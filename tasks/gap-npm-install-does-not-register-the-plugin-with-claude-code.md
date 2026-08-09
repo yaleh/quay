@@ -1,16 +1,17 @@
 ---
 id: gap-npm-install-does-not-register-the-plugin-with-claude-code
-title: "`npm install -g quay-*.tgz` — the install path README tells users to run —
-  lands quay + plugin/ under npm root but NEVER registers the plugin with Claude
-  Code, so the canonical entry point `/quay:init` (human ruling 2026-08-07: this
-  is THE way a user onboards a project) does not exist after a clean install;
-  measured on both B (orangevps) and C (ad-arm1) 2026-08-07: npm-root plugin dir
-  present on both, referenced by ~/.claude/settings.json on NEITHER (grep count
-  0/0); B's settings still points at /home/yale/work/quay/plugin, a DEV-TREE path
-  that no longer exists, and C references only a bare 'quay'/'yaleh/quay' with no
-  resolvable path — this blocks AC16 criterion 3 (end-to-end usability from a
-  release artifact on a non-quay project) permanently, not incidentally"
-status: ready
+title: "`npm install -g quay-*.tgz` — the install path README tells users to run
+  — lands quay + plugin/ under npm root but NEVER registers the plugin with
+  Claude Code, so the canonical entry point `/quay:init` (human ruling
+  2026-08-07: this is THE way a user onboards a project) does not exist after a
+  clean install; measured on both B (orangevps) and C (ad-arm1) 2026-08-07:
+  npm-root plugin dir present on both, referenced by ~/.claude/settings.json on
+  NEITHER (grep count 0/0); B's settings still points at
+  /home/yale/work/quay/plugin, a DEV-TREE path that no longer exists, and C
+  references only a bare 'quay'/'yaleh/quay' with no resolvable path — this
+  blocks AC16 criterion 3 (end-to-end usability from a release artifact on a
+  non-quay project) permanently, not incidentally"
+status: done
 labels:
   - gap
   - defect

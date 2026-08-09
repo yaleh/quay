@@ -110,6 +110,11 @@ resume 若中断，先跑 measure 读 integration 领先数 + 方向确认 + for
       ——literal 空串不再出现；未验证 id 由 helper 从 `git log --oneline develop..integration`
       机械提取（integration-branch-model.ts:139 Contract invoke），内层无需记忆。helper 行为：
       `unverified-integration-task-ids.ts` 跑该 git 命令、从 fan-in 合并信息提取 `task/<id>` / `gap-<id>`
+      **（2026-08-08 10:3x 二次修正——取证看来源不看值）**：批量合后 integration 被清空 ⇒
+      `git log develop..integration` 为空 ⇒ `UNVERIFIED_IDS` 合法等于空串——**此刻的空是正确的**。
+      「写死 ""」与「计算得 ""」在派发那刻同形，故判据两条：(ii-a) 实参是计算表达式
+      （`grep '"$UNVERIFIED_IDS"'` 且无字面 `""`）+ (ii-b) 该来源在 integration 非空时确实产出非空
+      （下方 fixture 实测：integration 有未验证任务 ⇒ `UNVERIFIED_IDS=[gap-uv-live]` 非空）。
       模式（去重、校验 `tasks/<id>.md` 存在）、逗号分隔输出、无则空。**fixture 实测**：有未验证任务时
       `UNVERIFIED_IDS=[gap-uv-live]`，命令实参为 `"gap-uv-live"`（非空 ⇒ 空串 = 0 成立）。
       **overlap 路径 LIVE 证明（before/after 对照，同一候选 touches `plugin/loop/fast-mode-loop-tick.md`）**：

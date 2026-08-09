@@ -6,7 +6,7 @@ title: "quay-init lays files but NEVER commits (0 git add/commit hits) —
   never → broken fresh-clone); meta-cc 22 plugin/scripts uncommitted = same
   risk; fix: quay-init auto-commits (chore(quay-init): prefix) = delivery
   contract 铺设→版本→提交→升级"
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -65,6 +65,12 @@ committed 态是自洽的**。archguard 报的 broken committed 态属于 **quay
 - [x] AC1-AC5 全勾（quay-init 铺完自动 commit `chore(quay-init):` 前缀；fresh-clone 机制完整无 broken committed 态；已有未提交改动不静默覆盖；与 delivery-surface-grows 交叉标注；B 机对照 quay 自身 committed 态自洽）
 - [x] fresh-clone + quay-init 实测机制完整；已有改动时提示待确认
 - [x] scoped 门 `scripts/test.sh --for-task gap-quay-init-never-commits-broken-committed-state` 绿（GATE EXIT=0，tests 5 / pass 5 / fail 0 / cancelled 0；task-contract-check strict-subset 无 violations）
+
+## Definition of Done
+
+- [ ] AC1-AC5 全勾（quay-init 铺完自动 commit `chore(quay-init):` 前缀；fresh-clone 机制完整无 broken committed 态；已有未提交改动不静默覆盖；与 delivery-surface-grows 交叉标注；B 机对照 quay 自身 committed 态自洽）
+- [ ] fresh-clone + quay-init 实测机制完整；已有改动时提示待确认
+- [ ] scoped 门 `scripts/test.sh --for-task gap-quay-init-never-commits-broken-committed-state` 绿
 
 ## Touches
 

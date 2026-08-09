@@ -8,7 +8,7 @@ title: manager→outer 的异步通道缺的不是机制是一行注册——mes
   ——给 outer 一个文件收件箱 transport（如 .quay/outer-inbox/），或复用 createFileInboxTransport
   注册 outer 目标；另：身份冒充问题 supervisor-bus-identity.sh 已 done（fail-closed，agent 不能 冒充
   human），此前两侧用裸 tmux 绕过总线丢 from 字段
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -57,6 +57,41 @@ the real human」。实测闸门 fail-closed：`identity_rejected=true  reason=i
 没有 from 字段、没有冒充闸门、delivered/consumed 不分）。
 **更正为：outer→manager 走总线（带 from: outer），escalations.md 只作降级备份。**
 禁止裸 tmux 那一条不变，理由更强：裸 tmux 绕过的正是身份层。
+**（08:5x/09:0x 更新——禁令已降级，见下「人裁定三步顺序 + tmux 降级」节）**
+
+### 人裁定三步顺序 + tmux 降级（管理者 08:5x 传达，09:0x 书面）
+
+**outer→manager 的 tmux 硬禁即刻降级为「优先用其它通道」**。三步顺序：① 建写侧（发送入口 +
+per-target 收件箱）→ ② 建消费侧（轮询 + 推送）→ ③ 才收紧 tmux。08:31Z 硬禁下在 ①② 之前——
+先禁旧通道、再建新通道，正是「退役一个机制却没写下它覆盖的判据归谁」那类错误的重犯。
+**现在规矩（③ 落地前）**：
+- **优先级**：git 产物（任务/提交）> tmux。有产物可写的，写产物，不必再发消息。
+- **tmux 仍可用**，但消息里须说明为什么不是产物形态（一句话）。
+- **不变的一条**：消息里不得出现任何冒充人的表述。manager transcript 分不出 `[外层→管理者]`
+  和人打的字（type/isSidechain/userType 三字段全同），一律按【来源不明】处理——不记为「人裁定」、
+  不据以撤防任何机制。
+- ③ 落地后恢复硬禁，届时另行通知。
+
+### 人已确认的收件箱方案五点（对齐用，SPEC 未定稿前不要动手）
+
+1. Class 1（有产物）/ Class 2（无产物）分类成立；**ACK 不是协议字段**。
+2. **ACK = 正本存储（task store）里出现可引用的产物**，判据写在 `task_list`/`task_get` 上，
+   **不写在 `git log` 上**（quay-github 下正本是 issue；git 只是 native provider 的物理形态）。
+3. 三层语义在接口上分开、禁止混用：**delivered** = 进了信箱 / **consumed** = inbox_read 返回过 /
+   **resolved** = 正本里有产物。**只有 resolved 能回答「他做了吗」。**
+4. 身份：`CLAUDE_CODE_SESSION_ID` + 注册表，`from` 由 MCP server 盖章不由 agent 自述。
+   边界（人已接受）：挡 agent，不挡能改宿主配置的人。
+5. 推送进产品：`quay inbox watch` 输出 stdout 事件流，宿主自己接。分钟级延迟可接受，
+   **轮询是唯一对所有 transport 都成立的形态**（GitHub 不会推给你）。
+
+**旧 `.quay/manager-inbox/` 分四类废弃**：6 个 archguard-*.md 删（无运行时读者）；
+`supervisor-bus-identity.sh:52` 默认路径与 `inbox-reader.sh` **重指向不删**（读侧）；
+`capability-catalog.sh:190` 改描述；SPEC/任务/tick-log 历史提及保留不改。
+
+### 实现状态：**待 SPEC（不得开工）**
+
+管理者下一步起草 SPEC（定义要什么 + 判据 + 分层，不写实现）后交外层实现。**SPEC 定稿前不开工**
+（避免按中间版本做——判据已改过两次）。本任务 status: todo 保持，不 promote、不派发，等 SPEC。
 
 ### 归因更正（管理者 08:5x，总线零流量不是纪律问题）
 
@@ -76,14 +111,23 @@ the real human」。实测闸门 fail-closed：`identity_rejected=true  reason=i
 原因是这个。佐证：inbox-reader.sh 注释「without it the inbox degenerates back to "3 messages on
 disk, nobody reads"」——**它防住了「有人写没人读」，没防住「有人读没人能写」。**
 
-### 修法方向（设计归外层+内层，产品代码）——两半
+### 修法方向（**已被 SPEC 取代**——设计归 manager 已定稿的 SPEC，实现归外层）
 
-缺陷成立，但根因是两半，修法不同：
-1. **前半：transport 注册**——`installDefaultTransports` 里 outer 那行从 `createSessionTransport()`
-   改为文件收件箱（如 `.quay/outer-inbox/`，复用 `createFileInboxTransport`）。这样 manager 向
-   outer 投递走文件（异步、带 from），不依赖 outer 会话状态。
-2. **后半：写侧入口**——只补 transport 注册三方仍发不了。需加一个发送入口（CLI 子命令或 shell
-   脚本）让 agent（bash 驱动）能调用 deliver()。**这是 bus 能用的前提——写侧零入口是根因的另一半。**
+**2026-08-08 09:1x：manager 落 SPEC `orchestration/SPEC-inbox-service-2026-08-08.md`（eacc557c）**，
+「draft，待 outer 实现」。**本任务的修法方向以该 SPEC 为准，下面旧的两半方向保留为根因记录、不再
+是修法**：
+- SPEC **D6**：承载形态 = **每项目一个后台服务**（不是文件目录）——原「文件收件箱」方案被否决。
+- SPEC **D4**：**不做 resolved 层**——收件箱是通信信道不是工作流引擎。两层：delivered（进队列）/
+  consumed（inbox_read 调过）；「对方受理没有」归 manager 巡检 + 不对称原则（证明失职的证据不能由
+  该方提供），不归本信道。
+- SPEC **D7**：消息注入端点**不得复用 web UI listener**（独立端口 + 每会话 token）。
+- SPEC 架构：寻址 = `<project>:<role>` 逻辑名，身份 = `CLAUDE_CODE_SESSION_ID` → 注册表（token）。
+  三面：`inbox_send`/`inbox_read` 走 MCP（身份），`quay inbox watch` 走 CLI（进程）。
+  **CLI 不提供 send**（bash 能设任何环境变量 ⇒ 身份退回自述）。
+- SPEC **D8** 顺序：① 写侧 → ② 消费侧 → ③ 才收紧 tmux（AC-8 生效）。
+- 旧 `.quay/manager-inbox/` 分四类处理（SPEC §7）：6 archguard 删；读侧重指向；catalog 改描述；
+  历史保留。
+- 实施顺序见 SPEC §10；**待 SPEC 定稿**（P1 端口分配 / P2 token 形态 2 条待人拍板）后才开工。
 
 ## Contract
 
@@ -108,10 +152,18 @@ resume 若中断，先跑 measure 确认 outer 当前注册形态，不要假设
       总线机制已 done，本条是补 outer 的注册
 - [ ] AC5: 文档同步——manager-loop-tick / fast-mode-loop-tick 的投递通道说明从「escalations.md
       降级备份」更正为「总线优先，escalations.md 降级」
+- [ ] AC6: **实现前阻塞（2026-08-08 人裁定，排序第 3）**——本任务**不 promote、不派发**。
+      **2026-08-08 09:5x 状态更正**：SPEC 已**定稿**（D1–D13 零待定），但人明确**「现在不用向 outer
+      提」**——held 的原因从「等 SPEC」变为「排序让位」（人排序：① AC19 ② AC16 ③ 收件箱 SPEC，SPEC
+      定稿待命、不派发）。**不需要我读 SPEC 或做任何准备**，等排到再说。实现以 SPEC 为准（已定稿，
+      `orchestration/SPEC-inbox-service-2026-08-08.md`）：D4 **不做 resolved 层**（两层
+      delivered/consumed，「受理没有」归 manager 巡检 + 不对称原则）、D6 每项目后台服务（非文件
+      目录）、D7 独立监听面、`from` 由 MCP server 按 token 盖章（CLI 不提供 send）、`quay inbox watch`
+      走进程输出 stdout、旧 `.quay/manager-inbox/` 按 §7 四类处理
 
 ## Definition of Done
 
-- [ ] AC1-AC5 实跑输出贴任务体（注册前后对照 + 总线投递带 from + 回归）
+- [ ] AC1-AC6 实跑输出贴任务体（写侧+消费侧按 SPEC §10 顺序落地 + 身份闸门 + 监听面分离 + 回归 + SPEC 对齐）
 
 ## Touches
 - packages/quay/src/message-bus.ts（installDefaultTransports：outer 注册为文件收件箱）

@@ -66,6 +66,12 @@ quay-sea-*.tar.gz **没修**。AC16 改判未达成（2395a05f）。
 - [x] 架构决定落地（sidecar 推荐分发）+ release 产物实测含 plugin
 - [x] scoped 门 `scripts/test.sh --for-task gap-release-sea-bundle-excludes-plugin-tree --allow-thin` 绿
 
+## Definition of Done
+
+- [ ] AC1-AC4 全勾（SEA tarball 或 sidecar bundle 含 plugin/，6 个新机制名可反查；交叉标注完成；推荐分发方式明确——架构决定；B 机从 release 产物装出含 plugin 完整机制）
+- [ ] 架构决定落地（SEA 内嵌 / sidecar / npm tgz 推荐分发之一）+ release 产物实测含 plugin
+- [ ] scoped 门 `scripts/test.sh --for-task gap-release-sea-bundle-excludes-plugin-tree` 绿
+
 ## Touches
 - tasks/gap-release-sea-bundle-excludes-plugin-tree.md（自身文件——self-touch，2026-08-08 内层补：缺此条不满足派发资格闸 step 4.5）
 

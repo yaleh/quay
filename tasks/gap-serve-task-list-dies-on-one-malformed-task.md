@@ -225,3 +225,7 @@ All QN-031 serve/action regression tests passed.
    与 `store.ts`（无 `store.test.mjs`）均无法被 select-tests-for-touches 解析，Touches 3 条只直接命中 1 条
    （`serve.test.mjs`），覆盖 1/3 < 0.5 → thin。`scripts/test.sh --for-task <id> --allow-thin` 已实测选中并全绿
    `serve.test.mjs`。这与 `gap-handleTaskAction-null-crash`（Touches 只有 `serve-handlers.ts`）的既有 thin 失败同源。
+
+## Contract invoke 证据（2026-08-08 内层补）
+
+invoke 实跑入口：`packages/quay/bin/quay.ts`（task-contract-check invoke-evidence 判据——done 任务须在 Contract 外展示所执行入口路径）

@@ -138,6 +138,25 @@ develop」，也不是注入 pane 的负控制通过。**真根因下，收口 =
 心跳源）观测并报出 IDLE——需一个空闲窗口；本实现的边界测试已在注入 fixture 上证明机制（pane-only +
 LOOP_MIN=0 → SESSION-IDLE），真实环境的收口观测待一个 idle 窗口。**
 
+### manager 无自指复刻（16:1x，判据② 读数）+ 外层真实 capture 验证——结构差异假设排除，LOOP_MIN 假说定论
+
+**manager 无自指复刻**（把同一主检出脚本挂到 quay-0:inner，manager 从不驱动 inner，仪器已验活
+pid 3594682 etime 38min）：inner 窗口 219s 空隙（16:03:21→16:07:01 > 180s 门槛），输入侧脚本自己的
+分类器判 waiting-input（outer 此刻 busy 对照，两侧都判对）⇒ 分类器没坏。**实收 SESSION-IDLE 0 /
+RESUMED 0**。零 RESUMED 自洽（一直 idle 无转换），但 IDLE_CONSEC 应单调累加、-ge 2 第 3 轮必触发 ⇒
+①注入报出 vs ④真实 219s 不报 看似直接对立。
+
+**外层按判据执行（真实 inner capture 原样喂 /tmp/sl-diag.sh，不改代码）**：
+- 真实 capture（含 ❯ 输入框 + 任务列表）：pane_state=waiting-input、IDLE_CONSEC 单调 1→4、
+  IDLE_REPORTED 0→1——四个值全正常。
+- **LOOP_MIN=0 → SESSION-IDLE 报出**；**默认 LOOP_MIN=20 → DIAG round=4 IDLE_REPORTED=1（闸通过）
+  但 SESSION-IDLE 0 条（静默）**；tick-log age=1min < 20。
+
+**定论**：**结构差异假设排除**（真实 capture 四个值正常），差异只在 LOOP_MIN 设置。manager 的 ④ =
+默认 LOOP_MIN=20 + pane-only 默认心跳 tick-log（age 恒 <20）→ IDLE 静默（LOOP_MIN 噪声闸门按设计，
+hmin<LOOP_MIN 的空闲 = 正常收尾静默，AC21）。① vs ④ 不矛盾：① 注入无心跳文件 hmin=? 报出分支；
+④ 真实 hmin=tick-log<20 静默分支。**LOOP_MIN 假说（2c1d0c7c）对真实 inner 完全成立。**
+
 **测试**（`plugin/test/session-liveness-signals.test.mjs`，node:test，全部通过）：
 - from-mount stall：挂载即停摆（从未见忙、transcript 8 分钟无写入）的会话报 SESSION-IDLE。
 - per-spell edge：一段空闲只报一次，忙段再武装 → 新段再报。
@@ -234,3 +253,14 @@ at: 2026-08-08T13:0xZ
 changed: 管理者两小时全量对账（outer 12 窗口漏 67%、inner 16 窗口 100% 漏报）+ D2 忙假阳性（green-busy
   fixture = 空输入+esc+agent⇒busy，inner 实时屏幕同形态）+ D3 去抖不对称（RESUMED 单轮/IDLE 2 轮）
   + 人裁定（带 subagent 的停摆必须报 IDLE）。外层复核 pane-state-classify.ts:344 + inner 屏幕——成立。
+
+### 收口证据（2026-08-08 16:24Z，实环境 SESSION-IDLE）
+
+**LOOP_MIN=0 observer（pid 4166382，目标 quay-0:inner）捕获真实 SESSION-IDLE**：
+```
+SESSION-IDLE quay 的会话转入空闲等输入；心跳 1 分钟前更新
+```
+- 判据「实环境报出一次 SESSION-IDLE」达成（非「已合入 develop」）。
+- 前提（证据链闭环 0e055336）：LOOP_MIN=0 报出 / 默认 LOOP_MIN=20 静默（pane-only 默认心跳 tick-log
+  被上层刷新 → hmin<LOOP_MIN → 静默）；边界修复（1a351335）正确。
+- 收口：空闲窗口内 LOOP_MIN=0 observer 报出 IDLE ⇒ busy-mask-idle 机制在真实环境生效。

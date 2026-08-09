@@ -5,7 +5,7 @@ title: "scoped selection blind to packaging-vs-source diff (manager usage-view
   never matches packaging tests (npm-pack-e2e/build-dist/...), src-touching task
   scoped-green can still break packaged; fix: src-touching task forces ≥1
   packaging test in selection"
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -91,6 +91,12 @@ extra: {}
 **跨切判据实测**：`node --experimental-strip-types plugin/scripts/select-tests-for-touches.ts --task gap-both-gates-read-one-signal-so-done-costs-nothing 2>&1 | grep -c 'npm-pack-e2e\|build-dist\|check-adr\|lint'` = **3**；`plugin/test/select-tests-for-touches.test.mjs` 24 条全绿（含新增 AC2/AC3/AC4/AC5/AC6 五条跨切测试）。
 
 **变更文件**：`plugin/scripts/select-tests-for-touches.ts`（CROSSCUT_CHECKS + applyCrosscut + 默认输出 crosscut 标记行）；`plugin/skills/author/SKILL.md`（review-plan 步 Cross-cut AC checklist）；`plugin/test/select-tests-for-touches.test.mjs`（AC2-AC6 五条测试 + AC10 pin 精确化）；`CLAUDE.md`（Cross-cut scoped selection 段）；`tasks/gap-vendor-runtime-not-in-git-clone-broken-mcp-entry.md`（Cross-annotation 段）。
+
+## Definition of Done
+
+- [ ] AC1-AC7 全勾（author SKILL 模板含跨切检查清单；select-tests-for-touches 加跨切标记；触碰 packages/*/src 含打包态测试；触碰 src/MCP tool 含 check-adr；新代码 lint 检查进任务内；纯 plugin/文档不含跨切测试；与 archguard TASK-62/64/65/66 + packaging e2e + 自适应并发交叉标注）
+- [ ] 跨切判据实测：打包态/ADR/lint 检查器无论 touches 进 scoped 选中集
+- [ ] scoped 门 `scripts/test.sh --for-task gap-scoped-selection-blind-to-packaging-state-diff` 绿
 
 ## Touches
 - tasks/gap-scoped-selection-blind-to-packaging-state-diff.md（自身文件——self-touch，2026-08-08 内层补：缺此条不满足派发资格闸 step 4.5）

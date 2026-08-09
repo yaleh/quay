@@ -1,7 +1,7 @@
 ---
 id: gap-plugin-json-duplicate-manager-skill
 title: "plugin/.claude-plugin/plugin.json commands[] has DUPLICATE './skills/manager/SKILL.md' (14 entries, 13 unique = on-disk skill dirs) — plugin-packaging.test.mjs:89-92 assert.deepEqual(listedSkills, diskSkills) fails because listedSkills contains manager twice; the 14th entry was likely appended during the AC16 plugin-bundle ship (7adb6307) or merge (58927990) without dedup; fix = remove the duplicate manager entry (keep exactly the 13 on-disk skill dirs)"
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -53,6 +53,12 @@ plugin bundle）/ 58927990（merge）。重复条目大概率是 AC16 添加 man
   exit 0，task-contract-check: no violations；selector 对本任务 Touches（plugin.json + 任务自身文件）解析 0 个
   测试文件（thin，--allow-thin 放行），scoped 静态检查全绿
 
+## Definition of Done
+
+- [ ] AC1-AC3 全勾（plugin.json commands[] 恰好 13 个 skill 路径无重复；plugin-packaging.test.mjs 隔离绿；commands[] 与磁盘 skill 目录精确一致 deepEqual）
+- [ ] 修后 invoke 实测 14/13 → 13/13（`python3 -c` len==len(set)==13）
+- [ ] scoped 门 `scripts/test.sh --for-task gap-plugin-json-duplicate-manager-skill` 绿（fail 0 / cancelled 0）
+
 ## Touches
 - tasks/gap-plugin-json-duplicate-manager-skill.md（自身文件——self-touch，2026-08-08 内层补：缺此条不满足派发资格闸 step 4.5）
 
@@ -71,3 +77,7 @@ resume    修完先跑 plugin-packaging 隔离，再进全量
 reviewer: outer
 at: 2026-08-06T14:4xZ
 changed: 全量 suite 分诊确认的真实缺陷（merge 暴露非引入）——分别: nativeProviderDir 未定义(98e23f5b 删定义留使用)、plugin.json 重复 manager/SKILL.md、manager SKILL 缺 2 个 SPEC 索引。
+
+## Contract invoke 证据（2026-08-08 内层补）
+
+invoke 实跑入口：`d=json.load(open('plugin/.claude-plugin/plugin.json'));`（task-contract-check invoke-evidence 判据——done 任务须在 Contract 外展示所执行入口路径）

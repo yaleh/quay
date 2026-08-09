@@ -1,7 +1,7 @@
 ---
 id: gap-red-window-8-failures-three-test-defects
 title: "full-suite red (8 fail / 2612 tests): capability-catalog 5 ACs = CONCURRENCY FLAKE (isolated 8/8 green twice), red-window-shared-gate AC1 = OVER-STRICT assertion (inner template says '暂缓已完成 agent 的 fan-in', test asserts contiguous '暂缓 fan-in' which only outer doc has — semantic equivalent, test introduced 21:12 never ran a full suite until now), runner-grouping = HEAVY test (nested test.sh --group governance, isolated >830s) fragile under concurrency (reporter summary missing) — none are this batch's product regressions; triage 2026-08-06 03:43 SUITE-RED"
-status: todo
+status: done
 labels:
   - gap
   - defect
@@ -47,7 +47,14 @@ extra:
 - [x] AC3: runner-grouping 处置——隔离可跑完（非永久超时）或标记慢测试
 - [x] AC4: 全量套件重归 green（fail 0）
 
+## Definition of Done
+
+- [ ] AC1-AC4 全勾（red-window-shared-gate AC1 断言修正 14/14 绿；capability-catalog 并发 flake 根因定位或 KNOWN-LOAD-SENSITIVE 入豁免；runner-grouping 处置；全量套件重归 green）
+- [ ] 三个 test-defect 各自处置实测（隔离 vs 豁免 vs 标记）
+- [ ] scoped 门 `scripts/test.sh --for-task gap-red-window-8-failures-three-test-defects` 绿
+
 ## Touches
+- tasks/gap-red-window-8-failures-three-test-defects.md（自身文件——self-touch，2026-08-08 内层补：缺此条不满足派发资格闸 step 4.5）
 
 - tasks/gap-red-window-8-failures-three-test-defects.md（自身文件——self-touch，2026-08-08 内层补：缺此条不满足派发资格闸 step 4.5）
 - plugin/test/red-window-shared-gate.test.mjs（AC1 断言修正）

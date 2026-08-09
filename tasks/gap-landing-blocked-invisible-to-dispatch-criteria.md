@@ -1,7 +1,7 @@
 ---
 id: gap-landing-blocked-invisible-to-dispatch-criteria
 title: "LANDING-BLOCKED is invisible to dispatch criteria — ready-pool-check criterion_met=True answers 'are there >=cap mutually-disjoint candidates' (touches-conflict graph only, grep-verified: no merge/land/landing state read) and slot-refill only measures slot-release; when landing is STRUCTURALLY blocked (e.g. AC17 catch-up: task branches can't rebase because develop/integration frozen 2h at 926d771b while master has 62 commits, B pushed 105 to GitHub develop), criterion_met still reports True — 'dispatchable visible, landable invisible' = heartbeat-vs-consciousness instance; manager usage-perspective probe 2026-08-06: criterion has no basis yet still answers"
-status: todo
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -44,7 +44,14 @@ extra:
 - [x] landing-blocked 场景实测：develop 落后+冻结时就绪池报出，正常时不报
 - [x] scoped 门 `scripts/test.sh --for-task gap-landing-blocked-invisible-to-dispatch-criteria` 绿
 
+## Definition of Done
+
+- [ ] AC1-AC4 全勾（criterion_met 之外有 landing-blocked 信号，落地被阻塞明确报；AC17 catch-up 场景可观测；与 gap-ready-pool-check-counts-merged 交叉标注；负控制落地正常不误报）
+- [ ] landing-blocked 场景实测：develop 落后+冻结时就绪池报出，正常时不报
+- [ ] scoped 门 `scripts/test.sh --for-task gap-landing-blocked-invisible-to-dispatch-criteria` 绿
+
 ## Touches
+- tasks/gap-landing-blocked-invisible-to-dispatch-criteria.md（自身文件——self-touch，2026-08-08 内层补：缺此条不满足派发资格闸 step 4.5）
 
 - tasks/gap-landing-blocked-invisible-to-dispatch-criteria.md（自身文件——self-touch，2026-08-08 内层补：缺此条不满足派发资格闸 step 4.5）
 - plugin/scripts/ready-pool-check.ts（landing-blocked 信号）

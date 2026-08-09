@@ -93,11 +93,10 @@ import { fileURLToPath } from "node:url";
 import { runOnce } from "./suite-state-trigger.ts";
 import { getLoad1 } from "./checker-cost.ts";
 import { scanFamily, kindForFile } from "./known-load-sensitive.ts";
-// gap-single-file-test-duration-trend-unwatched AC1/AC2 — after the suite, land the
-// append-only per-file duration history (reusing measure-suite-reporter's __PERFILE__ lines
-// already tee'd into the log) and report single-file duration growth against the previous
-// round. The trend dimension: the suite-cost task measured the one-shot distribution; this
-// makes the per-file durations WATCHED round over round.
+// gap-single-file-test-duration-trend-unwatched AC1/AC2 (fan-in 9edf2cb9, hand-merged into the
+// develop→integration convergence 2026-08-09): land the suite's per-file __PERFILE__ duration
+// history + compare against the last round (the trend dimension — per-file durations WATCHED round
+// over round; see integration's version of this file for the original placement).
 import { landMeasureHistory, compareLastTwoRounds } from "./measure-trend-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -968,6 +967,15 @@ export async function run(argv: string[]): Promise<number> {
   // record carries tests/cancelled/perTestMs — the input of the trend criterion (trend-check.ts).
   let testsSeen = 0;
   let cancelledSeen = 0;
+  // testPhaseStarted — TRUE once the suite demonstrably left the pre-test static-check phase.
+  // This is the phase gate the `testsSeen === 0` guard was always meant to be. It is set on
+  // (a) test.sh's own "selected N files (groups=…)" test-phase-start marker, or (b) a TAP/ℹ
+  // test-count summary (`testsSeen > 0`). Why a DEDICATED flag: testsSeen never incremented for
+  // this repo's suite because the reporter emits `ℹ tests N` (info glyph) while the parser only
+  // accepted `# tests N` — so the old `testsSeen === 0` guard was inert and STATIC_CHECK_FAILURE_
+  // PATTERNS fired on TEST-FIXTURE output anywhere in the run (round-6 2026-08-09 false-red:
+  // candidate-contracts.test.mjs's ANTI-DRIFT fixtures, static checks clean, 279 files passed).
+  let testPhaseStarted = false;
   const onSignal = (sig: string) => {
     if (runDone || redDetected) return;
     const at = new Date().toISOString();
@@ -1040,8 +1048,13 @@ export async function run(argv: string[]): Promise<number> {
     // AC1 — TAP summary parsing: `# tests N` / `# cancelled N` (node:test emits these on the
     // stream regardless of pass/fail). Fires on every line; a later summary overwrites an earlier
     // one (TAP prints exactly one summary, but a failing worker may print its own before the root).
-    const testsMatch = /^#\s*tests\s+(\d+)/.exec(line);
+    const testsMatch = /^[#ℹ]\s*tests\s+(\d+)/.exec(line);
     if (testsMatch) testsSeen = Number(testsMatch[1]);
+    // test.sh prints "selected N files (groups=…)" exactly when the node --test phase starts; a
+    // test-count summary (testsSeen > 0) is the TAP-side proof. Either ⇒ past the static-check
+    // phase ⇒ the static-check patterns below must not fire (test fixtures can legitimately print
+    // "FAIL: N violation(s)" — candidate-contracts.test.mjs's ANTI-DRIFT hard-fail fixtures).
+    if (/^selected \d+ files?\b/.test(line) || testsSeen > 0) testPhaseStarted = true;
     const cancelledMatch = /^#\s*cancelled\s+(\d+)/.exec(line);
     if (cancelledMatch) cancelledSeen = Number(cancelledMatch[1]);
     if (!redDetected && isFailureLine(line)) {
@@ -1068,7 +1081,7 @@ export async function run(argv: string[]): Promise<number> {
       process.stderr.write(
         `full-suite-runner: FAILURE detected on stream -> state=red reason=failed (run still in progress)\n  ${line}\n`
       );
-    } else if (!redDetected && !staticCheckDetected && testsSeen === 0 && isStaticCheckFailureLine(line)) {
+    } else if (!redDetected && !staticCheckDetected && !testPhaseStarted && isStaticCheckFailureLine(line)) {
       // gap-full-suite-state-red-no-failure-detail-static-check-invisible AC2/AC3/AC4 — a STATIC-
       // CHECK failure (run_static_checks aborted the suite before the test phase): write red +
       // reason=static-check EARLY (same early-red property test failures get), with the machine-
@@ -1180,7 +1193,7 @@ export async function run(argv: string[]): Promise<number> {
   // terminal verdict:
   //   1. a REAL test failure (redDetected) ⇒ reason="failed"   (existing behavior, AC5 — never
   //      downgraded by a static-check marker);
-  //   2. a STATIC-CHECK failure with NO test run (testsSeen === 0 — test.sh aborted under set -e
+  //   2. a STATIC-CHECK failure with NO test run (!testPhaseStarted — test.sh aborted under set -e
   //      before the node --test phase) ⇒ reason="static-check" (AC2/AC3 — distinguishable);
   //   3. no correctness conclusion (abort marker / signal kill / spawn error) ⇒ reason="aborted";
   //   4. everything else ⇒ fail-closed "failed" (the pre-existing catch-all).
@@ -1194,7 +1207,7 @@ export async function run(argv: string[]): Promise<number> {
     !redDetected && !staticCheckDetected && (abortDetected || childKilledBySignal || spawnError !== null);
   const reason: SuiteStateReason = redDetected
     ? "failed"
-    : staticCheckDetected && testsSeen === 0
+    : staticCheckDetected && !testPhaseStarted
       ? "static-check"
       : noCorrectnessConclusion
         ? "aborted"
@@ -1262,7 +1275,6 @@ export async function run(argv: string[]): Promise<number> {
   // run — 2 runs produced 4 lines and AC6's "pure append, one per run" assertion failed. The
   // appendVerificationRound record is the canonical shape (state/pass/fail/round); the other
   // function is retained as an exported helper only (no live callers).
-
   // gap-single-file-test-duration-trend-unwatched AC1/AC2 — land the per-file duration history
   // (the suite's __PERFILE__ lines are already in the log; this only PARSES them — AC3 reuses
   // measure-suite-reporter, no new measurer) and report single-file growth against the last
@@ -1293,7 +1305,6 @@ export async function run(argv: string[]): Promise<number> {
   } catch {
     // best-effort — a measure-history failure never fails the suite verdict
   }
-
   process.stderr.write(
     `full-suite-runner: FINAL state=${finalState.state}${finalState.reason ? ` reason=${finalState.reason}` : ""} durationMs=${durationMs} exit=${exitCode}\n`
   );

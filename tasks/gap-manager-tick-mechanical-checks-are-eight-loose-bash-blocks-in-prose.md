@@ -10,7 +10,7 @@ title: "the manager tick's mechanical half lives as 8 loose bash blocks embedded
   9 session/topology instruments), NOT filed as a 7th loose .sh — human ruling
   2026-08-07: beware .sh danger especially around tmux, actively integrate to
   control the exposed surface"
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate

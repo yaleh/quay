@@ -1,7 +1,7 @@
 ---
 id: gap-verify-delivery-surface-checks-source-layout-not-consumer-laid
 title: "verify-delivery-surface checks the SOURCE layout (plugin/loop/, plugin/scripts/ = quay's own repo) not the CONSUMER's LAID layout (orchestration/ + docs/analysis/ = what quay-init lays into a consumer) — archguard ran the real mechanism: 0/6, structurally impossible to pass for ANY consumer (verify-delivery-surface.ts:17 comment admits it); this is 'parent environment hides parent defect': the check meant to validate delivery completeness CANNOT SEE the layout it validates — if used as AC16's completeness evidence it produces a green that is structurally impossible; archguard da0b2cbf 2026-08-06"
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -45,7 +45,14 @@ orchestration/SPEC-*」），而**消费者 laid 布局是 orchestration/ + docs
        AC16 完整性的机械证据链
 - [ ] AC4: 源布局模式保留（quay 自家仍可验 plugin/loop/）——两种布局都支持
 
+## Definition of Done
+
+- [ ] AC1-AC4 全勾（verify-delivery-surface 支持消费者 laid 布局；AC16 完整性证据用 laid 校验通过；与 gap-release-excludes-plugin-bundle 交叉标注；源布局模式保留）
+- [ ] archguard laid 布局实跑 > 0（不再 0/6）；两种布局都支持
+- [ ] scoped 门 `scripts/test.sh --for-task gap-verify-delivery-surface-checks-source-layout-not-consumer-laid` 绿
+
 ## Touches
+- tasks/gap-verify-delivery-surface-checks-source-layout-not-consumer-laid.md（自身文件——self-touch，2026-08-08 内层补：缺此条不满足派发资格闸 step 4.5）
 
 - plugin/scripts/verify-delivery-surface.ts（laid 布局模式）
 - tasks/gap-release-excludes-plugin-bundle-agent-surface.md（AC3 交叉标注）

@@ -14,7 +14,7 @@ title: "cold-start six keys measure 'installed' not 'running' — 'queue-empty /
   archguard's real stop was backlog-bottom (needs human direction: capability
   direction/TASK-49 creds/TASK-31-35 release), genuinely human-needed, NOT a
   defect; archguard NOT suitable for AC12b second timing line (no work)"
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -80,6 +80,12 @@ TASK-49 凭据 / TASK-31-35 发布）——真需要人。archguard 目前**不�
 - [x] AC1-AC4 全勾（cold-start 区分「已装好+在转」vs「已装好+已停」调用 dead-loop-check；停转给可执行下一步；三态不再全报「完成」；与 gap-l2-continuous-health-dead-loop-criterion 交叉标注）
 - [x] 三态区分实测（队列空/等人/从未启动分别给出不同判定）
 - [x] scoped 门 `scripts/test.sh --for-task gap-cold-start-six-keys-measure-installed-not-running --allow-thin` 绿
+
+## Definition of Done
+
+- [ ] AC1-AC4 全勾（cold-start 区分「已装好+在转」vs「已装好+已停」调用 dead-loop-check；停转给可执行下一步；三态不再全报「完成」；与 gap-l2-continuous-health-dead-loop-criterion 交叉标注）
+- [ ] 三态区分实测（队列空/等人/从未启动分别给出不同判定）
+- [ ] scoped 门 `scripts/test.sh --for-task gap-cold-start-six-keys-measure-installed-not-running` 绿
 
 ## Touches
 - tasks/gap-cold-start-six-keys-measure-installed-not-running.md（自身文件——self-touch，2026-08-08 内层补：缺此条不满足派发资格闸 step 4.5）

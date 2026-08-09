@@ -1,7 +1,7 @@
 ---
 id: gap-manager-skill-index-missing-new-specs
 title: "manager SKILL (plugin/skills/manager/SKILL.md) indexes only 14 of 16 on-disk orchestration/SPEC-*.md — missing SPEC-branching-model-integration-branch-2026-08-05.md and SPEC-integration-architecture-2026-08-05.md (both added 08-05); manager-layer-shipping.test.mjs AC6 requires the SKILL to index EVERY on-disk SPEC file (readdir + includes assert); the two new SPECs (branching model / integration architecture) were filed 2026-08-05 but never added to the manager SKILL's methodology index — documentation drift, the same 'added file without updating its index' class; fix = add the two missing SPEC filenames to manager SKILL.md's index section"
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -62,6 +62,12 @@ $ node --test plugin/test/manager-layer-shipping.test.mjs
 / `SPEC-inbox-service-2026-08-08.md`），计数 "14 份" → "17 份"。原 2 个缺失 SPEC
 （branching-model / integration-architecture）已在 `ba833c14`（2026-08-06）进过 Methodology sources
 清单但未进 §7 索引表；本次补全 §7 表使其与 on-disk 全量对齐。
+
+## Definition of Done
+
+- [ ] AC1-AC3 全勾（manager SKILL 索引全部 16 个 on-disk SPEC-*.md；manager-layer-shipping.test.mjs AC6 隔离绿；索引格式与现有条目对齐）
+- [ ] 修后 invoke 实测 MISSING 2 → 0（`for f in orchestration/SPEC-*.md; do grep -q "$(basename $f)" plugin/skills/manager/SKILL.md || echo MISSING; done` 无输出）
+- [ ] scoped 门 `scripts/test.sh --for-task gap-manager-skill-index-missing-new-specs` 绿（fail 0 / cancelled 0）
 
 ## Touches
 - tasks/gap-manager-skill-index-missing-new-specs.md（自身文件——self-touch，2026-08-08 内层补：缺此条不满足派发资格闸 step 4.5）

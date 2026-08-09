@@ -1,7 +1,7 @@
 ---
 id: gap-task-check-test-nativeproviderdir-undefined
 title: "task-check.test.mjs ReferenceError — line 82 `cwd: nativeProviderDir` uses an undefined variable: 98e23f5b (A-layer spawn conversion, 08:42) DELETED the `const nativeProviderDir` definition (line 31) while its commit message claims 'Pin nativeProviderDir to the SOURCE bin dir'; the usage at line 82 was left dangling → full-suite fails with 'ReferenceError: nativeProviderDir is not defined'; sibling files (unparseable-frontmatter/build-dist-smoke/serve-github) still define it, so the pattern is established; fix = restore the definition (path.join(__dirname,'..','..','quay-native','bin')) or derive from QUAY_NATIVE_CLI's dirname; introduced in integration, first surfaced in develop at 14:08 FF — a merge-exposed (not merge-introduced) real defect"
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -40,6 +40,12 @@ serve-github.test.mjs:64 都有定义。
 - [x] AC1-AC3 全勾（task-check.test.mjs 隔离绿无 ReferenceError；与 A-layer spawn conversion 意图一致；全量 suite 中 task-check 不再失败）
 - [x] nativeProviderDir 定义补回（98e23f5b 删定义留使用的回归修复）
 - [x] scoped 门 `scripts/test.sh --for-task gap-task-check-test-nativeproviderdir-undefined` 绿
+
+## Definition of Done
+
+- [ ] AC1-AC3 全勾（task-check.test.mjs 隔离绿无 ReferenceError；与 A-layer spawn conversion 意图一致；全量 suite 中 task-check 不再失败）
+- [ ] nativeProviderDir 定义补回（98e23f5b 删定义留使用的回归修复）
+- [ ] scoped 门 `scripts/test.sh --for-task gap-task-check-test-nativeproviderdir-undefined` 绿
 
 ## Touches
 - tasks/gap-task-check-test-nativeproviderdir-undefined.md（自身文件——self-touch，2026-08-08 内层补：缺此条不满足派发资格闸 step 4.5）

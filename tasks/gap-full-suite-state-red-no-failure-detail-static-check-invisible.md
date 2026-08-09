@@ -36,10 +36,12 @@ extra: {}
 - [x] AC3: **reason 区分**——静态检查红与测试失败红 `reason` 分离，消费方（suite-state-trigger / inner）能区分（`SuiteStateReason` 增 `"static-check"`；routeRed/shouldStopDispatch/classifyFailure 已接线，见 Evidence）
 - [x] AC4: **failures 填充（若选候选 B）**——静态违规明细（任务 + 类型）填进 failures[]（选定候选 B：`VIOLATION:` 明细以 `staticCheck:true` 条目进 failures[]，见 Evidence）
 - [x] AC5: **不破坏测试失败路径**——真实测试失败仍写 failures[] + reason:"failed"（既有行为保留；`--fail-fast-check` 原样绿 + 「真实测试失败压过 static-check 标记」负控制，见 Evidence）
+- [ ] AC6: **runner 异常终止也写终态**（manager 2026-08-08 23:4x 伴生缺口；e1f34338 的 `} finally {` 终局写覆盖了 uncaught-exception 路径，但 SIGKILL/异常终止的 `reason:"crashed"` 终态仍待确认/补）——runner 被 kill / 子进程挂死后收尾失败时，state 不能停在 `running` 永不写终态；须写一条终态（哪怕 `reason:"crashed"`），使「跑着」与「死了」在 state 上可区分（与 aborted/failed 同族，缺的是「根本没写」）。**实测**：proposal-convergence 死锁被 kill 后 state 停 `running` mtime=23:16 从未写终态（消费方一直以为在跑）
 
 ## Definition of Done
 
 - [x] AC1–AC5 全部勾上（按选定候选：A + B + C 全做——机器可读字段、failures 填充、reason 区分）
+- [ ] AC6 伴生缺口：runner 异常终止写终态（SIGKILL/异常终止的 `reason:"crashed"` 终态，非 uncaught-exception finally 覆盖）
 - [x] 修后实跑：静态检查违规时 state 含机器可读字段（reason 区分 + 计数 + ceiling），贴任务体（见 Evidence）
 - [x] 既有 full-suite-runner 测试 + 新增测试全绿（`--for-task` scoped，EXIT=0 / 64 pass / 0 fail / 0 cancelled）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 的批量合闸门，非任务级 scoped（`gap-suite-green-gate-duplicated-in-task-dod-and-batch-merge` 已移除任务级那份；本任务只跑 `--for-task`）

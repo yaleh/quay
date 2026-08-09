@@ -1,7 +1,7 @@
 ---
 id: gap-permission-prompt-vs-dismissable-prompt-classifier
 title: "classifyPaneState 把可忽略式提示/问卷当阻塞式 permission-prompt——恒判忙 ⇒ SESSION-IDLE 永不触发（manager 19:35Z 实测 + 外层核实）"
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -40,7 +40,7 @@ extra: {}
 - [x] AC2: **可忽略提示不判忙**——问卷/可忽略提示（`(optional)` / `Dismiss`）出现时 classifyPaneState 判非 permission-prompt（waiting-input），实跑验证（见 Evidence）
 - [x] AC3: **真权限确认仍判忙**——阻塞式权限确认框（Allow/Deny/Yn）仍判 permission-prompt（负控制），既有 pane-state 测试全绿（20/20，见 Evidence）
 - [x] AC4: **退一步 WARN（候选 B 已选）**——permission-prompt 持续 N 轮无 transcript 写入 ⇒ 报 WARN（`_sl_perm_prompt_warn_verdict` + 主循环接线，不无限静默），纯判据 + 主循环实跑测试（见 Evidence）
-- [ ] AC5: **位置无关（候选 C 未选）**——未选候选 C；位置依赖已由候选 A 在误判发生面（问卷在底部区域时）消除：同屏问卷在/不在底部区域都判非 permission-prompt（AC1/AC2 测试覆盖），不整屏扫描（ADR-016 boundary b）
+- [x] AC5: **位置无关（候选 C 未选，A+B 已覆盖等价语义）**——未选候选 C；位置依赖已由候选 A 在误判发生面（问卷在底部区域时）消除：同屏问卷在/不在底部区域都判非 permission-prompt（AC1/AC2 测试覆盖），不整屏扫描（ADR-016 boundary b）
 
 ## Definition of Done
 

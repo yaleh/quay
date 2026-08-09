@@ -4,7 +4,7 @@ title: detectTaskOver90m reads telemetry bracket start (never task status) — 3
   false OVER90 tonight (phantom in-flight from crash, worktree 0-commit dead,
   process gone); add task-status gate (ready/done never triggers) + reconcile
   criterion fix (worktree existence ≠ mid-flight)
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -59,6 +59,12 @@ extra: {}
 - [x] AC1-AC4 全勾（detectTaskOver90m 对 status=ready 超时 bracket 不触发负控制；status=in-progress 仍触发正控制；测试覆盖两形态 + os-anchor 复发案例；与 phantom-in-flight 任务交叉标注）
 - [x] 复现 os-anchor ready+超时 bracket 形态不再报 false over-90m；真超时仍报
 - [x] scoped 门 `scripts/test.sh --for-task gap-over-90m-false-signal-source-reads-telemetry-not-task-status` 绿
+
+## Definition of Done
+
+- [ ] AC1-AC4 全勾（detectTaskOver90m 对 status=ready 超时 bracket 不触发负控制；status=in-progress 仍触发正控制；测试覆盖两形态 + os-anchor 复发案例；与 phantom-in-flight 任务交叉标注）
+- [ ] 复现 os-anchor ready+超时 bracket 形态不再报 false over-90m；真超时仍报
+- [ ] scoped 门 `scripts/test.sh --for-task gap-over-90m-false-signal-source-reads-telemetry-not-task-status` 绿
 
 ## Touches
 - tasks/gap-over-90m-false-signal-source-reads-telemetry-not-task-status.md（自身文件——self-touch，2026-08-08 内层补：缺此条不满足派发资格闸 step 4.5）

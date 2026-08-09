@@ -15,7 +15,7 @@ title: "nothing measures context saturation — a session at 100% context is
   heartbeat-not-consciousness (假死判据): the criterion measures whether the session
   MOVES, never whether it can still TAKE IN anything; manager observation
   2026-08-06"
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate

@@ -129,6 +129,31 @@ export function exclusionEntries(repoRoot, pluginDir) {
       target: path.join(repoRoot, 'experiments', 'quay-perpetual-stream', 'fixtures', 'scheduler'),
       reason: "replay fixtures (gap-dispatch-eligibility-blind-to-files-that-do-not-exist-yet): the eligibility check's OUTPUT embeds the old-path regex patterns as DATA (the replay pins what the scheduler names), not live callers",
     },
+    {
+      rel: 'orchestration/manager-phase-goal.md',
+      target: path.join(repoRoot, 'orchestration', 'manager-phase-goal.md'),
+      reason: "manager's operational doc referencing the quay-local deployed outer tick doc at orchestration/orchestrator-loop-tick.md — a real materialized copy (the C3 no-manager-tick-doc checker's quay-local landing, same target-layout class), not a stale reference to a moved mechanism",
+    },
+    {
+      rel: 'plugin/scripts/instrument-failure-check.ts',
+      target: path.join(pluginDir, 'scripts', 'instrument-failure-check.ts'),
+      reason: "the instrument's ## Contract scan surface (DEFAULT_SURFACE) intentionally includes the deployed tick-doc copies (orchestration/ + docs/analysis/) alongside the canonical plugin/loop/ copies — it scans the layout consumers actually receive, not a stale source-copy reference",
+    },
+    {
+      rel: 'plugin/scripts/checker-mutation-cases/instrument-failure-check.sh',
+      target: path.join(pluginDir, 'scripts', 'checker-mutation-cases', 'instrument-failure-check.sh'),
+      reason: "mutation-case fixture whose scan surface MUST match instrument-failure-check.ts DEFAULT_SURFACE (the 'must match' invariant makes it a mirror of the instrument's deployed-layout surface)",
+    },
+    {
+      rel: 'plugin/test/instrument-failure-check.test.mjs',
+      target: path.join(pluginDir, 'test', 'instrument-failure-check.test.mjs'),
+      reason: "tests the instrument against its deployed-layout scan surface (copySurfaceTo copies DEFAULT_SURFACE incl. the orchestration/ deployed copies); target-layout reference, same class as the instrument itself",
+    },
+    {
+      rel: 'plugin/test/quay-init-loop.test.mjs',
+      target: path.join(pluginDir, 'test', 'quay-init-loop.test.mjs'),
+      reason: "asserts quay-init's DEPLOYED layout — quay-init.sh lays tick docs at orchestration/orchestrator-loop-tick.md + docs/analysis/fast-mode-loop-tick.md (target layout); the assertion verifies the consumer workspace tracks the deployed copies, not a stale source-copy reference",
+    },
     // NOTE: plugin/loop/ is fully excluded: the tick-doc templates legitimately spell the TARGET
     // layout (orchestration/ + docs/analysis/ for a cold-started project). Their own old-path
     // strings are therefore only policed by AC1c's three assertions, and AC1c's liveLines filter

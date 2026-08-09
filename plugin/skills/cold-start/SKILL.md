@@ -270,7 +270,16 @@ least one delivered event line**
 the Monitor stream each round). If no event arrives within ~90s, the monitor is not delivering — **STOP and report**
 `MONITORS-DELIVERING: false`; do not proceed to pretend the loop is up.
 
-### 5. Re-create the 20-minute cron — THE single loop driver (session-scoped, dies with the session)
+### 5. Re-create the 20-minute cron — THE single loop driver (session-scoped: dies when the session PROCESS exits)
+
+> **Precision (measured 2026-08-08 13:3xZ)**: "session-scoped" means the **process**, not the
+> context. A `/clear` swaps the transcript session id and wipes the context but **does NOT kill the
+> cron** — `CronList` after two consecutive `/clear`s still returned the live job. So this step is
+> **list-then-decide**, never unconditional re-creation; creating one blindly after a `/clear` is
+> exactly the double-trigger this section forbids. What does kill it is process exit (crash / OOM /
+> window closed), and then `CronList` comes back empty. Same-measurement corollary: a `/clear`
+> leaves the loop **running** while silently invalidating any monitor that pinned a transcript
+> path — resolve the transcript by `customTitle`, never by a hardcoded session id.
 
 **`CronCreate` is the ONE loop-driving mechanism.** Do NOT also start a `/loop` (a fixed-interval
 `/loop` is the same cron mechanism — a second one is a double-trigger) and do NOT use the self-paced

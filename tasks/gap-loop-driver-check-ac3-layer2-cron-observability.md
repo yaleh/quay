@@ -1,7 +1,14 @@
 ---
 id: gap-loop-driver-check-ac3-layer2-cron-observability
-title: "loop-driver-check AC3 LAYER 2: 'registry has a row but the driver is dead' must not report LIVE — layer-1 (self-declared registry) structurally cannot distinguish real drivers from stale rows (registry is self-declared, cron is session-internal, bash checker can't see session cron list); layer-2 = swap to an OBSERVABLE source (CronList output / session-internal task list) whose precondition is UNANSWERED: 'can a bash checker see session-internal cron?' — not guessed before answered; carried from gap-the-loop-driver-check (done, AC3 explicitly recorded unsolved per its own DoD)"
-status: todo
+title: "loop-driver-check AC3 LAYER 2: 'registry has a row but the driver is
+  dead' must not report LIVE — layer-1 (self-declared registry) structurally
+  cannot distinguish real drivers from stale rows (registry is self-declared,
+  cron is session-internal, bash checker can't see session cron list); layer-2 =
+  swap to an OBSERVABLE source (CronList output / session-internal task list)
+  whose precondition is UNANSWERED: 'can a bash checker see session-internal
+  cron?' — not guessed before answered; carried from gap-the-loop-driver-check
+  (done, AC3 explicitly recorded unsolved per its own DoD)"
+status: ready
 labels:
   - gap
   - milestone-candidate

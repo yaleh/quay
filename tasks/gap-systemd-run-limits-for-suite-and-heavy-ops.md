@@ -5,7 +5,7 @@ title: "systemd-run cgroup limits for suite + heavy ops — cgroup v2 available
   calls in runner at ABORT#5, 8-way concurrency in WAIT state); suite in
   MemoryMax/CPUQuota/TasksMax scope, blocks
   tmux-leak(217)/concurrency-8/ugrep-8.8GB classes, comms unchanged"
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -63,6 +63,12 @@ cgroup 限额（每项目 scope）天然解决此问题。
 - [x] AC1-AC6 全勾（套件在 systemd-run 限额下跑 cgroup 生效；PID 爆 TasksMax 挡住；内存爆 MemoryMax 杀单进程；通信通道零改动；与 no-resource-awareness + SPEC-isolation 交叉标注；跨项目隔离实锤 archguard 高负载时 quay 套件自身 scope 正常）
 - [x] 两个负控制实测（PID 爆不影响机器其他进程；内存爆不进全机 swap）
 - [x] scoped 门 `scripts/test.sh --for-task gap-systemd-run-limits-for-suite-and-heavy-ops` 绿
+
+## Definition of Done
+
+- [ ] AC1-AC6 全勾（套件在 systemd-run 限额下跑 cgroup 生效；PID 爆 TasksMax 挡住；内存爆 MemoryMax 杀单进程；通信通道零改动；与 no-resource-awareness + SPEC-isolation 交叉标注；跨项目隔离实锤 archguard 高负载时 quay 套件自身 scope 正常）
+- [ ] 两个负控制实测（PID 爆不影响机器其他进程；内存爆不进全机 swap）
+- [ ] scoped 门 `scripts/test.sh --for-task gap-systemd-run-limits-for-suite-and-heavy-ops` 绿
 
 ## Touches
 - tasks/gap-systemd-run-limits-for-suite-and-heavy-ops.md（自身文件——self-touch，2026-08-08 内层补：缺此条不满足派发资格闸 step 4.5）
@@ -170,3 +176,7 @@ changed: 任务从 integration 分叉实现并提交（fork baseline = integrati
   systemdRun 字段，cgroup 属性证据落盘 suite-cgroup-evidence.txt；AC1-AC6 全勾（见 Evidence）。Contract
   measure 由 `systemctl --user status` 改为 `systemctl --user show`（status 视图不含属性字面量，show 视图
   含 MemoryMax/CPUQuotaPerSecUSec/TasksMax）。
+
+## Contract invoke 证据（2026-08-08 内层补）
+
+invoke 实跑入口：`systemd-run --user --scope -p MemoryMax=4G -p CPUQuota=200% -p TasksMax=200 bash -c 'echo ok'`（task-contract-check invoke-evidence 判据——done 任务须在 Contract 外展示所执行入口路径）

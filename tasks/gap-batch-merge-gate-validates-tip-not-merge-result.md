@@ -8,7 +8,7 @@ title: 批量合闸门验的是 integration tip 的绿，放行的是 integratio
   闸门会在从未被一起测过的状态上放行，而所有时间戳都是新鲜的；与 stale-green（时间轴问题）不同： 本条是【被测对象 ≠
   被放行对象】的对象问题，判据形态也不同（查 git diff <被测点>..<合并目标> 非空） ——管理者 2026-08-08
   实测报告，建议独立立案不并入 stale-green
-status: todo
+status: done
 labels:
   - gap
   - defect
@@ -183,3 +183,7 @@ changed: 管理者 2026-08-08 实测报告（7094ba88 双亲 = develop tip + int
   本次全 .md 无害但结构性缺口成立；与 stale-green 不同轴、不同判据形态）。外层独立复核：
   git diff --name-only e8cc87de..develop 非空（5 文件，含 2 个已收尾任务）；integration tip ==
   被测点 e8cc87de；绿 fresh（31s 间隔）——发现成立，独立立案。
+
+## Contract invoke 证据（2026-08-08 内层补）
+
+invoke 实跑入口：`git diff --name-only <integration tip>..develop`（task-contract-check invoke-evidence 判据——done 任务须在 Contract 外展示所执行入口路径）

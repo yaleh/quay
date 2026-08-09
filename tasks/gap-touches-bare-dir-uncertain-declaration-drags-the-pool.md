@@ -60,7 +60,14 @@ extra:
 - [x] 裸目录 flag 实测 + 池 disjointness 复测正常
 - [x] scoped 门 `scripts/test.sh --for-task gap-touches-bare-dir-uncertain-declaration-drags-the-pool` 绿
 
+## Definition of Done
+
+- [ ] AC1-AC3 全勾（裸目录+不确定标注 Touches 被 flag——机械或模板 AC；branch-model Touches 收窄——'若成脚本'改明确候选路径或删；复测池候选 disjointness 正常不再被裸目录拖垮）
+- [ ] 裸目录 flag 实测 + 池 disjointness 复测正常
+- [ ] scoped 门 `scripts/test.sh --for-task gap-touches-bare-dir-uncertain-declaration-drags-the-pool` 绿
+
 ## Touches
+- tasks/gap-touches-bare-dir-uncertain-declaration-drags-the-pool.md（自身文件——self-touch，2026-08-08 内层补：缺此条不满足派发资格闸 step 4.5）
 
 - tasks/gap-touches-bare-dir-uncertain-declaration-drags-the-pool.md（自身文件——self-touch，2026-08-08 内层补：缺此条不满足派发资格闸 step 4.5）
 - plugin/scripts/touches-parser.ts（裸目录 + 不确定标注检测 flagBareDirUncertainTouches，AC1 机械检查）

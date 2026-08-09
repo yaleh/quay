@@ -108,11 +108,16 @@ bash plugin/scripts/inner-session-check.sh --json   # 四态自检：{state: hea
 **4. 重建 cron —— 唯一的循环驱动，这一步最容易漏**
 
 **整个冷启动只有这一个循环驱动机制**：tick 靠它每 20 分钟触发一次。`CronCreate` 的任务是
-**会话内的**，会话一结束就没了。新会话必须重建，否则外层再也不会自动触发：
+**会话内的**——但**「会话内」指的是【进程】，不是【上下文】**（2026-08-08 13:3xZ 实测更正，见下）。
+**因此这一步是「先列、再决定」，不是「无条件重建」**：
 
 ```
+CronList     # ← 必须先列。/clear 之后旧 cron 仍在，直接建就是双触发（§4a 明令禁止的那个）
+# 恰好一个本层 tick 的 cron  ⇒ 什么都不做
+# 多于一个                  ⇒ CronDelete 到只剩一个（哨兵清扫：按 prompt 内容找，绝不靠记住的 ID）
+# 一个都没有                ⇒ 才建：
 CronCreate(cron="*/20 * * * *", prompt="执行 orchestrator-loop-tick.md 中的 tick 指令", recurring=true)
-CronList   # 确认它已被列出——没列出的 cron 不是报警，是静默空转
+CronList   # 建完再列一次确认——没列出的 cron 不是报警，是静默空转
 mkdir -p <root>/.quay
 printf '%s\n' '{"mechanism":"cron","interval":"*/20 * * * *","source":"cold-start"}' >> <root>/.quay/loop-driver.jsonl
 mkdir -p "$REPO_ROOT/.quay"
@@ -120,6 +125,18 @@ mkdir -p "$REPO_ROOT/.quay"
 # 只建 cron 不写注册表 = 检查器看不见这个驱动，照文档冷启动会误报 STALLED
 printf '%s\n' '{"mechanism":"cron","interval":"*/20 * * * *","source":"cold-start"}' >> "$REPO_ROOT/.quay/loop-driver.jsonl"
 ```
+
+> **⚠️ 2026-08-08 13:3xZ 实测更正：原文「会话一结束就没了。新会话必须重建」是错的，
+> 且它与本文件 §4a 自相矛盾。** 本节标题覆盖的正是 `/clear`，而**实测对一个外层会话连发两次
+> `/clear` 后 `CronList` 仍返回 `c0ac1607 — Every 20 minutes (recurring)`** ⇒ **`/clear` 清上下文、
+> 换 transcript session id，但不杀 cron（进程没退）。** 照原文无条件 `CronCreate`，造出的正是
+> §4a 禁止的双触发。**真正杀掉 cron 的是进程退出**（崩溃 / OOM / 关窗），那时 `CronList` 返回空
+> ——**所以判据只有一个：先列，按结果决定建不建。**
+>
+> **同次实测暴露的第二个、更阴的失效**：`/clear` **保留驱动、更换 transcript session id**
+> ⇒ **循环照跑，观测瞎掉**——任何把 transcript 路径写死的监视器从此静默读空。
+> **「进程死了」有 `SESSION-GONE`，「id 换了」什么都不报。**
+> ⇒ 监视器按 `customTitle`（如 `"quay-outer"`）解析当前 transcript，**不写死 session id**。
 
 **最后一行是写驱动注册表**：`CronCreate` 建的 cron 是**会话内的**，对 `loop-driver-check.sh` 本身
 不可见——检查器数的是**注册表** `.quay/loop-driver.jsonl`，一行 = 一个驱动。**建好却没写注册表的

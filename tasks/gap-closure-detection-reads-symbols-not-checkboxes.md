@@ -6,7 +6,7 @@ title: 收尾信号耦合在「任务写法」不耦合在「完成状态」—�
   写散文的任务无论完成与否都不可见（gap-cold-start 4/4、concurrency-derivation 14/14 等）；修法 =
   not-yet-flipped 加并列信号 all_acs_checked && status==ready（与 taskWorkLanded 并集，
   不替换）
-status: ready
+status: done
 labels:
   - gap
   - defect

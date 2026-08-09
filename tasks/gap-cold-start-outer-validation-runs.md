@@ -1,7 +1,7 @@
 ---
 id: gap-cold-start-outer-validation-runs
-title: "cold-start 三条验证 AC 待外层实跑：meta-cc 真实写入、inner 零操作记录、多模型同后果清单"
-status: ready
+title: cold-start 三条验证 AC 待外层实跑：meta-cc 真实写入、inner 零操作记录、多模型同后果清单
+status: done
 labels:
   - gap
 extra:

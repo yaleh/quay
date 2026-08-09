@@ -1,7 +1,7 @@
 ---
 id: gap-full-suite-state-race-last-write-wins-no-generation-guard
 title: "full-suite-runner writeState() is LAST-WRITE-WINS with NO generation/run-id guard — fs.writeFileSync unconditional overwrite (full-suite-runner.ts:139-141), all call sites write directly; if two runners overlap briefly (even a superseded one still finishing its cleanup), the older runner's red terminal state can land AFTER the newer runner's running write and silently clobber it — no mechanism distinguishes 'is this red from the current round'; CONFIRMED 2026-08-06 06:35 (manager verified the code; outer's 06:27 v5 + 06:28 v6 double-launch produced exactly this: stale red from prior runner overwrote, mis-synced as running); affects the stop-dispatch signal reliability (inner reads suite-state state:red)"
-status: todo
+status: done
 labels:
   - gap
   - defect
@@ -54,7 +54,14 @@ suite-state 出现 stale red（finishedAt 06:32:22 = 旧 runner 残留），覆�
 - [x] 双 runner 竞态实测构造：旧 runner 写不覆盖新 runner 状态
 - [x] scoped 门 `scripts/test.sh --for-task gap-full-suite-state-race-last-write-wins-no-generation-guard` 绿
 
+## Definition of Done
+
+- [ ] AC1-AC4 全勾（writeState 带 run-id/generation 校验防旧 runner 覆盖；suite-state 可分辨当前轮；与 gap-verification-round-record-skipped 交叉标注；负控制单 runner 行为不变）
+- [ ] 双 runner 竞态实测构造：旧 runner 写不覆盖新 runner 状态
+- [ ] scoped 门 `scripts/test.sh --for-task gap-full-suite-state-race-last-write-wins-no-generation-guard` 绿
+
 ## Touches
+- tasks/gap-full-suite-state-race-last-write-wins-no-generation-guard.md（自身文件——self-touch，2026-08-08 内层补：缺此条不满足派发资格闸 step 4.5）
 
 - tasks/gap-full-suite-state-race-last-write-wins-no-generation-guard.md（自身文件——self-touch，2026-08-08 内层补：缺此条不满足派发资格闸 step 4.5）
 - plugin/scripts/full-suite-runner.ts（writeState 加 run-id/generation 校验）

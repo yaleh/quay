@@ -10,7 +10,7 @@ title: "KNOWN-LOAD-SENSITIVE interpretive rule (fast-mode-loop-tick.md 已知负
   root causes (session-liveness wall-clock vs runner-grouping nested-spawn);
   mechanize as machine-readable family manifest (per-file @load-sensitive <kind>
   annotation) + red-window triage auto-partition + auto isolate-rerun"
-status: todo
+status: done
 labels:
   - gap
   - defect

@@ -13,7 +13,7 @@ title: "Sixth 'instrument-exists-but-not-wired' instance, biggest consequence:
   wall-clock per file), then tune on real data, then present stronger fast
   evidence for the merge; add a mechanical check that the reporter is ACTUALLY
   loaded (>34 covered files) to prevent a seventh instance"
-status: ready
+status: done
 labels:
   - gap
   - defect

@@ -14,7 +14,7 @@ title: "the L0 anti-machine-wipe guard (tmux-isolated.sh) has ZERO consumers out
   documented four times (gap-tmux-isolation-cannot-depend-on-caller-remembering-to-unset-TMUX,
   restart-plan-2026-08-04-third §6) for which the guard was purpose-built and then never adopted;
   manager 2026-08-06 with sudo-verified kernel evidence"
-status: todo
+status: ready
 labels:
   - gap
   - defect

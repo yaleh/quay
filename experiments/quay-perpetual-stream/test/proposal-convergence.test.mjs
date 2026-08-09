@@ -2790,15 +2790,34 @@ fixture proposal text v1
   // processes (node:child_process `spawn`, not in-process mocks/Promise.all-of-sync-calls) — the
   // established pattern this repo's own cross-process race tests use (see
   // prepare-admission-check.test.mjs's `gap-prepare-milestone-lease-read-race` describe block).
-  function spawnConvergenceCli(args) {
+  // kill-timeout guard (2026-08-08, red-window #9): the suite hung 20+ min when one of the
+  // concurrent children blocked in a futex (Node/libuv internal condition-variable wait) under the
+  // full suite's extreme contention (cpu avg10 71, ~100 threads from 20 spawned children) — a hung
+  // child stalled the ENTIRE main group because the suite runs --test-timeout=0. The epoch-lock
+  // acquire/release is provably bounded (7 attempts, ~1.3s retry budget; stale-reclaim 30s); the
+  // hang is not in that logic. A generous default converts an indefinite hang into a bounded,
+  // diagnosable timeout failure so a single stuck child can never hang the suite again.
+  // 60s (raised from 20s on 2026-08-09, red-window #10): the suite runs inside a systemd-run scope
+  // with CPUQuota=200% (nproc=2 inside), and 20 concurrent node spawns + the epoch-lock retries can
+  // legitimately take 20-60s under that 2-core oversubscription — 20s false-timed-out a starved
+  // but alive child. 60s is still ≫ the lock retry budget + the 500ms test-hold seam, and bounds a
+  // true deadlock to a bounded failure.
+  function spawnConvergenceCli(args, { timeoutMs = 60_000 } = {}) {
     return new Promise((resolve) => {
       const child = spawn("node", ["--no-warnings", "--experimental-strip-types", CONVERGENCE_SCRIPT, ...args]);
       let stdout = "";
       let stderr = "";
+      let settled = false;
+      const killTimer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        child.kill("SIGKILL");
+        resolve({ code: null, timeout: true, stdout, stderr: `${stderr}\n[spawnConvergenceCli] TIMEOUT: child did not exit within ${timeoutMs}ms — SIGKILLed (blocked in a futex under load); treat as a hang, not a pass` });
+      }, timeoutMs);
       child.stdout.on("data", (d) => { stdout += d; });
       child.stderr.on("data", (d) => { stderr += d; });
-      child.on("close", (code) => resolve({ code, stdout, stderr }));
-      child.on("error", (err) => resolve({ code: -1, stdout, stderr: `${stderr}\nspawn error: ${err.message}` }));
+      child.on("close", (code) => { if (settled) return; settled = true; clearTimeout(killTimer); resolve({ code, stdout, stderr }); });
+      child.on("error", (err) => { if (settled) return; settled = true; clearTimeout(killTimer); resolve({ code: -1, stdout, stderr: `${stderr}\nspawn error: ${err.message}` }); });
     });
   }
   function spawnNewEpoch(dir, taskId, charterFile, { reason, owner, confirmUnchangedScope } = {}) {

@@ -1,7 +1,7 @@
 ---
 id: gap-release-excludes-plugin-bundle-agent-surface
 title: "release v0.3.13 excludes the ENTIRE plugin bundle (the agent surface that IS the self-evolving mechanism) — packages/quay/package.json files=[README,CHANGELOG,LICENSE,bin,src,dist] has NO plugin/, so a GitHub install yields a task-board CLI, NOT the evolving loop (product outline §6 delivery main body = plugin scripts 119 + gate-scripts 14 + skills 13 + probes 4 + loop 2 + vendor + agents); AC16 core gap, manager measured 2026-08-06 (v0.3.13 2026-07-24, master ahead 2463 commits); human phase-goal: deliver complete usable release on GitHub; outer rulings: files add plugin/, tag from develop (post-cutover), SEA continues (self-contained runtime for AC16 criterion 3), version v0.4.0 (plugin bundle first-in-package = major delivery-surface extension)"
-status: ready
+status: done
 labels:
   - gap
   - defect

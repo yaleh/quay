@@ -11,7 +11,7 @@ title: "README Option B ('from source... no global install step required') and
   runs; same break repeats for quay-native.js and quay-github.js; a fresh
   git-clone adopter following README's own recommended dev path hits ENOENT on
   the FIRST copy-pasted command; doc-vs-code lens, manager 2026-08-06"
-status: ready
+status: done
 labels:
   - gap
   - defect

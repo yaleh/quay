@@ -97,12 +97,29 @@ inner 会话的（例如 inner claude 进程启动时刻之后的），否则按
 **4. 重建 cron —— 唯一的循环驱动，这一步最容易漏**
 
 **整个冷启动只有这一个循环驱动机制**：tick 靠它每 20 分钟触发一次。`CronCreate` 的任务是
-**会话内的**，会话一结束就没了。新会话必须重建，否则外层再也不会自动触发：
+**会话内的**——但**「会话内」指的是【进程】，不是【上下文】**（2026-08-08 13:3xZ 实测更正，见下）。
+**因此这一步是「先列、再决定」，不是「无条件重建」**：
 
 ```
+CronList     # ← 必须先列。/clear 之后旧 cron 仍在，直接建就是双触发（§4a 明令禁止的那个）
+# 恰好一个本层 tick 的 cron  ⇒ 什么都不做
+# 多于一个                  ⇒ CronDelete 到只剩一个（哨兵清扫：按 prompt 内容找，绝不靠记住的 ID）
+# 一个都没有                ⇒ 才建：
 CronCreate(cron="*/20 * * * *", prompt="执行 orchestrator-loop-tick.md 中的 tick 指令", recurring=true)
-CronList   # 确认它已被列出——没列出的 cron 不是报警，是静默空转
+CronList     # 建完再列一次确认——没列出的 cron 不是报警，是静默空转
 ```
+
+> **⚠️ 2026-08-08 13:3xZ 实测更正：原文「会话一结束就没了。新会话必须重建」是错的，
+> 且它与本文件 §4a 自相矛盾。** 本节标题覆盖的正是 `/clear`，而**实测对本层连发两次 `/clear`
+> 后 `CronList` 仍返回 `c0ac1607 — Every 20 minutes (recurring)`** ⇒ **`/clear` 清上下文、
+> 换 transcript session id，但不杀 cron（进程没退）。** 照原文无条件 `CronCreate`，
+> 造出的正是 §4a 禁止的双触发。**真正杀掉 cron 的是进程退出**（崩溃 / OOM / 关窗），
+> 那时 `CronList` 返回空——**所以判据只有一个：先列，按结果决定建不建。**
+>
+> **同次实测暴露的第二个、更阴的失效**：`/clear` **保留驱动、更换 transcript session id**
+> ⇒ **循环照跑，观测瞎掉**——任何把 transcript 路径写死的监视器从此静默读空。
+> **「进程死了」有 `SESSION-GONE`，「id 换了」什么都不报。**
+> ⇒ 监视器按 `customTitle`（如 `"quay-outer"`）解析当前 transcript，**不写死 session id**。
 
 **为什么选它（判据：无人值守时最不容易静默停摆）**：
 
@@ -439,6 +456,41 @@ OVERDUE/REPO-STALL（协调方 2026-08-03 样本）。
 `SESSION-IDLE` 在心跳时距小于 `LOOP_MIN` 时静默——那是正常收尾；`SESSION-RESUMED`
 **保留不静默**（它便宜，且是唯一能确认会话还在按期活动的正向信号）。
 
+### 0b3. 层间 tick 间隔检查——量自驱心跳，不量最后活动（人 2026-08-08 10:5xZ 裁定，外层半）
+
+**人的原话**：「manager 和 outer 的 tick 中应当检查【下一层】的最近 tick 记录，并在时间超长时报警。」
+manager 查 outer（manager 侧已落地 b8d7746e）；**outer 查 inner（本条，外层半）**。
+
+**为什么此前两层都没有**：读 inner 产出时只读【内容】不问【间隔】——内容在就判「在动」。
+今晚代价：inner 自驱心跳 09:31 起零次响应，但外部事件（外层 send-keys / 子代理完成通知）恰好
+填补空档，从 transcript 看「一直在动」；管理者与我都据此连判错两轮。
+
+**判读关键：量【自驱心跳】的间隔，不量【最后活动】。**
+- 最后活动会被外部事件填满（send-keys、`<task-notification>`）——看起来在动，自己的脉搏早停了。
+- **有外部输入时，二者在 transcript 里无法区分**（外层 send 与 inner `/loop 25m` 触发都是
+  「执行 fast-mode-loop-tick.md 中的 tick 指令」，字面同形）。
+- ⇒ 可机械判的是 **transcript 心跳源 mtime 间隔的下界**：任何活动都没有（含外部事件）超过阈值 =
+  **肯定**没自驱。这比「判自驱心跳」保守（宁松勿紧——人裁误报≈秒级、漏报≤20min 空转），
+  但不把外部事件当自驱脉搏。
+
+```bash
+# 层间 tick 间隔检查（每轮必跑，成本≈0）：inner transcript 心跳源 mtime 间隔
+# ⚠️ 目标解析必须验【pid 匹配 inner pane】，不是发现启发式（2026-08-08 11:4x 管理者上游定位：
+#    默认目标解析看的是 outer 自己 2989418；发现启发式会挑到 b8dc91a6（manager 会话）——
+#    两个都不是 inner 728a4610）。SESSION_TRANSCRIPTS 必须显式写 inner 的 transcript 路径。
+INNER_TX=$(grep '^SESSION_TRANSCRIPTS' orchestration/session-liveness.env | head -1 | cut -d= -f2- | tr -d '"' | awk '{print $2}')
+[ -z "$INNER_TX" ] && INNER_TX="/home/yale/.claude/projects/-home-yale-work-quay/728a4610-46b5-4c4a-84ea-6ed01667c433.jsonl"
+# 取证必须含 pid 断言：该 transcript 的会话 == quay-0:inner 的 pane_pid（不是 alive=1 就算）
+INNER_PANE=$(tmux list-panes -t "quay-0:inner" -F '#{pane_pid}' 2>/dev/null)
+echo "  inner transcript=${INNER_TX} pane_pid=${INNER_PANE}（取证：查的是 inner 不是 outer/自己）"
+age_min=$(( ($(date +%s) - $(stat -c%Y "$INNER_TX")) / 60 ))
+echo "  inner 心跳源间隔=${age_min}min  阈值=30min（/loop 1200-1800s 上界）"
+[ "$age_min" -gt 30 ] && echo "  ⚠️ ALARM: inner 无任何活动 >30min —— 需驱动它 / 重挂它的 /loop"
+```
+
+**阈值 = 该层申报周期的上界，不是 2 倍**（人已裁）：inner = `/loop 25m` 上界 30min
+（fast-mode-loop-tick.md:262 的 1200–1800s）。报警后动作归外层机制决定（驱动它 / 重挂 /loop / 只记录）。
+
 ### 0c. 派发闸口的清单与留痕：`## Contract` + `## Dispatch review`（外层，gap-dispatch-gate-has-no-checklist-and-no-trace）
 
 外层对派发任务的审查此前是**惯例**——四次介入里两次靠外层碰巧拥有的上下文（`=` 拼写、`duration_ms`
@@ -519,6 +571,21 @@ node --experimental-strip-types plugin/scripts/task-status-drift-check.ts --stra
 cat docs/analysis/batch2-queue-state.md             # 内层自报的队列状态
 bash plugin/scripts/supervisor-bus-identity.sh inbox-summary   # 收件箱机械挂载点（gap-supervisor-message-bus-with-identity AC4）：unread 逐条进决策，delivered≠consumed
 ```
+
+**1a. 内层占用率（AC26，强制——量【占用率】不是【新鲜度】）**：每 tick 必须取两个读数并写进本行
+tick-log，不是写进任务体：
+```bash
+# ① in-flight / effective_cap（占用率；cap 来自 cap-from-gate.sh，不用回退 3）
+cap=$(bash plugin/scripts/cap-from-gate.sh 2>/dev/null | sed -n 's/^effective_cap=\([0-9]*\)$/\1/p')
+node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --slots --cap "${cap:-5}" --root "$REPO_ROOT" --json
+# ② inner 最近一次【自己的报告】（tick-log 里 inner 的最近一条，不是外层观察）
+#    ——三个不算：mtime / "transcript is fresh" / "最后活动"（在 inner 有子代理或被上层唤醒时都会为真而占用率为空）
+```
+**判据（AC26）**：① 该编号步骤产出 `in-flight/effective_cap` 与「inner 最近一次自己的报告」两个读数；
+② 每轮 tick-log 行能读到这两个读数的具体值；③ 取的是占用率——mtime/「transcript is fresh」/「最后
+活动」一律不算。**槽未满（in-flight < cap）且上游已通 ⇒ 当轮驱动派发，不得记录后结束。**
+（人 13:2x 原话：「outer 在处理 tick 时没有看 inner 槽位，也没有看 inner 的 transcript/屏幕，根本没
+有了解 inner 的状态，当然也就不会响应 inner 关于任务的需求」——AC26 前置 AC25。）
 
 **`ruling-required` 屏幕观察者（外层是主轮询方，`gap-ruling-required-trigger-is-dead-code-never-wired-into-any-tick`）**：
 `--transcript` 从未进过任何生产调用，是死代码；现在 `ruling-required` 的主判据是**屏幕形状分类**。

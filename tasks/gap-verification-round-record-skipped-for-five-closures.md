@@ -1,7 +1,7 @@
 ---
 id: gap-verification-round-record-skipped-for-five-closures
 title: "outer closure bookkeeping: 5 closures (rounds 14-18) landed + flipped done but verification-round.jsonl was NOT appended for any of them (last record round 13 @00:25Z, next write 02:0xZ backfill) — the closure-sync AC2 routine wrote the narrative queue-state but the machine-readable round record silently fell off; nobody notices because nothing READS the round record for closure completeness (inner reads suite-state, not verification-round); '存在≠生效' recurrence on the outer's own bookkeeping; fix: a per-tick assertion or the tick itself must check verification-round.jsonl tail round == number of merged closures"
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -54,6 +54,12 @@ verification-round.jsonl**——closure-sync AC3 把它从 inner 读取面撤下
 - [x] AC1-AC4 全勾（收尾 pass 机械判据：本轮 ≥1 收尾 ⇒ jsonl round 前进 1，追加前 assert last+1；无收尾 tick 不要求写 jsonl；与 closure-sync 交叉标注；round 14-18 已补记连续 1-18）
 - [x] jsonl round 连续性实测（追加前 assert last+1，失败即 tick 异常非静默）
 - [x] scoped 门 `scripts/test.sh --for-task gap-verification-round-record-skipped-for-five-closures` 绿
+
+## Definition of Done
+
+- [ ] AC1-AC4 全勾（收尾 pass 机械判据：本轮 ≥1 收尾 ⇒ jsonl round 前进 1，追加前 assert last+1；无收尾 tick 不要求写 jsonl；与 closure-sync 交叉标注；round 14-18 已补记连续 1-18）
+- [ ] jsonl round 连续性实测（追加前 assert last+1，失败即 tick 异常非静默）
+- [ ] scoped 门 `scripts/test.sh --for-task gap-verification-round-record-skipped-for-five-closures` 绿
 
 ## Touches
 - tasks/gap-verification-round-record-skipped-for-five-closures.md（自身文件——self-touch，2026-08-08 内层补：缺此条不满足派发资格闸 step 4.5）

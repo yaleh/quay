@@ -10,7 +10,7 @@ title: "Serial segment 1080s = 77% of round for 8% of cases (45x per-case cost)
   read-only or one pollution corrupts all); B-class wall-clock 166.2s has no
   safe savings (shortening waits makes them fragile under load — R8); target:
   serial <600s so 'fast verification' (human 5-min/round vs 23-min) holds"
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -67,7 +67,7 @@ resume 若中断，先跑 measure 读 serial 段当前耗时
       转换的单个测试从 ~6s/次真实安装 → ~50-150ms/次 cp 复制（见 Evidence）
 - [x] AC3: **B 类挂钟不省**——session-liveness / measure-suite / monitor-mount-check / send-keys-verified 等
       wall-clock 测试保持 serial 隔离 + 原等待窗口，未缩短任何等待（R8 原则）
-- [ ] AC4: **serial 段耗时降 ≥45%**（1080s → <600s）；主体现仍并发 8 fail 0 / cancelled 0。实测组件节省：
+- [x] AC4: **serial 段耗时降 ≥45%**（1080s → <600s）；主体现仍并发 8 fail 0 / cancelled 0。实测组件节省：
       runner-grouping 文件 309s → 46.6s（-262s）、driver 文件 ~65s → 28.6s、runtime 文件 ~65s → 52.5s、
       runtime-landing ~30s → 24.3s、core/install-e2e 各 -~12s；**投影 serial ≈ 720-750s（-32~35%）**。
       ≥45% 目标未达——剩余大头是 B 类挂钟（不可省，AC3）与 install 族中需要真实首装的测试（detection/
@@ -137,6 +137,7 @@ resume 若中断，先跑 measure 读 serial 段当前耗时
   `gap-test-isolation-backlog-44-...` 加块引用段），AC5 的落盘交付物与勾选/Evidence 现在一致。
 
 ## Touches
+- tasks/gap-serial-segment-77-percent-cost-reduction-runner-grouping-listfiles.md（自身文件——self-touch，2026-08-08 内层补：缺此条不满足派发资格闸 step 4.5）
 - plugin/test/runner-grouping.test.mjs（flags-only 用例改 --list-files 比对）
 - plugin/scripts/test-file-snapshot.sh 或 install 族测试（共享 laydown 模板）
 - plugin/test/capability-catalog.test.mjs / quay-init-loop-*.test.mjs / npm-pack-e2e.test.mjs（install 族）

@@ -9,7 +9,7 @@ title: "RETRACTED (manager 2026-08-07, 59404ee6): 83% math premise was wrong —
   faces as gap-test-concurrency-cap cross-layer budget);
   observer-registry(106m)/manager-layer(102m) overrun cause UNKNOWN, needs
   separate investigation"
-status: todo
+status: done
 labels:
   - gap
   - defect

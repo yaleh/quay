@@ -89,6 +89,7 @@ resume 若中断，先跑 measure 读声明在场 + lowconc 失败数
       不跑全量，AC3 的 DEFERRED 记录即 DoD 该项的顺延记录；外层在 40→6 收口后重跑并勾此项。
 
 ## Touches
+- tasks/gap-merge-introduced-referenced-not-landed-manager-tick-log.md（自身文件：self-touch，2026-08-08 内层补——缺此条不满足派发资格闸 step 4.5）
 - plugin/skills/init/SKILL.md 或对应铺装声明文件（manager-tick-log.md reference-doc 声明）
 - plugin/scripts/quay-init.sh（若需要）
 - tasks/gap-merge-exposed-contract-violations-in-done-tasks.md（AC4 交叉标注）

@@ -10,7 +10,7 @@ title: "Telemetry UNDER-report (mirror of the done high-report task):
   into task brackets (wrong semantics), add a 'non-task subagents in-flight'
   count to --slots and have self-check ① use real concurrency (brackets +
   non-task subagents)"
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -119,6 +119,7 @@ slots 仍报 0。
 - [ ] 并发 8 全量套件连跑 2 次全绿（fail 0 且 cancelled 0）
 
 ## Touches
+- tasks/gap-telemetry-underreport-nontask-subagents-not-counted-in-slots.md（自身文件：self-touch，2026-08-08 内层补——缺此条不满足派发资格闸 step 4.5）
 - plugin/scripts/fast-mode-telemetry.ts（`--slots`/`--slot-status` 增 subagentsInFlight）
 - plugin/loop/fast-mode-loop-tick.md（状态自检①改真实并发 = 括号 + 非任务 subagent）
 - plugin/test/slot-visibility.test.mjs（runCli 钉 QUAY_TELEMETRY_SUBAGENTS=0 保持确定性）

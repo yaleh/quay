@@ -5,7 +5,7 @@ title: "manager instrument failures hit 7 times tonight across 5 families — al
   provably don't work (7 recurrences); AC8 form: the families get MECHANICALLY
   detected, not that manager is more careful; the manager can't write the
   checker themselves (role boundary) — the inner must build it"
-status: todo
+status: done
 labels:
   - gap
   - defect

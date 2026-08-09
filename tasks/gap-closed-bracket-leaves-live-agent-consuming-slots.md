@@ -6,7 +6,7 @@ title: "REVERSE-direction bracket-lifecycle defect: manager-layer (2h24m) and
   \"bracket should close but didn't\", this is \"bracket closed, agent still
   alive\"; slot accounting sees the slot free (bracket closed) while the process
   still burns CPU, so a new dispatch could land in a slot that's actually busy"
-status: todo
+status: done
 labels:
   - gap
   - defect

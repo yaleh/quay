@@ -7,7 +7,7 @@ title: 批量合后的主检出对账步骤由调用方各自发明，inner 用 
   额外覆盖工作区=唯一有害那件）；且与 Land 锁无关——锁防交错防不了销毁，共享主检出上
   「拿到锁就能动工作区」不成立；修法方向：对账步骤由脚本自己提供且不得用 --hard，若确需前置断言 git status --porcelain
   为空非空即失败并报出属主（管理者 2026-08-08 实测报告，损失已凭上下文重写 并提交 fa032ec7/49d18602——救回是运气不是机制）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -96,6 +96,25 @@ resume 若中断，先跑 measure 确认当前对账步骤是否含 --hard，不
 
 - [x] AC1-AC5 实跑输出贴任务体（--mixed 对账保留未提交 + 前置断言非空拦截对照）——见各 AC 实跑注；
       另见测试 `plugin/test/integration-batch-merge.test.mjs`（11 用例全绿，含 3 条 --reconcile 新用例）。
+
+### 实跑记录（inner 生产运行，2026-08-08，本任务全流程闭合）
+
+**批量合（integration→develop，带 `--reconcile`，非测试夹具）**：
+```
+integration-batch-merge: reconcile: primary checkout clean (porcelain empty) — safe to proceed
+integration-batch-merge: DIVERGENCE — develop and integration have diverged (NOT a fast-forward)
+integration-batch-merge:   develop-only commits:     8
+integration-batch-merge:   integration-only commits: 5
+integration-batch-merge:   would-conflict files: (none — changes are file-disjoint)
+integration-batch-merge: OK — develop real-merged to integration (merge commit 43a4bc58259193f8e743512f215485afa2c51d15)
+integration-batch-merge: measure integration_ff_merges=0
+sync-lag-check: ... develop -> develop (7094ba88..43a4bc58)
+integration-batch-merge: reconcile: git reset --mixed 43a4bc58259193f8e743512f215485afa2c51d15 (refresh index only; NEVER --hard; working-tree files untouched)
+integration-batch-merge: reconcile: index refreshed to develop tip 43a4bc58259193f8e743512f215485afa2c51d15; working-tree files untouched
+```
+- **AC2 实跑（生产形态）**：合后 `git status --porcelain` 显示 7 个 merge-introduced 文件为**未暂存** M（= `--mixed` 保留工作区内容的诚实旧-vs-新 diff，测试断言形态一致）；definitive 核对 `git diff 02a63baf`（旧 develop tip）**为空** ⇒ 工作区字节级 = 旧 develop 内容、**零真实未提交编辑**；故对 7 个 merge 文件做 `git checkout HEAD -- <files>` 无损同步（**非 --hard**），主检出回到 43a4bc58 干净态（porcelain 空）。
+- **AC3 实跑（拦截路径由测试夹具证明）**：`integration-batch-merge.test.mjs` 第 385 行用例——主检出上放未提交 manager 编辑 → 运行 `--reconcile` → exit 非 0、stderr `reconcile FAIL-CLOSED` + `NOT moving any ref` + 属主上报，编辑在磁盘保留（断言 `MANAGER EDIT` 命中）。
+- **验证**：`git merge-base --is-ancestor integration develop` → YES（integration 重新成为 develop 祖先）；`git rev-list --count develop..origin/develop` = 0（已 push）；脚本 reconcile 路径 `grep -c hard`（非注释）= 0（AC2 无 --hard）。全量套件 3 趟（前 2 趟红为 contract/tick-vocabulary 门禁修复，第 3 趟 **GREEN 796.7s exit 0，tests 42 / pass 42 / fail 0**）含 11 条 integration-batch-merge 用例（3 条 --reconcile）。
 
 ## Touches
 - plugin/scripts/integration-batch-merge.sh（提供对账步骤 / 后置命令）

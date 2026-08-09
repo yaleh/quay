@@ -1,7 +1,7 @@
 ---
 id: gap-ready-pool-promotion-same-class-as-slot-refill
 title: "ready-pool auto-promotion (step 3.6: pool < floor ⇒ 本 tick 补晋) written as a FORCED step but execution depends on inner tick volition — pool=5 < floor=20 sustained ~3h, 121 todo / 33 ready, last MECHANICAL promote bbf85ea9 00:53, two promotes since were human-directive/event-driven (0361893d/0aeaef38), ready-pool-check currently recommends 7 promotions (manager measurement 2026-08-06 04:0xZ + outer git-verified); SAME CLASS as gap-slot-refill-only-triggered-on-completion-not-tick-heartbeat — a forced step in the tick doc with no mechanical guarantee it runs; fix: tick doc step 3.6 must run ready-pool-check + apply promotions unconditionally each tick (like slot-refill's heartbeat-must-run), or fold into the same heartbeat guarantee"
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -58,7 +58,14 @@ slot-refill 修的是「派发评估」无人问，本条是「补晋评估」�
 - [ ] tick 心跳补晋实测：pool<floor 时自动补晋，不需自觉
 - [ ] scoped 门 `scripts/test.sh --for-task gap-ready-pool-promotion-same-class-as-slot-refill` 绿
 
+## Definition of Done
+
+- [ ] AC1-AC4 全勾（tick 心跳必跑 ready-pool-check，pool<floor 且 promotions 非空 ⇒ 补晋落盘；与 slot-refill-only-triggered 交叉标注——同一根因第二实例；负控制 pool≥floor 或 promotions 空不补晋；当前候选可机械补晋）
+- [ ] tick 心跳补晋实测：pool<floor 时自动补晋，不需自觉
+- [ ] scoped 门 `scripts/test.sh --for-task gap-ready-pool-promotion-same-class-as-slot-refill` 绿
+
 ## Touches
+- tasks/gap-ready-pool-promotion-same-class-as-slot-refill.md（自身文件——self-touch，2026-08-08 内层补：缺此条不满足派发资格闸 step 4.5）
 
 - tasks/gap-ready-pool-promotion-same-class-as-slot-refill.md（自身文件——self-touch，2026-08-08 内层补：缺此条不满足派发资格闸 step 4.5）
 - plugin/loop/fast-mode-loop-tick.md（步骤 3.6 无条件执行措辞）
