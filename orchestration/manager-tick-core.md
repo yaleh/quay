@@ -1,0 +1,55 @@
+# manager tick — 执行核
+
+**这份文件是执行路径,不是理由档案。** 理由、实测、代价全部在
+`orchestration/manager-loop-tick.md`(1138 行)里,本文件只给动作和判据,每条最多一行指路。
+
+**立此文件的原因**(2026-08-09 05:5xZ,人提出「控制面越小越稳定」后):执行路径与理由档案
+混在同一份 1138 行文档里,一次重读无法当 checklist 执行 ⇒ 实际被执行的是注意力当轮选中的
+部分。同夜两次实证:outer 的「强制」步骤在 1095 行文档第 687 行、静默停摆 8.5 小时;
+我的 workflow **根本不在文档任何一行**、静默 21.5 小时。
+
+**当前状态:并行对照期。锚仍指向 `manager-loop-tick.md`。**
+每轮两份都跑,差异记进 tick-log;确认零遗漏后才改锚,切换时 tick-log 留一行。
+
+---
+
+## A. 每轮必跑的读数(顺序无关,但一条都不能缺值)
+
+| # | 动作 | 判据 / 陷阱 |
+|---|---|---|
+| A1 | `python3 orchestration/manager-anchor-check.py` | 校的是**文件**,不是活 cron |
+| A2 | `GATE=$(bash plugin/scripts/cap-from-gate.sh)` → 从中取 `CAP` → `slot-refill.sh --cap "$CAP"` | **同一 tick 内 cap 只取一次**;`floor` 必须与该 cap 同源(§2.4b) |
+| A3 | in-flight = `tmux capture-pane -t quay-0:inner \| grep -cE '^\s+◯ '` | **不用 `slot-refill` 的 `in_flight_count`——那是入参不是测量** |
+| A4 | 两层忙闲 = pane 尾部 `esc to interrupt` | pane-only;`LOOP_MIN=0` 才看得到全部事件 |
+| A5 | 三项目 `.halt` 存在性 | quay / archguard / meta-cc |
+| A6 | `git merge-base --is-ancestor develop integration` + 两方向 `rev-list --count` | AC27 |
+| A7 | 套件末轮:读 `.quay/verification-round.jsonl` **末行** | **单状态文件只答「此刻在跑什么」,不答「第 N 轮结果」**(它每轮覆盖) |
+| A8 | `git status --porcelain \| wc -l` | 脏树 |
+| A9 | `meta-cc query_session_content role=tool tool_name=Workflow` → `last(timestamp)` | §2.4c;>3 个 tick 周期未调用 ⇒ 写明「已停用/已替代/是缺陷」三选一 |
+
+## B. 每轮必产出
+
+- **B1 §0.5b**:每条活跃 AC 给一个状态词(达成 / 待观察 / 不适用 / 不可判 / 违反),**缺值 = 未查**。
+- **B2 四元组**(与三层统一契约同格式):① 各声称机制的最近真实执行时刻 ② 占用率(in-flight/cap)
+  ③ 本轮写入落到哪条线 ④ 本行账本。
+- **B3 tick-log 追加一行**(六列),用 `'XEOF'` 引号 heredoc,**只 `'a'` 追加,永不 `'w'`**。
+- **B4 哨兵清扫**:`CronList` → 删所有含 `[manager-tick]` 者 → 建一个。**绝不靠记住的 ID。**
+
+## C. 硬约束(每条都已付过代价,理由见档案)
+
+| 约束 | 一句话 |
+|---|---|
+| C1 | **计数是结论不是读数**——要给数量,先 `grep -a <pat> <file>` 逐行打印,禁止直接 `grep -c` |
+| C2 | 进程计数用 `ps -eo pid,etime,args \| grep -v shell-snapshots \| grep -v ugrep \| grep -- "$P"`;本机 `grep` 是 ugrep 函数,`grep -v grep` 失效 |
+| C3 | **未跟踪的正本禁止单行 read-modify-write**;改写前先 `cp` 备份,读/写分两句 |
+| C4 | 提交前确认落点:**manager 的写落 `integration`**,落 develop 会破两线不变式 |
+| C5 | 「内容是否落地」用内容比对(提交信息/diffstat);「祖先关系」才用 `is-ancestor`——cherry-pick 造新哈希 |
+| C6 | 任何「某机制会导致 X」的断言,发出前引用实现里的一行;引不出来只报现象 |
+| C7 | 跨文件/跨分支的数字,用之前先确认它出自**哪一份**副本 |
+| C8 | 已核实的事实直接发外层,**不问「要不要发」**;决定归外层的,给事实 + 意见 + 明说裁定权在它 |
+
+## D. 边界
+
+不写任务体/AC/DoD、不跑验证、不替任何项目调试代码、不直接改项目代码。
+**手里出现 `.sh`/`.ts` 实现是越界信号。**
+删除/覆盖任何目标前先看目标。跨主机:黑名单——kill / rm -rf / 批量进程操作一律不跨主机执行。
