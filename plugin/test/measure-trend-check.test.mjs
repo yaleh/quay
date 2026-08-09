@@ -148,24 +148,26 @@ test("AC2 — compareLastTwoRounds reports a single-file duration doubling (file
   try {
     const historyFile = path.join(dir, "measure-history.jsonl");
     const logFile = path.join(dir, "full-suite.log");
-    // round 1: a.test = 100ms (small), b.test = 100s (large)
-    writeFileSync(logFile, fakeLog([["/a.test.mjs", 100], ["/b.test.mjs", 100_000]]), "utf8");
+    // round 1: a.test = 10s (LARGE — relative threshold applies), b.test = 100s (large),
+    //          small.test = 300ms (small — relative exempt, gap-measure-trend-... AC2)
+    writeFileSync(logFile, fakeLog([["/a.test.mjs", 10_000], ["/b.test.mjs", 100_000], ["/small.test.mjs", 300]]), "utf8");
     landMeasureHistory({ historyFile, logFile, laneCount: 8, runAt: "2026-08-08T00:00:00.000Z" });
-    // round 2: a.test grows 100→300ms (3× relative, still small absolute); b.test grows
-    //          100s→140s (+40 s, 1.4× absolute); c.test is NEW (no baseline ⇒ not compared).
-    writeFileSync(logFile, fakeLog([["/a.test.mjs", 300], ["/b.test.mjs", 140_000], ["/c.test.mjs", 5]]), "utf8");
+    // round 2: a.test grows 10s→30s (3× relative, large baseline); b.test grows 100s→140s
+    //          (+40s absolute); small.test grows 300→800ms (2.7× relative BUT small baseline —
+    //          must NOT flag, this is the round-172 load-noise class); c.test is NEW.
+    writeFileSync(logFile, fakeLog([["/a.test.mjs", 30_000], ["/b.test.mjs", 140_000], ["/small.test.mjs", 800], ["/c.test.mjs", 5]]), "utf8");
     landMeasureHistory({ historyFile, logFile, laneCount: 8, runAt: "2026-08-08T00:00:01.000Z" });
 
     const growth = compareLastTwoRounds(historyFile);
-    assert.equal(growth.length, 2, "a.test (3× relative) and b.test (+40s absolute) both reported");
+    assert.equal(growth.length, 2, "a.test (3× relative, large) and b.test (+40s absolute) reported; small.test (2.7× but small) exempted");
     const byFile = new Map(growth.map((g) => [g.file, g]));
 
     const a = byFile.get("/a.test.mjs");
     assert.ok(a, "a.test reported");
-    assert.equal(a.prevMs, 100);
-    assert.equal(a.currMs, 300);
-    assert.equal(a.growthMs, 200);
-    assert.equal(a.reason, "relative", "3× relative > 2× ⇒ relative threshold");
+    assert.equal(a.prevMs, 10_000);
+    assert.equal(a.currMs, 30_000);
+    assert.equal(a.growthMs, 20_000);
+    assert.equal(a.reason, "relative", "3× relative on a LARGE baseline ⇒ relative threshold");
     assert.ok(Math.abs(a.ratio - 3) < 1e-9);
 
     const b = byFile.get("/b.test.mjs");
@@ -173,25 +175,27 @@ test("AC2 — compareLastTwoRounds reports a single-file duration doubling (file
     assert.equal(b.growthMs, 40_000);
     assert.equal(b.reason, "absolute", "+40s > +30s ⇒ absolute threshold");
     assert.ok(!byFile.has("/c.test.mjs"), "new file with no baseline is not compared");
+    assert.ok(!byFile.has("/small.test.mjs"), "small test (300→800ms, 2.7×) must NOT flag — load noise (gap-measure-trend-load-noise-false-positive AC2)");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test("AC2/Control — an EXACT doubling (2.0×) is reported (单文件耗时翻倍 ⇒ 报出)", () => {
+test("AC2/Control — an EXACT doubling (2.0×) on a LARGE baseline is reported; a small-baseline exact doubling is NOT", () => {
   const dir = mkdtempSync(path.join(tmpdir(), "mtc-double-"));
   try {
     const historyFile = path.join(dir, "measure-history.jsonl");
     const logFile = path.join(dir, "full-suite.log");
-    // A small file that exactly doubles: 100ms -> 200ms (ratio == 2.0, growth +100ms which is
-    // FAR below the +30s absolute threshold). The relative trigger must catch it (>= 2×), or the
-    // Contract control "翻倍 ⇒ 报出" is violated.
-    writeFileSync(logFile, fakeLog([["/a.test.mjs", 100]]), "utf8");
+    // a.test: LARGE baseline 10s -> 20s (exact 2.0×, large ⇒ relative trigger fires).
+    // small.test: SMALL baseline 100ms -> 200ms (exact 2.0×, but small-baseline ⇒ exempt —
+    // gap-measure-trend-load-noise-false-positive AC2: a 100ms test doubling is load noise, not
+    // regression, so the relative trigger must NOT fire for it).
+    writeFileSync(logFile, fakeLog([["/a.test.mjs", 10_000], ["/small.test.mjs", 100]]), "utf8");
     landMeasureHistory({ historyFile, logFile });
-    writeFileSync(logFile, fakeLog([["/a.test.mjs", 200]]), "utf8");
+    writeFileSync(logFile, fakeLog([["/a.test.mjs", 20_000], ["/small.test.mjs", 200]]), "utf8");
     landMeasureHistory({ historyFile, logFile });
     const growth = compareLastTwoRounds(historyFile);
-    assert.equal(growth.length, 1, "exact doubling must be reported");
+    assert.equal(growth.length, 1, "only the LARGE-baseline exact doubling reported; small-baseline exempted");
     assert.equal(growth[0].file, "/a.test.mjs");
     assert.equal(growth[0].reason, "relative");
   } finally {
@@ -225,9 +229,9 @@ test("AC2/Contract — the CLI --json output carries one 'growth' line per slow 
   try {
     const historyFile = path.join(dir, "measure-history.jsonl");
     const logFile = path.join(dir, "full-suite.log");
-    writeFileSync(logFile, fakeLog([["/a.test.mjs", 100], ["/b.test.mjs", 100_000]]), "utf8");
+    writeFileSync(logFile, fakeLog([["/a.test.mjs", 10_000], ["/b.test.mjs", 100_000]]), "utf8");
     landMeasureHistory({ historyFile, logFile });
-    writeFileSync(logFile, fakeLog([["/a.test.mjs", 300], ["/b.test.mjs", 140_000]]), "utf8");
+    writeFileSync(logFile, fakeLog([["/a.test.mjs", 30_000], ["/b.test.mjs", 140_000]]), "utf8");
     landMeasureHistory({ historyFile, logFile });
 
     const res = spawnSync(
@@ -237,7 +241,7 @@ test("AC2/Contract — the CLI --json output carries one 'growth' line per slow 
     );
     assert.equal(res.status, 0, `CLI exit 0; stderr: ${res.stderr}`);
     const growthLines = res.stdout.split("\n").filter((l) => l.includes("growth"));
-    assert.equal(growthLines.length, 2, "one growth line per slow file (a.test + b.test)");
+    assert.equal(growthLines.length, 2, "one growth line per slow file (a.test 3× relative + b.test +40s absolute)");
     for (const line of growthLines) {
       const parsed = JSON.parse(line);
       assert.equal(parsed.type, "growth");

@@ -49,6 +49,12 @@ export const DEFAULT_LOG_FILE = path.join(REPO_ROOT, ".quay", "full-suite.log");
 /** Default outer-ruling thresholds (task body): relative >2× OR absolute >+30 s. */
 export const DEFAULT_RELATIVE_FACTOR = 2.0;
 export const DEFAULT_ABSOLUTE_MS = 30_000;
+/** Small-test exemption (gap-measure-trend-load-noise-false-positive): a file whose BASELINE
+ * duration is below this (default 5s) must NOT flag on relative ≥2× — a 300ms test doubling to
+ * 800ms under load is noise, not regression (round-172: 13 files flagged, all load-noise, sprawl
+ * untouched, 0 tests ran before the static gate red). Small tests flag ONLY on absolute growth
+ * past `absoluteMs` (e.g. +30s on a 4s test is a real regression; +0.5s on a 300ms test is not). */
+export const DEFAULT_SMALL_TEST_MS = 5_000;
 
 export interface PerFileRecord {
   file: string;
@@ -207,10 +213,11 @@ export function lastRound(historyFile: string): number {
  */
 export function compareLastTwoRounds(
   historyFile: string,
-  opts?: { relativeFactor?: number; absoluteMs?: number },
+  opts?: { relativeFactor?: number; absoluteMs?: number; smallTestMs?: number },
 ): GrowthReport[] {
   const relativeFactor = opts?.relativeFactor ?? DEFAULT_RELATIVE_FACTOR;
   const absoluteMs = opts?.absoluteMs ?? DEFAULT_ABSOLUTE_MS;
+  const smallTestMs = opts?.smallTestMs ?? DEFAULT_SMALL_TEST_MS;
   const rounds = readHistoryRounds(historyFile);
   if (rounds.length < 2) return [];
   const prev = rounds[rounds.length - 2].records;
@@ -228,7 +235,13 @@ export function compareLastTwoRounds(
     const ratio = prevMs > 0 ? currMs / prevMs : Number.POSITIVE_INFINITY;
     // Relative trigger uses >= (not strict >): the Contract control "单文件耗时翻倍 ⇒ 报出"
     // means an EXACT doubling (ratio == 2×) must be caught, not only a strictly-greater one.
-    const rel = prevMs > 0 && ratio >= relativeFactor;
+    // SMALL-TEST EXEMPTION (gap-measure-trend-load-noise-false-positive AC2): a file whose
+    // BASELINE (prev) is below `smallTestMs` (default 5s) does NOT flag on relative growth —
+    // a 300ms test at 800ms under load is noise (round-172: gate-blocks the suite before 0
+    // tests run). Small tests flag ONLY on absolute growth past `absoluteMs`. Large tests keep
+    // both thresholds (a real 2× on a 10s file is still a regression signal).
+    const isSmallTest = prevMs < smallTestMs;
+    const rel = !isSmallTest && prevMs > 0 && ratio >= relativeFactor;
     const abs = growthMs > absoluteMs;
     if (rel || abs) {
       reports.push({ file, prevMs, currMs, growthMs, ratio, reason: rel ? "relative" : "absolute" });
@@ -271,8 +284,10 @@ if (isDirect) {
   const logFile = parseArg(argv, "--log") ?? DEFAULT_LOG_FILE;
   const relativeFactorRaw = Number(parseArg(argv, "--relative-factor") ?? String(DEFAULT_RELATIVE_FACTOR));
   const absoluteMsRaw = Number(parseArg(argv, "--absolute-ms") ?? String(DEFAULT_ABSOLUTE_MS));
+  const smallTestMsRaw = Number(parseArg(argv, "--small-test-ms") ?? String(DEFAULT_SMALL_TEST_MS));
   const relativeFactor = Number.isFinite(relativeFactorRaw) && relativeFactorRaw > 1 ? relativeFactorRaw : DEFAULT_RELATIVE_FACTOR;
   const absoluteMs = Number.isFinite(absoluteMsRaw) && absoluteMsRaw > 0 ? absoluteMsRaw : DEFAULT_ABSOLUTE_MS;
+  const smallTestMs = Number.isFinite(smallTestMsRaw) && smallTestMsRaw > 0 ? smallTestMsRaw : DEFAULT_SMALL_TEST_MS;
   const json = argv.includes("--json");
   const noLand = argv.includes("--no-land");
 
@@ -281,7 +296,7 @@ if (isDirect) {
     land = landMeasureHistory({ historyFile, logFile, repoRoot: REPO_ROOT });
   }
 
-  const growth = compareLastTwoRounds(historyFile, { relativeFactor, absoluteMs });
+  const growth = compareLastTwoRounds(historyFile, { relativeFactor, absoluteMs, smallTestMs });
 
   if (json) {
     // JSONL: one line per growth report (each contains "growth"); the summary line AVOIDS
