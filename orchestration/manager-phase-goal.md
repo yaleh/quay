@@ -1611,6 +1611,32 @@ inner 自驱心跳次数           = 0（今晚 6 次唤醒：会话续接 1 / �
 "dies when Claude exits"），因此「冷启动 = 挂 monitor + cron」是**会话为它自己**做的动作，
 一个死掉的会话无法给自己重新武装——这是循环依赖，不是缺一个脚本。
 
+**【人 2026-08-09 06:2xZ 补充裁定,两条】**
+
+**补充一:自愈的边界是 Claude Code【进程】,不是 CC 自己的「会话」概念。**
+人原话:「机器只做 Claude Code 进程内(指 Claude Code 进程启动后、人输入冷启动 skill 后到
+Claude Code 进程退出前)的自愈。Claude Code 自己的『会话』概念有些不同——它将 `/clear` 和
+`/compact` 后看作一次新会话。而这种新会话在 quay 看来仍然应当连续覆盖。」
+
+⇒ **`/clear` 与 `/compact` 不是边界,是必须被跨过去的东西。** 这一条不是理论:
+`ADR-009` 的第二次修订用一个有时间戳的事件证明了它——workflow 实践**死在 08-08 07:49:05
+的压缩边界上**(压缩前最后一轮 tick 用了它,压缩后第一轮就没有,此后 21.5 小时为零),
+而**同一次压缩里 cron 照常触发**。两者差别只有一个:cron 是锚指向文件,workflow 是上下文里的记忆。
+⇒ **凡是必须跨压缩存活的东西,必须落在锚所指向的文件里。**
+
+**补充二:允许 quay 多做一点点——启动链作为便利措施交付。**
+人原话:「manager 启动(但不管自愈) outer 和 inner,outer 启动(但不管自愈) inner,
+这作为一个便利措施交付。」
+
+⇒ 三点约束随之确定:
+- **「启动」与「自愈」分离**:上层负责把下层**拉起来一次**,不负责让它**保持活着**。
+  下层死了不是上层的兜底责任(那是进程级问题,已按上一条裁定接受)。
+- **必须幂等**:两条启动路径重叠(manager 可起 inner,outer 也可起 inner)⇒ 重复执行不得双开。
+  现有 `plugin/scripts/inner-session-check.sh` 已是查后建形态(`window_exists()` + 多源探测),
+  是这条的实现基础,**不需要新发明**。
+- **这条同时收口了 `SPEC-manager-productization` §7 记录的悬案「谁创建 inner」**:
+  答案是「都可以,且都必须幂等」。
+
 **这条裁定settle 了什么**：
 
 1. **`gap-loop-has-no-os-level-anchor-cannot-self-recover-after-crash`（当前 `status: ready`）
