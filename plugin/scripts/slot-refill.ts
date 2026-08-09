@@ -202,6 +202,18 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
       if (blocked) continue;
       candidates.push(parseCandidate(id, text));
     }
+    // SUITE-BLOCKING RANK (gap-ready-relevance-blind-to-suite-blocking-signal AC3): a task the
+    // consecutive-red-window signal implicates (pool.suite_blocking.tasks — ready-pool-check's
+    // blocking_suite axis) ranks FIRST so the refill picks the suite-blocker before any other work.
+    // Ties stay id-deterministic. The signal only re-ranks; the step-4 dispatch checks above still
+    // gate admission (a suite-blocker that fails touches-resolve/deps/disjoint is never forced in).
+    const suiteBlockingIds = new Set((pool.suite_blocking && pool.suite_blocking.tasks) || []);
+    candidates.sort((a, b) => {
+      const ab = suiteBlockingIds.has(a.id) ? 0 : 1;
+      const bb = suiteBlockingIds.has(b.id) ? 0 : 1;
+      if (ab !== bb) return ab - bb;
+      return a.id.localeCompare(b.id);
+    });
     const { batch } = assembleBatch(candidates, { expand });
     recommended = batch.slice(0, slotsFree);
   }
@@ -239,6 +251,12 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
     // reported without interrupting dispatch).
     landing_blocked: pool.landing_blocked,
     landing_blocked_reason: pool.landing_blocked_reason,
+    // SUITE-BLOCKING (gap-ready-relevance-blind-to-suite-blocking-signal AC3): surfaced so the
+    // event-driven/tick refill path can see which tasks the consecutive-red window implicates and
+    // that they were ranked FIRST into `recommended`. SIGNAL, not a gate — should_refill stays
+    // criterion/slot-driven (AC4: no red window ⇒ suite_blocking.window_active=false, ordering
+    // unchanged).
+    suite_blocking: pool.suite_blocking,
     halted: halt.halted,
     halt_reason: halt.halted ? halt.reason : null,
     should_refill: shouldRefill,

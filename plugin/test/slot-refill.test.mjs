@@ -369,3 +369,50 @@ test("CLI smoke: --root/--cap/--in-flight produces JSON with the refill fields (
   assert.ok(Array.isArray(parsed.recommended));
   assert.equal(parsed.recommended.length, 2);
 });
+
+// ── Suite-blocking rank (tasks/gap-ready-relevance-blind-to-suite-blocking-signal AC3) ──────────────
+// AC3: a task the consecutive-red-window signal implicates (pool.suite_blocking.tasks, the
+// ready-pool-check blocking_suite axis) is ranked FIRST into `recommended` — the inner's slot-refill
+// picks the suite-blocker before any other work. Negative control: no red window ⇒ recommended keeps
+// the pre-signal (id) ordering.
+
+function writeRounds(root, rows) {
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(root, ".quay", "verification-round.jsonl"), rows.map((r) => JSON.stringify(r)).join("\n"));
+}
+
+function writeState(root, failures) {
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(root, ".quay", "full-suite-state.json"), JSON.stringify({ state: "red", reason: "failed", failures }));
+}
+
+test("slot-refill recommends the suite-blocking task first; no red window ⇒ unchanged (AC3/negative)", (t) => {
+  const root = makeWorkspace("suiteblock");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-plain-ready", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/plain.ts (new)"]) });
+  writeTask(root, "gap-watchdog", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/wd.ts (new)"]) });
+  const opts = { tasksDir: path.join(root, "tasks"), root, cap: 2 };
+
+  // AC4 negative control FIRST: no suite history ⇒ recommended keeps the id tie-break order.
+  const before = analyzeSlotRefill(opts);
+  assert.equal(before.suite_blocking.window_active, false);
+  assert.deepEqual(before.recommended, ["gap-plain-ready", "gap-watchdog"], "no red window ⇒ pre-signal ordering");
+
+  // AC3: 3 consecutive red rounds whose failures hit the watchdog task's Touches ⇒ it ranks first.
+  writeRounds(root, Array.from({ length: 3 }, (_, i) => ({ round: 220 + i, state: "red", reason: "failed", fail: 1, failures: [{ file: "code/wd.ts", line: "x" }] })));
+  writeState(root, [{ file: "code/wd.ts", line: "x" }]);
+  const after = analyzeSlotRefill(opts);
+  assert.equal(after.suite_blocking.window_active, true);
+  assert.deepEqual(after.suite_blocking.tasks, ["gap-watchdog"]);
+  assert.equal(after.recommended[0], "gap-watchdog", "the suite-blocker is picked first by the refill");
+  assert.equal(after.recommended.length, 2, "both dispatchable candidates still recommended (cap 2)");
+
+  // negative: last round green clears the window ⇒ recommended back to pre-signal order.
+  writeRounds(root, [
+    ...Array.from({ length: 3 }, () => ({ state: "red", reason: "failed", fail: 1, failures: [{ file: "code/wd.ts" }] })),
+    { round: 223, state: "green", fail: 0 },
+  ]);
+  const green = analyzeSlotRefill(opts);
+  assert.equal(green.suite_blocking.window_active, false);
+  assert.deepEqual(green.recommended, ["gap-plain-ready", "gap-watchdog"], "green round clears the window ⇒ no re-rank");
+});

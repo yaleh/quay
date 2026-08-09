@@ -49,6 +49,15 @@ import {
   LANDING_BEHIND_THRESHOLD_DEFAULT,
   setTaskStatus,
   applyPromotions,
+  computeSuiteBlocking,
+  consecutiveRedRounds,
+  collectFailureFiles,
+  isRedRound,
+  readJsonLines,
+  readVerificationRounds,
+  readStateFailures,
+  SUITE_BLOCKING_WEIGHT,
+  RED_WINDOW_MIN_DEFAULT,
 } from "../scripts/ready-pool-check.ts";
 import { parseTask } from "../scripts/task-schema.ts";
 import { taskWorkLanded } from "../scripts/task-status-drift-check.ts";
@@ -1563,4 +1572,172 @@ test("CLI --apply smoke: --root/--cap/--floor-mult/--apply lands promotions + em
   assert.equal(parsed.applied_promotions.length, 1);
   const task = parseTask(fs.readFileSync(path.join(root, "tasks", "gap-candidate.md"), "utf8"));
   assert.match(task.frontmatterRaw, /^status:\s*ready$/m, "CLI --apply lands the promotion on disk");
+});
+
+// ── Suite-blocking signal (tasks/gap-ready-relevance-blind-to-suite-blocking-signal) ────────────────
+// AC2: computeRelevance reads the consecutive-red window (verification-round.jsonl ≥ N consecutive
+//   red rounds) + the failure detail (full-suite-state.json failures[] / per-round failures) mapped
+//   onto a task's declared ## Touches ⇒ blocking dynamically true / blocking_suite true / value +
+//   SUITE_BLOCKING_WEIGHT. AC3: a suite-blocking task ranks FIRST in ready_relevance (and slot-refill
+//   recommended — asserted in slot-refill.test.mjs). AC4 negative control: no red window / no failure
+//   hit ⇒ ordering byte-identical. AC5: the obligation shape is recorded in the obligation ledger in
+//   mechanically-checkable JSONL form.
+
+function writeRounds(root, rows) {
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(root, ".quay", "verification-round.jsonl"), rows.map((r) => JSON.stringify(r)).join("\n"));
+}
+
+function writeState(root, failures) {
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(root, ".quay", "full-suite-state.json"), JSON.stringify({ state: "red", reason: "failed", failures }));
+}
+
+test("consecutiveRedRounds / isRedRound / collectFailureFiles window detection (AC2)", () => {
+  // canonical red rounds (state:red, reason:failed) + an aborted round in the middle — the abort is
+  // STILL red (the suite is not green), so it does not break the consecutive window.
+  const rounds = [
+    { round: 192, state: "red", reason: "failed", fail: 1, failures: [{ file: "code/wd.ts", line: "x" }] },
+    { round: 193, state: "red", reason: "failed", fail: 1, failures: [{ file: "code/wd.ts", line: "x" }] },
+    { round: 194, state: "red", reason: "aborted", fail: 0 },
+    { round: 195, state: "red", reason: "failed", fail: 1, failures: [{ file: "code/wd.ts", line: "x" }] },
+    { round: 196, state: "red", reason: "failed", fail: 1, failures: [{ file: "code/wd.ts", line: "x" }] },
+  ];
+  assert.equal(isRedRound(rounds[0]), true, "canonical red ⇒ red");
+  assert.equal(isRedRound(rounds[2]), true, "aborted is still red (suite not green)");
+  assert.equal(isRedRound({ state: "green", fail: 0 }), false, "green ⇒ not red");
+  assert.equal(isRedRound({ state: "green", fail: 0, reason: "failed" }), false, "green with fail 0 stays green");
+  assert.equal(isRedRound({ fail: 1 }), true, "legacy row (no state, fail>0) ⇒ red");
+  assert.equal(isRedRound({ fail: 0 }), false, "legacy row (no state, fail=0) ⇒ not red");
+  assert.equal(consecutiveRedRounds(rounds), 5, "aborted in the middle does not break the red window");
+  assert.equal(consecutiveRedRounds([...rounds, { round: 197, state: "green", fail: 0 }]), 0, "green last round resets the window");
+  assert.equal(consecutiveRedRounds([]), 0);
+  assert.equal(consecutiveRedRounds([{ round: 1, state: "red", reason: "failed" }]), 1);
+  assert.deepEqual(collectFailureFiles(rounds, []), ["code/wd.ts"], "per-round failures collected");
+  assert.deepEqual(collectFailureFiles(rounds, [{ file: "code/other.ts" }]), ["code/wd.ts", "code/other.ts"], "state failures unioned in");
+});
+
+test("computeSuiteBlocking: red window + Touches hit ⇒ task flagged; negative controls (AC2/AC4)", () => {
+  const tasks = new Map([
+    ["gap-watchdog", { status: "ready", body: "## Touches\n- code/wd.ts" }],
+    ["gap-plain", { status: "ready", body: "## Touches\n- code/plain.ts" }],
+    ["gap-done-wd", { status: "done", body: "## Touches\n- code/wd.ts" }], // landed work — never re-prioritized
+  ]);
+  const expand = (globs) => new Set(globs); // concrete declared paths resolve to themselves
+
+  const redRounds = Array.from({ length: 3 }, (_, i) => ({ round: 200 + i, state: "red", reason: "failed", failures: [{ file: "code/wd.ts" }] }));
+  const r = computeSuiteBlocking({ rounds: redRounds, stateFailures: [], tasks, expand });
+  assert.equal(r.consecutiveRed, 3);
+  assert.equal(r.windowActive, true);
+  assert.ok(r.ids.has("gap-watchdog"), "failure file hits the watchdog task's Touches ⇒ flagged");
+  assert.ok(!r.ids.has("gap-plain"), "unrelated task not flagged");
+  assert.ok(!r.ids.has("gap-done-wd"), "a done task (work already landed) is never suite-blocking");
+
+  // negative: only 2 consecutive red rounds (below the default min 3) ⇒ nothing flagged.
+  const short = computeSuiteBlocking({ rounds: redRounds.slice(0, 2), stateFailures: [], tasks, expand });
+  assert.equal(short.windowActive, false);
+  assert.equal(short.ids.size, 0, "below-min window ⇒ no suite-blocking");
+
+  // negative: 3 red rounds but the failure points at an untouched file ⇒ nothing flagged.
+  const unrelated = computeSuiteBlocking({
+    rounds: Array.from({ length: 3 }, () => ({ state: "red", reason: "failed", failures: [{ file: "code/unrelated.ts" }] })),
+    stateFailures: [],
+    tasks,
+    expand,
+  });
+  assert.equal(unrelated.windowActive, true);
+  assert.equal(unrelated.ids.size, 0, "failure file hits nobody's Touches ⇒ nothing flagged");
+
+  // negative: 3 red rounds but NO failure detail anywhere ⇒ window active, no attribution.
+  const noFail = computeSuiteBlocking({ rounds: Array.from({ length: 3 }, () => ({ state: "red", reason: "failed" })), stateFailures: [], tasks, expand });
+  assert.equal(noFail.windowActive, true);
+  assert.equal(noFail.ids.size, 0);
+
+  // negative: last round green resets the window ⇒ nothing flagged.
+  const green = computeSuiteBlocking({ rounds: [...redRounds, { round: 203, state: "green" }], stateFailures: [], tasks, expand });
+  assert.equal(green.windowActive, false);
+  assert.equal(green.ids.size, 0);
+});
+
+test("computeRelevance: suite-blocking flips blocking true + boosts value (AC2/AC3 unit)", () => {
+  const empty = new Map();
+  // without the signal: plain 1-touch task values at costBenefit 1, blocking false.
+  const before = computeRelevance("gap-watchdog", { body: "plain\n## Touches\n- code/wd.ts" }, empty, empty);
+  assert.equal(before.blocking, false);
+  assert.equal(before.blocking_suite, false);
+  assert.equal(before.value, 1);
+  // with the signal: blocking flips, blocking_suite true, value = 2 (blocking) + 2 (suite) + 1 (cost) = 5.
+  const after = computeRelevance("gap-watchdog", { body: "plain\n## Touches\n- code/wd.ts" }, empty, empty, new Set(["gap-watchdog"]));
+  assert.equal(after.blocking, true, "suite-blocking flips the blocking axis true");
+  assert.equal(after.blocking_suite, true);
+  assert.equal(after.value, BLOCKING_WEIGHT + SUITE_BLOCKING_WEIGHT + 1);
+  assert.match(after.reason, /suite-blocking Y/);
+  // a different task in the set does not affect this one (id-scoped).
+  const other = computeRelevance("gap-watchdog", { body: "plain\n## Touches\n- code/wd.ts" }, empty, empty, new Set(["gap-someone-else"]));
+  assert.equal(other.blocking_suite, false);
+  assert.equal(other.value, 1);
+});
+
+test("analyzeTasks: suite-blocking jumps ready_relevance; negative control unchanged (AC2/AC3/AC4)", (t) => {
+  const root = makeWorkspace("suiteblock");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-plain-ready", { status: "ready", labels: ["gap"], body: fourArtifactBody({ touches: ["- code/plain.ts (new)"] }) });
+  writeTask(root, "gap-watchdog", { status: "ready", labels: ["gap"], body: fourArtifactBody({ touches: ["- code/wd.ts (new)"] }) });
+
+  const opts = { tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 };
+
+  // AC4 negative control FIRST: no verification-round / state file ⇒ no signal ⇒ ordering unchanged.
+  // Both tasks are plain 1-touch ready tasks (value 1); alphabetical id tie-break puts gap-plain-ready
+  // first.
+  const before = analyzeTasks(opts);
+  assert.equal(before.suite_blocking.window_active, false);
+  assert.deepEqual(before.suite_blocking.tasks, []);
+  assert.deepEqual(
+    before.ready_relevance.map((e) => e.id),
+    ["gap-plain-ready", "gap-watchdog"],
+    "no red window ⇒ pre-signal ordering (id tie-break)",
+  );
+  for (const e of before.ready_relevance) assert.equal(e.blocking_suite, false);
+
+  // AC2/AC3: a 3-consecutive-red window whose failures hit the watchdog task's Touches.
+  writeRounds(root, Array.from({ length: 3 }, (_, i) => ({ round: 210 + i, state: "red", reason: "failed", fail: 1, failures: [{ file: "code/wd.ts", line: "x" }] })));
+  writeState(root, [{ file: "code/wd.ts", line: "x" }]);
+  const after = analyzeTasks(opts);
+  assert.equal(after.suite_blocking.window_active, true);
+  assert.equal(after.suite_blocking.consecutive_red, 3);
+  assert.deepEqual(after.suite_blocking.failure_files, ["code/wd.ts"]);
+  assert.deepEqual(after.suite_blocking.tasks, ["gap-watchdog"], "only the Touches-hitting task is suite-blocking");
+  const watchdog = after.ready_relevance.find((e) => e.id === "gap-watchdog");
+  assert.equal(watchdog.blocking, true, "suite-blocking flips blocking true in ready_relevance");
+  assert.equal(watchdog.blocking_suite, true);
+  assert.equal(watchdog.value, BLOCKING_WEIGHT + SUITE_BLOCKING_WEIGHT + 1);
+  assert.equal(after.ready_relevance[0].id, "gap-watchdog", "suite-blocker jumps to the front of the ready pool ranking");
+  assert.equal(after.ready_relevance.find((e) => e.id === "gap-plain-ready").blocking_suite, false, "unrelated task stays unflagged");
+
+  // negative: last round green clears the window ⇒ ordering back to the pre-signal tie-break.
+  writeRounds(root, [
+    ...Array.from({ length: 3 }, () => ({ state: "red", reason: "failed", fail: 1, failures: [{ file: "code/wd.ts" }] })),
+    { round: 213, state: "green", fail: 0 },
+  ]);
+  const green = analyzeTasks(opts);
+  assert.equal(green.suite_blocking.window_active, false);
+  assert.deepEqual(green.ready_relevance.map((e) => e.id), ["gap-plain-ready", "gap-watchdog"], "green round clears the window ⇒ no re-rank");
+});
+
+test("AC5: suite-blocking obligation recorded mechanically in the obligation ledger (JSONL)", (t) => {
+  // The ledger is at <repoRoot>/orchestration/manager-obligation-ledger.jsonl — the AC5 deliverable:
+  // the "suite-blocker can't get prioritized" obligation is now MECHANICALLY derivable (ready-pool-
+  // check's blocking_suite field), recorded as a machine-readable JSONL row (not prose).
+  const repoRoot = path.resolve(__dirname, "..", "..");
+  const ledger = path.join(repoRoot, "orchestration", "manager-obligation-ledger.jsonl");
+  assert.ok(fs.existsSync(ledger), "obligation ledger exists");
+  const rows = fs.readFileSync(ledger, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  const suite = rows.find((r) =>
+    /SUITE-BLOCK|SUITE_BLOCK|BLOCKING.*SUITE|OB-BLOCKING-DEFECT-NOT-PRIORITIZED/i.test(String(r.id)) ||
+    /blocking_suite/.test(String(r.reading || "") + String(r.note || "")) ||
+    /suite.*阻塞|阻塞.*suite|连续红窗/i.test(String(r.reading || "") + String(r.note || "")));
+  assert.ok(suite, "a suite-blocking obligation row exists in the ledger");
+  for (const key of ["tick", "id", "condition", "reading", "note"]) {
+    assert.ok(suite[key] !== undefined && suite[key] !== null && suite[key] !== "", `obligation row carries \`${key}\``);
+  }
 });
