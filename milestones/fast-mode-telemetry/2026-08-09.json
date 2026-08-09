@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-09T18:22:30.530Z",
+  "generatedAt": "2026-08-09T20:58:48.633Z",
   "since": null,
   "tasks": [
     {
@@ -916,11 +916,11 @@
   ],
   "meanMinutes": 91.36545206812654,
   "medianMinutes": 56.31883333333333,
-  "tasksPerHour": 0.7789698729926896,
+  "tasksPerHour": 0.7675985030272827,
   "serialEquivalentPerHour": 0.6567033669932598,
   "windowStart": "2026-08-02T10:29:46.000Z",
-  "windowEnd": "2026-08-09T18:22:09.870Z",
-  "windowHours": 175.87329722222222,
+  "windowEnd": "2026-08-09T20:58:29.400Z",
+  "windowHours": 178.47872222222222,
   "haltedHours": 0,
   "halted": [],
   "blocked": [
@@ -1369,7 +1369,7 @@
       "minutes": 750.52545,
       "outcome": "abandoned",
       "reconcileReason": "worktree-gone-and-no-process",
-      "startedAtMsUnreliable": true
+      "startedAtMsUnreliable": false
     },
     {
       "taskId": "gap-gate-scripts-laid-down-but-dead-and-not-mutation-checked",
@@ -2369,12 +2369,6 @@
     }
   ],
   "realInFlight": 0,
-  "closedButLive": [
-    {
-      "taskId": "gap-full-suite-state-red-no-failure-detail-static-check-invisible",
-      "runId": "fm-gap-full-suite-state-red-no-failure-detail-static-check-invisible-1786222786048-7x65d8",
-      "reason": "worktree-present"
-    }
-  ],
-  "occupiedSlots": 1
+  "closedButLive": [],
+  "occupiedSlots": 0
 }

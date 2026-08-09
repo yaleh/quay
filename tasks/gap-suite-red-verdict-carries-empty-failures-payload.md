@@ -3,7 +3,7 @@ id: gap-suite-red-verdict-carries-empty-failures-payload
 title: "SUITE-RED verdict carries empty failures payload (state.failures=[])
   while full-suite-runner:232 requires WHERE; log also lacks # fail summary —
   red landing not mechanically recoverable"
-status: todo
+status: ready
 labels:
   - gap
   - defect

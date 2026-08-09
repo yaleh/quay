@@ -3,7 +3,7 @@ id: gap-quay-last-pane-txt-untracked-dirties-tree
 title: .quay/last-pane.txt (tick-doc §1 artifact) is un-gitignored → dirties
   tree; assert-clean-tree (suite-after, any porcelain) vs tree-hygiene-check
   (known patterns only) diverge on "clean"
-status: todo
+status: ready
 labels:
   - gap
   - defect
