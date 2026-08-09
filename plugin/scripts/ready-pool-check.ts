@@ -54,6 +54,18 @@
 // with a reason each (NOT the pool<floor promotion list; that keeps its existing gap>DIR order, AC4).
 // Priority query:   node --experimental-strip-types plugin/scripts/ready-pool-check.ts --top 5
 //
+// SUITE-BLOCKING AXIS (tasks/gap-ready-relevance-blind-to-suite-blocking-signal): computeRelevance's
+// `blocking` axis used to read ONLY static parent/children dependency — a defect consecutively
+// red-ing the FULL SUITE ranked value 0.25 / position 7 with blocking:false, so slot-refill never
+// picked it. The relevance signal now ALSO reads the consecutive-red window
+// (<root>/.quay/verification-round.jsonl ≥ `--red-window-min` consecutive `state:red` rounds, default
+// 3) and, when the latest failure detail (full-suite-state.json failures[], or per-round `failures`)
+// hits a task's declared `## Touches`, flips that task's `blocking` true + `blocking_suite` true + a
+// value bonus (SUITE_BLOCKING_WEIGHT=2) so it jumps the dispatch queue. A SIGNAL, not a gate: it only
+// re-ranks ready_relevance / slot-refill recommended; dispatch decisions stay criterion-driven. The
+// negative control is structural (AC4): no red window / no failure hit ⇒ suite_blocking.tasks empty ⇒
+// the pre-signal ranking is byte-identical.
+//
 // TARGETED PROMOTION (gap-targeted-promotion-operation-does-not-exist): the pool<floor refill above
 // is the BULK path (inner's mechanical product mechanism, AC3 — keep byte-unchanged). A stage-goal
 // task the bulk path leaves in todo (pool<floor gate blocks it, e.g. pool=24>floor=20) needs a SECOND,
@@ -307,6 +319,23 @@ export const STRATEGIC_REF_RE = /FINDING-|SYNTHESIS-|SPEC-|REVIEW-cadence/;
 export const STRATEGIC_WEIGHT = 4;
 export const BLOCKING_WEIGHT = 2;
 
+// ── SUITE-BLOCKING signal (tasks/gap-ready-relevance-blind-to-suite-blocking-signal) ────────────────
+// computeRelevance's `blocking` axis used to read ONLY static parent/children dependency — a defect
+// that was consecutively red-ing the FULL SUITE (verification-round.jsonl `state: red` rows) ranked
+// value 0.25 / position 7 with blocking:false, so the inner's slot-refill never picked it. This
+// signal adds the "currently blocking the suite" axis: a task whose `## Touches` hits the failure
+// file(s) of a ≥N-consecutive-red window gets `blocking` flipped true + a value bonus so it jumps
+// the dispatch queue. Sources are the two .quay ledgers the outer already writes:
+//   <root>/.quay/verification-round.jsonl — one line per full-suite run (state/reason/round…)
+//   <root>/.quay/full-suite-state.json    — the LATEST run, carries failures[] (file/line)
+// The signal is a RECOMMENDER axis (never a gate): it only re-ranks ready_relevance / slot-refill
+// recommended — dispatch decisions stay criterion-driven.
+export const SUITE_BLOCKING_WEIGHT = 2;
+
+/** Minimum consecutive red rounds before a suite-blocking signal fires (the Contract band:
+ *  连续 ≥3 轮红同一 Touches 命中 ⇒ blocking true). */
+export const RED_WINDOW_MIN_DEFAULT = 3;
+
 // Shape-aware registered sections (mirrors quay-native store.ts SHAPE_REGISTRY, single-source shape
 // dispatch: contract → finding → plan; unknown fails closed). The four artifacts are the shape's own
 // registered sections — a `finding`-shape task has no plan dimension, a `contract`-shape task uses
@@ -484,27 +513,147 @@ export function touchesScale(body) {
 
 /** The composite relevance signal for one task. All inputs mechanical (grep / frontmatter fields /
  *  touches count) — no human scoring. `childrenByTask` / `parentRefCount` are precomputed once per
- *  analyzeTasks call (blocking needs to know if ANY other task names this id as its parent). */
-export function computeRelevance(id, task, childrenByTask = new Map(), parentRefCount = new Map()) {
+ *  analyzeTasks call (blocking needs to know if ANY other task names this id as its parent).
+ *  `suiteBlockingIds` (a Set of task ids, optional) is the consecutive-red-window signal
+ *  (gap-ready-relevance-blind-to-suite-blocking-signal AC2): a task implicated in the current
+ *  suite-blocking window gets `blocking` flipped true, `blocking_suite` true, and a value bonus
+ *  (SUITE_BLOCKING_WEIGHT) so it jumps the dispatch queue. */
+export function computeRelevance(id, task, childrenByTask = new Map(), parentRefCount = new Map(), suiteBlockingIds = null) {
   const strategic = strategicTraceable(task.body);
   const children = childrenByTask.get(id) || [];
-  const blocking = children.length > 0 || (parentRefCount.get(id) || 0) > 0;
+  const suiteBlocking = suiteBlockingIds ? suiteBlockingIds.has(id) : false;
+  const blocking = children.length > 0 || (parentRefCount.get(id) || 0) > 0 || suiteBlocking;
   const { hasSection, count } = touchesScale(task.body);
   const cost = hasSection ? count : 0;
   const costBenefit = hasSection && count > 0 ? Math.min(1, 1 / count) : 0;
-  const value = (strategic ? STRATEGIC_WEIGHT : 0) + (blocking ? BLOCKING_WEIGHT : 0) + costBenefit;
+  const value = (strategic ? STRATEGIC_WEIGHT : 0) + (blocking ? BLOCKING_WEIGHT : 0) + (suiteBlocking ? SUITE_BLOCKING_WEIGHT : 0) + costBenefit;
   const v = Number(value.toFixed(3));
   return {
     id,
     strategic,
     blocking,
+    blocking_suite: suiteBlocking,
     cost,
     value: v,
     reason:
       `value ${v} · strategic ${strategic ? "Y" : "N"} · ` +
       `blocking ${blocking ? `Y(${children.length} ${children.length === 1 ? "child" : "children"})` : "N"} · ` +
+      `suite-blocking ${suiteBlocking ? "Y" : "N"} · ` +
       `cost ${cost} touch${cost === 1 ? "" : "es"}`,
   };
+}
+
+// ── Consecutive-red-window reader (gap-ready-relevance-blind-to-suite-blocking-signal AC2/AC4) ──────
+// Best-effort JSONL parse of the .quay ledgers the outer's full-suite runner already writes. Absent
+// file / corrupt line ⇒ skip (an absent ledger = no suite history = no suite-blocking signal), the
+// same fail-open family as trend-check.ts's readJsonLines.
+
+/** Parse a JSONL file into objects, skipping blank lines and unparseable rows (best-effort). */
+export function readJsonLines(file) {
+  let text;
+  try {
+    text = fs.readFileSync(file, "utf8");
+  } catch {
+    return [];
+  }
+  const rows = [];
+  for (const line of text.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      rows.push(JSON.parse(line));
+    } catch {
+      // skip a corrupt line — never let one bad row hide the rest of the history
+    }
+  }
+  return rows;
+}
+
+/** Read <root>/.quay/verification-round.jsonl — one row per full-suite run. Absent ⇒ []. */
+export function readVerificationRounds(root) {
+  return readJsonLines(path.join(root, ".quay", "verification-round.jsonl"));
+}
+
+/** Read <root>/.quay/full-suite-state.json's failures[] — the LATEST run's failure detail
+ *  ({file,line}[]). Absent/unparseable/no failures ⇒ []. */
+export function readStateFailures(root) {
+  try {
+    const st = JSON.parse(fs.readFileSync(path.join(root, ".quay", "full-suite-state.json"), "utf8"));
+    return Array.isArray(st && st.failures) ? st.failures : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Classify one verification-round row as RED (suite not green). Canonical rows carry `state`
+ *  ("red"|"green"); legacy rows (the appendSuiteDurationRecord shape) carry only pass/fail. An
+ *  aborted round (state:red, reason:aborted) is STILL red — the suite is not green — so it does NOT
+ *  break the consecutive window (the manager's own reading counts round-192/193/195/196 as
+ *  consecutive red with round-194 aborted in between); it just contributes no failure attribution. */
+export function isRedRound(r) {
+  if (!r) return false;
+  if (r.state === "red") return true;
+  if ((r.state === undefined || r.state === null) && Number(r.fail) > 0) return true;
+  return false;
+}
+
+/** Count consecutive RED rounds at the END of the round history (last row backwards). A green round
+ *  breaks the window; an aborted round is still red (does not break it). */
+export function consecutiveRedRounds(rounds) {
+  let n = 0;
+  for (let i = rounds.length - 1; i >= 0; i--) {
+    if (isRedRound(rounds[i])) n++;
+    else break;
+  }
+  return n;
+}
+
+/** Collect the failure-file set implicated by a set of red rounds + the state file's failures.
+ *  A round may carry its own `failures` array (fixture / a future writer that per-round records the
+ *  red detail); the state file's failures[] is the production source for the LATEST red run. Files
+ *  are repo-relative paths. */
+export function collectFailureFiles(rounds, stateFailures) {
+  const out = new Set();
+  for (const r of rounds) {
+    if (Array.isArray(r && r.failures)) {
+      for (const f of r.failures) if (f && f.file) out.add(String(f.file));
+    }
+  }
+  for (const f of stateFailures || []) if (f && f.file) out.add(String(f.file));
+  return [...out];
+}
+
+/** Compute the suite-blocking signal for the whole task store.
+ *  @param {object} i
+ *  @param {Array<object>} i.rounds         verification-round.jsonl rows
+ *  @param {Array<object>} i.stateFailures  full-suite-state.json failures[]
+ *  @param {Map<string,object>} i.tasks     id → task ({body})
+ *  @param {number} [i.minRedWindow]        consecutive red rounds required (default RED_WINDOW_MIN_DEFAULT)
+ *  @param {(globs:string[])=>Set<string>} i.expand  declared-Touches expander (fs-backed in prod)
+ *  @returns {{ ids:Set<string>, consecutiveRed:number, windowActive:boolean, failureFiles:string[] }}
+ *  A task is suite-blocking when the window is active AND one of its declared ## Touches expands to
+ *  one of the window's failure files. Only dispatchable-status tasks (ready/todo) are candidates — a
+ *  done task's work has already landed, so it is never re-prioritized. Negative control (AC4): no
+ *  window OR no failure hit ⇒ ids empty. */
+export function computeSuiteBlocking({ rounds, stateFailures, tasks, minRedWindow = RED_WINDOW_MIN_DEFAULT, expand }) {
+  const consecutiveRed = consecutiveRedRounds(rounds);
+  if (consecutiveRed < minRedWindow) {
+    return { ids: new Set(), consecutiveRed, windowActive: false, failureFiles: [] };
+  }
+  const failureFiles = collectFailureFiles(rounds, stateFailures);
+  if (failureFiles.length === 0) {
+    return { ids: new Set(), consecutiveRed, windowActive: true, failureFiles: [] };
+  }
+  const ids = new Set();
+  for (const [id, task] of tasks) {
+    if (task.status !== "ready" && task.status !== "todo") continue;
+    const parsed = parseTouches(task.body);
+    if (!parsed.hasSection || parsed.globs.length === 0) continue;
+    const declared = expand(parsed.globs);
+    for (const f of failureFiles) {
+      if (declared.has(f)) { ids.add(id); break; }
+    }
+  }
+  return { ids, consecutiveRed, windowActive: true, failureFiles };
 }
 
 function depsReadyFor(task, allTasks) {
@@ -699,7 +848,7 @@ function buildReport({ pool, floor, cap, floorMult, dispatchableDisjoint, criter
  *  TARGETED-PROMOTION query (gap-targeted-promotion-operation-does-not-exist) — when set, a
  *  `targeted_promotion` result for that one id is produced (floor-INDEPENDENT, AC2), supplemental
  *  to and never altering the bulk `promotions` path (AC3). */
-export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, floorMult = POOL_FLOOR_MULT_DEFAULT, floorCap, inFlight = [], closedButLive = [], topN = 0, targetedId = null, develop = "develop", integration = "integration", master = "master", landingStalenessMs = LANDING_STALENESS_MS_DEFAULT, landingBehindThreshold = LANDING_BEHIND_THRESHOLD_DEFAULT, now = Date.now() }) {
+export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, floorMult = POOL_FLOOR_MULT_DEFAULT, floorCap, inFlight = [], closedButLive = [], topN = 0, targetedId = null, develop = "develop", integration = "integration", master = "master", landingStalenessMs = LANDING_STALENESS_MS_DEFAULT, landingBehindThreshold = LANDING_BEHIND_THRESHOLD_DEFAULT, redWindowMin = RED_WINDOW_MIN_DEFAULT, now = Date.now() }) {
   const allTasks = new Map();
   const fileNames = fs.existsSync(tasksDir)
     ? fs.readdirSync(tasksDir).filter((f) => f.endsWith(".md"))
@@ -746,13 +895,30 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
   ready.sort();
   excluded.sort((a, b) => a.id.localeCompare(b.id));
 
+  // ── SUITE-BLOCKING signal (gap-ready-relevance-blind-to-suite-blocking-signal AC2/AC3/AC4).
+  // Read the consecutive-red window from verification-round.jsonl (+ the latest full-suite-state.json
+  // failures[]) and map it onto task ids via declared ## Touches expansion. The ONE tree walk is
+  // shared with the dispatchable-disjoint scan below (walk-once, gap-select-preflight-json-real-store-
+  // too-slow pattern). Negative control (AC4): no red window / no failure hit ⇒ empty id set ⇒ the
+  // relevance ranking below is byte-identical to the pre-signal ordering.
+  const sharedFiles = walkFiles(root);
+  const expand = (globs) => expandDeclaredTouches(globs, root, sharedFiles);
+  const suiteBlocking = computeSuiteBlocking({
+    rounds: readVerificationRounds(root),
+    stateFailures: readStateFailures(root),
+    tasks: allTasks,
+    minRedWindow: redWindowMin,
+    expand,
+  });
+
   // ── Value-prioritization relevance (AC1/AC2/AC6 — tasks/gap-value-prioritization-has-no-mechanism).
   // todo_relevance: every non-done, non-fixture, non-parked todo ranked by the mechanical value
   // signal — the "which of the N todos matters most" answer. top_relevance = the top-N query slice.
   // ready_relevance: the READY pool ranked by the same signal — the "who to dispatch next" answer
   // (AC6), which the gap-* > DIR-* mechanical tiebreak alone cannot give. Both carry per-entry
-  // { strategic, blocking, cost, value, reason }. Existing promotion order is untouched (AC4).
-  const relevanceOf = (id) => computeRelevance(id, allTasks.get(id), childrenByTask, parentRefCount);
+  // { strategic, blocking, blocking_suite, cost, value, reason }. Existing promotion order is
+  // untouched (AC4).
+  const relevanceOf = (id) => computeRelevance(id, allTasks.get(id), childrenByTask, parentRefCount, suiteBlocking.ids);
   const todoRelevance = [...allTasks.values()]
     .filter((t) => t.status === "todo" && !isFixture(t) && !isParked(t))
     .map((t) => relevanceOf(t.id))
@@ -777,9 +943,8 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
   // wildcards hit the filesystem (expandDeclaredTouches, single-source from the batch scheduler).
   // WALK-ONCE (gap-select-preflight-json-real-store-too-slow pattern): the O(n²) pairwise scan
   // would re-walk the whole tree per glob side (190ms × ~146 glob pairs = ~28s on the real store);
-  // one shared walkFiles(root) makes the whole scan one walk.
-  const sharedFiles = walkFiles(root);
-  const expand = (globs) => expandDeclaredTouches(globs, root, sharedFiles);
+  // one shared walkFiles(root) makes the whole scan one walk — shared with the suite-blocking
+  // computation above (same `sharedFiles`/`expand`).
   const poolParsed = ready.map((id) => ({ id, touches: parseTouches(allTasks.get(id).body) }));
   // In-flight ranking includes closed-bracket-but-live agents (gap-closed-bracket-leaves-live-agent-
   // consuming-slots): a new dispatch must be pairwise-disjoint from a still-present executor's touches
@@ -892,6 +1057,17 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
     pool_big_all_colliding: poolBigAllColliding,
     landing_blocked: landing.landing_blocked,
     landing_blocked_reason: landing.reason,
+    // SUITE-BLOCKING (gap-ready-relevance-blind-to-suite-blocking-signal AC2/AC3): the consecutive-
+    // red-window signal — which tasks are currently blocking the full suite (blocking_suite=true in
+    // ready_relevance / top_relevance), the window count, and the failure files that implicate them.
+    // slot-refill consumes `tasks` to rank the suite-blocker first. A SIGNAL, not a gate.
+    suite_blocking: {
+      consecutive_red: suiteBlocking.consecutiveRed,
+      min_red_window: redWindowMin,
+      window_active: suiteBlocking.windowActive,
+      failure_files: [...suiteBlocking.failureFiles].sort(),
+      tasks: [...suiteBlocking.ids].sort(),
+    },
     report: buildReport({ pool, floor, cap, floorMult, dispatchableDisjoint, criterionMet, poolBigAllColliding, deficit, landingBlocked: landing.landing_blocked, landingReason: landing.reason }),
     ready,
     excluded,
@@ -969,6 +1145,7 @@ function main(argv) {
   let master = "master";
   let landingStalenessMs = LANDING_STALENESS_MS_DEFAULT;
   let landingBehindThreshold = LANDING_BEHIND_THRESHOLD_DEFAULT;
+  let redWindowMin = RED_WINDOW_MIN_DEFAULT;
   const args = argv.slice(2);
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--root") root = args[++i];
@@ -984,6 +1161,7 @@ function main(argv) {
     else if (args[i] === "--master") master = String(args[++i] || "master");
     else if (args[i] === "--landing-staleness-ms") landingStalenessMs = Number(args[++i]);
     else if (args[i] === "--landing-behind-threshold") landingBehindThreshold = Number(args[++i]);
+    else if (args[i] === "--red-window-min") redWindowMin = Number(args[++i]); // suite-blocking consecutive-red threshold (default 3)
     else if (args[i] === "--in-flight") {
       inFlightIds = String(args[++i] || "").split(",").map((s) => s.trim()).filter(Boolean);
     } else if (args[i] === "--closed-but-live") {
@@ -1016,7 +1194,7 @@ function main(argv) {
   const inFlight = readTasks(inFlightIds);
   const closedButLive = readTasks(closedButLiveIds);
   const t0 = Date.now();
-  const base = { tasksDir: path.join(rootDir, "tasks"), root: rootDir, cap, floorMult, floorCap, inFlight, closedButLive, topN, targetedId, develop, integration, master, landingStalenessMs, landingBehindThreshold };
+  const base = { tasksDir: path.join(rootDir, "tasks"), root: rootDir, cap, floorMult, floorCap, inFlight, closedButLive, topN, targetedId, develop, integration, master, landingStalenessMs, landingBehindThreshold, redWindowMin };
   // HEARTBEAT MODE (gap-ready-pool-promotion-same-class-as-slot-refill): with `--apply`, pool < floor
   // && promotions non-empty ⇒ the recommended promotions are written to disk (status todo → ready) as
   // a side effect of the unconditional tick-heartbeat run. Without it, this stays a pure detector.
