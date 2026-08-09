@@ -34,6 +34,11 @@
 | A15 | 派发前逐候选六检查 | ① `touches-orthogonality-check.ts --resolve`(多数条目 MISSING ⇒ 不派发) (src:807) ② 依赖就绪,用 `it0-split-or-commit-check.ts` 的 PARENT-DONE-IFF-CHILDREN (src:811) ③ `concurrent-batch-scheduler.ts --json` 对**所有在飞任务和彼此**两两判 (src:820) ④ `fork-baseline.ts` / `integration-branch-model.ts --fork-baseline` 定分叉基线 (src:839,894) ⑤ `--self-touch`(缺 `tasks/<id>.md` ⇒ 不派发) (src:855) ⑥ 设了 `QUAY_CLAIM_REMOTE` ⇒ `claim-task.sh --check-touches` 先认领 (src:868) |
 | A16 | 派发前每任务 `fast-mode-telemetry.ts --task-start --taskId <id>` | **强制不可跳过**,记下 runId;inner **只写 `--task-start`** (src:599,604,608) |
 | A17 | **必跑** `sync-lag-check.sh --push --branch "$FORK_BASELINE" --root …` | 兜底触发源,不依赖任何完成事件;push 失败(非快进=真分歧)只报告、下 tick 重试,**绝不 force** (src:939,948) |
+| A18 | **账本·声称机制的真实调用**(AC29(a),每 tick):`meta-cc query_session_content role=tool tool_name=ready-pool-check` → `last(timestamp)` | `--apply` 心跳是「工具造好后一次没被调用过」高发项;>3 个 tick 周期无真实调用 ⇒ 写明「已停用/已替代/是缺陷」三选一 (src:647,685) |
+| A19 | **账本·slot-refill**(AC29(a)):`meta-cc query_session_content role=tool tool_name=slot-refill` → `last(timestamp)` | >3 个 tick 周期未调用 ⇒ 三选一写明;slot-refill 与 ready-pool 同族「心跳无机械保证」 (src:297,747) |
+| A20 | **账本·sync-lag-check --push**(AC29(a)):`meta-cc query_session_content role=tool tool_name=sync-lag-check` → `last(timestamp)` | push 兜底是「完成事件缺失时的唯一触发源」——>3 个 tick 周期未调用 ⇒ 三选一 (src:939) |
+| A21 | **账本·--task-start 计量**(AC29(a)):`meta-cc query_session_content role=tool tool_name=fast-mode-telemetry` → `last(timestamp)` 且核对 `--task-start` 分支 | 源文档自记「工具造好后一次没被调用过」——每 tick 至少一次真实 `--task-start`;缺失 ⇒ 三选一 (src:599,604) |
+| A22 | **账本·monitor-mount-check 两判据**(AC29(a)):`meta-cc query_session_content role=tool tool_name=monitor-mount-check` → `last(timestamp)` | 判据 `mounted` + `targetOk` 缺一不可;本层停摆有没有人发现的全靠它——>3 个 tick 周期未调用 ⇒ 三选一 (src:370,373) |
 
 ## B. 每轮必产出
 

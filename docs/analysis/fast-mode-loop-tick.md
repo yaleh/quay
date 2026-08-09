@@ -1,6 +1,6 @@
 # 快速模式 loop tick 指令
 
-> ## ⇒ 先读执行核：[`orchestration/fast-mode-tick-core.md`](fast-mode-tick-core.md)（73 行）
+> ## ⇒ 先读执行核：[`orchestration/fast-mode-tick-core.md`](fast-mode-tick-core.md)（78 行）
 >
 > **本文件是理由档案(1149 行),不是执行清单。** 每轮实际要跑的动作、必产出、硬约束、边界
 > 都在执行核里;本文件提供每一条的实测与代价。
