@@ -167,9 +167,20 @@ export const POOL_FLOOR_MULT_DEFAULT = 4;
  *  floor = cap × 4 (cap=3 ⇒ 12). SINGLE SOURCE — no hardcoded 3 anywhere. */
 export const POOL_FLOOR = CONCURRENCY_CAP_DEFAULT * POOL_FLOOR_MULT_DEFAULT;
 
-/** floor = cap × floorMult (default 4×). The one definition of the floor; analyzeTasks calls this. */
-export function computePoolFloor(cap = CONCURRENCY_CAP_DEFAULT, floorMult = POOL_FLOOR_MULT_DEFAULT) {
-  return cap * floorMult;
+/** floor = cap × floorMult (default 4×). The one definition of the floor; analyzeTasks calls this.
+ * gap-ready-pool-floor-tied-to-volatile-cap: the floor must NOT ride the VOLATILE current cap — a
+ * cap that drops under load (cap 4 → 3) would lower the floor (16 → 12) and let the SAME pool go
+ * from ②true to ②false without any work — the "obligation disappears when the machine is busy"
+ * channel. Fix: floor uses the WINDOW-MAX cap, never the current one. `floorCap` is the caller's
+ * view of the max cap in the window (>= current cap); when omitted, the conservative floor cap
+ * DEFAULT is used so the floor can never drop below cap × floorMult for the default cap. */
+export function computePoolFloor(cap = CONCURRENCY_CAP_DEFAULT, floorMult = POOL_FLOOR_MULT_DEFAULT, floorCap?: number) {
+  // floorCap undefined ⇒ pure `cap × floorMult` (the existing math — small explicit caps in
+  // tests/experiments stay exact). floorCap passed ⇒ floor uses max(cap, floorCap) so a volatile
+  // cap drop (cap 4→3 under load) never lowers the floor (gap-ready-pool-floor-tied-to-volatile-cap:
+  // the "obligation disappears when the machine is busy" channel is closed).
+  const effectiveFloorCap = floorCap === undefined ? cap : Math.max(cap, floorCap);
+  return effectiveFloorCap * floorMult;
 }
 
 /** Minimum non-whitespace content for a section to count as a real artifact (mirrors
@@ -660,7 +671,7 @@ function buildReport({ pool, floor, cap, floorMult, dispatchableDisjoint, criter
  *  TARGETED-PROMOTION query (gap-targeted-promotion-operation-does-not-exist) — when set, a
  *  `targeted_promotion` result for that one id is produced (floor-INDEPENDENT, AC2), supplemental
  *  to and never altering the bulk `promotions` path (AC3). */
-export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, floorMult = POOL_FLOOR_MULT_DEFAULT, inFlight = [], closedButLive = [], topN = 0, targetedId = null, develop = "develop", integration = "integration", master = "master", landingStalenessMs = LANDING_STALENESS_MS_DEFAULT, landingBehindThreshold = LANDING_BEHIND_THRESHOLD_DEFAULT, now = Date.now() }) {
+export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, floorMult = POOL_FLOOR_MULT_DEFAULT, floorCap, inFlight = [], closedButLive = [], topN = 0, targetedId = null, develop = "develop", integration = "integration", master = "master", landingStalenessMs = LANDING_STALENESS_MS_DEFAULT, landingBehindThreshold = LANDING_BEHIND_THRESHOLD_DEFAULT, now = Date.now() }) {
   const allTasks = new Map();
   const fileNames = fs.existsSync(tasksDir)
     ? fs.readdirSync(tasksDir).filter((f) => f.endsWith(".md"))
@@ -729,7 +740,7 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
     .sort((a, b) => b.value - a.value || a.id.localeCompare(b.id));
   const topRelevance = topN > 0 ? todoRelevance.slice(0, topN) : [];
 
-  const floor = computePoolFloor(cap, floorMult);
+  const floor = computePoolFloor(cap, floorMult, floorCap);
   const pool = ready.length;
   const deficit = Math.max(0, floor - pool);
 
@@ -920,6 +931,7 @@ function main(argv) {
   let apply = false;
   let cap = CONCURRENCY_CAP_DEFAULT;
   let floorMult = POOL_FLOOR_MULT_DEFAULT;
+  let floorCap = undefined; // gap-ready-pool-floor-tied-to-volatile-cap: when set, floor = max(cap, floorCap)×mult (never drops under load)
   let inFlightIds = [];
   let closedButLiveIds = [];
   let topN = 0;
@@ -936,6 +948,7 @@ function main(argv) {
     else if (args[i] === "--apply") { apply = true; } // heartbeat mode: land the promotions on disk
     else if (args[i] === "--cap") cap = Number(args[++i]);
     else if (args[i] === "--floor-mult") floorMult = Number(args[++i]);
+    else if (args[i] === "--floor-cap") floorCap = Number(args[++i]); // gap-ready-pool-floor-tied-to-volatile-cap: window-max cap for the floor
     else if (args[i] === "--top") topN = Number(args[++i]); // value-prioritization query: top-N todos by relevance
     else if (args[i] === "--targeted") targetedId = String(args[++i] || "").trim() || null; // targeted-promotion query
     else if (args[i] === "--develop") develop = String(args[++i] || "develop");
@@ -975,7 +988,7 @@ function main(argv) {
   const inFlight = readTasks(inFlightIds);
   const closedButLive = readTasks(closedButLiveIds);
   const t0 = Date.now();
-  const base = { tasksDir: path.join(rootDir, "tasks"), root: rootDir, cap, floorMult, inFlight, closedButLive, topN, targetedId, develop, integration, master, landingStalenessMs, landingBehindThreshold };
+  const base = { tasksDir: path.join(rootDir, "tasks"), root: rootDir, cap, floorMult, floorCap, inFlight, closedButLive, topN, targetedId, develop, integration, master, landingStalenessMs, landingBehindThreshold };
   // HEARTBEAT MODE (gap-ready-pool-promotion-same-class-as-slot-refill): with `--apply`, pool < floor
   // && promotions non-empty ⇒ the recommended promotions are written to disk (status todo → ready) as
   // a side effect of the unconditional tick-heartbeat run. Without it, this stays a pure detector.
