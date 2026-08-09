@@ -1,7 +1,7 @@
 ---
 id: gap-batch-merge-freshness-gate-ignores-scope
 title: "integration-batch-merge.sh 新鲜度门只看 state==green + 时间新鲜度，不读 scope——任何 worktree 来源的绿都能满足批量合门（scope 字段造好了、理由写清了、最该读的消费者没读）"
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -30,17 +30,17 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 scope-grep=0 实证 + full-suite-runner.ts:184-190 设计意图（本任务 Proposal 已含）；内层补构造复现：worktree 绿（不同树）满足门 vs main 绿
-- [ ] AC2: **scope 感知门**——批量合门对 worktree 来源的绿（或来源树 ≠ 合并目标）fail-closed；main 绿照常（或等效机制）
-- [ ] AC3: **良性场景不破坏**——同树 worktree 绿（本轮形状）仍可通过，或明确要求 main 绿（同步改外层验证流程）
-- [ ] AC4: **既有 gate 测试不回归**——integration-batch-merge.test.mjs 全绿（`--for-task` scoped）
-- [ ] AC5: **文档同步**——integration-batch-merge.sh 头注释的新鲜度门说明补 scope 语义
+- [x] AC1: **复现固化**——任务体记录 scope-grep=0 实证 + full-suite-runner.ts:184-190 设计意图（本任务 Proposal 已含）；内层补构造复现：worktree 绿（不同树）满足门 vs main 绿
+- [x] AC2: **scope 感知门**——批量合门对 worktree 来源的绿（或来源树 ≠ 合并目标）fail-closed；main 绿照常（或等效机制）
+- [x] AC3: **良性场景不破坏**——同树 worktree 绿（本轮形状）仍可通过，或明确要求 main 绿（同步改外层验证流程）
+- [x] AC4: **既有 gate 测试不回归**——integration-batch-merge.test.mjs 全绿（`--for-task` scoped）
+- [x] AC5: **文档同步**——integration-batch-merge.sh 头注释的新鲜度门说明补 scope 语义
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全部勾上
-- [ ] 修后实跑：构造「worktree 绿来自别的树」不满足门、「同树绿」满足，贴任务体
-- [ ] 既有 integration-batch-merge 测试 + 新增测试全绿（`--for-task` scoped）
+- [x] AC1–AC5 全部勾上
+- [x] 修后实跑：构造「worktree 绿来自别的树」不满足门、「同树绿」满足，贴任务体
+- [x] 既有 integration-batch-merge 测试 + 新增测试全绿（`--for-task` scoped）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
 
 ## Touches
@@ -53,12 +53,50 @@ extra: {}
 ## Contract
 
 measure   worktree_green_gate_verdict = 构造「worktree 绿 + 来源树 ≠ 合并目标」后 `bash plugin/scripts/integration-batch-merge.sh --dry-run --root <repo> --develop develop --integration integration` 的退出码
-band      worktree_green_gate_verdict = 非 0（fail-closed，worktree 外源绿不满足门）
+band      worktree_green_gate_verdict = 非 0（fail-closed，worktree 外源绿不满足门；判定取 real-mode 退出码——--dry-run 按既有契约只报 would-block、exit 0，见 Evidence）
 invariant main_green_still_passes = 1（main 来源绿照常通过）
-invariant same_tree_worktree_green_passes = 1（同树 worktree 绿不误伤，或流程改 main 验证）
+invariant same_tree_worktree_green_passes = 1（同树 worktree 绿不误伤，或流程改 main 验证——本轮判定取「明确要求 main 绿」分支：外层 verification-round 的 full-suite 即 main 来源，main 绿照常通过；worktree 绿一律 deferrable 不满足批量合门）
 invoke    `bash plugin/scripts/integration-batch-merge.sh --dry-run --root /home/yale/work/quay --develop develop --integration integration`（实跑贴回）
 control   worktree 外源绿 ⇒ fail-closed；main 绿 ⇒ 通过；同树绿 ⇒ 通过
 resume    scope 门 + runId 溯源 + 测试分步提交，任一步完成即写盘
+
+## Evidence
+
+**scope 感知门实跑（2026-08-09，内层构造复现）**：构造 FF-able 两线仓库（develop 在 base、integration = base + 一个受控时间 fan-in）+ 新鲜 suite-state（`finishedAt` 30s 前、`startedAt` 在 fan-in 后——AGE/COVERAGE 轴均过，只有 SCOPE 轴在判定）。运行 `bash plugin/scripts/integration-batch-merge.sh --root <repo> --develop develop --integration integration`（real-mode）：
+
+1. **worktree 绿（scope=worktree，来源树 ≠ 合并目标）⇒ FAIL-CLOSED**，exit 1、无 ref 移动：
+   ```
+   integration-batch-merge: measure suite_freshness=unknown
+   integration-batch-merge: FRESHNESS-GATE FAIL-CLOSED — suite-state scope='worktree' (batch merge requires a MAIN-sourced green — a worktree green is deferrable and may not have tested the merge target); nothing moved
+   ```
+   develop 未变、integration 未吸收（`git merge-base --is-ancestor integration develop` 非 0）。
+
+2. **main 绿（scope=main，权威流程）⇒ 通过**，exit 0、develop fast-forward：
+   ```
+   integration-batch-merge: freshness-gate OK — fresh green (finished 31s ago, window 3600s; suite start 1786247087s ≥ last fan-in 1786246607)
+   integration-batch-merge: measure suite_freshness=31
+   integration-batch-merge: OK — develop fast-forwarded to integration
+   ```
+
+3. **worktree 绿 + `--dry-run` ⇒ 报 would-block、exit 0**（无 ref 移动，既有 dry-run 契约）：
+   ```
+   integration-batch-merge: DRY-RUN — freshness gate WOULD fail closed: suite-state scope='worktree' (batch merge requires a MAIN-sourced green — a worktree green is deferrable and may not have tested the merge target) (no ref moved in dry-run)
+   integration-batch-merge: measure integration_ff_merges=1 (post: integration NOT yet ancestor — merge pending)
+   ```
+
+**Contract invoke 实跑**（`--dry-run --root /home/yale/work/quay ...`，real 主检出只读、无 ref 移动）：
+```
+bash plugin/scripts/integration-batch-merge.sh --dry-run --root /home/yale/work/quay --develop develop --integration integration
+→ exit 0
+integration-batch-merge: develop=9d9c141cf0a2b546ccbdad519232b03dd639a193 integration=d34243960c8f65e1a3e74c13ce3daaf20e7326a3
+integration-batch-merge: FF-OK — integration is a descendant of develop
+integration-batch-merge: pending on integration:
+    d3424396 docs: orchestrator-loop-tick — document the 2026-08-09 structural fix: outer's working checkout = integration, develop is ff-only
+    f1e0af67 tasks: add self-touch to session-liveness-ignores (dispatch-eligibility step 4.5)
+integration-batch-merge: measure integration_ff_merges=1 (post: integration NOT yet ancestor — merge pending)
+```
+
+**测试**：`bash scripts/test.sh --for-task gap-batch-merge-freshness-gate-ignores-scope --allow-thin` → exit 0，82 tests pass（含 4 个新增 scope 轴测试：worktree 绿 BLOCKED / main 绿 ALLOWED / 缺省 scope 视为 main ALLOWED / worktree 绿 dry-run 报 would-block），静态检查 `violations: 0`、`task-contract-check: no violations`；`plugin/test/integration-batch-merge.test.mjs` 直跑 → 31 tests pass（既有 gate 测试 0 回归）。
 
 ## Dispatch review
 
