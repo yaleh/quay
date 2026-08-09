@@ -13,7 +13,7 @@ title: plugin/skills/manager/SKILL.md documents the manager's boundary rule
   one already shipped in plugin/scripts/ — the rule existing in prose is not
   sufficient, as proven by its own author violating it in the same session that
   read it; manager 2026-08-06, filed per human direction to transfer to outer
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate

@@ -21,7 +21,7 @@ title: "tests LEAK tmux servers — the MAIN resource pressure and very likely t
   before crash) where load was an unexcluded candidate; ② the 07:26 resource
   ABORT and 07:50 cross-project pause were both right decisions with incomplete
   attribution; ③ gate is GO now, M3 validation suite can run"
-status: ready
+status: done
 labels:
   - gap
   - defect

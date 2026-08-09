@@ -9,7 +9,7 @@ title: inner panel shows a FROZEN stale agent line after the bracket closed — 
   agent without cross-time sampling (timer advance), so anyone glancing reads
   「agent ran 3h unfinished」 — same family as tonight's recurring "instrument
   can't distinguish opposite states" (stuck-vs-running → ended-vs-running)
-status: ready
+status: done
 labels:
   - gap
   - defect

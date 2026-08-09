@@ -12,7 +12,7 @@ title: "the manager hand-assembles the SAME ssh+git+capture-pane+/proc
   {git_state, suite_state, session_state, process_state}, read-only,
   ssh-transport-agnostic (same shape for local vs remote); manager 2026-08-06,
   filed per human direction to transfer to outer"
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate

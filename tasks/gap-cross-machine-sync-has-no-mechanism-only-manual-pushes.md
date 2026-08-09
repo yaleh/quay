@@ -4,7 +4,7 @@ title: unpushed commits are lost on a single machine's crash/wipe —
   sync-lag-check kept per human ruling (2026-08-06) as SINGLE-MACHINE
   loss-prevention; cross-machine collaboration goal cancelled, the push
   mechanism survives as the loss-prevention criterion
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate

@@ -13,7 +13,7 @@ title: "Human proposal 15:5x: add a lowconc group (concurrency 3) alongside
   scheduling); MEASURE FIRST (run candidate set alone at --test-concurrency=3,
   real wall-clock, before committing — don't set thresholds first); modeled
   23min→15min, +C1→10min, +C2→7.6min"
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate

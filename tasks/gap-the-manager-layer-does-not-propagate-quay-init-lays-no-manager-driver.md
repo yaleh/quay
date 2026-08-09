@@ -14,7 +14,7 @@ title: "the manager layer does NOT propagate — quay-init lays exactly two file
   instance); reproduction-lens: the missing genetic material is the entire
   supervisory layer, and it bears directly on AC12b since the manager is what
   watches the outers; manager 2026-08-06"
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate

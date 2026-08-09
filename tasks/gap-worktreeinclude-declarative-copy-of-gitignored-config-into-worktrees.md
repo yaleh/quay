@@ -6,7 +6,7 @@ title: "Build .worktreeinclude — official declarative mechanism (gitignore
   root cause was .quay/config.yml missing from the verification worktree (Error:
   Cannot find repo root: no .quay/config.yml found upward, ×15); hand-copying
   misses, declarative doesn't"
-status: ready
+status: done
 labels:
   - gap
   - defect

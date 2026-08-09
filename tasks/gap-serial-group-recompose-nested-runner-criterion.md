@@ -13,7 +13,7 @@ title: "Serial group mixes two reasons — recompose per manager audit: only 3
   vs driver/runtime/vendor [lowconc] GROUP NOTES are verbatim-identical — real
   criterion is nested-runner, text says load-sensitive; elevate 'nested runner'
   as the explicit serial criterion"
-status: ready
+status: done
 labels:
   - gap
   - defect

@@ -1,7 +1,7 @@
 ---
 id: gap-static-check-false-positive-testsseen-regex-does-not-match-reporter-format
 title: "e1f34338 静态检查假红：testsSeen 的 `^# tests` regex 不匹配 reporter 的 `ℹ tests`——testsSeen 恒 0，守卫失效，测试 fixture 输出误命中"
-status: ready
+status: done
 labels:
   - gap
   - defect

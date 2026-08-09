@@ -6,7 +6,7 @@ title: the inner's ONLY anchor is outer prose (its Cron count is 0; all 59
   re-anchor to the shipped doc, as a FIXED relay (single cadence), with a strict
   conformance-check-only wake contract so the cron never becomes a second
   dispatch source
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate

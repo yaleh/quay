@@ -13,7 +13,7 @@ title: "the nproc-derived test concurrency was REVERTED to a hardcoded 8 on 2026
   message on a passing test; measured on this host nproc=4 so claimed=1 vs actual=8 = precisely the
   4.25x oversubscription CLAUDE.md says was eliminated, and the live in-flight scoped gate is
   running --test-concurrency=8 at PSI avg300=16.27; manager claim-vs-actual lens 2026-08-06"
-status: ready
+status: done
 labels:
   - gap
   - defect

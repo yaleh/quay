@@ -1,7 +1,7 @@
 ---
 id: gap-no-post-merge-cross-machine-verification-detection-latency-is-luck
 title: "a wrong merge resolution has NO mechanism that finds it — post-merge verification is missing: THIS machine merges task/<id> → integration → develop, and a wrongly-resolved merge stays undetected (detection latency d is pure luck). Cross-machine verification goal cancelled 2026-08-06 (human: keep github release only) — the 'merge has no verifier' core survives, reframed to single-repo post-merge verification; the 4+3 historical cross-machine defects are evidence of the shape, not the premise"
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate

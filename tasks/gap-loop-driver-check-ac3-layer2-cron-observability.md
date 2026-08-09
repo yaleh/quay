@@ -8,7 +8,7 @@ title: "loop-driver-check AC3 LAYER 2: 'registry has a row but the driver is
   whose precondition is UNANSWERED: 'can a bash checker see session-internal
   cron?' — not guessed before answered; carried from gap-the-loop-driver-check
   (done, AC3 explicitly recorded unsolved per its own DoD)"
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate

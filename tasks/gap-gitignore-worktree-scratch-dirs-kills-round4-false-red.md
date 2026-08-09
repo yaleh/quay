@@ -7,7 +7,7 @@ title: "One-line .gitignore fix: .quay-worktree-local* / .quay-wtl* are NOT
   Code official worktree requirement is exactly 'Add .claude/worktrees/ to your
   .gitignore'; add one gitignore line, no more exclusion-table entries (B task
   fixes the assertion mechanism shape)"
-status: ready
+status: done
 labels:
   - gap
   - defect

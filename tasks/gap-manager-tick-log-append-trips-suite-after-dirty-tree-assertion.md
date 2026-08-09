@@ -9,7 +9,7 @@ title: the manager's periodic tick-log append (orchestration/manager-tick-log.md
   (gap-mkdtemp-rooted-in-the-shared-checkout-dirties-the-tree) treats any dirty
   file as a test artifact — a false positive for a legitimate concurrent writer;
   every suite the manager appends during will be red
-status: ready
+status: done
 labels:
   - gap
   - defect
