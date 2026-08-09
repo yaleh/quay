@@ -1095,6 +1095,16 @@ tick 或 `/clear` 后的会话会重犯。
 - Monitor 两判据（`bash plugin/scripts/monitor-mount-check.sh --json` 的 `mounted` /
   `targetRoot` 是否等于本仓根 / `targetOk`）——挂没挂、挂的哪个仓库
   （2026-08-06 起 `delivered` 随共享事件文件移除；事件送达由挂载方自己的 Monitor 流承担）
+- **账本四元组（统一发射器，`gap-spec-p2-quad-tuple-unified-emitter`）**：用统一发射器吐本层
+  SPEC §2.5 四元组，不再手工拼。外层声称机制 = 1b 收尾的 `closure-lag-check --record` /
+  `verification-round` / `full-suite-runner`——发射器自动读 `.quay/closure-pass-last-run.json` /
+  `.quay/verification-round.jsonl` / `.quay/full-suite-state.json` 的最近真实执行时刻；占用率用步骤 1a
+  的 `cap-from-gate.sh` + `fast-mode-telemetry --slots`（`--in-flight` / `--cap` 显式覆盖）：
+  ```bash
+  node --experimental-strip-types plugin/scripts/accounting-emit.ts --layer outer --json
+  ```
+  输出 `complete:false` 且 `missing` 非空 ⇒ 对应机制未执行/未判定，本 tick 查明并写「已停用/已替代/是缺陷」
+  ——缺值 = 未执行，机械报出，不靠自述（AC3/AC4）。
 
 不要只说「内层在跑」——没有这些，分层是否有效无法判定。
 

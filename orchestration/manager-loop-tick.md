@@ -977,6 +977,18 @@ outer 步骤 1c 逐字 `cat` 转发），由 **grep 断言 + `reanchor-prompt.te
 **`correct` 的对象只能是外层的「做法」，不能是它的任务内容**——
 纠正任务内容就是越界做了外层的活。
 
+**账本四元组（统一发射器，`gap-spec-p2-quad-tuple-unified-emitter`）**：每轮用统一发射器吐本层
+SPEC §2.5 四元组，不再手工拼（B2 与三层统一契约同格式）。先按 §2.4c/§0.5b 的 meta-cc 形态取声称机制
+（`Workflow` 工具、`cap-from-gate`、`slot-refill` 等）的 `last(timestamp)`，超过声称周期 ⇒ 以
+`:已停用|已替代|是缺陷` 三选一标注，然后：
+```bash
+node --experimental-strip-types plugin/scripts/accounting-emit.ts --layer manager --json \
+  --in-flight <本层占用> --cap <CAP，与 §2.4b 同源> \
+  --mechanism "Workflow:<epoch>[:判定]" --mechanism "cap-from-gate:<epoch>[:判定]" ...
+```
+输出 `complete:false` 且 `missing` 非空 ⇒ 对应机制未执行/未判定，本轮查明并写「已停用/已替代/是缺陷」
+——缺值 = 未执行，机械报出，不靠自述（AC3/AC4）。
+
 ### 3b. 第六列：熔态动作（2026-08-07 人授权双层结构后加）
 
 **在五列之后追加第六列 `熔｜<动作名>,<动作名>`**——本轮在骨架之外临时做的动作，
