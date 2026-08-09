@@ -127,6 +127,25 @@ export const CROSSCUT_CHECKS = [
     trigger: (rel) => /\.(ts|js|mjs)$/.test(rel) && !rel.startsWith("tasks/") && !rel.startsWith("docs/"),
     tests: [],
   },
+  {
+    // gap-github-client-iscompound-sabotaged-uncommitted (AC4): a quay-github src change must run
+    // quay-github's OWN gate-correctness tests in scoped mode. Basename pairing never selects them
+    // (`github-client.ts` has no `*/test/github-client.test.mjs`), so a task that edits
+    // `packages/quay-github/src/*` used to go scoped-green while a checkGate regression went
+    // uncaught until the full-suite red window (the 2026-08-09 round-190 sabotage: `isCompound`
+    // hardcoded false in an uncommitted working-tree edit). quay-github is the Provider reference
+    // implementation; its gate surface (compound-gate / create-mcp / gate / gate-gameability /
+    // task-check-passthrough) is the corresponding test set for ANY src change.
+    name: "quay-github-src",
+    trigger: (rel) => /^packages\/quay-github\/src(\/|$)/.test(rel),
+    tests: [
+      "packages/quay-github/test/compound-gate.test.mjs",
+      "packages/quay-github/test/create-mcp.test.mjs",
+      "packages/quay-github/test/gate.test.mjs",
+      "packages/quay-github/test/gate-gameability.test.mjs",
+      "packages/quay-github/test/task-check-passthrough.test.mjs",
+    ],
+  },
 ];
 
 /**

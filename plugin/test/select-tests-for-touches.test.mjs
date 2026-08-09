@@ -444,6 +444,43 @@ test("AC6 — a pure plugin/doc task selects NO cross-cut tests (no bloat)", () 
   }
 });
 
+// gap-github-client-iscompound-sabotaged-uncommitted (AC4): a quay-github src change has no
+// same-basename test (`github-client.ts` -> no `*/test/github-client.test.mjs`), so the
+// `quay-github-src` cross-cut must pull quay-github's own gate-correctness tests into the scoped
+// selection. Without it, an isCompound-style checkGate regression in the GitHub Provider would stay
+// scoped-green and surface only at the full-suite red window (the 2026-08-09 round-190 sabotage).
+test("AC7 — a quay-github src change selects quay-github's own gate tests (quay-github-src cross-cut)", () => {
+  const root = makeWorkspace({
+    ...CROSSCUT_FILES,
+    // A same-basename file exists in the REAL repo only via the cross-cut (there is no
+    // `github-client.test.mjs`); the fixture adds one so this test's touch is not thin-coverage,
+    // keeping the assertion focused on the cross-cut ADDING the gate-correctness surface.
+    "packages/quay-github/test/github-client.test.mjs": TEST_FILE_CONTENT,
+    "packages/quay-github/test/compound-gate.test.mjs": TEST_FILE_CONTENT,
+    "packages/quay-github/test/create-mcp.test.mjs": TEST_FILE_CONTENT,
+    "packages/quay-github/test/gate.test.mjs": TEST_FILE_CONTENT,
+    "packages/quay-github/test/gate-gameability.test.mjs": TEST_FILE_CONTENT,
+    "packages/quay-github/test/task-check-passthrough.test.mjs": TEST_FILE_CONTENT,
+  });
+  try {
+    writeTask(root, "tqg", "## Touches\n- packages/quay-github/src/github-client.ts\n");
+    const j = runCli(root, "--task", "tqg", "--json");
+    assert.equal(j.status, 0, j.stderr);
+    const out = JSON.parse(j.stdout);
+    // basename pairing resolves github-client.test.mjs; the quay-github-src cross-cut must ALSO add
+    // the gate-correctness surface (compound-gate / create-mcp / task-check-passthrough / …) that
+    // basename pairing alone can never see.
+    assert.ok(out.selected.includes("packages/quay-github/test/compound-gate.test.mjs"), `quay-github-src cross-cut in: ${out.selected}`);
+    assert.ok(out.selected.includes("packages/quay-github/test/create-mcp.test.mjs"), "quay-github-src cross-cut (create-mcp)");
+    assert.ok(out.selected.includes("packages/quay-github/test/task-check-passthrough.test.mjs"), "quay-github-src cross-cut (task-check-passthrough)");
+    const r = runCli(root, "--task", "tqg");
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /crosscut: .*quay-github-src/, "default output names the quay-github-src cross-cut");
+  } finally {
+    cleanup(root);
+  }
+});
+
 // ── AC1: byte-identical mirrors ───────────────────────────────────────────────────────────────────────
 
 test("AC1 — experiments and plugin mirrors are byte-identical", () => {
