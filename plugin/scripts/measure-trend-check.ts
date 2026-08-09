@@ -229,7 +229,11 @@ export function compareLastTwoRounds(
   // 71s) that historically swings 35-104s under load is at its natural max at 104s — flagging it on a
   // +33s absolute excursion past +30s is a false positive (round-173b). Suppress the ABSOLUTE trigger
   // when currMs is within the file's own historical max (a single excursion within history = noise).
-  // A genuine regression that EXCEEDS the historical max still flags. Relative trigger unchanged.
+  // A genuine regression that EXCEEDS the historical max still flags. BOTH triggers are guarded
+  // (gap-measure-trend-relative-trigger-lacks-hist-variance-exemption): the relative ≥2× trigger
+  // also exempts an in-band excursion (high-variance large test returning to its own normal band
+  // after a low point was flagged as "doubling" — round-199 task-check-passthrough 9575→21293 ≤
+  // histMax 23183, acceptance-env 10304→20974 ≤ histMax 21445).
   const histMax = new Map<string, number>();
   if (useHistVariance) {
     for (const r of rounds.slice(0, rounds.length - 1)) {
@@ -257,10 +261,13 @@ export function compareLastTwoRounds(
     // tests run). Small tests flag ONLY on absolute growth past `absoluteMs`. Large tests keep
     // both thresholds (a real 2× on a 10s file is still a regression signal).
     const isSmallTest = prevMs < smallTestMs;
-    const rel = !isSmallTest && prevMs > 0 && ratio >= relativeFactor;
     // HIST-VARIANCE EXEMPTION (gap-measure-trend-large-test-load-noise AC2): for LARGE tests, an
-    // absolute excursion that stays within the file's own historical max is load noise, not trend.
+    // excursion that stays within the file's own historical max is load noise, not trend. The
+    // guard is isomorphic across BOTH triggers — `rel` (gap-measure-trend-relative-trigger-lacks-
+    // hist-variance-exemption) and `abs` — so a high-variance large test returning to its own
+    // normal band after a low point is not misreported as "doubling" (round-199).
     const withinHistMax = useHistVariance && (histMax.get(file) ?? 0) > 0 && currMs <= histMax.get(file)!;
+    const rel = !isSmallTest && prevMs > 0 && ratio >= relativeFactor && !withinHistMax;
     const abs = growthMs > absoluteMs && !withinHistMax;
     if (rel || abs) {
       reports.push({ file, prevMs, currMs, growthMs, ratio, reason: rel ? "relative" : "absolute" });

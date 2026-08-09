@@ -41,18 +41,32 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 round-199 实证（2 文件 relative flag、各自历史方差带、根因代码定位 relative 无 withinHistMax 守卫）（本任务 Proposal 已含）
-- [ ] AC2: **relative 豁免**——历史带内（currMs ≤ histMax）的 relative ≥2× 不再 flag（与 absolute 同构）
-- [ ] AC3: **负控制保留**——超出历史 max 的 relative/absolute 任一仍 flag（真实回归不吞）
-- [ ] AC4: **既有不回归**——measure-trend 既有测试（小测试豁免、历史方差 absolute）仍绿；`--for-task` scoped 门绿
-- [ ] AC5: **全量套件绿**——round-199 类场景不再静态检查红（fail 0 且 cancelled 0 且 FULL-SUITE-EXIT=0）
+- [x] AC1: **复现固化**——任务体记录 round-199 实证（2 文件 relative flag、各自历史方差带、根因代码定位 relative 无 withinHistMax 守卫）（本任务 Proposal 已含）
+- [x] AC2: **relative 豁免**——历史带内（currMs ≤ histMax）的 relative ≥2× 不再 flag（与 absolute 同构）
+- [x] AC3: **负控制保留**——超出历史 max 的 relative/absolute 任一仍 flag（真实回归不吞）
+- [x] AC4: **既有不回归**——measure-trend 既有测试（小测试豁免、历史方差 absolute）仍绿；`--for-task` scoped 门绿
+- [ ] AC5: **全量套件绿**——round-199 类场景不再静态检查红（fail 0 且 cancelled 0 且 FULL-SUITE-EXIT=0）——外层 verification-round 验证
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全部勾上
-- [ ] 修后实跑：round-199 两文件带内不 flag（贴任务体）；超出历史 max 仍 flag
-- [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
+- [ ] AC1–AC5 全部勾上（AC5 待外层 verification-round 全量套件验证）
+- [x] 修后实跑：round-199 两文件带内不 flag（贴任务体）；超出历史 max 仍 flag
+- [x] 既有测试 + 新增测试全绿（`--for-task` scoped）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
+
+## Evidence（内层实现 2026-08-09）
+
+**AC2 修（relative 触发器加 withinHistMax 守卫，与 absolute 同构）**：`plugin/scripts/measure-trend-check.ts` `compareLastTwoRounds` 的 `rel` 由 `!isSmallTest && prevMs > 0 && ratio >= relativeFactor` 改为 `!isSmallTest && prevMs > 0 && ratio >= relativeFactor && !withinHistMax`。`withinHistMax` 计算移到 `rel` 之前（避免 TDZ）；`abs` 不变（`growthMs > absoluteMs && !withinHistMax`）。真实回归（超出历史 max）relative/absolute 任一仍触发。
+
+**AC1/AC3 验证（CLI 端到端，round-199 实证数字）**：
+- 带内不 flag：构造历史 rounds 1-4 = task-check-passthrough 9079→23183(histMax)→9575(低点)→**21293**、acceptance-env 9166→21445(histMax)→10304(低点)→**20974** —— `--json --no-land` 输出 `slowFiles: 0`，`grep -c growth` = **0**（round-199 两文件带内相对 2.22×/2.04× 不再误判翻倍）。
+- 带外仍 flag：构造 a.test 10000→16000(histMax)→**33000**（2.06× 相对、超历史 max、绝对 +17s < +30s）—— 输出 1 条 growth，`reason: "relative"`（超出历史 max 的真实回归不被吞）。
+
+**AC4 不回归**：measure-trend-check.test.mjs **13/13 pass / 0 fail / 0 cancelled**（新增 2 个测试：带内 relative 2× 不 flag（round-199 场景）、带外 relative 2× 仍 flag 负控制）；既有小测试豁免 + 历史方差 absolute 测试仍绿。
+
+**AC5 scoped 门**：`bash scripts/test.sh --for-task gap-measure-trend-relative-trigger-lacks-hist-variance-exemption --allow-thin` → **exit 0，13 pass / 0 fail / 0 cancelled，task-contract-check no violations，violations 0**。
+
+**注**：本 worktree 从 stale `origin/develop`（2e7ccc5a，缺 d83916e4/c5cb083f 两个同族修复）fork，已将 `measure-trend-check.ts`/`measure-trend-check.test.mjs`/两个同族任务文件同步到当前 develop（b80478db）状态后施加本次修复。
 
 ## Touches
 
