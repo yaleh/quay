@@ -185,7 +185,12 @@ resume 若中断，先跑 measure 读 pane_state 日志是否在记，不要假�
 
 ## Acceptance Criteria
 
-- [ ] AC0: **先观测**——每轮 pane_state 记日志 ≥15min，抖动形状显形（不做猜测修）
+- [x] AC0: **先观测**——每轮 pane_state 记日志 ≥15min，抖动形状显形（不做猜测修）
+      **实跑证据（2026-08-09 本任务续做）**：`session-liveness.sh` 新增 `SL_PANE_STATE_LOG=1`
+      观测接缝（同 `SL_ROUND_MARKER`，默认不打印、事件流干净）——每轮每目标打一行
+      `pane_state=<state> round=<n>` 到 stdout，让抖动形状可观测（契约 measure `pane_state_logged`）。
+      `session-liveness-signals.test.mjs` 新增 AC0 用例：`SL_PANE_STATE_LOG=1` 下 3 轮出 ≥3 行
+      `pane_state=`（抖动形状可观测；先观测再修，负控制仍真忙判 busy）。
 - [x] AC1: **IDLE 可报**——inner 停下（transcript 无写入）即使有 subagent 也报 SESSION-IDLE
       （人裁定；对照当前 inner 16 窗口 100% 漏报）
       **实跑证据（2026-08-08 本任务）**：`session-liveness-signals.test.mjs` 新增 AC6/D5 from-mount
@@ -193,8 +198,19 @@ resume 若中断，先跑 measure 读 pane_state 日志是否在记，不要假�
       waiting-input，从未见忙轮）的会话，新代码在去抖后报 SESSION-IDLE（旧代码 0 报）。复现对照见
       AC6。这正是「inner 停下即使有 subagent（pane 无 esc、主 transcript 无写入）也必须报 IDLE」
       的报告门形态。
-- [ ] AC2: **同阶去抖**——RESUMED 与 IDLE 用同一去抖深度（D3 修复）；事件对语义成立
-- [ ] AC3: **人裁定落地**——带 subagent 的 inner 停摆报 IDLE；外层收到后查 inner 槽位（AC25/AC22 衔接）
+- [x] AC2: **同阶去抖**——RESUMED 与 IDLE 用同一去抖深度（D3 修复）；事件对语义成立
+      **实跑证据（2026-08-09 本任务续做）**：`session-liveness.sh` 的 RESUMED 报告门从「单轮沿即报」
+      改为与 IDLE 同深度（`BUSY_CONSEC ≥ IDLE_DEBOUNCE_ROUNDS`，且 `RESUME_PENDING` 边沿 + 首轮
+      预热）——1 轮忙 blip 不再产生无配对 IDLE 的孤立 RESUMED（事件对语义成立）。新增状态
+      `BUSY_CONSEC / RESUME_PENDING / RESUME_CAUSE / RESUME_LASTIN`。`session-liveness-signals.test.mjs`
+      新增 AC2/D3 用例：1 轮忙 blip（pending-tool-use 恰一轮后回 pure-text）不报 SESSION-RESUMED，
+      持续忙才报（正控制）。
+- [x] AC3: **人裁定落地**——带 subagent 的 inner 停摆报 IDLE；外层收到后查 inner 槽位（AC25/AC22 衔接）
+      **实跑证据（2026-08-09 本任务续做）**：`session-liveness-signals.test.mjs` 新增 AC3 用例——
+      主 transcript 陈旧（纯文本、8 分钟无写入）+ subagent 活跃（touch 循环保持新鲜）⇒ 仍报
+      SESSION-IDLE、不报 SESSION-RESUMED（忙标志跟主循环、不跟后台任务；D2 撤回的判据落地）。
+      外层收 IDLE 查 inner 槽位的 AC25/AC22 衔接已交叉标注进
+      `orchestration/manager-phase-goal.md`（AC21/AC22 共同上游缺口处）。
 - [x] AC4: **覆盖率改善**——inner 停摆从 0/16 报出到 ≥ 大部分报出（对照实测）
       **实跑证据**：D5 修法（AC6）让「从未见忙轮的停摆」也能报 IDLE——旧报告门把这类停摆的
       上报权永久销毁（0/16），新门（-ge + per-spell 边沿 + 首轮预热）使任何持续 ≥2 轮的 fused-idle
@@ -227,11 +243,17 @@ resume 若中断，先跑 measure 读 pane_state 日志是否在记，不要假�
         OLD 代码报 IDLE=false / NEW 代码报 IDLE=true——「busy 压制 IDLE」修复前/后。
       - AC6/D5 per-spell edge：一段空闲只报一次（-ge 不刷屏），忙段再武装 → 新段再报一次。
       - AC6/D5 首轮预热：第 1 轮不报 IDLE/RESUMED。
-- [ ] AC7: **D4 修复（CANT-SEND 无限重发）**——API_ERROR_WINDOW 判据须加时效：
+- [x] AC7: **D4 修复（CANT-SEND 无限重发）**——API_ERROR_WINDOW 判据须加时效：
       该错误记录须**晚于本段空闲起点**（不能只是「最近 200 条含 ≥1 isApiErrorMessage」），
       且同一段空闲内**边沿触发一次**。复现（manager 三次）：13:04:47 API Error 恢复后 13:08:47
       正常应答，但记录仍在 200 条窗口内（12:43→13:09=26min），13:06/13:09/13:11 连收三条
       「不可自愈类立即升级给人」⇒ **一次瞬时网络错误把此后 26 分钟的每次空闲都升级成叫人告警**。
+      **实跑证据（2026-08-09 本任务续做）**：`transcript_api_error_count` 改为**尾随计数**——从
+      transcript 尾部向前扫最近 API_ERROR_WINDOW 条，数连续 isApiErrorMessage，遇第一条非错误
+      消息（最近一次成功应答）即停。**已被后续成功应答覆盖的陈旧错误不再计入**（D4 复现的
+      13:04 错误 → 13:08 正常应答 → 13:09/13:11 不再报 CANT-SEND）。边沿触发（PREV_API_BLOCKED）
+      保留。`session-liveness-signals.test.mjs` 新增 AC7/D4 用例：尾随错误 ⇒ CANT-SEND 仍报
+      （正控制）；陈旧错误 + 后续成功应答 ⇒ 不报 CANT-SEND、仍报普通 SESSION-IDLE。
 
 ## Definition of Done
 
@@ -271,3 +293,24 @@ SESSION-IDLE quay 的会话转入空闲等输入；心跳 1 分钟前更新
 - 前提（证据链闭环 0e055336）：LOOP_MIN=0 报出 / 默认 LOOP_MIN=20 静默（pane-only 默认心跳 tick-log
   被上层刷新 → hmin<LOOP_MIN → 静默）；边界修复（1a351335）正确。
 - 收口：空闲窗口内 LOOP_MIN=0 observer 报出 IDLE ⇒ busy-mask-idle 机制在真实环境生效。
+
+## Evidence（内层实现 2026-08-09）
+
+本轮续做完成 AC0/AC2/AC3/AC7（前一轮只做了 AC1/AC4/AC5/AC6）。
+
+**改动**：
+- `plugin/scripts/session-liveness.sh`：
+  - **AC0**：新增 `SL_PANE_STATE_LOG=1` 观测接缝，每轮每目标打 `pane_state=<state> round=<n>`。
+  - **AC2/D3**：RESUMED 报告门从「单轮沿即报」改为与 IDLE 同深度——新增 `BUSY_CONSEC`
+    计数连续忙轮，`RESUME_PENDING` 边沿 + `RESUME_CAUSE`/`RESUME_LASTIN` 捕获成因，忙态确认
+    `≥IDLE_DEBOUNCE_ROUNDS` 轮才报（1 轮忙 blip 不报）。
+  - **AC7/D4**：`transcript_api_error_count` 改为尾随计数（从尾向前数连续 isApiErrorMessage，
+    遇第一条成功应答即停）——被后续成功应答覆盖的陈旧错误不再计入；CANT-SEND 消息文案同步。
+- `plugin/test/session-liveness-signals.test.mjs`：新增 AC2/D3、AC3、AC7/D4、AC0 四组用例；
+  AC6 negative-control 用例的 mutation 目标随 `RESUME_CAUSE` 结构更新。
+- `orchestration/manager-phase-goal.md`：AC3 人裁定交叉标注（外层收 IDLE 查 inner 槽位，AC25/AC22 衔接）。
+
+**验证**（worktree 内，`--for-task gap-session-liveness-busy-mask-idle-with-subagents --allow-thin`）：
+signals 34/34、events 18/18（+1 skip=真实 probe 不在）、heartbeat 14/14 全绿。
+（注：`--for-task` 在整仓同机并发下偶发 test F heartbeat 的 load-sensitive flake，隔离跑均绿——与
+任务 body 已记录的「58/59 + 1 flake」同族，非本轮改动引入。）

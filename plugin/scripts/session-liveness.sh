@@ -274,7 +274,8 @@ PERM_PROMPT_TX_WINDOW=${PERM_PROMPT_TX_WINDOW:-60}       # transcript 最近写�
 EXPECTED_CYCLE_MIN=20
 declare -A PREV_ALIVE PREV_STALL PREV_OVERDUE PREV_STATE PREV_IDLE PREV_HALTED UNHALT_TS \
   PREV_BUSY_SEM PREV_API_BLOCKED PREV_MARKER_STALE PREV_PANE_EMPTY IDLE_CONSEC SEEN_BUSY \
-  PREV_SATURATED IDLE_REPORTED ROUNDS PERM_CONSEC PREV_PERM_WARNED
+  PREV_SATURATED IDLE_REPORTED ROUNDS PERM_CONSEC PREV_PERM_WARNED \
+  BUSY_CONSEC RESUME_PENDING RESUME_CAUSE RESUME_LASTIN
 
 # ── classifyPaneState 消费者（ADR-016 Amendment 2026-08-04 / 裁定 D）───────────────────────────
 # 忙闲判据读 pane 的【底部区域形状】（纯函数 pane-state-classify.ts），不是整屏哈希。SL_CLASSIFY /
@@ -385,17 +386,34 @@ _sl_perm_prompt_warn_verdict() {
   fi
 }
 
-# transcript_api_error_count —— 最近 API_ERROR_WINDOW 条记录里「结构性」isApiErrorMessage 字段
-# 的计数（AC9）。结构字段 = 顶层 JSON 键 `"isApiErrorMessage":true`（只有 API 被拒记录才有，
-# 实测 archguard 被 429 拒绝会话最近 200 条为 6、健康/陈旧会话为 0）。
-# 不用 429 文案（绑死供应商文案，换端点即失效）；不用「transcript 是否增长」（429 也会被写进
-# transcript，增长分不开两种空闲——被拒会话实测仍在增长，而记录的类型可以）。
+# transcript_api_error_count —— 「当前被 429 卡住」的计数（AC9 结构性字段 + AC7/D4 时效）。
+# 结构字段 = 顶层 JSON 键 `"isApiErrorMessage":true`（只有 API 被拒记录才有，实测 archguard
+# 被 429 拒绝会话最近 200 条为 6、健康/陈旧会话为 0）。不用 429 文案（绑死供应商文案，换端点
+# 即失效）；不用「transcript 是否增长」（429 也会被写进 transcript，增长分不开两种空闲）。
+#
+# AC7/D4 时效（gap-session-liveness-busy-mask-idle-with-subagents）：**只数【尾随】的错误记录**
+# ——从尾向前扫最近 API_ERROR_WINDOW 条，数连续的 isApiErrorMessage 记录，遇到第一条非错误
+# 消息（最近一次成功应答）即停。一次瞬时 429 被后续正常应答覆盖后就不再计数：D4 复现（manager
+# 三次实测）13:04:47 错误 → 13:08:47 正常应答，但记录仍在 200 条窗口内（12:43→13:09=26min），
+# 旧判据「最近 200 条含 ≥1」让 13:06/13:09/13:11 连报三条 CANT-SEND——一次瞬时网络错误把此后
+# 26 分钟的每次空闲都升级成叫人告警。尾随计数让「已恢复」的空闲回到普通 SESSION-IDLE。
 # grep 模式 `"isApiErrorMessage":…true` 只命中顶层键：content 里文字提及该字段的形式是
 # `isApiErrorMessage: true` 或转义键 `\"isApiErrorMessage\":…`，前导不是裸 `"`，不会误命中。
+# 元数据行（非 assistant/user 消息）跳过、不作为「成功应答」边界（与 transcript_last_message_type
+# 同源；真实 transcript 尾部常有 mode/summary 等元数据）。
 transcript_api_error_count() {
-  local t=$1 n
-  n=$(tail -n "$API_ERROR_WINDOW" "$t" 2>/dev/null | grep -c '"isApiErrorMessage"[[:space:]]*:[[:space:]]*true' 2>/dev/null || true)
-  [ -z "$n" ] && n=0
+  local t=$1 n=0 line
+  while IFS= read -r line; do
+    case "$line" in
+      *'"type":"assistant"'*|*'"type":"user"'*)
+        if printf '%s' "$line" | grep -q '"isApiErrorMessage"[[:space:]]*:[[:space:]]*true'; then
+          n=$(( n + 1 ))
+        else
+          break
+        fi
+        ;;
+    esac
+  done < <(tail -n "$API_ERROR_WINDOW" "$t" 2>/dev/null | tac 2>/dev/null)
   printf '%s\n' "$n"
 }
 
@@ -1119,6 +1137,10 @@ while true; do
       raw=$("${_sl_tmux[@]}" capture-pane -p -t "$target" 2>/dev/null)
       _sl_pane_verdict "$raw"
       pane_state="$_sl_pane_state"; busy_sem="$_sl_pane_busy"; region="$_sl_pane_region"
+      # AC0 观测（先观测再修）：SL_PANE_STATE_LOG=1 时每轮每目标打一行 `pane_state=<state>`
+      # 到 stdout，让「抖动形状」可观测（契约 measure pane_state_logged：运行 ≥15min 后日志
+      # 出现每轮 pane_state=<state> 行 ≥1）。默认不打印，事件流干净（同 SL_ROUND_MARKER 接缝）。
+      [ "${SL_PANE_STATE_LOG:-0}" = "1" ] && echo "pane_state=$pane_state round=${ROUNDS[$name]:-0}"
       if [ -z "${raw:-}" ] || [ -z "$region" ]; then
         # AC5（防过滤）：pane 捕获为空（tmux 失败 / pane 不可读）或分类器区域为空 ⇒ 不判空闲
         # ——忙会话若读到空屏会被永远报成空闲（静默）。显式 WARN 一次 + 判非闲（_sl_pane_verdict
@@ -1147,10 +1169,18 @@ while true; do
         idle=$(( 1 - fused_busy ))
         # AC2 去抖：连续 fused-idle 轮数计数；忙轮清零。pane 形状分类是候选闲的辅助
         # （AC7）——transcript 最后一条消息类型是忙闲的结构信号。
+        # AC2/D3 同阶去抖（gap-session-liveness-busy-mask-idle-with-subagents）：RESUMED 与 IDLE
+        # 用同一去抖深度。IDLE 要连续 ≥IDLE_DEBOUNCE_ROUNDS 轮才报（下面 counter 分支）；RESUMED
+        # 原先单轮沿即报（不对称硬事实）。BUSY_CONSEC 计数连续忙轮，RESUMED 也要求忙态被确认
+        # ≥IDLE_DEBOUNCE_ROUNDS 轮才报（事件对语义成立：一段空闲的确认深度与一段忙的确认深度
+        # 相同，1 轮忙 blip 不产生无配对 IDLE 的孤立 RESUMED）。
         if [ "$idle" = "1" ]; then
           IDLE_CONSEC[$name]=$(( ${IDLE_CONSEC[$name]:-0} + 1 ))
+          BUSY_CONSEC[$name]=0
+          RESUME_PENDING[$name]=0
         else
           IDLE_CONSEC[$name]=0
+          BUSY_CONSEC[$name]=$(( ${BUSY_CONSEC[$name]:-0} + 1 ))
           SEEN_BUSY[$name]=1
           # per-spell 边沿（D5 锐化）：忙轮开启新段 → 该段空闲尚未报过，允许再报一次。
           IDLE_REPORTED[$name]=0
@@ -1162,7 +1192,9 @@ while true; do
             # 不造成漏报），远在 20 分钟 cron 兜底之内。真正的 SESSION-IDLE 由下面 counter 分支报。
             :
           else
-            resumed=1
+            # idle→busy 转换：捕获成因并挂起，待忙态被确认 ≥IDLE_DEBOUNCE_ROUNDS 轮再报
+            # （AC2/D3 同阶去抖）。RESUME_PENDING 在空闲轮清 0——1 轮忙 blip 不报 RESUMED。
+            RESUME_PENDING[$name]=1
             # AC6/AC7：SESSION-RESUMED 带成因 payload（哪个标志/哪个区变了）+ 上次收到输入时刻。
             # 判据：收到事件后无需再采样即可判真假（原外层 3-4 次调用，改后 1 次）。
             cause_parts=()
@@ -1174,24 +1206,32 @@ while true; do
                 *) cause_parts+=("屏幕形状判忙（$pane_state）") ;;
               esac
             fi
-            cause=""
+            RESUME_CAUSE[$name]=""
             for part in "${cause_parts[@]:-}"; do
               [ -n "$part" ] || continue
-              [ -n "$cause" ] && cause="$cause + $part" || cause="$part"
+              [ -n "${RESUME_CAUSE[$name]}" ] && RESUME_CAUSE[$name]="${RESUME_CAUSE[$name]} + $part" || RESUME_CAUSE[$name]="$part"
             done
-            [ -n "$cause" ] && cause="$cause" || cause="状态变化"
-            lastin="取不到"
+            [ -n "${RESUME_CAUSE[$name]}" ] || RESUME_CAUSE[$name]="状态变化"
+            RESUME_LASTIN[$name]="取不到"
             if [ -n "$tr_path" ] && [ -r "$tr_path" ]; then
               if lep=$(last_user_input_epoch "$tr_path") && [ -n "$lep" ]; then
                 lmin=$(( ( $(date +%s) - lep ) / 60 ))
                 [ "$lmin" -lt 0 ] && lmin=0
-                lastin="${lmin} 分钟前"
+                RESUME_LASTIN[$name]="${lmin} 分钟前"
               fi
             fi
-            sl_emit "SESSION-RESUMED $name 的会话恢复活动（此前空闲；成因：${cause}；上次收到输入：${lastin}）"
           fi
         fi
         PREV_IDLE[$name]=$idle
+        # AC2/D3 同阶去抖的 RESUMED 报告：忙态确认 ≥IDLE_DEBOUNCE_ROUNDS 轮（与 IDLE 同深度）
+        # 且本段未报过（RESUME_PENDING 边沿）且非启动首轮（ROUNDS 预热）才报。
+        if [ "${RESUME_PENDING[$name]:-0}" = "1" ] \
+           && [ "${BUSY_CONSEC[$name]:-0}" -ge "$IDLE_DEBOUNCE_ROUNDS" ] \
+           && [ "${ROUNDS[$name]:-0}" -gt 1 ]; then
+          RESUME_PENDING[$name]=0
+          resumed=1
+          sl_emit "SESSION-RESUMED $name 的会话恢复活动（此前空闲；成因：${RESUME_CAUSE[$name]:-状态变化}；上次收到输入：${RESUME_LASTIN[$name]:-取不到}）"
+        fi
         # 去抖后的 SESSION-IDLE 报告（AC2 + D5 锐化，2026-08-08）：连续 ≥IDLE_DEBOUNCE_ROUNDS
         # 轮 fused-idle 且本段未报过（IDLE_REPORTED 边沿）且非启动首轮（ROUNDS 预热）才报。
         #   * -ge 而非 -eq：计数器越过阈值后继续匹配——每段停摆不再只有「等于 2 的那一轮」一次
@@ -1220,7 +1260,7 @@ while true; do
           fi
           PREV_API_BLOCKED[$name]=$api_blocked
           if [ "$api_blocked" = "1" ]; then
-            sl_emit "SESSION-IDLE-CANT-SEND $name 的会话空闲且发不出请求（最近 ${API_ERROR_WINDOW} 条 transcript 记录含 ${api_n} 条 isApiErrorMessage 结构字段）——不可自愈类，立即升级给人"
+            sl_emit "SESSION-IDLE-CANT-SEND $name 的会话空闲且发不出请求（transcript 尾部连续 ${api_n} 条 isApiErrorMessage 结构字段，未被后续应答覆盖——AC7/D4 时效）——不可自愈类，立即升级给人"
           elif [ "$hmin" = "?" ] || [ "$hmin" -ge "$LOOP_MIN" ]; then
             # 噪声标定（管理者 3 个完整周期实测，2026-08-03）：健康循环是「刚动过（写了心跳）才转
             # 空闲」（心跳时距 ~1 分钟），每 20 分钟一对事件、三项目满载 18 次/小时，全是「一切正常」。
@@ -1259,7 +1299,7 @@ while true; do
           api_n2=$(transcript_api_error_count "$tr_path")
           api_blocked2=$([ "$api_n2" -ge "$API_ERROR_MIN" ] 2>/dev/null && echo 1 || echo 0)
           if [ "$api_blocked2" = "1" ] && [ "${PREV_API_BLOCKED[$name]:-0}" = "0" ]; then
-            sl_emit "SESSION-IDLE-CANT-SEND $name 的会话空闲且发不出请求（最近 ${API_ERROR_WINDOW} 条 transcript 记录含 ${api_n2} 条 isApiErrorMessage 结构字段）——不可自愈类，立即升级给人"
+            sl_emit "SESSION-IDLE-CANT-SEND $name 的会话空闲且发不出请求（transcript 尾部连续 ${api_n2} 条 isApiErrorMessage 结构字段，未被后续应答覆盖——AC7/D4 时效）——不可自愈类，立即升级给人"
           fi
           PREV_API_BLOCKED[$name]=$api_blocked2
         else

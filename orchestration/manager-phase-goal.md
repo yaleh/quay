@@ -1953,6 +1953,20 @@ manager 收到的                                  = 236 次
 而现在 outer 看不见 ⇒ 两条同时不成立。**修 AC23(a) 的「outer 查 inner」时必须先修目标，
 否则会做出第二个盯着自己的检查。**
 
+> **交叉标注（2026-08-09，gap-session-liveness-busy-mask-idle-with-subagents 人裁定落地）**：
+> **inner 停下时即使有若干 subagent 在跑，也必须报 IDLE 事件；外层收到 IDLE 后必须去查
+> inner 的槽位是不是满（AC25/AC22 的机制衔接）。**
+> 两条都落在这个「outer 对 inner 空闲无观测通道」的缺口上：
+> ① **带 subagent 的停摆可报**——忙闲判据只读主 transcript 的最后消息类型（`transcript_busy`），
+>    subagent 只进心跳（OVERDUE）不进忙判据；主 transcript 停摆（纯文本陈旧）即使 subagent 在写，
+>    也必须 fused-idle ⇒ `SESSION-IDLE` 照报（`session-liveness-signals.test.mjs` AC3 用例，
+>    LOOP_MIN=0 观测，与 F2「subagent 保 OVERDUE 不报」同源同向）。
+> ② **外层收到 IDLE 查槽位**——`SESSION-IDLE` 是「inner 有空档」的**连续观测**信号（不受 tick
+>    采样率限制），正是 AC22「收尾→下一次派发评估衔接」与 AC25「槽未满即追上游」要吃的那个
+>    「由不可能变为可能」的状态变化；外层收到后应查 inner `in-flight` 与 `effective_cap`。
+> **机制方向**：忙标志跟主循环、不跟后台任务（D2 撤回后的判据），
+> 不在 `classifyPaneState` 的 busy 判据里引入 subagent 计数。
+
 ### AC21（机制·inner）：inner 有可验证的自驱触发
 
 **判据两条，缺一不可**：
