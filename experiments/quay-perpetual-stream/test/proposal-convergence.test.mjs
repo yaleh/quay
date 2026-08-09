@@ -1,4 +1,10 @@
-// @test-group engine
+// @test-group serial
+// @load-sensitive heavy
+// KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — the 20-concurrency
+// child sub-tests spawn 20 genuine --new-epoch child processes; they rotated red under full-suite load
+// (rounds 164/186/193/204) while solo 218/218 stays green, so the load-sensitive partition routes this
+// file to the serial phase (isomorphic with the install family, gap-install-family-tests-rotate-flakes-
+// under-full-suite).
 // Unit tests for proposal-convergence.ts — DIR-125's bounded ProposalReview convergence engine.
 // Pure-function coverage: caps, stable finding identity, ledger merge/resolution, split
 // recommendation, injected-clock budget status, the nextAction decision table, ledger
