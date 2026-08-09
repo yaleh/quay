@@ -120,6 +120,7 @@ declare -A QUESTION=(
   [drivable-workspace-check.sh]="Is the workspace drivable by a loop (safe to hand to an autonomous driver)?"
   [drivable-workspace-check.ts]="Is the workspace drivable by a loop (canonical fail-closed gate)?"
   [drive-contract-check.ts]="When a drive text asserts a task order (X→Y), does it attach the checkTouchesPair output in the same text?"
+  [external-dogfooding-check.ts]="Is the external-dogfooding routine's contract satisfied (cadence, drivable foreign target, tmux remote-drive surface, evidence-backed directive finding)?"
   [execution-policy.ts]="Is an execution policy versioned and authorized for activation (minimal substrate for finding back-propagation)?"
   [fast-mode-telemetry.ts]="What did the fast mode actually do (telemetry events over a window)?"
   [fork-baseline.ts]="Should a task fork from develop or integration (dependency-based fork baseline)?"
