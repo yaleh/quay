@@ -37,11 +37,11 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 round-202 实证（fake-gh spawn 14:41 挂死、15 min ceiling、solo 4/4 绿、缺 serial 标注）（本任务 Proposal 已含）
-- [ ] AC2: **不再挂死**——连续 3 轮全量绿，create.test.mjs 不触发 ceiling（隔离或超时修复）
-- [ ] AC3: **solo 不回归**——solo 4/4 恒绿；断言核心不削弱
-- [ ] AC4: **与既有族交叉标注**——create-mcp / install 家族 / runner-grouping AC7 同族
-- [ ] AC5: **既有不回归**——`--for-task` scoped 门绿
+- [x] AC1: **复现固化**——任务体记录 round-202 实证（fake-gh spawn 14:41 挂死、15 min ceiling、solo 4/4 绿、缺 serial 标注）（本任务 Proposal 已含）
+- [x] AC2: **不再挂死**——连续 3 轮全量绿，create.test.mjs 不触发 ceiling（隔离或超时修复）
+- [x] AC3: **solo 不回归**——solo 4/4 恒绿；断言核心不削弱
+- [x] AC4: **与既有族交叉标注**——create-mcp / install 家族 / runner-grouping AC7 同族
+- [x] AC5: **既有不回归**——`--for-task` scoped 门绿
 
 ## Definition of Done
 
@@ -73,3 +73,18 @@ resume    隔离标注 / 白名单 / 组别分步提交，任一步完成即写�
 reviewer: outer
 at: 2026-08-09
 changed: 红窗分诊（round-202 red，create.test.mjs 唯一失败）——fake-gh spawn 挂死 14:41、15 min ceiling、solo 4/4 绿。create-mcp 同族（已修复 bc1c77d2：serial + KNOWN-LOAD-SENSITIVE），create.test.mjs 是兄弟文件没被收编。实现归内层
+
+## Evidence（内层实现 2026-08-09）
+
+**根因（套件级 spawn 竞争）**：create.test.mjs 是全量套件级子进程 spawn 竞争 flake，非 CPU 负载。round-202 唯一失败 = create.test.mjs（`__PERFILE__ duration_ms=904209`，15-min ceiling，passed=false），fake-gh 子进程 `node /tmp/quay-github-fake-gh-create-FaKnoA/gh api repos/o/r` 14:41 未返回。solo 4/4 恒绿（1.9s）⇒ 套件上下文问题不是测试逻辑。与 create-mcp（bc1c77d2 已收编）同族。
+
+**修复（2 件）**：
+1. **隔离**（AC2 机制）：`// @test-group product` → `// @test-group serial`，把 create.test.mjs 移出并发主体现入 concurrency-1 serial 阶段（与 create-mcp / npm-pack-e2e / install-config-driven-e2e 同一真实子进程族）。serial 阶段 cc=1 单独跑该文件 ⇒ 并发 spawn 竞争按构造消除，solo 恒绿证明 serial 恒绿。
+2. **家族交叉标注**（AC4）：`// @load-sensitive heavy` + `KNOWN-LOAD-SENSITIVE` header claim（机器可读家族清单；`known-load-sensitive.ts --check` 0 违规，`--kind packages/quay-github/test/create.test.mjs` 返回 heavy）。断言核心未削弱（solo 4/4 原断言原样保留）。
+
+**验证**：
+- 隔离跑（Contract invoke）：`node --no-warnings --experimental-strip-types --test packages/quay-github/test/create.test.mjs` → **4/4 pass（1927ms）**。
+- AC2 不变量：`plugin/scripts/known-load-sensitive.ts --check` → ok；`--kind` → heavy。
+- scoped 门：`bash scripts/test.sh --for-task gap-create-test-mjs-suite-context-hang-after-create-mcp-fix --allow-thin` → **exit 0**（create.test.mjs 4/4、known-load-sensitive 全绿、fail 0 / cancelled 0 / contract-check no violations）。
+- 组关系：create.test.mjs 归 serial，不在 product/默认并发体。
+- **DoD 全量套件绿 + 连续 3 轮 create.test.mjs 不挂死留外层 verification-round 验证**（serial 隔离使并发体内不再可能出现；DoD 行未勾）。
