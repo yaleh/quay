@@ -5,8 +5,11 @@
 // All shared rendering helpers live here; serve.ts imports them from here.
 
 import type { IncomingMessage, ServerResponse } from "node:http";
+import path from "node:path";
 import type { ProviderClient } from "./provider-client.ts";
 import { readLive, readJournal, readBoardLanding, readBoardExecution, type LiveResult, type JournalResult, type JournalSection, type BoardLanding, type BoardExecution } from "./observation.ts";
+import { createGoalStore } from "./goal-store.ts";
+import { createDocumentStore } from "./document-store.ts";
 // live-state discriminator texts (gap-live-cannot-tell-a-dead-loop-from-an-unwired-one) — the
 // two telemetry-empty states must have DIFFERENT copy AND a next-step action, and never collapse
 // back to the generic 「无数据」.
@@ -845,7 +848,7 @@ export async function handleTaskList(
       <!-- QX-015 orientation banner removed by DIR-007 (iteration 10): misleading
            needs-human placement + disproportionate layout cost. -->
       <h1>Quay — task list (${escapeHtml(manifest.id)} provider)</h1>
-      <p class="meta"><a href="/live">live</a> · <a href="/journal">journal</a> · <a href="/adr">ADRs →</a></p>
+      <p class="meta"><a href="/live">live</a> · <a href="/journal">journal</a> · <a href="/adr">ADRs →</a> · <a href="/goal">goals →</a> · <a href="/doc">docs →</a></p>
       ${errorParam ? html`<div class="error-banner" role="alert"><strong>Error:</strong> ${escapeHtml(errorParam)}</div>` : ""}
       ${successParam ? html`<div class="success-banner" role="status"><strong>Done:</strong> ${escapeHtml(successParam)}</div>` : ""}
       ${prefixNav ? html`<p class="meta">Prefix: ${prefixNav}</p>` : ""}
@@ -919,6 +922,189 @@ export async function handleAdrDetail(
       <p class="meta">status: <strong>${escapeHtml(a.status)}</strong>${adrExt.date ? ` · ${escapeHtml(adrExt.date as string)}` : ""}</p>
       ${supersedesMeta}${supersededByMeta}
       <article>${renderMarkdown(a.body || "")}</article>
+    </main></body></html>`);
+}
+
+// ── /goal + /doc — the third sibling kind (goal store) + the second (document store) ──
+// Both are CORE stores (not Provider ABI surfaces), so these routes read them directly
+// from the workspace root's `goals/` and `docs-managed/` dirs — same list/detail shape
+// as /adr (SPEC §4: "照 /adr 形状"). The goal page's most valuable column is the most
+// recent verdict + time (SPEC §4: "最近 verdict 与时刻"), read from the record's
+// `evidence` field, which the goal gate runner updates after every criterion execution.
+
+function goalEvidenceCell(ext: Record<string, unknown>): string {
+  const ev = ext.evidence as { at?: string; verdict?: string; reading?: string } | undefined;
+  if (!ev || typeof ev !== "object") return "—";
+  const verdict = typeof ev.verdict === "string" ? ev.verdict : "";
+  const at = typeof ev.at === "string" ? ev.at : "";
+  if (!verdict && !at) return "—";
+  const vColored = verdict === "pass"
+    ? `<strong style="color:#1a7f37">pass</strong>`
+    : `<strong style="color:#cf222e">${escapeHtml(verdict || "unknown")}</strong>`;
+  return html`${vColored}${at ? ` · ${escapeHtml(at)}` : ""}`;
+}
+
+export async function handleGoalList(
+  req: IncomingMessage,
+  res: ServerResponse,
+  url: URL,
+  cfg: { workspaceRoot: string },
+): Promise<void> {
+  const statusFilter = url.searchParams.get("status");
+  const kindFilter = url.searchParams.get("kind");
+  const goalDir = path.join(cfg.workspaceRoot, "goals");
+  let goals;
+  let readError: string | null = null;
+  try {
+    goals = createGoalStore(goalDir).list({
+      ...(statusFilter ? { status: statusFilter } : {}),
+      ...(kindFilter ? { kind: kindFilter } : {}),
+    });
+  } catch (err) {
+    goals = [];
+    readError = err instanceof Error ? err.message : String(err);
+  }
+  const rows = goals.map((g) => {
+    const ext = g as unknown as Record<string, unknown>;
+    const criterion = typeof ext.criterion === "string" ? ext.criterion : "";
+    const criterionCell = criterion.length > 60 ? `${escapeHtml(criterion.slice(0, 60))}…` : escapeHtml(criterion);
+    return html`<tr>
+      <td><a href="/goal/${encodeURIComponent(String(g.id))}">${escapeHtml(String(g.id))}</a></td>
+      <td>${escapeHtml(String(g.kind ?? ""))}</td>
+      <td>${escapeHtml(String(g.status ?? ""))}</td>
+      <td>${escapeHtml(String(g.phase ?? ""))}</td>
+      <td>${escapeHtml(String(g.title ?? ""))}</td>
+      <td><code>${criterionCell || "—"}</code></td>
+      <td>${goalEvidenceCell(ext)}</td>
+      <td>${escapeHtml(String(ext.origin ?? ""))}</td>
+    </tr>`;
+  }).join("\n");
+  const statusNav = [
+    statusFilter ? html`<a href="/goal">All</a>` : html`<strong>All</strong>`,
+    ...["active", "achieved", "superseded", "retired"].map((s) =>
+      s === statusFilter
+        ? html`<strong>${s}</strong>`
+        : html`<a href="/goal?status=${s}">${s}</a>`
+    ),
+  ].join(" · ");
+  const kindNav = [
+    kindFilter ? html`<a href="/goal">All</a>` : html`<strong>All</strong>`,
+    ...["phase", "criterion"].map((k) =>
+      k === kindFilter
+        ? html`<strong>${k}</strong>`
+        : html`<a href="/goal?kind=${k}">${k}</a>`
+    ),
+  ].join(" · ");
+  res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+  res.end(html`<!doctype html>
+    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${pageStyles()}<title>Goals</title></head>
+    <body><main>
+      <p class="meta"><a href="/">← tasks</a> · <a href="/live">live</a> · <a href="/journal">journal</a> · <a href="/adr">ADRs →</a> · <a href="/doc">docs →</a></p>
+      <h1>Goals — 阶段目标与 AC (${goals.length})</h1>
+      ${readError ? html`<div class="error-banner" role="alert"><strong>读失败:</strong> ${escapeHtml(readError)}</div>` : ""}
+      <p class="meta">Kind: ${kindNav}</p>
+      <p class="meta">Status: ${statusNav}</p>
+      ${goals.length === 0 ? html`<p class="meta">No goals.</p>` : html`<table>
+        <tr><th>id</th><th>kind</th><th>status</th><th>phase</th><th>title</th><th>criterion</th><th>recent verdict</th><th>origin</th></tr>
+        ${rows}
+      </table>`}
+    </main></body></html>`);
+}
+
+export async function handleGoalDetail(
+  req: IncomingMessage,
+  res: ServerResponse,
+  goalId: string,
+  cfg: { workspaceRoot: string },
+): Promise<void> {
+  const goalDir = path.join(cfg.workspaceRoot, "goals");
+  const store = createGoalStore(goalDir);
+  const g = store.get(goalId);
+  if (!g) {
+    res.writeHead(404, { "Content-Type": "text/plain" });
+    res.end("not found");
+    return;
+  }
+  const ext = g as unknown as Record<string, unknown>;
+  const evidenceCell = goalEvidenceCell(ext);
+  res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+  res.end(html`<!doctype html>
+    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="${escapeHtml(String(g.id))}: ${escapeHtml(String(g.title))}">${pageStyles()}<title>${escapeHtml(String(g.id))}</title></head>
+    <body><main>
+      <p class="meta"><a href="/goal">← goals</a> · <a href="/live">live</a> · <a href="/journal">journal</a></p>
+      <h1>${escapeHtml(String(g.id))}: ${escapeHtml(String(g.title))}</h1>
+      <p class="meta">kind: <strong>${escapeHtml(String(g.kind ?? ""))}</strong> · status: <strong>${escapeHtml(String(g.status ?? ""))}</strong>${g.phase ? html` · phase: ${escapeHtml(String(g.phase))}` : ""}</p>
+      ${evidenceCell !== "—" ? html`<p class="meta">最近 verdict: ${evidenceCell}</p>` : ""}
+      ${typeof ext.criterion === "string" && (ext.criterion as string).length > 0
+        ? html`<p class="meta">criterion: <code>${escapeHtml(ext.criterion as string)}</code></p>` : ""}
+      ${ext.expect ? html`<p class="meta">expect: ${escapeHtml(String(ext.expect))}</p>` : ""}
+      <p class="meta">origin: ${escapeHtml(String(ext.origin ?? ""))}</p>
+      <article>${renderMarkdown(g.body || "")}</article>
+    </main></body></html>`);
+}
+
+export async function handleDocList(
+  req: IncomingMessage,
+  res: ServerResponse,
+  url: URL,
+  cfg: { workspaceRoot: string },
+): Promise<void> {
+  const statusFilter = url.searchParams.get("status");
+  const docDir = path.join(cfg.workspaceRoot, "docs-managed");
+  let docs;
+  let readError: string | null = null;
+  try {
+    docs = createDocumentStore(docDir).list(statusFilter ? { status: statusFilter } : {});
+  } catch (err) {
+    docs = [];
+    readError = err instanceof Error ? err.message : String(err);
+  }
+  const rows = docs.map((d) => {
+    const ext = d as unknown as Record<string, unknown>;
+    return html`<tr>
+      <td><a href="/doc/${encodeURIComponent(String(d.id))}">${escapeHtml(String(d.id))}</a></td>
+      <td>${escapeHtml(String(d.status ?? ""))}</td>
+      <td>${escapeHtml(String(ext.kind ?? ""))}</td>
+      <td>${escapeHtml(String(d.title ?? ""))}</td>
+    </tr>`;
+  }).join("\n");
+  res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+  res.end(html`<!doctype html>
+    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${pageStyles()}<title>Docs</title></head>
+    <body><main>
+      <p class="meta"><a href="/">← tasks</a> · <a href="/live">live</a> · <a href="/journal">journal</a> · <a href="/adr">ADRs →</a> · <a href="/goal">goals →</a></p>
+      <h1>Managed documents (${docs.length})</h1>
+      ${readError ? html`<div class="error-banner" role="alert"><strong>读失败:</strong> ${escapeHtml(readError)}</div>` : ""}
+      ${docs.length === 0 ? html`<p class="meta">No documents.</p>` : html`<table>
+        <tr><th>id</th><th>status</th><th>kind</th><th>title</th></tr>
+        ${rows}
+      </table>`}
+    </main></body></html>`);
+}
+
+export async function handleDocDetail(
+  req: IncomingMessage,
+  res: ServerResponse,
+  docId: string,
+  cfg: { workspaceRoot: string },
+): Promise<void> {
+  const docDir = path.join(cfg.workspaceRoot, "docs-managed");
+  const store = createDocumentStore(docDir);
+  const d = store.get(docId);
+  if (!d) {
+    res.writeHead(404, { "Content-Type": "text/plain" });
+    res.end("not found");
+    return;
+  }
+  const ext = d as unknown as Record<string, unknown>;
+  res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+  res.end(html`<!doctype html>
+    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="${escapeHtml(String(d.id))}: ${escapeHtml(String(d.title))}">${pageStyles()}<title>${escapeHtml(String(d.id))}</title></head>
+    <body><main>
+      <p class="meta"><a href="/doc">← docs</a> · <a href="/live">live</a> · <a href="/journal">journal</a></p>
+      <h1>${escapeHtml(String(d.id))}: ${escapeHtml(String(d.title))}</h1>
+      <p class="meta">status: <strong>${escapeHtml(String(d.status ?? ""))}</strong>${ext.kind ? ` · kind: ${escapeHtml(String(ext.kind))}` : ""}</p>
+      <article>${renderMarkdown(d.body || "")}</article>
     </main></body></html>`);
 }
 
@@ -1288,6 +1474,33 @@ export async function handleAllRoutes(
   if (adrM) {
     const id = decodeURIComponent(adrM[1]);
     await handleAdrDetail(req, res, id, client);
+    return;
+  }
+
+  // /goal + /doc — SPEC §4: the third sibling kind's route, done TOGETHER with /doc
+  // (which had NO route — grep -c document = 0), both following the /adr shape. The
+  // goal page shows target / criterion / status / recent verdict+time / origin.
+  if (url.pathname === "/goal") {
+    await handleGoalList(req, res, url, cfg);
+    return;
+  }
+
+  const goalM = /^\/goal\/([^/]+)$/.exec(url.pathname);
+  if (goalM) {
+    const id = decodeURIComponent(goalM[1]);
+    await handleGoalDetail(req, res, id, cfg);
+    return;
+  }
+
+  if (url.pathname === "/doc") {
+    await handleDocList(req, res, url, cfg);
+    return;
+  }
+
+  const docM = /^\/doc\/([^/]+)$/.exec(url.pathname);
+  if (docM) {
+    const id = decodeURIComponent(docM[1]);
+    await handleDocDetail(req, res, id, cfg);
     return;
   }
 

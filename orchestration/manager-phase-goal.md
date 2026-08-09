@@ -1,5 +1,14 @@
 # 管理者本阶段的目标与 AC
 
+> **归档声明（2026-08-09，任务 gap-spec-goal-store-third-sibling-kind 落地）**：本文件已降级为
+> **理由档案**——阶段目标/AC 的**机制载体**现在是 goal store（`packages/quay/src/goal-store.ts`，
+> SPEC §2/§2b：`PHASE-NNN` + `AC-NNN` 记录，schema 含 criterion/status(含 achieved)/phase/origin；
+> I1 原子阶段切换、I2 达成推导、origin 强制）。goal 记录的 `origin` 字段指回本文件的历史裁定。
+> **按 SPEC §5「落地前不迁」：AC20-35 的「活跃 AC 判据命令」节继续保留在本文件**，直到
+> 具体 AC 逐一迁入 goal store（迁移处置归人：AC10/AC12/AC16/AC17/AC20 各自是达成/废止/并入）。
+> 本文件的「四独有字段」历史与六次设目标只加不关的教训记录于 SPEC §2b.4，不再重复。
+
+
 **角色**：三项目（quay / archguard / meta-cc）管理者。**不是任何一个项目的外层。**
 **建立时间**：2026-08-03 11:5xZ ——人指出「你应该把自己这个阶段的 AC 明确列出来」。
 

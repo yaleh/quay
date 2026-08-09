@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { runAcceptance } from "./acceptance-runner.ts";
 import { makeDocumentContractGate } from "./factories/document-contract.ts";
+import { makeGoalGate } from "./factories/goal.ts";
 import { resolveRunnerOptions } from "./config/utils.ts";
 import { discoverWorkspaceRoot, loadWorkspaceGates, loadWorkspaceGateMetadata } from "./config/loader.ts";
 import type { Task } from "../abi.ts";
@@ -26,8 +27,17 @@ export function registerDocumentGate(gateName, docDir, docId) {
   gateRegistry[gateName] = makeDocumentContractGate(docId, docDir);
 }
 
+export function registerGoalGate(gateName, goalDir, goalId) {
+  gateRegistry[gateName] = makeGoalGate(goalId, goalDir);
+}
+
 var DOCUMENTS_DIR = path.join(REPO_ROOT, "docs-managed");
 var DOCUMENT_GATE_IDS = [{ gateName: "doc-quay-directive-skill", docId: "DOC-001" }];
+
+// Goal gates: no DEFAULT registration — per SPEC §5 the active AC set (AC20-35) is NOT
+// migrated until the kind + /goal route land, and the disposition of the four unclosed
+// phases (AC10/AC12/AC16/AC17/AC20) is a human adjudication, not a mechanical default.
+// A workspace/goal gate is registered dynamically via registerGoalGate (or gates.yml).
 
 export var gateRegistry = {
   dod: async function(task, client) {
