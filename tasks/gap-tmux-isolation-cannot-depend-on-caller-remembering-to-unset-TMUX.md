@@ -128,3 +128,11 @@ status: todo→**ready**（2026-08-04T14:5xZ 外层裁定 R3/L0 优先级：两�
 L0 结构性关闭它 ⇒ 升入 A/D 并发批次，不再排在 A/D/B 之后）。touches 的 `session-liveness.sh` 行
 格式修正（备注移出路径，resolve 不再 MISSING）。与 A/D/B 的 `checkTouchesPair` 实测全部
 `disjoint:true`。
+
+> 交叉标注（2026-08-09，`gap-tmux-isolated-guard-has-zero-consumers-fifth-machine-wipe` AC11）：
+> 本任务（L0 防护 `tmux-isolated.sh`）是**同一失效模式的第四、第五次之间建的防护**——但防护零采用，
+> 第五次（2026-08-06 16:00:05，sudo 排除内核 OOM）仍发生：8/9 tmux 测试文件绕过它，
+> 4/8 缺隔离条件（如 `session-liveness` 缺 `-S`、`session-bootstrap` 缺 `env -u TMUX`）。
+> 根因是「注释里的禁令不是机制」。该任务把 L0 结晶为 `.ts` 库 `tmux-session.ts`（决策核 / 可注入 exec /
+> 真实语义验证三层），并新增静态检查 `tmux-test-isolation-check.ts` 机械强制「起真实 tmux 必须走机制或
+> 双条件齐备」——防护从「存在」变成「被调用」。

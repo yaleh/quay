@@ -31,6 +31,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
+// STAGE 1/3 (gap-tmux-isolated-guard-has-zero-consumers-fifth-machine-wipe): the hermetic session
+// cleanup routes through the tmux-session library so BOTH isolation conditions are structural
+// (explicit -S + $TMUX-stripped env).
+import { tmux as isolatedTmux } from "../scripts/tmux-session.ts";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pluginDir = path.resolve(__dirname, "..");
 const repoRoot = path.resolve(pluginDir, "..");
@@ -179,6 +184,6 @@ test("AC2/C2 — manager home/identity is $QUAY_GLOBAL_DIR/manager (out of any p
     assert.match(identity, /role=manager/, "identity must declare role=manager");
     // Cleanup the hermetic session.
     const sess = (identity.match(/session=(\S+)/) || [])[1] || "quay-manager";
-    spawnSync("tmux", ["-S", path.join(socketBase, "default"), "kill-session", "-t", sess], { env });
+    isolatedTmux(["kill-session", "-t", sess], { socket: path.join(socketBase, "default"), env });
   } finally { cleanup(tmp); }
 });

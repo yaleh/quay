@@ -32,6 +32,8 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
+import { newHermeticTmux } from "./helpers/hermetic-tmux.mjs";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SCRIPT = path.resolve(__dirname, "..", "scripts", "supervisor-deliver.sh");
 const RELIABLE = path.resolve(__dirname, "..", "scripts", "send-keys-reliable.sh");
@@ -130,21 +132,21 @@ test("AC5 e2e: existing session (--transcript) — adapter delivers a payload, v
     return;
   }
   const session = uniqueName("sup-deliver");
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sup-deliver-e2e-"));
-  const fixture = path.join(tmp, "fixture.sh");
-  const transcript = path.join(tmp, "transcript.jsonl");
+  const h = newHermeticTmux("sup-deliver-e2e-");
+  const fixture = path.join(h.tmp, "fixture.sh");
+  const transcript = path.join(h.tmp, "transcript.jsonl");
   fs.writeFileSync(fixture, fixtureScriptSrc(transcript), "utf8");
   // NOT fresh: seed the transcript so the existing-session (send-keys-reliable) path is taken.
   fs.writeFileSync(transcript, `${userStringLine("prior-session-message")}\n`, "utf8");
   const marker = `sup-deliver-marker-${process.pid}`;
   let result = null;
   try {
-    const start = spawnSync("tmux", ["new-session", "-d", "-s", session, "bash", fixture], { encoding: "utf8" });
+    const start = h.newSession(session, `bash ${fixture}`);
     assert.equal(start.status, 0, `tmux new-session failed: ${start.stderr}`);
 
     let ready = false;
     for (let i = 0; i < 100 && !ready; i++) {
-      const cap = spawnSync("tmux", ["capture-pane", "-p", "-t", session], { encoding: "utf8" });
+      const cap = h.capture(session);
       if (cap.status === 0 && cap.stdout.includes("❯")) ready = true;
       else await new Promise((r) => setTimeout(r, 100));
     }
@@ -154,7 +156,7 @@ test("AC5 e2e: existing session (--transcript) — adapter delivers a payload, v
       encoding: "utf8",
       timeout: 90000,
       env: {
-        ...process.env,
+        ...h.env,
         SUPERVISOR_DELIVER_VERIFY_S: "20",
       },
     });
@@ -163,8 +165,7 @@ test("AC5 e2e: existing session (--transcript) — adapter delivers a payload, v
     const transcriptText = fs.readFileSync(transcript, "utf8");
     assert.match(transcriptText, new RegExp(`"content":"${marker}"`), `marker should appear as a real user message in the transcript:\n${transcriptText}`);
   } finally {
-    try { spawnSync("tmux", ["kill-session", "-t", session], { encoding: "utf8" }); } catch { /* best-effort */ }
-    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* best-effort */ }
+    h.cleanup();
   }
 });
 
@@ -195,20 +196,20 @@ test("AC5 e2e: fresh session (transcript absent) — direct-send path creates th
     return;
   }
   const session = uniqueName("sup-fresh");
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sup-fresh-"));
-  const fixture = path.join(tmp, "fixture.sh");
-  const transcript = path.join(tmp, "transcript.jsonl");
+  const h = newHermeticTmux("sup-fresh-");
+  const fixture = path.join(h.tmp, "fixture.sh");
+  const transcript = path.join(h.tmp, "transcript.jsonl");
   fs.writeFileSync(fixture, ghostFixtureScriptSrc(transcript), "utf8");
   // Transcript deliberately ABSENT — a fresh session (nothing typed yet).
   const marker = `sup-fresh-marker-${process.pid}`;
   let result = null;
   try {
-    const start = spawnSync("tmux", ["new-session", "-d", "-s", session, "bash", fixture], { encoding: "utf8" });
+    const start = h.newSession(session, `bash ${fixture}`);
     assert.equal(start.status, 0, `tmux new-session failed: ${start.stderr}`);
 
     let ready = false;
     for (let i = 0; i < 100 && !ready; i++) {
-      const cap = spawnSync("tmux", ["capture-pane", "-p", "-t", session], { encoding: "utf8" });
+      const cap = h.capture(session);
       if (cap.status === 0 && cap.stdout.includes(GHOST_WELCOME)) ready = true;
       else await new Promise((r) => setTimeout(r, 100));
     }
@@ -217,7 +218,7 @@ test("AC5 e2e: fresh session (transcript absent) — direct-send path creates th
     result = spawnSync("bash", [SCRIPT, session, marker, "--transcript", transcript], {
       encoding: "utf8",
       timeout: 90000,
-      env: { ...process.env, SUPERVISOR_DELIVER_VERIFY_S: "20" },
+      env: { ...h.env, SUPERVISOR_DELIVER_VERIFY_S: "20" },
     });
     assert.equal(result.status, 0, `fresh-session deliver failed (exit ${result.status}):\nstdout: ${result.stdout}\nstderr: ${result.stderr}`);
     assert.match(result.stdout, /fresh-session/, `adapter should report the fresh-session path:\n${result.stdout}`);
@@ -226,8 +227,7 @@ test("AC5 e2e: fresh session (transcript absent) — direct-send path creates th
     const transcriptText = fs.readFileSync(transcript, "utf8");
     assert.match(transcriptText, new RegExp(`"content":"${marker}"`), `marker should appear as a real user message:\n${transcriptText}`);
   } finally {
-    try { spawnSync("tmux", ["kill-session", "-t", session], { encoding: "utf8" }); } catch { /* best-effort */ }
-    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* best-effort */ }
+    h.cleanup();
   }
 });
 
@@ -239,17 +239,20 @@ test("AC5 negative control: nonexistent tmux target → exit 1 (fail loud), noth
     t.skip("tmux not available — skipping");
     return;
   }
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sup-neg-"));
-  const transcript = path.join(tmp, "transcript.jsonl");
+  const h = newHermeticTmux("sup-neg-");
+  const transcript = path.join(h.tmp, "transcript.jsonl");
   fs.writeFileSync(transcript, `${userStringLine("prior")}\n`, "utf8");
   try {
+    // The deliver script's bare `tmux` resolves to the hermetic socket (h.env) — a nonexistent
+    // target fails loud there exactly as it would anywhere, without touching the default server.
     const r = spawnSync("bash", [SCRIPT, uniqueName("no-such-target"), "marker", "--transcript", transcript], {
       encoding: "utf8",
+      env: h.env,
     });
     assert.equal(r.status, 1, `nonexistent target must exit 1, got ${r.status}\n${r.stdout}\n${r.stderr}`);
     assert.match(r.stderr, /不存在/);
   } finally {
-    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* best-effort */ }
+    h.cleanup();
   }
 });
 
@@ -262,11 +265,11 @@ test("AC5: --root (re-spawn mode) waits for the NEW transcript NOT in the pre-se
     return;
   }
   const session = uniqueName("sup-root");
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sup-root-"));
+  const h = newHermeticTmux("sup-root-");
   // The root whose slug the adapter derives. slug = root with '/' → '-'.
   const root = path.join(os.tmpdir(), `sup-root-proj-${process.pid}`);
   const slug = root.replace(/\//g, "-");
-  const projDir = path.join(tmp, ".claude", "projects", slug);
+  const projDir = path.join(h.tmp, ".claude", "projects", slug);
   fs.mkdirSync(projDir, { recursive: true });
   // OLD session's transcript (in the pre-send snapshot — must NOT be the delivery target).
   const oldTranscript = path.join(projDir, "old-session.jsonl");
@@ -274,16 +277,16 @@ test("AC5: --root (re-spawn mode) waits for the NEW transcript NOT in the pre-se
   // The re-spawned session writes to a NEW file that appears only on its first committed input.
   const newTranscript = path.join(projDir, "new-session.jsonl");
 
-  const fixture = path.join(tmp, "fixture.sh");
+  const fixture = path.join(h.tmp, "fixture.sh");
   fs.writeFileSync(fixture, fixtureScriptSrc(newTranscript), "utf8");
   const marker = `sup-root-marker-${process.pid}`;
   let result = null;
   try {
-    const start = spawnSync("tmux", ["new-session", "-d", "-s", session, "bash", fixture], { encoding: "utf8" });
+    const start = h.newSession(session, `bash ${fixture}`);
     assert.equal(start.status, 0, `tmux new-session failed: ${start.stderr}`);
     let ready = false;
     for (let i = 0; i < 100 && !ready; i++) {
-      const cap = spawnSync("tmux", ["capture-pane", "-p", "-t", session], { encoding: "utf8" });
+      const cap = h.capture(session);
       if (cap.status === 0 && cap.stdout.includes("❯")) ready = true;
       else await new Promise((r) => setTimeout(r, 100));
     }
@@ -293,7 +296,7 @@ test("AC5: --root (re-spawn mode) waits for the NEW transcript NOT in the pre-se
     result = spawnSync("bash", [SCRIPT, session, marker, "--root", root], {
       encoding: "utf8",
       timeout: 90000,
-      env: { ...process.env, HOME: tmp, SUPERVISOR_DELIVER_VERIFY_S: "20" },
+      env: { ...h.env, HOME: h.tmp, SUPERVISOR_DELIVER_VERIFY_S: "20" },
     });
     assert.equal(result.status, 0, `--root deliver failed (exit ${result.status}):\nstdout: ${result.stdout}\nstderr: ${result.stderr}`);
     assert.match(result.stdout, /fresh-session/, `re-spawn mode should take the fresh path:\n${result.stdout}`);
@@ -305,8 +308,7 @@ test("AC5: --root (re-spawn mode) waits for the NEW transcript NOT in the pre-se
     const oldText = fs.readFileSync(oldTranscript, "utf8");
     assert.doesNotMatch(oldText, new RegExp(marker), `old session transcript must not receive the payload:\n${oldText}`);
   } finally {
-    try { spawnSync("tmux", ["kill-session", "-t", session], { encoding: "utf8" }); } catch { /* best-effort */ }
-    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* best-effort */ }
+    h.cleanup();
     try { fs.rmSync(root, { recursive: true, force: true }); } catch { /* best-effort */ }
   }
 });

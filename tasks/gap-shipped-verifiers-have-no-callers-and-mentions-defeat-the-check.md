@@ -123,3 +123,9 @@ resume 若中断，先跑 measure 读当前零调用点清单，不要假设上�
 reviewer: outer
 at: 2026-08-06T14:1xZ
 changed: 类级机制立案（shipped-but-uncalled verifiers）——verify-delivery-surface.ts 为单一事实源却零执行调用点；TASK-60 band 被证伪仍 done（archguard 池空 197 分钟）。修复 Contract 格式（measure 补命令、续行合并、加本段）。
+
+> 交叉标注（2026-08-09，`gap-tmux-isolated-guard-has-zero-consumers-fifth-machine-wipe` AC10）：本类最严重实例——
+> 不被调用的不是报告检查器，是**为防止整机崩溃而建的防护**（`tmux-isolated.sh` 除自身测试外零消费者，
+> 8/9 tmux 测试文件绕过，4/8 缺隔离条件，2026-08-06 整机 tmux server 第五次死亡）。该任务把「调用点」机制化：
+> 新增静态检查 `tmux-test-isolation-check.ts` 接进 `run_static_checks`，任何起真实 tmux 的测试文件必须
+> 引用机制或双条件齐备，否则报红——「提及不构成调用点」的教训从报告类扩展到防护类。

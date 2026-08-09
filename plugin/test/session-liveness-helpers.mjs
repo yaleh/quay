@@ -26,6 +26,13 @@ import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
 
+// STAGE 1 (gap-tmux-isolated-guard-has-zero-consumers-fifth-machine-wipe): this helper isolated by
+// TMUX_TMPDIR + deleting $TMUX but had NO explicit `-S`. Route the hermetic path through the
+// tmux-session library so BOTH conditions are structural (explicit -S + $TMUX stripped). The real
+// probe path (env === process.env, targeting the manager box's REAL quay-0 session) deliberately
+// keeps the default-socket resolution — it never starts/kills a server.
+import { tmux as isolatedTmux } from "../scripts/tmux-session.ts";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const SCRIPT = path.resolve(__dirname, "..", "scripts", "session-liveness.sh");
 export const PROBE_TARGET = "quay-0:probe"; // the manager's real, dedicated probe session
@@ -119,7 +126,24 @@ export function md5(s) {
 }
 
 export function tmux(args, env) {
-  const r = spawnSync("tmux", args, { encoding: "utf8", env: env ?? process.env });
+  const e = env ?? process.env;
+  // Hermetic path (env carries TMUX_TMPDIR): force the explicit `-S` to the socket tmux materializes
+  // for that TMUX_TMPDIR — `<sockDir>/tmux-<uid>/default` — plus the library's $TMUX strip. BOTH
+  // conditions, structural (a bare `tmux` here under an inherited $TMUX would land on the DEFAULT
+  // server — the 2026-08-06 fifth-wipe crash path).
+  if (e.TMUX_TMPDIR) {
+    const sock = path.join(e.TMUX_TMPDIR, `tmux-${process.getuid()}`, "default");
+    // tmux refuses to create the socket when its parent dir is absent (exit 0 with "error
+    // creating ... (No such file or directory)") — pre-create it, matching the other hermetic
+    // helpers' 0o700 socket-base dirs.
+    fs.mkdirSync(path.dirname(sock), { recursive: true, mode: 0o700 });
+    const r = isolatedTmux(args, { socket: sock, env: e });
+    return { status: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
+  }
+  // Real-probe path (env === process.env, targeting the manager box's REAL probe session): preserve
+  // the existing default-socket resolution. These are capture/send-keys on an EXISTING session —
+  // they never create or kill a server, so there is no crash surface here.
+  const r = spawnSync("tmux", args, { encoding: "utf8", env: e });
   return { status: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
 }
 

@@ -29,6 +29,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
 
+// STAGE 1 (gap-tmux-isolated-guard-has-zero-consumers-fifth-machine-wipe): this test used
+// TMUX_TMPDIR alone — under an inherited $TMUX that resolves to the DEFAULT server (the crash
+// path). The tmux-session library makes BOTH conditions structural: explicit `-S <materialized
+// socket>` + $TMUX stripped.
+import { tmux as isolatedTmux } from "../scripts/tmux-session.ts";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
 const SCRIPT = path.join(REPO_ROOT, "plugin", "scripts", "supervisor-observe.sh");
@@ -210,13 +216,19 @@ test("AC3b — observe --branch develop compares develop vs origin/develop even 
 
 test("AC3c — session_state reads tmux LIVE (a created session appears on the next call; a killed one disappears) and the script reads no cache/state file", async () => {
   const tmuxTmp = fs.mkdtempSync(path.join(os.tmpdir(), "obs-tmux-"));
-  const sockEnv = { TMUX_TMPDIR: tmuxTmp };
+  // The socket tmux materializes for TMUX_TMPDIR=<tmuxTmp> when $TMUX is stripped.
+  const sockPath = path.join(tmuxTmp, `tmux-${process.getuid()}`, "default");
+  fs.mkdirSync(path.dirname(sockPath), { recursive: true, mode: 0o700 });
+  // $TMUX must be STRIPPED (TMUX_TMPDIR alone does not isolate a process that inherited $TMUX —
+  // the 2026-08-06 fifth-wipe crash path).
+  const sockEnv = { TMUX_TMPDIR: tmuxTmp, TMUX: undefined };
   const w = makeGitRepo();
   try {
     // a fresh, hermetic session on an isolated socket — never touches the driver's tmux
     const sess = "obs-hermetic-sess";
-    const spawnTmux = (cmd) =>
-      spawnSync("tmux", cmd, { encoding: "utf8", env: { ...process.env, ...sockEnv } });
+    // explicit -S to the materialized private socket (the observe script's bare `tmux` under
+    // sockEnv resolves to the SAME socket).
+    const spawnTmux = (cmd) => isolatedTmux(cmd, { socket: sockPath, env: sockEnv });
 
     const before = runObserveJson(w.repo, sockEnv);
     const beforeNames = before.session_state.sessions.map((s) => s.name);

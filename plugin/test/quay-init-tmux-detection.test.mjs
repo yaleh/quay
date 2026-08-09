@@ -43,6 +43,13 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
+// STAGE 1/3 (gap-tmux-isolated-guard-has-zero-consumers-fifth-machine-wipe): the explicit-socket
+// kill calls (tmuxAt) route through the tmux-session library so BOTH isolation conditions are
+// structural. Session CREATION stays env-based (quay-init.sh's detection is an env contract — it
+// must resolve the SAME socket the test set up via TMUX_TMPDIR, which the already-stripped $TMUX
+// makes private).
+import { tmux as isolatedTmux } from '../scripts/tmux-session.ts';
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pluginDir = path.resolve(__dirname, '..');
 
@@ -82,8 +89,11 @@ function socketPathFor(sockDir) {
   return path.join(sockDir, `tmux-${process.getuid()}`, 'default');
 }
 function tmuxAt(sockPath, args, env) {
-  const argv = sockPath ? ['-S', sockPath, ...args] : args;
-  const r = spawnSync('tmux', argv, { encoding: 'utf8', env: env ?? process.env });
+  if (sockPath) {
+    // Explicit -S + $TMUX-stripped env, both structural via the library.
+    return isolatedTmux(args, { socket: sockPath, env: env ?? process.env });
+  }
+  const r = spawnSync('tmux', args, { encoding: 'utf8', env: env ?? process.env });
   return { status: r.status, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
 }
 

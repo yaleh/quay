@@ -36,6 +36,13 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
+// STAGE 1 (gap-tmux-isolated-guard-has-zero-consumers-fifth-machine-wipe): the local hermetic
+// helper had explicit `-S` but did NOT strip $TMUX — under an inherited $TMUX the `-S`-less
+// subprocesses of session-bootstrap.sh (env-only resolution) could still reach the default server.
+// Delegating the helper's tmux() to the tmux-session library makes BOTH conditions structural
+// (explicit -S + $TMUX-stripped env).
+import { tmux as isolatedTmux } from "../scripts/tmux-session.ts";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pluginDir = path.resolve(__dirname, "..");
 const BOOTSTRAP = path.join(pluginDir, "scripts", "session-bootstrap.sh");
@@ -54,7 +61,7 @@ function newHermetic(prefix = "quay-sb-") {
   return {
     tmp, sockPath, started,
     tmux(args) {
-      return spawnSync("tmux", ["-S", this.sockPath, ...args], { encoding: "utf8" });
+      return isolatedTmux(args, { socket: this.sockPath });
     },
     newSession(name, cmd) {
       const r = this.tmux(["new-session", "-d", "-s", name, cmd]);
