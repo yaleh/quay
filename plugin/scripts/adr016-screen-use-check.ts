@@ -102,6 +102,7 @@ const MD_TICK_DOCS = new Set([
   "plugin/loop/manager-loop-tick.md",
   "plugin/loop/orchestrator-loop-tick.md",
   "orchestration/manager-loop-tick.md",
+  "orchestration/orchestrator-loop-tick.md",
 ]);
 
 export interface Violation {

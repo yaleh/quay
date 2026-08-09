@@ -78,6 +78,11 @@ export function exclusionEntries(repoRoot, pluginDir) {
       target: path.join(repoRoot, 'orchestration', 'orchestrator-loop-tick.md'),
       reason: "deployed copy of the outer tick-doc template — its template-params NOTE documents the TARGET layout (same class as plugin/loop/, excluded below)",
     },
+    {
+      rel: 'plugin/scripts/adr016-screen-use-check.ts',
+      target: path.join(pluginDir, 'scripts', 'adr016-screen-use-check.ts'),
+      reason: "ADR-016 screen-use check's MD_TICK_DOCS scans the DEPLOYED tick-doc copies (incl. orchestration/orchestrator-loop-tick.md) for the md5(capture-pane) anti-pattern — a target-layout reference to a live deployed doc, not a stale source-copy reference (surfaced by the AC1b scan 2026-08-09 on the converged tree: the adr016-md5-ban scope-gap fan-in added MD_TICK_DOCS after the exclusion table was built)",
+    },
     { rel: 'test/cold-start-e2e.sh', target: path.join(repoRoot, 'test', 'cold-start-e2e.sh'), reason: 'target layout (asserts the laid-down project)' },
     { rel: 'test/cold-start-oneliner-e2e.sh', target: path.join(repoRoot, 'test', 'cold-start-oneliner-e2e.sh'), reason: 'AC8d target-layout paths (the cold start operates on orchestration/ + docs/analysis/)' },
     { rel: 'plugin/skills/init/SKILL.md', target: path.join(pluginDir, 'skills', 'init', 'SKILL.md'), reason: "mapping table's target column" },
