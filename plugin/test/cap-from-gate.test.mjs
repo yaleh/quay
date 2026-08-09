@@ -392,6 +392,41 @@ test("BUDGET — the effective cap is bounded by the cross-layer total process b
   assert.equal(constrained.effective_cap, 1, "available=1 ⇒ cap bounded to 1");
 });
 
+// ── SEAM HERMETICITY (round-5 red, cluster B): the injected nproc seam wins over the ambient ────────
+// The round-5 failure mode was "注入的 hermetic 信号在套件满载时被真实负载信号覆盖 (seam 忽略)": the
+// suite runs inside a systemd-run --user --scope with CPUQuota=200% → `nproc` reads 2 inside the scope
+// (vs 4 on the host), so a budget read that DIDN'T honor RESOURCE_GATE_TEST_NPROC collapsed the
+// effective cap to min(GO_band, 2) = 2 instead of the injected 3. The red-window #10 pin at the file
+// top (process.env.RESOURCE_GATE_TEST_NPROC = "4") feeds every `{ ...process.env, ... }` env object;
+// THIS test seals the seam explicitly by injecting a value PROVABLY different from the ambient nproc
+// and asserting the injected value flows through process-budget.sh AND the full cap decision. If the
+// seam is ever ignored, the assertion fails loudly (total_budget would read ambient ≠ injected).
+test("SEAM (round-5 red, cluster B) — RESOURCE_GATE_TEST_NPROC overrides the ambient nproc end-to-end (process-budget.sh + computeEffectiveCap)", () => {
+  const ambient = Number(spawnSync("nproc", { encoding: "utf8" }).stdout.trim());
+  assert.ok(Number.isFinite(ambient) && ambient > 0, `ambient nproc must be readable, got ${ambient}`);
+  // Deliberately NON-ambient so a seam-ignoring read (which falls back to ambient nproc) fails loudly.
+  const injected = ambient === 4 ? 3 : 4;
+  assert.notEqual(injected, ambient, "the injected total_budget must differ from ambient nproc (the seal is only provable when injected ≠ ambient)");
+  // (a) process-budget.sh (the single budget authority) honors the seam.
+  const budgetEnv = { ...process.env, RESOURCE_GATE_TEST_NPROC: String(injected), RESOURCE_GATE_TEST_NODE_PROCS: "0" };
+  const budget = spawnSync("bash", [path.join(REPO_ROOT, "plugin", "scripts", "process-budget.sh")], { cwd: REPO_ROOT, encoding: "utf8", env: budgetEnv });
+  assert.equal(budget.status, 0, `process-budget.sh must exit 0\n${budget.stdout}${budget.stderr}`);
+  assert.match(budget.stdout, new RegExp(`total_budget=${injected}`), `injected RESOURCE_GATE_TEST_NPROC=${injected} must win over ambient nproc=${ambient}, got:\n${budget.stdout}`);
+  assert.match(budget.stdout, new RegExp(`available=${injected}`), `available = total_budget − in_use = ${injected} − 0`);
+  // (b) the full cap decision (the mechanism the tick actually calls) honors the seam.
+  const state = tmpState("seam");
+  const cap = computeEffectiveCap({
+    repoRoot: REPO_ROOT,
+    stateFile: state,
+    bands: TEST_BANDS,
+    env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "12", RESOURCE_GATE_TEST_NODE_PROCS: "0", RESOURCE_GATE_TEST_NPROC: String(injected) },
+  });
+  assert.equal(cap.band, "GO");
+  assert.equal(cap.budget_total, injected, `budget_total must be the injected ${injected} (ambient is ${ambient})`);
+  assert.equal(cap.budget_available, injected, "budget_available = injected total_budget − 0 in_use");
+  assert.equal(cap.effective_cap, Math.min(TEST_BANDS.go, injected), `GO cap under the seam = min(go=${TEST_BANDS.go}, injected=${injected})`);
+});
+
 // ── AC4: configurable bands ────────────────────────────────────────────────────────────────────────
 test("AC4 — readBandsFromConfig: defaults 5/2/1; a config override takes effect", (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "capfg-cfg-"));
