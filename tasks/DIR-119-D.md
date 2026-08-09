@@ -3,7 +3,7 @@ id: DIR-119-D
 title: Literally wire phase-DAG Build, read-only audit shards, and deterministic
   Reconcile into execute-milestone.js; add real manifest phase/shard synthesis;
   fix Gate-failure task attribution
-status: done
+status: needs-human
 labels:
   - milestone-candidate
   - human-steered

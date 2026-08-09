@@ -2,7 +2,7 @@
 id: DIR-100-C
 title: "Diagnostic output channel: QUAY_GATE_DIAGNOSTICS (stderr/quiet/file) +
   severity taxonomy + stderr routing"
-status: todo
+status: done
 labels:
   - directive
   - human-steered
@@ -132,6 +132,9 @@ Standard inherited-core DoD clauses apply.
 ## Human verification
 
 1. Does the env var control the channel, and does `gate --list` stdout stay byte-identical?
+
+**needs-human 时效性分诊关闭（2026-08-09，outer 依人裁定执行；判定：feature landed: QUAY_GATE_DIAGNOSTICS output channel (stderr/quiet/file) + severity taxonomy (error=not-registered / warn=extra-fields) in loader.ts (3 markers) + gate-diagnostics.test.mjs; commit M228.）**
+全文见 git 历史（`git log -p -- tasks/DIR-100-C.md`）。
 
 ## Touches
 

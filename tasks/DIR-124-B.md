@@ -11,8 +11,7 @@ children:
   - DIR-124-B1
   - DIR-124-B2
   - DIR-124-B3
-  - DIR-124-B4
-extra:
+  extra:
   dirStatus: applied
   schema: v1
 ---
