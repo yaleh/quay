@@ -146,6 +146,16 @@ names `session-bootstrap.sh` as the bare-metal step in its Preconditions and in 
 - [ ] Task body records: this closes the gap `quay:cold-start`'s own docs name ("now it is truly
       one command — before, it was 'hand-build the session, then one command'")
 
+## Contract
+
+measure   bootstrap_script = `test -f plugin/scripts/session-bootstrap.sh && grep -c 'verify' plugin/scripts/session-bootstrap.sh` 的计数
+band      bootstrap_script = ≥ 1（脚本存在且含 liveness verify）
+invariant idempotent = 1（重复运行不重复建窗口、不杀活进程）
+invariant fail_closed = 1（任一窗口进程失败即非零退出并指名窗口）
+invoke    `bash scripts/test.sh --for-task gap-no-formalized-bare-metal-session-bootstrap`
+control   scoped 门绿；AC1-AC3 实跑输出已贴任务体
+resume    script + 测试 + SKILL 接线分步提交
+
 ## Touches
 
 - tasks/gap-no-formalized-bare-metal-session-bootstrap.md

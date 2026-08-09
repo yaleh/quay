@@ -68,6 +68,16 @@ on itself is the SPEC's explicit first proof point, not a parallel rollout.
 - [ ] Parent task [[gap-quay-has-never-self-hosted-its-own-cold-start]]'s own AC2/DoD table updated
       to point at this evidence
 
+## Contract
+
+measure   six_keys_true = `grep -c 'true' docs/analysis/quay-self-cold-start-proof.md` 输出的计数（六键表 true 行数）
+band      six_keys_true = 6（六键全 true）
+invariant self_certify = 1（无 human-in-the-loop 验证步——AC2）
+invariant negative_control = 1（与 two-oom-recoveries-compared.md 手动时间线对照——AC3）
+invoke    `bash scripts/test.sh --for-task gap-quay-self-hosting-e2e-proof`
+control   六键表全 true 贴任务体；任一 false 路由回对应前置任务
+resume    前置四任务全 done 后才 dispatch；证据 doc 落盘
+
 ## Touches
 
 - plugin/skills/cold-start/SKILL.md

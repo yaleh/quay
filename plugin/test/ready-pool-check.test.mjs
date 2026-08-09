@@ -493,6 +493,33 @@ test("artifactsComplete is shape-aware and content-gated", () => {
   assert.equal(artifactsComplete("## Some unknown heading\ncontent").complete, false);
 });
 
+test("artifactsComplete recognizes finding-shape draft AC/DoD headings (gap-todo-shape-mismatch-author-gate)", () => {
+  // The 9 finding-shape gap-* tasks use `## AC（draft）` / `## DoD（draft）` (full-width parens) or
+  // `## AC (draft)` (half-width parens) for their AC/DoD sections. The `（draft）` suffix is a
+  // heading-label convention, not an absent section — the four-artifacts gate must count these
+  // sections or those todo tasks are wrongly ineligible for author→ready promotion.
+  const finding = "## Finding\nA real finding paragraph that is definitely more than forty non-whitespace characters long.";
+  const acDraft = "## AC（draft）\n- [ ] the first draft acceptance item whose text is definitely longer than forty characters";
+  const dodDraft = "## DoD（draft）\n- [ ] the first draft done item whose text is definitely longer than forty characters";
+  const fullWidth = finding + "\n" + acDraft + "\n" + dodDraft;
+  const rFull = artifactsComplete(fullWidth);
+  assert.equal(rFull.complete, true, `full-width draft headings should complete, got ${JSON.stringify(rFull.missing)}`);
+  assert.deepEqual(rFull.missing, []);
+
+  // Half-width parens need literal (regex-escaped) heading matching — `AC (draft)` must not be
+  // interpreted as a regex capture group.
+  const halfWidth = finding + "\n" + acDraft.replace("（draft）", " (draft)") + "\n" + dodDraft.replace("（draft）", " (draft)");
+  const rHalf = artifactsComplete(halfWidth);
+  assert.equal(rHalf.complete, true, `half-width draft headings should complete, got ${JSON.stringify(rHalf.missing)}`);
+  assert.deepEqual(rHalf.missing, []);
+
+  // A finding-shape task WITHOUT any AC section still fails closed (missing ac+dod).
+  const noAc = finding + "\n## Proposal\nA proposal paragraph that is more than forty non-whitespace chars.";
+  const rNoAc = artifactsComplete(noAc);
+  assert.equal(rNoAc.complete, false);
+  assert.ok(rNoAc.missing.includes("ac"), `missing should include ac, got ${rNoAc.missing}`);
+});
+
 // ── AC1: floor = cap × 4 (12 at cap 3) — single source, no hardcoded 3 ────────────────────────────
 
 test("POOL_FLOOR = cap × 4 (12 at cap 3) — single source, no hardcoded 3 (AC1)", () => {
