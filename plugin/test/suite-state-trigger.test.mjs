@@ -346,7 +346,7 @@ test("AC6 unit — detectCrashedRunner: a running state with a DEAD pid is crash
   assert.equal(detectCrashedRunner(null), null, "absent state is not crashed");
 });
 
-test("AC6 unit — detectCrashedRunner: a legacy running state (no pid) falls back to a stale-AGE threshold", () => {
+test("AC6 unit — detectCrashedRunner: a NO-PID running state is NEVER judged crashed on age (fail-open, even when stale)", () => {
   const now = Date.now();
   // fresh legacy running state (no pid, < RUNNING_STALE_MS old) ⇒ fail-open toward running
   assert.equal(
@@ -357,13 +357,15 @@ test("AC6 unit — detectCrashedRunner: a legacy running state (no pid) falls ba
     null,
     "a fresh legacy running state is treated as in-progress (no pid yet — fail-open)",
   );
-  // stale legacy running state (> RUNNING_STALE_MS old) ⇒ crashed (the pre-fix leftover shape)
+  // STALE legacy running state (> RUNNING_STALE_MS old) ⇒ STILL not crashed: without a pid we cannot
+  // confirm the runner is dead, so the watchdog fails open toward "running" regardless of age
+  // (gap-suite-state-trigger-crash-watchdog-breaks-running-transition-test — the pre-fix stale-AGE
+  // fallback misjudged red-window-shared-gate AC3's no-pid old-startedAt fixture as a dead runner).
   const stale = detectCrashedRunner(
     { state: "running", startedAt: new Date(now - RUNNING_STALE_MS - 1000).toISOString() },
     now,
   );
-  assert.ok(stale, "a stale legacy running state is detected as crashed");
-  assert.equal(stale.reason, "crashed");
+  assert.equal(stale, null, "a stale no-pid legacy running state is NOT crashed (fail-open, no age heuristic)");
   // a legacy state with an unparseable startedAt is also treated as in-progress (fail-open)
   assert.equal(detectCrashedRunner({ state: "running", startedAt: "not-a-date" }, now), null);
 });

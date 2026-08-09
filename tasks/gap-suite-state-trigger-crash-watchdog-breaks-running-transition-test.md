@@ -45,11 +45,30 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 round-192 实证 + 最小复现（首读 running 发 SUITE-RED）+ 根因（detectCrashedRunner 无 pid 老 startedAt 判 dead）（本任务 Proposal 已含）
-- [ ] AC2: **watchdog 修正**——无 pid 的 running state 不误判 crashed（保守 fail-open），真实 crashed（pid 死）仍检出
-- [ ] AC3: **AC3 测试绿**——red-window-shared-gate.test.mjs AC3 running→red 转变触发 SUITE-RED
-- [ ] AC4: **真实崩溃仍检出**——构造 pid 死 ⇒ watchdog 写 crashed（负控制保留 AC6 能力）
-- [ ] AC5: **既有不回归**——`--for-task` scoped 门绿（suite-state-trigger + red-window-shared-gate 测试）
+- [x] AC1: **复现固化**——任务体记录 round-192 实证 + 最小复现（首读 running 发 SUITE-RED）+ 根因（detectCrashedRunner 无 pid 老 startedAt 判 dead）（本任务 Proposal 已含）
+- [x] AC2: **watchdog 修正**——无 pid 的 running state 不误判 crashed（保守 fail-open），真实 crashed（pid 死）仍检出
+- [x] AC3: **AC3 测试绿**——red-window-shared-gate.test.mjs AC3 running→red 转变触发 SUITE-RED
+- [x] AC4: **真实崩溃仍检出**——构造 pid 死 ⇒ watchdog 写 crashed（负控制保留 AC6 能力）
+- [x] AC5: **既有不回归**——`--for-task` scoped 门绿（suite-state-trigger + red-window-shared-gate 测试）
+
+## Evidence（内层实现 2026-08-09）
+
+**根因**：`plugin/scripts/suite-state-trigger.ts` 的 AC6 crash-watchdog（7d0311cf，gap-full-suite-state-red-no-failure-detail-static-check-invisible）在 `detectCrashedRunner` 里对**无 pid** 的 `running` state 用了「startedAt 距今 ≥ RUNNING_STALE_MS(60min) ⇒ crashed」的 stale-AGE 启发式。测试 fixture（red-window-shared-gate.test.mjs 的 `state()` helper）的 `startedAt` 固定为 `2026-08-05T06:00:00.000Z`（4 天前）且无 pid ⇒ 首读 running 就被 watchdog 改写成 red reason=crashed 并发 SUITE-RED；第二轮真 red 无转变 ⇒ AC3（running→red 转变触发 SUITE-RED）失败。
+
+**修法（候选修法 3）**：crash-watchdog 的唯一判死判据改为「**有 pid 且进程死**」。`detectCrashedRunner` 对无 pid 的 running state（legacy / 测试 fixture / 手工写入）**一律不判 crashed**（fail-open，不看 startedAt 年龄）——无 pid 无法确认真死，宁可不误杀。RUNNING_STALE_MS 保留为导出常量（文档/兼容），watchdog 不再读它。
+
+**改动**：
+- `plugin/scripts/suite-state-trigger.ts`：`detectCrashedRunner` 重写（no-pid ⇒ null；pid 活 ⇒ null；pid 死 ⇒ crashed）+ 块注释/RUNNING_STALE_MS 文档更新。
+- `plugin/test/suite-state-trigger.test.mjs`：AC6 unit 「no-pid running falls back to stale-AGE threshold」改为「no-pid running **永不** 按年龄判 crashed（stale 也不判）」，保留 `crashed_still_detected` 正控与 live-pid 负控。
+- `plugin/test/red-window-shared-gate.test.mjs`：未改（回归验证目标）。
+
+**验证**：
+- Contract measure `rwsg_ac3_red_after_fix` = `0`（red-window-shared-gate AC3 绿）。
+- Contract invoke（`node --test plugin/test/red-window-shared-gate.test.mjs plugin/test/suite-state-trigger.test.mjs`）：**33/33 pass, fail 0, cancelled 0**。
+- `crashed_still_detected` = 1（dead pid ⇒ state=red reason=crashed）；`nopid_running_not_crashed` = 1（no-pid 老 startedAt ⇒ null）；live-pid 负控 = 1。
+- 最小复现（task Proposal）：首读 running（无 pid 老 startedAt）⇒ `SUITE-RUNNING`（修前 SUITE-RED）；第二轮 red ⇒ `SUITE-RED`。
+- 基座对齐：本 worktree 从 develop fork，缺 7d0311cf 的 watchdog 代码；已将 `suite-state-trigger.ts` / `suite-state-trigger.test.mjs` 的 integration（=7d0311cf）版本带入作为基座再修正（full-suite-runner.ts 未触碰，不在本任务 Touches）。
+- scoped 门：`bash scripts/test.sh --for-task gap-suite-state-trigger-crash-watchdog-breaks-running-transition-test --allow-thin` 见下节实跑结果。
 
 ## Definition of Done
 
