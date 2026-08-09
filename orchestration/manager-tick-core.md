@@ -26,6 +26,10 @@
 | A7 | 套件末轮:读 `.quay/verification-round.jsonl` **末行** | **单状态文件只答「此刻在跑什么」,不答「第 N 轮结果」**(它每轮覆盖) |
 | A8 | `git status --porcelain \| wc -l` | 脏树 |
 | A9 | `meta-cc query_session_content role=tool tool_name=Workflow` → `last(timestamp)` | §2.4c;>3 个 tick 周期未调用 ⇒ 写明「已停用/已替代/是缺陷」三选一 |
+| A10 | 我跑的 `session-liveness` 是不是旧版 | 逐行 `ps` 看进程与其脚本路径(C1);**版本落后 = 观测的是未修版**(档案 §1.4) |
+| A11 | `Monitor` 工具任务是否还活着 | 它们不在 A10 的覆盖里;**本轮发过事件即为存活证据**(档案 §1.4e) |
+| A12 | 聚合升级项 + 资源仲裁与排序 | 三项目横向;无新项也要写「无」(档案 §1.c/§1.d) |
+| A13 | 本轮抛给人的「可自判」问题计数 | 机械计数,写进账本;判据见 C8(档案 §⑧) |
 
 ## B. 每轮必产出
 
