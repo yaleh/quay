@@ -109,7 +109,15 @@ export type SuiteStateValue = "running" | "green" | "red";
 // shouldDispatchOnRed, the inner stop-condition) can distinguish a static-check red from a
 // test-failure red: both stop dispatch (static checks ARE the shared gate), but the triage differs
 // (static-check red ⇒ fix the contract, not roll back code).
-export type SuiteStateReason = "failed" | "aborted" | "infra-error" | "static-check" | "timeout" | "hung";
+// gap-full-suite-state-red-no-failure-detail-static-check-invisible AC6 — "crashed" (the RUNNER died
+// mid-run — SIGKILL / uncaught exception / unhandled rejection — and left NO correctness conclusion
+// on disk). Same family as aborted/failed (a terminal red), but distinct: "aborted" = the runner saw
+// a signal and deliberately wrote a terminal state; "crashed" = the runner died WITHOUT writing
+// (SIGKILL is uncatchable in-process; the terminal state is written by suite-state-trigger's
+// crash-watchdog on the next read, or by the runner's own uncaughtException handler for catchable
+// crashes). Consumers route it like aborted (no correctness conclusion ⇒ no code-risk stop-dispatch),
+// but the reason lets them distinguish "deliberately stopped" from "died silently" and re-launch.
+export type SuiteStateReason = "failed" | "aborted" | "infra-error" | "static-check" | "timeout" | "hung" | "crashed";
 
 /**
  * One detected suite failure — the FAILURE LOCATION for the red-window dispatch decision
@@ -235,6 +243,14 @@ export interface SuiteState {
    * the static-check violation details (AC4 candidate B), each marked `staticCheck: true`.
    */
   staticCheck?: SuiteStateStaticCheck;
+  /**
+   * gap-full-suite-state-red-no-failure-detail-static-check-invisible AC6 — the RUNNER's PID, written
+   * on EVERY state (via the `base` object) so a consumer (suite-state-trigger's runOnce crash-watchdog)
+   * can tell "the suite is genuinely running" (PID alive ⇒ `process.kill(pid, 0)` does not throw ESRCH)
+   * from "the runner died mid-run" (PID dead — SIGKILL, which NO in-process handler can catch). Absent
+   * on legacy states ⇒ the watchdog falls back to a stale-AGE threshold before declaring a crash.
+   */
+  pid?: number;
 }
 
 // AC2 — failure markers that flip state to red the MOMENT they appear on the suite's
@@ -887,6 +903,11 @@ export async function run(argv: string[]): Promise<number> {
     laneCount,
     scope,
     runId,
+    // AC6 (gap-full-suite-state-red-no-failure-detail-static-check-invisible): every state write
+    // carries the RUNNER's PID so suite-state-trigger's runOnce crash-watchdog can distinguish
+    // "genuinely running" (PID alive) from "runner died mid-run" (PID dead — SIGKILL is uncatchable
+    // in-process, so the terminal crashed state is written by the watchdog, not the dying process).
+    pid: process.pid,
     ...(useSystemdRun
       ? { systemdRun: { applied: true as const, memoryMax: systemdLimits.memoryMax, cpuQuota: systemdLimits.cpuQuota, tasksMax: systemdLimits.tasksMax } }
       : {}),
@@ -924,6 +945,43 @@ export async function run(argv: string[]): Promise<number> {
   // establish: this running write is UNGUARDED — it (re)establishes the generation, so a newer
   // runner can always take over from a stale/legacy state.
   writeSuiteState({ state: "running", ...base, finishedAt: null, durationMs: null }, { establish: true });
+
+  // AC6 (gap-full-suite-state-red-no-failure-detail-static-check-invisible) — in-process crash
+  // terminal state: an uncaught exception / unhandled rejection must NOT leave state=running on disk
+  // forever (consumers would keep thinking the suite is in flight while the runner is dead). These
+  // handlers write a terminal state=red reason=crashed BEFORE exiting. SIGKILL cannot be caught
+  // in-process — that path is covered by suite-state-trigger's runOnce crash-watchdog (PID-liveness
+  // check, next read). The handlers are removed right after the normal terminal verdict write so a
+  // late error in post-verdict teardown can never overwrite the correct green/red with a spurious
+  // crashed.
+  const writeCrashTerminal = (err: unknown) => {
+    const at = new Date().toISOString();
+    process.stderr.write(
+      `full-suite-runner: uncaught ${err instanceof Error ? err.message : String(err)} -> state=red reason=crashed (runner died mid-run)\n`,
+    );
+    try {
+      writeSuiteState({
+        state: "red",
+        reason: "crashed",
+        ...base,
+        finishedAt: toEpochSeconds(at),
+        durationMs: Date.parse(at) - Date.parse(startedAt),
+      });
+    } catch {
+      // best-effort — never mask the original crash with a write failure
+    }
+    process.exit(1);
+  };
+  process.once("uncaughtException", writeCrashTerminal);
+  process.once("unhandledRejection", writeCrashTerminal);
+  // Test seam (hermetic, never set in production): throw an uncaught exception shortly after the
+  // `running` write so the AC6 in-process crash-terminal path is exercised deterministically (the
+  // handler above must write state=red reason=crashed before the process dies).
+  if (process.env.QUAY_TEST_CRASH_AFTER_RUNNING === "1") {
+    setTimeout(() => {
+      throw new Error("QUAY_TEST_CRASH_AFTER_RUNNING");
+    }, 30);
+  }
 
   // gap-resource-gate-no-single-flight-lock-two-suite-overlap: the SINGLE-FLIGHT mutual exclusion is
   // enforced inside scripts/test.sh's full-suite default path (`full_suite_lock_acquire` on a flock
@@ -1362,6 +1420,12 @@ export async function run(argv: string[]): Promise<number> {
           : {}),
       };
   writeSuiteState(finalState);
+  // AC6 (gap-full-suite-state-red-no-failure-detail-static-check-invisible) — the verdict is on disk;
+  // a late error in the post-verdict teardown (measure-history, ledger append, final stderr) must not
+  // overwrite the correct green/red with a spurious crashed. Remove the crash handlers so any error
+  // here reverts to the default crash behavior — the state is already terminal.
+  process.removeListener("uncaughtException", writeCrashTerminal);
+  process.removeListener("unhandledRejection", writeCrashTerminal);
   // AC6 — append the run to the suite-duration SEQUENCE (never overwrite the single-state file).
   // The full-suite-state.json's durationMs is this run's point value; verification-round.jsonl keeps
   // the history so the sequence survives rounds (gap-no-criterion-records-its-own-cost AC6).

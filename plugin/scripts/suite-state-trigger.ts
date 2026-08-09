@@ -19,11 +19,18 @@
 //         节奏仍唯一（外层 `*/20` cron）。
 //
 // 状态文件（输入，well-known 位置）：<root>/.quay/full-suite-state.json
-//   {state: running|green|red, reason?: failed|aborted|infra-error, runner, startedAt, finishedAt,
-//    durationMs, laneCount}
-//   —— (a) 块的 full-suite-runner.ts 写它；本脚本只读。`reason` 只在 red 时出现（原因轴，AC5/AC1）：
+//   {state: running|green|red, reason?: failed|aborted|infra-error|static-check|crashed, runner,
+//    startedAt, finishedAt, durationMs, laneCount, pid?}
+//   —— (a) 块的 full-suite-runner.ts 写它；本脚本只读（AC6 例外：见下）。`reason` 只在 red 时出现
+//      （原因轴，AC5/AC1）：
 //      failed（真实失败——stop-dispatch 信号）/ aborted（无正确性结论——不触发停派）/
-//      infra-error（环境问题——同样不触发代码风险停派）。
+//      infra-error（环境问题——同样不触发代码风险停派）/ static-check（静态检查违规——停派）/
+//      crashed（runner 死在中途——无正确性结论，不触发停派）。
+//   —— AC6 例外（gap-full-suite-state-red-no-failure-detail-static-check-invisible）：本脚本在
+//      runOnce 轮询里增加 crash-watchdog——读到 state=running 且其 runner PID 已死（SIGKILL——
+//      进程内 handler 抓不到的硬杀）时，把 state 写成终态 red reason=crashed（generation-guarded）。
+//      这是「跑着」与「死了」在 state 文件上可区分的唯一机制（runner 自己被 kill 时无法自写）。
+//      角色边界不变：这不是新决策，只是把「runner 死了却没写终态」翻译成 state 上的事实。
 //
 // 记忆文件（本脚本自己的上次观测）：<root>/.quay/suite-state-last.json  —— 跨重启保持「上一个状态」，
 //   使「冷启动即红」（外层 /clear 后重启、套件仍红）也能被检测为一次转变并触发 SUITE-RED。
@@ -57,7 +64,13 @@ export type SuiteStateValue = "running" | "green" | "red";
 // test-isolation ratchet — NOT a test failure). Consumers can distinguish a static-check red from a
 // test-failure red: both stop dispatch (static checks ARE the shared gate), but the triage differs
 // (static-check red ⇒ fix the contract, not roll back code).
-export type SuiteStateReason = "failed" | "aborted" | "infra-error" | "static-check";
+// gap-full-suite-state-red-no-failure-detail-static-check-invisible AC6 — "crashed" (the RUNNER died
+// mid-run without writing a terminal state — SIGKILL / uncaught exception — leaving state=running on
+// disk). Same family as aborted/failed (a terminal red), but distinct: it is written by THIS module's
+// crash-watchdog (runOnce detects a running state whose runner PID is dead) or by the runner's own
+// uncaughtException handler. Reroutes like aborted (no correctness conclusion ⇒ no code-risk stop),
+// but tells the consumer the suite died silently and must be re-launched, not triaged.
+export type SuiteStateReason = "failed" | "aborted" | "infra-error" | "static-check" | "crashed";
 
 /**
  * One detected suite failure — the FAILURE LOCATION for the red-window dispatch decision
@@ -127,6 +140,15 @@ export interface SuiteState {
    * check red (fix the contract) without hand-digging the log.
    */
   staticCheck?: SuiteStateStaticCheck;
+  /**
+   * gap-full-suite-state-red-no-failure-detail-static-check-invisible AC6 — the full-suite-runner's
+   * PID, written on every state (via its `base` object). This module's runOnce crash-watchdog reads
+   * it to tell "the suite is genuinely running" (PID alive) from "the runner died mid-run" (PID dead
+   * — SIGKILL, which no in-process handler can catch) and writes a terminal reason=crashed state so
+   * `running` never persists after the runner is dead. Absent on legacy states ⇒ the watchdog falls
+   * back to a stale-AGE threshold before declaring a crash.
+   */
+  pid?: number;
 }
 
 /** The AC2 reason-axis route a red state takes (gap-suite-state-has-no-reason-axis-failed-aborted-infra). */
@@ -149,11 +171,17 @@ export type RedRoute = "red-window-triage" | "resource-gate" | "proceed";
  *   - red + reason=infra-error (environment problem — neither a code failure nor a deliberate abort)
  *     ⇒ "resource-gate" too: it carries no code-failure conclusion, so it must not stop dispatch on
  *     code risk either.
+ *   - red + reason=crashed (gap-full-suite-state-red-no-failure-detail-static-check-invisible AC6 —
+ *     the runner died mid-run without writing a correctness conclusion; the terminal state was
+ *     written by this module's crash-watchdog or the runner's uncaughtException handler) ⇒
+ *     "resource-gate" too: NO correctness conclusion, so it must not stop dispatch on code risk.
+ *     The distinct reason value still lets the consumer distinguish "deliberately aborted" from
+ *     "died silently" (⇒ re-launch the suite).
  *   - non-red / absent state file ⇒ "proceed".
  */
 export function routeRed(state: SuiteState | null): RedRoute {
   if (!state || state.state !== "red") return "proceed";
-  if (state.reason === "aborted" || state.reason === "infra-error") return "resource-gate";
+  if (state.reason === "aborted" || state.reason === "infra-error" || state.reason === "crashed") return "resource-gate";
   return "red-window-triage";
 }
 
@@ -332,6 +360,72 @@ export function readSuiteState(root: string): SuiteState | null {
   return readJson<SuiteState>(statePath(root));
 }
 
+// ── AC6 crash-watchdog (gap-full-suite-state-red-no-failure-detail-static-check-invisible) ──────────
+// A `running` state whose RUNNER is no longer alive must not stay `running` forever — consumers
+// cannot distinguish "suite running" from "runner died mid-run" (the proposal-convergence deadlock:
+// state stuck at running mtime=23:16, never a terminal state, consumers kept thinking it was in
+// flight). SIGKILL is uncatchable in-process, so the dying runner CANNOT write the terminal state
+// itself — this watchdog (driven by the always-on runOnce poll) is the only mechanism that can.
+//   - the runner writes `pid` on every state (post-fix); a running state whose PID is dead ⇒ crashed.
+//   - legacy running states (no pid, written before the fix) fall back to a stale-AGE threshold.
+// The threshold is generous (60 min): the runner's own max-runtime guard kills the child tree and
+// writes a terminal state at 45 min, so a LIVE runner can never exceed it — a pid-absent running
+// state older than it is almost certainly a dead-runner leftover.
+export const RUNNING_STALE_MS = 60 * 60_000;
+
+/** Is a process with this PID currently alive? (ESRCH = no such process = dead; EPERM = exists but not ours = alive.) */
+export function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+/**
+ * AC6 — given a `running` state, return the terminal `crashed` state when the RUNNER is dead
+ * (SIGKILL / uncaught crash left `running` on disk), else null (genuinely running). A running state
+ * with a LIVE PID is always treated as in-progress regardless of age; a pid-absent legacy running
+ * state is crashed only once it is older than RUNNING_STALE_MS (see the block comment above).
+ */
+export function detectCrashedRunner(state: SuiteState | null, now = Date.now()): SuiteState | null {
+  if (!state || state.state !== "running") return null;
+  const startedAtMs = typeof state.startedAt === "string" ? Date.parse(state.startedAt) : NaN;
+  if (typeof state.pid === "number" && Number.isFinite(state.pid) && state.pid > 0) {
+    if (isProcessAlive(state.pid)) return null; // the runner is genuinely alive — still running
+  } else if (!Number.isFinite(startedAtMs) || now - startedAtMs < RUNNING_STALE_MS) {
+    return null; // legacy running state (no pid) too fresh to call dead — fail-open toward "running"
+  }
+  const atIso = new Date(now).toISOString();
+  return {
+    ...state,
+    state: "red",
+    reason: "crashed",
+    finishedAt: Math.floor(now / 1000), // epoch seconds — same unit the runner's terminal writes use
+    durationMs: Number.isFinite(startedAtMs) ? now - startedAtMs : null,
+  };
+}
+
+/**
+ * AC6 — write the crash-watchdog's terminal state to disk, guarded: the file is only overwritten if
+ * it STILL holds the SAME run's `running` state (a newer runner may have established a new generation
+ * since our read — the watchdog must never clobber it). Fail-open: a write failure never crashes the
+ * trigger loop (a later poll retries).
+ */
+function writeCrashState(root: string, crashed: SuiteState): void {
+  try {
+    const p = statePath(root);
+    const onDisk = readJson<SuiteState>(p);
+    if (!onDisk || onDisk.state !== "running") return; // already terminal / absent — nothing to do
+    if (crashed.runId && onDisk.runId !== crashed.runId) return; // newer generation owns the file
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p, JSON.stringify(crashed, null, 2) + "\n", "utf8");
+  } catch {
+    // best-effort — the watchdog is a notifier, never a gate
+  }
+}
+
 /**
  * 记录一条转变事件到 append-only 日志（measure 钩子）。无转变 = 不写，返回 null。
  * 写日志不是「决策」——它是状态变化的事实记录，处置决策由外层既有逻辑做（AC2/AC4）。
@@ -377,7 +471,24 @@ export function recordTransition(
 export function runOnce(root: string): RunOnceResult {
   const memo = readJson<{ state: SuiteStateValue | null }>(memoPath(root));
   const prev: SuiteStateValue | null = memo?.state ?? null;
-  const cur = readSuiteState(root);
+  let cur = readSuiteState(root);
+
+  // AC6 (gap-full-suite-state-red-no-failure-detail-static-check-invisible) — crash-watchdog: a
+  // `running` state whose RUNNER is dead (SIGKILL / uncaught crash) must not stay `running` forever.
+  // Detect it, write the terminal reason=crashed state, and let the normal transition machinery fire
+  // SUITE-RED so every consumer (inner stop-condition / suite-state-trigger / outer tick) sees the
+  // death on the STATE file itself, not only in its own in-memory read. stopSignal stays false
+  // (routeRed routes crashed → resource-gate: no correctness conclusion), and the SUITE-RED event
+  // carries the crashed state so the outer knows to re-launch the suite.
+  if (cur && cur.state === "running") {
+    const crashed = detectCrashedRunner(cur);
+    if (crashed) {
+      writeCrashState(root, crashed);
+      // Re-read so the authoritative on-disk state drives the transition below (a guarded write that
+      // a newer generation refused leaves the file untouched — `cur` stays the live running state).
+      cur = readSuiteState(root) ?? crashed;
+    }
+  }
   const status: SuiteStateValue | "absent" = cur?.state ?? "absent";
 
   const events: SuiteStateEvent[] = [];

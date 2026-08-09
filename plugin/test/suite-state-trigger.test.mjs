@@ -38,11 +38,13 @@ import { fileURLToPath } from "node:url";
 
 import {
   detectSuiteEvent,
+  detectCrashedRunner,
   runOnce,
   writeSuiteState,
   readSuiteEvents,
   shouldStopDispatch,
   routeRed,
+  RUNNING_STALE_MS,
 } from "../scripts/suite-state-trigger.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -68,8 +70,25 @@ function state(over) {
     finishedAt: null,
     durationMs: null,
     laneCount: 8,
+    // AC6 (gap-full-suite-state-red-no-failure-detail-static-check-invisible): every real runner
+    // state carries `pid` (the runner process). A LIVE pid means the watchdog must NOT treat this
+    // running state as crashed — the fixtures default to the live test-process pid so the existing
+    // running-state tests stay green while the new watchdog code path is exercised.
+    pid: process.pid,
     ...over,
   };
+}
+
+/** A PID that is definitely not alive (the crash-watchdog's dead-runner fixture). */
+function deadPid() {
+  for (let p = 4000000; p > 1000; p -= 1) {
+    try {
+      process.kill(p, 0);
+    } catch (e) {
+      if (e.code === "ESRCH") return p;
+    }
+  }
+  throw new Error("could not find a dead pid to test the crash-watchdog");
 }
 
 // ── AC1: RED auto-trigger ───────────────────────────────────────────────────────
@@ -298,4 +317,102 @@ test("AC6 — this file declares node:test and // @test-group governance", () =>
   const src = read(new URL(import.meta.url));
   assert.ok(src.includes('import { test } from "node:test"'), "uses node:test");
   assert.match(src, /^\/\/ @test-group governance/m, "declares @test-group governance");
+});
+
+// ── AC6: crash-watchdog (gap-full-suite-state-red-no-failure-detail-static-check-invisible) ─────────
+// A `running` state whose RUNNER is dead (SIGKILL / uncaught crash — the proposal-convergence
+// deadlock shape: state stuck at running mtime=23:16, never a terminal state) must not stay `running`
+// forever: runOnce must write a terminal reason=crashed state so consumers can tell "running" from
+// "dead" on the STATE FILE itself.
+
+test("AC6 unit — detectCrashedRunner: a running state with a DEAD pid is crashed; a LIVE pid is genuinely running", () => {
+  const iso = new Date().toISOString();
+  // live pid ⇒ genuinely running (never crashed by the watchdog, regardless of age)
+  assert.equal(
+    detectCrashedRunner({ state: "running", pid: process.pid, startedAt: "2020-01-01T00:00:00.000Z" }),
+    null,
+    "a live-pid running state is genuinely in progress (AC6 negative control)",
+  );
+  // dead pid ⇒ terminal crashed red
+  const crashed = detectCrashedRunner({ state: "running", pid: deadPid(), startedAt: iso });
+  assert.ok(crashed, "a dead-pid running state is detected as crashed (AC6)");
+  assert.equal(crashed.state, "red");
+  assert.equal(crashed.reason, "crashed");
+  assert.equal(typeof crashed.finishedAt, "number", "crashed terminal state has epoch finishedAt");
+  assert.equal(typeof crashed.durationMs, "number", "crashed terminal state has durationMs");
+  // non-running states are never crashed
+  assert.equal(detectCrashedRunner({ state: "green" }), null, "green is not crashed");
+  assert.equal(detectCrashedRunner({ state: "red", reason: "failed" }), null, "red is not crashed");
+  assert.equal(detectCrashedRunner(null), null, "absent state is not crashed");
+});
+
+test("AC6 unit — detectCrashedRunner: a legacy running state (no pid) falls back to a stale-AGE threshold", () => {
+  const now = Date.now();
+  // fresh legacy running state (no pid, < RUNNING_STALE_MS old) ⇒ fail-open toward running
+  assert.equal(
+    detectCrashedRunner(
+      { state: "running", startedAt: new Date(now - RUNNING_STALE_MS / 2).toISOString() },
+      now,
+    ),
+    null,
+    "a fresh legacy running state is treated as in-progress (no pid yet — fail-open)",
+  );
+  // stale legacy running state (> RUNNING_STALE_MS old) ⇒ crashed (the pre-fix leftover shape)
+  const stale = detectCrashedRunner(
+    { state: "running", startedAt: new Date(now - RUNNING_STALE_MS - 1000).toISOString() },
+    now,
+  );
+  assert.ok(stale, "a stale legacy running state is detected as crashed");
+  assert.equal(stale.reason, "crashed");
+  // a legacy state with an unparseable startedAt is also treated as in-progress (fail-open)
+  assert.equal(detectCrashedRunner({ state: "running", startedAt: "not-a-date" }, now), null);
+});
+
+test("AC6 — runOnce crash-watchdog: a dead-runner running state becomes red reason=crashed on the STATE FILE + fires SUITE-RED (no stop signal)", () => {
+  const root = tmpRoot();
+  try {
+    // The proposal-convergence shape: state=running, runner dead, no terminal write ever.
+    writeSuiteState(root, state({ state: "running", pid: deadPid() }));
+    const res = runOnce(root);
+    assert.equal(res.status, "red", "runOnce reports the crashed state as red");
+    assert.equal(res.stopSignal, false, "crashed has no correctness conclusion ⇒ no code-risk stop (same as aborted)");
+    const redEv = res.events.find((e) => e.event === "SUITE-RED");
+    assert.ok(redEv, "the running→crashed death is recorded as a SUITE-RED event");
+    assert.equal(redEv.state?.reason, "crashed", "the SUITE-RED event carries reason=crashed (consumer can re-launch)");
+    assert.equal(redEv.stopSignal, false, "the crashed SUITE-RED event confirms no stop-dispatch");
+    // The STATE FILE itself was rewritten to the terminal crashed state — consumers reading the file
+    // directly (inner stop-condition / suite-state-trigger / outer tick) see the death, not running.
+    const onDisk = JSON.parse(fs.readFileSync(path.join(root, ".quay", "full-suite-state.json"), "utf8"));
+    assert.equal(onDisk.state, "red", "the state FILE is terminal red, not running (AC6 — '跑着' vs '死了' distinguishable)");
+    assert.equal(onDisk.reason, "crashed", "the state FILE carries reason=crashed");
+    // steady state: a second runOnce over the now-crashed state emits no new transition
+    const again = runOnce(root);
+    assert.equal(again.status, "red");
+    assert.deepEqual(again.events, [], "crashed → crashed is a same-state no-transition");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC6 negative control — runOnce does NOT crash a genuinely-running state (live pid): stays running, no SUITE-RED", () => {
+  const root = tmpRoot();
+  try {
+    writeSuiteState(root, state({ state: "running", pid: process.pid }));
+    const res = runOnce(root);
+    assert.equal(res.status, "running", "a live-runner running state stays running (AC6 negative control)");
+    assert.equal(res.stopSignal, false);
+    assert.ok(!res.events.some((e) => e.event === "SUITE-RED"), "no false SUITE-RED for a genuinely-running suite");
+    const onDisk = JSON.parse(fs.readFileSync(path.join(root, ".quay", "full-suite-state.json"), "utf8"));
+    assert.equal(onDisk.state, "running", "the state FILE is untouched (still running)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC6 — routeRed/shouldStopDispatch route crashed like aborted (no code-risk stop); crashed stays distinct from failed/aborted", () => {
+  assert.equal(routeRed({ state: "red", reason: "crashed" }), "resource-gate", "crashed → resource-gate (NOT a code-failure conclusion)");
+  assert.equal(shouldStopDispatch({ state: "red", reason: "crashed" }), false, "crashed does NOT stop dispatch");
+  assert.equal(shouldStopDispatch({ state: "red", reason: "failed" }), true, "failed still stops (unchanged)");
+  assert.equal(shouldStopDispatch({ state: "red", reason: "static-check" }), true, "static-check still stops (unchanged)");
+  assert.equal(shouldStopDispatch({ state: "red", reason: "aborted" }), false, "aborted does NOT stop (unchanged)");
 });
