@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-09T09:53:04.597Z",
+  "generatedAt": "2026-08-09T14:01:37.833Z",
   "since": null,
   "tasks": [
     {
@@ -852,14 +852,51 @@
       "outcome": "done"
     }
   ],
-  "inProgress": [],
+  "inProgress": [
+    {
+      "taskId": "DIR-043",
+      "runId": "fm-DIR-043-1786276079696-281gaz",
+      "startedAtMs": 1786276079708,
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-install-family-tests-rotate-flakes-under-full-suite",
+      "runId": "fm-gap-install-family-tests-rotate-flakes-under-full-suite-1786279440586-dcmvkq",
+      "startedAtMs": 1786279440610,
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-merge-introduced-referenced-not-landed-manager-tick-log",
+      "runId": "fm-gap-merge-introduced-referenced-not-landed-manager-tick-log-1786276079248-twp3n8",
+      "startedAtMs": 1786276079261,
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-proposal-convergence-load-flake-20-child-concurrency",
+      "runId": "fm-gap-proposal-convergence-load-flake-20-child-concurrency-1786281235151-3yj8qk",
+      "startedAtMs": 1786281235170,
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-round5-red-killtimeout-sigkill-and-capfromgate-seam-under-load",
+      "runId": "fm-gap-round5-red-killtimeout-sigkill-and-capfromgate-seam-under-load-1786276078559-t84bel",
+      "startedAtMs": 1786276078570,
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-serial-phase-install-test-residue-dependency",
+      "runId": "fm-gap-serial-phase-install-test-residue-dependency-1786276078891-wc7ozf",
+      "startedAtMs": 1786276078903,
+      "startedAtMsUnreliable": false
+    }
+  ],
   "meanMinutes": 91.36545206812654,
   "medianMinutes": 56.31883333333333,
-  "tasksPerHour": 0.8184791713388946,
+  "tasksPerHour": 0.7987115648845081,
   "serialEquivalentPerHour": 0.6567033669932598,
   "windowStart": "2026-08-02T10:29:46.000Z",
-  "windowEnd": "2026-08-09T09:52:47.003Z",
-  "windowHours": 167.38361194444445,
+  "windowEnd": "2026-08-09T14:01:20.502Z",
+  "windowHours": 171.52625055555555,
   "haltedHours": 0,
   "halted": [],
   "blocked": [
@@ -2225,7 +2262,56 @@
       "startedAtMs": 1785998556329
     }
   ],
-  "reconcilable": [],
+  "reconcilable": [
+    {
+      "taskId": "DIR-043",
+      "runId": "fm-DIR-043-1786276079696-281gaz",
+      "startedAtMs": 1786276079708,
+      "startedAtMsUnreliable": false,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process"
+    },
+    {
+      "taskId": "gap-install-family-tests-rotate-flakes-under-full-suite",
+      "runId": "fm-gap-install-family-tests-rotate-flakes-under-full-suite-1786279440586-dcmvkq",
+      "startedAtMs": 1786279440610,
+      "startedAtMsUnreliable": false,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process"
+    },
+    {
+      "taskId": "gap-merge-introduced-referenced-not-landed-manager-tick-log",
+      "runId": "fm-gap-merge-introduced-referenced-not-landed-manager-tick-log-1786276079248-twp3n8",
+      "startedAtMs": 1786276079261,
+      "startedAtMsUnreliable": false,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process"
+    },
+    {
+      "taskId": "gap-proposal-convergence-load-flake-20-child-concurrency",
+      "runId": "fm-gap-proposal-convergence-load-flake-20-child-concurrency-1786281235151-3yj8qk",
+      "startedAtMs": 1786281235170,
+      "startedAtMsUnreliable": false,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process"
+    },
+    {
+      "taskId": "gap-round5-red-killtimeout-sigkill-and-capfromgate-seam-under-load",
+      "runId": "fm-gap-round5-red-killtimeout-sigkill-and-capfromgate-seam-under-load-1786276078559-t84bel",
+      "startedAtMs": 1786276078570,
+      "startedAtMsUnreliable": false,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process"
+    },
+    {
+      "taskId": "gap-serial-phase-install-test-residue-dependency",
+      "runId": "fm-gap-serial-phase-install-test-residue-dependency-1786276078891-wc7ozf",
+      "startedAtMs": 1786276078903,
+      "startedAtMsUnreliable": false,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process"
+    }
+  ],
   "realInFlight": 0,
   "closedButLive": [],
   "occupiedSlots": 0
