@@ -74,3 +74,15 @@ changed: 建任务时判「负载 flake」；inner 10:42 根因定位升格为�
   - 测试：`experiments/quay-perpetual-stream/test/proposal-convergence.test.mjs` 218 pass / 0 fail / 0 cancelled（duration 30894ms）。
   - 20-并发 child 子测试两跳全绿：`20 genuinely concurrent --new-epoch child processes against a shared epoch (maxNewEpochResetCount:3) never exceed the hard ceiling`（1612ms）与 `--override-budget` 同型测试（1534ms）；stale-reclaim（crashed + corrupt）+ deterministic 真互斥 5/5 亦绿。
 - **AC2/AC3/AC4 承接**：子测试 5/5 不再轮换失败、solo 218/218、TOCTOU 核心断言（ceiling 不超 + ok:true 持久记录）均已在 scoped 门内再验（inner a551dd5f 原始验证）。DoD 全量套件绿留外层 verification-round。
+
+## 补充发现（outer 2026-08-09 18:56，round-186/193 两轮同子测试红后定位）
+
+**该测试缺 KNOWN-LOAD-SENSITIVE 标注——本轮套件又红在同一子测试**（round-186 18:13 + round-193 18:54，均 `proposal-convergence.test.mjs` 72-80s passed=false；solo 218/218 恒绿）。机器持续负载 avg10 48-78。
+
+**根因升级**：a551dd5f PID-liveness 修的是「epoch 锁互斥破洞」；但该测试的 **20-concurrency 子测试本身是 KNOWN-LOAD-SENSITIVE 族**（全量套件并发下轮换红，隔离恒绿）。`experiments/quay-perpetual-stream/test/proposal-convergence.test.mjs` 只带 `// @test-group engine`，**无 `// KNOWN-LOAD-SENSITIVE` + `// @load-sensitive <kind>` 标注**（对照 `gap-install-family-tests-rotate-flakes-under-full-suite` 已 done 的 install 家族收编：12 个文件统一加标注进 serial 相位）。
+
+**修法（补充 AC）**：
+- **AC6（新增）**：`proposal-convergence.test.mjs` 头部加 `// KNOWN-LOAD-SENSITIVE` + `// @load-sensitive heavy`（20-concurrency 子进程重型），runner 的 load-sensitive 分区把它隔离（serial 相位或并发 1），消除全量套件下轮换红。
+- 不削弱 20-concurrency 断言核心（AC4 保留）；solo 仍 218/218（AC3 保留）。
+
+**验证锚**：修后连续 2 轮全量套件 proposal-convergence 不红（band `proposal_convergence_red_rounds_after_fix=0` 达成）。
