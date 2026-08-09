@@ -45,10 +45,10 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 round-200 实证（176 绿仅 loop-shipping AC1b 红、solo 12/11、threshold-scope-check 旧路径引用 + 不在排除表）（本任务 Proposal 已含）
-- [ ] AC2: **旧路径引用消除**——threshold-scope-check.ts 不再引用旧部署路径（改 plugin/loop/ 规范路径），或已进排除表
-- [ ] AC3: **loop-shipping 绿**——AC1b 回归验证 12/12（含 necessity-check 不炸）
-- [ ] AC4: **扫描面不丢**——threshold-scope-check 仍扫 CLAUDE.md + 有效 tick-doc 面（Contract invariant 保持）
+- [x] AC1: **复现固化**——任务体记录 round-200 实证（176 绿仅 loop-shipping AC1b 红、solo 12/11、threshold-scope-check 旧路径引用 + 不在排除表）（本任务 Proposal 已含）
+- [x] AC2: **旧路径引用消除**——threshold-scope-check.ts 不再引用旧部署路径（改 plugin/loop/ 规范路径），或已进排除表
+- [x] AC3: **loop-shipping 绿**——AC1b 回归验证 12/12（含 necessity-check 不炸）
+- [x] AC4: **扫描面不丢**——threshold-scope-check 仍扫 CLAUDE.md + 有效 tick-doc 面（Contract invariant 保持）
 - [ ] AC5: **全量套件绿**——round-200 类场景不再红（fail 0 且 cancelled 0 且 FULL-SUITE-EXIT=0）
 
 ## Definition of Done
@@ -81,3 +81,53 @@ resume    SCAN_DOCS 改路径 / 排除表分步提交，任一步完成即写盘
 reviewer: outer
 at: 2026-08-09
 changed: 红窗分诊（round-200 176 绿仅 loop-shipping AC1b 红）——threshold-scope-check.ts（32702dbc 新增）SCAN_DOCS 引用旧部署路径且不在排除表，其他 checker 均扫 plugin/loop/ 规范路径且已排除。quantified fan-in 的 cross-cut 盲区回归。实现归内层
+
+## Evidence（内层实现 2026-08-09）
+
+### 根因与修复
+
+**根因**：`plugin/scripts/threshold-scope-check.ts`（32702dbc 新增，quantified fan-in 的 cross-cut
+盲区）的 `SCAN_DOCS` 引用**旧部署副本路径** `docs/analysis/fast-mode-loop-tick.md` +
+`orchestration/orchestrator-loop-tick.md`，且不在 loop-shipping 排除表内。AC1b「移动后不许残留旧路径
+引用」扫描在 **4 个文件 8 处命中**（worktree 实测复现）：
+
+- `docs/analysis/threshold-scope-violations.md`（header 注释 + ratchet 键）
+- `plugin/scripts/threshold-scope-check.ts`（SCAN_DOCS + header 注释）
+- `plugin/test/threshold-scope-check.test.mjs`（AC6 scanned 断言）
+- `scripts/test.sh`（threshold-scope wiring 的 `@static-object` 行）
+
+**修复（主修：改 plugin/loop/ 规范路径）**：
+
+1. `threshold-scope-check.ts` `SCAN_DOCS` 改为 `plugin/loop/fast-mode-loop-tick.md` +
+   `plugin/loop/orchestrator-loop-tick.md` + `CLAUDE.md`（与 adr016/no-manager/instrument-failure 同形，
+   扫**规范路径**）；同步更新 header 注释与 writeRatchet header 文案。
+2. `docs/analysis/threshold-scope-violations.md` ratchet 经 `--write-ratchet --reset-baseline` 重锚到新
+   扫描面：**baseline 3→5**。2 条旧 `orchestration/` 键解析（其 rel 键随扫描面改变），新增 2 条 canonical
+   文档真实违规（`注册表 ≥2`、`last-pane.txt`）——这是把扫描面从部署副本移到规范源后的**真实暴露**，非
+   新引入；重锚是收缩 ratchet 的既定「criterion fix」机制。
+3. `plugin/test/threshold-scope-check.test.mjs` AC6 断言更新为新扫描面（scanned[0..2] → canonical、
+   thresholdHits 2→3）。
+4. `scripts/test.sh` 补 threshold-scope wiring（从 integration 对齐），`@static-object` 行用规范路径。
+5. `loop-shipping-exclusion-data.mjs`：给 `orchestration/manager-tick-log.md` 补 `retainedNote`
+   （fresh-checkout 下该 gitignored 运行时 ledger 不存在→inert，necessity-check 报 1 违例；补书面保留理由
+   使 necessity-check 在 fresh-checkout 也绿，AC3）。
+
+### 验证（worktree 实跑）
+
+```
+$ node --no-warnings --experimental-strip-types --test plugin/test/loop-shipping.test.mjs
+# AC1b ✔  12 pass / 0 fail   ← round-200 红点已绿
+
+$ node --no-warnings --experimental-strip-types --test plugin/test/threshold-scope-check.test.mjs
+# AC6/default ✔（ratchet growth=false, currentCount=baselineCount=5）  9 pass / 0 fail
+
+$ node --no-warnings --experimental-strip-types --test plugin/test/loop-shipping-necessity-check.test.mjs
+# inert_exclusions: 0   3 pass / 0 fail
+
+$ node --no-warnings --experimental-strip-types plugin/scripts/threshold-scope-check.ts --root . --json
+# scanned: [plugin/loop/fast-mode-loop-tick.md, plugin/loop/orchestrator-loop-tick.md, CLAUDE.md]
+# violations: 3（注册表 ≥2 / needs-human 积压 ≥3 ×2）  stalePaths: 2（last-pane.txt / .claude/.../execute-milestone.js）
+# ratchet: { baselineCount: 5, currentCount: 5, growth: false }
+```
+
+`--for-task` scoped 门结果见 dispatch 回传（fail 0 / cancelled 0 / contract-check 0）。

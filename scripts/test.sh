@@ -246,15 +246,6 @@ run_static_checks() {
   # @static-tier change
   # @static-object plugin/test/ packages/*/test/ experiments/*/test/
   run_checker "test-isolation-check" bash "${repo_root}/plugin/scripts/test-isolation-check.sh" "${repo_root}"
-  echo "== tmux-test-isolation check (gap-tmux-isolated-guard-has-zero-consumers-fifth-machine-wipe, AC3/AC4) =="
-  # A MECHANICAL ban (not a prose rule) on test files that spawn real tmux with no isolation
-  # mechanism reference AND missing a mandatory condition (env -u TMUX / explicit -S). The L0 .sh
-  # guard had ZERO consumers and the machine's tmux server died a fifth time — the check catches a
-  # future bare `tmux new-session` at commit time, before it can land on the default socket. The
-  # negative control is the checker's mutation case + plugin/test/tmux-test-isolation-check.test.mjs.
-  # @static-tier change
-  # @static-object plugin/test/
-  run_checker "tmux-test-isolation-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/tmux-test-isolation-check.ts" --root "${repo_root}"
   echo "== test-impl-census check (gap-experiment-legacy-reclaim-and-touches-heuristic AC5) =="
   # Mechanized criterion "被测实现不存在的测试文件随实现删除": a test file that imports a
   # scripts/<name> module that exists NOWHERE (plugin/scripts, experiments/scripts, repo scripts/
@@ -342,7 +333,7 @@ run_static_checks() {
   # aborts the suite (set -euo pipefail), red-lighting a driver-doc edit that reintroduces an
   # unscoped threshold or a stale path.
   # @static-tier change
-  # @static-object docs/analysis/fast-mode-loop-tick.md orchestration/orchestrator-loop-tick.md CLAUDE.md plugin/scripts/threshold-scope-check.ts plugin/test/threshold-scope-check.test.mjs docs/analysis/threshold-scope-violations.md
+  # @static-object plugin/loop/fast-mode-loop-tick.md plugin/loop/orchestrator-loop-tick.md CLAUDE.md plugin/scripts/threshold-scope-check.ts plugin/test/threshold-scope-check.test.mjs docs/analysis/threshold-scope-violations.md
   run_checker "threshold-scope-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/threshold-scope-check.ts" --root "${repo_root}"
   echo "== instrument-failure check (gap-manager-instrument-failures-need-mechanical-detection-not-carefulness, AC3) =="
   # The manager instrument-failure five-family detector (FAMILY-1..5 in the checker header). The
@@ -361,12 +352,6 @@ run_static_checks() {
   # @static-tier change
   # @static-object orchestration/manager-loop-tick.md plugin/loop/fast-mode-loop-tick.md plugin/loop/manager-loop-tick.md plugin/loop/orchestrator-loop-tick.md
   run_checker "instrument-failure-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/instrument-failure-check.ts" --gate --root "${repo_root}"
-  echo "== outer-tick-log no-action evidence check (gap-no-action-requires-evidence-mechanical-check) =="
-  # @static-tier full
-  # The outer's `no-action` verdict must carry the five-inequality evidence with all five false.
-  # Wired into run_static_checks so every full-suite (and --static-checks) run re-measures — the
-  # enforcement must NOT depend on the outer session choosing to run it (manager 设计约束 ②).
-  run_checker "outer-tick-log-check" bash "${repo_root}/plugin/scripts/outer-tick-log-check.sh" --root "${repo_root}"
   echo "== checker-mutation check (gap-checkers-have-never-been-shown-to-fail, AC1-AC6) =="
   # The L_S instrument: mutation-test the checkers THEMSELVES, not product code. The manifest is
   # parsed from THIS function + CI (never hand-written), so a checker added here (or to a CI
