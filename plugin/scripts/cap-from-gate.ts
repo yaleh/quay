@@ -1,12 +1,24 @@
 #!/usr/bin/env node
-// plugin/scripts/cap-from-gate.ts — the ADAPTIVE concurrency cap
-// (gap-adaptive-concurrency-cap-tied-to-resource-gate →
-//  gap-cap-from-gate-avg300-driven-by-claude-session-churn-structural-cap-2).
+// plugin/scripts/cap-from-gate.ts — FIXED concurrency cap (the dynamic cap is RETIRED).
 //
-// The dispatch decision point (fast-mode-loop-tick.md step 4) calls this to compute the effective
-// concurrency cap instead of a fixed number. Mechanism: read cpu pressure AT the dispatch point
-// (via resource-gate.sh report mode — single source), map to a band, keep hysteresis so a single
-// sample cannot flip the band, and cap at the band's configured number.
+// HUMAN RULING (2026-08-09, task gap-fixed-cap-5-dynamic-cap-retired): the ADAPTIVE concurrency cap
+// (gap-adaptive-concurrency-cap-tied-to-resource-gate →
+//  gap-cap-from-gate-avg300-driven-by-claude-session-churn-structural-cap-2) is retired. The measured
+// cap history was `4(40) / 1(36) / 5(25) / 2(21) / 3(5)` — cap=1 every 3-4 rounds, switching ONLY with
+// "is a suite running" — i.e. a boolean disguised as a number, and a mis-computed one (process-budget.sh
+// reported in_use=5 with 1 real node-MainThread test process, so the WAIT verdict that dropped the cap
+// was built on a wrong count). The dispatch cap is now FIXED at 5:
+//
+//   effective_cap = FIXED_EFFECTIVE_CAP (5), constant, regardless of cpu pressure / suite state / budget.
+//
+// The cpu-pressure band + hysteresis + budget reasoning are KEPT ONLY AS OBSERVATION: this helper still
+// prints the signal/band/budget lines (so the human/outer can SEE load), but those readings participate
+// in NO decision — dispatch, slot-refill and floor computation all use the fixed 5. The dynamic
+// mechanism was a "boolean disguised as a number"; the fixed 5 removes the fluctuation and the
+// WAIT-on-wrong-count class of errors.
+//
+// The RETIRED adaptive mechanism is preserved below for reference/observation (a detector/recommender,
+// not a gate — it exits 0 always and the band/budget lines are informational only).
 //
 // SIGNAL SEMANTICS (changed 2026-08-08 by gap-cap-from-gate-avg300-driven-by-claude-session-churn-
 // structural-cap-2): the signal is `some avg10`, NOT `some avg300`. The outer layer measured that
@@ -59,6 +71,8 @@
 //
 // Fail-closed: an unmeasurable signal (kernel without PSI) => EXTREME band (lowest cap) — a cap that
 // silently stays high when its signal is unmeasurable is a quietly-lying instrument.
+// NOTE (retired mechanism): the band FAIL-CLOSED to EXTREME only affected the OBSERVED band, never the
+// fixed effective_cap — the cap is 5 even when the signal is unmeasurable.
 //
 // Usage:
 //   node --experimental-strip-types plugin/scripts/cap-from-gate.ts [--root <repo>] [--state <file>]
@@ -66,8 +80,9 @@
 //   # the Contract invocation form (thin bash wrapper):
 //   bash plugin/scripts/cap-from-gate.sh [--root <repo>]
 //
-// Output (stdout): signal/band lines + a LAST `effective_cap=N` line the tick extracts. Exit 0 always
-// (a detector/recommender, not a gate — the dispatch decision consumes the number).
+// Output (stdout): signal/band/budget OBSERVATION lines + a LAST `effective_cap=N` line the tick
+// extracts. effective_cap is ALWAYS FIXED_EFFECTIVE_CAP (5) — the dynamic cap is retired
+// (gap-fixed-cap-5-dynamic-cap-retired). Exit 0 always (a detector/recommender, not a gate).
 
 import fs from "node:fs";
 import path from "node:path";
@@ -75,8 +90,15 @@ import { spawnSync } from "node:child_process";
 import { parse as parseYaml } from "yaml";
 import { isDirectEntry } from "./gate-script-base.ts";
 
+/** FIXED dispatch cap (gap-fixed-cap-5-dynamic-cap-retired, human ruling 2026-08-09): the dynamic
+ *  adaptive cap is retired. effective_cap is this constant — 5 — regardless of cpu pressure, suite
+ *  state, or process budget. The band/budget fields returned alongside it are PURE OBSERVATION and
+ *  must NOT participate in any decision (dispatch / slot-refill / floor all use this fixed 5). */
+export const FIXED_EFFECTIVE_CAP = 5;
+
 /** Default GO/WAIT/EXTREME caps when config declares no concurrency_bands. quay's default (5/2/1);
- *  a project overrides in `.quay/config.yml` `loop:concurrency_bands` (e.g. archguard 4/2/1). */
+ *  a project overrides in `.quay/config.yml` `loop:concurrency_bands` (e.g. archguard 4/2/1).
+ *  RETIRED as a decision input — kept for the OBSERVED-band line only. */
 export const DEFAULT_BANDS = { go: 5, wait: 2, extreme_wait: 1 };
 
 /** Band thresholds on cpu `some avg10` (mechanism constants). WAIT=60 sits ABOVE the measured
@@ -259,14 +281,17 @@ export function readCpuStallFromGate(repoRoot: string, env: NodeJS.ProcessEnv = 
   return Number.isFinite(v) ? v : null;
 }
 
-/** The full adaptive-cap decision. Returns the effective cap + the reasoning fields the tick/operator
- *  can print. `stateFile` defaults to <root>/.quay/concurrency-cap-state.json. `now` is a test seam
- *  for the hysteresis time-decay (AC3b stall convergence). */
+/** The cap decision. RETIRED as a dynamic decision (gap-fixed-cap-5-dynamic-cap-retired): the
+ *  effective_cap returned is the FIXED constant 5; the band/consecutive/budget fields are OBSERVATION
+ *  only (printed by main() so the load is visible) and participate in no decision. `stateFile` defaults
+ *  to <root>/.quay/concurrency-cap-state.json. `now` is a test seam for the hysteresis time-decay
+ *  (AC3b stall convergence — the hysteresis still OBSERVES the band). */
 export function computeEffectiveCap(opts: {
   repoRoot: string;
   env?: NodeJS.ProcessEnv;
   stateFile?: string;
   samples?: number;
+  /** RETIRED as a decision input (the cap is fixed); accepted for API compatibility. */
   bands?: BandConfig;
   now?: number;
 }): {
@@ -285,7 +310,6 @@ export function computeEffectiveCap(opts: {
   const env = opts.env ?? process.env;
   const stateFile = opts.stateFile ?? path.join(repoRoot, ".quay", STATE_FILE_NAME);
   const samples = opts.samples ?? HYSTERESIS_SAMPLES_DEFAULT;
-  const bands = opts.bands ?? readBandsFromConfig(path.join(repoRoot, ".quay", "config.yml"));
   const now = opts.now ?? Date.now();
   const cpuStall = readCpuStallFromGate(repoRoot, env);
   const desired = computeDesiredBand(cpuStall);
@@ -298,13 +322,14 @@ export function computeEffectiveCap(opts: {
   if (loaded && desired !== loaded.band) last_away_at = new Date(now).toISOString();
   if (switched) last_away_at = null;
   saveState(stateFile, { band, consecutive, decided_at: new Date(now).toISOString(), last_away_at });
-  const bandCap = capForBand(bands, band);
-  // The B face reads the CROSS-LAYER TOTAL BUDGET too (AC1): the dispatch slot cap is bounded by how
+  // The B face reads the CROSS-LAYER TOTAL BUDGET too (AC1): the dispatch slot cap was bounded by how
   // many node --test processes the whole repo may still start (process-budget.sh — the single
-  // authority). If the budget is exhausted (available = 0) the cap drops to its floor (1), so a
-  // saturated host (another worktree's suite, nested spawns) dispatches nothing more.
+  // authority). RETIRED as a decision input (gap-fixed-cap-5-dynamic-cap-retired): the budget is read
+  // ONLY for the observation line — a saturated host no longer drops the cap; effective_cap is fixed.
   const budget = readBudgetFromGate(repoRoot, env);
-  const effective_cap = budget !== null ? Math.min(bandCap, Math.max(1, budget.available)) : bandCap;
+  // FIXED-CAP RETIREMENT (AC2, human ruling 2026-08-09): the cap is a constant 5, NOT
+  // min(bandCap, available). The band/budget above are pure observation.
+  const effective_cap = FIXED_EFFECTIVE_CAP;
   return {
     effective_cap,
     band,

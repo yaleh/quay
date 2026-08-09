@@ -95,6 +95,45 @@ test("computeSlotsFree = max(0, cap − in_flight), never negative (AC1)", () =>
   assert.equal(computeSlotsFree(1, 0), 1);
 });
 
+// ── FIXED-CAP RETIREMENT (gap-fixed-cap-5-dynamic-cap-retired AC3) ─────────────────────────────────
+// The dynamic cap is retired (human ruling 2026-08-09): `--cap` NOT passed ⇒ the default is the fixed
+// constant 5, so slot-refill and its derived floor (5 × floor_mult = 20) are stable regardless of
+// load/suite state. This is the Contract's `slot_refill_default_5` invariant.
+test("FIXED-CAP — --cap not passed ⇒ default 5, floor = 5 × 4 = 20 (AC3, slot_refill_default_5)", (t) => {
+  const root = makeWorkspace("fixed-cap");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-a", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/a.ts (new)"]) });
+  writeTask(root, "gap-b", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/b.ts (new)"]) });
+
+  // analyzeSlotRefill without a cap: default resolves to 5.
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root });
+  assert.equal(r.cap, 5, "default cap is the fixed 5");
+  assert.equal(r.floor_mult, 4, "floor_mult default is 4");
+  assert.equal(r.floor, 20, "floor = 5 × 4 = 20 (the Contract's floor=20)");
+  assert.equal(r.slots_free, 5, "0 in-flight ⇒ 5 free slots at the fixed cap");
+
+  // CLI without --cap: JSON carries cap=5 and floor=20.
+  const script = path.resolve(__dirname, "..", "scripts", "slot-refill.ts");
+  const out = execFileSync(
+    process.execPath,
+    ["--experimental-strip-types", script, "--root", root],
+    { encoding: "utf8" },
+  );
+  const parsed = JSON.parse(out);
+  assert.equal(parsed.cap, 5, "CLI --cap default is 5");
+  assert.equal(parsed.floor, 20, "CLI floor = 20");
+  assert.equal(parsed.slots_free, 5);
+});
+
+test("FIXED-CAP — an explicit --cap still overrides the fixed default (manual/test runs)", (t) => {
+  const root = makeWorkspace("cap-override");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-a", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/a.ts (new)"]) });
+  const r3 = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 3 });
+  assert.equal(r3.cap, 3, "explicit cap wins");
+  assert.equal(r3.slots_free, 3);
+});
+
 // ── AC2/AC3: positive — free slot + dispatchable candidate ⇒ should_refill, capped recommended ──────
 
 test("should_refill=true with a free slot and a dispatchable candidate (AC2/AC3)", (t) => {
