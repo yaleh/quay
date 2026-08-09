@@ -1,32 +1,30 @@
 // @test-group governance
-// cap-from-gate.test.mjs — gap-adaptive-concurrency-cap-tied-to-resource-gate →
-// gap-cap-from-gate-avg300-driven-by-claude-session-churn-structural-cap-2. Pins the ADAPTIVE
-// concurrency cap mechanism (plugin/scripts/cap-from-gate.ts) that replaces the fixed cap=3:
+// cap-from-gate.test.mjs — gap-fixed-cap-5-dynamic-cap-retired. The DYNAMIC adaptive concurrency cap
+// is RETIRED (human ruling 2026-08-09): effective_cap is the FIXED constant 5, regardless of cpu
+// pressure / suite state / process budget. The band + hysteresis + budget logic still RUNS as PURE
+// OBSERVATION (the signal/band/budget lines the CLI prints) and is pinned here as observation, but it
+// participates in NO decision — effective_cap is always FIXED_EFFECTIVE_CAP (5).
 //
-//   AC1 — cap read AT the dispatch decision point (the helper is the mechanism the tick calls in
-//         step 4; no new polling — a single read per tick, reused by ready-pool floor + dispatch)
-//   AC2 — reads cpu `some avg10` (the responsive signal), NOT `some avg300` (measured churn-dominated:
-//         stable 50-55, barely moves under dispatch-class load, +1.5pt vs avg10's +26pt under a 4-core
-//         injection). Test: the churn baseline (avg10 42-54) is GO, real overload (avg10 68) is WAIT —
-//         regardless of what avg300 says. avg10's 10s window is safe because hysteresis + dispatch-point
-//         sampling (25-min ticks) make the switch slow (2 same-direction readings = sustained load).
-//   AC3 — hysteresis (negative control): ONE avg10 sample pointing at a new band does NOT switch;
-//         `samples` consecutive same-direction readings do. avg10 near-threshold jitter must never
-//         amplify into dispatch jitter.
-//   AC4 — bands configurable: numbers come from .quay/config.yml loop:concurrency_bands
-//         (quay default 5/2/1; override e.g. 4/2/1 takes effect). Mechanism shared, numbers per-project.
-//   AC5 — resources empty (low avg10) ⇒ GO band ⇒ cap equals the configured GO value (quay default 5; per-project override respected).
-//   AC6 — high avg10 (e.g. another project saturating the host) ⇒ WAIT/EXTREME band ⇒ cap drops
-//         (does not add load).
-//   AC7 — ownership: the mechanism lives in quay's plugin/scripts (downstream adopts via upgrade
-//         channel, never re-invents). Asserted by the file being under plugin/scripts/ + the thin
-//         bash wrapper for the Contract invocation form.
-//   AC8 — cross-referenced with resource-gate (signal) + concurrent-batch-scheduler (the disjointness
-//         gate at the same decision point) + SPEC-isolation (the containerized-resource-governance spec).
+// History (retired mechanism, kept for the observation semantics):
+//   gap-adaptive-concurrency-cap-tied-to-resource-gate →
+//   gap-cap-from-gate-avg300-driven-by-claude-session-churn-structural-cap-2. The adaptive cap read
+//   cpu `some avg10` (the responsive signal), mapped it to GO/WAIT/EXTREME bands, kept hysteresis
+//   (2 same-direction samples before switching, AC3b stall convergence), and bounded the result by
+//   the cross-layer process budget. The measured cap history was 4/1/5/2/3 — a boolean disguised as
+//   a number switching only with "is a suite running", and the WAIT verdict was built on a wrong
+//   process-budget count (in_use=5 with 1 real test MainThread). All of that is now observation only.
 //
-// The DoD's live-system controls (real empty-host dispatch >= 3; real 4-core-injection downgrade;
-// real config override) are recorded in the task body — the unit/integration tests here pin the same
-// mechanism deterministically via the resource-gate env seams (RESOURCE_GATE_TEST_CPU_AVG10).
+//   AC1 — the helper is still invoked AT the dispatch decision point (the tick calls it in step 4;
+//         no new polling) — it now returns the fixed 5.
+//   AC2 — the signal read is still cpu `some avg10` (the OBSERVED band line); the cap does NOT follow it.
+//   AC3 — hysteresis still OBSERVES the band (negative control preserved for the observation).
+//   AC4 — bands configurable (observed band), but the cap is fixed regardless of config.
+//   AC5/AC6 — GO ⇒ observed band GO, WAIT/EXTREME ⇒ observed band drops; effective_cap stays 5.
+//   AC8 — cross-references preserved (resource-gate + concurrent-batch-scheduler + SPEC-isolation).
+//
+// The DoD's live-system controls (effective_cap=5 with a suite running AND not running) are recorded
+// in the task body — the unit/integration tests here pin the fixed-cap semantics deterministically via
+// the resource-gate env seams (RESOURCE_GATE_TEST_CPU_AVG10 / RESOURCE_GATE_TEST_NODE_PROCS).
 //
 // Run:
 //   scripts/test.sh plugin/test/cap-from-gate.test.mjs
@@ -41,6 +39,7 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
 import {
+  FIXED_EFFECTIVE_CAP,
   DEFAULT_BANDS,
   WAIT_THRESHOLD,
   EXTREME_THRESHOLD,
@@ -126,10 +125,11 @@ test("AC2 — the full decision reads cpu some avg10, NOT avg300: churn-only hig
     bands: TEST_BANDS,
     env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "53", RESOURCE_GATE_TEST_CPU_AVG300: "54.5", RESOURCE_GATE_TEST_NODE_PROCS: "0" },
   });
-  assert.equal(r1.band, "GO", "avg10 (not avg300) decides the band — session churn alone must not cap");
-  assert.equal(r1.effective_cap, TEST_BANDS.go, `GO band must equal the injected hermetic value, got ${r1.effective_cap}`);
+  assert.equal(r1.band, "GO", "avg10 (not avg300) decides the OBSERVED band — session churn alone must not cap");
+  assert.equal(r1.effective_cap, FIXED_EFFECTIVE_CAP, `effective_cap is the fixed 5 regardless of the observed GO band, got ${r1.effective_cap}`);
   // real overload: 4-core injection moved avg10 to 68 while avg300 stayed ~53.7 (only +1.5pt) → WAIT.
-  // The responsive signal sees the overload the avg300 could not.
+  // The responsive signal sees the overload the avg300 could not — but the OBSERVED band downgrade
+  // does NOT change the fixed effective_cap.
   const s2 = tmpState("avg10b");
   const r2 = computeEffectiveCap({
     repoRoot: REPO_ROOT,
@@ -137,12 +137,12 @@ test("AC2 — the full decision reads cpu some avg10, NOT avg300: churn-only hig
     bands: TEST_BANDS,
     env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "68", RESOURCE_GATE_TEST_CPU_AVG300: "53.7", RESOURCE_GATE_TEST_NODE_PROCS: "0" },
   });
-  assert.equal(r2.band, "WAIT", "high avg10 (real overload) must downgrade even though avg300 is unchanged");
-  assert.equal(r2.effective_cap, TEST_BANDS.wait);
+  assert.equal(r2.band, "WAIT", "high avg10 (real overload) must downgrade the OBSERVED band even though avg300 is unchanged");
+  assert.equal(r2.effective_cap, FIXED_EFFECTIVE_CAP, "effective_cap stays fixed 5 under a WAIT band (retired dynamic cap)");
 });
 
 // ── AC5/AC6: the cap tracks resources ──────────────────────────────────────────────────────────────
-test("AC5 — resources empty (low avg10) ⇒ GO band ⇒ cap equals the configured GO value (cold-start first decision adopts immediately)", (t) => {
+test("AC5 — resources empty (low avg10) ⇒ OBSERVED GO band; effective_cap is the fixed 5 (cold-start first decision adopts immediately)", (t) => {
   const state = tmpState("go");
   const r = computeEffectiveCap({
     repoRoot: REPO_ROOT,
@@ -151,15 +151,15 @@ test("AC5 — resources empty (low avg10) ⇒ GO band ⇒ cap equals the configu
     env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "12", RESOURCE_GATE_TEST_NODE_PROCS: "0" },
   });
   assert.equal(r.band, "GO");
-  assert.equal(r.effective_cap, TEST_BANDS.go, `GO cap must equal the injected hermetic value, got ${r.effective_cap}`);
-  // The state file is written (a real decision was made and persisted).
+  assert.equal(r.effective_cap, FIXED_EFFECTIVE_CAP, `effective_cap is the fixed 5, got ${r.effective_cap}`);
+  // The state file is written (the band observation is persisted).
   const persisted = loadState(state);
   assert.equal(persisted.band, "GO");
 });
 
-test("AC6 — high avg10 (host saturated by another project) ⇒ WAIT then EXTREME ⇒ cap drops", (t) => {
+test("AC6 — high avg10 (host saturated) ⇒ OBSERVED band WAIT then EXTREME; effective_cap stays fixed 5", (t) => {
   const state = tmpState("high");
-  // Cold start with LOW avg10 establishes GO (AC5 — resources empty ⇒ cap >= 3).
+  // Cold start with LOW avg10 establishes GO (AC5 — resources empty ⇒ GO band).
   const cold = computeEffectiveCap({
     repoRoot: REPO_ROOT,
     stateFile: state,
@@ -167,7 +167,7 @@ test("AC6 — high avg10 (host saturated by another project) ⇒ WAIT then EXTRE
     env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "12", RESOURCE_GATE_TEST_NODE_PROCS: "0" },
   });
   assert.equal(cold.band, "GO");
-  assert.equal(cold.effective_cap, TEST_BANDS.go);
+  assert.equal(cold.effective_cap, FIXED_EFFECTIVE_CAP);
   // First overloaded sample (avg10=68 — the measured 4-core-injection reading): desired WAIT but
   // hysteresis holds GO (consecutive=1). One sample must NOT switch — the negative control.
   const first = computeEffectiveCap({
@@ -175,19 +175,19 @@ test("AC6 — high avg10 (host saturated by another project) ⇒ WAIT then EXTRE
     stateFile: state,
     env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "68", RESOURCE_GATE_TEST_NODE_PROCS: "0" },
   });
-  assert.equal(first.band, "GO", "single sample must NOT switch (hysteresis)");
+  assert.equal(first.band, "GO", "single sample must NOT switch the OBSERVED band (hysteresis)");
   assert.equal(first.consecutive, 1);
-  // Second consecutive overloaded sample → switches to WAIT (cap 2).
+  // Second consecutive overloaded sample → the OBSERVED band switches to WAIT; cap stays 5.
   const second = computeEffectiveCap({
     repoRoot: REPO_ROOT,
     stateFile: state,
     bands: TEST_BANDS,
     env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "68", RESOURCE_GATE_TEST_NODE_PROCS: "0" },
   });
-  assert.equal(second.band, "WAIT", "two consecutive same-direction samples switch");
-  assert.equal(second.effective_cap, TEST_BANDS.wait, "WAIT cap is the injected hermetic value");
+  assert.equal(second.band, "WAIT", "two consecutive same-direction samples switch the OBSERVED band");
+  assert.equal(second.effective_cap, FIXED_EFFECTIVE_CAP, "effective_cap stays fixed 5 under WAIT (retired dynamic cap)");
   // A single EXTREME sample (avg10=90) from WAIT holds (hysteresis: consecutive=1), then a second
-  // consecutive EXTREME sample escalates → EXTREME (cap 1).
+  // consecutive EXTREME sample escalates the OBSERVED band → EXTREME; cap still 5.
   const third = computeEffectiveCap({
     repoRoot: REPO_ROOT,
     stateFile: state,
@@ -202,8 +202,8 @@ test("AC6 — high avg10 (host saturated by another project) ⇒ WAIT then EXTRE
     bands: TEST_BANDS,
     env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "90", RESOURCE_GATE_TEST_NODE_PROCS: "0" },
   });
-  assert.equal(fourth.band, "EXTREME", "sustained heavy overload escalates to EXTREME");
-  assert.equal(fourth.effective_cap, TEST_BANDS.extreme_wait);
+  assert.equal(fourth.band, "EXTREME", "sustained heavy overload escalates the OBSERVED band to EXTREME");
+  assert.equal(fourth.effective_cap, FIXED_EFFECTIVE_CAP, "effective_cap stays fixed 5 even under EXTREME (retired dynamic cap)");
 });
 
 // ── AC3: hysteresis (negative control) ─────────────────────────────────────────────────────────────
@@ -309,8 +309,8 @@ test("AC3b — WAIT/GO alternation CONVERGES to the load band after 2 same-direc
     env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "68", RESOURCE_GATE_TEST_NODE_PROCS: "0" },
     now: base + 3 * stepMs,
   });
-  assert.equal(r3.band, "WAIT", "the 2nd same-direction sample across the alternation switches — converged, no stall");
-  assert.equal(r3.effective_cap, TEST_BANDS.wait, "WAIT band cap is the injected hermetic value");
+  assert.equal(r3.band, "WAIT", "the 2nd same-direction sample across the alternation switches the OBSERVED band — converged, no stall");
+  assert.equal(r3.effective_cap, FIXED_EFFECTIVE_CAP, "effective_cap stays fixed 5 even after the OBSERVED band converges to WAIT");
 });
 
 test("AC3b — a STALE divergence (load genuinely recovered) DOES reset the counter, so an isolated blip fades", (t) => {
@@ -355,41 +355,46 @@ test("AC3b — a STALE divergence (load genuinely recovered) DOES reset the coun
   assert.equal(late.consecutive, 1, "the later WAIT sample restarts the accumulation at 1");
 });
 
-// ── CROSS-LAYER TOTAL BUDGET bound (gap-test-concurrency-cap-does-not-scope-nested-spawns AC1/AC4) ──
-// The B face (dispatch slot cap) reads the SAME total process budget as test.sh's worker derivation
-// and resource-gate.sh (process-budget.sh — single authority). The effective cap is bounded by how
-// many node --test processes the whole repo may still start: budget exhausted → cap drops to its
-// floor (1), so a saturated host dispatches nothing more.
-test("BUDGET — the effective cap is bounded by the cross-layer total process budget (available)", (t) => {
+// ── CROSS-LAYER TOTAL BUDGET (gap-fixed-cap-5-dynamic-cap-retired) ────────────────────────────────
+// The B face (dispatch slot cap) USED to read the same total process budget as test.sh's worker
+// derivation and resource-gate.sh (process-budget.sh — single authority) and bound the effective cap:
+// budget exhausted → cap dropped to the floor (1). RETIRED as a decision input: the budget is now
+// READ ONLY as observation (the printed `budget:` line). A saturated host no longer drops the cap —
+// effective_cap is the fixed 5 even when available=0 (the "WAIT built on a wrong in_use count" class
+// of error is gone with the dynamic cap).
+test("BUDGET — the budget is OBSERVED (available/readable) but NO LONGER bounds effective_cap (fixed 5)", (t) => {
   const state = tmpState("budget");
-  // GO band with an IDLE budget (in_use=0 → available=nproc=4): cap = min(GO_band, 4).
+  // GO band with an IDLE budget (in_use=0 → available=nproc=4): budget observed, cap fixed 5.
   const idle = computeEffectiveCap({
     repoRoot: REPO_ROOT,
     stateFile: state,
-    bands: TEST_BANDS, // go=3, wait=2, extreme=1
+    bands: TEST_BANDS, // go=3, wait=2, extreme=1 — injected, but irrelevant to the fixed cap
     env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "12", RESOURCE_GATE_TEST_NODE_PROCS: "0" },
   });
   assert.equal(idle.band, "GO");
-  assert.equal(idle.effective_cap, TEST_BANDS.go, "GO cap = the injected hermetic value when budget has room");
-  assert.equal(idle.budget_available, 4, "available = nproc - in_use = 4 - 0");
-  // Budget EXHAUSTED (in_use=20 on a 4-core box → available=0): GO band cap must drop to the floor 1.
+  assert.equal(idle.effective_cap, FIXED_EFFECTIVE_CAP, "GO with room ⇒ fixed 5, not min(GO_band, available)");
+  assert.equal(idle.budget_available, 4, "available = nproc - in_use = 4 - 0 (observation)");
+  // Budget EXHAUSTED (in_use=20 on a 4-core box → available=0): the OLD behavior dropped the cap to 1;
+  // the retired dynamic cap means effective_cap stays 5 (a saturated host's WAIT verdict no longer
+  // participates in the dispatch decision).
   const saturated = computeEffectiveCap({
     repoRoot: REPO_ROOT,
     stateFile: state,
     bands: TEST_BANDS,
     env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "12", RESOURCE_GATE_TEST_NODE_PROCS: "20" },
   });
-  assert.equal(saturated.band, "GO", "cpu pressure still says GO");
-  assert.equal(saturated.effective_cap, 1, "budget exhausted ⇒ cap drops to the floor (1) — nested spawns can no longer multiply beyond the budget");
+  assert.equal(saturated.band, "GO", "cpu pressure still says GO (observed)");
+  assert.equal(saturated.effective_cap, FIXED_EFFECTIVE_CAP, "budget exhausted ⇒ effective_cap STAYS 5 (no cap drop — dynamic cap retired)");
   assert.equal(saturated.budget_available, 0);
-  // Budget constrained (available=1): cap is bounded to 1, below the GO band value.
+  // Budget constrained (available=1): the OLD behavior bounded the cap to 1; now it stays 5.
   const constrained = computeEffectiveCap({
     repoRoot: REPO_ROOT,
     stateFile: state,
     bands: TEST_BANDS,
     env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "12", RESOURCE_GATE_TEST_NODE_PROCS: "3" },
   });
-  assert.equal(constrained.effective_cap, 1, "available=1 ⇒ cap bounded to 1");
+  assert.equal(constrained.effective_cap, FIXED_EFFECTIVE_CAP, "available=1 ⇒ effective_cap stays 5");
+  assert.equal(constrained.budget_available, 1, "budget observation still accurate");
 });
 
 // ── SEAM HERMETICITY (round-5 red, cluster B): the injected nproc seam wins over the ambient ────────
@@ -424,7 +429,7 @@ test("SEAM (round-5 red, cluster B) — RESOURCE_GATE_TEST_NPROC overrides the a
   assert.equal(cap.band, "GO");
   assert.equal(cap.budget_total, injected, `budget_total must be the injected ${injected} (ambient is ${ambient})`);
   assert.equal(cap.budget_available, injected, "budget_available = injected total_budget − 0 in_use");
-  assert.equal(cap.effective_cap, Math.min(TEST_BANDS.go, injected), `GO cap under the seam = min(go=${TEST_BANDS.go}, injected=${injected})`);
+  assert.equal(cap.effective_cap, FIXED_EFFECTIVE_CAP, `the seam proves the budget flows through (observation); effective_cap is still the fixed 5`);
 });
 
 // ── AC4: configurable bands ────────────────────────────────────────────────────────────────────────
@@ -451,9 +456,9 @@ test("AC4 — readBandsFromConfig: defaults 5/2/1; a config override takes effec
   assert.equal(r.extreme_wait, 1);
 });
 
-test("AC4 — the effective cap follows an injected band config (mechanism shared, numbers per-project)", (t) => {
+test("AC4 — the OBSERVED band follows an injected band config, but effective_cap stays fixed 5 (config no longer decides the cap)", (t) => {
   // Fresh state per case — each is a cold-start first decision with the injected bands.
-  // EXTREME (avg10=90 ≥ 85) with archguard bands 4/2/1 → cap 1 (extreme_wait is 1 in both configs).
+  // EXTREME (avg10=90 ≥ 85) with archguard bands 4/2/1 → observed band EXTREME; cap fixed 5.
   const s1 = tmpState("cfgcap-x");
   const r = computeEffectiveCap({
     repoRoot: REPO_ROOT,
@@ -462,8 +467,8 @@ test("AC4 — the effective cap follows an injected band config (mechanism share
     bands: { go: 4, wait: 2, extreme_wait: 1 },
   });
   assert.equal(r.band, "EXTREME");
-  assert.equal(r.effective_cap, 1);
-  // GO band with archguard bands → cap 4 (config change ⇒ mechanism follows).
+  assert.equal(r.effective_cap, FIXED_EFFECTIVE_CAP, "config 4/2/1 does NOT drop the cap — fixed 5");
+  // GO band with archguard bands → observed band GO; cap still fixed 5 (config change does NOT move it).
   const s2 = tmpState("cfgcap-go");
   const r2 = computeEffectiveCap({
     repoRoot: REPO_ROOT,
@@ -472,7 +477,7 @@ test("AC4 — the effective cap follows an injected band config (mechanism share
     bands: { go: 4, wait: 2, extreme_wait: 1 },
   });
   assert.equal(r2.band, "GO");
-  assert.equal(r2.effective_cap, 4, "config GO=4 takes effect");
+  assert.equal(r2.effective_cap, FIXED_EFFECTIVE_CAP, "config GO=4 does NOT change the cap — fixed 5");
 });
 
 // ── AC1/AC7: the mechanism is invoked at dispatch; owned by quay ───────────────────────────────────
@@ -503,10 +508,52 @@ test("CLI smoke — `bash cap-from-gate.sh` prints a trailing effective_cap=<dig
   assert.equal(res.status, 0, `cap-from-gate.sh must exit 0\n${res.stdout}${res.stderr}`);
   const capLine = res.stdout.split("\n").filter((l) => l.startsWith("effective_cap=")).pop();
   assert.match(capLine, /^effective_cap=\d+$/, `last line must be effective_cap=N, got: ${capLine}`);
-  assert.ok(Number(capLine.split("=")[1]) >= 3, "low avg10 ⇒ cap >= 3");
+  assert.equal(Number(capLine.split("=")[1]), FIXED_EFFECTIVE_CAP, "low avg10 ⇒ effective_cap is the fixed 5");
   // The Contract measure form: the stdout's digit segment contains the cap.
   const digits = (res.stdout.match(/[0-9]/g) || []);
   assert.ok(digits.length > 0, "stdout must carry a digit segment (Contract measure)");
+});
+
+// ── FIXED-CAP RETIREMENT (gap-fixed-cap-5-dynamic-cap-retired AC2) ──────────────────────────────────
+// The human ruling: the dynamic cap was a "boolean disguised as a number" (cap history 4/1/5/2/3,
+// switching only with suite-running). effective_cap must be 5 REGARDLESS of load state — a suite
+// running or not, cpu pressure GO or EXTREME, budget idle or saturated. This is the Contract's
+// `effective_cap_stability` band: the CLI output is 5 in every state.
+test("FIXED-CAP — effective_cap is 5 under EVERY observed state (GO/WAIT/EXTREME × budget idle/saturated) — the Contract measure", (t) => {
+  const states = [
+    // [label, avg10, nodeProcs, expectedObservedBand]
+    ["GO idle", "12", "0", "GO"],
+    ["GO saturated", "12", "20", "GO"],
+    ["WAIT idle", "68", "0", "WAIT"],
+    ["WAIT saturated", "68", "20", "WAIT"],
+    ["EXTREME idle", "90", "0", "EXTREME"],
+    ["EXTREME saturated", "90", "20", "EXTREME"],
+    ["UNMEASURABLE (fail-closed EXTREME)", "unmeasurable", "0", "EXTREME"],
+  ];
+  for (const [label, avg10, procs, expectedBand] of states) {
+    const state = tmpState(`fixed-${label.replace(/\W+/g, "-")}`);
+    // UNMEASURABLE is driven by the resource-gate seam string `unmeasurable` (a kernel-without-PSI
+    // signal — the retired mechanism fail-closed the OBSERVED band to EXTREME).
+    const env = {
+      ...process.env,
+      RESOURCE_GATE_TEST_CPU_AVG10: avg10,
+      RESOURCE_GATE_TEST_NODE_PROCS: procs,
+    };
+    const r = computeEffectiveCap({ repoRoot: REPO_ROOT, stateFile: state, env });
+    assert.equal(r.effective_cap, FIXED_EFFECTIVE_CAP, `${label}: effective_cap must be the fixed 5, got ${r.effective_cap}`);
+    assert.ok(["GO", "WAIT", "EXTREME"].includes(r.band), `${label}: observed band is a real band`);
+    if (label.startsWith("UNMEASURABLE")) assert.equal(r.band, "EXTREME", "unmeasurable signal fail-closes the OBSERVED band to EXTREME");
+  }
+  // Contract invocation form: `bash cap-from-gate.sh` with a suite-running simulation (EXTREME +
+  // budget saturated) still emits effective_cap=5.
+  const res = spawnSync("bash", [CAP_SCRIPT, "--state", tmpState("contract")], {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+    env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "90", RESOURCE_GATE_TEST_NODE_PROCS: "20" },
+  });
+  assert.equal(res.status, 0, `cap-from-gate.sh must exit 0\n${res.stdout}${res.stderr}`);
+  const capLine = res.stdout.split("\n").filter((l) => l.startsWith("effective_cap=")).pop();
+  assert.equal(Number(capLine.split("=")[1]), FIXED_EFFECTIVE_CAP, "suite-running (EXTREME, saturated) ⇒ effective_cap is still 5");
 });
 
 test("resource-gate.sh reports BOTH avg10 and avg300 lines (single source for the signal)", () => {

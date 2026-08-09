@@ -366,6 +366,45 @@ test("AC4 — overload protection RETAINED: injecting test workers drops availab
   assert.match(five.stdout, /verdict=WAIT/);
 });
 
+// ── COUNTING ACCURACY (gap-fixed-cap-5-dynamic-cap-retired AC4) ────────────────────────────────────
+// The human ruling's measured defect: process-budget.sh reported `in_use=5` while only 1 node
+// MainThread test process actually ran (infra — mcp/serve/monitor — was being counted as a
+// throttle-able test worker). The fix (f126c087) counts ONLY throttle-able TEST procs; THIS test pins
+// the exact reported scenario — 1 real test worker among the resident infra cmdlines ⇒ in_use=1,
+// never 5. `budget_count_accurate` invariant.
+test("AC4 — in_use matches the ACTUAL test-worker count: 1 test worker among infra ⇒ in_use=1 (not 5) — the 报5实1 reproduction", () => {
+  const budgetScript = path.join(REPO_ROOT, "plugin", "scripts", "process-budget.sh");
+  // The measured host infra set (2026-08-08 19:1xZ / the manager's 2026-08-09 ruling): MCP servers,
+  // web serve, suite-state monitor — NOT throttle-able. Plus exactly ONE real test worker.
+  const infraCmds = [
+    "node /home/yale/.local/share/quay-plugin//vendor/quay/dist/quay.js mcp",
+    "node packages/quay/bin/quay.ts mcp",
+    "node /home/yale/.nvm/versions/node/v26.5.0/bin/quay-native mcp",
+    "node /home/yale/.nvm/versions/node/v26.5.0/bin/quay serve --host 100.87.141.82 --port 4174",
+    "node --experimental-strip-types packages/quay/bin/quay.ts serve --host 100.87.141.82 --port 4173",
+    "node --no-warnings --experimental-strip-types /home/yale/work/quay/plugin/scripts/suite-state-trigger.ts --monitor",
+  ];
+  const oneWorker = "node --test --test-concurrency=1 /tmp/budget-control.mjs";
+  const cmds = [...infraCmds, oneWorker];
+  const r = spawnSync("bash", [budgetScript], {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+    env: { ...process.env, RESOURCE_GATE_TEST_NPROC: "4", RESOURCE_GATE_TEST_PROC_CMDLINES: cmds.join(";") },
+  });
+  assert.equal(r.status, 0, `process-budget.sh must exit 0\n${r.stdout}${r.stderr}`);
+  assert.match(r.stdout, /in_use=1/, `6 infra + 1 test worker ⇒ in_use=1, got:\n${r.stdout}`);
+  assert.match(r.stdout, /available=3/, "1 test worker on 4 cores ⇒ available=3");
+  assert.match(r.stdout, /verdict=GO/, "1 worker leaves the budget GO");
+  // Every infra cmdline alone (no test worker) ⇒ in_use=0 — infra is NEVER throttle-able.
+  const infraOnly = spawnSync("bash", [budgetScript], {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+    env: { ...process.env, RESOURCE_GATE_TEST_NPROC: "4", RESOURCE_GATE_TEST_PROC_CMDLINES: infraCmds.join(";") },
+  });
+  assert.equal(infraOnly.status, 0);
+  assert.match(infraOnly.stdout, /in_use=0/, "pure infra ⇒ in_use=0 (infra is a resident constant, not test concurrency)");
+});
+
 test("AC5 — process-budget.sh header documents the counting scope (test procs only; infra is a resident constant)", () => {
   const src = fs.readFileSync(path.join(REPO_ROOT, "plugin", "scripts", "process-budget.sh"), "utf8");
   assert.match(src, /COUNTING SCOPE/, "the header must carry a COUNTING SCOPE section (AC5)");

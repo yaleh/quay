@@ -82,14 +82,25 @@ is_test_cmdline() {
   return 1
 }
 
+# list_node_mainthread_pids — enumerate ALL node-MainThread pids (EXACT comm match — the same
+# spelling resource-gate.sh uses; `grep -x node` and `pgrep -f` both fail on Node's comm). Uses
+# `ps -e -o pid= -o comm=` (the process list form CLAUDE.md's memory note calls out) with an awk
+# exact-match on the 15-char `node-MainThread` comm, so the enumeration is deterministic even where
+# pgrep is absent (minimal containers). NEVER `ps | grep node`: grepping for "node" matches npm /
+# node-*/other node-named comms, and on this box grep is a ugrep function so a `grep -v grep`
+# exclusion silently fails — the grep process itself gets counted (gap-fixed-cap-5-dynamic-cap-retired
+# AC4: the "报 5 实 1" overcount was exactly an infra-counted-as-test miscount).
+list_node_mainthread_pids() {
+  ps -e -o pid= -o comm= 2>/dev/null | awk '$2 == "node-MainThread" { print $1 }'
+}
+
 # read_test_procs — count node-MainThread processes currently running that classify as TEST
-# (throttle-able). EXACT `pgrep -x node-MainThread` comm match (the same AC4 spelling
-# resource-gate.sh uses; `grep -x node` and `pgrep -f` both fail on Node's comm), then classify
-# each pid's /proc/<pid>/cmdline. A pid whose cmdline is unreadable (already exited) is not
-# counted — fail-open on a race, never wedges the budget.
+# (throttle-able). Enumerate via list_node_mainthread_pids (exact comm), then classify each pid's
+# /proc/<pid>/cmdline. A pid whose cmdline is unreadable (already exited) is not counted — fail-open
+# on a race, never wedges the budget.
 read_test_procs() {
   local count=0 pid cmdline
-  for pid in $(pgrep -x node-MainThread 2>/dev/null || true); do
+  for pid in $(list_node_mainthread_pids); do
     cmdline="$(tr '\0' ' ' < "/proc/${pid}/cmdline" 2>/dev/null || true)"
     if is_test_cmdline "${cmdline}"; then count=$((count + 1)); fi
   done

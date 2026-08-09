@@ -30,8 +30,11 @@
 // slots (the caller owns the in-flight set and MUST add a freshly-dispatched id before the next
 // evaluation).
 //
-// AC5 (cap semantics unchanged): the cap is an INPUT (--cap, the effective_cap from cap-from-gate.sh
-// at the dispatch decision point) — mechanism/strategy separation, the helper never hardcodes a cap.
+// AC5 (cap semantics, RETIRED as dynamic — gap-fixed-cap-5-dynamic-cap-retired): the cap was an INPUT
+// (--cap, the effective_cap from cap-from-gate.sh at the dispatch decision point). The dynamic cap is
+// retired (human ruling 2026-08-09): the DEFAULT cap is now the fixed constant FIXED_DISPATCH_CAP (5),
+// so slot-refill and its derived floor (5 × 4 = 20) are stable regardless of load/suite state. An
+// explicit --cap still overrides (for manual runs/tests), but the production default is fixed 5.
 //
 // AC8-PREEMPT (tasks/gap-supervisor-preemption — .halt mechanical mount point): `.halt` used to be
 // checked ONLY at the tick boundary (fast-mode-loop-tick.md step 0), and the continuous flow
@@ -56,7 +59,6 @@ import path from "node:path";
 import { parseTask } from "./task-schema.ts";
 import {
   analyzeTasks,
-  CONCURRENCY_CAP_DEFAULT,
   POOL_FLOOR_MULT_DEFAULT,
 } from "./ready-pool-check.ts";
 import {
@@ -72,6 +74,12 @@ import {
   expandDeclaredTouches,
 } from "./concurrent-batch-scheduler.ts";
 import { isDirectEntry } from "./gate-script-base.ts";
+
+/** FIXED dispatch cap (gap-fixed-cap-5-dynamic-cap-retired, human ruling 2026-08-09): the dynamic
+ *  adaptive cap is retired. `--cap` defaults to this constant — 5 — so slot-refill and its derived
+ *  floor (5 × floor_mult = 20) are stable regardless of load/suite state. (The caller may still pass
+ *  an explicit `--cap`; the DEFAULT is fixed at 5.) */
+export const FIXED_DISPATCH_CAP = 5;
 
 /** Free dispatch slots = max(0, cap − in_flight). The one definition; never hardcoded. */
 export function computeSlotsFree(cap, inFlightCount) {
@@ -141,7 +149,8 @@ function buildStatusById(tasksDir) {
  *  @param {object} o
  *  @param {string} o.tasksDir   the store's tasks dir (<root>/tasks)
  *  @param {string} o.root       repo root (touches-resolution + git signals)
- *  @param {number} [o.cap]      effective concurrency cap (from cap-from-gate.sh); default 3
+ *  @param {number} [o.cap]      concurrency cap; default FIXED_DISPATCH_CAP (5) — the dynamic cap is
+ *      retired (gap-fixed-cap-5-dynamic-cap-retired). floor = cap × floor_mult = 5 × 4 = 20.
  *  @param {number} [o.floorMult] pool floor multiplier; default 4
  *  @param {Array<{id:string, body:string}>} [o.inFlight] currently-RUNNING subagent tasks
  *  @param {Array<{id:string, body:string}>} [o.closedButLive] tasks whose bracket CLOSED but whose
@@ -151,7 +160,7 @@ function buildStatusById(tasksDir) {
  *      pool, floor, dispatchable_disjoint, criterion_met, should_refill, no_refill_reason,
  *      recommended, scanned }
  */
-export function analyzeSlotRefill({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, floorMult = POOL_FLOOR_MULT_DEFAULT, inFlight = [], closedButLive = [] }) {
+export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, floorMult = POOL_FLOOR_MULT_DEFAULT, inFlight = [], closedButLive = [] }) {
   // PREEMPTIVE HALT (gap-supervisor-preemption AC2): the `.halt` sentinel is a CODE mount point,
   // not a tick-step-0 prose rule. When halted, dispatch is blocked no matter how many slots/candidates
   // exist — the human's stop takes effect at ANY dispatch-recommendation point, mid-flow.
@@ -241,7 +250,7 @@ export function analyzeSlotRefill({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAUL
 
 function main(argv) {
   let root = null;
-  let cap = CONCURRENCY_CAP_DEFAULT;
+  let cap = FIXED_DISPATCH_CAP;
   let floorMult = POOL_FLOOR_MULT_DEFAULT;
   let inFlightIds = [];
   let closedButLiveIds = [];
