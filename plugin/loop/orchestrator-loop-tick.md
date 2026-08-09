@@ -1192,6 +1192,24 @@ node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --slot-sta
   来自入站回显而非自写备忘」这一事实——**问责对象是「框里有文本」这一状态，不是「谁写的」**（自清/自证
   不可靠：框会被动接收文本，唯一可靠观察者是外部会话）。
 
+### 4c. 外部自食例行观察（external-dogfooding routine，常驻发现通道）
+
+**这是外层对 DIR-043 常驻外部自食例行的观察位**——例行本身（调度 / 派发 / 闸门 / FILE-ONLY）由内层
+`fast-mode-loop-tick.md` §3.7 承载；外层只确认契约没烂、发现还在流动。该例行是 loop 对外部真实目标
+（archguard）的 pre-friction 发现通道（`L_T` 再照明）；机制已结晶并 real-fire 证明过（DIR-051 驱动
+archguard，ADR-016 tmux remote-drive）。
+
+- **契约观察**（机械，fail-closed）：
+  `node --experimental-strip-types plugin/scripts/external-dogfooding-check.ts --selftest`
+  自检 + 契约四项（cadence / 外部目标可驱动 / remote-drive 表面 / 发现形状），目标与 registry 用
+  `--target <外部工作区> --registry experiments/quay-perpetual-stream/drivable-workspaces.yml`。
+  契约不满足 = 例行退化 → 按本步必报上报并进升级路径，不静默跳过。
+- **发现观察**：例行 DUE 时内层 §3.7 派发（`every(N)` / `on(checkpoint)`）。外层看
+  `routine-file-gate` 是否放行了新 `label:directive` 发现（队列里多出来的新任务文件）：有 = 通道在流动；
+  长期零发现且契约绿 = 通道可能空转，按发现观察记录。
+- **单驱动纪律（ADR-016）**：外部工作区一次只有一个驱动者——外层若要亲手碰 archguard，先确认没有在飞
+  例行在驱动它；否则只观察不驱动。
+
 ### 5. 升级（攒起来，不打扰）
 
 以下**不自行决定**，写进 `orchestration/escalations.md` 等人：
@@ -1267,6 +1285,8 @@ tick 或 `/clear` 后的会话会重犯。
 - Monitor 三判据（`bash plugin/scripts/monitor-mount-check.sh --json` 的 `mounted` /
   `targetRoot` 是否等于本仓根 / `delivered`）——挂没挂、挂的哪个仓库、事件有没有送达，三条一条都不能少
   （AC9 起 `delivered` 取代 `ownedByThisSession`）
+- `external-dogfooding` 例行（4c）：契约四项是否绿（`external-dogfooding-check.ts`）、是否 DUE、本窗口
+  是否产了新 `label:directive` 发现
 
 不要只说「内层在跑」——没有这些，分层是否有效无法判定。
 

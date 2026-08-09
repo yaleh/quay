@@ -754,9 +754,17 @@ node --experimental-strip-types plugin/scripts/ready-pool-check.ts --root "$(pwd
 4. **闸门 + FILE-ONLY**：findings 走 `routine-file-gate.ts`（新颖性 / 去重 / 限流）；只产新任务文件
    （`tasks/`），改任何产品/方法代码 = 违规丢弃。
 
+**常驻例行实例（2026-08-09，DIR-043 接线）**：本 track 现承载三个常驻例行——`self-validation`
+（内源自验，`every(5)`）、`architecture-analysis`（架构分析，`every(10)`）、`external-dogfooding`
+（**外部自食**——用 quay 对真实外部工作区（archguard）做 pre-friction 发现，`every(8)` 或
+`on(checkpoint)`，DIR-043/ADR-016）。`external-dogfooding` 的例行契约（cadence / 外部目标可驱动 /
+tmux remote-drive 表面 / 发现形状）由 `external-dogfooding-check.ts` 机械校验（capability-catalog
+AC1c，fail-closed）——派发前先 `--selftest` + `--surface --plugin-root "$CLAUDE_PLUGIN_ROOT"` +
+`--target <外部工作区> --registry <drivable-workspaces.yml>`，契约不满足即视为发现（先建档再派发）。
+
 `quay:run-routines` skill（`plugin/skills/routines/SKILL.md`）是这条 track 的操作化承载——本步调度它
-即可，不必手抄流水线；routine-scheduler.ts / read-probe-spec.ts / routine-file-gate.ts 随 --loop 铺入目标
-（机制语料裸名解析，见 quay-init.sh 的 derive_loop_scripts）。
+即可，不必手抄流水线；routine-scheduler.ts / read-probe-spec.ts / routine-file-gate.ts /
+external-dogfooding-check.ts 随 --loop 铺入目标（机制语料裸名解析，见 quay-init.sh 的 derive_loop_scripts）。
 
 ### 4. 派发就绪任务（并发）
 
