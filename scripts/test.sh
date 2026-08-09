@@ -958,7 +958,13 @@ run_selected() {
     # before-run snapshot are this run's leak. Second line of defense — the teardown fix
     # (kill-session, never kill-server) is primary; this covers the whole leak class at once.
     # Same flip-only-a-passing-run semantics as assert-clean-tree above.
-    if [ "$code" -eq 0 ] && ! bash "${repo_root}/plugin/scripts/tmux-leak-scan.sh" --check "${repo_root}"; then
+    # Candidate C (gap-runner-failure-patterns-miss-info-glyph-and-perfile-failed AC5): the leak scan
+    # runs UNCONDITIONALLY — the `&&` short-circuit (old `[ "$code" -eq 0 ] && ! bash ...`) swallowed
+    # the scan whenever the test phase exited non-zero, so a test-red ALSO hid a genuine leak-class
+    # residual (the snapshot was deleted by --check's success path or left stale). A leak is a REAL
+    # residual, independent of test-failure reporting — merge its verdict into code so the runner's
+    # tmux-leak-scan: FAIL line reaches the stream and failures[].
+    if ! bash "${repo_root}/plugin/scripts/tmux-leak-scan.sh" --check "${repo_root}"; then
       code=1
     fi
     full_suite_lock_release

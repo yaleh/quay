@@ -248,13 +248,27 @@ export interface SuiteState {
 // `❯ <file> (N tests | M failed)` (per-file) and `Test Files <N> failed` (summary).
 // FULL-SUITE-EXIT is the repo's own marker. A generic non-zero exit code is the catch-all
 // for failures no line matched (applied at exit).
+// gap-runner-failure-patterns-miss-info-glyph-and-perfile-failed — this repo's measure-suite
+// reporter / node:test SPEC-reporter emit the INFO-GLYPH and per-file forms, NOT the TAP `#`
+// forms (round-149 red: state=red reason=failed but failures=[] / redAt=null — the third path of
+// the same family 42aad5fe fixed for testsSeen): `ℹ fail N` / `ℹ cancelled N` (same [ #ℹ] dual
+// prefix the tallies already accept), `✖ <testname> (Nms)` (spec-reporter per-test failure —
+// the trailing (Nms) distinguishes it from bare `✖ ...` console noise, the TASK-67 negative
+// control), `__PERFILE__ ... passed=false` (measure-suite-reporter per-file failure — the file
+// path rides ON the line so failures[] carries it), and `tmux-leak-scan: FAIL` (the suite-tail
+// leak scan's residual report — candidate C: a leak is a REAL residual, independent of test
+// failures, and must not be swallowed by a `&&` short-circuit).
 const FAILURE_PATTERNS: RegExp[] = [
   /^not ok\b/, // node:test / TAP per-test failure
-  /^#\s*fail\s+[1-9]/, // TAP summary: # fail 1+
-  /^#\s*cancelled\s+[1-9]/, // TAP summary: # cancelled 1+ (cancelled is a failure even when fail 0)
+  /^[#ℹ]\s*fail\s+[1-9]/, // TAP + spec-reporter summary: # fail 1+ / ℹ fail 1+
+  /^[#ℹ]\s*cancelled\s+[1-9]/, // TAP + spec-reporter summary: # cancelled 1+ / ℹ cancelled 1+ (cancelled is a failure even when fail 0)
   /❯\s+\S+\s+\(\d+\s+tests?\s*\|\s*[1-9]\d*\s+failed(?:[^)]*)\)/, // vitest per-file: ❯ <file> (N tests | M failed [| K skipped])
   /Test Files\s+[1-9]\d*\s+failed/, // vitest summary: Test Files <N> failed
   /FULL-SUITE-EXIT=[^0]/, // the repo's own full-suite exit marker, non-zero
+  /✖\s+\S.*\(\d+(?:\.\d+)?ms\)/, // node:test spec-reporter per-test failure: ✖ <testname> (Nms)
+  /✖\s+failing tests?/, // node:test spec-reporter failure-block header: `✖ failing tests:` (only emitted when tests failed)
+  /__PERFILE__.*passed=false/, // measure-suite-reporter per-file failure: __PERFILE__ duration_ms=<d> <path> passed=false
+  /tmux-leak-scan: FAIL/, // suite-tail leak scan's residual report (candidate C)
 ];
 
 // AC5 reason axis (gap-suite-state-has-no-reason-axis-failed-aborted-infra AC1/AC3) — ABORT markers
@@ -1201,6 +1215,22 @@ export async function run(argv: string[]): Promise<number> {
   //      before the node --test phase) ⇒ reason="static-check" (AC2/AC3 — distinguishable);
   //   3. no correctness conclusion (abort marker / signal kill / spawn error) ⇒ reason="aborted";
   //   4. everything else ⇒ fail-closed "failed" (the pre-existing catch-all).
+  // gap-runner-failure-patterns-miss-info-glyph-and-perfile-failed candidate B — AGGREGATE
+  // backstop: if no STRUCTURED failure line matched but the [ #ℹ] summary tallies (the SAME
+  // tallies AC6 already records, from `ℹ fail N` / `ℹ cancelled N`) recorded fail>0 or
+  // cancelled>0, the summary IS the verdict — red + reason=failed + a non-empty failures[].
+  // This closes the third family path: a reporter form the FAILURE_PATTERNS didn't catch must
+  // still flip red (the tallies and the red verdict become single-source, not two pattern sets).
+  if (!redDetected && !staticCheckDetected && (tapFail > 0 || tapCancelled > 0)) {
+    redDetected = true;
+    redAtIso = redAtIso ?? new Date().toISOString();
+    redFailures.push(
+      enrichFailure({
+        line: `ℹ fail ${tapFail}${tapCancelled > 0 ? `; ℹ cancelled ${tapCancelled}` : ""}`,
+        file: undefined,
+      }),
+    );
+  }
   const green =
     !redDetected && !staticCheckDetected && !abortDetected && spawnError === null && exitCode === 0;
   // No correctness conclusion (abort) iff: an abort marker was seen, OR the child was killed by a
