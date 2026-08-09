@@ -166,13 +166,14 @@ test("AC1 — a green run writes the exact suite-state shape to .quay/full-suite
         "durationMs",
         "finishedAt",
         "laneCount",
+        "pid",
         "runId",
         "runner",
         "scope",
         "startedAt",
         "state",
       ],
-      "exact suite-state shape (AC1 + gap-worktree-scoped-runs-consume-resources-but-produce-no-signal AC1 scope + gap-full-suite-state-race-last-write-wins-no-generation-guard runId)",
+      "exact suite-state shape (AC1 + gap-worktree-scoped-runs-consume-resources-but-produce-no-signal AC1 scope + gap-full-suite-state-race-last-write-wins-no-generation-guard runId + gap-full-suite-state-red-no-failure-detail-static-check-invisible AC6 pid)",
     );
     assert.equal(s.state, "green");
     assert.equal(s.runner, "outer");
@@ -1796,3 +1797,63 @@ test(
     }
   },
 );
+
+// ── AC6: runner-died terminal state (gap-full-suite-state-red-no-failure-detail-static-check-invisible) ──
+
+test("AC6 — every state write carries the runner PID (the crash-watchdog's liveness anchor)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-pid-"));
+  const { f, dir } = fakeSuite(GREEN_SUITE);
+  try {
+    const child = runRunner({ root, command: `bash ${f}`, laneCount: 8 });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, "runner exits 0 on green");
+    const s = readState(root);
+    assert.equal(s.state, "green");
+    assert.equal(typeof s.pid, "number", "the state carries the runner PID (AC6)");
+    assert.ok(Number.isInteger(s.pid) && s.pid > 0, "pid is a positive integer");
+    assert.equal(s.pid, child.pid, "pid is the RUNNER process's pid — the watchdog's liveness anchor");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC6 — a runner that dies mid-run from an uncaughtException writes state=red reason=crashed (never stuck at running)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-crash-"));
+  // The fake suite BLOCKS (sleep 3) so the child CANNOT close before the crash seam fires — a fast
+  // suite would let the runner reach its green verdict and remove the crash handlers first (the
+  // flake: under load the child's close raced the 30ms seam and the runner exited 0/green).
+  const { f, dir } = fakeSuite('echo "running"; sleep 3; exit 0');
+  try {
+    // QUAY_TEST_CRASH_AFTER_RUNNING is a hermetic test seam: it throws an uncaught exception ~30ms
+    // after the `running` write, exercising the AC6 in-process crash-terminal path deterministically.
+    const child = runRunner({
+      root,
+      command: `bash ${f}`,
+      laneCount: 8,
+      env: { QUAY_TEST_CRASH_AFTER_RUNNING: "1" },
+    });
+    const { code } = await waitExit(child);
+    assert.equal(code, 1, "a crashed runner exits 1");
+    const s = readState(root);
+    assert.equal(s.state, "red", "the runner died -> the state is terminal red, NOT running (AC6)");
+    assert.equal(s.reason, "crashed", "the terminal reason is crashed (AC6) — distinguishable from aborted/failed");
+    assert.equal(typeof s.pid, "number", "the crashed state still carries the runner pid");
+    assert.ok(s.finishedAt !== null && s.finishedAt !== undefined, "crashed state has a finishedAt (terminal, not early)");
+    assert.equal(typeof s.durationMs, "number", "crashed state has a durationMs");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC6 — routeRed/shouldStopDispatch treat crashed like aborted (no code-risk stop) but keep the reason distinguishable", () => {
+  // crashed = the runner died mid-run without a correctness conclusion — same no-stop family as
+  // aborted/infra-error, but the reason value stays distinct so a consumer can tell "deliberately
+  // stopped" from "died silently (re-launch the suite)".
+  assert.equal(routeRed({ state: "red", reason: "crashed" }), "resource-gate", "crashed red → resource-gate (NOT a code-failure conclusion)");
+  assert.equal(shouldStopDispatch({ state: "red", reason: "crashed" }), false, "crashed red does NOT stop dispatch (no correctness conclusion)");
+  assert.notEqual("crashed", "aborted", "crashed is a DISTINCT reason value from aborted (consumer can distinguish)");
+  assert.equal(shouldStopDispatch({ state: "red", reason: "failed" }), true, "test-failure red still stops (unchanged, AC5)");
+  assert.equal(shouldStopDispatch({ state: "red", reason: "static-check" }), true, "static-check red still stops (unchanged, AC3)");
+});

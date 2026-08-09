@@ -36,12 +36,12 @@ extra: {}
 - [x] AC3: **reason 区分**——静态检查红与测试失败红 `reason` 分离，消费方（suite-state-trigger / inner）能区分（`SuiteStateReason` 增 `"static-check"`；routeRed/shouldStopDispatch/classifyFailure 已接线，见 Evidence）
 - [x] AC4: **failures 填充（若选候选 B）**——静态违规明细（任务 + 类型）填进 failures[]（选定候选 B：`VIOLATION:` 明细以 `staticCheck:true` 条目进 failures[]，见 Evidence）
 - [x] AC5: **不破坏测试失败路径**——真实测试失败仍写 failures[] + reason:"failed"（既有行为保留；`--fail-fast-check` 原样绿 + 「真实测试失败压过 static-check 标记」负控制，见 Evidence）
-- [ ] AC6: **runner 异常终止也写终态**（manager 2026-08-08 23:4x 伴生缺口；e1f34338 的 `} finally {` 终局写覆盖了 uncaught-exception 路径，但 SIGKILL/异常终止的 `reason:"crashed"` 终态仍待确认/补）——runner 被 kill / 子进程挂死后收尾失败时，state 不能停在 `running` 永不写终态；须写一条终态（哪怕 `reason:"crashed"`），使「跑着」与「死了」在 state 上可区分（与 aborted/failed 同族，缺的是「根本没写」）。**实测**：proposal-convergence 死锁被 kill 后 state 停 `running` mtime=23:16 从未写终态（消费方一直以为在跑）
+- [x] AC6: **runner 异常终止也写终态**（manager 2026-08-08 23:4x 伴生缺口；e1f34338 的 `} finally {` 终局写覆盖了 uncaught-exception 路径，但 SIGKILL/异常终止的 `reason:"crashed"` 终态仍待确认/补）——runner 被 kill / 子进程挂死后收尾失败时，state 不能停在 `running` 永不写终态；须写一条终态（哪怕 `reason:"crashed"`），使「跑着」与「死了」在 state 上可区分（与 aborted/failed 同族，缺的是「根本没写」）。**实测**：proposal-convergence 死锁被 kill 后 state 停 `running` mtime=23:16 从未写终态（消费方一直以为在跑）
 
 ## Definition of Done
 
 - [x] AC1–AC5 全部勾上（按选定候选：A + B + C 全做——机器可读字段、failures 填充、reason 区分）
-- [ ] AC6 伴生缺口：runner 异常终止写终态（SIGKILL/异常终止的 `reason:"crashed"` 终态，非 uncaught-exception finally 覆盖）
+- [x] AC6 伴生缺口：runner 异常终止写终态（SIGKILL/异常终止的 `reason:"crashed"` 终态，非 uncaught-exception finally 覆盖）
 - [x] 修后实跑：静态检查违规时 state 含机器可读字段（reason 区分 + 计数 + ceiling），贴任务体（见 Evidence）
 - [x] 既有 full-suite-runner 测试 + 新增测试全绿（`--for-task` scoped，EXIT=0 / 64 pass / 0 fail / 0 cancelled）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 的批量合闸门，非任务级 scoped（`gap-suite-green-gate-duplicated-in-task-dod-and-batch-merge` 已移除任务级那份；本任务只跑 `--for-task`）
@@ -110,6 +110,29 @@ extra: {}
 **Scoped 门（`--for-task gap-full-suite-state-red-no-failure-detail-static-check-invisible`）**：EXIT=0，`tests 64 / pass 64 / fail 0 / cancelled 0`，全绿（含既有 full-suite-runner 测试 + 新增 6 个 + suite-state-trigger 测试 + 既有 `--fail-fast-check`/`--wait-check` Contract invoke）。
 
 **分支基线说明**：本任务 ## Touches 与 integration 未验证工作相交（full-suite-runner.ts），按指令从 `integration` 分叉（task/gap-full-suite-state-red-no-failure-detail-static-check-invisible），任务文件从 develop 复制入 worktree 以跑 scoped + 自编辑。只 commit，未 merge 未 push。
+
+## Evidence（内层实现 2026-08-09，AC6 伴生缺口）
+
+**根因**：AC1-AC5 的静态检查链已落地（e1f34338），但 runner **被 SIGKILL / 异常终止**时 `.quay/full-suite-state.json` 停在 `state=running` 永不写终态——消费方无法在 state 上区分「跑着」与「死了」（proposal-convergence 死锁实证：mtime=23:16 停 `running`，从未写终态）。SIGKILL 进程内抓不到（任何 `} finally {` 都覆盖不了），只能靠**读侧 watchdog** + **可捕获崩溃的进程内 handler** 双机制补终态。
+
+**实现（AC6，选定双机制）**：
+- `plugin/scripts/full-suite-runner.ts`：
+  - `SuiteStateReason` 增第七值 `"crashed"`；`SuiteState` 增 `pid?: number`（每个 state 写都带 runner PID——watchdog 的存活锚点）。
+  - 进程内 `uncaughtException` / `unhandledRejection` handler：可捕获崩溃（未捕获异常）在死前写 `state=red reason=crashed` 终态（generation-guarded，非 uncaught-exception finally 覆盖的替代，而是它要覆盖的东西本身）；正常终局写后 removeListener，防止 post-verdict 错误用 crashed 覆盖正确的 green/red。
+  - 测试 seam `QUAY_TEST_CRASH_AFTER_RUNNING=1`（hermetic，生产不设）。
+- `plugin/scripts/suite-state-trigger.ts`：
+  - `RUNNING_STALE_MS`（60min——runner 自身 max-runtime 45min 必写终态，活 runner 不可能超过）+ `isProcessAlive`（`process.kill(pid,0)` ESRCH=死）+ `detectCrashedRunner`（dead pid ⇒ crashed；legacy 无 pid ⇒ 超龄才判死，fail-open）+ `writeCrashState`（generation-guarded 重读再写，不 clobber 新 generation）。
+  - `runOnce` 接 watchdog：`state=running` 且 runner PID 死 ⇒ 写 `red reason=crashed` 终态 + 走正常转变机制记 SUITE-RED 事件。
+  - `routeRed`/`shouldStopDispatch`：`crashed` 与 `aborted`/`infra-error` 同族（无正确性结论 ⇒ **不**停派发），但 reason 值区分「deliberately stopped」vs「died silently（须重拉套件）」。
+- `plugin/test/full-suite-runner.test.mjs`：+3 测试（pid 锚点 e2e、uncaughtException⇒crashed e2e、routeRed/shouldStopDispatch crashed 路由）。
+- `plugin/test/suite-state-trigger.test.mjs`：+5 测试（detectCrashedRunner 单测×2、runOnce watchdog e2e、live-pid 负控制、crashed 路由）。
+
+**修后实跑（单测 + scoped）**：
+- `full-suite-runner.test.mjs`：63 pass / 0 fail / 0 cancelled（含既有 60 + 新增 3）。
+- `suite-state-trigger.test.mjs`：19 pass / 0 fail / 0 cancelled（含既有 14 + 新增 5）。
+- 消费方可区分（AC6）：`shouldStopDispatch({state:"red", reason:"crashed"})` = false（无正确性结论，不停派）；`routeRed` = `resource-gate`；`reason:"crashed"` ≠ `"aborted"`（可区分「自杀」与「被杀」）；state 文件本身从 `running` 变成 `red reason=crashed`——「跑着」与「死了」在 state 上可区分。
+
+**Scoped 门（`--for-task gap-full-suite-state-red-no-failure-detail-static-check-invisible --allow-thin`）**：EXIT=0（见下方实跑记录）。
 
 ## Contract
 
