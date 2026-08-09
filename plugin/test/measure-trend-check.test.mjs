@@ -301,3 +301,57 @@ test("Wiring — full-suite-runner lands the measure-history after a suite that 
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+// ── gap-measure-trend-large-test-load-noise AC2/AC3: historical-variance exemption ─────────
+// A LARGE test (it0-dod-check 71s baseline) that historically swings 35-110s under load must NOT
+// flag on a +33s absolute excursion that stays within its OWN historical max (round-173b false
+// positive). A reading that EXCEEDS the historical max is a genuine trend and still flags.
+
+test("AC2 — large-test absolute growth WITHIN its historical max is not flagged (load noise)", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "mtc-hist-"));
+  try {
+    const historyFile = path.join(dir, "measure-history.jsonl");
+    const logFile = path.join(dir, "full-suite.log");
+    // rounds 1-3: it0-dod-check swings 35s → 74s → 110s (historical max 110s = load noise band).
+    writeFileSync(logFile, fakeLog([["/it0-dod-check.test.mjs", 35_000]]), "utf8");
+    landMeasureHistory({ historyFile, logFile });
+    writeFileSync(logFile, fakeLog([["/it0-dod-check.test.mjs", 74_000]]), "utf8");
+    landMeasureHistory({ historyFile, logFile });
+    writeFileSync(logFile, fakeLog([["/it0-dod-check.test.mjs", 110_000]]), "utf8");
+    landMeasureHistory({ historyFile, logFile });
+    // round 4: 71s → 104s (+33s absolute > +30s, but 104s ≤ hist max 110s ⇒ within variance).
+    writeFileSync(logFile, fakeLog([["/it0-dod-check.test.mjs", 104_685]]), "utf8");
+    landMeasureHistory({ historyFile, logFile });
+
+    const growth = compareLastTwoRounds(historyFile);
+    assert.equal(growth.length, 0, `within-historical-max excursion must not flag: ${JSON.stringify(growth)}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC3 — large-test absolute growth EXCEEDING its historical max still flags (genuine trend)", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "mtc-hist2-"));
+  try {
+    const historyFile = path.join(dir, "measure-history.jsonl");
+    const logFile = path.join(dir, "full-suite.log");
+    // historical max 110s; round 4 jumps to 150s (>> hist max ⇒ genuine regression).
+    writeFileSync(logFile, fakeLog([["/it0-dod-check.test.mjs", 35_000]]), "utf8");
+    landMeasureHistory({ historyFile, logFile });
+    writeFileSync(logFile, fakeLog([["/it0-dod-check.test.mjs", 110_000]]), "utf8");
+    landMeasureHistory({ historyFile, logFile });
+    writeFileSync(logFile, fakeLog([["/it0-dod-check.test.mjs", 71_066]]), "utf8");
+    landMeasureHistory({ historyFile, logFile });
+    writeFileSync(logFile, fakeLog([["/it0-dod-check.test.mjs", 150_000]]), "utf8");
+    landMeasureHistory({ historyFile, logFile });
+
+    const growth = compareLastTwoRounds(historyFile);
+    assert.equal(growth.length, 1, "exceeding-historical-max must flag");
+    assert.equal(growth[0].file, "/it0-dod-check.test.mjs");
+    // 150s vs prev 71s is 2.11× (relative fires) AND > hist max 110s; either reason is the point —
+    // what matters is it flags (a genuine regression past history is never suppressed).
+    assert.ok(growth[0].reason === "absolute" || growth[0].reason === "relative", `flags by either threshold: ${growth[0].reason}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

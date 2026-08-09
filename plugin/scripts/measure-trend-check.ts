@@ -213,15 +213,31 @@ export function lastRound(historyFile: string): number {
  */
 export function compareLastTwoRounds(
   historyFile: string,
-  opts?: { relativeFactor?: number; absoluteMs?: number; smallTestMs?: number },
+  opts?: { relativeFactor?: number; absoluteMs?: number; smallTestMs?: number; histVariance?: boolean },
 ): GrowthReport[] {
   const relativeFactor = opts?.relativeFactor ?? DEFAULT_RELATIVE_FACTOR;
   const absoluteMs = opts?.absoluteMs ?? DEFAULT_ABSOLUTE_MS;
   const smallTestMs = opts?.smallTestMs ?? DEFAULT_SMALL_TEST_MS;
+  const useHistVariance = opts?.histVariance ?? true; // gap-measure-trend-large-test-load-noise AC2
   const rounds = readHistoryRounds(historyFile);
   if (rounds.length < 2) return [];
   const prev = rounds[rounds.length - 2].records;
   const curr = rounds[rounds.length - 1].records;
+
+  // Historical variance band (candidate A, gap-measure-trend-large-test-load-noise): for each file,
+  // the max duration it reached across ALL rounds BEFORE the current one. A large test (it0-dod-check
+  // 71s) that historically swings 35-104s under load is at its natural max at 104s — flagging it on a
+  // +33s absolute excursion past +30s is a false positive (round-173b). Suppress the ABSOLUTE trigger
+  // when currMs is within the file's own historical max (a single excursion within history = noise).
+  // A genuine regression that EXCEEDS the historical max still flags. Relative trigger unchanged.
+  const histMax = new Map<string, number>();
+  if (useHistVariance) {
+    for (const r of rounds.slice(0, rounds.length - 1)) {
+      for (const [file, rec] of r.records) {
+        if (rec.durationMs > (histMax.get(file) ?? 0)) histMax.set(file, rec.durationMs);
+      }
+    }
+  }
 
   const reports: GrowthReport[] = [];
   for (const [file, currRec] of curr) {
@@ -242,7 +258,10 @@ export function compareLastTwoRounds(
     // both thresholds (a real 2× on a 10s file is still a regression signal).
     const isSmallTest = prevMs < smallTestMs;
     const rel = !isSmallTest && prevMs > 0 && ratio >= relativeFactor;
-    const abs = growthMs > absoluteMs;
+    // HIST-VARIANCE EXEMPTION (gap-measure-trend-large-test-load-noise AC2): for LARGE tests, an
+    // absolute excursion that stays within the file's own historical max is load noise, not trend.
+    const withinHistMax = useHistVariance && (histMax.get(file) ?? 0) > 0 && currMs <= histMax.get(file)!;
+    const abs = growthMs > absoluteMs && !withinHistMax;
     if (rel || abs) {
       reports.push({ file, prevMs, currMs, growthMs, ratio, reason: rel ? "relative" : "absolute" });
     }
