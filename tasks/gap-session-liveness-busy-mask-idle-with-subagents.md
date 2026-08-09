@@ -246,6 +246,13 @@ resume 若中断，先跑 measure 读 pane_state 日志是否在记，不要假�
   （session-liveness.test.mjs 已拆分为 events/signals/heartbeat，本 touch 指向实际文件，修复
   --for-task selector 按旧文件名解析不到的问题。）
 
+> **交叉标注（2026-08-09，gap-ready-pool-worklanded-traps-stuck-work）**：本任务曾被
+> ready-pool 的 `notYetFlipped` 误排除出可派发池——AC 未满（4/8=0.50，AC0/AC2/AC3/AC7 是真实
+> 实现工作）但 `workLanded=true`（touchLanded），既不能派发又不能翻 done，任务困死。修复后
+> `notYetFlipped` 只排除「AC 全勾 或 AC 完成率 >50%」的 workLanded 任务，本任务回到 dispatchable
+> 候选（ready-pool-check --json 的 ready 列表含 gap-session-liveness-busy-mask-idle-with-subagents）。
+> 剩余未勾 AC 是可正常派发续做的真实工作。
+
 ## Dispatch review
 
 reviewer: none

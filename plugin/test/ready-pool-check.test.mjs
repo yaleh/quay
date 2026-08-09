@@ -117,7 +117,7 @@ function dirTask(id, opts) {
 
 // ── AC1 / AC6: pool computation with the three exclusions ─────────────────────────────────────────
 
-test("ready pool excludes fixture, PARKED, and not-yet-flipped ready tasks", (t) => {
+test("ready pool excludes fixture, PARKED, and done-flip ready tasks; keeps stuck-work", (t) => {
   const root = makeWorkspace("excl");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   writeTask(root, "gap-a", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
@@ -129,38 +129,55 @@ test("ready pool excludes fixture, PARKED, and not-yet-flipped ready tasks", (t)
     labels: ["gap"],
     body: "> **PARKED (outer ruling, 2026-08-04) — execution suspended.**\n\n" + fourArtifactBody(),
   });
-  // A MERGED-but-AC-all-unchecked ready task (the shape the old all-ACs-checked signal missed):
-  // 0 ACs checked, but its declared Touches file exists on disk → work landed → not dispatchable.
+  // A MERGED DONE-FLIP ready task: work landed (Touches file exists on disk) AND ACs near-complete
+  // (3/4 — the "verification-window" shape) → not-yet-flipped → not dispatchable.
   fs.writeFileSync(path.join(root, "code", "landed.ts"), "export const landed = 1;\n");
-  writeTask(root, "gap-merged-not-flipped", {
+  writeTask(root, "gap-done-flip", {
+    status: "ready",
+    labels: ["gap"],
+    body: fourArtifactBody({ checkedAc: 3, touches: ["- code/landed.ts (new)"] }),
+  });
+  // STUCK-WORK: work landed but ACs far from complete (0/4) — REAL remaining implementation, NOT a
+  // done-flip (gap-ready-pool-worklanded-traps-stuck-work AC2) → stays dispatchable.
+  writeTask(root, "gap-stuck-work", {
     status: "ready",
     labels: ["gap"],
     body: fourArtifactBody({ touches: ["- code/landed.ts (new)"] }),
   });
 
   const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root });
-  assert.equal(r.pool, 2, "pool should be gap-a + gap-b only");
-  assert.deepEqual(r.ready.sort(), ["gap-a", "gap-b"]);
+  assert.equal(r.pool, 3, "pool should be gap-a + gap-b + gap-stuck-work");
+  assert.deepEqual(r.ready.sort(), ["gap-a", "gap-b", "gap-stuck-work"]);
 
   const reasonsById = Object.fromEntries(r.excluded.map((e) => [e.id, e.reasons]));
   assert.deepEqual(reasonsById["QENG-DEMO"], ["fixture"]);
   assert.deepEqual(reasonsById["AC-REC"], ["ac-record"], "ac-labelled AC record excluded by kind (isAcRecord, SPEC §5 AC-tracking)");
   assert.deepEqual(reasonsById["gap-parked"], ["parked"]);
-  assert.ok(reasonsById["gap-merged-not-flipped"].includes("not-yet-flipped"), "merged-but-AC-unchecked ready task excluded");
+  assert.ok(reasonsById["gap-done-flip"].includes("not-yet-flipped"), "near-complete workLanded ready task excluded as done-flip");
+  assert.equal(reasonsById["gap-stuck-work"], undefined, "AC-incomplete workLanded ready task is stuck-work → stays dispatchable");
 });
 
-// ── AC5/AC6: the "merged but AC all unchecked" shape the old all-ACs-checked signal missed ──────────
-// Regression pin: pool must never count a merged task, and a truly-unstarted ready task stays.
+// ── AC5/AC6: the "merged but AC all unchecked" shape is STUCK-WORK, not done-work ──────────────────
+// Regression pin (gap-ready-pool-worklanded-traps-stuck-work): a merged task whose ACs are far from
+// complete (<50%) has REAL remaining implementation → counted in the pool; a merged DONE-FLIP task
+// (work landed AND ACs near-complete) is excluded; a truly-unstarted ready task stays.
 
-test("pool excludes merged-but-AC-all-unchecked ready tasks and keeps truly-unstarted ones (AC5/AC6)", (t) => {
+test("pool counts merged-but-AC-incomplete stuck-work, excludes merged done-flip, keeps truly-unstarted (AC5/AC6)", (t) => {
   const root = makeWorkspace("merged-shape");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  // The shape the old 11/11 missed: work LANDED (Touches file exists on disk) but ACs all unchecked.
+  // STUCK-WORK: work LANDED (Touches file exists on disk) but ACs all unchecked → real remaining
+  // implementation → must stay dispatchable (gap-ready-pool-worklanded-traps-stuck-work AC2).
   fs.writeFileSync(path.join(root, "code", "landed.ts"), "export const landed = 1;\n");
-  writeTask(root, "gap-merged", {
+  writeTask(root, "gap-merged-stuck", {
     status: "ready",
     labels: ["gap"],
     body: fourArtifactBody({ touches: ["- code/landed.ts (new)"] }), // 0/4 AC checked
+  });
+  // DONE-FLIP: work landed AND ACs near-complete (3/4 — the verification-window shape) → excluded.
+  writeTask(root, "gap-merged-done-flip", {
+    status: "ready",
+    labels: ["gap"],
+    body: fourArtifactBody({ checkedAc: 3, touches: ["- code/landed.ts (new)"] }),
   });
   // A genuinely-unstarted ready task: Touches file does not exist, no resolving symbols → stays.
   writeTask(root, "gap-unstarted", {
@@ -171,10 +188,11 @@ test("pool excludes merged-but-AC-all-unchecked ready tasks and keeps truly-unst
   writeTask(root, "gap-real", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
 
   const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root });
-  assert.equal(r.pool, 2, "pool must not count the merged-but-unchecked task");
-  assert.deepEqual(r.ready.sort(), ["gap-real", "gap-unstarted"]);
+  assert.equal(r.pool, 3, "pool counts the merged stuck-work task (real remaining work)");
+  assert.deepEqual(r.ready.sort(), ["gap-merged-stuck", "gap-real", "gap-unstarted"]);
   const reasonsById = Object.fromEntries(r.excluded.map((e) => [e.id, e.reasons]));
-  assert.ok(reasonsById["gap-merged"].includes("not-yet-flipped"), "merged-but-unchecked ready task excluded");
+  assert.equal(reasonsById["gap-merged-stuck"], undefined, "merged-but-AC-incomplete stuck-work task stays in the pool (AC2)");
+  assert.ok(reasonsById["gap-merged-done-flip"].includes("not-yet-flipped"), "merged near-complete done-flip task excluded (AC3)");
   assert.ok(!reasonsById["gap-unstarted"], "truly-unstarted ready task stays in the pool");
 });
 
@@ -184,7 +202,7 @@ test("pool excludes merged-but-AC-all-unchecked ready tasks and keeps truly-unst
 // (`(new)` touch now existing) is landing evidence; an existing-file task is judged by its own
 // symbols. AC2 (not-landed existing-file task stays in pool) + AC3 (landed one is excluded).
 
-test("existing-file-modifying tasks: not-landed stays in the pool, landed is excluded (AC2/AC3)", (t) => {
+test("existing-file-modifying tasks: not-landed stays, done-flip landed is excluded, stuck-work landed stays (AC2/AC3)", (t) => {
   const root = makeWorkspace("existing-file");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   // The file exists on master regardless — the touch is NOT marked (new), so file existence must
@@ -196,9 +214,17 @@ test("existing-file-modifying tasks: not-landed stays in the pool, landed is exc
     labels: ["gap"],
     body: fourArtifactBody({ touches: ["- code/existing.ts"] }), // 0/4 AC, no (new), no resolving symbols
   });
-  // LANDED: an existing-file task whose work HAS landed via a task-created file ((new) exists).
+  // DONE-FLIP landed: an existing-file task whose work HAS landed via a task-created file ((new)
+  // exists) AND ACs near-complete (3/4) → excluded (AC3).
   fs.writeFileSync(path.join(root, "code", "created.ts"), "export const created = 1;\n");
-  writeTask(root, "gap-mod-landed", {
+  writeTask(root, "gap-mod-done-flip", {
+    status: "ready",
+    labels: ["gap"],
+    body: fourArtifactBody({ checkedAc: 3, touches: ["- code/existing.ts", "- code/created.ts (new)"] }),
+  });
+  // STUCK-WORK landed: the same landing evidence but ACs far from complete (0/4) → real remaining
+  // implementation → stays dispatchable (AC2).
+  writeTask(root, "gap-mod-stuck", {
     status: "ready",
     labels: ["gap"],
     body: fourArtifactBody({ touches: ["- code/existing.ts", "- code/created.ts (new)"] }),
@@ -206,21 +232,24 @@ test("existing-file-modifying tasks: not-landed stays in the pool, landed is exc
   writeTask(root, "gap-real", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
 
   const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root });
-  assert.equal(r.pool, 2, "pool must keep the not-landed existing-file task");
-  assert.deepEqual(r.ready.sort(), ["gap-mod-not-landed", "gap-real"]);
+  assert.equal(r.pool, 3, "pool keeps the not-landed + the stuck-work existing-file tasks");
+  assert.deepEqual(r.ready.sort(), ["gap-mod-not-landed", "gap-mod-stuck", "gap-real"]);
   const reasonsById = Object.fromEntries(r.excluded.map((e) => [e.id, e.reasons]));
   assert.ok(!reasonsById["gap-mod-not-landed"], "not-landed existing-file task stays in the pool (AC2)");
-  assert.ok(reasonsById["gap-mod-landed"].includes("not-yet-flipped"), "landed existing-file task excluded (AC3)");
+  assert.equal(reasonsById["gap-mod-stuck"], undefined, "landed-but-AC-incomplete existing-file task is stuck-work → stays (AC2)");
+  assert.ok(reasonsById["gap-mod-done-flip"].includes("not-yet-flipped"), "near-complete landed existing-file task excluded (AC3)");
 });
 
 // ── git-history landed signal (gap-ready-pool-taskworklanded-underdetects-prose-ac-merged-tasks) ──
-// A prose-heavy-AC merged-not-flipped task (no resolvable symbols, no (new) touches) whose work
-// landed via a fan-in merge that references it must be excluded from the dispatchable pool. These
-// tests need a REAL git repo (the signal reads `git log master`), created inline (mkdtemp + the
-// same t.after cleanup the other ready-pool tests use) so the R6 isolation checker sees the
+// A prose-heavy-AC merged task (no resolvable symbols, no (new) touches) whose work landed via a
+// fan-in merge that references it is judged by the SAME AC gate as the other workLanded signals:
+// near-complete (>50% AC) → done-flip, excluded from the dispatchable pool; far-from-complete
+// (<50% AC) → stuck-work, stays dispatchable (gap-ready-pool-worklanded-traps-stuck-work AC2/AC3).
+// These tests need a REAL git repo (the signal reads `git log master`), created inline (mkdtemp +
+// the same t.after cleanup the other ready-pool tests use) so the R6 isolation checker sees the
 // directory covered.
 
-test("ready pool excludes a prose-heavy merged task via git-history (AC1/AC3)", (t) => {
+test("ready pool excludes a prose-heavy DONE-FLIP via git-history, keeps git-history STUCK-WORK (AC1/AC2/AC3)", (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `ready-pool-gh-${Date.now()}-`));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
@@ -232,13 +261,14 @@ test("ready pool excludes a prose-heavy merged task via git-history (AC1/AC3)", 
   fs.writeFileSync(path.join(root, ".gitkeep"), "base\n");
   git("add", ".");
   git("commit", "-q", "-m", "init");
-  // A prose-heavy task whose AC yields no resolvable symbols and whose Touches are existing-file
+  // A prose-heavy DONE-FLIP task: ACs yield no resolvable symbols and Touches are existing-file
   // paths (no (new)) — the shape that was under-detected (web-board). Its work lands via a fan-in
-  // merge "merge web-board: …" that modified code/board.ts → git-history fires.
+  // merge "merge web-board: …" that modified code/board.ts → git-history fires; ACs near-complete
+  // (3/4) → excluded as done-flip.
   writeTask(root, "gap-web-board-needs-an-inconsistency-verdict-it-does-not-have", {
     status: "ready",
     labels: ["gap"],
-    body: fourArtifactBody({ touches: ["- code/board.ts"] }),
+    body: fourArtifactBody({ checkedAc: 3, touches: ["- code/board.ts"] }),
   });
   // A genuinely-unstarted ready task stays in the pool (no commit references it).
   writeTask(root, "gap-unstarted", { status: "ready", labels: ["gap"], body: fourArtifactBody({ touches: ["- code/never.ts"] }) });
@@ -249,15 +279,33 @@ test("ready pool excludes a prose-heavy merged task via git-history (AC1/AC3)", 
   git("checkout", "-q", "master");
   git("merge", "--no-ff", "task/gap-web-board", "-m", "merge web-board: /board route joins intent/execution/landing", "-q");
   git("branch", "-D", "task/gap-web-board");
+  // STUCK-WORK via git-history: the same under-detected prose shape whose work also lands via a
+  // fan-in merge (references "web-stuck") BUT whose ACs are far from complete (0/4) → real remaining
+  // implementation → stays dispatchable (AC2).
+  writeTask(root, "gap-web-stuck-work", {
+    status: "ready",
+    labels: ["gap"],
+    body: fourArtifactBody({ touches: ["- code/board-stuck.ts"] }),
+  });
+  git("checkout", "-q", "-b", "task/gap-web-stuck");
+  fs.writeFileSync(path.join(root, "code", "board-stuck.ts"), "stuck\n");
+  git("add", ".");
+  git("commit", "-q", "-m", "board-stuck impl");
+  git("checkout", "-q", "master");
+  git("merge", "--no-ff", "task/gap-web-stuck", "-m", "merge web-stuck: /board-stuck route joins intent/execution/landing", "-q");
+  git("branch", "-D", "task/gap-web-stuck");
 
   const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root });
   const byId = Object.fromEntries(r.excluded.map((e) => [e.id, e.reasons]));
   assert.ok(
     byId["gap-web-board-needs-an-inconsistency-verdict-it-does-not-have"]?.includes("not-yet-flipped"),
-    "prose-heavy merged task excluded via the git-history signal (AC1/AC3)",
+    "prose-heavy near-complete merged task excluded via the git-history signal (AC3)",
   );
   assert.equal(r.ready.includes("gap-web-board-needs-an-inconsistency-verdict-it-does-not-have"), false,
-    "the landed task is NOT in the dispatchable pool");
+    "the done-flip landed task is NOT in the dispatchable pool");
+  assert.equal(r.ready.includes("gap-web-stuck-work"), true,
+    "git-history landed but AC-incomplete task is stuck-work → in the dispatchable pool (AC2)");
+  assert.equal(byId["gap-web-stuck-work"], undefined, "stuck-work task not excluded (AC2)");
   assert.equal(r.ready.includes("gap-unstarted"), true, "a genuinely-unstarted ready task stays in the pool");
 });
 
@@ -277,14 +325,21 @@ test("isFixture / isParked / notYetFlipped unit behavior", (t) => {
   const parked = parseTask("---\nid: x\n---\n> **PARKED (human, 2026-08-04) — execution suspended.**\nmore");
   assert.equal(isParked(parked), true);
 
-  // notYetFlipped uses the LANDED-on-master signal, NOT AC checkbox state (the fan-in merges
-  // without ticking ACs). A merged-but-AC-all-unchecked ready task is EXCLUDED.
+  // notYetFlipped's workLanded signal is now AC-gated (gap-ready-pool-worklanded-traps-stuck-work):
+  // a merged-but-AC-incomplete ready task is STUCK-WORK (real remaining implementation) →
+  // dispatchable; a merged NEAR-COMPLETE ready task (work landed + ACs >50%) is a done-flip →
+  // excluded.
   fs.writeFileSync(path.join(root, "code", "landed.ts"), "export const landed = 1;\n");
-  const merged = {
+  const stuckWork = {
     status: "ready",
     body: "## Acceptance Criteria\n- [ ] unchecked\n- [ ] still unchecked\n## Touches\n- code/landed.ts (new)\n## Definition of Done\nstandard",
   };
-  assert.equal(notYetFlipped(merged, root), true, "merged-but-AC-unchecked ready task must be excluded");
+  assert.equal(notYetFlipped(stuckWork, root), false, "merged-but-AC-incomplete stuck-work ready task stays dispatchable");
+  const doneFlip = {
+    status: "ready",
+    body: "## Acceptance Criteria\n- [x] done\n- [x] done\n- [ ] verify window\n## Touches\n- code/landed.ts (new)\n## Definition of Done\nstandard",
+  };
+  assert.equal(notYetFlipped(doneFlip, root), true, "merged near-complete ready task is a done-flip and must be excluded");
 
   // A truly-unstarted ready task (work not on master — Touches file absent, no resolving symbols)
   // STAYS in the pool.
@@ -304,11 +359,14 @@ test("isFixture / isParked / notYetFlipped unit behavior", (t) => {
 // `(new)` touches / git history) — never AC checkboxes — so a prose-AC COMPLETED task (all ACs
 // checked, but no resolvable symbols / no `(new)` touches / no git reference) stayed in the
 // dispatchable pool and got re-dispatched (measured 2026-08-08: 17/21 ready tasks were
-// AC-complete-not-flipped). Fix: the not-yet-flipped signal is a UNION — taskWorkLanded (the
-// merged-but-unchecked half, preserved) OR all_acs_checked && status==ready (the COMPLETION state,
-// independent of writing style). AC1 positive control (AC-complete-but-not-flipped is surfaced) +
-// AC2 union-not-replace (taskWorkLanded stays pure / landed-but-unchecked still excluded) + negative
-// controls (partial / zero-checkbox / non-ready are NOT surfaced).
+// AC-complete-not-flipped). Fix: the not-yet-flipped signal is a UNION — taskWorkLanded OR
+// all_acs_checked && status==ready (the COMPLETION state, independent of writing style). The
+// taskWorkLanded arm is itself AC-gated (gap-ready-pool-worklanded-traps-stuck-work): a workLanded
+// task is a done-flip only when AC-complete or near-complete (>50%); AC-far-from-complete
+// workLanded tasks are STUCK-WORK and stay dispatchable. AC1 positive control
+// (AC-complete-but-not-flipped is surfaced) + AC2 union-with-AC-gate (taskWorkLanded stays pure /
+// landed-but-incomplete is stuck-work / landed-near-complete is excluded) + negative controls
+// (partial / zero-checkbox / non-ready are NOT surfaced).
 
 test("AC-complete-not-flipped ready task is surfaced; genuinely-pending is not (AC1 union positive control)", (t) => {
   const root = makeWorkspace("ac-complete");
@@ -365,16 +423,59 @@ test("AC-complete signal is a UNION not a replace: partial/zero/non-ready NOT su
   assert.equal(taskWorkLanded(acCompleteNotLanded.body, root), false, "taskWorkLanded stays a pure work-landed signal (AC2)");
   assert.equal(notYetFlipped(acCompleteNotLanded, root), true, "union catches it via the AC-complete signal (AC1)");
 
-  // taskWorkLanded semantics preserved: a work-landed-but-AC-unchecked ready task is STILL excluded.
+  // taskWorkLanded stays a pure work-landed signal, but notYetFlipped now AC-gates it
+  // (gap-ready-pool-worklanded-traps-stuck-work): a work-landed-but-AC-incomplete ready task is
+  // STUCK-WORK → dispatchable (AC2); a work-landed NEAR-COMPLETE ready task is a done-flip → still
+  // excluded (AC3).
   const landedUnchecked = {
     status: "ready",
     body: "## Acceptance Criteria\n- [ ] unchecked\n## Touches\n- code/landed.ts (new)\n## Definition of Done\nstandard",
   };
-  assert.equal(notYetFlipped(landedUnchecked, root), true, "landed-but-unchecked ready task still excluded (union-not-replace)");
+  assert.equal(notYetFlipped(landedUnchecked, root), false, "landed-but-AC-incomplete ready task is stuck-work → dispatchable (AC2)");
+  const landedDoneFlip = {
+    status: "ready",
+    body: "## Acceptance Criteria\n- [x] done\n- [x] done\n- [x] done\n- [ ] verify\n## Touches\n- code/landed.ts (new)\n## Definition of Done\nstandard",
+  };
+  assert.equal(notYetFlipped(landedDoneFlip, root), true, "landed near-complete (3/4) ready task is a done-flip → still excluded (AC3)");
 
   // Neither signal fires → stays in the pool.
   const pending = { status: "ready", body: fourArtifactBody({ touches: ["- code/never.ts"] }) };
   assert.equal(notYetFlipped(pending, root), false, "neither signal fires → stays in the pool");
+});
+
+// ── stuck-work vs done-flip (gap-ready-pool-worklanded-traps-stuck-work) ──────────────────────────
+// The not-yet-flipped exclusion used to treat ANY workLanded task as "done, not yet flipped". But
+// workLanded only means "some work landed" — a workLanded task whose ACs are far from complete
+// (<50% checked) has REAL remaining implementation (stuck-work) and must stay dispatchable (AC2);
+// only a workLanded task that is AC-complete or near-complete (>50% — the "verification-window"
+// done-flip shape) is excluded (AC3). The threshold is STRICTLY > 0.5 so a task at exactly 50%
+// (gap-session-liveness 4/8) returns to the pool (verification anchor (a)).
+
+test("stuck-work (workLanded + AC ≤50%) stays dispatchable; done-flip (workLanded + AC >50%) is excluded (AC2/AC3)", (t) => {
+  const root = makeWorkspace("stuck-vs-flip");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // gap-session-liveness shape: work landed (Touches file exists) but only 4/8 ACs checked = 50%.
+  fs.writeFileSync(path.join(root, "code", "landed.ts"), "export const landed = 1;\n");
+  writeTask(root, "gap-session-liveness", {
+    status: "ready",
+    labels: ["gap"],
+    body: fourArtifactBody({ acBoxes: 8, checkedAc: 4, touches: ["- code/landed.ts (new)"] }),
+  });
+  // gap-dispatch shape: work landed and 5/6 ACs checked (only the verification window remains).
+  writeTask(root, "gap-dispatch", {
+    status: "ready",
+    labels: ["gap"],
+    body: fourArtifactBody({ acBoxes: 6, checkedAc: 5, touches: ["- code/landed.ts (new)"] }),
+  });
+  writeTask(root, "gap-real", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root });
+  const byId = Object.fromEntries(r.excluded.map((e) => [e.id, e.reasons]));
+  assert.equal(r.ready.includes("gap-session-liveness"), true, "AC-incomplete workLanded task is stuck-work → back in the pool (AC2)");
+  assert.equal(byId["gap-session-liveness"], undefined, "stuck-work task not excluded (AC2)");
+  assert.equal(r.ready.includes("gap-dispatch"), false, "near-complete workLanded task is a done-flip → excluded (AC3)");
+  assert.ok(byId["gap-dispatch"]?.includes("not-yet-flipped"), "done-flip task excluded with reason not-yet-flipped (AC3)");
+  assert.equal(r.pool, 2, "pool = gap-session-liveness + gap-real");
 });
 
 test("artifactsComplete is shape-aware and content-gated", () => {

@@ -237,3 +237,9 @@ resume    调查与接线分步提交：先证明完成通知是否触发重评�
 reviewer: outer
 at: 2026-08-05T18:2xZ
 changed: 外层 filing 时已审（ratchet compliance 补齐 section）
+
+> **交叉标注（2026-08-09，gap-ready-pool-worklanded-traps-stuck-work）**：本任务是「合法
+> done-flip」对照——AC 6 框勾 5（仅验证窗 AC3 未勾）= 0.833 > 0.5。gap-ready-pool 修复后
+> `notYetFlipped` 仍把本任务排除（ready-pool-check --json 的 excluded 含
+> gap-dispatch-evaluated-only-at-inner-tick-boundary-not-slot-release, reason: not-yet-flipped）——
+> work 真做完了、只差外层验证窗复测，不被误派。修复只放宽 AC ≤50% 的 stuck-work，done-flip 类不受影响。

@@ -34,17 +34,49 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录实证（gap-session-liveness 4/9 被 workLanded 排除 + work 未完成 + 对比 gap-dispatch 合法 done-flip）（本任务 Proposal 已含；内层补：ready-pool 直接跑复现）
-- [ ] AC2: **stuck-work 不被排除**——AC 未满（如 <50% 勾选）的 workLanded 任务重新可派发（gap-session-liveness 回到候选）
-- [ ] AC3: **done-flip 仍正确排除**——AC 全勾/仅验证窗的任务仍是 not-yet-flipped（不误派已落地工作）
-- [ ] AC4: **池子计数恢复**——无 workLanded 误排后 pool 反映真实可派发量（不再虚低）
-- [ ] AC5: **既有机制不回归**——`--for-task` scoped 门绿（含 ready-pool / task-status-drift 契约检查）
+- [x] AC1: **复现固化**——任务体记录实证（gap-session-liveness 4/9 被 workLanded 排除 + work 未完成 + 对比 gap-dispatch 合法 done-flip）（本任务 Proposal 已含；内层补：ready-pool 直接跑复现）
+      **实证（内层 2026-08-09 直跑复现）**：main 检出未修版 ready-pool-check 对 live store → pool 19 / not-yet-flipped 排除 19，gap-session-liveness **不在** ready 候选（被误排除），gap-dispatch 在 excluded。实测 gap-session-liveness 任务体 AC 8 框勾 4（AC1/AC4/AC5/AC6 已勾；AC0/AC2/AC3/AC7 未勾 = 真实实现工作）= 4/8 = 0.50，正是被 `workLanded=true`（touchLanded）误排除的 stuck-work 形态——work 没做完既不能派发又不能翻 done。
+- [x] AC2: **stuck-work 不被排除**——AC 未满（如 <50% 勾选）的 workLanded 任务重新可派发（gap-session-liveness 回到候选）
+      **实证（内层 2026-08-09）**：修后同一次 run → gap-session-liveness-busy-mask-idle-with-subagents 出现在 `ready`（dispatchable 候选）列表。判据：`notYetFlipped` 现在要求 workLanded **且**（AC 全勾 或 AC 完成率 **>0.5**）才排除；4/8 = 0.50 不满足 `>0.5` ⇒ 回到候选。
+- [x] AC3: **done-flip 仍正确排除**——AC 全勾/仅验证窗的任务仍是 not-yet-flipped（不误派已落地工作）
+      **实证（内层 2026-08-09）**：gap-dispatch-evaluated-only-at-inner-tick-boundary-not-slot-release（AC 6 框勾 5 = 0.833 > 0.5，仅验证窗 AC3 未勾）修后仍在 `excluded`（reason: not-yet-flipped）——合法 done-flip 不被误派。阈值边界钉在 ready-pool-check.test.mjs：4/8=0.50 可派发、5/6=0.833 排除、2/2 排除、0/2 可派发。
+- [x] AC4: **池子计数恢复**——无 workLanded 误排后 pool 反映真实可派发量（不再虚低）
+      **实证（内层 2026-08-09，同一 live store 同一时刻对照）**：修前 pool 19 / not-yet-flipped 排除 19；修后 pool 28 / not-yet-flipped 排除 10——9 个 AC 未满的 workLanded 任务回到池子。修后剩余 10 个 not-yet-flipped 排除中 **0 个** AC 完成率 ≤50%（无 workLanded 误排残留）。
+- [x] AC5: **既有机制不回归**——`--for-task` scoped 门绿（含 ready-pool / task-status-drift 契约检查）
+      **实证（内层 2026-08-09）**：`bash scripts/test.sh --for-task gap-ready-pool-worklanded-traps-stuck-work --allow-thin` → EXIT=0；ℹ tests 106 · pass 105 · fail 0 · cancelled 0 · skipped 1（QUAY_TEST_REAL_STORE=1 opt-in）；scoped static checks 全过：test-framework-policy / test-isolation / test-impl-census / task-contract-check（--strict-subset）→ "no violations"；violations: 0 unique。
+
+## Evidence（内层实现 2026-08-09）
+
+**实现**：`plugin/scripts/ready-pool-check.ts` 的 `notYetFlipped()`——workLanded 分支加 AC 完成度闸：
+`doneFlipReady = workLanded && (allAcsChecked || acRatio > 0.5)`，返回 `doneFlipReady || allAcsChecked`。
+阈值**严格 >0.5**：AC 全勾（done-flip）或 >50%（仅剩验证窗）才排除；AC ≤50% 的 workLanded 任务
+（stuck-work = 真实剩余实现工作）回到可派发池。三条 landing 证据（symbolResolved / touchLanded /
+gitHistory）全部过同一 AC 闸。测试：`plugin/test/ready-pool-check.test.mjs` 重写覆盖三条 landing
+路径的 stuck-work vs done-flip 对照 + 阈值边界（4/8 可派发 / 5/6 排除 / 2/2 排除 / 0/2 可派发）。
+
+**修后实跑**（`node --no-warnings --experimental-strip-types plugin/scripts/ready-pool-check.ts --root /home/yale/work/quay --json`，2026-08-09 对 live store 同一时刻）：
+
+| 锚 | 修前（main 未修版） | 修后（本任务） |
+|---|---|---|
+| pool | 19 | 28 |
+| not-yet-flipped 排除 | 19 | 10 |
+| gap-session-liveness 在 ready 候选 | 否（被误排除） | **是** |
+| gap-dispatch 在 excluded(not-yet-flipped) | 是 | 是（合法 done-flip 不误派） |
+| 剩余排除中 AC≤50% 的 workLanded 误排 | — | 0（无残留） |
+
+**验证锚对照**：(a) gap-session-liveness（4/8=0.50）回到 dispatchable——AC2 达成；(b) gap-dispatch
+（5/6=0.833 仅验证窗）仍 not-yet-flipped——AC3 达成；(c) pool 19→28 反映真实可派发量——AC4 达成。
+
+**scoped gate**：`bash scripts/test.sh --for-task gap-ready-pool-worklanded-traps-stuck-work --allow-thin`
+→ EXIT=0 · ℹ tests 106 · pass 105 · fail 0 · cancelled 0 · skipped 1（opt-in real-store）· scoped static
+checks 全绿（test-framework-policy / test-isolation / test-impl-census / task-contract-check
+--strict-subset "no violations"）· violations: 0 unique。
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全部勾上
-- [ ] 修后实跑：gap-session-liveness 回到 dispatchable；gap-dispatch 仍 done-flip；pool 计数（贴任务体）
-- [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
+- [x] AC1–AC5 全部勾上
+- [x] 修后实跑：gap-session-liveness 回到 dispatchable；gap-dispatch 仍 done-flip；pool 计数（贴任务体）——见「Evidence（内层实现 2026-08-09）」
+- [x] 既有测试 + 新增测试全绿（`--for-task` scoped）——105 pass / 0 fail / 0 cancelled
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
 
 ## Touches

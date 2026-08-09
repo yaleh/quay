@@ -382,18 +382,24 @@ export function kindOrder(kind) {
  *  evidence) but `status` is still `ready` (fan-in has not flipped it). The signal is a UNION of two
  *  INDEPENDENT closure indicators:
  *   (1) taskWorkLanded — work-landed evidence (symbol-resolution / touch-file / git-history) that
- *       catches the "merged-but-AC-unchecked" half (the inner's fan-in merges WITHOUT ticking AC
- *       boxes; gap-ready-pool-check-counts-merged-not-flipped-tasks-in-the-pool). Does NOT depend on
- *       AC checkbox state.
+ *       catches the "merged-but-AC-incomplete" half (the inner's fan-in merges WITHOUT ticking AC
+ *       boxes; gap-ready-pool-check-counts-merged-not-flipped-tasks-in-the-pool). By itself it means
+ *       "SOME work landed", NOT "the task is done" — so it excludes ONLY when the ACs are also
+ *       complete (all checked) or near-complete (>50% — the "verification-window" done-flip shape,
+ *       e.g. gap-dispatch 5/6). A workLanded task whose ACs are far from complete (<50% checked,
+ *       e.g. gap-session-liveness 4/8) has REAL remaining implementation — STUCK-WORK — and must
+ *       stay dispatchable (gap-ready-pool-worklanded-traps-stuck-work AC2), not be trapped out of
+ *       both dispatch AND done-flip.
  *   (2) AC-complete — `all_acs_checked && status == ready` (countAcCheckboxes, total > 0): the
  *       COMPLETION state as written by the checkboxes, independent of AC writing style
  *       (gap-closure-detection-reads-symbols-not-checkboxes). A prose-AC completed task whose work
  *       landed but shows no resolvable symbols / `(new)` touches / git-history reference is invisible
  *       to (1) yet IS a closure candidate — this second signal surfaces it. Complements, never
  *       replaces, taskWorkLanded (the union, not an either/or).
- *  A task is excluded from the dispatchable pool when EITHER fires. `taskId` is passed through so the
- *  git-history signal (gap-ready-pool-taskworklanded-underdetects-prose-ac-merged-tasks) can anchor
- *  on the task's own id without depending on the self-touch Touches entry. */
+ *  A task is excluded from the dispatchable pool when EITHER fires (a legal done-flip candidate).
+ *  `taskId` is passed through so the git-history signal
+ *  (gap-ready-pool-taskworklanded-underdetects-prose-ac-merged-tasks) can anchor on the task's own
+ *  id without depending on the self-touch Touches entry. */
 export function notYetFlipped(task, repoRoot, gitIndex) {
   if (task.status !== "ready") return false;
   const opts = { taskId: task.id };
@@ -402,7 +408,14 @@ export function notYetFlipped(task, repoRoot, gitIndex) {
   const ac = extractSection(task.body, "Acceptance Criteria");
   const { total, checked } = countAcCheckboxes(ac);
   const allAcsChecked = total > 0 && checked === total;
-  return workLanded || allAcsChecked;
+  const acRatio = total === 0 ? 0 : checked / total;
+  // AC-completeness gate on the workLanded branch: workLanded alone must NOT exclude an
+  // AC-incomplete task — that shape is stuck-work (real remaining implementation), not done-work
+  // waiting to flip. Only all-checked or >50% (the verification-window done-flip shape) counts.
+  // Threshold is STRICTLY > 0.5 so a task at exactly 50% (gap-session-liveness 4/8) returns to the
+  // dispatchable pool (gap-ready-pool-worklanded-traps-stuck-work verification anchor (a)).
+  const doneFlipReady = workLanded && (allAcsChecked || acRatio > 0.5);
+  return doneFlipReady || allAcsChecked;
 }
 
 export function isFixture(task) {
