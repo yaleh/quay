@@ -604,6 +604,10 @@ test("AC5 unit — isAbortLine matches the early-EXIT gate-WAIT shape, never a f
     "scripts/test.sh: resource gate says WAIT — not running the full suite (numbers above). Re-run when the gate reports GO.",
     "resource gate says WAIT",
     "not running the full suite",
+    // gap-runner-no-kill-on-red-and-no-max-runtime-hang-leak AC4: a PRIOR run's single-flight flock
+    // blocked this test.sh → 0 test output → NO correctness conclusion → must be aborted, not failed.
+    "another full suite holds .git/full-suite.lock — not starting (single-flight lock; waited 600s). Re-run when it finishes.",
+    "single-flight lock; waited 600s",
   ]) {
     assert.equal(isAbortLine(line), true, `should flag as abort: ${line}`);
   }
@@ -1034,6 +1038,60 @@ test("AC2/AC3 e2e — a `✖ <testname> (Nms)` spec-reporter failure line flips 
     assert.equal(s.reason, "failed");
     assert.ok(s.failures && s.failures.length >= 1, `failures[] carries the spec-reporter failure (AC3); got ${JSON.stringify(s.failures)}`);
     assert.match(s.failures[0].line, /✖ AC1\/AC2 — the real bundle inventory/, "the failure line records the failing test name");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── gap-runner-no-kill-on-red-and-no-max-runtime-hang-leak AC2/AC3 ─────────────────────────────────
+// The runner previously waited for a HUNG suite child forever (round-164 leaked 20+ min holding the
+// single-flight flock). The max-runtime / silence / red-grace guards kill the child TREE and produce
+// reason=timeout / reason=hung / a prompt red exit. Tests use the env seams to make the guards fire fast.
+
+test("AC3 e2e — a HANGING suite is killed at the max-runtime seam (reason=timeout, no indefinite leak)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-timeout-"));
+  const { f, dir } = fakeSuite('sleep 30'); // hangs far beyond the 800ms seam
+  try {
+    const child = runRunner({ root, command: `bash ${f}`, env: { QUAY_TEST_SUITE_MAX_RUNTIME_MS: "800" } });
+    const { code } = await waitExit(child);
+    const s = readState(root);
+    assert.equal(s.state, "red", "a max-runtime kill is a red (no correctness conclusion)");
+    assert.equal(s.reason, "timeout", `max-runtime kill must be reason=timeout, got ${s.reason}`);
+    assert.ok(code !== 0, "runner exits non-zero on a timeout kill");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC3 e2e — a SILENT suite is killed at the silence seam (reason=hung)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-hung-"));
+  const { f, dir } = fakeSuite('echo "start"; sleep 30'); // one line, then silence far beyond the seam
+  try {
+    const child = runRunner({ root, command: `bash ${f}`, env: { QUAY_TEST_SUITE_SILENCE_MS: "800" } });
+    const { code } = await waitExit(child);
+    const s = readState(root);
+    assert.equal(s.state, "red", "a silence kill is a red (no correctness conclusion)");
+    assert.equal(s.reason, "hung", `silence kill must be reason=hung, got ${s.reason}`);
+    assert.ok(code !== 0, "runner exits non-zero on a hung kill");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC2 e2e — a RED suite whose test.sh hangs is killed after the red-grace seam (prompt exit, red conclusion stands)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-killonred-"));
+  const { f, dir } = fakeSuite('echo "not ok 1 - boom"; sleep 30'); // red detected, then hangs
+  try {
+    const child = runRunner({ root, command: `bash ${f}`, env: { QUAY_TEST_RED_GRACE_MS: "800" } });
+    const { code } = await waitExit(child);
+    const s = readState(root);
+    assert.equal(s.state, "red", "the red conclusion stands");
+    assert.equal(s.reason, "failed", `a REAL failure (not ok) is never downgraded to timeout/hung: got ${s.reason}`);
+    assert.ok(s.failures && s.failures.length >= 1, `the not-ok failure must be recorded; got ${JSON.stringify(s.failures)}`);
+    assert.ok(code !== 0, "runner exits non-zero on the red");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(dir, { recursive: true, force: true });

@@ -109,7 +109,7 @@ export type SuiteStateValue = "running" | "green" | "red";
 // shouldDispatchOnRed, the inner stop-condition) can distinguish a static-check red from a
 // test-failure red: both stop dispatch (static checks ARE the shared gate), but the triage differs
 // (static-check red ⇒ fix the contract, not roll back code).
-export type SuiteStateReason = "failed" | "aborted" | "infra-error" | "static-check";
+export type SuiteStateReason = "failed" | "aborted" | "infra-error" | "static-check" | "timeout" | "hung";
 
 /**
  * One detected suite failure — the FAILURE LOCATION for the red-window dispatch decision
@@ -281,7 +281,24 @@ const FAILURE_PATTERNS: RegExp[] = [
 const ABORT_PATTERNS: RegExp[] = [
   /resource gate says WAIT/, // test.sh internal gate fail-closed — the suite never ran tests
   /not running the full suite/, // same gate-WAIT message (both halves of the canonical line)
+  /another full suite holds/, // single-flight lock-WAIT (gap-runner-no-kill-on-red-and-no-max-runtime-hang-leak AC4): a PRIOR run's flock blocked this test.sh → 0 test output → NO correctness conclusion → aborted, not failed
+  /single-flight lock; waited/, // same lock-WAIT message (both halves of the canonical line)
 ];
+
+// ── suite child liveness guards (gap-runner-no-kill-on-red-and-no-max-runtime-hang-leak AC2/AC3) ────
+// The runner previously waited for test.sh's `close` forever: a hung node --test subprocess (round-164)
+// leaked the runner + test.sh 20+ min, holding the single-flight flock (which then lock-blocked the
+// next round → misjudged failed instead of aborted). Three bounded guards:
+//   - SUITE_MAX_RUNTIME_MS: hard ceiling on the suite child's wall-clock (the real suite is ~15-21 min;
+//     45 min is 2-3x — a legitimately-slow suite must never false-trigger). On fire → kill tree + reason=timeout.
+//   - SUITE_SILENCE_MS: no stdout/stderr line for this long ⇒ the suite is hung, not working. On fire →
+//     kill tree + reason=hung.
+//   - RED_GRACE_MS: once redDetected, let the suite collect the failing-tests summary for this long,
+//     then kill the tree if it still hasn't exited (a red suite whose test.sh hangs must not leak the flock).
+// Env seams keep the runner tests hermetic (QUAY_TEST_SUITE_MAX_RUNTIME_MS / _SILENCE_MS / _RED_GRACE_MS).
+export const SUITE_MAX_RUNTIME_MS = Number(process.env.QUAY_TEST_SUITE_MAX_RUNTIME_MS ?? 45 * 60_000);
+export const SUITE_SILENCE_MS = Number(process.env.QUAY_TEST_SUITE_SILENCE_MS ?? 15 * 60_000);
+export const RED_GRACE_MS = Number(process.env.QUAY_TEST_RED_GRACE_MS ?? 30_000);
 
 // ── static-check red detection (gap-full-suite-state-red-no-failure-detail-static-check-invisible) ──
 // When run_static_checks fails (task-contract-check ratchet growth / test-framework-policy /
@@ -928,6 +945,9 @@ export async function run(argv: string[]): Promise<number> {
       cwd: root,
       stdio: ["ignore", "pipe", "pipe"],
       env: { ...process.env },
+      // detached: the suite child becomes a process-group leader so killChildTree() can terminate
+      // the WHOLE tree (test.sh + its node --test children) — a hung subprocess can't leak the flock.
+      detached: true,
     });
     // AC1 evidence — fire-and-forget: find the scope unit and dump its applied cgroup properties to
     // <state-dir>/suite-cgroup-evidence.txt (best-effort; never fails the run).
@@ -942,6 +962,8 @@ export async function run(argv: string[]): Promise<number> {
       cwd: root,
       stdio: ["ignore", "pipe", "pipe"],
       env: { ...process.env },
+      // detached: same as the systemd-run spawn — process-group leader for killChildTree().
+      detached: true,
     });
   }
 
@@ -953,6 +975,47 @@ export async function run(argv: string[]): Promise<number> {
   // conclusion — red + reason=aborted, NOT failed.
   let redDetected = false;
   let abortDetected = false;
+  // ── suite-child liveness guards (gap-runner-no-kill-on-red-and-no-max-runtime-hang-leak AC2/AC3) ──
+  // timedOut / hung are set by the max-runtime / silence timers below; both force a process-tree kill
+  // so a hung suite can never leak the runner + flock. The terminal verdict maps them to reason=timeout
+  // / reason=hung (a NO-correctness-conclusion outcome, same class as aborted).
+  let timedOut = false;
+  let hung = false;
+  let lastOutputAt = Date.now();
+  let redGraceTimer: NodeJS.Timeout | null = null;
+  let redGraceArmed = false;
+  const killChildTree = (sig: NodeJS.Signals) => {
+    try {
+      // Negative pid = the whole process group (detached spawn makes the child a group leader).
+      process.kill(-(child.pid), sig);
+    } catch { /* group already gone — nothing to kill */ }
+    try {
+      child.kill(sig);
+    } catch { /* child already gone */ }
+  };
+  const killChildTreeEscalating = () => {
+    killChildTree("SIGTERM");
+    // Give the tree a bounded chance to exit, then force-kill.
+    setTimeout(() => killChildTree("SIGKILL"), 10_000);
+  };
+  // Max-runtime guard: the suite's wall-clock ceiling. On fire, if the child hasn't exited, kill + mark.
+  const maxRuntimeTimer = setTimeout(() => {
+    if (runDone) return;
+    timedOut = true;
+    process.stderr.write(`full-suite-runner: suite exceeded ${Math.round(SUITE_MAX_RUNTIME_MS / 1000)}s max runtime — killing child tree, state=red reason=timeout\n`);
+    killChildTreeEscalating();
+  }, SUITE_MAX_RUNTIME_MS);
+  // Silence guard: no suite output for SUITE_SILENCE_MS ⇒ hung (not working). Reset lastOutputAt in onLine.
+  const silenceTimer = setInterval(() => {
+    if (runDone) return;
+    if (Date.now() - lastOutputAt > SUITE_SILENCE_MS) {
+      hung = true;
+      process.stderr.write(`full-suite-runner: no suite output for ${Math.round(SUITE_SILENCE_MS / 1000)}s — hung, killing child tree, state=red reason=hung\n`);
+      killChildTreeEscalating();
+    }
+    // Adaptive interval: production (15 min silence) checks every 30s; a test with a tiny seam
+    // (e.g. 800ms) needs sub-second checking — never slower than 1s, never faster than 1/2 the threshold.
+  }, Math.max(1_000, Math.min(30_000, Math.floor(SUITE_SILENCE_MS / 2))));
   // gap-full-suite-state-red-no-failure-detail-static-check-invisible AC2/AC4 — static-check red
   // accumulation: set when a STATIC_CHECK_FAILURE_PATTERN line appears (a run_static_checks checker
   // failed); the machine-readable counts + violation details are captured from the stream as they
@@ -1075,8 +1138,20 @@ export async function run(argv: string[]): Promise<number> {
     if (/^selected \d+ files?\b/.test(line) || testsSeen > 0) testPhaseStarted = true;
     const cancelledMatch = /^[#ℹ]\s*cancelled\s+(\d+)/.exec(line);
     if (cancelledMatch) cancelledSeen = Number(cancelledMatch[1]);
+    lastOutputAt = Date.now(); // silence guard: any suite output (even a failure line) proves liveness
     if (!redDetected && isFailureLine(line)) {
       redDetected = true;
+      // AC2 kill-on-red: once judged red, let the suite collect its failing-tests summary for RED_GRACE_MS,
+      // then kill the child tree if it STILL hasn't exited — a red suite whose test.sh hangs (a node --test
+      // subprocess stuck) must not leak the runner + single-flight flock (round-164).
+      if (!redGraceArmed) {
+        redGraceArmed = true;
+        redGraceTimer = setTimeout(() => {
+          if (runDone) return;
+          process.stderr.write(`full-suite-runner: red conclusion but suite child did not exit within ${Math.round(RED_GRACE_MS / 1000)}s — killing child tree (kill-on-red, AC2)\n`);
+          killChildTreeEscalating();
+        }, RED_GRACE_MS);
+      }
       // AC3b — timestamp the red flip (the early-RED detection-latency observation point).
       redAtIso = new Date().toISOString();
       // AC2 — mark RED immediately, while the run is still in progress. reason=failed (AC5: this
@@ -1170,6 +1245,11 @@ export async function run(argv: string[]): Promise<number> {
   const exitCode = exit.code;
 
   runDone = true;
+  // The suite child closed on its own — the liveness guards are no longer needed; clear them all so a
+  // stale timer can't fire after a normal completion (AC2/AC3 — the guards are only for a HUNG child).
+  clearTimeout(maxRuntimeTimer);
+  clearInterval(silenceTimer);
+  if (redGraceTimer) clearTimeout(redGraceTimer);
   // Fan-in race fix (2026-08-05): do NOT remove the signal listeners here. The `if (runDone ||
   // redDetected) return` guard in onSignal already makes a late signal a no-op, so keeping the
   // listeners registered is safe AND closes the unhandled-signal window: previously a SIGTERM
@@ -1241,11 +1321,15 @@ export async function run(argv: string[]): Promise<number> {
     !redDetected && !staticCheckDetected && (abortDetected || childKilledBySignal || spawnError !== null);
   const reason: SuiteStateReason = redDetected
     ? "failed"
-    : staticCheckDetected && !testPhaseStarted
-      ? "static-check"
-      : noCorrectnessConclusion
-        ? "aborted"
-        : "failed";
+    : timedOut
+      ? "timeout" // max-runtime fired (AC3) — NO correctness conclusion, killed the child tree
+      : hung
+        ? "hung" // silence guard fired (AC3) — the suite went silent, killed as hung
+        : staticCheckDetected && !testPhaseStarted
+          ? "static-check"
+          : noCorrectnessConclusion
+            ? "aborted"
+            : "failed";
   // AC4 candidate B — on a static-check red, failures[] carries the violation details (task + type),
   // each marked staticCheck:true so suite-state-trigger's classifyFailure routes them to the shared
   // gate. On a test-failure red, failures[] carries the real test failures (unchanged, AC5).
