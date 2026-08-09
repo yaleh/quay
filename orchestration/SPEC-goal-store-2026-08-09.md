@@ -38,10 +38,11 @@ document-store.ts   VALID_DOCUMENT_STATUSES = draft / active / retired
 ## 2. Schema(本 kind 独有的部分)
 
 ```yaml
-id: GOAL-001            # 或 AC-028；编号方案由实现者定，需与 ADR-/DOC- 同族可辨
+# ⚠ 本块的 id/kind/phase 三行已被 §2b 取代（人 2026-08-09 08:0xZ 定案），此处按定案改写：
+id: AC-028              # 判据记录；阶段记录用 PHASE-NNN。理由见 §2b「命名」
 title: 经验能在层间流动
-kind: goal | criterion  # 目标 / 判据；一个 goal 可有多条 criterion
-phase: 2026-08-09-three-layer-unification
+kind: phase | criterion # 阶段（=那一个目标）/ 判据。PHASE 记录【无】 criterion 字段
+phase: PHASE-003        # 判据指向所属阶段（纯序号，含义在该 PHASE 的 title）
 status: active | achieved | superseded | retired
 criterion: |            # ★ 可跑的 shell 命令；未设 ⇒ gate fail-closed
   git rev-list --count integration..develop
