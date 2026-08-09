@@ -2,7 +2,7 @@
 id: gap-ready-pool-unknown-flag-fail-open
 title: ready-pool-check.ts 未知 flag 静默忽略且 exit 0——fail-open（任何臆造 flag
   都拿正常输出+成功码，「看起来做了其实没做」制造机）；--promote 不存在只在注释，真实路径是 quay promote &lt;id&gt;
-status: ready
+status: done
 labels:
   - gap
   - defect

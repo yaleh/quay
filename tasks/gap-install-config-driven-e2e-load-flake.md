@@ -1,7 +1,8 @@
 ---
 id: gap-install-config-driven-e2e-load-flake
-title: "install-config-driven-e2e 间歇性负载红——2/3 轮 full red（round-152/155 失败、round-152 验证轮绿），`✖ A1 两 workspace 字节一致` 在 lowconc 并发 3 下超时；单独跑 12/12 绿"
-status: ready
+title: install-config-driven-e2e 间歇性负载红——2/3 轮 full red（round-152/155
+  失败、round-152 验证轮绿），`✖ A1 两 workspace 字节一致` 在 lowconc 并发 3 下超时；单独跑 12/12 绿
+status: done
 labels:
   - gap
   - defect

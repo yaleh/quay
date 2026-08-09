@@ -2,7 +2,7 @@
 id: gap-no-action-requires-evidence-mechanical-check
 title: outer 的 no-action 判词零成本——14:08-15:08 连续 5 次 tick 全判 no-action 但五条不等式 ①②③
   每次为真（欠 15 强制动作）；需机械检查（复用 manager-tick-log-check 行判据同形），不是散文纪律
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -121,7 +121,7 @@ band      no_action_illegal_rows = 非 0（FAIL：no-action 不合法，欠动�
 invariant deception_input_caught = 1（读数全+判词 escalate+实际没动 ⇒ 红）
 invariant no_action_legal_passes = 1（五条全假的 no-action 行 PASS）
 invariant freshness_bound_no_false_positive = 1（20 分钟前行 + 此刻量变 ⇒ 不误报）
-invoke    `node .claude/workflows/outer-no-action-check.js`（构造行实跑贴回）
+invoke    `bash plugin/scripts/outer-tick-log-check.sh --root /home/yale/work/quay`（构造行实跑贴回；真实实现为 script，人裁定保持，workflow 等价）
 control   no-action+①真 ⇒ FAIL；no-action+全假 ⇒ PASS；欺骗输入 ⇒ 红；陈旧行 ⇒ 不误报
 resume    workflow 骨架（JS 算术 + agent 语义）+ 接线 + 新鲜度上界分步提交，任一步完成即写盘
 
