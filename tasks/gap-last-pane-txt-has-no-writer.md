@@ -161,3 +161,11 @@ tests 62, pass 62, fail 0, cancelled 0
 - 候选 A（给 `.quay/last-pane.txt` 补写入者）：未做——候选 B 已消除对快照的依赖，band 判据「改读活源后
   不依赖此文件」满足。
 - 全量套件：外层 verification-round 验证（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）。
+
+### 交叉标注（2026-08-09，gap-permission-prompt-merged-into-busy）
+
+同检测链的第二道遮蔽（外层复核归因）：即使本任务把 `last-pane.txt` 死快照修好（A7 改读活源），
+`session-liveness.sh:355` 仍把 `permission-prompt` 并进 `busy`——「卡权限框」与「在干活」在忙闲读数
+仍同形，检测链第二层看不见「需要介入」。修复见 `tasks/gap-permission-prompt-merged-into-busy.md`：
+permission-prompt 单列非忙（`busy=0 intervention=1`）+ `SESSION-INTERVENTION-REQUIRED` 事件立即触发。
+本任务是第一道遮蔽（读数无写入者），该任务是第二道遮蔽（permission-prompt 与 busy 同形）。

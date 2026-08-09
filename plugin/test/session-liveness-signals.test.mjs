@@ -37,7 +37,7 @@ import {
   setProbeTmpPrefix, sweepTmp, tmux, isolateTmuxEnv, isClaudePid,
   paneHasClaudeChild, waitForAlive, makeHermeticProbe,
   spawnMonitor, waitForOutput, waitForRounds, countRounds,
-  makePaneBusy, makePaneIdle, startTouchLoop, cleanup,
+  makePaneBusy, makePaneIdle, makePanePermissionPrompt, startTouchLoop, cleanup,
   userRecord, assistantRecord, apiErrorRecord, isoAgo,
   assistantToolUseRecord, assistantTextRecord, userInputRecord, writeTranscript,
   assistantUsageRecord,
@@ -300,20 +300,17 @@ test("AC7 negative control — an EMPTY transcript yields last-input 取不到, 
 });
 
 test("AC6 negative control — a script mutation that neutralizes the cause yields an empty cause, which the strengthened AC6 assertion rejects", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
-  // Mutation (checker-mutation method): force the cause empty right before the SESSION-RESUMED echo.
-  // The strengthened AC6 assertion (`/成因：[^；）]/`) must reject the empty cause — proving the 25s
+  // Mutation (checker-mutation method): force cause="" right before the SESSION-RESUMED echo. The
+  // strengthened AC6 assertion (`/成因：[^；）]/`) must reject the empty cause — proving the 25s
   // window is not the check and the cause path is actually asserted (the old `! /成因：\)/` was a
   // no-op: ASCII paren never appears in the full-width output, so an empty cause passed).
-  // AC2/D3 同阶去抖 (2026-08-09) moved the cause into the RESUME_CAUSE array; the mutation now
-  // targets that emit's cause interpolation so the emitted 成因 is empty (成因：；).
   const p = makeHermeticProbe("ol-nc-cause");
   const x = path.join(p.tmp, "session.jsonl");
   fs.writeFileSync(x, [userRecord(isoAgo(5)), assistantRecord(isoAgo(0.05))].join("\n") + "\n");
   const mutated = path.join(p.tmp, "session-liveness-mutated.sh");
   // The event emitter is sl_emit (writes stdout + shared file); the mutation must target THAT call.
-  fs.writeFileSync(mutated, fs.readFileSync(SCRIPT, "utf8").replace(
-    /成因：\$\{RESUME_CAUSE\[\$name\]:-状态变化\}/,
-    "成因："));
+  fs.writeFileSync(mutated, fs.readFileSync(SCRIPT, "utf8").replace(/sl_emit "SESSION-RESUMED/,
+    'cause=""\n            sl_emit "SESSION-RESUMED'));
   try {
     assert.ok(await waitForAlive(p.env, p.session), "probe must be alive");
     const mon = spawnMonitor(p.env, `pl ${p.tmp} ${p.session}`, { script: mutated, transcripts: `pl ${x}` });
@@ -919,32 +916,67 @@ test("阶段四 AC2（承重条）— 饱和会话与普通忙会话产出不同
   }
 });
 
-test("AC2/D3 — 同阶去抖（RESUMED 与 IDLE 同深度）：一个 1 轮的忙 blip 不报 SESSION-RESUMED（镜像 AC4 的 1 轮闲 blip 不报 IDLE）；持续忙才报", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
-  // D3 不对称（2026-08-08 硬事实）：RESUMED 单轮沿即报 / IDLE 要连续 2 轮。AC2 修复：两者用
-  // 同一去抖深度。本测试镜像 AC4（1 轮闲 blip 不报 IDLE）的反向：1 轮忙 blip 也不报 RESUMED。
-  const p = makeHermeticProbe("ol-d3sym");
-  const x = path.join(p.tmp, "session.jsonl");
-  writeTranscript(x, [assistantTextRecord(isoAgo(0.1))], 1); // idle baseline: pure-text, stale
+// ── gap-permission-prompt-merged-into-busy（2026-08-09）：permission-prompt 单列非 busy ────────────
+// 同族失效（ADR-033）：读数无法表达关键区别。session-liveness.sh:355 曾把 permission-prompt 并进
+// busy——「卡权限框」与「在干活」在忙闲读数同形，上层看到 busy 以为在推进、实际卡在权限框。本组
+// 测试锁死修复：permission-prompt ⇒ busy=0 intervention=1（单列）+ SESSION-INTERVENTION-REQUIRED
+// 立即触发；正常忙碌 ⇒ busy=1 intervention=0（负控制）。
+
+test("AC1/AC2 — a permission-prompt pane is NOT busy: --pane-state reads state=permission-prompt busy=0 intervention=1 (pre-fix it read busy=1 — 卡权限框与在干活同形)", () => {
+  const perm = "Quick safety check: Is this a project you created or one you trust?\n❯ 1. Yes, I trust this folder ✔\n  2. No, exit\nEnter to confirm · Esc to cancel";
+  const r = spawnSync("bash", [SCRIPT, "--pane-state"], { input: perm, encoding: "utf8" });
+  assert.equal(r.status, 0, `--pane-state must exit 0:\n${r.stderr}`);
+  assert.match(r.stdout, /state=permission-prompt busy=0 intervention=1/,
+    `permission-prompt must be non-busy and intervention-flagged (the pre-fix reading was busy=1):\n${r.stdout}`);
+});
+
+test("AC4 — normal busy is NOT intervention-flagged (negative control): --pane-state on a busy pane reads busy=1 intervention=0; waiting-input reads busy=0 intervention=0", () => {
+  const busy = "───────────────────────────────\n❯ \n───────────────────────────────\n  ⏵⏵ bypass permissions on · 1 monitor · esc to interrupt · ← 1 agent · ↓ to manage";
+  const rb = spawnSync("bash", [SCRIPT, "--pane-state"], { input: busy, encoding: "utf8" });
+  assert.equal(rb.status, 0, `--pane-state must exit 0:\n${rb.stderr}`);
+  assert.match(rb.stdout, /state=busy busy=1 intervention=0/,
+    `true busy must stay busy with NO intervention (正常忙碌不误报):\n${rb.stdout}`);
+  const idle = "───────────────────────────────\n❯ \n───────────────────────────────\n  ⏵⏵ bypass permissions on · 1 monitor · ← 1 agent · ↓ to manage";
+  const ri = spawnSync("bash", [SCRIPT, "--pane-state"], { input: idle, encoding: "utf8" });
+  assert.match(ri.stdout, /state=waiting-input busy=0 intervention=0/,
+    `waiting-input must stay idle with NO intervention:\n${ri.stdout}`);
+});
+
+test("## Contract — --check exits 0 and reports permission_prompt_class=intervention-required + busy_true_work_not_flagged=1 + intervention_triggered=1 (the three contract bands)", () => {
+  const r = spawnSync("bash", [SCRIPT, "--check"], { encoding: "utf8" });
+  assert.equal(r.status, 0, `--check must exit 0 (all contract bands hold):\n${r.stdout}\n${r.stderr}`);
+  assert.match(r.stdout, /permission_prompt_class=intervention-required/,
+    `--check must report the new non-busy state (measure permission_prompt_class band=非 busy):\n${r.stdout}`);
+  assert.match(r.stdout, /busy_true_work_not_flagged=1/,
+    `--check must report busy-not-flagged (invariant busy_true_work_not_flagged=1, AC4 negative control):\n${r.stdout}`);
+  assert.match(r.stdout, /intervention_triggered=1/,
+    `--check must report intervention triggered (invariant intervention_triggered=1, AC3):\n${r.stdout}`);
+});
+
+test("AC3 — a permission-prompt pane emits SESSION-INTERVENTION-REQUIRED immediately (edge-triggered once per spell); leaving permission-prompt re-arms the edge", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  const p = makeHermeticProbe("ol-intv");
   try {
     assert.ok(await waitForAlive(p.env, p.session), "probe must be alive");
-    const mon = spawnMonitor(p.env, `d3 ${p.tmp} ${p.session}`,
-      { transcripts: `d3 ${x}`, overdueMin: 999, loopMin: 1, interval: 1 });
+    const mon = spawnMonitor(p.env, `intv ${p.tmp} ${p.session}`, { interval: 1 });
     try {
-      // phase 1: ≥2 idle rounds establish the idle baseline.
-      assert.ok(await waitForRounds(mon, 2, 15000), `monitor must run ≥2 idle rounds:\n${mon.output()}`);
-      // phase 2: the BUSY BLIP — exactly one round of pending-tool-use, then back to idle
-      // before the 2nd busy round. Same-order debounce must NOT report RESUMED.
-      writeTranscript(x, [assistantToolUseRecord(isoAgo(0.1))], 1); // the blip: pending-tool-use
-      assert.ok(await waitForRounds(mon, 3, 15000), `one busy blip round must elapse:\n${mon.output()}`);
-      writeTranscript(x, [assistantTextRecord(isoAgo(0.1))], 1); // back to idle
-      // phase 3: several idle rounds — a wrongly-held busy path would have fired by now.
-      assert.ok(await waitForRounds(mon, 6, 20000), `several idle rounds must elapse:\n${mon.output()}`);
-      assert.ok(!/SESSION-RESUMED d3/.test(mon.output()),
-        `AC2/D3: a single-round busy blip between idle spells must NOT report SESSION-RESUMED (same-order debounce):\n${mon.output()}`);
-      // positive control: a PERSISTENT busy (≥IDLE_DEBOUNCE_ROUNDS rounds) DOES report RESUMED.
-      writeTranscript(x, [assistantToolUseRecord(isoAgo(0.1))], 1); // persistent busy
-      assert.ok(await waitForOutput(mon, /SESSION-RESUMED d3/, 15000),
-        `AC2/D3 control: a persistent busy MUST report SESSION-RESUMED (proves the suppression is the same-order debounce):\n${mon.output()}`);
+      await sleep(2000); // idle baseline (bash prompt → unknown → busy=0)
+      makePanePermissionPrompt(p.env, p.session);
+      // Fires IMMEDIATELY (not waiting for PERM_PROMPT_WARN_ROUNDS busy rounds or transcript
+      // staleness) — the AC3 requirement: permission-prompt 出现即触发 escalate/报告.
+      assert.ok(await waitForOutput(mon, /SESSION-INTERVENTION-REQUIRED intv/, 8000),
+        `permission-prompt must fire SESSION-INTERVENTION-REQUIRED immediately:\n${mon.output()}`);
+      // hold the permission-prompt a few more rounds → the edge must NOT re-fire every round.
+      await sleep(2500);
+      let c = (mon.output().match(/SESSION-INTERVENTION-REQUIRED intv/g) || []).length;
+      assert.equal(c, 1, `the intervention event must be edge-triggered (once per spell), got ${c}:\n${mon.output()}`);
+      // leaving permission-prompt (back to idle) re-arms the edge → a new permission-prompt fires again.
+      makePaneIdle(p.env, p.session);
+      await sleep(2000);
+      makePanePermissionPrompt(p.env, p.session);
+      const deadline = Date.now() + 8000;
+      while (Date.now() < deadline && (mon.output().match(/SESSION-INTERVENTION-REQUIRED intv/g) || []).length < 2) await sleep(200);
+      c = (mon.output().match(/SESSION-INTERVENTION-REQUIRED intv/g) || []).length;
+      assert.equal(c, 2, `a new permission-prompt spell must re-fire SESSION-INTERVENTION-REQUIRED (edge re-armed), got ${c}:\n${mon.output()}`);
     } finally {
       mon.child.kill("SIGKILL");
       mon.cleanup();
@@ -954,95 +986,23 @@ test("AC2/D3 — 同阶去抖（RESUMED 与 IDLE 同深度）：一个 1 轮的�
   }
 });
 
-test("AC3（人裁定）— 带 subagent 的 inner 停摆报 IDLE：主 transcript 陈旧 + subagent 活跃 ⇒ 仍报 SESSION-IDLE（忙标志跟主循环，不跟后台任务）", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
-  // 人裁定（2026-08-08）：「inner 停下时即使有若干 subagent 在跑，也必须报 IDLE 事件」。
-  // 忙闲判据只读主 transcript 的最后消息类型（transcript_busy），subagent 只进心跳（OVERDUE）
-  // 不进忙判据——所以主 transcript 停摆（纯文本陈旧）即使 subagent 在写，也必须 fused-idle。
-  // LOOP_MIN=0（管理者对 pane-only 观测的既有做法）让 IDLE 不受心跳新鲜度噪声闸门压制。
-  const p = makeHermeticProbe("ol-subagent");
-  const main = path.join(p.tmp, "session.jsonl");
-  const agent = path.join(p.tmp, "session", "subagents", "agent-1.jsonl");
-  try {
-    fs.mkdirSync(path.dirname(agent), { recursive: true });
-    writeTranscript(main, [assistantTextRecord(isoAgo(0.1))], 8); // main transcript STALE pure-text (stalled)
-    fs.writeFileSync(agent, "{}\n"); // subagent file exists, will be kept fresh
-    assert.ok(await waitForAlive(p.env, p.session), "probe must be alive");
-    const mon = spawnMonitor(p.env, `sub ${p.tmp} ${p.session}`,
-      { transcripts: `sub ${main}`, overdueMin: 999, loopMin: 0, interval: 1 });
-    const toucher = startTouchLoop(agent); // the subagent keeps writing while the main is quiet
-    try {
-      // With the subagent ACTIVE, the stall must STILL report SESSION-IDLE (the busy flag follows
-      // the main loop, not background tasks — D2 withdrawal). F2 heartbeat already proves the
-      // subagent keeps OVERDUE away; this is the IDLE side of the same human ruling.
-      assert.ok(await waitForOutput(mon, /SESSION-IDLE sub/, 20000),
-        `AC3: inner stall (stale main transcript) with an ACTIVE subagent MUST report SESSION-IDLE:\n${mon.output()}`);
-      assert.ok(!/SESSION-RESUMED sub/.test(mon.output()),
-        `AC3: the active subagent must NOT be read as busy (busy follows the main loop):\n${mon.output()}`);
-    } finally {
-      toucher.kill("SIGKILL");
-      mon.child.kill("SIGKILL");
-      mon.cleanup();
-    }
-  } finally {
-    p.cleanup();
-  }
-});
-
-test("AC7/D4 — CANT-SEND 时效：陈旧错误被后续成功应答覆盖 ⇒ 不再报 SESSION-IDLE-CANT-SEND（尾随计数）；尾随错误仍报", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
-  // D4 复现（manager 三次实测）：13:04:47 API Error 恢复后 13:08:47 正常应答，但记录仍在 200 条
-  // 窗口内（12:43→13:09=26min），旧判据「最近 200 条含 ≥1 isApiErrorMessage」让 13:06/13:09/13:11
-  // 连报三条 CANT-SEND。修复：只数【尾随】错误——遇到第一条非错误消息（成功应答）即停。本测试：
-  //  * 尾随错误（blocked，错误在最末）⇒ CANT-SEND 仍报（正控制，同 AC9）；
-  //  * 陈旧错误 + 后续成功应答（recovered，最后一条是 assistant 文本）⇒ 不报 CANT-SEND（D4 修复）。
-  const p = makeHermeticProbe("ol-d4fresh");
-  const blocked = path.join(p.tmp, "blocked.jsonl");
-  const recovered = path.join(p.tmp, "recovered.jsonl");
-  fs.writeFileSync(blocked, [userRecord(isoAgo(10)), assistantRecord(isoAgo(5)),
-    apiErrorRecord(isoAgo(1)), apiErrorRecord(isoAgo(0.5))].join("\n") + "\n");
-  fs.writeFileSync(recovered, [userRecord(isoAgo(10)), apiErrorRecord(isoAgo(5)),
-    assistantRecord(isoAgo(1))].join("\n") + "\n");
+test("AC4 — normal busy (esc to interrupt) does NOT fire SESSION-INTERVENTION-REQUIRED (negative control)", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  const p = makeHermeticProbe("ol-intvbusy");
   try {
     assert.ok(await waitForAlive(p.env, p.session), "probe must be alive");
-    // 尾随错误正控制：错误在最末（0.5m/1m 前）⇒ CANT-SEND 报。
-    const monB = spawnMonitor(p.env, `b ${p.tmp} ${p.session}`, { transcripts: `b ${blocked}`, loopMin: 0, interval: 1 });
+    const mon = spawnMonitor(p.env, `intvb ${p.tmp} ${p.session}`, { interval: 1 });
     try {
-      assert.ok(await waitForOutput(monB, /SESSION-IDLE-CANT-SEND b/, 8000),
-        `AC7 positive control: trailing errors MUST report CANT-SEND:\n${monB.output()}`);
-    } finally {
-      monB.child.kill("SIGKILL");
-      monB.cleanup();
-    }
-    // D4 修复：陈旧错误（5m 前）被后续成功应答（1m 前，最后一条 assistant 文本）覆盖 ⇒ 不报 CANT-SEND。
-    const monR = spawnMonitor(p.env, `r ${p.tmp} ${p.session}`, { transcripts: `r ${recovered}`, loopMin: 0, interval: 1 });
-    try {
-      await sleep(4500); // several idle rounds — a stale-error CANT-SEND would have fired by now
-      assert.ok(!/SESSION-IDLE-CANT-SEND/.test(monR.output()),
-        `AC7/D4: a stale error superseded by a successful response MUST NOT report CANT-SEND:\n${monR.output()}`);
-      assert.ok(/SESSION-IDLE r/.test(monR.output()),
-        `AC7/D4: the recovered session must still report a REGULAR SESSION-IDLE (the freshness gate, not a blind mute):\n${monR.output()}`);
-    } finally {
-      monR.child.kill("SIGKILL");
-      monR.cleanup();
-    }
-  } finally {
-    p.cleanup();
-  }
-});
-
-test("AC0（先观测）— SL_PANE_STATE_LOG=1 时每轮打 pane_state=<state> 观测行（抖动形状可观测；契约 measure pane_state_logged ≥1）", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
-  // 契约 measure pane_state_logged = 运行 session-liveness ≥15min 后日志出现每轮
-  // `pane_state=<state>` 行（≥1）。SL_PANE_STATE_LOG=1 接缝（同 SL_ROUND_MARKER）让观察者可
-  // 读每轮 pane_state，抖动形状可观测（AC0「先观测」）。本测试证明接缝确实逐轮输出。
-  const p = makeHermeticProbe("ol-pstatelog");
-  try {
-    assert.ok(await waitForAlive(p.env, p.session), "probe must be alive");
-    const mon = spawnMonitor({ ...p.env, SL_PANE_STATE_LOG: "1" }, `psl ${p.tmp} ${p.session}`,
-      { interval: 1 });
-    try {
-      assert.ok(await waitForRounds(mon, 3, 15000), `monitor must run ≥3 rounds:\n${mon.output()}`);
-      const paneStateLines = (mon.output().match(/pane_state=\S+/g) || []).length;
-      assert.ok(paneStateLines >= 3,
-        `AC0: SL_PANE_STATE_LOG must emit a pane_state=<state> line per round (≥3 for 3 rounds), got ${paneStateLines}:\n${mon.output()}`);
+      // Idle baseline MUST establish ≥2 rounds so PREV_IDLE=1 is armed BEFORE the busy transition —
+      // the SESSION-RESUMED edge (idle→busy) requires a prior idle round; a 2s sleep can be as few
+      // as one slow round (classifier subprocess latency) and the edge would never arm.
+      assert.ok(await waitForRounds(mon, 2, 15000), `idle baseline must establish 2 rounds:\n${mon.output()}`);
+      makePaneBusy(p.env, p.session); // real work shape: esc to interrupt
+      // busy semantics preserved: the busy transition still fires SESSION-RESUMED.
+      assert.ok(await waitForOutput(mon, /SESSION-RESUMED intvb/, 15000),
+        `busy must still fire SESSION-RESUMED (busy semantics preserved):\n${mon.output()}`);
+      await sleep(3500); // several busy rounds
+      assert.ok(!/SESSION-INTERVENTION-REQUIRED intvb/.test(mon.output()),
+        `normal busy must NOT fire SESSION-INTERVENTION-REQUIRED (AC4 negative control):\n${mon.output()}`);
     } finally {
       mon.child.kill("SIGKILL");
       mon.cleanup();

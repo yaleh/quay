@@ -97,8 +97,11 @@
 #       ADR-016 Amendment 禁止的整屏哈希，且正是 token 计数假阳性的来源。改用
 #       `classifyPaneState`（plugin/scripts/pane-state-classify.ts，纯函数）：只读
 #       底部区域（输入框 + 状态行）的【形状】，枚举五态（waiting-input /
-#       permission-prompt / busy / error-banner / unknown）。busy / permission-prompt /
-#       error-banner ⇒ 忙；waiting-input ⇒ 闲；unknown ⇒ 闲（transcript 融合兜底）。
+#       permission-prompt / busy / error-banner / unknown）。busy / error-banner ⇒ 忙；
+#       waiting-input ⇒ 闲；unknown ⇒ 闲（transcript 融合兜底）。
+#       【2026-08-09 改判（gap-permission-prompt-merged-into-busy）】permission-prompt 不再并进
+#       busy：它是「需要人/上层介入」的信号（busy=0 intervention=1），与「在干活」相反——卡权限框
+#       与在干活在忙闲读数里必须可区分（同 ADR-033 读数无法表达关键区别源）。
 #       转圈耗时行（✽）、token 计数行（`/clear to save …`）、`✻ …` 残留天然进不了
 #       判据——形状分类读的是「有没有 esc/❯/权限框」这种结构，不是逐字节比较，
 #       所以 chrome 的抖动永远不会被判成活动（本任务假阳性源在此吸收）。
@@ -139,9 +142,11 @@
 #   - 屏幕（tmux capture-pane）：语义清晰、即时、是「人真正看的那几个标志」。判据 =
 #     classifyPaneState 的底部区域【形状分类】（ADR-016 Amendment / 裁定 D）——不是整屏哈希：
 #     枚举五态（waiting-input / permission-prompt / busy / error-banner / unknown），
-#     busy/permission-prompt/error-banner 判忙、waiting-input 判闲、unknown 判闲（transcript
-#     融合兜底）。chrome（转圈耗时/token 计数/提示语/✻ 残留）天然进不了判据——形状分类
-#     读结构不读字节，chrome 的抖动不会再被判成活动（姊妹任务确认的假阳性源在此吸收）。
+#     busy/error-banner 判忙、waiting-input 判闲、unknown 判闲（transcript 融合兜底）。
+#     permission-prompt 单列非忙（busy=0 intervention=1，gap-permission-prompt-merged-into-busy
+#     2026-08-09：需要人/上层介入的信号，与「在干活」相反）。chrome（转圈耗时/token 计数/提示语/
+#     ✻ 残留）天然进不了判据——形状分类读结构不读字节，chrome 的抖动不会再被判成活动（姊妹任务
+#     确认的假阳性源在此吸收）。
 #     仍依赖 tmux，且 TUI 布局/文案一改标志就失效——失效形态是【静默】；AC5 兜住
 #     「捕获为空/区域为空」不让它静默判闲。
 #     边界说明（gap-session-liveness-busy-mask-idle-with-subagents，2026-08-08 真根因 2c1d0c7c）：
@@ -275,7 +280,7 @@ EXPECTED_CYCLE_MIN=20
 declare -A PREV_ALIVE PREV_STALL PREV_OVERDUE PREV_STATE PREV_IDLE PREV_HALTED UNHALT_TS \
   PREV_BUSY_SEM PREV_API_BLOCKED PREV_MARKER_STALE PREV_PANE_EMPTY IDLE_CONSEC SEEN_BUSY \
   PREV_SATURATED IDLE_REPORTED ROUNDS PERM_CONSEC PREV_PERM_WARNED \
-  BUSY_CONSEC RESUME_PENDING RESUME_CAUSE RESUME_LASTIN
+  BUSY_CONSEC RESUME_PENDING RESUME_CAUSE RESUME_LASTIN PREV_INTERVENTION
 
 # ── classifyPaneState 消费者（ADR-016 Amendment 2026-08-04 / 裁定 D）───────────────────────────
 # 忙闲判据读 pane 的【底部区域形状】（纯函数 pane-state-classify.ts），不是整屏哈希。SL_CLASSIFY /
@@ -340,13 +345,16 @@ mask_pane() {
 }
 
 # _sl_pane_verdict —— classifyPaneState + AC5 防过滤守卫的【共享实现】（主循环与 --pane-state
-# 接缝共用，避免两处逻辑漂移）。入参：$1 = pane 原始文本。结果写到三个全局：_sl_pane_state /
-# _sl_pane_busy / _sl_pane_region。
-#   state ∈ busy|permission-prompt|error-banner ⇒ busy=1；waiting-input/unknown ⇒ busy=0；
+# 接缝共用，避免两处逻辑漂移）。入参：$1 = pane 原始文本。结果写到四个全局：_sl_pane_state /
+# _sl_pane_busy / _sl_pane_intervention / _sl_pane_region。
+#   state ∈ busy|error-banner ⇒ busy=1（真在干活 / 报错，忙闲轴上的忙）；
+#   permission-prompt ⇒ busy=0 + intervention=1（需要人/上层介入——不再并进 busy，
+#     gap-permission-prompt-merged-into-busy 的修复：卡权限框与在干活必须可区分）；
+#   waiting-input/unknown ⇒ busy=0 + intervention=0；
 #   空捕获（$1 为空）或分类器区域为空 ⇒ busy=1（AC5：无内容可判不得静默判空闲）。
 _sl_pane_verdict() {
   local raw=$1 cls
-  _sl_pane_state="unknown"; _sl_pane_busy=0; _sl_pane_region=""
+  _sl_pane_state="unknown"; _sl_pane_busy=0; _sl_pane_intervention=0; _sl_pane_region=""
   if [ -z "$raw" ]; then
     _sl_pane_busy=1
     return 0
@@ -359,8 +367,9 @@ _sl_pane_verdict() {
   _sl_pane_region=${cls#*$'\n'}
   [ -z "$_sl_pane_state" ] && _sl_pane_state="unknown"
   case "$_sl_pane_state" in
-    busy|permission-prompt|error-banner) _sl_pane_busy=1 ;;
-    *) _sl_pane_busy=0 ;;   # waiting-input / unknown → 闲；unknown 的歧义由 transcript 融合兜底
+    busy|error-banner) _sl_pane_busy=1; _sl_pane_intervention=0 ;;
+    permission-prompt) _sl_pane_busy=0; _sl_pane_intervention=1 ;;
+    *) _sl_pane_busy=0; _sl_pane_intervention=0 ;;   # waiting-input / unknown → 闲；unknown 的歧义由 transcript 融合兜底
   esac
   [ -z "$_sl_pane_region" ] && _sl_pane_busy=1
 }
@@ -727,6 +736,53 @@ selfcheck() {
   return $rc
 }
 
+# intervention_selfcheck —— --check 接缝（gap-permission-prompt-merged-into-busy ## Contract 的
+# measure/invoke：`bash plugin/scripts/session-liveness.sh --check`）。自包含（纯字符串 fixture，
+# 无 tmux / 无文件）验证三条契约带：
+#   1. permission_prompt_class：构造 permission-prompt pane ⇒ 分类为 intervention-required
+#      （raw state=permission-prompt，busy=0 intervention=1）——非 busy，与「在干活」可区分（AC2）；
+#   2. intervention_triggered：permission-prompt ⇒ 上层动作触发（SESSION-INTERVENTION-REQUIRED 事件
+#      立即发出，非等 3 次 busy）（AC3）；
+#   3. busy_true_work_not_flagged：构造真忙 pane（esc to interrupt）⇒ busy=1 intervention=0，
+#      不触发 intervention（负控制，AC4）。
+# 输出逐键 key=value 行（外层可 grep），退出 0 = 全部契约带成立；1 = 任一违反。
+intervention_selfcheck() {
+  local perm busy idle perm_state perm_busy perm_int busy_state busy_busy busy_int rc=0
+  perm="Quick safety check: Is this a project you created or one you trust?\n❯ 1. Yes, I trust this folder ✔\n  2. No, exit\nEnter to confirm · Esc to cancel"
+  busy="───────────────────────────────\n❯ \n───────────────────────────────\n  ⏵⏵ bypass permissions on · 1 monitor · esc to interrupt · ← 1 agent · ↓ to manage"
+  idle="───────────────────────────────\n❯ \n───────────────────────────────\n  ⏵⏵ bypass permissions on · 1 monitor · ← 1 agent · ↓ to manage"
+  _sl_pane_verdict "$(printf '%b\n' "$perm")"
+  perm_state="$_sl_pane_state"; perm_busy="$_sl_pane_busy"; perm_int="$_sl_pane_intervention"
+  _sl_pane_verdict "$(printf '%b\n' "$busy")"
+  busy_state="$_sl_pane_state"; busy_busy="$_sl_pane_busy"; busy_int="$_sl_pane_intervention"
+  _sl_pane_verdict "$(printf '%b\n' "$idle")"
+  # 契约带 1/2：permission-prompt ⇒ 非 busy + intervention（新状态，可区分于在干活）
+  if [ "$perm_state" = "permission-prompt" ] && [ "$perm_busy" = "0" ] && [ "$perm_int" = "1" ]; then
+    echo "permission_prompt_class=intervention-required (raw ${perm_state}; busy=${perm_busy} intervention=${perm_int})"
+    echo "intervention_triggered=1 (permission-prompt ⇒ SESSION-INTERVENTION-REQUIRED 事件立即发出，非等 3 次 busy)"
+  else
+    echo "permission_prompt_class=FAIL (raw ${perm_state}; busy=${perm_busy} intervention=${perm_int}——permission-prompt 必须非 busy 且标 intervention)" >&2
+    echo "intervention_triggered=0" >&2
+    rc=1
+  fi
+  # 契约带 3（负控制）：真忙 ⇒ busy=1 intervention=0，不触发 intervention
+  if [ "$busy_state" = "busy" ] && [ "$busy_busy" = "1" ] && [ "$busy_int" = "0" ]; then
+    echo "busy_true_work_not_flagged=1 (busy ⇒ busy=${busy_busy} intervention=${busy_int}——正常忙碌不误报)"
+  else
+    echo "busy_true_work_not_flagged=0 (raw ${busy_state}; busy=${busy_busy} intervention=${busy_int})" >&2
+    rc=1
+  fi
+  # 附带正控制：waiting-input ⇒ 闲 + 不干预（分类器未回归）
+  if [ "$_sl_pane_state" = "waiting-input" ] && [ "$_sl_pane_busy" = "0" ] && [ "$_sl_pane_intervention" = "0" ]; then
+    : # 正常闲：契约带之外的正控制，静默通过
+  else
+    echo "waiting_input_class=FAIL (raw ${_sl_pane_state}; busy=${_sl_pane_busy} intervention=${_sl_pane_intervention})" >&2
+    rc=1
+  fi
+  [ "$rc" = "0" ] && echo "session-liveness --check: PASS — permission-prompt 单列非 busy + 触发 intervention；正常忙仍 busy"
+  return $rc
+}
+
 ONE_SHOT=false
 case "${1:-}" in
   --once) ONE_SHOT=true ;;
@@ -745,6 +801,7 @@ case "${1:-}" in
     echo "REPO-STALL — 仓库信号（非会话面）"
     echo "SESSION-STATUS — --once 接缝状态行"
     echo "SESSION-SATURATED — 上下文已饱和（saturated: alive but cannot take input）"
+    echo "SESSION-INTERVENTION-REQUIRED — 需要人/上层介入（permission-prompt 卡权限框，非 busy，单列可检测）"
     exit 0 ;;
   --saturation)
     [ -n "${2:-}" ] || { echo "用法: $0 --saturation <transcript>" >&2; exit 2; }
@@ -752,10 +809,17 @@ case "${1:-}" in
   --mask) mask_pane; exit 0 ;;
   --pane-state)
     # 诊断接缝（AC4/AC5 单测直接调用）：从 stdin 读 pane 文本，跑与主循环相同的
-    # _sl_pane_verdict（classifyPaneState + AC5 守卫），打印 "state=<s> busy=<0|1>"。
+    # _sl_pane_verdict（classifyPaneState + AC5 守卫），打印
+    # "state=<s> busy=<0|1> intervention=<0|1>"。busy 字段保持向后兼容；intervention 是
+    # gap-permission-prompt-merged-into-busy 新增的独立标志（permission-prompt ⇒ intervention=1）。
     _sl_pane_verdict "$(cat)"
-    echo "state=$_sl_pane_state busy=$_sl_pane_busy"
+    echo "state=$_sl_pane_state busy=$_sl_pane_busy intervention=$_sl_pane_intervention"
     exit 0 ;;
+  --check)
+    # ## Contract measure/invoke 接缝（gap-permission-prompt-merged-into-busy）：自包含自检。
+    # 构造 permission-prompt / busy / waiting-input 三种 pane，验证三条契约带（见
+    # intervention_selfcheck）。退出 0 = 全部通过。
+    intervention_selfcheck; exit $? ;;
   --perm-warn-verdict)
     # 候选 B 纯判据接缝（gap-permission-prompt-vs-dismissable-prompt-classifier AC4 单测直接调用）：
     # 打印 _sl_perm_prompt_warn_verdict 的输出（warn|ok）。入参 <连续轮数> <transcript 陈旧秒数|-1>。
@@ -771,7 +835,7 @@ case "${1:-}" in
   --last-message-type)
     [ -n "${2:-}" ] || { echo "用法: $0 --last-message-type <transcript>" >&2; exit 2; }
     transcript_last_message_type "$2"; exit 0 ;;
-  -h|--help) echo "用法: $0 [--once] [--selfcheck [--json]] [--states] [--saturation <t>] [--mask] [--pane-state] [--api-errors <t>] [--last-input <t>] [--last-message-type <t>] [--perm-warn-verdict <rounds> <tx_age>]"; exit 0 ;;
+  -h|--help) echo "用法: $0 [--once] [--selfcheck [--json]] [--states] [--saturation <t>] [--mask] [--pane-state] [--check] [--api-errors <t>] [--last-input <t>] [--last-message-type <t>] [--perm-warn-verdict <rounds> <tx_age>]"; exit 0 ;;
 esac
 
 # ── 本项目根：自定位（同 inner-state.sh）。SESSION_ROOT 是测试接缝，生产不设。 ──────────────
@@ -1127,9 +1191,11 @@ while true; do
     #
     # 判据（裁定 D / ADR-016 Amendment 2026-08-04）：屏幕信号 = classifyPaneState 的
     #   底部区域【形状分类】——不是整屏哈希（md5(capture-pane) 一族已被 ADR 禁止，无论是否
-    #   先 mask）。忙 = 形状是 busy（esc to interrupt 在状态区）/ permission-prompt /
-    #   error-banner；闲 = waiting-input / unknown（unknown 由 transcript 融合兜底，AC5 只
-    #   兜「捕获为空/区域为空」不静默判闲）。chrome（转圈耗时 ✽ / token 计数 /clear to save /
+    #   先 mask）。忙 = 形状是 busy（esc to interrupt 在状态区）/ error-banner；闲 =
+    #   waiting-input / unknown（unknown 由 transcript 融合兜底，AC5 只兜「捕获为空/区域为空」
+    #   不静默判闲）。permission-prompt 单列：非忙 + intervention（gap-permission-prompt-merged-
+    #   into-busy 2026-08-09——需要人/上层介入的信号，与「在干活」相反，触发
+    #   SESSION-INTERVENTION-REQUIRED）。chrome（转圈耗时 ✽ / token 计数 /clear to save /
     #   ✻ 残留）天然进不了判据——形状分类读结构不读字节，所以「停泊会话只有 token 计数器
     #   在变」不会判忙（本任务假阳性源在此吸收）。不用 /proc CPU 增量：空闲的 Claude Code
     #   TUI 本身也在烧 CPU（实测 10 vs 132 jiffies，分离度太弱）。
@@ -1309,11 +1375,27 @@ while true; do
       PREV_STATE[$name]=$pane_state
       PREV_BUSY_SEM[$name]=$busy_sem
 
+      # 事件 5b：SESSION-INTERVENTION-REQUIRED（gap-permission-prompt-merged-into-busy）——
+      # permission-prompt 单列后的上层动作触发（AC3）。permission-prompt = 需要人/上层裁决或授权，
+      # 与「在干活」相反（busy=0 intervention=1）。出现即触发 escalate/报告——边沿触发（每段介入只报
+      # 一次，PREV_INTERVENTION 承担边沿；离开 permission-prompt 清 0 → 新段可再报），不是等 3 次 busy，
+      # 也不依赖 transcript 陈旧度（permission-prompt 本身就是要介入的信号）。启动首轮也报：一个
+      # 挂载时就卡在权限框的会话此刻就要介入，不是预热噪声。
+      if [ "$_sl_pane_intervention" = "1" ]; then
+        if [ "${PREV_INTERVENTION[$name]:-0}" = "0" ]; then
+          sl_emit "SESSION-INTERVENTION-REQUIRED $name 的会话需要人/上层介入：pane 显示权限确认框（permission-prompt，busy=0 intervention=1）——卡权限框 ≠ 在干活；上层应立即 escalate/报告，而不是当作忙碌推进"
+        fi
+        PREV_INTERVENTION[$name]=1
+      else
+        PREV_INTERVENTION[$name]=0
+      fi
+
       # 候选 B（gap-permission-prompt-vs-dismissable-prompt-classifier AC4）：permission-prompt 持续
       # ≥PERM_PROMPT_WARN_ROUNDS 轮且 transcript 最近 PERM_PROMPT_TX_WINDOW 秒未写入 ⇒ 报一次 WARN
       # （不无限静默）。兜底：分类器候选 A 只排除已知可忽略提示（问卷带 (optional)/Dismiss）；新变体
-      # 漏网时，假的 permission-prompt 永久钉住 busy ⇒ SESSION-IDLE 永不触发（D5 同族沉默）。WARN 只去
-      # stderr、每段一次（PREV_PERM_WARNED 边沿），绝不改动忙闲判据（真权限框保持忙）。
+      # 漏网时，假的 permission-prompt 会反复触发 SESSION-INTERVENTION-REQUIRED（噪声，而非阻断
+      # SESSION-IDLE——permission-prompt 已单列非忙，gap-permission-prompt-merged-into-busy）。WARN 只去
+      # stderr、每段一次（PREV_PERM_WARNED 边沿），绝不改动忙闲判据。
       if [ "$pane_state" = "permission-prompt" ]; then
         PERM_CONSEC[$name]=$(( ${PERM_CONSEC[$name]:-0} + 1 ))
       else
@@ -1328,7 +1410,7 @@ while true; do
           [ "$perm_hmt" != "0" ] && perm_tx_age=$(( $(date +%s) - perm_hmt ))
         fi
         if [ "$(_sl_perm_prompt_warn_verdict "${PERM_CONSEC[$name]}" "$perm_tx_age")" = "warn" ]; then
-          echo "session-liveness: WARN $name 的 pane 连续 ${PERM_CONSEC[$name]} 轮 permission-prompt 且 transcript 最近 ${perm_tx_age}s 未写入（窗口 ${PERM_PROMPT_TX_WINDOW}s）——可能是可忽略提示（问卷）被误判，SESSION-IDLE 被阻断；若属实应改判非忙（AC4 兜底，不无限静默）" >&2
+          echo "session-liveness: WARN $name 的 pane 连续 ${PERM_CONSEC[$name]} 轮 permission-prompt 且 transcript 最近 ${perm_tx_age}s 未写入（窗口 ${PERM_PROMPT_TX_WINDOW}s）——可能是可忽略提示（问卷）被误判，反复触发 SESSION-INTERVENTION-REQUIRED 属噪声；若属实应让分类器识别为可忽略（AC4 兜底，不无限静默）" >&2
           PREV_PERM_WARNED[$name]=1
         fi
       fi
@@ -1359,6 +1441,7 @@ while true; do
       IDLE_CONSEC[$name]=0; SEEN_BUSY[$name]=0; PREV_SATURATED[$name]=0
       IDLE_REPORTED[$name]=0; ROUNDS[$name]=0
       PERM_CONSEC[$name]=0; PREV_PERM_WARNED[$name]=0
+      PREV_INTERVENTION[$name]=0
     fi
 
     # 事件 4：心跳逾期——会话活着、项目未暂停，但心跳源超过 OVERDUE_MIN 未被更新。
