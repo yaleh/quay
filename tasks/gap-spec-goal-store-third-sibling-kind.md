@@ -46,6 +46,19 @@ extra:
 
 **验证锚**（SPEC §6 AC1-AC6）：复用 base 不复制 / criterion 空判红 / gate 事件带 verdict+timestamp / phase 可推导 / web 路由显示 verdict+时刻 / origin 空写不进。
 
+### 设计定案（manager 2026-08-09 08:0x 转达人同意——覆盖早期 schema 草案）
+
+1. **命名 `PHASE-NNN`**（纯序号，含义在 title）——目标文字会漂（08-05/08-06/08-09 三次逐字更正/换目标），任何从目标文字派生的名字都跟着漂；本仓已答三次：ADR-001..032 / DOC-001 / DIR-001..192 全是 `<KIND>-<NNN>` + 独立 title、id 永不移动。PHASE-NNN 是第四次沿用。**原 schema 草案的 GOAL-001 作废。**
+2. **phase 与 goal 合一**（不是两种对象）——`PHASE-NNN` 的 title 就是那一个目标陈述；`AC-NNN` 各带 `phase: PHASE-NNN`。**PHASE 记录【不】有 criterion 字段**——它的判据是其 AC 的合取。
+3. **两条不变式（人已同意）**：I1 同一时刻只能有一条 `status: active` 的 PHASE；I2 PHASE 达成 ⟺ 其所有活跃 AC 达成（**推导不是存储**）。
+4. **历史检验（物证）**：manager-phase-goal.md 有【四条】自称「主判据」的 AC（AC10/AC12/AC20/AC28）——四个「本阶段主判据」活在同一个文件里；六次设目标只加不关、AC16 无关闭标记；唯一做对的一次是 08-05（显式降旧+明新）。
+5. **落实设计（根因不是「忘了关」——开新阶段有触发器、关旧阶段没有）**：
+   - (a) **阶段切换是单次原子写入、fail-closed**——已有 active phase 时拒绝创建第二条，除非同一次调用给出旧 phase 的处置（achieved 或 superseded-by），不给处置就写不进去；
+   - (b) AC 的活跃性派生自 phase，不单独存储；
+   - (c) 「恰好一条 active phase」做成 checker 进各层 tick 的 A 段（预演：今天一跑必红）；
+   - (d) I2 评估时推导、永不存储。
+6. **迁移处置归人不归你我**——AC10/AC12/AC16/AC17/AC20 各自是达成/废止/并入，是目标层面的判断；机制只负责把这个问题逼出来。
+
 ## Acceptance Criteria
 
 - [ ] AC1: **goal-store kind 落地**——复用 `frontmatter-store-base.ts`（读 import，不复制机制），schema 含 criterion/status(含 achieved)/phase/origin/evidence
@@ -56,6 +69,9 @@ extra:
 - [ ] AC6: **origin 空写不进**——负控制：空 origin 记录被拒
 - [ ] AC7: **gate 自身账本检查**（SPEC §7 风险 1）——gate-events 最近执行时刻 vs 声称周期；超时未跑 ⇒ 报出（防 AC 在静默 gate 上集体显绿）
 - [ ] AC8: **既有机制不回归**——`--for-task` scoped 门绿（frontmatter-store-base / adr-store / document-store / serve 相关契约检查）
+- [ ] AC9: **PHASE-NNN 命名 + phase/goal 合一**——纯序号 id（`PHASE-NNN` / `AC-NNN`，title 独立），PHASE 无 criterion 字段（判据=其 AC 合取）
+- [ ] AC10: **I1 原子阶段切换 fail-closed**——已有 active phase 时拒绝创建第二条，除非同一次调用给出旧 phase 处置（achieved/superseded-by）；不给处置写不进
+- [ ] AC11: **I2 推导**——PHASE 达成 ⟺ 其所有活跃 AC 达成（评估时推导，永不存储）；「恰好一条 active phase」checker 进各层 tick A 段
 
 ## Definition of Done
 
