@@ -1,7 +1,7 @@
 ---
 id: gap-spec-p2-halt-three-layer-mechanical-enforcement
 title: "SPEC P2-8: `.halt` 对三层同时机械生效——当前只有外层 tick 边界读 .halt，inner/manager 与代码内强制点未覆盖（SPEC-three-layer-unified-architecture §2.8）"
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -32,19 +32,51 @@ extra:
 
 **验证锚**：修后，(a) 放置 `.halt` 后 inner / manager / outer 各自的下一执行点都停（三层实测）；(b) `无.halt` + 长期无产出 ⇒ 组合判据机械报出；(c) 移除 `.halt` 后恢复。
 
+## 执行记录（2026-08-09，inner 实现 + 三层实测）
+
+**落地**：统一检查点 `plugin/scripts/halt-check.sh --for <layer> --json`（fail-closed 读 `.halt`，
+同形 `supervisor-preempt.sh halt-check`；组合判据 `stall` = `无 .halt` 且 最后提交 > 阈值(默认24h) ⇒
+未标记停摆）。三层 tick 入口接线：inner `plugin/loop/fast-mode-loop-tick.md` 步骤 0、outer
+`orchestration/orchestrator-loop-tick.md` 步骤 0d、manager `orchestration/manager-loop-tick.md` 步骤 1a。
+`capability-catalog.sh` 声明 `halt-check.sh`（QUESTION + PUBLIC_ENTRYPOINTS，AC1c 门绿）。
+新增测试 `plugin/test/halt-check.test.mjs`（13 条：fail-closed / 组合判据 / 三层 measure / --projects）。
+
+**(a) 放置 `.halt` ⇒ 三层停**（`echo "pause all layers | 解除: x" > .halt` 后逐层 `--json`）：
+```
+layer=outer   halted=True reason=pause all layers | 解除: x   stall=False
+layer=inner   halted=True reason=pause all layers | 解除: x   stall=False
+layer=manager halted=True reason=pause all layers | 解除: x   stall=False
+```
+measure `three_layer_halt_effective` = 3 个 `halted` 字段全 true（band 3 达成）。
+
+**(c) 移除 `.halt` ⇒ 三层恢复**（`rm .halt` 后逐层 `--json`）：
+```
+layer=outer   halted=False
+layer=inner   halted=False
+layer=manager halted=False
+```
+invariant `halt_removal_resumes` = 1。
+
+**(b) 组合判据机械报出**（临时 git 仓，提交 backdate 81h，无 `.halt`）：
+```
+no .halt + stale commit: halted=False stall=True | unmarked stall (SPEC 2.8): no .halt AND last commit 81.15 h ago > 24.00 h thresh
+.halt present + stale commit: halted=True stall=False
+```
+invariant `halt_combination_mechanical` = 1；有 `.halt` 的标记停不报未标记停摆（负控制）。
+
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录现状（三层 `.halt` 覆盖矩阵：外层 tick 边界读 / inner 文档有但代码未接 / manager 文档有组合判据 / watchdog 已非交付物）（本任务 Proposal 已含）
-- [ ] AC2: **三层同时机械生效**——放置 `.halt` 后 inner / manager / outer 各自的下一执行点都停（三层实测贴任务体）
-- [ ] AC3: **组合判据机械化**——`无.halt` + `>24h 无产出` ⇒ 未标记停摆报出（非只写文档）
-- [ ] AC4: **移除即恢复**——删 `.halt` 后三层恢复推进（负控制）
-- [ ] AC5: **既有机制不回归**——`--for-task` scoped 门绿（含 capability-catalog / 相关 tick 文档契约检查）
+- [x] AC1: **复现固化**——任务体记录现状（三层 `.halt` 覆盖矩阵：外层 tick 边界读 / inner 文档有但代码未接 / manager 文档有组合判据 / watchdog 已非交付物）（本任务 Proposal 已含）
+- [x] AC2: **三层同时机械生效**——放置 `.halt` 后 inner / manager / outer 各自的下一执行点都停（三层实测贴任务体）
+- [x] AC3: **组合判据机械化**——`无.halt` + `>24h 无产出` ⇒ 未标记停摆报出（非只写文档）
+- [x] AC4: **移除即恢复**——删 `.halt` 后三层恢复推进（负控制）
+- [x] AC5: **既有机制不回归**——`--for-task` scoped 门绿（含 capability-catalog / 相关 tick 文档契约检查）
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全部勾上
-- [ ] 修后实跑：三层各放置/移除 `.halt` 各一次，停/恢复实测贴任务体；组合判据报出实测
-- [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
+- [x] AC1–AC5 全部勾上
+- [x] 修后实跑：三层各放置/移除 `.halt` 各一次，停/恢复实测贴任务体；组合判据报出实测
+- [x] 既有测试 + 新增测试全绿（`--for-task` scoped）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
 
 ## Touches
@@ -54,6 +86,7 @@ extra:
 - plugin/scripts/capability-catalog.sh（候选 B：supervisor-preempt.sh 声明的实现接线；或标注已由候选 A/C 覆盖）
 - orchestration/SPEC-three-layer-unified-architecture-2026-08-09.md（P2-8 验收：三层实测贴回）
 - tasks/gap-spec-p2-halt-three-layer-mechanical-enforcement.md（自身：勾 AC + 贴证据）
+- plugin/test/halt-check.test.mjs（新增测试：统一检查点 fail-closed / 组合判据 / 三层 measure）
 
 ## Contract
 
