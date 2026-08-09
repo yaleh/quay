@@ -1178,6 +1178,12 @@ clause-14 降为 advisory、既有失败记在已 done 的任务体里）。
 - 遥测吞吐：`tasksPerHour`（= `--task-end` 闭合任务数 / 墙钟窗口小时，报 `windowStart`/`windowEnd`/
   `windowHours`——2026-08-03 起口径由 `60/均耗时` 修正，旧量更名为 `serialEquivalentPerHour`，与并发
   无关；`--task-end` 由外层异步写，见 `orchestrator-loop-tick.md` 步骤 1b）
+- **执行模式两数（`gap-inner-serial-main-thread-not-dispatch`）**：`node --no-warnings
+  --experimental-strip-types plugin/scripts/inner-exec-mode-report.ts --json` 的
+  `main_thread_edits` / `agent_dispatches`（主线程 Edit 产品文件数 : Agent 派发数；`--since` 可
+  窗口化到本 tick 起始时刻）。**常规轮次判据：`agent_dispatches ≥ 1`（或非红窗时 `main_thread_edits`
+  不大幅 > `agent_dispatches`）**；主线程 Edit 产品文件数远大于 Agent 派发数、且当轮非红窗 ⇒
+  「常规 ready 任务实现必须派 subagent」被违反（白名单见下节「执行模式两数判据与红窗白名单」）
 - 阻塞信号状态（步骤 3 `--detect-stop` 的输出：命中了哪些停止条件、`.quay/inner-blocked.json`
   存在与否；存在则报 `reason` + `question`，以及 `fast-mode-telemetry --report` 的累计死时间/单次最长
   ——2026-08-03 起该数有基线）
@@ -1198,3 +1204,38 @@ clause-14 降为 advisory、既有失败记在已 done 的任务体里）。
   ——缺值 = 未执行，机械报出，不靠自述（AC3/AC4）。
 
 不要只说「继续中」——没有这些数字，1 任务/小时的目标无法判定。
+
+---
+
+## 执行模式两数判据与红窗白名单（`gap-inner-serial-main-thread-not-dispatch`，AC2/AC3）
+
+**判据（机械可核）**：inner 的吞吐恒等于 1 的机制根是「主线程串行做实现，不走派发路径」——
+85 分钟 Bash 162 / Edit 41 / Agent 2，41 次 Edit 全在主线程改产品脚本。修法不是「禁止主线程 Edit」，
+是「**常规 ready 任务的实现必须派 subagent；主线程只做红窗快修 + 编排 + 立案**」。每 tick 报两数：
+
+```bash
+node --no-warnings --experimental-strip-types plugin/scripts/inner-exec-mode-report.ts --json
+# { main_thread_edits, agent_dispatches, total_edits, edits_no_file_path, session, ... }
+```
+
+- `main_thread_edits` = 主线程 tool_use `Edit` 且 `input.file_path` 指向**产品文件**
+  （`plugin/scripts/`、`plugin/test/`、`packages/` 之下）的次数；`tasks/` 与 `docs/`
+  （含 `orchestration/`、`plugin/loop/` 的 `.md`）**不算**。
+- `agent_dispatches` = 主线程 tool_use `Agent` 的次数。
+- `--since <ISO>` 窗口化到本 tick 起始时刻 ⇒ 报「本轮」两数（Contract measure 的读取形态）。
+
+**常规轮次违反判据**：`agent_dispatches == 0` **且** `main_thread_edits` 远大于 `agent_dispatches`
+（即常规实现被主线程直接 Edit 掉了、没有任何派发）⇒ 违反「常规 ready 任务实现必须派 subagent」。
+helper 只报数、不裁决——「当轮是否红窗」由 tick 的 suite-state 读判，判据是两层读数合起来的。
+
+**红窗快修白名单（AC3，不误报）**：以下主线程产品文件 Edit **允许**、不判违——
+1. **红窗即时修复**：suite-red 分诊后针对失败文件的即刻修复（文档写明的快路径；
+   measure-trend/ready-pool 那类即时修复属此类）。
+2. **任务立案/编排**：写任务体、勾 AC、贴证据、编辑 `tasks/*.md`（helper 结构上不计入
+   `main_thread_edits`——`tasks/` 不是产品文件，白名单在计数源头兑现）。
+3. **tick 文档/编排文档编辑**：`plugin/loop/*.md`、`orchestration/*.md` 的编辑属编排，
+   不计入产品文件 Edit（同 2，计数源头排除）。
+
+**机械上报触发**：当 `main_thread_edits` 大（> 3）**且** `agent_dispatches == 0` **且** 当轮不是
+红窗轮（suite-state 非 red）⇒ 本 tick 必须在 tick-log 里显式写出「执行模式违规候选」并说明为什么
+这轮的主线程 Edit 属于/不属于白名单——把散文的「记得派 subagent」变成每轮被检查的数字。

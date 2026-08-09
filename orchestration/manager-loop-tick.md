@@ -36,6 +36,16 @@
 （`heavy-op-token.sh` 已于 2026-08-06 退休：人裁定「彻底删掉」，见
 gap-session-liveness-remove-shared-events-and-lock。）
 
+**交叉标注（`gap-inner-serial-main-thread-not-dispatch`，2026-08-09）：OB-SLOT 槽位账测错对象作废重立。**
+管理者此前按「空槽 = 没有在飞的 subagent」读内层槽位——但 inner 的 85 分钟实测（Bash 162 / Edit 41 /
+Agent 2）显示工作根本不在 subagent 里（41 次 Edit 全在主线程改产品脚本），「空槽」义务测的是**不承载
+工作的量**。槽位账的**纠正对象** = 内层每轮 tick 的**执行模式两数**（`node --no-warnings
+--experimental-strip-types plugin/scripts/inner-exec-mode-report.ts --json` 的 `main_thread_edits` :
+`agent_dispatches`，判据与白名单见 `plugin/loop/fast-mode-loop-tick.md`「执行模式两数判据与红窗白名单」）：
+常规轮次 `agent_dispatches ≥ 1`（或非红窗时 `main_thread_edits` 不大幅 > `agent_dispatches`）才算
+「在走派发路径」；主线程 Edit 大且 Agent 0 且非红窗 = 空槽判断依旧虚。**管理者判「空槽/该补派」时，
+把执行模式两数一并读进来，不再只数 subagent 数。**
+
 ## 0.5 每个 tick 先看一眼自己的目标
 
 `orchestration/manager-phase-goal.md` —— 本阶段的目标与 AC（**不写数量：数量会变，
