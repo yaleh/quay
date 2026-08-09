@@ -1171,3 +1171,31 @@ done
 
 **并且这是 `SPEC-outer-liveness-productization.md` AC5 的实例**:
 那条要求「挂载的父进程必须存活」,现在补上更前面的一层——**挂载本身必须存在**。
+
+---
+
+## 附:执行核(manager-tick-core.md)的立档理由与新增条目理由
+
+**立此执行核的原因**(2026-08-09 05:5xZ,人提出「控制面越小越稳定」后):执行路径与理由档案
+混在同一份 1138 行文档里,一次重读无法当 checklist 执行 ⇒ 实际被执行的是注意力当轮选中的
+部分。同夜两次实证:outer 的「强制」步骤在 1095 行文档第 687 行、静默停摆 8.5 小时;
+我的 workflow **根本不在文档任何一行**、静默 21.5 小时。
+
+**A14(背离度)的理由**(2026-08-09 15:4x-16:0x):外层连续 5 次 tick 全判 `no-action`,
+而三条强制动作条件每次都为真(在飞 0~1 < cap 4、pool 11 < floor 16、nyf 17),欠 15 个动作
+交付 0 个。查的是**量**不是**行为归因**——「它挑了便宜的那条」可争辩、判不了;
+「nyf 与 pool deficit 连续 K 轮不下降且同期有派发」是算术。干预阶梯:K=1 报外层、
+K=2 升级给人、K=3 关生产闸。**`.halt` 不能用作 K=3 的手段**:代码层 `slot-refill.ts:155`
+只挡派发,但两层实际遵循的文档层是「整个 tick 空转、fan-in 也停」
+(`orchestrator-loop-tick.md:563`、inner core A1)⇒ 会造成死锁。正确形式是把背离度接到
+`slot-refill.ts:155` 那个已存在的挂载点,触发与解除都是不等式。
+**边界**:这不保障外层会做——没有机制能保障会话意志。保障的是可观测与止损。
+
+**C16(绕过必留痕)的理由**(2026-08-09 16:1x):outer 说 `ready-pool-check --promote`
+「output is unclear」后绕过。实测 `--promote` **这个 flag 根本不存在**(grep 全文只在注释里,
+脚本设计是报告 `targeted_promotion` 让调用者自己跑 `quay promote <id>`),且传臆造 flag
+`--this-flag-does-not-exist-xyz` 同样输出正常 JSON + **exit=0** ⇒ 未知 flag 静默忽略并报成功,
+是「看起来做了、其实没做」的通用制造机。**今晚三笔旧账都是「当时绕过、没留痕」的直接后果**:
+`slot-refill.in_flight_count` 是入参不是测量(绕过去自己数 pane ⇒ in_flight 至今无可信来源)、
+`.quay/last-pane.txt` 无写入者(绕过用 capture-pane ⇒ A7 死判据留到今天)、
+`FAILURE_PATTERNS` 前两次只修触发的那条(第三次复发)。
