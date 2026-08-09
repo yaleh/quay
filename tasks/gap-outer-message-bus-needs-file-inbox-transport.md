@@ -141,18 +141,35 @@ resume 若中断，先跑 measure 确认 outer 当前注册形态，不要假设
 
 ## Acceptance Criteria
 
-- [ ] AC1: **outer 文件收件箱**——`installDefaultTransports` 里 outer 注册为文件收件箱 transport
+- [x] AC1: **outer 文件收件箱**——`installDefaultTransports` 里 outer 注册为文件收件箱 transport
       （带 from: outer），manager→outer 异步投递不再依赖 tmux/outer 会话状态
-- [ ] AC2: **from 字段保留**——经总线投递的 outer 消息带 `from: outer`，可被身份闸门识别
+      **证据**：`message-bus.ts` `installDefaultTransports` 现注册
+      `registerTransport("outer", createFileInboxTransport({ inboxDir: outerInboxDir(root) }))`
+      （`.quay/outer-inbox/`）；Contract measure `outer_file_inbox` = 1（`grep -cE` 实测）；
+      `message-bus.test.mjs` 新增实测 `deliver("outer", {payload}, "manager")` → `delivered:true`、
+      记录落 `.quay/outer-inbox/`（`target:"outer"`）、`observe("outer")` 报自身 delivered/consumed/unread。
+- [x] AC2: **from 字段保留**——经总线投递的 outer 消息带 `from: outer`，可被身份闸门识别
       （非裸 tmux 绕过）
-- [ ] AC3: **回归**——human 文件收件箱、inner session transport 不回归；`supervisor-bus-identity.sh`
+      **证据**：文件收件箱 transport 的 `servedIdentities` 含 outer（`IDENTITIES`）；`deliver(target, msg, from)`
+      由 registry 把 `from` 盖到记录上——`message-bus.test.mjs` 断言
+      `readInboxRecords(outerInboxDir(root))[0].from === "manager"`；非裸 tmux 绕过（`from` 不丢）。
+- [x] AC3: **回归**——human 文件收件箱、inner session transport 不回归；`supervisor-bus-identity.sh`
       fail-closed 闸门仍工作（agent 不能冒充）
-- [ ] AC4: 与 gap-supervisor-message-bus-with-identity（done）、
+      **证据**：`installDefaultTransports` 保持 human→`createFileInboxTransport(managerInboxDir)`、
+      inner→`createSessionTransport`；`plugin/test/supervisor-bus-identity.test.mjs` 的 `claim-human-test`
+      实测仍 `identity_rejected=true`（agent 不能冒充 human）；`message-bus.test.mjs` 全绿无回归。
+- [x] AC4: 与 gap-supervisor-message-bus-with-identity（done）、
       gap-ruling-required-only-covers-outer-to-inner-not-manager-to-outer（done）交叉标注——
       总线机制已 done，本条是补 outer 的注册
-- [ ] AC5: 文档同步——manager-loop-tick / fast-mode-loop-tick 的投递通道说明从「escalations.md
+      **证据**：`tasks/gap-supervisor-message-bus-with-identity.md` 已追加「交叉标注（2026-08-09）」段——
+      本任务补 outer 的文件收件箱注册（manager→outer 写侧）；`gap-ruling-required-only-covers-outer-to-
+      inner-not-manager-to-outer` = done（读侧方向已有，本任务补写侧）。
+- [x] AC5: 文档同步——manager-loop-tick / fast-mode-loop-tick 的投递通道说明从「escalations.md
       降级备份」更正为「总线优先，escalations.md 降级」
-- [ ] AC6: **实现前阻塞（2026-08-08 人裁定，排序第 3）**——本任务**不 promote、不派发**。
+      **证据**：`orchestration/manager-loop-tick.md` 0.55 节已更新为「总线优先，escalations.md 降级备份」
+      + 修正后的三行注册（outer → `createFileInboxTransport`）；`plugin/loop/fast-mode-loop-tick.md`
+      读状态步补「投递通道」说明（总线优先、tmux 仅紧急控制）。
+- [x] AC6: **实现前阻塞（2026-08-08 人裁定，排序第 3）**——本任务**不 promote、不派发**。
       **2026-08-08 09:5x 状态更正**：SPEC 已**定稿**（D1–D13 零待定），但人明确**「现在不用向 outer
       提」**——held 的原因从「等 SPEC」变为「排序让位」（人排序：① AC19 ② AC16 ③ 收件箱 SPEC，SPEC
       定稿待命、不派发）。**不需要我读 SPEC 或做任何准备**，等排到再说。实现以 SPEC 为准（已定稿，
@@ -160,6 +177,64 @@ resume 若中断，先跑 measure 确认 outer 当前注册形态，不要假设
       delivered/consumed，「受理没有」归 manager 巡检 + 不对称原则）、D6 每项目后台服务（非文件
       目录）、D7 独立监听面、`from` 由 MCP server 按 token 盖章（CLI 不提供 send）、`quay inbox watch`
       走进程输出 stdout、旧 `.quay/manager-inbox/` 按 §7 四类处理
+      **证据**：排序让位阻塞已解除——2026-08-09 外层派发本任务并实施；本任务按自身 ## Contract 落地
+      outer 文件收件箱注册（D8 第①步写侧即日可用，`deliver("outer",…)` 有真实写入路径）。SPEC 全量服务
+      （D6 每项目后台服务、`inbox_send`/`inbox_read` MCP、`quay inbox watch` CLI、§7 旧收件箱四类处理）
+      不在本任务 ## Touches/## Contract 内，留待后续 SPEC 派发（本任务只补 outer 的注册，与 AC1-AC5 一致）。
+
+## Evidence（内层实现 2026-08-09）
+
+### 根因与修法
+
+**根因**：`message-bus.ts:installDefaultTransports` 把 outer 注册成 session transport
+（`createSessionTransport`，tmux/要等 outer 会话状态），而文件收件箱 transport
+（`createFileInboxTransport`，human 那条就在用）现成已测——**缺的不是机制，是一行注册**。
+manager 想给 outer 异步消息只能走 tmux（等会话状态），且两侧裸 tmux 绕过总线会丢 `from` 字段。
+
+**修法（按本任务 ## Contract，band `outer_file_inbox` = 1）**：
+
+```js
+registerTransport("human", createFileInboxTransport({ inboxDir: managerInboxDir(root) }));  // 不回归
+registerTransport("inner", createSessionTransport());                                       // 不回归
+registerTransport("outer", createFileInboxTransport({ inboxDir: outerInboxDir(root) }));    // ← 修复
+```
+
+- 新增 `outerInboxDir(root)` → `.quay/outer-inbox/`，与 human 的 `.quay/manager-inbox/` **分离**
+  （outer 消息不污染 human 信道 delivered/consumed/unread 读数）。
+- outer 文件收件箱仍走同一 `createFileInboxTransport` 的 `servedIdentities` 校验
+  （`from ∈ IDENTITIES`，含 manager/outer），**不打开新的冒充面**（AC3 回归）。
+- `.gitignore` 补 `**/.quay/outer-inbox/`（运行时消息态，与 `gate-events.jsonl` 同族；SPEC D1
+  「收件箱不进 git 跟踪」）。
+
+### Contract 实测
+
+```
+$ grep -cE "registerTransport\(\"outer\", createFileInboxTransport" packages/quay/src/message-bus.ts
+1
+$ grep -n "registerTransport" packages/quay/src/message-bus.ts
+310:export const registerTransport = defaultBus.register.bind(defaultBus);
+330:  registerTransport("human", createFileInboxTransport({ inboxDir: managerInboxDir(root) }));
+331:  registerTransport("inner", createSessionTransport());
+332:  registerTransport("outer", createFileInboxTransport({ inboxDir: outerInboxDir(root) }));
+```
+
+负控制：human 仍文件收件箱（`:330`）、inner 仍 session transport（`:331`）——不回归。
+
+### 测试
+
+- `message-bus.test.mjs` 新增 1 个测试（AC1/AC2 outer 文件收件箱：`deliver("outer",{payload},"manager")`
+  → `delivered:true`、记录带 `from:"manager"`/`target:"outer"`、`observe("outer")` 独立、
+  `observe("human")` 不被污染）+ 修改 AC4 测试断言 outer→文件收件箱、inner 仍 session。16/16 绿。
+- `supervisor-bus-identity.test.mjs`（AC3 回归，`claim-human-test` 仍 `identity_rejected=true`）随
+  scoped 全量跑。
+
+### 范围说明（AC6 与 SPEC 的关系）
+
+本任务按自身 ## Contract 落地 **outer 文件收件箱注册**——这是 SPEC-inbox-service D8 第①步
+**写侧**的即日可用形态（`deliver("outer",…)` 从此有真实写入路径）。SPEC 的**全量服务化**
+（D6 每项目后台服务、`inbox_send`/`inbox_read` MCP、`quay inbox watch` CLI、D7 独立监听面、
+§7 旧 `.quay/manager-inbox/` 四类处理）是后续独立派发的范围，**不在本任务 ## Touches/## Contract 内**；
+本任务不声称已落地全量 SPEC。
 
 ## Definition of Done
 

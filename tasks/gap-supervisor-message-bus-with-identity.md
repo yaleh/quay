@@ -189,6 +189,16 @@ tick 读状态步（fast-mode 步骤 1）与观察步（orchestrator 步骤 1）
 ——「文件在、无人读」的**原样现场**。本任务挂载点（tick 读状态步）现在会看到它们并逐条进决策；
 `inbox-reader.sh`/`inbox-summary` 只读 `.json` 记录，遗留 .md 由 tick 按文本读（机制不双轨）。
 
+### 交叉标注（2026-08-09）—— outer 文件收件箱（gap-outer-message-bus-needs-file-inbox-transport）
+
+本任务把总线机制（带身份、文件收件箱 transport、fail-closed 闸门）做成 done；**写侧只有 `deliver()`
+这个 JS 函数、agent 靠 bash 驱动谁都发不了**（delivered=0 的真实原因）。`gap-outer-message-bus-needs-
+file-inbox-transport` = done 补上 manager→outer 的写侧：`installDefaultTransports` 把 **outer 注册为
+文件收件箱 transport**（`.quay/outer-inbox/`，与 human 的 `.quay/manager-inbox/` 分离），manager→outer
+异步投递带 `from`、不再依赖 tmux/outer 会话状态。本任务的 fail-closed 身份闸门（`AGENT_IDENTITIES` 不含
+human、`checkIdentityClaim`）保持原样——outer 文件收件箱仍走同一 `createFileInboxTransport` 的
+`servedIdentities` 校验（`from ∈ IDENTITIES`），不打开新的冒充面。
+
 ### 测试统计（scoped）
 
 ```

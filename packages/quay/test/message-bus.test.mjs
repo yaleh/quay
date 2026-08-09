@@ -29,6 +29,7 @@ import path from "node:path";
 import {
   TARGETS,
   managerInboxDir,
+  outerInboxDir,
   readInboxRecords,
   computeInboxObservation,
   createFileInboxTransport,
@@ -203,10 +204,52 @@ test("AC4 — installDefaultTransports wires human → the real file-inbox mount
   assert.equal(o.target, "human");
   assert.equal(o.delivered, 1);
 
-  // inner/outer default to the session transport (adapters wired later by the supervisor).
+  // inner STILL defaults to the session transport (adapters wired later by the supervisor) —
+  // the change here is ONLY outer → file-inbox (manager→outer async, no session wait).
   const ri = deliver("inner", { from: "human", payload: { text: "drive" } });
   assert.equal(ri.delivered, false);
   assert.match(ri.reason, /session transport not configured/);
+
+  // outer → file-inbox: manager→outer async delivery lands in .quay/outer-inbox/ (no session wait).
+  const ro = deliver("outer", { from: "manager", payload: { text: "async to outer" } });
+  assert.equal(ro.delivered, true);
+  assert.equal(fs.existsSync(path.join(root, ".quay", "outer-inbox", `${ro.receiptId}.json`)), true);
+});
+
+// ── outer file-inbox (tasks/gap-outer-message-bus-needs-file-inbox-transport) ─────────────────────────
+
+test("AC1/AC2 — outer file-inbox: manager→outer delivers with `from` preserved in a SEPARATE inbox", (t) => {
+  const root = tmpRoot(t);
+  resetTransports();
+  t.after(() => resetTransports());
+  installDefaultTransports(root);
+
+  // manager → outer: an async delivery that must NOT wait on outer's session state (file inbox).
+  const r = deliver("outer", { payload: { text: "async task note" } }, "manager");
+  assert.equal(r.delivered, true);
+  assert.equal(r.target, "outer");
+  assert.equal(outerInboxDir(root), path.join(root, ".quay", "outer-inbox"));
+  assert.equal(fs.existsSync(path.join(root, ".quay", "outer-inbox", `${r.receiptId}.json`)), true);
+
+  // The record carries the sender identity (`from` is stamped by the bus on delivery, not
+  // self-claimed via a bare-tmux send-keys that drops the field).
+  const [rec] = readInboxRecords(outerInboxDir(root));
+  assert.equal(rec.target, "outer");
+  assert.equal(rec.from, "manager");
+  assert.equal(rec.delivered, true);
+  assert.equal(rec.consumed, false);
+
+  // The outer channel is SEPARATE from the human channel: a manager→outer message must NOT
+  // inflate the human channel's observation (observe("human") counts only manager-inbox records).
+  const humanObs = observe("human");
+  assert.equal(humanObs.delivered, 0, "outer messages never pollute the human channel's measurement");
+
+  // observe("outer") reports the outer inbox's OWN delivered/consumed/unread.
+  const outerObs = observe("outer");
+  assert.equal(outerObs.target, "outer");
+  assert.equal(outerObs.delivered, 1);
+  assert.equal(outerObs.consumed, 0);
+  assert.equal(outerObs.unread, 1);
 });
 
 // ── AC5 — AC12b measurability: timestamped, countable records ──────────────────────────────────────
