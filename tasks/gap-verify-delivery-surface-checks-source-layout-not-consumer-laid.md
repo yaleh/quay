@@ -37,13 +37,13 @@ orchestration/SPEC-*」），而**消费者 laid 布局是 orchestration/ + docs
 
 ## Acceptance Criteria
 
-- [ ] AC1: verify-delivery-surface 支持消费者 laid 布局——archguard（orchestration/+docs/analysis/）
+- [x] AC1: verify-delivery-surface 支持消费者 laid 布局——archguard（orchestration/+docs/analysis/）
        不再 0/6（实跑 > 0）
-- [ ] AC2: AC16 完整性证据用 laid 布局校验——release 装出的消费者，verify-delivery-surface laid 模式
+- [x] AC2: AC16 完整性证据用 laid 布局校验——release 装出的消费者，verify-delivery-surface laid 模式
        通过（而非源布局假阴性）
-- [ ] AC3: 与 gap-release-excludes-plugin-bundle（AC16 核心）交叉标注——verify-delivery-surface 是
+- [x] AC3: 与 gap-release-excludes-plugin-bundle（AC16 核心）交叉标注——verify-delivery-surface 是
        AC16 完整性的机械证据链
-- [ ] AC4: 源布局模式保留（quay 自家仍可验 plugin/loop/）——两种布局都支持
+- [x] AC4: 源布局模式保留（quay 自家仍可验 plugin/loop/）——两种布局都支持
 
 ## Definition of Done
 
@@ -55,6 +55,8 @@ orchestration/SPEC-*」），而**消费者 laid 布局是 orchestration/ + docs
 - tasks/gap-verify-delivery-surface-checks-source-layout-not-consumer-laid.md（自身文件——self-touch，2026-08-08 内层补：缺此条不满足派发资格闸 step 4.5）
 
 - plugin/scripts/verify-delivery-surface.ts（laid 布局模式）
+- plugin/test/verify-delivery-surface.test.mjs（laid 布局测试——2026-08-09 内层补）
+- plugin/scripts/quay-init.sh（铺设集加 verify-delivery-surface.ts + write_state_file 全量 laidFiles——2026-08-09 内层补，追加两半 #2/#3）
 - tasks/gap-release-excludes-plugin-bundle-agent-surface.md（AC3 交叉标注）
 - .quay/manager-inbox/archguard-20260806-033256Z.md（AC1 实证来源）
 
@@ -96,3 +98,43 @@ Linux-only 违反可移植性。修复：第 5 项移除 os-anchor 或改判据�
    等实际铺设的绝大部分。**记录与交付不一致**——与 ADR-024（裁定与其机械化检查可追溯绑定）同 territory。
 
 **这是「子代发现亲代盲区」第三实例**（管理者先在亲代查出一半、子代补上另两半）——分工价值第二个实证。
+
+## Evidence（内层实现 2026-08-09）
+
+**根因**：verify-delivery-surface.ts 的 MANIFEST 把交付物钉在 quay 源布局（plugin/scripts/…、plugin/loop/…），
+而 quay-init --loop 铺给消费者的 laid 布局是 orchestration/ + docs/analysis/ + plugin/scripts/（派生集）+
+.quay/runtime/。对任何消费方 `--surface --root <consumer>` 都查源路径 → 结构性 0/6（archguard 实证
+da0b2cbf）。另有追加两半：#2 检查本身不在 quay-init 铺设集（消费方无法自检）；#3 write_state_file 的
+laidFiles/laidCategories 硬编码只记 2 个 tick 文档，记录与交付不一致。
+
+**修复**（分步，Contract resume）：
+1. **verify-delivery-surface.ts 支持双布局**（AC1/AC4）：新增 `LAID_MANIFEST`（同六类，消费者 laid 路径：
+   .quay/config.yml + .quay/runtime/ → 机件运行时；orchestration/ + docs/analysis/ tick 文档 → 循环文档；
+   quay-launch.sh → 启动配置；session-liveness.sh + session-liveness.env → 会话拓扑；空 → 周期锚点；
+   verify-delivery-surface.ts + l1-delivery-surface-check.ts → 观测校验）。新增 `--layout source|laid|auto`
+   （默认 auto，`detectLayout` 用 `scripts/test.sh` 存在 ⇒ source，`orchestration/`+`docs/analysis/` 并存 ⇒ laid）。
+   `findRepoRoot` 同时识别消费者根（package.json + .quay/config.yml）。laid 输出加 `consumer_surface_ok=1/0`
+   使外层 `grep 'ok|PASS'` 可数。
+2. **quay-init.sh 铺设集加 verify-delivery-surface.ts**（追加两半 #2）：derive_loop_scripts (c) 显式加入，
+   消费方装后可 `--surface` 自检 laid 布局（l1-delivery-surface-check.ts 已在铺设集，同模式）。
+3. **quay-init.sh write_state_file 记录全量铺设集**（追加两半 #3）：laidFiles 从「硬编码 2 个 tick 文档」
+   改为枚举全部 laid 根（plugin/scripts、plugin/probes、orchestration、docs/analysis、.quay/config.yml、
+   .quay/quay-init-state.json、.quay/runtime、.claude/workflows、.claude/agents），逐文件 sha256；
+   laidCategories 从 `{"loop"}` 扩展为 scripts/probes/loop/runtime/workflows/agents。
+4. **AC3 交叉标注**：gap-release-excludes-plugin-bundle-agent-surface.md 增
+   `Cross-annotation (gap-verify-delivery-surface-checks-source-layout-not-consumer-laid)`——本任务是
+   AC16 判据 2 完整性的机械证据链（与 npm-pack-e2e 的 bundle_in_pack>0 成对：一个验「装得到」，一个验「铺得对、可自验」）。
+
+**实测**（本 worktree）：
+- 源布局保留：`--surface`（无 --root，bundle）→ `surface_categories_covered=6/6` + `spec_is_live=1`（AC4）。
+- 消费者 laid（mock quay-init --loop 全量 fixture）：`--surface --root <consumer>`（auto→laid）→ 6/6，exit 0（AC2）。
+- 部分消费者（archguard 形状：仅 2 个 tick 文档）：auto→laid → `surface_categories_covered=2/6`，`consumer_surface_ok=1`
+  ——不再 0/6（AC1）。
+- 测试：`plugin/test/verify-delivery-surface.test.mjs` 20/20 PASS（新增 7 条 laid 布局用例：AC1/AC2/AC4/控制/CLI/measure）。
+
+**改动文件**：
+- `plugin/scripts/verify-delivery-surface.ts` — 双布局（LAID_MANIFEST + --layout + detectLayout + findRepoRoot 消费者识别）
+- `plugin/test/verify-delivery-surface.test.mjs` — laid 布局测试（node:test，@test-group governance）
+- `plugin/scripts/quay-init.sh` — 铺设集加 verify-delivery-surface.ts；write_state_file 全量 laidFiles/laidCategories
+- `tasks/gap-release-excludes-plugin-bundle-agent-surface.md` — AC3 交叉标注
+- 本任务文件 — AC1-AC4 勾选 + 本 Evidence
