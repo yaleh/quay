@@ -402,6 +402,15 @@ export function isParked(task) {
   return PARKED_MARKER_RE.test(task.body);
 }
 
+// AC-record exclusion (SPEC-three-layer-unified-architecture §5 AC-tracking, manager AC20-AC35
+// migration): an `ac`-labelled task is a tracked acceptance-criterion record, NOT a dispatchable
+// work item — it lives in the task store for gate/ledger purposes but must not enter the ready pool
+// or pollute dispatchable_disjoint. Distinct from `fixture` (gate demo, never real work) and
+// `parked` (temporarily shelved) — an AC record is permanently non-dispatchable by kind.
+export function isAcRecord(task) {
+  return (task.labels || []).includes("ac");
+}
+
 /** Parse the `children:` frontmatter field — flow `[a, b]` or block `- a` list. Mirrors the labels
  *  parser in task-schema.ts (lenient; no YAML dep). Returns the child task-id array. */
 export function readChildren(frontmatterRaw) {
@@ -690,6 +699,7 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
     const reasons = [];
     if (isFixture(t)) reasons.push("fixture");
     if (isParked(t)) reasons.push("parked");
+    if (isAcRecord(t)) reasons.push("ac-record");
     if (notYetFlipped(t, root, gitIndex)) reasons.push("not-yet-flipped");
     if (reasons.length > 0) excluded.push({ id, reasons });
     else ready.push(id);

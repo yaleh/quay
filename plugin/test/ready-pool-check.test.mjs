@@ -123,6 +123,7 @@ test("ready pool excludes fixture, PARKED, and not-yet-flipped ready tasks", (t)
   writeTask(root, "gap-a", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
   writeTask(root, "gap-b", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
   writeTask(root, "QENG-DEMO", { status: "ready", labels: ["fixture"], body: fourArtifactBody() });
+  writeTask(root, "AC-REC", { status: "ready", labels: ["ac"], body: fourArtifactBody() });
   writeTask(root, "gap-parked", {
     status: "ready",
     labels: ["gap"],
@@ -143,6 +144,7 @@ test("ready pool excludes fixture, PARKED, and not-yet-flipped ready tasks", (t)
 
   const reasonsById = Object.fromEntries(r.excluded.map((e) => [e.id, e.reasons]));
   assert.deepEqual(reasonsById["QENG-DEMO"], ["fixture"]);
+  assert.deepEqual(reasonsById["AC-REC"], ["ac-record"], "ac-labelled AC record excluded by kind (isAcRecord, SPEC §5 AC-tracking)");
   assert.deepEqual(reasonsById["gap-parked"], ["parked"]);
   assert.ok(reasonsById["gap-merged-not-flipped"].includes("not-yet-flipped"), "merged-but-AC-unchecked ready task excluded");
 });

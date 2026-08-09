@@ -280,18 +280,21 @@ export function selfTouchCheck(taskBody, taskId) {
 // True when the task frontmatter declares the `fixture` label (block list `labels:\n  - fixture` or
 // flow list `labels: [..., fixture]`). Fixtures are gate demo tasks — never real work, never
 // dispatchable — so the ready-pool scan skips them (matching ready-pool-check.ts's isFixture).
+// `ac`-labelled AC-record tasks are also non-dispatchable by kind (matching isAcRecord) — tracked
+// for gate/ledger, excluded from the pool.
+const NON_DISPATCHABLE_LABELS = ["fixture", "ac"];
 export function isFixtureTask(raw) {
   const fm = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
   if (!fm) return false;
   const flow = fm[1].match(/^labels:\s*\[([^\]]*)\]\s*$/m);
-  if (flow) return flow[1].split(",").some((v) => v.trim().replace(/^["']|["']$/g, "") === "fixture");
+  if (flow) return flow[1].split(",").some((v) => NON_DISPATCHABLE_LABELS.includes(v.trim().replace(/^["']|["']$/g, "")));
   const lines = fm[1].split(/\r?\n/);
   const idx = lines.findIndex((l) => /^labels:\s*$/.test(l));
   if (idx < 0) return false;
   for (let i = idx + 1; i < lines.length; i++) {
     const m = lines[i].match(/^\s+-\s+(.+?)\s*$/);
     if (m) {
-      if (m[1].replace(/^["']|["']$/g, "") === "fixture") return true;
+      if (NON_DISPATCHABLE_LABELS.includes(m[1].replace(/^["']|["']$/g, ""))) return true;
     } else if (/^\S/.test(lines[i])) break; // next top-level key ends the list
   }
   return false;
