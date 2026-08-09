@@ -131,7 +131,8 @@
 #                two-dot `git diff integration develop` — the two-dot also lists integration's OWN
 #                tested files, a false positive the gate must avoid.
 #
-#   FRESHNESS GATE (gap-batch-merge-gate-reads-stale-green; gap-batch-merge-freshness-gate-ignores-scope):
+#   FRESHNESS GATE (gap-batch-merge-gate-reads-stale-green; gap-batch-merge-freshness-gate-ignores-scope;
+#                   gap-batch-merge-freshness-gate-doc-only-exemption):
 #                before ANY merge (ff or real), the helper requires a FRESH suite green — the batch-merge
 #                gate previously read ONLY `state == green` and treated a 3-hour-old green (measuring a
 #                DIFFERENT batch of commits) as a pass for THIS tree (7b1ac3a1, 2026-08-08). The gate
@@ -145,6 +146,12 @@
 #                    trust — the SCOPE axis). scope absent (legacy state) = treat as main (fail-open)
 #                  finishedAt within --freshness-window (default 3600s) of now  — the AGE axis
 #                  suite startedAt >= most-recent integration fan-in commit time — the COVERAGE axis
+#                DOC-ONLY EXEMPTION (gap-batch-merge-freshness-gate-doc-only-exemption): the COVERAGE
+#                axis is EXEMPT when every file the fan-in(s) changed after the suite started is doc-only
+#                (.md/.jsonl — `git diff --name-only <integration-tip-as-of-suite-start> <integration>`)
+#                — doc-only commits (phase-goal/SPEC/task edits) cannot change the test surface, so
+#                blocking forces a needless 17-min full-suite re-run (rounds 153/157/158). A pending
+#                change touching ANY other file type (a code file) is NOT exempt — fail-closed as before.
 #                FAILS CLOSED (nothing moved) on any violation. `--skip-freshness-gate` is the explicit
 #                opt-out for callers exercising OTHER gates in isolation; the real orchestrator
 #                invocation never passes it (the gate is ON by default — mechanical, not self-judged).
@@ -506,6 +513,41 @@ check_object_gate() {
 # OR the state file is absent. This is the TIME/SOURCE-AXIS gate, complementary to the OBJECT gate's
 # MERGE-RESULT axis (gap-batch-merge-gate-validates-tip-not-merge-result); both run before any ref moves.
 # In --dry-run this reports the would-block measure without failing (mirrors check_object_gate).
+
+# ── DOC-ONLY EXEMPTION (gap-batch-merge-freshness-gate-doc-only-exemption) ───────────────────────────
+# The COVERAGE axis fails closed when a fan-in landed on integration after the suite started — the
+# green did not test the pending tip. That cost is only justified when the pending content can CHANGE
+# THE TEST SURFACE. Doc-only commits (.md/.jsonl — phase-goal/SPEC/task edits) cannot: they touch no
+# code the suite exercises. The gate observed 3 consecutive doc-only blocks (rounds 153/157/158 —
+# manager AC35 phase-goal → orchestration/manager-phase-goal.md; MILESTONE-NNN adjudication →
+# orchestration/SPEC-goal-store.md; ongoing manager SPEC edits → orchestration/*.md), each a needless
+# 17-min full-suite re-run. pending_is_doc_only() EXEMPTS the coverage axis when every file changed
+# between the integration tip AS OF the suite start and the CURRENT integration tip is a .md/.jsonl;
+# a pending change touching ANY other file type is NOT exempt — the coverage axis fails closed exactly
+# as before (negative control, AC3).
+#
+# Returns 0 (exempt — the pending content is doc-only) or 1 (not exempt — a non-doc-only file is
+# pending; the coverage axis must fail closed).
+pending_is_doc_only() {
+  local started_epoch="$1"
+  local suite_tip="" changed non_doc
+  # The integration tip AS OF the suite start — the tree the green actually measured.
+  suite_tip="$(git -C "${repo_root}" rev-list -1 --before="${started_epoch}" "refs/heads/${integration_ref}" 2>/dev/null || true)"
+  if [ -z "${suite_tip}" ]; then
+    # No integration commit existed when the suite started — the WHOLE integration tip is pending.
+    # Diff against the git empty tree (well-known all-zeros hash) so the exemption covers this
+    # degenerate case instead of erroring.
+    suite_tip="$(git -C "${repo_root}" hash-object -t tree /dev/null 2>/dev/null || true)"
+  fi
+  changed="$(git -C "${repo_root}" diff --name-only "${suite_tip}" "refs/heads/${integration_ref}" 2>/dev/null || true)"
+  # No changed files — nothing pending, trivially doc-only (shouldn't reach here; the caller only
+  # invokes the exemption when a fan-in landed after the suite start).
+  [ -z "${changed}" ] && return 0
+  # Any changed file that is NOT a .md/.jsonl ⇒ NOT doc-only ⇒ no exemption.
+  non_doc="$(printf '%s\n' "${changed}" | grep -vE '\.(md|jsonl)$' || true)"
+  [ -z "${non_doc}" ]
+}
+
 check_freshness_gate() {
   if [ "${skip_freshness_gate}" -eq 1 ]; then
     echo "integration-batch-merge: freshness-gate SKIPPED (--skip-freshness-gate)"
@@ -619,6 +661,16 @@ print(int(ts), int(st), int(time.time()-ts))
   # COVERAGE dimension — the suite must have STARTED at/after the most recent integration fan-in.
   last_fanin="$(git -C "${repo_root}" log -1 --format=%ct "refs/heads/${integration_ref}" 2>/dev/null || true)"
   if [ -n "${last_fanin}" ] && [ "${started_epoch}" -lt "${last_fanin}" ]; then
+    # DOC-ONLY EXEMPTION (gap-batch-merge-freshness-gate-doc-only-exemption): a fan-in that landed
+    # after the suite started means the green did not test the pending tip — UNLESS the pending
+    # content is doc-only (.md/.jsonl). Doc-only commits (phase-goal/SPEC/task edits) cannot change
+    # the test surface, so exempting them avoids a needless 17-min full-suite re-run on every SPEC
+    # edit (rounds 153/157/158 — the observed doc-only blocks). A pending code file is NOT exempt.
+    if pending_is_doc_only "${started_epoch}"; then
+      echo "integration-batch-merge: freshness-gate DOC-ONLY EXEMPT — the fan-in(s) after the suite started touch only .md/.jsonl (doc-only); the green still covers the test surface — no re-run needed"
+      echo "integration-batch-merge: measure suite_freshness=${age}"
+      return 0
+    fi
     verdict="a fan-in landed on ${integration_ref} after the suite started (last fan-in ${last_fanin}s epoch > suite start ${started_epoch}s) — the green did NOT test the pending tip"
     echo "integration-batch-merge: measure suite_freshness=${age}"
     if [ "${dry_run}" -eq 1 ]; then
