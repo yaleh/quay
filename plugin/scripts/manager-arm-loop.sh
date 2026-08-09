@@ -31,6 +31,12 @@
 #     --validate       只验证「哨兵/指针规则已在文档中」，不改注册表（AC5c 文档规则检查）
 #
 # 依赖：无（纯 shell + 文件操作）。
+# ── 统一 --help（gap-scripts-sprawl：用法在前、退出 0、无业务副作用）────────────────────
+if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
+  _gap_help_lib="$(dirname "${BASH_SOURCE[0]}")/gate-script-lib.sh"
+  if [ -f "$_gap_help_lib" ]; then . "$_gap_help_lib"; tool_help "$0"; else echo "用法: bash $(basename "$0") [参数…]"; fi
+  exit 0
+fi
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

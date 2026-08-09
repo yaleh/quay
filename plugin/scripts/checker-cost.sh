@@ -43,6 +43,12 @@
 #   CHECKER_COST_TEST_DELAY_MS — sleep N ms before recording (int). The AC2 fixture reproduces the
 #                                35.8->91.2->157.0 slope deterministically with delay + load seams.
 
+# ── 统一 --help（gap-scripts-sprawl：用法在前、退出 0、无业务副作用）────────────────────
+if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
+  _gap_help_lib="$(dirname "${BASH_SOURCE[0]}")/gate-script-lib.sh"
+  if [ -f "$_gap_help_lib" ]; then . "$_gap_help_lib"; tool_help "$0"; else echo "用法: bash $(basename "$0") [参数…]"; fi
+  exit 0
+fi
 set -euo pipefail
 
 # ── self-locate (works in-repo AND installed: <workspace>/plugin/scripts/checker-cost.sh) ──────────

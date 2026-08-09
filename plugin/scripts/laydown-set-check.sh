@@ -37,6 +37,12 @@
 #                         the 8e2e49b9 merge's simplified human-only rewrite, now restored)
 # stdout (Contract measure): `laydown_set_green: green|red` (human) or a JSON object (--json)
 # exit 0 = green, 1 = red, 2 = usage error (bad --root / unknown arg)
+# ── 统一 --help（gap-scripts-sprawl：用法在前、退出 0、无业务副作用）────────────────────
+if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
+  _gap_help_lib="$(dirname "${BASH_SOURCE[0]}")/gate-script-lib.sh"
+  if [ -f "$_gap_help_lib" ]; then . "$_gap_help_lib"; tool_help "$0"; else echo "用法: bash $(basename "$0") [参数…]"; fi
+  exit 0
+fi
 set -u
 
 ROOT=""

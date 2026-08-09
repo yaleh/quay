@@ -19,6 +19,12 @@
 #       永不 pgrep -f（rule 3）。文本经 `send-keys -l` 原样发送，文本里恰好出现 "Enter"/
 #       "C-u" 这类键名不会被当成按键。
 
+# ── 统一 --help（gap-scripts-sprawl：用法在前、退出 0、无业务副作用）────────────────────
+if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
+  _gap_help_lib="$(dirname "${BASH_SOURCE[0]}")/gate-script-lib.sh"
+  if [ -f "$_gap_help_lib" ]; then . "$_gap_help_lib"; tool_help "$0"; else echo "用法: bash $(basename "$0") [参数…]"; fi
+  exit 0
+fi
 set -uo pipefail
 
 TARGET="${1:-}"
