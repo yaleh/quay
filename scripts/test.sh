@@ -336,6 +336,12 @@ run_static_checks() {
   # @static-tier change
   # @static-object orchestration/manager-loop-tick.md plugin/loop/fast-mode-loop-tick.md plugin/loop/manager-loop-tick.md plugin/loop/orchestrator-loop-tick.md
   run_checker "instrument-failure-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/instrument-failure-check.ts" --gate --root "${repo_root}"
+  echo "== outer-tick-log no-action evidence check (gap-no-action-requires-evidence-mechanical-check) =="
+  # @static-tier full
+  # The outer's `no-action` verdict must carry the five-inequality evidence with all five false.
+  # Wired into run_static_checks so every full-suite (and --static-checks) run re-measures — the
+  # enforcement must NOT depend on the outer session choosing to run it (manager 设计约束 ②).
+  run_checker "outer-tick-log-check" bash "${repo_root}/plugin/scripts/outer-tick-log-check.sh" --root "${repo_root}"
   echo "== checker-mutation check (gap-checkers-have-never-been-shown-to-fail, AC1-AC6) =="
   # The L_S instrument: mutation-test the checkers THEMSELVES, not product code. The manifest is
   # parsed from THIS function + CI (never hand-written), so a checker added here (or to a CI
