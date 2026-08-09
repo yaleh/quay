@@ -1,5 +1,16 @@
 # 快速模式 loop tick 指令
 
+> ## ⇒ 先读执行核：[`orchestration/fast-mode-tick-core.md`](fast-mode-tick-core.md)（73 行）
+>
+> **本文件是理由档案(1149 行),不是执行清单。** 每轮实际要跑的动作、必产出、硬约束、边界
+> 都在执行核里;本文件提供每一条的实测与代价。
+>
+> **这一行本身就是一条判据的产物**(`ADR-009` 第二次修订 + `AC30(b)` 三层统一架构 SPEC,
+> 2026-08-09):**凡是必须跨压缩存活的东西,必须落在锚所指向的文件里。** 执行核建于 05:5xZ,
+> 但直到 06:5xZ 之前它**不在锚的可达范围内**——只靠「我记得它存在」维持,而那种存在形式的
+> 寿命上界是下一次压缩(实证:workflow 实践死在 08-08 07:49:05 的压缩边界上,同一次压缩里
+> cron 照常触发,差别只在于 cron 是锚指向文件)。**加这一行,是把执行核从记忆搬进锚的可达范围。**
+
 > **模板参数（gap-install-rewrites-files-so-upgrade-cannot-tell-who-changed-them）**：本文件是随
 > quay 插件包分发的内层 tick 文档（模板在 `plugin/loop/fast-mode-loop-tick.md`，外层模板是
 > `plugin/loop/orchestrator-loop-tick.md`）。
