@@ -174,3 +174,38 @@ changed: AC19（人「以分支策略跑起来为主」）两条缺口核实：�
   直合 develop 而非 integration）+ integration 领先恒 0（fork_baseline 不可观测）。机制决定：
   不改 config（声明正确），让内层按文档 fan-in 合 integration，制造 integration 领先窗口验证
   fork_baseline 可分辨。AC19 判据 ①②③ 见任务体。
+
+## Evidence（内层实现 2026-08-09）
+
+**执行环境**：worktree `/home/yale/work/quay-worktrees/gap-ac19-two-line-model-actually-runs`（分支
+`task/gap-ac19-two-line-model-actually-runs`，fork 自 develop @ 2e7ccc5a）。AC3 机制修复
+（`plugin/scripts/unverified-integration-task-ids.ts` + `plugin/test/unverified-integration-task-ids.test.mjs`
++ `fast-mode-loop-tick.md` 派发步机械命令）已在 develop 落地（8665f3a9），worktree 基线自带，本内层执行
+= 核实 + 收尾取证。
+
+**scoped 门**：`bash scripts/test.sh --for-task gap-ac19-two-line-model-actually-runs --allow-thin`
+→ **exit 0**。测试 **6 pass / 0 fail / 0 cancelled / 0 skipped**（4.2s）；静态检查 0 违规
+（test-isolation 基线内、test-framework-policy PASS、task-contract strict-subset no violations、
+instrument-failure-check 5/5 families ok）。selector 解析 touches 2/6（0.33 < 0.5 判定 thin，需
+`--allow-thin`）——非代码 touches 占多数（self 任务文件、内层 fan-in 行为、loop 文档、
+manager-phase-goal 交叉标注），代码 touches（helper + 测试）已解析并全绿。
+
+**AC1-AC5 复核（前轮已勾，本轮核实无回归）**：
+- AC3 helper 纯函数 + git-fixture 端到端测试在基线上通过：test (c) 用真实未验证 id 跑
+  `integration-branch-model.ts --fork-baseline --overlaps-unverified <real ids>`——候选 touches 与
+  未验证任务相交 → stdout `integration`，disjoint 候选 → `develop`；overlap 路径 live，不再半死。
+- 派发步（fast-mode-loop-tick.md:930-943）已含 `UNVERIFIED_IDS=$(node --experimental-strip-types
+  plugin/scripts/unverified-integration-task-ids.ts --root "$(pwd)")` 机械提取 + 禁令「`--overlaps-unverified`
+  不得传空串」——AC3 (ii) 实参恒空串缺陷闭环（helper 从 `git log --oneline develop..integration` 提取，
+  即 integration-branch-model.ts:139 Contract invoke，内层无需记忆来源）。
+- AC1/AC2/AC4/AC5 证据按更正判别式复核仍成立（方向修正、integration 领先窗口、批量合回、不凑数——
+  与分叉点判别式无关）；AC3 证据已按 2026-08-08 更正判据重验（见任务体 AC3 证据块）。
+
+**两线窗口在场（本执行 snapshot，共享仓库）**：`develop..integration` = **124**（integration 领先
+develop）、`integration..develop` = 0、`git merge-base --is-ancestor integration develop` → **NO**
+（integration 不再是 develop 祖先——真实窗口在场）；integration tip 含 `inner: fan-in task/<id>` 合并。
+
+**留给外层**：本任务分支的真实 fan-in（task → integration，MERGE_TARGET）与批量合回
+（integration → develop）归外层 fan-in / verification-round 步骤（内层按派发不 merge/push）。
+外层 fan-in 本任务分支后即 AC19 判据 ①（真实合并走声明方向）的下一实例；窗口在场 ⇒ fork_baseline
+可分辨性可在外层下一轮重验。**DoD 全量门（AC1-AC4 实跑 + 完整循环 ≥1 次）留待外层**。
