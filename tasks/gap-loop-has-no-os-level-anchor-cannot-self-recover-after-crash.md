@@ -33,7 +33,7 @@ title: "THE structural blocker to the primary goal (self-evolution without a
   all three layers missing because all session-scoped). AC10: does NOT score
   (axis opened by the 29h stall, post-friction), count stays 6; priority is
   independent of pre/post-friction"
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -179,6 +179,18 @@ pre-friction 无关。**（**2026-08-06 追加，`gap-telemetry-brackets-vs-suba
 - [ ] AC1–AC7 全部勾上；AC2 实跑输出贴任务体（崩溃自动恢复）
 - [ ] OS 级 watchdog 在（不随会话死亡）；崩溃后自动恢复而非手工；三项目会话覆盖
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
+
+
+## Resolution（关闭，2026-08-09）
+
+**前提被人的裁定整体裁掉——关闭，不改写。**
+
+1. **OS 级自愈已被放弃（b6f08e1e，人原话「仅在人工启动 Claude Code 会话中手工启动 manager/outer/inner」，已记入 orchestration/manager-phase-goal.md）**：人接受「一次人工启动之后的会话生命期内，人不在场」，明确**不含崩溃后无人复活**。本任务的核心诉求（OS 级 systemd timer/crontab 崩溃自愈）即目标边界里被放弃的那一项。
+2. **配套 watchdog 早已非交付物（2026-08-06，文件头第 5 行原文，quay-init.sh 不装不调）**：本次裁定与那条同向并把它收口。
+3. **「会话内复活」的窄范围已由既有机制覆盖，不重复立**：AC20（两层 pane idle + in-flight=0 + dispatchable_disjoint>0 + 无 .halt 无 suite）本来就是会话内的量；「会话内连续性」清单（/clear 后重新武装、人机对话期间 cron 不 fire、崩溃态对账遥测括号/worktree/锁）一条不豁免；冷启动走 SPEC-cold-start-one-liner（人要手工走三会话界面）。—— 改写为「会话内复活」只会与 AC20/冷启动规格重复，不产生新能力。
+4. **status 从 ready 摘除**（manager 裁定「别让它继续挂在 ready 里」）：本任务前提已裁，继续占就绪池位置既不可执行也无意义。
+
+**遗留（不为此任务开新洞）**：崩溃后无人复活是目标的**明确边界**，不是本任务的未竟工作；若未来人把「无人干预下的持续演进」再扩展到跨会话，才需要重启本方向。
 
 ## Touches
 
