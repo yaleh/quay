@@ -120,6 +120,7 @@ resume 若中断，先跑 measure 读当前基线，不要假设已经统一
 > `--help`，交付面保持散件但界面一致（那条的 AC3 负控制条仍会把它标记为内部件不该被消费者直调）。
 
 ## Touches
+- tasks/gap-scripts-sprawl-no-uniform-cli-convention-across-57-shell-tools.md（自身：勾 AC + 贴证据）
 - plugin/scripts/*.sh（57 个文件，具体改动范围由 AC2 选定机制决定）
 - plugin/scripts/capability-catalog.sh
 - tasks/gap-shipped-ts-files-are-not-bundled-80-raw-typescript-in-the-artifact.md（AC5 交叉标注：那条管 `.ts`
