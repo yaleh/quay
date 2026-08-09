@@ -1,7 +1,9 @@
 ---
 id: gap-outer-tick-log-check-trace-window-anchored-at-log-mtime
-title: "outer-tick-log-check 的 git-trace 窗口锚定在 tick-log 自身 mtime 且前向查找——动作行自己的提交(act-then-log 顺序下在 log 写入之前)永远被排除,通过与否取决于「log 写入后是否有无关提交落地」的运气,是 phantom-red 家族"
-status: todo
+title: outer-tick-log-check 的 git-trace 窗口锚定在 tick-log 自身 mtime
+  且前向查找——动作行自己的提交(act-then-log 顺序下在 log 写入之前)永远被排除,通过与否取决于「log
+  写入后是否有无关提交落地」的运气,是 phantom-red 家族
+status: ready
 labels:
   - gap
   - defect

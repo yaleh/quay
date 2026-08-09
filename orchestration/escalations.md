@@ -525,3 +525,13 @@ resource-aware。
 不碰分支本身（去留仍归人）。这是解阻塞不是范围改变。
 
 
+
+## 2026-08-09 17:3xZ — 批量合被 freshness-gate 持续拒（round-174b 拒一次，b69266c7 注定再拒）：inner A9 允许套件运行中照常 fan-in，gate COVERAGE 轴要求 suite start ≥ 最后 integration fan-in ⇒ inner 活跃时套件永远不满足 gate
+**现象**：④ integration 领先 develop 45 commit，round-174b 17:23 绿，批量合被 FRESHNESS-GATE FAIL-CLOSED 拒（last fan-in 28ac96a3 17:22:47 > suite start 16:42:07，绿没测 pending tip）。补跑 b69266c7（17:24 起）——但 17:25 三个 inner fan-in（27f44be5/aa3cdf1b/30029245，改代码 .ts/.mjs/.sh 非 doc-only）又落在套件起跑后 ⇒ 此绿注定再拒。14:02 成功合（52 commit）是 inner 当时 idle（0 in-flight）；现在 inner 固定 cap=5 压力测试（OB-FIXEDCAP-FIRST-LOADTEST），fan-in 每 1-2 min 一条 ⇒ 无套件可满足 gate。
+**外层已尝试**：① round-174b 绿后立即 dry-run→real 批量合（被 gate 拒，正确 fail-closed）；② 误把 `full-suite-runner.ts --help`（无 --help 分支）当用法查询，实际跑出 b69266c7 真套件——巧合补上「套件必须起跑于最后 fan-in 后」的正确动作。
+**为什么超出授权**：修法是「inner A9 套件运行中暂停 fan-in」或「freshness gate 放宽（仅检查 merge 目标树）或加 inner-quiescent 前置」，都是对两线模型协调语义的改变，且 manager OB-MERGE 已在跟踪该义务——方向归 manager/人，外层不自行改 gate 或 A9。
+**选项**：
+1. **inner A9 改：套件 running 时暂停 fan-in**（fan-in 排队到 suite 绿后再放）——最直，gate 语义不变，代价 inner 吞吐下降（一个套件周期 ~40min 无新 merge）。
+2. **batch-merge 加 quiescent 前置**：先验 integration 最近 N 分钟无新 fan-in 再起跑套件（gate 侧等待，不动 A9）——外层/脚本侧，可机械执行。
+3. **接受现状**：inner 压力测试结束后自然 quiesce，届时套件可满足 gate——零改动，但 batch-merge 在 active 期持续阻塞，44+ commit 积压 develop 不前进（AC19 两线模型不完整运转）。
+**外层倾向**：选项 2（不动 inner A9，外层起跑套件前先查 quiescence），或接受选项 3 直到压力测试收尾；不建议选项 1（套件期暂停内层吞吐，与 fixed-cap 目标相悖）。

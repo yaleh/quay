@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-09T14:01:37.833Z",
+  "generatedAt": "2026-08-09T17:17:39.468Z",
   "since": null,
   "tasks": [
     {
@@ -860,10 +860,22 @@
       "startedAtMsUnreliable": false
     },
     {
+      "taskId": "gap-install-config-driven-e2e-load-flake",
+      "runId": "fm-gap-install-config-driven-e2e-load-flake-1786288568062-jd9wo6",
+      "startedAtMs": 1786288568076,
+      "startedAtMsUnreliable": false
+    },
+    {
       "taskId": "gap-install-family-tests-rotate-flakes-under-full-suite",
       "runId": "fm-gap-install-family-tests-rotate-flakes-under-full-suite-1786279440586-dcmvkq",
       "startedAtMs": 1786279440610,
       "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-last-pane-txt-has-no-writer",
+      "runId": "fm-gap-last-pane-txt-has-no-writer-1786292741044-qulp3x",
+      "startedAtMs": 1786292741061,
+      "startedAtMsUnreliable": true
     },
     {
       "taskId": "gap-merge-introduced-referenced-not-landed-manager-tick-log",
@@ -878,9 +890,21 @@
       "startedAtMsUnreliable": false
     },
     {
+      "taskId": "gap-ready-pool-worklanded-traps-stuck-work",
+      "runId": "fm-gap-ready-pool-worklanded-traps-stuck-work-1786292743310-cw436c",
+      "startedAtMs": 1786292743327,
+      "startedAtMsUnreliable": true
+    },
+    {
       "taskId": "gap-round5-red-killtimeout-sigkill-and-capfromgate-seam-under-load",
       "runId": "fm-gap-round5-red-killtimeout-sigkill-and-capfromgate-seam-under-load-1786276078559-t84bel",
       "startedAtMs": 1786276078570,
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-scripts-sprawl-no-uniform-cli-convention-across-57-shell-tools",
+      "runId": "fm-gap-scripts-sprawl-no-uniform-cli-convention-across-57-shell-tools-1786287640958-01lx2j",
+      "startedAtMs": 1786287640971,
       "startedAtMsUnreliable": false
     },
     {
@@ -892,11 +916,11 @@
   ],
   "meanMinutes": 91.36545206812654,
   "medianMinutes": 56.31883333333333,
-  "tasksPerHour": 0.7987115648845081,
+  "tasksPerHour": 0.7837944926438416,
   "serialEquivalentPerHour": 0.6567033669932598,
   "windowStart": "2026-08-02T10:29:46.000Z",
-  "windowEnd": "2026-08-09T14:01:20.502Z",
-  "windowHours": 171.52625055555555,
+  "windowEnd": "2026-08-09T17:17:12.575Z",
+  "windowHours": 174.79071527777776,
   "haltedHours": 0,
   "halted": [],
   "blocked": [
@@ -2272,6 +2296,14 @@
       "reconcileReason": "worktree-gone-and-no-process"
     },
     {
+      "taskId": "gap-install-config-driven-e2e-load-flake",
+      "runId": "fm-gap-install-config-driven-e2e-load-flake-1786288568062-jd9wo6",
+      "startedAtMs": 1786288568076,
+      "startedAtMsUnreliable": false,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process"
+    },
+    {
       "taskId": "gap-install-family-tests-rotate-flakes-under-full-suite",
       "runId": "fm-gap-install-family-tests-rotate-flakes-under-full-suite-1786279440586-dcmvkq",
       "startedAtMs": 1786279440610,
@@ -2304,6 +2336,14 @@
       "reconcileReason": "worktree-gone-and-no-process"
     },
     {
+      "taskId": "gap-scripts-sprawl-no-uniform-cli-convention-across-57-shell-tools",
+      "runId": "fm-gap-scripts-sprawl-no-uniform-cli-convention-across-57-shell-tools-1786287640958-01lx2j",
+      "startedAtMs": 1786287640971,
+      "startedAtMsUnreliable": false,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process"
+    },
+    {
       "taskId": "gap-serial-phase-install-test-residue-dependency",
       "runId": "fm-gap-serial-phase-install-test-residue-dependency-1786276078891-wc7ozf",
       "startedAtMs": 1786276078903,
@@ -2312,7 +2352,7 @@
       "reconcileReason": "worktree-gone-and-no-process"
     }
   ],
-  "realInFlight": 0,
+  "realInFlight": 2,
   "closedButLive": [],
-  "occupiedSlots": 0
+  "occupiedSlots": 2
 }
