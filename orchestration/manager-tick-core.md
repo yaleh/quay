@@ -18,6 +18,7 @@
 | # | 动作 | 判据 / 陷阱 |
 |---|---|---|
 | A1 | `python3 orchestration/manager-anchor-check.py` | 校的是**文件**,不是活 cron |
+| A0 | `node --experimental-strip-types plugin/scripts/quay-session.ts manager-tick-readings` | **优先用这条,不再逐条手打**(2026-08-09 10:3x 查出:该脚本已存在,08-07 建成,覆盖 A1/A4/A5/A9-A11 且多出 `resource.*`(CPU/load/内存,此前从未读)与三项目 `outer.ticklog`(此前只读 quay 自己的);18 处 `catch{}` 静默吞错,读数为空时不代表"无异常",仅代表"读取失败") |
 | A2 | `GATE=$(bash plugin/scripts/cap-from-gate.sh)` → 从中取 `CAP` → `slot-refill.sh --cap "$CAP"` | **同一 tick 内 cap 只取一次**;`floor` 必须与该 cap 同源(§2.4b) |
 | A3 | in-flight = `tmux capture-pane -t quay-0:inner \| grep -cE '^\s+◯ '` | **不用 `slot-refill` 的 `in_flight_count`——那是入参不是测量** |
 | A4 | 两层忙闲 = pane 尾部 `esc to interrupt` | pane-only;`LOOP_MIN=0` 才看得到全部事件 |
