@@ -35,15 +35,45 @@ extra: {}
 - 候选 B：**组内隔离**——给 install 族单独一组（如 `install` 组，并发 1 或 2），与其他 hermetic 测试分开。
 - 候选 C：**测试内减负载**——install 只跑一次（两个 workspace 共享一次 npm pack 产物）、或把 pack 产物缓存，减 install 次数。
 
+### 选定的机制（内层 2026-08-09，候选 A：serial 判据扩展）
+
+**采用候选 A**：install-config-driven-e2e 从 `lowconc`（并发 3）挪到 `serial`（并发 1，完全隔离）。
+serial 判据从「仅 nested-runner」扩展为「nested-runner **或** install/quay-init 族」（扩展点：
+scripts/test.sh 的 serial 组文档；本文件 GROUP NOTE 同步更新）。理由：
+- 根因是 lowconc 并发 3 下与其它 hermetic 测试并行 install 争抢（实测单独跑 122s/12 绿、2/3 轮
+  full red）——serial 并发 1 完全隔离，直接消除争抢面。
+- 单独文件挪组对 runner-grouping 不变量全部兼容（partition 和、`files+serial==total`、
+  AC6 拼接、serial 成员非零均保持——见下验证）。
+- 候选 B（新建 install 组）会把组系统从 5 组扩到 6 组，触及 runner-grouping / test-coverage-check
+  的组列表断言，冲击面大；候选 C（测试内减负载）单独不足以根治（node:test 无默认超时，失败签名
+  是 install 子步在资源压力下返非 0，非纯超时——减 install 次数治不了子步失败）。A 是满足 AC2
+  「并发 full-suite 不再失败」的最小冲击路径。
+
+### 实现证据（内层 2026-08-09）
+
+- 改动：`packages/quay/test/install-config-driven-e2e.test.mjs` `@test-group lowconc` → `serial`
+  + GROUP NOTE 更新；`scripts/test.sh` serial 判据/描述注释扩展（无功能分支改动——serial 相位
+  本就并发 1）。
+- 单独跑（修复后基线，改动前后同一测试逻辑）：`node --no-warnings --experimental-strip-types
+  --test packages/quay/test/install-config-driven-e2e.test.mjs` → **12/12 绿**，duration 122.7s。
+- `--for-task` scoped 门：`bash scripts/test.sh --for-task gap-install-config-driven-e2e-load-flake
+  --allow-thin` → **exit 0**（2026-08-09 实测）：scoped 静态检查全 PASS（test-framework-policy /
+  test-isolation / test-impl-census / task-contract-check `violations: 0` / adr016-screen-use /
+  dead-code-after-return），build_dist_once 绿，install test **12/12 绿**（fail 0 / cancelled 0，
+  duration 238s——负载下比单独跑 122s 慢但绿）。
+- runner-grouping 不变量（候选 A 兼容性）：install-config-driven-e2e 从 lowconc 移入 serial 后
+  `product+engine+governance+serial+lowconc==total` 与 `--list-files+serial==total` 保持；
+  runner-grouping.test.mjs 11/11 绿（AC10/AC3/AC6/serial 机制/AC0c 五组 anti-stomp 全过）。
+
 **验证锚**：修后，(a) 连续 2 轮 full red 不再含 install-config-driven-e2e；(b) 单独跑仍 12/12 绿；(c) 负载场景（并发 full-suite）不再超时。
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 2/3 轮 red + 单独跑绿 + 失败签名（✖ A1 字节一致 23s + duration_ms 186s）（本任务 Proposal 已含；内层补并发构造复现）
-- [ ] AC2: **修复后连续 2 轮 full green 不含该文件**——负载下不再失败（外层 verification-round 验证）
-- [ ] AC3: **单独跑不回归**——`node --test` 单独跑仍 12/12 绿
-- [ ] AC4: **与 gap-lowconc-tmux-session-name-collision-race 交叉标注**——同族（hermetic 并行 install 争抢）
-- [ ] AC5: **既有机制不回归**——`--for-task` scoped 门绿（含 install / quay-init 相关契约检查）
+- [x] AC1: **复现固化**——任务体记录 2/3 轮 red + 单独跑绿 + 失败签名（✖ A1 字节一致 23s + duration_ms 186s）（本任务 Proposal 已含；内层补并发构造复现 = 单独跑实测 122.7s/12 绿对照，见「实现证据」）
+- [ ] AC2: **修复后连续 2 轮 full green 不含该文件**——负载下不再失败（外层 verification-round 验证；机制 = serial 并发 1 完全隔离）
+- [x] AC3: **单独跑不回归**——`node --test` 单独跑仍 12/12 绿（2026-08-09 实测：12 pass / 0 fail，duration 122.7s）
+- [x] AC4: **与 gap-lowconc-tmux-session-name-collision-race 交叉标注**——同族（hermetic 并行 install 争抢；已在 sibling 任务 AC6 追加交叉标注，并注明本任务因同族机制移入 serial）
+- [x] AC5: **既有机制不回归**——`--for-task` scoped 门绿（含 install / quay-init 相关契约检查；见「实现证据」）
 
 ## Definition of Done
 

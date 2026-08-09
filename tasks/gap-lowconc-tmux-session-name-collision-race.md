@@ -88,7 +88,10 @@ resume 若中断，先跑 measure 读 AC4 断言措辞 + AC3 独占 cc3 失败�
 - [ ] AC4: **全栈并发 8 绿**——lowconc 相位 2 条失败消、三趟 fail 0 / cancelled 0
 - [x] AC5: **test.sh 注释改名**——`measure-suite-reporter-wired.test.mjs` → `measure-suite-reporter.test.mjs`
 - [x] AC6: 与 gap-session-liveness-tail-capped-split（同轮同相位、报告器坐实、独占窗口共享）、
-      gap-serial-group-recompose-nested-runner（4a5b1413 引入回退的源头）交叉标注
+      gap-serial-group-recompose-nested-runner（4a5b1413 引入回退的源头）、
+      gap-install-config-driven-e2e-load-flake（AC4 交叉标注，2026-08-09：同族——hermetic
+      但并行 install 争抢；install-config-driven-e2e 在 lowconc cc3 下 2/3 轮 red，已因同族
+      机制移入 serial 并发 1 相位）交叉标注
 
 ## Definition of Done
 
