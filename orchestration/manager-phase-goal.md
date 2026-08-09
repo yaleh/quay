@@ -186,6 +186,43 @@ outer 的 `1b` 收尾例程标着「强制/每 tick」却**静默 8.5 小时**�
 
 **立此条的实测依据**:身份绑错已实际发生(`session-liveness` 曾盯 outer 自己的 pid 而非 inner)。
 
+## 活跃 AC 的判据命令（执行面 —— 与理由分开，2026-08-09 07:4xZ）
+
+**这一节存在的理由**：实测 AC28-35 的 12 条子判据里 **7 条今晚每轮都在用命令判**，
+而那些命令在本文件出现 1 次、在执行核出现 1 次——**它们活在我每轮敲的 bash 里**。
+**判据在跑、跑得对、但载体是上下文**：与 workflow 静默 21.5 小时同形，压缩一次就只剩散文。
+本节把命令从 bash 搬到 AC 旁边。**下面每条都可直接复制执行。**
+
+| AC | 判据命令 | 通过条件 |
+|---|---|---|
+| AC29(a) | `for f in manager orchestrator fast-mode; do grep -c 'meta-cc' orchestration/$f-tick-core.md; done` | 三个数均 ≥1 |
+| AC29(b) | `grep -cE '已停用｜已替代｜是缺陷' orchestration/manager-tick-log.md` | ≥1（且三层各自的账本同理） |
+| AC30(a) | `for f in manager orchestrator fast-mode; do wc -l < orchestration/$f-tick-core.md; done` | 三个数均 ≤80 |
+| AC30(b) | `head -8 orchestration/manager-loop-tick.md \| grep -c manager-tick-core`（outer/inner 同形） | 三处均 =1 |
+| AC31 | `git rev-list --count integration..develop` | =0 |
+| AC32(a) | `for f in manager orchestrator fast-mode; do grep -c '\.halt' orchestration/$f-tick-core.md; done` | 三个数均 ≥1 |
+| AC33(c) | `bash plugin/scripts/closure-lag-check.sh --json` | `closure_pass_last_run` 非 null |
+| AC35 | `grep -l 'SPEC-three-layer-unified-architecture' tasks/*.md \| wc -l` + `grep -c 'SPEC P0' orchestration/tick-log.md` | 两者之和 ≥1（每条 SPEC 项至少一个载体） |
+
+**仍不可机械判定的 5 条（fail-closed，必须持续可见，不得用措辞掩盖）**：
+
+| AC | 为什么还不可跑 |
+|---|---|
+| **AC28（本阶段主判据）** | 「下一轮 tick 内」缺机械定义；今晚三次「实证」全是人工观察。**主判据没有可跑判据，这件事不该被散文盖住。** |
+| AC30(c) | 并行对照轮数无计数载体 |
+| AC32(b) | 「组合判据已被正确分类」——分类结论是判断，不是读数 |
+| AC34 | 未开始 |
+| AC29(b) 的三层版 | manager 已触发，outer/inner 的账本判定词尚无固定位置 |
+
+**下一步（载体迁移）的前置**：把 AC 迁入 quay 任务 store 用 gate 引擎跑，需要一个
+**AC 记录的排除类**，否则 16 条记录会污染派发池与 `dispatchable_disjoint` 读数。
+现有可用形态只有两个，且都语义错位：`label: fixture`（说它是测试夹具）与
+`**PARKED` body 标记（说它临时搁置）。**正确做法是新增一个排除类，那是产品代码，归外层。**
+⇒ **在排除类落地前不创建那 16 条记录**——用一个语义谎言换早一步落地，
+会同时污染我每轮依赖的池读数，并制造「机制建好但语义错位」的新实例。
+
+---
+
 ### AC35（机制·工作路径归属）：每条 SPEC 项都必须有载体,且载体可机械核对
 
 **立此条的触发**:人 2026-08-09 07:3xZ 问「现在的任务都由 outer 排进 pool、inner 执行,
