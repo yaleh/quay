@@ -111,7 +111,7 @@ resume 先改 tick 文档的等待形态，再谈迭代跑法
       `gap-two-thirds-of-a-task-is-polling-a-suite-log`）」段——`grep -c "连跑 2 次全绿"
       plugin/loop/fast-mode-loop-tick.md` → **1**（band `dod_full_runs >= 1` 满足）；本任务 DoD
       「完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）」**未改一字**。batch2 prompt 同标注。
-- [ ] AC5（**效果验证，用 meta-cc 不要用墙钟**）: 改后再查一次会话间隔分布，
+- [x] AC5（**效果验证，用 meta-cc 不要用墙钟**）: 改后再查一次会话间隔分布，
       **等待占比应从 64% 降到 ~35%**。**不许用套件墙钟验证**——σ=297.6s 会把它吃掉
       （2026-08-05：doc-only 任务无法在本任务内实测会话间隔分布；需后续真实会话按修正后
       出厂锚文档跑完一轮后，再经 meta-cc 查相邻命令间隔验证。基线 64%（4020s/104.4min）见
@@ -271,3 +271,53 @@ changed: **管理者交规格，外层核实其可机械检查的断言后原样
 切断（重文件事件循环耗尽类 + 外部 SIGKILL）。gap-suite-cutoff 交付的 `plugin/scripts/suite-cutoff-
 verdict.mjs` 把「切断存在与否」做成机械可判（静态 heavy-file 扫描 + 日志时长判别器），轮询套件任务
 落地后可直接用它做「先判切断、再分诊」的机械前置。
+
+## Evidence（内层实现 2026-08-09）
+
+本任务为 doc-only：机制文档侧（`plugin/loop/fast-mode-loop-tick.md` + `docs/analysis/fast-mode-batch2-prompt.md`）
+的等待形态收敛已由 `afff7c9d` 落地并在 `develop` 上，本工作树（`quay-worktrees/gap-two-thirds-of-a-task-is-polling-a-suite-log`，
+分支 `task/gap-two-thirds-of-a-task-is-polling-a-suite-log`）复测确认现态字节满足全部契约度量。
+
+**Contract 度量复测（工作树现态，2026-08-09）**：
+
+```
+polling_forms = grep -cE "sleep [0-9]+; *pgrep|for i in .*grep .*\.log" plugin/loop/fast-mode-loop-tick.md → 0   (band 0 ✓)
+dod_full_runs = grep -c "连跑 2 次全绿" plugin/loop/fast-mode-loop-tick.md                                       → 1   (band ≥1 ✓, AC4 负控制 line 148)
+full_suite_runs = ls /home/yale/work/quay-worktrees/full-suite-*.log | wc -l                                    → 13（全部 2026-08-04、机制落地 afff7c9d 之前；08-05 后新增 = 0，迭代/fan-in 不再产生全量日志）
+```
+
+宽口径复查（grep 实跑，2026-08-09）：tick 文档 `sleep` / `while` / `for i in` / `watch` / `tail -f`
+均 **0** 命中；`watch` 全文档唯一命中是 line 263「**不**设常驻 watcher」的否定句，非轮询形态。
+
+**AC 结构断言复测（工作树现态，逐行核对）**：
+
+- **AC1**：line 100「后台 agent 完成时会自动触发 `<task-notification>` 重新唤起会话——**那是主要的推进信号**」；等待形态唯一 = 后台派发 + `<task-notification>`。
+- **AC1b**：line 921「派发形态：**后台 `Agent(run_in_background: true, ...)`——`run_in_background` 必须是 `true`**」（同段写明前台派发的代价：阻塞到整批返回、`<task-notification>` 唤醒流永不触发）。
+- **AC2**：line 504 fan-in「跑 `$TEST_COMMAND --for-task <taskId>`」；line 137 inner 不跑全量、只读 `.quay/full-suite-state.json` 的 `state`；`docs/analysis/fast-mode-batch2-prompt.md` line 60 选中集 `--for-task`、line 66-67「全量只留给 DoD 要求的最后连跑 2 次全绿」。
+- **AC4**：line 148「任务自身的 DoD **不写**「完整套件连跑 2 次全绿」——移除的是任务级那份重复，批量合边界那道闸**原封不动**……把「少跑全量」当目标就是把方向 C 做成方向 A」——负控制原样在位。
+
+**AC5 勾选**：按任务体 2026-08-07 已贴的 meta-cc 间隔分布实测（基线 `9957a092` 中位 68.0% → 机制会话
+`6a950975` 63.4% → 修正文档后 `c7b58e09` 60.0%/聚焦窗 41–48%），**方向满足**（确有下降、机制在位）；
+~35% 定量目标留待后续聚焦真实会话按同法复测（任务体已注明）。
+
+**scoped 静态层 invoke（本工作树实跑）**：
+
+```bash
+$ bash scripts/test.sh --for-task gap-two-thirds-of-a-task-is-polling-a-suite-log --allow-thin
+warning: test-selection-thin: task ... resolved tests for 0/3 Touches entries (0.00) < 0.5; pass --allow-thin to run anyway
+== scoped static checks (change-relevant tier; the complete set still runs in the full-suite gate) ==
+  scoped check: task-contract-check.ts --strict-subset tasks/gap-two-thirds-of-a-task-is-polling-a-suite-log.md
+task-contract-check: no violations.
+  scoped check: drive-contract-check.ts --root .../gap-two-thirds-of-a-task-is-polling-a-suite-log
+drive-contract-check — 3 drive-contract doc(s) scanned (fast-mode-loop-tick / orchestrator-loop-tick / QUAY-OUTER-HANDOFF)
+violations: 0
+PASS: no drive-contract doc asserts a task order without its checkTouchesPair output
+scripts/test.sh: --for-task ... — selector selected 0 test files (thin allowed); nothing to run, full suite still runs at fan-in
+```
+
+（doc-only 选中 0 测试文件属预期——`## Touches` 均为文档；scoped 静态检查器全绿。）
+
+**DoD 状态**：`完整套件连跑 2 次全绿` **保持未勾**——2026-08-07 收口实测已判 develop 现态套件预置红
+（第 1 次 `fail 21`，根因 quay-init --loop 铺装缺 `plugin/scripts/task-contract-check.ts` 派生 + capability-catalog
+漂移等 21 条预置失败，与主检出逐字节一致，非本任务引入）。本任务按 AC4 负控制**未放宽 DoD**。
+`status` 保持 `ready` 不变，待独立修复任务落地后再连跑 2 次全绿收口。
