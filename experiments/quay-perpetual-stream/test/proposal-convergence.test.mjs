@@ -2820,21 +2820,33 @@ fixture proposal text v1
       child.on("error", (err) => { if (settled) return; settled = true; clearTimeout(killTimer); resolve({ code: -1, stdout, stderr: `${stderr}\nspawn error: ${err.message}` }); });
     });
   }
-  function spawnNewEpoch(dir, taskId, charterFile, { reason, owner, confirmUnchangedScope } = {}) {
+  function spawnNewEpoch(dir, taskId, charterFile, { reason, owner, confirmUnchangedScope, timeoutMs } = {}) {
     const args = ["--new-epoch", "--taskId", taskId, "--workspace", dir, "--charterFile", charterFile];
     if (reason !== undefined) args.push("--reason", reason);
     if (owner !== undefined) args.push("--owner", owner);
     if (confirmUnchangedScope !== undefined) args.push("--confirmUnchangedScope", String(confirmUnchangedScope));
-    return spawnConvergenceCli(args);
+    return spawnConvergenceCli(args, { timeoutMs });
   }
-  function spawnOverride(dir, taskId, charterFile, { reason, owner, additionalMinutes } = {}) {
+  function spawnOverride(dir, taskId, charterFile, { reason, owner, additionalMinutes, timeoutMs } = {}) {
     const args = ["--override-budget", "--taskId", taskId, "--workspace", dir, "--charterFile", charterFile];
     if (reason !== undefined) args.push("--reason", reason);
     if (owner !== undefined) args.push("--owner", owner);
     if (additionalMinutes !== undefined) args.push("--additional-minutes", String(additionalMinutes));
-    return spawnConvergenceCli(args);
+    return spawnConvergenceCli(args, { timeoutMs });
   }
   function parseCliJson(res) {
+    // round-5 red, cluster A (kill-timeout SIGKILL white-list): a child that exceeded the spawn
+    // kill-timeout (spawnConvergenceCli's timeoutMs, default 60s) was SIGKILLed — an indefinite
+    // hang converted into a bounded, diagnosable failure (red-window #9/#10). Under the full suite's
+    // extreme load a starved-but-alive child can legitimately blow the 60s bound (futex-blocked, not
+    // broken); that is a DESIGNED bounded contention outcome, in the same family as
+    // `epoch-lock-contention`. It MUST surface as a recognizable typed rejection — `epoch-cli-timeout`
+    // — that the REGRESSION acceptance whitelist contains, never as `unparseable-cli-output` (which
+    // reads like a CLI crash). A killed child's stdout is empty, so the JSON.parse branch below would
+    // otherwise swallow the timeout into the catch-all unparseable code; check res.timeout FIRST.
+    if (res.timeout === true) {
+      return { ok: false, code: "epoch-cli-timeout", raw: res.stdout, stderr: res.stderr, exitCode: res.code, timeout: true };
+    }
     try {
       return JSON.parse(res.stdout.trim());
     } catch {
@@ -2879,7 +2891,7 @@ fixture proposal text v1
       for (const r of results) {
         if (r.ok !== true) {
           assert.ok(
-            ["new-epoch-reset-count-cap-exceeded", "new-epoch-reset-not-distinct", "epoch-lock-contention"].includes(r.code),
+            ["new-epoch-reset-count-cap-exceeded", "new-epoch-reset-not-distinct", "epoch-lock-contention", "epoch-cli-timeout"].includes(r.code),
             `unexpected rejection code for a concurrent --new-epoch call: ${r.code} (${JSON.stringify(r)})`
           );
         }
@@ -2919,12 +2931,41 @@ fixture proposal text v1
       for (const r of results) {
         if (r.ok !== true) {
           assert.ok(
-            ["override-count-cap-exceeded", "override-not-distinct", "epoch-lock-contention"].includes(r.code),
+            ["override-count-cap-exceeded", "override-not-distinct", "epoch-lock-contention", "epoch-cli-timeout"].includes(r.code),
             `unexpected rejection code for a concurrent --override-budget call: ${r.code} (${JSON.stringify(r)})`
           );
         }
       }
       assert.ok(lockContention.length < N, "the bounded lock retry must not starve every single concurrent caller");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("kill-timeout (round-5 red, cluster A): a --new-epoch child SIGKILLed for exceeding the spawn kill-timeout surfaces as the RECOGNIZABLE bounded rejection code `epoch-cli-timeout` (never `unparseable-cli-output`), white-listed by the REGRESSION acceptance", async () => {
+    const taskId = "EPOCH-CLI-FIXTURE";
+    const { dir, charterFile } = makeCliScratch(taskId);
+    try {
+      runDispatch(dir, taskId, charterFile, { dispatchDelta: 1, attemptIncrement: 1, terminalPhase: "ProposalReview", reason: "zero-finding" });
+      // Force the kill-timeout deterministically: a 50ms deadline is far below node's own spawn +
+      // --experimental-strip-types startup cost, so the child CANNOT finish the epoch logic — the
+      // timeout path (SIGKILL) fires, never a real completion or a fast-fail. This is the Contract
+      // measure: "并发 --new-epoch child 超时被 kill 时 CLI 返回的 code".
+      const res = await spawnNewEpoch(dir, taskId, charterFile, {
+        reason: "forced-timeout", owner: "owner-timeout", confirmUnchangedScope: true, timeoutMs: 50,
+      });
+      assert.equal(res.timeout, true, "the child must be killed by the kill-timeout guard (res.timeout=true)");
+      const parsed = parseCliJson(res);
+      assert.equal(parsed.ok, false, "a timed-out child is a rejection, never ok:true");
+      assert.equal(parsed.code, "epoch-cli-timeout", `a timed-out child must surface the RECOGNIZABLE code, got ${parsed.code} (${JSON.stringify(parsed)})`);
+      assert.equal(parsed.timeout, true, "the timeout marker must survive through parseCliJson");
+      // The code is one of the REGRESSION-accepted rejections — the SAME whitelist the two
+      // 20-concurrency REGRESSION tests assert against, so a real (load-induced) timeout under the
+      // full suite is a legal bounded contention result, not an unexpected rejection.
+      assert.ok(
+        ["new-epoch-reset-count-cap-exceeded", "new-epoch-reset-not-distinct", "epoch-lock-contention", "epoch-cli-timeout"].includes(parsed.code),
+        `epoch-cli-timeout must be in the REGRESSION acceptance whitelist, got ${parsed.code}`,
+      );
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

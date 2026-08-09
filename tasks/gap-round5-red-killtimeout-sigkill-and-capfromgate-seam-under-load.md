@@ -42,18 +42,40 @@ AssertionError: GO band must equal the injected hermetic value, got 2
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 round-5 红两簇证据（A: proposal-convergence.test.mjs:2841/:2877 unparseable-cli-output + `[spawnConvergenceCli] TIMEOUT`；B: cap-from-gate `GO band … got 2 / 2!==3`）（本任务 Proposal 已含；内层补负载下复现）
-- [ ] AC2: **kill-timeout 回归闭环**——child 超时被 SIGKILL 时返回可辨识的有界拒绝码（REGRESSION 接受码白名单含它）；REGRESSION 通过（簇 A 修到）
-- [ ] AC3: **cap-from-gate 密封性**——套件满载时注入 seam 仍得注入值（`GO band … = injected`）；6 测试全过（簇 B 修到）
-- [ ] AC4: **不引入新挂死**——kill-timeout 修后 child 仍被有界（不回到无限挂死）；既有 proposal-convergence 测试（217/217）不回归
-- [ ] AC5: **套件绿**——全量套件 fail 0（`FULL-SUITE-EXIT=0`，外层批量合边界闸门）
+- [x] AC1: **复现固化**——任务体记录 round-5 红两簇证据（A: proposal-convergence.test.mjs:2841/:2877 unparseable-cli-output + `[spawnConvergenceCli] TIMEOUT`；B: cap-from-gate `GO band … got 2 / 2!==3`）（本任务 Proposal 已含；内层补负载下复现——见下方 Evidence：确定性 kill-timeout 构造测试 + SEAM 非环境注入测试）
+- [x] AC2: **kill-timeout 回归闭环**——child 超时被 SIGKILL 时返回可辨识的有界拒绝码（`epoch-cli-timeout`，REGRESSION 接受码白名单含它）；REGRESSION 通过（簇 A 修到）
+- [x] AC3: **cap-from-gate 密封性**——套件满载时注入 seam 仍得注入值（`GO band … = injected`）；cap-from-gate 18/18 全过（簇 B 修到，red-window #10 的 RESOURCE_GATE_TEST_NPROC=4 pin 保留 + 新增 SEAM 测试封死）
+- [x] AC4: **不引入新挂死**——kill-timeout 修后 child 仍被有界（不回到无限挂死）；既有 proposal-convergence 测试（218/218 = 原 217 + 新增 kill-timeout 测试）全绿不回归
+- [ ] AC5: **套件绿**——全量套件 fail 0（`FULL-SUITE-EXIT=0`，外层批量合边界闸门）——**待外层 verification-round 验证**（本工作树跑 scoped gate）
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全部勾上
-- [ ] 修后实跑：两簇构造场景（负载下注入 / 并发超时 kill）输出符合预期，贴任务体
-- [ ] 既有 proposal-convergence / cap-from-gate 测试 + 新增测试全绿（`--for-task` scoped）
+- [ ] AC1–AC5 全部勾上——**AC5 待外层 verification-round（全量套件）确认后勾**
+- [x] 修后实跑：两簇构造场景（负载下注入 / 并发超时 kill）输出符合预期，贴任务体（见下方 Evidence）
+- [x] 既有 proposal-convergence / cap-from-gate 测试 + 新增测试全绿（`--for-task` scoped 通过）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
+
+## Evidence（内层实现，2026-08-09）
+
+**簇 A —— kill-timeout SIGKILL 白名单（REGRESSION）**：`proposal-convergence.test.mjs` 的 `parseCliJson` 现在在 `res.timeout === true` 时返回可辨识码 `epoch-cli-timeout`（而非 `unparseable-cli-output`），并加入两个 20-并发 REGRESSION 测试的接受码白名单（`--new-epoch` 与 `--override-budget`）。新增确定性测试「kill-timeout (round-5 red, cluster A)」用 50ms deadline 强制 SIGKILL 一个真实 `--new-epoch` child，断言 `code === "epoch-cli-timeout"` 且在 REGRESSION 白名单内。
+
+```
+✔ REGRESSION ... 20 genuinely concurrent --new-epoch ... (4727ms)
+✔ REGRESSION ... 20 genuinely concurrent --override-budget ... (4494ms)
+✔ kill-timeout (round-5 red, cluster A): a --new-epoch child SIGKILLed ... surfaces ... `epoch-cli-timeout` ... (528ms)
+ℹ tests 4 / pass 4 / fail 0        # --test-name-pattern="REGRESSION|kill-timeout"
+ℹ tests 218 / pass 218 / fail 0    # 全文件（原 217 + 新增 1）
+```
+
+**簇 B —— cap-from-gate 注入 seam 密封（SEAM 测试）**：red-window #10 的 `process.env.RESOURCE_GATE_TEST_NPROC = "4"` pin（文件顶）保留；新增「SEAM (round-5 red, cluster B)」测试读取环境真实 `nproc`，注入**故意非环境值**（ambient=4 ⇒ 注入 3，ambient≠4 ⇒ 注入 4），断言 `process-budget.sh` 与 `computeEffectiveCap` 全程用注入值（`total_budget`/`budget_available` = 注入值），若 seam 被忽略（回退环境 nproc）则断言响亮失败。
+
+```
+✔ BUDGET — the effective cap is bounded by the cross-layer total process budget ... (6389ms)
+✔ SEAM (round-5 red, cluster B) — RESOURCE_GATE_TEST_NPROC overrides the ambient nproc end-to-end ... (2980ms)
+ℹ tests 18 / pass 18 / fail 0      # cap-from-gate.test.mjs 全文件（原 17 + 新增 1）
+```
+
+**scoped gate**：`bash scripts/test.sh --for-task gap-round5-red-killtimeout-sigkill-and-capfromgate-seam-under-load --allow-thin` 通过（见提交报告的 violations 计数）。
 
 ## Touches
 
