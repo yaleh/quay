@@ -20,7 +20,7 @@ checklist 执行。
 | # | 动作 | 判据 / 陷阱 |
 |---|---|---|
 | A1 | `bash plugin/scripts/monitor-mount-check.sh --json` | 两判据缺一不可:`mounted` + `targetRoot`==本仓根(`targetOk`);挂错目标与挂对了从外面一模一样 (src:311) |
-| A2 | `pgrep -af 'suite-state-trigger.ts --monitor'` | 套件触发者 Monitor 在不在;排除 pgrep 自己那一行 (src:1072) |
+| A2 | `pgrep -af 'suite-state-trigger.ts --monitor'` + **套件链心跳**(manager 2026-08-09 定向):读 `.quay/suite-chain-heartbeat.json`(`runId`/`phase`/`ts`) | 套件触发者 Monitor 在不在;排除 pgrep 自己那一行 (src:1072)。**launch→poll→merge 链由后台 Bash/subagent 跑,本 tick 只监督心跳**——`ts` 距今 >3 个 tick 周期 ⇒ 重新武装(起新后台链),**不手动重跑整条链** (src:1072, manager 2026-08-09: 确定性控制流不占 tick 注意力) |
 | A3 | 三项目 `.halt` 存在性 + 内容 + **最后提交时距**(quay / archguard / meta-cc) | 每 tick 必报——「暂停后忘了」的唯一防线 (src:555)。**组合判据(SPEC 2.8)**:`无 .halt` **且** 长期无产出(>24h)⇒ **未标记的停摆**,必须升级——只读不判会稳定产生「看见但没发现」(与 manager A5 同形) |
 | A4 | 观察块:`capture-pane` → `.quay/last-pane.txt`、`git log -10`、`git status --short`、`fast-mode-telemetry --report --json`、`task-status-drift-check`(含 `--stranded`)、`batch2-queue-state.md` | 只读不动手 (src:569) |
 | A5 | `ls .quay/manager-inbox/`（**列目录本身，不依赖任何 unread 计数器**——gap-inbox-counter-disconnected-from-files：counter 曾报 delivered=0 但目录实有 6 封，沉默失败） | 判据：**目录非空 ⇒ 逐条进决策**，不看 counter；`delivered`（写进目录）≠ `consumed`（读过+回执），无回执机制则 delivered>0 即报（不吞） (src:580) |
