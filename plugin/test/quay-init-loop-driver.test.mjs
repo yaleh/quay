@@ -1,10 +1,15 @@
-// @test-group lowconc
-// GROUP NOTE (gap-serial-group-recompose-nested-runner-criterion): routed to `lowconc`, NOT `serial`.
-// The serial group's ONLY criterion is nested-runner (a file that spawns its own worker-pool
-// sub-suites via `node --test` / test.sh --for-task, see fast-mode-loop-tick.md). This file is
-// load-sensitive (each --loop test spawns a real quay-init.sh → python3 children) but is NOT a
-// nested runner — it does not spawn its own worker-pool sub-suite. Low-load/timing reasons go to
-// lowconc, not serial.
+// @test-group serial
+// @load-sensitive heavy
+// KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — real-install e2e:
+// each --loop test spawns a real quay-init.sh → python3 children. The install/quay-init family
+// rotated flakes across groups under full-suite load, so the whole family is consolidated into the
+// concurrency-1 serial phase (gap-install-family-tests-rotate-flakes-under-full-suite).
+// GROUP NOTE (gap-serial-group-recompose-nested-runner-criterion → gap-install-family-tests-rotate-
+// flakes-under-full-suite): routed to `serial`, not `lowconc`. The old criterion routed
+// load-sensitive-but-not-nested files to lowconc; the family then rotated flakes across groups under
+// full-suite load, so the serial criterion was extended to admit the install/quay-init family's
+// real-install e2e and the family was consolidated into the concurrency-1 serial phase. The laydown
+// template (one real install per file process) keeps each file's serial cost bounded.
 // quay-init-loop-driver.test.mjs — split out of quay-init-loop.test.mjs (2026-08-07 inner red-window
 // fix). The original 54-test single file exhausted the node:test worker event loop under heavy
 // blocking spawnSync, self-failing at ~167s with 'Promise resolution is still pending'. Each split

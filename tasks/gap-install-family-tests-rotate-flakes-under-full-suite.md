@@ -40,11 +40,11 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 3 轮 install 家族轮换失败（round-160/161/162 不同文件）+ 全部单独跑绿 + 29 家族规模（本任务 Proposal 已含；内层补：构造全量负载下 install 家族轮换失败）
+- [x] AC1: **复现固化**——任务体记录 3 轮 install 家族轮换失败（round-160/161/162 不同文件）+ 全部单独跑绿 + 29 家族规模（本任务 Proposal 已含；内层补：构造全量负载下 install 家族轮换失败）
 - [ ] AC2: **install 家族连续 3 轮不再轮换失败**——每轮 install 家族文件全绿（外层 verification-round 验证）
-- [ ] AC3: **单独跑不回归**——29 家族各单独跑仍绿
-- [ ] AC4: **无静默漏测**——不通过 skip 逃过（负控制：每轮 install 家族确实被跑）
-- [ ] AC5: **既有机制不回归**——`--for-task` scoped 门绿（runner-grouping / 组系统契约检查）
+- [x] AC3: **单独跑不回归**——29 家族各单独跑仍绿
+- [x] AC4: **无静默漏测**——不通过 skip 逃过（负控制：每轮 install 家族确实被跑）
+- [x] AC5: **既有机制不回归**——`--for-task` scoped 门绿（runner-grouping / 组系统契约检查）
 
 ## Definition of Done
 
@@ -76,3 +76,53 @@ resume    组别隔离 + pack 缓存 + 资源门分步提交，任一步完成�
 reviewer: outer
 at: 2026-08-09
 changed: 建任务（round-160/161/162 三次分诊三个不同 install 家族文件——drift-report/governance、loop-core/serial、install-config/serial；全单独跑绿、29 家族规模；逐测试打地鼠不收敛 ⇒ 系统化负载问题。实现归内层）
+
+## Evidence（内层实现 2026-08-09）
+
+**实现选择（候选 A/D 合并：install 家族全隔离 + KNOWN-LOAD-SENSITIVE 机器可读标记）**：
+把 serial 判据从「nested-runner-only」扩展为「nested-runner **或** real-install 的 install/quay-init
+家族」，12 个已立案的 install/quay-init 家族测试文件统一收编进 serial 并发 1 相位（候选 A），并给每个
+成员打上 `// @load-sensitive <kind>` + `KNOWN-LOAD-SENSITIVE` 机器可读标记（候选 D）。不选候选 B/C
+（pack 缓存共享 / 资源门）——它们治标不治本且风险（B：29 测试共享一次 pack 的复用语义改动；C：skip 变
+静默漏测）。改动清单：
+- `scripts/test.sh`：serial 判据/组描述/相位注释系统化（round-162 的 install-config 单文件扩展升级为
+  全家族收编，注释更新于 header / 组定义 / group_of / serial 相位 / lowconc 相位五处；**无功能分支改动**，
+  round-162 的 tmux-leak-scan 无条件化与 round-161 的 install-config 隔离修复均保留）。
+- 12 个测试文件组别收编：install-config-driven-e2e / npm-pack-e2e / quay-init-check-drift /
+  quay-init-drift-report / quay-init-laydown-closure / quay-init-loop-core / quay-init-loop-driver /
+  quay-init-loop-runtime / quay-init-loop-vendor / quay-init-loop / quay-init-tmux-detection /
+  runtime-landing → 全部 `@test-group serial` + `@load-sensitive heavy|nested-spawn` + KNOWN-LOAD-SENSITIVE。
+- `plugin/test/quay-init-laydown-closure.test.mjs`：移除 governance self-skip 包装（serial 相位下它会让
+  测试静默 skip——QUAY_TEST_GROUPS 只在 `--group` 分支设，serial 相位下 self-skip 包装必须删除）。
+- `plugin/loop/fast-mode-loop-tick.md`：「serial 组的显式判据」从一条扩为两条（嵌套 runner / real-install
+  家族），注明 160/161/162 三论轮换与全家族收编。
+- `tasks/gap-install-config-driven-e2e-load-flake.md`：交叉标注（候选 A 已落地并被系统化为全家族收编）。
+
+**AC5 scoped 门**：`bash scripts/test.sh --for-task gap-install-family-tests-rotate-flakes-under-full-suite
+--allow-thin` → **exit 0**。task-contract strict-subset **no violations**（对
+gap-install-family-tests-rotate-flakes-under-full-suite / gap-install-config-driven-e2e-load-flake /
+gap-serial-phase-install-test-residue-dependency 三任务文件）；adr016-screen-use **0 违规**（2 retired 不计）；
+dead-code-after-return **0 违规**。selector 0/5（thin allowed——Touches 是 shell 脚本 / 任务文件，非测试文件）。
+
+**组系统契约（机械不变量）**：`runner-grouping.test.mjs` + `known-load-sensitive.test.mjs` +
+`load-sensitive-release-check.test.mjs` 连跑 **35/35 绿 / 0 fail / 0 cancelled**（EXIT=0，179.2s）——
+partition 和（AC3 files+serial==total）、AC6（`--group product,engine ∪ --group lowconc` == no-args）、
+serial 机制、AC0c 五组 anti-stomp、KLS 头声明⇒`@load-sensitive` 强制、release-check 准入全过。
+
+**AC3 单独跑不回归（抽样 3 个）**：`quay-init-check-drift + quay-init-drift-report + runtime-landing`
+连跑 **15/15 绿 / 0 fail / 0 skipped**（EXIT=0，73.8s）。测试逻辑未动（仅组别标注 + 注释），单独跑绿由
+构造保留。
+
+**AC4 无静默漏测**：12 个收编文件在 serial 相位跑真实测试（无 governance self-skip 包装；抽样的 3 个
+0 skipped 实证）；`known-load-sensitive.ts --list` 权威清单确认 12 个文件全部标记为
+heavy/nested-spawn 负载敏感。
+
+**fan-in 对账（round-162 并发合并）**：本任务分支基于 round-159 base fc681f52，integration 已推进至
+round-169（含 round-161 隔离修复 + round-162 install-config→serial 移动）。实现时把 5 个重叠文件
+（scripts/test.sh / install-config-driven-e2e / quay-init-loop-core / fast-mode-loop-tick /
+load-flake 任务）对账到 integration 当前内容 + 本任务增量：round-161/162 的功能改动（install-config 的
+`diskWorktreeRoot()` 隔离、test.sh 的 tmux-leak-scan 无条件化、loop-core 的顺序残留隔离契约注释）**全部
+保留**，只叠加本任务的注释/标注增量。`git rebase integration` 后本分支 = integration + 本任务增量。
+
+**AC2（连续 3 轮 install 家族全绿）与 DoD 全量套件归外层 verification-round 验证**——内层只交付
+scoped 门绿 + 组契约绿 + 单独跑绿 + 无静默漏测。

@@ -1,4 +1,9 @@
-// @test-group governance
+// @test-group serial
+// @load-sensitive heavy
+// KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — real-install e2e:
+// each test spawns a real quay-init.sh --loop install subprocess tree. The install/quay-init family
+// rotated flakes across groups under full-suite load, so the whole family is consolidated into the
+// concurrency-1 serial phase (gap-install-family-tests-rotate-flakes-under-full-suite).
 // quay-init-laydown-closure.test.mjs — gap-laydown-derivation-is-sensitive-to-reference-spelling-
 // dependency-closure (AC1/AC2/AC3/AC4).
 //
@@ -36,13 +41,9 @@ import { spawnSync } from 'node:child_process';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pluginDir = path.resolve(__dirname, '..');
 
-// Governance self-skip (AC8 @test-group governance, ADR-019 decision #1 precedent): in a default
-// (product,engine) run this file reports `skipped`, not absent; it runs in full when invoked
-// explicitly (QUAY_TEST_GROUPS unset) or with `--group governance`.
-if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(',').includes('governance')) {
-  test('governance group skipped', { skip: 'set QUAY_TEST_GROUPS=governance to run' }, () => {});
-} else {
-
+// NOTE (gap-install-family-tests-rotate-flakes-under-full-suite): this file left the governance
+// group for the serial phase — the real tests ALWAYS run (no self-skip wrapper; the serial phase
+// runs them at concurrency 1 in the default full-suite run).
 const _worktreeTestRoots = [];
 after(() => {
   for (const d of _worktreeTestRoots) {
@@ -182,5 +183,3 @@ test('AC4 — send-keys-reliable.sh FAILS LOUD at startup when its CHECKER is mi
     assert.match(r.stderr, /fail loud/, 'must state the fail-loud resolution');
   } finally { cleanup(tmp); }
 });
-
-} // end governance self-skip

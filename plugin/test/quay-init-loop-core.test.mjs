@@ -1,11 +1,18 @@
 // @test-group serial
 // @load-sensitive nested-spawn
-// GROUP NOTE (gap-serial-group-recompose-nested-runner-criterion): routed to the `serial` group
-// because it IS a nested runner — each --loop test spawns a real quay-init.sh → `$TEST_COMMAND`
-// (node --test) worker-pool sub-suite, which derives its own concurrency N (18 nested-runner
-// matches, per the manager audit). Per the explicit serial criterion (fast-mode-loop-tick.md), the
-// ONLY reason to enter serial is spawning your own worker-pool sub-suite; this file runs in the
-// concurrency-1 serial phase, never competing with the concurrency-8 main body's worker pool.
+// KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — real-install e2e:
+// each --loop test spawns a real quay-init.sh → `$TEST_COMMAND` (node --test) worker-pool sub-suite.
+// The install/quay-init family rotated flakes across groups under full-suite load, so the whole
+// family is consolidated into the concurrency-1 serial phase
+// (gap-install-family-tests-rotate-flakes-under-full-suite).
+// GROUP NOTE (gap-serial-group-recompose-nested-runner-criterion + gap-install-family-tests-rotate-
+// flakes-under-full-suite): routed to the `serial` group because it IS a nested runner — each --loop
+// test spawns a real quay-init.sh → `$TEST_COMMAND` (node --test) worker-pool sub-suite, which
+// derives its own concurrency N (18 nested-runner matches, per the manager audit). Per the serial
+// criterion (fast-mode-loop-tick.md) it was admitted as a nested runner; the round-162 extension
+// (gap-install-family-tests-rotate-flakes-under-full-suite) widened that criterion to the whole
+// real-install install/quay-init family. This file runs in the concurrency-1 serial phase, never
+// competing with the concurrency-N main body's worker pool.
 // quay-init-loop-core.test.mjs — split out of quay-init-loop.test.mjs (2026-08-07 inner red-window
 // fix). The original 54-test single file exhausted the node:test worker event loop under heavy
 // blocking spawnSync (each --loop test spawns a real quay-init.sh → python3 children), self-failing

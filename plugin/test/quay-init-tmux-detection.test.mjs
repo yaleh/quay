@@ -1,9 +1,15 @@
-// @test-group lowconc
-// GROUP NOTE (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests): routed to the
-// `serial` group (B-class real wall-clock wait — exercises a HERMETIC tmux server and real tmux
-// has-session round-trips) so it runs in the concurrency-1 serial phase, never competing with the
-// concurrency-8 main body. It left the product group (was AC7 product) because the install contract
-// it guards is now covered by the serial phase of the full suite, not the concurrency-8 body.
+// @test-group serial
+// @load-sensitive heavy
+// KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — real-install e2e:
+// exercises a HERMETIC tmux server + real quay-init install. The install/quay-init family rotated
+// flakes across groups under full-suite load, so the whole family is consolidated into the
+// concurrency-1 serial phase (gap-install-family-tests-rotate-flakes-under-full-suite).
+// GROUP NOTE (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests + gap-install-
+// family-tests-rotate-flakes-under-full-suite): routed to the `serial` group (B-class real wall-clock
+// wait — exercises a HERMETIC tmux server and real tmux has-session round-trips) so it runs in the
+// concurrency-1 serial phase, never competing with the concurrency-N main body. It left the product
+// group (was AC7 product) because the install contract it guards is now covered by the serial phase
+// of the full suite, not the concurrency-N body.
 // quay-init-tmux-detection.test.mjs — gap-init-guesses-the-tmux-session.
 //
 // The installer once guessed "<project>-0:0.0" as the tmux session (no detection) and wrote the

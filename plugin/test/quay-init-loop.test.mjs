@@ -1,4 +1,9 @@
-// @test-group product
+// @test-group serial
+// @load-sensitive heavy
+// KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — real-install e2e:
+// each test spawns a real quay-init.sh --loop subprocess tree. The install/quay-init family rotated
+// flakes across groups under full-suite load, so the whole family is consolidated into the
+// concurrency-1 serial phase (gap-install-family-tests-rotate-flakes-under-full-suite).
 // quay-init-loop.test.mjs — gap-quay-init-never-commits-broken-committed-state (AC1-AC3).
 //
 // quay-init 铺文件但从不 commit ⇒ consumer 仓库的机制默认活在未提交工作树里，committed 态是否自洽纯属

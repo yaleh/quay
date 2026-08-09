@@ -32,6 +32,13 @@ extra: {}
 
 **交叉标注（gap-serial-phase-install-test-residue-dependency，2026-08-09）**：本任务候选 A 的落地（把 install-config 从 lowconc 挪到 serial，提交 e09089f3）是**顺序残留依赖的引入源头**——install-config 挪到 serial 后与 quay-init-loop-core 同相位相邻，round-161 出现 install-config passed → quay-init-loop-core failed（AC2/AC4）的顺序依赖。两个任务互为因果：本任务解决「并发 3 下 install 争抢」时把该文件送进 serial，serial 相位暴露了「并发 1 但顺序相邻」的残留依赖；后者（gap-serial-phase-install-test-residue-dependency）已在内层以**测试内隔离强化**修复（install-config 每 install 独立 `--worktree-root` + 每 workspace 独立 tmux session + `after()` 彻底清理）。本文件即那两个任务的负控制边界：隔离后连续 2 轮 serial 相位两 install 测试都绿。
 
+**（cross-annotation 2026-08-09）候选 A 已落地并被系统化为整个 install/quay-init 家族的 serial 收编**：
+`gap-install-family-tests-rotate-flakes-under-full-suite` 把 serial 判据从「nested-runner-only」扩展到
+「real-install install/quay-init 家族」（round-160/161/162 每轮 flake 不同文件——drift-report/governance、
+loop-core/serial、install-config/lowconc），本文件随家族一并移入 serial 并发 1 体制，并加
+`// @load-sensitive heavy` + `KNOWN-LOAD-SENSITIVE` 机器可读标记（`known-load-sensitive.ts --list` 权威
+清单）。serial 判据扩展的权威说明见 `plugin/loop/fast-mode-loop-tick.md`「serial 组的显式判据」。
+
 **修的方向（实现归内层）**：
 - 候选 A：**挪 serial 组**——install e2e 从 lowconc 挪到 serial（并发 1，完全隔离）。但 serial 判据是「nested-runner」，本测试不 spawn worker-pool ⇒ 需扩 serial 判据或另设。
 - 候选 B：**组内隔离**——给 install 族单独一组（如 `install` 组，并发 1 或 2），与其他 hermetic 测试分开。

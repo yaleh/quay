@@ -1,4 +1,10 @@
-// @test-group governance
+// @test-group serial
+// @load-sensitive heavy
+// KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — real-install e2e:
+// each test spawns a real quay-init.sh (--loop install / --check-drift / upgrade subprocess tree).
+// The install/quay-init family rotated flakes across groups under full-suite load — this governance
+// file flaked at 20s in the concurrency-N main body (round-162) — so the whole family is consolidated
+// into the concurrency-1 serial phase (gap-install-family-tests-rotate-flakes-under-full-suite).
 // quay-init-drift-report.test.mjs — gap-delivery-surface-grows-but-target-freezes-no-upgrade.
 //
 // The delivery surface grows (new derived scripts ship with the plugin) while an installed target
