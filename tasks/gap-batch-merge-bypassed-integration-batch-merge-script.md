@@ -66,11 +66,11 @@ resume 若中断，先跑 measure 确认 reflog 形态，不要假设已修
 
 ## Acceptance Criteria
 
-- [ ] AC1: **绕过消除**——批量合 integration→develop 走 `integration-batch-merge.sh`（REF-LEVEL），
+- [x] AC1: **绕过消除**——批量合 integration→develop 走 `integration-batch-merge.sh`（REF-LEVEL），
       主检出 reflog 无 `reset: moving to HEAD` 痕迹、无主检出 merge
-- [ ] AC2: **执行者可查**——批量合是否走脚本有机械可查的识别（reflog 形态 / 脚本调用痕迹 / 日志），
+- [x] AC2: **执行者可查**——批量合是否走脚本有机械可查的识别（reflog 形态 / 脚本调用痕迹 / 日志），
       不再只能事后人工看
-- [ ] AC3: 与 gap-merge-exposed-contract-violations-in-done-tasks（合并后首验暴露）、
+- [x] AC3: 与 gap-merge-exposed-contract-violations-in-done-tasks（合并后首验暴露）、
       a862c914 merge 交叉标注——同类「合并路径未被机械看守」族
 
 ## Definition of Done

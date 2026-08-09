@@ -53,12 +53,12 @@ config 有 fork_baseline、AC2 scratch 跑通），但**真实 dispatch 的 fork
 
 ## Acceptance Criteria
 
-- [ ] AC1: 下一个新派发——任务分支从 develop 分叉（rev-list develop..branch ∩ develop..master ≠ 全量，
+- [x] AC1: 下一个新派发——任务分支从 develop 分叉（rev-list develop..branch ∩ develop..master ≠ 全量，
        或 rev-list develop..branch 不含 master-only 提交）
-- [ ] AC2: fork 动作读 config fork_baseline（grep 调用链证明——worktree 创建传 fork-baseline.ts 结果）
-- [ ] AC3: 与 gap-two-layer-loop-tick-docs-hardcode-master（done）交叉标注——本任务是它「配置生效 ≠
+- [x] AC2: fork 动作读 config fork_baseline（grep 调用链证明——worktree 创建传 fork-baseline.ts 结果）
+- [x] AC3: 与 gap-two-layer-loop-tick-docs-hardcode-master（done）交叉标注——本任务是它「配置生效 ≠
        调用点改变」在真实 dispatch 层的复现
-- [ ] AC4: 负控制——下游（无 fork_baseline 配置）仍从 master 分叉（共享默认不变）
+- [x] AC4: 负控制——下游（无 fork_baseline 配置）仍从 master 分叉（共享默认不变）
 
 **needs-human 时效性分诊关闭（2026-08-09，outer 依人裁定执行；判定：non-reproduction confirmed in body: next dispatch reflog shows 'Created from develop' (fork_baseline read); supervisor was the last pre-activation master fork. No fix implemented because nothing to fix.）**
 全文见 git 历史（`git log -p -- tasks/gap-dispatch-fork-does-not-read-config-fork-baseline.md`）。

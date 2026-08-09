@@ -53,7 +53,7 @@ AC12b 已达成后（人方向）可更频繁验证安装/升级/冷启动——
 - [x] AC1: fresh welcome 屏（`❯ Try "..."` ghost 文本）⇒ send-keys-reliable 跳过清屏直接发送，rc=0（archguard 场景，负控制——当前会 fail loud rc=1）
 - [x] AC2: 正常空框（`❯`+NBSP）⇒ 仍走 NBSP 清屏路径（不回归）
 - [x] AC3: 与 gap-os-anchor-watchdog-drive-retry-and-rc-semantics 交叉标注（watchdog 驱动依赖此修复）
-- [ ] AC4: 实测：kill archguard outer → watchdog relaunch → drive 成功（transcript 出现 user 消息）——AC2 完整闭环
+- [x] AC4: 实测：kill archguard outer → watchdog relaunch → drive 成功（transcript 出现 user 消息）——AC2 完整闭环
 
 ### AC1–AC3 验证证据（2026-08-05，worktree 分支 task/gap-send-keys-reliable-welcome-screen-ghost-drive-fails）
 

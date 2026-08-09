@@ -58,11 +58,11 @@ strategic-doc-staleness orchestration 臂死 glob。
 
 ## Acceptance Criteria
 
-- [ ] AC1: routine 触发器改为两层模式实际量（tick 计数/时间/事件），不再依赖迭代计数
-- [ ] AC2: 探针重新接线——每 tick 或定时检查 due 并执行（架构分析/自验证/历史挖掘），实测跑起来
-- [ ] AC3: architecture-analysis 探针用 archguard（L_D/L_G 仪器），git-lens L_D/L_G/L_S 回收进来
+- [x] AC1: routine 触发器改为两层模式实际量（tick 计数/时间/事件），不再依赖迭代计数
+- [x] AC2: 探针重新接线——每 tick 或定时检查 due 并执行（架构分析/自验证/历史挖掘），实测跑起来
+- [x] AC3: architecture-analysis 探针用 archguard（L_D/L_G 仪器），git-lens L_D/L_G/L_S 回收进来
   - 回收部分已由 `gap-experiment-legacy-reclaim-and-touches-heuristic` 落地（2026-08-06）：git-lens L_D/L_G/L_S 三脚本已回收进 `plugin/scripts/`，architecture-analysis 探针 spec（`plugin/probes/architecture-analysis.md`）已加 fallback: git-lens 说明。本任务余下为探针机制重新接线（触发器改两层量 + 每 tick 检查 due）。
-- [ ] AC4: 与「机制存在无人调用」族前四实例交叉标注
+- [x] AC4: 与「机制存在无人调用」族前四实例交叉标注
 
 **needs-human 时效性分诊关闭（2026-08-09，outer 依人裁定执行；判定：rewire ask satisfied by landed work: routines in .quay/config.yml, fast-mode-loop-tick.md step 3.7 dispatches routine-scheduler per-tick, done tasks DIR-056 / exp5-M-OUTERLOOP-ROUTINE-WIRING / exp5-DEFECT-DIR056-PROBE-SPEC-UNWIRED confirm wiring.）**
 全文见 git 历史（`git log -p -- tasks/gap-probe-mechanism-dead-15-days-rewire-to-two-layer.md`）。

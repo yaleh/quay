@@ -84,13 +84,13 @@ would fire on every deep task even when no split is warranted.
 
 ## Acceptance Criteria
 
-- [ ] AC1: depth >= 2 + subsystem-blocking-cluster → `split-recursive-guard` (not cluster)
-- [ ] AC2: depth >= 2 + touch-set-too-large → `split-recursive-guard`
-- [ ] AC3: depth >= 2 + multi-mechanism → `split-recursive-guard` (existing behavior preserved)
-- [ ] AC4: depth >= 2 + NO trigger fires → `recommend: false` (guard does not fire spuriously)
-- [ ] AC5: depth 0/1 + any trigger → original code unchanged (no regression)
-- [ ] AC6: guard result carries `repairable: false` and the originating trigger's reason text
-- [ ] AC7: both mirrors byte-identical; `_splitCheck()` in prepare-milestone.js matches
+- [x] AC1: depth >= 2 + subsystem-blocking-cluster → `split-recursive-guard` (not cluster)
+- [x] AC2: depth >= 2 + touch-set-too-large → `split-recursive-guard`
+- [x] AC3: depth >= 2 + multi-mechanism → `split-recursive-guard` (existing behavior preserved)
+- [x] AC4: depth >= 2 + NO trigger fires → `recommend: false` (guard does not fire spuriously)
+- [x] AC5: depth 0/1 + any trigger → original code unchanged (no regression)
+- [x] AC6: guard result carries `repairable: false` and the originating trigger's reason text
+- [x] AC7: both mirrors byte-identical; `_splitCheck()` in prepare-milestone.js matches
 
 ## Definition of Done
 

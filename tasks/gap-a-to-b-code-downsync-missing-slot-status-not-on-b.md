@@ -50,13 +50,13 @@ incremental-upgrade）同类——「改进的机制不会自动到达已在跑�
 
 ## Acceptance Criteria
 
-- [ ] AC1: A→B 代码下行机制落地——B 机代码跟上 A master（`--slot-status` 出现在 B 的
+- [x] AC1: A→B 代码下行机制落地——B 机代码跟上 A master（`--slot-status` 出现在 B 的
        fast-mode-telemetry.ts）
-- [ ] AC2: B 机槽位视角可用——`--slot-status` 在 B 机能区分真实执行者 vs 陈旧括号（B 遥测
+- [x] AC2: B 机槽位视角可用——`--slot-status` 在 B 机能区分真实执行者 vs 陈旧括号（B 遥测
        不再 5 个在飞无法区分）
-- [ ] AC3: 与 AC15（manager-phase-goal）交叉标注——AC15 判据③只覆盖 B→A 备份方向，本任务补
+- [x] AC3: 与 AC15（manager-phase-goal）交叉标注——AC15 判据③只覆盖 B→A 备份方向，本任务补
        A→B 下行方向
-- [ ] AC4: 与 gap-quay-init-config-preserving-incremental-upgrade 交叉标注——同族（改进机制不到达
+- [x] AC4: 与 gap-quay-init-config-preserving-incremental-upgrade 交叉标注——同族（改进机制不到达
        下游）不同机制（仓库层 vs 安装层）
 
 **needs-human 时效性分诊关闭（2026-08-09，outer 依人裁定执行；判定：withdrawn in body (2026-08-06): frame corrected, narrow A→B downsync superseded by gap-two-peer-quay-developers-continuous-bidirectional-merge.）**
