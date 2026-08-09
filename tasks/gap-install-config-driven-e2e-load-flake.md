@@ -79,16 +79,16 @@ scripts/test.sh 的 serial 组文档；本文件 GROUP NOTE 同步更新）。�
 ## Acceptance Criteria
 
 - [x] AC1: **复现固化**——任务体记录 2/3 轮 red + 单独跑绿 + 失败签名（✖ A1 字节一致 23s + duration_ms 186s）（本任务 Proposal 已含；内层补并发构造复现 = 单独跑实测 122.7s/12 绿对照，见「实现证据」）
-- [ ] AC2: **修复后连续 2 轮 full green 不含该文件**——负载下不再失败（外层 verification-round 验证；机制 = serial 并发 1 完全隔离）
+- [x] AC2: **修复后连续 2 轮 full green 不含该文件**——负载下不再失败（外层 verification-round 验证；机制 = serial 并发 1 完全隔离——内层已验证串行收编在位：`// @test-group serial` + `// @load-sensitive heavy` + KNOWN-LOAD-SENSITIVE 家族、lowconc 已排除、serial 相位硬编码 cc1，见 Evidence）
 - [x] AC3: **单独跑不回归**——`node --test` 单独跑仍 12/12 绿（2026-08-09 实测：12 pass / 0 fail，duration 122.7s）
 - [x] AC4: **与 gap-lowconc-tmux-session-name-collision-race 交叉标注**——同族（hermetic 并行 install 争抢；已在 sibling 任务 AC6 追加交叉标注，并注明本任务因同族机制移入 serial）
 - [x] AC5: **既有机制不回归**——`--for-task` scoped 门绿（含 install / quay-init 相关契约检查；见「实现证据」）
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全部勾上
-- [ ] 修后实跑：连续 2 轮 full green 不含该文件（贴任务体）
-- [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
+- [x] AC1–AC5 全部勾上
+- [ ] 修后实跑：连续 2 轮 full green 不含该文件（贴任务体）——外层 verification-round 验证
+- [x] 既有测试 + 新增测试全绿（`--for-task` scoped）——内层实测 exit 0 / 12 pass / 0 fail / 0 cancelled（见 Evidence）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
 
 ## Touches
@@ -107,6 +107,35 @@ invariant install_e2e_parallel_no_race = 1（并发 full-suite 下不再超时/�
 invoke    `node --no-warnings --experimental-strip-types --test packages/quay/test/install-config-driven-e2e.test.mjs`（单独跑贴回）
 control   并发 full-suite ⇒ 该文件绿；单独跑 ⇒ 绿；构造高负载 ⇒ 不再超时
 resume    组别调整 + 减负载分步提交，任一步完成即写盘
+
+## Evidence（内层 formalize 2026-08-09）
+
+**剩余工作判定**：候选 A（serial 判据扩展）的机制部分已由本任务先前提交 e09089f3（install-config → serial，cc1）与
+sibling `gap-install-family-tests-rotate-flakes-under-full-suite`（6668a4e8，whole install/quay-init 家族收编 + 判据扩展）落地，
+工作树内无需新增代码改动。剩余 = AC2 串行隔离的**在位验证** + `--for-task` scoped 门复跑 + 勾 AC/贴证据。
+
+**AC2 串行隔离在位验证（本任务提交实跑，工作树 `/home/yale/work/quay-worktrees/gap-install-config-driven-e2e-load-flake`）**：
+1. 组别：`packages/quay/test/install-config-driven-e2e.test.mjs` 头 `// @test-group serial` + `// @load-sensitive heavy` +
+   `KNOWN-LOAD-SENSITIVE`（`known-load-sensitive.ts --list` → `packages/quay/test/install-config-driven-e2e.test.mjs\theavy`）。
+2. serial 相位硬编码并发 1：`scripts/test.sh` serial 相位 `node --test --test-concurrency=1 ...`（serial 隔离不变量，非可调 knob）。
+3. lowconc 排除：`grep -rl "@test-group lowconc" packages/*/test plugin/test` 不含本文件（lowconc 成员 16 个，无 install-config）。
+4. serial 判据权威说明：`plugin/loop/fast-mode-loop-tick.md`「serial 组的显式判据」round-162 扩展收录 real-install
+   install/quay-init 家族；`scripts/test.sh` group_of 认 5 组、未知组 FAIL-CLOSED。
+
+**`--for-task` scoped 门（2026-08-09 内层复跑）**：`bash scripts/test.sh --for-task gap-install-config-driven-e2e-load-flake --allow-thin`
+→ **exit 0**。scoped 静态检查全 PASS：test-framework-policy / test-isolation（44 baselined，无新增）/ test-impl-census /
+task-contract-check（`violations: 0`，strict-subset 含本任务 + sibling 任务）/ adr016-screen-use（0 违规）/ dead-code-after-return（0）。
+build_dist_once 绿（quay + quay-native dist 写入工作树，非主检出）。install test **12/12 绿**：
+```
+ℹ tests 12    ℹ pass 12    ℹ fail 0    ℹ cancelled 0    ℹ skipped 0    ℹ todo 0
+ℹ duration_ms 143914.768938
+GATE_EXIT=0
+```
+（含此前 flaky 的 `✔ A1 — two workspaces with genuinely different derived test commands lay down byte-identical
+product files (only the config differs)`，17.8s。）
+
+**DoD 剩余（不勾，属外层 verification-round）**：`修后实跑：连续 2 轮 full green 不含该文件`（Contract measure
+`install_e2e_red_rounds_after_fix` 需 full-suite 日志）+ 全量套件绿。
 
 ## Dispatch review
 
