@@ -39,18 +39,34 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 round-149 实证（`ℹ fail 1`/`✖`/`passed=false` 三形态 + failures=[] + redAt=null + leak-scan 被短路吞）（本任务 Proposal 已含；内层补构造复现 fixture）
-- [ ] AC2: **FAILURE_PATTERNS 认 reporter 字形**——`ℹ fail N`/`ℹ cancelled N`/`✖ <name>`/`__PERFILE__ passed=false` 至少一条触发 redDetected（或候选 B 的汇总统计等效判定）
-- [ ] AC3: **红带明细**——真实失败红 state=red reason=failed 且 failures[] 非空（含文件/测试名），redAt 有值
-- [ ] AC4: **不回归**——静态违规仍 reason=static-check；`not ok` 直连 TAP 仍触发；既有 full-suite-runner 测试全绿
-- [ ] AC5: **tmux-leak-scan 不被短路吞**——测试红时 scan 仍跑（泄漏残留独立报告，或候选 C 落地的合并语义）
+- [x] AC1: **复现固化**——任务体记录 round-149 实证（`ℹ fail 1`/`✖`/`passed=false` 三形态 + failures=[] + redAt=null + leak-scan 被短路吞）（本任务 Proposal 已含；内层补构造复现 fixture）
+- [x] AC2: **FAILURE_PATTERNS 认 reporter 字形**——`ℹ fail N`/`ℹ cancelled N`/`✖ <name>`/`__PERFILE__ passed=false` 至少一条触发 redDetected（或候选 B 的汇总统计等效判定）
+- [x] AC3: **红带明细**——真实失败红 state=red reason=failed 且 failures[] 非空（含文件/测试名），redAt 有值
+- [x] AC4: **不回归**——静态违规仍 reason=static-check；`not ok` 直连 TAP 仍触发；既有 full-suite-runner 测试全绿
+- [x] AC5: **tmux-leak-scan 不被短路吞**——测试红时 scan 仍跑（泄漏残留独立报告，或候选 C 落地的合并语义）
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全部勾上
-- [ ] 修后实跑：构造「`ℹ fail 1` fake suite」⇒ failures[] 非空；构造「真实违规」⇒ reason=static-check 不回归；构造「测试红 + 泄漏残留」⇒ 两者都报（贴任务体）
-- [ ] 既有 full-suite-runner 测试 + 新增测试全绿（`--for-task` scoped）
+- [x] AC1–AC5 全部勾上
+- [x] 修后实跑：构造「`ℹ fail 1` fake suite」⇒ failures[] 非空；构造「真实违规」⇒ reason=static-check 不回归；构造「测试红 + 泄漏残留」⇒ 两者都报（贴任务体）
+- [x] 既有 full-suite-runner 测试 + 新增测试全绿（`--for-task` scoped）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
+
+### 修后实证（内层 2026-08-09 落地）
+
+**实现（三候选全落地）**：
+- 候选 A（`plugin/scripts/full-suite-runner.ts` FAILURE_PATTERNS）：`fail`/`cancelled` 汇总正则改 `[#ℹ]` 双前缀（认 `ℹ fail N`/`ℹ cancelled N`，与 42aad5fe 的 testsSeen 同源）；新增 `✖ <testname> (Nms)`（spec-reporter 每测试失败行——尾随 `(Nms)` 把它与 TASK-67 的裸 `✖ ...` console 噪音区分开）、`__PERFILE__.*passed=false`（measure-suite-reporter 每文件失败行，文件路径随行进 failures[]）、`tmux-leak-scan: FAIL`（候选 C 泄漏残留）。`not ok` 保留（TAP 直连场景）。
+- 候选 B（终态汇总判定）：`!redDetected && !staticCheckDetected && (tapFail > 0 || tapCancelled > 0)` ⇒ 强制 red + reason=failed + failures[] 非空（汇总统计与红判定同源，不双写 pattern）。
+- 候选 C（`scripts/test.sh`）：tmux-leak-scan 从 `[ "$code" -eq 0 ] && ! bash ...` 改为无条件 `! bash ...`——测试红不再短路吞掉 scan，泄漏残留合并进 code。
+
+**修后实跑证据**：
+- `ℹ fail 1` fake suite ⇒ `state=red reason=failed failures.length=1`（line 记录 `ℹ fail 1`）、verification-round `redAt` 有值（round-149 是 null）。
+- `✖ <testname> (Nms)` fake suite ⇒ red + failures.length=1（line 含失败测试名）。
+- `__PERFILE__ ... passed=false` fake suite ⇒ red + failures[0].file=包内相对路径。
+- `tmux-leak-scan: FAIL` fake suite ⇒ red + failures.length=1（候选 C 合并语义）。
+- `--static-check-check` Contract invoke ⇒ 仍 `reason=static-check` + `violations=11` + `failures=2`（AC4 不回归）；`not ok` 直连 TAP 既有测试仍绿。
+- `bash scripts/test.sh --for-task gap-runner-failure-patterns-miss-info-glyph-and-perfile-failed --allow-thin` ⇒ exit 0，`violations: 0`，57 tests 全绿（既有 + 5 新增）。
+- 全量套件绿：待外层 verification-round 验证（`fail 0`/`cancelled 0`/`FULL-SUITE-EXIT=0`）。
 
 ## Touches
 

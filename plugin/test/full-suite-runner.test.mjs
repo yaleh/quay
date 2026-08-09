@@ -558,6 +558,41 @@ test("AC2 unit — the failure markers match STRUCTURED failure lines, never bar
   }
 });
 
+// ── gap-runner-failure-patterns-miss-info-glyph-and-perfile-failed: AC2 (reporter glyph forms) ──────
+// The round-149 real failure emitted `ℹ fail 1` (info-glyph summary), `✖ <testname> (Nms)`
+// (spec-reporter per-test failure) and `__PERFILE__ ... passed=false` (measure-suite-reporter
+// per-file failure) — NONE of which the old FAILURE_PATTERNS recognized (it only knew `not ok` /
+// `# fail` / `# cancelled` / vitest `❯`), so redDetected stayed false and the red carried
+// failures=[] / redAt=null. These pin the fix (AC2): the reporter forms flag; the passing forms
+// and the bare-✖ negative control (TASK-67) still do NOT.
+
+test("AC2 unit — FAILURE_PATTERNS recognize the reporter info-glyph + per-file + leak-scan failure forms", () => {
+  for (const line of [
+    "ℹ fail 1", // measure-suite-reporter / spec-reporter info-glyph summary
+    "ℹ cancelled 1", // info-glyph cancelled summary
+    "✖ AC1/AC2 — the real bundle inventory matches the outline §6 snapshot (--inventory exits 0) (3.411515ms)", // spec-reporter per-test failure
+    "✖ some test name (12ms)", // short spec-reporter failure line
+    "✖ failing tests:", // spec-reporter failure-block header (only emitted when tests failed)
+    "__PERFILE__ duration_ms=3580.991183 /home/yale/work/quay/packages/quay/test/verify-delivery-surface.test.mjs passed=false", // per-file failure
+    "__PERFILE__ duration_ms=100 packages/quay/test/foo.test.mjs passed=false", // per-file failure, relative path
+    "tmux-leak-scan: FAIL — NEW residual test tmux servers/dirs after the run (delta vs the before-run snapshot)", // candidate C leak-scan residual
+  ]) {
+    assert.equal(isFailureLine(line), true, `should flag: ${line}`);
+  }
+  // negative controls — a PASSING run never emits these, and the bare-✖ console-noise guard holds:
+  for (const line of [
+    "✖ Diagram test failed", // TASK-67 negative control: passing vitest test logging a bare ✖ line
+    "ℹ pass 5",
+    "ℹ fail 0",
+    "ℹ cancelled 0",
+    "__PERFILE__ duration_ms=100 /home/yale/work/quay/packages/quay/test/foo.test.mjs passed=true", // passed=true is NOT a failure
+    "# fail 0",
+    "# cancelled 0",
+  ]) {
+    assert.equal(isFailureLine(line), false, `should not flag: ${line}`);
+  }
+});
+
 // ── gap-suite-state-has-no-reason-axis-failed-aborted-infra: AC1/AC2/AC3 (reason axis) ─────────────
 
 test("AC5 unit — isAbortLine matches the early-EXIT gate-WAIT shape, never a failure line", () => {
@@ -944,6 +979,104 @@ test("AC2 — a vitest structured failure line flips red EARLY, before the run c
     assert.ok(!fs.existsSync(marker), "red appeared before the suite's post-failure step completed");
     const { code } = await waitExit(child);
     assert.equal(code, 1, "runner exits 1 on red");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── gap-runner-failure-patterns-miss-info-glyph-and-perfile-failed: AC2/AC3/AC5 e2e ────────────────
+// The round-149 defect (state=red reason=failed but failures=[] / redAt=null): the runner's
+// FAILURE_PATTERNS missed the reporter's info-glyph / per-file failure forms. Each e2e below
+// constructs the real reporter shape and asserts red + a non-empty failures[] (the AC3 "red with
+// detail" property) — the measure `failures_nonempty_on_info_red >= 1` band.
+
+test("AC2/AC3 e2e — an `ℹ fail 1` (info-glyph summary) suite flips red with a non-empty failures[] and a non-null redAt", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-infofail-"));
+  const { f, dir } = fakeSuite('echo "ℹ tests 1"\necho "ℹ pass 0"\necho "ℹ fail 1"\necho "ℹ cancelled 0"\nexit 1');
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    assert.equal(code, 1, "runner exits 1 on red");
+    const s = readState(root);
+    assert.equal(s.state, "red", "ℹ fail 1 flips state to red (AC2 — the reporter glyph form is recognized)");
+    assert.equal(s.reason, "failed", "ℹ fail 1 is a REAL test failure (stop-dispatch signal)");
+    assert.ok(s.failures && s.failures.length >= 1, `failures[] must be non-empty (measure failures_nonempty_on_info_red >= 1); got ${JSON.stringify(s.failures)}`);
+    // redAt is carried on the verification-round record (the early-RED detection-latency axis) —
+    // the round-149 record had redAt=null; a recognized failure line must timestamp it.
+    const roundFile = path.join(root, ".quay", "verification-round.jsonl");
+    const rounds = fs.existsSync(roundFile)
+      ? fs.readFileSync(roundFile, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l))
+      : [];
+    assert.ok(rounds.length >= 1, "a verification-round record is appended");
+    assert.ok(rounds[rounds.length - 1].redAt, `redAt must have a value (round-149 had null); got ${rounds[rounds.length - 1].redAt}`);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC2/AC3 e2e — a `✖ <testname> (Nms)` spec-reporter failure line flips red with failures non-empty", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-specx-"));
+  const { f, dir } = fakeSuite(
+    'echo "✖ AC1/AC2 — the real bundle inventory matches the outline §6 snapshot (--inventory exits 0) (3.411515ms)"\nexit 1',
+  );
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    assert.equal(code, 1, "runner exits 1 on red");
+    const s = readState(root);
+    assert.equal(s.state, "red", "✖ <name> (Nms) flips state to red (AC2)");
+    assert.equal(s.reason, "failed");
+    assert.ok(s.failures && s.failures.length >= 1, `failures[] carries the spec-reporter failure (AC3); got ${JSON.stringify(s.failures)}`);
+    assert.match(s.failures[0].line, /✖ AC1\/AC2 — the real bundle inventory/, "the failure line records the failing test name");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC2/AC3 e2e — a `__PERFILE__ ... passed=false` per-file line flips red and carries the failed file in failures[]", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-pf-"));
+  const { f, dir } = fakeSuite(
+    'echo "__PERFILE__ duration_ms=3580.991183 packages/quay/test/verify-delivery-surface.test.mjs passed=false"\nexit 1',
+  );
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    assert.equal(code, 1, "runner exits 1 on red");
+    const s = readState(root);
+    assert.equal(s.state, "red", "__PERFILE__ passed=false flips state to red (AC2)");
+    assert.equal(s.reason, "failed");
+    assert.ok(s.failures && s.failures.length >= 1, `failures[] carries the per-file failure (AC3); got ${JSON.stringify(s.failures)}`);
+    assert.equal(
+      s.failures[0].file,
+      "packages/quay/test/verify-delivery-surface.test.mjs",
+      "the per-file line's path is the failure's file (AC3 — red with detail, no more failures=[])",
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC5 e2e — a `tmux-leak-scan: FAIL` residual line (candidate C) flips red with failures non-empty (leak is a real residual)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-leak-"));
+  // Candidate C merge semantics: the suite-tail leak scan reports a residual to the stream
+  // (unconditional, no `&&` short-circuit in test.sh); the runner must recognize that FAIL line
+  // as a REAL failure (not swallow it into the failures=[] catch-all).
+  const { f, dir } = fakeSuite(
+    'echo "tmux-leak-scan: FAIL — NEW residual test tmux servers/dirs after the run (delta vs the before-run snapshot; prefixes: skv-|session-liveness-|ol-tok-|enter-repro-):" >&2\nexit 1',
+  );
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    assert.equal(code, 1, "runner exits 1 on red");
+    const s = readState(root);
+    assert.equal(s.state, "red", "tmux-leak-scan FAIL flips state to red (candidate C — leak is a real residual)");
+    assert.equal(s.reason, "failed");
+    assert.ok(s.failures && s.failures.length >= 1, `failures[] carries the leak-scan residual (AC5); got ${JSON.stringify(s.failures)}`);
+    assert.match(s.failures[0].line, /tmux-leak-scan: FAIL/, "the leak-scan FAIL line is the recorded failure");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(dir, { recursive: true, force: true });
