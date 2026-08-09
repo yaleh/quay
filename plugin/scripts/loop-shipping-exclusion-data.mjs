@@ -83,6 +83,21 @@ export function exclusionEntries(repoRoot, pluginDir) {
       target: path.join(pluginDir, 'scripts', 'adr016-screen-use-check.ts'),
       reason: "ADR-016 screen-use check's MD_TICK_DOCS scans the DEPLOYED tick-doc copies (incl. orchestration/orchestrator-loop-tick.md) for the md5(capture-pane) anti-pattern — a target-layout reference to a live deployed doc, not a stale source-copy reference (surfaced by the AC1b scan 2026-08-09 on the converged tree: the adr016-md5-ban scope-gap fan-in added MD_TICK_DOCS after the exclusion table was built)",
     },
+    {
+      rel: 'orchestration/orchestrator-tick-core.md',
+      target: path.join(repoRoot, 'orchestration', 'orchestrator-tick-core.md'),
+      reason: "outer tick 执行核 — references the DEPLOYED copy orchestration/orchestrator-loop-tick.md (1095 lines, excluded above) as its extraction source + (src:N) anchor; the anchor still points at the deployed copy during the parallel-comparison period. Same target-layout class as adr016-screen-use-check.ts (surfaced by the AC1b scan 2026-08-09: the exec-cores landed after the exclusion table was built)",
+    },
+    {
+      rel: 'orchestration/manager-tick-core.md',
+      target: path.join(repoRoot, 'orchestration', 'manager-tick-core.md'),
+      reason: "manager tick 执行核 — cites deployed-path provenance (orchestration/orchestrator-loop-tick.md:302) for rules it borrowed from the outer doc; references the deployed copy as the live anchor target. Same class as orchestrator-tick-core.md above (surfaced by the AC1b scan 2026-08-09)",
+    },
+    {
+      rel: 'orchestration/manager-tick-log.md',
+      target: path.join(repoRoot, 'orchestration', 'manager-tick-log.md'),
+      reason: "the manager's running tick log — a GITIGNORED runtime ledger (16:1x rule, never committed) whose historical entries quote deployed tick-doc paths verbatim (orchestrator-loop-tick.md:320/:605). Same class as manager-pending.md / tick-log.md above: the ledger documents the DEPLOYED target layout as living reference (surfaced by the AC1b scan 2026-08-09)",
+    },
     { rel: 'test/cold-start-e2e.sh', target: path.join(repoRoot, 'test', 'cold-start-e2e.sh'), reason: 'target layout (asserts the laid-down project)' },
     { rel: 'test/cold-start-oneliner-e2e.sh', target: path.join(repoRoot, 'test', 'cold-start-oneliner-e2e.sh'), reason: 'AC8d target-layout paths (the cold start operates on orchestration/ + docs/analysis/)' },
     { rel: 'plugin/skills/init/SKILL.md', target: path.join(pluginDir, 'skills', 'init', 'SKILL.md'), reason: "mapping table's target column" },
