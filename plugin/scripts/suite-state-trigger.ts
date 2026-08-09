@@ -366,11 +366,19 @@ export function readSuiteState(root: string): SuiteState | null {
 // state stuck at running mtime=23:16, never a terminal state, consumers kept thinking it was in
 // flight). SIGKILL is uncatchable in-process, so the dying runner CANNOT write the terminal state
 // itself — this watchdog (driven by the always-on runOnce poll) is the only mechanism that can.
-//   - the runner writes `pid` on every state (post-fix); a running state whose PID is dead ⇒ crashed.
-//   - legacy running states (no pid, written before the fix) fall back to a stale-AGE threshold.
-// The threshold is generous (60 min): the runner's own max-runtime guard kills the child tree and
-// writes a terminal state at 45 min, so a LIVE runner can never exceed it — a pid-absent running
-// state older than it is almost certainly a dead-runner leftover.
+//   - the runner writes `pid` on every state (post-fix); a running state whose PID is DEAD ⇒ crashed.
+//   - a running state with a LIVE pid ⇒ genuinely running (never crashed, regardless of age).
+//   - a pid-ABSENT running state (legacy state, test fixture, hand-written) is NEVER judged crashed
+//     on age alone (gap-suite-state-trigger-crash-watchdog-breaks-running-transition-test): without a
+//     pid there is no way to confirm the runner is dead, so the watchdog fails open toward "running".
+//     The pre-fix stale-AGE fallback (no pid + startedAt older than RUNNING_STALE_MS ⇒ crashed)
+//     misjudged red-window-shared-gate.test.mjs's no-pid fixture (startedAt fixed at 2026-08-05) as a
+//     dead runner, rewriting the first running read to red reason=crashed and emitting SUITE-RED on
+//     the wrong transition — breaking the running→red AC3 test. Death is only CERTAIN when we hold a
+//     pid whose process is gone, so that is the sole crashed criterion.
+// RUNNING_STALE_MS is retained as an exported constant (the old no-pid fallback threshold) for
+// context/back-compat; the crash-watchdog no longer reads it (the runner's own max-runtime guard at
+// 45 min still bounds a LIVE runner's age, and a real death is caught by pid-liveness instead).
 export const RUNNING_STALE_MS = 60 * 60_000;
 
 /** Is a process with this PID currently alive? (ESRCH = no such process = dead; EPERM = exists but not ours = alive.) */
@@ -385,19 +393,20 @@ export function isProcessAlive(pid: number): boolean {
 
 /**
  * AC6 — given a `running` state, return the terminal `crashed` state when the RUNNER is dead
- * (SIGKILL / uncaught crash left `running` on disk), else null (genuinely running). A running state
- * with a LIVE PID is always treated as in-progress regardless of age; a pid-absent legacy running
- * state is crashed only once it is older than RUNNING_STALE_MS (see the block comment above).
+ * (SIGKILL / uncaught crash left `running` on disk), else null (genuinely running). The ONLY
+ * crashed criterion is "a pid we hold whose process is gone": a running state with a LIVE pid is
+ * always in-progress regardless of age, and a pid-ABSENT running state (legacy state, test fixture,
+ * hand-written) is NEVER judged crashed on age alone — without a pid we cannot confirm the runner is
+ * dead, so we fail open toward "running" (gap-suite-state-trigger-crash-watchdog-breaks-running-
+ * transition-test: the pre-fix stale-AGE fallback misjudged the AC3 no-pid fixture as crashed).
  */
 export function detectCrashedRunner(state: SuiteState | null, now = Date.now()): SuiteState | null {
   if (!state || state.state !== "running") return null;
-  const startedAtMs = typeof state.startedAt === "string" ? Date.parse(state.startedAt) : NaN;
-  if (typeof state.pid === "number" && Number.isFinite(state.pid) && state.pid > 0) {
-    if (isProcessAlive(state.pid)) return null; // the runner is genuinely alive — still running
-  } else if (!Number.isFinite(startedAtMs) || now - startedAtMs < RUNNING_STALE_MS) {
-    return null; // legacy running state (no pid) too fresh to call dead — fail-open toward "running"
+  if (typeof state.pid !== "number" || !Number.isFinite(state.pid) || state.pid <= 0) {
+    return null; // no pid ⇒ cannot confirm death — fail open toward "running" (never age-judged crashed)
   }
-  const atIso = new Date(now).toISOString();
+  if (isProcessAlive(state.pid)) return null; // the runner is genuinely alive — still running
+  const startedAtMs = typeof state.startedAt === "string" ? Date.parse(state.startedAt) : NaN;
   return {
     ...state,
     state: "red",
