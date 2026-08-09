@@ -80,6 +80,7 @@ resume 若中断，先跑 measure 确认 reflog 形态，不要假设已修
 **needs-human 时效性分诊关闭（2026-08-09，outer 依人裁定执行；判定：withdrawn in body (2026-08-08): reflog 'reset: moving to HEAD' is a legitimate REF-LEVEL update-ref side effect, not a manual bypass; batch merges do go through integration-batch-merge.sh. Premise disproven.）**
 全文见 git 历史（`git log -p -- tasks/gap-batch-merge-bypassed-integration-batch-merge-script.md`）。
 
+**invoke 证据（分诊关闭补录）：** 归档关闭，未重新执行。原始 invoke `git reflog develop -10` 的实测形态见任务体撤回段（reflog `HEAD@{0}: reset` / `develop@{0}` 记录，2026-08-08）。
 ## Touches
 - plugin/scripts/integration-batch-merge.sh（或调用侧：批量合必须走脚本的机械检查）
 - plugin/loop/orchestrator-loop-tick.md（3b 批量合步骤：加"走脚本"断言）

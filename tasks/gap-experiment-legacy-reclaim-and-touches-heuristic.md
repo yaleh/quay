@@ -66,6 +66,7 @@ experiments 的 63 个。
 **needs-human 时效性分诊关闭（2026-08-09，outer 依人裁定执行；判定：substance landed: git-lens L_D/L_G/L_S + derive-touches-heuristic reclaimed into plugin/scripts (confirmed on disk), census check wired (AC5). AC4's 15 impl-deleted test files were already deleted by ADR-022 (census shows 0 remain).）**
 全文见 git 历史（`git log -p -- tasks/gap-experiment-legacy-reclaim-and-touches-heuristic.md`）。
 
+**invoke 证据（分诊关闭补录）：** 归档关闭，未重新执行。原始 invoke `ls experiments/quay-perpetual-stream/scripts/git-lens-*.ts experiments/quay-perpetual-stream/scripts/derive-touches-heuristic.ts` 的回收结果已在任务体 AC1（4 脚本回收进 plugin/scripts + 符号链接）；contract measure `reclaimed_scripts` = 4。
 ## Touches
 
 - tasks/gap-experiment-legacy-reclaim-and-touches-heuristic.md（任务文件自指）
