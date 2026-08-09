@@ -586,6 +586,10 @@ test("AC2 unit — FAILURE_PATTERNS recognize the reporter info-glyph + per-file
     "ℹ fail 0",
     "ℹ cancelled 0",
     "__PERFILE__ duration_ms=100 /home/yale/work/quay/packages/quay/test/foo.test.mjs passed=true", // passed=true is NOT a failure
+    // gap-runner-perfile-pattern-unnchored-self-match-phantom-red AC3: the round-163 phantom-red —
+    // a PASSING test whose NAME quotes the `__PERFILE__ ... passed=false` shape (the runner's own
+    // e2e name) is `✔`-prefixed, so the ^-anchored + full-shape pattern must NOT flag it:
+    "✔ AC2/AC3 e2e — a `__PERFILE__ duration_ms=336 /home/yale/work/quay/plugin/test/foo.test.mjs passed=false` per-file line flips red and carries the failed file in failures[] (336.35913ms)",
     "# fail 0",
     "# cancelled 0",
   ]) {

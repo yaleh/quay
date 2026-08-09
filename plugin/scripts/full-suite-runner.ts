@@ -267,7 +267,7 @@ const FAILURE_PATTERNS: RegExp[] = [
   /FULL-SUITE-EXIT=[^0]/, // the repo's own full-suite exit marker, non-zero
   /^✖\s+\S.*\(\d+(?:\.\d+)?ms\)/, // node:test spec-reporter per-test failure: ✖ <testname> (Nms) — ^ anchored: a REAL reporter failure starts the line; a PASSING test whose NAME quotes the `✖ <name> (Nms)` shape (runner-failure-patterns' own e2e names) is `✔`-prefixed and must not match
   /^✖\s+failing tests?/, // node:test spec-reporter failure-block header: `✖ failing tests:` (only emitted when tests failed) — ^ anchored, same reasoning
-  /__PERFILE__.*passed=false/, // measure-suite-reporter per-file failure: __PERFILE__ duration_ms=<d> <path> passed=false
+  /^__PERFILE__\s+duration_ms=.*\s+passed=false\b/, // measure-suite-reporter per-file failure: __PERFILE__ duration_ms=<d> <path> passed=false — ^ anchored + FULL reporter shape (candidate B, gap-runner-perfile-pattern-unnchored-self-match-phantom-red): a REAL reporter line starts column-0 with `__PERFILE__ duration_ms=...`; a PASSING test whose NAME quotes the shape (the runner's own e2e test names) is `✔`-prefixed and must not match — same family as the ^✖ fix (c83ce4be)
   /tmux-leak-scan: FAIL/, // suite-tail leak scan's residual report (candidate C)
 ];
 
