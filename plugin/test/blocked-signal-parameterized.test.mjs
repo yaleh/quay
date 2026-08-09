@@ -437,3 +437,261 @@ test("Contract measure — a --target outer invocation greps the 'blocked-signal
     cleanup(tmp);
   }
 });
+
+// ── Candidate B (gap-last-pane-txt-has-no-writer): LIVE tmux capture when the --pane snapshot is stale/absent ──
+//
+// The dead-snapshot class: `.quay/last-pane.txt` had NO writer, so its stale bytes were classified
+// busy / reset / 0/3 forever and A7 could never detect a stopped inner. Candidate B makes
+// observePaneForRuling read a LIVE capture-pane when the snapshot is stale (> PANE_STALENESS_MS) or
+// absent — eliminating the whole dead-snapshot class. These tests drive the observer DIRECTLY with a
+// `liveCaptureFn` injection seam (the repo's "NO terminal sessions/windows" discipline) so the live
+// fallback is exercised hermetically; the seam is the exact function `capturePaneLive` wraps.
+
+// Reusable env-clearing helper: with these set to empty strings the CLI child cannot resolve any
+// tmux target (env override empty, no orchestration/session-liveness.env in the tmp workspace), so a
+// live capture is guaranteed unavailable — hermetic regardless of whether the test runner itself runs
+// inside tmux.
+function blankTmuxEnv() {
+  return { SESSION_TMUX_SESSION: "", SESSION_TMUX_SOCKET: "", SESSION_TMUX_TARGET: "", INNER_BLOCKED_TMUX_TARGET: "" };
+}
+
+test("candidate B — a STALE pane file is never classified; the observer reads the LIVE capture instead (source=live)", async () => {
+  const cli = await import(CLI);
+  const tmp = makeTmpWorkspace();
+  try {
+    const pane = writePaneFile(tmp, "stale.txt", WAITING_INPUT_PANE);
+    const t = new Date(Date.now() - 400 * 1000); // older than PANE_STALENESS_MS (300s)
+    fs.utimesSync(pane, t, t);
+
+    let liveCalls = 0;
+    const obs = await cli.observePaneForRuling(tmp, {
+      panePath: pane,
+      nowMs: Date.now(),
+      samples: 1,
+      target: "outer",
+      tmuxTarget: "quay-0:outer",
+      liveCaptureFn: (target) => { liveCalls++; assert.equal(target, "quay-0:outer"); return WAITING_INPUT_PANE; },
+    });
+    assert.equal(obs.source, "live", "a stale snapshot must be attributed to the LIVE source");
+    assert.equal(obs.state, "waiting-input", "the live pane is classified, not the stale bytes");
+    assert.ok(obs.condition, "samples=1 ⇒ a ruling-required condition emerges from the live read");
+    assert.equal(liveCalls, 1, "live capture invoked exactly once");
+    assert.match(obs.condition.evidence.join("\n"), /pane source: live \(snapshot stale\/absent — live tmux capture\)/,
+      "the evidence names the live source (the verification anchor for the dead-snapshot fix)");
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test("candidate B — a FRESH pane file wins (source=file); live capture is NOT invoked", async () => {
+  const cli = await import(CLI);
+  const tmp = makeTmpWorkspace();
+  try {
+    const pane = writePaneFile(tmp, "fresh.txt", WAITING_INPUT_PANE); // fresh mtime
+    let liveCalls = 0;
+    const obs = await cli.observePaneForRuling(tmp, {
+      panePath: pane,
+      nowMs: Date.now(),
+      samples: 1,
+      target: "outer",
+      tmuxTarget: "quay-0:outer",
+      liveCaptureFn: () => { liveCalls++; return BUSY_PANE; },
+    });
+    assert.equal(obs.source, "file", "a fresh snapshot stays on the file source");
+    assert.equal(obs.state, "waiting-input");
+    assert.equal(liveCalls, 0, "live capture must NOT be invoked while the file is fresh (backward-safety)");
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test("candidate B — STALE file + live capture unavailable ⇒ unreadable, counter reset, no condition (fail-closed)", async () => {
+  const cli = await import(CLI);
+  const tmp = makeTmpWorkspace();
+  try {
+    const pane = writePaneFile(tmp, "stale.txt", WAITING_INPUT_PANE);
+    const t = new Date(Date.now() - 400 * 1000);
+    fs.utimesSync(pane, t, t);
+
+    // Build a streak of 2 toward outer first (via a fresh file so it registers).
+    const fresh = writePaneFile(tmp, "fresh.txt", WAITING_INPUT_PANE);
+    await cli.observePaneForRuling(tmp, { panePath: fresh, samples: 3, target: "outer" });
+    await cli.observePaneForRuling(tmp, { panePath: fresh, samples: 3, target: "outer" });
+    assert.equal(cli.readRulingObserverState(tmp, "outer").consecutiveNeedsInput, 2, "streak built to 2");
+
+    // Now a stale file with a FAILING live capture ⇒ unreadable + counter reset, never busy-classified.
+    const obs = await cli.observePaneForRuling(tmp, {
+      panePath: pane,
+      nowMs: Date.now(),
+      samples: 3,
+      target: "outer",
+      tmuxTarget: "quay-0:outer",
+      liveCaptureFn: () => null, // tmux unreachable / target pane missing
+    });
+    assert.equal(obs.source, null, "no source when both file and live fail");
+    assert.equal(obs.state, "unreadable");
+    assert.equal(obs.condition, null);
+    assert.equal(cli.readRulingObserverState(tmp, "outer").consecutiveNeedsInput, 0,
+      "stale + unavailable resets the counter — no false positive on stale data");
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test("candidate B — ABSENT --pane file + live capture success ⇒ source=live (no dead-snapshot trust)", async () => {
+  const cli = await import(CLI);
+  const tmp = makeTmpWorkspace();
+  try {
+    const pane = path.join(tmp, "never-written.txt");
+    let liveCalls = 0;
+    const obs = await cli.observePaneForRuling(tmp, {
+      panePath: pane,
+      nowMs: Date.now(),
+      samples: 1,
+      target: "inner",
+      tmuxTarget: "quay-0:inner",
+      liveCaptureFn: (target) => { liveCalls++; assert.equal(target, "quay-0:inner"); return PERMISSION_PANE; },
+    });
+    assert.equal(obs.source, "live", "an absent snapshot falls back to live");
+    assert.equal(obs.state, "permission-prompt", "a permission prompt is a needs-input sample (AC3)");
+    assert.ok(obs.condition, "samples=1 ⇒ a stopped-at-prompt inner is DETECTABLE (blocked_detectable invariant)");
+    assert.equal(liveCalls, 1);
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test("candidate B — no panePath and no resolvable tmux target ⇒ unobserved no-op (live never guessed)", async () => {
+  const cli = await import(CLI);
+  const tmp = makeTmpWorkspace();
+  try {
+    // Blank every tmux/session env and use a tmp workspace with NO orchestration/session-liveness.env
+    // ⇒ resolveTmuxTarget returns null ⇒ the live fallback is a no-op, never a guessed session.
+    const saved = {};
+    for (const k of ["SESSION_TMUX_SESSION", "SESSION_TMUX_SOCKET", "SESSION_TMUX_TARGET", "INNER_BLOCKED_TMUX_TARGET"]) {
+      saved[k] = process.env[k];
+      delete process.env[k];
+    }
+    try {
+      const obs = await cli.observePaneForRuling(tmp, {
+        nowMs: Date.now(),
+        samples: 3,
+        target: "inner",
+        liveCaptureFn: () => { assert.fail("live capture must not run without a resolvable target"); },
+      });
+      assert.equal(obs.source, null);
+      assert.equal(obs.state, "unobserved", "no pane source at all ⇒ unobserved, not inferred");
+      assert.equal(obs.condition, null);
+    } finally {
+      for (const k of Object.keys(saved)) {
+        if (saved[k] !== undefined) process.env[k] = saved[k]; else delete process.env[k];
+      }
+    }
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test("candidate B — AC2 with a LIVE source: two consecutive live samples reach the threshold and write", async () => {
+  const cli = await import(CLI);
+  const tmp = makeTmpWorkspace();
+  try {
+    // The dead-snapshot defect was "always busy / always reset / never 3". With a live source the
+    // observer must be able to ACCUMULATE across observations (blocked_detectable).
+    let calls = 0;
+    const obs1 = await cli.observePaneForRuling(tmp, {
+      nowMs: Date.now(), samples: 2, target: "inner",
+      tmuxTarget: "quay-0:inner",
+      liveCaptureFn: () => { calls++; return WAITING_INPUT_PANE; },
+    });
+    assert.equal(obs1.state, "waiting-input");
+    assert.equal(obs1.consecutive, 1, "first live sample accumulates 1/2");
+    assert.equal(obs1.condition, null, "1/2 is not yet a block");
+
+    const obs2 = await cli.observePaneForRuling(tmp, {
+      nowMs: Date.now(), samples: 2, target: "inner",
+      tmuxTarget: "quay-0:inner",
+      liveCaptureFn: () => { calls++; return WAITING_INPUT_PANE; },
+    });
+    assert.equal(obs2.consecutive, 2, "second live sample reaches 2/2");
+    assert.ok(obs2.condition, "a LIVE waiting pane is detectable after the threshold (blocked_detectable)");
+    assert.equal(calls, 2, "two live captures, one per observation");
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test("candidate B — busy is never a false positive from a LIVE source (busy_not_false_positive)", async () => {
+  const cli = await import(CLI);
+  const tmp = makeTmpWorkspace();
+  try {
+    const obs = await cli.observePaneForRuling(tmp, {
+      nowMs: Date.now(), samples: 3, target: "inner",
+      tmuxTarget: "quay-0:inner",
+      liveCaptureFn: () => BUSY_PANE,
+    });
+    assert.equal(obs.state, "busy");
+    assert.equal(obs.needsInput, false, "a busy live pane is never a needs-input sample");
+    assert.equal(obs.condition, null, "busy never produces a ruling-required condition");
+    assert.equal(cli.readRulingObserverState(tmp, "inner").consecutiveNeedsInput, 0, "busy resets the counter");
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test("candidate B — CLI: a STALE --pane file with live unavailable ⇒ unreadable/reset (never busy/never block)", () => {
+  const tmp = makeTmpWorkspace();
+  try {
+    const pane = writePaneFile(tmp, "stale.txt", WAITING_INPUT_PANE);
+    const t = new Date(Date.now() - 400 * 1000);
+    fs.utimesSync(pane, t, t);
+    // Blank the tmux env so the child cannot resolve a live target → live capture guaranteed unavailable.
+    const res = runCli(tmp, ["--detect-stop", "--target", "inner", "--pane", pane, "--samples", "3"], blankTmuxEnv());
+    assert.equal(res.status, 0, res.stderr);
+    assert.match(res.stdout, /pane_decision=unreadable branch=reset consecutive=0\/3/, res.stdout);
+    assert.match(res.stdout, /no stop condition/, "a stale file with no live source must NOT produce a block");
+    assert.ok(!fs.existsSync(INNER_BLOCKED_PATH(tmp)), "no block from a stale/unreadable pane");
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test("candidate B — resolveTmuxTarget precedence: explicit env > session env > session-liveness.env > null (never a guess)", async () => {
+  const cli = await import(CLI);
+  const tmp = makeTmpWorkspace();
+  const saved = {};
+  for (const k of ["SESSION_TMUX_SESSION", "SESSION_TMUX_SOCKET", "SESSION_TMUX_TARGET", "INNER_BLOCKED_TMUX_TARGET"]) {
+    saved[k] = process.env[k];
+    delete process.env[k];
+  }
+  try {
+    // 1) Nothing configured ⇒ null (the "NO guess" discipline — no invented session name).
+    assert.equal(cli.resolveTmuxTarget(tmp, "inner"), null, "no config ⇒ null");
+
+    // 2) SESSION_TMUX_SESSION env ⇒ "<session>:<target>".
+    process.env.SESSION_TMUX_SESSION = "sess-a";
+    assert.equal(cli.resolveTmuxTarget(tmp, "inner"), "sess-a:inner");
+    assert.equal(cli.resolveTmuxTarget(tmp, "outer"), "sess-a:outer", "the role window names the observed target");
+
+    // 3) SESSION_TMUX_TARGET (session-liveness explicit target override) wins over the session env.
+    process.env.SESSION_TMUX_TARGET = "st-target";
+    assert.equal(cli.resolveTmuxTarget(tmp, "inner"), "st-target");
+
+    // 4) INNER_BLOCKED_TMUX_TARGET (the observer's own explicit override) wins over everything.
+    process.env.INNER_BLOCKED_TMUX_TARGET = "explicit-sess:win";
+    assert.equal(cli.resolveTmuxTarget(tmp, "inner"), "explicit-sess:win");
+
+    // 5) No env ⇒ the <root>/orchestration/session-liveness.env file is the fallback.
+    delete process.env.SESSION_TMUX_SESSION;
+    delete process.env.SESSION_TMUX_TARGET;
+    delete process.env.INNER_BLOCKED_TMUX_TARGET;
+    const envFile = path.join(tmp, "orchestration", "session-liveness.env");
+    fs.mkdirSync(path.dirname(envFile), { recursive: true });
+    fs.writeFileSync(envFile, 'SESSION_TMUX_SESSION="from-file"\n', "utf8");
+    assert.equal(cli.resolveTmuxTarget(tmp, "inner"), "from-file:inner");
+  } finally {
+    for (const k of Object.keys(saved)) {
+      if (saved[k] !== undefined) process.env[k] = saved[k]; else delete process.env[k];
+    }
+  }
+});
