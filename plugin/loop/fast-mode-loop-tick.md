@@ -206,20 +206,31 @@ AC1/AC2）。本散文只讲判读规则，**不再手列族文件**——文件
 全绿（fail 0 / cancelled 0，`$TEST_COMMAND plugin/test/session-liveness-events.test.mjs plugin/test/session-liveness-heartbeat.test.mjs plugin/test/session-liveness-signals.test.mjs plugin/test/cold-start-skill.test.mjs`）；
 人为负载（并发放量套件）下确实变红 ⇒ 敏感是真实的，标注不是伪装的借口。
 
-## serial 组的显式判据（gap-serial-group-recompose-nested-runner-criterion，2026-08-07）
+## serial 组的显式判据（gap-serial-group-recompose-nested-runner-criterion，2026-08-07；round-162 扩展）
 
-**进 serial 的唯一理由 = 该文件 spawn 自己 worker 池的子套件（嵌套 runner）**——通过
-`$TEST_COMMAND` / `--for-task` 派生并发 N 的子套件（runner-grouping / select-tests-for-touches /
-quay-init-loop-core 属此类，见各文件头 `@test-group serial`）。serial 并发 1 是机制不变量——这类
-文件在并发 8 主套件下 = 8×N 进程互相放大，cc1 是正确答案不是保守。
+**serial 的准入判据（两条，满足其一即可）**：
+1. **嵌套 runner**——该文件 spawn 自己 worker 池的子套件（通过 `$TEST_COMMAND` / `--for-task` 派生
+   并发 N 的子套件；runner-grouping / select-tests-for-touches / quay-init-loop-core 属此类，见各文件头
+   `@test-group serial`）。serial 并发 1 是机制不变量——这类文件在并发 N 主套件下 = N×子进程互相放大，
+   cc1 是正确答案不是保守。
+2. **real-install 的 install/quay-init 家族**——每个测试 spawn 真实 `quay-init.sh --loop` 安装
+   （真实 git 仓库 + 提交 + 可能真实 tmux/pre-commit-hook 往返）。该家族在 160/161/162 三论全量验证中
+   轮换 flake（每轮不同的文件：drift-report/governance、loop-core/serial、install-config/lowconc），
+   全部单跑全绿——是并发负载放大，不是逻辑错误。round-162 把 install-config-driven-e2e 移入 serial
+   （`gap-install-config-driven-e2e-load-flake`），本任务把**整个家族**统一收编进 serial 的并发 1 隔离
+   体制（`gap-install-family-tests-rotate-flakes-under-full-suite`），并给每个成员文件打上
+   `// @load-sensitive heavy|nested-spawn` + `KNOWN-LOAD-SENSITIVE` 机器可读标记。
 
 **其它理由一律走 lowconc，不走 serial**：
 - **低负载/时序敏感**（如 checker-cost 的 9 处单调性断言）——需要的是【机器有余量】不是【独占】；
-- **hermetic 但先前留串行**（如 session-topology 的私有 socket 自隔离）——隔离功课做完、分组没跟；
-- **串行只是验收标准文本、非技术必要**（如 install-config-driven-e2e）。
+- **hermetic 但先前留串行**（如 session-topology 的私有 socket 自隔离）——隔离功课做完、分组没跟。
 
-判定新文件归组时读这条：能说清「不串行会怎样」才算 serial；否则进 lowconc（需低负载）或主套件。
-GROUP NOTE 必须与判据对齐——同一家族内，嵌套 runner 的留 serial，低负载/时序的走 lowconc。
+判定新文件归组时读这条：能说清「不串行会怎样」才算 serial（嵌套 runner ⇒ 进程放大；real-install ⇒
+真实安装/提交往返的墙钟负载）；否则进 lowconc（需低负载）或主套件。
+GROUP NOTE 必须与判据对齐——real-install 的 install/quay-init 家族整体已收编进 serial（round-162 只移
+install-config 单文件；`gap-install-family-tests-rotate-flakes-under-full-suite` 把整个家族移入，含
+quay-init-tmux-detection 等原 lowconc 成员——家族按 round 轮换 flake，无法预判下一个），非家族的
+低负载/时序文件才走 lowconc。
 
 ## 会话存活监视（`session-liveness.sh`）——看自己还在不在（AC13）
 

@@ -1,13 +1,19 @@
 // @test-group serial
-// GROUP NOTE (gap-install-config-driven-e2e-load-flake): routed to `serial`, NOT `lowconc`.
-// The serial criterion was nested-runner only (gap-serial-group-recompose-nested-runner-criterion);
-// this file EXTENDS it to the install/quay-init family (the criterion is documented in
-// scripts/test.sh — serial = the load-sensitive family that needs concurrency-1 isolation).
-// install-config-driven-e2e does REAL quay-init --loop installs into temp workspaces (~122s
-// standalone, 12 real installs) and flaked 2/3 full-suite rounds under the lowconc
-// concurrency-3 phase (`✖ A1 字节一致` at 23s under resource contention while the solo run stayed
-// 12/12 green — gap-install-config-driven-e2e-load-flake). serial = concurrency 1 = complete
-// isolation: no competing hermetic test runs while this file lays down its workspaces.
+// @load-sensitive heavy
+// KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — real-install e2e:
+// each test spawns a real quay-init.sh --loop subprocess tree. The install/quay-init family rotated
+// flakes across groups under full-suite load (round-160/161/162 — different files each round), so the
+// whole family is consolidated into the concurrency-1 serial phase
+// (gap-install-family-tests-rotate-flakes-under-full-suite).
+// GROUP NOTE (gap-install-config-driven-e2e-load-flake + gap-install-family-tests-rotate-flakes-
+// under-full-suite): routed to `serial`. The serial criterion was nested-runner only
+// (gap-serial-group-recompose-nested-runner-criterion); this file EXTENDS it to the install/quay-init
+// family (the criterion is documented in scripts/test.sh — serial = the load-sensitive family that
+// needs concurrency-1 isolation). install-config-driven-e2e does REAL quay-init --loop installs into
+// temp workspaces (~122s standalone, 12 real installs) and flaked 2/3 full-suite rounds under the
+// lowconc concurrency-3 phase (`✖ A1 字节一致` at 23s under resource contention while the solo run
+// stayed 12/12 green — gap-install-config-driven-e2e-load-flake). serial = concurrency 1 = complete
+// isolation: the concurrency-1 serial phase is now the family's single isolation regime.
 // install-config-driven-e2e.test.mjs — gap-no-e2e-proves-install-is-configuration-driven.
 //
 // The reinstall gate: ONE e2e with FOUR assertions (A1–A4). This file is the ONLY
@@ -38,7 +44,9 @@
 // stays red (never "both empty so identical").
 // AC7: the two derived test commands are asserted to genuinely differ (verbatim
 // evidence pasted in the task body from the run below).
-// AC8: node:test + `// @test-group lowconc`; temp workspaces destroyed via after().
+// AC8: node:test + `// @test-group serial` (moved from lowconc to the concurrency-1 serial phase
+// with the install/quay-init family, gap-install-family-tests-rotate-flakes-under-full-suite);
+// temp workspaces destroyed via after().
 
 import { test, after } from "node:test";
 import assert from "node:assert/strict";

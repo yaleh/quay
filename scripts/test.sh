@@ -20,13 +20,13 @@
 # currently 34 files — the shrink-only ratchet of AC4, it can only get shorter, never longer).
 # NEW files must also carry a `// @test-group <product|engine|governance|serial|lowconc>`
 # declaration (AC5); existing files may omit it and default to `engine`. `serial` is the
-# load-sensitive family routed to its own concurrency-1 phase
-# (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests); `lowconc` is the
-# hermetic-but-load-sensitive family routed to its own concurrency-3 phase
-# (gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive). The serial CRITERION is
-# nested-runner OR the install/quay-init family (gap-install-config-driven-e2e-load-flake: a real
-# install e2e flaked 2/3 full-suite rounds under the lowconc concurrency-3 phase, so the
-# concurrency-1 serial phase now owns the heaviest install e2e). The check does NOT migrate the 34
+# load-sensitive family routed to its own concurrency-1 phase — nested-suite-spawn + real-wall-
+# clock-wait + the real-install install/quay-init family, the latter admitted at round 162 after
+# rotating flakes across groups under full-suite load
+# (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests +
+# gap-install-family-tests-rotate-flakes-under-full-suite); `lowconc` is the hermetic-but-load-
+# sensitive session-observation family routed to its own concurrency-3 phase
+# (gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive). The check does NOT migrate the 34
 # legacy hand-rolled-harness files — it stops the 35th and turns each existing file's eventual
 # conversion (e.g. relation-sync's harness) into the ratchet.
 #
@@ -81,13 +81,20 @@
 #   - governance  exp5 metering (PARKED but not deleted — exp6 phase-2 needs it; the in-file
 #                 skip block makes it visible as `skipped` in default runs instead of absent)
 #   - serial      KNOWN-LOAD-SENSITIVE A/B-class family (nested-suite-spawn, real-wall-clock-wait)
-#                 PLUS the install/quay-init family (real-install e2e — its heaviest member
-#                 install-config-driven-e2e flaked under the lowconc cc3 phase, so the serial
-#                 criterion was extended at gap-install-config-driven-e2e-load-flake) — routed OUT
-#                 of the concurrency-N body into its own phase at concurrency 1
+#                 + the REAL-INSTALL install/quay-init family, routed OUT of the concurrency-N body
+#                 into its own phase at concurrency 1. The serial admission criterion
+#                 (gap-serial-group-recompose-nested-runner-criterion — nested-runner-only) was
+#                 EXTENDED at round 162 to admit the install/quay-init real-install family after it
+#                 rotated flakes across groups under full-suite load (rounds 160/161/162 — a
+#                 different file each round: drift-report/governance, loop-core/serial,
+#                 install-config/lowconc): the whole family is now consolidated into the
+#                 concurrency-1 serial phase (gap-install-family-tests-rotate-flakes-under-full-suite).
 #                 (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests).
-#   - lowconc     hermetic-but-load-sensitive B-class session-observation + install/quay-init
-#                 family (each mkdtemp workspace / private socket) — its own phase at concurrency 3
+#   - lowconc     hermetic-but-load-sensitive B-class session-observation family (each private
+#                 socket / wall-clock wait) — its own phase at concurrency 3. The install/quay-init
+#                 family LEFT this group for serial in round 162
+#                 (gap-install-family-tests-rotate-flakes-under-full-suite); only the session-
+#                 observation wall-clock files remain.
 #                 (gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive).
 #
 #   The glob now ALSO includes experiments/quay-perpetual-stream/test/*.test.mjs (AC2), so the
@@ -581,10 +588,11 @@ full_suite_lock_release() {
 
 # group_of <file> — echo the declared `// @test-group <name>` (default: engine, AC7).
 # Valid groups: product|engine|governance (the default-run body) + serial (the load-sensitive
-# concurrency-1 phase — nested-runner OR install/quay-init family, the criterion extended at
-# gap-install-config-driven-e2e-load-flake; gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests) +
-# lowconc (the hermetic-but-load-sensitive concurrency-3 phase,
-# gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive). A MISSING declaration defaults to
+# concurrency-1 phase — nested-suite-spawn + real-wall-clock-wait + the real-install
+# install/quay-init family, gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests +
+# gap-install-family-tests-rotate-flakes-under-full-suite) + lowconc (the hermetic-but-load-sensitive
+# concurrency-3 phase, gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive). A MISSING
+# declaration defaults to
 # engine (AC7). An UNRECOGNIZED group name is FAIL-CLOSED, never silently degraded to engine:
 # the r10 regression (four commits b209f4fd→174badc0→e92c54d8→c7176a37 each dropping one group
 # from this case, so serial/lowconc silently folded into the concurrency-N body and the isolation
@@ -879,14 +887,16 @@ run_selected() {
     local code=$?
     [ "$oh_full" -eq 1 ] && oh_t5=$(_oh_mark)
     # SERIAL GROUP phase (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests):
-    # the A/B-class KNOWN-LOAD-SENSITIVE family (plus the install/quay-init family — criterion
-    # extended at gap-install-config-driven-e2e-load-flake) is routed OUT of the concurrency-N main
-    # body into a `serial` group that runs AFTER it, ALONE, at concurrency 1 — the mechanical
-    # isolation that keeps real-wall-clock-wait and nested-suite-spawn tests (and real install e2e)
-    # from being starved by the main body's worker pool. The concurrency is a HARD-CODED 1 — serial
-    # isolation is the mechanism's invariant, never a user-tunable knob (the --group serial path in
-    # the non-default branch strips explicit concurrency flags for the same reason). Its TAP summary
-    # lands LAST on the
+    # the A/B-class KNOWN-LOAD-SENSITIVE family (nested-suite-spawn + real-wall-clock-wait) PLUS
+    # the REAL-INSTALL install/quay-init family is routed OUT of the concurrency-N main body into
+    # a `serial` group that runs AFTER it, ALONE, at concurrency 1 — the mechanical isolation that
+    # keeps real-wall-clock-wait, nested-suite-spawn, and real-install tests from being starved by
+    # the main body's worker pool. The install/quay-init family was admitted to serial at round 162
+    # after rotating flakes across groups under full-suite load (rounds 160/161/162 — a different
+    # file each round; gap-install-family-tests-rotate-flakes-under-full-suite). The concurrency
+    # is a HARD-CODED 1 — serial isolation is the mechanism's
+    # invariant, never a user-tunable knob (the --group serial path in the non-default branch
+    # strips explicit concurrency flags for the same reason). Its TAP summary lands LAST on the
     # stream, so the outer runner's pass/fail/cancelled tallies reflect BOTH phases (the serial
     # summary overwrites the main body's only when both are green — a serial failure flips the
     # whole run red via its own fail/cancelled). The phase runs EVEN IF the main body failed
@@ -904,16 +914,14 @@ run_selected() {
     fi
     [ "$oh_full" -eq 1 ] && oh_t6=$(_oh_mark)
     # LOWCONC phase (gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive, AC1/AC4): the
-    # hermetic-but-load-sensitive files (B-class session-observation + install/quay-init family,
-    # each mkdtemp workspace / private socket) run in their OWN phase at `--test-concurrency=3` —
-    # not the derived default and not 8 — so wait-type tests get timely scheduling. NOTE
-    # (gap-install-config-driven-e2e-load-flake): the heaviest install e2e
-    # (install-config-driven-e2e, real quay-init installs into temp workspaces) moved OUT to the
-    # concurrency-1 serial phase after flaking here 2/3 rounds; the remaining install/quay-init
-    # lowconc files are lighter and stay at cc3. The phase runs even if the body failed (report all
-    # failures); its exit code merges into `code`. The hard-coded 3 is deliberate (AC4) and does NOT
-    # add a derived-concurrency literal site (resource-gate AC5 pins exactly 5
-    # `--test-concurrency="$(default_test_concurrency)"` sites).
+    # hermetic-but-load-sensitive files (B-class session-observation family, each private socket /
+    # wall-clock wait — the install/quay-init family LEFT this group for serial in round 162,
+    # gap-install-family-tests-rotate-flakes-under-full-suite) run in their OWN phase at
+    # `--test-concurrency=3` — not the derived default and not 8 — so wait-type tests get timely
+    # scheduling. The phase runs even if the body failed (report all failures); its exit code merges
+    # into `code`. The hard-coded 3 is deliberate (AC4) and does NOT add a derived-concurrency
+    # literal site (resource-gate AC5 pins exactly 5 `--test-concurrency="$(default_test_concurrency)"`
+    # sites).
     local lowconc_files=() lf
     while IFS= read -r lf; do lowconc_files+=("$lf"); done < <(select_files "lowconc")
     [ "$oh_full" -eq 1 ] && oh_t6b=$(_oh_mark)
