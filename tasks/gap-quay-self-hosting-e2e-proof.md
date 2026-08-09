@@ -1,7 +1,9 @@
 ---
 id: gap-quay-self-hosting-e2e-proof
-title: "run quay:cold-start's AC8c six-key checklist end to end on quay's own repo and prove it self-certifies without a human — the capstone of quay self-hosting its own cold start"
-status: todo
+title: run quay:cold-start's AC8c six-key checklist end to end on quay's own
+  repo and prove it self-certifies without a human — the capstone of quay
+  self-hosting its own cold start
+status: ready
 parent: gap-quay-has-never-self-hosted-its-own-cold-start
 labels:
   - gap
