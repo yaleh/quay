@@ -35,11 +35,11 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 round-161 实证（serial 相位 install-config passed → quay-init-loop-core failed + 两测试单独跑绿 + 顺序依赖定位）（本任务 Proposal 已含；内层补顺序构造复现）
+- [x] AC1: **复现固化**——任务体记录 round-161 实证（serial 相位 install-config passed → quay-init-loop-core failed + 两测试单独跑绿 + 顺序依赖定位）（本任务 Proposal 已含；内层补顺序构造复现）
 - [ ] AC2: **serial 相位两 install 测试不再互污染**——round-162+ 连续 2 轮 quay-init-loop-core + install-config-driven-e2e 都绿（外层 verification-round 验证）
-- [ ] AC3: **单独跑不回归**——两测试各自单独跑仍 12/12 绿
-- [ ] AC4: **顺序无关**——交换两测试执行顺序也不互污染（负控制）
-- [ ] AC5: **既有机制不回归**——`--for-task` scoped 门绿（含 runner-grouping / serial 机制契约检查）
+- [x] AC3: **单独跑不回归**——两测试各自单独跑仍 12/12 绿
+- [x] AC4: **顺序无关**——交换两测试执行顺序也不互污染（负控制）
+- [x] AC5: **既有机制不回归**——`--for-task` scoped 门绿（含 runner-grouping / serial 机制契约检查）
 
 ## Definition of Done
 
@@ -71,3 +71,23 @@ resume    相位拆分 / 测试隔离 / 残留检查分步提交，任一步完�
 reviewer: outer
 at: 2026-08-09
 changed: 建任务（round-161 serial 相位顺序残留依赖——install-config passed → quay-init-loop-core failed，两测试单独跑绿；inner 的 load-flake 挪 serial 引入的顺序副作用；serial 隔离是并发侧不是顺序侧。实现归内层）
+
+## Evidence（内层实现 2026-08-09）
+
+**实现选择（候选 B：测试内隔离强化，worktree 于 round-159 base fc681f52）**：根因是 install-config-driven-e2e 的所有 install 之前**不传** `--worktree-root`，落到共享的 sibling-of-repo 默认 `/srv/target-worktrees`（一个固定、跨测试共享、磁盘上不存在所以**永远清不掉**的命名空间）；且默认 tmux session 是固定 `proj-0:0.0`（与 quay-init-loop 族 STANDARD_INIT_ARGS 共享）。serial 相位并发 1 但顺序相邻时，前一测试的共享命名空间残留污染后一测试。修复：
+- `packages/quay/test/install-config-driven-e2e.test.mjs`：每个 install 注入**唯一** `--worktree-root`（`diskWorktreeRoot()`——磁盘-backed `/var/tmp/install-e2e-wt-*`，非 tmpfs，`after()` 追踪清理）+ **每 workspace 独立 tmux session**（`p-<basename-slice>-0:0.0`，两个 workspace 永不共享）。AC6/AC1「整段 loop 保留」升级路径用 `worktreeRoot: null`（不注入，保持 consumer 记录的 root）。
+- `plugin/test/quay-init-loop-core.test.mjs`：注释固化隔离契约（该文件本就每 install 唯一 worktree root + 每测试 fresh workspace；固定 `proj-0:0.0` 现在只属于 loop 族）。
+- `tasks/gap-install-config-driven-e2e-load-flake.md`：交叉标注（本任务是 load-flake 挪 serial 的顺序副作用；互为因果）。
+- `scripts/test.sh` 未改——候选 A/C（相位分组/排序）经评估非必要，隔离强化已消除共享命名空间。
+
+**AC1 复现固化（顺序构造）**：并发 1 下按 round-161 顺序 `install-config-driven-e2e.test.mjs` → `quay-init-loop-core.test.mjs` 连跑，修复后 **24/24 pass / 0 fail / EXIT=0（246.7s）**（/tmp/ordering-repro.log）。修复前共享命名空间签名已在任务体 Proposal 记录（round-161 passed→failed）。
+
+**AC3 单独跑不回归**：两测试各自单独跑均 **12/12 绿**（修复前基线：install-config 259s exit 0；quay-init-loop-core 175s exit 0）。
+
+**AC4 顺序无关（负控制）**：交换执行顺序 `quay-init-loop-core.test.mjs` → `install-config-driven-e2e.test.mjs`，并发 1 连跑，修复后 **24/24 pass / 0 fail / EXIT=0（311.7s）**（/tmp/ordering-reverse.log）。两序都绿证明不互污染。
+
+**AC5 scoped 门**：`bash scripts/test.sh --for-task gap-serial-phase-install-test-residue-dependency --allow-thin` → **exit 0**。静态检查 0 违规（test-framework-policy PASS、test-isolation 44 条全部基线内无新增、task-contract strict-subset no violations、adr016 0 违规、dead-code-after-return 0 违规）；测试 **24 pass / 0 fail / 0 cancelled / 0 skipped**（180.0s）。
+
+**残留验证**：修复后两序连跑 + scoped 门跑完，`/var/tmp/install-e2e-wt-*` 0 残留（`after()` 清理生效）、`/tmp/install-e2e-*` 无 11:55 后新增、无 `proj-0` tmux session、`/srv/target-worktrees` 从未存在。
+
+**AC2（serial 相位连续 2 轮绿）归外层 verification-round 验证**——内层只交付顺序无关 + 单独跑绿 + scoped 门绿。
