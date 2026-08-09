@@ -24,6 +24,12 @@
 #     --home <dir>     manager 家目录（默认 $QUAY_GLOBAL_DIR/manager/）
 #
 # 测试接缝：复用 inner-session-check.sh 的全部测试接缝（--session / --transcript / hermetic tmux）。
+# ── 统一 --help（gap-scripts-sprawl：用法在前、退出 0、无业务副作用）────────────────────
+if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
+  _gap_help_lib="$(dirname "${BASH_SOURCE[0]}")/gate-script-lib.sh"
+  if [ -f "$_gap_help_lib" ]; then . "$_gap_help_lib"; tool_help "$0"; else echo "用法: bash $(basename "$0") [参数…]"; fi
+  exit 0
+fi
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -165,3 +165,24 @@ gate_resolve_milestone_root() {
 # Standardized PASS / FAIL output lines.
 gate_emit_pass() { echo "PASS: $*"; }
 gate_emit_fail() { echo "FAIL: $*"; }
+
+# ── tool_help ───────────────────────────────────────────────────────────────────────────────────────
+# The UNIFORM --help contract (gap-scripts-sprawl-no-uniform-cli-convention-across-57-shell-tools,
+# AC2 least-common-denominator mechanism). Every .sh tool routes `--help|-h` through this function.
+#   * FIRST output line starts with 用法 — the Contract measure
+#     (`bash "$f" --help 2>&1 | head -1 | grep -ci 'usage\|用法'`) reads ONLY the first line, so the
+#     用法 token MUST be first for the tool to count as help-consistent.
+#   * then the script's own header comment (its detailed usage), shebang line skipped.
+#   * exit 0, NO business side effects — the AC3 load-bearing negative control: supervisor-deliver.sh
+#     --help must never attempt a delivery; the invariant: capability-catalog.sh --help must not
+#     run the catalog.
+# Usage: tool_help <script-path>
+tool_help() {
+  local _s="${1:?script path required}" _b
+  _b="$(basename "$_s")"
+  printf '用法: bash %s [参数…] — 详见下方脚本头部用法注释（--help|-h 仅打印用法，无副作用，退出 0）\n' "$_b"
+  if [ -f "$_s" ]; then
+    awk 'NR<=120 && /^#/ { sub(/^# ?/, ""); if ($0 !~ /^!/) print }' "$_s" 2>/dev/null || true
+  fi
+  return 0
+}
