@@ -120,6 +120,7 @@ documented reference from a genuine missing file:
 | `orchestration/manager-tick-log.md` | quay's manager tick log — gitignored runtime telemetry the manager appends each tick (see `gap-manager-tick-mechanical-checks...`); referenced by the shipped manager-loop-tick template but NOT a loop deliverable — declared so referenced ⊆ landed holds |
 | `orchestration/SYNTHESIS-four-gaps-2026-08-05.md` | quay's four-gap synthesis that motivated shipping the manager layer — not a generic loop deliverable |
 | `orchestration/SPEC-manager-productization-2026-08-05.md` | quay's manager productization SPEC (C1–C5 constraints, build-vs-run ownership) — not a generic loop deliverable |
+| `orchestration/SPEC-three-layer-unified-architecture-2026-08-09.md` | quay's three-layer (manager/outer/inner) unified-architecture SPEC — referenced by the shipped manager/init skills, not a generic loop deliverable |
 | the manager skill's SPEC methodology-source index | the SPEC files the manager skill lists as an index (AC6) are each declared reference-doc below — referenced, not batch-crystallized, not shipped |
 
 <!-- self-create: orchestration/tick-log.md -->
@@ -138,6 +139,7 @@ documented reference from a genuine missing file:
 <!-- reference-doc: orchestration/manager-loop-tick.md -->
 <!-- reference-doc: orchestration/manager-tick-log.md -->
 <!-- reference-doc: orchestration/SYNTHESIS-four-gaps-2026-08-05.md -->
+<!-- reference-doc: orchestration/SPEC-three-layer-unified-architecture-2026-08-09.md -->
 <!-- reference-doc: orchestration/SPEC-manager-productization-2026-08-05.md -->
 <!-- reference-doc: orchestration/SPEC-cold-start-one-liner.md -->
 <!-- reference-doc: orchestration/SPEC-complete-delivery-surface-2026-08-05.md -->
