@@ -29,11 +29,11 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 round-164 实证 + inner 根因（age-only stale-reclaim 把活而慢的持有者当崩溃回收 ⇒ 互斥破洞）（本任务 Proposal 已含；a551dd5f 已验证）
+- [x] AC1: **复现固化**——任务体记录 round-164 实证 + inner 根因（age-only stale-reclaim 把活而慢的持有者当崩溃回收 ⇒ 互斥破洞）（本任务 Proposal 已含；a551dd5f 已验证）
 - [x] AC2: **子测试不再轮换失败**——a551dd5f 修复后 20-concurrency 测试 5/5（inner 已验）；全量验证（外层 verification-round）
 - [x] AC3: **solo 不回归**——proposal-convergence.test.mjs 218/218 绿（inner a551dd5f 已验）
 - [x] AC4: **TOCTOU 断言核心不削弱**——ceiling 不超 + ok:true 有持久记录 保留（a551dd5f 修互斥，断言未弱化）
-- [ ] AC5: **既有机制不回归**——`--for-task` scoped 门绿（含实验侧测试契约检查）
+- [x] AC5: **既有机制不回归**——`--for-task` scoped 门绿（含实验侧测试契约检查）
 
 ## Definition of Done
 
@@ -64,3 +64,13 @@ resume    根因修复（a551dd5f 已落地）+ 全量验证分步提交，任�
 reviewer: outer
 at: 2026-08-09
 changed: 建任务时判「负载 flake」；inner 10:42 根因定位升格为真互斥破洞（age-only stale-reclaim 回收活而慢的持有者），a551dd5f 已修（PID-liveness 守卫 + 5/5 + 218/218）。任务体更新为根因版。
+
+## Evidence（内层实现 2026-08-09）
+
+- **a551dd5f 落地核验**：worktree 自 develop fc681f52 fork，不含 a551dd5f → 已在 worktree 内 cherry-pick（本地提交 `c7ddf328`，仅改 `experiments/quay-perpetual-stream/scripts/proposal-convergence.ts`），并手工镜像到 `plugin/scripts/proposal-convergence.ts`（两份 sha1 一致，PID-liveness 守卫在 `_acquireEpochLock` 的 stale-reclaim 分支在位，第 1921-1931 行）。
+- **AC1 复现固化**：round-164 实证 + inner 根因（age-only stale-reclaim 回收活而慢的持有者 ⇒ 互斥破洞）本任务 Proposal 已含；根因修复 a551dd5f 经上述 cherry-pick 验证在固定代码上生效。
+- **AC5 scoped 门绿**：`bash scripts/test.sh --for-task gap-proposal-convergence-load-flake-20-child-concurrency --allow-thin`（worktree 内）exit 0：
+  - 静态检查：test-framework-policy PASS、test-isolation PASS（44 条全 baseline）、test-impl-census 287 文件 clean、task-contract-check strict-subset 0 violations。
+  - 测试：`experiments/quay-perpetual-stream/test/proposal-convergence.test.mjs` 218 pass / 0 fail / 0 cancelled（duration 30894ms）。
+  - 20-并发 child 子测试两跳全绿：`20 genuinely concurrent --new-epoch child processes against a shared epoch (maxNewEpochResetCount:3) never exceed the hard ceiling`（1612ms）与 `--override-budget` 同型测试（1534ms）；stale-reclaim（crashed + corrupt）+ deterministic 真互斥 5/5 亦绿。
+- **AC2/AC3/AC4 承接**：子测试 5/5 不再轮换失败、solo 218/218、TOCTOU 核心断言（ceiling 不超 + ok:true 持久记录）均已在 scoped 门内再验（inner a551dd5f 原始验证）。DoD 全量套件绿留外层 verification-round。
