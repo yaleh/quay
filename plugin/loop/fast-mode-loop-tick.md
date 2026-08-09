@@ -357,6 +357,12 @@ node --experimental-strip-types plugin/scripts/slot-refill.ts --root "$(pwd)" --
 
 `.halt` 存在 → 本 tick 空转，报告「已暂停」，重新排程，结束。
 
+**统一 halt 检查点（SPEC 2.8，`gap-spec-p2-halt-three-layer-mechanical-enforcement`）**：三层共用
+**同一个**机械读哨兵命令——`plugin/scripts/halt-check.sh --for <layer> --json`。它一次给出
+`halted`（fail-closed，读失败 = 停）+ **组合判据**（`无 .halt` **且** 最后提交 >24h ⇒ `stall=true`，
+未标记的停摆机械报出）。`--for inner` 是本层标签；输出与 `supervisor-preempt.sh halt-check` 同形
+（`halted=` / `reason=` 行），可当 drop-in 读。**放置 `.halt` ⇒ 下一执行点即停，不等到 tick 边界。**
+
 **抢占挂载（`gap-supervisor-preemption`：.halt 任意点生效，不再只是本步骤 0）**：本步骤只是
 tick 边界的**规则文本**；`.halt` 的**强制点在代码**（机械挂载，任意执行点生效——今晚事故 7
 halt 后仍派发 5 个 subagent 的根因就是「连续流程绕过步骤 0」，SPEC-state-crystallization §2.1）：
@@ -367,11 +373,14 @@ halt 后仍派发 5 个 subagent 的根因就是「连续流程绕过步骤 0」
    进程/会话发停止信号（TUI 形态 = tmux C-c；`-p` 迁移后 = `kill <pid>`，OS 就是抢占原语，
    AC4/AC5b）；`preempt-all --root <根> --target <层>[,<层>] --pid <pid>[,<pid>]` 在 halt 时对
    全部在飞层发信号。
-3. **读哨兵**：`bash plugin/scripts/supervisor-preempt.sh halt-check --root <根>` 输出
-   `halted=true|false` + `reason`（fail-closed——读失败 = 停，gap-halt-sentinel-path-mismatch）。
+3. **读哨兵（统一）**：`bash plugin/scripts/halt-check.sh --for inner --json` 输出 `halted` 字段
+   （fail-closed——读失败 = 停，gap-halt-sentinel-path-mismatch）；`--projects <dir1,dir2,...>`
+   可加读各项目的 `.halt`（外层/管理者三项目读法）。`supervisor-preempt.sh halt-check --root <根>`
+   是同一语义的进程级抢占原语读法，两者等价。
 
 本 tick 每步派发前（步骤 3/4 与槽位回填）都要先问 halt-check/slot-refill——halt 置位即停派，
-不等到下一 tick 边界。
+不等到下一 tick 边界。**组合判据同 A1**：`halt-check.sh --for inner` 的 `stall=true`（无 `.halt` 且
+>24h 无产出）⇒ 未标记的停摆，本 tick 必须升级报出，不静默空转。
 
 **Monitor 挂载自检**（`gap-nothing-checks-whether-the-monitor-is-mounted-or-aimed-right`）：外层靠
 `plugin/scripts/session-liveness.sh` 的 Monitor 消费本层停止条件（观测只有一个工具；`inner-state.sh`

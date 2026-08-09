@@ -155,6 +155,23 @@ Layer = (Role, Anchor, Core, Ledger, QueueView, WriteTarget, HaltResponse)
   **实证:我每轮打印 `archguard 无.halt`,而它已 2 天无提交,连续多轮未升级——
   只读不判会稳定产生「看见但没发现」。**
 
+#### P2-8 验收（`gap-spec-p2-halt-three-layer-mechanical-enforcement`,2026-08-09 落地）
+
+统一检查点 = `plugin/scripts/halt-check.sh --for <layer> --json`,三层 tick 入口各接
+(`--for inner` / `--for outer` / `--for manager`)。三层实测:
+
+- **放置 `.halt` ⇒ 三层停**:`halt-check.sh --for {inner,outer,manager} --json` 三层各自输出
+  `halted: true`(measure `three_layer_halt_effective` = 3 个 `halted` 字段,band 3 达成)。
+- **移除 `.halt` ⇒ 三层恢复**:删哨兵后三层 `halted: false`(invariant `halt_removal_resumes` = 1)。
+- **组合判据机械化**:无 `.halt` + 最后提交 >24h ⇒ `stall: true` + 原因「unmarked stall (SPEC 2.8):
+  no .halt AND last commit … h ago > 24.00 h threshold」;有 `.halt` ⇒ `stall: false`(标记停不是未标记停摆)
+  (invariant `halt_combination_mechanical` = 1)。fail-closed 读语义与 `supervisor-preempt.sh halt-check`
+  同形(读失败 ⇒ `halted: true`,绝不 fail-open)。
+
+三层 tick 接线:inner `plugin/loop/fast-mode-loop-tick.md` 步骤 0 / outer `orchestration/
+orchestrator-loop-tick.md` 步骤 0d / manager `orchestration/manager-loop-tick.md` 步骤 1a。
+capability-catalog 声明 `halt-check.sh`(AC1c 门绿)。
+
 ---
 
 ## 3. 明确不统一什么

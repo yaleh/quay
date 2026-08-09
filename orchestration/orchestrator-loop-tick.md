@@ -564,10 +564,18 @@ rm <repo>/.halt
 所以在飞任务会算完但不落地，直到解除。**人已裁定接受这一点。**
 缓解只有一条纪律：**暂停不是终点，解除条件必须写在 `.halt` 内容里**。
 
-**外层每个 tick 必须报三个项目的 `.halt` 状态**——这是「暂停后忘了」的唯一防线：
+**外层每个 tick 必须报三个项目的 `.halt` 状态**——这是「暂停后忘了」的唯一防线。**统一读法（SPEC
+2.8，`gap-spec-p2-halt-three-layer-mechanical-enforcement`）**：`plugin/scripts/halt-check.sh`
+是本层（及三层）共用的机械检查点——`--for outer --json` 给出 `halted`（fail-closed）+ 组合判据
+`stall`（`无 .halt` **且** 最后提交 >24h ⇒ 未标记停摆）；`--projects <根清单>` 一次读三项目的
+`.halt` + 最后提交时距，逐项目报 `stall`。`halted=true` ⇒ 本 tick 空转；`stall=true` ⇒ 升级报出。
 
 ```bash
 # 每个目标项目的根见各自 .quay/config.yml loop.repo_root（quay 自己的清单：quay/archguard/meta-cc）
+# --projects 接受目标项目根的绝对路径（label = basename）；相对名在 --root 下解析。
+bash plugin/scripts/halt-check.sh --for outer --json \
+  --projects <目标项目根1,目标项目根2,...>
+# 人读 fallback（兼容旧式）：
 for d in <目标项目根清单>; do
   printf "%-12s %s\n" "$(basename $d)" \
     "$([ -f "$d/.halt" ] && echo "暂停: $(head -c 80 $d/.halt)" || echo 运行中)"
