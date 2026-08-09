@@ -1165,5 +1165,17 @@ clause-14 降为 advisory、既有失败记在已 done 的任务体里）。
 - Monitor 两判据（`bash plugin/scripts/monitor-mount-check.sh --json` 的 `mounted` /
   `targetRoot` 是否等于本仓根 / `targetOk`）——外层消费本层停止条件的那条命脉，挂没挂/挂哪个仓库
   （2026-08-06 起 `delivered` 随共享 events.jsonl 移除；事件送达由挂载方自己的 Monitor 流承担）
+- **账本四元组（统一发射器，`gap-spec-p2-quad-tuple-unified-emitter`）**：用统一发射器吐本层
+  SPEC §2.5 四元组，不再手工拼。先 meta-cc 取本层声称机制的最近真实执行时刻（A18–A22 的
+  `ready-pool-check --apply` / `slot-refill` / `fast-mode-telemetry --task-start` /
+  `sync-lag-check --push` 等，`query_session_content role=tool tool_name=<X>` → `last(timestamp)`），
+  超过声称周期 ⇒ 以 `:已停用|已替代|是缺陷` 三选一标注，然后：
+  ```bash
+  node --experimental-strip-types plugin/scripts/accounting-emit.ts --layer inner --json \
+    --in-flight <真实在飞 realConcurrency> --cap "${effective_cap:-3}" \
+    --mechanism "ready-pool-check --apply:<epoch>[:判定]" --mechanism "slot-refill:<epoch>[:判定]" ...
+  ```
+  输出 `complete:false` 且 `missing` 非空 ⇒ 对应机制未执行/未判定，本 tick 查明并写「已停用/已替代/是缺陷」
+  ——缺值 = 未执行，机械报出，不靠自述（AC3/AC4）。
 
 不要只说「继续中」——没有这些数字，1 任务/小时的目标无法判定。

@@ -74,6 +74,7 @@ declare -A QUESTION=(
   [assert-clean-tree.sh]="Is the working tree clean after a full-suite run?"
   [audit-independence-check.sh]="Is the audit gate independent of the contestant it judges?"
   [audit-independence-check.ts]="Is the audit gate independent of the contestant it judges (canonical implementation)?"
+  [accounting-emit.ts]="What is this layer's SPEC §2.5 ledger four-tuple — ① each claimed mechanism's last real execution time vs its claimed period, ② occupancy (in-flight/effective_cap), ③ write target, ④ the canonical ledger line — in ONE unified, layer-identical schema, with any missing field mechanically reported (缺值 = 未执行)?"
   [axis-generator.ts]="What range does each standing criterion quantify (time/scope/layer/instance/cost), and which axes remain unopened?"
   [build-evidence-collector.ts]="What evidence did the Build phase deterministically produce?"
   [build-evidence-gate.ts]="Is the Build evidence manifest valid before the Audit phase may proceed?"

@@ -6,6 +6,16 @@
 # not-yet-flipped climbing to 42/51 = 82% — AC23 only checks the tick HEARTBEAT, not whether the
 # forced steps INSIDE the tick ran).
 #
+# CROSS-ANNOTATION (task gap-spec-p2-quad-tuple-unified-emitter, candidate A):
+# this script is the closure-lag SIGNAL + TRACE WRITER (one mechanism in the SPEC §2.5 ledger
+# four-tuple's ①「声称机制的最近真实执行时刻」— its trace `.quay/closure-pass-last-run.json` is one
+# of the on-disk traces the unified four-tuple emitter reads). The UNIFIED four-tuple emitter is
+# `plugin/scripts/accounting-emit.ts` (all three layers call it); this script stays the outer's
+# closure-lag signal, and the emitter's outer mechanism registry reads this script's trace for the
+# closure-pass's last real execution time. Candidate B (extending this script into the four-tuple
+# emitter) was NOT taken — the emitter is a separate, layer-identical script so the format is shared
+# by construction.
+#
 # THE SIGNAL (## Contract band: non-zero = 报出; normal = 0 silent). Two independent conditions,
 # either fires ⇒ exit 1:
 #   1. not-yet-flipped backlog too large — ready-pool-check's excluded[] count of tasks whose work

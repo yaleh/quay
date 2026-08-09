@@ -172,6 +172,25 @@ Layer = (Role, Anchor, Core, Ledger, QueueView, WriteTarget, HaltResponse)
 orchestrator-loop-tick.md` 步骤 0d / manager `orchestration/manager-loop-tick.md` 步骤 1a。
 capability-catalog 声明 `halt-check.sh`(AC1c 门绿)。
 
+#### P2-9 验收（`gap-spec-p2-quad-tuple-unified-emitter`,2026-08-09 落地）
+
+统一发射器 = `plugin/scripts/accounting-emit.ts`(三层共用一个实现,候选 A;候选 B 的
+`closure-lag-check.sh` 交叉标注、不扩为发射器)。三层 tick 必报各接:
+
+- **三层输出字段集合相同(band `unified_emitter_format` = 同一 schema)**:对三层各跑
+  `node --experimental-strip-types plugin/scripts/accounting-emit.ts --layer <outer|inner|manager> --json`
+  ——顶层键、`occupancy` 键、`mechanisms` 条目键三层逐一相同(测试 `plugin/test/accounting-emit.test.mjs`
+  固化;实测三层输出对照贴任务体)。
+- **缺值机械报出(invariant `quad_tuple_no_missing` = 1)**:任一四元组字段缺值 ⇒ `missing` 点名 +
+  `complete:false` + 退出 1(构造 `--mechanism x:never` 无判定 ⇒ `missing` 含
+  `mechanism:x.last_run_epoch` / `mechanisms.exec_time_unreadable`,退出 1)。
+- **每层执行时刻 A 项可读(invariant `layer_exec_time_readable` = 1)**:三层各有一条「最近真实执行时刻」,
+  未超过声称周期 ⇒ fresh;超过 ⇒ 必须附 `:已停用|已替代|是缺陷` 三选一判定,否则计入 `missing`。
+- **占用率 / 写入落点**:占用率 = 真实 in-flight / effective_cap(外层自动读 `cap-from-gate` +
+  `fast-mode-telemetry --slots`,`--in-flight`/`--cap` 显式覆盖);写入落点 = `write_target`(SPEC 2.7,
+  默认 integration,`--write-target` 覆盖)。
+- capability-catalog 声明 `accounting-emit.ts`(AC1c 门绿)。
+
 ---
 
 ## 3. 明确不统一什么
