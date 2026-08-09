@@ -1,20 +1,25 @@
 ---
 id: gap-scripts-sprawl-no-uniform-cli-convention-across-57-shell-tools
-title: "plugin/scripts/ has 57 .sh files (107 total incl. .ts) with ZERO uniform CLI convention —
-  --help behaves differently in every one tested tonight: dead-loop-check.sh silently ignores it
-  and runs normal logic, prefriction-count.sh treats it as a --since git-revision value, axis-
-  generator.ts requires node --experimental-strip-types (bare bash execution fails on the first
-  comment line), supervisor-deliver.sh treats it as the payload text to deliver, session-bootstrap.sh
-  falls through to printing its own shebang line — this is not a cosmetic gap: it directly produced
-  tonight's real mistakes (the manager guessed wrong invocation forms multiple times before finding
-  correct usage in each script's own header comments, because there is no queryable, uniform
-  interface); orchestration/SPEC-manager-productization-2026-08-05.md and SPEC-state-crystallization
-  -2026-08-05.md already establish the right framework (名词进代码/动词留文本 — facts crystallize
-  into structured single-writer state, rules stay as prose, per §2 of state-crystallization; manager
-  must consume via capability-catalog.sh not hand-roll, per §5 of manager-productization) but neither
-  addresses INTERFACE consistency across the 57+ existing crystallized tools themselves; manager
-  2026-08-06, filed per human direction ('即使是这些 .sh 也依然太散，应进一步结晶')"
-status: ready
+title: "plugin/scripts/ has 57 .sh files (107 total incl. .ts) with ZERO uniform
+  CLI convention — --help behaves differently in every one tested tonight:
+  dead-loop-check.sh silently ignores it and runs normal logic,
+  prefriction-count.sh treats it as a --since git-revision value, axis-
+  generator.ts requires node --experimental-strip-types (bare bash execution
+  fails on the first comment line), supervisor-deliver.sh treats it as the
+  payload text to deliver, session-bootstrap.sh falls through to printing its
+  own shebang line — this is not a cosmetic gap: it directly produced tonight's
+  real mistakes (the manager guessed wrong invocation forms multiple times
+  before finding correct usage in each script's own header comments, because
+  there is no queryable, uniform interface);
+  orchestration/SPEC-manager-productization-2026-08-05.md and
+  SPEC-state-crystallization -2026-08-05.md already establish the right
+  framework (名词进代码/动词留文本 — facts crystallize into structured single-writer
+  state, rules stay as prose, per §2 of state-crystallization; manager must
+  consume via capability-catalog.sh not hand-roll, per §5 of
+  manager-productization) but neither addresses INTERFACE consistency across the
+  57+ existing crystallized tools themselves; manager 2026-08-06, filed per
+  human direction ('即使是这些 .sh 也依然太散，应进一步结晶')"
+status: done
 labels:
   - gap
   - milestone-candidate

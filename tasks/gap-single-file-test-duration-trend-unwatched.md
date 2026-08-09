@@ -1,7 +1,17 @@
 ---
 id: gap-single-file-test-duration-trend-unwatched
-title: "single-file test duration GROWTH is not tracked — measure-suite.mjs + measure-suite-reporter.mjs have precise per-file duration capture (__PERFILE__ <basename> <duration_ms> <passed>) but are one-shot manual tools: no history persistence, no trend comparison, not wired into any decision path (only capability-catalog lists them as tools; scripts/test.sh static layer has no duration check; CI has only coarse job-level timeout 10-15min that kills the whole job without naming the slow file); 'can measure but doesn't watch' — same class as writer-exists-nobody-calls / existence-not-effect recurring tonight; trigger: session-liveness.test.mjs 2016 lines slow (>30s wait, manager spent time diagnosing whether it hung); human-approved usage-perspective probe 2026-08-06, ruling requested on thresholds/storage/立案"
-status: ready
+title: "single-file test duration GROWTH is not tracked — measure-suite.mjs +
+  measure-suite-reporter.mjs have precise per-file duration capture (__PERFILE__
+  <basename> <duration_ms> <passed>) but are one-shot manual tools: no history
+  persistence, no trend comparison, not wired into any decision path (only
+  capability-catalog lists them as tools; scripts/test.sh static layer has no
+  duration check; CI has only coarse job-level timeout 10-15min that kills the
+  whole job without naming the slow file); 'can measure but doesn't watch' —
+  same class as writer-exists-nobody-calls / existence-not-effect recurring
+  tonight; trigger: session-liveness.test.mjs 2016 lines slow (>30s wait,
+  manager spent time diagnosing whether it hung); human-approved
+  usage-perspective probe 2026-08-06, ruling requested on thresholds/storage/立案"
+status: done
 labels:
   - gap
   - milestone-candidate

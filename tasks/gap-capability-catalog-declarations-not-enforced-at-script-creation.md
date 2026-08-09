@@ -1,7 +1,12 @@
 ---
 id: gap-capability-catalog-declarations-not-enforced-at-script-creation
-title: "capability-catalog regressed twice this session (14 scripts entered artifact undeclared) — the AC1c gate exits 1 but the scoped static-tier defers it to full-suite, so a task creating plugin/scripts/* ships green and the catalog turns red only at the outer's verification round; fix: include capability-catalog in the scoped tier for tasks whose Touches create plugin/scripts/* files, or a creation-time check"
-status: ready
+title: "capability-catalog regressed twice this session (14 scripts entered
+  artifact undeclared) — the AC1c gate exits 1 but the scoped static-tier defers
+  it to full-suite, so a task creating plugin/scripts/* ships green and the
+  catalog turns red only at the outer's verification round; fix: include
+  capability-catalog in the scoped tier for tasks whose Touches create
+  plugin/scripts/* files, or a creation-time check"
+status: done
 labels:
   - gap
   - defect
@@ -50,11 +55,11 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: 任务 Touches 含 `plugin/scripts/*` 新建文件 ⇒ scoped 静态层含 capability-catalog 检查
-- [ ] AC2: 该任务在 catalog 未声明其新脚本 ⇒ scoped 红（创建时暴露，非全量时）
-- [ ] AC3: 已在 catalog 声明的脚本（如 claim-task.sh 等 11 个已补）⇒ scoped 绿（不误伤）
-- [ ] AC4: 负控制——只查 Touches `(new)` / 未跟踪的新脚本，不重扫全 artifact（存量 0 影响）
-- [ ] AC5: 测试 `node:test` + `// @test-group governance`
+- [x] AC1: 任务 Touches 含 `plugin/scripts/*` 新建文件 ⇒ scoped 静态层含 capability-catalog 检查
+- [x] AC2: 该任务在 catalog 未声明其新脚本 ⇒ scoped 红（创建时暴露，非全量时）
+- [x] AC3: 已在 catalog 声明的脚本（如 claim-task.sh 等 11 个已补）⇒ scoped 绿（不误伤）
+- [x] AC4: 负控制——只查 Touches `(new)` / 未跟踪的新脚本，不重扫全 artifact（存量 0 影响）
+- [x] AC5: 测试 `node:test` + `// @test-group governance`
 
 ## Touches
 
