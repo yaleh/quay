@@ -115,30 +115,30 @@ resume   每扫完一个文档即写盘                                        #
 
 ## Acceptance Criteria
 
-- [ ] AC1: `threshold-scope-check.ts` 实现，输出 `violations` 与 `skippedByMarker` 两个字段
-- [ ] AC2: **双向负控制**——`needs-human ≥ 3`（无集合无窗口）必须报出；
+- [x] AC1: `threshold-scope-check.ts` 实现，输出 `violations` 与 `skippedByMarker` 两个字段
+- [x] AC2: **双向负控制**——`needs-human ≥ 3`（无集合无窗口）必须报出；
       `窗口内新增 needs-human ≥ 3` 必须不报。两条实跑输出都贴进任务体
-- [ ] AC3: 被 `<!-- unmechanized: -->` / `<!-- unmechanizable: -->` 标记的段落**不报**；
+- [x] AC3: 被 `<!-- unmechanized: -->` / `<!-- unmechanizable: -->` 标记的段落**不报**；
       用文档里现有的 3 处标记验证，并在输出里报 `skippedByMarker` 的数量（**跳过必须可见**——
       静默跳过与「没发现问题」不可区分）
-- [ ] AC4: 匹配按**行内容**，剥离代码块与 HTML 注释内容
+- [x] AC4: 匹配按**行内容**，剥离代码块与 HTML 注释内容
       （本仓库今晚已有 7 次「匹配到提到它的文本而非它本身」的教训）
-- [ ] AC5: 在当前三份文档上实跑，违规清单贴进任务体；名单落盘为
+- [x] AC5: 在当前三份文档上实跑，违规清单贴进任务体；名单落盘为
       `docs/analysis/threshold-scope-violations.md`
-- [ ] AC6: 名单是 shrink-only 棘轮，新增即失败；与 `contract-violations.md` 同款
-- [ ] AC7: 报出而不阻断；接进 `scripts/test.sh` 的 governance 组
-- [ ] AC9: 过期引用判定按上表**三层**实现；用 CLAUDE.md 实跑，
+- [x] AC6: 名单是 shrink-only 棘轮，新增即失败；与 `contract-violations.md` 同款
+- [x] AC7: 报出而不阻断；接进 `scripts/test.sh` 的 governance 组
+- [x] AC9: 过期引用判定按上表**三层**实现；用 CLAUDE.md 实跑，
       **18 条局部路径必须不报**（外层第一版检查正是在这里过度报告）
-- [ ] AC10: 含占位模式（`NNN`/`<...>`/`*`）的路径**跳过**；用 `tasks/DIR-NNN.md` 验证
-- [ ] AC11: **负控制**——人为在扫描的文档里加一条指向不存在文件的引用 ⇒ 必须报出；
+- [x] AC10: 含占位模式（`NNN`/`<...>`/`*`）的路径**跳过**；用 `tasks/DIR-NNN.md` 验证
+- [x] AC11: **负控制**——人为在扫描的文档里加一条指向不存在文件的引用 ⇒ 必须报出；
       改成真实存在的路径 ⇒ 必须不报
-- [ ] AC8: 测试带 `// @test-group governance` 声明
+- [x] AC8: 测试带 `// @test-group governance` 声明
 
 ## Definition of Done
 
-- [ ] AC2 的双向负控制与 AC5 的违规清单贴进任务体
+- [x] AC2 的双向负控制与 AC5 的违规清单贴进任务体
 - [ ] `scripts/test.sh` 连跑 2 次全绿
-- [ ] 明确记录：**缺的从来不是执行者，是范围**。`≥3` 本身没有歧义，
+- [x] 明确记录：**缺的从来不是执行者，是范围**。`≥3` 本身没有歧义，
       「≥3 个什么、在什么窗口内」才是歧义所在——而正是这个歧义卡死了一次派发
 
 ## Touches
@@ -147,6 +147,8 @@ resume   每扫完一个文档即写盘                                        #
 - plugin/test/threshold-scope-check.test.mjs
 - docs/analysis/threshold-scope-violations.md
 - scripts/test.sh
+- plugin/scripts/capability-catalog.sh   # 内层新增：新 checker 必须在 catalog 声明其问题（AC1c 门）
+- plugin/scripts/checker-mutation-cases/threshold-scope-check.sh   # 内层新增：mutation case（AC1b 门）
 
 ## Dispatch review
 
@@ -158,3 +160,57 @@ changed: 范围两次调整。(1) 从「所有决策性散文都要有执行者�
   并要求 AC3 显式报出 `skippedByMarker` 数量，因为静默跳过与「没发现问题」不可区分。
   (2) 人指出 CLAUDE.md 的 `quay.js` 是阶段性文本、属同一个检查，故加入第二类判定「点名的路径必须解析」，
   并把外层第一版检查的过度报告（18 条局部路径误判）写成 AC9 的显式反例——判据必须分三层，不是简单的存在性检查
+
+## Evidence（内层实现 2026-08-09）
+
+### AC2 双向负控制（--judge 实跑）
+
+```
+$ node plugin/scripts/threshold-scope-check.ts --root . --judge <fixture1> --json
+{ "violations": [ { "line": 1, "hit": "≥ 3", "snippet": "停止条件：needs-human 积压 ≥ 3" } ],
+  "stalePaths": [], "skippedByMarker": 0, "flagged": true }        # exit 1 —— 必须报出 ✓
+
+$ node plugin/scripts/threshold-scope-check.ts --root . --judge <fixture2> --json
+{ "violations": [], "stalePaths": [], "skippedByMarker": 0, "flagged": false }   # exit 0 —— 必须不报 ✓
+```
+（fixture1 = `停止条件：needs-human 积压 ≥ 3`；fixture2 = `停止条件：窗口内新增 needs-human ≥ 3`）
+
+### AC3：现有 3 处标记全部跳过且可见
+
+`docs/analysis/fast-mode-loop-tick.md` 的三处 `<!-- unmechanized: -->` / `<!-- unmechanizable: -->`
+（L96 判断句、L739 ADR-021 判断边界表、L855 思维纪律）所在段落（及孤立标记的相邻段）全部不报，
+且 `skippedByMarker` 在输出里报 **3** —— 跳过是可见的，与「没发现问题」不可区分。
+
+### AC5：当前三份文档实跑违规清单（已落盘 `docs/analysis/threshold-scope-violations.md`）
+
+```
+violations (count-threshold stop-condition without a window): 2
+  orchestration/orchestrator-loop-tick.md:248  [≥3]  超 90 分钟 / needs-human 积压 ≥3」就停下等人……
+  orchestration/orchestrator-loop-tick.md:925  [≥3]  | needs-human 积压 ≥3 | 分诊：真阻塞的攒给人……
+stalePaths: 1
+  CLAUDE.md:262  [stale-path] .claude/workflows/execute-milestone.js   # 外层 08-03 修掉的 5 条之外第 6 条
+skippedByMarker: 3
+```
+
+两份 orchestrator 违规正是本任务要抓的原始形状 `needs-human 积压 ≥3`（无集合无窗口）；fast-mode 同款
+`窗口内新增 needs-human ≥3`（L454/L736）因命名窗口而不报。CLAUDE.md 的 18 条局部路径（basename 存在
+的简称引用）全部不报（AC9），`tasks/DIR-NNN.md` 等占位路径跳过（AC10）。
+
+### AC11 负控制（--judge 实跑）
+
+```
+$ node plugin/scripts/threshold-scope-check.ts --root . --judge <bad> --json   # 加 `nowhere/exists.js`
+{ "stalePaths": [ { "path": "nowhere/exists.js", "kind": "stale-path" } ], "flagged": true }  # exit 1 ✓
+$ node plugin/scripts/threshold-scope-check.ts --root . --judge <good> --json  # 改成 `scripts/test.sh`
+{ "stalePaths": [], "flagged": false }                                          # exit 0 ✓
+```
+
+### 收尾记录（DoD 第 3 条）
+
+**缺的从来不是执行者，是范围。** `≥3` 本身没有歧义；「≥3 个什么、在什么窗口内」才是歧义所在——而
+正是这个歧义卡死了一次派发（2026-08-03 内层把「窗口内新增」读成「有史以来总数」）。本检查把「量词
+停止条件必须说明集合与窗口」变成机械判据：报出但不阻断（AC7），违规名单 shrink-only（AC6），
+`<!-- unmechanized/unmechanizable -->` 标记的段落显式跳过并计数（AC3）。
+
+内层实现备注：mutation case（`checker-mutation-cases/threshold-scope-check.sh`）与 capability-catalog
+声明（AC1b/AC1c 门）随本任务一起补齐，二者是本任务 `## Touches` 之外的必要新增文件。

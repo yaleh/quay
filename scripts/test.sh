@@ -328,6 +328,22 @@ run_static_checks() {
   # @static-tier change
   # @static-object plugin/loop/fast-mode-loop-tick.md plugin/loop/orchestrator-loop-tick.md orchestration/QUAY-OUTER-HANDOFF.md
   run_checker "drive-contract-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/drive-contract-check.ts" --root "${repo_root}"
+  echo "== threshold-scope check (gap-quantified-stop-conditions-have-no-scope, AC2/AC3/AC6/AC7/AC9) =="
+  # The driver-doc prose hygiene checker: (1) a quantified stop/trigger condition must name its SET
+  # and WINDOW — `needs-human 积压 ≥ 3` (no window) is the 2026-08-03 dispatch-freeze shape, its
+  # positive control `窗口内新增 needs-human ≥ 3` must stay clean; paragraphs marked
+  # `<!-- unmechanized: -->` / `<!-- unmechanizable: -->` are skipped AND the skip is reported via
+  # `skippedByMarker` (silent skip == no findings is a failure mode this task exists to close).
+  # (2) a backtick-named path must resolve (three-layer judgment: exact / basename / same-stem-diff-ext;
+  # placeholders `NNN`/`<...>`/*/`{` skipped); the five `.js`→`.ts` migration leftovers the outer
+  # already fixed are the calibration, and the 18 local-reference (basename-exists) paths must not
+  # over-report. REPORT-ONLY (AC7): violations are listed but exit 0; the ONE blocking edge is the
+  # shrink-only ratchet (docs/analysis/threshold-scope-violations.md) — a NEW violation exits 1 and
+  # aborts the suite (set -euo pipefail), red-lighting a driver-doc edit that reintroduces an
+  # unscoped threshold or a stale path.
+  # @static-tier change
+  # @static-object docs/analysis/fast-mode-loop-tick.md orchestration/orchestrator-loop-tick.md CLAUDE.md plugin/scripts/threshold-scope-check.ts plugin/test/threshold-scope-check.test.mjs docs/analysis/threshold-scope-violations.md
+  run_checker "threshold-scope-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/threshold-scope-check.ts" --root "${repo_root}"
   echo "== instrument-failure check (gap-manager-instrument-failures-need-mechanical-detection-not-carefulness, AC3) =="
   # The manager instrument-failure five-family detector (FAMILY-1..5 in the checker header). The
   # manager's instrument failures recurred 7× in one night across five families already documented
