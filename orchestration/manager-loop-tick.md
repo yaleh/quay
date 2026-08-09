@@ -269,14 +269,17 @@ exit=0
    escalations.md 没有 `from`、没有冒充闸门、`delivered`/`consumed` 不分——比总线差。
    **禁止裸 tmux 那条不变，理由反而更强：裸 tmux 绕过的正是身份层。**
 
-**异步方向同理，缺的只是一行注册**（`message-bus.ts:317`）：
+**异步方向同理，缺的只是一行注册——现已修**（`message-bus.ts:installDefaultTransports`，
+`gap-outer-message-bus-needs-file-inbox-transport` = 内层实现 2026-08-09）：
 
 ```js
-registerTransport("human", createFileInboxTransport({ inboxDir: managerInboxDir(root) }));  // 异步
+registerTransport("human", createFileInboxTransport({ inboxDir: managerInboxDir(root) }));  // 异步（human 信道）
 registerTransport("inner", createSessionTransport());   // tmux，要等会话
-registerTransport("outer", createSessionTransport());   // ← manager→outer 每次都要等，就是这行
+registerTransport("outer", createFileInboxTransport({ inboxDir: outerInboxDir(root) }));    // ← 已改：manager→outer 异步，不再等会话
 ```
-文件 transport 现成、已测、human 那条在用；**outer 只是没被注册成它**。修法归 outer（产品代码）。
+文件 transport 现成、已测、human 那条在用；outer 现注册为**自己的文件收件箱**（`.quay/outer-inbox/`，
+与 human 信道分离、互不污染 delivered/consumed 读数）。**manager→outer 异步投递走总线文件收件箱
+（带 `from`），不再依赖 tmux/outer 会话状态。投递通道优先级：总线优先，`escalations.md` 降级备份。**
 
 **一个读数**：`inbox-summary` = `delivered=0 consumed=0 unread=0`——
 **总线自建成以来零流量**，而它已被 outer 的 tick 第 574 行挂载。

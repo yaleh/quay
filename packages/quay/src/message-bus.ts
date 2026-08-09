@@ -95,6 +95,15 @@ export function managerInboxDir(root) {
   return path.join(root, ".quay", "manager-inbox");
 }
 
+/** The OUTER target's mechanical mount point: `.quay/outer-inbox/` under the workspace root.
+ *  A SEPARATE inbox from the human channel — outer's messages must NOT pollute the human channel's
+ *  delivered/consumed/unread measurement (observe("human") counts records in its OWN directory).
+ *  (tasks/gap-outer-message-bus-needs-file-inbox-transport — outer is a file-inbox target like
+ *  human, so manager→outer async delivery never waits on outer's session state.) */
+export function outerInboxDir(root) {
+  return path.join(root, ".quay", "outer-inbox");
+}
+
 // ── Record helpers (AC12b: every human message = timestamped, countable record) ──────────────────────
 
 /**
@@ -310,12 +319,15 @@ export function resetTransports() {
 
 /**
  * Install the default transport wiring for a workspace root: human → the real file-inbox
- * (the mechanical mount point at `.quay/manager-inbox/`), inner/outer → session transports
- * (adapters injected later by the supervisor). Idempotent — safe to call repeatedly.
+ * (the mechanical mount point at `.quay/manager-inbox/`), inner → session transport
+ * (adapters injected later by the supervisor), outer → its OWN file-inbox at `.quay/outer-inbox/`
+ * (manager→outer async delivery no longer waits on outer's session state — the same
+ * createFileInboxTransport the human channel already uses, registered for outer;
+ * tasks/gap-outer-message-bus-needs-file-inbox-transport). Idempotent — safe to call repeatedly.
  * @param {string} root
  */
 export function installDefaultTransports(root) {
   registerTransport("human", createFileInboxTransport({ inboxDir: managerInboxDir(root) }));
   registerTransport("inner", createSessionTransport());
-  registerTransport("outer", createSessionTransport());
+  registerTransport("outer", createFileInboxTransport({ inboxDir: outerInboxDir(root) }));
 }

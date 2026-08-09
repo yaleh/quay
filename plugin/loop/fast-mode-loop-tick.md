@@ -414,6 +414,12 @@ bash plugin/scripts/supervisor-bus-identity.sh inbox-summary
 `delivered` = 投递成功（放进了收件箱），`consumed` = 已读回执（人读了）——两者分开（AC3），
 unread = delivered − consumed。本步只读不写回执（消费是人的动作，`inbox-reader.sh` 负责）。
 
+**投递通道（`gap-outer-message-bus-needs-file-inbox-transport` = done）：总线优先，
+`escalations.md` 降级备份。** manager→outer 异步消息走总线的文件收件箱（`.quay/outer-inbox/`，
+`installDefaultTransports` 把 outer 注册为 `createFileInboxTransport`，带 `from`，不再等 outer 会话状态）；
+outer→manager 同理走总线（带 `from: outer`）。**裸 tmux send-keys 仍是紧急控制专用**（SPEC-inbox-service D3：
+tmux 仅用于紧急控制；投递通道不可认证、丢 `from` 字段）。
+
 ### 2. Fan-in 已返回的任务（合并串行，不写任务状态）
 
 **词汇规范（本步与外层 1b 同词，`gap-split-batch-vocabulary-dispatch-rolling-vs-verification-round`）**：
