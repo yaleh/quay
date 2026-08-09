@@ -46,7 +46,8 @@ bash <root>/plugin/scripts/session-bootstrap.sh <root> manager/inner/outer # ful
 ```
 
 It creates each named window (idempotent — re-runs leave live windows alone), launches each
-role's Claude Code process from the checked-in `quay-launch.sh <role>` convention, verifies each
+role's Claude Code process via the checked-in launcher `quay-launch.sh` (the skill's internal
+implementation, never a user-facing invocation), verifies each
 process is actually alive (the same `/proc` process-detection `session-liveness.sh` uses), and
 exits non-zero naming the failing window if any window cannot be confirmed live (fail-closed).
 After it returns, this skill's "inner session reachable" precondition is already satisfied — the
@@ -55,19 +56,19 @@ truly one command.
 
 **Launch config is checked-in, not remembered.** The correct per-role launch command lives in
 `<root>/.claude/launch.settings.json` (settings-schema keys + `_launchSpec` for flag-only params) and is
-materialized by `<root>/plugin/scripts/quay-launch.sh`. If a session must be (re)started during this
-skill, run `bash <root>/plugin/scripts/quay-launch.sh <role>` (roles `manager|outer|inner`) — never
-hand-type a shell one-liner from memory (`gap-crystallize-launch-config-into-checked-in-settings-file`).
-Verify the command without starting anything: `bash <root>/plugin/scripts/quay-launch.sh <role> --dry-run`.
-For a one-shot verification session use `bash <root>/plugin/scripts/quay-launch.sh <role> --bare`
-(minimal mode, not long-lived).
+materialized by the skill-internal launcher `quay-launch.sh`. If a session must be (re)started during this
+skill, the skill handles the launch itself — the user/agent never names the launcher script and never
+hand-types a shell one-liner from memory (`gap-crystallize-launch-config-into-checked-in-settings-file`;
+`quay-launch.sh` is the skill's inner implementation, not a user-facing deliverable). To verify the
+materialized command without starting anything, the skill runs the launcher in dry-run mode (`--dry-run`);
+the `--bare` flag produces a minimal one-shot verification session (not long-lived).
 
 **Ghost-suggestion elimination is REQUIRED, not optional** (`gap-ghost-suggestion-eliminated-at-source-
 prompt-suggestions-false`, 人 2026-08-05 裁定): the launch config MUST carry `--prompt-suggestions false`
 (as `_launchSpec.promptSuggestions=false`, translated by `quay-launch.sh`) AND
 `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false` (as the `env` key) — both routes, for every role. A cold
-start MUST confirm the materialized command contains the flag: `bash <root>/plugin/scripts/quay-launch.sh
-<role> --dry-run` output includes `--prompt-suggestions false`. A fresh session launched without it shows
+start MUST confirm the materialized command contains the flag (the skill's dry-run verification — the
+launcher's `--dry-run` output must include `--prompt-suggestions false`). A fresh session launched without it shows
 gray ghost-suggestion text in the input box that the reliable-send / pane classifier can misread as a
 submitted action (fault 6/7).
 **REQUIRED launch params (gap-ghost-suggestion-eliminated-at-source-prompt-suggestions-false, human
