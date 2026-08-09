@@ -141,3 +141,38 @@ reviewer: none
 at: 2026-08-07T05:0xZ
 changed: 外层分诊——干净窗口 35 真失败（catalog 隔离复现）→ 回滚 a4b1d9a9（7642849a）→ 立本任务：
   修测试再重合并。40→6 工作留 integration。
+
+## Evidence（内层实现 2026-08-09）
+
+**实现状态**：本 worktree 自 develop HEAD（2e7ccc5a）fork，AC1 的测试更新（develop 2163c4c3 +
+2dc55ba9，7 文件）已随基线在树内——逐文件核验过裸脚本形断言确实落位（session-topology 断
+`quay-topology.sh`/`topology-check.sh`、quay-init-loop-core 去 manager-loop-tick 铺装断言、
+quay-entry-test-helpers.mjs 已恢复）。inner 本趟无新增代码改动，交付为 **worktree 内复验 +
+铺装 gitignored vendor 运行时 + scoped 门绿**。
+
+**复现（worktree 特有阻断）**：AC2 注记（2026-08-08）记录 worktree 内 capability-catalog 隔离红
+（ERR_ASSERTION actual 2 vs 0，quay-init --loop exit 2）源于 gitignored vendor 运行时缺失
+（plugin/vendor/quay/dist/quay.js 未铺装，当时 sync-vendor.sh 失败）。本趟初查确认 worktree 确实
+无 vendor dist（`plugin/vendor/{quay,quay-native}/dist/` 空）；但重验发现该阻断已不再复现——
+`bash plugin/scripts/sync-vendor.sh` 本趟成功（build+mirror 两个 bundle），且做负控制移走 vendor
+dist 后 `quay-init --loop` 会自动经 ensure_vendor_runtime→sync-vendor.sh 重建（Wiring 子测试在无
+vendor dist 情况下仍 pass 1/0）。故 AC2 注记的失败是当时的瞬时环境问题（node_modules/构建时序），
+非 40→6 回归。
+
+**修复**：`bash plugin/scripts/sync-vendor.sh`（在 worktree 内）铺装 vendor dist
+（plugin/vendor/quay/dist/quay.js + plugin/vendor/quay-native/dist/quay-native.js；gitignored，
+不入提交）。quay-init 的 ensure_vendor_runtime 会自动做同样的事；scoped 门跑前已确保两个 bundle 在。
+
+**验证（worktree 内隔离实跑）**：
+- capability-catalog.test.mjs：**12 pass / 0 fail / 0 cancelled**（含 Wiring 子测试，quay-init
+  --loop 实跑 pass）；契约 invoke catalog_fail=0 ✓；
+- AC1 受影响族：quay-session 6/0 · session-topology 10/0 · session-bootstrap 9/0 ·
+  inner-blocked-signal 35/0 · quay-init-loop-driver 15/0 · quay-init-loop-core 12/0；
+- **scoped 门**：`bash scripts/test.sh --for-task gap-forty-to-six-remerge-needs-tests-updated-first
+  --allow-thin` → **exit 0**。静态检查 0 违规（test-impl-census 294 文件全 clean、
+  test-isolation 44 条全部基线内无新增、task-contract-check strict-subset 三任务文件
+  no violations、lint crosscut 0）；测试 **12 pass / 0 fail / 0 cancelled**。
+
+**AC 勾选**：AC1/AC2 由 develop 基线兑现（保持 [x]，本趟复验通过）；AC3/AC4（integration→develop
+重合并 + 复验）与 AC5（交叉标注）为外层动作/延后，inner 不勾。全量 suite_green=1 归外层
+verification-round（clean window）验证。
