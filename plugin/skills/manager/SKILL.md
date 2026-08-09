@@ -174,6 +174,7 @@ rules* but does not re-implement each SPEC. Index (under `orchestration/` in the
 - `orchestration/SPEC-quay-self-hosts-its-own-cold-start.md` — self-hosting the cold start
 - `orchestration/SPEC-state-crystallization-2026-08-05.md` — state crystallization
 - `orchestration/SPEC-three-layer-unified-architecture-2026-08-09.md` — the three-layer unified architecture (manager/outer/inner minimal unified architecture; AC28–AC34, P0 wiring = SPEC-carrying first-lines + ledger A + parallel-comparison rounds)
+- `orchestration/SPEC-goal-store-2026-08-09.md` — the goal-store spec (phase goals/ACs are a THIRD sibling kind: criterion shell-runnable + status(achieved) + phase derivable + origin required; web `/goal`+`/doc`; gate-staleness self-check)
 - `orchestration/SPEC-suite-speed.md` — suite speed
 - `orchestration/SPEC-typed-axes-and-standing-dynamics.md` — typed axes + standing dynamics
 
