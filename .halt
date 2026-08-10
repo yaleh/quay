@@ -1,0 +1,1 @@
+A15-04 takeover 2026-08-10 12:5x: suite-fix subagent ab380c5e exited without scope=worktree green; outer main session fixing+merging until green (manager verified: zero scope=worktree+green rounds today)

@@ -51,7 +51,7 @@ extra: {}
 
 - [x] AC1–AC5 全部勾上
 - [x] 修后实跑：judge 对今晚心跳输出 stopped/awaiting/contradictsStructured（贴输出）；变红触发
-- [x] 既有测试 + 新增测试全绿（`--for-task` scoped：39 tests / 0 fail / 0 cancelled / EXIT 0）
+- [x] 既有测试 + 新增测试全绿（`--for-task` scoped：54 tests / 0 fail / 0 cancelled / EXIT 0；重建于 integration 顶后含 integration 新增 catalog 测试）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
 
 ### 修后实跑证据（2026-08-10，takeover subagent）
