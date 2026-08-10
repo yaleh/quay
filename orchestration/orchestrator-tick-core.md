@@ -32,7 +32,7 @@ checklist 执行。
 | A11 | 读 `.quay/full-suite-state.json` 的 `state`/`reason`/`durationMs` | `green`⇒suiteGreen;`running`⇒true(proceed);`red`⇒false;**缺文件⇒true**。`reason: aborted` **不**触发停派 (src:738) |
 | A12 | 独立核实内层至少一项声称:`inner-forensics.mjs verify <类别> --since <上次 tick ISO>` / `timecost` | 以 git 和实测为准,不以内层自述为准;零命中 ≠ 没做过(先用类别形式复核);见 `⚠ 更早会话未被包含` 即窗口不完整 (src:630) |
 | A13 | `self-report-vocab-audit.ts --git-log 15 --exclude-prefix outer: --window 3 --json` | 读 `inner_self_report_vocab` + `converged`;连续 3 轮无 batch 式自述 = 收敛 (src:851) |
-| A14 | **账本·本轮 closure-pass 是否被调用**(FINDING §6①,每 tick):`meta-cc query_session_content role=tool tool_name=closure-lag-check` → `last(timestamp)` | 抓「收尾 pass 自述做了但没真调用」——与 manager A9 同手法(抓 nyf-semantic-judge workflow 49c0be86 用完即弃那次,有 4 个 done-flip 真产出却因执行核无「调用」步骤而丢);`--record` 心跳缺失 >3 个 tick 周期 ⇒ 写明「已停用/已替代/是缺陷」三选一 (src:668)。**另(人 2026-08-10 裁定):每 tick 用 meta-cc 查自己会话有无「未经 send-keys-verified.sh 的裸 tmux send-keys 指向他人 pane」,有则本轮判违规并记账** |
+| A14 | **账本·本轮 closure-pass 是否被调用**(FINDING §6①,每 tick):`meta-cc query_session_content role=tool tool_name=closure-lag-check` → `last(timestamp)` | 抓「收尾 pass 自述做了但没真调用」——与 manager A9 同手法(抓 nyf-semantic-judge workflow 49c0be86 用完即弃那次,有 4 个 done-flip 真产出却因执行核无「调用」步骤而丢);`--record` 心跳缺失 >3 个 tick 周期 ⇒ 写明「已停用/已替代/是缺陷」三选一 (src:668)。**另(人 2026-08-10 裁定更正):每 tick 统计本会话里裸 tmux send-keys 次数（meta-cc query tool_name 含 tmux send-keys 且不含 supervisor-deliver/send-keys-reliable）,非 0 即违规并记账;并调 drive-contract-check.ts（outer→inner 驱动文本契约检查器,近 3 天仅 3 次调用——应入 tick）** |
 
 ## B. 每轮必产出
 
@@ -55,7 +55,7 @@ checklist 执行。
 
 | 约束 | 一句话 |
 |---|---|
-| C1 | **驱动 inner 一律用 `bash plugin/scripts/send-keys-verified.sh <tmux目标> <文本>`,禁止手工拼 send-keys**（该脚本封装 C-u→文本→Enter 三次分开调用,合并会丢 Enter）;送达判据**只用已提交才产生的信号**（inner transcript 新增 user 消息 / pane 已提交块 / inner 转忙）,**不得用 pane 回显或哈希变化**（send-keys-verified 的哈希比较分不清 typed 与 submitted,只作预防不作检测） (src:276, 人 2026-08-10 裁定) |
+| C1 | **驱动 inner 一律用 `bash plugin/scripts/supervisor-deliver.sh <tmux目标> <文本> --root <repo>`,禁止手工拼 send-keys、禁止用 send-keys-verified.sh**（supervisor-deliver 是唯一送达实现,内部包 send-keys-reliable 五步硬化 + transcript-delivery-check 纯判据;send-keys-verified 已被 superseded,其 md5 判据被 ADR-016 Amendment boundary (c) 明令禁止）;送达判据**只用 committed 信号**（目标会话 transcript 出现内容匹配的真实 user 消息——CRYSTALLIZED-reliable-send-2026-08-04 故障 5）,**不得用 pane 回显/哈希/单次检查**（CRYSTALLIZED 故障 4:已提交与进 transcript 可差 ~30s,须有界轮询） (src:276, 人 2026-08-10 裁定更正) |
 | C2 | 忙闲只取 pane **底部 3 行** `tail -3 \| grep -q 'esc to interrupt'`;**整屏 `md5(capture-pane)` 是 ADR-016 明令禁止**;别写 `-S -3`(那是起始行) (src:283, 286) |
 | C3 | 跑全量套件前过 `resource-gate.sh --for full-suite`,非 0 = WAIT ⇒ 只核实便宜的声称;全量只串行跑、跑完再叫醒内层 (src:296) |
 | C4 | 数进程用 `comm` 精确匹配(`grep -cx node-MainThread` / `pgrep -xc node`)或显式排除自身;**`pgrep -f` 会匹配发起查询的命令自己**;判停摆要进程数 0 **且** load1<1 两个判据;找服务按端口 `ss -ltnp` (src:395, 402, 407) |
