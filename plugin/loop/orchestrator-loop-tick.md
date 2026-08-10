@@ -312,7 +312,7 @@ cold-start skill exists to prevent.**
 ### 铺什么验什么（gate 判据 — 冷启动门是 DERIVED laydown set 绿，不是全量套件绿）
 
 **What gates a cold start.** The gate is: **all scripts in the DERIVED laydown set are green** — NOT
-"the whole quay suite is green" (`scripts/test.sh` full-suite / 全量). A cold start only lays down the
+"the whole quay suite is green" (`$TEST_COMMAND` full-suite / 全量). A cold start only lays down the
 derived laydown set (the `plugin/scripts/*` the shipped skill + loop docs reference), so a suite
 failure UNRELATED to that set must NOT block it (与铺设集无关的失败不再无限期阻塞冷启动); a failure
 INSIDE the set MUST block (铺什么验什么). The 2026-08-05 wait was correct: `session-liveness.sh` +
