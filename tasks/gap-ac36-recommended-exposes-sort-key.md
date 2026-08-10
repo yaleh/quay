@@ -49,7 +49,7 @@ extra: {}
 ## Touches
 
 - plugin/scripts/slot-refill.ts（AC2：recommended 带排序键或 ranking 数组）
-- plugin/scripts/（AC3：判据② 机械检查器或复用）
+- plugin/scripts/ac36-sortkey-criterion-check.ts（AC3：判据② 机械检查器——断言 DC 任务严格前移 + 同族非 DC 不变 + blocking_suite 之上）
 - plugin/test/slot-refill.test.mjs（AC2/AC3：排序键暴露 + 机械断言测试）
 - orchestration/manager-phase-goal.md（AC36 判据② 正本——本任务 Proposal 已引用）
 - tasks/gap-ac36-delivery-critical-priority-axis.md（交叉标注——AC36 自身的可验证性缺口）
