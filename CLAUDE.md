@@ -30,6 +30,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 7. **要求记录某动作，就不能把该动作排在记录之后**。〔产物：收尾顺序=先清扫后写日志〕
 8. **编号/命名不得复用**——否则缺席被伪装成在场。〔产物：`甲乙丙丁戊` 与判准 `①-⑤` 分离〕
 9. **可见性 ≠ 执行**：一条规则若「守」与「不守」在记录上无法区分，它就只能靠意志——**该给它造产物，不是把它写得更醒目**。
+10. **延迟 MCP 工具必须先 `ToolSearch` 取 schema 再调**（`select:<name>` 或关键词；确认真返回了 schema 才调）。
+    未取先调必 `InputValidationError`；`ToolSearch` 对预期存在的名字返回零结果**是真故障信号**（被改名/被删/skill 引用过期），**不要盲目重试**。
+    适用本仓库全部 quay/meta-cc/archguard/playwright MCP 工具（exp5-ADR-TOOLSEARCH-DEFERRED-SCHEMA-PATTERN）。〔**无产物，靠自觉**〕
 
 ## What this repo is
 
@@ -50,6 +53,10 @@ an autonomous loop under `experiments/`. Both layers coexist — the `packages/`
   `--test-concurrency=` 的 `=` 写法、`QUAY_TEST_LIVE_GITHUB`、`@test-group`/`@static-tier` 标注，
   **全部读脚本，不要在此处复制一份**（本节曾复制 144 行，占本文件 49%，正是漂移之源）。
 - **Web UI**：`node --experimental-strip-types packages/quay/bin/quay.ts serve --host <ip> --port <p>`
+- **两条没有别处正本、故留在此**：①测试要用真 `.quay/config.yml` 建临时 workspace（见某测试文件里的
+  `makeWorkspace()`）——**裸 tasks 目录不是合法 workspace**，config 是 provider map 不是扁平路径；
+  ②**覆盖率不是目标**：从未被测量、可被刷（本仓库自带 `gate-gameability.test.mjs`）、
+  且要紧的分支密集决策函数都已有直接 `import` 单测——**若要看覆盖率，它是参考不是指标**。
 - **`scripts/test.sh` 覆盖不到的**（正本 `.github/workflows/ci.yml`）：`dist-verify-node-floor`
   （真 npm-pack 产物在 Node 底线上跑）、以及里程碑节奏的浏览器/agent e2e
   （`adr/ADR-010-scheduled-milestone-e2e-incl-browser-tests.md`，status: proposed）。
