@@ -66,7 +66,7 @@ phase('Merge'); await agent('fan-in + verify clean + batch-merge')
 
 - orchestration/orchestrator-tick-core.md(A15 ④:裸 Agent → Workflow 形态;Monitor 措辞修正)
 - plugin/loop/orchestrator-loop-tick.md(§suite-health 执行体描述)
-- .claude/workflows/(若用命名 workflow)
+- .claude/workflows/execute-suite-fix.js(若用命名 workflow;以实际落地文件为准)
 - tasks/gap-a15-04-suite-fix-as-workflow.md(自身:勾 AC + 贴证据)
 
 ## Contract
