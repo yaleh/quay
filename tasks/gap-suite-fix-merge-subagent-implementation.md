@@ -17,7 +17,7 @@ extra: {}
 
 ## Proposal
 
-**人的完整裁定集（2026-08-10）已入执行核（A15 执行体 + D 边界 .halt 判据，outer f641d3ca），本任务是它的实现。** A15 定「何时判、判什么、产物是什么」，本提案定「谁去跑、跑在哪」——做成一件事，不并立两套。
+**人的完整裁定集（2026-08-10）已入执行核（A15 执行体 + D 边界 .halt 判据，outer f641d3ca）。outer 已于 2026-08-10 04:10 用 `Agent(run_in_background:true)` 首次实跑 suite-fix-merge subagent（agent a4da8d45）——机件全部现成（git worktree add / scripts/test.sh / git merge / integration-batch-merge MERGE-TO-VERIFIED-COMMIT，后者 02:19:38 实测放行 183 提交），**不需要造任何新东西**。本任务角色已改：**把这次实跑的流程结晶成可复用的固定形态**（prompt 模板 / A15 心跳接线 / 评价 subagent 产物格式），不是「先造再用」——manager 2026-08-10 04:0x 纠正（人 2026-08-09T16:07 裁定过的形状：该自己执行，不是创建任务扔 inner）。
 
 ### 实证（人裁定 5 条 + outer 核实）
 
@@ -27,20 +27,20 @@ extra: {}
 - **裁定4（A15 合并）**：评价 subagent 的输出**就是 `.quay/suite-health-last-run.json`**，不另立产物。
 - **裁定5（执行保障）**：连续 3 轮 A15 心跳缺失（`meta-cc query tool_name=Agent` last(timestamp) 无新 ts）⇒ 先 `.halt`；再 3 轮仍缺 ⇒ `/clear`。**背景 subagent 对 outer 是从没做过的动作**（全历史 Agent 调用=1 次且 run_in_background=None）——按 C17 需要有产物，心跳时间戳正是它。
 
-### 选定机制方向（实现归 inner，判定归 outer）
+### 选定机制方向（结晶本次实跑，非造机制）
 
-1. **suite-fix-merge subagent**：outer 起后台 subagent（Agent run_in_background:true），自带 git worktree；从 integration 切 branch → 跑套件 → 修（含 tasks/*.md）→ 自测绿 → (a) fan-in 回 integration → (b) 批量合 develop 到 branch tip。
-2. **评价 subagent**：输出 `.quay/suite-health-last-run.json`（结构化，零发现也写 0），专注套件耗时 + 合并中发现的问题，可创建任务。
+1. **本次实跑已发生**（outer 04:10 起 Agent a4da8d45，run_in_background:true）——机件全现成，无需 inner 造。
+2. **结晶产物**：把实跑流程固化为可复用 prompt 模板（含 5 裁定 + ①-⑤ 机件清单 + 终止条件）→ A15 心跳接线（meta-cc Agent ts）→ 评价 subagent 产物格式（suite-health-last-run.json）。
 3. **执行保障**：A15 心跳（meta-cc Agent timestamp）缺失 3 轮 ⇒ .halt；再 3 轮 ⇒ /clear。
 4. **终止**：≥8 轮或 ≥3 小时上限（建议值），未绿 ⇒ .halt + outer 停其它事。
 
-**验证锚**：修后 (a) outer 起 suite-fix-merge subagent（run_in_background:true）成功且产生 heartbeat ts；(b) 修复落到 integration（fan-in）且 develop 到确切提交；(c) 评价 subagent 产出 suite-health-last-run.json 带时间戳。
+**验证锚**：实跑已产 (a) outer 起 suite-fix-merge subagent（run_in_background:true）成功且产生 heartbeat ts（04:10 a4da8d45）；(b) 修复落到 integration（fan-in）且 develop 到确切提交（待实跑完成确认）；(c) 评价 subagent 产出 suite-health-last-run.json 带时间戳。
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 5 裁定 + outer 核实（develop 单写入者实证、outer Agent 历史 1 次前台）（本任务 Proposal 已含）
-- [ ] AC2: **suite-fix-merge subagent**——outer 后台起 subagent（run_in_background:true）+ 自带 worktree，integration 切 branch→修→自测绿→(a)fan-in→(b)批量合到确切提交
-- [ ] AC3: **tasks/*.md 授权**——subagent 可修 tasks/*.md（裁定3）
+- [ ] AC1: **复现固化**——任务体记录 5 裁定 + outer 核实（develop 单写入者实证、outer Agent 历史 1 次前台）+ manager 纠正（该自己执行非建任务扔 inner）（本任务 Proposal 已含）
+- [ ] AC2: **首次实跑完成**——outer 04:10 起 suite-fix-merge subagent（run_in_background:true）实跑，integration 切 branch→修→自测绿→(a)fan-in→(b)批量合到确切提交（agent a4da8d45 结果回填）
+- [ ] AC3: **tasks/*.md 授权验证**——subagent 实跑中确认可修 tasks/*.md（裁定3）
 - [ ] AC4: **评价 subagent 产物**——输出 = `.quay/suite-health-last-run.json`（结构化，零发现写 0）
 - [ ] AC5: **执行保障接线**——A15 心跳（meta-cc Agent ts）缺失 3 轮 ⇒ .halt，再 3 轮 ⇒ /clear
 - [ ] AC6: **终止上限**——≥8 轮或 ≥3 小时，未绿 ⇒ .halt + outer 停其它事
@@ -62,14 +62,14 @@ extra: {}
 
 ## Contract
 
-measure   suite_fix_subagent_wired = `grep -c "suite-fix-merge\|run_in_background: true" orchestration/orchestrator-tick-core.md plugin/scripts/*.ts` 的 stdout 数字
-band      suite_fix_subagent_wired >= 1（subagent 执行体接线）
+measure   suite_fix_subagent_ran = `meta-cc query tool_name=Agent` last(timestamp) 的 stdout 时间戳
+band      suite_fix_subagent_ran = 2026-08-10T04:10（首次实跑已发生,心跳存在）
 invariant merge_path_integration_first = 1（integration 切 branch→fan-in→批量合 develop,非直合）
 invariant eval_output_is_suite_health = 1（评价 subagent 输出=suite-health-last-run.json）
 invariant heartbeat_ladder = 1（3 轮心跳缺⇒.halt,再 3 轮⇒/clear）
-invoke    `bash plugin/scripts/<suite-fix-subagent>.sh --check`（贴输出：subagent 起 + 修复落两条线）
-control   合并路径 integration 先；可修 tasks/*.md；评价产物=suite-health；终止上限；心跳阶梯
-resume    subagent / 评价者 / 执行保障分步提交，任一步完成即写盘
+invoke    `meta-cc query tool_name=Agent → last(timestamp)`（贴输出：04:10 首次后台 subagent 实跑心跳）
+control   实跑已发生(非造机制)；合并路径 integration 先；评价产物=suite-health；心跳阶梯
+resume    结晶 prompt 模板 / 心跳接线 / 评价产物格式分步提交，任一步完成即写盘
 
 ## Dispatch review
 
