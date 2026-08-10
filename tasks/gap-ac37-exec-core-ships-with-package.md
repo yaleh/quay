@@ -1,7 +1,10 @@
 ---
 id: gap-ac37-exec-core-ships-with-package
-title: '执行核零交付——plugin/loop/{manager,orchestrator,fast-mode}-tick-core.md 三份全部不存在，quay-init.sh 里 tick-core 命中 0；交付出去的是 1232/1309 行理由档案，≤80 行执行路径一行没走；处方=执行核进 quay-init.sh derive_loop_scripts 派生集 ⇒ :1081 的 referenced ⊆ landed 门自动生效（不新建检查）'
-status: todo
+title: 执行核零交付——plugin/loop/{manager,orchestrator,fast-mode}-tick-core.md
+  三份全部不存在，quay-init.sh 里 tick-core 命中 0；交付出去的是 1232/1309 行理由档案，≤80
+  行执行路径一行没走；处方=执行核进 quay-init.sh derive_loop_scripts 派生集 ⇒ :1081 的 referenced ⊆
+  landed 门自动生效（不新建检查）
+status: ready
 labels:
   - gap
   - defect
@@ -54,11 +57,11 @@ extra: {}
 ## Touches
 
 - plugin/scripts/quay-init.sh（AC2/AC3：derive_loop_scripts 加三份核 + --manager opt-in）
-- plugin/loop/manager-tick-core.md（AC3：随包正本——从 orchestration/ 复制）
-- plugin/loop/orchestrator-tick-core.md（AC2：随包正本）
-- plugin/loop/fast-mode-tick-core.md（AC2：随包正本）
+- `plugin/loop/manager-tick-core.md`（AC3：随包正本——从 orchestration/ 复制）(new)
+- `plugin/loop/orchestrator-tick-core.md`（AC2：随包正本）(new)
+- `plugin/loop/fast-mode-tick-core.md`（AC2：随包正本）(new)
 - orchestration/manager-tick-core.md / orchestrator-tick-core.md / fast-mode-tick-core.md（随包正本的源）
-- plugin/test/quay-init.test.mjs（AC2-AC5：派生集含核 + opt-in + referenced⊆landed）
+- `plugin/test/quay-init.test.mjs`（AC2-AC5：派生集含核 + opt-in + referenced⊆landed）(new)
 - plugin/scripts/known-load-sensitive.ts（头注释补「收编到 serial 相仅应在证明并发造成后执行」裁定——manager 2026-08-10 建议放机制正本；C15 已在 orchestrator-tick-core.md 落 git 跟踪，此为同裁定的机制侧载体）
 - tasks/gap-ac36-delivery-critical-priority-axis.md（交叉标注——本任务将作 AC36 ③ 的活体样本）
 - tasks/gap-ac37-exec-core-ships-with-package.md（自身：勾 AC + 贴证据）
