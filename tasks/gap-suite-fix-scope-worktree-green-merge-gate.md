@@ -74,3 +74,10 @@ resume    门 / 失败信息 / 测试分步提交，任一步完成即写盘
 reviewer: outer
 at: 2026-08-10
 changed: manager 决定性读数——第二个 suite-fix subagent rounds 230/231 scope=main，从未自测绿（第一 subagent rounds 218-221 scope=worktree + round-221 green 是正对照）。三保障同时失效而条文每条「没违反」。处方=fan-in 前置断言 scope=worktree+green（数据已在 verification-round.jsonl）。实现归 inner
+
+## 交叉标注 (gap-ac41-red-on-omission-artifact, 2026-08-10)
+
+本任务（scope=worktree 闸）是 AC41③ 三次有效干预之一——它的「不做会变红」读数是 `.quay/
+verification-round.jsonl` 无 `scope=worktree`+`state=green` 记录 ⇒ fan-in 拒。执行体 =
+`red-on-omission-audit` 检查器（`tasks/gap-ac41-red-on-omission-artifact`）把 `scope_worktree_gate`
+列为 Contract invariant，机械核对 runner 声明 `scope` 字段 + fan-in 消费者要求 worktree+green。

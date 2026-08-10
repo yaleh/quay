@@ -72,3 +72,10 @@ resume    计数器脚本 / catalog 声明 / tick 接线分步提交，任一步
 reviewer: outer
 at: 2026-08-10
 changed: manager 点检——A15 裁定5（连续 3 轮心跳缺失⇒.halt，再 3 轮⇒/clear）连续 9 轮未执行，catalog 0 命中、suite-health-last-run.json 1h44m 未更新；C17 最强实例（规则在 80 行执行核每轮必读仍不执行）。立案：照 closure-lag-check.sh 造计数器。实现归 inner，判定归 outer
+
+## 交叉标注 (gap-ac41-red-on-omission-artifact, 2026-08-10)
+
+本任务（计数器）是 AC41③（red-on-omission）判据 1/2 的产物——但**计数器本身也必须能指出「不做时
+哪个读数会变红」**，否则又是一个靠自觉跑的机制（Proposal 反面）。执行体 = `red-on-omission-audit`
+检查器（`tasks/gap-ac41-red-on-omission-artifact`）：registry 把 `a15_ruling5`（含计数器形态的
+`ruling5_status` 自报字段）列为 invariant，逐条机械核对「行为→变红读数」。

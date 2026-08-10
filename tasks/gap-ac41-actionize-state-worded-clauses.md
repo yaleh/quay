@@ -119,3 +119,10 @@ resume    枚举 / 逐条动作化 / 计数归零分步提交，任一步完成�
 reviewer: outer
 at: 2026-08-10
 changed: 人裁定「同意上述意见…更新 AC、创建任务并推进」+ manager AC41 落盘。反直觉实证：两 subagent 同一条文行为相反（引文件失败/全散文成功），差别=动作被压缩成结果状态（run the suite→self-test）。措辞分布 95% 动作 / 1 处状态描述 = 自测绿。立案：结果状态型条款动作化。实现归 inner，判定归 outer
+
+## 交叉标注 (gap-ac41-red-on-omission-artifact, 2026-08-10)
+
+本任务（AC41 判据 1 动作化）解决「条文质量」，`gap-ac41-red-on-omission-artifact`（判据 3）解决
+「执行保障」——两条同属 AC41，行为固化的完整形态 = 条文（动作化）+ 单源（引用）+ 执行保障（不做会
+变红）。`state-worded-clause-check`（判据 1 的执行体）与 `red-on-omission-audit`（判据 3 的执行体）
+都在 test.sh run_static_checks 里，同为 `@static-tier change`。
