@@ -32,7 +32,7 @@ checklist 执行。
 | A11 | 读 `.quay/full-suite-state.json` 的 `state`/`reason`/`durationMs` | `green`⇒suiteGreen;`running`⇒true(proceed);`red`⇒false;**缺文件⇒true**。`reason: aborted` **不**触发停派 (src:738) |
 | A12 | 独立核实内层至少一项声称:`inner-forensics.mjs verify <类别> --since <上次 tick ISO>` / `timecost` | 以 git 和实测为准,不以内层自述为准;零命中 ≠ 没做过(先用类别形式复核);见 `⚠ 更早会话未被包含` 即窗口不完整 (src:630) |
 | A13 | `self-report-vocab-audit.ts --git-log 15 --exclude-prefix outer: --window 3 --json` | 读 `inner_self_report_vocab` + `converged`;连续 3 轮无 batch 式自述 = 收敛 (src:851) |
-| A14 | **账本·本轮 closure-pass 是否被调用**(FINDING §6①,每 tick):`meta-cc query_session_content role=tool tool_name=closure-lag-check` → `last(timestamp)` | 抓「收尾 pass 自述做了但没真调用」——与 manager A9 同手法(抓 nyf-semantic-judge workflow 49c0be86 用完即弃那次,有 4 个 done-flip 真产出却因执行核无「调用」步骤而丢);`--record` 心跳缺失 >3 个 tick 周期 ⇒ 写明「已停用/已替代/是缺陷」三选一 (src:668)。**另(人 2026-08-10 裁定更正):每 tick 统计本会话里裸 tmux send-keys 次数（meta-cc query tool_name 含 tmux send-keys 且不含 supervisor-deliver/send-keys-reliable）,非 0 即违规并记账;并调 drive-contract-check.ts（outer→inner 驱动文本契约检查器,近 3 天仅 3 次调用——应入 tick）** |
+| A14 | **账本·本轮 closure-pass 是否被调用**(FINDING §6①,每 tick):`meta-cc query_session_content role=tool tool_name=closure-lag-check` → `last(timestamp)` | 抓「收尾 pass 自述做了但没真调用」——与 manager A9 同手法(抓 nyf-semantic-judge workflow 49c0be86 用完即弃那次,有 4 个 done-flip 真产出却因执行核无「调用」步骤而丢);`--record` 心跳缺失 >3 个 tick 周期 ⇒ 写明「已停用/已替代/是缺陷」三选一 (src:668)。**另(人 2026-08-10 裁定更正×2):每 tick 统计本会话里裸 tmux send-keys 次数——**按位置判定**（命令位置:行首/`&&`/`;`/管道后,且不在引号/字符串/注释内——复用 drive-contract-check.ts「by POSITION, never by keyword」与 test-framework-policy-check.ts「code positions only」的既有手法,勿按关键词,A16 关键词法首轮即 3 假阳性）;非 0 即违规并记账;并调 drive-contract-check.ts（outer→inner 驱动文本契约检查器,近 3 天仅 3 次调用——应入 tick）** |
 
 ## B. 每轮必产出
 
