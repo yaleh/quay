@@ -64,8 +64,8 @@ extra: {}
 
 ## Contract
 
-measure   empty_wait_after_terminal = 轮终态后到下一轮启动的间隔（分钟）
-band      empty_wait_after_terminal <= 10（自动重触发阈值内，无长空洞）
+measure   empty_wait_after_terminal = `python3 -c "import json;rs=[json.loads(l) for l in open('.quay/verification-round.jsonl') if l.strip()];print([ (r.get('round'), r.get('startedAt')) for r in rs[-6:] ])"` 的 stdout 中末轮终态后到下一轮启动的间隔分钟数
+band      empty_wait_after_terminal = <= 10（自动重触发阈值内，无长空洞）
 invariant no_race_with_manual_launch = 1（resource-gate 先行，与手动起跑互斥）
 invariant no_new_race_conditions = 1（自动重触发不引入竞态）
 invoke    `python3 -c "import json;[print(r['round'],r['state'],r['startedAt']) for r in json.loads(open('.quay/verification-round.jsonl').read().splitlines() and '['+','.join(open('.quay/verification-round.jsonl').read().splitlines())+']')]"`（终态-启动间隔分布贴回）

@@ -65,7 +65,7 @@ extra: {}
 ## Contract
 
 measure   suite_blocking_tasks_nonempty = `node --no-warnings --experimental-strip-types plugin/scripts/ready-pool-check.ts --root <repo> --json` 输出里 plugin/scripts 失败后 `suite_blocking.tasks` 长度
-band      suite_blocking_tasks_nonempty > 0（plugin/scripts 失败 → tasks 非空或显式未归因清单）
+band      suite_blocking_tasks_nonempty = 非空（>0，plugin/scripts 失败 → tasks 非空或显式未归因清单）
 invariant no_false_positive_on_no_red = 1（无红窗不误报）
 invariant crosscut_plugin_scripts_linked = 1（与 cross-cut 条目同根衔接）
 invoke    `node --no-warnings --experimental-strip-types plugin/scripts/ready-pool-check.ts --root <repo> --json`（plugin/scripts 失败 fixture 贴回）

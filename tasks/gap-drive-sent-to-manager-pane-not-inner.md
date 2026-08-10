@@ -62,7 +62,7 @@ extra: {}
 
 ## Contract
 
-measure   drive_target_verified = `grep -o "quay-0:[0-9.]*" <外层驱动日志>` 是否有数字索引残留
+measure   drive_target_verified = `grep -o "quay-0:[0-9.]*" <外层驱动日志> | sort -u` 的 stdout 里数字索引残留行数
 band      drive_target_verified = 0（无数字索引残留——只用窗口名 quay-0:inner）
 invariant no_drive_to_non_inner = 1（驱动前置校验，非 inner 即中止）
 invariant delivered_requires_inner_signal = 1（confirmed delivered 只认 inner 信号）
