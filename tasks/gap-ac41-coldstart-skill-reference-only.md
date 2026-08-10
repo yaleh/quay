@@ -82,9 +82,9 @@ orchestration/orchestrator-loop-tick.md:35:> **切分声明（AC38，2026-08-10�
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全部勾上
-- [ ] 修后实跑：SKILL.md 理由段搬走（贴 diff）；tick 与冷启动引用同一批文件（贴集合对比）——见上方 Evidence
-- [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）——scoped 门绿 + 关键受影响 88/88 绿
+- [x] AC1–AC5 全部勾上
+- [x] 修后实跑：SKILL.md 理由段搬走（贴 diff）；tick 与冷启动引用同一批文件（贴集合对比）——见上方 Evidence
+- [x] 既有测试 + 新增测试全绿（`--for-task` scoped）——scoped 门绿 + 关键受影响 88/88 绿
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
 
 ## Touches

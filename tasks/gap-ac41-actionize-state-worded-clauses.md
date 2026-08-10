@@ -83,9 +83,9 @@ $ node --no-warnings --experimental-strip-types plugin/scripts/state-worded-clau
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全部勾上
-- [ ] 修后实跑：措辞计数 = 0（贴输出）；自测绿新写法可执行（worktree 跑 test.sh → 等 scope=worktree+green）
-- [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
+- [x] AC1–AC5 全部勾上
+- [x] 修后实跑：措辞计数 = 0（贴输出）；自测绿新写法可执行（worktree 跑 test.sh → 等 scope=worktree+green）
+- [x] 既有测试 + 新增测试全绿（`--for-task` scoped）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
 
 ## Touches

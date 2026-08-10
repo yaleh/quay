@@ -98,9 +98,9 @@ EXIT=0
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全部勾上
-- [ ] 修后实跑：`quay-init.sh | grep -c tick-core` > 0 + 目标项目读核（贴输出）
-- [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
+- [x] AC1–AC5 全部勾上
+- [x] 修后实跑：`quay-init.sh | grep -c tick-core` > 0 + 目标项目读核（贴输出）
+- [x] 既有测试 + 新增测试全绿（`--for-task` scoped）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
 
 ## Touches
