@@ -41,9 +41,14 @@ extra: {}
 
 ## AC（draft）
 
-- [ ] `git status --porcelain` 在 tick §1 observe 后干净（last-pane.txt 不再显示为 untracked）
-- [ ] `tree-hygiene-check.sh` 与 `assert-clean-tree.sh` 对同一工作树给出**一致**的 clean/dirty 结论
-- [ ] 负控制：构造 last-pane.txt 存在 ⇒ 两个检查器都判干净（或都判脏），不一致即失败
+- [x] `git status --porcelain` 在 tick §1 observe 后干净（last-pane.txt 不再显示为 untracked）
+      —— 实测：模拟 tick §1 observe 写入 `.quay/last-pane.txt` + `.quay/last-outer-pane.txt` 后，
+      `git status --porcelain` 空；`git check-ignore --no-index` 两条均命中（exit 0）
+- [x] `tree-hygiene-check.sh` 与 `assert-clean-tree.sh` 对同一工作树给出**一致**的 clean/dirty 结论
+      —— 实测：同一树（last-pane.txt + last-outer-pane.txt 在盘上）tree-hygiene exit=0（clean）、
+      assert-clean-tree（absolute 模式）exit=0（PASS）——两检查器一致判干净
+- [x] 负控制：构造 last-pane.txt 存在 ⇒ 两个检查器都判干净（或都判脏），不一致即失败
+      —— 实测：构造 last-pane.txt + last-outer-pane.txt 存在 ⇒ 两检查器都判干净（clean/clean），一致；负控制通过
 
 ## DoD（draft）
 
@@ -66,3 +71,36 @@ extra: {}
 - `assert-clean-tree.sh:46`：`dirty="$(git status --porcelain)"; if [ -n "$dirty" ]`
 - `tree-hygiene-check.sh:21-22`：KNOWN SCRATCH patterns 清单（last-pane 不在）
 - 两 tick 文档共 5 处 `last-pane.txt` 写入命令
+
+## Execution evidence（2026-08-10，worktree `quay-worktrees/gap-quay-last-pane-txt-untracked-dirties-tree`）
+
+**实现**
+- `.gitignore`：在 `.quay/` 逐文件运行时状态族新增两条规则（与 `.ruling-observer-state.json` / `blocked-signals/` 同类）——
+  `**/.quay/last-pane.txt` + `**/.quay/last-outer-pane.txt`（后者是 manager 盯外层的同类快照，orchestrator-loop-tick.md AC5）。
+- **关键实测补充：`.quay/last-pane.txt` 已在 git 里被跟踪**（fan-in `ae47d845` 用 `git add -A` 意外卷入 116 行 pane 捕获内容；
+  本任务 Finding 2026-08-06 写「未跟踪」，2026-08-10 已被误提交）。gitignore 规则对已跟踪文件无效 ⇒ 必须同时
+  `git rm --cached .quay/last-pane.txt`（文件留在磁盘，从此不可见）。`last-outer-pane.txt` 从未被跟踪，仅需规则。
+
+**AC 实测（提交后干净态，模拟 tick §1 observe 写入两个 pane 快照到磁盘）**
+```
+AC1: git status --porcelain                                        → 空
+     git check-ignore --no-index .quay/last-pane.txt              → .gitignore:100 命中 exit=0
+     git check-ignore --no-index .quay/last-outer-pane.txt        → .gitignore:101 命中 exit=0
+AC2: bash plugin/scripts/tree-hygiene-check.sh                     → clean exit=0
+     bash plugin/scripts/assert-clean-tree.sh <root>（absolute）   → PASS exit=0
+AC3: 负控制：last-pane.txt + last-outer-pane.txt 在盘上存在
+     tree-hygiene exit=0 == assert-clean-tree exit=0              → CONSISTENT（都判干净）
+```
+
+**scoped 验证（`./scripts/test.sh --for-task gap-quay-last-pane-txt-untracked-dirties-tree --allow-thin`）**
+- scoped 静态层全绿：task-contract-check（0 violations，strict-subset）、superseded-capability-check（PASS）。
+- 选择器 0 测试文件（Touches 均为非测试文件，thin allowed，exit 0）——完整套件由外层批量合闸门承担（同 DoD 延后约定）。
+
+**可选「两检查器共享 KNOWN SCRATCH 单一来源」未做**——Cross-annotation 明示可选；两检查器对 last-pane 类已一致（均判干净），
+本任务只做 gitignore 补规则 + untrack。完整统一两检查器的口径是更大的改动，超出 Touches 范围。
+
+## Touches
+
+- tasks/gap-quay-last-pane-txt-untracked-dirties-tree.md（自身文件：self-touch，2026-08-10 outer 补——缺此条被 C8 拒派发，见 touches-orthogonality-check --self-touch-scan）
+- .gitignore（实现：新增 `**/.quay/last-pane.txt` + `**/.quay/last-outer-pane.txt` 规则）
+- .quay/last-pane.txt（git rm --cached：撤销 fan-in ae47d845 意外提交的运行时 pane 快照，文件留在磁盘）
