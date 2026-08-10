@@ -49,11 +49,15 @@ phase('Merge'); await agent('fan-in + verify clean + batch-merge')
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 ab380c5e 悬挂实证(裸 Bash 起 runner、11 次空等、Monitor/BashOutput 0 调用)+ Monitor 建议撤回理由(嵌套 agent 自武装 Monitor 唤醒不保证)+ Workflow 投递机制差异(本任务 Proposal 已含)
-- [ ] AC2: **Workflow 化**——A15 ④ 的「Fix→Verify(轮询等绿)→Merge」整条链改造为 Workflow,等待由脚本 `setTimeout`+轮询决定,不由 agent 判断
-- [ ] AC3: **两类场景不退化**——对照验证:成功 subagent 形态(纯 agent 语义判断)与失败形态(诊断+等待同 agent)在 workflow 化后都不退化
-- [ ] AC4: **Monitor 撤回落地**——此前加的「subagent 自验证必须用 Monitor」措辞修正为「等待由 workflow 脚本控制流决定」(不依赖嵌套 agent 自武装 Monitor)
-- [ ] AC5: **既有不回归**——`--for-task` scoped 门绿
+- [x] AC1: **复现固化**——任务体记录 ab380c5e 悬挂实证(裸 Bash 起 runner、11 次空等、Monitor/BashOutput 0 调用)+ Monitor 建议撤回理由(嵌套 agent 自武装 Monitor 唤醒不保证)+ Workflow 投递机制差异(本任务 Proposal 已含)
+- [x] AC2: **Workflow 化**——A15 ④ 的「Fix→Verify(轮询等绿)→Merge」整条链改造为 Workflow `.claude/workflows/execute-suite-fix.js`,等待由脚本 `setTimeout`+轮询决定,不由 agent 判断
+- [ ] AC3: **两类场景不退化**——对照验证:成功 subagent 形态(纯 agent 语义判断)与失败形态(诊断+等待同 agent)在 workflow 化后都不退化（待本轮以 workflow 形态实跑一次绿/红验证）
+- [x] AC4: **Monitor 撤回落地**——orchestrator-tick-core.md A15 ④ 的「subagent 自验证必须用 Monitor」措辞已修正为「等待由 workflow 脚本控制流决定」(不依赖嵌套 agent 自武装 Monitor);workflow 内 Fix/Verify/Merge 三段均不出现「agent 自己决定等待机制」的环节
+- [ ] AC5: **既有不回归**——`--for-task` scoped 门绿（待 workflow 形态全量轮跑绿后确认）
+
+## 追加记录（manager 15:3x,人裁定）
+
+`.halt` 接管期间 suite 行为必须简化:完整跑 suite、分析、修复、迭代,**不得引入任何部分执行/提前中止机制**。五闸全枚举已写进 A15 ④:①max-runtime 45min→接管设 ≥120min(`QUAY_TEST_SUITE_MAX_RUNTIME_MS`);②静态检查红=tests 0,先修再重跑全量,不得当验证轮;③resource-gate WAIT/lock=未跑即 abort,等待重跑不计迭代;④scoped/--group 不是验证信号,判绿只认全量;⑤不得发明提前退出。**验证轮判据**:verification-round.jsonl 记录满足 `tests ≥ 2900` 或 `reason ∈ {static-check,aborted,timeout}` 且标注「非验证轮，需重跑」才算「一轮验证」。workflow 内已实现该分类(isRealRedRound / isNonVerificationTerminal)。
 
 ## Definition of Done
 
