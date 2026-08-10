@@ -68,7 +68,7 @@ extra: {}
 ## Contract
 
 measure   round_failures_field_present = `python3 -c "import json;rs=[json.loads(l) for l in open('.quay/verification-round.jsonl') if l.strip()];print(sum(1 for r in rs if 'failures' in r))"` 的 stdout 数字
-band      round_failures_field_present > 0（红轮带 failures 字段）
+band      round_failures_field_present = > 0（红轮带 failures 字段）
 invariant historical_rounds_in_attribution = 1（历史轮参与归因）
 invariant basename_shape_normalized = 1（裸 basename 命中 Touches）
 invariant backward_compatible = 1（缺失 failures 旧行读者容忍）
