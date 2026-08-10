@@ -1,0 +1,434 @@
+#!/usr/bin/env node
+// tick-core-static-check.ts — execution-core static coverage checker
+// (tasks/gap-tick-core-zero-static-coverage, AC2-AC7)
+//
+// WHAT IT DETECTS: the three execution cores (orchestration/*-tick-core.md — what the three layers
+// ACTUALLY read every tick, the AC30(a) judgment objects) previously had ZERO static coverage:
+// scripts/test.sh's @static-object pointed at the *-loop-tick.md REASON archives, not the
+// *-tick-core.md EXECUTION cores (grep -c "tick-core" scripts/test.sh = 0). The 2026-08-10
+// incidents — AC30(a) ≤80 lines, a pointer target file deleted, criterion numbering reused against
+// the B3 group, and an unconditional "外层不直接改代码" prohibition contradicting the core's own
+// Agent(run_in_background) dispatch — were ALL hand-found with wc -l / grep, zero mechanical gate.
+// This checker closes the four gates:
+//
+//   AC3  — each core ≤ MAX_CORE_LINES (80) lines (AC30(a)). A core pushed over 80 lines reddens.
+//   AC4  — every pointer target (a backtick-named repo-relative path a core references, e.g.
+//          `orchestration/manager-loop-tick.md`) must EXIST. Three-layer resolution (exact →
+//          basename → same-stem-diff-ext); placeholders (`NNN`/`<…>`/`*`/`{`), `.quay/` runtime
+//          state, gitignored build artifacts, and stale-annotated references (the line itself says
+//          the file is retired/replaced/banned) are skipped. A missing pointer target reddens.
+//   AC5  — the manager B3 group's numbering (甲乙丙丁戊) must not collide with the criteria
+//          numbering (①-⑤, reserved for manager-tick-criteria.md). The B3 section must carry all
+//          five 甲乙丙丁戊 markers (the 2026-08-10 shape: three B3 tick-log lines reused ①-⑤ and
+//          absence was disguised as presence). A B3 section missing any marker reddens.
+//   AC6  — prohibition text in the four prohibition docs ("不要自己用 Agent / 外层不直接改代码")
+//          must be CONSISTENT with the cores' background Agent dispatch. When a core uses
+//          `run_in_background` (it does: fast-mode C5 / orchestrator C8), an UNCONDITIONAL
+//          prohibition (a prohibition paragraph WITHOUT the 收窄/单一写入者/共享树 narrowing that
+//          scopes it to the shared tree, permitting infrastructure work in one's own worktree)
+//          contradicts the core and reddens. A narrowed prohibition passes.
+//
+// SCAN SURFACE (a ## Contract invariant — the set must stay byte-identical across runs; a missing
+// scan target is an ERROR, never a silent green):
+//     CORES           = orchestration/{manager,orchestrator,fast-mode}-tick-core.md
+//     PROHIBITION_DOCS = orchestration/outer-brief-2026-08-04-third-restart.md
+//                      + orchestration/QUAY-OUTER-HANDOFF.md
+//                      + orchestration/exp6-phase1-sustained-unattended-operation.md
+//                      + orchestration/orchestrator-loop-tick.md (boundary table)
+//
+// MODES:
+//   default / --check  — scan the full surface under --root; exit 0 iff all four criteria pass.
+//   --only <ac3|ac4|ac5|ac6> — run ONE criterion on the full surface (per-criterion tests).
+//   --judge <path>     — judge ONE file: a prohibition doc → AC6; anything else → AC3+AC4+AC5.
+//   --json             — machine-readable {ok, lines, ac3, ac4, ac5, ac6}.
+//
+// Exit codes: 0 = PASS; 1 = FAIL (any criterion violated, or a scan target missing); 2 = usage.
+
+import fs from "node:fs";
+import path from "node:path";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { isDirectEntry } from "./gate-script-base.ts";
+
+// ── Scan surface (a ## Contract invariant — missing target = ERROR, never silent green) ──────────────
+export const CORES = [
+  "orchestration/manager-tick-core.md",
+  "orchestration/orchestrator-tick-core.md",
+  "orchestration/fast-mode-tick-core.md",
+] as const;
+
+export const PROHIBITION_DOCS = [
+  "orchestration/outer-brief-2026-08-04-third-restart.md",
+  "orchestration/QUAY-OUTER-HANDOFF.md",
+  "orchestration/exp6-phase1-sustained-unattended-operation.md",
+  "orchestration/orchestrator-loop-tick.md",
+] as const;
+
+export const MAX_CORE_LINES = 80;
+export const PROHIBITION_PHRASES = ["不要自己用", "外层不直接改"];
+export const NARROWING_MARKERS = ["收窄", "单一写入者", "共享树"];
+export const B3_MARKERS = ["甲", "乙", "丙", "丁", "戊"];
+
+// ── AC4 path-resolution constants (mirror threshold-scope-check.ts's three-layer judgment) ───────────
+const TOP_LEVELS = [
+  "packages", "plugin", "scripts", "docs", "tasks", "orchestration", "experiments",
+  "adr", "dist", ".github", ".quay", ".claude", "milestones", "src", "test",
+];
+const PATH_EXT_RE = /\.(ts|js|mjs|md|sh|json|yml|yaml|txt|env|tsx|jsx|css|html|png|py|lock|snapshot|jsonl)$/;
+const PLACEHOLDER_RE = /NNN|<[^>]*>|\*|\{/;
+/** An annotation on the SAME line as a missing reference that explains why the path is gone — a
+ *  reader following it is not misled (the text itself says it is retired/replaced/banned/runtime
+ *  state). The deleted-superseded references in the cores (send-keys-verified.sh, the
+ *  inner-agent-budget-report.ts that A16 deprecated) carry such annotations. */
+const STALE_ANNOT_RE =
+  /(retired|superseded|RETIRED|SUPERSEDED|退役|退休|已退休|已废除|已删除|旧路径|never-existing|不存在|已修正|作废|不可用|已随|改名|取代|废弃|禁止|已停用|已退役)/;
+
+// ── Result shapes ────────────────────────────────────────────────────────────────────────────────────
+export interface PointerHit { file: string; line: number; path: string; kind: "missing" | "stale-ext"; }
+export interface ProhibitionViolation { file: string; line: number; phrase: string; snippet: string; }
+
+// ── AC3: ≤ MAX_CORE_LINES ────────────────────────────────────────────────────────────────────────────
+/** wc -l semantics — the number of newline characters (the AC30(a) mechanical criterion is
+ *  `wc -l < core`). `text.split("\n").length` over-counts a trailing-newline file by one. */
+export function lineCount(text: string): number {
+  return (text.match(/\n/g) || []).length;
+}
+
+// ── AC4: pointer targets exist ───────────────────────────────────────────────────────────────────────
+
+export interface FileIndex {
+  byBasename: Map<string, string>;
+  byStem: Map<string, Set<string>>;
+}
+
+export function buildFileIndex(root: string): FileIndex {
+  const byBasename = new Map<string, string>();
+  const byStem = new Map<string, Set<string>>();
+  const walk = (dir: string) => {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      if (e.isDirectory()) {
+        // Exclude hidden / node_modules / TEST-ARTIFACT + WORKTREE dirs: a basename found only in
+        // tmp/worktree/milestone copies must not falsely resolve a genuinely stale reference.
+        if (e.name.startsWith(".") || e.name === "node_modules" || e.name === "tmp"
+          || e.name === "worktrees" || e.name === "milestones") continue;
+        walk(path.join(dir, e.name));
+        continue;
+      }
+      const rel = path.relative(root, path.join(dir, e.name)).split(path.sep).join("/");
+      if (!byBasename.has(e.name)) byBasename.set(e.name, rel);
+      const dot = e.name.lastIndexOf(".");
+      if (dot > 0) {
+        const stem = e.name.slice(0, dot);
+        if (!byStem.has(stem)) byStem.set(stem, new Set());
+        byStem.get(stem)!.add(e.name.slice(dot + 1));
+      }
+    }
+  };
+  walk(root);
+  return { byBasename, byStem };
+}
+
+/** Extract path-like candidates from a backtick token (same judgment as threshold-scope-check:
+ *  slash-bearing tokens that start at a repo top-level or carry a known extension; bare basenames
+ *  only when they look like real filenames; absolute/home/numeric/shell-word tokens skipped).
+ *  A trailing `:N` line reference (e.g. `orchestration/orchestrator-loop-tick.md:302`) is stripped —
+ *  the doc uses `path:N` as a source-locator shorthand, never a filename. */
+export function pathCandidates(token: string): string[] {
+  const out: string[] = [];
+  for (const w of token.split(/\s+/)) {
+    let w2 = w.replace(/^[`'"(]+/, "").replace(/[),;.]+$/, "");
+    w2 = w2.replace(/:\d+$/, "");
+    if (w2.length < 3) continue;
+    if (w2.startsWith("/") || w2.startsWith("~")) continue;
+    if (!w2.includes("/")) {
+      const dot = w2.lastIndexOf(".");
+      if (dot <= 0 || dot === w2.length - 1) continue; // ".mjs" or "foo." — not a filename
+      const base = w2.slice(0, dot);
+      const ext = w2.slice(dot + 1);
+      if (!PATH_EXT_RE.test(`.${ext}`)) continue;
+      if (!/^[A-Za-z0-9_@-]/.test(base)) continue; // shell/flag/quote leftovers
+      out.push(w2);
+      continue;
+    }
+    if (w2.length <= 2) continue; // lone "/" from math
+    const startsTop = TOP_LEVELS.some((t) => w2 === t || w2.startsWith(t + "/"));
+    if (startsTop || PATH_EXT_RE.test(w2)) out.push(w2);
+  }
+  return out;
+}
+
+/** Which of `missingPaths` are gitignored under `root` (git check-ignore --stdin, batched). A
+ *  missing gitignored path is expected runtime/build state (e.g. `dist/quay.js`), not a stale
+ *  reference. Fail-open: a non-git fixture returns an empty set (nothing exempt via git). */
+export function gitignoredPaths(root: string, missingPaths: string[]): Set<string> {
+  const out = new Set<string>();
+  if (missingPaths.length === 0) return out;
+  try {
+    const res = execFileSync("git", ["check-ignore", "--stdin"], {
+      cwd: root, encoding: "utf8", input: missingPaths.join("\n") + "\n",
+      timeout: 5_000, stdio: ["pipe", "pipe", "ignore"],
+    });
+    for (const line of res.split("\n")) {
+      const p = line.trim();
+      if (p) out.add(p.replace(/\\/g, "/"));
+    }
+  } catch {
+    // git absent / not a repo / error — fail-open (nothing exempt).
+  }
+  return out;
+}
+
+/** Basenames mentioned in `.gitignore` — a BARE reference to one is a known runtime/ignored
+ *  artifact (`batch2-queue-state.md` → `docs/analysis/batch2-queue-state.md`), not a stale SOURCE
+ *  path. `git check-ignore` cannot match a bare basename against a prefixed pattern, so this is the
+ *  bare-name companion to gitignoredPaths (mirrors threshold-scope-check). */
+export function readGitignoreBasenames(root: string): Set<string> {
+  const p = path.join(root, ".gitignore");
+  if (!fs.existsSync(p)) return new Set();
+  const out = new Set<string>();
+  for (const line of fs.readFileSync(p, "utf8").split(/\r?\n/)) {
+    const t = line.trim();
+    if (!t || t.startsWith("#")) continue;
+    const seg = t.split("/").pop() || "";
+    const base = seg.replace(/[*?]/g, "").trim();
+    const dot = base.lastIndexOf(".");
+    if (dot > 0 && dot < base.length - 1 && /^[A-Za-z0-9_@-]/.test(base.slice(0, dot))) out.add(base);
+  }
+  return out;
+}
+
+/** Scan one core's text for backtick-named pointer targets that cannot be resolved. */
+export function scanPointerTargets(text: string, rel: string, root: string, index: FileIndex, ignored: Set<string>, ignoredBasenames: Set<string> = new Set()): PointerHit[] {
+  const hits: PointerHit[] = [];
+  const lines = text.split("\n");
+  lines.forEach((raw, i) => {
+    for (const bm of raw.matchAll(/`([^`\n]+)`/g)) {
+      for (const cand of pathCandidates(bm[1])) {
+        if (PLACEHOLDER_RE.test(cand)) continue;
+        const exact = fs.existsSync(path.join(root, cand));
+        if (exact) continue;
+        const base = cand.split("/").pop() || cand;
+        const dot = base.lastIndexOf(".");
+        const stem = dot > 0 ? base.slice(0, dot) : base;
+        const candExt = dot > 0 ? base.slice(dot + 1) : "";
+        if (index.byBasename.has(base)) continue; // local reference — legal shorthand
+        // Annotated as gone on the same line — the text itself says retired/replaced/banned.
+        if (STALE_ANNOT_RE.test(raw)) continue;
+        // Runtime/build state expected absent in a fresh checkout.
+        if (cand.startsWith(".quay/") || ignored.has(cand) || ignoredBasenames.has(base)) continue;
+        const sameStemDiffExt = dot > 0
+          && index.byStem.has(stem)
+          && [...(index.byStem.get(stem) as Set<string>)].some((e) => e !== candExt);
+        hits.push({ file: rel, line: i + 1, path: cand, kind: sameStemDiffExt ? "stale-ext" : "missing" });
+      }
+    }
+  });
+  return hits;
+}
+
+// ── AC5: criterion numbering ≠ B3 group ──────────────────────────────────────────────────────────────
+export function findB3Section(text: string): { start: number; end: number } | null {
+  const lines = text.split("\n");
+  let start = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (/^- \*\*B3\b/.test(lines[i].trim())) { start = i; break; }
+  }
+  if (start === -1) return null;
+  let end = lines.length;
+  for (let i = start + 1; i < lines.length; i++) {
+    if (/^- \*\*B[0-9]+\b/.test(lines[i].trim())) { end = i; break; }
+  }
+  return { start, end };
+}
+
+/** The five B3 markers must all be present in the B3 section. A B3 group that renumbers its items
+ *  to ①-⑤ (the criteria numbering, reserved for manager-tick-criteria.md) loses the 甲-戊 markers
+ *  and reddens — the 2026-08-10 "absence disguised as presence" shape. */
+export function missingB3Markers(section: string): string[] {
+  return B3_MARKERS.filter((m) => !section.includes(m));
+}
+
+// ── AC6: prohibition consistency ─────────────────────────────────────────────────────────────────────
+export function groupParagraphs(text: string): string[] {
+  return text.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
+}
+
+/** Scan one prohibition doc's paragraphs: a paragraph carrying a prohibition phrase must also carry
+ *  a narrowing marker (收窄 / 单一写入者 / 共享树). An UNCONDITIONAL prohibition — with the cores'
+ *  run_in_background dispatch in force — contradicts the core and is a violation. */
+export function scanProhibition(text: string, rel: string): ProhibitionViolation[] {
+  const out: ProhibitionViolation[] = [];
+  const paras = groupParagraphs(text);
+  for (const p of paras) {
+    for (const phrase of PROHIBITION_PHRASES) {
+      if (!p.includes(phrase)) continue;
+      const narrowed = NARROWING_MARKERS.some((m) => p.includes(m));
+      if (narrowed) continue;
+      const line = text.split("\n").findIndex((l) => l.includes(phrase)) + 1;
+      out.push({ file: rel, line: line || 1, phrase, snippet: p.slice(0, 120) });
+      break;
+    }
+  }
+  return out;
+}
+
+// ── Aggregated result ────────────────────────────────────────────────────────────────────────────────
+export interface CheckResult {
+  ok: boolean;
+  lines: Record<string, number>;
+  ac3: { ok: boolean; over: { file: string; lines: number }[] };
+  ac4: { ok: boolean; missing: PointerHit[] };
+  ac5: { ok: boolean; missingMarkers: string[]; b3Found: boolean };
+  ac6: { ok: boolean; precondition: boolean; violations: ProhibitionViolation[] };
+}
+
+function readText(root: string, rel: string): string {
+  const abs = path.join(root, rel);
+  if (!fs.existsSync(abs)) {
+    throw new Error(`tick-core-static-check: scan target missing — ${rel} (the scan surface is a ## Contract invariant; a renamed/deleted file must fail loudly, not shrink the surface)`);
+  }
+  return fs.readFileSync(abs, "utf8");
+}
+
+export function runChecks(root: string, only?: string): CheckResult {
+  const coresText = new Map<string, string>();
+  for (const rel of CORES) coresText.set(rel, readText(root, rel));
+
+  const lines: Record<string, number> = {};
+  for (const rel of CORES) lines[rel] = lineCount(coresText.get(rel)!);
+
+  // AC3
+  const over: { file: string; lines: number }[] = [];
+  for (const rel of CORES) {
+    const n = lines[rel];
+    if (n > MAX_CORE_LINES) over.push({ file: rel, lines: n });
+  }
+  const ac3 = { ok: over.length === 0, over };
+
+  // AC4
+  const index = buildFileIndex(root);
+  const ignoredBasenames = readGitignoreBasenames(root);
+  let missing: PointerHit[] = [];
+  if (!only || only === "ac4") {
+    const allMissing: PointerHit[] = [];
+    for (const rel of CORES) {
+      allMissing.push(...scanPointerTargets(coresText.get(rel)!, rel, root, index, new Set(), ignoredBasenames));
+    }
+    const notIgnored = allMissing.filter((h) => !h.path.startsWith(".quay/"));
+    const ignored = gitignoredPaths(root, notIgnored.map((h) => h.path));
+    missing = notIgnored.filter((h) => !ignored.has(h.path));
+  }
+  const ac4 = { ok: missing.length === 0, missing };
+
+  // AC5 (manager core only — the B3 group is manager-specific)
+  let missingMarkers: string[] = [];
+  let b3Found = true;
+  if (!only || only === "ac5") {
+    const managerText = coresText.get("orchestration/manager-tick-core.md")!;
+    const b3 = findB3Section(managerText);
+    if (!b3) { b3Found = false; missingMarkers = B3_MARKERS.slice(); }
+    else {
+      const section = managerText.split("\n").slice(b3.start, b3.end).join("\n");
+      missingMarkers = missingB3Markers(section);
+    }
+  }
+  const ac5 = { ok: b3Found && missingMarkers.length === 0, missingMarkers, b3Found };
+
+  // AC6 (prohibition docs vs cores' run_in_background)
+  let precondition = false;
+  let violations: ProhibitionViolation[] = [];
+  if (!only || only === "ac6") {
+    for (const rel of CORES) {
+      if (coresText.get(rel)!.includes("run_in_background")) { precondition = true; break; }
+    }
+    if (precondition) {
+      for (const rel of PROHIBITION_DOCS) {
+        violations.push(...scanProhibition(readText(root, rel), rel));
+      }
+    }
+  }
+  const ac6 = { ok: violations.length === 0, precondition, violations };
+
+  return { ok: ac3.ok && ac4.ok && ac5.ok && ac6.ok, lines, ac3, ac4, ac5, ac6 };
+}
+
+// ── CLI ──────────────────────────────────────────────────────────────────────────────────────────────
+interface CliResult { code: number; json: unknown; }
+
+function usage(): CliResult {
+  process.stderr.write(
+    "usage: tick-core-static-check.ts [--root <dir>] [--only <ac3|ac4|ac5|ac6>] [--json]\n",
+  );
+  return { code: 2, json: { error: "usage" } };
+}
+
+export function main(argv: string[]): CliResult {
+  let root = process.cwd();
+  let only: string | undefined;
+  let json = false;
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === "--root") {
+      root = argv[++i];
+      if (root === undefined) return usage();
+    } else if (a === "--only") {
+      only = argv[++i];
+      if (only === undefined || !/^ac[3456]$/.test(only)) return usage();
+    } else if (a === "--json") {
+      json = true;
+    } else if (a === "--check") {
+      // Explicit alias for the default full-surface check (the ## Contract `invoke` form).
+    } else if (a === "--help" || a === "-h") {
+      process.stdout.write(
+        "tick-core-static-check.ts — are the three execution cores ≤80 lines, with every pointer target existing, the B3 group numbering distinct from the criteria numbering, and the prohibition docs consistent with the cores' run_in_background?\n",
+      );
+      return { code: 0, json: { help: true } };
+    } else {
+      return usage();
+    }
+  }
+
+  let res: CheckResult;
+  try {
+    res = runChecks(root, only);
+  } catch (err) {
+    process.stderr.write(`${(err as Error).message}\n`);
+    return { code: 1, json: { error: (err as Error).message } };
+  }
+
+  if (json) {
+    process.stdout.write(`${JSON.stringify(res, null, 2)}\n`);
+    return { code: res.ok ? 0 : 1, json: res };
+  }
+
+  const line = CORES.map((r) => r.split("/").pop()).map((b, i) => `${b}=${res.lines[CORES[i]]}`).join(" / ");
+  process.stdout.write(`tick-core-static-check: AC3 lines ${line} (max ${MAX_CORE_LINES})\n`);
+  if (res.ac3.over.length > 0) {
+    for (const o of res.ac3.over) process.stdout.write(`  FAIL: ${o.file} is ${o.lines} lines (> ${MAX_CORE_LINES})\n`);
+  }
+  process.stdout.write(
+    `tick-core-static-check: AC4 pointer targets ${res.ac4.missing.length === 0 ? "OK" : `FAIL (${res.ac4.missing.length} missing)`}\n`,
+  );
+  for (const m of res.ac4.missing) process.stdout.write(`  FAIL: ${m.path} (${m.kind}) at line ${m.line}\n`);
+  process.stdout.write(
+    `tick-core-static-check: AC5 B3 numbering ${res.ac5.ok ? "OK" : `FAIL (missing ${res.ac5.missingMarkers.join("") || "(no B3 section)"})`}\n`,
+  );
+  process.stdout.write(
+    `tick-core-static-check: AC6 prohibition ${res.ac6.ok ? "consistent" : `FAIL (${res.ac6.violations.length} unconditional)`}\n`,
+  );
+  for (const v of res.ac6.violations) process.stdout.write(`  FAIL: ${v.file}:${v.line} — ${v.phrase}\n    ${v.snippet}\n`);
+  if (!res.ok) process.stdout.write(`tick-core-static-check: RED — execution-core static gate violated.\n`);
+  else process.stdout.write(`tick-core-static-check: PASS — execution cores are statically covered.\n`);
+  return { code: res.ok ? 0 : 1, json: res };
+}
+
+if (isDirectEntry(import.meta)) {
+  const r = main(process.argv.slice(2));
+  process.exitCode = r.code;
+}

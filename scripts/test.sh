@@ -361,6 +361,19 @@ run_static_checks() {
   # @static-tier change
   # @static-object orchestration/manager-tick-core.md orchestration/orchestrator-tick-core.md orchestration/fast-mode-tick-core.md plugin/scripts/state-worded-clause-check.ts plugin/test/state-worded-clause-check.test.mjs
   run_checker "state-worded-clause-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/state-worded-clause-check.ts" --root "${repo_root}"
+  echo "== tick-core static check (gap-tick-core-zero-static-coverage, AC2-AC7) =="
+  # The execution-core static gate: the three *-tick-core.md files (what the three layers ACTUALLY
+  # read every tick, the AC30(a) judgment objects) had ZERO static coverage — @static-object pointed
+  # at the *-loop-tick.md REASON archives, not the *-tick-core.md EXECUTION cores (grep -c "tick-core"
+  # in this file was 0; §1.4e's "换实现要同步换判据,否则『检查通过』检查的是一个已经不存在的东西").
+  # Four 2026-08-10 incidents were all hand-found with wc -l / grep, zero mechanical gate:
+  #   ① AC30(a) ≤80 lines per core  ② pointer target files exist  ③ criterion numbering (①-⑤)
+  #      must not collide with the B3 group (甲乙丙丁戊)  ④ prohibition docs ("不要自己用 Agent /
+  #      外层不直接改代码") must be consistent with the cores' run_in_background dispatch — an
+  #      unconditional prohibition reddens; the 收窄/单一写入者/共享树 narrowing passes.
+  # @static-tier always
+  # @static-object orchestration/manager-tick-core.md orchestration/orchestrator-tick-core.md orchestration/fast-mode-tick-core.md orchestration/outer-brief-2026-08-04-third-restart.md orchestration/QUAY-OUTER-HANDOFF.md orchestration/exp6-phase1-sustained-unattended-operation.md orchestration/orchestrator-loop-tick.md plugin/scripts/tick-core-static-check.ts plugin/test/tick-core-static-check.test.mjs
+  run_checker "tick-core-static-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/tick-core-static-check.ts" --root "${repo_root}"
   echo "== instrument-failure check (gap-manager-instrument-failures-need-mechanical-detection-not-carefulness, AC3) =="
   # The manager instrument-failure five-family detector (FAMILY-1..5 in the checker header). The
   # manager's instrument failures recurred 7× in one night across five families already documented
