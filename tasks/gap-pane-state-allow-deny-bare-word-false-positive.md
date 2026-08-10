@@ -54,10 +54,64 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 inner 两次假 permission-prompt monitor 事件 + 屏幕字面证据（`--allow-thin` 命中裸 `Allow`）+ :57-58 同坑注释（本任务 Proposal 已含）
-- [ ] AC2: **裸词换形状**——`Allow`/`Deny` 改为带上下文的形状（成对行 / 行首位置），不再单命中标题里的 `--allow-thin`/`deny`
-- [ ] AC3: **回归钉住**——真实 pane 文本（含 `--allow-thin` + `bypass permissions on`）fixture → busy 非 permission-prompt；真对话框样本仍判 permission-prompt
-- [ ] AC4: **既有不回归**——`--for-task` scoped 门绿（含既有 pane-state-classify 测试：permissions 排除、dismissable questionnaire 等）
+- [x] AC1: **复现固化**——任务体记录 inner 两次假 permission-prompt monitor 事件 + 屏幕字面证据（`--allow-thin` 命中裸 `Allow`）+ :57-58 同坑注释（本任务 Proposal 已含）
+- [x] AC2: **裸词换形状**——`Allow`/`Deny` 改为带上下文的形状（成对行 / 行首位置），不再单命中标题里的 `--allow-thin`/`deny`
+- [x] AC3: **回归钉住**——真实 pane 文本（含 `--allow-thin` + `bypass permissions on`）fixture → busy 非 permission-prompt；真对话框样本仍判 permission-prompt
+- [x] AC4: **既有不回归**——`--for-task` scoped 门绿（含既有 pane-state-classify 测试：permissions 排除、dismissable questionnaire 等）
+
+## Implementation evidence (inner 2026-08-10)
+
+**AC2 — 裸词换形状**：`plugin/scripts/pane-state-classify.ts` `PERMISSION_PROMPT_RE` 由裸 `Allow|Deny`（`/i`，命中 `--allow-thin`/`denied` 标题）改为带上下文形状（`m`+`i` 标志）：
+
+```ts
+const PERMISSION_PROMPT_RE = new RegExp(
+  "Do you want to proceed|Quick safety check|trust this folder|Enter to confirm|Grant access|" +
+    "Y\\/n\\b|" +
+    "Allow\\b[^\\n]*\\bDeny\\b|Deny\\b[^\\n]*\\bAllow\\b|" +
+    "Allow\\b[^\\n]*\\n[^\\n]*\\bDeny\\b|Deny\\b[^\\n]*\\n[^\\n]*\\bAllow\\b|" +
+    "^\\s*[❯›>]?\\s*(?:1\\.\\s*)?Allow\\b|^\\s*[❯›>]?\\s*(?:1\\.\\s*)?Deny\\b",
+  "im",
+);
+```
+
+即：Allow/Deny 只在三种真实批准框形状里算 permission-prompt——(1) 同行成对（`Allow  ·  Deny  ·  Y/n`）、(2) 相邻行成对、(3) 行首选项行（`❯ Allow` / `1. Allow`）。裸词出现在标题中段（`--allow-thin`、`denied`）不满足任何形状 ⇒ 不再误判。文件内注释同步说明（by POSITION, never by keyword——同 :57-58 对 `permissions` 的既有排除）。
+
+**AC3 — 回归钉住**（新 fixture + 新断言）：
+- `plugin/test/fixtures/pane-states/allow-thin-agent-busy-1.txt` — 真实 inner agent pane（`Re-running scoped test with --allow-thin` + `bypass permissions on` + 状态行 `esc to interrupt`），期望 busy；
+- `plugin/test/fixtures/pane-states/real-allow-deny-dialog-1.txt` — 真批准框（`Do you want to proceed?` + `❯ Allow` / `Deny` 选项行），期望 permission-prompt；
+- 二者均入 `FIXTURE_EXPECTATIONS`，并新增两个专项回归测试（`--allow-thin` 标题 → busy 非 prompt；中段 `denied` 单词 → 非 prompt；真对话框 → 仍 prompt）。
+
+**AC4 — scoped 门绿**：`./scripts/test.sh --for-task gap-pane-state-allow-deny-bare-word-false-positive` → EXIT 0，37 pass / 0 fail / 0 cancelled（含既有 pane-state-classify 全部测试：permissions 排除、dismissable questionnaire、真实 fixtures 等），task-contract-check no violations。
+
+**Contract invoke 证据（`--classify` stdin seam，实际 CLI 无 `--input` 参数）**：
+
+```
+$ node --no-warnings --experimental-strip-types plugin/scripts/pane-state-classify.ts --classify < plugin/test/fixtures/pane-states/allow-thin-agent-busy-1.txt
+busy
+◯ general-purpose  Re-running scoped test with --allow-thin   11m 15s · ↓193.4k tokens
+◯ general-purpose  Updating orchestrator-tick-core.md C16 discip…  11m  9s · ↓200.0k tokens
+───────────────────────────────
+❯
+───────────────────────────────
+  ⏵⏵ bypass permissions on · 1 monitor · esc to interrupt · ← 1 agent · ↓ to manage
+
+$ node --no-warnings --experimental-strip-types plugin/scripts/pane-state-classify.ts --classify < plugin/test/fixtures/pane-states/real-allow-deny-dialog-1.txt
+permission-prompt
+Do you want to proceed?
+❯ Allow
+  Deny
+  Always allow for this folder
+  Enter to confirm · Esc to cancel
+
+$ printf '───────────────────────────────\n❯ \n───────────────────────────────\n  ⏵⏵ bypass permissions on · 1 monitor · ← 1 agent · ↓ to manage\n' | node --no-warnings --experimental-strip-types plugin/scripts/pane-state-classify.ts --classify
+waiting-input
+───────────────────────────────
+❯ 
+───────────────────────────────
+  ⏵⏵ bypass permissions on · 1 monitor · ← 1 agent · ↓ to manage
+```
+
+→ `allow_thin_false_busy` = busy（非 permission-prompt）；`real_dialog_still_prompt` = 1；`permissions_exclusion_kept` = 1。
 
 ## Definition of Done
 
