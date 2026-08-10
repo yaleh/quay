@@ -50,7 +50,7 @@ extra: {}
 ## Touches
 
 - orchestration/orchestrator-tick-core.md（类级纪律挂载点——B9 已接 deficit 触发器，纪律可与其同处）
-- plugin/scripts/（审计检查器：判据→消费动作映射，或复用 capability-catalog 的声明）
+- plugin/scripts/judgment-consumer-check.ts（审计检查器：判据→消费动作映射——判据清单 + 各自消费动作，无消费方判据列未完成；复用 capability-catalog 的声明）
 - plugin/test/（新增审计测试）
 - tasks/gap-slot-refill-c8-reject-no-backfill.md（交叉标注——实例 2）
 - tasks/gap-slot-refill-repeats-done-eligible-recommendations.md（交叉标注——实例 1，已修）
