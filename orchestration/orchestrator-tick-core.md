@@ -71,6 +71,7 @@ checklist 执行。
 | C12 | **人机对话期间 cron 不 fire**——每次对话结束前手动补一次 tick,不要假设 cron 会接上 (src:302) |
 | C13 | 写 `tasks/` 前先确认没有在飞任务把 `tasks/` 列进它的 `## Touches`;撞上就改为「记进队列状态文件 + 指示内层建」 (src:252) |
 | C14 | 派发前读候选的 `## Contract` 六键并跑 `task-contract-check.ts`(**报出不阻断**),介入后把改了什么写进 `## Dispatch review`;每个 `measure` 行自带完整反引号命令 (src:507, 517, 524) |
+| C15 | **收编到 serial 相(并发=1 硬编码)仅应在证明相应失败是并发造成后才能执行**(人 2026-08-10 裁定;此前只活在 gitignored tick-log:5752,冷启动即丢——本行是其 git 跟踪正本)。证明手段 = `red-window-triage.ts` 的 isolated-rerun(隔离重跑):隔离下仍红 ⇒ 非并发问题,收编是错误处置;隔离下绿 ⇒ 才是并发致因,收编才有依据。**not-in-family 文件(`known-load-sensitive.ts --kind <file>` 空)不得按负载敏感处理**。收编改动 = `@test-group serial` + `@load-sensitive <kind>`,必须先跑 isolated-rerun 贴证据 (manager 2026-08-10 09:4x) |
 
 ## D. 边界
 
