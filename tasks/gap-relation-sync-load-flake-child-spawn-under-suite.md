@@ -42,11 +42,11 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 round-209 实证 + solo/负载全绿 + 套件内静默失败签名（本任务 Proposal 已含）
-- [ ] AC2: **收编**——`relation-sync.test.mjs` 加 `// @test-group serial` + `// @load-sensitive child-spawn` + `// KNOWN-LOAD-SENSITIVE` 声明 + `known-load-sensitive.ts` 条目
-- [ ] AC3: **失败诊断**——harness 顶层 try/catch，spawn 失败/顶层异常写 `FAIL:` 到 fd 2（同步不静默）
-- [ ] AC4: **家族交叉标注**——create-mcp / proposal-convergence / install 家族同族标注
-- [ ] AC5: **既有不回归**——`--for-task` scoped 门绿；solo 恒绿；断言核心不削弱
+- [x] AC1: **复现固化**——任务体记录 round-209 实证 + solo/负载全绿 + 套件内静默失败签名（本任务 Proposal 已含）
+- [x] AC2: **收编**——`relation-sync.test.mjs` 加 `// @test-group serial` + `// @load-sensitive child-spawn` + `// KNOWN-LOAD-SENSITIVE` 声明 + `known-load-sensitive.ts` 条目
+- [x] AC3: **失败诊断**——harness 顶层 try/catch，spawn 失败/顶层异常写 `FAIL:` 到 fd 2（同步不静默）
+- [x] AC4: **家族交叉标注**——create-mcp / proposal-convergence / install 家族同族标注
+- [x] AC5: **既有不回归**——`--for-task` scoped 门绿；solo 恒绿；断言核心不削弱
 
 ## Definition of Done
 
@@ -82,3 +82,21 @@ resume    收编 serial / 失败诊断 / 家族标注分步提交，任一步完
 reviewer: outer
 at: 2026-08-10
 changed: round-209 early-red 分诊（relation-sync 唯一失败）——solo + CPU 负载全绿、套件内静默 passed=false（1932ms 比 solo 快、零 harness 输出行）⇒ 并发子进程 spawn 竞争 load-flake，同 create-mcp/proposal-convergence 族未收编。修：@test-group serial + KNOWN-LOAD-SENSITIVE 收编 + 顶层 try/catch 失败诊断。实现归内层
+
+## Evidence（内层实现 2026-08-10）
+
+### 实现
+
+1. **AC2 收编**——`packages/quay-native/test/relation-sync.test.mjs` 头改 `// @test-group product` → `// @test-group serial`，加 `// @load-sensitive child-spawn` + `// KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族")` 声明（child-spawn 杀族 + round-209 静默签名 + solo/CPU 负载全绿 + 与 create-mcp/proposal-convergence/install 同构）。
+2. **known-load-sensitive.ts**——`KINDS` 加 `child-spawn`（收编机制是标注驱动扫描——`listTestFiles` 按 `// @load-sensitive <kind>` 自动收进家族，无手工成员表；`--check` 强制「有 KNOWN-LOAD-SENSITIVE 头声明 ⇒ 必有 @load-sensitive」，两者齐备）。AC2 的「known-load-sensitive.ts 条目」即 KINDS 扩展，非重复手工列表。
+3. **AC3 失败诊断**——harness 顶层 5 个测试调用包 try/catch；spawn 失败/顶层异常写同步 `FAIL: <err.stack>` 到 fd 2 并置 `process.exitCode = 1`（同 writeErr 同步契约，node --test 异步 stderr 管道不可丢）；断言核心不削弱。成功消息只在无故障时打印（`process.exitCode === undefined` 守卫）。
+4. **AC4 家族交叉标注**——create-mcp / proposal-convergence / install-family / load-sensitive-serial-phase / phase-order 五个任务 Touches 各加本任务交叉标注行。
+
+### 验证
+
+- **solo**：`node --no-warnings --experimental-strip-types --test packages/quay-native/test/relation-sync.test.mjs` → 19/19 PASS、`All M35-native-relation-sync tests passed.`、exit 0。
+- **scanFamily**：`kindForFile(f, 'packages/quay-native/test/relation-sync.test.mjs')` → `child-spawn`。
+- **known-load-sensitive --check**：`ok — every KNOWN-LOAD-SENSITIVE header claim carries @load-sensitive <kind>`；`--list` 含 `packages/quay-native/test/relation-sync.test.mjs\tchild-spawn`。
+- **known-load-sensitive.test.mjs**（solo）：14/14 PASS（无 family-count 回归）。
+- **scoped 门**：`bash scripts/test.sh --for-task gap-relation-sync-load-flake-child-spawn-under-suite --allow-thin` → exit 0、fail 0、cancelled 0（relation-sync + known-load-sensitive 全绿）。
+- **失败诊断实测**：在 try 内注入 `throw new Error("SIMULATED_SPAWN_FAILURE")` → 写 `FAIL: Error: SIMULATED_SPAWN_FAILURE` + stack 到 fd 2、exit 1（不再静默 passed=false）。

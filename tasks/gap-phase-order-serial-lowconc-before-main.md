@@ -68,6 +68,7 @@ extra: {}
 - tasks/gap-serial-group-recompose-nested-runner-criterion.md（交叉标注——串行相准入判据族）
 - tasks/gap-suite-state-trigger-crash-watchdog-breaks-running-transition-test.md（交叉标注——RED 判定/终态机制族）
 - tasks/gap-runner-grouping-ac7-nested-spawn-load-flake.md（交叉标注——runner 分组族）
+- tasks/gap-relation-sync-load-flake-child-spawn-under-suite.md（交叉标注——serial 相排在末尾放大红成本；本任务 round-209 红窗即此族）
 - tasks/gap-phase-order-serial-lowconc-before-main.md（自身：勾 AC + 贴判红时刻）
 
 ## Contract

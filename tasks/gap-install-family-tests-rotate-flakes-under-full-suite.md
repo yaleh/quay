@@ -59,6 +59,7 @@ extra: {}
 - plugin/scripts/（候选 B：npm pack 缓存 / install 复用）
 - tasks/gap-install-config-driven-e2e-load-flake.md（交叉标注——本任务是它族类的系统化）
 - tasks/gap-serial-phase-install-test-residue-dependency.md（交叉标注——同族不同表现）
+- tasks/gap-relation-sync-load-flake-child-spawn-under-suite.md（交叉标注——同族：负载敏感旋转 flake，本任务是子进程 spawn 竞争类同族收编）
 - tasks/gap-install-family-tests-rotate-flakes-under-full-suite.md（自身：勾 AC + 贴证据）
 
 ## Contract
