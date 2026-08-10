@@ -5,6 +5,7 @@ status: todo
 labels:
   - gap
   - defect
+  - delivery-critical
 parent: null
 children: []
 extra: {}
