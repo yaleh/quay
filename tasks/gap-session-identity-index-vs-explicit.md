@@ -1,6 +1,6 @@
 ---
 id: gap-session-identity-index-vs-explicit
-status: ready
+status: done
 labels: []
 parent: null
 children: []

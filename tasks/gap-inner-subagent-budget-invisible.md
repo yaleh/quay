@@ -1,6 +1,6 @@
 ---
 id: gap-inner-subagent-budget-invisible
-status: ready
+status: done
 labels:
   - gap
   - defect

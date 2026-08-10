@@ -4,7 +4,7 @@ title: 结果状态型条款改写成动作+可核产物——三份执行核 95
   的「自测绿」）；实证：两个 suite-fix subagent 同一份条文行为相反（引文件的失败 scope=main、全散文的成功
   scope=worktree）；自测绿正确写法=「worktree 里跑 scripts/test.sh 直到
   verification-round.jsonl 出现 scope=worktree 且 state=green」；measure=状态描述型措辞计数→0
-status: ready
+status: done
 labels:
   - gap
   - defect

@@ -4,7 +4,7 @@ title: 执行核零交付——plugin/loop/{manager,orchestrator,fast-mode}-tick
   三份全部不存在，quay-init.sh 里 tick-core 命中 0；交付出去的是 1232/1309 行理由档案，≤80
   行执行路径一行没走；处方=执行核进 quay-init.sh derive_loop_scripts 派生集 ⇒ :1081 的 referenced ⊆
   landed 门自动生效（不新建检查）
-status: ready
+status: done
 labels:
   - gap
   - defect

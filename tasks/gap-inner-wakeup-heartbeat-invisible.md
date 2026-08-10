@@ -1,6 +1,6 @@
 ---
 id: gap-inner-wakeup-heartbeat-invisible
-status: ready
+status: done
 labels:
   - gap
   - defect

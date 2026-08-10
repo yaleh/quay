@@ -2,7 +2,7 @@
 id: gap-ready-pool-floor-tied-to-volatile-cap
 title: ready-pool 的 floor=cap×4 挂在波动 cap 上——同一 pool 在 cap 3 时②假（floor 12）cap 4
   时②真（floor 16），负载决定判词；义务「等机器忙就能自动消失」通道
-status: ready
+status: done
 labels:
   - gap
   - defect
