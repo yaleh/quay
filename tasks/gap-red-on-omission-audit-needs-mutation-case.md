@@ -33,10 +33,10 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 readiness check-6 FAIL 链（red-on-omission-audit uncovered + e532d599 在 verifiedCommit 之后落地 + r251 不覆盖它）（本任务 Proposal 已含）
-- [ ] AC2: **mutation case 补齐**——`plugin/scripts/checker-mutation-cases/red-on-omission-audit.sh` 构造破坏输入 ⇒ 检查器变红；`checker-mutation-check` uncovered 不含它
-- [ ] AC3: **既有不回归**——`--for-task` scoped 门绿（含 checker-mutation-check 自身 selftest + 25 既有 cases）
-- [ ] AC4: **全量静态检查绿**——`scripts/test.sh` 静态检查阶段无 checker-mutation FAIL
+- [x] AC1: **复现固化**——任务体记录 readiness check-6 FAIL 链（red-on-omission-audit uncovered + e532d599 在 verifiedCommit 之后落地 + r251 不覆盖它）（本任务 Proposal 已含）
+- [x] AC2: **mutation case 补齐**——`plugin/scripts/checker-mutation-cases/red-on-omission-audit.sh` 构造破坏输入 ⇒ 检查器变红；`checker-mutation-check` uncovered 不含它
+- [x] AC3: **既有不回归**——`--for-task` scoped 门绿（含 checker-mutation-check 自身 selftest + 25 既有 cases）
+- [x] AC4: **全量静态检查绿**——`scripts/test.sh` 静态检查阶段无 checker-mutation FAIL
 
 ## Definition of Done
 
@@ -67,3 +67,18 @@ resume    mutation case / scoped 门 / 全量静态分步提交，任一步完�
 reviewer: outer
 at: 2026-08-10
 changed: readiness check 事后补跑抓到 check-6 FAIL 的第二真因——red-on-omission-audit 无 mutation case（e532d599 在 r251 之后落地，r251 不覆盖）。checker-mutation 门是本仓 L_S 仪器的核心，必须补 case。实现归 inner
+
+### 修后实跑证据（2026-08-10，inner subagent）
+
+**实现**：新增 `plugin/scripts/checker-mutation-cases/red-on-omission-audit.sh`（GREEN baseline → inject `ruling5_status`→`XXXX_status` → checker 变红 → restore → GREEN；注入突变与检查器自身测试 `red-on-omission-audit.test.mjs` AC3/AC4 钉的突变一致）。
+
+**AC2 invoke**：`bash plugin/scripts/checker-mutation-cases/red-on-omission-audit.sh <tmp>` → exit 0（baseline GREEN → 注入 RED → restore GREEN 全证）。
+`bash plugin/scripts/checker-mutation-check.sh --check` → `uncovered (registered checker with no mutation case): 0`，`RESULT: PASS`（checkers_with_mutation: 20，mutations_that_stayed_green: 0，MUTATION red-on-omission-audit: pass）。
+
+**AC3 invoke**：`./scripts/test.sh --for-task gap-red-on-omission-audit-needs-mutation-case --allow-thin` → `tests 16 / pass 16 / fail 0 / cancelled 0`，EXIT 0；scoped 静态检查（test-framework-policy / test-isolation / test-impl-census / task-contract strict-subset / adr016 / capability-catalog / dead-code-after-return / superseded-capability）全绿。checker-mutation-check 自身 selftest（AC4: empty-manifest / skip-cases / invert-red 三注入全 PASS）在 `--static-checks` 全量静态阶段实跑通过。
+
+**AC4 invoke**：`./scripts/test.sh --static-checks`（完整 run_static_checks，不跑测试）→ EXIT 0；`checker-mutation-check --list --json` → `uncovered: []`；`red-on-omission-audit: covered=18 uncov=0 (band 0)`。
+
+**Contract measure 说明（供 outer 判定）**：字面 measure `grep -c 'red-on-omission-audit'` 在 **worktree 路径含检查器名**时会被 node stderr 警告（路径回显）污染 → 输出 9，在主子检出上修前/修后都是 1（修前=uncovered 列表行、修后=MUTATION 行）——它结构上无法区分「covered」与「uncovered」，是坏 measure（硬规则 4）。精确判据是 JSON uncovered 数组：`checker-mutation-check.sh --list --json` → `uncovered: []`，以及 `--check` 的 `uncovered: 0` + `MUTATION red-on-omission-audit: pass`。
+
+**fork 点偏差（重要，供 outer 复核）**：派发指令写「fork develop」，但 develop（de7aa6e3）**不含** e532d599（检查器、test.sh 接线、capability-catalog 声明都在 integration 上）——`git merge-base --is-ancestor e532d599 develop` = false。按 develop fork 则检查器文件缺失 ⇒ mutation case 引用不存在的 checker（node ENOENT ⇒ ALWAYS-RED），且 manifest 看不到 red-on-omission-audit ⇒ uncovered 恒空（假绿）。为满足本任务验证锚（checker-mutation uncovered 不含它），worktree 实际 fork 自 **integration（990eb050）**。
