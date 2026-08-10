@@ -114,6 +114,14 @@ resume 若中断，先跑 measure 读声明在场 + lowconc 失败数
 - **承重测试族实跑（本重派直接跑，非仅引用旧证据）**：`bash scripts/test.sh --test-concurrency=1 plugin/test/quay-init-loop-core.test.mjs plugin/test/worktree-root-fs-check.test.mjs plugin/test/quay-init-laydown-closure.test.mjs plugin/test/quay-init-check-drift.test.mjs plugin/test/quay-init-drift-report.test.mjs plugin/test/quay-init-loop-vendor.test.mjs plugin/test/quay-init-tmux-detection.test.mjs` → **ℹ tests 42 / pass 42 / fail 0 / cancelled 0 / exit 0**（duration_ms 461265）。这 7 个文件正是 18 个失败文件里承重 referenced-not-landed 的 install 家族——修复前必现 `FAIL (referenced-not-landed)`，现全绿。
 - **AC 勾选维持**：AC1/AC2/AC4 已在 develop 勾定；**AC3（全栈并发 8 绿）与 DoD 全量三趟行保持未勾**——按任务指示顺延至外层验证轮（40→6 入口断言收口后重跑）。
 
+**重派复核 2026-08-10（worktree task/gap-merge-introduced-referenced-not-landed-manager-tick-log @ develop HEAD de7aa6e3，fix commit 7f43fc78 ∈ ancestry，f05a4bdf 为祖先）**：
+
+- **fix 在场（HEAD 复核）**：`plugin/skills/init/SKILL.md` L123 reference-doc 表格行（manager-tick-log.md — gitignored 运行时遥测，非铺装目标，声明使 referenced ⊆ landed 成立）+ L145 `<!-- reference-doc: orchestration/manager-tick-log.md -->` 声明；`plugin/scripts/quay-init.sh` L1002-1101 reference-doc 判定逻辑（含 L1045-1050 completeness sentinel：manager-tick-log.md 恒在 shipped init skill 的 refdoc 集）。
+- **Contract measure referenced_landed**：`grep -c "manager-tick-log" plugin/skills/init/SKILL.md plugin/scripts/quay-init.sh` → **2 / 2**（声明在场 ≥1）。
+- **scoped 门实跑**：`bash scripts/test.sh --for-task gap-merge-introduced-referenced-not-landed-manager-tick-log --allow-thin` → **exit 0**，**tests 4 / pass 4 / fail 0**。本次选择到承重文件 `quay-init.test.mjs`（Touches 含 plugin/skills/init/SKILL.md + plugin/scripts/quay-init.sh 故直选），其 AC2-AC5 覆盖 exec-core 铺装 + manager-tick-core OPT-IN + referenced⊆landed 正负控制 + --loop --manager 三核铺装——非 thin 0-test。静态子集全绿：task-contract-check no violations / adr016-screen-use-check 0（147 files）/ superseded-capability-check PASS / dead-code-after-return-check 0（142 scripts）。
+- **承重测试族实跑**：`bash scripts/test.sh --test-concurrency=1 plugin/test/quay-init-loop-core.test.mjs plugin/test/worktree-root-fs-check.test.mjs plugin/test/quay-init-laydown-closure.test.mjs plugin/test/quay-init-check-drift.test.mjs plugin/test/quay-init-drift-report.test.mjs plugin/test/quay-init-loop-vendor.test.mjs plugin/test/quay-init-tmux-detection.test.mjs` → **ℹ tests 42 / pass 42 / fail 0 / cancelled 0 / exit 0**（duration_ms 360828）。这 7 个文件正是 18 个失败文件里承重 referenced-not-landed 的 install 家族——修复前必现 `FAIL (referenced-not-landed)`，现全绿。
+- **AC 勾选维持**：AC1/AC2/AC4 已勾定；**AC3（全栈并发 8 绿）与 DoD 全量三趟行保持未勾**——按任务指示顺延至外层验证轮（40→6 入口断言收口后重跑）。
+
 ## Touches
 - tasks/gap-merge-introduced-referenced-not-landed-manager-tick-log.md（自身文件：self-touch，2026-08-08 内层补——缺此条不满足派发资格闸 step 4.5）
 - plugin/skills/init/SKILL.md 或对应铺装声明文件（manager-tick-log.md reference-doc 声明）
