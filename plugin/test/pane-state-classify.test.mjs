@@ -73,6 +73,18 @@ const FIXTURE_EXPECTATIONS = {
   // dependence, tasks/gap-permission-prompt-vs-dismissable-prompt-classifier). The `(optional)` +
   // `0: Dismiss` markers are the distinguishing feature the fix keys on (candidate A).
   "questionnaire-dismissable-1.txt": "waiting-input",
+  // REPRODUCTION (gap-pane-state-allow-deny-bare-word-false-positive, manager 2026-08-10 17:2x):
+  // a real inner agent pane whose task title carries `--allow-thin`. The pre-fix bare `Allow` in
+  // PERMISSION_PROMPT_RE (case-insensitive) matched the title and misread the busy pane as a
+  // permission-prompt (the manager caught two false "permission box appeared" monitor events; the
+  // second trigger word was literally on screen: "Re-running scoped test with **--allow-thin**").
+  // Reconstructed from that capture + the busy-manager status-line shape ("esc to interrupt"): the
+  // agent is ACTIVELY running the scoped test, so the correct verdict is busy, not a dialog.
+  "allow-thin-agent-busy-1.txt": "busy",
+  // REPRODUCTION (same task): a genuine blocking tool-approval dialog where Allow/Deny appear as
+  // option rows (each on its own line, plus the line-start `❯ Allow` gutter shape) — the
+  // invariant that a REAL Allow/Deny dialog still reads permission-prompt after the bare-word fix.
+  "real-allow-deny-dialog-1.txt": "permission-prompt",
 };
 
 function readFixture(name) {
@@ -209,6 +221,27 @@ test("AC3 (negative control) — a genuine blocking permission confirmation with
     "Allow  ·  Deny  ·  Y/n",
   ].join("\n");
   assert.equal(classifyPaneState(approve).state, "permission-prompt");
+});
+
+test("AC3 (regression) — a real agent pane whose task title carries `--allow-thin` is BUSY, never a permission-prompt (bare Allow /i false positive)", () => {
+  const r = classifyPaneState(readFixture("allow-thin-agent-busy-1.txt"));
+  assert.equal(r.state, "busy", `--allow-thin title pane must read busy, got ${r.state}`);
+  assert.notEqual(r.state, "permission-prompt", "the title word --allow-thin must never fake a permission dialog");
+  // And the invariant side: the genuine Allow/Deny dialog fixture STILL reads permission-prompt.
+  assert.equal(classifyPaneState(readFixture("real-allow-deny-dialog-1.txt")).state, "permission-prompt");
+});
+
+test("AC3 (regression) — a mid-line title word 'Deny'/'denied' alone (no co-option) must NOT trip a permission-prompt", () => {
+  const deniedTitle = [
+    "◯ general-purpose  Task: denied access to tool   9m 20s · ↓150.1k tokens",
+    "───────────────────────────────",
+    "❯ ",
+    "───────────────────────────────",
+    "  ⏵⏵ bypass permissions on · 1 monitor · esc to interrupt · ← 1 agent · ↓ to manage",
+  ].join("\n");
+  const r = classifyPaneState(deniedTitle);
+  assert.notEqual(r.state, "permission-prompt", `mid-line 'denied' must not fake a dialog, got ${r.state}`);
+  assert.equal(r.state, "busy", `denied-title pane with esc-to-interrupt status is busy, got ${r.state}`);
 });
 
 test("AC6: region negative control — same bottom region + different upper content ⇒ same verdict; different bottom + same upper ⇒ different", () => {

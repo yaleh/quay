@@ -1,0 +1,6 @@
+◯ general-purpose  Re-running scoped test with --allow-thin   11m 15s · ↓193.4k tokens
+◯ general-purpose  Updating orchestrator-tick-core.md C16 discip…  11m  9s · ↓200.0k tokens
+───────────────────────────────
+❯
+───────────────────────────────
+  ⏵⏵ bypass permissions on · 1 monitor · esc to interrupt · ← 1 agent · ↓ to manage

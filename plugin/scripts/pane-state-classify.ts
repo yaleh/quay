@@ -55,9 +55,24 @@ export function bottomRegion(paneText: string, lines = DEFAULT_BOTTOM_LINES): st
  * sample (trust-check: "Quick safety check: … trust this folder … Enter to confirm") plus the
  * tool-approval family ("Do you want to proceed?") the task's AC4 names. Deliberately does NOT
  * match the word "permissions" (the "bypass permissions on" mode indicator appears in every
- * status line of this fleet — a real capture tripped on exactly that). */
-const PERMISSION_PROMPT_RE =
-  /Do you want to proceed|Quick safety check|trust this folder|Enter to confirm|Grant access|Allow|Deny|Y\/n\b/i;
+ * status line of this fleet — a real capture tripped on exactly that).
+ *
+ * Allow/Deny are NOT bare words here (gap-pane-state-allow-deny-bare-word-false-positive): a bare
+ * case-insensitive `Allow` matches a task title's `--allow-thin` and `Deny` matches any
+ * deny/denied title, turning a busy agent pane into a fake permission-prompt (the inner fleet runs
+ * `bypass permissions on` — structurally no permission box can ever appear, so that signal is pure
+ * noise). By POSITION, never by keyword (the same lesson the "permissions" exclusion above
+ * records): a real approval dialog shows BOTH options — either on one line ("Allow  ·  Deny  ·
+ * Y/n"), on adjacent lines, or Allow/Deny sits at line start as an option row (with the TUI's
+ * ❯/› gutter and optional numbering). A bare title word never satisfies any of those shapes. */
+const PERMISSION_PROMPT_RE = new RegExp(
+  "Do you want to proceed|Quick safety check|trust this folder|Enter to confirm|Grant access|" +
+    "Y\\/n\\b|" +
+    "Allow\\b[^\\n]*\\bDeny\\b|Deny\\b[^\\n]*\\bAllow\\b|" +
+    "Allow\\b[^\\n]*\\n[^\\n]*\\bDeny\\b|Deny\\b[^\\n]*\\n[^\\n]*\\bAllow\\b|" +
+    "^\\s*[❯›>]?\\s*(?:1\\.\\s*)?Allow\\b|^\\s*[❯›>]?\\s*(?:1\\.\\s*)?Deny\\b",
+  "im",
+);
 
 /** Dismissable / ignorable prompt markers — the distinguishing feature that tells a blocking
  * permission confirmation apart from a feedback questionnaire (tasks/gap-permission-prompt-vs-
@@ -409,6 +424,38 @@ export function selfcheck(): boolean {
   check("questionnaire-red-not-permission", classifyPaneState(questionnaire).state !== "permission-prompt");
   // AC3 negative control: the genuine permission dialog is UNCHANGED by the dismissable exclusion.
   check("green-real-permission-still-prompt", classifyPaneState(prompt).state === "permission-prompt");
+
+  // ── bare Allow/Deny false-positive regression (gap-pane-state-allow-deny-bare-word-false-positive) ──
+
+  // GREEN: a busy agent pane whose task title carries `--allow-thin` must read BUSY, never
+  // permission-prompt (the pre-fix bare `Allow` /i matched the title and faked a dialog).
+  const allowThinTitle = [
+    "◯ general-purpose  Re-running scoped test with --allow-thin   11m 15s · ↓193.4k tokens",
+    "───────────────────────────────",
+    "❯ ",
+    "───────────────────────────────",
+    "  ⏵⏵ bypass permissions on · 1 monitor · esc to interrupt · ← 1 agent · ↓ to manage",
+  ].join("\n");
+  check("green-allow-thin-busy", classifyPaneState(allowThinTitle).state === "busy");
+  check("allow-thin-red-not-permission", classifyPaneState(allowThinTitle).state !== "permission-prompt");
+  // RED relabel: a title word "Deny"/"denied" alone (mid-line, no co-option) must NOT trip either.
+  const deniedTitle = [
+    "◯ general-purpose  Task: denied access to tool   9m 20s · ↓150.1k tokens",
+    "───────────────────────────────",
+    "❯ ",
+    "───────────────────────────────",
+    "  ⏵⏵ bypass permissions on · 1 monitor · esc to interrupt · ← 1 agent · ↓ to manage",
+  ].join("\n");
+  check("denied-red-not-permission", classifyPaneState(deniedTitle).state !== "permission-prompt");
+  // GREEN: a genuine Allow/Deny approval dialog (pair on adjacent lines + line-start Allow) still
+  // reads permission-prompt.
+  const allowDenyDialog = [
+    "Do you want to proceed?",
+    "❯ Allow",
+    "  Deny",
+    "  Enter to confirm · Esc to cancel",
+  ].join("\n");
+  check("green-allow-deny-dialog-prompt", classifyPaneState(allowDenyDialog).state === "permission-prompt");
 
   // tier-2 GREEN: an unmatched screen → unknown, with the region passed through verbatim in raw.
   const weird = "a vim help screen\n~ ~ ~\n~ ~ ~\n(1 of 12)   help.txt";

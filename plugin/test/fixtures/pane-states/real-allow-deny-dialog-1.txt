@@ -1,0 +1,5 @@
+Do you want to proceed?
+❯ Allow
+  Deny
+  Always allow for this folder
+  Enter to confirm · Esc to cancel
