@@ -246,7 +246,7 @@ test("AC5 — cold-start/SKILL.md wires session-bootstrap.sh in as the bare-meta
   // session-bootstrap`). The test asserts the SAME command name the skill uses (AC2: docs and tests
   // must not each write their own). Re-instate the `quay-session.ts` form when 40→6 is re-merged.
   assert.match(src, /session-bootstrap\.sh/, "cold-start must reference the bootstrap command (the formalized bare-metal step)");
-  assert.match(src, /bare metal|裸机/i, "cold-start must name the bare-metal step it formalizes");
+  assert.match(src, /bare-?metal|裸机/i, "cold-start must name the bare-metal step it formalizes");
 });
 
 // ── validation + dry-run ───────────────────────────────────────────────────────────────────────────
