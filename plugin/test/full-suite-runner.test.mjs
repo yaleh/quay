@@ -2033,8 +2033,9 @@ function fakeTestShRecordingPhaseEnv(root) {
 
 test("AC2/AC3 — the default run passes QUAY_SERIAL_CONCURRENCY=1 and QUAY_LOWCONC_CONCURRENCY=3 to the child test.sh", async () => {
   // measure-first (gap-load-sensitive-serial-phase-unbounded-growth-measure-first AC2/AC3): the
-  // runner's phase-concurrency defaults are the isolation values (serial=1 / lowconc=3); the
-  // controlled experiment overrides them explicitly, never silently changing the default.
+  // runner's phase-concurrency defaults are the experiment-validated values (serial=2 raised from 1
+  // by the AC2 controlled experiment — 0-cancelled + 36% faster; lowconc=3); a future experiment
+  // overrides them explicitly, never silently changing the default.
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-phaseenv-default-"));
   const { envLog } = fakeTestShRecordingPhaseEnv(root);
   try {
@@ -2043,7 +2044,7 @@ test("AC2/AC3 — the default run passes QUAY_SERIAL_CONCURRENCY=1 and QUAY_LOWC
     assert.equal(code, 0, `runner exits 0 on green, got ${code}`);
     await poll(() => fs.existsSync(envLog));
     const line = fs.readFileSync(envLog, "utf8").trim();
-    assert.equal(line, "SERIAL=1 LOWCONC=3", `defaults must be serial=1 lowconc=3, got: ${line}`);
+    assert.equal(line, "SERIAL=2 LOWCONC=3", `defaults must be serial=2 lowconc=3, got: ${line}`);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

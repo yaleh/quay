@@ -615,14 +615,15 @@ export function defaultLaneCount(): number {
 /**
  * gap-load-sensitive-serial-phase-unbounded-growth-measure-first AC2/AC3 (measure-first) —
  * the load-sensitive phase concurrency defaults. The serial phase (KNOWN-LOAD-SENSITIVE A/B-class +
- * real-install family) defaults to concurrency 1 (the isolation invariant); the lowconc phase
+ * real-install family) defaults to concurrency 2, RAISED from 1 by the AC2 controlled experiment
+ * (2026-08-10: A/B-class serial subset cc=1 WALL_MS=455613 vs cc=2 WALL_MS=289579, both 0-cancelled —
+ * c2 快 36%; real-install e2e 双文件 c2 实测 0-cancelled — see task body). The lowconc phase
  * (hermetic-but-load-sensitive session-observation family) defaults to 3 (gap-lowconc-group-
  * concurrency-3-for-hermetic-load-sensitive AC4). Both are overridable via --serial-concurrency /
  * --lowconc-concurrency, which the runner passes to test.sh as QUAY_SERIAL_CONCURRENCY /
- * QUAY_LOWCONC_CONCURRENCY so the CONTROLLED EXPERIMENT can measure wall-clock + cancelled BEFORE the
- * default is bumped. The default stays 1 until an experiment proves 0-cancelled at a higher value.
+ * QUAY_LOWCONC_CONCURRENCY so a FUTURE controlled experiment can re-measure before the next bump.
  */
-export const DEFAULT_SERIAL_CONCURRENCY = 1;
+export const DEFAULT_SERIAL_CONCURRENCY = 2;
 export const DEFAULT_LOWCONC_CONCURRENCY = 3;
 
 /** Parse a positive-integer arg (e.g. --serial-concurrency 2); NaN/<1 → null (caller errors). */
@@ -904,7 +905,8 @@ export async function run(argv: string[]): Promise<number> {
   // load-sensitive phase concurrency overrides. An explicit --serial-concurrency / --lowconc-
   // concurrency is passed to test.sh as QUAY_SERIAL_CONCURRENCY / QUAY_LOWCONC_CONCURRENCY so the
   // controlled experiment can run the serial phase at a higher concurrency and measure wall-clock +
-  // cancelled BEFORE the default is bumped. Defaults stay DEFAULT_SERIAL_CONCURRENCY=1 /
+  // cancelled BEFORE the default is bumped. Defaults are DEFAULT_SERIAL_CONCURRENCY=2 (raised from 1
+  // by the AC2 experiment — 0-cancelled + 36% faster) /
   // DEFAULT_LOWCONC_CONCURRENCY=3 until an experiment proves 0-cancelled.
   const serialConcurrencyArg = parsePositiveIntArg(argv, "--serial-concurrency");
   const lowconcConcurrencyArg = parsePositiveIntArg(argv, "--lowconc-concurrency");

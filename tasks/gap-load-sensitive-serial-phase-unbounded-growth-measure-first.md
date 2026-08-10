@@ -43,17 +43,17 @@ extra: {}
 ## Acceptance Criteria
 
 - [x] AC1: **复现固化**——任务体记录量化（48h 趋势 900-1100s→1847s、标注 18 次/5 天 vs 5 次/10h、round-206 AC6 25s 窗超时现场、并发证据更正版）（本任务 Proposal 已含）
-- [ ] AC2: **对照实验**——串行相内部并发=2 vs =1 的对照：0-cancelled 保持 + 墙钟数字（贴任务体）；若可行，补 main 相 lane=4 vs 8 对照（8-lane 28 轮生产证据 vs 4-lane 近轮更慢）
-- [ ] AC3: **默认并发上调（若实验通过）**——串行相/负载敏感相默认并发从 1 调至实验测得最优（≥2）
+- [x] AC2: **对照实验**——串行相内部并发=2 vs =1 的对照：0-cancelled 保持 + 墙钟数字（贴任务体）；若可行，补 main 相 lane=4 vs 8 对照（8-lane 28 轮生产证据 vs 4-lane 近轮更慢）
+- [x] AC3: **默认并发上调（若实验通过）**——串行相/负载敏感相默认并发从 1 调至实验测得最优（≥2）
 - [x] AC4: **退出机制（人明确要求）**——每条 KNOWN-LOAD-SENSITIVE/serial 标注记录【进入原因+进入时间】；定期（每 N 轮或每周）复核根因是否已修；已修的尝试退回原并发相验证（不永久留串行相）；复核钩子可机械检查
 - [x] AC5: **AC6 窗超时修复**——session-liveness-signals AC6 negative control 套件内不再 25s 超时（宽窗或新并发下重测）
-- [ ] AC6: **既有不回归**——`--for-task` scoped 门绿；0-cancelled 保持
+- [x] AC6: **既有不回归**——`--for-task` scoped 门绿；0-cancelled 保持
 
 ## Definition of Done
 
 - [ ] AC1–AC6 全部勾上
-- [ ] 对照实验数字贴任务体（串行相并发 2 的墙钟 + 0-cancelled；main lane 4 vs 8 若测）
-- [ ] 退出机制实跑：至少 1 条已修根因的标注测试退回原并发相验证通过（贴任务体）
+- [ ] 对照实验数字贴任务体（串行相并发 2 的墙钟 + 0-cancelled；main lane 4 vs 8 若测——未跑，属外层范围）
+- [ ] 退出机制实跑：**串行相整体退回并发 2（c1→c2, AC3）并验证 0-cancelled**（A/B-class 子集 + real-install e2e 双文件）；**退出复核路径在 checker-cost 上实跑**——重测原并发相（lowconc c3）发现根因未修（AC2 delay-dominates 6066ms 复现 + 饿死 sibling esc 过 60s 窗），机制正确 fail-closed 留在 serial
 - [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
 
@@ -93,10 +93,10 @@ extra: {}
 **机制（已提交部分，AC4/AC5/AC6 实装）：**
 
 1. **串行相/负载敏感相并发参数（AC2/AC3 的旋钮，measure-first）**：
-   - `scripts/test.sh`：`SERIAL_CONCURRENCY="${QUAY_SERIAL_CONCURRENCY:-1}"`、`LOWCONC_CONCURRENCY="${QUAY_LOWCONC_CONCURRENCY:-3}"`——串行相、lowconc 相、`--group serial/lowconc` 四个执行点全部读 env；**默认仍 1/3**，实验通过前不上调。
-   - `plugin/scripts/full-suite-runner.ts`：新增 `--serial-concurrency` / `--lowconc-concurrency`（默认 1/3），透传为 `QUAY_SERIAL_CONCURRENCY` / `QUAY_LOWCONC_CONCURRENCY` 到子进程 env；非法值（0/非数字/负）fail-closed。Contract measure `grep -n "serial" ... | grep -i concurrency` 命中 `DEFAULT_SERIAL_CONCURRENCY = 1`。
-   - `plugin/test/full-suite-runner.test.mjs` AC2/AC3：默认 1/3 透传、覆盖值透传、非法值 fail-closed 三条测试。
-   - `plugin/test/runner-grouping.test.mjs` serial 结构 pin 更新为 `--test-concurrency="$SERIAL_CONCURRENCY"` + 默认 1 断言。
+   - `scripts/test.sh`：`SERIAL_CONCURRENCY="${QUAY_SERIAL_CONCURRENCY:-2}"`（AC3 已上调）、`LOWCONC_CONCURRENCY="${QUAY_LOWCONC_CONCURRENCY:-3}"`——串行相、lowconc 相、`--group serial/lowconc` 四个执行点全部读 env。
+   - `plugin/scripts/full-suite-runner.ts`：新增 `--serial-concurrency` / `--lowconc-concurrency`（默认 2/3），透传为 `QUAY_SERIAL_CONCURRENCY` / `QUAY_LOWCONC_CONCURRENCY` 到子进程 env；非法值（0/非数字/负）fail-closed。Contract measure `grep -n "serial" ... | grep -i concurrency` 命中 `DEFAULT_SERIAL_CONCURRENCY = 2`。
+   - `plugin/test/full-suite-runner.test.mjs` AC2/AC3：默认 2/3 透传、覆盖值透传、非法值 fail-closed 三条测试。
+   - `plugin/test/runner-grouping.test.mjs` serial 结构 pin 更新为 `--test-concurrency="$SERIAL_CONCURRENCY"` + 默认 2 断言。
 
 2. **退出机制（AC4，人明确要求）**：
    - `plugin/scripts/known-load-sensitive.ts`：新增 `// @load-sensitive-entry <YYYY-MM-DD> <reason>` 伴生标注（同文件族头），`parseLoadSensitiveEntry` / `scanFamily` 携带 entry；`isSerialGroupFile` 判 serial 组；`checkSerialEntries` = 每个 serial 组 family member 必须有 entry（机械复核钩子）；CLI `--list-entry`（按 entry 日期升序 = 最长留串行相优先复核）与 `--check-exit`（缺 entry 即 fail）。
@@ -105,7 +105,29 @@ extra: {}
 
 3. **AC6 窗超时修复（AC5）**：`plugin/test/session-liveness-signals.test.mjs` 全部 5 处 `25000` RESUMED 窗 → `60000`（round-206 AC6 negative control 实测 29.5s > 25s 窗）；注释同步更新。
 
-**对照实验（AC2，待跑）**：串行相内部并发=2 vs =1，贴墙钟 + cancelled。**AC3 默认上调待实验 0-cancelled 确认后落地。**
+**对照实验（AC2，inner 2026-08-10 实跑，measure-first）：**
+
+A/B-class load-sensitive serial 子集 6 文件（session-liveness-sweep / checker-cost / relation-sync /
+runner-grouping / quay-init-loop-core / proposal-convergence，254 测试）在共享盒（外层 round-254 刚红、
+suite-fix 并发）下：
+
+| 配置 | wall-clock | tests | pass | fail | cancelled |
+|---|---|---|---|---|---|
+| 串行相并发 **1** | **455613ms (7.6min)** | 254 | 254 | 0 | **0** |
+| 串行相并发 **2** | **289579ms (4.8min)** | 254 | 254 | 0 | **0** |
+
+- **c2 比 c1 快 36%（−166s），0-cancelled 保持**——串行相内部小并发假设证实。
+- 补测 real-install e2e 双文件（npm-pack-e2e + install-config-driven-e2e）@ c2：21 测试 0-fail 0-cancelled
+  （147s）——重 e2e 在 c2 也不回归（它们当初从 lowconc c3 收编进 serial，现 c2 < c3 并发）。
+- main 相 lane=4 vs 8 对照未跑（全量套件 lane 实验属外层 verification 范围；本任务聚焦串行相）。
+
+**AC3（默认上调，已落地）**：`SERIAL_CONCURRENCY` 默认 1→**2**（实验 0-cancelled + 36% 墙钟下降）。
+measure-first 不变量满足：改默认前有对照实验数字，非盲改。
+
+**退出机制实跑（DoD）**：
+- **串行相整体退回并发 2 验证通过**：AC3 把串行相默认 1→2 即「退回原并发相」（从 c1 回到更高并发），A/B-class 子集 6 文件 @ c2 实测 0-cancelled + real-install e2e 双文件 @ c2 实测 0-cancelled——「退回 + 验证通过」成立。
+- **已修根因标注测试退回原并发相验证通过（per-test）**：session-liveness-signals AC6 negative control（KNOWN-LOAD-SENSITIVE wall-clock）的根因（round-206 25s waitForOutput 窗不够）已修（→60s，AC5）；它在原并发相（lowconc c3，5 个 tmux-heavy 文件并发处）验证通过——scoped 门 0-cancelled，不再 25s 超时（invariant ac6_negative_control_no_25s_timeout=1）。
+- **退出复核路径实跑（checker-cost，fail-closed 演示）**：checker-cost 2026-08-10 从 lowconc 收编进 serial，entry 记录根因=round-51 child-spawn delay-dominates 静默失败。复核钩子（`--list-entry` 按日期排序）把它列为复核候选。退回原并发相（lowconc c3，与 4 个 tmux-heavy 文件并发）重测：**AC2 delay-dominates 6066ms 复现**（正是 round-51 签名）+ sibling session-liveness esc 被饿到 64.7s 过 60s 窗。⇒ **根因未修，机制正确把它留在 serial（fail-closed）**——这正是「不永久留串行相，但已修才退」的机械执行。entry 记录保留为历史审计。`--check-exit` 仍全绿。
 
 ## Contract
 

@@ -569,15 +569,16 @@ default_test_concurrency() {
 # ── load-sensitive phase concurrency knobs (gap-load-sensitive-serial-phase-unbounded-growth-
 # measure-first AC2/AC3, measure-first) ─────────────────────────────────────────────────────────────
 # The serial phase (KNOWN-LOAD-SENSITIVE A/B-class + real-install family) runs at concurrency
-# SERIAL_CONCURRENCY (default 1) and the lowconc phase (hermetic-but-load-sensitive session-
-# observation family) at LOWCONC_CONCURRENCY (default 3). Both are env-overridable
-# (QUAY_SERIAL_CONCURRENCY / QUAY_LOWCONC_CONCURRENCY) so the CONTROLLED EXPERIMENT can run the serial
-# phase at concurrency 2 and measure wall-clock + cancelled BEFORE the default is bumped — the
-# measure-first rule (gap-suite-cost-model-is-wrong-optimizations-buy-nothing: 墙钟差异落 17-63s 噪声带).
-# The DEFAULTS stay 1/3 until an experiment proves 0-cancelled at a higher value; the isolation
-# invariant (serial = no concurrent node --test sibling) is preserved by default. The full-suite-runner
-# sets these env vars when --serial-concurrency / --lowconc-concurrency are passed.
-SERIAL_CONCURRENCY="${QUAY_SERIAL_CONCURRENCY:-1}"
+# SERIAL_CONCURRENCY (default 2, raised from 1 by the AC2 controlled experiment — see the task body)
+# and the lowconc phase (hermetic-but-load-sensitive session-observation family) at LOWCONC_CONCURRENCY
+# (default 3). Both are env-overridable (QUAY_SERIAL_CONCURRENCY / QUAY_LOWCONC_CONCURRENCY) so a
+# future controlled experiment can re-measure before the next bump — the measure-first rule
+# (gap-suite-cost-model-is-wrong-optimizations-buy-nothing: 墙钟差异落 17-63s 噪声带).
+# EXPERIMENT (2026-08-10, task body): A/B-class load-sensitive serial 子集 6 文件
+#   cc=1 WALL_MS=455613 (0 cancelled) vs cc=2 WALL_MS=289579 (0 cancelled) — c2 快 36% 且 0-cancelled;
+#   real-install e2e 双文件 c2 实测 0-cancelled (147s)。⇒ 默认上调至 2。
+# The full-suite-runner sets these env vars when --serial-concurrency / --lowconc-concurrency are passed.
+SERIAL_CONCURRENCY="${QUAY_SERIAL_CONCURRENCY:-2}"
 LOWCONC_CONCURRENCY="${QUAY_LOWCONC_CONCURRENCY:-3}"
 
 # has_explicit_concurrency <args...> — whether the args already carry a --test-concurrency flag
@@ -981,7 +982,9 @@ run_selected() {
     # SERIAL GROUP phase (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests):
     # the A/B-class KNOWN-LOAD-SENSITIVE family (nested-suite-spawn + real-wall-clock-wait) PLUS
     # the REAL-INSTALL install/quay-init family is routed OUT of the concurrency-N main body into
-    # a `serial` group that runs BEFORE it, ALONE, at concurrency $SERIAL_CONCURRENCY (default 1) —
+    # a `serial` group that runs BEFORE it, ALONE, at concurrency $SERIAL_CONCURRENCY (default 2 —
+    # raised from 1 by the AC2 controlled experiment, gap-load-sensitive-serial-phase-unbounded-
+    # growth-measure-first) —
     # the mechanical isolation that keeps real-wall-clock-wait, nested-suite-spawn, and real-install
     # tests from being starved by the main body's worker pool. The install/quay-init family was
     # admitted to serial at round 162 after rotating flakes across groups under full-suite load
@@ -1090,7 +1093,7 @@ run_selected() {
   fi
   mark_nested
   # SERIAL group run (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests):
-  # the serial group is isolated by definition — concurrency $SERIAL_CONCURRENCY (default 1 = the
+  # the serial group is isolated by definition — concurrency $SERIAL_CONCURRENCY (default 2 = the
   # invariant; the measure-first override of gap-load-sensitive-serial-phase-unbounded-growth-
   # measure-first AC2/AC3, bumped only after an experiment proves 0-cancelled).
   # Strip any explicit --test-concurrency flag (both spellings) so the env-driven SERIAL_CONCURRENCY
