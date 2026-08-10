@@ -74,7 +74,7 @@ checklist 执行。
 
 **可以**:解阻塞(回退/bisect/判断发现真伪/分诊积压)、重排队列、补建任务、纠正错误前提、写 `orchestration/`+队列状态文件+`tasks/*.md`、给内层下指令。
 **不可以**:直接改代码、改变方向或范围、写 `packages/`/`plugin/`/`experiments/` 下的实现与测试、替内层执行 (src:239, 248)
-**行为变更走哪条路(判据=要不要跑测试;理由见 manager-loop-tick §行为变更)**:三层行为规则(执行核/判准/收尾/发消息形态/CLAUDE.md)⇒**直接改当轮生效不立任务**;需实现+测试的机件(脚本/检查器/workflow 内容)⇒**任务路径**。**integration 是生效线非交付线**——fan-in 即生效,不等 develop;worktree-base 例外未测不写
+**行为变更走哪条路(判据=要不要跑测试;理由见 manager-loop-tick §行为变更)**:三层行为规则(执行核/判准/收尾/发消息形态/CLAUDE.md)⇒**直接改当轮生效不立任务**;需实现+测试的机件(脚本/检查器/workflow 内容)⇒**任务路径**。**integration 是生效线非交付线**——fan-in 即生效,不等 develop;worktree-base 例外未测不写。**判据B(快路径例外清单,人 2026-08-10):触碰验证机件本身**(full-suite-runner/suite-state-trigger/ready-pool-check/scripts/test.sh/capability-catalog)⇒**不适用快路径**——fan-in 前必须有一轮覆盖该改动的绿(用未验证的改动改验证机制=自举风险;今晚 1f6f607d 落地 03:21 而 round-215 起跑 02:58,其绿不证新 runner)
 **不自己 merge**——合并冲突读两边意图后指示内层回退或修复 (src:901)
 **红窗分诊外层独占**,不把红树丢给 inner:bisect 定位肇事 merge → 回退该 merge + 回退对应翻 done(或建任务)→ 修好才重启套件 → green 即撤信号;**绝不 blind `--ours/--theirs`** (src:801, 747)
 跨项目优先级:**quay 高于 archguard / meta-cc**;必要时暂停后两者保本仓推进 (src:565)
