@@ -1550,7 +1550,7 @@ worktree 故测不到。**若从 `develop` 切，worktree 内的 scoped 验证�
 - 13:5x —— **provisioning 缺口**（验证 worktree 缺 `.quay/config.yml` 这一族，今晚已撞三次）
   ⇒ outer 据此建了 `provision-verify-worktree.sh`；
 - 14:5x —— **`dist/quay.js` 跨 3.5 小时红了三次**（r235/r236/r247），且 **r247 发生在该脚本 fan-in 之后 9 分钟**
-  ⇒ 查出脚本覆盖 `plugin/vendor/*/dist` 却**漏了 `packages/quay/dist`**（`grep -cE 'packages/quay|npm run build'` = 0），
+  ⇒ 查出脚本覆盖 `plugin/vendor/*/dist` 却**漏了 `packages/quay/dist`**（全仓非测试引用 `grep -cE 'packages/quay|npm run build'` 无命中——该计数被当作「脚本没覆盖它」的证据），
   而这一条 **inner 11:13 就逐字报过、连修法和「9/9 绿」的验证结果都给了**。
 
 **⇒ 失败形态**：`.halt` 期间「甲乙丙丁戊」几乎恒定（甲不成立因 halt 在效、丁不成立因未绿），
