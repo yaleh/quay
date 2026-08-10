@@ -201,7 +201,13 @@ Key cross-cutting facts (require reading several files to see):
 - **archguard** (MCP) — static architecture analysis: the `L_D`/`L_G` instrument (dependency structure/cycles, god-packages, duplicated/reinvented abstractions) per ADR-007. Consult it before calling a milestone done.
 - **meta-cc** (MCP) — search Claude Code session history (past errors, edit sequences, work patterns).
 - BOTH are maintained by the repo owner, so bugs get fixed fast — use them aggressively and report/fix issues rather than working around them.
-- **tmux remote-drive** (→ ADR-016) — to drive a FOREIGN workspace's Claude Code session (e.g. run archguard's `/loop` from here): `send-keys` to kick off (reliable = 3 separate calls `C-u` → text → `Enter`; combined drops the Enter), then read the RESULT from the filesystem/`git`/meta-cc — never parse the TUI. The screen-use carve-out is pinned in ADR-016's `## Amendment 2026-08-04`: only the bottom region (input box + status line), only the enumerated states (waiting-input / permission-prompt / busy / error-banner / unknown), and never a whole-screen equality/hash of `capture-pane` (enforced by `plugin/scripts/adr016-screen-use-check.ts`). One driver per session (never race a human typing there; beware gray ghost-suggestions). This is how cross-workspace proofs (DIR-048/049/051) can run without a human round-trip.
+- **tmux remote-drive** (→ ADR-016) — to drive a FOREIGN workspace's Claude Code session (e.g. run archguard's `/loop` from here): **deliver via `bash plugin/scripts/supervisor-deliver.sh <tmux目标> <文本> --transcript <目标会话 .jsonl>`** (`--root` only for re-spawned sessions), then read the RESULT from the filesystem/`git`/meta-cc — never parse the TUI. Do **not** hand-write tmux send-keys sequences and do **not** use `send-keys-verified.sh` (superseded; its md5 pane-hash criterion is ADR-016-forbidden). The screen-use carve-out is pinned in ADR-016's `## Amendment 2026-08-04`: only the bottom region (input box + status line), only the enumerated states (waiting-input / permission-prompt / busy / error-banner / unknown), and never a whole-screen equality/hash of `capture-pane` (enforced by `plugin/scripts/adr016-screen-use-check.ts`). One driver per session (never race a human typing there; beware gray ghost-suggestions). This is how cross-workspace proofs (DIR-048/049/051) can run without a human round-trip.
+
+**跨会话驱动/状态读取的四条硬规则**（机件清单只存在于 `bash plugin/scripts/capability-catalog.sh`，任何地方不得复制——catalog 头注释钉死「The field lives IN A SCRIPT, never in the README」）：
+1. 驱动/投递到别的 Claude 会话：`supervisor-deliver.sh <目标> <文本> --transcript <目标会话.jsonl>`（`--root` 只用于重生会话）；禁止手工拼 tmux send-keys；`send-keys-verified.sh` 已 superseded。
+2. 收件箱 delivered→consumed：`inbox-reader.sh`，不是 `ls`。
+3. pane 状态：`pane-state-classify.ts`，不是整屏哈希（ADR-016 禁）。
+4. outer→inner 驱动文本契约：`drive-contract-check.ts`。
 
 ## Process
 
