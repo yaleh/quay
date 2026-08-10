@@ -32,6 +32,11 @@ import {
   kindForFile,
   isFamilyMember,
   checkNoUnannotatedClaims,
+  parseLoadSensitiveEntry,
+  hasLoadSensitiveEntry,
+  isSerialGroupFile,
+  checkSerialEntries,
+  entryLineFor,
   KINDS,
 } from "../scripts/known-load-sensitive.ts";
 
@@ -177,4 +182,114 @@ test("AC2 negative control — adding @load-sensitive to that file makes --check
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+// ── exit mechanism (gap-load-sensitive-serial-phase-unbounded-growth-measure-first AC4) ──────────────
+
+test("AC4 — parseLoadSensitiveEntry reads an explicit // @load-sensitive-entry <date> <reason> header line", () => {
+  const src = `// @test-group serial\n// @load-sensitive heavy\n// @load-sensitive-entry 2026-08-09 real-install e2e; install family flake rotation\n// KNOWN-LOAD-SENSITIVE\nimport { test } from "node:test";\n`;
+  const e = parseLoadSensitiveEntry(src);
+  assert.ok(e, "entry must parse");
+  assert.equal(e.date, "2026-08-09");
+  assert.equal(e.reason, "real-install e2e; install family flake rotation");
+  assert.ok(hasLoadSensitiveEntry(src), "hasLoadSensitiveEntry must be true");
+});
+
+test("AC4 — parseLoadSensitiveEntry rejects a missing date, a bare mention, or an empty reason", () => {
+  assert.equal(parseLoadSensitiveEntry(`// @load-sensitive-entry 2026-08-09\nimport { test } from "node:test";\n`), null,
+    "missing reason → null");
+  assert.equal(parseLoadSensitiveEntry(`// @load-sensitive-entry bad-date reason here\nimport { test } from "node:test";\n`), null,
+    "non-ISO date → null");
+  assert.equal(parseLoadSensitiveEntry(`// load-sensitive-entry 2026-08-09 reason\nimport { test } from "node:test";\n`), null,
+    "bare mention without @ → null");
+});
+
+test("AC4 — isSerialGroupFile detects @test-group serial, rejects other groups", () => {
+  assert.equal(isSerialGroupFile(`// @test-group serial\n// @load-sensitive heavy\n`), true);
+  assert.equal(isSerialGroupFile(`// @test-group lowconc\n// @load-sensitive wall-clock\n`), false);
+  assert.equal(isSerialGroupFile(`// @test-group engine\n`), false);
+});
+
+test("AC4 — checkSerialEntries fails on a serial-group family member without an entry record", () => {
+  const root = tmpRoot();
+  try {
+    const dir = path.join(root, "plugin", "test");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, "no-entry.test.mjs"),
+      `// @test-group serial\n// @load-sensitive heavy\n// KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md) — claims family\nimport { test } from "node:test";\ntest("x", () => {});\n`,
+    );
+    const vs = checkSerialEntries(root);
+    assert.equal(vs.length, 1, "one violation expected");
+    assert.equal(vs[0].rel, "plugin/test/no-entry.test.mjs");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC4 — adding the entry record makes checkSerialEntries pass; --check-exit exits 0", () => {
+  const root = tmpRoot();
+  try {
+    const dir = path.join(root, "plugin", "test");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, "with-entry.test.mjs"),
+      `// @test-group serial\n// @load-sensitive heavy\n// @load-sensitive-entry 2026-08-09 real-install e2e; install family flake rotation\n// KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md) — claims family\nimport { test } from "node:test";\ntest("x", () => {});\n`,
+    );
+    assert.equal(checkSerialEntries(root).length, 0, "no violations with an entry record");
+    const r = runCli(["--check-exit"], root);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC4 — a non-serial family member (lowconc/engine) does NOT require an entry record", () => {
+  const root = tmpRoot();
+  try {
+    const dir = path.join(root, "plugin", "test");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, "lowconc-no-entry.test.mjs"),
+      `// @test-group lowconc\n// @load-sensitive wall-clock\n// KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md) — claims family\nimport { test } from "node:test";\ntest("x", () => {});\n`,
+    );
+    assert.equal(checkSerialEntries(root).length, 0, "lowconc family members are not subject to the serial-entry invariant");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC4 — --list-entry emits <rel>\\t<date>\\t<reason> sorted oldest-first", () => {
+  const root = tmpRoot();
+  try {
+    const dir = path.join(root, "plugin", "test");
+    fs.mkdirSync(dir, { recursive: true });
+    const newer = `// @test-group serial\n// @load-sensitive heavy\n// @load-sensitive-entry 2026-08-10 newer admission\n// KNOWN-LOAD-SENSITIVE\nimport { test } from "node:test";\n`;
+    const older = `// @test-group serial\n// @load-sensitive heavy\n// @load-sensitive-entry 2026-08-08 older admission\n// KNOWN-LOAD-SENSITIVE\nimport { test } from "node:test";\n`;
+    fs.writeFileSync(path.join(dir, "a-newer.test.mjs"), newer);
+    fs.writeFileSync(path.join(dir, "b-older.test.mjs"), older);
+    const r = runCli(["--list-entry"], root);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    const lines = r.stdout.trim().split("\n").filter(Boolean);
+    assert.equal(lines.length, 2);
+    assert.ok(lines[0].startsWith("plugin/test/b-older.test.mjs\t2026-08-08\tolder admission"),
+      "oldest entry must sort first, got: " + lines[0]);
+    assert.ok(lines[1].startsWith("plugin/test/a-newer.test.mjs\t2026-08-10\tnewer admission"),
+      "newest entry second, got: " + lines[1]);
+    // entryLineFor: a member WITHOUT an entry record produces no line.
+    const noEntryMember = { rel: "plugin/test/x.test.mjs", kind: "heavy" };
+    assert.equal(entryLineFor(noEntryMember), null);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC4 — the real repo's serial-group family members all carry entry records (--check-exit ok)", () => {
+  const r = runCli(["--check-exit"]);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  // And the review hook surfaces at least one record (the mechanism is not vacuously empty).
+  const list = runCli(["--list-entry"]);
+  assert.equal(list.status, 0, list.stdout + list.stderr);
+  const lines = list.stdout.trim().split("\n").filter(Boolean);
+  assert.ok(lines.length >= 1, "at least one serial entry record must exist on the real repo");
 });

@@ -566,6 +566,20 @@ default_test_concurrency() {
   default_concurrency_formula
 }
 
+# ── load-sensitive phase concurrency knobs (gap-load-sensitive-serial-phase-unbounded-growth-
+# measure-first AC2/AC3, measure-first) ─────────────────────────────────────────────────────────────
+# The serial phase (KNOWN-LOAD-SENSITIVE A/B-class + real-install family) runs at concurrency
+# SERIAL_CONCURRENCY (default 1) and the lowconc phase (hermetic-but-load-sensitive session-
+# observation family) at LOWCONC_CONCURRENCY (default 3). Both are env-overridable
+# (QUAY_SERIAL_CONCURRENCY / QUAY_LOWCONC_CONCURRENCY) so the CONTROLLED EXPERIMENT can run the serial
+# phase at concurrency 2 and measure wall-clock + cancelled BEFORE the default is bumped — the
+# measure-first rule (gap-suite-cost-model-is-wrong-optimizations-buy-nothing: 墙钟差异落 17-63s 噪声带).
+# The DEFAULTS stay 1/3 until an experiment proves 0-cancelled at a higher value; the isolation
+# invariant (serial = no concurrent node --test sibling) is preserved by default. The full-suite-runner
+# sets these env vars when --serial-concurrency / --lowconc-concurrency are passed.
+SERIAL_CONCURRENCY="${QUAY_SERIAL_CONCURRENCY:-1}"
+LOWCONC_CONCURRENCY="${QUAY_LOWCONC_CONCURRENCY:-3}"
+
 # has_explicit_concurrency <args...> — whether the args already carry a --test-concurrency flag
 # (either the `=` spelling with a numeric value, or the SPACE spelling with a numeric value). When it
 # does, the derived default MUST NOT be prepended: an explicit flag is the SINGLE concurrency source.
@@ -967,14 +981,17 @@ run_selected() {
     # SERIAL GROUP phase (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests):
     # the A/B-class KNOWN-LOAD-SENSITIVE family (nested-suite-spawn + real-wall-clock-wait) PLUS
     # the REAL-INSTALL install/quay-init family is routed OUT of the concurrency-N main body into
-    # a `serial` group that runs BEFORE it, ALONE, at concurrency 1 — the mechanical isolation that
-    # keeps real-wall-clock-wait, nested-suite-spawn, and real-install tests from being starved by
-    # the main body's worker pool. The install/quay-init family was admitted to serial at round 162
-    # after rotating flakes across groups under full-suite load (rounds 160/161/162 — a different
-    # file each round; gap-install-family-tests-rotate-flakes-under-full-suite). The concurrency
-    # is a HARD-CODED 1 — serial isolation is the mechanism's
-    # invariant, never a user-tunable knob (the --group serial path in the non-default branch
-    # strips explicit concurrency flags for the same reason). Its TAP summary lands FIRST on the
+    # a `serial` group that runs BEFORE it, ALONE, at concurrency $SERIAL_CONCURRENCY (default 1) —
+    # the mechanical isolation that keeps real-wall-clock-wait, nested-suite-spawn, and real-install
+    # tests from being starved by the main body's worker pool. The install/quay-init family was
+    # admitted to serial at round 162 after rotating flakes across groups under full-suite load
+    # (rounds 160/161/162 — a different file each round;
+    # gap-install-family-tests-rotate-flakes-under-full-suite). The concurrency default is 1 —
+    # serial isolation is the mechanism's invariant; QUAY_SERIAL_CONCURRENCY is the measure-first
+    # override (gap-load-sensitive-serial-phase-unbounded-growth-measure-first AC2) — the default is
+    # bumped only after an experiment proves 0-cancelled at a higher value (the --group serial path
+    # in the non-default branch strips explicit concurrency flags for the same isolation reason).
+    # Its TAP summary lands FIRST on the
     # stream (before the main body), so a serial failure flips the run red BEFORE the main phase's
     # cost is paid (gap-phase-order-serial-lowconc-before-main) — the phase runs EVEN IF a later
     # phase fails (report all failures; the serial exit code merges into `code`), so a red main
@@ -985,7 +1002,7 @@ run_selected() {
     [ "$oh_full" -eq 1 ] && oh_t5=$(_oh_mark)
     if [ "${#serial_files[@]}" -gt 0 ]; then
       echo "selected ${#serial_files[@]} files (groups=serial)"
-      node --test --test-concurrency=1 $(suite_reporter_flags) "${serial_files[@]}"
+      node --test --test-concurrency="$SERIAL_CONCURRENCY" $(suite_reporter_flags) "${serial_files[@]}"
       serial_code=$?
       [ "$serial_code" -eq 0 ] || code="$serial_code"
     fi
@@ -994,18 +1011,18 @@ run_selected() {
     # hermetic-but-load-sensitive files (B-class session-observation family, each private socket /
     # wall-clock wait — the install/quay-init family LEFT this group for serial in round 162,
     # gap-install-family-tests-rotate-flakes-under-full-suite) run in their OWN phase at
-    # `--test-concurrency=3` — not the derived default and not 8 — so wait-type tests get timely
-    # scheduling. The phase runs even if another phase failed (report all failures); its exit code
-    # merges into `code`. Runs BEFORE the main body so a lowconc failure is judged red at the phase
-    # boundary (gap-phase-order-serial-lowconc-before-main). The hard-coded 3 is deliberate (AC4)
-    # and does NOT add a derived-concurrency literal site (resource-gate AC5 pins exactly 5
-    # `--test-concurrency="$(default_test_concurrency)"` sites).
+    # `--test-concurrency=$LOWCONC_CONCURRENCY` (default 3) — not the derived default and not 8 — so
+    # wait-type tests get timely scheduling. The phase runs even if another phase failed (report all
+    # failures); its exit code merges into `code`. Runs BEFORE the main body so a lowconc failure is
+    # judged red at the phase boundary (gap-phase-order-serial-lowconc-before-main). The default 3 is
+    # deliberate (AC4) and does NOT add a derived-concurrency literal site (resource-gate AC5 pins
+    # exactly 5 `--test-concurrency="$(default_test_concurrency)"` sites).
     local lowconc_files=() lf
     while IFS= read -r lf; do lowconc_files+=("$lf"); done < <(select_files "lowconc")
     [ "$oh_full" -eq 1 ] && oh_t6=$(_oh_mark)
     if [ "${#lowconc_files[@]}" -gt 0 ]; then
       echo "selected ${#lowconc_files[@]} files (groups=lowconc)"
-      node --test --test-concurrency=3 $(suite_reporter_flags) "${lowconc_files[@]}"
+      node --test --test-concurrency="$LOWCONC_CONCURRENCY" $(suite_reporter_flags) "${lowconc_files[@]}"
       local lcode=$?
       [ "$lcode" -eq 0 ] || code="$lcode"
     fi
@@ -1073,10 +1090,12 @@ run_selected() {
   fi
   mark_nested
   # SERIAL group run (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests):
-  # the serial group is isolated by definition — ALWAYS concurrency 1, never a user-tunable knob.
-  # Strip any explicit --test-concurrency flag (both spellings) so the hard-coded 1 is the SINGLE
-  # concurrency source — a full-suite-runner splice onto a `--group serial` command must not leak
-  # concurrency N in.
+  # the serial group is isolated by definition — concurrency $SERIAL_CONCURRENCY (default 1 = the
+  # invariant; the measure-first override of gap-load-sensitive-serial-phase-unbounded-growth-
+  # measure-first AC2/AC3, bumped only after an experiment proves 0-cancelled).
+  # Strip any explicit --test-concurrency flag (both spellings) so the env-driven SERIAL_CONCURRENCY
+  # is the SINGLE concurrency source — a full-suite-runner splice onto a `--group serial` command
+  # must not leak concurrency N in.
   if in_group "serial" "$groups"; then
     local filtered=() a prev_arg=""
     for a in "$@"; do
@@ -1087,15 +1106,15 @@ run_selected() {
       if [ "$prev_arg" = "continue" ]; then prev_arg=""; continue; fi
       filtered+=("$a")
     done
-    exec node --test --test-concurrency=1 $(suite_reporter_flags) "${filtered[@]}" "${files[@]}"
+    exec node --test --test-concurrency="$SERIAL_CONCURRENCY" $(suite_reporter_flags) "${filtered[@]}" "${files[@]}"
   fi
   # LOWCONC group run (gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive, AC1/AC4):
-  # `--group lowconc` runs the hermetic-but-load-sensitive phase ALONE at its own concurrency 3 —
-  # not the derived default. An explicit user --test-concurrency flag still wins (single
-  # concurrency source, AC2). The hard-coded 3 adds no derived-concurrency literal site.
+  # `--group lowconc` runs the hermetic-but-load-sensitive phase ALONE at its own concurrency
+  # $LOWCONC_CONCURRENCY — not the derived default. An explicit user --test-concurrency flag still
+  # wins (single concurrency source, AC2). The default 3 adds no derived-concurrency literal site.
   local lowconc_force=""
   if in_group "lowconc" "$groups"; then
-    lowconc_force="--test-concurrency=3"
+    lowconc_force="--test-concurrency=$LOWCONC_CONCURRENCY"
   fi
   # has_explicit_concurrency: an explicit --test-concurrency flag is the SINGLE concurrency source
   # (gap-full-suite-runner-concurrency-default-and-gate AC2) — skip the default prepend.

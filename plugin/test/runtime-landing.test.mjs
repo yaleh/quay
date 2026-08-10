@@ -1,5 +1,6 @@
 // @test-group serial
 // @load-sensitive heavy
+// @load-sensitive-entry 2026-08-09 real quay-init --loop install; moved lowconc→serial
 // KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — real-install e2e:
 // each test takes a throwaway target through a real quay-init --loop install (shared laydown
 // template via quay-init-loop-helpers.mjs). The install/quay-init family rotated flakes across groups

@@ -1,5 +1,6 @@
 // @test-group serial
 // @load-sensitive heavy
+// @load-sensitive-entry 2026-08-09 real MCP server subprocess spawns; suite-level spawn contention (round-188 9.9s fail)
 // KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — this test spawns a
 // REAL quay-github MCP server subprocess over stdio and drives a full task_write CREATE+EDIT roundtrip
 // (~11 synchronous gh-api subprocess spawns inside the server). It passed solo / --test-concurrency=8 /

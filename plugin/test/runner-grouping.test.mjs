@@ -1,5 +1,6 @@
 // @test-group serial
 // @load-sensitive nested-spawn
+// @load-sensitive-entry 2026-08-08 A-class nested full-suite spawn (shells out to real scripts/test.sh --group governance)
 // KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — this file shells
 // out to the REAL scripts/test.sh including `--group governance` (the grown governance sub-suite,
 // >830s isolated) — inherently heavy + fragile under full-suite concurrency (nested node --test
@@ -228,15 +229,19 @@ test("AC1 (structural): the DEFAULT-glob flags-only branch exists and routes ext
 
 test("serial group mechanism (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests, AC1)", () => {
   // The load-sensitive family (A/B classes + KNOWN-LOAD-SENSITIVE) is routed OUT of the
-  // concurrency-N main body into a `serial` group that runs alone at concurrency 1. Structural pin:
+  // concurrency-N main body into a `serial` group that runs alone at the serial concurrency.
+  // Structural pin:
   //   - group_of recognizes serial as a REAL group (so serial files are EXCLUDED from the default
   //     product,engine selection, not silently re-defaulted to engine).
   //   - the FULL-SUITE_DEFAULT branch runs a serial phase BEFORE the main body (phase-order
   //     reorder, gap-phase-order-serial-lowconc-before-main: serial/lowconc run first so a
   //     serial/lowconc failure is judged red before the whole main phase's cost is paid),
-  //     hard-coded to concurrency 1 (the mechanism's invariant, never a user-tunable knob).
-  //   - the non-default --group serial path detects the group and forces concurrency 1, stripping
-  //     any explicit --test-concurrency flag (a full-suite-runner splice must not leak lane N in).
+  //     at --test-concurrency="$SERIAL_CONCURRENCY" (default 1 = the isolation invariant; the
+  //     env override is the measure-first knob of gap-load-sensitive-serial-phase-unbounded-growth-
+  //     measure-first AC2/AC3 — the default is bumped only after the experiment proves 0-cancelled).
+  //   - the non-default --group serial path detects the group and forces the same SERIAL_CONCURRENCY,
+  //     stripping any explicit --test-concurrency flag (a full-suite-runner splice must not leak
+  //     lane N in).
   //   - list_groups counts serial (the 4th group in the partition).
   const src = readFileSync(testSh, "utf8");
   assert.match(src, /product\|engine\|governance\|serial\|lowconc\) echo "\$g" ;;/,
@@ -245,8 +250,10 @@ test("serial group mechanism (gap-suite-concurrency-8-green-serial-group-for-non
     "the FULL-SUITE-DEFAULT branch must declare a serial phase");
   assert.match(src, /selected \$\{#serial_files\[@\]\} files \(groups=serial\)/,
     "the serial phase must self-report its selection (AC4 self-report invariant)");
-  assert.match(src, /node --test --test-concurrency=1( \$\(suite_reporter_flags\))? "\$\{serial_files\[@\]\}"/,
-    "the serial phase must be HARD-CODED concurrency 1 (serial isolation is the invariant); the optional suite_reporter_flags splice is the gap-install-suite-cost-instrument-reporter-not-wired wiring");
+  assert.match(src, /node --test --test-concurrency="\$SERIAL_CONCURRENCY"( \$\(suite_reporter_flags\))? "\$\{serial_files\[@\]\}"/,
+    "the serial phase must use the env-driven SERIAL_CONCURRENCY (default 1 = isolation invariant); the optional suite_reporter_flags splice is the gap-install-suite-cost-instrument-reporter-not-wired wiring");
+  assert.match(src, /SERIAL_CONCURRENCY="\$\{QUAY_SERIAL_CONCURRENCY:-1\}"/,
+    "the serial concurrency must default to 1 (measure-first: bumped only after an experiment proves 0-cancelled, gap-load-sensitive-serial-phase-unbounded-growth-measure-first AC2/AC3)");
   assert.match(src, /in_group "serial" "\$groups"/,
     "the non-default path must detect the serial group");
   assert.match(src, /printf 'serial:\s+%d\\n' "\$\{counts\[serial\]:-0\}"/,

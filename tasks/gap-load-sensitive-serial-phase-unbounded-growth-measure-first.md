@@ -42,11 +42,11 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录量化（48h 趋势 900-1100s→1847s、标注 18 次/5 天 vs 5 次/10h、round-206 AC6 25s 窗超时现场、并发证据更正版）（本任务 Proposal 已含）
+- [x] AC1: **复现固化**——任务体记录量化（48h 趋势 900-1100s→1847s、标注 18 次/5 天 vs 5 次/10h、round-206 AC6 25s 窗超时现场、并发证据更正版）（本任务 Proposal 已含）
 - [ ] AC2: **对照实验**——串行相内部并发=2 vs =1 的对照：0-cancelled 保持 + 墙钟数字（贴任务体）；若可行，补 main 相 lane=4 vs 8 对照（8-lane 28 轮生产证据 vs 4-lane 近轮更慢）
 - [ ] AC3: **默认并发上调（若实验通过）**——串行相/负载敏感相默认并发从 1 调至实验测得最优（≥2）
-- [ ] AC4: **退出机制（人明确要求）**——每条 KNOWN-LOAD-SENSITIVE/serial 标注记录【进入原因+进入时间】；定期（每 N 轮或每周）复核根因是否已修；已修的尝试退回原并发相验证（不永久留串行相）；复核钩子可机械检查
-- [ ] AC5: **AC6 窗超时修复**——session-liveness-signals AC6 negative control 套件内不再 25s 超时（宽窗或新并发下重测）
+- [x] AC4: **退出机制（人明确要求）**——每条 KNOWN-LOAD-SENSITIVE/serial 标注记录【进入原因+进入时间】；定期（每 N 轮或每周）复核根因是否已修；已修的尝试退回原并发相验证（不永久留串行相）；复核钩子可机械检查
+- [x] AC5: **AC6 窗超时修复**——session-liveness-signals AC6 negative control 套件内不再 25s 超时（宽窗或新并发下重测）
 - [ ] AC6: **既有不回归**——`--for-task` scoped 门绿；0-cancelled 保持
 
 ## Definition of Done
@@ -59,22 +59,53 @@ extra: {}
 
 ## Touches
 
-- plugin/scripts/full-suite-runner.ts（串行相/负载敏感相内部并发参数：默认 1 → 实验测得值）
-- plugin/scripts/known-load-sensitive.ts（退出机制：标注加【进入原因+进入时间】+ 复核钩子/清单）
-- plugin/test/session-liveness-signals.test.mjs（AC6 negative control 25s 窗 → 宽或按新并发重测）
-- scripts/test.sh（串行相 / lowconc 相并发参数——同 full-suite-runner）
-- plugin/test/full-suite-runner.test.mjs（AC2/AC3 对照实验 + 并发参数测试）
-- tasks/gap-merge-green-snapshot-verified-commit-livelock.md（交叉标注——同根：串行相扩容推高轮时长，拉大与提交节奏差距）
-- tasks/gap-suite-cost-model-is-wrong-optimizations-buy-nothing.md（交叉标注——measure-first 教训，本任务③ 前置引用）
-- tasks/gap-session-liveness-busy-mask-idle-with-subagents.md（交叉标注——round-206 AC6 现场来源）
-- tasks/gap-serial-group-recompose-nested-runner-criterion.md（交叉标注——串行相准入判据族）
-- tasks/gap-load-sensitive-session-family-confounds-step-three.md（交叉标注——负载敏感族）
-- tasks/gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive.md（交叉标注——lowconc 相并发 3 的既有定案）
-- tasks/gap-serial-segment-77-percent-cost-reduction-runner-grouping-listfiles.md（交叉标注——串行相成本）
-- tasks/gap-suite-concurrency-4-vs-8-measurement.md（交叉标注——并发测量族）
-- tasks/gap-serial-phase-install-test-residue-dependency.md（交叉标注——串行相内部顺序残留依赖，与内部并发↑ 的张力）
-- tasks/gap-relation-sync-load-flake-child-spawn-under-suite.md（交叉标注——收编进 serial 相是串行相扩容的来源之一，同扩容族）
+- plugin/scripts/full-suite-runner.ts（串行相/负载敏感相内部并发参数：默认 1 → 实验测得值；--serial-concurrency / --lowconc-concurrency 透传 QUAY_SERIAL_CONCURRENCY / QUAY_LOWCONC_CONCURRENCY）
+- plugin/scripts/known-load-sensitive.ts（退出机制：@load-sensitive-entry 标注【进入原因+进入时间】+ --list-entry/--check-exit 复核钩子）
+- scripts/test.sh（串行相 / lowconc 相并发参数 SERIAL_CONCURRENCY / LOWCONC_CONCURRENCY——默认 1/3，env 可覆盖）
+- plugin/test/session-liveness-signals.test.mjs（AC6 negative control 25s 窗 → 60s）
+- plugin/test/full-suite-runner.test.mjs（AC2/AC3 并发参数透传 + 失败关闭测试）
+- plugin/test/known-load-sensitive.test.mjs（AC4 退出机制解析/检查/CLI 测试）
+- plugin/test/runner-grouping.test.mjs（serial 相结构 pin 更新为 env 驱动）
 - tasks/gap-load-sensitive-serial-phase-unbounded-growth-measure-first.md（自身：勾 AC + 贴实验数字）
+
+> 注：21 个 serial 组 family member 的 `@load-sensitive-entry` 是**注释级**改动（每文件一行），不在此逐一列
+> 为 Touches——它们由 `plugin/test/known-load-sensitive.test.mjs` 的 AC4 机制测试 + `--check-exit`
+> 不变量机械覆盖（每个 serial 组 family member 必须有 entry 记录）。把它们放进 scoped 门会让 21 个
+> 负载敏感文件在 c4 并发下跑，反而引入 flake 假回归，故 scoped 门不选它们（全量套件门覆盖）。
+> 交叉标注任务：gap-merge-green-snapshot-verified-commit-livelock / gap-suite-cost-model-is-wrong-
+> optimizations-buy-nothing / gap-session-liveness-busy-mask-idle-with-subagents /
+> gap-serial-group-recompose-nested-runner-criterion / gap-load-sensitive-session-family-confounds-
+> step-three / gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive /
+> gap-serial-segment-77-percent-cost-reduction-runner-grouping-listfiles /
+> gap-suite-concurrency-4-vs-8-measurement / gap-serial-phase-install-test-residue-dependency /
+> gap-relation-sync-load-flake-child-spawn-under-suite（见 Proposal/实现记录，不占 Touches 测试分辨率）。
+
+## Test-Files
+
+- plugin/test/full-suite-runner.test.mjs
+- plugin/test/known-load-sensitive.test.mjs
+- plugin/test/session-liveness-signals.test.mjs
+- plugin/test/runner-grouping.test.mjs
+- plugin/test/resource-gate.test.mjs
+
+## 实现记录（inner 2026-08-10）
+
+**机制（已提交部分，AC4/AC5/AC6 实装）：**
+
+1. **串行相/负载敏感相并发参数（AC2/AC3 的旋钮，measure-first）**：
+   - `scripts/test.sh`：`SERIAL_CONCURRENCY="${QUAY_SERIAL_CONCURRENCY:-1}"`、`LOWCONC_CONCURRENCY="${QUAY_LOWCONC_CONCURRENCY:-3}"`——串行相、lowconc 相、`--group serial/lowconc` 四个执行点全部读 env；**默认仍 1/3**，实验通过前不上调。
+   - `plugin/scripts/full-suite-runner.ts`：新增 `--serial-concurrency` / `--lowconc-concurrency`（默认 1/3），透传为 `QUAY_SERIAL_CONCURRENCY` / `QUAY_LOWCONC_CONCURRENCY` 到子进程 env；非法值（0/非数字/负）fail-closed。Contract measure `grep -n "serial" ... | grep -i concurrency` 命中 `DEFAULT_SERIAL_CONCURRENCY = 1`。
+   - `plugin/test/full-suite-runner.test.mjs` AC2/AC3：默认 1/3 透传、覆盖值透传、非法值 fail-closed 三条测试。
+   - `plugin/test/runner-grouping.test.mjs` serial 结构 pin 更新为 `--test-concurrency="$SERIAL_CONCURRENCY"` + 默认 1 断言。
+
+2. **退出机制（AC4，人明确要求）**：
+   - `plugin/scripts/known-load-sensitive.ts`：新增 `// @load-sensitive-entry <YYYY-MM-DD> <reason>` 伴生标注（同文件族头），`parseLoadSensitiveEntry` / `scanFamily` 携带 entry；`isSerialGroupFile` 判 serial 组；`checkSerialEntries` = 每个 serial 组 family member 必须有 entry（机械复核钩子）；CLI `--list-entry`（按 entry 日期升序 = 最长留串行相优先复核）与 `--check-exit`（缺 entry 即 fail）。
+   - 21 个 serial 组 family member 全部补 `@load-sensitive-entry`（日期按 admission commit 定，reason 摘自各自头部 KNOWN-LOAD-SENSITIVE 文档）。
+   - `plugin/test/known-load-sensitive.test.mjs` AC4：解析/检查/负控制/CLI/真实仓 check-exit 全绿（22 测试）。
+
+3. **AC6 窗超时修复（AC5）**：`plugin/test/session-liveness-signals.test.mjs` 全部 5 处 `25000` RESUMED 窗 → `60000`（round-206 AC6 negative control 实测 29.5s > 25s 窗）；注释同步更新。
+
+**对照实验（AC2，待跑）**：串行相内部并发=2 vs =1，贴墙钟 + cancelled。**AC3 默认上调待实验 0-cancelled 确认后落地。**
 
 ## Contract
 

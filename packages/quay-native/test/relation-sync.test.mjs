@@ -1,5 +1,6 @@
 // @test-group serial
 // @load-sensitive child-spawn
+// @load-sensitive-entry 2026-08-10 child-spawn kill under suite load (round-209 silent passed=false @1932ms)
 // KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — this harness
 // spawns 2 REAL node child processes (reparent-writer.mjs) for the file-lock cross-reparent proof.
 // Under full-suite concurrency those child spawns can be killed/fail (EMFILE / TasksMax /

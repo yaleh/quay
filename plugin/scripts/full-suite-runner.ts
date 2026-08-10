@@ -71,6 +71,14 @@
 //     [--state-file <path>]          # default: <state-dir>/full-suite-state.json
 //     [--log-file <path>]            # default: <state-dir>/full-suite.log
 //     [--lane-count <n>]             # default: max(1, floor(nproc/1.0)) = nproc (AC1, cost-side-verified)
+//     [--serial-concurrency <n>]     # serial-phase internal concurrency, passed to test.sh as
+//                                    #   QUAY_SERIAL_CONCURRENCY (default 1 = isolation invariant;
+//                                    #   gap-load-sensitive-serial-phase-unbounded-growth-measure-first
+//                                    #   AC2/AC3 — measure-first: bump only after an experiment proves
+//                                    #   0-cancelled at a higher value)
+//     [--lowconc-concurrency <n>]    # lowconc-phase internal concurrency, passed as
+//                                    #   QUAY_LOWCONC_CONCURRENCY (default 3, AC4 of
+//                                    #   gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive)
 //     [--sync]                       # wait for the suite to finish before exiting
 //
 // Concurrency knob FORK (gap-full-suite-runner-red-pattern-matches-bare-x-vitest-false-red AC3):
@@ -605,6 +613,28 @@ export function defaultLaneCount(): number {
 }
 
 /**
+ * gap-load-sensitive-serial-phase-unbounded-growth-measure-first AC2/AC3 (measure-first) —
+ * the load-sensitive phase concurrency defaults. The serial phase (KNOWN-LOAD-SENSITIVE A/B-class +
+ * real-install family) defaults to concurrency 1 (the isolation invariant); the lowconc phase
+ * (hermetic-but-load-sensitive session-observation family) defaults to 3 (gap-lowconc-group-
+ * concurrency-3-for-hermetic-load-sensitive AC4). Both are overridable via --serial-concurrency /
+ * --lowconc-concurrency, which the runner passes to test.sh as QUAY_SERIAL_CONCURRENCY /
+ * QUAY_LOWCONC_CONCURRENCY so the CONTROLLED EXPERIMENT can measure wall-clock + cancelled BEFORE the
+ * default is bumped. The default stays 1 until an experiment proves 0-cancelled at a higher value.
+ */
+export const DEFAULT_SERIAL_CONCURRENCY = 1;
+export const DEFAULT_LOWCONC_CONCURRENCY = 3;
+
+/** Parse a positive-integer arg (e.g. --serial-concurrency 2); NaN/<1 → null (caller errors). */
+function parsePositiveIntArg(argv: string[], name: string): number | null {
+  const raw = parseArg(argv, name);
+  if (raw === undefined) return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 1) return null;
+  return n;
+}
+
+/**
  * AC2 — strip any existing `--test-concurrency=*` from a command string, both the `=` spelling
  * (`--test-concurrency=8`) and the SPACE spelling (`--test-concurrency 8`). The splice is a
  * REPLACE so the spawned process carries exactly ONE --test-concurrency (the effective value).
@@ -870,6 +900,31 @@ export async function run(argv: string[]): Promise<number> {
     return 1;
   }
 
+  // gap-load-sensitive-serial-phase-unbounded-growth-measure-first AC2/AC3 (measure-first): the
+  // load-sensitive phase concurrency overrides. An explicit --serial-concurrency / --lowconc-
+  // concurrency is passed to test.sh as QUAY_SERIAL_CONCURRENCY / QUAY_LOWCONC_CONCURRENCY so the
+  // controlled experiment can run the serial phase at a higher concurrency and measure wall-clock +
+  // cancelled BEFORE the default is bumped. Defaults stay DEFAULT_SERIAL_CONCURRENCY=1 /
+  // DEFAULT_LOWCONC_CONCURRENCY=3 until an experiment proves 0-cancelled.
+  const serialConcurrencyArg = parsePositiveIntArg(argv, "--serial-concurrency");
+  const lowconcConcurrencyArg = parsePositiveIntArg(argv, "--lowconc-concurrency");
+  if (serialConcurrencyArg === null && parseArg(argv, "--serial-concurrency") !== undefined) {
+    process.stderr.write(`full-suite-runner: invalid --serial-concurrency (must be a positive integer)\n`);
+    return 1;
+  }
+  if (lowconcConcurrencyArg === null && parseArg(argv, "--lowconc-concurrency") !== undefined) {
+    process.stderr.write(`full-suite-runner: invalid --lowconc-concurrency (must be a positive integer)\n`);
+    return 1;
+  }
+  const serialConcurrency = serialConcurrencyArg ?? DEFAULT_SERIAL_CONCURRENCY;
+  const lowconcConcurrency = lowconcConcurrencyArg ?? DEFAULT_LOWCONC_CONCURRENCY;
+  // The phase-concurrency env the child test.sh reads. Always set explicitly so the runner is the
+  // single source of truth for both phase knobs (test.sh defaults match these values by construction).
+  const phaseConcurrencyEnv = {
+    QUAY_SERIAL_CONCURRENCY: String(serialConcurrency),
+    QUAY_LOWCONC_CONCURRENCY: String(lowconcConcurrency),
+  };
+
   const baseCommand = explicitCommand ?? "bash scripts/test.sh";
   // AC2 — REPLACE splice: strip any existing --test-concurrency (both spellings) and splice the
   // effective laneCount as the ONLY concurrency flag. Arbitrary non-concurrency commands (a fake
@@ -1056,7 +1111,7 @@ export async function run(argv: string[]): Promise<number> {
     child = spawn(sdArgv[0], sdArgv.slice(1), {
       cwd: root,
       stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env },
+      env: { ...process.env, ...phaseConcurrencyEnv },
       // detached: the suite child becomes a process-group leader so killChildTree() can terminate
       // the WHOLE tree (test.sh + its node --test children) — a hung subprocess can't leak the flock.
       detached: true,
@@ -1073,7 +1128,7 @@ export async function run(argv: string[]): Promise<number> {
     child = spawn("bash", ["-c", command], {
       cwd: root,
       stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env },
+      env: { ...process.env, ...phaseConcurrencyEnv },
       // detached: same as the systemd-run spawn — process-group leader for killChildTree().
       detached: true,
     });
