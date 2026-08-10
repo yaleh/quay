@@ -59,6 +59,8 @@ extra: {}
 
 **AC5 scoped 门**：`bash scripts/test.sh --for-task gap-measure-trend-large-test-load-noise --allow-thin` → **exit 0，11 pass / 0 fail，violations 0**。
 
+**内层再验（2026-08-10 派发，worktree fork develop@018d5868）**：实现已随 `d83916e4`（histVariance 候选 A）在 develop 上；本派发重新跑 scoped 门 → **exit 0，13 pass / 0 fail / 0 cancelled，violations 0，task-contract-check no violations**（13 = 既有 11 + 同族 `93f87930` 在相同测试文件新增的 2 个相对触发器 histMax 守卫测试）。AC2 构造验证仍有效：71→104s ≤ 历史 max 110s ⇒ 0 flag；>历史 max ⇒ flag。
+
 ## Touches
 
 - plugin/scripts/measure-trend-check.ts（候选 A/B/C：历史方差感知 / 连续 2 轮 / 负载归一）
