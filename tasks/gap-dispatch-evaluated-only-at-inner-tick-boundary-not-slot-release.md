@@ -68,6 +68,8 @@ extra:
 - [x] AC5: 并发上限语义不变（cap=3 仍在，机制/策略分离，档位配置可调）— cap 是输入（cap-from-gate.sh 的 effective_cap），slot-refill 不硬编码；测试覆盖 in-flight≥cap ⇒ no refill、cap 可调
 - [x] AC6: 与 gap-telemetry-brackets-vs-subagents（括号≠子代理）交叉标注——事件驱动依赖准确的完成感知 — 回填用 `<task-notification>` 真实完成信号、不读遥测括号；tick 文档「事件驱动派发（槽位回填）」节与本任务 Proposal 均交叉引用 gap-telemetry-brackets-vs-subagents-no-slot-visibility
 
+> **交叉标注（2026-08-10，gap-inner-wakeup-heartbeat-invisible）**：本任务把派发重评估挂到「完成事件 + tick 心跳」双触发源——但 tick 心跳的**自排程（ScheduleWakeup）本身无机械可查产物**：它停了（15.3h 未重排，0 在飞⇒无 notification⇒不重评估）没有任何文件/检查器报「心跳已断」。该任务另立：inner 每次重排写 `.quay/inner-wakeup-heartbeat.json`，外层 tick 读它判新鲜（>3 周期报「inner 兜底心跳断」）——把「自排程断了不可见」变成「断了 3 周期即报」。
+
 ## Invoke evidence（scoped 实跑，2026-08-05）
 
 **Contract invoke（tick 文档含事件驱动派发机制的字面命中）**：

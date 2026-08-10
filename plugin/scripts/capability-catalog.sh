@@ -155,6 +155,7 @@ declare -A QUESTION=(
   [inbox-reader.sh]="Does the human channel's manager inbox have a mechanical reader that consumes every delivered message (delivered ≠ read otherwise)?"
   [inner-session-check.sh]="Is the inner session healthy / empty-shell / missing (three-state cold-start self-check)?"
   [instrument-failure-check.ts]="Which of the manager's five documented instrument-failure families does each shell command in the tick docs exhibit (grep self-match, zero-hit-as-absent, pipe-then-exit-status, ...)?"
+  [inner-wakeup-heartbeat-check.ts]="Is the inner ScheduleWakeup fallback heartbeat fresh — .quay/inner-wakeup-heartbeat.json ts within 3 tick periods (5400s) — or dead (inner 兜底心跳断)?"
   [integration-batch-merge.sh]="Can integration be batch-merged into develop (fast-forward + CAS, fail-closed)?"
   [integration-branch-model.ts]="Which ref should a task fork from — develop (independent) or integration (declared dependency / overlapping unverified work) — and is the integration→develop batch merge fast-forward-safe?"
   [it0-enforcement-with-design-check.sh]="Is every enforced rule backed by a design that explains it (ADR-011)?"

@@ -978,6 +978,18 @@ push 失败（非快进 = 真分歧）只报告、不覆写、下一 tick 重试
 派发评估（见「事件驱动派发（槽位回填）」）；tick 是兜底必跑心跳（每 tick 无条件跑 slot-refill，见步骤 4），
 不是派发的主节奏也不是新轮询源。
 
+**每次重排写心跳产物** `.quay/inner-wakeup-heartbeat.json`（`{ts, delaySeconds, reason}`；ts = 重排时刻
+epoch 秒；与 suite-chain-heartbeat.json 同构，外层 A2 先例）——`gap-inner-wakeup-heartbeat-invisible`：
+兜底心跳只活在 transcript（ScheduleWakeup tool_use 时间戳），断了 15.3h 不可见直到人问第三次 + manager 用
+meta-cc 查时间戳；按 C17 给「上次 ScheduleWakeup 时刻」造机械可查产物。**写命令（重排后立即跑）**：
+
+```bash
+python3 -c "import json,time;d={'ts':int(time.time()),'delaySeconds':1500,'reason':'tick heartbeat'};open('.quay/inner-wakeup-heartbeat.json','w').write(json.dumps(d))"
+```
+
+外层每个 tick 读该产物判新鲜（`orchestrator-tick-core.md` A13，`inner-wakeup-heartbeat-check.ts`）；
+`ts` 距今 > 3 个 tick 周期（5400s）⇒ 外层报「inner 兜底心跳断」并升级——把「断了不可见」变成「断了 3 周期即报」。
+
 ---
 
 ## 无人值守期间的判断边界
