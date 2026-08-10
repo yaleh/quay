@@ -127,6 +127,17 @@ orchestration/inner-idle-log.jsonl
 **/.quay/full-suite.log
 **/.quay/suite-state-events.jsonl
 **/.quay/suite-state-last.json
+# gap-runtime-state-files-not-gitignored (2026-08-10): 5 runtime state files fell through the
+# per-file .gitignore (there is NO `**/.quay/*` wildcard) — last-pane.txt (pane-state-classify
+# product), suite-cgroup-evidence.txt / suite-chain-heartbeat.json / suite-health-last-run.json
+# (suite-fix chain products), closure-pass-last-run.json (B2 closure accounting). Same live
+# runtime-state family as full-suite-state.json / gate-events.jsonl; never committed. All 5 were
+# ALSO accidentally tracked via fan-in ae47d845 — git rm --cached'd in the same gap.
+**/.quay/last-pane.txt
+**/.quay/suite-cgroup-evidence.txt
+**/.quay/suite-chain-heartbeat.json
+**/.quay/suite-health-last-run.json
+**/.quay/closure-pass-last-run.json
 # gap-inner-wakeup-heartbeat-invisible: inner's ScheduleWakeup fallback heartbeat product — runtime
 # state written by inner each time it reschedules (ts/delaySeconds/reason), read by the OUTER tick's
 # A13 checker (inner-wakeup-heartbeat-check.ts). Same class as suite-chain-heartbeat.json: never commit.

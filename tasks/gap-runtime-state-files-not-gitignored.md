@@ -24,6 +24,7 @@ extra: {}
   - `.quay/suite-chain-heartbeat.json`（未跟踪）
   - `.quay/suite-health-last-run.json`（未跟踪）
   - `.quay/closure-pass-last-run.json`（**已跟踪**——committed `c9051056` 2026-08-09 23:09Z「B2 record closure-pass」；且每个 tick 都被 `--record` 改写，git status 恒显示 modified）
+- **实现时新发现（inner 2026-08-10）**：**5 个全被跟踪**，不止 closure-pass——fan-in `ae47d845`（2026-08-10 13:13Z「task/gap-semantic-observer-judge-stopped-awaiting @ a111b430」）把另外 4 个运行时文件也 commit 进了 develop（`git show --stat ae47d845` 实测：last-pane.txt +116 / suite-cgroup-evidence.txt +9 / suite-chain-heartbeat.json +1 / suite-health-last-run.json +10 / closure-pass-last-run.json 2±）。任务立案时 manager 在主检出（integration）看到 4 个是「未跟踪」，但 develop 上 fan-in 已把它们跟踪了。⇒ AC3 的 `git rm --cached` 从 1 个扩到 **5 个**（否则这 4 个跟踪文件每 tick 被改写仍显示 ` M`，AC4/Contract 的「status 不含 5 文件名」恒不成立）。
 - **后果**：每次 `restart-readiness-check.sh` 的「脏树」检查把未跟踪运行时文件报成 FAIL——`experiments/quay-perpetual-stream/scripts/restart-readiness-check.sh` 的 8 项硬阻断里「clean tree」是其一，长时间暂停后复检必误报。manager 用 `.halt` 正文的更具体判据绕开（本次 5 个未跟踪里数个正是 suite-fix subagent 在写），但**判据绕开是一次性的；`.gitignore` 缺口是长期的**。
 
 **为什么重要**：运行时状态文件（heartbeat/健康快照/闭包记账/last-pane）是三层执行核的产物——它们不该出现在 git status 的脏树里（会被 restart-readiness-check 误报、会被 batch-merge 的 clean-tree 断言误伤）。这是「运行时状态与 git 边界不清」的又一次实例（同类：gate-events.jsonl / supervisor-bus-ledger.jsonl 已有忽略行）。
@@ -38,11 +39,43 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 5 文件 NOT-ignored 实测（git check-ignore 全空）+ closure-pass-last-run.json 已跟踪实证（committed c9051056）+ restart-readiness-check 脏树误报后果（本任务 Proposal 已含）
-- [ ] AC2: **.gitignore 补齐**——5 个文件各加忽略行（同 `**/.quay/session-liveness.*.json` 形态），`git check-ignore` 全命中
-- [ ] AC3: **untrack 运行时状态**——`git rm --cached .quay/closure-pass-last-run.json`（磁盘文件保留，B2 继续写）
-- [ ] AC4: **脏树不再误报**——`git status --short` 不再列出 5 文件；restart-readiness-check 脏树检查不再因它们 FAIL
-- [ ] AC5: **既有不回归**——`--for-task` scoped 门绿
+- [x] AC1: **复现固化**——任务体记录 5 文件 NOT-ignored 实测（git check-ignore 全空）+ closure-pass-last-run.json 已跟踪实证（committed c9051056）+ restart-readiness-check 脏树误报后果（本任务 Proposal 已含；实现时再补 ae47d845 实证——5 个全被跟踪）
+- [x] AC2: **.gitignore 补齐**——5 个文件各加忽略行（同 `**/.quay/session-liveness.*.json` 形态），`git check-ignore` 全命中
+- [x] AC3: **untrack 运行时状态**——`git rm --cached` 5 个文件（closure-pass + 另外 4 个被 ae47d845 误跟踪的；磁盘文件保留，B2 继续写）
+- [x] AC4: **脏树不再误报**——`git status --short` 不再列出 5 文件（commit 后）；restart-readiness-check 脏树检查不再因它们 FAIL
+- [x] AC5: **既有不回归**——`--for-task` scoped 门绿（`--allow-thin`，新增 gitignore 守卫测试也绿）
+
+## Test-Files
+
+- plugin/test/gitignore.test.mjs（AC2 守卫：git check-ignore 对 5 个运行时文件全命中——防逐文件 .gitignore 再漏新文件；`## Test-Files` 声明让 scoped 选择器把它纳入运行）
+
+## 执行证据（inner 2026-08-10）
+
+```
+# 修前复现（任务体记录 + worktree 实测）
+git check-ignore .quay/last-pane.txt .quay/suite-cgroup-evidence.txt .quay/suite-chain-heartbeat.json .quay/suite-health-last-run.json .quay/closure-pass-last-run.json 2>/dev/null | wc -l
+# → 0（全 NOT-ignored）
+git ls-files .quay/last-pane.txt .quay/suite-cgroup-evidence.txt .quay/suite-chain-heartbeat.json .quay/suite-health-last-run.json .quay/closure-pass-last-run.json
+# → 5 个全列出（develop 上 ae47d845 fan-in 把 4 个运行时文件也 commit 了，不止 closure-pass）
+
+# 修后：gitignore 5 行 + git rm --cached 5 个
+git check-ignore .quay/last-pane.txt .quay/suite-cgroup-evidence.txt .quay/suite-chain-heartbeat.json .quay/suite-health-last-run.json .quay/closure-pass-last-run.json 2>/dev/null | wc -l
+# → 5（全命中）
+git ls-files .quay/closure-pass-last-run.json
+# → 空（untracked）
+git ls-files --error-unmatch .quay/closure-pass-last-run.json 2>/dev/null; echo $?
+# → 1（untracked，Contract invariant closure_pass_not_tracked 成立）
+ls .quay/closure-pass-last-run.json .quay/last-pane.txt .quay/suite-cgroup-evidence.txt .quay/suite-chain-heartbeat.json .quay/suite-health-last-run.json
+# → 5 个磁盘文件仍在（B2 继续写）
+
+# Contract invoke（commit 后 git status --short 不含 5 文件名）
+git status --short | grep -E "last-pane|suite-cgroup|suite-chain-heartbeat|suite-health-last-run|closure-pass-last-run"
+# → （空）
+
+# 新增守卫测试
+node --no-warnings --experimental-strip-types --test plugin/test/gitignore.test.mjs
+# → pass 1 / fail 0（AC2 — all 5 runtime-state files are gitignored）
+```
 
 ## Definition of Done
 
