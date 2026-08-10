@@ -1,7 +1,10 @@
 ---
 id: gap-ac38-outer-doc-drift
-title: outer 双份文档漂移——plugin/loop/orchestrator-loop-tick.md（1309 行）与 orchestration/orchestrator-loop-tick.md（1164 行）共同行 954、各有 200-350 行独有；与 AC41 判据 2（单一批行为文件）同判据，由 gap-ac41-coldstart-skill-reference-only 一并收（切分声明 + 产品行为进 plugin / 本层状态留 orchestration）
-status: done
+title: outer 双份文档漂移——plugin/loop/orchestrator-loop-tick.md（1309 行）与
+  orchestration/orchestrator-loop-tick.md（1164 行）共同行 954、各有 200-350 行独有；与 AC41
+  判据 2（单一批行为文件）同判据，由 gap-ac41-coldstart-skill-reference-only 一并收（切分声明 + 产品行为进
+  plugin / 本层状态留 orchestration）
+status: ready
 labels:
   - gap
   - defect
