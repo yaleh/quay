@@ -1,7 +1,7 @@
 ---
 id: gap-a15-04-suite-fix-as-workflow
 title: 'A15 ④ 的「测试→修复→等绿→fan-in→合并」整条链应从裸 Agent() subagent 改造为 Workflow——ab380c5e 静默悬挂的根因是「诊断+等待被塞进同一个 agent 的一轮对话」,workflow 形态让等待由脚本控制流决定,结构上不可能复现;人 2026-08-10 14:0x 裁定(撤回此前 Monitor 建议的后半)'
-status: todo
+status: ready
 labels:
   - gap
   - defect

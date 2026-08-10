@@ -1,7 +1,7 @@
 ---
 id: gap-runtime-state-files-not-gitignored
 title: .gitignore 用逐文件名匹配 .quay/* 非通配——5 个运行时文件从未被覆盖：4 个未跟踪不忽略（last-pane.txt/suite-cgroup-evidence.txt/suite-chain-heartbeat.json/suite-health-last-run.json 每次 restart-readiness-check 报脏树误导）+ closure-pass-last-run.json 已跟踪且被修改（运行时状态不该进 git）；按现有 `**/.quay/session-liveness.*.json` 同形态补齐
-status: todo
+status: ready
 labels:
   - gap
   - defect
