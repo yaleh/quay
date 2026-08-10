@@ -3,7 +3,7 @@ id: gap-suite-empty-wait-no-auto-retrigger
 title: 套件空等无自动重触发——红窗总跨度 23.8h 里 suite 真跑 6.75h(51%)/空等 6.48h(49%)、~2h
   空洞(19:13→21:06)、develop 卡 9.3h(integration-only=162)、红窗停派纪律机制上不存在(slot-refill
   无 red 门,行为上红窗 fan-in 2.4×)；P3 比 P2(lane=8)大 4 倍；处方=轮终态后 N 分钟无新轮自动起跑+空洞检测
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -88,6 +88,7 @@ extra: {}
 - tasks/gap-merge-green-snapshot-verified-commit-livelock.md（交叉标注——同族：套件轮调度）
 - tasks/gap-phase-order-serial-lowconc-before-main.md（交叉标注——同族：套件轮时长/判红）
 - tasks/gap-load-sensitive-serial-phase-unbounded-growth-measure-first.md（交叉标注——同族：轮时长）
+- tasks/gap-b3-arbitration-inflight-vs-backlog.md（交叉标注——同族：套件轮调度）
 - tasks/gap-suite-empty-wait-no-auto-retrigger.md（自身：勾 AC + 贴证据）
 
 ## Contract
@@ -96,7 +97,7 @@ measure   empty_wait_after_terminal = `python3 -c "import json;rs=[json.loads(l)
 band      empty_wait_after_terminal = <= 10（自动重触发阈值内，无长空洞）
 invariant no_race_with_manual_launch = 1（resource-gate 先行，与手动起跑互斥）
 invariant no_new_race_conditions = 1（自动重触发不引入竞态）
-invoke    `python3 -c "import json;[print(r['round'],r['state'],r['startedAt']) for r in json.loads(open('.quay/verification-round.jsonl').read().splitlines() and '['+','.join(open('.quay/verification-round.jsonl').read().splitlines())+']')]"`（终态-启动间隔分布贴回）
+invoke    `node --no-warnings --experimental-strip-types plugin/scripts/suite-state-trigger.ts --retrigger-idle-min <min> --root <repo>`（invoke-evidence：指向实际交付可执行——suite-state-trigger.ts；Evidence 有短-N 注入实跑）
 control   无 >30min 空洞；自动重触发在阈值内；竞态安全
 resume    自动重触发 / 空洞检测分步提交，任一步完成即写盘
 

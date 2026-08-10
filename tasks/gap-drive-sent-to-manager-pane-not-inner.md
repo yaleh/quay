@@ -75,3 +75,11 @@ resume    纪律固化 / 前置校验 / delivered 实证分步提交，任一步
 reviewer: outer
 at: 2026-08-10
 changed: manager STOP——错投窗口（quay-0:0.0=claude/manager 非 inner；6 次 send-keys 两次派发全进 manager 输入框）+ 错读 transcript（26 次把 b8dc91a6 当 inner）+ confirmed-delivered 无实证（send-keys 退出码 0 当送达）⇒ 立案。三缺陷：错投窗口 / 错读 transcript / delivered 无实证。实现归内层
+
+## 同根标注（gap-session-identity-index-vs-explicit，2026-08-10）
+
+26 次把 b8dc91a6（manager transcript）当 inner 读 = 「最新/索引启发式替代显式身份」的一个实例。
+同根任务 `gap-session-identity-index-vs-explicit` 把同一根因修在 `inner-exec-mode-report.ts`：
+缺省 `--session` 先反查 pane pid → session（显式身份），启发式仅 fallback 且报 WARN
+（session_source ∈ pane-pid|config|arg|heuristic|none）。两条任务共同消灭「索引/最新替代显式身份」
+这一类跨层错误。

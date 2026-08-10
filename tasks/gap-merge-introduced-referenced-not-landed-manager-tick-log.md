@@ -101,6 +101,19 @@ resume 若中断，先跑 measure 读声明在场 + lowconc 失败数
   - 测试选择：**0 test files selected（thin，`--allow-thin` 放行）**——本任务 Touches 为自身文件 + 声明文件 + 交叉标注，无承重测试文件直选；承重测试族（quay-init-loop-core / worktree-root-fs-check / quay-init-laydown-closure 等）属全量面，2026-08-08 复核已实跑 42 tests / fail 0。
 - **AC 勾选维持**：AC1/AC2/AC4 已在 develop 勾定；**AC3（全栈并发 8 绿）与 DoD 全量三趟行保持未勾**——按任务指示顺延至外层验证轮（40→6 入口断言收口后重跑）。
 
+**重派复核 2026-08-10（worktree task/gap-merge-introduced-referenced-not-landed-manager-tick-log @ develop HEAD f05a4bdf，含 fix commit 7f43fc78）**：
+
+- **fix 在场（同 AC1 证据，HEAD 复核）**：`plugin/skills/init/SKILL.md` L120 reference-doc 表格行 + L140 `<!-- reference-doc: orchestration/manager-tick-log.md -->` 声明；`plugin/scripts/quay-init.sh` L1029-1033 reference-doc 判定逻辑（含 completeness sentinel：manager-tick-log.md 恒在 shipped init skill 的 refdoc 集）。
+- **Contract measure referenced_landed**：`grep -c "manager-tick-log" plugin/skills/init/SKILL.md plugin/scripts/quay-init.sh` → **2 / 2**（声明在场 ≥1）。
+- **scoped 门实跑**：`bash scripts/test.sh --for-task gap-merge-introduced-referenced-not-landed-manager-tick-log --allow-thin` → **exit 0**。静态子集全绿：
+  - `task-contract-check`（strict-subset，扫本任务 + 两个 AC4 交叉标注任务）→ **no violations**（0 unique / info 0）；
+  - `adr016-screen-use-check` → **violations 0**（145 file(s) scanned）；
+  - `superseded-capability-check` → **PASS**（1 superseded 均已从可执行层移除）；
+  - `dead-code-after-return-check` → **violations 0**（140 shell script(s) scanned）；
+  - 测试选择：0 test files selected（thin，`--allow-thin` 放行）——Touches 无承重测试文件直选，承重族另行实跑（下条）。
+- **承重测试族实跑（本重派直接跑，非仅引用旧证据）**：`bash scripts/test.sh --test-concurrency=1 plugin/test/quay-init-loop-core.test.mjs plugin/test/worktree-root-fs-check.test.mjs plugin/test/quay-init-laydown-closure.test.mjs plugin/test/quay-init-check-drift.test.mjs plugin/test/quay-init-drift-report.test.mjs plugin/test/quay-init-loop-vendor.test.mjs plugin/test/quay-init-tmux-detection.test.mjs` → **ℹ tests 42 / pass 42 / fail 0 / cancelled 0 / exit 0**（duration_ms 461265）。这 7 个文件正是 18 个失败文件里承重 referenced-not-landed 的 install 家族——修复前必现 `FAIL (referenced-not-landed)`，现全绿。
+- **AC 勾选维持**：AC1/AC2/AC4 已在 develop 勾定；**AC3（全栈并发 8 绿）与 DoD 全量三趟行保持未勾**——按任务指示顺延至外层验证轮（40→6 入口断言收口后重跑）。
+
 ## Touches
 - tasks/gap-merge-introduced-referenced-not-landed-manager-tick-log.md（自身文件：self-touch，2026-08-08 内层补——缺此条不满足派发资格闸 step 4.5）
 - plugin/skills/init/SKILL.md 或对应铺装声明文件（manager-tick-log.md reference-doc 声明）

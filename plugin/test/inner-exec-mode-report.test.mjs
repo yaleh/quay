@@ -250,6 +250,126 @@ test("detectSession — 优先仓库 slug 匹配的会话目录（同分取最�
   } finally { cleanup(tmp); }
 });
 
+// ── AC2/AC3 (gap-session-identity-index-vs-explicit): 显式身份优先，启发式仅 fallback + WARN ────────
+// 同根：索引/最新启发式替代显式身份 —— 与 gap-drive-sent-to-manager-pane-not-inner 错读 b8dc91a6 同根。
+
+test("AC2 — 显式身份优先：resolveSessionPath 走 pane pid → session（pane-pid），启发式不被调用、无 WARN", () => {
+  const tmp = mkTmp("ier-id1-");
+  try {
+    const repoRoot = path.join(tmp, "repo");
+    const projectsDir = path.join(tmp, "projects");
+    fs.mkdirSync(projectsDir, { recursive: true });
+    const innerTr = path.join(projectsDir, "inner.jsonl");
+    fs.writeFileSync(innerTr, "", "utf8");
+    const resolved = mod.resolveSessionPath(repoRoot, projectsDir, {
+      resolveIdentity: () => ({ transcript: innerTr, source: "discovery-pid" }),
+    });
+    assert.equal(resolved.path, innerTr, "显式身份（pane pid → session）的 transcript 被采用");
+    assert.equal(resolved.source, "pane-pid", "discovery-pid 归一为 pane-pid（显式身份）");
+    assert.equal(resolved.warning, null, "显式身份路径不报 WARN");
+  } finally { cleanup(tmp); }
+});
+
+test("AC2 — 启发式仅 fallback 且报 WARN：无显式身份 ⇒ detectSession + warning", () => {
+  const tmp = mkTmp("ier-id2-");
+  try {
+    const repoRoot = path.join(tmp, "repo");
+    const projectsDir = path.join(tmp, "projects");
+    const repoDir = path.join(projectsDir, mod.repoSlug(repoRoot));
+    fs.mkdirSync(repoDir, { recursive: true });
+    const otherSess = writeSession(repoDir, "other.jsonl", [toolUse("Edit", { file_path: "plugin/scripts/a.ts" })]);
+    const resolved = mod.resolveSessionPath(repoRoot, projectsDir, {
+      resolveIdentity: () => null,   // 无 pane pid → session 显式身份
+      selfSessionId: "my-session",   // 排除自己（不与 other.jsonl 冲突）
+    });
+    assert.equal(resolved.path, otherSess, "启发式命中检测到的会话");
+    assert.equal(resolved.source, "heuristic");
+    assert.ok(resolved.warning && /启发式/.test(resolved.warning), "启发式必须报 WARN（不静默）");
+  } finally { cleanup(tmp); }
+});
+
+test("AC2 — inner-session-check discovery（TR_SOURCE=discovery）视为启发式 fallback 报 WARN", () => {
+  const tmp = mkTmp("ier-id3-");
+  try {
+    const repoRoot = path.join(tmp, "repo");
+    const projectsDir = path.join(tmp, "projects");
+    fs.mkdirSync(projectsDir, { recursive: true });
+    const tr = path.join(projectsDir, "guessed.jsonl");
+    fs.writeFileSync(tr, "", "utf8");
+    const resolved = mod.resolveSessionPath(repoRoot, projectsDir, {
+      resolveIdentity: () => ({ transcript: tr, source: "discovery" }),
+    });
+    assert.equal(resolved.path, tr);
+    assert.equal(resolved.source, "heuristic", "discovery 归为 heuristic（退化路径）");
+    assert.ok(resolved.warning, "discovery 退化必须报 WARN");
+  } finally { cleanup(tmp); }
+});
+
+test("AC2 — detectSession 自排除：调用方自己的 <sid>.jsonl 不参与评分（不命中自己）", () => {
+  const tmp = mkTmp("ier-self-");
+  try {
+    const repoRoot = path.join(tmp, "repo");
+    const projectsDir = path.join(tmp, "projects");
+    const repoDir = path.join(projectsDir, mod.repoSlug(repoRoot));
+    fs.mkdirSync(repoDir, { recursive: true });
+    const other = writeSession(repoDir, "other.jsonl", [toolUse("Edit", { file_path: "plugin/scripts/other.ts" })]);
+    const mine = writeSession(repoDir, "mine.jsonl", [toolUse("Edit", { file_path: "plugin/scripts/mine.ts" })]);
+    // mine 后写 ⇒ 默认 mtime 更新（无自排除时会赢）；selfSessionId="mine" 排除它 ⇒ 命中 other
+    const picked = mod.detectSession(repoRoot, projectsDir, { selfSessionId: "mine" });
+    assert.equal(picked, other, "自己的 <sid>.jsonl 被排除，命中 other（即使 other 更旧）");
+    // 只剩自己的会话 ⇒ null（不猜、不静默命中自己）
+    fs.rmSync(other, { force: true });
+    const picked2 = mod.detectSession(repoRoot, projectsDir, { selfSessionId: "mine" });
+    assert.equal(picked2, null, "唯一候选是自己的会话时返回 null");
+  } finally { cleanup(tmp); }
+});
+
+test("CLI — --root 别名 + 缺省 --session 报 session_source=heuristic + WARN（不静默命中自己）；显式 --session ⇒ arg", () => {
+  const tmp = mkTmp("ier-cli3-");
+  try {
+    const repoRoot = path.join(tmp, "repo");
+    fs.mkdirSync(repoRoot, { recursive: true });
+    const projectsDir = path.join(tmp, "projects");
+    const repoDir = path.join(projectsDir, mod.repoSlug(repoRoot));
+    fs.mkdirSync(repoDir, { recursive: true });
+    const sess = writeSession(repoDir, "other.jsonl", [
+      toolUse("Edit", { file_path: path.join(repoRoot, "plugin/scripts/a.ts") }),
+      toolUse("Agent", { run_in_background: true }),
+    ]);
+    const env = { ...process.env, INNER_EXEC_MODE_PROJECTS_DIR: projectsDir, CLAUDE_CODE_SESSION_ID: "my-session" };
+
+    // 缺省 --session（--root 别名）：启发式命中 other.jsonl + WARN 字段（不静默）
+    const res = spawnSync("node", [
+      "--no-warnings", "--experimental-strip-types", MODULE, "--root", repoRoot, "--json",
+    ], { encoding: "utf8", env });
+    assert.equal(res.status, 0, `CLI exit ${res.status}\nstderr: ${res.stderr}`);
+    const out = JSON.parse(res.stdout);
+    assert.equal(out.session, sess);
+    assert.equal(out.session_source, "heuristic");
+    assert.ok(out.session_warning, "启发式必须带 session_warning 字段");
+    assert.equal(out.main_thread_edits, 1);
+    assert.equal(out.agent_dispatches, 1);
+
+    // 人类可读：stderr 必须报 WARNING（不静默）
+    const human = spawnSync("node", [
+      "--no-warnings", "--experimental-strip-types", MODULE, "--root", repoRoot,
+    ], { encoding: "utf8", env });
+    assert.equal(human.status, 0);
+    assert.match(human.stderr, /WARNING/, "启发式路径必须 stderr 报 WARNING");
+    assert.match(human.stdout, /session-source: heuristic/);
+
+    // 显式 --session ⇒ session_source=arg，无 WARN
+    const explicit = spawnSync("node", [
+      "--no-warnings", "--experimental-strip-types", MODULE,
+      "--session", sess, "--root", repoRoot, "--json",
+    ], { encoding: "utf8", env });
+    assert.equal(explicit.status, 0);
+    const eout = JSON.parse(explicit.stdout);
+    assert.equal(eout.session_source, "arg", "显式 --session ⇒ source=arg");
+    assert.equal(eout.session_warning, null, "显式 --session 无 WARN");
+  } finally { cleanup(tmp); }
+});
+
 // ── AC5: @test-group 声明 ───────────────────────────────────────────────────────────────────────────
 
 test("AC5 — 本测试文件声明 // @test-group engine", () => {

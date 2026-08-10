@@ -108,13 +108,19 @@
 #   default_test_concurrency below). AMPLIFICATION was 2.1 (2026-08-03 measured process
 #   amplification 17/8 ≈ 2.125) until the AC5 cost-side experiment finally ran
 #   (gap-dod-two-green-runs-and-over90-budget-are-mathematically-incompatible, 2026-08-08):
-#   the same selected set at concurrency 1/4/8 produced ZERO cancelled at every level, and
-#   concurrency = nproc was the wall-clock sweet spot (24s vs 57.5s at 1, 27.3s at 8 on this
-#   4-core box). "Lower concurrency to avoid cancel" was refuted; the derived default is now
-#   nproc (4 on this box). The old hardcoded 8 was a 4.25× oversubscription (17 processes on
-#   4 cores), but the cost side of that oversubscription was never shown to cancel/fail —
-#   the outer's own full-suite verification rounds at laneCount 8 (13+ runs, 2026-08-08) all
-#   show cancelled 0. A later --test-concurrency=N on the command line overrides the derived
+#   the same selected set at concurrency 1/4/8 produced ZERO cancelled at every level — the
+#   cost-side criterion (CANCELLED dimension) that refuted "lower concurrency to avoid cancel".
+#   Wall-clock is a SEPARATE axis: in this selected set c4 was fastest (24s vs 57.5s at 1, 27.3s
+#   at 8 on this 4-core box), while the outer's full-suite rounds at laneCount 8 (13+ runs,
+#   2026-08-08) were wall-clock FASTER than lane 4 (median ~783s vs ~1302s, −22%~−40%, directional
+#   only — suite composition was changing). Do NOT read "nproc = wall-clock sweet spot" as the
+#   derivation's justification: the derived default is now nproc (4 on this box) on the CANCELLED
+#   dimension; wall-clock is a separate axis needing a controlled comparison
+#   (gap-load-sensitive-serial-phase-unbounded-growth-measure-first AC2 lane 4 vs 8). The old
+#   hardcoded 8 was a 4.25× oversubscription (17 processes on 4 cores), but the cost side of that
+#   oversubscription was never shown to cancel/fail — the outer's own full-suite verification
+#   rounds at laneCount 8 (13+ runs, 2026-08-08) all show cancelled 0. A later
+#   --test-concurrency=N on the command line overrides the derived
 #   default (node --test is last-flag-wins).
 #
 # gap-test-sh-flags-only-form-silently-runs-a-different-suite: the flags-only form
@@ -343,6 +349,18 @@ run_static_checks() {
   # @static-tier change
   # @static-object plugin/loop/fast-mode-loop-tick.md plugin/loop/orchestrator-loop-tick.md CLAUDE.md plugin/scripts/threshold-scope-check.ts plugin/test/threshold-scope-check.test.mjs docs/analysis/threshold-scope-violations.md
   run_checker "threshold-scope-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/threshold-scope-check.ts" --root "${repo_root}"
+  echo "== state-worded-clause check (gap-ac41-actionize-state-worded-clauses, AC4) =="
+  # The result-state-clause checker: the three execution cores must phrase every executable clause
+  # as an ACTION + mechanically verifiable product, never a result state (自测绿/确保/保证/直到…绿).
+  # The 2026-08-10 incident — orchestrator A15 ④'s 自测绿 (a result state, not an action) let two
+  # suite-fix subagents behave oppositely (the file-quoting one read it as "observe until green" →
+  # scope=main failure; the all-prose one happened to run the suite → scope=worktree success).
+  # The ## Contract measure IS this checker's count over the three tick-cores, band 0. Exit 1 on a
+  # NEW state-worded clause red-lights the commit (set -euo pipefail), so a result-state regression
+  # in a tick-core is stopped when it is WRITTEN, not after the suite goes red.
+  # @static-tier change
+  # @static-object orchestration/manager-tick-core.md orchestration/orchestrator-tick-core.md orchestration/fast-mode-tick-core.md plugin/scripts/state-worded-clause-check.ts plugin/test/state-worded-clause-check.test.mjs
+  run_checker "state-worded-clause-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/state-worded-clause-check.ts" --root "${repo_root}"
   echo "== instrument-failure check (gap-manager-instrument-failures-need-mechanical-detection-not-carefulness, AC3) =="
   # The manager instrument-failure five-family detector (FAMILY-1..5 in the checker header). The
   # manager's instrument failures recurred 7× in one night across five families already documented
@@ -430,8 +448,11 @@ run_scoped_static_checks_touches() { run_scoped_static_checks_sel --touches "$1"
 # (gap-dod-two-green-runs-and-over90-budget-are-mathematically-incompatible, 2026-08-08): the same
 # selected set (6 subprocess-heavy plugin test files, 86 tests) at concurrency 1/4/8 gave
 #   c1: 57.5s wall, 0 cancelled · c4: 24.1s, 0 cancelled · c8: 27.3s, 0 cancelled
-# — concurrency = nproc is the wall-clock sweet spot and "lower concurrency to avoid cancel" is
-# refuted (zero cancelled at 4 AND 8). The old 2.1 amplification (which on this box gave 1, a
+# — CANCELLED dimension: zero cancelled at 4 AND 8 refutes "lower concurrency to avoid cancel".
+#   Wall-clock is a SEPARATE axis (this selected set: c4 fastest; outer's full-suite laneCount-8
+#   rounds wall-clock faster than lane 4, −22%~−40% directional, 2026-08-08) — the derivation is
+#   justified by the cancelled dimension, NOT "nproc = the wall-clock sweet spot" (split per
+#   gap-claude-md-nproc-wallclock-claim-scope-correction). The old 2.1 amplification (which on this box gave 1, a
 # definite ~2.4× wall-clock penalty) was an unproven-conservative guard against oversubscription;
 # the cost side was never measured until now. On this box the default is now floor(4/1.0) = 4.
 #

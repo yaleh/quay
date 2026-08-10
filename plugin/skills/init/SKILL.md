@@ -67,6 +67,9 @@ mechanically by quay-init's `verify-referenced-landed` (see below).
 | `agents/*.md` | `.claude/agents/` |
 | `loop/orchestrator-loop-tick.md` | `orchestration/orchestrator-loop-tick.md` (byte-identical, no substitution) |
 | `loop/fast-mode-loop-tick.md` | `docs/analysis/fast-mode-loop-tick.md` (byte-identical, no substitution) |
+| `loop/orchestrator-tick-core.md` | `orchestration/orchestrator-tick-core.md` (byte-identical, no substitution; the ≤80-line outer exec core — `gap-ac37-exec-core-ships-with-package`) |
+| `loop/fast-mode-tick-core.md` | `orchestration/fast-mode-tick-core.md` (byte-identical, no substitution; the ≤80-line inner exec core) |
+| `loop/manager-tick-core.md` | `orchestration/manager-tick-core.md` — **opt-in**: laid only with `--manager` (human ruling 2026-08-10: the typical path is two-layer, outer + inner), NOT in the default `--loop` set |
 | `scripts/*` referenced by a shipped skill/tick doc (e.g. `fast-mode-telemetry.ts`, `monitor-mount-check.sh`, `send-keys-reliable.sh`, `session-liveness-mount.sh`, `ready-pool-check.ts`, `read-probe-spec.ts`, `task-schema-check.ts`, `quay-launch.sh`, `quay-topology.sh`, `topology-check.sh`, …) | `plugin/scripts/` |
 | `scripts/` bare-name mechanism files the docs call without a `plugin/scripts/` prefix (`inner-idle-log.ts`, `it0-split-or-commit-check.ts`, `pipe-exit-code-check.sh`; `heavy-op-token.sh` was retired 2026-08-06) | `plugin/scripts/` |
 | `scripts/gate-script-base.ts`, `workflow-event-schema.mjs`, `task-schema.ts`, `touches-parser.ts`, `wiring-coverage-check.ts` (transitive deps of the checkers — the laid-down mechanism must be functional) | `plugin/scripts/` |
@@ -118,6 +121,8 @@ documented reference from a genuine missing file:
 | `orchestration/REVIEW-cadence.md` | quay's daily-review cadence mechanism (referenced by the shipped manager skill as its cadence hook) — not a generic loop deliverable |
 | `orchestration/manager-loop-tick.md` | quay's manager operational tick doc (the shipped manager skill's §1.5/§1.6 rules are extracted from it) — not a generic loop deliverable |
 | `orchestration/manager-tick-log.md` | quay's manager tick log — gitignored runtime telemetry the manager appends each tick (see `gap-manager-tick-mechanical-checks...`); referenced by the shipped manager-loop-tick template but NOT a loop deliverable — declared so referenced ⊆ landed holds |
+| `orchestration/manager-anchor-check.py` | quay's own manager anchor-check tool (referenced by the opt-in manager exec core, `loop/manager-tick-core.md`) — quay-specific, not a generic loop deliverable — declared so referenced ⊆ landed holds |
+| `orchestration/manager-` (glob) | the opt-in manager exec core's `orchestration/manager-*` glob (its own quay-local manager-layer files) — quay-specific development-process docs, not loop deliverables — declared so referenced ⊆ landed holds |
 | `orchestration/SYNTHESIS-four-gaps-2026-08-05.md` | quay's four-gap synthesis that motivated shipping the manager layer — not a generic loop deliverable |
 | `orchestration/SPEC-manager-productization-2026-08-05.md` | quay's manager productization SPEC (C1–C5 constraints, build-vs-run ownership) — not a generic loop deliverable |
 | `orchestration/SPEC-three-layer-unified-architecture-2026-08-09.md` | quay's three-layer (manager/outer/inner) unified-architecture SPEC — referenced by the shipped manager/init skills, not a generic loop deliverable |
@@ -162,8 +167,9 @@ documented reference from a genuine missing file:
 <!-- reference-doc: orchestration/SPEC-inbox-service-2026-08-08.md -->
 <!-- reference-doc: orchestration/SPEC-three-layer-unified-architecture-2026-08-09.md -->
 <!-- reference-doc: orchestration/SPEC-goal-store-2026-08-09.md -->
-<!-- reference-doc: orchestration/orchestrator-tick-core.md -->
-<!-- reference-doc: orchestration/fast-mode-tick-core.md -->
+<!-- reference-doc: orchestration/manager-anchor-check.py -->
+<!-- reference-doc: orchestration/manager- -->
+<!-- reference-doc: orchestration/manager-tick-core.md -->
 
 ## Behavior
 

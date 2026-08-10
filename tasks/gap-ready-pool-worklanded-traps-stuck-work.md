@@ -2,7 +2,7 @@
 id: gap-ready-pool-worklanded-traps-stuck-work
 title: ready-pool 的 workLanded 排除把真实剩余工作堵死——gap-session-liveness（4/9，5 条 AC
   未勾是真实实现工作）被排除出可派发池，既不能派又不能翻 done；对比 gap-dispatch（11/12 仅验证窗）合法 done-flip
-status: ready
+status: done
 labels:
   - gap
   - defect

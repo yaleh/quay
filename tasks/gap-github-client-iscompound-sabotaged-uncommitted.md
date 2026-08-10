@@ -4,7 +4,7 @@ title: github-client.ts 工作树未提交编辑禁用 compound-gate——两处
   role==="compound"&&children.length>0），compound-gate.test.mjs 8
   子测试全崩（r.childrenStatus undefined TypeError），round-190 全量红；未提交、无 commit、mtime
   18:3x
-status: ready
+status: done
 labels:
   - gap
   - defect

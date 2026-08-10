@@ -50,7 +50,12 @@
 //
 // Run:
 //   node --experimental-strip-types plugin/scripts/slot-refill.ts [--root <repo>]
-//       [--cap <n>] [--in-flight <id1,id2>] [--floor-mult <n>] [--json]
+//       [--cap <n>] [--in-flight <id1,id2>] [--floor-mult <n>] [--integration-backlog <n>]
+//       [--red-backlog-threshold <n>] [--red-backlog-cap <n>] [--json]
+//   --integration-backlog <n>   override the git-read integration backlog (test/Contract seam; the
+//                               production default reads `git rev-list --count develop..integration`).
+//   --red-backlog-threshold <n> backlog above which a red suite narrows the cap (default 50).
+//   --red-backlog-cap <n>       the narrowed cap under red suite + backlog > threshold (default 2).
 //
 // The pure functions are exported and unit-tested; main() is a thin CLI over them.
 
@@ -60,6 +65,7 @@ import { parseTask } from "./task-schema.ts";
 import {
   analyzeTasks,
   POOL_FLOOR_MULT_DEFAULT,
+  readGitRevCount,
 } from "./ready-pool-check.ts";
 import {
   checkTaskTouchesResolve,
@@ -81,9 +87,42 @@ import { isDirectEntry } from "./gate-script-base.ts";
  *  an explicit `--cap`; the DEFAULT is fixed at 5.) */
 export const FIXED_DISPATCH_CAP = 5;
 
+/** B3 ①/④ ARBITRATION (gap-b3-arbitration-inflight-vs-backlog): B3's five inequalities were written
+ *  as five INDEPENDENT mandates, but ④ (integration ahead + suite green ⇒ batch-merge) is a DOWNSTREAM
+ *  constraint on ① (in_flight<cap ⇒ dispatch): when the delivery gate is blocked by a red suite, the
+ *  commits pile up on integration (measured 01:05 162 → 01:15 169, develop 9.6h frozen) and a full-cap
+ *  dispatch adds WIP, not throughput — a newly-finished task joins the 169 and becomes 174. The
+ *  arbitration narrows the effective dispatch cap to "just enough to fix red" (RED_BACKLOG_CAP) when
+ *  the suite is RED and the integration backlog (integration-ahead-of-develop commits) exceeds
+ *  RED_BACKLOG_THRESHOLD; the cap restores to full when the suite is green, and an empty backlog has no
+ *  effect. It is a cap ARBITRATION, not a gate — slot-refill still only recommends, but every
+ *  dispatch-recommendation path that consumes this helper (event-driven + tick-heartbeat) automatically
+ *  reads the arbitrated cap. */
+export const RED_BACKLOG_CAP_DEFAULT = 2;
+export const RED_BACKLOG_THRESHOLD_DEFAULT = 50;
+
 /** Free dispatch slots = max(0, cap − in_flight). The one definition; never hardcoded. */
 export function computeSlotsFree(cap, inFlightCount) {
   return Math.max(0, cap - inFlightCount);
+}
+
+/** Read <root>/.quay/full-suite-state.json's `state` — the CURRENT suite red-block (A11 semantics:
+ *  `red` is the ONLY blocking state; green/running/absent all proceed). Absent/unparseable ⇒ false
+ *  (proceed). This is the "④ 被红阻塞（suite 非绿）" reading the arbitration keys on. */
+export function readSuiteRed(root) {
+  try {
+    const st = JSON.parse(fs.readFileSync(path.join(root, ".quay", "full-suite-state.json"), "utf8"));
+    return st && st.state === "red";
+  } catch {
+    return false;
+  }
+}
+
+/** The ①/④ arbitration, pure: narrow the dispatch cap to `redBacklogCap` when the suite is red AND the
+ *  integration backlog exceeds `redBacklogThreshold`; otherwise the base cap is unchanged. */
+export function computeArbitratedCap({ baseCap, suiteRed, integrationBacklog, redBacklogThreshold = RED_BACKLOG_THRESHOLD_DEFAULT, redBacklogCap = RED_BACKLOG_CAP_DEFAULT }) {
+  if (suiteRed && integrationBacklog > redBacklogThreshold) return redBacklogCap;
+  return baseCap;
 }
 
 /**
@@ -150,25 +189,43 @@ function buildStatusById(tasksDir) {
  *  @param {string} o.tasksDir   the store's tasks dir (<root>/tasks)
  *  @param {string} o.root       repo root (touches-resolution + git signals)
  *  @param {number} [o.cap]      concurrency cap; default FIXED_DISPATCH_CAP (5) — the dynamic cap is
- *      retired (gap-fixed-cap-5-dynamic-cap-retired). floor = cap × floor_mult = 5 × 4 = 20.
+ *      retired (gap-fixed-cap-5-dynamic-cap-retired). floor = cap × floor_mult = 5 × 4 = 20. The cap
+ *      is ARBITRATED (gap-b3-arbitration-inflight-vs-backlog): under a red suite + high integration
+ *      backlog it narrows to `redBacklogCap` (2) so dispatch adds red-fixing work, not WIP.
  *  @param {number} [o.floorMult] pool floor multiplier; default 4
  *  @param {Array<{id:string, body:string}>} [o.inFlight] currently-RUNNING subagent tasks
  *  @param {Array<{id:string, body:string}>} [o.closedButLive] tasks whose bracket CLOSED but whose
  *      executor is still observably present (from fast-mode-telemetry --slots closedButLive) — their
  *      slots are NOT free.
- *  @returns {object} { cap, in_flight_count, closed_but_live_count, occupied_slots, slots_free,
- *      pool, floor, dispatchable_disjoint, criterion_met, should_refill, no_refill_reason,
- *      recommended, scanned }
+ *  @param {number} [o.integrationBacklog] integration-ahead-of-develop commit count; when omitted it
+ *      is read from git (`git rev-list --count develop..integration`), fail-safe 0 on a non-git root /
+ *      missing ref. Injectable for tests (a temp dir is not a git repo).
+ *  @param {number} [o.redBacklogThreshold] backlog above which the red-suite cap narrowing applies
+ *      (default RED_BACKLOG_THRESHOLD_DEFAULT = 50).
+ *  @param {number} [o.redBacklogCap] the narrowed dispatch cap under red suite + backlog > threshold
+ *      (default RED_BACKLOG_CAP_DEFAULT = 2).
+ *  @returns {object} { cap, base_cap, effective_cap, arbitration, in_flight_count,
+ *      closed_but_live_count, occupied_slots, slots_free, pool, floor, dispatchable_disjoint,
+ *      criterion_met, should_refill, no_refill_reason, recommended, scanned }
  */
-export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, floorMult = POOL_FLOOR_MULT_DEFAULT, inFlight = [], closedButLive = [] }) {
+export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, floorMult = POOL_FLOOR_MULT_DEFAULT, inFlight = [], closedButLive = [], integrationBacklog, redBacklogThreshold = RED_BACKLOG_THRESHOLD_DEFAULT, redBacklogCap = RED_BACKLOG_CAP_DEFAULT }) {
   // PREEMPTIVE HALT (gap-supervisor-preemption AC2): the `.halt` sentinel is a CODE mount point,
   // not a tick-step-0 prose rule. When halted, dispatch is blocked no matter how many slots/candidates
   // exist — the human's stop takes effect at ANY dispatch-recommendation point, mid-flow.
   const halt = checkHaltSentinel(root);
-  const pool = analyzeTasks({ tasksDir, root, cap, floorMult, inFlight, closedButLive });
+  // B3 ①/④ ARBITRATION (gap-b3-arbitration-inflight-vs-backlog): ① (in_flight<cap ⇒ dispatch) conflicts
+  // with ④ (integration ahead + suite green ⇒ batch-merge) — ④ is a DOWNSTREAM constraint on ①. When the
+  // delivery gate is blocked by a red suite AND the integration backlog exceeds the threshold, the
+  // effective dispatch cap narrows to "just enough to fix red" so dispatch adds red-fixing work, not WIP.
+  const suiteRed = readSuiteRed(root);
+  const backlog = integrationBacklog ?? readGitRevCount(root, "develop..integration") ?? 0;
+  const baseCap = cap;
+  const effectiveCap = computeArbitratedCap({ baseCap, suiteRed, integrationBacklog: backlog, redBacklogThreshold, redBacklogCap });
+  const capNarrowed = effectiveCap !== baseCap;
+  const pool = analyzeTasks({ tasksDir, root, cap: effectiveCap, floorMult, inFlight, closedButLive });
   // A slot is free only when neither a running subagent NOR a closed-bracket-but-live agent holds it.
   const occupied = inFlight.length + closedButLive.length;
-  const slotsFree = computeSlotsFree(cap, occupied);
+  const slotsFree = computeSlotsFree(effectiveCap, occupied);
 
   // recommended — the production disjoint batch over the ready pool, filtered by the SAME step-4
   // dispatch checks (touches-resolve + deps-ready + disjoint-from-in-flight), capped at slots_free.
@@ -208,10 +265,21 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
     // Ties stay id-deterministic. The signal only re-ranks; the step-4 dispatch checks above still
     // gate admission (a suite-blocker that fails touches-resolve/deps/disjoint is never forced in).
     const suiteBlockingIds = new Set((pool.suite_blocking && pool.suite_blocking.tasks) || []);
+    // DELIVERY-CRITICAL SECOND AXIS (gap-ac36-delivery-critical-priority-axis): the sort key is now
+    // (blocking_suite, delivery_critical, id). `deliveryCritical` comes from parseCandidate (which
+    // reads the task's frontmatter `labels` via task-schema's parseTask — reuse, no new parser). A
+    // task labeled `delivery-critical` ranks below a suite-blocker but ABOVE plain id order, so the
+    // productization-delivery phase's AC tasks are picked by the refill before ordinary pool work.
+    // The signal only re-ranks (SIGNAL, not a gate): the step-4 dispatch checks above still gate
+    // admission, and a delivery-critical task that fails touches-resolve/deps/disjoint is never
+    // forced in.
     candidates.sort((a, b) => {
       const ab = suiteBlockingIds.has(a.id) ? 0 : 1;
       const bb = suiteBlockingIds.has(b.id) ? 0 : 1;
       if (ab !== bb) return ab - bb;
+      const ad = a.deliveryCritical ? 0 : 1;
+      const bd = b.deliveryCritical ? 0 : 1;
+      if (ad !== bd) return ad - bd;
       return a.id.localeCompare(b.id);
     });
     const { batch } = assembleBatch(candidates, { expand });
@@ -229,13 +297,29 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
     shouldRefill = false;
     noRefillReason = `halted (preemption: .halt present — ${halt.reason}; check with supervisor-preempt.sh halt-check)`;
   } else if (slotsFree <= 0) {
-    noRefillReason = `no free slots (in-flight ${inFlight.length} + closed-but-live ${closedButLive.length} >= cap ${cap})`;
+    noRefillReason = `no free slots (in-flight ${inFlight.length} + closed-but-live ${closedButLive.length} >= cap ${effectiveCap})`;
   } else if (recommended.length === 0) {
     noRefillReason = "no dispatchable candidate passes step-4 checks (touches-resolve / deps-ready / disjoint-from-in-flight)";
   }
 
   return {
-    cap,
+    cap: effectiveCap,
+    base_cap: baseCap,
+    effective_cap: effectiveCap,
+    // B3 ①/④ ARBITRATION (gap-b3-arbitration-inflight-vs-backlog): the arbitration reading — whether
+    // the effective cap was narrowed (red suite + integration backlog > threshold) and why. `cap`
+    // above is the EFFECTIVE (arbitrated) cap every dispatch-recommendation path consumes.
+    arbitration: {
+      suite_red: suiteRed,
+      red_window_active: pool.suite_blocking ? pool.suite_blocking.window_active : false,
+      integration_backlog: backlog,
+      backlog_threshold: redBacklogThreshold,
+      red_backlog_cap: redBacklogCap,
+      cap_narrowed: capNarrowed,
+      reason: capNarrowed
+        ? `red suite (state=red) + integration backlog ${backlog} > threshold ${redBacklogThreshold} ⇒ dispatch cap narrowed ${baseCap}→${effectiveCap}`
+        : null,
+    },
     floor_mult: floorMult,
     in_flight_count: inFlight.length,
     closed_but_live_count: closedButLive.length,
@@ -272,6 +356,9 @@ function main(argv) {
   let floorMult = POOL_FLOOR_MULT_DEFAULT;
   let inFlightIds = [];
   let closedButLiveIds = [];
+  let integrationBacklog = undefined;
+  let redBacklogThreshold = RED_BACKLOG_THRESHOLD_DEFAULT;
+  let redBacklogCap = RED_BACKLOG_CAP_DEFAULT;
   const args = argv.slice(2);
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--root") root = args[++i];
@@ -282,6 +369,12 @@ function main(argv) {
       inFlightIds = String(args[++i] || "").split(",").map((s) => s.trim()).filter(Boolean);
     } else if (args[i] === "--closed-but-live") {
       closedButLiveIds = String(args[++i] || "").split(",").map((s) => s.trim()).filter(Boolean);
+    } else if (args[i] === "--integration-backlog") {
+      integrationBacklog = Number(args[++i]);
+    } else if (args[i] === "--red-backlog-threshold") {
+      redBacklogThreshold = Number(args[++i]);
+    } else if (args[i] === "--red-backlog-cap") {
+      redBacklogCap = Number(args[++i]);
     }
   }
   const rootDir = root ? path.resolve(root) : findRepoRoot(process.cwd());
@@ -296,7 +389,7 @@ function main(argv) {
   };
   const inFlight = readTasks(inFlightIds);
   const closedButLive = readTasks(closedButLiveIds);
-  const result = analyzeSlotRefill({ tasksDir: path.join(rootDir, "tasks"), root: rootDir, cap, floorMult, inFlight, closedButLive });
+  const result = analyzeSlotRefill({ tasksDir: path.join(rootDir, "tasks"), root: rootDir, cap, floorMult, inFlight, closedButLive, integrationBacklog, redBacklogThreshold, redBacklogCap });
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   return 0;
 }

@@ -32,6 +32,10 @@
 > `.quay/config.yml` `loop:` 节的 `fork_baseline` / `merge_target`。所有含分支操作的命令代入这两个值，
 > 不要字面写死。共享模板 `plugin/loop/orchestrator-loop-tick.md` 的工作分支名**可配置**（默认单线，
 > 供未做 cutover 的下游经升级通道消费），本副本是 quay 自己的两线落地——两者角色分工见任务体 AC5。
+> **切分声明（AC38，2026-08-10）**：本文件是 quay 自身消费的**本层状态**（工作分支两线、integration
+> 作 checkout、项目列表）；**产品行为正本**在 `plugin/loop/orchestrator-loop-tick.md`（随 `quay-init --loop`
+> 原样铺到目标项目即本路径）。**产品行为进 plugin / 本层状态留 orchestration**——与 manager 层已按同判据
+> 切分（产品模板 322 行 vs quay 状态 1505 行）。冷启动 skill 与 tick 核引用同一批行为文件（AC3）。
 > **⚠️ 2026-08-09 结构性修正（外层的 WORKING CHECKOUT 切到 integration）**：此前的故障链是「立项/记账
 > 提交落 develop ⇒ 不变式被破（develop-only 累积）⇒ ff 前需并回 integration ⇒ 验证期 tip 被记账推走 ⇒
 > 绿过期」——冻结窗口只是手段不是机制。长效解法：**外层工作 checkout = integration**，develop 只经 ff
@@ -238,6 +242,104 @@ Monitor 事件流承担（谁挂的谁拥有），不是检查器能读的跨观
 在 `tick-log.md` 记一行，注明「冷启动恢复」。
 
 **7. 进入正常 tick 步骤**
+
+## 冷启动 skill 背景档案（AC41 判据 2 — 背景从 plugin/skills/cold-start/SKILL.md 搬入）
+
+`plugin/skills/cold-start/SKILL.md` 只留动作(Steps)与可判定清单；本段是被它引用的背景/判据正文。
+冷启动 skill 引用本文件(外层 tick)与内层 tick 文档作为**同一批行为文件**。tick 执行核同样引用这一批，
+各自指向同层 loop-tick 文档：外层 `orchestration/orchestrator-loop-tick.md`、内层
+`docs/analysis/fast-mode-loop-tick.md`、管理者 `orchestration/manager-loop-tick.md`。
+（注：本文件是 quay 的 laid-down 副本——外层/内层 tick 的产品模板在 `plugin/loop/` 下。）
+
+### nohup 为什么不行（Monitor tool 判据）
+
+A `nohup bash …session-liveness.sh > log &` process and a Monitor-tool process look **identical in
+`ps`** (same argv). The difference is where stdout goes: the nohup process writes to a file and
+**nobody is notified**; a Monitor-tool process has every stdout line turned into a **session
+notification**. The criterion for "the loop is up" is therefore **"an event was delivered to this
+session"**, not "a process is running". A cold start whose monitor is nohup'd looks installed but is
+silently dead — worse than not installed, because it looks installed. **⇒ Never use nohup.** If you
+find yourself writing `nohup` or `&` to background a monitor, **STOP — that is the anti-pattern the
+cold-start skill exists to prevent.**
+
+### 铺什么验什么（gate 判据 — 冷启动门是 DERIVED laydown set 绿，不是全量套件绿）
+
+**What gates a cold start.** The gate is: **all scripts in the DERIVED laydown set are green** — NOT
+"the whole quay suite is green" (`scripts/test.sh` full-suite / 全量). A cold start only lays down the
+derived laydown set (the `plugin/scripts/*` the shipped skill + loop docs reference), so a suite
+failure UNRELATED to that set must NOT block it (与铺设集无关的失败不再无限期阻塞冷启动); a failure
+INSIDE the set MUST block (铺什么验什么). The 2026-08-05 wait was correct: `session-liveness.sh` +
+`session-liveness-mount.sh` are both derived members, so laying then would have shipped the M3
+busy/idle regression into the target project.
+
+**Mechanical derivation (no new mechanism).** The set is derived by grepping the shipped docs — the
+same derivation quay-init.sh's `derive_loop_scripts()` step (a) uses. Never hand-edit the set; re-run
+the grep:
+
+```bash
+grep -ohE 'plugin/scripts/[a-zA-Z0-9._-]+' <root>/plugin/skills/*/SKILL.md <root>/plugin/loop/*.md
+```
+
+**Run the gate:**
+
+```bash
+bash <root>/plugin/scripts/laydown-set-check.sh   # → `laydown_set_green: green|red`
+```
+
+`red` (a missing / non-parsing member, or a member's OWN test failing — the M3 class of logic
+regression a syntax check cannot see) blocks the cold start; `green` means the exact scripts this cold
+start will lay down are verifiably working. This is the full-suite gate's SCOPED-ED down cousin: it
+runs exactly the laid-down set's tests, nothing else — an unrelated red in the whole suite does not
+hold up the cold start. The check **never falls back to the whole suite**: if 0 test files resolve
+from the derived set it fails closed (red) — a silent "nothing checked" green is not an acceptable gate.
+
+### bare-metal 会话引导背景
+
+**From bare metal to a session is ONE command (`gap-no-formalized-bare-metal-session-bootstrap`).**
+The cold-start skill runs inside an already-existing outer session — the step BEFORE that (bare
+metal → a tmux window layout with a Claude Code process live in each pane) is the formalized product
+`plugin/scripts/session-bootstrap.sh <root> <layout>`:
+
+```bash
+bash <root>/plugin/scripts/session-bootstrap.sh <root> inner/outer        # project topology
+bash <root>/plugin/scripts/session-bootstrap.sh <root> manager/inner/outer # full quay-0-shaped layout
+```
+
+It creates each named window (idempotent — re-runs leave live windows alone), launches each role's
+Claude Code process via the checked-in launcher `quay-launch.sh` (the skill's internal
+implementation, never a user-facing invocation), verifies each process is actually alive (the same
+`/proc` process-detection `session-liveness.sh` uses), and exits non-zero naming the failing window
+if any window cannot be confirmed live (fail-closed). After it returns, the cold-start skill's
+"inner session reachable" precondition is already satisfied — the same command a cold start used to
+follow ("hand-build the session, then one command") is now truly one command.
+
+### launch config 与 ghost-suggestion 背景
+
+**Launch config is checked-in, not remembered.** The correct per-role launch command lives in
+`<root>/.claude/launch.settings.json` (settings-schema keys + `_launchSpec` for flag-only params) and
+is materialized by the skill-internal launcher `quay-launch.sh`. If a session must be (re)started
+during the cold-start skill, the skill handles the launch itself — the user/agent never names the
+launcher script and never hand-types a shell one-liner from memory
+(`gap-crystallize-launch-config-into-checked-in-settings-file`; `quay-launch.sh` is the skill's inner
+implementation, not a user-facing deliverable). To verify the materialized command without starting
+anything, the skill runs the launcher in dry-run mode (`--dry-run`); the `--bare` flag produces a
+minimal one-shot verification session (not long-lived).
+
+**Ghost-suggestion elimination is REQUIRED, not optional** (`gap-ghost-suggestion-eliminated-at-source-
+prompt-suggestions-false`, 人 2026-08-05 裁定): the launch config MUST carry `--prompt-suggestions false`
+(as `_launchSpec.promptSuggestions=false`, translated by `quay-launch.sh`) AND
+`CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false` (as the `env` key) — both routes, for every role. A fresh
+session launched without it shows gray ghost-suggestion text in the input box that the reliable-send /
+pane classifier can misread as a submitted action (fault 6/7). The cold-start skill MUST confirm the
+materialized command contains the flag (the launcher's `--dry-run` output must include
+`--prompt-suggestions false`).
+
+### non-goals
+
+- **Not a one-keypress button.** The command count is install (1–2) + init (1) + this skill (1);
+  the inner start is INSIDE the cold-start skill, not a separate human step.
+- **Not a shell script.** The monitor is mounted through the Monitor tool so its events reach a
+  session; a script that backgrounds processes delivers to nobody.
 
 ## 定位
 
@@ -598,6 +700,7 @@ node --experimental-strip-types plugin/scripts/task-status-drift-check.ts
 node --experimental-strip-types plugin/scripts/task-status-drift-check.ts --stranded   # stranded worktree branches (gap-stranded-...: silent fail-closed alarm)
 cat docs/analysis/batch2-queue-state.md             # 内层自报的队列状态
 bash plugin/scripts/supervisor-bus-identity.sh inbox-summary   # 收件箱机械挂载点（gap-supervisor-message-bus-with-identity AC4）：unread 逐条进决策，delivered≠consumed
+bash plugin/scripts/manager-tick-log-check.sh --json   # AC5b 行判据(新旧两格式)+缩水棘轮(基线sidecar <log>.baseline，pass 时自动上调)——自动调用者；fail(exit 非 0) 按既有升级通道处置（写 tick-log + 攒给人），不静默
 ```
 
 **1a. 内层占用率（AC26，强制——量【占用率】不是【新鲜度】）**：每 tick 必须取两个读数并写进本行

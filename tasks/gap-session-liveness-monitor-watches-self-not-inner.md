@@ -1,7 +1,11 @@
 ---
 id: gap-session-liveness-monitor-watches-self-not-inner
-title: "session-liveness monitor 盯自己（outer）不盯 inner——11:3x 报过未立案；两个常驻实例 SESSION_TARGETS/TRANSCRIPTS 均未设（实测 /proc environ 空）⇒ 都走自动发现 ⇒ 解析到自己 pane_pid=2989418 非 inner 2989409；SESSION-IDLE 通知整个会话 0 次 ⇒ 收不到 inner 转闲信号 ⇒ 只能 tick 时顺手看 ⇒ AC20/22/25 共同上游且唯一没主人；修法 = 显式配置 SESSION_TARGETS/SESSION_TRANSCRIPTS + 重启监视器 + 取证断言 pid==quay-0:inner pane_pid"
-status: ready
+title: session-liveness monitor 盯自己（outer）不盯 inner——11:3x 报过未立案；两个常驻实例
+  SESSION_TARGETS/TRANSCRIPTS 均未设（实测 /proc environ 空）⇒ 都走自动发现 ⇒ 解析到自己
+  pane_pid=2989418 非 inner 2989409；SESSION-IDLE 通知整个会话 0 次 ⇒ 收不到 inner 转闲信号 ⇒ 只能
+  tick 时顺手看 ⇒ AC20/22/25 共同上游且唯一没主人；修法 = 显式配置
+  SESSION_TARGETS/SESSION_TRANSCRIPTS + 重启监视器 + 取证断言 pid==quay-0:inner pane_pid
+status: done
 labels:
   - gap
   - defect

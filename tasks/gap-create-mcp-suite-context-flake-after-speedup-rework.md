@@ -3,7 +3,7 @@ id: gap-create-mcp-suite-context-flake-after-speedup-rework
 title: create-mcp.test.mjs 全量套件上下文 flake——solo/并发8/4-busy-loop 全绿，套件内 9.9s
   红（task_write gh-new 子进程 MCP roundtrip 3.9s）；suite-speedup 39cca37e 重构过该测试（MCP
   shutdown latency），非简单 CPU 负载，疑套件级子进程 spawn 竞争
-status: ready
+status: done
 labels:
   - gap
   - defect

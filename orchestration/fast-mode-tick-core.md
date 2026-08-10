@@ -3,12 +3,11 @@
 **这份文件是执行路径,不是理由档案。** 理由、实测、代价全在源文档 `plugin/loop/fast-mode-loop-tick.md`(1149 行),本文件只给动作和判据,每条带 `(src:行号)` 指路;
 **纯提取,零发明**——每条都能在源行号逐字核对;源文档一字未改。
 
-**行号注（2026-08-09，`gap-fast-mode-loop-tick-duplicate-paste-blocks` 去重）**：源文档删 5 处重复粘贴段
-（L270/271、459-471 rebase、820-832 scheduler、956-961 步骤6+判绿三条件），1200→1173，`src:N` 前移 ≈27 行——**按内容核对不按行号**;去重是合并非删减,语义均保留 (任务体 Evidence)。
+**引用同一批行为文件（AC41 判据 2 / AC3）**：本核与冷启动 skill 引用同一批——内层产品模板 `plugin/loop/fast-mode-loop-tick.md`（src:N 基准，冷启动驱动其 laid-down 副本）/ 外层 `plugin/loop/orchestrator-loop-tick.md` / 管理者 `orchestration/manager-loop-tick.md`。
 
-**立此文件的原因**(2026-08-09):执行路径与理由档案混在同一份千行文档里,一次重读无法当 checklist
-执行 ⇒ 实际被执行的是注意力当轮选中的部分。两次实证:outer 的「强制」步骤在 1095 行文档第 687 行、
-静默停摆 8.5 小时;nyf-semantic-judge 工作流(49c0be86)用完即弃——4 次 done-flip 真产出却因执行核无「调用」步骤而丢。
+**行号注（2026-08-09，去重）**：源文档删 5 处重复粘贴段（L270/271、459-471、820-832、956-961），1200→1173，`src:N` 前移 ≈27 行——**按内容核对不按行号** (任务体 Evidence)。
+
+**立此文件的原因**(2026-08-09):执行路径与理由档案混在同一份千行文档里,一次重读无法当 checklist 执行 ⇒ 实际被执行的是注意力当轮选中的部分。两次实证:outer 的「强制」步骤在 1095 行第 687 行、静默停摆 8.5 小时;nyf-semantic-judge 工作流(49c0be86)用完即弃——4 次 done-flip 真产出却因执行核无「调用」步骤而丢。
 
 **当前状态:并行对照期。锚仍指向源文档,本文件不接锚/cron/skill;两份并行跑,差异记进 tick-log,零遗漏后 inner/outer 决定改锚。**
 
@@ -36,7 +35,7 @@
 | A16 | 派发前每任务 `fast-mode-telemetry.ts --task-start --taskId <id>` | **强制不可跳过**,记下 runId;inner **只写 `--task-start`** (src:599,604,608) |
 | A17 | **必跑** `sync-lag-check.sh --push --branch "$FORK_BASELINE" --root …` | 兜底触发源,不依赖任何完成事件;push 失败(非快进=真分歧)只报告、下 tick 重试,**绝不 force** (src:939,948) |
 | A18 | **账本·声称机制的真实调用**(AC29(a),每 tick):`meta-cc query_session_content role=tool tool_name=ready-pool-check` → `last(timestamp)` | `--apply` 心跳是「工具造好后一次没被调用过」高发项;>3 个 tick 周期无真实调用 ⇒ 写明「已停用/已替代/是缺陷」三选一 (src:647,685) |
-| A19 | **账本·slot-refill**(AC29(a)):`meta-cc query_session_content role=tool tool_name=slot-refill` → `last(timestamp)` | >3 个 tick 周期未调用 ⇒ 三选一写明;slot-refill 与 ready-pool 同族「心跳无机械保证」 (src:297,747) |
+| A19 | **账本·slot-refill**(AC29(a)):`meta-cc query_session_content role=tool tool_name=slot-refill` → `last(timestamp)` | >3 个 tick 周期未调用 ⇒ 三选一写明;slot-refill 与 ready-pool 同族「心跳缺机械产物」 (src:297,747) |
 | A20 | **账本·sync-lag-check --push**(AC29(a)):`meta-cc query_session_content role=tool tool_name=sync-lag-check` → `last(timestamp)` | push 兜底是「完成事件缺失时的唯一触发源」——>3 个 tick 周期未调用 ⇒ 三选一 (src:939) |
 | A21 | **账本·--task-start 计量**(AC29(a)):`meta-cc query_session_content role=tool tool_name=fast-mode-telemetry` → `last(timestamp)` 且核对 `--task-start` 分支 | 源文档自记「工具造好后一次没被调用过」——每 tick 至少一次真实 `--task-start`;缺失 ⇒ 三选一 (src:599,604) |
 | A22 | **账本·monitor-mount-check 两判据**(AC29(a)):`meta-cc query_session_content role=tool tool_name=monitor-mount-check` → `last(timestamp)` | 判据 `mounted` + `targetOk` 缺一不可;本层停摆有没有人发现的全靠它——>3 个 tick 周期未调用 ⇒ 三选一 (src:370,373) |
@@ -46,7 +45,8 @@
 
 - **B1 写回队列文件**(步骤 5):已完成 / 在飞(含 worktree 路径与派发时刻)/ 待执行 / 计量表 / 本 tick 做了什么。**每个 tick 结束必须写回——它是 compact 后唯一可信的状态,不要靠记忆** (src:243,952)。
 - **B2 tick 必报**(缺一不可):合并了什么、派发了什么;在飞任务及时长(**按三种含义分别标注**:遥测括号在飞 / 真实在飞 `realInFlight` / subagent 在飞 + 非任务 subagent);槽位五字段;停止条件是否触发、哪条;计量表行数与均值;`tasksPerHour`(含 window*);阻塞信号状态(`reason`+`question`+累计死时间/单次最长);Monitor 两判据;**执行模式两数**(`inner-exec-mode-report.ts --json` 的 `main_thread_edits` / `agent_dispatches`——常规轮次 `agent_dispatches ≥ 1` 或非红窗时 `main_thread_edits` 不大幅 > `agent_dispatches`,违反则说明白名单归属)。**不要只说「继续中」** (src:1181,1210)。
-- **B3 重新排程** `ScheduleWakeup`,间隔 **1200–1800 秒**;tick 是兜底心跳,**不是派发节奏** (src:954-961)。
+- **B3 重新排程** `ScheduleWakeup`,间隔 **1200–1800 秒**;tick 是兜底心跳,**不是派发节奏** (src:954-961)。**每次重排写心跳产物** `.quay/inner-wakeup-heartbeat.json`(ts/delaySeconds/reason;与 suite-chain-heartbeat.json 同构,A2 先例)——`gap-inner-wakeup-heartbeat-invisible`:兜底心跳只活在 transcript,断了 15.3h 不可见直到 meta-cc 查时间戳;按 C17 给「上次重排时刻」造机械可查产物。写命令(重排后立即跑):
+  `python3 -c "import json,time;d={'ts':int(time.time()),'delaySeconds':<N>,'reason':'<tick heartbeat>'};open('.quay/inner-wakeup-heartbeat.json','w').write(json.dumps(d))"`
 - **B4 阻塞信号落盘**:judgment 条件(review-refuted 等)在**停下的那一刻**调 `inner-blocked-signal.ts --assert-blocked`,**恢复的那一刻**调 `--clear`;机械条件(合并冲突/超 90 分钟/ruling-required)由 A7 自动落盘,不要手写 (src:991,996,1002,1009)。
 - **B5 建任务时**:必须有 `## Proposal`(问题+证据+选定机制)、可机械验证的 `## Acceptance Criteria`、`## Touches`,缺一不算建成;fast-mode 执行型任务另写 `## Contract` 六键(measure/band/invariant/invoke/control/resume),**一行一个键、不可折行**,`n/a: <理由>` 合法、留白不合法;`## Dispatch review` 记 reviewer/at/changed (src:1036,1039,1053,1116)。
 
