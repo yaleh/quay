@@ -1,5 +1,4 @@
 # manager tick — 执行核
-
 **这份文件是执行路径,不是理由档案。** 理由、实测、代价全部在
 `orchestration/manager-loop-tick.md`(1138 行)里,本文件只给动作和判据,每条最多一行指路。
 

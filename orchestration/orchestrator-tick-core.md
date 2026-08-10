@@ -2,12 +2,9 @@
 
 **这份文件是执行路径,不是理由档案。** 理由、实测、代价全部在 `orchestration/orchestrator-loop-tick.md`(1095 行)里,
 本文件只给动作和判据;每条尾部的 `(src:N)` 是该条在源文档里的行号——**用它机械核对有没有漏抽**。
-
 **立此文件的原因**(2026-08-09):源文档 `### 1b 异步收尾例程(强制)`写着「每 tick 执行」却位于第 687 行,**静默停摆 8.5 小时无人发现**(`git log | grep 'outer: close'` 从每 ~20 分钟一次变为零),同期 not-yet-flipped 从 61% 涨到 82%。
 执行路径与理由档案混在一份 1095 行文档里,一次重读无法当 checklist 执行。
-
 **当前状态:并行对照期。锚(cron / skill / 冷启动)仍指向 `orchestrator-loop-tick.md`。** 每轮两份都跑,差异记进 tick-log;确认零遗漏后,**由 outer 自己决定**是否改锚。**冷启动(新会话 / `/clear` 后)不在本核内**——照源文档 7 步做(src:39-228)。
-
 ## A. 每轮必跑的读数(顺序无关,但一条都不能缺值)
 
 | # | 动作 | 判据 / 陷阱 |
@@ -47,7 +44,6 @@
 - **B12 自身停止条件自查**:连续 3 个 tick 没有推进任何任务状态 ⇒ 停 loop、叫人、附三次 tick 各看到什么 (src:1029)
 - **B13 tick-log 追加一行**:时刻(`date -u '+%H:%MZ'`)、动作类型、做了什么、内层状态快照。**写完验证读磁盘文件(`tail -3`),不读 git**;累计分布**从行数重算**不手工加减;**tick-log 已 untrack+gitignore,「提交 tick-log」这一步作废**。**no-action 是需举证的判词,不是零成本标签(manager 2026-08-09 已核实:14:08-15:08 5 次 no-action 全不合法):tick-log 行写 `no-action` 必须同时携带五条不等式读数且全为假——①in_flight<cap 且 recommended 非空?②pool<floor?③nyf>0 且 work 落地?④integration 领先 develop 且 suite 绿?⑤suite red?——任何一条为真则 no-action 不合法,该行必须有对应动作或硬理由**。**①/④ 冲突仲裁(gap-b3-arbitration-inflight-vs-backlog,2026-08-10):④ 是 ① 的下游约束——④ 被红阻塞(⑤ red)且 integration 积压>50 时,① 的 cap 收窄到 2(够修红即可)而非满 cap=5,否则填满 cap 只加 WIP 不加吞吐(169 排队红门后,新做完的变 174)。cap 一律读 slot-refill 输出 `effective_cap`(仲裁后),窄化与否看 `arbitration.cap_narrowed`;绿窗 cap 恢复满,无积压不影响** (src:1045, 1051, 1057)
 - **B14 每个 tick 必报**(缺任一条则分层是否有效无法判定):动作类型 / 独立核实了哪一项及结果 / 内层在飞任务数与各自时长 / 遥测任务数·均耗时·`tasksPerHour` / 本轮收尾几条 + suite `state` + `durationMs` / 套件触发者是否挂上 + 最近 `SUITE-*` 事件与时刻 / 累计动作类型分布 / Monitor 两判据 / 本轮是否转发重锚 + 空闲判据 / `inner_self_report_vocab` 与收敛状态 (src:1063, 850, 858, 776)
-
 ## C. 硬约束(每条都已付过代价,理由见档案)
 
 > 每条硬约束带 `失效前提:` 字段（① 熔融-结晶张力）——失效有可 grep 的可测前提；写不出可测形式的明标「无可测前提，靠周期复核」。缺字段 = 入口闸拒绝（照 capability-catalog 已有做法）。
