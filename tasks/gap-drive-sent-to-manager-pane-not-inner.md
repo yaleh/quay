@@ -41,11 +41,35 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 pane 结构核实（0 claude/1 inner/2 outer + pid）+ 错投计数（30 次调用/6 次 send-keys/26 次错读 transcript）+ 后果（本任务 Proposal 已含）
-- [ ] AC2: **窗口名纪律**——外层驱动/观测统一用 `quay-0:inner`，数字索引作废（脚本/文档）
-- [ ] AC3: **前置校验**——每次 capture-pane/send-keys 前 `display-message` 确认 window_name==inner，非 inner 即中止（fail-closed）
-- [ ] AC4: **delivered 实证**——confirmed delivered 只认 inner 自己的信号（worktree/commit/pane 回显+窗口名核实），不用 send-keys 退出码或 transcript 推断
-- [ ] AC5: **既有不回归**——`--for-task` scoped 门绿
+- [x] AC1: **复现固化**——任务体记录 pane 结构核实（0 claude/1 inner/2 outer + pid）+ 错投计数（30 次调用/6 次 send-keys/26 次错读 transcript）+ 后果（本任务 Proposal 已含；实证 2026-08-10 复核：`tmux list-windows -t quay-0` → `0 claude 2983389 / 1 inner 2989409 / 2 outer 2989418`，与 Proposal 记录一致）
+- [x] AC2: **窗口名纪律**——外层驱动/观测统一用 `quay-0:inner`，数字索引作废（`drive-target-check.sh` 结构性拒绝 `0`/`0.0`/`1.0`；send-keys-reliable/supervisor-deliver 默认期望窗口名 `inner`；orchestrator-tick-core.md C16 + A4 固化）
+- [x] AC3: **前置校验**——每次 capture-pane/send-keys 前 `display-message` 确认 window_name==inner，非 inner 即中止（fail-closed）：`drive-target-check.sh` 已接进 send-keys-reliable.sh step 0 与 supervisor-deliver.sh fresh 路径，数字索引在 tmux 调用前即被拒；测试证明「非 inner 窗口 → exit 1 且 transcript 无任何发送」）
+- [x] AC4: **delivered 实证**——confirmed delivered 只认窗口名校验后的 inner 自身 committed 信号（transcript 内容匹配真实 user 消息 / worktree 出现 / commit），不因 send-keys 退出码 0、pane 回显、或「某个 transcript 在增长」（manager 的 b8dc91a6 正是错读对象）判送达——C16 纪律③固化，前置校验保证 transcript 属于被核实的 inner）
+- [x] AC5: **既有不回归**——`--for-task` scoped 门绿（79 tests / 0 fail / 0 cancelled / exit 0）
+
+## Implementation evidence（inner 2026-08-10）
+
+**前置校验 gate（`drive-target-check.sh`，接进 send-keys-reliable step 0 + supervisor-deliver fresh 路径）——真实 quay-0 会话实跑：**
+
+```
+$ tmux display-message -p -t quay-0:inner "#{window_name}"        # Contract invoke
+inner                                                                # rc=0
+$ bash plugin/scripts/drive-target-check.sh quay-0:inner
+drive-target-check: OK——目标 'quay-0:inner' 窗口名 'inner' == 期望 'inner'      # rc=0
+$ bash plugin/scripts/drive-target-check.sh quay-0:0.0             # 数字索引（事故原形）
+drive-target-check: FAIL——目标 'quay-0:0.0' 使用数字索引……索引作废             # rc=1
+$ bash plugin/scripts/drive-target-check.sh quay-0:claude          # 错投窗口（claude=manager）
+drive-target-check: FAIL——目标 'quay-0:claude' 的窗口名是 'claude'，期望 'inner' # rc=1
+```
+
+**三条纪律接线：**
+- ① 窗口名纪律：`drive-target-check.sh` 对 `^[0-9]+(\.[0-9]+)?$` 的窗口部分结构性拒绝（不依赖 tmux），`quay-0:0`/`quay-0:0.0`/`1.0` 一律 exit 1；`os-anchor-watchdog.sh` 驱动 outer 窗口时显式 `DRIVE_EXPECT_WINDOW_NAME="$outer"`。
+- ② 前置校验：`send-keys-reliable.sh` step 0 与 `supervisor-deliver.sh` fresh 路径在**任何 send-keys/capture-pane 之前**跑 gate；还补了 `list-windows` 真实窗口名校验——tmux `display-message` 对不存在的窗口名会静默落到活动窗口（typo `innr` 若活动窗口恰是 inner 会误过），成员校验封死该洞。
+- ③ delivered 实证：`transcript-delivery-check.ts` 仍是唯一送达判定（窗口名校验后的 inner 自身 committed 信号）；C16 纪律③ 明确「不因 send-keys 退出码 0 / pane 回显 / transcript 在增长」判送达。
+
+**scoped 门（AC5）**：`./scripts/test.sh --for-task gap-drive-sent-to-manager-pane-not-inner` → `ℹ tests 79 / pass 79 / fail 0 / cancelled 0 / exit 0`。新增测试：`drive-target-check.test.mjs`（12 用例）、send-keys-reliable.test.mjs 新增 2 条 fail-closed 用例（非 inner 中止不发送 / 数字索引拒绝）。
+
+**capability-catalog 登记**：`drive-target-check.sh` 登记进唯一清单（declaration/cadence/invalidation/last-reaffirmed/matching/consumer-facing 六处），AC1c gate 通过。
 
 ## Definition of Done
 
@@ -56,9 +80,20 @@ extra: {}
 
 ## Touches
 
-- plugin/scripts/（外层驱动/观测脚本：窗口名校验 + delivered 判定改 inner 信号）
-- orchestration/orchestrator-tick-core.md（三条纪律固化：窗口名纪律 + 前置校验 + delivered 实证）
+- plugin/scripts/drive-target-check.sh（新增：fail-closed 前置校验 gate——数字索引拒绝 + display-message 窗口名校验 + list-windows 真实窗口名校验）
+- plugin/scripts/send-keys-reliable.sh（step 0 前置校验接线：send-keys 前跑 gate，非 inner 即中止）
+- plugin/scripts/supervisor-deliver.sh（fresh 路径前置校验接线）
+- plugin/scripts/os-anchor-watchdog.sh（DRIVE_EXPECT_WINDOW_NAME=outer 覆盖——watchdog 驱动 outer 窗口）
+- plugin/scripts/capability-catalog.sh（新机制登记进唯一清单——AC1c gate：未声明问题的脚本进 artifact 会 exit 1）
+- orchestration/orchestrator-tick-core.md（三条纪律固化 C16 + A4 观察目标 quay-0:inner）
 - tasks/gap-drive-sent-to-manager-pane-not-inner.md（自身：勾 AC + 贴证据）
+
+## Test-Files
+
+- plugin/test/drive-target-check.test.mjs（新增：12 用例——数字索引拒绝/窗口名匹配/typo 真实窗口名校验/真实-TUI e2e）
+- plugin/test/send-keys-reliable.test.mjs（既有 e2e 适配 + 新增 2 条 fail-closed 用例：非 inner 中止不发送/数字索引拒绝）
+- plugin/test/supervisor-deliver.test.mjs（既有 e2e 适配 DRIVE_EXPECT_WINDOW_NAME）
+- plugin/test/supervisor-bus.test.mjs（既有 e2e 适配 DRIVE_EXPECT_WINDOW_NAME）
 
 ## Contract
 

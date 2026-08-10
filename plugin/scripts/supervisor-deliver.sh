@@ -136,9 +136,18 @@ fi
 # ── fresh-session path (transcript absent, or re-spawn via --root) ──────────────────────────────
 echo "supervisor-deliver: fresh-session 直接投递 + 有界等待（$([ -n "$TRANSCRIPT" ] && echo "等待 $TRANSCRIPT" || echo "--root 自动发现新 transcript")）" >&2
 
-# The target must exist (positive control: a nonexistent target → fail loud, never silent 0).
-if ! tmux list-panes -t "$TARGET" -F '#{pane_pid}' >/dev/null 2>&1; then
-  echo "supervisor-deliver: 目标 $TARGET 不存在——无法送达" >&2
+# Pre-flight target verification (gap-drive-sent-to-manager-pane-not-inner — the three
+# disciplines): the target must NAME a window (`quay-0:inner`), never a numeric index, and the
+# window name must equal the expected name (env DRIVE_EXPECT_WINDOW_NAME, default `inner`).
+# Fail-closed before any direct send-keys — a wrong target (e.g. window 0 = claude/manager) is
+# never silently driven. The delegation path (existing --transcript → send-keys-reliable.sh) runs
+# the same gate inside send-keys-reliable.sh; the fresh path runs it here.
+if [ ! -f "$SELF_DIR/drive-target-check.sh" ]; then
+  echo "supervisor-deliver: 缺少前置校验 $SELF_DIR/drive-target-check.sh——无法确认目标是 inner，fail loud" >&2
+  exit 1
+fi
+if ! DRIVE_EXPECT_WINDOW_NAME="${DRIVE_EXPECT_WINDOW_NAME:-inner}" bash "$SELF_DIR/drive-target-check.sh" "$TARGET"; then
+  echo "supervisor-deliver: 目标 $TARGET 未通过前置校验（非 inner 或数字索引）——中止，不发送" >&2
   exit 1
 fi
 
