@@ -34,6 +34,11 @@
 > **worktree 一律建在 `$WORKTREE_ROOT/<slug>`**——`worktree_root` 是 quay-init 落盘时校验过的磁盘路径
 > （tmpfs 会 fail-closed，见 gap-the-shipped-tick-doc-teaches-every-project-to-put-worktrees-in-tmpfs）；
 > `/tmp` 是 tmpfs，每个 MB 都是内存，worktree 建进去就是在重演整机 OOM。
+>
+> **切分声明（AC38，2026-08-10）**：本文件是**产品行为正本**（随 `quay-init --loop` 原样铺到目标项目
+> `docs/analysis/fast-mode-loop-tick.md`）。quay 自身网络的**本层状态**在 quay 仓库的
+> `docs/analysis/fast-mode-loop-tick.md` 副本。**产品行为进 plugin / 本层状态留本层目录**——
+> 与 manager/orchestrator 切分同判据。冷启动 skill 与 tick 核引用同一批行为文件（AC3）。
 
 **这是一份 tick 指令，不是驱动器。** `/loop` 每次触发就执行一遍下面的步骤，然后重新排程。
 

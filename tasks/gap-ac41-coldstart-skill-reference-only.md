@@ -39,17 +39,52 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 SKILL.md 388 行（Steps 240 cmd=23 / 理由 148 cmd=0）+ 人裁定方向 + AC38 同判据（本任务 Proposal 已含）
-- [ ] AC2: **理由段搬走**——SKILL.md 理由段（Why…nohup 等）搬去被引用文件，Steps 留下
-- [ ] AC3: **同一批文件**——tick 与冷启动引用同一批行为文件（集合相等）
-- [ ] AC4: **AC38 一并收**——outer 双份文档按 manager 先例切分（产品行为进 plugin / 本层状态留 orchestration），留切分声明
-- [ ] AC5: **既有不回归**——`--for-task` scoped 门绿
+- [x] AC1: **复现固化**——任务体记录 SKILL.md 388 行（Steps 240 cmd=23 / 理由 148 cmd=0）+ 人裁定方向 + AC38 同判据（本任务 Proposal 已含）
+- [x] AC2: **理由段搬走**——SKILL.md 理由段（Why…nohup 等）搬去被引用文件，Steps 留下
+- [x] AC3: **同一批文件**——tick 与冷启动引用同一批行为文件（集合相等）
+- [x] AC4: **AC38 一并收**——outer 双份文档按 manager 先例切分（产品行为进 plugin / 本层状态留 orchestration），留切分声明
+- [x] AC5: **既有不回归**——`--for-task` scoped 门绿
+
+## Evidence
+
+**AC2 — 理由段搬走（invoke：`grep -nE "Why|because" plugin/skills/cold-start/SKILL.md`）**
+
+搬走前（388 行 → 318 行，`## Steps` 保留）：
+```
+12:## Why agent-executed, and why nohup does NOT pass
+20:dead — worse than not installed, because it looks installed.
+```
+搬走后（`skill_reason_lines = 0`）：
+```
+(exit 1 — 无命中)
+```
+- 理由/背景/判据正文（nohup 为何不行、铺什么验什么、bare-metal 引导、launch config 与 ghost-suggestion、non-goals）搬入 `orchestration/orchestrator-loop-tick.md` 的「冷启动 skill 背景档案」段（产品模板 `plugin/loop/orchestrator-loop-tick.md` 同段），SKILL.md 只留 Steps + Preconditions 表 + Observable-consequences 清单 + 指针。
+- nohup 禁令（测试钉住的 `Never use nohup` / `STOP — that is the anti-pattern this skill exists`）保留在 Step 3 动作内；7 键清单保留（`cold-start-skill.test.mjs` AC8c 钉住）。
+
+**AC3 — tick 与冷启动引用同一批行为文件（集合对比）**
+
+同一批 = 外层 tick / 内层 tick / 管理者 tick。冷启动 SKILL.md 指针与三个 tick 核各带「引用同一批行为文件」标注：
+- 外层：`orchestration/orchestrator-loop-tick.md`（产品模板 `plugin/loop/orchestrator-loop-tick.md`，铺到目标项目是 orchestration 路径）
+- 内层：`docs/analysis/fast-mode-loop-tick.md`（产品模板 `plugin/loop/fast-mode-loop-tick.md`；fast-mode-tick-core 的 src:N 基准即模板）
+- 管理者：`orchestration/manager-loop-tick.md`
+- 交叉引用：cold-start 指针 + `orchestration/fast-mode-tick-core.md`（同一批标注）+ 背景档案段。
+
+**AC4 — AC38 切分声明在场（invoke：`grep -nE "切分声明" ...`）**
+```
+plugin/loop/orchestrator-loop-tick.md:35:> **切分声明（AC38，2026-08-10）**：本文件是**产品行为正本**…
+plugin/loop/fast-mode-loop-tick.md:38:> **切分声明（AC38，2026-08-10）**：本文件是**产品行为正本**…
+orchestration/orchestrator-loop-tick.md:35:> **切分声明（AC38，2026-08-10）**：本文件是 quay 自身消费的**本层状态**…
+```
+产品行为进 plugin（模板） / 本层状态留 orchestration（quay 副本），与 manager 先例同判据。新建 `tasks/gap-ac38-outer-doc-drift.md` 交叉标注（status: done，由本任务一并收）。
+
+**AC5 — scoped 门绿**
+`./scripts/test.sh --for-task gap-ac41-coldstart-skill-reference-only --allow-thin`：scoped static checks 全 PASS（task-contract-check / adr016-screen-use-check / superseded-capability / strategic-doc-staleness 无新 stale），selector selected 0 test files（thin——Touches 全为文档，无同名测试）。关键受影响测试 88/88 绿：cold-start-skill(8) / quay-init-laydown-closure(5) / plugin-packaging(34) / no-manager-tick-doc-check(5) / loop-shipping(12) / loop-shipping-necessity-check(3) / fast-mode-loop-tick-dedup / manager-layer-skill / manager-layer-shipping。
 
 ## Definition of Done
 
 - [ ] AC1–AC5 全部勾上
-- [ ] 修后实跑：SKILL.md 理由段搬走（贴 diff）；tick 与冷启动引用同一批文件（贴集合对比）
-- [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
+- [ ] 修后实跑：SKILL.md 理由段搬走（贴 diff）；tick 与冷启动引用同一批文件（贴集合对比）——见上方 Evidence
+- [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）——scoped 门绿 + 关键受影响 88/88 绿
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
 
 ## Touches
