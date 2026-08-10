@@ -1,7 +1,22 @@
 # 管理者本阶段的目标与 AC
 
-> **归档声明（2026-08-09，任务 gap-spec-goal-store-third-sibling-kind 落地）**：本文件已降级为
-> **理由档案**——阶段目标/AC 的**机制载体**现在是 goal store（`packages/quay/src/goal-store.ts`，
+> **⚠️ 载体状态更正（manager 2026-08-10 08:5xZ 实测；此前这段写的「本文件已降级为理由档案」
+> 与事实不符，且当晚已实际误导过一次——我照它理解，于是在同一轮里既用本文件的 AC 做判定、
+> 又不把本文件当真源）**：
+> **本文件仍是阶段目标/AC 的唯一活载体。** 迁移**已设计（SPEC）、已落地代码**
+> （`goal-store.ts` 488 行 + 3 测试 + gate 工厂，`f37462ec` 2026-08-09T09:26），
+> **但一步未走**：`goals/` 目录**不存在**、记录数 **0**；SPEC §5 的解冻条件「`/goal` 路由可用」
+> **未满足**（CLI 零命中、MCP 1 处）。⇒ **按 SPEC §5「落地前不迁」，AC 留在本文件是合规的，
+> 不是漂移**；三处指针（manager cron prompt / `plugin/skills/manager/SKILL.md:350` /
+> `manager-loop-tick.md:51,65`）指向本文件也是对的。
+> **真正缺的是：原任务 `gap-spec-goal-store-third-sibling-kind` 已 `status: done`（AC 14/15，
+> 差的那条是「全量套件绿」这个收口条件，与迁移无关），而【没有任何 open 任务在盯"把 AC 迁进
+> goal store"】——所以它不会自己往前走，三个载体会永久并存。** 迁移方向归人裁定。
+> **本文件的体量本身是同一个病的产物**：2225 行 / 163KB / 26 个 AC 小节，其中标「已达成」14 处、
+> **标「已废止/已退休」0 处**——什么都没被移出去过。
+>
+> **（以下为 2026-08-09 的原始归档声明，保留为历史，其「已降级」的判断按上文更正）**
+> 任务 gap-spec-goal-store-third-sibling-kind 落地：阶段目标/AC 的**机制载体**设计为 goal store（`packages/quay/src/goal-store.ts`，
 > SPEC §2/§2b：`PHASE-NNN` + `AC-NNN` 记录，schema 含 criterion/status(含 achieved)/phase/origin；
 > I1 原子阶段切换、I2 达成推导、origin 强制）。goal 记录的 `origin` 字段指回本文件的历史裁定。
 > **按 SPEC §5「落地前不迁」：AC20-35 的「活跃 AC 判据命令」节继续保留在本文件**，直到
