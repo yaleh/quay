@@ -4,8 +4,7 @@
 `orchestration/manager-loop-tick.md`(1138 行)里,本文件只给动作和判据,每条最多一行指路。
 
 **立此文件的原因** (src:1176) — 两次实证:outer 的「强制」步骤埋在 1095 行文档第 687 行、
-静默停摆 8.5 小时;outer 的 `nyf-semantic-judge` **不在文档任何一行**,跑通产出 4 个 done-flip
-(`49c0be86`)后用完即弃,全历史仅此一次(**原例「我 workflow 静默 21.5h」已更正**,见档案 §workflow-价值核查)。
+静默停摆 8.5 小时;outer 的 `nyf-semantic-judge` **不在文档任何一行**,产出 4 个 done-flip(`49c0be86`)后用完即弃(**原例「我 workflow 静默 21.5h」举错,已更正**,见档案 §workflow-价值核查)。
 
 **当前状态:并行对照期。锚仍指向 `manager-loop-tick.md`。**
 每轮两份都跑,差异记进 tick-log;确认零遗漏后才改锚,切换时 tick-log 留一行。
