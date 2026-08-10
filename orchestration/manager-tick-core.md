@@ -25,8 +25,8 @@
 | A7 | 套件末轮:读 `.quay/verification-round.jsonl`,**先按 `startedAt` 非空过滤再取末条** | ①单状态文件只答「此刻在跑什么」,不答「第 N 轮结果」(它每轮覆盖);②**该 jsonl 是异构日志,两种记录混写**:套件轮次 `{startedAt,durationMs,state,reason,…}` 与收尾轮次 `{at,suiteGreen,closed:[…]}`(实测 75/150 是后者)。**直接取末行会在末行恰为收尾记录时报 `state=None`,看起来像"空记录/记录缺陷",实则是我取错了类型**(2026-08-09 06:3xZ 亲历并误报过一次) |
 | A8 | `git status --porcelain \| wc -l` | 脏树 |
 | A9 | `meta-cc query_session_content role=tool tool_name=Workflow` → `last(timestamp)` | §2.4c;>3 个 tick 周期未调用 ⇒ 写明「已停用/已替代/是缺陷」三选一 (src:901) |
-| A10 | 我跑的 `session-liveness` 是不是旧版 | 逐行 `ps` 看进程与其脚本路径(C1);**版本落后 = 观测的是未修版**(档案 §1.4) (src:37) |
-| A11 | `Monitor` 工具任务是否还活着 | 它们不在 A10 的覆盖里;**本轮发过事件即为存活证据**(档案 §1.4e) (src:499) |
+| A10 | **仪器存活(两项合一)**:①我跑的 `session-liveness` 是不是旧版(逐行 `ps` 看进程与其脚本路径,C1) ②`Monitor` 任务是否还活着(不在①覆盖内) | 版本落后 = 观测的是未修版;**本轮发过事件即为 Monitor 存活证据**(档案 §1.4/§1.4e) (src:37,499) |
+| A16 | **机件绕过自查(2026-08-10 新增)**:数本会话里**裸 `tmux send-keys`** 的次数(未经 `supervisor-deliver.sh`/`send-keys-reliable.sh`),**非 0 即本轮违规,写进账本** | **规则不是检查**——C10 三天前就写着「不要手工拼」,我整晚每一条都手工拼,自己的核一次都没拦。近 3 天全会话实测:裸手工 **339** 次 vs 三个机件合计 294 次(deliver 28/reliable 240/verified 26)。同类待补:`inbox-reader.sh`(11 次;我的 A15 却用 `ls`)、`pane-state-classify.ts`(38 次;我的 A3/A4 却肉眼看 `capture-pane`)、`drive-contract-check.ts`(3 次) |
 | A12 | 聚合升级项 + 资源仲裁与排序 | 三项目横向;无新项也要写「无」(档案 §1.c/§1.d) (src:689) |
 | A13 | 本轮抛给人的「可自判」问题计数 | 机械计数,写进账本;判据见 C8(档案 §⑧) (src:814) |
 | A15 | **收件箱:`ls -la .quay/manager-inbox/`——判据是【列目录本身】,不得依赖未读计数器** | 实测 2026-08-09:目录里 6 封 archguard 报告(最新 08-06,三天前)全未读,而 `supervisor-bus-identity.sh inbox-summary` 报 `unread=0` ⇒ **计数器沉默失败**。我的核此前 `inbox` 命中 0 条,outer 的 A5 早有此项——**跨层不对称,方向同 C9**。未读逐条进决策;**delivered ≠ consumed**(借自 outer A5) (src:1203) |
