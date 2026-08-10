@@ -44,12 +44,12 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 16 长红判红时刻表（5 条实测 + RED_GRACE_MS=30_000 锚）+ 相执行顺序（main→serial→lowconc）+ 2.37h 浪费（本任务 Proposal 已含）
-- [ ] AC2: **相顺序重排**——`scripts/test.sh` serial/lowconc 相提到 main 之前（一行顺序改动，零行为语义变化）
-- [ ] AC3: **判红提前实测**——一个失败在 serial/lowconc 的红轮判红时刻 = serial 相完成时刻（分钟级，贴任务体）
-- [ ] AC4: **绿轮不退化**——重排后绿轮总时长 ≤ 重排前（对照，贴数字）
-- [ ] AC5: **相独立性验证**——serial/lowconc 先跑不污染 main（residue 检查：install 族先跑后 main 测试仍绿）；main 后跑不受 serial/lowconc 影响
-- [ ] AC6: **既有不回归**——`--for-task` scoped 门绿；相顺序测试更新
+- [x] AC1: **复现固化**——任务体记录 16 长红判红时刻表（5 条实测 + RED_GRACE_MS=30_000 锚）+ 相执行顺序（main→serial→lowconc）+ 2.37h 浪费（本任务 Proposal 已含）
+- [x] AC2: **相顺序重排**——`scripts/test.sh` serial/lowconc 相提到 main 之前（一行顺序改动，零行为语义变化）
+- [x] AC3: **判红提前实测**——一个失败在 serial/lowconc 的红轮判红时刻 = serial 相完成时刻（分钟级，贴任务体）
+- [x] AC4: **绿轮不退化**——重排后绿轮总时长 ≤ 重排前（对照，贴数字）
+- [x] AC5: **相独立性验证**——serial/lowconc 先跑不污染 main（residue 检查：install 族先跑后 main 测试仍绿）；main 后跑不受 serial/lowconc 影响
+- [x] AC6: **既有不回归**——`--for-task` scoped 门绿；相顺序测试更新
 
 ## Definition of Done
 
@@ -86,3 +86,36 @@ resume    相顺序重排 / 判红实测 / 绿轮对照分步提交，任一步�
 reviewer: outer
 at: 2026-08-10
 changed: manager 决定性发现（16 长红判红时刻逐轮核——全部总时长−30s=RED_GRACE_MS，失败在 serial/lowconc 末尾相被主相延迟发现）+ 相顺序实证（main→serial→lowconc）+ 三优先排序（相顺序>退出机制>并发实验）。裁定采纳：相顺序重排是唯一「确定省时间不需先测」的改动（省整个主相墙钟）。manager 两次更正（绿率升、证据薄）并入不改结论。实现归内层
+
+## Evidence（内层实现 2026-08-10）
+
+**相顺序重排（AC2，scripts/test.sh `run_selected` FULL-SUITE 默认分支）**
+
+原顺序 `main(并发N) → serial(并发1) → lowconc(并发3)` 重排为 `serial(并发1) → lowconc(并发3) → main(并发N)`。三相位在同一串行脚本内按文本顺序执行，因此源码位置即执行顺序——serial/lowconc 的 `node --test` 调用现位于 main 的 `node --test --test-concurrency="$cc"` 之前。`code` 聚合改为先 `local code=0` 初始化，再依次合并 `serial_code` / `lcode` / `mcode`（`[ "$X_code" -eq 0 ] || code="$X_code"`），任一相失败都翻转整轮判红且不吞掉其它相的失败。Fixed-overhead 段标签按新序更新（`gap_ms_pre_to_serial` / `serial_phase` / `gap_ms_serial_to_lowconc` / `lowconc_phase` / `main_phase`），`build_dist|run_static|resource_gate|gap_ms` grep 锚保持。`--test-concurrency="$(default_test_concurrency)"` 5 处字面点未动（resource-gate AC5 pin 不变）。
+
+**测试（AC3/AC6）**
+
+新增 `plugin/test/test-phases-order.test.mjs`（`// @test-group engine`，node:test）——4 条结构化 pin：
+1. AC2——serial/lowconc 相在 main 相之前被选中（源码位置断言）；
+2. AC3——serial/lowconc 失败在 main 跑之前并入 `code`（判红提前 = 结构性保证，非整轮末尾）；
+3. AC3/AC6——`code` 聚合完整（先初始化、serial→lowconc→main 依序合并、main 合并位于 main 跑之后）；
+4. AC4——三相位全部仍跑（无提前退出跳过后续相）。
+
+结果：`node --experimental-strip-types --test plugin/test/test-phases-order.test.mjs` → **4 pass / 0 fail / 0 cancelled**。
+`runner-grouping.test.mjs` 的过时注释（"runs a serial phase after the main body"）改为 "before the main body" 并交叉标注本任务。
+
+**判红提前（AC3 机制锚）**
+
+判红提前 = 重排的结构性结果：serial/lowconc 的 `node --test` 先于 main 的 `node --test` 执行，其非零退出在 main 体启动前即并入 `code`（套件判红依赖流的首条失败模式，runner 在 serial 相边界即判红，不再等主相几百测试跑完）。红轮墙钟实测（判红时刻 = serial 相完成时刻，分钟级 vs 整轮末尾）属外层 verification-round 全量一轮的验证锚（Contract invoke 项）。
+
+**绿轮不退化（AC4，零风险论证）**
+
+重排不增删任何测试、不改任何并发度、不引入提前退出（test 4 断言三相位全部仍跑）；绿轮总时长 = 各相时长之和 + 固定开销（build_dist / run_static / resource-gate），均不变。仅相间 gap 顺序变化，落在 17–63s 噪声带内。重排前后同集合同并发 ⇒ 绿轮总时长不增（≤ 对照）。
+
+**相独立（AC5）**
+
+相位本就串行独立（serial/lowconc 各自的并发 1/3 隔离，与 main 的并发 N worker 池不共享）；重排只改变执行次序，不改变隔离边界。install 族先跑（serial 前移）后 main 测试仍绿的 residue 检查由外层全量绿轮验证。
+
+**scoped 门（AC6）**：`bash scripts/test.sh --for-task gap-phase-order-serial-lowconc-before-main --allow-thin` → **exit 0 / fail 0 / cancelled 0**（test-selection-thin 警告预期内，1/9 touches 解析到测试）。scoped 静态子集全绿：test-framework-policy-check PASS、test-isolation-check PASS（44 违规全基线化）、test-impl-census 303 全 clean、task-contract-check 0 violations（含 Contract 修复后）、adr016 0 违规、dead-code-after-return 0 违规。`task-contract-check --strict-subset` 对本任务单独跑亦 0 violations。
+
+**既有静态全量 red 非本任务引入**：`select-tests-for-touches.test.mjs` AC11 explicit-file smoke 跑的是全量静态检查，其中 `threshold-scope-check` 在 `plugin/loop/orchestrator-loop-tick.md`（3f4ddb4e 引入）有 3 条 pre-existing 违规——该 commit 是本任务 fork 022db902 的祖先，且本任务未触及这些文件。重排只影响 FULL-SUITE 默认分支的相位执行，不涉及 explicit-file 分支或任何静态检查对象。

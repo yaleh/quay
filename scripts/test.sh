@@ -893,77 +893,91 @@ run_selected() {
     # run's leak. Snapshot failure is non-fatal (the absolute suite-tail check still runs after).
     bash "${repo_root}/plugin/scripts/tmux-leak-scan.sh" --snapshot "${repo_root}" || true
     set +e
-    # has_explicit_concurrency: an explicit --test-concurrency flag is the SINGLE concurrency
-    # source — skip the default prepend (gap-full-suite-runner-concurrency-default-and-gate AC2).
-    if has_explicit_concurrency "$@"; then
-      node --test $(suite_reporter_flags) "$@" "${files[@]}"
-    else
-      node --test --test-concurrency="$cc" $(suite_reporter_flags) "$@" "${files[@]}"
-    fi
-    local code=$?
-    [ "$oh_full" -eq 1 ] && oh_t5=$(_oh_mark)
+    # Phase order (gap-phase-order-serial-lowconc-before-main): serial and lowconc phases run
+    # BEFORE the main concurrency-N body so a failure in a serial/lowconc file is judged red at
+    # the phase boundary (minutes) instead of AFTER the entire main phase's cost has been paid —
+    # the 16 long-reds were all judged red exactly total−30s=RED_GRACE_MS because their failures
+    # lived in the LAST phases (serial/lowconc) and paid the whole main phase first (2.37h pure
+    # waste). Phases are independent and serially sequenced (no shared state between phase runs),
+    # so the reorder changes wall-clock latency only, never correctness.
+    local code=0
     # SERIAL GROUP phase (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests):
     # the A/B-class KNOWN-LOAD-SENSITIVE family (nested-suite-spawn + real-wall-clock-wait) PLUS
     # the REAL-INSTALL install/quay-init family is routed OUT of the concurrency-N main body into
-    # a `serial` group that runs AFTER it, ALONE, at concurrency 1 — the mechanical isolation that
+    # a `serial` group that runs BEFORE it, ALONE, at concurrency 1 — the mechanical isolation that
     # keeps real-wall-clock-wait, nested-suite-spawn, and real-install tests from being starved by
     # the main body's worker pool. The install/quay-init family was admitted to serial at round 162
     # after rotating flakes across groups under full-suite load (rounds 160/161/162 — a different
     # file each round; gap-install-family-tests-rotate-flakes-under-full-suite). The concurrency
     # is a HARD-CODED 1 — serial isolation is the mechanism's
     # invariant, never a user-tunable knob (the --group serial path in the non-default branch
-    # strips explicit concurrency flags for the same reason). Its TAP summary lands LAST on the
-    # stream, so the outer runner's pass/fail/cancelled tallies reflect BOTH phases (the serial
-    # summary overwrites the main body's only when both are green — a serial failure flips the
-    # whole run red via its own fail/cancelled). The phase runs EVEN IF the main body failed
-    # (report all failures; the serial exit code merges into `code`) — a red main must not leave
-    # the serial 3 files' verdict unknown (gap-post-merge-verification-failure-batch AC3:
-    # round 95 skipped serial when main was red, so serial failures were invisible).
+    # strips explicit concurrency flags for the same reason). Its TAP summary lands FIRST on the
+    # stream (before the main body), so a serial failure flips the run red BEFORE the main phase's
+    # cost is paid (gap-phase-order-serial-lowconc-before-main) — the phase runs EVEN IF a later
+    # phase fails (report all failures; the serial exit code merges into `code`), so a red main
+    # must not leave the serial files' verdict unknown (gap-post-merge-verification-failure-batch
+    # AC3: round 95 skipped serial when main was red, so serial failures were invisible).
     local serial_files=() sf serial_code
     while IFS= read -r sf; do serial_files+=("$sf"); done < <(select_files "serial")
-    [ "$oh_full" -eq 1 ] && oh_t5b=$(_oh_mark)
+    [ "$oh_full" -eq 1 ] && oh_t5=$(_oh_mark)
     if [ "${#serial_files[@]}" -gt 0 ]; then
       echo "selected ${#serial_files[@]} files (groups=serial)"
       node --test --test-concurrency=1 $(suite_reporter_flags) "${serial_files[@]}"
       serial_code=$?
       [ "$serial_code" -eq 0 ] || code="$serial_code"
     fi
-    [ "$oh_full" -eq 1 ] && oh_t6=$(_oh_mark)
+    [ "$oh_full" -eq 1 ] && oh_t5b=$(_oh_mark)
     # LOWCONC phase (gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive, AC1/AC4): the
     # hermetic-but-load-sensitive files (B-class session-observation family, each private socket /
     # wall-clock wait — the install/quay-init family LEFT this group for serial in round 162,
     # gap-install-family-tests-rotate-flakes-under-full-suite) run in their OWN phase at
     # `--test-concurrency=3` — not the derived default and not 8 — so wait-type tests get timely
-    # scheduling. The phase runs even if the body failed (report all failures); its exit code merges
-    # into `code`. The hard-coded 3 is deliberate (AC4) and does NOT add a derived-concurrency
-    # literal site (resource-gate AC5 pins exactly 5 `--test-concurrency="$(default_test_concurrency)"`
-    # sites).
+    # scheduling. The phase runs even if another phase failed (report all failures); its exit code
+    # merges into `code`. Runs BEFORE the main body so a lowconc failure is judged red at the phase
+    # boundary (gap-phase-order-serial-lowconc-before-main). The hard-coded 3 is deliberate (AC4)
+    # and does NOT add a derived-concurrency literal site (resource-gate AC5 pins exactly 5
+    # `--test-concurrency="$(default_test_concurrency)"` sites).
     local lowconc_files=() lf
     while IFS= read -r lf; do lowconc_files+=("$lf"); done < <(select_files "lowconc")
-    [ "$oh_full" -eq 1 ] && oh_t6b=$(_oh_mark)
+    [ "$oh_full" -eq 1 ] && oh_t6=$(_oh_mark)
     if [ "${#lowconc_files[@]}" -gt 0 ]; then
       echo "selected ${#lowconc_files[@]} files (groups=lowconc)"
       node --test --test-concurrency=3 $(suite_reporter_flags) "${lowconc_files[@]}"
       local lcode=$?
       [ "$lcode" -eq 0 ] || code="$lcode"
     fi
+    [ "$oh_full" -eq 1 ] && oh_t6b=$(_oh_mark)
+    # MAIN phase (the concurrency-N default body) — runs LAST, after serial/lowconc
+    # (gap-phase-order-serial-lowconc-before-main): a serial/lowconc failure is now judged red at
+    # the phase boundary, never after the entire main phase's cost has been paid.
+    # has_explicit_concurrency: an explicit --test-concurrency flag is the SINGLE concurrency
+    # source — skip the default prepend (gap-full-suite-runner-concurrency-default-and-gate AC2).
+    local mcode=0
+    if has_explicit_concurrency "$@"; then
+      node --test $(suite_reporter_flags) "$@" "${files[@]}"
+      mcode=$?
+    else
+      node --test --test-concurrency="$cc" $(suite_reporter_flags) "$@" "${files[@]}"
+      mcode=$?
+    fi
+    [ "$mcode" -eq 0 ] || code="$mcode"
     [ "$oh_full" -eq 1 ] && oh_t7=$(_oh_mark)
     # Fixed-overhead breakdown (gap-suite-fixed-overhead-decomposition AC2): emit the deterministic
     # serial-segment durations. Each is a DIRECT measurement of one sequential step — decidable,
     # unlike wall-clock diffs inside the 17–63s noise band. The "gap" segments are the inter-phase
-    # serial transitions (select/echo between phases, oh_t5→oh_t5b and oh_t6→oh_t6b); the phase
-    # segments (main/serial/lowconc) are the node --test runs themselves. Label tokens deliberately
-    # match the task's measure grep (`build_dist|run_static|resource_gate|gap_ms`).
+    # serial transitions (select/echo between phases: oh_t4→oh_t5 pre→serial, oh_t5b→oh_t6
+    # serial→lowconc); the phase segments (serial/lowconc/main) are the node --test runs themselves.
+    # Label tokens deliberately match the task's measure grep (`build_dist|run_static|resource_gate|gap_ms`).
     if [ "$oh_full" -eq 1 ]; then
       _oh_emit "lock_overhead"      "$oh_t0" "$oh_t1"
       _oh_emit "resource_gate"      "$oh_t1" "$oh_t2"
       _oh_emit "build_dist"         "$oh_t2" "$oh_t3"
       _oh_emit "run_static_checks"  "$oh_t3" "$oh_t4"
-      _oh_emit "main_phase"         "$oh_t4" "$oh_t5"
-      _oh_emit "gap_ms_main_to_serial"  "$oh_t5" "$oh_t5b"
-      _oh_emit "serial_phase"       "$oh_t5b" "$oh_t6"
-      _oh_emit "gap_ms_serial_to_lowconc" "$oh_t6" "$oh_t6b"
-      _oh_emit "lowconc_phase"      "$oh_t6b" "$oh_t7"
+      _oh_emit "gap_ms_pre_to_serial"    "$oh_t4" "$oh_t5"
+      _oh_emit "serial_phase"       "$oh_t5" "$oh_t5b"
+      _oh_emit "gap_ms_serial_to_lowconc" "$oh_t5b" "$oh_t6"
+      _oh_emit "lowconc_phase"      "$oh_t6" "$oh_t6b"
+      _oh_emit "main_phase"         "$oh_t6b" "$oh_t7"
     fi
     set -e
     # DISABLED (human ruling 17:1x, disable-not-delete): the suite-after clean-tree assertion NO
