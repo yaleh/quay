@@ -3,7 +3,7 @@ id: gap-slot-refill-repeats-done-eligible-recommendations
 title: slot-refill 反复重派「已落地待翻 done」的任务——not-yet-flipped 被 ready-pool-check
   算出却没接进推荐路径（:243 只遍历 pool.ready + 3 项 step-4 检查，grep not-yet-flipped|excluded =
   0 命中）；今日 25 条重派/复验提交自述，每条都是 subagent 复核已落地工作
-status: needs-human
+status: ready
 labels:
   - gap
   - defect
@@ -39,10 +39,34 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 inner 18:38 心跳 + manager 实现层核对（:243 无 not-yet-flipped/excluded 引用 + grep 0 命中 + 25 条重派提交自述）（本任务 Proposal 已含）
-- [ ] AC2: **第 4 项 step-4 检查**——slot-refill 候选循环跳过 `pool.excluded` 中 reason 含 `not-yet-flipped` 的 id
-- [ ] AC3: **既有不回归**——`--for-task` scoped 门绿；slot-refill 既有 3 项 step-4 检查不破坏
-- [ ] AC4: **不改变 AC5 严格性**——not-yet-flipped 任务仍等绿轮翻 done，只是不再重复派发
+- [x] AC1: **复现固化**——任务体记录 inner 18:38 心跳 + manager 实现层核对（:243 无 not-yet-flipped/excluded 引用 + grep 0 命中 + 25 条重派提交自述）（本任务 Proposal 已含）
+- [x] AC2: **第 4 项 step-4 检查**——slot-refill 候选循环跳过 `pool.excluded` 中 reason 含 `not-yet-flipped` 的 id
+- [x] AC3: **既有不回归**——`--for-task` scoped 门绿；slot-refill 既有 3 项 step-4 检查不破坏
+- [x] AC4: **不改变 AC5 严格性**——not-yet-flipped 任务仍等绿轮翻 done，只是不再重复派发
+
+## Evidence（inner 2026-08-10 实现）
+
+**修法**（slot-refill.ts 加第 4 项 step-4 检查 `isNotYetFlippedSkip`）：候选循环跳过「已 fan-in 待翻 done」的 id，跳过集 = 并集：
+- (a) `pool.excluded` 中 reason 含 `not-yet-flipped` 的 id（AC2 字面接线——ready-pool-check 已算出的信号；与 pool.ready 不相交，属防御 + 明文接线）。
+- (b) **fan-in 已合并**（`hasFanInMerge`——`git log --all --merges --grep <taskId>`，读 `--all` 合并史，故能看见两线模型 integration 线的 fan-in，而 master-only 的 `taskWorkLanded` 看不见）+ **AC 完成度闸**（>50% 或全勾——与 ready-pool-check `notYetFlipped` 同一闸，故 AC≤50% 的 fan-in stuck-work 仍可派发，gap-ready-pool-worklanded-traps-stuck-work 不回归）。
+- `hasFanInMerge` 是 inner-blocked-signal.`hasMergeRecord`（只 grep `task/<id>`）的加宽兄弟——裸 id 同时覆盖规范的 `fan-in: task/<id>` 格式与 adhoc `merge: <id>` 格式（实测 gap-runner-grouping 只走后者）。
+
+**实跑前/后对比**（`node --experimental-strip-types plugin/scripts/slot-refill.ts --root /home/yale/work/quay --json`，同一次 git 状态）：
+
+- **修前 recommended（5 条，3 条已 fan-in）**：
+```json
+["gap-slot-refill-repeats-done-eligible-recommendations","gap-inventory-drift-inner-exec-mode-report-missing-snapshot-regen","gap-loop-shipping-threshold-scope-check-old-path-regression","gap-measure-trend-large-test-load-noise","gap-merge-introduced-referenced-not-landed-manager-tick-log"]
+```
+- **修后 recommended（3 条，0 条已 fan-in）**：
+```json
+["gap-slot-refill-repeats-done-eligible-recommendations","gap-inventory-drift-inner-exec-mode-report-missing-snapshot-regen","gap-pool-quality-semantic-gate"]
+```
+- 被剔除的 3 条全部是「已 fan-in 待翻 done」：gap-loop-shipping-threshold-scope-check-old-path-regression（merge 记录 YES，AC 4/5）、gap-measure-trend-large-test-load-noise（merge YES，AC 4/5）、gap-merge-introduced-referenced-not-landed-manager-tick-log（merge YES，AC 3/4）——各带一条 `fan-in: task/<id>` merge 提交，但 master-only 信号看不见（两线模型 fan-in 在 integration，master 落后 2061 提交），故此前每轮被重派去复核已落地工作。
+- 修后剩 3 条均无 merge 记录（真可派发）：自身任务 + gap-inventory-drift + gap-pool-quality-semantic-gate。`should_refill=true / slots_free=5 / cap=5`。
+
+**测试**：`./scripts/test.sh --for-task gap-slot-refill-repeats-done-eligible-recommendations` → **exit 0，50 pass / 0 fail / 0 cancelled，violations 0**。新增 5 用例：fan-in 合并 >50% AC 不推荐 + 未 fan-in 仍推荐；adhoc `merge: <id>` 格式也拦；AC≤50% fan-in 保持可派发（stuck-work 不困）；pool.excluded arm 不推荐；`isNotYetFlippedSkip`/`hasFanInMerge` 纯单测。另跑 slot-refill-heartbeat / supervisor-preempt / concurrent-batch-scheduler / ready-pool-check 全绿（22+63 等）。
+
+**Contract**：measure `slot_refill_skips_nyf` = `grep -cE "not-yet-flipped|excluded" plugin/scripts/slot-refill.ts` = **11 ≥ 1**。invariant `nyf_task_not_recommended`（实跑 3 条 fan-in 全部剔除）与 `unfanned_ready_still_recommended`（未 fan-in 仍推荐）均成立。
 
 ## Definition of Done
 

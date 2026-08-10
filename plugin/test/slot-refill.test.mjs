@@ -29,6 +29,8 @@ import {
   computeSlotsFree,
   computeArbitratedCap,
   readSuiteRed,
+  isNotYetFlippedSkip,
+  hasFanInMerge,
 } from "../scripts/slot-refill.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -84,6 +86,70 @@ function dispatchableBody(touches, extra = "") {
 
 function inFlightTask(id, touches) {
   return { id, body: dispatchableBody(touches) };
+}
+
+// NOT-YET-FLIPPED SKIP (gap-slot-refill-repeats-done-eligible-recommendations) fixtures.
+//
+// A ready task whose work has LANDED but status is still `ready` — the "已 fan-in 待翻 done" shape.
+// Deliberately crafted so ready-pool-check's `taskWorkLanded` (the MASTER-only git-history signal)
+// does NOT fire: the Touches entry is a NON-(new) existing-file path and the AC prose carries no
+// resolvable backticked symbols, so `notYetFlipped` returns false and the task stays in pool.ready.
+// The ONLY "work landed" evidence is the durable fan-in MERGE record — which the master-only signal
+// misses but slot-refill's `hasFanInMerge` (--all merge history) sees. This is the exact real-store
+// shape: work fanned into integration/develop, invisible to `git log master`.
+function fannedInBody(nChecked, nTotal) {
+  const acs = [];
+  for (let i = 0; i < nTotal; i++) {
+    acs.push(`- [${i < nChecked ? "x" : " "}] AC${i + 1}: a long enough acceptance criterion item number ${i + 1}`);
+  }
+  return [
+    "**type:** execution",
+    "## Proposal",
+    "A real proposal paragraph that is definitely more than forty non-whitespace chars.",
+    "## Contract",
+    "measure   slot = `node plugin/scripts/slot-refill.ts` stdout 的 slots_free 字段",
+    "band      slot = ≥0",
+    "invoke    `node plugin/scripts/slot-refill.ts`",
+    "control   in-flight≥cap ⇒ should_refill false",
+    "resume    分步提交",
+    "## Touches",
+    "- code/touched.ts", // NOT (new): existing-file touch ⇒ file existence is not landing evidence
+    "## Acceptance Criteria",
+    ...acs,
+    "## Definition of Done",
+    "standard DoD — the five clauses; meta-enforcer fixture-pinned.",
+  ].join("\n");
+}
+
+/** Real temp git repo where the task's branch was MERGED as a fan-in (the two-line model's durable
+ *  fan-in record). `mergeFormat`: "canonical" ⇒ message `fan-in: task/<id>`; "bare" ⇒ message
+ *  `merge: <id> — …` (the adhoc format observed for gap-runner-grouping). Current checkout is
+ *  `integration` (the fan-in line); `master` does NOT exist — the exact master-invisible shape.
+ *  The `code/touched.ts` file the task touches exists on disk (fan-in landed it). */
+function makeFannedInWorkspace(tag, { mergeFormat = "canonical" } = {}) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `slot-refill-fan-${tag}-`));
+  fs.mkdirSync(path.join(dir, "tasks"), { recursive: true });
+  fs.mkdirSync(path.join(dir, "code"), { recursive: true });
+  fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
+  runGit(dir, "init", "-q");
+  runGit(dir, "config", "user.email", "t@t");
+  runGit(dir, "config", "user.name", "t");
+  fs.writeFileSync(path.join(dir, "base.txt"), "base\n");
+  runGit(dir, "add", "-A");
+  runGit(dir, "commit", "-qm", "base");
+  runGit(dir, "branch", "-M", "develop");
+  // task branch: the task's touched file is implemented there…
+  runGit(dir, "checkout", "-qb", "task/gap-fanned");
+  fs.writeFileSync(path.join(dir, "code", "touched.ts"), "// implementation\n");
+  runGit(dir, "add", "-A");
+  runGit(dir, "commit", "-qm", "implement gap-fanned");
+  // …then fanned back into develop as a merge (the durable fan-in record).
+  runGit(dir, "checkout", "-q", "develop");
+  const msg = mergeFormat === "bare" ? "merge: gap-fanned — fan-in" : "fan-in: task/gap-fanned";
+  runGit(dir, "merge", "--no-ff", "task/gap-fanned", "-m", msg);
+  runGit(dir, "branch", "integration");
+  runGit(dir, "checkout", "-q", "integration");
+  return dir;
 }
 
 // ── AC1: slots_free arithmetic ─────────────────────────────────────────────────────────────────────
@@ -661,4 +727,75 @@ test("DELIVERY-CRITICAL — end-to-end: after labeling, the next refill evaluati
   assert.ok(afterRank < beforeRank, `rank strictly improves: before ${beforeRank} → after ${afterRank}`);
   assert.equal(after.recommended[0], "ac36-e2e", "the next refill would dispatch the labeled task first");
   assert.ok(Date.now() >= labelTs, "dispatch evaluation happens after the label is applied (ts order)");
+});
+
+// ── NOT-YET-FLIPPED SKIP (tasks/gap-slot-refill-repeats-done-eligible-recommendations) ──────────────
+// slot-refill's candidate loop at :243 used to iterate pool.ready + 3 step-4 checks and NEVER looked
+// at the not-yet-flipped signal (grep not-yet-flipped|excluded = 0 hits). A task whose work LANDED
+// (fan-in merged into the two-line model's integration line — invisible to the master-only git-history
+// signal) but whose status is still `ready` was re-recommended every round, re-dispatching a subagent
+// to re-verify already-landed work (25 re-dispatch commits self-described on 2026-08-10). AC2: the 4th
+// step-4 check skips not-yet-flipped tasks; AC4: it never touches AC5's strictness (the task still
+// waits for the green round to flip done, it is just not re-dispatched).
+
+test("NOT-YET-FLIPPED — a fanned-in (merged) task with >50% ACs is NOT recommended; an unfanned ready task still is (AC2/nyf_task_not_recommended/unfanned_ready_still_recommended)", (t) => {
+  const root = makeFannedInWorkspace("canonical");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // gap-fanned: work fanned in (merge record), 4/5 ACs ⇒ "已 fan-in 待翻 done" — must NOT be re-dispatched.
+  writeTask(root, "gap-fanned", { status: "ready", labels: ["gap"], body: fannedInBody(4, 5) });
+  // gap-unfanned: no merge record, real work ⇒ must still be recommended.
+  writeTask(root, "gap-unfanned", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/unfanned.ts (new)"]) });
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 3 });
+  assert.ok(r.recommended.includes("gap-unfanned"), "unfanned ready task is still recommended (unfanned_ready_still_recommended)");
+  assert.ok(!r.recommended.includes("gap-fanned"), "fanned-in ready task (4/5 ACs) is not re-dispatched (nyf_task_not_recommended)");
+});
+
+test("NOT-YET-FLIPPED — the adhoc `merge: <id>` fan-in format is also caught (bare-id arm of hasFanInMerge)", (t) => {
+  const root = makeFannedInWorkspace("bare", { mergeFormat: "bare" });
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-fanned", { status: "ready", labels: ["gap"], body: fannedInBody(4, 5) });
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 3 });
+  assert.ok(!r.recommended.includes("gap-fanned"), "bare-id-format fan-in is also skipped");
+});
+
+test("NOT-YET-FLIPPED — a fanned-in task with ACs at/under 50% stays dispatchable (stuck-work not trapped, gap-ready-pool-worklanded-traps-stuck-work parity)", (t) => {
+  const root = makeFannedInWorkspace("stuck");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // 2/5 = 40% — the merge record fired, but the AC-completeness gate (>50% or all) keeps it dispatchable:
+  // an AC-incomplete fan-in is genuinely stuck-work with real remaining implementation, not done-work.
+  writeTask(root, "gap-fanned", { status: "ready", labels: ["gap"], body: fannedInBody(2, 5) });
+  writeTask(root, "gap-stuck", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/stuck.ts (new)"]) });
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 3 });
+  assert.ok(r.recommended.includes("gap-fanned"), "fanned-in but AC-incomplete task stays dispatchable (stuck-work)");
+  assert.ok(r.recommended.includes("gap-stuck"));
+});
+
+test("NOT-YET-FLIPPED — a task ready-pool-check already excluded as not-yet-flipped is never in recommended (AC2 pool.excluded arm)", (t) => {
+  const root = makeWorkspace("excluded-arm");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // All ACs checked ⇒ ready-pool-check's notYetFlipped all_acs_checked branch fires ⇒ pool.excluded.
+  writeTask(root, "gap-excluded", { status: "ready", labels: ["gap"], body: fannedInBody(3, 3) });
+  writeTask(root, "gap-open", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/open.ts (new)"]) });
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 3 });
+  assert.ok(!r.recommended.includes("gap-excluded"), "already-excluded not-yet-flipped task is never recommended");
+  assert.ok(r.recommended.includes("gap-open"), "dispatchable sibling still recommended");
+});
+
+test("isNotYetFlippedSkip — pure unit: excludedNyfIds arm, merge arm, AC gate, total=0 (AC2)", (t) => {
+  const root = makeFannedInWorkspace("unit");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const body4of5 = fannedInBody(4, 5);
+  // (a) excludedNyfIds arm — true regardless of merge/AC state.
+  assert.equal(isNotYetFlippedSkip({ id: "gap-any", body: body4of5, root, excludedNyfIds: new Set(["gap-any"]) }), true);
+  // (b) no merge record ⇒ false (even with complete ACs — the pool.excluded arm is the only way).
+  assert.equal(isNotYetFlippedSkip({ id: "gap-nomerge", body: body4of5, root, excludedNyfIds: new Set() }), false);
+  // (c) merge record + 4/5 ACs ⇒ true.
+  assert.equal(isNotYetFlippedSkip({ id: "gap-fanned", body: body4of5, root, excludedNyfIds: new Set() }), true);
+  // (d) merge record + 2/5 ACs ⇒ false (stuck-work stays dispatchable).
+  assert.equal(isNotYetFlippedSkip({ id: "gap-fanned", body: fannedInBody(2, 5), root, excludedNyfIds: new Set() }), false);
+  // (e) merge record + zero AC boxes ⇒ false (total=0 ⇒ no gate).
+  assert.equal(isNotYetFlippedSkip({ id: "gap-fanned", body: fannedInBody(0, 0), root, excludedNyfIds: new Set() }), false);
+  // (f) hasFanInMerge itself: merge record fires, and a plain (non-merge) commit never does.
+  assert.equal(hasFanInMerge(root, "gap-fanned"), true, "the fan-in merge record is durable evidence");
+  assert.equal(hasFanInMerge(root, "gap-nonexistent"), false);
 });

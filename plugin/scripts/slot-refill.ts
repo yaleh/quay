@@ -61,12 +61,19 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { parseTask } from "./task-schema.ts";
+import { execFileSync } from "node:child_process";
+import { parseTask, extractSection } from "./task-schema.ts";
 import {
   analyzeTasks,
   POOL_FLOOR_MULT_DEFAULT,
   readGitRevCount,
 } from "./ready-pool-check.ts";
+// NOT-YET-FLIPPED SKIP (gap-slot-refill-repeats-done-eligible-recommendations): the AC-completeness
+// gate (countAcCheckboxes — the SAME gate ready-pool-check's notYetFlipped applies, so an AC-incomplete
+// fan-in that is genuinely stuck-work stays dispatchable) + the durable fan-in signal (hasFanInMerge —
+// reads --all MERGE history, so it survives the two-line branch model's integration fan-in that the
+// master-only git-history signal misses).
+import { countAcCheckboxes } from "./task-status-drift-check.ts";
 import {
   checkTaskTouchesResolve,
   checkTouchesPair,
@@ -174,6 +181,51 @@ function buildStatusById(tasksDir) {
   return statusById;
 }
 
+/** DURABLE FAN-IN SIGNAL (gap-slot-refill-repeats-done-eligible-recommendations): whether the task's
+ *  branch was merged — a MERGE commit anywhere in `--all` history whose message references the task id.
+ *  This is the broadened sibling of inner-blocked-signal.hasMergeRecord (which greps only the canonical
+ *  `task/<id>` fan-in branch convention): matching the BARE task id also catches the adhoc `merge:
+ *  <id> — …` format (observed real fan-in, e.g. gap-runner-grouping-ac7-nested-spawn-load-flake), and
+ *  it still fires on every `task/<id>` merge. Same durable fan-in evidence — survives `git branch -d`
+ *  after fan-in, reads `--all` so the two-line model's INTEGRATION fan-in is visible where the
+ *  master-only git-history signal sees nothing. Any git failure → false (never a positive from an
+ *  unavailable source). */
+export function hasFanInMerge(root, taskId) {
+  try {
+    const out = execFileSync("git", ["-C", root, "log", "--all", "--format=%H", "--merges", "--grep", taskId], {
+      encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"],
+    });
+    return out.trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/** NOT-YET-FLIPPED SKIP (gap-slot-refill-repeats-done-eligible-recommendations) — the 4th step-4
+ *  check. A task is "已 fan-in 待翻 done" (work already landed, waiting only for the green round to
+ *  flip done) and must NOT be re-dispatched — a re-dispatch only wastes a subagent re-verifying
+ *  already-landed work — when EITHER:
+ *   (a) ready-pool-check's analyzeTasks already excluded the id as not-yet-flipped (pool.excluded
+ *       reason "not-yet-flipped" — the master-landed / all-ACs-checked case; slot-refill iterates
+ *       pool.ready which is disjoint from excluded, so this arm is defense-in-depth that wires the
+ *       existing signal into the candidate path per AC2), or
+ *   (b) its branch was MERGED (hasFanInMerge — reads `--all` merge history, so it survives the
+ *       two-line branch model's INTEGRATION fan-in that the master-only git-history signal misses)
+ *       AND its ACs are substantially complete (>50% or all checked — the SAME AC-completeness gate
+ *       ready-pool-check's notYetFlipped applies, so an AC-incomplete fan-in that is genuinely
+ *       stuck-work stays dispatchable, gap-ready-pool-worklanded-traps-stuck-work).
+ *  Pure + read-only; reuses the existing signals, never a parallel copy. */
+export function isNotYetFlippedSkip({ id, body, root, excludedNyfIds }) {
+  if (excludedNyfIds.has(id)) return true;
+  if (!hasFanInMerge(root, id)) return false;
+  const ac = extractSection(body, "Acceptance Criteria");
+  const { total, checked } = countAcCheckboxes(ac);
+  if (total === 0) return false;
+  const allAcsChecked = checked === total;
+  const acRatio = checked / total;
+  return allAcsChecked || acRatio > 0.5;
+}
+
 /** The slot-refill decision. Pure: reads the store, never writes, never dispatches.
  *
  *  REVERSE-DIRECTION DIMENSION (gap-closed-bracket-leaves-live-agent-consuming-slots): a slot is
@@ -239,6 +291,16 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
     // Concurrency eligibility must also respect closed-bracket-but-live agents' touches — a closed
     // bracket does NOT free the touches a still-live agent is working on.
     const inFlightParsed = [...(inFlight || []), ...(closedButLive || [])].map((t) => ({ id: t.id, touches: parseTouches(t.body) }));
+    // NOT-YET-FLIPPED SKIP (gap-slot-refill-repeats-done-eligible-recommendations): ready-pool-check's
+    // analyzeTasks already computes the not-yet-flipped exclusion into pool.excluded (reason
+    // "not-yet-flipped"). Wire that signal into the candidate path (AC2) — it is disjoint from
+    // pool.ready by construction, so this is the literal 4th step-4 check + defense-in-depth. The
+    // hasMergeRecord arm inside isNotYetFlippedSkip additionally catches tasks whose work landed on
+    // the two-line model's INTEGRATION line (fan-in merged) — invisible to the master-only git-history
+    // signal, yet already "已 fan-in 待翻 done".
+    const excludedNyfIds = new Set(
+      (pool.excluded || []).filter((e) => e.reasons.includes("not-yet-flipped")).map((e) => e.id),
+    );
     const candidates = [];
     for (const id of pool.ready) {
       const file = path.join(tasksDir, `${id}.md`);
@@ -257,6 +319,9 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
         if (!checkTouchesPair(parsed, inf.touches, expand).disjoint) { blocked = true; break; }
       }
       if (blocked) continue;
+      // step-4 check 4: not-yet-flipped — work already landed (fan-in merged / master-landed), don't
+      // re-dispatch a subagent to re-verify it (gap-slot-refill-repeats-done-eligible-recommendations).
+      if (isNotYetFlippedSkip({ id, body: text, root, excludedNyfIds })) continue;
       candidates.push(parseCandidate(id, text));
     }
     // SUITE-BLOCKING RANK (gap-ready-relevance-blind-to-suite-blocking-signal AC3): a task the
