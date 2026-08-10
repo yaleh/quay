@@ -1,7 +1,9 @@
 ---
 id: gap-ac41-coldstart-skill-reference-only
-title: '冷启动 skill 与 tick 引用同一批行为文件，不各自复述——plugin/skills/cold-start/SKILL.md 现 388 行，## Steps 240 行 cmd=23（动作）、其余 148 行（如 Why…nohup does NOT pass cmd=0）是理由；理由段搬去被引用文件，Steps 留下，tick 与冷启动引用同一批文件；与 AC38（outer 双份文档漂移）同判据，一起收'
-status: todo
+title: 冷启动 skill 与 tick 引用同一批行为文件，不各自复述——plugin/skills/cold-start/SKILL.md 现 388
+  行，## Steps 240 行 cmd=23（动作）、其余 148 行（如 Why…nohup does NOT pass
+  cmd=0）是理由；理由段搬去被引用文件，Steps 留下，tick 与冷启动引用同一批文件；与 AC38（outer 双份文档漂移）同判据，一起收
+status: ready
 labels:
   - gap
   - defect

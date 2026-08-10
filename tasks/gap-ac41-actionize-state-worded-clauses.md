@@ -1,7 +1,10 @@
 ---
 id: gap-ac41-actionize-state-worded-clauses
-title: '结果状态型条款改写成动作+可核产物——三份执行核 95% 是动作，唯一 5% 状态描述正是坏掉的那条（orchestrator 的「自测绿」）；实证：两个 suite-fix subagent 同一份条文行为相反（引文件的失败 scope=main、全散文的成功 scope=worktree）；自测绿正确写法=「worktree 里跑 scripts/test.sh 直到 verification-round.jsonl 出现 scope=worktree 且 state=green」；measure=状态描述型措辞计数→0'
-status: todo
+title: 结果状态型条款改写成动作+可核产物——三份执行核 95% 是动作，唯一 5% 状态描述正是坏掉的那条（orchestrator
+  的「自测绿」）；实证：两个 suite-fix subagent 同一份条文行为相反（引文件的失败 scope=main、全散文的成功
+  scope=worktree）；自测绿正确写法=「worktree 里跑 scripts/test.sh 直到
+  verification-round.jsonl 出现 scope=worktree 且 state=green」；measure=状态描述型措辞计数→0
+status: ready
 labels:
   - gap
   - defect
@@ -41,11 +44,42 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录反直觉实证（两 subagent 对照表）+ 措辞分布（95% 动作 / 1 处状态描述 = 自测绿）+ 自测绿坏因（本任务 Proposal 已含）
-- [ ] AC2: **枚举**——三份执行核 + 被 skill 引用的行为文件枚举全部结果状态型可执行条款（清单贴任务体）
-- [ ] AC3: **逐条动作化**——每条改成「命令 + 可核产物」形态；首条 `自测绿` →「worktree 跑 scripts/test.sh 直到 verification-round.jsonl 有 scope=worktree+green 记录」
-- [ ] AC4: **measure 归零**——状态描述型措辞计数 = 0（基线 1/1/0）；检查器可机械核
-- [ ] AC5: **既有不回归**——`--for-task` scoped 门绿
+- [x] AC1: **复现固化**——任务体记录反直觉实证（两 subagent 对照表）+ 措辞分布（95% 动作 / 1 处状态描述 = 自测绿）+ 自测绿坏因（本任务 Proposal 已含）
+- [x] AC2: **枚举**——三份执行核 + 被 skill 引用的行为文件枚举全部结果状态型可执行条款（清单见本任务「执行证据」）
+- [x] AC3: **逐条动作化**——每条改成「命令 + 可核产物」形态；首条 `自测绿` →「worktree 跑 scripts/test.sh 直到 verification-round.jsonl 有 scope=worktree+green 记录」
+- [x] AC4: **measure 归零**——状态描述型措辞计数 = 0（基线 1/1/0）；检查器可机械核（新 `plugin/scripts/state-worded-clause-check.ts`，@static-tier change）
+- [x] AC5: **既有不回归**——`--for-task` scoped 门绿（17/17 绿 exit 0，`--allow-thin`）
+
+## 执行证据（inner 2026-08-10）
+
+**枚举清单（AC2）——三份执行核 + 被引用的行为文件全部结果状态型可执行条款：**
+- `orchestration/orchestrator-tick-core.md` A15 ④：`自测绿`（结果状态）→ 动作化；同条 `未绿退出`（结果状态）→ 一并动作化（`直到.*绿` 同一行跨句命中使裸 measure 计 1，修后归零）。
+- `orchestration/fast-mode-tick-core.md` A19：`心跳无机械保证`（literal measure 命中 `保证`）→ `心跳缺机械产物`（措辞计数归零所必需；语义对齐 C17「缺的是产物不是可见性」）。
+- `orchestration/manager-tick-core.md`：0 处（人的裁定引语不计，扫描确认无新增）。
+- `plugin/skills/`：0 处状态描述型（枚举后无需改写）。
+- 源文档 `orchestrator-loop-tick.md` 的 `确保`/`机械保证` 是理由档案散文（同段紧邻具体命令），非执行核、不在 measure 面，不改。
+
+**改写前后（Contract invoke `grep -nE "自测绿|确保|保证" orchestration/orchestrator-tick-core.md`）：**
+- 改前：`…→修→自测绿→(a)branch 合回…`（line 35 命中 `自测绿`）。
+- 改后：`…→修→在自带 worktree 里跑 \`scripts/test.sh\` 直到 \`verification-round.jsonl\` 出现 \`scope=worktree\` 且 \`state=green\` 记录→(a)branch 合回…`；同条 `未绿退出 ⇒` → `\`verification-round.jsonl\` 无 \`scope=worktree\` 且 \`state=green\` 记录 ⇒ 退出并…`。grep 零命中。
+
+**measure 归零（Contract `grep -cE "自测绿|确保|保证|直到.*绿" orchestration/{manager,orchestrator,fast-mode}-tick-core.md`）：**
+```
+orchestration/manager-tick-core.md:0
+orchestration/orchestrator-tick-core.md:0
+orchestration/fast-mode-tick-core.md:0
+```
+
+**新检查器可机械核（AC4）：**
+```
+$ node --no-warnings --experimental-strip-types plugin/scripts/state-worded-clause-check.ts --root . --json
+{ "count": 0, "band": 0, "hits": [] }
+```
+负向控制：`--judge` 一个含 `自测绿` 的临时文件 ⇒ exit 1 报出；actionized 形 ⇒ exit 0（见 `plugin/test/state-worded-clause-check.test.mjs` 5 例 + `plugin/scripts/checker-mutation-cases/state-worded-clause-check.sh`）。
+
+**scoped 门（AC5）：** `./scripts/test.sh --for-task gap-ac41-actionize-state-worded-clauses --allow-thin` ⇒ **exit 0，17 pass / 0 fail / 0 cancelled**（含 5 个新 checker 测试 + capability-catalog 全族）。Touches 以文档改写为主、可解析测试少，按 selector 文档语义用 `--allow-thin`（选中集确实跑了且全绿，未静默欠选）。
+
+**交叉标注（同 AC41 判据 2/3）：** 两个 sibling 任务（`gap-ac41-coldstart-skill-reference-only.md` / `gap-ac41-red-on-omission-artifact.md`）仅存在于 integration（d5418679），不在 develop fork；从主检出拷入字节一致副本（fan-in 无冲突）。二者的 Touches 已指向本任务（同 AC41 判据 1）；`gap-ac41-red-on-omission-artifact.md` 的裸目录 Touches 声明被 `task-contract-check` 检出违规（bare-dir-uncertain-touch），按其自身 Contract measure 落为具体路径 `plugin/scripts/red-on-omission-audit.ts`（机械清理，非行为变更）。
 
 ## Definition of Done
 
@@ -56,14 +90,18 @@ extra: {}
 
 ## Touches
 
-- orchestration/orchestrator-tick-core.md（A15 ④：`自测绿` → 动作化写法）
-- orchestration/manager-tick-core.md（如有人裁定引语外的状态描述条）
-- orchestration/fast-mode-tick-core.md（基线 0，扫描确认无新增）
-- plugin/skills/（被引用的行为文件——枚举后按需改写）
-- plugin/scripts/（新检查器或复用：状态描述型措辞计数，@static-tier）
+- orchestration/orchestrator-tick-core.md（A15 ④：`自测绿` + `未绿退出` → 动作化写法）
+- orchestration/manager-tick-core.md（扫描确认 0 处——裁定引语不计，无改动）
+- orchestration/fast-mode-tick-core.md（A19 `心跳无机械保证` → `心跳缺机械产物`，措辞计数归零所必需）
+- plugin/skills/（被引用的行为文件——枚举 0 处状态描述型，无需改写）
+- plugin/scripts/state-worded-clause-check.ts（新检查器：状态描述型措辞计数，@static-tier change）
+- plugin/scripts/checker-mutation-cases/state-worded-clause-check.sh（新 mutation case，checker-mutation 门 AC1b）
+- plugin/test/state-worded-clause-check.test.mjs（新测试，node:test + @test-group governance）
+- scripts/test.sh（注册 state-worded-clause-check 进 run_static_checks）
+- plugin/scripts/capability-catalog.sh（AC1c：新 checker 声明其问题）
 - orchestration/manager-phase-goal.md（AC41 判据 1 正本——本任务 Proposal 已引用）
-- tasks/gap-ac41-coldstart-skill-reference-only.md（交叉标注——同 AC41 判据 2）
-- tasks/gap-ac41-red-on-omission-artifact.md（交叉标注——同 AC41 判据 3）
+- tasks/gap-ac41-coldstart-skill-reference-only.md（交叉标注——同 AC41 判据 2；从 integration 拷入字节一致副本）
+- tasks/gap-ac41-red-on-omission-artifact.md（交叉标注——同 AC41 判据 3；从 integration 拷入字节一致副本）
 - tasks/gap-ac41-actionize-state-worded-clauses.md（自身：勾 AC + 贴证据）
 
 ## Contract

@@ -1,7 +1,9 @@
 ---
 id: gap-ac41-red-on-omission-artifact
-title: '每条固化行为必须能指出「不做时哪个读数会变红」——指不出的视为未固化；实证：A15 裁定5 在 80 行核里、每轮必读、阈值明确、计数器建好、catalog 已声明，仍连续 9 轮未被执行直到 .halt；今晚三次有效干预（.halt / ruling5_status 自报 / scope=worktree fan-in 闸）全部属这一类'
-status: todo
+title: 每条固化行为必须能指出「不做时哪个读数会变红」——指不出的视为未固化；实证：A15 裁定5 在 80
+  行核里、每轮必读、阈值明确、计数器建好、catalog 已声明，仍连续 9 轮未被执行直到 .halt；今晚三次有效干预（.halt /
+  ruling5_status 自报 / scope=worktree fan-in 闸）全部属这一类
+status: ready
 labels:
   - gap
   - defect
@@ -56,7 +58,7 @@ extra: {}
 ## Touches
 
 - orchestration/orchestrator-tick-core.md（A15 ⑤：裁定5 的执行保障——不做会变红的读数）
-- plugin/scripts/（red-on-omission 审计检查器或复用：逐条行为→变红读数，@static-tier）
+- plugin/scripts/red-on-omission-audit.ts（red-on-omission 审计检查器：逐条行为→变红读数，@static-tier；路径与本任务 Contract measure 一致）
 - .quay/（状态文件：各行为的「不做会变红」产物——mtime/字段/门）
 - orchestration/manager-phase-goal.md（AC41 判据 3 正本——本任务 Proposal 已引用）
 - tasks/gap-a15-ruling5-counter-missing.md（交叉标注——计数器本身也需「不做会变红」）
