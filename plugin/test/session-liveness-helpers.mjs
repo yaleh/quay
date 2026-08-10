@@ -109,6 +109,51 @@ export function sweepTmp(...prefixes) {
   }
 }
 
+// ── hermetic-probe residue reaper (gap-session-liveness-cancelled-test-skips-finally) ──────────
+// KNOWN-LOAD-SENSITIVE: under suite load a hermetic-probe test can be CANCELLED mid-run by
+// node:test (the KNOWN-LOAD-SENSITIVE note in each split file documents this), which SKIPS the
+// test's `finally { p.cleanup() }` → the probe's tmux server keeps running and its /tmp dir keeps
+// its socket. sweepTmp skips live-owner dirs BY DESIGN (it must never kill an in-use sibling
+// probe), so it cannot reclaim this class — the suite-tail tmux-leak-scan reds on it (round-254
+// empirical: `ol-d3sym` leaked by a cancelled test under load 9.05).
+//
+// Each hermetic probe constructor REGISTERS its tmpdir here (process-local — a Set of absolute
+// dir paths). `reapLiveOwners()` — called from each session-liveness file's after() BEFORE
+// sweepTmp — kills still-alive servers for THIS process's OWN registered probes (never a sibling
+// process's: the registry is per-process, so the SPLIT CONCURRENCY SAFETY and the cross-actor
+// safety both hold by construction), via the SAFE named kill-session on the structurally isolated
+// private socket (never kill-server — the 2026-08-06 crash rule; never pkill by name). The dir is
+// removed once its owner server is gone.
+const __liveProbeTmpDirs = new Set();
+export function __registerProbeTmp(tmp) { __liveProbeTmpDirs.add(tmp); }
+export function __unregisterProbeTmp(tmp) { __liveProbeTmpDirs.delete(tmp); }
+
+export function reapLiveOwners() {
+  for (const abs of [...__liveProbeTmpDirs]) {
+    if (!dirHasLiveOwner(abs)) { // owner already gone (e.g. a sibling sweep reaped the socket) — nothing to kill
+      __liveProbeTmpDirs.delete(abs);
+      try { fs.rmSync(abs, { recursive: true, force: true }); } catch { /* best-effort */ }
+      continue;
+    }
+    const sockDir = path.join(abs, "sock");
+    const env = isolateTmuxEnv(sockDir);
+    const sessions = tmux(["list-sessions", "-F", "#{session_name}"], env);
+    if (sessions.status === 0 && sessions.stdout.trim()) {
+      for (const s of sessions.stdout.trim().split("\n").filter(Boolean)) {
+        tmux(["kill-session", "-t", s], env); // safe named kill on the private socket
+      }
+    }
+    // The server exits once its last session is killed; wait briefly so the socket is released
+    // before the dir is removed (a sync wait via Atomics — no process spawn in the cleanup path).
+    const deadline = Date.now() + 2000;
+    while (Date.now() < deadline && dirHasLiveOwner(abs)) {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+    }
+    try { fs.rmSync(abs, { recursive: true, force: true }); } catch { /* best-effort */ }
+    __liveProbeTmpDirs.delete(abs);
+  }
+}
+
 // ── availability guards ───────────────────────────────────────────────────────────
 export const tmuxAvailable = (() => {
   try { return spawnSync("tmux", ["-V"], { encoding: "utf8" }).status === 0; } catch { return false; }
@@ -214,6 +259,7 @@ export async function waitForAlive(env, session, timeoutMs = 5000) {
 // detection. Process-detection tests are unaffected (they don't read pane dimensions).
 export function makeHermeticProbe(session) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), probeTmpPrefix));
+  __registerProbeTmp(tmp);
   const sockDir = path.join(tmp, "sock");
   fs.mkdirSync(sockDir, { recursive: true });
   const env = isolateTmuxEnv(sockDir);
@@ -226,6 +272,7 @@ export function makeHermeticProbe(session) {
     env,
     session,
     cleanup() {
+      __unregisterProbeTmp(tmp);
       tmux(["kill-session", "-t", session], env);
       try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* best-effort */ }
     },
@@ -237,6 +284,7 @@ export function makeHermeticProbe(session) {
 // cmdline must NOT be reported as a claude session.
 export function makePlainPane(session) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), probeTmpPrefix));
+  __registerProbeTmp(tmp);
   const sockDir = path.join(tmp, "sock");
   fs.mkdirSync(sockDir, { recursive: true });
   const env = isolateTmuxEnv(sockDir);
@@ -247,6 +295,7 @@ export function makePlainPane(session) {
     env,
     session,
     cleanup() {
+      __unregisterProbeTmp(tmp);
       tmux(["kill-session", "-t", session], env);
       try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* best-effort */ }
     },
@@ -260,6 +309,7 @@ export function makePlainPane(session) {
 // alive=0 always (gap-session-liveness-session-pid-blind-to-claude-as-pane-process).
 export function makeClaudePaneProcess(session) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), probeTmpPrefix));
+  __registerProbeTmp(tmp);
   const sockDir = path.join(tmp, "sock");
   fs.mkdirSync(sockDir, { recursive: true });
   const env = isolateTmuxEnv(sockDir);
@@ -272,6 +322,7 @@ export function makeClaudePaneProcess(session) {
     env,
     session,
     cleanup() {
+      __unregisterProbeTmp(tmp);
       tmux(["kill-session", "-t", session], env);
       try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* best-effort */ }
     },
@@ -284,6 +335,7 @@ export function makeClaudePaneProcess(session) {
 // :outer window.
 export function makeTwoWindowSession(session) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), probeTmpPrefix));
+  __registerProbeTmp(tmp);
   const sockDir = path.join(tmp, "sock");
   fs.mkdirSync(sockDir, { recursive: true });
   const env = isolateTmuxEnv(sockDir);
@@ -296,6 +348,7 @@ export function makeTwoWindowSession(session) {
     env,
     session,
     cleanup() {
+      __unregisterProbeTmp(tmp);
       tmux(["kill-session", "-t", session], env);
       try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* best-effort */ }
     },
