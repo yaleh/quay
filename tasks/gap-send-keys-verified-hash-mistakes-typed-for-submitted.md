@@ -27,9 +27,9 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: 任务体记录撤销理由（原任务正确关闭,判据已是 transcript-delivery-check,前提证伪）
-- [ ] AC2: 任务状态改为 done（撤销——不实现,因为前提证伪）
-- [ ] AC3: 既有不回归
+- [x] AC1: 任务体记录撤销理由（原任务正确关闭,判据已是 transcript-delivery-check,前提证伪）
+- [x] AC2: 任务状态改为 done（撤销——不实现,因为前提证伪）
+- [x] AC3: 既有不回归
 
 ## Contract
 
