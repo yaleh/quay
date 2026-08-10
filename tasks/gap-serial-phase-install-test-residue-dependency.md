@@ -25,6 +25,8 @@ extra: {}
 
 **为什么重要**：serial 相位的价值是「并发 1 完全隔离」——但隔离是**并发侧**隔离，不是**顺序侧**隔离。两个 install 测试同相位顺序执行仍互相污染。这是「隔离」的盲区。
 
+**同教训交叉标注**：见 `tasks/gap-runner-grouping-ac7-nested-spawn-load-flake.md`——serial 组只解决并发侧隔离，不解决嵌套 spawn 自身负载敏感，同「隔离是并发侧不是顺序侧」教训。
+
 **修的方向（实现归内层）**：
 - 候选 A：**相位拆分**——serial 相位内部把 install 测试按「一个 temp workspace 族」分组，或把 quay-init 族移回 lowconc（但 lowconc 也有争抢，已证）。
 - 候选 B：**测试内隔离强化**——每个 install 测试用**独立**的环境变量命名空间 + 彻底清理（`after()` 删干净 temp workspace），消除顺序残留。
