@@ -58,7 +58,7 @@ extra: {}
 ## Touches
 
 - orchestration/orchestrator-tick-core.md（A15 ⑤：裁定5 的执行保障——不做会变红的读数）
-- plugin/scripts/（red-on-omission 审计检查器或复用：逐条行为→变红读数，@static-tier）
+- plugin/scripts/red-on-omission-audit.ts（red-on-omission 审计检查器：逐条行为→变红读数，@static-tier；路径与本任务 Contract measure 一致）
 - .quay/（状态文件：各行为的「不做会变红」产物——mtime/字段/门）
 - orchestration/manager-phase-goal.md（AC41 判据 3 正本——本任务 Proposal 已引用）
 - tasks/gap-a15-ruling5-counter-missing.md（交叉标注——计数器本身也需「不做会变红」）

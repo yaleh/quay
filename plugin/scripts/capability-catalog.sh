@@ -222,6 +222,7 @@ declare -A QUESTION=(
   [slot-refill.ts]="Should a released slot be refilled from the ready pool now (event-driven dispatch refill evaluator)?"
   [stage-receipt.ts]="Is a stage receipt valid per the canonical versioned schema family (FindingEnvelope / StageEvent / StageReceiptEnvelope / ReceiptValidationResult)?"
   [suite-state-trigger.ts]="Has the full-suite state changed to red or running, and has the outer been notified (the red-window auto-executor)?"
+  [state-worded-clause-check.ts]="Is every executable clause in the three tick-cores an ACTION + mechanically verifiable product (run THIS command, wait for THAT reading), never a result state (自测绿/确保/保证/直到…绿), band 0?"
   [strategic-doc-staleness-check.ts]="Does a strategic doc reference a deleted path or a retired ADR mechanism?"
   [suite-state-trigger.ts]="Has the full-suite state changed to red or running, and has the outer been notified (the red-window auto-executor)?"
   [supervisor-bus.sh]="Can a cross-session message be delivered with sender identity (layer + project) through the ONE hardened delivery path, with the delivery event recorded as who → who → when → delivered in an attributable ledger?"

@@ -349,6 +349,18 @@ run_static_checks() {
   # @static-tier change
   # @static-object plugin/loop/fast-mode-loop-tick.md plugin/loop/orchestrator-loop-tick.md CLAUDE.md plugin/scripts/threshold-scope-check.ts plugin/test/threshold-scope-check.test.mjs docs/analysis/threshold-scope-violations.md
   run_checker "threshold-scope-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/threshold-scope-check.ts" --root "${repo_root}"
+  echo "== state-worded-clause check (gap-ac41-actionize-state-worded-clauses, AC4) =="
+  # The result-state-clause checker: the three execution cores must phrase every executable clause
+  # as an ACTION + mechanically verifiable product, never a result state (自测绿/确保/保证/直到…绿).
+  # The 2026-08-10 incident — orchestrator A15 ④'s 自测绿 (a result state, not an action) let two
+  # suite-fix subagents behave oppositely (the file-quoting one read it as "observe until green" →
+  # scope=main failure; the all-prose one happened to run the suite → scope=worktree success).
+  # The ## Contract measure IS this checker's count over the three tick-cores, band 0. Exit 1 on a
+  # NEW state-worded clause red-lights the commit (set -euo pipefail), so a result-state regression
+  # in a tick-core is stopped when it is WRITTEN, not after the suite goes red.
+  # @static-tier change
+  # @static-object orchestration/manager-tick-core.md orchestration/orchestrator-tick-core.md orchestration/fast-mode-tick-core.md plugin/scripts/state-worded-clause-check.ts plugin/test/state-worded-clause-check.test.mjs
+  run_checker "state-worded-clause-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/state-worded-clause-check.ts" --root "${repo_root}"
   echo "== instrument-failure check (gap-manager-instrument-failures-need-mechanical-detection-not-carefulness, AC3) =="
   # The manager instrument-failure five-family detector (FAMILY-1..5 in the checker header). The
   # manager's instrument failures recurred 7× in one night across five families already documented
