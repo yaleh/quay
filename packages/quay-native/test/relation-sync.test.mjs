@@ -1,4 +1,15 @@
-// @test-group product
+// @test-group serial
+// @load-sensitive child-spawn
+// KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — this harness
+// spawns 2 REAL node child processes (reparent-writer.mjs) for the file-lock cross-reparent proof.
+// Under full-suite concurrency those child spawns can be killed/fail (EMFILE / TasksMax /
+// suite-caused kill), and round-209 (2026-08-10) showed the exact signature: a silent passed=false
+// at 1932ms — FASTER than the 2197ms solo run — with ZERO harness output lines (an assertion
+// failure would always write FAIL: to fd 2; zero lines = the process died before the harness could
+// report). Solo and 4x busy-loop CPU-load runs stay 19/19 green. Same child-spawn family as
+// create-mcp / proposal-convergence / install-family (all routed to the concurrency-1 serial
+// phase); this file was left in the default concurrent body and is now also routed to serial
+// (gap-relation-sync-load-flake-child-spawn-under-suite).
 // M35-native-relation-sync: proves store.js's `write()` now performs
 // bidirectional parent/children relation sync (matching the github
 // provider's `writeRelations()` contract, github-client.js ~L771-830) --
@@ -205,11 +216,24 @@ async function testConcurrentCrossReparentNoDeadlockNoCorruption() {
   }
 }
 
-testReparentUpdatesBothParents();
-testReparentNoDuplicateOnNewParent();
-testUnsetParentRemovesWithoutAddingElsewhere();
-testUnrelatedWriteDoesNotTriggerSync();
-await testConcurrentCrossReparentNoDeadlockNoCorruption();
+// AC3 (gap-relation-sync-load-flake-child-spawn-under-suite): top-level failure diagnostic. This
+// harness spawns 2 REAL node child processes (reparent-writer.mjs) for the file-lock cross-reparent
+// proof; under full-suite concurrency a child spawn can fail (EMFILE / TasksMax / suite-caused kill)
+// and the rejection at the top-level await previously surfaced as a SILENT passed=false with zero
+// harness output (round-209). A spawn failure or any top-level exception must now be LOUD — a
+// synchronous fd-2 `FAIL:` (same contract as writeErr, so node --test's async stderr pipe cannot
+// drop it) and a non-zero exit. Assertions are NOT weakened — this only converts an unhandled
+// top-level exception into a diagnosable failure instead of a silent file-level fail.
+try {
+  testReparentUpdatesBothParents();
+  testReparentNoDuplicateOnNewParent();
+  testUnsetParentRemovesWithoutAddingElsewhere();
+  testUnrelatedWriteDoesNotTriggerSync();
+  await testConcurrentCrossReparentNoDeadlockNoCorruption();
+} catch (err) {
+  writeErr(`FAIL: ${err && err.stack ? err.stack : err}`);
+  process.exitCode = 1;
+}
 
 fs.rmSync(tasksDir, { recursive: true, force: true });
 
@@ -223,6 +247,6 @@ if (failures > 0) {
   // harness in this repo (test-shape-analysis.md: 34 files) uses the
   // process.exitCode pattern; this one used process.exit(1) and paid for it.
   process.exitCode = 1;
-} else {
+} else if (process.exitCode === undefined) {
   console.log("\nAll M35-native-relation-sync tests passed.");
 }

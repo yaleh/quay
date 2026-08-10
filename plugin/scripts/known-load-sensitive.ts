@@ -20,6 +20,11 @@
 //   nested-spawn  — spawns nested node --test / full-suite sub-suites (runner-grouping,
 //                   quay-init-loop-core)
 //   heavy         — real subprocess + port binding (serve.test.mjs)
+//   child-spawn   — spawns real child processes whose spawn/kill is load-race-prone under full-suite
+//                   concurrency (relation-sync.test.mjs spawns 2 real node child processes for the
+//                   file-lock cross-reparent proof; round-209 silent passed=false at 1932ms —
+//                   gap-relation-sync-load-flake-child-spawn-under-suite). Sibling family to
+//                   create-mcp / proposal-convergence (which declare `heavy`).
 //
 // Commands:
 //   node --no-warnings --experimental-strip-types plugin/scripts/known-load-sensitive.ts --list
@@ -46,7 +51,7 @@ import { isDirectEntry } from "./gate-script-base.ts";
 export const MARKER = "KNOWN-LOAD-SENSITIVE";
 
 /** The known root-cause kinds. One root cause = one kind; different root causes = different kinds. */
-export const KINDS = ["wall-clock", "nested-spawn", "heavy"] as const;
+export const KINDS = ["wall-clock", "nested-spawn", "heavy", "child-spawn"] as const;
 export type LoadSensitiveKind = (typeof KINDS)[number];
 
 /** The canonical test glob scripts/test.sh owns (single source — do not hand-write a second copy). */

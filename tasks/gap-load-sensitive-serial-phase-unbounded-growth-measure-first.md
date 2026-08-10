@@ -73,6 +73,7 @@ extra: {}
 - tasks/gap-serial-segment-77-percent-cost-reduction-runner-grouping-listfiles.md（交叉标注——串行相成本）
 - tasks/gap-suite-concurrency-4-vs-8-measurement.md（交叉标注——并发测量族）
 - tasks/gap-serial-phase-install-test-residue-dependency.md（交叉标注——串行相内部顺序残留依赖，与内部并发↑ 的张力）
+- tasks/gap-relation-sync-load-flake-child-spawn-under-suite.md（交叉标注——收编进 serial 相是串行相扩容的来源之一，同扩容族）
 - tasks/gap-load-sensitive-serial-phase-unbounded-growth-measure-first.md（自身：勾 AC + 贴实验数字）
 
 ## Contract

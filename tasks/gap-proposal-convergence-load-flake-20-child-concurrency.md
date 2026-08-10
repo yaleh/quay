@@ -48,6 +48,7 @@ extra: {}
 - experiments/quay-perpetual-stream/scripts/proposal-convergence.ts（stale-reclaim PID-liveness 守卫——a551dd5f 已落地）
 - experiments/quay-perpetual-stream/test/proposal-convergence.test.mjs（20-child 并发子测试）
 - tasks/gap-install-family-tests-rotate-flakes-under-full-suite.md（交叉标注——同族表面：负载敏感重测试全量下红；本任务揭示「负载 flake 可能掩真 bug」）
+- tasks/gap-relation-sync-load-flake-child-spawn-under-suite.md（交叉标注——同族：2 真实 node 子进程 spawn 竞争，同 child-spawn 根因）
 - tasks/gap-proposal-convergence-load-flake-20-child-concurrency.md（自身：勾 AC + 贴证据）
 
 ## Contract
