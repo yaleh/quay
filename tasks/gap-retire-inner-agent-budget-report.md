@@ -36,11 +36,11 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 round-250 唯一红(AC4 断言 core 必读 inner-agent-budget.json,而 A16 已删)+ A16 裁定原文 + harm 实录(自触发 201/200 假触顶)(本任务 Proposal 已含)
-- [ ] AC2: **删除脚本+测试**——`inner-agent-budget-report.ts` 与 `.test.mjs` 从 plugin/ 删除
-- [ ] AC3: **清引用**——capability-catalog 5 条目删;fast-mode-loop-tick 3 处预算引用改;gap-inner-subagent-budget-invisible 标 retired
-- [ ] AC4: **真实产物不回归**——`.quay/inner-wakeup-heartbeat.json`(真实心跳)仍在、A16 新行为(上层观察下层失能)不受影响
-- [ ] AC5: **既有不回归**——`--for-task` scoped 门绿
+- [x] AC1: **复现固化**——任务体记录 round-250 唯一红(AC4 断言 core 必读 inner-agent-budget.json,而 A16 已删)+ A16 裁定原文 + harm 实录(自触发 201/200 假触顶)(本任务 Proposal 已含——Proposal §实证 三行:round-250 唯一红 / A16 裁定原文 / harm 实录,无需另行固化)
+- [x] AC2: **删除脚本+测试**——`inner-agent-budget-report.ts` 与 `.test.mjs` 从 plugin/ 删除(实删于 090a0277;本 worktree 复核 `ls plugin/scripts/inner-agent-budget-report.ts` / `ls plugin/test/inner-agent-budget-report.test.mjs` 均 No such file)
+- [x] AC3: **清引用**——capability-catalog 5 条目删(090a0277,QUESTION/CADENCE/INVALIDATION/LAST_REAFFIRMED/MATCHING 各 1);fast-mode-loop-tick 预算引用改(保留 A16 交叉标注);gap-inner-subagent-budget-invisible 标 retired(体首 RETIRED 注);另清本 commit 发现的一处漏网引用:`plugin/scripts/tick-core-static-check.ts:85` 注释(实删提交遗漏,现改写为「A16-deprecated subagent-budget counting script」)
+- [x] AC4: **真实产物不回归**——`.quay/inner-wakeup-heartbeat.json`(真实心跳)仍在、可读(`ls -la` 479 字节;内容 `{"budgetHit":false,"agentDispatches":18,"agentLimit":200,...}`,A16 新行为「上层观察下层失能」结构完整);`.quay/inner-agent-budget.json`(虚构产物)不存在
+- [x] AC5: **既有不回归**——`--for-task` scoped 门绿:`bash scripts/test.sh --for-task gap-retire-inner-agent-budget-report --allow-thin` → **exit 0 / tests 15 / pass 15 / fail 0 / cancelled 0**(capability-catalog 12 + 静态检查全 PASS;tick-core-static-check PASS / instrument-failure-check PASS / delivery-inventory drift gate PASS;详 Invoke evidence)
 
 ## Definition of Done
 
@@ -51,12 +51,74 @@ extra: {}
 
 ## Touches
 
-- plugin/scripts/inner-agent-budget-report.ts(删——A16 裁定整体废弃)
-- plugin/test/inner-agent-budget-report.test.mjs(删——stale,断言被废除的旧行为)
-- plugin/scripts/capability-catalog.sh(删 5 条目)
-- plugin/loop/fast-mode-loop-tick.md(删 3 处预算机制引用,保留 A16 交叉标注)
-- tasks/gap-inner-subagent-budget-invisible.md(标 retired——A16 取代)
+- plugin/scripts/inner-agent-budget-report.ts(删——A16 裁定整体废弃;实删于 090a0277,本 worktree 复核不存在)
+- plugin/test/inner-agent-budget-report.test.mjs(删——stale,断言被废除的旧行为;实删于 090a0277,本 worktree 复核不存在)
+- plugin/scripts/capability-catalog.sh(删 5 条目;实删于 090a0277,本 worktree 复核零命中)
+- plugin/loop/fast-mode-loop-tick.md(删 3 处预算机制引用,保留 A16 交叉标注;本 commit 另将交叉标注中残留的字面量文件名改述为「自计数脚本」——保留 A16 裁定交叉标注,同时满足 plugin/ 零命中)
+- plugin/scripts/tick-core-static-check.ts(本 commit 新增——实删提交遗漏的一处注释引用,改写以消除字面量,保留注解语义)
+- tasks/gap-inner-subagent-budget-invisible.md(标 retired——A16 取代;090a0277 体首 RETIRED 注,本 worktree 复核在场)
 - tasks/gap-retire-inner-agent-budget-report.md(自身:勾 AC + 贴证据)
+
+## Invoke evidence(本 worktree 实跑,2026-08-10)
+
+**Contract measure `budget_report_gone` = 0**:
+```
+$ grep -rc "inner-agent-budget-report" plugin/scripts plugin/test 2>/dev/null | grep -v ":0" | wc -l
+0
+```
+
+**Contract invoke(删后应为零)**:
+```
+$ grep -rn "inner-agent-budget-report" plugin/ scripts/ 2>/dev/null | grep -v capability-catalog
+(零命中,退出码 1)
+```
+
+**DoD grep `inner-agent-budget-report` 在 plugin/ 零命中**:
+```
+$ grep -rn "inner-agent-budget-report" plugin/ 2>/dev/null || echo "PLUGIN CLEAN (zero hits)"
+PLUGIN CLEAN (zero hits)
+```
+
+**catalog 无条目**:
+```
+$ grep -n "inner-agent-budget" plugin/scripts/capability-catalog.sh 2>/dev/null || echo "CATALOG CLEAN"
+CATALOG CLEAN
+```
+
+**删除复核(AC2)**:
+```
+$ ls plugin/scripts/inner-agent-budget-report.ts
+ls: cannot access 'plugin/scripts/inner-agent-budget-report.ts': No such file or directory
+$ ls plugin/test/inner-agent-budget-report.test.mjs
+ls: cannot access 'plugin/test/inner-agent-budget-report.test.mjs': No such file or directory
+```
+
+**真实产物不回归(AC4)**——主检出 `.quay/inner-wakeup-heartbeat.json`(gitignored 运行时产物,本 worktree 为新建检出故不含;以主检出为准):
+```
+$ cat .quay/inner-wakeup-heartbeat.json
+{"ts": 1786402782, "delaySeconds": 1500, "reason": "tick heartbeat — 新派 retire-inner-agent-budget-report (a5e45810, A16 裁定落地); ...", "runIds": {"retire-agent-budget": "fm-gap-retire-inner-agent-budget-report-1786402770145-cn5x87"}, "effectiveCap": 5, "suiteState": "running (round-262)", "blocked": [], "budgetHit": false, "agentDispatches": 18, "agentLimit": 200}
+```
+(`budgetHit:false / agentDispatches:18 / agentLimit:200` —— A16 新行为「上层观察下层失能」结构完整,不受本次删除影响。)
+
+**scoped 门绿(AC5)**:
+```
+$ bash scripts/test.sh --for-task gap-retire-inner-agent-budget-report --allow-thin
+tick-core-static-check: AC3 src:N coverage manager-tick-core.md=39/39 / orchestrator-tick-core.md=47/47 / fast-mode-tick-core.md=44/44 (target 100%)
+tick-core-static-check: AC4 pointer targets OK
+tick-core-static-check: AC5 B3 numbering OK
+tick-core-static-check: AC6 prohibition consistent
+tick-core-static-check: PASS — execution cores are statically covered.
+instrument-failure-check --gate: PASS — 5/5 families mechanically detectable, no shrink-only violation
+PASS: delivery-inventory drift gate (plugin/scripts A/D without outline update: no)
+ℹ tests 15
+ℹ suites 0
+ℹ pass 15
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+(EXIT=0)
+```
 
 ## Contract
 
