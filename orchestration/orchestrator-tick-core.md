@@ -30,8 +30,7 @@ checklist 执行。
 | A9 | `ready-pool-check.ts --root "$REPO_ROOT" --json` → `excluded[]` 里 `not-yet-flipped` | 探测用 `taskWorkLanded`,不用 `status: done`。**判据(不只读计数):not-yet-flipped 数 ≥ floor/2 ⇒ 本 tick 报「done-flip 积压」并逐个核 AC——AC 全勾且 work 落地即翻 done,AC 未满的 workLanded 任务是上游堵塞(该修 probe 或补判据),不是「正常 backlog」** (src:675) |
 | A10 | `bash plugin/scripts/closure-lag-check.sh` | 退出非 0 ⇒ 本 tick **报 WARN 进 tick-log + 报告**,不静默;信号是报告不是门控。**判据:读 `not_yet_flipped` 数字后自己求值 `not_yet_flipped ≥ threshold(30) ⇒ 升级`——但脚本默认阈值 30 是松的,17 条积压被它判「正常」;外层自己定更严判据(如 ≥10 即报「done-flip 积压偏多」并逐个核),不要只抄 `overdue: False` 当结论** (src:701) |
 | A11 | 读 `.quay/full-suite-state.json` 的 `state`/`reason`/`durationMs` | `green`⇒suiteGreen;`running`⇒true(proceed);`red`⇒false;**缺文件⇒true**。`reason: aborted` **不**触发停派 (src:738) |
-| A12 | 独立核实内层至少一项声称:`inner-forensics.mjs verify <类别> --since <上次 tick ISO>` / `timecost` | 以 git 和实测为准,不以内层自述为准;零命中 ≠ 没做过(先用类别形式复核);见 `⚠ 更早会话未被包含` 即窗口不完整 (src:630) |
-| A13 | `self-report-vocab-audit.ts --git-log 15 --exclude-prefix outer: --window 3 --json` | 读 `inner_self_report_vocab` + `converged`;连续 3 轮无 batch 式自述 = 收敛 (src:851) |
+| A12 | 独立核实内层至少一项声称:`inner-forensics.mjs verify <类别> --since <上次 tick ISO>` / `timecost`;`self-report-vocab-audit.ts --git-log 15 --exclude-prefix outer: --window 3 --json` 读 `inner_self_report_vocab`/`converged`(连续 3 轮无 batch 自述=收敛) | 以 git 和实测为准,不以内层自述为准;零命中 ≠ 没做过(先用类别形式复核);见 `⚠ 更早会话未被包含` 即窗口不完整 (src:630, 851) |
 | A14 | **账本·本轮 closure-pass 是否被调用**(FINDING §6①,每 tick):`meta-cc query_session_content role=tool tool_name=closure-lag-check` → `last(timestamp)` | 抓「收尾 pass 自述做了但没真调用」——与 manager A9 同手法(抓 nyf-semantic-judge workflow 49c0be86 用完即弃那次,有 4 个 done-flip 真产出却因执行核无「调用」步骤而丢);`--record` 心跳缺失 >3 个 tick 周期 ⇒ 写明「已停用/已替代/是缺陷」三选一 (src:668)。**另(人 2026-08-10 裁定更正×2):每 tick 统计本会话里裸 tmux send-keys 次数——**按位置判定**（命令位置:行首/`&&`/`;`/管道后,且不在引号/字符串/注释内——复用 drive-contract-check.ts「by POSITION, never by keyword」与 test-framework-policy-check.ts「code positions only」的既有手法,勿按关键词,A16 关键词法首轮即 3 假阳性）;非 0 即违规并记账;并调 drive-contract-check.ts（outer→inner 驱动文本契约检查器,近 3 天仅 3 次调用——应入 tick）** |
 | A15 | **suite-health 三件套（理由见 orchestrator-loop-tick.md §suite-health）**——①每 tick 写 `.quay/suite-health-last-run.json`（`suite-health-judge` workflow 结构化返回,零发现也写 0）;②触发:末轮 `durationMs>1000_000 ∨ state=red ∨ merge 被门拒 ∨ 距上次记录 >K 轮` ⇒ 必跑;③心跳:`meta-cc query tool_name=Workflow` last(timestamp),>3 tick 未调用 ⇒ 写三选一 | 判词=**只有 workflow 能产的必产出**（手写不被接受,检查读带时间戳产物是否新鲜）;分档:>1000s 分析触发 / >1800s 升级 |
 
@@ -51,7 +50,6 @@ checklist 执行。
 - **B12 自身停止条件自查**:连续 3 个 tick 没有推进任何任务状态 ⇒ 停 loop、叫人、附三次 tick 各看到什么 (src:1029)
 - **B13 tick-log 追加一行**:时刻(`date -u '+%H:%MZ'`)、动作类型、做了什么、内层状态快照。**写完验证读磁盘文件(`tail -3`),不读 git**;累计分布**从行数重算**不手工加减;**tick-log 已 untrack+gitignore,「提交 tick-log」这一步作废**。**no-action 是需举证的判词,不是零成本标签(manager 2026-08-09 已核实:14:08-15:08 5 次 no-action 全不合法):tick-log 行写 `no-action` 必须同时携带五条不等式读数且全为假——①in_flight<cap 且 recommended 非空?②pool<floor?③nyf>0 且 work 落地?④integration 领先 develop 且 suite 绿?⑤suite red?——任何一条为真则 no-action 不合法,该行必须有对应动作或硬理由** (src:1045, 1051, 1057)
 - **B14 每个 tick 必报**(缺任一条则分层是否有效无法判定):动作类型 / 独立核实了哪一项及结果 / 内层在飞任务数与各自时长 / 遥测任务数·均耗时·`tasksPerHour` / 本轮收尾几条 + suite `state` + `durationMs` / 套件触发者是否挂上 + 最近 `SUITE-*` 事件与时刻 / 累计动作类型分布 / Monitor 两判据 / 本轮是否转发重锚 + 空闲判据 / `inner_self_report_vocab` 与收敛状态 (src:1063, 850, 858, 776)
-- **B15 suite-health 必产出**:每 tick 写 `.quay/suite-health-last-run.json`（`suite-health-judge` workflow 结构化返回;零发现也写 0;手写判词不被接受）
 
 ## C. 硬约束(每条都已付过代价,理由见档案)
 
