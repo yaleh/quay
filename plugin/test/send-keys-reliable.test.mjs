@@ -376,6 +376,9 @@ test("AC2 e2e: NBSP-prompt fixture pane on an ALREADY-ACTIVE (non-fresh) session
   try {
     const start = h.newSession(session, `bash ${fixture}`);
     assert.equal(start.status, 0, `tmux new-session failed: ${start.stderr}`);
+    // Name the fixture window after the session so the drive-target-check gate (which requires the
+    // window name to equal DRIVE_EXPECT_WINDOW_NAME) sees a deterministic, matching window name.
+    assert.equal(h.tmx(["rename-window", "-t", `${session}:0`, session]).status, 0, `rename-window failed`);
 
     // Wait (bounded) for the fixture pane to render the NBSP prompt.
     let ready = false;
@@ -391,6 +394,7 @@ test("AC2 e2e: NBSP-prompt fixture pane on an ALREADY-ACTIVE (non-fresh) session
       timeout: 90000,
       env: {
         ...h.env,
+        DRIVE_EXPECT_WINDOW_NAME: session, // the fixture's window is renamed to the session (drive-target-check gate)
         RELIABLE_CLEAR_MAX: "2",          // if the NBSP empty-check regresses, the clear loop exhausts at 2 and fails loud
         RELIABLE_STABLE_TIMEOUT_S: "3",
         RELIABLE_DELIVERY_FIRST_S: "3",
@@ -404,6 +408,86 @@ test("AC2 e2e: NBSP-prompt fixture pane on an ALREADY-ACTIVE (non-fresh) session
     assert.doesNotMatch(result.stdout, /SKIP 清屏循环/, `non-fresh session must walk the clear loop, not the fresh skip:\n${result.stdout}`);
     const transcriptText = fs.readFileSync(transcript, "utf8");
     assert.match(transcriptText, new RegExp(`"content":"${marker}"`), `marker should appear as a real user message in the transcript:\n${transcriptText}`);
+  } finally {
+    h.cleanup();
+  }
+});
+
+// ── gap-drive-sent-to-manager-pane-not-inner: fail-closed wrong-target pre-verify ────────────────
+// The 2026-08-10 incident: the outer drove `quay-0:0.0` — window 0 was claude (the MANAGER), not
+// inner — and 6 send-keys in 2 dispatches all landed in the manager's input box. The fix: the
+// drive-target-check gate (wired into step 0 of send-keys-reliable.sh) fails closed before ANY
+// send when the target's window name is not the expected one. These tests prove (a) a non-inner
+// window name → exit 1 + nothing sent, and (b) a numeric index → exit 1 even when it would resolve
+// to the right window.
+
+test("AC3 fail-closed: a target whose window name != expected (default inner) is REJECTED before any send — nothing lands in the transcript", { timeout: 90000 }, async (t) => {
+  const tmuxV = spawnSync("tmux", ["-V"], { encoding: "utf8" });
+  if (tmuxV.error || tmuxV.status !== 0) {
+    t.skip("tmux not available — skipping the real-TUI e2e");
+    return;
+  }
+  const session = uniqueName("skr-wrong");
+  const h = newHermeticTmux("skr-wrong-");
+  const fixture = path.join(h.tmp, "fixture.sh");
+  const transcript = path.join(h.tmp, "transcript.jsonl");
+  fs.writeFileSync(fixture, fixtureScriptSrc(transcript), "utf8");
+  // NOT fresh: seed the transcript so the delivery-poll path is reachable (had a send occurred).
+  fs.writeFileSync(transcript, `${userStringLine("prior-session-message")}\n`, "utf8");
+  const marker = `skr-wrong-marker-${process.pid}`;
+  let result = null;
+  try {
+    const start = h.newSession(session, `bash ${fixture}`);
+    assert.equal(start.status, 0, `tmux new-session failed: ${start.stderr}`);
+    let ready = false;
+    for (let i = 0; i < 100 && !ready; i++) {
+      const cap = h.capture(session);
+      if (cap.status === 0 && cap.stdout.includes("❯")) ready = true;
+      else await new Promise((r) => setTimeout(r, 100));
+    }
+    assert.ok(ready, "fixture pane should render the ❯ prompt");
+
+    // DRIVE_EXPECT_WINDOW_NAME deliberately NOT set → default `inner`. The fixture window is named
+    // after the session (`skr-wrong-...`), NOT inner → the gate must fail closed.
+    result = spawnSync("bash", [SCRIPT, session, marker, transcript], {
+      encoding: "utf8",
+      timeout: 30000,
+      env: { ...h.env },
+    });
+    assert.equal(result.status, 1, `wrong window name must exit 1 (fail closed), got ${result.status}\nstdout: ${result.stdout}\nstderr: ${result.stderr}`);
+    assert.match(result.stderr, /前置校验/, `must name the pre-verify gate:\n${result.stderr}`);
+    // Nothing was sent: the marker must NOT appear in the transcript.
+    const transcriptText = fs.readFileSync(transcript, "utf8");
+    assert.doesNotMatch(transcriptText, new RegExp(`"content":"${marker}"`), `nothing may be sent to a non-inner window:\n${transcriptText}`);
+  } finally {
+    h.cleanup();
+  }
+});
+
+test("AC3 fail-closed: a numeric-index target (quay-0:0.0) is REJECTED by the gate before any tmux/send — even for an existing session whose window 0 would match", { timeout: 30000 }, async (t) => {
+  const tmuxV = spawnSync("tmux", ["-V"], { encoding: "utf8" });
+  if (tmuxV.error || tmuxV.status !== 0) {
+    t.skip("tmux not available — skipping");
+    return;
+  }
+  const session = uniqueName("skr-numidx");
+  const h = newHermeticTmux("skr-numidx-");
+  const transcript = path.join(h.tmp, "transcript.jsonl");
+  fs.writeFileSync(transcript, `${userStringLine("prior")}\n`, "utf8");
+  try {
+    // A single-window session whose window 0 is named `inner` — a numeric index quay-0:0 WOULD
+    // resolve to the right window, but discipline ① says the numeric index is retired regardless.
+    const start = h.newSession(session, `tmux rename-window -t ${session}:0 inner; sleep 30`);
+    assert.equal(start.status, 0, `tmux new-session failed: ${start.stderr}`);
+    const r = spawnSync("bash", [SCRIPT, `${session}:0`, "marker-numidx", transcript], {
+      encoding: "utf8",
+      timeout: 30000,
+      env: { ...h.env, DRIVE_EXPECT_WINDOW_NAME: "inner" },
+    });
+    assert.equal(r.status, 1, `numeric-index target must exit 1 (fail closed), got ${r.status}\n${r.stdout}\n${r.stderr}`);
+    assert.match(r.stderr, /数字索引/, `must name the numeric-index rejection:\n${r.stderr}`);
+    const transcriptText = fs.readFileSync(transcript, "utf8");
+    assert.doesNotMatch(transcriptText, /marker-numidx/, `nothing may be sent via a numeric index:\n${transcriptText}`);
   } finally {
     h.cleanup();
   }
@@ -447,6 +531,9 @@ test("AC1 e2e: fresh welcome-screen ghost text (`❯ Try \"fix lint errors\"`) �
   try {
     const start = h.newSession(session, `bash ${fixture}`);
     assert.equal(start.status, 0, `tmux new-session failed: ${start.stderr}`);
+    // Name the fixture window after the session so the drive-target-check gate sees a deterministic,
+    // matching window name.
+    assert.equal(h.tmx(["rename-window", "-t", `${session}:0`, session]).status, 0, `rename-window failed`);
 
     // Wait (bounded) for the fixture pane to render the ghost welcome text.
     let ready = false;
@@ -462,6 +549,7 @@ test("AC1 e2e: fresh welcome-screen ghost text (`❯ Try \"fix lint errors\"`) �
       timeout: 90000,
       env: {
         ...h.env,
+        DRIVE_EXPECT_WINDOW_NAME: session, // the fixture's window is named after the session (drive-target-check gate)
         RELIABLE_CLEAR_MAX: "2",          // if the fresh-skip regresses, the clear loop exhausts at 2 against the ghost text and fails loud
         RELIABLE_STABLE_TIMEOUT_S: "3",
         RELIABLE_DELIVERY_FIRST_S: "3",

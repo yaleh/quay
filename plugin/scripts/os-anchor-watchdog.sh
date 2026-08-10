@@ -256,11 +256,14 @@ drive_outer() {
 
   # deliver(target, payload) -> delivered|failed, by intent. Explicit --transcript when the
   # config carries one; otherwise --root (auto-discovery of the re-spawned session's file).
+  # The window-name pre-flight gate (drive-target-check.sh) verifies the target window name
+  # before any send — the watchdog drives the OUTER window (${session}:${outer}), so it must
+  # set DRIVE_EXPECT_WINDOW_NAME to that window name (gap-drive-sent-to-manager-pane-not-inner).
   local out rc
   if [ -n "$transcript_override" ]; then
-    out=$(SUPERVISOR_DELIVER_VERIFY_S=45 bash "$sdel" "$target" "$drive" --transcript "$transcript_override" 2>&1)
+    out=$(DRIVE_EXPECT_WINDOW_NAME="$outer" SUPERVISOR_DELIVER_VERIFY_S=45 bash "$sdel" "$target" "$drive" --transcript "$transcript_override" 2>&1)
   else
-    out=$(SUPERVISOR_DELIVER_VERIFY_S=45 bash "$sdel" "$target" "$drive" --root "$root" 2>&1)
+    out=$(DRIVE_EXPECT_WINDOW_NAME="$outer" SUPERVISOR_DELIVER_VERIFY_S=45 bash "$sdel" "$target" "$drive" --root "$root" 2>&1)
   fi
   rc=$?
   if [ "$rc" -eq 0 ]; then

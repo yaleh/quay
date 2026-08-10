@@ -208,6 +208,9 @@ test("AC3 e2e: real target session receives the payload, transcript verifies, le
   try {
     const start = h.newSession(session, `bash ${fixture}`);
     assert.equal(start.status, 0, `tmux new-session failed: ${start.stderr}`);
+    // Name the fixture window after the session so the drive-target-check gate sees a deterministic,
+    // matching window name.
+    assert.equal(h.tmx(["rename-window", "-t", `${session}:0`, session]).status, 0, `rename-window failed`);
 
     let ready = false;
     for (let i = 0; i < 100 && !ready; i++) {
@@ -220,7 +223,7 @@ test("AC3 e2e: real target session receives the payload, transcript verifies, le
     result = spawnSync("bash", [SCRIPT, "--send", "--from", "outer", "--to", session, "--payload", marker, "--transcript", transcript, "--ledger", ledger, "--project", "quay"], {
       encoding: "utf8",
       timeout: 90000,
-      env: { ...h.env, RELIABLE_DELIVERY_VERIFY_S: "20", SUPERVISOR_DELIVER_VERIFY_S: "20" },
+      env: { ...h.env, DRIVE_EXPECT_WINDOW_NAME: session, RELIABLE_DELIVERY_VERIFY_S: "20", SUPERVISOR_DELIVER_VERIFY_S: "20" },
     });
     assert.equal(result.status, 0, `bus --send failed (exit ${result.status}):\nstdout: ${result.stdout}\nstderr: ${result.stderr}`);
     assert.match(result.stdout, /^delivered=true /, `Contract measure delivered=true:\n${result.stdout}`);

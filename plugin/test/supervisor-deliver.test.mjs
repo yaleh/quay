@@ -143,6 +143,9 @@ test("AC5 e2e: existing session (--transcript) — adapter delivers a payload, v
   try {
     const start = h.newSession(session, `bash ${fixture}`);
     assert.equal(start.status, 0, `tmux new-session failed: ${start.stderr}`);
+    // Name the fixture window after the session so the drive-target-check gate sees a deterministic,
+    // matching window name.
+    assert.equal(h.tmx(["rename-window", "-t", `${session}:0`, session]).status, 0, `rename-window failed`);
 
     let ready = false;
     for (let i = 0; i < 100 && !ready; i++) {
@@ -157,6 +160,7 @@ test("AC5 e2e: existing session (--transcript) — adapter delivers a payload, v
       timeout: 90000,
       env: {
         ...h.env,
+        DRIVE_EXPECT_WINDOW_NAME: session, // the fixture's window is named after the session (drive-target-check gate)
         SUPERVISOR_DELIVER_VERIFY_S: "20",
       },
     });
@@ -206,6 +210,9 @@ test("AC5 e2e: fresh session (transcript absent) — direct-send path creates th
   try {
     const start = h.newSession(session, `bash ${fixture}`);
     assert.equal(start.status, 0, `tmux new-session failed: ${start.stderr}`);
+    // Name the fixture window after the session so the drive-target-check gate sees a deterministic,
+    // matching window name.
+    assert.equal(h.tmx(["rename-window", "-t", `${session}:0`, session]).status, 0, `rename-window failed`);
 
     let ready = false;
     for (let i = 0; i < 100 && !ready; i++) {
@@ -218,7 +225,7 @@ test("AC5 e2e: fresh session (transcript absent) — direct-send path creates th
     result = spawnSync("bash", [SCRIPT, session, marker, "--transcript", transcript], {
       encoding: "utf8",
       timeout: 90000,
-      env: { ...h.env, SUPERVISOR_DELIVER_VERIFY_S: "20" },
+      env: { ...h.env, DRIVE_EXPECT_WINDOW_NAME: session, SUPERVISOR_DELIVER_VERIFY_S: "20" },
     });
     assert.equal(result.status, 0, `fresh-session deliver failed (exit ${result.status}):\nstdout: ${result.stdout}\nstderr: ${result.stderr}`);
     assert.match(result.stdout, /fresh-session/, `adapter should report the fresh-session path:\n${result.stdout}`);
@@ -284,6 +291,9 @@ test("AC5: --root (re-spawn mode) waits for the NEW transcript NOT in the pre-se
   try {
     const start = h.newSession(session, `bash ${fixture}`);
     assert.equal(start.status, 0, `tmux new-session failed: ${start.stderr}`);
+    // Name the fixture window after the session so the drive-target-check gate sees a deterministic,
+    // matching window name.
+    assert.equal(h.tmx(["rename-window", "-t", `${session}:0`, session]).status, 0, `rename-window failed`);
     let ready = false;
     for (let i = 0; i < 100 && !ready; i++) {
       const cap = h.capture(session);
@@ -296,7 +306,7 @@ test("AC5: --root (re-spawn mode) waits for the NEW transcript NOT in the pre-se
     result = spawnSync("bash", [SCRIPT, session, marker, "--root", root], {
       encoding: "utf8",
       timeout: 90000,
-      env: { ...h.env, HOME: h.tmp, SUPERVISOR_DELIVER_VERIFY_S: "20" },
+      env: { ...h.env, HOME: h.tmp, DRIVE_EXPECT_WINDOW_NAME: session, SUPERVISOR_DELIVER_VERIFY_S: "20" },
     });
     assert.equal(result.status, 0, `--root deliver failed (exit ${result.status}):\nstdout: ${result.stdout}\nstderr: ${result.stderr}`);
     assert.match(result.stdout, /fresh-session/, `re-spawn mode should take the fresh path:\n${result.stdout}`);

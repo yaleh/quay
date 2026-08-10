@@ -84,10 +84,19 @@ usage() {
 # an assignment). Fail at startup with exit 1 + the missing path, never silently assign.
 [ -f "$CHECKER" ] || { echo "send-keys-reliable: 缺少校验器 $CHECKER——无法验证送达（依赖未铺？），fail loud" >&2; exit 1; }
 
-# Step 0. The target must exist (positive control: a nonexistent target → fail loud, never a
-# silent 0). Nothing is sent before this check.
-if ! tmux list-panes -t "$TARGET" -F '#{pane_pid}' >/dev/null 2>&1; then
-  echo "send-keys-reliable: 目标 $TARGET 不存在——无法送达" >&2
+# Step 0. Pre-flight target verification (gap-drive-sent-to-manager-pane-not-inner — the three
+# disciplines): the target must NAME a window (`quay-0:inner`), never a numeric index
+# (`quay-0:0.0`), and the target's window name must equal the expected name (env
+# DRIVE_EXPECT_WINDOW_NAME, default `inner`). Fail-closed BEFORE any send-keys/capture-pane — a
+# wrong target (e.g. window 0 = claude/manager, not inner) is never silently driven. The gate is
+# required: a missing gate means the identity promise is broken, so fail loud (same rule as the
+# missing-checker preconditions).
+if [ ! -f "$SCRIPT_DIR/drive-target-check.sh" ]; then
+  echo "send-keys-reliable: 缺少前置校验 $SCRIPT_DIR/drive-target-check.sh——无法确认目标是 inner，fail loud" >&2
+  exit 1
+fi
+if ! DRIVE_EXPECT_WINDOW_NAME="${DRIVE_EXPECT_WINDOW_NAME:-inner}" bash "$SCRIPT_DIR/drive-target-check.sh" "$TARGET"; then
+  echo "send-keys-reliable: 目标 $TARGET 未通过前置校验（非 inner 或数字索引）——中止，不发送" >&2
   exit 1
 fi
 
