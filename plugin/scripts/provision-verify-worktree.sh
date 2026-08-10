@@ -84,4 +84,24 @@ else
   echo "provision-verify-worktree: linked ${root}/node_modules -> ${worktree}/node_modules"
 fi
 
+# 3. Core CLI dist build (manager 2026-08-10 15:0x finding — the 4th gap). `packages/quay/dist/quay.js`
+#    is the CORE CLI build product (needs `npm run build --prefix packages/quay`), gitignored and NOT
+#    covered by worktree-include.sh's declarative copy (only plugin/vendor/*/dist). A fresh worktree
+#    lacks it → the package e2e tests (npm-pack-e2e / install-config-driven-e2e / task-list-root-scope
+#    / sea-bundle-plugin-sidecar, ×5) fail on a missing dist (red r235/r236/r247, 3× over 3.5h).
+#    inner 11:13 had already reported this verbatim: "suite runner needs to build dist before running
+#    npm-pack-e2e". Build runs AFTER the node_modules symlink (build needs deps).
+if [ -f "${worktree}/packages/quay/dist/quay.js" ]; then
+  echo "provision-verify-worktree: packages/quay/dist/quay.js already present, keeping"
+elif [ "${dry_run}" -eq 1 ]; then
+  echo "provision-verify-worktree: [dry-run] would build packages/quay/dist via npm run build --prefix packages/quay"
+else
+  echo "provision-verify-worktree: building packages/quay/dist (npm run build --prefix packages/quay)..."
+  (cd "${worktree}/packages/quay" && npm run build >/dev/null 2>&1) \
+    || { echo "provision-verify-worktree: packages/quay build failed" >&2; exit 2; }
+  [ -f "${worktree}/packages/quay/dist/quay.js" ] \
+    || { echo "provision-verify-worktree: build did not produce packages/quay/dist/quay.js" >&2; exit 2; }
+  echo "provision-verify-worktree: packages/quay/dist/quay.js built"
+fi
+
 exit 0
