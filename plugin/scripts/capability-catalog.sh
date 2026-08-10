@@ -123,6 +123,7 @@ declare -A QUESTION=(
   [claim-task.sh]="Is a task/branch claimed by a specific machine (claim protocol, atomic CAS push)?"
   [claim-task.ts]="Which branch should a candidate task fork from under multi-machine claims (decideClaim)?"
   [closure-lag-check.sh]="Is the outer's async closure pass running on schedule — not-yet-flipped backlog under threshold and the last closure-pass trace fresh (the closure-lag signal; also writes the trace via --record)?"
+  [provision-verify-worktree.sh]="Has a fresh verify worktree been provisioned with the gitignored runtime symlinks (node_modules + .quay/config.yml) it needs to run the full suite — the shared step for both the suite-fix subagent and the outer takeover path?"
   [codex-stage1-live-proof-check.ts]="Is there live, internally-consistent proof that a Codex Stage-1 session did real authorized work?"
   [codex-stage1-selfcheck.sh]="Is the DIR-121 Codex-adoption Stage-1 mechanical self-check satisfied?"
   [concurrent-batch-scheduler.ts]="Which ready tasks can be dispatched concurrently without touching overlapping files?"
@@ -1142,6 +1143,7 @@ declare -A PUBLIC_ENTRYPOINTS=(
   [outer-tick-log-check.sh]="consumer-facing: the outer's no-action-must-carry-all-five-false-evidence detector (B8/B13) in the orchestrator tick docs"
   [monitor-mount-check.sh]="consumer-facing: the loop-monitor mount/aim check in the tick docs"
   [process-budget.sh]="consumer-facing: the total test-process budget authority consumed by test.sh / cap-from-gate / resource-gate"
+  [provision-verify-worktree.sh]="consumer-facing: provision a fresh verify worktree (node_modules + .quay/config.yml symlinks) so it can run the full suite — used by A15 ④ both paths"
   # quay-launch.sh is NOT declared here: it is INTERNAL (surface=internal) — the per-role launch
   # command is invoked by session-bootstrap.sh / quay-topology.sh / this skill set's own inner
   # implementation, never by a consumer. Demoted by
@@ -1153,6 +1155,7 @@ declare -A PUBLIC_ENTRYPOINTS=(
   [real-target-verify.sh]="consumer-facing: the real-downstream install/upgrade verification command in the verification-round docs"
   [resource-gate.sh]="consumer-facing: the resource-safety gate invoked by the tick docs before heavy ops"
   [process-budget.sh]="consumer-facing: the total test-process budget authority consumed by test.sh / cap-from-gate / resource-gate"
+  [provision-verify-worktree.sh]="consumer-facing: provision a fresh verify worktree (node_modules + .quay/config.yml symlinks) so it can run the full suite — used by A15 ④ both paths"
   [send-keys-reliable.sh]="consumer-facing: the reliable send-keys sequence used by ADR-016 remote-drive"
   [session-bootstrap.sh]="consumer-facing: the bare-machine tmux bootstrap in the session-topology skill"
   [supervisor-deliver.sh]="consumer-facing: the single hardened cross-session delivery implementation (deliver(target,payload)) documented in the tick docs / drive-contract (AC37 核随包走引用)"
