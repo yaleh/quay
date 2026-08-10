@@ -1,9 +1,0 @@
-scope_unit=run-p819149-i97275919.scope
-limits_applied=1 memoryMax=4G cpuQuota=200% tasksMax=200
-recorded_at=2026-08-10T13:12:15.317Z
-ControlGroup=/user.slice/user-1000.slice/user@1000.service/app.slice/run-p819149-i97275919.scope
-EffectiveMemoryMax=4294967296
-EffectiveTasksMax=200
-CPUQuotaPerSecUSec=2s
-MemoryMax=4294967296
-TasksMax=200
