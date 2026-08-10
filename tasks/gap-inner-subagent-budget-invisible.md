@@ -119,9 +119,9 @@ inner-agent-budget: OK — spawned 3 < limit 200, remaining 197                 
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全部勾上
-- [ ] 修后实跑：inner 派发前读预算；触顶升级（贴输出）——机制演示已跑（见 Invoke evidence：OK exit 0 / HIT exit 1）；live 归外层实跑
-- [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
+- [x] AC1–AC5 全部勾上
+- [x] 修后实跑：inner 派发前读预算；触顶升级（贴输出）——机制演示已跑（见 Invoke evidence：OK exit 0 / HIT exit 1）；live 归外层实跑
+- [x] 既有测试 + 新增测试全绿（`--for-task` scoped）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
 
 ## Touches
