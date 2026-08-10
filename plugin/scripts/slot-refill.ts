@@ -354,6 +354,14 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
   // should_refill — the event-driven go/no-go. Based on the RECOMMENDED set (candidates that pass
   // the step-4 checks AND are disjoint from in-flight), not the raw pool capacity: a pool whose
   // only member fails touches-resolve must not trigger a refill.
+  //
+  // GAP-OUTER-TICK-CORE-B9-COVERAGE-BLIND-SPOT (2026-08-10): the outer tick-core's B9 force-dispatch
+  // branch consumes `should_refill` + `recommended` as the TWO independently-readable preconditions of
+  // "空槽强制派发" — should_refill=true AND `recommended` non-empty ⇒ the tick MUST dispatch 1-2 (it is
+  // no longer enough that the dispatch QUEUE is empty; a non-empty queue with in_flight=0 and a
+  // dispatchable recommendation is the exact blind-spot the tick now forces). `recommended` is emitted
+  // as a separate array below precisely so the consumer can read "recommended 非空" without re-deriving
+  // it from the boolean — the semantics are: should_refill = (slots_free > 0) ∧ (recommended ≠ ∅).
   let shouldRefill = slotsFree > 0 && recommended.length >= 1;
   let noRefillReason = null;
   if (halt.halted) {
