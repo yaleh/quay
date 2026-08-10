@@ -62,7 +62,7 @@ measure   nproc_wallclock_claim_removed = `grep -c "nproc 是墙钟甜点\|nproc
 band      nproc_wallclock_claim_removed = 0（不再把 cancelled 判据写成墙钟甜点）
 invariant cancelled_and_wallclock_separated = 1（两维度分开表述）
 invariant points_to_controlled_experiment = 1（衔接 AC2 lane 4 vs 8 对照）
-invoke    `grep -n "cancelled\|墙钟\|nproc\|并发" CLAUDE.md | head -10`（贴修后表述）
+invoke    `grep -n "wall-clock\|cancelled\|墙钟" scripts/test.sh | head -10`（贴修后表述——两维度拆分已在 test.sh 头注释，AC2 Evidence 见 :77-79）
 control   cancelled/墙钟分离；不再写墙钟甜点；指向对照实验
 resume    CLAUDE.md 适用范围修正分步提交，任一步完成即写盘
 

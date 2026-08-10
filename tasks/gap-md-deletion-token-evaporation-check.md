@@ -63,7 +63,7 @@ band      evaporation_check_wired >= 1（接线进 run_static_checks）
 invariant whole_set_not_sampled = 1（全集不抽样——逐词条验证）
 invariant zero_occurrence_is_homeless = 1（零出现才算无家,别处仍在=有正本）
 invariant failure_lists_tokens = 1（失败输出词条清单,非布尔）
-invoke    `bash plugin/scripts/<新检查器>.sh --check <复现fixture提交>`（贴输出：3 词条被拦）
+invoke    `bash plugin/scripts/md-deletion-token-evaporation-check.sh --root <复现fixture目录>`（贴输出：3 词条被拦——AC5 实测拦下 ToolSearch/makeWorkspace/gate-gameability 见 Evidence）
 control   触发=净删 ≥50 行；全集不抽样；零出现判定；清单输出；负控制不误报
 resume    检查器 / 接线 / 测试分步提交，任一步完成即写盘
 
