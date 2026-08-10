@@ -90,6 +90,15 @@ packages/quay/plugin/
 # Must stay untracked: it is live observer state (consecutive needs-input samples) that advances and
 # resets every 60s poll; committing it would dirty the tree the transcript composite requires clean.
 **/.quay/.ruling-observer-state.json
+# gap-quay-last-pane-txt-untracked-dirties-tree (2026-08-10): the tick §1 observe pane-snapshot
+# artifacts — `tmux capture-pane -p -t "$TMUX_SESSION" > .quay/last-pane.txt` (outer observes inner,
+# orchestrator-tick-core A4/A7, fast-mode-tick-core A7) and `> .quay/last-outer-pane.txt` (manager
+# observes outer, orchestrator-loop-tick.md AC5). Same live observation-snapshot family as
+# blocked-signals/ / .ruling-observer-state.json — per-tick transient state that must never appear in
+# `git status --porcelain` (un-ignored they dirty the tree and diverge the two "clean" checkers:
+# assert-clean-tree's porcelain vs tree-hygiene-check's KNOWN SCRATCH patterns).
+**/.quay/last-pane.txt
+**/.quay/last-outer-pane.txt
 # outer correction 2026-08-03T02:45:03Z (idle instrumentation): the inner layer's append-only
 # idle-reason log — a separate, non-signal channel from inner-blocked.json. One line per
 # "round ended, no pending work" turn; no duration (the outer computes it from transcript gaps).
