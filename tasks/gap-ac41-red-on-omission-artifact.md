@@ -3,7 +3,7 @@ id: gap-ac41-red-on-omission-artifact
 title: 每条固化行为必须能指出「不做时哪个读数会变红」——指不出的视为未固化；实证：A15 裁定5 在 80
   行核里、每轮必读、阈值明确、计数器建好、catalog 已声明，仍连续 9 轮未被执行直到 .halt；今晚三次有效干预（.halt /
   ruling5_status 自报 / scope=worktree fan-in 闸）全部属这一类
-status: ready
+status: done
 labels:
   - gap
   - defect

@@ -3,7 +3,7 @@ id: gap-load-sensitive-serial-phase-unbounded-growth-measure-first
 title: KNOWN-LOAD-SENSITIVE 标注只进不出、串行相零并行度快速扩容⇒套件轮时长被推高(48h 900-1100s→1847s,标注 3
   倍加速,nproc 未变)；与绿快照活锁同根；处方=③ measure-first 对照实验(串行相内部并发
   2)+②退出机制(根因修完复核标注)+①实验通过则上调默认并发；round-206 AC6 25s 窗超时是活实例
-status: ready
+status: done
 labels:
   - gap
   - defect

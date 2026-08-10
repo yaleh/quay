@@ -2,7 +2,7 @@
 id: gap-inner-serial-main-thread-not-dispatch
 title: inner 执行模式是主线程串行做实现非派发——85 分钟 Edit 41/Agent 2，吞吐恒 1、槽位账全假（OB-SLOT
   测错对象）；常规 ready 任务实现须派 subagent，主线程只做红窗快修+编排+立案
-status: ready
+status: done
 labels:
   - gap
   - defect

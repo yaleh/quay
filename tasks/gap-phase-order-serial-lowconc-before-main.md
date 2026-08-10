@@ -1,9 +1,8 @@
 ---
 id: gap-phase-order-serial-lowconc-before-main
 title: 相执行顺序 serial/lowconc 提到 main 前——实现已落地保留(AC4)；manager 2026-08-10
-  更正:原「轮长≈判红时刻+30s 恒等式」论证是恒等式非测量,任务收缩为论证更正(击杀宽限
-  期语义+移动靶解释+诊断轮评估),不以恒等式为判红依据
-status: ready
+  更正:原「轮长≈判红时刻+30s 恒等式」论证是恒等式非测量,任务收缩为论证更正(击杀宽限 期语义+移动靶解释+诊断轮评估),不以恒等式为判红依据
+status: done
 labels:
   - gap
   - defect

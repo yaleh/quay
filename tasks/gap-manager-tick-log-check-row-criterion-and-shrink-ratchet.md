@@ -1,7 +1,7 @@
 ---
 id: gap-manager-tick-log-check-row-criterion-and-shrink-ratchet
-title: "manager-tick-log-check.sh 行判据只认旧格式 + 无缩水基线——最近 24 轮 tick 行没被数进，277→5 行缩水静默 PASS"
-status: ready
+title: manager-tick-log-check.sh 行判据只认旧格式 + 无缩水基线——最近 24 轮 tick 行没被数进，277→5 行缩水静默 PASS
+status: done
 labels:
   - gap
   - defect

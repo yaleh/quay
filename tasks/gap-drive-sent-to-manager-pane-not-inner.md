@@ -5,7 +5,7 @@ title: 外层驱动错投窗口——quay-0:0.0 是 claude/manager 非 inner(6 �
   无实证(send-keys 退出码 0 当送达)；worktree=0/AC 0/6/零进展的真因是驱动没到达非 inner 卡
   compact；三条纪律:窗口名 quay-0:inner 永不用索引/前置 display-message 校验/delivered 只认 inner
   信号
-status: ready
+status: done
 labels:
   - gap
   - defect

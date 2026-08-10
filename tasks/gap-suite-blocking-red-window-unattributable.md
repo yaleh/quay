@@ -4,7 +4,7 @@ title: "suite_blocking 红窗信号活着却映射不到任务——round-210 �
   不在任何任务 ## Touches ⇒ window_active=true consecutive_red=4 但 tasks=[] 空 ⇒
   红窗信号连改排序的作用都没有,红对派发影响严格为零；与 CROSSCUT plugin/scripts 零覆盖同根(plugin/scripts
   机制层不被索引)；补归因映射+未归因清单"
-status: ready
+status: done
 labels:
   - gap
   - defect

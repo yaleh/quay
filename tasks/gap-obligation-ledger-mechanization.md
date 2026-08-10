@@ -3,7 +3,7 @@ id: gap-obligation-ledger-mechanization
 title: 义务台账机械化——三层只有 inner 携带义务；outer/manager
   的账本是日记不携带义务，「漏了就漏了」是结构原因；需义务一等对象+年龄负反馈+阶梯挂最老年龄（推导非作者写，未处置不能
   no-action），第一个适用对象=outer verification-round
-status: ready
+status: done
 labels:
   - gap
   - defect

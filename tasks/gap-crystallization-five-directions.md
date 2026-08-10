@@ -4,7 +4,7 @@ title: 熔融-结晶张力五方向实现——①失效前提可测 ②零调�
   全历史表态+禁止最近没用为唯一退休理由+默认待观察) ③last-reaffirmed ④checker-lib抽取
   ⑤审视者(归manager);证据=A结晶点熔融(182机件49%零调用)/B条文理由失效无触发器/ C判据形态错/D可见不执行;理由档案
   orchestrator-loop-tick §熔融-结晶张力五方向
-status: ready
+status: done
 labels:
   - gap
   - mechanism

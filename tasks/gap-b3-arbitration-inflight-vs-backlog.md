@@ -3,7 +3,7 @@ id: gap-b3-arbitration-inflight-vs-backlog
 title: B3 ①(in_flight<cap 派发)与 ④(integration 领先且 suite 绿)冲突无仲裁——④ 是 ① 的下游约束但 B3
   把五条写成独立强制动作；当前 integration 169 排红门后(01:05 162→01:15 169,develop 9.6h)填满 cap=5
   是加 WIP 不加吞吐(新做完的变 174)；处方=④ 被红阻塞且积压>阈值时 ① cap 收窄到修红所需
-status: ready
+status: done
 labels:
   - gap
   - defect
