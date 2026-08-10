@@ -3,7 +3,7 @@ id: gap-claude-md-nproc-wallclock-claim-scope-correction
 title: CLAUDE.md「nproc 是墙钟甜点/8 是 4.25× 超订」判据是 08-08 成本实验的 cancelled
   数非墙钟；同日墙钟数据(lane=8 783s vs lane=4
   1302s,−22%~−40%)指向相反——改适用范围(cancelled+墙钟两维度拆分,非删结论),衔接 lane 4 vs 8 对照实验
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -43,10 +43,10 @@ extra: {}
 
 ## Definition of Done
 
-- [ ] AC1–AC4 全部勾上
-- [ ] 修后实跑：CLAUDE.md 两维度表述贴任务体；cancelled/墙钟分离
-- [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
+- [x] AC1–AC4 全部勾上
+- [x] 修后实跑：CLAUDE.md 两维度表述贴任务体；cancelled/墙钟分离
+- [x] 既有测试 + 新增测试全绿（`--for-task` scoped）
+- [x] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证（round-227 green，2026-08-10，ffa24a28 在 verified commit 018d5868）
 
 ## Touches
 

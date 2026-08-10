@@ -2,7 +2,7 @@
 id: gap-md-deletion-token-evaporation-check
 title: md 删除 164 行时三种机件名全蒸发无人拦——抽样当全集的判据形态错(今晚第 5 次同族, 来源完备性硬规则⑤无产物);处方=「提交净删
   *.md ≥50 行 ⇒ 算被删内容独有词条集, 零出现即失败+打清单」的静态检查(全集不抽样/零出现才算无家/失败给清单不给布尔, 判准③枚举不布尔)
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -44,10 +44,10 @@ extra: {}
 
 ## Definition of Done
 
-- [ ] AC1–AC7 全部勾上
-- [ ] 修后实跑：对 manager 事故的复现 fixture 跑通（拦下 3 词条）+ 正常编辑不误报（贴输出）
-- [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
+- [x] AC1–AC7 全部勾上
+- [x] 修后实跑：对 manager 事故的复现 fixture 跑通（拦下 3 词条）+ 正常编辑不误报（贴输出）
+- [x] 既有测试 + 新增测试全绿（`--for-task` scoped）
+- [x] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证（round-227 green，2026-08-10，e5a15273 在 verified commit 018d5868）
 
 ## Touches
 
