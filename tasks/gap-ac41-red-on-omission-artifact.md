@@ -65,7 +65,6 @@ extra: {}
 - tasks/gap-suite-fix-scope-worktree-green-merge-gate.md（交叉标注——scope=worktree 闸是有效干预实例）
 - tasks/gap-ac41-actionize-state-worded-clauses.md（交叉标注——同 AC41 判据 1）
 - tasks/gap-ac41-coldstart-skill-reference-only.md（交叉标注——同 AC41 判据 2）
-- tasks/gap-semantic-observer-judge-stopped-awaiting.md（交叉标注——变红产物判据的执行体：judge 输出 stopped:true 而本轮 tick-log 无对应升级记录 ⇒ 变红；AC41③ 的观测层实例）
 - tasks/gap-ac41-red-on-omission-artifact.md（自身：勾 AC + 贴证据）
 
 ## Contract

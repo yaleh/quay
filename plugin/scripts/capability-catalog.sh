@@ -209,7 +209,6 @@ declare -A QUESTION=(
   [select-static-checks-for-touches.ts]="Which static checks should a scoped run execute for this change's touched files (change-relevant tier)?"
   [select-tests-for-touches.ts]="Which tests should run for this task's ## Touches?"
   [self-report-vocab-audit.ts]="Do the inner's recent self-reports avoid batch-style vocabulary (reanchor convergence)?"
-  [semantic-observer-judge.ts]="Is the inner/outer layer semantically stopped and awaiting an external action — reading FREE TEXT (heartbeat reason + tick report transcript), not just structured fields — outputting {stopped, awaiting, needs, contradictsStructured, confidence}, where contradictsStructured names the failure (structured says blocked=[], free text says 'dispatch stopped, awaiting outer /clear')?"
   [self-report-vocab-check.ts]="Has the inner layer's self-reported vocabulary drifted from the shipped semantics (reanchor convergence)?"
   [send-keys-reliable.sh]="Did the reliable five-step send-keys sequence land in the foreign session?"
   [serial-fanin-absorb.ts]="How should concurrent survivors be absorbed serially at fan-in?"
