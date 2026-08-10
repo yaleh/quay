@@ -1123,3 +1123,13 @@ tick 或 `/clear` 后的会话会重犯。
 | `.quay/verification-round.jsonl` | 外层异步收尾的轮次记录（`closed` 清单 + `suiteGreen`；gitignored 运行时态，步骤 1b 写） |
 | `adr/ADR-021-*.md` | 四项原则 |
 | `docs/proposals/exp6-queue-driven-concurrent-executor.md` §0 | 两阶段交付范围 |
+
+## suite-health 三件套（A15/B15）——理由档案（2026-08-10 人裁定，执行核只留动作）
+
+**分档依据**：`durationMs` 分布——1000s 打全部轮 30%，完整轮(>400s)里 49%（中位 734s / p75 1122s / p90 1838s / max 2480s；近 24h 29%）。**所以 1000s 不是异常告警（一半完整轮都超标），是分析触发器**；>1800s(p90) 才升级。
+
+**假阳性方法论（人裁定）**：适当的假阳性可接受，只要有配套的语义分析去检查确认——机械触发要宽（宁多触发），语义判定交 schema agent，假阳性不是缺陷而是「被记录并被解释的」。
+
+**为什么用 workflow（根因）**：执行核已有 closure-lag 三件套（A10 触发/A14 心跳/B2 record）完全可复用，workflow 缺的正是这套——每项必产出都可手写，调不调用纯凭意志。让 suite-health 判词成为**只有 workflow 能产生的必产出**（手写判词不被接受，检查读的是带时间戳的结构化产物是否新鲜），与 closure-lag `--record` 心跳同构。**任务不是机制**：立任务进池子=进队列（gap-pool-quality-semantic-gate AC3 即此，status=ready AC 0/5 卡住）——此条直接入执行核。
+
+**触发分档（宽网，算术写死脚本——ADR-033）**：末轮 `durationMs>1000_000 ∨ state=red ∨ merge 被门拒 ∨ 距上次记录 >K 轮` ⇒ 必跑 suite-health-judge workflow。
