@@ -44,12 +44,36 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录应然（三件形状 + 两条硬性质 + manager 实例 OB-AC28/OB-SLOT）+ 已知弱点（任务体 Proposal 已含；内层补：构造「上轮未处置义务被跳过」复现）
-- [ ] AC2: **义务一等对象 + 推导义务集**——`{id, 条件, 真假, first_true_at, ticks_true, discharged_at, discharged_by, defer_reason}`；义务集由读数推导（非作者写）——同一条件在两轮产生同一 id，漏写即漏记
-- [ ] AC3: **年龄负反馈**——tick 读数段含「上轮未处置义务按年龄降序」；处置顺序按年龄不按成本；跳过使下一轮更靠前（构造：老义务跳过 ⇒ 下一轮排最前）
-- [ ] AC4: **升级阶梯挂最老年龄**——`最老未处置义务的 age ≥ 阈值` ⇒ 升级（不挂内容）；`nyf>5` 类实例阈值不算（写一条只治一条）
-- [ ] AC5: **不满足不能收**——verification-round 记录携带推导义务集；未处置或未显式 defer（理由+解阻塞条件）⇒ 不能闭轮（与 inner DoD gate 同构，构造「未处置义务 + 强行闭轮」⇒ 拒绝）
-- [ ] AC6: **既有机制不回归**——`--for-task` scoped 门绿（含 ledger / verification-round 契约检查）
+- [x] AC1: **复现固化**——任务体记录应然（三件形状 + 两条硬性质 + manager 实例 OB-AC28/OB-SLOT）+ 已知弱点（任务体 Proposal 已含；内层补：构造「上轮未处置义务被跳过」复现——见 Evidence 第 1-2 轮：OB-SLOT round-1 live 未处置 ⇒ round-2 同一 id 年龄 1→2、仍在最老未处置位）
+- [x] AC2: **义务一等对象 + 推导义务集**——`{id, 条件, 真假, first_true_at, ticks_true, discharged_at, discharged_by, defer_reason}`；义务集由读数推导（非作者写）——同一条件在两轮产生同一 id，漏写即漏记（deriveObligationId 确定；缺读数 ⇒ live:null/未查，fail-closed 拦闭轮）
+- [x] AC3: **年龄负反馈**——tick 读数段含「上轮未处置义务按年龄降序」；处置顺序按年龄不按成本；跳过使下一轮更靠前（构造：老义务跳过 ⇒ 下一轮排最前——Evidence：`undischargedByAgeDesc` 把 age=2 的 OB-SLOT 排最前；`--oldest` 输出 `OB-SLOT 2`）
+- [x] AC4: **升级阶梯挂最老年龄**——`最老未处置义务的 age ≥ 阈值` ⇒ 升级（不挂内容）；`nyf>5` 类实例阈值不算（写一条只治一条）——Evidence：`--age-threshold 3` 时 oldest_age=3 ⇒ `escalate:true`
+- [x] AC5: **不满足不能收**——verification-round 记录携带推导义务集；未处置或未显式 defer（理由+解阻塞条件）⇒ 不能闭轮（与 inner DoD gate 同构，构造「未处置义务 + 强行闭轮」⇒ 拒绝）——Evidence：round-2 未处置 ⇒ `--round-close-check` 输出 `CANNOT-CLOSE` exit 1；defer 后 ⇒ `CAN-CLOSE` exit 0
+- [x] AC6: **既有机制不回归**——`--for-task` scoped 门绿（含 ledger / verification-round 契约检查）——`./scripts/test.sh --for-task gap-obligation-ledger-mechanization` EXIT:0，38 测试全绿
+
+## Evidence（inner 2026-08-10，Contract invoke 构造两轮贴回）
+
+`node --no-warnings --experimental-strip-types plugin/scripts/obligation-ledger.ts --report`（两轮 + `--oldest` + `--round-close-check`）：
+
+```
+ROUND 1 --report（同一条件 → 推导出 id=OB-SLOT；live=true 未处置 ⇒ canClose=false，exit 1）：
+  {"id":"OB-SLOT","key":"SLOT","live":true,"first_true_at":1,"ticks_true":1,
+   "discharged_at":null,"defer_reason":null}
+  ladder: {"escalate":false,"oldest_age":1,"threshold":3}   canClose: false
+
+ROUND 2 --report（跳过 ⇒ 同一 id，年龄 1→2，仍在最老未处置位）：
+  {"id":"OB-SLOT","key":"SLOT","live":true,"first_true_at":1,"ticks_true":2,
+   "discharged_at":null,"defer_reason":null}
+  ladder: {"escalate":false,"oldest_age":2,"threshold":3}   canClose: false
+
+--oldest（band：age 随轮次单调升 1→2）：OB-SLOT 2
+--round-close-check（未处置强行闭轮 ⇒ 拒绝，exit 1）：CANNOT-CLOSE: 1 undischarged undeferred live obligation(s): OB-SLOT(live=true)
+
+--report --round 3 --age-threshold 3（年龄到阈值 ⇒ 升级）：
+  ladder: {"escalate":true,"oldest_age":3,"threshold":3}
+--defer OB-SLOT --reason "阻塞在人的裁定" --unblock "人裁定"（显式 defer ⇒ 闭轮成功）：
+  --round-close-check：CAN-CLOSE  exit 0
+```
 
 ## Definition of Done
 
@@ -61,9 +85,17 @@ extra: {}
 ## Touches
 
 - .quay/verification-round.jsonl（verification-round 义务集推导 + 台账——outer 第一个适用对象；gitignored 运行态文件，义务集进记录形状）
-- plugin/scripts/obligation-ledger.ts（年龄/排序/阶梯 JS 确定性部分，或扩 manager-obligation-ledger 机制）
-- plugin/scripts/（「已处置」语义 agent——带 schema，同 no-action-check agent 族）
+- plugin/scripts/obligation-ledger.ts（年龄/排序/阶梯 JS 确定性部分——推导义务集/算年龄/按年龄降序/升级阶梯/闭轮闸）
+- plugin/scripts/obligation-discharge-agent.ts（「已处置」语义判定 schema 契约——带 schema，同 no-action-check agent 族；ADR-033）
+- plugin/scripts/obligation-ledger-check.ts（顶层完整性审计——接进 scripts/test.sh 静态检查）
+- plugin/scripts/checker-mutation-cases/obligation-ledger-check.sh（新 checker 的 mutation case）
+- plugin/test/obligation-ledger.test.mjs（AC2/AC3/AC4/AC5 + Contract）
+- plugin/test/obligation-ledger-check.test.mjs（顶层审计 checker 的测试）
+- plugin/test/obligation-discharge-agent.test.mjs（「已处置」schema 契约测试）
+- plugin/test/verification-round.test.mjs（AC5：round 记录携带推导义务集；未处置不能闭轮）
+- plugin/test/manager-obligation-ledger.test.mjs（交叉标注——manager 实例形状与机械化推导对齐）
 - scripts/test.sh（顶层审计接进静态检查——机械核对台账完整性）
+- plugin/scripts/capability-catalog.sh（注册新脚本——catalog 是唯一清单，硬规则 1）
 - orchestration/manager-obligation-ledger.jsonl（交叉标注——manager 实例，形状参照）
 - tasks/gap-obligation-ledger-mechanization.md（自身：勾 AC + 贴证据）
 
