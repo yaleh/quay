@@ -34,7 +34,7 @@
 
 ## B. 每轮必产出
 
-- **B1 tick 第一步 = `Workflow({scriptPath:'.claude/workflows/manager-tick-core.js'})`,再照它返回的
+- **B1 tick 第一步 = `Workflow({scriptPath:'.claude/workflows/manager-tick-core.js', args:{prior:<本轮读数差异 + 台账最近 12 条 `id｜condition` 的紧凑已入账清单>}})`,再照它返回的
   `指令.第一/二/三/四步` 做**——判准活在磁盘上、跨 clear/compact 稳定,**不是"我记得应用"**;自带
   meta-cc 自审段。**手写判词不被接受**;缺读数按「缺值=未查」判不可判,不得写 `no-action`。活跃集
   `AC20-AC34`,主判据 `AC28`。**调查型工作走后台 subagent**(人量化门槛 5-8 分钟)。**2026-08-10:我
