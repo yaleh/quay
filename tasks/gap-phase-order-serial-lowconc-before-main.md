@@ -72,12 +72,12 @@ extra: {}
 
 ## Contract
 
-measure   red_judged_after_main_phase = 红轮判红时刻 − serial 相完成时刻（重排后）
-band      red_judged_after_main_phase < 0（判红不再被主相延迟——serial/lowconc 先跑，红即时判）
+measure   red_judged_after_main_phase = `python3 -c "import json;d=json.load(open('.quay/full-suite-state.json'));print(d.get('redAt',''))"` 的 redAt − serial 相完成时刻（重排后，判红不再被主相延迟）
+band      red_judged_after_main_phase = < 0（`redAt` 时刻落在 serial 相完成之前/同时——serial/lowconc 先跑，红即时判）
 invariant green_round_duration_not_worse = 1（重排后绿轮总时长 ≤ 重排前对照）
 invariant phase_independence_preserved = 1（serial/lowconc 先跑不污染 main；main 后跑不受影响）
 invariant phase_order_has_test_coverage = 1（相顺序断言测试存在且绿）
-invoke    `bash scripts/test.sh --group serial 2>&1 | tail -3` + `bash scripts/test.sh --group lowconc 2>&1 | tail -3`（独立跑仍绿）+ 全量一轮贴判红时刻
+invoke    `bash scripts/test.sh --group serial 2>&1 | tail -3` && `bash scripts/test.sh --group lowconc 2>&1 | tail -3`（独立跑仍绿）+ 全量一轮贴判红时刻
 control   判红提前（分钟级非整轮末尾）；绿轮不退化；相独立；既有不回归
 resume    相顺序重排 / 判红实测 / 绿轮对照分步提交，任一步完成即写盘
 
