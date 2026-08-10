@@ -498,6 +498,16 @@ export interface SuiteRoundRecord {
    * on non-git hermetic roots / legacy rows.
    */
   commit?: string;
+  /**
+   * gap-suite-round-record-missing-failures-field AC2 — the SuiteFailure array on RED rounds (the
+   * SAME array the suite-state write carries), so the red-window attribution can reverse-look-up
+   * "failed file → task Touches" from the round sequence across rounds — not only the latest
+   * full-suite-state.json (single-round coverage). Present on every red round (reason=failed /
+   * static-check; an aborted round carries the empty redFailures array — it produced no failure
+   * conclusion); absent on green rounds (绿轮可无). Legacy rows lack the field — a reader must
+   * tolerate its absence.
+   */
+  failures?: SuiteFailure[];
 }
 
 /**
@@ -1492,6 +1502,12 @@ export async function run(argv: string[]): Promise<number> {
     // gap-merge-green-snapshot-verified-commit-livelock AC2 — the verified commit this round tested
     // (same value the state carries). Absent on non-git hermetic roots.
     ...(verifiedCommit ? { commit: verifiedCommit } : {}),
+    // gap-suite-round-record-missing-failures-field AC2 — a RED round carries the SAME SuiteFailure
+    // array the suite-state write carries (finalFailures — the redFailures/staticCheckFailures the
+    // state already recorded), so verification-round.jsonl becomes a multi-round-queryable sequence
+    // for "failed file → task Touches" attribution. Green rounds omit it (绿轮可无) — all other
+    // round-record fields stay byte-identical for non-red rounds.
+    ...(finalState.state === "red" ? { failures: finalFailures } : {}),
   });
   // NOTE: appendVerificationRound above is the ONE suite-duration append per run (the
   // checker-cost.test.mjs AC6 contract: two runs ⇒ exactly two verification-round.jsonl lines).

@@ -38,6 +38,8 @@ extra: {}
 
 **验证锚**：修后 (a) verification-round.jsonl 红轮带 failures 字段；(b) 历史红轮参与归因；(c) 裸 basename 失败文件能命中 Touches（形状归一）。
 
+**交叉标注（内层实现 2026-08-10，落地于 gap-suite-round-record-missing-failures-field）**：上述选定的机制方向已由实现任务落地——`SuiteRoundRecord` 加 `failures?: SuiteFailure[]` 且红轮写入（与 state 同源）；`computeSuiteBlocking` 经 `collectFailureFiles` 消费 per-round failures（历史轮可归因）+ `failureFileMatches` 做裸 basename ↔ 相对路径形状归一匹配。实测：round-210 裸 basename 与 round-212 相对路径都命中同一 Touches；`a/foo.ts` 失败不误配 `b/foo.ts`。本任务 AC2/AC3/AC4 的复现与实现证据见实现任务 Evidence 段。
+
 ## Acceptance Criteria
 
 - [ ] AC1: **复现固化**——任务体记录实证（209 轮 failures=0、SuiteRoundRecord 无 failures、done 任务正确排除、failures[].file 形状不一致：相对路径 vs 裸 basename）（本任务 Proposal 已含）

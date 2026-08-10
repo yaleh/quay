@@ -1096,6 +1096,55 @@ test("AC2/AC3 e2e — an `ℹ fail 1` (info-glyph summary) suite flips red with 
   }
 });
 
+// ── gap-suite-round-record-missing-failures-field: AC2 (round record carries failures on red) ────────
+// The round-210 attribution hole: verification-round.jsonl round records lacked a `failures` field
+// (209 rounds measured without it), so the red-window reverse-lookup "failed file → task Touches"
+// could only read the single-round full-suite-state.json. AC2: a RED round's record carries the SAME
+// SuiteFailure array the suite-state write carries; a GREEN round's record omits it (绿轮可无).
+
+test("AC2 — a RED run's verification-round record carries the failures[] array mirroring the suite-state (gap-suite-round-record-missing-failures-field)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-roundfail-"));
+  const { f, dir } = fakeSuite('echo "not ok 1 - boom"\necho "ℹ tests 1"\necho "ℹ pass 0"\necho "ℹ fail 1"\necho "ℹ cancelled 0"\nexit 1');
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    assert.equal(code, 1, "runner exits 1 on red");
+    const s = readState(root);
+    assert.equal(s.state, "red", "not ok 1 flips state to red");
+    assert.ok(s.failures && s.failures.length >= 1, `suite-state carries failures[]; got ${JSON.stringify(s.failures)}`);
+    const roundFile = path.join(root, ".quay", "verification-round.jsonl");
+    assert.ok(fs.existsSync(roundFile), "verification-round.jsonl written");
+    const rounds = fs.readFileSync(roundFile, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+    assert.ok(rounds.length >= 1, "a verification-round record is appended");
+    const rec = rounds[rounds.length - 1];
+    assert.equal(rec.state, "red", "round record state is red");
+    assert.ok("failures" in rec, "red round record carries the failures field (Contract: red_round_failures_recorded = 1)");
+    assert.ok(Array.isArray(rec.failures), "red round record failures is an array");
+    assert.equal(rec.failures.length, s.failures.length, "round-record failures mirror the suite-state failures (same array)");
+    assert.equal(rec.failures[0].line, s.failures[0].line, "round-record failure line equals the state failure line");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC2 — a GREEN run's verification-round record omits failures (绿轮可无; non-red fields byte-identical)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-roundgreen-"));
+  const { f, dir } = fakeSuite(GREEN_SUITE);
+  try {
+    const child = runRunner({ root, command: `bash ${f}`, laneCount: 8 });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, "runner exits 0 on green");
+    const roundFile = path.join(root, ".quay", "verification-round.jsonl");
+    const rec = JSON.parse(fs.readFileSync(roundFile, "utf8").trim().split("\n").filter((l) => l.trim())[0]);
+    assert.equal(rec.state, "green");
+    assert.ok(!("failures" in rec), "green round record omits the failures field");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("AC2/AC3 e2e — a `✖ <testname> (Nms)` spec-reporter failure line flips red with failures non-empty", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-specx-"));
   const { f, dir } = fakeSuite(

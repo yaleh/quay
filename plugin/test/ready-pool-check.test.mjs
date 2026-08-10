@@ -1659,6 +1659,49 @@ test("computeSuiteBlocking: red window + Touches hit ⇒ task flagged; negative 
   assert.equal(green.ids.size, 0);
 });
 
+test("computeSuiteBlocking: round-record failures attribute cross-round + bare-basename shape normalized (AC3 — gap-suite-round-record-missing-failures-field)", () => {
+  const tasks = new Map([
+    ["gap-script", { status: "ready", body: "## Touches\n- plugin/scripts/send-keys-verified.sh" }],
+    ["gap-other", { status: "ready", body: "## Touches\n- plugin/scripts/unrelated.ts" }],
+  ]);
+  const expand = (globs) => new Set(globs); // concrete declared paths resolve to themselves
+
+  // round-210 carries a BARE BASENAME (`send-keys-verified.sh`), round-212 a REPO-RELATIVE path —
+  // the exact shape inconsistency the task notes. BOTH must attribute the same full-path touch.
+  const mixedRounds = [
+    { round: 210, state: "red", reason: "failed", failures: [{ file: "send-keys-verified.sh" }] },
+    { round: 211, state: "red", reason: "failed", failures: [{ file: "send-keys-verified.sh" }] },
+    { round: 212, state: "red", reason: "failed", failures: [{ file: "plugin/scripts/send-keys-verified.sh" }] },
+  ];
+  const r = computeSuiteBlocking({ rounds: mixedRounds, stateFailures: [], tasks, expand });
+  assert.equal(r.consecutiveRed, 3);
+  assert.equal(r.windowActive, true);
+  assert.ok(r.ids.has("gap-script"), "bare-basename failure file attributes to the full-path touch (round-210 form normalized)");
+  assert.ok(!r.ids.has("gap-other"), "unrelated task not flagged");
+
+  // Two FULL repo-relative paths sharing only a basename must NOT over-attribute (a/foo.ts vs b/foo.ts).
+  const dirTasks = new Map([
+    ["gap-a", { status: "ready", body: "## Touches\n- a/foo.ts" }],
+    ["gap-b", { status: "ready", body: "## Touches\n- b/foo.ts" }],
+  ]);
+  const fullPathRounds = Array.from({ length: 3 }, () => ({ state: "red", reason: "failed", failures: [{ file: "a/foo.ts" }] }));
+  const r2 = computeSuiteBlocking({ rounds: fullPathRounds, stateFailures: [], tasks: dirTasks, expand });
+  assert.ok(r2.ids.has("gap-a"), "exact full-path match attributes");
+  assert.ok(!r2.ids.has("gap-b"), "same basename in a different directory does NOT over-attribute a full-path failure");
+
+  // Cross-round attribution: the failure detail lives ONLY in an OLD round (round-208); the two
+  // LATER rounds carry no failures. The red window must still attribute via the old round's record
+  // (the task's whole point — historical rounds attributable, not just the current state file).
+  const crossRound = [
+    { round: 208, state: "red", reason: "failed", failures: [{ file: "plugin/scripts/send-keys-verified.sh" }] },
+    { round: 209, state: "red", reason: "failed" },
+    { round: 210, state: "red", reason: "failed" },
+  ];
+  const r3 = computeSuiteBlocking({ rounds: crossRound, stateFailures: [], tasks, expand });
+  assert.equal(r3.consecutiveRed, 3);
+  assert.ok(r3.ids.has("gap-script"), "an old round's recorded failure attributes across the red window (round-record reverse-lookup)");
+});
+
 test("computeRelevance: suite-blocking flips blocking true + boosts value (AC2/AC3 unit)", () => {
   const empty = new Map();
   // without the signal: plain 1-touch task values at costBenefit 1, blocking false.
