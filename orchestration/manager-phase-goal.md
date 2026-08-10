@@ -218,6 +218,13 @@ mechanisms 是 `cap-from-gate` / `slot-refill`——**那是 inner 的机制**�
 **⚠ 窗口 N 暂不设数值**——按硬规则 4「成本结构未知前不要设阈值」，先记趋势，
 **等两次完整运行后再标定**（2026-08-10 08:48→09:03 的 `.halt` 闭环已是 ④ 的第一个样本）。
 
+**交叉标注（AC40/AC41③ 同域，2026-08-10 11:3x）**：AC40 的「L2 持续正确驱动」与 AC41 判据 3
+（red-on-omission）在执行层有一个共同执行体——**语义观测器 judge**
+（`tasks/gap-semantic-observer-judge-stopped-awaiting`）：它读 inner/outer **自由文本**（心跳 `reason` +
+tick 报告全文）判「停了/在等谁/等什么」，`contradictsStructured` 命名「结构化字段与自由文本矛盾」，
+且 `stopped:true` 而 tick-log 无升级 ⇒ **变红**（AC41③ 产物）。它直接防止今晚的失效类（inner 停 2.5h
+未发现——只因只读结构化字段），是 AC40「持续驱动」与 AC41③「不做即变红」的观测层执行体。
+
 ---
 
 ## 【已暂停 · 保持核对】【人裁定 2026-08-09 06:5xZ】本阶段目标 = 实现三层统一架构 SPEC
