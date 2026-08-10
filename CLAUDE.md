@@ -18,6 +18,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | 判准 / 收尾 / 发消息形态 | `orchestration/manager-tick-{criteria,closing,sending}.md`（466 行；**停调 workflow 19 小时 ⇒ 这些全部缺席 ⇒ 8 条违规**） |
 | 收件箱 delivered→consumed | `plugin/scripts/inbox-reader.sh`（**不是 `ls`**） |
 | pane 状态 | `plugin/scripts/pane-state-classify.ts`（底部区域 + 枚举态，**不是整屏哈希**） |
+| **诊断「空槽 + 池里有货 + 就是不派」** | **先查 subagent 预算,不要先怀疑机制** —— harness 有**会话级累计** spawn 上限，触顶后**静默降级为主线程串行**，三层执行核都不写它。识别：目标会话 transcript 里搜 `Subagent spawn limit reached`；实测燃烧率 ~60 次/天 ⇒ 默认额度约 **3 天**寿命，**任何长于 3 天的自主运行必然撞它**。数值、环境变量名、`/clear` 是否重置、两个易混旋钮（会话累计 vs 并发）——**正本在 `tasks/gap-inner-subagent-budget-invisible.md`，不在此处复制**（数值随 Claude Code 版本变）。**代价实证 2026-08-10：三层 + 人共花数小时反复误诊为「outer 不派发」「inner 自锁」「唤醒链断」，全错。** |
 
 ## 认识论硬规则（不随代码过期；标注了各自靠什么保证）
 
