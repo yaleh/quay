@@ -1255,11 +1255,26 @@ export async function run(argv: string[]): Promise<number> {
       // subprocess stuck) must not leak the runner + single-flight flock (round-164).
       if (!redGraceArmed) {
         redGraceArmed = true;
-        redGraceTimer = setTimeout(() => {
+        const rescheduleOrKill = () => {
           if (runDone) return;
-          process.stderr.write(`full-suite-runner: red conclusion but suite child did not exit within ${Math.round(RED_GRACE_MS / 1000)}s — killing child tree (kill-on-red, AC2)\n`);
+          // manager 2026-08-10 15:1x (gap-phase-order-serial-lowconc-before-main × kill-on-red): the
+          // red grace timer must only kill a HUNG child (no new output for RED_GRACE_MS), not one that
+          // is still producing results. test.sh:956 runs phases EVEN IF a later phase fails ("report
+          // all failures" — round-95 AC3); the runner's unconditional kill-on-red cancelled that when a
+          // serial/lowconc file reds FIRST, so the main phase (281 files, 89% of the suite) never ran.
+          // lastOutputAt is updated on EVERY line (the silence guard), so "still producing" = fresh.
+          // If the subtree is still emitting output, reschedule the grace window instead of killing
+          // (the run will finish main and land its real red at the terminal write). A truly hung child
+          // (no output for RED_GRACE_MS) still escalates the kill — the round-164 flock-leak protection
+          // is preserved.
+          if (Date.now() - lastOutputAt < RED_GRACE_MS) {
+            redGraceTimer = setTimeout(rescheduleOrKill, RED_GRACE_MS);
+            return;
+          }
+          process.stderr.write(`full-suite-runner: red conclusion but suite child is silent for ${Math.round(RED_GRACE_MS / 1000)}s — killing child tree (kill-on-red, AC2)\n`);
           killChildTreeEscalating();
-        }, RED_GRACE_MS);
+        };
+        redGraceTimer = setTimeout(rescheduleOrKill, RED_GRACE_MS);
       }
       // AC3b — timestamp the red flip (the early-RED detection-latency observation point).
       redAtIso = new Date().toISOString();

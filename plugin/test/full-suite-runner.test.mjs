@@ -1219,6 +1219,35 @@ test("AC2 e2e — a RED suite whose test.sh hangs is killed after the red-grace 
   }
 });
 
+test("AC2 e2e — a RED suite STILL PRODUCING OUTPUT is NOT killed on red-grace; it runs to completion (report-all-failures, manager 2026-08-10 15:1x)", async () => {
+  // round-95 AC3 principle: phases run EVEN IF a later phase fails. The runner's kill-on-red must
+  // only kill a HUNG child (silent for RED_GRACE_MS), not one still emitting results — otherwise a
+  // serial/lowconc red (which runs FIRST per test.sh phase order) kills the whole tree before the
+  // main phase (281 files, 89%) ever runs. This fake suite reds early, then keeps producing output
+  // (simulating main still running) and exits on its own — the runner must NOT escalate the kill.
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-stillprod-"));
+  const { f, dir } = fakeSuite(
+    'echo "not ok 1 - boom"; for i in $(seq 1 30); do echo "line $i - still running"; sleep 0.1; done; exit 1',
+  );
+  try {
+    const child = runRunner({ root, command: `bash ${f}`, env: { QUAY_TEST_RED_GRACE_MS: "800" } });
+    const { code } = await waitExit(child);
+    const s = readState(root);
+    assert.equal(s.state, "red", "the red conclusion stands");
+    assert.equal(s.reason, "failed", `a real failure is never downgraded to timeout/hung: got ${s.reason}`);
+    assert.ok(s.failures && s.failures.length >= 1, `the not-ok failure must be recorded; got ${JSON.stringify(s.failures)}`);
+    // The suite ran its full body (all 30 'still running' lines) and exited itself — the runner did
+    // NOT kill it at the red-grace seam (a kill would cut the output short).
+    assert.ok(code !== 0, "runner exits non-zero on the red");
+    // Assert the suite body completed: the last 'still running' line reached the log (not killed mid-way).
+    const log = fs.readFileSync(path.join(root, ".quay", "full-suite.log"), "utf8");
+    assert.match(log, /line 30 - still running/, "the suite's final line must appear — NOT killed at red-grace");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("AC2/AC3 e2e — a `__PERFILE__ ... passed=false` per-file line flips red and carries the failed file in failures[]", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-pf-"));
   const { f, dir } = fakeSuite(
