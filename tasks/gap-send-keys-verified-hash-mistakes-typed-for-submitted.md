@@ -15,7 +15,7 @@ extra: {}
 
 ## Proposal（2026-08-10 撤销——基于误判立的 sibling 任务）
 
-**本任务（gap-send-keys-verified-hash-mistakes-typed-for-submitted）基于误判 false-done 而立项——原任务 gap-send-keys-verified-hash-check 的 done+superseded 是正确关闭（ruling F 用 send-keys-reliable.sh 取代），工具判据已是 transcript-delivery-check.ts（纯判据：目标会话 transcript 真实 user 消息），不存在 typed/submitted 问题。本任务撤销。**
+**本任务（tasks/gap-send-keys-verified-hash-mistakes-typed-for-submitted.md）基于误判 false-done 而立项——原任务 gap-send-keys-verified-hash-check 的 done+superseded 是正确关闭（ruling F 用 send-keys-reliable.sh 取代），工具判据已是 transcript-delivery-check.ts（纯判据：目标会话 transcript 真实 user 消息），不存在 typed/submitted 问题。本任务撤销（证据见本行路径——invoke 入口路径已入正文）。**
 
 ### 实证（manager 2026-08-10 更正 + outer 复核）
 
