@@ -38,7 +38,7 @@ extra: {}
 - [x] AC2: **counter 与实际文件一致**——`inbox-summary` 报 delivered=6（数文件，不脱离）（候选 A）
 - [x] AC3: **上层可看到未读**——A5/执行核判据改列目录本身（`ls .quay/manager-inbox/`），不依赖 unread 计数器（候选 B）
 - [x] AC4: **处理留痕**——处理后有 consumed/回执痕迹（delivered≠consumed 语义明确）
-- [ ] AC5: **既有机制不回归**——`--for-task` scoped 门绿（含 supervisor-bus 契约检查）
+- [x] AC5: **既有机制不回归**——`--for-task` scoped 门绿（含 supervisor-bus 契约检查）
 
 ## Definition of Done
 
@@ -70,6 +70,8 @@ unread: file=archguard-20260806-101500Z.md
 **AC4**：`<f>.consumed` sidecar = 消费痕迹（`unread: file=<f>` 消失、consumed 计数 +1）。新增测试覆盖：`.md` 计 delivered、sidecar 计 consumed、混合 json+md 各一行 unread。
 
 **新增测试**：`plugin/test/supervisor-bus-identity.test.mjs` +3（AC2 md 计 delivered / AC4 sidecar consumed / 混合两标识），全文件 9/9 pass。
+
+**AC5 invoke（2026-08-10 inner 复核）**：`./scripts/test.sh --for-task gap-inbox-counter-disconnected-from-files --allow-thin` → exit 0。supervisor-bus-identity 测试 9/9 pass（fail 0, cancelled 0）：Contract claim-human-test ×2、AC4 inbox-summary ×3、AC2 `.md` 计 delivered、AC4 sidecar consumed、AC2 混合 json+md、usage fail-loud。scoped 静态检查全 PASS：task-contract-check（strict-subset 本任务文件无 violation）、adr016-screen-use-check、superseded-capability-check、dead-code-after-return-check、strategic-doc-staleness-check、state-worded-clause-check、instrument-failure-check。复跑 invoke 证据：`ls .quay/manager-inbox/` = 6 文件，`bash plugin/scripts/supervisor-bus-identity.sh inbox-summary` → `delivered=6 consumed=0 unread=6`。
 
 ## Touches
 
