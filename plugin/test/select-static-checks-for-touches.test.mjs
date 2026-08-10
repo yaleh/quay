@@ -119,9 +119,14 @@ t("AC1 — a NEW plugin/scripts file in the touches selects capability-catalog (
     registry,
     { newTouches: ["plugin/scripts/new-helper.sh"] },
   );
-  assert.ok(selected.some((s) => s.name === "capability-catalog"),
-    `capability-catalog must be selected for a new plugin/scripts touch: ${selected.map((s) => s.name)}`);
-  const cc = selected.find((s) => s.name === "capability-catalog");
+  // NOTE: `capability-catalog` is ALSO a real tier=always registry entry since a37df1c5
+  // (superseded-capability-check runs capability-catalog.sh --superseded-check), so it is present
+  // in EVERY scoped set. The VIRTUAL AC1c gate (the `--json` mode, gap-capability-catalog-
+  // declarations-not-enforced-at-script-creation) is the checker under test here — select by the
+  // `--json` command-line marker, not the bare name, to distinguish it from the always-tier entry.
+  assert.ok(selected.some((s) => s.name === "capability-catalog" && s.commandLine.includes("--json")),
+    `the capability-catalog AC1c --json gate must be selected for a new plugin/scripts touch: ${selected.map((s) => s.name)}`);
+  const cc = selected.find((s) => s.name === "capability-catalog" && s.commandLine.includes("--json"));
   assert.match(cc.commandLine, /capability-catalog\.sh/, "the selected checker runs the catalog script");
   assert.match(cc.commandLine, /--json/, "the catalog runs in its machine-readable AC1c mode");
   // The emitted command resolves ${repo_root} exactly like every registry command line.
@@ -137,8 +142,11 @@ t("AC1 — a task with NO new plugin/scripts touch does NOT select capability-ca
     registry,
     {},
   );
-  assert.ok(!selected.some((s) => s.name === "capability-catalog"),
-    `capability-catalog must NOT be selected when nothing is a new plugin/scripts file: ${selected.map((s) => s.name)}`);
+  // Since a37df1c5, capability-catalog is a real tier=always registry entry (superseded-capability-
+  // check) and IS selected for every task — the virtual AC1c --json gate is the NEW-file-only
+  // checker, so the negative assertion targets the --json gate, not the always-tier entry.
+  assert.ok(!selected.some((s) => s.name === "capability-catalog" && s.commandLine.includes("--json")),
+    `the capability-catalog AC1c --json gate must NOT be selected when nothing is a new plugin/scripts file: ${selected.map((s) => s.name)}`);
 });
 
 t("AC1 — a `(new)`-tagged plugin/scripts touch selects capability-catalog (CLI end-to-end)", async () => {
@@ -227,8 +235,10 @@ t("AC3 — a task touching an ALREADY-declared script (claim-task.sh) does NOT s
     registry,
     {}, // no newTouches — nothing in this change is a NEW script
   );
-  assert.ok(!selected.some((s) => s.name === "capability-catalog"),
-    `claim-task.sh is already declared — no false positive: ${selected.map((s) => s.name)}`);
+  // The real capability-catalog tier=always entry (superseded-capability-check) is always present
+  // since a37df1c5; the VIRTUAL AC1c --json gate must NOT be selected for an already-declared script.
+  assert.ok(!selected.some((s) => s.name === "capability-catalog" && s.commandLine.includes("--json")),
+    `claim-task.sh is already declared — no false positive (no --json gate): ${selected.map((s) => s.name)}`);
   // And claim-task.sh genuinely IS declared in the real catalog (the AC3 precondition).
   const src = fs.readFileSync(CATALOG, "utf8");
   assert.match(src, /\[claim-task\.sh\]=/, "claim-task.sh must have a QUESTION-table entry (AC3 precondition)");
@@ -242,8 +252,8 @@ t("AC3 — a task touching the catalog's own script file does NOT select capabil
     registry,
     {},
   );
-  assert.ok(!selected.some((s) => s.name === "capability-catalog"),
-    `capability-catalog.sh itself is an existing tracked script — editing it must not re-trigger the scan: ${selected.map((s) => s.name)}`);
+  assert.ok(!selected.some((s) => s.name === "capability-catalog" && s.commandLine.includes("--json")),
+    `capability-catalog.sh itself is an existing tracked script — editing it must not re-trigger the --json gate: ${selected.map((s) => s.name)}`);
 });
 
 // ── AC4: negative control — only NEW plugin/scripts files trigger; zero impact on existing artifact ──
@@ -256,8 +266,8 @@ t("AC4 — a `(new)` touch OUTSIDE plugin/scripts does NOT select capability-cat
     registry,
     { newTouches: ["docs/proposals/exp5-x.md"] },
   );
-  assert.ok(!selected.some((s) => s.name === "capability-catalog"),
-    `a new non-plugin/scripts file must not trigger the catalog: ${selected.map((s) => s.name)}`);
+  assert.ok(!selected.some((s) => s.name === "capability-catalog" && s.commandLine.includes("--json")),
+    `a new non-plugin/scripts file must not trigger the catalog --json gate: ${selected.map((s) => s.name)}`);
 });
 
 t("AC4 — a glob touch (not a concrete new file) does NOT select capability-catalog", async () => {
@@ -268,8 +278,8 @@ t("AC4 — a glob touch (not a concrete new file) does NOT select capability-cat
     registry,
     { newTouches: [] },
   );
-  assert.ok(!selected.some((s) => s.name === "capability-catalog"),
-    `a bare glob is not a concrete new file: ${selected.map((s) => s.name)}`);
+  assert.ok(!selected.some((s) => s.name === "capability-catalog" && s.commandLine.includes("--json")),
+    `a bare glob is not a concrete new file (no --json gate): ${selected.map((s) => s.name)}`);
 });
 
 t("AC4 — isGitUntracked unit: false for non-git, false for tracked, true for an on-disk untracked file", async () => {

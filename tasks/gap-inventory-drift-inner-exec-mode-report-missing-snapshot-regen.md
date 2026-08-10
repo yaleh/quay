@@ -39,11 +39,18 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **本次闭环**——`verify-delivery-surface --inventory --write-inventory` 重生成快照 181→182，`--inventory` drift=0，`verify-delivery-surface.test.mjs` solo 绿（贴 diff）
-- [ ] AC2: **接线（根治）**——新脚本任务（Touches 含 `plugin/scripts/*(new)`）触发 `--inventory` 漂移检查（scoped 静态层或 fan-in 闸，机制执行时定），漂移即报/拒，不再靠全量验证轮
-- [ ] AC3: **既有不回归**——capability-catalog 的 scoped 机制不动（同族已 done 的 `gap-capability-catalog-...` 保持）；`--for-task` scoped 门绿
-- [ ] AC4: **负控制**——不重扫全 artifact（只查新脚本的 delta，存量 0 影响）；快照正确时不误报
-- [ ] AC5: **历史 5 次不复现**——halt-check/spec-goal/accounting-emit/DIR-043/inner-exec-mode 五例的快照在检查下均无漂移
+- [x] AC1: **本次闭环**——`verify-delivery-surface --inventory --write-inventory` 重生成快照，`--inventory` drift=0，`verify-delivery-surface.test.mjs` solo 绿（25/25）
+  - 实证：fork 的 develop 已含后续重生（7d2faf06 等，snapshot=194 匹配 disk=194），本任务的字面 181→182 已被后续 merge 超越——`--write-inventory` 幂等（无 diff），drift=0。solo：`node --test plugin/test/verify-delivery-surface.test.mjs` ⇒ tests 25 pass 25 fail 0
+- [x] AC2: **接线（根治）**——新脚本任务（Touches 含 `plugin/scripts/*(new)`）触发 `--inventory` 漂移检查（scoped 静态层），漂移即报，不再靠全量验证轮
+  - 实现：`select-static-checks-for-touches.ts` 新增 `DELIVERY_INVENTORY_CHECKER`（`verify-delivery-surface.ts --inventory`），与 `CAPABILITY_CATALOG_CHECKER` 同信号（`(new)` tag 或 git-untracked 的 `plugin/scripts/*`）加入 scoped 集
+  - 实证：构造新脚本任务（Touches 含 `plugin/scripts/foo-new-check.ts (new)`）⇒ selector `--names` 输出含 `delivery-inventory`；该检查实跑：snapshot=1 + 磁盘新加 1 脚本 ⇒ `[DRIFT] scripts: disk=2 snapshot=1` `inventory_drift=1` exit=1；`--write-inventory` 后 drift=0
+- [x] AC3: **既有不回归**——capability-catalog 的 scoped 机制不动（同族已 done 的 `gap-capability-catalog-...` 保持）；`--for-task` scoped 门绿
+  - `--for-task gap-inventory-drift-inner-exec-mode-report-missing-snapshot-regen` ⇒ tests 36 pass 36 fail 0 EXIT=0（含 verify-delivery-surface 25 + select-static-checks 11）
+  - 附带吸收：`select-static-checks-for-touches.test.mjs` 6 个既有断言因 a37df1c5（superseded-capability-check 使 capability-catalog 成为真实 tier=always registry 条目）而 stale——按 `--json` 标记区分虚拟 AC1c 闸而非裸名，断言修复为绿（该文件不在本任务 Touches，但 AC3 的「scoped 门绿」要求它绿；不动机制，只修测试预期）
+- [x] AC4: **负控制**——不重扫全 artifact（只查新脚本的 delta，存量 0 影响）；快照正确时不误报
+  - fixture 测试：快照正确 ⇒ `--inventory` exit 0 drift=0 不误报；存量脚本任务（无新 plugin/scripts）⇒ selector 不选 `delivery-inventory`
+- [x] AC5: **历史 5 次不复现**——halt-check/spec-goal/accounting-emit/DIR-043/inner-exec-mode 五例的快照在检查下均无漂移
+  - 测试断言 4 个可定位历史脚本存在（halt-check.sh / accounting-emit.ts / external-dogfooding-check.ts / inner-exec-mode-report.ts；spec-goal 为 goal-store fan-in），且真实 bundle `--inventory` drift=0
 
 ## Definition of Done
 
@@ -54,10 +61,11 @@ extra: {}
 
 ## Touches
 
-- plugin/scripts/verify-delivery-surface.ts（若接线走 scoped 静态层：`--inventory` 已在；可能加 `--write-inventory` 调用点）
-- plugin/scripts/select-static-checks-for-touches.ts（AC2 若选 scoped 层：新脚本任务含 verify-delivery-surface）
-- plugin/test/verify-delivery-surface.test.mjs（AC2 若选 fan-in 闸或 scoped：新增新脚本→漂移即报 fixture）
-- docs/proposals/quay-product-outline.md（AC1：本次快照 181→182 重生成）
+- plugin/scripts/verify-delivery-surface.ts（`--inventory`/`--write-inventory` 已有，未改）
+- plugin/scripts/select-static-checks-for-touches.ts（AC2 scoped 层：新增 DELIVERY_INVENTORY_CHECKER 虚拟检查器）
+- plugin/test/verify-delivery-surface.test.mjs（AC2/AC4/AC5 新增 5 测试：新脚本→漂移即报 fixture、负控制、selector 接线、历史 5 例）
+- plugin/test/select-static-checks-for-touches.test.mjs（AC3 吸收既有 stale 断言修复——a37df1c5 使 capability-catalog 成真实 tier=always 条目后，6 断言按 `--json` 区分虚拟闸而非裸名；不属本任务原 Touches，但 scoped 门绿要求它绿，故吸收并在此登记）
+- docs/proposals/quay-product-outline.md（AC1：snapshot 已=194 匹配 disk=194，`--write-inventory` 幂等无 diff）
 - tasks/gap-inventory-drift-inner-exec-mode-report-missing-snapshot-regen.md（自身：勾 AC + 贴证据）
 
 ## Contract

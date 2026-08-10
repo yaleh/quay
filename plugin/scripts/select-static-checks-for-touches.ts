@@ -79,6 +79,25 @@ export const CAPABILITY_CATALOG_CHECKER = {
   commandLine: 'run_checker "capability-catalog" bash "${repo_root}/plugin/scripts/capability-catalog.sh" --json',
 };
 
+/**
+ * The DELIVERY-INVENTORY drift check (gap-inventory-drift-inner-exec-mode-report-missing-snapshot-
+ * regen, AC2): the outline §6 DELIVERY-INVENTORY snapshot is a DERIVED copy of disk's
+ * plugin-bundle directory counts, validated by verify-delivery-surface.ts --inventory. A NEW
+ * plugin/scripts file (the `(new)` tag or git-untracked — the same signal CAPABILITY_CATALOG_CHECKER
+ * uses) changes disk's scripts count, so the snapshot MUST be regenerated (--write-inventory).
+ * Before this scoped-only VIRTUAL checker, a task that added a new script shipped scoped-green and
+ * the drift surfaced only at the full-suite verification round (5 instances: halt-check/spec-goal/
+ * accounting-emit/DIR-043/inner-exec-mode). Pulling --inventory into the scoped tier for new-script
+ * tasks turns the scoped gate red at creation time when the snapshot was not regenerated.
+ */
+export const DELIVERY_INVENTORY_CHECKER = {
+  name: "delivery-inventory",
+  tier: "change",
+  objects: [],
+  scopedMode: null,
+  commandLine: 'run_checker "delivery-inventory" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/verify-delivery-surface.ts" --inventory',
+};
+
 // ── Repo-root detection (mirrors select-tests-for-touches.ts) ─────────────────────────────────────────
 
 export function findRepoRoot(startDir = path.dirname(fileURLToPath(import.meta.url))) {
@@ -297,11 +316,16 @@ export function selectStaticChecksForTouches(touches, registry, opts = {}) {
   }
   // AC1 (gap-capability-catalog-declarations-not-enforced-at-script-creation): a NEW plugin/scripts
   // file in this change pulls the capability-catalog AC1c entry-point gate into the scoped tier.
+  // AC2 (gap-inventory-drift-inner-exec-mode-report-missing-snapshot-regen): the SAME new-file
+  // signal ALSO pulls the DELIVERY-INVENTORY drift check — a new script changes disk's scripts count,
+  // and the outline §6 snapshot is a derived copy that must be regenerated (--write-inventory);
+  // without this wiring the drift surfaced only at the full-suite round (5 prior instances).
   const newTouches = opts && opts.newTouches ? opts.newTouches : [];
   const newPluginScript = [...new Set(newTouches.map(normalizeRel))]
     .some((t) => matchesObject("plugin/scripts/", t));
   if (newPluginScript) {
     selected.push(CAPABILITY_CATALOG_CHECKER);
+    selected.push(DELIVERY_INVENTORY_CHECKER);
   }
   return { selected, deferred };
 }
@@ -344,8 +368,10 @@ Selection rule (AC1/AC3, parsed mechanically from scripts/test.sh's run_static_c
   scoped = { tier=always } ∪ { tier=change whose object ∩ touches } − { tier=full }
   tier annotations live in scripts/test.sh (never hand-listed here).
   PLUS: a NEW plugin/scripts file in the touches ((new) tag or git-untracked) adds the
-  capability-catalog AC1c entry-point gate to the scoped set
-  (gap-capability-catalog-declarations-not-enforced-at-script-creation).
+  capability-catalog AC1c entry-point gate AND the DELIVERY-INVENTORY drift check
+  (verify-delivery-surface.ts --inventory) to the scoped set
+  (gap-capability-catalog-declarations-not-enforced-at-script-creation /
+   gap-inventory-drift-inner-exec-mode-report-missing-snapshot-regen).
 
 Output modes:
   --commands (default) — concrete shell commands for the selected checkers (one per line)
