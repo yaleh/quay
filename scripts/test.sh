@@ -384,7 +384,7 @@ run_static_checks() {
   #      外层不直接改代码") must be consistent with the cores' run_in_background dispatch — an
   #      unconditional prohibition reddens; the 收窄/单一写入者/共享树 narrowing passes.
   # @static-tier always
-  # @static-object orchestration/manager-tick-core.md orchestration/orchestrator-tick-core.md orchestration/fast-mode-tick-core.md orchestration/outer-brief-2026-08-04-third-restart.md orchestration/QUAY-OUTER-HANDOFF.md orchestration/exp6-phase1-sustained-unattended-operation.md orchestration/orchestrator-loop-tick.md plugin/scripts/tick-core-static-check.ts plugin/test/tick-core-static-check.test.mjs
+  # @static-object orchestration/manager-tick-core.md orchestration/orchestrator-tick-core.md orchestration/fast-mode-tick-core.md orchestration/outer-brief-2026-08-04-third-restart.md orchestration/QUAY-OUTER-HANDOFF.md orchestration/exp6-phase1-sustained-unattended-operation.md plugin/loop/orchestrator-loop-tick.md plugin/scripts/tick-core-static-check.ts plugin/test/tick-core-static-check.test.mjs
   run_checker "tick-core-static-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/tick-core-static-check.ts" --root "${repo_root}"
   echo "== instrument-failure check (gap-manager-instrument-failures-need-mechanical-detection-not-carefulness, AC3) =="
   # The manager instrument-failure five-family detector (FAMILY-1..5 in the checker header). The

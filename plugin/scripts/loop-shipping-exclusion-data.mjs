@@ -171,6 +171,21 @@ export function exclusionEntries(repoRoot, pluginDir) {
       reason: "tests the instrument against its deployed-layout scan surface (copySurfaceTo copies DEFAULT_SURFACE incl. the orchestration/ deployed copies); target-layout reference, same class as the instrument itself",
     },
     {
+      rel: 'plugin/scripts/tick-core-static-check.ts',
+      target: path.join(pluginDir, 'scripts', 'tick-core-static-check.ts'),
+      reason: "the execution-core static-coverage checker's PROHIBITION_DOCS intentionally includes the deployed outer tick doc at orchestration/orchestrator-loop-tick.md (the boundary table) alongside the deployed execution cores + prohibition docs — it scans the deployed docs the outer loop actually runs against (same target-layout class as instrument-failure-check / no-manager-tick-doc-check, surfaced by the AC1b scan 2026-08-10 on the tick-core-static-check fan-in)",
+    },
+    {
+      rel: 'plugin/scripts/checker-mutation-cases/tick-core-static-check.sh',
+      target: path.join(pluginDir, 'scripts', 'checker-mutation-cases', 'tick-core-static-check.sh'),
+      reason: "mutation-case fixture whose scan surface MUST match tick-core-static-check.ts PROHIBITION_DOCS (writes the deployed orchestration/orchestrator-loop-tick.md boundary-table doc into its temp root) — the 'must match' invariant makes it a mirror of the checker's deployed-layout surface, same class as checker-mutation-cases/instrument-failure-check.sh",
+    },
+    {
+      rel: 'plugin/test/tick-core-static-check.test.mjs',
+      target: path.join(pluginDir, 'test', 'tick-core-static-check.test.mjs'),
+      reason: "tests the checker against its deployed-layout scan surface (PROHIBITION_DOCS fixtures incl. orchestration/orchestrator-loop-tick.md written into the baseline root); target-layout reference, same class as instrument-failure-check.test.mjs",
+    },
+    {
       rel: 'plugin/test/quay-init-loop.test.mjs',
       target: path.join(pluginDir, 'test', 'quay-init-loop.test.mjs'),
       reason: "asserts quay-init's DEPLOYED layout — quay-init.sh lays tick docs at orchestration/orchestrator-loop-tick.md + docs/analysis/fast-mode-loop-tick.md (target layout); the assertion verifies the consumer workspace tracks the deployed copies, not a stale source-copy reference",
