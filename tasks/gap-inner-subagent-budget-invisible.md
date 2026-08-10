@@ -8,6 +8,8 @@ parent: null
 children: []
 extra: {}
 ---
+
+> **RETIRED (A16 人 2026-08-10 11:5x 裁定)**——本任务建的 `inner-agent-budget-report.ts` 计数机制已整体废弃并删除（计数是我方自造的，Claude Code 无查询余量接口；`gap-retire-inner-agent-budget-report` 执行删除）。上层只观察下层失能，不自计数。
 **type:** execution
 
 ## Proposal
