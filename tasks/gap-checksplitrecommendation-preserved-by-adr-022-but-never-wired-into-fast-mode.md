@@ -178,3 +178,25 @@ Zero hits in any fast-mode tick/skill/checker file (`task-contract-check.ts`,
 reviewer: none
 at: 2026-08-04T10:5xZ
 changed: 无（外层建任务，裁定 gap-recursive-guard 时发现的更基础缺口；未经正式闸口审查）
+
+## 从 CLAUDE.md 搬入（2026-08-10，manager）
+
+CLAUDE.md 曾用 38 行（占该文件 13%）复制本任务的路由表与阈值裁定。按「必经路径只放指针」原则搬回此处，
+CLAUDE.md 只留指针。**以下两段是 CLAUDE.md 独有、此前不在本任务体里的内容，原样保存：**
+
+**路由表（`checkSplitRecommendation` 返回 `splitRecommendation.code` 时的处置）**
+
+| Code | Action | Rationale |
+|---|---|---|
+| `split-multi-mechanism` | 自动记录 split + 建子任务 | 不可修——范围需改章程。>2 个可独立落地的机制 |
+| `split-touch-set-too-large` | 自动记录 split + 收窄 touches | 不可修——面太宽（>8 文件） |
+| `split-subsystem-blocking-cluster` | **先消费 repairable bypass** | 可修——一次聚焦的 delta 修订可能关掉全部 findings；bypass 是每代一次性（`splitBypassAvailable` 在 `deltaRound === 0` 消费） |
+| `split-recursive-guard` | **路由到 needs-human，不自动拆** | 二级叶子仍多机制 ⇒ 真缺陷在上游分解太浅；自动再拆只会加重 |
+
+**记录 split 决定后必须验证已被落实**：①父任务 `children:` frontmatter 已填；②每个子任务
+`tasks/<childId>.md` 在盘上存在；③每个子任务 `status: todo` + `parent:` 反链；④M 号已分配（开发类）。
+**决定了但没建子任务 = 不完整**，任务处于 limbo（`status: todo`、无从执行）。
+
+**阈值裁定（CLAUDE.md 独有，此前不在本任务体）**：`checkSplitRecommendation` 里的 **`> 2` 机制阈值
+校准正确——不要调整它**。DIR-126 的五个子任务（各 1 机制，全部完成）与 DIR-124-B/F 的拆分（4/6 机制，
+分解正确）共同确认了该阈值。把覆盖项数成机制数，是 `extractMechanismClaims` 的校准问题，**不是阈值缺陷**。

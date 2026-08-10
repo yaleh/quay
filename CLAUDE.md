@@ -2,6 +2,35 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+> **本文件是唯一每会话自动注入的文档 —— 它的行数是本仓库最稀缺的资源。**
+> 因此只放两类东西：**① 指向正本的指针；② 不随代码演化过期的纪律。**
+> 任何清单、命令块、参数表都属于它们各自的正本，**在这里复制一份就是制造漂移**
+> （实证 2026-08-10：`:204` 教了三天已被 `ruling F` 取代的做法，339 次绕过由此而来，
+> 而没有任何检查发现——**覆盖率最高的位置，错误的杀伤力也最大**）。
+
+## 每轮必经（只放指针，清单在正本里）
+
+| 要做什么 | 正本（**不要在本文件复制其内容**） |
+|---|---|
+| 有哪些机件、各自回答什么问题 | `bash plugin/scripts/capability-catalog.sh`（182 条声明，**唯一清单**） |
+| 驱动/投递到别的 Claude 会话 | `plugin/scripts/supervisor-deliver.sh <目标> <文本> --transcript <目标会话.jsonl>`（`--root` 只用于重生会话）；规程见 `orchestration/CRYSTALLIZED-reliable-send-2026-08-04.md` |
+| 三层每轮该做什么 | `orchestration/{manager,orchestrator,fast-mode}-tick-core.md`（各 ≤80 行，执行路径） |
+| 判准 / 收尾 / 发消息形态 | `orchestration/manager-tick-{criteria,closing,sending}.md`（466 行；**停调 workflow 19 小时 ⇒ 这些全部缺席 ⇒ 8 条违规**） |
+| 收件箱 delivered→consumed | `plugin/scripts/inbox-reader.sh`（**不是 `ls`**） |
+| pane 状态 | `plugin/scripts/pane-state-classify.ts`（底部区域 + 枚举态，**不是整屏哈希**） |
+
+## 认识论硬规则（不随代码过期；标注了各自靠什么保证）
+
+1. **用机件，不手搓**——动作前先查 catalog 有没有同类工具。〔产物：投递工具名进记录 / `A16` 按位置计数〕
+2. **按位置判定，不按关键词**——注释、字符串、消息正文里提到不算命中。〔产物：复用 `drive-contract-check.ts` / `test-framework-policy-check.ts` 的判定手法〕
+3. **枚举，不布尔**——布尔化的存在性检查会把「对象没了」伪装成「检查失败」。〔产物：判准③ 要求写出条数与清单〕
+4. **一个结构上不可能取假的量，不是测量**——恒等式、自证、回显都属此类。〔**无产物，靠自觉**〕
+5. **来源完备性**：在某来源搜不到 X，只有当该来源对 X 完备时才等于「X 不存在」。〔**无产物，靠自觉**〕
+6. **缺值 = 未查**，不是「为假」。〔产物：判定入口校验，缺键即拒出结论〕
+7. **要求记录某动作，就不能把该动作排在记录之后**。〔产物：收尾顺序=先清扫后写日志〕
+8. **编号/命名不得复用**——否则缺席被伪装成在场。〔产物：`甲乙丙丁戊` 与判准 `①-⑤` 分离〕
+9. **可见性 ≠ 执行**：一条规则若「守」与「不守」在记录上无法区分，它就只能靠意志——**该给它造产物，不是把它写得更醒目**。
+
 ## What this repo is
 
 `quay` is a **provider-agnostic task board**: a small **Core** CLI/MCP client + a pluggable
@@ -12,149 +41,18 @@ an autonomous loop under `experiments/`. Both layers coexist — the `packages/`
 
 ## Commands
 
-No `package.json` scripts and no build step (plain ESM Node ≥20; repo developed on Node 25). `npm install` at the root (npm workspaces, `packages/*`).
+无 `package.json` scripts、无构建步骤（纯 ESM，Node ≥20；开发机 Node 25）。根目录 `npm install`（npm workspaces, `packages/*`）。
 
-- **Node floor (source execution):** the source CLI runs via `node --experimental-strip-types`,
-  which requires **Node ≥ 22.6** (gap-no-active-node-version-check-users-cant-tell-upgrade). The
-  pure-JS entry `packages/quay/bin/quay.js` probes `process.versions.node` and fails with a clear
-  upgrade message on older Node (instead of node's bare `bad option`); it then spawns the real TS
-  CLI under `--experimental-strip-types`. The shipped npm bin (`dist/quay.js`) is a bundle that runs
-  on the **dist floor (Node 20, `dist-verify-node-floor` CI)** — the source and dist floors are
-  judged separately.
-- **Run the CLI:** `node packages/quay/bin/quay.js <cmd>` (Core, version-probing entry), or
-  `node --experimental-strip-types packages/quay/bin/quay.ts <cmd>` on Node ≥ 22.6,
-  `node --experimental-strip-types packages/quay-native/bin/quay-native.ts <cmd>` (native provider directly).
-- **Tests** (Node's built-in runner, `.mjs` under each package's `test/`):
-  - **Canonical entrypoint: `scripts/test.sh`** (ADR-019/DIR-109) — the single script both this
-    file and `.github/workflows/ci.yml` invoke; it owns the test-file glob
-    (`packages/*/test/*.test.mjs plugin/test/*.test.mjs`) and derives its default concurrency
-    from `max(1, floor(nproc / 1.0))` = nproc (gap-no-resource-awareness-heavy-ops-run-blind AC5;
-    AMPLIFICATION was 2.1 until the cost-side experiment ran 2026-08-08 —
-    `gap-dod-two-green-runs-and-over90-budget-are-mathematically-incompatible` AC1/AC3: zero
-    cancelled at concurrency 4 AND 8, nproc is the wall-clock sweet spot, "avoid cancel" refuted;
-    the old hardcoded 8 was a 4.25× oversubscription on 4 cores — 8 workers + spawned subprocesses
-    = 17 processes; see `gap-concurrency-derivation-reverted-but-doc-ac-and-tests-all-still-report-derived`
-    for the 2026-08-03 TEMPORARY pin to 8 and its 2026-08-06 revert to the derived form — the
-    dead-code-after-return static check bans that pin shape from returning). The 17-process
-    oversubscription number is the cross-annotation baseline of
-    `gap-test-concurrency-cap-does-not-scope-nested-spawns`: the derivation is now BUDGET-AWARE —
-    default = `max(1, floor((nproc − in_use) / 1.0))` where `in_use` = node-MainThread processes
-    already running across ALL worktrees (single authority `plugin/scripts/process-budget.sh`,
-    total_budget = nproc), so nested spawns can no longer multiply beyond the total budget. An explicit
-    `--test-concurrency=N` always overrides (ci.yml pins it for the 10-minute budget). The full-suite default path
-    also consults the shared resource gate (`plugin/scripts/resource-gate.sh --for full-suite`) and exits
-    non-0 on WAIT. Do not hand-write a new copy of the glob or an exclusion list elsewhere — edit the script.
-  - Full safe-by-default suite: `scripts/test.sh` (no args)
-  - Single file: `scripts/test.sh packages/quay/test/gate.test.mjs`
-  - Single test by name: `scripts/test.sh --test-name-pattern="flag before id" packages/quay/test/gate.test.mjs`
-  - Coverage: `scripts/test.sh --experimental-test-coverage` (flags-only form KEEPS the default
-    glob — extra node `--test` flags alone run the same selected set, `--test-concurrency=N` and
-    friends still last-flag-win over the derived default; every glob-selected run self-reports
-    `selected N files (groups=…)`). Flags-only value flags MUST use the `=` spelling
-    (`--test-concurrency=4`); a space-separated value (`--test-concurrency 4`) is treated as a file
-    path and silently auto-discovers (see scripts/test.sh header).
-    For a coverage run over an explicit subset: `scripts/test.sh --experimental-test-coverage packages/quay/test/*.mjs`.
-  - **SCOPED STATIC-CHECK TIER** (gap-scoped-runs-pay-full-static-check-overhead, AC1/AC2/AC6): a
-    task-scoped run (`scripts/test.sh --for-task <id>` / `--scoped <id>`, the inner loop's per-task
-    verification) runs the **change-relevant** static-check subset — checkers whose object intersects
-    the task's `## Touches` (e.g. test-framework-policy/test-isolation when a test file is touched,
-    the doc/shell ratchets when their objects are touched) PLUS the `## Contract` consumer on the
-    TOUCHED task files (`--strict-subset`, AC4-i) — **skipping** `checker-mutation-check` (~13s) and
-    the unrelated repo-level ratchets. The mapping is MECHANICAL: `plugin/scripts/
-    select-static-checks-for-touches.ts` parses the `# @static-tier <always|change|full>` /
-    `# @static-object <glob>…` annotations in `scripts/test.sh`'s `run_static_checks()` (the same
-    single source checker-mutation-check.sh parses — never a hand-maintained list, AC3). The COMPLETE
-    set (run_static_checks) is byte-unchanged and always runs in full-suite mode (`scripts/test.sh`
-    no-args / `--static-checks`) — the outer verification-round gate is NOT weakened (AC2). Trade-off
-    (AC6): **scoped = fast feedback on the change; full = complete gate.** A scoped skip is DEFERRED
-    to the full-suite gate, never dropped — an unrelated repo-level ratchet violation is not caught by
-    the scoped run and MUST be caught by the full run (AC4-ii). `--static-checks` runs the complete
-    static set with no test run (the outer's gate-only surface).
-  - **3 files hit LIVE GitHub** (`packages/quay/test/serve-github.test.mjs`,
-    `provider-abi-conformance.test.mjs`, `cli-edit-parity-conformance.test.mjs`) — each declares
-    its OWN in-file `node:test` skip condition (ADR-019 decision #1), so `scripts/test.sh`'s
-    default glob always includes them and a credential-less run reports them `skipped`, not
-    silently excluded. Opt in with `QUAY_TEST_LIVE_GITHUB=1 scripts/test.sh` (requires
-    `GH_TOKEN`/`gh auth login` with access to `yaleh/quay`; they FAIL if that repo's state drifts
-    from what the fixture assumes).
-  - Tests build a temp workspace with a real `.quay/config.yml` (see `makeWorkspace()` in a test file) — a bare tasks dir is NOT a valid workspace; the config is a **provider map** with `mcp_entry`/`path`/`env`, not a flat tasks path.
-  - **NOT covered by `scripts/test.sh`** (DIR-111/ADR-019 decision #5 — named explicitly, not
-    silently absent): **packaging e2e** — the `dist-verify-node-floor` CI job builds the real
-    npm-pack tarball, installs it, and runs it on the declared Node floor, no `*.test.mjs` file
-    involved; and **browser/agent-driven e2e** — a milestone-cadence, MCP-tool-driven manual/agent
-    process (Playwright/chrome-devtools), `status: proposed` in `adr/ADR-010-scheduled-milestone-
-    e2e-incl-browser-tests.md`. A green `scripts/test.sh` run is evidence for neither category.
-  - **Cross-cut scoped selection (gap-scoped-selection-blind-to-packaging-state-diff):** scoped
-    selection (`scripts/test.sh --for-task <id>`) is blind to packaging-vs-source diffs — a task
-    touching `packages/*/src` resolves its own unit tests but NOT the packaging-state tests
-    (`npm-pack-e2e`/`build-dist`/`plugin-packaging`), the ADR-conformance check (`check-adr`), or a
-    lint check, so a src-touching task can be scoped-green and still break the packaged artifact
-    (archguard TASK-62/64/65/66 — the same three-project, three-check pattern). The selector
-    (`plugin/scripts/select-tests-for-touches.ts`) carries a **cross-cut marker** (AC2): cross-cut
-    checkers enter the `--for-task` selection whenever a touch triggers the registry, regardless of
-    basename pairing; the author SKILL.md task template defaults new-code ACs to a cross-cut checklist
-    (lint-clean + check-adr 0 violations + packaging-state by task type — AC1/AC5). Pure plugin/doc
-    tasks get no cross-cut tests (AC6 — scoped stays sub-second). The cross-cut packaging tests are a
-    **proxy**, not the floor proof — the real Node-floor artifact still needs the `dist-verify-node-floor`
-    CI job above (DIR-111). Cross-annotated with adaptive concurrency (`cap-from-gate.sh` +
-    `concurrent-batch-scheduler.ts`, same mechanism-once-reused-downstream principle).
-  - **Test-framework policy (gap-no-test-framework-policy-for-new-tests, AC1):** NEW test files
-    MUST use `node:test` (`import { test } from "node:test"`). Enforced mechanically by
-    `plugin/scripts/test-framework-policy-check.ts` (wired into `scripts/test.sh` via
-    `run_static_checks`, alongside the split-or-commit scan): every file in the canonical glob must
-    either import `node:test` or be on the legacy exemption list
-    (`plugin/test-framework-policy-exemptions.txt`, **currently 34 files** — the pre-existing
-    hand-rolled `makeAssert()`/`failures`-counter tests, 12,204 lines, measured 2026-08-02 in
-    `orchestration/test-shape-analysis.md`). That list is a **shrink-only ratchet (AC4)**, enforced
-    three ways: a **count ceiling** — the list can never exceed the data file header's own
-    `# baseline-count: 34` at any state (a clean commit, a fresh clone, a smuggled addition), so a
-    new hand-rolled test can never be exempted; a **shrink-only ceiling** — raising
-    `# baseline-count` itself in the working tree fails, because the header is the control surface
-    guarded pre-commit by the git strict-subset; and a **git-HEAD strict-subset** — a working-tree
-    addition that isn't in the committed list fails before it can land (catches same-count swaps).
-    Scope note: the ceiling is read from the working-tree data file, so raising it *and* adding
-    files *in the same commit* moves the baseline past both (a code-review-grade edit) — the
-    durable backstop is the pre-commit Audit window plus the shrink-only ceiling check. A listed
-    file that converts to `node:test` must be REMOVED from the list. Existing legacy files are NOT
-    migrated by this policy; each converts one at a time, when someone is already editing it (first
-    intended application: relation-sync's harness). New files must also declare
-    `// @test-group <product|engine|governance>` (AC5); existing files may omit it and default to
-    `engine`. The import detection is a code-position fast heuristic (comments, strings, and regex
-    literals that merely mention `node:test` do not count; a method call like
-    `loader.import("node:test")` does not count). The `@test-group` requirement is enforced at the
-    point a file is introduced (Audit-before-commit); a committed new file without it is treated as
-    existing (`存量缺省 engine`) by design.
-  - **Test-layer selection (AC7 — not coverage):** test at the boundary you are willing to keep
-    stable, in three layers: (1) user-facing **contracts** (CLI commands, MCP tools, Provider ABI,
-    web routes) → **≥1 real end-to-end check** against the shipped artifact (`dist/quay.js`, the
-    `npm pack` output); (2) **branch-dense pure functions** (`checkSplitRecommendation`,
-    `planCheckNextAction`, `checkTouchesPair`, …) → direct `import` unit tests — a failed CLI
-    assertion only says "output lacks X", not which branch is wrong; (3) **internal implementation
-    details** → **do not test** (testing them prepays refactor cost: behavior unchanged, test goes
-    red). No numeric thresholds — setting a threshold before the cost structure is known is the AC9/416s
-    mistake; do not repeat it. (`gap-suite-cost-model-is-wrong-optimizations-buy-nothing` is done and its
-    measured output is that wall-clock diff is INDETERMINATE within the 17–63s noise band — it produced
-    no usable cost numbers to wait on; the fixed-overhead breakdown is instrumented per run as
-    `gap-suite-fixed-overhead-decomposition`.)
-  - **Coverage is NOT a goal (AC7b):** three reasons. (1) It has never been measured — 
-    `scripts/test.sh --experimental-test-coverage` exists and CLAUDE.md documents it, but there is
-    no CI job and no recorded number, and setting a target for an unmeasured quantity is the 416s
-    mistake. (2) It is gameable — this repo ships `gate-gameability.test.mjs`; a coverage
-    percentage invites "executes lines but asserts nothing" tests. (3) The places that matter are
-    already covered — the five branch-dense decision functions all have direct `import` unit
-    tests; the 2.1:1 process/module ratio does NOT mean decision logic is untested. If coverage is
-    ever looked at, it is a reference, not a target.
-  - **`ToolSearch` is a mandatory pre-fetch step for deferred MCP tools** (exp5-ADR-TOOLSEARCH-
-    DEFERRED-SCHEMA-PATTERN, M148 precedent style): the harness defers most MCP tool schemas —
-    they are NOT loaded at session start, and calling a deferred tool before fetching its schema
-    fails with `InputValidationError`. Before the FIRST call to any tool listed as deferred in a
-    `<system-reminder>`, call `ToolSearch` with a `select:<name>[,<name>...]` (exact) or keyword
-    query, confirm the result actually returned the tool's schema, and only then call it — this
-    applies to every quay/meta-cc/archguard/playwright MCP tool used across this repo's workflows
-    and skills. If `ToolSearch` returns zero results for a name you expect to exist, that is a
-    real failure signal (a renamed/removed tool, a stale skill reference) — do not retry blindly.
-- **Web UI:** `node --experimental-strip-types packages/quay/bin/quay.ts serve --host <ip> --port <p>` (renders task bodies as markdown; reads the task store live per request).
-
+- **跑 CLI**：`node packages/quay/bin/quay.js <cmd>`（版本探测入口，源码路径需 Node ≥22.6）；
+  provider 直连：`node --experimental-strip-types packages/quay-native/bin/quay-native.ts <cmd>`
+- **跑测试**：`scripts/test.sh`（唯一入口，ADR-019/DIR-109）。**它的头注释 120 行是唯一正本**——
+  glob、三条泳道（main/serial/lowconc）、并发推导与预算、`--for-task` scoped 静态检查分层、
+  `--test-concurrency=` 的 `=` 写法、`QUAY_TEST_LIVE_GITHUB`、`@test-group`/`@static-tier` 标注，
+  **全部读脚本，不要在此处复制一份**（本节曾复制 144 行，占本文件 49%，正是漂移之源）。
+- **Web UI**：`node --experimental-strip-types packages/quay/bin/quay.ts serve --host <ip> --port <p>`
+- **`scripts/test.sh` 覆盖不到的**（正本 `.github/workflows/ci.yml`）：`dist-verify-node-floor`
+  （真 npm-pack 产物在 Node 底线上跑）、以及里程碑节奏的浏览器/agent e2e（`adr/ADR-010`，status: proposed）。
+  **一次绿的 `scripts/test.sh` 不是这两类的证据。**
 ## Architecture — the product (`packages/`)
 
 Three packages, one ABI:
@@ -213,45 +111,12 @@ Key cross-cutting facts (require reading several files to see):
 
 - Development is driven via **background Claude Code workflows at milestone granularity** (→ ADR-009), with a **scheduled milestone e2e incl. browser tests** (Playwright/chrome-devtools) that keeps `L_T` on the real product surface (→ ADR-010). Follow DIR-027 steering hygiene (`.halt` or private worktree; never race the loop on `master`).
 
-## Split-decision routing policy (DIR-124-A1b, 2026-08-01)
+## Split-decision routing policy
 
-> **STATUS: reference/manual policy — NOT mechanically enforced (2026-08-06,
-> `gap-checksplitrecommendation-preserved-by-adr-022-but-never-wired-into-fast-mode`).**
-> `checkSplitRecommendation` is retained and unit-tested, but **no fast-mode dispatch or
-> task-authoring code path calls it** (grep-verified: zero non-test callers outside
-> `proposal-convergence.ts`). The table below is the intended procedure for a human/agent
-> authoring or triaging a task **by hand** — nothing enforces it automatically. It was NOT wired
-> in because the classifier's inputs (a typed mechanism inventory from a review agent's
-> `mechanisms` array, and a blocking-findings `ledger`) do not exist in the fast-mode
-> task-authoring path (ProposalReview/PlanCheck were replaced by `task-contract-check.ts` +
-> subagent REFUTE rounds), and the only mechanical count source (`countMechanisms()` in
-> `wiring-coverage-check.ts`) was measured 3/5 correct — "NOT reliable enough to wire into the
-> split path (A4 would falsely split)" (`gap-extract-mechanism-claims-calibration`, done). The
-> fast mode's ACTUAL mechanical scope guards are touch orthogonality (`checkTouchesPair` /
-> `concurrent-batch-scheduler.ts`), compound decomposition (`it0-split-or-commit-check.ts`), and
-> touch resolvability (`touches-orthogonality-check.ts --resolve`). Revisit the wire-in when
-> mechanism-count calibration is fixed. Full decision record:
-> `tasks/gap-checksplitrecommendation-preserved-by-adr-022-but-never-wired-into-fast-mode.md`.
-
-When the split classifier (`checkSplitRecommendation` in `proposal-convergence.ts` — retained; under the classic loop this surfaced via `prepare-milestone` returning `needs-human`/`split-recommended`, which is retired under ADR-022) returns `splitRecommendation.code`, the orchestrator MUST route by that code, NOT auto-approve all splits indiscriminately:
-
-| Code | Action | Rationale |
-|---|---|---|
-| `split-multi-mechanism` | **Auto-record split** + create children | Not repairable — scope requires charter edit. >2 independently landable mechanisms. |
-| `split-touch-set-too-large` | **Auto-record split** + narrow touches | Not repairable — surface too broad (>8 files). |
-| `split-subsystem-blocking-cluster` | **Consume repairable bypass FIRST** | Repairable — one focused delta revision may close ALL findings. Only split if bypass fails (findings persist after the focused revision). The bypass is a ONE-SHOT per generation (`splitBypassAvailable` consumed once at `deltaRound === 0`). |
-| `split-recursive-guard` | **Route to needs-human** — do NOT auto-split | Level-2+ leaf still multi-mechanism. The real defect is UPSTREAM decomposition was too shallow (e.g., DIR-124-A→A1→A1b should have produced more children at level 2 rather than a level-3 leaf that still spans 8 boundaries). Auto-splitting deeper compounds the problem. |
-
-**After recording a split decision** (via `--record-split-decision --decision split`), the orchestrator MUST verify the split is enacted:
-1. Parent task's `children:` frontmatter is populated
-2. Each child's `tasks/<childId>.md` file EXISTS on disk
-3. Each child has `status: todo` + `parent:` backlink
-4. M-numbers are assigned (if development-class)
-
-A split decision where children haven't been created is **incomplete** — the task is in limbo (`status: todo`, no way to execute). The split-completion check is as important as the split decision itself.
-
-**The `> 2` mechanism threshold in `checkSplitRecommendation` is correctly calibrated — do NOT adjust it.** The five DIR-126 children (1 mechanism each, all completed) and the DIR-124-B/F splits (4/6 mechanisms, correctly decomposed) confirm the threshold. Overcounting of coverage items as mechanisms is a calibration issue in `extractMechanismClaims`, not a threshold defect.
-
+**正本已搬回任务体**：`tasks/gap-checksplitrecommendation-preserved-by-adr-022-but-never-wired-into-fast-mode.md`
+（四个 code 的路由表、split 落实的四项验证、`> 2` 阈值裁定，全在那里）。
+**状态：reference/manual，NOT mechanically enforced** —— `checkSplitRecommendation` 零非测试调用者，
+没有任何 fast-mode 派发或任务撰写路径调它。**别把它当生效的机制用。**
 ## GIT review checklist
 
 - Before calling a milestone done, ask **which of `L_T`/`L_C`/`L_D`/`L_G`/`L_S` is still dark** (ADR-006/007) and prefer **hard checks over prose** (ADR-004 — prose gets paraphrased away). See `docs/references/` for the framework and its limits (the continuous math is not rigor).
