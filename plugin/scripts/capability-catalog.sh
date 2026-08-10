@@ -148,6 +148,7 @@ declare -A QUESTION=(
   [gate-script-lib.sh]="Do bash gate/selfcheck scripts share the framework primitives they need?"
   [halt-check.sh]="Is the layer halted at the unified .halt check point (SPEC 2.8), and is an unmarked stall (no .halt + >24h no output) mechanically reported?"
   [inner-blocked-signal.ts]="Is the inner layer explicitly signalling that it is blocked?"
+  [inner-agent-budget-report.ts]="What is the inner subagent budget state — .quay/inner-agent-budget.json {spawned, limit, lastSpawnAt, hitLimit} — and is inner dispatch low or already at the harness spawn ceiling (触顶即报, not silent serial)?"
   [inner-exec-mode-report.ts]="How many main-thread product-file Edits did the inner layer make this round, versus how many Agent dispatches (inner exec-mode report)?"
   [inner-forensics.mjs]="Did the inner layer run a given command, at second-granularity, with zero CPU interference?"
   [inner-idle-log.ts]="Why was the inner layer idle (append-only reason log)?"

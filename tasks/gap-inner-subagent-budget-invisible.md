@@ -49,26 +49,92 @@ inner 实测 **201 次派发 / 3.33 天 = 60.4 次/天** ⇒ **默认 200 的寿
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 05:13:13 spawn-limit 原始记录 + 因果链 + 无正本实证（本任务 Proposal 已含）
-- [ ] AC2: **预算检查**——inner 派发前读剩余 subagent 预算（可读则用，否则退化为 Agent 计数）
-- [ ] AC3: **触顶升级**——收到 spawn-limit 信号 ⇒ 升级给人，不静默转主线程串行
-- [ ] AC4: **产物**——`.quay/inner-agent-budget.json`（spawned/limit/lastSpawnAt/hitLimit），外层 tick 可读
-- [ ] AC5: **既有不回归**——`--for-task` scoped 门绿
+- [x] AC1: **复现固化**——任务体记录 05:13:13 spawn-limit 原始记录 + 因果链 + 无正本实证（本任务 Proposal 已含；下方 Invoke evidence 又机械断言：`inner-agent-budget-report.test.mjs` 的「AC1 — reproduction is fixed in the task body」读任务体，必须含 `05:13:13` + `Subagent spawn limit reached` 字面量）
+- [x] AC2: **预算检查**——inner 派发前读剩余 subagent 预算（可读则用，否则退化为 Agent 计数）— 新增 `plugin/scripts/inner-agent-budget-report.ts`：`resolveLimit` 读 env `CLAUDE_CODE_MAX_SUBAGENTS_PER_SESSION`（可读 API，缺省 200），`analyzeAgentBudget` 从 transcript 数 Agent tool_use（Agent 计数退化路径）→ `spawned`/`lastSpawnAt`；接线 `plugin/loop/fast-mode-loop-tick.md` 步骤 4「派发前预算检查（subagent 硬上限——会话级闸，先于逐候选检查）」命令块
+- [x] AC3: **触顶升级**——收到 spawn-limit 信号 ⇒ 升级给人，不静默转主线程串行 — `analyzeAgentBudget` 扫描 transcript 的 `Subagent spawn limit reached` 信号 ⇒ `hitLimit=true` ⇒ `judgeBudget` status=hit ⇒ exit 1；tick 文档步骤 4 明令「触顶即升级，不静默转主线程串行」（`inner-blocked-signal.ts --assert-blocked` + `escalations.md`）；判断边界表新增「subagent 预算触顶 ⇒ 停止派发并升级」行
+- [x] AC4: **产物**——`.quay/inner-agent-budget.json`（spawned/limit/lastSpawnAt/hitLimit），外层 tick 可读 — `writeBudget` 写精确 schema；`.gitignore` 加 `**/.quay/inner-agent-budget.json`（gitignored 运行时状态，`git check-ignore` 命中 .gitignore:134）；外层 `orchestration/orchestrator-tick-core.md` 新 A16 行读它判预算（hitLimit/spawned≥limit ⇒ 触顶升级；spawned/limit≥0.8 ⇒ 预算将尽预警）
+- [x] AC5: **既有不回归**——`--for-task` scoped 门绿 — `bash scripts/test.sh --for-task gap-inner-subagent-budget-invisible --allow-thin` → **exit 0 / tests 35 / pass 35 / fail 0 / cancelled 0**（23 inner-agent-budget + 12 capability-catalog，见 Invoke evidence）；scoped 静态检查全 PASS（task-contract-check / adr016-screen-use-check / superseded-capability-check / strategic-doc-staleness-check / drive-contract-check / threshold-scope-check / instrument-failure-check）
+
+## Invoke evidence（scoped 实跑，2026-08-10）
+
+**Contract invoke**（读产物 + 双表面实跑；产物为机制演示态，gitignored 不提交）：
+
+```text
+# 产物 schema（精确四键 {spawned, limit, lastSpawnAt, hitLimit}；inner 每次派发前写）
+$ python3 -c "import json;d=json.load(open('.quay/inner-agent-budget.json'));print(d)"
+{'spawned': 2, 'limit': 200, 'lastSpawnAt': 1786350600, 'hitLimit': False}
+
+# Contract measure（spawned limit hitLimit 三元组）
+$ python3 -c "import json;d=json.load(open('.quay/inner-agent-budget.json'));print(d['spawned'],d['limit'],d['hitLimit'])"
+2 200 False
+
+# inner 派发前预算检查（OK：spawned < limit 且未触顶）⇒ exit 0
+$ node --no-warnings --experimental-strip-types plugin/scripts/inner-agent-budget-report.ts --root <root> --json
+status: ok | spawned: 3 | limit: 200 | remaining: 197 | hitLimit: False        # exit=0
+
+# 触顶升级（spawn-limit 信号 ⇒ HIT，不静默转主线程串行）⇒ exit 1
+$ node --no-warnings --experimental-strip-types plugin/scripts/inner-agent-budget-report.ts --root <root> --session <hit-transcript> --json
+status: hit | hitLimit: True | spawned: 1                                     # exit=1
+
+# 外层 tick 读（--read 表面）
+$ node --no-warnings --experimental-strip-types plugin/scripts/inner-agent-budget-report.ts --read --root <root>
+inner-agent-budget: OK — spawned 3 < limit 200, remaining 197                  # exit=0
+```
+
+**scoped 测试**（`bash scripts/test.sh --for-task gap-inner-subagent-budget-invisible --allow-thin`）：
+
+```text
+== scoped static checks (change-relevant tier) ==
+  task-contract-check        PASS（no violations）
+  adr016-screen-use-check    PASS（violations 0，band 0..1）
+  superseded-capability-check PASS
+  strategic-doc-staleness-check PASS（no NEW stale refs）
+  drive-contract-check       PASS（3 doc(s) scanned, violations 0）
+  threshold-scope-check      PASS（new since baseline: 0）
+  instrument-failure-check   PASS（5/5 families）
+== plugin/test/inner-agent-budget-report.test.mjs ==（23 条全绿）
+  ✔ resolveLimit — env CLAUDE_CODE_MAX_SUBAGENTS_PER_SESSION wins, else default 200 (AC2 可读则用)
+  ✔ analyzeAgentBudget — counts Agent tool_use, not Edit, and tracks lastSpawnAt (AC2 Agent 计数)
+  ✔ analyzeAgentBudget — spawn-limit signal in the transcript ⇒ hitLimit=true (AC3 触顶信号)
+  ✔ analyzeAgentBudget — spawned reaching limit also trips hitLimit (count fallback)
+  ✔ serializeBudget / parseBudget / judgeBudget — schema + ok/near/hit/missing/malformed 全分支
+  ✔ writeBudget/readBudgetText — round-trips the product under <root>/.quay/ (AC4)
+  ✔ AC2/AC4 CLI — inner surface counts + writes the product and exits 0 on OK
+  ✔ AC3 CLI — spawn-limit signal ⇒ HIT, exits 1 (escalate, not silent serial)
+  ✔ AC4 CLI --read — MISSING exits 0 (no data) / MALFORMED exits 1 (fail-closed)
+  ✔ AC2/AC3 wiring — fast-mode-loop-tick.md carries the pre-dispatch budget check + escalate-on-hit
+  ✔ AC4 wiring — orchestrator-tick-core.md A 段 must READ+judge inner-agent-budget.json
+  ✔ AC1/AC4 — cross-annotation to the same-family sibling tasks
+  ✔ AC1 — the reproduction is fixed in the task body (05:13:13 + Subagent spawn limit reached)
+== plugin/test/capability-catalog.test.mjs ==（Touches 登记 capability-catalog.sh ⇒ 同族选中）
+  …（AC1c 新脚本无声明即 exit 1、unclassified==0、--entry-surface 等 12 条，全绿）
+ℹ tests 35（23 inner-agent-budget + 12 capability-catalog）· pass 35 · fail 0 · cancelled 0 · exit 0
+```
+
+**DoD 注**：`--for-task` 带 `--allow-thin`——doc-heavy Touches（`plugin/loop/*.md` / `orchestration/*.md` /
+`.gitignore` / `tasks/*.md` / `.quay/*.json` 无同名测试文件）使选择器覆盖率 < 0.5，这是选择器对文档型任务的
+已知 fail-loud 结构属性（非测试失败）；测试集本身全绿（23 条）。同族先例 `gap-inner-wakeup-heartbeat-invisible`
+与 `gap-dispatch-evaluated-only-at-inner-tick-boundary-not-slot-release` 均用 `--allow-thin`。全量套件绿归
+外层 verification-round 验证（DoD 行不勾）。
 
 ## Definition of Done
 
 - [ ] AC1–AC5 全部勾上
-- [ ] 修后实跑：inner 派发前读预算；触顶升级（贴输出）
+- [ ] 修后实跑：inner 派发前读预算；触顶升级（贴输出）——机制演示已跑（见 Invoke evidence：OK exit 0 / HIT exit 1）；live 归外层实跑
 - [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
 
 ## Touches
 
-- plugin/loop/fast-mode-loop-tick.md（派发前预算检查 + 触顶升级步骤）
-- orchestration/orchestrator-tick-core.md（外层 A 段必读加 inner-agent-budget.json）
-- .quay/inner-agent-budget.json（产物，gitignored 运行时状态）
-- tasks/gap-inner-wakeup-heartbeat-invisible.md（交叉标注——同族：inner 自驱心跳无产物）
-- tasks/gap-dispatch-evaluated-only-at-inner-tick-boundary-not-slot-release.md（交叉标注——派发评估时机）
+- plugin/loop/fast-mode-loop-tick.md（步骤 4 派发前预算检查 + 触顶升级 + 判断边界表新行）
+- orchestration/orchestrator-tick-core.md（外层 A 段新增 A16 行读 inner-agent-budget.json 判预算）
+- plugin/scripts/inner-agent-budget-report.ts（新增：inner 派发前计数 + 写产物 + 报 verdict；外层 `--read` 判预算）
+- plugin/test/inner-agent-budget-report.test.mjs（新增：AC2/AC3/AC4 机械测试——逻辑 + CLI + 文档契约）
+- plugin/scripts/capability-catalog.sh（新脚本登记进唯一清单——AC1c gate：未声明问题的脚本进 artifact 会 exit 1）
+- .gitignore（`**/.quay/inner-agent-budget.json` 运行时产物忽略——Touches 声明「gitignored 运行时状态」）
+- .quay/inner-agent-budget.json（产物，gitignored 运行时状态；`git check-ignore` 命中 .gitignore:134）
+- tasks/gap-inner-wakeup-heartbeat-invisible.md（交叉标注——同族：inner 自驱心跳无产物，与本任务同环两端）
+- tasks/gap-dispatch-evaluated-only-at-inner-tick-boundary-not-slot-release.md（交叉标注——派发评估的另一静默天花板）
 - tasks/gap-inner-subagent-budget-invisible.md（自身：勾 AC + 贴证据）
 
 ## Contract
