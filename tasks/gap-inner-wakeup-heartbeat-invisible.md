@@ -23,6 +23,13 @@ extra: {}
 
 **为什么重要**：这是「心跳测的是条文有没有被调用，但『自排程是否还活着』没有读数直接对应」的又一处。内层心跳（ScheduleWakeup 重排）是外层 A8（层间 tick 间隔检查）之外的**内层自驱心跳**——它断了，外层读内层 transcript mtime 仍 fresh（inner 会话活着），但「inner 会不会自己醒来继续派发」无读数。C17：该给「上次 ScheduleWakeup 时刻」造一个机械可查的产物。
 
+> **交叉标注（2026-08-10，gap-inner-subagent-budget-invisible——同族：inner 自驱能力无产物）**：本任务管「自排程
+> （ScheduleWakeup）活着」要有产物；同族管「**派发能力（subagent spawn 预算）还在不在**」也要有产物——harness 的
+> per-session subagent 硬上限（200/200，`CLAUDE_CODE_MAX_SUBAGENTS_PER_SESSION`）是派发能力的**静默天花板**
+> （实证 inner 728a4610 2026-08-10T05:13:13 逐字 `Subagent spawn limit reached`），触顶后 0 在飞⇒无通知⇒不重评估，
+> 与本任务的自锁环是**同一个环的两端**（心跳断 / 预算触顶都让派发静默归零）。该任务另立：inner 派发前写
+> `.quay/inner-agent-budget.json`（spawned/limit/lastSpawnAt/hitLimit），外层 tick 读它判预算（触顶/将尽即升级）。
+
 ### 选定机制方向（实现归 inner，判定归 outer）
 
 1. **产物落盘**：inner 每次 ScheduleWakeup 重排时写一行 `.quay/inner-wakeup-heartbeat.json`（或 append 到 `.quay/inner-wakeup-log.jsonl`）：`{ts, delaySeconds, reason}`——与 suite-chain-heartbeat.json 同构（A2 已有一套「心跳产物」先例）。

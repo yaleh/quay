@@ -819,6 +819,32 @@ subagent**，`gap-telemetry-brackets-vs-subagents-no-slot-visibility` AC3/AC6，
 本 tick 只派发**至多 `effective_cap` 个在飞 subagent**。并发是打破「外层变瓶颈」的手段——串行时外层的
 20 分钟 tick 频率会和任务完成频率同量级，分层退化成单层加延迟。
 
+**派发前预算检查（subagent 硬上限——会话级闸，先于逐候选检查；`gap-inner-subagent-budget-invisible`）**：
+harness 的 per-session subagent spawn 硬上限（默认 **200**，`CLAUDE_CODE_MAX_SUBAGENTS_PER_SESSION` 覆盖，
+厂商 changelog v2.1.212；另有并发上限 `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` 默认 20 与嵌套深度上限
+`CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` 默认 3——**两个旋钮极易混用，我们撞的是会话累计 200，不是并发 20**）
+是**派发能力的静默天花板**：触顶后无法再派 subagent ⇒ 0 在飞 ⇒ 无 `<task-notification>` ⇒ 槽位回填不触发 ⇒
+「空槽 + 有货 + 不派」，形态与一切机制缺陷完全同形（实证 inner 728a4610 2026-08-10T05:13:13 逐字
+`Subagent spawn limit reached (200 of 200 agents spawned)`，当晚 4 人反复误诊数小时；inner 实测
+201 次派发 / 3.33 天 = 60.4 次/天 ⇒ 默认 200 的寿命 ≈ 3.3 天——任何长于 3.3 天的自主运行都必然撞它）。
+本会话内结构无解：`/clear` **立刻**解封（重置预算至 200，但换的是上下文不是进程）或新开进程重启
+（env var 只在下次进程启动时生效）是唯一出路。**派发前必跑预算检查**（预算是会话级属性，先于逐候选检查）：
+
+```bash
+node --no-warnings --experimental-strip-types plugin/scripts/inner-agent-budget-report.ts --root "$(pwd)" --json
+# 写 .quay/inner-agent-budget.json {spawned, limit, lastSpawnAt, hitLimit}（产物，外层 tick 读）并报 verdict：
+# exit 0 = OK（spawned < limit 且未触顶）⇒ 正常进入下面的逐候选检查；
+# exit 1 = NEAR（spawned/limit ≥ 0.8，预算将尽）⇒ **升级预警给人**（余量只够 ~N 次派发，问是否 /clear 或重启带新上限），可继续派发；
+# exit 1 = HIT（hitLimit 或 spawned ≥ limit，触顶）⇒ **升级给人并停止派发**。
+```
+
+**触顶即升级，不静默转主线程串行（AC3）**：收到 spawn-limit 信号 / `hitLimit=true` ⇒ **停止派发、升级给人**
+（`inner-blocked-signal.ts --assert-blocked --reason <...> --question <...>` + 写 `orchestration/escalations.md`）——
+**绝不静默把待派任务改为主线程串行做**（那是把「派发能力静默失去」伪装成「检查失败」，正是本缺陷的形态）。
+**调高 env 上限不是修复**：该上限存在的理由是厂商原话 `to stop runaway delegation loops`，调高即调低那层保护；
+设成 2000 只是把同样的静默失败推到 ~33 天后。**修复 = 本机制（派发前查预算 / 触顶即升级 / 产物）**。
+本步的预算检查写入由 `inner-agent-budget-report.ts` 机械完成，不靠自觉。
+
 派发前对每个候选：
 
 1. **触摸可解析性**（gap-ready-queue-still-lists-eight-tasks-targeting-retired-pipeline-files，
@@ -1004,6 +1030,7 @@ python3 -c "import json,time;d={'ts':int(time.time()),'delaySeconds':1500,'reaso
 | 任务超 90 分钟 | 中止 subagent，needs-human，不带内重试 |
 | **窗口内新增** needs-human ≥3 | 停止派发新任务（2026-08-03 裁定：历史积压不构成——它们是范围决定不是解阻塞，升级给人） |
 | 队列文件与 git 状态矛盾且无法判定 | 停，报告两边的实际内容 |
+| **subagent 预算触顶**（`gap-inner-subagent-budget-invisible`：`inner-agent-budget-report.ts` 报 HIT / `hitLimit=true`） | **停止派发并升级给人**——不静默转主线程串行（`/clear` 立刻解封、重启带新上限；调高 env 不是修复，只是推迟同一静默失败） |
 
 <!-- unmechanized: ADR-021 证据不足；覆盖上方「判断边界」表全部行。这不是欠账，是已声明的取舍——不要为它建检查 -->
 

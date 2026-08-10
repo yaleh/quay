@@ -70,6 +70,12 @@ extra:
 
 > **交叉标注（2026-08-10，gap-inner-wakeup-heartbeat-invisible）**：本任务把派发重评估挂到「完成事件 + tick 心跳」双触发源——但 tick 心跳的**自排程（ScheduleWakeup）本身无机械可查产物**：它停了（15.3h 未重排，0 在飞⇒无 notification⇒不重评估）没有任何文件/检查器报「心跳已断」。该任务另立：inner 每次重排写 `.quay/inner-wakeup-heartbeat.json`，外层 tick 读它判新鲜（>3 周期报「inner 兜底心跳断」）——把「自排程断了不可见」变成「断了 3 周期即报」。
 
+> **交叉标注（2026-08-10，gap-inner-subagent-budget-invisible——同族：派发评估的另一静默天花板）**：本任务管「何时评估派发」
+> （完成事件 vs tick 边界）；同族管「**派发能力本身还在不在**」——harness per-session subagent 硬上限（200/200）触顶后
+> 无法再派 subagent ⇒ 0 在飞 ⇒ 无 `<task-notification>` ⇒ 本任务的完成事件触发源**永远不 fire** ⇒ 派发评估机制在
+> 结构上无法被调起，形态与本任务描述的缺陷完全同形。该任务另立：inner 派发前写 `.quay/inner-agent-budget.json`
+> （spawned/limit/lastSpawnAt/hitLimit）并触顶即升级，把「空槽 + 有货 + 不派」的静默天花板变成外层可读的产物。
+
 ## Invoke evidence（scoped 实跑，2026-08-05）
 
 **Contract invoke（tick 文档含事件驱动派发机制的字面命中）**：
