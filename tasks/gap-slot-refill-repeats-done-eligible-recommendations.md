@@ -1,7 +1,9 @@
 ---
 id: gap-slot-refill-repeats-done-eligible-recommendations
-title: 'slot-refill 反复重派「已落地待翻 done」的任务——not-yet-flipped 被 ready-pool-check 算出却没接进推荐路径（:243 只遍历 pool.ready + 3 项 step-4 检查，grep not-yet-flipped|excluded = 0 命中）；今日 25 条重派/复验提交自述，每条都是 subagent 复核已落地工作'
-status: todo
+title: slot-refill 反复重派「已落地待翻 done」的任务——not-yet-flipped 被 ready-pool-check
+  算出却没接进推荐路径（:243 只遍历 pool.ready + 3 项 step-4 检查，grep not-yet-flipped|excluded =
+  0 命中）；今日 25 条重派/复验提交自述，每条都是 subagent 复核已落地工作
+status: ready
 labels:
   - gap
   - defect

@@ -5,7 +5,7 @@ title: 执行核 0 静态覆盖——tick-core 在 scripts/test.sh @static-objec
   指针目标存在/判准编号冲突 全被手工 wc -l/grep 发现零机械拦截;判准正本 §1.4e「换监视器
   要同步换判据,否则检查通过检查的是已不存在的东西」;处方=@static-object 加 orchestration/ *-tick-core.md +
   新检查器覆盖 ①各≤80(AC30a) ②指针目标存在 ③判准编号不与 B3 组冲突
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
