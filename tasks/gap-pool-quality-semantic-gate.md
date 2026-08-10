@@ -55,7 +55,7 @@ extra: {}
 
 - orchestration/orchestrator-tick-core.md（B 段增「调用 pool-quality-judge workflow」编号步骤 + 机械触发条件）
 - plugin/scripts/ 或 workflow 模板（pool-quality-judge 泛化：判词含 should-remove）
-- plugin/test/（若脚本化：AC2 测试）
+- plugin/test/known-load-sensitive.test.mjs（AC2 workflow 泛化条目测试，若脚本化；候选路径已声明）
 - adr/ADR-033-schema-agent.md（已 accepted，本任务前提锚定）
 - tasks/gap-pool-quality-semantic-gate.md（自身：勾 AC + 贴判词分布）
 
