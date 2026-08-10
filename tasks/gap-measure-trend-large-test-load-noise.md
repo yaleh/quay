@@ -61,6 +61,11 @@ extra: {}
 
 **内层再验（2026-08-10 派发，worktree fork develop@018d5868）**：实现已随 `d83916e4`（histVariance 候选 A）在 develop 上；本派发重新跑 scoped 门 → **exit 0，13 pass / 0 fail / 0 cancelled，violations 0，task-contract-check no violations**（13 = 既有 11 + 同族 `93f87930` 在相同测试文件新增的 2 个相对触发器 histMax 守卫测试）。AC2 构造验证仍有效：71→104s ≤ 历史 max 110s ⇒ 0 flag；>历史 max ⇒ flag。
 
+**内层再验（2026-08-10 二次派发，worktree fork develop@de7aa6e3）**：实现随 `d83916e4` + 同族 `93f87930` 已在 develop；重跑 scoped 门 → **exit 0，13 pass / 0 fail / 0 cancelled**（`--allow-thin`）。构造 invoke（Contract `large_test_load_flag`）：
+- **Scenario A（历史带内，期望 0 flag）**：rounds 35s/74s/110s/71s(dip)/104s ⇒ `node --no-warnings --experimental-strip-types plugin/scripts/measure-trend-check.ts --history <tmp>/hist-a.jsonl --no-land --json` → `{"slowFiles":0,"comparedRounds":4}`（71→104s +33s absolute 但 ≤ 历史 max 110s ⇒ 不 flag）。
+- **Scenario B（超出历史 max，期望 flag）**：rounds 35s/74s/110s/71s(dip)/150s ⇒ 同命令 hist-b.jsonl → `{"type":"growth","file":"/it0-dod-check.test.mjs","prevMs":71066,"currMs":150000,"growthMs":78934,"ratio":2.11,"reason":"relative"}` + `{"slowFiles":1}`（150s > 历史 max 110s ⇒ 真回归仍 flag）。
+小测试豁免保持（<5s 相对 2× 测试在 13-pass 内仍绿）。
+
 ## Touches
 
 - plugin/scripts/measure-trend-check.ts（候选 A/B/C：历史方差感知 / 连续 2 轮 / 负载归一）
