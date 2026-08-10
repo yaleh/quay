@@ -1366,3 +1366,29 @@ AC3 = 执行核编号步骤 + 机械触发 `pool>25 / 最久未复核>48h / 每 
 
 **与 §为什么要 workflow/subagent 的关系**：workflow 解决「怎么到眼前」（第一层），
 产物解决「到了眼前之后是否真做」（第二层）。**两层都缺一不可，而我此前只讨论了第一层。**
+
+---
+
+## §行为变更走哪条路（2026-08-10 实测，人问「立案到生效要多久 / 要等 develop 吗」）
+
+**结论一：不等 develop。** 三层 cwd 均为 `/home/yale/work/quay`，该检出在 **`integration`** 上 ⇒
+**fan-in 到 integration 即生效**。实证：此刻三份 tick-core + CLAUDE.md 的 integration 与 develop
+blob 全不同（develop 是旧版），而三层都在按新版跑。**`develop` 是交付线，不是生效线。**
+
+**结论二：两条路径延迟差 10–100 倍。**
+
+| 路径 | 实测（2026-08-10 当夜） |
+|---|---|
+| **任务路径**（立案→ready→派发→inner 实现→scoped 门→fan-in） | 相顺序前置 **16 min**、relation-sync **21 min**、A–E 删除 **25 min**；**另一端**：cross-cut plugin/scripts 立案 00:49 **至今未 fan-in（2.5h）**、`gap-pool-quality-semantic-gate` 立案 01:32 **112 min 仍 ready/AC 0/5/未开工** |
+| **直接改执行核** | A14 按位置、A15 三件套、A15 补 subagent、CLAUDE.md:204 换指针 —— **各 1–2 min，当轮生效** |
+
+**差别不在实现难度，在队列**：`gap-pool-quality-semantic-gate` 的 AC3 就是「给执行核加一个编号步骤」，
+一行文档的事，进池子就排在 30 条任务后面。⇒ 复证了「**任务进了池子就等于进了队列，任务不是机制**」。
+
+**判据（分界线 = 要不要跑测试）**：
+- **三层行为规则**（执行核 / 判准 / 收尾 / 发消息形态 / CLAUDE.md）⇒ **直接改，不立任务**——不需要 inner、不需要 scoped 门。
+- **需要实现+测试的机件**（脚本、检查器、workflow 内容）⇒ 走任务路径。
+
+**未测到的例外（明确交底，测到前不写进判据）**：inner 的任务 worktree 从哪个分支切出，本轮无在飞
+worktree 故测不到。**若从 `develop` 切，worktree 内的 scoped 验证看到的是 develop 版检查器**，
+那类改动需等批量合并才在那里生效。判法：`git merge-base --is-ancestor integration <worktree-head>`。
