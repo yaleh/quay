@@ -19,8 +19,12 @@
 # THE SIGNAL (## Contract band: non-zero = 报出; normal = 0 silent). Two independent conditions,
 # either fires ⇒ exit 1:
 #   1. not-yet-flipped backlog too large — ready-pool-check's excluded[] count of tasks whose work
-#      has LANDED but whose status is still `ready` exceeds --threshold (default 30, per the task
-#      Proposal "超阈值（如 >30）即报"). Reuses the existing probe — never reimplements the count.
+#      has LANDED but whose status is still `ready` exceeds --threshold (default 10 — lowered from 30
+#      on 2026-08-10 by outer disposition: 30 was a guessed example in the task Proposal, never
+#      calibrated; the execution core's A10 already documents the operational criterion as ≥10 即报,
+#      and a signal that cannot fire at real backlog sizes (nyf=15 with threshold=30, signal forever
+#      False) is a dead check — the retired-criterion-⑥ shape inverted). Reuses the existing probe —
+#      never reimplements the count.
 #   2. closure-pass overdue — the last closure-pass trace (.quay/closure-pass-last-run.json) is
 #      older than --timeout seconds (default 3600 = 1h), or is MISSING while there is pending closure
 #      work (a closure-pass that never ran with tasks awaiting closure IS a lag).
@@ -37,7 +41,7 @@
 #                        [--json] [--record --flipped <N>] [--help]
 #
 #   (no args)      measure-only: compute the closure-lag signal. 0 = silent, 1 = signal, 2 = error.
-#   --threshold N  not-yet-flipped backlog threshold (default 30; strictly > threshold fires).
+#   --threshold N  not-yet-flipped backlog threshold (default 10; strictly > threshold fires).
 #   --timeout S    closure-pass max age before the overdue signal (default 3600s = 1h).
 #   --root DIR     workspace root (default: auto-derived from this script's location).
 #   --json         measure-only, machine-readable JSON (never mutates).
@@ -59,7 +63,7 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$SCRIPT_DIR/../.." && pwd)"
-threshold="30"
+threshold="10"
 timeout="3600"
 mode="measure"
 flipped=""
