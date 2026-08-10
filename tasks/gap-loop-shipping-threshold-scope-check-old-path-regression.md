@@ -159,3 +159,26 @@ $ node --no-warnings --experimental-strip-types plugin/scripts/threshold-scope-c
 → **21 pass / 0 fail / 0 cancelled / exit 0**（loop-shipping AC1/AC1b/AC1c/AC2/AC7 +
 threshold-scope-check AC2..AC11 全绿；static 层 task-contract-check 0 违规、threshold-scope
 ratchet 0 新增）。AC5（全量套件）按 DoD 留待外层 verification-round 验证。
+
+### 内层复核（2026-08-10，fresh worktree from develop de7aa6e3）
+
+任务再派发时以 develop 头部（de7aa6e3）fresh worktree 复核，确认修复在最新 develop 上仍成立：
+
+```
+$ ./scripts/test.sh --for-task gap-loop-shipping-threshold-scope-check-old-path-regression --allow-thin
+# 21 pass / 0 fail / 0 cancelled / exit 0
+# static 层：task-contract-check 0 违规；threshold-scope-check ratchet ceiling 5 / new since baseline 0
+
+$ node --no-warnings --experimental-strip-types --test plugin/test/loop-shipping.test.mjs
+# 12 pass / 0 fail；Contract measure `grep -c '✖ AC1b'` = 0
+
+$ node --no-warnings --experimental-strip-types --test plugin/test/loop-shipping-necessity-check.test.mjs
+# 3 pass / 0 fail
+
+$ node --no-warnings --experimental-strip-types plugin/scripts/threshold-scope-check.ts --root . --json
+# scanned: [plugin/loop/fast-mode-loop-tick.md, plugin/loop/orchestrator-loop-tick.md, CLAUDE.md]
+# violations: 3  stalePaths: 2  ratchet: { baselineCount: 5, currentCount: 5, growth: false }
+```
+
+无新增代码改动（修复 37948eab 已在 develop）；AC1–AC4 保持勾选，AC5（全量套件）按 DoD
+留待外层 verification-round 验证。
