@@ -25,6 +25,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { isDirectEntry } from "./gate-script-base.ts";
 
 /** Heartbeat file name under `<root>/.quay/`. */
@@ -83,6 +84,42 @@ export function readHeartbeatText(root) {
   const p = path.join(root || ".", ".quay", HEARTBEAT_FILE);
   if (!fs.existsSync(p)) return null;
   return fs.readFileSync(p, "utf8");
+}
+
+// ── AC3 trigger wiring (tasks/gap-semantic-observer-judge-stopped-awaiting) ────────────────────────
+//
+// The semantic judge must NOT run every round (cost). Trigger when the free text changed (hash) OR when
+// the structured fields may contradict free text — the exact heuristic is `blocked==[] && agentDispatches
+// >= agentLimit` (2026-08-10: blocked=[] said "no block" while reason said "dispatch stopped, awaiting
+// outer /clear"). These three are the PURE trigger functions; the judge CLI imports them.
+
+/** AC3 heuristic: `blocked==[] && agentDispatches>=agentLimit`. PURE. */
+export function semanticTriggerHeuristic(heartbeat) {
+  const blocked = Array.isArray(heartbeat?.blocked) ? heartbeat.blocked : [];
+  const atLimit =
+    typeof heartbeat?.agentDispatches === "number" &&
+    typeof heartbeat?.agentLimit === "number" &&
+    heartbeat.agentDispatches >= heartbeat.agentLimit;
+  return blocked.length === 0 && atLimit;
+}
+
+/** Free-text content hash (sha256, first 16 hex). PURE. */
+export function freeTextHash(freeText) {
+  return createHash("sha256").update(String(freeText ?? "")).digest("hex").slice(0, 16);
+}
+
+/**
+ * Evaluate the AC3 trigger. PURE.
+ * @param {object|null} heartbeat parsed heartbeat (may be null)
+ * @param {string} freeText combined free text (reason + tick report)
+ * @param {string|null|undefined} prevHash previous free-text hash (null = no baseline ⇒ hashChanged=false)
+ * @returns {{fired:boolean, heuristic:boolean, hashChanged:boolean, hash:string}}
+ */
+export function evaluateTrigger(heartbeat, freeText, prevHash) {
+  const hash = freeTextHash(freeText);
+  const heuristic = semanticTriggerHeuristic(heartbeat);
+  const hashChanged = prevHash != null && hash !== prevHash;
+  return { fired: heuristic || hashChanged, heuristic, hashChanged, hash };
 }
 
 function usage() {
