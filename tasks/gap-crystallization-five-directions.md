@@ -44,14 +44,38 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录四类证据 + 人②硬修正原话 + 五方向（本任务 Proposal 已含）
-- [ ] AC2: **①失效前提**——硬约束带失效前提字段,缺字段入口闸拒绝,无可测形式明标
-- [ ] AC3: **②cadence 字段**——catalog 增 cadence(每轮/每红窗/每里程碑/冷启动/按需),零调用>3×周期进待表态
-- [ ] AC4: **②全历史表态**——表态回看全历史(meta-cc 全会话+git log --all),不只看近 N 天
-- [ ] AC5: **②禁止最近没用为唯一退休理由**——退休须给理由失效或已被取代实证;默认待观察
-- [ ] AC6: **③last-reaffirmed**——超 N 天未触及进待重新确认,看一眼盖章
-- [ ] AC7: **④checker-lib**——抽 matchAtCommandPosition/枚举式存在性,新检查器声明匹配方式
-- [ ] AC8: **既有不回归**——`--for-task` scoped 门绿
+- [x] AC1: **复现固化**——任务体记录四类证据 + 人②硬修正原话 + 五方向（本任务 Proposal 已含）
+- [x] AC2: **①失效前提**——硬约束带失效前提字段,缺字段入口闸拒绝,无可测形式明标
+- [x] AC3: **②cadence 字段**——catalog 增 cadence(每轮/每红窗/每里程碑/冷启动/按需),零调用>3×周期进待表态
+- [x] AC4: **②全历史表态**——表态回看全历史(meta-cc 全会话+git log --all),不只看近 N 天
+- [x] AC5: **②禁止最近没用为唯一退休理由**——退休须给理由失效或已被取代实证;默认待观察
+- [x] AC6: **③last-reaffirmed**——超 N 天未触及进待重新确认,看一眼盖章
+- [x] AC7: **④checker-lib**——抽 matchAtCommandPosition/枚举式存在性,新检查器声明匹配方式
+- [x] AC8: **既有不回归**——`--for-task` scoped 门绿
+
+### 实现证据（inner 2026-08-10）
+
+**invoke 实跑**（`node --no-warnings --experimental-strip-types plugin/scripts/mechanism-vitality-check.ts --check`）：
+
+```
+mechanism-vitality-check — 熔融-结晶张力 ①②③④ (2026-08-10T08:09:36.824Z)
+失效前提入口闸 (①): PASS
+cadence 分档 (②a, 按机件声明周期, 非统一天数):
+    每轮×3窗=3天  → 90 个
+    按需×3窗=90天  → 40 个
+    冷启动×3窗=30天  → 7 个
+    每里程碑×3窗=42天  → 35 个
+    每红窗×3窗=3天  → 7 个
+零调用全历史表态 (②b, 10 个待表态, 默认处置 待观察 ②d):
+    - checker-cost.ts [每红窗, 3×窗=3天] last-touch=2026-08-06 全历史提交=2 … → 待观察
+        全历史提示 (②b): …表态须回看全历史 (git log --all + meta-cc 全会话), 不得只看近 N 天
+    - …（共 10 条，每条都带 全历史提交/首提交/末提交，默认处置 待观察）
+待重新确认 (③, last-reaffirmed 超 30 天未触及, 0 个):
+    (无 — 全部 last-reaffirmed 均为 2026-08-10 初始章)
+退休规则 (②c/②d): PASS — 默认处置=待观察; 退休必须给「理由失效」或「已被取代」实证, 永不因「最近没用」
+```
+
+**scoped 测试**（`./scripts/test.sh --for-task gap-crystallization-five-directions`）：exit 0，`tests 81 / pass 81 / fail 0 / cancelled 0`，duration ~109s（优化后；checker 的 git 证据改为一次 `git log --all` 批量，-55s→-6s）。选中集 = capability-catalog(15) + checker-lib(8) + mechanism-vitality-check(11) + drive-contract-check(7) + test-framework-policy-check(25) + test-isolation-check(15)。scoped 静态检查（test-framework-policy / test-isolation）均 PASS。
 
 ## Definition of Done
 
@@ -63,9 +87,11 @@ extra: {}
 ## Touches
 
 - plugin/scripts/capability-catalog.sh（cadence 字段 + 零调用分档 + 失效前提入口闸）
-- plugin/scripts/<新检查器>.ts（零调用 triage + last-reaffirmed + 失效前提入口闸）
+- plugin/scripts/mechanism-vitality-check.ts（零调用 triage + last-reaffirmed + 失效前提入口闸）
 - plugin/scripts/checker-lib.ts（④ 抽取：matchAtCommandPosition / 枚举式存在性）
-- plugin/scripts/drive-contract-check.ts + test-framework-policy-check.ts（④ 改用 checker-lib）
+- plugin/scripts/drive-contract-check.ts（④ 改用 checker-lib）
+- plugin/scripts/test-framework-policy-check.ts（④ 改用 checker-lib）
+- plugin/scripts/test-isolation-check.ts（④ 第三处手搓 buildNonCodeMask 也改用 checker-lib）
 - plugin/test/（各 AC 测试）
 - orchestration/orchestrator-tick-core.md（若核需同步失效前提/零调用判据）
 - tasks/gap-crystallization-five-directions.md（自身：勾 AC + 贴输出）
@@ -78,7 +104,7 @@ invariant zero_call_cadence_gated = 1（零调用按 3×声明周期分档,非�
 invariant retirement_needs_reason_or_replacement = 1（禁止最近没用为唯一退休理由）
 invariant invalidation_precondition_testable = 1（失效前提缺字段=入口闸拒绝）
 invariant checker_lib_extracted = 1（matchAtCommandPosition/枚举式存在性抽库）
-invoke    `bash plugin/scripts/<新检查器>.sh --check`（贴输出：cadence 分档 + 零调用全历史 + 失效前提入口闸）
+invoke    `node --no-warnings --experimental-strip-types plugin/scripts/mechanism-vitality-check.ts --check`（贴输出：cadence 分档 + 零调用全历史 + 失效前提入口闸）
 control   cadence 周期门限；全历史表态；禁止最近没用退休；last-reaffirmed；checker-lib；默认待观察
 resume    失效前提 / cadence / 全历史表态 / last-reaffirmed / checker-lib 分步提交，任一步完成即写盘
 

@@ -89,8 +89,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+// gap-crystallization-five-directions ④: 位置判定原语抽到 checker-lib — 本条曾经是第三次手搓
+// buildNonCodeMask (写 A16 时又犯一次), 现在与 drive-contract/test-framework-policy 共用同一库。
+import { buildNonCodeMask } from "./checker-lib.ts";
 import {
-  buildNonCodeMask,
   hasNodeTestImport,
   canonicalTestFiles,
   readFileSafe,

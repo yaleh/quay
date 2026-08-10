@@ -58,6 +58,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+// gap-crystallization-five-directions ④: 位置判定原语抽到 checker-lib。
+import { buildNonCodeMask, enumerativeExistence } from "./checker-lib.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -72,89 +74,6 @@ export function readFileSafe(p: string): string {
   } catch {
     return "";
   }
-}
-
-/** Keywords after which a `/` unambiguously starts a regex literal (the standard lexer heuristic;
- * `return /re/` must not be read as division). */
-const REGEX_PRECURSOR_KEYWORDS = new Set([
-  "return", "typeof", "instanceof", "in", "of", "new", "delete", "void", "throw", "case", "do", "else", "yield", "await",
-]);
-
-/** Should a `/` at position `i` (with `prevCode` the previous non-comment, non-string char) be
- * read as the start of a regex literal? Implements the usual disambiguation: a `/` at a statement
- * start (after whitespace), after `=`/`(`/`,`/`{`/etc., or after `return`-class keywords is a
- * regex; a `/` immediately after an operand (`a / b`, `) / b`, `5 / 2`, `x++ / 2`) is division. */
-function isRegexStart(prevCode: string, src: string, i: number): boolean {
-  if (prevCode === "") return true; // start of file
-  if (/\s/.test(prevCode)) return true; // statement start — division never directly follows space
-  // postfix ++ / -- : `x++ / 2` and `x-- / 2` are division, not a regex
-  if ((prevCode === "+" || prevCode === "-") && src[i - 2] === prevCode) return false;
-  if (/[A-Za-z0-9_$]/.test(prevCode)) {
-    // an operand — unless the token just before was a regex-precursor keyword
-    const m = src.slice(0, i).match(/([A-Za-z_$][A-Za-z0-9_$]*)\s*$/);
-    return m ? REGEX_PRECURSOR_KEYWORDS.has(m[1]) : false;
-  }
-  if (prevCode === ")" || prevCode === "]" || prevCode === '"' || prevCode === "'" || prevCode === "`") return false; // division
-  return true; // `( , = [ ! & | ? { } ; : ^ ~` and other punctuation → regex
-}
-
-/** Build a mask marking every position that is NOT code: inside a `//` or a slash-star block
- * comment, inside a string/template literal, or inside a REGEX literal. A linear state machine —
- * unlike a regex, it cannot be fooled by a glob pattern inside a comment whose slash-star sequence
- * would make a naive block-comment regex scan forward past the imports and eat them (REFUTE
- * round-1 regression, confirmed on cli-entry.test.mjs whose header comments spell the test glob);
- * and it masks regex literals so `/import { test } from "node:test"/` written as a regex cannot
- * satisfy the policy (REFUTE round-2). */
-export function buildNonCodeMask(src: string): Uint8Array {
-  const mask = new Uint8Array(src.length);
-  let i = 0;
-  const n = src.length;
-  let prevCode = ""; // last CODE character emitted (for regex-literal disambiguation)
-  while (i < n) {
-    const c = src[i];
-    const d = src[i + 1];
-    if (c === "/" && d === "/") {
-      mask[i] = 1; mask[i + 1] = 1; i += 2;
-      while (i < n && src[i] !== "\n") { mask[i] = 1; i++; }
-      continue;
-    }
-    if (c === "/" && d === "*") {
-      mask[i] = 1; mask[i + 1] = 1; i += 2;
-      while (i < n && !(src[i] === "*" && src[i + 1] === "/")) { mask[i] = 1; i++; }
-      if (i < n) { mask[i] = 1; mask[i + 1] = 1; i += 2; }
-      continue;
-    }
-    if (c === '"' || c === "'" || c === "`") {
-      const q = c;
-      mask[i] = 1; i++;
-      while (i < n) {
-        mask[i] = 1;
-        if (src[i] === "\\") { if (i + 1 < n) { mask[i + 1] = 1; i += 2; } else { i++; } continue; }
-        if (src[i] === q) { i++; break; }
-        i++;
-      }
-      prevCode = q; // the closing quote is what a following `/` sees (division)
-      continue;
-    }
-    if (c === "/" && isRegexStart(prevCode, src, i)) {
-      mask[i] = 1; i++;
-      let inClass = false;
-      while (i < n) {
-        mask[i] = 1;
-        const cc = src[i];
-        if (cc === "\\") { if (i + 1 < n) { mask[i + 1] = 1; i += 2; } else { i++; } continue; }
-        if (cc === "[") inClass = true;
-        else if (cc === "]") inClass = false;
-        else if (cc === "/" && !inClass) { i++; break; }
-        else if (cc === "\n") { i++; break; } // unterminated regex — bail out of the literal
-        i++;
-      }
-      continue;
-    }
-    prevCode = c;
-    i++;
-  }
-  return mask;
 }
 
 /** True iff the nearest preceding CODE character (skipping comments/strings, which the mask marks
@@ -380,9 +299,12 @@ export function runPolicyChecks(i: PolicyCheckInput): string[] {
   }
 
   // C1 (AC3): every glob file must import node:test OR be on the exemption list.
-  for (const f of i.files) {
-    if (hasNodeTestImport(f.source)) continue;
-    if (exemptionSet.has(f.rel)) continue;
+  // 枚举式存在性 (checker-lib): 把 glob 文件分成「合规」与「违规」两个清单 — 缺席是清单里的事实,
+  // 不是被布尔化压缩成「检查失败」的存在性。
+  const { absent: nonCompliantFiles } = enumerativeExistence(i.files, (f) =>
+    hasNodeTestImport(f.source) || exemptionSet.has(f.rel),
+  );
+  for (const f of nonCompliantFiles) {
     failures.push(
       `AC3: ${f.rel} uses the hand-rolled harness (no "node:test" import) and is NOT on the legacy exemption list (${DATA_FILE_REL}). New test files MUST import node:test.`
     );
