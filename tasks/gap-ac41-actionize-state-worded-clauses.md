@@ -1,7 +1,10 @@
 ---
 id: gap-ac41-actionize-state-worded-clauses
-title: '结果状态型条款改写成动作+可核产物——三份执行核 95% 是动作，唯一 5% 状态描述正是坏掉的那条（orchestrator 的「自测绿」）；实证：两个 suite-fix subagent 同一份条文行为相反（引文件的失败 scope=main、全散文的成功 scope=worktree）；自测绿正确写法=「worktree 里跑 scripts/test.sh 直到 verification-round.jsonl 出现 scope=worktree 且 state=green」；measure=状态描述型措辞计数→0'
-status: todo
+title: 结果状态型条款改写成动作+可核产物——三份执行核 95% 是动作，唯一 5% 状态描述正是坏掉的那条（orchestrator
+  的「自测绿」）；实证：两个 suite-fix subagent 同一份条文行为相反（引文件的失败 scope=main、全散文的成功
+  scope=worktree）；自测绿正确写法=「worktree 里跑 scripts/test.sh 直到
+  verification-round.jsonl 出现 scope=worktree 且 state=green」；measure=状态描述型措辞计数→0
+status: ready
 labels:
   - gap
   - defect
