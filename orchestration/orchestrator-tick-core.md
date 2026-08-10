@@ -38,7 +38,7 @@
 - **B6 落盘聚合**:`fast-mode-telemetry.ts --snapshot` (src:772)
 - **B7 重锚转发(1c,强制)**:**判空闲才转发**(pane 两次相同 + 无在飞 bracket + 非 ruling-required)→ `cat plugin/scripts/reanchor-prompt.txt` **逐字原样**发,不现写散文 (src:825, 834, 837)
 - **B8 动作分类**:`no-action` / `unblock` / `correct` / `escalate` 记一个——判断分层是否退化的唯一依据。**`no-action` 唯一合法条件 = 五条不等式全为假**(见 B13 五条清单);任一为真则 B8 必须是 `unblock`/`correct`/`escalate` 之一,记 `no-action` 即违 (src:865)
-- **B9 队列**:队列空 ⇒ 按候选/依赖/`checkTouchesPair`/优先级补充(含跨机 `task/*` 分支在飞);阶段目标要的任务 ⇒ `ready-pool-check.ts --targeted <id>` 校验 + `quay promote <id>`(不受 `pool<floor` 约束) (src:908, 941)
+- **B9 队列**:队列空 ⇒ 按候选/依赖/`checkTouchesPair`/优先级补充(含跨机 `task/*` 分支在飞);阶段目标要的任务 ⇒ `ready-pool-check.ts --targeted <id>` 校验 + `quay promote <id>`(不受 `pool<floor` 约束);**`deficit > 0` 第三触发器(2026-08-10 manager 22:0x)** ⇒ 跑 `ready-pool-check.ts --apply`(自闸:pool<floor 且 promotions 非空 ⇒ 机械补晋落盘,否则零写;复用既有心跳,不手写 promote 循环) (src:908, 941, 1061)
 - **B10 学习**:问「这一轮是否改变了对目标或方法的理解」,是则改对应文件并**写明什么证据推翻了原判断** (src:1013, 1027)
 - **B11 升级**:同一失败再现 / 需改方向范围 / 外层停止条件触发 ⇒ 写 `orchestration/escalations.md`,含现象+已试+为何超权+≥2 选项 (src:1003)
 - **B12 自身停止条件自查**:连续 3 个 tick 没有推进任何任务状态 ⇒ 停 loop、叫人、附三次 tick 各看到什么 (src:1029)
