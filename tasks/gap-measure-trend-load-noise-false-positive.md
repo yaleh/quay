@@ -74,6 +74,7 @@ extra: {}
 - plugin/test/（新增：小测试翻倍不 flag；大绝对仍 flag）
 - tasks/gap-single-file-test-duration-trend-unwatched.md（交叉标注——本任务建的 measure-trend，假阳性是它的阈值问题）
 - tasks/gap-measure-trend-relative-trigger-lacks-hist-variance-exemption.md（交叉标注——同族后续：相对 ≥2× 触发器也缺历史方差豁免，round-199 高方差大测试低点后回正常带被误判翻倍）
+- tasks/gap-measure-trend-large-test-load-noise.md（交叉标注——本任务修复不完整的后续：小测试豁免只治 300ms 级，承重大测试 it0-dod-check 71s 在负载下 +33s 仍误报；补历史方差豁免 round-173b）
 - tasks/gap-measure-trend-load-noise-false-positive.md（自身：勾 AC + 贴证据）
 
 ## Contract
