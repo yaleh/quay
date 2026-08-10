@@ -93,3 +93,5 @@ changed: 建任务（round-161 serial 相位顺序残留依赖——install-conf
 **残留验证**：修复后两序连跑 + scoped 门跑完，`/var/tmp/install-e2e-wt-*` 0 残留（`after()` 清理生效）、`/tmp/install-e2e-*` 无 11:55 后新增、无 `proj-0` tmux session、`/srv/target-worktrees` 从未存在。
 
 **AC2（serial 相位连续 2 轮绿）归外层 verification-round 验证**——内层只交付顺序无关 + 单独跑绿 + scoped 门绿。
+
+**Re-verify 2026-08-10（本派发，develop head 06f4659c）**：实现已 fan-in 合入 develop（0aaddecd → 2793e1fb）。在 fresh worktree（fork develop @ 06f4659c，node_modules symlink 主检出）上复验：`bash scripts/test.sh --for-task gap-serial-phase-install-test-residue-dependency --allow-thin` → **exit 0**。静态检查 0 违规（test-isolation 44 条基线内无新增、task-contract strict-subset no violations、adr016 0、dead-code-after-return 0、superseded-capability PASS、test-impl-census 319 clean）；测试 **24 pass / 0 fail / 0 cancelled / 0 skipped（161.6s）**。隔离强化代码在位（`diskWorktreeRoot()` + per-workspace tmux session + `worktreeRoot:null` 升级路径）——develop 上 e21e7a54 尚未合入（仅 1 行 `@load-sensitive-entry` 标注，与隔离无关），故本复验直接证明当前 develop 上修复完整。
