@@ -51,7 +51,8 @@ an autonomous loop under `experiments/`. Both layers coexist — the `packages/`
   **全部读脚本，不要在此处复制一份**（本节曾复制 144 行，占本文件 49%，正是漂移之源）。
 - **Web UI**：`node --experimental-strip-types packages/quay/bin/quay.ts serve --host <ip> --port <p>`
 - **`scripts/test.sh` 覆盖不到的**（正本 `.github/workflows/ci.yml`）：`dist-verify-node-floor`
-  （真 npm-pack 产物在 Node 底线上跑）、以及里程碑节奏的浏览器/agent e2e（`adr/ADR-010`，status: proposed）。
+  （真 npm-pack 产物在 Node 底线上跑）、以及里程碑节奏的浏览器/agent e2e
+  （`adr/ADR-010-scheduled-milestone-e2e-incl-browser-tests.md`，status: proposed）。
   **一次绿的 `scripts/test.sh` 不是这两类的证据。**
 ## Architecture — the product (`packages/`)
 
