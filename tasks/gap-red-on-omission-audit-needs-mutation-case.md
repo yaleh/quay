@@ -54,8 +54,8 @@ extra: {}
 
 ## Contract
 
-measure   mutation_uncovered_has_red_on_omission = `bash plugin/scripts/checker-mutation-check.sh --check 2>&1 | grep -c 'red-on-omission-audit'` 的 stdout 数字
-band      mutation_uncovered_has_red_on_omission = 0（uncovered 不含它）
+measure   mutation_uncovered_has_red_on_omission = `bash plugin/scripts/checker-mutation-check.sh --list --json 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); print(len([c for c in d.get('uncovered',[]) if c=='red-on-omission-audit']))"` 的 stdout 数字（JSON uncovered 数组——修 `grep -c` 结构上不可取假的坏 measure：路径回显/covered 行也会命中，硬规则 4）
+band      mutation_uncovered_has_red_on_omission = 0（uncovered 数组不含 red-on-omission-audit）
 invariant checker_mutation_gate_green = 1（checker-mutation-check 不 FAIL）
 invariant red_on_omission_still_checks = 1（red-on-omission-audit 本身的检查能力不退化）
 invoke    `bash plugin/scripts/checker-mutation-check.sh --check`（贴 uncovered 清单）
