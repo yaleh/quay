@@ -39,18 +39,28 @@
 //   {"event":"SUITE-RED"|"SUITE-GREEN"|"SUITE-RUNNING","at":"<ISO>","early":<bool>,"stopSignal":<bool>,
 //    "state":{...}} —— Contract measure `red_to_triage_ms` 的起点（SUITE-RED.at → 分诊启动）。
 //
+// 自动重触发（gap-suite-empty-wait-no-auto-retrigger AC2/AC3）：套件终态（red/green）后 N 分钟
+// （默认 10）无新轮启动 → 机械地起下一轮（spawn full-suite-runner.ts，detached），不依赖外层 tick
+// 手动判断。判定是纯函数（shouldAutoRetrigger → runOnce 返回 `retrigger`），执行在 runMonitor
+// （spawnRetriggerRun）；resource-gate 仍先行（runner 内 checkResourceGate，WAIT ⇒ 不起跑）；
+// 与手动起跑互斥（running 状态不触发 + spawn 前重查状态仍是终态 + memo lastRetriggerAt 节流）。
+//
 // 使用（外层挂 Monitor，冷启动步骤 4b2；或 tick / 排障里跑 --once）：
 //   node --no-warnings --experimental-strip-types plugin/scripts/suite-state-trigger.ts \
 //     [--once]                      # 跑一轮：读状态、检测转变、记录并打印事件（测试接缝 + tick 排障）
 //     [--monitor]                   # Monitor 模式（默认）：每 --interval 秒跑一轮，把事件打到 stdout
 //                                   #   （外层 Monitor 事件流 → 立即推送，不等 cron）
 //     [--interval <sec>]            # Monitor 轮询间隔（默认 5，目标秒级）
+//     [--retrigger-idle-min <min>]  # 自动重触发阈值（默认 10 = Contract band empty_wait_after_terminal
+//                                   #   <= 10；测试注入短 N 用 QUAY_SUITE_RETRIGGER_IDLE_MS env 或 --once
+//                                   #   配合 --retrigger-idle-min 0.01 这类小数分钟）
 //     [--root <path>]               # 工作区根（测试接缝；默认仓库根）
 //
 // Exit: 0（正常）；只有不可解析的参数退出 1。状态是 red 不是错误——它就是要触发处置的信号。
 
 import fs from "node:fs";
 import path from "node:path";
+import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { matchGlob, parseTouches } from "./touches-orthogonality-check.ts";
@@ -323,6 +333,14 @@ export interface RunOnceResult {
   status: SuiteStateValue | "absent";
   events: SuiteStateEvent[];
   stopSignal: boolean;
+  /**
+   * gap-suite-empty-wait-no-auto-retrigger AC2/AC3 — true when the suite is terminal-with-finishedAt
+   * AND idle >= the retrigger threshold AND not throttled. The DECISION is pure; the caller (runMonitor)
+   * is the actor that spawns the next round (runOnce itself never launches a runner).
+   */
+  retrigger: boolean;
+  /** Measured idle ms behind the retrigger decision (null when no terminal anchor). */
+  retriggerIdleMs: number | null;
 }
 
 /** AC1/AC3 纯转变检测器：上一个状态 → 下一个状态，产出一条套件状态事件（无转变 = null）。 */
@@ -380,6 +398,110 @@ export function readSuiteState(root: string): SuiteState | null {
 // context/back-compat; the crash-watchdog no longer reads it (the runner's own max-runtime guard at
 // 45 min still bounds a LIVE runner's age, and a real death is caught by pid-liveness instead).
 export const RUNNING_STALE_MS = 60 * 60_000;
+
+// ── auto-retrigger (gap-suite-empty-wait-no-auto-retrigger AC2/AC3) ──────────────────────────────────
+// The full-suite's EMPTY-WAIT hole: after a suite terminal state (red/green), if no NEW round starts,
+// nothing mechanically starts the next one — the loop idles until the outer's manual tick. Measured
+// (manager 2026-08-10): red-window span 13.23h/23.8h=56%, suite truly running 6.75h (51%) vs empty
+// wait 6.48h (49%), a ~2h hole (19:13→21:06, r196 end 19:23 → r197 start 21:06), develop stuck 9.3h.
+//
+//   AC2 — auto-retrigger: after a terminal state (red/green) + N idle minutes with no new round, this
+//         monitor MECHANICALLY starts the next round (spawns full-suite-runner.ts) — NOT dependent on
+//         the outer's manual tick. N defaults to 10 min (the task Contract band
+//         `empty_wait_after_terminal <= 10`), overridable via `--retrigger-idle-min <min>` (CLI) or
+//         `QUAY_SUITE_RETRIGGER_IDLE_MS` (env, test seam).
+//   AC3 — hole detection: a red round ending with no `running` within the threshold takes the SAME
+//         path (a red terminal state is just a terminal state — the reason axis does not change the
+//         empty-wait arithmetic). The detection reads the TERMINAL TIMESTAMP from the state file
+//         (`finishedAt`, epoch sec per gap-batch-merge-gate-reads-stale-green / ISO legacy) and
+//         compares wall-clock idle.
+//   AC4 — race safety (all three, mechanically):
+//         (1) resource-gate FIRST — the retrigger reuses the runner's existing gate consultation
+//             (checkResourceGate BEFORE the running write; WAIT ⇒ exits without touching state), so a
+//             gate-WAIT blocks the retrigger by construction;
+//         (2) no double-start vs a MANUAL start — detection only fires on a NON-running state, and the
+//             spawn re-checks the state file is still terminal just before spawning (a manual start
+//             that landed in between has written `running` ⇒ bail);
+//         (3) no retrigger storm — the memo's `lastRetriggerAt` throttles to one attempt per idleMs
+//             window (a WAIT'd attempt retries only after another full N-idle period).
+//
+// The DECISION is pure (`shouldAutoRetrigger`, returned by runOnce as `retrigger`); the ACT is the
+// spawn in runMonitor (`spawnRetriggerRun`) — runOnce stays side-effect-free w.r.t. launching (tests
+// inject a short N and assert the decision, never a real spawn).
+export const DEFAULT_RETRIGGER_IDLE_MS = 10 * 60 * 1000; // 10 min — Contract band empty_wait_after_terminal <= 10
+
+/** The idle threshold: --retrigger-idle-min CLI, then QUAY_SUITE_RETRIGGER_IDLE_MS env (test seam), then default. */
+export function resolveRetriggerIdleMs(argv?: string[], opts?: { idleMs?: number }): number {
+  if (opts?.idleMs !== undefined && Number.isFinite(opts.idleMs) && opts.idleMs > 0) return opts.idleMs;
+  if (argv) {
+    const minArg = parseArg(argv, "--retrigger-idle-min");
+    if (minArg !== undefined) {
+      const min = Number(minArg);
+      if (Number.isFinite(min) && min > 0) return Math.round(min * 60 * 1000);
+    }
+  }
+  const envMs = Number(process.env.QUAY_SUITE_RETRIGGER_IDLE_MS);
+  if (Number.isFinite(envMs) && envMs > 0) return envMs;
+  return DEFAULT_RETRIGGER_IDLE_MS;
+}
+
+/**
+ * The suite's TERMINAL timestamp in epoch ms — the idle-measurement anchor (AC3). Returns null when
+ * the state is not terminal-with-a-finishedAt: a `running` state (a round is in flight — never
+ * retrigger), an absent state, or an EARLY red (`finishedAt: null` — the runner is still in flight and
+ * will write the real terminal timestamp when it completes). `finishedAt` is written as EPOCH SECONDS
+ * by the runner (gap-batch-merge-gate-reads-stale-green); ISO legacy states are still parsed.
+ */
+export function parseTerminalFinishedAt(state: SuiteState | null): number | null {
+  if (!state) return null;
+  if (state.state !== "green" && state.state !== "red") return null;
+  const f = state.finishedAt;
+  if (typeof f === "number" && Number.isFinite(f)) return f < 1e12 ? f * 1000 : f;
+  if (typeof f === "string") {
+    const ms = Date.parse(f);
+    return Number.isFinite(ms) ? ms : null;
+  }
+  return null;
+}
+
+export interface AutoRetriggerDecision {
+  retrigger: boolean;
+  /** Measured idle ms since the terminal timestamp (null when not terminal-with-finishedAt). */
+  idleMs: number | null;
+  reason:
+    | "idle-exceeded"
+    | "idle-not-exceeded"
+    | "throttled"
+    | "running"
+    | "not-terminal-with-finishedAt";
+}
+
+/**
+ * Pure retrigger decision (AC2/AC3): fire when the suite is terminal-with-finishedAt, idle >= idleMs,
+ * and the last retrigger attempt is older than idleMs (the throttle — one attempt per idle window).
+ * A `running` state / absent / early-red never fires. No side effects — the caller spawns.
+ */
+export function shouldAutoRetrigger(
+  state: SuiteState | null,
+  lastRetriggerAtMs: number | null,
+  idleMs: number,
+  now = Date.now(),
+): AutoRetriggerDecision {
+  const terminalAt = parseTerminalFinishedAt(state);
+  if (terminalAt === null) {
+    return {
+      retrigger: false,
+      idleMs: null,
+      reason: state?.state === "running" ? "running" : "not-terminal-with-finishedAt",
+    };
+  }
+  const idle = now - terminalAt;
+  if (idle < idleMs) return { retrigger: false, idleMs: idle, reason: "idle-not-exceeded" };
+  if (lastRetriggerAtMs !== null && now - lastRetriggerAtMs < idleMs) {
+    return { retrigger: false, idleMs: idle, reason: "throttled" };
+  }
+  return { retrigger: true, idleMs: idle, reason: "idle-exceeded" };
+}
 
 /** Is a process with this PID currently alive? (ESRCH = no such process = dead; EPERM = exists but not ours = alive.) */
 export function isProcessAlive(pid: number): boolean {
@@ -477,9 +599,10 @@ export function recordTransition(
  * 正是 ROUND 2「红着无人处置」要消灭的形态，必须一挂上就触发，而不是等下一次 cron。
  * （第一眼是 green 不记事件——那是平静基线，无转变。）
  */
-export function runOnce(root: string): RunOnceResult {
-  const memo = readJson<{ state: SuiteStateValue | null }>(memoPath(root));
+export function runOnce(root: string, opts?: { idleMs?: number }): RunOnceResult {
+  const memo = readJson<{ state: SuiteStateValue | null; lastRetriggerAt?: number | null }>(memoPath(root));
   const prev: SuiteStateValue | null = memo?.state ?? null;
+  let lastRetriggerAtMs: number | null = memo?.lastRetriggerAt ?? null;
   let cur = readSuiteState(root);
 
   // AC6 (gap-full-suite-state-red-no-failure-detail-static-check-invisible) — crash-watchdog: a
@@ -513,18 +636,39 @@ export function runOnce(root: string): RunOnceResult {
     }
   }
 
+  // ── auto-retrigger decision (gap-suite-empty-wait-no-auto-retrigger AC2/AC3) ────────────────────
+  // Pure decision: terminal-with-finishedAt + idle >= idleMs + not throttled. Firing it only updates
+  // the memo's lastRetriggerAt (one attempt per idleMs window — a WAIT'd attempt retries only after
+  // another full idle period, AC4 no-storm). The actual spawn lives in runMonitor, NEVER here.
+  const idleMs = resolveRetriggerIdleMs(undefined, opts);
+  const retriggerDecision = shouldAutoRetrigger(cur, lastRetriggerAtMs, idleMs);
+  let retrigger = false;
+  let retriggerIdleMs: number | null = null;
+  if (retriggerDecision.retrigger) {
+    retrigger = true;
+    retriggerIdleMs = retriggerDecision.idleMs;
+    lastRetriggerAtMs = Date.now();
+  }
+
   try {
     fs.mkdirSync(path.dirname(memoPath(root)), { recursive: true });
     fs.writeFileSync(
       memoPath(root),
-      JSON.stringify({ state: status === "absent" ? null : status }, null, 2) + "\n",
+      JSON.stringify(
+        {
+          state: status === "absent" ? null : status,
+          ...(lastRetriggerAtMs !== null ? { lastRetriggerAt: lastRetriggerAtMs } : {}),
+        },
+        null,
+        2,
+      ) + "\n",
       "utf8",
     );
   } catch {
     // 记忆写失败不阻断本轮检测（下次轮询会重新比较——至多多记一条，不会漏掉红）。
   }
 
-  return { status, events, stopSignal: shouldStopDispatch(cur) };
+  return { status, events, stopSignal: shouldStopDispatch(cur), retrigger, retriggerIdleMs };
 }
 
 function formatEventLine(ev: SuiteStateEvent): string {
@@ -539,13 +683,77 @@ function formatEventLine(ev: SuiteStateEvent): string {
   );
 }
 
-async function runMonitor(root: string, intervalMs: number): Promise<number> {
+/**
+ * The full-suite-runner CLI args a retrigger spawn passes (gap-suite-empty-wait-no-auto-retrigger
+ * AC4): `--root <workspace-root>` (the tested checkout — same root the trigger watches) and, when the
+ * terminal state records a laneCount, `--lane-count <n>` so the auto-started round continues at the
+ * SAME parallelism the last round used (the outer's explicit `--lane-count 4` is preserved across a
+ * retrigger). Exporting this makes the "what would the retrigger run" question testable WITHOUT a real
+ * spawn. The resource gate is NOT bypassed here — the runner consults it before starting (WAIT ⇒ exit
+ * without touching state), so AC4 (gate-first) holds by construction.
+ */
+export function retriggerRunnerArgs(root: string, state: SuiteState | null): string[] {
+  const args = ["--root", root];
+  if (state && typeof state.laneCount === "number" && Number.isFinite(state.laneCount) && state.laneCount >= 1) {
+    args.push("--lane-count", String(state.laneCount));
+  }
+  return args;
+}
+
+/**
+ * AC2/AC3 — start the next suite round by spawning full-suite-runner.ts DETACHED (fire-and-forget: the
+ * trigger's poll loop must not block on a multi-minute suite). The runner does the rest: consults the
+ * resource gate FIRST (WAIT ⇒ exits non-zero without touching state — AC4 gate-first), writes
+ * `running` (a NEW generation), runs the suite, writes the terminal state + verification-round record.
+ * AC4 no-double-start: re-check the state is STILL terminal just before spawning — a manual start that
+ * landed between the decision and here has written `running` ⇒ bail (the manual round IS the round).
+ * The runner's stderr/stdout diagnostics tee to <root>/.quay/full-suite-retrigger.log.
+ */
+export function spawnRetriggerRun(root: string): void {
+  const state = readSuiteState(root);
+  if (!state || state.state === "running") return; // AC4: a round is already in flight — never double-start
+  const runner = path.join(__dirname, "full-suite-runner.ts");
+  const args = ["--no-warnings", "--experimental-strip-types", runner, ...retriggerRunnerArgs(root, state)];
+  const logPath = path.join(root, ".quay", "full-suite-retrigger.log");
+  let fd: number | undefined;
+  try {
+    fs.mkdirSync(path.dirname(logPath), { recursive: true });
+    fd = fs.openSync(logPath, "a");
+    const child = spawn(process.execPath, args, {
+      cwd: root,
+      stdio: ["ignore", fd, fd],
+      detached: true,
+      env: { ...process.env },
+    });
+    child.unref();
+    // stdout = the outer Monitor's event stream → SUITE-RETRIGGER is the visible "the next round was
+    // mechanically started" signal (the durable outcome is the runner's state write a moment later).
+    console.log(`SUITE-RETRIGGER root=${root} laneCount=${state?.laneCount ?? "default"} at=${new Date().toISOString()}`);
+  } catch (err) {
+    console.log(`SUITE-RETRIGGER-FAILED root=${root} ${err instanceof Error ? err.message : String(err)}`);
+  } finally {
+    if (fd !== undefined) {
+      try {
+        fs.closeSync(fd);
+      } catch {
+        // already closed — best-effort
+      }
+    }
+  }
+}
+
+async function runMonitor(root: string, intervalMs: number, idleMs: number): Promise<number> {
   // 首轮先跑一次（建立基线/冷启动即红的立即触发），随后按间隔轮询。
   for (;;) {
-    const { events } = runOnce(root);
+    const { events, retrigger } = runOnce(root, { idleMs });
     for (const ev of events) {
       // stdout 是外层 Monitor 的事件流 → 立即推送（不等 20 分钟 cron）
       console.log(formatEventLine(ev));
+    }
+    if (retrigger) {
+      // gap-suite-empty-wait-no-auto-retrigger AC2/AC3 — a terminal state has been idle for the
+      // threshold and no new round started: MECHANICALLY start the next round (not the outer's tick).
+      spawnRetriggerRun(root);
     }
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
@@ -559,19 +767,21 @@ function parseArg(argv: string[], name: string): string | undefined {
 export async function run(argv: string[]): Promise<number> {
   const root = path.resolve(parseArg(argv, "--root") ?? REPO_ROOT);
   const interval = Number(parseArg(argv, "--interval") ?? "5");
+  const idleMs = resolveRetriggerIdleMs(argv);
 
   if (argv.includes("--monitor") || !argv.includes("--once")) {
     const intervalMs = Number.isFinite(interval) && interval > 0 ? interval * 1000 : 5000;
-    return runMonitor(root, intervalMs);
+    return runMonitor(root, intervalMs, idleMs);
   }
 
   // --once：跑一轮（测试接缝 + tick/排障）
-  const { status, events, stopSignal } = runOnce(root);
+  const { status, events, stopSignal, retrigger, retriggerIdleMs } = runOnce(root, { idleMs });
   console.log(`SUITE-STATUS ${status}`);
   for (const ev of events) {
     console.log(formatEventLine(ev));
   }
   console.log(`stopSignal=${stopSignal}`);
+  console.log(`retrigger=${retrigger}${retriggerIdleMs !== null ? ` idleMs=${retriggerIdleMs}` : ""}`);
   return 0;
 }
 

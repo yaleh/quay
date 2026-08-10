@@ -38,11 +38,37 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录量化（红窗 13.23h/56%、空等 6.48h/49%、~2h 空洞、develop 卡 9.3h、integration-only 162、红窗 fan-in 2.4×）（本任务 Proposal 已含）
-- [ ] AC2: **自动重触发**——suite 终态后 N 分钟无新轮自动起下一轮（机械判定，不依赖外层 tick 手动）
-- [ ] AC3: **空洞检测**——红轮结束无 running 超阈值 → 自动重触发或触发外层信号
-- [ ] AC4: **竞态安全**——resource-gate 仍先行；与手动起跑互斥
-- [ ] AC5: **既有不回归**——`--for-task` scoped 门绿
+- [x] AC1: **复现固化**——任务体记录量化（红窗 13.23h/56%、空等 6.48h/49%、~2h 空洞、develop 卡 9.3h、integration-only 162、红窗 fan-in 2.4×）（本任务 Proposal 已含）
+- [x] AC2: **自动重触发**——suite 终态后 N 分钟无新轮自动起下一轮（机械判定，不依赖外层 tick 手动）
+- [x] AC3: **空洞检测**——红轮结束无 running 超阈值 → 自动重触发或触发外层信号
+- [x] AC4: **竞态安全**——resource-gate 仍先行；与手动起跑互斥
+- [x] AC5: **既有不回归**——`--for-task` scoped 门绿
+
+## Evidence（内层实现 2026-08-10）
+
+**实现**：自动重触发落在 `plugin/scripts/suite-state-trigger.ts`（套件调度的监视器，外层 Monitor 挂载）。
+
+- 判定（纯函数 `shouldAutoRetrigger`）：suite 终态（red/green）且 `full-suite-state.json` 的 `finishedAt`
+  距今 >= N 分钟（默认 10 = Contract band `empty_wait_after_terminal <= 10`；`--retrigger-idle-min <min>`
+  或 env `QUAY_SUITE_RETRIGGER_IDLE_MS` 可注入短 N）→ `runOnce` 返回 `retrigger=true`（AC2/AC3 同一路径，
+  red 终态与 green 终态共用；早红 `finishedAt:null` 不触发——runner 仍在飞）。
+- 执行（`runMonitor` → `spawnRetriggerRun`）：detached spawn `full-suite-runner.ts --root <root> --lane-count
+  <末轮 laneCount>`，stdout 打 `SUITE-RETRIGGER` 事件，runner 的 stdout/stderr tee 到
+  `.quay/full-suite-retrigger.log`；runner 自行写 `running`（新 generation）→ 跑 → 写终态 + verification-round。
+- 竞态（AC4，三条全机械）：
+  1. resource-gate 先行——retrigger 复用 runner 的 `checkResourceGate`（WAIT ⇒ 退出且 state 不动）；
+  2. 与手动起跑互斥——`running` 状态永不触发（手动起跑落盘 running 即抑制）+ spawn 前重查 state 仍是终态
+     （手动起跑若落在判定与 spawn 之间 ⇒ 已写 running ⇒ bail）；
+  3. 无 retrigger 风暴——memo `lastRetriggerAt` 节流：每 idle 窗口至多一次尝试（WAIT 后等下一个完整 N-idle 再试）。
+- 测试（`plugin/test/suite-state-trigger.test.mjs` +4，全 23 通过；`plugin/test/full-suite-runner.test.mjs` 65 通过不回归）：
+  (a) 终态 + N idle → retrigger 判定触发（短 N 注入）；fresh/running/early-red/absent 均不触发；
+  (b) 同一 idle 终态立即重查被节流（无风暴）+ running 抑制；
+  (c) resource-gate WAIT 拦截——用 retrigger 同款 args 跑 runner + `RESOURCE_GATE_TEST_CPU_AVG10=84.77` 强制 WAIT，
+  断言 state 终态字节不动 + `full-suite.log` 未生成（suite 从未 spawn）。
+- Scoped 门绿：`bash scripts/test.sh --for-task gap-suite-empty-wait-no-auto-retrigger --allow-thin`
+  → 103 tests, fail 0, cancelled 0（`suite-state-trigger.test.mjs` + `full-suite-runner.test.mjs` +
+  `outer-tick-log-check.test.mjs` 全绿；scoped 静态检查 test-framework-policy / test-isolation / task-contract 全 PASS）。
+- 未实跑真实全量 suite（那是外层的活 + 会争资源）；retrigger 用短-N 测试注入验证，未产生副作用。
 
 ## Definition of Done
 
@@ -53,10 +79,12 @@ extra: {}
 
 ## Touches
 
-- plugin/scripts/full-suite-runner.ts 或套件调度（终态后 N 分钟无新轮自动起跑）
-- plugin/scripts/verification-round.ts 或等价（终态时间戳读取）
-- plugin/scripts/outer-tick-log-check.sh 或调度器（空洞检测信号）
-- plugin/test/full-suite-runner.test.mjs（AC2-AC4 测试）
+- plugin/scripts/suite-state-trigger.ts（自动重触发实现：终态后 N 分钟无新轮自动起跑；resource-gate 先行 + 与手动起跑互斥；终态时间戳读取 = full-suite-state.json finishedAt）
+- plugin/scripts/full-suite-runner.ts 或套件调度（终态后 N 分钟无新轮自动起跑——实现落在 suite-state-trigger，runner 复用其 resource-gate/终态写路径）
+- plugin/scripts/verification-round.ts 或等价（终态时间戳读取——等价实现：suite-state-trigger 读 full-suite-state.json finishedAt）
+- plugin/scripts/outer-tick-log-check.sh 或调度器（空洞检测信号——等价实现：suite-state-trigger 的终态+空闲检测）
+- plugin/test/suite-state-trigger.test.mjs（AC2-AC4 测试：判定纯函数 + 竞态 + gate-WAIT 拦截）
+- plugin/test/full-suite-runner.test.mjs（AC2-AC4 测试——既有 runner 侧回归，未改仍绿）
 - tasks/gap-merge-green-snapshot-verified-commit-livelock.md（交叉标注——同族：套件轮调度）
 - tasks/gap-phase-order-serial-lowconc-before-main.md（交叉标注——同族：套件轮时长/判红）
 - tasks/gap-load-sensitive-serial-phase-unbounded-growth-measure-first.md（交叉标注——同族：轮时长）
