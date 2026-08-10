@@ -15,71 +15,58 @@ extra: {}
 ---
 **type:** execution
 
-## Proposal
+## Proposal（范围已重定，2026-08-10 manager STOP-AND-RESCOPE）
 
-**`CROSSCUT_CHECKS` 注册表对 `plugin/scripts/` 这一整片零覆盖——四条触发器全部只认 `packages/*/src`（packaging-state/check-adr/quay-github-src 均 `^packages/[^/]+/src`，lint 是泛型 `.ts/.js/.mjs`）。而今晚 C 类「真由变更引入」的失败全部发生在 `plugin/scripts/`：改 suite-state-trigger.ts→打破 red-window-shared-gate.test.mjs；加 external-dogfooding-check.ts→打破 verify-delivery-surface.test.mjs 清单快照；改 known-load-sensitive 扫描器→打破 glob 覆盖面一致性。跨文件耦合正是 basename 配对天然选不出的形状（规则⑤ cross-cut marker 存在的意义），但注册表漏了机制层。**
+**原任务基于错误前提：以为 plugin/scripts 下的东西不进 scoped 选择。实跑核实：`select-tests-for-touches.ts` 对 `plugin/scripts/send-keys-verified.sh` 的 Touches 解析出 `plugin/test/send-keys-verified.test.mjs`，coverage 1.00（2/2 resolved），crosscut lint 进入——规则 2 basename 配对和规则 3 mirror fold（条文里明写 plugin/scripts/X.ts）本来就覆盖 plugin/scripts。原前提作废。重定范围后的真实（较小）缺口：CROSSCUT_CHECKS 的 4 条触发器只匹配 `packages/*/src`，所以 plugin/scripts 触碰不会拉进 packaging-state / check-adr / quay-github-src（但 lint 会进，影响比原判断小得多）。值不值得补，需要重新评估，不照抄原说法。**
 
-### 实证（manager 2026-08-10 核实 + outer 复核）
+### 实证（manager 2026-08-10 STOP-AND-RESCOPE + outer 复核）
 
-- **人三问**：①失败是否都与变更有关？②任务是否测试不充分？③能否只跑变更相关测试？
-- **Q3 先答：机制已存在，无需新建**——`scripts/test.sh --for-task <id>` + `select-tests-for-touches.ts`（26KB，6 条确定性规则：直接命中/basename 配对/镜像折叠/Test-Files 声明/cross-cut 标记/未解析必报）已是强制门，inner 每次 fan-in 前都跑。**真问题是：scoped 门每次都绿，为什么全量还是红。**
-- **Q1 分类量化**（今晚红窗 ~19 条任务）：
-  - **A 类·判定器/基础设施自身缺陷 ~8 条**：三次幻影红（`^✖`/`__PERFILE__`/tmux-leak-scan 正则未锚定误配自己通过的测试名）、failures=[] 空载荷、measure-trend 假阳性、动态 cap 读数错。
-  - **B 类·负载/并发 flake ~7 条**：create-mcp solo+并发8+4-busy-loop 全绿、relation-sync solo 19/19 绿且 CPU 满载也绿、install 家族每轮红不同文件。
-  - **C 类·真由变更引入仅 ~4 条**。
-  - **A+B ≈ 79% 与被测变更无关**——scoped 门再完美也抓不到（A 类是判定器自己坏了，B 类按定义只在全量并发下才出现）。
-- **Q2 只有 C 类是测试不充分，共性极具体**——C 类四条全是**跨文件耦合、basename 配对天然选不出**：改 suite-state-trigger.ts→打破 red-window-shared-gate.test.mjs；加 external-dogfooding-check.ts→打破 verify-delivery-surface.test.mjs 清单快照；改 known-load-sensitive 扫描器→打破 glob 覆盖面一致性。这正是规则⑤ cross-cut marker 要解决的。
-- **真缺口（本任务）**：`CROSSCUT_CHECKS` 注册表现在 4 条——packaging-state（触发器 `^packages/[^/]+/src`）、check-adr（同上+`mcp*.ts`）、lint（空 tests）、quay-github-src（`^packages/quay-github/src`）。**四条触发器全部只认 packages/*/src，对 plugin/scripts（方法论机制层、今晚绝大多数改动所在地）零覆盖。**
-- **推论（manager）**：79% 的红与变更无关 ⇒ 「红窗停派」的代价大部分时候是在为测试基础设施自己的缺陷买单。今晚已修掉一大批（三次幻影红锚定/failures 空载荷/measure-trend 假阳性/动态 cap）——**这些修复的真实价值比看起来大，它们直接减少未来红窗的分母**。
+- **原前提错误**：`select-tests-for-touches.ts --task gap-send-keys-verified-hash-check...` → 解析出 `plugin/test/send-keys-verified.test.mjs`，coverage 1.00（2/2 Touches resolved），crosscut lint。plugin/scripts 覆盖是满的（规则 2 basename + 规则 3 mirror fold，条文里明写 plugin/scripts/X.ts）。
+- **manager 错因自述**：只读了 CROSSCUT_CHECKS 那 4 条触发器都匹配 packages/*/src 就外推到整个 plugin/ 是盲区，没跑选择器——又一次从局部读数外推到全集。
+- **真实（较小）缺口**：CROSSCUT_CHECKS 4 条触发器确实只匹配 packages/*/src，所以 plugin/scripts 触碰不会拉进 packaging-state / check-adr / quay-github-src（这些 cross-cut 测试不进 scoped 选择）；但 lint 会进（泛型 .ts/.js/.mjs 触发）。影响比原判断小得多。
+- **评估**：plugin/scripts 触碰（如改 known-load-sensitive.ts / suite-state-trigger.ts / ready-pool-check.ts）时，packaging-state（npm-pack-e2e/build-dist）确实不会进 scoped——但 packaging-state 测的是打包产物，plugin/scripts 改动是否会影响打包产物需要逐项评估（多数 plugin/scripts 改动不影响 packages 打包）。check-adr 同理（ADR 检查对象是 packages src / mcp 工具）。**结论：值得补的优先级低**——plugin/scripts 触碰与 packaging-state/check-adr 的耦合是稀有的（今晚 C 类 4 条全是测试/脚本层耦合，不是打包层），且 lint 已覆盖基础面。**不立新任务补触发器，除非未来出现「改 plugin/scripts 打破打包产物」的真实实例。**
 
-**为什么重要**：这是「scoped 门每次绿、全量却红」的结构性缺口——不是 scoped 机制不够好，是 cross-cut 注册表漏了机制层这一整片。补上后，改 plugin/scripts 的任务在 scoped 阶段就会选入对应跨切测试（red-window-shared-gate / verify-delivery-surface / known-load-sensitive 三类耦合），C 类失败从「全量才暴露」变「scoped 即暴露」。
+**为什么重要**：纠正错误前提，避免 inner 在错误范围上实现无用功能。真实缺口在别处（verification-round.jsonl 无 failures 字段——已立 gap-suite-round-record-missing-failures-field）。
 
 ### 选定机制方向（实现归内层，接法留执行时）
 
-1. **加 plugin/scripts 触发器**：`CROSSCUT_CHECKS` 新增 `plugin-scripts` 条目——trigger `^plugin/scripts/`，tests 至少含三类耦合的跨切测试：red-window-shared-gate / verify-delivery-surface / known-load-sensitive 的对应测试文件。
-2. **同族标注**：与 packaging-state / check-adr / quay-github-src 同机制（cross-cut marker，basename 配对选不出的跨文件耦合）。
-3. **回归验证**：改 plugin/scripts/ 下任一文件 → scoped 选择包含跨切测试；未改 → 不误选（负控制）。
+1. **本任务收缩为「评估结论」**：CROSSCUT_CHECKS 不加 plugin/scripts 触发器（评估后优先级低，未来有真实实例再补）。若 inner 已开始实现，回退到评估结论。
+2. **真实缺口另行处理**：verification-round.jsonl 无 failures 字段 → 立 gap-suite-round-record-missing-failures-field。
 
-**验证锚**：修后 (a) 改 `plugin/scripts/suite-state-trigger.ts`（或任一 plugin/scripts 文件）→ `select-tests-for-touches` 选入 red-window-shared-gate 等跨切测试；(b) 未触 plugin/scripts → 不选（负控制）；(c) scoped 门绿。
+**验证锚**：修后 (a) 选择器对 plugin/scripts Touches coverage 1.00（已实测）；(b) CROSSCUT_CHECKS 不变（评估后不加触发器）；(c) 无新插件/打包耦合实例。
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 Q1/Q2/Q3 量化（A 类 ~8 + B 类 ~7 + C 类 ~4，79% 与变更无关；C 类全在 plugin/scripts 跨文件耦合）（本任务 Proposal 已含）
-- [ ] AC2: **CROSSCUT_CHECKS 加 plugin/scripts 触发器**——新增 `plugin-scripts` 条目（trigger `^plugin/scripts/`，tests 含 red-window-shared-gate / verify-delivery-surface / known-load-sensitive 三类耦合测试）
-- [ ] AC3: **scoped 选择生效**——改 plugin/scripts/ 文件 → 跨切测试进入 scoped 选择
-- [ ] AC4: **负控制**——未触 plugin/scripts → 不误选
-- [ ] AC5: **既有不回归**——`--for-task` scoped 门绿；既有 4 条 cross-cut 条目不受影响
+- [ ] AC1: **复现固化**——任务体记录实跑核实（plugin/scripts Touches → 选择器 coverage 1.00）+ 原前提作废 + manager 错因（本任务 Proposal 已含）
+- [ ] AC2: **范围收缩**——本任务改为评估结论：CROSSCUT_CHECKS 不加 plugin/scripts 触发器（优先级低，有真实实例再补）
+- [ ] AC3: **真实缺口转交**——verification-round.jsonl 无 failures 字段 → 立新任务（gap-suite-round-record-missing-failures-field）
+- [ ] AC4: **既有不回归**——`--for-task` scoped 门绿
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全部勾上
-- [ ] 修后实跑：改 plugin/scripts 文件 → scoped 选入跨切测试（贴任务体）；负控制不误选
+- [ ] AC1–AC4 全部勾上
+- [ ] 修后实跑：选择器 coverage 1.00 贴任务体；CROSSCUT_CHECKS 不变
 - [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
 
 ## Touches
 
-- plugin/scripts/select-tests-for-touches.ts（CROSSCUT_CHECKS 加 plugin-scripts 条目 + trigger + tests）
-- plugin/test/select-tests-for-touches.test.mjs（AC2-AC4 新增用例：plugin/scripts 触发选入 + 负控制）
-- tasks/gap-scoped-selection-blind-to-packaging-state-diff.md（交叉标注——同族：cross-cut 注册表源）
-- tasks/gap-github-client-iscompound-sabotaged-uncommitted.md（交叉标注——quay-github-src cross-cut 先例）
-- tasks/gap-suite-state-trigger-crash-watchdog-breaks-running-transition-test.md（交叉标注——C 类 1：plugin/scripts 改→red-window-shared-gate 破）
-- tasks/gap-loop-shipping-verify-delivery-surface-consumer-laid-ref.md（交叉标注——C 类 2：verify-delivery-surface 清单快照）
-- tasks/gap-loop-shipping-threshold-scope-check-old-path-regression.md（交叉标注——C 类 3：known-load-sensitive 扫描器 glob）
-- tasks/gap-crosscut-checks-zero-coverage-of-plugin-scripts.md（自身：勾 AC + 贴证据）
+- tasks/gap-crosscut-checks-zero-coverage-of-plugin-scripts.md（范围收缩为评估结论；若 inner 已实现则回退）
+- tasks/gap-suite-round-record-missing-failures-field.md（交叉标注——真实缺口转交）
+- tasks/gap-suite-blocking-red-window-unattributable.md（交叉标注——另一条错误前提任务的更正）
 
 ## Contract
 
-measure   plugin_scripts_crosscut_selected = `node --no-warnings --experimental-strip-types plugin/scripts/select-tests-for-touches.ts --root <repo> --json` 输出里改 `plugin/scripts/foo.ts` 后 selected tests 是否含跨切测试
-band      plugin_scripts_crosscut_selected = true（改 plugin/scripts → 跨切测试入选）
-invariant plugin_scripts_not_touched_no_selection = 1（负控制：未触 plugin/scripts 不误选）
-invariant existing_crosscut_entries_preserved = 1（既有 4 条不受影响）
-invoke    `node --no-warnings --experimental-strip-types plugin/scripts/select-tests-for-touches.ts --root <repo> --json`（改 plugin/scripts 文件贴选择结果 + 负控制）
-control   改 plugin/scripts → 跨切入选；未触不误选；既有不回归
-resume    触发器 / 测试集 / 负控制分步提交，任一步完成即写盘
+measure   plugin_scripts_touch_resolution = `node --no-warnings --experimental-strip-types plugin/scripts/select-tests-for-touches.ts --task <id> --root <repo>` 的 coverage
+band      plugin_scripts_touch_resolution = 1.00（plugin/scripts Touches 全解析——前提更正）
+invariant crosscut_registry_unchanged = 1（评估后不加 plugin/scripts 触发器）
+invariant no_new_crosscut_entry = 1（无新条目）
+invoke    `node --no-warnings --experimental-strip-types plugin/scripts/select-tests-for-touches.ts --task gap-send-keys-verified-hash-check-cannot-tell-typed-from-submitted --root <repo>`（贴 coverage 1.00）
+control   选择器 coverage 1.00；注册表不变；评估结论在档
+resume    范围收缩 / 真实缺口转交分步提交，任一步完成即写盘
 
 ## Dispatch review
 
 reviewer: outer
 at: 2026-08-10
-changed: manager Q1/Q2/Q3 量化（79% 红与变更无关：A 判定器缺陷 8 + B 负载 flake 7 + C 真变更 4；C 类全在 plugin/scripts 跨文件耦合）+ 真缺口定位（CROSSCUT_CHECKS 4 条触发器全认 packages/*/src，plugin/scripts 零覆盖）⇒ 立案：加 plugin-scripts cross-cut 条目。实现归内层
+changed: manager STOP-AND-RESCOPE——原前提错误（plugin/scripts 被规则2 basename + 规则3 mirror fold 覆盖,选择器实测 coverage 1.00）。范围收缩为评估结论：CROSSCUT_CHECKS 不加 plugin/scripts 触发器（优先级低,真实缺口是 verification-round.jsonl 无 failures 字段,另行立案）。实现归内层（若已实现则回退）
