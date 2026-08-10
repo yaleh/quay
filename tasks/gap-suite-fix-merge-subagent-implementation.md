@@ -55,10 +55,8 @@ extra: {}
 
 ## Touches
 
-- orchestration/orchestrator-tick-core.md（A15 执行体已入；实现如需同步核）
-- plugin/scripts/ 或 workflow 模板（suite-fix-merge subagent + 评价 subagent）
-- plugin/test/（subagent 相关测试，若脚本化）
-- tasks/gap-suite-fix-merge-subagent-implementation.md（自身：勾 AC + 贴输出）
+- orchestration/orchestrator-tick-core.md（A15 执行体已入；结晶 prompt 模板若需同步核）
+- tasks/gap-suite-fix-merge-subagent-implementation.md（自身：勾 AC + 贴实跑结果）
 
 ## Contract
 
