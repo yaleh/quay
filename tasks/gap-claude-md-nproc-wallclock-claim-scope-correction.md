@@ -36,10 +36,10 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 CLAUDE.md 现行表述 + 判据核实（cancelled 非墙钟）+ 同日墙钟反方向数据（本任务 Proposal 已含）
-- [ ] AC2: **CLAUDE.md 适用范围修正**——并发结论拆 cancelled 维度 + 墙钟维度，不再写「nproc 是墙钟甜点」
-- [ ] AC3: **交叉标注**——衔接 gap-load-sensitive-serial-phase-unbounded-growth-measure-first AC2（lane 4 vs 8 对照）
-- [ ] AC4: **既有不回归**——`--for-task` scoped 门绿
+- [x] AC1: **复现固化**——任务体记录 CLAUDE.md 现行表述 + 判据核实（cancelled 非墙钟）+ 同日墙钟反方向数据（本任务 Proposal 已含）
+- [x] AC2: **CLAUDE.md 适用范围修正**——并发结论拆 cancelled 维度 + 墙钟维度，不再写「nproc 是墙钟甜点」
+- [x] AC3: **交叉标注**——衔接 gap-load-sensitive-serial-phase-unbounded-growth-measure-first AC2（lane 4 vs 8 对照）
+- [x] AC4: **既有不回归**——`--for-task` scoped 门绿
 
 ## Definition of Done
 
@@ -71,3 +71,13 @@ resume    CLAUDE.md 适用范围修正分步提交，任一步完成即写盘
 reviewer: outer
 at: 2026-08-10
 changed: manager 裁定——CLAUDE.md「nproc 是墙钟甜点/8 是 4.25× 超订」判据是 08-08 成本实验的 cancelled 数非墙钟；同日墙钟数据（lane=8 783s vs lane=4 1302s）指向相反。该改适用范围（cancelled 维度 + 墙钟维度拆分）非删结论。立案。实现归内层
+
+## Evidence（内层实现 2026-08-10）
+
+**AC2 适用范围修正**：claim 现位于 `scripts/test.sh` 头注释（CLAUDE.md 已 trim 为指向 test.sh 正本的指针结构）——两处「concurrency = nproc is the wall-clock sweet spot」改为**双维度拆分**：
+- **CANCELLED 维度**：08-08 成本实验并发 1/4/8 cancelled 全 0，推翻「避免 cancel 需更高并发」——这是推导（默认=nproc）的判据。
+- **墙钟维度（独立轴）**：selected set c4 最快（24s vs c1 57.5s / c8 27.3s），但外层全量 laneCount-8 轮墙钟更快（中位 ~783s vs lane-4 ~1302s，−22%~−40%，方向性——套件构成在变）；两处均明确「不以 nproc=墙钟甜点作为推导判据」，指向 `gap-load-sensitive-serial-phase-unbounded-growth-measure-first` AC2 的 lane 4 vs 8 对照。
+
+**AC3 交叉标注**：两处注释均注明衔接 measure-first AC2 对照实验。
+
+**AC4 scoped 门绿**：`bash scripts/test.sh --for-task gap-claude-md-nproc-wallclock-claim-scope-correction --allow-thin` → exit 0。

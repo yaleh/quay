@@ -583,8 +583,10 @@ export function isAbortLine(line: string): boolean {
  * process amplification 17/8 ≈ 2.125) was an unproven-conservative guard against oversubscription:
  * the AC5 cost-side experiment (gap-dod-two-green-runs-and-over90-budget-are-mathematically-
  * incompatible, 2026-08-08) ran the same selected set at concurrency 1/4/8 — ZERO cancelled at
- * every level, and nproc was the wall-clock sweet spot (24s vs 57.5s at 1, 27.3s at 8 on a 4-core
- * box). The outer's own full-suite verification rounds at laneCount 8 (13+ runs, all cancelled 0)
+ * every level (the CANCELLED dimension that refuted "avoid cancel needs higher concurrency";
+ * wall-clock is a SEPARATE axis — see scripts/test.sh header, split per
+ * gap-claude-md-nproc-wallclock-claim-scope-correction, NOT "nproc = wall-clock sweet spot").
+ * The outer's own full-suite verification rounds at laneCount 8 (13+ runs, all cancelled 0)
  * corroborate that the oversubscription cost side never materialized. RESOURCE_GATE_NPROC /
  * RESOURCE_GATE_AMPLIFICATION are the deterministic test seams (the same env test.sh's
  * default_concurrency_formula reads).
