@@ -834,12 +834,56 @@ function freshnessRepo(prefix, fanInEpochSec, { docOnly = false, codeFile = fals
   return dir;
 }
 
+// Commit every staged change with a CONTROLLED author/committer date (epoch seconds) — the same
+// deterministic-time pattern freshnessRepo uses inline, factored out so the verified-merge repo can
+// make two fan-ins at two distinct epochs.
+function commitAt(dir, message, epochSec) {
+  const env = {
+    ...process.env,
+    GIT_AUTHOR_DATE: new Date(epochSec * 1000).toISOString(),
+    GIT_COMMITTER_DATE: new Date(epochSec * 1000).toISOString(),
+  };
+  gitCmd(dir, "add", "-A");
+  const res = spawnSync("git", ["-C", dir, "commit", "-q", "-m", message], { encoding: "utf8", env });
+  assert.equal(res.status, 0, `commit "${message}" failed: ${res.stderr}`);
+}
+
+// Build the STRUCTURAL-LIVELOCK shape (gap-merge-green-snapshot-verified-commit-livelock): an FF-able
+// two-line repo where integration has TWO commits — V (the VERIFIED commit: the integration tip when
+// the green suite STARTED, measured at `verifiedEpochSec`) then N (a NEWER fan-in that landed AFTER the
+// suite started at `newerEpochSec`; a code file feature.ts so the COVERAGE axis would fail-closed on it
+// WITHOUT the verified-commit fix). The batch merge must advance develop to V (the tested point), NOT N.
+function verifiedMergeRepo(prefix, { verifiedEpochSec, newerEpochSec }) {
+  const dir = makeTmp(prefix);
+  initGitRepo(dir);
+  mkdirSync(join(dir, "orchestration"), { recursive: true });
+  writeFileSync(join(dir, "orchestration", "tick-log.md"), "tick base\n", "utf8");
+  commitAll(dir, "base");
+  gitCmd(dir, "branch", "-M", "master");
+  gitCmd(dir, "checkout", "-q", "-b", "develop");
+  gitCmd(dir, "checkout", "-q", "-b", "integration");
+
+  // Commit V — the integration tip the green suite VERIFIED (the tested point).
+  writeFileSync(join(dir, "orchestration", "tick-log.md"), "tick int V\n", "utf8");
+  writeFileSync(join(dir, "int-v.txt"), "int v\n", "utf8");
+  commitAt(dir, "verified commit V (tested tip)", verifiedEpochSec);
+
+  // Commit N — a NEWER fan-in that landed AFTER the suite started (untested; touches a code file so
+  // the COVERAGE axis would fail-closed on it under the legacy merge-HEAD behavior).
+  writeFileSync(join(dir, "orchestration", "tick-log.md"), "tick int N\n", "utf8");
+  writeFileSync(join(dir, "feature.ts"), "new code\n", "utf8");
+  commitAt(dir, "newer fan-in N (after suite start)", newerEpochSec);
+
+  gitCmd(dir, "checkout", "-q", "develop");
+  return dir;
+}
+
 // Write a suite-state file (finishedAt EPOCH SECONDS — the format the runner now writes, and the
 // format the freshness gate's Contract measure `int(time.time() - finishedAt)` consumes).
 // `scope` (main|worktree) is written by the runner (gap-worktree-scoped-runs-consume-resources-but-
 // produce-no-signal AC1); when omitted the state is a legacy pre-scope file — the gate must treat it
 // as main (fail-open, the runner's documented legacy semantics).
-function writeSuiteStateFile(dir, { state = "green", scope, finishedAtEpoch, startedAtIso } = {}) {
+function writeSuiteStateFile(dir, { state = "green", scope, finishedAtEpoch, startedAtIso, verifiedCommit } = {}) {
   const stateDir = join(dir, ".quay");
   mkdirSync(stateDir, { recursive: true });
   const data = {
@@ -851,6 +895,9 @@ function writeSuiteStateFile(dir, { state = "green", scope, finishedAtEpoch, sta
     laneCount: 8,
   };
   if (scope !== undefined) data.scope = scope;
+  // gap-merge-green-snapshot-verified-commit-livelock AC2 — the commit the green VERIFIED (written by
+  // full-suite-runner.ts at suite start); the batch merge merges THIS commit, not integration HEAD.
+  if (verifiedCommit !== undefined) data.verifiedCommit = verifiedCommit;
   const file = join(stateDir, "full-suite-state.json");
   writeFileSync(file, JSON.stringify(data), "utf8");
   return file;
@@ -1187,6 +1234,141 @@ test("FRESHNESS GATE (scope axis dry-run): a worktree-sourced green in --dry-run
     assert.match(r.stdout, /scope='worktree'/);
     assert.match(r.stdout, /measure suite_freshness=unknown/);
     assert.equal(gitCmd(dir, "rev-parse", "develop").stdout.trim(), devBefore);
+    assert.notEqual(gitCmd(dir, "merge-base", "--is-ancestor", "integration", "develop").status, 0);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+// ── MERGE-TO-VERIFIED-COMMIT (gap-merge-green-snapshot-verified-commit-livelock AC3/AC4) ──────────────
+//
+// The structural livelock: the full suite takes ~1847s (~31 min) while integration gets ~12 commits/
+// round (median 147s) — a green that only records `state == green` never catches integration HEAD
+// (COVERAGE fail-closed forever). Fix: the green snapshot records the commit it VERIFIED
+// (`verifiedCommit` — the integration tip at suite start) and the batch merge merges THAT commit, not
+// the moving HEAD. The merged point WAS tested → COVERAGE satisfied by construction (AC4: the
+// criterion is NOT loosened — the merged point is exactly the tested point; the untested newer commits
+// stay pending). These tests run the batch-merge WITHOUT --skip-freshness-gate (the freshness gate IS
+// the axis under test).
+
+test("MERGE-TO-VERIFIED-COMMIT (AC3/AC4): a green with verifiedCommit merges the VERIFIED commit, NOT integration HEAD — COVERAGE passes at it", () => {
+  const now = Math.floor(Date.now() / 1000);
+  const dir = verifiedMergeRepo("mtv1", {
+    verifiedEpochSec: now - 600, // the tested tip, 10m ago
+    newerEpochSec: now - 60, // a fan-in landed 1m ago — AFTER the suite started (untested)
+  });
+  try {
+    const verifiedCommit = gitCmd(dir, "rev-parse", "integration~1").stdout.trim();
+    const intTip = gitCmd(dir, "rev-parse", "integration").stdout.trim();
+    assert.notEqual(verifiedCommit, intTip, "there IS a newer untested fan-in on integration");
+    const devBefore = gitCmd(dir, "rev-parse", "develop").stdout.trim();
+    // The green snapshot: started 5m ago (after the verified commit was made, BEFORE the newer fan-in),
+    // finished 30s ago (within the window), and records the commit it actually measured.
+    writeSuiteStateFile(dir, {
+      scope: "main",
+      finishedAtEpoch: now - 30,
+      startedAtIso: new Date((now - 300) * 1000).toISOString(),
+      verifiedCommit,
+    });
+    const r = run([batchMerge, "--root", dir]);
+    assert.equal(r.status, 0, `merge to the verified commit must succeed: ${r.stdout}${r.stderr}`);
+    assert.match(r.stdout, /MERGE-TO-VERIFIED-COMMIT/);
+    assert.match(r.stdout, /freshness-gate OK/, "COVERAGE passes AT the verified commit (no re-run needed)");
+    assert.match(r.stdout, /fast-forwarded to the VERIFIED commit/);
+    assert.match(r.stdout, /measure integration_ff_merges=1/, "the newer untested fan-in stays pending");
+    assert.equal(
+      gitCmd(dir, "rev-parse", "develop").stdout.trim(),
+      verifiedCommit,
+      "develop advanced to the VERIFIED commit, NOT integration HEAD",
+    );
+    assert.equal(gitCmd(dir, "rev-parse", "integration").stdout.trim(), intTip, "integration HEAD untouched");
+    // integration NOT fully absorbed — the newer untested fan-in awaits the next green.
+    assert.notEqual(gitCmd(dir, "merge-base", "--is-ancestor", "integration", "develop").status, 0);
+    assert.equal(gitCmd(dir, "rev-list", "--count", "develop..integration").stdout.trim(), "1", "one newer untested commit stays pending");
+    assert.equal(gitCmd(dir, "show", "develop:int-v.txt").stdout, "int v\n", "the verified point's content is on develop");
+    assert.notEqual(gitCmd(dir, "rev-parse", "develop").stdout.trim(), devBefore, "develop DID advance");
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("MERGE-TO-VERIFIED-COMMIT dry-run (AC3): reports COVERAGE passes at the verified commit and the deferred surface, no ref moved", () => {
+  const now = Math.floor(Date.now() / 1000);
+  const dir = verifiedMergeRepo("mtv2", {
+    verifiedEpochSec: now - 600,
+    newerEpochSec: now - 60,
+  });
+  try {
+    const verifiedCommit = gitCmd(dir, "rev-parse", "integration~1").stdout.trim();
+    const devBefore = gitCmd(dir, "rev-parse", "develop").stdout.trim();
+    writeSuiteStateFile(dir, {
+      scope: "main",
+      finishedAtEpoch: now - 30,
+      startedAtIso: new Date((now - 300) * 1000).toISOString(),
+      verifiedCommit,
+    });
+    const r = run([batchMerge, "--root", dir, "--dry-run"]);
+    assert.equal(r.status, 0, `dry-run at the verified commit must report a passing COVERAGE: ${r.stdout}${r.stderr}`);
+    assert.match(r.stdout, /MERGE-TO-VERIFIED-COMMIT/);
+    assert.match(r.stdout, /freshness-gate OK/);
+    assert.match(r.stdout, /at merge point [0-9a-f]{40}/);
+    assert.match(r.stdout, /deferred to the next green/);
+    assert.equal(gitCmd(dir, "rev-parse", "develop").stdout.trim(), devBefore, "dry-run moves no ref");
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("MERGE-TO-VERIFIED-COMMIT already-absorbed (AC3): the verified commit already merged ⇒ no-op, newer untested commits deferred", () => {
+  const now = Math.floor(Date.now() / 1000);
+  const dir = verifiedMergeRepo("mtv4", {
+    verifiedEpochSec: now - 600,
+    newerEpochSec: now - 60,
+  });
+  try {
+    const verifiedCommit = gitCmd(dir, "rev-parse", "integration~1").stdout.trim();
+    // Pre-advance develop to the verified commit — simulating the previous round already merged it.
+    gitCmd(dir, "update-ref", "refs/heads/develop", verifiedCommit);
+    writeSuiteStateFile(dir, {
+      scope: "main",
+      finishedAtEpoch: now - 30,
+      startedAtIso: new Date((now - 300) * 1000).toISOString(),
+      verifiedCommit,
+    });
+    const r = run([batchMerge, "--root", dir]);
+    assert.equal(r.status, 0, "an already-merged verified commit is a clean no-op");
+    assert.match(r.stdout, /verified commit .* is already an ancestor of develop/);
+    assert.equal(
+      gitCmd(dir, "rev-parse", "develop").stdout.trim(),
+      verifiedCommit,
+      "develop stays at the verified commit (integration HEAD's newer untested commits await the next green)",
+    );
+    assert.notEqual(gitCmd(dir, "merge-base", "--is-ancestor", "integration", "develop").status, 0);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("MERGE-TO-VERIFIED-COMMIT negative control (AC4): WITHOUT verifiedCommit the COVERAGE criterion still holds — an untested tip still blocks", () => {
+  const now = Math.floor(Date.now() / 1000);
+  const dir = verifiedMergeRepo("mtv3", {
+    verifiedEpochSec: now - 600,
+    newerEpochSec: now - 60,
+  });
+  try {
+    const devBefore = gitCmd(dir, "rev-parse", "develop").stdout.trim();
+    // NO verifiedCommit in the state — the legacy gate must still fail closed on the untested tip
+    // (a fan-in landed after the suite started and touches a CODE file ⇒ NOT doc-only exempt).
+    writeSuiteStateFile(dir, {
+      scope: "main",
+      finishedAtEpoch: now - 30,
+      startedAtIso: new Date((now - 300) * 1000).toISOString(),
+    });
+    const r = run([batchMerge, "--root", dir]);
+    assert.notEqual(r.status, 0, "without verifiedCommit the untested integration tip must still block");
+    assert.match(r.stderr, /FRESHNESS-GATE FAIL-CLOSED/);
+    assert.ok(!/MERGE-TO-VERIFIED-COMMIT/.test(r.stdout), "no merge-to-verified path when the snapshot has no verifiedCommit");
+    assert.equal(gitCmd(dir, "rev-parse", "develop").stdout.trim(), devBefore, "nothing moved");
     assert.notEqual(gitCmd(dir, "merge-base", "--is-ancestor", "integration", "develop").status, 0);
   } finally {
     cleanup(dir);

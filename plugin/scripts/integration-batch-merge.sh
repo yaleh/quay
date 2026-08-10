@@ -247,6 +247,40 @@ fi
 develop_tip="$(git -C "${repo_root}" rev-parse "refs/heads/${develop_ref}")"
 integration_tip="$(git -C "${repo_root}" rev-parse "refs/heads/${integration_ref}")"
 
+# ── MERGE-TO-VERIFIED-COMMIT (gap-merge-green-snapshot-verified-commit-livelock) ─────────────────────
+# The full suite takes ~1847s (~31 min) while integration lands ~12 commits/round (median 147s/commit)
+# — a green that only records `state == green` can NEVER catch integration HEAD (the COVERAGE axis
+# fails closed forever = structural livelock). The fix: the green snapshot records the commit it
+# VERIFIED (`verifiedCommit` — the integration tip at suite START, written by full-suite-runner.ts),
+# and this script merges THAT commit instead of the moving integration HEAD. The merged point WAS
+# tested → COVERAGE is satisfied by construction (AC4: no criterion loosened — the merged point is
+# exactly the tested point). Backward compatible: a snapshot WITHOUT verifiedCommit falls back to the
+# current behavior (merge integration HEAD). The `--integration <ref>` branch-name entry stays intact.
+state_file="${suite_state_file:-${repo_root}/.quay/full-suite-state.json}"
+verified_commit=""
+merge_target=""
+merge_uses_verified=0
+if [ -f "${state_file}" ]; then
+  verified_commit="$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('verifiedCommit',''))" "${state_file}" 2>/dev/null || true)"
+fi
+if [ -n "${verified_commit}" ]; then
+  # The verified commit must be a real commit AND lie on the integration line (an ancestor of
+  # integration HEAD) — an orphaned/force-pushed-away commit is not a valid merge point.
+  if git -C "${repo_root}" rev-parse --verify --quiet "${verified_commit}^{commit}" >/dev/null 2>&1 \
+     && git -C "${repo_root}" merge-base --is-ancestor "${verified_commit}^{commit}" "refs/heads/${integration_ref}" >/dev/null 2>&1; then
+    merge_target="$(git -C "${repo_root}" rev-parse "${verified_commit}^{commit}")"
+    merge_uses_verified=1
+  else
+    echo "integration-batch-merge: verifiedCommit ${verified_commit} (from ${state_file}) is not a resolvable commit on ${integration_ref} — falling back to integration HEAD (COVERAGE will fail closed if that tip is untested)" >&2
+  fi
+fi
+if [ -z "${merge_target}" ]; then
+  merge_target="${integration_tip}"
+fi
+if [ "${merge_uses_verified}" -eq 1 ]; then
+  echo "integration-batch-merge: MERGE-TO-VERIFIED-COMMIT — merging the verified commit ${merge_target} (the point the green suite tested) instead of integration HEAD ${integration_tip}"
+fi
+
 # ── helpers ──────────────────────────────────────────────────────────────────────────────────────────
 
 # Is a conflicted path a KNOWN SHARED file (develop-authoritative on conflict)?
@@ -469,9 +503,13 @@ reconcile_index() {
 # positive this gate must avoid: the defect is develop-side untested code, not integration's tested code.
 check_object_gate() {
   local mb code_files count
-  mb="$(git -C "${repo_root}" merge-base "refs/heads/${integration_ref}" "refs/heads/${develop_ref}" 2>/dev/null || true)"
+  # gap-merge-green-snapshot-verified-commit-livelock AC3 — the object gate validates the ACTUAL merge
+  # result: `merge_target` (the VERIFIED commit when the green snapshot records one, else the
+  # integration tip) ⊕ develop. The tested tree is merge_target — develop-only code files since it
+  # diverged from merge_target are the ones that never entered the tested tree.
+  mb="$(git -C "${repo_root}" merge-base "${merge_target}" "refs/heads/${develop_ref}" 2>/dev/null || true)"
   if [ -z "${mb}" ]; then
-    echo "integration-batch-merge: object-gate: no merge-base between ${integration_ref} and ${develop_ref} — unrelated histories, skipping gate (downstream will fail closed)" >&2
+    echo "integration-batch-merge: object-gate: no merge-base between ${merge_target} and ${develop_ref} — unrelated histories, skipping gate (downstream will fail closed)" >&2
     echo "integration-batch-merge: measure unmerged_develop_files=0"
     return 0
   fi
@@ -483,14 +521,18 @@ check_object_gate() {
   fi
   count="$(printf '%s\n' "${code_files}" | grep -c . || true)"
   echo "integration-batch-merge: measure unmerged_develop_files=${count}"
-  echo "integration-batch-merge:   develop-side code files that never entered the tested tree (${integration_ref} tip):"
+  echo "integration-batch-merge:   develop-side code files that never entered the tested tree (${merge_target}):"
   printf '%s\n' "${code_files}" | sed 's/^/integration-batch-merge:     /'
   if [ "${dry_run}" -eq 1 ]; then
     echo "integration-batch-merge: DRY-RUN — object gate WOULD fail closed (no ref moved in dry-run)"
     return 0
   fi
-  echo "integration-batch-merge: OBJECT-GATE FAIL-CLOSED — the MERGE RESULT (${integration_ref} ⊕ ${develop_ref}) would ship untested code; nothing moved" >&2
-  echo "integration-batch-merge:   tested tree = ${integration_ref} tip (${integration_tip})" >&2
+  echo "integration-batch-merge: OBJECT-GATE FAIL-CLOSED — the MERGE RESULT (${merge_target} ⊕ ${develop_ref}) would ship untested code; nothing moved" >&2
+  if [ "${merge_uses_verified}" -eq 1 ]; then
+    echo "integration-batch-merge:   tested tree = verified commit ${merge_target} (the point the green suite tested)" >&2
+  else
+    echo "integration-batch-merge:   tested tree = integration tip (${merge_target})" >&2
+  fi
   echo "integration-batch-merge:   fix: fan-in the ${develop_ref}-side commit into ${integration_ref} (re-test the merged tree), then re-run" >&2
   return 1
 }
@@ -559,7 +601,6 @@ check_freshness_gate() {
     echo "integration-batch-merge: freshness-gate SKIPPED (--skip-freshness-gate)"
     return 0
   fi
-  local state_file="${suite_state_file:-${repo_root}/.quay/full-suite-state.json}"
   local state=""
   local parsed=""
   local finished_epoch="" started_epoch="" age=""
@@ -664,8 +705,12 @@ print(int(ts), int(st), int(time.time()-ts))
     return 1
   fi
 
-  # COVERAGE dimension — the suite must have STARTED at/after the most recent integration fan-in.
-  last_fanin="$(git -C "${repo_root}" log -1 --format=%ct "refs/heads/${integration_ref}" 2>/dev/null || true)"
+  # COVERAGE dimension — the suite must have STARTED at/after the commit this batch merge will
+  # actually land. gap-merge-green-snapshot-verified-commit-livelock AC3/AC4: when the green snapshot
+  # records a verifiedCommit, `merge_target` IS that commit (the point the suite VERIFIED) → COVERAGE
+  # is satisfied by construction (the merged point WAS tested). Without verifiedCommit (legacy), the
+  # coverage basis is the integration tip exactly as before — no criterion loosened.
+  last_fanin="$(git -C "${repo_root}" log -1 --format=%ct "${merge_target}" 2>/dev/null || true)"
   if [ -n "${last_fanin}" ] && [ "${started_epoch}" -lt "${last_fanin}" ]; then
     # DOC-ONLY EXEMPTION (gap-batch-merge-freshness-gate-doc-only-exemption): a fan-in that landed
     # after the suite started means the green did not test the pending tip — UNLESS the pending
@@ -677,7 +722,7 @@ print(int(ts), int(st), int(time.time()-ts))
       echo "integration-batch-merge: measure suite_freshness=${age}"
       return 0
     fi
-    verdict="a fan-in landed on ${integration_ref} after the suite started (last fan-in ${last_fanin}s epoch > suite start ${started_epoch}s) — the green did NOT test the pending tip"
+    verdict="a fan-in landed on ${integration_ref} after the suite started (last fan-in ${last_fanin}s epoch > suite start ${started_epoch}s) — the green did NOT test the pending merge point ${merge_target}"
     echo "integration-batch-merge: measure suite_freshness=${age}"
     if [ "${dry_run}" -eq 1 ]; then
       echo "integration-batch-merge: DRY-RUN — freshness gate WOULD fail closed: ${verdict} (no ref moved in dry-run)"
@@ -687,7 +732,7 @@ print(int(ts), int(st), int(time.time()-ts))
     return 1
   fi
 
-  echo "integration-batch-merge: freshness-gate OK — fresh green (finished ${age}s ago, window ${freshness_window}s; suite start ${started_epoch}s ≥ last fan-in ${last_fanin:-<none>})"
+  echo "integration-batch-merge: freshness-gate OK — fresh green (finished ${age}s ago, window ${freshness_window}s; suite start ${started_epoch}s ≥ last fan-in ${last_fanin:-<none>} at merge point ${merge_target})"
   echo "integration-batch-merge: measure suite_freshness=${age}"
   return 0
 }
@@ -710,9 +755,11 @@ real_merge() {
     return 1
   fi
 
-  # Merge integration into develop (detached HEAD at develop_tip). --no-commit: we decide when to
-  # commit, after classifying and (if safe) auto-resolving shared-file conflicts.
-  if ! git -C "${tmp_wt}" merge --no-ff --no-commit "refs/heads/${integration_ref}" >/dev/null 2>&1; then
+  # Merge the MERGE TARGET into develop (detached HEAD at develop_tip). --no-commit: we decide when
+  # to commit, after classifying and (if safe) auto-resolving shared-file conflicts. gap-merge-green-
+  # snapshot-verified-commit-livelock AC3: `merge_target` is the VERIFIED commit (the tested point)
+  # when the green snapshot records one, else the integration tip (backward compatible).
+  if ! git -C "${tmp_wt}" merge --no-ff --no-commit "${merge_target}" >/dev/null 2>&1; then
     local -a conflicts
     conflicts=()
     while IFS= read -r p; do
@@ -813,45 +860,61 @@ real_merge() {
     return 1
   fi
 
-  # POST-state measure (Contract): integration's tip must now be reachable from develop.
-  if git -C "${repo_root}" merge-base --is-ancestor "refs/heads/${integration_ref}" "refs/heads/${develop_ref}"; then
-    echo "integration-batch-merge: OK — develop real-merged to integration (merge commit ${merge_commit})"
-    echo "integration-batch-merge: measure integration_ff_merges=0"
+  # POST-state measure: the MERGE TARGET (the verified commit / integration tip this merge actually
+  # landed) must now be reachable from develop. When merging the VERIFIED commit while integration
+  # HEAD has advanced beyond it, integration is intentionally NOT fully absorbed — the newer commits
+  # were not tested and await the next green (reported, not a failure).
+  if git -C "${repo_root}" merge-base --is-ancestor "${merge_target}" "refs/heads/${develop_ref}"; then
+    echo "integration-batch-merge: OK — develop real-merged to ${merge_target} (merge commit ${merge_commit})"
+    if [ "${merge_uses_verified}" -eq 1 ] && [ "${merge_target}" != "${integration_tip}" ]; then
+      echo "integration-batch-merge:   integration HEAD ${integration_tip} still has newer untested commits — they await the next green (nothing silently dropped)"
+      echo "integration-batch-merge: measure integration_ff_merges=1"
+    else
+      echo "integration-batch-merge: measure integration_ff_merges=0"
+    fi
     do_sync
     if [ "${reconcile}" -eq 1 ] && [ "${dry_run}" -eq 0 ]; then
       reconcile_index "${merge_commit}" || return 1
     fi
     return 0
   else
-    echo "integration-batch-merge: post-measure FAILED — integration not ancestor of develop after real merge; needs human" >&2
+    echo "integration-batch-merge: post-measure FAILED — merge target ${merge_target} not ancestor of develop after real merge; needs human" >&2
     return 1
   fi
 }
 
 # ── main flow ───────────────────────────────────────────────────────────────────────────────────────
 
-# Nothing pending? integration already absorbed into develop ⇒ measure=0, no-op.
-if git -C "${repo_root}" merge-base --is-ancestor "refs/heads/${integration_ref}" "refs/heads/${develop_ref}"; then
+# Nothing pending? The MERGE TARGET (the verified commit when the green snapshot records one, else the
+# integration tip) is already absorbed into develop ⇒ measure=0, no-op.
+if git -C "${repo_root}" merge-base --is-ancestor "${merge_target}" "refs/heads/${develop_ref}"; then
   if [ "${dry_run}" -eq 1 ]; then
     echo "integration-batch-merge: DRY-RUN (no ref moved)"
     echo "integration-batch-merge: develop=${develop_tip} integration=${integration_tip}"
   fi
-  echo "integration-batch-merge: OK — integration is already an ancestor of develop (nothing pending)"
+  if [ "${merge_uses_verified}" -eq 1 ] && [ "${merge_target}" != "${integration_tip}" ]; then
+    echo "integration-batch-merge: OK — verified commit ${merge_target} is already an ancestor of develop (the tested point is merged; integration HEAD ${integration_tip} has newer untested commits that await the next green)"
+  else
+    echo "integration-batch-merge: OK — integration is already an ancestor of develop (nothing pending)"
+  fi
   echo "integration-batch-merge: measure integration_ff_merges=0"
   exit 0
 fi
 
 # ── OBJECT GATE (gap-batch-merge-gate-validates-tip-not-merge-result) ────────────────────────────────
 # Validate the MERGE RESULT, not just the integration tip, BEFORE any ref moves. The suite tested the
-# integration tip; the merge produces integration ⊕ develop. develop-side code files that never entered
+# merge target; the merge produces merge_target ⊕ develop. develop-side code files that never entered
 # the tested tree ⇒ the merge result would ship untested code ⇒ fail closed (nothing moved). In
 # --dry-run this reports the would-block measure without failing.
 check_object_gate || exit 1
 
 # ── FRESHNESS GATE (gap-batch-merge-gate-reads-stale-green) ─────────────────────────────────────────
 # The batch merge may only proceed when the suite green is a FRESH green (finishedAt within the window
-# AND the suite started after the most recent integration fan-in). This is the TIME-AXIS gate, run
-# before any ref moves. In --dry-run this reports the would-block measure without failing.
+# AND the suite started at/after the commit this merge will land — the MERGE TARGET). gap-merge-green-
+# snapshot-verified-commit-livelock AC3/AC4: with a recorded verifiedCommit the merge target IS the
+# tested point, so COVERAGE passes by construction; without it the target is the integration tip exactly
+# as before (no criterion loosened). This is the TIME-AXIS gate, run before any ref moves. In --dry-run
+# this reports the would-block measure without failing.
 check_freshness_gate || exit 1
 
 # ── --reconcile: porcelain-empty guard BEFORE any ref moves ──────────────────────────────────────────
@@ -871,59 +934,73 @@ if [ "${reconcile}" -eq 1 ]; then
   fi
 fi
 
-# PRE-state: is develop an ancestor of integration (integration a descendant ⇒ fast-forward)?
-if git -C "${repo_root}" merge-base --is-ancestor "refs/heads/${develop_ref}" "refs/heads/${integration_ref}"; then
+# PRE-state: is develop an ancestor of the MERGE TARGET (the verified commit / integration tip)?
+if git -C "${repo_root}" merge-base --is-ancestor "refs/heads/${develop_ref}" "${merge_target}"; then
   ff_possible=1
 else
   ff_possible=0
 fi
 
-# What's pending on integration that develop doesn't have yet (the invoke surface)?
-pending="$(git -C "${repo_root}" log --oneline "refs/heads/${develop_ref}..refs/heads/${integration_ref}" 2>/dev/null || true)"
+# What this batch merge would land: develop..merge_target (the invoke surface). When merging the
+# VERIFIED commit while integration HEAD has advanced beyond it, the newer untested commits stay on
+# integration — reported (deferred), never silently dropped.
+pending="$(git -C "${repo_root}" log --oneline "refs/heads/${develop_ref}..${merge_target}" 2>/dev/null || true)"
+deferred="$(git -C "${repo_root}" log --oneline "${merge_target}..refs/heads/${integration_ref}" 2>/dev/null || true)"
 
 if [ "${dry_run}" -eq 1 ]; then
   echo "integration-batch-merge: DRY-RUN (no ref moved)"
   echo "integration-batch-merge: develop=${develop_tip} integration=${integration_tip}"
   if [ "${ff_possible}" -eq 1 ]; then
-    echo "integration-batch-merge: FF-OK — integration is a descendant of develop"
-    echo "integration-batch-merge: pending on integration:"
+    echo "integration-batch-merge: FF-OK — ${develop_ref} is an ancestor of the merge target ${merge_target}"
+    echo "integration-batch-merge: pending merge (${develop_ref}..${merge_target}):"
     printf '%s\n' "${pending}" | sed 's/^/    /'
+    if [ "${merge_uses_verified}" -eq 1 ] && [ -n "${deferred}" ]; then
+      deferred_count="$(printf '%s\n' "${deferred}" | grep -c . || true)"
+      echo "integration-batch-merge:   (${deferred_count} newer untested commit(s) on integration HEAD ${integration_tip} deferred to the next green — the verified commit is what the suite tested)"
+    fi
   else
     report_divergence
     if [ "${merge_mode}" -eq 1 ]; then
       report_conflict_classification "${would_conflicts[@]}"
     fi
-    echo "integration-batch-merge: NOT-FAST-FORWARD — integration is not a descendant of develop; needs a human (pass --merge to real-merge auto-resolving shared files develop-authoritative and reverse-edge files integration-authoritative)" >&2
+    echo "integration-batch-merge: NOT-FAST-FORWARD — the merge target ${merge_target} is not a descendant of develop; needs a human (pass --merge to real-merge auto-resolving shared files develop-authoritative and reverse-edge files integration-authoritative)" >&2
     exit 1
   fi
-  # Post-state measure (would-be): `git merge-base --is-ancestor <integration> <develop>`.
-  if git -C "${repo_root}" merge-base --is-ancestor "refs/heads/${integration_ref}" "refs/heads/${develop_ref}"; then
-    echo "integration-batch-merge: measure integration_ff_merges=0 (post: integration is ancestor of develop)"
+  # Post-state measure (would-be): `git merge-base --is-ancestor <merge_target> <develop>`.
+  if git -C "${repo_root}" merge-base --is-ancestor "${merge_target}" "refs/heads/${develop_ref}"; then
+    echo "integration-batch-merge: measure integration_ff_merges=0 (post: merge target ${merge_target} is ancestor of develop)"
   else
-    echo "integration-batch-merge: measure integration_ff_merges=1 (post: integration NOT yet ancestor — merge pending)"
+    echo "integration-batch-merge: measure integration_ff_merges=1 (post: merge target NOT yet ancestor — merge pending)"
   fi
   exit 0
 fi
 
 if [ "${ff_possible}" -eq 1 ]; then
   # Perform the ref-level fast-forward with a CAS on the old develop tip (atomic; refuses if develop
-  # moved concurrently — never a blind force-overwrite).
-  if ! git -C "${repo_root}" update-ref "refs/heads/${develop_ref}" "${integration_tip}" "${develop_tip}"; then
+  # moved concurrently — never a blind force-overwrite). gap-merge-green-snapshot-verified-commit-
+  # livelock AC3: develop advances to the MERGE TARGET (the verified commit), not the moving HEAD.
+  if ! git -C "${repo_root}" update-ref "refs/heads/${develop_ref}" "${merge_target}" "${develop_tip}"; then
     echo "integration-batch-merge: update-ref CAS failed — develop moved concurrently? Nothing changed." >&2
     exit 1
   fi
 
-  # POST-state measure (Contract): integration's tip must now be reachable from develop.
-  if git -C "${repo_root}" merge-base --is-ancestor "refs/heads/${integration_ref}" "refs/heads/${develop_ref}"; then
-    echo "integration-batch-merge: OK — develop fast-forwarded to integration"
-    echo "integration-batch-merge: measure integration_ff_merges=0"
-    echo "integration-batch-merge: develop=${integration_tip}"
+  # POST-state measure: the merge target must now be reachable from develop.
+  if git -C "${repo_root}" merge-base --is-ancestor "${merge_target}" "refs/heads/${develop_ref}"; then
+    if [ "${merge_uses_verified}" -eq 1 ] && [ "${merge_target}" != "${integration_tip}" ]; then
+      echo "integration-batch-merge: OK — develop fast-forwarded to the VERIFIED commit ${merge_target} (the point the green suite tested)"
+      echo "integration-batch-merge:   integration HEAD ${integration_tip} still has newer untested commits — they await the next green (nothing silently dropped)"
+      echo "integration-batch-merge: measure integration_ff_merges=1"
+    else
+      echo "integration-batch-merge: OK — develop fast-forwarded to integration"
+      echo "integration-batch-merge: measure integration_ff_merges=0"
+    fi
+    echo "integration-batch-merge: develop=${merge_target}"
     do_sync
     if [ "${reconcile}" -eq 1 ] && [ "${dry_run}" -eq 0 ]; then
-      reconcile_index "${integration_tip}" || exit 1
+      reconcile_index "${merge_target}" || exit 1
     fi
   else
-    echo "integration-batch-merge: post-measure FAILED — integration not ancestor of develop after ff; needs human" >&2
+    echo "integration-batch-merge: post-measure FAILED — merge target ${merge_target} not ancestor of develop after ff; needs human" >&2
     exit 1
   fi
   exit 0
