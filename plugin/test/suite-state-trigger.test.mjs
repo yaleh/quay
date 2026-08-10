@@ -41,10 +41,14 @@ import {
   detectCrashedRunner,
   runOnce,
   writeSuiteState,
+  readSuiteState,
   readSuiteEvents,
   shouldStopDispatch,
   routeRed,
   RUNNING_STALE_MS,
+  shouldAutoRetrigger,
+  retriggerRunnerArgs,
+  DEFAULT_RETRIGGER_IDLE_MS,
 } from "../scripts/suite-state-trigger.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -275,10 +279,11 @@ test("AC5 — both loop docs carry the failed vs aborted stop-dispatch ruling (r
 
 // ── Contract invoke: --fail-fast-check proves the RED chain end-to-end ──────────
 
-function runCli(script, args) {
+function runCli(script, args, env = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, ["--no-warnings", "--experimental-strip-types", script, ...args], {
       stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, ...env },
     });
     let out = "";
     let err = "";
@@ -417,4 +422,110 @@ test("AC6 — routeRed/shouldStopDispatch route crashed like aborted (no code-ri
   assert.equal(shouldStopDispatch({ state: "red", reason: "failed" }), true, "failed still stops (unchanged)");
   assert.equal(shouldStopDispatch({ state: "red", reason: "static-check" }), true, "static-check still stops (unchanged)");
   assert.equal(shouldStopDispatch({ state: "red", reason: "aborted" }), false, "aborted does NOT stop (unchanged)");
+});
+
+// ── auto-retrigger (gap-suite-empty-wait-no-auto-retrigger AC2/AC3/AC4) ─────────────────────────────
+// The full-suite EMPTY-WAIT hole (measured 2026-08-10: red-window span 13.23h/56%, empty wait
+// 6.48h/49%, ~2h hole 19:13→21:06): after a suite terminal state (red/green), nothing mechanically
+// starts the next round — the loop idles until the outer's manual tick. These tests pin the
+// auto-retrigger DECISION (pure) + the AC4 race-safety surfaces. The real spawn is exercised only via
+// the runner's gate path (test c) — never a live full-suite run (that is the outer's job).
+
+test("AC2 — a terminal state idle >= N fires retrigger (short-N injection); fresh / running / early-red / absent do NOT", () => {
+  const now = Date.now();
+  // idle-exceeded ⇒ fire — GREEN terminal (AC2: green round ends, no new round starts)
+  assert.equal(
+    shouldAutoRetrigger({ state: "green", finishedAt: Math.floor((now - 2000) / 1000) }, null, 1000, now).retrigger,
+    true,
+    "green terminal idle >= N fires",
+  );
+  // AC3 — a RED terminal takes the SAME path (red→idle hole detection: red round ends, no running)
+  assert.equal(
+    shouldAutoRetrigger({ state: "red", reason: "failed", finishedAt: Math.floor((now - 2000) / 1000) }, null, 1000, now).retrigger,
+    true,
+    "red terminal idle >= N fires (AC3 — red→idle hole)",
+  );
+  // fresh terminal (< N) ⇒ no fire
+  assert.equal(
+    shouldAutoRetrigger({ state: "green", finishedAt: Math.floor(now / 1000) }, null, 1000, now).retrigger,
+    false,
+    "fresh terminal (< N) does not fire",
+  );
+  // AC4 no-double-start — a `running` state (a round — manual OR auto — is in flight) never fires
+  assert.equal(shouldAutoRetrigger({ state: "running" }, null, 1000, now).retrigger, false, "running never fires");
+  // early-red (finishedAt null — the runner is STILL in flight) never fires
+  assert.equal(shouldAutoRetrigger({ state: "red", finishedAt: null }, null, 1000, now).retrigger, false, "early-red does not fire");
+  // absent state file (outer hasn't run round 1) never fires
+  assert.equal(shouldAutoRetrigger(null, null, 1000, now).retrigger, false, "absent state never fires");
+  // the default threshold is the Contract band (10 min)
+  assert.equal(DEFAULT_RETRIGGER_IDLE_MS, 10 * 60 * 1000, "default N = 10 min (empty_wait_after_terminal <= 10)");
+});
+
+test("AC4 — no retrigger storm: an immediately-repeated observation of the same idle terminal is throttled", () => {
+  const root = tmpRoot();
+  try {
+    const now = Date.now();
+    writeSuiteState(root, state({ state: "green", finishedAt: Math.floor((now - 2000) / 1000) }));
+    const first = runOnce(root, { idleMs: 1000 });
+    assert.equal(first.retrigger, true, "first observation of the idle terminal fires the retrigger decision");
+    const second = runOnce(root, { idleMs: 1000 });
+    assert.equal(second.retrigger, false, "an immediate repeat is throttled (one retrigger per idle window)");
+    // after the throttle window EXPIRES, the same idle terminal fires again (a WAIT'd attempt retries)
+    assert.equal(
+      shouldAutoRetrigger(
+        { state: "green", finishedAt: Math.floor((now - 5000) / 1000) },
+        now - 60_000, // last retrigger attempt 60s ago > 1s idle window
+        1000,
+        now,
+      ).retrigger,
+      true,
+      "once the throttle window expires, the idle terminal fires again",
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC4 — a running state between terminal and re-check prevents the retrigger (runOnce integration)", () => {
+  const root = tmpRoot();
+  try {
+    const now = Date.now();
+    writeSuiteState(root, state({ state: "green", finishedAt: Math.floor((now - 2000) / 1000) }));
+    runOnce(root, { idleMs: 1000 }); // decision: retrigger (but the SPAWN re-checks the state file)
+    // A manual/outer start lands before the spawn re-check: state is now running ⇒ the spawn bails.
+    writeSuiteState(root, state({ state: "running" }));
+    const res = runOnce(root, { idleMs: 1000 });
+    assert.equal(res.retrigger, false, "a running state (round in flight) suppresses the retrigger decision");
+    assert.equal(res.status, "running", "the observed status is running");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC4 — the retrigger reuses the runner's resource gate: WAIT blocks the retrigger (state untouched, suite never spawns)", async () => {
+  const root = tmpRoot();
+  try {
+    const now = Date.now();
+    const terminal = state({ state: "green", finishedAt: Math.floor((now - 2000) / 1000) });
+    writeSuiteState(root, terminal);
+    // The args a retrigger spawn passes — the SAME surface the outer's manual start uses. A fake
+    // --command is spliced so that even IF the gate unexpectedly GOed, no real suite would run.
+    const args = [...retriggerRunnerArgs(root, terminal), "--command", 'echo "fake suite — must not run on WAIT"'];
+    assert.ok(args.includes("--root"), "the retrigger passes the watched root (the tested checkout)");
+    assert.ok(args.includes("--lane-count"), "the retrigger preserves the last round's laneCount");
+    const { code } = await runCli(RUNNER, args, {
+      QUAY_TEST_SKIP_RESOURCE_GATE: "0", // force the REAL gate path, with seams (same as full-suite-runner AC3)
+      QUAY_TEST_SKIP_SYSTEMD_RUN: "1",
+      RESOURCE_GATE_TEST_CPU_AVG10: "84.77", // WAIT (cpu stalled)
+      RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000",
+    });
+    assert.notEqual(code, 0, "WAIT ⇒ the runner exits non-zero (did not start the suite)");
+    const s = readSuiteState(root);
+    assert.ok(s, "the state file still exists");
+    assert.equal(s.state, "green", "state stays terminal (untouched) on WAIT — the retrigger does not start into a busy machine");
+    assert.equal(s.finishedAt, terminal.finishedAt, "the terminal state is byte-untouched (same round)");
+    assert.ok(!fs.existsSync(path.join(root, ".quay", "full-suite.log")), "the suite was NEVER spawned on WAIT");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
