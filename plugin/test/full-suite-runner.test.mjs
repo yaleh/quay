@@ -2013,6 +2013,88 @@ test("AC6 — a runner that dies mid-run from an uncaughtException writes state=
   }
 });
 
+// ── gap-load-sensitive-serial-phase-unbounded-growth-measure-first AC2/AC3: phase-concurrency env ──
+
+/**
+ * A fake `<root>/scripts/test.sh` that records the load-sensitive phase-concurrency env vars the
+ * runner passes down (QUAY_SERIAL_CONCURRENCY / QUAY_LOWCONC_CONCURRENCY) and prints a green TAP
+ * summary — observes the AC2/AC3 knob plumbing without running the real suite.
+ */
+function fakeTestShRecordingPhaseEnv(root) {
+  const envLog = path.join(root, "phase-env.txt");
+  fs.mkdirSync(path.join(root, "scripts"), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, "scripts", "test.sh"),
+    `#!/usr/bin/env bash\necho "SERIAL=$QUAY_SERIAL_CONCURRENCY LOWCONC=$QUAY_LOWCONC_CONCURRENCY" > '${envLog}'\necho "# tests 1"\necho "# pass 1"\necho "# fail 0"\necho "# cancelled 0"\nexit 0\n`,
+    { mode: 0o755 },
+  );
+  return { envLog };
+}
+
+test("AC2/AC3 — the default run passes QUAY_SERIAL_CONCURRENCY=1 and QUAY_LOWCONC_CONCURRENCY=3 to the child test.sh", async () => {
+  // measure-first (gap-load-sensitive-serial-phase-unbounded-growth-measure-first AC2/AC3): the
+  // runner's phase-concurrency defaults are the experiment-validated values (serial=2 raised from 1
+  // by the AC2 controlled experiment — 0-cancelled + 36% faster; lowconc=3); a future experiment
+  // overrides them explicitly, never silently changing the default.
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-phaseenv-default-"));
+  const { envLog } = fakeTestShRecordingPhaseEnv(root);
+  try {
+    const child = runRunner({ root, laneCount: 4 });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, `runner exits 0 on green, got ${code}`);
+    await poll(() => fs.existsSync(envLog));
+    const line = fs.readFileSync(envLog, "utf8").trim();
+    assert.equal(line, "SERIAL=2 LOWCONC=3", `defaults must be serial=2 lowconc=3, got: ${line}`);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC2/AC3 — --serial-concurrency 2 propagates QUAY_SERIAL_CONCURRENCY=2 into the child test.sh (controlled experiment)", async () => {
+  // The AC2 controlled experiment: run the serial phase at concurrency 2, measure wall-clock +
+  // cancelled, and only bump the default if 0-cancelled holds (measure-first, not blind tuning).
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-phaseenv-s2-"));
+  const { envLog } = fakeTestShRecordingPhaseEnv(root);
+  try {
+    const args = [
+      "--no-warnings", "--experimental-strip-types", RUNNER, "--root", root,
+      "--lane-count", "4", "--serial-concurrency", "2", "--lowconc-concurrency", "5",
+    ];
+    const mergedEnv = { ...process.env, QUAY_TEST_SKIP_RESOURCE_GATE: "1", QUAY_TEST_SKIP_SYSTEMD_RUN: "1" };
+    const child = spawn(process.execPath, args, { stdio: ["ignore", "pipe", "pipe"], env: mergedEnv });
+    child.stdout.on("data", () => {});
+    child.stderr.on("data", () => {});
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, `runner exits 0 on green with serial-concurrency 2, got ${code}`);
+    await poll(() => fs.existsSync(envLog));
+    const line = fs.readFileSync(envLog, "utf8").trim();
+    assert.equal(line, "SERIAL=2 LOWCONC=5", `--serial-concurrency/--lowconc-concurrency must propagate, got: ${line}`);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC2/AC3 — invalid --serial-concurrency / --lowconc-concurrency (0, non-numeric) fails closed", async () => {
+  for (const bad of ["0", "abc", "-1"]) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-phaseenv-bad-"));
+    fakeTestShRecordingPhaseEnv(root);
+    try {
+      const args = [
+        "--no-warnings", "--experimental-strip-types", RUNNER, "--root", root,
+        "--lane-count", "4", "--serial-concurrency", bad,
+      ];
+      const mergedEnv = { ...process.env, QUAY_TEST_SKIP_RESOURCE_GATE: "1", QUAY_TEST_SKIP_SYSTEMD_RUN: "1" };
+      const child = spawn(process.execPath, args, { stdio: ["ignore", "pipe", "pipe"], env: mergedEnv });
+      child.stdout.on("data", () => {});
+      child.stderr.on("data", () => {});
+      const { code } = await waitExit(child);
+      assert.equal(code, 1, `invalid --serial-concurrency '${bad}' must fail closed`);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
 test("AC6 — routeRed/shouldStopDispatch treat crashed like aborted (no code-risk stop) but keep the reason distinguishable", () => {
   // crashed = the runner died mid-run without a correctness conclusion — same no-stop family as
   // aborted/infra-error, but the reason value stays distinct so a consumer can tell "deliberately

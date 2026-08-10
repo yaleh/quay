@@ -103,6 +103,55 @@ export function hasLoadSensitiveAnnotation(text) {
   return parseLoadSensitiveAnnotation(text) !== null;
 }
 
+// ── Exit-mechanism entry records (gap-load-sensitive-serial-phase-unbounded-growth-measure-first
+// AC4, 人明确要求：串行相要有退出机制) ─────────────────────────────────────────────────────────────
+// Every family member that is routed to the SERIAL group (concurrency-1 phase) must record WHY it
+// entered (the flake root cause that justified the admission) and WHEN, via a companion annotation
+// `// @load-sensitive-entry <YYYY-MM-DD> <reason>`. The review hook (--list-entry / --check-exit)
+// makes the record mechanically checkable: --check-exit fails on a serial-group family member with
+// no entry record (an un-reviewable admission), and --list-entry sorts by entry date so the
+// longest-in-serial members surface for periodic root-cause review (每 N 轮或每周复核该测试的 flake
+// 根因是否已修；已修的应尝试退回原并发相验证，不永久留在串行相).
+
+export interface LoadSensitiveEntry {
+  /** ISO date the family member was admitted to the serial/lowconc phase: YYYY-MM-DD. */
+  date: string;
+  /** Why it was admitted (the flake root cause / the round + signature that justified serial). */
+  reason: string;
+}
+
+/**
+ * Parse the `@load-sensitive-entry <YYYY-MM-DD> <reason>` companion annotation. Returns null when
+ * absent or malformed. The annotation is a line comment `// @load-sensitive-entry <date> <reason>`
+ * (one per file); a bare mention does NOT count.
+ * @param {string} text — full file text
+ * @returns {LoadSensitiveEntry | null}
+ */
+export function parseLoadSensitiveEntry(text) {
+  // [ \t]+ separators (never \n) keep the reason on the SAME line as the annotation — a bare
+  // `// @load-sensitive-entry 2026-08-09` with nothing after must NOT swallow the next code line.
+  const m = /^\s*\/\/\s*@load-sensitive-entry[ \t]+(\d{4}-\d{2}-\d{2})[ \t]+(.+?)[ \t]*$/m.exec(text);
+  if (!m) return null;
+  const reason = m[2].trim();
+  if (!reason) return null;
+  return { date: m[1], reason };
+}
+
+/** Whether a file's raw text carries an explicit `@load-sensitive-entry` record. */
+export function hasLoadSensitiveEntry(text) {
+  return parseLoadSensitiveEntry(text) !== null;
+}
+
+/**
+ * Whether a file's text declares `@test-group serial` (the concurrency-1 load-sensitive phase).
+ * A file that is a family member AND is routed to the serial group must carry an entry record —
+ * that is the mechanical exit-review invariant.
+ * @param {string} text — full file text
+ */
+export function isSerialGroupFile(text) {
+  return /^\s*\/\/\s*@test-group\s+serial\b/m.test(text);
+}
+
 /**
  * Whether a file's HEADER comment block carries a line-start KNOWN-LOAD-SENSITIVE *claim* — a
  * comment line in the canonical family-declaration shape: `// KNOWN-LOAD-SENSITIVE (see ...)`
@@ -142,6 +191,8 @@ export interface FamilyMember {
   rel: string;
   /** The declared kind (wall-clock | nested-spawn | heavy | ...). */
   kind: string;
+  /** The serial/lowconc entry record (exit-mechanism AC4), when the file carries one. */
+  entry?: LoadSensitiveEntry;
 }
 
 /** List the canonical-glob test files under a repo root (repo-relative paths, sorted). */
@@ -200,7 +251,10 @@ export function scanFamily(root) {
       continue;
     }
     const kind = parseLoadSensitiveAnnotation(text);
-    if (kind !== null) members.push({ rel, kind });
+    if (kind !== null) {
+      const entry = parseLoadSensitiveEntry(text);
+      members.push(entry ? { rel, kind, entry } : { rel, kind });
+    }
   }
   return members;
 }
@@ -253,10 +307,58 @@ export function checkNoUnannotatedClaims(root) {
   return violations;
 }
 
+// ── Exit-mechanism invariant (gap-load-sensitive-serial-phase-unbounded-growth-measure-first AC4) ──
+
+export interface SerialEntryViolation {
+  rel: string;
+  reason: string;
+}
+
+/**
+ * AC4 (exit mechanism, 人明确要求) — every family member whose file ALSO declares `@test-group serial`
+ * MUST carry a `// @load-sensitive-entry <YYYY-MM-DD> <reason>` record. A serial-group family member
+ * without an entry record is an un-reviewable admission (nobody can later decide whether the root
+ * cause is fixed and the test can leave the concurrency-1 serial phase). Returns the violation list
+ * (empty = invariant holds). This is the mechanical review hook: --list-entry surfaces the records
+ * sorted by entry date (oldest first = longest in serial, the review candidates), and --check-exit
+ * fails closed on an un-recorded admission.
+ * @param {string} root
+ * @returns {SerialEntryViolation[]}
+ */
+export function checkSerialEntries(root) {
+  const violations = [];
+  for (const rel of listTestFiles(root)) {
+    const p = path.join(root, rel);
+    let text;
+    try {
+      text = fs.readFileSync(p, "utf8");
+    } catch {
+      continue;
+    }
+    if (isSerialGroupFile(text) && hasLoadSensitiveAnnotation(text) && !hasLoadSensitiveEntry(text)) {
+      violations.push({
+        rel,
+        reason: "serial-group family member (KNOWN-LOAD-SENSITIVE) with no // @load-sensitive-entry <date> <reason> — 进入原因+进入时间 must be recorded so the root cause can be reviewed for a serial exit",
+      });
+    }
+  }
+  return violations;
+}
+
+/**
+ * One `--list-entry` line for a family member, or null when it has no entry record.
+ * `<rel>\t<date>\t<reason>` (the reason may contain spaces — it is the LAST field).
+ */
+export function entryLineFor(member) {
+  if (!member.entry) return null;
+  return `${member.rel}\t${member.entry.date}\t${member.entry.reason}`;
+}
+
 // ── CLI ─────────────────────────────────────────────────────────────────────────────────────────────
 
 const usage = `known-load-sensitive.ts — machine-readable KNOWN-LOAD-SENSITIVE family manifest
-(tasks/gap-known-load-sensitive-rule-is-doc-only-no-mechanical-triage AC1/AC2)
+(tasks/gap-known-load-sensitive-rule-is-doc-only-no-mechanical-triage AC1/AC2;
+ gap-load-sensitive-serial-phase-unbounded-growth-measure-first AC4 — serial exit mechanism)
 
 Usage:
   node --experimental-strip-types known-load-sensitive.ts --list [--root <dir>]
@@ -265,8 +367,14 @@ Usage:
       # the kind for one file (empty when not in family)
   node --experimental-strip-types known-load-sensitive.ts --check [--root <dir>]
       # AC2 invariant: no unannotated KNOWN-LOAD-SENSITIVE header claims; exit 1 on violation
+  node --experimental-strip-types known-load-sensitive.ts --list-entry [--root <dir>]
+      # exit-mechanism review hook: one line per family member WITH an entry record,
+      # <rel-file>\\t<date>\\t<reason>, sorted by entry date (oldest first = longest in serial)
+  node --experimental-strip-types known-load-sensitive.ts --check-exit [--root <dir>]
+      # AC4 invariant: every serial-group family member carries @load-sensitive-entry
+      # (进入原因+进入时间); exit 1 on a violation
 
-Exit: 0 ok; 1 a --check invariant violation; 2 usage/env error.`;
+Exit: 0 ok; 1 a --check/--check-exit invariant violation; 2 usage/env error.`;
 
 function getArgValue(args, name) {
   const idx = args.indexOf(name);
@@ -279,6 +387,8 @@ export function main(argv) {
   const listMode = args.includes("--list");
   const kindArg = getArgValue(args, "--kind");
   const checkMode = args.includes("--check");
+  const listEntryMode = args.includes("--list-entry");
+  const checkExitMode = args.includes("--check-exit");
   const root = path.resolve(getArgValue(args, "--root") ?? findRepoRoot());
 
   if (listMode) {
@@ -307,6 +417,36 @@ export function main(argv) {
       return 1;
     }
     process.stdout.write("known-load-sensitive --check: ok — every KNOWN-LOAD-SENSITIVE header claim carries @load-sensitive <kind>\n");
+    return 0;
+  }
+
+  if (listEntryMode) {
+    // Exit-mechanism review hook: family members WITH an entry record, sorted by entry date
+    // (oldest first = longest in serial → the periodic-review candidates, AC4).
+    const lines = scanFamily(root)
+      .map((m) => entryLineFor(m))
+      .filter((l) => l !== null)
+      .sort((a, b) => {
+        const da = a.split("\t")[1];
+        const db = b.split("\t")[1];
+        return da < db ? -1 : da > db ? 1 : 0;
+      });
+    for (const l of lines) process.stdout.write(`${l}\n`);
+    return 0;
+  }
+
+  if (checkExitMode) {
+    const violations = checkSerialEntries(root);
+    if (violations.length > 0) {
+      for (const v of violations) {
+        process.stderr.write(`known-load-sensitive --check-exit: ${v.rel}: ${v.reason}\n`);
+      }
+      process.stderr.write(
+        `known-load-sensitive --check-exit: ${violations.length} serial-group family member(s) without an entry record — add // @load-sensitive-entry <YYYY-MM-DD> <reason> to each (AC4, serial exit mechanism)\n`
+      );
+      return 1;
+    }
+    process.stdout.write("known-load-sensitive --check-exit: ok — every serial-group family member records 进入原因+进入时间 (serial exit mechanism AC4)\n");
     return 0;
   }
 

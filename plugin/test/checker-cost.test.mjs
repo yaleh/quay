@@ -1,5 +1,6 @@
 // @test-group serial
 // @load-sensitive child-spawn
+// @load-sensitive-entry 2026-08-10 child-spawn delay-dominates signal broke under lowconc c3 (round-51 silent passed=false @7542ms)
 // KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — AC2 asserts ms
 // MONOTONICITY (400→800→1200ms delay seams) across 3 child-process runs; node-startup jitter under
 // ANY concurrent load can break the delay-dominates signal. Round-51 (2026-08-10, suite-fix round-2)

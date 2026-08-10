@@ -1,5 +1,6 @@
 // @test-group serial
 // @load-sensitive heavy
+// @load-sensitive-entry 2026-08-09 hermetic tmux server + real install; B-class real wall-clock wait
 // KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — real-install e2e:
 // exercises a HERMETIC tmux server + real quay-init install. The install/quay-init family rotated
 // flakes across groups under full-suite load, so the whole family is consolidated into the

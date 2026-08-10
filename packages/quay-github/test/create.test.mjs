@@ -1,5 +1,6 @@
 // @test-group serial
 // @load-sensitive heavy
+// @load-sensitive-entry 2026-08-09 fake-gh subprocess HUNG 14:41 under full-suite load (round-202); suite spawn contention
 // KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — this test spawns a
 // REAL fake-gh subprocess over PATH and drives a full create() roundtrip (multiple synchronous gh-api
 // subprocess spawns per test case). It passed solo 4/4 (1.9s) but HUNG under full-suite concurrency

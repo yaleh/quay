@@ -84,7 +84,7 @@ test("AC1/AC3/AC6/AC7 — esc to interrupt PRESENCE drives busy/idle; RESUMED ca
     try {
       await sleep(3000); // idle baseline: bash prompt, no busy shape
       makePaneBusy(p.env, p.session); // type "esc to interrupt" into the input line → busy SHAPE
-      const resumed = await waitForOutput(mon, /SESSION-RESUMED esc/, 25000);
+      const resumed = await waitForOutput(mon, /SESSION-RESUMED esc/, 60000);
       assert.ok(resumed, `RESUMED must fire when esc to interrupt appears:\n${mon.output()}`);
       const out = mon.output();
       assert.ok(/成因：esc to interrupt 标志出现/.test(out),
@@ -243,11 +243,14 @@ test("AC6/AC7 — RESUMED carries the cause AND the last-input time from the tra
     try {
       await sleep(3000); // idle baseline
       makePaneBusy(p.env, p.session); // shape-busy (ruling D): typed esc → busy shape
-      // Window is generous (25000ms, not 8000ms): under the full suite's ~4× oversubscription the
-      // monitor's per-round tmux capture-pane + transcript reads stretch several-fold (observed
-      // >11s with no event in suite7/suite12), and the mechanism is correct — it fires at ~5s in
-      // isolation and ~7.7s under load for the sibling test. The 8s window was contention-marginal.
-      assert.ok(await waitForOutput(mon, /SESSION-RESUMED pl/, 25000), `RESUMED must fire:\n${mon.output()}`);
+      // Window is generous (60000ms, widened from 25000 by
+      // gap-load-sensitive-serial-phase-unbounded-growth-measure-first AC5 — the round-206 AC6
+      // negative control timed out at 29.5s under lowconc contention with a 25s window): under the
+      // full suite's ~4× oversubscription the monitor's per-round tmux capture-pane + transcript
+      // reads stretch several-fold (observed >11s with no event in suite7/suite12), and the
+      // mechanism is correct — it fires at ~5s in isolation and ~7.7s under load for the sibling
+      // test. The 8s window was contention-marginal.
+      assert.ok(await waitForOutput(mon, /SESSION-RESUMED pl/, 60000), `RESUMED must fire:\n${mon.output()}`);
       const out = mon.output();
       // Strengthened AC6 (2026-08-03): the old `! /成因：\)/` used an ASCII paren that never appears
       // in the full-width output, so an EMPTY cause still passed — a no-op assertion. Require at
@@ -267,11 +270,11 @@ test("AC6/AC7 — RESUMED carries the cause AND the last-input time from the tra
   }
 });
 
-test("AC7 negative control — an EMPTY transcript yields last-input 取不到, which the AC7 assertion still rejects (the 25s window is not the check)", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+test("AC7 negative control — an EMPTY transcript yields last-input 取不到, which the AC7 assertion still rejects (the wait window is not the check)", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
   // Mutation (checker-mutation method): the AC6/AC7 test asserts last-input "N 分钟前" when a
   // user record exists. Here we REMOVE the user record (empty transcript) → last_user_input_epoch
   // returns nothing → lastin="取不到". If the original AC7 assertion (`li && li[1] !== "取不到"`)
-  // still rejects this corrupted payload, the 25s window only delays the RESUMED wait — it does not
+  // still rejects this corrupted payload, the wait window only delays the RESUMED wait — it does not
   // mask a broken payload. If it did NOT reject it, the window bump would be diluting the assertion.
   const p = makeHermeticProbe("ol-nc");
   const x = path.join(p.tmp, "session.jsonl");
@@ -282,14 +285,14 @@ test("AC7 negative control — an EMPTY transcript yields last-input 取不到, 
     try {
       await sleep(3000); // idle baseline
       makePaneBusy(p.env, p.session); // shape-busy (ruling D): typed esc → busy shape
-      assert.ok(await waitForOutput(mon, /SESSION-RESUMED pl/, 25000), `RESUMED must fire:\n${mon.output()}`);
+      assert.ok(await waitForOutput(mon, /SESSION-RESUMED pl/, 60000), `RESUMED must fire:\n${mon.output()}`);
       const out = mon.output();
       const li = out.match(/上次收到输入：([^）]*)/);
       assert.ok(li && li[1] === "取不到",
         `negative control: empty transcript must yield last-input 取不到 (the corruption is real, so AC7 is what rejects it):\n${out}`);
       const ac7Satisfied = Boolean(li && li[1] !== "取不到");
       assert.equal(ac7Satisfied, false,
-        `AC7 must reject the corrupted payload (last-input 取不到); the 25s window is not the check:\n${out}`);
+        `AC7 must reject the corrupted payload (last-input 取不到); the wait window is not the check:\n${out}`);
     } finally {
       mon.child.kill("SIGKILL");
     mon.cleanup();
@@ -320,13 +323,13 @@ test("AC6 negative control — a script mutation that neutralizes the cause yiel
     try {
       await sleep(3000); // idle baseline
       makePaneBusy(p.env, p.session); // shape-busy (ruling D): typed esc → busy shape
-      assert.ok(await waitForOutput(mon, /SESSION-RESUMED pl/, 25000), `RESUMED must fire:\n${mon.output()}`);
+      assert.ok(await waitForOutput(mon, /SESSION-RESUMED pl/, 60000), `RESUMED must fire:\n${mon.output()}`);
       const out = mon.output();
       assert.ok(/成因：；/.test(out),
         `negative control: the mutation must yield an empty cause (成因：；), so the strengthened AC6 is what rejects it:\n${out}`);
       const ac6Satisfied = /成因：[^；）]/.test(out);
       assert.equal(ac6Satisfied, false,
-        `AC6 must reject the empty-cause mutation (the 25s window is not the check):\n${out}`);
+        `AC6 must reject the empty-cause mutation (the wait window is not the check):\n${out}`);
     } finally {
       mon.child.kill("SIGKILL");
     mon.cleanup();
@@ -391,8 +394,8 @@ test("AC4 — observers don't know each other: the same target watched by two ob
       assert.ok(await waitForRounds(monB, 2, 10000), `observer B must run ≥2 idle rounds despite A being already mounted:\n${monB.output()}`);
       // both track the pane: busy → RESUMED fires in BOTH observers (neither is a no-op).
       makePaneBusy(p.env, p.session);
-      assert.ok(await waitForOutput(monA, /SESSION-RESUMED pa/, 25000), `observer A must fire RESUMED:\n${monA.output()}`);
-      assert.ok(await waitForOutput(monB, /SESSION-RESUMED pa/, 25000), `observer B must fire RESUMED:\n${monB.output()}`);
+      assert.ok(await waitForOutput(monA, /SESSION-RESUMED pa/, 60000), `observer A must fire RESUMED:\n${monA.output()}`);
+      assert.ok(await waitForOutput(monB, /SESSION-RESUMED pa/, 60000), `observer B must fire RESUMED:\n${monB.output()}`);
       makePaneIdle(p.env, p.session);
       // B (LOOP_MIN=0) reports the healthy idle; A (LOOP_MIN=999) stays silent — each observer's
       // threshold serves ONLY its own stream (the AC21 "holder threshold decides everyone's blindness"

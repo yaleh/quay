@@ -1,5 +1,6 @@
 // @test-group serial
 // @load-sensitive nested-spawn
+// @load-sensitive-entry 2026-08-09 nested-runner (real quay-init → node --test worker sub-suite); install family flake rotation
 // KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — real-install e2e:
 // each --loop test spawns a real quay-init.sh → `$TEST_COMMAND` (node --test) worker-pool sub-suite.
 // The install/quay-init family rotated flakes across groups under full-suite load, so the whole
