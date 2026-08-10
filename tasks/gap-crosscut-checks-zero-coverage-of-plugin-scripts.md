@@ -37,10 +37,10 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录实跑核实（plugin/scripts Touches → 选择器 coverage 1.00）+ 原前提作废 + manager 错因（本任务 Proposal 已含）
-- [ ] AC2: **范围收缩**——本任务改为评估结论：CROSSCUT_CHECKS 不加 plugin/scripts 触发器（优先级低，有真实实例再补）
-- [ ] AC3: **真实缺口转交**——verification-round.jsonl 无 failures 字段 → 立新任务（gap-suite-round-record-missing-failures-field）
-- [ ] AC4: **既有不回归**——`--for-task` scoped 门绿
+- [x] AC1: **复现固化**——任务体记录实跑核实（plugin/scripts Touches → 选择器 coverage 1.00）+ 原前提作废 + manager 错因（本任务 Proposal 已含）
+- [x] AC2: **范围收缩**——本任务改为评估结论：CROSSCUT_CHECKS 不加 plugin/scripts 触发器（优先级低，有真实实例再补）
+- [x] AC3: **真实缺口转交**——verification-round.jsonl 无 failures 字段 → 立新任务（gap-suite-round-record-missing-failures-field）
+- [x] AC4: **既有不回归**——`--for-task` scoped 门绿
 
 ## Definition of Done
 
@@ -70,3 +70,13 @@ resume    范围收缩 / 真实缺口转交分步提交，任一步完成即写�
 reviewer: outer
 at: 2026-08-10
 changed: manager STOP-AND-RESCOPE——原前提错误（plugin/scripts 被规则2 basename + 规则3 mirror fold 覆盖,选择器实测 coverage 1.00）。范围收缩为评估结论：CROSSCUT_CHECKS 不加 plugin/scripts 触发器（优先级低,真实缺口是 verification-round.jsonl 无 failures 字段,另行立案）。实现归内层（若已实现则回退）
+
+## Evidence（内层实现 2026-08-10 — RESCOPE 评估结论）
+
+**AC1 复现核实**：`select-tests-for-touches.ts --task gap-relation-sync-load-flake-child-spawn-under-suite`（touches `plugin/scripts/known-load-sensitive.ts`）→ 选中 `known-load-sensitive.test.mjs`（basename 配对, 规则 2/3）——plugin/scripts 触摸的自身测试覆盖 1.00, **original 前提（plugin/scripts 零覆盖）作废**。CROSSCUT_CHECKS 维持 4 条 packages/*/src trigger, 不加 plugin-scripts。
+
+**AC2 结论**：不向 CROSSCUT_CHECKS 加 plugin/scripts 触发器（manager 裁定 + outer RESCOPE 02d30522）。下游耦合（verify-delivery-surface→loop-shipping AC1b 等）作为全量套件表面接受, 不以 scoped 增重换取提前浮现。
+
+**AC3 真实缺口转交**：`tasks/gap-suite-round-record-missing-failures-field.md` 已立（209 轮 round 记录无 failures 字段, red-window 归因无法反查失败文件）——RESCOPE 的真实缺口。
+
+**AC4 既有不回归**：CROSSCUT_CHECKS 4 条既有 trigger 零改动; `select-tests-for-touches.test.mjs` 27/27 绿（agent 实现已被裁定丢弃, 此评估不改 selector 代码）。
