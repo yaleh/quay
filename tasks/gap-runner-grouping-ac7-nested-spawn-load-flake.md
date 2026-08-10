@@ -69,6 +69,10 @@ extra: {}
 
 **AC5 scoped 门**：`bash scripts/test.sh --for-task gap-runner-grouping-ac7-nested-spawn-load-flake --allow-thin` → exit 0，11 pass / 0 fail / 0 cancelled，violations 0。
 
+**再验证（2026-08-10 inner re-dispatch，develop @ f05a4bdf）**：
+- **AC5 scoped 门重跑**：`bash scripts/test.sh --for-task gap-runner-grouping-ac7-nested-spawn-load-flake --allow-thin` → **GATE EXIT: 0**，`pass 11 / fail 0 / cancelled 0`。外层全量套件并发、系统负载 avg 9.75–14.5 下 AC7 仍绿（57.9s）——DIRECT 归属断言对并发树变更免疫成立，runner-grouping 全 11 测试全绿。
+- **AC3 Contract solo invoke 重跑**：`node --no-warnings --experimental-strip-types --test plugin/test/runner-grouping.test.mjs` → **SOLO EXIT: 0**，`tests 11 / pass 11 / fail 0 / cancelled 0`，其中 `✔ AC7: an undeclared file defaults to engine in --list-groups (24653ms)`。
+
 **AC2（连续 2 轮全量绿）与 DoD 全量绿**：留给外层 verification-round 验证（SCOPED ONLY 纪律）。
 
 ## Touches
