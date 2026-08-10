@@ -1230,3 +1230,39 @@ K=2 升级给人、K=3 关生产闸。**`.halt` 不能用作 K=3 的手段**:代
 6 个新机制名全未找到;`quay init --loop` 仍停在 config 冲突。结论:「package.json files 字段含
 plugin(source 层面)≠ release 产物含 plugin(消费方下载的)」,**AC16 在产物层面未达成**,
 这解释了升级通道为什么一直不通。**实测查证:此问题从未被立案。**
+
+---
+
+## §workflow-价值核查（2026-08-10 01:3x，人要求「检查历史会话，理解 workflow 的实际价值」）
+
+meta-cc 全量：**628 次调用 / 14 会话 / 2026-07-25 → 08-09**。分三段：
+
+| 时期 | 次数 | 是什么 | 下场 |
+|---|---|---|---|
+| 07-25 → 08-01 | 543 | 经典里程碑流水线（`prepare-`/`execute-milestone`）的引擎 | ADR-022 于 08-03 退休该流水线 |
+| 08-07 11:19 → 08-08 07:35 | 84 | **全部**是 `manager-tick-readings.js` / `manager-tick-core.js` | 死于 08-08 07:49 压缩边界 |
+| 08-09 16:49:05 | **1** | outer 的 `nyf-semantic-judge`，**全历史唯一一次** | 用完即弃 |
+
+**执行核头部原来举的例子（「我的 workflow 静默 21.5 小时」）是错的，已更正。**
+那 84 次全是纯算术 tick 读数——按 ADR-033（已 accepted）本就该是普通脚本，属**反向违反**；
+且同日（08-07）已被 `quay-session.ts manager-tick-readings` 正确取代。**它死掉没有损失。**
+教训方向不变（动作必须落在锚指向的文件里），但**样本必须是「有产出却被丢掉」的那次**，
+否则据此推出的结论会是「恢复用 workflow 跑 tick 读数」——正好反向。
+
+**唯一的价值实证**：`nyf-semantic-judge` —— 19 个 nyf 任务，每个一个 schema'd `agent()` 出
+`{verdict: landed|not-landed|uncertain, acCompleteness, evidence, recommendFlip}`，筛选计数用普通 JS。
+16:49 后台起跑 → **17:13:18 outer 据此 flip 4 个 done（`49c0be86`，提交信息带每任务 agent 证据）**，
+24 分钟，期间 outer 并行处理其它 tick 事务。模板在
+`~/.claude/projects/-home-yale-work-quay/7795bb75-…/workflows/scripts/nyf-semantic-judge-wf_a9cc0bb4-807.js`。
+
+**为什么用一次就丢**：三份执行核 grep `workflow` —— orchestrator 1 次（A14 引用 A9 手法作类比）、
+fast-mode 1 次（头部叙述）、manager 2 次（A9 检测我有没有调用）。
+**三层都有「检测 workflow 没被调用」的仪器，没有一层有「调用 workflow」的步骤——仪器在测一个从未被规定过的动作。**
+
+**处置**：已发 outer，它 01:32 立 `gap-pool-quality-semantic-gate`（AC2 判词含 `should-remove`；
+AC3 = 执行核编号步骤 + 机械触发 `pool>25 / 最久未复核>48h / 每 10 轮`；AC4 拿今晚前提被证伪的
+任务当负控制），并把 **ADR-033 推到 `accepted`**。同一错例仍在 `orchestrator-tick-core.md:35`
+与 `fast-mode-tick-core.md:14`，归各自层更正。
+
+**自查**：本次修正一度把执行核从 80 行推到 90 行，**违反我自己一小时前刚报「达成」的 AC30(a)**
+——理由塞进了执行核。已压回 3 行并把全文落到本档案，即本节。
