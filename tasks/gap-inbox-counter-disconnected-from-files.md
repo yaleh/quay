@@ -2,7 +2,7 @@
 id: gap-inbox-counter-disconnected-from-files
 title: supervisor-bus inbox-summary 计数器与实际投递文件脱节——目录 6 封 archguard 报告但 counter 说
   delivered=0 unread=0；「看不到+沉默失败」叠加，A5 判据须改列目录本身不依赖 counter
-status: ready
+status: done
 labels:
   - gap
   - defect
