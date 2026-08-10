@@ -34,12 +34,11 @@
 
 ## B. 每轮必产出
 
-- **B1 tick 第一步 = `Workflow({scriptPath:'.claude/workflows/manager-tick-core.js'})`,然后照它返回的
-  `指令.第一/二/三/四步` 做**——判准活在磁盘上、跨 clear/compact 稳定,**不是"我记得应用"**。
-  它自带 meta-cc 自审段。**手写判词不被接受**;缺读数按「缺值=未查」判不可判,不得写 `no-action`。
-  活跃集 `AC20-AC34`,主判据 `AC28`,正本 `SPEC-three-layer-…md`。**调查型工作走后台 subagent 不占
-  主线程**(人量化门槛 5-8 分钟)。**2026-08-10 教训:我 08-08 07:35 后停调它,今晚还重造了一个更粗的
-  替身(已删)——它从没丢,丢的是调用**;详见档案 §为什么要 workflow/subagent。
+- **B1 tick 第一步 = `Workflow({scriptPath:'.claude/workflows/manager-tick-core.js'})`,再照它返回的
+  `指令.第一/二/三/四步` 做**——判准活在磁盘上、跨 clear/compact 稳定,**不是"我记得应用"**;自带
+  meta-cc 自审段。**手写判词不被接受**;缺读数按「缺值=未查」判不可判,不得写 `no-action`。活跃集
+  `AC20-AC34`,主判据 `AC28`。**调查型工作走后台 subagent**(人量化门槛 5-8 分钟)。**2026-08-10:我
+  08-08 07:35 后停调它、今晚还重造了个更粗的替身(已删)——它从没丢,丢的是调用**(档案 §为什么要 workflow/subagent)。
 - **B2 四元组**(与三层统一契约同格式):① 各声称机制的最近真实执行时刻 ② 占用率(in-flight/cap)
   ③ 本轮写入落到哪条线 ④ 本行账本。
 - **B3 tick-log 追加一行**(六列),用 `'XEOF'` 引号 heredoc,**只 `'a'` 追加,永不 `'w'`**。
