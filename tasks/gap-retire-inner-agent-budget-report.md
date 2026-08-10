@@ -1,7 +1,7 @@
 ---
 id: gap-retire-inner-agent-budget-report
 title: 'A16 裁定(11:5x)宣布 inner-agent-budget-report.ts 整体废弃,但删除从未落地——脚本/测试/7 处引用仍在,全量套件被其 stale 测试挡住(round-250 唯一红:AC4 断言外层 A 段必读 inner-agent-budget.json,而 A16 已把该读从核心删掉)'
-status: todo
+status: ready
 labels:
   - gap
   - defect

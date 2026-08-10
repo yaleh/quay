@@ -9,7 +9,7 @@ title: "quay-init.sh's config-generation heredoc (write_provider_config, line 55
   today (A, B, ad-arm1/machine-C) got it via manual/ad-hoc edit, never via the mechanism — manager
   reproduction-lens probe 2026-08-06 (ad-arm1 real check: config HAS the keys, but git-blame-
   equivalent traces to manual setup, not quay-init; quay-init.sh source has zero mentions)"
-status: todo
+status: ready
 labels:
   - gap
   - milestone-candidate

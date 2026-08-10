@@ -1,7 +1,7 @@
 ---
 id: gap-ac36-delivery-critical-priority-axis
 title: 'slot-refill.ts candidates.sort(:264) 加第二轴 label:delivery-critical——优先级低于 blocking_suite、高于 id 序；打了该 label 的任务在 recommended 里位次严格前移（负控制：不打 label 位次不变）；端到端：下一条本阶段 AC 任务打 label 后 inner 派发即取'
-status: todo
+status: ready
 labels:
   - gap
   - defect
