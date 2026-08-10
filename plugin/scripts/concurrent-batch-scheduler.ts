@@ -31,6 +31,10 @@ import {
 // (which verifies ACTUAL `git diff --numstat` files) — a wrong guess can only mis-batch (caught at
 // fan-in), never let a bad write land.
 import { deriveTouches } from "./derive-touches-heuristic.ts";
+// AC36 (gap-ac36-delivery-critical-priority-axis): parseTask is the ONE lenient frontmatter parse
+// (task-schema.ts) that reads `labels` — reused here so parseCandidate can expose a
+// delivery-critical flag without a second labels parser (slot-refill.ts:250 already uses it).
+import { parseTask } from "./task-schema.ts";
 // DIR-117 iteration-2 item 4: the SAME touch-set-expansion arithmetic that
 // milestone-preparation-check.ts's `Prepared` gate used to detect a checked Plan outgrowing its
 // declared '## Touches'. milestone-preparation-check.ts is retired with the prepare/execute
@@ -90,7 +94,15 @@ export function parseCandidate(id, charterText, repoRoot) {
   // **Value type:** ...") and/or with parenthetical prose between the label and the colon.
   const vm = String(charterText).match(/value[\s-]?type\b[^:\n]*:\s*\*{0,2}\s*`?([a-zA-Z][\w-]*)/i);
   if (vm) valueType = vm[1].toLowerCase();
-  return { id, touches, type, valueType };
+  // AC36 (gap-ac36-delivery-critical-priority-axis): expose the candidate's frontmatter `labels`
+  // (via parseTask — same single-source parse slot-refill.ts uses) and a derived `deliveryCritical`
+  // boolean. A candidate with no frontmatter / no such label ⇒ labels=[] / deliveryCritical=false
+  // (conservative default). This is what lets slot-refill's candidates.sort rank delivery-critical
+  // tasks as a SECOND axis — below blocking_suite, above plain id order.
+  const parsed = parseTask(String(charterText));
+  const labels = parsed.labels || [];
+  const deliveryCritical = labels.includes("delivery-critical");
+  return { id, touches, type, valueType, labels, deliveryCritical };
 }
 
 // ── isCapabilityGrowth ───────────────────────────────────────────────────────────────────────────
