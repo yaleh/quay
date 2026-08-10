@@ -1133,3 +1133,10 @@ tick 或 `/clear` 后的会话会重犯。
 **为什么用 workflow（根因）**：执行核已有 closure-lag 三件套（A10 触发/A14 心跳/B2 record）完全可复用，workflow 缺的正是这套——每项必产出都可手写，调不调用纯凭意志。让 suite-health 判词成为**只有 workflow 能产生的必产出**（手写判词不被接受，检查读的是带时间戳的结构化产物是否新鲜），与 closure-lag `--record` 心跳同构。**任务不是机制**：立任务进池子=进队列（gap-pool-quality-semantic-gate AC3 即此，status=ready AC 0/5 卡住）——此条直接入执行核。
 
 **触发分档（宽网，算术写死脚本——ADR-033）**：末轮 `durationMs>1000_000 ∨ state=red ∨ merge 被门拒 ∨ 距上次记录 >K 轮` ⇒ 必跑 suite-health-judge workflow。
+
+**workflow 与 subagent 是互补两侧，不是二选一（manager 2026-08-10 补 A15 缺的另一半，人 2026-08-09T15:27 与 08-05 已分别裁定）**：
+
+- **workflow = 把意志从环里拿掉**（控制流是代码，A 段读数被跑是因为脚本跑它，与该轮注意力无关）。人 2026-08-09T15:27 驳回过「workflow 的价值=扇出」——原话「你还在把 workflow 和扇出扯在一起」「看看你自己的 tick workflow，它的价值绝不止是扇出」。治的是**意志/注意力失效**：机制在场没被调用、读数在场没被判、no-action 零成本。
+- **subagent = 独立上下文 + 后台并发**（不堵前台、不烧主会话上下文）。人 2026-08-05T02:28 是**量化门槛裁定**：「5-8 分钟这个量级应集中到 outer、用**后台 subagent** 跑，**不要堵着 inner 里各个任务**」；08-05T06:23「inner 为什么要等？套件应该在 outer 的后台 subagent 运行」。治的是**主线程串行做实现 / 前台被长任务堵死 / 上下文被烧到 100%**。
+- **近 24h 三层实测（工具调用计数，manager 2026-08-10）**：outer 总 2728，**Agent=1 / Workflow=1**，Bash 2623（96%）；inner 总 1179，**Agent=63**，Workflow=0；manager 总 843，**Agent=2 / Workflow=0**，Bash 808（96%）。**真正在用 subagent 的是 inner；不用的是 outer 与 manager**——所以这不是 outer 一个人的纪律问题。manager 已先自改：建 `.claude/workflows/manager-tick-judge.js`（AC 状态词/A16 命中真伪/B3 判词三路 schema agent，算术全留普通 JS）+ 接成 B1 必产出（手写判词不被接受，判据=workflow 本轮有无结构化返回，与 closure-lag --record 心跳同构）。
+- **分工**：suite/merge 的**长时观测与等待**（跑一轮 30 分钟量级、轮询状态、等绿）按人 08-05 量化门槛必须走**后台 subagent（`run_in_background: true`）**，不占 outer 前台；**workflow 只负责判定段**。subagent 解决「不堵前台/独立上下文」，workflow 解决「不依赖该轮注意力」。
