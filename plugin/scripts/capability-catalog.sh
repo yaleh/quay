@@ -359,6 +359,7 @@ declare -A PUBLIC_ENTRYPOINTS=(
   [process-budget.sh]="consumer-facing: the total test-process budget authority consumed by test.sh / cap-from-gate / resource-gate"
   [send-keys-reliable.sh]="consumer-facing: the reliable send-keys sequence used by ADR-016 remote-drive"
   [session-bootstrap.sh]="consumer-facing: the bare-machine tmux bootstrap in the session-topology skill"
+  [supervisor-deliver.sh]="consumer-facing: the single hardened cross-session delivery implementation (deliver(target,payload)) documented in the tick docs / drive-contract (AC37 核随包走引用)"
   [session-liveness-mount.sh]="consumer-facing: the per-observer session-liveness mount command in the tick docs"
   [session-liveness.sh]="consumer-facing: the session-alive/busy/heartbeat observer invoked by the tick docs"
   [slot-refill.sh]="consumer-facing: the event-driven slot-refill evaluator in the tick docs"
