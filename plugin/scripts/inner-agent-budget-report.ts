@@ -87,6 +87,12 @@ export function resolveLimit(env = process.env, explicit = undefined) {
 export function analyzeAgentBudget(records, { limit, rawText = "" } = {}) {
   let spawned = 0;
   let lastSpawnAt = null; // epoch ms (last Agent tool_use dispatch timestamp)
+  // Agent tool_use ids — a real harness spawn-limit error surfaces as the tool_RESULT of an Agent
+  // call. Collect every Agent call's id first, so the signal scan below can match BY POSITION
+  // (硬规则 2: 注释/任务体引用/user 消息里的同一串不算命中 — manager 2026-08-10 11:4x 实测:
+  // 任务 gap-inner-subagent-budget-invisible 为留证逐字引用了 05:13:13 原文, 该引用进入 inner
+  // transcript 后被裸 includes 误判为触顶, 而真实 Agent 计数 18/200).
+  const agentCallIds = new Set();
   for (const rec of records) {
     if (!rec || typeof rec !== "object") continue;
     const tsMs = typeof rec.timestamp === "string" ? Date.parse(rec.timestamp) : NaN;
@@ -97,11 +103,29 @@ export function analyzeAgentBudget(records, { limit, rawText = "" } = {}) {
       if (!blk || typeof blk !== "object") continue;
       if (blk.type === "tool_use" && blk.name === "Agent") {
         spawned++;
+        if (blk.id) agentCallIds.add(blk.id);
         if (ts !== null && (lastSpawnAt === null || ts > lastSpawnAt)) lastSpawnAt = ts;
       }
     }
   }
-  const hitBySignal = typeof rawText === "string" && rawText.includes(SPAWN_LIMIT_SIGNAL);
+  // POSITION-BASED signal scan: the spawn-limit string counts ONLY when it appears in a tool_result
+  // whose tool_use_id matches an Agent call (the real harness error return). Task-body quotes /
+  // user messages / assistant text that merely mention the string do NOT count (硬规则 2,
+  // drive-contract-check "by POSITION, never by keyword"; test-framework-policy-check
+  // "strings that merely mention it do not count" — 同一手法).
+  let hitBySignal = false;
+  for (const rec of records) {
+    if (!rec || typeof rec !== "object") continue;
+    const content = rec.message && typeof rec.message === "object" ? rec.message.content : undefined;
+    if (!Array.isArray(content)) continue;
+    for (const blk of content) {
+      if (!blk || typeof blk !== "object" || blk.type !== "tool_result") continue;
+      if (!blk.tool_use_id || !agentCallIds.has(blk.tool_use_id)) continue;
+      const text = typeof blk.content === "string" ? blk.content : JSON.stringify(blk.content || "");
+      if (text.includes(SPAWN_LIMIT_SIGNAL)) { hitBySignal = true; break; }
+    }
+    if (hitBySignal) break;
+  }
   const hitByCount = spawned >= limit;
   return {
     spawned,

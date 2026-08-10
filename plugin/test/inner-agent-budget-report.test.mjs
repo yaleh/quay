@@ -80,18 +80,35 @@ test("analyzeAgentBudget — counts Agent tool_use, not Edit, and tracks lastSpa
   assert.equal(r.lastSpawnAtIso, "2026-08-10T05:13:13.000Z");
 });
 
-test("analyzeAgentBudget — spawn-limit signal in the transcript ⇒ hitLimit=true even when spawned < limit (AC3 触顶信号)", () => {
+test("analyzeAgentBudget — spawn-limit in an Agent tool_RESULT ⇒ hitLimit=true (AC3 触顶信号, POSITION-BASED)", () => {
+  // Positive control: a REAL harness spawn-limit error is the tool_result RETURN of an Agent call —
+  // its tool_use_id matches the Agent tool_use's id. Only this position counts (硬规则 2).
   const records = [
-    { type: "assistant", timestamp: "2026-08-10T04:00:00.000Z", message: { content: [{ type: "tool_use", name: "Agent", input: {} }] } },
+    { type: "assistant", timestamp: "2026-08-10T04:00:00.000Z", message: { content: [{ type: "tool_use", name: "Agent", id: "call_00_agent1", input: {} }] } },
+    { type: "user", timestamp: "2026-08-10T05:13:14.000Z", message: { content: [{ type: "tool_result", tool_use_id: "call_00_agent1", content: `${SPAWN_LIMIT_SIGNAL} (200 of 200 agents spawned).` }] } },
   ];
-  const raw = `${JSON.stringify(records[0])}\n${JSON.stringify({
-    type: "assistant",
-    timestamp: "2026-08-10T05:13:14.000Z",
-    message: { content: [{ type: "tool_result", content: `${SPAWN_LIMIT_SIGNAL} (200 of 200 agents spawned).` }] },
-  })}\n`;
+  const raw = records.map((r) => JSON.stringify(r)).join("\n");
   const r = analyzeAgentBudget(records, { limit: 200, rawText: raw });
   assert.equal(r.spawned, 1, "only one Agent dispatch counted");
-  assert.equal(r.hitLimit, true, "the harness spawn-limit signal must trip hitLimit");
+  assert.equal(r.hitLimit, true, "the harness spawn-limit tool_result RETURN must trip hitLimit");
+});
+
+test("analyzeAgentBudget — task-body quote / user message mentioning the string does NOT trip (硬规则 2 POSITION negative control)", () => {
+  // Negative control (manager 2026-08-10 11:4x): the task gap-inner-subagent-budget-invisible quotes
+  // the 05:13:13 verbatim for evidence; that quote enters inner's transcript (as a Read tool_result
+  // or user message) and a bare includes() matched it. A tool_result WITHOUT a matching Agent id, or
+  // a user message, must NOT trip hitLimit.
+  const records = [
+    { type: "assistant", timestamp: "2026-08-10T04:00:00.000Z", message: { content: [{ type: "tool_use", name: "Agent", id: "call_00_real", input: {} }] } },
+    // A Read tool_result whose CONTENT is the task body quoting the signal — no Agent tool_use_id.
+    { type: "user", timestamp: "2026-08-10T05:13:14.000Z", message: { content: [{ type: "tool_result", tool_use_id: "call_00_read_task", content: `原始记录(非自述): inner 会话 728a4610 的 tool_result, 2026-08-10T05:13:13 逐字写着 "${SPAWN_LIMIT_SIGNAL} (200 of 200 agents spawned)"…` }] } },
+    // A user message merely mentioning the string.
+    { type: "user", timestamp: "2026-08-10T05:13:15.000Z", message: { content: `外层说该会话出现过 "${SPAWN_LIMIT_SIGNAL}"` } },
+  ];
+  const raw = records.map((r) => JSON.stringify(r)).join("\n");
+  const r = analyzeAgentBudget(records, { limit: 200, rawText: raw });
+  assert.equal(r.spawned, 1, "one real Agent dispatch counted");
+  assert.equal(r.hitLimit, false, "task-body quote / user message mentioning the signal must NOT trip (硬规则 2)");
 });
 
 test("analyzeAgentBudget — spawned reaching limit also trips hitLimit (count fallback)", () => {
@@ -196,8 +213,8 @@ function makeTranscript(recordsLines) {
   return tmp;
 }
 
-const agentRec = (ts, name = "Agent") =>
-  JSON.stringify({ type: "assistant", timestamp: ts, message: { content: [{ type: "tool_use", name, input: {} }] } });
+const agentRec = (ts, name = "Agent", id = `call_${ts.replace(/\D/g, "")}`) =>
+  JSON.stringify({ type: "assistant", timestamp: ts, message: { content: [{ type: "tool_use", name, id, input: {} }] } });
 
 test("AC2/AC4 CLI — inner surface counts + writes the product and exits 0 on OK", () => {
   const root = makeTranscript([
@@ -222,10 +239,11 @@ test("AC2/AC4 CLI — inner surface counts + writes the product and exits 0 on O
 });
 
 test("AC3 CLI — spawn-limit signal ⇒ HIT, exits 1 (escalate, not silent serial)", () => {
+  const agentId = `call_${"2026-08-10T05:13:13.000Z".replace(/\D/g, "")}`;
   const root = makeTranscript([
     agentRec("2026-08-10T04:00:00.000Z"),
     agentRec("2026-08-10T05:13:13.000Z"),
-    JSON.stringify({ type: "assistant", timestamp: "2026-08-10T05:13:14.000Z", message: { content: [{ type: "tool_result", content: `${SPAWN_LIMIT_SIGNAL} (200 of 200 agents spawned).` }] } }),
+    JSON.stringify({ type: "user", timestamp: "2026-08-10T05:13:14.000Z", message: { content: [{ type: "tool_result", tool_use_id: agentId, content: `${SPAWN_LIMIT_SIGNAL} (200 of 200 agents spawned).` }] } }),
   ]);
   try {
     const r = runCli(root, ["--session", path.join(root, "sess.jsonl"), "--limit", "5", "--json"]);
