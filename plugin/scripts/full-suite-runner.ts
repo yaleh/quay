@@ -326,6 +326,9 @@ const ABORT_PATTERNS: RegExp[] = [
 export const SUITE_MAX_RUNTIME_MS = Number(process.env.QUAY_TEST_SUITE_MAX_RUNTIME_MS ?? 45 * 60_000);
 export const SUITE_SILENCE_MS = Number(process.env.QUAY_TEST_SUITE_SILENCE_MS ?? 15 * 60_000);
 export const RED_GRACE_MS = Number(process.env.QUAY_TEST_RED_GRACE_MS ?? 30_000);
+// manager 2026-08-10 15:2x — failures[] was structurally capped at 1 (push inside the !redDetected
+// guard); now EVERY failure line pushes. Cap the list so a pathological round cannot grow it unbounded.
+export const MAX_RECORDED_FAILURES = 200;
 
 // ── static-check red detection (gap-full-suite-state-red-no-failure-detail-static-check-invisible) ──
 // When run_static_checks fails (task-contract-check ratchet growth / test-framework-policy /
@@ -1182,6 +1185,19 @@ export async function run(argv: string[]): Promise<number> {
 
   // Tee the suite output to the log (the outer's verification gate greps it for the
   // 判绿 markers), and flip red the instant a failure line appears (AC2).
+  // manager 2026-08-10 15:1x (44% of reds zero-detail + log overwritten each round): archive the
+  // PREVIOUS round's log before truncating, so a red's log survives for post-hoc diagnosis (the
+  // failures[] list may be empty on the fail-closed path, but the archived log is still queryable).
+  if (fs.existsSync(logFile)) {
+    const archiveSuffix = new Date().toISOString().replace(/[:.]/g, "-");
+    const archivePath = logFile.replace(/full-suite\.log$/, `full-suite-${archiveSuffix}.log`);
+    try {
+      fs.renameSync(logFile, archivePath);
+      process.stderr.write(`full-suite-runner: archived previous round log -> ${archivePath}\n`);
+    } catch (e) {
+      process.stderr.write(`full-suite-runner: log archive failed (continuing): ${(e as Error).message}\n`);
+    }
+  }
   const logStream = fs.createWriteStream(logFile, { flags: "w" });
 
   // AC6 (gap-no-criterion-records-its-own-cost-checker-cost-jsonl) — per-run pass/fail/cancelled
@@ -1248,45 +1264,54 @@ export async function run(argv: string[]): Promise<number> {
     const cancelledMatch = /^[#ℹ]\s*cancelled\s+(\d+)/.exec(line);
     if (cancelledMatch) cancelledSeen = Number(cancelledMatch[1]);
     lastOutputAt = Date.now(); // silence guard: any suite output (even a failure line) proves liveness
-    if (!redDetected && isFailureLine(line)) {
-      redDetected = true;
-      // AC2 kill-on-red: once judged red, let the suite collect its failing-tests summary for RED_GRACE_MS,
-      // then kill the child tree if it STILL hasn't exited — a red suite whose test.sh hangs (a node --test
-      // subprocess stuck) must not leak the runner + single-flight flock (round-164).
-      if (!redGraceArmed) {
-        redGraceArmed = true;
-        const rescheduleOrKill = () => {
-          if (runDone) return;
-          // manager 2026-08-10 15:1x (gap-phase-order-serial-lowconc-before-main × kill-on-red): the
-          // red grace timer must only kill a HUNG child (no new output for RED_GRACE_MS), not one that
-          // is still producing results. test.sh:956 runs phases EVEN IF a later phase fails ("report
-          // all failures" — round-95 AC3); the runner's unconditional kill-on-red cancelled that when a
-          // serial/lowconc file reds FIRST, so the main phase (281 files, 89% of the suite) never ran.
-          // lastOutputAt is updated on EVERY line (the silence guard), so "still producing" = fresh.
-          // If the subtree is still emitting output, reschedule the grace window instead of killing
-          // (the run will finish main and land its real red at the terminal write). A truly hung child
-          // (no output for RED_GRACE_MS) still escalates the kill — the round-164 flock-leak protection
-          // is preserved.
-          if (Date.now() - lastOutputAt < RED_GRACE_MS) {
-            redGraceTimer = setTimeout(rescheduleOrKill, RED_GRACE_MS);
-            return;
-          }
-          process.stderr.write(`full-suite-runner: red conclusion but suite child is silent for ${Math.round(RED_GRACE_MS / 1000)}s — killing child tree (kill-on-red, AC2)\n`);
-          killChildTreeEscalating();
-        };
-        redGraceTimer = setTimeout(rescheduleOrKill, RED_GRACE_MS);
+    if (isFailureLine(line)) {
+      // manager 2026-08-10 15:2x (failures[] structurally capped at 1): redFailures.push used to sit
+      // inside the !redDetected guard, so after the FIRST failure line flipped redDetected=true, every
+      // subsequent failure line was skipped — a round's record named only 1 of its N failures (r240
+      // TAP fail=7 but failures[] had 1). Red DETECTION still flips once (redDetected, redAtIso, the
+      // grace timer, stop-dispatch semantics all unchanged); the push now runs for EVERY failure line,
+      // capped to keep a pathological round from unbounded growth.
+      if (!redDetected) {
+        redDetected = true;
+        // AC2 kill-on-red: once judged red, let the suite collect its failing-tests summary for RED_GRACE_MS,
+        // then kill the child tree if it STILL hasn't exited — a red suite whose test.sh hangs (a node --test
+        // subprocess stuck) must not leak the runner + single-flight flock (round-164).
+        if (!redGraceArmed) {
+          redGraceArmed = true;
+          const rescheduleOrKill = () => {
+            if (runDone) return;
+            // manager 2026-08-10 15:1x (gap-phase-order-serial-lowconc-before-main × kill-on-red): the
+            // red grace timer must only kill a HUNG child (no new output for RED_GRACE_MS), not one that
+            // is still producing results. test.sh:956 runs phases EVEN IF a later phase fails ("report
+            // all failures" — round-95 AC3); the runner's unconditional kill-on-red cancelled that when a
+            // serial/lowconc file reds FIRST, so the main phase (281 files, 89% of the suite) never ran.
+            // lastOutputAt is updated on EVERY line (the silence guard), so "still producing" = fresh.
+            // If the subtree is still emitting output, reschedule the grace window instead of killing
+            // (the run will finish main and land its real red at the terminal write). A truly hung child
+            // (no output for RED_GRACE_MS) still escalates the kill — the round-164 flock-leak protection
+            // is preserved.
+            if (Date.now() - lastOutputAt < RED_GRACE_MS) {
+              redGraceTimer = setTimeout(rescheduleOrKill, RED_GRACE_MS);
+              return;
+            }
+            process.stderr.write(`full-suite-runner: red conclusion but suite child is silent for ${Math.round(RED_GRACE_MS / 1000)}s — killing child tree (kill-on-red, AC2)\n`);
+            killChildTreeEscalating();
+          };
+          redGraceTimer = setTimeout(rescheduleOrKill, RED_GRACE_MS);
+        }
+        // AC3b — timestamp the red flip (the early-RED detection-latency observation point).
+        redAtIso = new Date().toISOString();
       }
-      // AC3b — timestamp the red flip (the early-RED detection-latency observation point).
-      redAtIso = new Date().toISOString();
       // AC2 — mark RED immediately, while the run is still in progress. reason=failed (AC5: this
       // IS a real failure — the stop-dispatch signal). Record the failure LINE (the 判定信息 —
       // which test failed is already known) + open a short detail lookahead for the file context.
       // A file on the failure line itself (vitest `❯ <file>` / `test at <file>`) is captured now;
       // TAP detail-block files are captured by the lookahead.
       const failure: SuiteFailure = enrichFailure({ line, file: extractFailureFile(line, root) });
-      redFailures.push(failure);
+      if (redFailures.length < MAX_RECORDED_FAILURES) redFailures.push(failure);
       pendingFailure = failure;
       detailRemaining = 15;
+      if (!redAtIso) redAtIso = new Date().toISOString();
       writeSuiteState({
         state: "red",
         reason: "failed",

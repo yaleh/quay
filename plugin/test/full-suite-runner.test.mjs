@@ -1248,6 +1248,32 @@ test("AC2 e2e — a RED suite STILL PRODUCING OUTPUT is NOT killed on red-grace;
   }
 });
 
+test("AC2 e2e — MULTIPLE failure lines each push into failures[] (manager 2026-08-10 15:2x: structurally capped at 1 before; now every failure records)", async () => {
+  // r240 TAP reported fail=7 but failures[] held only the FIRST failure's name — the push sat inside
+  // the !redDetected guard that flips true on line 1. This fake suite emits THREE not-ok lines; all
+  // three must be recorded (capped at MAX_RECORDED_FAILURES only for pathological rounds).
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-multifail-"));
+  const { f, dir } = fakeSuite(
+    'echo "not ok 1 - alpha"; echo "not ok 2 - beta"; echo "not ok 3 - gamma"; exit 1',
+  );
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    const s = readState(root);
+    assert.equal(s.state, "red");
+    assert.equal(s.reason, "failed");
+    assert.ok(s.failures.length >= 3, `all 3 failure lines must be recorded; got ${JSON.stringify(s.failures)}`);
+    const names = s.failures.map((x) => x.line).join(" ");
+    assert.match(names, /alpha/, "first failure recorded");
+    assert.match(names, /beta/, "second failure recorded (was dropped by the !redDetected cap)");
+    assert.match(names, /gamma/, "third failure recorded");
+    assert.ok(code !== 0, "runner exits non-zero on the red");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("AC2/AC3 e2e — a `__PERFILE__ ... passed=false` per-file line flips red and carries the failed file in failures[]", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-pf-"));
   const { f, dir } = fakeSuite(
