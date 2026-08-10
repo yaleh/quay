@@ -3,7 +3,7 @@ id: gap-suite-round-record-missing-failures-field
 title: verification-round.jsonl 的 round 记录没有 failures 字段——209 轮全缺，red-window
   归因（gap-suite-blocking-red-window-unattributable）无法从 round 记录反查失败文件；补
   failures[] 进 SuiteRoundRecord/appendVerificationRound
-status: done
+status: ready
 labels:
   - gap
   - defect

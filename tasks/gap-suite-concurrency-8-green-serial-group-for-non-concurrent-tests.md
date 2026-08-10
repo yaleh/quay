@@ -14,7 +14,7 @@ title: "HUMAN RULING 2026-08-07: concurrency 8 stays — identify tests that
   scripts/test.sh --group mechanism — add a serial group, main body stays
   concurrency 8, serial group runs alone; D fixed by code (fixture out of shared
   dir)"
-status: done
+status: ready
 labels:
   - gap
   - defect
