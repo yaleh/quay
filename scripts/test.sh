@@ -360,6 +360,18 @@ run_static_checks() {
   # @static-tier change
   # @static-object orchestration/manager-loop-tick.md plugin/loop/fast-mode-loop-tick.md plugin/loop/manager-loop-tick.md plugin/loop/orchestrator-loop-tick.md
   run_checker "instrument-failure-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/instrument-failure-check.ts" --gate --root "${repo_root}"
+  echo "== obligation-ledger check (gap-obligation-ledger-mechanization, AC2-AC5 top-level audit) =="
+  # The obligation-ledger integrity audit — the top-level audit the known weakness demands ("台账由
+  # 本层写、上层审；顶层审计 = 人 + 接进套件静态检查的机械核对"). Mechanically verifies on the
+  # checked ledger: (1) obligation_set_derived=1 — every obligation id equals the deterministic
+  # derivation of its generator key (a hand-written id is the "作者写义务集" shape); (2) band — age
+  # is monotonic across consecutive live rounds (never drops, never jumps); (3)
+  # round_cannot_close_with_undischarged=1 — a round recorded canClose:true while a live+undischarged
+  # obligation exists is the 强行闭轮 shape and red-lights the commit. Fail-open on an ABSENT ledger
+  # (mechanism not yet adopted); fail-closed on a present one.
+  # @static-tier change
+  # @static-object plugin/scripts/obligation-ledger.ts plugin/scripts/obligation-ledger-check.ts plugin/scripts/obligation-discharge-agent.ts plugin/test/obligation-ledger.test.mjs plugin/test/obligation-ledger-check.test.mjs
+  run_checker "obligation-ledger-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/obligation-ledger-check.ts" --root "${repo_root}"
   echo "== checker-mutation check (gap-checkers-have-never-been-shown-to-fail, AC1-AC6) =="
   # The L_S instrument: mutation-test the checkers THEMSELVES, not product code. The manifest is
   # parsed from THIS function + CI (never hand-written), so a checker added here (or to a CI

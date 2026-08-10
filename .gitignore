@@ -110,6 +110,10 @@ orchestration/inner-idle-log.jsonl
 # live control-plane-state family as gate-events.jsonl/inner-blocked.json — written by the outer's
 # async closure pass, read by the inner's stop condition; never committed.
 **/.quay/verification-round.jsonl
+# gap-obligation-ledger-mechanization: the derived obligation-ledger jsonl (one round record per
+# verification round + discharge/defer events). Same live runtime-state family as verification-round
+# — written by obligation-ledger.ts, read by obligation-ledger-check.ts; never committed.
+**/.quay/obligation-ledger.jsonl
 # gap-no-criterion-records-its-own-cost-checker-cost-jsonl: the per-criterion pure-append cost
 # ledger — one line {name, ms, n, load, exit, ts} per checker/gate execution (written by
 # plugin/scripts/checker-cost.sh). Same live runtime-state family as verification-round.jsonl /
