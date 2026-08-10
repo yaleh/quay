@@ -274,6 +274,7 @@ declare -A QUESTION=(
   [workflow-metadata-conformance.mjs]="Does the workflow's metadata match its executable driver?"
   [workflow-replay.ts]="Does the workflow replay byte-for-byte against its golden run?"
   [worktree-branch-hygiene-check.sh]="Is the worktree and branch state hygienic (no stale branches or stranded worktrees)?"
+  [md-deletion-token-evaporation-check.sh]="Did any commit net-deleting ≥50 lines from *.md leave deleted-content unique tokens (identifiers/paths/专名) with ZERO occurrence in the post-delete repo (来源完备性整段蒸发)?"
 )
 
 # ── superseded capability table (gap-retired-script-still-callable, human ruling 2026-08-10) ──
