@@ -58,6 +58,7 @@ extra: {}
 - plugin/loop/fast-mode-tick-core.md（AC2：随包正本）
 - orchestration/manager-tick-core.md / orchestrator-tick-core.md / fast-mode-tick-core.md（随包正本的源）
 - plugin/test/quay-init.test.mjs（AC2-AC5：派生集含核 + opt-in + referenced⊆landed）
+- plugin/scripts/known-load-sensitive.ts（头注释补「收编到 serial 相仅应在证明并发造成后执行」裁定——manager 2026-08-10 建议放机制正本；C15 已在 orchestrator-tick-core.md 落 git 跟踪，此为同裁定的机制侧载体）
 - tasks/gap-ac36-delivery-critical-priority-axis.md（交叉标注——本任务将作 AC36 ③ 的活体样本）
 - tasks/gap-ac37-exec-core-ships-with-package.md（自身：勾 AC + 贴证据）
 
