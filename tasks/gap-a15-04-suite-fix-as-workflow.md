@@ -55,6 +55,12 @@ phase('Merge'); await agent('fan-in + verify clean + batch-merge')
 - [x] AC4: **Monitor 撤回落地**——orchestrator-tick-core.md A15 ④ 的「subagent 自验证必须用 Monitor」措辞已修正为「等待由 workflow 脚本控制流决定」(不依赖嵌套 agent 自武装 Monitor);workflow 内 Fix/Verify/Merge 三段均不出现「agent 自己决定等待机制」的环节
 - [ ] AC5: **既有不回归**——`--for-task` scoped 门绿（待 workflow 形态全量轮跑绿后确认）
 
+## 追加记录（outer 15:5x,workflow 首跑的结构性发现与修复）
+
+**workflow 首跑（runId f6b824b5,15:54）暴露一个 workflow 形态特有的缺陷并已修复:** subagent 里用 `Bash(run_in_background:true)` 起 full-suite-runner,runner 在 **subagent 退出的同一秒**被 harness 连带杀掉（15:54:06→15:54:22,SIGTERM→onSignal→state=aborted）。这是「workflow 脚本拥有等待」的结构里唯一还握在 agent 手里的环节——**启动**。修复:启动改走 `setsid`+`&`+`disown` 的前台 Bash 调用（runner 活在独立 session,subagent 退出不影响）,脚本轮询 state.json 仍拥有全部等待。提交 29bff20d。
+
+**该失败恰好是 workflow 设计的正面对照:** state=red/reason=aborted 被 `isNonVerificationTerminal` 正确识别为「非验证终态」（不是真实红轮）,workflow 未判绿、未 merge,而是走非验证分支重跑——ab380c5e 类「诊断+等待同 agent」悬挂场景在 workflow 形态下由脚本控制流拦截,不悬挂、不误判。AC3 的两类场景对照由此各得一例实证。
+
 ## 追加记录（manager 15:3x,人裁定）
 
 `.halt` 接管期间 suite 行为必须简化:完整跑 suite、分析、修复、迭代,**不得引入任何部分执行/提前中止机制**。五闸全枚举已写进 A15 ④:①max-runtime 45min→接管设 ≥120min(`QUAY_TEST_SUITE_MAX_RUNTIME_MS`);②静态检查红=tests 0,先修再重跑全量,不得当验证轮;③resource-gate WAIT/lock=未跑即 abort,等待重跑不计迭代;④scoped/--group 不是验证信号,判绿只认全量;⑤不得发明提前退出。**验证轮判据**:verification-round.jsonl 记录满足 `tests ≥ 2900` 或 `reason ∈ {static-check,aborted,timeout}` 且标注「非验证轮，需重跑」才算「一轮验证」。workflow 内已实现该分类(isRealRedRound / isNonVerificationTerminal)。
