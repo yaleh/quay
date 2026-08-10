@@ -31,17 +31,17 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 209 轮 round 记录缺 failures 的实测（keys 清单 + round-210/212 归因案例）（本任务 Proposal 已含）
-- [ ] AC2: **round 记录带 failures**——`appendVerificationRound` 红轮写入 `failures[]`（SuiteFailure 形状），`SuiteRoundRecord` 加 `failures?`
-- [ ] AC3: **归因可反查**——红窗归因（computeSuiteBlocking / suite_blocking）优先读 round 记录 failures 反查失败文件→任务 Touches
-- [ ] AC4: **既有不回归**——`--for-task` scoped 门绿；round 记录既有字段不破坏
+- [x] AC1: **复现固化**——任务体记录 209 轮 round 记录缺 failures 的实测（keys 清单 + round-210/212 归因案例）（本任务 Proposal 已含）
+- [x] AC2: **round 记录带 failures**——`appendVerificationRound` 红轮写入 `failures[]`（SuiteFailure 形状），`SuiteRoundRecord` 加 `failures?`
+- [x] AC3: **归因可反查**——红窗归因（computeSuiteBlocking / suite_blocking）优先读 round 记录 failures 反查失败文件→任务 Touches
+- [x] AC4: **既有不回归**——`--for-task` scoped 门绿；round 记录既有字段不破坏
 - [ ] AC5: **全量套件绿**——verification-round 写入路径在全量下正常（fail 0 且 cancelled 0）——外层 verification-round 验证
 
 ## Definition of Done
 
 - [ ] AC1–AC5 全部勾上
-- [ ] 修后实跑：红轮 round 记录带 failures[]；归因跨轮反查成功（贴任务体）
-- [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
+- [x] 修后实跑：红轮 round 记录带 failures[]；归因跨轮反查成功（贴任务体）
+- [x] 既有测试 + 新增测试全绿（`--for-task` scoped）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
 
 ## Touches
@@ -69,3 +69,22 @@ resume    append 写 failures / 归因读取分步提交，任一步完成即写
 reviewer: outer
 at: 2026-08-10
 changed: RESCOPE gap-crosscut-checks-zero-coverage-of-plugin-scripts 时裁定：original 前提作废，真实缺口 = verification-round.jsonl 无 failures 字段（209 轮全缺），转交本任务。实现归内层
+
+## Evidence（内层实现 2026-08-10）
+
+**AC2 — 红轮 round 记录带 failures[]**（plugin/scripts/full-suite-runner.ts）
+- `SuiteRoundRecord` 加 `failures?: SuiteFailure[]`（`appendVerificationRound` 调用处用同一数组 `finalFailures`——与 suite-state 写入同源；`state === "red"` 时写入，绿轮省略）。
+- 实测注入（fake 红 suite `not ok 1 - boom` + `ℹ fail 1`）：`verification-round.jsonl` 末条 `rec.state === "red"` 且 `"failures" in rec`，`rec.failures.length === state.failures.length`，`rec.failures[0].line === state.failures[0].line`。
+- 绿轮负控制：`rec.state === "green"` 且 `!("failures" in rec)`——既有字段不回归。
+- 测试：`plugin/test/full-suite-runner.test.mjs` 新增 2 用例（红轮带 failures / 绿轮省略），67/67 绿。
+
+**AC3 — 归因跨轮反查 + 文件形状归一**（plugin/scripts/ready-pool-check.ts）
+- `collectFailureFiles` 已读 per-round `failures`（round 记录现在带 failures ⇒ 历史轮可归因）；新增 `failureFileMatches` 形状归一比较器（裸 basename ↔ 仓库相对路径双向命中；两个全路径同 basename 不同目录不误配）。
+- 实测注入：round-210 裸 basename `send-keys-verified.sh` + round-212 相对路径 `plugin/scripts/send-keys-verified.sh` 都命中 `## Touches: plugin/scripts/send-keys-verified.sh`；`a/foo.ts` 失败不误配 `b/foo.ts`；失败明细只在旧轮（round-208）时仍跨红窗归因。
+- 测试：`plugin/test/ready-pool-check.test.mjs` 新增 1 用例（cross-round + 形状归一），63/63 绿。
+
+**AC4 — scoped 门绿**：`bash scripts/test.sh --for-task gap-suite-round-record-missing-failures-field --allow-thin` → exit 0，fail 0，cancelled 0（90 测试绿）。
+
+**Contract measure 验证**（fixture 注入）：`.quay/verification-round.jsonl` 红轮带 failures ⇒ `round_record_has_failures = True`；`d[-1].get('failures','ABSENT')` 返回该轮 failures 数组。
+
+**AC5（全量套件绿）留外层 verification-round 验证**——未勾。

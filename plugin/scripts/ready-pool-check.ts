@@ -608,9 +608,9 @@ export function consecutiveRedRounds(rounds) {
 }
 
 /** Collect the failure-file set implicated by a set of red rounds + the state file's failures.
- *  A round may carry its own `failures` array (fixture / a future writer that per-round records the
- *  red detail); the state file's failures[] is the production source for the LATEST red run. Files
- *  are repo-relative paths. */
+ *  A round may carry its own `failures` array (fixture / the round-record writer — gap-suite-round-
+ *  record-missing-failures-field AC2 now writes failures[] into red round records); the state file's
+ *  failures[] is the production source for the LATEST red run. Files are repo-relative paths. */
 export function collectFailureFiles(rounds, stateFailures) {
   const out = new Set();
   for (const r of rounds) {
@@ -620,6 +620,35 @@ export function collectFailureFiles(rounds, stateFailures) {
   }
   for (const f of stateFailures || []) if (f && f.file) out.add(String(f.file));
   return [...out];
+}
+
+/**
+ * gap-suite-round-record-missing-failures-field AC3 — does a failure FILE match a task's expanded
+ * declared-Touches path set? The failure-file shape is INCONSISTENT across rounds (round-210 bare
+ * basename `send-keys-verified.sh` vs round-212 repo-relative `plugin/scripts/send-keys-verified.sh`),
+ * so the attribution reverse-lookup must normalize BOTH forms when matching against Touches:
+ *   - an EXACT repo-relative match always counts (the canonical round-212 form);
+ *   - a BARE BASENAME (no `/`) also matches any declared touch whose basename equals it (the
+ *     round-210 form — a bare basename carries no directory, so only the basename is comparable);
+ *   - a declared touch that is itself a bare basename likewise matches a full-path failure file;
+ *   - two FULL repo-relative paths that share only a basename (a/foo.ts vs b/foo.ts) do NOT match —
+ *     a full path already carries the directory, so the exact comparison is the fair one (no
+ *     over-attribution across directories).
+ */
+function failureFileMatches(declared, file) {
+  if (declared.has(file)) return true;
+  const fileStr = String(file);
+  const fileBase = fileStr.split("/").pop();
+  const fileBare = !fileStr.includes("/");
+  if (!fileBase) return false;
+  for (const d of declared) {
+    if (d === file) return true;
+    const dStr = String(d);
+    if (fileBare || !dStr.includes("/")) {
+      if (dStr.split("/").pop() === fileBase) return true;
+    }
+  }
+  return false;
 }
 
 /** Compute the suite-blocking signal for the whole task store.
@@ -649,8 +678,10 @@ export function computeSuiteBlocking({ rounds, stateFailures, tasks, minRedWindo
     const parsed = parseTouches(task.body);
     if (!parsed.hasSection || parsed.globs.length === 0) continue;
     const declared = expand(parsed.globs);
+    // AC3 — match with the shape-normalizing comparator (bare basename AND repo-relative failure
+    // files both resolve against declared Touches; see failureFileMatches).
     for (const f of failureFiles) {
-      if (declared.has(f)) { ids.add(id); break; }
+      if (failureFileMatches(declared, f)) { ids.add(id); break; }
     }
   }
   return { ids, consecutiveRed, windowActive: true, failureFiles };
