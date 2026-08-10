@@ -37,6 +37,10 @@ extra: {}
 - [ ] AC1–AC3 全部勾上
 - [ ] 切分声明在场；两份独有内容各自可解释（由 gap-ac41-coldstart-skill-reference-only 验证并贴证据）
 
+## Touches
+
+- tasks/gap-ac38-outer-doc-drift.md（自身文件：self-touch，2026-08-10 outer 补——缺此条被 C8 拒派发，见 touches-orthogonality-check --self-touch-scan）
+
 ## Contract
 
 measure   split_declared = `grep -cE "切分声明" plugin/loop/orchestrator-loop-tick.md orchestration/orchestrator-loop-tick.md` 的 stdout 数字

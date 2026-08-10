@@ -207,6 +207,7 @@ serial 隔离机制不变：默认主体并发 N 之后追加 serial 阶段，co
 - tasks/gap-wall-clock-timing-dependency-in-tests-not-covered-by-r1-r7.md（AC5 交叉标注）
 - tasks/gap-test-isolation-backlog-44-violations-unmeasured.md（AC5 交叉标注）
 - tasks/gap-known-load-sensitive-rule-is-doc-only-no-mechanical-triage.md（AC5 交叉标注）
+- tasks/gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests.md（自身文件：self-touch，2026-08-10 outer 补——缺此条被 C8 拒派发，见 touches-orthogonality-check --self-touch-scan）
 
 ## Dispatch review
 

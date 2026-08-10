@@ -66,3 +66,7 @@ extra: {}
 - `assert-clean-tree.sh:46`：`dirty="$(git status --porcelain)"; if [ -n "$dirty" ]`
 - `tree-hygiene-check.sh:21-22`：KNOWN SCRATCH patterns 清单（last-pane 不在）
 - 两 tick 文档共 5 处 `last-pane.txt` 写入命令
+
+## Touches
+
+- tasks/gap-quay-last-pane-txt-untracked-dirties-tree.md（自身文件：self-touch，2026-08-10 outer 补——缺此条被 C8 拒派发，见 touches-orthogonality-check --self-touch-scan）

@@ -59,3 +59,7 @@ SUITE-RED 判决的载荷是**空的**，而设计上它必须带上红落点。
 - `full-suite-runner.ts:230-238`：设计注释明写 state.failures 必须带落点
 - `.quay/full-suite.log`：`grep -cE '^# (tests|pass|fail|cancelled)'` = 0；tail 断在 `diff: 'simple'`
 - 内层 18:5x：`timeout 300 node --test --test-concurrency=1 plugin/test/quay-init-loop.test.mjs`（另一条路找落点）
+
+## Touches
+
+- tasks/gap-suite-red-verdict-carries-empty-failures-payload.md（自身文件：self-touch，2026-08-10 outer 补——缺此条被 C8 拒派发，见 touches-orthogonality-check --self-touch-scan）

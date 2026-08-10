@@ -84,6 +84,7 @@ resume    前置四任务全 done 后才 dispatch；证据 doc 落盘
 
 - plugin/skills/cold-start/SKILL.md
 - docs/analysis/quay-self-cold-start-proof.md (new)
+- tasks/gap-quay-self-hosting-e2e-proof.md（自身文件：self-touch，2026-08-10 outer 补——缺此条被 C8 拒派发，见 touches-orthogonality-check --self-touch-scan）
 
 ## Dispatch review
 
