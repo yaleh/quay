@@ -1263,9 +1263,16 @@ export async function run(argv: string[]): Promise<number> {
   let tapPass = 0;
   let tapFail = 0;
   let tapCancelled = 0;
+  // gap-suite-red-verdict-carries-empty-failures-payload AC1 — the last stream line seen, kept for
+  // the fail-closed catch-all synthesis (a generic non-zero exit with no structured failure line has
+  // NO failure to extract from — the last output line is the best-effort file-context source so the
+  // synthesized entry still carries a failure location for the red-window dispatch rule).
+  let lastStreamLine = "";
 
   const onLine = (line: string) => {
     logStream.write(line + "\n");
+    // Keep the last non-empty stream line for the fail-closed catch-all synthesis (AC1).
+    if (line.trim()) lastStreamLine = line;
     // NOTE (# vs ℹ): this repo's measure-suite-reporter emits the info-glyph forms `ℹ pass N` /
     // `ℹ fail N` / `ℹ cancelled N`, NOT the TAP `# pass N` forms — so the old `#`-only regexes
     // never matched and verification-round.jsonl recorded tests/pass/fail=0 for every round (green
@@ -1544,7 +1551,25 @@ export async function run(argv: string[]): Promise<number> {
     file: d.file,
     staticCheck: true,
   }));
-  const finalFailures: SuiteFailure[] = redDetected ? redFailures : staticCheckDetected ? staticCheckFailures : redFailures;
+  let finalFailures: SuiteFailure[] = redDetected ? redFailures : staticCheckDetected ? staticCheckFailures : redFailures;
+  // gap-suite-red-verdict-carries-empty-failures-payload AC1 — a red verdict must NEVER carry an
+  // EMPTY failures payload. The fail-closed catch-all (a generic non-zero exit with no structured
+  // failure line, no TAP tally, no static-check marker — e.g. `exit 3` after some stray output) used
+  // to write reason=failed + failures=[]: the SUITE-RED event carries state.failures so the inner
+  // dispatch rule can distinguish a SHARED-GATE failure from a SPECIFIC-TEST failure; an empty array
+  // gives it no input (fail-closed toward stopping, but the WHERE is lost). Synthesize ONE best-effort
+  // entry from the last stream line (the closest thing to a failure location the catch-all saw) so the
+  // payload is never empty on a red verdict. Consumers (classifyFailure) route it "unknown" ⇒
+  // fail-closed toward stopping — the same dispatch outcome as the empty array, but now with a line
+  // recorded for triage.
+  if (!green && reason === "failed" && finalFailures.length === 0 && spawnError === null) {
+    finalFailures = [
+      enrichFailure({
+        line: lastStreamLine ? lastStreamLine : `exit code ${exitCode} (no structured failure line)`,
+        file: lastStreamLine ? extractFailureFile(lastStreamLine, root) : undefined,
+      }),
+    ];
+  }
   const finalState: SuiteState = green
     ? { state: "green", ...base, finishedAt, durationMs }
     : {
@@ -1568,6 +1593,28 @@ export async function run(argv: string[]): Promise<number> {
           : {}),
       };
   writeSuiteState(finalState);
+  // gap-suite-red-verdict-carries-empty-failures-payload AC3 — the suite log must ALWAYS end with a
+  // `# fail N / # pass M` summary line. The observed defect (2026-08-06): full-suite.log ran 9251
+  // lines / 792K with 410 fail-words but ZERO `# fail`/`# pass` summary lines, ending mid-assertion
+  // (`diff: 'simple'`) — the summary node:test's TAP stream emits was lost when the run was killed /
+  // truncated, so the log was not mechanically queryable for a fail count. The runner KNOWS the final
+  // tally (tapPass/tapFail/tapCancelled + the verdict), so it appends its own TAP-form summary line(s)
+  // to the log after the verdict. Appended directly (the logStream tee is already ended) as TAP
+  // summary lines so existing `grep -cE '^# (tests|pass|fail|cancelled)'` consumers find them.
+  try {
+    const summaryFail = green ? 0 : tapFail > 0 ? tapFail : finalFailures.length;
+    const summaryLines = [
+      `# tests ${tapPass + tapFail + tapCancelled}`,
+      `# pass ${tapPass}`,
+      `# fail ${summaryFail}`,
+      `# cancelled ${tapCancelled}`,
+      `# suite ${green ? "green" : `red ${reason}`}`,
+      "",
+    ];
+    fs.appendFileSync(logFile, summaryLines.join("\n"), "utf8");
+  } catch {
+    // best-effort — a log-summary append must never fail the run (same fail-open family as the ledger)
+  }
   // AC6 (gap-full-suite-state-red-no-failure-detail-static-check-invisible) — the verdict is on disk;
   // a late error in the post-verdict teardown (measure-history, ledger append, final stderr) must not
   // overwrite the correct green/red with a spurious crashed. Remove the crash handlers so any error

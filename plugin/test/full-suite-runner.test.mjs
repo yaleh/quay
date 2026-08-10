@@ -52,7 +52,7 @@ import {
   parseSystemdRunLimits,
   systemdRunAvailable,
 } from "../scripts/full-suite-runner.ts";
-import { runOnce, classifyFailure, routeRed, shouldStopDispatch } from "../scripts/suite-state-trigger.ts";
+import { runOnce, classifyFailure, routeRed, shouldStopDispatch, shouldDispatchOnRed } from "../scripts/suite-state-trigger.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../..");
@@ -1009,6 +1009,49 @@ test("AC5 — a generic non-zero exit with NO failure/abort marker stays reason=
     const s = readState(root);
     assert.equal(s.state, "red");
     assert.equal(s.reason, "failed", "an unmatched non-zero exit stays fail-closed failed");
+    // gap-suite-red-verdict-carries-empty-failures-payload AC1 — a red verdict must NEVER carry an
+    // EMPTY failures payload: the fail-closed catch-all used to write failures=[] (the SUITE-RED
+    // event's dispatch rule has no input). Now the runner synthesizes one best-effort entry from the
+    // last stream line so the red-window dispatch rule has a failure to classify.
+    assert.ok(s.failures && s.failures.length >= 1, `a red verdict carries a non-empty failures[]; got ${JSON.stringify(s.failures)}`);
+    assert.ok(s.failures[0].line, "the synthesized failure carries a line (the last stream output)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC3 — a red suite's full-suite.log ends with a `# fail` summary line (gap-suite-red-verdict-carries-empty-failures-payload)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-logsump-"));
+  // The observed defect: full-suite.log ran 9251 lines with ZERO `# fail`/`# pass` summary lines,
+  // ending mid-assertion. The runner now appends its OWN TAP-form summary after the verdict so the
+  // log is always mechanically queryable for a fail count — even when the child was killed mid-assert.
+  const { f, dir } = fakeSuite('echo "not ok 1 - boom"\nexit 1');
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    assert.equal(code, 1, "runner exits 1 on red");
+    const log = fs.readFileSync(path.join(root, ".quay", "full-suite.log"), "utf8");
+    // The runner's own summary line carries the red verdict as a fail count (TAP form so
+    // `grep -cE '^# (tests|pass|fail|cancelled)'` finds it).
+    assert.match(log, /^# fail [1-9]\d*$/m, `log has a '# fail N' summary line; got:\n${log}`);
+    assert.match(log, /^# suite red failed$/m, "log summary names the red verdict");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC1/AC3 e2e — a GREEN suite's full-suite.log ends with a `# fail 0` summary (summary is verdict-accurate)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-logsumpgreen-"));
+  const { f, dir } = fakeSuite(GREEN_SUITE);
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, "runner exits 0 on green");
+    const log = fs.readFileSync(path.join(root, ".quay", "full-suite.log"), "utf8");
+    assert.match(log, /^# fail 0$/m, `a green run logs '# fail 0'; got:\n${log}`);
+    assert.match(log, /^# suite green$/m, "green summary names the green verdict");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(dir, { recursive: true, force: true });
@@ -1271,6 +1314,65 @@ test("AC2 e2e — MULTIPLE failure lines each push into failures[] (manager 2026
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC2 e2e negative control — a SHARED-GATE red and a SPECIFIC-TEST red produce distinguishable failures[] payloads (the dispatch rule can decide)", async () => {
+  // gap-suite-red-verdict-carries-empty-failures-payload AC2 — the SUITE-RED failures payload must
+  // carry enough WHERE for the inner dispatch rule to distinguish a SHARED-GATE failure (run_static_checks
+  // — every scoped run pays it ⇒ stop dispatch) from a SPECIFIC-TEST failure unrelated to a candidate's
+  // touch-set (⇒ dispatch continues). Construct BOTH through the real runner and assert the two
+  // failures[] payloads classify differently (shared-gate vs specific-test) — the empty-payload defect
+  // would make this impossible (failures=[] has no location to classify).
+  const runBoth = async (scriptBody) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-ac2neg-"));
+    const { f, dir } = fakeSuite(scriptBody);
+    try {
+      const child = runRunner({ root, command: `bash ${f}` });
+      const { code } = await waitExit(child);
+      assert.notEqual(code, 0, "the red suite exits non-zero");
+      const s = readState(root);
+      assert.equal(s.state, "red");
+      assert.ok(s.failures && s.failures.length >= 1, `failures[] must be non-empty (payload not empty); got ${JSON.stringify(s.failures)}`);
+      return { s, root };
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  };
+
+  // shared-gate red: a static-check checker fails (task-contract ratchet growth) — the shared gate
+  const shared = await runBoth(
+    'echo "VIOLATION: tasks/gap-foo.md — V1: Contract block missing invariant line"\n' +
+      'echo "violations: 11 unique across 9 task(s); info findings (non-ratchet, pre-opt-in baseline): 0 — see --json for details"\n' +
+      'echo "ratchet ceiling: 6; new since baseline: 6 (tasks/gap-foo.md: V1); resolved: 0"\n' +
+      "exit 1",
+  );
+  // specific-test red: a real test file failure (TAP not ok with a file in the detail block) — the
+  // file is repo-relative (absolute paths OUTSIDE the temp root would normalize away, see
+  // normalizeFailureFile); the runner captures it from the detail block's `location:` line. The
+  // detail line must be ECHOED (a bare `location: ...` line would be treated as a bash command).
+  const specific = await runBoth("echo \"not ok 1 - something failed\"\necho \"  location: 'plugin/test/foo.test.mjs:3:1'\"\nexit 1");
+
+  try {
+    const sharedLoc = classifyFailure(shared.s.failures[0]);
+    const specificLoc = classifyFailure(specific.s.failures[0]);
+    assert.equal(sharedLoc.kind, "shared-gate", `the static-check failure classifies shared-gate; got ${JSON.stringify(sharedLoc)}`);
+    assert.equal(specificLoc.kind, "specific-test", `the test-file failure classifies specific-test; got ${JSON.stringify(specificLoc)}`);
+    // The dispatch rule reads the payloads differently: a shared-gate red blocks an unrelated
+    // candidate; a specific-test red unrelated to the candidate's touches does NOT.
+    assert.equal(
+      shouldDispatchOnRed(shared.s, "## Touches\n- plugin/test/other.test.mjs\n"),
+      true,
+      "shared-gate red stops dispatch even for an unrelated candidate (every scoped run pays it)",
+    );
+    assert.equal(
+      shouldDispatchOnRed(specific.s, "## Touches\n- plugin/test/other.test.mjs\n"),
+      false,
+      "a specific-test red unrelated to the candidate's touch-set does NOT stop dispatch (dispatch continues)",
+    );
+  } finally {
+    fs.rmSync(shared.root, { recursive: true, force: true });
+    fs.rmSync(specific.root, { recursive: true, force: true });
   }
 });
 

@@ -42,9 +42,9 @@ SUITE-RED 判决的载荷是**空的**，而设计上它必须带上红落点。
 
 ## AC（draft）
 
-- [ ] 一次红判决的 `state.failures` 非空（含失败落点 file/line）
-- [ ] 负控制：构造 shared-gate 失败 vs specific-test 失败 ⇒ 两条 `failures` 载荷可区分（inner 派发规则能据此决策）
-- [ ] `full-suite.log` 有 `# fail` 汇总行（不再断在断言中间无汇总）
+- [x] 一次红判决的 `state.failures` 非空（含失败落点 file/line）
+- [x] 负控制：构造 shared-gate 失败 vs specific-test 失败 ⇒ 两条 `failures` 载荷可区分（inner 派发规则能据此决策）
+- [x] `full-suite.log` 有 `# fail` 汇总行（不再断在断言中间无汇总）
 
 ## DoD（draft）
 
@@ -59,3 +59,16 @@ SUITE-RED 判决的载荷是**空的**，而设计上它必须带上红落点。
 - `full-suite-runner.ts:230-238`：设计注释明写 state.failures 必须带落点
 - `.quay/full-suite.log`：`grep -cE '^# (tests|pass|fail|cancelled)'` = 0；tail 断在 `diff: 'simple'`
 - 内层 18:5x：`timeout 300 node --test --test-concurrency=1 plugin/test/quay-init-loop.test.mjs`（另一条路找落点）
+
+## Invoke evidence（2026-08-10，inner 实现）
+
+- **AC1 修复**：`full-suite-runner.ts` 终判区新增 fail-closed catch-all 合成——通用非零退出（无结构化失败行、无 TAP 汇总、无 static-check 标记，如 `echo "something went wrong"; exit 3`）之前写 `reason=failed + failures=[]`；现在合成一条 best-effort 落点（`line` = 最后流行，`file` = best-effort 提取），红判决 `failures` **永不为空**。实测：构造该场景 ⇒ `state=red reason=failed failures=[{"line":"something went wrong"}]`（非空，之前为 `[]`）。
+- **AC2 负控制**：新增 e2e `AC2 e2e negative control — a SHARED-GATE red and a SPECIFIC-TEST red produce distinguishable failures[] payloads`——同一 runner 跑 static-check 红（`reason=static-check`，`classifyFailure ⇒ shared-gate`）与 TAP 具体测试红（`classifyFailure ⇒ specific-test`），`shouldDispatchOnRed` 对共享门红停派、对不相关具体测试红继续派——两条载荷可区分，派发规则有输入。
+- **AC3 汇总行**：`full-suite-runner.ts` 终判后向 `full-suite.log` 追加 TAP 形式汇总（`# tests N / # pass M / # fail N / # cancelled N / # suite red failed`）。实测：红跑日志以 `# fail 1` 结尾、绿跑以 `# fail 0` 结尾——`grep -cE '^# (tests|pass|fail|cancelled)'` ≥ 4。
+- **scoped 测试**：`node --test --test-concurrency=1 plugin/test/full-suite-runner.test.mjs plugin/test/suite-state-trigger.test.mjs plugin/test/red-window-shared-gate.test.mjs` ⇒ 112 pass / 0 fail（runner 75 项含 4 项本任务新增：catch-all 非空、红汇总行、绿 `# fail 0`、shared/specific 负控制）。`./scripts/test.sh --for-task` 的 selector 按 Touches 解析 0 测试（Touches 仅 self-touch），改用显式文件跑；scoped static checks 两门（task-contract / superseded-capability）均 PASS。
+
+## Touches
+
+- tasks/gap-suite-red-verdict-carries-empty-failures-payload.md（自身文件）
+- plugin/scripts/full-suite-runner.ts
+- plugin/test/full-suite-runner.test.mjs
