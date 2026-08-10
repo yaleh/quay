@@ -26,7 +26,7 @@
 | A8 | `git status --porcelain \| wc -l` | 脏树 |
 | A9 | `meta-cc query_session_content role=tool tool_name=Workflow` → `last(timestamp)` | §2.4c;>3 个 tick 周期未调用 ⇒ 写明「已停用/已替代/是缺陷」三选一 (src:901) |
 | A10 | **仪器存活(两项合一)**:①我跑的 `session-liveness` 是不是旧版(逐行 `ps` 看进程与其脚本路径,C1) ②`Monitor` 任务是否还活着(不在①覆盖内) | 版本落后 = 观测的是未修版;**本轮发过事件即为 Monitor 存活证据**(档案 §1.4/§1.4e) (src:37,499) |
-| A16 | **机件绕过自查(2026-08-10 新增)**:数本会话里**裸 `tmux send-keys`** 的次数(未经 `supervisor-deliver.sh`/`send-keys-reliable.sh`),**非 0 即本轮违规,写进账本** | **规则不是检查**——C10 三天前就写着「不要手工拼」,我整晚每一条都手工拼,自己的核一次都没拦。近 3 天全会话实测:裸手工 **339** 次 vs 三个机件合计 294 次(deliver 28/reliable 240/verified 26)。同类待补:`inbox-reader.sh`(11 次;我的 A15 却用 `ls`)、`pane-state-classify.ts`(38 次;我的 A3/A4 却肉眼看 `capture-pane`)、`drive-contract-check.ts`(3 次) |
+| A16 | **机件绕过自查**:数本会话里的裸 `tmux send-keys`,**按位置判定——命令位置(行首/`&&`/`;`/管道后)且不在引号内**,非 0 即本轮违规记账 | **首版按关键词匹配,首跑即 3 次假阳性**(我发出的消息正文、我统计脚本里的 grep 模式、台账 JSON 字符串)——**本仓库已解决过两次**(`drive-contract-check.ts`「by POSITION, never by keyword」/`test-framework-policy-check.ts`「strings that merely mention it do not count」),**我在指认「大家绕过已有机件」的同一轮里重造了已解决两次的反模式**,判定手法直接复用那两个 checker,不要重造。近3天按位置真调用 **332**(关键词 339,虚高 7),经机件 323——**大致各半**;分布 **我 263 / outer 56 / 其它 13**,**主要绕过者是我,不是 outer** |
 | A12 | 聚合升级项 + 资源仲裁与排序 | 三项目横向;无新项也要写「无」(档案 §1.c/§1.d) (src:689) |
 | A13 | 本轮抛给人的「可自判」问题计数 | 机械计数,写进账本;判据见 C8(档案 §⑧) (src:814) |
 | A15 | **收件箱:`ls -la .quay/manager-inbox/`——判据是【列目录本身】,不得依赖未读计数器** | 实测 2026-08-09:目录里 6 封 archguard 报告(最新 08-06,三天前)全未读,而 `supervisor-bus-identity.sh inbox-summary` 报 `unread=0` ⇒ **计数器沉默失败**。我的核此前 `inbox` 命中 0 条,outer 的 A5 早有此项——**跨层不对称,方向同 C9**。未读逐条进决策;**delivered ≠ consumed**(借自 outer A5) (src:1203) |
