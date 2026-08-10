@@ -44,7 +44,7 @@
 - **B3 tick-log 追加一行**(六列),用 `'XEOF'` 引号 heredoc,**只 `'a'` 追加,永不 `'w'`**。
   **⚠️ 本组一律写 `甲乙丙丁戊`,禁用 ①-⑤(那是 `manager-tick-criteria.md` 判准的编号)。2026-08-10 自审实证:我三行只写本组却沿用 ①-⑤,行里明明有 ①②③④⑤ 而标准六条一条没判(且从未退休,仅 ⑥ 于 08-07 20:1x 明文退休由 ⑥′ 取代)——编号复用把缺席伪装成在场,同形于「布尔化把对象没了伪装成检查失败」。两套都要写:先判准①-⑤/⑥′,再甲-戊。**
   **`no-action` 需举证**:该行必须携带本组五条且**全为假**——甲`in_flight<cap` 且 `recommended` 非空;乙`pool<floor`;
-  丙`nyf>0` 且工作已落地;丁`integration` 领先 `develop` 且 suite 绿;戊suite `red`。
+  丙`nyf>0` 且工作已落地(**字段=`excluded[]` 里 reasons 含 `not-yet-flipped` 的条数,不是 `closed_but_live`——后者恒 0,我整晚读错报了整晚的假,实为 30**);丁`integration` 领先 `develop` 且 suite 绿;戊suite `red`。
   实证 2026-08-09 14:08-15:08:outer 5 次 tick 全判 `no-action`,而①②③在这 5 次里**每次都为真**
   (在飞 0~1 < cap 4、pool 11 < floor 16、nyf 17——nyf 这个数还是它自己 A10 每轮读出来的),
   欠 15 个强制动作交付 0 个。**我自己同期的 `no-action` 行同样没带这五条读数,是同一个洞**;
