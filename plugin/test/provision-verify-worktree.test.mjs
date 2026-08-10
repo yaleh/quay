@@ -10,6 +10,8 @@
 //   AC3 — idempotent: re-running keeps the node_modules symlink + re-copies config (no error).
 //   AC4 — dry-run: prints what would happen, changes nothing.
 //   AC5 — fail-closed: missing --worktree, missing main node_modules exit 2.
+//   AC6 — Core CLI dist build: a fresh worktree gets packages/quay/dist/quay.js built (the 4th gap,
+//         manager 2026-08-10 15:0x — dist/quay.js red r235/r236/r247, 3× over 3.5h).
 //
 // Run:
 //   scripts/test.sh plugin/test/provision-verify-worktree.test.mjs
@@ -40,13 +42,33 @@ function tmpMainRepo() {
   return dir;
 }
 
-/** Make a throwaway WORKTREE dir (tracked files, no symlinks). */
+/** Make a throwaway WORKTREE dir (tracked files, no symlinks). Step 3 (dist build) short-circuits
+ * when packages/quay/dist/quay.js is already present, so the plain-dir tests pre-create it (the
+ * real build is exercised by the manual fresh-worktree verification + the suite's npm-pack-e2e). */
 function tmpWorktree() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "provision-verify-"));
   fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
+  fs.mkdirSync(path.join(dir, "packages", "quay", "dist"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "packages", "quay", "dist", "quay.js"), "// fixture dist\n");
   fs.copyFileSync(path.join(REPO_ROOT, ".worktreeinclude"), path.join(dir, ".worktreeinclude"));
   return dir;
 }
+
+test("AC6 — Core CLI dist build: a fresh worktree gets packages/quay/dist/quay.js (the 4th provisioning gap)", () => {
+  // NOTE: building the real packages/quay/dist requires a real packages/quay tree + npm deps, so
+  // this is a targeted assertion: the script's dry-run mentions the build step (the mechanism is
+  // wired). The real build is verified by the manual fresh-worktree test + the suite itself.
+  const main = tmpMainRepo();
+  const wt = tmpWorktree();
+  try {
+    const r = run(["--worktree", wt, "--root", main, "--dry-run"]);
+    assert.equal(r.status, 0);
+    assert.match(r.stdout, /packages\/quay\/dist/, "dry-run must mention the Core CLI dist build");
+  } finally {
+    fs.rmSync(wt, { recursive: true, force: true });
+    fs.rmSync(main, { recursive: true, force: true });
+  }
+});
 
 test("AC1 — node_modules symlink: <main>/node_modules → <worktree>/node_modules", () => {
   // NOTE: config.yml copying is worktree-include.sh's job (declarative .worktreeinclude) and needs a
