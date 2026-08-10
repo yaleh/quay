@@ -2,13 +2,15 @@
 # Mutation case for tick-core-static-check (gap-tick-core-zero-static-coverage, AC2-AC7).
 # The checker's four gates — the 2026-08-10 incidents were ALL hand-found with wc -l / grep, zero
 # mechanical gate:
-#   AC3 — each core ≤ 80 lines (AC30(a)).
+#   AC3 — each core's A/B/C items carry (src:N) back-references to the reason archive
+#         (AC30(a) measure = coverage, target 100%; an item without (src:N) reddens —
+#         the ≤80-line criterion was RETIRED 2026-08-10, manager-phase-goal.md:324).
 #   AC4 — every pointer target a core references must exist.
 #   AC5 — the B3 group numbering (甲乙丙丁戊) must not collide with the criteria numbering (①-⑤).
 #   AC6 — an UNCONDITIONAL prohibition ("外层不直接改代码", no 收窄/单一写入者/共享树) contradicting
 #         the cores' run_in_background dispatch must redden.
 # Fixture: a minimal 3-core + 4-prohibition-doc baseline → GREEN.
-# Inject #1: an orchestrator core pushed to 81 lines → RED (AC3).
+# Inject #1: an orchestrator core item WITHOUT (src:N) → RED (AC3 coverage < 100%).
 # Restore → GREEN. Inject #2: an unconditional prohibition doc → RED (AC6). Restore → GREEN.
 set -u
 name="tick-core-static-check"
@@ -27,31 +29,31 @@ write() { # <rel> <content...>
 write orchestration/manager-tick-core.md \
   '# manager tick — 执行核' \
   '## A. 读数' \
-  '| A1 | 读 `.quay/manager-inbox/` | 目录非空即进决策 |' \
+  '| A1 | 读 `.quay/manager-inbox/` | 目录非空即进决策 (src:1) |' \
   '## B. 产出' \
-  '- **B3 tick-log**:本组一律写 `甲乙丙丁戊`,禁用 ①-⑤。`no-action` 需举证——甲`a`;乙`b`;丙`c`;丁`d`;戊`e`。' \
+  '- **B3 tick-log**:本组一律写 `甲乙丙丁戊`,禁用 ①-⑤。`no-action` 需举证——甲`a`;乙`b`;丙`c`;丁`d`;戊`e` (src:1)。' \
   '## C. 约束' \
-  '| C1 | 约束一 |' \
+  '| C1 | 约束一 (src:1) |' \
   '## D. 边界' \
   '**可以**:写 `orchestration/`。'
 write orchestration/orchestrator-tick-core.md \
   '# outer tick — 执行核' \
   '## A. 读数' \
-  '| A1 | 读 `.quay/full-suite-state.json` | green⇒suiteGreen |' \
+  '| A1 | 读 `.quay/full-suite-state.json` | green⇒suiteGreen (src:1) |' \
   '## B. 产出' \
-  '- **B1** 收尾 pass。' \
+  '- **B1** 收尾 pass (src:1)。' \
   '## C. 约束' \
-  '| C1 | 约束一 |' \
+  '| C1 | 约束一 (src:1) |' \
   '## D. 边界' \
   '**可以**:写 `orchestration/`。'
 write orchestration/fast-mode-tick-core.md \
   '# inner (fast-mode) tick — 执行核' \
   '## A. 每轮必跑' \
-  '| A1 | `.halt` 哨兵 | 存在 ⇒ 空转 |' \
+  '| A1 | `.halt` 哨兵 | 存在 ⇒ 空转 (src:1) |' \
   '## B. 每轮必产出' \
-  '- **B1** 写回队列文件。' \
+  '- **B1** 写回队列文件 (src:1)。' \
   '## C. 硬约束' \
-  '| C1 | 派发形态必须 `Agent(run_in_background: true)` |' \
+  '| C1 | 派发形态必须 `Agent(run_in_background: true)` (src:1) |' \
   '## D. 边界' \
   '一律停下等人。'
 write orchestration/outer-brief-2026-08-04-third-restart.md \
@@ -79,25 +81,34 @@ if checker_cmd; then :; else
   exit 4
 fi
 
-# INJECT #1 (AC3): push the orchestrator core to 81 lines → the checker MUST go RED.
-printf 'x\n%.0s' $(seq 1 81) > "${root}/orchestration/orchestrator-tick-core.md"
+# INJECT #1 (AC3): an orchestrator core item WITHOUT (src:N) → coverage < 100% → RED.
+write orchestration/orchestrator-tick-core.md \
+  '# outer tick — 执行核' \
+  '## A. 读数' \
+  '| A1 | 读 `.quay/full-suite-state.json` | green⇒suiteGreen |' \
+  '## B. 产出' \
+  '- **B1** 收尾 pass (src:1)。' \
+  '## C. 约束' \
+  '| C1 | 约束一 (src:1) |' \
+  '## D. 边界' \
+  '**可以**:写 `orchestration/`。'
 if checker_cmd; then
-  echo "STAYED-GREEN — a >80-line core did not redden the checker" >&2
+  echo "STAYED-GREEN — an item without (src:N) did not redden the checker" >&2
   exit 3
 fi
 # RESTORE #1.
 write orchestration/orchestrator-tick-core.md \
   '# outer tick — 执行核' \
   '## A. 读数' \
-  '| A1 | 读 `.quay/full-suite-state.json` | green⇒suiteGreen |' \
+  '| A1 | 读 `.quay/full-suite-state.json` | green⇒suiteGreen (src:1) |' \
   '## B. 产出' \
-  '- **B1** 收尾 pass。' \
+  '- **B1** 收尾 pass (src:1)。' \
   '## C. 约束' \
-  '| C1 | 约束一 |' \
+  '| C1 | 约束一 (src:1) |' \
   '## D. 边界' \
   '**可以**:写 `orchestration/`。'
 if checker_cmd; then :; else
-  echo "ALWAYS-RED — restored (≤80) core still reddens the checker" >&2
+  echo "ALWAYS-RED — restored (src:N-carrying) core still reddens the checker" >&2
   exit 4
 fi
 
