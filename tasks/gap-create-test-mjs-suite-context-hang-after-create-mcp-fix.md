@@ -3,7 +3,7 @@ id: gap-create-test-mjs-suite-context-hang-after-create-mcp-fix
 title: create.test.mjs 全量套件并发下 fake-gh spawn 挂死（15 min ceiling）——solo 4/4 绿
   1.9s；与 create-mcp 同族（spawn 真实子进程套件级竞争）但缺 serial/KNOWN-LOAD-SENSITIVE
   标注（@test-group product 在并发池）；round-202 唯一失败
-status: ready
+status: done
 labels:
   - gap
   - defect

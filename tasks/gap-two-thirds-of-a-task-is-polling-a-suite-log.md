@@ -2,7 +2,7 @@
 id: gap-two-thirds-of-a-task-is-polling-a-suite-log
 title: 64% of inner task time is waiting on suite logs — the mechanism that
   removes it is already documented and already implemented, and neither is used
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate

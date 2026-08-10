@@ -3,7 +3,7 @@ id: gap-branch-model-dryrun-pending-surface-removed
 title: verified-commit 修复(d666a79e)删除 integration-batch-merge.sh 的 `pending on
   integration:` dry-run 输出块⇒branch-model.test.mjs AC3 断言失败(round-212 红 + solo
   320ms 真回归非 flake)——活锁修复引入的契约破坏,scoped 盲区(basename 配对选不出);恢复输出段或同步断言
-status: ready
+status: done
 labels:
   - gap
   - defect

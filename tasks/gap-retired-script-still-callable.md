@@ -4,7 +4,7 @@ title: 退休脚本仍可调用——send-keys-verified.sh 是 Layered retiremen
   范式原型(NEVER_LAYDOWN)但没退干净:①仍可调用(2026-08-10 我调用发错指引)②测试泄漏 tmux(144
   孤儿进程/round-210 红);capability-catalog 管入口、gate-scripts-retirement
   管出口单案例,缺「被取代机件是否仍有调用者」检查;加 superseded 表+三检查(不进 laydown/不教学/静态调用者 0)
-status: ready
+status: done
 labels:
   - gap
   - defect

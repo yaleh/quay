@@ -1,22 +1,21 @@
 ---
 id: gap-dispatch-evaluated-only-at-inner-tick-boundary-not-slot-release
 title: "dispatch re-evaluated ONLY at inner's own tick boundary, not at slot
-  release — measured (manager meta-cc, 2026-08-05): 20 Agent dispatch
-  timestamps over 6h = 3 tight clusters (12:22:04/07/10, 13:07:10/13/15,
-  13:55:56/59/56:02, intra-cluster 2-3s) with 15-55min ZERO-dispatch gaps
-  (39/30/18/33/50); fast-mode-portability dispatched 12:22:04 done ~12:28
-  freed a slot, next dispatch 13:07:10 = 39min idle while pool=27 /
-  dispatchable_disjoint=12 healthy; inner pane self-reports '下一 tick 排定
-  20/25分钟后' + transcript 'Next wakeup scheduled... harness re-invokes on
-  wakeup or task-notification' → design intent '并发是打破外层变瓶颈' (fast-mode-
-  loop-tick.md) is DEGRADED: inner's own tick interval replaces the outer's
-  20min, slot idle ≈ tick period, bottleneck moved from outer to inner;
-  ~170min recoverable throughput across the sample window; fix direction:
-  event-driven re-evaluation when ANY in-flight subagent completes (completion
-  notification already exists in the two-layer protocol), not tick-polling;
-  investigate whether the task-notification turn currently re-runs the dispatch
-  step"
-status: ready
+  release — measured (manager meta-cc, 2026-08-05): 20 Agent dispatch timestamps
+  over 6h = 3 tight clusters (12:22:04/07/10, 13:07:10/13/15, 13:55:56/59/56:02,
+  intra-cluster 2-3s) with 15-55min ZERO-dispatch gaps (39/30/18/33/50);
+  fast-mode-portability dispatched 12:22:04 done ~12:28 freed a slot, next
+  dispatch 13:07:10 = 39min idle while pool=27 / dispatchable_disjoint=12
+  healthy; inner pane self-reports '下一 tick 排定 20/25分钟后' + transcript 'Next
+  wakeup scheduled... harness re-invokes on wakeup or task-notification' →
+  design intent '并发是打破外层变瓶颈' (fast-mode- loop-tick.md) is DEGRADED: inner's own
+  tick interval replaces the outer's 20min, slot idle ≈ tick period, bottleneck
+  moved from outer to inner; ~170min recoverable throughput across the sample
+  window; fix direction: event-driven re-evaluation when ANY in-flight subagent
+  completes (completion notification already exists in the two-layer protocol),
+  not tick-polling; investigate whether the task-notification turn currently
+  re-runs the dispatch step"
+status: done
 labels:
   - gap
   - defect

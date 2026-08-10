@@ -4,7 +4,7 @@ title: suite-state-trigger 的 AC6 crash-watchdog（7d0311cf）把无 pid 的 ru
   fixture 判成 crashed——red-window-shared-gate.test.mjs AC3 期望 running→red 转变触发
   SUITE-RED，但首读 running 就发 SUITE-RED（watchdog 把 60min 前的 startedAt 无 pid 当死），第二轮
   red 无事件 ⇒ AC3 红，全量套件轮换红
-status: ready
+status: done
 labels:
   - gap
   - defect

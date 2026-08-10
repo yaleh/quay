@@ -1,16 +1,19 @@
 ---
 id: gap-quay-launch-sh-is-a-user-facing-surface-should-be-skill-internal
-title: "quay-launch.sh is documented in 4 SKILL.md files (init/manager/cold-start/session-topology)
-  as 'the launch command' a human/agent runs directly, not hidden behind a skill action — it DOES
-  have real internal callers (session-bootstrap.sh, quay-topology.sh) and real test coverage
-  (4 test files: launch-settings/manager-layer-skill/manager-layer-shipping/session-topology), so
-  it is not dead code, but it conflates two roles: (a) legitimate internal implementation detail
-  consumed by session-bootstrap.sh, and (b) a bare shell script users/agents are told to invoke
-  directly — human ruling 2026-08-06: it should not itself be a product-facing deliverable; a skill
-  is the interface users are accustomed to, and this wrapper script must become that skill's OWN
-  inner implementation, not the thing pointed at directly; manager 2026-08-06, filed per human
-  direction to transfer to outer"
-status: ready
+title: "quay-launch.sh is documented in 4 SKILL.md files
+  (init/manager/cold-start/session-topology) as 'the launch command' a
+  human/agent runs directly, not hidden behind a skill action — it DOES have
+  real internal callers (session-bootstrap.sh, quay-topology.sh) and real test
+  coverage (4 test files:
+  launch-settings/manager-layer-skill/manager-layer-shipping/session-topology),
+  so it is not dead code, but it conflates two roles: (a) legitimate internal
+  implementation detail consumed by session-bootstrap.sh, and (b) a bare shell
+  script users/agents are told to invoke directly — human ruling 2026-08-06: it
+  should not itself be a product-facing deliverable; a skill is the interface
+  users are accustomed to, and this wrapper script must become that skill's OWN
+  inner implementation, not the thing pointed at directly; manager 2026-08-06,
+  filed per human direction to transfer to outer"
+status: done
 labels:
   - gap
   - milestone-candidate

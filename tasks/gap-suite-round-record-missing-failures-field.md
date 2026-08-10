@@ -1,7 +1,9 @@
 ---
 id: gap-suite-round-record-missing-failures-field
-title: "verification-round.jsonl 的 round 记录没有 failures 字段——209 轮全缺，red-window 归因（gap-suite-blocking-red-window-unattributable）无法从 round 记录反查失败文件；补 failures[] 进 SuiteRoundRecord/appendVerificationRound"
-status: ready
+title: verification-round.jsonl 的 round 记录没有 failures 字段——209 轮全缺，red-window
+  归因（gap-suite-blocking-red-window-unattributable）无法从 round 记录反查失败文件；补
+  failures[] 进 SuiteRoundRecord/appendVerificationRound
+status: done
 labels:
   - gap
   - defect
@@ -60,7 +62,7 @@ measure   round_record_has_failures = `python3 -c "import json;d=[json.loads(l) 
 band      round_record_has_failures = True（至少一个红轮记录带 failures[]）
 invariant red_round_failures_recorded = 1（红轮必带 failures[]，绿轮可无）
 invariant attribution_cross_round = 1（归因能从 round 记录反查失败文件）
-invoke    `python3 -c "import json;d=[json.loads(l) for l in open('.quay/verification-round.jsonl') if l.strip()];print(d[-1].get('failures','ABSENT'))"`（贴回最近一轮 failures 或 ABSENT）
+invoke    `node --no-warnings --experimental-strip-types plugin/scripts/full-suite-runner.ts --root <repo>`（invoke-evidence：指向实际交付可执行——full-suite-runner.ts；Evidence 有红轮带 failures 注入实跑）
 control   红轮带 failures；归因反查成功；既有字段不回归
 resume    append 写 failures / 归因读取分步提交，任一步完成即写盘
 

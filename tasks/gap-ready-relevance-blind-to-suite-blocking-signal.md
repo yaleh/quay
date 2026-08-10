@@ -3,7 +3,7 @@ id: gap-ready-relevance-blind-to-suite-blocking-signal
 title: ready_relevance/computeRelevance 的 blocking 只读任务间静态依赖，不读
   verification-round.jsonl 的连续红窗——一个红 5 轮的 suite 阻断缺陷 value 仍 0.25、排第 7，inner
   永远排不到前面挑中它；与 A14 背离度同族：真实持续可测信号没进任何判据
-status: ready
+status: done
 labels:
   - gap
   - defect

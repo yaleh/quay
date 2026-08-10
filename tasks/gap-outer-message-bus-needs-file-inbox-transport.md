@@ -8,7 +8,7 @@ title: manager→outer 的异步通道缺的不是机制是一行注册——mes
   ——给 outer 一个文件收件箱 transport（如 .quay/outer-inbox/），或复用 createFileInboxTransport
   注册 outer 目标；另：身份冒充问题 supervisor-bus-identity.sh 已 done（fail-closed，agent 不能 冒充
   human），此前两侧用裸 tmux 绕过总线丢 from 字段
-status: ready
+status: done
 labels:
   - gap
   - defect

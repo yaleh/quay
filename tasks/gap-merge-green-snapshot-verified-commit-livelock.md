@@ -4,7 +4,7 @@ title: 套件轮时长(1847s)与 integration 提交间隔(147s)差一个数量�
   COVERAGE⇒活锁(绿追不上 HEAD)；处方=批量合「已验证 commit」非 HEAD；前置缺失=绿快照不记 verified
   commit(full-suite-state.json/verification-round.jsonl 均无)、merge 脚本无合到指定 commit
   入口
-status: ready
+status: done
 labels:
   - gap
   - defect

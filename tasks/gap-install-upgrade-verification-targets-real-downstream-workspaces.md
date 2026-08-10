@@ -1,7 +1,11 @@
 ---
 id: gap-install-upgrade-verification-targets-real-downstream-workspaces
-title: "install/upgrade verification must target REAL downstream workspaces (archguard/meta-cc/B), not just the mkdtemp fixture — A3 green on synthetic while archguard's real config-conflict went uncaught; range-not-frequency (human: AC12b achieved, verify install/upgrade/cold-start more frequently; manager: '只提高频率不改验证对象，跑一万次也撞不到那个状态' — 裁定：两者都要)"
-status: ready
+title: "install/upgrade verification must target REAL downstream workspaces
+  (archguard/meta-cc/B), not just the mkdtemp fixture — A3 green on synthetic
+  while archguard's real config-conflict went uncaught; range-not-frequency
+  (human: AC12b achieved, verify install/upgrade/cold-start more frequently;
+  manager: '只提高频率不改验证对象，跑一万次也撞不到那个状态' — 裁定：两者都要)"
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -73,7 +77,7 @@ loop 值 ≠ 模板）。**冲突来自「这个项目真的用过、真的改�
 
 measure   real_target_verified = `bash <real-target-verify.sh> --target <真实工作区> 2>&1 | grep -c 'verified\|已验'` stdout 数字段
 band      real_target_verified >= 1（真实下游工作区可被验证机制跑通）
-invoke    `grep -rn 'install\|upgrade\|cold-start\|config-conflict' plugin/scripts/<真实目标验证脚本>`
+invoke    `grep -rn 'install\|upgrade\|cold-start\|config-conflict' plugin/scripts/real-target-verify.sh`（invoke-evidence：占位符解析为真实脚本，Evidence 回归节有 6 pass 实跑）
 control   真实工作区验证结论与合成夹具分开标注（AC3）；频率机制可触发（AC2）
 resume    真实目标机制与频率机制分步提交，任一步完成即写盘
 

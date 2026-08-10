@@ -3,7 +3,7 @@ id: gap-permission-prompt-merged-into-busy
 title: session-liveness.sh:355 把 permission-prompt 并进
   busy——「卡权限框」与「在干活」在忙闲读数同形（第二道遮蔽，同 ADR-033 读数无法表达关键区别源），permission-prompt
   应单列并直接触发上层动作
-status: ready
+status: done
 labels:
   - gap
   - defect

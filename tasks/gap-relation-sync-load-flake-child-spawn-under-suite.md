@@ -5,7 +5,7 @@ title: relation-sync.test.mjs(手写 harness,spawn 2 真实 node 子进程做文
   harness 输出行=子进程 spawn 失败/被杀非断言失败)；solo+CPU 负载全绿；同
   create-mcp/proposal-convergence 并发子进程族未收编(@test-group product 非
   KNOWN-LOAD-SENSITIVE)
-status: ready
+status: done
 labels:
   - gap
   - defect
