@@ -114,3 +114,10 @@ resume    理由段搬走 / 同一批文件 / AC38 切分分步提交，任一�
 reviewer: outer
 at: 2026-08-10
 changed: 人裁定「冷启动 skill 精简、只引用相应文件，行为固化在这些文件里，tick 引用同一批」+ manager AC41 判据 2。SKILL.md 388 行（理由 148）→ 理由搬去被引用文件。AC38 同判据一并收。实现归 inner
+
+## 交叉标注 (gap-ac41-red-on-omission-artifact, 2026-08-10)
+
+本任务（AC41 判据 2 单一批文件）解决「引用同一批文件」，`gap-ac41-red-on-omission-artifact`
+（判据 3）补「执行保障」——**引用解决「记不住」，解决不了「没人执行」**（A15 裁定5 全就位仍 9 轮
+未执行是判据 2 的极限反例）。冷启动 skill 引用的行为文件（执行核 C 段/A 段）里，每条固化行为都应能
+在 `red-on-omission-audit` 的 registry 里找到它的变红读数；指不出的列未固化。

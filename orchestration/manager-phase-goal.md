@@ -200,6 +200,10 @@ subagent 序列）……也是需要 tick 的原因——**我们需要把这些
    **仍连续 9 轮未被执行**，直到 manager 置 `.halt`。今晚三次有效干预
    （`.halt` / `ruling5_status` 自报字段 / `scope=worktree` fan-in 闸）**全部属这一类**。
    ⇒ 每条固化下来的行为，**必须能指出「不做时哪个读数会变红」**；指不出的，视为未固化。
+   **执行体（`tasks/gap-ac41-red-on-omission-artifact`，2026-08-10 fan-in）**：`red-on-omission-audit`
+   检查器把本条机械化——registry 逐条列「行为→变红读数」并机械核对 tracked 文件里是 DECLARED 的
+   （非自证），缺失的列未固化并报 uncov>0 ⇒ exit 1；A15 裁定5 / scope=worktree 闸 / ruling5_status
+   三条是它的 Contract invariant。执行核 A15 ⑤ 每 tick 跑它读 covered/uncov。
 
 ### AC39（机制·P2-9 层内容未按层定制）：四元组的 `complete` 能真达成
 

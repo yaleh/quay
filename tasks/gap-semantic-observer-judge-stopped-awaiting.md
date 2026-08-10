@@ -104,3 +104,10 @@ resume    judge / 触发 / 变红产物分步提交，任一步完成即写盘
 reviewer: outer
 at: 2026-08-10
 changed: manager 规格（人方向裁定「基于语义的观测，源=transcript 非 pane」）。实证：心跳 11:13/11:28 结构化 vs 自由文本矛盾（blocked=[]+budgetHit 说无阻塞，reason 说「停了等 /clear」）——outer 复核原始记录确认，字段实为 budgetHit=true。judge 读自由文本输出 stopped/awaiting/needs/contradictsStructured；触发=hash 变化或 blocked==[] && agentDispatches>=agentLimit；产物=stopped 无升级即变红（AC41③）。优先级=delivery-critical（防今晚失效类）。实现归 inner
+
+## 交叉标注 (gap-ac41-red-on-omission-artifact, 2026-08-10)
+
+本任务（语义观测器 judge）是 AC41③「变红产物」判据的执行体：judge 输出 `stopped:true` 而本轮
+tick-log 无对应升级记录 ⇒ 变红（`redOnOmission` exit 1）。`red-on-omission-audit` 检查器
+（`tasks/gap-ac41-red-on-omission-artifact`）把 `a17_semantic_judge` 列为 registry 的 a-reading，
+机械核对 judge 带 `redOnOmission→exit 1` + 执行核 A17 接线。

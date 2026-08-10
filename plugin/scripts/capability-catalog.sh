@@ -213,6 +213,7 @@ declare -A QUESTION=(
   [select-tests-for-touches.ts]="Which tests should run for this task's ## Touches?"
   [self-report-vocab-audit.ts]="Do the inner's recent self-reports avoid batch-style vocabulary (reanchor convergence)?"
   [semantic-observer-judge.ts]="Is the inner/outer layer semantically stopped and awaiting an external action — reading FREE TEXT (heartbeat reason + tick report transcript), not just structured fields — outputting {stopped, awaiting, needs, contradictsStructured, confidence}, where contradictsStructured names the failure (structured says blocked=[], free text says 'dispatch stopped, awaiting outer /clear')?"
+  [red-on-omission-audit.ts]="Is every solidified behavior able to point at a reading that turns RED when it is NOT done (AC41 判据 3) — the registry lists each behavior → redReading and mechanically verifies the reading is declared in the workspace; missing readings are listed 未固化 (uncov>0 ⇒ exit 1), with a15_ruling5 / scope_worktree_gate / ruling5_status as invariants?"
   [self-report-vocab-check.ts]="Has the inner layer's self-reported vocabulary drifted from the shipped semantics (reanchor convergence)?"
   [send-keys-reliable.sh]="Did the reliable five-step send-keys sequence land in the foreign session?"
   [serial-fanin-absorb.ts]="How should concurrent survivors be absorbed serially at fan-in?"
@@ -481,6 +482,7 @@ declare -A CADENCE=(
   [obligation-ledger-check.ts]="每轮"
   [obligation-ledger.ts]="每轮"
   [semantic-observer-judge.ts]="按需"
+  [red-on-omission-audit.ts]="每轮"
 
 )
 
@@ -679,6 +681,7 @@ declare -A INVALIDATION=(
   [obligation-ledger-check.ts]="失效前提：义务账本仍由 obligation-ledger.ts 派生；若派生并入他处或账本文件删除，本条退休"
   [obligation-ledger.ts]="失效前提：轮次仍产生义务账本；若义务跟踪改为别处，本条退休"
   [semantic-observer-judge.ts]="失效前提：inner/outer 状态仍以自由文本（心跳 reason + tick 报告）承载；若观测面改为纯结构化 schema 且无自由文本，本条退休"
+  [red-on-omission-audit.ts]="失效前提：执行核仍以 tick-core 文档固化行为；若行为固化面迁出 tick-core/plugin-scripts 文件系统，本条退休"
 
 )
 
@@ -877,6 +880,7 @@ declare -A LAST_REAFFIRMED=(
   [obligation-ledger-check.ts]="2026-08-10"
   [obligation-ledger.ts]="2026-08-10"
   [semantic-observer-judge.ts]="2026-08-10"
+  [red-on-omission-audit.ts]="2026-08-10"
 
 )
 
@@ -1075,6 +1079,7 @@ declare -A MATCHING=(
   [obligation-ledger-check.ts]="enumerative"
   [obligation-ledger.ts]="enumerative"
   [semantic-observer-judge.ts]="keyword"
+  [red-on-omission-audit.ts]="keyword"
 )
 # ── superseded capability table (gap-retired-script-still-callable, human ruling 2026-08-10) ──
 # One capability = ONE implementation. A superseded implementation must NOT exist in the

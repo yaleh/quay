@@ -42,11 +42,11 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 A15 裁定5 全就位仍 9 轮未执行 + 三次有效干预共性（不做即可见）（本任务 Proposal 已含）
-- [ ] AC2: **逐条审计**——固化行为清单（执行核 C 段 / A 段 / skill 步骤 / A15 裁定5 等），每条标「不做时变红的读数」
-- [ ] AC3: **补产物**——指不出的行为补「不做会变红」的产物（状态 mtime 超时 / 字段缺失 / 门拒）
-- [ ] AC4: **审计可机械核**——`red-on-omission` 检查器（或复用）逐条列出行为→变红读数，缺失的列未固化
-- [ ] AC5: **既有不回归**——`--for-task` scoped 门绿
+- [x] AC1: **复现固化**——任务体记录 A15 裁定5 全就位仍 9 轮未执行 + 三次有效干预共性（不做即可见）（本任务 Proposal 已含）
+- [x] AC2: **逐条审计**——固化行为清单（执行核 C 段 / A 段 / skill 步骤 / A15 裁定5 等），每条标「不做时变红的读数」
+- [x] AC3: **补产物**——指不出的行为补「不做会变红」的产物（状态 mtime 超时 / 字段缺失 / 门拒）
+- [x] AC4: **审计可机械核**——`red-on-omission` 检查器（或复用）逐条列出行为→变红读数，缺失的列未固化
+- [x] AC5: **既有不回归**——`--for-task` scoped 门绿
 
 ## Definition of Done
 
@@ -84,3 +84,22 @@ resume    审计 / 补产物 / 检查器分步提交，任一步完成即写盘
 reviewer: outer
 at: 2026-08-10
 changed: 人裁定「同意上述意见」+ manager AC41 判据 3（第三条限定，人已裁定同意）。实证：A15 裁定5 全就位仍 9 轮未执行直到 .halt。三次有效干预（.halt / ruling5_status / scope=worktree 闸）共性=不做即可见。立案：每条固化行为必须能指出「不做时哪个读数会变红」。实现归 inner
+
+### 修后实跑证据（2026-08-10，inner subagent）
+
+**invoke**：`node --no-warnings --experimental-strip-types plugin/scripts/red-on-omission-audit.ts --root "$PWD" --json`
+
+**measure**：`covered=18 uncov=0 band=0`；三条 Contract invariant 全 1：
+`a15_ruling5_has_red_reading=1` / `scope_worktree_gate_covered=1` / `ruling5_status_covered=1`。
+
+**covered（18 条固化行为 → 变红读数）**：
+- `a15_ruling5`：A15 裁定5（连续 3 轮心跳缺失 ⇒ .halt；再 3 轮 ⇒ /clear）→ `suite-health-last-run.json` 的 `ruling5_status` 缺失/violated + A15 ② mtime 陈旧 ⇒ exit 1
+- `scope_worktree_gate`：fan-in 前必须存在 ≥1 条 scope=worktree+state=green 轮次记录 → `verification-round.jsonl` 无该记录 ⇒ 门拒
+- `ruling5_status`：每 tick 写 suite-health-last-run.json 的 ruling5_status 自报 → 字段缺失 ⇒ exit 1
+- `a15_heartbeat_write` / `a17_semantic_judge`（redOnOmission exit 1）/ `a16_observe_inner_failure` / `a14_closure_pass` / `a13_inner_heartbeat` / `a10_closure_lag` / `a6_fixed_cap` / `a2_suite_chain` / `a1_monitor_mount` / `c1_delivery`（裸 send-keys 计数）/ `c2_pane_busy`（adr016 门）/ `c3_resource_gate`（WAIT 门）/ `c7_drive_text`（drive-contract 门）/ `c14_contract_check`（task-contract 门）/ `b2_closure_record`（--record 心跳）
+
+**未固化（审计如实列出，AC41③ backlog）**：A4 / C4 / C5 / C6 / C8 / C9 / C10 / C11 / C12 / C13 / C15——它们还没有「不做会变红」的机械产物，列入审计清单待补（执行核 C 段头注释注明）。
+
+**验证**：verify 是机械核对 tracked 文件（非自证）——删掉 `ruling5_status` 声明 ⇒ `a15_ruling5`+`ruling5_status` 转 uncov；空 root（无 tick core）⇒ exit 1。
+
+**scoped 门**：`./scripts/test.sh --for-task gap-ac41-red-on-omission-artifact --allow-thin` → `tests 16 / pass 16 / fail 0 / cancelled 0`，EXIT 0；静态检查 `red-on-omission-audit: covered=18 uncov=0 (band 0)` 随 scoped 跑。

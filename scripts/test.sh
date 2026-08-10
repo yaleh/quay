@@ -361,6 +361,18 @@ run_static_checks() {
   # @static-tier change
   # @static-object orchestration/manager-tick-core.md orchestration/orchestrator-tick-core.md orchestration/fast-mode-tick-core.md plugin/scripts/state-worded-clause-check.ts plugin/test/state-worded-clause-check.test.mjs
   run_checker "state-worded-clause-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/state-worded-clause-check.ts" --root "${repo_root}"
+  echo "== red-on-omission audit (gap-ac41-red-on-omission-artifact, AC41 判据 3) =="
+  # The AC41③ red-on-omission audit: every solidified behavior must be able to point at a reading
+  # that turns RED when the behavior is NOT done; 指不出的视为未固化. The 2026-08-10 evidence —
+  # A15 裁定5 in the 80-line execution core, read every tick, threshold explicit, counter built,
+  # catalog declared — STILL ran 9 rounds without executing until manager set .halt. The checker's
+  # registry lists each behavior → redReading and mechanically verifies the reading is declared in
+  # tracked files (not self-asserted); removing a red-reading declaration exits 1 (uncov>0), so a
+  # regression in execution-guarantee wiring red-lights the commit. The three ## Contract invariants
+  # are a15_ruling5 / scope_worktree_gate / ruling5_status (must be covered).
+  # @static-tier change
+  # @static-object orchestration/orchestrator-tick-core.md plugin/scripts/red-on-omission-audit.ts plugin/test/red-on-omission-audit.test.mjs
+  run_checker "red-on-omission-audit" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/red-on-omission-audit.ts" --root "${repo_root}"
   echo "== instrument-failure check (gap-manager-instrument-failures-need-mechanical-detection-not-carefulness, AC3) =="
   # The manager instrument-failure five-family detector (FAMILY-1..5 in the checker header). The
   # manager's instrument failures recurred 7× in one night across five families already documented
