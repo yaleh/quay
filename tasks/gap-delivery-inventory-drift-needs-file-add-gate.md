@@ -3,7 +3,7 @@ id: gap-delivery-inventory-drift-needs-file-add-gate
 title: verify-delivery-surface inventory 漂移无机制 owner——今日同对象红 6 次烧 128.4
   分钟（r216/r222/r223/r226/r248/r253），每次都是「plugin/scripts/ 新增文件但 outline §6
   快照没同步重生」；7d2faf06 只修症状，闸要装在【加脚本】这个动作上
-status: needs-human
+status: ready
 labels:
   - gap
   - defect
@@ -39,10 +39,29 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 6 次红的轮次+时刻+烧掉时间（r216/r222/r223/r226/r248/r253 = 128.4min）+ 三条机制缺席判据（本任务 Proposal 已含）
-- [ ] AC2: **文件集变化闸**——候选 B（`--diff-filter=AD` 命中 `plugin/scripts/` ⇒ 要求同提交更新 outline §6），FAIL-closed；候选 A 作为更严档可选
-- [ ] AC3: **既有不回归**——`--for-task` scoped 门绿；verify-delivery-surface 既有测试不破坏
-- [ ] AC4: **机制有 owner**——重生命令 `verify-delivery-surface.ts --write-inventory` 不再零非测试调用方（闸要求更新 outline 即触发重生路径）
+- [x] AC1: **复现固化**——任务体记录 6 次红的轮次+时刻+烧掉时间（r216/r222/r223/r226/r248/r253 = 128.4min）+ 三条机制缺席判据（本任务 Proposal 已含）
+- [x] AC2: **文件集变化闸**——候选 B（`--diff-filter=AD` 命中 `plugin/scripts/` ⇒ 要求同提交更新 outline §6），FAIL-closed；候选 A 作为更严档可选。实现 = 新闸 `plugin/scripts/delivery-inventory-drift-gate.sh`，接入 `scripts/test.sh` run_static_checks（`@static-tier change` + `@static-object plugin/scripts/ docs/proposals/quay-product-outline.md`）。DoD 实跑：`(a)` 新增 `plugin/scripts/foo.ts` 且 outline 未更新 ⇒ `exit=1`（FAIL-closed）；`(b)` 只改已有 `a.sh` 内容（无 A/D）⇒ `exit=0` 不触发；`(c)` 新增脚本 + 更新 outline ⇒ `exit=0`
+- [x] AC3: **既有不回归**——`--for-task` scoped 门绿（见本任务 AC 下方实跑证据）；verify-delivery-surface 既有测试不破坏（scoped 测试含 `verify-delivery-surface.test.mjs` 全绿）
+- [x] AC4: **机制有 owner**——重生命令 `verify-delivery-surface.ts --write-inventory` 不再零非测试调用方（闸要求更新 outline 即触发重生路径）。本次实现即真实非测试调用：`node --experimental-strip-types plugin/scripts/verify-delivery-surface.ts --write-inventory` 将 §6 快照从 `scripts=194` 重生为 `scripts=195`（新增闸脚本），`inventory_drift=0`。闸的 FAIL 消息直接给出重生命令，owner = 闸本身
+
+## Invoke 证据（inner 2026-08-10，本任务分支 `task/gap-delivery-inventory-drift-needs-file-add-gate` HEAD 后贴）
+
+- Contract invoke（证明新增文件能被闸捕获）——实际输出：
+  ```
+  $ git diff --name-only --diff-filter=AD <base>..HEAD | grep '^plugin/scripts/'
+  plugin/scripts/checker-mutation-cases/delivery-inventory-drift-gate.sh
+  plugin/scripts/delivery-inventory-drift-gate.sh
+  ```
+  两个新插件脚本都被闸的核心谓词（`--diff-filter=AD` 命中 `plugin/scripts/`）捕获——而同提交的
+  `docs/proposals/quay-product-outline.md`（§6 快照）更新使闸 PASS（`script_structural=1 outline_touched=1`）。
+- 实跑 DoD 锚 (a)/(b)/(c) 已在 AC2 勾选说明中记录；`--write-inventory` 将 §6 快照从 `scripts=194`
+  重生为 `scripts=195`，`inventory_drift=0`（AC4：重生命令真实非测试调用）。
+- `--for-task` scoped 门绿：scoped 静态检查含 `delivery-inventory-drift-gate` ⇒ PASS；56 tests / 0 fail
+  （含 verify-delivery-surface、delivery-inventory-drift-gate、capability-catalog、checker-mutation-check）。
+- 实现期发现并修复一个 post-commit 回归：闸的 committed 扫描原先 `--diff-filter=AD` 会把 outline 的
+  `M` 状态滤掉，导致「提交新增脚本 + outline 同提交修改」被误报红——改为 status-aware（plugin/scripts
+  A/D ⇒ 触发；outline 任意状态 ⇒ 满足），新增回归测试钉住该方向（`delivery-inventory-drift-gate.test.mjs`
+  第 10 条）。
 
 ## Definition of Done
 
@@ -53,10 +72,20 @@ extra: {}
 
 ## Touches
 
-- scripts/test.sh（新增静态检查：`--diff-filter=AD` 命中 `plugin/scripts/` ⇒ 要求同提交 outline 更新；或独立 checker 脚本接进 run_static_checks）
-- plugin/scripts/（如新 checker，按 capability-catalog + checker-mutation 要求登记 + mutation case）
-- docs/proposals/quay-product-outline.md（§6 快照——被检查的目标，非本次实现改动）
+- scripts/test.sh（注册新闸到 run_static_checks：`--diff-filter=AD` 命中 `plugin/scripts/` ⇒ 要求同提交更新 outline §6）
+- plugin/scripts/delivery-inventory-drift-gate.sh（新闸，新增——文件集变化闸候选 B）
+- plugin/scripts/checker-mutation-cases/delivery-inventory-drift-gate.sh（新闸 mutation case，新增）
+- plugin/test/delivery-inventory-drift-gate.test.mjs（新闸单元测试，新增）
+- plugin/scripts/capability-catalog.sh（声明新闸能力 + 五方向字段）
+- docs/proposals/quay-product-outline.md（§6 快照——被检查的目标，本次经 `--write-inventory` 重生）
 - tasks/gap-delivery-inventory-drift-needs-file-add-gate.md（自身：勾 AC + 贴证据）
+
+## Test-Files
+
+- plugin/test/verify-delivery-surface.test.mjs（outline §6 快照重生后必须仍绿——AC3 既有不回归）
+- plugin/test/delivery-inventory-drift-gate.test.mjs（新闸行为：new_script_requires_outline / content_only_change_skipped / outline_updated_alongside）
+- plugin/test/capability-catalog.test.mjs（新脚本必须有能力声明 + 五方向字段）
+- plugin/test/checker-mutation-check.test.mjs（新 checker 必须带 mutation case 且全绿）
 
 ## Contract
 

@@ -402,6 +402,16 @@ run_static_checks() {
   # @static-tier change
   # @static-object plugin/scripts/obligation-ledger.ts plugin/scripts/obligation-ledger-check.ts plugin/scripts/obligation-discharge-agent.ts plugin/test/obligation-ledger.test.mjs plugin/test/obligation-ledger-check.test.mjs
   run_checker "obligation-ledger-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/obligation-ledger-check.ts" --root "${repo_root}"
+  echo "== delivery-inventory drift gate (gap-delivery-inventory-drift-needs-file-add-gate, AC2) =="
+  # The file-set change gate on the delivery-inventory snapshot (candidate B): `--diff-filter=AD` on plugin/scripts/ — git committed range + working-tree staged/unstaged/untracked — is the ONLY
+  # trigger; when it fires, the SAME change set must update docs/proposals/quay-product-outline.md
+  # §6 (the derived DELIVERY-INVENTORY snapshot). Content-only edits to existing scripts do NOT
+  # trigger (invariant content_only_change_skipped = 1). FAIL-closed: a plugin/scripts A/D without
+  # an outline update exits 1. 2026-08-10 red family (r216/r222/r223/r226/r248/r253) fixed at the
+  # root cause (7d2faf06 fixed the symptom only).
+  # @static-tier change
+  # @static-object plugin/scripts/ docs/proposals/quay-product-outline.md
+  run_checker "delivery-inventory-drift-gate" bash "${repo_root}/plugin/scripts/delivery-inventory-drift-gate.sh" --root "${repo_root}"
   echo "== checker-mutation check (gap-checkers-have-never-been-shown-to-fail, AC1-AC6) =="
   # The L_S instrument: mutation-test the checkers THEMSELVES, not product code. The manifest is
   # parsed from THIS function + CI (never hand-written), so a checker added here (or to a CI
