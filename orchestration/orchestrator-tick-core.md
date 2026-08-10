@@ -53,22 +53,24 @@ checklist 执行。
 
 ## C. 硬约束(每条都已付过代价,理由见档案)
 
+> 每条硬约束带 `失效前提:` 字段（① 熔融-结晶张力）——失效有可 grep 的可测前提；写不出可测形式的明标「无可测前提，靠周期复核」。缺字段 = 入口闸拒绝（照 capability-catalog 已有做法）。
+
 | 约束 | 一句话 |
 |---|---|
-| C1 | **驱动 inner 一律用 `bash plugin/scripts/supervisor-deliver.sh <tmux目标> <文本> --transcript <目标会话 .jsonl>`,禁止手工拼 send-keys、禁止用 send-keys-verified.sh、禁止对活会话用 `--root`**（supervisor-deliver 是唯一送达实现;`--transcript`=活会话（解析已知 transcript）,`--root`=重生会话模式（等新 transcript 落盘,对活会话必报 FAIL——manager 02:2x 踩过,工具 exit 1「60s 未现新 transcript」而文本已送达）;send-keys-verified 已被 superseded,其 md5 判据被 ADR-016 明令禁止）;送达判据**只用 committed 信号**（目标会话 transcript 出现内容匹配的真实 user 消息——CRYSTALLIZED 故障 5）,**不得用 pane 回显/哈希/单次检查**（故障 4:已提交与进 transcript 可差 ~30s,须有界轮询） (src:276, 人 2026-08-10 裁定更正) |
-| C2 | 忙闲只取 pane **底部 3 行** `tail -3 \| grep -q 'esc to interrupt'`;**整屏 `md5(capture-pane)` 是 ADR-016 明令禁止**;别写 `-S -3`(那是起始行) (src:283, 286) |
-| C3 | 跑全量套件前过 `resource-gate.sh --for full-suite`,非 0 = WAIT ⇒ 只核实便宜的声称;全量只串行跑、跑完再叫醒内层 (src:296) |
-| C4 | 数进程用 `comm` 精确匹配(`grep -cx node-MainThread` / `pgrep -xc node`)或显式排除自身;**`pgrep -f` 会匹配发起查询的命令自己**;判停摆要进程数 0 **且** load1<1 两个判据;找服务按端口 `ss -ltnp` (src:395, 402, 407) |
-| C5 | 核实「修好了没有」看**行为**或**读 diff**,**不要 grep 关键词**——描述缺陷的词必然出现在缺陷自己的文档和修复说明里,双向都给反向答案 (src:373, 378) |
-| C6 | 新检测器的**第一条事件默认当待验证,不当发现**——先跑一次能证伪它的检查,确认前不据此行动、不写进 tick 记录 (src:412) |
-| C7 | 驱动文本**只携带数据,不复述行为**;要定顺序就把 `checkTouchesPair` 实际输出附在**同一条**驱动文本里;出厂文档的行为错了就改文档,不用散文覆盖 (src:957, 968) |
-| C8 | 「在飞」拆两义:**括号在飞**(遥测 `inProgress`)/ **subagent 在飞**(读 Agent 调用的 `input.run_in_background` 原始字段);核实并发不得用 START 事件或 pane UI 文字 (src:985, 988) |
-| C9 | 输入框是待提交缓冲区不是笔记本:备忘一律落队列状态文件或 tick-log;用完 `C-u` 清空;问责对象是「框里有文本」这一状态 (src:994) |
-| C10 | **写任何时刻前先跑 `date -u`**,不许估 (src:1038) |
-| C11 | 停摆分类不要靠输入框内容猜——那多半是 ghost suggestion;看最后一段 `⏺` 问了什么,直接答 (src:267, 274) |
-| C12 | **人机对话期间 cron 不 fire**——每次对话结束前手动补一次 tick,不要假设 cron 会接上 (src:302) |
-| C13 | 写 `tasks/` 前先确认没有在飞任务把 `tasks/` 列进它的 `## Touches`;撞上就改为「记进队列状态文件 + 指示内层建」 (src:252) |
-| C14 | 派发前读候选的 `## Contract` 六键并跑 `task-contract-check.ts`(**报出不阻断**),介入后把改了什么写进 `## Dispatch review`;每个 `measure` 行自带完整反引号命令 (src:507, 517, 524) |
+| C1 | **驱动 inner 一律用 `bash plugin/scripts/supervisor-deliver.sh <tmux目标> <文本> --transcript <目标会话 .jsonl>`,禁止手工拼 send-keys、禁止用 send-keys-verified.sh、禁止对活会话用 `--root`**（supervisor-deliver 是唯一送达实现;`--transcript`=活会话（解析已知 transcript）,`--root`=重生会话模式（等新 transcript 落盘,对活会话必报 FAIL——manager 02:2x 踩过,工具 exit 1「60s 未现新 transcript」而文本已送达）;send-keys-verified 已被 superseded,其 md5 判据被 ADR-016 明令禁止）;送达判据**只用 committed 信号**（目标会话 transcript 出现内容匹配的真实 user 消息——CRYSTALLIZED 故障 5）,**不得用 pane 回显/哈希/单次检查**（故障 4:已提交与进 transcript 可差 ~30s,须有界轮询） (src:276, 人 2026-08-10 裁定更正)  **失效前提：外层仍通过 tmux/transcript 远程驱动别的 Claude 会话；若投递面迁出 tmux+transcript 协议，本条退休** |
+| C2 | 忙闲只取 pane **底部 3 行** `tail -3 \| grep -q 'esc to interrupt'`;**整屏 `md5(capture-pane)` 是 ADR-016 明令禁止**;别写 `-S -3`(那是起始行) (src:283, 286)  **失效前提：仍通过 tmux capture-pane 观测 pane 忙闲；若观测面迁移出 TUI，本条退休** |
+| C3 | 跑全量套件前过 `resource-gate.sh --for full-suite`,非 0 = WAIT ⇒ 只核实便宜的声称;全量只串行跑、跑完再叫醒内层 (src:296)  **失效前提：全量套件仍是资源受限的重操作；若套件改为轻量/无资源竞争，本条退休** |
+| C4 | 数进程用 `comm` 精确匹配(`grep -cx node-MainThread` / `pgrep -xc node`)或显式排除自身;**`pgrep -f` 会匹配发起查询的命令自己**;判停摆要进程数 0 **且** load1<1 两个判据;找服务按端口 `ss -ltnp` (src:395, 402, 407)  **失效前提：进程观测仍用 shell 命令；若观测面 API 化，本条退休** |
+| C5 | 核实「修好了没有」看**行为**或**读 diff**,**不要 grep 关键词**——描述缺陷的词必然出现在缺陷自己的文档和修复说明里,双向都给反向答案 (src:373, 378)  **失效前提：核实仍发生在人/agent 阅读文本的语境；若核实改为纯机械判定，本条退休** |
+| C6 | 新检测器的**第一条事件默认当待验证,不当发现**——先跑一次能证伪它的检查,确认前不据此行动、不写进 tick 记录 (src:412)  **失效前提：仍存在首次产出事件的新检测器；若检测器全部引入自检机制，本条退休** |
+| C7 | 驱动文本**只携带数据,不复述行为**;要定顺序就把 `checkTouchesPair` 实际输出附在**同一条**驱动文本里;出厂文档的行为错了就改文档,不用散文覆盖 (src:957, 968)  **失效前提：外层仍以驱动文本 prose 派发；若派发改为纯 API/结构化消息，本条退休** |
+| C8 | 「在飞」拆两义:**括号在飞**(遥测 `inProgress`)/ **subagent 在飞**(读 Agent 调用的 `input.run_in_background` 原始字段);核实并发不得用 START 事件或 pane UI 文字 (src:985, 988)  **失效前提：内层仍通过 Agent 工具做 subagent 派发；若派发机制改变，本条退休** |
+| C9 | 输入框是待提交缓冲区不是笔记本:备忘一律落队列状态文件或 tick-log;用完 `C-u` 清空;问责对象是「框里有文本」这一状态 (src:994)  **失效前提：仍用 tmux 输入框作为交互缓冲区；若交互面迁移，本条退休** |
+| C10 | **写任何时刻前先跑 `date -u`**,不许估 (src:1038)  **失效前提：仍需人类可读的时刻记录；若改由机件自动盖章，本条退休** |
+| C11 | 停摆分类不要靠输入框内容猜——那多半是 ghost suggestion;看最后一段 `⏺` 问了什么,直接答 (src:267, 274)  **失效前提：仍通过 pane UI 诊断停摆；若诊断改为结构化读数，本条退休** |
+| C12 | **人机对话期间 cron 不 fire**——每次对话结束前手动补一次 tick,不要假设 cron 会接上 (src:302)  **失效前提：cron 仍可能与人机对话并发；若调度改为纯事件驱动，本条退休** |
+| C13 | 写 `tasks/` 前先确认没有在飞任务把 `tasks/` 列进它的 `## Touches`;撞上就改为「记进队列状态文件 + 指示内层建」 (src:252)  **失效前提：外层仍写 tasks/*.md；若写任务改为纯 API，本条退休** |
+| C14 | 派发前读候选的 `## Contract` 六键并跑 `task-contract-check.ts`(**报出不阻断**),介入后把改了什么写进 `## Dispatch review`;每个 `measure` 行自带完整反引号命令 (src:507, 517, 524)  **失效前提：候选任务仍带 ## Contract 六键；若契约格式改变，本条退休** |
 
 ## D. 边界
 

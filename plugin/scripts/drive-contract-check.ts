@@ -42,6 +42,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { isDirectEntry } from "./gate-script-base.ts";
+// gap-crystallization-five-directions ④: 位置判定原语抽到 checker-lib — 按位置不按关键词。
+import { matchAtCommandPosition, hasMatchAtCommandPosition } from "./checker-lib.ts";
 
 /**
  * An ORDER ASSERTION: a chain of two or more UPPERCASE task-like identifiers joined by → arrows,
@@ -77,24 +79,21 @@ export interface DriveTextResult {
   violations: number; // orderAssertions.length when the same text LACKS a pair output, else 0
 }
 
-/** Find all order-assertion chains in `src`, each with its line + trimmed snippet. */
+/** Find all order-assertion chains in `src`, each with its line + trimmed snippet.
+ * 位置判定 (按位置不按关键词): 用 checker-lib 的 matchAtCommandPosition 在全文跑结构性签名
+ * (大写任务 id 的箭头链), 不用关键词 grep — 判据就是结构本身。 */
 export function findOrderAssertions(src: string): OrderHit[] {
-  const hits: OrderHit[] = [];
   const lines = src.split("\n");
-  for (let i = 0; i < lines.length; i++) {
-    ORDER_ASSERTION_RE.lastIndex = 0;
-    let m: RegExpExecArray | null;
-    while ((m = ORDER_ASSERTION_RE.exec(lines[i]))) {
-      hits.push({ line: i + 1, hit: m[0], snippet: lines[i].trim().slice(0, 90) });
-    }
-  }
-  return hits;
+  return matchAtCommandPosition(src, ORDER_ASSERTION_RE, { maskNonCode: false }).map((h) => ({
+    line: h.line,
+    hit: h.match,
+    snippet: (lines[h.line - 1] ?? "").trim().slice(0, 90),
+  }));
 }
 
-/** Whether the same text carries a checkTouchesPair output marker. */
+/** Whether the same text carries a checkTouchesPair output marker. 同样走 checker-lib 位置判定。 */
 export function hasPairOutput(src: string): boolean {
-  PAIR_OUTPUT_RE.lastIndex = 0;
-  return PAIR_OUTPUT_RE.test(src);
+  return hasMatchAtCommandPosition(src, PAIR_OUTPUT_RE, { maskNonCode: false });
 }
 
 /**

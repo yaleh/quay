@@ -216,6 +216,75 @@ test("AC1/AC3 — --entry-surface --json is machine-readable and reports ok:true
   assert.equal(obj.sh_shipped, obj.public_sh + obj.internal_sh);
 });
 
+// ── gap-crystallization-five-directions ①②③④: per-entry crystallization fields ──
+test("①/②/③/④ — every declared row carries cadence, 失效前提, last-reaffirmed and matching (entry fields present)", () => {
+  const rows = catalogRows();
+  const declared = rows.filter((r) => r.question);
+  assert.ok(declared.length > 0, "there are declared checks");
+  for (const r of declared) {
+    assert.ok(r.cadence && r.cadence.length > 0,
+      `every declared check declares cadence: ${r.file} → ${r.cadence}`);
+    assert.ok(/^(每轮|每红窗|每里程碑|冷启动|按需)$/.test(r.cadence),
+      `cadence must be one of the five enumerated values: ${r.file} → ${r.cadence}`);
+    assert.ok(r.invalidation && r.invalidation.length > 0,
+      `every declared check carries a 失效前提 (invalidation) field: ${r.file}`);
+    assert.ok(r.last_reaffirmed && /^\d{4}-\d{2}-\d{2}$/.test(r.last_reaffirmed),
+      `every declared check carries a last-reaffirmed YYYY-MM-DD stamp: ${r.file} → ${r.last_reaffirmed}`);
+    assert.ok(r.matching && /^(position|keyword|enumerative|n\/a)$/.test(r.matching),
+      `every declared check declares a matching method: ${r.file} → ${r.matching}`);
+  }
+});
+
+test("① entry gate — a declared check missing cadence/失效前提 is rejected (exit non-zero), and restoring it passes", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cap-cat-fields-"));
+  try {
+    // A temp copy of the whole plugin/scripts so the catalog sees every real script.
+    fs.mkdirSync(path.join(tmp, "plugin", "scripts"), { recursive: true });
+    for (const f of derivedScripts()) {
+      fs.copyFileSync(path.join(SCRIPTS_DIR, f), path.join(tmp, "plugin", "scripts", f));
+    }
+    const catTmp = path.join(tmp, "plugin", "scripts", "capability-catalog.sh");
+    const src = fs.readFileSync(CATALOG, "utf8");
+
+    // Remove ONE CADENCE row for a real declared script (capability-catalog.sh itself).
+    const stripped = src.replace(/^(\s*)\[capability-catalog\.sh\]="每轮"$/m, "");
+    assert.notEqual(stripped, src, "the capability-catalog.sh CADENCE row must be present to strip");
+    fs.writeFileSync(catTmp, stripped);
+
+    const fail = spawnSync("bash", [catTmp, "--json"], { encoding: "utf8" });
+    assert.notEqual(fail.status, 0, "a declared check missing cadence must make the catalog exit non-zero");
+    assert.match(fail.stderr, /lack cadence/, "the gate names the missing-cadence failure");
+
+    // Restore → passes again.
+    fs.writeFileSync(catTmp, src);
+    const pass = spawnSync("bash", [catTmp, "--json"], { encoding: "utf8" });
+    assert.equal(pass.status, 0, `restored catalog must pass:\n${pass.stderr}`);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("① entry gate — a declared check missing 失效前提 (invalidation) is rejected", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cap-cat-inval-"));
+  try {
+    fs.mkdirSync(path.join(tmp, "plugin", "scripts"), { recursive: true });
+    for (const f of derivedScripts()) {
+      fs.copyFileSync(path.join(SCRIPTS_DIR, f), path.join(tmp, "plugin", "scripts", f));
+    }
+    const catTmp = path.join(tmp, "plugin", "scripts", "capability-catalog.sh");
+    const src = fs.readFileSync(CATALOG, "utf8");
+    // Remove the capability-catalog.sh INVALIDATION row.
+    const stripped = src.replace(/^(\s*)\[capability-catalog\.sh\]="失效前提：[^"]*"$/m, "");
+    assert.notEqual(stripped, src, "the capability-catalog.sh INVALIDATION row must be present to strip");
+    fs.writeFileSync(catTmp, stripped);
+    const fail = spawnSync("bash", [catTmp, "--json"], { encoding: "utf8" });
+    assert.notEqual(fail.status, 0, "a declared check missing 失效前提 must make the catalog exit non-zero");
+    assert.match(fail.stderr, /lack 失效前提/, "the gate names the missing-invalidation failure");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 // ── AC2: the three named exp5-legacy families are judged NOT shipped ──
 test("AC2 — the three named exp5-legacy families are ships:false (do not ship with the artifact)", () => {
   const rows = catalogRows();
