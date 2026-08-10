@@ -2,7 +2,7 @@
 id: gap-ac19-two-line-model-actually-runs
 title: AC19：两线模型机制已装但从未真正跑过——方向倒置（task fan-in 直合 develop 而非 integration）+
   integration 领先恒 0（fork_baseline 结构性不可观测）；让任务真正合 integration 制造领先窗口验证可分辨
-status: ready
+status: done
 labels: []
 parent: null
 children: []

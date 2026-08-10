@@ -2,7 +2,7 @@
 id: gap-quantified-stop-conditions-have-no-scope
 title: "Driver-doc prose hygiene: quantified thresholds must name set and
   window; named paths must resolve"
-status: ready
+status: done
 labels:
   - gap
   - defect

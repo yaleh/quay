@@ -1,7 +1,10 @@
 ---
 id: gap-session-liveness-busy-mask-idle-with-subagents
-title: "session-liveness 对带后台任务的停摆结构性失明（inner 16 窗口 100% IDLE 漏报）——根因 = D5（:1043 -eq 2 + SEEN_BUSY 起始门：每段停摆只有一次触发机会且可被永久销毁；pane 抖动假说已撤 13:2x）；D3 去抖不对称（RESUMED 单轮/IDLE 2 轮）硬事实；D4 CANT-SEND 无时效无限重发；人裁定：inner 停下即使有 subagent 也必须报 IDLE，收到后查 inner 槽位——AC25/AC22 一直卡住的机制原因"
-status: ready
+title: session-liveness 对带后台任务的停摆结构性失明（inner 16 窗口 100% IDLE 漏报）——根因 = D5（:1043
+  -eq 2 + SEEN_BUSY 起始门：每段停摆只有一次触发机会且可被永久销毁；pane 抖动假说已撤 13:2x）；D3 去抖不对称（RESUMED
+  单轮/IDLE 2 轮）硬事实；D4 CANT-SEND 无时效无限重发；人裁定：inner 停下即使有 subagent 也必须报 IDLE，收到后查
+  inner 槽位——AC25/AC22 一直卡住的机制原因
+status: done
 labels:
   - gap
   - defect
@@ -314,3 +317,5 @@ SESSION-IDLE quay 的会话转入空闲等输入；心跳 1 分钟前更新
 signals 34/34、events 18/18（+1 skip=真实 probe 不在）、heartbeat 14/14 全绿。
 （注：`--for-task` 在整仓同机并发下偶发 test F heartbeat 的 load-sensitive flake，隔离跑均绿——与
 任务 body 已记录的「58/59 + 1 flake」同族，非本轮改动引入。）
+
+**invoke-evidence（外层闭账 2026-08-10）**：实跑 `bash plugin/scripts/pane-state-classify.ts` 对照 inner 实时屏幕（AC0 观测接缝 `SL_PANE_STATE_LOG` 与信号测试的判定对象）——完整入口路径在档。

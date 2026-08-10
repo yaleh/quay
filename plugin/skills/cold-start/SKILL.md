@@ -9,19 +9,12 @@ allowed-tools: Bash, Read, Monitor, CronCreate, CronList
 **One slash command that turns a quay-init-prepared project into a running two-layer loop.**
 The user's whole cold start is this command; after it returns, the loop must be provably live.
 
-## Why agent-executed, and why nohup does NOT pass
-
-A `nohup bash …session-liveness.sh > log &` process and a Monitor-tool process look **identical in
-`ps`** (same argv). The difference is where stdout goes: the nohup process writes to a file and
-**nobody is notified**; a Monitor-tool process has every stdout line turned into a **session
-notification**.
-The criterion for "the loop is up" is therefore **"an event was delivered to this session"**, not
-"a process is running". A cold start whose monitor is nohup'd looks installed but is silently
-dead — worse than not installed, because it looks installed.
-
-**⇒ This skill mounts the monitor via the Monitor tool. Never use nohup. If you find yourself
-writing `nohup` or `&` to background a monitor, STOP — that is the anti-pattern this skill exists
-to prevent.**
+**本文件是执行路径,不是行为正本。** 行为正本与背景(如 nohup 禁用的说明、铺什么验什么的判据、
+non-goals)在 `orchestration/orchestrator-loop-tick.md`(冷启动段 + 冷启动背景档案)与
+`orchestration/CRYSTALLIZED-reliable-send-2026-08-04.md`。本文件只给动作(Steps)与可判定清单。
+**tick 与冷启动引用同一批行为文件**:外层 `orchestration/orchestrator-loop-tick.md`、内层
+`docs/analysis/fast-mode-loop-tick.md`(产品模板 `plugin/loop/fast-mode-loop-tick.md`)、管理者
+`orchestration/manager-loop-tick.md`。
 
 ## Preconditions (fail-closed)
 
@@ -35,48 +28,18 @@ All must hold before starting; if any fails, STOP and report which precondition 
 | inner session reachable | tmux session from `<root>/orchestration/session-liveness.env` (`SESSION_TMUX_SESSION=`), else `<project>-0:0.0`, exists (`tmux list-panes -t <session}`) |
 | derived laydown set green | the plugin's DERIVED laydown set is green — `bash <quay-source>/plugin/scripts/laydown-set-check.sh` reports `laydown_set_green: green`. **Gate = the derived set (lay what you verify), NOT the whole suite** — an unrelated suite failure must NOT block the cold start (`gap-cold-start-gate-should-be-derived-laydown-set-green-not-whole-suite`; cross: `gap-red-window-dispatch-stop-should-be-shared-gate-conditional`, same scope axis, different mechanism) |
 
-**From bare metal to a session is ONE command (`gap-no-formalized-bare-metal-session-bootstrap`).**
-This skill runs inside an already-existing outer session — the step BEFORE that (bare metal → a
-tmux window layout with a Claude Code process live in each pane) is the formalized product
-`plugin/scripts/session-bootstrap.sh <root> <layout>`:
+**Launch config is checked-in, not remembered** (background: `orchestration/orchestrator-loop-tick.md`
+冷启动背景档案). The per-role launch command lives in `<root>/.claude/launch.settings.json`
+(settings-schema keys + `_launchSpec` for flag-only params), materialized by the skill-internal
+launcher `quay-launch.sh` — the user/agent never names the launcher and never hand-types a shell
+one-liner. Verify without starting anything via the launcher's `--dry-run`.
 
-```bash
-bash <root>/plugin/scripts/session-bootstrap.sh <root> inner/outer        # project topology
-bash <root>/plugin/scripts/session-bootstrap.sh <root> manager/inner/outer # full quay-0-shaped layout
-```
-
-It creates each named window (idempotent — re-runs leave live windows alone), launches each
-role's Claude Code process via the checked-in launcher `quay-launch.sh` (the skill's internal
-implementation, never a user-facing invocation), verifies each
-process is actually alive (the same `/proc` process-detection `session-liveness.sh` uses), and
-exits non-zero naming the failing window if any window cannot be confirmed live (fail-closed).
-After it returns, this skill's "inner session reachable" precondition is already satisfied — the
-same command a cold start used to follow ("hand-build the session, then one command") is now
-truly one command.
-
-**Launch config is checked-in, not remembered.** The correct per-role launch command lives in
-`<root>/.claude/launch.settings.json` (settings-schema keys + `_launchSpec` for flag-only params) and is
-materialized by the skill-internal launcher `quay-launch.sh`. If a session must be (re)started during this
-skill, the skill handles the launch itself — the user/agent never names the launcher script and never
-hand-types a shell one-liner from memory (`gap-crystallize-launch-config-into-checked-in-settings-file`;
-`quay-launch.sh` is the skill's inner implementation, not a user-facing deliverable). To verify the
-materialized command without starting anything, the skill runs the launcher in dry-run mode (`--dry-run`);
-the `--bare` flag produces a minimal one-shot verification session (not long-lived).
-
-**Ghost-suggestion elimination is REQUIRED, not optional** (`gap-ghost-suggestion-eliminated-at-source-
-prompt-suggestions-false`, 人 2026-08-05 裁定): the launch config MUST carry `--prompt-suggestions false`
-(as `_launchSpec.promptSuggestions=false`, translated by `quay-launch.sh`) AND
-`CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false` (as the `env` key) — both routes, for every role. A cold
-start MUST confirm the materialized command contains the flag (the skill's dry-run verification — the
-launcher's `--dry-run` output must include `--prompt-suggestions false`). A fresh session launched without it shows
-gray ghost-suggestion text in the input box that the reliable-send / pane classifier can misread as a
-submitted action (fault 6/7).
-**REQUIRED launch params (gap-ghost-suggestion-eliminated-at-source-prompt-suggestions-false, human
-ruling 2026-08-05):** the ghost-suggestion (reliable-send fault 6) is eliminated AT SOURCE by two
-params, both REQUIRED (not optional), present in EVERY launched session (manager/outer/inner):
+**REQUIRED launch params (both routes, every role, fail-closed)** — the ghost-suggestion
+(reliable-send fault 6) is eliminated AT SOURCE by two params, both REQUIRED, present in EVERY
+launched session (manager/outer/inner):
 
 1. `--prompt-suggestions false` — flag-only form, materialized by `quay-launch.sh` from
-   `_launchSpec.promptSuggestions === false` (verify: `--dry-run` output contains
+   `_launchSpec.promptSuggestions === false` (verify: the launcher's `--dry-run` output contains
    `--prompt-suggestions false`).
 2. `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false` — env-var form, carried by the checked-in settings
    file top-level `env` and loaded via `--settings`.
@@ -85,35 +48,8 @@ A `--dry-run` that omits `--prompt-suggestions false` for any role means the che
 has drifted from the REQUIRED cold-start contract — STOP and fix the settings file before starting
 (`plugin/test/launch-settings.test.mjs` asserts this mechanically).
 
-## Gate criterion — 铺什么验什么 (scoped to the laydown set, not the whole suite)
-
-**What gates a cold start.** The gate is: **all scripts in the DERIVED laydown set are green** — NOT
-"the whole quay suite is green" (`scripts/test.sh` full-suite / 全量). A cold start only lays down the
-derived laydown set (the `plugin/scripts/*` the shipped skill + loop docs reference), so a suite
-failure UNRELATED to that set must NOT block it (与铺设集无关的失败不再无限期阻塞冷启动); a failure
-INSIDE the set MUST block (铺什么验什么). The 2026-08-05 wait was correct: `session-liveness.sh` +
-`session-liveness-mount.sh` are both derived members, so laying then would have shipped the M3
-busy/idle regression into the target project.
-
-**Mechanical derivation (no new mechanism).** The set is derived by grepping the shipped docs — the
-same derivation quay-init.sh's `derive_loop_scripts()` step (a) uses. Never hand-edit the set; re-run
-the grep:
-
-```bash
-grep -ohE 'plugin/scripts/[a-zA-Z0-9._-]+' <root>/plugin/skills/*/SKILL.md <root>/plugin/loop/*.md
-```
-
-**Run the gate:**
-
-```bash
-bash <root>/plugin/scripts/laydown-set-check.sh   # → `laydown_set_green: green|red`
-```
-
-`red` (a missing / non-parsing member, or a member's OWN test failing — the M3 class of logic
-regression a syntax check cannot see) blocks the cold start; `green` means the exact scripts this cold
-start will lay down are verifiably working. This is the full-suite gate's SCOPED-ED down cousin: it
-runs exactly the laid-down set's tests, nothing else — an unrelated red in the whole suite does not
-hold up the cold start.
+**Gate criterion — 铺什么验什么**（判据正文在 `orchestration/orchestrator-loop-tick.md` 冷启动背景档案；
+门是 DERIVED laydown set 绿，不是全量套件绿——步骤 1b 跑门，本文件不再复述判据）。
 
 ## Observable consequences (AC8c) — the falsifiable checklist every cold-start MUST produce
 
@@ -124,8 +60,7 @@ start did NOT complete.
 
 | # | Key | Checkable definition | Evidence |
 |---|---|---|---|
-| 1 | `MONITORS-MOUNTED` | ONE Monitor-tool invocation exists for `<root>/plugin/scripts/session-liveness-mount.sh` (an observer — session observation has exactly ONE tool, SPEC-one-observer-two-surfaces.md); `bash <root>/plugin/scripts/monitor-mount-check.sh --json` reports `mounted=true`, `targetOk=true` (2026-08-06: `delivered` retired with the shared events file — the mount check is mounted + targetOk) | the `--json` output (two criteria) |
-| 1 | `MONITORS-MOUNTED` | ONE Monitor-tool invocation exists for `<root>/plugin/scripts/session-liveness-mount.sh` (the observer, per SPEC-one-observer-two-surfaces.md; the retired per-parameter observer was removed by gap-retire-inner-state-one-observer-targets-by-parameter); `bash <root>/plugin/scripts/monitor-mount-check.sh --json` reports `mounted=true`, `targetOk=true` | the `--json` output (two criteria) |
+| 1 | `MONITORS-MOUNTED` | ONE Monitor-tool invocation exists for `<root>/plugin/scripts/session-liveness-mount.sh` (the observer — session observation has exactly ONE tool, SPEC-one-observer-two-surfaces.md; the retired per-parameter observer was removed by gap-retire-inner-state-one-observer-targets-by-parameter); `bash <root>/plugin/scripts/monitor-mount-check.sh --json` reports `mounted=true`, `targetOk=true` (2026-08-06: `delivered` retired with the shared events file — the mount check is mounted + targetOk) | the `--json` output (two criteria) |
 | 2 | `MONITORS-DELIVERING` | **At least one event line from the mounted monitor was delivered to THIS session** (a `SESSION-STATUS` line, a `SESSION-GONE`, a `SESSION-OVERDUE`, a `SESSION-IDLE`, etc. — each observer owns its own stdout stream, 2026-08-06). A running process is NOT evidence; a nohup log file is NOT evidence | the delivered event line(s), verbatim |
 | 3 | `CRON-CREATED` | `CronCreate` `*/20 * * * *` succeeded, `CronList` lists it, AND `bash <root>/plugin/scripts/loop-driver-check.sh <root>` reports `LIVE` (exactly ONE driver — not STALLED, not DOUBLE-TRIGGER) | the check output (`loop-driver: LIVE (1) …`) |
 <!-- gap-laydown-derivation-is-sensitive-to-reference-spelling-dependency-closure (AC2/AC3): this
@@ -133,8 +68,6 @@ start did NOT complete.
      and mechanically caught — the dependency-closure pass reads send-keys-reliable.sh:41
      `${SCRIPT_DIR}/transcript-delivery-check.ts` (content-level, spelling-independent), and the
      verify check resolves tick-doc bare names. Do NOT "fix" it to a prefixed form. -->
-| 4 | `INNER-DRIVEN` | `bash <root>/plugin/scripts/send-keys-reliable.sh <session> "<fast-mode tick instruction>" <target-transcript.jsonl>` exited 0 — the TARGET session's own transcript shows the drive text as a real user message (`transcript-delivery-check.ts`, Fault 5; only the target transcript is a trustworthy delivery signal — the pane-hash criterion is superseded, outer ruling F, 3 false positives). Inner was EXPLICITLY started — not assumed as a side effect of outer guidance | send-keys-reliable output (`delivered: true` + matched transcript line) |
-
 | 4 | `INNER-DRIVEN` | `bash <root>/plugin/scripts/send-keys-reliable.sh <session> "<fast-mode tick instruction>" <target-transcript.jsonl>` exited 0 — the TARGET session's own transcript shows the drive text as a real user message (`transcript-delivery-check.ts` — a BARE-FILENAME reference, resolved by quay-init's laydown derivation under plugin/scripts/, gap-laydown-derivation-is-sensitive-to-reference-spelling; Fault 5; only the target transcript is a trustworthy delivery signal — the pane-hash criterion is superseded, outer ruling F, 3 false positives). Inner was EXPLICITLY started — not assumed as a side effect of outer guidance | send-keys-reliable output (`delivered: true` + matched transcript line) |
 | 5 | `TELEMETRY-RECORD` | `<root>/.workflow-events/` contains at least one `.jsonl` file carrying a `--task-start`-written record (the runId from the first `fast-mode-telemetry.ts --task-start --taskId <id> --root <root>`) | `ls <root>/.workflow-events/` + grep for the task-start record |
 | 6 | `FIRST-TASK` | At least one task is `ready`/`done` on the board and it has been dispatched — `fast-mode-telemetry.ts --report --json --root <root>` shows it in `inProgress` (or the task-start record in #5 references it) | the `--report --json` `inProgress` |
@@ -239,11 +172,10 @@ would start the loop in a session that is visibly not the shipped topology.
 Observation has exactly ONE tool (`session-liveness.sh`, SPEC-one-observer-two-surfaces.md), mounted
 through a mount entry that execs it (who mounts owns its own stdout event stream — the "single-flight"
 mutual-exclusion semantics were retired 2026-08-06; parallel mounts of the same target are naturally
-conflict-free). Mount `session-liveness-mount.sh`:
-Observation has exactly ONE tool (`session-liveness.sh`, SPEC-one-observer-two-surfaces.md).
-The retired per-parameter observer never observed the session (tmux hits 0) and its signature signal
-(`.quay/inner-blocked.json`) never fired in any project. Mount `session-liveness-mount.sh` (the
-mount entry, which execs `session-liveness.sh`):
+conflict-free). **Never use nohup** — a `nohup bash …session-liveness.sh > log &` process is
+`ps`-identical to a Monitor-tool process but writes to a file and **nobody is notified**; if you find
+yourself writing `nohup` or `&` to background a monitor, **STOP — that is the anti-pattern this skill exists to prevent.** Mount `session-liveness-mount.sh` (the mount entry, which execs
+`session-liveness.sh`):
 
 ```
 Monitor({command: "<root>/plugin/scripts/session-liveness-mount.sh",
@@ -382,7 +314,5 @@ Report `LOOP-STATE: <cold_start_state>` plus, when stopped, `STOPPED-REASON: <st
 
 ## Non-goals
 
-- **Not a one-keypress button.** The command count is install (1–2) + init (1) + this skill (1);
-  the inner start is INSIDE this skill, not a separate human step.
-- **Not a shell script.** The monitor is mounted through the Monitor tool so its events reach a
-  session; a script that backgrounds processes delivers to nobody.
+Non-goals 与「这些不是目标」的正文已搬去 `orchestration/orchestrator-loop-tick.md`(冷启动背景档案)。
+本文件只留动作。

@@ -1,7 +1,15 @@
 ---
 id: gap-verify-delivery-surface-checks-source-layout-not-consumer-laid
-title: "verify-delivery-surface checks the SOURCE layout (plugin/loop/, plugin/scripts/ = quay's own repo) not the CONSUMER's LAID layout (orchestration/ + docs/analysis/ = what quay-init lays into a consumer) — archguard ran the real mechanism: 0/6, structurally impossible to pass for ANY consumer (verify-delivery-surface.ts:17 comment admits it); this is 'parent environment hides parent defect': the check meant to validate delivery completeness CANNOT SEE the layout it validates — if used as AC16's completeness evidence it produces a green that is structurally impossible; archguard da0b2cbf 2026-08-06"
-status: ready
+title: "verify-delivery-surface checks the SOURCE layout (plugin/loop/,
+  plugin/scripts/ = quay's own repo) not the CONSUMER's LAID layout
+  (orchestration/ + docs/analysis/ = what quay-init lays into a consumer) —
+  archguard ran the real mechanism: 0/6, structurally impossible to pass for ANY
+  consumer (verify-delivery-surface.ts:17 comment admits it); this is 'parent
+  environment hides parent defect': the check meant to validate delivery
+  completeness CANNOT SEE the layout it validates — if used as AC16's
+  completeness evidence it produces a green that is structurally impossible;
+  archguard da0b2cbf 2026-08-06"
+status: done
 labels:
   - gap
   - defect
@@ -64,7 +72,7 @@ orchestration/SPEC-*」），而**消费者 laid 布局是 orchestration/ + docs
 
 measure   consumer_surface = `node --experimental-strip-types plugin/scripts/verify-delivery-surface.ts --surface --root <consumer-dir> 2>&1 | grep -c 'ok\|PASS'` stdout 数字段
 band      consumer_surface = > 0（消费者 laid 布局可验，非 0/6）
-invoke    `grep -n 'orchestration\|docs/analysis\|plugin/loop\|plugin/scripts' plugin/scripts/verify-delivery-surface.ts`
+invoke    `node --no-warnings --experimental-strip-types plugin/scripts/verify-delivery-surface.ts --surface --root <consumer>`（invoke-evidence：指向实际交付可执行——verify-delivery-surface.ts；Evidence 有 laid/source 双布局实跑）
 control   archguard laid 布局实跑 > 0（AC1）；源布局模式保留（AC4）
 resume    laid 模式与 AC16 接线分步提交，任一步完成即写盘
 

@@ -127,6 +127,15 @@ orchestration/inner-idle-log.jsonl
 **/.quay/full-suite.log
 **/.quay/suite-state-events.jsonl
 **/.quay/suite-state-last.json
+# gap-inner-wakeup-heartbeat-invisible: inner's ScheduleWakeup fallback heartbeat product — runtime
+# state written by inner each time it reschedules (ts/delaySeconds/reason), read by the OUTER tick's
+# A13 checker (inner-wakeup-heartbeat-check.ts). Same class as suite-chain-heartbeat.json: never commit.
+**/.quay/inner-wakeup-heartbeat.json
+# gap-inner-subagent-budget-invisible: inner's subagent spawn-budget product — runtime state written
+# by inner before each dispatch decision ({spawned, limit, lastSpawnAt, hitLimit}), read by the OUTER
+# tick (inner-agent-budget-report.ts). The 200/200 harness ceiling is a silent dispatch killer — the
+# product makes it readable. Same class as suite-chain-heartbeat.json: never commit.
+**/.quay/inner-agent-budget.json
 # gap-resource-gate-no-single-flight-lock-two-suite-overlap: the single-flight lock FALLBACK path
 # (<repo_root>/.quay/full-suite.lock) used only when git-common-dir is unavailable (a non-git copy).
 # The PRIMARY path is <git-common-dir>/full-suite.lock (inside .git/, invisible to git status). The

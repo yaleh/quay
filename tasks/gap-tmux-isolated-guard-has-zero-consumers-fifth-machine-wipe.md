@@ -1,20 +1,23 @@
 ---
 id: gap-tmux-isolated-guard-has-zero-consumers-fifth-machine-wipe
-title: "the L0 anti-machine-wipe guard (tmux-isolated.sh) has ZERO consumers outside its own test —
-  8 of 9 tmux-using test files bypass it and hand-roll isolation, and 4 of those 8 are missing the
-  isolation mechanisms the guard's own header declares MANDATORY ('BOTH are required (AC1)':
-  env -u TMUX because $TMUX overrides TMUX_TMPDIR, AND an explicit -S because only -S overrides
-  $TMUX); measured: supervisor-deliver.test.mjs has neither (bare `tmux new-session` at :142 lands
-  on the DEFAULT socket that hosts the live quay-0 sessions), send-keys-reliable.test.mjs has
-  neither, session-liveness.test.mjs has env-u-TMUX but NO -S, session-bootstrap.test.mjs has -S
-  but no env -u TMUX; on 2026-08-06 ~16:00:05 the machine's entire tmux server died taking
-  quay-0's outer+inner with it, DURING a full-suite run (15:53 red, 2854 tests) that executes all
-  of these files, and sudo dmesg confirms NO kernel OOM today (last OOM was Aug 1) so this was a
-  userspace tmux kill, not memory pressure — this is the FIFTH instance of a failure mode already
-  documented four times (gap-tmux-isolation-cannot-depend-on-caller-remembering-to-unset-TMUX,
-  restart-plan-2026-08-04-third §6) for which the guard was purpose-built and then never adopted;
-  manager 2026-08-06 with sudo-verified kernel evidence"
-status: ready
+title: "the L0 anti-machine-wipe guard (tmux-isolated.sh) has ZERO consumers
+  outside its own test — 8 of 9 tmux-using test files bypass it and hand-roll
+  isolation, and 4 of those 8 are missing the isolation mechanisms the guard's
+  own header declares MANDATORY ('BOTH are required (AC1)': env -u TMUX because
+  $TMUX overrides TMUX_TMPDIR, AND an explicit -S because only -S overrides
+  $TMUX); measured: supervisor-deliver.test.mjs has neither (bare `tmux
+  new-session` at :142 lands on the DEFAULT socket that hosts the live quay-0
+  sessions), send-keys-reliable.test.mjs has neither, session-liveness.test.mjs
+  has env-u-TMUX but NO -S, session-bootstrap.test.mjs has -S but no env -u
+  TMUX; on 2026-08-06 ~16:00:05 the machine's entire tmux server died taking
+  quay-0's outer+inner with it, DURING a full-suite run (15:53 red, 2854 tests)
+  that executes all of these files, and sudo dmesg confirms NO kernel OOM today
+  (last OOM was Aug 1) so this was a userspace tmux kill, not memory pressure —
+  this is the FIFTH instance of a failure mode already documented four times
+  (gap-tmux-isolation-cannot-depend-on-caller-remembering-to-unset-TMUX,
+  restart-plan-2026-08-04-third §6) for which the guard was purpose-built and
+  then never adopted; manager 2026-08-06 with sudo-verified kernel evidence"
+status: done
 labels:
   - gap
   - defect

@@ -1,21 +1,20 @@
 ---
 id: gap-dispatch-evaluated-only-at-inner-tick-boundary-not-slot-release
 title: "dispatch re-evaluated ONLY at inner's own tick boundary, not at slot
-  release — measured (manager meta-cc, 2026-08-05): 20 Agent dispatch
-  timestamps over 6h = 3 tight clusters (12:22:04/07/10, 13:07:10/13/15,
-  13:55:56/59/56:02, intra-cluster 2-3s) with 15-55min ZERO-dispatch gaps
-  (39/30/18/33/50); fast-mode-portability dispatched 12:22:04 done ~12:28
-  freed a slot, next dispatch 13:07:10 = 39min idle while pool=27 /
-  dispatchable_disjoint=12 healthy; inner pane self-reports '下一 tick 排定
-  20/25分钟后' + transcript 'Next wakeup scheduled... harness re-invokes on
-  wakeup or task-notification' → design intent '并发是打破外层变瓶颈' (fast-mode-
-  loop-tick.md) is DEGRADED: inner's own tick interval replaces the outer's
-  20min, slot idle ≈ tick period, bottleneck moved from outer to inner;
-  ~170min recoverable throughput across the sample window; fix direction:
-  event-driven re-evaluation when ANY in-flight subagent completes (completion
-  notification already exists in the two-layer protocol), not tick-polling;
-  investigate whether the task-notification turn currently re-runs the dispatch
-  step"
+  release — measured (manager meta-cc, 2026-08-05): 20 Agent dispatch timestamps
+  over 6h = 3 tight clusters (12:22:04/07/10, 13:07:10/13/15, 13:55:56/59/56:02,
+  intra-cluster 2-3s) with 15-55min ZERO-dispatch gaps (39/30/18/33/50);
+  fast-mode-portability dispatched 12:22:04 done ~12:28 freed a slot, next
+  dispatch 13:07:10 = 39min idle while pool=27 / dispatchable_disjoint=12
+  healthy; inner pane self-reports '下一 tick 排定 20/25分钟后' + transcript 'Next
+  wakeup scheduled... harness re-invokes on wakeup or task-notification' →
+  design intent '并发是打破外层变瓶颈' (fast-mode- loop-tick.md) is DEGRADED: inner's own
+  tick interval replaces the outer's 20min, slot idle ≈ tick period, bottleneck
+  moved from outer to inner; ~170min recoverable throughput across the sample
+  window; fix direction: event-driven re-evaluation when ANY in-flight subagent
+  completes (completion notification already exists in the two-layer protocol),
+  not tick-polling; investigate whether the task-notification turn currently
+  re-runs the dispatch step"
 status: ready
 labels:
   - gap
@@ -68,6 +67,14 @@ extra:
 - [x] AC4: 负控制——无完成事件时零派发（不引入新轮询源/双驱动）— slot-refill.ts 是纯状态读取器（exit 0 恒、零写入、零派发）；tick 文档明令不建第二个 /loop、不改 ScheduleWakeup 成快轮询、无常驻 watcher；测试覆盖「无候选 ⇒ should_refill=false」 **交叉标注（2026-08-06，gap-slot-refill-only-triggered-on-completion-not-tick-heartbeat）**：本 AC4 的负控制正是该任务的反面形态——「无完成事件即零派发」把长任务霸占期间的空槽写成了正确行为，实为缺陷（实测 in_flight=1/slots_free=2/should_refill=true 却 34 分钟零派发）。该任务另立（不重开本任务），把负控制修正为「无完成事件、且 tick 心跳没到」才零派发：tick 心跳每 tick 无条件跑 slot-refill（兜底必跑触发源），完成事件只是加速源
 - [x] AC5: 并发上限语义不变（cap=3 仍在，机制/策略分离，档位配置可调）— cap 是输入（cap-from-gate.sh 的 effective_cap），slot-refill 不硬编码；测试覆盖 in-flight≥cap ⇒ no refill、cap 可调
 - [x] AC6: 与 gap-telemetry-brackets-vs-subagents（括号≠子代理）交叉标注——事件驱动依赖准确的完成感知 — 回填用 `<task-notification>` 真实完成信号、不读遥测括号；tick 文档「事件驱动派发（槽位回填）」节与本任务 Proposal 均交叉引用 gap-telemetry-brackets-vs-subagents-no-slot-visibility
+
+> **交叉标注（2026-08-10，gap-inner-wakeup-heartbeat-invisible）**：本任务把派发重评估挂到「完成事件 + tick 心跳」双触发源——但 tick 心跳的**自排程（ScheduleWakeup）本身无机械可查产物**：它停了（15.3h 未重排，0 在飞⇒无 notification⇒不重评估）没有任何文件/检查器报「心跳已断」。该任务另立：inner 每次重排写 `.quay/inner-wakeup-heartbeat.json`，外层 tick 读它判新鲜（>3 周期报「inner 兜底心跳断」）——把「自排程断了不可见」变成「断了 3 周期即报」。
+
+> **交叉标注（2026-08-10，gap-inner-subagent-budget-invisible——同族：派发评估的另一静默天花板）**：本任务管「何时评估派发」
+> （完成事件 vs tick 边界）；同族管「**派发能力本身还在不在**」——harness per-session subagent 硬上限（200/200）触顶后
+> 无法再派 subagent ⇒ 0 在飞 ⇒ 无 `<task-notification>` ⇒ 本任务的完成事件触发源**永远不 fire** ⇒ 派发评估机制在
+> 结构上无法被调起，形态与本任务描述的缺陷完全同形。该任务另立：inner 派发前写 `.quay/inner-agent-budget.json`
+> （spawned/limit/lastSpawnAt/hitLimit）并触顶即升级，把「空槽 + 有货 + 不派」的静默天花板变成外层可读的产物。
 
 ## Invoke evidence（scoped 实跑，2026-08-05）
 

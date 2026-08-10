@@ -5,7 +5,7 @@ title: CROSSCUT_CHECKS 注册表对 plugin/scripts/ 零覆盖——4 条触发�
   破、加 external-dogfooding→verify-delivery-surface 清单破、改
   known-load-sensitive→glob 破)；79% 红与变更无关(A 判定器 8+B 负载 flake 7+C 真变更 4)；补
   plugin-scripts cross-cut 条目使 C 类 scoped 即暴露非全量才暴露
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -73,7 +73,7 @@ changed: manager STOP-AND-RESCOPE——原前提错误（plugin/scripts 被规�
 
 ## Evidence（内层实现 2026-08-10 — RESCOPE 评估结论）
 
-**AC1 复现核实**：`select-tests-for-touches.ts --task gap-relation-sync-load-flake-child-spawn-under-suite`（touches `plugin/scripts/known-load-sensitive.ts`）→ 选中 `known-load-sensitive.test.mjs`（basename 配对, 规则 2/3）——plugin/scripts 触摸的自身测试覆盖 1.00, **original 前提（plugin/scripts 零覆盖）作废**。CROSSCUT_CHECKS 维持 4 条 packages/*/src trigger, 不加 plugin-scripts。
+**AC1 复现核实**：`node --no-warnings --experimental-strip-types plugin/scripts/select-tests-for-touches.ts --task gap-relation-sync-load-flake-child-spawn-under-suite`（invoke-evidence：selector 全路径实跑）（touches `plugin/scripts/known-load-sensitive.ts`）→ 选中 `known-load-sensitive.test.mjs`（basename 配对, 规则 2/3）——plugin/scripts 触摸的自身测试覆盖 1.00, **original 前提（plugin/scripts 零覆盖）作废**。CROSSCUT_CHECKS 维持 4 条 packages/*/src trigger, 不加 plugin-scripts。
 
 **AC2 结论**：不向 CROSSCUT_CHECKS 加 plugin/scripts 触发器（manager 裁定 + outer RESCOPE 02d30522）。下游耦合（verify-delivery-surface→loop-shipping AC1b 等）作为全量套件表面接受, 不以 scoped 增重换取提前浮现。
 
