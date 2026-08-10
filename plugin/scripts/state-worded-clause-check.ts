@@ -51,8 +51,32 @@ import { isDirectEntry } from "./gate-script-base.ts";
  * `直到.*绿` is intended to catch "until green" phrasings; it is applied PER-LINE (not across the
  * whole file) so an unrelated 「未绿」 in a later sentence of the same table cell cannot be dragged
  * into a hit by a leading 「直到」 (see the DEFAULT_LINE_RE note below).
+ *
+ * ACTIONIZED EXEMPTION (manager 2026-08-10 ruling, the A15 ④ shape): a clause that gives BOTH a
+ * runnable command (`scripts/test.sh`) AND a readable artifact (`verification-round.jsonl`) is the
+ * ACTIONIZED form AC41 判据① demands — "run THIS command until THAT artifact reads state=green" —
+ * and passes REGARDLESS of whether its wording contains 直到/出现. `state=green` is latin (no Chinese
+ * 绿), so a Chinese `绿` on the same line can only come from a LATER unrelated clause (绿退/未绿) in the
+ * same table cell; the raw `直到.*绿` sweep then false-positives the actionized line. The fix keeps
+ * the hard result-state words (自测绿/确保/保证) unconditional but exempts `直到.*绿` when the line
+ * also carries a command + an artifact.
  */
 export const STATE_WORD_RE = /自测绿|确保|保证|直到.*绿/;
+
+/** A runnable command on the line (backtick-quoted executable, or `bash/node/scripts/…`). */
+const COMMAND_RE = /`[^`]*\.(?:sh|ts|mjs|js)`|(?:\bbash\s+|\bnode\s+)(?:\S+\s+)*(?:\S+\.(?:sh|ts|mjs|js)|\S+)/;
+
+/** A readable artifact on the line (backtick-quoted .jsonl/.json/.log/.md path, or state file). */
+const ARTIFACT_RE = /`[^`]*\.(?:jsonl|json|log|md)`|verification-round\.jsonl|full-suite-state\.json/;
+
+/**
+ * True when the line carries BOTH a runnable command AND a readable artifact — the actionized form
+ * (AC41 判据①: 动作 + 可核产物). Such a line's `直到…绿` is the command's termination condition, not
+ * a bare result-state clause, so it is exempt from the `直到.*绿` alternative.
+ */
+export function isActionized(line: string): boolean {
+  return COMMAND_RE.test(line) && ARTIFACT_RE.test(line);
+}
 
 /** One reported hit. */
 export interface StateWordHit {
@@ -83,12 +107,23 @@ export function scanText(fileRel: string, text: string): StateWordHit[] {
     const line = lines[i];
     // Per-LINE match: `直到.*绿` must resolve within the same line so an unrelated later 「绿」
     // (e.g. "未绿退出" in a different sentence of the same table cell) cannot be swept into a hit.
-    const m = line.match(STATE_WORD_RE);
-    if (!m) continue;
+    // Split the sweep: HARD result-state words (自测绿/确保/保证) are unconditional — an actionized
+    // clause never contains them (the actionized form REPLACES 自测绿 with "跑 <cmd> 直到 <产物> 绿").
+    // The `直到.*绿` alternative gets the ACTIONIZED EXEMPTION (manager 2026-08-10): a line carrying
+    // BOTH a runnable command AND a readable artifact is the actionized form AC41 判据① demands — its
+    // `直到…绿` is the command's termination condition, not a bare result state. (The A15 ④ shape:
+    // "跑 `scripts/test.sh` 直到 `verification-round.jsonl` 出现 `scope=worktree` 且 `state=green`" —
+    // `state=green` is latin, so a Chinese 绿 on that line can only come from a LATER unrelated clause
+    // in the same table cell.) The negative control (原文「自测绿」, no command/artifact) is untouched.
+    const hard = line.match(/自测绿|确保|保证/);
+    const until = line.match(/直到.*绿/);
+    if (!hard && !until) continue;
+    const hit = hard ? hard[0] : until![0];
+    if (until && isActionized(line) && !hard) continue;
     hits.push({
       file: fileRel,
       line: i + 1,
-      hit: m[0],
+      hit,
       snippet: line.trim().slice(0, 120),
     });
   }
