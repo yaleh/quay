@@ -65,7 +65,7 @@
 | C7 | 跨文件/跨分支的数字,用之前先确认它出自**哪一份**副本 (src:580) |
 | C8 | 已核实的事实直接发外层,**不问「要不要发」**;决定归外层的,给事实 + 意见 + 明说裁定权在它 (src:16) |
 | C16 | **绕过不是罪,不留痕才是。** 撞上本项目工具缺陷 ⇒ 最低线是立案(复现+期望+实际),然后可继续绕过干活;不立案就绕过 = 缺陷永久化。本仓库自己的工具更强适用——没有别人会修 (src:1189) |
-| C10 | **一律用 `plugin/scripts/supervisor-deliver.sh <目标> <文本> --root $(pwd)`（唯一交付实现，exit 0=目标 transcript 里出现真实 user 消息）；它内部包 `send-keys-reliable.sh` 的五步硬化过程。禁止手工拼 `send-keys`,也禁止用 `send-keys-verified.sh`（其 md5 判据已被 outer ruling F 取代、ADR-016 修正案边界 (c) 明令禁止）** —— 五个失效模式 2026-08-04 已实测结晶在 `orchestration/CRYSTALLIZED-reliable-send-2026-08-04.md`：C-u 只清当前行(1554 字节需 30 次)、长文本紧跟 Enter 会被丢、稳定态 Enter 仍可能不提交、已提交与进 transcript 差 ~30s、**唯一可信送达信号是目标 transcript 里的真实 user 消息**。**我整晚手工拼、还一度让 outer 用被取代的那个——今晚我「发现」的每一条三天前都已在这里** |
+| C10 | **一律用 `plugin/scripts/supervisor-deliver.sh <目标> <文本> --transcript <目标会话 .jsonl>`（唯一交付实现；exit 0=目标 transcript 出现内容匹配的真实 user 消息,1=failed 需人工,2=用法错）。`--root` 是【重生会话】模式,等新 transcript 落盘——**对活着的会话用它必报 FAIL(我 02:2x 亲历,文本其实已送到)**。禁止手工拼 `send-keys`;`send-keys-verified.sh` 的 md5 判据已被 outer ruling F 取代、ADR-016 修正案边界 (c) 明令禁止** —— 五个失效模式 2026-08-04 已实测结晶于 `orchestration/CRYSTALLIZED-reliable-send-2026-08-04.md`:C-u 只清当前行(1554 字节需 30 次)、长文本紧跟 Enter 被丢、稳定态 Enter 仍可能不提交、已提交与进 transcript 差 ~30s、**唯一可信送达信号是目标 transcript 里的真实 user 消息**。**我整晚手工拼、又两次指错工具/参数——今晚「发现」的每一条三天前都在这里** |
 | C11 | **写任何时刻前先跑 `date -u`,不许估。** 今晚两次班次时间算错(`--since` 用了未来时刻返回空;写「已过点」而其实没到) — 借自 outer C10 (src:956) |
 | C12 | 核实「修好了没有」看**行为**或**读 diff**,**不要 grep 关键词**——描述缺陷的词必然出现在修复里。今晚 grep 到 `ERROR:`/`ANTI-DRIFT HARD FAIL` 差点当失败报,查紧邻行才知是 fixture 负向输出 — 借自 outer C5 (src:687) |
 | C13 | 下结论前先问「**如果我错了,哪一条命令会告诉我**」并跑它、贴输出。今晚每条裁定都写了反证条件(逃生舱、cgroup 假设),但那是临场自觉不是判据 — 借自 inner C13 |
