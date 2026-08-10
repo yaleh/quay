@@ -68,6 +68,7 @@ extra: {}
 - tasks/gap-batch-merge-gate-reads-stale-green.md（交叉标注——相关但不同：那是 stale green 读旧快照，这是绿快照不记 commit）
 - tasks/gap-green-verdict-never-expires-411-minutes-and-187-commits-later-still-green.md（交叉标注——绿判据时效族）
 - tasks/gap-suite-green-gate-duplicated-in-task-dod-and-batch-merge.md（交叉标注——门判据单源族）
+- tasks/gap-b3-arbitration-inflight-vs-backlog.md（交叉标注——同族：批量合门/积压）
 - tasks/gap-merge-green-snapshot-verified-commit-livelock.md（自身：勾 AC + 贴证据）
 
 ## Contract

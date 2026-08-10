@@ -37,18 +37,23 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录实证（01:05 162→01:15 169、develop 9.6h、169 排队在红门后、填满=加 WIP 不加吞吐）（本任务 Proposal 已含）
-- [ ] AC2: **仲裁规则**——B3 增 ①/④ 冲突仲裁：④ 被红阻塞且积压>阈值 → ① cap 收窄到修红所需
-- [ ] AC3: **接线**——外层 tick 核 B3 部分增仲裁判定；派发脚本读仲裁后 cap
-- [ ] AC4: **回归验证**——红窗+高积压 → cap 收窄；绿窗 → 恢复；无积压不影响
-- [ ] AC5: **既有不回归**——`--for-task` scoped 门绿
+- [x] AC1: **复现固化**——任务体记录实证（01:05 162→01:15 169、develop 9.6h、169 排队在红门后、填满=加 WIP 不加吞吐）（本任务 Proposal 已含）
+  - 证据：复现已固化于本任务 Proposal（01:05 162→01:15 169、develop 9.6h、169 排红门后、填满=加 WIP 不加吞吐）
+- [x] AC2: **仲裁规则**——B3 增 ①/④ 冲突仲裁：④ 被红阻塞且积压>阈值 → ① cap 收窄到修红所需
+  - 证据：`plugin/scripts/slot-refill.ts` 新增 `computeArbitratedCap`（红 suite `full-suite-state.json state==="red"` 且 integration 积压>50 ⇒ 有效 cap 收窄至 2）与 `readSuiteRed`；B13 五条不等式补 ①/④ 冲突仲裁判定
+- [x] AC3: **接线**——外层 tick 核 B3 部分增仲裁判定；派发脚本读仲裁后 cap
+  - 证据：`orchestration/orchestrator-tick-core.md` B13 增仲裁判定（① 的 cap 读 slot-refill 输出 `effective_cap`，`arbitration.cap_narrowed` 指示是否窄化）；slot-refill 的 `slots_free`/`recommended`/`analyzeTasks` 一律消费仲裁后 `effective_cap`；CLI 增 `--integration-backlog`/`--red-backlog-threshold`/`--red-backlog-cap`
+- [x] AC4: **回归验证**——红窗+高积压 → cap 收窄；绿窗 → 恢复；无积压不影响
+  - 证据：`plugin/test/slot-refill.test.mjs` 新增 7 个仲裁测试（纯函数 + 注入 + 真实 temp git repo CLI）：红窗+积压60 → `effective_cap=2`、推荐数≤窄 cap；绿窗 → 恢复 5；无积压/低于阈值/缺状态文件 → 不影响。26/26 通过
+- [x] AC5: **既有不回归**——`--for-task` scoped 门绿
+  - 证据：worktree 内 `bash scripts/test.sh --for-task gap-b3-arbitration-inflight-vs-backlog --allow-thin` 退出 0（26 测试全绿、静态检查含 test-isolation ratchet / task-contract-check / task-ac-carryover-check 通过）
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全部勾上
-- [ ] 修后实跑：红窗+积压 → 派发数 ≤ 窄 cap（贴任务体）；绿窗恢复
-- [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
+- [ ] AC1–AC5 全部勾上（本任务 AC1-AC5 已勾）
+- [ ] 修后实跑：红窗+积压 → 派发数 ≤ 窄 cap（贴任务体）；绿窗恢复（**verification-window：待外层实跑验证，未勾**）
+- [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）（已绿，exit 0）
+- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证（**未勾**）
 
 ## Touches
 
@@ -68,6 +73,38 @@ invariant no_backlog_no_effect = 1（无积压不影响）
 invoke    `node --no-warnings --experimental-strip-types plugin/scripts/slot-refill.ts --root <repo> --json`（红窗+高积压 fixture 贴回）
 control   红窗+积压 → cap 收窄；绿窗恢复；无积压不影响
 resume    仲裁规则 / 接线分步提交，任一步完成即写盘
+
+## Evidence（内层实现 2026-08-10）
+
+**仲裁机制（AC2/AC3）**：`plugin/scripts/slot-refill.ts` 新增三个纯函数/常量——
+- `RED_BACKLOG_CAP_DEFAULT = 2`（红窗+高积压时的窄 cap）、`RED_BACKLOG_THRESHOLD_DEFAULT = 50`（积压阈值）；
+- `readSuiteRed(root)`：读 `.quay/full-suite-state.json` 的 `state`，`state==="red"` 才为红阻塞（A11 语义：green/running/缺文件都 proceed）；
+- `computeArbitratedCap({baseCap, suiteRed, integrationBacklog, redBacklogThreshold, redBacklogCap})`：`suiteRed && integrationBacklog > threshold` ⇒ 返回 `redBacklogCap`，否则返回 `baseCap`。
+
+`analyzeSlotRefill` 接线：读 `suiteRed` + `integrationBacklog`（注入或 `git rev-list --count develop..integration`，fail-safe 0）→ `effectiveCap = computeArbitratedCap(...)` → `analyzeTasks`/`slots_free`/`recommended` 一律用 `effectiveCap`（单一 cap 概念，floor 随窄化降到 8）。输出 `base_cap`/`effective_cap`/`cap`（=effective）+ `arbitration{suite_red, red_window_active, integration_backlog, backlog_threshold, red_backlog_cap, cap_narrowed, reason}`。
+
+**测试（AC4）**：`plugin/test/slot-refill.test.mjs` 新增 7 个仲裁测试（26 个全绿）——
+- `computeArbitratedCap` 纯函数：红+60>50→2、红+50 不>50→5、绿+高积压→5、红+0→5、自定义阈值/cap；
+- `readSuiteRed`：red→true；green/running/缺文件/不可解析→false；
+- `analyzeSlotRefill` 注入：红+60→`effective_cap=2`、推荐数≤窄 cap（5 候选只推 2）、绿+80→5、红+10→5、红+0→5、缺状态→5；
+- CLI 真实 temp git repo（integration 55 ahead of develop）：红→`effective_cap=2`（git-read backlog 驱动）、绿→5；
+- 默认（无红/无积压）与既有行为字节兼容（`cap=5`、`slots_free=5`）。
+
+**门结果（AC5）**：worktree 内 `bash scripts/test.sh --for-task gap-b3-arbitration-inflight-vs-backlog --allow-thin` 退出 0；test-isolation ratchet（slot-refill.test.mjs 无新违规）、task-contract-check（no violations）、task-ac-carryover-check（new since baseline 0）均过。
+
+**Contract 实跑（红窗+高积压 fixture）**：
+```
+$ echo '{"state":"red","reason":"failed"}' > .quay/full-suite-state.json
+$ node --no-warnings --experimental-strip-types plugin/scripts/slot-refill.ts --root <repo> --integration-backlog 60 --json | jq '{cap, base_cap, effective_cap, arbitration}'
+{ "cap": 2, "base_cap": 5, "effective_cap": 2,
+  "arbitration": { "suite_red": true, "integration_backlog": 60, "backlog_threshold": 50,
+                    "red_backlog_cap": 2, "cap_narrowed": true, ... } }
+$ echo '{"state":"green","fail":0}' > .quay/full-suite-state.json   # 绿窗恢复
+$ ... slot-refill.ts --root <repo> --integration-backlog 60 --json | jq '{cap, effective_cap}'
+{ "cap": 5, "effective_cap": 5 }                                     # cap 恢复满
+```
+
+**DoD 未勾项**（verification-window，待外层）：「修后实跑：红窗+积压 → 派发数 ≤ 窄 cap（贴任务体）；绿窗恢复」与「全量套件绿」——本任务保持 `ready`，不翻 done。
 
 ## Dispatch review
 

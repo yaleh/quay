@@ -88,6 +88,7 @@ extra: {}
 - tasks/gap-merge-green-snapshot-verified-commit-livelock.md（交叉标注——同族：套件轮调度）
 - tasks/gap-phase-order-serial-lowconc-before-main.md（交叉标注——同族：套件轮时长/判红）
 - tasks/gap-load-sensitive-serial-phase-unbounded-growth-measure-first.md（交叉标注——同族：轮时长）
+- tasks/gap-b3-arbitration-inflight-vs-backlog.md（交叉标注——同族：套件轮调度）
 - tasks/gap-suite-empty-wait-no-auto-retrigger.md（自身：勾 AC + 贴证据）
 
 ## Contract
