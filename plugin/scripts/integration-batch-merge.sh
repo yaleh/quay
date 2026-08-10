@@ -952,7 +952,8 @@ if [ "${dry_run}" -eq 1 ]; then
   echo "integration-batch-merge: develop=${develop_tip} integration=${integration_tip}"
   if [ "${ff_possible}" -eq 1 ]; then
     echo "integration-batch-merge: FF-OK — ${develop_ref} is an ancestor of the merge target ${merge_target}"
-    echo "integration-batch-merge: pending merge (${develop_ref}..${merge_target}):"
+    echo "integration-batch-merge: pending on integration:"
+    echo "integration-batch-merge:   (merge surface ${develop_ref}..${merge_target})"
     printf '%s\n' "${pending}" | sed 's/^/    /'
     if [ "${merge_uses_verified}" -eq 1 ] && [ -n "${deferred}" ]; then
       deferred_count="$(printf '%s\n' "${deferred}" | grep -c . || true)"

@@ -37,11 +37,11 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 round-212 + solo 复现 + 失败断言 + d666a79e 删除行（本任务 Proposal 已含）
-- [ ] AC2: **契约恢复**——`pending on integration:` 输出段恢复（或 AC3 断言同步新形状），branch-model.test.mjs 9/9 绿
-- [ ] AC3: **verified-commit 不回归**——MERGE-TO-VERIFIED-COMMIT 逻辑保持
-- [ ] AC4: **scoped 盲区标注**——与 Q2 跨文件耦合同族（basename 配对选不出），可衔接 pool-quality-gate / CROSSCUT
-- [ ] AC5: **既有不回归**——`--for-task` scoped 门绿
+- [x] AC1:- [x] AC1: **复现固化**——任务体记录 round-212 + solo 复现 + 失败断言 + d666a79e 删除行（本任务 Proposal 已含）
+- [x] AC2: **契约恢复**——`pending on integration:` 输出段恢复（或 AC3 断言同步新形状），branch-model.test.mjs 9/9 绿
+- [x] AC3: **verified-commit 不回归**——MERGE-TO-VERIFIED-COMMIT 逻辑保持
+- [x] AC4: **scoped 盲区标注**——与 Q2 跨文件耦合同族（basename 配对选不出），可衔接 pool-quality-gate / CROSSCUT
+- [x] AC5: **既有不回归**——`--for-task` scoped 门绿
 
 ## Definition of Done
 
@@ -74,3 +74,20 @@ resume    输出段恢复 / 断言同步分步提交，任一步完成即写盘
 reviewer: outer
 at: 2026-08-10
 changed: round-212 红分诊——branch-model AC3 solo 复现失败（320ms,断言 /pending on integration:/ 不匹配）⇒ d666a79e（verified-commit 修复）删除 dry-run 的 pending on integration 输出段,契约破坏。真回归非 flake。修:恢复输出段或同步断言。实现归内层
+
+## Evidence（内层实现 2026-08-10）
+
+**AC2 契约恢复**：integration-batch-merge.sh dry-run 恢复 `pending on integration:` 标签（
+merge surface `${develop_ref}..${merge_target}` 详情并入下一行 `  (merge surface ...)`），
+FF-OK 行保留 verified-commit 上下文（"ancestor of the merge target ${merge_target}"）。
+branch-model.test.mjs **9/9 solo 绿**（AC3 `/pending on integration:/` 断言恢复命中）。
+
+**AC3 verified-commit 不回归**：只改输出标签，MERGE-TO-VERIFIED-COMMIT 逻辑（merge_target 解析、
+deferred 报告、object-gate 对 merge_target）零改动——`merge_uses_verified` 路径不变。
+
+**AC4 scoped 盲区标注**：本回归经 round-212 全量才浮现，scoped 门（`--for-task`）因 basename 配对
+选不出 branch-model.test.mjs（integration-batch-merge.sh 无同 basename 测试）——正是 manager Q2
+「跨文件耦合 basename 配对选不出」类，衔接 pool-quality-gate / CROSSCUT 讨论。
+
+**AC5 scoped 门**：`bash scripts/test.sh --for-task gap-branch-model-dryrun-pending-surface-removed --allow-thin`
+→ exit 0（branch-model 9/9 入 scoped 选择）。
