@@ -231,8 +231,10 @@ test("serial group mechanism (gap-suite-concurrency-8-green-serial-group-for-non
   // concurrency-N main body into a `serial` group that runs alone at concurrency 1. Structural pin:
   //   - group_of recognizes serial as a REAL group (so serial files are EXCLUDED from the default
   //     product,engine selection, not silently re-defaulted to engine).
-  //   - the FULL-SUITE_DEFAULT branch runs a serial phase after the main body, hard-coded to
-  //     concurrency 1 (the mechanism's invariant, never a user-tunable knob).
+  //   - the FULL-SUITE_DEFAULT branch runs a serial phase BEFORE the main body (phase-order
+  //     reorder, gap-phase-order-serial-lowconc-before-main: serial/lowconc run first so a
+  //     serial/lowconc failure is judged red before the whole main phase's cost is paid),
+  //     hard-coded to concurrency 1 (the mechanism's invariant, never a user-tunable knob).
   //   - the non-default --group serial path detects the group and forces concurrency 1, stripping
   //     any explicit --test-concurrency flag (a full-suite-runner splice must not leak lane N in).
   //   - list_groups counts serial (the 4th group in the partition).
