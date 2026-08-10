@@ -55,7 +55,7 @@ checklist 执行。
 
 | 约束 | 一句话 |
 |---|---|
-| C1 | **驱动 inner 一律用 `bash plugin/scripts/supervisor-deliver.sh <tmux目标> <文本> --root <repo>`,禁止手工拼 send-keys、禁止用 send-keys-verified.sh**（supervisor-deliver 是唯一送达实现,内部包 send-keys-reliable 五步硬化 + transcript-delivery-check 纯判据;send-keys-verified 已被 superseded,其 md5 判据被 ADR-016 Amendment boundary (c) 明令禁止）;送达判据**只用 committed 信号**（目标会话 transcript 出现内容匹配的真实 user 消息——CRYSTALLIZED-reliable-send-2026-08-04 故障 5）,**不得用 pane 回显/哈希/单次检查**（CRYSTALLIZED 故障 4:已提交与进 transcript 可差 ~30s,须有界轮询） (src:276, 人 2026-08-10 裁定更正) |
+| C1 | **驱动 inner 一律用 `bash plugin/scripts/supervisor-deliver.sh <tmux目标> <文本> --transcript <目标会话 .jsonl>`,禁止手工拼 send-keys、禁止用 send-keys-verified.sh、禁止对活会话用 `--root`**（supervisor-deliver 是唯一送达实现;`--transcript`=活会话（解析已知 transcript）,`--root`=重生会话模式（等新 transcript 落盘,对活会话必报 FAIL——manager 02:2x 踩过,工具 exit 1「60s 未现新 transcript」而文本已送达）;send-keys-verified 已被 superseded,其 md5 判据被 ADR-016 明令禁止）;送达判据**只用 committed 信号**（目标会话 transcript 出现内容匹配的真实 user 消息——CRYSTALLIZED 故障 5）,**不得用 pane 回显/哈希/单次检查**（故障 4:已提交与进 transcript 可差 ~30s,须有界轮询） (src:276, 人 2026-08-10 裁定更正) |
 | C2 | 忙闲只取 pane **底部 3 行** `tail -3 \| grep -q 'esc to interrupt'`;**整屏 `md5(capture-pane)` 是 ADR-016 明令禁止**;别写 `-S -3`(那是起始行) (src:283, 286) |
 | C3 | 跑全量套件前过 `resource-gate.sh --for full-suite`,非 0 = WAIT ⇒ 只核实便宜的声称;全量只串行跑、跑完再叫醒内层 (src:296) |
 | C4 | 数进程用 `comm` 精确匹配(`grep -cx node-MainThread` / `pgrep -xc node`)或显式排除自身;**`pgrep -f` 会匹配发起查询的命令自己**;判停摆要进程数 0 **且** load1<1 两个判据;找服务按端口 `ss -ltnp` (src:395, 402, 407) |
