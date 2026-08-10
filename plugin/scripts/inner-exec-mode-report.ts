@@ -26,21 +26,25 @@
 // 用法:
 //   node --no-warnings --experimental-strip-types plugin/scripts/inner-exec-mode-report.ts --json
 //   node --no-warnings --experimental-strip-types plugin/scripts/inner-exec-mode-report.ts --session <path> [--since <ISO>] [--json]
-//   node --no-warnings --experimental-strip-types plugin/scripts/inner-exec-mode-report.ts --repo-root <dir> --session <path> --json
+//   node --no-warnings --experimental-strip-types plugin/scripts/inner-exec-mode-report.ts --root <dir> --session <path> --json
 //
 // 参数:
 //   --session <path>   显式指定 transcript 文件（不存在 ⇒ 报错退出 2）。
 //   --since <ISO>      只数 timestamp >= 该时刻之后的工具调用（一轮 tick 报「本轮」）。
-//   --repo-root <dir>  覆盖仓库根（产品文件分类的基准；默认向上找 .quay/config.yml / git root）。
+//   --root <dir>       覆盖仓库根（产品文件分类的基准；别名 --repo-root；默认向上找 .quay/config.yml / git root）。
 //   --json             输出 JSON 对象（Contract invoke 的读取形态）。
-//   缺省 --session     自动检测：~/.claude/projects/ 下最新 .jsonl，优先父目录名匹配仓库 slug
-//                      或记录 cwd 匹配仓库根的会话。测试接缝：INNER_EXEC_MODE_PROJECTS_DIR
-//                      覆盖 projects 目录（同其它脚本的 env 接缝约定）。
+//   缺省 --session     显式身份优先（pane pid → session 反查，复用 inner-session-check.sh 的
+//                      discovery-pid 结构解析），启发式（~/.claude/projects/ 下最新 .jsonl）仅
+//                      fallback 且报 WARN —— 不再静默命中「最新」会话（多会话拓扑下会命中
+//                      manager/outer 自己；gap-session-identity-index-vs-explicit，同根：
+//                      gap-drive-sent-to-manager-pane-not-inner 错读 b8dc91a6）。
+//                      session_source ∈ pane-pid|config|arg|heuristic|none。测试接缝：
+//                      INNER_EXEC_MODE_PROJECTS_DIR 覆盖 projects 目录。
 
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { isDirectEntry } from "./gate-script-base.ts";
 
@@ -187,8 +191,11 @@ export function loadTranscript(sessionPath) {
  *   +2  父目录（或祖父目录）名 === repoSlug(repoRoot)   —— 仓库专属会话目录
  *   +1  记录 cwd 以 repoRoot 开头（cwd 探测，只看每个候选的前 CWD_PROBE_LINES 行）
  * 同分取 mtime 最新。
+ * 自排除：selfSessionId（缺省 CLAUDE_CODE_SESSION_ID —— 调用方自己的会话）的
+ * <id>.jsonl 不参与评分 —— 启发式不得命中「自己」（与 inner-session-check.sh 的
+ * discovery fallback 同纪律；gap-session-identity-index-vs-explicit）。
  */
-export function detectSession(repoRoot, projectsDir = defaultProjectsDir()) {
+export function detectSession(repoRoot, projectsDir = defaultProjectsDir(), { selfSessionId = process.env.CLAUDE_CODE_SESSION_ID } = {}) {
   const slug = repoSlug(repoRoot);
   const candidates = [];
   const walk = (dir, depth) => {
@@ -209,8 +216,13 @@ export function detectSession(repoRoot, projectsDir = defaultProjectsDir()) {
   walk(projectsDir, 0);
   if (candidates.length === 0) return null;
 
+  const nonSelf = selfSessionId
+    ? candidates.filter((c) => path.basename(c.abs) !== `${selfSessionId}.jsonl`)
+    : candidates;
+  if (nonSelf.length === 0) return null;
+
   const CWD_PROBE_LINES = 200;
-  const scored = candidates.map((c) => {
+  const scored = nonSelf.map((c) => {
     let score = 0;
     const parent = path.basename(path.dirname(c.abs));
     const grand = path.basename(path.dirname(path.dirname(c.abs)));
@@ -243,17 +255,77 @@ export function detectSession(repoRoot, projectsDir = defaultProjectsDir()) {
   return top.length > 0 ? top[0].abs : null;
 }
 
+// ── 显式身份优先：pane pid → session 反查（复用 inner-session-check.sh 机件）────────────────────────
+
+/**
+ * 调用 inner-session-check.sh --json，取其结构性 transcript 解析：pane pid → claude pid →
+ * /proc environ 的 CLAUDE_CODE_SESSION_ID → transcript 文件名（进程↔会话 1:1，唯一不会认错
+ * 的显式身份映射；与 inner-session-check.sh 的 discovery-pid 同源）。
+ * @param {string} repoRoot
+ * @param {{checkerPath?: string, env?: Record<string,string|undefined>}} [opts]  —— checkerPath 可注入
+ *   （测试接缝）；env 覆盖子进程环境。
+ * @returns {{transcript: string, source: string} | null}
+ *   source 继承 inner-session-check 的 transcriptSource：discovery-pid（结构性，可信）/
+ *   config / arg / discovery（启发式退化）。脚本不可用 / 非零退出 / 无 transcript ⇒ null。
+ */
+export function resolveViaInnerSessionCheck(repoRoot, { checkerPath, env } = {}) {
+  const script = checkerPath || path.join(repoRoot, "plugin", "scripts", "inner-session-check.sh");
+  if (!fs.existsSync(script)) return null;
+  const r = spawnSync("bash", [script, "--json"], {
+    encoding: "utf8",
+    env: { ...process.env, ...env },
+    timeout: 10_000,
+  });
+  if (r.status !== 0) return null;
+  let j;
+  try { j = JSON.parse(r.stdout); } catch { return null; }
+  if (!j || typeof j !== "object" || !j.transcript) return null;
+  return { transcript: String(j.transcript), source: String(j.transcriptSource || "discovery-pid") };
+}
+
+/** 启发式 fallback 的 WARN 文案（显式身份缺失时，多会话拓扑下可能命中错误对象）。 */
+export function heuristicWarning(sessionPath) {
+  return `未指定 --session，且无 pane pid → session 显式身份；退到启发式命中 ${sessionPath}（多会话拓扑下可能命中错误对象）。显式传 --session <path> 指定身份。`;
+}
+
+/**
+ * 缺省会话解析：显式身份优先（pane pid → session），启发式仅 fallback 且报 WARN。
+ * @param {string} repoRoot
+ * @param {string} [projectsDir]
+ * @param {{resolveIdentity?: (root: string) => {transcript: string, source: string} | null,
+ *          selfSessionId?: string}} [opts]  —— resolveIdentity 可注入（测试接缝），缺省走
+ *   resolveViaInnerSessionCheck（真实 pane pid → session 机件）。
+ * @returns {{path: string|null, source: 'pane-pid'|'config'|'arg'|'heuristic'|'none', warning: string|null}}
+ */
+export function resolveSessionPath(repoRoot, projectsDir = defaultProjectsDir(), opts = {}) {
+  const identity = opts.resolveIdentity
+    ? opts.resolveIdentity(repoRoot)
+    : resolveViaInnerSessionCheck(repoRoot);
+  if (identity && identity.transcript) {
+    if (identity.source === "discovery") {
+      // inner-session-check 自己也退到 discovery 启发式（TR_SOURCE=discovery）——视为启发式
+      // fallback + WARN（同根纪律：索引替代身份不得静默）。
+      return { path: identity.transcript, source: "heuristic", warning: heuristicWarning(identity.transcript) };
+    }
+    const src = identity.source === "discovery-pid" ? "pane-pid" : identity.source;
+    return { path: identity.transcript, source: src, warning: null };
+  }
+  const detected = detectSession(repoRoot, projectsDir, { selfSessionId: opts.selfSessionId });
+  if (detected) return { path: detected, source: "heuristic", warning: heuristicWarning(detected) };
+  return { path: null, source: "none", warning: null };
+}
+
 // ── CLI ─────────────────────────────────────────────────────────────────────────────────────────────
 
 const USAGE = `inner-exec-mode-report.ts — 主线程 Edit 产品文件数 : Agent 派发数（AC2/AC3）
 
 Usage:
-  node --no-warnings --experimental-strip-types plugin/scripts/inner-exec-mode-report.ts [--session <path>] [--since <ISO>] [--repo-root <dir>] [--json]
+  node --no-warnings --experimental-strip-types plugin/scripts/inner-exec-mode-report.ts [--session <path>] [--since <ISO>] [--root <dir>] [--json]
 
 Options:
-  --session <path>   transcript JSONL 文件（缺省自动检测最新匹配会话）
+  --session <path>   transcript JSONL 文件（缺省显式身份优先：pane pid → session；启发式仅 fallback 且报 WARN）
   --since <ISO>      只数该时刻之后的工具调用
-  --repo-root <dir>  仓库根（产品文件分类基准；缺省自动检测）
+  --root <dir>       仓库根（产品文件分类基准；别名 --repo-root；缺省自动检测）
   --json             输出 JSON`;
 
 export function main(argv = process.argv) {
@@ -262,13 +334,15 @@ export function main(argv = process.argv) {
   const has = (name) => args.includes(name);
   const session = get("--session");
   const since = get("--since");
-  const repoRootArg = get("--repo-root");
+  const repoRootArg = get("--root") || get("--repo-root");
   const json = has("--json");
 
   if (has("--help") || has("-h")) { console.log(USAGE); return 0; }
 
   const repoRoot = repoRootArg ? path.resolve(repoRootArg) : findRepoRoot();
   let sessionPath = session;
+  let sessionSource = "arg";
+  let sessionWarning = null;
   if (sessionPath) {
     sessionPath = path.resolve(sessionPath);
     if (!fs.existsSync(sessionPath)) {
@@ -276,9 +350,13 @@ export function main(argv = process.argv) {
       return 2;
     }
   } else {
-    sessionPath = detectSession(repoRoot);
+    // 缺省 --session：显式身份优先（pane pid → session），启发式仅 fallback 且报 WARN。
+    const resolved = resolveSessionPath(repoRoot, defaultProjectsDir());
+    sessionPath = resolved.path;
+    sessionSource = resolved.source;
+    sessionWarning = resolved.warning;
     if (!sessionPath) {
-      const out = { main_thread_edits: 0, agent_dispatches: 0, total_edits: 0, edits_no_file_path: 0, session: null, repo_root: repoRoot, since: since || null, error: "no session transcript detected" };
+      const out = { main_thread_edits: 0, agent_dispatches: 0, total_edits: 0, edits_no_file_path: 0, session: null, session_source: "none", session_warning: null, repo_root: repoRoot, since: since || null, error: "no session transcript detected" };
       if (json) console.log(JSON.stringify(out, null, 2));
       else { console.log(`session: (none detected under ${defaultProjectsDir()})`); console.log("main_thread_edits: 0"); console.log("agent_dispatches: 0"); }
       return 0;
@@ -287,12 +365,14 @@ export function main(argv = process.argv) {
 
   const records = loadTranscript(sessionPath);
   const res = analyzeRecords(records, { repoRoot, since });
-  const out = { ...res, session: sessionPath, repo_root: repoRoot };
+  const out = { ...res, session: sessionPath, session_source: sessionSource, session_warning: sessionWarning, repo_root: repoRoot };
 
   if (json) {
     console.log(JSON.stringify(out, null, 2));
   } else {
+    if (sessionWarning) console.error(`WARNING: ${sessionWarning}`);
     console.log(`session: ${sessionPath}`);
+    console.log(`session-source: ${sessionSource}`);
     console.log(`main_thread_edits: ${out.main_thread_edits}`);
     console.log(`agent_dispatches: ${out.agent_dispatches}`);
     console.log(`total_edits: ${out.total_edits}`);
