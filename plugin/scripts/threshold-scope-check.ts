@@ -382,7 +382,13 @@ export function scanDoc(text: string, rel: string, root: string, index: FileInde
         if (annotated) continue;
         // runtime state (expected absent in a fresh checkout): gitignored path, a .quay/ runtime
         // file, or a basename named in .gitignore (e.g. `tick-log.md` → orchestration/tick-log.md).
-        if (!sameStemDiffExt && (ignored.has(cand) || cand.startsWith(".quay/") || ignoredBasenames.has(base))) continue;
+        // UNCONDITIONAL — NOT gated on !sameStemDiffExt: a `.quay/config.yml` that collides with a
+        // same-stem-diff-ext `config.ts` in the code is STILL a runtime file whose absence in a fresh
+        // checkout (worktree/CI) is expected — the diff-ext heuristic exists to catch SOURCE path
+        // migrations (lifecycle.js → lifecycle.ts), never to re-flag runtime state. Round-217 was
+        // green on the primary checkout (which has .quay/config.yml on disk); a fresh worktree
+        // false-positived stale-path-ext. gap-threshold-scope-worktree-config-yml-false-positive.
+        if (ignored.has(cand) || cand.startsWith(".quay/") || ignoredBasenames.has(base)) continue;
         stalePaths.push({
           line: i + 1,
           path: cand,
