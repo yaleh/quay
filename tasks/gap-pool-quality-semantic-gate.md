@@ -38,11 +38,11 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录证明实例（49c0be86 + 模板路径）+ 丢失原因（三层仪器无步骤）+ 同死因对照（本任务 Proposal 已含）
-- [ ] AC2: **workflow 泛化**——`pool-quality-judge` 判词含 ready/needs-work/should-remove/uncertain，每任务 schema agent + JS 计数
-- [ ] AC3: **执行核编号步骤**——orchestrator-tick-core 增「调用 workflow」步骤（机械触发：pool>25 / 最久未复核>48h / 每 10 轮）
-- [ ] AC4: **should-remove 生效**——前提证伪任务被判 should-remove → 撤出/重定范围（不是进 pool）
-- [ ] AC5: **既有不回归**——`--for-task` scoped 门绿
+- [x] AC1: **复现固化**——任务体记录证明实例（49c0be86 + 模板路径）+ 丢失原因（三层仪器无步骤）+ 同死因对照（本任务 Proposal 已含）
+- [x] AC2: **workflow 泛化**——`pool-quality-judge` 判词含 ready/needs-work/should-remove/uncertain，每任务 schema agent + JS 计数（`.claude/workflows/pool-quality-judge.js` + `plugin/scripts/pool-quality-judge.ts`，单测 `plugin/test/pool-quality-judge.test.mjs`）
+- [x] AC3: **执行核编号步骤**——orchestrator-tick-core 增「调用 workflow」步骤（机械触发：pool>25 / 最久未复核>48h / 每 10 轮）——B15
+- [x] AC4: **should-remove 生效**——前提证伪任务被判 should-remove → 撤出/重定范围（不是进 pool）——workflow 判词 + 脚本聚合 `remove-or-rescope` 路由，demo 判词含 should-remove 案例
+- [x] AC5: **既有不回归**——`--for-task` scoped 门绿（`--allow-thin`，Touches 5 条中 3 条解析测试，2 条 doc/ADR 无测试映射——见 Invoke Evidence）
 
 ## Definition of Done
 
@@ -58,6 +58,29 @@ extra: {}
 - plugin/test/known-load-sensitive.test.mjs（AC2 workflow 泛化条目测试，若脚本化；候选路径已声明）
 - adr/ADR-033-schema-agent.md（已 accepted，本任务前提锚定）
 - tasks/gap-pool-quality-semantic-gate.md（自身：勾 AC + 贴判词分布）
+
+## Test-Files
+
+- plugin/test/pool-quality-judge.test.mjs（新增：pool-quality-judge 确定性部分的单测——AC2/AC3/AC4，basename 配对 plugin/scripts/pool-quality-judge.ts）
+- plugin/test/known-load-sensitive.test.mjs（Touches 声明路径）
+
+## Invoke Evidence
+
+**修后实跑（2026-08-10，inner worktree）**——`node --no-warnings --experimental-strip-types plugin/scripts/pool-quality-judge.ts --root <repo> --demo`（判词聚合含 should-remove 案例）:
+```
+counts { ready:1, needsWork:1, shouldRemove:1, uncertain:1, total:4 }
+distribution { ready:1, needs-work:1, should-remove:1, uncertain:1 }
+shouldRemoveIds [ "gap-demo-should-remove" ]
+actions: gap-demo-should-remove → should-remove → remove-or-rescope（前提证伪 → 撤出/重定范围，AC4 生效）
+         gap-demo-ready → ready → dispatchable / gap-demo-needs-work → needs-work → back-to-todo / gap-demo-uncertain → uncertain → needs-human
+```
+`--plan`（机械触发 + 池枚举）:
+```
+triggers { poolCount:21, oldestUnreviewedAgeMs:512555, roundsSinceLastJudge:0, fired:false, reasons:[] }
+（pool 21 ≤ 25 且最久未复核 ~8.5min ≤ 48h 且距上次 0 < 10 轮 ⇒ 本轮不触发——机械量正确）
+poolCount 21, oldestTaskId gap-ac38-outer-doc-drift, currentRound 0
+```
+单测 `plugin/test/pool-quality-judge.test.mjs`：18 pass / 0 fail。Contract measures 满足：`pool_quality_judge_ran=1`（grep -c orchestrator-tick-core）、`should_remove_tier_present`、`trigger_is_mechanical`、`judgment_is_agent`（workflow `VERDICT_SCHEMA` schema agent）。
 
 ## Contract
 
