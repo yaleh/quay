@@ -1392,3 +1392,50 @@ blob 全不同（develop 是旧版），而三层都在按新版跑。**`develop
 **未测到的例外（明确交底，测到前不写进判据）**：inner 的任务 worktree 从哪个分支切出，本轮无在飞
 worktree 故测不到。**若从 `develop` 切，worktree 内的 scoped 验证看到的是 develop 版检查器**，
 那类改动需等批量合并才在那里生效。判法：`git merge-base --is-ancestor integration <worktree-head>`。
+
+---
+
+## §生效线的代价：未经全量验证的是什么（2026-08-10，人指出上一节的代价面）
+
+上一节（§行为变更走哪条路）的结论是「不等 develop，fan-in 到 integration 即生效」。
+**人当场指出代价：在运行的版本未经 suite 测试。** 量化如下。
+
+**敞口精确化**：`develop..integration` 55 提交 = 治理文档 33(60%) / 任务体 12(22%) /
+混合合并 7(13%) / **代码机件仅 3(5%)**。上一次绿 `cddc9f6d`(02:19:20) 之后落地的
+**含代码提交 = 3 条**，且都有 scoped 绿。**所以不是「55 个提交在裸奔」。**
+
+**但那 3 条恰好全在改验证机制自身**：
+
+| 提交 | 改了什么 |
+|---|---|
+| `a37df1c5` | `capability-catalog.sh` / `quay-init.sh` / `adr016-screen-use-check.ts` + 8 处断言 |
+| `bcf31ea1` | **suite 触发器** `suite-state-trigger.ts` |
+| `1f6f607d` | **suite runner 本身** `full-suite-runner.ts` + `ready-pool-check.ts` |
+
+⇒ **用未经全量验证的改动，去改全量验证机制**——自举系统特有的风险形态，不是一般的未测代码上线。
+更具体：`1f6f607d` 03:21:12 落地，当前轮 02:58:54 起跑，**跑的树里没有它，而它改的正是 runner**
+⇒ 这一轮绿也不证明新 runner 对。
+
+**82% 的文档改动风险类型不同：不是崩溃，是判据失效。** 今晚实证：CLAUDE.md 删 164 行丢 3 条；
+执行核三次撑破 AC30(a)。**全部是我手工发现的，零机械拦截**——而它们都是可机械检查的。
+
+**生效线不是没有门，是门漏了执行核。** 静态检查层（秒级，今晚 3 次红各 11–14s）已存在且在工作，
+但实测 **`tick-core` 在 `scripts/test.sh` 里出现 0 次**：它的 `@static-object` 覆盖 `plugin/loop/*-loop-tick.md`
+与 `orchestration/manager-loop-tick.md`（**理由档案**），**不覆盖 `*-tick-core.md`（执行核）**。
+原因：执行核 2026-08-09 才建，静态检查的 object 列表还指着旧文件。
+**这正是判准正本 §1.4e 自己写的「换实现要同步换判据，否则『检查通过』检查的是一个已经不存在的东西」。**
+
+**两线模型的正确表述**：
+
+| 线 | 角色 | 应有的门 | 现状 |
+|---|---|---|---|
+| `integration` | **生效线** | **静态检查层（秒级）** | 存在，**漏了执行核** |
+| `develop` | **交付线** | 全量 suite（分钟级） | 正常 |
+
+**全量 suite 对文档改动是错的门**（30 分钟，测的 99% 与改动无关）。快路径缺的不是慢门，是它自己的秒级门。
+
+**两条判据（已发 outer）**：
+- **A 补门**：`orchestration/*-tick-core.md` 进 `@static-object`，至少覆盖 ①三份各 ≤80 行 ②指针目标存在 ③判准编号不与 B3 组冲突。
+- **B 快路径例外清单（对象封闭）**：触碰 `full-suite-runner.ts` / `suite-state-trigger.ts` / `ready-pool-check.ts` /
+  `scripts/test.sh` / `capability-catalog.sh` 的改动**不适用快路径**——fan-in 前须有一轮覆盖该改动的绿，
+  否则下一轮的红绿判定本身不可信。**今晚这 3 条全部违反了它，且是在我建议加速的情况下发生的。**
