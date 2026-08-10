@@ -131,3 +131,31 @@ $ node --no-warnings --experimental-strip-types plugin/scripts/threshold-scope-c
 ```
 
 `--for-task` scoped 门结果见 dispatch 回传（fail 0 / cancelled 0 / contract-check 0）。
+
+### 复核（2026-08-10，fresh worktree from develop 018d5868）
+
+主修复已在 develop（37948eab），本次以独立 fresh checkout 复核，确认修复在更新后的
+develop 头上依然成立、且既有 checker 不回归：
+
+```
+$ node --no-warnings --experimental-strip-types --test plugin/test/loop-shipping.test.mjs
+# 12 pass / 0 fail（AC1b 绿）；Contract measure `grep -c '✖ AC1b'` = 0
+
+$ node --no-warnings --experimental-strip-types --test plugin/test/threshold-scope-check.test.mjs
+# 9 pass / 0 fail（ratchet growth=false, currentCount=baselineCount=5）
+
+$ node --no-warnings --experimental-strip-types --test plugin/test/loop-shipping-necessity-check.test.mjs
+# 3 pass / 0 fail（inert_exclusions 0）
+
+$ node --no-warnings --experimental-strip-types plugin/scripts/threshold-scope-check.ts --root . --json
+# scanned: [plugin/loop/fast-mode-loop-tick.md, plugin/loop/orchestrator-loop-tick.md, CLAUDE.md]
+# violations: 3  stalePaths: 2  ratchet: { baselineCount: 5, currentCount: 5, growth: false }
+
+# 既有 checker 不回归（shared exclusion-data）：
+#   adr016-screen-use-check 15/15 · no-manager-tick-doc-check 5/5 · instrument-failure-check 11/11
+```
+
+`./scripts/test.sh --for-task gap-loop-shipping-threshold-scope-check-old-path-regression --allow-thin`
+→ **21 pass / 0 fail / 0 cancelled / exit 0**（loop-shipping AC1/AC1b/AC1c/AC2/AC7 +
+threshold-scope-check AC2..AC11 全绿；static 层 task-contract-check 0 违规、threshold-scope
+ratchet 0 新增）。AC5（全量套件）按 DoD 留待外层 verification-round 验证。
