@@ -14,63 +14,82 @@ extra: {}
 ---
 **type:** execution
 
-## Proposal
+## Proposal（2026-08-10 人裁定：删除——A-E 完整计划，先定目标态再对照）
 
-**`send-keys-verified.sh` 已经退休（Layered retirement 范式原型：`NEVER_LAYDOWN="send-keys-verified.sh quay-init.sh"`，gate-scripts-retirement.test.mjs 把它命名为此范式的原型个案——「the files stay in the plugin tree but are no longer laid down by quay-init and no longer synced by sync.sh」），但**没退干净**：①它仍可被调用（2026-08-10 我今晚就调了并据此发了错指引）——退休了但没人拦；②它的测试仍在跑并泄漏 tmux server（gap-send-keys-verified-leaks-tmux-servers-unincorporated，status ready，是这族唯一没办完的；144 个孤儿进程/700MB；round-210 的红就是它）。本任务办 ①：**退休脚本可调用性检查**——capability-catalog 管入口（183 声明/0 未分类/178 出货），gate-scripts-retirement 管出口但只是单个案例，**没有一道答「已被取代的机件是否仍有调用者」**。**
+**结晶阶段删除是必要的——遗留残骸污染上下文，已经引起了错误的行为（今晚实证：读到 send-keys-verified.sh、指错工具、误判 false-done）。目标态：①一个能力=一个实现，同名第二份即污染源；②被取代的实现**不存在于仓库**（不是「不铺设」是不存在），因此不可能被调用/被读到/被带进上下文；③历史留在**记录层**（ADR/任务体/结晶文档），不留在**可执行层**（plugin/scripts、plugin/test、packages/*/plugin vendored 副本）；④入口文档指向机件不复述规程（CLAUDE.md:204/207 已改 ✓）；⑤一道机械检查保证①-④不回潮。**
 
 ### 实证（人 2026-08-10 裁定 + outer 复核）
 
-- **send-keys-verified 是退休范式原型**：quay-init.sh:816 `NEVER_LAYDOWN="send-keys-verified.sh quay-init.sh"`；:1348「send-keys-verified.sh is retired」；gate-scripts-retirement.test.mjs「Layered retirement (**send-keys-verified precedent**)」。≥8 个测试钉「它不被铺设」这条不变式。
-- **没退干净**：①仍可被调用（我今晚调用并据此发了错指引——退休了但没人拦）；②测试仍在跑泄漏 tmux server（144 孤儿进程/700MB,round-210 红）。
-- **缺的检查**：capability-catalog 管入口（新脚本无声明会被报出）、gate-scripts-retirement 管出口（单案例）——**没有一道答「已被取代的机件是否仍有调用者」**。
-- **建议（人）**：给 capability-catalog 加 superseded 表 + 检查——superseded 脚本 ①不得进 laydown ②不得出现在任何 SKILL/README 的教学位置 ③静态调用者为 0。这是 manager 给自己加 A16 的仓库级版本。
+- **目标态①直接证据**：plugin 版（3457B,有统一 --help）与 vendored 版（3038B,无）**已漂移 7 行**——同名同能力两份实现已经分叉。
+- **目标态②的反面**：quay-init-check-drift.test.mjs:212 断言「must still exist in the plugin tree (layered retirement keeps the file)」——正是「存在但不铺设」的反面,须改成「不存在」。
+- **四类实体清点**：
+  - **A 删除（4 实体）**：plugin/scripts/send-keys-verified.sh (3457B)、packages/quay/plugin/scripts/send-keys-verified.sh (3038B)、plugin/test/send-keys-verified.test.mjs (13204B)、docs/analysis/send-keys-verified-test-leaks-tmux-servers.md (2461B)。删 test.mjs 顺带解决 gap-send-keys-verified-leaks-tmux-servers-unincorporated（144 孤儿/700MB,round-210 红）。
+  - **B 必须同步改否则删了就红**：quay-init-check-drift.test.mjs:211-216（「存在但不铺设」→「不存在」）、quay-init-drift-report.test.mjs:203、install-config-driven-e2e.test.mjs:575（写进临时工作区当夹具）、adr016-screen-use-check.test.mjs:107/160/163（断言 retired>=1）、adr016-screen-use-check.ts:74（KNOWN RETIRED 表含它）、capability-catalog.sh:207（声明行）、quay-init.sh:816（NEVER_LAYDOWN,文件没了不需要）。
+  - **C 保留（记录层,正确历史）**：adr/ADR-016、CRYSTALLIZED-reliable-send-2026-08-04.md、outer-rulings-2026-08-04-A-F.md、tasks/*.md、send-keys-reliable.sh 头注释里「为什么取代它」那几行。
+  - **D 悬空命名重命名**：退休范式「Layered retirement (**send-keys-verified precedent**)」在 quay-init.sh:30 / plugin-packaging.test.mjs:513 / gate-scripts-retirement.test.mjs:7——删了文件这名字悬空;范式改名（建议「分层退休」,或改以 gate-scripts 为存活范例）。
+  - **E 目标态⑤检查**：capability-catalog 加 superseded 表（与声明表单正本同构）+ 检查：superseded 实现不得存在于 plugin/scripts、plugin/test、packages/*/plugin;且不得出现在 SKILL/README 教学位置。载体 = 本任务（gap-retired-script-still-callable）。
 
-**为什么重要**：退休但不拦调用 = 退休形同虚设——下一个人照旧用 send-keys-verified（我今晚就犯了），且其测试泄漏污染套件。把「被取代的机件无调用者」变成机械检查，退休才真正生效。
+**为什么重要**：删除是结晶的收尾——不删则残骸持续污染上下文（今晚已实证）。A-E 完整计划保证删除后不红、历史保留在记录层、范式改名不悬空、机械检查不回潮。
 
 ### 选定机制方向（实现归内层，接法留执行时）
 
-1. **superseded 表**：capability-catalog 加 superseded 声明（send-keys-verified → supervisor-deliver/send-keys-reliable）。
-2. **三检查**：①不得进 laydown（已有 NEVER_LAYDOWN,补目录 superseded 表联动）；②不得出现在 SKILL/README 教学位置（grep 教学文件）；③静态调用者为 0（grep plugin/scripts + packages + SKILL 里的 `send-keys-verified.sh` 调用,排除 NEVER_LAYDOWN/退休注释本身）。
-3. **接线**：进 run_static_checks（或能力目录检查）。
+1. **A 删除**：4 实体删除（含 vendored 副本）。
+2. **B 同步改**：8 处断言/声明从「存在但不铺设」→「不存在」或移除。
+3. **D 范式改名**：「分层退休」或 gate-scripts 存活范例,3 处。
+4. **E superseded 表 + 检查**：capability-catalog,接线 run_static_checks。
+5. **C 保留**：记录层不动。
 
-**验证锚**：修后 (a) 目录有 superseded 表；(b) 静态调用者检查报 0 或列明；(c) 教学位置无 superseded 脚本。
+**验证锚**：修后 (a) 4 实体不存在;(b) B 处不红（scoped 门）;(c) 范式改名无悬空;(d) E 检查在档。
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 send-keys-verified 退休范式原型 + 没退干净（可调用 + 泄漏）+ 缺「无调用者」检查（本任务 Proposal 已含）
-- [ ] AC2: **superseded 表**——capability-catalog 加 superseded 声明
-- [ ] AC3: **三检查**——①不进 laydown ②不教学位置 ③静态调用者 0
-- [ ] AC4: **接线**——进 run_static_checks
-- [ ] AC5: **既有不回归**——`--for-task` scoped 门绿
+- [ ] AC1: **复现固化**——任务体记录 A-E 四类清点 + 目标态①②证据（本任务 Proposal 已含）
+- [ ] AC2: **A 删除**——4 实体删除（plugin/vendored/test/docs）
+- [ ] AC3: **B 同步改**——8 处断言「存在」→「不存在」或移除,删除后 scoped 门不红
+- [ ] AC4: **D 范式改名**——「分层退休」或 gate-scripts 范例,3 处无悬空
+- [ ] AC5: **E superseded 表 + 检查**——capability-catalog 加表 + 接线 run_static_checks
+- [ ] AC6: **C 保留**——记录层（ADR/结晶/任务）不动
+- [ ] AC7: **既有不回归**——`--for-task` scoped 门绿
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全部勾上
-- [ ] 修后实跑：superseded 表 + 三检查输出（贴任务体）
+- [ ] AC1–AC7 全部勾上
+- [ ] 修后实跑：4 实体不存在 + B 处绿 + 范式无悬空 + E 检查在档（贴任务体）
 - [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
 
 ## Touches
 
-- plugin/scripts/capability-catalog.sh（superseded 表 + 三检查）
-- plugin/test/capability-catalog.test.mjs 或等价（AC2-AC4 测试）
-- plugin/scripts/quay-init.sh（NEVER_LAYDOWN 已含 send-keys-verified——联动确认）
-- tasks/gap-send-keys-verified-leaks-tmux-servers-unincorporated.md（交叉标注——②泄漏办完）
+- plugin/scripts/send-keys-verified.sh（A 删）
+- packages/quay/plugin/scripts/send-keys-verified.sh（A 删,vendored）
+- plugin/test/send-keys-verified.test.mjs（A 删——顺带解决泄漏任务）
+- docs/analysis/send-keys-verified-test-leaks-tmux-servers.md（A 删）
+- plugin/test/quay-init-check-drift.test.mjs:211-216（B 改「存在」→「不存在」）
+- plugin/test/quay-init-drift-report.test.mjs:203（B 改）
+- packages/quay/test/install-config-driven-e2e.test.mjs:575（B 改,夹具引用）
+- plugin/test/adr016-screen-use-check.test.mjs:107/160/163（B 改）
+- plugin/scripts/adr016-screen-use-check.ts:74（B 改,KNOWN RETIRED 表）
+- plugin/scripts/capability-catalog.sh:207 + E（B 改声明 + E superseded 表）
+- plugin/scripts/quay-init.sh:816（B 改,NEVER_LAYDOWN 移除）+ :30（D 改名）
+- plugin/test/plugin-packaging.test.mjs:513（D 改名）
+- plugin/test/gate-scripts-retirement.test.mjs:7（D 改名）
 - tasks/gap-retired-script-still-callable.md（自身：勾 AC + 贴证据）
+- tasks/gap-send-keys-verified-leaks-tmux-servers-unincorporated.md（A 删后关闭——泄漏源消失）
 
 ## Contract
 
-measure   superseded_static_callers = `grep -rn "send-keys-verified.sh" plugin/scripts packages --include="*.sh" --include="*.ts" --include="*.mjs" | grep -v "NEVER_LAYDOWN\|retired\|superseded" | wc -l` 的 stdout 数字
-band      superseded_static_callers = 0（superseded 脚本静态调用者为 0）
-invariant superseded_not_in_laydown = 1（不进 laydown）
-invariant superseded_not_in_teaching = 1（不教学位置）
-invariant catalog_has_superseded_table = 1（目录有 superseded 表）
-invoke    `bash plugin/scripts/capability-catalog.sh`（贴 superseded 表 + 三检查输出）
-control   superseded 表在档；静态调用者 0；教学位置无 superseded；接线 run_static_checks
-resume    superseded 表 / 三检查 / 接线分步提交，任一步完成即写盘
+measure   skv_entities_remaining = `ls plugin/scripts/send-keys-verified.sh packages/quay/plugin/scripts/send-keys-verified.sh plugin/test/send-keys-verified.test.mjs docs/analysis/send-keys-verified-test-leaks-tmux-servers.md 2>&1 | wc -l` 的 stdout 数字
+band      skv_entities_remaining = 0（4 实体全删）
+invariant b_assertions_not_red = 1（B 处改后 scoped 门绿）
+invariant paradigm_renamed_no_dangling = 1（D 范式改名无悬空）
+invariant superseded_check_wired = 1（E superseded 表 + run_static_checks 接线）
+invariant record_layer_preserved = 1（C 记录层不动）
+invoke    `bash scripts/test.sh --for-task gap-retired-script-still-callable`（scoped 门绿贴回）+ `bash plugin/scripts/capability-catalog.sh`（superseded 表贴回）
+control   4 实体不存在；B 处绿；范式无悬空；E 检查在档；记录层保留
+resume    A 删 / B 改 / D 改名 / E 表分步提交，任一步完成即写盘
 
 ## Dispatch review
 
 reviewer: outer
 at: 2026-08-10
-changed: 人裁定——send-keys-verified 已退休（范式原型）但没退干净:①仍可调用（我今晚调用发错指引）②测试泄漏 tmux。本任务办①:capability-catalog 加 superseded 表 + 三检查（不进 laydown/不教学/静态调用者 0）,接线 run_static_checks。②泄漏归 gap-send-keys-verified-leaks-tmux-servers-unincorporated（ready）。实现归内层
+changed: 人裁定删除（结晶收尾——残骸污染上下文已实证:读到/指错工具/误判 false-done）。A-E 完整计划:①能力=一实现,同名第二份即污染源（A 两版已漂移 7 行=证据）;②被取代实现不存在于仓库;③历史留记录层;④入口文档指向机件（已改✓）;⑤机械检查不回潮。A 删 4 实体+B 改 8 断言+D 范式改名+E superseded 表+C 记录层保留。实现归内层
