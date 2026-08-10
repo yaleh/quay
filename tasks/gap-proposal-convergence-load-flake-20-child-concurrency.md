@@ -87,5 +87,6 @@ changed: 建任务时判「负载 flake」；inner 10:42 根因定位升格为�
 **修法（补充 AC）**：
 - **AC6（新增）**：`proposal-convergence.test.mjs` 头部加 `// KNOWN-LOAD-SENSITIVE` + `// @load-sensitive heavy`（20-concurrency 子进程重型），runner 的 load-sensitive 分区把它隔离（serial 相位或并发 1），消除全量套件下轮换红。
 - 不削弱 20-concurrency 断言核心（AC4 保留）；solo 仍 218/218（AC3 保留）。
+- **同族交叉标注**：`tasks/gap-runner-grouping-ac7-nested-spawn-load-flake.md`——nested-spawn 负载 flake 同族第 3 例（runner-grouping AC7 同为 delta 断言在负载/并发下轮换红，改 DIRECT 归属免疫）。
 
 **验证锚**：修后连续 2 轮全量套件 proposal-convergence 不红（band `proposal_convergence_red_rounds_after_fix=0` 达成）。

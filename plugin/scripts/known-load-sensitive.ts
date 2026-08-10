@@ -37,6 +37,12 @@
 //       # `// KNOWN-LOAD-SENSITIVE` claim must ALSO carry `// @load-sensitive <kind>`; exit 1 on a
 //       # violation (a new unannotated claim is mechanically rejected)
 //
+// Serial-phase ruling (manager 2026-08-10, mechanism-side carrier; the doc-side anchor lives in the
+// shipped orchestrator-tick-core.md): 收编到 serial 相（把一族测试移进 concurrency-1 的 serial 阶段）
+// 只应在「证明并发确实造成了该 flake」之后执行——判定依据必须是实测并发失败归因到该族的证据，
+// 不是「最近在 suite 里闪了一下」的印象。先归因，再收编；收编本身不替代归因。本文件的 KINDS 就是
+// 归因分类器（一个 root cause = 一个 kind）——收编决策应落在 kind 已证实的族上。
+//
 // Exit: 0 ok; 1 a `--check` invariant violation; 2 usage/env error.
 
 import fs from "node:fs";

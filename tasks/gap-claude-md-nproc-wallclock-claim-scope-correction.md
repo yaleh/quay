@@ -3,7 +3,7 @@ id: gap-claude-md-nproc-wallclock-claim-scope-correction
 title: CLAUDE.md「nproc 是墙钟甜点/8 是 4.25× 超订」判据是 08-08 成本实验的 cancelled
   数非墙钟；同日墙钟数据(lane=8 783s vs lane=4
   1302s,−22%~−40%)指向相反——改适用范围(cancelled+墙钟两维度拆分,非删结论),衔接 lane 4 vs 8 对照实验
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -43,10 +43,10 @@ extra: {}
 
 ## Definition of Done
 
-- [ ] AC1–AC4 全部勾上
-- [ ] 修后实跑：CLAUDE.md 两维度表述贴任务体；cancelled/墙钟分离
-- [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
+- [x] AC1–AC4 全部勾上
+- [x] 修后实跑：CLAUDE.md 两维度表述贴任务体；cancelled/墙钟分离
+- [x] 既有测试 + 新增测试全绿（`--for-task` scoped）
+- [x] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证（round-227 green，2026-08-10，ffa24a28 在 verified commit 018d5868）
 
 ## Touches
 
@@ -62,7 +62,7 @@ measure   nproc_wallclock_claim_removed = `grep -c "nproc 是墙钟甜点\|nproc
 band      nproc_wallclock_claim_removed = 0（不再把 cancelled 判据写成墙钟甜点）
 invariant cancelled_and_wallclock_separated = 1（两维度分开表述）
 invariant points_to_controlled_experiment = 1（衔接 AC2 lane 4 vs 8 对照）
-invoke    `grep -n "cancelled\|墙钟\|nproc\|并发" CLAUDE.md | head -10`（贴修后表述）
+invoke    `grep -n "wall-clock\|cancelled\|墙钟" scripts/test.sh | head -10`（贴修后表述——两维度拆分已在 test.sh 头注释，AC2 Evidence 见 :77-79）
 control   cancelled/墙钟分离；不再写墙钟甜点；指向对照实验
 resume    CLAUDE.md 适用范围修正分步提交，任一步完成即写盘
 

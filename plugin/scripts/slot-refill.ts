@@ -265,10 +265,21 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
     // Ties stay id-deterministic. The signal only re-ranks; the step-4 dispatch checks above still
     // gate admission (a suite-blocker that fails touches-resolve/deps/disjoint is never forced in).
     const suiteBlockingIds = new Set((pool.suite_blocking && pool.suite_blocking.tasks) || []);
+    // DELIVERY-CRITICAL SECOND AXIS (gap-ac36-delivery-critical-priority-axis): the sort key is now
+    // (blocking_suite, delivery_critical, id). `deliveryCritical` comes from parseCandidate (which
+    // reads the task's frontmatter `labels` via task-schema's parseTask — reuse, no new parser). A
+    // task labeled `delivery-critical` ranks below a suite-blocker but ABOVE plain id order, so the
+    // productization-delivery phase's AC tasks are picked by the refill before ordinary pool work.
+    // The signal only re-ranks (SIGNAL, not a gate): the step-4 dispatch checks above still gate
+    // admission, and a delivery-critical task that fails touches-resolve/deps/disjoint is never
+    // forced in.
     candidates.sort((a, b) => {
       const ab = suiteBlockingIds.has(a.id) ? 0 : 1;
       const bb = suiteBlockingIds.has(b.id) ? 0 : 1;
       if (ab !== bb) return ab - bb;
+      const ad = a.deliveryCritical ? 0 : 1;
+      const bd = b.deliveryCritical ? 0 : 1;
+      if (ad !== bd) return ad - bd;
       return a.id.localeCompare(b.id);
     });
     const { batch } = assembleBatch(candidates, { expand });

@@ -28,6 +28,7 @@ extra: {}
 - 该测试做**真实 `npm pack` + 两个 temp workspace install**（每 install 起 `quay-native mcp` + `npm install`），跑 `✖ A1` 子测试时 `duration_ms=186563`（3min+）——**低并发组（lowconc, 并发 3）里与其他 hermetic 测试并行时，install 慢 + 资源争抢 ⇒ 超时/失败**。
 - 已标注 `// @test-group lowconc`（正确），但 lowconc 并发 3 下仍会争抢（两个 install 同时跑 + 主相位残留资源）。
 - **与 `gap-lowconc-tmux-session-name-collision-race` 同族**：hermetic 但并行 install 互相干扰。
+- **与 `gap-runner-grouping-ac7-nested-spawn-load-flake` 同族**（交叉标注）：负载敏感重测试/嵌套 spawn 全量下轮换 flake（同族第 3 例）。
 
 **为什么重要**：它是「真实 install 字节一致」的承重 e2e（config-driven install 的负控制），负载红会**间歇性挡批量合**（round-155 因此没绿，freshness 又加码）。不是假红，是「并发下 install 争抢」的真问题。
 

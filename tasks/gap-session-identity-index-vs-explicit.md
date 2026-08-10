@@ -29,10 +29,10 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 inner-exec-mode-report.ts:36 启发式命中自己 + 00:22 错读同源（本任务 Proposal 已含）
-- [ ] AC2: **显式身份优先**——缺省 --session 先反查 pane pid → session，启发式仅 fallback + WARN
-- [ ] AC3: **同根覆盖**——一条根因（索引替代身份）覆盖 inner-exec-mode-report + 外层 transcript 读取两实例
-- [ ] AC4: **既有不回归**——`--for-task` scoped 门绿
+- [x] AC1: **复现固化**——任务体记录 inner-exec-mode-report.ts:36 启发式命中自己 + 00:22 错读同源（本任务 Proposal 已含）
+- [x] AC2: **显式身份优先**——缺省 --session 先反查 pane pid → session，启发式仅 fallback + WARN
+- [x] AC3: **同根覆盖**——一条根因（索引替代身份）覆盖 inner-exec-mode-report + 外层 transcript 读取两实例
+- [x] AC4: **既有不回归**——`--for-task` scoped 门绿
 
 ## Definition of Done
 
@@ -64,3 +64,40 @@ resume    显式身份优先 / 启发式 WARN 分步提交，任一步完成即�
 reviewer: outer
 at: 2026-08-10
 changed: manager 更正——inner-exec-mode-report.ts 缺省 --session 自动检测最新 .jsonl 命中自己（b8dc91a6），与我 00:22 错读同源（索引/最新替代显式身份）。并成一条根因：显式身份优先 + 启发式 fallback WARN。实现归内层
+
+## Evidence（内层实现 2026-08-10）
+
+**AC2 显式身份优先（实现）**：`plugin/scripts/inner-exec-mode-report.ts` 缺省 `--session` 改为
+`resolveSessionPath()` —— ① 显式身份优先：`resolveViaInnerSessionCheck(repoRoot)` 复用
+`inner-session-check.sh --json` 的 pane pid → claude pid → `/proc environ` CLAUDE_CODE_SESSION_ID →
+transcript 的结构性反查（discovery-pid，进程↔会话 1:1）；② 启发式仅 fallback 且报 WARN：
+`detectSession()` 现在自排除调用方自己的会话（`CLAUDE_CODE_SESSION_ID` 的 `<id>.jsonl` 不参与评分，
+与 inner-session-check 的 discovery fallback 同纪律），命中时输出 `session_source=heuristic` +
+`session_warning`（human 模式 stderr 报 WARNING）。输出新增 `session_source`
+（pane-pid|config|arg|heuristic|none）与 `session_warning` 字段；`--root` 别名（契约 invoke 形态，
+`--repo-root` 仍兼容）。
+
+**DoD 修后实跑（主仓，inner 会话在 pane 里可反查）**：
+`node --no-warnings --experimental-strip-types plugin/scripts/inner-exec-mode-report.ts --root /home/yale/work/quay --json`
+→ `session` = `.../35ecbb54-3172-402e-9b93-55bc13eab3fb.jsonl`（inner 会话，经 pane pid → session
+反查，非 manager/outer）、`session_source` = `pane-pid`、`session_warning` = `null`（显式身份不 WARN）。
+主仓 `inner-session-check.sh --json` 佐证：`transcriptSource=discovery-pid`（结构性，非 discovery）。
+
+**启发式 fallback WARN（worktree 无内层会话可反查时）**：
+`node --no-warnings --experimental-strip-types plugin/scripts/inner-exec-mode-report.ts --root <worktree> --json`
+→ `session_source` = `heuristic`、`session_warning` 非空（human 模式 stderr 打 `WARNING: 未指定
+--session，且无 pane pid → session 显式身份；退到启发式命中 …`）。自排除验证：本环境
+CLAUDE_CODE_SESSION_ID=35ecbb54，启发式命中 7795bb75（非自己）。
+
+**AC3 同根覆盖（交叉标注）**：`tasks/gap-drive-sent-to-manager-pane-not-inner.md`（26 次错读
+b8dc91a6）与 `tasks/gap-inner-serial-main-thread-not-dispatch.md`（本 helper 的创建任务）各加
+「同根标注」节，指向本任务：一条根因（索引/最新替代显式身份）覆盖两实例。
+
+**AC4 scoped 门绿**：`bash scripts/test.sh --for-task gap-session-identity-index-vs-explicit --allow-thin`
+退出 0 —— `ℹ pass 13 fail 0 cancelled 0`（原 8 条 + 新增 5 条：显式身份优先 / 启发式 fallback WARN /
+discovery 退化 WARN / detectSession 自排除 / CLI `--root` 别名 + 缺省跑 WARN + 显式 `--session`=arg）。
+scoped 静态检查（task-contract / test-isolation / test-impl-census / superseded-capability）全 PASS；
+capability-catalog `inner-exec-mode-report.ts` 已声明（unclassified = 0）。
+
+**DoD 说明**：全量套件行未勾（外层 verification-round 的活，scoped-only 下任务内不可知）；
+`status: ready` 不变。

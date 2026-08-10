@@ -175,17 +175,21 @@ drive-contract-check、instrument-failure-check、adr016-screen-use-check，全�
 **AC 勾选**——AC1-AC5 [x]（2026-08-08 落地时勾）；AC6 池机制三件套 **推迟**（见 AC6 注，不在本条
 Touches 范围，单独立项），DoD AC6 行保持未勾；`status: ready` 不变（ready→done 由外层全量门收口）。
 
+
 ### Evidence（内层重核验 2026-08-10 第二轮）
 
 **本轮形态**：worktree 分支 `task/gap-targeted-promotion-operation-does-not-exist` 自 develop
 （018d5868）新建，分叉基线已含既有实现（`9aa945fa` --targeted 落地 + `38f4daa3` 核验），本内层轮为
+
 **对既有实现的完整重核验**——无需新增代码，逐项复核代码/文档/测试/实跑并收尾任务文件。
 
 **scoped 门实跑（本内层轮）**——
 ```
 $ bash scripts/test.sh --for-task gap-targeted-promotion-operation-does-not-exist --allow-thin
+
 task-contract-check: no violations.        # --strict-subset 扫描本任务 + gap-promotion-cadence 任务
 tests 63 / pass 63 / fail 0 / cancelled 0 / duration_ms ~13953   # ready-pool-check.test.mjs 全绿，含 6 条 --targeted 用例
+
 EXIT=0
 ```
 
@@ -193,14 +197,18 @@ EXIT=0
 - `measure targeted_promote_path`：`grep -cE "定向晋级|--targeted|targeted.*promote"` ⇒
   ready-pool-check.ts=8 / fast-mode-loop-tick.md=3 / orchestrator-loop-tick.md=6，band ≥1 ✓（修复前=0）。
 - `measure floor_independent`：`pool < floor` 出现位置全部落在补充 refill 路径（:25/:77/:101/:120/
+
   :988/:1004/:1121/:1148/:1229 等），定向路径 `:785`/`:844`/`:1073` 明确注释「NEVER gated on pool < floor
   (AC2)」/「floor_independent: true」/「NOT gated on deficit>0 / pool<floor (AC2)」——`pool < floor` 只约束
   补充不约束定向 ✓。
 
+
 **invoke 实跑（本内层轮，2026-08-10）**——
 - **负控制（本任务自身）**：live `--targeted gap-targeted-promotion-operation-does-not-exist` 返回
   `{ found: true, status: "ready", eligible: false, floor_independent: true, reason: "status-ready",
+
   pool: 30, floor: 12, cap: 3 }` ——状态护栏生效（不重复 promote 已 ready 的任务）。
+
 - **正控制（合成 todo 目标，AC2 负控制形状）**：cap=2/floorMult=1 ⇒ floor=2，两个 ready（pool=2≥floor，
   deficit=0），`--targeted gap-target`（todo 四件套齐）⇒ `{ found: true, status: "todo", eligible: true,
   floor_independent: true, promote_cmd: "quay promote gap-target", pool: 2, floor: 2, cap: 2 }`，同时批量

@@ -33,6 +33,10 @@
 # Flags:
 #   --force         overwrite on conflict (backup the existing file first)
 #   --dry-run       list what would happen, copy nothing
+#   --manager       with --loop: ALSO lay the opt-in manager exec core
+#                   (orchestration/manager-tick-core.md — gap-ac37-exec-core-ships-with-package).
+#                   The typical path is two-layer (outer + inner), so the default --loop set does
+#                   NOT include the manager core; --manager opts in.
 # Read-only report modes (no category dispatch, no target writes):
 #   --check-drift                  drift report over the derived laydown set (漂移/缺失/一致, L_D)
 #   --check-dependency-closure     dependency-closure report over the derived laydown set
@@ -86,6 +90,7 @@ DRY_RUN=false
 DO_WORKFLOWS=false
 DO_AGENTS=false
 DO_LOOP=false
+DO_MANAGER=false
 DO_CHECK_DRIFT=false
 DO_CHECK_DEPENDENCY_CLOSURE=false
 ANY_CATEGORY=false
@@ -101,6 +106,7 @@ while [ $# -gt 0 ]; do
     --workflows) DO_WORKFLOWS=true; ANY_CATEGORY=true; shift ;;
     --agents) DO_AGENTS=true; ANY_CATEGORY=true; shift ;;
     --loop) DO_LOOP=true; ANY_CATEGORY=true; shift ;;
+    --manager) DO_MANAGER=true; shift ;;
     --check-drift) DO_CHECK_DRIFT=true; shift ;;
     --check-dependency-closure) DO_CHECK_DEPENDENCY_CLOSURE=true; shift ;;
     --all) DO_WORKFLOWS=true; DO_AGENTS=true; ANY_CATEGORY=true; shift ;;
@@ -909,6 +915,16 @@ derive_loop_scripts() {
     capability-catalog.sh l1-delivery-surface-check.ts dead-loop-check.sh inner-blocked-signal.ts \
     inner-forensics.mjs task-contract-check.ts task-status-drift-check.ts touches-orthogonality-check.ts \
     verify-delivery-surface.ts >> "$out"
+  # (c3) exec-core tick docs (gap-ac37-exec-core-ships-with-package): the three ≤80-line execution
+  #   cores ship with the loop so an installed project can read "每轮该做什么" — the shipped tick
+  #   templates (orchestrator-loop-tick.md / fast-mode-loop-tick.md) reference them by the
+  #   `orchestration/<name>` path, and the referenced⊆landed gate (:1081) must see them LAND (this
+  #   entry makes them part of the derived set ⇒ no new check needed). They live under plugin/loop/
+  #   (source: orchestration/<name>), NOT plugin/scripts/, so the laydown loop + drift report treat
+  #   them as loop docs (orchestration/ landing), distinct from scripts. manager-tick-core.md is
+  #   OPT-IN: laid only with --manager (human ruling 2026-08-10: the typical path is two-layer), but
+  #   still derived so ITS OWN references are gate-validated in every --loop run.
+  printf '%s\n' orchestrator-tick-core.md fast-mode-tick-core.md manager-tick-core.md >> "$out"
   # (c2) consolidated grouped-entry members (SPEC-instruments-behind-one-entry.md AC8/AC12): the
   #   docs invoke them via `quay-<group>.ts <member>` (a subcommand, never a plugin/scripts/ path),
   #   so (a)/(b) cannot see them — but the entry point must dispatch to them, so they ship. Only
@@ -1316,26 +1332,41 @@ PYEOF
 # deliverable, not a pass/fail gate (Contract band: parseable; missing/drift upgradeable to 0 via
 # --loop or listed).
 compute_drift_report() {
-  local ws="$1" drift=0 missing=0 consistent=0 n=0 s tgt
+  local ws="$1" drift=0 missing=0 consistent=0 n=0 s tgt rel src
   local -a drift_list=() missing_list=()
   for s in "${LOOP_SCRIPTS[@]}"; do
-    [ -f "$PLUGIN_ROOT/scripts/$s" ] || { echo "  WARN: loop mechanism script missing from plugin: plugin/scripts/$s" >&2; continue; }
+    # opt-in exec core (gap-ac37-exec-core-ships-with-package): manager-tick-core lands only with
+    # --manager; when not requested AND not already present in the target it is not a defect — skip
+    # it so the drift denominator is the DEFAULT landing + whatever was opted into (a target that
+    # DID opt in earlier still has its manager core drift-checked, because it exists there).
+    if [ "$s" = "manager-tick-core.md" ] && [ "$DO_MANAGER" != true ] && [ ! -f "$ws/orchestration/$s" ]; then
+      continue
+    fi
+    if [ -f "$PLUGIN_ROOT/scripts/$s" ]; then
+      src="$PLUGIN_ROOT/scripts/$s"; tgt="$ws/plugin/scripts/$s"; rel="plugin/scripts/$s"
+    elif [ -f "$PLUGIN_ROOT/loop/$s" ]; then
+      # exec-core tick doc (gap-ac37-exec-core-ships-with-package): lands at orchestration/ (the
+      # path the shipped tick templates reference), distinct from the scripts landing.
+      src="$PLUGIN_ROOT/loop/$s"; tgt="$ws/orchestration/$s"; rel="orchestration/$s"
+    else
+      echo "  WARN: loop mechanism file missing from plugin: plugin/scripts/$s (or plugin/loop/$s)" >&2
+      continue
+    fi
     n=$((n + 1))
-    tgt="$ws/plugin/scripts/$s"
     if [ ! -f "$tgt" ]; then
-      missing=$((missing + 1)); missing_list+=("$s")
-    elif cmp -s "$PLUGIN_ROOT/scripts/$s" "$tgt"; then
+      missing=$((missing + 1)); missing_list+=("$rel")
+    elif cmp -s "$src" "$tgt"; then
       consistent=$((consistent + 1))
     else
-      drift=$((drift + 1)); drift_list+=("$s")
+      drift=$((drift + 1)); drift_list+=("$rel")
     fi
   done
   echo "drift-report: 漂移 ${drift} / 缺失 ${missing} / 一致 ${consistent} (derived-set ${n})"
-  for s in "${drift_list[@]}"; do
-    echo "  drift: plugin/scripts/$s — target differs from the plugin's current delivery (stale install or local edit); --loop upgrade backs it up + reports, never silent"
+  for rel in "${drift_list[@]}"; do
+    echo "  drift: $rel — target differs from the plugin's current delivery (stale install or local edit); --loop upgrade backs it up + reports, never silent"
   done
-  for s in "${missing_list[@]}"; do
-    echo "  missing: plugin/scripts/$s — not installed (target froze at install time); --loop upgrade auto-adds it"
+  for rel in "${missing_list[@]}"; do
+    echo "  missing: $rel — not installed (target froze at install time); --loop upgrade auto-adds it"
   done
   return 0
 }
@@ -1682,8 +1713,18 @@ PYEOF
       # silently skipped. Mechanism executables must be current (verify-installed-executables.sh
       # fails closed on any drift, so a leftover stale copy would otherwise abort the install).
       copy_one "$PLUGIN_ROOT/scripts/$s" "$WORKSPACE_ROOT/plugin/scripts/$s" clean
+    elif [ -f "$PLUGIN_ROOT/loop/$s" ]; then
+      # exec-core tick doc (gap-ac37-exec-core-ships-with-package): the ≤80-line execution cores
+      # lay VERBATIM to orchestration/ (the path the shipped tick templates reference) in "managed"
+      # mode, like the other tick docs. manager-tick-core.md is OPT-IN (--manager): laid only when
+      # requested, but still reported here so the operator knows it is available.
+      if [ "$s" = "manager-tick-core.md" ] && [ "$DO_MANAGER" != true ]; then
+        echo "  skip (opt-in): orchestration/$s — manager exec core requires --manager"
+        continue
+      fi
+      copy_one "$PLUGIN_ROOT/loop/$s" "$WORKSPACE_ROOT/orchestration/$s" managed
     else
-      echo "  WARN: loop mechanism script missing from plugin: plugin/scripts/$s" >&2
+      echo "  WARN: loop mechanism file missing from plugin: plugin/scripts/$s (or plugin/loop/$s)" >&2
     fi
   done
   echo "  drift report (after upgrade):"
