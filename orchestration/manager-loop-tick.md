@@ -1627,7 +1627,7 @@ K 就会单调爬升，最终触发一个与病因相反的处置。这与判准
 | 轮次 | 我造成的红 | 本可在几秒内发现的检查 | 实际代价 |
 |---|---|---|---|
 | r250 | `manager-obligation-ledger.test.mjs` —— 我 15:0x–15:3x 写的 9 条台账缺 `truth/live/condition/reading` 四选一 | `node --test plugin/test/manager-obligation-ledger.test.mjs`（本地 2/2，数秒） | 32.9 分钟全量轮 |
-| r259 | `loop-shipping.test.mjs` AC1b —— 我的核 C9 引用旧路径 `orchestration/orchestrator-loop-tick.md:302` | 一次 `grep -F` 五个旧路径（数秒） | 25.5 分钟全量轮 |
+| r259 | `loop-shipping.test.mjs` AC1b —— 我的核 C9 引用旧路径（`orchestration/` 下那份 orchestrator loop-tick 文档的 `:302`；**此处刻意不写全字面量**——写全就又是一处活引用，本条正是为此而立） | 一次 `grep -F` 五个旧路径（数秒） | 25.5 分钟全量轮 |
 
 **共同点**：两次都是**我写的产物没过「覆盖我这份产物的那个机件」**。
 我给别人立的规矩（判准 ②e「判定取原文不取自述」、A0b「调机件前先读 Usage」）都执行了，
