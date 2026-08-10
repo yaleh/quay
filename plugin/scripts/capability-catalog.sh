@@ -212,6 +212,7 @@ declare -A QUESTION=(
   [select-static-checks-for-touches.ts]="Which static checks should a scoped run execute for this change's touched files (change-relevant tier)?"
   [select-tests-for-touches.ts]="Which tests should run for this task's ## Touches?"
   [self-report-vocab-audit.ts]="Do the inner's recent self-reports avoid batch-style vocabulary (reanchor convergence)?"
+  [semantic-observer-judge.ts]="Is the inner/outer layer semantically stopped and awaiting an external action — reading FREE TEXT (heartbeat reason + tick report transcript), not just structured fields — outputting {stopped, awaiting, needs, contradictsStructured, confidence}, where contradictsStructured names the failure (structured says blocked=[], free text says 'dispatch stopped, awaiting outer /clear')?"
   [self-report-vocab-check.ts]="Has the inner layer's self-reported vocabulary drifted from the shipped semantics (reanchor convergence)?"
   [send-keys-reliable.sh]="Did the reliable five-step send-keys sequence land in the foreign session?"
   [serial-fanin-absorb.ts]="How should concurrent survivors be absorbed serially at fan-in?"
@@ -476,6 +477,10 @@ declare -A CADENCE=(
   [workflow-metadata-conformance.mjs]="每里程碑"
   [workflow-replay.ts]="每里程碑"
   [worktree-branch-hygiene-check.sh]="每轮"
+  [obligation-discharge-agent.ts]="按需"
+  [obligation-ledger-check.ts]="每轮"
+  [obligation-ledger.ts]="每轮"
+  [semantic-observer-judge.ts]="按需"
 
 )
 
@@ -670,6 +675,10 @@ declare -A INVALIDATION=(
   [workflow-metadata-conformance.mjs]="无可测前提，靠周期复核"
   [workflow-replay.ts]="无可测前提，靠周期复核"
   [worktree-branch-hygiene-check.sh]="无可测前提，靠周期复核"
+  [obligation-discharge-agent.ts]="失效前提：义务裁决仍由 discharge/defer agent 判定；若改为纯机械判定或取消义务裁决，本条退休"
+  [obligation-ledger-check.ts]="失效前提：义务账本仍由 obligation-ledger.ts 派生；若派生并入他处或账本文件删除，本条退休"
+  [obligation-ledger.ts]="失效前提：轮次仍产生义务账本；若义务跟踪改为别处，本条退休"
+  [semantic-observer-judge.ts]="失效前提：inner/outer 状态仍以自由文本（心跳 reason + tick 报告）承载；若观测面改为纯结构化 schema 且无自由文本，本条退休"
 
 )
 
@@ -864,6 +873,10 @@ declare -A LAST_REAFFIRMED=(
   [workflow-metadata-conformance.mjs]="2026-08-10"
   [workflow-replay.ts]="2026-08-10"
   [worktree-branch-hygiene-check.sh]="2026-08-10"
+  [obligation-discharge-agent.ts]="2026-08-10"
+  [obligation-ledger-check.ts]="2026-08-10"
+  [obligation-ledger.ts]="2026-08-10"
+  [semantic-observer-judge.ts]="2026-08-10"
 
 )
 
@@ -1058,6 +1071,10 @@ declare -A MATCHING=(
   [workflow-metadata-conformance.mjs]="n/a"
   [workflow-replay.ts]="keyword"
   [worktree-branch-hygiene-check.sh]="keyword"
+  [obligation-discharge-agent.ts]="enumerative"
+  [obligation-ledger-check.ts]="enumerative"
+  [obligation-ledger.ts]="enumerative"
+  [semantic-observer-judge.ts]="keyword"
 )
 # ── superseded capability table (gap-retired-script-still-callable, human ruling 2026-08-10) ──
 # One capability = ONE implementation. A superseded implementation must NOT exist in the
