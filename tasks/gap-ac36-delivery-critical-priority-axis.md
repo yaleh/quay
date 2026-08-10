@@ -36,11 +36,16 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录唯一轴实证（slot-refill :267-273 只按 blocking_suite + id 序；gap-load-sensitive 9h 未取 vs 22 条 fan-in）（本任务 Proposal 已含）
-- [ ] AC2: **第二轴落地**——`candidates.sort` 加 `label:delivery-critical`（优先级低于 blocking_suite、高于 id 序），复用已有位置不新建调度器
-- [ ] AC3: **位次严格前移**——打 label 任务在 `--json` recommended 里位次前移；**负控制**：不打 label 的同族位次不变
-- [ ] AC4: **端到端**——给本阶段任一 AC 实现任务打 label 后，下一次 inner 派发即取它（dispatch 时间戳 > 打 label 时间戳，可核）
-- [ ] AC5: **既有不回归**——`--for-task` scoped 门绿（含 slot-refill.test.mjs / ready-pool-check 相关）
+- [x] AC1: **复现固化**——任务体记录唯一轴实证（slot-refill :267-273 只按 blocking_suite + id 序；gap-load-sensitive 9h 未取 vs 22 条 fan-in）（本任务 Proposal 已含）
+  - 证据：实证已固化于本任务 Proposal（唯一轴 slot-refill :267-273 只按 blocking_suite + id 序；gap-load-sensitive ready/AC 0-11/立案 00:18 9 小时未被取 vs 同期 22 条 fan-in）
+- [x] AC2: **第二轴落地**——`candidates.sort` 加 `label:delivery-critical`（优先级低于 blocking_suite、高于 id 序），复用已有位置不新建调度器
+  - 证据：`plugin/scripts/concurrent-batch-scheduler.ts` 的 `parseCandidate` 新增读 frontmatter `labels`（复用 task-schema.ts `parseTask`，无新解析器）并暴露 `deliveryCritical` 布尔；`plugin/scripts/slot-refill.ts` 的 `candidates.sort` 排序键从 `(blocking_suite, id)` 改为 `(blocking_suite, delivery_critical, id)`——复用原 sort 位置，未新建调度器。`task-schema.ts` 的 `parseTask` 本就读 labels，无需改动
+- [x] AC3: **位次严格前移**——打 label 任务在 `--json` recommended 里位次前移；**负控制**：不打 label 的同族位次不变
+  - 证据：`plugin/test/slot-refill.test.mjs` 新增 4 个 delivery-critical 测试（位次严格前移 2→1、负控制 id 序保持、blocking_suite 仍在 delivery-critical 之上、端到端 CLI）；`plugin/test/concurrent-batch-scheduler.test.mjs` 新增 parseCandidate labels 解析 5 测试。见 `## Evidence` 的 invoke 输出
+- [x] AC4: **端到端**——给本阶段任一 AC 实现任务打 label 后，下一次 inner 派发即取它（dispatch 时间戳 > 打 label 时间戳，可核）
+  - 证据：`plugin/test/slot-refill.test.mjs`「DELIVERY-CRITICAL — end-to-end」测试：打 label 后 `recommended[0]===该任务` 且 dispatch 求值时间戳 ≥ 打 label 时间戳；`## Evidence` 的 CLI 对比显示打 label 后 recommended 首位即为该任务（下一次 refill 即取）
+- [x] AC5: **既有不回归**——`--for-task` scoped 门绿（含 slot-refill.test.mjs / ready-pool-check 相关）
+  - 证据：worktree 内 `bash scripts/test.sh --for-task gap-ac36-delivery-critical-priority-axis` 退出 0——102 测试全绿（含既有 slot-refill 26 + 既有 concurrent-batch-scheduler 45 + 新增 11）、静态检查（task-contract-check / test-isolation ratchet / test-framework-policy / superseded-capability / strategic-doc-staleness）通过
 
 ## Definition of Done
 
@@ -68,6 +73,40 @@ invariant id_order_preserved_within_tie = 1（同轴内 id 序保持）
 invoke    `node --no-warnings --experimental-strip-types plugin/scripts/slot-refill.ts --root "$PWD" --cap 5 --json`（贴 recommended 数组 + delivery-critical 下标）
 control   打 label 前移；负控制不变；blocking_suite 不降；id 序保持
 resume    第二轴 / 位次验证 / 端到端分步提交，任一步完成即写盘
+
+## Evidence（内层实现 2026-08-10）
+
+**第二轴落地（AC2）**：`plugin/scripts/slot-refill.ts` 的 `candidates.sort` 排序键从 `(blocking_suite, id)` 改为 `(blocking_suite, delivery_critical, id)`——复用原位置，未新建调度器。`deliveryCritical` 由 `parseCandidate`（`plugin/scripts/concurrent-batch-scheduler.ts`）提供：它复用 task-schema.ts 的 `parseTask` 读 frontmatter `labels`（无新解析器），`labels.includes("delivery-critical")` ⇒ `deliveryCritical=true`；无 frontmatter 的 legacy charter ⇒ `labels=[]`/`deliveryCritical=false`（保守默认）。`task-schema.ts` 的 `parseTask` 本就读 labels，未改动。
+
+**位次对比（AC3/AC4，Contract invoke）**——受控 fixture（三个同族 ready 任务 ac36-aaa/ac36-bbb/ac36-e2e，互不重叠 touches，`--cap 5 --json`）：
+
+1. **打 label 前（id 序）**：
+   ```
+   recommended: ["ac36-aaa","ac36-bbb","ac36-e2e"]
+   delivery_critical_rank(ac36-e2e): 2
+   ```
+2. **负控制：只给 ac36-bbb 打 label（ac36-e2e 不打）**——不打 label 的同族位次不变：
+   ```
+   recommended: ["ac36-bbb","ac36-aaa","ac36-e2e"]
+   unlabeled ac36-aaa rank: 1（ac36-aaa 仍在 ac36-e2e 之前，id 序保持）
+   ```
+3. **打 label 后（ac36-e2e 加 `delivery-critical`）**——位次严格前移：
+   ```
+   recommended: ["ac36-bbb","ac36-e2e","ac36-aaa"]
+   delivery_critical_rank(ac36-e2e): 1
+   STRICT IMPROVEMENT: rank 2 -> 1（严格前移；同轴内 id 序保持——bbb 仍在 e2e 前）
+   ```
+4. **invariant：blocking_suite 仍最高**（3 连红窗 implicating ac36-aaa）：
+   ```
+   suite_blocking.window_active: true
+   suite_blocking.tasks: ["ac36-aaa"]
+   recommended: ["ac36-aaa","ac36-bbb","ac36-e2e"]
+   ac36-aaa (suite-blocking) rank: 0；ac36-e2e (delivery-critical) rank: 2
+   ```
+
+**端到端（AC4）**：`plugin/test/slot-refill.test.mjs`「DELIVERY-CRITICAL — end-to-end」测试覆盖——打 label 前 `recommended[0]=ac36-aaa`（id 序），打 label 后 `recommended[0]=ac36-e2e`（下一次 refill 即取该任务），且 dispatch 求值 `Date.now() >= labelTs`（求值发生在打 label 之后）。
+
+**测试**：`plugin/test/slot-refill.test.mjs` 30/30（+4 新增 delivery-critical）、`plugin/test/concurrent-batch-scheduler.test.mjs` 5/5（新增）、既有 `experiments/quay-perpetual-stream/test/concurrent-batch-scheduler.test.mjs` 45/45 不回归。`bash scripts/test.sh --for-task gap-ac36-delivery-critical-priority-axis` 退出 0（102 全绿）。
 
 ## Dispatch review
 

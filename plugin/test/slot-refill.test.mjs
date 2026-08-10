@@ -573,3 +573,92 @@ test("ARBITRATION — default (no red/backlog) is byte-forward-compatible: cap s
   assert.equal(r.arbitration.integration_backlog, 0, "non-git temp root fails safe to 0");
   assert.equal(r.slots_free, 5);
 });
+
+// ── DELIVERY-CRITICAL SECOND AXIS (tasks/gap-ac36-delivery-critical-priority-axis) ────────────────
+// candidates.sort key becomes (blocking_suite, delivery_critical, id): a task labeled
+// `delivery-critical` ranks below a suite-blocker but ABOVE plain id order, so the
+// productization-delivery phase's AC tasks are picked by the refill before ordinary pool work.
+// AC3 positive: labeled task strictly moves forward in recommended. AC3 negative control: an
+// unlabeled same-family task keeps its id-order position. Invariant: blocking_suite stays the top
+// axis. AC4 end-to-end: after labeling, the next refill evaluation picks the labeled task
+// (dispatch evaluation happens strictly after the label is applied — timestamp order).
+
+test("DELIVERY-CRITICAL — labeled task strictly moves forward in recommended; unlabeled sibling keeps id order (AC3)", (t) => {
+  const root = makeWorkspace("ac36-rank");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "ac36-a", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/a.ts (new)"]) });
+  writeTask(root, "ac36-b", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/b.ts (new)"]) });
+  const opts = { tasksDir: path.join(root, "tasks"), root, cap: 3 };
+
+  // Negative control FIRST: no delivery-critical label ⇒ id tie-break order (a before b).
+  const before = analyzeSlotRefill(opts);
+  assert.deepEqual(before.recommended, ["ac36-a", "ac36-b"], "no label ⇒ id tie-break order");
+
+  // Positive: add the label to b ⇒ it strictly moves ahead of a.
+  writeTask(root, "ac36-b", { status: "ready", labels: ["gap", "delivery-critical"], body: dispatchableBody(["- code/b.ts (new)"]) });
+  const after = analyzeSlotRefill(opts);
+  assert.deepEqual(after.recommended, ["ac36-b", "ac36-a"], "labeled task ranks first (delivery-critical axis above id order)");
+});
+
+test("DELIVERY-CRITICAL — negative control: unlabeled same-family tasks keep relative id order (AC3)", (t) => {
+  const root = makeWorkspace("ac36-neg");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "ac36-x", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/x.ts (new)"]) });
+  writeTask(root, "ac36-y", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/y.ts (new)"]) });
+  writeTask(root, "ac36-z", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/z.ts (new)"]) });
+  const opts = { tasksDir: path.join(root, "tasks"), root, cap: 3 };
+
+  const before = analyzeSlotRefill(opts);
+  assert.deepEqual(before.recommended, ["ac36-x", "ac36-y", "ac36-z"], "id order baseline");
+
+  // Label only the middle task; the unlabeled x and z must keep x-before-z relative order.
+  writeTask(root, "ac36-y", { status: "ready", labels: ["gap", "delivery-critical"], body: dispatchableBody(["- code/y.ts (new)"]) });
+  const after = analyzeSlotRefill(opts);
+  assert.deepEqual(after.recommended, ["ac36-y", "ac36-x", "ac36-z"], "y moves up; unlabeled x/z keep id order");
+});
+
+test("DELIVERY-CRITICAL — blocking_suite axis stays ABOVE delivery-critical (invariant)", (t) => {
+  const root = makeWorkspace("ac36-suite");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "ac36-watchdog", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/wd.ts (new)"]) });
+  writeTask(root, "ac36-critical", { status: "ready", labels: ["gap", "delivery-critical"], body: dispatchableBody(["- code/crit.ts (new)"]) });
+  const opts = { tasksDir: path.join(root, "tasks"), root, cap: 2 };
+
+  // 3 consecutive red rounds implicating the watchdog task's Touches ⇒ watchdog is a suite-blocker.
+  writeRounds(root, Array.from({ length: 3 }, (_, i) => ({ round: 300 + i, state: "red", reason: "failed", fail: 1, failures: [{ file: "code/wd.ts", line: "x" }] })));
+  writeState(root, [{ file: "code/wd.ts", line: "x" }]);
+  const r = analyzeSlotRefill(opts);
+  assert.equal(r.suite_blocking.window_active, true);
+  assert.equal(r.recommended[0], "ac36-watchdog", "suite-blocker ranks above delivery-critical (blocking_suite > delivery_critical)");
+  assert.equal(r.recommended[1], "ac36-critical", "delivery-critical ranks second (above id order, below blocking_suite)");
+});
+
+test("DELIVERY-CRITICAL — end-to-end: after labeling, the next refill evaluation picks the labeled task (dispatch eval > label ts) (AC4)", (t) => {
+  const root = makeWorkspace("ac36-e2e");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // ac36-aaa sorts BEFORE ac36-e2e in id order, so the labeled task is NOT first before labeling —
+  // the label must strictly move it from rank 1 to rank 0.
+  writeTask(root, "ac36-aaa", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/aaa.ts (new)"]) });
+  writeTask(root, "ac36-e2e", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/e2e.ts (new)"]) });
+  const script = path.resolve(__dirname, "..", "scripts", "slot-refill.ts");
+  const run = () => JSON.parse(execFileSync(
+    process.execPath,
+    ["--no-warnings", "--experimental-strip-types", script, "--root", root, "--cap", "3", "--json"],
+    { encoding: "utf8" },
+  ));
+
+  const before = run();
+  assert.deepEqual(before.recommended, ["ac36-aaa", "ac36-e2e"], "id order before labeling");
+  const beforeRank = before.recommended.indexOf("ac36-e2e");
+  assert.equal(beforeRank, 1, "labeled task starts at rank 1 (id order)");
+
+  // Apply the delivery-critical label; record the wall-clock label time before the next refill eval.
+  const labelTs = Date.now();
+  writeTask(root, "ac36-e2e", { status: "ready", labels: ["gap", "delivery-critical"], body: dispatchableBody(["- code/e2e.ts (new)"]) });
+
+  const after = run();
+  const afterRank = after.recommended.indexOf("ac36-e2e");
+  assert.ok(afterRank < beforeRank, `rank strictly improves: before ${beforeRank} → after ${afterRank}`);
+  assert.equal(after.recommended[0], "ac36-e2e", "the next refill would dispatch the labeled task first");
+  assert.ok(Date.now() >= labelTs, "dispatch evaluation happens after the label is applied (ts order)");
+});
