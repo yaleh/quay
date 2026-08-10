@@ -16,20 +16,19 @@ extra: {}
 
 ## Proposal（范围已重定，2026-08-10 manager STOP-AND-RESCOPE + 归因缺口新增实证）
 
-**原任务基于错误前提：以为 suite_blocking.tasks=[] 是归因盲区。实跑核实：`computeSuiteBlocking` 只把 ready/todo 当候选（ready-pool-check.ts:634），round-210 失败文件 send-keys-verified.sh 对应任务 `gap-send-keys-verified-hash-check...` 是 `status: done`——机制对的，tasks=[] 是 done 任务正确排除。真实缺口：verification-round.jsonl 从未写过 failures 字段（209 轮含 failures = 0），历史红轮无法参与归因。归因缺口新增实证（2026-08-10 01:41）：failures[].file 形状不一致——本轮（branch-model）是仓库相对路径 `plugin/test/branch-model.test.mjs`，上一轮（send-keys-verified）是裸 basename `send-keys-verified.sh`；computeSuiteBlocking 拿它跟 ## Touches 展开集做 `has()` 精确匹配，裸 basename 永不命中。**
+**原任务基于错误前提：以为 suite_blocking.tasks=[] 是归因盲区。实跑核实：`computeSuiteBlocking` 只把 ready/todo 当候选（ready-pool-check.ts:634），round-210 失败文件 send-keys-verified.sh 对应任务 `gap-send-keys-verified-hash-check...` 是 `status: done`——机制对的，tasks=[] 是 done 任务正确排除。真实缺口：verification-round.jsonl 从未写过 failures 字段（209 轮含 failures = 0），历史红轮无法参与归因。归因缺口新增实证（2026-08-10 01:41）：failures[].file 形状不一致已确认（本轮 branch-model 是仓库相对路径，上一轮 send-keys-verified 是裸 basename，两种形态各观测到一次）；其效果尚未证实（上轮唯一声明该路径的任务当时 status:done，done 解释与 basename 解释同时成立未分离——需声明该路径的 ready/todo 任务才能分离）。**
 
 ### 实证（manager 2026-08-10 STOP-AND-RESCOPE + 归因形状核实 + outer 复核）
 
 - **原前提错误**：computeSuiteBlocking 只把 ready/todo 当候选（ready-pool-check.ts:634）。round-210 失败文件 send-keys-verified.sh 对应任务是 `status: done`——done 任务正确排除，tasks=[] 是机制正确行为。
 - **真实缺口（实）**：`verification-round.jsonl` 209 轮逐行统计，**含 failures 字段的轮数 = 0**。`SuiteRoundRecord` 接口（full-suite-runner.ts:465）无 failures 字段——round 记录只有计数（fail/cancelled）无失败明细。failures[] 只进 `writeSuiteState`（state 文件），`appendVerificationRound` 不写。
-- **归因缺口新增实证（failures[].file 形状不一致）**：
+- **归因形状不一致（已确认，效果未证实）**：
   - 本轮（round-212）failures[].file = **仓库相对路径** `plugin/test/branch-model.test.mjs`。
   - 上一轮（round-210）failures[].file = **裸 basename** `send-keys-verified.sh`。
-  - `computeSuiteBlocking` 拿 `failure_files` 跟任务的 `## Touches` 展开集做 `has()` **精确匹配**——裸 basename 与 Touches 里的仓库相对路径（`plugin/scripts/send-keys-verified.sh`）永不命中。
-  - 即使任务 Touches 正确声明了文件，裸 basename 形式也会归因失败——**形状不一致本身就是归因缺陷**，与候选过滤无关。
+  - **形状不一致本身已确认**（两种形态各观测到一次）。**其效果尚未证实**：上一轮唯一声明 send-keys-verified 路径的任务当时 `status: done`，而 computeSuiteBlocking 本就跳过 done——done 解释与 basename 解释同时成立、未被分离。要分离需要一个声明该路径的 ready/todo 任务（`gap-send-keys-verified-leaks-tmux-servers-unincorporated` 是 01:17 才立的，晚于 01:07 的读数）。`has()` 精确匹配对裸 basename 的行为需在该前提下再验证——**不作为 basename 假说的证明**。
 - **manager 错因自述**：又读局部外推到全集，没跑选择器/没读机制。
 
-**为什么重要**：红窗归因缺两个维度——①历史轮（verification-round.jsonl 无 failures 字段，只有最新一轮 state 文件可用）；②文件形状（failures[].file 裸 basename vs 相对路径不一致，`has()` 精确匹配永不命中裸 basename）。两者都补上，suite_blocking 才能把「阻塞 suite 的缺陷」排到 inner 面前。
+**为什么重要**：红窗归因缺两个维度——①历史轮（verification-round.jsonl 无 failures 字段，只有最新一轮 state 文件可用）；②文件形状不一致（已确认观测到两种形态，效果待分离验证）。两者都补上，suite_blocking 才能把「阻塞 suite 的缺陷」排到 inner 面前。
 
 ### 选定机制方向（实现归内层，接法留执行时）
 
@@ -80,4 +79,4 @@ resume    字段写入 / 归因消费 / 形状归一分步提交，任一步完�
 
 reviewer: outer
 at: 2026-08-10
-changed: manager STOP-AND-RESCOPE——原前提错误（suite_blocking tasks=[] 是 done 任务正确排除,机制对的）。真实缺口：①verification-round.jsonl 209 轮含 failures=0（SuiteRoundRecord 无该字段）⇒ 红窗归因只有最新一轮;②failures[].file 形状不一致（round-212 相对路径 vs round-210 裸 basename,computeSuiteBlocking 的 has() 精确匹配永不命中裸 basename）。范围重定:round 记录加 failures + 归因消费历史 + 文件形状归一。实现归内层
+changed: manager STOP-AND-RESCOPE——原前提错误（suite_blocking tasks=[] 是 done 任务正确排除,机制对的）。真实缺口：①verification-round.jsonl 209 轮含 failures=0（SuiteRoundRecord 无该字段）⇒ 红窗归因只有最新一轮;②failures[].file 形状不一致已确认（相对路径 vs 裸 basename 各观测一次）,效果未证实（上轮唯一声明该路径任务当时 done,两解释未分离）。范围重定:round 记录加 failures + 归因消费历史 + 形状归一（后者效果待分离验证）。实现归内层
