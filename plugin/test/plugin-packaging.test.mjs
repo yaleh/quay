@@ -510,7 +510,7 @@ test('M143: plugin/workflows/ exists with the 2 surviving JS workflow files', ()
 });
 
 test('M143: plugin/gate-scripts/ is RETIRED — kept in tree, not laid down by quay-init', () => {
-  // Layered retirement (send-keys-verified precedent): the classic-pipeline era gate scripts
+  // 分层退休（Layered retirement）: the classic-pipeline era gate scripts
   // stay in the plugin tree as a historical artifact, but they are NO LONGER in the distribution.
   const gateDir = path.join(pluginDir, 'gate-scripts');
   assert.ok(existsSync(gateDir), 'plugin/gate-scripts/ must exist (retired artifact kept in tree)');

@@ -3,8 +3,8 @@
 // not-mutation-checked. Pins the RETIREMENT of the plugin/gate-scripts/ distribution category:
 //
 //   AC2: the classic-pipeline era gate scripts were laid into every target project's
-//        scripts/gates/ but nothing called them — dead weight shipped to every install. Layered
-//        retirement (send-keys-verified precedent): the files stay in the plugin tree but are no
+//        scripts/gates/ but nothing called them — dead weight shipped to every install.
+//        分层退休（Layered retirement）: the files stay in the plugin tree but are no
 //        longer laid down by quay-init and no longer synced by sync.sh.
 //
 // Contract measure: dead_gates_remaining = `grep -c 'gate-scripts' plugin/scripts/quay-init.sh`

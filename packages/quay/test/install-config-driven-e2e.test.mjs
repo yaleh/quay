@@ -568,11 +568,13 @@ test("AC2 — config backup before upgrade + rollback restores the config unchan
     "AC2: the first backup must capture the pre-upgrade config exactly (backup before upgrade)");
 
   // Force a FAILED upgrade AFTER the config write: a corrupted NON-loop installed script
-  // (send-keys-verified.sh is NEVER_LAYDOWN — the lay-down does not replace it, so
-  // verify-installed-executables fails closed). The upgrade passes a DIFFERENT test_command,
-  // which ensure_loop_config writes into the config — proving the rollback must undo it.
+  // (quay-init.sh is NEVER_LAYDOWN — the lay-down does not replace it, so
+  // verify-installed-executables fails closed; send-keys-verified.sh was the prior fixture but is
+  // now DELETED per gap-retired-script-still-callable, leaving quay-init.sh as the lone
+  // NEVER_LAYDOWN script). The upgrade passes a DIFFERENT test_command, which
+  // ensure_loop_config writes into the config — proving the rollback must undo it.
   fs.mkdirSync(path.join(ws, "plugin", "scripts"), { recursive: true });
-  fs.writeFileSync(path.join(ws, "plugin", "scripts", "send-keys-verified.sh"),
+  fs.writeFileSync(path.join(ws, "plugin", "scripts", "quay-init.sh"),
     "#!/usr/bin/env bash\n# corrupted non-loop residue — never replaced by the lay-down\n");
   const rUp = runInit(ws, { repoRoot: "/srv/proj", tmux: "proj-session", testCommand: "SHOULD-NOT-STICK-cmd" });
   assert.notEqual(rUp.status, 0,

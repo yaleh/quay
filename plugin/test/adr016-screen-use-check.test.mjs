@@ -25,7 +25,6 @@ import {
   detectTickDocViolations,
   scanForScreenHashViolations,
   stripShellComments,
-  RETIRED_FILES,
 } from "../scripts/adr016-screen-use-check.ts";
 
 import { makeTmpDir } from "./helpers/tmp-workspace.mjs";
@@ -104,21 +103,6 @@ test("AC4: a SECOND active violation exceeds the band → exit 1 (new active vio
   assert.match(res.stdout, /b\.sh:1/);
 });
 
-test("AC4: send-keys-verified.sh is RETIRED (superseded under ruling F) — reported but not counted", () => {
-  const dir = makeTmpDir("adr016-retired-");
-  fs.mkdirSync(path.join(dir, "plugin/scripts"), { recursive: true });
-  fs.writeFileSync(
-    path.join(dir, "plugin/scripts/send-keys-verified.sh"),
-    "hash_before=$(tmux capture-pane -p -t \"$TARGET\" 2>/dev/null | md5sum | cut -c1-16)\n",
-  );
-  const { violations, retired } = scanForScreenHashViolations(dir);
-  assert.equal(violations.length, 0); // not counted against the band
-  assert.equal(retired.length, 1);
-  assert.equal(retired[0].rel, "plugin/scripts/send-keys-verified.sh");
-  const res = runChecker(dir);
-  assert.equal(res.status, 0); // retired observer does not redden the gate
-});
-
 test("AC5: negative control both directions — file present → reported; removed → not reported", () => {
   const dir = makeTmpDir("adr016-ac5-");
   const evil = path.join(dir, "zz-negcontrol.sh");
@@ -156,11 +140,12 @@ test("AC3/AC7: the checker scans shell scripts + tick-doc bash blocks — .md pr
   // was fixed by gap-session-liveness-hashes-the-token-counter-as-if-it-were-work (its busy
   // judgment now consumes classifyPaneState; the capture-pane→md5sum flow is gone). The shipped
   // tick docs' md5(capture-pane) blocks were fixed by gap-adr016-md5-ban-violated-in-shipped-md-
-  // and-checker-scope-gap (AC1), so the repo is now at ZERO active violations. Only the retired
-  // send-keys-verified.sh occurrences remain.
+  // and-checker-scope-gap (AC1), so the repo is now at ZERO active violations. The retired observer
+  // (send-keys-verified.sh) was DELETED by gap-retired-script-still-callable, so the retired set is
+  // empty too — no whole-screen-hash occurrences remain anywhere.
   const { violations, retired } = scanForScreenHashViolations(repoRoot);
   assert.equal(violations.length, 0, JSON.stringify(violations.map((v) => `${v.rel}:${v.line}`)));
-  assert.ok(retired.length >= 1); // send-keys-verified.sh retired occurrences
+  assert.equal(retired.length, 0); // the retired send-keys-verified.sh observer was deleted
 });
 
 test("AC3: a fenced ```bash INSTRUCTION block in a tick doc is a violation (shipped bash blocks are not prose)", () => {
