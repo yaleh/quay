@@ -41,25 +41,50 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录心跳 11:13/11:28 结构化 vs 自由文本矛盾实证（blocked=[]+budgetHit 说无阻塞，reason 说「停了等 /clear」）+ 三字段失效（本任务 Proposal 已含）
-- [ ] AC2: **judge 实现**——schema'd judge 输出 `{stopped, awaiting, needs, contradictsStructured, confidence}`；读自由文本（reason + tick 报告），不只读结构化字段
-- [ ] AC3: **触发条件**——自由文本 hash 变化 **或** `blocked==[] && agentDispatches>=agentLimit` 启发式触发（不是每轮）
-- [ ] AC4: **变红产物（AC41③）**——judge `stopped:true` 而本轮 tick-log 无对应升级记录 ⇒ 变红
-- [ ] AC5: **三层对称 + 既有不回归**——`--layer inner|outer` 可用；`--for-task` scoped 门绿
+- [x] AC1: **复现固化**——任务体记录心跳 11:13/11:28 结构化 vs 自由文本矛盾实证（blocked=[]+budgetHit 说无阻塞，reason 说「停了等 /clear」）+ 三字段失效（本任务 Proposal 已含）
+- [x] AC2: **judge 实现**——schema'd judge 输出 `{stopped, awaiting, needs, contradictsStructured, confidence}`；读自由文本（reason + tick 报告），不只读结构化字段
+- [x] AC3: **触发条件**——自由文本 hash 变化 **或** `blocked==[] && agentDispatches>=agentLimit` 启发式触发（不是每轮）
+- [x] AC4: **变红产物（AC41③）**——judge `stopped:true` 而本轮 tick-log 无对应升级记录 ⇒ 变红
+- [x] AC5: **三层对称 + 既有不回归**——`--layer inner|outer` 可用；`--for-task` scoped 门绿
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全部勾上
-- [ ] 修后实跑：judge 对今晚心跳输出 stopped/awaiting/contradictsStructured（贴输出）；变红触发
-- [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
+- [x] AC1–AC5 全部勾上
+- [x] 修后实跑：judge 对今晚心跳输出 stopped/awaiting/contradictsStructured（贴输出）；变红触发
+- [x] 既有测试 + 新增测试全绿（`--for-task` scoped：39 tests / 0 fail / 0 cancelled / EXIT 0）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
+
+### 修后实跑证据（2026-08-10，takeover subagent）
+
+**judge 对今晚心跳（`--layer inner`，读自由文本）**：
+
+```json
+{
+  "layer": "inner",
+  "stopped": true,
+  "awaiting": { "who": "outer", "what": "/clear" },
+  "needs": [ { "what": "/clear", "owner": "outer", "blocking": true, "evidence": "awaiting outer /clear" } ],
+  "contradictsStructured": true,
+  "confidence": 0.727,
+  "readFreeText": true,
+  "trigger": { "fired": true, "heuristic": true, "hashChanged": false, "hash": "4cbde09d0396198c" },
+  "redOnOmission": false
+}
+```
+
+**变红触发**：同一心跳 + tick-log 无升级记录 ⇒ `redOnOmission:true` 且 **exit 1**（AC41③）；tick-log 有 `escalate` 行 ⇒ `redOnOmission:false` 且 exit 0。
+
+**触发启发式（AC3）**：`blocked==[] && agentDispatches(201)>=agentLimit(200)` ⇒ `semanticTriggerHeuristic=true`；hash 变化独立触发；hash 不变 + heuristic 假 ⇒ 不触发（不是每轮）。
+
+**三层对称（AC5）**：`--layer inner` 与 `--layer outer` 均输出完整 schema（`plugin/test/semantic-observer-judge.test.mjs` AC5 用例逐层断言）。
 
 ## Touches
 
 - plugin/scripts/semantic-observer-judge.ts（新 judge：读自由文本输出 schema'd 判定）
-- plugin/test/semantic-observer-judge.test.mjs（AC2-AC5：今晚心跳 fixture 断言 + 触发 + 变红）
-- orchestration/orchestrator-tick-core.md（A 段：judge 触发 + 变红记录）
+- plugin/test/semantic-observer-judge.test.mjs（AC1-AC5：今晚心跳 fixture 断言 + 触发 + 变红）
+- orchestration/orchestrator-tick-core.md（A 段 A17：judge 触发 + 变红记录）
 - plugin/scripts/inner-wakeup-heartbeat-check.ts（AC3：触发启发式接线）
+- plugin/scripts/capability-catalog.sh（新 judge 入 catalog——AC1c 门：artifact 新脚本须声明所答问题）
 - orchestration/manager-phase-goal.md（AC40/AC41③ 交叉标注——同域）
 - tasks/gap-ac41-red-on-omission-artifact.md（交叉标注——变红产物判据）
 - tasks/gap-semantic-observer-judge-stopped-awaiting.md（自身：勾 AC + 贴证据）
