@@ -82,7 +82,7 @@ const PLACEHOLDER_RE = /NNN|<[^>]*>|\*|\{/;
 /** An annotation on the SAME line as a missing reference that explains why the path is gone — a
  *  reader following it is not misled (the text itself says it is retired/replaced/banned/runtime
  *  state). The deleted-superseded references in the cores (send-keys-verified.sh, the
- *  inner-agent-budget-report.ts that A16 deprecated) carry such annotations. */
+ *  A16-deprecated subagent-budget counting script) carry such annotations. */
 const STALE_ANNOT_RE =
   /(retired|superseded|RETIRED|SUPERSEDED|退役|退休|已退休|已废除|已删除|旧路径|never-existing|不存在|已修正|作废|不可用|已随|改名|取代|废弃|禁止|已停用|已退役)/;
 
