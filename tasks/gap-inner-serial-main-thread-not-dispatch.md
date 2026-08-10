@@ -119,3 +119,11 @@ capability-catalog）全 PASS，0 violations。`capability-catalog.sh` 已为新
 
 **DoD 说明**：全量套件行未勾（外层 verification-round 的活，scoped-only 下任务内不可知）；
 `status: ready` 不变。
+
+## 同根标注（gap-session-identity-index-vs-explicit，2026-08-10）
+
+本任务创建的 helper `plugin/scripts/inner-exec-mode-report.ts` 在缺省 `--session` 时曾用「最新
+.jsonl」启发式自动检测 —— 从 manager/outer 跑会命中自己（实测 session=b8dc91a6，manager）。
+同根任务 `gap-session-identity-index-vs-explicit` 已修：缺省先反查 pane pid → session（显式身份，
+复用 inner-session-check.sh 的 discovery-pid 结构解析），启发式仅 fallback 且报 WARN；
+输出新增 `session_source` / `session_warning` 字段。
