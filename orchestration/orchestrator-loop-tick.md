@@ -598,6 +598,7 @@ node --experimental-strip-types plugin/scripts/task-status-drift-check.ts
 node --experimental-strip-types plugin/scripts/task-status-drift-check.ts --stranded   # stranded worktree branches (gap-stranded-...: silent fail-closed alarm)
 cat docs/analysis/batch2-queue-state.md             # 内层自报的队列状态
 bash plugin/scripts/supervisor-bus-identity.sh inbox-summary   # 收件箱机械挂载点（gap-supervisor-message-bus-with-identity AC4）：unread 逐条进决策，delivered≠consumed
+bash plugin/scripts/manager-tick-log-check.sh --json   # AC5b 行判据(新旧两格式)+缩水棘轮(基线sidecar <log>.baseline，pass 时自动上调)——自动调用者；fail(exit 非 0) 按既有升级通道处置（写 tick-log + 攒给人），不静默
 ```
 
 **1a. 内层占用率（AC26，强制——量【占用率】不是【新鲜度】）**：每 tick 必须取两个读数并写进本行
