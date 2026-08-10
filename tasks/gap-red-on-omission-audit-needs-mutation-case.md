@@ -1,7 +1,9 @@
 ---
 id: gap-red-on-omission-audit-needs-mutation-case
-title: 'red-on-omission-audit 检查器无 mutation case——checker-mutation-check 门 FAIL（uncovered: 1），静态检查红；gap-ac41-red-on-omission-artifact 的 fan-in（e532d599）注册了 checker 却没配 mutation case'
-status: todo
+title: "red-on-omission-audit 检查器无 mutation case——checker-mutation-check 门
+  FAIL（uncovered: 1），静态检查红；gap-ac41-red-on-omission-artifact 的
+  fan-in（e532d599）注册了 checker 却没配 mutation case"
+status: ready
 labels:
   - gap
   - defect
