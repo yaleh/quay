@@ -34,13 +34,11 @@
 
 ## B. 每轮必产出
 
-- **B1 §0.5b 语义判定段——必须走 `Workflow({scriptPath:'.claude/workflows/manager-tick-judge.js', args})`**
-  (人 2026-08-07T11:16 授权;**手写判词不被接受**——判据是该 workflow 的结构化返回是否本轮产生,
-  与 `closure-lag --record` 心跳同构)。它出三样:每条活跃 AC 的状态词(达成/待观察/不适用/不可判/违反,
-  **缺值=未查**)、A16 每条命中的真伪、B3 判词+背离度。**机械读数与门槛由脚本采好经 `args` 传入,
-  算术不进 agent(ADR-033)**。活跃集:`AC20-AC27`(未作废)+`AC28-AC34`;主判据 `AC28`;正本
-  `orchestration/SPEC-three-layer-unified-architecture-2026-08-09.md`。**调查型工作用后台 subagent,
-  不在主线程做**(人 2026-08-05T02:28 量化门槛:5-8 分钟量级一律后台,不堵前台)。
+- **B1 语义判定段必须走 `Workflow({scriptPath:'.claude/workflows/manager-tick-judge.js', args})`**——出
+  AC 状态词(达成/待观察/不适用/不可判/违反,**缺值=未查**)、A16 命中真伪、B3 判词+背离度;机械读数与
+  门槛经 `args` 传入,**算术不进 agent**(ADR-033)。**手写判词不被接受**,判据=该 workflow 本轮有无结构化
+  返回(同构 `closure-lag --record` 心跳)。活跃集 `AC20-AC34`,主判据 `AC28`,正本 `SPEC-three-layer-…md`。
+  **调查型工作走后台 subagent 不占主线程**(人量化门槛:5-8 分钟量级一律后台)。详见档案 §为什么要 workflow/subagent。
 - **B2 四元组**(与三层统一契约同格式):① 各声称机制的最近真实执行时刻 ② 占用率(in-flight/cap)
   ③ 本轮写入落到哪条线 ④ 本行账本。
 - **B3 tick-log 追加一行**(六列),用 `'XEOF'` 引号 heredoc,**只 `'a'` 追加,永不 `'w'`**。
