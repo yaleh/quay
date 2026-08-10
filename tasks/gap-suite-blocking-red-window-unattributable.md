@@ -42,13 +42,13 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录实证（209 轮 failures=0、SuiteRoundRecord 无 failures、done 任务正确排除、failures[].file 形状不一致：相对路径 vs 裸 basename）（本任务 Proposal 已含）
-- [ ] AC2: **round 记录加 failures**——SuiteRoundRecord 加 failures?: SuiteFailure[]，appendVerificationRound 写入（与 state 同源）
-- [ ] AC3: **归因消费历史 failures**——computeSuiteBlocking 读 per-round failures 参与归因（不止最新一轮）
-- [ ] AC4: **文件形状归一**——failures[].file 统一相对路径，或 computeSuiteBlocking 对裸 basename 解析后匹配（裸 basename 能命中 Touches）
-- [ ] AC5: **负控制**——无 failures 轮不参与归因
-- [ ] AC6: **向后兼容**——缺失 failures 的旧行读者容忍
-- [ ] AC7: **既有不回归**——`--for-task` scoped 门绿
+- [x] AC1: **复现固化**——任务体记录实证（209 轮 failures=0、SuiteRoundRecord 无 failures、done 任务正确排除、failures[].file 形状不一致：相对路径 vs 裸 basename）（本任务 Proposal 已含）
+- [x] AC2: **round 记录加 failures**——SuiteRoundRecord 加 failures?: SuiteFailure[]，appendVerificationRound 写入（与 state 同源）
+- [x] AC3: **归因消费历史 failures**——computeSuiteBlocking 读 per-round failures 参与归因（不止最新一轮）
+- [x] AC4: **文件形状归一**——failures[].file 统一相对路径，或 computeSuiteBlocking 对裸 basename 解析后匹配（裸 basename 能命中 Touches）
+- [x] AC5: **负控制**——无 failures 轮不参与归因
+- [x] AC6: **向后兼容**——缺失 failures 的旧行读者容忍
+- [x] AC7: **既有不回归**——`--for-task` scoped 门绿
 
 ## Definition of Done
 
@@ -82,3 +82,36 @@ resume    字段写入 / 归因消费 / 形状归一分步提交，任一步完�
 reviewer: outer
 at: 2026-08-10
 changed: manager STOP-AND-RESCOPE——原前提错误（suite_blocking tasks=[] 是 done 任务正确排除,机制对的）。真实缺口：①verification-round.jsonl 209 轮含 failures=0（SuiteRoundRecord 无该字段）⇒ 红窗归因只有最新一轮;②failures[].file 形状不一致已确认（相对路径 vs 裸 basename 各观测一次）,效果未证实（上轮唯一声明该路径任务当时 done,两解释未分离）。范围重定:round 记录加 failures + 归因消费历史 + 形状归一（后者效果待分离验证）。实现归内层
+
+## Evidence（inner 核实收尾 2026-08-10 —— 机制已由 gap-suite-round-record-missing-failures-field 落地，本任务验证归因缺口闭合）
+
+**AC1 — 复现固化**：Proposal 已含（209 轮 failures=0 实测、SuiteRoundRecord 原无 failures、done 任务正确排除、failures[].file 形状不一致：相对路径 vs 裸 basename）。
+
+**AC2 — round 记录加 failures**：`SuiteRoundRecord.failures?: SuiteFailure[]`（full-suite-runner.ts:513）+ `appendVerificationRound` 红轮写入（与 suite-state 同源，full-suite-runner.ts:1552）。实测：live `.quay/verification-round.jsonl` 含 failures 的轮数 = **32**（round 248/250 红轮带仓库相对路径失败文件）。测试：`full-suite-runner.test.mjs`「红轮带 failures / 绿轮省略」2 用例绿。
+
+**AC3 — 归因消费历史 failures**：`computeSuiteBlocking` 经 `collectFailureFiles`（ready-pool-check.ts:614）读 per-round failures（不止最新一轮 state 文件）。fixture 实测：round-208/210/212 的失败明细跨 5 轮红窗（208-212）归因成功（见下 invoke）。
+
+**AC4 — 文件形状归一**：`failureFileMatches`（ready-pool-check.ts:638）裸 basename ↔ 相对路径双向命中、两全路径同 basename 不同目录不误配。fixture 实测：round-210 裸 basename `send-keys-verified.sh` 与 round-208/212 相对路径 `plugin/scripts/send-keys-verified.sh` 命中同一 Touches。
+
+**AC5 — 负控制**：无 failures 轮不参与归因——fixture round-209/211 无 failures，不贡献 failure_files、不误配，只保持红窗连续。
+
+**AC6 — 向后兼容**：`collectFailureFiles` 以 `Array.isArray(r && r.failures)` 守卫，缺失 failures 的旧行读者容忍（fixture 209/211 无 failures 不炸）。
+
+**AC7 — scoped 门绿**：`./scripts/test.sh --for-task gap-suite-blocking-red-window-unattributable` → EXIT=0，**132 pass / 0 fail / 0 cancelled**（含本归因链相关用例：consecutiveRedRounds/collectFailureFiles、computeSuiteBlocking 负控制、cross-round+形状归一、analyzeTasks suite-blocking）。
+
+**Contract invoke（fixture 注入，历史轮 failures + 裸 basename）**：
+```
+node --no-warnings --experimental-strip-types plugin/scripts/ready-pool-check.ts --root /tmp/gap-sbrw-fixture --json
+suite_blocking: {
+  "consecutive_red": 5,
+  "min_red_window": 3,
+  "window_active": true,
+  "failure_files": ["plugin/scripts/send-keys-verified.sh", "send-keys-verified.sh"],
+  "tasks": ["gap-script"]
+}
+```
+（fixture：round-208 相对路径 + round-210 裸 basename + round-212 相对路径；gap-script Touches=`plugin/scripts/send-keys-verified.sh` 被归因；gap-other Touches=`unrelated.ts` 未误配。ready_relevance：gap-script `blocking=True blocking_suite=True value=5 reason=…suite-blocking Y…`，gap-other 不变。）
+
+**Contract measure（live）**：`round_failures_field_present = 32`（band > 0 满足）——红轮已带 failures 字段。
+
+**invariant**：historical_rounds_in_attribution = 1（fixture 跨 5 轮归因）；basename_shape_normalized = 1（round-210 裸 basename 命中）；backward_compatible = 1（209/211 无 failures 容忍）。
