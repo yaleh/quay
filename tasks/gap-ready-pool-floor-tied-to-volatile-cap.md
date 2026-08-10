@@ -40,14 +40,14 @@ extra: {}
 - [x] AC2: **floor 不随当下 cap 波动**——cap 波动时 pool 判词不变（候选 A/B/C 任一）
 - [x] AC3: **义务不自动消失**——「pool ≥ floor」不因负载波动被豁免（构造：cap 降 ⇒ floor 不降 ⇒ ② 仍真）
 - [x] AC4: **既有机制不回归**——`--for-task` scoped 门绿（含 ready-pool 契约检查）
-- [ ] AC5: **不回归**——全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
+- [x] AC5: **不回归**——全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证（r251: tests 3084 / fail 0 / cancelled 0 / exit 0，已勾）
 
 ## Definition of Done
 
 - [x] AC1–AC5 全部勾上
 - [x] 修后实跑：cap 3 vs 4 同一 pool ⇒ 判词一致；构造 cap 降 ⇒ ② 仍真（贴任务体）
 - [x] 既有测试 + 新增测试全绿（`--for-task` scoped）
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
+- [x] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证（r251 已满足）
 
 ## Evidence（内层实现 2026-08-09）
 

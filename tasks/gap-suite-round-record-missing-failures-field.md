@@ -37,14 +37,14 @@ extra:
 - [x] AC2: **round 记录带 failures**——`appendVerificationRound` 红轮写入 `failures[]`（SuiteFailure 形状），`SuiteRoundRecord` 加 `failures?`
 - [x] AC3: **归因可反查**——红窗归因（computeSuiteBlocking / suite_blocking）优先读 round 记录 failures 反查失败文件→任务 Touches
 - [x] AC4: **既有不回归**——`--for-task` scoped 门绿；round 记录既有字段不破坏
-- [ ] AC5: **全量套件绿**——verification-round 写入路径在全量下正常（fail 0 且 cancelled 0）——外层 verification-round 验证
+- [x] AC5: **全量套件绿**——verification-round 写入路径在全量下正常（fail 0 且 cancelled 0）——外层 verification-round 验证（r251: tests 3084 / fail 0 / cancelled 0，已勾）
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全部勾上
+- [x] AC1–AC5 全部勾上
 - [x] 修后实跑：红轮 round 记录带 failures[]；归因跨轮反查成功（贴任务体）
 - [x] 既有测试 + 新增测试全绿（`--for-task` scoped）
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
+- [x] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证（r251 已满足）
 
 ## Touches
 
