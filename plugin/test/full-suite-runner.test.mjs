@@ -192,6 +192,68 @@ test("AC1 — a green run writes the exact suite-state shape to .quay/full-suite
   }
 });
 
+// ── gap-merge-green-snapshot-verified-commit-livelock: AC2 (verifiedCommit / commit) ────────────────
+
+test("AC2 — a git-repo run records verifiedCommit (the integration tip at suite start) in the state AND the round record", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-vc-"));
+  // A REAL git repo (not a hermetic non-git temp root) so `git rev-parse HEAD` resolves — the hermetic
+  // AC1 exact-shape test above stays byte-stable because a non-git root omits the field.
+  execSync("git init -q", { cwd: root });
+  execSync("git config user.name fsr-test", { cwd: root });
+  execSync("git config user.email fsr@example.com", { cwd: root });
+  fs.writeFileSync(path.join(root, "a.txt"), "a\n", "utf8");
+  execSync("git add -A && git commit -q -m base", { cwd: root });
+  const head = execSync("git rev-parse HEAD", { cwd: root, encoding: "utf8" }).trim();
+  const { f, dir } = fakeSuite(GREEN_SUITE);
+  try {
+    const child = runRunner({ root, command: `bash ${f}`, laneCount: 8 });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, `runner exits 0 on green, got ${code}`);
+    const s = readState(root);
+    assert.ok(s, "state file written");
+    assert.equal(s.verifiedCommit, head, "state carries the tested commit (the integration tip at suite start)");
+    // The verification-round record carries the same verified commit (AC2, second half).
+    const vrf = path.join(root, ".quay", "verification-round.jsonl");
+    assert.ok(fs.existsSync(vrf), "verification-round.jsonl written");
+    const rec = JSON.parse(fs.readFileSync(vrf, "utf8").split("\n").filter((l) => l.trim())[0]);
+    assert.equal(rec.commit, head, "round record carries the verified commit");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC2 — the worktree state mirror carries the SAME verifiedCommit (SYNC BRIDGE byte-identical)", async () => {
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-vc-wt-"));
+  const mainRoot = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-vc-main-"));
+  execSync("git init -q", { cwd: worktree });
+  execSync("git config user.name fsr-test", { cwd: worktree });
+  execSync("git config user.email fsr@example.com", { cwd: worktree });
+  fs.writeFileSync(path.join(worktree, "a.txt"), "a\n", "utf8");
+  execSync("git add -A && git commit -q -m base", { cwd: worktree });
+  const gateDir = path.join(mainRoot, ".quay");
+  const { f, dir } = fakeSuite(GREEN_SUITE);
+  try {
+    const child = runRunner({ root: worktree, command: `bash ${f}`, laneCount: 8, stateDir: gateDir });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, `runner exits 0 on green, got ${code}`);
+    const wt = readState(worktree);
+    const main = readState(mainRoot);
+    assert.ok(wt && main, "both states written");
+    assert.ok(wt.verifiedCommit, "worktree state carries verifiedCommit");
+    assert.equal(wt.verifiedCommit, main.verifiedCommit, "mirror carries the SAME verifiedCommit");
+    assert.deepEqual(
+      JSON.parse(fs.readFileSync(path.join(worktree, ".quay", "full-suite-state.json"), "utf8")),
+      JSON.parse(fs.readFileSync(path.join(mainRoot, ".quay", "full-suite-state.json"), "utf8")),
+      "worktree state byte-identical to the main-repo (gate) state (state_synced = same)",
+    );
+  } finally {
+    fs.rmSync(worktree, { recursive: true, force: true });
+    fs.rmSync(mainRoot, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // ── gap-suite-state-split-across-worktree-and-gate: AC1/AC2/AC3 (--state-dir split) ────────────────
 
 test("AC1/AC2 — --state-dir decouples the state/log write location from --root (the tested checkout)", async () => {

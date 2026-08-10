@@ -251,6 +251,17 @@ export interface SuiteState {
    * on legacy states ⇒ the watchdog falls back to a stale-AGE threshold before declaring a crash.
    */
   pid?: number;
+  /**
+   * gap-merge-green-snapshot-verified-commit-livelock AC2 — the commit this run VERIFIED: the
+   * integration tip (`git rev-parse HEAD`) in the tested checkout at suite START. The full suite
+   * takes ~1847s (~31 min) while integration lands ~12 commits/round (median 147s) — a green that
+   * only records `state == green` never catches integration HEAD (COVERAGE fail-closed forever =
+   * structural livelock). The batch-merge helper (integration-batch-merge.sh) reads this field and
+   * merges THE VERIFIED COMMIT instead of the moving integration HEAD, so COVERAGE is satisfied by
+   * construction (the merged point WAS tested). Absent on non-git hermetic test roots and on legacy
+   * states (the runner omits the field when it cannot resolve a HEAD).
+   */
+  verifiedCommit?: string;
 }
 
 // AC2 — failure markers that flip state to red the MOMENT they appear on the suite's
@@ -481,6 +492,12 @@ export interface SuiteRoundRecord {
   // reason axis (gap-suite-state-has-no-reason-axis-failed-aborted-infra) carried into the
   // sequence so the trend reader can tell a real-failure red from an abort without re-deriving it.
   reason?: SuiteStateReason | null;
+  /**
+   * gap-merge-green-snapshot-verified-commit-livelock AC2 — the verified commit this round tested
+   * (same value as the suite-state's `verifiedCommit`: the integration tip at suite start). Absent
+   * on non-git hermetic roots / legacy rows.
+   */
+  commit?: string;
 }
 
 /**
@@ -600,6 +617,22 @@ export function spliceConcurrency(cmd: string, laneCount: number): string {
 }
 
 // ── AC3: resource-gate consultation before starting ──────────────────────────────────────────────────
+
+/**
+ * gap-merge-green-snapshot-verified-commit-livelock AC2 — the TESTED COMMIT: `git rev-parse HEAD` in
+ * the tested checkout at suite start. In the main repo this IS the integration tip the green measures
+ * (the batch-merge helper merges exactly this commit, not the moving integration HEAD). Not a git
+ * checkout (a hermetic test root) ⇒ undefined ⇒ the field is omitted (graceful — the AC1 exact-shape
+ * test on a non-git temp root stays byte-stable).
+ */
+export function readVerifiedCommit(root: string): string | undefined {
+  try {
+    const out = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
+    return /^[0-9a-f]{40,}$/i.test(out) ? out : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * gap-worktree-scoped-runs-consume-resources-but-produce-no-signal AC1/AC2 — whether a checkout is a
@@ -866,6 +899,11 @@ export async function run(argv: string[]): Promise<number> {
   // producing checkout's scope so waiters can distinguish a worktree-origin suite (deferrable — its
   // completion updates nothing anyone waits on) from the main-repo suite (the signal being waited for).
   const scope = isGitWorktree(root) ? ("worktree" as const) : ("main" as const);
+  // gap-merge-green-snapshot-verified-commit-livelock AC2 — record the TESTED COMMIT ONCE at run
+  // start (the integration tip the green is about to verify). The batch-merge helper merges THIS
+  // commit rather than the moving integration HEAD, so the green's COVERAGE is satisfied by
+  // construction (the merged point WAS tested). Non-git hermetic test roots omit the field.
+  const verifiedCommit = readVerifiedCommit(root);
   // GENERATION GUARD — this run's unique id, carried by EVERY state write. The initial `running`
   // write establishes it (the newest runner owns the file from then on); every later write must
   // still own the generation or it is dropped (gap-full-suite-state-race-last-write-wins-no-
@@ -903,6 +941,7 @@ export async function run(argv: string[]): Promise<number> {
     laneCount,
     scope,
     runId,
+    ...(verifiedCommit ? { verifiedCommit } : {}),
     // AC6 (gap-full-suite-state-red-no-failure-detail-static-check-invisible): every state write
     // carries the RUNNER's PID so suite-state-trigger's runOnce crash-watchdog can distinguish
     // "genuinely running" (PID alive) from "runner died mid-run" (PID dead — SIGKILL is uncatchable
@@ -1450,6 +1489,9 @@ export async function run(argv: string[]): Promise<number> {
     reason: finalState.reason ?? null,
     runner: base.runner,
     scope,
+    // gap-merge-green-snapshot-verified-commit-livelock AC2 — the verified commit this round tested
+    // (same value the state carries). Absent on non-git hermetic roots.
+    ...(verifiedCommit ? { commit: verifiedCommit } : {}),
   });
   // NOTE: appendVerificationRound above is the ONE suite-duration append per run (the
   // checker-cost.test.mjs AC6 contract: two runs ⇒ exactly two verification-round.jsonl lines).
