@@ -36,11 +36,11 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录裁定5 连续 9 轮未执行的实证（tick 行数 / Agent last ts 07:15:44 / suite-health-last-run.json 1h44m 未更新 / catalog 0 命中）（本任务 Proposal 已含）
-- [ ] AC2: **计数器脚本**——`a15-ruling5-counter` 读 transcript 最后一次 Agent tool_use ts，算距现在 tick 行数，>=3/>=6 分别报「应 .halt」/「应 /clear」
-- [ ] AC3: **capability-catalog 声明**——`grep -ci suite-health` > 0（manager 点检手法可验证）
-- [ ] AC4: **tick 接线**——`orchestrator-tick-core.md` A15 ⑤ 注明每 tick 跑计数器；A15 ② 每 tick 写 suite-health-last-run.json 保持
-- [ ] AC5: **既有不回归**——`--for-task` scoped 门绿
+- [x] AC1: **复现固化**——任务体记录裁定5 连续 9 轮未执行的实证（tick 行数 / Agent last ts 07:15:44 / suite-health-last-run.json 1h44m 未更新 / catalog 0 命中）（本任务 Proposal 已含）
+- [x] AC2: **计数器脚本**——`a15-ruling5-counter` 读 transcript 最后一次 Agent tool_use ts，算距现在 tick 行数，>=3/>=6 分别报「应 .halt」/「应 /clear」
+- [x] AC3: **capability-catalog 声明**——`grep -ci suite-health` > 0（manager 点检手法可验证）
+- [x] AC4: **tick 接线**——`orchestrator-tick-core.md` A15 ⑤ 注明每 tick 跑计数器；A15 ② 每 tick 写 suite-health-last-run.json 保持
+- [x] AC5: **既有不回归**——`--for-task` scoped 门绿
 
 ## Definition of Done
 
@@ -66,6 +66,34 @@ invariant a15_counter_wired_every_tick = 1（A15 ⑤ 每 tick 跑计数器）
 invoke    `node --no-warnings --experimental-strip-types plugin/scripts/a15-ruling5-counter.ts --json`（贴 ticks_since_agent 数字）
 control   <3 轮健康静默；>=3 报应 .halt；>=6 报应 /clear
 resume    计数器脚本 / catalog 声明 / tick 接线分步提交，任一步完成即写盘
+
+## Implement evidence（inner 2026-08-10，worktree `gap-a15-ruling5-counter-missing`）
+
+**Contract invoke（真实 transcript 实跑，验证锚 (b)「计数器对当前状态报 ≥3 轮缺失」）**：
+
+```json
+$ node --no-warnings --experimental-strip-types plugin/scripts/a15-ruling5-counter.ts --root /home/yale/work/quay --json; echo exit=$?
+{
+  "ticks_since_agent": 8,
+  "last_agent_ts": "2026-08-10T11:40:09.100Z",
+  "last_agent_epoch_ms": 1786362009100,
+  "band": "clear",
+  "signal": true,
+  "action": "应 /clear",
+  "message": "A15 心跳缺失 8 轮 (>=6) ⇒ 应 /clear",
+  "transcript": "/home/yale/.claude/projects/-home-yale-work-quay/7795bb75-d3c9-4d7f-82dd-f8097b36db30.jsonl",
+  "tick_log": "/home/yale/work/quay/orchestration/tick-log.md"
+}
+exit=1
+```
+
+当前真值 ticks_since_agent=8（>=6 ⇒ 应 /clear）——外层自 11:40:09Z 后未派发 Agent，8 条 tick 行越过 3/6 两道门槛，此前在记录上不可区分（正是本任务立因）。
+
+**AC3 catalog 命中**：`grep -ci suite-health plugin/scripts/capability-catalog.sh` = **1**（manager 点检手法可验证）。
+
+**AC5 scoped 门**：`./scripts/test.sh --for-task gap-a15-ruling5-counter-missing` → **27 pass / 0 fail / 0 cancelled**（新增 `a15-ruling5-counter.test.mjs` 12 用例 + `capability-catalog.test.mjs` 15 用例；含 red-on-omission-audit 静态检查 `uncov=0`、delivery-inventory 快照已再生）。
+
+**新增脚本导致的机械产物**：`plugin/scripts/a15-ruling5-counter.ts` 进入 plugin/scripts ⇒ `delivery-inventory-drift-gate` 要求同 change 再生 `docs/proposals/quay-product-outline.md §6` 快照（`verify-delivery-surface.ts --write-inventory` 已跑，disk=198 snapshot=198）——该文件非 Touches 声明，但为门禁机械必需。
 
 ## Dispatch review
 

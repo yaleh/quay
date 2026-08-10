@@ -78,6 +78,7 @@ SELF_DIR="$(cd "$(dirname "$SELF")" 2>/dev/null && pwd || true)"
 # as a specific QUESTION, never the generic "checks correctness" (AC5 negative control:
 # a catalog where every entry says "checks correctness" is indistinguishable from none).
 declare -A QUESTION=(
+  [a15-ruling5-counter.ts]="Is A15 裁定5 (suite-health 心跳缺失) mechanically counted — ticks since the outer's last Agent tool_use (read from the outer session transcript + tick-log), >=3 ⇒ 应 .halt / >=6 ⇒ 应 /clear?"
   [adr016-screen-use-check.ts]="Is this tmux remote-drive usage compliant with ADR-016's screen-use carve-out?"
   [anti-drift-touches-check.ts]="Did the landed change touch exactly the files the task's ## Touches declared (and nothing else)?"
   [anti-gaming-guard.sh]="Is a candidate value surface machine-verifiable, capped and un-inflatable (no subjective gaming of the chart)?"
@@ -292,6 +293,7 @@ declare -A QUESTION=(
 # ── CADENCE (cadence declaration (②a, gap-crystallization-five-directions) — every declared check declares how often it is supposed to run; 零调用 > 3× 声明周期 → 待表态 (not a uniform day count)) ──
 declare -A CADENCE=(
   [accounting-emit.ts]="每轮"
+  [a15-ruling5-counter.ts]="每轮"
   [adr016-screen-use-check.ts]="每轮"
   [anti-drift-touches-check.ts]="按需"
   [anti-gaming-guard.sh]="冷启动"
@@ -493,6 +495,7 @@ declare -A CADENCE=(
 # ── INVALIDATION (invalidation-precondition declaration (①) — every hard constraint / mechanism declaration carries a 失效前提 field; when a testable precondition can be written, write it, when not, mark the explicit '无可测前提，靠周期复核' (标出来别假装有). Missing field = entry-gate reject below) ──
 declare -A INVALIDATION=(
   [accounting-emit.ts]="无可测前提，靠周期复核"
+  [a15-ruling5-counter.ts]="失效前提：外层仍通过 transcript 心跳判执行；若执行面 API 化不再依赖 Agent tool_use 时间戳（不再有 transcript 可读），本条退休"
   [adr016-screen-use-check.ts]="失效前提：远程驱动仍通过 tmux capture-pane 观测（ADR-016 仍生效）；若驱动面改为非 TUI 协议，本条退休"
   [anti-drift-touches-check.ts]="无可测前提，靠周期复核"
   [anti-gaming-guard.sh]="无可测前提，靠周期复核"
@@ -694,6 +697,7 @@ declare -A INVALIDATION=(
 # ── LAST_REAFFIRMED (last-reaffirmed stamp (③) — the date someone last looked at this mechanism and stamped it; 超 N 天未被任何调用/检查/复核触及 → 待重新确认 (只看一眼盖章, 不判断对错)) ──
 declare -A LAST_REAFFIRMED=(
   [accounting-emit.ts]="2026-08-10"
+  [a15-ruling5-counter.ts]="2026-08-10"
   [adr016-screen-use-check.ts]="2026-08-10"
   [anti-drift-touches-check.ts]="2026-08-10"
   [anti-gaming-guard.sh]="2026-08-10"
@@ -895,6 +899,7 @@ declare -A LAST_REAFFIRMED=(
 # ── MATCHING (matching-method declaration (④) — how this checker judges: position (按位置不按关键词) | keyword | enumerative (枚举式存在性) | n/a (non-judgment lib/data). New checkers MUST declare which matching they use) ──
 declare -A MATCHING=(
   [accounting-emit.ts]="keyword"
+  [a15-ruling5-counter.ts]="enumerative"
   [adr016-screen-use-check.ts]="position"
   [anti-drift-touches-check.ts]="keyword"
   [anti-gaming-guard.sh]="keyword"
