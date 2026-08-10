@@ -69,11 +69,20 @@ if (!worktree || !stateDir || !root) {
 
 const launchEnv = `QUAY_TEST_SUITE_MAX_RUNTIME_MS=${envMaxRuntimeMs} QUAY_TEST_SUITE_SILENCE_MS=${envSilenceMs} QUAY_TEST_RED_GRACE_MS=${envRedGraceMs}`
 
+// ⚠️ 启动必须 DETACH（实证 15:54:06→15:54:22, runId f6b824b5）：workflow subagent 里用
+// `Bash(run_in_background:true)` 起的后台任务会在 subagent 退出时被 harness 连带杀掉（SIGTERM →
+// onSignal → state=aborted, runner 死于 Fix agent 返回的同一秒）。detach（setsid + & + disown）
+// 让 runner 活在独立 session，subagent 退出不影响它；等待仍由 workflow 脚本轮询 state.json 决定，
+// 不违背「等待由脚本控制流决定」。subagent 侧只做：前台 Bash 跑这条（立即返回）+ 短促确认。
+const launchCmd = `cd ${root} && ${launchEnv} setsid node --no-warnings --experimental-strip-types plugin/scripts/full-suite-runner.ts --root ${worktree} --state-dir ${stateDir} --log-file ${logFile} >/dev/null 2>&1 & disown; sleep 2; echo detached-pid=$!`
+
 // ── 通用指令片段（发给每个 agent 的执行上下文，固定命令块，不靠探索）─────────────────
 const CONTEXT = `
 repo main checkout root: ${root}
 verify worktree: ${worktree}   (frozen during a verification round — do NOT fast-forward/checkout/reset it mid-round)
-runner: cd ${root} && ${launchEnv} node --no-warnings --experimental-strip-types plugin/scripts/full-suite-runner.ts --root ${worktree} --state-dir ${stateDir} --log-file ${logFile}
+LAUNCH (detached, survives subagent exit): ${launchCmd}
+  — run this as a FOREGROUND Bash call (it returns immediately via &+disown); then poll state.json up to ~20s until state=running appears (短促确认), THEN return.
+  — do NOT use Bash(run_in_background:true): a background task from a subagent is killed at subagent exit (实证 runId f6b824b5 died 16s after launch).
 state file: ${stateDir}/full-suite-state.json  (script-owned polling reads this)
 verification-round log: ${stateDir}/verification-round.jsonl
 integration-batch-merge: cd ${root} && bash plugin/scripts/integration-batch-merge.sh
@@ -89,8 +98,7 @@ ${CONTEXT}
 1. 读 ${stateDir}/full-suite-state.json 与 ${stateDir}/verification-round.jsonl 末尾：当前是否已有 suite 在跑（state=running）？上一轮红的话 failures[] 是什么？
 2. 若上一轮是真实红轮（reason=failed 且 tests>=2900）：读【全部】failures[] 与归档日志，逐条诊断根因并修复，在 worktree 里 commit。
 3. 若上一轮是非验证终态（static-check/aborted/timeout/截断）：修掉阻塞它的东西（静态检查红先修静态检查；resource-gate WAIT/single-flight lock 则等待）。
-4. 然后【启动】全量 suite：cd ${root} && ${launchEnv} node --no-warnings --experimental-strip-types plugin/scripts/full-suite-runner.ts --root ${worktree} --state-dir ${stateDir} --log-file ${logFile}
-   —— 用 Bash(run_in_background:true) 启动；启动后做一次短促确认（几秒内 state.json 出现 state=running 或 runId 更新）即返回，不要长等。
+4. 然后【启动】全量 suite：${launchCmd} —— 前台 Bash 跑（&+disown 立即返回），然后轮询 state.json 最多 ~20s 直到 state=running 出现（短促确认），再返回。禁止 Bash(run_in_background:true)。
 5. 若 suite 已经在跑（state=running），直接返回，不重复启动。
 返回 { launched: bool, runId, worktreeHead: 当前 worktree HEAD, failuresFixed: string[], note }。
 不要做任何等待决策——等待由 workflow 脚本控制。`,
@@ -128,8 +136,7 @@ ${CONTEXT}
 1. reason=static-check：读 ${logFile} 的静态检查失败详情（run_static_checks 阶段），修静态检查（不是绕过），然后重跑全量 suite。
 2. reason=aborted 且是 resource-gate WAIT / single-flight lock：检查 "resource-gate.sh --for full-suite"，等它放行，然后重跑全量 suite。
 3. 其它：读日志找阻塞根因，修掉，重跑全量 suite。
-4. 启动全量 suite：cd ${root} && ${launchEnv} node --no-warnings --experimental-strip-types plugin/scripts/full-suite-runner.ts --root ${worktree} --state-dir ${stateDir} --log-file ${logFile}
-   用 Bash(run_in_background:true) 启动；做短促确认（几秒内 state=running）即返回。
+4. 启动全量 suite：${launchCmd} —— 前台 Bash 跑（&+disown 立即返回），然后轮询 state.json 最多 ~20s 直到 state=running（短促确认）再返回。禁止 Bash(run_in_background:true)。
 返回 { blocker: string, relaunched: bool }。不要做等待决策——等待由 workflow 脚本控制。`,
       { schema: { type: 'object', properties: { blocker: { type: 'string' }, relaunched: { type: 'boolean' } }, required: ['blocker', 'relaunched'] } }
     )
@@ -150,8 +157,7 @@ ${CONTEXT}
 任务：
 1. 读 ${stateDir}/full-suite-state.json 的 failures[]（现在记录【全部】失败，最多 200 条）+ 归档日志 ${logFile}，逐条列出失败，诊断每一条的根因。
 2. 修复所有根因，在 worktree 里 commit（一次提交可以含多个修复，但必须是真实的修复，不是删测试/改判据绕过）。
-3. 重跑全量 suite：cd ${root} && ${launchEnv} node --no-warnings --experimental-strip-types plugin/scripts/full-suite-runner.ts --root ${worktree} --state-dir ${stateDir} --log-file ${logFile}
-   用 Bash(run_in_background:true) 启动；做短促确认（几秒内 state=running）即返回。
+3. 重跑全量 suite：${launchCmd} —— 前台 Bash 跑（&+disown 立即返回），然后轮询 state.json 最多 ~20s 直到 state=running（短促确认）再返回。禁止 Bash(run_in_background:true)。
 返回 { failureCount, rootCauses: string[], relaunched: bool, worktreeHead, note }。
 不要做任何等待决策——等待由 workflow 脚本控制。`,
     { schema: { type: 'object', properties: { failureCount: { type: 'number' }, rootCauses: { type: 'array', items: { type: 'string' } }, relaunched: { type: 'boolean' }, worktreeHead: { type: 'string' }, note: { type: 'string' } }, required: ['failureCount', 'relaunched'] } }
