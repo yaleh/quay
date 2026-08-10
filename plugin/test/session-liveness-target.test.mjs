@@ -33,7 +33,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import {
   SCRIPT, tmuxAvailable,
-  setProbeTmpPrefix, sweepTmp, tmux, isClaudePid,
+  setProbeTmpPrefix, sweepTmp, reapLiveOwners, tmux, isClaudePid,
   waitForAlive, makeHermeticProbe, makeTwoWindowSession,
   waitForSelfClaude, spawnMonitor, waitForOutput,
 } from "./session-liveness-helpers.mjs";
@@ -44,6 +44,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 setProbeTmpPrefix("session-liveness-tgt-");
 
 after(() => {
+  reapLiveOwners();
   sweepTmp("session-liveness-tgt-");
 });
 

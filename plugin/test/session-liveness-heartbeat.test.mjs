@@ -34,7 +34,7 @@ import { fileURLToPath } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
 import {
   SCRIPT, tmuxAvailable,
-  setProbeTmpPrefix, sweepTmp, tmux, isolateTmuxEnv, isClaudePid,
+  setProbeTmpPrefix, sweepTmp, reapLiveOwners, tmux, isolateTmuxEnv, isClaudePid,
   paneHasClaudeChild, waitForAlive, makeHermeticProbe,
   spawnMonitor, waitForOutput, waitForRounds, countRounds,
   makeBackdatedGitRepo, makeFreshGitRepo, initGitRepo,
@@ -47,9 +47,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 setProbeTmpPrefix("session-liveness-hb-");
 
 // KNOWN-LOAD-SENSITIVE: under suite load a hermetic-probe test can be cancelled mid-run,
-// skipping its finally → this file's /tmp dirs leak and trip the suite-tail tmux-leak-scan. Sweep
-// ONLY this file's own prefixes (see SPLIT CONCURRENCY SAFETY above — never a sibling's).
+// skipping its finally → this file's /tmp dirs leak (server + socket stay alive) and trip the
+// suite-tail tmux-leak-scan. reapLiveOwners() FIRST kills this process's OWN still-alive probe
+// servers (a cancelled test's residue — sweepTmp cannot: it skips live-owner dirs by design), then
+// sweepTmp removes owner-dead residue. Sweep ONLY this file's own prefixes (see SPLIT CONCURRENCY
+// SAFETY above — never a sibling's).
 after(() => {
+  reapLiveOwners();
   sweepTmp("session-liveness-hb-");
 });
 

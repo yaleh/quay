@@ -37,14 +37,14 @@ import { fileURLToPath } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
 import {
   tmuxAvailable,
-  setProbeTmpPrefix, sweepTmp, dirHasLiveOwner,
+  setProbeTmpPrefix, sweepTmp, reapLiveOwners, dirHasLiveOwner,
   makeHermeticProbe, spawnMonitor, waitForRounds,
 } from "./session-liveness-helpers.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 setProbeTmpPrefix("session-liveness-swp-");
-after(() => { sweepTmp("session-liveness-swp-"); });
+after(() => { reapLiveOwners(); sweepTmp("session-liveness-swp-"); });
 
 const noTmux = tmuxAvailable ? false : "tmux not installed";
 
@@ -67,6 +67,29 @@ test("AC4/AC3 — sweepTmp keeps a LIVE probe (owner session alive) and cleans o
   } finally {
     p.cleanup();
     try { fs.rmSync(residue, { recursive: true, force: true }); } catch { /* best-effort */ }
+  }
+});
+
+test("reapLiveOwners — kills THIS process's still-alive hermetic probe server and removes the dir (cancelled-test residue)", { skip: noTmux }, async () => {
+  // The KNOWN-LOAD-SENSITIVE family can have a test CANCELLED mid-run, skipping its finally →
+  // the probe's tmux server survives. sweepTmp skips live-owner dirs BY DESIGN, so it cannot
+  // reclaim this class; reapLiveOwners (called from each file's after() before sweepTmp) is the
+  // reaper for it. This test proves the reaper kills this process's OWN registered probe.
+  const p = makeHermeticProbe("swp-reap");
+  try {
+    assert.ok(dirHasLiveOwner(p.tmp),
+      "the probe dir must report a LIVE owner before the reaper");
+    reapLiveOwners();
+    assert.ok(!dirHasLiveOwner(p.tmp),
+      "reapLiveOwners must kill the live owner server (socket no longer held by a live process)");
+    assert.ok(!fs.existsSync(p.tmp),
+      "reapLiveOwners must remove the reaped probe dir");
+    // the reaper replaced the probe's own cleanup — cleanup() must stay safe/idempotent on a
+    // reaped probe (a cancelled test's finally may still run if the node:test abort allows it).
+    p.cleanup();
+    assert.ok(true, "cleanup on a reaped probe must not throw");
+  } finally {
+    try { p.cleanup(); } catch { /* already reaped */ }
   }
 });
 
