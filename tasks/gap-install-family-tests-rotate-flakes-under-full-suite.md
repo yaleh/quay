@@ -139,3 +139,16 @@ scoped 门绿 + 组契约绿 + 单独跑绿 + 无静默漏测。
 - AC3 单独跑（抽样 3）：`quay-init-check-drift + quay-init-drift-report + runtime-landing` 连跑
   **15/15 绿 / 0 fail / 0 skipped**（EXIT=0，93.8s）。
 AC 勾选状态不变（AC1/3/4/5 勾、AC2 + DoD 留外层）。
+
+**再派发复验（inner re-dispatch 2026-08-10，develop HEAD de7aa6e3）**：develop 已推进（含 manager
+修复，未触及 test 基建），本工作树基于当前 develop HEAD 复跑三项核验全过，与上述证据吻合：
+- `bash scripts/test.sh --for-task gap-install-family-tests-rotate-flakes-under-full-suite --allow-thin`
+  → **exit 0**。task-contract strict-subset **no violations**（对 4 个 Touches 任务文件）；adr016-screen-use
+  **0 违规**（147 文件扫描）；superseded-capability **PASS**；dead-code-after-return **0 违规**；
+  selector 0/6 thin allowed（Touches 是 shell 脚本 / 任务文件，非测试文件）。
+- 组系统契约：`runner-grouping + known-load-sensitive + load-sensitive-release-check` 连跑
+  **35/35 绿 / 0 fail / 0 cancelled / 0 skipped**（EXIT=0，223.5s）。
+- AC3 单独跑（抽样 3）：`quay-init-check-drift + quay-init-drift-report + runtime-landing` 连跑
+  **15/15 绿 / 0 fail / 0 skipped**（EXIT=0，125.2s）——工作树先 `npm install`（postinstall 触发
+  sync-vendor.sh 重建 plugin/vendor 产物），env 就绪后测试逻辑未动、单独跑绿由构造保留。
+AC 勾选状态不变（AC1/3/4/5 勾、AC2 + DoD 留外层）。
