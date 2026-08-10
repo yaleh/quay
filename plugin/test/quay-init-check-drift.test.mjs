@@ -20,8 +20,9 @@
 //       lists it; re-running `--loop` (the upgrade path) fills it; `--check-drift` then reports 缺失-0.
 // AC3/control — locally modify a derived script ⇒ `--check-drift` lists it as 漂移 and is READ-ONLY
 //       (never silently overwrites); the upgrade re-run backs it up + replaces with a visible report.
-// L_G — send-keys-verified.sh stays in the plugin tree but is RETIRED from the derived set; the
-//       drift report must NOT list it as missing (分层退役处置正确, the upgrade must not lay it back).
+// L_G — send-keys-verified.sh is DELETED (superseded implementation removed —
+//       gap-retired-script-still-callable); the drift report must NOT list it as missing (it does
+//       not exist in the plugin tree, so it can never be laid back).
 //
 // Run:
 //   scripts/test.sh plugin/test/quay-init-check-drift.test.mjs
@@ -202,21 +203,21 @@ test('AC3/control — local edit is listed 漂移, --check-drift is read-only (�
   } finally { cleanup(ws); cleanup(src); }
 });
 
-// L_G — send-keys-verified.sh stays in the plugin tree but is RETIRED from the derived set; the
-// drift report must NOT list it as missing (分层退役处置正确 — the upgrade must not lay it back).
-test('L_G — retired send-keys-verified.sh stays in the plugin tree but is NOT in the derived set (not reported missing, not laid back)', () => {
+// L_G — send-keys-verified.sh is DELETED (superseded implementation removed —
+// gap-retired-script-still-callable); the drift report must NOT list it as missing (it does not
+// exist in the plugin tree, so it can never be laid back).
+test('L_G — send-keys-verified.sh is DELETED (not in plugin tree, not in derived set, not reported missing)', () => {
   const src = fakePluginRoot();
   const ws = makeTmp();
   try {
-    assert.ok(fs.existsSync(path.join(src, 'scripts', 'send-keys-verified.sh')),
-      'send-keys-verified.sh must still exist in the plugin tree (layered retirement keeps the file)');
+    assert.ok(!fs.existsSync(path.join(src, 'scripts', 'send-keys-verified.sh')),
+      'send-keys-verified.sh must NOT exist in the plugin tree (superseded implementation deleted — gap-retired-script-still-callable)');
     const r1 = runLoop(ws, src);
     assert.equal(r1.status, 0, `--loop must exit 0:\n${r1.stderr}`);
     assert.ok(!fs.existsSync(path.join(ws, 'plugin', 'scripts', 'send-keys-verified.sh')),
-      'the install must NOT lay down the retired send-keys-verified.sh');
+      'the install must NOT lay down the deleted send-keys-verified.sh');
     const c = runCheckDrift(ws, src);
-    // The header prose legitimately names the retired file (explains why it is not reported); the
-    // missing/drift per-item lists must NOT contain it (matches quay-init-drift-report.test.mjs L_G).
+    // The missing/drift per-item lists must NOT contain it (matches quay-init-drift-report.test.mjs L_G).
     const itemLines = c.stdout.split('\n').filter((l) => /^\s+(missing|drift):/.test(l));
     assert.ok(!itemLines.some((l) => l.includes('send-keys-verified')),
       'the drift report must NOT list send-keys-verified.sh as missing/drift (it is not in the derived set)');

@@ -18,7 +18,8 @@
 //          dimension.
 //   AC3  — no silent overwrite: a locally-modified derived script is LISTED as drift and the upgrade
 //          backs it up + reports before replacing (never silent); a missing one is auto-added.
-//   L_G  — positive note: send-keys-verified.sh (retired from the derived set) is NOT reported.
+//   L_G  — positive note: send-keys-verified.sh (deleted — superseded implementation) is NOT
+//          reported.
 //
 // Contract:
 //   measure   drift_report = `bash plugin/scripts/quay-init.sh --check-drift` stdout 的 漂移/缺失/一致 数字段
@@ -196,18 +197,18 @@ test('AC3 — a locally-modified derived script is listed as drift and the upgra
   } finally { cleanup(ws); }
 });
 
-// ── L_G positive note: send-keys-verified.sh is retired from the derived set → NOT reported ────────
-test('L_G — send-keys-verified.sh (retired from the derived set) is NOT in the drift report', () => {
+// ── L_G positive note: send-keys-verified.sh is DELETED (superseded implementation) → NOT reported ──
+test('L_G — send-keys-verified.sh (deleted — superseded implementation) is NOT in the drift report', () => {
   const ws = makeTmp();
   try {
-    assert.ok(fs.existsSync(path.join(pluginDir, 'scripts', 'send-keys-verified.sh')),
-      'the retired script still lives in the plugin tree (layered retirement — file kept, not derived)');
+    assert.ok(!fs.existsSync(path.join(pluginDir, 'scripts', 'send-keys-verified.sh')),
+      'send-keys-verified.sh must NOT exist in the plugin tree (superseded implementation deleted — gap-retired-script-still-callable)');
     const r = runInit(ws, ['--check-drift', '--root', ws]);
     assert.equal(r.status, 0, `--check-drift must exit 0:\n${r.stderr}`);
     const rep = parseDriftReport(r.stdout);
     const missingLines = r.stdout.split('\n').filter((l) => l.startsWith('  missing: '));
     assert.ok(!missingLines.some((l) => l.includes('send-keys-verified')),
-      'missing list must not contain send-keys-verified.sh (retired from the derived set — the upgrade must not lay it back down)');
+      'missing list must not contain send-keys-verified.sh (deleted — the upgrade has nothing to lay back down)');
     assert.ok(rep.derived > 0, 'the derived set is non-empty');
   } finally { cleanup(ws); }
 });

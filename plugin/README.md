@@ -78,8 +78,8 @@ Behavior: idempotent (skips identical files), conflict-aware (reports but does n
 
 The classic-pipeline era gate scripts in `plugin/gate-scripts/` are **RETIRED** (2026-08-05):
 they were laid into `scripts/gates/` in target projects but nothing called them (dead weight).
-They remain in the tree as a historical artifact (layered retirement — send-keys-verified
-precedent) but are **no longer laid down by quay-init and no longer synced by sync.sh**. The live
+They remain in the tree as a historical artifact (分层退休 / layered retirement) but are
+**no longer laid down by quay-init and no longer synced by sync.sh**. The live
 fast-mode gate scripts ship under `plugin/scripts/` via the `--loop` category instead.
 
 ### Agent types (`plugin/agents/`)

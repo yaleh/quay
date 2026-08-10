@@ -27,7 +27,7 @@
 # NOTE (2026-08-05 retirement): the old gate-script category that copied the plugin's
 # classic-pipeline era gates (it0-*/audit-*/drain-*/vmeta-lag) into <workspace>/scripts/gates/
 # is RETIRED. Those gates were laid into every target project but nothing called them — dead
-# weight shipped to every install. Layered retirement (send-keys-verified precedent): the files
+# weight shipped to every install. 分层退休（Layered retirement）: the files
 # stay in the plugin tree, but no category lays them down and sync.sh no longer syncs them. The
 # live fast-mode gate scripts ship via the --loop plugin/scripts/ landing.
 # Flags:
@@ -803,7 +803,7 @@ validate_worktree_root() {
 #       operates) that exists under plugin/scripts/. A bare filename there is a target-local
 #       mechanism reference (reference-spelling independence: 文档写裸文件名不再静默漏铺). Scoped to
 #       the mechanism corpus because the pipeline/routine/init skills bare-MENTION plugin-local
-#       tools (proposal-convergence.ts, routine-*, quay-init.sh, send-keys-verified.sh) whose
+#       tools (proposal-convergence.ts, routine-*, quay-init.sh) whose
 #       transitive deps are NOT loop mechanisms — auto-laying those would ship broken files.
 #   (c) explicit       — documented additions below (bare-name mechanism files the docs call with
 #       no path at all, the checkers' transitive deps, the self-describing capability catalog).
@@ -812,8 +812,10 @@ validate_worktree_root() {
 #       This is the dependency-closure invariant (铺了消费者必然铺依赖): send-keys-reliable.sh:41
 #       `CHECKER="${SCRIPT_DIR}/transcript-delivery-check.ts"` and inner-session-check.sh:43 are the
 #       regression controls — before this, the laid-down delivery-verification was broken from first use.
-# Scripts that must NEVER auto-lay-down (a layer-retired delivery check + the installer itself):
-NEVER_LAYDOWN="send-keys-verified.sh quay-init.sh"
+# Scripts that must NEVER auto-lay-down (the installer itself — it is the script doing the
+# laying down; send-keys-verified.sh was DELETED by gap-retired-script-still-callable, so it is
+# no longer an entry here — a superseded implementation must not exist, not merely not be laid):
+NEVER_LAYDOWN="quay-init.sh"
 
 # Cross-machine VERIFICATION mechanism (gap-no-post-merge-cross-machine-verification-detection-latency-is-luck):
 # `cross-machine-verify.sh` ships with the loop because the loop tick docs reference it by full path
@@ -1345,8 +1347,7 @@ compute_drift_report() {
 if [ "$DO_CHECK_DRIFT" = true ]; then
   echo "quay-init drift report (plugin v${PLUGIN_VERSION})"
   echo "  derived-set axis: the delivery surface's DERIVED scripts (L_D — the functional surface is the"
-  echo "  derived laydown set, NOT the raw plugin/scripts file count). send-keys-verified.sh is retired"
-  echo "  from the derived set (layered retirement) and is intentionally NOT reported."
+  echo "  derived laydown set, NOT the raw plugin/scripts file count)."
   LOOP_SCRIPTS=()
   while IFS= read -r s; do LOOP_SCRIPTS+=("$s"); done < <(derive_loop_scripts)
   compute_drift_report "$WORKSPACE_ROOT"

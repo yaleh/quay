@@ -41,6 +41,11 @@
 #                                                        # .sh delivery-form gate (AC3):
 #                                                        #   every consumer-doc-referenced .sh must be
 #                                                        #   declared public; exit 1 on a violation
+#   bash plugin/scripts/capability-catalog.sh --superseded-check
+#                                                        # superseded-capability gate (AC5):
+#                                                        #   every SUPERSEDED entry must NOT exist in
+#                                                        #   plugin/scripts, plugin/test, packages/*/plugin
+#                                                        #   nor be taught in SKILL/README; exit 1 otherwise
 #
 # Exit status: 0 when every shipped check declares its question (unclassified == 0)
 # AND (in --entry-surface mode) no internal .sh is referenced by consumer-facing docs;
@@ -204,7 +209,6 @@ declare -A QUESTION=(
   [self-report-vocab-audit.ts]="Do the inner's recent self-reports avoid batch-style vocabulary (reanchor convergence)?"
   [self-report-vocab-check.ts]="Has the inner layer's self-reported vocabulary drifted from the shipped semantics (reanchor convergence)?"
   [send-keys-reliable.sh]="Did the reliable five-step send-keys sequence land in the foreign session?"
-  [send-keys-verified.sh]="Did the C-u → text → Enter send-keys sequence deliver to the target pane?"
   [serial-fanin-absorb.ts]="How should concurrent survivors be absorbed serially at fan-in?"
   [session-liveness-mount.sh]="Is a session-liveness observer mounted (one observer per consumer — who mounts owns its own stdout stream, no lock, no shared file)?"
   [session-liveness.sh]="Is a Claude Code session alive, busy, and within heartbeat (pure read-only observation, per-observer event stream)?"
@@ -270,6 +274,17 @@ declare -A QUESTION=(
   [workflow-metadata-conformance.mjs]="Does the workflow's metadata match its executable driver?"
   [workflow-replay.ts]="Does the workflow replay byte-for-byte against its golden run?"
   [worktree-branch-hygiene-check.sh]="Is the worktree and branch state hygienic (no stale branches or stranded worktrees)?"
+)
+
+# ── superseded capability table (gap-retired-script-still-callable, human ruling 2026-08-10) ──
+# One capability = ONE implementation. A superseded implementation must NOT exist in the
+# executable layer (plugin/scripts, plugin/test, packages/*/plugin vendored copies) and must NOT
+# be taught in SKILL/README positions (target state ①/②/⑤ — 一个能力=一个实现,被取代的实现不存在于
+# 仓库,不被教学;历史留在记录层 ADR/任务体/结晶文档). This table is the RECORD of what was removed and
+# why; `--superseded-check` asserts the invariant mechanically every run (wired into
+# run_static_checks in scripts/test.sh), so a deleted implementation can never silently regrow.
+declare -A SUPERSEDED=(
+  [send-keys-verified.sh]="REMOVED 2026-08-10 (gap-retired-script-still-callable, human ruling) — superseded by send-keys-reliable.sh under outer ruling F (2026-08-04); its md5 pane-hash criterion is ADR-016-forbidden. Deleted with its test (send-keys-verified.test.mjs) and leak doc (send-keys-verified-test-leaks-tmux-servers.md). Crystallization residue poisons context — the implementation must NOT exist."
 )
 
 # ── exp5-legacy screening (AC2) ──────────────────────────────────────────────────
@@ -378,13 +393,61 @@ case "${1:-}" in
     sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'
     exit 0
     ;;
+  --superseded-check)
+    MODE=superseded-check
+    ;;
   "")
     ;;
   *)
-    echo "ERROR: unknown argument: $1 (expected --json | --table | --summary | --entry-surface)" >&2
+    echo "ERROR: unknown argument: $1 (expected --json | --table | --summary | --entry-surface | --superseded-check)" >&2
     exit 2
     ;;
 esac
+
+# ── superseded-capability check (AC5: 一个能力=一个实现,被取代的实现不存在于仓库,不被教学) ──
+# Asserts the SUPERSEDED table invariant: every superseded implementation must NOT exist in the
+# executable layer (plugin/scripts, plugin/test, packages/*/plugin vendored copies) and must NOT
+# be taught in SKILL/README positions. Wired into run_static_checks (scripts/test.sh) so a
+# deleted superseded implementation can never silently regrow. Exit 0 = every superseded
+# capability is gone and untaught; 1 = at least one still exists / is still taught.
+if [ "$MODE" = "superseded-check" ]; then
+  REPO_ROOT="$(cd "${SELF_DIR}/../.." 2>/dev/null && pwd || true)"
+  viol=""
+  for b in "${!SUPERSEDED[@]}"; do
+    stem="${b%.*}"
+    # (1) executable layer — plugin/scripts/<name>
+    if [ -f "${REPO_ROOT}/plugin/scripts/${b}" ]; then
+      viol+="  plugin/scripts/${b} — superseded implementation still exists"$'\n'
+    fi
+    # (2) vendored copies — packages/*/plugin/scripts/<name>
+    for v in "${REPO_ROOT}"/packages/*/plugin/scripts/"${b}"; do
+      if [ -f "$v" ]; then
+        viol+="  ${v#${REPO_ROOT}/} — superseded vendored copy still exists"$'\n'
+      fi
+    done
+    # (3) test layer — plugin/test/<name> and plugin/test/<stem>.test.mjs
+    if [ -f "${REPO_ROOT}/plugin/test/${b}" ]; then
+      viol+="  plugin/test/${b} — superseded test still exists"$'\n'
+    fi
+    if [ -f "${REPO_ROOT}/plugin/test/${stem}.test.mjs" ]; then
+      viol+="  plugin/test/${stem}.test.mjs — superseded test still exists"$'\n'
+    fi
+    # (4) SKILL/README teaching positions must NOT teach the superseded capability
+    for tf in "${REPO_ROOT}"/plugin/skills/*/SKILL.md "${REPO_ROOT}/plugin/README.md" "${REPO_ROOT}/README.md" "${REPO_ROOT}"/packages/*/README.md; do
+      [ -f "$tf" ] || continue
+      if grep -q -- "${stem}" "$tf"; then
+        viol+="  ${tf#${REPO_ROOT}/} teaches the superseded capability ${b} (stem ${stem})"$'\n'
+      fi
+    done
+  done
+  if [ -n "$viol" ]; then
+    echo "FAIL (superseded-capability check): a superseded implementation must NOT exist in the executable layer nor be taught:" >&2
+    printf '%s' "$viol" >&2
+    exit 1
+  fi
+  echo "superseded-capability check: PASS — every superseded capability is removed from the executable layer and not taught (${#SUPERSEDED[@]} superseded)"
+  exit 0
+fi
 
 # ── build rows ─────────────────────────────────────────────────────────────────────
 TOTAL=${#SCRIPTS[@]}

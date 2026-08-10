@@ -29,9 +29,9 @@ this repo keeps removing. Run the script; do not hand-reimplement its behavior.
 
 The former `--gate-scripts` category (plugin/gate-scripts/* → scripts/gates/) is **RETIRED**
 (2026-08-05): those classic-pipeline era gates were laid into every target project but nothing
-called them — dead weight shipped to every install. Layered retirement (send-keys-verified
-precedent): the files stay in the plugin tree but are no longer laid down or synced. The live
-fast-mode gate scripts ship with `--loop` via the `plugin/scripts/` landing.
+called them — dead weight shipped to every install. 分层退休（Layered retirement）: the files stay
+in the plugin tree but are no longer laid down or synced. The live fast-mode gate scripts ship
+with `--loop` via the `plugin/scripts/` landing.
 
 `--loop` extra parameters (see the script for the full list):
 

@@ -43,20 +43,41 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 A-E 四类清点 + 目标态①②证据（本任务 Proposal 已含）
-- [ ] AC2: **A 删除**——4 实体删除（plugin/vendored/test/docs）
-- [ ] AC3: **B 同步改**——8 处断言「存在」→「不存在」或移除,删除后 scoped 门不红
-- [ ] AC4: **D 范式改名**——「分层退休」或 gate-scripts 范例,3 处无悬空
-- [ ] AC5: **E superseded 表 + 检查**——capability-catalog 加表 + 接线 run_static_checks
-- [ ] AC6: **C 保留**——记录层（ADR/结晶/任务）不动
-- [ ] AC7: **既有不回归**——`--for-task` scoped 门绿
+- [x] AC1: **复现固化**——任务体记录 A-E 四类清点 + 目标态①②证据（本任务 Proposal 已含）
+- [x] AC2: **A 删除**——4 实体删除（plugin/vendored/test/docs）
+- [x] AC3: **B 同步改**——8 处断言「存在」→「不存在」或移除,删除后 scoped 门不红
+- [x] AC4: **D 范式改名**——「分层退休」或 gate-scripts 范例,3 处无悬空
+- [x] AC5: **E superseded 表 + 检查**——capability-catalog 加表 + 接线 run_static_checks
+- [x] AC6: **C 保留**——记录层（ADR/结晶/任务）不动
+- [x] AC7: **既有不回归**——`--for-task` scoped 门绿
 
 ## Definition of Done
 
-- [ ] AC1–AC7 全部勾上
-- [ ] 修后实跑：4 实体不存在 + B 处绿 + 范式无悬空 + E 检查在档（贴任务体）
-- [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
+- [x] AC1–AC7 全部勾上
+- [x] 修后实跑：4 实体不存在 + B 处绿 + 范式无悬空 + E 检查在档（贴任务体）
+- [x] 既有测试 + 新增测试全绿（`--for-task` scoped）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
+
+## Evidence（内层实现 2026-08-10）
+
+**A 删除（git rm）**：`plugin/scripts/send-keys-verified.sh`、`plugin/test/send-keys-verified.test.mjs`、`docs/analysis/send-keys-verified-test-leaks-tmux-servers.md` 已 git rm。vendored 副本 `packages/quay/plugin/scripts/send-keys-verified.sh` 是 gitignored 的 pack-time 生成快照（`packages/quay/plugin/` 在 .gitignore，源 = repo-root plugin/ 树，sync-vendor.sh/package.sh 镜像）——本 worktree 中该目录不存在、无 git 跟踪；源已删 ⇒ 重新 sync/package 不会再生。删除 test.mjs 顺带消除了 tmux 泄漏源（144 孤儿/700MB 任务）。
+
+**B 同步改（8 处「存在但不铺设」→「不存在」）**：
+- `plugin/test/quay-init-check-drift.test.mjs` L_G：断言改为 `assert.ok(!fs.existsSync(...))`（文件必须不存在），测试名/头部注释同步。
+- `plugin/test/quay-init-drift-report.test.mjs` L_G：同上翻转。
+- `packages/quay/test/install-config-driven-e2e.test.mjs:575`：corrupted 夹具从 send-keys-verified.sh 换为 quay-init.sh（删除后唯一 NEVER_LAYDOWN 脚本，verify-installed-executables 仍 fail-closed）。
+- `plugin/test/adr016-screen-use-check.test.mjs`：删除「retired 不计数」测试；AC3/AC7 断言 retired.length 从 >=1 改为 ==0；移除 RETIRED_FILES 导入。
+- `plugin/scripts/adr016-screen-use-check.ts:74`：RETIRED_FILES 清空（保留机制作维护钩子，注释更新）。
+- `plugin/scripts/capability-catalog.sh:207`：send-keys-verified 声明行移除。
+- `plugin/scripts/quay-init.sh:816`：NEVER_LAYDOWN 改为 `"quay-init.sh"`（注释同步）+ 漂移报告头注释(:1348)去掉命名 + :806 示例列表去掉。
+
+**D 范式改名（5 处，无悬空）**：退休范式统一命名为「分层退休（Layered retirement）」。quay-init.sh:30、plugin-packaging.test.mjs:513、gate-scripts-retirement.test.mjs:7（任务列明 3 处）**+** plugin/skills/init/SKILL.md:32 与 plugin/README.md:81（E 检查强制——SKILL/README 教学位不得再教被取代能力）。未用「gate-scripts precedent」是因为 plugin-packaging.test.mjs 断言 quay-init.sh 含零 `gate-scripts`。
+
+**E superseded 表 + 检查（AC5）**：capability-catalog.sh 新增 `declare -A SUPERSEDED`（send-keys-verified.sh → REMOVED 记录）与 `--superseded-check` 模式：断言被取代实现不存在于 plugin/scripts、plugin/test、packages/*/plugin vendored 副本，且不出现在 SKILL/README 教学位。接线 `run_static_checks`（`# @static-tier always`，每轮都跑）。新增 mutation case `plugin/scripts/checker-mutation-cases/capability-catalog.sh`（baseline GREEN → 注入 superseded 文件 RED → 还原 GREEN，case 实测 exit 0）。`checker-mutation-check --list` 显示 uncovered: none。
+
+**C 记录层保留（未动）**：adr/ADR-016、CRYSTALLIZED-reliable-send-2026-08-04.md、outer-rulings-2026-08-04-A-F.md、tasks/*.md、send-keys-reliable.sh 头注释。
+
+**实跑**：`bash plugin/scripts/capability-catalog.sh --superseded-check` → PASS；直接触碰测试全绿：adr016 15/15、plugin-packaging+gate-scripts-retirement 39/39、capability-catalog 12/12、quay-init-check-drift 4/4、quay-init-drift-report 6/6、install-config-driven-e2e 12/12。scoped 门 `bash scripts/test.sh --for-task gap-retired-script-still-callable --allow-thin` → **exit 0，88 tests / 88 pass / fail 0 / cancelled 0**（AC7 绿）。
 
 ## Touches
 

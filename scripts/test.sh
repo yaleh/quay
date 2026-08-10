@@ -287,6 +287,14 @@ run_static_checks() {
   # @static-tier change
   # @static-object **/*.sh **/*.bash plugin/loop/*-loop-tick.md orchestration/*-loop-tick.md plugin/scripts/adr016-screen-use-check.ts plugin/test/adr016-screen-use-check.test.mjs
   run_checker "adr016-screen-use-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/adr016-screen-use-check.ts" --root "${repo_root}"
+  echo "== superseded-capability check (gap-retired-script-still-callable, AC5) =="
+  # One capability = ONE implementation. A superseded implementation (the SUPERSEDED table in
+  # capability-catalog.sh — currently send-keys-verified.sh, deleted 2026-08-10 under human ruling)
+  # must NOT exist in the executable layer (plugin/scripts, plugin/test, packages/*/plugin vendored
+  # copies) and must NOT be taught in SKILL/README positions. This mode asserts the invariant every
+  # run, so a deleted superseded implementation can never silently regrow (target state ⑤).
+  # @static-tier always
+  run_checker "superseded-capability-check" bash "${repo_root}/plugin/scripts/capability-catalog.sh" --superseded-check
   echo "== dead-code-after-return check (gap-concurrency-derivation-reverted-but-doc-ac-and-tests-all-still-report-derived, AC6) =="
   # The 2026-08-03 TEMPORARY pin shape (`echo 8; return 0; <formula>` — a statement after a top-level
   # return) is the drift that made docs/ACs/tests report "derived" while the code returned a constant.

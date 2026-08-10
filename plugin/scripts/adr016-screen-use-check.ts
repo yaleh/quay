@@ -27,10 +27,11 @@
 //
 // Band (task ## Contract, measure adr016_violations = 0..1): the repo currently has exactly ONE
 // ACTIVE whole-screen-hash observer — session-liveness.sh, carried by the sibling task
-// gap-pane-state-is-hashed-not-classified-so-needs-input-is-unobservable. send-keys-verified.sh is
-// excluded as RETIRED (its task was superseded under outer ruling F 2026-08-04; the file awaits
-// retirement). The gate exits 0 when active violations ≤ 1 and 1 when a NEW active violation
-// appears. Retired files are still REPORTED (so the audit trail is visible) but not counted.
+// gap-pane-state-is-hashed-not-classified-so-needs-input-is-unobservable. The former RETIRED
+// observer, send-keys-verified.sh (superseded under outer ruling F 2026-08-04), was DELETED by
+// gap-retired-script-still-callable (2026-08-10 human ruling — a superseded implementation must
+// NOT exist in the executable layer), so RETIRED_FILES is empty. The gate exits 0 when active
+// violations ≤ 1 and 1 when a NEW active violation appears.
 //
 // <!-- enforcement: plugin/scripts/adr016-screen-use-check.ts -->
 //
@@ -71,16 +72,15 @@ const SKIP_DIRS = new Set([
   "worktrees",
 ]);
 
-/** Known RETIRED whole-screen-hash implementations. send-keys-verified.sh's task was superseded
- * under outer ruling F (2026-08-04) and its hash mechanism is deprecated; the file awaits
- * retirement. Reported but NOT counted against the band — it is not a "new" violation. The
- * packages/quay/plugin/ copy is the gitignored pack-time snapshot of plugin/ (package.sh
- * materializes it so the tarball carries the plugin bundle) — the same retired file, so it
- * inherits the same retirement rather than double-counting against the band. */
-export const RETIRED_FILES = new Set([
-  "plugin/scripts/send-keys-verified.sh",
-  "packages/quay/plugin/scripts/send-keys-verified.sh",
-]);
+/** Known RETIRED whole-screen-hash implementations: files whose capture-pane→md5 flow is a known
+ * retired artifact, reported but NOT counted against the band (not a "new" violation). The sole
+ * retired observer, send-keys-verified.sh (superseded under outer ruling F 2026-08-04), was
+ * DELETED by gap-retired-script-still-callable (human ruling 2026-08-10 — a superseded
+ * implementation must NOT exist in the executable layer). The set is kept as a maintenance hook:
+ * any future retired observer must be listed here, and the superseded-capability check
+ * (capability-catalog.sh --superseded-check) forbids a superseded implementation from existing
+ * on disk. */
+export const RETIRED_FILES = new Set<string>([]);
 
 /** Shell script extensions scanned. `.ts` is deliberately NOT scanned (decision record, NOT a
  * silent omission — gap-adr016-md5-ban-violated-in-shipped-md-and-checker-scope-gap AC2):
