@@ -1,19 +1,12 @@
 # outer tick — 执行核
 
-**这份文件是执行路径,不是理由档案。** 理由、实测、代价全部在
-`orchestration/orchestrator-loop-tick.md`(1095 行)里,本文件只给动作和判据;每条尾部的
-`(src:N)` 是该条在源文档里的行号——**用它机械核对有没有漏抽**。
+**这份文件是执行路径,不是理由档案。** 理由、实测、代价全部在 `orchestration/orchestrator-loop-tick.md`(1095 行)里,
+本文件只给动作和判据;每条尾部的 `(src:N)` 是该条在源文档里的行号——**用它机械核对有没有漏抽**。
 
-**立此文件的原因**(2026-08-09):源文档 `### 1b 异步收尾例程(强制)`写着「每 tick 执行」却位于
-第 687 行,**静默停摆 8.5 小时无人发现**(`git log | grep 'outer: close'` 从每 ~20 分钟一次变为零),
-同期 not-yet-flipped 从 61% 涨到 82%。执行路径与理由档案混在一份 1095 行文档里,一次重读无法当
-checklist 执行。
+**立此文件的原因**(2026-08-09):源文档 `### 1b 异步收尾例程(强制)`写着「每 tick 执行」却位于第 687 行,**静默停摆 8.5 小时无人发现**(`git log | grep 'outer: close'` 从每 ~20 分钟一次变为零),同期 not-yet-flipped 从 61% 涨到 82%。
+执行路径与理由档案混在一份 1095 行文档里,一次重读无法当 checklist 执行。
 
-**当前状态:并行对照期。锚(cron / skill / 冷启动)仍指向 `orchestrator-loop-tick.md`。**
-每轮两份都跑,差异记进 tick-log;确认零遗漏后,**由 outer 自己决定**是否改锚。
-**冷启动(新会话 / `/clear` 后)不在本核内**——照源文档 7 步做(src:39-228)。
-
----
+**当前状态:并行对照期。锚(cron / skill / 冷启动)仍指向 `orchestrator-loop-tick.md`。** 每轮两份都跑,差异记进 tick-log;确认零遗漏后,**由 outer 自己决定**是否改锚。**冷启动(新会话 / `/clear` 后)不在本核内**——照源文档 7 步做(src:39-228)。
 
 ## A. 每轮必跑的读数(顺序无关,但一条都不能缺值)
 
@@ -84,8 +77,7 @@ checklist 执行。
 
 ## D. 边界
 
-**可以**:解阻塞(回退/bisect/判断发现真伪/分诊积压)、重排队列、补建任务、纠正错误前提、写 `orchestration/`+队列状态文件+`tasks/*.md`、给内层下指令。
-**不可以**:直接改代码、改变方向或范围、写 `packages/`/`plugin/`/`experiments/` 下的实现与测试、替内层执行 (src:239, 248)
+**可以**:解阻塞(回退/bisect/判断发现真伪/分诊积压)、重排队列、补建任务、纠正错误前提、写 `orchestration/`+队列状态文件+`tasks/*.md`、给内层下指令。**不可以**:直接改代码、改变方向或范围、写 `packages/`/`plugin/`/`experiments/` 下的实现与测试、替内层执行 (src:239, 248)
 **行为变更走哪条路(判据=要不要跑测试;理由见 manager-loop-tick §行为变更)**:三层行为规则(执行核/判准/收尾/发消息形态/CLAUDE.md)⇒**直接改当轮生效不立任务**;需实现+测试的机件(脚本/检查器/workflow 内容)⇒**任务路径**。**integration 是生效线非交付线**——fan-in 即生效,不等 develop;worktree-base 例外未测不写。**判据B(快路径例外清单,人 2026-08-10):触碰验证机件本身**(full-suite-runner/suite-state-trigger/ready-pool-check/scripts/test.sh/capability-catalog)⇒**不适用快路径**——fan-in 前必须有一轮覆盖该改动的绿(用未验证的改动改验证机制=自举风险;今晚 1f6f607d 落地 03:21 而 round-215 起跑 02:58,其绿不证新 runner)。**双执行体互斥(manager 04:15 边界):suite-fix-merge subagent 在飞期间,其失败对象对应任务不得派发**——机械判据:`.quay/full-suite-state.json` 的 failures[] 命中某任务 `## Touches` ⇒ 该任务在 subagent 结束前不进 dispatchable 集(复用红窗归因;今晚 failures 归因任务数=8 已生效)
 **不自己 merge**——合并冲突读两边意图后指示内层回退或修复 (src:901)。**`.halt` 触发判据（人 2026-08-10 裁定，与旧「停派发好让 outer 修红」的死锁反对不冲突——区分在此）**:`.halt` 的触发条件是**「具备完全修复权限的执行体已经失败」**，不是「红了」。suite-subagent 有完全修复权限(含 `tasks/*.md`)、自带 worktree、修到绿才 merge——**它未绿而退出 = 自动化路径已穷尽**,此时 `.halt` 是唯一正确动作;**保障可观测与止损,不保障意志** (manager A14 同步 762c8b22)
 **红窗分诊外层独占**,不把红树丢给 inner:bisect 定位肇事 merge → 回退该 merge + 回退对应翻 done(或建任务)→ 修好才重启套件 → green 即撤信号;**绝不 blind `--ours/--theirs`** (src:801, 747)

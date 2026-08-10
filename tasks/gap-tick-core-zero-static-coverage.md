@@ -37,14 +37,28 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录零覆盖实证（grep tick-core=0、@static-object 只指理由档案、§1.4e 自述）+ 四判据今晚全手工发现（本任务 Proposal 已含）
-- [ ] AC2: **@static-object 补门**——`orchestration/*-tick-core.md` + 四处禁令文档进静态检查覆盖面
-- [ ] AC3: **AC30a 检查**——三份执行核各 ≤80 行，违例红
-- [ ] AC4: **指针目标检查**——执行核引用路径目标文件存在，缺失红
-- [ ] AC5: **编号冲突检查**——判准编号不与 B3 组冲突，冲突红
-- [ ] AC6: **禁令一致性检查**——「不要自己用 Agent / 外层不直接改代码」与核 `run_in_background: true` 并存即报；禁令文本带「收窄/理由=单一写入者/共享树」放行
-- [ ] AC7: **@static-tier always 接线**——每轮必跑（非 change-only）
-- [ ] AC8: **既有不回归**——`--for-task` scoped 门绿
+- [x] AC1: **复现固化**——任务体记录零覆盖实证（grep tick-core=0、@static-object 只指理由档案、§1.4e 自述）+ 四判据今晚全手工发现（本任务 Proposal 已含）
+- [x] AC2: **@static-object 补门**——`orchestration/*-tick-core.md` + 四处禁令文档进静态检查覆盖面
+- [x] AC3: **AC30a 检查**——三份执行核各 ≤80 行，违例红
+- [x] AC4: **指针目标检查**——执行核引用路径目标文件存在，缺失红
+- [x] AC5: **编号冲突检查**——判准编号不与 B3 组冲突，冲突红
+- [x] AC6: **禁令一致性检查**——「不要自己用 Agent / 外层不直接改代码」与核 `run_in_background: true` 并存即报；禁令文本带「收窄/理由=单一写入者/共享树」放行
+- [x] AC7: **@static-tier always 接线**——每轮必跑（非 change-only）
+- [x] AC8: **既有不回归**——`--for-task` scoped 门绿
+
+**invoke 证据（inner 2026-08-10 实测）**：`node --no-warnings --experimental-strip-types plugin/scripts/tick-core-static-check.ts --root "$REPO_ROOT"` 输出：
+
+```
+tick-core-static-check: AC3 lines manager-tick-core.md=80 / orchestrator-tick-core.md=80 / fast-mode-tick-core.md=80 (max 80)
+tick-core-static-check: AC4 pointer targets OK
+tick-core-static-check: AC5 B3 numbering OK
+tick-core-static-check: AC6 prohibition consistent
+tick-core-static-check: PASS — execution cores are statically covered.
+```
+
+**违例红（AC3 负控）**：把某核撑到 81 行 ⇒ exit 1 + `FAIL: orchestration/orchestrator-tick-core.md is 81 lines (> 80)`。
+**违例红（AC6 负控）**：在禁令文档恢复无条件「外层不直接改代码」（无 收窄/单一写入者/共享树）⇒ exit 1 + `FAIL: … — 外层不直接改`。
+**scoped 门**：`./scripts/test.sh --for-task gap-tick-core-zero-static-coverage --allow-thin` ⇒ `tests 12 · pass 12 · fail 0 · cancelled 0`，且 scoped 静态检查含 `tick-core-static-check … PASS`。
 
 ## Definition of Done
 
@@ -56,8 +70,8 @@ extra: {}
 ## Touches
 
 - scripts/test.sh（@static-object 加 orchestration/*-tick-core.md + 四处禁令文档 + @static-tier always 接线）
-- plugin/scripts/<新检查器>.ts（AC30a ≤80 / 指针存在 / 编号冲突 / 禁令一致性 四判据）
-- plugin/test/<新检查器>.test.mjs（AC3-AC8 测试）
+- plugin/scripts/tick-core-static-check.ts（AC30a ≤80 / 指针存在 / 编号冲突 / 禁令一致性 四判据）
+- plugin/test/tick-core-static-check.test.mjs（AC3-AC8 测试）
 - orchestration/orchestrator-tick-core.md（自身：若被执行核文件改动）
 - orchestration/outer-brief-2026-08-04-third-restart.md（禁令一致性检查对象）
 - orchestration/QUAY-OUTER-HANDOFF.md（禁令一致性检查对象）
@@ -73,7 +87,7 @@ invariant ac30a_checked_mechanically = 1（AC30a ≤80 机械检查,非手工 wc
 invariant pointer_targets_checked = 1（指针目标存在检查）
 invariant criterion_numbering_checked = 1（判准编号不与 B3 组冲突）
 invariant prohibition_consistent = 1（禁令文本与执行核一致:禁止语+核内 run_in_background 并存即报）
-invoke    `bash plugin/scripts/<新检查器>.sh --check`（贴输出：80/80/80 + 违例红 + 禁令一致性）
+invoke    `node --no-warnings --experimental-strip-types plugin/scripts/tick-core-static-check.ts --root "$REPO_ROOT" --check`（贴输出：80/80/80 + 违例红 + 禁令一致性）
 control   补门覆盖执行核+禁令文档；四判据机械化；@static-tier always 每轮跑
 resume    补门 / 检查器 / 接线 / 测试分步提交，任一步完成即写盘
 
