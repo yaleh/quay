@@ -1,11 +1,16 @@
-// @test-group lowconc
-// GROUP NOTE (gap-serial-group-recompose-nested-runner-criterion): routed to `lowconc`, NOT `serial`.
-// The serial group's ONLY criterion is nested-runner (a file that spawns its own worker-pool
-// sub-suites via `node --test` / test.sh --for-task). This file is NOT a nested runner — it needs
-// LOW LOAD, not serial exclusivity: AC2's ready-pool-check 3x test asserts ms MONOTONICITY
-// (400→800→1200ms delays) that node-startup jitter under the concurrency-8 main body's load breaks;
-// lowconc's concurrency-3 low load keeps the delay-dominates signal. Low-load/timing reasons go to
-// lowconc, not serial.
+// @test-group serial
+// @load-sensitive child-spawn
+// KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — AC2 asserts ms
+// MONOTONICITY (400→800→1200ms delay seams) across 3 child-process runs; node-startup jitter under
+// ANY concurrent load can break the delay-dominates signal. Round-51 (2026-08-10, suite-fix round-2)
+// passed=false @7542ms with NO assertion output under lowconc concurrency-3 (solo 8/8 green) — the
+// silent-failure child-spawn signature, same family as relation-sync/create-mcp/proposal-convergence/
+// branch-model/threshold-scope-check. Escalated lowconc→serial (concurrency 1 = no concurrent load).
+// GROUP NOTE (gap-serial-group-recompose-nested-runner-criterion, amended 2026-08-10): was routed to
+// `lowconc` (concurrency 3) on "needs LOW LOAD, not serial exclusivity"; round-51 disproved lowconc's
+// sufficiency — the delay-dominates signal broke even at concurrency-3. Serial guarantees no
+// concurrent node --test sibling, restoring the delay-dominates signal. Also spawns a nested
+// full-suite-runner sub-suite (AC6 run()) — a secondary nested-spawn shape.
 // checker-cost.test.mjs — tasks/gap-no-criterion-records-its-own-cost-checker-cost-jsonl.
 //
 // The ENABLING MECHANISM for the whole criterion-cost family: every criterion (static checker /
@@ -24,7 +29,7 @@
 //   AC6 — full-suite-runner appends {round, startedAt, durationMs, laneCount, pass, fail, load}
 //         to .quay/verification-round.jsonl (append-only sequence; the single-state
 //         full-suite-state.json is never overwritten away).
-//   AC7 — this file uses node:test and declares // @test-group lowconc (see GROUP NOTE above).
+//   AC7 — this file uses node:test and declares // @test-group serial (see GROUP NOTE above).
 //
 // Run:
 //   scripts/test.sh --for-task gap-no-criterion-records-its-own-cost-checker-cost-jsonl
