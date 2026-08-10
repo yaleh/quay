@@ -11,7 +11,10 @@
 // Agent(run_in_background) dispatch — were ALL hand-found with wc -l / grep, zero mechanical gate.
 // This checker closes the four gates:
 //
-//   AC3  — each core ≤ MAX_CORE_LINES (80) lines (AC30(a)). A core pushed over 80 lines reddens.
+//   AC3  — each core's A/B/C items carry (src:N) back-references to the reason archive (AC30(a)
+//          measure = coverage, target 100%). An item without (src:N) reddens. (The retired ≤80-line
+//          criterion was an n=3 placeholder conflicting with AC41 actionization — manager-phase-goal
+//          :324, 2026-08-10.)
 //   AC4  — every pointer target (a backtick-named repo-relative path a core references, e.g.
 //          `orchestration/manager-loop-tick.md`) must EXIST. Three-layer resolution (exact →
 //          basename → same-stem-diff-ext); placeholders (`NNN`/`<…>`/`*`/`{`), `.quay/` runtime
@@ -64,7 +67,7 @@ export const PROHIBITION_DOCS = [
   "orchestration/orchestrator-loop-tick.md",
 ] as const;
 
-export const MAX_CORE_LINES = 80;
+// (AC30(a) retired the ≤80-line ceiling — the measure is now (src:N) coverage, target 100%.)
 export const PROHIBITION_PHRASES = ["不要自己用", "外层不直接改"];
 export const NARROWING_MARKERS = ["收窄", "单一写入者", "共享树"];
 export const B3_MARKERS = ["甲", "乙", "丙", "丁", "戊"];
@@ -87,11 +90,26 @@ const STALE_ANNOT_RE =
 export interface PointerHit { file: string; line: number; path: string; kind: "missing" | "stale-ext"; }
 export interface ProhibitionViolation { file: string; line: number; phrase: string; snippet: string; }
 
-// ── AC3: ≤ MAX_CORE_LINES ────────────────────────────────────────────────────────────────────────────
-/** wc -l semantics — the number of newline characters (the AC30(a) mechanical criterion is
- *  `wc -l < core`). `text.split("\n").length` over-counts a trailing-newline file by one. */
-export function lineCount(text: string): number {
-  return (text.match(/\n/g) || []).length;
+// ── AC3: (src:N) coverage ───────────────────────────────────────────────────────────────────────────
+// AC30(a) (manager-phase-goal.md:324) RETIRED the "≤80 行" criterion: it was an n=3 placeholder that
+// structurally conflicted with AC41 actionization. The AC30(a) measure is:
+//   "每条带源行号 `(src:N)` 回指理由档案——measure = 覆盖率,目标 100%"
+// An "item" is an actionable A-row (`| A<num> |`), B-bullet (`- **B<num>**`), or C-row (`| C<num> |`).
+// Coverage = items carrying a `(src:...)` back-reference / total items; a core below 100% reddens.
+export function srcNCoverage(text: string): { covered: number; total: number; missing: string[] } {
+  const lines = text.split("\n");
+  const missing: string[] = [];
+  let total = 0;
+  let covered = 0;
+  lines.forEach((raw, i) => {
+    const s = raw.trim();
+    if (/^\| A\d+/.test(s) || /^- \*\*B\d+/.test(s) || /^\| C\d+/.test(s)) {
+      total += 1;
+      if (/\(src:[^)]*\)/.test(s)) covered += 1;
+      else missing.push(`${raw.slice(0, 60)}...`);
+    }
+  });
+  return { covered, total, missing };
 }
 
 // ── AC4: pointer targets exist ───────────────────────────────────────────────────────────────────────
@@ -281,8 +299,8 @@ export function scanProhibition(text: string, rel: string): ProhibitionViolation
 // ── Aggregated result ────────────────────────────────────────────────────────────────────────────────
 export interface CheckResult {
   ok: boolean;
-  lines: Record<string, number>;
-  ac3: { ok: boolean; over: { file: string; lines: number }[] };
+  coverage: Record<string, { covered: number; total: number }>;
+  ac3: { ok: boolean; uncovered: { file: string; covered: number; total: number; missing: string[] }[] };
   ac4: { ok: boolean; missing: PointerHit[] };
   ac5: { ok: boolean; missingMarkers: string[]; b3Found: boolean };
   ac6: { ok: boolean; precondition: boolean; violations: ProhibitionViolation[] };
@@ -300,16 +318,21 @@ export function runChecks(root: string, only?: string): CheckResult {
   const coresText = new Map<string, string>();
   for (const rel of CORES) coresText.set(rel, readText(root, rel));
 
-  const lines: Record<string, number> = {};
-  for (const rel of CORES) lines[rel] = lineCount(coresText.get(rel)!);
+  const coverage: Record<string, { covered: number; total: number }> = {};
+  const covMap = new Map<string, ReturnType<typeof srcNCoverage>>();
+  for (const rel of CORES) {
+    const c = srcNCoverage(coresText.get(rel)!);
+    covMap.set(rel, c);
+    coverage[rel] = { covered: c.covered, total: c.total };
+  }
 
   // AC3
-  const over: { file: string; lines: number }[] = [];
+  const uncovered: { file: string; covered: number; total: number; missing: string[] }[] = [];
   for (const rel of CORES) {
-    const n = lines[rel];
-    if (n > MAX_CORE_LINES) over.push({ file: rel, lines: n });
+    const c = covMap.get(rel)!;
+    if (c.covered < c.total) uncovered.push({ file: rel, covered: c.covered, total: c.total, missing: c.missing });
   }
-  const ac3 = { ok: over.length === 0, over };
+  const ac3 = { ok: uncovered.length === 0, uncovered };
 
   // AC4
   const index = buildFileIndex(root);
@@ -355,7 +378,7 @@ export function runChecks(root: string, only?: string): CheckResult {
   }
   const ac6 = { ok: violations.length === 0, precondition, violations };
 
-  return { ok: ac3.ok && ac4.ok && ac5.ok && ac6.ok, lines, ac3, ac4, ac5, ac6 };
+  return { ok: ac3.ok && ac4.ok && ac5.ok && ac6.ok, coverage, ac3, ac4, ac5, ac6 };
 }
 
 // ── CLI ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -407,10 +430,13 @@ export function main(argv: string[]): CliResult {
     return { code: res.ok ? 0 : 1, json: res };
   }
 
-  const line = CORES.map((r) => r.split("/").pop()).map((b, i) => `${b}=${res.lines[CORES[i]]}`).join(" / ");
-  process.stdout.write(`tick-core-static-check: AC3 lines ${line} (max ${MAX_CORE_LINES})\n`);
-  if (res.ac3.over.length > 0) {
-    for (const o of res.ac3.over) process.stdout.write(`  FAIL: ${o.file} is ${o.lines} lines (> ${MAX_CORE_LINES})\n`);
+  const line = CORES.map((r) => r.split("/").pop()).map((b, i) => `${b}=${res.coverage[CORES[i]].covered}/${res.coverage[CORES[i]].total}`).join(" / ");
+  process.stdout.write(`tick-core-static-check: AC3 src:N coverage ${line} (target 100%)\n`);
+  if (res.ac3.uncovered.length > 0) {
+    for (const o of res.ac3.uncovered) {
+      process.stdout.write(`  FAIL: ${o.file} src:N coverage ${o.covered}/${o.total} — items without (src:N):\n`);
+      for (const m of o.missing) process.stdout.write(`    ${m}\n`);
+    }
   }
   process.stdout.write(
     `tick-core-static-check: AC4 pointer targets ${res.ac4.missing.length === 0 ? "OK" : `FAIL (${res.ac4.missing.length} missing)`}\n`,

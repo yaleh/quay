@@ -54,33 +54,33 @@ function write(root, rel, content) {
 
 const MGR_CORE = `# manager tick — 执行核
 ## A. 读数
-| A1 | 读 \`.quay/manager-inbox/\` | 目录非空即进决策 |
+| A1 | 读 \`.quay/manager-inbox/\` | 目录非空即进决策 (src:1) |
 ## B. 产出
-- **B3 tick-log 追加一行**:本组一律写 \`甲乙丙丁戊\`,禁用 ①-⑤。\`no-action\` 需举证——甲\`a\`;乙\`b\`;丙\`c\`;丁\`d\`;戊\`e\`。
+- **B3 tick-log 追加一行**:本组一律写 \`甲乙丙丁戊\`,禁用 ①-⑤。\`no-action\` 需举证——甲\`a\`;乙\`b\`;丙\`c\`;丁\`d\`;戊\`e\` (src:1)。
 ## C. 约束
-| C1 | 约束一 |
+| C1 | 约束一 (src:1) |
 ## D. 边界
 **可以**:写 \`orchestration/\`。
 `;
 
 const ORCH_CORE = `# outer tick — 执行核
 ## A. 读数
-| A1 | 读 \`.quay/full-suite-state.json\` | green⇒suiteGreen |
+| A1 | 读 \`.quay/full-suite-state.json\` | green⇒suiteGreen (src:1) |
 ## B. 产出
-- **B1** 收尾 pass。
+- **B1** 收尾 pass (src:1)。
 ## C. 约束
-| C1 | 约束一 |
+| C1 | 约束一 (src:1) |
 ## D. 边界
 **可以**:写 \`orchestration/\`。
 `;
 
 const FAST_CORE = `# inner (fast-mode) tick — 执行核
 ## A. 每轮必跑
-| A1 | \`.halt\` 哨兵 | 存在 ⇒ 空转 |
+| A1 | \`.halt\` 哨兵 | 存在 ⇒ 空转 (src:1) |
 ## B. 每轮必产出
-- **B1** 写回队列文件。
+- **B1** 写回队列文件 (src:1)。
 ## C. 硬约束
-| C1 | 派发形态必须 \`Agent(run_in_background: true)\` |
+| C1 | 派发形态必须 \`Agent(run_in_background: true)\` (src:1) |
 ## D. 边界
 一律停下等人。
 `;
@@ -113,7 +113,7 @@ test("the baseline fixture root passes all four criteria (green baseline)", () =
     assert.equal(res.status, 0, `baseline reddened the checker: ${res.stdout} ${res.stderr}`);
     const out = JSON.parse(res.stdout);
     assert.equal(out.ok, true);
-    assert.equal(out.lines["orchestration/manager-tick-core.md"] <= 80, true);
+    assert.equal(out.coverage["orchestration/manager-tick-core.md"].covered, out.coverage["orchestration/manager-tick-core.md"].total);
     assert.equal(out.ac4.ok, true);
     assert.equal(out.ac5.ok, true);
     assert.equal(out.ac6.ok, true);
@@ -123,16 +123,18 @@ test("the baseline fixture root passes all four criteria (green baseline)", () =
   }
 });
 
-test("AC3: a core pushed over 80 lines reddens", () => {
+test("AC3: an A/B/C item without a (src:N) back-reference reddens", () => {
   const dir = buildBaselineRoot();
   try {
-    write(dir, "orchestration/orchestrator-tick-core.md", "x\n".repeat(81));
+    write(dir, "orchestration/orchestrator-tick-core.md", "# outer tick — 执行核\n## A. 读数\n| A1 | 读 state.json | green⇒green |\n## B. 产出\n- **B1** 收尾 pass (src:1)。\n## C. 约束\n| C1 | 约束一 (src:1) |\n## D. 边界\n**可以**。\n");
     const res = run(dir, "--only", "ac3", "--json");
-    assert.equal(res.status, 1, `an 81-line core did not redden AC3: ${res.stdout} ${res.stderr}`);
+    assert.equal(res.status, 1, `an item without (src:N) did not redden AC3: ${res.stdout} ${res.stderr}`);
     const out = JSON.parse(res.stdout);
     assert.equal(out.ac3.ok, false);
-    assert.equal(out.ac3.over.length, 1);
-    assert.equal(out.ac3.over[0].file, "orchestration/orchestrator-tick-core.md");
+    assert.equal(out.ac3.uncovered.length, 1);
+    assert.equal(out.ac3.uncovered[0].file, "orchestration/orchestrator-tick-core.md");
+    assert.equal(out.ac3.uncovered[0].covered, 2); // B1 + C1 have src:N
+    assert.equal(out.ac3.uncovered[0].total, 3); // A1 lacks src:N
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -246,13 +248,13 @@ test("the scan surface is a ## Contract invariant — a missing scan target fail
   }
 });
 
-test("the real repo passes all four criteria (80/80/80 + pointers + numbering + prohibition)", () => {
+test("the real repo passes all four criteria (src:N 100% + pointers + numbering + prohibition)", () => {
   const res = run(REPO_ROOT, "--json");
   assert.equal(res.status, 0, `the real repo reddened the checker: ${res.stdout} ${res.stderr}`);
   const out = JSON.parse(res.stdout);
-  assert.equal(out.lines["orchestration/manager-tick-core.md"], 80);
-  assert.equal(out.lines["orchestration/orchestrator-tick-core.md"], 80);
-  assert.equal(out.lines["orchestration/fast-mode-tick-core.md"], 80);
+  for (const rel of ["orchestration/manager-tick-core.md", "orchestration/orchestrator-tick-core.md", "orchestration/fast-mode-tick-core.md"]) {
+    assert.equal(out.coverage[rel].covered, out.coverage[rel].total, `${rel} not at 100% src:N coverage: ${JSON.stringify(out.coverage[rel])}`);
+  }
   assert.equal(out.ac4.ok, true);
   assert.equal(out.ac5.ok, true);
   assert.equal(out.ac6.ok, true);
