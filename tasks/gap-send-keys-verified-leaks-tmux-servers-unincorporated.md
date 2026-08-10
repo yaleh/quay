@@ -15,6 +15,27 @@ extra: {}
 ---
 **type:** execution
 
+> **SUPERSEDED（inner 2026-08-10 实施发现）**：本任务实施前提已被删除消除。
+> `tasks/gap-retired-script-still-callable.md`（status: done，人裁定，commit `a37df1c5`，2026-08-10 02:48Z）
+> 按 A-E 计划删除了全部 4 个 send-keys-verified 实体（`plugin/scripts/send-keys-verified.sh`、
+> `packages/quay/plugin/scripts/send-keys-verified.sh`、`plugin/test/send-keys-verified.test.mjs`、
+> `docs/analysis/send-keys-verified-test-leaks-tmux-servers.md`），其 Proposal 明言
+> 「删 test.mjs 顺带解决 gap-send-keys-verified-leaks-tmux-servers-unincorporated（144 孤儿/700MB）」。
+> **泄漏源已随删除消除**——本任务「收编 + 清理杀服务端」不再需要实施。
+>
+> **inner 验证（2026-08-10，develop=06f4659c）**：
+> - 4 实体全部 GONE；`git log --all -- plugin/test/send-keys-verified.test.mjs` 最后提交即 a37df1c5 删除，无 re-add。
+> - Contract measure：`pgrep -af '^tmux new-session' | grep -c 'skv-'` = **0**（无孤儿）。
+> - 家族机制完好：`known-load-sensitive.ts --list` 含 install-config-driven-e2e（heavy）、create-mcp（heavy）、
+>   proposal-convergence（heavy）、relation-sync（child-spawn）；`--check` ok。
+> - scoped 门绿：`./scripts/test.sh --for-task gap-send-keys-verified-leaks-tmux-servers-unincorporated --allow-thin`
+>   （selector 因 stale Touches 报 thin——目标 test 文件已不存在；--allow-thin 放行后
+>   known-load-sensitive.test.mjs **14/14 pass、fail 0、cancelled 0**，exit 0）。
+> - 替代机件 `send-keys-reliable.test.mjs` 已用 scoped `tmux kill-session -t <unique>`（never kill-server）。
+>
+> **AC 处置**：AC1（复现固化，任务体已含实证）与 AC5（既有不回归，scoped 门绿）勾上。
+> AC2/AC3/AC4 目标文件已删除 → **MOOT，不勾选**（实施即逆人裁定回滚删除）。最终处置（supersede / retreat / needs-human）留外层裁定。
+
 ## Proposal
 
 **`plugin/test/send-keys-verified.test.mjs` 现在 `@test-group lowconc` 但 KNOWN-LOAD-SENSITIVE=0（`plugin/scripts/known-load-sensitive.ts` 无条目）——而 `docs/analysis/send-keys-verified-test-leaks-tmux-servers.md`（2026-08-04）已记录它泄漏 tmux server（144 个孤儿进程，136 个 skv-ok，~670-811MB 内存）。按 install-family / create-mcp / proposal-convergence / relation-sync 同一套路收编：加 KNOWN-LOAD-SENSITIVE + @load-sensitive 标注 + 隔离清理杀服务端（非只删目录）。这是开门的第一步——修掉这个泄漏源，套件更干净，绿更快。**
@@ -38,11 +59,11 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录实证（KNOWN-LOAD-SENSITIVE=0、泄漏文档 144 进程/700MB、同族收编先例）（本任务 Proposal 已含）
-- [ ] AC2: **收编**——`send-keys-verified.test.mjs` 加 KNOWN-LOAD-SENSITIVE + @load-sensitive 标注 + known-load-sensitive.ts 条目
-- [ ] AC3: **隔离清理杀服务端**——清理逻辑杀本测试创建的 tmux 服务端（非只删目录），无孤儿进程泄漏
-- [ ] AC4: **家族交叉标注**——install-family/create-mcp/proposal-convergence/relation-sync 同族
-- [ ] AC5: **既有不回归**——`--for-task` scoped 门绿；solo 恒绿
+- [x] AC1: **复现固化**——任务体记录实证（KNOWN-LOAD-SENSITIVE=0、泄漏文档 144 进程/700MB、同族收编先例）（本任务 Proposal 已含）
+- [ ] AC2: **收编**——`send-keys-verified.test.mjs` 加 KNOWN-LOAD-SENSITIVE + @load-sensitive 标注 + known-load-sensitive.ts 条目（**MOOT——目标文件已删，见顶部 SUPERSEDED**）
+- [ ] AC3: **隔离清理杀服务端**——清理逻辑杀本测试创建的 tmux 服务端（非只删目录），无孤儿进程泄漏（**MOOT——目标文件已删，见顶部 SUPERSEDED**）
+- [ ] AC4: **家族交叉标注**——install-family/create-mcp/proposal-convergence/relation-sync 同族（**MOOT——家族机制已完整，无需为已删机件交叉标注**）
+- [x] AC5: **既有不回归**——`--for-task` scoped 门绿（known-load-sensitive.test.mjs 14/14 pass）；家族机制 solo 恒绿
 
 ## Definition of Done
 
@@ -69,7 +90,7 @@ measure   orphan_tmux_after_suite = `pgrep -af '^tmux new-session' | grep -c 'sk
 band      orphan_tmux_after_suite = 0（收编+清理杀服务端后无孤儿 tmux）
 invariant send_keys_verified_solo_green = 1（单独跑恒绿）
 invariant cleanup_kills_server_not_just_dir = 1（清理杀服务端）
-invoke    `node --no-warnings --experimental-strip-types --test plugin/test/send-keys-verified.test.mjs`（单独跑贴回）+ `pgrep -af '^tmux new-session' | grep -c skv-`（贴 0）
+invoke    `node --no-warnings --experimental-strip-types --test plugin/test/send-keys-verified.test.mjs`（MOOT——目标已删，未跑）+ `pgrep -af '^tmux new-session' | grep -c skv-`（贴 0 = **0**，2026-08-10 验证）
 control   无孤儿 tmux；solo 绿；清理杀服务端
 resume    收编 / 清理杀服务端分步提交，任一步完成即写盘
 
