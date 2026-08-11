@@ -802,6 +802,26 @@ node plugin/scripts/inner-forensics.mjs timecost --since <外层 loop 起点或�
 请求窗口早于它首条记录时，工具会打印 `⚠ … 个更早的会话未被包含`，并给出 `--session <id>`。
 **看到那条警告就说明本次输出不是完整窗口**——跨 `/clear` 的分析要逐个会话跑再合并。
 
+### 1a. Routine 检查（监督探针 standing track 不 dead——`gap-probe-mechanism-dead-15-days-rewire-to-two-layer`）
+
+**探针机制死过 15 天无人报警**（`routine-scheduler.ts` 存在但无生产调用；trigger 按迭代计数触发，
+两层模式没有迭代号）。外层是监督方，**每 tick 机械核实探针没死**——DUE 判定走与内层同一个
+`routine-scheduler.ts` 与 `.quay/routine-last-run.json`（任一先触发即写回，同窗口不 double-fire）：
+
+```bash
+node --experimental-strip-types plugin/scripts/routine-scheduler.ts \
+  --now "$(($(date +%s) * 1000))" \
+  --last-run "$REPO_ROOT/.quay/routine-last-run.json" \
+  --plugin-root "$CLAUDE_PLUGIN_ROOT" \
+  /tmp/routines-outer-<tick>.json
+# exit 0 + DUE: 行 ⇒ 有 due；exit 3 = 无 due
+```
+
+- **有 DUE** ⇒ 内层 fast-mode 步骤 4b 应正在派发；核实内层在跑（遥测有在飞 / 最近有提交），若内层
+  idle/stuck，外层经 run-routines skill 派发或驱动内层派发。
+- **STALE 检测（dead-mechanism 报警）**：对每个 routine，`now - lastRun[name] > 2 × interval` 即
+  **探针 dead**——升格（步骤 5），不再「没人报警」。这正是 15 天静默的机械反例。
+
 ### 1b. 异步收尾例程（`verification-round-N`，强制）
 
 **词汇规范（与外层文档同词，`gap-split-batch-vocabulary-dispatch-rolling-vs-verification-round`）**：
@@ -1375,6 +1395,8 @@ tick 或 `/clear` 后的会话会重犯。
 ## 每个 tick 必报
 
 - 动作类型（`no-action` / `unblock` / `correct` / `escalate`）
+- Routine 检查（步骤 1a）：DUE 名单 / 无 due；各 routine 距上次运行分针数
+  （`.quay/routine-last-run.json`）；是否有 STALE（> 2×interval）——探针 dead 报警
 - 独立核实了内层的哪一项声称，结果如何
 - 内层在飞任务数与各自已运行时长
 - 遥测当前：任务数、均耗时、`tasksPerHour`（吞吐 = 收尾数/墙钟窗口小时，带 `windowStart/End/Hours`；

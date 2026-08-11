@@ -237,3 +237,11 @@ alive_signals: none
 判据与已处置固化完成（resume 两步合一：机制 `plugin/scripts/dead-loop-check.sh` + 交叉标注 SPEC §5 / 两任务）。
 注：scoped 运行需 node_modules 工作区链接（worktree 内按 `develop-merge` 先例补齐），否则 native dist build 报
 `Could not resolve "quay/…"`。
+
+## 交叉标注（AC4，2026-08-07）
+
+本条（dead-loop 判据——「循环在不在转」）与 `tasks/gap-probe-mechanism-dead-15-days-rewire-to-two-layer.md`
+（「机制存在无人调用」族第五实例——探针机制死 15 天，触发器按退休的迭代计数触发）同源：**判据查「铺没铺」、
+不查「转没转 / 调没调」**。前者把「循环没在转」变成机械判据（`dead-loop-check.sh`），后者把「探针没人调」
+重新接线（触发器改两层时间量 `interval:<N>m` + 每 tick due 判定）。两机制互相补位：dead-loop 判据抓住
+「循环死了」；探针 due 判定抓住「循环活着但某机制没人调」。

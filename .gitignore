@@ -216,3 +216,7 @@ docs/analysis/batch2-queue-state.md
 # 不进 git，manager 重启后丢失可接受。内容全部可从仓库重新推导（分析可重跑、grep 可重搜），
 # 丢的只是"待办意图"。同 tick-log 的理由：运行时状态不是代码。
 orchestration/manager-pending.md
+# gap-probe-mechanism-dead-15-days-rewire-to-two-layer (2026-08-07): the routine track's per-routine
+# last-run epoch-ms map (written by the run-routines skill after each probe fires, read by
+# routine-scheduler.ts's interval:<N>m triggers every tick). Same gitignored runtime-state family as
+**/.quay/routine-last-run.json

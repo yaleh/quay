@@ -994,6 +994,33 @@ A-D: {"disjoint":true,"overlaps":[],"reason":"disjoint file-sets"}   # 合规：
 输出 `unpushed` / `behind` / `leads` 字段——「本地领先 origin 几笔」有测量。心跳跑 `--push` = 测 + 领先即推；
 push 失败（非快进 = 真分歧）只报告、不覆写、下一 tick 重试（fail-closed，绝不 force）。
 
+### 4b. Routine 检查（探针 standing track，每 tick 判定 due——`gap-probe-mechanism-dead-15-days-rewire-to-two-layer`）
+
+**探针是 pre-friction 发现机制**（在被硌之前发现缺口；架构分析/自验证/历史挖掘都靠它）。上一代
+触发器按迭代计数（`every(N)`）——ADR-022 退休了经典管线，两层模式**没有迭代号**，机制因此死了 15 天
+无人报警。已改为两层模式实际有的量：**时间（`interval:<N>m`，距上次运行 N 分钟）**、**事件
+（`on(<event>)`）**、tick 计数（`every(N)` 由调用方供计数，legacy）。**每 tick 无条件检查一次 due**
+（与 4a 同频——心跳是现成节奏，不引入新轮询源）：
+
+```bash
+# 1. 读 .quay/config.yml loop.routines:（DIR-050 统一格式；缺省 [] = 无 routine）
+# 2. 写 routines 临时 JSON（/tmp/routines-<tick>.json）
+# 3. 判定 due（--now = 当前墙钟 epoch-ms；--last-run = 每 routine 上次运行时刻映射，缺省 = 从未跑 ⇒ due）：
+node --experimental-strip-types plugin/scripts/routine-scheduler.ts \
+  --now "$(($(date +%s) * 1000))" \
+  --last-run .quay/routine-last-run.json \
+  --plugin-root "$CLAUDE_PLUGIN_ROOT" \
+  /tmp/routines-<tick>.json
+# exit 0 + DUE: 行 ⇒ 有 due；exit 3 = 无 due
+```
+
+**DUE ⇒ 调 run-routines skill（`plugin/skills/routines/SKILL.md`）派发探针**（Schedule → Dispatch →
+Gate → FILE-ONLY verify）。派发后把本 tick 时刻写回 `.quay/routine-last-run.json`
+（`{ "<name>": <epoch-ms> }`，合并不覆盖）——`interval:<N>m` 靠它不重复触发；**内外层共享同一
+last-run 文件**，任一先触发即写回，另一个在同一窗口内不会重触发（无 double-fire）。无 due ⇒ 跳过。
+**FILE-ONLY invariant**：探针只产出 `<tasksDir>/` 下的新任务文件，绝不碰产品/方法代码
+（`git status --porcelain` 只应出现新 `tasks/` 条目；违反 ⇒ `git checkout --` 丢弃 + 报告）。
+
 ### 5. 写回状态
 
 更新队列文件：已完成 / 在飞（含 worktree 路径和派发时刻）/ 待执行 / 计量表 / 本 tick 做了什么。
@@ -1180,6 +1207,9 @@ clause-14 降为 advisory、既有失败记在已 done 的任务体里）。
 ## 每个 tick 必报
 
 - 本 tick 合并了什么、派发了什么
+- Routine 检查（步骤 4b）：`routine-scheduler.ts` 判定结果（DUE 名单 / 无 due）+ 是否派发探针
+  + `.quay/routine-last-run.json` 里 self-validation / architecture-analysis / history-mining 各自
+  距上次运行的分针数（探针不 dead 的机械证据）
 - 在飞任务及其已运行时长——**「在飞」按 AC7 拆三种含义分别标注**：遥测括号在飞（`--task-start` 未闭合）、
   **真实在飞**（reconcile 感知 `realInFlight`——括号数扣减 executor 已消失者，`--slots` 的 real-in-flight）
   vs subagent 在飞（原始 Agent 调用 `input.run_in_background: true`）+ **非任务 subagent 在飞**
