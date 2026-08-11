@@ -765,6 +765,59 @@ test("AC6 reset: --write-ratchet --reset-baseline re-anchors the ceiling to the 
   assert.match(r.stdout, /new since baseline: 0/);
 });
 
+// ── --no-block (gap-task-file-static-syntax-should-not-block-product-verification, option ①) ────────
+// A task-file Contract/AC syntax violation is a different risk class from "is the product code
+// usable" — in the verification-round path (--no-block) it is REPORTED + recorded in a grow-only
+// ledger but NEVER sets red. The DEFAULT mode (no --no-block) keeps the shrink-only ratchet blocking
+// behavior (maintenance / mutation tests) — the existing tests above pin that unchanged.
+
+test("CLI --no-block: ratchet growth is REPORTED + ledgered but does NOT exit 1 (round proceeds)", () => {
+  const root = makeGitRoot("noblock");
+  fs.writeFileSync(path.join(root, "tasks", "t-clean.md"), CLEAN_TASK);
+  let r = spawnSync(process.execPath, ["--experimental-strip-types", CHECKER, "--root", root, "--write-ratchet"], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  // Clean store → --no-block exits 0 with zero recorded.
+  r = spawnSync(process.execPath, ["--experimental-strip-types", CHECKER, "--root", root, "--no-block"], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stdout);
+  assert.match(r.stdout, /recorded \(non-blocking\): 0/);
+  // Introduce a NEW violation → DEFAULT exits 1 (ratchet growth, unchanged), --no-block exits 0.
+  fs.writeFileSync(path.join(root, "tasks", "t-bad.md"), VIOLATING_TASK);
+  r = spawnSync(process.execPath, ["--experimental-strip-types", CHECKER, "--root", root], { encoding: "utf8" });
+  assert.equal(r.status, 1, r.stdout);
+  r = spawnSync(process.execPath, ["--experimental-strip-types", CHECKER, "--root", root, "--no-block"], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stdout);
+  // Reported + recorded, but the runner's static-check failure marker is avoided (no "new since
+  // baseline: N" with N>0 — full-suite-runner.ts would otherwise flip the round red).
+  assert.match(r.stdout, /VIOLATION:/);
+  assert.match(r.stdout, /recorded \(non-blocking\): 7/);
+  assert.match(r.stdout, /recorded \(non-blocking, grow-only ledger\): 7/);
+  assert.doesNotMatch(r.stdout, /new since baseline: 7/);
+  // Grow-only ledger written (one line per violation).
+  const ledgerPath = path.join(root, ".quay", "task-file-violation-ledger.jsonl");
+  assert.ok(fs.existsSync(ledgerPath), "grow-only ledger must be written");
+  const lineCount = () => fs.readFileSync(ledgerPath, "utf8").trim().split(/\r?\n/).filter(Boolean).length;
+  assert.equal(lineCount(), 7);
+  // Grow-only: a second run does NOT re-append (只增不减, dedup by (checker, violation)).
+  r = spawnSync(process.execPath, ["--experimental-strip-types", CHECKER, "--root", root, "--no-block"], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stdout);
+  assert.equal(lineCount(), 7);
+});
+
+test("CLI --no-block + strict-subset: a touched task's violation is REPORTED + ledgered but does NOT exit 1", () => {
+  const root = makeGitRoot("noblock-subset");
+  fs.writeFileSync(path.join(root, "tasks", "t-bad.md"), VIOLATING_TASK);
+  // Default strict-subset still FAILS (AC4-i — the scoped contract consumer catches a touched task's
+  // violation in DEFAULT mode; unchanged).
+  let r = spawnSync(process.execPath, ["--experimental-strip-types", CHECKER, "--root", root, "--strict-subset", path.join(root, "tasks", "t-bad.md")], { encoding: "utf8" });
+  assert.notEqual(r.status, 0, r.stdout);
+  // --no-block strict-subset reports + ledgeres but exits 0 (a scoped run is ALSO a verification —
+  // task-file syntax must not stop it).
+  r = spawnSync(process.execPath, ["--experimental-strip-types", CHECKER, "--root", root, "--strict-subset", path.join(root, "tasks", "t-bad.md"), "--no-block"], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stdout);
+  assert.match(r.stdout, /REPORTED \+ ledgered, NOT blocking/);
+  assert.match(r.stdout, /recorded \(non-blocking, grow-only ledger\)/);
+});
+
 test("findWorkspaceRoot walks up to .git", () => {
   const root = makeGitRoot("rootwalk");
   const sub = path.join(root, "a", "b");
