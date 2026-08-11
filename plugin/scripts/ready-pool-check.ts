@@ -168,6 +168,12 @@ import { taskWorkLanded, buildGitHistoryIndex, countAcCheckboxes, landingRef, wo
 // Reuse the SAME pool-candidate judge the strategic-doc-staleness-check CLI exposes (--pool-candidate
 // <id>, review-cadence AC8) — single source, no parallel copy.
 import { judgePoolCandidate } from "./strategic-doc-staleness-check.ts";
+// gap-suite-blocking-experiment-rounds-count-toward-consecutive-red AC2: the DEFAULT lane count is
+// nproc-derived (single source — full-suite-runner's defaultLaneCount, NOT a parallel copy of the
+// nproc formula). An experiment round (--lane-count 8 vs the 4-lane default on this box) carries a
+// laneCount ≠ this default and is excluded from the consecutive-red count; its red is an experiment
+// finding, not a regression.
+import { defaultLaneCount } from "./full-suite-runner.ts";
 
 /** Default concurrency cap (max in-flight subagents) — CONSERVATIVE FALLBACK for manual runs with
  *  no --cap. The tick's dispatch decision point passes the ADAPTIVE cap from cap-from-gate.sh
@@ -763,6 +769,20 @@ export function consecutiveRedRounds(rounds) {
   return n;
 }
 
+/** gap-suite-blocking-experiment-rounds-count-toward-consecutive-red AC2 — is a verification-round a
+ *  one-off CONTROLLED-EXPERIMENT round (excluded from the consecutive-red count)? Mechanically
+ *  identifiable by a NON-DEFAULT laneCount: the default lane is nproc-derived (full-suite-runner's
+ *  defaultLaneCount — a lane-8 comparison vs the 4-lane default on this box is a probe, not a
+ *  regression). A round with NO laneCount field (legacy rows) is NOT an experiment round — only an
+ *  EXPLICIT non-default laneCount marks one, so existing/legacy rounds keep counting normally. */
+export function isExperimentRound(r, defaultLane) {
+  if (!r) return false;
+  if (r.laneCount === undefined || r.laneCount === null) return false;
+  const lane = Number(r.laneCount);
+  const def = Number(defaultLane);
+  return Number.isFinite(lane) && Number.isFinite(def) && lane !== def;
+}
+
 /** Collect the failure-file set implicated by a set of red rounds + the state file's failures.
  *  A round may carry its own `failures` array (fixture / the round-record writer — gap-suite-round-
  *  record-missing-failures-field AC2 now writes failures[] into red round records); the state file's
@@ -814,17 +834,30 @@ function failureFileMatches(declared, file) {
  *  @param {Map<string,object>} i.tasks     id → task ({body})
  *  @param {number} [i.minRedWindow]        consecutive red rounds required (default RED_WINDOW_MIN_DEFAULT)
  *  @param {(globs:string[])=>Set<string>} i.expand  declared-Touches expander (fs-backed in prod)
+ *  @param {number} [i.defaultLane]         the nproc-derived DEFAULT laneCount (default: full-suite-
+ *                                          runner's defaultLaneCount()); rounds with a laneCount ≠ this
+ *                                          are CONTROLLED-EXPERIMENT rounds, excluded from the
+ *                                          consecutive-red count (AC2 — gap-suite-blocking-experiment-
+ *                                          rounds-count-toward-consecutive-red). Injectable for hermetic
+ *                                          tests.
  *  @returns {{ ids:Set<string>, consecutiveRed:number, windowActive:boolean, failureFiles:string[] }}
  *  A task is suite-blocking when the window is active AND one of its declared ## Touches expands to
  *  one of the window's failure files. Only dispatchable-status tasks (ready/todo) are candidates — a
  *  done task's work has already landed, so it is never re-prioritized. Negative control (AC4): no
  *  window OR no failure hit ⇒ ids empty. */
-export function computeSuiteBlocking({ rounds, stateFailures, tasks, minRedWindow = RED_WINDOW_MIN_DEFAULT, expand }) {
-  const consecutiveRed = consecutiveRedRounds(rounds);
+export function computeSuiteBlocking({ rounds, stateFailures, tasks, minRedWindow = RED_WINDOW_MIN_DEFAULT, expand, defaultLane = defaultLaneCount() }) {
+  // gap-suite-blocking-experiment-rounds-count-toward-consecutive-red AC2: a one-off CONTROLLED-
+  // EXPERIMENT round (laneCount ≠ nproc-derived default) is an experiment finding, not a regression —
+  // it must not push the consecutive-red window. Skip such rounds ENTIRELY (count AND failure
+  // attribution): their red stays recorded in the round record itself (state/reason preserved), it
+  // just does not drive suite-blocking. `defaultLane` is injectable so tests are hermetic (they pass
+  // an explicit default rather than depending on the host nproc).
+  const realRounds = rounds.filter((r) => !isExperimentRound(r, defaultLane));
+  const consecutiveRed = consecutiveRedRounds(realRounds);
   if (consecutiveRed < minRedWindow) {
     return { ids: new Set(), consecutiveRed, windowActive: false, failureFiles: [] };
   }
-  const failureFiles = collectFailureFiles(rounds, stateFailures);
+  const failureFiles = collectFailureFiles(realRounds, stateFailures);
   if (failureFiles.length === 0) {
     return { ids: new Set(), consecutiveRed, windowActive: true, failureFiles: [] };
   }
