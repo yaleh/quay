@@ -2,7 +2,7 @@
 id: gap-quay-init-laydown-dominant-red-suite-blocker
 title: quay-init laydown breaks the full-suite gate (dominant of 178 fails) — no
   open task tracks it, so all dispatch stays gated
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -36,15 +36,15 @@ This is a development-class fix (quay-init laydown + its tests). It needs a Plan
 
 ## AC (draft)
 
-- [ ] Root-cause the quay-init-loop.test.mjs 44-failure cluster (laydown install artifacts vs. test drift) and state the verdict in the task body
-- [ ] `scripts/test.sh` green with the quay-init family passing
-- [ ] Stranded worktrees reconciled (M239 retired worktree removed; task worktrees verified in-flight or cleaned with worktree-branch-hygiene gate)
+- [x] Root-cause the quay-init-loop.test.mjs 44-failure cluster (laydown install artifacts vs. test drift) and state the verdict in the task body
+- [x] `scripts/test.sh` green with the quay-init family passing
+- [x] Stranded worktrees reconciled (M239 retired worktree removed; task worktrees verified in-flight or cleaned with worktree-branch-hygiene gate)
 
 ## DoD (draft)
 
-- [ ] `.quay/full-suite-state.json` = `green` after the fix run
-- [ ] The inner's next dispatch round sees the ready pool (gate cleared)
-- [ ] Full suite green (`scripts/test.sh`) including the quay-init family
+- [x] `.quay/full-suite-state.json` = `green` after the fix run
+- [x] The inner's next dispatch round sees the ready pool (gate cleared)
+- [x] Full suite green (`scripts/test.sh`) including the quay-init family
 
 ## Evidence
 
@@ -62,3 +62,14 @@ This is a development-class fix (quay-init laydown + its tests). It needs a Plan
 2. **quay-init-loop.test.mjs "90s timeout" = node:test worker event-loop exhaustion, NOT a test-logic failure.** The file has 54 tests, 37 of which each spawn a real `quay-init --loop` (~5.5s, each spawning python3 children). Full-file run self-fails at **167s** with `'Promise resolution is still pending but the event loop has already resolved'` (cancelled 1). Pattern-runs UNDER the exhaustion threshold pass: AC1+AC3 (19 tests) = 86s green; AC1 (12 tests) = 51s green; individual tests = 2-7s green. The "hang"/"timeout" is the node:test worker being torn down when its event loop empties mid-Promise under heavy blocking spawnSync — matching `gap-suite-cutoff-what-tears-test-process-at-session-topology.md`'s finding (same message ×35 in the 04:0x suite red).
 
 **Recommended fix (mechanical, aligns with gap-suite-cutoff):** split `quay-init-loop.test.mjs` (1286 lines) into 2-3 smaller files (each ~18 tests, ~80-90s, under the exhaustion threshold), extracting the shared helpers (`makeTmp`/`cleanup`/`diskWorktreeRoot`/`runInit`/`extractRefs`/`declaredSet`) into a `quay-init-loop-helpers.mjs` module. Each split file then runs green within the node:test worker's event-loop budget.
+
+## 自审勾 AC/DoD（2026-08-11 outer B1 closure，production-verification 路径——suite-red 先例；B15 pool-quality judge 同判 ready）
+
+- **AC1（root-cause 判词入 body）实测**：task body `## Root-cause verdict`（2026-08-07 inner，双层：laydown/referenced-not-landed 已修 + 90s timeout=node:test worker event-loop exhaustion 非测试逻辑）——判词在 body，双层结论明确。
+- **AC2（scripts/test.sh green + quay-init family 过）实测**：`plugin/test/quay-init-loop-{core,driver,runtime,vendor}.test.mjs + helpers.mjs` 五文件在盘（split 落地），scripts/test.sh:777 glob `plugin/test/*.test.mjs` 覆盖；round-32 green（2026-08-11 19:40:11Z，tests=3244 pass=3244 fail=0，verifiedCommit=986230b3）⇒ family 随全量过。
+- **AC3（stranded worktrees reconciled）实测**：`git worktree list`（2026-08-11）仅剩主 checkout + gap-quay-self-hosting-e2e-proof（合法在飞）；M239/iteration-0、manager-productization、resource-aware、/tmp/quay-intg2 四 stranded 全清。
+- **DoD1**：`.quay/full-suite-state.json` state=green（round 32）✓
+- **DoD2**：gate 已清（stopSignal=false，round-32 green 后 inner 下轮派发见 ready 池）✓
+- **DoD3**：全量 green 含 quay-init family（同 AC2 round-32 证据）✓
+- **B15 交叉**：pool-quality-judge workflow（wf_48909373-f0c，2026-08-11 19:4x）判此任务 `ready`（premiseSound=true，recommendation=closure——无剩余开发工作，split 落地、suite green、worktrees 已清）。外层按 suite-red 先例生产验证闭环后 B1 闭。
+- **B1 收尾**：`status: ready → done`、AC/DoD 6 框勾选、closure-lag `--record --flipped 2`（含 gap-apply-promotes-b15 共 2 闭）、verification-round r33 closed=2。
