@@ -182,7 +182,9 @@ AC1/AC2）。本散文只讲判读规则，**不再手列族文件**——文件
 代表成员（示意，非清单）：`plugin/test/session-liveness-events.test.mjs`、`session-liveness-heartbeat.test.mjs`、
 `session-liveness-signals.test.mjs`（原 `session-liveness.test.mjs` 拆分，
 `gap-session-liveness-tail-capped-split`）、`plugin/test/cold-start-skill.test.mjs`（及其演练/laid-down
-`--once` 同类）、`plugin/test/runner-grouping.test.mjs`（`nested-spawn` kind）——它们用**真实进程 + tmux 时序**
+`--once` 同类）、`plugin/test/runner-grouping-list-groups.test.mjs`（`nested-spawn` kind，2026-08-11
+`gap-suite-floor-two-longest-files-bound` 拆 4，同族四文件 runner-grouping-{list-groups,fixture-runs,flags-only,
+serial-anti-stomp}.test.mjs）——它们用**真实进程 + tmux 时序**
 或**嵌套 node --test spawn** 验证会话存活/冷启动/分组语义，机器负载一高就红——
 隔离下全绿、并发下红，**不是逻辑错误**。2026-08-04 全量套件 #6/#7 各挂一条不同但同族的测试，
 隔离单跑全过，确认并发敏感。**两种根因、两个 kind，判读不得混用**（`wall-clock` = 真实进程 + tmux 时序；

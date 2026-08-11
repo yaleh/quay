@@ -52,9 +52,18 @@ extra: {}
 
 ## Touches
 
-- plugin/test/runner-grouping.test.mjs（拆 4 份）
-- plugin/test/cap-from-gate.test.mjs（拆 4 份）
+- plugin/test/runner-grouping-list-groups.test.mjs（runner-grouping 拆 4 之一）
+- plugin/test/runner-grouping-fixture-runs.test.mjs（runner-grouping 拆 4 之一）
+- plugin/test/runner-grouping-flags-only.test.mjs（runner-grouping 拆 4 之一）
+- plugin/test/runner-grouping-serial-anti-stomp.test.mjs（runner-grouping 拆 4 之一）
+- plugin/test/cap-from-gate-bands.test.mjs（cap-from-gate 拆 5 之一）
+- plugin/test/cap-from-gate-hysteresis.test.mjs（cap-from-gate 拆 5 之一）
+- plugin/test/cap-from-gate-stale.test.mjs（cap-from-gate 拆 5 之一）
+- plugin/test/cap-from-gate-config-budget.test.mjs（cap-from-gate 拆 5 之一）
+- plugin/test/cap-from-gate-cli.test.mjs（cap-from-gate 拆 5 之一）
 - plugin/scripts/known-load-sensitive.ts（runner-grouping nested-spawn 标注保持）
+- plugin/test/known-load-sensitive.test.mjs（runner-grouping 改名落点）
+- plugin/test/red-window-triage.test.mjs（runner-grouping 改名落点）
 - tasks/gap-suite-floor-two-longest-files-bound.md（自身：勾 AC + 贴证据）
 
 
