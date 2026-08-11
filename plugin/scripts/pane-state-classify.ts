@@ -42,15 +42,23 @@ function runtimeTmux(args: string[]): { status: number; stdout: string; stderr: 
   const host = process.env.SUPERVISOR_DELIVER_HOST || "";
   const sshBin = process.env.SUPERVISOR_DELIVER_SSH || "ssh";
   if (host) {
-    // Remote: ONE ssh round-trip running `tmux <args…>` on the target host. Each arg is double-quoted
-    // (with " \ $ ` escaped) so the remote shell re-parses it as a single word — a pane format like
-    // '#{window_name}' survives, and a leading '#' cannot start a remote comment.
-    const remote = `tmux ${args.map((a) => `"${a.replace(/(["\\$`])/g, "\\$1")}"`).join(" ")}`;
+    // Remote: ONE ssh round-trip running `tmux <args…>` on the target host. Simple args stay bare
+    // (readable + the runtime probes' verbs/keys/targets never need quoting); any arg with a shell
+    // metacharacter is double-quoted (with " \ $ ` escaped) so the remote shell re-parses it as one
+    // word — a pane format like '#{window_name}' survives, and a leading '#' cannot start a comment.
+    const remote = `tmux ${args.map(shellQuoteArg).join(" ")}`;
     const r = spawnSync(sshBin, [host, remote], { encoding: "utf8" });
     return { status: r.status ?? 1, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
   }
   const r = spawnSync("tmux", args, { encoding: "utf8" });
   return { status: r.status ?? 1, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
+}
+
+/** Quote one arg for the REMOTE shell. Chars that are shell-safe unquoted (alnum, - _ : . % + = ,)
+ * stay bare so the ssh command string stays readable; everything else is double-quoted. */
+function shellQuoteArg(arg: string): string {
+  if (/^[A-Za-z0-9_\-:.%+=,]+$/.test(arg)) return arg;
+  return `"${arg.replace(/(["\\$`])/g, "\\$1")}"`;
 }
 
 /** Default number of bottom lines the classifier examines. The Claude Code TUI's input box +

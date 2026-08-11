@@ -143,9 +143,12 @@ send_key() {  # send_key <C-u|Enter>
 
 send_text_literal() {  # send_text_literal <text> — the -l payload, forwarded exactly over ssh
   if [ -n "$HOST" ]; then
-    local q
-    q="$(printf '%q' "$1")"
-    "$SSH_BIN" "$HOST" "tmux send-keys -t $(printf '%q' "$TARGET") -l ${q}"
+    # The payload is base64-embedded and decoded by the REMOTE shell's `$(printf '%s' '<b64>' |
+    # base64 -d)` — the one robust way to carry arbitrary bytes (Chinese, quotes, newlines) through
+    # ssh's argv-join, independent of the remote shell's quoting dialect.
+    local b64
+    b64="$(printf '%s' "$1" | base64 | tr -d '\n')"
+    "$SSH_BIN" "$HOST" "tmux send-keys -t $(printf '%q' "$TARGET") -l \"\$(printf '%s' '$b64' | base64 -d)\""
   else
     tmux send-keys -t "$TARGET" -l "$1"
   fi
