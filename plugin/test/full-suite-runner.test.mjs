@@ -1400,6 +1400,35 @@ test("AC2/AC3 e2e — a `__PERFILE__ ... passed=false` per-file line flips red a
   }
 });
 
+test("AC2 e2e — a GREEN round archives stderr __OVERHEAD__ phase lines (stderr is teed, not dropped)", async () => {
+  // test.sh's _oh_emit writes the fixed-overhead decomposition to STDERR (>&2). The runner must
+  // archive those lines into .quay/full-suite.log — the outer's verification round greps that log
+  // for `__OVERHEAD__`. This fake suite emits one line to stdout and one to STDERR on a green run;
+  // both must land in the archived log (gap-red-round-loses-overhead-phase-decomposition AC2).
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-oh-green-"));
+  const { f, dir } = fakeSuite(
+    'echo "__OVERHEAD__ lock_overhead_ms=42"\n' +
+      'echo "__OVERHEAD__ main_phase_ms=650104" >&2\n' +
+      'echo "# tests 1"\necho "# pass 1"\necho "# fail 0"\necho "# cancelled 0"\nexit 0',
+  );
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, `green suite exits 0, got ${code}`);
+    assert.equal(readState(root).state, "green");
+    const log = read(path.join(root, ".quay", "full-suite.log"));
+    assert.match(log, /__OVERHEAD__ lock_overhead_ms=42/, "stdout __OVERHEAD__ line reached the archived log");
+    assert.match(
+      log,
+      /__OVERHEAD__ main_phase_ms=650104/,
+      "STDERR __OVERHEAD__ line reached the archived log (stderr is teed, not dropped)",
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("AC5 e2e — a `tmux-leak-scan: FAIL` residual line (candidate C) flips red with failures non-empty (leak is a real residual)", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-leak-"));
   // Candidate C merge semantics: the suite-tail leak scan reports a residual to the stream
