@@ -37,11 +37,32 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 round-215 红（passed=false@7721ms 无断言输出）+ 时序订正（行不在树,红=load-flake 非 CLAUDE.md）+ 签名三要点（本任务 Proposal 已含）
-- [ ] AC2: **@load-sensitive 声明**——threshold-scope-check.test.mjs 声明 @load-sensitive（对照前四同族形态）
-- [ ] AC3: **manifest 收编**——KNOWN-LOAD-SENSITIVE manifest 含 threshold-scope-check
-- [ ] AC4: **serial 相路由**——进 serial 相（并发 1），main 相不再跑
-- [ ] AC5: **既有不回归**——`--for-task` scoped 门绿
+- [x] AC1: **复现固化**——任务体记录 round-215 红（passed=false@7721ms 无断言输出）+ 时序订正（行不在树,红=load-flake 非 CLAUDE.md）+ 签名三要点（本任务 Proposal 已含）
+- [x] AC2: **@load-sensitive 声明**——threshold-scope-check.test.mjs 声明 @load-sensitive（对照前四同族形态）
+- [x] AC3: **manifest 收编**——KNOWN-LOAD-SENSITIVE manifest 含 threshold-scope-check
+- [x] AC4: **serial 相路由**——进 serial 相（并发 1），main 相不再跑
+- [x] AC5: **既有不回归**——`--for-task` scoped 门绿
+
+### 实现证据（inner 2026-08-11）
+
+**改动**：`plugin/test/threshold-scope-check.test.mjs` 头部收编 KNOWN-LOAD-SENSITIVE（`@test-group governance`→`serial`，声明 `@load-sensitive child-spawn` + `@load-sensitive-entry 2026-08-10 child-spawn ×9 checker spawnSync under main concurrent phase (round-215 silent passed=false @7721ms, solo 4089ms green)`）；`plugin/scripts/known-load-sensitive.ts` child-spawn kind 注释登记该成员（Contract measure 满足）。
+
+**Contract invoke**（`known-load-sensitive.ts --list`，threshold-scope-check 在列）：
+```
+plugin/test/threshold-scope-check.test.mjs	child-spawn
+```
+`--check` exit 0（AC2 不变式）；`--check-exit` exit 0（serial 进入记录不变式）；`grep -c "threshold-scope-check" plugin/scripts/known-load-sensitive.ts` = 1。
+
+**scoped 门**（`scripts/test.sh --for-task gap-threshold-scope-load-flake-fifth-family-member --allow-thin`）：
+```
+ℹ tests 31
+ℹ pass 31
+ℹ fail 0
+ℹ cancelled 0
+ℹ duration_ms 1094.59
+EXIT=0
+```
+覆盖 threshold-scope-check.test.mjs（serial 相，9 tests 全绿）+ known-load-sensitive.test.mjs（22 tests 全绿）。
 
 ## Definition of Done
 
