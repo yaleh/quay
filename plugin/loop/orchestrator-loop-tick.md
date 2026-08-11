@@ -260,6 +260,30 @@ session-liveness：退回纯 20 分钟轮询（正是本轮事故形态）——
 （`pgrep -af 'suite-state-trigger.ts --monitor'`，有 node 活进程即可；按步骤 0 的自匹配纪律
 排除 pgrep 自己那一行——发起查询的命令行里含同样字符串）。
 
+**4b3. 重挂空槽触发器（空槽事件执行者，`gap-slot-free-not-an-event-slots-stay-empty-missed-without-trace`）——空槽即事件，不等 tick**
+
+空槽不是事件：`in_flight < cap ∧ dispatchable > 0`（空槽 + 有可派）之前只靠三层 20-25 分钟 tick 轮询到
+那一格才处置；tick 醒来时手上总有更急的事（红套件 / fan-in / needs-human），回填空槽永远排最后且漏了
+不留痕（C17）。本条给它补**事件执行者层**——`slot-free-trigger.ts`（照 `suite-state-trigger.ts` 形态，
+**触发者是执行者，不是新决策者/新调度源**——它只做「空槽条件 → 事件」的翻译，派谁/怎么派仍是内层
+`slot-refill.ts` + 步骤 4 的既有规则，节奏仍唯一）Monitor 轮询（~5s）读 `fast-mode-telemetry --slots`
+（`slotsRemaining`，reconcile 感知在飞）+ `ready-pool-check`（`dispatchable_disjoint`，仅在有空槽时跑），
+`in_flight<cap ∧ dispatchable>0` ⇒ 发 `SLOT-FREE` 事件 + 追加 `.quay/slot-free-events.jsonl`（append-only）：
+
+```
+Monitor({command: "node --no-warnings --experimental-strip-types $REPO_ROOT/plugin/scripts/slot-free-trigger.ts --monitor",   # REPO_ROOT 见 .quay/config.yml loop.repo_root
+         description: "空槽自动触发（SLOT-FREE → 立即驱动 inner 回填，不等 20-min tick）",
+         persistent: true, timeout_ms: 3600000})
+```
+
+事件流里出现 `SLOT-FREE` ⇒ **立即**驱动 inner 回填（不等下一次 cron）：按步骤 4 从 `slot-refill.ts` 的
+`recommended` 取 1-2 条派给 inner——**同一 B9 空槽强制链**，事件只是把它的触发从「20 分钟 tick」提前到
+「空槽出现的那一刻」。**漏回填在事件日志可追责**：`.quay/slot-free-events.jsonl` 记录每次 SLOT-FREE 的
+`at` 时间戳；事件已发而未回填 ⇒ 下一 tick 的 A18/B9 强制链（`should_refill=true` 而未派发 ⇒ `no-action`
+不合法）仍兜底，且事件日志让「漏了」从看不见变成可查。挂载遗漏的代价同 suite-state-trigger：退回纯
+20 分钟轮询——所以 4c 的验证纪律对三者同样成立（`pgrep -af 'slot-free-trigger.ts --monitor'`，排除
+pgrep 自己那一行）。
+
 **4c. 重挂后立即验证挂上了 —— 两判据自检**
 
 重挂 Monitor 后立刻跑一次检查器，不靠「看起来挂上了」：
@@ -1078,6 +1102,18 @@ tick 做一次收尾 pass。
 | → `red` + `reason: aborted` | `SUITE-RED`（`stopSignal:false`——套件未完成、无正确性结论，**不触发停派**） | **记录 + 等重跑**：aborted-red 不是失败结论，外层按 `gap-full-suite-runner-concurrency-default-and-gate` AC5 语义处置（不挡 inner 派发；re-tick 时按起跑条件重起） |
 | → `running` | `SUITE-RUNNING` | 「RUNNING 乐观派发执行者」：池有 `dispatchable_disjoint ≥ cap` 就按步骤 4 驱动 inner 照常派发（不待轮——(a) 块 AC4 的乐观行为被实际动用，AC3） |
 | → `green` | `SUITE-GREEN` | 平静基线，无处置 |
+
+**空槽状态自动触发者（空槽事件执行者层，`gap-slot-free-not-an-event-slots-stay-empty-missed-without-trace`——
+把「in_flight<cap ∧ dispatchable>0」从「tick 轮询到那一格才处置」变成「空槽即事件」）**：
+
+`slot-free-trigger.ts`（Monitor，冷启动 4b3 挂上）在 `in_flight < cap ∧ dispatchable > 0` **成立时**立即发
+事件（5 秒轮询，≪ cron 的 20 分钟窗口）并记 `.quay/slot-free-events.jsonl`（append-only；`SLOT-FREE.at`
+就是「事件 → 驱动」的起点，Contract band `event_to_drive_under_5min`）：
+
+| 条件 | 事件 | 本层动作（全部是既有逻辑的执行，不是新决策） |
+|---|---|---|
+| `in_flight < cap ∧ dispatchable > 0`（`fast-mode-telemetry --slots` 的 `slotsRemaining > 0` 且 `ready-pool-check` 的 `dispatchable_disjoint ≥ 1`） | `SLOT-FREE`（携带 `slots_free` / `dispatchable_disjoint` / `in_flight_count` / `at`） | **立即**驱动 inner 回填（不等下一次 cron）：按步骤 4 从 `slot-refill.ts` 的 `recommended` 取 1-2 条派给 inner——同一 B9 空槽强制链，事件把触发从「20 分钟 tick」提前到「空槽出现的那一刻」；**漏回填在 `.quay/slot-free-events.jsonl` 可追责**（事件已发而未回填 ⇒ 下一 tick A18/B9 强制链仍兜底，且日志让「漏了」从看不见变成可查） |
+| 非 `in_flight<cap ∧ dispatchable>0` | 无 | 平静基线，无事件（负控制；`.halt` 在场同样不发——外层无法处置的空槽是噪音） |
 
 **触发者是执行者，不是新调度源（AC2/AC4）**：它只做「状态变化 → 事件」的翻译与通知，不做任何分诊/
 派发决策；分诊 = 本文件下方既有「红窗分诊」，派发 = inner 出厂文档既有 §4 规则。**失败位置也是翻译不是
