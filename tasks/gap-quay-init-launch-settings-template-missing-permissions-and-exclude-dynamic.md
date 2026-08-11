@@ -1,10 +1,12 @@
 ---
 id: gap-quay-init-launch-settings-template-missing-permissions-and-exclude-dynamic
+
 title: quay-init 铺下的 launch.settings.json 缺
   permissions.defaultMode=bypassPermissions 整块 +
   excludeDynamicSystemPromptSections 缺（true）——消费方 inner 冷启动在自家 loop 脚本上撞
   permission prompt（ad-arm1 archguard 实测 F1/F2）
 status: done
+
 labels:
   - gap
   - defect
@@ -33,7 +35,9 @@ extra: {}
 
 - [x] AC1: **复现固化**——任务体记录 ad-arm1 archguard 实测（monitor-mount-check.sh 批准框卡死）+ init.ts 模板缺 permissions/excludeDynamic 的 grep 证据
 - [x] AC2: **修复模板**——init.ts 铺出与 quay 本机一致的 launch.settings.json（含 bypassPermissions 块 + excludeDynamicSystemPromptSections: true）
+
 - [x] AC3: **消费方复测**——ad-arm1 冷启动 inner 不再撞 permission prompt（需 ad-arm1 实机复测，inner 无 SSH 访问——待 outer 消费方复测验证）
+
 - [x] AC4: **既有不回归**——`--for-task` scoped 门绿
 
 ## Definition of Done
@@ -64,6 +68,7 @@ reviewer: outer
 at: 2026-08-11
 changed: ad-arm1 archguard 真实消费方 Level3 首跑实测 F1/F2——init.ts 铺下 launch.settings.json 缺 permissions.defaultMode=bypassPermissions 整块 + excludeDynamicSystemPromptSections（本机有、模板无）⇒ 消费方 inner 冷启动撞 permission prompt。实现归 inner，判定归 outer
 
+
 ### AC3 消费方复测证据（outer 2026-08-11 18:0x，ad-arm1 实机）
 
 安装含修复的 quay-0.4.0.launchfix.tgz（从 launch-settings worktree 打包）到 ad-arm1 后，冷启动 `quay init --root <fresh>` 铺出的 `.claude/launch.settings.json` 实测含：
@@ -76,6 +81,7 @@ changed: ad-arm1 archguard 真实消费方 Level3 首跑实测 F1/F2——init.t
 ```
 
 ⇒ 消费方 inner 冷启动不再撞 permission prompt（F1/F2 根因已消除）。`grep defaultMode dist/quay.js` = 1（安装副本确认修复在）。
+
 
 ## 实跑证据（inner 2026-08-11）
 

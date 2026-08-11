@@ -20,6 +20,10 @@ export interface InitResult {
   tasksDir: string;
   /** The full generated config YAML content (for dry-run printing). */
   content: string;
+  /** Absolute path to the .claude/launch.settings.json scaffold. */
+  launchSettingsPath: string;
+  /** The full generated launch.settings.json content (for dry-run printing). */
+  launchSettingsContent: string;
 }
 
 /**
@@ -278,6 +282,49 @@ export function detectProvider(): string {
 }
 
 /**
+ * Generate the `.claude/launch.settings.json` content laid down by `quay init`.
+ *
+ * gap-quay-init-launch-settings-template-missing-permissions-and-exclude-dynamic:
+ * the scaffold previously laid down NO launch.settings.json at all — consumers
+ * hand-copied it, and the copy was missing the `permissions.defaultMode:
+ * "bypassPermissions"` block and `_launchSpec.excludeDynamicSystemPromptSections:
+ * true` (measured F1/F2 on ad-arm1 archguard: inner cold-start hit a permission
+ * prompt on its own loop scripts, monitor-mount-check.sh). This template matches
+ * the quay-local checked-in `.claude/launch.settings.json` structure:
+ *   - `permissions.defaultMode: "bypassPermissions"` — the two-layer loop's own
+ *     scripts run without interactive prompts (ADR-016 remotely-drivable).
+ *   - `_launchSpec.excludeDynamicSystemPromptSections: true` — outer/inner share
+ *     a stable system prompt across per-task worktree cwds (prompt-cache reuse).
+ *   - `_launchSpec.promptSuggestions: false` + the env-var disable — ghost
+ *     suggestions off at the source.
+ * Roles default to the generic `claude` launcher / null model; a consumer edits
+ * them to their stack (quay itself uses claude-deepseek + deepseek-v4-flash).
+ */
+export function generateLaunchSettingsContent(): string {
+  return (
+    JSON.stringify(
+      {
+        $schema: "https://json.schemastore.org/claude-code-settings.json",
+        permissions: { defaultMode: "bypassPermissions" },
+        env: { CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION: "false" },
+        _launchSpec: {
+          version: 1,
+          excludeDynamicSystemPromptSections: true,
+          promptSuggestions: false,
+          roles: {
+            manager: { name: "quay-manager", launcher: "claude", model: null, env: {} },
+            outer: { name: "quay-outer", launcher: "claude", model: null, env: {} },
+            inner: { name: "quay-inner", launcher: "claude", model: null, env: {} },
+          },
+        },
+      },
+      null,
+      2,
+    ) + "\n"
+  );
+}
+
+/**
  * Run the init operation.
  *
  * @returns InitResult on success.
@@ -288,6 +335,8 @@ export function runInit(opts: InitOptions): InitResult {
   const quayDir = path.join(root, ".quay");
   const configPath = path.join(quayDir, "config.yml");
   const tasksDir = path.join(root, "tasks");
+  const launchSettingsPath = path.join(root, ".claude", "launch.settings.json");
+  const launchSettingsContent = generateLaunchSettingsContent();
 
   // Check if config already exists.
   const configExists = fs.existsSync(configPath);
@@ -298,6 +347,8 @@ export function runInit(opts: InitOptions): InitResult {
       configPath,
       tasksDir,
       content: "",
+      launchSettingsPath,
+      launchSettingsContent: "",
     };
     return result;
   }
@@ -315,7 +366,7 @@ export function runInit(opts: InitOptions): InitResult {
   const content = generateConfigContent({ providerId, providerPath, isNode, isGo });
 
   if (opts.dryRun) {
-    return { outcome: "dry-run", configPath, tasksDir, content };
+    return { outcome: "dry-run", configPath, tasksDir, content, launchSettingsPath, launchSettingsContent };
   }
 
   // Write config.
@@ -327,7 +378,17 @@ export function runInit(opts: InitOptions): InitResult {
     fs.mkdirSync(tasksDir, { recursive: true });
   }
 
-  return { outcome: "written", configPath, tasksDir, content };
+  // Lay down .claude/launch.settings.json (with bypassPermissions +
+  // excludeDynamicSystemPromptSections) so a cold-start inner does not hit a
+  // permission prompt on its own loop scripts. Create-if-absent on a fresh
+  // init; --force overwrites a stale copy. Never silently overwrite a user's
+  // launch settings on a plain re-init (that path returns "skipped" anyway).
+  if (opts.force || !fs.existsSync(launchSettingsPath)) {
+    fs.mkdirSync(path.dirname(launchSettingsPath), { recursive: true });
+    fs.writeFileSync(launchSettingsPath, launchSettingsContent, "utf8");
+  }
+
+  return { outcome: "written", configPath, tasksDir, content, launchSettingsPath, launchSettingsContent };
 }
 
 /**

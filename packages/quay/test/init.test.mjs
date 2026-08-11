@@ -435,4 +435,72 @@ test("gap-mcp-entry-for-provider unit: node_modules vs repo-tree discrimination"
     '["node", "./dist/quay-native.js", "mcp"]',
     "windows-style node_modules path -> dist bundle"
   );
+
+// gap-quay-init-launch-settings-template-missing-permissions-and-exclude-dynamic
+// (2026-08-11). `quay init` must lay down `.claude/launch.settings.json` with
+// `permissions.defaultMode: "bypassPermissions"` + `_launchSpec.excludeDynamicSystemPromptSections: true`
+// so a cold-start inner does NOT hit a permission prompt on its own loop scripts
+// (measured F1/F2 on ad-arm1 archguard: monitor-mount-check.sh approval box).
+// ---------------------------------------------------------------------------
+
+test("gap-launch-settings: quay init lays down .claude/launch.settings.json with bypassPermissions + excludeDynamic", () => {
+  const dir = tmpDir("launchsettings");
+  const out = runQuay(["init"], dir);
+
+  assert.ok(out.includes("launch.settings.json"), "quay init should report the launch.settings.json scaffold");
+  const settingsPath = path.join(dir, ".claude", "launch.settings.json");
+  assert.ok(fs.existsSync(settingsPath), ".claude/launch.settings.json should be laid down by quay init");
+  const raw = fs.readFileSync(settingsPath, "utf8");
+  assert.equal(
+    JSON.parse(raw).permissions?.defaultMode,
+    "bypassPermissions",
+    "permissions.defaultMode must be bypassPermissions (F1 — inner must not hit permission prompt)"
+  );
+  assert.equal(
+    JSON.parse(raw)._launchSpec?.excludeDynamicSystemPromptSections,
+    true,
+    "_launchSpec.excludeDynamicSystemPromptSections must be true (F2 — outer/inner prompt-cache consistency)"
+  );
+});
+
+test("gap-launch-settings: quay-native init lays down the same launch.settings.json", () => {
+  const dir = tmpDir("launchsettings-native");
+  const out = runNative(["init"], dir);
+  assert.ok(out.includes("launch.settings.json"), "quay-native init should report the launch.settings.json scaffold");
+
+  const settingsPath = path.join(dir, ".claude", "launch.settings.json");
+  assert.ok(fs.existsSync(settingsPath), "quay-native init should lay down .claude/launch.settings.json");
+  const s = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+  assert.equal(s.permissions?.defaultMode, "bypassPermissions");
+  assert.equal(s._launchSpec?.excludeDynamicSystemPromptSections, true);
+});
+
+test("gap-launch-settings: quay init --dry-run does NOT write launch.settings.json", () => {
+  const dir = tmpDir("launchsettings-dryrun");
+  const out = runQuay(["init", "--dry-run"], dir);
+  assert.ok(out.includes("launch.settings.json"), "dry-run should preview the launch.settings.json path");
+  assert.ok(!fs.existsSync(path.join(dir, ".claude")), "dry-run must NOT write .claude/ dir");
+  assert.ok(!fs.existsSync(path.join(dir, ".quay", "config.yml")), "dry-run must NOT write config");
+});
+
+test("gap-launch-settings: quay init --force overwrites a stale launch.settings.json (consumer fix path)", () => {
+  const dir = tmpDir("launchsettings-force");
+  runQuay(["init"], dir);
+  const settingsPath = path.join(dir, ".claude", "launch.settings.json");
+
+  // Simulate the consumer's stale/broken copy (F1/F2: no bypassPermissions,
+  // excludeDynamicSystemPromptSections false).
+  const staleRaw = JSON.stringify(
+    { $schema: "https://json.schemastore.org/claude-code-settings.json", _launchSpec: { excludeDynamicSystemPromptSections: false } },
+    null,
+    2,
+  );
+  fs.writeFileSync(settingsPath, staleRaw, "utf8");
+
+  runQuay(["init", "--force"], dir);
+  const afterRaw = fs.readFileSync(settingsPath, "utf8");
+  const second = JSON.parse(afterRaw);
+  assert.equal(second.permissions?.defaultMode, "bypassPermissions", "--force must restore bypassPermissions");
+  assert.equal(second._launchSpec?.excludeDynamicSystemPromptSections, true, "--force must restore excludeDynamic");
+  assert.notEqual(afterRaw, staleRaw, "stale file must be overwritten on --force");
 });
