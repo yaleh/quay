@@ -115,6 +115,16 @@ $ quay gate-log TEST-002
 
 **处置（判定归 outer，当前决策）**：AC5 措辞改为准确反映「Level2（CLI 状态机验证）已达成，两层循环验证仍未做」；真实两层循环验证是否/何时补做由 outer 决定——当前不占用 DIR-123 的 deliver 机制收尾（该机制已验证），列为独立后续（可在 DIR-128 前置核实后一并推进）。
 
+### Finding：ad-arm1 archguard TASK-81 部分达成——分支+fan-in 通了，但三项不达标，AC16③ 字面判据仍未满足（manager 16:3x 先核实后报）
+
+**TASK-81 属实部分**：`ready → 建 task/TASK-81 分支 → 提交证据 → fan-in merge(f0ad34cb) → status done`，全程在真实第三方项目 archguard、aarch64 机器、quay 0.4.0 从构建产物安装。**分支+fan-in 通路真的通了**（今晚 ad-arm1 上最实质的一步）。**但三项不达标，AC16③ 字面判据仍未满足，勿据此收口**：
+
+1. **不是「从 todo 到落地」**：TASK-81 起始状态就是 `ready`（该 workspace `.quay/config.yml` `default_task_status: ready`），从未经过 todo→ready。AC16③ 原文是「至少一个任务**从 todo 到落地**」。
+2. **合并 diff 只有任务文件**：`git diff --stat f0ad34cb^1 f0ad34cb` = `tasks/TASK-81.md | 28 ++++----`（1 file changed，零产品产物变更）。任务是「跑 self-analysis 重新生成架构图集」，DoD 勾的是 build/analyze 退出 0 + 图集 verified——**验证型产出，非代码变更**。「两层循环驱动开发」的「开发」一半尚无实例。
+3. **loop 完成路径零 GateEvent**：`.quay/gate-events.jsonl` 不存在、gate-log 零事件；同台机器 CLI 路径 TEST-002 有 4 条（dod/promote/acceptance/complete pass）。**loop 完成路径绕过了 gate 引擎**（meter is runnable, not asserted 实破）——已另立案 `gap-loop-completion-path-produces-zero-gateevents`。
+
+**AC16③ 判据说明（防再犯）**：达成需 (a) 任务**从 todo 起始**（非 default_task_status: ready 的 workspace 结构性跳段）；(b) 合并含**真实代码变更**（非纯验证型/任务文件）；(c) loop 完成路径产生 GateEvent（gate-log 可读）。archguard `default_task_status: ready` 使 todo→ready 段在该项目结构性无法演示——记入判据，避免再有人用 ready 起始任务声称达成。
+
 **静态**：`delivery-manifest-check.ts --json` → `{"ok": true, "manifestVersion": "0.4.0", "issues": []}`。
 
 ### Finding：Node-free aarch64 SEA 为显式 out-of-scope（决策记录）
