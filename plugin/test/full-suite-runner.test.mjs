@@ -422,6 +422,12 @@ test("AC3 — resource gate WAIT ⇒ the runner does NOT start and leaves the st
         QUAY_TEST_SKIP_RESOURCE_GATE: "0", // force the REAL gate path, with seams
         RESOURCE_GATE_TEST_CPU_AVG10: "84.77", // WAIT (cpu stalled)
         RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000",
+        // Determinism for the OVERLOAD-WINDOW load seam (same convention as resource-gate.test.mjs
+        // runGate): the real /proc/loadavg on a busy host under the full suite's own 4-lane load
+        // would nondeterministically flip the new load_wait verdict and make this WAIT test
+        // attributable to load instead of CPU. Pin the load LOW so the WAIT verdict is exactly the
+        // CPU stall the test title names. gap-r274-flake-ac3-go-load-seam-unpinned.
+        RESOURCE_GATE_TEST_LOAD_OVERRIDE: "1",
       },
     });
     const { code } = await waitExit(child);
@@ -445,6 +451,12 @@ test("AC3 — resource gate GO ⇒ the runner starts (state=running then green)"
         QUAY_TEST_SKIP_RESOURCE_GATE: "0",
         RESOURCE_GATE_TEST_CPU_AVG10: "10", // GO (cpu calm)
         RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000",
+        // Determinism for the OVERLOAD-WINDOW load seam (same convention as resource-gate.test.mjs
+        // runGate): the real /proc/loadavg on a busy host under the full suite's own 4-lane load
+        // would nondeterministically flip the new load_wait verdict and make this GO test WAIT
+        // (round r274 flake: the suite's own load pushed loadavg >= nproc×2, the gate returned WAIT,
+        // the runner exited 1, assert.equal(code, 0) failed). Pin the load LOW so GO is a real GO.
+        RESOURCE_GATE_TEST_LOAD_OVERRIDE: "1",
       },
     });
     const { code } = await waitExit(child);
