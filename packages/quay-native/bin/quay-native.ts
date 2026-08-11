@@ -319,11 +319,13 @@ Description:
         console.log(`\n# Dry run — nothing written to disk.`);
         console.log(`# Would create: ${result.configPath}`);
         console.log(`# Would create: ${result.tasksDir}/`);
+        console.log(`# Would create: ${result.launchSettingsPath}`);
         return;
       }
 
       console.log(`Created ${result.configPath}`);
       console.log(`Created ${result.tasksDir}/ (or already existed)`);
+      console.log(`Created ${result.launchSettingsPath}`);
       printNextSteps("native", result.tasksDir);
     } catch (err) {
       console.error(`quay-native init: ${err instanceof Error ? err.message : String(err)}`);
