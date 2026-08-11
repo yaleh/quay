@@ -32,16 +32,16 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录死锁证据（ep_poll/socket 句柄/14+ 分钟/pcpu≈0.9%）+ conc=4 对照（本机 23.2s / orangevps 20.2s）+ 影响面（boheidc lane16 1493s 剔除异常值）（本任务 Proposal 已含）
-- [ ] AC2: **根因定位**——定位 mcp-server.test.mjs 或 mcp-server.ts 中高并发下持 socket 句柄不释放的路径（stdio transport / 资源注册 / 子进程通道）
-- [ ] AC3: **修复**——并发下句柄正确释放（或测试隔离），conc=16 单跑循环 ≥3 次全绿无挂起
+- [ ] AC1: **复现固化**——任务体记录死锁证据（ep_poll/socket 句柄/14+ 分钟/pcpu≈0.9%，**两次**：conc=16 首次 + conc=8 第二次 boheidc）+ conc=4 对照（本机 23.2s / orangevps 20.2s）+ 影响面（boheidc lane16 1493s 剔除异常值）（本任务 Proposal 已含）
+- [ ] AC2: **根因定位**——定位 mcp-server.test.mjs 或 mcp-server.ts 中**长批次尾段**持 socket 句柄不释放的路径（stdio transport / 资源注册 / 子进程通道 / **fd 或临时端口耗尽、遗留子进程句柄未回收**——两次死锁都发生在大批量 300+ 文件跑到后段，非开局）
+- [ ] AC3: **修复**——句柄正确释放（或测试隔离），**长批次尾段复现**（见 DoD）全绿无挂起
 - [ ] AC4: **低并发不回归**——conc=4 回归（本机 23.2s 基线量级）；`--for-task` scoped 门绿
 - [ ] AC5: **全量不回归**——全量套件绿（外层 verification-round 验证）
 
 ## Definition of Done
 
 - [ ] AC1–AC5 全部勾上
-- [ ] 修后实跑：conc=16 循环复现无挂起（贴 3 次结果）+ conc=4 回归数字
+- [ ] 修后实跑：**长批次尾段复现无挂起**（在 ≥300 文件的批次跑到尾段时单跑该文件；贴 2 次结果）+ conc=4 回归数字
 - [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
 
@@ -57,3 +57,11 @@ extra: {}
 **已复现、已用 /proc + ep_poll 确认，非猜测**：`--test-concurrency=16` 下 mcp-server.test.mjs 卡 ep_poll，socket 句柄不释放，14+ 分钟无 CPU（strace wchan=ep_poll, pcpu≈0.9%）。conc=4 本机 23.2s passed、orangevps 20.2s passed ⇒ 只高并发触发。现场 kill -9 已终止，句柄快照未保留。
 
 **数据修正（随本任务）**：两机最初 31 失败 = 同一根因 `.quay/config.yml` 缺失（gitignored、quay-init 生成、新 clone 没有）；scp 修复后单跑 27/27、46/46 绿，失败归零（除死锁）。**orangevps 干净重跑 main_phase_ms 从带 31 假失败的 117s 变 170s**——那 31 个瞬间报错把 sum_ms 拉低，**此前任何用那批数据的外推作废**。boheidc lane16 sum=1493s/289 文件、理论地板≈93.3s（未经验证轮）。两机单核速度比 boheidc/orangevps 中位 2.12x（短 1.86x/长 2.28x），16 核数量优势更大 ⇒ 整体预测快约 1.8x（未确认）。SERIAL/LOWCONC_CONCURRENCY 均可 env 覆盖，不受 --test-concurrency 影响。
+
+### Finding：死锁非「只在高并发触发」——conc=8 也复现，触发条件是长批次尾段资源累积（manager 2026-08-11 11:2x 更正 10:23 判断，落点 Finding 不进 Contract）
+
+**更正 10:23 的「只在高并发触发」**：conc=8 也复现（boheidc 第二次死锁）——main 相隔离实验（product+engine+governance，305 文件，conc=8）跑到第 **304/305 个文件**时 mcp-server.test.mjs 又卡死：wchan=ep_poll、持 3 个 socket 句柄不释放、运行 8 分 53 秒、CPU 0.2%，与首次（conc=16）现场完全同构。已 kill -9。
+
+**与「并发数本身」矛盾**：首次 conc=16 死锁、conc=4 两次（orangevps/boheidc）都 passed；这次 conc=8 死锁。⇒ **触发条件可能不是并发数，而是「批次跑到接近尾声、前面 300+ 个文件已消耗/累积了某种资源」**——fd 耗尽 / 临时端口耗尽 / 遗留子进程或句柄未及时回收。**两次死锁都发生在大批量文件跑到后段，不是开局**——唯一共同点，机制归因不下结论（C6b：该问失败者本人，manager 条件有限只报现象）。
+
+**DoD 复现设计更新（AC3/DoD 已按此改）**：原「16-32 核 conc16 单跑循环 ≥3 次」可能不够——更该测**「在一个跑了 300+ 文件的长批次尾声跑它」**而非孤立单跑循环（后者 conc=4 单跑两次 20-23s 正常，测不出成因）。
