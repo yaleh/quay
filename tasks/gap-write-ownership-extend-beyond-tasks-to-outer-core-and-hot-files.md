@@ -1,7 +1,10 @@
 ---
 id: gap-write-ownership-extend-beyond-tasks-to-outer-core-and-hot-files
-title: "写所有权分离只覆盖了 tasks/（35→7 已验证），没覆盖 orchestration/orchestrator-* 与 plugin/loop/* 与热点实现文件——inner 在改 outer 的执行核/loop 文档/outer 正在改的实现 ⇒ 6 条 fan-in 撞 add/add 卡死；修法=①核心/loop 文档 outer 独占写（inner 给建议、outer 落盘）②迁移窗口内新路径只允许一方新建 ③热点实现文件在有人改时把 outer 在飞改动纳入 touches-orthogonality-check 占用表"
-status: todo
+title: 写所有权分离只覆盖了 tasks/（35→7 已验证），没覆盖 orchestration/orchestrator-* 与
+  plugin/loop/* 与热点实现文件——inner 在改 outer 的执行核/loop 文档/outer 正在改的实现 ⇒ 6 条 fan-in 撞
+  add/add 卡死；修法=①核心/loop 文档 outer 独占写（inner 给建议、outer 落盘）②迁移窗口内新路径只允许一方新建
+  ③热点实现文件在有人改时把 outer 在飞改动纳入 touches-orthogonality-check 占用表
+status: ready
 labels:
   - gap
   - defect
