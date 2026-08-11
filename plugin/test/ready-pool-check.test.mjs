@@ -50,6 +50,7 @@ import {
   setTaskStatus,
   applyPromotions,
   computeSuiteBlocking,
+  isDirectoryGlob,
   consecutiveRedRounds,
   collectFailureFiles,
   isRedRound,
@@ -1955,6 +1956,60 @@ test("computeSuiteBlocking: controlled-experiment round (laneCount ≠ default) 
     defaultLane,
   });
   assert.equal(middle.consecutiveRed, 2, "experiment round in the middle is transparent (neither counts nor breaks)");
+});
+
+test("isDirectoryGlob: bare dir / dir/** / no-slash dir are directory globs; concrete files + file wildcards are not (AC2 — gap-suite-blocking-directory-glob-overbroad)", () => {
+  // The crystallization Touches entry `plugin/test/（各 AC 测试）` is a bare trailing-slash directory.
+  assert.equal(isDirectoryGlob("plugin/test/"), true, "trailing-slash bare directory");
+  assert.equal(isDirectoryGlob("plugin/test/**"), true, "explicit dir/** form (what parseTouches turns plugin/test/ into)");
+  assert.equal(isDirectoryGlob("plugin/test"), true, "no-slash bare directory token");
+  assert.equal(isDirectoryGlob("plugin/**"), true, "whole-directory glob");
+  assert.equal(isDirectoryGlob("**"), true, "all-files wildcard is directory-like (non-attributable)");
+  assert.equal(isDirectoryGlob("code/wd.ts"), false, "concrete file");
+  assert.equal(isDirectoryGlob("plugin/test/checker-cost.test.mjs"), false, "concrete file under a directory");
+  assert.equal(isDirectoryGlob("plugin/test/*.test.mjs"), false, "file-scoped wildcard");
+  assert.equal(isDirectoryGlob("send-keys-verified.sh"), false, "bare basename file");
+});
+
+test("computeSuiteBlocking: directory glob does NOT attribute; concrete failing filename still does (AC2/AC3 — gap-suite-blocking-directory-glob-overbroad)", () => {
+  const tasks = new Map([
+    // The crystallization shape: Touches carry concrete script files AND a `plugin/test/` directory
+    // glob (各 AC 测试). A failure under plugin/test/ must NOT be attributed via the dir glob.
+    ["gap-crystal-dir", { status: "ready", body: "## Touches\n- plugin/test/\n- plugin/scripts/capability-catalog.sh" }],
+    // A task whose Touches name the CONCRETE failing file must still be attributed.
+    ["gap-real-blocker", { status: "ready", body: "## Touches\n- plugin/test/checker-cost.test.mjs" }],
+    // A task whose Touches name a FILE-SCOPED wildcard over the failing file must still be attributed.
+    ["gap-wildcard", { status: "ready", body: "## Touches\n- plugin/test/*.test.mjs" }],
+  ]);
+  // A test expander mirroring the prod expandDeclaredTouches for the globs under test: concrete
+  // paths resolve to themselves, file-scoped wildcards expand to the concrete file, and a dir glob
+  // WOULD expand to the file — but computeSuiteBlocking must never let the dir glob reach expand.
+  const expand = (globs) => {
+    const set = new Set();
+    for (const g of globs) {
+      if (g === "plugin/test/*.test.mjs") set.add("plugin/test/checker-cost.test.mjs");
+      else if (g === "plugin/test/**") set.add("plugin/test/checker-cost.test.mjs");
+      else set.add(g);
+    }
+    return set;
+  };
+
+  const redRounds = Array.from({ length: 3 }, (_, i) => ({ round: 290 + i, state: "red", reason: "failed", failures: [{ file: "plugin/test/checker-cost.test.mjs" }] }));
+  const r = computeSuiteBlocking({ rounds: redRounds, stateFailures: [], tasks, expand });
+  assert.equal(r.windowActive, true);
+  assert.ok(!r.ids.has("gap-crystal-dir"), "AC2: a directory glob (plugin/test/) does NOT attribute a failure under that directory");
+  assert.ok(r.ids.has("gap-real-blocker"), "AC3: a task whose Touches name the concrete failing file is still a suite-blocker");
+  assert.ok(r.ids.has("gap-wildcard"), "AC3: a file-scoped wildcard that covers the failing file still attributes");
+
+  // The SAME task attributed when the failure hits one of its CONCRETE touches (only the dir glob is
+  // inert — the concrete script touches still participate).
+  const concreteHit = computeSuiteBlocking({
+    rounds: Array.from({ length: 3 }, (_, i) => ({ round: 293 + i, state: "red", reason: "failed", failures: [{ file: "plugin/scripts/capability-catalog.sh" }] })),
+    stateFailures: [],
+    tasks,
+    expand,
+  });
+  assert.ok(concreteHit.ids.has("gap-crystal-dir"), "a concrete touch of the same task still attributes when hit");
 });
 
 test("computeRelevance: suite-blocking flips blocking true + boosts value (AC2/AC3 unit)", () => {

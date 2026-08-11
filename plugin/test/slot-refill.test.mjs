@@ -759,6 +759,27 @@ test("DELIVERY-CRITICAL — blocking_suite axis stays ABOVE delivery-critical (i
   assert.equal(r.recommended[1], "ac36-critical", "delivery-critical ranks second (above id order, below blocking_suite)");
 });
 
+test("DELIVERY-CRITICAL — a false-positive dir-glob suite-blocker does NOT demote the DC task (AC4 — gap-suite-blocking-directory-glob-overbroad)", (t) => {
+  const root = makeWorkspace("glob-dc");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // The crystallization shape: Touches carry concrete scripts AND the `plugin/test/` directory glob.
+  writeTask(root, "gap-crystal-dir", { status: "ready", labels: ["gap"], body: dispatchableBody(["- plugin/test/", "- plugin/scripts/capability-catalog.sh (new)"]) });
+  // The delivery-critical task that must rank #1 when nothing is a true suite-blocker.
+  writeTask(root, "ac37-dc", { status: "ready", labels: ["gap", "delivery-critical"], body: dispatchableBody(["- code/dc.ts (new)"]) });
+  const opts = { tasksDir: path.join(root, "tasks"), root, cap: 2 };
+
+  // 3 consecutive red rounds whose ONLY failing file is under plugin/test/ — the dir glob must NOT
+  // implicate gap-crystal-dir, so the DC task keeps the top of the ranking (before the fix, the dir
+  // glob made gap-crystal-dir a false suite-blocker and pushed it to #1, demoting the DC task).
+  writeRounds(root, Array.from({ length: 3 }, (_, i) => ({ round: 310 + i, state: "red", reason: "failed", fail: 1, failures: [{ file: "plugin/test/checker-cost.test.mjs", line: "x" }] })));
+  writeState(root, [{ file: "plugin/test/checker-cost.test.mjs", line: "x" }]);
+  const r = analyzeSlotRefill(opts);
+  assert.equal(r.suite_blocking.window_active, true);
+  assert.ok(!r.suite_blocking.tasks.includes("gap-crystal-dir"), "the dir-glob task is NOT a suite-blocker (AC2 negative control)");
+  assert.equal(r.recommended[0], "ac37-dc", "no suite-blocker ⇒ the delivery-critical task ranks first (DC axis restored)");
+  assert.ok(r.recommended.includes("gap-crystal-dir"), "the dir-glob task is still dispatchable (ranked after the DC task)");
+});
+
 test("DELIVERY-CRITICAL — end-to-end: after labeling, the next refill evaluation picks the labeled task (dispatch eval > label ts) (AC4)", (t) => {
   const root = makeWorkspace("ac36-e2e");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
