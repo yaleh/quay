@@ -1,7 +1,7 @@
 ---
 id: gap-verification-round-missing-phase-ms-breaks-cost-attribution
 title: "verification-round.jsonl 不记三个 *_phase_ms ⇒ per_test_ms 把截断红轮与完整绿轮混在一起（「700s 退化」误判的来源）；套件耗时归因缺相级读数"
-status: ready
+status: done
 labels:
   - gap
   - defect

@@ -524,6 +524,16 @@ resource-aware。
 **外层倾向选项 1**：清理残留 worktree（进程已退出、非在飞工作）释放槽位，分支保留待 needs-human 裁定；
 不碰分支本身（去留仍归人）。这是解阻塞不是范围改变。
 
+## 2026-08-11 10:5xZ — suite-state-trigger 的 retrigger spawn 继承的环境 PATH 缺 nvm v25 ⇒ test.sh→node 解析到 v18.19.1 ⇒ it0-split-or-commit-check ESM SyntaxError ⇒ 自动 retrigger CRASH-LOOP 每 ~10min 一次；外层已停 trigger 止血，重挂须带 v25 PATH
+**现象**：全量套件 red（本轮 4 个 verification round 全红：round-1 static-check dispatch-review-missing [已修]、round-2/3 v18 崩溃、round-4 static-check carryover [已修]）。round-2/3 崩溃根因 = `suite-state-trigger.ts` 的 `spawnRetriggerRun`（:712-743）用 `spawn(process.execPath, ...)` 起 runner（v25 无问题），但 runner 内 `scripts/test.sh` 解析 `node` 走 **环境 PATH**，而 trigger 挂载时（09:25 冷启动，v25 绝对路径挂载）**环境 PATH 未含 nvm v25 目录** ⇒ 套件静态检查子进程 `it0-split-or-commit-check.ts` 跑在 `Node.js v18.19.1` ⇒ ESM `SyntaxError: Cannot use import statement outside a module`（`.quay/full-suite.log` 与 `full-suite-retrigger.log` 10:34/10:44 两次 exit 1）。约每 10min idle 阈值再触发一次（下一次 ~10:54）。
+**外层已尝试**：① 确认根因——trigger PID 3200901 的 `/proc/<pid>/environ` PATH 无 nvm v25；`spawnRetriggerRun` env 传 `{...process.env}`，test.sh 内 node 解析确实 v18；② **10:50Z kill 3200901 停 trigger 止血**（Monitor b6gex3c4c 随之 exit 143 正常）；确认无 runner 在跑、suite state 保持 red/static-check。③ cgroup 环境性 blocker（74/75）已有在飞任务 `gap-full-suite-runner-cgroup-scope-evidence-unfound` 在修——套件在本机判绿的唯一剩余代码障碍。
+**为什么超出授权**：修 `suite-state-trigger.ts` 的 spawn env（prepend execPath 目录，或在 trigger 挂载前显式 export PATH）或改 test.sh 的 node 解析都是 code change，归内层；外层只做挂载/停启的操作性动作。且 cgroup 任务在飞期间全量套件已知红——自动 retrigger 无论 crash 与否都只复确认已知红，烧资源。
+**选项**：
+1. **内层修 trigger spawn env**：`spawnRetriggerRun` 的 env 显式 `PATH: dirname(execPath)+":"+process.env.PATH`（或 runner 侧为子进程 prepend nvm）——根因修，一次到位，之后重挂 trigger 即可。
+2. **外层重挂 trigger 时带 v25 PATH**：`PATH="$HOME/.nvm/versions/node/v25.2.0/bin:$PATH" node ... --monitor` 重挂——止血但不治本（下次从裸 shell 挂仍复发），且重挂后 auto-retrigger 每 ~35min 跑一次真套件（已知红，烧资源）。
+3. **cgroup 任务落地前不挂 trigger**：外层 B3 手工按需起跑套件，cgroup 修好后（套件可能判绿）再重挂 auto-trigger——最省资源；依赖外层记得挂。
+**外层倾向**：先做 1（内层 code fix 根因），在 cgroup 落地前维持 3（trigger 保持停），cgroup 修复的 fan-in 合并后按需手工跑一次真套件验证绿，再重挂 trigger（带 v25 PATH）。
+
 
 
 ## 2026-08-09 17:3xZ — 批量合被 freshness-gate 持续拒（round-174b 拒一次，b69266c7 注定再拒）：inner A9 允许套件运行中照常 fan-in，gate COVERAGE 轴要求 suite start ≥ 最后 integration fan-in ⇒ inner 活跃时套件永远不满足 gate

@@ -5,7 +5,7 @@ title: send-keys-verified.test.mjs 未收编且泄漏 tmux
   tmux 进程(136 skv-ok,~670-811MB,清理只删目录不杀服务端)；按
   install-family/create/proposal-convergence/relation-sync 同一套路收编(标注+进
   known-load-sensitive+清理杀服务端)——开门第一步,修泄漏源让套件干净、绿更快、放掉 169
-status: ready
+status: done
 labels:
   - gap
   - defect

@@ -114,3 +114,8 @@ resume    A 删 / B 改 / D 改名 / E 表分步提交，任一步完成即写�
 reviewer: outer
 at: 2026-08-10
 changed: 人裁定删除（结晶收尾——残骸污染上下文已实证:读到/指错工具/误判 false-done）。A-E 完整计划:①能力=一实现,同名第二份即污染源（A 两版已漂移 7 行=证据）;②被取代实现不存在于仓库;③历史留记录层;④入口文档指向机件（已改✓）;⑤机械检查不回潮。A 删 4 实体+B 改 8 断言+D 范式改名+E superseded 表+C 记录层保留。实现归内层
+
+## Carries
+
+from: gap-send-keys-verified-leaks-tmux-servers-unincorporated
+acs: AC2, AC3, AC4
