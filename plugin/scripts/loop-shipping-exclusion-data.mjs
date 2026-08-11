@@ -16,6 +16,7 @@
 //     that are deliberately kept despite suppressing nothing right now.
 
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 
 /**
  * The 5 formerly-plugin-external mechanism files' OLD paths (pre-move). Single source: the AC1
@@ -46,6 +47,52 @@ export const oldPathPatterns = oldPaths.map((s) =>
     ? new RegExp(`(?<!plugin/)${escapeRegExp(s)}`)
     : new RegExp(escapeRegExp(s)),
 );
+
+/**
+ * Absolute paths of every git worktree CONTAINER that the fs-based `walk()` must NOT scan as
+ * main-repo content (gap-loop-shipping-scan-does-not-exclude-worktrees).
+ *
+ * A git worktree is a COMPLETE content copy of the repo (own checkout, own stale-path strings and
+ * file copies). `walk()` is an fs traversal that does NOT respect gitignore — without this exclusion
+ * an outer-layer agent worktree under `.claude/worktrees/` (or a milestone worktree under
+ * `milestones/M<NN>/worktrees/`) is swept into the corpus and its old-path references / second
+ * fast-mode-telemetry.ts copy false-red AC1b / AC2.
+ *
+ * Belt-and-suspenders, two sources:
+ *   - `.claude/worktrees/` (the Claude Code subagent-worktree root) is ALWAYS excluded — it can
+ *     hold residue (dirs whose `git worktree` registration was removed, e.g. a stale `agent-*`)
+ *     that `git worktree list` no longer reports, and an `agent-*` copy is exactly the 2026-08-10
+ *     false-red source;
+ *   - every NON-main path from `git worktree list --porcelain` is excluded too — registered
+ *     worktree copies anywhere (`/home/yale/work/quay-worktrees/*`, `milestones/M<NN>/worktrees/*`,
+ *     `/tmp/*`), not just `.claude/worktrees/`.
+ *
+ * The main repo root is never excluded (that is the tree the scan is FOR).
+ *
+ * @param {string} repoRoot absolute repo root
+ * @returns {Set<string>} absolute container paths
+ */
+export function worktreeContainerPaths(repoRoot) {
+  const root = path.resolve(repoRoot);
+  const containers = new Set([path.join(root, '.claude', 'worktrees')]);
+  let porcelain = '';
+  try {
+    porcelain = execFileSync('git', ['worktree', 'list', '--porcelain'], {
+      cwd: root,
+      encoding: 'utf8',
+      stdio: 'pipe',
+    });
+  } catch {
+    // git unavailable / not a git repo — the .claude/worktrees container above is still excluded.
+    return containers;
+  }
+  for (const line of porcelain.split('\n')) {
+    if (!line.startsWith('worktree ')) continue;
+    const wt = path.resolve(line.slice('worktree '.length).trim());
+    if (wt !== root) containers.add(wt);
+  }
+  return containers;
+}
 
 /**
  * The AC1b exclusion table: files that MAY legitimately mention the old paths (historical record /

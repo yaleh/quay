@@ -23,11 +23,42 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import { oldPaths, oldPathPatterns, exclusionEntries } from '../scripts/loop-shipping-exclusion-data.mjs';
+import { oldPaths, oldPathPatterns, exclusionEntries, worktreeContainerPaths } from '../scripts/loop-shipping-exclusion-data.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pluginDir = path.resolve(__dirname, '..');
 const repoRoot = path.resolve(pluginDir, '..');
+
+// ── Shared corpus walk + worktree-container exclusion ──────────────────────────────────────────────
+// walk() is an fs traversal and does NOT respect gitignore: a git worktree under the repo (e.g.
+// .claude/worktrees/agent-*/ or milestones/M*/worktrees/iteration-0) is a COMPLETE content copy whose
+// stale-path strings and file copies would be scanned as if they were the main repo → AC1b/AC2
+// false-red (gap-loop-shipping-scan-does-not-exclude-worktrees). worktreeContainerPaths (single source
+// in loop-shipping-exclusion-data.mjs) supplies every container path; walkCorpus skips them exactly
+// like node_modules/.git/dist.
+function walkCorpus(dir, { excluded = [], includeWorktrees = false } = {}) {
+  const containers = includeWorktrees ? new Set() : worktreeContainerPaths(repoRoot);
+  const isContainer = (p) => [...containers].some((c) => p === c || p.startsWith(c + path.sep));
+  const scanned = [];
+  const walk = (d) => {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      if (e.name === 'node_modules' || e.name === '.git' || e.name === 'dist') continue;
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) {
+        if (isContainer(p) || excluded.some((x) => p === x || p.startsWith(x + path.sep))) continue;
+        walk(p); continue;
+      }
+      if (!/\.(md|sh|mjs|ts|json|yml|js)$/.test(e.name)) continue;
+      if (excluded.some((x) => p === x || p.startsWith(x + path.sep))) continue;
+      scanned.push(p);
+    }
+  };
+  walk(dir);
+  return scanned;
+}
+
+// The AC1b exclusion targets (files/dirs that MAY legitimately mention the old paths).
+const exclusionTargets = () => exclusionEntries(repoRoot, pluginDir).map((e) => e.target);
 
 // ── AC1: the 5 files are inside plugin/; old paths are gone (no shims left behind) ─────────────────
 test('AC1 — the 5 formerly-external mechanism files live in plugin/; the old paths are gone (no compat shells)', () => {
@@ -83,7 +114,6 @@ test('AC1b — after the move, no live reference to the 5 old paths remains (com
   // substrings of their new `plugin/loop/` locations, so plain substring is exact there.
   // Files that MAY legitimately mention the old paths (historical record / target-layout), and
   // are therefore excluded from the "no live reference" scan:
-  const excluded = exclusionEntries(repoRoot, pluginDir).map((e) => e.target);
   const hits = [];
   // Corpus non-emptiness guard (gap-checks-that-verify-an-empty-set family): assert.deepEqual(hits, [])
   // alone would pass silently if walk() returned early, the extension filter changed, or the excluded
@@ -91,22 +121,16 @@ test('AC1b — after the move, no live reference to the 5 old paths remains (com
   // in the corpus, so the scan keeps resolving power.
   let scanned = 0;
   let sawTestSh = false;
-  const walk = (dir) => {
-    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-      if (e.name === 'node_modules' || e.name === '.git' || e.name === 'dist') continue;
-      const p = path.join(dir, e.name);
-      if (e.isDirectory()) { walk(p); continue; }
-      if (!/\.(md|sh|mjs|ts|json|yml|js)$/.test(e.name)) continue;
-      if (excluded.some((x) => p === x || p.startsWith(x + path.sep))) continue;
-      scanned += 1;
-      if (p === path.join(repoRoot, 'scripts', 'test.sh')) sawTestSh = true;
-      const src = fs.readFileSync(p, 'utf8');
-      for (const re of oldPathPatterns) {
-        if (re.test(src)) hits.push(`${path.relative(repoRoot, p)}: contains "${re}"`);
-      }
+  // walkCorpus skips node_modules/.git/dist AND every git worktree container (a worktree is a
+  // complete repo copy whose stale-path strings are not main-repo references).
+  for (const p of walkCorpus(repoRoot, { excluded: exclusionTargets() })) {
+    scanned += 1;
+    if (p === path.join(repoRoot, 'scripts', 'test.sh')) sawTestSh = true;
+    const src = fs.readFileSync(p, 'utf8');
+    for (const re of oldPathPatterns) {
+      if (re.test(src)) hits.push(`${path.relative(repoRoot, p)}: contains "${re}"`);
     }
-  };
-  walk(repoRoot);
+  }
   assert.deepEqual(hits, [], 'no live reference to the moved files\' old paths may remain (update callers to plugin/loop/ + plugin/scripts/)');
   assert.ok(scanned >= 200, `scan corpus must not be empty/starved: only ${scanned} files scanned`);
   assert.ok(sawTestSh, 'scripts/test.sh (a known live caller) must be in the scan corpus');
@@ -156,21 +180,75 @@ test('AC2 — fast-mode-telemetry.ts has ONE physical copy; plugin/scripts/ is a
     'experiments symlink must point at the plugin authority'
   );
   // No OTHER physical copy anywhere under the repo. Use lstatSync so symlinks (the re-export at
-  // experiments/) are not counted as physical copies.
+  // experiments/) are not counted as physical copies. walkCorpus skips node_modules/.git/dist, the
+  // gitignored pack-time snapshot packages/quay/plugin/, AND every git worktree container (a worktree
+  // is a complete repo copy — its fast-mode-telemetry.ts is not a second authority).
   const copies = [];
-  const walk = (dir) => {
-    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-      // Skip the gitignored pack-time snapshot packages/quay/plugin/ (package.sh materializes a
-      // byte-identical copy of plugin/ so the tarball carries it) — it is NOT a second authority.
-      if (e.name === 'node_modules' || e.name === '.git' || e.name === 'dist' ||
-          (dir === path.join(repoRoot, 'packages', 'quay') && e.name === 'plugin')) continue;
-      const p = path.join(dir, e.name);
-      if (e.isDirectory()) walk(p);
-      else if (e.name === 'fast-mode-telemetry.ts' && !fs.lstatSync(p).isSymbolicLink()) copies.push(p);
-    }
-  };
-  walk(repoRoot);
+  for (const p of walkCorpus(repoRoot, { excluded: [path.join(repoRoot, 'packages', 'quay', 'plugin')] })) {
+    if (path.basename(p) === 'fast-mode-telemetry.ts' && !fs.lstatSync(p).isSymbolicLink()) copies.push(p);
+  }
   assert.deepEqual(copies, [canonical], `exactly one physical fast-mode-telemetry.ts expected, got ${JSON.stringify(copies)}`);
+});
+
+// ── AC2/AC3 worktree-container controls (gap-loop-shipping-scan-does-not-exclude-worktrees) ────────
+test('AC2 — walk() skips a REAL git worktree (`git worktree list` source): stale refs + a telemetry copy inside it are not scanned', () => {
+  const worktreesDir = path.join(repoRoot, '.claude', 'worktrees');
+  const madeParent = !fs.existsSync(worktreesDir);
+  fs.mkdirSync(worktreesDir, { recursive: true });
+  const wt = path.join(worktreesDir, `ls-control-${process.pid}`);
+  try {
+    execFileSync('git', ['worktree', 'add', '--detach', wt, 'HEAD'], { cwd: repoRoot, stdio: 'pipe' });
+    // The fresh container set must report the registered worktree, and never the main repo root.
+    const containers = worktreeContainerPaths(repoRoot);
+    assert.ok(containers.has(wt), 'a registered git worktree must be reported by worktreeContainerPaths');
+    assert.ok(!containers.has(path.resolve(repoRoot)), 'repoRoot must never be a worktree container');
+    // Stale-path reference + a fast-mode-telemetry.ts copy inside the worktree.
+    fs.writeFileSync(path.join(wt, 'stale-probe.md'), 'old tick-doc path orchestration/orchestrator-loop-tick.md and docs/analysis/fast-mode-loop-tick.md\n');
+    fs.writeFileSync(path.join(wt, 'fast-mode-telemetry.ts'), 'export const worktreeCopy = true;\n');
+    const scanned = walkCorpus(repoRoot, { excluded: exclusionTargets() });
+    assert.ok(!scanned.some((p) => p.startsWith(wt + path.sep)), 'walk() must not scan inside a real git worktree');
+    const copies = scanned.filter((p) => path.basename(p) === 'fast-mode-telemetry.ts' && !fs.lstatSync(p).isSymbolicLink());
+    assert.deepEqual(copies, [path.join(pluginDir, 'scripts', 'fast-mode-telemetry.ts')], 'a git worktree copy of fast-mode-telemetry.ts must not be counted (AC2)');
+  } finally {
+    try { execFileSync('git', ['worktree', 'remove', '--force', wt], { cwd: repoRoot, stdio: 'pipe' }); } catch { /* already gone */ }
+    fs.rmSync(wt, { recursive: true, force: true });
+    if (madeParent) fs.rmSync(worktreesDir, { recursive: true, force: true });
+  }
+});
+
+test('AC2 — walk() skips the .claude/worktrees/ container even for UNREGISTERED residue (the 2026-08-10 agent-* shape)', () => {
+  const worktreesDir = path.join(repoRoot, '.claude', 'worktrees');
+  const madeParent = !fs.existsSync(worktreesDir);
+  fs.mkdirSync(worktreesDir, { recursive: true });
+  const residue = path.join(worktreesDir, `residue-${process.pid}`);
+  try {
+    fs.mkdirSync(residue, { recursive: true });
+    // NOT a registered git worktree (no `.git`): a stale leftover `agent-*`-shaped dir whose content
+    // is a full repo copy — exactly the 2026-08-10 false-red source (agent-a8fd.../README.md). Only
+    // the explicit .claude/worktrees/ container skip catches this (git worktree list does not).
+    fs.writeFileSync(path.join(residue, 'README.md'), 'references orchestration/orchestrator-loop-tick.md\n');
+    fs.writeFileSync(path.join(residue, 'fast-mode-telemetry.ts'), 'export const residueCopy = true;\n');
+    const scanned = walkCorpus(repoRoot, { excluded: exclusionTargets() });
+    assert.ok(!scanned.some((p) => p.startsWith(residue + path.sep)), 'walk() must not scan unregistered residue under .claude/worktrees/');
+    const copies = scanned.filter((p) => path.basename(p) === 'fast-mode-telemetry.ts' && !fs.lstatSync(p).isSymbolicLink());
+    assert.deepEqual(copies, [path.join(pluginDir, 'scripts', 'fast-mode-telemetry.ts')], 'residue fast-mode-telemetry.ts copy must not be counted (AC2)');
+  } finally {
+    fs.rmSync(residue, { recursive: true, force: true });
+    if (madeParent) fs.rmSync(worktreesDir, { recursive: true, force: true });
+  }
+});
+
+test('AC3 — negative control: a REAL old-path reference in the MAIN repo is still caught (normal capture retained)', () => {
+  const probe = path.join(repoRoot, '.loop-shipping-main-repo-probe.md');
+  try {
+    fs.writeFileSync(probe, 'the moved file used to live at orchestration/orchestrator-loop-tick.md\n');
+    const scanned = walkCorpus(repoRoot, { excluded: exclusionTargets() });
+    assert.ok(scanned.includes(probe), 'a probe file in the MAIN repo must be part of the scan corpus (not over-excluded by the worktree skip)');
+    const src = fs.readFileSync(probe, 'utf8');
+    assert.ok(oldPathPatterns.some((re) => re.test(src)), 'the probe old-path reference must trip an AC1b old-path pattern (would be collected as a hit)');
+  } finally {
+    fs.rmSync(probe, { force: true });
+  }
 });
 
 // ── AC7: the shipped plugin subtree excludes per-project state files ───────────────────────────────
