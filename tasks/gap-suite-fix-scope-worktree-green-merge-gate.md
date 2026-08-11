@@ -38,11 +38,34 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 scope 决定性读数（第一 subagent rounds 218-221 worktree+green；第二 subagent rounds 230/231 main——从未自测）+ 三保障失效 + round-231 tests=0（本任务 Proposal 已含）
-- [ ] AC2: **fan-in 机械判据**——fan-in 前断言存在 ≥1 条 `scope=worktree` 且 `state=green` 的轮次记录，否则拒绝 merge
-- [ ] AC3: **不新建机件**——数据复用 verification-round.jsonl 的 scope/state；只加前置断言
-- [ ] AC4: **明确失败信息**——拒绝时返回可行动提示（「先在自己 worktree 自测绿：node --test <文件> 或 scoped test.sh」）
-- [ ] AC5: **既有不回归**——`--for-task` scoped 门绿
+- [x] AC1: **复现固化**——任务体记录 scope 决定性读数（第一 subagent rounds 218-221 worktree+green；第二 subagent rounds 230/231 main——从未自测）+ 三保障失效 + round-231 tests=0（本任务 Proposal 已含）
+- [x] AC2: **fan-in 机械判据**——fan-in 前断言存在 ≥1 条 `scope=worktree` 且 `state=green` 的轮次记录，否则拒绝 merge
+- [x] AC3: **不新建机件**——数据复用 verification-round.jsonl 的 scope/state；只加前置断言
+- [x] AC4: **明确失败信息**——拒绝时返回可行动提示（「先在自己 worktree 自测绿：node --test <文件> 或 scoped test.sh」）
+- [x] AC5: **既有不回归**——`--for-task` scoped 门绿
+
+## Evidence (inner 2026-08-11)
+
+**实现**：`integration-batch-merge.sh` 新增 opt-in `--require-worktree-green` 门（AC2/AC4）——批量合前（任何 ref 移动前，先于 object/freshness gate）断言 `verification-round.jsonl` 存在 ≥1 条 `scope=worktree` 且 `state=green` 记录，无 ⇒ FAIL-CLOSED + 可行动提示；`--dry-run` 报 would-block 不失败。复用既有 scope/state 字段（AC3，不新建机件）。`execute-suite-fix.js` Merge 段 step 0 先跑门前置检查、step 3 批量合必带 `--require-worktree-green`（禁止裸调用跳过门）。`orchestration/orchestrator-tick-core.md` A15 ④ 注明机械门；`gap-ac36` 交叉标注。测试 `plugin/test/integration-batch-merge.test.mjs` 新增 7 条（无记录拒 / main+green 或 worktree+red 拒 / 有 worktree+green 放行 / 坏行容忍 ± / dry-run would-block / 默认不传 flag 不受影响负控制）。
+
+**Contract invoke（拒绝 + 放行）**：
+```
+# 拒绝（无 worktree+green 记录 = 第二个 suite-fix subagent 形态，rounds 全 scope=main）
+bash integration-batch-merge.sh --root <repo> --develop develop --integration integration --require-worktree-green
+integration-batch-merge: measure has_worktree_green_round=False
+integration-batch-merge: WORKTREE-GREEN-GATE FAIL-CLOSED — no scope=worktree + state=green verification-round record … nothing moved
+integration-batch-merge:   fix: 先在自己 worktree 自测绿 —— node --test <文件> 或 scoped test.sh（scripts/test.sh --for-task <id> / --scoped <文件>），直到 verification-round.jsonl 出现 scope=worktree 且 state=green 记录，再 fan-in
+EXIT=1
+# dry-run 拒绝：measure has_worktree_green_round=False / DRY-RUN — worktree-green gate WOULD fail closed（EXIT=0，无 ref 移动）
+# 放行（有 scope=worktree+state=green 记录 = 第一 subagent 形态，round 218-221）
+bash integration-batch-merge.sh --root <repo> --develop develop --integration integration --require-worktree-green --skip-freshness-gate
+integration-batch-merge: measure has_worktree_green_round=True
+integration-batch-merge: worktree-green-gate OK — ≥1 scope=worktree + state=green verification-round exists …
+integration-batch-merge: OK — develop fast-forwarded to integration
+EXIT=0
+```
+
+**Scoped 门（AC5）**：`bash scripts/test.sh --for-task gap-suite-fix-scope-worktree-green-merge-gate --allow-thin` → `tests 45 / pass 45 / fail 0 / cancelled 0`，**EXIT=0**。静态检查全绿（state-worded-clause-check band 0；red-on-omission-audit invariants 全 1；test-impl-census clean；task-contract-check no violations；delivery-inventory drift gate pass）。
 
 ## Definition of Done
 

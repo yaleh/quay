@@ -156,6 +156,29 @@
 #                opt-out for callers exercising OTHER gates in isolation; the real orchestrator
 #                invocation never passes it (the gate is ON by default — mechanical, not self-judged).
 #
+#   WORKTREE-GREEN GATE (gap-suite-fix-scope-worktree-green-merge-gate, A15 ④ fan-in pre-assertion):
+#                the suite-fix fan-in contract ("自带 worktree、修到绿才 merge、未绿退出则 .halt")
+#                requires the suite-fix subagent to have run a self-test round IN ITS OWN worktree and
+#                reached green BEFORE it may merge (rounds 230/231 of the second suite-fix subagent were
+#                scope=main — it waited on the SHARED checkout's rounds and never self-tested green, so
+#                all three guarantees silently failed while every clause read as "not violated"). The
+#                mechanical gate: `--require-worktree-green` asserts, before any ref moves, that
+#                `.quay/verification-round.jsonl` contains AT LEAST ONE record with `scope == "worktree"`
+#                AND `state == "green"` (the self-test-green evidence). No such record ⇒ FAIL CLOSED with
+#                an actionable "先在自己 worktree 自测绿" hint. The data already lives in
+#                verification-round.jsonl (`scope` + `state` written by full-suite-runner.ts) — no new
+#                machinery, only a pre-assertion on the consumer side (AC3). OPT-IN: the OUTER loop's
+#                regular integration→develop batch merge relies on a MAIN-sourced green (the freshness
+#                gate's SCOPE axis) and is NOT affected — only the suite-fix fan-in path (execute-suite-fix.js
+#                Merge phase) passes `--require-worktree-green`. In --dry-run this reports the would-block
+#                measure without failing (mirrors the object/freshness gates).
+#   --require-worktree-green
+#                 require ≥1 `scope=worktree` + `state=green` record in verification-round.jsonl before
+#                 ANY merge (the suite-fix fan-in pre-assertion); fail-closed with an actionable hint
+#                 when none exists. NOT implied by default (the outer loop's main-green path is unaffected).
+#   --verification-round-file <path>
+#                 override the verification-round.jsonl path (default <repo_root>/.quay/verification-round.jsonl).
+#
 # Exit codes:
 #   0  merge performed (ff or real) OR nothing pending (integration already absorbed into develop);
 #      with --dry-run, the ff-ability / divergence surface was reported without moving any ref
@@ -189,6 +212,14 @@ reconcile=0
 skip_freshness_gate=0
 freshness_window=3600
 suite_state_file=""
+# ── WORKTREE-GREEN GATE (gap-suite-fix-scope-worktree-green-merge-gate) ─────────────────────────────
+# The suite-fix fan-in pre-assertion: before ANY merge, the batch-merge script must verify the
+# suite-fix subagent actually self-tested green IN ITS OWN worktree — at least one verification-round
+# record with `scope == "worktree"` AND `state == "green"` (the A15 ④ "自测绿" evidence). OPT-IN: the
+# outer loop's regular integration→develop merge relies on a MAIN-sourced green (freshness gate) and
+# does NOT pass this flag; only the suite-fix closure (execute-suite-fix.js Merge phase) does.
+require_worktree_green=0
+verification_round_file=""
 # Global for the real-merge temp worktree path (must outlive real_merge() so the EXIT trap can
 # clean it up even under `set -u`).
 tmp_wt=""
@@ -229,6 +260,8 @@ while [ "$#" -gt 0 ]; do
     --skip-freshness-gate) skip_freshness_gate=1; shift ;;
     --freshness-window) freshness_window="$2"; shift 2 ;;
     --suite-state-file) suite_state_file="$2"; shift 2 ;;
+    --require-worktree-green) require_worktree_green=1; shift ;;
+    --verification-round-file) verification_round_file="$2"; shift 2 ;;
     *) usage ;;
   esac
 done
@@ -737,6 +770,60 @@ print(int(ts), int(st), int(time.time()-ts))
   return 0
 }
 
+# ── WORKTREE-GREEN GATE (gap-suite-fix-scope-worktree-green-merge-gate, A15 ④ fan-in pre-assertion) ──
+# The suite-fix fan-in contract requires the subagent to have self-tested green IN ITS OWN worktree
+# BEFORE merging — otherwise "修到绿才 merge / 未绿退出则 .halt / 不得修一个等30min" all silently fail
+# while every clause reads as "not violated" (rounds 230/231 of the second suite-fix subagent were
+# scope=main — it waited on the SHARED checkout's rounds and never self-tested its own tree; the green
+# it waited for measured a tree WITHOUT its fix, so it could never judge whether it fixed anything).
+# The mechanical gate: `--require-worktree-green` asserts at least ONE verification-round record with
+# `scope == "worktree"` AND `state == "green"` exists in `.quay/verification-round.jsonl` (the data is
+# already written by full-suite-runner.ts — no new machinery, AC3). Absent/empty/malformed file ⇒ no
+# record ⇒ fail-closed (a missing file is NOT a pass). In --dry-run this reports the would-block measure
+# without failing (mirrors check_object_gate / check_freshness_gate). OPT-IN: the outer loop's regular
+# integration→develop merge relies on a MAIN-sourced green (freshness gate SCOPE axis) and does NOT
+# pass this flag — only the suite-fix closure (execute-suite-fix.js Merge phase) does.
+check_worktree_green_gate() {
+  if [ "${require_worktree_green}" -ne 1 ]; then
+    echo "integration-batch-merge: worktree-green-gate SKIPPED (--require-worktree-green not requested — outer main-green path unaffected)"
+    return 0
+  fi
+  local vfile="${verification_round_file:-${repo_root}/.quay/verification-round.jsonl}"
+  local has=""
+  if [ ! -f "${vfile}" ]; then
+    has="False"
+  else
+    # Contract measure (has_worktree_green_round): any record with scope=worktree AND state=green.
+    # Tolerates malformed/empty lines (skips them) so one bad row cannot disable the gate. The path
+    # is passed via argv (not embedded) — the freshness gate's same pattern, robust to odd paths.
+    has="$(python3 -c "
+import json,sys
+rs=[]
+try:
+  for l in open(sys.argv[1]):
+    l=l.strip()
+    if not l: continue
+    try: rs.append(json.loads(l))
+    except Exception: pass
+except Exception:
+  pass
+print(any(r.get('scope')=='worktree' and r.get('state')=='green' for r in rs))" "${vfile}" 2>/dev/null || echo False)"
+  fi
+  echo "integration-batch-merge: measure has_worktree_green_round=${has}"
+  if [ "${has}" = "True" ]; then
+    echo "integration-batch-merge: worktree-green-gate OK — ≥1 scope=worktree + state=green verification-round exists (the suite-fix subagent self-tested green in its own worktree)"
+    return 0
+  fi
+  local verdict="no scope=worktree + state=green verification-round record in ${vfile} (the suite-fix subagent has NOT self-tested green in its own worktree — rounds may all be scope=main, i.e. it waited on the shared checkout)"
+  if [ "${dry_run}" -eq 1 ]; then
+    echo "integration-batch-merge: DRY-RUN — worktree-green gate WOULD fail closed: ${verdict} (no ref moved in dry-run)"
+    return 0
+  fi
+  echo "integration-batch-merge: WORKTREE-GREEN-GATE FAIL-CLOSED — ${verdict}; nothing moved" >&2
+  echo "integration-batch-merge:   fix: 先在自己 worktree 自测绿 —— node --test <文件> 或 scoped test.sh（scripts/test.sh --for-task <id> / --scoped <文件>），直到 verification-round.jsonl 出现 scope=worktree 且 state=green 记录，再 fan-in" >&2
+  return 1
+}
+
 # Real merge of `integration` into `develop` (merge commit) in a throwaway temp worktree, then advance
 # develop with a CAS on the old tip. Shared-file conflicts auto-resolve develop-authoritative; a real
 # code conflict fails closed (nothing moved). Returns 0 on success, 1 on fail-closed.
@@ -900,6 +987,14 @@ if git -C "${repo_root}" merge-base --is-ancestor "${merge_target}" "refs/heads/
   echo "integration-batch-merge: measure integration_ff_merges=0"
   exit 0
 fi
+
+# ── WORKTREE-GREEN GATE (gap-suite-fix-scope-worktree-green-merge-gate, A15 ④ fan-in pre-assertion) ──
+# The suite-fix fan-in path (`--require-worktree-green`) must show the subagent self-tested green in
+# its OWN worktree (≥1 scope=worktree + state=green verification-round record) BEFORE any ref moves —
+# otherwise the merge is refused with an actionable "先自测绿" hint. OPT-IN: the outer loop's regular
+# main-green batch merge is unaffected. Runs BEFORE the object/freshness gates (fail fast on the fan-in
+# pre-assertion); in --dry-run it reports the would-block measure without failing.
+check_worktree_green_gate || exit 1
 
 # ── OBJECT GATE (gap-batch-merge-gate-validates-tip-not-merge-result) ────────────────────────────────
 # Validate the MERGE RESULT, not just the integration tip, BEFORE any ref moves. The suite tested the

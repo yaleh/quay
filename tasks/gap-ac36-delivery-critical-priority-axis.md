@@ -119,3 +119,5 @@ changed: 本阶段（产品化交付）第一件工作（manager 指定顺序+�
 **AC37 活体样本（交叉标注，gap-ac37-exec-core-ships-with-package 2026-08-10）**：AC37 作为 AC36 判据③（端到端）的活体样本——本任务自带 `delivery-critical` label，经新轴被 inner 派发取走（dispatch 时间戳 > 打 label 时间戳），实现「交付关键路径」从脆弱通道转到常规池排队。AC37 完成后即反向验证 AC36 判据③。
 
 **判据② 可验证性缺口（交叉标注，gap-ac36-recommended-exposes-sort-key 2026-08-11）**：本任务 AC3/AC4 的位次前移 + 负控制此前只能靠 Contract invoke 的人工两次比对（见上「位次对比」）——`--json` 的 `recommended` 是纯字符串数组，不暴露排序字段，判据② 无法机械核。修后 `slot-refill --json` 另发 `ranking` 数组（每条带 `axis/deliveryCritical/suiteBlocking`），并由 `plugin/scripts/ac36-sortkey-criterion-check.ts` 机械断言判据②（DC 严格前移 / 同族非 DC 位次不变 / blocking_suite 之上），本任务 Evidence 的位次对比从此可由检查器复现。
+
+**本阶段交付路径（交叉标注，gap-suite-fix-scope-worktree-green-merge-gate 2026-08-11）**：本任务（AC36 优先级第二轴）正是为推进本阶段交付路径而建；`gap-suite-fix-scope-worktree-green-merge-gate` 是交付路径上的机械门——suite-fix fan-in 前必须存在 `scope=worktree`+`state=green` 记录（不自测绿不许合），无记录 ⇒ 门拒（merge 被门拒是 A15 ② 的必跑触发）。它是「不做会变红」的读数（`.quay/verification-round.jsonl` 无 worktree+green 记录 ⇒ fan-in 拒），按本任务的 delivery-critical 轴应优先取。

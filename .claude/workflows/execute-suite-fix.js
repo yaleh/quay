@@ -85,7 +85,11 @@ LAUNCH (detached, survives subagent exit): ${launchCmd}
   — do NOT use Bash(run_in_background:true): a background task from a subagent is killed at subagent exit (实证 runId f6b824b5 died 16s after launch).
 state file: ${stateDir}/full-suite-state.json  (script-owned polling reads this)
 verification-round log: ${stateDir}/verification-round.jsonl
-integration-batch-merge: cd ${root} && bash plugin/scripts/integration-batch-merge.sh
+integration-batch-merge: cd ${root} && bash plugin/scripts/integration-batch-merge.sh --require-worktree-green
+  — the suite-fix fan-in gate (gap-suite-fix-scope-worktree-green-merge-gate): before ANY merge it asserts
+    verification-round.jsonl contains ≥1 scope=worktree + state=green record (自测绿). No such record ⇒
+    FAIL-CLOSED with an actionable hint — 不许 merge。Always pass --require-worktree-green on BOTH the
+    --dry-run pre-check and the real batch-merge call.
 resource gate: cd ${root} && bash plugin/scripts/resource-gate.sh --for full-suite
 FAILURES are ALL recorded in state.json's failures[] (MAX_RECORDED_FAILURES=200) + the archived log ${logFile} — read EVERY failure line, never just the first.
 `
@@ -205,9 +209,14 @@ const merge = await agent(
   `你是 A15 ④ suite-fix 链的 Merge 阶段。上一轮 suite 已 green（scope=worktree, state=green, verifiedCommit=${lastState.verifiedCommit}）。
 ${CONTEXT}
 任务：
+0. 【fan-in 机械判据（gap-suite-fix-scope-worktree-green-merge-gate, AC2）】先跑 gate 前置检查：
+   cd ${root} && bash plugin/scripts/integration-batch-merge.sh --require-worktree-green --skip-freshness-gate --dry-run
+   —— 若输出 \`measure has_worktree_green_round=False\`（verification-round.jsonl 无 scope=worktree + state=green 记录 = 没在自己 worktree 自测绿），
+   **不许 fan-in、不许 batch-merge**：返回 { batchMergeOk:false, note:'worktree-green-gate-blocked: 先在自己 worktree 自测绿（node --test <文件> 或 scoped test.sh）直到出现 scope=worktree+green 记录' }。
+   只有 \`measure has_worktree_green_round=True\`（本次 green 轮已在 verification-round.jsonl 留下 worktree+green 记录）才继续。
 1. fan-in：把 verify worktree 的 branch（${worktree} 当前分支）合回 integration。冲突按「机械 union / per-hunk 判断」处置；不要用 --ours/--theirs 抹掉任何一方的真实内容。先 git reset --hard HEAD 清 staged/working-tree 残留（rebase-abort 残留纪律）。
 2. 验证 integration 干净、worktree 已清理。
-3. batch-merge：把 develop 推到那个确切 verifiedCommit（${lastState.verifiedCommit}）——cd ${root} && bash plugin/scripts/integration-batch-merge.sh 的正确调用形式（--dry-run 先验证，再实际执行）。
+3. batch-merge：把 develop 推到那个确切 verifiedCommit（${lastState.verifiedCommit}）——cd ${root} && bash plugin/scripts/integration-batch-merge.sh --require-worktree-green 的正确调用形式（--dry-run 先验证，再实际执行；**必须带 --require-worktree-green**，禁止裸调用跳过门）。
 4. 返回合并结果与最终 develop/integration HEAD。
 返回 { fanIn: string[], batchMergeOk: bool, developHead, integrationHead, note }。`,
   { schema: { type: 'object', properties: { fanIn: { type: 'array', items: { type: 'string' } }, batchMergeOk: { type: 'boolean' }, developHead: { type: 'string' }, integrationHead: { type: 'string' }, note: { type: 'string' } }, required: ['batchMergeOk'] } }

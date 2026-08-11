@@ -1374,3 +1374,155 @@ test("MERGE-TO-VERIFIED-COMMIT negative control (AC4): WITHOUT verifiedCommit th
     cleanup(dir);
   }
 });
+
+// ── WORKTREE-GREEN GATE (gap-suite-fix-scope-worktree-green-merge-gate, A15 ④ fan-in pre-assertion) ──
+//
+// The suite-fix fan-in contract ("自带 worktree、修到绿才 merge、未绿退出则 .halt") requires the
+// suite-fix subagent to have self-tested green IN ITS OWN WORKTREE before merging. The second suite-fix
+// subagent (rounds 230/231, 2026-08-10) never did — its verification rounds were scope=main (it waited
+// on the SHARED checkout's rounds, so the green it waited for measured a tree WITHOUT its fix), and all
+// three guarantees silently failed while every clause read as "not violated". The mechanical gate:
+// `--require-worktree-green` asserts ≥1 `scope=worktree` + `state=green` record in
+// verification-round.jsonl before ANY ref moves; no such record ⇒ FAIL CLOSED with an actionable
+// "先在自己 worktree 自测绿" hint (AC2/AC4). The data already lives in verification-round.jsonl
+// (`scope` + `state` written by full-suite-runner.ts) — no new machinery, only a consumer-side
+// pre-assertion (AC3). OPT-IN: the outer loop's regular integration→develop batch merge relies on a
+// MAIN-sourced green (the freshness gate's SCOPE axis) and does NOT pass the flag — it is unaffected
+// (negative control below, AC5). These tests use --skip-freshness-gate to isolate the new gate from
+// the freshness gate (the merge-mechanics pattern).
+
+// Write verification-round.jsonl for a test repo (JSON-lines; replaces any existing file).
+function writeVerificationRound(dir, lines) {
+  const stateDir = join(dir, ".quay");
+  mkdirSync(stateDir, { recursive: true });
+  writeFileSync(join(stateDir, "verification-round.jsonl"), lines.map((l) => JSON.stringify(l)).join("\n") + "\n", "utf8");
+}
+
+test("WORKTREE-GREEN GATE (AC2, gap-suite-fix-scope-worktree-green-merge-gate): --require-worktree-green with NO scope=worktree+green record (absent file) ⇒ BLOCKED, nothing moved, actionable hint", () => {
+  const now = Math.floor(Date.now() / 1000);
+  const dir = freshnessRepo("wtg1", now - 600);
+  try {
+    const devBefore = gitCmd(dir, "rev-parse", "develop").stdout.trim();
+    const r = run([batchMerge, "--root", dir, "--require-worktree-green", "--skip-freshness-gate"]);
+    assert.notEqual(r.status, 0, "no worktree-green record must block the suite-fix fan-in merge");
+    assert.match(r.stderr, /WORKTREE-GREEN-GATE FAIL-CLOSED/);
+    assert.match(r.stdout, /measure has_worktree_green_round=False/);
+    // Actionable hint (AC4): tells the subagent to self-test green in its own worktree first.
+    assert.match(r.stderr, /先在自己 worktree 自测绿/);
+    assert.match(r.stderr, /node --test <文件>|scoped test\.sh|scripts\/test\.sh/);
+    // Nothing moved.
+    assert.equal(gitCmd(dir, "rev-parse", "develop").stdout.trim(), devBefore);
+    assert.notEqual(gitCmd(dir, "merge-base", "--is-ancestor", "integration", "develop").status, 0);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("WORKTREE-GREEN GATE (AC2/AC3): --require-worktree-green with ONLY a main+green or worktree+red record ⇒ STILL BLOCKED (BOTH scope AND state must match)", () => {
+  const now = Math.floor(Date.now() / 1000);
+  const dir = freshnessRepo("wtg2", now - 600);
+  try {
+    const devBefore = gitCmd(dir, "rev-parse", "develop").stdout.trim();
+    // A MAIN-sourced green (the OUTER loop's signal) is NOT the suite-fix subagent's self-test —
+    // this is exactly the round-230/231 shape: the subagent waited on the shared checkout's rounds.
+    writeVerificationRound(dir, [{ round: 230, scope: "main", state: "green" }]);
+    const r = run([batchMerge, "--root", dir, "--require-worktree-green", "--skip-freshness-gate"]);
+    assert.notEqual(r.status, 0, "a main-sourced green must NOT satisfy the worktree-green gate");
+    assert.match(r.stderr, /WORKTREE-GREEN-GATE FAIL-CLOSED/);
+    assert.match(r.stdout, /measure has_worktree_green_round=False/);
+
+    // A WORKTREE-sourced RED round is not a self-test-green either.
+    writeVerificationRound(dir, [{ round: 231, scope: "worktree", state: "red", tests: 0 }]);
+    const r2 = run([batchMerge, "--root", dir, "--require-worktree-green", "--skip-freshness-gate"]);
+    assert.notEqual(r2.status, 0, "a worktree+red round must NOT satisfy the gate");
+    assert.match(r2.stdout, /measure has_worktree_green_round=False/);
+    assert.equal(gitCmd(dir, "rev-parse", "develop").stdout.trim(), devBefore);
+    assert.notEqual(gitCmd(dir, "merge-base", "--is-ancestor", "integration", "develop").status, 0);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("WORKTREE-GREEN GATE (AC2): --require-worktree-green WITH a scope=worktree + state=green record ⇒ ALLOWED (develop fast-forwards)", () => {
+  const now = Math.floor(Date.now() / 1000);
+  const dir = freshnessRepo("wtg3", now - 600);
+  try {
+    writeVerificationRound(dir, [{ round: 218, scope: "worktree", state: "green", commit: "abc" }]);
+    const r = run([batchMerge, "--root", dir, "--require-worktree-green", "--skip-freshness-gate"]);
+    assert.equal(r.status, 0, `a worktree+green record must allow the suite-fix fan-in merge: ${r.stdout}${r.stderr}`);
+    assert.match(r.stdout, /measure has_worktree_green_round=True/);
+    assert.match(r.stdout, /worktree-green-gate OK/);
+    assert.match(r.stdout, /fast-forwarded to integration/);
+    assert.equal(gitCmd(dir, "merge-base", "--is-ancestor", "integration", "develop").status, 0);
+    assert.equal(gitCmd(dir, "rev-list", "--count", "develop..integration").stdout.trim(), "0");
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("WORKTREE-GREEN GATE (malformed-line tolerance): a malformed row does not disable the gate — with a valid worktree+green record it passes", () => {
+  const now = Math.floor(Date.now() / 1000);
+  const dir = freshnessRepo("wtg6", now - 600);
+  try {
+    const stateDir = join(dir, ".quay");
+    mkdirSync(stateDir, { recursive: true });
+    // A malformed line + a valid worktree+green record ⇒ the valid record is found (one bad row
+    // must NOT disable the gate — a reader that bails on the first bad line would fail open).
+    writeFileSync(join(stateDir, "verification-round.jsonl"), "{not-json}\n" + JSON.stringify({ round: 219, scope: "worktree", state: "green" }) + "\n", "utf8");
+    const r = run([batchMerge, "--root", dir, "--require-worktree-green", "--skip-freshness-gate"]);
+    assert.equal(r.status, 0, `a valid worktree+green record must pass despite a malformed row: ${r.stdout}${r.stderr}`);
+    assert.match(r.stdout, /measure has_worktree_green_round=True/);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("WORKTREE-GREEN GATE (malformed-line tolerance negative): a file with ONLY malformed rows has NO record ⇒ BLOCKED", () => {
+  const now = Math.floor(Date.now() / 1000);
+  const dir = freshnessRepo("wtg7", now - 600);
+  try {
+    const devBefore = gitCmd(dir, "rev-parse", "develop").stdout.trim();
+    const stateDir = join(dir, ".quay");
+    mkdirSync(stateDir, { recursive: true });
+    writeFileSync(join(stateDir, "verification-round.jsonl"), "{not-json}\n[also not\n", "utf8");
+    const r = run([batchMerge, "--root", dir, "--require-worktree-green", "--skip-freshness-gate", "--dry-run"]);
+    assert.equal(r.status, 0, "dry-run must not fail");
+    assert.match(r.stdout, /measure has_worktree_green_round=False/);
+    assert.match(r.stdout, /DRY-RUN — worktree-green gate WOULD fail closed/);
+    assert.equal(gitCmd(dir, "rev-parse", "develop").stdout.trim(), devBefore);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("WORKTREE-GREEN GATE (dry-run, AC2): --dry-run --require-worktree-green with no record reports the would-block WITHOUT failing and moves no ref", () => {
+  const now = Math.floor(Date.now() / 1000);
+  const dir = freshnessRepo("wtg4", now - 600);
+  try {
+    const devBefore = gitCmd(dir, "rev-parse", "develop").stdout.trim();
+    const r = run([batchMerge, "--root", dir, "--require-worktree-green", "--skip-freshness-gate", "--dry-run"]);
+    assert.equal(r.status, 0, "dry-run must not fail even when the worktree-green gate would block");
+    assert.match(r.stdout, /measure has_worktree_green_round=False/);
+    assert.match(r.stdout, /DRY-RUN — worktree-green gate WOULD fail closed/);
+    assert.ok(!/WORKTREE-GREEN-GATE FAIL-CLOSED/.test(r.stderr), "dry-run must not emit the fail-closed verdict");
+    assert.equal(gitCmd(dir, "rev-parse", "develop").stdout.trim(), devBefore);
+    assert.notEqual(gitCmd(dir, "merge-base", "--is-ancestor", "integration", "develop").status, 0);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("WORKTREE-GREEN GATE negative control (AC5): the OUTER loop's regular batch merge (NO --require-worktree-green) is NOT blocked by an absent verification-round file", () => {
+  const now = Math.floor(Date.now() / 1000);
+  const dir = freshnessRepo("wtg5", now - 600);
+  try {
+    // No verification-round.jsonl at all — the outer loop's main-green batch merge must proceed
+    // (the freshness gate is skipped to isolate; the point is the worktree-green gate is OPT-IN).
+    const r = run([batchMerge, "--root", dir, "--skip-freshness-gate", "--dry-run"]);
+    assert.equal(r.status, 0, "the outer loop's batch merge must not be affected by the opt-in gate");
+    assert.match(r.stdout, /worktree-green-gate SKIPPED/);
+    assert.match(r.stdout, /FF-OK/);
+  } finally {
+    cleanup(dir);
+  }
+});
