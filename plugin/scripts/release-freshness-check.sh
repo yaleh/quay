@@ -18,8 +18,9 @@
 #
 # The delivery dir set is CROSS-REFERENCED (not an independent source): the authoritative list is
 # DELIVERY_INVENTORY in plugin/scripts/verify-delivery-surface.ts. release-freshness-check mirrors
-# the same dirs; release-freshness-check.test.mjs selfchecks the mirror against the TS single source
-# (a dir added there ⇒ the selfcheck goes red until this list is updated).
+# the same dirs (DELIVERY_DIRS below); release-freshness-check.test.mjs selfchecks the mirror
+# against the TS single source (a dir added there ⇒ the selfcheck goes red until this list is
+# updated).
 #
 # Exit codes: 0 = FRESH (release_ahead <= threshold AND drift_dirs == 0)
 #             1 = STALE (recut WARN and/or drift reported — delivery surface not current)
@@ -129,15 +130,57 @@ if [ "${recut_warn}" -eq 1 ]; then
   verdict="STALE"
 fi
 
+# ── 2. drift gate (AC3) — release 产物 vs develop 机制集 ─────────────────────────────────────────
+# Reuses the delivery-inventory idea (verify-delivery-surface.ts DELIVERY_INVENTORY — the 8
+# delivery-surface dirs) against the release surface: per-dir top-level non-hidden entry count at
+# the release tag vs at develop. Any count difference ⇒ drift_dirs>0, reported mechanically.
+# --list-drift additionally lists the file-level A/D/M per drifted dir.
+DELIVERY_DIRS=(plugin/scripts plugin/gate-scripts plugin/skills plugin/probes plugin/loop plugin/workflows plugin/agents plugin/vendor)
+
+drift_dirs=0
+declare -a drift_report=()
+for d in "${DELIVERY_DIRS[@]}"; do
+  tag_count="$(git ls-tree "${tag}" "${d}/" 2>/dev/null | awk '{print $NF}' | grep -v '^\.' | wc -l)"
+  dev_count="$(git ls-tree "${develop_ref}" "${d}/" 2>/dev/null | awk '{print $NF}' | grep -v '^\.' | wc -l)"
+  if [ "${tag_count}" != "${dev_count}" ]; then
+    drift_dirs=$((drift_dirs + 1))
+    drift_report+=("${d}:${tag_count}->${dev_count}")
+  fi
+done
+
+# surface_delta = total file-level A/D/M across the delivery surface between tag and develop
+# (counts every changed path — added, deleted, modified).
+surface_delta="$(git diff --name-only "${tag}" "${develop_ref}" -- "${DELIVERY_DIRS[@]}" 2>/dev/null | wc -l)"
+
+if [ "${drift_dirs}" -gt 0 ]; then
+  verdict="STALE"
+fi
+
+# ── output ─────────────────────────────────────────────────────────────────────────────────────────
 if [ "${json_mode}" -eq 1 ]; then
-  printf '{"release_tag":"%s","develop":"%s","release_ahead":%s,"recut_threshold":%s,"recut_warn":%s,"verdict":"%s"}\n' \
-    "${tag}" "${develop_ref}" "${release_ahead}" "${threshold}" "${recut_warn}" "${verdict}"
+  # drift entries quoted as JSON strings: plugin/scripts:126->205
+  _drift_json="$(IFS=,; printf '"%s"' "${drift_report[*]}" | sed 's/,/","/g')"
+  printf '{"release_tag":"%s","develop":"%s","release_ahead":%s,"recut_threshold":%s,"recut_warn":%s,"drift_dirs":%s,"surface_delta":%s,"drift":[%s],"verdict":"%s"}\n' \
+    "${tag}" "${develop_ref}" "${release_ahead}" "${threshold}" "${recut_warn}" \
+    "${drift_dirs}" "${surface_delta}" \
+    "${_drift_json}" "${verdict}"
 else
   echo "release-freshness-check (root=${root})"
   echo "  release_tag=${tag} develop=${develop_ref}"
   echo "  release_ahead=${release_ahead} recut_threshold=${threshold} recut_warn=${recut_warn}"
+  echo "  drift_dirs=${drift_dirs} surface_delta=${surface_delta}"
+  for entry in "${drift_report[@]:-}"; do
+    [ -n "${entry}" ] && echo "  drift: ${entry}"
+  done
   if [ "${recut_warn}" -eq 1 ]; then
     echo "  WARN: release is stale — develop is ${release_ahead} commits ahead of ${tag} (threshold ${threshold}); trigger a recut (DIR-123 / delivery)" >&2
+  fi
+  if [ "${drift_dirs}" -gt 0 ]; then
+    echo "  WARN: release ${tag} 产物与 develop 机制集漂移 — ${drift_dirs} dir(s) count differ; run --list-drift for file-level A/D/M" >&2
+  fi
+  if [ "${list_drift}" -eq 1 ] && [ "${drift_dirs}" -gt 0 ]; then
+    echo "  file-level A/D/M between ${tag} and ${develop_ref} (delivery surface):"
+    git diff --name-status "${tag}" "${develop_ref}" -- "${DELIVERY_DIRS[@]}" | sed 's/^/    /'
   fi
   echo "  verdict=${verdict}"
 fi
