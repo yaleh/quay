@@ -39,7 +39,7 @@ extra: {}
 ## Acceptance Criteria
 
 - [x] AC1: **复现固化**——任务体记录 round-168 实证（AC7 engine+1 失败 + solo 18.4s 绿 + 全文件 164s + 无 pending commit 触及）（本任务 Proposal 已含；内层补：全量负载下构造复现，或记录第 2 次全量红）
-- [ ] AC2: **AC7 不再轮换失败**——连续 2 轮全量 AC7 绿（外层 verification-round 验证）
+- [x] AC2: **AC7 不再轮换失败**——连续 2 轮全量 AC7 绿（r271 绿 verification-round 验证；closure 31dfa65e 判定）
 - [x] AC3: **solo 不回归**——runner-grouping.test.mjs 单独跑仍绿
 - [x] AC4: **断言核心不削弱**——「undeclared 文件归 engine」保留（负控制：弱化为「只要 total+1 就行」即违）
 - [x] AC5: **既有机制不回归**——`--for-task` scoped 门绿（含 runner-grouping / serial 组契约检查）

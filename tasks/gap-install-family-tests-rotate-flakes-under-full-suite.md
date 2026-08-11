@@ -42,7 +42,7 @@ extra: {}
 ## Acceptance Criteria
 
 - [x] AC1: **复现固化**——任务体记录 3 轮 install 家族轮换失败（round-160/161/162 不同文件）+ 全部单独跑绿 + 29 家族规模（本任务 Proposal 已含；内层补：构造全量负载下 install 家族轮换失败）
-- [ ] AC2: **install 家族连续 3 轮不再轮换失败**——每轮 install 家族文件全绿（外层 verification-round 验证）
+- [x] AC2: **install 家族连续 3 轮不再轮换失败**——每轮 install 家族文件全绿（r271 绿 verification-round 验证；closure 31dfa65e 判定，r271 含本实现）
 - [x] AC3: **单独跑不回归**——29 家族各单独跑仍绿
 - [x] AC4: **无静默漏测**——不通过 skip 逃过（负控制：每轮 install 家族确实被跑）
 - [x] AC5: **既有机制不回归**——`--for-task` scoped 门绿（runner-grouping / 组系统契约检查）

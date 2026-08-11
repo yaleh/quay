@@ -55,7 +55,7 @@ AssertionError: GO band must equal the injected hermetic value, got 2
 - [x] AC2: **kill-timeout 回归闭环**——child 超时被 SIGKILL 时返回可辨识的有界拒绝码（`epoch-cli-timeout`，REGRESSION 接受码白名单含它）；REGRESSION 通过（簇 A 修到）
 - [x] AC3: **cap-from-gate 密封性**——套件满载时注入 seam 仍得注入值（`GO band … = injected`）；cap-from-gate 18/18 全过（簇 B 修到，red-window #10 的 RESOURCE_GATE_TEST_NPROC=4 pin 保留 + 新增 SEAM 测试封死）
 - [x] AC4: **不引入新挂死**——kill-timeout 修后 child 仍被有界（不回到无限挂死）；既有 proposal-convergence 测试（218/218 = 原 217 + 新增 kill-timeout 测试）全绿不回归
-- [ ] AC5: **套件绿**——全量套件 fail 0（`FULL-SUITE-EXIT=0`，外层批量合边界闸门）——**待外层 verification-round 验证**（本工作树跑 scoped gate）
+- [x] AC5: **套件绿**——全量套件 fail 0（`FULL-SUITE-EXIT=0`，外层批量合边界闸门）——r271 绿 verification-round 验证（closure 31dfa65e 判定）
 
 ## Definition of Done
 

@@ -43,7 +43,7 @@ extra: {}
 - [x] AC2: **排除表收编**——verify-delivery-surface.ts 进 loop-shipping 排除表（consumer-laid 目标布局引用，与同类 checker 一致）
 - [x] AC3: **loop-shipping 绿**——AC1b 回归验证 12/12
 - [x] AC4: **verify-delivery-surface 功能不丢**——consumer-laid 校验仍工作（--surface 模式 6/6 COVERED）
-- [ ] AC5: **全量套件绿**——round-203 类场景不再红（fail 0 且 cancelled 0 且 FULL-SUITE-EXIT=0）——外层 verification-round 验证
+- [x] AC5: **全量套件绿**——round-203 类场景不再红（fail 0 且 cancelled 0 且 FULL-SUITE-EXIT=0）——r271 绿 verification-round 验证（closure 31dfa65e 判定）
 
 ## Definition of Done
 

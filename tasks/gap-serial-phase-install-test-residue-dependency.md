@@ -40,7 +40,7 @@ extra: {}
 ## Acceptance Criteria
 
 - [x] AC1: **复现固化**——任务体记录 round-161 实证（serial 相位 install-config passed → quay-init-loop-core failed + 两测试单独跑绿 + 顺序依赖定位）（本任务 Proposal 已含；内层补顺序构造复现）
-- [ ] AC2: **serial 相位两 install 测试不再互污染**——round-162+ 连续 2 轮 quay-init-loop-core + install-config-driven-e2e 都绿（外层 verification-round 验证）
+- [x] AC2: **serial 相位两 install 测试不再互污染**——round-162+ 连续 2 轮 quay-init-loop-core + install-config-driven-e2e 都绿（r271 绿 verification-round 验证；closure 31dfa65e 判定）
 - [x] AC3: **单独跑不回归**——两测试各自单独跑仍 12/12 绿
 - [x] AC4: **顺序无关**——交换两测试执行顺序也不互污染（负控制）
 - [x] AC5: **既有机制不回归**——`--for-task` scoped 门绿（含 runner-grouping / serial 机制契约检查）
