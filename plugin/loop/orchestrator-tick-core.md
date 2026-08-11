@@ -36,7 +36,7 @@ checklist 执行。
 
 ## B. 每轮必产出
 
-- **B1 收尾 pass(1b,强制,每 tick 一次)**:对每个 `not-yet-flipped` —— 先 `--task-end --taskId --runId --outcome done` 关遥测括号(`inProgress[]` 无 runId 则跳过)→ 核对 AC/DoD 真实满足后写 `status: ready → done` → 记进 `closed`。**不受套件状态门控**,红窗照跑 (src:668, 673, 682)
+- **B1 收尾 pass(1b,强制,每 tick 一次)**:对每个 `not-yet-flipped` —— 先 `--task-end --taskId --runId --outcome done` 关遥测括号(`inProgress[]` 无 runId 则跳过)→ 核对 AC/DoD 真实满足后调 `node --no-warnings --experimental-strip-types plugin/scripts/loop-complete-task.ts --root "$REPO_ROOT" --task <id> --verified-by "..."`(经 QENG `runCompleteLoop` 写 `status: ready → done` + 追加 `complete` pass GateEvent;**不手搓直接写文件**,`gap-loop-completion-path-produces-zero-gateevents`)→ 记进 `closed`。**不受套件状态门控**,红窗照跑 (src:668, 673, 682)
 - **B2 留痕**:`closure-lag-check.sh --record --flipped <N>`,**零收尾也写 0** (src:693)
 - **B3 全量 suite 后台起跑**:条件 = 本轮收尾 ≥1(或有新 merge 落地)**且** `state != running` **且** `resource-gate.sh --for full-suite` 放行。被测 worktree/integration checkout 时**必须**同传 `--state-dir "$REPO_ROOT/.quay"` (src:709, 714, 720)。**事件分支(`gap-b3-tick-coupled-misses-between-tick-merges`,2026-08-11):起跑是事件,不是本 tick 的轮询副作用**——`suite-state-trigger.ts` 的 Monitor 已把同一条件事件化:integration HEAD 前移(merge 落地)且 `state != running` ⇒ `SUITE-MERGE-PENDING`(AC2);`state=green` 且 `develop..integration>0` 且持续 idle ⇒ `SUITE-IDLE-GREEN`(AC3)。两条事件都驱动起跑(不靠 tick),`event_not_tick` 恒 1。本 B3 仍是 tick 内兜底(收尾 ≥1 路径),事件路径在其之前 (src:任务体 gap-b3-tick-coupled-misses-between-tick-merges Proposal/Contract)
 - **B4 批量合(suiteGreen 为 true 时)**:`integration-batch-merge.sh --develop develop --integration integration`,**`--dry-run` 先跑**;false ⇒ 不跑,integration 照常接收 (src:741, 753)
