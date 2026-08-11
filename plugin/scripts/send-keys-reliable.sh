@@ -77,6 +77,40 @@ usage() {
 [ -n "$TEXT" ] || { echo "send-keys-reliable: 文本为空" >&2; exit 2; }
 [ -n "$TARGET_JSONL" ] || { echo "send-keys-reliable: 缺少目标 transcript 路径" >&2; exit 2; }
 
+# ── remote-aware tmux (gap-supervisor-deliver-cross-host-target-support) ──────────
+# The target may live on ANOTHER host (SUPERVISOR_DELIVER_HOST — set by supervisor-deliver.sh when
+# it resolves <host>:<tmux-target> or --host). Every tmux interaction routes through these helpers:
+# LOCAL → bare `tmux` (resolves via TMUX_TMPDIR — the hermetic-socket contract); CROSS-HOST → ONE
+# `ssh $HOST tmux …` round-trip per call with each arg shell-quoted (printf %q), so a pane format
+# survives the remote re-parse. The send-keys (C-u / literal text / Enter) are SEPARATE ssh
+# invocations — the "三次分开调用" contract, forwarded over ssh.
+HOST="${SUPERVISOR_DELIVER_HOST:-}"
+SSH_BIN="${SUPERVISOR_DELIVER_SSH:-ssh}"
+
+tmux_cmd() {
+  local a q=""
+  if [ -n "$HOST" ]; then
+    for a in "$@"; do q+="$(printf '%q ' "$a")"; done
+    "$SSH_BIN" "$HOST" "tmux ${q}"
+  else
+    tmux "$@"
+  fi
+}
+
+send_key() {  # send_key <C-u|Enter>
+  tmux_cmd send-keys -t "$TARGET" "$1"
+}
+
+send_text_literal() {  # send_text_literal <text> — the -l payload, forwarded exactly over ssh
+  if [ -n "$HOST" ]; then
+    local q
+    q="$(printf '%q' "$1")"
+    "$SSH_BIN" "$HOST" "tmux send-keys -t $(printf '%q' "$TARGET") -l ${q}"
+  else
+    tmux send-keys -t "$TARGET" -l "$1"
+  fi
+}
+
 # fail-loud precondition (gap-laydown-derivation-is-sensitive-to-reference-spelling-dependency-closure
 # AC4): the delivery verdict depends on the pure checker; a MISSING checker means the whole
 # deliver-confirmed-verdict promise is broken (the pre-fix script only ASSIGNED CHECKER at line 41
@@ -95,7 +129,9 @@ if [ ! -f "$SCRIPT_DIR/drive-target-check.sh" ]; then
   echo "send-keys-reliable: 缺少前置校验 $SCRIPT_DIR/drive-target-check.sh——无法确认目标是 inner，fail loud" >&2
   exit 1
 fi
-if ! DRIVE_EXPECT_WINDOW_NAME="${DRIVE_EXPECT_WINDOW_NAME:-inner}" bash "$SCRIPT_DIR/drive-target-check.sh" "$TARGET"; then
+if ! DRIVE_EXPECT_WINDOW_NAME="${DRIVE_EXPECT_WINDOW_NAME:-inner}" \
+     SUPERVISOR_DELIVER_HOST="$HOST" SUPERVISOR_DELIVER_SSH="$SSH_BIN" \
+     bash "$SCRIPT_DIR/drive-target-check.sh" "$TARGET"; then
   echo "send-keys-reliable: 目标 $TARGET 未通过前置校验（非 inner 或数字索引）——中止，不发送" >&2
   exit 1
 fi
@@ -116,7 +152,8 @@ if [ ! -f "$SCRIPT_DIR/pane-state-classify.ts" ]; then
   echo "send-keys-reliable: 缺少分类器 $SCRIPT_DIR/pane-state-classify.ts——无法判定目标可接收，fail loud" >&2
   exit 1
 fi
-if ! node --experimental-strip-types "$SCRIPT_DIR/pane-state-classify.ts" --can-receive-wait "$TARGET" --wait "$CAN_RECEIVE_WAIT_S" --poll "$CAN_RECEIVE_POLL_S"; then
+if ! SUPERVISOR_DELIVER_HOST="$HOST" SUPERVISOR_DELIVER_SSH="$SSH_BIN" \
+     node --experimental-strip-types "$SCRIPT_DIR/pane-state-classify.ts" --can-receive-wait "$TARGET" --wait "$CAN_RECEIVE_WAIT_S" --poll "$CAN_RECEIVE_POLL_S"; then
   echo "send-keys-reliable: 目标 $TARGET 在 ${CAN_RECEIVE_WAIT_S}s 内未转为 waiting-input——fail loud 需人工，不发送（不假装送达）" >&2
   exit 1
 fi
@@ -183,8 +220,8 @@ clear_ok=0
 if [ "$fresh_session" -ne 1 ]; then
   i=0
   while [ "$i" -lt "$CLEAR_MAX" ]; do
-    tmux send-keys -t "$TARGET" C-u
-    pane=$(tmux capture-pane -p -t "$TARGET" 2>/dev/null || true)
+    send_key C-u
+    pane=$(tmux_cmd capture-pane -p -t "$TARGET" 2>/dev/null || true)
     if [ -z "$pane" ] || pane_input_box_empty "$pane"; then
       clear_ok=1
       break
@@ -200,7 +237,7 @@ else
 fi
 
 # Step 2 (fault 2, part 1): send the text literally.
-tmux send-keys -t "$TARGET" -l "$TEXT"
+send_text_literal "$TEXT"
 
 # Step 3 (fault 2, part 2): wait until the receiver has finished rendering — two consecutive
 # captures equal. Bounded (STABLE_TIMEOUT_S). If the pane never stabilizes we PROCEED anyway
@@ -209,9 +246,9 @@ tmux send-keys -t "$TARGET" -l "$TEXT"
 stable=0
 end=$(( $(date +%s) + STABLE_TIMEOUT_S ))
 while [ "$(date +%s)" -lt "$end" ]; do
-  a=$(tmux capture-pane -p -t "$TARGET" 2>/dev/null || true)
+  a=$(tmux_cmd capture-pane -p -t "$TARGET" 2>/dev/null || true)
   sleep 0.3
-  b=$(tmux capture-pane -p -t "$TARGET" 2>/dev/null || true)
+  b=$(tmux_cmd capture-pane -p -t "$TARGET" 2>/dev/null || true)
   if [ -n "$a" ] && [ "$a" = "$b" ]; then
     stable=1
     break
@@ -222,7 +259,7 @@ if [ "$stable" -ne 1 ]; then
 fi
 
 # Step 4 (fault 2, part 3): submit.
-tmux send-keys -t "$TARGET" Enter
+send_key Enter
 
 # run_checker — one delivery-verification attempt. exit 0 = delivered; 1 = failed (clear discard
 # evidence: enqueued then removed without materialization); 3 = unknown (no evidence either way —
@@ -270,7 +307,7 @@ while [ "$(date +%s)" -lt "$deadline_total" ]; do
   fi
   if [ "$phase" -eq 1 ] && [ "$(date +%s)" -ge "$deadline_first" ]; then
     echo "send-keys-reliable: ${DELIVERY_FIRST_S}s 内未见送达——补发一次独立 Enter（故障 3 修法），重新计时" >&2
-    tmux send-keys -t "$TARGET" Enter
+    send_key Enter
     phase=2
   fi
   sleep "$DELIVERY_POLL_S"

@@ -32,6 +32,27 @@ import { spawnSync } from "node:child_process";
 
 const ENUMERATED_STATES = ["waiting-input", "permission-prompt", "busy", "error-banner", "unknown"];
 
+// ── remote-aware runtime tmux (gap-supervisor-deliver-cross-host-target-support) ──────────────
+// The delivery scripts drive a tmux target that may live on ANOTHER host. The runtime probes below
+// (probeResidueTarget / runCanReceive / runCanReceiveWait) talk to tmux directly; when
+// SUPERVISOR_DELIVER_HOST is set they must route through `ssh <host> tmux …` — the SAME seam the
+// shell scripts use, so a cross-host delivery keeps the identical capture/send surface. The PURE
+// classify functions stay pure; this helper is the only place a runtime probe reaches tmux/ssh.
+function runtimeTmux(args: string[]): { status: number; stdout: string; stderr: string } {
+  const host = process.env.SUPERVISOR_DELIVER_HOST || "";
+  const sshBin = process.env.SUPERVISOR_DELIVER_SSH || "ssh";
+  if (host) {
+    // Remote: ONE ssh round-trip running `tmux <args…>` on the target host. Each arg is double-quoted
+    // (with " \ $ ` escaped) so the remote shell re-parses it as a single word — a pane format like
+    // '#{window_name}' survives, and a leading '#' cannot start a remote comment.
+    const remote = `tmux ${args.map((a) => `"${a.replace(/(["\\$`])/g, "\\$1")}"`).join(" ")}`;
+    const r = spawnSync(sshBin, [host, remote], { encoding: "utf8" });
+    return { status: r.status ?? 1, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
+  }
+  const r = spawnSync("tmux", args, { encoding: "utf8" });
+  return { status: r.status ?? 1, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
+}
+
 /** Default number of bottom lines the classifier examines. The Claude Code TUI's input box +
  * status line occupy the last ~6 lines (prompt line, separator, status line, plus one or two
  * content lines above). 10 gives a small margin while staying far short of the whole screen —
@@ -405,11 +426,11 @@ export interface ResidueProbeResult {
 export function probeResidueTarget(target: string, maxClicks = RESIDUE_CLEAR_MAX_DEFAULT): ResidueProbeResult {
   const captures: string[] = [];
   const capture = (): { ok: boolean; out: string; err: string } => {
-    const r = spawnSync("tmux", ["capture-pane", "-p", "-t", target], { encoding: "utf8" });
+    const r = runtimeTmux(["capture-pane", "-p", "-t", target]);
     return { ok: r.status === 0, out: r.stdout ?? "", err: r.stderr ?? "" };
   };
   const send = (keys: string): void => {
-    spawnSync("tmux", ["send-keys", "-t", target, keys], { encoding: "utf8" });
+    runtimeTmux(["send-keys", "-t", target, keys]);
   };
 
   const first = capture();
@@ -522,7 +543,7 @@ export function runCanReceive(argv: string[]): number {
     process.stderr.write("usage: pane-state-classify.ts --can-receive <tmux目标>\n");
     return 2;
   }
-  const cap = spawnSync("tmux", ["capture-pane", "-p", "-t", target], { encoding: "utf8" });
+  const cap = runtimeTmux(["capture-pane", "-p", "-t", target]);
   if (cap.status !== 0 || (cap.stdout ?? "").trim() === "") {
     process.stderr.write(
       `can-receive: 捕获目标 ${target} 失败/为空——fail closed，不发送（AC5 同源守卫：无内容不判可接收）\n`,
@@ -566,7 +587,7 @@ export function runCanReceiveWait(argv: string[]): number {
   const deadline = Date.now() + waitS * 1000;
   let lastState = "unknown";
   while (Date.now() < deadline) {
-    const cap = spawnSync("tmux", ["capture-pane", "-p", "-t", target], { encoding: "utf8" });
+    const cap = runtimeTmux(["capture-pane", "-p", "-t", target]);
     if (cap.status === 0 && (cap.stdout ?? "").trim() !== "") {
       const o = classifyPaneStateOrthogonal(cap.stdout ?? "");
       lastState = o.input_state;

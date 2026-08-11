@@ -122,6 +122,43 @@ if [[ "$TARGET" == *:*:* ]]; then
   [ -n "$HOST" ] || HOST="$implicit_host"
 fi
 
+# ── remote-aware delivery helpers (gap-supervisor-deliver-cross-host-target-support) ──────────
+# Every tmux interaction routes through these: LOCAL → bare `tmux` (resolves via TMUX_TMPDIR);
+# CROSS-HOST → ONE `ssh $HOST tmux …` round-trip per call, args shell-quoted (printf %q). The
+# fresh path's three send-keys (C-u / literal text / Enter) are THREE separate ssh invocations —
+# the same "三次分开调用" the local path uses, forwarded over ssh.
+tmux_cmd() {
+  local a q=""
+  if [ -n "$HOST" ]; then
+    for a in "$@"; do q+="$(printf '%q ' "$a")"; done
+    "$SSH_BIN" "$HOST" "tmux ${q}"
+  else
+    tmux "$@"
+  fi
+}
+
+send_key() {  # send_key <C-u|Enter>
+  tmux_cmd send-keys -t "$TARGET" "$1"
+}
+
+send_text_literal() {  # send_text_literal <text> — the -l payload, forwarded exactly over ssh
+  if [ -n "$HOST" ]; then
+    local q
+    q="$(printf '%q' "$1")"
+    "$SSH_BIN" "$HOST" "tmux send-keys -t $(printf '%q' "$TARGET") -l ${q}"
+  else
+    tmux send-keys -t "$TARGET" -l "$1"
+  fi
+}
+
+file_exists() {  # file_exists <path> — existence test that works locally AND on the remote host
+  if [ -n "$HOST" ]; then
+    "$SSH_BIN" "$HOST" "test -f $(printf '%q' "$1")" 2>/dev/null
+  else
+    [ -e "$1" ]
+  fi
+}
+
 # fail-loud precondition: the delivery verdict depends on the pure checker; a missing checker
 # means the deliver-confirmed promise is broken (same rule as send-keys-reliable.sh).
 [ -f "$CHECKER" ] || { echo "supervisor-deliver: 缺少校验器 $CHECKER——无法验证送达（依赖未铺？），fail loud" >&2; exit 1; }
@@ -156,9 +193,12 @@ fi
 # The --root mode ALWAYS takes the fresh path: for a re-spawned session the newest pre-existing
 # jsonl is the OLD session's file and is not the delivery target; the target is the file that
 # appears after the send (the snapshot rule below).
-if [ -z "$ROOT" ] && [ -n "$TRANSCRIPT" ] && [ -e "$TRANSCRIPT" ]; then
+if [ -z "$ROOT" ] && [ -n "$TRANSCRIPT" ] && file_exists "$TRANSCRIPT"; then
   if [ -f "$RELIABLE" ] && [ -x "$RELIABLE" ]; then
-    RELIABLE_DELIVERY_VERIFY_S="$VERIFY_S" bash "$RELIABLE" "$TARGET" "$PAYLOAD" "$TRANSCRIPT"
+    RELIABLE_DELIVERY_VERIFY_S="$VERIFY_S" \
+    SUPERVISOR_DELIVER_HOST="$HOST" \
+    SUPERVISOR_DELIVER_SSH="$SSH_BIN" \
+    bash "$RELIABLE" "$TARGET" "$PAYLOAD" "$TRANSCRIPT"
     exit $?
   fi
   echo "supervisor-deliver: 缺少可靠投递脚本 $RELIABLE——fail loud" >&2
@@ -178,7 +218,9 @@ if [ ! -f "$SELF_DIR/drive-target-check.sh" ]; then
   echo "supervisor-deliver: 缺少前置校验 $SELF_DIR/drive-target-check.sh——无法确认目标是 inner，fail loud" >&2
   exit 1
 fi
-if ! DRIVE_EXPECT_WINDOW_NAME="${DRIVE_EXPECT_WINDOW_NAME:-inner}" bash "$SELF_DIR/drive-target-check.sh" "$TARGET"; then
+if ! DRIVE_EXPECT_WINDOW_NAME="${DRIVE_EXPECT_WINDOW_NAME:-inner}" \
+     SUPERVISOR_DELIVER_HOST="$HOST" SUPERVISOR_DELIVER_SSH="$SSH_BIN" \
+     bash "$SELF_DIR/drive-target-check.sh" "$TARGET"; then
   echo "supervisor-deliver: 目标 $TARGET 未通过前置校验（非 inner 或数字索引）——中止，不发送" >&2
   exit 1
 fi
@@ -196,18 +238,20 @@ if [ ! -f "$SELF_DIR/pane-state-classify.ts" ]; then
   echo "supervisor-deliver: 缺少分类器 $SELF_DIR/pane-state-classify.ts——无法判定目标可接收，fail loud" >&2
   exit 1
 fi
-if ! node --experimental-strip-types "$SELF_DIR/pane-state-classify.ts" --can-receive-wait "$TARGET" --wait "$CAN_RECEIVE_WAIT_S" --poll "$CAN_RECEIVE_POLL_S"; then
+if ! SUPERVISOR_DELIVER_HOST="$HOST" SUPERVISOR_DELIVER_SSH="$SSH_BIN" \
+     node --experimental-strip-types "$SELF_DIR/pane-state-classify.ts" --can-receive-wait "$TARGET" --wait "$CAN_RECEIVE_WAIT_S" --poll "$CAN_RECEIVE_POLL_S"; then
   echo "supervisor-deliver: 目标 $TARGET 在 ${CAN_RECEIVE_WAIT_S}s 内未转为 waiting-input——fail loud 需人工，不发送（不假装送达）" >&2
   exit 1
 fi
 echo "supervisor-deliver: 目标 $TARGET 可接收（waiting-input）——继续投递" >&2
 
 # Direct reliable send: fresh session has nothing to clear → C-u (harmless), literal text, Enter.
-tmux send-keys -t "$TARGET" C-u 2>/dev/null || true
+# Cross-host: THREE separate `ssh <host> tmux send-keys` invocations (the "三次分开调用" contract).
+send_key C-u 2>/dev/null || true
 sleep 0.5
-tmux send-keys -t "$TARGET" -l "$PAYLOAD" 2>/dev/null || true
+send_text_literal "$PAYLOAD" 2>/dev/null || true
 sleep 0.5
-tmux send-keys -t "$TARGET" Enter 2>/dev/null || true
+send_key Enter 2>/dev/null || true
 
 # Bounded wait for the transcript file to appear (the send is what creates it — fault 4's
 # queuing delay is real; poll, never single-check). With --root, prefer a file NOT in the
