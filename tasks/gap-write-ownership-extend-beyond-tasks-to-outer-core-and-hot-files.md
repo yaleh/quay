@@ -35,11 +35,11 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 6 条 resolve-pending 冲突清单 + 类别（outer 执行核 / 迁移新路径 add/add / 热点实现）+ 0ce3f2a8 只覆盖 tasks/（本任务 Proposal 已含）
-- [ ] AC2: **核心/loop 文档 outer 独占**——inner 任务不再直接改 `orchestration/orchestrator-*` 与 `plugin/loop/orchestrator-loop-tick.md`（改为给建议，outer 落盘）
-- [ ] AC3: **迁移单方新建**——迁移窗口内新路径只允许一方新建（move 一次提交，另一方只 rebase）
-- [ ] AC4: **热点占用表**——touches-orthogonality-check 纳入 outer 在飞改动（同文件并发 ⇒ 拒绝派发）
-- [ ] AC5: **既有不回归**——`--for-task` scoped 门绿；新任务不再因写所有权重叠 needs-human
+- [x] AC1: **复现固化**——任务体记录 6 条 resolve-pending 冲突清单 + 类别（outer 执行核 / 迁移新路径 add/add / 热点实现）+ 0ce3f2a8 只覆盖 tasks/（本任务 Proposal 已含）
+- [x] AC2: **核心/loop 文档 outer 独占**——inner 任务不再直接改 `orchestration/orchestrator-*` 与 `plugin/loop/orchestrator-loop-tick.md`（改为给建议，outer 落盘）
+- [x] AC3: **迁移单方新建**——迁移窗口内新路径只允许一方新建（move 一次提交，另一方只 rebase）
+- [x] AC4: **热点占用表**——touches-orthogonality-check 纳入 outer 在飞改动（同文件并发 ⇒ 拒绝派发）
+- [x] AC5: **既有不回归**——`--for-task` scoped 门绿；新任务不再因写所有权重叠 needs-human
 
 ## Definition of Done
 
@@ -81,3 +81,46 @@ resume    核心独占写 / 迁移单方 / 占用表 / 测试分步提交，任�
 reviewer: outer
 at: 2026-08-11
 changed: manager 06:5x——写所有权分离只覆盖 tasks/（35→7），没覆盖 outer 执行核/loop 文档/热点实现；6 条 inner 分支卡 add/add（slot-free 改 outer 执行核 + 迁移新路径、verification-round 改 outer 正在改的 full-suite-runner、reconcile-step 改 outer 执行核）。处方：①核心/loop outer 独占写 ②迁移单方新建 ③outer 在飞改动纳入 touches-orthogonality 占用表。实现归 inner，判定归 outer
+
+## Evidence
+
+**实现（inner 2026-08-11）**——三招 + 测试分步提交，scoped 门绿：
+
+- **AC1 复现固化**：6 条卡 add/add 的 inner 分支清单 + 类别（outer 执行核 / 迁移新路径 add/add / 热点实现 / 共享 loop 文档）：
+  - `task/gap-slot-free-not-an-event...`（ahead=4）——改 `orchestration/orchestrator-tick-core.md`（**outer 执行核**）、`plugin/loop/orchestrator-loop-tick.md`（**迁移中新路径 ⇒ 双方各自新建 ⇒ add/add**）、`plugin/loop/fast-mode-loop-tick.md`（共享 loop 文档）、`docs/proposals/quay-product-outline.md`、`.gitignore`。
+  - `task/gap-verification-round-missing...`（ahead=1）——改 `plugin/scripts/full-suite-runner.ts`（**热点实现**，outer 同期在改 systemd 限额）。
+  - `task/gap-reconcile-step...`（ahead=4）——改 `orchestration/orchestrator-tick-core.md`（**outer 执行核**）。
+  - `task/gap-judgment-computed-not-wired-to-action`（在飞，ahead=3）——改 `orchestration/orchestrator-tick-core.md`（**outer 执行核**）+ `plugin/scripts/capability-catalog.sh` + `scripts/test.sh`。
+  - `task/gap-split-session-liveness-signals-unblocks-lowconc`（在飞，ahead=3）——改 `plugin/loop/fast-mode-loop-tick.md` + `docs/analysis/fast-mode-loop-tick.md`（共享 loop 文档）。
+  - `task/gap-suite-floor-two-longest-files-bound`（在飞，ahead=4）——改 `plugin/loop/fast-mode-loop-tick.md` + `plugin/test-isolation-violations.txt`（共享 loop 文档）。
+  - `0ce3f2a8` 写所有权分离把 `tasks/` 漂移从 35 降到 7（已验证），但**没覆盖**上述 outer 执行核 / loop 文档 / 热点实现类别。
+- **AC2 核心/loop 文档 outer 独占**：`orchestration/orchestrator-tick-core.md` 新增 **C17** 硬约束——`orchestration/orchestrator-*.md` 与 `plugin/loop/orchestrator-loop-tick.md` 归 outer 独占写，inner 任务不得列进 Touches、不得直接改（改给建议由 outer 落盘）；`plugin/loop/fast-mode-loop-tick.md`「建任务时」节新增撰写纪律（inner 建任务不得把这两类路径列进 Touches，需要改就在 Proposal 给改动建议）。
+- **AC3 迁移单方新建**：C17 ② + fast-mode-loop-tick.md 撰写纪律——迁移窗口内新路径只允许一方新建（move 一次提交，另一方只 rebase）；同路径两个提交各自 ADD ⇒ fan-in 必 add/add。
+- **AC4 热点占用表**：`plugin/scripts/touches-orthogonality-check.ts` 新增 `checkOuterInflight` / `checkDispatchEligibility` + CLI `--check-pair <A> <B> [--outer-inflight <path> ...]`（outer 在飞改动算占用，同文件并发 ⇒ 拒绝派发）；fast-mode-loop-tick.md 步骤 4 新增 **3b「outer 在飞占用」**派发接线。
+- **AC5 既有不回归**：`--for-task` scoped 门绿（EXIT=0，45/45 测试全绿，tick-core-static-check PASS / delivery-inventory PASS / red-on-omission PASS）。
+
+**Contract invoke（`--check-pair --outer-inflight`，outer 占用拒绝用例）**：
+```bash
+node --no-warnings --experimental-strip-types plugin/scripts/touches-orthogonality-check.ts --check-pair \
+  experiments/quay-perpetual-stream/fixtures/touches/disjoint-a.md \
+  experiments/quay-perpetual-stream/fixtures/touches/disjoint-b.md \
+  --outer-inflight experiments/quay-perpetual-stream/scripts/vmeta-lag-check.ts
+# OVERLAP ... (outer-inflight occupancy: side A touches .../vmeta-lag-check.ts → serialize (outer owns it in flight)) [overlap: ...]  + exit 1
+```
+
+**scoped 测试（`bash scripts/test.sh --for-task gap-write-ownership-extend-beyond-tasks-to-outer-core-and-hot-files --allow-thin`，EXIT=0）**：
+```text
+ℹ tests 45
+ℹ pass 45
+ℹ fail 0
+ℹ cancelled 0
+tick-core-static-check: PASS — execution cores are statically covered.
+PASS: delivery-inventory drift gate
+red-on-omission-audit: band satisfied (uncov=0, all invariants true)
+```
+
+**提交（4 步分步提交）**：
+- `f39f064c` AC4 占用表源码（checkOuterInflight / checkDispatchEligibility / CLI --check-pair）
+- `482310ea` AC4 测试（10 条 outer-占用用例 + 测试归位 plugin/test，experiments 路径 symlink）
+- `989ce334` AC2/AC3 核心/loop outer 独占写 + 迁移单方新建（orchestrator-tick-core.md C17）
+- `a24122a7` AC2/AC4 派发接线 + 撰写纪律（fast-mode-loop-tick.md 步骤 3b + 建任务纪律）

@@ -195,6 +195,54 @@ export function checkTouchesPair(parsedA, parsedB, expand) {
   return { disjoint, overlaps, reason: disjoint ? "disjoint file-sets" : "overlapping file-sets" };
 }
 
+// ── outer-inflight occupancy (AC4 of gap-write-ownership-extend-beyond-tasks-to-outer-core-and-hot-files) ──
+// A dispatch-eligibility check COMPLEMENTING checkTouchesPair. checkTouchesPair answers "do these two
+// tasks' declared file-sets overlap?"; it does NOT answer "does a task's declared file-set collide with
+// what OUTER is editing RIGHT NOW in the main checkout?". Hot implementation files (e.g.
+// full-suite-runner.ts) are often touched by outer AND by an inner task in the same window — the inner
+// branch then collides with outer's mainline edit at fan-in (add/add or real conflicts). The fix
+// (task gap-write-ownership-extend-beyond-tasks-to-outer-core-and-hot-files ③): count outer's in-flight
+// edits as OCCUPIED — a task whose declared expansion intersects an outer-inflight path must serialize.
+// `outerInflightFiles` is an array of repo-relative paths (or path globs) outer has uncommitted edits
+// to; the CLI `--outer-inflight <path>` flag is repeatable. Exact paths are matched after
+// normalizePath; globs are expanded via `expand`.
+export function checkOuterInflight(parsed, outerInflightFiles, expand) {
+  if (!outerInflightFiles || outerInflightFiles.length === 0) {
+    return { blocked: [], ok: true };
+  }
+  const taskSet = expand(parsed.globs);
+  const blocked = [];
+  for (const f of outerInflightFiles) {
+    const hasWildcard = /[*?]/.test(f);
+    if (hasWildcard || f.endsWith("/")) {
+      const glob = f.endsWith("/") && !hasWildcard ? `${f}**` : f;
+      for (const m of expand([glob])) if (taskSet.has(m)) blocked.push(m);
+    } else {
+      const p = normalizePath(f);
+      if (taskSet.has(p)) blocked.push(p);
+    }
+  }
+  blocked.sort();
+  return { blocked, ok: blocked.length === 0 };
+}
+
+// The full dispatch pre-flight for a PAIR (the existing checkTouchesPair verdict) PLUS outer-inflight
+// occupancy on EACH side. This is what the `--check-pair` CLI mode runs: a pair that is mutually
+// disjoint must STILL serialize when either side collides with an outer in-flight edit (the task's
+// dispatch gate step 4 must refuse a candidate whose declared file-set includes a file outer is
+// editing right now — otherwise the inner branch collides at fan-in).
+export function checkDispatchEligibility(parsedA, parsedB, outerInflightFiles, expand) {
+  const pair = checkTouchesPair(parsedA, parsedB, expand);
+  if (!pair.disjoint) return pair;
+  for (const [parsed, who] of [[parsedA, "A"], [parsedB, "B"]]) {
+    const oc = checkOuterInflight(parsed, outerInflightFiles, expand);
+    if (!oc.ok) {
+      return { disjoint: false, overlaps: oc.blocked, reason: `outer-inflight occupancy: side ${who} touches ${oc.blocked.join(", ")} → serialize (outer owns it in flight)` };
+    }
+  }
+  return pair;
+}
+
 // ── touchExists / checkTouchesResolve ────────────────────────────────────────────────────────────
 // gap-ready-queue-still-lists-eight-tasks-targeting-retired-pipeline-files: a dispatch-eligibility
 // resolve check COMPLEMENTING checkTouchesPair. checkTouchesPair answers "do these two tasks'
@@ -332,6 +380,7 @@ export function findRepoRoot(start) {
 
 function usage() {
   process.stderr.write("Usage: touches-orthogonality-check.mjs [--root <dir>] <charterA.md> <charterB.md>\n");
+  process.stderr.write("       touches-orthogonality-check.mjs --check-pair [--root <dir>] <charterA.md> <charterB.md> [--outer-inflight <path> ...]\n");
   process.stderr.write("       touches-orthogonality-check.mjs --resolve [--root <dir>] <task.md>\n");
   process.stderr.write("       touches-orthogonality-check.mjs --self-touch [--root <dir>] <task.md>\n");
   process.stderr.write("       touches-orthogonality-check.mjs --self-touch-scan [--root <dir>]\n");
@@ -419,10 +468,44 @@ function mainSelfTouchScan(args) {
   return missing.length === 0 ? 0 : 1;
 }
 
+// --check-pair mode: the dispatch gate's pair pre-flight PLUS outer-inflight occupancy. Takes exactly
+// two task/charter files and any number of `--outer-inflight <path>` entries (repeatable). Runs
+// checkDispatchEligibility — the existing checkTouchesPair verdict first, then each side against outer's
+// in-flight edits. Exits 1 (must serialize) when the pair overlaps OR either side collides with an
+// outer-inflight path (gap-write-ownership-extend-beyond-tasks-to-outer-core-and-hot-files AC4).
+function mainCheckPair(args) {
+  let root = null;
+  const files = [];
+  const outerInflight = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--check-pair") continue;
+    if (args[i] === "--root") { root = args[++i]; continue; }
+    if (args[i] === "--outer-inflight") { const v = args[++i]; if (v) outerInflight.push(v); continue; }
+    files.push(args[i]);
+  }
+  if (files.length !== 2) { usage(); return 2; }
+  for (const f of files) {
+    if (!fs.existsSync(f)) { process.stderr.write(`ERROR: charter not found: ${f}\n`); return 2; }
+  }
+  const expandRoot = root ? path.resolve(root) : findRepoRoot(path.resolve(path.dirname(files[0])));
+  const A = parseTouches(fs.readFileSync(files[0], "utf8"));
+  const B = parseTouches(fs.readFileSync(files[1], "utf8"));
+  const expand = (globs) => expandGlobs(globs, expandRoot);
+  const r = checkDispatchEligibility(A, B, outerInflight, expand);
+  if (r.disjoint) {
+    process.stdout.write(`DISJOINT: ${files[0]} ∥ ${files[1]} — safe to batch (${r.reason})\n`);
+    return 0;
+  }
+  const tail = r.overlaps.length ? ` [overlap: ${r.overlaps.join(", ")}]` : "";
+  process.stdout.write(`OVERLAP: ${files[0]} ✗ ${files[1]} — must serialize (${r.reason})${tail}\n`);
+  return 1;
+}
+
 export async function main(argv) {
   const args = argv.slice(2);
   if (args.includes("--self-touch-scan")) return mainSelfTouchScan(args);
   if (args.includes("--self-touch")) return mainSelfTouch(args);
+  if (args.includes("--check-pair")) return mainCheckPair(args);
   if (args.includes("--resolve")) return mainResolve(args);
   let root = null;
   const files = [];
