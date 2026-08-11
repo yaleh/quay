@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-11T21:51:33.118Z",
+  "generatedAt": "2026-08-11T22:09:51.792Z",
   "since": null,
   "tasks": [
     {
@@ -57,6 +57,12 @@
       "outcome": "done"
     },
     {
+      "taskId": "gap-supervisor-preempt-candidates-work-clock",
+      "runId": "fm-gap-supervisor-preempt-candidates-work-clock-1786483830444-wf9eee",
+      "minutes": 33.60276666666667,
+      "outcome": "done"
+    },
+    {
       "taskId": "gap-verification-round-missing-phase-ms-breaks-cost-attribution",
       "runId": "fm-gap-verification-round-missing-phase-ms-breaks-cost-attribution-1786440532052-w2mhce",
       "minutes": 55.18248333333333,
@@ -71,22 +77,15 @@
       "startedAtMs": 1786444937432,
       "workStartedAtMs": 1786444937432,
       "startedAtMsUnreliable": false
-    },
-    {
-      "taskId": "gap-supervisor-preempt-candidates-work-clock",
-      "runId": "fm-gap-supervisor-preempt-candidates-work-clock-1786483830444-wf9eee",
-      "startedAtMs": 1786483830450,
-      "workStartedAtMs": 1786483830450,
-      "startedAtMsUnreliable": false
     }
   ],
-  "meanMinutes": 88.97032666666667,
-  "medianMinutes": 56.853741666666664,
-  "tasksPerHour": 0.8079344912351226,
-  "serialEquivalentPerHour": 0.6743821479356151,
+  "meanMinutes": 83.93691212121212,
+  "medianMinutes": 55.18248333333333,
+  "tasksPerHour": 0.8673362736325042,
+  "serialEquivalentPerHour": 0.7148225790502615,
   "windowStart": "2026-08-11T09:28:51.925Z",
-  "windowEnd": "2026-08-11T21:51:29.993Z",
-  "windowHours": 12.377241111111111,
+  "windowEnd": "2026-08-11T22:09:48.957Z",
+  "windowHours": 12.682508888888888,
   "haltedHours": 0,
   "halted": [],
   "blocked": [],
@@ -296,7 +295,7 @@
   ],
   "unreliable": [],
   "reconcilable": [],
-  "realInFlight": 2,
+  "realInFlight": 1,
   "closedButLive": [],
-  "occupiedSlots": 2
+  "occupiedSlots": 1
 }
