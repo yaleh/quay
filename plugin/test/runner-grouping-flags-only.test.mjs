@@ -8,7 +8,7 @@
 // GROUP NOTE (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests): routed to the
 // `serial` group (A-class nested full-suite spawn) so it runs in the concurrency-1 serial phase,
 // never competing with the concurrency-8 main body's worker pool.
-// SPLIT NOTE (gap-suite-floor-two-longest-files-bound): this is one of FOUR files split from the
+// SPLIT NOTE (gap-suite-floor-two-longest-files-bound): this is one of FIVE files split from the
 // original runner-grouping.test.mjs (204s serial floor) by test concern — this file holds the
 // flags-only selection-parity tests (gap-test-sh-flags-only-form-silently-runs-a-different-suite)
 // + the product fixture RUN sanity. The nested `@load-sensitive nested-spawn` annotation is

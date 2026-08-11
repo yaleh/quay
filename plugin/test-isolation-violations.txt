@@ -139,6 +139,7 @@ packages/quay/test/provider-abi-conformance.test.mjs:mkdtemp-no-cleanup
 plugin/test/plugin-packaging.test.mjs:shared-build-artifact-write
 plugin/test/runner-grouping-fixture-runs.test.mjs:spawns-test-sh
 plugin/test/runner-grouping-flags-only.test.mjs:spawns-test-sh
+plugin/test/runner-grouping-governance.test.mjs:spawns-test-sh
 plugin/test/runner-grouping-list-groups.test.mjs:spawns-test-sh
 plugin/test/runner-grouping-serial-anti-stomp.test.mjs:spawns-test-sh
 plugin/test/runtime-usage-inventory.test.mjs:mkdtemp-no-cleanup

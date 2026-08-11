@@ -8,14 +8,16 @@
 // GROUP NOTE (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests): routed to the
 // `serial` group (A-class nested full-suite spawn) so it runs in the concurrency-1 serial phase,
 // never competing with the concurrency-8 main body's worker pool.
-// SPLIT NOTE (gap-suite-floor-two-longest-files-bound): this is one of FOUR files split from the
+// SPLIT NOTE (gap-suite-floor-two-longest-files-bound): this is one of FIVE files split from the
 // original runner-grouping.test.mjs (204s serial floor) by test concern — this file holds the
-// fixture-EXECUTION tests (the governance/product fixtures run through the REAL test.sh, the
-// dominant per-call cost). The nested `@load-sensitive nested-spawn` annotation is preserved so
-// the family membership + serial routing stay byte-identical.
+// governance fixture REAL-RUN test (AC5, one --group governance fixture execution — the dominant
+// per-call cost; the AC8 product self-skip half moved to runner-grouping-governance.test.mjs so
+// no runner-grouping file exceeds the 60s serial band). The nested `@load-sensitive nested-spawn`
+// annotation is preserved so the family membership + serial routing stay byte-identical.
 // gap-test-suite-has-no-layer-grouping — the governance fixture RUN test: --group governance runs
-// a governance fixture's real tests, --group product self-skips it (the in-file skip block). These
-// shell out to the REAL scripts/test.sh (the single source of truth), not a copy of its logic.
+// a governance fixture's real tests (AC5). The product-mode self-skip is pinned in the sibling
+// runner-grouping-governance.test.mjs (AC8). These shell out to the REAL scripts/test.sh (the
+// single source of truth), not a copy of its logic.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -40,12 +42,8 @@ function runTestSh(...args) {
   return r.stdout;
 }
 
-test("AC5/AC8: --group governance runs a governance fixture's real tests; --group product self-skips it", () => {
+test("AC5: --group governance runs a governance fixture's real tests", () => {
   // governance mode: real test runs
   const runOut = runTestSh("--group", "governance", fixture);
   assert.match(runOut, /REAL GOV TEST RAN/);
-  // product mode: in-file skip fires (visible as skipped, real test absent)
-  const skipOut = runTestSh("--group", "product", fixture);
-  assert.match(skipOut, /governance group skipped/);
-  assert.doesNotMatch(skipOut, /REAL GOV TEST RAN/);
 });

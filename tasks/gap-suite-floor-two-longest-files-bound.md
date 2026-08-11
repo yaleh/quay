@@ -52,10 +52,11 @@ extra: {}
 
 ## Touches
 
-- plugin/test/runner-grouping-list-groups.test.mjs（runner-grouping 拆 4 之一）
-- plugin/test/runner-grouping-fixture-runs.test.mjs（runner-grouping 拆 4 之一）
-- plugin/test/runner-grouping-flags-only.test.mjs（runner-grouping 拆 4 之一）
-- plugin/test/runner-grouping-serial-anti-stomp.test.mjs（runner-grouping 拆 4 之一）
+- plugin/test/runner-grouping-list-groups.test.mjs（runner-grouping 拆 5 之一）
+- plugin/test/runner-grouping-fixture-runs.test.mjs（runner-grouping 拆 5 之一）
+- plugin/test/runner-grouping-flags-only.test.mjs（runner-grouping 拆 5 之一）
+- plugin/test/runner-grouping-governance.test.mjs（runner-grouping 拆 5 之一）
+- plugin/test/runner-grouping-serial-anti-stomp.test.mjs（runner-grouping 拆 5 之一）
 - plugin/test/cap-from-gate-bands.test.mjs（cap-from-gate 拆 5 之一）
 - plugin/test/cap-from-gate-hysteresis.test.mjs（cap-from-gate 拆 5 之一）
 - plugin/test/cap-from-gate-stale.test.mjs（cap-from-gate 拆 5 之一）

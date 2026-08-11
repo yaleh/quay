@@ -11,7 +11,7 @@
 // in the shared plugin/test dir (that is what makes the undeclared→engine assertion meaningful);
 // the collision with test-file-snapshot is fixed on the SNAPSHOT side (test-file-snapshot.sh
 // excludes transient zz-* runtime fixtures).
-// SPLIT NOTE (gap-suite-floor-two-longest-files-bound): this is one of FOUR files split from the
+// SPLIT NOTE (gap-suite-floor-two-longest-files-bound): this is one of FIVE files split from the
 // original runner-grouping.test.mjs (204s serial floor) by test concern — this file holds the
 // group-CLASSIFICATION EDGE-CASE tests: the undeclared→engine fixture (AC7), the serial group
 // mechanism, and the AC0c anti-stomp guard (group_of must recognize all five groups). The two

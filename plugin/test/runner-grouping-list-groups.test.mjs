@@ -11,16 +11,16 @@
 // in the shared plugin/test dir (that is what makes the undeclared→engine assertion meaningful);
 // the collision with test-file-snapshot is fixed on the SNAPSHOT side (test-file-snapshot.sh
 // excludes transient zz-* runtime fixtures).
-// SPLIT NOTE (gap-suite-floor-two-longest-files-bound): this is one of FOUR files split from the
+// SPLIT NOTE (gap-suite-floor-two-longest-files-bound): this is one of FIVE files split from the
 // original runner-grouping.test.mjs (204s serial floor) by test concern — this file holds the
-// --list-groups/--list-files RELATIONSHIP tests (the deduped partition invariants). The nested
-// `@load-sensitive nested-spawn` annotation is preserved so the family membership + serial routing
-// stay byte-identical.
+// --list-groups/--list-files RELATIONSHIP tests (the deduped partition invariants; the governance
+// --list-files membership test moved to runner-grouping-governance.test.mjs so no runner-grouping
+// file exceeds the 60s serial band). The nested `@load-sensitive nested-spawn` annotation is
+// preserved so the family membership + serial routing stay byte-identical.
 // gap-test-suite-has-no-layer-grouping — tests for the layer-grouping mechanics in
 // scripts/test.sh: extended glob (AC2), realpath dedup (AC3), default groups product,engine
-// with governance self-skipping (AC4/AC6), --group (AC5), undeclared→engine (AC7), and
-// --list-groups (AC10). These shell out to the REAL scripts/test.sh (the single source of
-// truth), not a copy of its logic.
+// with governance self-skipping (AC4/AC6), and --list-groups (AC10). These shell out to the REAL
+// scripts/test.sh (the single source of truth), not a copy of its logic.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -98,19 +98,4 @@ test("AC6: --group product,engine ∪ --group lowconc selects the same files as 
   // body ends with a trailing newline after its last file; splice body's trailing newline and
   // append low directly so the concatenation is byte-identical to no-args.
   assert.equal(body.replace(/\n$/, "") + "\n" + low, noArgs);
-});
-
-test("--group governance --list-files lists exactly the governance files", () => {
-  const out = runTestSh("--group", "governance", "--list-files").trim().split("\n").filter(Boolean);
-  const g = parseGroups(runTestSh("--list-groups"));
-  // Relationship: --group governance's file list has exactly governance's count.
-  assert.equal(out.length, g.governance);
-  // Every governance file is a test file under one of the governance roots. The path is a live
-  // membership, not a contract: inventory (2026-08-03) added the first governance test outside
-  // experiments/ (plugin/test/runtime-usage-inventory.test.mjs), and message-bus-identity.test.mjs
-  // (2026-08-06) declared governance under packages/quay/test/. Allowed roots:
-  //   experiments/quay-perpetual-stream/test/  (historic home of governance)
-  //   plugin/test/                             (governance tests may live next to plugin tests)
-  //   packages/quay/test/                      (a governance-declared product-tree test)
-  for (const f of out) assert.match(f, /(experiments\/quay-perpetual-stream\/test\/|plugin\/test\/|packages\/quay\/test\/)/);
 });
