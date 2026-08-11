@@ -662,15 +662,22 @@ providers:
     env:
       QUAY_NATIVE_TASKS_DIR: "${WORKSPACE_ROOT}/tasks"
 # Target-project loop values (gap-install-rewrites-files-so-upgrade-cannot-tell-who-changed-them,
-# SPEC AC2): the single config source for repo_root / test_command / tmux_session / worktree_root.
-# Scripts and tick docs read these at runtime instead of having them baked in at install (AC3).
+# SPEC AC2): the single config source for repo_root / test_command / tmux_session / worktree_root
+# AND the branch-model keys fork_baseline / merge_target (gap-quay-init-never-writes-branch-model-
+# config-fork-baseline-merge-target). Scripts and tick docs read these at runtime instead of having
+# them baked in at install (AC3). The branch-model defaults ship WITH quay-init (SPEC-branching-
+# model's current ruling: develop/integration is the ONLY working branch model — never hardcoded
+# master); the config-preserving upgrade path (ensure_loop_config) never overwrites an existing
+# consumer's fork_baseline/merge_target.
 loop:
   repo_root: ${REPO_ROOT}
   test_command: ${TEST_COMMAND}
   tmux_session: ${TMUX_SESSION}
   worktree_root: ${WORKTREE_ROOT}
+  fork_baseline: develop
+  merge_target: integration
 EOF
-    echo "  wrote: .quay/config.yml (provider mcp_entry → project-local absolute paths — AC7b; loop: repo_root/test_command/tmux_session/worktree_root — SPEC AC2)"
+    echo "  wrote: .quay/config.yml (provider mcp_entry → project-local absolute paths — AC7b; loop: repo_root/test_command/tmux_session/worktree_root/fork_baseline/merge_target — SPEC AC2)"
   fi
 }
 

@@ -100,3 +100,20 @@ rev-list 交集把已合并老分支误标。
 且 tip 是 develop 祖先、`rev-list develop..分支` = 0——**从 develop 分叉**。⇒ fork 路径在 config 激活
 后已读 fork_baseline。**本任务不复现，不实现修复**（supervisor 是 config 激活前最后的 master 分叉，
 记录在案）。若标记为已修复，是在修幻影。
+
+## 交叉标注（2026-08-11，gap-quay-init-never-writes-branch-model-config-fork-baseline-merge-target）
+
+**铺设链路的相邻两段（前后相邻，缺一段就都白搭）**：
+
+- **本任务**（gap-dispatch-fork-does-not-read-config-fork-baseline，done，AC4 负控制）：**「铺设后
+  dispatch 是否读」**——config 有 `fork_baseline`/`merge_target` 时 fork 动作读不读。结论：读，不复现
+  （reflog `Created from develop`）；无配置下游仍从 master 分叉（共享默认不变）。
+- **那条任务**（gap-quay-init-never-writes-branch-model-config-fork-baseline-merge-target）：**「新主机
+  第一次铺设时这两键会不会被写进去」**——`write_provider_config` heredoc 此前从不写
+  `fork_baseline`/`merge_target`（grep 0 命中），新主机跑标准 `quay-init --loop` 得到
+  `loop:{repo_root,test_command,tmux_session,worktree_root}` ONLY，dispatch 静默回落到旧 master-only
+  模型。修复：heredoc 写入 `fork_baseline: develop` / `merge_target: integration`（随 quay-init 升级
+  默认值，非硬编码 master）；升级路径（ensure_loop_config）不覆盖已存在正确值。
+
+两任务在铺设链路上相邻：本任务负责「铺好后 dispatch 读不读」，那条任务负责「铺的时候写不写」。
+这条任务补齐后者后，`quay-init --loop` → 生成的 config 含两键 → 本任务的 fork 读取链路才真正闭环。
