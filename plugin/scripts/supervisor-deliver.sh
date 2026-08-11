@@ -151,6 +151,23 @@ if ! DRIVE_EXPECT_WINDOW_NAME="${DRIVE_EXPECT_WINDOW_NAME:-inner}" bash "$SELF_D
   exit 1
 fi
 
+# ── can-receive pre-flight (gap-supervisor-deliver-no-wait-for-idle-retry) ──────────
+# Same can-receive pre-flight as send-keys-reliable.sh's step 0: the fresh path does its own direct
+# send-keys, so it runs the check HERE rather than delegating. The judgment is the SAME
+# pane-state-classify `--can-receive` seam (waiting-input is the only receivable state; a
+# non-receivable target is FAIL CLOSED — the bounded wait/retry upgrade is step 2,
+# --can-receive-wait). A freshly re-spawned session that has not rendered its prompt yet is never
+# blindly driven.
+if [ ! -f "$SELF_DIR/pane-state-classify.ts" ]; then
+  echo "supervisor-deliver: 缺少分类器 $SELF_DIR/pane-state-classify.ts——无法判定目标可接收，fail loud" >&2
+  exit 1
+fi
+if ! node --experimental-strip-types "$SELF_DIR/pane-state-classify.ts" --can-receive "$TARGET"; then
+  echo "supervisor-deliver: 目标 $TARGET 当前不可接收（非 waiting-input）——fail closed 不发送，需人工/稍后重试" >&2
+  exit 1
+fi
+echo "supervisor-deliver: 目标 $TARGET 可接收（waiting-input）——继续投递" >&2
+
 # Direct reliable send: fresh session has nothing to clear → C-u (harmless), literal text, Enter.
 tmux send-keys -t "$TARGET" C-u 2>/dev/null || true
 sleep 0.5

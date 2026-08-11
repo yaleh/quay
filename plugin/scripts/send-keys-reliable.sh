@@ -100,6 +100,25 @@ if ! DRIVE_EXPECT_WINDOW_NAME="${DRIVE_EXPECT_WINDOW_NAME:-inner}" bash "$SCRIPT
   exit 1
 fi
 
+# ── can-receive pre-flight (gap-supervisor-deliver-no-wait-for-idle-retry) ──────────
+# Before ANY keystroke the target must be RECEIVABLE — otherwise text lands in the input box but is
+# never committed (the measured 2026-08-06 defect: sending to a busy/thinking target made the one-shot
+# send→verify fail every time). The judgment is pane-state-classify's `--can-receive` probe — the SAME
+# shape classifier session-liveness uses for its busy/idle verdict, never a duplicated idle heuristic
+# (the fix direction's 与 session-liveness 的 idle 判定同源). waiting-input is the ONLY receivable
+# state; a non-receivable target is FAIL CLOSED here (the wait/retry upgrade is step 2 —
+# --can-receive-wait, single-sourced in the probe; supervisor-deliver.sh's fresh path calls the same
+# seam).
+if [ ! -f "$SCRIPT_DIR/pane-state-classify.ts" ]; then
+  echo "send-keys-reliable: 缺少分类器 $SCRIPT_DIR/pane-state-classify.ts——无法判定目标可接收，fail loud" >&2
+  exit 1
+fi
+if ! node --experimental-strip-types "$SCRIPT_DIR/pane-state-classify.ts" --can-receive "$TARGET"; then
+  echo "send-keys-reliable: 目标 $TARGET 当前不可接收（非 waiting-input）——fail closed 不发送，需人工/稍后重试" >&2
+  exit 1
+fi
+echo "send-keys-reliable: 目标 $TARGET 可接收（waiting-input）——继续投递" >&2
+
 # Baseline for the delivery poll (fault 4): only content appended AFTER this byte offset may
 # count as the NEW user message we just sent. The transcript only grows when the receiver
 # commits, so clearing/sending never moves it.
