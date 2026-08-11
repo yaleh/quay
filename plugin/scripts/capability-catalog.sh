@@ -1210,12 +1210,7 @@ declare -A PUBLIC_ENTRYPOINTS=(
   [observer-registry.sh]="consumer-facing: the single observer-registry heartbeat (--audit) invoked unconditionally every tick in the loop docs (fast-mode 4c / orchestrator 3d)"
   [process-budget.sh]="consumer-facing: the total test-process budget authority consumed by test.sh / cap-from-gate / resource-gate"
   [provision-verify-worktree.sh]="consumer-facing: provision a fresh verify worktree (node_modules + .quay/config.yml symlinks) so it can run the full suite — used by A15 ④ both paths"
-  # quay-launch.sh is NOT declared here: it is INTERNAL (surface=internal) — the per-role launch
-  # command is invoked by session-bootstrap.sh / quay-topology.sh / this skill set's own inner
-  # implementation, never by a consumer. Demoted by
-  # gap-quay-launch-sh-is-a-user-facing-surface-should-be-skill-internal (AC3): a skill is the
-  # user-facing interface; the launcher is the skill's hidden pipe. The QUESTION entry above stays
-  # (the script still answers "what is the exact per-role launch command").
+  [quay-launch.sh]="consumer-facing: the per-role launch command materializing the checked-in launch settings — documented as the launch surface in the cold-start skill + orchestrator-loop-tick (gap-quay-init-coldstart-usability-launch-not-used-huge-tick-doc-selftest-dominant AC2/Contract; re-instated 2026-08-11, superseding the 2026-08-06 demotion-to-internal of gap-quay-launch-sh-is-a-user-facing-surface-should-be-skill-internal)"
   [quay-topology.sh]="consumer-facing: the two-window topology factory in the tick docs"
   [release-task.sh]="consumer-facing: the claim-release command documented in the tick docs"
   [real-target-verify.sh]="consumer-facing: the real-downstream install/upgrade verification command in the verification-round docs"
