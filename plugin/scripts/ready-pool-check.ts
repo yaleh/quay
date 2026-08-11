@@ -359,7 +359,11 @@ export const RED_WINDOW_MIN_DEFAULT = 3;
 // are wrongly ineligible for author→ready promotion (the 38-todo shape-vs-gate mismatch).
 const SHAPE_SECTIONS = {
   contract: {
-    proposal: ["Proposal"],
+    // `## 人的裁定` is the directive-variant proposal-slot (type: directive tasks
+    // carry the human ruling as proposal, implementation in ## Contract —
+    // DIR-123-aarch64, gap-cli-quay-init-collides). Same alias principle as
+    // finding's `## Finding` mapping into the proposal-slot.
+    proposal: ["Proposal", "人的裁定"],
     plan: ["Contract"],
     ac: ["AC", "Acceptance Criteria"],
     dod: ["DoD", "Definition of Done"],
@@ -375,13 +379,28 @@ const SHAPE_SECTIONS = {
     ac: ["AC", "Acceptance Criteria"],
     dod: ["DoD", "Definition of Done"],
   },
+  // proposal shape (2026-08-11, mirrors store.ts SHAPE_REGISTRY): a task whose own
+  // complete contract is Proposal / AC / DoD with NO plan dimension — symmetric
+  // with `finding` but the proposal-slot is the literal `## Proposal`. Recording-type
+  // directives (DIR-028: "只记录方向,不要求立刻做") and execution tasks carrying their
+  // approach inside `## Proposal` (no separate `## Plan`) are complete on this
+  // dimension. Adding a fabricated `## Contract` would be a shape change, not a fix.
+  proposal: {
+    proposal: ["Proposal"],
+    ac: ["AC", "Acceptance Criteria"],
+    dod: ["DoD", "Definition of Done"],
+  },
 };
 
-/** Detect a task body's shape by exact heading presence (contract → finding → plan → unknown). */
+/** Detect a task body's shape by exact heading presence (contract → finding → plan → proposal → unknown). */
 export function detectShape(body) {
   if (/^##\s+Contract\s*$/im.test(body)) return "contract";
   if (/^##\s+Finding\s*$/im.test(body)) return "finding";
   if (/^##\s+Plan\s*$/im.test(body)) return "plan";
+  // proposal shape: a literal `## Proposal` section with no contract/finding/plan
+  // heading. Checked AFTER contract/finding/plan so a task carrying `## Proposal`
+  // alongside its shape's own proposal-slot heading still resolves to its true shape.
+  if (/^##\s+Proposal\s*$/im.test(body)) return "proposal";
   return "unknown";
 }
 

@@ -78,20 +78,23 @@ test("AC1: SHAPE_REGISTRY is importable and registers contract/finding/plan with
   });
 });
 
-test("detectShape classifies contract / finding / plan / unknown", () => {
+test("detectShape classifies contract / finding / plan / proposal / unknown", () => {
   assert.equal(detectShape(`## Contract\nbody`), "contract");
   assert.equal(detectShape(`## Plan\nbody`), "plan");
   assert.equal(detectShape(`## Finding\nbody`), "finding");
   // A DIR task carries BOTH ## Finding and ## Plan; Finding must win (its
   // proposal-slot is Finding, so classifying as plan would demand Proposal).
   assert.equal(detectShape(`## Finding\n...\n## Plan\n...`), "finding");
-  // Subheadings like "## Finding (measured 2026-08-02)" must NOT trigger
-  // detection (exact-heading match) — such a body is an unknown shape.
+  // A literal `## Proposal` section with no contract/finding/plan heading is the
+  // proposal shape (DIR-028 recording directives + execution tasks carrying their
+  // approach inside ## Proposal). Subheadings like "## Finding (measured
+  // 2026-08-02)" still do NOT trigger finding detection (exact-heading match) —
+  // the body resolves to proposal, not finding, and never to plan.
   assert.equal(
     detectShape(
       `## Proposal\n${substantive("Proposal")}\n## Finding (measured 2026-08-02)\n...\n## Acceptance Criteria\n- [x] a\n## Definition of Done\n${substantive("DoD")}\n`
     ),
-    "unknown"
+    "proposal"
   );
   assert.equal(detectShape("no registered headings at all"), "unknown");
 });
@@ -288,16 +291,23 @@ test("AC4: Contract shape missing a required key fails closed, naming the key", 
 test("AC5: unknown shape fails closed — never falls into a lenient branch", () => {
   const { store, dir } = freshStore();
   try {
-    // Body with Proposal/AC/DoD but NO Contract/Finding/Plan heading.
-    const body =
+    // Body with Proposal/AC/DoD but NO Contract/Finding/Plan heading is now the
+    // proposal shape (2026-08-11): complete on its own dimension (Proposal/AC/DoD).
+    const proposalBody =
       `## Proposal\n${substantive("Proposal")}\n` +
-      `## Acceptance Criteria\n- [x] a real, checkable acceptance criterion\n` +
+      `## Acceptance Criteria\n- [x] a real, checkable acceptance criterion with enough words to clear the forty-character minimum content threshold comfortably\n` +
       `## Definition of Done\n${substantive("Definition of Done")}\n`;
-    store.write("AC5-UNK", { title: "unknown-shape", status: "todo", body });
-    const r = store.check("AC5-UNK");
-    assert.equal(r.shape, "unknown");
-    assert.equal(r.ok, false);
-    assert.match(r.reason, /unrecognized task shape/);
+    store.write("AC5-PROP", { title: "proposal-shape", status: "todo", body: proposalBody });
+    const r = store.check("AC5-PROP");
+    assert.equal(r.shape, "proposal");
+    assert.equal(r.ok, true);
+    assert.match(r.reason, /eligible to move to ready/);
+    // A body with NO registered heading at all still fails closed as unknown.
+    store.write("AC5-UNK", { title: "unknown-shape", status: "todo", body: "no registered headings at all" });
+    const u = store.check("AC5-UNK");
+    assert.equal(u.shape, "unknown");
+    assert.equal(u.ok, false);
+    assert.match(u.reason, /unrecognized task shape/);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

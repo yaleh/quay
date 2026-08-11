@@ -39,7 +39,12 @@ export const SHAPE_REGISTRY = {
   contract: {
     planKeys: ["measure", "band", "invariant", "invoke", "control", "resume"],
     sections: {
-      proposal: ["Proposal"],
+      // `## 人的裁定` is the directive-variant proposal-slot: a directive task
+      // (type: directive) carries the human ruling as its proposal, with the
+      // implementation contract in `## Contract` (DIR-123-aarch64,
+      // gap-cli-quay-init-collides). Same alias principle as finding's
+      // `## Finding` mapping into the proposal-slot.
+      proposal: ["Proposal", "人的裁定"],
       plan: ["Contract"],
       ac: ["AC", "Acceptance Criteria"],
       dod: ["DoD", "Definition of Done"],
@@ -58,6 +63,23 @@ export const SHAPE_REGISTRY = {
     sections: {
       proposal: ["Proposal"],
       plan: ["Plan"],
+      ac: ["AC", "Acceptance Criteria"],
+      dod: ["DoD", "Definition of Done"],
+    },
+  },
+  // proposal shape (2026-08-11, DIR-127 + gap-mcp-server-test-deadlocks): a task
+  // whose own complete contract is Proposal / AC / DoD with NO plan dimension —
+  // symmetric with `finding` (which uses `## Finding` as its proposal-slot), but
+  // the proposal-slot is the literal `## Proposal`. Recording-type directives
+  // (DIR-028: "只记录方向,不要求立刻做") and execution tasks that carry their
+  // approach inside `## Proposal` (no separate `## Plan`) are complete on this
+  // dimension — adding a fabricated `## Contract` to them would be a shape change
+  // (gap-todo-shape-mismatch-author-gate's "分派 ≠ 豁免": a shape is complete on
+  // its OWN dimension, not lazily skipping the plan check).
+  proposal: {
+    planKeys: [],
+    sections: {
+      proposal: ["Proposal"],
       ac: ["AC", "Acceptance Criteria"],
       dod: ["DoD", "Definition of Done"],
     },
@@ -89,6 +111,14 @@ export function detectShape(body: string): TaskShape {
   if (hasExactHeading(body, "Contract")) return "contract";
   if (hasExactHeading(body, "Finding")) return "finding";
   if (hasExactHeading(body, "Plan")) return "plan";
+  // proposal shape: a literal `## Proposal` section with no contract/finding/plan
+  // heading. Checked AFTER contract/finding/plan so a task that carries `## Proposal`
+  // alongside its shape's own proposal-slot heading still resolves to its true shape
+  // (e.g. a contractBody test carries both `## Proposal` and `## Contract`).
+  // A subheading like `## Finding (measured ...)` does NOT match the proposal
+  // detection — exact-heading match only, so the existing unknown-shape negative
+  // control (Proposal + `## Finding (measured ...)` subheading) still fails closed.
+  if (hasExactHeading(body, "Proposal")) return "proposal";
   return "unknown";
 }
 

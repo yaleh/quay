@@ -14,7 +14,9 @@ extra: {}
 ---
 **type:** directive
 
-## 人的裁定（2026-08-11 13:3xZ + 14:1xZ 精化，逐字意图）
+## 人的裁定
+
+**（2026-08-11 13:3xZ + 14:1xZ 精化，逐字意图）**
 
 **13:3xZ**：要求尽早输出一个覆盖验证环境的 build（验证环境含 B=orangevps x86_64 与 C=ad-arm1 aarch64——需要 release/package 构建流程支持 aarch64 目标，补上此前报的「C 无可用产物」缺口），并且此后每次 merge 到 develop 后都自动执行这一 build 过程（解决「release 新鲜度退化，develop 领先 release 已 2216 提交」）。
 
