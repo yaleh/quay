@@ -1,7 +1,7 @@
 ---
 id: gap-serial-install-family-shared-prebuilt-fixture
 title: "serial 相真安装族 12 文件每文件一次完整真安装（r266 sum=865s/1241s）⇒ 共享预建安装夹具（一次安装 + cp -al 硬链接/tar 解包复用），【先测再改】：先测单文件安装 setup 占比（加计时不改行为），按 70% 可省估 serial sum 1241→636s、墙钟 620→318s（-300s，最大杠杆）"
-status: todo
+status: ready
 labels:
   - gap
   - defect
