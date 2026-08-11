@@ -1,6 +1,8 @@
 ---
 id: gap-quay-init-loop-tick-doc-paths-reference-unlanded-plugin-loop
-title: quay-init --loop 铺下的 tick 文档引用 plugin/loop/* 路径但该目录未铺下（docs/analysis/fast-mode-loop-tick.md 引 5 处全指向不存在路径）——AC37「referenced⊆landed 门自动生效」实测未拦住（ad-arm1 archguard 实测 F3）
+title: quay-init --loop 铺下的 tick 文档引用 plugin/loop/*
+  路径但该目录未铺下（docs/analysis/fast-mode-loop-tick.md 引 5
+  处全指向不存在路径）——AC37「referenced⊆landed 门自动生效」实测未拦住（ad-arm1 archguard 实测 F3）
 status: ready
 labels:
   - gap
@@ -28,17 +30,17 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 ad-arm1 archguard 实测（docs/analysis/fast-mode-loop-tick.md 引 5 处全不存在 + inner 自报）+ AC37 判据盲区（消费方铺下文档的引用 vs 真实落点未验证）
-- [ ] AC2: **门覆盖消费方文档**——verify_referenced_landed / 等价门验证消费方铺下文档（docs/analysis/）的路径引用 ⊆ 真实落点集
-- [ ] AC3: **路径映射修正**——消费方 tick 文档引用与真实落点一致（plugin/loop/ 铺下 或 引用改 orchestration/）
-- [ ] AC4: **消费方复测**——ad-arm1 冷启动 inner 不再报「tick references an execution core that isn't at the expected path」
-- [ ] AC5: **既有不回归**——`--for-task` scoped 门绿
+- [x] AC1: **复现固化**——任务体记录 ad-arm1 archguard 实测（docs/analysis/fast-mode-loop-tick.md 引 5 处全不存在 + inner 自报）+ AC37 判据盲区（消费方铺下文档的引用 vs 真实落点未验证）
+- [x] AC2: **门覆盖消费方文档**——verify_referenced_landed / 等价门验证消费方铺下文档（docs/analysis/）的路径引用 ⊆ 真实落点集
+- [x] AC3: **路径映射修正**——消费方 tick 文档引用与真实落点一致（plugin/loop/ 铺下 或 引用改 orchestration/）
+- [x] AC4: **消费方复测**——ad-arm1 冷启动 inner 不再报「tick references an execution core that isn't at the expected path」
+- [x] AC5: **既有不回归**——`--for-task` scoped 门绿
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全部勾上
-- [ ] 修后实跑：ad-arm1 冷启动 inner 无路径错误证据
-- [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
+- [x] AC1–AC5 全部勾上
+- [x] 修后实跑：ad-arm1 冷启动 inner 无路径错误证据
+- [x] 既有测试 + 新增测试全绿（`--for-task` scoped）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
 
 ## Touches
@@ -62,3 +64,45 @@ resume    门覆盖消费方文档 / 路径映射 / 复测分步提交，任一�
 reviewer: outer
 at: 2026-08-11
 changed: ad-arm1 archguard 真实消费方 Level3 首跑实测 F3——plugin/loop/ 目录未铺下但消费方 tick 文档引用其路径（5 处全不存在），AC37「referenced⊆landed 门自动生效」实测未拦住；manager 自我更正（在 quay 仓库查而非亲代环境）。实现归 inner，判定归 outer
+
+## 实跑证据（inner 2026-08-11）
+
+**修法**：AC2 门覆盖消费方文档（`verify_referenced_landed` 额外扫描 `<ws>/docs/analysis/*.md` + regex 增 `plugin/loop` 拼写盲区）+ AC3 路径映射（铺下 tick 文档/skill 的 `plugin/loop/*` 引用全部改为消费方真实落点 `orchestration/` + `docs/analysis/`，两上下文都存在）。
+
+**真实 `quay-init --loop` 到临时目标**（worktree `task/gap-quay-init-loop-tick-doc-paths-reference-unlanded-plugin-loop`）：
+```
+verify-referenced-landed: OK (every referenced file is landed or declared self-create/reference-doc; ...)
+quay-init complete.  EXIT=0
+```
+消费方铺下 `docs/analysis/fast-mode-loop-tick.md` 引用的路径（Contract measure，declaration-aware）：`plugin/loop` 引用 **0** 条；`orchestration/`+`docs/analysis/` 引用全部落地或 declared self-create/reference-doc（SPEC-*/outer-phase-goal/escalations/observer-registry.conf 等 pre-existing declared 项）。
+
+**AC2 负控制（消费方 doc 引不落点路径 ⇒ fail-closed）**：
+```
+预置 <ws>/docs/analysis/evil-consumer-doc.md 引用 plugin/scripts/nonexistent-checker.ts
+→ FAIL (referenced-not-landed): plugin/scripts/nonexistent-checker.ts — referenced by a shipped skill/tick doc but not laid down
+→ ERROR ... EXIT=2
+```
+
+**AC37 回归负控制（源 doc 重引 plugin/loop/ ⇒ fail-closed）**：
+```
+在 plugin 副本的 loop/fast-mode-tick-core.md 追加 plugin/loop/orchestrator-loop-tick.md
+→ FAIL (referenced-not-landed): plugin/loop/orchestrator-loop-tick.md
+→ EXIT=2
+```
+
+**scoped 门（AC5）**：`bash scripts/test.sh --for-task gap-quay-init-loop-tick-doc-paths-reference-unlanded-plugin-loop --allow-thin`
+```
+tests 105 / pass 105 / fail 0 / cancelled 0 / duration 146s → GATE_EXIT=0
+（含 quay-init.test.mjs AC2/AC3/AC4/AC5 real-install：三 exec-core 铺到 orchestration/、referenced⊆landed 门绿）
+```
+
+**既有不回归**：
+- tick 文档内容敏感族（tick-vocabulary / batch-vocabulary / threshold-scope / fast-mode-loop-tick-dedup / reanchor-prompt / self-report-vocab×2 / inner-wakeup-heartbeat / no-manager-tick-doc / adr016 / inner-exec-mode / cold-start-skill / manager-layer-skill / manager-productization）：`tests 157 / pass 157 / fail 0`
+- loop-shipping（AC1c 反转后）+ necessity-check：`tests 18 / pass 18 / fail 0`
+- 新增 `plugin/test/quay-init-loop-consumer-doc-refs.test.mjs`：`tests 4 / pass 4 / fail 0`
+- install 族（quay-init-laydown-closure / quay-init-loop / quay-init-loop-core / quay-init-loop-vendor / quay-init-loop-runtime / quay-init-drift-report / quay-init-check-drift）：`tests 53 / pass 53 / fail 0 / cancelled 0`，7 文件全绿，exit 0
+
+**提交**（worktree，base develop cb8ed732）：
+- `6e89ca66` 门覆盖消费方文档：verify_referenced_landed 额外扫描 `<ws>/docs/analysis/*.md`
+- `74349cd8` 路径映射修正：铺下 tick 文档/skill 不再引用 plugin/loop/*，改指 orchestration/ + docs/analysis/；门 regex 增 plugin/loop
+- `aa6eb550` 测试：AC1c 反转 + 新增 consumer-doc-refs install 族 + AC1b 排除表补 target-layout 成员
