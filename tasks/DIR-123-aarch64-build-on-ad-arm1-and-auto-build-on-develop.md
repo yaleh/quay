@@ -35,7 +35,7 @@ extra: {}
 - [x] AC2: **develop merge 后自动 deliver**——每次 merge 到 develop 后，`integration-batch-merge.sh` 的 `do_deliver` 钩子自动跑 `develop-deliver-tgz.sh`：worktree@develop-tip 建 .tgz → scp B/C → 安装 + 验证 → 写 state；best-effort 不阻塞 merge
 - [x] AC3: **x86_64 走 CI**——B=orangevps 的 x86_64 产物由现有 release.yml CI 路径覆盖（linux-x64 已存在）
 - [x] AC4: **delivery-manifest 更新**——`delivery-manifest.json` version 0.3.13→0.4.0（对齐 packages/quay/package.json；**不加** linux-arm64 到 sea-binaries——无 SEA 资产，声明了会令 --ci fail-closed；aarch64 由 npm-tarball 覆盖，该条目本就无平台限制）
-- [x] AC5: **AC16③ 复测可用**——C 上安装产物 + `quay serve` http_code=200 + `quay --version` 0.4.0（aarch64）（实测通过，见 Evidence）
+- [x] AC5: **AC16③ 复测可用（Level3 真实生命周期，非仅 serve）**——C 上安装产物后跑通**真实 todo→done 全生命周期**：`quay init` 铺工作区 + `task create`（todo）+ `promote`（todo→ready, author gate `dod pass`）+ `complete`（ready→done, acceptance gate `acceptance pass`），gate-log 四事件全 pass，最终 `TEST-002 status=done`（真 aarch64, quay 0.4.0, Node v24.19.0）。**Level1（serve http_code=200）为前置子项，Level3（一个任务从 todo 到落地）才是 AC16③ 字面判据——本 AC 以 Level3 为准**（manager 2026-08-11 14:2x 指正 + outer 补做，见 Evidence）
 
 ## Definition of Done
 
@@ -84,12 +84,28 @@ develop-deliver: OK — fresh quay quay-0.4.0.tgz delivered + verified on all ho
 ```
 state: `{"lastDelivered":"04e9f1d7…","hosts":{"C":"200","B":"200"},"timestamp":"2026-08-11T14:18:22Z"}`；idempotent 重跑（state fresh）跳过。
 
-**AC16③ 复测（C 上独立探测）**：
+**AC16③ 复测（C 上独立探测，Level1 + Level3）**：
 ```text
+# Level1 — 安装产物可跑、serve 返回 200
 $ ssh ad-arm1 'export PATH="$HOME/.local/opt/node-current/bin:$PATH"; quay --version; uname -m'
 0.4.0
 aarch64
+
+# Level3 — 真实 todo→done 全生命周期（AC16③ 字面判据；manager 2026-08-11 14:2x 指正后补做）
+$ ssh ad-arm1 'export PATH="$HOME/.local/opt/node-current/bin:$PATH"; cd ~/quay-ac16c3-ws && quay init && quay task create TEST-002 --title "AC16c3 real round-trip" --body "<contract-shape 六键>" --extra '"'"'{"acceptance":"true"}'"'"' && quay promote TEST-002 && quay complete TEST-002'
+TEST-002: AC16c3 real round-trip on aarch64 [todo]     # create → todo
+PROMOTE todo → ready                                    # author gate: dod pass
+PASS — status=done                                      # acceptance gate: acceptance pass
+# 最终:
+$ quay task list
+TEST-002  done  primitive  AC16c3 real round-trip on aarch64
+$ quay gate-log TEST-002
+2026-08-11T14:30:02.742Z dod pass
+2026-08-11T14:30:02.751Z promote pass
+2026-08-11T14:30:03.108Z acceptance pass
+2026-08-11T14:30:03.121Z complete pass
 ```
+**注**：Level3 途中撞出安装副本 `quay init` mcp_entry 指向 raw `.ts` 的缺陷（`ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`，Node ≥23.7 禁 node_modules 下 type-stripping）——已另立案 `gap-init-scaffolds-mcp-entry-to-raw-ts-fails-on-installed-copy.md`（delivery-critical），本任务 Level3 用 dist-bundle 形态（`mcp_entry: ["node","./dist/quay-native.js","mcp"]`）完成。
 
 **静态**：`delivery-manifest-check.ts --json` → `{"ok": true, "manifestVersion": "0.4.0", "issues": []}`。
 
