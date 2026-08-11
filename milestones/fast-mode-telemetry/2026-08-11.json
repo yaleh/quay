@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-11T14:51:03.146Z",
+  "generatedAt": "2026-08-11T14:57:39.447Z",
   "since": null,
   "tasks": [
     {
@@ -965,15 +965,22 @@
       "outcome": "done"
     }
   ],
-  "inProgress": [],
+  "inProgress": [
+    {
+      "taskId": "gap-forty-to-six-remerge-needs-tests-updated-first",
+      "runId": "fm-gap-forty-to-six-remerge-needs-tests-updated-first-1786459959470-e2zrsv",
+      "startedAtMs": 1786459959514,
+      "startedAtMsUnreliable": true
+    }
+  ],
   "deferred": [],
   "meanMinutes": 108.11724849462368,
   "medianMinutes": 61.879616666666664,
-  "tasksPerHour": 0.7034685720649998,
+  "tasksPerHour": 0.7031067401336767,
   "serialEquivalentPerHour": 0.5549530795077865,
   "windowStart": "2026-08-02T10:29:46.000Z",
-  "windowEnd": "2026-08-11T14:49:58.408Z",
-  "windowHours": 220.33678,
+  "windowEnd": "2026-08-11T14:56:46.610Z",
+  "windowHours": 220.45016944444444,
   "haltedHours": 0,
   "halted": [],
   "blocked": [
@@ -1507,7 +1514,7 @@
       "minutes": 1116.1975,
       "outcome": "abandoned",
       "reconcileReason": "worktree-gone-and-no-process",
-      "startedAtMsUnreliable": false
+      "startedAtMsUnreliable": true
     },
     {
       "taskId": "gap-forty-to-six-remerge-needs-tests-updated-first",
@@ -1515,7 +1522,7 @@
       "minutes": 693.1571,
       "outcome": "abandoned",
       "reconcileReason": "worktree-gone-and-no-process",
-      "startedAtMsUnreliable": false
+      "startedAtMsUnreliable": true
     },
     {
       "taskId": "gap-full-suite-runner-marks-test-sh-gate-wait-as-failed",
@@ -3033,8 +3040,18 @@
     }
   ],
   "reconcilable": [],
-  "realInFlight": 0,
+  "realInFlight": 1,
   "closedButLive": [
+    {
+      "taskId": "gap-forty-to-six-remerge-needs-tests-updated-first",
+      "runId": "fm-gap-forty-to-six-remerge-needs-tests-updated-first-1786356624732-ynl3f5",
+      "reason": "worktree-present"
+    },
+    {
+      "taskId": "gap-forty-to-six-remerge-needs-tests-updated-first",
+      "runId": "fm-gap-forty-to-six-remerge-needs-tests-updated-first-1786382007167-vt6p93",
+      "reason": "worktree-present"
+    },
     {
       "taskId": "gap-judgment-computed-not-wired-to-action",
       "runId": "fm-gap-judgment-computed-not-wired-to-action-1786441120687-r0gtjl",
@@ -3056,5 +3073,5 @@
       "reason": "worktree-present"
     }
   ],
-  "occupiedSlots": 4
+  "occupiedSlots": 7
 }
