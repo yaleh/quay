@@ -37,6 +37,71 @@ export const DEFAULT_MAX_AGE_SECS = 5400;
 /** Sentinel for a file that exists but does not parse / lacks a valid `ts`. */
 export const MALFORMED = Object.freeze({ __malformed__: true });
 
+// ── Minimal field contract (tasks/gap-inner-heartbeat-fields-shrunk-no-minimal-contract) ────────────
+//
+// Defect family: 2026-08-11 05:20 the heartbeat shrank to 3 keys ({ts, delaySeconds, reason}) — the
+// runIds/blocked/budgetHit/effectiveCap/agentDispatches fields all vanished. Manager A3's premise is
+// that THIS product is the only thing answering "what does inner need" — without blocked[] the outer
+// cannot tell whether inner is stuck (hard rule 6: absent key = not-checked, ≠ no-block). The shrink
+// was a silent regression of the structured shape into a one-line prose blob.
+//
+// Contract band `heartbeat_field_count >= 7` names ts/runIds/blocked/budgetHit/effectiveCap/
+// agentDispatches/delaySeconds. reason prose may SUPPLEMENT but never REPLACE these (AC3) — the
+// contract check looks ONLY at the structured keys, so a prose-only heartbeat is RED.
+export const REQUIRED_HEARTBEAT_FIELDS = [
+  "ts",
+  "runIds",
+  "blocked",
+  "budgetHit",
+  "effectiveCap",
+  "agentDispatches",
+  "delaySeconds",
+];
+
+/** Per-field type guard for the required fields. PURE. */
+export const HEARTBEAT_FIELD_TYPES = {
+  ts: (v) => typeof v === "number" && Number.isFinite(v),
+  runIds: Array.isArray,
+  blocked: Array.isArray,
+  budgetHit: (v) => typeof v === "boolean",
+  effectiveCap: (v) => typeof v === "number" && Number.isFinite(v),
+  agentDispatches: (v) => typeof v === "number" && Number.isFinite(v),
+  delaySeconds: (v) => typeof v === "number" && Number.isFinite(v),
+};
+
+/**
+ * Check a heartbeat against the minimal field contract. PURE.
+ * `reason` prose is deliberately NOT a substitute for any structured key (AC3): the check
+ * inspects only REQUIRED_HEARTBEAT_FIELDS — a `{ts, delaySeconds, reason}` heartbeat is RED.
+ * @param {object|null|MALFORMED} heartbeat parseHeartbeat output
+ * @returns {{ok:boolean, missing:string[], wrongType:string[], fieldCount:number, requiredPresent:number}}
+ */
+export function checkFieldContract(heartbeat) {
+  const missing = [];
+  const wrongType = [];
+  const fieldCount = heartbeat && typeof heartbeat === "object" ? Object.keys(heartbeat).length : 0;
+  let requiredPresent = 0;
+  if (heartbeat && typeof heartbeat === "object") {
+    for (const f of REQUIRED_HEARTBEAT_FIELDS) {
+      if (!(f in heartbeat)) { missing.push(f); continue; }
+      if (HEARTBEAT_FIELD_TYPES[f] && !HEARTBEAT_FIELD_TYPES[f](heartbeat[f])) { wrongType.push(f); continue; }
+      requiredPresent++;
+    }
+  } else {
+    missing.push(...REQUIRED_HEARTBEAT_FIELDS);
+  }
+  return {
+    ok: missing.length === 0 && wrongType.length === 0,
+    missing,
+    wrongType,
+    fieldCount,
+    requiredPresent,
+  };
+}
+
+/** Reason string for a fresh-but-field-shrunk heartbeat (AC2: missing keys ⇒ checker reports). */
+export const FIELDS_MISSING_REASON = "inner-wakeup-heartbeat-fields-missing";
+
 /**
  * Parse the heartbeat file text. PURE.
  * @param {string|null|undefined} text
@@ -125,17 +190,21 @@ export function evaluateTrigger(heartbeat, freeText, prevHash) {
 function usage() {
   console.error(`inner-wakeup-heartbeat-check.ts — inner 兜底心跳产物检查器（外层读）
 
-Reads <root>/.quay/${HEARTBEAT_FILE} ({ts, delaySeconds, reason} — written by inner each time it
-reschedules ScheduleWakeup, same shape as suite-chain-heartbeat.json) and judges freshness:
-age = now − ts > max-age (default ${DEFAULT_MAX_AGE_SECS}s = 3 tick periods × 1800s) ⇒
-"inner 兜底心跳断" + exit 1 (escalate). Missing / malformed file = same dead verdict (fail-closed).
+Reads <root>/.quay/${HEARTBEAT_FILE} (written by inner each time it reschedules ScheduleWakeup via
+plugin/scripts/inner-wakeup-heartbeat.ts) and judges BOTH:
+  (a) freshness — age = now − ts > max-age (default ${DEFAULT_MAX_AGE_SECS}s = 3 tick periods × 1800s)
+      ⇒ "inner 兜底心跳断" + exit 1 (escalate); missing / malformed file = same dead verdict (fail-closed);
+  (b) minimal field contract — a FRESH heartbeat must carry the ${REQUIRED_HEARTBEAT_FIELDS.length} structured
+      keys ${REQUIRED_HEARTBEAT_FIELDS.join("/")} (Contract band heartbeat_field_count >= 7; blocked[] +
+      runIds are the A3 "inner 卡住" premise). Missing key / wrong type ⇒ "心跳字段缺失" + exit 1.
+      reason prose may supplement but NEVER replace the structured fields (AC3).
 
 Usage:
   --root <dir>         workspace root (default: cwd) — reads <root>/.quay/${HEARTBEAT_FILE}
   --max-age-secs <N>   dead threshold in seconds (default ${DEFAULT_MAX_AGE_SECS})
   --json               JSON output (default human-readable)
 
-Exit: 0 ALIVE · 1 DEAD (missing / malformed / stale) · 2 usage error`);
+Exit: 0 ALIVE · 1 DEAD (missing / malformed / stale / fields-missing) · 2 usage error`);
 }
 
 export function main(argv) {
@@ -156,7 +225,25 @@ export function main(argv) {
   const text = readHeartbeatText(root);
   const heartbeat = parseHeartbeat(text);
   const nowSec = Math.floor(Date.now() / 1000);
-  const v = judgeHeartbeat(nowSec, heartbeat, maxAge);
+  let v = judgeHeartbeat(nowSec, heartbeat, maxAge);
+
+  // AC2/AC3: a FRESH heartbeat must also satisfy the minimal field contract. A fresh-but-shrunk
+  // heartbeat (e.g. the 2026-08-11 05:20 3-key {ts, delaySeconds, reason}) is RED — reason prose
+  // never substitutes for the structured keys.
+  let fields = null;
+  if (v.status === "alive") {
+    fields = checkFieldContract(heartbeat);
+    if (!fields.ok) {
+      v = {
+        alive: false,
+        status: "fields-missing",
+        ageSecs: v.ageSecs,
+        reason: FIELDS_MISSING_REASON,
+        missing: fields.missing,
+        wrongType: fields.wrongType,
+      };
+    }
+  }
 
   const filePath = path.join(root, ".quay", HEARTBEAT_FILE);
   if (jsonOut) {
@@ -169,16 +256,23 @@ export function main(argv) {
       ageSecs: v.ageSecs,
       maxAgeSecs: maxAge,
       reason: v.reason,
+      fieldContract: fields
+        ? { ok: fields.ok, required: REQUIRED_HEARTBEAT_FIELDS, fieldCount: fields.fieldCount, missing: fields.missing, wrongType: fields.wrongType }
+        : null,
     }, null, 2));
   } else {
     const base = `inner-wakeup-heartbeat: ${v.alive ? "ALIVE" : "DEAD"}`;
     if (v.status === "alive") {
-      console.log(`${base} — age ${v.ageSecs}s ≤ ${maxAge}s (heartbeat fresh)`);
+      console.log(`${base} — age ${v.ageSecs}s ≤ ${maxAge}s, fields ${fields.fieldCount}/${REQUIRED_HEARTBEAT_FIELDS.length} (heartbeat fresh + contract ok)`);
     } else if (v.status === "stale") {
       const last = new Date(nowSec * 1000 - v.ageSecs * 1000).toISOString();
       console.log(`${base} — age ${v.ageSecs}s > ${maxAge}s ⇒ inner 兜底心跳断 (last reschedule ${last})`);
     } else if (v.status === "missing") {
       console.log(`${base} — ${filePath} MISSING (never written) ⇒ inner 兜底心跳断`);
+    } else if (v.status === "fields-missing") {
+      const miss = [...(v.missing || []).map((f) => `${f}(缺失)`), ...(v.wrongType || []).map((f) => `${f}(类型错)`)]
+        .join(" / ");
+      console.log(`${base} — 心跳字段缺失 ⇒ inner 兜底心跳不合规（缺 ${miss}）`);
     } else {
       console.log(`${base} — ${filePath} MALFORMED (no valid ts) ⇒ inner 兜底心跳断`);
     }
