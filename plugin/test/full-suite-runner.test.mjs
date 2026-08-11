@@ -910,6 +910,33 @@ test("AC2/AC3/AC4 — a static-check-red run writes reason=static-check + machin
   }
 });
 
+test("gap-task-file-static-syntax: a --no-block task-file checker round (violations recorded, exit 0) is GREEN, not static-check red", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-noblock-"));
+  // The post-fix shape (option ①): task-contract-check runs with --no-block — it prints VIOLATION
+  // lines + "recorded (non-blocking)" (the "new since baseline: N" marker is deliberately avoided),
+  // exits 0, and the suite proceeds to a green test phase. The round must be GREEN — task-file
+  // Contract/AC syntax must not consume a verification opportunity.
+  const { f, dir } = fakeSuite(
+    'echo "VIOLATION: tasks/gap-foo.md — V1: Contract block missing invariant line"\n' +
+      'echo "recorded (non-blocking, grow-only ledger): 6 new task-file violation(s) — task-file syntax does NOT block the verification round"\n' +
+      'echo "ratchet ceiling: 6; recorded (non-blocking): 6 (tasks/gap-foo.md: V1); resolved: 0"\n' +
+      'echo "selected 1 files (groups=product,engine)"\n' +
+      'echo "# tests 1"\necho "# pass 1"\necho "# fail 0"\necho "# cancelled 0"\n' +
+      "exit 0",
+  );
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, "runner exits 0 — the round is green; task-file syntax did not block");
+    const s = readState(root);
+    assert.equal(s.state, "green", `expected green (recorded-not-blocking), got: ${JSON.stringify(s)}`);
+    assert.notEqual(s.reason, "static-check", "a recorded-not-blocking round is NOT a static-check red");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("AC2b — the static-check phase gate: test-phase output (selected N files) stops static-check patterns firing on test fixtures (round-6 2026-08-09 false-red)", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-pgate-"));
   // The round-6 false-red shape: a passing test (candidate-contracts.test.mjs) prints
