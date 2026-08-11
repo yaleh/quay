@@ -1800,6 +1800,44 @@ test("analyzeTasks: suite-blocking jumps ready_relevance; negative control uncha
   assert.deepEqual(green.ready_relevance.map((e) => e.id), ["gap-plain-ready", "gap-watchdog"], "green round clears the window ⇒ no re-rank");
 });
 
+test("analyzeTasks: suite red ⇒ suite-fix family dispatchable, unrelated task still blocked (AC2/AC3 — gap-suite-blocking-self-lock-blocks-fix-family)", (t) => {
+  const root = makeWorkspace("suitelock");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // The suite-fix family — ids carry install/suite markers (the self-lock victims from the task's
+  // empirical record: gap-install-family + gap-serial-phase-install were among the 22 blocked).
+  writeTask(root, "gap-install-family-tests-rotate-flakes-under-full-suite", {
+    status: "ready", labels: ["gap"],
+    body: fourArtifactBody({ touches: ["- plugin/test/install-family.test.mjs (fix)"] }),
+  });
+  writeTask(root, "gap-serial-phase-install-test-residue-dependency", {
+    status: "ready", labels: ["gap"],
+    body: fourArtifactBody({ touches: ["- plugin/test/serial-install.test.mjs (fix)"] }),
+  });
+  // Unrelated task touching a failing suite file — no suite-fix marker — must stay blocked (AC3).
+  writeTask(root, "gap-watchdog-unrelated", {
+    status: "ready", labels: ["gap"],
+    body: fourArtifactBody({ touches: ["- plugin/test/install-family.test.mjs"] }),
+  });
+
+  const opts = { tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 };
+
+  // 3 consecutive red rounds whose failure hits the suite infra file the fix-family touches.
+  writeRounds(root, Array.from({ length: 3 }, (_, i) => ({ round: 220 + i, state: "red", reason: "failed", fail: 1, failures: [{ file: "plugin/test/install-family.test.mjs", line: "x" }] })));
+  writeState(root, [{ file: "plugin/test/install-family.test.mjs", line: "x" }]);
+
+  const r = analyzeTasks(opts);
+  assert.equal(r.suite_blocking.window_active, true);
+  assert.equal(r.suite_blocking.consecutive_red, 3);
+  assert.ok(!r.suite_blocking.tasks.includes("gap-install-family-tests-rotate-flakes-under-full-suite"),
+    "AC2: gap-install-family (suite-fix) stays dispatchable under the red window — self-lock broken");
+  assert.ok(!r.suite_blocking.tasks.includes("gap-serial-phase-install-test-residue-dependency"),
+    "AC2: gap-serial-phase-install (suite-fix) stays dispatchable");
+  assert.ok(r.suite_blocking.tasks.includes("gap-watchdog-unrelated"),
+    "AC3 reverse control: unrelated task touching the failing suite file is still blocked");
+  // The exemption must NOT make the window vanish — the failing file is still reported.
+  assert.deepEqual(r.suite_blocking.failure_files, ["plugin/test/install-family.test.mjs"]);
+});
+
 test("AC5: suite-blocking obligation recorded mechanically in the obligation ledger (JSONL)", (t) => {
   // The ledger is at <repoRoot>/orchestration/manager-obligation-ledger.jsonl — the AC5 deliverable:
   // the "suite-blocker can't get prioritized" obligation is now MECHANICALLY derivable (ready-pool-
