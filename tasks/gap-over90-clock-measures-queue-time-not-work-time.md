@@ -3,7 +3,7 @@ id: gap-over90-clock-measures-queue-time-not-work-time
 title: OVER90's 90-min clock starts at task-start, which may precede actual work
   (defer/queue) — three triggers tonight (crash-leftover,
   needs-human-not-closed, queue-time) none was "work really timed out"
-status: ready
+status: done
 labels:
   - gap
   - defect

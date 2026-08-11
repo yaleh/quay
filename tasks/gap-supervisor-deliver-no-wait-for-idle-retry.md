@@ -3,7 +3,7 @@ id: gap-supervisor-deliver-no-wait-for-idle-retry
 title: supervisor-deliver.sh one-shot send→verify→failed — doesn't wait for
   target idle or retry; can-receive (pane-state-classify) exists but not wired
   into delivery path
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -41,10 +41,10 @@ extra: {}
 
 ## DoD（draft）
 
-- [ ] 对 busy 目标投递：等待其转空闲后送达（不等同一次失败）
-- [ ] 对 idle 目标投递：行为不变（无回归）
-- [ ] 超上限仍未空闲：fail loud 需人工（不假装）
-- [ ] 完整套件绿
+- [x] 对 busy 目标投递：等待其转空闲后送达（不等同一次失败）——AC3 positive 实测（~5.8s，stderr 含 有界等待转 waiting-input + 已送达）
+- [x] 对 idle 目标投递：行为不变（无回归）——AC5 e2e（NBSP/ghost 通过，门首判即 waiting-input 零等待）
+- [x] 超上限仍未空闲：fail loud 需人工（不假装）——AC3 negative 实测（~5.4s，exit 1，marker 未进 transcript）
+- [x] 完整套件绿——r39 green（round 39, 3244 pass / 0 fail, commit 61154ec3）
 
 ## Evidence
 
