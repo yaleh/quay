@@ -23,10 +23,10 @@ extra: {}
 
 ## AC（draft）
 
-- [ ] `listPreemptible` 判 >90m 只计工作时钟（`workStartedAtMs ?? startedAtMs`），排队/defer 段不计入
-- [ ] 负控制：构造「defer 久 + 工作短」的 ledger 记录 ⇒ 不判 preemptible（与 over90 负控制同构）
-- [ ] 未 defer 记录回退 `startedAtMs` 行为不变（无回归）
-- [ ] 测试用 `node:test` 且带 `// @test-group governance`
+- [x] `listPreemptible` 判 >90m 只计工作时钟（`workStartedAtMs ?? startedAtMs`），排队/defer 段不计入
+- [x] 负控制：构造「defer 久 + 工作短」的 ledger 记录 ⇒ 不判 preemptible（与 over90 负控制同构）
+- [x] 未 defer 记录回退 `startedAtMs` 行为不变（无回归）
+- [x] 测试用 `node:test` 且带 `// @test-group governance`
 
 ## DoD（draft）
 
@@ -39,6 +39,10 @@ extra: {}
 - over90 AC3 note（`tasks/gap-over90-clock-measures-queue-time-not-work-time.md:60`）：`listPreemptible` 仍读 `p.startedAtMs`，`kept` 已携带 `workStartedAtMs`（reconcile 透传），一行迁移即可；列为 follow-up
 - `plugin/scripts/supervisor-preempt-candidates.ts:83`：`.filter((p) => nowMs - p.startedAtMs > TASK_OVER_90M_MS && ...)` 排队时钟
 - `plugin/scripts/supervisor-preempt-candidates.ts:87-88`：输出 `startedAtMs: p.startedAtMs`、`minutes: (nowMs - p.startedAtMs)` 排队时钟
+- **实现（2026-08-11，inner 执行）**：`listPreemptible` 的 filter 与输出改读工作时钟 `(p.workStartedAtMs ?? p.startedAtMs)`（同 over90 口径）。`kept` 记录经 reconcileInFlight 已携带 `workStartedAtMs`（fast-mode-telemetry 透传）；未 defer 记录回退 bracket `startedAtMs`，行为字节不变。输出 `startedAtMs`/`minutes` 亦按工作时钟计算。
+- **负控制实测（scoped run）**：`WORK-CLOCK — negative control: defer 80min + work 20min (100min bracket, 20min work) is NOT preemptible` ⇒ `listPreemptible` 返回 count=0（排队段不计入 90m，不判 preemptible）。正回归 `WORK-CLOCK — never-deferred 91min bracket is still preemptible` ⇒ count=1、minutes=91（未 defer 字节不变）。
+- **scoped 测试结果**：`bash scripts/test.sh --for-task gap-supervisor-preempt-candidates-work-clock --allow-thin` ⇒ **PASS / EXIT 0**，`13 tests / 13 pass / 0 fail / 0 cancelled`（supervisor-preempt-candidates 全 13 例含 2 个新增 WORK-CLOCK 用例）。
+- **over90 交叉标注已落地**：`gap-over90-clock-measures-queue-time-not-work-time` 的 AC3 follow-up note 已追加「已落地」标注（本任务即该 follow-up）。
 
 ## Touches
 

@@ -156,6 +156,50 @@ test("AC1/AC2 band: a single >90min no-progress task (status in-progress) is det
   }
 });
 
+// ── WORK-CLOCK (gap-supervisor-preempt-candidates-work-clock): preemptibility reads the WORK clock ──
+// Same 口径 as over90's fix (gap-over90-clock-measures-queue-time-not-work-time): `workStartedAtMs`
+// (the --work-start marker) is the age baseline. A touches-overlap defer/queue segment must NOT count
+// toward the 90-minute budget — a task that queued 80min then worked 20min is NOT preemptible.
+
+test("WORK-CLOCK — negative control: defer 80min + work 20min (100min bracket, 20min work) is NOT preemptible", async () => {
+  const mod = await import(CANDIDATES);
+  const telemetry = await import(TELEMETRY);
+  const root = makeRoot();
+  try {
+    writeTaskFile(root, "gap-preempt-deferred", "in-progress");
+    const now = Date.now();
+    const t0 = now - 100 * 60_000; // bracket opened 100min ago
+    const workStart = t0 + 80 * 60_000; // 80min queue, then 20min real work
+    const runId = telemetry.generateRunId("gap-preempt-deferred");
+    telemetry.writeEvent(telemetry.buildStartEvent({ taskId: "gap-preempt-deferred", runId, recordedAtMs: t0 }), root);
+    telemetry.writeEvent(telemetry.buildWorkStartEvent({ taskId: "gap-preempt-deferred", runId, recordedAtMs: workStart }), root);
+    const { preemptible, count } = await mod.listPreemptible(root, { nowMs: now });
+    assert.equal(count, 0, `defer 80min + work 20min (100min bracket, 20min work) must NOT be preemptible — got ${count}`);
+    assert.equal(preemptible.length, 0, "no preemptible candidate for the queue-heavy record");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("WORK-CLOCK — never-deferred 91min bracket is still preemptible (legacy byte-identical fallback)", async () => {
+  const mod = await import(CANDIDATES);
+  const telemetry = await import(TELEMETRY);
+  const root = makeRoot();
+  try {
+    writeTaskFile(root, "gap-preempt-legacy", "in-progress");
+    const now = Date.now();
+    const t0 = now - 91 * 60_000; // no --work-start ⇒ work clock falls back to bracket start
+    const runId = telemetry.generateRunId("gap-preempt-legacy");
+    telemetry.writeEvent(telemetry.buildStartEvent({ taskId: "gap-preempt-legacy", runId, recordedAtMs: t0 }), root);
+    const { preemptible, count } = await mod.listPreemptible(root, { nowMs: now });
+    assert.equal(count, 1, `never-deferred 91min bracket must remain preemptible — got ${count}`);
+    assert.equal(preemptible[0].taskId, "gap-preempt-legacy");
+    assert.equal(preemptible[0].minutes, 91, "never-deferred minutes stay on the bracket clock (byte-identical)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("AC3 positive control: a FRESH (<90min) in-progress task is NOT preemptible", async () => {
   const root = makeRoot();
   try {
