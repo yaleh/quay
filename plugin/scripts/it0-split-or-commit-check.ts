@@ -17,6 +17,17 @@
 //      can be judged `done` while a real phase is still open — the exact modeling hole that made
 //      M-TS-MIGRATION (children: [P0-only]) read as complete while P1-P4 were unlisted.
 //
+//   4. DEP-DONE-IFF-DEPS: A task marked `done` whose `depends_on:` prerequisites are NOT all `done`
+//      is a violation — a task cannot be done before its declared prerequisites. `depends_on` is the
+//      machine-readable home for prerequisites (gap-prerequisite-gates-prose-invisible-to-mechanisms):
+//      the same edges the ready-pool author→ready gate and the A15② dispatch dependency-readiness
+//      check read, so a prose-only prerequisite (a `[[task-id]]` wikilink in a "Do not dispatch until
+//      … lands" paragraph) is visible here and caught before a dependent is judged complete.
+//
+//   5. DEP-DANGLING: A task declaring `depends_on: [X]` where X does not exist is a dangling
+//      prerequisite edge — fail-closed (a missing dep file cannot be confirmed done), the same
+//      family as CHILD-LINK-SYMMETRY's dangling-parent rule.
+//
 // D3·R7 enforcement pointer: OUTER-LOOP.md's prose description of parent-done-iff-children
 // at Step 1 / SPLIT-OR-COMMIT references THIS script as the mechanical enforcement.
 // <!-- enforcement: scripts/it0-split-or-commit-check.ts -->
@@ -52,6 +63,7 @@ export interface TaskFrontmatter {
   children: string[];
   labels: string[];
   parent: string | null;
+  dependsOn: string[];
 }
 
 // ── parseFrontmatter — extract id, status, role, children from YAML frontmatter. ─────────────────
@@ -93,6 +105,7 @@ export function parseFrontmatter(text: string): TaskFrontmatter | null {
     children: list("children"),
     labels: list("labels"),
     parent: scalar("parent"),
+    dependsOn: list("depends_on"),
   };
 }
 
@@ -194,6 +207,44 @@ export function runChecks(taskMap: Map<string, TaskFrontmatter>): CheckResult {
     }
   }
 
+  // CHECK 4: DEP-DONE-IFF-DEPS
+  // For every task marked `done`, all `depends_on:` prerequisites must ALSO be `done`. A task cannot
+  // be done before its declared prerequisites — otherwise a dependent is judged complete while a
+  // prerequisite is still open (the same "prematurely done" family PARENT-DONE-IFF-CHILDREN kills,
+  // over the depends_on edge). This is the split-or-commit gate's half of making prerequisites
+  // mechanism-visible: a prose-only prerequisite has no depends_on edge, so it is NOT checked here —
+  // the ready-pool author→ready gate (prose-prereq-no-edge exclusion) blocks that shape at promotion.
+  for (const [id, t] of taskMap) {
+    if (t.status !== "done") continue;
+    const deps = t.dependsOn || [];
+    if (deps.length === 0) continue;
+    const nonDoneDeps: string[] = [];
+    for (const depId of deps) {
+      const dep = taskMap.get(depId);
+      const depStatus = dep ? dep.status : "missing";
+      if (depStatus !== "done") nonDoneDeps.push(`${depId} (status: ${depStatus})`);
+    }
+    if (nonDoneDeps.length > 0) {
+      failures.push(
+        `DEP-DONE-IFF-DEPS: task "${id}" is done but has ${nonDoneDeps.length} non-done prerequisite(s) in depends_on: ${nonDoneDeps.join(", ")} — a done task requires ALL its depends_on prerequisites done (gap-prerequisite-gates-prose-invisible-to-mechanisms)`
+      );
+    }
+  }
+
+  // CHECK 5: DEP-DANGLING
+  // A task declaring `depends_on: [X]` where X does not exist is a dangling prerequisite edge — the
+  // edge cannot be confirmed done (fail-closed). A prerequisite written in prose instead of the edge
+  // is invisible here; a DANGLING edge is the opposite defect (the edge exists but points nowhere).
+  for (const [id, t] of taskMap) {
+    for (const depId of t.dependsOn || []) {
+      if (!taskMap.has(depId)) {
+        failures.push(
+          `DEP-DANGLING: task "${id}" declares depends_on "${depId}" but no such task exists — dangling prerequisite edge (gap-prerequisite-gates-prose-invisible-to-mechanisms)`
+        );
+      }
+    }
+  }
+
   return { failures };
 }
 
@@ -202,7 +253,10 @@ export function runChecks(taskMap: Map<string, TaskFrontmatter>): CheckResult {
 // RED case 2: compound task with `todo` status and NO children → FAIL
 // RED case 3: child declares `parent` but the parent's `children` omits it (link asymmetry) → FAIL
 // RED case 4: child declares a `parent` that does not exist (dangling link) → FAIL
-// GREEN case: parent `done` with all children `done` + compound `todo` with children + symmetric links → PASS
+// RED case 5: task `done` with a depends_on prerequisite that is `todo` (DEP-DONE-IFF-DEPS) → FAIL
+// RED case 6: task declares a `depends_on` id that does not exist (DEP-DANGLING) → FAIL
+// GREEN case: parent `done` with all children `done` + compound `todo` with children + symmetric
+//   links + a done task whose depends_on deps are all done → PASS
 export function selftest(): boolean {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "it0-split-or-commit-"));
   let allPassed = true;
@@ -212,6 +266,7 @@ export function selftest(): boolean {
     role?: string;
     children?: string[];
     parent?: string;
+    dependsOn?: string[];
   }
 
   function writeTask(dir: string, id: string, fields: TaskDef): void {
@@ -219,8 +274,12 @@ export function selftest(): boolean {
       fields.children && fields.children.length > 0
         ? `children:\n${fields.children.map((c) => `  - ${c}`).join("\n")}`
         : "children: []";
+    const dependsOnBlock =
+      fields.dependsOn && fields.dependsOn.length > 0
+        ? `depends_on:\n${fields.dependsOn.map((d) => `  - ${d}`).join("\n")}`
+        : "depends_on: []";
     const parentLine = `parent: ${fields.parent || "null"}`;
-    const content = `---\nid: ${id}\nstatus: ${fields.status}\nrole: ${fields.role || "primitive"}\n${parentLine}\n${childrenBlock}\n---\n`;
+    const content = `---\nid: ${id}\nstatus: ${fields.status}\nrole: ${fields.role || "primitive"}\n${parentLine}\n${childrenBlock}\n${dependsOnBlock}\n---\n`;
     fs.writeFileSync(path.join(dir, `${id}.md`), content);
   }
 
@@ -271,20 +330,35 @@ export function selftest(): boolean {
     "orphan": { status: "todo", role: "primitive", parent: "ghost-parent", children: [] },
   }, true /* expect FAIL */);
 
-  // GREEN case: parent `done` with all children `done` + compound `todo` with children + SYMMETRIC links
+  // RED case 5: task `done` with a depends_on prerequisite that is `todo` (DEP-DONE-IFF-DEPS)
+  runFixture("red-done-with-undone-dep", {
+    "pre-req": { status: "todo", role: "primitive", children: [] },
+    "dependent-done": { status: "done", role: "primitive", children: [], dependsOn: ["pre-req"] },
+  }, true /* expect FAIL */);
+
+  // RED case 6: task declares a `depends_on` id that does not exist (DEP-DANGLING)
+  runFixture("red-dangling-dep", {
+    "dep-user": { status: "ready", role: "primitive", children: [], dependsOn: ["ghost-dep"] },
+  }, true /* expect FAIL */);
+
+  // GREEN case: parent `done` with all children `done` + compound `todo` with children + SYMMETRIC
+  // links + a done task whose depends_on deps are all done
   runFixture("green-compliant", {
     "parent-done": { status: "done", role: "compound", children: ["child-a", "child-b"] },
     "child-a": { status: "done", role: "primitive", parent: "parent-done", children: [] },
     "child-b": { status: "done", role: "primitive", parent: "parent-done", children: [] },
     "compound-with-children": { status: "todo", role: "compound", children: ["sub-x"] },
     "sub-x": { status: "todo", role: "primitive", parent: "compound-with-children", children: [] },
+    "dep-a": { status: "done", role: "primitive", children: [] },
+    "dep-b": { status: "done", role: "primitive", children: [] },
+    "dep-dependent": { status: "done", role: "primitive", children: [], dependsOn: ["dep-a", "dep-b"] },
   }, false /* expect PASS */);
 
   // Clean up
   fs.rmSync(tmpDir, { recursive: true, force: true });
 
   if (allPassed) {
-    console.log("SELFTEST: all 5 fixture cases PASS.");
+    console.log("SELFTEST: all 7 fixture cases PASS.");
     return true;
   } else {
     console.error("SELFTEST: one or more fixture cases FAILED.");
