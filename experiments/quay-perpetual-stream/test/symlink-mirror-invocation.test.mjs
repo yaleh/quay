@@ -56,7 +56,10 @@ const PLUGIN_SCRIPTS_DIR = path.join(REPO_ROOT, 'plugin', 'scripts');
 // the exact defect class (a guard that never fires via the symlink path), so a symlinked PURE
 // LIBRARY module with no such guard (e.g. read-probe-spec.ts, confirmed by direct read to export
 // functions with no main()/guard at all) is correctly out of scope, not a false negative. ────────
-const GUARD_PATTERN = /isDirectEntry\(import\.meta\)|isDirectInvocation\(/;
+// The gate-script-base isDirectEntry form is now `isDirectEntry(import.meta, undefined, "<name>")`
+// (bundler-friendly expectedBase arg, gap-shipped-ts-files-are-not-bundled-80-raw-typescript-in-
+// the-artifact) — match the `import.meta` prefix so BOTH the 2-arg and 3-arg forms are discovered.
+const GUARD_PATTERN = /isDirectEntry\(import\.meta|isDirectInvocation\(/;
 function discoverMirroredTsSymlinks() {
   const found = [];
   for (const name of fs.readdirSync(SCRIPTS_DIR)) {
