@@ -332,3 +332,97 @@ test("AC6 — appendVerificationRound/readLoadAvg helpers are deterministic on a
   assert.equal(JSON.parse(lines[1]).round, 2);
   assert.equal(typeof readLoadAvg(), "number", "readLoadAvg returns a finite number on this machine");
 });
+
+// ── Parallel-mode run_checker (gap-run-static-checks-zero-concurrency-can-parallelize) ─────────────
+// The run_static_checks path in scripts/test.sh sources checker-cost-lib.sh (NOT the standalone
+// checker-cost.sh wrapper) and wraps every checker in run_checker. With RUN_CHECKER_PARALLEL=1
+// run_checker backgrounds each timed+recorded run bounded to STATIC_CHECK_CONCURRENCY, and
+// run_checker_parallel_wait waits for all, fails closed on any failure, and keeps EVERY cost row.
+// These tests exercise the LIB directly (source checker-cost-lib.sh in a hermetic bash subprocess).
+const CHECKER_COST_LIB = path.join(REPO_ROOT, "plugin/scripts/checker-cost-lib.sh");
+
+function runLibScript(root, script, env = {}) {
+  return spawnSync("bash", ["-c", script], {
+    env: {
+      ...process.env,
+      CHECKER_COST_FILE: path.join(root, ".quay", "checker-cost.jsonl"),
+      ...env,
+    },
+    encoding: "utf8",
+  });
+}
+
+test("AC2/AC3/AC4 — parallel run_checker fails closed with the failing name visible and EVERY cost row appended", () => {
+  const root = makeTmpDir("cc-par-fail-");
+  const res = runLibScript(root, `
+    set -euo pipefail
+    source "${CHECKER_COST_LIB}"
+    RUN_CHECKER_PARALLEL=1
+    STATIC_CHECK_CONCURRENCY=2
+    run_checker "par-ok-1" bash -c "sleep 0.1; exit 0"
+    run_checker "par-fail" bash -c "exit 3"
+    run_checker "par-ok-2" bash -c "sleep 0.1; exit 0"
+    run_checker_parallel_wait
+  `);
+  // AC3: fail-closed with the FIRST failing checker's exit code; the failing name is on stderr,
+  // never masked by its siblings' (parallel) output.
+  assert.equal(res.status, 3, `parallel wait returns the first failing checker's exit code (got ${res.status}): ${res.stderr}`);
+  assert.match(res.stderr, /par-fail/, `the failing checker's name is reported (AC3, not masked): ${res.stderr}`);
+  // AC4: every checker's cost row is appended — the failure must not lose sibling rows.
+  const rows = readLedgerRows(root);
+  assert.equal(rows.length, 3, `all three cost rows appended despite the failure (AC4): ${res.stderr}`);
+  assert.deepEqual(rows.map((r) => r.name).sort(), ["par-fail", "par-ok-1", "par-ok-2"]);
+});
+
+test("AC2 — parallel run_checker runs checkers concurrently (a sibling observes the other mid-run)", () => {
+  const root = makeTmpDir("cc-par-overlap-");
+  const mark = path.join(root, "a-started");
+  const saw = path.join(root, "b-saw-a");
+  const res = runLibScript(root, `
+    set -euo pipefail
+    source "${CHECKER_COST_LIB}"
+    RUN_CHECKER_PARALLEL=1
+    STATIC_CHECK_CONCURRENCY=4
+    run_checker "par-a" bash -c "touch '${mark}'; sleep 0.5; rm -f '${mark}'"
+    run_checker "par-b" bash -c "for i in \\$(seq 1 300); do [ -f '${mark}' ] && { touch '${saw}'; break; }; sleep 0.01; done; true"
+    run_checker_parallel_wait
+  `);
+  assert.equal(res.status, 0, `two clean parallel checkers: ${res.stderr}`);
+  // par-a holds the marker for 0.5s then removes it; par-b polls for it. If the two ran
+  // SEQUENTIALLY, par-b would start after par-a removed the marker and never see it. Seeing it
+  // proves overlap (concurrent execution). The marker removal is what makes this a true
+  // concurrency detector rather than a false positive.
+  assert.ok(fs.existsSync(saw), "checker B observed checker A's transient marker while A was mid-run — the two executed concurrently");
+});
+
+test("AC2 — STATIC_CHECK_CONCURRENCY bounds concurrency (a 3rd checker waits for a slot to free)", () => {
+  const root = makeTmpDir("cc-par-bound-");
+  const done = path.join(root, "a-done");
+  const saw = path.join(root, "c-saw-a-done");
+  const res = runLibScript(root, `
+    set -euo pipefail
+    source "${CHECKER_COST_LIB}"
+    RUN_CHECKER_PARALLEL=1
+    STATIC_CHECK_CONCURRENCY=1
+    run_checker "par-a" bash -c "sleep 0.3; touch '${done}'"
+    run_checker "par-c" bash -c "[ -f '${done}' ] && touch '${saw}'; true"
+    run_checker_parallel_wait
+  `);
+  assert.equal(res.status, 0, `bounded-pool run: ${res.stderr}`);
+  // With a pool of 1, par-c must NOT start until par-a finished (0.3s → done exists). If the pool
+  // were unbounded, par-c would start immediately and the done marker would NOT exist yet.
+  assert.ok(fs.existsSync(saw), "checker C ran only AFTER checker A finished — concurrency bounded to STATIC_CHECK_CONCURRENCY");
+});
+
+test("AC3 — non-parallel run_checker (the scoped tier) runs synchronously and propagates exit code unchanged", () => {
+  const root = makeTmpDir("cc-par-sync-");
+  const res = runLibScript(root, `
+    set -euo pipefail
+    source "${CHECKER_COST_LIB}"
+    run_checker "sync-fail" bash -c "exit 2"
+  `);
+  // RUN_CHECKER_PARALLEL is unset here — the scoped tier's single evals must stay synchronous and
+  // propagate the wrapped exit code exactly as before the parallelization.
+  assert.equal(res.status, 2, "synchronous run_checker propagates the wrapped command's exit code");
+  assert.equal(readLedgerRows(root).length, 1, "one append-only cost row");
+});
