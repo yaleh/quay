@@ -108,6 +108,15 @@ extra: {}
 - **生产 1.44/h vs 验证绿 0.38/h ⇒ 生产比验证快约 4 倍**，差额全堆在 develop..integration（此刻 55 条）——这是「验证滞后中位 3.9h」的**产生机制**，不是它的后果。
 - **79% 的轮次没跑完全量**比「68% 机时花在红轮」更刺眼：多数轮次连一次完整测量都没产出，而 per_test_ms、相位分解等读数都来自完整轮次——**样本量比我们以为的小得多**。
 
+### CPUQuota 修正（manager 2026-08-11 06:4x——今晚全部硬件结论的基数错了；outer 已实测复核）
+
+**实测（outer 复核 C6）**：套件真实作用域 `.../app.slice/run-p584490-*.scope` 读数为 **cpu.max = 200000 100000（= 2.0 核）、memory.max = 4294967296（4 GiB）、pids.max = 200**；机器有 **4 个物理核** ⇒ **套件被限制在一半**。resource-gate 此前判 nproc=2 由此而来——是真限制不是假门（修正本任务 proposal 里「48 核撞地板」的一切外推基数：4 应是 2）。manager 自己先前查「无限制」是查错对象（自身作用域 max，非套件作用域）——判准②i「对象错了」。
+
+**三条修正**：
+- **(a) 核数外推基数错**：「4 核并发墙钟地板」「16/48 核 493s」的 4 都该是 2。lane8 的 1.79× 每文件膨胀由此得更好解释：8 进程挤 2 核 = **4× 超额订阅**（非以为的 2×）。
+- **(b) 最便宜的杠杆是这个配额，不是三条**：按实测 CPU 占比 79% 估算，CPUQuota 200%→400%（用满现有物理核），main 相每文件 CPU 部分减半 ⇒ sum 2543s → 约 1539s ⇒ 墙钟 636s → **约 385s**。**改一个参数、不动测试代码。** 建议 measure-first：同 commit 对照（`QUAY_TEST_SYSTEMD_RUN_LIMITS` 覆盖 CPUQuota=400%，其余不变）比对三个 `*_phase_ms` 与 cancelled。**前提**：会让套件与 inner 5 个 subagent 争抢同一 4 核 ⇒ resource-gate WAIT 更频繁——必须与「生产/验证的核预算怎么分」一起定，不能单独提。
+- **(c) 内存建议打补丁**：memory.max=4GiB 硬顶。每进程 47-88MB，并发 32-48 时 2.8-4.2GB **会顶到** ⇒ 更大主机上配额必须同步放大，否则加的核用不上。pids.max=200 在 nested-spawn 类测试高并发时同理。
+
 ## Contract
 measure   runner_grouping_ms = `grep -oE '__PERFILE__ duration_ms=[0-9.]+ [^ ]*runner-grouping' <serial相日志> | tail -1` 的 stdout 中 duration_ms 数字
 band      runner_grouping_ms <= 60000（拆 4 后地板 ≤ 约 51s）
