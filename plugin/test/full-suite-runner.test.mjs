@@ -100,6 +100,12 @@ function runRunner({ root, command, laneCount, stateDir, env = {} }) {
   // cgroup-scope wrapper by default (a temp-root fake suite needs no user systemd session); the
   // AC1-AC6 tests below opt in via QUAY_TEST_SYSTEMD_RUN_AVAILABLE=1 / QUAY_TEST_SKIP_SYSTEMD_RUN=0.
   if (!("QUAY_TEST_SKIP_SYSTEMD_RUN" in mergedEnv)) mergedEnv.QUAY_TEST_SKIP_SYSTEMD_RUN = "1";
+  // HERMETICITY: the parent suite launch sets QUAY_TEST_SYSTEMD_RUN_LIMITS (e.g. CPUQuota=400% per
+  // the human ruling). Without clearing it, that override leaks into every child runner via
+  // `...process.env`, so the AC1 "default limits" test would observe 400% instead of the default
+  // 200% the runner uses when the override is absent. Unless a test explicitly provides its own
+  // limits, drop the inherited override so the child uses the runner's DEFAULT_SYSTEMD_RUN_LIMITS.
+  if (!("QUAY_TEST_SYSTEMD_RUN_LIMITS" in env)) delete mergedEnv.QUAY_TEST_SYSTEMD_RUN_LIMITS;
   const child = spawn(process.execPath, args, { stdio: ["ignore", "pipe", "pipe"], env: mergedEnv });
   // Drain pipes so a chatty fake suite cannot block the child.
   child.stdout.on("data", () => {});
@@ -186,6 +192,107 @@ test("AC1 — a green run writes the exact suite-state shape to .quay/full-suite
     assert.ok(s.finishedAt > 0, "finishedAt epoch seconds is positive");
     assert.equal(typeof s.durationMs, "number", "durationMs is the AC5 measurement hook");
     assert.ok(s.durationMs >= 0);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── gap-verification-round-missing-phase-ms-breaks-cost-attribution: AC2/AC3 (phase_ms) ─────────────
+// test.sh's FULL-SUITE default path emits `__OVERHEAD__ <phase>_ms=N` per fixed-overhead phase
+// (serial/lowconc/main + run_static_checks). The runner must carry those phase readings into the
+// verification-round record so per_test_ms is no longer a phase-blind mix of truncated-red and
+// complete-green rounds (the 08-09 "700s regression" misjudgment source).
+
+test("AC2/AC3 — a complete round records all four *_phase_ms from the __OVERHEAD__ stream lines", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-oh-"));
+  // The fake suite emits the phase markers to STDERR exactly like test.sh's _oh_emit does, then a
+  // green TAP summary. Values mirror the r266 decomposition (static 33s / serial 640s / lowconc
+  // 272s / main 650s — the task body's anchored split).
+  const suite = [
+    'echo "__OVERHEAD__ run_static_checks_ms=33000" >&2',
+    'echo "__OVERHEAD__ serial_phase_ms=640000" >&2',
+    'echo "__OVERHEAD__ lowconc_phase_ms=272000" >&2',
+    'echo "__OVERHEAD__ main_phase_ms=650000" >&2',
+    'echo "# tests 5"',
+    'echo "# pass 5"',
+    'echo "# fail 0"',
+    'echo "# cancelled 0"',
+    "exit 0",
+  ].join("\n");
+  const { f, dir } = fakeSuite(suite);
+  try {
+    const child = runRunner({ root, command: `bash ${f}`, laneCount: 8 });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, `runner exits 0 on green, got ${code}`);
+    const vrf = path.join(root, ".quay", "verification-round.jsonl");
+    assert.ok(fs.existsSync(vrf), "verification-round.jsonl written");
+    const rec = JSON.parse(fs.readFileSync(vrf, "utf8").split("\n").filter((l) => l.trim())[0]);
+    assert.equal(rec.static_phase_ms, 33000, "static_phase_ms ← run_static_checks_ms");
+    assert.equal(rec.serial_phase_ms, 640000, "serial_phase_ms present");
+    assert.equal(rec.lowconc_phase_ms, 272000, "lowconc_phase_ms present");
+    assert.equal(rec.main_phase_ms, 650000, "main_phase_ms present");
+    // AC3 — the four readings make a complete round phase-annotatable: the whole phase set is in
+    // the record, so per_test_ms carries the full-suite context (unlike the truncated shape below).
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC2/AC3 — a kill-on-red-TRUNCATED red round is distinguishable: serial/lowconc present, main_phase_ms ABSENT", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-oh-red-"));
+  // The pre-main phases completed (their __OVERHEAD__ markers fired) but the run reds DURING main
+  // and is cut before the main-phase completion marker — the exact shape a kill-on-red 30s tree-kill
+  // leaves. per_test_ms on such a round must NOT be read as a full-suite per-test cost (the 700s
+  // misjudgment: truncated red reads like a regression).
+  const suite = [
+    'echo "__OVERHEAD__ run_static_checks_ms=33000" >&2',
+    'echo "__OVERHEAD__ serial_phase_ms=640000" >&2',
+    'echo "__OVERHEAD__ lowconc_phase_ms=272000" >&2',
+    'echo "not ok 1 - boom"',
+    'echo "# tests 5"',
+    'echo "# pass 4"',
+    'echo "# fail 1"',
+    'echo "# cancelled 0"',
+    "exit 1",
+  ].join("\n");
+  const { f, dir } = fakeSuite(suite);
+  try {
+    const child = runRunner({ root, command: `bash ${f}`, laneCount: 8 });
+    const { code } = await waitExit(child);
+    assert.equal(code, 1, `runner exits 1 on red, got ${code}`);
+    const vrf = path.join(root, ".quay", "verification-round.jsonl");
+    assert.ok(fs.existsSync(vrf), "verification-round.jsonl written");
+    const rec = JSON.parse(fs.readFileSync(vrf, "utf8").split("\n").filter((l) => l.trim())[0]);
+    assert.equal(rec.state, "red", "truncated round is red");
+    assert.equal(rec.serial_phase_ms, 640000, "serial phase completed before the cut");
+    assert.equal(rec.lowconc_phase_ms, 272000, "lowconc phase completed before the cut");
+    assert.equal(rec.main_phase_ms, undefined, "main_phase_ms ABSENT — the truncation is visible in the record");
+    // AC3 — the phase reading is what separates this truncated red's per_test_ms from a complete
+    // green round's: a reader sees serial+lowconc WITHOUT main and knows the per-test cost is NOT
+    // a full-suite number.
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC2 backward-compat — a suite with NO __OVERHEAD__ emission records NO *_phase_ms fields", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-oh-none-"));
+  const { f, dir } = fakeSuite(GREEN_SUITE);
+  try {
+    const child = runRunner({ root, command: `bash ${f}`, laneCount: 8 });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, `runner exits 0 on green, got ${code}`);
+    const vrf = path.join(root, ".quay", "verification-round.jsonl");
+    const rec = JSON.parse(fs.readFileSync(vrf, "utf8").split("\n").filter((l) => l.trim())[0]);
+    // Scoped/legacy runs (and any suite that skips __OVERHEAD__ emission) must not fabricate zeros
+    // — the fields stay absent, and a reader tolerates that (same contract as per_test_ms/redAt).
+    assert.equal(rec.static_phase_ms, undefined, "no static_phase_ms on a non-__OVERHEAD__ suite");
+    assert.equal(rec.serial_phase_ms, undefined, "no serial_phase_ms on a non-__OVERHEAD__ suite");
+    assert.equal(rec.lowconc_phase_ms, undefined, "no lowconc_phase_ms on a non-__OVERHEAD__ suite");
+    assert.equal(rec.main_phase_ms, undefined, "no main_phase_ms on a non-__OVERHEAD__ suite");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(dir, { recursive: true, force: true });
@@ -809,6 +916,33 @@ test("AC2/AC3/AC4 — a static-check-red run writes reason=static-check + machin
   }
 });
 
+test("gap-task-file-static-syntax: a --no-block task-file checker round (violations recorded, exit 0) is GREEN, not static-check red", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-noblock-"));
+  // The post-fix shape (option ①): task-contract-check runs with --no-block — it prints VIOLATION
+  // lines + "recorded (non-blocking)" (the "new since baseline: N" marker is deliberately avoided),
+  // exits 0, and the suite proceeds to a green test phase. The round must be GREEN — task-file
+  // Contract/AC syntax must not consume a verification opportunity.
+  const { f, dir } = fakeSuite(
+    'echo "VIOLATION: tasks/gap-foo.md — V1: Contract block missing invariant line"\n' +
+      'echo "recorded (non-blocking, grow-only ledger): 6 new task-file violation(s) — task-file syntax does NOT block the verification round"\n' +
+      'echo "ratchet ceiling: 6; recorded (non-blocking): 6 (tasks/gap-foo.md: V1); resolved: 0"\n' +
+      'echo "selected 1 files (groups=product,engine)"\n' +
+      'echo "# tests 1"\necho "# pass 1"\necho "# fail 0"\necho "# cancelled 0"\n' +
+      "exit 0",
+  );
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, "runner exits 0 — the round is green; task-file syntax did not block");
+    const s = readState(root);
+    assert.equal(s.state, "green", `expected green (recorded-not-blocking), got: ${JSON.stringify(s)}`);
+    assert.notEqual(s.reason, "static-check", "a recorded-not-blocking round is NOT a static-check red");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("AC2b — the static-check phase gate: test-phase output (selected N files) stops static-check patterns firing on test fixtures (round-6 2026-08-09 false-red)", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-pgate-"));
   // The round-6 false-red shape: a passing test (candidate-contracts.test.mjs) prints
@@ -1412,6 +1546,68 @@ test("AC2/AC3 e2e — a `__PERFILE__ ... passed=false` per-file line flips red a
   }
 });
 
+test("AC2 e2e — a GREEN round archives stderr __OVERHEAD__ phase lines (stderr is teed, not dropped)", async () => {
+  // test.sh's _oh_emit writes the fixed-overhead decomposition to STDERR (>&2). The runner must
+  // archive those lines into .quay/full-suite.log — the outer's verification round greps that log
+  // for `__OVERHEAD__`. This fake suite emits one line to stdout and one to STDERR on a green run;
+  // both must land in the archived log (gap-red-round-loses-overhead-phase-decomposition AC2).
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-oh-green-"));
+  const { f, dir } = fakeSuite(
+    'echo "__OVERHEAD__ lock_overhead_ms=42"\n' +
+      'echo "__OVERHEAD__ main_phase_ms=650104" >&2\n' +
+      'echo "# tests 1"\necho "# pass 1"\necho "# fail 0"\necho "# cancelled 0"\nexit 0',
+  );
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, `green suite exits 0, got ${code}`);
+    assert.equal(readState(root).state, "green");
+    const log = read(path.join(root, ".quay", "full-suite.log"));
+    assert.match(log, /__OVERHEAD__ lock_overhead_ms=42/, "stdout __OVERHEAD__ line reached the archived log");
+    assert.match(
+      log,
+      /__OVERHEAD__ main_phase_ms=650104/,
+      "STDERR __OVERHEAD__ line reached the archived log (stderr is teed, not dropped)",
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC2/AC3 e2e — a RED/killed round's archived log still carries stderr __OVERHEAD__ phase lines (red round OVERHEAD non-zero)", async () => {
+  // gap-red-round-loses-overhead-phase-decomposition: kill-on-red truncates the main phase BEFORE
+  // test.sh's full 9-segment emit, so a red round historically archived ZERO __OVERHEAD__ lines.
+  // With the partial fallback, test.sh emits the COMPLETED segments (serial/lowconc) with partial=1
+  // to stderr BEFORE the kill; the runner must archive those lines even though the round is red and
+  // the child is killed. This fake suite writes the partial-phase lines to stderr, reds early, then
+  // goes silent so the runner's red-grace kill fires — the __OVERHEAD__ count must be non-zero.
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-oh-red-"));
+  const { f, dir } = fakeSuite(
+    'echo "__OVERHEAD__ lock_overhead_ms=42 partial=1"\n' +
+      'echo "__OVERHEAD__ serial_phase_ms=639986 partial=1" >&2\n' +
+      'echo "__OVERHEAD__ lowconc_phase_ms=271616 partial=1" >&2\n' +
+      'echo "not ok 1 - boom"\n' +
+      "sleep 5\n",
+  );
+  try {
+    const child = runRunner({ root, command: `bash ${f}`, env: { QUAY_TEST_RED_GRACE_MS: "300" } });
+    const { code } = await waitExit(child);
+    assert.notEqual(code, 0, "runner exits non-zero on the red");
+    const s = readState(root);
+    assert.equal(s.state, "red", "the failure flipped red");
+    const log = read(path.join(root, ".quay", "full-suite.log"));
+    // The red round's phase decomposition is present DESPITE the kill — the whole point of AC2/AC3.
+    assert.match(log, /__OVERHEAD__ lock_overhead_ms=42 partial=1/, "stderr partial line reached the archived log");
+    assert.match(log, /__OVERHEAD__ serial_phase_ms=639986 partial=1/, "completed serial phase present on the red round");
+    assert.match(log, /__OVERHEAD__ lowconc_phase_ms=271616 partial=1/, "completed lowconc phase present on the red round");
+    assert.ok((log.match(/__OVERHEAD__/g) || []).length >= 3, "the red round's __OVERHEAD__ count is non-zero");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("AC5 e2e — a `tmux-leak-scan: FAIL` residual line (candidate C) flips red with failures non-empty (leak is a real residual)", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-leak-"));
   // Candidate C merge semantics: the suite-tail leak scan reports a residual to the stream
@@ -1864,7 +2060,7 @@ test("AC1 unit — buildSystemdRunArgv wraps a command in systemd-run --user --s
     "-p",
     "MemoryMax=4G",
     "-p",
-    "CPUQuota=200%",
+    "CPUQuota=400%",
     "-p",
     "TasksMax=200",
     "bash",
@@ -1881,7 +2077,7 @@ test("AC1 unit — parseSystemdRunLimits merges a seam override over the default
   const l = parseSystemdRunLimits("MemoryMax=64M TasksMax=20");
   assert.equal(l.memoryMax, "64M");
   assert.equal(l.tasksMax, "20");
-  assert.equal(l.cpuQuota, "200%", "an unchanged key keeps the default");
+  assert.equal(l.cpuQuota, "400%", "an unchanged key keeps the default");
   assert.deepEqual(parseSystemdRunLimits(undefined), DEFAULT_SYSTEMD_RUN_LIMITS);
   // an unknown key is ignored (fail-safe — never produce an unparseable scope property)
   assert.deepEqual(parseSystemdRunLimits("MemoryMax=64M Bogus=1"), { ...DEFAULT_SYSTEMD_RUN_LIMITS, memoryMax: "64M" });
@@ -1909,7 +2105,7 @@ test(
       assert.equal(s.state, "green");
       assert.ok(s.systemdRun, "the state carries the systemdRun limits (suite ran inside a cgroup scope)");
       assert.equal(s.systemdRun.memoryMax, "4G");
-      assert.equal(s.systemdRun.cpuQuota, "200%");
+      assert.equal(s.systemdRun.cpuQuota, "400%");
       assert.equal(s.systemdRun.tasksMax, "200");
       // AC1 observable — the applied cgroup attributes (systemctl --user show) land in the state dir
       const evidence = path.join(root, ".quay", "suite-cgroup-evidence.txt");
@@ -1918,7 +2114,7 @@ test(
       assert.match(txt, /scope_unit=run-p\d+-/, "the transient scope unit name is recorded");
       assert.match(txt, /MemoryMax=4294967296/, "MemoryMax=4G applied (bytes)");
       assert.match(txt, /EffectiveTasksMax=200/, "TasksMax=200 applied (effective)");
-      assert.match(txt, /CPUQuotaPerSecUSec=2s/, "CPUQuota=200% applied");
+      assert.match(txt, /CPUQuotaPerSecUSec=4s/, "CPUQuota=400% applied (full 4 physical cores)");
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
       fs.rmSync(dir, { recursive: true, force: true });

@@ -210,12 +210,16 @@ test("AC1 — gateCostName extracts the executed script basename (all 14 gate sc
 test("AC2 — ready-pool-check run 3x (35.8→91.2→157.0) yields a readable cost+load sequence; same-n points distinguished by load", () => {
   const POOL = 3;
   const root = makePoolFixture("cc-ac2", POOL);
-  // Delays dominate the ready-pool-check command's own run-to-run jitter (~±100ms), so the recorded
-  // ms sequence is strictly monotonic (the 35.8->91.2->157.0 shape, scaled down to test time).
+  // Delays dominate the ready-pool-check command's own run-to-run jitter. The full suite runs 4
+  // concurrent lanes under a systemd CPUQuota=400% scope, so a machine-loaded run can stretch by
+  // several hundred ms — the previous 400/800/1200 gaps (400ms apart) let load jitter break the
+  // monotonic assertion (r285: "ms is monotonically increasing" failed once under load). Widen the
+  // gaps (1000/1500ms) so the recorded ms sequence stays strictly monotonic even under full-suite
+  // load while preserving the 35.8->91.2->157.0 readable shape, scaled down to test time.
   const runs = [
-    { delayMs: 400, load: "1.0" },
-    { delayMs: 800, load: "5.0" },
-    { delayMs: 1200, load: "10.0" },
+    { delayMs: 500, load: "1.0" },
+    { delayMs: 1500, load: "5.0" },
+    { delayMs: 3000, load: "10.0" },
   ];
   for (const r of runs) {
     const res = wrapCost({

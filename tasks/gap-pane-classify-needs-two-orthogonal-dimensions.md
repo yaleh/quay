@@ -1,7 +1,10 @@
 ---
 id: gap-pane-classify-needs-two-orthogonal-dimensions
-title: "pane-state-classify 枚举态少一个维度——【主线程能否收输入】与【后台 agent 是否在跑】正交，单枚举装不下 ⇒ MARKER-STALE 是诚实报告非分类器 bug（{input空闲+agents在跑} 判 unknown）；正确形态=两个正交字段 input_state/work_in_flight；附缺口：PANEL_BUSY_RE 只匹配 ctrl+t（面板折叠态），展开态变 ↓ to manage 不命中"
-status: todo
+title: pane-state-classify 枚举态少一个维度——【主线程能否收输入】与【后台 agent 是否在跑】正交，单枚举装不下 ⇒
+  MARKER-STALE 是诚实报告非分类器 bug（{input空闲+agents在跑} 判 unknown）；正确形态=两个正交字段
+  input_state/work_in_flight；附缺口：PANEL_BUSY_RE 只匹配 ctrl+t（面板折叠态），展开态变 ↓ to
+  manage 不命中
+status: done
 labels:
   - gap
   - defect
@@ -38,17 +41,17 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录实测 pane（`← 1 agent · ↓ to manage` + `● main`/`◯ general-purpose`）+ `classifyPaneState` 返回 unknown（本任务 Proposal 已含）
-- [ ] AC2: **两正交字段**——`classifyPaneStateOrthogonal` 返回 `input_state` + `work_in_flight`；实测 pane 得 `waiting-input` + `true`
-- [ ] AC3: **work-in-flight 独立标志**——`← N agent`/agent 列表是 work_in_flight 标志（非 busy）；空闲时渲染不误判（代码注释拒绝保留）
-- [ ] AC4: **PANEL_BUSY_RE 补展开态**——`↓ to manage` 加入匹配（若走单枚举路线必补）；或新字段天然覆盖
-- [ ] AC5: **消费方适配 + 既有不回归**——inner-blocked-signal/session-liveness/supervisor-health 读新字段；`--for-task` scoped 门绿
+- [x] AC1: **复现固化**——任务体记录实测 pane（`← 1 agent · ↓ to manage` + `● main`/`◯ general-purpose`）+ `classifyPaneState` 返回 unknown（本任务 Proposal 已含）
+- [x] AC2: **两正交字段**——`classifyPaneStateOrthogonal` 返回 `input_state` + `work_in_flight`；实测 pane 得 `waiting-input` + `true`
+- [x] AC3: **work-in-flight 独立标志**——`← N agent`/agent 列表是 work_in_flight 标志（非 busy）；空闲时渲染不误判（代码注释拒绝保留）
+- [x] AC4: **PANEL_BUSY_RE 补展开态**——`↓ to manage` 加入匹配（若走单枚举路线必补）；或新字段天然覆盖
+- [x] AC5: **消费方适配 + 既有不回归**——inner-blocked-signal/session-liveness/supervisor-health 读新字段；`--for-task` scoped 门绿
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全部勾上
-- [ ] 修后实跑：实测 pane 返回两字段（贴输出）；MARKER-STALE 场景自洽
-- [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
+- [x] AC1–AC5 全部勾上
+- [x] 修后实跑：实测 pane 返回两字段（贴输出）；MARKER-STALE 场景自洽
+- [x] 既有测试 + 新增测试全绿（`--for-task` scoped）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
 
 ## Touches
@@ -79,3 +82,18 @@ resume    新字段 / PANEL_BUSY_RE / 消费方 / 测试分步提交，任一步
 reviewer: outer
 at: 2026-08-11
 changed: manager 04:1x 根因查清——MARKER-STALE 非分类器 bug，是枚举态少一个维度（{input空闲+agents在跑} 装不下）；两正交字段 input_state/work_in_flight 是正确形态；PANEL_BUSY_RE 缺展开态 ↓ to manage。既有两 done 任务未覆盖此形态。实现归 inner，判定归 outer
+
+## Inner 实跑证据（2026-08-11，inner 实现完成）
+
+实现：`classifyPaneStateOrthogonal` 并行函数（旧枚举 `classifyPaneState` 保持不变）——input_state + work_in_flight 两正交字段；`↓ to manage` 展开态由 work_in_flight 天然覆盖（PANEL_BUSY_RE 保持 `ctrl+t to hide tasks`，代码注释钉死 `↓ to manage` 非 busy——AC4「或新字段天然覆盖」分支）；消费方 inner-blocked-signal/session-liveness/supervisor-health 适配。分步提交：990aa05f（新字段）/ 93ad3bad（测试）/ ebf0f9b6（消费方）。
+
+- **Contract measure 1（状态行单独传入，旧枚举复现 unknown = MARKER-STALE 根因）**：
+  `node --no-warnings --experimental-strip-types plugin/scripts/pane-state-classify.ts --pane-text "⏵⏵ bypass permissions on (shift+tab to cycle) · ← 1 agent · ↓ to manage" --json`
+  → `{"state":"unknown","confidence":0,...,"input_state":"waiting-input","work_in_flight":true}` —— 旧枚举无槽返回 unknown（复现固化），新字段 input_state=waiting-input + work_in_flight=true。
+- **实测 pane（状态行 + agent 列表 `● main` / `◯ general-purpose Reviewing the full diff summary. 17m 13s`）**：
+  → `input_state=waiting-input` + `work_in_flight=true`（AC2 锚 (a) 达成）。
+- **MARKER-STALE 自洽**（AC3/AC5）：session-liveness `_sl_pane_verdict` 改读 `--classify --orthogonal`（input_state/work_in_flight/region）；`transcript 动 + input 空闲 + work_in_flight=1` 抑制 SESSION-MARKER-STALE（锚 (b)）。纯空闲 pane（无 `← N agent` 无 agent 列表）work_in_flight=false，MARKER-STALE 仍照常发出——既有 AC2 交叉正控制测试绿。
+- **旧枚举兼容**（锚 (c)）：waiting-input/busy/permission-prompt 单字段测试全绿（pane-state-classify.test.mjs / blocked-signal-parameterized.test.mjs / ruling-required-wiring.test.mjs）。
+- **scoped 门绿**（AC5 锚 (d)）：`bash scripts/test.sh --for-task gap-pane-classify-needs-two-orthogonal-dimensions --allow-thin` → 69 tests, 0 fail, 0 cancelled（pane-state-classify 29 + inner-blocked-signal 40 + supervisor-health 5，含新增 4 条正交用例）。另手动跑 session-liveness-events/heartbeat/signals/sweep/target 全绿（selector 未把 session-liveness.sh 配对到 `session-liveness-*.test.mjs` 带后缀文件，属既有选择器盲点，非本次改动）。
+- **--selfcheck**：`pane-state-classify --selfcheck: 46 passed, 0 failed`（新增 orthogonal-* 检查）。
+- **全量套件**：未跑（执行纪律要求不跑全量，留给外层 verification-round 验证 DoD 末项）。

@@ -129,7 +129,7 @@ test("AC3 — recordVerdict writes green (environmental) or red (not environment
   const state = {
     state: "red",
     reason: "failed",
-    failures: [{ line: "not ok 1 - x", file: "plugin/test/session-liveness-signals.test.mjs", in_family: true, kind: "wall-clock", isolate_rerun: "bash scripts/test.sh ..." }],
+    failures: [{ line: "not ok 1 - x", file: "plugin/test/session-liveness-signals-kinds.test.mjs", in_family: true, kind: "wall-clock", isolate_rerun: "bash scripts/test.sh ..." }],
   };
   const { state: triaged } = applyTriage(state, family, REPO_ROOT);
   const green = recordVerdict(triaged.failures, 0, "green");

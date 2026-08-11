@@ -1,7 +1,10 @@
 ---
 id: gap-nyf-branch-existence-vs-commit-trace
-title: "ready-pool 的 not-yet-flipped 判据依赖 task/<id> 分支是否存在且未合——分支一旦合并并删除，信号消失，任务又像崭新的 ready 工作（16 条幽灵池实证）；与 worktree 泄漏同根形状：拿短暂产物（分支存在/worktree 存在）当持久事实（工作已落地/执行体存活）的信号，短暂产物一消失判据就静默翻转；处方=nyf 判据换成持久证据：integration 存在 inner: <id> 或 fan-in: task/<id> 提交 ⇒ 工作已落地，不得再算作可派"
-status: todo
+title: "ready-pool 的 not-yet-flipped 判据依赖 task/<id>
+  分支是否存在且未合——分支一旦合并并删除，信号消失，任务又像崭新的 ready 工作（16 条幽灵池实证）；与 worktree
+  泄漏同根形状：拿短暂产物（分支存在/worktree 存在）当持久事实（工作已落地/执行体存活）的信号，短暂产物一消失判据就静默翻转；处方=nyf
+  判据换成持久证据：integration 存在 inner: <id> 或 fan-in: task/<id> 提交 ⇒ 工作已落地，不得再算作可派"
+status: needs-human
 labels:
   - gap
   - defect
@@ -35,10 +38,10 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 16 条幽灵池实证（18 ready 里 16 已落地、按位置判定 inner:/fan-in: 提交）+ 根形状（分支存在 vs 工作已落地）（本任务 Proposal 已含）
-- [ ] AC2: **nyf 判据换提交痕迹**——integration/git 历史存在 `inner: <id>`/`fan-in: task/<id>` ⇒ 不得再算可派（不随分支删除失效）
-- [ ] AC3: **真·可派数正确**——ready − 已落地 − 待fan-in − 冲突 − 前置；B9 补池用真·可派数而非 pool 数
-- [ ] AC4: **既有不回归**——`--for-task` scoped 门绿
+- [x] AC1: **复现固化**——任务体记录 16 条幽灵池实证（18 ready 里 16 已落地、按位置判定 inner:/fan-in: 提交）+ 根形状（分支存在 vs 工作已落地）（本任务 Proposal 已含）
+- [x] AC2: **nyf 判据换提交痕迹**——integration/git 历史存在 `inner: <id>`/`fan-in: task/<id>` ⇒ 不得再算可派（不随分支删除失效）
+- [x] AC3: **真·可派数正确**——ready − 已落地 − 待fan-in − 冲突 − 前置；B9 补池用真·可派数而非 pool 数
+- [x] AC4: **既有不回归**——`--for-task` scoped 门绿
 
 ## Definition of Done
 
@@ -70,3 +73,11 @@ resume    提交痕迹判据 / 真·可派数 / 测试分步提交，任一步�
 reviewer: outer
 at: 2026-08-11
 changed: manager 05:2x——18 ready 里 16 实现已落地（按位置判定 inner:/fan-in: 提交），分支合并删除后 nyf 信号消失、任务像新 ready；与 worktree 泄漏同根形状（短暂产物当持久信号）。处方：nyf 判据换提交痕迹 + B9 用真·可派数。实现归 inner，判定归 outer
+
+## Inner evidence (2026-08-11)
+
+- **AC1 复现固化**：Proposal 已含 16 条幽灵池实证 + 根形状（分支存在 vs 工作已落地），确认即可。
+- **AC2 判据换提交痕迹**（commit `185ec134`）：`ready-pool-check.ts` 新增 commit-trace 信号——`git log --all --format=%s` 一次池扫描建索引（`buildCommitTraceIndex`），提交 subject 存在 `inner: <id>` / `fan-in: task/<id>` / `merge: fan-in task/<id>` / `merge: fan-in <id>`（`commitSubjectTracesTask`，wordMatch 定界按位置判定）⇒ 工作已落地 ⇒ 不得再算可派。提交 subject 持久于分支删除；`--all` 覆盖两线模型 integration fan-in（stale master 不可见，实证 master..integration=2224）。与 workLanded 同受 AC 完备闸（别改它——traced 但 AC≤50% 仍 stuck-work 可派）。
+- **AC3 真·可派数**（commit `185ec134` 同）：真·可派 = ready − 已落地（commit-trace/nyf 排除）− 待fan-in − 冲突（dispatchable_disjoint）− 前置。主检读实跑（`--root /home/yale/work/quay --cap 5 --json`）：pool 18（7 条先前幽灵 `not-yet-flipped` 排除）、dispatchable_disjoint 8、deficit 2——B9 补池的 pool 不再被幽灵灌水。
+- **AC4 既有不回归**（commit `d2b9f6ac`）：新增测试 3 个（commitSubjectTracesTask 单测 / buildCommitTraceIndex fail-closed / 两线模型集成测试——分支合并+删除 ⇒ done-flip 不可派、stuck-work 仍可派、未落地仍可派），ready-pool-check.test.mjs 66/66 绿；`--for-task` scoped 门 exit 0（task-contract-check no violations、superseded-capability PASS、tick-core-static PASS、delivery-inventory-drift PASS、66/66 tests）。
+- **契约 invoke**（worktree 实跑）：`node --no-warnings --experimental-strip-types plugin/scripts/ready-pool-check.ts --root "$PWD" --cap 5 --json` ⇒ pool 12 / dispatchable_disjoint 9 / criterion_met true。

@@ -1,4 +1,16 @@
-// @test-group governance
+// @test-group serial
+// @load-sensitive child-spawn
+// @load-sensitive-entry 2026-08-11 child-spawn spawn×9 under suite load (round-215 silent passed=false @7721ms)
+// KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — this harness
+// spawns the threshold-scope-check.ts checker as a REAL node child process (~9 spawnSync calls,
+// AC1-AC9 each spawn once per fixture). Under full-suite main-phase concurrency those spawns are
+// start/schedule-delayed, and round-215 (2026-08-10) showed the exact signature: a silent
+// passed=false at 7721ms with ZERO harness output lines (an assertion failure would always write
+// FAIL: to fd 2; zero lines = the process died before the harness could report). Solo 4089ms 9/9
+// green. Same child-spawn family as relation-sync / create-mcp / proposal-convergence / checker-cost
+// (all routed to the concurrency-1 serial phase); this file was left in the default concurrent
+// governance body and is now also routed to serial
+// (gap-threshold-scope-load-flake-fifth-family-member).
 // threshold-scope-check.test.mjs — tasks/gap-quantified-stop-conditions-have-no-scope:
 // the driver-doc prose hygiene checker (quantified stop-conditions must name set+window; named
 // paths must resolve).
@@ -17,7 +29,7 @@
 //   AC10 — placeholder patterns (`NNN`, `<...>`, `*`, `{`) are skipped (`tasks/DIR-NNN.md`).
 //   AC11 — the negative control: a fabricated reference to a nonexistent file MUST be reported;
 //         the same text with a real path MUST NOT.
-//   AC8  — this file uses node:test and declares `// @test-group governance` (line 1).
+//   AC8  — this file uses node:test and declares `// @test-group serial` (line 1).
 //   AC6  — the shrink-only ratchet: the real-repo gate exits 0 and its current violation set
 //         exactly matches the baseline file (a NEW violation would flip growth=true → exit 1).
 //

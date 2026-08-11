@@ -19,6 +19,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const pluginDir = path.resolve(__dirname, "..");
@@ -87,35 +88,168 @@ const STANDARD_INIT_ARGS = (ws) => [
 ];
 const _laydownTemplate = { ws: null, install: null, wtRoot: null };
 
-// laydownTemplate() — lazily builds the read-only template for THIS file process (per-file
-// isolation: the template lives in a module-level variable + an os.tmpdir() mkdtemp, never a
-// shared-checkout path, so the test-isolation R3/R8 ratchets stay green). FAILS LOUD: a template
-// install that does not exit 0 is a real product defect, not something to paper over.
-export function laydownTemplate() {
-  if (_laydownTemplate.ws) return _laydownTemplate;
-  const ws = makeTmp("laydown-tmpl-");
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// Shared prebuilt-install fixture (gap-serial-install-family-shared-prebuilt-fixture AC3)
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// The serial phase's real-install family (12 files) each ran a full `quay-init --loop` install
+// (r266: family sum=865s; measured setup ratio 82.6% in drift-report — AC2). AC3: ONE real install
+// per SERIAL PHASE (not per file), shared across the whole family. Every family file's
+// laydownTemplate() copies from THIS fixture (cp -a, safe: preserves symlinks+permissions; each copy
+// is an independent writable root). The fixture itself is read-only (write bits stripped) so one
+// copy's pollution can never corrupt it — the same AC2-② invariant the per-file template enforced.
+//
+// cp -al hard links are deliberately NOT used: hard-linked copies share inodes, so a copy's
+// `chmod -R u+w` (laydownWorkspace's delta pattern) would strip the read-only guard from the shared
+// fixture itself — breaking isolation for every other file. cp -a costs ~50-150ms per copy (measured
+// in gap-serial-segment-77-... AC2) vs ~6-10s per install — the install is the cost, not the copy.
+//
+// Content-addressed: the fixture path hashes the installed plugin surface (plugin/scripts + loop/ +
+// skills/init + the vendored dist bundles + package.json), so a plugin change yields a FRESH fixture
+// (never a stale reuse) and an unchanged plugin reuses the previous run's fixture (a cache across
+// serial phases — each copy rewrites the fixture's absolute path, so cross-run reuse is safe). Old
+// fixtures (different hash) are simply orphaned in /var/tmp (disk-backed, cleaned on reboot; each is
+// a few MB) — never cleaned by an individual file, which cannot know when the last consumer is done.
+//
+// Cross-file coordination: the serial phase runs family files at concurrency 2, so two files can
+// build the fixture concurrently. The build is guarded by an atomic mkdir lock; a concurrent file
+// polls for the ready marker instead of building twice. A stale lock (>120s, a crashed builder) is
+// stolen and the build retried. FAILS LOUD: a fixture install that does not exit 0 is a real product
+// defect, not something to paper over.
+const FIXTURE_BASE = "/var/tmp"; // disk-backed (worktrees must not live in /tmp tmpfs — same convention as diskWorktreeRoot)
+const FIXTURE_PREFIX = "quay-install-fixture-";
+
+function _sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function _fixtureHash() {
+  const h = createHash("sha1");
+  const files = [];
+  const walk = (d) => {
+    let ents;
+    try { ents = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+    for (const e of ents) {
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) walk(p);
+      else files.push(p);
+    }
+  };
+  walk(path.join(pluginDir, "scripts"));
+  walk(path.join(pluginDir, "loop"));
+  walk(path.join(pluginDir, "skills", "init"));
+  // The vendored dist bundles are gitignored generated artifacts the install lays verbatim into the
+  // target's .quay/runtime/ — include them when present so a rebuilt bundle yields a fresh fixture.
+  for (const b of ["vendor/quay/dist/quay.js", "vendor/quay-native/dist/quay-native.js"]) {
+    const p = path.join(pluginDir, b);
+    if (fs.existsSync(p)) files.push(p);
+  }
+  const pkg = path.join(pluginDir, "package.json");
+  if (fs.existsSync(pkg)) files.push(pkg);
+  files.sort();
+  for (const f of files) {
+    h.update(path.relative(pluginDir, f));
+    h.update(fs.readFileSync(f));
+  }
+  return h.digest("hex").slice(0, 16);
+}
+
+function _fixturePath() {
+  return path.join(FIXTURE_BASE, `${FIXTURE_PREFIX}${_fixtureHash()}`);
+}
+
+function _makeReadOnly(dir) {
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    const p = path.join(dir, e.name);
+    if (e.isSymbolicLink()) continue;
+    const mode = fs.statSync(p).mode;
+    if (e.isDirectory()) { fs.chmodSync(p, mode & ~0o222); _makeReadOnly(p); }
+    else { fs.chmodSync(p, mode & ~0o222); }
+  }
+}
+
+function _readFixtureInstall(ws) {
+  try {
+    const j = JSON.parse(fs.readFileSync(path.join(ws, ".install.json"), "utf8"));
+    return { status: j.status, stdout: j.stdout, stderr: j.stderr };
+  } catch {
+    return null;
+  }
+}
+
+// _buildSharedFixture(ws) — one real install into a clean fixture dir, then make it read-only and
+// record the ready marker + the captured install result (so a cache-hit in another file/run can
+// return the same install output that a fresh install would produce). Holds the lock.
+function _buildSharedFixture(ws) {
+  if (fs.existsSync(ws)) fs.rmSync(ws, { recursive: true, force: true });
+  fs.mkdirSync(ws, { recursive: true });
   const wtRoot = diskWorktreeRoot();
   const install = runInit(ws, [...STANDARD_INIT_ARGS(ws), "--worktree-root", wtRoot]);
   if (install.status !== 0) {
-    cleanup(ws);
-    throw new Error(`laydown template install failed:\n${install.stderr}`);
+    fs.rmSync(ws, { recursive: true, force: true });
+    throw new Error(`shared install fixture build failed:\n${install.stderr}`);
   }
-  // Read-only template (AC2 ②): strip WRITE bits from every dir + file; keep read + execute bits
-  // so laid-down executables stay runnable and the tree stays traversable. Symlinks are left
-  // untouched (permissions do not apply to a link itself; its target is walked normally).
-  const makeReadOnly = (dir) => {
-    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-      const p = path.join(dir, e.name);
-      if (e.isSymbolicLink()) continue;
-      const mode = fs.statSync(p).mode;
-      if (e.isDirectory()) { fs.chmodSync(p, mode & ~0o222); makeReadOnly(p); }
-      else { fs.chmodSync(p, mode & ~0o222); }
+  fs.writeFileSync(path.join(ws, ".install.json"),
+    JSON.stringify({ status: install.status, stdout: install.stdout, stderr: install.stderr }));
+  _makeReadOnly(ws);
+  fs.writeFileSync(path.join(ws, ".fixture-ready"), `${pluginDir}\n`);
+  return { ws, install, wtRoot };
+}
+
+// sharedFixture() — the family's ONE real install per serial phase. Lazy, single-flight (atomic
+// mkdir lock), cached across files AND runs (content-addressed). Returns { ws, install, wtRoot }:
+// ws is the read-only fixture root; install is the captured install result (from .install.json on a
+// cache hit), used by laydownWorkspace to return install output with paths rewritten to the copy.
+export function sharedFixture() {
+  const ws = _fixturePath();
+  const readyMarker = path.join(ws, ".fixture-ready");
+  // A fixture is reusable only when BOTH the ready marker AND a valid captured install result exist
+  // (a marker without .install.json is a partial/corrupt build — rebuild, don't reuse).
+  const ready = () => fs.existsSync(readyMarker) && _readFixtureInstall(ws) !== null;
+  if (ready()) {
+    return { ws, install: _readFixtureInstall(ws), wtRoot: null };
+  }
+  const lock = `${ws}.lock`;
+  let held = false;
+  try { fs.mkdirSync(lock); held = true; } catch { /* another file holds the lock — wait below */ }
+  if (!held) {
+    const deadline = Date.now() + 180000;
+    while (Date.now() < deadline) {
+      if (ready()) return { ws, install: _readFixtureInstall(ws), wtRoot: null };
+      // Steal a stale lock (a crashed builder) — the lock dir's mtime is the acquisition time.
+      try {
+        const st = fs.statSync(lock);
+        if (Date.now() - st.mtimeMs > 120000) {
+          fs.rmSync(lock, { recursive: true, force: true });
+          try { fs.mkdirSync(lock); held = true; break; } catch { /* raced — keep waiting */ }
+        }
+      } catch {
+        // Lock vanished (released between check and stat) — retry acquiring it.
+        try { fs.mkdirSync(lock); held = true; break; } catch { /* raced */ }
+      }
+      _sleepSync(250);
     }
-  };
-  makeReadOnly(ws);
-  _laydownTemplate.ws = ws;
-  _laydownTemplate.install = install;
-  _laydownTemplate.wtRoot = wtRoot;
+    if (!held) {
+      throw new Error(`shared install fixture build timed out (lock ${lock} held by another serial-phase file)`);
+    }
+  }
+  try {
+    return _buildSharedFixture(ws);
+  } finally {
+    fs.rmSync(lock, { recursive: true, force: true });
+  }
+}
+
+// laydownTemplate() — the read-only template THIS file's tests copy from. Now served by the SHARED
+// prebuilt-install fixture (AC3): one real install per serial phase, reused by the whole family.
+// The template lives at a content-addressed /var/tmp path (never a shared-checkout path, so the
+// test-isolation R3/R8 ratchets stay green). FAILS LOUD: a fixture install that does not exit 0 is
+// a real product defect, not something to paper over.
+export function laydownTemplate() {
+  if (_laydownTemplate.ws) return _laydownTemplate;
+  const fixture = sharedFixture();
+  _laydownTemplate.ws = fixture.ws;
+  _laydownTemplate.install = fixture.install;
+  _laydownTemplate.wtRoot = fixture.wtRoot;
   return _laydownTemplate;
 }
 

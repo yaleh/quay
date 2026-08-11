@@ -137,6 +137,28 @@ if ! bash "${PLUGIN_DEST}/scripts/capability-catalog.sh" --entry-surface; then
 fi
 LOOSE_SH_COUNT="$(find "${PLUGIN_DEST}" -name '*.sh' | wc -l | tr -d ' ')"
 echo "Delivery form measured: ${LOOSE_SH_COUNT} loose .sh staged | consumer-facing surface declared + gated (AC3)"
+# ── gap-shipped-ts-files-are-not-bundled-80-raw-typescript-in-the-artifact ─────────────────────────
+# The plugin's consumer-referenced .ts used to ship RAW (80 files), so every invocation on a
+# consumer machine paid `node --experimental-strip-types` and the consumer's Node had to support
+# the flag — while Core (`package/dist/quay.js`) and the vendored runtimes
+# (`package/plugin/vendor/*/dist/*.js`) were already bundled. Human ruling 2026-08-06: the user
+# should get "a small number of executable files", aligned with Core. So, on the STAGED copy:
+#   1. build per-entry ESM bundles (plugin/scripts/dist/*.js + plugin/gate-scripts/dist/*.js)
+#      with the SAME esbuild config as Core's build-dist.mjs (bundle/node/esm + createRequire
+#      banner for yaml's CJS shim) — the entry set is DERIVED from the shipped surface's own
+#      references, never hand-maintained;
+#   2. DELETE the raw .ts from the staged artifact (each is either an entrypoint bundle or
+#      inlined into one; internals no longer ship standalone);
+#   3. rewrite the staged invokers (tick docs, skills, probes, .sh wrappers, quay-init's
+#      mechanism derivation) to reference plugin/scripts/dist/*.js instead of the raw .ts.
+# The SOURCE tree keeps its .ts (readable/editable dev form); the shipped artifact is the
+# crystallized executable form. The bundles run on a bare Node >=20, no --experimental-strip-types.
+echo "Building the plugin's bundled dist entrypoints (scripts/dist/*.js + gate-scripts/dist/*.js)..."
+node "${SCRIPT_DIR}/build-plugin-dist.mjs" "${PLUGIN_DEST}"
+echo "Removing raw plugin .ts from the staged artifact (bundled/inlined into dist/*.js)..."
+find "${PLUGIN_DEST}/scripts" "${PLUGIN_DEST}/gate-scripts" -name '*.ts' -delete
+echo "Rewriting staged invokers (docs/.sh/quay-init) to reference the dist bundles..."
+node "${SCRIPT_DIR}/build-plugin-dist.mjs" --rewrite "${PLUGIN_DEST}"
 echo "Staged: ${PLUGIN_DEST} ($(find "${PLUGIN_DEST}" -type f | wc -l) files)"
 
 # Pack the package. This produces quay-<version>.tgz in the current directory.

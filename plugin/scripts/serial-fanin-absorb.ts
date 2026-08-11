@@ -97,6 +97,6 @@ export async function main(argv) {
   return 0;
 }
 
-if (isDirectEntry(import.meta)) {
+if (isDirectEntry(import.meta, undefined, "serial-fanin-absorb")) {
   main(process.argv).then((code) => process.exit(code));
 }

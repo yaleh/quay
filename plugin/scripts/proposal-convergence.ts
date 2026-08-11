@@ -2649,6 +2649,6 @@ async function _cliMain(argv) {
   return 2;
 }
 
-if (isDirectEntry(import.meta)) {
+if (isDirectEntry(import.meta, undefined, "proposal-convergence")) {
   _cliMain(process.argv).then((code) => process.exit(code));
 }

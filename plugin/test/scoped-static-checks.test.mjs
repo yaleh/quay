@@ -338,6 +338,26 @@ t("buildCommand — subset-touched resolves ${repo_root} and appends --strict-su
   assert.match(cmd, /\/tmp\/root\/tasks\/foo\.md/);
 });
 
+// gap-task-file-static-syntax-should-not-block-product-verification, option ① — the verification-round
+// path runs task-file static checkers in --no-block (recorded, never red). The scoped tier inherits it
+// from the run_static_checks command line, so a scoped run is ALSO never blocked by task-file syntax.
+t("buildCommand — the task-file checker's scoped command inherits --no-block (verification-round degradation)", async () => {
+  const mod = await importMod();
+  const registry = mod.parseStaticCheckRegistry(fs.readFileSync(TEST_SH, "utf8"));
+  const { selected } = mod.selectStaticChecksForTouches(["tasks/foo.md"], registry);
+  const contract = selected.find((s) => s.name === "task-contract-check");
+  assert.ok(contract, "contract consumer selected for a task-file touch");
+  const cmd = mod.buildCommand(contract, "/tmp/root");
+  // The REAL run_static_checks line carries --no-block; the scoped command preserves it alongside
+  // the appended --strict-subset (a scoped run is also a verification — task-file syntax must not stop it).
+  assert.match(cmd, /--no-block/, `scoped command must inherit --no-block: ${cmd}`);
+  assert.match(cmd, /--strict-subset/, `scoped command must still append --strict-subset: ${cmd}`);
+  // The full-suite registry line for task-ac-carryover-check also carries --no-block.
+  const carry = registry.find((c) => c.name === "task-ac-carryover-check");
+  assert.ok(carry, "task-ac-carryover-check registered");
+  assert.match(carry.commandLine, /--no-block/, `full registry line must carry --no-block: ${carry.commandLine}`);
+});
+
 // ── AC2: the full set is unchanged (registry coverage vs checker-mutation-check's own parser) ───────
 
 t("AC2 — every run_static_checks checker checker-mutation-check sees is in the tier registry", async () => {

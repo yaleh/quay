@@ -411,7 +411,7 @@ export function selfcheck(): boolean {
   return fail === 0;
 }
 
-const isDirect = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+const isDirect = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]) && path.basename(process.argv[1]).replace(/.(?:js|ts|mjs)$/, "") === "transcript-delivery-check";
 if (isDirect) {
   if (process.argv.includes("--selfcheck")) process.exit(selfcheck() ? 0 : 1);
   process.exit(main(process.argv));

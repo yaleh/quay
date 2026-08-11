@@ -30,7 +30,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { makeTmp, cleanup, runInit, pluginDir } from "./quay-init-loop-helpers.mjs";
+import { makeTmp, cleanup, runInit, pluginDir, laydownWorkspace } from "./quay-init-loop-helpers.mjs";
 
 const INIT_ARGS = (ws) => [
   "--loop", "--root", ws, "--project", "proj",
@@ -45,9 +45,10 @@ const CORE_BASENAMES = [
 
 // ── AC2: the three exec cores ship in the derived set + are laid down ────────────────────────────────
 test("AC2 — the three exec-core docs are in the derived laydown set; a --loop install lays them to orchestration/", () => {
-  const ws = makeTmp();
+  // AC3 (gap-serial-install-family-shared-prebuilt-fixture): the initial install is pure setup — copy
+  // it from the shared prebuilt fixture; the `measure` re-run below stays a REAL install.
+  const { ws, install: r } = laydownWorkspace();
   try {
-    const r = runInit(ws, INIT_ARGS(ws));
     assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
     assert.match(r.stdout, /verify-referenced-landed: OK/, "referenced ⊆ landed must pass with the cores landed");
     // The two default-loop cores land in the target's orchestration/ (the path the tick templates reference).
@@ -69,10 +70,11 @@ test("AC2 — the three exec-core docs are in the derived laydown set; a --loop 
 
 // ── AC3: manager-tick-core is opt-in (--manager), not in the default --loop set ───────────────────────
 test("AC3 — manager-tick-core.md is OPT-IN: absent in a default --loop, present with --manager", () => {
-  // Default --loop: the manager core must NOT land.
-  const wsDefault = makeTmp();
+  // Default --loop: the manager core must NOT land. AC3: the default install is pure setup — copy it
+  // from the shared prebuilt fixture (a default --loop install, so it has no --manager core and its
+  // output carries the opt-in skip report).
+  const { ws: wsDefault, install: r } = laydownWorkspace();
   try {
-    const r = runInit(wsDefault, INIT_ARGS(wsDefault));
     assert.equal(r.status, 0, `default init must exit 0:\n${r.stderr}`);
     assert.ok(!fs.existsSync(path.join(wsDefault, "orchestration", "manager-tick-core.md")),
       "default --loop must NOT lay manager-tick-core.md (opt-in via --manager)");

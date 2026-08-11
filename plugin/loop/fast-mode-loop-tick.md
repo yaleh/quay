@@ -135,7 +135,7 @@ bare-x-vitest-false-red` AC3）。两层绝不同时跑全量套件。
 槽位帽（B 面）、本节的资源闸/外层调度（A 面）**都读这同一预算，不各自推导**：
 - **worker 数**：test.sh 默认并发 = `max(1, floor((total_budget − in_use) / 1.0))`——空闲时 = nproc（墙钟甜点），
   已有嵌套派生（quay-init 族 / 会话族内部 spawn）在跑时自动收口，**嵌套不再绕过上限**（17-19 进程 / load 18.70 的根因）；
-- **槽位帽**：`effective_cap = min(档位cap, max(1, available))`——预算耗尽（available=0）时槽位帽落到 1，饱和主机不再派发；
+- **槽位帽**：**固定 `effective_cap = 5`**（人 2026-08-11 裁定：与 manager A2/outer A6 对齐）——cap-from-gate 的 `min(档位cap, max(1, available))` 公式**降为观测**（读其 band/effective_cap 记 tick-log，不参与派发裁决；动态值曾随负载 2-5 跳压低派发，实证 2026-08-11）；
 - **资源闸**：report 模式输出 `total_budget / budget_in_use / budget_available`（与 test.sh/cap-from-gate 同一权威）。
 验证判据：任何配置下 `ps -e -o comm= | grep -cx node-MainThread` ≤ total_budget。
 **全量套件本身已移到外层后台**（`gap-full-suite-belongs-to-outer-background-above-3-min`，AC1/AC3）：
@@ -180,8 +180,9 @@ grep 'tests 2239'    # tests 数等于参考值（2026-08-04 实测 2239＝2227+
 的 `// @load-sensitive <kind>` 标注，`gap-known-load-sensitive-rule-is-doc-only-no-mechanical-triage`
 AC1/AC2）。本散文只讲判读规则，**不再手列族文件**——文件清单以该脚本输出为准（单一来源，消灭双源）。
 代表成员（示意，非清单）：`plugin/test/session-liveness-events.test.mjs`、`session-liveness-heartbeat.test.mjs`、
-`session-liveness-signals.test.mjs`（原 `session-liveness.test.mjs` 拆分，
-`gap-session-liveness-tail-capped-split`）、`plugin/test/cold-start-skill.test.mjs`（及其演练/laid-down
+`session-liveness-signals-kinds.test.mjs` / `session-liveness-signals-thresholds.test.mjs` / `session-liveness-signals-integration.test.mjs`
+（原 `session-liveness.test.mjs` → `session-liveness-signals.test.mjs` 两次拆分，
+`gap-session-liveness-tail-capped-split` / `gap-split-session-liveness-signals-unblocks-lowconc`）、`plugin/test/cold-start-skill.test.mjs`（及其演练/laid-down
 `--once` 同类）、`plugin/test/runner-grouping-list-groups.test.mjs`（`nested-spawn` kind，2026-08-11
 `gap-suite-floor-two-longest-files-bound` 拆 5，同族五文件 runner-grouping-{list-groups,fixture-runs,flags-only,
 governance,serial-anti-stomp}.test.mjs）——它们用**真实进程 + tmux 时序**
@@ -206,7 +207,7 @@ governance,serial-anti-stomp}.test.mjs）——它们用**真实进程 + tmux �
 **机制标记**：这族测试文件头部带 `// @test-group governance` 之外的**显式负载敏感注释**：`// @load-sensitive <kind>`
 （机器可解析，`known-load-sensitive.ts` 读取）+ `KNOWN-LOAD-SENSITIVE` 散文标记（人读）。`known-load-sensitive.ts --check`
 强制「有 KNOWN-LOAD-SENSITIVE 头声明 ⇒ 必有 `@load-sensitive`」，无标注的声明机械拒绝（AC2）。低负载基线实测：单套件连跑 2 次
-全绿（fail 0 / cancelled 0，`$TEST_COMMAND plugin/test/session-liveness-events.test.mjs plugin/test/session-liveness-heartbeat.test.mjs plugin/test/session-liveness-signals.test.mjs plugin/test/cold-start-skill.test.mjs`）；
+全绿（fail 0 / cancelled 0，`$TEST_COMMAND plugin/test/session-liveness-events.test.mjs plugin/test/session-liveness-heartbeat.test.mjs plugin/test/session-liveness-signals-kinds.test.mjs plugin/test/session-liveness-signals-thresholds.test.mjs plugin/test/session-liveness-signals-integration.test.mjs plugin/test/cold-start-skill.test.mjs`）；
 人为负载（并发放量套件）下确实变红 ⇒ 敏感是真实的，标注不是伪装的借口。
 
 ## serial 组的显式判据（gap-serial-group-recompose-nested-runner-criterion，2026-08-07；round-162 扩展）
@@ -292,7 +293,7 @@ exp5 已退役（`.claude/loop.md` 已删除），`.halt` 从「暂停 exp5 循�
 
 | # | 核对项 | 机械判据 |
 |---|---|---|
-| ① | 在飞 agent 是否符合文档 | **读槽位视角，不读原始括号**（`gap-telemetry-brackets-vs-subagents-no-slot-visibility`——括号 ≠ subagent，红窗遗留的未闭合 start 会把健康态误判成满负荷）：`node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --slots --cap "${effective_cap:-3}" --root "$(pwd)" --json` 的 **`realConcurrency` ≤ `effective_cap`**（步骤 4 并发上限，由 `cap-from-gate.sh` 在派发时刻读 cpu 压力（some avg10）算出——见步骤 3.6 前置块；不再固定 3）。**`realConcurrency` = `realInFlight`（括号真实在飞）+ `subagentsInFlight`（非任务 subagent 进程——调查型无括号，`gap-telemetry-underreport-nontask-subagents-not-counted-in-slots`）**——**真实并发 = 括号 + 非任务 subagent**，只读 `realInFlight` 会把调查型 subagent 漏算成空槽（实测 0/3 而实际 1 个 187k-token subagent 在跑 ⇒ 真实并发 4 不是 3）。**`realConcurrency > cap` ⇒ 并发违规（真超派发），判据抓住**；`brackets_reflect_subagents: false` ⇒ 有陈旧括号未 reconcile（`--reconcile` 处理）或 `--task-start`/`--task-end` 对没调齐（AC4）——是偏差，对齐而非误判健康。**反向维度（`gap-closed-bracket-leaves-live-agent-consuming-slots`：括号关 ≠ 进程退）**：`--slots` 的 `closedButLive` / `occupied_slots`（= `realConcurrency` + 已关括号但 executor 仍存在者）——**括号关 ≠ 槽空**，executor 仍在（worktree 未清 / 进程未退）的已关括号仍占槽，`occupied_slots > cap` 同样并发违规；该槽不得派新任务。每个在飞任务有 worktree 且在 `$WORKTREE_ROOT/<slug>`（磁盘，非 `/tmp`） |
+| ① | 在飞 agent 是否符合文档 | **读槽位视角，不读原始括号**（`gap-telemetry-brackets-vs-subagents-no-slot-visibility`——括号 ≠ subagent，红窗遗留的未闭合 start 会把健康态误判成满负荷）：`node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --slots --cap "${effective_cap:-3}" --root "$(pwd)" --json` 的 **`realConcurrency` ≤ `effective_cap`**（步骤 4 并发上限，**固定 `effective_cap=5`**——人 2026-08-11 裁定与 manager A2/outer A6 对齐；`cap-from-gate.sh` 降为观测输出，读其 `band`/`effective_cap` 记 tick-log 不参与派发裁决）。**`realConcurrency` = `realInFlight`（括号真实在飞）+ `subagentsInFlight`（非任务 subagent 进程——调查型无括号，`gap-telemetry-underreport-nontask-subagents-not-counted-in-slots`）**——**真实并发 = 括号 + 非任务 subagent**，只读 `realInFlight` 会把调查型 subagent 漏算成空槽（实测 0/3 而实际 1 个 187k-token subagent 在跑 ⇒ 真实并发 4 不是 3）。**`realConcurrency > cap` ⇒ 并发违规（真超派发），判据抓住**；`brackets_reflect_subagents: false` ⇒ 有陈旧括号未 reconcile（`--reconcile` 处理）或 `--task-start`/`--task-end` 对没调齐（AC4）——是偏差，对齐而非误判健康。**反向维度（`gap-closed-bracket-leaves-live-agent-consuming-slots`：括号关 ≠ 进程退）**：`--slots` 的 `closedButLive` / `occupied_slots`（= `realConcurrency` + 已关括号但 executor 仍存在者）——**括号关 ≠ 槽空**，executor 仍在（worktree 未清 / 进程未退）的已关括号仍占槽，`occupied_slots > cap` 同样并发违规；该槽不得派新任务。每个在飞任务有 worktree 且在 `$WORKTREE_ROOT/<slug>`（磁盘，非 `/tmp`） |
 | ② | 就绪池是否维护 | `node --experimental-strip-types plugin/scripts/ready-pool-check.ts --root "$(pwd)" --cap "${effective_cap:-3}"` 的 `pool` / `dispatchable_disjoint` 字段（`effective_cap` 见步骤 3.6 前置块）；`pool < floor`（=cap×4）或 `dispatchable_disjoint < cap` 时是否已按步骤 3.6 补晋 |
 | ③ | 是否在偷偷做收尾 | inner 已无收尾职责（步骤 2 不写任务状态、步骤 3.5 只写 `--task-start`；收尾是外层步骤 1b 的异步活）。核对：本回合未合并改动里无 `status: *done` 写入、无 `--task-end` 调用、无轮次记录写入。**closure-lag 留痕/信号是外层 1b 的活**（`.quay/closure-pass-last-run.json` 由外层 `closure-lag-check.sh --record` 写、`closure-lag-check.sh` 是外层 tick 的每 tick 检查）——inner 不写不读不碰（`gap-closure-pass-has-no-lag-signal`）。红窗只停派发/合并推进，不停外层收尾 |
 | ④ | 停止条件是否被遵守 | 步骤 3 命中项（合并冲突 / OVER90 / ruling-required / 外层 suite-state `state: red` / 就绪队列空 / 窗口新增 needs-human ≥3）命中时是否停止派发；`.halt` 存在则本 tick 空转 |
@@ -311,20 +312,29 @@ exp5 已退役（`.claude/loop.md` 已删除），`.halt` 从「暂停 exp5 循�
 **被 `<task-notification>` 唤起时（≠ tick 心跳）**，不是空转等下一 tick，而是立即走**槽位回填**路径：
 把刚完成的任务从在飞集合里移除（**它的槽位在完成时刻释放，不在 fan-in 时刻**——遥测括号未闭合不意味着槽位还被占着，AC6：括号≠subagent，`gap-telemetry-brackets-vs-subagents-no-slot-visibility`），然后评估是否立即派发新任务填这个空槽。**不 fan-in、不写任务状态、不重排程**——只做派发重评估；合并与收尾仍归下一 tick / 外层异步。
 
+**醒来第一件事（AC4，`gap-slot-free-not-an-event-slots-stay-empty-missed-without-trace`——把 13:1x 那次「三条必读零读数、先 fan-in 后回填」的次序纠正过来）**：被 `<task-notification>` 唤起后，**先跑 A11/A12/A13 三条必读 + 回填，再 fan-in/写报告**——顺序是硬约束，不是建议：
+1. **A11 就绪池维护**：`node --experimental-strip-types plugin/scripts/ready-pool-check.ts --cap "${effective_cap:-3}" --apply`（`deficit > 0` ⇒ 补晋；自闸：pool<floor 且 promotions 非空才落盘）
+2. **A12 回填评估**：下面的「槽位回填的机械判定」——`slot-refill.ts --in-flight <本会话在飞集合>` 的 `should_refill=true` 且 `recommended` 非空 ⇒ 立即按步骤 4 派发 1-2 条
+3. **A13 slots 遥测**：`fast-mode-telemetry.ts --slots --cap "${effective_cap:-3}"` 读 `real_in_flight` / `slots_free` / `stale_brackets`（`stale_brackets > 0` ⇒ 调 `--reconcile`——inner 核 A13 的强制步，见 `orchestration/fast-mode-tick-core.md`）
+
+**做完这三条必读 + 回填，才轮到 fan-in / 写报告 / 重排程。** 触发器早就存在（完成通知 = harness 原生事件）；
+缺的不是触发器，是【醒来后的第一件事】——本条的产物是：唤醒回合的报告必须带 A11/A12/A13 三条读数 + 回填结果，
+缺一条即本轮报告不完整（C17：守与不守在记录上可区分）。
+
 **先看是什么唤起了本回合**：transcript 里出现 `<task-notification>`（后台 agent 完成）⇒ 走本节的槽位回填（**加速触发源**）；
 否则（/loop 心跳、重锚、人工）⇒ 按「Tick 步骤」全流程，**且步骤 4 无条件先跑 slot-refill**（**兜底必跑触发源**，`gap-slot-refill-only-triggered-on-completion-not-tick-heartbeat`——长任务霸占期间空槽对机制不可见，心跳必须每 tick 问一次）。两者都跑步骤 3 停止条件 + 步骤 4 派发闸——完成事件/心跳只是「何时评估派发」的两个触发源，不是另一套更宽松的闸。
 
 ### 槽位回填的机械判定（强制）
 
 ```bash
-effective_cap="$(bash plugin/scripts/cap-from-gate.sh 2>/dev/null | sed -n 's/^effective_cap=\([0-9]*\)$/\1/p')"
+effective_cap=5   # 固定 cap（人 2026-08-11 裁定：与 manager A2/outer A6 对齐）；cap-from-gate.sh 降为观测
 node --experimental-strip-types plugin/scripts/slot-refill.ts --root "$(pwd)" --cap "${effective_cap:-3}" --in-flight <仍在跑的任务id逗号分隔> --closed-but-live <已关括号但 executor 仍在的任务id（来自 --slots 的 closedButLive，可空）>
 ```
 
 - stdout 是 JSON。**`slots_free` = 空槽数**（`max(0, cap − 在飞数 − closed_but_live 数)`；在飞数由**本会话自己维护的集合**给出，不是遥测——AC6 括号≠subagent，遥测括号会把已完成任务多算在飞）。**`closed_but_live` 是反向维度**（`gap-closed-bracket-leaves-live-agent-consuming-slots`）：括号已关（`--task-end` 已写）但 executor 进程仍存在（worktree 未清 / 进程未退）的任务 id——它们仍占槽，`--slots` 的 `closedButLive` 机械给出，回填时一并传入，**别把它们的槽当空**。
 - **`should_refill` = 事件驱动 go/no-go**：`slots_free > 0` 且 `recommended` 非空（有候选通过步骤 4 的触摸可解析/依赖就绪/并发资格三道检查）。
 - **`recommended` = 建议立即派发的候选**（至多 `slots_free` 个，生产 disjoint 批，与在飞两两不相交）。用它做派发候选，仍需跑步骤 4 自己的逐候选检查（触摸可解析、依赖就绪、并发资格）。
-- **`no_refill_reason` 非空 = 不派发**：`in-flight ≥ cap`（并发上限语义不变，AC5；cap 仍是 `cap-from-gate.sh` 读 cpu 压力（some avg10）+ 滞回 + 档位配置的产物）、`.halt` 存在（**抢占挂载**，`gap-supervisor-preemption` AC2——代码强制点，任意点生效）或无可派发候选（负控制）。
+- **`no_refill_reason` 非空 = 不派发**：`in-flight ≥ cap`（并发上限语义不变，AC5；**cap 固定 = 5**，人 2026-08-11 裁定，与 manager A2/outer A6 对齐）、`.halt` 存在（**抢占挂载**，`gap-supervisor-preemption` AC2——代码强制点，任意点生效）或无可派发候选（负控制）。
 
 ### 规则
 
@@ -503,6 +513,12 @@ tmux 仅用于紧急控制；投递通道不可认证、丢 `from` 字段）。
 worktree/分支——翻 done、写轮次记录、写 `--task-end` 都由外层异步做（`orchestrator-loop-tick.md`
 步骤 1b），inner 不需要也不应该碰。
 
+**A6/A15 对齐（`gap-worktree-leak-after-fan-in-occupies-slot-permanently`）**：inner 的 fan-in 序列
+（本步骤：merge --no-ff → --for-task 复测 → `git worktree remove`）与 **outer A15 ④ 的 fan-in 序列已对齐**
+（`orchestration/orchestrator-tick-core.md` A15 ④ 现含同一 `git worktree remove`）——两层的「合并后清理」是同一条
+纪律，否则在 outer 侧 fan-in 的任务（最近全在 outer 侧执行）会留下 worktree，每合一个任务永久吃一个槽位
+（`worktreeExists` 判存活 = worktree 还在 ⇒ occupied 单调累积 > cap ⇒ 空槽恒 0）。
+
 **两机协作：合并后释放认领（`gap-two-machine-collaboration-git-branch-claiming`）**——若本任务派发时
 经认领协议认领过（`QUAY_CLAIM_REMOTE` 设置了共享裸仓库），合并进 `$MERGE_TARGET` 后**释放认领**：
 `bash plugin/scripts/release-task.sh <taskId> --remote "$QUAY_CLAIM_REMOTE"`（合并+删分支=释放，
@@ -661,6 +677,7 @@ occupied_slots)`。**别把已关括号的槽当空**——executor 仍在就不
 ```bash
 node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --slots --cap "${effective_cap:-3}"
 # real-in-flight N / subagents-in-flight M / real-concurrency N+M / slots-remaining K；
+# reconcile-compliant true|false（C17：stale>0 且邻近无 --reconcile 调用 ⇒ false，本 tick 调 --reconcile 留痕）
 # dispatchable_disjoint（步骤 3.6）− realConcurrency = 槽位级闲置
 ```
 
@@ -694,12 +711,11 @@ avg10`（对真实过载响应），阈值抬高以剔 churn 基线**：avg10 < 
 容器化硬限额上位解 `orchestration/SPEC-isolation-and-resource-governance-2026-08-05.md`。
 
 ```bash
-effective_cap="$(bash plugin/scripts/cap-from-gate.sh 2>/dev/null | sed -n 's/^effective_cap=\([0-9]*\)$/\1/p')"
-# Contract 的读取形态：`bash <cap-from-gate-helper> 2>&1 | grep -o '[0-9]'`（stdout 数字段）；
-# sed 提取是同一 stdout 的健壮写法（effective_cap= 行是末行）。空值 ⇒ 重跑一次看 stderr。
-# 槽位帽已接跨层总预算（gap-test-concurrency-cap-does-not-scope-nested-spawns AC1/B 面）：
-# effective_cap = min(档位cap, max(1, available))——available 来自 process-budget.sh（全仓
-# node --test 进程预算 = nproc，减去已在跑的 node-MainThread 数）。预算耗尽 ⇒ 落到 1。
+effective_cap=5   # 固定 cap（人 2026-08-11 裁定：与 manager A2/outer A6 对齐）。动态 cap-from-gate 曾随负载 2-5 跳、
+                  # 每个 tick 压低派发（实证：cap 5 ⇒ slotsRemaining=3 而心跳判「cap2 无空槽」）——降为观测不再裁决。
+# 观测（不参与派发裁决，记 tick-log 用）：bash plugin/scripts/cap-from-gate.sh 2>/dev/null | sed -n 's/^effective_cap=\([0-9]*\)$/\1/p'
+# 背景：槽位帽曾接跨层总预算（gap-test-concurrency-cap-does-not-scope-nested-spawns AC1/B 面）；
+# effective_cap = min(档位cap, max(1, available))——available 来自 process-budget.sh。预算耗尽 ⇒ 落到 1。
 ```
 
 ```bash
@@ -880,6 +896,20 @@ node --experimental-strip-types plugin/scripts/concurrent-batch-scheduler.ts --r
 
 重叠 → 不可并发，等下一 tick。**不要凭读 Touches 列表目测**——本会话有过目测判断被实测推翻的先例。
 
+3b. **outer 在飞占用（`gap-write-ownership-extend-beyond-tasks-to-outer-core-and-hot-files` AC4）**：
+   outer 主检出的**未提交改动**算占用——outer 正在改的热点实现文件（如 `full-suite-runner.ts`）
+   若同时被 inner 候选列入 `## Touches`，该候选的 inner 分支会在 fan-in 与 outer 主线撞
+   add/add。派发前对每个候选（与任一在飞 peer 或候选自身）用 `--check-pair` + `--outer-inflight`
+   判定；outer 在飞文件清单 = `git -C "$REPO_ROOT" status --short` 的改动路径（可带 glob）：
+
+```bash
+node --no-warnings --experimental-strip-types plugin/scripts/touches-orthogonality-check.ts --check-pair tasks/<id>.md tasks/<peer>.md --outer-inflight <outer在飞文件> --root "$(pwd)"
+# DISJOINT + exit 0 ⇒ 不与 outer 在飞改动冲突，可继续；OVERLAP (outer-inflight occupancy) + exit 1 ⇒ 拒绝派发，等 outer 落盘
+```
+
+   命中 `outer-inflight occupancy` ⇒ **拒绝派发**，不把 outer 在飞文件列进任务 Touches 的替代是
+   在 Proposal 给 outer 改动建议（见下方「核心/loop 文档 outer 独占」）。
+
 4. **分叉基线判定（统一 fork 源，`gap-task-file-develop-integration-drift-fan-in-conflicts` AC2）**：
    任务 worktree **fork 源统一 = integration HEAD**（生效线，与 fan-in 目标一致）。旧的两线
    依赖声明（独立 → develop / 依赖 → integration）**不再是 fork 源判据**——任务文件在
@@ -1054,13 +1084,20 @@ last-run 文件**，任一先触发即写回，另一个在同一窗口内不会
 派发评估（见「事件驱动派发（槽位回填）」）；tick 是兜底必跑心跳（每 tick 无条件跑 slot-refill，见步骤 4），
 不是派发的主节奏也不是新轮询源。
 
-**每次重排写心跳产物** `.quay/inner-wakeup-heartbeat.json`（`{ts, delaySeconds, reason}`；ts = 重排时刻
-epoch 秒；与 suite-chain-heartbeat.json 同构，外层 A2 先例）——`gap-inner-wakeup-heartbeat-invisible`：
-兜底心跳只活在 transcript（ScheduleWakeup tool_use 时间戳），断了 15.3h 不可见直到人问第三次 + manager 用
-meta-cc 查时间戳；按 C17 给「上次 ScheduleWakeup 时刻」造机械可查产物。**写命令（重排后立即跑）**：
+**每次重排写心跳产物** `.quay/inner-wakeup-heartbeat.json`（ts = 重排时刻 epoch 秒；与 suite-chain-heartbeat.json
+同构，外层 A2 先例）——`gap-inner-wakeup-heartbeat-invisible`：兜底心跳只活在 transcript（ScheduleWakeup
+tool_use 时间戳），断了 15.3h 不可见直到人问第三次 + manager 用 meta-cc 查时间戳；按 C17 给「上次
+ScheduleWakeup 时刻」造机械可查产物。**字段最小契约**（`gap-inner-heartbeat-fields-shrunk-no-minimal-contract`）：
+心跳必须含结构化键 `ts`/`runIds`/`blocked`/`budgetHit`/`effectiveCap`/`agentDispatches`/`delaySeconds`
+（Contract `heartbeat_field_count >= 7`）——`blocked[]` + `runIds` 是 manager A3 判「inner 是否卡住」的前提；
+**reason 散文可补充但不可替代结构化字段**（缺键=未查≠无阻塞，硬规则 6）；缺键 ⇒ 外层
+`inner-wakeup-heartbeat-check.ts` 报「心跳字段缺失」。**写命令（重排后立即跑，用写入方脚本，不手搓 python）**：
 
 ```bash
-python3 -c "import json,time;d={'ts':int(time.time()),'delaySeconds':1500,'reason':'tick heartbeat'};open('.quay/inner-wakeup-heartbeat.json','w').write(json.dumps(d))"
+node --no-warnings --experimental-strip-types plugin/scripts/inner-wakeup-heartbeat.ts \
+  --blocked '[]' --run-ids '["<run-id>"]' \
+  --effective-cap 3 --agent-dispatches 1 --budget-hit false \
+  --delay-seconds 1500 --reason 'tick heartbeat'
 ```
 
 外层每个 tick 读该产物判新鲜（`orchestrator-tick-core.md` A13，`inner-wakeup-heartbeat-check.ts`）；
@@ -1223,6 +1260,13 @@ engine 组 + governance 组 == 去重后 realpath 总数」这类**关系**，�
 建的任务必须有：`## Proposal`（问题 + 证据 + 选定机制）、`## Acceptance Criteria`（可机械验证）、
 `## Touches`。缺任一项的不算建成。
 
+**核心/loop 文档 outer 独占写（`gap-write-ownership-extend-beyond-tasks-to-outer-core-and-hot-files` AC2）**：
+inner 建任务时**不得**把 `plugin/loop/orchestrator-loop-tick.md` 与 `plugin/loop/orchestrator-tick-core.md`
+（及未来新增的 `plugin/loop/` 下 `orchestrator-*.md` 一族）列入 `## Touches`——它们归 outer 独占写
+（外层执行核 + loop 文档；写所有权分离 `0ce3f2a8` 只覆盖 `tasks/`，不覆盖这两类，6 条 inner 分支撞
+add/add 就是代价）。inner 需要改它们 ⇒ 在 `## Proposal` 给**改动建议**（要改哪条、改成什么、为什么），
+由 outer 落盘。
+
 **发现问题必须处置**：修，或建任务。**不要静音、不要降级后就走。** 本项目已有四次
 「造了检测机制 → 它正确报警 → 警报无人处理」（RED 测试被改 skip、golden replay 被当预存失败、
 clause-14 降为 advisory、既有失败记在已 done 的任务体里）。
@@ -1239,9 +1283,13 @@ clause-14 降为 advisory、既有失败记在已 done 的任务体里）。
   （`--slots` 的 `subagentsInFlight`，调查型无括号，`gap-telemetry-underreport-nontask-subagents-not-counted-in-slots`）；
   核实并发读原始字段，不用 START 事件或 pane 文字（见 `orchestrator-loop-tick.md` 步骤 4b）
 - **槽位视角（`--slot-status`）**：`real_in_flight` / `subagents_in_flight` / `real_concurrency` /
-  `stale_brackets` / `slots_free`（`node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts
-  --slots --cap "${effective_cap:-3}"`）——「还剩几个并发槽」机械可见（AC2）；`stale_brackets > 0` 时调
-  `--reconcile` 闭合，别让红窗遗留括号污染后续判定
+  `stale_brackets` / `slots_free` + **`reconcile_compliant`**（`node --experimental-strip-types
+  plugin/scripts/fast-mode-telemetry.ts --slots --cap "${effective_cap:-3}"`）——「还剩几个并发槽」
+  机械可见（AC2）；`stale_brackets > 0` 时调 `--reconcile` 闭合，别让红窗遗留括号污染后续判定。
+  **C17 合规产物（`gap-reconcile-step-skipped-no-compliance-product`）**：`reconcile_compliant=false`
+  ⇒ `stale_brackets > 0` 且邻近无 `--reconcile` 调用记录——本 tick 判「未对账」并立即调 `--reconcile`
+  （每次调用写时间戳到 `.workflow-events/reconcile-invocations.jsonl`），把 false + 已调 reconcile
+  记进 tick-log
   事件或 pane 文字（见 `orchestrator-loop-tick.md` 步骤 4b）。**空槽数**（AC2/AC5）：`--slots --cap
   ${effective_cap}` 的 slots-remaining + `dispatchable_disjoint − realConcurrency` 的槽位级闲置
 - 停止条件是否触发、触发了哪条

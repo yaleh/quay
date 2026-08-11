@@ -42,7 +42,8 @@
 // backticks. This is an explicit, accepted limitation of a mechanical gate, not an oversight (same
 // posture as task-schema.ts's own documented NON-GOAL for semantic emptiness).
 
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
+import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 // `owns?` intentionally excludes the ubiquitous possessive-determiner usage ("the task's own AC
@@ -522,11 +523,22 @@ function wiringFindingsFromUncovered(uncovered) {
 
 const _runAsCli = (() => {
   try {
+    // Symlink-tolerant (gap-shipped-ts-files-are-not-bundled-80-raw-typescript-in-the-artifact):
+    // the experiments mirror is a SYMLINK into plugin/scripts — node resolves import.meta.url to
+    // the REALPATH while process.argv[1] keeps the symlink path, so a raw URL equality silently
+    // fails (and `path` was not even imported). Resolve the realpath of argv[1] before comparing.
+    const entryReal = typeof process.argv[1] === "string" ? realpathSync(process.argv[1]) : "";
     return (
       typeof process !== "undefined" &&
       Array.isArray(process.argv) &&
       typeof process.argv[1] === "string" &&
-      import.meta.url === pathToFileURL(process.argv[1]).href
+      // Bundler-friendly (gap-shipped-ts-files-are-not-bundled-80-raw-typescript-in-the-artifact):
+      // when wiring-coverage-check is BUNDLED into another tool (task-schema → many entries), the
+      // inlined module shares the bundle's import.meta.url, so URL equality would falsely fire its
+      // CLI block. Basename match distinguishes running wiring-coverage-check itself from being
+      // inlined into another entry.
+      import.meta.url === pathToFileURL(entryReal).href &&
+      path.basename(entryReal).replace(/\.(?:js|ts|mjs)$/, "") === "wiring-coverage-check"
     );
   } catch {
     return false;

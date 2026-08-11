@@ -126,7 +126,15 @@ const BUSY_RE = /esc to interr/i;
  * the panel chrome is the only busy proof. IMPORTANT distinction: `1 monitor` and `← N agent` alone
  * are AMBIENT counts that render even at idle (waiting-input-manager-* fixtures carry them), so they
  * must NOT be busy flags; only the panel-mode marker `ctrl+t to hide tasks` proves "有活在跑"
- * (a `monitor` count followed by `ctrl+t` is exactly the 成因 B status line). */
+ * (a `monitor` count followed by `ctrl+t` is exactly the 成因 B status line).
+ *
+ * gap-pane-classify-needs-two-orthogonal-dimensions: `↓ to manage` is the panel-EXPANDED hint and is
+ * deliberately NOT added here. It renders at idle too (every waiting-input fixture carries it), so as
+ * a busy flag it would turn every idle pane busy — the exact misread the 成因 B comment warns about.
+ * The expanded panel is covered NATURALLY by the orthogonal work_in_flight dimension
+ * (classifyPaneStateOrthogonal): an expanded panel shows the agent list (`● main` / `◯ general-purpose`)
+ * or the `← N agent` indicator, either of which sets work_in_flight=true WITHOUT making input_state
+ * busy (AC4: 「或新字段天然覆盖」). */
 const PANEL_BUSY_RE = /ctrl\+t to hide tasks/i;
 
 /** Agent-list rows: when subagents are running the TUI renders the agent list BELOW the status line
@@ -139,6 +147,16 @@ const PANEL_BUSY_RE = /ctrl\+t to hide tasks/i;
  * + status lines that are always present, so a quoted-esc content line can never be pulled into it
  * (AC4 — the last-two-lines discipline is unchanged for panes without an agent list). */
 const AGENT_LIST_LINE_RE = /^\s*[●◯]\s/;
+
+/** Claude Code TUI chrome — the prompt/status-line vocabulary that proves "this is an interactive
+ * Claude Code session pane" (as opposed to a bash prompt or a vim help screen). The orthogonal
+ * input_state (classifyPaneStateOrthogonal) reads waiting-input only when chrome evidence is present
+ * AND no blocking shape matched; without chrome the input_state is `unknown` (tier-2, the same
+ * fail-loud philosophy as classifyPaneState). */
+const CLAUDE_PANE_CHROME_RE = new RegExp(
+  "❯|⏵⏵|bypass permissions|esc to interr|ctrl\\+t to hide tasks|↓ to manage|←\\s*\\d+\\s+agents?|\\d+\\s+monitors?",
+  "i",
+);
 
 /** The status area = the last up-to-two non-blank, non-agent-list lines of the bottom region (the
  * status line and its possible continuation). Busy is judged HERE, not across the whole bottom
@@ -196,6 +214,70 @@ export function classifyPaneState(paneText: string, opts: { lines?: number } = {
   }
   // tier-2: no common shape matched — hand the region to the outer to read (never a silent guess).
   return { state: "unknown", confidence: 0, region, raw: region };
+}
+
+// ── two orthogonal dimensions (gap-pane-classify-needs-two-orthogonal-dimensions) ─────────────────
+// The single five-state enum above has ONE slot, but a pane's real state is TWO ORTHOGONAL
+// dimensions:
+//   ① input_state     — can the MAIN THREAD receive input?
+//                       (waiting-input / permission-prompt / busy / error-banner / unknown)
+//   ② work_in_flight  — is a BACKGROUND agent running? (boolean)
+// The measured real pane `⏵⏵ bypass permissions on (shift+tab to cycle) · ← 1 agent · ↓ to manage`
+// + agent list (● main / ◯ general-purpose) is {input idle + agents running} — the single enum has
+// no slot for it, so classifyPaneState honestly returned unknown. MARKER-STALE is the monitor's
+// HONEST REPORT of that unrepresentable combo, not a classifier bug (the task's root finding). The
+// two fields make it representable: waiting-input + true.
+
+/** Whether the bottom region is an interactive Claude Code pane (chrome evidence). The `❯` prompt,
+ * the ⏵⏵ mode indicator, the status-line vocabulary, or an agent-list row all count. */
+export function regionLooksLikeClaudePane(region: string): boolean {
+  if (INPUT_PROMPT_RE.test(region)) return true;
+  if (region.split("\n").some((l) => AGENT_LIST_LINE_RE.test(l))) return true;
+  return CLAUDE_PANE_CHROME_RE.test(region);
+}
+
+/** work_in_flight — the SECOND orthogonal dimension: is a background agent running? True when the
+ * region shows an agent-list row (`● main` / `◯ general-purpose` — AGENT_LIST_LINE_RE) or the status
+ * line's `← N agent` indicator. Deliberately NOT a busy flag — the old comment's rejection is
+ * PRESERVED (these render at idle too, see the waiting-input-manager-* fixtures); they are the
+ * independent work-in-flight dimension, orthogonal to whether the main thread can receive input. */
+export function paneShowsWorkInFlight(region: string): boolean {
+  if (region.split("\n").some((l) => AGENT_LIST_LINE_RE.test(l))) return true;
+  const m = region.match(/←\s*(\d+)\s+agents?/i);
+  return m !== null && Number(m[1]) > 0;
+}
+
+export interface OrthogonalClassifyResult {
+  input_state: string;
+  work_in_flight: boolean;
+  region: string;
+  raw: string;
+}
+
+/** Two orthogonal fields instead of one enum slot. input_state uses the same most-specific-first
+ * shape checks as classifyPaneState (permission → busy → error → waiting-input), but the final
+ * waiting-input leg requires only Claude-Code chrome evidence (not a `❯`) — so the real pane's
+ * STATUS LINE ALONE (`⏵⏵ bypass permissions on … · ← 1 agent · ↓ to manage`, no `❯`) reads
+ * waiting-input instead of unknown. work_in_flight is computed independently. */
+export function classifyPaneStateOrthogonal(paneText: string, opts: { lines?: number } = {}): OrthogonalClassifyResult {
+  const region = bottomRegion(paneText, opts.lines ?? DEFAULT_BOTTOM_LINES);
+  const work_in_flight = paneShowsWorkInFlight(region);
+  let input_state: string;
+  if (PERMISSION_PROMPT_RE.test(region) && !DISMISSABLE_PROMPT_RE.test(region)) {
+    input_state = "permission-prompt";
+  } else {
+    const statusAreaText = statusArea(region);
+    if (BUSY_RE.test(statusAreaText) || PANEL_BUSY_RE.test(statusAreaText)) {
+      input_state = "busy";
+    } else if (ERROR_BANNER_RE.test(region)) {
+      input_state = "error-banner";
+    } else if (regionLooksLikeClaudePane(region)) {
+      input_state = "waiting-input";
+    } else {
+      input_state = "unknown";
+    }
+  }
+  return { input_state, work_in_flight, region, raw: region };
 }
 
 // ── --check-residue mode (tasks/gap-residue-check-crystallized-as-tool-mode) ─────────────────────
@@ -569,6 +651,56 @@ export function selfcheck(): boolean {
   check("tier2-unknown", r.state === "unknown");
   check("tier2-raw-passthrough", r.raw === bottomRegion(weird) && r.raw.includes("help.txt"));
 
+  // ── two orthogonal dimensions (gap-pane-classify-needs-two-orthogonal-dimensions) ────────────────
+
+  // GREEN: the measured real pane — status line `⏵⏵ bypass permissions on (shift+tab to cycle) ·
+  // ← 1 agent · ↓ to manage` + agent list (● main / ◯ general-purpose) = {input idle + agents
+  // running}. The single enum has no slot (the old classifier returned unknown); the two fields
+  // make it representable: waiting-input + true (AC2/AC3 verification anchor).
+  const realPaneStatusLine = "⏵⏵ bypass permissions on (shift+tab to cycle) · ← 1 agent · ↓ to manage";
+  const oReal = classifyPaneStateOrthogonal(realPaneStatusLine);
+  check("orthogonal-real-input-state", oReal.input_state === "waiting-input");
+  check("orthogonal-real-work-in-flight", oReal.work_in_flight === true);
+  // The status line ALONE (no ❯) reads waiting-input in the orthogonal view (chrome evidence), where
+  // the old single-enum classifier honestly reported unknown (the MARKER-STALE root).
+  check("orthogonal-old-unknown-still-unknown", classifyPaneState(realPaneStatusLine).state === "unknown");
+
+  // GREEN: the full pane (with ❯ + agent rows below) reads waiting-input + true.
+  const oRealFull = classifyPaneStateOrthogonal([
+    "● main",
+    "◯ general-purpose  Reviewing the full diff summary.  17m 13s",
+    "───────────────────────────────",
+    "❯ ",
+    "───────────────────────────────",
+    "  " + realPaneStatusLine,
+  ].join("\n"));
+  check("orthogonal-real-full-input-state", oRealFull.input_state === "waiting-input");
+  check("orthogonal-real-full-work-in-flight", oRealFull.work_in_flight === true);
+
+  // RED: `← N agent` is a work-in-flight flag, NOT a busy flag — an idle status line with it must
+  // stay waiting-input (AC3: the old comment's rejection preserved; `↓ to manage` is also not busy).
+  const idleWithAgent = classifyPaneStateOrthogonal(idle);
+  check("orthogonal-idle-agent-input-state", idleWithAgent.input_state === "waiting-input");
+  check("orthogonal-idle-agent-work-in-flight", idleWithAgent.work_in_flight === true);
+  // A busy pane (esc to interrupt) still reads input_state=busy, and work_in_flight is independent.
+  const oBusy = classifyPaneStateOrthogonal(busy);
+  check("orthogonal-busy-input-state", oBusy.input_state === "busy");
+  check("orthogonal-busy-work-in-flight", oBusy.work_in_flight === true);
+  // The pure idle pane (no `← N agent`, no agent list) reads work_in_flight=false.
+  const idleNoAgent = [
+    "───────────────────────────────",
+    "❯ ",
+    "───────────────────────────────",
+    "  ⏵⏵ bypass permissions on · 1 monitor · ↓ to manage",
+  ].join("\n");
+  const oIdleNoAgent = classifyPaneStateOrthogonal(idleNoAgent);
+  check("orthogonal-idle-no-agent-input-state", oIdleNoAgent.input_state === "waiting-input");
+  check("orthogonal-idle-no-agent-work-in-flight", oIdleNoAgent.work_in_flight === false);
+  // tier-2 preserved: a non-Claude screen still reads input_state=unknown in the orthogonal view.
+  check("orthogonal-tier2-unknown", classifyPaneStateOrthogonal(weird).input_state === "unknown");
+  // permission-prompt keeps its slot in the orthogonal view.
+  check("orthogonal-permission-input-state", classifyPaneStateOrthogonal(prompt).input_state === "permission-prompt");
+
   // AC6 (region): identical bottom region, different upper content → same verdict.
   const upperA = "some upper text\n".repeat(30) + idle;
   const upperB = "completely different upper\n".repeat(30) + idle;
@@ -601,7 +733,14 @@ export function selfcheck(): boolean {
   return fail === 0;
 }
 
-const isDirect = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+const isDirect =
+  process.argv[1] &&
+  fileURLToPath(import.meta.url) === path.resolve(process.argv[1]) &&
+  // Bundler-friendly (gap-shipped-ts-files-are-not-bundled-80-raw-typescript-in-the-artifact):
+  // when pane-state-classify is BUNDLED into another tool (inner-blocked-signal), the inlined
+  // module shares the bundle's import.meta.url, so URL equality would falsely fire. Basename match
+  // distinguishes running pane-state-classify itself from being inlined into another entry.
+  path.basename(process.argv[1]).replace(/\.(?:js|ts|mjs)$/, "") === "pane-state-classify";
 if (isDirect) {
   const args = process.argv.slice(2);
   // THREE-WAY exclusive entry (ad-arm1 gate #1: the old fall-through ran selfcheck()+exit() after
@@ -620,8 +759,17 @@ if (isDirect) {
     process.stdin.setEncoding("utf8");
     process.stdin.on("data", (d) => { input += d; });
     process.stdin.on("end", () => {
-      const r = classifyPaneState(input);
-      process.stdout.write(r.state + "\n" + r.region + "\n");
+      // --orthogonal (gap-pane-classify-needs-two-orthogonal-dimensions): line 1 = input_state,
+      // line 2 = work_in_flight (0|1), line 3+ = the bottom region. session-liveness.sh reads this
+      // shape to feed its MARKER-STALE suppression (work_in_flight ⇒ transcript-fresh + idle is
+      // self-consistent, not an anomaly).
+      if (args.includes("--orthogonal")) {
+        const o = classifyPaneStateOrthogonal(input);
+        process.stdout.write(o.input_state + "\n" + (o.work_in_flight ? "1" : "0") + "\n" + o.region + "\n");
+      } else {
+        const r = classifyPaneState(input);
+        process.stdout.write(r.state + "\n" + r.region + "\n");
+      }
       process.exit(0);
     });
     process.stdin.resume();
@@ -634,8 +782,19 @@ if (isDirect) {
     // consumers). Pure — no tmux, no file reads.
     const text = args[1] ?? "";
     const r = classifyPaneState(text);
-    if (args.includes("--json")) {
-      process.stdout.write(JSON.stringify(r) + "\n");
+    const o = classifyPaneStateOrthogonal(text);
+    if (args.includes("--orthogonal")) {
+      // The two-orthogonal-field surface (Contract invoke form for AC2/AC3).
+      if (args.includes("--json")) {
+        process.stdout.write(JSON.stringify(o) + "\n");
+      } else {
+        process.stdout.write(o.input_state + "\n" + (o.work_in_flight ? "1" : "0") + "\n" + o.region + "\n");
+      }
+    } else if (args.includes("--json")) {
+      // Superset: keep the legacy single-enum fields (state/confidence) AND expose the two
+      // orthogonal fields (input_state/work_in_flight) — the Contract's measure reads
+      // input_state/work_in_flight from this seam while old consumers keep state/confidence.
+      process.stdout.write(JSON.stringify({ ...r, input_state: o.input_state, work_in_flight: o.work_in_flight }) + "\n");
     } else {
       process.stdout.write(r.state + "\n" + r.region + "\n");
     }

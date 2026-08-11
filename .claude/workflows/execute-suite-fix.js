@@ -61,13 +61,14 @@ const {
   envMaxRuntimeMs = 7_200_000, // 120 min（manager 建议 ≥7200000；默认 45min 会截断最坏 77min 的轮次）
   envSilenceMs = 3_600_000,     // 60 min（默认 15min）
   envRedGraceMs = 180_000,      // 3 min（默认 30s；给红 suite 时间收集完整失败汇总）
+  systemdRunLimits = "MemoryMax=4G CPUQuota=400% TasksMax=200", // 人 2026-08-11 06:4x 裁定：取消 CPU 配额（400%=用满 4 物理核）、保持内存 4G（01:07 OOM 护栏）、TasksMax 200；gap-systemd-run-cancel-cpuquota-keep-memory-guardrail AC3
 } = args ?? {}
 
 if (!worktree || !stateDir || !root) {
   return { outcome: 'bad-args', message: 'worktree/stateDir/root are required', args }
 }
 
-const launchEnv = `QUAY_TEST_SUITE_MAX_RUNTIME_MS=${envMaxRuntimeMs} QUAY_TEST_SUITE_SILENCE_MS=${envSilenceMs} QUAY_TEST_RED_GRACE_MS=${envRedGraceMs}`
+const launchEnv = `QUAY_TEST_SUITE_MAX_RUNTIME_MS=${envMaxRuntimeMs} QUAY_TEST_SUITE_SILENCE_MS=${envSilenceMs} QUAY_TEST_RED_GRACE_MS=${envRedGraceMs} QUAY_TEST_SYSTEMD_RUN_LIMITS='${systemdRunLimits}'`
 
 // ⚠️ 启动必须 DETACH（实证 15:54:06→15:54:22, runId f6b824b5）：workflow subagent 里用
 // `Bash(run_in_background:true)` 起的后台任务会在 subagent 退出时被 harness 连带杀掉（SIGTERM →
@@ -206,9 +207,10 @@ const merge = await agent(
 ${CONTEXT}
 任务：
 1. fan-in：把 verify worktree 的 branch（${worktree} 当前分支）合回 integration。冲突按「机械 union / per-hunk 判断」处置；不要用 --ours/--theirs 抹掉任何一方的真实内容。先 git reset --hard HEAD 清 staged/working-tree 残留（rebase-abort 残留纪律）。
-2. 验证 integration 干净、worktree 已清理。
-3. batch-merge：把 develop 推到那个确切 verifiedCommit（${lastState.verifiedCommit}）——cd ${root} && bash plugin/scripts/integration-batch-merge.sh 的正确调用形式（--dry-run 先验证，再实际执行）。
-4. 返回合并结果与最终 develop/integration HEAD。
+2. worktree 清理（AC3 落地形式，gap-worktree-leak-after-fan-in-occupies-slot-permanently）：fan-in 合并后**实际执行** \`git -C ${root} worktree remove ${worktree} && git -C ${root} worktree prune\`——不是「验证已清理」，是执行清理；分支已合，只删工作副本，提交不丢。remove 失败（脏树）⇒ 标出未提交残留、不要 --force，写进 note 报出来。未清理 ⇒ 该 fan-in 不算完成（每合一个任务永久吃一槽）。
+3. 验证 integration 干净。
+4. batch-merge：把 develop 推到那个确切 verifiedCommit（${lastState.verifiedCommit}）——cd ${root} && bash plugin/scripts/integration-batch-merge.sh 的正确调用形式（--dry-run 先验证，再实际执行）。
+5. 返回合并结果与最终 develop/integration HEAD。
 返回 { fanIn: string[], batchMergeOk: bool, developHead, integrationHead, note }。`,
   { schema: { type: 'object', properties: { fanIn: { type: 'array', items: { type: 'string' } }, batchMergeOk: { type: 'boolean' }, developHead: { type: 'string' }, integrationHead: { type: 'string' }, note: { type: 'string' } }, required: ['batchMergeOk'] } }
 )

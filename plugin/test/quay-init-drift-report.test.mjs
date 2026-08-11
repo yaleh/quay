@@ -38,6 +38,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+// AC3 (gap-serial-install-family-shared-prebuilt-fixture): the install-as-setup tests below copy a
+// fresh installed root from the SHARED prebuilt fixture (one real install per serial phase, not one
+// per test). The upgrade/drift re-runs stay REAL installs (they verify the upgrade path itself).
+import { laydownWorkspace } from './quay-init-loop-helpers.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pluginDir = path.resolve(__dirname, '..');
@@ -54,10 +58,21 @@ function cleanup(dir) {
 // and quay-init correctly fails closed there (gap-the-shipped-tick-doc-...-in-tmpfs).
 const _wtRoots = [];
 import { after } from 'node:test';
+// ── AC2 install-setup timing (gap-serial-install-family-shared-prebuilt-fixture) ─────────────────
+// Measure-first gate: time every REAL `--loop` install (the setup a shared prebuilt fixture would
+// eliminate) vs the file's total wall time. Behavior-preserving — adds timing only, no assertion or
+// flow change. Reported to stderr (never the TAP stream) from the after() hook below.
+const _fileStart = Date.now();
+let _loopInstallMs = 0;
+let _loopInstallCount = 0;
 after(() => {
   for (const d of _wtRoots) {
     try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* best-effort */ }
   }
+  const totalMs = Date.now() - _fileStart;
+  const ratio = totalMs > 0 ? (_loopInstallMs / totalMs) * 100 : 0;
+  process.stderr.write(
+    `__INSTALL_SETUP__ install_ms=${_loopInstallMs} install_count=${_loopInstallCount} total_ms=${totalMs} ratio=${ratio.toFixed(1)}%\n`);
 });
 function diskWorktreeRoot() {
   let dir = null;
@@ -75,11 +90,14 @@ function diskWorktreeRoot() {
 function runInit(workspace, args = []) {
   const loop = args.includes('--loop');
   const extra = loop && !args.some((a) => a === '--worktree-root') ? ['--worktree-root', diskWorktreeRoot()] : [];
-  return spawnSync('bash', [INIT, ...extra, ...args], {
+  const t0 = Date.now();
+  const r = spawnSync('bash', [INIT, ...extra, ...args], {
     cwd: workspace,
     encoding: 'utf8',
     env: { ...process.env, CLAUDE_PLUGIN_ROOT: pluginDir },
   });
+  if (loop) { _loopInstallMs += Date.now() - t0; _loopInstallCount += 1; }
+  return r;
 }
 
 const LOOP_ARGS = (ws) => ['--loop', '--root', ws, '--project', 'proj',
@@ -112,9 +130,9 @@ test('AC1/AC2 — --check-drift on a fresh target: parseable 漂移/缺失/一�
 
 // ── AC1/AC2: after a full --loop install the drift report is all-consistent ───────────────────────
 test('AC1/AC2 — after a --loop install, --check-drift reports the derived set all consistent', () => {
-  const ws = makeTmp();
+  // AC3: the initial install is pure setup — copy it from the shared prebuilt fixture.
+  const { ws, install: r1 } = laydownWorkspace();
   try {
-    const r1 = runInit(ws, LOOP_ARGS(ws));
     assert.equal(r1.status, 0, `--loop install must exit 0:\n${r1.stderr}`);
     const r2 = runInit(ws, ['--check-drift', '--root', ws]);
     assert.equal(r2.status, 0, `--check-drift after install must exit 0:\n${r2.stderr}`);
@@ -127,9 +145,9 @@ test('AC1/AC2 — after a --loop install, --check-drift reports the derived set 
 
 // ── Contract control: target missing a derived script ⇒ upgrade restores + reports 缺失-1 ──────────
 test('Contract control — a derived script deleted from the target ⇒ --loop upgrade auto-adds it and reports 缺失-1 then 缺失-0', () => {
-  const ws = makeTmp();
+  // AC3: the initial install is pure setup — copy it from the shared prebuilt fixture.
+  const { ws, install: r1 } = laydownWorkspace();
   try {
-    const r1 = runInit(ws, LOOP_ARGS(ws));
     assert.equal(r1.status, 0, `install must exit 0:\n${r1.stderr}`);
     const victim = path.join(ws, 'plugin', 'scripts', 'resource-gate.sh');
     assert.ok(fs.existsSync(victim), 'resource-gate.sh must be laid down by the install');
@@ -159,9 +177,9 @@ test('Contract control — a derived script deleted from the target ⇒ --loop u
 
 // ── AC3: a locally-modified derived script ⇒ listed as drift; upgrade backs up + reports (never silent) ──
 test('AC3 — a locally-modified derived script is listed as drift and the upgrade is NOT silent (backup + report)', () => {
-  const ws = makeTmp();
+  // AC3: the initial install is pure setup — copy it from the shared prebuilt fixture.
+  const { ws, install: r1 } = laydownWorkspace();
   try {
-    const r1 = runInit(ws, LOOP_ARGS(ws));
     assert.equal(r1.status, 0, `install must exit 0:\n${r1.stderr}`);
     const victim = path.join(ws, 'plugin', 'scripts', 'resource-gate.sh');
     const localEdit = '\n# local customisation by the target project\n';
@@ -216,9 +234,9 @@ test('L_G — send-keys-verified.sh (deleted — superseded implementation) is N
 
 // ── Idempotence regression: re-running --loop on a fully-installed target changes nothing ──────────
 test('idempotence — re-running --loop on an installed target: all skipped, drift report stays all consistent, no residue cleanup', () => {
-  const ws = makeTmp();
+  // AC3: the initial install is pure setup — copy it from the shared prebuilt fixture.
+  const { ws, install: r1 } = laydownWorkspace();
   try {
-    const r1 = runInit(ws, LOOP_ARGS(ws));
     assert.equal(r1.status, 0, `install must exit 0:\n${r1.stderr}`);
     const r2 = runInit(ws, LOOP_ARGS(ws));
     assert.equal(r2.status, 0, `re-run must exit 0:\n${r2.stderr}`);

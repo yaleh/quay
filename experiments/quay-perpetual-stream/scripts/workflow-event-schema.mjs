@@ -792,12 +792,12 @@ async function main(argv) {
 function isDirectEntry(argv1) {
   const entry = argv1 || process.argv[1];
   if (!entry) return false;
-  try {
-    return fs.realpathSync(path.resolve(entry)) === fileURLToPath(import.meta.url);
-  } catch (_) {
-    // Fallback: simple basename match
-    return entry.endsWith("workflow-event-schema.mjs");
-  }
+  // Bundler-friendly (gap-shipped-ts-files-are-not-bundled-80-raw-typescript-in-the-artifact):
+  // when this module is BUNDLED into another tool (fast-mode-telemetry, inner-blocked-signal),
+  // the inlined module shares the bundle's import.meta.url, so URL equality would falsely fire its
+  // CLI block. Basename match distinguishes running workflow-event-schema.mjs itself from being
+  // inlined into another entry.
+  return path.basename(entry) === "workflow-event-schema.mjs";
 }
 
 // Run CLI if invoked directly

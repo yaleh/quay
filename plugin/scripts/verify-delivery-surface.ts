@@ -680,7 +680,7 @@ export function main(argv: string[]): number {
   return ok ? 0 : 1;
 }
 
-const isDirect = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+const isDirect = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]) && path.basename(process.argv[1]).replace(/.(?:js|ts|mjs)$/, "") === "verify-delivery-surface";
 if (isDirect) {
   process.exitCode = main(process.argv);
 }
