@@ -30,7 +30,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, execSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -49,6 +49,12 @@ import {
   shouldAutoRetrigger,
   retriggerRunnerArgs,
   DEFAULT_RETRIGGER_IDLE_MS,
+  // gap-b3-tick-coupled-misses-between-tick-merges — event-driven round-start triggers
+  shouldStartIdleGreen,
+  shouldStartOnMergeLanding,
+  readGitVerificationState,
+  resolveIdleGreenMs,
+  DEFAULT_IDLE_GREEN_MS,
 } from "../scripts/suite-state-trigger.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -525,6 +531,259 @@ test("AC4 — the retrigger reuses the runner's resource gate: WAIT blocks the r
     assert.equal(s.state, "green", "state stays terminal (untouched) on WAIT — the retrigger does not start into a busy machine");
     assert.equal(s.finishedAt, terminal.finishedAt, "the terminal state is byte-untouched (same round)");
     assert.ok(!fs.existsSync(path.join(root, ".quay", "full-suite.log")), "the suite was NEVER spawned on WAIT");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ── gap-b3-tick-coupled-misses-between-tick-merges: event-driven round START ────────────────────────
+// The B3 start condition was a tick-polling side effect — a merge landing between ticks was missed
+// (r271 04:38 → 51 min idle, develop..integration 33→38, machine empty, all B3 conditions satisfied).
+// The fix: AC2 merge-landing trigger (integration HEAD advances ⇒ start) + AC3 idle-green trigger
+// (state=green + develop..integration>0 + sustained idle ⇒ start), both event-driven via this Monitor.
+
+/** A REAL git repo with develop + integration branches, integration ahead by `ahead` commits. */
+function gitRoot(ahead = 1) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "sst-git-"));
+  execSync("git init -q -b develop", { cwd: root, stdio: "ignore" });
+  execSync("git config user.email sst@example.com", { cwd: root, stdio: "ignore" });
+  execSync("git config user.name sst", { cwd: root, stdio: "ignore" });
+  fs.writeFileSync(path.join(root, "a.txt"), "base\n", "utf8");
+  execSync("git add a.txt && git commit -q -m base", { cwd: root, stdio: "ignore" });
+  const developHead = execSync("git rev-parse develop", { cwd: root, encoding: "utf8" }).trim();
+  execSync("git branch integration", { cwd: root, stdio: "ignore" });
+  execSync("git checkout -q integration", { cwd: root, stdio: "ignore" });
+  for (let i = 1; i <= ahead; i++) {
+    fs.writeFileSync(path.join(root, "a.txt"), `base + ${i}\n`, "utf8");
+    execSync("git add a.txt && git commit -q -m merge", { cwd: root, stdio: "ignore" });
+  }
+  const integrationHead = execSync("git rev-parse integration", { cwd: root, encoding: "utf8" }).trim();
+  execSync("git checkout -q develop", { cwd: root, stdio: "ignore" });
+  return { root, developHead, integrationHead, ahead };
+}
+
+// ── AC2: merge 落地触发 (merge landing trigger) ─────────────────────────────────────────────────────
+
+test("AC2 — shouldStartOnMergeLanding is pure: a head ADVANCE with pending + non-running fires; no advance / running / no-pending do not", () => {
+  const now = Date.now();
+  const green = state({ state: "green", finishedAt: Math.floor((now - 60_000) / 1000) });
+  const headA = "a".repeat(40);
+  const headB = "b".repeat(40);
+  // a NEW merge landed (head advanced past the memo's last-seen tip) + pending + not running ⇒ fire
+  assert.equal(
+    shouldStartOnMergeLanding(headA, headB, 1, green).fire,
+    true,
+    "head advance + pending + green (not running) fires the merge-landing trigger",
+  );
+  // no baseline (first observation) ⇒ no fire — a baseline is established, not a landing to react to
+  assert.equal(shouldStartOnMergeLanding(null, headB, 1, green).fire, false, "no prev head ⇒ baseline, no fire");
+  // head UNCHANGED ⇒ no new merge ⇒ no fire
+  assert.equal(shouldStartOnMergeLanding(headA, headA, 1, green).fire, false, "stable head ⇒ no new merge");
+  // state=running ⇒ a round is in flight ⇒ no fire (AC2: state != running required)
+  assert.equal(
+    shouldStartOnMergeLanding(headA, headB, 1, state({ state: "running" })).fire,
+    false,
+    "running state ⇒ no merge-landing (a round is in flight)",
+  );
+  // pending==0 ⇒ no unverified commits ⇒ no fire (AC4 no_pending_no_trigger)
+  assert.equal(shouldStartOnMergeLanding(headA, headB, 0, green).fire, false, "no pending ⇒ no fire (AC4)");
+});
+
+test("AC2 — runOnce emits SUITE-MERGE-PENDING + mergePending flag when a new integration merge lands (real git fixture)", () => {
+  const { root, integrationHead } = gitRoot(1);
+  try {
+    const now = Date.now();
+    writeSuiteState(root, state({ state: "green", finishedAt: Math.floor((now - 60_000) / 1000) }));
+    // First observation: establishes the lastIntegrationHead baseline (no fire on a pre-existing tip).
+    const first = runOnce(root, { idleGreenMs: 10_000_000 });
+    assert.equal(first.mergePending, false, "first observation establishes the baseline, does not fire");
+    assert.equal(first.events.some((e) => e.event === "SUITE-MERGE-PENDING"), false, "no event on baseline");
+
+    // Advance integration with a NEW merge while state stays green.
+    execSync("git checkout -q integration", { cwd: root, stdio: "ignore" });
+    fs.writeFileSync(path.join(root, "a.txt"), "base + 1 + 2\n", "utf8");
+    execSync("git add a.txt && git commit -q -m merge2", { cwd: root, stdio: "ignore" });
+    execSync("git checkout -q develop", { cwd: root, stdio: "ignore" });
+    const second = runOnce(root, { idleGreenMs: 10_000_000 });
+    assert.equal(second.mergePending, true, "a NEW integration merge while green fires the merge-landing trigger");
+    const ev = second.events.find((e) => e.event === "SUITE-MERGE-PENDING");
+    assert.ok(ev, "SUITE-MERGE-PENDING event recorded");
+    assert.match(ev.integrationHead ?? "", /^[0-9a-f]{40}$/, "event carries the integration tip sha");
+    assert.notEqual(ev.integrationHead, integrationHead, "the tip is the NEW post-merge head, not the baseline");
+    assert.ok(ev.pendingCount >= 1, "event carries the pending count (develop..integration >= 1)");
+    assert.ok(readSuiteEvents(root).some((e) => e.event === "SUITE-MERGE-PENDING"), "event persisted to the events log");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC2 — runOnce does NOT fire merge-landing when state=running even if a merge landed (a round is in flight)", () => {
+  const { root } = gitRoot(1);
+  try {
+    writeSuiteState(root, state({ state: "green", finishedAt: Math.floor(Date.now() / 1000) }));
+    runOnce(root, { idleGreenMs: 10_000_000 }); // baseline
+    // Now a merge lands WHILE a round is running.
+    execSync("git checkout -q integration", { cwd: root, stdio: "ignore" });
+    fs.writeFileSync(path.join(root, "a.txt"), "base + 1 + 3\n", "utf8");
+    execSync("git add a.txt && git commit -q -m merge3", { cwd: root, stdio: "ignore" });
+    execSync("git checkout -q develop", { cwd: root, stdio: "ignore" });
+    writeSuiteState(root, state({ state: "running" }));
+    const res = runOnce(root, { idleGreenMs: 10_000_000 });
+    assert.equal(res.mergePending, false, "running state suppresses the merge-landing trigger");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ── AC3: idle-green 触发 (idle-green with unverified commits) ──────────────────────────────────────
+
+test("AC3 — shouldStartIdleGreen is pure: green + pending>0 + idle>=N fires; green-no-pending / not-green / fresh do not", () => {
+  const now = Date.now();
+  const idleGreenMs = 1000;
+  // green + pending + idle exceeded ⇒ fire
+  assert.equal(
+    shouldStartIdleGreen(
+      { state: "green", finishedAt: Math.floor((now - 2000) / 1000) },
+      { integrationHead: "h".repeat(40), pendingCount: 2 },
+      idleGreenMs,
+      null,
+      now,
+    ).fire,
+    true,
+    "green + pending>0 + idle >= N fires the idle-green trigger",
+  );
+  // AC4 negative: pending==0 ⇒ no fire (无未验证提交不误起)
+  assert.equal(
+    shouldStartIdleGreen(
+      { state: "green", finishedAt: Math.floor((now - 2000) / 1000) },
+      { integrationHead: "h".repeat(40), pendingCount: 0 },
+      idleGreenMs,
+      null,
+      now,
+    ).fire,
+    false,
+    "green with NO pending commits never fires (AC4 no_pending_no_trigger)",
+  );
+  // not-green (running / red) ⇒ no fire
+  assert.equal(
+    shouldStartIdleGreen(
+      { state: "running" },
+      { integrationHead: "h".repeat(40), pendingCount: 2 },
+      idleGreenMs,
+      null,
+      now,
+    ).fire,
+    false,
+    "running is not idle-green",
+  );
+  // fresh terminal (< N) ⇒ no fire
+  assert.equal(
+    shouldStartIdleGreen(
+      { state: "green", finishedAt: Math.floor(now / 1000) },
+      { integrationHead: "h".repeat(40), pendingCount: 2 },
+      idleGreenMs,
+      null,
+      now,
+    ).fire,
+    false,
+    "fresh terminal (< N) does not fire idle-green",
+  );
+  // throttled: a repeat within the idle window is suppressed (one attempt per idle window)
+  assert.equal(
+    shouldStartIdleGreen(
+      { state: "green", finishedAt: Math.floor((now - 2000) / 1000) },
+      { integrationHead: "h".repeat(40), pendingCount: 2 },
+      idleGreenMs,
+      now - 100, // last idle-green attempt < idleMs ago
+      now,
+    ).fire,
+    false,
+    "a repeat within the idle window is throttled (no storm)",
+  );
+  // no-git ⇒ no fire (pendingCount null = cannot see unverified work)
+  assert.equal(
+    shouldStartIdleGreen(
+      { state: "green", finishedAt: Math.floor((now - 2000) / 1000) },
+      { integrationHead: null, pendingCount: null },
+      idleGreenMs,
+      null,
+      now,
+    ).fire,
+    false,
+    "no git facts ⇒ no idle-green trigger",
+  );
+});
+
+test("AC3 — runOnce emits SUITE-IDLE-GREEN + idleGreen flag when state=green with unverified commits + sustained idle (real git fixture)", () => {
+  const { root } = gitRoot(2);
+  try {
+    const now = Date.now();
+    writeSuiteState(root, state({ state: "green", finishedAt: Math.floor((now - 2000) / 1000) }));
+    const res = runOnce(root, { idleGreenMs: 1000 });
+    assert.equal(res.idleGreen, true, "green + develop..integration>0 + idle>=N fires the idle-green trigger");
+    const ev = res.events.find((e) => e.event === "SUITE-IDLE-GREEN");
+    assert.ok(ev, "SUITE-IDLE-GREEN event recorded");
+    assert.ok(ev.pendingCount >= 1, "event carries the pending count (develop..integration >= 1)");
+    assert.ok(readSuiteEvents(root).some((e) => e.event === "SUITE-IDLE-GREEN"), "event persisted to the events log");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC3 — runOnce does NOT fire idle-green when pending==0 (AC4 no_pending_no_trigger)", () => {
+  const { root } = gitRoot(0); // integration == develop — NO unverified commits
+  try {
+    const now = Date.now();
+    writeSuiteState(root, state({ state: "green", finishedAt: Math.floor((now - 2000) / 1000) }));
+    const res = runOnce(root, { idleGreenMs: 1000 });
+    assert.equal(res.idleGreen, false, "green with NO unverified commits never fires idle-green");
+    assert.equal(res.events.some((e) => e.event === "SUITE-IDLE-GREEN"), false, "no SUITE-IDLE-GREEN event");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC3 — idle-green is event-driven, not a tick side effect: resolveIdleGreenMs honors CLI/env and defaults to 2 min", () => {
+  assert.equal(DEFAULT_IDLE_GREEN_MS, 2 * 60 * 1000, "default idle-green threshold = 2 min (持续 idle)");
+  assert.equal(resolveIdleGreenMs(["--idle-green-min", "0.5"]), 30_000, "CLI --idle-green-min converts minutes to ms");
+  // env seam wins over default, CLI wins over env
+  process.env.QUAY_SUITE_IDLE_GREEN_MS = "1234";
+  try {
+    assert.equal(resolveIdleGreenMs([]), 1234, "env seam QUAY_SUITE_IDLE_GREEN_MS overrides the default");
+    assert.equal(resolveIdleGreenMs(["--idle-green-min", "0.5"]), 30_000, "CLI wins over env");
+  } finally {
+    delete process.env.QUAY_SUITE_IDLE_GREEN_MS;
+  }
+});
+
+// ── Contract measure: `suite-state-trigger.ts --json` surfaces the idle-green event ─────────────────
+
+test("Contract measure — `suite-state-trigger.ts --json` emits SUITE-IDLE-GREEN for a green + pending + idle fixture", async () => {
+  const { root } = gitRoot(2);
+  try {
+    const now = Date.now();
+    writeSuiteState(root, state({ state: "green", finishedAt: Math.floor((now - 2000) / 1000) }));
+    const { code, out } = await runCli(TRIGGER, ["--root", root, "--json", "--idle-green-min", "0.001"], {
+      QUAY_SUITE_IDLE_GREEN_MS: "1",
+    });
+    assert.equal(code, 0, `--json exits 0; got ${code}`);
+    const parsed = JSON.parse(out);
+    assert.equal(parsed.idleGreen, true, "JSON reports the idle-green trigger fired");
+    assert.ok(
+      parsed.events.some((e) => e.event === "SUITE-IDLE-GREEN"),
+      "JSON event array carries SUITE-IDLE-GREEN (the Contract measure band)",
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC2 — readGitVerificationState reads integration head + develop..integration from a real git repo", () => {
+  const { root, integrationHead } = gitRoot(3);
+  try {
+    const git = readGitVerificationState(root);
+    assert.equal(git.integrationHead, integrationHead, "integration head resolved");
+    assert.ok(git.pendingCount >= 1, "develop..integration count resolved (unverified commits present)");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
