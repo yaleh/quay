@@ -308,6 +308,24 @@ run_static_checks() {
   # @static-tier change
   # @static-object **/*.sh **/*.bash
   run_checker "dead-code-after-return-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/dead-code-after-return-check.ts" --root "${repo_root}"
+  echo "== commit-message verified-claim check (gap-commit-message-claims-verified-without-verification, AC11) =="
+  # Commit messages are an AC11 carrier: merge commit 8e2e49b9's message claimed "all syntax
+  # verified" while carrying real merge corruption (trend-check.ts duplicated 2×, 8 task
+  # frontmatters unparseable) — history is NOT re-verified by later readers, so a bare
+  # verified-claim in a commit message is more dangerous than one in a task body/tick row.
+  # This checker scans the live window (git log -n 100 from the repo root — ≈2 days at the
+  # fast-mode loop's ~40-50 commits/day, far beyond the original 7h41m discovery delay) and
+  # flags any commit whose message makes a "verified"-class ASSERTION without a reproducible
+  # verification command/reference (script path / test invocation / result counts /
+  # verifiedCommit= / backtick command). Judgment is POSITIONAL: a task-id
+  # (gap-…-verified-…), a descriptive "re-verify", a negation ("unverified"), or a CITED claim
+  # ("… claims 'all syntax verified'") is not an assertion. Exit 1 red-lights the commit
+  # (set -euo pipefail), so a new bare verified-claim reddens at the next test run — not after
+  # a 7h41m discovery delay. Negative control + mutation case:
+  # plugin/test/commit-message-verified-claim-check.test.mjs + checker-mutation-cases/<name>.sh.
+  # @static-tier change
+  # @static-object plugin/scripts/commit-message-verified-claim-check.ts plugin/test/commit-message-verified-claim-check.test.mjs scripts/test.sh
+  run_checker "commit-message-verified-claim-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/commit-message-verified-claim-check.ts" --root "${repo_root}"
   echo "== strategic-doc-staleness check (gap-establish-daily-review-cadence-mechanism, AC2/AC3/AC8) =="
   # The generic strategic-doc staleness checker: scans docs/proposals + orchestration/*ROADMAP* for
   # unannotated references to classic-pipeline scripts ADR-022 deleted (prepare-milestone.js /

@@ -4,7 +4,7 @@ title: 8e2e49b9 commit message claims "all syntax verified" while carrying real
   merge corruption (trend-check duplicated 2×, 8 task frontmatters broken) —
   commit message is a new AC11 carrier, more dangerous than task body/tick rows
   (history won't re-verify)
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -37,9 +37,9 @@ extra: {}
 
 ## AC（draft）
 
-- [ ] 提交消息的 "verified" 类断言必须伴随可复现的验证命令/引用（负控制：无命令则 flag）
-- [ ] 一条机械检查能检出「提交消息自称 verified 但缺验证命令」的提交
-- [ ] 与 `gap-ac8-import-over-spawn-ticked-...`（AC 勾选 ≠ 机制生效）与 `manager-phase-goal.md` AC11 交叉标注
+- [x] 提交消息的 "verified" 类断言必须伴随可复现的验证命令/引用（负控制：无命令则 flag）
+- [x] 一条机械检查能检出「提交消息自称 verified 但缺验证命令」的提交
+- [x] 与 `gap-ac8-import-over-spawn-ticked-...`（AC 勾选 ≠ 机制生效）与 `manager-phase-goal.md` AC11 交叉标注
 
 ## DoD（draft）
 
@@ -51,3 +51,18 @@ extra: {}
 - `git log -1 --format=%s 8e2e49b9`：含 "all syntax verified"
 - `82b1a719`（20:43:05）修复 trend-check 复制 2 份；`9c6b4efd` 修 8 个 frontmatter
 - d = 13:02:03 → 20:43:05 = 7h41m（`orchestration/ANALYSIS-when-should-B-develop-...md` 已记，c1085e6b）
+
+### Invoke evidence（2026-08-11，worktree 实跑）
+
+- **scoped 门**：`bash scripts/test.sh --for-task gap-commit-message-claims-verified-without-verification --allow-thin` → **11 pass / 0 fail / 0 cancelled / EXIT 0**；scoped 静态检查 13 项全绿（含本检查器 `commit-message-verified-claim-check`、capability-catalog、delivery-inventory、test-framework-policy、test-isolation、test-impl-census、dead-code-after-return、adr016、tick-core、task-contract、superseded、delivery-inventory-drift-gate）。
+- **检查器 RED（8e2e49b9 形态，裸断言无命令）**：`commit-message-verified-claim-check --root <repo> --depth 10` → `violations: 1`，`claim='all syntax verified'`，`subject='merge: 45 conflicts resolved (...; all syntax verified)'`，**EXIT=1**。
+- **检查器 GREEN（同一断言带验证命令）**：`subject='merge: 45 conflicts resolved (...; all syntax verified — scripts/test.sh scoped green)'` → `violations: 0`，**EXIT=0**。
+- **mutation case**：`checker-mutation-check.sh --check` → `MUTATION commit-message-verified-claim-check: pass`（注入裸断言必红、恢复命令引用必绿）。
+- **AC3 交叉标注**：本检查器即「机械生效 ≠ 勾选」的实例——检查器被接进 `run_static_checks`（scoped + full 都跑），裸 verified 断言在下次测试即红，而不是等到 7h41m 后发现；对齐 `gap-ac8-import-over-spawn-ticked-...`（AC 勾选 ≠ 机制生效）与 `manager-phase-goal.md` AC11（verified 断言必须带验证命令 + 负控制）。
+
+## Touches
+
+- plugin/scripts/commit-message-verified-claim-check.ts（new：机械检查——提交消息含 "verified" 须带验证命令引用，否则 flag）
+- plugin/test/commit-message-verified-claim-check.test.mjs（new：检查器测试 + 负控制）
+- scripts/test.sh（接线到 run_static_checks，若需）
+- tasks/gap-commit-message-claims-verified-without-verification.md（自身：勾 AC + 贴证据）
