@@ -66,4 +66,5 @@ OVER90 的 90 分钟时钟从 `--task-start` 起算，**可能先于实际工作
 - plugin/scripts/fast-mode-telemetry.ts（括号/时钟口径：排队段与工作段分离，OVER90 只看工作时钟）
 - plugin/scripts/inner-blocked-signal.ts（OVER90 判定读工作时钟）
 - plugin/test/fast-mode-telemetry.test.mjs（负控制：defer 后再工作不误触）
+- docs/analysis/fast-mode-loop-tick.md + plugin/loop/fast-mode-loop-tick.md（--work-start 接线：派发实际启动 subagent 时刻调用）
 - tasks/gap-over90-clock-measures-queue-time-not-work-time.md（自身：勾 AC + 贴证据）
