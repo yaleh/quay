@@ -1032,7 +1032,7 @@ verify_referenced_landed() {
     case " $NEVER_LAYDOWN " in *" $member "*) continue ;; esac
     consolidated_refs+="plugin/scripts/$member"$'\n'
   done
-  refs="$( ( grep -ohE '(plugin/scripts|orchestration|docs/analysis)/[a-zA-Z0-9._-]+' "$PLUGIN_ROOT/skills"/*/SKILL.md "$PLUGIN_ROOT"/loop/*.md 2>/dev/null
+  refs="$( ( grep -ohE '(plugin/scripts|plugin/loop|orchestration|docs/analysis)/[a-zA-Z0-9._-]+' "$PLUGIN_ROOT/skills"/*/SKILL.md "$PLUGIN_ROOT"/loop/*.md 2>/dev/null
              # AC2 (gap-quay-init-loop-tick-doc-paths-reference-unlanded-plugin-loop): the gate must
              # ALSO verify the CONSUMER-LAID docs (docs/analysis/) — the reference set of the
              # byte-identical copy a target project actually reads, not just the plugin source. A
@@ -1040,8 +1040,10 @@ verify_referenced_landed() {
              # when the loop lays only orchestration/ + docs/analysis/) is exactly the AC37
              # referenced⊆landed blind spot (ad-arm1: docs/analysis/fast-mode-loop-tick.md refs 5
              # paths that never landed). The laid copy IS the deliverable; the source scan alone
-             # cannot see a consumer-side mismatch.
-             grep -ohE '(plugin/scripts|orchestration|docs/analysis)/[a-zA-Z0-9._-]+' "$ws"/docs/analysis/*.md 2>/dev/null
+             # cannot see a consumer-side mismatch. `plugin/loop` is in the alternation (the AC37
+             # path-spelling blind spot): a shipped doc referencing plugin/loop/* (a bundle-source
+             # path that does NOT land — the loop lays orchestration/ + docs/analysis/) fails closed.
+             grep -ohE '(plugin/scripts|plugin/loop|orchestration|docs/analysis)/[a-zA-Z0-9._-]+' "$ws"/docs/analysis/*.md 2>/dev/null
              printf '%s\n' "$mech_bare"
              printf '%s' "$consolidated_refs"
            ) | sort -u || true )"

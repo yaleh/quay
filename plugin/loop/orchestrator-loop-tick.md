@@ -12,8 +12,8 @@
 > cron 照常触发,差别只在于 cron 是锚指向文件)。**加这一行,是把执行核从记忆搬进锚的可达范围。**
 
 > **模板参数（gap-install-rewrites-files-so-upgrade-cannot-tell-who-changed-them）**：本文件是随
-> quay 插件包分发的外层 tick 文档（模板在 `plugin/loop/orchestrator-loop-tick.md`，内层模板是
-> `plugin/loop/fast-mode-loop-tick.md`）。
+> quay 插件包分发的外层 tick 文档（铺到目标项目时是 `orchestration/orchestrator-loop-tick.md`，内层铺到
+> `docs/analysis/fast-mode-loop-tick.md`）。
 > `quay-init --loop` **原样铺出**（字节相同，不做文本替换）——目标项目的值（`repo_root` /
 > `test_command` / `tmux_session`）集中在一个配置文件 `.quay/config.yml` 的 `loop:` 节里，
 > 脚本与本 tick 在**运行时读取**它们，不在落地时烘焙。铺到目标项目时的位置：
@@ -329,9 +329,9 @@ monitor 只在状态转换时发事件**（SESSION-GONE/BACK/IDLE/RESUMED/OVERDU
 ## 冷启动 skill 背景档案（AC41 判据 2 — 背景从 plugin/skills/cold-start/SKILL.md 搬入）
 
 `plugin/skills/cold-start/SKILL.md` 只留动作(Steps)与可判定清单；本段是被它引用的背景/判据正文。
-冷启动 skill 引用本文件(外层 tick)与 `plugin/loop/fast-mode-loop-tick.md`(内层 tick 产品模板)作为
+冷启动 skill 引用本文件(外层 tick)与 `docs/analysis/fast-mode-loop-tick.md`(内层 tick 产品模板)作为
 **同一批行为文件**。tick 执行核同样引用这一批，各自指向同层 loop-tick 文档：外层
-`plugin/loop/orchestrator-loop-tick.md`、内层 `plugin/loop/fast-mode-loop-tick.md`、管理者
+`orchestration/orchestrator-loop-tick.md`、内层 `docs/analysis/fast-mode-loop-tick.md`、管理者
 `orchestration/manager-loop-tick.md`。
 
 > 铺到目标项目后的 laid-down 位置（quay-init 字节原样铺出）：外层 `orchestration/orchestrator-loop-tick.md`、
@@ -363,7 +363,7 @@ same derivation quay-init.sh's `derive_loop_scripts()` step (a) uses. Never hand
 the grep:
 
 ```bash
-grep -ohE 'plugin/scripts/[a-zA-Z0-9._-]+' <root>/plugin/skills/*/SKILL.md <root>/plugin/loop/*.md
+grep -ohE 'plugin/scripts/[a-zA-Z0-9._-]+' <root>/plugin/skills/*/SKILL.md <root>/orchestration/*.md <root>/docs/analysis/*.md
 ```
 
 **Run the gate:**

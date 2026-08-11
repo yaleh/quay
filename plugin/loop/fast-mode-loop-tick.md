@@ -12,8 +12,8 @@
 > cron 照常触发,差别只在于 cron 是锚指向文件)。**加这一行,是把执行核从记忆搬进锚的可达范围。**
 
 > **模板参数（gap-install-rewrites-files-so-upgrade-cannot-tell-who-changed-them）**：本文件是随
-> quay 插件包分发的内层 tick 文档（模板在 `plugin/loop/fast-mode-loop-tick.md`，外层模板是
-> `plugin/loop/orchestrator-loop-tick.md`）。
+> quay 插件包分发的内层 tick 文档（铺到目标项目时是 `docs/analysis/fast-mode-loop-tick.md`，外层铺到
+> `orchestration/orchestrator-loop-tick.md`）。
 > `quay-init --loop` **原样铺出**（字节相同，不做文本替换）——目标项目的值（`repo_root` /
 > `test_command` / `tmux_session`）集中在一个配置文件 `.quay/config.yml` 的 `loop:` 节里，
 > 脚本与本 tick 在**运行时读取**它们，不在落地时烘焙。铺到目标项目时的位置：
@@ -1281,8 +1281,8 @@ engine 组 + governance 组 == 去重后 realpath 总数」这类**关系**，�
 `## Touches`。缺任一项的不算建成。
 
 **核心/loop 文档 outer 独占写（`gap-write-ownership-extend-beyond-tasks-to-outer-core-and-hot-files` AC2）**：
-inner 建任务时**不得**把 `plugin/loop/orchestrator-loop-tick.md` 与 `plugin/loop/orchestrator-tick-core.md`
-（及未来新增的 `plugin/loop/` 下 `orchestrator-*.md` 一族）列入 `## Touches`——它们归 outer 独占写
+inner 建任务时**不得**把 `orchestration/orchestrator-loop-tick.md` 与 `orchestration/orchestrator-tick-core.md`
+（及未来新增的 `orchestration/` 下 `orchestrator-*.md` 一族）列入 `## Touches`——它们归 outer 独占写
 （外层执行核 + loop 文档；写所有权分离 `0ce3f2a8` 只覆盖 `tasks/`，不覆盖这两类，6 条 inner 分支撞
 add/add 就是代价）。inner 需要改它们 ⇒ 在 `## Proposal` 给**改动建议**（要改哪条、改成什么、为什么），
 由 outer 落盘。
@@ -1359,7 +1359,7 @@ node --no-warnings --experimental-strip-types plugin/scripts/inner-exec-mode-rep
 
 - `main_thread_edits` = 主线程 tool_use `Edit` 且 `input.file_path` 指向**产品文件**
   （`plugin/scripts/`、`plugin/test/`、`packages/` 之下）的次数；`tasks/` 与 `docs/`
-  （含 `orchestration/`、`plugin/loop/` 的 `.md`）**不算**。
+  （含 `orchestration/`、`docs/analysis/` 的 `.md`）**不算**。
 - `agent_dispatches` = 主线程 tool_use `Agent` 的次数。
 - `--since <ISO>` 窗口化到本 tick 起始时刻 ⇒ 报「本轮」两数（Contract measure 的读取形态）。
 
@@ -1372,7 +1372,7 @@ helper 只报数、不裁决——「当轮是否红窗」由 tick 的 suite-sta
    measure-trend/ready-pool 那类即时修复属此类）。
 2. **任务立案/编排**：写任务体、勾 AC、贴证据、编辑 `tasks/*.md`（helper 结构上不计入
    `main_thread_edits`——`tasks/` 不是产品文件，白名单在计数源头兑现）。
-3. **tick 文档/编排文档编辑**：`plugin/loop/*.md`、`orchestration/*.md` 的编辑属编排，
+3. **tick 文档/编排文档编辑**：`orchestration/*.md`、`docs/analysis/*.md` 的编辑属编排，
    不计入产品文件 Edit（同 2，计数源头排除）。
 
 **机械上报触发**：当 `main_thread_edits` 大（> 3）**且** `agent_dispatches == 0` **且** 当轮不是

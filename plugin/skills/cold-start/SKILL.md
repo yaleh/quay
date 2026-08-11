@@ -13,7 +13,7 @@ The user's whole cold start is this command; after it returns, the loop must be 
 non-goals)在 `orchestration/orchestrator-loop-tick.md`(冷启动段 + 冷启动背景档案)与
 `orchestration/CRYSTALLIZED-reliable-send-2026-08-04.md`。本文件只给动作(Steps)与可判定清单。
 **tick 与冷启动引用同一批行为文件**:外层 `orchestration/orchestrator-loop-tick.md`、内层
-`docs/analysis/fast-mode-loop-tick.md`(产品模板 `plugin/loop/fast-mode-loop-tick.md`)、管理者
+`docs/analysis/fast-mode-loop-tick.md`(随 `quay-init --loop` 铺下的产品模板)、管理者
 `orchestration/manager-loop-tick.md`。
 
 ## Preconditions (fail-closed)
@@ -133,8 +133,8 @@ as its first cold-start consumer.
 ### 1b. Gate the derived laydown set — lay what you verify, not the whole suite (fail-closed)
 
 The cold start only relies on the **DERIVED laydown set** — the scripts quay-init laid down. That set
-is mechanically derived (`grep plugin/skills/*/SKILL.md plugin/loop/*.md` → the `plugin/scripts/*`
-they reference — the SAME derivation quay-init.sh uses; no hand-written list). The gate is therefore
+is mechanically derived (`grep plugin/skills/*/SKILL.md orchestration/*.md docs/analysis/*.md` → the
+`plugin/scripts/*` they reference — the SAME derivation quay-init.sh uses; no hand-written list). The gate is therefore
 **"that set is green", not "the whole suite is green"**: an unrelated suite failure must NOT block the
 cold start (`gap-cold-start-gate-should-be-derived-laydown-set-green-not-whole-suite`; cross:
 `gap-red-window-dispatch-stop-should-be-shared-gate-conditional` — same scope axis, different
