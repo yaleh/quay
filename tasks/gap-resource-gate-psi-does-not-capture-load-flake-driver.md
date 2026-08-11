@@ -1,7 +1,7 @@
 ---
 id: gap-resource-gate-psi-does-not-capture-load-flake-driver
 title: 'resource-gate 用 PSI some avg10 判 GO 但套件 flake 与 load-average 相关——round-230 (load 6.4) / round-232 (load 11.76) 的 loop-shipping passed=false 均发生在 PSI 低位（8-10 < 60 limit）时，gate 返回 GO ⇒ 轮次在过载窗口持续起跑；gate 判据与真实 flake 驱动器错配（头注释「PSI over load」有意为之，但实证不支持）'
-status: todo
+status: ready
 labels:
   - gap
   - defect
