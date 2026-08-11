@@ -281,6 +281,22 @@ export function readCpuStallFromGate(repoRoot: string, env: NodeJS.ProcessEnv = 
   return Number.isFinite(v) ? v : null;
 }
 
+/** Read the load-average (1-min) OVERLOAD-WINDOW signal from resource-gate.sh REPORT mode (single
+ *  source — gap-resource-gate-psi-does-not-capture-load-flake-driver AC3: the gate now also gates
+ *  on load >= nproc × LOAD_OVER_FACTOR, the supplementary overload-window criterion; cap-from-gate
+ *  reports the SAME reading so the observation line stays in sync with the gate the suite uses).
+ *  Returns null when UNMEASURABLE. Note the cap itself is FIXED (gap-fixed-cap-5-dynamic-cap-retired)
+ *  — this is observation only, so dispatch sees the same overload-window signal the gate refuses on. */
+export function readLoadAvgFromGate(repoRoot: string, env: NodeJS.ProcessEnv = process.env): number | null {
+  const gate = path.join(repoRoot, "plugin", "scripts", "resource-gate.sh");
+  const res = spawnSync("bash", [gate], { cwd: repoRoot, encoding: "utf8", env });
+  if (res.status !== 0) return null;
+  const m = `${res.stdout}\n${res.stderr}`.match(/loadavg=([0-9.]+|UNMEASURABLE)/);
+  if (!m || m[1] === "UNMEASURABLE") return null;
+  const v = Number(m[1]);
+  return Number.isFinite(v) ? v : null;
+}
+
 /** The cap decision. RETIRED as a dynamic decision (gap-fixed-cap-5-dynamic-cap-retired): the
  *  effective_cap returned is the FIXED constant 5; the band/consecutive/budget fields are OBSERVATION
  *  only (printed by main() so the load is visible) and participate in no decision. `stateFile` defaults
@@ -301,6 +317,7 @@ export function computeEffectiveCap(opts: {
   consecutive: number;
   switched: boolean;
   cpu_stall: number | null;
+  load_avg: number | null;
   stateFile: string;
   budget_available: number | null;
   budget_total: number | null;
@@ -312,6 +329,7 @@ export function computeEffectiveCap(opts: {
   const samples = opts.samples ?? HYSTERESIS_SAMPLES_DEFAULT;
   const now = opts.now ?? Date.now();
   const cpuStall = readCpuStallFromGate(repoRoot, env);
+  const loadAvg = readLoadAvgFromGate(repoRoot, env);
   const desired = computeDesiredBand(cpuStall);
   const loaded = loadState(stateFile);
   const { band, consecutive, switched } = applyHysteresis(loaded, desired, samples, now);
@@ -337,6 +355,7 @@ export function computeEffectiveCap(opts: {
     consecutive,
     switched,
     cpu_stall: cpuStall,
+    load_avg: loadAvg,
     stateFile,
     budget_available: budget?.available ?? null,
     budget_total: budget?.total_budget ?? null,
@@ -366,8 +385,12 @@ function main(argv: string[]): number {
     samples,
   });
   const avg = result.cpu_stall === null ? "UNMEASURABLE" : result.cpu_stall.toFixed(2);
+  const load = result.load_avg === null ? "UNMEASURABLE" : result.load_avg.toFixed(2);
   console.log(
     `signal: cpu_stall(some avg10)=${avg}  bands(go<${WAIT_THRESHOLD}, wait<${EXTREME_THRESHOLD}, extreme>=${EXTREME_THRESHOLD})`,
+  );
+  console.log(
+    `load: loadavg(1min)=${load}  [overload-window: gate WAITs at load >= nproc x LOAD_OVER_FACTOR — gap-resource-gate-psi-does-not-capture-load-flake-driver]`,
   );
   console.log(
     `band: ${result.band}  desired=${result.desired}  consecutive=${result.consecutive}/${samples}  switched=${result.switched ? "yes" : "no"}`,
