@@ -1784,3 +1784,100 @@ test("AC5: suite-blocking obligation recorded mechanically in the obligation led
     assert.ok(suite[key] !== undefined && suite[key] !== null && suite[key] !== "", `obligation row carries \`${key}\``);
   }
 });
+
+// ── PROSE-PREREQUISITE GAP (gap-prerequisite-gates-prose-invisible-to-mechanisms) ──────────────────
+// A prerequisite written ONLY as prose (a `[[task-id]]` wikilink inside a "Do not dispatch until …
+// lands / 前置" paragraph) is invisible to every mechanism path that reads relation edges
+// (parent/children/depends_on). The detector makes it FAIL-CLOSED: a ready task with a prose prereq
+// that has NO relation edge is excluded from the dispatchable pool, and a todo candidate with the
+// same shape is ineligible for author→ready promotion.
+
+const PREREQ_BODY = (prereqIds, { withEdge = false } = {}) => {
+  const lines = [
+    "**type:** execution",
+    "## Proposal",
+    "A real proposal paragraph that is definitely more than forty non-whitespace chars in total length.",
+    `**Do not dispatch until all of these have landed**: ${prereqIds.map((p) => `[[${p}]]`).join(", ")}.`,
+    "## Contract",
+    "measure   ready_pool = `node plugin/scripts/ready-pool-check.ts` stdout 的 pool 字段",
+    "band      ready_pool = true",
+    "invoke    `node plugin/scripts/ready-pool-check.ts`",
+    "control   ok",
+    "resume    前置任务全 done 后才 dispatch",
+    "## Acceptance Criteria",
+    "- [ ] an AC item that is long enough to count as a real acceptance criterion box",
+    "## Definition of Done",
+    "standard DoD — the five clauses; meta-enforcer fixture-pinned, definitely long enough content.",
+  ];
+  return lines.join("\n");
+};
+
+test("ready task with prose prereq and NO relation edge ⇒ excluded from the pool (prose-prereq-no-edge)", (t) => {
+  const root = makeWorkspace("prereq-ready");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // The referenced prereq task exists (so the wikilink resolves) but has NO relation edge to the target.
+  writeTask(root, "gap-prereq-a", { status: "done", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-no-edge", {
+    status: "ready",
+    labels: ["gap"],
+    body: PREREQ_BODY(["gap-prereq-a"]),
+  });
+
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 });
+  const ex = r.excluded.find((e) => e.id === "gap-no-edge");
+  assert.ok(ex, "prose-prereq-no-edge ready task must be in the excluded list");
+  assert.ok(ex.reasons.some((s) => s.includes("前置")), `exclusion reason must carry the 前置 literal, got: ${ex.reasons.join(";")}`);
+  assert.equal(r.ready.includes("gap-no-edge"), false, "the task must NOT be in the dispatchable ready pool");
+});
+
+test("prose prereq that IS a relation edge (depends_on) ⇒ NOT excluded; depsReady checks depends_on", (t) => {
+  const root = makeWorkspace("prereq-edge");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-prereq-a", { status: "done", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-prereq-b", { status: "todo", labels: ["gap"], body: fourArtifactBody() });
+  // The prose prereq is ALSO expressed as a depends_on edge (done) ⇒ no gap, stays dispatchable.
+  writeTask(root, "gap-edged-ready", {
+    status: "ready",
+    labels: ["gap"],
+    parent: null,
+    children: [],
+    body: PREREQ_BODY(["gap-prereq-a", "gap-prereq-b"]),
+  });
+  // Add depends_on AFTER writeTask by patching the file (writeTask has no dependsOn param).
+  const file = path.join(root, "tasks", "gap-edged-ready.md");
+  const raw = fs.readFileSync(file, "utf8").replace("parent: null", "depends_on:\n  - gap-prereq-a\n  - gap-prereq-b\nparent: null");
+  fs.writeFileSync(file, raw);
+
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 });
+  assert.equal(r.ready.includes("gap-edged-ready"), true, "prose prereq ALSO expressed as an edge stays dispatchable");
+  assert.equal(r.excluded.some((e) => e.id === "gap-edged-ready"), false);
+
+  // depsReady: gap-prereq-a done + gap-prereq-b todo ⇒ the todo candidate is NOT deps-ready.
+  writeTask(root, "gap-child-cand", { status: "todo", labels: ["gap"], parent: null, children: [], body: PREREQ_BODY([]) });
+  const file2 = path.join(root, "tasks", "gap-child-cand.md");
+  const raw2 = fs.readFileSync(file2, "utf8").replace("parent: null", "depends_on:\n  - gap-prereq-a\n  - gap-prereq-b\nparent: null");
+  fs.writeFileSync(file2, raw2);
+  const r2 = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 });
+  const cand = r2.candidates.find((c) => c.id === "gap-child-cand");
+  assert.equal(cand.depsReady, false, "a depends_on entry not done ⇒ deps NOT ready (parent alone no longer the only dep)");
+});
+
+test("todo candidate with prose prereq and NO edge ⇒ ineligible for promotion (author→ready fail-closed)", (t) => {
+  const root = makeWorkspace("prereq-promo");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-prereq-a", { status: "done", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-cand", {
+    status: "todo",
+    labels: ["gap"],
+    parent: null,
+    children: [],
+    body: PREREQ_BODY(["gap-prereq-a"]),
+  });
+
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1, targetedId: "gap-cand" });
+  assert.equal(r.targeted_promotion.eligible, false, "targeted promotion must reject prose-prereq-no-edge");
+  assert.deepEqual(r.targeted_promotion.checks.prosePrereqGap, ["gap-prereq-a"], "the gap names the missing edge");
+  const cand = r.candidates.find((c) => c.id === "gap-cand");
+  assert.equal(cand.eligible, false, "bulk promotion must reject prose-prereq-no-edge");
+  assert.deepEqual(cand.prosePrereqGap, ["gap-prereq-a"]);
+});

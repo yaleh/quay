@@ -132,7 +132,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { parseTask, extractSection } from "./task-schema.ts";
+import { parseTask, extractSection, readDependsOn } from "./task-schema.ts";
 // criterion-cost self-record (gap-no-criterion-records-its-own-cost-checker-cost-jsonl): this
 // criterion KNOWS its input size n (the ready pool count) — the ONLY field that splits "the
 // criterion got slower" into "n got bigger" vs "the machine got busier" (the 35.8→91.2→157.0
@@ -498,6 +498,74 @@ export function readChildren(frontmatterRaw) {
   return out;
 }
 
+// ── PROSE-PREREQUISITE GAP (tasks/gap-prerequisite-gates-prose-invisible-to-mechanisms) ────────────
+// The mechanism paths that judge dispatch-readiness — the A15② dependency check
+// (it0-split-or-commit-check.ts's PARENT-DONE-IFF-CHILDREN), the ready-pool author→ready gate, and
+// the pre-dispatch readiness scan — read RELATION EDGES (parent/children/depends_on). A prerequisite
+// written ONLY as prose (a `[[task-id]]` wikilink inside a "Do not dispatch until … lands / 前置 /
+// depends on" declaration) is invisible to all three: the task stays ready/dispatchable and only a
+// subagent reading the body discovers it. This detector makes prose-declared prerequisites
+// FAIL-CLOSED: a task whose body declares a prerequisite that is NOT expressed as a relation edge is
+// excluded from the ready pool and ineligible for author→ready promotion (it stays dispatchable ONLY
+// when the prose prereq is ALSO a relation edge — a normal dependency, handled by depsReadyFor).
+//
+// Precision constraints (verified against the real store, 2026-08-11):
+//   - WIKILINKS INSIDE CODE SPANS ARE SKIPPED: a paragraph QUOTING another task's prereq prose inside
+//     backticks (`` `[[gap-…]]` `` — e.g. this very task's Proposal describing the empirical task) is
+//     an illustrative mention, not a prereq declaration. stripCode removes fenced blocks + inline
+//     backtick spans before wikilink matching.
+//   - A prereq keyword ALONE is not enough — the paragraph must ALSO carry a wikilink to an EXISTING
+//     task file (a broken link is a different defect, not a prereq claim).
+//   - "依赖" alone is deliberately NOT in the keyword set (a "无代码依赖 / no code dependency" mention
+//     would false-fire); only gating constructions qualify.
+const PREREQ_KEYWORD_RE =
+  /前置|depends?\s+on|depends_on|do\s+not\s+dispatch|勿派|不得派发|不得派|禁止派发|先决|前序|声明依赖|依赖前序|先落地|先完成|先跑/i;
+const WIKILINK_RE = /\[\[([A-Za-z0-9][A-Za-z0-9-]*)(?:[#|][^\]]*)?\]\]/g;
+
+/** Strip fenced code blocks (```…``` / ~~~…~~~) and inline backtick spans (`…`) so a QUOTED wikilink
+ *  inside code is not read as a prereq declaration. Fences are removed before inline spans (an inline
+ *  backtick can appear inside a fence). */
+export function stripCodeSpans(text) {
+  const noFence = text.replace(/```[\s\S]*?```|~~~[\s\S]*?~~~/g, " ");
+  return noFence.replace(/`[^`\n]*`/g, " ");
+}
+
+/** The task's declared relation-edge set — parent + children + depends_on (the fields every
+ *  dependency mechanism reads). A prereq written into ANY of these is mechanism-visible. */
+export function relationEdges(frontmatterRaw) {
+  const edges = new Set();
+  const parent = readFrontField(frontmatterRaw, "parent");
+  if (parent && parent !== "null" && parent !== "~") edges.add(parent);
+  for (const c of readChildren(frontmatterRaw)) edges.add(c);
+  for (const d of readDependsOn(frontmatterRaw)) edges.add(d);
+  return edges;
+}
+
+/** Task ids referenced as wikilinks inside prereq-declaration paragraphs of the body (code spans
+ *  stripped; only ids that resolve to an existing task file). */
+export function prosePrereqRefs(body, tasksDir) {
+  const refs = new Set();
+  const clean = stripCodeSpans(body);
+  for (const para of clean.split(/\r?\n\s*\r?\n/)) {
+    if (!PREREQ_KEYWORD_RE.test(para)) continue;
+    for (const m of para.matchAll(WIKILINK_RE)) {
+      const id = m[1];
+      if (fs.existsSync(path.join(tasksDir, `${id}.md`))) refs.add(id);
+    }
+  }
+  return [...refs];
+}
+
+/** Prose-declared prerequisites that are NOT expressed as a relation edge. Empty array = no gap (all
+ *  prose-declared prereqs are also edges, or there are none). A non-empty result is the fail-closed
+ *  signal: this task declares a prerequisite the mechanisms cannot see. */
+export function prosePrereqGap(body, frontmatterRaw, tasksDir) {
+  const refs = prosePrereqRefs(body, tasksDir);
+  if (refs.length === 0) return [];
+  const edges = relationEdges(frontmatterRaw);
+  return refs.filter((r) => !edges.has(r));
+}
+
 /** Mechanical strategic-traceability grep: does the body reference a written strategic question
  *  (the orchestration/ strategic-doc naming convention — FINDING-, SYNTHESIS-, SPEC-, or
  *  REVIEW-cadence)? */
@@ -688,12 +756,21 @@ export function computeSuiteBlocking({ rounds, stateFailures, tasks, minRedWindo
 }
 
 function depsReadyFor(task, allTasks) {
+  // ALL prerequisites — parent AND every depends_on entry (gap-prerequisite-gates-prose-invisible-
+  // to-mechanisms AC2: prereqs live in relation edges and the author→ready gate reads the SAME field
+  // the dispatch check reads). Each must be done; a missing file fails closed.
+  const deps = [];
   const parent = task.parent;
-  if (!parent || parent === "null" || parent === "~") return true;
-  const p = allTasks.get(parent);
-  // Parent file missing → cannot confirm done → fail closed (conservative, not dispatchable).
-  if (!p) return false;
-  return p.status === "done";
+  if (parent && parent !== "null" && parent !== "~") deps.push(parent);
+  for (const d of readDependsOn(task.frontmatterRaw)) deps.push(d);
+  if (deps.length === 0) return true;
+  for (const depId of deps) {
+    const p = allTasks.get(depId);
+    // Parent/dep file missing → cannot confirm done → fail closed (conservative, not dispatchable).
+    if (!p) return false;
+    if (p.status !== "done") return false;
+  }
+  return true;
 }
 
 /** Largest subset of `parsed` (an array of parseTouches results) whose members are pairwise
@@ -751,6 +828,10 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
   // intercepted, not promoted).
   const staleRefs = judgePoolCandidate(root, id); // null when tasks/<id>.md is missing — not a live candidate
   const retiredMechanism = staleRefs !== null && staleRefs.length > 0;
+  // PROSE-PREREQUISITE GAP (gap-prerequisite-gates-prose-invisible-to-mechanisms AC3): a candidate
+  // whose body declares a prerequisite in prose WITHOUT a corresponding relation edge must NOT be
+  // promoted to ready — it would enter the ready pool with a dependency no mechanism can see.
+  const prosePrereqGapIds = prosePrereqGap(task.body, task.frontmatterRaw, path.join(root, "tasks"));
   // Touch-disjointness score: how many of the already-pooled ready tasks + in-flight tasks this
   // candidate is pairwise touches-DISJOINT from (checkTouchesPair, the real dispatch judge). Higher
   // = promotes into a pool that stays dispatchable-disjoint (AC4 — disjointness ranks FIRST).
@@ -773,10 +854,14 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
     // is never eligible (the intercept reason is mechanically carried for the `intercepted` output).
     retiredMechanism,
     retiredRefs: staleRefs !== null ? staleRefs : [],
+    // PROSE-PREREQUISITE GAP (AC3): prose-declared prereqs with no relation edge — never eligible.
+    prosePrereqGap: prosePrereqGapIds,
     // AC5: the touchesResolve guard is KEPT — majority-missing candidates are never eligible.
     // AC1: the retired-mechanism guard is ADDED — a candidate targeting a retired pipeline mechanism
     // is never eligible either.
-    eligible: depsReady && four.complete && touchesResolve && !retiredMechanism,
+    // AC3: the prose-prereq-no-edge guard is ADDED — a candidate whose prose prereqs have no relation
+    // edge is never eligible (promotion would put an invisible dependency into the ready pool).
+    eligible: depsReady && four.complete && touchesResolve && !retiredMechanism && prosePrereqGapIds.length === 0,
   };
 }
 
@@ -826,12 +911,16 @@ export function buildTargetedPromotion(id, task, root, allTasks) {
   const depsReady = depsReadyFor(task, allTasks);
   const touches = checkTaskTouchesResolve(task.body, root);
   const touchesResolve = !touches.majorityMissing;
-  const eligible = four.complete && depsReady && touchesResolve;
+  // PROSE-PREREQUISITE GAP (AC3): targeted promotion must NOT advance a task whose prose-declared
+  // prereqs have no relation edge — same fail-closed as the bulk path.
+  const prosePrereqGapIds = prosePrereqGap(task.body, task.frontmatterRaw, path.join(root, "tasks"));
+  const eligible = four.complete && depsReady && touchesResolve && prosePrereqGapIds.length === 0;
   const checks = {
     fourArtifacts: four.complete,
     missingArtifacts: four.missing,
     depsReady,
     touchesResolve,
+    prosePrereqGap: prosePrereqGapIds,
     notFixture: true,
     notParked: true,
     retiredMechanism: false,
@@ -847,7 +936,8 @@ export function buildTargetedPromotion(id, task, root, allTasks) {
     reason: eligible
       ? `${id}: targeted promotion (outer stage-goal selection) — mechanically eligible; run \`quay promote ${id}\``
       : `${id}: not eligible · four-artifacts ${four.complete ? "complete" : `missing ${four.missing.join(",")}`} · ` +
-        `deps ${depsReady ? "ready" : "NOT-ready"} · touches ${touchesResolve ? "resolve" : "MISSING"}`,
+        `deps ${depsReady ? "ready" : "NOT-ready"} · touches ${touchesResolve ? "resolve" : "MISSING"} · ` +
+        `prose-prereq ${prosePrereqGapIds.length === 0 ? "ok" : `GAP(${prosePrereqGapIds.join(",")})`}`,
   };
 }
 
@@ -920,6 +1010,13 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
     if (isParked(t)) reasons.push("parked");
     if (isAcRecord(t)) reasons.push("ac-record");
     if (notYetFlipped(t, root, gitIndex)) reasons.push("not-yet-flipped");
+    // PROSE-PREREQUISITE GAP (gap-prerequisite-gates-prose-invisible-to-mechanisms AC3): a ready task
+    // whose body declares a prerequisite in prose WITHOUT a relation edge is NOT dispatchable — it
+    // would be dispatched with an invisible dependency and only a subagent reading the body would
+    // discover it. Fail-closed at the pool: excluded (never dispatchable until the edge is added).
+    // The reason carries the 前置 literal (the Contract measure's grep surface).
+    const proseGap = prosePrereqGap(t.body, t.frontmatterRaw, tasksDir);
+    if (proseGap.length > 0) reasons.push(`prose-prereq-no-edge (前置无边: ${proseGap.join(",")})`);
     if (reasons.length > 0) excluded.push({ id, reasons });
     else ready.push(id);
   }
