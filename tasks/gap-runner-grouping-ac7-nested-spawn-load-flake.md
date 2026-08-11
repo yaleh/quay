@@ -78,6 +78,11 @@ extra: {}
 - **AC3 Contract solo invoke 重跑**：`node --no-warnings --experimental-strip-types --test plugin/test/runner-grouping.test.mjs` → **SOLO EXIT: 0**，`tests 11 / pass 11 / fail 0 / cancelled 0`（duration 244.2s），其中 `✔ AC7 (15813ms)`。
 - **确认**：AC7 DIRECT-membership 修法（`--group engine --list-files` 成员断言 + `--group product` 非成员断言）在 develop head 上仍在位（`a9523011` 起），本 re-dispatch 未改动测试代码——fix 已在 develop，重新验证其经受 develop 后续 ~27 个提交（f05a4bdf→255c9edb）无回归。
 
+**再验证（2026-08-11 inner re-dispatch #3，develop @ d29834f6，worktree `task/gap-runner-grouping-ac7-nested-spawn-load-flake`）**：
+- **AC5 scoped 门重跑**：`bash scripts/test.sh --for-task gap-runner-grouping-ac7-nested-spawn-load-flake --allow-thin` → **GATE EXIT: 0**，`tests 11 / pass 11 / fail 0 / cancelled 0`（duration 67.6s），其中 `✔ AC7: an undeclared file defaults to engine in --list-groups (6771ms)`；静态检查全过（test-framework-policy / test-isolation / test-impl-census / task-contract-check / superseded-capability / tick-core-static-check，violations 0）。
+- **AC3 Contract solo invoke 重跑**：`node --no-warnings --experimental-strip-types --test plugin/test/runner-grouping.test.mjs` → **SOLO EXIT: 0**，`tests 11 / pass 11 / fail 0 / cancelled 0`（duration 101.0s），其中 `✔ AC7: an undeclared file defaults to engine in --list-groups (6697ms)`。
+- **确认**：本 re-dispatch 未改动测试代码——AC7 DIRECT-membership 修法经受 develop 自 255c9edb → d29834f6 的后续提交无回归。AC2（连续 2 轮全量绿）与 DoD 全量绿留给外层 verification-round 验证（SCOPED ONLY 纪律）。
+
 **AC2（连续 2 轮全量绿）与 DoD 全量绿**：留给外层 verification-round 验证（SCOPED ONLY 纪律）。
 
 ## Touches
