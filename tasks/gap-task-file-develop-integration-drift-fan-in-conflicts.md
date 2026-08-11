@@ -107,3 +107,5 @@ tick-core-static-check: PASS — execution cores are statically covered.
 delivery-inventory drift gate: PASS
 instrument-failure-check --gate: PASS
 ```
+
+**交叉标注（2026-08-11, gap-write-ownership-extend-beyond-tasks-to-outer-core-and-hot-files）**：写所有权分离 `0ce3f2a8` 的覆盖范围从此任务（`tasks/` 35→7）扩展到 outer 执行核/loop 文档/热点实现——`orchestration/orchestrator-*.md` 与 `plugin/loop/orchestrator-loop-tick.md` **outer 独占写**（inner 给建议、outer 落盘）、迁移窗口新路径**单方新建**、outer 在飞改动纳入 `touches-orthogonality-check` 占用表（`--check-pair --outer-inflight`）。此任务的继承处置记录在 `orchestration/orchestrator-tick-core.md` C17（inner 只追加任务文件正文段、不写 frontmatter 的纪律仍有效）。

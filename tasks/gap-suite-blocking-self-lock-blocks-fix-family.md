@@ -3,7 +3,7 @@ id: gap-suite-blocking-self-lock-blocks-fix-family
 title: suite_blocking 自锁——套件红 ⇒ 拦碰套件文件的任务 ⇒ 而修套件的任务必然碰套件文件 ⇒ 派不出去 ⇒ 套件继续红（与
   .halt 裁定同型：停派发好让 outer 修红是死锁，修红要靠派发）；应豁免【Touches
   与本次失败文件相交、且任务本身就是修这些失败的】一类，或至少豁免 suite 基础设施族
-status: ready
+status: needs-human
 labels:
   - gap
   - defect

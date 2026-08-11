@@ -64,12 +64,6 @@ cgroup 限额（每项目 scope）天然解决此问题。
 - [x] 两个负控制实测（PID 爆不影响机器其他进程；内存爆不进全机 swap）
 - [x] scoped 门 `scripts/test.sh --for-task gap-systemd-run-limits-for-suite-and-heavy-ops` 绿
 
-## Definition of Done
-
-- [ ] AC1-AC6 全勾（套件在 systemd-run 限额下跑 cgroup 生效；PID 爆 TasksMax 挡住；内存爆 MemoryMax 杀单进程；通信通道零改动；与 no-resource-awareness + SPEC-isolation 交叉标注；跨项目隔离实锤 archguard 高负载时 quay 套件自身 scope 正常）
-- [ ] 两个负控制实测（PID 爆不影响机器其他进程；内存爆不进全机 swap）
-- [ ] scoped 门 `scripts/test.sh --for-task gap-systemd-run-limits-for-suite-and-heavy-ops` 绿
-
 ## Touches
 - tasks/gap-systemd-run-limits-for-suite-and-heavy-ops.md（自身文件——self-touch，2026-08-08 内层补：缺此条不满足派发资格闸 step 4.5）
 
@@ -161,6 +155,15 @@ CPUQuota，不需要整机空闲。新测试 `AC6 — cross-project isolation…
 A = CPU 燃烧器（`CPUQuota=100%`，`while :; do :; done`，模拟 archguard 高负载），
 B = quay 套件（自身限额）——B 在 A 燃烧期间正常跑完（exit 0，state green，state.systemdRun 证明
 它在自身 scope）。自动化 + 本机实测均绿。
+
+## 交叉标注（2026-08-11）——CPU 项被子任务改掉（本任务保留内存项）
+
+**人的裁定（2026-08-11 06:4x，`gap-systemd-run-cancel-cpuquota-keep-memory-guardrail`）「取消 CPU
+配额、保持内存配额」⇒ `full-suite-runner.ts` `DEFAULT_SYSTEMD_RUN_LIMITS` cpuQuota 由本任务落定的
+`200%` 改为 **`400%`**（用满本机 4 物理核）；MemoryMax=4G（01:07 整机 OOM 护栏，人明确要求保持）与
+TasksMax=200 保持不动。**本任务 AC1/Evidence/Contract 里的 `CPUQuota=200%`/`CPUQuotaPerSecUSec=2s`
+是 2026-08-08 时的实测记录（当时默认 200%）**——保留为历史记录不改写；现行默认以
+`gap-systemd-run-cancel-cpuquota-keep-memory-guardrail` 为准。
 
 ## Dispatch review
 

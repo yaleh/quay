@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-11T07:49:53.954Z",
+  "generatedAt": "2026-08-11T08:32:12.656Z",
   "since": null,
   "tasks": [
     {
@@ -901,31 +901,37 @@
   ],
   "inProgress": [
     {
-      "taskId": "gap-git-history-landed-master-stale-under-two-line-model",
-      "runId": "fm-gap-git-history-landed-master-stale-under-two-line-model-1786432443194-l8ecqc",
-      "startedAtMs": 1786432443207,
+      "taskId": "gap-b3-tick-coupled-misses-between-tick-merges",
+      "runId": "fm-gap-b3-tick-coupled-misses-between-tick-merges-1786435247714-nh6d6a",
+      "startedAtMs": 1786435247725,
       "startedAtMsUnreliable": true
     },
     {
-      "taskId": "gap-inner-heartbeat-fields-shrunk-no-minimal-contract",
-      "runId": "fm-gap-inner-heartbeat-fields-shrunk-no-minimal-contract-1786432443631-bnp75n",
-      "startedAtMs": 1786432443645,
+      "taskId": "gap-split-session-liveness-signals-unblocks-lowconc",
+      "runId": "fm-gap-split-session-liveness-signals-unblocks-lowconc-1786435248662-0k2o59",
+      "startedAtMs": 1786435248676,
       "startedAtMsUnreliable": true
     },
     {
-      "taskId": "gap-worktree-leak-after-fan-in-occupies-slot-permanently",
-      "runId": "fm-gap-worktree-leak-after-fan-in-occupies-slot-permanently-1786432442778-lhhgy6",
-      "startedAtMs": 1786432442801,
+      "taskId": "gap-suite-blocking-experiment-rounds-count-toward-consecutive-red",
+      "runId": "fm-gap-suite-blocking-experiment-rounds-count-toward-consecutive-red-1786436031834-gps98i",
+      "startedAtMs": 1786436031852,
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-suite-floor-two-longest-files-bound",
+      "runId": "fm-gap-suite-floor-two-longest-files-bound-1786436032349-7la1tw",
+      "startedAtMs": 1786436032364,
       "startedAtMsUnreliable": true
     }
   ],
   "meanMinutes": 97.6017666666667,
   "medianMinutes": 56.62085,
-  "tasksPerHour": 0.6750308835418685,
+  "tasksPerHour": 0.6728074562879208,
   "serialEquivalentPerHour": 0.614742970841033,
   "windowStart": "2026-08-02T10:29:46.000Z",
-  "windowEnd": "2026-08-11T07:49:10.863Z",
-  "windowHours": 213.32357305555556,
+  "windowEnd": "2026-08-11T08:31:28.757Z",
+  "windowHours": 214.0285436111111,
   "haltedHours": 0,
   "halted": [],
   "blocked": [
@@ -1519,6 +1525,14 @@
       "startedAtMsUnreliable": false
     },
     {
+      "taskId": "gap-git-history-landed-master-stale-under-two-line-model",
+      "runId": "fm-gap-git-history-landed-master-stale-under-two-line-model-1786432443194-l8ecqc",
+      "minutes": 48.41298333333334,
+      "outcome": "abandoned",
+      "reconcileReason": "branch-merged",
+      "startedAtMsUnreliable": true
+    },
+    {
       "taskId": "gap-gitignore-worktree-scratch-dirs-kills-round4-false-red",
       "runId": "fm-gap-gitignore-worktree-scratch-dirs-kills-round4-false-red-1786115833737-v8ybwy",
       "minutes": 11.32545,
@@ -1541,6 +1555,14 @@
       "outcome": "abandoned",
       "reconcileReason": "worktree-gone-and-no-process",
       "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-inner-heartbeat-fields-shrunk-no-minimal-contract",
+      "runId": "fm-gap-inner-heartbeat-fields-shrunk-no-minimal-contract-1786432443631-bnp75n",
+      "minutes": 48.40591666666667,
+      "outcome": "abandoned",
+      "reconcileReason": "branch-merged",
+      "startedAtMsUnreliable": true
     },
     {
       "taskId": "gap-inner-panel-shows-frozen-stale-agent-line-after-bracket-close",
@@ -2799,6 +2821,14 @@
       "startedAtMsUnreliable": false
     },
     {
+      "taskId": "gap-worktree-leak-after-fan-in-occupies-slot-permanently",
+      "runId": "fm-gap-worktree-leak-after-fan-in-occupies-slot-permanently-1786432442778-lhhgy6",
+      "minutes": 48.42021666666667,
+      "outcome": "abandoned",
+      "reconcileReason": "branch-merged",
+      "startedAtMsUnreliable": true
+    },
+    {
       "taskId": "gap-worktree-scoped-runs-consume-resources-but-produce-no-signal",
       "runId": "fm-gap-worktree-scoped-runs-consume-resources-but-produce-no-signal-1786209328622-mpst1b",
       "minutes": 974.8211333333334,
@@ -2921,7 +2951,16 @@
       "startedAtMs": 1785998556329
     }
   ],
-  "reconcilable": [],
+  "reconcilable": [
+    {
+      "taskId": "gap-suite-blocking-experiment-rounds-count-toward-consecutive-red",
+      "runId": "fm-gap-suite-blocking-experiment-rounds-count-toward-consecutive-red-1786436031834-gps98i",
+      "startedAtMs": 1786436031852,
+      "startedAtMsUnreliable": false,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process"
+    }
+  ],
   "realInFlight": 3,
   "closedButLive": [],
   "occupiedSlots": 3

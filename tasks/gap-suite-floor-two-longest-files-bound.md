@@ -175,6 +175,10 @@ runner-grouping-list-groups.test.mjs）、plugin/loop/fast-mode-loop-tick.md（s
 
 **⚠ 混杂因素**：orangevps main 117s（孤立跑）vs 本机 r281 main 729s（同 conc=4）——6.2 倍差，CPU 配额只能解释 2 倍 ⇒ 差额来自**本机套件与活跃开发抢同一 4 核**。⇒ 本节「79% CPU 占比」反解、main 相理论地板 385s、全部为**负载环境读数**（非孤立值）——CPUQuota 400% 收益预测应下调。正本在 `gap-systemd-run-cancel-cpuquota-keep-memory-guardrail` Finding（①②③④ 四条 + lane4-only 失败清单）。
 
+## 交叉标注（2026-08-11）——CPUQuota 修正已落地
+
+**`gap-systemd-run-cancel-cpuquota-keep-memory-guardrail`（2026-08-11）已落地人的裁定「取消 CPU 配额、保持内存配额」**：`full-suite-runner.ts` `DEFAULT_SYSTEMD_RUN_LIMITS` cpuQuota `200%`→**`400%`**（用满本机 4 物理核），MemoryMax=4G / TasksMax=200 保持。本 Finding 的「4 应是 2」外推基数修正随之再反转：**现行默认回到 4 核满**——本节 (a)/(b) 的 2 核推算全部针对 200% 默认的历史记录；400% 默认下的实测对照（三 `*_phase_ms`）待外层 verification-round。
+
 ## Contract
 measure   runner_grouping_ms = `grep -oE '__PERFILE__ duration_ms=[0-9.]+ [^ ]*runner-grouping' <serial相日志> | tail -1` 的 stdout 中 duration_ms 数字
 band      runner_grouping_ms <= 60000（拆 4 后地板 ≤ 约 51s）
