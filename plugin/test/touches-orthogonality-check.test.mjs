@@ -30,8 +30,11 @@ import {
 import { parseTouchEntriesWithTags } from "../scripts/touches-parser.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const FIX = path.join(__dirname, "..", "fixtures", "touches");
-const REPO_ROOT = path.resolve(__dirname, "..", "..", ".."); // experiments/quay-perpetual-stream/test → repo root
+// Canonical home is plugin/test (the experiments path is a symlink back here); the fixtures live in
+// the experiment's fixture tree (shared with touches-orthogonality-selfcheck.sh, which runs from the
+// experiment root).
+const FIX = path.join(__dirname, "..", "..", "experiments", "quay-perpetual-stream", "fixtures", "touches");
+const REPO_ROOT = path.resolve(__dirname, "..", ".."); // plugin/test → repo root
 const read = (f) => fs.readFileSync(path.join(FIX, f), "utf8");
 const fx = (f) => path.join(FIX, f);
 
@@ -182,6 +185,112 @@ test("checkTouchesPair: a glob matching NOTHING → CONSERVATIVE not-disjoint (l
   const r = checkTouchesPair(A, B, fakeExpand({ "x/typo.js": [], "y/b.js": ["y/b.js"] }));
   assert.equal(r.disjoint, false);
   assert.match(r.reason, /matched nothing|empty/i);
+});
+
+// ── outer-inflight occupancy (AC4 of gap-write-ownership-extend-beyond-tasks-to-outer-core-and-hot-files) ──
+// A task whose declared expansion intersects an outer in-flight edit must serialize — inner and outer
+// editing the same hot file (e.g. full-suite-runner.ts) in the same window is an add/add at fan-in.
+import { checkOuterInflight, checkDispatchEligibility } from "../scripts/touches-orthogonality-check.ts";
+
+test("checkOuterInflight: no outer-inflight files → ok, nothing blocked", () => {
+  const A = parseTouches("## Touches\n- x/a.js");
+  const r = checkOuterInflight(A, [], fakeExpand({ "x/a.js": ["x/a.js"] }));
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.blocked, []);
+});
+
+test("checkOuterInflight: task expansion intersects an outer-inflight path → blocked", () => {
+  const A = parseTouches("## Touches\n- plugin/scripts/full-suite-runner.ts");
+  const expand = fakeExpand({ "plugin/scripts/full-suite-runner.ts": ["plugin/scripts/full-suite-runner.ts"] });
+  const r = checkOuterInflight(A, ["plugin/scripts/full-suite-runner.ts"], expand);
+  assert.equal(r.ok, false);
+  assert.deepEqual(r.blocked, ["plugin/scripts/full-suite-runner.ts"]);
+});
+
+test("checkOuterInflight: task expansion disjoint from outer-inflight paths → ok", () => {
+  const A = parseTouches("## Touches\n- plugin/scripts/a.ts");
+  const expand = fakeExpand({ "plugin/scripts/a.ts": ["plugin/scripts/a.ts"] });
+  const r = checkOuterInflight(A, ["plugin/scripts/full-suite-runner.ts"], expand);
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.blocked, []);
+});
+
+test("checkOuterInflight: a task glob expansion overlapping the outer path → blocked", () => {
+  const A = parseTouches("## Touches\n- plugin/scripts/full-suite-*");
+  const expand = fakeExpand({ "plugin/scripts/full-suite-*": ["plugin/scripts/full-suite-runner.ts"] });
+  const r = checkOuterInflight(A, ["plugin/scripts/full-suite-runner.ts"], expand);
+  assert.equal(r.ok, false);
+  assert.deepEqual(r.blocked, ["plugin/scripts/full-suite-runner.ts"]);
+});
+
+test("checkOuterInflight: normalizePath collapses ./ on the OUTER path so the occupancy match is not spoofable", () => {
+  const A = parseTouches("## Touches\n- plugin/scripts/full-suite-runner.ts");
+  const expand = fakeExpand({ "plugin/scripts/full-suite-runner.ts": ["plugin/scripts/full-suite-runner.ts"] });
+  // outer reports its in-flight path with a leading ./ — normalizePath must collapse it so the match hits
+  const r = checkOuterInflight(A, ["./plugin/scripts/full-suite-runner.ts"], expand);
+  assert.equal(r.ok, false);
+  assert.deepEqual(r.blocked, ["plugin/scripts/full-suite-runner.ts"]);
+});
+
+test("checkDispatchEligibility: mutually disjoint pair with NO outer-inflight → disjoint", () => {
+  const A = parseTouches("## Touches\n- x/a.js");
+  const B = parseTouches("## Touches\n- y/b.js");
+  const r = checkDispatchEligibility(A, B, [], fakeExpand({ "x/a.js": ["x/a.js"], "y/b.js": ["y/b.js"] }));
+  assert.equal(r.disjoint, true);
+});
+
+test("checkDispatchEligibility: pair disjoint but side A collides with outer-inflight → serialize", () => {
+  const A = parseTouches("## Touches\n- plugin/scripts/full-suite-runner.ts");
+  const B = parseTouches("## Touches\n- y/b.js");
+  const expand = fakeExpand({
+    "plugin/scripts/full-suite-runner.ts": ["plugin/scripts/full-suite-runner.ts"],
+    "y/b.js": ["y/b.js"],
+  });
+  const r = checkDispatchEligibility(A, B, ["plugin/scripts/full-suite-runner.ts"], expand);
+  assert.equal(r.disjoint, false);
+  assert.match(r.reason, /outer-inflight/);
+  assert.deepEqual(r.overlaps, ["plugin/scripts/full-suite-runner.ts"]);
+});
+
+test("checkDispatchEligibility: pair itself overlaps → serialize (outer-inflight not even consulted)", () => {
+  const A = parseTouches("## Touches\n- x/a.js");
+  const B = parseTouches("## Touches\n- x/a.js");
+  const r = checkDispatchEligibility(A, B, [], fakeExpand({ "x/a.js": ["x/a.js"] }));
+  assert.equal(r.disjoint, false);
+});
+
+test("main --check-pair: disjoint pair with non-intersecting outer-inflight → exit 0", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "touches-outer-"));
+  try {
+    fs.mkdirSync(path.join(root, "x"), { recursive: true });
+    fs.writeFileSync(path.join(root, "a.md"), "## Touches\n- x/a.js\n");
+    fs.writeFileSync(path.join(root, "b.md"), "## Touches\n- y/b.js\n");
+    fs.mkdirSync(path.join(root, "plugin", "scripts"), { recursive: true });
+    fs.writeFileSync(path.join(root, "plugin", "scripts", "full-suite-runner.ts"), "");
+    fs.writeFileSync(path.join(root, "x", "a.js"), "");
+    fs.mkdirSync(path.join(root, "y"), { recursive: true });
+    fs.writeFileSync(path.join(root, "y", "b.js"), "");
+    const code = await main(["node", "s", "--check-pair", "--root", root, path.join(root, "a.md"), path.join(root, "b.md"), "--outer-inflight", "plugin/scripts/full-suite-runner.ts"]);
+    assert.equal(code, 0);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("main --check-pair: side collides with an outer-inflight path → exit 1 (outer 占用拒绝)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "touches-outer-"));
+  try {
+    fs.mkdirSync(path.join(root, "plugin", "scripts"), { recursive: true });
+    fs.writeFileSync(path.join(root, "plugin", "scripts", "full-suite-runner.ts"), "");
+    fs.writeFileSync(path.join(root, "a.md"), "## Touches\n- plugin/scripts/full-suite-runner.ts\n");
+    fs.writeFileSync(path.join(root, "b.md"), "## Touches\n- y/b.js\n");
+    fs.mkdirSync(path.join(root, "y"), { recursive: true });
+    fs.writeFileSync(path.join(root, "y", "b.js"), "");
+    const code = await main(["node", "s", "--check-pair", "--root", root, path.join(root, "a.md"), path.join(root, "b.md"), "--outer-inflight", "plugin/scripts/full-suite-runner.ts"]);
+    assert.equal(code, 1);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 // ── fixture charters (the selfcheck's objects) parse as expected ──────────────────────────────────
