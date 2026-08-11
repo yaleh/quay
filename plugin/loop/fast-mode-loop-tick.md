@@ -82,7 +82,11 @@
 1. `docs/analysis/batch2-queue-state.md` —— 队列当前状态（已完成/在飞/待执行）。**「batch2」是历史名**（旧批模型的队列快照，保留不改名以免破坏引用）；今天的派发是滚动的，不读成「分批门控」
 2. `orchestration/exp6-phase1-sustained-unattended-operation.md` —— 目标、AC、DoD
 3. `adr/ADR-021-adaptive-budget-self-regulating-methodology.md` —— 四项原则
-4. 本文件其余部分
+4. `orchestration/fast-mode-tick-core.md`（**≤80 行执行核**）—— 每轮该做什么、判据、硬约束。**冷启动第一份读它**，不要先读本文件全量
+
+**本文件（126,895 字节，F5）是完整理由档案，不是冷启动第一读**（measured 2026-08-11：铺下 tick 文档
+126,895 字节，消费方 inner 冷启动不该第一件事读它）。每条判据的执行动作都在 `fast-mode-tick-core.md`，
+带 `(src:行号)` 指回本文件——只在需要某条判据的实测/理由/代价时按 src 行号查本文件，平时不读全量。
 
 再跑这三条建立实况（**以实测为准，不以队列文件为准**——它可能是 compact 前的旧快照）：
 
