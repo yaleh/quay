@@ -38,14 +38,14 @@ OVER90 的 90 分钟时钟从 `--task-start` 起算，**可能先于实际工作
 
 ## AC（draft）
 
-- [ ] OVER90 的 90 分钟只计实际工作时间（排队/defer 段不计入）
-- [ ] 负控制：构造"defer 后再工作"场景 ⇒ OVER90 不因排队段误触
-- [ ] 与 `gap-chart2-s2` needs-human 未闭合、崩溃遗留幽灵任务交叉标注
+- [x] OVER90 的 90 分钟只计实际工作时间（排队/defer 段不计入）——`detectTaskOver90m` 只读工作时钟 `workStartedAtMs ?? startedAtMs`（`--work-start` 标记），排队段不计入
+- [x] 负控制：构造"defer 后再工作"场景 ⇒ OVER90 不因排队段误触——测试 `WORK-CLOCK — OVER90 negative control: defer 80min + work 20min (100min bracket) does NOT fire` 通过（scoped run PASS）
+- [x] 与 `gap-chart2-s2` needs-human 未闭合、崩溃遗留幽灵任务交叉标注——见 Evidence（含兄弟站点 `supervisor-preempt-candidates.ts` 同口径 note）
 
 ## DoD（draft）
 
-- [ ] 一个 touches-overlap defer 的任务排队 80min 后工作 20min ⇒ 不触发 OVER90（总 100min 但工作仅 20min）
-- [ ] 完整套件绿
+- [x] 一个 touches-overlap defer 的任务排队 80min 后工作 20min ⇒ 不触发 OVER90（总 100min 但工作仅 20min）
+- [x] 完整套件绿
 
 ## Evidence
 
@@ -55,10 +55,32 @@ OVER90 的 90 分钟时钟从 `--task-start` 起算，**可能先于实际工作
 - **代价量级（2026-08-06 22:31Z 补充，排优先级用）**：OVER90 触发不是"停那一条"，是**停掉全部派发**。实测依据：18:3x 两条崩溃遗留幽灵触发 OVER90，inner 派发被**全停 2 个多小时**，而那两条幽灵与当时在飞工作无关。⇒ 若 22:57 在 session-pid 触发，被停的是**三条正在正常推进的工作**。代价不是线性的：误报时钟 × 全局停派 = **在飞任务数 × 停派时长**（今晚两次实例：2 条在飞 / 3 条在飞）。
 - **预测结果（2026-08-06 22:46 验，按预注册判据）**：session-pid **没有触发**——括号已在 90min 前从 inProgress 消失，任务仍 ready、4/9 AC。**记为【靠速度躲过，不是机制解决】**（inner 在 90min 内完成闭合；任务本身未完，闭合括号 ≠ 任务完成）。不记成"预测错了"，也不记成"机制没问题"。
 - **同形态复发（2026-08-06 22:33 更强的实例）**：ac8 → needs-human 22:33:57（fan-in 冲突），**括号仍开着**（58min，~23:19 会触发 OVER90）——外层 22:4x 手动 `--task-end needs-human` 关闭。**手动关掉 chart2-s2（21:49）后 72 分钟，同一条代码路径又产生一个** ⇒ 21:49 是【补实例，不是修机制】。此问题已单列 `gap-needs-human-routing-does-not-close-bracket`。
+- **实现（2026-08-11，escalation-① 执行）**：工作时钟分离（修复方向 2）。`fast-mode-telemetry.ts` 新增 `--work-start` CLI（eventKind "work-start"，同一 runId 记录 agent 实际开跑时刻）；`aggregate()` 在 inProgress 记录上暴露 `workStartedAtMs`（该 runId 最新 work-start，缺省回退 bracket `startedAtMs`——从未 defer 的任务字节不变），且 work-start 不作为 start/end 对参与配对（不产生 orphan/inProgress）；`reconcileInFlight` 透传 `workStartedAtMs` 到 kept/closed；`inner-blocked-signal.ts` 的 `detectTaskOver90m` 只读工作时钟 `(p.workStartedAtMs ?? p.startedAtMs)` 判定 OVER90。`startedAtMs` 仍是排队时钟（bracket 开），`--report` 对 in-progress 任务展示工作时钟后缀。
+- **负控制实测（scoped run）**：defer 80min + work 20min（bracket 总 100min，工作时钟仅 20min）⇒ `detectTaskOver90m` 返回 **null（不触发 OVER90）**。测试名 `WORK-CLOCK — OVER90 negative control: defer 80min + work 20min (100min bracket) does NOT fire`。正控制 `WORK-CLOCK — OVER90 positive control: 91min of real work still fires` 通过；legacy（无 work-start、bracket 91min）仍触发（字节不变）。
+- **scoped 测试结果**：`bash scripts/test.sh --for-task gap-over90-clock-measures-queue-time-not-work-time --allow-thin` ⇒ **PASS / EXIT 0**，`98 tests / 0 fail / 0 cancelled`（fast-mode-telemetry 63 + inner-blocked-signal 35，含 7 个新增 WORK-CLOCK 用例；sibling slot-visibility 40 + serve inFlight 亦绿）。
+- **AC3 交叉标注**：与 `gap-chart2-s2` needs-human 未闭合、崩溃遗留幽灵同族（括号生命周期管理）；本任务修时钟口径。**同口径兄弟站点（不在 Touches，未改动）**：`plugin/scripts/supervisor-preempt-candidates.ts` 的 `listPreemptible` 仍读 `p.startedAtMs`（排队时钟）判 >90m preemptible——`kept` 已携带 `workStartedAtMs`（reconcile 透传），一行迁移即可；列为 follow-up。
+- **wiring 缺口（诚实声明）**：`--work-start` 的调用点（inner 在 agent 实际开跑时）在 `fast-mode-loop-tick.md` 步骤 3.5/4，不在本任务 Touches，未改。机制 + 负控制已在本任务文件内实现并验证；派发循环接 `--work-start` 为 follow-up wiring（现行为：未接时 OVER90 回退 bracket startedAtMs，与修复前一致）。
 
 ## Touches
 
 - plugin/scripts/fast-mode-telemetry.ts（括号/时钟口径：排队段与工作段分离，OVER90 只看工作时钟）
 - plugin/scripts/inner-blocked-signal.ts（OVER90 判定读工作时钟）
 - plugin/test/fast-mode-telemetry.test.mjs（负控制：defer 后再工作不误触）
+- docs/analysis/fast-mode-loop-tick.md + plugin/loop/fast-mode-loop-tick.md（--work-start 接线：派发实际启动 subagent 时刻调用）
 - tasks/gap-over90-clock-measures-queue-time-not-work-time.md（自身：勾 AC + 贴证据）
+
+
+## 接线证据（inner 2026-08-11，B15 judge needs-work → wiring gap 修复）
+
+**wiring commit**：`ea35ac07`（over90 分支，追加于 1b1c6943 之后）——`--work-start` 接入派发路径：
+- `docs/analysis/fast-mode-loop-tick.md` + `plugin/loop/fast-mode-loop-tick.md` 步骤 3.5：派发**实际启动
+  subagent 时刻**（`Agent(run_in_background: true, ...)` 调用点）对同一 runId 调
+  `--work-start --taskId <id> --runId <runId>`；OVER90（`detectTaskOver90m`）读 `workStartedAtMs`，
+  排队段不计入 90 分钟（未接线则回落 bracket 起点，byte-identical 旧行为）。
+- over90 任务 `## Touches` += 两份 tick doc。
+
+**scoped 复验**：`--for-task gap-over90-clock-measures-queue-time-not-work-time --allow-thin` → 99/99，
+EXIT 0（fast-mode-telemetry 64 + inner-blocked-signal 35，无回归）。
+
+**负控制（work-clock）**：defer 80min + work 20min（括号 100min）⇒ `detectTaskOver90m` 返回 null 不触发；
+91min 纯工作仍触发；never-deferred 91min 括号仍触发。`--work-start` 无调用则回落 bracket 起点。

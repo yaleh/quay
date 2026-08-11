@@ -890,6 +890,13 @@ export function taskStatusAllowsOver90m(root, taskId) {
  * a stale timeout bracket is a FALSE signal and is skipped (AC1 negative control; reproduces the
  * os-anchor shape).
  *
+ * WORK-CLOCK GATE (gap-over90-clock-measures-queue-time-not-work-time): the budget is measured against
+ * the WORK clock (`workStartedAtMs` — the `--work-start` marker, or the bracket's startedAtMs when no
+ * defer/queue segment existed), NOT the QUEUE clock (`startedAtMs` — bracket open). A touches-overlap
+ * defer opens the bracket before real work begins; counting that queue segment against the 90-minute
+ * budget is exactly the false-OVER90 class this task fixes. A task that queues 80min then works 20min
+ * (100min bracket, 20min work) reports a 20-minute work clock and does NOT fire.
+ *
  * @param {string} root
  * @param {{executorGone?: (rec: {taskId: string}) => {gone: boolean, reason: string}}} [opts]
  * @returns {Promise<{taskId: string, reason: "task-over-90m", question: string, evidence: string[]} | null>}
@@ -902,17 +909,26 @@ export async function detectTaskOver90m(root, opts = {}) {
   if (rep.inProgress.length === 0) return null;
   const executorGone = opts.executorGone ?? makeOver90ExecutorGone(root);
   const { kept } = reconcileInFlight(rep.inProgress, { executorGone });
+  // WORK CLOCK ONLY: `workStartedAtMs` (the --work-start marker) is the age baseline; a never-
+  // deferred record falls back to the bracket's startedAtMs (aggregate/reconcile guarantee this).
   const over = kept.filter(
-    (p) => nowMs - p.startedAtMs > TASK_OVER_90M_MS && taskStatusAllowsOver90m(root, p.taskId),
+    (p) => nowMs - (p.workStartedAtMs ?? p.startedAtMs) > TASK_OVER_90M_MS && taskStatusAllowsOver90m(root, p.taskId),
   );
   if (over.length === 0) return null;
   const p = over[0];
-  const mins = ((nowMs - p.startedAtMs) / 60_000).toFixed(1);
+  const workMs = p.workStartedAtMs ?? p.startedAtMs;
+  const mins = ((nowMs - workMs) / 60_000).toFixed(1);
+  const queued = p.workStartedAtMs != null && p.workStartedAtMs > p.startedAtMs
+    ? ` (bracket opened ${((nowMs - p.startedAtMs) / 60_000).toFixed(1)}m ago incl. queue; work clock ${mins}m)`
+    : "";
   return {
     taskId: p.taskId,
     reason: "task-over-90m",
-    question: `task ${p.taskId} has been in-progress ${mins}m (>90m) — rule on abort vs continue (no inner retry), then run --clear`,
-    evidence: [`${p.taskId} started ${new Date(p.startedAtMs).toISOString()}`, `real in-flight ${over.length} task(s) over budget (reconcile-aware + task-status gate)`],
+    question: `task ${p.taskId} has been in-progress ${mins}m of work (>90m work) — rule on abort vs continue (no inner retry), then run --clear`,
+    evidence: [
+      `${p.taskId} work clock started ${new Date(workMs).toISOString()}${queued}`,
+      `real in-flight ${over.length} task(s) over budget (reconcile-aware + task-status gate + work-clock)`,
+    ],
   };
 }
 

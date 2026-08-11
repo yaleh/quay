@@ -635,6 +635,18 @@ inner 只写 `--task-start`。**`--task-end`（关遥测括号）由外层异步
 subagents-no-slot-visibility` AC4）——本步的 `--task-start` 是派发时的开括号，外层 1b 的 `--task-end`
 / `--reconcile` 是收尾时的关括号；缺任一半，遥测就退化成只记录历史。
 
+**工作时钟 `--work-start`（强制，`gap-over90-clock-measures-queue-time-not-work-time`）**：`--task-start`
+开括号可能**早于实际工作**（touches-overlap defer / 排队），OVER90 只看**工作时钟**。派发**实际启动
+subagent 的时刻**（`Agent(run_in_background: true, ...)` 调用点），对同一 runId 调 `--work-start`：
+
+```bash
+node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --work-start --taskId <id> --runId <runId>
+# runId = 上面 --task-start 打印的；记录实际工作起点（排队段不计入 90 分钟）
+```
+
+`detectTaskOver90m`（`inner-blocked-signal.ts`）读 `workStartedAtMs`（无 `--work-start` 则回落 bracket
+起点，byte-identical 旧行为）。
+
 **括号 ≠ subagent（`gap-telemetry-brackets-vs-subagents-no-slot-visibility`）**：`--report` 的
 `inProgress` 是括号视角——红窗遗留的未闭合 start 会让它虚高。要看**真实并发/空槽**，用
 `--slots --cap "${effective_cap:-3}"`（纯读，不写盘）：`real_in_flight` 是执行者仍存活的括号数，
