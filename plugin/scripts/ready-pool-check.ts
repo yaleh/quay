@@ -663,17 +663,28 @@ function failureFileMatches(declared, file) {
 // The family the self-lock actually hit — gap-install-family / gap-serial-phase-install /
 // gap-suite-* — all carry these markers in their task id.
 const SUITE_FIX_MARKER_RE = /(\bfix(?:e[ds]|ing)?\b|\binstall|\bsuite|修|红|\bred\b)/i;
+// Proposal arm is NARROWER than the id/title arm (AC3 reverse control): a bare marker in a Proposal
+// is not intent — a Proposal that merely MENTIONS the suite ("nothing to do with the suite", "the
+// suite is red, diagnose separately") must NOT exempt an unrelated task. The Proposal exempts only
+// on FIX-INTENT CO-OCCURRENCE: a fix marker (fix/修/red/红) and a suite reference (install/suite)
+// both present — the "I am here to fix the suite" phrasing, in either order.
+const SUITE_FIX_PROPOSAL_RE = /(?:\bfix(?:e[ds]|ing)?\b|修|\bred\b|红)[\s\S]*?(?:\binstall|\bsuite)|(?:\binstall|\bsuite)[\s\S]*?(?:\bfix(?:e[ds]|ing)?\b|修|\bred\b|红)/i;
 
-/** True when a task self-identifies as a suite-fix task — its id, frontmatter title, or ## Proposal
- *  carries a suite-fix marker (install/suite/fix/red/修/红). Such a task IS the one that must
- *  dispatch when the suite is red, so it is exempt from suite_blocking attribution (the self-lock
- *  break, AC2). A task carrying NONE of these markers is an unrelated task touching a failing file —
- *  it stays suite-blocked (AC3 reverse control). */
+/** True when a task self-identifies as a suite-fix task. TWO arms:
+ *   (1) id/frontmatter-title carries a suite-fix marker (install/suite/fix/red/修/红) — a strong
+ *       intent signal (the self-lock family gap-install-family / gap-serial-phase-install /
+ *       gap-suite-* all carry install/suite in the id);
+ *   (2) the ## Proposal carries FIX-INTENT CO-OCCURRENCE (fix/修/red/红 AND install/suite together) —
+ *       "fix the install-family suite flake" exempts, but "nothing to do with the suite" does NOT.
+ * Such a task IS the one that must dispatch when the suite is red, so it is exempt from
+ * suite_blocking attribution (the self-lock break, AC2). A task failing BOTH arms is an unrelated
+ * task touching a failing file — it stays suite-blocked (AC3 reverse control). */
 export function isSuiteFixTask(task, id) {
   const idStr = String(id || (task && task.id) || "");
   const fm = (task && task.frontmatterRaw) || "";
+  if (SUITE_FIX_MARKER_RE.test(`${idStr} ${fm}`)) return true;
   const proposal = extractSection((task && task.body) || "", "Proposal") || "";
-  return SUITE_FIX_MARKER_RE.test(`${idStr} ${fm} ${proposal}`);
+  return SUITE_FIX_PROPOSAL_RE.test(proposal);
 }
 
 /** gap-suite-blocking-self-lock-blocks-fix-family AC3 (反向控制) — the exemption is a TWO-condition

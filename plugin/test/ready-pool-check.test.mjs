@@ -1715,11 +1715,13 @@ test("exemptFromSuiteBlocking / isSuiteFixTask: suite-fix marker + failure-hit A
     frontmatterRaw: "id: gap-serial-phase-install-test-residue\ntitle: serial phase install test residue dependency\nstatus: ready",
     body: "## Proposal\nserial phase install residue — fix the ordering dependency.\n## Touches\n- plugin/test/serial-install.test.mjs",
   };
-  // unrelated: no marker anywhere (id/title/Proposal) — a "fixture" title must NOT read as fix-intent.
+  // unrelated: no marker anywhere (id/title/Proposal) — a "fixture" title must NOT read as fix-intent,
+  // and a Proposal that merely MENTIONS the suite (no fix-intent co-occurrence) must NOT exempt either
+  // (the AC3 over-exemption case the end-to-end demo caught).
   const unrelated = {
     id: "gap-watchdog",
     frontmatterRaw: "id: gap-watchdog\ntitle: fixture gap-watchdog\nstatus: ready",
-    body: "## Proposal\nwatch the dispatch pool and report health.\n## Touches\n- plugin/scripts/ready-pool-check.ts",
+    body: "## Proposal\nwatch the dispatch pool and report health — nothing to do with the suite.\n## Touches\n- plugin/scripts/ready-pool-check.ts",
   };
 
   // AC2: the suite-fix family self-identifies (id + title carry install/suite).
