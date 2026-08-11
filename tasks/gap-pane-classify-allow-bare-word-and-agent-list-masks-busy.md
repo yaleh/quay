@@ -1,7 +1,11 @@
 ---
 id: gap-pane-classify-allow-bare-word-and-agent-list-masks-busy
-title: pane-state-classify.ts 两缺陷（manager 对照实验机械证实，行号已定位）：①PERMISSION_PROMPT_RE 裸词 Allow 无词边界（:59-60）——subagent 描述里的 --allow-thin 命中 ⇒ 满载会话判成 permission-prompt；②statusArea 取底部最后两行（:97-101）——有 subagent 在飞时 agent 列表渲染在状态行【下面】把 esc to interrupt 挤出两行窗口 ⇒ busy 判成 waiting-input（idle 掩盖 busy，与 gap-session-liveness-busy-mask-idle 方向相反）；解释了今晚监视器 IDLE/RESUMED 振荡
-status: ready
+title: pane-state-classify.ts 两缺陷（manager 对照实验机械证实，行号已定位）：①PERMISSION_PROMPT_RE
+  裸词 Allow 无词边界（:59-60）——subagent 描述里的 --allow-thin 命中 ⇒ 满载会话判成
+  permission-prompt；②statusArea 取底部最后两行（:97-101）——有 subagent 在飞时 agent
+  列表渲染在状态行【下面】把 esc to interrupt 挤出两行窗口 ⇒ busy 判成 waiting-input（idle 掩盖 busy，与
+  gap-session-liveness-busy-mask-idle 方向相反）；解释了今晚监视器 IDLE/RESUMED 振荡
+status: done
 labels:
   - gap
   - defect

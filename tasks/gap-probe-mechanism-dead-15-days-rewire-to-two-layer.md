@@ -5,7 +5,7 @@ title: probe mechanism dead 15 days — routine-scheduler exists but no producti
   07-15 Iteration 49/52); 5th 'mechanism exists nobody calls' instance; rewire
   trigger to two-layer quantities (tick-count/time/event) + archguard L_D/L_G
   instrumentation
-status: ready
+status: done
 labels:
   - gap
   - defect

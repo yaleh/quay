@@ -4,7 +4,7 @@ title: pool 任务质量语义闸——proof-once-then-lost:nyf-semantic-judge w
   flip 4,24min)因三层执行核只有「检测没被调用」仪器无「调用」步骤而丢失；ADR-033 已 accepted 锚定「需要语义的值必须
   agent()」;处方=泛化为 pool-quality-judge(判词加 should-remove 档:前提证伪→撤出,如 crosscut
   RESCOPE)+做成执行核带机械触发的编号步骤(触发机械量/判定 agent)
-status: ready
+status: done
 labels:
   - gap
   - defect

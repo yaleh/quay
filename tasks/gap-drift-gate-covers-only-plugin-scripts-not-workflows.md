@@ -1,7 +1,8 @@
 ---
 id: gap-drift-gate-covers-only-plugin-scripts-not-workflows
-title: "delivery-inventory drift 闸只盯 plugin/scripts/，不覆盖 .claude/workflows/ —— 新建 workflow 不镜像 plugin/workflows/ 红 3 条（M143/AC9/C6）；同类缺口还敞一个口子"
-status: ready
+title: delivery-inventory drift 闸只盯 plugin/scripts/，不覆盖 .claude/workflows/ —— 新建
+  workflow 不镜像 plugin/workflows/ 红 3 条（M143/AC9/C6）；同类缺口还敞一个口子
+status: done
 labels:
   - gap
   - defect

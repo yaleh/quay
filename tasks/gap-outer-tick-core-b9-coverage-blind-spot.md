@@ -1,6 +1,6 @@
 ---
 id: gap-outer-tick-core-b9-coverage-blind-spot
-status: ready
+status: done
 labels:
   - gap
   - defect

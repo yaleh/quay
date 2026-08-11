@@ -3,7 +3,7 @@ id: gap-inventory-drift-inner-exec-mode-report-missing-snapshot-regen
 title: DELIVERY-INVENTORY 第 5 次漂移——fan-in 27f44be5（serial-main-thread 的
   inner-exec-mode-report.ts）加了 plugin/scripts 新文件却漏重生成 outline §6 快照（disk=182
   snapshot=181）；这是该模式的重复，证明「新脚本任务必须重生成快照」仍未机械接线
-status: ready
+status: done
 labels:
   - gap
   - defect

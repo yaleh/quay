@@ -1,7 +1,9 @@
 ---
 id: gap-pane-state-allow-deny-bare-word-false-positive
-title: 'pane-state-classify.ts PERMISSION_PROMPT_RE 的裸 Allow/Deny 假阳性——agent 任务标题里的 --allow-thin 命中 Allow（/i 大小写不敏感）→ permission-prompt 误判 busy；与 :57-58 已排除 permissions 是同一类坑,裸词换带上下文的形状（by POSITION, never by keyword）'
-status: ready
+title: pane-state-classify.ts PERMISSION_PROMPT_RE 的裸 Allow/Deny 假阳性——agent
+  任务标题里的 --allow-thin 命中 Allow（/i 大小写不敏感）→ permission-prompt 误判 busy；与 :57-58
+  已排除 permissions 是同一类坑,裸词换带上下文的形状（by POSITION, never by keyword）
+status: done
 labels:
   - gap
   - defect

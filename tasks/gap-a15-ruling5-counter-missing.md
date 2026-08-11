@@ -1,7 +1,8 @@
 ---
 id: gap-a15-ruling5-counter-missing
-title: A15 裁定5（连续 3 轮 A15 心跳缺失 ⇒ .halt；再 3 轮 ⇒ /clear）没有计数器——执行核 80 行每轮必读仍连续 9 轮未执行，capability-catalog 对该规则 0 命中；照 closure-lag-check.sh 造计数器
-status: ready
+title: A15 裁定5（连续 3 轮 A15 心跳缺失 ⇒ .halt；再 3 轮 ⇒ /clear）没有计数器——执行核 80 行每轮必读仍连续 9
+  轮未执行，capability-catalog 对该规则 0 命中；照 closure-lag-check.sh 造计数器
+status: done
 labels:
   - gap
   - defect
