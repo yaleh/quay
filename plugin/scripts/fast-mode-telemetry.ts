@@ -307,12 +307,16 @@ export function isQuayWorktreePath(worktreePath, root) {
  *   2. it checks out a `task/<taskId>` branch;
  *   3. that branch is merged into the merge target (`isMerged(taskId) === true`).
  *
- * Caveat (bounded, documented): a worktree freshly forked from a base commit that a LATER fan-in
- * carried into the target is indistinguishable from a merged-leak by refs alone — its branch tip IS
- * an ancestor of the target. This only affects the compliance REPORT (never an auto-remove; a
- * spurious entry lists a taskId+path for inspection), and only while the fresh worktree sits at the
- * bare fork base before its first commit — once the task commits, the branch tip leaves the
- * target's history and the entry clears.
+ * ADVISORY — NOT a cleaner, never auto-removes. The `isMerged` criterion is an ANCESTOR
+ * relationship, and the manager's runIds finding (gap-worktree-leak-... 07:3x) proves that is
+ * unreliable for IN-USE worktrees: a live subagent's worktree whose branch was fan-in-merged and
+ * then advanced again looks like a leak in the window between the merge and the subagent's next
+ * commit (its tip is an ancestor of the target). A worktree freshly forked from a base commit that
+ * a LATER fan-in carried into the target is likewise indistinguishable from a merged-leak by refs
+ * alone. This report therefore lists CANDIDATES for manual inspection (taskId + path) and the
+ * compliance verdict is a signal, never a delete instruction. Mechanized cleanup must wait for the
+ * inner heartbeat's `runIds` to be restored (gap-inner-heartbeat-fields-shrunk-no-minimal-contract)
+ * — the only reliable "who is actually in use" source; until then cleanup stays human-judged.
  * @param {Array<{path:string, branch:string|null}>} worktrees — from listWorktrees (inject in tests)
  * @param {object} [opts]
  * @param {(taskId:string) => boolean} [opts.isMerged] — merged-into-target verdict per taskId.
