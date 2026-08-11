@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-11T15:33:46.710Z",
+  "generatedAt": "2026-08-11T17:24:27.592Z",
   "since": null,
   "tasks": [
     {
@@ -967,20 +967,50 @@
   ],
   "inProgress": [
     {
-      "taskId": "gap-forty-to-six-remerge-needs-tests-updated-first",
-      "runId": "fm-gap-forty-to-six-remerge-needs-tests-updated-first-1786459959470-e2zrsv",
-      "startedAtMs": 1786459959514,
+      "taskId": "gap-quay-init-coldstart-usability-launch-not-used-huge-tick-doc-selftest-dominant",
+      "runId": "fm-gap-quay-init-coldstart-usability-launch-not-used-huge-tick-doc-selftest-dominant-1786464874876-iej94n",
+      "startedAtMs": 1786464874900,
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-quay-init-launch-settings-template-missing-permissions-and-exclude-dynamic",
+      "runId": "fm-gap-quay-init-launch-settings-template-missing-permissions-and-exclude-dynamic-1786467683861-cwmkdo",
+      "startedAtMs": 1786467683876,
       "startedAtMsUnreliable": true
+    },
+    {
+      "taskId": "gap-quay-init-loop-tick-doc-paths-reference-unlanded-plugin-loop",
+      "runId": "fm-gap-quay-init-loop-tick-doc-paths-reference-unlanded-plugin-loop-1786466587970-ygqt35",
+      "startedAtMs": 1786466587983,
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-release-freshness-no-recut-mechanism",
+      "runId": "fm-gap-release-freshness-no-recut-mechanism-1786464875394-1r5rn7",
+      "startedAtMs": 1786464875437,
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-run-static-checks-zero-concurrency-can-parallelize",
+      "runId": "fm-gap-run-static-checks-zero-concurrency-can-parallelize-1786467684339-lisl2q",
+      "startedAtMs": 1786467684351,
+      "startedAtMsUnreliable": true
+    },
+    {
+      "taskId": "gap-supervisor-deliver-cross-host-target-support",
+      "runId": "fm-gap-supervisor-deliver-cross-host-target-support-1786465337006-30z4z3",
+      "startedAtMs": 1786465337015,
+      "startedAtMsUnreliable": false
     }
   ],
   "deferred": [],
   "meanMinutes": 108.11724849462368,
   "medianMinutes": 61.879616666666664,
-  "tasksPerHour": 0.7011858315299632,
+  "tasksPerHour": 0.6953982595931274,
   "serialEquivalentPerHour": 0.5549530795077865,
   "windowStart": "2026-08-02T10:29:46.000Z",
-  "windowEnd": "2026-08-11T15:33:00.745Z",
-  "windowHours": 221.05409583333332,
+  "windowEnd": "2026-08-11T17:23:23.884Z",
+  "windowHours": 222.89385666666666,
   "haltedHours": 0,
   "halted": [],
   "blocked": [
@@ -1525,6 +1555,14 @@
       "startedAtMsUnreliable": false
     },
     {
+      "taskId": "gap-forty-to-six-remerge-needs-tests-updated-first",
+      "runId": "fm-gap-forty-to-six-remerge-needs-tests-updated-first-1786459959470-e2zrsv",
+      "minutes": 92.31955,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": true
+    },
+    {
       "taskId": "gap-full-suite-runner-marks-test-sh-gate-wait-as-failed",
       "runId": "fm-gap-full-suite-runner-marks-test-sh-gate-wait-as-failed-1786061423894-zsaigu",
       "minutes": 6.9244666666666665,
@@ -1608,6 +1646,14 @@
       "taskId": "gap-inbox-counter-disconnected-from-files",
       "runId": "fm-gap-inbox-counter-disconnected-from-files-1786383549123-k1ssot",
       "minutes": 667.4580333333333,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-init-scaffolds-mcp-entry-to-raw-ts-fails-on-installed-copy",
+      "runId": "fm-gap-init-scaffolds-mcp-entry-to-raw-ts-fails-on-installed-copy-1786464521881-02ecup",
+      "minutes": 16.280416666666667,
       "outcome": "abandoned",
       "reconcileReason": "worktree-gone-and-no-process",
       "startedAtMsUnreliable": false
@@ -2653,6 +2699,14 @@
       "startedAtMsUnreliable": false
     },
     {
+      "taskId": "gap-supervisor-deliver-no-wait-for-idle-retry",
+      "runId": "fm-gap-supervisor-deliver-no-wait-for-idle-retry-1786464109574-875v2g",
+      "minutes": 23.152366666666666,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
       "taskId": "gap-supervisor-message-bus-with-identity",
       "runId": "fm-gap-supervisor-message-bus-with-identity-1786012358446-e687j8",
       "minutes": 24.460433333333334,
@@ -3041,15 +3095,39 @@
   ],
   "reconcilable": [
     {
-      "taskId": "gap-forty-to-six-remerge-needs-tests-updated-first",
-      "runId": "fm-gap-forty-to-six-remerge-needs-tests-updated-first-1786459959470-e2zrsv",
-      "startedAtMs": 1786459959514,
-      "startedAtMsUnreliable": true,
+      "taskId": "gap-quay-init-coldstart-usability-launch-not-used-huge-tick-doc-selftest-dominant",
+      "runId": "fm-gap-quay-init-coldstart-usability-launch-not-used-huge-tick-doc-selftest-dominant-1786464874876-iej94n",
+      "startedAtMs": 1786464874900,
+      "startedAtMsUnreliable": false,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process"
+    },
+    {
+      "taskId": "gap-quay-init-loop-tick-doc-paths-reference-unlanded-plugin-loop",
+      "runId": "fm-gap-quay-init-loop-tick-doc-paths-reference-unlanded-plugin-loop-1786466587970-ygqt35",
+      "startedAtMs": 1786466587983,
+      "startedAtMsUnreliable": false,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process"
+    },
+    {
+      "taskId": "gap-release-freshness-no-recut-mechanism",
+      "runId": "fm-gap-release-freshness-no-recut-mechanism-1786464875394-1r5rn7",
+      "startedAtMs": 1786464875437,
+      "startedAtMsUnreliable": false,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process"
+    },
+    {
+      "taskId": "gap-supervisor-deliver-cross-host-target-support",
+      "runId": "fm-gap-supervisor-deliver-cross-host-target-support-1786465337006-30z4z3",
+      "startedAtMs": 1786465337015,
+      "startedAtMsUnreliable": false,
       "outcome": "abandoned",
       "reconcileReason": "worktree-gone-and-no-process"
     }
   ],
-  "realInFlight": 0,
+  "realInFlight": 2,
   "closedButLive": [
     {
       "taskId": "gap-judgment-computed-not-wired-to-action",
@@ -3072,5 +3150,5 @@
       "reason": "worktree-present"
     }
   ],
-  "occupiedSlots": 4
+  "occupiedSlots": 6
 }

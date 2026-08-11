@@ -245,3 +245,52 @@ plugin/vendor/quay-native/dist/quay-native.js；首个 catalog 隔离跑的 Wiri
 **AC 勾选**：AC1/AC2 保持 [x]（本趟复验通过）；AC3/AC4（integration→develop 重合并 + 复验）与
 AC5（交叉标注）为外层动作/延后，inner 不勾。全量 suite_green=1 归外层 verification-round（clean
 window）验证。
+
+## Evidence（内层复验 2026-08-11 · B9 空槽重派）
+
+**基线**：本 worktree 自 develop HEAD（04e9f1d7）fork（分支
+`task/gap-forty-to-six-remerge-needs-tests-updated-first`）。AC1 测试更新（2163c4c3 + 2dc55ba9，
+7 文件）随基线在树内——逐文件核验裸脚本形断言落位 + Re-instate 标记：session-topology 断
+`quay-topology.sh`/`topology-check.sh`、session-bootstrap 断 `session-bootstrap.sh`、
+inner-blocked-signal 断 `inner-blocked-signal.ts`、quay-init-loop-driver 断 `loop-driver-check.sh`
+（均注释标「Re-instate … when 40→6 is re-merged」）、quay-init-loop-core 无 manager-loop-tick 铺装断言
+（仅注释提及）、`quay-entry-test-helpers.mjs` 已恢复（quay-session.test.mjs 纯 import 依赖）。
+inner 本趟无新增代码改动，交付为 **worktree 内复验 + 隔离跑 + scoped 门绿**。
+
+**环境铺装（worktree 特有，均 gitignored 不入提交）**：`ln -s /home/yale/work/quay/node_modules` 复用主
+checkout node_modules；`cp /home/yale/work/quay/.quay/config.yml .quay/`；`bash
+plugin/scripts/sync-vendor.sh` 铺装 vendor dist（plugin/vendor/quay/dist/quay.js +
+plugin/vendor/quay-native/dist/quay-native.js）。
+
+**复现 + 分诊（dispatch 的 catalog_fail=14 基线）**：派发基线 measure（catalog_fail=14）在主检出
+（integration 分支）测得。逐项复现：
+- **worktree（develop fork，本任务作业面）**：`node --no-warnings --experimental-strip-types --test
+  plugin/test/capability-catalog.test.mjs` → **15 pass / 0 fail / 0 cancelled**；契约 measure
+  `grep -c 'fail [1-9]'` = 0 → **catalog_fail=0** ✓。develop 树无 40→6 回归，AC1 测试更新正确。
+- **主检出（integration，40→6 在树）**：同测试文件（与 worktree 逐字节相同）→ **1 pass / 14 fail**
+  （fail 清单：AC1a/AC1b、AC1b、AC5/band、AC1c、AC1/AC3 ×3、①/②/③/④ ×2、AC2、AC5、Wiring；仅
+  AC6 过）。**根因不是 40→6、不是 vendor 运行时缺失**：integration 的
+  `plugin/scripts/develop-deliver-tgz.sh`（DIR-123 提交 7c147b39，integration-only，不在 develop fork
+  内）**未声明 question**——catalog `--json` 报 unclassified=1 且 exit 1 → `catalogRows()` 断言
+  status 0 失败 → 除 AC6 外全部测试连带红。该脚本是 DIR-123「develop 合并后向 B/C 投递 .tgz」的
+  新增发货脚本（头注释完整但缺 `@instrument` 类问题声明）。**本趟新发现，超 40→6 家族范围，记录给
+  外层**：AC3 重合并（integration→develop）会把 develop-deliver-tgz.sh 一并带入 develop，若不先补
+  question 声明，重合并后 catalog band 仍红。
+
+**AC1 受影响族隔离实跑（worktree 内）**：
+- capability-catalog **15/0** · quay-session+session-topology+session-bootstrap **25/0** ·
+  inner-blocked-signal+quay-init-loop-driver+quay-init-loop-core+tick-vocabulary **67/0** → 合计
+  **107 pass / 0 fail / 0 cancelled**。
+
+**scoped 门**：`bash scripts/test.sh --for-task gap-forty-to-six-remerge-needs-tests-updated-first
+--allow-thin` → **exit 0**。静态检查 0 违规（test-framework-policy-check 332 文件 PASS、
+test-isolation 44 条全部基线内无新增、test-impl-census 332 文件全 clean、task-contract-check
+strict-subset 三任务文件 no violations、superseded-capability PASS、tick-core-static-check PASS）；
+测试 **15 pass / 0 fail / 0 cancelled**。无 `--allow-thin` 时同一趟 selector 报 test-selection-thin
+（exit 1）——Touches 含两个延后交叉标注任务文件 + `plugin/test/` 目录级条目未直接解析到测试，与
+2026-08-10 前趟同因。
+
+**AC 勾选**：AC1/AC2 保持 [x]（本趟复验通过）；AC3/AC4（integration→develop 重合并 + 复验）为
+外层动作，inner 不勾；AC5（交叉标注）延后。全量 suite_green=1 归外层 verification-round（clean
+window）验证。**外层注意**：AC3 重合并前需处理 `develop-deliver-tgz.sh`（DIR-123，提交 7c147b39）
+的 catalog 问题声明缺失，否则重合并后 catalog band 复红。

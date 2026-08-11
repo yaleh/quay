@@ -1,8 +1,9 @@
 ---
 id: DIR-123-aarch64-build-on-ad-arm1-and-auto-build-on-develop
-title: 人裁定 2026-08-11：release/package 构建须支持 aarch64（覆盖验证环境 C=ad-arm1）；不走 GitHub ARM
-  runner；**实现走硬件无关 .tgz 路线**（C 已有 Node v24.19.0 → npm install -g 即覆盖 aarch64，无需在 ad-arm1 单独建
-  SEA）；每次 merge 到 develop 后自动 deliver + 验证（解决 release 新鲜度退化）
+title: 人裁定 2026-08-11：release/package 构建须支持 aarch64（覆盖验证环境 C=ad-arm1）；不走 GitHub
+  ARM runner；**实现走硬件无关 .tgz 路线**（C 已有 Node v24.19.0 → npm install -g 即覆盖
+  aarch64，无需在 ad-arm1 单独建 SEA）；每次 merge 到 develop 后自动 deliver + 验证（解决 release
+  新鲜度退化）
 status: todo
 labels:
   - directive
@@ -92,7 +93,7 @@ $ ssh ad-arm1 'export PATH="$HOME/.local/opt/node-current/bin:$PATH"; quay --ver
 aarch64
 
 # Level2 — CLI 状态机 todo→done（任务引擎/gate 机制在 aarch64 上工作正常；AC16③ 字面判据「真实两层循环」仍未做）
-$ ssh ad-arm1 'export PATH="$HOME/.local/opt/node-current/bin:$PATH"; cd ~/quay-ac16c3-ws && quay init && quay task create TEST-002 --title "AC16c3 real round-trip" --body "<contract-shape 六键>" --extra '"'"'{"acceptance":"true"}'"'"' && quay promote TEST-002 && quay complete TEST-002'
+$ ssh ad-arm1 'export PATH="$HOME/.local/opt/node-current/bin:$PATH"; cd ~/quay-ac16c3-ws && quay init && quay task create TEST-002 --title "AC16c3 real round-trip" --body "<contract-shape 六键>" --extra '"{""acceptance"":""true""}"' && quay promote TEST-002 && quay complete TEST-002'
 TEST-002: AC16c3 real round-trip on aarch64 [todo]     # create → todo
 PROMOTE todo → ready                                    # author gate: dod pass
 PASS — status=done                                      # acceptance gate: acceptance pass
@@ -130,3 +131,7 @@ $ quay gate-log TEST-002
 ### Finding：Node-free aarch64 SEA 为显式 out-of-scope（决策记录）
 
 SEA 的 arch-bound 特性使「无 Node 的 aarch64 用户」需要 linux-arm64 SEA 二进制，但：(a) 验证环境 B/C 均有 Node ≥20（本任务核心目标 C 无可用产物已由 .tgz 关闭）；(b) 人 14:1x 禁止 GitHub ARM runner（billing/可用性）。若未来出现「无 Node 的 aarch64 消费者」需求，备选路径：ad-arm1 本机 `build-sea.sh`（node-current PATH 前置，arch 由本机 node 决定）。此为决策记录，不进 Contract。
+
+## 交叉标注（gap-init-scaffolds-mcp-entry-to-raw-ts-fails-on-installed-copy 修复，2026-08-11）
+
+上述 Evidence「注」里另立案的安装副本 init mcp_entry 缺陷已由 inner 修复：`packages/quay/src/init.ts` 新增 `mcpEntryForProvider()`，按 provider 解析后形态选 mcp_entry（node_modules 安装形态 → `["node","./dist/quay-native.js","mcp"]`；dev 形态 → `["node","./bin/quay-native.ts","mcp"]`），模板第 78 行硬编码移除。今后 C 上安装副本 `quay init` 铺出的 config 自动用 dist-bundle 形态，不再需要手工改写——Level2/Level3 复测可直接从 `quay init` 起步。证据：AC1-AC5 已勾 + 实跑证据贴在该 gap 任务。
