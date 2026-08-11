@@ -1,7 +1,7 @@
 ---
 id: gap-init-scaffolds-mcp-entry-to-raw-ts-fails-on-installed-copy
 title: quay init 铺出的 mcp_entry=["node","./bin/quay-native.ts","mcp"] 在已安装副本上必挂——Node ≥23.7 拒绝 node_modules 下的 type-stripping（ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING），quay task create 等一切经 provider MCP 的命令全崩
-status: todo
+status: ready
 labels:
   - gap
   - defect

@@ -1,7 +1,7 @@
 ---
 id: gap-quay-init-launch-settings-template-missing-permissions-and-exclude-dynamic
 title: quay-init 铺下的 launch.settings.json 缺 permissions.defaultMode=bypassPermissions 整块 + excludeDynamicSystemPromptSections 缺（true）——消费方 inner 冷启动在自家 loop 脚本上撞 permission prompt（ad-arm1 archguard 实测 F1/F2）
-status: todo
+status: ready
 labels:
   - gap
   - defect

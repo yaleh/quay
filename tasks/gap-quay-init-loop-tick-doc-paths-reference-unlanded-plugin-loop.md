@@ -1,7 +1,7 @@
 ---
 id: gap-quay-init-loop-tick-doc-paths-reference-unlanded-plugin-loop
 title: quay-init --loop 铺下的 tick 文档引用 plugin/loop/* 路径但该目录未铺下（docs/analysis/fast-mode-loop-tick.md 引 5 处全指向不存在路径）——AC37「referenced⊆landed 门自动生效」实测未拦住（ad-arm1 archguard 实测 F3）
-status: todo
+status: ready
 labels:
   - gap
   - defect

@@ -1,7 +1,7 @@
 ---
 id: gap-run-static-checks-zero-concurrency-can-parallelize
 title: run_static_checks 结构性零并发可并行化——scripts/test.sh:225 约 20+ 个 run_checker 顺序执行无 &/wait/xargs -P；各检查器只读独立无共享状态 ⇒ 并行化风险低于 serial 并发实验；本机/orangevps 只省 10-16s，但多核机器 run_static_checks_ms 直接暴露单核速度、随核数线性可省——核数优势能兑现的第五个位置
-status: todo
+status: ready
 labels:
   - gap
   - defect

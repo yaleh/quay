@@ -1,7 +1,7 @@
 ---
 id: gap-release-freshness-no-recut-mechanism
 title: release 新鲜度无维护机制——develop 领先 release 已 2216 提交（08-07 时 568），无重切/自动化任务；交付缺口：产物长期陈旧则交付面不可信，release 与 develop 漂移无闸
-status: todo
+status: ready
 labels:
   - gap
   - defect
