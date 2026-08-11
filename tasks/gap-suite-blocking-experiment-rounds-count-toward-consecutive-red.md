@@ -35,16 +35,16 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 r268 lane8 实验轮计入连红推窗激活 + 机械可辨（laneCount 字段）（本任务 Proposal 已含）
-- [ ] AC2: **实验轮不计连红**——computeSuiteBlocking 跳过 laneCount ≠ 默认的轮次
-- [ ] AC3: **真红仍计**——默认 lane 的真红轮正常累计
-- [ ] AC4: **既有不回归**——`--for-task` scoped 门绿
+- [x] AC1: **复现固化**——任务体记录 r268 lane8 实验轮计入连红推窗激活 + 机械可辨（laneCount 字段）（本任务 Proposal 已含）
+- [x] AC2: **实验轮不计连红**——computeSuiteBlocking 跳过 laneCount ≠ 默认的轮次
+- [x] AC3: **真红仍计**——默认 lane 的真红轮正常累计
+- [x] AC4: **既有不回归**——`--for-task` scoped 门绿
 
 ## Definition of Done
 
-- [ ] AC1–AC4 全部勾上
-- [ ] 修后实跑：构造 [实验红, 真红, 真红] ⇒ consecutive_red=2（贴输出）
-- [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
+- [x] AC1–AC4 全部勾上
+- [x] 修后实跑：构造 [实验红, 真红, 真红] ⇒ consecutive_red=2（贴输出）
+- [x] 既有测试 + 新增测试全绿（`--for-task` scoped）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
 
 ## Touches
@@ -63,6 +63,44 @@ invariant real_red_still_counts = 1（默认 lane 真红正常累计）
 invoke    `node --no-warnings --experimental-strip-types plugin/scripts/ready-pool-check.ts --root "$PWD" --cap 5 --json`（贴 suite_blocking.consecutive_red）
 control   实验轮不计；真红仍计；窗激活正确；既有不回归
 resume    跳过实验轮 / 测试分步提交，任一步完成即写盘
+
+## Implementation evidence（inner 2026-08-11）
+
+### 改了什么
+
+- `plugin/scripts/ready-pool-check.ts`：
+  - 新增 `isExperimentRound(r, defaultLane)`——仅**显式非默认 laneCount** 才算实验轮（无 laneCount 的 legacy 行、laneCount == default 的真轮正常计）。
+  - `computeSuiteBlocking` 读 verification-round 时**跳过实验轮**（`rounds.filter(r => !isExperimentRound(r, defaultLane))`），consecutive_red 与失败归因都只吃真红轮；实验轮的红仍留在 round 记录本身（state/reason 保留），只是不推连红窗。
+  - default lane 用 full-suite-runner 的 `defaultLaneCount()`（nproc 派生，**单一来源**，未复制 nproc 公式），`defaultLane` 可注入供 hermetic 测试。
+- `plugin/test/ready-pool-check.test.mjs`：新增用例 `[实验红(lane8), 真红, 真红] ⇒ consecutive_red=2 且 min3 窗不激活`；`[真红 ×3] ⇒ 3 且窗激活、归因命中`；中间实验轮透明（不计也不断）。
+
+### 实跑证据（Contract invoke：`ready-pool-check.ts --root <tmp> --cap 5 --json` 的 suite_blocking 字段）
+
+Scenario A：`[实验红(268, lane8), 真红(269), 真红(270)]`（r268 复现形态）
+
+```
+suite_blocking.consecutive_red = 2
+suite_blocking.window_active   = false
+suite_blocking.tasks          = []
+```
+
+⇒ 实验轮不计，2 < 3 窗不激活——r268+r269+r270 的 3 连红自锁解除（r269+r270 = 2）。
+
+Scenario B：`[真红 ×3]`（默认 lane）
+
+```
+suite_blocking.consecutive_red = 3
+suite_blocking.window_active   = true
+suite_blocking.tasks          = ["gap-wd"]
+```
+
+⇒ 真红仍正常累计，窗激活并归因到 Touches 命中任务。
+
+### scoped 门（`--for-task`，exit 0）
+
+- 静态检查全过：test-framework-policy / test-isolation（44 baseline）/ test-impl-census（328 clean）/ task-contract-check（strict-subset 本任务+同族，no violations）/ superseded-capability / tick-core-static / delivery-inventory-drift。
+- 测试：`plugin/test/ready-pool-check.test.mjs` 64 通过（含新增用例）· fail 0 · cancelled 0。
+- 全量套件绿留待外层 verification-round 验证（未勾）。
 
 ## Dispatch review
 
