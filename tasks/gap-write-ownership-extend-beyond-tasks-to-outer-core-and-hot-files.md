@@ -67,6 +67,18 @@ extra: {}
 - **① 确定性规则**：冲突路径**仅**为 `tasks/<本任务 id>.md` 时，inner 取**分支版本**（同一文件 + 本任务 AC 勾选与证据，内容是超集）；**其余任何路径仍按 C16 abort**。4 次来回 → 0 次，不放松代码冲突纪律。
 - ②（更根本、后续可做）：inner **写任务体前先 rebase 到当前 integration**（A6 里 rebase 在 fan-in 时才做、那时两边已各自新建）。
 
+### Finding：产品代码 multi-writer 冲突——任务文档规则覆盖不到、占用表（AC4）的落点（manager 2026-08-11 10:3x，落点 Finding 不进 Contract）
+
+**resolve-pending 序列创新高且性质变了（6→8→9→11→11→12→13）——不是任务文档 add/add 类，是产品代码冲突**（manager C6b 先看实际冲突内容再判断）：`task/gap-suite-blocking-self-lock-blocks-fix-family` 改了 **`plugin/scripts/ready-pool-check.ts`**（实现代码）+ 对应测试 + 2 任务文件；inner 心跳原话「self-lock done but ready-pool-check multi-writer overlap (C16 needs-human)」。
+
+**根因可核（outer 复核）**：`ready-pool-check.ts` 同时被**两个在飞 inner 任务**改——`gap-suite-blocking-self-lock`（af21a05d/51f19eea/637eaec9，豁免判据 isSuiteFixTask/computeSuiteBlocking）与 `gap-suite-blocking-experiment-rounds`（d5ce7a9d，skip experiment rounds）——同一产品代码文件的双写者。
+
+**⇒ 本任务（write-ownership-extend）的 AC4 占用表正是此处落点**：touches-orthogonality-check 目前只看 inner 任务之间、且不把**产品代码热点文件**算占用（本任务 AC4 原文覆盖「outer 在飞改动」——**产品代码双写者同理应被派发前拦截**）。两个方向（manager 报）：
+1. inner 派发前的 touches-orthogonality 正交性检查**理论该拦住两个同时改同一文件的任务同时在飞**——若没拦住，值得查为什么（多写者现成样本：ready-pool-check.ts 双任务）；
+2. 即使拦住同时在飞，fan-in 顺序仍可能因一方 rebase 晚而冲突——**产品代码热点文件在有人变更未合并时，派发前也应算作占用**（outer 主线在飞改动同理，与 08:2x 建议一致）。
+
+**处置**：self-lock 已按 C16 needs-human（外循环恢复其未提交状态 d2caf57a）；判定归 outer。
+
 ## Contract
 
 measure   inner_touches_outer_core = `grep -lE "orchestration/orchestrator-|plugin/loop/orchestrator-loop-tick" tasks/*.md | wc -l` 的 stdout 数字（新派发任务含核心/loop 路径的 Touches 数）
