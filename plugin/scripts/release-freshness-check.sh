@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# @instrument "Is the latest release FRESH — how far develop has run ahead of the latest release tag (重切触发, release_ahead vs recut threshold) and does the release 产物 tree drift from develop's mechanism set (漂移闸, drift_dirs)?"
 # release-freshness-check.sh — release 新鲜度检查：重切触发 + 漂移闸
 # (gap-release-freshness-no-recut-mechanism, AC2/AC3).
 #
