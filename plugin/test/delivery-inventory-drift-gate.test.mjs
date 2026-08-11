@@ -1,10 +1,15 @@
 // @test-group governance
 // delivery-inventory-drift-gate.test.mjs — unit tests for the file-set change gate
-// (gap-delivery-inventory-drift-needs-file-add-gate, AC2/AC4 + Contract invariants).
+// (gap-delivery-inventory-drift-needs-file-add-gate, AC2/AC4 + gap-drift-gate-covers-only-plugin-
+// scripts-not-workflows AC2 + Contract invariants).
 //
 // The gate answers: "Did this change ADD/DELETE a file under plugin/scripts/ WITHOUT updating the
 // outline §6 DELIVERY-INVENTORY snapshot in the same change?" — the 2026-08-10 red family
-// (r216/r222/r223/r226/r248/r253) fixed at the ROOT CAUSE instead of the symptom (7d2faf06).
+// (r216/r222/r223/r226/r248/r253) fixed at the ROOT CAUSE instead of the symptom (7d2faf06). And,
+// since gap-drift-gate-covers-only-plugin-scripts-not-workflows (2026-08-11, r265 red M143/AC9/C6):
+// "did this change ADD/DELETE a file under .claude/workflows/ WITHOUT touching the plugin/workflows/
+// mirror in the same change?" — the r265 root cause was a NEW workflow (execute-suite-fix.js,
+// pool-quality-judge.js) added to .claude/workflows/ without a plugin/workflows/ mirror.
 //
 // Coverage map (task ACs + Contract):
 //   AC2 — candidate B: `--diff-filter=AD` on plugin/scripts ⇒ the same change set must update the
@@ -16,6 +21,15 @@
 //   Contract invariant content_only_change_skipped = 1 — editing an existing script's content does
 //         NOT trigger. (GREEN test.)
 //   outline_updated_alongside — add a script + update the outline in the same change ⇒ PASS.
+//   AC2 (workflows) — .claude/workflows A/D ⇒ the same change set must touch plugin/workflows/
+//         (the mirror); FAIL-closed. Exercised on the WORKING-TREE surface (a new untracked
+//         workflow without a mirror → exit 1) AND the COMMITTED surface (a committed workflow
+//         deletion without a mirror deletion → exit 1).
+//   Contract invariant new_workflow_requires_mirror = 1 — add a .claude/workflows file ⇒ same-change
+//         plugin/workflows mirror touch, else FAIL. (RED test.)
+//   Contract invariant content_only_change_skipped = 1 (workflows) — editing an existing workflow's
+//         content does NOT trigger. (GREEN test.)
+//   workflow_mirror_alongside — add a workflow + mirror it in the same change ⇒ PASS.
 //   AC3 — existing verify-delivery-surface tests are not broken (run separately via the task's
 //         ## Test-Files declaration; this file does not duplicate them).
 //
@@ -58,11 +72,22 @@ function makeRepo() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "inv-drift-gate-"));
   fs.mkdirSync(path.join(root, "docs", "proposals"), { recursive: true });
   fs.mkdirSync(path.join(root, "plugin", "scripts"), { recursive: true });
+  fs.mkdirSync(path.join(root, ".claude", "workflows"), { recursive: true });
+  fs.mkdirSync(path.join(root, "plugin", "workflows"), { recursive: true });
   fs.writeFileSync(
     path.join(root, OUTLINE_REL),
     "# outline\n\n<!-- DELIVERY-INVENTORY-BEGIN -->\nscripts=1\n<!-- DELIVERY-INVENTORY-END -->\n"
   );
   fs.writeFileSync(path.join(root, "plugin", "scripts", "existing.sh"), "#!/usr/bin/env bash\necho existing\n");
+  // Committed mirrored workflow pair — the .claude/workflows/ canonical source + plugin/workflows/ mirror.
+  fs.writeFileSync(
+    path.join(root, ".claude", "workflows", "existing-wf.js"),
+    'export const meta = { name: "existing-wf" };\n'
+  );
+  fs.writeFileSync(
+    path.join(root, "plugin", "workflows", "existing-wf.js"),
+    'export const meta = { name: "existing-wf" };\n'
+  );
   git(root, "init", "-q");
   git(root, "config", "user.email", "t@test");
   git(root, "config", "user.name", "t");
@@ -183,6 +208,70 @@ t("GREEN — a committed script ADD + outline MODIFY in the same commit passes (
     // committed scan would MISS it (the 2026-08-10 post-commit regression this test pins).
     const res = spawnSync("bash", [GATE, "--root", root, "--base", "HEAD~1"], { encoding: "utf8" });
     assert.equal(res.status, 0, "committed script-add + outline-modify must pass (outline touched via M status)");
+  } finally { rmrf(root); }
+});
+
+// ── workflows trigger (gap-drift-gate-covers-only-plugin-scripts-not-workflows, AC2) ──────────────
+
+const WF_CANONICAL = path.join(".claude", "workflows");
+const WF_MIRROR = path.join("plugin", "workflows");
+
+t("GREEN — a clean tree with no .claude/workflows A/D passes", () => {
+  const root = makeRepo();
+  try {
+    const r = runGate(root);
+    assert.equal(r.status, 0, `clean tree must pass:\n${r.stderr}`);
+  } finally { rmrf(root); }
+});
+
+t("RED — a NEW .claude/workflows file without a plugin/workflows mirror fails FAIL-closed (new_workflow_requires_mirror)", () => {
+  const root = makeRepo();
+  try {
+    fs.writeFileSync(path.join(root, WF_CANONICAL, "foo-new.js"), 'export const meta = { name: "foo-new" };\n');
+    const r = runGate(root);
+    assert.equal(r.status, 1, "workflow addition without mirror must fail (FAIL-closed)");
+    assert.match(r.stderr, /plugin\/workflows|mirror/, "the failure must name the plugin/workflows mirror");
+  } finally { rmrf(root); }
+});
+
+t("RED — a committed .claude/workflows DELETION without a mirror deletion fails (committed path)", () => {
+  const root = makeRepo();
+  try {
+    fs.rmSync(path.join(root, WF_CANONICAL, "existing-wf.js"));
+    git(root, "add", "-A");
+    git(root, "commit", "-q", "-m", "delete workflow without mirror");
+    const res = spawnSync("bash", [GATE, "--root", root, "--base", "HEAD~1"], { encoding: "utf8" });
+    assert.equal(res.status, 1, "committed workflow deletion without mirror deletion must fail");
+    assert.match(res.stdout + res.stderr, /plugin\/workflows|mirror/);
+  } finally { rmrf(root); }
+});
+
+t("GREEN — a content-only edit to an existing workflow does NOT trigger (content_only_change_skipped)", () => {
+  const root = makeRepo();
+  try {
+    fs.appendFileSync(path.join(root, WF_CANONICAL, "existing-wf.js"), "\n// changed\n");
+    const r = runGate(root);
+    assert.equal(r.status, 0, "workflow content-only edit must not trigger");
+  } finally { rmrf(root); }
+});
+
+t("GREEN — a NEW workflow WITH a plugin/workflows mirror in the same change passes (workflow_mirror_alongside)", () => {
+  const root = makeRepo();
+  try {
+    fs.writeFileSync(path.join(root, WF_CANONICAL, "bar-new.js"), 'export const meta = { name: "bar-new" };\n');
+    fs.writeFileSync(path.join(root, WF_MIRROR, "bar-new.js"), 'export const meta = { name: "bar-new" };\n');
+    const r = runGate(root);
+    assert.equal(r.status, 0, "workflow addition WITH mirror must pass");
+  } finally { rmrf(root); }
+});
+
+t("GREEN — a DELETION of a workflow WITH its mirror deleted in the same change passes", () => {
+  const root = makeRepo();
+  try {
+    fs.rmSync(path.join(root, WF_CANONICAL, "existing-wf.js"));
+    fs.rmSync(path.join(root, WF_MIRROR, "existing-wf.js"));
+    const r = runGate(root);
+    assert.equal(r.status, 0, "workflow deletion WITH mirror deletion must pass");
   } finally { rmrf(root); }
 });
 

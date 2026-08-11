@@ -33,17 +33,42 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录两目录计数（6 vs 2）+ run-routines 漂移 + 三条失败（M143/AC9/C6）+ 时间线（本任务 Proposal 已含）
-- [ ] AC2: **闸覆盖 workflows**——drift 闸触发目录扩到 `.claude/workflows/`（A/D ⇒ 要求同提交更新 plugin/workflows 镜像 + C6 计数），FAIL-closed
-- [ ] AC3: **既有不回归**——`--for-task` scoped 门绿；drift 闸既有 plugin/scripts 判据不破坏
-- [ ] AC4: **类级缺口闭合**——同一族「往钉死集合加文件」的其它集合（capability-catalog 声明等）评估是否同法覆盖
+- [x] AC1: **复现固化**——任务体记录两目录计数（6 vs 2）+ run-routines 漂移 + 三条失败（M143/AC9/C6）+ 时间线（本任务 Proposal 已含）。inner 复核（worktree HEAD 9b08ed62）：`.claude/workflows/`=6，`plugin/workflows/`=2，run-routines.js 镜像已由 r265 修复（`diff` 两边 identical）
+- [x] AC2: **闸覆盖 workflows**——drift 闸触发目录扩到 `.claude/workflows/`（A/D ⇒ 要求同提交更新 plugin/workflows 镜像 + C6 计数），FAIL-closed。`classify_path` 新增 `.claude/workflows/*`→`workflows_structural`（untracked/A/D，rename 排除）与 `plugin/workflows/*`→`workflows_mirror_touched`（任意 status）；`workflows_structural && !workflows_mirror_touched ⇒ exit 1`。Contract measure：`grep -cE "workflows"` = **23** ≥ 1
+- [x] AC3: **既有不回归**——`--for-task gap-drift-gate-covers-only-plugin-scripts-not-workflows` scoped 门绿（16/16 tests pass + scoped 静态检查全绿，含 drift 闸在本次变更集上 PASS）；既有 plugin/scripts→outline 判据原样保留（INJECT-A/B/C + committed 用例全绿）
+- [x] AC4: **类级缺口闭合**——评估其它「往钉死集合加文件」集合：`capability-catalog.sh` 的声明清单、`plugin/test/plugin-packaging.test.mjs` 的 surviving-workflow `wanted` 数组、`workflow-metadata-conformance.mjs` 默认文件列表（C6 计数）都是**被钉侧**，由 M143/AC9/C6 在 full-suite 校验。闸的价值正是**同变更强制**被钉侧更新；闸的 FAIL 消息已显式提示同步这三处。capability-catalog 声明属 `capability-catalog.sh` 自身 AC1c 入口门（`--superseded-check`），非本闸同法覆盖对象——评估结论：无需扩展
 
 ## Definition of Done
 
 - [ ] AC1–AC4 全部勾上
-- [ ] 修后实跑：新增 .claude/workflows/foo.js 未镜像 ⇒ 静态红；镜像 ⇒ 绿（贴 diff-filter 输出）
-- [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
+- [ ] 修后实跑：新增 .claude/workflows/foo.js 未镜像 ⇒ 静态红；镜像 ⇒ 绿（贴 diff-filter 输出）——证据见下方「inner 执行证据」，勾选归外层
+- [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）——inner 实跑 16/16 pass，勾选归外层
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
+
+## inner 执行证据（2026-08-11, inner subagent）
+
+Contract invoke（临时 git 仓库，committed 范围 HEAD~1..HEAD，新增 workflow 未镜像）：
+```
+$ git diff --name-only --diff-filter=AD HEAD~1..HEAD | grep -E '^\.claude/workflows/'
+.claude/workflows/invoke-demo.js
+$ bash plugin/scripts/delivery-inventory-drift-gate.sh --root <tmp> --base HEAD~1
+FAIL: .claude/workflows/ has an ADDED/DELETED file in this change, but plugin/workflows/ (the distribution mirror) was NOT updated in the same change.
+  Mirror the workflow in the SAME change: cp .claude/workflows/<name>.js plugin/workflows/<name>.js (delete the mirror for a removal), then update the surviving-workflow list/count in plugin/scripts/workflow-metadata-conformance.mjs and plugin/test/plugin-packaging.test.mjs.
+exit=1
+```
+修后实跑矩阵（临时仓库，`--base HEAD` working-tree 面 + committed 面）：
+- 新增 `.claude/workflows/foo-new.js` 未镜像 ⇒ **exit 1（FAIL-closed）**
+- 同步镜像（`plugin/workflows/bar-new.js`）⇒ **exit 0（绿）**
+- 只改已有 workflow 内容（M，无 A/D）⇒ **exit 0（不触发，content_only_change_skipped）**
+- committed 删 workflow 未删镜像 ⇒ **exit 1**；镜像同删 ⇒ **exit 0**
+- plugin/scripts 既有判据（INJECT-A/B/C + committed A/D）全部不回归
+
+scoped 门（`./scripts/test.sh --for-task gap-drift-gate-covers-only-plugin-scripts-not-workflows`）：
+```
+tests 16 · pass 16 · fail 0 · cancelled 0
+PASS: delivery-inventory drift gate (plugin/scripts A/D without outline update: no; .claude/workflows A/D without plugin/workflows mirror: no)
+```
+变更文件：`plugin/scripts/delivery-inventory-drift-gate.sh`（触发目录扩到 workflows）、`plugin/scripts/checker-mutation-cases/delivery-inventory-drift-gate.sh`（INJECT-D/E/F）、`plugin/test/delivery-inventory-drift-gate.test.mjs`（新增 workflows A/D 用例 + fixture 镜像对）。本任务文件由 integration 拷贝进 worktree（develop fork 无此文件）。
 
 ## Touches
 
