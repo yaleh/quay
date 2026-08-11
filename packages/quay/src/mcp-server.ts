@@ -316,15 +316,32 @@ export async function startMcpServer(): Promise<void> {
   // Close every connected Provider client when the Core server's own
   // transport closes (stdin closes), so no orphaned Provider subprocess is
   // left running after the Agent disconnects.
-  transport.onclose = async () => {
-    for (const pending of clients.values()) {
-      try {
-        const { client } = await pending;
-        await client.close();
-      } catch {
-        // best-effort cleanup
-      }
-    }
+  //
+  // gap-mcp-server-test-deadlocks-at-high-test-concurrency: close providers in
+  // PARALLEL (Promise.allSettled) rather than sequentially. The SDK client's
+  // StdioClientTransport.close() gives this process only a 2s grace before it
+  // SIGTERMs, and 2s more before SIGKILL. Sequential provider closes multiply
+  // the cleanup time by the number of enabled providers — under load (a long
+  // batch at conc=8/16) that can exceed 2s, so the client SIGTERMs this process
+  // MID-cleanup and the not-yet-closed Provider subprocesses are orphaned.
+  // Parallel close keeps the whole tree's shutdown inside the grace window.
+  //
+  // closeAllProviders is extracted (not inline) so BOTH the transport onclose
+  // path and the SIGTERM/SIGINT path below run the same provider cleanup.
+  async function closeAllProviders(): Promise<void> {
+    await Promise.allSettled(
+      [...clients.values()].map(async (pending) => {
+        try {
+          const { client } = await pending;
+          await client.close();
+        } catch {
+          // best-effort cleanup
+        }
+      })
+    );
+  }
+  transport.onclose = () => {
+    void closeAllProviders();
   };
 
   // gap-suite-speedup (task gap-suite-speedup): when the client disconnects
@@ -340,4 +357,17 @@ export async function startMcpServer(): Promise<void> {
   process.stdin.on("close", () => {
     void transport.close();
   });
+
+  // gap-mcp-server-test-deadlocks-at-high-test-concurrency: if the SDK client's
+  // close() SIGTERMs us (its 2s grace elapsed before our stdin-EOF cleanup
+  // finished — possible under load), close the providers and exit rather than
+  // dying mid-cleanup and orphaning them. SIGKILL (the SDK's last resort) is
+  // uncatchable, so this is the final hand we get; after it the providers are
+  // piped (see provider-client.ts) so an orphan would not hold the runner's
+  // stderr anyway — this just reclaims the subprocesses too.
+  for (const sig of ["SIGTERM", "SIGINT"] as const) {
+    process.on(sig, () => {
+      void closeAllProviders().finally(() => process.exit(0));
+    });
+  }
 }
