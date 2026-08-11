@@ -1340,4 +1340,154 @@ test("SLOT-STATUS CLI — --slot-status carries subagents_in_flight / real_concu
   }
 });
 
+// ── Worktree leaks (gap-worktree-leak-after-fan-in-occupies-slot-permanently) ──
+// A fan-in merges a task's branch back into the merge target but the worktree is never removed —
+// `worktreeExists`/worktree-present then reads that leak as an ALIVE executor forever, so occupied
+// climbs monotonically until someone removes the worktree. The leak detector flags open
+// quay-worktrees whose `task/<id>` branch is already merged; the compliance verdict (AC4) fails
+// exactly when `occupied > cap` AND leaks exist.
+
+test("WORKTREE-LEAK — detectWorktreeLeaks flags merged quay-worktree task branches only (PURE)", async () => {
+  const cli = await importCli();
+  const root = "/home/yale/work/quay";
+  const worktrees = [
+    { path: "/home/yale/work/quay-worktrees/task-merged", branch: "refs/heads/task/task-merged" },
+    { path: "/home/yale/work/quay-worktrees/task-unmerged", branch: "refs/heads/task/task-unmerged" },
+    { path: "/home/yale/work/quay", branch: "refs/heads/integration" }, // main checkout — never a leak
+    { path: "/tmp/fan-in-test", branch: "refs/heads/task/tmp-task" }, // non-quay-worktrees fixture
+    { path: "/home/yale/work/quay-worktrees/feat-x", branch: "refs/heads/feat/feat-x" }, // non-task branch
+  ];
+  const isQuayWorktree = (p) => cli.isQuayWorktreePath(p, root);
+  const leaks = cli.detectWorktreeLeaks(worktrees, {
+    isMerged: (id) => id === "task-merged",
+    isQuayWorktree,
+  });
+  assert.deepEqual(
+    leaks.map((l) => l.taskId),
+    ["task-merged"],
+    "only the merged quay-worktree task branch leaks; main checkout, /tmp fixture, feat branch, unmerged excluded",
+  );
+  assert.equal(leaks[0].path, "/home/yale/work/quay-worktrees/task-merged");
+  assert.equal(leaks[0].branch, "refs/heads/task/task-merged");
+});
+
+test("WORKTREE-LEAK — no isMerged probe ⇒ no leak flagged (fail-closed without evidence)", async () => {
+  const cli = await importCli();
+  const leaks = cli.detectWorktreeLeaks(
+    [{ path: "/home/yale/work/quay-worktrees/task-a", branch: "refs/heads/task/task-a" }],
+    { isQuayWorktree: () => true },
+  );
+  assert.deepEqual(leaks, [], "without a merged probe the detector must not fabricate leaks");
+});
+
+test("WORKTREE-LEAK — taskIdFromBranch accepts both ref forms and rejects non-task branches", async () => {
+  const cli = await importCli();
+  assert.equal(cli.taskIdFromBranch("refs/heads/task/abc"), "abc");
+  assert.equal(cli.taskIdFromBranch("task/def"), "def");
+  assert.equal(cli.taskIdFromBranch("refs/heads/integration"), null);
+  assert.equal(cli.taskIdFromBranch("feat/x"), null);
+  assert.equal(cli.taskIdFromBranch(null), null);
+});
+
+test("WORKTREE-LEAK — isQuayWorktreePath excludes the main checkout and non-convention paths", async () => {
+  const cli = await importCli();
+  const root = "/home/yale/work/quay";
+  assert.equal(cli.isQuayWorktreePath("/home/yale/work/quay-worktrees/foo", root), true);
+  assert.equal(cli.isQuayWorktreePath("/home/yale/work/quay", root), false, "main checkout is not a task worktree");
+  assert.equal(cli.isQuayWorktreePath("/tmp/foo", root), false, "test fixtures outside quay-worktrees/ never occupy a slot");
+  assert.equal(cli.isQuayWorktreePath("/home/yale/work/other/quay-worktrees/foo", root), false, "sibling project's worktrees are not this repo's slots");
+  assert.equal(cli.isQuayWorktreePath(null, root), false);
+});
+
+test("WORKTREE-LEAK — occupied>cap AND leaks ⇒ NON-COMPLIANT; leaks alone or over-cap alone stay compliant (AC4)", async () => {
+  const cli = await importCli();
+  const inProgress = [{ taskId: "live-1", runId: "fm-live-1-1", startedAtMs: 1 }];
+  const executorGone = () => ({ gone: false, reason: "worktree-present" });
+  const leaks = [{ taskId: "merged-a", path: "/home/yale/work/quay-worktrees/merged-a", branch: "task/merged-a" }];
+
+  // The AC4 shape: occupied (1) > cap (0) AND a leak present ⇒ NON-COMPLIANT.
+  const s1 = cli.analyzeSlotStatus(inProgress, { cap: 0, executorGone, worktreeLeaks: leaks });
+  assert.equal(s1.occupied_slots > s1.cap, true, "occupied exceeds cap");
+  assert.equal(s1.worktree_leaks_count, 1, "a merged-worktree leak is present");
+  assert.equal(s1.worktree_leak_compliant, false, "occupied>cap AND leaks ⇒ the round is NON-COMPLIANT");
+
+  // Leaks alone (occupied ≤ cap) do NOT fail the round.
+  const s2 = cli.analyzeSlotStatus(inProgress, { cap: 3, executorGone, worktreeLeaks: leaks });
+  assert.equal(s2.worktree_leaks_count, 1);
+  assert.equal(s2.worktree_leak_compliant, true, "leaks alone must not fail a round that has free slots");
+
+  // Over-cap alone (no leaks) is a DIFFERENT violation — not the worktree-leak verdict.
+  const s3 = cli.analyzeSlotStatus(inProgress, { cap: 0, executorGone, worktreeLeaks: [] });
+  assert.equal(s3.occupied_slots > s3.cap, true);
+  assert.equal(s3.worktree_leaks_count, 0);
+  assert.equal(s3.worktree_leak_compliant, true, "over-cap with no leaks is not a worktree-leak compliance failure");
+
+  // Default (no worktreeLeaks arg) — no leaks, compliant, byte-compatible forward shape.
+  const s4 = cli.analyzeSlotStatus(inProgress, { cap: 0, executorGone });
+  assert.equal(s4.worktree_leaks_count, 0);
+  assert.equal(s4.worktree_leak_compliant, true);
+  assert.equal(s4.worktree_leaks.length, 0);
+});
+
+test("WORKTREE-LEAK CLI — real git: merged worktree reads as a leak; removal clears it and frees the slot (AC2/AC4)", async () => {
+  const tmp = makeTmpWorkspace();
+  // quay-worktrees sibling dir follows the fast-mode worktree path convention.
+  const wtRoot = path.join(path.dirname(tmp), "quay-worktrees");
+  try {
+    fs.writeFileSync(path.join(tmp, ".gitignore"), ".workflow-events/\n", "utf8");
+    fs.mkdirSync(path.join(tmp, "tasks"), { recursive: true });
+    fs.writeFileSync(path.join(tmp, "tasks", "seed.md"), "---\nid: seed\n---\n", "utf8");
+    gitCmd(tmp, "init", "-q", "-b", "master");
+    gitCmd(tmp, "config", "user.email", "test@example.com");
+    gitCmd(tmp, "config", "user.name", "test");
+    assert.equal(gitCmd(tmp, "add", "-A").status, 0);
+    assert.equal(gitCmd(tmp, "commit", "-m", "seed tasks").status, 0);
+    fs.mkdirSync(wtRoot, { recursive: true });
+    // task/leak-a: branch checked out in a quay-worktree, work committed, merged into master,
+    // worktree NEVER removed ⇒ the leak shape.
+    assert.equal(gitCmd(tmp, "worktree", "add", "-b", "task/leak-a", path.join(wtRoot, "leak-a"), "master").status, 0);
+    fs.appendFileSync(path.join(wtRoot, "leak-a", "tasks", "seed.md"), "work\n");
+    const wtGit = (args) => gitCmd(path.join(wtRoot, "leak-a"), ...args);
+    assert.equal(wtGit(["add", "-A"]).status, 0);
+    assert.equal(wtGit(["commit", "-m", "leak-a work"]).status, 0);
+    assert.equal(gitCmd(tmp, "merge", "--no-ff", "task/leak-a", "-m", "merge: fan-in leak-a").status, 0);
+
+    // The task has an OPEN telemetry bracket — its worktree-present executor makes it real in-flight.
+    assert.equal(runCli(tmp, "--task-start", "--taskId", "leak-a").status, 0);
+
+    const before = runCli(tmp, "--slot-status", "--cap", "1", "--json");
+    assert.equal(before.status, 0, before.stderr);
+    const b = JSON.parse(before.stdout);
+    assert.deepEqual(b.worktree_leaks.map((l) => l.taskId), ["leak-a"], "the merged-but-present worktree is reported as a leak");
+    assert.equal(b.real_in_flight, 1, "the leaked worktree reads as an alive executor");
+    assert.equal(b.occupied_slots, 1, "occupied = the leaked worktree's bracket");
+    assert.equal(b.worktree_leak_compliant, true, "occupied 1 is NOT > cap 1, so the AC4 over-cap shape is not yet met — leaks alone don't fail");
+    assert.equal(b.slots_free, 0, "cap 1 − occupied 1 ⇒ full");
+
+    // AC4's over-cap AND leak shape: cap 0.
+    const over = runCli(tmp, "--slot-status", "--cap", "0", "--json");
+    const ov = JSON.parse(over.stdout);
+    assert.equal(ov.worktree_leaks_count, 1);
+    assert.equal(ov.occupied_slots > ov.cap, true, "occupied exceeds cap 0");
+    assert.equal(ov.worktree_leak_compliant, false, "occupied>cap AND a merged-worktree leak ⇒ NON-COMPLIANT");
+
+    // Pure read: --slot-status must not remove the worktree or write reconcile events.
+    assert.equal(fs.existsSync(path.join(wtRoot, "leak-a")), true, "slot-status is pure-read: it never removes a worktree");
+
+    // AC2: the fix is `git worktree remove` (safe — branch merged, only the working copy is deleted).
+    assert.equal(gitCmd(tmp, "worktree", "remove", path.join(wtRoot, "leak-a")).status, 0);
+
+    const after = runCli(tmp, "--slot-status", "--cap", "5", "--json");
+    assert.equal(after.status, 0, after.stderr);
+    const a = JSON.parse(after.stdout);
+    assert.equal(a.worktree_leaks_count, 0, "after removal the leak is gone");
+    assert.equal(a.real_in_flight, 0, "the removed worktree no longer reads as an alive executor (branch merged ⇒ gone)");
+    assert.equal(a.worktree_leak_compliant, true, "no leaks ⇒ compliant");
+    assert.ok(a.slots_free > 0, "the slot the leak held is freed");
+  } finally {
+    cleanup(tmp);
+    try { fs.rmSync(wtRoot, { recursive: true, force: true }); } catch (_) { /* best-effort */ }
+  }
+});
+
 } // ── end governance self-skip (AC6) ──
