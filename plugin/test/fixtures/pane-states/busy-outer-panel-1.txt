@@ -1,0 +1,7 @@
+✢ Hullaballooing…
+  ⎿  Tip: Use /theme to change the color theme
+──────────────────────────────────────────────────────────────
+❯
+──────────────────────────────────────────────────────────────
+⏵⏵ bypass permissions on · 1 monitor · ctrl+t to hide tasks · ← 1 agent · ↓ to manage
+◯ execute-suite-fix  A15 … 28/28 agents done · 1h 0m 59s · ↓ 2.0m tokens · ⚠ Large workflow

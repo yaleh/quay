@@ -107,7 +107,23 @@ const DISMISSABLE_PROMPT_RE = /\(optional\)|Dismiss|How is Claude doing this ses
  * bypass-mode pane does not. A "co-occurring active signal" requirement would only add a
  * false-IDLE path (a busy pane whose work line is scrolled out of the bottom region would read
  * idle). The closure criterion is one real SESSION-IDLE, not a classifier heuristic. */
-const BUSY_RE = /esc to interrupt/i;
+// BUSY_RE is truncation-tolerant (成因 A, gap-pane-classify-busy-truncated-by-column-width): when
+// the tmux window is narrower than the status line, the TUI omits the tail with an ellipsis —
+// `esc to interrupt` becomes `esc to interru…` (实测 inner width=67). The pre-fix /esc to
+// interrupt/i missed the truncated form, so a busy pane read as idle (transcript 6s fresh but
+// SESSION-IDLE). Matching the /esc to interr/ PREFIX covers the full string and EVERY truncation of
+// the suffix — a truncated busy pane and a full busy pane both hit. Still restricted to the status
+// area (below), so a scrolled-content quote cannot fake it.
+const BUSY_RE = /esc to interr/i;
+
+/** 成因 B — task-panel busy marker (gap-pane-classify-busy-truncated-by-column-width): when the TUI
+ * renders the task/agent management view, the status line's `esc to interrupt` flag is REPLACED by
+ * `ctrl+t to hide tasks` (实测 outer width=93, 28/28 agents running). Neither string appears then —
+ * the panel chrome is the only busy proof. IMPORTANT distinction: `1 monitor` and `← N agent` alone
+ * are AMBIENT counts that render even at idle (waiting-input-manager-* fixtures carry them), so they
+ * must NOT be busy flags; only the panel-mode marker `ctrl+t to hide tasks` proves "有活在跑"
+ * (a `monitor` count followed by `ctrl+t` is exactly the 成因 B status line). */
+const PANEL_BUSY_RE = /ctrl\+t to hide tasks/i;
 
 /** The status area = the last up-to-two non-blank lines of the bottom region (the status line and
  * its possible continuation). Busy is judged HERE, not across the whole bottom region. */
@@ -147,7 +163,13 @@ export function classifyPaneState(paneText: string, opts: { lines?: number } = {
   if (PERMISSION_PROMPT_RE.test(region) && !DISMISSABLE_PROMPT_RE.test(region)) {
     return { state: "permission-prompt", confidence: 0.85, region, raw: region };
   }
-  if (BUSY_RE.test(statusArea(region))) {
+  const statusAreaText = statusArea(region);
+  // Busy judgment must not depend on a SINGLE string (gap-pane-classify-busy-truncated-by-column-
+  // width): BUSY_RE covers 成因 A (truncated `esc to interru…` at 67 cols, and the full form);
+  // PANEL_BUSY_RE covers 成因 B (the task-panel view replaces the flag with `ctrl+t to hide tasks`
+  // — seen on the 93-col outer with 28/28 agents running). Either ⇒ busy. The ambient `1 monitor` /
+  // `← N agent` counts are NOT busy flags (they render at idle too — see waiting-input fixtures).
+  if (BUSY_RE.test(statusAreaText) || PANEL_BUSY_RE.test(statusAreaText)) {
     return { state: "busy", confidence: 0.9, region, raw: region };
   }
   if (ERROR_BANNER_RE.test(region)) {
@@ -394,6 +416,35 @@ export function selfcheck(): boolean {
   ].join("\n");
   check("green-busy", classifyPaneState(busy).state === "busy");
 
+  // ── busy judgment not single-string: 成因 A truncation + 成因 B panel flags ─────────────────────
+  // (gap-pane-classify-busy-truncated-by-column-width)
+
+  // GREEN (成因 A): the 67-column TUI truncates the status line's "esc to interrupt" with an
+  // ellipsis → "esc to interru…" (实测 inner width=67). Pre-fix BUSY_RE required the full string and
+  // missed it, reading a busy pane as idle (transcript 6s fresh but SESSION-IDLE). Must read BUSY.
+  const truncated67col = "⏵⏵ bypass permissions on (shift+tab to cycle) · esc to interru…";
+  check("green-truncated-67col-busy", classifyPaneState(truncated67col).state === "busy");
+  // RED relabel: the truncated busy flag must never read waiting-input (idle masking busy).
+  check("truncated-67col-red-not-waiting", classifyPaneState(truncated67col).state !== "waiting-input");
+
+  // GREEN (成因 A positive control): the FULL "esc to interrupt" still reads busy.
+  check("green-full-text-busy", classifyPaneState(busy).state === "busy");
+
+  // GREEN (成因 B): the outer's 93-column task-panel rendering REPLACES "esc to interrupt" with
+  // "ctrl+t to hide tasks" (real 2026-08-11 outer capture, 28/28 agents running). No esc string at
+  // all — only the panel chrome. Must read BUSY.
+  const outerPanel = [
+    "⏵⏵ bypass permissions on · 1 monitor · ctrl+t to hide tasks · ← 1 agent · ↓ to manage",
+    "◯ execute-suite-fix  A15 … 28/28 agents done · 1h 0m 59s · ↓ 2.0m tokens · ⚠ Large workflow",
+  ].join("\n");
+  check("green-outer-panel-busy", classifyPaneState(outerPanel).state === "busy");
+  // RED relabel: the panel-rendered busy pane must never read waiting-input.
+  check("outer-panel-red-not-waiting", classifyPaneState(outerPanel).state !== "waiting-input");
+  // RED negative control: the AMBIENT "1 monitor · ← 1 agent" counts that render at idle are NOT a
+  // busy signal by themselves (waiting-input fixtures carry them) — a status line with only those
+  // counts must stay waiting-input, never flip to busy.
+  check("ambient-counts-red-not-busy", classifyPaneState(idle).state === "waiting-input");
+
   // GREEN: a permission dialog (the recorded trust-check family).
   const prompt = [
     "Quick safety check: Is this a project you created or one you trust?",
@@ -520,6 +571,20 @@ if (isDirect) {
     });
     process.stdin.resume();
     // do NOT fall through — return here; the async stdin path owns the process lifecycle.
+  } else if (args[0] === "--pane-text") {
+    // Contract invoke seam (gap-pane-classify-busy-truncated-by-column-width): classify a literal
+    // pane text passed as the NEXT argument (no stdin, no file) — the outer verification reads the
+    // `state` field of `--json` (the measure/band surface). `--json` emits the full classify result;
+    // without it, prints "state\nregion" (the same line-1 state contract as --classify, for bash
+    // consumers). Pure — no tmux, no file reads.
+    const text = args[1] ?? "";
+    const r = classifyPaneState(text);
+    if (args.includes("--json")) {
+      process.stdout.write(JSON.stringify(r) + "\n");
+    } else {
+      process.stdout.write(r.state + "\n" + r.region + "\n");
+    }
+    process.exit(0);
   } else if (args[0] === "--check-residue") {
     process.exit(runCheckResidue(args.slice(1)));
   } else {
