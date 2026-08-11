@@ -519,6 +519,21 @@ export interface SuiteRoundRecord {
    * tolerate its absence.
    */
   failures?: SuiteFailure[];
+  /**
+   * gap-verification-round-missing-phase-ms-breaks-cost-attribution AC2 — per-phase cost readings
+   * from test.sh's `__OVERHEAD__ <phase>_ms=N` fixed-overhead instrumentation (emitted on the
+   * FULL-SUITE default path; `static_phase_ms` ← `run_static_checks_ms`, plus `serial_phase_ms` /
+   * `lowconc_phase_ms` / `main_phase_ms`). Only phases that RAN are present: a kill-on-red-
+   * truncated round is missing `main_phase_ms` (the kill cut the main phase before its completion
+   * marker), so truncated-vs-complete is distinguishable from the record alone — the per_test_ms
+   * axis finally has phase context (the 08-09 "700s regression" misjudgment source). Absent on
+   * legacy rows and on scoped runs (which skip __OVERHEAD__ emission) — a reader must tolerate
+   * their absence.
+   */
+  static_phase_ms?: number;
+  serial_phase_ms?: number;
+  lowconc_phase_ms?: number;
+  main_phase_ms?: number;
 }
 
 /**
@@ -1264,6 +1279,13 @@ export async function run(argv: string[]): Promise<number> {
   let tapFail = 0;
   let tapCancelled = 0;
 
+  // gap-verification-round-missing-phase-ms-breaks-cost-attribution AC2 — accumulate the
+  // `__OVERHEAD__ <phase>_ms=N` phase timings (test.sh's fixed-overhead instrumentation, emitted
+  // on the FULL-SUITE default path) as the lines stream through. Keyed by the raw __OVERHEAD__
+  // label (`serial_phase`, `lowconc_phase`, `main_phase`, `run_static_checks`); only labels that
+  // were actually emitted are present (a truncated kill-on-red round has no main_phase line).
+  const phaseMs: Record<string, number> = {};
+
   const onLine = (line: string) => {
     logStream.write(line + "\n");
     // NOTE (# vs ℹ): this repo's measure-suite-reporter emits the info-glyph forms `ℹ pass N` /
@@ -1276,6 +1298,12 @@ export async function run(argv: string[]): Promise<number> {
     if (failM) tapFail = Number(failM[1]);
     const cancelledM = line.match(/^[#ℹ]\s*cancelled\s+(\d+)/);
     if (cancelledM) tapCancelled = Number(cancelledM[1]);
+    // gap-verification-round-missing-phase-ms-breaks-cost-attribution AC2 — the fixed-overhead
+    // phase timings (`__OVERHEAD__ <phase>_ms=N`, test.sh:909-918). Same stream-accumulation family
+    // as tapPass/tapFail above (NOT a post-hoc log re-read — the logStream buffer may not be
+    // flushed at append time, and the stream already carries the identical lines the log gets).
+    const overheadM = line.match(/^__OVERHEAD__\s+([A-Za-z0-9_]+)_ms=(\d+)$/);
+    if (overheadM) phaseMs[overheadM[1]] = Number(overheadM[2]);
     // gap-full-suite-state-red-no-failure-detail-static-check-invisible AC2/AC4 — accumulate
     // static-check detail lines on EVERY line (the `VIOLATION:` / summary / ratchet lines appear
     // even on passing runs; they only become failure-relevant when a STATIC_CHECK_FAILURE_PATTERN
@@ -1607,6 +1635,15 @@ export async function run(argv: string[]): Promise<number> {
     // for "failed file → task Touches" attribution. Green rounds omit it (绿轮可无) — all other
     // round-record fields stay byte-identical for non-red rounds.
     ...(finalState.state === "red" ? { failures: finalFailures } : {}),
+    // gap-verification-round-missing-phase-ms-breaks-cost-attribution AC2/AC3 — carry the per-phase
+    // cost readings (test.sh's `__OVERHEAD__ <phase>_ms` lines, already tee'd to the log). Only a
+    // phase that RAN is present: a kill-on-red-truncated round is missing main_phase_ms (the kill
+    // cut the main phase before its completion marker), so truncated-vs-complete is distinguishable
+    // from the record alone — per_test_ms finally has phase context.
+    ...(phaseMs.run_static_checks !== undefined ? { static_phase_ms: phaseMs.run_static_checks } : {}),
+    ...(phaseMs.serial_phase !== undefined ? { serial_phase_ms: phaseMs.serial_phase } : {}),
+    ...(phaseMs.lowconc_phase !== undefined ? { lowconc_phase_ms: phaseMs.lowconc_phase } : {}),
+    ...(phaseMs.main_phase !== undefined ? { main_phase_ms: phaseMs.main_phase } : {}),
   });
   // NOTE: appendVerificationRound above is the ONE suite-duration append per run (the
   // checker-cost.test.mjs AC6 contract: two runs ⇒ exactly two verification-round.jsonl lines).

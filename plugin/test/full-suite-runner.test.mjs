@@ -192,6 +192,107 @@ test("AC1 — a green run writes the exact suite-state shape to .quay/full-suite
   }
 });
 
+// ── gap-verification-round-missing-phase-ms-breaks-cost-attribution: AC2/AC3 (phase_ms) ─────────────
+// test.sh's FULL-SUITE default path emits `__OVERHEAD__ <phase>_ms=N` per fixed-overhead phase
+// (serial/lowconc/main + run_static_checks). The runner must carry those phase readings into the
+// verification-round record so per_test_ms is no longer a phase-blind mix of truncated-red and
+// complete-green rounds (the 08-09 "700s regression" misjudgment source).
+
+test("AC2/AC3 — a complete round records all four *_phase_ms from the __OVERHEAD__ stream lines", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-oh-"));
+  // The fake suite emits the phase markers to STDERR exactly like test.sh's _oh_emit does, then a
+  // green TAP summary. Values mirror the r266 decomposition (static 33s / serial 640s / lowconc
+  // 272s / main 650s — the task body's anchored split).
+  const suite = [
+    'echo "__OVERHEAD__ run_static_checks_ms=33000" >&2',
+    'echo "__OVERHEAD__ serial_phase_ms=640000" >&2',
+    'echo "__OVERHEAD__ lowconc_phase_ms=272000" >&2',
+    'echo "__OVERHEAD__ main_phase_ms=650000" >&2',
+    'echo "# tests 5"',
+    'echo "# pass 5"',
+    'echo "# fail 0"',
+    'echo "# cancelled 0"',
+    "exit 0",
+  ].join("\n");
+  const { f, dir } = fakeSuite(suite);
+  try {
+    const child = runRunner({ root, command: `bash ${f}`, laneCount: 8 });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, `runner exits 0 on green, got ${code}`);
+    const vrf = path.join(root, ".quay", "verification-round.jsonl");
+    assert.ok(fs.existsSync(vrf), "verification-round.jsonl written");
+    const rec = JSON.parse(fs.readFileSync(vrf, "utf8").split("\n").filter((l) => l.trim())[0]);
+    assert.equal(rec.static_phase_ms, 33000, "static_phase_ms ← run_static_checks_ms");
+    assert.equal(rec.serial_phase_ms, 640000, "serial_phase_ms present");
+    assert.equal(rec.lowconc_phase_ms, 272000, "lowconc_phase_ms present");
+    assert.equal(rec.main_phase_ms, 650000, "main_phase_ms present");
+    // AC3 — the four readings make a complete round phase-annotatable: the whole phase set is in
+    // the record, so per_test_ms carries the full-suite context (unlike the truncated shape below).
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC2/AC3 — a kill-on-red-TRUNCATED red round is distinguishable: serial/lowconc present, main_phase_ms ABSENT", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-oh-red-"));
+  // The pre-main phases completed (their __OVERHEAD__ markers fired) but the run reds DURING main
+  // and is cut before the main-phase completion marker — the exact shape a kill-on-red 30s tree-kill
+  // leaves. per_test_ms on such a round must NOT be read as a full-suite per-test cost (the 700s
+  // misjudgment: truncated red reads like a regression).
+  const suite = [
+    'echo "__OVERHEAD__ run_static_checks_ms=33000" >&2',
+    'echo "__OVERHEAD__ serial_phase_ms=640000" >&2',
+    'echo "__OVERHEAD__ lowconc_phase_ms=272000" >&2',
+    'echo "not ok 1 - boom"',
+    'echo "# tests 5"',
+    'echo "# pass 4"',
+    'echo "# fail 1"',
+    'echo "# cancelled 0"',
+    "exit 1",
+  ].join("\n");
+  const { f, dir } = fakeSuite(suite);
+  try {
+    const child = runRunner({ root, command: `bash ${f}`, laneCount: 8 });
+    const { code } = await waitExit(child);
+    assert.equal(code, 1, `runner exits 1 on red, got ${code}`);
+    const vrf = path.join(root, ".quay", "verification-round.jsonl");
+    assert.ok(fs.existsSync(vrf), "verification-round.jsonl written");
+    const rec = JSON.parse(fs.readFileSync(vrf, "utf8").split("\n").filter((l) => l.trim())[0]);
+    assert.equal(rec.state, "red", "truncated round is red");
+    assert.equal(rec.serial_phase_ms, 640000, "serial phase completed before the cut");
+    assert.equal(rec.lowconc_phase_ms, 272000, "lowconc phase completed before the cut");
+    assert.equal(rec.main_phase_ms, undefined, "main_phase_ms ABSENT — the truncation is visible in the record");
+    // AC3 — the phase reading is what separates this truncated red's per_test_ms from a complete
+    // green round's: a reader sees serial+lowconc WITHOUT main and knows the per-test cost is NOT
+    // a full-suite number.
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC2 backward-compat — a suite with NO __OVERHEAD__ emission records NO *_phase_ms fields", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-oh-none-"));
+  const { f, dir } = fakeSuite(GREEN_SUITE);
+  try {
+    const child = runRunner({ root, command: `bash ${f}`, laneCount: 8 });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, `runner exits 0 on green, got ${code}`);
+    const vrf = path.join(root, ".quay", "verification-round.jsonl");
+    const rec = JSON.parse(fs.readFileSync(vrf, "utf8").split("\n").filter((l) => l.trim())[0]);
+    // Scoped/legacy runs (and any suite that skips __OVERHEAD__ emission) must not fabricate zeros
+    // — the fields stay absent, and a reader tolerates that (same contract as per_test_ms/redAt).
+    assert.equal(rec.static_phase_ms, undefined, "no static_phase_ms on a non-__OVERHEAD__ suite");
+    assert.equal(rec.serial_phase_ms, undefined, "no serial_phase_ms on a non-__OVERHEAD__ suite");
+    assert.equal(rec.lowconc_phase_ms, undefined, "no lowconc_phase_ms on a non-__OVERHEAD__ suite");
+    assert.equal(rec.main_phase_ms, undefined, "no main_phase_ms on a non-__OVERHEAD__ suite");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // ── gap-merge-green-snapshot-verified-commit-livelock: AC2 (verifiedCommit / commit) ────────────────
 
 test("AC2 — a git-repo run records verifiedCommit (the integration tip at suite start) in the state AND the round record", async () => {
