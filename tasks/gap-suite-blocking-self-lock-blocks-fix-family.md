@@ -35,16 +35,16 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录自锁实证（suite_blocking active + 22 拦 + gap-install-family/gap-serial-phase-install 被拦 + 与 .halt 裁定同型）（本任务 Proposal 已含）
-- [ ] AC2: **豁免修 suite 任务**——Touches 与失败文件相交且任务本身修 suite ⇒ 不拦（gap-install-family/gap-serial-phase-install 可派）
-- [ ] AC3: **反向不放行**——无关任务碰套件文件仍被拦
-- [ ] AC4: **既有不回归**——`--for-task` scoped 门绿
+- [x] AC1: **复现固化**——任务体记录自锁实证（suite_blocking active + 22 拦 + gap-install-family/gap-serial-phase-install 被拦 + 与 .halt 裁定同型）（本任务 Proposal 已含）
+- [x] AC2: **豁免修 suite 任务**——Touches 与失败文件相交且任务本身修 suite ⇒ 不拦（gap-install-family/gap-serial-phase-install 可派）
+- [x] AC3: **反向不放行**——无关任务碰套件文件仍被拦
+- [x] AC4: **既有不回归**——`--for-task` scoped 门绿
 
 ## Definition of Done
 
-- [ ] AC1–AC4 全部勾上
-- [ ] 修后实跑：构造套件红场景 ⇒ gap-install-family 可派 / 无关任务仍拦（贴输出）
-- [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
+- [x] AC1–AC4 全部勾上
+- [x] 修后实跑：构造套件红场景 ⇒ gap-install-family 可派 / 无关任务仍拦（贴输出）
+- [x] 既有测试 + 新增测试全绿（`--for-task` scoped）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
 
 ## Touches
@@ -69,3 +69,36 @@ resume    豁免判据 / 反向控制 / 测试分步提交，任一步完成即�
 reviewer: outer
 at: 2026-08-11
 changed: manager 04:3x 紧急——suite_blocking 自锁：22 拦含修套件族（gap-install-family/gap-serial-phase-install），套件红 ⇒ 拦修套件任务 ⇒ 修不了 ⇒ 继续红（.halt 裁定同型死锁）。处方：豁免修 suite 任务 + 反向控制。实现归 inner，判定归 outer
+
+## Evidence
+
+**实现**（inner 2026-08-11，分步提交 4 个，全部在 worktree `gap-suite-blocking-self-lock-blocks-fix-family`）：
+1. `637eaec9` 豁免判据（AC2）——`isSuiteFixTask`（id/标题/Proposal 识别修 suite 任务），`computeSuiteBlocking` 归因循环跳过
+2. `51f19eea` 反向控制（AC3）——`exemptFromSuiteBlocking` 双条件 AND 闸（标记 ∧ 真实失败命中），标记单边永不豁免
+3. `7942257e` 测试——单元（AND 闸）+ 集成（analyzeTasks 套件红 ⇒ suite-fix 族可派 / 无关仍拦）
+4. `af21a05d` 反向控制加固——实跑暴露「Proposal 单独提 suite」误放，Proposal 臂收紧为 fix-intent 共现
+
+**AC2/AC3 实跑**（合成套件红场景：3 连红窗失败文件 `plugin/test/install-family.test.mjs`）：
+`node --no-warnings --experimental-strip-types plugin/scripts/ready-pool-check.ts --root /tmp/suitelock-demo-2ikY --cap 5 --json`
+```
+{
+  "suite_blocking": {
+    "consecutive_red": 3, "min_red_window": 3, "window_active": true,
+    "failure_files": ["plugin/test/install-family.test.mjs"],
+    "tasks": ["gap-watchdog-unrelated"]          // ← 只拦无关任务（AC3）
+  },
+  "ready": ["gap-install-family-tests-rotate-flakes-under-full-suite",
+            "gap-serial-phase-install-test-residue-dependency",
+            "gap-watchdog-unrelated"],
+  "pool": 3
+}
+```
+- AC2（死锁破除，Contract band `fix_family_dispatchable=true`）：`gap-install-family` 与 `gap-serial-phase-install` **不在** `suite_blocking.tasks` ⇒ 套件红时仍可派
+- AC3（Contract invariant `unrelated_still_blocked=1`）：无关任务 `gap-watchdog-unrelated`（Touches 碰同一失败文件、无修 suite 标记）**仍被拦**
+- Contract invariant `deadlock_broken=1`：window_active 保持 true，失败文件如实报告——豁免只放行修 suite 任务，不放行无关任务
+
+**AC4 既有不回归**（scoped 门）：`bash scripts/test.sh --for-task gap-suite-blocking-self-lock-blocks-fix-family --allow-thin`
+- EXIT=0；静态检查全 PASS（test-framework-policy / test-isolation 44 baseline / test-impl-census 328 clean / task-contract-check 0 violations / superseded / tick-core / delivery-inventory drift）
+- ready-pool-check.test.mjs：65 pass / 0 fail（含新增 `analyzeTasks: suite red ⇒ suite-fix family dispatchable, unrelated task still blocked` 与 `exemptFromSuiteBlocking / isSuiteFixTask` 单元用例）
+
+**DoD 全量套件绿**：留待外层 verification-round 验证（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）。

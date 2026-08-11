@@ -54,6 +54,7 @@ extra: {}
 - plugin/test/ready-pool-check.test.mjs（AC2-AC4：目录 glob 不归因 / 真 blocker 不回归 / DC 恢复）
 - tasks/gap-ac36-delivery-critical-priority-axis.md（交叉标注——DC 轴被污染）
 - tasks/gap-ac36-recommended-exposes-sort-key.md（交叉标注——同 AC36 验证链）
+- tasks/gap-suite-blocking-self-lock-blocks-fix-family.md（交叉标注——同族判据：本任务收窄「目录 glob 不归因」，它豁免「修 suite 任务不归因」——两个都是 suite_blocking 归因过宽/自锁的面，修法都在 computeSuiteBlocking 的归因循环）
 - tasks/gap-suite-blocking-directory-glob-overbroad.md（自身：勾 AC + 贴证据）
 
 ## Contract
