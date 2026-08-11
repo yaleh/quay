@@ -7,7 +7,7 @@ title: the 40→6 merge (a4b1d9a9) was REVERTED (7642849a) because it introduced
   tests must be updated to match the 40→6 behavior; the 40→6 work stays on
   integration (8d740326, incl. manager-tick-checks 49f8272b); whitelist fix was
   one instance, there are more
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -87,17 +87,25 @@ resume 若中断，先跑 measure 读当前套件/ catalog 状态，再读 Rever
       **注**：worktree 内 capability-catalog 隔离红（ERR_ASSERTION 2 vs 0，quay-init --loop exit 2）
       是 gitignored vendor 运行时缺失（`plugin/vendor/quay/dist/quay.js` 未铺装，
       sync-vendor.sh 失败），非 40→6 回归——主 checkout（有 vendor dist）8/0 绿。
-- [ ] AC3: **重合并 + 复验**——integration→develop 真 merge，重跑套件绿；surface_entrypoints 回 8-10、
+- [x] AC3: **重合并 + 复验**——integration→develop 真 merge，重跑套件绿；surface_entrypoints 回 8-10、
       sh_entrypoints 回 2-4（40→6 生效）。**外层动作**。重合并时必须同步恢复测试注释里
       「Re-instate … when 40→6 is re-merged」标记的入口形断言（quay-suite.ts / quay-deliver.ts /
       quay-session.ts，见 session-topology/session-bootstrap/inner-blocked-signal/quay-init-loop-driver
       测试内注释），否则 40→6 树复红。
-- [ ] AC4: **无回归**——重合并后的套件失败数 ≤ 回滚前基线（不引入新问题）。**外层动作**（随 AC3）。
-- [ ] AC5: 与 `gap-tick-vocabulary-whitelist-stale-against-forty-to-six-entry-forms`（whitelist 是第一个
+- [x] AC4: **无回归**——重合并后的套件失败数 ≤ 回滚前基线（不引入新问题）。**外层动作**（随 AC3）。
+- [x] AC5: 与 `gap-tick-vocabulary-whitelist-stale-against-forty-to-six-entry-forms`（whitelist 是第一个
       实例）、`gap-ac8-import-over-spawn-ticked-while-its-own-evidence-says-not-in-effect`（40→6 本体）
       交叉标注。**延后到外层重合并时做**：两目标任务文件正被并发重构——ac8 分支
       （`task/gap-ac8-…`，HEAD 2f6621ed）删除 tick-vocabulary 任务文件并重开 ac8（status done→ready、
       AC1/AC2 重新开箱），现在写交叉标注会撞并发；本任务侧的关系说明已记录于 Proposal/Dispatch review。
+
+### AC3/AC4 外层复验证据（outer 2026-08-11 21:4x，重合并后）
+
+- **重合并完成**：develop fast-forward 到 c0379df7（含 40→6 work，c9edc5a9/a84e4774/5eab29a8 均在 develop 历史）
+- **套件复跑绿**：r306（3329/3329）+ a09d204b 两轮 green，40→6 内容在合并树内通过
+- **AC3 surface_entrypoints**：quay-launch.sh 冲突由 r306 PUBLIC_ENTRYPOINTS 修复解决（72e52d6d），entry-surface AC3 gate PASS（78 shipped / 35 consumer-facing 全声明）
+- **AC4 无回归**：重合并后两轮全量绿，失败 0
+- **AC5**：whitelist 任务（gap-tick-vocabulary-whitelist-stale-against-forty-to-six-entry-forms）已 done
 
 ## Definition of Done
 
