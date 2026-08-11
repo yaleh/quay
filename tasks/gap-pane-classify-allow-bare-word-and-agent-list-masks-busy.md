@@ -45,11 +45,42 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 manager 对照实验（缺陷一：--allow-thin vs --thin-flag；缺陷二：busy+agent vs busy）+ outer 复核（同一 pane 只改一词）+ 行号 :59-60 / :97-101（本任务 Proposal 已含）
-- [ ] AC2: **缺陷一修复**——`PERMISSION_PROMPT_RE` 裸词 `Allow`（及同族 `Deny`/`Grant access`）不再命中子串（`--allow-thin` 不误报）；真权限框仍判 permission-prompt（正控制）
-- [ ] AC3: **缺陷二修复**——有 subagent 在飞（`● main` / `◯ general-purpose` / `← N agent` 在底部区域）时仍判 busy，不落 waiting-input；无 agent 时 busy 判定不回归
-- [ ] AC4: **位置判定不退回整屏**——`esc to interrupt` 判定窗口仍限状态行区域，不因修复退回整屏扫描（:81-94 false-IDLE 论证不回归）；消息正文引述「esc to interrupt」不得判 busy
-- [ ] AC5: **既有不回归**——`--for-task` scoped 门绿（含 pane-state-classify.test.mjs / inner-blocked-signal 相关测试）
+- [x] AC1: **复现固化**——任务体记录 manager 对照实验（缺陷一：--allow-thin vs --thin-flag；缺陷二：busy+agent vs busy）+ outer 复核（同一 pane 只改一词）+ 行号 :59-60 / :97-101（本任务 Proposal 已含）
+- [x] AC2: **缺陷一修复**——`PERMISSION_PROMPT_RE` 裸词 `Allow`（及同族 `Deny`/`Grant access`）不再命中子串（`--allow-thin` 不误报）；真权限框仍判 permission-prompt（正控制）
+      （`Allow`/`Deny` 的成对/行首形状判定已由前序任务 gap-pane-state-allow-deny-bare-word-false-positive
+      commit 1b10bd02 落地；本任务增量：`Grant access` 同族收口为对话框问句形状 + 双侧测试。）
+- [x] AC3: **缺陷二修复**——有 subagent 在飞（`● main` / `◯ general-purpose` / `← N agent` 在底部区域）时仍判 busy，不落 waiting-input；无 agent 时 busy 判定不回归
+- [x] AC4: **位置判定不退回整屏**——`esc to interrupt` 判定窗口仍限状态行区域，不因修复退回整屏扫描（:81-94 false-IDLE 论证不回归）；消息正文引述「esc to interrupt」不得判 busy
+- [x] AC5: **既有不回归**——`--for-task` scoped 门绿（含 pane-state-classify.test.mjs / inner-blocked-signal 相关测试）
+
+## Evidence（inner 2026-08-11）
+
+**Contract measures（任务体 Contract 四键全过）**：
+```
+allow_thin_not_permission  = unknown        （band: != 'permission-prompt' ✓）
+busy_with_agents_is_busy   = busy           （band: == 'busy' ✓）
+real_permission_still_prompt = 1            （invariant ✓）
+quote_esc_not_busy          = 1             （invariant ✓）
+```
+
+**缺陷一对照实验（同一 pane 只改一词）**：
+```
+--allow-thin  → {"state":"unknown",...}
+--thin-flag   → {"state":"unknown",...}
+正控制 Quick safety check: trust this folder? → {"state":"permission-prompt","confidence":0.85,...}
+```
+
+**缺陷二对照实验**：
+```
+busy + 2 agent（● main / ◯ general-purpose 在状态行下面）→ {"state":"busy","confidence":0.9,...}
+busy 无 agent 列表                                              → {"state":"busy","confidence":0.9,...}
+```
+
+**scoped 门**：`./scripts/test.sh --for-task gap-pane-classify-allow-bare-word-and-agent-list-masks-busy --allow-thin`
+→ `ℹ tests 59 / pass 59 / fail 0 / cancelled 0`（exit 0）。`--for-task` 不带 `--allow-thin` 时 selector 报
+`test-selection-thin (selector exit 1)`——Touches 7 项中 4 项为交叉标注 markdown（无对应测试文件），覆盖率
+0.43<0.5，系 Touches 构成的固有属性（baseline 同此），非测试失败；选中集（pane-state-classify +
+inner-blocked-signal）全绿。session-liveness-signals 的 busy-presence 用例单独跑绿（9s，真实 tmux 集成）。
 
 ## Definition of Done
 

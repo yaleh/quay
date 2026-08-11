@@ -224,3 +224,8 @@ changed: 外层裁定 D/E 立案。相对简报的三处收紧：
 (3) **DoD 显式禁止本任务改 `session-liveness.sh`**——分类器与接线拆成两个任务的全部意义就是
 触摸集不相交可并发，一旦本任务顺手改了那个文件，两个任务就串行了。
 `## Touches` 三条全是 `(new)`，与在飞/待派发任务零重叠（`checkTouchesResolve` 豁免 `(new)`）。
+
+> **交叉标注（2026-08-11，gap-pane-classify-allow-bare-word-and-agent-list-masks-busy）**：pane 判定家族——
+> 本任务立分类器（底部区域形状，五态枚举，ADR-016 边界 b）；`gap-pane-classify-allow-bare-word-and-agent-
+> list-masks-busy` 在分类器上修两个缺陷：裸词 `Allow`/`Deny`/`Grant access` 假阳性（:59-60 族）与
+> statusArea「最后两行」窗口被 agent 列表打破（:97-101 族）。共享同一边界纪律：不退回整屏扫描。
