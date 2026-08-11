@@ -86,7 +86,7 @@ LAUNCH (detached, survives subagent exit): ${launchCmd}
   — do NOT use Bash(run_in_background:true): a background task from a subagent is killed at subagent exit (实证 runId f6b824b5 died 16s after launch).
 state file: ${stateDir}/full-suite-state.json  (script-owned polling reads this)
 verification-round log: ${stateDir}/verification-round.jsonl
-integration-batch-merge: cd ${root} && bash plugin/scripts/integration-batch-merge.sh
+integration-batch-merge: cd ${root} && bash plugin/scripts/integration-batch-merge.sh --deliver  (DIR-123: --deliver launches develop-deliver-tgz.sh DETACHED after land closure — fresh .tgz to B/C + verify; best-effort, never blocks/fails the merge)
 resource gate: cd ${root} && bash plugin/scripts/resource-gate.sh --for full-suite
 FAILURES are ALL recorded in state.json's failures[] (MAX_RECORDED_FAILURES=200) + the archived log ${logFile} — read EVERY failure line, never just the first.
 `
@@ -209,7 +209,7 @@ ${CONTEXT}
 1. fan-in：把 verify worktree 的 branch（${worktree} 当前分支）合回 integration。冲突按「机械 union / per-hunk 判断」处置；不要用 --ours/--theirs 抹掉任何一方的真实内容。先 git reset --hard HEAD 清 staged/working-tree 残留（rebase-abort 残留纪律）。
 2. worktree 清理（AC3 落地形式，gap-worktree-leak-after-fan-in-occupies-slot-permanently）：fan-in 合并后**实际执行** \`git -C ${root} worktree remove ${worktree} && git -C ${root} worktree prune\`——不是「验证已清理」，是执行清理；分支已合，只删工作副本，提交不丢。remove 失败（脏树）⇒ 标出未提交残留、不要 --force，写进 note 报出来。未清理 ⇒ 该 fan-in 不算完成（每合一个任务永久吃一槽）。
 3. 验证 integration 干净。
-4. batch-merge：把 develop 推到那个确切 verifiedCommit（${lastState.verifiedCommit}）——cd ${root} && bash plugin/scripts/integration-batch-merge.sh 的正确调用形式（--dry-run 先验证，再实际执行）。
+4. batch-merge：把 develop 推到那个确切 verifiedCommit（${lastState.verifiedCommit}）——cd ${root} && bash plugin/scripts/integration-batch-merge.sh --deliver 的正确调用形式（--dry-run 先验证，再实际执行；--deliver 使 land closure 后自动投递新鲜 .tgz 到 B/C，best-effort 不阻塞 merge）。
 5. 返回合并结果与最终 develop/integration HEAD。
 返回 { fanIn: string[], batchMergeOk: bool, developHead, integrationHead, note }。`,
   { schema: { type: 'object', properties: { fanIn: { type: 'array', items: { type: 'string' } }, batchMergeOk: { type: 'boolean' }, developHead: { type: 'string' }, integrationHead: { type: 'string' }, note: { type: 'string' } }, required: ['batchMergeOk'] } }
