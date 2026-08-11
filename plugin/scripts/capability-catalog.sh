@@ -165,6 +165,7 @@ declare -A QUESTION=(
   [inner-session-check.sh]="Is the inner session healthy / empty-shell / missing (three-state cold-start self-check)?"
   [instrument-failure-check.ts]="Which of the manager's five documented instrument-failure families does each shell command in the tick docs exhibit (grep self-match, zero-hit-as-absent, pipe-then-exit-status, ...)?"
   [inner-wakeup-heartbeat-check.ts]="Is the inner ScheduleWakeup fallback heartbeat fresh — .quay/inner-wakeup-heartbeat.json ts within 3 tick periods (5400s) — or dead (inner 兜底心跳断)?"
+  [inner-wakeup-heartbeat.ts]="Does the inner layer WRITE the structured wakeup heartbeat — .quay/inner-wakeup-heartbeat.json with the minimal field set (ts/runIds/blocked/budgetHit/effectiveCap/agentDispatches/delaySeconds), fail-closed against a shrunk shape (inner 兜底心跳写入方)?"
   [integration-batch-merge.sh]="Can integration be batch-merged into develop (fast-forward + CAS, fail-closed)?"
   [integration-branch-model.ts]="Which ref should a task fork from — develop (independent) or integration (declared dependency / overlapping unverified work) — and is the integration→develop batch merge fast-forward-safe?"
   [it0-enforcement-with-design-check.sh]="Is every enforced rule backed by a design that explains it (ADR-011)?"
@@ -363,6 +364,7 @@ declare -A CADENCE=(
   [inner-panel-stale-check.ts]="每轮"
   [inner-session-check.sh]="每轮"
   [inner-wakeup-heartbeat-check.ts]="每轮"
+  [inner-wakeup-heartbeat.ts]="每轮"
 
   [instrument-failure-check.ts]="每轮"
   [integration-batch-merge.sh]="按需"
@@ -571,6 +573,7 @@ declare -A INVALIDATION=(
   [inner-panel-stale-check.ts]="无可测前提，靠周期复核"
   [inner-session-check.sh]="无可测前提，靠周期复核"
   [inner-wakeup-heartbeat-check.ts]="失效前提：inner 自排程仍写心跳文件；若改由 harness 直接上报，本条退休"
+  [inner-wakeup-heartbeat.ts]="失效前提：inner 自排程仍以脚本写心跳文件；若改由 harness 直接上报，本条退休"
 
   [instrument-failure-check.ts]="失效前提：tick 文档仍以 shell 命令承载判据；若判据迁出 shell，本条退休"
   [integration-batch-merge.sh]="无可测前提，靠周期复核"
@@ -779,6 +782,7 @@ declare -A LAST_REAFFIRMED=(
   [inner-panel-stale-check.ts]="2026-08-10"
   [inner-session-check.sh]="2026-08-10"
   [inner-wakeup-heartbeat-check.ts]="2026-08-10"
+  [inner-wakeup-heartbeat.ts]="2026-08-11"
 
   [instrument-failure-check.ts]="2026-08-10"
   [integration-batch-merge.sh]="2026-08-10"
@@ -987,6 +991,7 @@ declare -A MATCHING=(
   [inner-panel-stale-check.ts]="keyword"
   [inner-session-check.sh]="keyword"
   [inner-wakeup-heartbeat-check.ts]="n/a"
+  [inner-wakeup-heartbeat.ts]="n/a"
 
   [instrument-failure-check.ts]="position"
   [integration-batch-merge.sh]="keyword"

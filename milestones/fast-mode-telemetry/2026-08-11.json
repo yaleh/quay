@@ -1,0 +1,2928 @@
+{
+  "generatedAt": "2026-08-11T07:49:53.954Z",
+  "since": null,
+  "tasks": [
+    {
+      "taskId": "DIR-103-C",
+      "runId": "fm-DIR-103-C-1785834807691-12x3q8",
+      "minutes": 41.19263333333333,
+      "outcome": "done"
+    },
+    {
+      "taskId": "DIR-112",
+      "runId": "fm-DIR-112-1785692650183-3l08lu",
+      "minutes": 10.43525,
+      "outcome": "done"
+    },
+    {
+      "taskId": "DIR-124-A2",
+      "runId": "fm-DIR-124-A2-1785693890531-06eeel",
+      "minutes": 59.87506666666667,
+      "outcome": "done"
+    },
+    {
+      "taskId": "DIR-124-A5",
+      "runId": "fm-DIR-124-A5-1785693852283-raemx0",
+      "minutes": 0.09751666666666667,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-a-crash-leaves-phantom-in-flight-tasks-and-the-one-signal-that-fires-is-documented-backwards",
+      "runId": "fm-gap-a-crash-leaves-phantom-in-flight-tasks-and-the-one-signal-that-fires-is-documented-backwards-1785883502777-uq4gn4",
+      "minutes": 22.35718333333333,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-a-log-already-filtered-by-one-consumers-threshold-cannot-serve-a-second",
+      "runId": "fm-gap-a-log-already-filtered-by-one-consumers-threshold-cannot-serve-a-second-1785883503121-e72y8s",
+      "minutes": 8.71335,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-ac11-spawns-the-runner-inside-the-runner",
+      "runId": "fm-gap-ac11-spawns-the-runner-inside-the-runner-1785720243516-o3ewzl",
+      "minutes": 61.879616666666664,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-ac3b-prove-installed-quay-runs-without-dev-tree",
+      "runId": "fm-gap-ac3b-prove-installed-quay-runs-without-dev-tree-1785892121560-hr0orn",
+      "minutes": 22.207016666666668,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-ac8-import-over-spawn-ticked-while-its-own-evidence-says-not-in-effect",
+      "runId": "fm-gap-ac8-import-over-spawn-ticked-while-its-own-evidence-says-not-in-effect-1786052983264-q30ump",
+      "minutes": 58.423833333333334,
+      "outcome": "needs-human"
+    },
+    {
+      "taskId": "gap-adr-016-alternatives-rejected-one-shot-claim-is-factually-wrong",
+      "runId": "fm-gap-adr-016-alternatives-rejected-one-shot-claim-is-factually-wrong-1785863264808-wt89gy",
+      "minutes": 14.64075,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-adr-016-carve-out-permits-the-whole-screen-hash-it-was-meant-to-forbid",
+      "runId": "fm-gap-adr-016-carve-out-permits-the-whole-screen-hash-it-was-meant-to-forbid-1785854452091-70xccj",
+      "minutes": 65.569,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-b-machine-periodic-push-backup-to-bare-repo",
+      "runId": "fm-gap-b-machine-periodic-push-backup-to-bare-repo-1785985742451-lp6v0p",
+      "minutes": 16.551266666666667,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-both-gates-read-one-signal-so-done-costs-nothing",
+      "runId": "fm-gap-both-gates-read-one-signal-so-done-costs-nothing-1785805945121-oewucx",
+      "minutes": 27.265316666666667,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-checkers-have-never-been-shown-to-fail",
+      "runId": "fm-gap-checkers-have-never-been-shown-to-fail-1785781431331-qfwki4",
+      "minutes": 203.85698333333335,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-checks-that-verify-an-empty-set-must-fail-closed",
+      "runId": "fm-gap-checks-that-verify-an-empty-set-must-fail-closed-1785770647906-im2uh5",
+      "minutes": 95.00131666666667,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-closure-could-not-run-in-task-grant-self-touches-for-ac-and-invoke-evidence",
+      "runId": "fm-gap-closure-could-not-run-in-task-grant-self-touches-for-ac-and-invoke-evidence-1785900659718-7deh6h",
+      "minutes": 92.0604,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-closure-sync-is-the-true-batch-boundary-move-bookkeeping-to-outer-async",
+      "runId": "fm-gap-closure-sync-is-the-true-batch-boundary-move-bookkeeping-to-outer-async-1785896470472-4szd1p",
+      "minutes": 12.360766666666667,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-cold-start-ac8c-key4-teaches-superseded-send-keys-hash",
+      "runId": "fm-gap-cold-start-ac8c-key4-teaches-superseded-send-keys-hash-1785908833862-vx2eq6",
+      "minutes": 252.61383333333333,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-cold-start-e2e-installs-from-a-copy-and-nothing-runs-it",
+      "runId": "fm-gap-cold-start-e2e-installs-from-a-copy-and-nothing-runs-it-1785763857267-q5rdmm",
+      "minutes": 54.22391666666667,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-cold-start-needs-a-human-to-dictate-eight-steps",
+      "runId": "fm-gap-cold-start-needs-a-human-to-dictate-eight-steps-1785776615141-d05ioq",
+      "minutes": 284.1206833333333,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-contract-ratchet-has-no-runner-and-grew-tenfold-unnoticed",
+      "runId": "fm-gap-contract-ratchet-has-no-runner-and-grew-tenfold-unnoticed-1785753514939-7gehxb",
+      "minutes": 48.89938333333333,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-cross-machine-sync-has-no-mechanism-only-manual-pushes",
+      "runId": "fm-gap-cross-machine-sync-has-no-mechanism-only-manual-pushes-1786023162583-rusomk",
+      "minutes": 18.61475,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-crystallize-launch-config-into-checked-in-settings-file",
+      "runId": "fm-gap-crystallize-launch-config-into-checked-in-settings-file-1785929180232-or6nej",
+      "minutes": 79.97503333333333,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-dispatch-eligibility-blind-to-files-that-do-not-exist-yet",
+      "runId": "fm-gap-dispatch-eligibility-blind-to-files-that-do-not-exist-yet-1785883503466-r9awzr",
+      "minutes": 11.1409,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-dispatch-gate-has-no-checklist-and-no-trace",
+      "runId": "fm-gap-dispatch-gate-has-no-checklist-and-no-trace-1785724039718-y7tt6x",
+      "minutes": 50.45935,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-dod-clause13-14-enforced-but-undocumented",
+      "runId": "fm-gap-dod-clause13-14-enforced-but-undocumented-1785673841706-w7y7uz",
+      "minutes": 40.256233333333334,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-drift-check-only-looks-at-the-harmless-direction",
+      "runId": "fm-gap-drift-check-only-looks-at-the-harmless-direction-1785807859117-ybp1wy",
+      "minutes": 17.956766666666667,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-drive-text-carries-data-not-behavior-outer-inner-handoff",
+      "runId": "fm-gap-drive-text-carries-data-not-behavior-outer-inner-handoff-1785897872315-y5sohc",
+      "minutes": 32.84623333333333,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-eighty-one-instruments-behind-remembered-paths-and-no-entry-point",
+      "runId": "fm-gap-eighty-one-instruments-behind-remembered-paths-and-no-entry-point-1785889477146-gsd8fg",
+      "minutes": 15.755933333333333,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-eighty-two-shipped-checks-and-none-says-what-it-answers",
+      "runId": "fm-gap-eighty-two-shipped-checks-and-none-says-what-it-answers-1785891344402-erfvb3",
+      "minutes": 17.50285,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-establish-daily-review-cadence-mechanism",
+      "runId": "fm-gap-establish-daily-review-cadence-mechanism-1785895801684-si4yp7",
+      "minutes": 16.534766666666666,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-exclusion-lists-have-no-necessity-check",
+      "runId": "fm-gap-exclusion-lists-have-no-necessity-check-1785932516056-x598cj",
+      "minutes": 24.3718,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-full-suite-belongs-to-outer-background-above-3-min",
+      "runId": "fm-gap-full-suite-belongs-to-outer-background-above-3-min-1785900015383-kktyfz",
+      "minutes": 102.80413333333334,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-full-suite-runner-concurrency-default-and-gate",
+      "runId": "fm-gap-full-suite-runner-concurrency-default-and-gate-1785928202277-ewzep7",
+      "minutes": 96.28025,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-green-verdict-never-expires-411-minutes-and-187-commits-later-still-green",
+      "runId": "fm-gap-green-verdict-never-expires-411-minutes-and-187-commits-later-still-green-1786028750180-c4icmw",
+      "minutes": 110.70336666666667,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-init-ships-a-skill-that-calls-files-it-does-not-lay-down",
+      "runId": "fm-gap-init-ships-a-skill-that-calls-files-it-does-not-lay-down-1785889476765-v79vfe",
+      "minutes": 29.59845,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-inner-forensics-verify-reports-nonruns-and-zero-durations",
+      "runId": "fm-gap-inner-forensics-verify-reports-nonruns-and-zero-durations-1785747111351-b4mxpa",
+      "minutes": 35.69153333333333,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-inner-has-no-periodic-anchor-prose-only-drives-drift",
+      "runId": "fm-gap-inner-has-no-periodic-anchor-prose-only-drives-drift-1785897233834-dwx4p4",
+      "minutes": 43.48265,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-install-rewrites-files-so-upgrade-cannot-tell-who-changed-them",
+      "runId": "fm-gap-install-rewrites-files-so-upgrade-cannot-tell-who-changed-them-1785807858795-09efle",
+      "minutes": 25.780216666666668,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-inventory-drift-inner-exec-mode-report-missing-snapshot-regen",
+      "runId": "fm-gap-inventory-drift-inner-exec-mode-report-missing-snapshot-regen-1786392071720-t2gn3x",
+      "minutes": 446.5679333333333,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-laydown-derivation-is-sensitive-to-reference-spelling-dependency-closure",
+      "runId": "fm-gap-laydown-derivation-is-sensitive-to-reference-spelling-dependency-closure-1785994825310-m6xqmw",
+      "minutes": 64.88113333333334,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-live-cannot-tell-a-dead-loop-from-an-unwired-one",
+      "runId": "fm-gap-live-cannot-tell-a-dead-loop-from-an-unwired-one-1785778243668-r72g6s",
+      "minutes": 45.00216666666667,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-liveness-mounting-is-a-single-flight-role-with-no-owner",
+      "runId": "fm-gap-liveness-mounting-is-a-single-flight-role-with-no-owner-1785800828451-h2nhm9",
+      "minutes": 36.642583333333334,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-load-sensitive-session-family-confounds-step-three",
+      "runId": "fm-gap-load-sensitive-session-family-confounds-step-three-1785889477561-96jvfp",
+      "minutes": 34.5919,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-loop-has-no-os-level-anchor-cannot-self-recover-after-crash",
+      "runId": "fm-gap-loop-has-no-os-level-anchor-cannot-self-recover-after-crash-1785920983998-qk1q0y",
+      "minutes": 112.46665,
+      "outcome": "abandoned"
+    },
+    {
+      "taskId": "gap-loop-mechanism-lives-outside-the-package-and-cannot-ship",
+      "runId": "fm-gap-loop-mechanism-lives-outside-the-package-and-cannot-ship-1785753284154-36fiim",
+      "minutes": 76.5426,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-m264-build-evidence-regress-flaky",
+      "runId": "fm-gap-m264-build-evidence-regress-flaky-1785724040015-mxjpbk",
+      "minutes": 69.35986666666666,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-manager-productization-five-constraints",
+      "runId": "fm-gap-manager-productization-five-constraints-1786031622606-hlo8jn",
+      "minutes": 160.58145,
+      "outcome": "needs-human"
+    },
+    {
+      "taskId": "gap-manager-productization-five-constraints",
+      "runId": "fm-gap-manager-productization-five-constraints-1786033412934-cf7gcr",
+      "minutes": 130.75045,
+      "outcome": "needs-human"
+    },
+    {
+      "taskId": "gap-merge-exposed-contract-violations-in-done-tasks",
+      "runId": "fm-gap-merge-exposed-contract-violations-in-done-tasks-1786145405725-kpo1fj",
+      "minutes": 600.1305666666667,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-message-bus-human-third-target-transport-agnostic",
+      "runId": "fm-gap-message-bus-human-third-target-transport-agnostic-1785986396473-gr87vt",
+      "minutes": 32.30715,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-mkdtemp-rooted-in-the-shared-checkout-dirties-the-tree",
+      "runId": "fm-gap-mkdtemp-rooted-in-the-shared-checkout-dirties-the-tree-1785794535627-fmpf0r",
+      "minutes": 104.01958333333333,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-no-criterion-records-its-own-cost-checker-cost-jsonl",
+      "runId": "fm-gap-no-criterion-records-its-own-cost-checker-cost-jsonl-1786007852064-2e31zm",
+      "minutes": 22.098116666666666,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-no-cross-project-heavy-op-token",
+      "runId": "fm-gap-no-cross-project-heavy-op-token-1785746441367-r1x9cn",
+      "minutes": 31.123116666666668,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-no-e2e-proves-install-is-configuration-driven",
+      "runId": "fm-gap-no-e2e-proves-install-is-configuration-driven-1785801886729-v8uvdb",
+      "minutes": 79.95508333333333,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-no-explicit-blocked-signal-from-inner-layer",
+      "runId": "fm-gap-no-explicit-blocked-signal-from-inner-layer-1785715628922-tvlfl3",
+      "minutes": 56.32268333333333,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-no-inventory-of-what-the-two-layer-mode-actually-runs",
+      "runId": "fm-gap-no-inventory-of-what-the-two-layer-mode-actually-runs-1785726431169-yylhln",
+      "minutes": 92.78618333333333,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-no-post-merge-cross-machine-verification-detection-latency-is-luck",
+      "runId": "fm-gap-no-post-merge-cross-machine-verification-detection-latency-is-luck-1786026436011-g19w0h",
+      "minutes": 149.27768333333333,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-no-resource-awareness-heavy-ops-run-blind",
+      "runId": "fm-gap-no-resource-awareness-heavy-ops-run-blind-1785732445920-hjkru7",
+      "minutes": 42.3167,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-no-resource-awareness-heavy-ops-run-blind",
+      "runId": "fm-gap-no-resource-awareness-heavy-ops-run-blind-1785932516422-smshus",
+      "minutes": 229.91031666666666,
+      "outcome": "needs-human"
+    },
+    {
+      "taskId": "gap-no-test-framework-policy-for-new-tests",
+      "runId": "fm-gap-no-test-framework-policy-for-new-tests-1785715629435-syg65l",
+      "minutes": 56.31883333333333,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-node-compile-cache-is-never-enabled-and-every-spawn-reparses",
+      "runId": "fm-gap-node-compile-cache-is-never-enabled-and-every-spawn-reparses-1785858423469-na3bdu",
+      "minutes": 56.919016666666664,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-nothing-checks-whether-a-done-task-left-its-acs-behind",
+      "runId": "fm-gap-nothing-checks-whether-a-done-task-left-its-acs-behind-1785778243228-334tt3",
+      "minutes": 45.00286666666667,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-nothing-checks-whether-the-monitor-is-mounted-or-aimed-right",
+      "runId": "fm-gap-nothing-checks-whether-the-monitor-is-mounted-or-aimed-right-1785758123703-srq4rs",
+      "minutes": 92.95223333333334,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-one-unparseable-task-takes-down-the-whole-board",
+      "runId": "fm-gap-one-unparseable-task-takes-down-the-whole-board-1785771054185-oz4y5q",
+      "minutes": 88.23513333333334,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-pane-classify-allow-bare-word-and-agent-list-masks-busy",
+      "runId": "fm-gap-pane-classify-allow-bare-word-and-agent-list-masks-busy-1786410761438-3ecz50",
+      "minutes": 135.08575,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-pane-state-allow-deny-bare-word-false-positive",
+      "runId": "fm-gap-pane-state-allow-deny-bare-word-false-positive-1786401449733-nm2a1p",
+      "minutes": 290.30036666666666,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-pane-state-is-hashed-not-classified-so-needs-input-is-unobservable",
+      "runId": "fm-gap-pane-state-is-hashed-not-classified-so-needs-input-is-unobservable-1785854782241-tnf4qs",
+      "minutes": 117.12125,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-preflight-merged-markdown-claims-low-identifier-count-silent-miss",
+      "runId": "fm-gap-preflight-merged-markdown-claims-low-identifier-count-silent-miss-1785895802346-7mfvtr",
+      "minutes": 5.9751666666666665,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-promotion-cadence-is-role-volition-not-product-mechanism",
+      "runId": "fm-gap-promotion-cadence-is-role-volition-not-product-mechanism-1785865377727-mptjhp",
+      "minutes": 12.435733333333333,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-provision-verify-worktree-step",
+      "runId": "fm-gap-provision-verify-worktree-step-1786417179275-k7f4so",
+      "minutes": 28.157533333333333,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-quality-criteria-are-point-in-time-no-trend-criteria",
+      "runId": "fm-gap-quality-criteria-are-point-in-time-no-trend-criteria-1786010022164-ymxfq2",
+      "minutes": 10.8852,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-quay-init-config-preserving-incremental-upgrade",
+      "runId": "fm-gap-quay-init-config-preserving-incremental-upgrade-1786219528489-jll20j",
+      "minutes": 580.6827666666667,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-quay-init-rewrites-an-executable-instead-of-generating-config",
+      "runId": "fm-gap-quay-init-rewrites-an-executable-instead-of-generating-config-1785767230829-kb2ool",
+      "minutes": 50.5096,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-r1-cannot-see-tests-writing-into-the-live-task-store",
+      "runId": "fm-gap-r1-cannot-see-tests-writing-into-the-live-task-store-1785763857016-9hlwy4",
+      "minutes": 54.223533333333336,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-ready-pool-check-counts-merged-not-flipped-tasks-in-the-pool",
+      "runId": "fm-gap-ready-pool-check-counts-merged-not-flipped-tasks-in-the-pool-1785867803479-360uvx",
+      "minutes": 10.997266666666667,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-ready-pool-check-taskworklanded-overshoot-excludes-existing-file-tasks",
+      "runId": "fm-gap-ready-pool-check-taskworklanded-overshoot-excludes-existing-file-tasks-1785887793754-7fdpk9",
+      "minutes": 0.49748333333333333,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-ready-pool-promotion-same-class-as-slot-refill",
+      "runId": "fm-gap-ready-pool-promotion-same-class-as-slot-refill-1786220927265-6p1qv6",
+      "minutes": 557.3744666666666,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-ready-queue-still-lists-eight-tasks-targeting-retired-pipeline-files",
+      "runId": "fm-gap-ready-queue-still-lists-eight-tasks-targeting-retired-pipeline-files-1785837354157-gzxg3x",
+      "minutes": 31.227016666666668,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-reclaim-21-merged-worktrees-and-fix-my-bad-criterion",
+      "runId": "fm-gap-reclaim-21-merged-worktrees-and-fix-my-bad-criterion-1785728258022-sf5zrl",
+      "minutes": 76.67895,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-relation-sync-suite-red-isolation-green",
+      "runId": "fm-gap-relation-sync-suite-red-isolation-green-1785715527286-1zhl5t",
+      "minutes": 48.78273333333333,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-release-excludes-plugin-bundle-agent-surface",
+      "runId": "fm-gap-release-excludes-plugin-bundle-agent-surface-1786003222308-lkh4fi",
+      "minutes": 19.15825,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-release-sea-bundle-excludes-plugin-tree",
+      "runId": "fm-gap-release-sea-bundle-excludes-plugin-tree-1786211889557-gg2k3e",
+      "minutes": 708.00745,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-reliable-send-crystallize-the-five-failure-modes-into-a-script",
+      "runId": "fm-gap-reliable-send-crystallize-the-five-failure-modes-into-a-script-1785863265122-1334in",
+      "minutes": 14.642916666666666,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-residue-check-crystallized-as-tool-mode",
+      "runId": "fm-gap-residue-check-crystallized-as-tool-mode-1786056416338-lu9m1f",
+      "minutes": 76.63956666666667,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-resource-gate-psi-does-not-capture-load-flake-driver",
+      "runId": "fm-gap-resource-gate-psi-does-not-capture-load-flake-driver-1786419443643-z1nsje",
+      "minutes": 53.8558,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-retire-inner-agent-budget-report",
+      "runId": "fm-gap-retire-inner-agent-budget-report-1786402770145-cn5x87",
+      "minutes": 268.31846666666667,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-retire-inner-state-one-observer-targets-by-parameter",
+      "runId": "fm-gap-retire-inner-state-one-observer-targets-by-parameter-1785840474006-bxqip0",
+      "minutes": 226.96416666666667,
+      "outcome": "abandoned"
+    },
+    {
+      "taskId": "gap-retire-inner-state-one-observer-targets-by-parameter",
+      "runId": "fm-gap-retire-inner-state-one-observer-targets-by-parameter-1785858900674-sszfty",
+      "minutes": 48.972,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-retire-the-prepare-execute-pipeline-cluster",
+      "runId": "fm-gap-retire-the-prepare-execute-pipeline-cluster-1785732126252-0b3l2x",
+      "minutes": 61.73993333333333,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-reverse-drift-check-buries-true-positives-in-noise",
+      "runId": "fm-gap-reverse-drift-check-buries-true-positives-in-noise-1785720243805-vbtmva",
+      "minutes": 61.88041666666667,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-roadmap-silently-stale-mark-superseded-or-rewrite-fast-mode",
+      "runId": "fm-gap-roadmap-silently-stale-mark-superseded-or-rewrite-fast-mode-1785895802071-gkh6wh",
+      "minutes": 7.034283333333334,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-ruling-required-trigger-is-dead-code-never-wired-into-any-tick",
+      "runId": "fm-gap-ruling-required-trigger-is-dead-code-never-wired-into-any-tick-1785856431482-8uwrrh",
+      "minutes": 32.587316666666666,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-runtime-state-files-not-gitignored",
+      "runId": "fm-gap-runtime-state-files-not-gitignored-1786399951674-li7zez",
+      "minutes": 315.3016166666667,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-scoped-runs-pay-full-static-check-overhead",
+      "runId": "fm-gap-scoped-runs-pay-full-static-check-overhead-1785901833989-1zrbbb",
+      "minutes": 72.50026666666666,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-select-preflight-json-real-store-too-slow",
+      "runId": "fm-gap-select-preflight-json-real-store-too-slow-1785673841089-yoji1f",
+      "minutes": 40.25695,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-send-keys-verified-hash-check-cannot-tell-typed-from-submitted",
+      "runId": "fm-gap-send-keys-verified-hash-check-cannot-tell-typed-from-submitted-1785840473690-w6m5x8",
+      "minutes": 227.39668333333333,
+      "outcome": "abandoned"
+    },
+    {
+      "taskId": "gap-serve-task-list-dies-on-one-malformed-task",
+      "runId": "fm-gap-serve-task-list-dies-on-one-malformed-task-1785733070377-pyzd0e",
+      "minutes": 31.915566666666667,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-session-liveness-hashes-the-token-counter-as-if-it-were-work",
+      "runId": "fm-gap-session-liveness-hashes-the-token-counter-as-if-it-were-work-1785979857268-sxqszn",
+      "minutes": 194.15661666666668,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-session-liveness-heartbeat-freezes-for-the-whole-task",
+      "runId": "fm-gap-session-liveness-heartbeat-freezes-for-the-whole-task-1785770647528-tg6r7g",
+      "minutes": 100.82288333333334,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-session-liveness-remove-shared-events-and-lock",
+      "runId": "fm-gap-session-liveness-remove-shared-events-and-lock-1786018700846-fnl27u",
+      "minutes": 73.65195,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-session-liveness-stage-2-screen-signal-and-payload",
+      "runId": "fm-gap-session-liveness-stage-2-screen-signal-and-payload-1785781431693-fs57qr",
+      "minutes": 203.85615,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-shipped-verifiers-have-no-callers-and-mentions-defeat-the-check",
+      "runId": "fm-gap-shipped-verifiers-have-no-callers-and-mentions-defeat-the-check-1786028750607-8d7wlt",
+      "minutes": 110.70661666666666,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-slot-refill-only-triggered-on-completion-not-tick-heartbeat",
+      "runId": "fm-gap-slot-refill-only-triggered-on-completion-not-tick-heartbeat-1785984338817-6ph2wv",
+      "minutes": 19.547283333333333,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-stranded-worktree-branches-have-no-alarm-channel",
+      "runId": "fm-gap-stranded-worktree-branches-have-no-alarm-channel-1785736303709-tikhj7",
+      "minutes": 91.67928333333333,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-suite-concurrency-4-vs-8-measurement",
+      "runId": "fm-gap-suite-concurrency-4-vs-8-measurement-1785706293549-4af9ik",
+      "minutes": 76.29515,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-suite-cost-model-is-wrong-optimizations-buy-nothing",
+      "runId": "fm-gap-suite-cost-model-is-wrong-optimizations-buy-nothing-1785685475162-odoz6u",
+      "minutes": 72.18956666666666,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-suite-sigma-distribution-stale-after-retirement",
+      "runId": "fm-gap-suite-sigma-distribution-stale-after-retirement-1785736688189-e7g0qj",
+      "minutes": 150.61753333333334,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-suite-speed-under-a-297-second-sigma",
+      "runId": "fm-gap-suite-speed-under-a-297-second-sigma-1785859025231-j45o7g",
+      "minutes": 332.4510666666667,
+      "outcome": "needs-human"
+    },
+    {
+      "taskId": "gap-supervisor-preemption",
+      "runId": "fm-gap-supervisor-preemption-1786013898406-paw019",
+      "minutes": 15.681083333333333,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-supervisor-step-4-preemption",
+      "runId": "fm-gap-supervisor-step-4-preemption-1786226751081-5svdg9",
+      "minutes": 460.32076666666666,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-supervisor-step-5-message-bus-with-identity",
+      "runId": "fm-gap-supervisor-step-5-message-bus-with-identity-1786224811606-l46h3w",
+      "minutes": 492.6500833333333,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-symlink-mirror-invocation-test-contract-mismatch",
+      "runId": "fm-gap-symlink-mirror-invocation-test-contract-mismatch-1785673841393-d330u6",
+      "minutes": 40.2564,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-sync-vendor-drift-mislabelled-as-task-schema",
+      "runId": "fm-gap-sync-vendor-drift-mislabelled-as-task-schema-1785698309174-7d8kss",
+      "minutes": 86.18386666666666,
+      "outcome": "needs-human"
+    },
+    {
+      "taskId": "gap-sync-vendor-drift-mislabelled-as-task-schema",
+      "runId": "fm-gap-sync-vendor-drift-mislabelled-as-task-schema-1785711272112-o45wve",
+      "minutes": 60.002183333333335,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-task-body-has-n-parsers-and-no-authority",
+      "runId": "fm-gap-task-body-has-n-parsers-and-no-authority-1785738433602-ttg1t6",
+      "minutes": 56.186366666666665,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-task-list-route-is-linear-in-task-count",
+      "runId": "fm-gap-task-list-route-is-linear-in-task-count-1785794637373-nvomw3",
+      "minutes": 102.32943333333333,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-task-write-accepts-a-title-that-breaks-its-own-frontmatter",
+      "runId": "fm-gap-task-write-accepts-a-title-that-breaks-its-own-frontmatter-1785858423027-qbvfzz",
+      "minutes": 90.66416666666667,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-tasksperhour-counts-halted-time-as-slow-work",
+      "runId": "fm-gap-tasksperhour-counts-halted-time-as-slow-work-1785758123384-3w5muw",
+      "minutes": 92.95245,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-tasksperhour-measures-mean-duration-not-throughput",
+      "runId": "fm-gap-tasksperhour-measures-mean-duration-not-throughput-1785720243211-4ij0d7",
+      "minutes": 61.88001666666667,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-telemetry-report-writes-and-deadlocks-readiness",
+      "runId": "fm-gap-telemetry-report-writes-and-deadlocks-readiness-1785690646974-mw97c6",
+      "minutes": 23.2206,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-test-coverage-check-parses-stale-files-variable",
+      "runId": "fm-gap-test-coverage-check-parses-stale-files-variable-1785724040268-4w3tpe",
+      "minutes": 33.755066666666664,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-test-isolation-contract-is-unwritten",
+      "runId": "fm-gap-test-isolation-contract-is-unwritten-1785728258296-wo6yww",
+      "minutes": 62.339133333333336,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-test-sh-flags-only-form-silently-runs-a-different-suite",
+      "runId": "fm-gap-test-sh-flags-only-form-silently-runs-a-different-suite-1785703705884-oiqn25",
+      "minutes": 42.83965,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-test-suite-has-no-layer-grouping",
+      "runId": "fm-gap-test-suite-has-no-layer-grouping-1785669188453-vcfjby",
+      "minutes": 67.84928333333333,
+      "outcome": "needs-human"
+    },
+    {
+      "taskId": "gap-tests-never-clean-up-their-tmpdirs",
+      "runId": "fm-gap-tests-never-clean-up-their-tmpdirs-1785744545014-tlg485",
+      "minutes": 37.87741666666667,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-tests-spawn-cli-from-ts-source",
+      "runId": "fm-gap-tests-spawn-cli-from-ts-source-1785676937127-z8534e",
+      "minutes": 22.43315,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-tests-use-cli-where-module-import-suffices",
+      "runId": "fm-gap-tests-use-cli-where-module-import-suffices-1785678301009-hn9gyi",
+      "minutes": 34.45701666666667,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-the-blocked-channel-has-a-writer-nobody-calls",
+      "runId": "fm-gap-the-blocked-channel-has-a-writer-nobody-calls-1785805946128-msadpj",
+      "minutes": 20.1345,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-the-dod-gate-encodes-a-retired-task-shape",
+      "runId": "fm-gap-the-dod-gate-encodes-a-retired-task-shape-1785800911825-9wwkva",
+      "minutes": 15.5157,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-the-loop-driver-check-reads-a-self-declared-registry-nobody-writes",
+      "runId": "fm-gap-the-loop-driver-check-reads-a-self-declared-registry-nobody-writes-1785987131261-a5jpkr",
+      "minutes": 72.92936666666667,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-the-one-condition-the-channel-was-built-for-still-has-no-trigger",
+      "runId": "fm-gap-the-one-condition-the-channel-was-built-for-still-has-no-trigger-1785834808086-p68cig",
+      "minutes": 41.19125,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-the-only-token-waiter-refuses-to-wait-at-all",
+      "runId": "fm-gap-the-only-token-waiter-refuses-to-wait-at-all-1785794419629-c1pul1",
+      "minutes": 105.94785,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-the-spawn-count-criterion-was-wall-clock-and-that-is-the-wrong-axis-for-concurrency",
+      "runId": "fm-gap-the-spawn-count-criterion-was-wall-clock-and-that-is-the-wrong-axis-for-concurrency-1786001533223-pxndi5",
+      "minutes": 103.42065,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-the-tick-doc-ships-three-contradictory-loop-drivers",
+      "runId": "fm-gap-the-tick-doc-ships-three-contradictory-loop-drivers-1785800912375-l4x18s",
+      "minutes": 14.890083333333333,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-the-token-watches-the-shell-that-asked-not-the-work-that-runs",
+      "runId": "fm-gap-the-token-watches-the-shell-that-asked-not-the-work-that-runs-1785994824988-xk3jsq",
+      "minutes": 64.89191666666666,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-tmp-leak-is-live-r6-absolves-a-file-for-one-cleanup-call",
+      "runId": "fm-gap-tmp-leak-is-live-r6-absolves-a-file-for-one-cleanup-call-1785758123038-hkdtnb",
+      "minutes": 92.96766666666667,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-tmux-isolation-cannot-depend-on-caller-remembering-to-unset-TMUX",
+      "runId": "fm-gap-tmux-isolation-cannot-depend-on-caller-remembering-to-unset-TMUX-1785856431215-0b3gdc",
+      "minutes": 32.595483333333334,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-token-status-reports-a-dead-holder-as-busy",
+      "runId": "fm-gap-token-status-reports-a-dead-holder-as-busy-1785996381131-mbsm4t",
+      "minutes": 38.96091666666667,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-touches-bare-dir-uncertain-declaration-drags-the-pool",
+      "runId": "fm-gap-touches-bare-dir-uncertain-declaration-drags-the-pool-1786227569005-sepwnx",
+      "minutes": 446.6985666666667,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-value-prioritization-has-no-mechanism",
+      "runId": "fm-gap-value-prioritization-has-no-mechanism-1785994824729-5xzv3k",
+      "minutes": 64.90708333333333,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-web-action-buttons-unused-route-and-open-redirect-delete",
+      "runId": "fm-gap-web-action-buttons-unused-route-and-open-redirect-delete-1785985270023-fqtpnm",
+      "minutes": 24.40445,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-web-board-needs-an-inconsistency-verdict-it-does-not-have",
+      "runId": "fm-gap-web-board-needs-an-inconsistency-verdict-it-does-not-have-1785921110363-pwxyo5",
+      "minutes": 110.55188333333334,
+      "outcome": "abandoned"
+    },
+    {
+      "taskId": "gap-web-cannot-show-what-the-loop-is-doing-now",
+      "runId": "fm-gap-web-cannot-show-what-the-loop-is-doing-now-1785736304036-lrq9xl",
+      "minutes": 37.52603333333333,
+      "outcome": "done"
+    }
+  ],
+  "orphaned": [
+    {
+      "taskId": "gap-claim-task-and-backup-push-still-point-at-retired-local-bare-repo-not-github",
+      "runId": "fm-gap-claim-task-and-backup-push-still-point-1785999481954-r7wcu5",
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-inner-subagent-budget-invisible",
+      "runId": "none",
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-release-postinstall-fallback-breaks-windows-sea-build",
+      "runId": "fm-gap-release-postinstall-1786010786471-i9mza9",
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-session-liveness-single-flight-lock-cross-project-blind",
+      "runId": "fm-gap-single-flight-lock-1786017947921-yj8c4n",
+      "outcome": "abandoned"
+    },
+    {
+      "taskId": "gap-supervisor-message-bus-with-identity",
+      "runId": "fm-gap-supervisor-message-bus-1786012358446-e687j8",
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-two-layer-loop-tick-docs-hardcode-master-not-wired-to-existing-branch-model",
+      "runId": "fm-gap-two-layer-loop-tick-docs-hardcode-master-not-wired-1785999127214-oy1evg",
+      "outcome": "done"
+    }
+  ],
+  "inProgress": [
+    {
+      "taskId": "gap-git-history-landed-master-stale-under-two-line-model",
+      "runId": "fm-gap-git-history-landed-master-stale-under-two-line-model-1786432443194-l8ecqc",
+      "startedAtMs": 1786432443207,
+      "startedAtMsUnreliable": true
+    },
+    {
+      "taskId": "gap-inner-heartbeat-fields-shrunk-no-minimal-contract",
+      "runId": "fm-gap-inner-heartbeat-fields-shrunk-no-minimal-contract-1786432443631-bnp75n",
+      "startedAtMs": 1786432443645,
+      "startedAtMsUnreliable": true
+    },
+    {
+      "taskId": "gap-worktree-leak-after-fan-in-occupies-slot-permanently",
+      "runId": "fm-gap-worktree-leak-after-fan-in-occupies-slot-permanently-1786432442778-lhhgy6",
+      "startedAtMs": 1786432442801,
+      "startedAtMsUnreliable": true
+    }
+  ],
+  "meanMinutes": 97.6017666666667,
+  "medianMinutes": 56.62085,
+  "tasksPerHour": 0.6750308835418685,
+  "serialEquivalentPerHour": 0.614742970841033,
+  "windowStart": "2026-08-02T10:29:46.000Z",
+  "windowEnd": "2026-08-11T07:49:10.863Z",
+  "windowHours": 213.32357305555556,
+  "haltedHours": 0,
+  "halted": [],
+  "blocked": [
+    {
+      "taskId": "batch7-fanin-closure",
+      "reason": "suite-red",
+      "sinceMs": 1785789347537,
+      "clearedAtMs": 1785789495843,
+      "durationMs": 148306
+    },
+    {
+      "taskId": "fast-mode-loop",
+      "reason": "merge-conflict",
+      "sinceMs": 1786432080537,
+      "clearedAtMs": 1786434497156,
+      "durationMs": 2416619
+    },
+    {
+      "taskId": "gap-axis-generator-question-what-range-every-standing-criterion",
+      "reason": "task-over-90m",
+      "sinceMs": 1785946025287,
+      "clearedAtMs": 1785946311639,
+      "durationMs": 286352
+    },
+    {
+      "taskId": "gap-axis-generator-question-what-range-every-standing-criterion",
+      "reason": "task-over-90m",
+      "sinceMs": 1785958345454,
+      "clearedAtMs": 1785958386576,
+      "durationMs": 41122
+    },
+    {
+      "taskId": "gap-axis-generator-question-what-range-every-standing-criterion",
+      "reason": "task-over-90m",
+      "sinceMs": 1785959535153,
+      "clearedAtMs": 1785959546357,
+      "durationMs": 11204
+    },
+    {
+      "taskId": "gap-cold-start-ac8c-key4-teaches-superseded-send-keys-hash",
+      "reason": "task-over-90m",
+      "sinceMs": 1785918199370,
+      "clearedAtMs": 1785920840818,
+      "durationMs": 2641448
+    },
+    {
+      "taskId": "gap-cold-start-ac8c-key4-teaches-superseded-send-keys-hash",
+      "reason": "task-over-90m",
+      "sinceMs": 1785920870134,
+      "clearedAtMs": 1785921127308,
+      "durationMs": 257174
+    },
+    {
+      "taskId": "gap-cold-start-ac8c-key4-teaches-superseded-send-keys-hash",
+      "reason": "task-over-90m",
+      "sinceMs": 1785921174940,
+      "clearedAtMs": 1785924009573,
+      "durationMs": 2834633
+    },
+    {
+      "taskId": "gap-crystallization-five-directions",
+      "reason": "merge-conflict",
+      "sinceMs": 1786349982473,
+      "clearedAtMs": 1786361306380,
+      "durationMs": 11323907
+    },
+    {
+      "taskId": "gap-full-suite-belongs-to-outer-background-above-3-min",
+      "reason": "task-over-90m",
+      "sinceMs": 1785905465238,
+      "clearedAtMs": 1785906194029,
+      "durationMs": 728791
+    },
+    {
+      "taskId": "gap-green-verdict-never-expires-411-minutes-and-187-commits-later-still-green",
+      "reason": "task-over-90m",
+      "sinceMs": 1786034635937,
+      "clearedAtMs": 1786034747487,
+      "durationMs": 111550
+    },
+    {
+      "taskId": "gap-loop-has-no-os-level-anchor-cannot-self-recover-after-crash",
+      "reason": "task-over-90m",
+      "sinceMs": 1785927068619,
+      "clearedAtMs": 1785927565038,
+      "durationMs": 496419
+    },
+    {
+      "taskId": "gap-manager-productization-five-constraints",
+      "reason": "task-over-90m",
+      "sinceMs": 1786038527430,
+      "clearedAtMs": 1786042033368,
+      "durationMs": 3505938
+    },
+    {
+      "taskId": "gap-merge-exposed-contract-violations-in-done-tasks",
+      "reason": "task-over-90m",
+      "sinceMs": 1786168742014,
+      "clearedAtMs": 1786207083629,
+      "durationMs": 38341615
+    },
+    {
+      "taskId": "gap-no-post-merge-cross-machine-verification-detection-latency-is-luck",
+      "reason": "task-over-90m",
+      "sinceMs": 1786033520876,
+      "clearedAtMs": 1786034634537,
+      "durationMs": 1113661
+    },
+    {
+      "taskId": "gap-productize-the-manager-layer",
+      "reason": "task-over-90m",
+      "sinceMs": 1785990640635,
+      "clearedAtMs": 1785990661699,
+      "durationMs": 21064
+    },
+    {
+      "taskId": "gap-ready-pool-floor-scales-with-cap-and-promotion-ranks-touch-disjointness",
+      "reason": "task-over-90m",
+      "sinceMs": 1785911738284,
+      "clearedAtMs": 1785918185607,
+      "durationMs": 6447323
+    },
+    {
+      "taskId": "gap-retire-inner-state-one-observer-targets-by-parameter",
+      "reason": "task-over-90m",
+      "sinceMs": 1785852752777,
+      "clearedAtMs": 1785854117991,
+      "durationMs": 1365214
+    },
+    {
+      "taskId": "gap-session-liveness-hashes-the-token-counter-as-if-it-were-work",
+      "reason": "task-over-90m",
+      "sinceMs": 1785985523949,
+      "clearedAtMs": 1785985559278,
+      "durationMs": 35329
+    },
+    {
+      "taskId": "gap-session-liveness-hashes-the-token-counter-as-if-it-were-work",
+      "reason": "task-over-90m",
+      "sinceMs": 1785987051957,
+      "clearedAtMs": 1785987086757,
+      "durationMs": 34800
+    },
+    {
+      "taskId": "gap-session-liveness-hashes-the-token-counter-as-if-it-were-work",
+      "reason": "task-over-90m",
+      "sinceMs": 1785988808735,
+      "clearedAtMs": 1785988841000,
+      "durationMs": 32265
+    },
+    {
+      "taskId": "gap-suite-speed-under-a-297-second-sigma",
+      "reason": "task-over-90m",
+      "sinceMs": 1785864446549,
+      "clearedAtMs": 1785878995266,
+      "durationMs": 14548717
+    },
+    {
+      "taskId": "gap-task-write-accepts-a-title-that-breaks-its-own-frontmatter",
+      "reason": "task-over-90m",
+      "sinceMs": 1785863839603,
+      "clearedAtMs": 1785863863506,
+      "durationMs": 23903
+    }
+  ],
+  "totalBlockedMs": 86767354,
+  "longestBlockedMs": 38341615,
+  "reconciled": [
+    {
+      "taskId": "DIR-043",
+      "runId": "fm-DIR-043-1786276079696-281gaz",
+      "minutes": 1193.1157166666667,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "DIR-119",
+      "runId": "fm-DIR-119-1785943155002-vt4z8d",
+      "minutes": 51.313716666666664,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "DIR-121",
+      "runId": "fm-DIR-121-1786057647799-kp00th",
+      "minutes": 38.2043,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-ac36-delivery-critical-priority-axis",
+      "runId": "fm-gap-ac36-delivery-critical-priority-axis-1786354603095-gdl98g",
+      "minutes": 36.75268333333333,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-ac36-recommended-exposes-sort-key",
+      "runId": "fm-gap-ac36-recommended-exposes-sort-key-1786410761029-2tgsp6",
+      "minutes": 222.2004,
+      "outcome": "abandoned",
+      "reconcileReason": "branch-merged",
+      "startedAtMsUnreliable": true
+    },
+    {
+      "taskId": "gap-ac37-exec-core-ships-with-package",
+      "runId": "fm-gap-ac37-exec-core-ships-with-package-1786356009365-qad7uq",
+      "minutes": 1126.4517,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-ac41-actionize-state-worded-clauses",
+      "runId": "fm-gap-ac41-actionize-state-worded-clauses-1786356151986-a0095i",
+      "minutes": 1124.075,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-ac41-coldstart-skill-reference-only",
+      "runId": "fm-gap-ac41-coldstart-skill-reference-only-1786356266209-u8bnrk",
+      "minutes": 1122.17145,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-ac41-red-on-omission-artifact",
+      "runId": "fm-gap-ac41-red-on-omission-artifact-1786356540569-wak147",
+      "minutes": 4.46185,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-ac41-red-on-omission-artifact",
+      "runId": "fm-gap-ac41-red-on-omission-artifact-1786382006402-qdfzrr",
+      "minutes": 693.1683333333333,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-adaptive-concurrency-cap-tied-to-resource-gate",
+      "runId": "fm-gap-adaptive-concurrency-cap-tied-to-resource-gate-1785943154691-z0r1jc",
+      "minutes": 51.31915,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-adr016-md5-ban-violated-in-shipped-md-and-checker-scope-gap",
+      "runId": "fm-gap-adr016-md5-ban-violated-in-shipped-md-and-checker-scope-gap-1786394275058-p6roep",
+      "minutes": 488.6904666666667,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-assert-clean-tree-premise-void-under-concurrent-writers",
+      "runId": "fm-gap-assert-clean-tree-premise-void-under-concurrent-writers-1786115835184-6rr7dv",
+      "minutes": 11.30045,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-assert-clean-tree-premise-void-under-concurrent-writers",
+      "runId": "fm-gap-assert-clean-tree-premise-void-under-concurrent-writers-1786121255146-mn9617",
+      "minutes": 9.462616666666667,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-audit-findings-not-backpropagated-to-earlier-detectors",
+      "runId": "fm-gap-audit-findings-not-backpropagated-to-earlier-detectors-1786061421190-sann50",
+      "minutes": 6.9691833333333335,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-audit-findings-not-backpropagated-to-earlier-detectors",
+      "runId": "fm-gap-audit-findings-not-backpropagated-to-earlier-detectors-1786088311772-2ke36t",
+      "minutes": 47.4472,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-axis-generator-question-what-range-every-standing-criterion",
+      "runId": "fm-gap-axis-generator-question-what-range-every-standing-criterion-1785935223569-sj8mjj",
+      "minutes": 183.5048,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-axis-generator-question-what-range-every-standing-criterion",
+      "runId": "fm-gap-axis-generator-question-what-range-every-standing-criterion-1785952366779-5agdj6",
+      "minutes": 131.91778333333335,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-batch-merge-gate-reads-stale-green",
+      "runId": "fm-gap-batch-merge-gate-reads-stale-green-1786215696315-94ip2n",
+      "minutes": 868.6864666666667,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-blocked-signal-timeout-auto-escalation",
+      "runId": "fm-gap-blocked-signal-timeout-auto-escalation-1786215696662-3e08rj",
+      "minutes": 868.6809,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point",
+      "runId": "fm-gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point-1785972660863-m5cx2c",
+      "minutes": 34.259283333333336,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-c3-has-no-runtime-constraint",
+      "runId": "fm-gap-c3-has-no-runtime-constraint-1786210683504-7cys1x",
+      "minutes": 952.2336333333334,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-checksplitrecommendation-preserved-by-adr-022-but-never-wired-into-fast-mode",
+      "runId": "fm-gap-checksplitrecommendation-preserved-by-adr-022-but-never-wired-into-fast-mode-1786064310500-y2k714",
+      "minutes": 8.6968,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-claim-task-and-backup-push-still-point-at-retired-local-bare-repo-not-github",
+      "runId": "fm-gap-claim-task-and-backup-push-still-point-at-retired-local-bare-repo-not-github-1785999481954-r7wcu5",
+      "minutes": 12.929516666666666,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-cli-quay-init-collides-with-the-canonical-slash-quay-init",
+      "runId": "fm-gap-cli-quay-init-collides-with-the-canonical-slash-quay-init-1786086385875-au88ra",
+      "minutes": 19.6039,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-cold-start-gate-should-be-derived-laydown-set-green-not-whole-suite",
+      "runId": "fm-gap-cold-start-gate-should-be-derived-laydown-set-green-not-whole-suite-1785966770435-n10coc",
+      "minutes": 31.922183333333333,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-cold-start-six-keys-measure-installed-not-running",
+      "runId": "fm-gap-cold-start-six-keys-measure-installed-not-running-1786212077417-jlfxji",
+      "minutes": 929.0019666666667,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-complete-delivery-surface-spec-and-l1-verification",
+      "runId": "fm-gap-complete-delivery-surface-spec-and-l1-verification-1785976262385-mc8zqn",
+      "minutes": 33.899966666666664,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-complete-delivery-surface-spec-and-l1-verification",
+      "runId": "fm-gap-complete-delivery-surface-spec-and-l1-verification-1786075336736-r12gxw",
+      "minutes": 0.6018,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-complete-delivery-surface-spec-and-l1-verification",
+      "runId": "fm-gap-complete-delivery-surface-spec-and-l1-verification-1786081331174-n4x5g1",
+      "minutes": 4.7866333333333335,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-concurrency-derivation-reverted-but-doc-ac-and-tests-all-still-report-derived",
+      "runId": "fm-gap-concurrency-derivation-reverted-but-doc-ac-and-tests-all-still-report-derived-1786023279256-1smkpe",
+      "minutes": 51.16605,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-concurrency-derivation-reverted-but-doc-ac-and-tests-all-still-report-derived",
+      "runId": "fm-gap-concurrency-derivation-reverted-but-doc-ac-and-tests-all-still-report-derived-1786061422558-1a4e31",
+      "minutes": 35.68835,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-cross-machine-readonly-observation-orchestration-not-a-tool",
+      "runId": "fm-gap-cross-machine-readonly-observation-orchestration-not-a-tool-1786086390520-89ijgy",
+      "minutes": 79.46815,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-cross-machine-sync-has-no-mechanism-only-manual-pushes",
+      "runId": "fm-gap-cross-machine-sync-has-no-mechanism-only-manual-pushes-1786063658201-gyyg22",
+      "minutes": 6.232866666666666,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-cross-machine-sync-has-no-mechanism-only-manual-pushes",
+      "runId": "fm-gap-cross-machine-sync-has-no-mechanism-only-manual-pushes-1786073591165-7m726w",
+      "minutes": 10.4293,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-crystallization-five-directions",
+      "runId": "fm-gap-crystallization-five-directions-1786347842000-ggbpxr",
+      "minutes": 1262.5755833333333,
+      "outcome": "abandoned",
+      "reconcileReason": "branch-merged",
+      "startedAtMsUnreliable": true
+    },
+    {
+      "taskId": "gap-delivery-inventory-drift-needs-file-add-gate",
+      "runId": "fm-gap-delivery-inventory-drift-needs-file-add-gate-1786388367780-kelun7",
+      "minutes": 595.4214666666667,
+      "outcome": "abandoned",
+      "reconcileReason": "branch-merged",
+      "startedAtMsUnreliable": true
+    },
+    {
+      "taskId": "gap-delivery-outline-vs-verify-surface-single-source",
+      "runId": "fm-gap-delivery-outline-vs-verify-surface-single-source-1786214527257-km5ad7",
+      "minutes": 888.1712666666666,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-delivery-surface-grows-but-target-freezes-no-upgrade",
+      "runId": "fm-gap-delivery-surface-grows-but-target-freezes-no-upgrade-1785977648487-bb3rgc",
+      "minutes": 30.668516666666665,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-dispatch-evaluated-only-at-inner-tick-boundary-not-slot-release",
+      "runId": "fm-gap-dispatch-evaluated-only-at-inner-tick-boundary-not-slot-release-1785970391105-3uq0rx",
+      "minutes": 31.6412,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-dist-runtime-not-self-contained-reads-external-package-json",
+      "runId": "fm-gap-dist-runtime-not-self-contained-reads-external-package-json-1785940146674-ee13ls",
+      "minutes": 101.45321666666666,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-dod-two-green-runs-and-over90-budget-are-mathematically-incompatible",
+      "runId": "fm-gap-dod-two-green-runs-and-over90-budget-are-mathematically-incompatible-1786207279760-wknlf1",
+      "minutes": 1008.9632,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-drive-sent-to-manager-pane-not-inner",
+      "runId": "fm-gap-drive-sent-to-manager-pane-not-inner-1786382006792-zm8nic",
+      "minutes": 693.1629833333334,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-fast-mode-cross-project-portability-strategic-question",
+      "runId": "fm-gap-fast-mode-cross-project-portability-strategic-question-1785932515752-mt1bp3",
+      "minutes": 228.63538333333332,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-forty-to-six-remerge-needs-tests-updated-first",
+      "runId": "fm-gap-forty-to-six-remerge-needs-tests-updated-first-1786356624732-ynl3f5",
+      "minutes": 1116.1975,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-forty-to-six-remerge-needs-tests-updated-first",
+      "runId": "fm-gap-forty-to-six-remerge-needs-tests-updated-first-1786382007167-vt6p93",
+      "minutes": 693.1571,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-full-suite-runner-marks-test-sh-gate-wait-as-failed",
+      "runId": "fm-gap-full-suite-runner-marks-test-sh-gate-wait-as-failed-1786061423894-zsaigu",
+      "minutes": 6.9244666666666665,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-full-suite-runner-red-pattern-matches-bare-x-vitest-false-red",
+      "runId": "fm-gap-full-suite-runner-red-pattern-matches-bare-x-vitest-false-red-1785938145525-36ncwq",
+      "minutes": 134.80591666666666,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-full-suite-runner-red-pattern-matches-bare-x-vitest-false-red",
+      "runId": "fm-gap-full-suite-runner-red-pattern-matches-bare-x-vitest-false-red-1786064109644-xs55rk",
+      "minutes": 7.8892,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-full-suite-state-race-last-write-wins-no-generation-guard",
+      "runId": "fm-gap-full-suite-state-race-last-write-wins-no-generation-guard-1786212231154-4h12t4",
+      "minutes": 926.4400833333333,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-full-suite-state-red-no-failure-detail-static-check-invisible",
+      "runId": "fm-gap-full-suite-state-red-no-failure-detail-static-check-invisible-1786222786048-7x65d8",
+      "minutes": 750.52545,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-gate-scripts-laid-down-but-dead-and-not-mutation-checked",
+      "runId": "fm-gap-gate-scripts-laid-down-but-dead-and-not-mutation-checked-1785936346573-6du2tp",
+      "minutes": 164.78866666666667,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-ghost-suggestion-eliminated-at-source-prompt-suggestions-false",
+      "runId": "fm-gap-ghost-suggestion-eliminated-at-source-prompt-suggestions-false-1785979856638-uoosis",
+      "minutes": 13.965833333333334,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-gitignore-worktree-scratch-dirs-kills-round4-false-red",
+      "runId": "fm-gap-gitignore-worktree-scratch-dirs-kills-round4-false-red-1786115833737-v8ybwy",
+      "minutes": 11.32545,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-global-count-assertions-fragile-relative-baseline",
+      "runId": "fm-gap-global-count-assertions-fragile-relative-baseline-1785969052322-kfcwog",
+      "minutes": 53.95445,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-inbox-counter-disconnected-from-files",
+      "runId": "fm-gap-inbox-counter-disconnected-from-files-1786383549123-k1ssot",
+      "minutes": 667.4580333333333,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-inner-panel-shows-frozen-stale-agent-line-after-bracket-close",
+      "runId": "fm-gap-inner-panel-shows-frozen-stale-agent-line-after-bracket-close-1786086387429-3v5t80",
+      "minutes": 88.34191666666666,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-inner-session-check-discovery-fallback-silent",
+      "runId": "fm-gap-inner-session-check-discovery-fallback-silent-1786061927117-dvn12o",
+      "minutes": 6.515066666666667,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-inner-subagent-budget-invisible",
+      "runId": "fm-gap-inner-subagent-budget-invisible-1786354083467-00zk9a",
+      "minutes": 45.41375,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-inner-wakeup-heartbeat-invisible",
+      "runId": "fm-gap-inner-wakeup-heartbeat-invisible-1786349667630-hgo8wg",
+      "minutes": 119.01126666666667,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-install-config-driven-e2e-load-flake",
+      "runId": "fm-gap-install-config-driven-e2e-load-flake-1786288568062-jd9wo6",
+      "minutes": 984.9766166666667,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-install-family-tests-rotate-flakes-under-full-suite",
+      "runId": "fm-gap-install-family-tests-rotate-flakes-under-full-suite-1786279440586-dcmvkq",
+      "minutes": 1137.1012333333333,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-install-family-tests-rotate-flakes-under-full-suite",
+      "runId": "fm-gap-install-family-tests-rotate-flakes-under-full-suite-1786384297355-j9el8w",
+      "minutes": 654.98765,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-install-suite-cost-instrument-reporter-not-wired",
+      "runId": "fm-gap-install-suite-cost-instrument-reporter-not-wired-1786126812267-sc9qau",
+      "minutes": 50.3232,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-install-upgrade-verification-targets-real-downstream-workspaces",
+      "runId": "fm-gap-install-upgrade-verification-targets-real-downstream-workspaces-1786221884355-gn7tkd",
+      "minutes": 765.5537666666667,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-integration-batch-merge-ff-only-contradicts-real-merge-ruling",
+      "runId": "fm-gap-integration-batch-merge-ff-only-contradicts-real-merge-ruling-1786086388960-5rlztu",
+      "minutes": 29.338616666666667,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-integration-content-fails-first-complete-tree-verification-fix-21",
+      "runId": "fm-gap-integration-content-fails-first-complete-tree-verification-fix-21-1786103334998-uphbr9",
+      "minutes": 2.4123666666666668,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-integration-content-fails-first-complete-tree-verification-fix-21",
+      "runId": "fm-gap-integration-content-fails-first-complete-tree-verification-fix-21-1786103494713-ephf52",
+      "minutes": 58.34446666666667,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-known-load-sensitive-rule-is-doc-only-no-mechanical-triage",
+      "runId": "fm-gap-known-load-sensitive-rule-is-doc-only-no-mechanical-triage-1786207280079-rtv08p",
+      "minutes": 1008.9587333333334,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-l2-continuous-health-dead-loop-criterion-loop-running-not-installed",
+      "runId": "fm-gap-l2-continuous-health-dead-loop-criterion-loop-running-not-installed-1785961925534-4l8wvq",
+      "minutes": 32.72655,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-landing-blocked-invisible-to-dispatch-criteria",
+      "runId": "fm-gap-landing-blocked-invisible-to-dispatch-criteria-1786218857421-plgl85",
+      "minutes": 816.0032333333334,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-last-pane-txt-has-no-writer",
+      "runId": "fm-gap-last-pane-txt-has-no-writer-1786292741044-qulp3x",
+      "minutes": 915.4272166666667,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-load-sensitive-serial-phase-unbounded-growth-measure-first",
+      "runId": "fm-gap-load-sensitive-serial-phase-unbounded-growth-measure-first-1786386920551-h2skc6",
+      "minutes": 611.268,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-loop-shipping-scan-does-not-exclude-worktrees",
+      "runId": "fm-gap-loop-shipping-scan-does-not-exclude-worktrees-1786429264574-3v3461",
+      "minutes": 84.20378333333333,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-loop-shipping-threshold-scope-check-old-path-regression",
+      "runId": "fm-gap-loop-shipping-threshold-scope-check-old-path-regression-1786356049768-wssd1n",
+      "minutes": 12.642466666666667,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-loop-shipping-threshold-scope-check-old-path-regression",
+      "runId": "fm-gap-loop-shipping-threshold-scope-check-old-path-regression-1786386920911-qqx8fk",
+      "minutes": 611.26235,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-loop-shipping-verify-delivery-surface-consumer-laid-ref",
+      "runId": "fm-gap-loop-shipping-verify-delivery-surface-consumer-laid-ref-1786421036525-nq7vqi",
+      "minutes": 42.668816666666665,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": true
+    },
+    {
+      "taskId": "gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive",
+      "runId": "fm-gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive-1786117501596-3raiyp",
+      "minutes": 4.7772,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-lowconc-tmux-session-name-collision-race",
+      "runId": "fm-gap-lowconc-tmux-session-name-collision-race-1786133540910-j5iwlv",
+      "minutes": 50.390966666666664,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-manager-baked-into-project-topology-factory",
+      "runId": "fm-gap-manager-baked-into-project-topology-factory-1785944637733-ax7d3e",
+      "minutes": 26.602766666666668,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-manager-instrument-failures-need-mechanical-detection-not-carefulness",
+      "runId": "fm-gap-manager-instrument-failures-need-mechanical-detection-not-carefulness-1786209115237-1to04i",
+      "minutes": 978.3731333333334,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-manager-productization-five-constraints",
+      "runId": "fm-gap-manager-productization-five-constraints-1786075335084-92ttqn",
+      "minutes": 42.145783333333334,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-manager-skill-index-missing-new-specs",
+      "runId": "fm-gap-manager-skill-index-missing-new-specs-1786210683975-zwqx0l",
+      "minutes": 952.2276666666667,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-manager-skill-missing-mandatory-tool-reuse-checklist",
+      "runId": "fm-gap-manager-skill-missing-mandatory-tool-reuse-checklist-1786061747903-cm33tm",
+      "minutes": 5.772166666666666,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-manager-tick-core-exclusion-now-inert-after-c9-fix",
+      "runId": "fm-gap-manager-tick-core-exclusion-now-inert-after-c9-fix-1786428028234-j48ske",
+      "minutes": 104.80966666666667,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-manager-tick-log-append-trips-suite-after-dirty-tree-assertion",
+      "runId": "fm-gap-manager-tick-log-append-trips-suite-after-dirty-tree-assertion-1786093642465-oskvl2",
+      "minutes": 4.32365,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-manager-tick-log-check-row-criterion-and-shrink-ratchet",
+      "runId": "fm-gap-manager-tick-log-check-row-criterion-and-shrink-ratchet-1786354083820-oi9dw3",
+      "minutes": 45.4084,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-manager-tick-mechanical-checks-are-eight-loose-bash-blocks-in-prose",
+      "runId": "fm-gap-manager-tick-mechanical-checks-are-eight-loose-bash-blocks-in-prose-1786077596333-fm4w4l",
+      "minutes": 21.637083333333333,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-measure-claude-p-headless-third-party-roundtrip-and-exit-semantics",
+      "runId": "fm-gap-measure-claude-p-headless-third-party-roundtrip-and-exit-semantics-1785928270790-3usk8j",
+      "minutes": 299.3853833333333,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-measure-claude-p-headless-third-party-roundtrip-and-exit-semantics",
+      "runId": "fm-gap-measure-claude-p-headless-third-party-roundtrip-and-exit-semantics-1785950807577-0y228f",
+      "minutes": 18.051966666666665,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-measure-trend-large-test-load-noise",
+      "runId": "fm-gap-measure-trend-large-test-load-noise-1786356048976-sslssk",
+      "minutes": 12.6561,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-measure-trend-large-test-load-noise",
+      "runId": "fm-gap-measure-trend-large-test-load-noise-1786392008031-da9ekw",
+      "minutes": 526.4776833333333,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-measure-trend-load-noise-false-positive",
+      "runId": "fm-gap-measure-trend-load-noise-false-positive-1786385185993-aejgq6",
+      "minutes": 640.1785666666667,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-measure-trend-relative-trigger-lacks-hist-variance-exemption",
+      "runId": "fm-gap-measure-trend-relative-trigger-lacks-hist-variance-exemption-1786386920179-drfz6a",
+      "minutes": 611.2756166666667,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": true
+    },
+    {
+      "taskId": "gap-merge-introduced-referenced-not-landed-manager-tick-log",
+      "runId": "fm-gap-merge-introduced-referenced-not-landed-manager-tick-log-1786276079248-twp3n8",
+      "minutes": 1193.1241166666666,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-merge-introduced-referenced-not-landed-manager-tick-log",
+      "runId": "fm-gap-merge-introduced-referenced-not-landed-manager-tick-log-1786347842612-o4vzqo",
+      "minutes": 33.054,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-merge-introduced-referenced-not-landed-manager-tick-log",
+      "runId": "fm-gap-merge-introduced-referenced-not-landed-manager-tick-log-1786383549487-h9jarg",
+      "minutes": 667.45415,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-no-active-node-version-check-users-cant-tell-upgrade",
+      "runId": "fm-gap-no-active-node-version-check-users-cant-tell-upgrade-1786215726523-la31yx",
+      "minutes": 868.1855333333333,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-no-post-merge-cross-machine-verification-detection-latency-is-luck",
+      "runId": "fm-gap-no-post-merge-cross-machine-verification-detection-latency-is-luck-1786068314098-uu1vih",
+      "minutes": 15.269533333333333,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-npm-install-does-not-register-the-plugin-with-claude-code",
+      "runId": "fm-gap-npm-install-does-not-register-the-plugin-with-claude-code-1786088312119-ayfsdh",
+      "minutes": 47.44193333333333,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-nyf-branch-existence-vs-commit-trace",
+      "runId": "fm-gap-nyf-branch-existence-vs-commit-trace-1786428028585-s5scpm",
+      "minutes": 104.80396666666667,
+      "outcome": "abandoned",
+      "reconcileReason": "branch-merged",
+      "startedAtMsUnreliable": true
+    },
+    {
+      "taskId": "gap-obligation-ledger-mechanization",
+      "runId": "fm-gap-obligation-ledger-mechanization-1786349668178-x07kib",
+      "minutes": 1232.14285,
+      "outcome": "abandoned",
+      "reconcileReason": "branch-merged",
+      "startedAtMsUnreliable": true
+    },
+    {
+      "taskId": "gap-outer-heartbeat-source-inverts-under-incident-handling",
+      "runId": "fm-gap-outer-heartbeat-source-inverts-under-incident-handling-1785956029300-o8929h",
+      "minutes": 70.87593333333334,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-outer-self-checks-and-creates-inner-session",
+      "runId": "fm-gap-outer-self-checks-and-creates-inner-session-1785945580092-s68m47",
+      "minutes": 47.500483333333335,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-over-90m-false-signal-source-reads-telemetry-not-task-status",
+      "runId": "fm-gap-over-90m-false-signal-source-reads-telemetry-not-task-status-1786213301968-iukcjn",
+      "minutes": 908.595,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-pane-classify-needs-two-orthogonal-dimensions",
+      "runId": "fm-gap-pane-classify-needs-two-orthogonal-dimensions-1786428028929-m8t5ji",
+      "minutes": 104.79826666666666,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-permission-prompt-vs-dismissable-prompt-classifier",
+      "runId": "fm-gap-permission-prompt-vs-dismissable-prompt-classifier-1786217934980-0xuj7f",
+      "minutes": 831.3783333333333,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-phase-order-serial-lowconc-before-main",
+      "runId": "fm-gap-phase-order-serial-lowconc-before-main-1786347842323-8hc8pr",
+      "minutes": 33.059,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": true
+    },
+    {
+      "taskId": "gap-plugin-json-duplicate-manager-skill",
+      "runId": "fm-gap-plugin-json-duplicate-manager-skill-1786210684351-scsyq1",
+      "minutes": 952.2224166666666,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-prefriction-trigger-regex-too-broad-signal-is-dead",
+      "runId": "fm-gap-prefriction-trigger-regex-too-broad-signal-is-dead-1786056264167-86ch64",
+      "minutes": 30.260433333333335,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-prepare-milestone-no-size-aware-routing",
+      "runId": "fm-gap-prepare-milestone-no-size-aware-routing-1785977648165-zeeizn",
+      "minutes": 10.8039,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-prerequisite-gates-prose-invisible-to-mechanisms",
+      "runId": "fm-gap-prerequisite-gates-prose-invisible-to-mechanisms-1786423060163-u2yx9g",
+      "minutes": 15.0601,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": true
+    },
+    {
+      "taskId": "gap-process-budget-counts-infra-as-test-concurrency-cap-pinned-1",
+      "runId": "fm-gap-process-budget-counts-infra-as-test-concurrency-cap-pinned-1-1786217027553-9uwey4",
+      "minutes": 846.50255,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-proposal-convergence-load-flake-20-child-concurrency",
+      "runId": "fm-gap-proposal-convergence-load-flake-20-child-concurrency-1786281235151-3yj8qk",
+      "minutes": 1107.1926666666666,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-quay-init-never-commits-broken-committed-state",
+      "runId": "fm-gap-quay-init-never-commits-broken-committed-state-1786212230748-iy4f0c",
+      "minutes": 926.4494666666667,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-quay-init-never-writes-branch-model-config-fork-baseline-merge-target",
+      "runId": "fm-gap-quay-init-never-writes-branch-model-config-fork-baseline-merge-target-1786425578900-h0muuq",
+      "minutes": 145.63228333333333,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-quay-last-pane-txt-untracked-dirties-tree",
+      "runId": "fm-gap-quay-last-pane-txt-untracked-dirties-tree-1786399174065-i5g2ay",
+      "minutes": 415.31691666666666,
+      "outcome": "abandoned",
+      "reconcileReason": "branch-merged",
+      "startedAtMsUnreliable": true
+    },
+    {
+      "taskId": "gap-quay-self-hosting-e2e-proof",
+      "runId": "fm-gap-quay-self-hosting-e2e-proof-1786421029350-ierbkt",
+      "minutes": 42.790366666666664,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-readme-source-install-commands-are-all-broken-quay-js-does-not-exist",
+      "runId": "fm-gap-readme-source-install-commands-are-all-broken-quay-js-does-not-exist-1786063624569-k51grd",
+      "minutes": 10.394733333333333,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-ready-pool-check-times-out-after-git-history-signal",
+      "runId": "fm-gap-ready-pool-check-times-out-after-git-history-signal-1785958779323-f3qjjw",
+      "minutes": 45.3386,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-ready-pool-check-times-out-after-git-history-signal",
+      "runId": "fm-gap-ready-pool-check-times-out-after-git-history-signal-1786074303420-4lb7j4",
+      "minutes": 15.776983333333334,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-ready-pool-floor-scales-with-cap-and-promotion-ranks-touch-disjointness",
+      "runId": "fm-gap-ready-pool-floor-scales-with-cap-and-promotion-ranks-touch-disjointness-1785906318198-zurq5h",
+      "minutes": 296.24803333333335,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-ready-pool-floor-scales-with-cap-and-promotion-ranks-touch-disjointness",
+      "runId": "fm-gap-ready-pool-floor-scales-with-cap-and-promotion-ranks-touch-disjointness-1785951135434-35d7qn",
+      "minutes": 12.588333333333333,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-ready-pool-promotion-ignores-retired-mechanism-candidate-check",
+      "runId": "fm-gap-ready-pool-promotion-ignores-retired-mechanism-candidate-check-1786212305219-61r31v",
+      "minutes": 925.2084666666667,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-ready-pool-taskworklanded-underdetects-prose-ac-merged-tasks",
+      "runId": "fm-gap-ready-pool-taskworklanded-underdetects-prose-ac-merged-tasks-1785951445247-utp61a",
+      "minutes": 147.27706666666666,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-ready-pool-worklanded-traps-stuck-work",
+      "runId": "fm-gap-ready-pool-worklanded-traps-stuck-work-1786292743310-cw436c",
+      "minutes": 915.39025,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-reanchor-must-converge-inner-self-reported-vocabulary",
+      "runId": "fm-gap-reanchor-must-converge-inner-self-reported-vocabulary-1785965455303-tvj0w6",
+      "minutes": 14.1325,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-reconcile-step-skipped-no-compliance-product",
+      "runId": "fm-gap-reconcile-step-skipped-no-compliance-product-1786429264235-r9c9wz",
+      "minutes": 84.21033333333334,
+      "outcome": "abandoned",
+      "reconcileReason": "branch-merged",
+      "startedAtMsUnreliable": true
+    },
+    {
+      "taskId": "gap-red-on-omission-audit-needs-mutation-case",
+      "runId": "fm-gap-red-on-omission-audit-needs-mutation-case-1786384296769-6e5olw",
+      "minutes": 655.0001833333333,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-red-round-loses-overhead-phase-decomposition",
+      "runId": "fm-gap-red-round-loses-overhead-phase-decomposition-1786428427805-owggjl",
+      "minutes": 98.15086666666667,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-red-window-8-failures-three-test-defects",
+      "runId": "fm-gap-red-window-8-failures-three-test-defects-1786212552836-kw5tr7",
+      "minutes": 921.0817833333333,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-red-window-dispatch-stop-should-be-shared-gate-conditional",
+      "runId": "fm-gap-red-window-dispatch-stop-should-be-shared-gate-conditional-1785963177240-mfgl24",
+      "minutes": 31.8146,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-red-window-has-no-automatic-executor",
+      "runId": "fm-gap-red-window-has-no-automatic-executor-1785907152329-5zwuyu",
+      "minutes": 282.34596666666664,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-release-postinstall-fallback-breaks-windows-sea-build",
+      "runId": "fm-gap-release-postinstall-fallback-breaks-windows-sea-build-1786010786471-i9mza9",
+      "minutes": 24.340716666666665,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-resource-gate-no-single-flight-lock-two-suite-overlap",
+      "runId": "fm-gap-resource-gate-no-single-flight-lock-two-suite-overlap-1786128472183-zw1kqq",
+      "minutes": 22.6581,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-resource-gate-two-thresholds-test-sh-vs-cap-from-gate",
+      "runId": "fm-gap-resource-gate-two-thresholds-test-sh-vs-cap-from-gate-1786223795172-4kx5f5",
+      "minutes": 733.70965,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-round5-red-killtimeout-sigkill-and-capfromgate-seam-under-load",
+      "runId": "fm-gap-round5-red-killtimeout-sigkill-and-capfromgate-seam-under-load-1786276078559-t84bel",
+      "minutes": 1193.1364166666667,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": true
+    },
+    {
+      "taskId": "gap-round5-red-killtimeout-sigkill-and-capfromgate-seam-under-load",
+      "runId": "fm-gap-round5-red-killtimeout-sigkill-and-capfromgate-seam-under-load-1786347842872-wpksai",
+      "minutes": 33.05011666666667,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": true
+    },
+    {
+      "taskId": "gap-round5-red-killtimeout-sigkill-and-capfromgate-seam-under-load",
+      "runId": "fm-gap-round5-red-killtimeout-sigkill-and-capfromgate-seam-under-load-1786362722241-sk6f99",
+      "minutes": 1014.5759666666667,
+      "outcome": "abandoned",
+      "reconcileReason": "branch-merged",
+      "startedAtMsUnreliable": true
+    },
+    {
+      "taskId": "gap-ruling-required-only-covers-outer-to-inner-not-manager-to-outer",
+      "runId": "fm-gap-ruling-required-only-covers-outer-to-inner-not-manager-to-outer-1785949997632-7neikr",
+      "minutes": 31.551766666666666,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-runner-grouping-ac7-nested-spawn-load-flake",
+      "runId": "fm-gap-runner-grouping-ac7-nested-spawn-load-flake-1786349668843-mm5rjo",
+      "minutes": 118.99176666666666,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-runner-grouping-ac7-nested-spawn-load-flake",
+      "runId": "fm-gap-runner-grouping-ac7-nested-spawn-load-flake-1786394957260-4k544o",
+      "minutes": 477.3274833333333,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-scoped-selection-blind-to-packaging-state-diff",
+      "runId": "fm-gap-scoped-selection-blind-to-packaging-state-diff-1786213301554-4wtqm8",
+      "minutes": 908.60335,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-scripts-sprawl-no-uniform-cli-convention-across-57-shell-tools",
+      "runId": "fm-gap-scripts-sprawl-no-uniform-cli-convention-across-57-shell-tools-1786287640958-01lx2j",
+      "minutes": 1000.4299,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-self-report-vocab-misfires-on-stopped-state",
+      "runId": "fm-gap-self-report-vocab-misfires-on-stopped-state-1786213302435-eccphz",
+      "minutes": 908.5888833333333,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-send-keys-reliable-nbsp-empty-check-is-broken-for-any-input-box",
+      "runId": "fm-gap-send-keys-reliable-nbsp-empty-check-is-broken-for-any-input-box-1785918481061-21ycgf",
+      "minutes": 93.5339,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-send-keys-reliable-nbsp-empty-check-is-broken-for-any-input-box",
+      "runId": "fm-gap-send-keys-reliable-nbsp-empty-check-is-broken-for-any-input-box-1785950986248-2462vj",
+      "minutes": 15.07505,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-send-keys-reliable-welcome-screen-ghost-drive-fails",
+      "runId": "fm-gap-send-keys-reliable-welcome-screen-ghost-drive-fails-1785938144852-tdi9lw",
+      "minutes": 134.81786666666667,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-send-keys-reliable-welcome-screen-ghost-drive-fails",
+      "runId": "fm-gap-send-keys-reliable-welcome-screen-ghost-drive-fails-1786024901645-owtg81",
+      "minutes": 24.1266,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-send-keys-verified-leaks-tmux-servers-unincorporated",
+      "runId": "fm-gap-send-keys-verified-leaks-tmux-servers-unincorporated-1786394274063-us7a7g",
+      "minutes": 488.71415,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-serial-group-recompose-nested-runner-criterion",
+      "runId": "fm-gap-serial-group-recompose-nested-runner-criterion-1786127346044-aw7y4d",
+      "minutes": 41.427166666666665,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-serial-install-family-shared-prebuilt-fixture",
+      "runId": "fm-gap-serial-install-family-shared-prebuilt-fixture-1786421029971-gjhd3r",
+      "minutes": 221.4484,
+      "outcome": "abandoned",
+      "reconcileReason": "branch-merged",
+      "startedAtMsUnreliable": true
+    },
+    {
+      "taskId": "gap-serial-phase-install-test-residue-dependency",
+      "runId": "fm-gap-serial-phase-install-test-residue-dependency-1786276078891-wc7ozf",
+      "minutes": 1193.1312,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-serial-phase-install-test-residue-dependency",
+      "runId": "fm-gap-serial-phase-install-test-residue-dependency-1786394274582-1vftv2",
+      "minutes": 488.70613333333336,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-serial-segment-77-percent-cost-reduction-runner-grouping-listfiles",
+      "runId": "fm-gap-serial-segment-77-percent-cost-reduction-runner-grouping-listfiles-1786115832318-x8j8j9",
+      "minutes": 11.350533333333333,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-serial-segment-77-percent-cost-reduction-runner-grouping-listfiles",
+      "runId": "fm-gap-serial-segment-77-percent-cost-reduction-runner-grouping-listfiles-1786210030868-ypeiwr",
+      "minutes": 963.1151833333333,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-session-identity-index-vs-explicit",
+      "runId": "fm-gap-session-identity-index-vs-explicit-1786356049401-pogbe7",
+      "minutes": 12.64935,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-session-idle-true-idle-via-transcript-fusion-and-debounce",
+      "runId": "fm-gap-session-idle-true-idle-via-transcript-fusion-and-debounce-1785906317909-9mw2lf",
+      "minutes": 296.25326666666666,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-session-idle-true-idle-via-transcript-fusion-and-debounce",
+      "runId": "fm-gap-session-idle-true-idle-via-transcript-fusion-and-debounce-1785951805176-bnmm17",
+      "minutes": 141.27835,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-session-liveness-cannot-see-context-saturation-alive-but-cannot-take-input",
+      "runId": "fm-gap-session-liveness-cannot-see-context-saturation-alive-but-cannot-take-input-1786069300675-o5hef0",
+      "minutes": 70.10903333333333,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-session-liveness-remove-shared-events-and-lock",
+      "runId": "fm-gap-session-liveness-remove-shared-events-and-lock-1786077914768-ya9hg7",
+      "minutes": 55.53913333333333,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-session-liveness-session-pid-blind-to-claude-as-pane-process",
+      "runId": "fm-gap-session-liveness-session-pid-blind-to-claude-as-pane-process-1786051655647-m7iuvd",
+      "minutes": 67.97743333333334,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-session-liveness-session-pid-blind-to-claude-as-pane-process",
+      "runId": "fm-gap-session-liveness-session-pid-blind-to-claude-as-pane-process-1786093642748-vc3scm",
+      "minutes": 4.319116666666667,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-session-liveness-single-flight-lock-cross-project-blind",
+      "runId": "fm-gap-session-liveness-single-flight-lock-cross-project-blind-1786017947921-yj8c4n",
+      "minutes": 4.408816666666667,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-session-liveness-tail-capped-split",
+      "runId": "fm-gap-session-liveness-tail-capped-split-1786133539433-9awk74",
+      "minutes": 50.416133333333335,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-shipped-artifact-carries-86-loose-shell-scripts-as-the-delivery-form",
+      "runId": "fm-gap-shipped-artifact-carries-86-loose-shell-scripts-as-the-delivery-form-1786207280491-r1jydk",
+      "minutes": 1008.9548833333333,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-single-file-test-duration-trend-unwatched",
+      "runId": "fm-gap-single-file-test-duration-trend-unwatched-1786225936865-jlzyub",
+      "minutes": 698.0155,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-slot-free-not-an-event-slots-stay-empty-missed-without-trace",
+      "runId": "fm-gap-slot-free-not-an-event-slots-stay-empty-missed-without-trace-1786430333624-adfqfr",
+      "minutes": 66.38755,
+      "outcome": "abandoned",
+      "reconcileReason": "branch-merged",
+      "startedAtMsUnreliable": true
+    },
+    {
+      "taskId": "gap-slot-refill-c8-reject-no-backfill",
+      "runId": "fm-gap-slot-refill-c8-reject-no-backfill-1786432444069-dp294b",
+      "minutes": 31.21365,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-slot-refill-repeats-done-eligible-recommendations",
+      "runId": "fm-gap-slot-refill-repeats-done-eligible-recommendations-1786392007735-b06639",
+      "minutes": 534.7562166666667,
+      "outcome": "abandoned",
+      "reconcileReason": "branch-merged",
+      "startedAtMsUnreliable": true
+    },
+    {
+      "taskId": "gap-split-batch-vocabulary-dispatch-rolling-vs-verification-round",
+      "runId": "fm-gap-split-batch-vocabulary-dispatch-rolling-vs-verification-round-1785977648829-9cl8gf",
+      "minutes": 30.663066666666666,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": true
+    },
+    {
+      "taskId": "gap-split-batch-vocabulary-dispatch-rolling-vs-verification-round",
+      "runId": "fm-gap-split-batch-vocabulary-dispatch-rolling-vs-verification-round-1786024902427-624cxa",
+      "minutes": 24.11375,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": true
+    },
+    {
+      "taskId": "gap-split-batch-vocabulary-dispatch-rolling-vs-verification-round",
+      "runId": "fm-gap-split-batch-vocabulary-dispatch-rolling-vs-verification-round-1786065345254-nxd6wr",
+      "minutes": 36.73348333333333,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": true
+    },
+    {
+      "taskId": "gap-stale-check-orchestration-arm-is-a-dead-glob",
+      "runId": "fm-gap-stale-check-orchestration-arm-is-a-dead-glob-1785951354044-9xvjhu",
+      "minutes": 8.944966666666666,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-suite-blocking-red-window-unattributable",
+      "runId": "fm-gap-suite-blocking-red-window-unattributable-1786385618282-jha8qp",
+      "minutes": 632.9779,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests",
+      "runId": "fm-gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests-1786099382309-hhfcd9",
+      "minutes": 68.29065,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-suite-cutoff-what-tears-test-process-at-session-topology",
+      "runId": "fm-gap-suite-cutoff-what-tears-test-process-at-session-topology-1786088311497-gt3giu",
+      "minutes": 47.45263333333333,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-suite-cutoff-what-tears-test-process-at-session-topology",
+      "runId": "fm-gap-suite-cutoff-what-tears-test-process-at-session-topology-1786208572424-5hydft",
+      "minutes": 987.4231333333333,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-suite-execution-rollback-to-main-session-not-restored-after-crash",
+      "runId": "fm-gap-suite-execution-rollback-to-main-session-not-restored-after-crash-1786423061090-18vihh",
+      "minutes": 22.6249,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-suite-green-gate-duplicated-in-task-dod-and-batch-merge",
+      "runId": "fm-gap-suite-green-gate-duplicated-in-task-dod-and-batch-merge-1786115696538-rxd6zu",
+      "minutes": 13.61415,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-suite-red-verdict-carries-empty-failures-payload",
+      "runId": "fm-gap-suite-red-verdict-carries-empty-failures-payload-1786399174361-46av3i",
+      "minutes": 415.31263333333334,
+      "outcome": "abandoned",
+      "reconcileReason": "branch-merged",
+      "startedAtMsUnreliable": true
+    },
+    {
+      "taskId": "gap-suite-state-has-no-reason-axis-failed-aborted-infra",
+      "runId": "fm-gap-suite-state-has-no-reason-axis-failed-aborted-infra-1786074304812-s70ikb",
+      "minutes": 7.260416666666667,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-suite-state-split-across-worktree-and-gate",
+      "runId": "fm-gap-suite-state-split-across-worktree-and-gate-1786140442264-8wru1v",
+      "minutes": 12.379266666666666,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-supervisor-base-layer-outside-sessions-architecture",
+      "runId": "fm-gap-supervisor-base-layer-outside-sessions-architecture-1786000383161-kxnp8f",
+      "minutes": 39.68423333333333,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-supervisor-base-layer-outside-sessions-architecture",
+      "runId": "fm-gap-supervisor-base-layer-outside-sessions-architecture-1786024902008-ggbr5b",
+      "minutes": 24.121016666666666,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-supervisor-message-bus-with-identity",
+      "runId": "fm-gap-supervisor-message-bus-with-identity-1786012358446-e687j8",
+      "minutes": 24.460433333333334,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-systemd-run-limits-for-suite-and-heavy-ops",
+      "runId": "fm-gap-systemd-run-limits-for-suite-and-heavy-ops-1786213607326-gonu5c",
+      "minutes": 903.5083,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-targeted-promotion-operation-does-not-exist",
+      "runId": "fm-gap-targeted-promotion-operation-does-not-exist-1786211889241-v69mji",
+      "minutes": 932.1431666666666,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": true
+    },
+    {
+      "taskId": "gap-targeted-promotion-operation-does-not-exist",
+      "runId": "fm-gap-targeted-promotion-operation-does-not-exist-1786347843140-sdkg2x",
+      "minutes": 33.04586666666667,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": true
+    },
+    {
+      "taskId": "gap-targeted-promotion-operation-does-not-exist",
+      "runId": "fm-gap-targeted-promotion-operation-does-not-exist-1786362722789-tw8wz3",
+      "minutes": 1014.5692833333334,
+      "outcome": "abandoned",
+      "reconcileReason": "branch-merged",
+      "startedAtMsUnreliable": true
+    },
+    {
+      "taskId": "gap-task-check-test-nativeproviderdir-undefined",
+      "runId": "fm-gap-task-check-test-nativeproviderdir-undefined-1786211889867-c6wf20",
+      "minutes": 932.1328833333333,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-task-file-develop-integration-drift-fan-in-conflicts",
+      "runId": "fm-gap-task-file-develop-integration-drift-fan-in-conflicts-1786412254241-bkva4j",
+      "minutes": 197.31471666666667,
+      "outcome": "abandoned",
+      "reconcileReason": "branch-merged",
+      "startedAtMsUnreliable": true
+    },
+    {
+      "taskId": "gap-task-list-root-does-not-scope-config-lookup",
+      "runId": "fm-gap-task-list-root-does-not-scope-config-lookup-1786211036449-9gtvst",
+      "minutes": 946.3566333333333,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-telemetry-brackets-vs-subagents-no-slot-visibility",
+      "runId": "fm-gap-telemetry-brackets-vs-subagents-no-slot-visibility-1785979857865-eri043",
+      "minutes": 13.9457,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-test-concurrency-cap-does-not-scope-nested-spawns",
+      "runId": "fm-gap-test-concurrency-cap-does-not-scope-nested-spawns-1786214278567-bvmfpw",
+      "minutes": 892.32155,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-test-isolation-backlog-44-violations-unmeasured",
+      "runId": "fm-gap-test-isolation-backlog-44-violations-unmeasured-1786214527837-skrh12",
+      "minutes": 888.1671833333334,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-tests-leak-tmux-servers-main-resource-pressure-and-crash-cause",
+      "runId": "fm-gap-tests-leak-tmux-servers-main-resource-pressure-and-crash-cause-1785925128561-d1niqc",
+      "minutes": 43.05885,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-tests-leak-tmux-servers-main-resource-pressure-and-crash-cause",
+      "runId": "fm-gap-tests-leak-tmux-servers-main-resource-pressure-and-crash-cause-1786071987405-nle657",
+      "minutes": 27.907333333333334,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-the-manager-layer-does-not-propagate-quay-init-lays-no-manager-driver",
+      "runId": "fm-gap-the-manager-layer-does-not-propagate-quay-init-lays-no-manager-driver-1786061960395-dsfn4r",
+      "minutes": 105.10196666666667,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-tick-core-zero-static-coverage",
+      "runId": "fm-gap-tick-core-zero-static-coverage-1786385566716-1rgtl4",
+      "minutes": 642.1069666666667,
+      "outcome": "abandoned",
+      "reconcileReason": "branch-merged",
+      "startedAtMsUnreliable": true
+    },
+    {
+      "taskId": "gap-tick-vocabulary-whitelist-stale-against-forty-to-six-entry-forms",
+      "runId": "fm-gap-tick-vocabulary-whitelist-stale-against-forty-to-six-entry-forms-1786209329014-3bv0wy",
+      "minutes": 974.8142666666666,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-tmux-session-topology-no-factory-definition",
+      "runId": "fm-gap-tmux-session-topology-no-factory-definition-1785935223915-kp8mdj",
+      "minutes": 183.50026666666668,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-two-layer-loop-tick-docs-hardcode-master-not-wired-to-existing-branch-model",
+      "runId": "fm-gap-two-layer-loop-tick-docs-hardcode-master-not-wired-to-existing-branch-model-1785999127214-oy1evg",
+      "minutes": 18.84215,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-two-machine-collaboration-git-branch-claiming",
+      "runId": "fm-gap-two-machine-collaboration-git-branch-claiming-1785974652794-v83fui",
+      "minutes": 20.556533333333334,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-two-thirds-of-a-task-is-polling-a-suite-log",
+      "runId": "fm-gap-two-thirds-of-a-task-is-polling-a-suite-log-1785935224309-bphra4",
+      "minutes": 183.49385,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-two-thirds-of-a-task-is-polling-a-suite-log",
+      "runId": "fm-gap-two-thirds-of-a-task-is-polling-a-suite-log-1786074370706-pnelds",
+      "minutes": 36.9163,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-upgrade-channel-cant-sync-build-artifacts-dist-stale",
+      "runId": "fm-gap-upgrade-channel-cant-sync-build-artifacts-dist-stale-1785948098115-66c872",
+      "minutes": 63.21091666666667,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-user-scope-install-reinstall-criterion-and-version",
+      "runId": "fm-gap-user-scope-install-reinstall-criterion-and-version-1786218857072-zh5p4l",
+      "minutes": 816.0135,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-vendor-runtime-not-in-git-clone-broken-mcp-entry",
+      "runId": "fm-gap-vendor-runtime-not-in-git-clone-broken-mcp-entry-1785938145192-nga79w",
+      "minutes": 134.81268333333333,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-verification-round-missing-phase-ms-breaks-cost-attribution",
+      "runId": "fm-gap-verification-round-missing-phase-ms-breaks-cost-attribution-1786419436712-udnk5b",
+      "minutes": 248.00303333333332,
+      "outcome": "abandoned",
+      "reconcileReason": "branch-merged",
+      "startedAtMsUnreliable": true
+    },
+    {
+      "taskId": "gap-verify-round-9-failures-from-recent-changes-fix-batch",
+      "runId": "fm-gap-verify-round-9-failures-from-recent-changes-fix-batch-1786122760293-epg82r",
+      "minutes": 35.86625,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-web-board-needs-an-inconsistency-verdict-it-does-not-have",
+      "runId": "fm-gap-web-board-needs-an-inconsistency-verdict-it-does-not-have-1785928144348-qw5qbk",
+      "minutes": 301.49358333333333,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-web-board-needs-an-inconsistency-verdict-it-does-not-have",
+      "runId": "fm-gap-web-board-needs-an-inconsistency-verdict-it-does-not-have-1785949997950-doaxoi",
+      "minutes": 31.547133333333335,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-worktree-scoped-runs-consume-resources-but-produce-no-signal",
+      "runId": "fm-gap-worktree-scoped-runs-consume-resources-but-produce-no-signal-1786209328622-mpst1b",
+      "minutes": 974.8211333333334,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-worktreeinclude-declarative-copy-of-gitignored-config-into-worktrees",
+      "runId": "fm-gap-worktreeinclude-declarative-copy-of-gitignored-config-into-worktrees-1786116822757-lihh7j",
+      "minutes": 10.3868,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "TEST-x",
+      "runId": "fm-TEST-x-1786425574909-oxqaf4",
+      "minutes": 145.69996666666665,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    }
+  ],
+  "unreliable": [
+    {
+      "taskId": "gap-a15-ruling5-counter-missing",
+      "runId": "fm-gap-a15-ruling5-counter-missing-1786399951292-ylkfa6",
+      "minutes": 315.2208166666667,
+      "outcome": "done",
+      "startedAtMsUnreliable": true,
+      "startedAtMs": 1786399951309
+    },
+    {
+      "taskId": "gap-ac38-outer-doc-drift",
+      "runId": "fm-gap-ac38-outer-doc-drift-1786399173765-rr3fwq",
+      "minutes": 328.1879333333333,
+      "outcome": "done",
+      "startedAtMsUnreliable": true,
+      "startedAtMs": 1786399173778
+    },
+    {
+      "taskId": "gap-chart2-s2-test-assertions-stale-after-delivery-c-d",
+      "runId": "fm-gap-chart2-s2-test-assertions-stale-after-delivery-c-d-1786051058797-lkui4j",
+      "minutes": 31.041233333333334,
+      "outcome": "needs-human",
+      "startedAtMsUnreliable": true,
+      "startedAtMs": 1786051058808
+    },
+    {
+      "taskId": "gap-drift-gate-covers-only-plugin-scripts-not-workflows",
+      "runId": "fm-gap-drift-gate-covers-only-plugin-scripts-not-workflows-1786415850456-2r3sjj",
+      "minutes": 50.248916666666666,
+      "outcome": "done",
+      "startedAtMsUnreliable": true,
+      "startedAtMs": 1786415850467
+    },
+    {
+      "taskId": "gap-observer-registry-target-decommission-and-criterion-invalidation",
+      "runId": "fm-gap-observer-registry-target-decommission-and-criterion-invalidation-1786061714809-ujqan9",
+      "minutes": 193.20131666666666,
+      "outcome": "needs-human",
+      "startedAtMsUnreliable": true,
+      "startedAtMs": 1786061714820
+    },
+    {
+      "taskId": "gap-outer-tick-core-b9-coverage-blind-spot",
+      "runId": "fm-gap-outer-tick-core-b9-coverage-blind-spot-1786401450145-wzc7rk",
+      "minutes": 290.26733333333334,
+      "outcome": "done",
+      "startedAtMsUnreliable": true,
+      "startedAtMs": 1786401450159
+    },
+    {
+      "taskId": "gap-pane-classify-busy-truncated-by-column-width",
+      "runId": "fm-gap-pane-classify-busy-truncated-by-column-width-1786415850799-bfy41g",
+      "minutes": 50.27258333333333,
+      "outcome": "done",
+      "startedAtMsUnreliable": true,
+      "startedAtMs": 1786415850815
+    },
+    {
+      "taskId": "gap-pool-quality-semantic-gate",
+      "runId": "fm-gap-pool-quality-semantic-gate-1786394956914-ucz4ao",
+      "minutes": 398.52095,
+      "outcome": "done",
+      "startedAtMsUnreliable": true,
+      "startedAtMs": 1786394956926
+    },
+    {
+      "taskId": "gap-probe-mechanism-dead-15-days-rewire-to-two-layer",
+      "runId": "fm-gap-probe-mechanism-dead-15-days-rewire-to-two-layer-1786064124743-v6xkfo",
+      "minutes": 33.1211,
+      "outcome": "needs-human",
+      "startedAtMsUnreliable": true,
+      "startedAtMs": 1786064124755
+    },
+    {
+      "taskId": "gap-productize-the-manager-layer",
+      "runId": "fm-gap-productize-the-manager-layer-1785984338411-2eurri",
+      "minutes": 118.91688333333333,
+      "outcome": "done",
+      "startedAtMsUnreliable": true,
+      "startedAtMs": 1785984338431
+    },
+    {
+      "taskId": "gap-shipped-ts-files-are-not-bundled-80-raw-typescript-in-the-artifact",
+      "runId": "fm-gap-shipped-ts-files-are-not-bundled-80-raw-typescript-in-the-artifact-1786054632872-rollav",
+      "minutes": 51.405833333333334,
+      "outcome": "needs-human",
+      "startedAtMsUnreliable": true,
+      "startedAtMs": 1786054632885
+    },
+    {
+      "taskId": "gap-the-runtime-has-nowhere-safe-to-land",
+      "runId": "fm-gap-the-runtime-has-nowhere-safe-to-land-1785998556317-xch9ls",
+      "minutes": 26.61785,
+      "outcome": "done",
+      "startedAtMsUnreliable": true,
+      "startedAtMs": 1785998556329
+    }
+  ],
+  "reconcilable": [],
+  "realInFlight": 3,
+  "closedButLive": [],
+  "occupiedSlots": 3
+}

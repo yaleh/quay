@@ -60,7 +60,6 @@ extra: {}
 **本任务不只是「可观测性退化」——它是 worktree 清理机制的前置依赖。** manager 复核确认：「分支已合」是活跃工作期间的瞬时状态（subagent 在 fan-in 之后、下次提交之前，其 worktree 在祖先判据下全像泄漏）；进程名匹配无效（subagent 是 `claude` 进程、argv 无任务 id）；`worktreeExists` 反过来（worktree 在就判存活 ⇒ 泄漏算在飞）。**唯一可靠判据 = inner 心跳的 `runIds`**——而本任务覆盖的字段缩水恰好删掉了它。⇒ **实现顺序**：先恢复 `runIds`（本任务），再让 worktree 清理机制读它（gap-worktree-leak 的 AC3 落地）；在此之前清理只能人工判别、不要机械化。详见 gap-worktree-leak-after-fan-in-occupies-slot-permanently Finding。
 
 **第二个消费者——`--reconcile` 的存活判据也应改读 runIds（manager 2026-08-11 07:4x）**：现在 `--reconcile` 与清理机制共用 `worktreeExists`。对 reconcile 它的不可靠方向**是安全的**（worktree 在 ⇒ 判「未消失」⇒ 拒绝关闭 ⇒ 只漏关不误关；outer 已跑 --reconcile 验证：brackets 15→3、kept 3 条全是在飞 subagent）——与清理方向相反，故 **reconcile 不必等 runIds、清理必须等**。**但 runIds 落地后 `--reconcile` 也应改读它**——否则以后有人修了清理、忘了 reconcile。这是本前置依赖的第二个消费者。
-
 ## Contract
 
 measure   heartbeat_field_count = `python3 -c "import json; print(len(json.load(open('.quay/inner-wakeup-heartbeat.json'))))"` 的 stdout 数字
