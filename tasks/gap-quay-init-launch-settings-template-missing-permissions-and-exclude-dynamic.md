@@ -28,16 +28,16 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 ad-arm1 archguard 实测（monitor-mount-check.sh 批准框卡死）+ init.ts 模板缺 permissions/excludeDynamic 的 grep 证据
-- [ ] AC2: **修复模板**——init.ts 铺出与 quay 本机一致的 launch.settings.json（含 bypassPermissions 块 + excludeDynamicSystemPromptSections: true）
-- [ ] AC3: **消费方复测**——ad-arm1 冷启动 inner 不再撞 permission prompt
-- [ ] AC4: **既有不回归**——`--for-task` scoped 门绿
+- [x] AC1: **复现固化**——任务体记录 ad-arm1 archguard 实测（monitor-mount-check.sh 批准框卡死）+ init.ts 模板缺 permissions/excludeDynamic 的 grep 证据
+- [x] AC2: **修复模板**——init.ts 铺出与 quay 本机一致的 launch.settings.json（含 bypassPermissions 块 + excludeDynamicSystemPromptSections: true）
+- [ ] AC3: **消费方复测**——ad-arm1 冷启动 inner 不再撞 permission prompt（需 ad-arm1 实机复测，inner 无 SSH 访问——待 outer 消费方复测验证）
+- [x] AC4: **既有不回归**——`--for-task` scoped 门绿
 
 ## Definition of Done
 
-- [ ] AC1–AC4 全部勾上
-- [ ] 修后实跑：ad-arm1 冷启动 inner 无 permission prompt 证据
-- [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
+- [x] AC1、AC2、AC4 已勾上（AC3 待 outer ad-arm1 消费方复测）
+- [ ] 修后实跑：ad-arm1 冷启动 inner 无 permission prompt 证据（待 outer 消费方复测）
+- [x] 既有测试 + 新增测试全绿（`--for-task` scoped：105/105 pass）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
 
 ## Touches
@@ -60,3 +60,32 @@ resume    init.ts 模板修复 / 消费方复测 / 测试分步提交，任一�
 reviewer: outer
 at: 2026-08-11
 changed: ad-arm1 archguard 真实消费方 Level3 首跑实测 F1/F2——init.ts 铺下 launch.settings.json 缺 permissions.defaultMode=bypassPermissions 整块 + excludeDynamicSystemPromptSections（本机有、模板无）⇒ 消费方 inner 冷启动撞 permission prompt。实现归 inner，判定归 outer
+
+## 实跑证据（inner 2026-08-11）
+
+**实现**：`packages/quay/src/init.ts` 新增 `generateLaunchSettingsContent()`，`runInit` 在每次写入 config 时铺下 `.claude/launch.settings.json`（fresh 创建，`--force` 覆盖 stale 副本，dry-run 不写盘）；`packages/quay/bin/quay.ts` + `packages/quay-native/bin/quay-native.ts` 报告新 scaffold 路径。两个 CLI 共享同一 `runInit`。
+
+**AC2 实跑**（`quay init` 铺出文件 + grep 验证，Contract `invoke`）：
+```
+$ node --experimental-strip-types packages/quay/bin/quay.ts init --root "$TMP"
+Created .../.quay/config.yml
+Created .../tasks/ (or already existed)
+Created .../.claude/launch.settings.json
+$ grep -c 'bypassPermissions' "$TMP/.claude/launch.settings.json"   # → 1（Contract measure）
+$ grep -c 'excludeDynamicSystemPromptSections" *: true' "$TMP/.claude/launch.settings.json"  # → 1
+```
+铺出内容含 `permissions.defaultMode: "bypassPermissions"` + `_launchSpec.excludeDynamicSystemPromptSections: true`（+ `promptSuggestions: false` + 三角色 `name`/`launcher`/`model`/`env`，结构与本机一致）。
+
+**AC4 实跑**（scoped 门，worktree 内）：
+```
+$ bash scripts/test.sh --for-task gap-quay-init-launch-settings-template-missing-permissions-and-exclude-dynamic --allow-thin
+ℹ tests 105   ℹ pass 105   ℹ fail 0   ℹ cancelled 0   → EXIT=0
+```
+新增 4 条测试（init.test.mjs）：`quay init` / `quay-native init` 铺出 launch.settings.json 含 bypassPermissions + excludeDynamicSystemPromptSections=true；`--dry-run` 不写盘；`--force` 覆盖 stale 副本。
+
+**提交**：
+- `7b5f8a7b` 模板修复（init.ts + quay.ts + quay-native.ts）
+- `6bee5fb6` 测试（init.test.mjs 新增 launch.settings 断言）
+- `fca107df` 任务文件入 worktree（fork develop 早于任务文件，`--for-task` 需解析 Touches）
+
+**AC3（ad-arm1 消费方复测）**：inner 无 ad-arm1 SSH 访问，待 outer 在消费方复测。根因已消除——冷启动铺出的 launch.settings.json 现在必含 bypassPermissions 块，inner 不再在自家 loop 脚本上撞 permission prompt。
