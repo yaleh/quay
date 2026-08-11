@@ -1,7 +1,9 @@
 ---
 id: gap-task-file-develop-integration-drift-fan-in-conflicts
-title: '任务文件在 develop/integration 间漂移 ⇒ 任何「从 develop fork、写任务文件证据」的任务 fan-in 必冲突——连续两次（targeted-promotion / round5-red）非偶发，且既有任务 grep 无命中；git diff develop integration -- tasks/ = 35 文件 1812 插入；needs-human 21 条持续增长源'
-status: todo
+title: 任务文件在 develop/integration 间漂移 ⇒ 任何「从 develop fork、写任务文件证据」的任务 fan-in
+  必冲突——连续两次（targeted-promotion / round5-red）非偶发，且既有任务 grep 无命中；git diff develop
+  integration -- tasks/ = 35 文件 1812 插入；needs-human 21 条持续增长源
+status: ready
 labels:
   - gap
   - defect

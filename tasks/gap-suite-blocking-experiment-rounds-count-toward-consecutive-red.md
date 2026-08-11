@@ -1,7 +1,9 @@
 ---
 id: gap-suite-blocking-experiment-rounds-count-toward-consecutive-red
-title: "suite_blocking 把一次性对照实验轮计入 consecutive_red——r268（lane8 对照，--lane-count 8 非默认）的红是实验结论的一部分、不是回归，却贡献 3 次连红中的 1 次直接推窗激活；实验轮机械可辨（laneCount 非默认值），应从 consecutive_red 计数排除"
-status: todo
+title: suite_blocking 把一次性对照实验轮计入 consecutive_red——r268（lane8 对照，--lane-count 8
+  非默认）的红是实验结论的一部分、不是回归，却贡献 3 次连红中的 1 次直接推窗激活；实验轮机械可辨（laneCount 非默认值），应从
+  consecutive_red 计数排除
+status: ready
 labels:
   - gap
   - defect

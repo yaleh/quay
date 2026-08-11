@@ -1,7 +1,11 @@
 ---
 id: gap-worktree-leak-after-fan-in-occupies-slot-permanently
-title: "合并后没删 worktree 的累积泄漏——fast-mode-telemetry:834/:898 判执行体存活=worktree 还在；12 个分支已合 integration 的 worktree 仍留着 ⇒ 每合一个任务永久吃掉一个槽位（occupied 15 > cap 5 ⇒ 空槽恒 0）；inner A6 fan-in 序列含 worktree remove 但 outer A15 fan-in 没有 ⇒ 最近 fan-in 全在 outer 侧执行故泄漏；处方=①清已合 worktree ②A15 fan-in 序列补 worktree remove ③slot-status 报 occupied>cap 且存在【分支已合但 worktree 仍在】⇒ 该轮判不合规"
-status: todo
+title: 合并后没删 worktree 的累积泄漏——fast-mode-telemetry:834/:898 判执行体存活=worktree 还在；12
+  个分支已合 integration 的 worktree 仍留着 ⇒ 每合一个任务永久吃掉一个槽位（occupied 15 > cap 5 ⇒ 空槽恒
+  0）；inner A6 fan-in 序列含 worktree remove 但 outer A15 fan-in 没有 ⇒ 最近 fan-in 全在
+  outer 侧执行故泄漏；处方=①清已合 worktree ②A15 fan-in 序列补 worktree remove ③slot-status 报
+  occupied>cap 且存在【分支已合但 worktree 仍在】⇒ 该轮判不合规
+status: ready
 labels:
   - gap
   - defect

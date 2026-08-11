@@ -1,7 +1,9 @@
 ---
 id: gap-split-session-liveness-signals-unblocks-lowconc
-title: "lowconc 相被单文件 session-liveness-signals.test.mjs（216s > sum/3=152s）钉死墙钟（__GROUP__ capped=1）⇒ 拆成 3 个文件，lowconc 272→约 152s（-120s，算术确定，无需先测）"
-status: todo
+title: lowconc 相被单文件 session-liveness-signals.test.mjs（216s >
+  sum/3=152s）钉死墙钟（__GROUP__ capped=1）⇒ 拆成 3 个文件，lowconc 272→约
+  152s（-120s，算术确定，无需先测）
+status: ready
 labels:
   - gap
   - defect

@@ -1,7 +1,11 @@
 ---
 id: gap-semantic-observer-judge-stopped-awaiting
-title: 'inner/outer 语义观测器——schema 字段只承载预先想到的需求类型，真实需求溢出到自由文本（心跳 reason 逐字「BUDGET HIT, dispatch stopped, awaiting /clear」而 blocked=[] 被清空、字段失效）；judge 读自由文本输出 {stopped, awaiting, needs, contradictsStructured, confidence}；触发=文本 hash 变化或 blocked==[] && agentDispatches>=agentLimit；产物=stopped:true 而 tick-log 无升级 ⇒ 变红（AC41③）'
-status: todo
+title: inner/outer 语义观测器——schema 字段只承载预先想到的需求类型，真实需求溢出到自由文本（心跳 reason 逐字「BUDGET
+  HIT, dispatch stopped, awaiting /clear」而 blocked=[] 被清空、字段失效）；judge 读自由文本输出
+  {stopped, awaiting, needs, contradictsStructured, confidence}；触发=文本 hash 变化或
+  blocked==[] && agentDispatches>=agentLimit；产物=stopped:true 而 tick-log 无升级 ⇒
+  变红（AC41③）
+status: ready
 labels:
   - gap
   - defect

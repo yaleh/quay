@@ -1,7 +1,11 @@
 ---
 id: gap-git-history-landed-master-stale-under-two-line-model
-title: "taskWorkLanded 第三条信号 gitHistoryLanded 硬编码 master——两线模型下工作落 integration，master 停在 ea2208cf/08-06（master..integration=2212）⇒ 08-06 后落地的一切对 gitHistory 恒为假；散文 AC + 只改既有文件的任务（治理层大多数）三条信号全假 ⇒ workLanded=false ⇒ 永不判 not-yet-flipped ⇒ 永远留 ready 池（closure 探针系统性少数 12 条）；处方=ref 随两线模型走（integration/develop，保留「不算游离分支」原意）"
-status: todo
+title: taskWorkLanded 第三条信号 gitHistoryLanded 硬编码 master——两线模型下工作落
+  integration，master 停在 ea2208cf/08-06（master..integration=2212）⇒ 08-06 后落地的一切对
+  gitHistory 恒为假；散文 AC + 只改既有文件的任务（治理层大多数）三条信号全假 ⇒ workLanded=false ⇒ 永不判
+  not-yet-flipped ⇒ 永远留 ready 池（closure 探针系统性少数 12 条）；处方=ref
+  随两线模型走（integration/develop，保留「不算游离分支」原意）
+status: ready
 labels:
   - gap
   - defect

@@ -1,7 +1,9 @@
 ---
 id: gap-reconcile-step-skipped-no-compliance-product
-title: "inner 核 A13 写了【stale_brackets > 0 ⇒ 调 --reconcile】但没有产物区分守与不守——04:01 心跳已写 realConcurrency=8(残留占槽) 却未执行 --reconcile，直接损失 4 槽×多轮；处方=slot-status 报 stale_brackets>0 而同轮无 --reconcile 调用 ⇒ 该轮判不合规（C17 形状闭合）"
-status: todo
+title: inner 核 A13 写了【stale_brackets > 0 ⇒ 调 --reconcile】但没有产物区分守与不守——04:01 心跳已写
+  realConcurrency=8(残留占槽) 却未执行 --reconcile，直接损失 4 槽×多轮；处方=slot-status 报
+  stale_brackets>0 而同轮无 --reconcile 调用 ⇒ 该轮判不合规（C17 形状闭合）
+status: ready
 labels:
   - gap
   - defect

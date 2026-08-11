@@ -1,7 +1,8 @@
 ---
 id: gap-red-round-loses-overhead-phase-decomposition
-title: "红轮结构上拿不到相位分解 —— __OVERHEAD__ 只在成功收尾时发（test.sh _oh_emit 在 kill-on-red 前未全部落盘 + stderr 不进 runner 日志）；红轮恰恰是【需要测量】的场合，绕法 __PERFILE__ 重建（lane8 对照已实证可行）"
-status: todo
+title: 红轮结构上拿不到相位分解 —— __OVERHEAD__ 只在成功收尾时发（test.sh _oh_emit 在 kill-on-red
+  前未全部落盘 + stderr 不进 runner 日志）；红轮恰恰是【需要测量】的场合，绕法 __PERFILE__ 重建（lane8 对照已实证可行）
+status: ready
 labels:
   - gap
   - defect

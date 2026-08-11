@@ -1,7 +1,11 @@
 ---
 id: gap-slot-free-not-an-event-slots-stay-empty-missed-without-trace
-title: "空槽不是事件 ⇒ 槽位空闲 4、可派 11 却漏回填——「in_flight<cap ∧ dispatchable>0」只靠三层 20-25 分钟 tick 轮询，醒来时手上总有更急的事（红套件/fan-in/needs-human）⇒ 回填空槽永远排最后且漏了不留痕；既有 gap-dispatch-evaluated-only-at-inner-tick-boundary-not-slot-release 假设缺触发器，实测触发器存在（task-notification 唤醒）但醒来第一件事是 fan-in+报告不是 A11/A12/A13+回填；处方=按 suite-state-trigger 模型做 slot-free 事件推送"
-status: todo
+title: 空槽不是事件 ⇒ 槽位空闲 4、可派 11 却漏回填——「in_flight<cap ∧ dispatchable>0」只靠三层 20-25 分钟
+  tick 轮询，醒来时手上总有更急的事（红套件/fan-in/needs-human）⇒ 回填空槽永远排最后且漏了不留痕；既有
+  gap-dispatch-evaluated-only-at-inner-tick-boundary-not-slot-release
+  假设缺触发器，实测触发器存在（task-notification 唤醒）但醒来第一件事是 fan-in+报告不是 A11/A12/A13+回填；处方=按
+  suite-state-trigger 模型做 slot-free 事件推送
+status: ready
 labels:
   - gap
   - defect

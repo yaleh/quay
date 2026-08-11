@@ -1,7 +1,11 @@
 ---
 id: gap-b3-tick-coupled-misses-between-tick-merges
-title: "B3 验证轮起跑条件 tick 耦合漏掉 tick 间 merge——r271 04:38 完成后 51 分钟无轮次（机器空、边际成本零、develop..integration=33→38 未验证）；B3 条件（收尾≥1 或新 merge 且 state!=running 且 gate 放行）全满足却没触发 ⇒ 起跑是 tick 轮询的副作用，merge 落在 tick 之间就漏；处方=验证轮起跑做成事件（merge 落地 ⇒ 检查并起跑），或 suite-state-trigger 增加 idle-green-有-未验证提交 触发"
-status: todo
+title: B3 验证轮起跑条件 tick 耦合漏掉 tick 间 merge——r271 04:38 完成后 51
+  分钟无轮次（机器空、边际成本零、develop..integration=33→38 未验证）；B3 条件（收尾≥1 或新 merge 且
+  state!=running 且 gate 放行）全满足却没触发 ⇒ 起跑是 tick 轮询的副作用，merge 落在 tick
+  之间就漏；处方=验证轮起跑做成事件（merge 落地 ⇒ 检查并起跑），或 suite-state-trigger 增加
+  idle-green-有-未验证提交 触发
+status: ready
 labels:
   - gap
   - defect
