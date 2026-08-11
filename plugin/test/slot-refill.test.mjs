@@ -52,7 +52,7 @@ function makeWorkspace(tag) {
   return dir;
 }
 
-function writeTask(root, id, { status = "todo", labels = [], parent = null, body }) {
+function writeTask(root, id, { status = "todo", labels = [], parent = null, body, selfTouch = true } = {}) {
   const fm = [
     "---",
     `id: ${id}`,
@@ -65,6 +65,14 @@ function writeTask(root, id, { status = "todo", labels = [], parent = null, body
     "  schema: v1",
     "---",
   ].join("\n");
+  // C8 SELF-TOUCH MODELING (gap-slot-refill-c8-reject-no-backfill): a real dispatchable task's
+  // `## Touches` must contain `tasks/<id>.md` WITHOUT `(new)` — the C8 dispatch gate
+  // (fast-mode-tick-core.md C8) the inner's A15 gate ⑤ applies pre-dispatch. Fixtures DEFAULT to a
+  // C8-clean body so slot-refill's default self-touch gate admits them; pass `selfTouch: false` to
+  // model a C8-MISSING (non-dispatchable) candidate.
+  if (selfTouch && body.includes("## Touches") && !body.includes(`- tasks/${id}.md`)) {
+    body = body.replace(/(## Touches\n)/, `$1- tasks/${id}.md\n`);
+  }
   fs.writeFileSync(path.join(root, "tasks", `${id}.md`), `${fm}\n\n${body}`);
 }
 
@@ -751,6 +759,27 @@ test("DELIVERY-CRITICAL — blocking_suite axis stays ABOVE delivery-critical (i
   assert.equal(r.recommended[1], "ac36-critical", "delivery-critical ranks second (above id order, below blocking_suite)");
 });
 
+test("DELIVERY-CRITICAL — a false-positive dir-glob suite-blocker does NOT demote the DC task (AC4 — gap-suite-blocking-directory-glob-overbroad)", (t) => {
+  const root = makeWorkspace("glob-dc");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // The crystallization shape: Touches carry concrete scripts AND the `plugin/test/` directory glob.
+  writeTask(root, "gap-crystal-dir", { status: "ready", labels: ["gap"], body: dispatchableBody(["- plugin/test/", "- plugin/scripts/capability-catalog.sh (new)"]) });
+  // The delivery-critical task that must rank #1 when nothing is a true suite-blocker.
+  writeTask(root, "ac37-dc", { status: "ready", labels: ["gap", "delivery-critical"], body: dispatchableBody(["- code/dc.ts (new)"]) });
+  const opts = { tasksDir: path.join(root, "tasks"), root, cap: 2 };
+
+  // 3 consecutive red rounds whose ONLY failing file is under plugin/test/ — the dir glob must NOT
+  // implicate gap-crystal-dir, so the DC task keeps the top of the ranking (before the fix, the dir
+  // glob made gap-crystal-dir a false suite-blocker and pushed it to #1, demoting the DC task).
+  writeRounds(root, Array.from({ length: 3 }, (_, i) => ({ round: 310 + i, state: "red", reason: "failed", fail: 1, failures: [{ file: "plugin/test/checker-cost.test.mjs", line: "x" }] })));
+  writeState(root, [{ file: "plugin/test/checker-cost.test.mjs", line: "x" }]);
+  const r = analyzeSlotRefill(opts);
+  assert.equal(r.suite_blocking.window_active, true);
+  assert.ok(!r.suite_blocking.tasks.includes("gap-crystal-dir"), "the dir-glob task is NOT a suite-blocker (AC2 negative control)");
+  assert.equal(r.recommended[0], "ac37-dc", "no suite-blocker ⇒ the delivery-critical task ranks first (DC axis restored)");
+  assert.ok(r.recommended.includes("gap-crystal-dir"), "the dir-glob task is still dispatchable (ranked after the DC task)");
+});
+
 test("DELIVERY-CRITICAL — end-to-end: after labeling, the next refill evaluation picks the labeled task (dispatch eval > label ts) (AC4)", (t) => {
   const root = makeWorkspace("ac36-e2e");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -908,4 +937,69 @@ test("isNotYetFlippedSkip — pure unit: excludedNyfIds arm, merge arm, AC gate,
   // (f) hasFanInMerge itself: merge record fires, and a plain (non-merge) commit never does.
   assert.equal(hasFanInMerge(root, "gap-fanned"), true, "the fan-in merge record is durable evidence");
   assert.equal(hasFanInMerge(root, "gap-nonexistent"), false);
+});
+
+// ── C8 SELF-TOUCH / BACKFILL (tasks/gap-slot-refill-c8-reject-no-backfill) ──────────────────────────
+// slot-refill's candidate loop used to apply only its OWN step-4 checks (touches-resolve / deps /
+// concurrency / nyf) and NOT the inner dispatch side's C8 self-touch gate. It therefore recommended
+// candidates that the inner rejected one-by-one at dispatch (C8: `## Touches` must contain
+// `tasks/<id>.md` without `(new)`), with NO backfill from later-in-sort candidates — the measured
+// "17 本可派 + 本 tick 无可派" deadlock (22 ready, 5 missing self-touch). AC2: the candidate loop now
+// rejects C8-MISSING candidates and BACKFILLS from later-in-sort candidates until cap filled or
+// candidates exhausted. AC4: all candidates rejected ⇒如实无可派 (no fabrication). The injected
+// `dispatchGate` callback gives the inner a per-candidate gate extension point with the same backfill.
+
+test("C8 BACKFILL — the first 3 id-sorted candidates lack self-touch; the 4th+ have it ⇒ recommended backfills the 4th+ (AC2, c8_rejected_candidate_backfilled)", (t) => {
+  const root = makeWorkspace("c8-backfill");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // id-sorted order: c8-a, c8-b, c8-c rank FIRST but are C8-MISSING (selfTouch: false) — the inner
+  // would reject each at dispatch. c8-d, c8-e rank LATER and ARE C8-clean — they must backfill.
+  writeTask(root, "gap-c8-a", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/a.ts (new)"]), selfTouch: false });
+  writeTask(root, "gap-c8-b", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/b.ts (new)"]), selfTouch: false });
+  writeTask(root, "gap-c8-c", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/c.ts (new)"]), selfTouch: false });
+  writeTask(root, "gap-c8-d", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/d.ts (new)"]) });
+  writeTask(root, "gap-c8-e", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/e.ts (new)"]) });
+
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 5 });
+  assert.equal(r.pool, 5, "all 5 are ready and in the pool");
+  assert.equal(r.should_refill, true);
+  assert.ok(r.recommended.includes("gap-c8-d"), "4th candidate (C8-clean) BACKFILLS into recommended");
+  assert.ok(r.recommended.includes("gap-c8-e"), "5th candidate (C8-clean) BACKFILLS into recommended");
+  for (const id of ["gap-c8-a", "gap-c8-b", "gap-c8-c"]) {
+    assert.ok(!r.recommended.includes(id), `C8-MISSING candidate ${id} is NOT recommended (rejected ⇒ later candidate backfills)`);
+  }
+});
+
+test("C8 ALL-REJECTED — every candidate lacks self-touch ⇒ recommended empty, should_refill=false, no fabricated dispatch (AC4, all_rejected_no_fake)", (t) => {
+  const root = makeWorkspace("c8-all-rejected");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-c8-x", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/x.ts (new)"]), selfTouch: false });
+  writeTask(root, "gap-c8-y", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/y.ts (new)"]), selfTouch: false });
+  writeTask(root, "gap-c8-z", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/z.ts (new)"]), selfTouch: false });
+
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 5 });
+  assert.equal(r.pool, 3, "3 ready candidates in the pool");
+  assert.equal(r.slots_free, 5, "slots exist");
+  assert.equal(r.recommended.length, 0, "all C8-MISSING ⇒ nothing recommended — 如实无可派 (no fabrication from backfill)");
+  assert.equal(r.should_refill, false, "recommended empty ⇒ should_refill=false");
+  assert.match(r.no_refill_reason, /no dispatchable candidate/);
+});
+
+test("C8 BACKFILL — injected dispatchGate rejects a mid-rank candidate ⇒ later candidate backfills (AC2, dispatch-gate callback)", (t) => {
+  const root = makeWorkspace("c8-gate");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // id-sorted: gate-a, gate-b, gate-c — all C8-clean. The INJECTED gate rejects gate-b (mid-ranked);
+  // the loop must skip it and BACKFILL gate-c into recommended (never recommend gate-b).
+  writeTask(root, "gap-gate-a", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/ga.ts (new)"]) });
+  writeTask(root, "gap-gate-b", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/gb.ts (new)"]) });
+  writeTask(root, "gap-gate-c", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/gc.ts (new)"]) });
+  const r = analyzeSlotRefill({
+    tasksDir: path.join(root, "tasks"),
+    root,
+    cap: 3,
+    dispatchGate: ({ id }) => (id === "gap-gate-b" ? { ok: false, reason: "test gate rejects gap-gate-b" } : { ok: true }),
+  });
+  assert.ok(r.recommended.includes("gap-gate-a"), "unrejected candidate still recommended");
+  assert.ok(r.recommended.includes("gap-gate-c"), "later candidate BACKFILLS the rejected slot");
+  assert.ok(!r.recommended.includes("gap-gate-b"), "gate-rejected candidate is not recommended (no fabrication)");
 });

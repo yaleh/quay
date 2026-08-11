@@ -80,6 +80,7 @@ import {
   parseTouches,
   findRepoRoot,
   walkFiles,
+  selfTouchCheck,
 } from "./touches-orthogonality-check.ts";
 import {
   assembleBatch,
@@ -256,6 +257,12 @@ export function isNotYetFlippedSkip({ id, body, root, excludedNyfIds }) {
  *      (default RED_BACKLOG_THRESHOLD_DEFAULT = 50).
  *  @param {number} [o.redBacklogCap] the narrowed dispatch cap under red suite + backlog > threshold
  *      (default RED_BACKLOG_CAP_DEFAULT = 2).
+ *  @param {Function} [o.dispatchGate] OPTIONAL injected per-candidate dispatch gate
+ *      `(candidate) => ({ ok: boolean, reason?: string })` (or a bare `false` to reject). Applied in
+ *      the candidate loop AFTER the built-in step-4 checks. A rejected candidate is skipped and the
+ *      loop continues to the next — BACKFILL (gap-slot-refill-c8-reject-no-backfill: a per-candidate
+ *      gate rejection must pull a later-in-sort candidate, never recommend a rejected one with no
+ *      replacement). Default: none (the built-in C8 self-touch gate is always on).
  *  @returns {object} { cap, base_cap, effective_cap, arbitration, in_flight_count,
  *      closed_but_live_count, occupied_slots, slots_free, pool, floor, dispatchable_disjoint,
  *      criterion_met, should_refill, no_refill_reason, recommended, ranking, scanned } —
@@ -263,7 +270,7 @@ export function isNotYetFlippedSkip({ id, body, root, excludedNyfIds }) {
  *      exposes-sort-key) is the parallel array of {id, deliveryCritical, suiteBlocking, rank} that
  *      exposes each recommended id's sort axes for AC36 判据②'s mechanical check.
  */
-export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, floorMult = POOL_FLOOR_MULT_DEFAULT, inFlight = [], closedButLive = [], integrationBacklog, redBacklogThreshold = RED_BACKLOG_THRESHOLD_DEFAULT, redBacklogCap = RED_BACKLOG_CAP_DEFAULT }) {
+export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, floorMult = POOL_FLOOR_MULT_DEFAULT, inFlight = [], closedButLive = [], integrationBacklog, redBacklogThreshold = RED_BACKLOG_THRESHOLD_DEFAULT, redBacklogCap = RED_BACKLOG_CAP_DEFAULT, dispatchGate = null }) {
   // PREEMPTIVE HALT (gap-supervisor-preemption AC2): the `.halt` sentinel is a CODE mount point,
   // not a tick-step-0 prose rule. When halted, dispatch is blocked no matter how many slots/candidates
   // exist — the human's stop takes effect at ANY dispatch-recommendation point, mid-flow.
@@ -333,6 +340,23 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
       // step-4 check 4: not-yet-flipped — work already landed (fan-in merged / master-landed), don't
       // re-dispatch a subagent to re-verify it (gap-slot-refill-repeats-done-eligible-recommendations).
       if (isNotYetFlippedSkip({ id, body: text, root, excludedNyfIds })) continue;
+      // step-4 check 5: C8 SELF-TOUCH (gap-slot-refill-c8-reject-no-backfill) — the dispatch gate
+      // (fast-mode-tick-core.md C8) requires the candidate's OWN `tasks/<id>.md` in ## Touches
+      // WITHOUT `(new)`. A candidate lacking it is NOT dispatchable — the inner's A15 gate ⑤ would
+      // reject it at dispatch. Rejecting it HERE (continue) means it never enters `candidates`, so
+      // the loop keeps iterating later-in-sort candidates — BACKFILL: a C8-rejected candidate is
+      // replaced by the next dispatchable one instead of being recommended and then rejected by the
+      // dispatch side with NO replacement (the "17 dispatchable yet none dispatched" deadlock:
+      // pool 有货 + 本 tick 无可派 同时为真).
+      if (!selfTouchCheck(text, id).ok) continue;
+      // INJECTED DISPATCH GATE (optional): any additional per-candidate check the caller wants to
+      // enforce (default none). A rejected candidate (ok:false) is skipped and the loop continues →
+      // BACKFILL from later-in-sort candidates, exactly like the built-in step-4 gates — a rejected
+      // candidate is never recommended with no replacement.
+      if (dispatchGate) {
+        const g = dispatchGate({ id, text, task });
+        if (g === false || (g && g.ok === false)) continue;
+      }
       candidates.push(parseCandidate(id, text));
     }
     // SUITE-BLOCKING RANK (gap-ready-relevance-blind-to-suite-blocking-signal AC3): a task the
@@ -398,7 +422,7 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
   } else if (slotsFree <= 0) {
     noRefillReason = `no free slots (in-flight ${inFlight.length} + closed-but-live ${closedButLive.length} >= cap ${effectiveCap})`;
   } else if (recommended.length === 0) {
-    noRefillReason = "no dispatchable candidate passes step-4 checks (touches-resolve / deps-ready / disjoint-from-in-flight)";
+    noRefillReason = "no dispatchable candidate passes step-4 checks (touches-resolve / deps-ready / disjoint-from-in-flight / self-touch C8)";
   }
 
   return {
@@ -497,6 +521,6 @@ function main(argv) {
   return 0;
 }
 
-if (isDirectEntry(import.meta)) {
+if (isDirectEntry(import.meta, undefined, "slot-refill")) {
   process.exitCode = main(process.argv);
 }

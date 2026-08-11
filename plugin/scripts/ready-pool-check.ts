@@ -9,10 +9,13 @@
 //
 // WHAT IT DOES (a DETECTOR/RECOMMENDER, not a gate — always exits 0, never writes tasks/**):
 //   1. Compute the REAL ready pool = `status: ready` tasks MINUS the three non-dispatchable classes:
-//        (a) not-yet-flipped — the declared work has LANDED on master (task-status-drift-check's
-//            symbol-resolution / touch-file evidence) but status is still `ready` (this batch's work
-//            is done, waiting fan-in to flip to `done`); mechanically: taskWorkLanded(body) — does
-//            NOT depend on AC checkbox state (the fan-in merges without ticking ACs)
+//        (a) not-yet-flipped — the declared work has LANDED but status is still `ready` (this batch's
+//            work is done, waiting fan-in to flip to `done`); mechanically: taskWorkLanded(body) OR a
+//            COMMIT-TRACE record (`inner: <id>` / `fan-in: task/<id>` / `fan-in <id>` commit subjects,
+//            read from `git log --all` — PERSISTENT across branch deletion and visible on the two-line
+//            model's integration where a stale `master` sees nothing; gap-nyf-branch-existence-vs-
+//            commit-trace) — does NOT depend on AC checkbox state (the fan-in merges without ticking
+//            ACs)
 //        (b) fixture         — `labels: fixture` (gate demo fixtures, never real work)
 //        (c) PARKED          — a body `**PARKED` marker (task-level suspension; plain-text mentions
 //            of the WORD "PARKED" in AC prose are NOT markers)
@@ -132,7 +135,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { parseTask, extractSection } from "./task-schema.ts";
+import { parseTask, extractSection, readDependsOn } from "./task-schema.ts";
 // criterion-cost self-record (gap-no-criterion-records-its-own-cost-checker-cost-jsonl): this
 // criterion KNOWS its input size n (the ready pool count) — the ONLY field that splits "the
 // criterion got slower" into "n got bigger" vs "the machine got busier" (the 35.8→91.2→157.0
@@ -154,9 +157,10 @@ import { isDirectEntry } from "./gate-script-base.ts";
 // Reused "work has landed on master" signal (AC6: reuse, never a parallel copy) — the same
 // symbol-resolution / touch-file evidence task-status-drift-check.ts uses to judge landing.
 // buildGitHistoryIndex is the BATCHED git-history source (gap-ready-pool-check-times-out-after-
-// git-history-signal): ONE `git log` over all of master, matched in memory per task, instead of
-// ~30-50 per-task `git log -- <paths>` calls (each O(history) — the >150s pool-check timeout).
-import { taskWorkLanded, buildGitHistoryIndex, countAcCheckboxes } from "./task-status-drift-check.ts";
+// git-history-signal): ONE `git log` over all of the landing ref (integration/develop/master per
+// landingRef — gap-git-history-landed-master-stale-under-two-line-model), matched in memory per task,
+// instead of ~30-50 per-task `git log -- <paths>` calls (each O(history) — the >150s pool-check timeout).
+import { taskWorkLanded, buildGitHistoryIndex, countAcCheckboxes, landingRef, wordMatch } from "./task-status-drift-check.ts";
 // RETIRED-MECHANISM INTERCEPT (gap-ready-pool-promotion-ignores-retired-mechanism-candidate-check):
 // promotion must NOT advance a candidate that references an ADR-022-deleted classic-pipeline script
 // (prepare-milestone.js / execute-milestone.js / milestone-worktree.ts) without annotation — a todo
@@ -164,6 +168,12 @@ import { taskWorkLanded, buildGitHistoryIndex, countAcCheckboxes } from "./task-
 // Reuse the SAME pool-candidate judge the strategic-doc-staleness-check CLI exposes (--pool-candidate
 // <id>, review-cadence AC8) — single source, no parallel copy.
 import { judgePoolCandidate } from "./strategic-doc-staleness-check.ts";
+// gap-suite-blocking-experiment-rounds-count-toward-consecutive-red AC2: the DEFAULT lane count is
+// nproc-derived (single source — full-suite-runner's defaultLaneCount, NOT a parallel copy of the
+// nproc formula). An experiment round (--lane-count 8 vs the 4-lane default on this box) carries a
+// laneCount ≠ this default and is excluded from the consecutive-red count; its red is an experiment
+// finding, not a regression.
+import { defaultLaneCount } from "./full-suite-runner.ts";
 
 /** Default concurrency cap (max in-flight subagents) — CONSERVATIVE FALLBACK for manual runs with
  *  no --cap. The tick's dispatch decision point passes the ADAPTIVE cap from cap-from-gate.sh
@@ -421,34 +431,111 @@ export function kindOrder(kind) {
   return kind === "gap" ? 0 : kind === "dir" ? 1 : 2;
 }
 
+// ── COMMIT-TRACE work-landed signal (tasks/gap-nyf-branch-existence-vs-commit-trace) ──────────────
+// The not-yet-flipped criterion's existing workLanded signals depend on TRANSIENT or narrow artifacts:
+// the task/<id> branch existing+unmerged (a branch merged+DELETED makes that signal vanish), and the
+// git-history signal hardcoded to `master` (STALE under the two-line branch model — master..integration
+// = 2224 on 2026-08-11, so integration-landed commits are invisible to it). Both hide "work already
+// landed, still ready" tasks — the 16 phantom ready tasks (2026-08-11), each verified via
+// `git log --all | grep -E "inner: <id>|fan-in: task/<id>"`. The COMMIT-TRACE signal is PERSISTENT:
+// commit SUBJECTS survive branch deletion, and reading `--all` covers the two-line model's integration
+// fan-in that a stale `master` misses. A commit whose subject names the task in one of the live commit
+// conventions —
+//   `inner: <id> …`                 (the inner executor's implementation commit)
+//   `fan-in: task/<id> …` / `merge: fan-in task/<id> …` / `merge: fan-in <id> …`
+//                                  (the outer's fan-in merge of the task branch)
+// — is a durable record that the task was DISPATCHED and its work committed ⇒ it is "work landed, not
+// yet flipped" (waiting fan-in or already merged), NEVER fresh dispatchable work.
+
+/** ONE `git log --all` pass for commit SUBJECTS (the commit-trace signal needs no path data — subjects
+ *  alone carry the inner:/fan-in: convention). `--all` covers integration + develop + master + any live
+ *  task branch, so a task whose work landed on integration (invisible to a stale `master`) is still
+ *  caught. Fail-closed: any git failure / non-git root ⇒ empty array (never a positive from an
+ *  unavailable source). Called ONCE per analyzeTasks (the pool scan), never per task. */
+export function buildCommitTraceIndex(repoRoot) {
+  try {
+    const out = execFileSync("git", ["log", "--all", "--format=%s"], {
+      cwd: repoRoot, encoding: "utf8", timeout: 15_000, maxBuffer: 64 * 1024 * 1024,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    return out.split("\n").filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+/** True when a commit subject records the task's work in one of the live commit conventions.
+ *  Position-based (CLAUDE.md hard rule 2): the task id must appear as a DELIMITED word after the
+ *  `inner: ` / `fan-in: task/` / `fan-in ` prefix — a subject that merely mentions the id elsewhere
+ *  (e.g. an `outer:` closure commit listing many ids) is NOT a trace. The four forms cover the
+ *  observed real formats: `inner: <id>`, `fan-in: task/<id>`, `merge: fan-in task/<id>`, and the bare
+ *  `merge: fan-in <id>` (no `task/` prefix, e.g. gap-manager-tick-core-exclusion-now-inert-after-c9-fix). */
+export function commitSubjectTracesTask(subject, taskId) {
+  return wordMatch(subject, `inner: ${taskId}`)
+    || wordMatch(subject, `fan-in: task/${taskId}`)
+    || wordMatch(subject, `fan-in task/${taskId}`)
+    || wordMatch(subject, `fan-in ${taskId}`);
+}
+
+/** Batched commit-trace check: true when ANY subject in the analyzeTasks-built index traces the task. */
+export function commitTraceLanded(taskId, subjects) {
+  return subjects.some((s) => commitSubjectTracesTask(s, taskId));
+}
+
 /** True when the task is in the "this batch done, not yet flipped to done" state — the declared
- *  work has landed on master (task-status-drift-check's symbol-resolution / touch-file / git-history
- *  evidence) but `status` is still `ready` (fan-in has not flipped it). The signal is a UNION of two
+ *  work has landed on the mainline (task-status-drift-check's symbol-resolution / touch-file /
+ *  git-history evidence — the last over integration/develop/master per landingRef, not hardcoded
+ *  master, gap-git-history-landed-master-stale-under-two-line-model — OR the COMMIT-TRACE record
+ *  below) but `status` is still `ready` (fan-in has not flipped it). The signal is a UNION of three
  *  INDEPENDENT closure indicators:
  *   (1) taskWorkLanded — work-landed evidence (symbol-resolution / touch-file / git-history) that
  *       catches the "merged-but-AC-incomplete" half (the inner's fan-in merges WITHOUT ticking AC
  *       boxes; gap-ready-pool-check-counts-merged-not-flipped-tasks-in-the-pool). By itself it means
  *       "SOME work landed", NOT "the task is done" — so it excludes ONLY when the ACs are also
  *       complete (all checked) or near-complete (>50% — the "verification-window" done-flip shape,
- *       e.g. gap-dispatch 5/6). A workLanded task whose ACs are far from complete (<50% checked,
+ *       e.g. gap-dispatch 5/6) OR the task has no AC checkboxes at all (total===0 — structurally
+ *       unable to tick ACs, its landing is its closeout; gap-git-history-landed-master-stale-under-
+ *       two-line-model AC4). A workLanded task whose ACs are far from complete (<50% checked,
  *       e.g. gap-session-liveness 4/8) has REAL remaining implementation — STUCK-WORK — and must
  *       stay dispatchable (gap-ready-pool-worklanded-traps-stuck-work AC2), not be trapped out of
  *       both dispatch AND done-flip.
- *   (2) AC-complete — `all_acs_checked && status == ready` (countAcCheckboxes, total > 0): the
+ *   (2) COMMIT-TRACE (tasks/gap-nyf-branch-existence-vs-commit-trace) — a commit whose SUBJECT names
+ *       the task in the `inner: <id>` / `fan-in: task/<id>` / `fan-in <id>` conventions. PERSISTENT:
+ *       commit subjects survive branch deletion (the old branch-existence signal vanished when the
+ *       merged branch was deleted), and it reads `--all` (the two-line model's INTEGRATION fan-in
+ *       invisible to the stale-master git-history signal). Joins workLanded under the SAME
+ *       AC-completeness gate — the manager's "别改它" on
+ *       gap-ready-pool-worklanded-traps-stuck-work: a traced task whose ACs are far from complete is
+ *       STUCK-WORK with real remaining implementation and stays dispatchable.
+ *   (3) AC-complete — `all_acs_checked && status == ready` (countAcCheckboxes, total > 0): the
  *       COMPLETION state as written by the checkboxes, independent of AC writing style
  *       (gap-closure-detection-reads-symbols-not-checkboxes). A prose-AC completed task whose work
  *       landed but shows no resolvable symbols / `(new)` touches / git-history reference is invisible
  *       to (1) yet IS a closure candidate — this second signal surfaces it. Complements, never
  *       replaces, taskWorkLanded (the union, not an either/or).
- *  A task is excluded from the dispatchable pool when EITHER fires (a legal done-flip candidate).
- *  `taskId` is passed through so the git-history signal
+ *  A task is excluded from the dispatchable pool when ANY of the three fires (a legal done-flip
+ *  candidate). `taskId` is passed through so the git-history signal
  *  (gap-ready-pool-taskworklanded-underdetects-prose-ac-merged-tasks) can anchor on the task's own
- *  id without depending on the self-touch Touches entry. */
-export function notYetFlipped(task, repoRoot, gitIndex) {
+ *  id without depending on the self-touch Touches entry. `opts` is either the analyzeTasks-built
+ *  commit-subject index (ONE `git log --all` per pool scan; null/empty ⇒ the commit-trace signal is
+ *  off — the legacy caller form) or an options bag `{ ref, commitTraceSubjects }` (the current
+ *  analyzeTasks caller): `ref` names the landing ref (default: landingRef's integration→develop→master
+ *  resolution). */
+export function notYetFlipped(task, repoRoot, gitIndex, opts = null) {
   if (task.status !== "ready") return false;
-  const opts = { taskId: task.id };
-  if (gitIndex) opts.gitIndex = gitIndex; // batched git-history index (see buildGitHistoryIndex)
-  const workLanded = taskWorkLanded(task.body, repoRoot, opts);
+  // opts is EITHER the legacy commit-subject array OR an options bag { ref, commitTraceSubjects }.
+  const commitTraceSubjects = Array.isArray(opts) ? opts : (opts ? opts.commitTraceSubjects : null);
+  const o = { taskId: task.id };
+  if (gitIndex) o.gitIndex = gitIndex; // batched git-history index (see buildGitHistoryIndex)
+  if (opts && !Array.isArray(opts) && opts.ref) o.ref = opts.ref; // landing ref (two-line model)
+  const workLanded = taskWorkLanded(task.body, repoRoot, o);
+  // COMMIT-TRACE (gap-nyf-branch-existence-vs-commit-trace): a commit whose subject names the task in
+  // the inner:/fan-in: conventions is a PERSISTENT work-landed record — it survives branch deletion AND
+  // reads `--all` (the two-line model's integration fan-in invisible to the stale-master git-history
+  // signal). It joins workLanded under the SAME AC-completeness gate below (the manager's "别改它" on
+  // gap-ready-pool-worklanded-traps-stuck-work): a traced task whose ACs are far from complete is
+  // STUCK-WORK with real remaining implementation and stays dispatchable.
+  const traced = commitTraceSubjects ? commitTraceLanded(task.id, commitTraceSubjects) : false;
   const ac = extractSection(task.body, "Acceptance Criteria");
   const { total, checked } = countAcCheckboxes(ac);
   const allAcsChecked = total > 0 && checked === total;
@@ -458,7 +545,14 @@ export function notYetFlipped(task, repoRoot, gitIndex) {
   // waiting to flip. Only all-checked or >50% (the verification-window done-flip shape) counts.
   // Threshold is STRICTLY > 0.5 so a task at exactly 50% (gap-session-liveness 4/8) returns to the
   // dispatchable pool (gap-ready-pool-worklanded-traps-stuck-work verification anchor (a)).
-  const doneFlipReady = workLanded && (allAcsChecked || acRatio > 0.5);
+  // NO-AC fallback (gap-git-history-landed-master-stale-under-two-line-model AC4): a task with NO
+  // `## Acceptance Criteria` checkboxes (total=0) is STRUCTURALLY unable to tick ACs — allAcsChecked
+  // is always false — so it can never be a done-flip through the checkbox signals and would sit in
+  // the ready pool forever (measured 2026-08-11: last-pane / suite-red). When its work HAS landed
+  // (workLanded OR commit-trace), the landing itself is its closeout signal: total===0 joins the
+  // all-checked / >50% gate. A no-AC task whose work has NOT landed stays dispatchable (workLanded
+  // false keeps doneFlipReady false).
+  const doneFlipReady = (workLanded || traced) && (allAcsChecked || acRatio > 0.5 || total === 0);
   return doneFlipReady || allAcsChecked;
 }
 
@@ -496,6 +590,74 @@ export function readChildren(frontmatterRaw) {
     else if (/^\S/.test(lines[i])) break; // next top-level key ends the list
   }
   return out;
+}
+
+// ── PROSE-PREREQUISITE GAP (tasks/gap-prerequisite-gates-prose-invisible-to-mechanisms) ────────────
+// The mechanism paths that judge dispatch-readiness — the A15② dependency check
+// (it0-split-or-commit-check.ts's PARENT-DONE-IFF-CHILDREN), the ready-pool author→ready gate, and
+// the pre-dispatch readiness scan — read RELATION EDGES (parent/children/depends_on). A prerequisite
+// written ONLY as prose (a `[[task-id]]` wikilink inside a "Do not dispatch until … lands / 前置 /
+// depends on" declaration) is invisible to all three: the task stays ready/dispatchable and only a
+// subagent reading the body discovers it. This detector makes prose-declared prerequisites
+// FAIL-CLOSED: a task whose body declares a prerequisite that is NOT expressed as a relation edge is
+// excluded from the ready pool and ineligible for author→ready promotion (it stays dispatchable ONLY
+// when the prose prereq is ALSO a relation edge — a normal dependency, handled by depsReadyFor).
+//
+// Precision constraints (verified against the real store, 2026-08-11):
+//   - WIKILINKS INSIDE CODE SPANS ARE SKIPPED: a paragraph QUOTING another task's prereq prose inside
+//     backticks (`` `[[gap-…]]` `` — e.g. this very task's Proposal describing the empirical task) is
+//     an illustrative mention, not a prereq declaration. stripCode removes fenced blocks + inline
+//     backtick spans before wikilink matching.
+//   - A prereq keyword ALONE is not enough — the paragraph must ALSO carry a wikilink to an EXISTING
+//     task file (a broken link is a different defect, not a prereq claim).
+//   - "依赖" alone is deliberately NOT in the keyword set (a "无代码依赖 / no code dependency" mention
+//     would false-fire); only gating constructions qualify.
+const PREREQ_KEYWORD_RE =
+  /前置|depends?\s+on|depends_on|do\s+not\s+dispatch|勿派|不得派发|不得派|禁止派发|先决|前序|声明依赖|依赖前序|先落地|先完成|先跑/i;
+const WIKILINK_RE = /\[\[([A-Za-z0-9][A-Za-z0-9-]*)(?:[#|][^\]]*)?\]\]/g;
+
+/** Strip fenced code blocks (```…``` / ~~~…~~~) and inline backtick spans (`…`) so a QUOTED wikilink
+ *  inside code is not read as a prereq declaration. Fences are removed before inline spans (an inline
+ *  backtick can appear inside a fence). */
+export function stripCodeSpans(text) {
+  const noFence = text.replace(/```[\s\S]*?```|~~~[\s\S]*?~~~/g, " ");
+  return noFence.replace(/`[^`\n]*`/g, " ");
+}
+
+/** The task's declared relation-edge set — parent + children + depends_on (the fields every
+ *  dependency mechanism reads). A prereq written into ANY of these is mechanism-visible. */
+export function relationEdges(frontmatterRaw) {
+  const edges = new Set();
+  const parent = readFrontField(frontmatterRaw, "parent");
+  if (parent && parent !== "null" && parent !== "~") edges.add(parent);
+  for (const c of readChildren(frontmatterRaw)) edges.add(c);
+  for (const d of readDependsOn(frontmatterRaw)) edges.add(d);
+  return edges;
+}
+
+/** Task ids referenced as wikilinks inside prereq-declaration paragraphs of the body (code spans
+ *  stripped; only ids that resolve to an existing task file). */
+export function prosePrereqRefs(body, tasksDir) {
+  const refs = new Set();
+  const clean = stripCodeSpans(body);
+  for (const para of clean.split(/\r?\n\s*\r?\n/)) {
+    if (!PREREQ_KEYWORD_RE.test(para)) continue;
+    for (const m of para.matchAll(WIKILINK_RE)) {
+      const id = m[1];
+      if (fs.existsSync(path.join(tasksDir, `${id}.md`))) refs.add(id);
+    }
+  }
+  return [...refs];
+}
+
+/** Prose-declared prerequisites that are NOT expressed as a relation edge. Empty array = no gap (all
+ *  prose-declared prereqs are also edges, or there are none). A non-empty result is the fail-closed
+ *  signal: this task declares a prerequisite the mechanisms cannot see. */
+export function prosePrereqGap(body, frontmatterRaw, tasksDir) {
+  const refs = prosePrereqRefs(body, tasksDir);
+  if (refs.length === 0) return [];
+  const edges = relationEdges(frontmatterRaw);
+  return refs.filter((r) => !edges.has(r));
 }
 
 /** Mechanical strategic-traceability grep: does the body reference a written strategic question
@@ -607,6 +769,20 @@ export function consecutiveRedRounds(rounds) {
   return n;
 }
 
+/** gap-suite-blocking-experiment-rounds-count-toward-consecutive-red AC2 — is a verification-round a
+ *  one-off CONTROLLED-EXPERIMENT round (excluded from the consecutive-red count)? Mechanically
+ *  identifiable by a NON-DEFAULT laneCount: the default lane is nproc-derived (full-suite-runner's
+ *  defaultLaneCount — a lane-8 comparison vs the 4-lane default on this box is a probe, not a
+ *  regression). A round with NO laneCount field (legacy rows) is NOT an experiment round — only an
+ *  EXPLICIT non-default laneCount marks one, so existing/legacy rounds keep counting normally. */
+export function isExperimentRound(r, defaultLane) {
+  if (!r) return false;
+  if (r.laneCount === undefined || r.laneCount === null) return false;
+  const lane = Number(r.laneCount);
+  const def = Number(defaultLane);
+  return Number.isFinite(lane) && Number.isFinite(def) && lane !== def;
+}
+
 /** Collect the failure-file set implicated by a set of red rounds + the state file's failures.
  *  A round may carry its own `failures` array (fixture / the round-record writer — gap-suite-round-
  *  record-missing-failures-field AC2 now writes failures[] into red round records); the state file's
@@ -620,6 +796,30 @@ export function collectFailureFiles(rounds, stateFailures) {
   }
   for (const f of stateFailures || []) if (f && f.file) out.add(String(f.file));
   return [...out];
+}
+
+/** gap-suite-blocking-directory-glob-overbroad AC2 — is `glob` a DIRECTORY glob (a bare directory
+ *  such as `plugin/test/` — with or without the trailing slash — or an explicit `dir/**`)? A
+ *  directory glob expands to EVERY file under the directory, so matching it against a failure FILE
+ *  over-attributes: a task whose `## Touches` merely names a directory (e.g. `plugin/test/`) becomes
+ *  a suite-blocker for ANY failure inside it. Only FILE-SCOPED globs — a concrete path like
+ *  `plugin/test/checker-cost.test.mjs`, or a wildcard that targets files like
+ *  `plugin/test/*.test.mjs` — are attributable.
+ *
+ *  A glob is directory-shaped when, after stripping a trailing `/**` (the DIR-106 directory form that
+ *  parseTouches appends to trailing-slash entries) or a trailing `/`, the remainder carries no
+ *  wildcard and its basename has no file extension. (A bare extensionless FILE such as `Makefile` is
+ *  mis-classified directory-shaped too, but failure files are test files with extensions — an
+ *  extensionless path never appears in the failure list, so that false positive is harmless.)
+ */
+export function isDirectoryGlob(glob) {
+  const g = String(glob);
+  if (/^[*?]+$/.test(g)) return true; // all-wildcard glob matches every file — directory-like
+  const m = g.match(/^(.*?)\/\*\*\/?$/);
+  const prefix = (m ? m[1] : g).replace(/\/+$/, "");
+  if (/[*?]/.test(prefix)) return false;
+  const base = prefix.split("/").pop() || "";
+  return !base.includes(".");
 }
 
 /**
@@ -644,6 +844,13 @@ function failureFileMatches(declared, file) {
   for (const d of declared) {
     if (d === file) return true;
     const dStr = String(d);
+    // SHAPE CONSTRAINT (gap-suite-blocking-directory-glob-overbroad AC2): a DIRECTORY-SHAPED
+    // declared entry (a bare directory token — e.g. `plugin/test` — whose basename carries no file
+    // extension) is not a FILE, so it must never attribute a failure FILE through the basename
+    // reverse-lookup. Without this guard, a failure file whose basename happens to equal a directory
+    // name (e.g. a bare `test`) would pull in every task that touches a directory of that name.
+    // Concrete file paths (extension-bearing) and file-scoped wildcards are unaffected.
+    if (isDirectoryGlob(dStr)) continue;
     if (fileBare || !dStr.includes("/")) {
       if (dStr.split("/").pop() === fileBase) return true;
     }
@@ -658,17 +865,30 @@ function failureFileMatches(declared, file) {
  *  @param {Map<string,object>} i.tasks     id → task ({body})
  *  @param {number} [i.minRedWindow]        consecutive red rounds required (default RED_WINDOW_MIN_DEFAULT)
  *  @param {(globs:string[])=>Set<string>} i.expand  declared-Touches expander (fs-backed in prod)
+ *  @param {number} [i.defaultLane]         the nproc-derived DEFAULT laneCount (default: full-suite-
+ *                                          runner's defaultLaneCount()); rounds with a laneCount ≠ this
+ *                                          are CONTROLLED-EXPERIMENT rounds, excluded from the
+ *                                          consecutive-red count (AC2 — gap-suite-blocking-experiment-
+ *                                          rounds-count-toward-consecutive-red). Injectable for hermetic
+ *                                          tests.
  *  @returns {{ ids:Set<string>, consecutiveRed:number, windowActive:boolean, failureFiles:string[] }}
  *  A task is suite-blocking when the window is active AND one of its declared ## Touches expands to
  *  one of the window's failure files. Only dispatchable-status tasks (ready/todo) are candidates — a
  *  done task's work has already landed, so it is never re-prioritized. Negative control (AC4): no
  *  window OR no failure hit ⇒ ids empty. */
-export function computeSuiteBlocking({ rounds, stateFailures, tasks, minRedWindow = RED_WINDOW_MIN_DEFAULT, expand }) {
-  const consecutiveRed = consecutiveRedRounds(rounds);
+export function computeSuiteBlocking({ rounds, stateFailures, tasks, minRedWindow = RED_WINDOW_MIN_DEFAULT, expand, defaultLane = defaultLaneCount() }) {
+  // gap-suite-blocking-experiment-rounds-count-toward-consecutive-red AC2: a one-off CONTROLLED-
+  // EXPERIMENT round (laneCount ≠ nproc-derived default) is an experiment finding, not a regression —
+  // it must not push the consecutive-red window. Skip such rounds ENTIRELY (count AND failure
+  // attribution): their red stays recorded in the round record itself (state/reason preserved), it
+  // just does not drive suite-blocking. `defaultLane` is injectable so tests are hermetic (they pass
+  // an explicit default rather than depending on the host nproc).
+  const realRounds = rounds.filter((r) => !isExperimentRound(r, defaultLane));
+  const consecutiveRed = consecutiveRedRounds(realRounds);
   if (consecutiveRed < minRedWindow) {
     return { ids: new Set(), consecutiveRed, windowActive: false, failureFiles: [] };
   }
-  const failureFiles = collectFailureFiles(rounds, stateFailures);
+  const failureFiles = collectFailureFiles(realRounds, stateFailures);
   if (failureFiles.length === 0) {
     return { ids: new Set(), consecutiveRed, windowActive: true, failureFiles: [] };
   }
@@ -677,7 +897,14 @@ export function computeSuiteBlocking({ rounds, stateFailures, tasks, minRedWindo
     if (task.status !== "ready" && task.status !== "todo") continue;
     const parsed = parseTouches(task.body);
     if (!parsed.hasSection || parsed.globs.length === 0) continue;
-    const declared = expand(parsed.globs);
+    // gap-suite-blocking-directory-glob-overbroad AC2 — a DIRECTORY glob (a bare directory like
+    // `plugin/test/`, which parseTouches turns into `plugin/test/**`) expands to every file under
+    // the directory, so it would attribute the task as the suite-blocker for ANY failure in that
+    // directory. Directory globs do NOT attribute: only FILE-SCOPED globs (concrete paths or
+    // wildcards that target files) are expanded and matched against failure files.
+    const fileGlobs = parsed.globs.filter((g) => !isDirectoryGlob(g));
+    if (fileGlobs.length === 0) continue;
+    const declared = expand(fileGlobs);
     // AC3 — match with the shape-normalizing comparator (bare basename AND repo-relative failure
     // files both resolve against declared Touches; see failureFileMatches).
     for (const f of failureFiles) {
@@ -688,12 +915,21 @@ export function computeSuiteBlocking({ rounds, stateFailures, tasks, minRedWindo
 }
 
 function depsReadyFor(task, allTasks) {
+  // ALL prerequisites — parent AND every depends_on entry (gap-prerequisite-gates-prose-invisible-
+  // to-mechanisms AC2: prereqs live in relation edges and the author→ready gate reads the SAME field
+  // the dispatch check reads). Each must be done; a missing file fails closed.
+  const deps = [];
   const parent = task.parent;
-  if (!parent || parent === "null" || parent === "~") return true;
-  const p = allTasks.get(parent);
-  // Parent file missing → cannot confirm done → fail closed (conservative, not dispatchable).
-  if (!p) return false;
-  return p.status === "done";
+  if (parent && parent !== "null" && parent !== "~") deps.push(parent);
+  for (const d of readDependsOn(task.frontmatterRaw)) deps.push(d);
+  if (deps.length === 0) return true;
+  for (const depId of deps) {
+    const p = allTasks.get(depId);
+    // Parent/dep file missing → cannot confirm done → fail closed (conservative, not dispatchable).
+    if (!p) return false;
+    if (p.status !== "done") return false;
+  }
+  return true;
 }
 
 /** Largest subset of `parsed` (an array of parseTouches results) whose members are pairwise
@@ -751,6 +987,10 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
   // intercepted, not promoted).
   const staleRefs = judgePoolCandidate(root, id); // null when tasks/<id>.md is missing — not a live candidate
   const retiredMechanism = staleRefs !== null && staleRefs.length > 0;
+  // PROSE-PREREQUISITE GAP (gap-prerequisite-gates-prose-invisible-to-mechanisms AC3): a candidate
+  // whose body declares a prerequisite in prose WITHOUT a corresponding relation edge must NOT be
+  // promoted to ready — it would enter the ready pool with a dependency no mechanism can see.
+  const prosePrereqGapIds = prosePrereqGap(task.body, task.frontmatterRaw, path.join(root, "tasks"));
   // Touch-disjointness score: how many of the already-pooled ready tasks + in-flight tasks this
   // candidate is pairwise touches-DISJOINT from (checkTouchesPair, the real dispatch judge). Higher
   // = promotes into a pool that stays dispatchable-disjoint (AC4 — disjointness ranks FIRST).
@@ -773,10 +1013,14 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
     // is never eligible (the intercept reason is mechanically carried for the `intercepted` output).
     retiredMechanism,
     retiredRefs: staleRefs !== null ? staleRefs : [],
+    // PROSE-PREREQUISITE GAP (AC3): prose-declared prereqs with no relation edge — never eligible.
+    prosePrereqGap: prosePrereqGapIds,
     // AC5: the touchesResolve guard is KEPT — majority-missing candidates are never eligible.
     // AC1: the retired-mechanism guard is ADDED — a candidate targeting a retired pipeline mechanism
     // is never eligible either.
-    eligible: depsReady && four.complete && touchesResolve && !retiredMechanism,
+    // AC3: the prose-prereq-no-edge guard is ADDED — a candidate whose prose prereqs have no relation
+    // edge is never eligible (promotion would put an invisible dependency into the ready pool).
+    eligible: depsReady && four.complete && touchesResolve && !retiredMechanism && prosePrereqGapIds.length === 0,
   };
 }
 
@@ -826,12 +1070,16 @@ export function buildTargetedPromotion(id, task, root, allTasks) {
   const depsReady = depsReadyFor(task, allTasks);
   const touches = checkTaskTouchesResolve(task.body, root);
   const touchesResolve = !touches.majorityMissing;
-  const eligible = four.complete && depsReady && touchesResolve;
+  // PROSE-PREREQUISITE GAP (AC3): targeted promotion must NOT advance a task whose prose-declared
+  // prereqs have no relation edge — same fail-closed as the bulk path.
+  const prosePrereqGapIds = prosePrereqGap(task.body, task.frontmatterRaw, path.join(root, "tasks"));
+  const eligible = four.complete && depsReady && touchesResolve && prosePrereqGapIds.length === 0;
   const checks = {
     fourArtifacts: four.complete,
     missingArtifacts: four.missing,
     depsReady,
     touchesResolve,
+    prosePrereqGap: prosePrereqGapIds,
     notFixture: true,
     notParked: true,
     retiredMechanism: false,
@@ -847,7 +1095,8 @@ export function buildTargetedPromotion(id, task, root, allTasks) {
     reason: eligible
       ? `${id}: targeted promotion (outer stage-goal selection) — mechanically eligible; run \`quay promote ${id}\``
       : `${id}: not eligible · four-artifacts ${four.complete ? "complete" : `missing ${four.missing.join(",")}`} · ` +
-        `deps ${depsReady ? "ready" : "NOT-ready"} · touches ${touchesResolve ? "resolve" : "MISSING"}`,
+        `deps ${depsReady ? "ready" : "NOT-ready"} · touches ${touchesResolve ? "resolve" : "MISSING"} · ` +
+        `prose-prereq ${prosePrereqGapIds.length === 0 ? "ok" : `GAP(${prosePrereqGapIds.join(",")})`}`,
   };
 }
 
@@ -910,7 +1159,18 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
   // master-history path→commit index ONCE for the whole pool scan — ONE `git log` pass instead of
   // ~30-50 per-task `git log -- <paths>` calls (each O(history) — the >150s pool-check timeout).
   const readyCount = [...allTasks.values()].filter((t) => t.status === "ready").length;
-  const gitIndex = readyCount > 0 ? buildGitHistoryIndex(root) : null;
+  // Landing ref for the git-history signal (gap-git-history-landed-master-stale-under-two-line-model):
+  // follow the two-line model's working line — the CONFIGURED integration/develop/master refs
+  // (--integration/--develop/--master) resolved to the first that exists, so a stale master no longer
+  // misjudges everything landed after it as unlanded. "Config source" = these CLI flags, which the
+  // outer loop drives from .quay/config.yml's branch model (gap-quay-init-never-writes-branch-model-config).
+  const landRef = landingRef(root, { candidates: [integration, develop, master] });
+  const gitIndex = readyCount > 0 ? buildGitHistoryIndex(root, { ref: landRef }) : null;
+  // COMMIT-TRACE (gap-nyf-branch-existence-vs-commit-trace): ONE `git log --all` subject pass for the
+  // whole pool scan (like buildGitHistoryIndex's batched index — never per-task git calls). Reads
+  // `--all` so the two-line model's INTEGRATION fan-in is visible where the stale-master git-history
+  // index sees nothing (master..integration=2224 on 2026-08-11).
+  const commitTraceSubjects = readyCount > 0 ? buildCommitTraceIndex(root) : [];
   const ready = [];
   const excluded = [];
   for (const [id, t] of allTasks) {
@@ -919,7 +1179,14 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
     if (isFixture(t)) reasons.push("fixture");
     if (isParked(t)) reasons.push("parked");
     if (isAcRecord(t)) reasons.push("ac-record");
-    if (notYetFlipped(t, root, gitIndex)) reasons.push("not-yet-flipped");
+    if (notYetFlipped(t, root, gitIndex, { ref: landRef, commitTraceSubjects })) reasons.push("not-yet-flipped");
+    // PROSE-PREREQUISITE GAP (gap-prerequisite-gates-prose-invisible-to-mechanisms AC3): a ready task
+    // whose body declares a prerequisite in prose WITHOUT a relation edge is NOT dispatchable — it
+    // would be dispatched with an invisible dependency and only a subagent reading the body would
+    // discover it. Fail-closed at the pool: excluded (never dispatchable until the edge is added).
+    // The reason carries the 前置 literal (the Contract measure's grep surface).
+    const proseGap = prosePrereqGap(t.body, t.frontmatterRaw, tasksDir);
+    if (proseGap.length > 0) reasons.push(`prose-prereq-no-edge (前置无边: ${proseGap.join(",")})`);
     if (reasons.length > 0) excluded.push({ id, reasons });
     else ready.push(id);
   }
@@ -1237,6 +1504,6 @@ function main(argv) {
   return 0;
 }
 
-if (isDirectEntry(import.meta)) {
+if (isDirectEntry(import.meta, undefined, "ready-pool-check")) {
   process.exitCode = main(process.argv);
 }

@@ -226,6 +226,6 @@ export function main(argv) {
   return 0;
 }
 
-if (isDirectEntry(import.meta)) {
+if (isDirectEntry(import.meta, undefined, "fork-baseline")) {
   process.exitCode = main(process.argv);
 }

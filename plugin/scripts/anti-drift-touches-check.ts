@@ -126,6 +126,6 @@ export async function main(argv) {
   return 1;
 }
 
-if (isDirectEntry(import.meta)) {
+if (isDirectEntry(import.meta, undefined, "anti-drift-touches-check")) {
   main(process.argv).then((code) => process.exit(code));
 }

@@ -998,6 +998,6 @@ async function main(argv) {
   }
 }
 
-if (isDirectEntry(import.meta)) {
+if (isDirectEntry(import.meta, undefined, "prepare-admission-check")) {
   main(process.argv).then((code) => process.exit(code));
 }

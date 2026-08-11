@@ -1,7 +1,9 @@
 ---
 id: gap-reconcile-step-skipped-no-compliance-product
-title: "inner 核 A13 写了【stale_brackets > 0 ⇒ 调 --reconcile】但没有产物区分守与不守——04:01 心跳已写 realConcurrency=8(残留占槽) 却未执行 --reconcile，直接损失 4 槽×多轮；处方=slot-status 报 stale_brackets>0 而同轮无 --reconcile 调用 ⇒ 该轮判不合规（C17 形状闭合）"
-status: todo
+title: inner 核 A13 写了【stale_brackets > 0 ⇒ 调 --reconcile】但没有产物区分守与不守——04:01 心跳已写
+  realConcurrency=8(残留占槽) 却未执行 --reconcile，直接损失 4 槽×多轮；处方=slot-status 报
+  stale_brackets>0 而同轮无 --reconcile 调用 ⇒ 该轮判不合规（C17 形状闭合）
+status: needs-human
 labels:
   - gap
   - defect
@@ -37,16 +39,16 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 slot-status 实测（38/27/11/15/0）+ inner 按 C6 规矩停派 + A13 写了 --reconcile 但 04:01 没执行（本任务 Proposal 已含）
-- [ ] AC2: **合规判据**——slot-status 加 `reconcile_compliant`（stale>0 且无 reconcile ⇒ false）
-- [ ] AC3: **上游观察**——outer tick 读 reconcile_compliant，false ⇒ 报未对账并驱动
-- [ ] AC4: **既有不回归**——`--for-task` scoped 门绿
+- [x] AC1: **复现固化**——任务体记录 slot-status 实测（38/27/11/15/0）+ inner 按 C6 规矩停派 + A13 写了 --reconcile 但 04:01 没执行（本任务 Proposal 已含）
+- [x] AC2: **合规判据**——slot-status 加 `reconcile_compliant`（stale>0 且无 reconcile ⇒ false）
+- [x] AC3: **上游观察**——outer tick 读 reconcile_compliant，false ⇒ 报未对账并驱动
+- [x] AC4: **既有不回归**——`--for-task` scoped 门绿
 
 ## Definition of Done
 
-- [ ] AC1–AC4 全部勾上
-- [ ] 修后实跑：stale>0 无 reconcile ⇒ reconcile_compliant=false（贴输出）；reconcile 后 true
-- [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
+- [x] AC1–AC4 全部勾上
+- [x] 修后实跑：stale>0 无 reconcile ⇒ reconcile_compliant=false（贴输出）；reconcile 后 true
+- [x] 既有测试 + 新增测试全绿（`--for-task` scoped）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
 
 ## Touches
@@ -75,3 +77,46 @@ resume    合规判据 / 留痕 / 上游观察 / 测试分步提交，任一步�
 reviewer: outer
 at: 2026-08-11
 changed: manager 04:4x——空槽真根因=账本失真（27 stale ⇒ slots-free 0），非节律/触发器；inner 按 C6 规矩停派非漏派；缺的下一步在 A13「stale>0 ⇒ --reconcile」，04:01 心跳已写残留占槽却没执行。C17 形状（核里写了无产物区分守与不守）。处方：slot-status 加 reconcile_compliant。实现归 inner，判定归 outer
+
+## Evidence（inner 2026-08-11 实跑）
+
+**修后实跑（DoD 锚）**——`--slot-status --cap 5 --json`：
+
+```
+=== (a) stale>0 无 reconcile ===
+stale_brackets: 1
+reconcile_compliant: False
+reconcile_compliant_reason: stale-but-no-reconcile-invocation
+last_reconcile_at_ms: None
+=== (b) 调 --reconcile 后 ===
+closed: 1 kept: 0
+stale_brackets: 0
+reconcile_compliant: True
+reconcile_compliant_reason: no-stale-brackets
+last_reconcile_at_ms: 1786430030503
+=== (c) reconcile 调用留痕 ===
+{"type":"reconcile","event":"invoke","atMs":1786430030503}
+```
+
+**AC2 合规判据**：`computeReconcileCompliance(stale, lastReconcileAtMs, nowMs)` 纯函数——
+stale=0 ⇒ true；stale>0 且从无 reconcile 调用 ⇒ false（04:01 形态）；stale>0 且最后一次 reconcile 在
+`RECONCILE_COMPLIANCE_WINDOW_MS`（30min，覆盖 1-2 tick）内 ⇒ true；超出 ⇒ false（需再对账）。
+`analyzeSlotStatus` 注入 `lastReconcileAtMs`/`nowMs`，输出 `reconcile_compliant` /
+`reconcile_compliant_reason` / `last_reconcile_at_ms`；`--slot-status --json` 与 `--slots --json`
+两个纯读面都携带（Contract measure 锚定 `--slot-status --cap 5 --json` 的 `reconcile_compliant`）。
+
+**AC3 上游观察**：outer `orchestration/orchestrator-tick-core.md` 新增 A19——每 tick 读
+`--slot-status --cap 5 --json` 的 `reconcile_compliant`，false ⇒ 报「inner 未对账」并驱动 inner 调
+`--reconcile`，false 而无驱动 ⇒ B8 no-action 不合法。inner 执行核 `fast-mode-tick-core.md` A13 注明
+合规产物（stale>0 且 false ⇒ 本 tick 判未对账、立即调 --reconcile 留痕、记 tick-log）。
+
+**AC4 scoped 门**：`bash scripts/test.sh --for-task gap-reconcile-step-skipped-no-compliance-product --allow-thin`
+→ exit 0；63 telemetry 测试 + 12 halt 测试全绿（`pass 63 / fail 0 / cancelled 0`）。
+
+**提交（worktree 4 步，各一步单独 commit）**：
+- 106e67b7 留痕：--reconcile 每次调用写 reconcile-invocations.jsonl 时间戳（含零关闭），readAllEvents 排除之
+- 3865403f 合规判据：slot-status/slots 加 reconcile_compliant（stale>0 且邻近无 reconcile ⇒ false）
+- 17739e9c 测试：reconcile_compliant 判据 + 留痕用例（新增 7 条）
+- 1df54c36 上游观察：三层核 A13 注明合规产物 + outer A19 读 reconcile_compliant
+
+**全量套件绿留待外层 verification-round 验证**（执行纪律：inner 不跑全量套件）。

@@ -189,6 +189,6 @@ export function extractTouchesSection(fullText) {
 // .ts under experiments/.../scripts/ to be NON-SILENT on no args, so present the report-tool
 // no-args "Usage:" signature here rather than exiting silently (gap-touches-orthogonality-
 // symlink-isdirect-mismatch). Imports of this module never trigger this block (isDirectEntry).
-if (isDirectEntry(import.meta)) {
+if (isDirectEntry(import.meta, undefined, "touches-parser")) {
   process.stdout.write("Usage: touches-parser.ts is a shared module, not a CLI — import { parseTouchEntries, extractTouchesSection, stripTouchAnnotation } from it.\n");
 }

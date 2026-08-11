@@ -211,6 +211,6 @@ export function main(argv: string[]): number {
   return ok ? 0 : 1;
 }
 
-if (isDirectEntry(import.meta)) {
+if (isDirectEntry(import.meta, undefined, "drive-contract-check")) {
   process.exit(main(process.argv));
 }

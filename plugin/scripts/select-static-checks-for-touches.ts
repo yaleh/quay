@@ -507,6 +507,6 @@ export function main(argv) {
   return 0;
 }
 
-if (isDirectEntry(import.meta)) {
+if (isDirectEntry(import.meta, undefined, "select-static-checks-for-touches")) {
   process.exitCode = main(process.argv);
 }

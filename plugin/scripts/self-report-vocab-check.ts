@@ -243,6 +243,6 @@ export function main(argv) {
   return 0; // DETECTOR — report only, never a gate
 }
 
-if (isDirectEntry(import.meta)) {
+if (isDirectEntry(import.meta, undefined, "self-report-vocab-check")) {
   process.exit(main(process.argv.slice(2)));
 }

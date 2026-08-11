@@ -284,6 +284,39 @@ test("AC7 ratchet shrink: fixing a baselined task exits 0 and reports resolved",
   assert.match(r.stdout, /new since baseline: 0/);
 });
 
+test("--no-block: a NEW unowned AC is REPORTED + ledgered but does NOT exit 1 (gap-task-file-static-syntax-should-not-block-product-verification, option ①)", () => {
+  const root = makeGitWorkspace("noblock", {
+    "done-half.md": acTask("done-half", "done", 8, 4),
+  });
+  let r = runCli(root, ["--write-ratchet"]);
+  assert.equal(r.status, 0, r.stderr);
+  // Clean store → --no-block exits 0 with zero recorded.
+  r = runCli(root, ["--no-block"]);
+  assert.equal(r.status, 0, r.stdout);
+  assert.match(r.stdout, /recorded \(non-blocking\): 0/);
+  // A NEW done task with unchecked ACs → DEFAULT exits 1 (ratchet growth, unchanged), --no-block exits 0.
+  fs.writeFileSync(path.join(root, "tasks", "done-new.md"), acTask("done-new", "done", 3, 2));
+  r = runCli(root);
+  assert.equal(r.status, 1, r.stdout);
+  assert.match(r.stdout, /new since baseline: 2/);
+  r = runCli(root, ["--no-block"]);
+  assert.equal(r.status, 0, r.stdout);
+  // Reported + ledgered; the runner's static-check failure marker is avoided (no "new since baseline: N").
+  assert.match(r.stdout, /unowned: done-new/);
+  assert.match(r.stdout, /recorded \(non-blocking\): 2/);
+  assert.match(r.stdout, /recorded \(non-blocking, grow-only ledger\): 2/);
+  assert.doesNotMatch(r.stdout, /new since baseline: 2/);
+  // Grow-only ledger written (one line per unowned AC).
+  const ledgerPath = path.join(root, ".quay", "task-file-violation-ledger.jsonl");
+  assert.ok(fs.existsSync(ledgerPath), "grow-only ledger must be written");
+  const lineCount = () => fs.readFileSync(ledgerPath, "utf8").trim().split(/\r?\n/).filter(Boolean).length;
+  assert.equal(lineCount(), 2);
+  // Grow-only: a second run does NOT re-append (只增不减, dedup by (checker, violation)).
+  r = runCli(root, ["--no-block"]);
+  assert.equal(r.status, 0, r.stdout);
+  assert.equal(lineCount(), 2);
+});
+
 test("writeBaseline refuses to grow past the ceiling or add new entries", () => {
   const root = makeGitWorkspace("norefuse");
   // Baseline of 1 entry, ceiling 1.

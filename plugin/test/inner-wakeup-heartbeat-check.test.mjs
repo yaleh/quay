@@ -13,10 +13,17 @@
 //
 // This file pins BOTH:
 //   (a) the checker's LOGIC (plugin/scripts/inner-wakeup-heartbeat-check.ts) — hermetic pure-function
-//       tests + CLI exit-code tests (fresh ⇒ 0, stale/missing/malformed ⇒ 1);
+//       tests + CLI exit-code tests (fresh ⇒ 0, stale/missing/malformed/fields-missing ⇒ 1);
 //   (b) the DOC-CONTRACT wiring — fast-mode-tick-core.md B3 + fast-mode-loop-tick.md step 6 must carry
 //       the WRITE instruction (inner writes the product on every reschedule), and
 //       orchestrator-tick-core.md A 段 must carry the READ+judge invocation.
+//
+// Field-contract extension (tasks/gap-inner-heartbeat-fields-shrunk-no-minimal-contract): since
+// 2026-08-11 the checker ALSO enforces the minimal field contract (AC2) — a FRESH heartbeat must carry
+// the structured keys ts/runIds/blocked/budgetHit/effectiveCap/agentDispatches/delaySeconds; missing
+// key ⇒ "心跳字段缺失" + exit 1. reason prose may supplement but never replace the structured fields
+// (AC3). The CLI fixtures therefore use the FULL structured shape (fullHeartbeat) for ALIVE cases, and
+// the shrunk 3-key shape is the RED case — it is the exact defect this task fixes.
 //
 // Run:
 //   scripts/test.sh plugin/test/inner-wakeup-heartbeat-check.test.mjs
@@ -31,11 +38,14 @@ import { spawnSync } from "node:child_process";
 
 import {
   DEFAULT_MAX_AGE_SECS,
+  FIELDS_MISSING_REASON,
   HEARTBEAT_FILE,
   MALFORMED,
   parseHeartbeat,
   judgeHeartbeat,
   readHeartbeatText,
+  checkFieldContract,
+  REQUIRED_HEARTBEAT_FIELDS,
 } from "../scripts/inner-wakeup-heartbeat-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -101,6 +111,63 @@ test("DEFAULT_MAX_AGE_SECS = 3 tick periods × 1800s (Contract band `<= 5400`)",
   assert.equal(DEFAULT_MAX_AGE_SECS, 3 * 1800);
 });
 
+// ── minimal field contract (AC2/AC3 — tasks/gap-inner-heartbeat-fields-shrunk-no-minimal-contract) ─
+
+test("AC2 — REQUIRED_HEARTBEAT_FIELDS = the Contract's 7 structured keys (heartbeat_field_count >= 7)", () => {
+  assert.deepEqual(REQUIRED_HEARTBEAT_FIELDS, [
+    "ts", "runIds", "blocked", "budgetHit", "effectiveCap", "agentDispatches", "delaySeconds",
+  ]);
+  assert.equal(REQUIRED_HEARTBEAT_FIELDS.length, 7);
+});
+
+test("AC2 — checkFieldContract passes a full-shape heartbeat (all 7 required keys present)", () => {
+  const c = checkFieldContract(fullHeartbeat());
+  assert.equal(c.ok, true, `full shape must satisfy the contract:\n${JSON.stringify(c)}`);
+  assert.equal(c.requiredPresent, 7);
+  assert.deepEqual(c.missing, []);
+  assert.deepEqual(c.wrongType, []);
+  assert.ok(c.fieldCount >= 7, `fieldCount ${c.fieldCount} must be >= 7`);
+});
+
+test("AC2 — checkFieldContract flags a heartbeat missing blocked[] (A3 判卡住的前提)", () => {
+  const { blocked, ...withoutBlocked } = fullHeartbeat(); // omit the key entirely (undefined ≠ missing)
+  const c = checkFieldContract(withoutBlocked);
+  assert.equal(c.ok, false);
+  assert.ok(c.missing.includes("blocked"), `blocked must be reported missing:\n${JSON.stringify(c.missing)}`);
+  assert.equal(c.requiredPresent, 6);
+});
+
+test("AC2 — checkFieldContract flags missing runIds + effectiveCap together", () => {
+  const { runIds, effectiveCap, ...without } = fullHeartbeat();
+  const c = checkFieldContract(without);
+  assert.equal(c.ok, false);
+  assert.ok(c.missing.includes("runIds"), "runIds must be reported missing");
+  assert.ok(c.missing.includes("effectiveCap"), "effectiveCap must be reported missing");
+});
+
+test("AC3 — prose does NOT replace the structured fields: a {ts, delaySeconds, reason} heartbeat is RED", () => {
+  // The exact 2026-08-11 05:20 shrink — fresh (ts present) but missing every structured key.
+  const c = checkFieldContract({ ts: 1786349702, delaySeconds: 1500, reason: "tick heartbeat" });
+  assert.equal(c.ok, false, "reason prose must not substitute for structured fields");
+  for (const f of ["runIds", "blocked", "budgetHit", "effectiveCap", "agentDispatches"]) {
+    assert.ok(c.missing.includes(f), `${f} must be missing`);
+  }
+  assert.equal(c.requiredPresent, 2, "only ts + delaySeconds are present");
+});
+
+test("AC2 — checkFieldContract flags a wrong-typed blocked (string instead of array)", () => {
+  const c = checkFieldContract(fullHeartbeat({ blocked: "not-an-array" }));
+  assert.equal(c.ok, false);
+  assert.ok(c.wrongType.includes("blocked"), `blocked must be wrongType:\n${JSON.stringify(c.wrongType)}`);
+});
+
+test("AC2 — checkFieldContract on null/missing heartbeat reports ALL required fields missing", () => {
+  const c = checkFieldContract(null);
+  assert.equal(c.ok, false);
+  assert.deepEqual(c.missing, REQUIRED_HEARTBEAT_FIELDS);
+  assert.equal(c.fieldCount, 0);
+});
+
 // ── CLI integration (spawn the real checker against a temp workspace) ───────────────────────────────
 
 function runCli(root, extra = []) {
@@ -118,12 +185,26 @@ function makeRootWithHeartbeat(heartbeatObjOrText) {
   return tmp;
 }
 
-test("AC3 CLI — fresh heartbeat exits 0 (ALIVE)", () => {
-  const now = Math.floor(Date.now() / 1000);
-  const root = makeRootWithHeartbeat({ ts: now, delaySeconds: 1500, reason: "tick heartbeat" });
+/** Full contract-compliant heartbeat (the shape the writer must produce since 2026-08-11). */
+function fullHeartbeat(overrides = {}) {
+  return {
+    ts: Math.floor(Date.now() / 1000),
+    runIds: ["run-1"],
+    blocked: [],
+    budgetHit: false,
+    effectiveCap: 3,
+    agentDispatches: 1,
+    delaySeconds: 1500,
+    reason: "tick heartbeat",
+    ...overrides,
+  };
+}
+
+test("AC3 CLI — fresh full-shape heartbeat exits 0 (ALIVE)", () => {
+  const root = makeRootWithHeartbeat(fullHeartbeat());
   try {
     const r = runCli(root);
-    assert.equal(r.status, 0, `fresh heartbeat must exit 0:\n${r.stdout}\n${r.stderr}`);
+    assert.equal(r.status, 0, `fresh full-shape heartbeat must exit 0:\n${r.stdout}\n${r.stderr}`);
     assert.match(r.stdout, /ALIVE/, "stdout must say ALIVE");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -131,7 +212,7 @@ test("AC3 CLI — fresh heartbeat exits 0 (ALIVE)", () => {
 });
 
 test("AC3 CLI — stale heartbeat exits 1 and names 兜底心跳断", () => {
-  const root = makeRootWithHeartbeat({ ts: Math.floor(Date.now() / 1000) - 9999, delaySeconds: 1500, reason: "tick heartbeat" });
+  const root = makeRootWithHeartbeat(fullHeartbeat({ ts: Math.floor(Date.now() / 1000) - 9999 }));
   try {
     const r = runCli(root);
     assert.equal(r.status, 1, `stale heartbeat must exit 1:\n${r.stdout}\n${r.stderr}`);
@@ -153,8 +234,7 @@ test("AC3 CLI — missing file exits 1 (fail-closed)", () => {
 });
 
 test("AC3 CLI — custom --max-age-secs makes an old heartbeat ALIVE when under the band", () => {
-  const now = Math.floor(Date.now() / 1000);
-  const root = makeRootWithHeartbeat({ ts: now - 10000, delaySeconds: 1500, reason: "tick heartbeat" });
+  const root = makeRootWithHeartbeat(fullHeartbeat({ ts: Math.floor(Date.now() / 1000) - 10000 }));
   try {
     const r = runCli(root, ["--max-age-secs", "20000", "--json"]);
     assert.equal(r.status, 0, `heartbeat under a wider band must exit 0:\n${r.stdout}\n${r.stderr}`);
@@ -167,8 +247,7 @@ test("AC3 CLI — custom --max-age-secs makes an old heartbeat ALIVE when under 
 });
 
 test("CLI — --json emits machine-readable verdict", () => {
-  const now = Math.floor(Date.now() / 1000);
-  const root = makeRootWithHeartbeat({ ts: now - 7000, delaySeconds: 1500, reason: "tick heartbeat" });
+  const root = makeRootWithHeartbeat(fullHeartbeat({ ts: Math.floor(Date.now() / 1000) - 7000 }));
   try {
     const r = runCli(root, ["--json"]);
     assert.equal(r.status, 1, "stale → exit 1 even in --json mode");
@@ -176,6 +255,77 @@ test("CLI — --json emits machine-readable verdict", () => {
     assert.equal(out.verdict, "DEAD");
     assert.equal(out.status, "stale");
     assert.equal(out.maxAgeSecs, DEFAULT_MAX_AGE_SECS);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC2 CLI — fresh but field-shrunk (3 keys, the 2026-08-11 05:20 defect) exits 1 with 心跳字段缺失", () => {
+  const root = makeRootWithHeartbeat({
+    ts: Math.floor(Date.now() / 1000),
+    delaySeconds: 1500,
+    reason: "tick heartbeat",
+  });
+  try {
+    const r = runCli(root);
+    assert.equal(r.status, 1, `field-shrunk fresh heartbeat must exit 1:\n${r.stdout}\n${r.stderr}`);
+    assert.match(r.stdout, /心跳字段缺失/, "the verdict must name 心跳字段缺失");
+    assert.match(r.stdout, /blocked\(缺失\)/, "blocked must be named as missing");
+    assert.match(r.stdout, /runIds\(缺失\)/, "runIds must be named as missing");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC2 CLI --json — fields-missing carries status + missing list", () => {
+  const root = makeRootWithHeartbeat({
+    ts: Math.floor(Date.now() / 1000),
+    delaySeconds: 1500,
+    reason: "tick heartbeat",
+  });
+  try {
+    const r = runCli(root, ["--json"]);
+    assert.equal(r.status, 1, "field-shrunk must exit 1 even in --json mode");
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.verdict, "DEAD");
+    assert.equal(out.status, "fields-missing");
+    assert.equal(out.reason, FIELDS_MISSING_REASON);
+    assert.ok(out.fieldContract.missing.includes("blocked"), "blocked must be in fieldContract.missing");
+    assert.ok(out.fieldContract.missing.includes("runIds"), "runIds must be in fieldContract.missing");
+    assert.ok(out.fieldContract.fieldCount <= 3, `fieldCount ${out.fieldContract.fieldCount} must be the shrunk 3`);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC2 CLI --json — a full-shape fresh heartbeat is ALIVE with fieldContract.ok true", () => {
+  const root = makeRootWithHeartbeat(fullHeartbeat());
+  try {
+    const r = runCli(root, ["--json"]);
+    assert.equal(r.status, 0, `full-shape heartbeat must exit 0:\n${r.stdout}\n${r.stderr}`);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.verdict, "ALIVE");
+    assert.equal(out.status, "alive");
+    assert.equal(out.fieldContract.ok, true);
+    assert.ok(out.fieldContract.fieldCount >= 7, `fieldCount ${out.fieldContract.fieldCount} must be >= 7`);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC2 CLI — stale heartbeat stays the stale verdict (freshness precedes field contract)", () => {
+  // A stale + shrunk heartbeat reports 兜底心跳断 (the dead verdict), not fields-missing.
+  const root = makeRootWithHeartbeat({
+    ts: Math.floor(Date.now() / 1000) - 9999,
+    delaySeconds: 1500,
+    reason: "tick heartbeat",
+  });
+  try {
+    const r = runCli(root, ["--json"]);
+    assert.equal(r.status, 1);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.status, "stale");
+    assert.equal(out.reason, "inner-wakeup-heartbeat-dead");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -226,4 +376,39 @@ test("AC2/AC4 — cross-reference to the same-family task (gap-dispatch-evaluate
     "utf8",
   );
   assert.match(sibling, /gap-inner-wakeup-heartbeat-invisible/, "the sibling task must carry the cross-annotation back");
+});
+
+// ── field-contract doc wiring (AC2/AC3 — the writer is now a SCRIPT, not an inline python one-liner) ─
+
+test("AC2 wiring — inner execution core B3 names the writer script inner-wakeup-heartbeat.ts (not hand-rolled python)", () => {
+  const core = fs.readFileSync(path.join(repoRoot, "orchestration", "fast-mode-tick-core.md"), "utf8");
+  assert.match(core, /B3\s+重新排程[\s\S]*inner-wakeup-heartbeat\.ts/, "B3 must carry the writer script invocation");
+  assert.match(core, /不手搓 python/, "B3 must forbid the hand-rolled python one-liner (the drift source)");
+});
+
+test("AC2/AC3 wiring — inner execution core B3 carries the minimal field contract (blocked[]/runIds + 心跳字段缺失)", () => {
+  const core = fs.readFileSync(path.join(repoRoot, "orchestration", "fast-mode-tick-core.md"), "utf8");
+  const b3Section = core.split("\n").filter((l) => l.includes("B3"));
+  const b3Text = b3Section.join("\n");
+  assert.match(b3Text, /blocked\[\]/, "B3 must name blocked[] (A3 判卡住的前提)");
+  assert.match(b3Text, /runIds/, "B3 must name runIds");
+  assert.match(b3Text, /心跳字段缺失/, "B3 must name the 心跳字段缺失 red verdict");
+  assert.match(b3Text, /reason 散文可补充不可替代/, "B3 must carry the AC3 prose-does-not-replace clause");
+});
+
+test("AC2/AC3 wiring — source tick doc step 6 carries the writer script + field contract + prose-does-not-replace", () => {
+  const doc = fs.readFileSync(path.join(repoRoot, "plugin", "loop", "fast-mode-loop-tick.md"), "utf8");
+  const lines = doc.split("\n");
+  const headingIdx = lines.findIndex((l) => /^### 6\. 重新排程/.test(l));
+  assert.ok(headingIdx !== -1, "step 6 heading must exist");
+  let end = lines.length;
+  for (let i = headingIdx + 1; i < lines.length; i++) {
+    if (/^(###|##) /.test(lines[i])) { end = i; break; }
+  }
+  const step6Section = lines.slice(headingIdx, end).join("\n");
+  assert.match(step6Section, /inner-wakeup-heartbeat\.ts/, "step 6 must invoke the writer script");
+  assert.match(step6Section, /blocked/, "step 6 must name the blocked[] structured key");
+  assert.match(step6Section, /runIds/, "step 6 must name runIds");
+  assert.match(step6Section, /心跳字段缺失/, "step 6 must name the 心跳字段缺失 red verdict");
+  assert.match(step6Section, /reason 散文可补充但不可替代/, "step 6 must carry the AC3 prose clause");
 });

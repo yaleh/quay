@@ -30,6 +30,8 @@ extra: {}
 
 **验证锚**：修后，套件因静态检查红时 `.quay/full-suite-state.json` 含机器可读的静态违规字段（reason 区分 + 计数），消费方不需翻日志即可定位成因。
 
+> **交叉标注（2026-08-11, `gap-task-file-static-syntax-should-not-block-product-verification`）**：本任务把「静态违规如何进 state（该不该可读）」做掉了；兄弟姐妹任务治「**任务文件类**静态违规**该不该阻断**验证轮」——近 48h 21/119 轮（18%）被 tasks/*.md 的 Contract/AC 语法吃掉、28 条失败全 task-file 零代码。结论（option ①）：**任务文件类**静态检查（task-contract-check / task-ac-carryover-check）在验证轮跑 `--no-block`——违规记账 `.quay/task-file-violation-ledger.jsonl`（只增不减）不置红，验证轮照跑；`reason="static-check"` 的静态红从此主要剩**产品代码类**检查（test-framework-policy / test-isolation / 等）。本任务的 `staticCheck` 机器字段仍保留——产品代码类静态红照旧用它。
+
 ## Acceptance Criteria
 
 - [x] AC1: **复现固化**——任务体记录 20:48 实证（failures=[] 空 + 真因在日志）——可读性缺口（本任务 Proposal 已含；见下方「实跑证据（2026-08-08 20:48Z）」）

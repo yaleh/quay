@@ -126,19 +126,40 @@ function spawnCapture(command: string, args: string[], cwd: string): Promise<{ e
   });
 }
 
+/**
+ * Resolve a plugin script path to a runnable executable, preferring the raw source form and
+ * falling back to the bundled dist form (gap-shipped-ts-files-are-not-bundled-80-raw-typescript-in-
+ * the-artifact). The shipped npm-pack artifact carries the plugin's consumer-referenced .ts as
+ * bundled `plugin/scripts/dist/*.js` executables (no .ts source), so `plugin/scripts/foo.ts` must
+ * resolve to `plugin/scripts/dist/foo.js` there; a source checkout keeps the .ts and is used as-is.
+ */
+function resolvePluginExecutable(
+  workspaceRoot: string,
+  relPath: string
+): { path: string; stripTypes: boolean } {
+  const abs = path.resolve(workspaceRoot, relPath);
+  if (fs.existsSync(abs)) return { path: abs, stripTypes: relPath.endsWith(".ts") };
+  if (relPath.endsWith(".ts")) {
+    const bundled = relPath.replace(/\.ts$/, ".js").replace(/\/(scripts|gate-scripts)\//, "/$1/dist/");
+    const absBundled = path.resolve(workspaceRoot, bundled);
+    if (fs.existsSync(absBundled)) return { path: absBundled, stripTypes: false };
+  }
+  return { path: abs, stripTypes: relPath.endsWith(".ts") };
+}
+
 /** Spawn the inventory tool's `--instruments-json` mode to DERIVE the instrument directory. */
 export async function fetchInstrumentsManifest(workspaceRoot: string): Promise<InstrumentsManifest> {
   const inventoryRel = path.join("plugin", "scripts", "runtime-usage-inventory.ts");
-  if (!fs.existsSync(path.resolve(workspaceRoot, inventoryRel))) {
+  const resolved = resolvePluginExecutable(workspaceRoot, inventoryRel);
+  if (!fs.existsSync(resolved.path)) {
     throw new Error(
-      `instrument directory unavailable: ${inventoryRel} is not present under workspace root ${workspaceRoot}`
+      `instrument directory unavailable: ${inventoryRel} (or its dist bundle) is not present under workspace root ${workspaceRoot}`
     );
   }
-  const r = await spawnCapture(
-    process.execPath,
-    ["--experimental-strip-types", inventoryRel, "--instruments-json", "--root", workspaceRoot],
-    workspaceRoot
-  );
+  const argv = resolved.stripTypes
+    ? ["--experimental-strip-types", resolved.path, "--instruments-json", "--root", workspaceRoot]
+    : [resolved.path, "--instruments-json", "--root", workspaceRoot];
+  const r = await spawnCapture(process.execPath, argv, workspaceRoot);
   if (r.exitCode !== 0) {
     throw new Error(`instrument directory build failed (exit ${r.exitCode}): ${r.stderr || r.stdout}`);
   }
@@ -158,9 +179,9 @@ export async function runInstrument(
       `no such instrument: "${name}" (the admitted directory has ${manifest.admitted}; call instrument action:list to see them)`
     );
   }
-  const target = path.resolve(workspaceRoot, entry.path);
+  const resolved = resolvePluginExecutable(workspaceRoot, entry.path);
   const command = entry.kind === "bash" ? "bash" : process.execPath;
-  const argv = entry.kind === "bash" ? [target, ...args] : ["--experimental-strip-types", target, ...args];
+  const argv = entry.kind === "bash" ? [resolved.path, ...args] : resolved.stripTypes ? ["--experimental-strip-types", resolved.path, ...args] : [resolved.path, ...args];
   return spawnCapture(command, argv, workspaceRoot);
 }
 

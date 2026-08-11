@@ -202,6 +202,29 @@ export function parseTask(fullText) {
   return { labels, extra, frontmatterRaw, body };
 }
 
+// ── readDependsOn — parse the `depends_on:` frontmatter list (the relation edge for prerequisites,
+//    tasks/gap-prerequisite-gates-prose-invisible-to-mechanisms). Mirrors the `children:` list shape:
+//    flow `depends_on: [a, b]` OR block `depends_on:\n  - a`. A prerequisite expressed ONLY as prose
+//    (a `[[task-id]]` wikilink in a "Do not dispatch until … lands / 前置" paragraph) is invisible to
+//    the mechanism paths that read relation edges — this field is the machine-readable home for it.
+//    Lenient (no YAML dep), same family as parseTask's labels parser.
+export function readDependsOn(frontmatterRaw) {
+  const flow = frontmatterRaw.match(/^depends_on:\s*\[([^\]]*)\]\s*$/m);
+  if (flow) {
+    return flow[1].split(",").map((s) => s.trim().replace(/^["']|["']$/g, "")).filter(Boolean);
+  }
+  const lines = frontmatterRaw.split(/\r?\n/);
+  const idx = lines.findIndex((l) => /^depends_on:\s*$/.test(l));
+  if (idx < 0) return [];
+  const out = [];
+  for (let i = idx + 1; i < lines.length; i++) {
+    const m = lines[i].match(/^\s+-\s+(.+?)\s*$/);
+    if (m) out.push(m[1].replace(/^["']|["']$/g, "").trim());
+    else if (/^\S/.test(lines[i])) break; // next top-level key ends the list
+  }
+  return out;
+}
+
 // ── Marker read (canonical grandfather boundary). ─────────────────────────────────────────────────
 export function hasSchemaMarker(task) {
   return task.extra && task.extra.schema === "v1";
