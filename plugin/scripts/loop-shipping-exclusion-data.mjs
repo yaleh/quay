@@ -89,11 +89,6 @@ export function exclusionEntries(repoRoot, pluginDir) {
       reason: "outer tick 执行核 — references the DEPLOYED copy orchestration/orchestrator-loop-tick.md (1095 lines, excluded above) as its extraction source + (src:N) anchor; the anchor still points at the deployed copy during the parallel-comparison period. Same target-layout class as adr016-screen-use-check.ts (surfaced by the AC1b scan 2026-08-09: the exec-cores landed after the exclusion table was built)",
     },
     {
-      rel: 'orchestration/manager-tick-core.md',
-      target: path.join(repoRoot, 'orchestration', 'manager-tick-core.md'),
-      reason: "manager tick 执行核 — cites deployed-path provenance (orchestration/orchestrator-loop-tick.md:302) for rules it borrowed from the outer doc; references the deployed copy as the live anchor target. Same class as orchestrator-tick-core.md above (surfaced by the AC1b scan 2026-08-09)",
-    },
-    {
       rel: 'orchestration/manager-tick-log.md',
       target: path.join(repoRoot, 'orchestration', 'manager-tick-log.md'),
       reason: "the manager's running tick log — a GITIGNORED runtime ledger (16:1x rule, never committed) whose historical entries quote deployed tick-doc paths verbatim (orchestrator-loop-tick.md:320/:605). Same class as manager-pending.md / tick-log.md above: the ledger documents the DEPLOYED target layout as living reference (surfaced by the AC1b scan 2026-08-09)",
