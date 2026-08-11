@@ -1,7 +1,10 @@
 ---
 id: gap-suite-fix-scope-worktree-green-merge-gate
-title: 'suite-fix subagent 收口缺机械判据——第二个 subagent 从未自测绿（rounds 230/231 scope=main，等共享检出），三条保障同时失效（修到绿才merge/未绿退出⇒.halt/不得修一个等30min）；处方=fan-in 前必须存在至少一条 scope=worktree 且 state=green 的轮次记录，否则不许 merge（数据已在 verification-round.jsonl，不新建机件）'
-status: todo
+title: suite-fix subagent 收口缺机械判据——第二个 subagent 从未自测绿（rounds 230/231
+  scope=main，等共享检出），三条保障同时失效（修到绿才merge/未绿退出⇒.halt/不得修一个等30min）；处方=fan-in
+  前必须存在至少一条 scope=worktree 且 state=green 的轮次记录，否则不许 merge（数据已在
+  verification-round.jsonl，不新建机件）
+status: ready
 labels:
   - gap
   - defect
