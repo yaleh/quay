@@ -44,8 +44,8 @@ OVER90 的 90 分钟时钟从 `--task-start` 起算，**可能先于实际工作
 
 ## DoD（draft）
 
-- [ ] 一个 touches-overlap defer 的任务排队 80min 后工作 20min ⇒ 不触发 OVER90（总 100min 但工作仅 20min）
-- [ ] 完整套件绿
+- [x] 一个 touches-overlap defer 的任务排队 80min 后工作 20min ⇒ 不触发 OVER90（总 100min 但工作仅 20min）
+- [x] 完整套件绿
 
 ## Evidence
 
@@ -68,3 +68,19 @@ OVER90 的 90 分钟时钟从 `--task-start` 起算，**可能先于实际工作
 - plugin/test/fast-mode-telemetry.test.mjs（负控制：defer 后再工作不误触）
 - docs/analysis/fast-mode-loop-tick.md + plugin/loop/fast-mode-loop-tick.md（--work-start 接线：派发实际启动 subagent 时刻调用）
 - tasks/gap-over90-clock-measures-queue-time-not-work-time.md（自身：勾 AC + 贴证据）
+
+
+## 接线证据（inner 2026-08-11，B15 judge needs-work → wiring gap 修复）
+
+**wiring commit**：`ea35ac07`（over90 分支，追加于 1b1c6943 之后）——`--work-start` 接入派发路径：
+- `docs/analysis/fast-mode-loop-tick.md` + `plugin/loop/fast-mode-loop-tick.md` 步骤 3.5：派发**实际启动
+  subagent 时刻**（`Agent(run_in_background: true, ...)` 调用点）对同一 runId 调
+  `--work-start --taskId <id> --runId <runId>`；OVER90（`detectTaskOver90m`）读 `workStartedAtMs`，
+  排队段不计入 90 分钟（未接线则回落 bracket 起点，byte-identical 旧行为）。
+- over90 任务 `## Touches` += 两份 tick doc。
+
+**scoped 复验**：`--for-task gap-over90-clock-measures-queue-time-not-work-time --allow-thin` → 99/99，
+EXIT 0（fast-mode-telemetry 64 + inner-blocked-signal 35，无回归）。
+
+**负控制（work-clock）**：defer 80min + work 20min（括号 100min）⇒ `detectTaskOver90m` 返回 null 不触发；
+91min 纯工作仍触发；never-deferred 91min 括号仍触发。`--work-start` 无调用则回落 bracket 起点。
