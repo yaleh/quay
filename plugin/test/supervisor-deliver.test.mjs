@@ -263,6 +263,162 @@ test("AC5 negative control: nonexistent tmux target → exit 1 (fail loud), noth
   }
 });
 
+// ── can-receive gate (gap-supervisor-deliver-no-wait-for-idle-retry) ───────────────────────────────
+// The one-shot send→verify→failed behavior failed immediately when the target was busy. The fix
+// judges the target pane state (pane-state-classify.ts) BEFORE sending and BOUNDED-WAITS for a
+// busy target to turn waiting-input. These two real-TUI controls prove:
+//   * AC3 positive — a busy target that turns idle is WAITED for (not one-shot failed) and then
+//     delivered; the delivery elapsed ≥ the busy phase and stderr reports the bounded wait.
+//   * AC3 negative — a target that stays busy past the bound is NEVER sent into: bounded wait,
+//     FAIL loud (needs human), and the marker never reaches the transcript.
+// Both use the existing-session path (seeded transcript → delegates to send-keys-reliable.sh),
+// which is where the can-receive gate lives (send-keys-reliable.sh step 0.2).
+
+/** Busy-then-idle fixture: renders a Claude Code BUSY status line ("esc to interrupt") for
+ * `busySeconds`, then clears the pane to a bare waiting-input prompt and commits sent lines to the
+ * transcript (the receiver turning idle — the exact busy→idle transition the gate must wait for). */
+function busyThenIdleFixtureSrc(transcriptPath, busySeconds) {
+  return `#!/usr/bin/env bash
+TRANSCRIPT="${transcriptPath}"
+mkdir -p "$(dirname "$TRANSCRIPT")"
+printf '❯ \\n───────────────────────────────\\n  ⏵⏵ bypass permissions on · esc to interrupt · ↓ to manage\\n'
+sleep ${busySeconds}
+printf '\\033[2J\\033[H'
+printf '❯ '
+while IFS= read -r line; do
+  [ -n "$line" ] || continue
+  printf '{"type":"user","message":{"role":"user","content":"%s"}}\\n' "$line" >> "$TRANSCRIPT"
+  printf '❯ '
+done
+`;
+}
+
+/** Busy-forever fixture: renders a BUSY status line and stays busy indefinitely (never reads
+ * stdin) — the "target never becomes idle" bound-exhaustion case. */
+function busyForeverFixtureSrc(transcriptPath) {
+  return `#!/usr/bin/env bash
+TRANSCRIPT="${transcriptPath}"
+mkdir -p "$(dirname "$TRANSCRIPT")"
+printf '❯ \\n───────────────────────────────\\n  ⏵⏵ bypass permissions on · esc to interrupt · ↓ to manage\\n'
+sleep 1000000
+`;
+}
+
+test("AC3 positive: a BUSY target is bounded-waited until it turns idle, then the payload is delivered (NOT a one-shot fail)", { timeout: 90000 }, async (t) => {
+  const tmuxV = spawnSync("tmux", ["-V"], { encoding: "utf8" });
+  if (tmuxV.error || tmuxV.status !== 0) {
+    t.skip("tmux not available — skipping the real-TUI e2e");
+    return;
+  }
+  const session = uniqueName("sup-busy-wait");
+  const h = newHermeticTmux("sup-busy-wait-");
+  const fixture = path.join(h.tmp, "fixture.sh");
+  const transcript = path.join(h.tmp, "transcript.jsonl");
+  const BUSY_S = 5;
+  fs.writeFileSync(fixture, busyThenIdleFixtureSrc(transcript, BUSY_S), "utf8");
+  // NOT fresh: seed the transcript so the existing-session (send-keys-reliable) path is taken.
+  fs.writeFileSync(transcript, `${userStringLine("prior-session-message")}\n`, "utf8");
+  const marker = `sup-busy-wait-marker-${process.pid}`;
+  let result = null;
+  let startedAt = 0;
+  try {
+    const start = h.newSession(session, `bash ${fixture}`);
+    assert.equal(start.status, 0, `tmux new-session failed: ${start.stderr}`);
+    // Name the fixture window after the session so the drive-target-check gate passes.
+    assert.equal(h.tmx(["rename-window", "-t", `${session}:0`, session]).status, 0, `rename-window failed`);
+
+    // Wait (bounded) for the fixture pane to render the BUSY status line.
+    let busy = false;
+    for (let i = 0; i < 100 && !busy; i++) {
+      const cap = h.capture(session);
+      if (cap.status === 0 && cap.stdout.includes("esc to interrupt")) busy = true;
+      else await new Promise((r) => setTimeout(r, 100));
+    }
+    assert.ok(busy, "fixture pane should render the busy status line");
+
+    startedAt = Date.now();
+    result = spawnSync("bash", [SCRIPT, session, marker, "--transcript", transcript], {
+      encoding: "utf8",
+      timeout: 90000,
+      env: {
+        ...h.env,
+        DRIVE_EXPECT_WINDOW_NAME: session,
+        SUPERVISOR_DELIVER_VERIFY_S: "20",
+        RELIABLE_WAIT_IDLE_S: "15",
+        RELIABLE_WAIT_IDLE_POLL_S: "1",
+      },
+    });
+    const elapsedMs = Date.now() - startedAt;
+
+    // It must WAIT, not one-shot fail: the delivery consumed at least the busy phase (~BUSY_S).
+    assert.ok(elapsedMs >= (BUSY_S - 2) * 1000, `delivery should have waited ~${BUSY_S}s, elapsed ${elapsedMs}ms`);
+    // The gate must REPORT the bounded wait (it saw a non-waiting-input state), then deliver.
+    assert.match(result.stderr, /有界等待/, `the gate must report the bounded wait:\n${result.stderr}`);
+    assert.equal(result.status, 0, `busy→idle deliver failed (exit ${result.status}):\nstdout: ${result.stdout}\nstderr: ${result.stderr}`);
+    assert.match(result.stdout, /已送达/, `adapter should report delivery:\n${result.stdout}`);
+    const transcriptText = fs.readFileSync(transcript, "utf8");
+    assert.match(transcriptText, new RegExp(`"content":"${marker}"`), `marker should appear as a real user message:\n${transcriptText}`);
+  } finally {
+    h.cleanup();
+  }
+});
+
+test("AC3 negative control: a target that stays BUSY past the bound is NEVER sent into — bounded wait, then FAIL loud with no transcript mutation", { timeout: 90000 }, async (t) => {
+  const tmuxV = spawnSync("tmux", ["-V"], { encoding: "utf8" });
+  if (tmuxV.error || tmuxV.status !== 0) {
+    t.skip("tmux not available — skipping the real-TUI e2e");
+    return;
+  }
+  const session = uniqueName("sup-busy-fail");
+  const h = newHermeticTmux("sup-busy-fail-");
+  const fixture = path.join(h.tmp, "fixture.sh");
+  const transcript = path.join(h.tmp, "transcript.jsonl");
+  fs.writeFileSync(fixture, busyForeverFixtureSrc(transcript), "utf8");
+  fs.writeFileSync(transcript, `${userStringLine("prior-session-message")}\n`, "utf8");
+  const marker = `sup-busy-fail-marker-${process.pid}`;
+  const WAIT_IDLE_S = 5;
+  let result = null;
+  let startedAt = 0;
+  try {
+    const start = h.newSession(session, `bash ${fixture}`);
+    assert.equal(start.status, 0, `tmux new-session failed: ${start.stderr}`);
+    assert.equal(h.tmx(["rename-window", "-t", `${session}:0`, session]).status, 0, `rename-window failed`);
+
+    let busy = false;
+    for (let i = 0; i < 100 && !busy; i++) {
+      const cap = h.capture(session);
+      if (cap.status === 0 && cap.stdout.includes("esc to interrupt")) busy = true;
+      else await new Promise((r) => setTimeout(r, 100));
+    }
+    assert.ok(busy, "fixture pane should render the busy status line");
+
+    startedAt = Date.now();
+    result = spawnSync("bash", [SCRIPT, session, marker, "--transcript", transcript], {
+      encoding: "utf8",
+      timeout: 90000,
+      env: {
+        ...h.env,
+        DRIVE_EXPECT_WINDOW_NAME: session,
+        SUPERVISOR_DELIVER_VERIFY_S: "20",
+        RELIABLE_WAIT_IDLE_S: String(WAIT_IDLE_S),
+        RELIABLE_WAIT_IDLE_POLL_S: "1",
+      },
+    });
+    const elapsedMs = Date.now() - startedAt;
+
+    // The bounded wait was consumed (not an instant fail), then it failed LOUD for a human.
+    assert.ok(elapsedMs >= WAIT_IDLE_S * 1000, `must wait the full bound (${WAIT_IDLE_S}s), elapsed ${elapsedMs}ms`);
+    assert.equal(result.status, 1, `busy-forever must exit 1 (fail loud), got ${result.status}\n${result.stdout}\n${result.stderr}`);
+    assert.match(result.stderr, /未转 waiting-input/, `must report the never-idle outcome:\n${result.stderr}`);
+    assert.match(result.stderr, /fail loud/, `must fail loud (needs human), never pretend success:\n${result.stderr}`);
+    // Nothing was sent into the busy pane — the marker must NOT reach the transcript.
+    const transcriptText = fs.readFileSync(transcript, "utf8");
+    assert.doesNotMatch(transcriptText, new RegExp(marker), `marker must NOT reach a busy target's transcript:\n${transcriptText}`);
+  } finally {
+    h.cleanup();
+  }
+});
+
 // ── --root transcript resolution (auto-discovery) ────────────────────────────────────────────────
 
 test("AC5: --root (re-spawn mode) waits for the NEW transcript NOT in the pre-send snapshot and verifies delivery through it", { timeout: 90000 }, async (t) => {
