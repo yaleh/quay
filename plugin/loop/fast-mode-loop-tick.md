@@ -907,10 +907,10 @@ node --experimental-strip-types plugin/scripts/concurrent-batch-scheduler.ts --r
 # deferred 的 reason 里 `(overlap: <file>)` 指名冲突文件（两个任务要创建同一个文件也会指名）。
 ```
 
-重叠 → 不可并发，**defer 并关括号**（`gap-over90-clock-measures-queue-time-not-work-time`：
-`bash plugin/scripts/closure-lag-check.sh --close-task --taskId <id> --outcome deferred`，idempotent），
-等下一 tick；真正派发时**重新 `--task-start`**（fresh 括号，OVER90 只计工作时间）。**不要凭读 Touches
-列表目测**——本会话有过目测判断被实测推翻的先例。
+重叠 → 不可并发，等下一 tick（此前先 **defer 并关括号**：
+`bash plugin/scripts/closure-lag-check.sh --close-task --taskId <id> --outcome deferred`，idempotent，
+见 `gap-over90-clock-measures-queue-time-not-work-time`）；真正派发时**重新 `--task-start`**
+（fresh 括号，OVER90 只计工作时间）。**不要凭读 Touches 列表目测**——本会话有过目测判断被实测推翻的先例。
 
 3b. **outer 在飞占用（`gap-write-ownership-extend-beyond-tasks-to-outer-core-and-hot-files` AC4）**：
    outer 主检出的**未提交改动**算占用——outer 正在改的热点实现文件（如 `full-suite-runner.ts`）
