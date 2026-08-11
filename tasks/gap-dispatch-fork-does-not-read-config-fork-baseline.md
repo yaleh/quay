@@ -100,3 +100,14 @@ rev-list 交集把已合并老分支误标。
 且 tip 是 develop 祖先、`rev-list develop..分支` = 0——**从 develop 分叉**。⇒ fork 路径在 config 激活
 后已读 fork_baseline。**本任务不复现，不实现修复**（supervisor 是 config 激活前最后的 master 分叉，
 记录在案）。若标记为已修复，是在修幻影。
+
+## 交叉标注（2026-08-11，gap-quay-init-never-writes-branch-model-config-fork-baseline-merge-target）
+
+本任务 AC4 把「无 fork_baseline 配置的下游仍从 master 分叉（共享默认不变）」当作**负控制的预期结果**。
+铺设缺口任务 `gap-quay-init-never-writes-branch-model-config-fork-baseline-merge-target` 补上了**上游这一段**：
+`write_provider_config()` 的 heredoc 现在随 quay-init 版本默认写入 `fork_baseline: develop` /
+`merge_target: integration`（非硬编码 master）。⇒ 本任务 AC4 的「共享默认不变」负控制**不再是新主机的
+稳定预期**——新主机第一次跑 quay-init --loop 即携带两键；`ensure_loop_config`/`migrate_stale_mcp_entry`
+升级分支仍不覆盖已存在的正确值（AC3 负控制），已手工配置主机不受影响。两任务在铺设链路上前后相邻：
+本任务=「铺设后 dispatch 是否读」，铺设缺口任务=「新主机第一次铺设时两键是否被写」。修复落地后，本任务
+AC4 的负控制语境收窄为「**旧配置（升级前已存在且缺键）** 的仍-master 行为」，不再是全新铺设的默认。
