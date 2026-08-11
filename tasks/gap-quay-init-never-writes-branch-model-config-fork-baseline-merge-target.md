@@ -57,20 +57,20 @@ not-read-config-fork-baseline` AC4 甚至把这个状态命名为"共享默认�
 
 ## Acceptance Criteria
 
-- [ ] AC1: 全新工作区跑 `quay-init.sh --loop`（`--dry-run` 或真实沙盒均可），生成的
+- [x] AC1: 全新工作区跑 `quay-init.sh --loop`（`--dry-run` 或真实沙盒均可），生成的
       `.quay/config.yml` 含 `fork_baseline`/`merge_target`，贴出实跑输出
-- [ ] AC2: 负控制——改前（当前源码）跑同一条命令，确认两键**不存在**（证明 AC1 是修复生效，不是
+- [x] AC2: 负控制——改前（当前源码）跑同一条命令，确认两键**不存在**（证明 AC1 是修复生效，不是
       巧合）
-- [ ] AC3: 已手工配置过的三台主机（A/B/ad-arm1）不受影响——升级路径（`ensure_loop_config`/
+- [x] AC3: 已手工配置过的三台主机（A/B/ad-arm1）不受影响——升级路径（`ensure_loop_config`/
       `migrate_stale_mcp_entry` 分支）不覆盖已存在的正确值
-- [ ] AC4: 与 `gap-dispatch-fork-does-not-read-config-fork-baseline` 交叉标注——本任务补上"新主机
+- [x] AC4: 与 `gap-dispatch-fork-does-not-read-config-fork-baseline` 交叉标注——本任务补上"新主机
       第一次铺设"这一段，那条任务负责"铺设后 dispatch 是否读"
 
 ## Definition of Done
 
-- [ ] AC1-AC4 实跑输出贴进任务体（quay-init --loop 生成的 config 含 fork_baseline/merge_target 两键，实跑输出贴出）
-- [ ] 完整套件连跑 2 次全绿
-- [ ] grep 可证 write_provider_config heredoc 含两键；已配置主机升级路径不覆盖已存在正确值（AC3 负控制）
+- [x] AC1-AC4 实跑输出贴进任务体（quay-init --loop 生成的 config 含 fork_baseline/merge_target 两键，实跑输出贴出）
+- [ ] 完整套件连跑 2 次全绿（inner 执行纪律要求不跑全量套件——由 outer 验证轮承接）
+- [x] grep 可证 write_provider_config heredoc 含两键；已配置主机升级路径不覆盖已存在正确值（AC3 负控制）
 
 ## Contract
 
@@ -85,6 +85,48 @@ resume    heredoc 加键 + 负控制 + 升级路径测试分步提交
 ## Touches
 - plugin/scripts/quay-init.sh
 - tasks/gap-dispatch-fork-does-not-read-config-fork-baseline.md（交叉标注）
+- tasks/gap-quay-init-never-writes-branch-model-config-fork-baseline-merge-target.md（自身）
+
+## Execution evidence (inner, 2026-08-11)
+
+**AC2 负控制（改前源码）** — 从改前 quay-init.sh 提取真实 `write_provider_config()`，对全新沙盒跑实（heredoc 本体，非重写）：
+
+```
+===== generated .quay/config.yml (loop: section) =====
+loop:
+  repo_root: /tmp/ac2-negctrl-smkMwV
+  test_command: node --test
+  tmux_session: proj-0:0.0
+  worktree_root: /var/tmp/quay-wt-ac2-demo
+===== grep for fork_baseline/merge_target in generated config =====
+NO MATCH — both keys ABSENT (exit=1)
+```
+
+源码级：heredoc 区域（改前 647-672 行）`grep fork_baseline\|merge_target` = 0 命中；全文件仅 :159/:462 两处**注释**提及（描述"升级必须保留这些键"，非写入）。
+
+**AC1 修复生效（改后）** — 同一真实函数改后重跑：
+
+```
+===== generated .quay/config.yml (loop: section) =====
+loop:
+  repo_root: /tmp/ac1-posctrl-E92S41
+  test_command: node --test
+  tmux_session: proj-0:0.0
+  worktree_root: /var/tmp/quay-wt-ac1-demo
+  fork_baseline: develop
+  merge_target: integration
+===== grep =====
+29:  fork_baseline: develop
+30:  merge_target: integration
+```
+
+Contract measure：`grep -c 'fork_baseline\|merge_target' plugin/scripts/quay-init.sh` = **6**（band ≥ 2）。写入位点：quay-init.sh:676-677（`fork_baseline: develop` / `merge_target: integration`，随版本默认，非硬编码 master）。
+
+**AC3 升级安全** — 模拟 ad-arm1 手工配置（fork_baseline: develop / merge_target: integration / board / gates / concurrency_bands），跑真实升级分支 `ensure_loop_config` + `migrate_stale_mcp_entry`：升级后 branch-model 两键 + board/gates/concurrency_bands **原样保留**；仅 provider path/mcp_entry 被迁移（dangling 路径）。`grep -n "fork_baseline\|merge_target"` 升级后 = :18/:19 仍在。
+
+**AC4 交叉标注** — 见 `gap-dispatch-fork-does-not-read-config-fork-baseline.md` 的 Execution note：本任务补"新主机第一次铺设"段，那条任务负责"铺设后 dispatch 是否读"——铺设链路上前后相邻，缺一段都白搭。
+
+**Scoped 门** — `bash scripts/test.sh --for-task gap-quay-init-never-writes-branch-model-config-fork-baseline-merge-target`：scoped 静态检查全 PASS（task-contract-check / adr016-screen-use-check / superseded-capability-check / dead-code-after-return-check / tick-core-static-check / delivery-inventory-drift-gate）；选中测试 `plugin/test/quay-init.test.mjs` 4/4 绿。另直跑 `plugin/test/quay-init-loop-core.test.mjs` 12/12 绿（含新增 `fork_baseline: develop` / `merge_target: integration` 回归断言，pin 住 AC1 非巧合）。
 
 ## Dispatch review
 
