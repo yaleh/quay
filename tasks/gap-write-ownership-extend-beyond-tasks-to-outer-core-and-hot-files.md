@@ -54,6 +54,16 @@ extra: {}
 - tasks/gap-task-file-develop-integration-drift-fan-in-conflicts.md（交叉标注——0ce3f2a8 的延续，覆盖范围扩展）
 - tasks/gap-write-ownership-extend-beyond-tasks-to-outer-core-and-hot-files.md（自身：勾 AC + 贴证据）
 
+### Finding：任务文件 add/add 的确定性规则（manager 2026-08-11 08:4x，落点 Finding 不进 Contract）
+
+**同任务文件 add/add 第 4 次复发（verification-round-phase-ms / slot-free / inner-heartbeat / split-session-liveness=杠杆2），根因可核**：`tasks/gap-split-session-liveness-signals-unblocks-lowconc.md` 在两边**各自被新建**——integration `22972e42`（03:47 你 file 三条杠杆任务时创建）vs 任务分支 `a46b88b8`（08:20 inner 勾 AC+贴证据时创建）。**两个不同提交各自 ADD 同一路径 ⇒ fan-in 必 add/add**。底层：**inner 分支 fork 自早于 03:47 的基线**，从分支视角该文件不存在、于是它新建。
+
+**不是机制坏了，是两步舞蹈**：inner C16「冲突一律 abort+needs-human」对代码冲突对、对「同一任务文件、一边只是多了 AC 勾选和证据」杀伤过度；outer per-hunk 解得掉但每次一个来回、今晚 4 次（含杠杆2 算术确定的 −120s 卡住）。
+
+**选定修法（manager 倾向 ①、outer 裁定采纳 ①）**：
+- **① 确定性规则**：冲突路径**仅**为 `tasks/<本任务 id>.md` 时，inner 取**分支版本**（同一文件 + 本任务 AC 勾选与证据，内容是超集）；**其余任何路径仍按 C16 abort**。4 次来回 → 0 次，不放松代码冲突纪律。
+- ②（更根本、后续可做）：inner **写任务体前先 rebase 到当前 integration**（A6 里 rebase 在 fan-in 时才做、那时两边已各自新建）。
+
 ## Contract
 
 measure   inner_touches_outer_core = `grep -lE "orchestration/orchestrator-|plugin/loop/orchestrator-loop-tick" tasks/*.md | wc -l` 的 stdout 数字（新派发任务含核心/loop 路径的 Touches 数）
