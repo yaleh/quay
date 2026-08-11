@@ -194,6 +194,67 @@ test("AC3 — --task-end rejects an outcome outside VALID_OUTCOMES (fail-closed)
   }
 });
 
+// ── DEFER OUTCOME (gap-over90-clock-measures-queue-time-not-work-time): a bracket closed on a
+// touches-overlap defer must leave inProgress (so OVER90's clock never counts the queue segment),
+// route to `deferred[]` (never `tasks[]`, never throughput), and be re-`--task-start`able as a
+// FRESH bracket (so OVER90 measures from work start, not task-start). ──────────────────────────────
+
+test("OVER90-DEFER — --task-end --outcome deferred is accepted and the pair routes to deferred[], not tasks[]", async () => {
+  const cli = await importCli();
+  const runId = cli.generateRunId("gap-defer-1");
+  const startEvent = cli.buildStartEvent({ taskId: "gap-defer-1", runId, recordedAtMs: 1_000_000 });
+  const endEvent = cli.buildEndEvent({ taskId: "gap-defer-1", runId, outcome: "deferred", recordedAtMs: 1_060_000 });
+  const report = cli.aggregate([startEvent, endEvent]);
+  assert.equal(report.inProgress.length, 0, "a defer-close must leave inProgress (no OVER90 on the queue segment)");
+  assert.equal(report.tasks.length, 0, "a defer-close is NOT a completed task — must never land in tasks[]/throughput");
+  assert.equal(report.deferred.length, 1, "the defer-close pair surfaces in deferred[]");
+  assert.equal(report.deferred[0].taskId, "gap-defer-1");
+  assert.equal(report.deferred[0].outcome, "deferred");
+  assert.equal(report.deferred[0].startedAtMs, 1_000_000, "deferred entry carries the bracket-open instant");
+});
+
+test("OVER90-DEFER — a defer-close does not extend the throughput window bounds (deferred[] is excluded like reconciled[])", async () => {
+  const cli = await importCli();
+  // Two events: a deferred close at t=1000..1060 (a queue segment) and a REAL completed task at t=5000..6000.
+  const dRun = cli.generateRunId("gap-defer-2");
+  const deferStart = cli.buildStartEvent({ taskId: "gap-defer-2", runId: dRun, recordedAtMs: 1_000_000 });
+  const deferEnd = cli.buildEndEvent({ taskId: "gap-defer-2", runId: dRun, outcome: "deferred", recordedAtMs: 1_060_000 });
+  const rRun = cli.generateRunId("gap-real-2");
+  const realStart = cli.buildStartEvent({ taskId: "gap-real-2", runId: rRun, recordedAtMs: 5_000_000 });
+  const realEnd = cli.buildEndEvent({ taskId: "gap-real-2", runId: rRun, outcome: "done", recordedAtMs: 5_600_000 });
+  const report = cli.aggregate([deferStart, deferEnd, realStart, realEnd], { nowMs: 6_000_000 });
+  assert.equal(report.tasks.length, 1, "only the real completed task is in tasks[]");
+  assert.equal(report.deferred.length, 1, "the defer-close is in deferred[]");
+  // Window start must be the REAL task's start (5_000_000), NOT the deferred segment's 1_000_000.
+  assert.equal(new Date(report.windowStart).getTime(), 5_000_000, "deferred segment must not pull the window earlier");
+});
+
+test("OVER90-DEFER — a fresh --task-start after a defer-close opens a NEW bracket (OVER90 measures from work start)", async () => {
+  const cli = await importCli();
+  const tmp = makeTmpWorkspace();
+  try {
+    // t=0: --task-start opens a bracket (pre-defer).
+    const start1 = runCli(tmp, "--task-start", "--taskId", "gap-defer-3");
+    const runId1 = start1.stdout.trim();
+    // t=0: defer detected → close the bracket with outcome deferred.
+    const defer = runCli(tmp, "--task-end", "--taskId", "gap-defer-3", "--runId", runId1, "--outcome", "deferred");
+    assert.equal(defer.status, 0, defer.stderr);
+    // t=80min later: work actually starts → fresh --task-start (new runId).
+    const start2 = runCli(tmp, "--task-start", "--taskId", "gap-defer-3");
+    const runId2 = start2.stdout.trim();
+    assert.notEqual(runId2, runId1, "a fresh --task-start must open a NEW bracket/runId");
+
+    const rep = runCli(tmp, "--report", "--json");
+    const r = JSON.parse(rep.stdout);
+    assert.equal(r.inProgress.length, 1, "only the FRESH work bracket is inProgress");
+    assert.equal(r.inProgress[0].runId, runId2, "the inProgress bracket is the fresh work one");
+    assert.equal(r.deferred.length, 1, "the pre-defer bracket is accounted in deferred[]");
+    assert.equal(r.tasks.length, 0, "the defer-close never counts as a completed task");
+  } finally {
+    cleanup(tmp);
+  }
+});
+
 // ── AC4: start/end pair yields a computable wall-clock ───────────────────────────────────────────────
 
 test("AC4 — a start/end pair yields a computable wall-clock (deterministic unit)", async () => {

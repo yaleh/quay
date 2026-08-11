@@ -459,6 +459,39 @@ test("ready candidate colliding with an in-flight task is not recommended (concu
   assert.ok(!r.recommended.includes("gap-blocked"), "candidate colliding with in-flight is not recommended");
 });
 
+// ── DEFER ACCOUNTING (gap-over90-clock-measures-queue-time-not-work-time): slot-refill is a PURE
+// recommender (never writes brackets), but it must SURFACE which candidates were deferred and why so
+// the tick can mechanically close their open brackets (closure-lag-check.sh --close-task --outcome
+// deferred) — the queue segment then never counts toward OVER90. ─────────────────────────────────────
+
+test("DEFER — slot-refill exposes deferred candidates with reasons (touches-overlap / deps / majority-missing / self-touch)", (t) => {
+  const root = makeWorkspace("defer");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // Recommended: a clean disjoint candidate.
+  writeTask(root, "gap-free", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/free.ts (new)"]) });
+  // Deferred (touches-overlap with in-flight): must be surfaced with the overlap reason.
+  writeTask(root, "gap-blocked", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/inflight.ts (new)"]) });
+  // Deferred (deps not ready): parent not done.
+  writeTask(root, "gap-dep", { status: "ready", labels: ["gap"], parent: "gap-never-done", body: dispatchableBody(["- code/dep.ts (new)"]) });
+  // Deferred (majority-missing touches): absent files without (new).
+  writeTask(root, "gap-missing", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/absent-1.ts", "- code/absent-2.ts"]) });
+  // Deferred (C8 self-touch missing): own task file not in Touches.
+  writeTask(root, "gap-selftouch", { status: "ready", labels: ["gap"], selfTouch: false, body: dispatchableBody(["- code/st.ts (new)"]) });
+  const inFlight = [inFlightTask("gap-in1", ["- code/inflight.ts (new)"])];
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 5, inFlight });
+
+  assert.ok(r.recommended.includes("gap-free"), "the disjoint candidate is still recommended");
+  const byId = Object.fromEntries(r.deferred.map((d) => [d.id, d.reason]));
+  assert.ok(r.deferred.length >= 4, `expected ≥4 deferred candidates, got ${r.deferred.length}`);
+  assert.ok(byId["gap-blocked"] && /touches-overlap-in-flight/.test(byId["gap-blocked"]),
+    `touches-overlap defer surfaced with reason, got: ${JSON.stringify(byId["gap-blocked"])}`);
+  assert.ok(byId["gap-dep"] && /deps-not-ready/.test(byId["gap-dep"]), "deps-not-ready defer surfaced");
+  assert.ok(byId["gap-missing"] && /touches-majority-missing/.test(byId["gap-missing"]), "touches-majority-missing defer surfaced");
+  assert.ok(byId["gap-selftouch"] && /self-touch-missing-c8/.test(byId["gap-selftouch"]), "self-touch defer surfaced");
+  // None of the deferred ids may appear in recommended.
+  for (const d of r.deferred) assert.ok(!r.recommended.includes(d.id), `deferred ${d.id} must not be recommended`);
+});
+
 // ── AC7: idempotence — pure, no writes, same inputs ⇒ identical output ─────────────────────────────
 
 test("analyzeSlotRefill is a pure reader: same inputs ⇒ deep-equal output, no store mutation (AC7)", (t) => {
