@@ -130,6 +130,7 @@ documented reference from a genuine missing file:
 
 <!-- self-create: orchestration/tick-log.md -->
 <!-- self-create: orchestration/escalations.md -->
+<!-- self-create: orchestration/observer-registry.conf -->
 <!-- self-create: docs/analysis/batch2-queue-state.md -->
 <!-- self-create: docs/analysis/contract-violations.md -->
 <!-- reference-doc: orchestration/exp6-phase1-sustained-unattended-operation.md -->

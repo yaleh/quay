@@ -95,6 +95,16 @@ default_projects() {
   for sibling in "$HOME/work/meta-cc" "$HOME/work/archguard"; do
     if [ -d "$sibling/plugin/scripts" ] && [ -f "$sibling/orchestration/session-liveness.env" ]; then
       name="$(basename "$sibling")"
+      # observer-registry (gap-observer-registry-target-decommission-and-criterion-invalidation):
+      # a sibling explicitly decommissioned (registered offline) must NOT be re-added to the
+      # watchdog's watch-list — the same single-registry rule as the watchdog itself (consumer #1;
+      # before this, the manager had to hand-comment archguard out of os-anchor-projects.conf).
+      if [ -x "$SELF_DIR/observer-registry.sh" ] && "$SELF_DIR/observer-registry.sh" --is-offline "$name" >/dev/null 2>&1; then
+        # stderr, not stdout: default_projects()'s stdout is captured (mapfile) and written into
+        # the generated os-anchor-projects.conf — a log line must not leak into the config.
+        echo "os-anchor-install: skip $name — registered offline in observer-registry (decommissioned)" >&2
+        continue
+      fi
       session=$(awk -F= '/^SESSION_TMUX_SESSION=/{print $2; exit}' "$sibling/orchestration/session-liveness.env" 2>/dev/null || true)
       [ -n "$session" ] || session="${name}-0"
       if [ -f "$sibling/orchestration/orchestrator-loop-tick.md" ]; then

@@ -282,6 +282,24 @@ drive_outer() {
 #   evidence (session-missing → recreate-session → DRIVE OK).
 watch_project() {
   local name="$1" root="$2" session="$3" outer="$4" launch="$5" drive="$6" transcript_override="${7:-}"
+  # observer-registry (gap-observer-registry-target-decommission-and-criterion-invalidation):
+  # a target registered OFFLINE is deliberately decommissioned — its criterion ("is the session
+  # alive?") is INVALID. Report "decommissioned" and NEVER re-spawn it. This is the class-level
+  # fix for consumer #1 (the watchdog revived a deliberately-decommissioned archguard).
+  # Resolve the registry helper from THIS copy first (works for the repo copy + --audit's
+  # synthetic config), falling back to the project's own plugin/scripts (works for the installed
+  # watchdog copy under ~/.config/quay/os-anchor/).
+  local _ow_reg=""
+  if [ -x "$SELF_DIR/observer-registry.sh" ]; then
+    _ow_reg="$SELF_DIR/observer-registry.sh"
+  elif [ -x "$root/plugin/scripts/observer-registry.sh" ]; then
+    _ow_reg="$root/plugin/scripts/observer-registry.sh"
+  fi
+  if [ -n "$_ow_reg" ] && "$_ow_reg" --is-offline "$name" >/dev/null 2>&1; then
+    echo "STATUS $name decommissioned (offline per observer-registry — not re-spawning)"
+    log "$name: decommissioned per observer-registry — not re-spawning"
+    return 0
+  fi
   # parked projects (.halt) are intentional — never fight them
   if [ -f "$root/.halt" ]; then
     echo "STATUS $name halted (project parked via .halt — not re-spawning)"

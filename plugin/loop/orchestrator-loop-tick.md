@@ -1003,6 +1003,15 @@ tick 做一次收尾 pass。
    输出 `unpushed` / `behind` / `leads` 字段——「本地领先 origin 几笔」从此有测量，不再靠人 `git log`。
    心跳读 `--json` 的 `leads` 或直接跑 `--push` 均等价（`--push` = 测 + 领先即推）。push 失败（非快进 =
    真分歧）只报告、不覆写、下一 tick 重试——正是 fail-closed 兜底。
+3d. **观测者注册表心跳（`observer-registry.sh --audit`，兜底必跑——`gap-observer-registry-target-decommission-and-criterion-invalidation`）**：
+   每个 tick（含轻触）**无条件**跑一次 `bash plugin/scripts/observer-registry.sh --audit --json`——
+   它问「有没有被登记下线的目标，且所有观测者是否都正确报『已下线』」。被下线的目标写一次在
+   `orchestration/observer-registry.conf`（人/管理者显式 `--register-offline`，观测者从不自行猜），
+   所有观测者（os-anchor-watchdog / session-liveness 的 git-staleness、coverage 读面 / topology-check）
+   从同一处读。`--audit` 是 AC3 负控制：对每个 offline 目标重建 4 个消费者读面，任一仍报旧状态
+   （REPO-STALL / NOT-WATCHED / GONE / 陈旧拓扑 / watchdog 复活）即 `stale`、退出 1；
+   **`stale_observer_reports` 必须恒为 0（band）**。无新系统 crontab：观测者保留各自既有触发，
+   本表只是每次读取时先查；`--audit` 与 `sync-lag-check` 同款双触发源（tick 心跳 + land 后事件驱动）。
 3.5 **批量合回 develop（两线模型的合并机制，`gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point` AC3）**：
     integration 只从 develop 长出、只往 develop 合回 ⇒ 永远是 develop 后代 ⇒ **fast-forward 无冲突**
     （`orchestration/SPEC-branching-model-integration-branch-2026-08-05.md`）。`suiteGreen` 为 true 时，

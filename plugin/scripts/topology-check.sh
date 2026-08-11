@@ -72,6 +72,21 @@ if [ -z "$SESSION" ]; then
   exit 2
 fi
 
+# observer-registry (gap-observer-registry-target-decommission-and-criterion-invalidation):
+# a session registered OFFLINE is deliberately decommissioned — its topology criterion is INVALID.
+# Report "decommissioned" instead of inspecting live tmux state (the class-level fix for consumer
+# #4: the session-topology Monitor kept reporting a stale cached value after B's tmux server had
+# cleanly terminated — the registry overrides any cached/live observation).
+_oreg="$SCRIPT_DIR/observer-registry.sh"
+if [ -x "$_oreg" ] && "$_oreg" --is-offline-session "$SESSION" >/dev/null 2>&1; then
+  if [ "$JSON" = 1 ]; then
+    printf '{"session":"%s","ok":true,"decommissioned":true}\n' "$SESSION"
+  else
+    echo "$SESSION decommissioned (offline per observer-registry — not watched)"
+  fi
+  exit 0
+fi
+
 ROLES="outer inner"
 
 # 窗口是否存在（按名字寻址）。
