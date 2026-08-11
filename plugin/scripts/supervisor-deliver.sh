@@ -30,10 +30,14 @@
 #
 # Usage:
 #   supervisor-deliver.sh <tmux-target> <payload> [--transcript <path>|--root <path>]
+#   supervisor-deliver.sh <host>:<tmux-target> <payload> [--transcript <path>|--root <path>]
+#   supervisor-deliver.sh <tmux-target> <payload> --host <fqdn> [--transcript <path>|--root <path>]
 # Exit: 0 = delivered (a real user message matching <payload> in the target transcript)
 #       1 = failed (undelivered after bounded retries — needs human)
 #       2 = usage / environment error (fail loud)
 # Env:  SUPERVISOR_DELIVER_VERIFY_S   overall delivery bound (default 60)
+#       SUPERVISOR_DELIVER_HOST       resolved remote host (empty = local); also set by --host/<host>:
+#       SUPERVISOR_DELIVER_SSH        ssh binary (default `ssh`; a test mock substitutes this)
 
 # ── 统一 --help（gap-scripts-sprawl：用法在前、退出 0、无业务副作用）────────────────────
 if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
@@ -51,10 +55,11 @@ TARGET="${1:-}"
 PAYLOAD="${2:-}"
 TRANSCRIPT=""
 ROOT=""
+HOST=""
 VERIFY_S="${SUPERVISOR_DELIVER_VERIFY_S:-60}"
 
 usage() {
-  echo "用法: $0 <tmux目标> <文本> [--transcript <transcript.jsonl>|--root <项目根>] [--verify-s <秒>]" >&2
+  echo "用法: $0 <tmux目标|host:tmux目标> <文本> [--transcript <transcript.jsonl>|--root <项目根>] [--host <fqdn>] [--verify-s <秒>]" >&2
   echo "退出码: 0=已送达 · 1=未送达(需人工) · 2=用法/环境错误" >&2
 }
 
@@ -77,6 +82,11 @@ while [ "$i" -le "$#" ]; do
       [ "$i" -le "$#" ] || { usage; exit 2; }
       VERIFY_S="${!i}"
       ;;
+    --host)
+      i=$(( i + 1 ))
+      [ "$i" -le "$#" ] || { usage; exit 2; }
+      HOST="${!i}"
+      ;;
     *)
       usage
       exit 2
@@ -89,6 +99,28 @@ done
 [ -n "$PAYLOAD" ] || { echo "supervisor-deliver: 文本为空" >&2; exit 2; }
 { [ -n "$TRANSCRIPT" ] || [ -n "$ROOT" ]; } || { echo "supervisor-deliver: 需要 --transcript 或 --root 以解析目标会话 transcript" >&2; exit 2; }
 { [ -n "$TRANSCRIPT" ] && [ -n "$ROOT" ]; } && { echo "supervisor-deliver: --transcript 与 --root 二选一" >&2; exit 2; }
+
+# ── cross-host target resolution (gap-supervisor-deliver-cross-host-target-support) ──────────
+# Two target forms:
+#   <host>:<tmux-target>   e.g. ad-arm1.wan.hwang.men:archguard-0:outer — the first ':'-segment
+#                          (the part BEFORE the <session>:<window> pair) is the HOST. A local tmux
+#                          target is <session>:<window> — exactly ONE ':' — so the implicit host form
+#                          is only taken when the target carries at least TWO ':'.
+#   --host <fqdn>          the explicit form — TARGET is a plain tmux target, HOST separate.
+# When HOST is set, every tmux interaction below routes through `ssh $HOST tmux …` (the env pair
+# SUPERVISOR_DELIVER_HOST / SUPERVISOR_DELIVER_SSH — the SAME seam the checker and classifier read),
+# so a cross-host delivery keeps the identical three-send-keys + pure-verify surface.
+HOST="${HOST:-}"
+SSH_BIN="${SUPERVISOR_DELIVER_SSH:-ssh}"
+if [[ "$TARGET" == *:*:* ]]; then
+  implicit_host="${TARGET%%:*}"
+  TARGET="${TARGET#*:}"
+  if [ -n "$HOST" ] && [ "$HOST" != "$implicit_host" ]; then
+    echo "supervisor-deliver: --host '$HOST' 与目标前缀 '$implicit_host' 冲突——二选一" >&2
+    exit 2
+  fi
+  [ -n "$HOST" ] || HOST="$implicit_host"
+fi
 
 # fail-loud precondition: the delivery verdict depends on the pure checker; a missing checker
 # means the deliver-confirmed promise is broken (same rule as send-keys-reliable.sh).
