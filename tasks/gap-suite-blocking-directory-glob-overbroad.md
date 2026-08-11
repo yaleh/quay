@@ -37,18 +37,53 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录读数矛盾（crystallization #1 vs AC37 #2）+ outer 复核（Touches 含 plugin/test/ 目录 glob → failureFileMatches 匹配任何 test 失败）（本任务 Proposal 已含）
-- [ ] AC2: **目录 glob 不归因**——computeSuiteBlocking 对裸目录 glob 不展开匹配失败文件
-- [ ] AC3: **真 suite-blocker 不回归**——Touches 含具体失败文件名的任务仍正确归因
-- [ ] AC4: **DC 轴恢复**——无 suite-blocker 时 DC 任务排第 1；负控制
-- [ ] AC5: **既有不回归**——`--for-task` scoped 门绿
+- [x] AC1: **复现固化**——任务体记录读数矛盾（crystallization #1 vs AC37 #2）+ outer 复核（Touches 含 plugin/test/ 目录 glob → failureFileMatches 匹配任何 test 失败）（本任务 Proposal 已含）
+- [x] AC2: **目录 glob 不归因**——computeSuiteBlocking 对裸目录 glob 不展开匹配失败文件
+- [x] AC3: **真 suite-blocker 不回归**——Touches 含具体失败文件名的任务仍正确归因
+- [x] AC4: **DC 轴恢复**——无 suite-blocker 时 DC 任务排第 1；负控制
+- [x] AC5: **既有不回归**——`--for-task` scoped 门绿
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全部勾上
-- [ ] 修后实跑：crystallization 不再因目录 glob 判 suite-blocker（贴 recommended 前 3 位）；真 blocker 仍归因
-- [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
+- [x] AC1–AC5 全部勾上
+- [x] 修后实跑：crystallization 不再因目录 glob 判 suite-blocker（贴 recommended 前 3 位）；真 blocker 仍归因
+- [x] 既有测试 + 新增测试全绿（`--for-task` scoped）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
+
+## Evidence (inner, 2026-08-11)
+
+### 实跑 1 — 真红窗（round 283-285，合成于 worktree .quay）：crystallization 不再判 suite-blocker
+
+`node --no-warnings --experimental-strip-types plugin/scripts/ready-pool-check.ts --root "$PWD" --cap 5 --json`
+- window_active: true, consecutive_red: 3
+- **crystallization in tasks: false** ✓（修前它在 suite_blocking.tasks 里）
+- suite_blocking.tasks（全为「Touches 含具体失败文件名」的真 blocker，抽查确认）：
+  `["DIR-118","gap-delivery-inventory-drift-needs-file-add-gate","gap-red-round-loses-overhead-phase-decomposition","gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests","gap-suite-tiering-kind-heavy-not-a-mechanism","gap-systemd-run-cancel-cpuquota-keep-memory-guardrail","gap-task-file-static-syntax-should-not-block-product-verification","gap-threshold-scope-load-flake-fifth-family-member","gap-write-ownership-extend-beyond-tasks-to-outer-core-and-hot-files"]`
+
+### 实跑 2 — 同真红窗 slot-refill recommended（DoD「贴 recommended 前 3 位」）
+
+`node --no-warnings --experimental-strip-types plugin/scripts/slot-refill.ts --root "$PWD" --cap 5 --json`
+- recommended = ["gap-task-file-static-syntax-should-not-block-product-verification","gap-systemd-run-cancel-cpuquota-keep-memory-guardrail","gap-suite-blocking-self-lock-blocks-fix-family", ...]
+- rank0 是「真 blocker + delivery-critical」双轴命中任务；**crystallization 不在 recommended 中**（修前它排第 1）
+- 真 blocker 仍归因：rank0/rank1 的 suiteBlocking: true 均来自 Touches 里的具体失败文件名（如 plugin/test/threshold-scope-check.test.mjs、plugin/test/full-suite-runner.test.mjs、scripts/test.sh 命中的 test.sh bare-basename 失败）
+
+### 实跑 3 — ghost 红窗（唯一失败 plugin/test/ghost-failure.test.mjs，无任务具体触碰）：suite_blocking.tasks = [] + DC 排第 1
+
+- ready-pool-check: `suite_blocking.tasks: []`（目录 glob 不再展开匹配任何 test 失败）
+- slot-refill: recommended[0] = gap-judgment-computed-not-wired-to-action, deliveryCritical: true, suiteBlocking: false, rank 0 ✓（AC4：无 suite-blocker ⇒ DC 任务排第 1）
+
+### 实跑 4 — scoped 门（AC5）
+
+`bash scripts/test.sh --for-task gap-suite-blocking-directory-glob-overbroad --allow-thin` → **EXIT=0**
+- tests 75 / pass 75 / fail 0 / cancelled 0
+- 新增测试全部在 scoped 门内跑：isDirectoryGlob 分类（AC2）/ computeSuiteBlocking 目录 glob 不归因+真 blocker+file-scoped 通配仍归因（AC2/AC3）/ analyzeTasks 集成级 AC4 负控制（无修则 2 fail，已证）
+
+### 提交（worktree task/gap-suite-blocking-directory-glob-overbroad）
+
+- `10277750` 归因收紧——computeSuiteBlocking 对目录 glob（裸目录/plugin/test/**）不展开匹配失败文件，只匹配 file-scoped glob（isDirectoryGlob helper）
+- `8184b7ed` 形状约束——failureFileMatches 对 directory-shaped 声明项（裸目录 token）在 basename 反查中不匹配失败文件（防御纵深）
+- `fd611683` 测试——isDirectoryGlob 分类 / computeSuiteBlocking AC2-AC3 / slot-refill DC 轴恢复
+- `ba28da24` 测试补充——analyzeTasks 集成级 AC4 负控制
 
 ## Touches
 
