@@ -1,5 +1,15 @@
 // @test-group governance
 // @load-sensitive child-spawn
+// KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — this harness
+// spawns the threshold-scope-check.ts checker as a REAL node child process (~9 spawnSync calls,
+// AC1-AC9 each spawn once per fixture). Under full-suite main-phase concurrency those spawns are
+// start/schedule-delayed, and round-215 (2026-08-10) showed the exact signature: a silent
+// passed=false at 7721ms with ZERO harness output lines (an assertion failure would always write
+// FAIL: to fd 2; zero lines = the process died before the harness could report). Solo 4089ms 9/9
+// green. Same child-spawn family as relation-sync / create-mcp / proposal-convergence / checker-cost
+// (all routed to the concurrency-1 serial phase); this file was left in the default concurrent
+// governance body and is now also routed to serial
+// (gap-threshold-scope-load-flake-fifth-family-member).
 // threshold-scope-check.test.mjs — tasks/gap-quantified-stop-conditions-have-no-scope:
 // the driver-doc prose hygiene checker (quantified stop-conditions must name set+window; named
 // paths must resolve).

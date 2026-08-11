@@ -23,8 +23,10 @@
 //   child-spawn   — spawns real child processes whose spawn/kill is load-race-prone under full-suite
 //                   concurrency (relation-sync.test.mjs spawns 2 real node child processes for the
 //                   file-lock cross-reparent proof; round-209 silent passed=false at 1932ms —
-//                   gap-relation-sync-load-flake-child-spawn-under-suite). Sibling family to
-//                   create-mcp / proposal-convergence (which declare `heavy`).
+//                   gap-relation-sync-load-flake-child-spawn-under-suite). threshold-scope-check.test.mjs
+//                   joins the child-spawn family (round-215 silent passed=false at 7721ms — the fifth
+//                   family member, gap-threshold-scope-load-flake-fifth-family-member). Sibling
+//                   family to create-mcp / proposal-convergence (which declare `heavy`).
 //
 // Commands:
 //   node --no-warnings --experimental-strip-types plugin/scripts/known-load-sensitive.ts --list
