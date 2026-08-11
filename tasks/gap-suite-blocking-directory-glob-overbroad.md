@@ -4,7 +4,7 @@ title: computeSuiteBlocking 用 failureFileMatches 把 Touches 的目录 glob（
   plugin/test/）展开匹配任何测试失败——gap-crystallization-five-directions 的 Touches 含
   plugin/test/（各 AC 测试）⇒ 被判为 suite-blocker 排到 recommended 第
   1，而它并未真引起本轮失败；over-broad attribution 污染 blocking_suite 轴
-status: ready
+status: done
 labels:
   - gap
   - defect
