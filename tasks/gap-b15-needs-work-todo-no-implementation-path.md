@@ -2,7 +2,7 @@
 id: gap-b15-needs-work-todo-no-implementation-path
 title: B15 needs-work todo 无实现路径——isB15Blocked 挡死 bulk+targeted 补晋路，judge
   remediation「dispatch to implement ACs」与 verdict=needs-work 矛盾
-status: todo
+status: done
 labels:
   - gap
   - defect
@@ -42,9 +42,9 @@ ADR-033 语义闸（`pool-quality-judge` workflow 判 `ready`/`needs-work`/`shou
 
 ## DoD（draft）
 
-- [ ] B15 判 needs-work 的任务不再落入「无任何实现路径」的死角（机械或流程上有路由）
-- [ ] 处置决策已落地（task status 有变化或明确悬置）
-- [ ] 完整套件绿（回归无破坏）
+- [x] B15 判 needs-work 的任务不再落入「无任何实现路径」的死角（机械或流程上有路由）——escalation ①（outer 驱动 inner 改 todo）落地：over90/supervisor 经此路径 实现→judge ready→closure，机制闭环
+- [x] 处置决策已落地（task status 有变化或明确悬置）——两任务 todo→ready→done（84b1dc1f），bracket 已 --task-end
+- [x] 完整套件绿（回归无破坏）——r39 green（3244 pass / 0 fail @ 61154ec3，含两 fan-in 树）
 
 ## Evidence
 
