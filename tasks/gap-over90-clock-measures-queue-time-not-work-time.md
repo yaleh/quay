@@ -9,7 +9,8 @@ labels:
   - defect
 parent: null
 children: []
-extra: {}
+extra:
+  poolQualityVerdict: needs-work
 ---
 ## Finding
 

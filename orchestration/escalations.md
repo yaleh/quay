@@ -556,3 +556,55 @@ resource-aware。
 2. **batch-merge 加 quiescent 前置**：先验 integration 最近 N 分钟无新 fan-in 再起跑套件（gate 侧等待，不动 A9）——外层/脚本侧，可机械执行。
 3. **接受现状**：inner 压力测试结束后自然 quiesce，届时套件可满足 gate——零改动，但 batch-merge 在 active 期持续阻塞，44+ commit 积压 develop 不前进（AC19 两线模型不完整运转）。
 **外层倾向**：选项 2（不动 inner A9，外层起跑套件前先查 quiescence），或接受选项 3 直到压力测试收尾；不建议选项 1（套件期暂停内层吞吐，与 fixed-cap 目标相悖）。
+
+## 2026-08-11 18:38Z — ready-pool-check --apply 机械补晋不认 B15 needs-work 判词：pool<floor 时把 B15 判 todo 的任务重新 promote 回 ready（本 hour 咬三次，ADR-033 语义闸可被机械 refill 立即撤销）
+**现象**：`ready-pool-check.ts --apply` 的候选过滤器（line 754-760）无 B15/pool-quality 意识——只查 stale（`judgePoolCandidate`，那是 strategic-doc-staleness 不是质量语义）+ four-artifacts + touches-resolve + not-fixture + not-PARKED。因此 **pool<floor 时 `--apply` 会把 B15 判 needs-work/retreat→todo 的任务机械补晋回 ready**。本 hour 三次咬合：
+1. **18:21Z**：外层 `--apply` 补晋 over90-clock + supervisor-deliver-no-wait（两个 B15 judge 判 todo）→ ready。
+2. **18:3xZ 诊断**：外层为查看池状态跑 `--apply --json`（`--apply` 实际写盘）→ 二次 promote 同一批。
+3. **18:38Z dry-run**：`--json`（无 --apply）候选过滤器**仍**把两个 B15-todo 任务列为 `promotions` 候选——只要下次 `pool<floor --apply` 就跑即再咬。
+**外层已尝试**：① 18:07Z 以 needs-human 路由规避只对 2 个 needs-human 任务生效（forty-to-six/has-never-self-hosted 逃过补晋），但 over90/supervisor-deliver 按 B15 判词路由 todo（合法派发目标），todo 任务 shape-complete 仍可被 --apply 咬；② 两次 `git checkout --` 恢复两个任务回 todo（18:2xZ + 18:3xZ），第三口仍是 dry-run 过滤器本身列出候选。
+**为什么超出授权**：补晋机制加 B15/needs-work marker 识别是 `ready-pool-check.ts` 的代码缺陷修复，归 inner（A15 ④：outer 主会话不修代码）。外层只能机械 revert 止血（每口一次 `git checkout`），不收敛。
+**选项**：
+1. **inner 给 `ready-pool-check.ts --apply` 加 B15 needs-work marker 识别**：候选过滤器跳过被判 needs-work/retreat→todo 的任务（读 B15 判词落点，如 `extra.poolQualityVerdict` 或每轮 B15 judge 输出文件）——根因修，语义闸不再被机械 refill 撤销（推荐）。
+2. **外层机械校验 --apply 结果**：每次 `--apply` 后立即用 B15 判词比对 promotions，命中即 `git checkout` 恢复 + tick-log 记录——止血不治本，每 tick 一次 revert 循环。
+3. **B15-todo 任务统一路由 needs-human**：判 todo 的任务不落回 todo 而路由 needs-human（逃过 --apply）——但 needs-human 是终态、语义不符（它们是合法派发目标），不推荐。
+**外层倾向**：选项 1（inner 根因修），落地前维持选项 2 机械 revert 止血。此 gap 与 `gap-pool-quality-semantic-gate`（done，judge workflow 本身）同族不同面：那条建了判词机制，这条是判词的**消费端**（--apply 补晋）不认判词。
+
+---
+
+## 2026-08-11 19:1xZ — apply-B15 根因修（inner 986230b3）是【有消费者无生产者】：fix 读 `extra.poolQualityVerdict` 但**全仓零代码写该字段**——真实 B15-todo 任务（over90-clock / supervisor-deliver-no-wait）在**每个历史 commit** 都是 `extra: {}`，fixed copy 实测仍把两者列为 `promotions`（`b15 intercepts: 0`）。选项 1 只落了一半。
+
+**现象（18:38Z entry 的选项 1 执行结果复核）**：inner 986230b3 给 `ready-pool-check.ts --apply` 加了 `isB15Blocked`（读 task frontmatter `extra.poolQualityVerdict`，非 ready 判词即跳过，bulk + --targeted 双守卫，intercepted reason=b15-needs-work）。**但没有任何代码写这个 marker**：
+1. 全树 grep `poolQualityVerdict`：仅 `ready-pool-check.ts`（消费者）+ 任务体/日志/escalation 的散文——**零生产者**。
+2. `pool-quality-judge.js` workflow 的 return 是 `actions[]`（id/verdict/action/reason）+ `shouldRemoveIds`，**不写 task frontmatter**；`pool-quality-judge.ts --aggregate` 读 verdicts JSON 做 JS 聚合，也不写任务。
+3. 真实 B15-todo 任务 git 历史每个 commit 均为 `extra: {}`（025e503f / 88e188fa / 77d01191 / 51394a22 抽查）。
+4. **fixed copy 实测**（worktree 分支内跑 `ready-pool-check.ts --json`）：`promotions` **仍**含 over90-clock + supervisor-deliver-no-wait（reason 均「four-artifacts complete」），`b15 intercepts: 0` —— 因两者 `extra.poolQualityVerdict` 缺失，`isB15Blocked` 返回 false（`undefined` 不阻塞）。
+5. fix 自身的测试能绿是因为 `ready-pool-check.test.mjs` 的 `writeTask` helper **手动**设了 `extra.poolQualityVerdict`——测试夹具设 marker，生产无 marker，两者脱节。
+
+fix 的注释自己写：「The marker is written by the judge's consumer when a judged task is retreated to todo」——**但没有任何「judge consumer」写它**：外层 B15 的 retreat 动作是 `git checkout --`（机械 revert，不写 marker）；tick-core B15 只记判词分布进 tick-log，不含写 marker 步骤。
+
+**后果**：986230b3 fan-in develop 后，`--apply` 对真实 B15-todo 任务**仍会补晋**（第 5 口）——marker 缺失 → 不阻塞 → 候选。选项 1 的 AC1/AC2 在夹具语义下绿，但在生产语义下**未闭合**。
+
+**外层已尝试**：代码级逐条复核 fix（git show 986230b3 读 isB15Blocked 实现 + 注释）；全树生产者搜索；fixed copy 对真实任务实跑 `--json`（promotions 仍含两任务）；真实任务 frontmatter git 历史抽查（均 `extra: {}`）。止血仍为 `git checkout` 机械 revert。
+
+**为什么超出授权**：补**生产者**（写 `extra.poolQualityVerdict` 到判词落点 / 或让 --apply 直接读 B15 judge 输出文件 / 或在外层 B15 retreat 步骤写 marker）是代码或执行核改动——归 inner 或执行核正本，外层不能自行改码（A15 ④）。
+
+**选项**：
+1. **inner 补生产者（推荐）**：B15 judge（`pool-quality-judge.js`）判 needs-work/should-remove/uncertain 后，把判词**写进**该 task 的 `extra.poolQualityVerdict`（task_write frontmatter）——或者 `--apply` 改为**直接读 B15 judge 输出**（18:38Z entry 选项 1 的另一半「每轮 B15 judge 输出文件」），不再依赖 frontmatter marker。前者是「judge 自产自销」，后者是「消费者读原文」。
+2. **外层 B15 retreat 步骤写 marker**：tick-core B15 的 retreat 动作从「git checkout revert」升级为「git checkout revert + 给任务写 `extra.poolQualityVerdict: needs-work`」——执行核正本改动，mechanically checkable，但仍是手工步骤（每口一次）。
+3. **接受现状 + 维持机械 revert**：986230b3 照常 fan-in，但 B1 **不闭** gap-apply-promotes-b15-needs-work-tasks（AC 在夹具语义绿、生产语义未闭合），等 producer 补上再闭——不推荐（第 5 口必然再咬）。
+
+**外层倾向**：选项 1（inner 补生产者，或 --apply 直接读 judge 输出）。**B1 处置**：986230b3 fan-in 后**不闭**该 gap task（fix 是半截），escalation 保持 open 直到 producer 落地；此时 tick-log 18:55Z「根因修已落地」的措辞需修正为「消费端已落地、生产端缺失」。
+
+## 2026-08-11 19:30Z — RESOLVED（选项 1 是误判：fix 契约把生产者判给 outer，非 inner）
+
+**纠错**：本 entry 的选项 1「inner 补生产者（推荐）」**方向错了**。`gap-apply-promotes-b15-needs-work-tasks` 任务体 `## 修复实现` line 60-62 的**生产端契约**明写：「**生产端接线（判词落盘的写入方）归 `gap-pool-quality-semantic-gate` 的 workflow 消费端/outer：B15 判 todo（retreat）时在任务 frontmatter 写 `extra.poolQualityVerdict: needs-work`，机械 refill 即不再撤销该判词**」——生产者是 **outer 的 B15 retreat 动作**（B16 AC3 外层独占 frontmatter 的自然推论），**不是 inner 补码**。选项 1（judge workflow 自写 frontmatter / --apply 直读 judge 输出）是绕开契约的替代路线，非契约本意。
+
+**已执行（外层为生产者）**：
+1. **判词核验**（wf_59513f29-b3c journal.jsonl，per-task verdict 记录逐条匹配）：over90-clock「OVER90 / detectTaskOver90m / queuedAtMs null」= `needs-work`；supervisor-deliver-no-wait「supervisor-deliver.sh 仅 drive-target-check 前置 / session-liveness:286-291 消费 classifyPaneState / 无 wait-for-idle loop」= `needs-work`——**两者均 `needs-work` ∈ B15_BLOCKED_VERDICTS**。
+2. **写 marker**：`tasks/gap-over90-clock-measures-queue-time-not-work-time.md` + `tasks/gap-supervisor-deliver-no-wait-for-idle-retry.md` frontmatter `extra: {poolQualityVerdict: needs-work}`（MCP task_write spawn-node-ENOENT → 直接 Edit frontmatter，B16 AC3 outer 独占）。
+3. **生产语义验证**（develop 拷贝 986230b3 实跑 `ready-pool-check.ts --json`）：`intercepted` 8 条中含**两目标均 b15-needs-work（verdict=needs-work）**，`promotions=[]`（两目标不再列出）——AC1/AC2 由夹具语义转为**生产语义闭合**。
+
+**耐久化（选项 2 落地）**：tick-core B15 步已修订——B15 判 needs-work/should-remove/uncertain 并 retreat→todo 时，外层同步写 `extra.poolQualityVerdict: <verdict>`（`orchestrator-tick-core.md` line 49 追加 producer 段）。未来每口 B15 retreat 自动产 marker，不再是一次性手工写。
+
+**B1 处置更新**：producer 已落地且机械验证通过 ⇒ `gap-apply-promotes-b15-needs-work-tasks` 达**生产语义闭合**——B1 closure 候选恢复（原「等 producer 落地再闭」条件已满足）。closure 执行见 tick-log 对应 entry。
