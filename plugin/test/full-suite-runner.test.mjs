@@ -1400,6 +1400,68 @@ test("AC2/AC3 e2e — a `__PERFILE__ ... passed=false` per-file line flips red a
   }
 });
 
+test("AC2 e2e — a GREEN round archives stderr __OVERHEAD__ phase lines (stderr is teed, not dropped)", async () => {
+  // test.sh's _oh_emit writes the fixed-overhead decomposition to STDERR (>&2). The runner must
+  // archive those lines into .quay/full-suite.log — the outer's verification round greps that log
+  // for `__OVERHEAD__`. This fake suite emits one line to stdout and one to STDERR on a green run;
+  // both must land in the archived log (gap-red-round-loses-overhead-phase-decomposition AC2).
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-oh-green-"));
+  const { f, dir } = fakeSuite(
+    'echo "__OVERHEAD__ lock_overhead_ms=42"\n' +
+      'echo "__OVERHEAD__ main_phase_ms=650104" >&2\n' +
+      'echo "# tests 1"\necho "# pass 1"\necho "# fail 0"\necho "# cancelled 0"\nexit 0',
+  );
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, `green suite exits 0, got ${code}`);
+    assert.equal(readState(root).state, "green");
+    const log = read(path.join(root, ".quay", "full-suite.log"));
+    assert.match(log, /__OVERHEAD__ lock_overhead_ms=42/, "stdout __OVERHEAD__ line reached the archived log");
+    assert.match(
+      log,
+      /__OVERHEAD__ main_phase_ms=650104/,
+      "STDERR __OVERHEAD__ line reached the archived log (stderr is teed, not dropped)",
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC2/AC3 e2e — a RED/killed round's archived log still carries stderr __OVERHEAD__ phase lines (red round OVERHEAD non-zero)", async () => {
+  // gap-red-round-loses-overhead-phase-decomposition: kill-on-red truncates the main phase BEFORE
+  // test.sh's full 9-segment emit, so a red round historically archived ZERO __OVERHEAD__ lines.
+  // With the partial fallback, test.sh emits the COMPLETED segments (serial/lowconc) with partial=1
+  // to stderr BEFORE the kill; the runner must archive those lines even though the round is red and
+  // the child is killed. This fake suite writes the partial-phase lines to stderr, reds early, then
+  // goes silent so the runner's red-grace kill fires — the __OVERHEAD__ count must be non-zero.
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-oh-red-"));
+  const { f, dir } = fakeSuite(
+    'echo "__OVERHEAD__ lock_overhead_ms=42 partial=1"\n' +
+      'echo "__OVERHEAD__ serial_phase_ms=639986 partial=1" >&2\n' +
+      'echo "__OVERHEAD__ lowconc_phase_ms=271616 partial=1" >&2\n' +
+      'echo "not ok 1 - boom"\n' +
+      "sleep 5\n",
+  );
+  try {
+    const child = runRunner({ root, command: `bash ${f}`, env: { QUAY_TEST_RED_GRACE_MS: "300" } });
+    const { code } = await waitExit(child);
+    assert.notEqual(code, 0, "runner exits non-zero on the red");
+    const s = readState(root);
+    assert.equal(s.state, "red", "the failure flipped red");
+    const log = read(path.join(root, ".quay", "full-suite.log"));
+    // The red round's phase decomposition is present DESPITE the kill — the whole point of AC2/AC3.
+    assert.match(log, /__OVERHEAD__ lock_overhead_ms=42 partial=1/, "stderr partial line reached the archived log");
+    assert.match(log, /__OVERHEAD__ serial_phase_ms=639986 partial=1/, "completed serial phase present on the red round");
+    assert.match(log, /__OVERHEAD__ lowconc_phase_ms=271616 partial=1/, "completed lowconc phase present on the red round");
+    assert.ok((log.match(/__OVERHEAD__/g) || []).length >= 3, "the red round's __OVERHEAD__ count is non-zero");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("AC5 e2e — a `tmux-leak-scan: FAIL` residual line (candidate C) flips red with failures non-empty (leak is a real residual)", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-leak-"));
   // Candidate C merge semantics: the suite-tail leak scan reports a residual to the stream

@@ -918,10 +918,59 @@ _oh_emit() { # _oh_emit <label> <start_ms> <end_ms>  → __OVERHEAD__ label_ms=N
   echo "__OVERHEAD__ ${label}_ms=$((e - s))" >&2
 }
 
+# ── Partial-overhead fallback (gap-red-round-loses-overhead-phase-decomposition AC2/AC3) ──────────
+# The full 9-segment emit below runs ONLY after the main phase completes — a kill-on-red truncation
+# (runner red-grace / max-runtime SIGTERM to the whole process tree) therefore historically left a
+# red round's archived log with ZERO __OVERHEAD__ lines even though serial/lowconc HAD completed.
+# Two fixes make the red round measurable: (1) the runner tees stderr to the archive too (the
+# __OVERHEAD__ lines ARE captured — locked by a regression test in full-suite-runner.test.mjs), and
+# (2) THIS fallback: a SIGTERM/EXIT trap emits the COMPLETED segments (partial=1) on the truncation
+# path, so serial/lowconc reach the log before the kill completes; un-run phases stay absent (缺省).
+_oh_done=0  # 1 once the full emit OR the partial fallback ran — suppresses SIGTERM→EXIT double-emit
+
+_oh_emit_p() { # _oh_emit_p <label> <start_ms> <end_ms> → __OVERHEAD__ label_ms=N partial=1 (skip if unset)
+  local label="$1" s="$2" e="$3"
+  # An un-run segment (e.g. main truncated) has an empty bound → 缺省: ABSENT, not ERR-UNSET, so a
+  # truncated round is distinguishable from a genuinely broken one.
+  if [ -z "$s" ] || [ -z "$e" ] || ! [[ "$s" =~ ^[0-9]+$ ]] || ! [[ "$e" =~ ^[0-9]+$ ]]; then
+    return 0
+  fi
+  echo "__OVERHEAD__ ${label}_ms=$((e - s)) partial=1" >&2
+}
+
+_oh_emit_partial() {
+  # Truncation-path fallback: emit the COMPLETED segments with partial=1. No-op on a scoped run
+  # (oh_full=0) or once the full emit already ran (_oh_done=1). Missing bounds are skipped (缺省).
+  [ "${oh_full:-0}" -eq 1 ] || return 0
+  [ "${_oh_done:-0}" -eq 0 ] || return 0
+  _oh_done=1
+  _oh_emit_p "lock_overhead"             "$oh_t0" "$oh_t1"
+  _oh_emit_p "resource_gate"             "$oh_t1" "$oh_t2"
+  _oh_emit_p "build_dist"                "$oh_t2" "$oh_t3"
+  _oh_emit_p "run_static_checks"         "$oh_t3" "$oh_t4"
+  _oh_emit_p "gap_ms_pre_to_serial"      "$oh_t4" "$oh_t5"
+  _oh_emit_p "serial_phase"              "$oh_t5" "$oh_t5b"
+  _oh_emit_p "gap_ms_serial_to_lowconc"  "$oh_t5b" "$oh_t6"
+  _oh_emit_p "lowconc_phase"             "$oh_t6" "$oh_t6b"
+  # main_phase is emitted ONLY by the full path (needs oh_t7 set) — a truncated main stays absent.
+}
+
+_oh_install_partial_trap() {
+  # SIGTERM → emit + re-raise 128+15 (the shell's signal-convention exit code, which the runner
+  # already classifies as a signal-kill/abort — never a false green); EXIT is the backstop for a
+  # set -e / any other non-SIGTERM truncation. _oh_done guards both paths so the emit runs exactly
+  # once whether the exit is SIGTERM→EXIT or a plain EXIT.
+  trap '_oh_emit_partial; exit 143' SIGTERM
+  trap '_oh_emit_partial' EXIT
+}
+
 run_selected() {
   local groups="$1"; shift
-  local oh_t0 oh_t1 oh_t2 oh_t3 oh_t4 oh_t5 oh_t5b oh_t6 oh_t6b oh_t7
-  local oh_full=0
+  # Phase marks + oh_full are GLOBAL (no `local`): the SIGTERM/EXIT partial-fallback trap above runs
+  # OUTSIDE this function's frame, and bash does not reliably give a trap handler dynamic scoping
+  # into the interrupted frame — globals are the only channel for the trap to read the marks.
+  oh_t0="" oh_t1="" oh_t2="" oh_t3="" oh_t4="" oh_t5="" oh_t5b="" oh_t6="" oh_t6b="" oh_t7=""
+  oh_full=0
   # Fail-closed pre-flight (AC0b): an unknown @test-group declaration must abort, not silently
   # degrade to engine — a dropped group cancels the isolation guarantee without going red.
   check_group_declarations
@@ -931,6 +980,10 @@ run_selected() {
   if is_default_set "$groups"; then
     FULL_SUITE_DEFAULT=1
     oh_full=1
+    # AC3 partial-fallback: arm the kill-on-red trap on the FULL path only. Scoped runs (oh_full=0)
+    # skip it — their fixed overhead is not the object of measurement.
+    _oh_done=0
+    _oh_install_partial_trap
     oh_t0=$(_oh_mark)
     # Single-flight lock FIRST (serialize with any already-running full suite), then the resource
     # gate (GO/WAIT on the machine's load at actual start time). Order matters: the lock queues the
@@ -1074,6 +1127,9 @@ run_selected() {
       _oh_emit "gap_ms_serial_to_lowconc" "$oh_t5b" "$oh_t6"
       _oh_emit "lowconc_phase"      "$oh_t6" "$oh_t6b"
       _oh_emit "main_phase"         "$oh_t6b" "$oh_t7"
+      # The FULL decomposition is on the wire — suppress the partial fallback so a subsequent
+      # SIGTERM/EXIT trap (and the SIGTERM→EXIT chain) is a no-op.
+      _oh_done=1
     fi
     set -e
     # DISABLED (human ruling 17:1x, disable-not-delete): the suite-after clean-tree assertion NO
