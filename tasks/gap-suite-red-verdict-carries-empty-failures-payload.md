@@ -42,9 +42,9 @@ SUITE-RED 判决的载荷是**空的**，而设计上它必须带上红落点。
 
 ## AC（draft）
 
-- [ ] 一次红判决的 `state.failures` 非空（含失败落点 file/line）
-- [ ] 负控制：构造 shared-gate 失败 vs specific-test 失败 ⇒ 两条 `failures` 载荷可区分（inner 派发规则能据此决策）
-- [ ] `full-suite.log` 有 `# fail` 汇总行（不再断在断言中间无汇总）
+- [x] 一次红判决的 `state.failures` 非空（含失败落点 file/line）
+- [x] 负控制：构造 shared-gate 失败 vs specific-test 失败 ⇒ 两条 `failures` 载荷可区分（inner 派发规则能据此决策）
+- [x] `full-suite.log` 有 `# fail` 汇总行（不再断在断言中间无汇总）
 
 ## DoD（draft）
 
@@ -59,6 +59,20 @@ SUITE-RED 判决的载荷是**空的**，而设计上它必须带上红落点。
 - `full-suite-runner.ts:230-238`：设计注释明写 state.failures 必须带落点
 - `.quay/full-suite.log`：`grep -cE '^# (tests|pass|fail|cancelled)'` = 0；tail 断在 `diff: 'simple'`
 - 内层 18:5x：`timeout 300 node --test --test-concurrency=1 plugin/test/quay-init-loop.test.mjs`（另一条路找落点）
+
+### 自审勾 AC（2026-08-11，closure 型：实施由同族 runner 任务落地，本任务 Touches 仅自身文件）
+
+- **AC1 实测**（hermetic fake suite：`not ok 1 - sample failure` + `# tests 3` / `# pass 1` / `# fail 2` / `# cancelled 0` + `exit 1`）：
+  `full-suite-state.json` → `state=red / reason=failed / failures=[{line:"not ok 1 - sample failure"},{line:"# fail 2"}]` —— 非空，含落点行。
+  文件上下文 best-effort：`__PERFILE__ … passed=false` 行 → `failures[0].file="packages/quay/test/verify-delivery-surface.test.mjs"`（full-suite-runner.test.mjs:1393 断言）。
+- **AC2 负控制**：
+  - `node …/full-suite-runner.ts --fail-fast-check`（specific-test 红）→ `state=red reason=failed stopSignal=true failures=1`（EXIT 0=链验证通过）；
+  - `node …/full-suite-runner.ts --static-check-check`（shared-gate 红）→ `state=red reason=static-check stopSignal=true violations=11 failures=2`，failures 每条 `staticCheck:true`（EXIT 0）；
+  - `red-window-shared-gate.test.mjs` **14/14 pass**：classifyFailure 区分 shared-gate/specific-test/unknown；shouldDispatchOnRed 共享门失败⇒停派、与候选 touch-set 无关的 specific-test⇒继续派、legacy 空 failures⇒fail-closed 停派。
+- **AC3 实测**：同一 fake red suite 的 `full-suite.log` 含 `# tests 3` / `# pass 1` / `# fail 2` / `# cancelled 0` 汇总行 —— runner 的 tee 逐行写日志不吞汇总，kill-on-red 只杀静默子进程（不断在断言中间）。
+- **scoped 测试**：`bash scripts/test.sh --for-task gap-suite-red-verdict-carries-empty-failures-payload --allow-thin`
+  → 静态检查全绿（task-contract-check 0 violations / superseded-capability PASS / tick-core-static-check PASS）；selector 选中 0 个测试文件（thin，任务仅 self-touch）→ **EXIT 0**。
+- **runner 测试**：`full-suite-runner.test.mjs` **74/75 pass / 1 fail** —— 唯一 fail 为 real-systemd cgroup scope 证据测试（本机 systemd 将 transient scope 命名为 `run-r<hex>.scope`，而 `findSuiteScopeUnit` 搜 `run-p<pid>-` 前缀，环境相关，与本任务 AC 无涉，且不在本任务 Touches 内）。
 
 ## Touches
 
