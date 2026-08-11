@@ -1,7 +1,7 @@
 ---
 id: gap-quay-init-coldstart-usability-launch-not-used-huge-tick-doc-selftest-dominant
 title: quay-init 冷启动可用性三缺陷——①消费方未用铺下的 quay-launch.sh 起会话（outer 无 --settings、inner 名非角色约定）②铺下 tick 文档 126,895 字节（冷启动第一件事读它）③基础设施自检占掉冷启动绝大部分（ad-arm1 archguard 15 分钟 / 120.6k token 诊断 monitor 为什么不发事件 = 设计如此）（F4/F5/F6）
-status: ready
+status: done
 labels:
   - gap
   - defect
