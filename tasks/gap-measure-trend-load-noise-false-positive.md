@@ -2,7 +2,7 @@
 id: gap-measure-trend-load-noise-false-positive
 title: measure-trend-check 把负载噪声当趋势——round-172 静态检查 red（13 个文件
   2-3x「增长」全是负载噪声、sprawl 未触碰、0 测试运行即红）；相对 ≥2× 阈值对小测试（300ms→800ms）过敏感
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -45,7 +45,7 @@ extra: {}
 - [x] AC2: **负载噪声不触发**——小测试（<5s）相对翻倍不再 flag（候选 A/C/D 任一）；round-172 类场景不再静态检查红
 - [x] AC3: **真实回归仍 flag**——it0-dod-check +33s 绝对增长仍报（大绝对/连续 2 轮仍触发）
 - [x] AC4: **既有机制不回归**——measure-trend 既有测试仍绿；`--for-task` scoped 门绿
-- [ ] AC5: **不回归**——全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
+- [x] AC5: **不回归**——全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
 
 ## Definition of Done
 
@@ -100,3 +100,7 @@ resume    阈值修正 / 负载归一 / 连续 2 轮分步提交，任一步完�
 reviewer: outer
 at: 2026-08-09
 changed: 建任务（round-172 静态检查 red：measure-trend 报 13 个负载噪声 flag（300ms 级小测试翻倍），sprawl 未触碰这些文件；0 测试运行即红。阈值把噪声当趋势。实现归内层）
+
+## Evidence (outer closure 2026-08-11)
+
+- 外层 verification-round 验证：rounds 24-26 全绿（3240/3240 fail 0, verifiedCommit 88e188fa），本任务 fix d83916e4 为 verified commit 祖先 ⇒ AC 满足。闭：ready→done。

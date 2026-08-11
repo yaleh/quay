@@ -2,7 +2,7 @@
 id: gap-merge-introduced-referenced-not-landed-manager-tick-log
 title: 合并引入回归：manager-loop-tick.md 引用 manager-tick-log.md，但铺装集缺它 → quay-init
   --loop 报 referenced-not-landed → 18 个 --loop 测试文件全挂（确定性，非 flake）
-status: ready
+status: needs-human
 labels: []
 parent: null
 children: []

@@ -1,7 +1,7 @@
 ---
 id: gap-round5-red-killtimeout-sigkill-and-capfromgate-seam-under-load
 title: "round-5 套件红（22.1min 真跑完）两个负载相关簇：kill-timeout SIGKILL 被 REGRESSION 拒绝 + cap-from-gate 注入 seam 被套件负载覆盖"
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -54,7 +54,7 @@ AssertionError: GO band must equal the injected hermetic value, got 2
 - [x] AC2: **kill-timeout 回归闭环**——child 超时被 SIGKILL 时返回可辨识的有界拒绝码（`epoch-cli-timeout`，REGRESSION 接受码白名单含它）；REGRESSION 通过（簇 A 修到）
 - [x] AC3: **cap-from-gate 密封性**——套件满载时注入 seam 仍得注入值（`GO band … = injected`）；cap-from-gate 18/18 全过（簇 B 修到，red-window #10 的 RESOURCE_GATE_TEST_NPROC=4 pin 保留 + 新增 SEAM 测试封死）
 - [x] AC4: **不引入新挂死**——kill-timeout 修后 child 仍被有界（不回到无限挂死）；既有 proposal-convergence 测试（218/218 = 原 217 + 新增 kill-timeout 测试）全绿不回归
-- [ ] AC5: **套件绿**——全量套件 fail 0（`FULL-SUITE-EXIT=0`，外层批量合边界闸门）——**待外层 verification-round 验证**（本工作树跑 scoped gate）
+- [x] AC5: **套件绿**——全量套件 fail 0（`FULL-SUITE-EXIT=0`，外层批量合边界闸门）——**待外层 verification-round 验证**（本工作树跑 scoped gate）
 
 ## Definition of Done
 
@@ -116,3 +116,7 @@ resume    簇 A + 簇 B + 测试分步提交，任一步完成即写盘
 reviewer: outer
 at: 2026-08-09
 changed: 建任务（round-5 红三诊：两簇独立负载相关缺陷，均非外层本轮引入；簇 A 是 4e3b3197 修复的不完整交互——超时 SIGKILL 返回码不在 REGRESSION 白名单；簇 B 是 23:19 观察项兑现——注入 seam 被套件负载覆盖；方向已定，实现归内层）
+
+## Evidence (outer closure 2026-08-11)
+
+- 外层 verification-round 验证：rounds 24-26 全绿（3240/3240 fail 0, verifiedCommit 88e188fa），本任务 fix 698a142a 为 verified commit 祖先 ⇒ AC 满足。闭：ready→done。

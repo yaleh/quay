@@ -4,7 +4,7 @@ title: quantified-stop-conditions 的 threshold-scope-check.ts 引用旧 tick-do
   loop-shipping 排除表——round-200 全量套件红在 loop-shipping AC1b（176 文件绿仅此 1
   失败）；SCAN_DOCS 扫 docs/analysis/+orchestration/ 旧部署副本，其他
   checker（adr016/no-manager/instrument-failure）都扫 plugin/loop/ 规范路径且已排除
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -49,7 +49,7 @@ extra: {}
 - [x] AC2: **旧路径引用消除**——threshold-scope-check.ts 不再引用旧部署路径（改 plugin/loop/ 规范路径），或已进排除表
 - [x] AC3: **loop-shipping 绿**——AC1b 回归验证 12/12（含 necessity-check 不炸）
 - [x] AC4: **扫描面不丢**——threshold-scope-check 仍扫 CLAUDE.md + 有效 tick-doc 面（Contract invariant 保持）
-- [ ] AC5: **全量套件绿**——round-200 类场景不再红（fail 0 且 cancelled 0 且 FULL-SUITE-EXIT=0）
+- [x] AC5: **全量套件绿**——round-200 类场景不再红（fail 0 且 cancelled 0 且 FULL-SUITE-EXIT=0）
 
 ## Definition of Done
 
@@ -213,3 +213,7 @@ $ node --no-warnings --experimental-strip-types plugin/scripts/threshold-scope-c
 
 无新增代码改动（修复 37948eab 已在 develop）；AC1–AC4 保持勾选，AC5（全量套件）按 DoD
 留待外层 verification-round 验证。
+
+## Evidence (outer closure 2026-08-11)
+
+- 外层 verification-round 验证：rounds 24-26 全绿（3240/3240 fail 0, verifiedCommit 88e188fa），本任务 fix 37948eab 为 verified commit 祖先 ⇒ AC 满足。闭：ready→done。

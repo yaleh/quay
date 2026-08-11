@@ -1,7 +1,7 @@
 ---
 id: gap-serial-phase-install-test-residue-dependency
 title: "serial 相位 install 测试顺序残留依赖——install-config-driven-e2e 先跑（passed）后 quay-init-loop-core 在串行相位失败（AC2/AC4 init 退出非0）；两测试都做真实 quay-init --loop install，前者的 temp workspace/env 残留污染后者"
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -38,7 +38,7 @@ extra: {}
 ## Acceptance Criteria
 
 - [x] AC1: **复现固化**——任务体记录 round-161 实证（serial 相位 install-config passed → quay-init-loop-core failed + 两测试单独跑绿 + 顺序依赖定位）（本任务 Proposal 已含；内层补顺序构造复现）
-- [ ] AC2: **serial 相位两 install 测试不再互污染**——round-162+ 连续 2 轮 quay-init-loop-core + install-config-driven-e2e 都绿（外层 verification-round 验证）
+- [x] AC2: **serial 相位两 install 测试不再互污染**——round-162+ 连续 2 轮 quay-init-loop-core + install-config-driven-e2e 都绿（外层 verification-round 验证）
 - [x] AC3: **单独跑不回归**——两测试各自单独跑仍 12/12 绿
 - [x] AC4: **顺序无关**——交换两测试执行顺序也不互污染（负控制）
 - [x] AC5: **既有机制不回归**——`--for-task` scoped 门绿（含 runner-grouping / serial 机制契约检查）
@@ -97,3 +97,7 @@ changed: 建任务（round-161 serial 相位顺序残留依赖——install-conf
 **Re-verify 2026-08-10（本派发，develop head 06f4659c）**：实现已 fan-in 合入 develop（0aaddecd → 2793e1fb）。在 fresh worktree（fork develop @ 06f4659c，node_modules symlink 主检出）上复验：`bash scripts/test.sh --for-task gap-serial-phase-install-test-residue-dependency --allow-thin` → **exit 0**。静态检查 0 违规（test-isolation 44 条基线内无新增、task-contract strict-subset no violations、adr016 0、dead-code-after-return 0、superseded-capability PASS、test-impl-census 319 clean）；测试 **24 pass / 0 fail / 0 cancelled / 0 skipped（161.6s）**。隔离强化代码在位（`diskWorktreeRoot()` + per-workspace tmux session + `worktreeRoot:null` 升级路径）——develop 上 e21e7a54 尚未合入（仅 1 行 `@load-sensitive-entry` 标注，与隔离无关），故本复验直接证明当前 develop 上修复完整。
 
 **Re-verify 2026-08-11（本派发，develop head 2be095ae）**：隔离修复仍在位（`diskWorktreeRoot()` 磁盘-backed 唯一 root + 每 workspace 独立 tmux session `p-<basename-slice>-0:0.0` + `worktreeRoot:null` 升级路径，`packages/quay/test/install-config-driven-e2e.test.mjs` 均未改）。develop 自 06f4659c 后仅新增：两个 install 测试的 `@load-sensitive-entry` 注释行（e21e7a54，与隔离无关）、test.sh 新增无关静态 checker（tick-core-static-check 等）。在 fresh worktree（fork develop @ 2be095ae，node_modules symlink 主检出）上复验 scoped 门：`bash scripts/test.sh --for-task gap-serial-phase-install-test-residue-dependency --allow-thin` → **exit 0**（/tmp/scoped-run-20260811.log）。静态检查 0 违规（test-framework-policy PASS、test-isolation 44 条全部基线内无新增、test-impl-census 326 clean、task-contract strict-subset no violations、adr016 0、superseded-capability PASS、dead-code-after-return 0、tick-core-static PASS）；测试 **24 tests / 23 pass / 0 fail / 0 cancelled / 1 skipped（39.6s）**——1 skipped 为 Go toolchain 本机不可用（`spawnSync go ENOENT`）的环境性跳过，非回归。round-161 失败顺序（install-config 先跑 → quay-init-loop-core 后跑，同 serial 相位）复验绿，两文件 11+12 pass。
+
+## Evidence (outer closure 2026-08-11)
+
+- 外层 verification-round 验证：rounds 24-26 全绿（3240/3240 fail 0, verifiedCommit 88e188fa），本任务 fix 06f4659c 为 verified commit 祖先 ⇒ AC 满足。闭：ready→done。

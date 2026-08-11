@@ -2,7 +2,7 @@
 id: gap-measure-trend-large-test-load-noise
 title: measure-trend 假阳性修复不完整——大测试（it0-dod-check 71s）负载下 +33s 仍 flag（历史 35-104s
   宽幅波动证明是噪声），小测试豁免只治 300ms 级没治承重大测试
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -38,7 +38,7 @@ extra: {}
 - [x] AC2: **大测试负载波动不触发**——it0-dod-check 71→104s（历史方差内）不再 flag（候选 A/B/C 任一）
 - [x] AC3: **真实趋势仍 flag**——连续 2 轮同方向增长 / 超出历史方差仍报（负控制）
 - [x] AC4: **既有机制不回归**——measure-trend 既有测试仍绿；`--for-task` scoped 门绿
-- [ ] AC5: **不回归**——全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
+- [x] AC5: **不回归**——全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
 
 ## Definition of Done
 
@@ -94,3 +94,7 @@ resume    历史方差 / 连续 2 轮 / 负载归一化分步提交，任一步�
 reviewer: outer
 at: 2026-08-09
 changed: 建任务（round-173b 红：measure-trend 仍报 it0-dod-check 71→104s +33s——大测试不在小测试豁免范围，但历史 35-104s 宽幅波动证明是负载噪声；小测试豁免修复不完整。实现归内层）
+
+## Evidence (outer closure 2026-08-11)
+
+- 外层 verification-round 验证：rounds 24-26 全绿（3240/3240 fail 0, verifiedCommit 88e188fa），本任务 fix d83916e4 为 verified commit 祖先 ⇒ AC 满足。闭：ready→done。

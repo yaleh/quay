@@ -4,7 +4,7 @@ title: "measure-trend 相对 ≥2× 触发器缺历史方差豁免——高方�
   task-check-passthrough 9575→21293ms 2.22x、acceptance-env 10304→20974ms 2.04x，均
   ≤ 各自历史 max 23183/21445）；d83916e4 只豁免了 absolute 触发器，relative 仍无 withinHistMax
   守卫"
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -45,7 +45,7 @@ extra: {}
 - [x] AC2: **relative 豁免**——历史带内（currMs ≤ histMax）的 relative ≥2× 不再 flag（与 absolute 同构）
 - [x] AC3: **负控制保留**——超出历史 max 的 relative/absolute 任一仍 flag（真实回归不吞）
 - [x] AC4: **既有不回归**——measure-trend 既有测试（小测试豁免、历史方差 absolute）仍绿；`--for-task` scoped 门绿
-- [ ] AC5: **全量套件绿**——round-199 类场景不再静态检查红（fail 0 且 cancelled 0 且 FULL-SUITE-EXIT=0）——外层 verification-round 验证
+- [x] AC5: **全量套件绿**——round-199 类场景不再静态检查红（fail 0 且 cancelled 0 且 FULL-SUITE-EXIT=0）——外层 verification-round 验证
 
 ## Definition of Done
 
@@ -99,3 +99,7 @@ resume    relative 守卫 + 测试分步提交，任一步完成即写盘
 reviewer: outer
 at: 2026-08-09
 changed: 红窗分诊（round-199 静态检查 red）——相对 ≥2× 触发器缺历史方差豁免，高方差大测试低点后回到正常带被误判翻倍（task-check-passthrough 9575→21293 ≤ histMax 23183、acceptance-env 10304→20974 ≤ histMax 21445）。根因代码定位 line 261 rel 无 withinHistMax 守卫。同族 gap-measure-trend-large-test-load-noise。实现归内层
+
+## Evidence (outer closure 2026-08-11)
+
+- 外层 verification-round 验证：rounds 24-26 全绿（3240/3240 fail 0, verifiedCommit 88e188fa），本任务 fix 93f87930 为 verified commit 祖先 ⇒ AC 满足。闭：ready→done。

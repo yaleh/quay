@@ -3,7 +3,7 @@ id: gap-loop-shipping-verify-delivery-surface-consumer-laid-ref
 title: verify-delivery-surface.ts consumer-laid 交付物引用旧 tick-doc 路径且不在
   loop-shipping 排除表——08853779 fan-in 的 cross-cut 回归（round-203 红于 loop-shipping
   AC1b）；consumer-laid 引用是有意的，应收编排除表（同族 adr016/no-manager/instrument-failure）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -43,7 +43,7 @@ extra: {}
 - [x] AC2: **排除表收编**——verify-delivery-surface.ts 进 loop-shipping 排除表（consumer-laid 目标布局引用，与同类 checker 一致）
 - [x] AC3: **loop-shipping 绿**——AC1b 回归验证 12/12
 - [x] AC4: **verify-delivery-surface 功能不丢**——consumer-laid 校验仍工作（--surface 模式 6/6 COVERED）
-- [ ] AC5: **全量套件绿**——round-203 类场景不再红（fail 0 且 cancelled 0 且 FULL-SUITE-EXIT=0）——外层 verification-round 验证
+- [x] AC5: **全量套件绿**——round-203 类场景不再红（fail 0 且 cancelled 0 且 FULL-SUITE-EXIT=0）——外层 verification-round 验证
 
 ## Definition of Done
 
@@ -126,3 +126,7 @@ $ node --experimental-strip-types plugin/scripts/verify-delivery-surface.ts --su
 无新增代码改动（修复 `36298bf6` 已在 develop，fan-in `ce824e9b` 已收编；exclusion 条目
 `plugin/scripts/loop-shipping-exclusion-data.mjs:189-193` 存在，reason/retainedNote 完整，
 既有排除条目不动）。AC1–AC4 保持勾选，AC5（全量套件）按 DoD 留待外层 verification-round 验证。
+
+## Evidence (outer closure 2026-08-11)
+
+- 外层 verification-round 验证：rounds 24-26 全绿（3240/3240 fail 0, verifiedCommit 88e188fa），本任务 fix 36298bf6 为 verified commit 祖先 ⇒ AC 满足。闭：ready→done。

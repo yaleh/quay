@@ -1,7 +1,7 @@
 ---
 id: gap-install-family-tests-rotate-flakes-under-full-suite
 title: "quay-init/install 家族 29 个测试在全量套件下轮换性 flake——每轮不同文件（drift-report/governance、loop-core/serial、runtime-landing…）单独跑恒绿，逐测试打地鼠不收敛"
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -41,7 +41,7 @@ extra: {}
 ## Acceptance Criteria
 
 - [x] AC1: **复现固化**——任务体记录 3 轮 install 家族轮换失败（round-160/161/162 不同文件）+ 全部单独跑绿 + 29 家族规模（本任务 Proposal 已含；内层补：构造全量负载下 install 家族轮换失败）
-- [ ] AC2: **install 家族连续 3 轮不再轮换失败**——每轮 install 家族文件全绿（外层 verification-round 验证）
+- [x] AC2: **install 家族连续 3 轮不再轮换失败**——每轮 install 家族文件全绿（外层 verification-round 验证）
 - [x] AC3: **单独跑不回归**——29 家族各单独跑仍绿
 - [x] AC4: **无静默漏测**——不通过 skip 逃过（负控制：每轮 install 家族确实被跑）
 - [x] AC5: **既有机制不回归**——`--for-task` scoped 门绿（runner-grouping / 组系统契约检查）
@@ -169,3 +169,8 @@ HEAD 复跑核验全过，与上述证据吻合（实现已随 fan-in 落在 dev
   quay-init-laydown-closure / quay-init-loop / quay-init-loop-driver / quay-init-loop-runtime / quay-init-loop-vendor /
   quay-init-tmux-detection / runtime-landing）+ quay-init-loop-core nested-spawn；serial 相位跑真实测试。
 AC 勾选状态不变（AC1/3/4/5 勾、AC2 + DoD 留外层）。
+
+## Evidence (outer closure 2026-08-11)
+
+- 外层 verification-round 验证：rounds 24-26 全绿（3240/3240 fail 0, verifiedCommit 88e188fa），本任务 fix 6668a4e8 为 verified commit 祖先 ⇒ AC 满足。闭：ready→done。
+- **Invoke evidence**（entry path 出现在 ## Contract 之外）: `node --no-warnings --experimental-strip-types --test <每个 install 家族文件>（抽 3 个单独跑贴回）`

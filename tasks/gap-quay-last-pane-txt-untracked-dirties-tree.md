@@ -3,7 +3,7 @@ id: gap-quay-last-pane-txt-untracked-dirties-tree
 title: .quay/last-pane.txt (tick-doc §1 artifact) is un-gitignored → dirties
   tree; assert-clean-tree (suite-after, any porcelain) vs tree-hygiene-check
   (known patterns only) diverge on "clean"
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -107,3 +107,7 @@ extra: {}
   `assert-clean-tree` absolute PASS exit 0、DELTA PASS exit 0 —— **两检查器一致判干净**。
 - 修前对照（移除 gitignore 规则时）：`?? .quay/last-outer-pane.txt` ⇒ `tree-hygiene-check` clean exit 0
   而 `assert-clean-tree` absolute FAIL exit 1 —— 正是本任务 Finding 记录的 divergence（同类文件复现）。
+
+## Evidence (outer closure 2026-08-11)
+
+- 外层 verification-round 验证：rounds 24-26 全绿（3240/3240 fail 0, verifiedCommit 88e188fa），本任务 fix b292ddb2 为 verified commit 祖先 ⇒ AC 满足。闭：ready→done。

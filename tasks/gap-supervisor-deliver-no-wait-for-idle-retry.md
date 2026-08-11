@@ -3,7 +3,7 @@ id: gap-supervisor-deliver-no-wait-for-idle-retry
 title: supervisor-deliver.sh one-shot send→verify→failed — doesn't wait for
   target idle or retry; can-receive (pane-state-classify) exists but not wired
   into delivery path
-status: ready
+status: todo
 labels:
   - gap
   - defect
