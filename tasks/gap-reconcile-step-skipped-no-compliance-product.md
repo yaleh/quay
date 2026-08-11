@@ -68,6 +68,8 @@ invoke    `node --no-warnings --experimental-strip-types plugin/scripts/fast-mod
 control   stale>0 无 reconcile ⇒ false；reconcile 后 ⇒ true；C17 闭合
 resume    合规判据 / 留痕 / 上游观察 / 测试分步提交，任一步完成即写盘
 
+> **manager 2026-08-11 04:5x 第二次更正（取代本任务根因）**：空槽真因=worktree 泄漏（合并后没删），非陈旧括号。--reconcile 该跑也跑了（括号 38→11、reconcilable 27→0），但不解决本因——occupied 15 = real 11 + closed-but-live 4，而 real 11 里 12 个已合分支 worktree 仍在（fast-mode-telemetry:834/:898 判存活=worktree 在，--reconcile 依规矩拒绝关）。本任务（reconcile_compliant 产物）保留但降级；真因任务=gap-worktree-leak-after-fan-in-occupies-slot-permanently。
+
 ## Dispatch review
 
 reviewer: outer
