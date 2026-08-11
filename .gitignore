@@ -155,6 +155,10 @@ orchestration/inner-idle-log.jsonl
 # tick (inner-agent-budget-report.ts). The 200/200 harness ceiling is a silent dispatch killer — the
 # product makes it readable. Same class as suite-chain-heartbeat.json: never commit.
 **/.quay/inner-agent-budget.json
+# B15 pool-quality judge persistence: {lastRound} — runtime state per the pool-quality-judge producer
+# contract (judge workflow's roundsSinceLastJudge), written/read by outer's B15 check. Same live
+# runtime-state family as inner-agent-budget.json / full-suite-state.json: never commit.
+**/.quay/pool-quality-judge-state.json
 # gap-resource-gate-no-single-flight-lock-two-suite-overlap: the single-flight lock FALLBACK path
 # (<repo_root>/.quay/full-suite.lock) used only when git-common-dir is unavailable (a non-git copy).
 # The PRIMARY path is <git-common-dir>/full-suite.lock (inside .git/, invisible to git status). The
