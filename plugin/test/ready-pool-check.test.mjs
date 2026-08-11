@@ -2077,6 +2077,31 @@ test("analyzeTasks: suite-blocking jumps ready_relevance; negative control uncha
   assert.deepEqual(green.ready_relevance.map((e) => e.id), ["gap-plain-ready", "gap-watchdog"], "green round clears the window ⇒ no re-rank");
 });
 
+test("analyzeTasks: dir-glob Touches task is NOT suite-blocking in a red window; concrete-file task is (AC4 negative control — gap-suite-blocking-directory-glob-overbroad)", (t) => {
+  const root = makeWorkspace("glob-neg");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // The crystallization shape: Touches carry a concrete script AND the `plugin/test/` directory glob.
+  writeTask(root, "gap-crystal-dir", { status: "ready", labels: ["gap"], body: fourArtifactBody({ touches: ["- plugin/test/", "- plugin/scripts/capability-catalog.sh"] }) });
+  // A task whose Touches name the CONCRETE failing file under that directory.
+  writeTask(root, "gap-real-blocker", { status: "ready", labels: ["gap"], body: fourArtifactBody({ touches: ["- plugin/test/checker-cost.test.mjs"] }) });
+  // The directory must EXIST with the failing file on disk — otherwise the dir glob expands to an
+  // empty set and the test cannot distinguish the fixed (dir glob filtered) from the buggy (dir glob
+  // attributed) behavior. This mirrors the real repo where plugin/test/ is a real directory.
+  fs.mkdirSync(path.join(root, "plugin", "test"), { recursive: true });
+  fs.writeFileSync(path.join(root, "plugin", "test", "checker-cost.test.mjs"), "// fixture\n");
+  const opts = { tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 };
+
+  // 3 consecutive red rounds whose ONLY failing file is under plugin/test/ — the real-repo shape
+  // where the crystallization task used to be a false suite-blocker.
+  writeRounds(root, Array.from({ length: 3 }, (_, i) => ({ round: 320 + i, state: "red", reason: "failed", fail: 1, failures: [{ file: "plugin/test/checker-cost.test.mjs", line: "x" }] })));
+  writeState(root, [{ file: "plugin/test/checker-cost.test.mjs", line: "x" }]);
+  const r = analyzeTasks(opts);
+  assert.equal(r.suite_blocking.window_active, true);
+  assert.deepEqual(r.suite_blocking.tasks, ["gap-real-blocker"], "only the concrete-file task is suite-blocking — the dir-glob task is NOT (AC4 negative control)");
+  const crystal = r.ready_relevance.find((e) => e.id === "gap-crystal-dir");
+  assert.equal(crystal.blocking_suite, false, "the dir-glob task's blocking_suite stays false in a red window");
+});
+
 test("AC5: suite-blocking obligation recorded mechanically in the obligation ledger (JSONL)", (t) => {
   // The ledger is at <repoRoot>/orchestration/manager-obligation-ledger.jsonl — the AC5 deliverable:
   // the "suite-blocker can't get prioritized" obligation is now MECHANICALLY derivable (ready-pool-
