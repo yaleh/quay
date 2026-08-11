@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-11T20:09:07.952Z",
+  "generatedAt": "2026-08-11T20:25:56.997Z",
   "since": null,
   "tasks": [
     {
@@ -54,19 +54,31 @@
   "orphaned": [],
   "inProgress": [
     {
+      "taskId": "gap-over90-clock-measures-queue-time-not-work-time",
+      "runId": "fm-gap-over90-clock-measures-queue-time-not-work-time-1786479699492-f7vvjz",
+      "startedAtMs": 1786479699501,
+      "startedAtMsUnreliable": false
+    },
+    {
       "taskId": "gap-quay-self-hosting-e2e-proof",
       "runId": "fm-gap-quay-self-hosting-e2e-proof-1786444937426-387z0x",
       "startedAtMs": 1786444937432,
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-supervisor-deliver-no-wait-for-idle-retry",
+      "runId": "fm-gap-supervisor-deliver-no-wait-for-idle-retry-1786479699315-bwk5g8",
+      "startedAtMs": 1786479699320,
       "startedAtMsUnreliable": false
     }
   ],
   "meanMinutes": 95.23194166666667,
   "medianMinutes": 55.17913333333333,
-  "tasksPerHour": 0.7497355815369595,
+  "tasksPerHour": 0.7305500930588913,
   "serialEquivalentPerHour": 0.6300407085052783,
   "windowStart": "2026-08-11T09:28:51.925Z",
-  "windowEnd": "2026-08-11T20:09:05.468Z",
-  "windowHours": 10.670428611111111,
+  "windowEnd": "2026-08-11T20:25:54.273Z",
+  "windowHours": 10.950652222222223,
   "haltedHours": 0,
   "halted": [],
   "blocked": [],
@@ -276,7 +288,7 @@
   ],
   "unreliable": [],
   "reconcilable": [],
-  "realInFlight": 1,
+  "realInFlight": 3,
   "closedButLive": [],
-  "occupiedSlots": 1
+  "occupiedSlots": 3
 }
