@@ -84,6 +84,18 @@ function readEventsJsonl(root, runId) {
     .map((line) => JSON.parse(line));
 }
 
+/** Read an arbitrary `.workflow-events/<filename>.jsonl` log (e.g. the reconcile-invocation log). */
+function readEventsJsonlRaw(root, filename) {
+  const file = path.join(root, ".workflow-events", filename);
+  if (!fs.existsSync(file)) return [];
+  return fs
+    .readFileSync(file, "utf8")
+    .trim()
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+}
+
 function md5(str) {
   return createHash("md5").update(str).digest("hex");
 }
@@ -1335,6 +1347,187 @@ test("SLOT-STATUS CLI — --slot-status carries subagents_in_flight / real_concu
     assert.equal(out.real_concurrency, 1);
     assert.equal(out.occupied_slots, 1);
     assert.equal(out.slots_free, 2);
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+// ── Reconcile compliance (gap-reconcile-step-skipped-no-compliance-product, C17) ─────────────────────
+// The A13 rule "stale_brackets > 0 ⇒ run --reconcile" previously had no record-observable product
+// separating 守 from 不守 — a tick observing stale_brackets > 0 and skipping --reconcile left no
+// trace (04:01 incident: realConcurrency=8 residual occupancy written, --reconcile never run).
+// `--reconcile` now records each invocation timestamp; --slot-status reconcile_compliant /
+// --slots reconcileCompliant compare stale > 0 against the last invocation within the window.
+
+test("RECONCILE-COMPLIANCE — stale>0 and no reconcile invocation ⇒ false (the 04:01 shape)", async () => {
+  const cli = await importCli();
+  const inProgress = [
+    { taskId: "ghost-a", runId: "fm-ghost-a-1", startedAtMs: 1000 },
+    { taskId: "ghost-b", runId: "fm-ghost-b-1", startedAtMs: 2000 },
+  ];
+  const executorGone = () => ({ gone: true, reason: "worktree-gone-and-no-process" });
+  const s = cli.analyzeSlotStatus(inProgress, { cap: 3, executorGone, lastReconcileAtMs: null });
+  assert.equal(s.stale_brackets, 2, "both ghosts are stale");
+  assert.equal(s.reconcile_compliant, false, "stale exists and no --reconcile was EVER recorded ⇒ non-compliant");
+  assert.equal(s.reconcile_compliant_reason, "stale-but-no-reconcile-invocation");
+  assert.equal(s.last_reconcile_at_ms, null);
+});
+
+test("RECONCILE-COMPLIANCE — stale>0 but reconcile invoked within the window ⇒ true", async () => {
+  const cli = await importCli();
+  const inProgress = [{ taskId: "ghost-a", runId: "fm-ghost-a-1", startedAtMs: 1000 }];
+  const executorGone = () => ({ gone: true, reason: "worktree-gone-and-no-process" });
+  const now = 10_000;
+  const s = cli.analyzeSlotStatus(inProgress, {
+    cap: 3,
+    executorGone,
+    lastReconcileAtMs: now - cli.RECONCILE_COMPLIANCE_WINDOW_MS / 2,
+    nowMs: now,
+  });
+  assert.equal(s.stale_brackets, 1, "stale still exists (a NEW phantom after the reconcile)");
+  assert.equal(s.reconcile_compliant, true, "the actor ran --reconcile in the same/adjacent round ⇒ compliant");
+  assert.equal(s.reconcile_compliant_reason, "reconcile-invoked-recently");
+});
+
+test("RECONCILE-COMPLIANCE — stale>0 and last reconcile OLDER than the window ⇒ false (freshness)", async () => {
+  const cli = await importCli();
+  const inProgress = [{ taskId: "ghost-a", runId: "fm-ghost-a-1", startedAtMs: 1000 }];
+  const executorGone = () => ({ gone: true, reason: "worktree-gone-and-no-process" });
+  const now = 10_000;
+  const s = cli.analyzeSlotStatus(inProgress, {
+    cap: 3,
+    executorGone,
+    lastReconcileAtMs: now - cli.RECONCILE_COMPLIANCE_WINDOW_MS - 1,
+    nowMs: now,
+  });
+  assert.equal(s.reconcile_compliant, false, "stale exists but the last --reconcile is beyond the adjacent-round window");
+  assert.equal(s.reconcile_compliant_reason, "stale-and-last-reconcile-stale");
+});
+
+test("RECONCILE-COMPLIANCE — stale=0 ⇒ compliant regardless of the reconcile log (nothing to reconcile)", async () => {
+  const cli = await importCli();
+  const executorGone = () => ({ gone: false, reason: "worktree-present" });
+  const noReconcile = cli.analyzeSlotStatus([], { cap: 3, executorGone, lastReconcileAtMs: null });
+  assert.equal(noReconcile.stale_brackets, 0);
+  assert.equal(noReconcile.reconcile_compliant, true);
+  assert.equal(noReconcile.reconcile_compliant_reason, "no-stale-brackets");
+  // Even with a reconcile log present, stale=0 is trivially compliant.
+  const withReconcile = cli.analyzeSlotStatus([], { cap: 3, executorGone, lastReconcileAtMs: 1000, nowMs: 1_000_000 });
+  assert.equal(withReconcile.reconcile_compliant, true);
+});
+
+test("RECONCILE-COMPLIANCE — computeReconcileCompliance window boundary (exactly AT the window ⇒ still adjacent)", async () => {
+  const cli = await importCli();
+  const now = 10_000;
+  // atMs exactly one window ago ⇒ difference == WINDOW ⇒ compliant (≤).
+  const boundary = cli.computeReconcileCompliance(1, now - cli.RECONCILE_COMPLIANCE_WINDOW_MS, now);
+  assert.equal(boundary.compliant, true, "at the window edge still counts as adjacent");
+  assert.equal(boundary.reason, "reconcile-invoked-recently");
+  const over = cli.computeReconcileCompliance(1, now - cli.RECONCILE_COMPLIANCE_WINDOW_MS - 1, now);
+  assert.equal(over.compliant, false);
+  assert.equal(over.reason, "stale-and-last-reconcile-stale");
+});
+
+test("RECONCILE-COMPLIANCE CLI — --reconcile records an invocation; --slot-status flips to compliant; --slot-status itself stays pure-read", async () => {
+  const cli = await importCli();
+  const tmp = makeTmpWorkspace();
+  try {
+    fs.writeFileSync(path.join(tmp, ".gitignore"), ".workflow-events/\n", "utf8");
+    fs.mkdirSync(path.join(tmp, "tasks"), { recursive: true });
+    fs.writeFileSync(path.join(tmp, "tasks", "ghost-task.md"), "---\nid: ghost-task\n---\n", "utf8");
+    gitCmd(tmp, "init", "-q");
+    gitCmd(tmp, "config", "user.email", "test@example.com");
+    gitCmd(tmp, "config", "user.name", "test");
+    assert.equal(gitCmd(tmp, "add", "-A").status, 0);
+    assert.equal(gitCmd(tmp, "commit", "-m", "seed").status, 0);
+    // ghost-task: branch merged ⇒ executor observably done ⇒ stale.
+    assert.equal(gitCmd(tmp, "checkout", "-b", "task/ghost-task").status, 0);
+    fs.appendFileSync(path.join(tmp, "tasks", "ghost-task.md"), "work\n");
+    assert.equal(gitCmd(tmp, "add", "-A").status, 0);
+    assert.equal(gitCmd(tmp, "commit", "-m", "ghost work landed").status, 0);
+    assert.equal(gitCmd(tmp, "checkout", "master").status, 0);
+    assert.equal(gitCmd(tmp, "merge", "--no-ff", "task/ghost-task", "-m", "Merge branch 'task/ghost-task'").status, 0);
+    const start = runCli(tmp, "--task-start", "--taskId", "ghost-task");
+    assert.equal(start.status, 0, start.stderr);
+
+    // Before --reconcile: stale>0, no invocation recorded ⇒ non-compliant, AND the log file does not exist.
+    const pre = runCli(tmp, "--slot-status", "--cap", "5", "--json");
+    assert.equal(pre.status, 0, pre.stderr);
+    const preObj = JSON.parse(pre.stdout);
+    assert.equal(preObj.stale_brackets, 1);
+    assert.equal(preObj.reconcile_compliant, false);
+    assert.equal(preObj.reconcile_compliant_reason, "stale-but-no-reconcile-invocation");
+    assert.equal(
+      fs.existsSync(path.join(tmp, ".workflow-events", cli.RECONCILE_LOG_FILENAME)),
+      false,
+      "--slot-status is pure-read: a reconcile-compliance read must NOT write the invocation log",
+    );
+
+    // --reconcile closes the phantom AND records the invocation timestamp.
+    const rec = runCli(tmp, "--reconcile", "--json");
+    assert.equal(rec.status, 0, rec.stderr);
+    const invocations = readEventsJsonlRaw(tmp, cli.RECONCILE_LOG_FILENAME);
+    assert.equal(invocations.length, 1, "exactly one invocation recorded");
+    assert.equal(invocations[0].type, "reconcile");
+    assert.equal(invocations[0].event, "invoke");
+    assert.ok(typeof invocations[0].atMs === "number" && Number.isFinite(invocations[0].atMs), "invocation carries a numeric timestamp");
+
+    // After: the phantom left inProgress (stale=0) ⇒ compliant trivially, and last_reconcile_at_ms set.
+    const post = runCli(tmp, "--slot-status", "--cap", "5", "--json");
+    assert.equal(post.status, 0, post.stderr);
+    const postObj = JSON.parse(post.stdout);
+    assert.equal(postObj.stale_brackets, 0);
+    assert.equal(postObj.reconcile_compliant, true);
+    assert.equal(postObj.last_reconcile_at_ms, invocations[0].atMs);
+
+    // The invocation log must NOT pollute the task pairing: --report inProgress/tasks stay clean.
+    const rep = runCli(tmp, "--report", "--json");
+    assert.equal(rep.status, 0, rep.stderr);
+    const repObj = JSON.parse(rep.stdout);
+    assert.equal(repObj.inProgress.length, 0, "ghost reconciled out of inProgress");
+    assert.equal(repObj.tasks.length, 0, "reconciled phantom must not enter completed tasks");
+    assert.equal(repObj.reconciled.length, 1, "phantom surfaces in reconciled[]");
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test("RECONCILE-COMPLIANCE CLI — --reconcile with NOTHING stale still records an invocation (zero-close record)", async () => {
+  const cli = await importCli();
+  const tmp = makeTmpWorkspace();
+  try {
+    fs.writeFileSync(path.join(tmp, ".gitignore"), ".workflow-events/\n", "utf8");
+    fs.mkdirSync(path.join(tmp, "tasks"), { recursive: true });
+    fs.writeFileSync(path.join(tmp, "tasks", "live-task.md"), "---\nid: live-task\n---\n", "utf8");
+    gitCmd(tmp, "init", "-q");
+    gitCmd(tmp, "config", "user.email", "test@example.com");
+    gitCmd(tmp, "config", "user.name", "test");
+    assert.equal(gitCmd(tmp, "add", "-A").status, 0);
+    assert.equal(gitCmd(tmp, "commit", "-m", "seed").status, 0);
+    // live-task: branch checked out in an OPEN worktree ⇒ reconcile KEEPS it (zero closes).
+    assert.equal(gitCmd(tmp, "worktree", "add", "-b", "task/live-task", path.join(tmp, "wt-live")).status, 0);
+    const start = runCli(tmp, "--task-start", "--taskId", "live-task");
+    assert.equal(start.status, 0, start.stderr);
+
+    const pre = runCli(tmp, "--slot-status", "--cap", "5", "--json");
+    const preObj = JSON.parse(pre.stdout);
+    assert.equal(preObj.stale_brackets, 0, "open-worktree executor is real in-flight, not stale");
+
+    const rec = runCli(tmp, "--reconcile", "--json");
+    assert.equal(rec.status, 0, rec.stderr);
+    const recObj = JSON.parse(rec.stdout);
+    assert.equal(recObj.closed.length, 0, "nothing stale ⇒ zero closes");
+    assert.equal(recObj.kept.length, 1, "the open-worktree task is kept");
+
+    const invocations = readEventsJsonlRaw(tmp, cli.RECONCILE_LOG_FILENAME);
+    assert.equal(invocations.length, 1, "a zero-close --reconcile still records its invocation");
+    assert.equal(invocations[0].event, "invoke");
+
+    const post = runCli(tmp, "--slot-status", "--cap", "5", "--json");
+    const postObj = JSON.parse(post.stdout);
+    assert.equal(postObj.stale_brackets, 0);
+    assert.equal(postObj.reconcile_compliant, true, "nothing stale ⇒ compliant, and the invocation is now on record");
+    assert.equal(postObj.last_reconcile_at_ms, invocations[0].atMs);
   } finally {
     cleanup(tmp);
   }
