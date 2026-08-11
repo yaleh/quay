@@ -115,3 +115,5 @@ at: 2026-08-10
 changed: 本阶段（产品化交付）第一件工作（manager 指定顺序+通道）。AC36 = slot-refill 第二轴 label:delivery-critical（低于 blocking_suite、高于 id 序）。实证 gap-load-sensitive 9h 未取。驱动通道 = outer 直接发消息给 inner 排入（非常规池排队）。实现归 inner，判定归 outer。本任务自带 delivery-critical label——实现后即用新轴推进 AC37-40 与 AC16③
 
 **AC37 活体样本（交叉标注，gap-ac37-exec-core-ships-with-package 2026-08-10）**：AC37 作为 AC36 判据③（端到端）的活体样本——本任务自带 `delivery-critical` label，经新轴被 inner 派发取走（dispatch 时间戳 > 打 label 时间戳），实现「交付关键路径」从脆弱通道转到常规池排队。AC37 完成后即反向验证 AC36 判据③。
+
+**可验证性缺口已闭环（交叉标注，gap-ac36-recommended-exposes-sort-key 2026-08-10）**：本任务判据②「位次严格前移 + 负控制」原只能**人工比对两次运行**——`--json` 的 `recommended` 是纯字符串数组，不暴露排序键。sibling 任务 `gap-ac36-recommended-exposes-sort-key` 补上：`--json` 新增 `ranking` 数组（`[{id, deliveryCritical, suiteBlocking, rank}]`，`recommended` 字符串数组保持原状），并由 `plugin/scripts/ac36-sortkey-criterion-check.ts` 吃两次运行 JSON 机械断言 (a) DC 严格前移 / (b) 同族非 DC 相对位次不变 / (c) blocking_suite 之上。判据② 从此靠机件，不靠自述。

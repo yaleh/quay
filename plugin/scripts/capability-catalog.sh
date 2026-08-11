@@ -78,6 +78,7 @@ SELF_DIR="$(cd "$(dirname "$SELF")" 2>/dev/null && pwd || true)"
 # as a specific QUESTION, never the generic "checks correctness" (AC5 negative control:
 # a catalog where every entry says "checks correctness" is indistinguishable from none).
 declare -A QUESTION=(
+  [ac36-sortkey-criterion-check.ts]="Did AC36 判据② hold mechanically — the delivery-critical task strictly moved forward, same-family non-DC kept their relative order, and blocking_suite still ranks above delivery_critical (two slot-refill runs' ranking compared)?"
   [adr016-screen-use-check.ts]="Is this tmux remote-drive usage compliant with ADR-016's screen-use carve-out?"
   [anti-drift-touches-check.ts]="Did the landed change touch exactly the files the task's ## Touches declared (and nothing else)?"
   [anti-gaming-guard.sh]="Is a candidate value surface machine-verifiable, capped and un-inflatable (no subjective gaming of the chart)?"
@@ -292,6 +293,7 @@ declare -A QUESTION=(
 
 # ── CADENCE (cadence declaration (②a, gap-crystallization-five-directions) — every declared check declares how often it is supposed to run; 零调用 > 3× 声明周期 → 待表态 (not a uniform day count)) ──
 declare -A CADENCE=(
+  [ac36-sortkey-criterion-check.ts]="按需"
   [accounting-emit.ts]="每轮"
   [adr016-screen-use-check.ts]="每轮"
   [anti-drift-touches-check.ts]="按需"
@@ -494,6 +496,7 @@ declare -A CADENCE=(
 
 # ── INVALIDATION (invalidation-precondition declaration (①) — every hard constraint / mechanism declaration carries a 失效前提 field; when a testable precondition can be written, write it, when not, mark the explicit '无可测前提，靠周期复核' (标出来别假装有). Missing field = entry-gate reject below) ──
 declare -A INVALIDATION=(
+  [ac36-sortkey-criterion-check.ts]="失效前提：slot-refill --json 仍暴露 ranking 数组（移除或改形状则判据② 失去机械读面，本条失效）"
   [accounting-emit.ts]="无可测前提，靠周期复核"
   [adr016-screen-use-check.ts]="失效前提：远程驱动仍通过 tmux capture-pane 观测（ADR-016 仍生效）；若驱动面改为非 TUI 协议，本条退休"
   [anti-drift-touches-check.ts]="无可测前提，靠周期复核"
@@ -696,6 +699,7 @@ declare -A INVALIDATION=(
 
 # ── LAST_REAFFIRMED (last-reaffirmed stamp (③) — the date someone last looked at this mechanism and stamped it; 超 N 天未被任何调用/检查/复核触及 → 待重新确认 (只看一眼盖章, 不判断对错)) ──
 declare -A LAST_REAFFIRMED=(
+  [ac36-sortkey-criterion-check.ts]="2026-08-11"
   [accounting-emit.ts]="2026-08-10"
   [adr016-screen-use-check.ts]="2026-08-10"
   [anti-drift-touches-check.ts]="2026-08-10"
@@ -898,6 +902,7 @@ declare -A LAST_REAFFIRMED=(
 
 # ── MATCHING (matching-method declaration (④) — how this checker judges: position (按位置不按关键词) | keyword | enumerative (枚举式存在性) | n/a (non-judgment lib/data). New checkers MUST declare which matching they use) ──
 declare -A MATCHING=(
+  [ac36-sortkey-criterion-check.ts]="position"
   [accounting-emit.ts]="keyword"
   [adr016-screen-use-check.ts]="position"
   [anti-drift-touches-check.ts]="keyword"

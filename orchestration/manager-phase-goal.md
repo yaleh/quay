@@ -135,6 +135,11 @@ manager 是交付物但不是典型开发过程组件。** 三层统一里 manag
 1. `slot-refill.ts` 的 `candidates.sort`（**复用已有位置，不新建调度器**）加第二轴
    `label:delivery-critical`，优先级低于 `blocking_suite`、高于 id 序；
 2. 打了该 label 的任务，在 `--json` 的 `recommended` 里**位次严格前移**（负控制：不打 label 的同族任务位次不变）；
+   **本判据已机械化（gap-ac36-recommended-exposes-sort-key）**：`--json` 新增 `ranking` 数组
+   （`[{id, deliveryCritical, suiteBlocking, rank}]`，与 `recommended` 并行；`recommended` 字符串数组保持原状），
+   由 `plugin/scripts/ac36-sortkey-criterion-check.ts` 吃**两次运行的 JSON**（打 label 前/后）机械断言：
+   (a) DC 任务 rank 严格减小；(b) 同族非 DC 相对位次不变；(c) blocking_suite 仍在 DC 之上。
+   判定靠机件，不再人工比对两次运行。
 3. **端到端**：给本阶段任一 AC 的实现任务打上该 label 后，**下一次 inner 派发即取它**（时间戳可核）。
 
 **驱动路径（人 2026-08-10 裁定的通道）**：由 **outer 直接发消息给 inner 要求排入**——

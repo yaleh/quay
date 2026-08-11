@@ -729,6 +729,64 @@ test("DELIVERY-CRITICAL — end-to-end: after labeling, the next refill evaluati
   assert.ok(Date.now() >= labelTs, "dispatch evaluation happens after the label is applied (ts order)");
 });
 
+// ── RANKING EXPOSURE (tasks/gap-ac36-recommended-exposes-sort-key AC2) ───────────────────────────────
+// The `recommended` STRING array is unchanged (backward compat — every consumer above reads ids).
+// The parallel `ranking` array exposes each recommended id's sort axes ({id, deliveryCritical,
+// suiteBlocking, rank}) so AC36 判据②'s "strict forward movement + negative control" is mechanically
+// assertable from the JSON alone — the exact gap this task closes (recommended was a pure string
+// array exposing NO sort field; 判据② could only be eyeballed).
+
+test("RANKING — parallel to recommended, carries {id, deliveryCritical, suiteBlocking, rank} for every recommended id (AC2)", (t) => {
+  const root = makeWorkspace("ranking-expose");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "ac36-a", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/a.ts (new)"]) });
+  writeTask(root, "ac36-b", { status: "ready", labels: ["gap", "delivery-critical"], body: dispatchableBody(["- code/b.ts (new)"]) });
+
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 3 });
+  assert.deepEqual(r.recommended, ["ac36-b", "ac36-a"], "string recommended is unchanged");
+  assert.ok(Array.isArray(r.ranking), "--json exposes the ranking array");
+  assert.equal(r.ranking.length, r.recommended.length, "ranking is parallel to recommended");
+  assert.deepEqual(r.ranking.map((e) => e.id), r.recommended, "ranking order === recommended order");
+  const b = r.ranking.find((e) => e.id === "ac36-b");
+  assert.equal(b.deliveryCritical, true, "deliveryCritical axis exposed for the labeled task");
+  assert.equal(b.suiteBlocking, false);
+  assert.equal(b.rank, 0, "rank = position within recommended");
+  const a = r.ranking.find((e) => e.id === "ac36-a");
+  assert.equal(a.deliveryCritical, false, "unlabeled task exposes deliveryCritical=false");
+  assert.equal(a.rank, 1);
+});
+
+test("RANKING — a suite-blocker's ranking entry carries suiteBlocking:true (blocking_suite axis exposed) (AC2)", (t) => {
+  const root = makeWorkspace("ranking-sb");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "ac36-watchdog", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/wd.ts (new)"]) });
+  writeTask(root, "ac36-critical", { status: "ready", labels: ["gap", "delivery-critical"], body: dispatchableBody(["- code/crit.ts (new)"]) });
+  writeRounds(root, Array.from({ length: 3 }, (_, i) => ({ round: 400 + i, state: "red", reason: "failed", fail: 1, failures: [{ file: "code/wd.ts", line: "x" }] })));
+  writeState(root, [{ file: "code/wd.ts", line: "x" }]);
+
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 2 });
+  assert.equal(r.suite_blocking.window_active, true);
+  assert.deepEqual(r.recommended, ["ac36-watchdog", "ac36-critical"], "blocking_suite above delivery_critical");
+  const wd = r.ranking.find((e) => e.id === "ac36-watchdog");
+  assert.equal(wd.suiteBlocking, true, "suiteBlocking axis exposed for the suite-blocker");
+  assert.equal(wd.rank, 0, "suite-blocker ranks first");
+  const crit = r.ranking.find((e) => e.id === "ac36-critical");
+  assert.equal(crit.deliveryCritical, true);
+  assert.equal(crit.suiteBlocking, false);
+  assert.equal(crit.rank, 1);
+});
+
+test("RANKING — halted ⇒ ranking is empty (parallel to the empty recommended) (AC2)", (t) => {
+  const root = makeWorkspace("ranking-halt");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "ac36-a", { status: "ready", labels: ["gap", "delivery-critical"], body: dispatchableBody(["- code/a.ts (new)"]) });
+  fs.writeFileSync(path.join(root, ".halt"), "paused");
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 3 });
+  assert.equal(r.halted, true);
+  assert.deepEqual(r.recommended, [], "halted ⇒ nothing recommended");
+  assert.deepEqual(r.ranking, [], "halted ⇒ nothing ranked");
+});
+
 // ── NOT-YET-FLIPPED SKIP (tasks/gap-slot-refill-repeats-done-eligible-recommendations) ──────────────
 // slot-refill's candidate loop at :243 used to iterate pool.ready + 3 step-4 checks and NEVER looked
 // at the not-yet-flipped signal (grep not-yet-flipped|excluded = 0 hits). A task whose work LANDED
