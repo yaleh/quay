@@ -659,6 +659,7 @@ occupied_slots)`。**别把已关括号的槽当空**——executor 仍在就不
 ```bash
 node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --slots --cap "${effective_cap:-3}"
 # real-in-flight N / subagents-in-flight M / real-concurrency N+M / slots-remaining K；
+# reconcile-compliant true|false（C17：stale>0 且邻近无 --reconcile 调用 ⇒ false，本 tick 调 --reconcile 留痕）
 # dispatchable_disjoint（步骤 3.6）− realConcurrency = 槽位级闲置
 ```
 
@@ -1237,9 +1238,13 @@ clause-14 降为 advisory、既有失败记在已 done 的任务体里）。
   （`--slots` 的 `subagentsInFlight`，调查型无括号，`gap-telemetry-underreport-nontask-subagents-not-counted-in-slots`）；
   核实并发读原始字段，不用 START 事件或 pane 文字（见 `orchestrator-loop-tick.md` 步骤 4b）
 - **槽位视角（`--slot-status`）**：`real_in_flight` / `subagents_in_flight` / `real_concurrency` /
-  `stale_brackets` / `slots_free`（`node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts
-  --slots --cap "${effective_cap:-3}"`）——「还剩几个并发槽」机械可见（AC2）；`stale_brackets > 0` 时调
-  `--reconcile` 闭合，别让红窗遗留括号污染后续判定
+  `stale_brackets` / `slots_free` + **`reconcile_compliant`**（`node --experimental-strip-types
+  plugin/scripts/fast-mode-telemetry.ts --slots --cap "${effective_cap:-3}"`）——「还剩几个并发槽」
+  机械可见（AC2）；`stale_brackets > 0` 时调 `--reconcile` 闭合，别让红窗遗留括号污染后续判定。
+  **C17 合规产物（`gap-reconcile-step-skipped-no-compliance-product`）**：`reconcile_compliant=false`
+  ⇒ `stale_brackets > 0` 且邻近无 `--reconcile` 调用记录——本 tick 判「未对账」并立即调 `--reconcile`
+  （每次调用写时间戳到 `.workflow-events/reconcile-invocations.jsonl`），把 false + 已调 reconcile
+  记进 tick-log
   事件或 pane 文字（见 `orchestrator-loop-tick.md` 步骤 4b）。**空槽数**（AC2/AC5）：`--slots --cap
   ${effective_cap}` 的 slots-remaining + `dispatchable_disjoint − realConcurrency` 的槽位级闲置
 - 停止条件是否触发、触发了哪条

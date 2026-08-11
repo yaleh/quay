@@ -43,6 +43,16 @@
 // throughput, and marks backfilled starts (`startedAtMs` later than the task's first known commit)
 // `startedAtMsUnreliable`, excluded from the throughput numerator and denominator (AC7).
 //
+// RECONCILE-COMPLIANCE PRODUCT (gap-reconcile-step-skipped-no-compliance-product, C17): the A13
+// rule "stale_brackets > 0 ⇒ run --reconcile" previously had no record-observable product separating
+// 守 from 不守 — a tick that observed stale_brackets > 0 and skipped --reconcile left no trace
+// (04:01 incident: realConcurrency=8 residual occupancy written, --reconcile never run). `--reconcile`
+// now records each INVOCATION timestamp (`.workflow-events/reconcile-invocations.jsonl`, appended
+// before any bracket close so even a zero-close run leaves a record), and the pure-read slot views
+// (`--slot-status` reconcile_compliant / `--slots` reconcileCompliant) compare stale_brackets > 0
+// against the last invocation time within RECONCILE_COMPLIANCE_WINDOW_MS — stale exists but no recent
+// reconcile ⇒ non-compliant (the outer tick reads this and drives "inner 未对账").
+//
 // BLOCKED-WAIT METRICS (gap-no-explicit-blocked-signal-from-inner-layer, AC7): --report/--snapshot
 // also aggregate blocked-wait periods. The inner layer's inner-blocked-signal.ts --clear emits a
 // `Fast`-stage event with eventKind "blocked" (timing.startedAtMs = block since, endedAtMs = clear
@@ -472,11 +482,84 @@ export function readHaltEvents(root) {
   return out;
 }
 
+// ── Reconcile-invocation log (gap-reconcile-step-skipped-no-compliance-product, C17) ────────────────
+// The A13 rule "stale_brackets > 0 ⇒ run --reconcile" previously had NO record-observable product
+// separating 守 from 不守 — a tick could observe stale_brackets > 0, skip --reconcile, and nothing
+// in any artifact would differ. This log is that product: `--reconcile` appends one line per
+// INVOCATION (at the START, before any bracket is closed, so even a zero-close run leaves a record),
+// and the pure-read slot views (`--slot-status` / `--slots`) compare the last invocation time against
+// stale_brackets > 0 to answer "did the actor run --reconcile near the last time stale existed?"
+// It is a SEPARATE file from the runId event stream (like halt-events.jsonl): its lines are
+// {type:"reconcile", event:"invoke", atMs}, NOT A1a StageEvents, and readAllEvents excludes it.
+
+/** Fixed filename of the append-only reconcile-invocation log (sibling of halt-events.jsonl, same gitignored dir). */
+export const RECONCILE_LOG_FILENAME = "reconcile-invocations.jsonl";
+
+/** Proximity window for "this round / adjacent" reconcile compliance — one inner tick is 1200–1800s. */
+export const RECONCILE_COMPLIANCE_WINDOW_MS = 30 * 60 * 1000;
+
+/**
+ * Append one reconcile-invocation line to `<root>/.workflow-events/reconcile-invocations.jsonl`.
+ * Called at the START of every `--reconcile` run — an invocation that closes zero brackets (nothing
+ * stale, or stale but all KEPT) still leaves a record, so a later reader can distinguish "ran
+ * --reconcile" from "never ran it". Fail-closed: invalid atMs throws and writes nothing.
+ * @param {string} root
+ * @param {number} [atMs] — epoch ms; defaults to Date.now()
+ * @returns {string} — the log path written
+ */
+export function writeReconcileInvocation(root, atMs = Date.now()) {
+  if (typeof atMs !== "number" || !Number.isFinite(atMs)) {
+    throw new Error(`refusing to write reconcile invocation: atMs must be a finite number, got ${atMs}`);
+  }
+  const eventsDir = path.join(root, ".workflow-events");
+  fs.mkdirSync(eventsDir, { recursive: true });
+  const logPath = path.join(eventsDir, RECONCILE_LOG_FILENAME);
+  fs.appendFileSync(logPath, JSON.stringify({ type: "reconcile", event: "invoke", atMs }) + "\n", "utf8");
+  return logPath;
+}
+
+/**
+ * Read every reconcile-invocation line from `<root>/.workflow-events/reconcile-invocations.jsonl`,
+ * in append order. Malformed lines are skipped silently (never crash the report). Missing file → [].
+ * @param {string} root
+ * @returns {Array<{type:"reconcile", event:"invoke", atMs:number}>}
+ */
+export function readReconcileInvocations(root) {
+  const logPath = path.join(root, ".workflow-events", RECONCILE_LOG_FILENAME);
+  if (!fs.existsSync(logPath)) return [];
+  const out = [];
+  for (const line of fs.readFileSync(logPath, "utf8").split("\n")) {
+    if (line.trim() === "") continue;
+    let e;
+    try {
+      e = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (e && e.type === "reconcile" && e.event === "invoke" && typeof e.atMs === "number" && Number.isFinite(e.atMs)) {
+      out.push(e);
+    }
+  }
+  return out;
+}
+
+/**
+ * The most recent --reconcile invocation's atMs, or null if none was ever recorded.
+ * @param {string} root
+ * @returns {number|null}
+ */
+export function lastReconcileAtMs(root) {
+  const invocations = readReconcileInvocations(root);
+  if (invocations.length === 0) return null;
+  return invocations[invocations.length - 1].atMs;
+}
+
 /**
  * Async-generate every schema-valid event across all `.workflow-events/*.jsonl` files.
  * Malformed lines are skipped by parseEventStream (never crash the report). The halt event log
- * (`halt-events.jsonl`) is explicitly EXCLUDED — its lines are not A1a StageEvents and must never
- * pollute the task pairing (orphaned/inProgress/tasks).
+ * (`halt-events.jsonl`) and the reconcile-invocation log (`reconcile-invocations.jsonl`) are
+ * explicitly EXCLUDED — their lines are not A1a StageEvents and must never pollute the task
+ * pairing (orphaned/inProgress/tasks).
  * @param {string} root
  * @returns {AsyncGenerator<object>}
  */
@@ -485,7 +568,7 @@ export async function* readAllEvents(root) {
   if (!fs.existsSync(eventsDir)) return;
   const files = fs
     .readdirSync(eventsDir)
-    .filter((f) => f.endsWith(".jsonl") && f !== HALT_LOG_FILENAME)
+    .filter((f) => f.endsWith(".jsonl") && f !== HALT_LOG_FILENAME && f !== RECONCILE_LOG_FILENAME)
     .sort();
   for (const file of files) {
     for await (const result of parseEventStream(path.join(eventsDir, file))) {
@@ -1019,6 +1102,39 @@ export function readSubagentsInFlight() {
 export const SLOT_STATUS_CAP_DEFAULT = 3;
 
 /**
+ * Reconcile compliance (gap-reconcile-step-skipped-no-compliance-product, C17 shape): the A13 rule
+ * "stale_brackets > 0 ⇒ run --reconcile" previously had NO product separating 守 from 不守 — a tick
+ * that observed stale_brackets > 0 and skipped --reconcile left no observable trace (the 04:01
+ * incident: realConcurrency=8 residual occupancy written, --reconcile never run). This is that
+ * product: `stale_brackets > 0` and no --reconcile invocation recorded in the same/adjacent round
+ * (the RECONCILE_COMPLIANCE_WINDOW_MS proximity window) ⇒ non-compliant. When stale_brackets === 0
+ * there is nothing to reconcile ⇒ always compliant regardless of the invocation log.
+ *
+ * PURE: all observable facts arrive as args — never reads the log itself (callers inject
+ * `lastReconcileAtMs`), so tests can assert deterministic verdicts.
+ * @param {number} staleBrackets — the count `--reconcile` would close (executor observably gone).
+ * @param {number|null} lastReconcileAtMs — most recent --reconcile invocation's atMs, or null.
+ * @param {number} [nowMs] — default Date.now().
+ * @returns {{compliant:boolean, reason:string}} — reason ∈
+ *   no-stale-brackets | stale-but-no-reconcile-invocation | reconcile-invoked-recently |
+ *   stale-and-last-reconcile-stale
+ */
+export function computeReconcileCompliance(staleBrackets, lastReconcileAtMs, nowMs = Date.now()) {
+  const stale = Number.isFinite(staleBrackets) && staleBrackets > 0 ? staleBrackets : 0;
+  const now = Number.isFinite(nowMs) ? nowMs : Date.now();
+  if (stale === 0) {
+    return { compliant: true, reason: "no-stale-brackets" };
+  }
+  if (lastReconcileAtMs == null) {
+    return { compliant: false, reason: "stale-but-no-reconcile-invocation" };
+  }
+  if (now - lastReconcileAtMs <= RECONCILE_COMPLIANCE_WINDOW_MS) {
+    return { compliant: true, reason: "reconcile-invoked-recently" };
+  }
+  return { compliant: false, reason: "stale-and-last-reconcile-stale" };
+}
+
+/**
  * Compute the slot view of an in-flight set. PURE: all observable facts arrive via the injected
  * `executorGone` probe (default: no-executor-probe, keep everything) so tests can inject
  * deterministic verdicts without faking processes/git. Reuses `reconcileInFlight` — the same
@@ -1050,13 +1166,17 @@ export const SLOT_STATUS_CAP_DEFAULT = 3;
  *   Default 0. These are NOT brackets and are counted on top of real_in_flight: real concurrency =
  *   real_in_flight + subagents_in_flight, and they occupy slots (slots_free must never offer a slot
  *   an actually-busy investigation subagent holds).
+ * @param {number|null} [opts.lastReconcileAtMs] — most recent --reconcile invocation's atMs
+ *   (gap-reconcile-step-skipped-no-compliance-product, C17 compliance product). Default null.
+ * @param {number} [opts.nowMs] — wall-clock for the compliance proximity window. Default Date.now().
  * @returns {{cap:number, in_progress_total:number, stale_brackets:number, real_in_flight:number,
  *   subagents_in_flight:number, real_concurrency:number, closed_but_live_agents:Array<object>,
  *   occupied_slots:number, slots_free:number, slot_state:"free"|"full",
  *   brackets_reflect_subagents:boolean, closed_brackets_reflect_processes:boolean,
+ *   last_reconcile_at_ms:number|null, reconcile_compliant:boolean, reconcile_compliant_reason:string,
  *   closed:Array<object>, kept:Array<object>}}
  */
-export function analyzeSlotStatus(inProgress, { cap = SLOT_STATUS_CAP_DEFAULT, executorGone, completed = [], executorPresent, firstKnownCommitMs = null, subagentsInFlight = 0 } = {}) {
+export function analyzeSlotStatus(inProgress, { cap = SLOT_STATUS_CAP_DEFAULT, executorGone, completed = [], executorPresent, firstKnownCommitMs = null, subagentsInFlight = 0, lastReconcileAtMs = null, nowMs = Date.now() } = {}) {
   const { closed, kept } = reconcileInFlight(inProgress ?? [], { executorGone, firstKnownCommitMs });
   const realInFlight = kept.length;
   const closedButLive = detectClosedButLive(completed, { executorPresent });
@@ -1064,6 +1184,7 @@ export function analyzeSlotStatus(inProgress, { cap = SLOT_STATUS_CAP_DEFAULT, e
   const realConcurrency = realInFlight + nonTaskSubagents;
   const occupiedSlots = realConcurrency + closedButLive.length;
   const slotsFree = Math.max(0, cap - occupiedSlots);
+  const reconcile = computeReconcileCompliance(closed.length, lastReconcileAtMs, nowMs);
   return {
     cap,
     in_progress_total: (inProgress ?? []).length,
@@ -1077,6 +1198,9 @@ export function analyzeSlotStatus(inProgress, { cap = SLOT_STATUS_CAP_DEFAULT, e
     slot_state: slotsFree > 0 ? "free" : "full",
     brackets_reflect_subagents: (inProgress ?? []).length === realInFlight,
     closed_brackets_reflect_processes: closedButLive.length === 0,
+    last_reconcile_at_ms: lastReconcileAtMs,
+    reconcile_compliant: reconcile.compliant,
+    reconcile_compliant_reason: reconcile.reason,
     closed,
     kept,
   };
@@ -1100,6 +1224,10 @@ function printHumanSlotStatus(slot) {
   console.log(`  occupied slots (real concurrency + closed-but-live): ${slot.occupied_slots}`);
   console.log(`  slots free: ${slot.slots_free} (slot_state ${slot.slot_state})`);
   console.log(`  brackets reflect subagents: ${slot.brackets_reflect_subagents ? "YES" : "NO (stale brackets or missing --task-end)"}`);
+  console.log(`  reconcile compliant: ${slot.reconcile_compliant ? "YES" : `NO — ${slot.reconcile_compliant_reason}`}`);
+  if (!slot.reconcile_compliant) {
+    console.log(`    stale_brackets > 0 but no --reconcile invocation recorded in the last window; run '--reconcile' to close them (gap-reconcile-step-skipped-no-compliance-product)`);
+  }
   if (slot.closed_but_live_agents.length > 0) {
     console.log(`  closed brackets reflect processes: NO — ${slot.closed_but_live_agents.length} closed-bracket agent(s) still present (bracket-close ≠ agent-exit); their slots are NOT free`);
   }
@@ -1203,11 +1331,11 @@ Usage:
   node --experimental-strip-types fast-mode-telemetry.ts --halt-start [--atMs <iso>] [--reason <str>] [--root <dir>]   (record a .halt placement)
   node --experimental-strip-types fast-mode-telemetry.ts --halt-end   [--atMs <iso>] [--root <dir>]                    (record a .halt removal)
   node --experimental-strip-types fast-mode-telemetry.ts --report [--since <iso>] [--json] [--root <dir>]   (PURE READ — never writes)
-  node --experimental-strip-types fast-mode-telemetry.ts --slot-status [--cap <n>] [--json] [--root <dir>] (PURE READ — slot view: real in-flight + non-task subagents vs stale brackets vs closed-but-live agents vs slots free)
+  node --experimental-strip-types fast-mode-telemetry.ts --slot-status [--cap <n>] [--json] [--root <dir>] (PURE READ — slot view: real in-flight + non-task subagents vs stale brackets vs closed-but-live agents vs slots free; carries reconcile_compliant)
   node --experimental-strip-types fast-mode-telemetry.ts --report [--since <iso>] [--json] [--root <dir>]   (PURE READ — never writes; carries reconcilable/realInFlight/closedButLive/occupiedSlots)
   node --experimental-strip-types fast-mode-telemetry.ts --snapshot [--since <iso>] [--json] [--root <dir>] (writes the committed aggregate)
-  node --experimental-strip-types fast-mode-telemetry.ts --slots [--cap N] [--json] [--root <dir>]          (PURE READ slot visibility: brackets vs real in-flight + non-task subagents vs closed-but-live)
-  node --experimental-strip-types fast-mode-telemetry.ts --reconcile [--json] [--root <dir>]  (close in-flight records whose executor is observably gone — WRTES an end event per close)`;
+  node --experimental-strip-types fast-mode-telemetry.ts --slots [--cap N] [--json] [--root <dir>]          (PURE READ slot visibility: brackets vs real in-flight + non-task subagents vs closed-but-live; carries reconcileCompliant)
+  node --experimental-strip-types fast-mode-telemetry.ts --reconcile [--json] [--root <dir>]  (close in-flight records whose executor is observably gone — WRITES an end event per close + records the invocation timestamp)`;
 
 function getArgValue(args, name) {
   const idx = args.indexOf(name);
@@ -1459,6 +1587,8 @@ export async function main(argv) {
       executorPresent: makeDefaultExecutorPresent(root),
       firstKnownCommitMs: (taskId) => firstKnownCommitMsByTask(taskId),
       subagentsInFlight: readSubagentsInFlight(),
+      lastReconcileAtMs: lastReconcileAtMs(root),
+      nowMs: Date.now(),
     });
     if (args.includes("--json")) {
       console.log(JSON.stringify(slot, null, 2));
@@ -1537,6 +1667,11 @@ export async function main(argv) {
     const closedButLive = reportWithMeta.closedButLive ?? [];
     const occupiedSlots = realConcurrency + closedButLive.length;
     const slotsRemaining = cap != null ? Math.max(0, cap - occupiedSlots) : null;
+    // Reconcile compliance (gap-reconcile-step-skipped-no-compliance-product, C17): the A13 rule
+    // "stale_brackets > 0 ⇒ run --reconcile" needs a record-observable product — stale exists but
+    // no --reconcile invocation in the proximity window ⇒ non-compliant.
+    const lastReconcile = lastReconcileAtMs(root);
+    const reconcile = computeReconcileCompliance(reportWithMeta.reconcilable.length, lastReconcile, Date.now());
     const out = {
       bracketsInFlight: reportWithMeta.inProgress.length,
       reconcilable: reportWithMeta.reconcilable.length,
@@ -1547,6 +1682,9 @@ export async function main(argv) {
       occupiedSlots,
       slotsTotal,
       slotsRemaining,
+      lastReconcileAtMs: lastReconcile,
+      reconcileCompliant: reconcile.compliant,
+      reconcileCompliantReason: reconcile.reason,
     };
     if (args.includes("--json")) {
       console.log(JSON.stringify(out, null, 2));
@@ -1555,7 +1693,7 @@ export async function main(argv) {
       const closedPart = out.closedButLive.length > 0 ? `, closed-but-live ${out.closedButLive.map((c) => c.taskId).join(",")}` : "";
       const subPart = out.subagentsInFlight > 0 ? `, non-task subagents ${out.subagentsInFlight}` : "";
       console.log(
-        `slot visibility: brackets-in-flight ${out.bracketsInFlight}, reconcilable ${out.reconcilable}, real-in-flight ${out.realInFlight}, real-concurrency ${out.realConcurrency}${subPart}${closedPart}, occupied ${out.occupiedSlots}${capPart}`,
+        `slot visibility: brackets-in-flight ${out.bracketsInFlight}, reconcilable ${out.reconcilable}, real-in-flight ${out.realInFlight}, real-concurrency ${out.realConcurrency}${subPart}${closedPart}, occupied ${out.occupiedSlots}${capPart}, reconcile-compliant ${out.reconcileCompliant}`,
       );
     }
     return 0;
@@ -1569,6 +1707,17 @@ export async function main(argv) {
   // worktree) are KEPT — fail-closed toward not making the phantom problem into a blindness problem
   // (AC3). Prints { closed, kept, inProgress } as JSON (or human lines).
   if (args.includes("--reconcile")) {
+    // Record the INVOCATION (gap-reconcile-step-skipped-no-compliance-product, C17): one line per
+    // --reconcile run, written BEFORE any bracket is closed so even a zero-close invocation leaves a
+    // record. The pure-read slot views compare stale_brackets > 0 against the last such timestamp to
+    // separate 守 (ran --reconcile near the observation) from 不守 (stale observed, --reconcile never
+    // run — the 04:01 incident shape).
+    try {
+      writeReconcileInvocation(root);
+    } catch (e) {
+      console.error(`fast-mode-telemetry: failed to record reconcile invocation: ${e.message}`);
+      return 1;
+    }
     let reportWithMeta;
     try {
       ({ report: reportWithMeta } = await loadAndAggregate(root, null));
