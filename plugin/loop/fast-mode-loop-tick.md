@@ -1259,7 +1259,8 @@ engine 组 + governance 组 == 去重后 realpath 总数」这类**关系**，�
 `## Touches`。缺任一项的不算建成。
 
 **核心/loop 文档 outer 独占写（`gap-write-ownership-extend-beyond-tasks-to-outer-core-and-hot-files` AC2）**：
-inner 建任务时**不得**把 `orchestration/orchestrator-*.md` 与 `plugin/loop/orchestrator-loop-tick.md`
+inner 建任务时**不得**把 `orchestration/orchestrator-loop-tick.md` 与 `orchestration/orchestrator-tick-core.md`
+（及未来新增的 `orchestration/` 下 `orchestrator-*.md` 一族）与 `plugin/loop/orchestrator-loop-tick.md`
 列入 `## Touches`——它们归 outer 独占写（外层执行核 + loop 文档；写所有权分离 `0ce3f2a8` 只覆盖
 `tasks/`，不覆盖这两类，6 条 inner 分支撞 add/add 就是代价）。inner 需要改它们 ⇒ 在 `## Proposal`
 给**改动建议**（要改哪条、改成什么、为什么），由 outer 落盘。**迁移单方新建（AC3）**：迁移窗口内
