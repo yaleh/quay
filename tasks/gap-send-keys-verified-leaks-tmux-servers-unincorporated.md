@@ -33,6 +33,15 @@ extra: {}
 >   known-load-sensitive.test.mjs **14/14 pass、fail 0、cancelled 0**，exit 0）。
 > - 替代机件 `send-keys-reliable.test.mjs` 已用 scoped `tmux kill-session -t <unique>`（never kill-server）。
 >
+> **inner 复核（2026-08-11，develop=51885b79，inner 重派执行）**：
+> - 4 实体仍 GONE；`git log --all -- plugin/test/send-keys-verified.test.mjs` 最后提交仍为 a37df1c5 删除，无 re-add。
+> - Contract measure：`pgrep -af '^tmux new-session' | grep -c 'skv-'` = **0**（仍无孤儿 tmux 进程）。
+> - 家族机制完好：`known-load-sensitive.ts --list`（worktree 内需显式 `--root`，因 `.quay/config.yml` 被 gitignore 导致 findRepoRoot 上溯到父目录）28 成员，
+>   含 install-config-driven-e2e（heavy）、create-mcp（heavy）、proposal-convergence（heavy）、relation-sync（child-spawn）；`--check` ok（exit 0）。
+> - scoped 门绿：`./scripts/test.sh --for-task gap-send-keys-verified-leaks-tmux-servers-unincorporated --allow-thin`
+>   → known-load-sensitive.test.mjs **22/22 pass、fail 0、cancelled 0**，EXIT 0。
+> - **无任何实现可做**：目标文件已删（人裁定 a37df1c5），重开即逆人裁定回滚删除且重引泄漏源。AC2/AC3/AC4 维持 MOOT，不勾选。
+>
 > **AC 处置**：AC1（复现固化，任务体已含实证）与 AC5（既有不回归，scoped 门绿）勾上。
 > AC2/AC3/AC4 目标文件已删除 → **MOOT，不勾选**（实施即逆人裁定回滚删除）。最终处置（supersede / retreat / needs-human）留外层裁定。
 
@@ -63,7 +72,7 @@ extra: {}
 - [ ] AC2: **收编**——`send-keys-verified.test.mjs` 加 KNOWN-LOAD-SENSITIVE + @load-sensitive 标注 + known-load-sensitive.ts 条目（**MOOT——目标文件已删，见顶部 SUPERSEDED**）
 - [ ] AC3: **隔离清理杀服务端**——清理逻辑杀本测试创建的 tmux 服务端（非只删目录），无孤儿进程泄漏（**MOOT——目标文件已删，见顶部 SUPERSEDED**）
 - [ ] AC4: **家族交叉标注**——install-family/create-mcp/proposal-convergence/relation-sync 同族（**MOOT——家族机制已完整，无需为已删机件交叉标注**）
-- [x] AC5: **既有不回归**——`--for-task` scoped 门绿（known-load-sensitive.test.mjs 14/14 pass）；家族机制 solo 恒绿
+- [x] AC5: **既有不回归**——`--for-task` scoped 门绿（known-load-sensitive.test.mjs 22/22 pass，2026-08-11 复核）；家族机制 solo 恒绿
 
 ## Definition of Done
 
