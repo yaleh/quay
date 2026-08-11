@@ -1,7 +1,7 @@
 ---
 id: gap-apply-promotes-b15-needs-work-tasks
 title: ready-pool-check --apply 机械补晋不认 B15 needs-work 判词——pool<floor 时把 B15 判 todo 的任务重新 promote 回 ready（ADR-033 语义闸可被机械 refill 立即撤销）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -84,6 +84,22 @@ EXIT=0
 任务（`extra.poolQualityVerdict: needs-work`）与一个干净 todo 候选 ⇒ `applyPromotions` 后
 `gap-b15-needs-work` 的 frontmatter `status: todo` 不变、`promotions` 不含它、`intercepted` 含
 `{id, reason:"b15-needs-work", verdict:"needs-work"}`；干净候选 `gap-clean` 被补晋到 `ready`。
+
+### 自审勾 AC/DoD（2026-08-11 outer B1 closure，生产验证路径——suite-red 先例）
+
+- **AC1（pool<floor 时 `--apply` 不 promote B15 needs-work 任务）实测（生产负控制，非测试）**：2026-08-11
+  19:38Z 在 pool=2<floor=20（deficit=18）时跑 `ready-pool-check.ts --cap 5 --apply` ⇒ `applied_promotions: []`、
+  `should_apply: false`、git 树零改动——两个 B15-todo 任务（over90-clock / supervisor-deliver-no-wait，均
+  `extra.poolQualityVerdict: needs-work`）未被补晋回 ready，DoD1 生产语义闭环。
+- **AC2（`--json` promotions 不列 B15-todo）实测**：同 tick `--json` 输出 `promotions: []`，两任务均在
+  `intercepted`（reason `b15-needs-work` + verdict）。
+- **AC3（与 gap-pool-quality-semantic-gate 交叉标注）**：修复契约 line 55-61 标注 judge VERDICTS 词表同源；
+  外层生产端接线已落地（B15 判 todo 时写 `extra.poolQualityVerdict`，outer commit 32ce39e1）。
+- **DoD1**：上述生产负控制即直接验证（shape-complete B15-todo 任务在 pool<floor 时经 `--apply` 不被补晋）。
+- **DoD2（完整套件绿）**：round 32 green（2026-08-11 19:40:11Z）——tests=3244 pass=3244 fail=0，
+  `verifiedCommit=986230b3`（本修复 commit 的首轮验证；round 31 及此前验证的是 pre-fan-in 33378531）。
+- **B1 收尾**：telemetry bracket 关（`--task-end --outcome done`）、`status: ready → done`（B16 AC3 outer
+  独占 frontmatter）、closure-lag `--record --flipped 1`、verification-round 追加 r33 closure 行。
 
 ## Touches
 
