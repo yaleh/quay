@@ -1,7 +1,7 @@
 ---
 id: gap-supervisor-preempt-candidates-work-clock
 title: supervisor-preempt-candidates.listPreemptible 仍读 startedAtMs（排队时钟）判 >90m preemptible——与 over90 work-clock 修复同口径不一致
-status: todo
+status: ready
 labels:
   - gap
   - defect
