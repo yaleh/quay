@@ -34,6 +34,9 @@
 #       1 = failed (undelivered after bounded retries — needs human)
 #       2 = usage / environment error (fail loud)
 # Env:  SUPERVISOR_DELIVER_VERIFY_S   overall delivery bound (default 60)
+#       RELIABLE_WAIT_IDLE_S          can-receive gate: bounded wait for the target to become
+#                                     waiting-input (busy target no longer one-shot fails; default 20)
+#       RELIABLE_WAIT_IDLE_POLL_S     can-receive gate: re-judge interval (default 1)
 
 # ── 统一 --help（gap-scripts-sprawl：用法在前、退出 0、无业务副作用）────────────────────
 if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
@@ -46,12 +49,16 @@ set -uo pipefail
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RELIABLE="$SELF_DIR/send-keys-reliable.sh"
 CHECKER="$SELF_DIR/transcript-delivery-check.ts"
+CLASSIFY="$SELF_DIR/pane-state-classify.ts"
 
 TARGET="${1:-}"
 PAYLOAD="${2:-}"
 TRANSCRIPT=""
 ROOT=""
 VERIFY_S="${SUPERVISOR_DELIVER_VERIFY_S:-60}"
+WAIT_IDLE_S="${RELIABLE_WAIT_IDLE_S:-20}"
+WAIT_IDLE_POLL_S="${RELIABLE_WAIT_IDLE_POLL_S:-1}"
+NODE="${NODE:-node}"
 
 usage() {
   echo "用法: $0 <tmux目标> <文本> [--transcript <transcript.jsonl>|--root <项目根>] [--verify-s <秒>]" >&2
@@ -93,6 +100,10 @@ done
 # fail-loud precondition: the delivery verdict depends on the pure checker; a missing checker
 # means the deliver-confirmed promise is broken (same rule as send-keys-reliable.sh).
 [ -f "$CHECKER" ] || { echo "supervisor-deliver: 缺少校验器 $CHECKER——无法验证送达（依赖未铺？），fail loud" >&2; exit 1; }
+# Same rule for the can-receive gate's classifier (gap-supervisor-deliver-no-wait-for-idle-retry):
+# the fresh path judges the target pane state before sending; a missing classifier means the
+# can-receive promise is broken — fail loud, never a silent empty-state wait.
+[ -f "$CLASSIFY" ] || { echo "supervisor-deliver: 缺少分类器 $CLASSIFY——无法判定目标可接收（依赖未铺？），fail loud" >&2; exit 1; }
 
 # ── transcript resolution ────────────────────────────────────────────────────────────────────────
 # --transcript → literal, even if the file does not exist yet (fresh — the file appears on the
@@ -150,6 +161,37 @@ if ! DRIVE_EXPECT_WINDOW_NAME="${DRIVE_EXPECT_WINDOW_NAME:-inner}" bash "$SELF_D
   echo "supervisor-deliver: 目标 $TARGET 未通过前置校验（非 inner 或数字索引）——中止，不发送" >&2
   exit 1
 fi
+
+# pane_state — capture the target pane and classify its state (the SAME pane-state-classify.ts
+# judgment send-keys-reliable.sh's can-receive gate uses — no reinvented busy detection).
+pane_state() {
+  local pane st
+  pane=$(tmux capture-pane -p -t "$TARGET" 2>/dev/null || true)
+  [ -z "$pane" ] && { echo "empty"; return; }
+  st=$(printf '%s\n' "$pane" | "$NODE" --no-warnings --experimental-strip-types "$CLASSIFY" --classify 2>/dev/null || true)
+  st="${st%%$'\n'*}"
+  [ -n "$st" ] || st="unknown"
+  printf '%s\n' "$st"
+}
+
+# can-receive gate (tasks/gap-supervisor-deliver-no-wait-for-idle-retry): judge the target pane
+# state BEFORE the direct send — ONLY waiting-input can receive (a busy/thinking target puts text
+# in the input box but never commits it). Bounded wait/retry (re-judge each round); fail loud
+# WITHOUT sending only after the bound. Same judgment as send-keys-reliable.sh's step 0.2.
+state="$(pane_state)"
+if [ "$state" != "waiting-input" ]; then
+  echo "supervisor-deliver: 目标 $TARGET 状态 $state —— 有界等待转 waiting-input（≤${WAIT_IDLE_S}s）" >&2
+fi
+_wait_end=$(( $(date +%s) + WAIT_IDLE_S ))
+while [ "$state" != "waiting-input" ] && [ "$(date +%s)" -lt "$_wait_end" ]; do
+  sleep "$WAIT_IDLE_POLL_S"
+  state="$(pane_state)"
+done
+if [ "$state" != "waiting-input" ]; then
+  echo "supervisor-deliver: 目标 $TARGET 在 ${WAIT_IDLE_S}s 内未转 waiting-input（最后状态: ${state:-empty}）——未发送，fail loud 需人工（不假装成功）" >&2
+  exit 1
+fi
+echo "supervisor-deliver: 目标 $TARGET 可接收（pane 状态: $state）"
 
 # Direct reliable send: fresh session has nothing to clear → C-u (harmless), literal text, Enter.
 tmux send-keys -t "$TARGET" C-u 2>/dev/null || true

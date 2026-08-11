@@ -33,6 +33,10 @@
 #         RELIABLE_DELIVERY_FIRST_S   first poll window before the retry Enter (default 15)
 #         RELIABLE_DELIVERY_VERIFY_S  overall delivery bound         (default 60)
 #         RELIABLE_DELIVERY_POLL_S    delivery poll interval         (default 5)
+#         RELIABLE_WAIT_IDLE_S        can-receive gate: bounded wait for the target to become
+#                                     waiting-input (busy target no longer one-shot fails) (default 20)
+#         RELIABLE_WAIT_IDLE_POLL_S   can-receive gate: re-judge interval (default 1)
+#         NODE                        node binary for the classifier/checker (default node)
 #
 # Rules (TOOLS-SESSION-HANDOFF / send-keys-verified.sh precedent): no pipeline feeding $?
 # (rule 2b) — every tmux/checker exit status is captured by `if cmd; then`, never `cmd | ...`
@@ -49,12 +53,20 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHECKER="${SCRIPT_DIR}/transcript-delivery-check.ts"
+CLASSIFY="${SCRIPT_DIR}/pane-state-classify.ts"
 
 # fail-loud precondition (gap-laydown-derivation-is-sensitive-to-reference-spelling-... AC4):
 # a missing CHECKER must abort at STARTUP, never a silent assignment. The pre-fix script ran the
 # whole delivery flow and only failed deep in the step-5 poll when node could not spawn the checker.
 if [ ! -f "$CHECKER" ]; then
   echo "send-keys-reliable: 缺少校验器 $CHECKER——无法验证送达（依赖未铺？），fail loud" >&2
+  exit 1
+fi
+# Same rule for the can-receive gate's classifier (gap-supervisor-deliver-no-wait-for-idle-retry):
+# the delivery precondition judges the target pane state; a missing classifier means the
+# can-receive promise is broken — fail loud at startup, never a silent empty-state wait.
+if [ ! -f "$CLASSIFY" ]; then
+  echo "send-keys-reliable: 缺少分类器 $CLASSIFY——无法判定目标可接收（依赖未铺？），fail loud" >&2
   exit 1
 fi
 
@@ -67,6 +79,9 @@ STABLE_TIMEOUT_S="${RELIABLE_STABLE_TIMEOUT_S:-10}"
 DELIVERY_FIRST_S="${RELIABLE_DELIVERY_FIRST_S:-15}"
 DELIVERY_VERIFY_S="${RELIABLE_DELIVERY_VERIFY_S:-60}"
 DELIVERY_POLL_S="${RELIABLE_DELIVERY_POLL_S:-5}"
+WAIT_IDLE_S="${RELIABLE_WAIT_IDLE_S:-20}"
+WAIT_IDLE_POLL_S="${RELIABLE_WAIT_IDLE_POLL_S:-1}"
+NODE="${NODE:-node}"
 
 usage() {
   echo "用法: $0 <tmux目标> <文本> <目标会话 transcript.jsonl 路径>" >&2
@@ -99,6 +114,43 @@ if ! DRIVE_EXPECT_WINDOW_NAME="${DRIVE_EXPECT_WINDOW_NAME:-inner}" bash "$SCRIPT
   echo "send-keys-reliable: 目标 $TARGET 未通过前置校验（非 inner 或数字索引）——中止，不发送" >&2
   exit 1
 fi
+
+# pane_state — capture the target pane and classify its state via pane-state-classify.ts (the SAME
+# busy/idle judgment session-liveness.sh uses — no reinvented busy detection). Prints ONE line:
+# waiting-input | busy | permission-prompt | error-banner | unknown | empty. A capture failure
+# (target gone) or a classifier failure defaults to a non-waiting state so the gate below never
+# sends into a pane it cannot judge (tier-2 fail-closed philosophy — never a silent guess).
+pane_state() {
+  local pane st
+  pane=$(tmux capture-pane -p -t "$TARGET" 2>/dev/null || true)
+  [ -z "$pane" ] && { echo "empty"; return; }
+  st=$(printf '%s\n' "$pane" | "$NODE" --no-warnings --experimental-strip-types "$CLASSIFY" --classify 2>/dev/null || true)
+  st="${st%%$'\n'*}"
+  [ -n "$st" ] || st="unknown"
+  printf '%s\n' "$st"
+}
+
+# Step 0.2 — can-receive gate (tasks/gap-supervisor-deliver-no-wait-for-idle-retry). The one-shot
+# send→verify→failed behavior failed immediately when the target was busy. Judge the target's pane
+# state BEFORE any send-keys; ONLY waiting-input can receive (a busy/thinking target puts text in
+# the input box but never commits it). For any other state, BOUNDED wait/retry — re-capture +
+# re-judge each round; only after WAIT_IDLE_S do we fail loud WITHOUT sending (never send into a
+# busy pane, never one-shot fail). An idle target passes on the FIRST judgment — no behavioral
+# change (DoD: idle 行为不变).
+state="$(pane_state)"
+if [ "$state" != "waiting-input" ]; then
+  echo "send-keys-reliable: 目标 $TARGET 状态 $state —— 有界等待转 waiting-input（≤${WAIT_IDLE_S}s）" >&2
+fi
+_wait_end=$(( $(date +%s) + WAIT_IDLE_S ))
+while [ "$state" != "waiting-input" ] && [ "$(date +%s)" -lt "$_wait_end" ]; do
+  sleep "$WAIT_IDLE_POLL_S"
+  state="$(pane_state)"
+done
+if [ "$state" != "waiting-input" ]; then
+  echo "send-keys-reliable: 目标 $TARGET 在 ${WAIT_IDLE_S}s 内未转 waiting-input（最后状态: ${state:-empty}）——未发送，fail loud 需人工（不假装成功）" >&2
+  exit 1
+fi
+echo "send-keys-reliable: 目标 $TARGET 可接收（pane 状态: $state）"
 
 # Baseline for the delivery poll (fault 4): only content appended AFTER this byte offset may
 # count as the NEW user message we just sent. The transcript only grows when the receiver
