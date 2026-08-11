@@ -51,6 +51,9 @@ import {
   DEFAULT_SYSTEMD_RUN_LIMITS,
   parseSystemdRunLimits,
   systemdRunAvailable,
+  parsePhaseMsFromLogText,
+  parsePhaseMsFromLog,
+  appendVerificationRound,
 } from "../scripts/full-suite-runner.ts";
 import { runOnce, classifyFailure, routeRed, shouldStopDispatch } from "../scripts/suite-state-trigger.ts";
 
@@ -1139,6 +1142,106 @@ test("AC2 — a GREEN run's verification-round record omits failures (绿轮可�
     const rec = JSON.parse(fs.readFileSync(roundFile, "utf8").trim().split("\n").filter((l) => l.trim())[0]);
     assert.equal(rec.state, "green");
     assert.ok(!("failures" in rec), "green round record omits the failures field");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── gap-verification-round-missing-phase-ms-breaks-cost-attribution: AC2/AC3 ───────────────────────
+// verification-round.jsonl recorded durationMs + per_test_ms but NOT the three/four `*_phase_ms`
+// (static/serial/lowconc/main), so per_test_ms conflated truncated red rounds (kill-on-red 30s — only
+// the main phase ran) with complete green rounds — the "700s degradation" misjudgment (08-09 four
+// rounds 734/732/689/1050s were ALL truncated red rounds, not comparable full rounds). AC2: the runner
+// parses the __OVERHEAD__ phase lines (test.sh _oh_emit emits `__OVERHEAD__ <label>_ms=N` per phase,
+// with run_static_checks_ms carrying the static-checks phase) into the round record. AC3: per_test_ms
+// plus phase readings distinguishes truncated red from full green (serial/lowconc absent ⇔ truncated).
+
+test("AC2 — parsePhaseMsFromLogText maps the four __OVERHEAD__ phase lines and excludes non-phase overhead", () => {
+  const text = [
+    "__OVERHEAD__ lock_overhead_ms=23",
+    "__OVERHEAD__ resource_gate_ms=77",
+    "__OVERHEAD__ build_dist_ms=4900",
+    "__OVERHEAD__ run_static_checks_ms=33000",
+    "__OVERHEAD__ gap_ms_pre_to_serial_ms=11",
+    "__OVERHEAD__ serial_phase_ms=640000",
+    "__OVERHEAD__ gap_ms_serial_to_lowconc_ms=12",
+    "__OVERHEAD__ lowconc_phase_ms=272000",
+    "__OVERHEAD__ main_phase_ms=650000",
+    "__OVERHEAD__ ERR-UNSET", // malformed (no _ms=<N>) — must be ignored, not crash
+    "ℹ pass 287",
+  ].join("\n");
+  const parsed = parsePhaseMsFromLogText(text);
+  assert.deepEqual(parsed, {
+    static_phase_ms: 33000,
+    serial_phase_ms: 640000,
+    lowconc_phase_ms: 272000,
+    main_phase_ms: 650000,
+  }, "only the four phase durations are parsed (non-phase overhead + malformed lines excluded)");
+});
+
+test("AC2 — a full round's verification-round record carries the four *_phase_ms parsed from the log", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-phasefull-"));
+  // Emit __OVERHEAD__ phase lines to stderr exactly as scripts/test.sh's _oh_emit does (> &2).
+  const suite = [
+    'echo "__OVERHEAD__ run_static_checks_ms=33000" >&2',
+    'echo "__OVERHEAD__ serial_phase_ms=640000" >&2',
+    'echo "__OVERHEAD__ lowconc_phase_ms=272000" >&2',
+    'echo "__OVERHEAD__ main_phase_ms=650000" >&2',
+    'echo "# tests 5"',
+    'echo "# pass 5"',
+    'echo "# fail 0"',
+    'echo "# cancelled 0"',
+    "exit 0",
+  ].join("\n");
+  const { f, dir } = fakeSuite(suite);
+  try {
+    const child = runRunner({ root, command: `bash ${f}`, laneCount: 8 });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, "runner exits 0 on green");
+    const roundFile = path.join(root, ".quay", "verification-round.jsonl");
+    const rec = JSON.parse(fs.readFileSync(roundFile, "utf8").trim().split("\n").filter((l) => l.trim())[0]);
+    assert.equal(rec.state, "green");
+    assert.equal(rec.static_phase_ms, 33000, "static_phase_ms parsed (from run_static_checks_ms)");
+    assert.equal(rec.serial_phase_ms, 640000, "serial_phase_ms parsed");
+    assert.equal(rec.lowconc_phase_ms, 272000, "lowconc_phase_ms parsed");
+    assert.equal(rec.main_phase_ms, 650000, "main_phase_ms parsed");
+    assert.ok(
+      ["serial_phase_ms", "lowconc_phase_ms", "main_phase_ms"].filter((k) => rec[k] !== undefined).length >= 2,
+      "Contract band: at least two of serial/lowconc/main present on a full round",
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC3 — a truncated kill-on-red round (only main phase ran) is distinguishable: main present, serial/lowconc absent", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-phasetrunc-"));
+  // Simulate the 08-09 truncated-red shape: the suite only ran the main phase (kill-on-red tore the
+  // tree before serial/lowconc), so the log carries main_phase_ms but NOT serial/lowconc.
+  const suite = [
+    'echo "__OVERHEAD__ main_phase_ms=650000" >&2',
+    'echo "not ok 1 - boom"',
+    'echo "# tests 1"',
+    'echo "# pass 0"',
+    'echo "# fail 1"',
+    'echo "# cancelled 0"',
+    "exit 1",
+  ].join("\n");
+  const { f, dir } = fakeSuite(suite);
+  try {
+    const child = runRunner({ root, command: `bash ${f}`, laneCount: 8 });
+    const { code } = await waitExit(child);
+    assert.equal(code, 1, "runner exits 1 on red");
+    const roundFile = path.join(root, ".quay", "verification-round.jsonl");
+    const rec = JSON.parse(fs.readFileSync(roundFile, "utf8").trim().split("\n").filter((l) => l.trim())[0]);
+    assert.equal(rec.state, "red", "truncated round is red");
+    assert.equal(rec.main_phase_ms, 650000, "truncated round carries main_phase_ms");
+    assert.ok(
+      rec.serial_phase_ms === undefined && rec.lowconc_phase_ms === undefined,
+      "truncated red round has NO serial/lowconc phase readings (ran only main) — distinguishable from a full green round",
+    );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(dir, { recursive: true, force: true });

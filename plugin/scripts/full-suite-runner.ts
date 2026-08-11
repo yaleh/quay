@@ -519,6 +519,62 @@ export interface SuiteRoundRecord {
    * tolerate its absence.
    */
   failures?: SuiteFailure[];
+  /**
+   * gap-verification-round-missing-phase-ms-breaks-cost-attribution AC2 — the four __OVERHEAD__
+   * phase durations (static/serial/lowconc/main) parsed from the suite log (scripts/test.sh emits
+   * `__OVERHEAD__ <label>_ms=<N>` per phase via _oh_emit, with `run_static_checks_ms` carrying the
+   * static-checks phase), so per_test_ms gains PHASE context: a truncated red round (kill-on-red —
+   * only the main phase ran, serial/lowconc absent) is now distinguishable from a complete green
+   * round (all phases present). Absent on legacy rows / scoped runs whose log carried no
+   * __OVERHEAD__ phase lines — a reader must tolerate their absence.
+   */
+  static_phase_ms?: number;
+  serial_phase_ms?: number;
+  lowconc_phase_ms?: number;
+  main_phase_ms?: number;
+}
+
+/** The four phase-duration fields parsed from a suite log's `__OVERHEAD__` lines (all optional). */
+export interface PhaseMsRecord {
+  static_phase_ms?: number;
+  serial_phase_ms?: number;
+  lowconc_phase_ms?: number;
+  main_phase_ms?: number;
+}
+
+// test.sh _oh_emit emits `__OVERHEAD__ <segment>_ms=<N>` per serial boundary; the PHASE segments are
+// the ones cost attribution needs (static = run_static_checks, then the three node --test phases in
+// their actual run order serial → lowconc → main). Other __OVERHEAD__ segments (lock_overhead,
+// resource_gate, build_dist, gap_ms_* inter-phase gaps) are fixed overhead, not phases — excluded.
+const OVERHEAD_PHASE_LABEL_MAP: Record<string, keyof PhaseMsRecord> = {
+  run_static_checks: "static_phase_ms",
+  serial_phase: "serial_phase_ms",
+  lowconc_phase: "lowconc_phase_ms",
+  main_phase: "main_phase_ms",
+};
+
+/** Parse `__OVERHEAD__ <label>_ms=<N>` phase lines from log text into the four *_phase_ms fields. */
+export function parsePhaseMsFromLogText(text: string): PhaseMsRecord {
+  const out: PhaseMsRecord = {};
+  for (const line of text.split("\n")) {
+    const m = line.match(/^__OVERHEAD__\s+([a-z0-9_]+)_ms=(\d+)\s*$/);
+    if (!m) continue;
+    const key = OVERHEAD_PHASE_LABEL_MAP[m[1]];
+    if (!key) continue;
+    const value = Number(m[2]);
+    if (Number.isFinite(value) && value >= 0) out[key] = value;
+  }
+  return out;
+}
+
+/** Best-effort read of a suite log's __OVERHEAD__ phase durations; {} on any read/parse failure. */
+export function parsePhaseMsFromLog(logFile: string): PhaseMsRecord {
+  try {
+    if (!fs.existsSync(logFile)) return {};
+    return parsePhaseMsFromLogText(fs.readFileSync(logFile, "utf8"));
+  } catch {
+    return {};
+  }
 }
 
 /**
@@ -526,8 +582,12 @@ export interface SuiteRoundRecord {
  * `stateDir` is the .quay STATE directory — the state/log/ledger write location, decoupled from the
  * TESTED CHECKOUT by --state-dir (gap-suite-state-split-across-worktree-and-gate). Pre-split callers
  * passed a workspace root; the equivalent stateDir is `<root>/.quay`.
+ * `logFile` (optional) — the suite log path; when provided, its `__OVERHEAD__` phase durations are
+ * parsed and merged into the record so per_test_ms gains phase context
+ * (gap-verification-round-missing-phase-ms-breaks-cost-attribution AC2). Absent/legacy logs merge
+ * nothing — the phase fields stay absent (a reader must tolerate that).
  */
-export function appendVerificationRound(stateDir: string, rec: SuiteRoundRecord): void {
+export function appendVerificationRound(stateDir: string, rec: SuiteRoundRecord, logFile?: string): void {
   try {
     const file = path.join(stateDir, "verification-round.jsonl");
     fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -536,7 +596,12 @@ export function appendVerificationRound(stateDir: string, rec: SuiteRoundRecord)
       const text = fs.readFileSync(file, "utf8");
       for (const l of text.split("\n")) if (l.trim()) prior++;
     }
-    fs.appendFileSync(file, JSON.stringify({ ...rec, round: rec.round > 0 ? rec.round : prior + 1 }) + "\n", "utf8");
+    const phaseMs = logFile ? parsePhaseMsFromLog(logFile) : {};
+    fs.appendFileSync(
+      file,
+      JSON.stringify({ ...rec, ...phaseMs, round: rec.round > 0 ? rec.round : prior + 1 }) + "\n",
+      "utf8",
+    );
   } catch {
     // best-effort — never let the ledger fail the run
   }
@@ -1582,6 +1647,11 @@ export async function run(argv: string[]): Promise<number> {
   // comparable across rounds of different sizes. `tests` = pass+fail+cancelled; per_test_ms =
   // durationMs/tests (0 when no tests ran — a no-test run says nothing about per-test cost).
   const tapTests = tapPass + tapFail + tapCancelled;
+  // gap-verification-round-missing-phase-ms-breaks-cost-attribution AC2 — pass the suite log so
+  // appendVerificationRound parses the __OVERHEAD__ phase durations (static/serial/lowconc/main)
+  // into the round record; per_test_ms then carries phase context (a truncated kill-on-red round
+  // that only ran the main phase is distinguishable from a complete green round — the "700s
+  // degradation" misjudgment source).
   appendVerificationRound(stateDir, {
     round: 0, // computed from prior line count inside appendVerificationRound
     startedAt,
@@ -1607,7 +1677,7 @@ export async function run(argv: string[]): Promise<number> {
     // for "failed file → task Touches" attribution. Green rounds omit it (绿轮可无) — all other
     // round-record fields stay byte-identical for non-red rounds.
     ...(finalState.state === "red" ? { failures: finalFailures } : {}),
-  });
+  }, logFile);
   // NOTE: appendVerificationRound above is the ONE suite-duration append per run (the
   // checker-cost.test.mjs AC6 contract: two runs ⇒ exactly two verification-round.jsonl lines).
   // The now-removed appendSuiteDurationRecord call wrote a SECOND record to the SAME file every
