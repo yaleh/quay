@@ -608,3 +608,23 @@ fix 的注释自己写：「The marker is written by the judge's consumer when a
 **耐久化（选项 2 落地）**：tick-core B15 步已修订——B15 判 needs-work/should-remove/uncertain 并 retreat→todo 时，外层同步写 `extra.poolQualityVerdict: <verdict>`（`orchestrator-tick-core.md` line 49 追加 producer 段）。未来每口 B15 retreat 自动产 marker，不再是一次性手工写。
 
 **B1 处置更新**：producer 已落地且机械验证通过 ⇒ `gap-apply-promotes-b15-needs-work-tasks` 达**生产语义闭合**——B1 closure 候选恢复（原「等 producer 落地再闭」条件已满足）。closure 执行见 tick-log 对应 entry。
+
+## 2026-08-11 19:52Z — B15 needs-work todo 无实现路径（机制死角，观察① 闭环后升级）
+
+**现象**：两个 shape-complete 的 todo 任务——`gap-over90-clock-measures-queue-time-not-work-time`、`gap-supervisor-deliver-no-wait-for-idle-retry`——被 B15 judge 判 `needs-work`（wf_59513f29-b3c，2026-08-11），外层按 producer 契约写 `extra.poolQualityVerdict: needs-work`（19:30Z）。此后 `isB15Blocked`（986230b3 消费者）**同时挡住 bulk `--apply` 与 `--targeted` 两条补晋路**（19:38Z/19:51Z 两次 --apply 均 intercepted、promotions=[]）。**内层 19:49Z 醒 no-action，未触碰两 todo**（把池排空归入 B15 闭环成功叙事）——needs-work todo 从此**没有任何获得实现工作的路径**：不 ready ⇒ 不进派发面；不能 promote ⇒ 不能变 ready；inner 不自驱 todo。judge 的 remediation advice「dispatch to implement ACs」与 verdict=needs-work 直接矛盾（judge 想要任务被实现，而判词把实现路全堵死）。
+
+**已试**：
+1. B15 judge retreat + 外层 producer 写 marker（19:30Z，判词核验逐条匹配）；
+2. isB15Blocked 消费者 fix（986230b3，bulk+--targeted 双 guard，intercepted 记录）；
+3. 两次 `--apply`（19:38Z/19:51Z）零写——拦截在生产持续有效（语义闸没被机械 refill 撤销，这是**好的**）；
+4. 观察 inner 19:49Z 醒——no-action，未自驱两 todo。
+
+**为何超权**：needs-work todo 如何获得实现工作，触及**派发模型的路线问题**（outer 是否直接驱动 inner 改 todo / 判词语义是否要加「rework 指派」动作 / 还是接受 parked）——方向决策，外层不宜单方面定；且这会是 **B15 每次判 needs-work 都再现**的结构性死角，不是一次性事件。
+
+**选项（≥2）**：
+1. **outer 直接驱动 inner 改两 todo**（推荐）：dispatch 文本点名 over90-clock + supervisor-deliver，要求 inner 按 judge remediation advice（over90-clock 查 queuedAtMs null 根因 / supervisor-deliver 加 wait-for-idle loop）重写 AC/实现路径后再走 B15 复核。不依赖 promote 路，直接改 todo。
+2. **接受 parked**：两 todo 是低优先级 gap（over90-clock 是观测类、supervisor-deliver 是投递等待），先悬置，等相关机制演化再回收；每 tick 确认无 dispatchable 候选即可（现状即此）。
+3. **判词语义修订**（gap 任务候选）：needs-work 判词应自动产「rework 指派」（B15 workflow 输出 actions[] 加 rework 指令 → outer 路由给 inner），而非只有 block。需新建 gap task + 改 workflow——方向变更。
+4. **新 gap task 记录本死角**（机制缺口：needs-work 无实现路径），由 inner 或外层按任务路径修。
+
+**外层倾向**：选项 1 先落地（成本最低、立即可做），同时选项 4 建 gap 记录机制缺口（防复发）。选项 3 是根治但方向变更需人裁定。**本 tick 不立即执行选项 1**——round 33 在跑、inner 睡到 20:20Z、且这是方向决策，先记录待下次 tick 或人介入时执行。

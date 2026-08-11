@@ -1,7 +1,7 @@
 ---
 id: gap-b15-needs-work-todo-no-implementation-path
 title: B15 needs-work todo 无实现路径——isB15Blocked 挡死 bulk+targeted 补晋路，judge remediation「dispatch to implement ACs」与 verdict=needs-work 矛盾
-status: todo
+status: ready
 labels:
   - gap
   - defect
