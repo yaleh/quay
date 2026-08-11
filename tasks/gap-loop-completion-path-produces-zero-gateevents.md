@@ -94,7 +94,7 @@ scoped static checks 全 PASS（test-framework-policy-check / test-isolation-che
 ## Contract
 
 measure   loop_gate_event_count = `ssh ad-arm1 'wc -l ~/work/archguard/.quay/gate-events.jsonl'` stdout 数字
-band      loop_gate_event_count ≥ 1（loop 完成任务后 gate-events.jsonl 非空）
+band      loop_gate_event_count = ≥ 1（loop 完成任务后 gate-events.jsonl 非空）
 invariant loop_uses_gate_engine = 1（loop 完成路径经与 CLI 一致的 gate 引擎）
 invoke    `ssh ad-arm1 'cd ~/work/archguard && quay gate-log <TASK-8X>'`（贴 gate 事件）
 control   loop 完成写事件；gate-log 可读；CLI 不回归；既有不回归
