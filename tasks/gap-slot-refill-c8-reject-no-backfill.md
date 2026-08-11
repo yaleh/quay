@@ -1,7 +1,7 @@
 ---
 id: gap-slot-refill-c8-reject-no-backfill
 title: "slot-refill 候选被逐候选门（C8 self-touch 等）拒掉后无回填——22 ready 中 5 缺 self-touch，17 本可派却报「本 tick 无可派」；候选循环不查 C8、派发侧拒了不补位"
-status: ready
+status: done
 labels:
   - gap
   - defect

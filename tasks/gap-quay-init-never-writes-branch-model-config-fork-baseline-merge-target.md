@@ -9,7 +9,7 @@ title: "quay-init.sh's config-generation heredoc (write_provider_config, line 55
   today (A, B, ad-arm1/machine-C) got it via manual/ad-hoc edit, never via the mechanism — manager
   reproduction-lens probe 2026-08-06 (ad-arm1 real check: config HAS the keys, but git-blame-
   equivalent traces to manual setup, not quay-init; quay-init.sh source has zero mentions)"
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -85,6 +85,7 @@ resume    heredoc 加键 + 负控制 + 升级路径测试分步提交
 ## Touches
 - plugin/scripts/quay-init.sh
 - tasks/gap-dispatch-fork-does-not-read-config-fork-baseline.md（交叉标注）
+- tasks/gap-quay-init-never-writes-branch-model-config-fork-baseline-merge-target.md（自身：勾 AC + 贴证据）
 
 ## Dispatch review
 
