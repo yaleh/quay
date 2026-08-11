@@ -1008,6 +1008,10 @@ drift_report() {
 # or reference-doc (quay-specific template prose that is not a loop-mechanism deliverable). The two
 # hand-maintained lists (call sites vs landing set) with no mechanical bond must drift; this is
 # the bond. A referenced file that is neither landed nor declared = drift → FAIL CLOSED.
+# AC2 (gap-quay-init-loop-tick-doc-paths-reference-unlanded-plugin-loop): the reference set ALSO
+# includes the CONSUMER-LAID docs at <ws>/docs/analysis/ — the byte-identical copies a target
+# project actually reads. The source scan alone could not see the AC37 blind spot (a laid tick doc
+# referencing plugin/loop/* paths that never land); scanning the laid docs closes it.
 verify_referenced_landed() {
   local ws="$1" missing=0 closure_missing=0 r sd script
   local refs selfcreate refdoc mech_bare
@@ -1028,7 +1032,18 @@ verify_referenced_landed() {
     case " $NEVER_LAYDOWN " in *" $member "*) continue ;; esac
     consolidated_refs+="plugin/scripts/$member"$'\n'
   done
-  refs="$( ( grep -ohE '(plugin/scripts|orchestration|docs/analysis)/[a-zA-Z0-9._-]+' "$PLUGIN_ROOT/skills"/*/SKILL.md "$PLUGIN_ROOT"/loop/*.md 2>/dev/null
+  refs="$( ( grep -ohE '(plugin/scripts|plugin/loop|orchestration|docs/analysis)/[a-zA-Z0-9._-]+' "$PLUGIN_ROOT/skills"/*/SKILL.md "$PLUGIN_ROOT"/loop/*.md 2>/dev/null
+             # AC2 (gap-quay-init-loop-tick-doc-paths-reference-unlanded-plugin-loop): the gate must
+             # ALSO verify the CONSUMER-LAID docs (docs/analysis/) — the reference set of the
+             # byte-identical copy a target project actually reads, not just the plugin source. A
+             # consumer doc referencing a path that does not land in the target (e.g. plugin/loop/
+             # when the loop lays only orchestration/ + docs/analysis/) is exactly the AC37
+             # referenced⊆landed blind spot (ad-arm1: docs/analysis/fast-mode-loop-tick.md refs 5
+             # paths that never landed). The laid copy IS the deliverable; the source scan alone
+             # cannot see a consumer-side mismatch. `plugin/loop` is in the alternation (the AC37
+             # path-spelling blind spot): a shipped doc referencing plugin/loop/* (a bundle-source
+             # path that does NOT land — the loop lays orchestration/ + docs/analysis/) fails closed.
+             grep -ohE '(plugin/scripts|plugin/loop|orchestration|docs/analysis)/[a-zA-Z0-9._-]+' "$ws"/docs/analysis/*.md 2>/dev/null
              printf '%s\n' "$mech_bare"
              printf '%s' "$consolidated_refs"
            ) | sort -u || true )"
@@ -1100,8 +1115,8 @@ verify_referenced_landed() {
     done
   fi
   if [ "$missing" = 1 ] || [ "$closure_missing" = 1 ]; then
-    echo "ERROR: quay-init --loop would ship skills/tick docs that reference files it does not lay down (referenced ⊆ landed violated)." >&2
-    echo "       Add the script to the landing set, or declare the file self-create/reference-doc in plugin/skills/init/SKILL.md." >&2
+    echo "ERROR: quay-init --loop would ship skills/tick docs (source OR consumer-laid docs/analysis/) that reference files it does not lay down (referenced ⊆ landed violated)." >&2
+    echo "       Add the script to the landing set, declare the file self-create/reference-doc in plugin/skills/init/SKILL.md, or fix the doc's path to the real landing." >&2
     return 1
   fi
   echo "  verify-referenced-landed: OK (every referenced file is landed or declared self-create/reference-doc; every laid-down script's same-dir dependency is landed)"

@@ -136,28 +136,32 @@ test('AC1b — after the move, no live reference to the 5 old paths remains (com
   assert.ok(sawTestSh, 'scripts/test.sh (a known live caller) must be in the scan corpus');
 });
 
-test('AC1c — the tick-doc templates\' own /loop prompts and reciprocal cross-refs use plugin/loop/, not the old orchestration/ + docs/analysis/ paths', () => {
-  // The template-params NOTE legitimately spells the target layout (orchestration/ + docs/analysis/),
-  // but the actionable instructions (the /loop invocation, the cross-refs to the sibling tick doc)
-  // must point at the canonical plugin/loop/ location so the quay repo's own loop works.
+test('AC1c — the tick-doc templates\' own /loop prompts and reciprocal cross-refs reference the CONSUMER landing (orchestration/ + docs/analysis/), not the non-landed plugin/loop/ bundle source', () => {
+  // gap-quay-init-loop-tick-doc-paths-reference-unlanded-plugin-loop (AC37, ad-arm1): the LAID tick
+  // docs are the consumer deliverable — quay-init --loop lays plugin/loop/*.md VERBATIM to
+  // orchestration/ + docs/analysis/, and does NOT lay plugin/loop/. A doc cross-ref to
+  // plugin/loop/... is therefore a dead path for the target project (the consumer tick doc referenced
+  // 5 plugin/loop/ paths that never landed, and the inner reported "the tick references an execution
+  // core that isn't at the expected path"). The actionable instructions must reference the
+  // consumer-resolvable paths (orchestration/ + docs/analysis/), which exist in BOTH the quay repo
+  // (deployed copies) and a consumer — that is what makes the SAME byte-identical doc work in both
+  // contexts. The template-params NOTE spells the same target layout.
   for (const name of ['orchestrator-loop-tick.md', 'fast-mode-loop-tick.md']) {
     const src = fs.readFileSync(path.join(pluginDir, 'loop', name), 'utf8');
-    // DRIVE COMMANDS are a target-layout EXCEPTION to the strict old-path rule: they execute
-    // against the LAID-DOWN copy in a running workspace (quay-init lays `loop/fast-mode-loop-tick.md`
-    // → `docs/analysis/fast-mode-loop-tick.md`; a target NEVER has `plugin/loop/`), and
-    // cold-start/SKILL.md:169 drives the SAME `$REPO_ROOT/docs/analysis/fast-mode-loop-tick.md`
-    // form. The strict assertion below governs the DOCUMENTATION cross-refs / /loop prompts
-    // (canonical plugin/loop/ source), not the execution-time interpolation.
+    // DRIVE COMMANDS execute against the LAID-DOWN copy in a running workspace — they already use
+    // the `$REPO_ROOT/docs/analysis/fast-mode-loop-tick.md` target-layout form (cold-start/SKILL.md
+    // drives the same), so they are the execution-time interpolation, not the doc cross-ref this
+    // assertion governs.
     const driveCmdRe = /\$REPO_ROOT\/docs\/analysis\/fast-mode-loop-tick\.md/;
     const liveLines = src.split('\n').filter((l) => !l.trim().startsWith('>') && !driveCmdRe.test(l));
-    for (const snippet of ['orchestration/orchestrator-loop-tick.md', 'docs/analysis/fast-mode-loop-tick.md']) {
-      assert.ok(
-        !liveLines.some((l) => l.includes(snippet)),
-        `${name} has a LIVE instruction referencing the old tick-doc path "${snippet}" (should be plugin/loop/...)`
-      );
-    }
-    assert.match(src, /plugin\/loop\/orchestrator-loop-tick\.md/, `${name} must reference the canonical outer tick-doc path`);
-    assert.match(src, /plugin\/loop\/fast-mode-loop-tick\.md/, `${name} must reference the canonical inner tick-doc path`);
+    // No LIVE instruction may reference the non-landed plugin/loop/ bundle-source path.
+    assert.ok(
+      !liveLines.some((l) => l.includes('plugin/loop/')),
+      `${name} has a LIVE instruction referencing the non-landed plugin/loop/ path (should be orchestration/ + docs/analysis/ — the consumer landing)`
+    );
+    // The docs MUST reference the consumer landing of the sibling tick docs.
+    assert.match(src, /orchestration\/orchestrator-loop-tick\.md/, `${name} must reference the consumer landing of the outer tick doc`);
+    assert.match(src, /docs\/analysis\/fast-mode-loop-tick\.md/, `${name} must reference the consumer landing of the inner tick doc`);
   }
 });
 

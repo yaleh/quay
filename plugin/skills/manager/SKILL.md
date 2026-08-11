@@ -19,8 +19,8 @@ any quay install can bring up a manager; it is not a quay-local artifact in `orc
 
 | Layer | Where it ships | Runs | Owns |
 |---|---|---|---|
-| outer | `plugin/loop/orchestrator-loop-tick.md` | per-project | the loop driver (cron, dispatch, verification round) |
-| inner | `plugin/loop/fast-mode-loop-tick.md` | per-project | the task execution / fast-mode tick |
+| outer | `orchestration/orchestrator-loop-tick.md` | per-project | the loop driver (cron, dispatch, verification round) |
+| inner | `docs/analysis/fast-mode-loop-tick.md` | per-project | the task execution / fast-mode tick |
 | **manager** | **this skill** (`plugin/skills/manager/SKILL.md`) | **per network/host, one** | **cross-project planning, prioritization, trend-watching** |
 
 **manager is above outer, below the human.** It is started by the human (or an OS anchor), never by

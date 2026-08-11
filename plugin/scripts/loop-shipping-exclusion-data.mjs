@@ -150,14 +150,24 @@ export function exclusionEntries(repoRoot, pluginDir) {
       reason: "cold-start skill operates on the TARGET project's laid-down layout (orchestration/ + docs/analysis/) — the AC8d target-layout paths, not the quay plugin/loop paths",
     },
     {
+      rel: 'plugin/skills/manager/SKILL.md',
+      target: path.join(pluginDir, 'skills', 'manager', 'SKILL.md'),
+      reason: "manager skill's layer table lists where each layer ships IN A CONSUMER project (orchestration/ + docs/analysis/ — the quay-init --loop consumer landing, gap-quay-init-loop-tick-doc-paths-reference-unlanded-plugin-loop). Same target-layout class as cold-start/SKILL.md / init/SKILL.md",
+    },
+    {
       rel: 'packages/quay/test/install-config-driven-e2e.test.mjs',
       target: path.join(repoRoot, 'packages', 'quay', 'test', 'install-config-driven-e2e.test.mjs'),
       reason: "asserts the laid-down target layout: REQUIRED_PRODUCT_FILES lists the cold-started project's orchestration/ + docs/analysis/ tick-doc paths (the reinstall-gate e2e, landed RED-first; its target-layout references were never added here)",
     },
     {
+      rel: 'plugin/test/quay-init-loop-consumer-doc-refs.test.mjs',
+      target: path.join(pluginDir, 'test', 'quay-init-loop-consumer-doc-refs.test.mjs'),
+      reason: "asserts the consumer-laid layout (docs/analysis/ + orchestration/ paths) — the AC37 consumer-doc-refs install family (gap-quay-init-loop-tick-doc-paths-reference-unlanded-plugin-loop). Same target-layout class as install-config-driven-e2e.test.mjs",
+    },
+    {
       rel: 'plugin/loop',
       target: path.join(pluginDir, 'loop'),
-      reason: "canonical templates: their /loop prompts and cross-refs use plugin/loop/; the only old-path strings left are in the template-params note documenting the TARGET layout",
+      reason: "canonical templates: their /loop prompts and cross-refs reference the CONSUMER landing (orchestration/ + docs/analysis/ — the paths quay-init lays them to), which are the AC37 'old' path strings; the template-params note spells the same target layout. The docs' cross-refs must NOT use plugin/loop/ (never laid in a consumer)",
     },
     {
       rel: 'packages/quay/plugin',

@@ -2,8 +2,8 @@
 
 **角色**：本网络各 quay 项目的管理者。**不是任何一个项目的外层。**
 
-**本文件是随 `quay-init --loop` 铺设的通用管理者驱动**（`plugin/loop/manager-loop-tick.md`
-→ `<workspace>/orchestration/manager-loop-tick.md`，字节一致，配置驱动——与 outer/inner 两份 tick 文档
+**本文件是随 `quay-init --loop` 铺设的通用管理者驱动**（铺到 `<workspace>/orchestration/manager-loop-tick.md`，
+字节一致，配置驱动——与 outer/inner 两份 tick 文档
 同一形态，`gap-the-manager-layer-does-not-propagate-quay-init-lays-no-manager-driver` 的形态裁定：
 管理者驱动**按项目铺设**、内容为**网络通用模板**，见任务体 AC3）。quay 自身网络特有的落地在 quay 仓库的
 `orchestration/manager-loop-tick.md`（工作分支/项目列表/tmux 窗口是 quay 自己的两线落地）；本模板是

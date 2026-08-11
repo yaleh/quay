@@ -1,6 +1,6 @@
 # inner (fast-mode) tick — 执行核
 
-**这份文件是执行路径,不是理由档案。** 理由、实测、代价全在源文档 `plugin/loop/fast-mode-loop-tick.md`(1149 行),本文件只给动作和判据,每条带 `(src:行号)` 指路;
+**这份文件是执行路径,不是理由档案。** 理由、实测、代价全在源文档 `docs/analysis/fast-mode-loop-tick.md`(1149 行),本文件只给动作和判据,每条带 `(src:行号)` 指路;
 **纯提取,零发明**——每条都能在源行号逐字核对;源文档一字未改。
 
 **行号注（2026-08-09，`gap-fast-mode-loop-tick-duplicate-paste-blocks` 去重）**：源文档删 5 处重复粘贴段
