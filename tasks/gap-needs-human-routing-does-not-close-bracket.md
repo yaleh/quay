@@ -74,3 +74,10 @@ needs-human 是终态、完成也是终态——**任何终态路径都应在路
 但进程仍占槽（槽位记账读括号判空 ⇒ 可能派新任务进实际忙的槽）。槽位记账的修复（`fast-mode-telemetry.ts`
 `--slots` 的 `closedButLive` / `occupied_slots`、`slot-refill.ts` 的 `--closed-but-live`）与正向的
 `--reconcile` 是同一记账面的两个方向。
+
+## Touches
+
+- plugin/scripts/fast-mode-telemetry.ts（`--task-end` CLI）
+- orchestration/orchestrator-tick-core.md（外层闭合 pass 步骤）
+- plugin/scripts/closure-lag-check.sh
+- tasks/gap-needs-human-routing-does-not-close-bracket.md

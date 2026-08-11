@@ -54,3 +54,9 @@ OVER90 的 90 分钟时钟从 `--task-start` 起算，**可能先于实际工作
 - **代价量级（2026-08-06 22:31Z 补充，排优先级用）**：OVER90 触发不是"停那一条"，是**停掉全部派发**。实测依据：18:3x 两条崩溃遗留幽灵触发 OVER90，inner 派发被**全停 2 个多小时**，而那两条幽灵与当时在飞工作无关。⇒ 若 22:57 在 session-pid 触发，被停的是**三条正在正常推进的工作**。代价不是线性的：误报时钟 × 全局停派 = **在飞任务数 × 停派时长**（今晚两次实例：2 条在飞 / 3 条在飞）。
 - **预测结果（2026-08-06 22:46 验，按预注册判据）**：session-pid **没有触发**——括号已在 90min 前从 inProgress 消失，任务仍 ready、4/9 AC。**记为【靠速度躲过，不是机制解决】**（inner 在 90min 内完成闭合；任务本身未完，闭合括号 ≠ 任务完成）。不记成"预测错了"，也不记成"机制没问题"。
 - **同形态复发（2026-08-06 22:33 更强的实例）**：ac8 → needs-human 22:33:57（fan-in 冲突），**括号仍开着**（58min，~23:19 会触发 OVER90）——外层 22:4x 手动 `--task-end needs-human` 关闭。**手动关掉 chart2-s2（21:49）后 72 分钟，同一条代码路径又产生一个** ⇒ 21:49 是【补实例，不是修机制】。此问题已单列 `gap-needs-human-routing-does-not-close-bracket`。
+
+## Touches
+
+- plugin/scripts/fast-mode-telemetry.ts（OVER90 记账）
+- plugin/scripts/slot-refill.ts
+- tasks/gap-over90-clock-measures-queue-time-not-work-time.md
