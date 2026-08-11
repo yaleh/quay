@@ -4,7 +4,7 @@ title: full-suite-runner's findSuiteScopeUnit matches rigid run-p<pid>- prefix
   but this host's systemd names transient scopes run-r<hex>.scope ⇒
   suite-cgroup-evidence.txt never written ⇒ AC1 test 1/75 consistently times out
   (poll timeout 10000ms), full-suite never green on this host
-status: needs-human
+status: done
 labels:
   - gap
   - defect
