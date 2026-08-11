@@ -71,6 +71,12 @@ extra: {}
 **outer 处置（07:2x）**：5 个已合+干净的 worktree（nyf/reconcile-step/serial-install/slot-free/verification-round）目录已被 fan-in subagent 删但留 stale 注册，`git worktree prune` 清掉 ⇒ slots-remaining **0→1**。**4 个不是泄漏**（git-history 未合 / inner-heartbeat / slot-refill-c8 / worktree-leak）：inner 心跳确认 4 subagent 在飞（本任务自己正在修泄漏），realInFlight=4 与心跳一致——删=毁 inner 在飞实现。
 **后续**：fan-in subagent 的 prompt 序列必须含 `git worktree remove` + `git worktree prune`（AC3 的落地形式），否则每次 fan-in 复发一次。
 
+### Finding：清理判据的前置依赖——runIds（manager 2026-08-11 07:3x，落点 Finding 不进 Contract）
+
+**「分支已合」是活跃工作期间的瞬时状态，不是「已废弃」的稳定指标。** manager 复核：07:25 判「8 个已合」，outer 说其中 4 个是 inner 在飞；07:30 重跑同一判据——**那 4 个全部显示「未合」**。原因不是读错，是**状态真翻转**：它们的 subagent 在这 5 分钟里提交了新工作，分支重新领先 integration。**任何按祖先关系做 worktree 清理的机制，都会在【fan-in 之后、该 subagent 下一次提交之前】那个窗口里删掉正在使用的 worktree**——今晚实际出现过（07:08-07:15 fan-in 7 条，inner 4 个 subagent 07:17 派、07:2x 才提交，中间几分钟祖先判据下全部像泄漏）。
+**两个替代判据也不可靠**：①进程名匹配——subagent 是 `claude` 进程、命令行无任务 id，`ps | grep <task-id>` 恒 0；②`worktreeExists`（fast-mode-telemetry:834/:898）反过来——worktree 在就判存活 ⇒ 泄漏被算成在飞。
+**唯一可靠判据 = inner 自己说它在用哪些（inner 心跳的 `runIds`）**。但**心跳字段缩水（gap-inner-heartbeat-fields-shrunk）恰好删掉了 `runIds`**——而 `runIds` 正是这个判别唯一可靠来源。⇒ **`gap-inner-heartbeat-fields-shrunk-no-minimal-contract` 是 worktree 清理机制的前置依赖**：先恢复 `runIds`，再让清理机制读它；在此之前清理只能人工判别、不要机械化。
+
 ## Contract
 measure   slots_free_after_cleanup = `node --no-warnings --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --slot-status --cap 5 --json` 的 stdout 中 slots-free 数字
 band      slots_free_restored = (slots_free_after_cleanup > 0)（泄漏清理后空槽恢复——AC2 引用名）
