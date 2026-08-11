@@ -319,3 +319,8 @@ signals 34/34、events 18/18（+1 skip=真实 probe 不在）、heartbeat 14/14 
 任务 body 已记录的「58/59 + 1 flake」同族，非本轮改动引入。）
 
 **invoke-evidence（外层闭账 2026-08-10）**：实跑 `bash plugin/scripts/pane-state-classify.ts` 对照 inner 实时屏幕（AC0 观测接缝 `SL_PANE_STATE_LOG` 与信号测试的判定对象）——完整入口路径在档。
+
+> **交叉标注（2026-08-11，gap-pane-classify-allow-bare-word-and-agent-list-masks-busy）**：同族、方向相反——
+> 本任务讲 **busy 掩盖 idle**（忙标志跟主循环，D2 撤回）；`gap-pane-classify-allow-bare-word-and-agent-
+> list-masks-busy` 缺陷二讲 **idle 掩盖 busy**（statusArea 最后两行被 agent 列表挤掉，busy 判成
+> waiting-input）。两任务共享同一判据源 `pane-state-classify.ts` 的 `esc to interrupt` 状态行判定。

@@ -85,6 +85,13 @@ const FIXTURE_EXPECTATIONS = {
   // option rows (each on its own line, plus the line-start `❯ Allow` gutter shape) — the
   // invariant that a REAL Allow/Deny dialog still reads permission-prompt after the bare-word fix.
   "real-allow-deny-dialog-1.txt": "permission-prompt",
+  // REPRODUCTION (gap-pane-classify-allow-bare-word-and-agent-list-masks-busy defect 2, manager
+  // 2026-08-10 对照实验 + outer 复核): a busy pane whose status line ("esc to interrupt") sits
+  // ABOVE the running agent list (● main / ◯ general-purpose) with the input at the bottom. The
+  // pre-fix statusArea took the last 2 non-blank lines = agent line + input, so esc was out of the
+  // window → waiting-input (idle masking busy — the reverse of gap-session-liveness-busy-mask-idle-
+  // with-subagents). The manager measured this exact shape reading waiting-input (0.6) pre-fix.
+  "agents-below-status-busy-1.txt": "busy",
 };
 
 function readFixture(name) {
@@ -229,6 +236,71 @@ test("AC3 (regression) — a real agent pane whose task title carries `--allow-t
   assert.notEqual(r.state, "permission-prompt", "the title word --allow-thin must never fake a permission dialog");
   // And the invariant side: the genuine Allow/Deny dialog fixture STILL reads permission-prompt.
   assert.equal(classifyPaneState(readFixture("real-allow-deny-dialog-1.txt")).state, "permission-prompt");
+});
+
+test("AC3 (defect 2, gap-pane-classify-allow-bare-word-and-agent-list-masks-busy) — a busy pane whose status line is pushed ABOVE the running agent list still reads busy (idle must not mask busy)", () => {
+  // The manager's measured shape: busy status line + ● main / ◯ general-purpose below it + ❯
+  // input at the bottom. Pre-fix statusArea took the last 2 non-blank lines = agent line + input,
+  // so esc to interrupt was out of the window → the pane read waiting-input. Must now read busy.
+  const r = classifyPaneState(readFixture("agents-below-status-busy-1.txt"));
+  assert.equal(r.state, "busy", `agents-below-status pane must read busy, got ${r.state}`);
+  assert.notEqual(r.state, "waiting-input", "idle must not mask busy (the defect)");
+
+  // Same shape inline (the task's Contract busy_with_agents_is_busy measure), exercising the
+  // multi-agent case (two agent rows, not one).
+  const agentsBelow = [
+    "⏵⏵ bypass permissions on",
+    "  esc to interrupt  ← 1 agent",
+    "  ● main",
+    "  ◯ general-purpose  running",
+    "❯",
+  ].join("\n");
+  assert.equal(classifyPaneState(agentsBelow).state, "busy");
+  // busy without an agent list still reads busy (no regression on the pre-existing path).
+  const busyNoAgents = [
+    "───────────────────────────────",
+    "❯ ",
+    "───────────────────────────────",
+    "  ⏵⏵ bypass permissions on · 1 monitor · esc to interrupt · ← 1 agent · ↓ to manage",
+  ].join("\n");
+  assert.equal(classifyPaneState(busyNoAgents).state, "busy");
+});
+
+test("AC2 (gap-pane-classify-allow-bare-word-and-agent-list-masks-busy) — 'Grant access' is a dialog SHAPE (a question), not a bare phrase", () => {
+  // Negative control: a busy agent pane whose description merely mentions "grant access" (no
+  // question, no option row) must read busy, never permission-prompt.
+  const grantTitleBusy = [
+    "◯ general-purpose  Need to grant access to the shared drive   11m 15s · ↓193.4k tokens",
+    "───────────────────────────────",
+    "❯ ",
+    "───────────────────────────────",
+    "  ⏵⏵ bypass permissions on · 1 monitor · esc to interrupt · ← 1 agent · ↓ to manage",
+  ].join("\n");
+  const r = classifyPaneState(grantTitleBusy);
+  assert.equal(r.state, "busy", `grant-access title pane must read busy, got ${r.state}`);
+  assert.notEqual(r.state, "permission-prompt", "a bare 'grant access' mention must never fake a dialog");
+
+  // Positive control: a genuine grant-access confirmation dialog (question + Allow/Deny buttons)
+  // still reads permission-prompt.
+  const grantDialog = [
+    "Grant access to this folder?",
+    "Allow  ·  Deny",
+    "Enter to confirm · Esc to cancel",
+  ].join("\n");
+  assert.equal(classifyPaneState(grantDialog).state, "permission-prompt");
+
+  // The dismissable grant-access variant (with Dismiss) stays non-blocking — the dismissable
+  // exclusion still wins over the shape match.
+  const grantDismissable = [
+    "Grant access to this folder?",
+    "Allow  ·  Deny  ·  Dismiss",
+  ].join("\n") + "\n" + [
+    "───────────────────────────────",
+    "❯ ",
+    "───────────────────────────────",
+    "  ⏵⏵ bypass permissions on · 1 monitor · ← 1 agent · ↓ to manage",
+  ].join("\n");
+  assert.equal(classifyPaneState(grantDismissable).state, "waiting-input");
 });
 
 test("AC3 (regression) — a mid-line title word 'Deny'/'denied' alone (no co-option) must NOT trip a permission-prompt", () => {

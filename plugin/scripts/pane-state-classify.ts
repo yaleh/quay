@@ -57,17 +57,21 @@ export function bottomRegion(paneText: string, lines = DEFAULT_BOTTOM_LINES): st
  * match the word "permissions" (the "bypass permissions on" mode indicator appears in every
  * status line of this fleet — a real capture tripped on exactly that).
  *
- * Allow/Deny are NOT bare words here (gap-pane-state-allow-deny-bare-word-false-positive): a bare
- * case-insensitive `Allow` matches a task title's `--allow-thin` and `Deny` matches any
- * deny/denied title, turning a busy agent pane into a fake permission-prompt (the inner fleet runs
- * `bypass permissions on` — structurally no permission box can ever appear, so that signal is pure
- * noise). By POSITION, never by keyword (the same lesson the "permissions" exclusion above
- * records): a real approval dialog shows BOTH options — either on one line ("Allow  ·  Deny  ·
- * Y/n"), on adjacent lines, or Allow/Deny sits at line start as an option row (with the TUI's
- * ❯/› gutter and optional numbering). A bare title word never satisfies any of those shapes. */
+ * Allow/Deny/Grant access are NOT bare words here (gap-pane-state-allow-deny-bare-word-false-positive
+ * + gap-pane-classify-allow-bare-word-and-agent-list-masks-busy defect 1): a bare case-insensitive
+ * `Allow` matches a task title's `--allow-thin`, `Deny` matches any deny/denied title, and `Grant
+ * access` matches any "need to grant access …" description — each turning a busy agent pane into a
+ * fake permission-prompt (the inner fleet runs `bypass permissions on` — structurally no permission
+ * box can ever appear, so that signal is pure noise). By POSITION/SHAPE, never by keyword (the same
+ * lesson the "permissions" exclusion above records): a real approval dialog shows BOTH options —
+ * either on one line ("Allow  ·  Deny  ·  Y/n"), on adjacent lines, or Allow/Deny sits at line start
+ * as an option row (with the TUI's ❯/› gutter and optional numbering); a grant-access dialog is a
+ * QUESTION ("Grant access to X?") whose buttons (Allow/Deny/Y/n) the option-row alternatives above
+ * already match. A bare title/description word never satisfies any of those shapes. */
 const PERMISSION_PROMPT_RE = new RegExp(
-  "Do you want to proceed|Quick safety check|trust this folder|Enter to confirm|Grant access|" +
+  "Do you want to proceed|Quick safety check|trust this folder|Enter to confirm|" +
     "Y\\/n\\b|" +
+    "Grant access[^\\n]*\\?|" +
     "Allow\\b[^\\n]*\\bDeny\\b|Deny\\b[^\\n]*\\bAllow\\b|" +
     "Allow\\b[^\\n]*\\n[^\\n]*\\bDeny\\b|Deny\\b[^\\n]*\\n[^\\n]*\\bAllow\\b|" +
     "^\\s*[❯›>]?\\s*(?:1\\.\\s*)?Allow\\b|^\\s*[❯›>]?\\s*(?:1\\.\\s*)?Deny\\b",
@@ -109,10 +113,22 @@ const DISMISSABLE_PROMPT_RE = /\(optional\)|Dismiss|How is Claude doing this ses
  * idle). The closure criterion is one real SESSION-IDLE, not a classifier heuristic. */
 const BUSY_RE = /esc to interrupt/i;
 
-/** The status area = the last up-to-two non-blank lines of the bottom region (the status line and
- * its possible continuation). Busy is judged HERE, not across the whole bottom region. */
+/** Agent-list rows: when subagents are running the TUI renders the agent list BELOW the status line
+ * (`● main` / `◯ general-purpose  …`), pushing the status line's `esc to interrupt` out of the
+ * bottom-two-lines window — a busy pane then read as waiting-input (gap-pane-classify-allow-bare-
+ * word-and-agent-list-masks-busy defect 2, idle-masks-busy, the reverse of busy-mask-idle). The
+ * enumerated agent-list shape is a bullet glyph (● filled / ◯ hollow) + agent name; those rows are
+ * excluded from the status area so the status line stays in the window. A scrolled-content bullet
+ * that happens to use the same glyph is harmless: the window is anchored at the bottom by the input
+ * + status lines that are always present, so a quoted-esc content line can never be pulled into it
+ * (AC4 — the last-two-lines discipline is unchanged for panes without an agent list). */
+const AGENT_LIST_LINE_RE = /^\s*[●◯]\s/;
+
+/** The status area = the last up-to-two non-blank, non-agent-list lines of the bottom region (the
+ * status line and its possible continuation). Busy is judged HERE, not across the whole bottom
+ * region — a quoted `esc to interrupt` in scrolled content must never fake a busy verdict. */
 function statusArea(region: string): string {
-  const lines = region.split("\n").filter((l) => l.trim() !== "");
+  const lines = region.split("\n").filter((l) => l.trim() !== "" && !AGENT_LIST_LINE_RE.test(l));
   return lines.slice(-2).join("\n");
 }
 
@@ -456,6 +472,45 @@ export function selfcheck(): boolean {
     "  Enter to confirm · Esc to cancel",
   ].join("\n");
   check("green-allow-deny-dialog-prompt", classifyPaneState(allowDenyDialog).state === "permission-prompt");
+
+  // ── agent-list-masks-busy (gap-pane-classify-allow-bare-word-and-agent-list-masks-busy defect 2) ──
+
+  // GREEN: a busy pane whose status line ("esc to interrupt") sits ABOVE the running agent list
+  // (● main / ◯ general-purpose) with the input at the bottom. Pre-fix statusArea took the last 2
+  // non-blank lines = agent line + input, so esc was out of the window → waiting-input (idle masking
+  // busy). Must read BUSY.
+  const agentsBelow = [
+    "⏵⏵ bypass permissions on",
+    "  esc to interrupt  ← 1 agent",
+    "  ● main",
+    "  ◯ general-purpose  running",
+    "❯",
+  ].join("\n");
+  check("green-agents-below-busy", classifyPaneState(agentsBelow).state === "busy");
+  // RED relabel: it must NEVER read waiting-input (idle masking busy is the defect).
+  check("agents-below-red-not-waiting", classifyPaneState(agentsBelow).state !== "waiting-input");
+
+  // ── Grant access shape (gap-pane-classify-allow-bare-word-and-agent-list-masks-busy defect 1) ──
+
+  // RED: a busy agent pane whose description mentions "grant access" WITHOUT a dialog shape (no
+  // question, no option row) must read BUSY, never permission-prompt.
+  const grantTitle = [
+    "◯ general-purpose  Need to grant access to the shared drive   11m 15s · ↓193.4k tokens",
+    "───────────────────────────────",
+    "❯ ",
+    "───────────────────────────────",
+    "  ⏵⏵ bypass permissions on · 1 monitor · esc to interrupt · ← 1 agent · ↓ to manage",
+  ].join("\n");
+  check("grant-access-red-not-permission", classifyPaneState(grantTitle).state !== "permission-prompt");
+  check("grant-access-green-busy", classifyPaneState(grantTitle).state === "busy");
+  // GREEN: a genuine grant-access confirmation dialog (question + Allow/Deny buttons) still reads
+  // permission-prompt.
+  const grantDialog = [
+    "Grant access to this folder?",
+    "Allow  ·  Deny",
+    "Enter to confirm · Esc to cancel",
+  ].join("\n");
+  check("green-grant-dialog-prompt", classifyPaneState(grantDialog).state === "permission-prompt");
 
   // tier-2 GREEN: an unmatched screen → unknown, with the region passed through verbatim in raw.
   const weird = "a vim help screen\n~ ~ ~\n~ ~ ~\n(1 of 12)   help.txt";

@@ -111,3 +111,8 @@ resume    分类修正 + 测试 + 文档分步提交，任一步完成即写盘
 reviewer: outer
 at: 2026-08-08
 changed: 建任务（manager 19:35Z 实测 + 外层核实位置依赖；方向已定候选 A/B/C，实现与测试归内层）
+
+> **交叉标注（2026-08-11，gap-pane-classify-allow-bare-word-and-agent-list-masks-busy）**：permission-prompt
+> 判定家族——本任务定 dismissable 排除（`(optional)`/`Dismiss` 与权限签名并存 ⇒ 问卷非阻塞）；
+> `gap-pane-classify-allow-bare-word-and-agent-list-masks-busy` 缺陷一扩展同族形状判定：`Grant access`
+> 与 `Allow`/`Deny` 一样不得以裸词命中（须为对话框形状：成对按钮 / 行首选项 / 问句）。
