@@ -127,6 +127,12 @@ orchestration/inner-idle-log.jsonl
 **/.quay/full-suite.log
 **/.quay/suite-state-events.jsonl
 **/.quay/suite-state-last.json
+# gap-slot-free-not-an-event-slots-stay-empty-missed-without-trace: the slot-free trigger's append-
+# only SLOT-FREE event log + its transition memo — same live control-plane-state family as
+# suite-state-events.jsonl / gate-events.jsonl (written by slot-free-trigger.ts, read by the outer
+# Monitor + tick; never committed — the event IS runtime state, not provenance).
+**/.quay/slot-free-events.jsonl
+**/.quay/slot-free-last.json
 # gap-runtime-state-files-not-gitignored (2026-08-10): 5 runtime state files fell through the
 # per-file .gitignore (there is NO `**/.quay/*` wildcard) — last-pane.txt (pane-state-classify
 # product), suite-cgroup-evidence.txt / suite-chain-heartbeat.json / suite-health-last-run.json
