@@ -265,8 +265,11 @@ export function isNotYetFlippedSkip({ id, body, root, excludedNyfIds }) {
  *      replacement). Default: none (the built-in C8 self-touch gate is always on).
  *  @returns {object} { cap, base_cap, effective_cap, arbitration, in_flight_count,
  *      closed_but_live_count, occupied_slots, slots_free, pool, floor, dispatchable_disjoint,
- *      criterion_met, should_refill, no_refill_reason, recommended, ranking, scanned } —
- *      `recommended` is the backward-compatible string-id array; `ranking` (gap-ac36-recommended-
+ *      criterion_met, should_refill, no_refill_reason, recommended, deferred, ranking, scanned } —
+ *      `recommended` is the backward-compatible string-id array; `deferred`
+ *      (gap-over90-clock-measures-queue-time-not-work-time) is the array of {id, reason} step-4
+ *      skips — the candidates whose open bracket must be closed on defer (--close-task --outcome
+ *      deferred) so the queue segment never counts toward OVER90; `ranking` (gap-ac36-recommended-
  *      exposes-sort-key) is the parallel array of {id, deliveryCritical, suiteBlocking, rank} that
  *      exposes each recommended id's sort axes for AC36 判据②'s mechanical check.
  */
@@ -302,6 +305,11 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
   // non-DC unchanged / blocking_suite above DC" from two runs' `ranking` arrays instead of a human
   // eyeballing two JSON dumps. The `recommended` STRING array is unchanged (backward compat).
   let ranking = [];
+  // DEFER ACCOUNTING (gap-over90-clock-measures-queue-time-not-work-time): the deferred candidates
+  // (step-4-skips) accumulate at function scope — empty while halted (nothing is evaluated). Surfaced
+  // in the result so the tick can close deferred candidates' open brackets (--close-task --outcome
+  // deferred). slot-refill stays PURE; it only reports.
+  let deferred = [];
   if (!halt.halted) {
     const sharedFiles = walkFiles(root);
     const expand = (globs) => expandDeclaredTouches(globs, root, sharedFiles);
@@ -319,27 +327,34 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
     const excludedNyfIds = new Set(
       (pool.excluded || []).filter((e) => e.reasons.includes("not-yet-flipped")).map((e) => e.id),
     );
+    // DEFER ACCOUNTING (gap-over90-clock-measures-queue-time-not-work-time): every step-4 skip is a
+    // DEFER — the candidate is NOT dispatched this round, so its telemetry bracket (if `--task-start`
+    // was called before the defer) must be closed via `closure-lag-check.sh --close-task --outcome
+    // deferred`, and re-`--task-start`ed when work actually begins. slot-refill stays PURE (never
+    // writes) — it surfaces `deferred` so the caller (the tick) can mechanically close those brackets
+    // instead of the queue segment silently accruing toward OVER90.
     const candidates = [];
+    const defer = (id, reason) => deferred.push({ id, reason });
     for (const id of pool.ready) {
       const file = path.join(tasksDir, `${id}.md`);
-      if (!fs.existsSync(file)) continue;
+      if (!fs.existsSync(file)) { defer(id, "task-file-missing"); continue; }
       const text = fs.readFileSync(file, "utf8");
       // step-4 check 1: touches-resolve (majority-missing ⇒ not dispatchable).
-      if (checkTaskTouchesResolve(text, root).majorityMissing) continue;
+      if (checkTaskTouchesResolve(text, root).majorityMissing) { defer(id, "touches-majority-missing"); continue; }
       // step-4 check 2: deps-ready (parent done).
       const task = parseTask(text);
       task.parent = readFrontField(task.frontmatterRaw, "parent");
-      if (!depsReadyFor(task, statusById)) continue;
+      if (!depsReadyFor(task, statusById)) { defer(id, "deps-not-ready"); continue; }
       // step-4 check 3: concurrency eligibility — disjoint from every currently-running subagent.
       const parsed = parseTouches(text);
-      let blocked = false;
+      let blocked = null;
       for (const inf of inFlightParsed) {
-        if (!checkTouchesPair(parsed, inf.touches, expand).disjoint) { blocked = true; break; }
+        if (!checkTouchesPair(parsed, inf.touches, expand).disjoint) { blocked = inf.id; break; }
       }
-      if (blocked) continue;
+      if (blocked) { defer(id, `touches-overlap-in-flight (peer ${blocked})`); continue; }
       // step-4 check 4: not-yet-flipped — work already landed (fan-in merged / master-landed), don't
       // re-dispatch a subagent to re-verify it (gap-slot-refill-repeats-done-eligible-recommendations).
-      if (isNotYetFlippedSkip({ id, body: text, root, excludedNyfIds })) continue;
+      if (isNotYetFlippedSkip({ id, body: text, root, excludedNyfIds })) { defer(id, "not-yet-flipped"); continue; }
       // step-4 check 5: C8 SELF-TOUCH (gap-slot-refill-c8-reject-no-backfill) — the dispatch gate
       // (fast-mode-tick-core.md C8) requires the candidate's OWN `tasks/<id>.md` in ## Touches
       // WITHOUT `(new)`. A candidate lacking it is NOT dispatchable — the inner's A15 gate ⑤ would
@@ -348,14 +363,14 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
       // replaced by the next dispatchable one instead of being recommended and then rejected by the
       // dispatch side with NO replacement (the "17 dispatchable yet none dispatched" deadlock:
       // pool 有货 + 本 tick 无可派 同时为真).
-      if (!selfTouchCheck(text, id).ok) continue;
+      if (!selfTouchCheck(text, id).ok) { defer(id, "self-touch-missing-c8"); continue; }
       // INJECTED DISPATCH GATE (optional): any additional per-candidate check the caller wants to
       // enforce (default none). A rejected candidate (ok:false) is skipped and the loop continues →
       // BACKFILL from later-in-sort candidates, exactly like the built-in step-4 gates — a rejected
       // candidate is never recommended with no replacement.
       if (dispatchGate) {
         const g = dispatchGate({ id, text, task });
-        if (g === false || (g && g.ok === false)) continue;
+        if (g === false || (g && g.ok === false)) { defer(id, "dispatch-gate-reject"); continue; }
       }
       candidates.push(parseCandidate(id, text));
     }
@@ -469,6 +484,13 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
     should_refill: shouldRefill,
     no_refill_reason: noRefillReason,
     recommended,
+    // DEFER ACCOUNTING (gap-over90-clock-measures-queue-time-not-work-time): every candidate in
+    // `pool.ready` that failed a step-4 check (touches-resolve / deps / touches-overlap-in-flight /
+    // not-yet-flipped / C8 self-touch / dispatch-gate) is listed here with its reason. These are the
+    // candidates whose open telemetry bracket must be closed on defer (--close-task --outcome
+    // deferred) so the queue segment never counts toward OVER90. PURE signal — slot-refill never
+    // writes brackets; the tick consumes this list to close them.
+    deferred,
     // RANKING EXPOSURE (gap-ac36-recommended-exposes-sort-key AC2): per-recommended-id sort axes
     // ({id, deliveryCritical, suiteBlocking, rank}) so AC36 判据②'s "strict forward movement +
     // negative control" is mechanically assertable from the JSON alone.
