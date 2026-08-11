@@ -878,18 +878,22 @@ node --experimental-strip-types plugin/scripts/concurrent-batch-scheduler.ts --r
 
 重叠 → 不可并发，等下一 tick。**不要凭读 Touches 列表目测**——本会话有过目测判断被实测推翻的先例。
 
-4. **分叉基线判定（两线模型 AC2，`gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point`）**：
-   派发前用 `fork-baseline.ts` 判定每个候选从哪条线分叉（**分叉基线即依赖声明**——独立 →
-   `$FORK_BASELINE`、声明依赖 → `$MERGE_TARGET`，机械可查；分支名**从配置代入，不字面写死**）：
+4. **分叉基线判定（统一 fork 源，`gap-task-file-develop-integration-drift-fan-in-conflicts` AC2）**：
+   任务 worktree **fork 源统一 = integration HEAD**（生效线，与 fan-in 目标一致）。旧的两线
+   依赖声明（独立 → develop / 依赖 → integration）**不再是 fork 源判据**——任务文件在
+   develop/integration 间漂移（integration 的 fan-in 持续更新任务文件），从 develop fork 会让
+   fork 点永远落后 integration，写证据段的任务 fan-in 必冲突。**统一从 `$MERGE_TARGET` 分叉**
+   （分支名**从配置代入，不字面写死**）：
 
 ```bash
-node --experimental-strip-types plugin/scripts/fork-baseline.ts --task tasks/<id>.md --root "$(pwd)" --develop "$FORK_BASELINE" --integration "$MERGE_TARGET"
-# stdout: $FORK_BASELINE（独立，从已验证基线分叉）或 $MERGE_TARGET（依赖未验证前序，从待验证汇入点分叉）
+node --experimental-strip-types plugin/scripts/fork-baseline.ts --task tasks/<id>.md --root "$(pwd)" --develop "$FORK_BASELINE" --integration "$MERGE_TARGET" --force-integration
+# stdout: $MERGE_TARGET（统一 = integration HEAD；--force-integration 强制，无视依赖声明）
 ```
 
-   worktree 建立命令相应取该基线：`git worktree add $WORKTREE_ROOT/<slug> -b task/<id> <基线>`。
-   这保证**新工作永不从未验证的树上分叉**——`$FORK_BASELINE` 永不包含未验证前序，红窗停派由此结构性消除
-   （`fork_baseline_is_dependency = 1`）。
+   worktree 建立命令**一律取 `$MERGE_TARGET`**：`git worktree add $WORKTREE_ROOT/<slug> -b task/<id> "$MERGE_TARGET"`。
+   **fork 点 = fan-in 目标** ⇒ 任务文件证据段与 integration 上已更新的任务文件不再 rebase 冲突
+   （`fork_source_integration = 1`；Contract 见任务体）。依赖声明语义（`fork_baseline_is_dependency`）
+   保留在 `fork-baseline.ts` 默认路径（单线下游用），quay 自身派发用 `--force-integration` 统一。
 
 5. **自身文件授权（self-touch，`gap-closure-could-not-run-in-task-grant-self-touches-for-ac-and-invoke-evidence`）**：
    每个任务的 `## Touches` 必须含**它自己的任务文件** `tasks/<id>.md`——**不带 `(new)` 标注**（带
@@ -932,36 +936,41 @@ node --experimental-strip-types plugin/scripts/touches-orthogonality-check.ts --
 见 `orchestration/SPEC-cut-the-waiting.md`。同一条消息里发多个 `Agent` 调用拿到的并发是 harness 并发执行，
 不是后台派发）。
 
-**分叉基线（两线模型，AC2——分叉基线即依赖声明；`orchestration/SPEC-branching-model-integration-branch-2026-08-05.md`）**：
+**分叉基线（统一 fork 源 = integration HEAD，`gap-task-file-develop-integration-drift-fan-in-conflicts` AC2；
+旧依赖声明语义见 `orchestration/SPEC-branching-model-integration-branch-2026-08-05.md`）**：
 subagent 用裸 `git worktree add` 自建 `$WORKTREE_ROOT/<slug>`（磁盘，不在 `/tmp`——tmpfs 是内存，
-`worktree_root` 见上）和 `task/<id>` 分支，**分叉点由
-`plugin/scripts/integration-branch-model.ts` 的 `forkBaseline` 机械判定**：
+`worktree_root` 见上）和 `task/<id>` 分支，**分叉点一律 = `$MERGE_TARGET`（integration HEAD）**——
+与 fan-in 目标一致，消除「fork 落后 integration」：
 ```bash
-UNVERIFIED_IDS=$(node --experimental-strip-types plugin/scripts/unverified-integration-task-ids.ts --root "$(pwd)")
-node --no-warnings --experimental-strip-types plugin/scripts/integration-branch-model.ts \
-  --fork-baseline tasks/<id>.md --overlaps-unverified "$UNVERIFIED_IDS" --root "$(pwd)"
-# 输出 develop（独立，默认）或 integration（声明依赖 / touches 与未验证任务相交）
+node --no-warnings --experimental-strip-types plugin/scripts/fork-baseline.ts \
+  --task tasks/<id>.md --root "$(pwd)" --develop "$FORK_BASELINE" --integration "$MERGE_TARGET" --force-integration
+# stdout: $MERGE_TARGET（统一；--force-integration 忽略依赖/重叠判定）
+git -C "$REPO_ROOT" worktree add $WORKTREE_ROOT/<slug> -b task/<id> "$MERGE_TARGET"
 ```
-  `--overlaps-unverified` **不得传空串**（`gap-ac19-two-line-model-actually-runs` AC3：空串使
-  `integration-branch-model.ts:47` 的 `overlapsUnverifiedIntegration` 路径恒假——机制半死）；未验证任务 id 由
-  `unverified-integration-task-ids.ts` 从 `git log --oneline develop..integration`（fan-in 合并信息）
-  机械提取——即 `integration-branch-model.ts:139` 的 Contract invoke，内层无需记忆来源。
-- **独立任务（默认）→ 从 `develop` 分叉**（已验证基线，绿）
-- **声明依赖前序任务 / touches 与 integration 上某未验证任务相交 → 从 `integration` 分叉**
-  （含未验证前序；`--overlaps-unverified` 传 `unverified-integration-task-ids.ts` 提取的未验证任务 id，
-  helper 做 touches 交集）
-- **develop 永不从未验证树分叉 ⇒ 红窗停派结构性消除**（AC3）；「基线陈旧只对触摸集相交的任务造成
-  麻烦，而相交任务本来就该串行」——与 checkTouchesPair + disjointness 排序是同一个约束（SPEC §3）。
+- **每个任务 worktree 都从 `$MERGE_TARGET`（integration HEAD）分叉**——任务文件在两条线间漂移
+  （integration 的 fan-in + 外层 status 翻转持续更新任务文件），从 develop fork 的写证据任务
+  fan-in 必撞（实证 2026-08-10：round5-red c3583844 vs 2c1539d7 同文件不同段）。fork 点 = 汇入点
+  后，fork 落后 integration 的冲突形状被消除。
+- **写所有权分离（AC3）**：任务文件的 `status:` frontmatter **由 outer 独占**（状态翻转/记录）；
+  inner **只追加正文段**（AC 勾选 / Evidence / 记录），**不写 frontmatter**——两层写同一文件的不同
+  段，fan-in 不再 add/add。证据追加用 body-only 语义（`task-schema.ts` 的 `appendBodySection`：
+  frontmatter 字节不变，只动正文），**不整体覆盖**（`evidence_append_not_overwrite = 1`）。
+- **per-hunk union fallback（AC3）**：写所有权已分离仍撞的（如共享执行核被并发任务改，
+  A 类冲突），fan-in 对 `tasks/*.md` 与执行核默认 **per-hunk 取并集**（保留双方各自新增的段），
+  不是 needs-human——今天已手工做过多次，形态现成。
 - worktree 建立后内部起独立对抗审查（硬上限 2 轮），**只提交不合并**。
 `milestone-worktree.ts` **不可用**——它要求数字 M 号，gap 任务没有；用裸 `git worktree add`。
 
-**任务代理完成时编辑自己的任务文件（AC2 派发词约定，`gap-closure-could-not-run-in-task-grant-self-touches-for-ac-and-invoke-evidence`）**：
+**任务代理完成时编辑自己的任务文件（AC2 派发词约定，`gap-closure-could-not-run-in-task-grant-self-touches-for-ac-and-invoke-evidence` + AC3 写所有权分离 `gap-task-file-develop-integration-drift-fan-in-conflicts`）**：
 任务代理提交前编辑 `tasks/<id>.md`（它自己的任务文件，Touches 已授权）：**勾 AC 复选框**（它实现了、
 自己跑过 scoped 测试，有全部事实）+ **贴 invoke 实跑证据**（自己 scoped 测试的输出）。**仍 SCOPED ONLY**
 （不跑全量 suite——全量判据归外层 verification-round-N，见步骤 2 词汇规范）；**不翻 status**（翻 done 是外层收尾的活）；
-**不勾 DoD 行**（DoD 全量绿在 SCOPED ONLY 下任务内不可知，是唯一真时序依赖）。收尾（外层异步）因此
-每任务只剩「核对 DoD 行 + 翻 done + 关遥测括号」——量小到不是同步点（(c) 块落地后，closure-async
-机制根的收尾对已自勾 AC/证据的任务是 no-op）。
+**不勾 DoD 行**（DoD 全量绿在 SCOPED ONLY 下任务内不可知，是唯一真时序依赖）。
+**写所有权分离（AC3）**：只允许**追加正文段**（AC 勾选 / Evidence / 记录）——**绝不写/改 frontmatter**
+（`status:` 由 outer 独占）。证据追加用 body-only 语义（`task-schema.ts` `appendBodySection`：
+frontmatter 字节不变，只动正文；无 frontmatter 时 fail-closed），**禁止整体覆盖任务文件**
+（`evidence_append_not_overwrite = 1`）。收尾（外层异步）因此每任务只剩「核对 DoD 行 + 翻 done + 关遥测括号」——
+量小到不是同步点（(c) 块落地后，closure-async 机制根的收尾对已自勾 AC/证据的任务是 no-op）。
 
 **驱动文本只携带数据，不复述行为（外层裁定 R2 — gap-drive-text-carries-data-not-behavior-outer-inner-handoff，AC1）**：
 外层驱动内层的文本只携带**数据**——任务 id、裁定结论、依赖事实（如「B 消费 D 的 classifyPaneState」）。

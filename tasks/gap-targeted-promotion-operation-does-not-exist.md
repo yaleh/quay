@@ -15,6 +15,14 @@ extra: {}
 
 **「定向晋级」不是一个操作——阶段目标要的任务无法离开 todo。**
 
+> **冲突实例交叉标注（2026-08-10，`gap-task-file-develop-integration-drift-fan-in-conflicts` 立案时写）**：
+> 本任务是任务文件在 develop/integration 间漂移的冲突实例之一——inner 从 develop fork、写任务文件
+> 证据段，fan-in 时撞 integration 上更新版任务文件 ⇒ rebase 冲突 ⇒ needs-human。**根因与修法见
+> `tasks/gap-task-file-develop-integration-drift-fan-in-conflicts.md`**：fork 源统一 integration HEAD
+> + `status:` frontmatter outer 独占 + inner 只追加正文段 + per-hunk union fallback。本任务的
+> targeted-promotion 定向晋级路径本身不受影响，但其任务文件若在 integration 被外层翻 status，同一
+> 写所有权纪律适用。
+
 > **AC 交叉标注（2026-08-08，`gap-closure-detection-reads-symbols-not-checkboxes` 落地时写）**：
 > ready-pool 池机制三件套——**收尾信号 / 退回排除 / 定向晋级**。本条 = 退回排除（AC6b）+ 定向晋级
 > （AC1-AC2）；收尾信号那条 = 池子里 AC 全勾未翻转被误当可派发（ready 池 61% 空转）。两条共同收窄

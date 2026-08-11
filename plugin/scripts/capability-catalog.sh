@@ -142,7 +142,7 @@ declare -A QUESTION=(
   [external-dogfooding-check.ts]="Is the external-dogfooding routine's contract satisfied (cadence, drivable foreign target, tmux remote-drive surface, evidence-backed directive finding)?"
   [execution-policy.ts]="Is an execution policy versioned and authorized for activation (minimal substrate for finding back-propagation)?"
   [fast-mode-telemetry.ts]="What did the fast mode actually do (telemetry events over a window)?"
-  [fork-baseline.ts]="Should a task fork from develop or integration (dependency-based fork baseline)?"
+  [fork-baseline.ts]="Should a task fork from develop or integration — dependency-based by default, or UNIFIED integration HEAD via --force-integration (gap-task-file-develop-integration-drift-fan-in-conflicts AC2: fork 源统一 = integration HEAD, matching the fan-in target)?"
   [finding-backpropagate.ts]="Should a finding be back-propagated to the earliest detector that could have caught it (Prepare/Execute feedback)?"
   [full-suite-runner.ts]="Is the full suite green, red, or still running, who ran it, and how long did it take (outer background async runner)?"
   [gate-dispatch-coverage.ts]="Is every registered gate dispatched somewhere (coverage report)?"

@@ -15,6 +15,14 @@ extra: {}
 
 **全量套件 round-5（full-suite-runner，00:17:57 起，22.1min 完整跑完）红，`state=red reason=failed`，`failures=[]` 空（可读性缺口兑现——真因在 `.quay/full-suite.log`）。两个独立失败簇，都负载相关：**
 
+> **冲突实例交叉标注（2026-08-10，`gap-task-file-develop-integration-drift-fan-in-conflicts` 立案时写）**：
+> 本任务是任务文件在 develop/integration 间漂移的冲突实例之一（round5-red `c3583844` 在 develop，
+> integration 上有 `2c1539d7`/`698a142a` 任务分支记录 scoped-gate 复核——两条线各自写了同一任务文件的
+> 不同段）。**根因与修法见 `tasks/gap-task-file-develop-integration-drift-fan-in-conflicts.md`**：
+> fork 源统一 integration HEAD + `status:` frontmatter outer 独占 + inner 只追加正文段 + per-hunk union
+> fallback。本任务的失败簇 A/B 本身是负载相关缺陷，与本冲突不同轴；但其任务文件同样受写所有权纪律约束。
+
+
 **簇 A —— kill-timeout SIGKILL 被 REGRESSION 测试拒绝（proposal-convergence）**：
 `experiments/quay-perpetual-stream/test/proposal-convergence.test.mjs:2841` 的 REGRESSION 测试（gap-prepare-milestone-epoch-cli-toctou-and-tamper-hardening：20 个并发 `--new-epoch` 子进程共享 epoch，maxNewEpochResetCount:3）断言于 `:2877` 收到意外拒绝码：
 ```
