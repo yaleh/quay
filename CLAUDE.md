@@ -26,7 +26,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
    **最高频的一个实例，单列**：**任何「查会话历史 / 读 transcript / 统计 agent 用量」都先用 `meta-cc` MCP，不要手搓 `python`/`grep` 解析 `*.jsonl`。**
    实证：管理者台账里此类认账 **16 条**，且 2026-08-11 02:1x 在人指出的前五分钟内又连犯两次（手搓解析 `agent-*.jsonl` 与 `meta.json`）。
    **为什么单列而不靠上一句涵盖**：上一句是通则，而通则在动手那一刻不会浮现；这条此前只写在管理者自己的核（C15，且窄——只禁 `capture-pane` 回滚）与台账里，
-   **不在唯一会被自动注入的本文件中** ⇒ 每次都要靠当场想起来。〔**无产物，靠自觉**——`meta-cc` 返回空≠没有数据，可能是 scope/参数不对，见硬规则 5 来源完备性〕
+   **不在唯一会被自动注入的本文件中** ⇒ 每次都要靠当场想起来。〔**无产物，靠自觉**〕
+   **`meta-cc` 返回空 ≠ 没有数据**（硬规则 5 来源完备性）。**已实测的一个覆盖缺口 + 绕法（2026-08-11 02:2x）**：
+   `query_session_content` 按 `working_dir` **哈希**定位 project，**不递归** `~/.claude/projects/<project>/<session-id>/subagents/workflows/<run>/agent-*.jsonl`
+   ⇒ 查「某个 workflow 内部到底发生了什么」时它恒返回空。**正确做法**：`ls -S <run 目录>/agent-*.jsonl` 定位文件（列文件不是解析），
+   再 **`meta-cc inspect_session_files --files <显式路径>`**——它给显式路径能读，返回 `line_count` / `record_types`（assistant/user 轮次数）/ `time_range`。
+   **轮次数就是成本的驱动量**：实测一次 suite-fix workflow 42 个 agent 共 705 轮、缓存读占 **98.8%**、真正新 token 仅 92 万
+   ⇒ **别用「总 token」判贵贱，要拆出 `cache_read` 再谈**（我 2026-08-11 02:2x 就因未拆而给出过一个误导性的「省 9M token」结论）。
 2. **按位置判定，不按关键词**——注释、字符串、消息正文里提到不算命中。〔产物：复用 `drive-contract-check.ts` / `test-framework-policy-check.ts` 的判定手法〕
 3. **枚举，不布尔**——布尔化的存在性检查会把「对象没了」伪装成「检查失败」。〔产物：判准③ 要求写出条数与清单〕
 4. **一个结构上不可能取假的量，不是测量**——恒等式、自证、回显都属此类。〔**无产物，靠自觉**〕
