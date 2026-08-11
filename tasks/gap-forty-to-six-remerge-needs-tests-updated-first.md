@@ -7,7 +7,7 @@ title: the 40→6 merge (a4b1d9a9) was REVERTED (7642849a) because it introduced
   tests must be updated to match the 40→6 behavior; the 40→6 work stays on
   integration (8d740326, incl. manager-tick-checks 49f8272b); whitelist fix was
   one instance, there are more
-status: done
+status: ready
 labels:
   - gap
   - defect
