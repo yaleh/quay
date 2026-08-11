@@ -1,7 +1,7 @@
 ---
 id: gap-pane-classify-busy-truncated-by-column-width
 title: "忙态判定不得只依赖单一字符串——两成因（A 列宽截断 esc to interru… / B 任务面板标志替换 esc to interrupt 缺失），任一都假空闲；A 67 列 inner、B 93 列 outer 恰在有 agent 跑时失效"
-status: todo
+status: ready
 labels:
   - gap
   - defect
