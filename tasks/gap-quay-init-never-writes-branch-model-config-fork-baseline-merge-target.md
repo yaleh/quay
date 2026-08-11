@@ -12,7 +12,7 @@ title: "quay-init.sh's config-generation heredoc (write_provider_config, line
   manager reproduction-lens probe 2026-08-06 (ad-arm1 real check: config HAS the
   keys, but git-blame- equivalent traces to manual setup, not quay-init;
   quay-init.sh source has zero mentions)"
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate

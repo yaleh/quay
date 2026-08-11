@@ -2,7 +2,7 @@
 id: gap-quay-init-laydown-dominant-red-suite-blocker
 title: quay-init laydown breaks the full-suite gate (dominant of 178 fails) — no
   open task tracks it, so all dispatch stays gated
-status: ready
+status: done
 labels:
   - gap
   - defect

@@ -3,7 +3,7 @@ id: gap-needs-human-routing-does-not-close-bracket
 title: terminal-path routing lacks a unified bracket-close point — needs-human
   (chart2-s2/ac8/shipped-ts) AND complete-but-not-done (residue-check) both
   leave telemetry brackets open; 4 instances, all closed manually by outer
-status: ready
+status: done
 labels:
   - gap
   - defect
