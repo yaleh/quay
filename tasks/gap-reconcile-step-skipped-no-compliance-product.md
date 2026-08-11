@@ -58,8 +58,10 @@ extra: {}
 - tasks/gap-slot-free-not-an-event-slots-stay-empty-missed-without-trace.md（交叉标注——优先级：本因先修，事件化其后）
 - tasks/gap-reconcile-step-skipped-no-compliance-product.md（自身：勾 AC + 贴证据）
 
-## Contract
 
+> **manager 2026-08-11 04:5x 第二次更正（取代本任务根因）**：空槽真因=worktree 泄漏（合并后没删），非陈旧括号。--reconcile 该跑也跑了（括号 38→11、reconcilable 27→0），但不解决本因——occupied 15 = real 11 + closed-but-live 4，而 real 11 里 12 个已合分支 worktree 仍在（fast-mode-telemetry:834/:898 判存活=worktree 在，--reconcile 依规矩拒绝关）。本任务（reconcile_compliant 产物）保留但降级；真因任务=gap-worktree-leak-after-fan-in-occupies-slot-permanently。
+
+## Contract
 measure   reconcile_compliant = `node --no-warnings --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --slot-status --cap 5 --json` 的 stdout 中 reconcile_compliant 字段
 band      reconcile_compliant = true（stale>0 时有 reconcile 调用）或 stale=0
 invariant reconcile_safe = 1（只在执行体可观察地消失时关闭，绝不按年龄关——源码已有）
@@ -67,8 +69,6 @@ invariant c17_closed = 1（守与不守在记录上可区分）
 invoke    `node --no-warnings --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --slot-status --cap 5 --json`（贴 reconcile_compliant + stale 数）
 control   stale>0 无 reconcile ⇒ false；reconcile 后 ⇒ true；C17 闭合
 resume    合规判据 / 留痕 / 上游观察 / 测试分步提交，任一步完成即写盘
-
-> **manager 2026-08-11 04:5x 第二次更正（取代本任务根因）**：空槽真因=worktree 泄漏（合并后没删），非陈旧括号。--reconcile 该跑也跑了（括号 38→11、reconcilable 27→0），但不解决本因——occupied 15 = real 11 + closed-but-live 4，而 real 11 里 12 个已合分支 worktree 仍在（fast-mode-telemetry:834/:898 判存活=worktree 在，--reconcile 依规矩拒绝关）。本任务（reconcile_compliant 产物）保留但降级；真因任务=gap-worktree-leak-after-fan-in-occupies-slot-permanently。
 
 ## Dispatch review
 

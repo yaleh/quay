@@ -37,7 +37,7 @@ extra: {}
 ## Acceptance Criteria
 
 - [ ] AC1: **复现固化**——任务体记录 12 泄漏 worktree 清单 + 单调累积（occupied 15 > cap 5）+ inner A6 有 remove 而 outer A15 没有（本任务 Proposal 已含）
-- [ ] AC2: **泄漏清理**——已合分支的泄漏 worktree 全部 remove（安全：分支已合，只删工作副本）
+- [ ] AC2: **泄漏清理**——已合分支的泄漏 worktree 全部 remove（安全：分支已合，只删工作副本）；`slots_free_restored`（空槽恢复）为真
 - [ ] AC3: **A15 fan-in 补 remove**——outer fan-in 序列 merge 后 `git worktree remove`（与 inner A6 对齐）
 - [ ] AC4: **合规产物**——slot-status 报 occupied>cap 且存在已合残留 ⇒ 判不合规；`--for-task` scoped 门绿
 
@@ -57,17 +57,17 @@ extra: {}
 - tasks/gap-slot-free-not-an-event-slots-stay-empty-missed-without-trace.md（交叉标注——本因=worktree 泄漏，事件化其后）
 - tasks/gap-worktree-leak-after-fan-in-occupies-slot-permanently.md（自身：勾 AC + 贴证据）
 
-## Contract
 
+> **manager 2026-08-11 05:0x 验证锚补充**：把 git worktree remove 补进 A15 fan-in 序列后，判据是【每次 fan-in 之后 slots-remaining 不下降】；若某轮 fan-in 后它又开始单调下降，说明补的那一步没生效或有别的路径在漏。**这个判据比数 worktree 个数更直接**——它量的正是我们真正在乎的东西（空槽）。
+
+## Contract
 measure   slots_free_after_cleanup = `node --no-warnings --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --slot-status --cap 5 --json` 的 stdout 中 slots-free 数字
-band      slots_free_after_cleanup > 0（泄漏清理后空槽恢复）
+band      slots_free_restored = (slots_free_after_cleanup > 0)（泄漏清理后空槽恢复——AC2 引用名）
 invariant reconcile_unchanged = 1（--reconcile 只在执行体可观察地消失时关闭——源码已有，不改）
 invariant a15_fanin_removes_worktree = 1（outer fan-in 序列含 worktree remove）
 invoke    `node --no-warnings --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --slot-status --cap 5 --json`（贴 occupied/slots-free）
 control   泄漏清理后空槽恢复；A15 无泄漏累积；reconcile 不变；既有不回归
 resume    泄漏清理 / A15 补 remove / 合规产物 / 测试分步提交，任一步完成即写盘
-
-> **manager 2026-08-11 05:0x 验证锚补充**：把 git worktree remove 补进 A15 fan-in 序列后，判据是【每次 fan-in 之后 slots-remaining 不下降】；若某轮 fan-in 后它又开始单调下降，说明补的那一步没生效或有别的路径在漏。**这个判据比数 worktree 个数更直接**——它量的正是我们真正在乎的东西（空槽）。
 
 ## Dispatch review
 

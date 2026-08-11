@@ -71,7 +71,7 @@ extra: {}
 measure targeted_promote_path = `grep -cE "定向晋级|--targeted|targeted.*promote" plugin/scripts/ready-pool-check.ts plugin/loop/fast-mode-loop-tick.md orchestration/orchestrator-loop-tick.md` stdout 数字段
 band targeted_promote_path = ≥1（修复后存在定向晋级路径；当前=0）
 measure floor_independent = `grep -c "pool < floor" plugin/scripts/ready-pool-check.ts` 是否只约束补充不约束定向（判定：定向晋级不走 pool<floor 门）
-invoke 对某个 todo 任务（阶段目标第 2 位要的）执行定向晋级 → status 变 ready（`quay promote <id>`，不受 pool<floor 门约束）
+invoke `quay promote gap-targeted-promotion-operation-does-not-exist`（对 todo 任务执行定向晋级 → status 变 ready，不受 pool<floor 门约束；实测见 Evidence：`promote_cmd` 输出同形）
 control 负控制：pool ≥ floor 时（当前 24>20，floor 用生产 cap=5 计算），定向晋级仍能发生（不受补充门约束）
 resume 若中断，先跑 measure 确认当前定向晋级路径是否存在，不要假设已修
 ```

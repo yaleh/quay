@@ -62,8 +62,10 @@ extra: {}
 - tasks/gap-dispatch-evaluated-only-at-inner-tick-boundary-not-slot-release.md（AC3 判据改正：触发器存在，醒来第一件事）
 - tasks/gap-slot-free-not-an-event-slots-stay-empty-missed-without-trace.md（自身：勾 AC + 贴证据）
 
-## Contract
 
+> **manager 2026-08-11 04:4x 更正（取代原案优先级）**：空槽问题真根因=槽位账本失真（27 陈旧遥测括号 ⇒ slots-free 0），非节律/非触发器方向；inner 完全按 C6 规矩办事（closedButLive 仍占槽 ⇒ slots-remaining 0 ⇒ 不多派），不是漏派。缺的下一步写在 inner 自己核 A13「stale_brackets > 0 ⇒ 调 --reconcile」，它看见了没执行。**事件化方向仍值得做，但优先级在【A13 --reconcile 步骤被跳过】之后**——后者是直接损失 4 槽×多轮的原因，同为 C17 形状。本任务保留为事件化方向（照 suite-state-trigger），优先级下调；对账问题另立任务。
+
+## Contract
 measure   slot_free_event_fired = `tail -1 .quay/slot-free-events.jsonl` 的 stdout 中是否含 SLOT-FREE
 band      slot_free_event_fired = 构造 in_flight<cap ∧ dd>0 场景后事件在场
 invariant event_to_drive_under_5min = 1（SLOT-FREE 事件 → outer 驱动 inner < 5min）
@@ -71,8 +73,6 @@ invariant inner_wake_reads_a11_a12_a13 = 1（task-notification 唤醒后 A11/A12
 invoke    `tail -3 .quay/slot-free-events.jsonl`（贴 SLOT-FREE 事件 + 时间戳）
 control   空槽发事件；事件即驱动；醒来先读三条必读；漏回填留痕
 resume    trigger / outer 接线 / inner 第一件事 / 既有收口分步提交，任一步完成即写盘
-
-> **manager 2026-08-11 04:4x 更正（取代原案优先级）**：空槽问题真根因=槽位账本失真（27 陈旧遥测括号 ⇒ slots-free 0），非节律/非触发器方向；inner 完全按 C6 规矩办事（closedButLive 仍占槽 ⇒ slots-remaining 0 ⇒ 不多派），不是漏派。缺的下一步写在 inner 自己核 A13「stale_brackets > 0 ⇒ 调 --reconcile」，它看见了没执行。**事件化方向仍值得做，但优先级在【A13 --reconcile 步骤被跳过】之后**——后者是直接损失 4 槽×多轮的原因，同为 C17 形状。本任务保留为事件化方向（照 suite-state-trigger），优先级下调；对账问题另立任务。
 
 ## Dispatch review
 

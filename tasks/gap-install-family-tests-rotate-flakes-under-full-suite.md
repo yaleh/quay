@@ -69,7 +69,7 @@ measure   install_family_red_rounds_after_fix = `grep -c "quay-init.*passed=fals
 band      install_family_red_rounds_after_fix = 0（连续 3 轮 install 家族全绿）
 invariant install_family_solo_green = 1（29 家族各单独跑恒绿）
 invariant install_family_no_silent_skip = 1（每轮 install 家族确实被跑，非 skip 逃过）
-invoke    `node --no-warnings --experimental-strip-types --test <每个 install 家族文件>`（抽 3 个单独跑贴回）
+invoke    `bash scripts/test.sh plugin/test/known-load-sensitive.test.mjs plugin/test/runner-grouping.test.mjs plugin/test/load-sensitive-release-check.test.mjs`（抽 3 个单独跑贴回——Evidence 组契约实跑 35/35 同形）
 control   连续 3 轮 install 家族全绿；单独跑绿；无 skip
 resume    组别隔离 + pack 缓存 + 资源门分步提交，任一步完成即写盘
 

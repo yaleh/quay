@@ -57,8 +57,10 @@ extra: {}
 - plugin/scripts/known-load-sensitive.ts（runner-grouping nested-spawn 标注保持）
 - tasks/gap-suite-floor-two-longest-files-bound.md（自身：勾 AC + 贴证据）
 
-## Contract
 
+> **manager 2026-08-11 05:5x 重排（人要求的全面量化推翻原排序）**：套件耗时影响实测（48h：116 轮=98红/18绿 绿率16%，套件占空 54%，68% 墙钟花在最终变红的轮次，MTBG 中位 2.2h，绿轮出生时已落后 16 提交/陈旧 27min，提交→验证等待中位 3.9h/p90 15h，4% 提交从未验证）。因果链超线性：套件越长⇒累积提交越多⇒快照含缺陷概率越高⇒绿率越低⇒MTBG 越长。反解 p≈4.95%：d=27min⇒MTBG 2.2h/绿率17%/累积35提交；d=20min⇒0.5h/67%/8；d=16min⇒0.4h/75%/6；d=8min⇒0.2h/89%/2。**27→20 分钟时长只降 26%，MTBG 降 77%——系统停在拐点坏侧**。⇒ 三杠杆把验证滞后从 3.9h 压到约 0.5h 是 **9 倍不是 30%**。**本任务（拆 runner-grouping+cap-from-gate）从我原排的第 4 位提到与三条杠杆并列**——跨过拐点的价值是 9 倍，而这两个文件正是跨过之后立刻接管的新地板。16 核+三杠杆已跨拐点，48 核撞最长文件地板、拐点那侧收益早已吃完。**反直觉推论**：68% 产能花在红轮不是浪费，浪费的是它们信息量太低——嫌疑集 35 的红轮与嫌疑集 2 的成本相同（都 27min）但后者直接指认缺陷；缩短套件的真正回报是把每次红轮信息量提高约 17 倍。
+
+## Contract
 measure   runner_grouping_ms = `grep -oE '__PERFILE__ duration_ms=[0-9.]+ [^ ]*runner-grouping' <serial相日志> | tail -1` 的 stdout 中 duration_ms 数字
 band      runner_grouping_ms <= 60000（拆 4 后地板 ≤ 约 51s）
 measure   cap_from_gate_ms = `grep -oE '__PERFILE__ duration_ms=[0-9.]+ [^ ]*cap-from-gate' <main相日志> | tail -1` 的 stdout 中 duration_ms 数字
@@ -67,8 +69,6 @@ invariant assertions_preserved = 1（断言全保留，覆盖不缩水）
 invoke    `grep -oE '__PERFILE__ duration_ms=[0-9.]+ [^ ]*(runner-grouping|cap-from-gate)' <日志>`（贴拆后耗时）
 control   两文件各拆 4 份；地板降 1/4；语义不降；既有不回归
 resume    拆 runner-grouping / 拆 cap-from-gate / 验证分步提交，任一步完成即写盘
-
-> **manager 2026-08-11 05:5x 重排（人要求的全面量化推翻原排序）**：套件耗时影响实测（48h：116 轮=98红/18绿 绿率16%，套件占空 54%，68% 墙钟花在最终变红的轮次，MTBG 中位 2.2h，绿轮出生时已落后 16 提交/陈旧 27min，提交→验证等待中位 3.9h/p90 15h，4% 提交从未验证）。因果链超线性：套件越长⇒累积提交越多⇒快照含缺陷概率越高⇒绿率越低⇒MTBG 越长。反解 p≈4.95%：d=27min⇒MTBG 2.2h/绿率17%/累积35提交；d=20min⇒0.5h/67%/8；d=16min⇒0.4h/75%/6；d=8min⇒0.2h/89%/2。**27→20 分钟时长只降 26%，MTBG 降 77%——系统停在拐点坏侧**。⇒ 三杠杆把验证滞后从 3.9h 压到约 0.5h 是 **9 倍不是 30%**。**本任务（拆 runner-grouping+cap-from-gate）从我原排的第 4 位提到与三条杠杆并列**——跨过拐点的价值是 9 倍，而这两个文件正是跨过之后立刻接管的新地板。16 核+三杠杆已跨拐点，48 核撞最长文件地板、拐点那侧收益早已吃完。**反直觉推论**：68% 产能花在红轮不是浪费，浪费的是它们信息量太低——嫌疑集 35 的红轮与嫌疑集 2 的成本相同（都 27min）但后者直接指认缺陷；缩短套件的真正回报是把每次红轮信息量提高约 17 倍。
 
 ## Dispatch review
 
