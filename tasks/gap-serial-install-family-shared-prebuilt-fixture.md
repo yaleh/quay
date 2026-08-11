@@ -39,8 +39,8 @@ extra: {}
 - [x] AC1: **复现固化**——任务体记录 r266 serial sum=1241s / 真安装族 12 文件各自耗时 + sum=865s / ps 实测各自临时根（本任务 Proposal 已含）
 - [x] AC2: **先测再改**——单个文件加安装 setup 计时（不改行为），量出 setup 占比，贴数据；占比 ≥50% 才动夹具
 - [x] AC3: **共享夹具**——一次真安装 + 每文件 `cp -al`/tar 解包复用，隔离性不降（每测试独立根）
-- [ ] AC4: **serial sum 实测下降**——serial 相 sum 从 1241s 显著下降（目标 ≤636s），墙钟 620→318s 量级
-- [ ] AC5: **既有不回归**——隔离性测试绿；`--for-task` scoped 门绿
+- [ ] AC4: **serial sum 实测下降**——serial 相 sum 从 1241s 显著下降（目标 ≤636s），墙钟 620→318s 量级（单文件实测下降已证；serial sum 受负载污染未达目标，见 Evidence——判定归 outer）
+- [x] AC5: **既有不回归**——隔离性测试绿；`--for-task` scoped 门绿
 
 ## Definition of Done
 
@@ -111,8 +111,29 @@ drift-report 文件 84.1s → 46.7s（含本文件内建夹具 ~10s；serial 相
 
 ### AC4 — serial 相 sum（贴 `__GROUP__`，对比 r266 1241s）
 
-_（inner 实测贴此，判定归 outer）_
+**实测受机器负载污染，不可作为洁净基线**：serial 相实跑期间 load average 8.73（多个 claude 会话 40.8%+28.8%+21.1%
+CPU + 并发 full-suite verification-round），`__GROUP__ concurrency=2 files=22 sum_ms=1867603.9`（≈1868s）。同轮
+`__PERFILE__` 显示**未触碰的文件同幅膨胀**（check-drift 74.6s→186.7s +150%、install-config-driven-e2e
+169.1s→383.8s +127%、tmux-detection 30.5s→39.1s +28%）——证明膨胀是环境负载，不是本任务改动。
+r266 基线（1241s）的测量条件不可复现。
+
+**单文件定向实测（隔离跑、低负载）确证下降**：
+- `quay-init-drift-report.test.mjs`：84.1s → **46.7s**（含本文件内建夹具 ~10s；serial 相共享后更低）；
+  setup 占比 82.6% → 54.1%（AC2 计时）。
+- 7 个受影响文件（core/runtime/driver/runtime-landing/drift-report/quay-init/laydown-closure）concurrency=2
+  同跑：`tests 61 / pass 61 / fail 0`，仅建 1 个夹具。
+- **诚实结论：AC4 的 ≤636s 目标本轮未达**——剩余大头是安装行为测试（install-config-driven-e2e / check-drift /
+  loop-vendor / loop / tmux-detection）验证安装/升级/漂移机制本身，不能用共享夹具替换首装（夹具是单一固定配置的
+  安装树，这些测试需要多变配置的真实安装）；共享夹具的安全作用域是 8 个「首装即纯 setup」的文件。串行 sum 的
+  绝对判定归 outer（需洁净负载下的全量套件测量）。
 
 ### AC5 — 隔离性 + `--for-task` scoped 门
 
-_（inner 实测贴此）_
+- **隔离性**：`test-isolation-check`（scoped static 层）PASS——44 violations 全部 baselined、零新增；
+  夹具在 `/var/tmp` 内容寻址路径、helper 非 `.test.mjs` 不被隔离扫描，R3/R8/R6 不变。
+- **`--for-task` scoped 门**：`./scripts/test.sh --for-task gap-serial-install-family-shared-prebuilt-fixture --allow-thin`
+  → test-isolation-check PASS + tick-core-static-check PASS + known-load-sensitive 22 tests pass 0 fail。
+  （`--allow-thin` 因任务 Touches 含目录级条目 `plugin/test/`/`plugin/scripts/`，selector 只解析出 1/4 测试文件；
+  静态层已全绿。）
+- **受影响文件不回归**：61/61（7 个转换文件）+ 单独验证的 drift-report 6/6、loop-core 12/12、loop-runtime 14/14、
+  loop-driver 15/15。
