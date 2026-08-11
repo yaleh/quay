@@ -1,7 +1,7 @@
 ---
 id: gap-quay-has-never-self-hosted-its-own-cold-start
 title: "quay should be able to start itself with its own shipped quay:cold-start skill, at the same formal-AC rigor as the skill promises other projects"
-status: todo
+status: needs-human
 role: compound
 children:
   - gap-cold-start-skill-has-no-recovery-branch
@@ -125,3 +125,4 @@ resume    依赖顺序按 SPEC 落；capstone 最后
 reviewer: none
 at: 2026-08-04T10:1xZ
 changed: 无（外层建任务，转译人/管理者给出的规格；未经正式闸口审查——`reviewer: none` 是被记录的选择）
+> **needs-human reason（B15 judge wf_59513f29-b3c, 2026-08-11）**: 非 as-is 可完成——2 个 children 仍 todo、capstone child 是 needs-human。先驱动 children（gap-cold-start-skill-has-no-recovery-branch / gap-no-formalized-bare-metal-session-bootstrap）到 done，本 umbrella 才可完成；现在派发浪费 agent 轮。

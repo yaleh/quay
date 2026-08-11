@@ -7,7 +7,7 @@ title: the 40→6 merge (a4b1d9a9) was REVERTED (7642849a) because it introduced
   tests must be updated to match the 40→6 behavior; the 40→6 work stays on
   integration (8d740326, incl. manager-tick-checks 49f8272b); whitelist fix was
   one instance, there are more
-status: todo
+status: needs-human
 labels:
   - gap
   - defect
@@ -282,3 +282,4 @@ plugin/vendor/quay-native/dist/quay-native.js）。git status 干净——所有
 **AC 勾选**：AC1/AC2 保持 [x]（本趟复验通过）；AC3/AC4（integration→develop 重合并 + 复验）与
 AC5（交叉标注）为外层动作/延后，inner 不勾。全量 suite_green=1 归外层 verification-round（clean
 window）验证。
+> **needs-human reason（B15 judge wf_59513f29-b3c, 2026-08-11）**: 4 次重派确认 inner 无活可做——AC3/AC4/AC5 是外层动作（integration→develop 跨分支 merge per SPEC ruling），标准 inner 派发无法执行。必须由外层/人完成 AC3-AC5 后翻 done。
