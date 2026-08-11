@@ -309,6 +309,15 @@ exp5 已退役（`.claude/loop.md` 已删除），`.halt` 从「暂停 exp5 循�
 **被 `<task-notification>` 唤起时（≠ tick 心跳）**，不是空转等下一 tick，而是立即走**槽位回填**路径：
 把刚完成的任务从在飞集合里移除（**它的槽位在完成时刻释放，不在 fan-in 时刻**——遥测括号未闭合不意味着槽位还被占着，AC6：括号≠subagent，`gap-telemetry-brackets-vs-subagents-no-slot-visibility`），然后评估是否立即派发新任务填这个空槽。**不 fan-in、不写任务状态、不重排程**——只做派发重评估；合并与收尾仍归下一 tick / 外层异步。
 
+**醒来第一件事（AC4，`gap-slot-free-not-an-event-slots-stay-empty-missed-without-trace`——把 13:1x 那次「三条必读零读数、先 fan-in 后回填」的次序纠正过来）**：被 `<task-notification>` 唤起后，**先跑 A11/A12/A13 三条必读 + 回填，再 fan-in/写报告**——顺序是硬约束，不是建议：
+1. **A11 就绪池维护**：`node --experimental-strip-types plugin/scripts/ready-pool-check.ts --cap "${effective_cap:-3}" --apply`（`deficit > 0` ⇒ 补晋；自闸：pool<floor 且 promotions 非空才落盘）
+2. **A12 回填评估**：下面的「槽位回填的机械判定」——`slot-refill.ts --in-flight <本会话在飞集合>` 的 `should_refill=true` 且 `recommended` 非空 ⇒ 立即按步骤 4 派发 1-2 条
+3. **A13 slots 遥测**：`fast-mode-telemetry.ts --slots --cap "${effective_cap:-3}"` 读 `real_in_flight` / `slots_free` / `stale_brackets`（`stale_brackets > 0` ⇒ 调 `--reconcile`——inner 核 A13 的强制步，见 `orchestration/fast-mode-tick-core.md`）
+
+**做完这三条必读 + 回填，才轮到 fan-in / 写报告 / 重排程。** 触发器早就存在（完成通知 = harness 原生事件）；
+缺的不是触发器，是【醒来后的第一件事】——本条的产物是：唤醒回合的报告必须带 A11/A12/A13 三条读数 + 回填结果，
+缺一条即本轮报告不完整（C17：守与不守在记录上可区分）。
+
 **先看是什么唤起了本回合**：transcript 里出现 `<task-notification>`（后台 agent 完成）⇒ 走本节的槽位回填（**加速触发源**）；
 否则（/loop 心跳、重锚、人工）⇒ 按「Tick 步骤」全流程，**且步骤 4 无条件先跑 slot-refill**（**兜底必跑触发源**，`gap-slot-refill-only-triggered-on-completion-not-tick-heartbeat`——长任务霸占期间空槽对机制不可见，心跳必须每 tick 问一次）。两者都跑步骤 3 停止条件 + 步骤 4 派发闸——完成事件/心跳只是「何时评估派发」的两个触发源，不是另一套更宽松的闸。
 
