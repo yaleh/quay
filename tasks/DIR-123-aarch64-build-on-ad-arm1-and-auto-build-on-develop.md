@@ -35,7 +35,7 @@ extra: {}
 - [x] AC2: **develop merge 后自动 deliver**——每次 merge 到 develop 后，`integration-batch-merge.sh` 的 `do_deliver` 钩子自动跑 `develop-deliver-tgz.sh`：worktree@develop-tip 建 .tgz → scp B/C → 安装 + 验证 → 写 state；best-effort 不阻塞 merge
 - [x] AC3: **x86_64 走 CI**——B=orangevps 的 x86_64 产物由现有 release.yml CI 路径覆盖（linux-x64 已存在）
 - [x] AC4: **delivery-manifest 更新**——`delivery-manifest.json` version 0.3.13→0.4.0（对齐 packages/quay/package.json；**不加** linux-arm64 到 sea-binaries——无 SEA 资产，声明了会令 --ci fail-closed；aarch64 由 npm-tarball 覆盖，该条目本就无平台限制）
-- [x] AC5: **AC16③ 复测可用（Level3 真实生命周期，非仅 serve）**——C 上安装产物后跑通**真实 todo→done 全生命周期**：`quay init` 铺工作区 + `task create`（todo）+ `promote`（todo→ready, author gate `dod pass`）+ `complete`（ready→done, acceptance gate `acceptance pass`），gate-log 四事件全 pass，最终 `TEST-002 status=done`（真 aarch64, quay 0.4.0, Node v24.19.0）。**Level1（serve http_code=200）为前置子项，Level3（一个任务从 todo 到落地）才是 AC16③ 字面判据——本 AC 以 Level3 为准**（manager 2026-08-11 14:2x 指正 + outer 补做，见 Evidence）
+- [x] AC5: **AC16③ 复测——Level2（CLI 状态机验证）已达成，两层循环验证仍未做**（manager 2026-08-11 14:2x + 15:0x 两次指正，第三次纠正弱证明）：C 上安装产物后跑通 **CLI 状态机 todo→done**：`quay init` 铺工作区 + `task create`（todo）+ `promote`（todo→ready, author gate `dod pass`）+ `complete`（ready→done, acceptance gate `acceptance pass`），gate-log 四事件全 pass，`TEST-002 status=done`（真 aarch64, quay 0.4.0, Node v24.19.0）——**这证明 quay 任务引擎/gate 机制在 aarch64 上工作正常（Level2），不是 AC16③ 原文「跑通一次真实的两层循环」的字面要求**。**两层循环 = outer/inner 这类 Claude Code agent 会话真的在那台机器上驱动开发（接真实任务→写代码→跑测试→落地），不是 CLI 状态机被脚本拨转一圈——此事至今未发生过一次**。Level1（serve http_code=200）+ Level2（CLI 状态机）已达成；Level3（真实两层循环）未达成，见 Finding
 
 ## Definition of Done
 
@@ -91,7 +91,7 @@ $ ssh ad-arm1 'export PATH="$HOME/.local/opt/node-current/bin:$PATH"; quay --ver
 0.4.0
 aarch64
 
-# Level3 — 真实 todo→done 全生命周期（AC16③ 字面判据；manager 2026-08-11 14:2x 指正后补做）
+# Level2 — CLI 状态机 todo→done（任务引擎/gate 机制在 aarch64 上工作正常；AC16③ 字面判据「真实两层循环」仍未做）
 $ ssh ad-arm1 'export PATH="$HOME/.local/opt/node-current/bin:$PATH"; cd ~/quay-ac16c3-ws && quay init && quay task create TEST-002 --title "AC16c3 real round-trip" --body "<contract-shape 六键>" --extra '"'"'{"acceptance":"true"}'"'"' && quay promote TEST-002 && quay complete TEST-002'
 TEST-002: AC16c3 real round-trip on aarch64 [todo]     # create → todo
 PROMOTE todo → ready                                    # author gate: dod pass
@@ -105,7 +105,15 @@ $ quay gate-log TEST-002
 2026-08-11T14:30:03.108Z acceptance pass
 2026-08-11T14:30:03.121Z complete pass
 ```
-**注**：Level3 途中撞出安装副本 `quay init` mcp_entry 指向 raw `.ts` 的缺陷（`ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`，Node ≥23.7 禁 node_modules 下 type-stripping）——已另立案 `gap-init-scaffolds-mcp-entry-to-raw-ts-fails-on-installed-copy.md`（delivery-critical），本任务 Level3 用 dist-bundle 形态（`mcp_entry: ["node","./dist/quay-native.js","mcp"]`）完成。
+**注**：Level2 途中撞出安装副本 `quay init` mcp_entry 指向 raw `.ts` 的缺陷（`ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`，Node ≥23.7 禁 node_modules 下 type-stripping）——已另立案 `gap-init-scaffolds-mcp-entry-to-raw-ts-fails-on-installed-copy.md`（delivery-critical），本任务 Level2 用 dist-bundle 形态（`mcp_entry: ["node","./dist/quay-native.js","mcp"]`）完成。
+
+### Finding：真实两层循环（AC16③ 字面判据）仍未验证——CLI 状态机 ≠ 两层循环（manager 15:0x 第三次纠正）
+
+**manager 指正（逐字意图）**：AC5 措辞「Level3 真实生命周期」仍不准确。实际做的是 outer 经 ssh 在 C 上直接跑 `quay init && task create && promote && complete` **CLI 命令链**，让任务状态机走完 todo→done 并触发四个 gate——这证明 **quay 任务引擎/gate 机制在 aarch64 上工作正常（Level2）**，不是 AC16③ 原文「跑通一次真实的两层循环」字面要求的东西。**「两层循环」指 outer/inner 这类 Claude Code agent 会话真的在那台机器上驱动开发**（接真实任务→写代码→跑测试→落地），不是 CLI 状态机被脚本拨转一圈。**此事至今未发生过一次。**
+
+**达成字面判据的路径（DIR-128 已备齐前一半）**：在 B/C 上真的起一个 Claude Code 会话（用 DIR-128 刚定的 `claude-deepseek` + `deepseek-v4-flash` + 同样命令行），让它接一个真实任务、写代码、跑测试、落地。DIR-128 已核实命令行 + env 六项 + B/C 密钥文件在位；剩余前置（`claude-deepseek` wrapper / jq / checkout 在 B/C 可用性）未核实。
+
+**处置（判定归 outer，当前决策）**：AC5 措辞改为准确反映「Level2（CLI 状态机验证）已达成，两层循环验证仍未做」；真实两层循环验证是否/何时补做由 outer 决定——当前不占用 DIR-123 的 deliver 机制收尾（该机制已验证），列为独立后续（可在 DIR-128 前置核实后一并推进）。
 
 **静态**：`delivery-manifest-check.ts --json` → `{"ok": true, "manifestVersion": "0.4.0", "issues": []}`。
 
