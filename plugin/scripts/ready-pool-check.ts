@@ -9,10 +9,13 @@
 //
 // WHAT IT DOES (a DETECTOR/RECOMMENDER, not a gate — always exits 0, never writes tasks/**):
 //   1. Compute the REAL ready pool = `status: ready` tasks MINUS the three non-dispatchable classes:
-//        (a) not-yet-flipped — the declared work has LANDED on master (task-status-drift-check's
-//            symbol-resolution / touch-file evidence) but status is still `ready` (this batch's work
-//            is done, waiting fan-in to flip to `done`); mechanically: taskWorkLanded(body) — does
-//            NOT depend on AC checkbox state (the fan-in merges without ticking ACs)
+//        (a) not-yet-flipped — the declared work has LANDED but status is still `ready` (this batch's
+//            work is done, waiting fan-in to flip to `done`); mechanically: taskWorkLanded(body) OR a
+//            COMMIT-TRACE record (`inner: <id>` / `fan-in: task/<id>` / `fan-in <id>` commit subjects,
+//            read from `git log --all` — PERSISTENT across branch deletion and visible on the two-line
+//            model's integration where a stale `master` sees nothing; gap-nyf-branch-existence-vs-
+//            commit-trace) — does NOT depend on AC checkbox state (the fan-in merges without ticking
+//            ACs)
 //        (b) fixture         — `labels: fixture` (gate demo fixtures, never real work)
 //        (c) PARKED          — a body `**PARKED` marker (task-level suspension; plain-text mentions
 //            of the WORD "PARKED" in AC prose are NOT markers)
@@ -156,7 +159,7 @@ import { isDirectEntry } from "./gate-script-base.ts";
 // buildGitHistoryIndex is the BATCHED git-history source (gap-ready-pool-check-times-out-after-
 // git-history-signal): ONE `git log` over all of master, matched in memory per task, instead of
 // ~30-50 per-task `git log -- <paths>` calls (each O(history) — the >150s pool-check timeout).
-import { taskWorkLanded, buildGitHistoryIndex, countAcCheckboxes } from "./task-status-drift-check.ts";
+import { taskWorkLanded, buildGitHistoryIndex, countAcCheckboxes, wordMatch } from "./task-status-drift-check.ts";
 // RETIRED-MECHANISM INTERCEPT (gap-ready-pool-promotion-ignores-retired-mechanism-candidate-check):
 // promotion must NOT advance a candidate that references an ADR-022-deleted classic-pipeline script
 // (prepare-milestone.js / execute-milestone.js / milestone-worktree.ts) without annotation — a todo
@@ -421,10 +424,61 @@ export function kindOrder(kind) {
   return kind === "gap" ? 0 : kind === "dir" ? 1 : 2;
 }
 
+// ── COMMIT-TRACE work-landed signal (tasks/gap-nyf-branch-existence-vs-commit-trace) ──────────────
+// The not-yet-flipped criterion's existing workLanded signals depend on TRANSIENT or narrow artifacts:
+// the task/<id> branch existing+unmerged (a branch merged+DELETED makes that signal vanish), and the
+// git-history signal hardcoded to `master` (STALE under the two-line branch model — master..integration
+// = 2224 on 2026-08-11, so integration-landed commits are invisible to it). Both hide "work already
+// landed, still ready" tasks — the 16 phantom ready tasks (2026-08-11), each verified via
+// `git log --all | grep -E "inner: <id>|fan-in: task/<id>"`. The COMMIT-TRACE signal is PERSISTENT:
+// commit SUBJECTS survive branch deletion, and reading `--all` covers the two-line model's integration
+// fan-in that a stale `master` misses. A commit whose subject names the task in one of the live commit
+// conventions —
+//   `inner: <id> …`                 (the inner executor's implementation commit)
+//   `fan-in: task/<id> …` / `merge: fan-in task/<id> …` / `merge: fan-in <id> …`
+//                                  (the outer's fan-in merge of the task branch)
+// — is a durable record that the task was DISPATCHED and its work committed ⇒ it is "work landed, not
+// yet flipped" (waiting fan-in or already merged), NEVER fresh dispatchable work.
+
+/** ONE `git log --all` pass for commit SUBJECTS (the commit-trace signal needs no path data — subjects
+ *  alone carry the inner:/fan-in: convention). `--all` covers integration + develop + master + any live
+ *  task branch, so a task whose work landed on integration (invisible to a stale `master`) is still
+ *  caught. Fail-closed: any git failure / non-git root ⇒ empty array (never a positive from an
+ *  unavailable source). Called ONCE per analyzeTasks (the pool scan), never per task. */
+export function buildCommitTraceIndex(repoRoot) {
+  try {
+    const out = execFileSync("git", ["log", "--all", "--format=%s"], {
+      cwd: repoRoot, encoding: "utf8", timeout: 15_000, maxBuffer: 64 * 1024 * 1024,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    return out.split("\n").filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+/** True when a commit subject records the task's work in one of the live commit conventions.
+ *  Position-based (CLAUDE.md hard rule 2): the task id must appear as a DELIMITED word after the
+ *  `inner: ` / `fan-in: task/` / `fan-in ` prefix — a subject that merely mentions the id elsewhere
+ *  (e.g. an `outer:` closure commit listing many ids) is NOT a trace. The four forms cover the
+ *  observed real formats: `inner: <id>`, `fan-in: task/<id>`, `merge: fan-in task/<id>`, and the bare
+ *  `merge: fan-in <id>` (no `task/` prefix, e.g. gap-manager-tick-core-exclusion-now-inert-after-c9-fix). */
+export function commitSubjectTracesTask(subject, taskId) {
+  return wordMatch(subject, `inner: ${taskId}`)
+    || wordMatch(subject, `fan-in: task/${taskId}`)
+    || wordMatch(subject, `fan-in task/${taskId}`)
+    || wordMatch(subject, `fan-in ${taskId}`);
+}
+
+/** Batched commit-trace check: true when ANY subject in the analyzeTasks-built index traces the task. */
+export function commitTraceLanded(taskId, subjects) {
+  return subjects.some((s) => commitSubjectTracesTask(s, taskId));
+}
+
 /** True when the task is in the "this batch done, not yet flipped to done" state — the declared
- *  work has landed on master (task-status-drift-check's symbol-resolution / touch-file / git-history
- *  evidence) but `status` is still `ready` (fan-in has not flipped it). The signal is a UNION of two
- *  INDEPENDENT closure indicators:
+ *  work has landed (task-status-drift-check's symbol-resolution / touch-file / git-history evidence,
+ *  OR the COMMIT-TRACE record below) but `status` is still `ready` (fan-in has not flipped it). The
+ *  signal is a UNION of three INDEPENDENT closure indicators:
  *   (1) taskWorkLanded — work-landed evidence (symbol-resolution / touch-file / git-history) that
  *       catches the "merged-but-AC-incomplete" half (the inner's fan-in merges WITHOUT ticking AC
  *       boxes; gap-ready-pool-check-counts-merged-not-flipped-tasks-in-the-pool). By itself it means
@@ -434,21 +488,37 @@ export function kindOrder(kind) {
  *       e.g. gap-session-liveness 4/8) has REAL remaining implementation — STUCK-WORK — and must
  *       stay dispatchable (gap-ready-pool-worklanded-traps-stuck-work AC2), not be trapped out of
  *       both dispatch AND done-flip.
- *   (2) AC-complete — `all_acs_checked && status == ready` (countAcCheckboxes, total > 0): the
+ *   (2) COMMIT-TRACE (tasks/gap-nyf-branch-existence-vs-commit-trace) — a commit whose SUBJECT names
+ *       the task in the `inner: <id>` / `fan-in: task/<id>` / `fan-in <id>` conventions. PERSISTENT:
+ *       commit subjects survive branch deletion (the old branch-existence signal vanished when the
+ *       merged branch was deleted), and it reads `--all` (the two-line model's INTEGRATION fan-in
+ *       invisible to the stale-master git-history signal). Joins workLanded under the SAME
+ *       AC-completeness gate — the manager's "别改它" on
+ *       gap-ready-pool-worklanded-traps-stuck-work: a traced task whose ACs are far from complete is
+ *       STUCK-WORK with real remaining implementation and stays dispatchable.
+ *   (3) AC-complete — `all_acs_checked && status == ready` (countAcCheckboxes, total > 0): the
  *       COMPLETION state as written by the checkboxes, independent of AC writing style
  *       (gap-closure-detection-reads-symbols-not-checkboxes). A prose-AC completed task whose work
  *       landed but shows no resolvable symbols / `(new)` touches / git-history reference is invisible
  *       to (1) yet IS a closure candidate — this second signal surfaces it. Complements, never
  *       replaces, taskWorkLanded (the union, not an either/or).
- *  A task is excluded from the dispatchable pool when EITHER fires (a legal done-flip candidate).
- *  `taskId` is passed through so the git-history signal
+ *  A task is excluded from the dispatchable pool when ANY of the three fires (a legal done-flip
+ *  candidate). `taskId` is passed through so the git-history signal
  *  (gap-ready-pool-taskworklanded-underdetects-prose-ac-merged-tasks) can anchor on the task's own
- *  id without depending on the self-touch Touches entry. */
-export function notYetFlipped(task, repoRoot, gitIndex) {
+ *  id without depending on the self-touch Touches entry. `commitTraceSubjects` is the analyzeTasks-built
+ *  commit-subject index (ONE `git log --all` per pool scan); null/empty ⇒ the commit-trace signal is off. */
+export function notYetFlipped(task, repoRoot, gitIndex, commitTraceSubjects = null) {
   if (task.status !== "ready") return false;
   const opts = { taskId: task.id };
   if (gitIndex) opts.gitIndex = gitIndex; // batched git-history index (see buildGitHistoryIndex)
   const workLanded = taskWorkLanded(task.body, repoRoot, opts);
+  // COMMIT-TRACE (gap-nyf-branch-existence-vs-commit-trace): a commit whose subject names the task in
+  // the inner:/fan-in: conventions is a PERSISTENT work-landed record — it survives branch deletion AND
+  // reads `--all` (the two-line model's integration fan-in invisible to the stale-master git-history
+  // signal). It joins workLanded under the SAME AC-completeness gate below (the manager's "别改它" on
+  // gap-ready-pool-worklanded-traps-stuck-work): a traced task whose ACs are far from complete is
+  // STUCK-WORK with real remaining implementation and stays dispatchable.
+  const traced = commitTraceSubjects ? commitTraceLanded(task.id, commitTraceSubjects) : false;
   const ac = extractSection(task.body, "Acceptance Criteria");
   const { total, checked } = countAcCheckboxes(ac);
   const allAcsChecked = total > 0 && checked === total;
@@ -458,7 +528,7 @@ export function notYetFlipped(task, repoRoot, gitIndex) {
   // waiting to flip. Only all-checked or >50% (the verification-window done-flip shape) counts.
   // Threshold is STRICTLY > 0.5 so a task at exactly 50% (gap-session-liveness 4/8) returns to the
   // dispatchable pool (gap-ready-pool-worklanded-traps-stuck-work verification anchor (a)).
-  const doneFlipReady = workLanded && (allAcsChecked || acRatio > 0.5);
+  const doneFlipReady = (workLanded || traced) && (allAcsChecked || acRatio > 0.5);
   return doneFlipReady || allAcsChecked;
 }
 
@@ -911,6 +981,11 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
   // ~30-50 per-task `git log -- <paths>` calls (each O(history) — the >150s pool-check timeout).
   const readyCount = [...allTasks.values()].filter((t) => t.status === "ready").length;
   const gitIndex = readyCount > 0 ? buildGitHistoryIndex(root) : null;
+  // COMMIT-TRACE (gap-nyf-branch-existence-vs-commit-trace): ONE `git log --all` subject pass for the
+  // whole pool scan (like buildGitHistoryIndex's batched index — never per-task git calls). Reads
+  // `--all` so the two-line model's INTEGRATION fan-in is visible where the stale-master git-history
+  // index sees nothing (master..integration=2224 on 2026-08-11).
+  const commitTraceSubjects = readyCount > 0 ? buildCommitTraceIndex(root) : [];
   const ready = [];
   const excluded = [];
   for (const [id, t] of allTasks) {
@@ -919,7 +994,7 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
     if (isFixture(t)) reasons.push("fixture");
     if (isParked(t)) reasons.push("parked");
     if (isAcRecord(t)) reasons.push("ac-record");
-    if (notYetFlipped(t, root, gitIndex)) reasons.push("not-yet-flipped");
+    if (notYetFlipped(t, root, gitIndex, commitTraceSubjects)) reasons.push("not-yet-flipped");
     if (reasons.length > 0) excluded.push({ id, reasons });
     else ready.push(id);
   }
