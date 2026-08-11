@@ -53,6 +53,7 @@ import {
   consecutiveRedRounds,
   collectFailureFiles,
   isRedRound,
+  isExperimentRound,
   readJsonLines,
   readVerificationRounds,
   readStateFailures,
@@ -1889,6 +1890,71 @@ test("computeSuiteBlocking: round-record failures attribute cross-round + bare-b
   const r3 = computeSuiteBlocking({ rounds: crossRound, stateFailures: [], tasks, expand });
   assert.equal(r3.consecutiveRed, 3);
   assert.ok(r3.ids.has("gap-script"), "an old round's recorded failure attributes across the red window (round-record reverse-lookup)");
+});
+
+test("computeSuiteBlocking: controlled-experiment round (laneCount ≠ default) excluded from consecutive-red (AC2/AC3 — gap-suite-blocking-experiment-rounds-count-toward-consecutive-red)", () => {
+  // r268 was a one-off CONTROLLED EXPERIMENT (lane-8 comparison, --lane-count 8 vs the nproc-derived
+  // default 4): its red is an experiment finding, not a regression — it must not push the consecutive-
+  // red window. Mechanically identifiable: laneCount ≠ defaultLane. The `defaultLane` fixture default
+  // (4) is hermetic — host-nproc independent; the experiment lane 8 is the r268 shape.
+  const defaultLane = 4;
+  const expLane = 8;
+  const tasks = new Map([
+    ["gap-wd", { status: "ready", body: "## Touches\n- code/wd.ts" }],
+  ]);
+  const expand = (globs) => new Set(globs);
+
+  // isExperimentRound predicate: only an EXPLICIT non-default laneCount marks an experiment round.
+  assert.equal(isExperimentRound({ state: "red", laneCount: expLane }, defaultLane), true, "laneCount ≠ default ⇒ experiment round");
+  assert.equal(isExperimentRound({ state: "red", laneCount: defaultLane }, defaultLane), false, "laneCount === default ⇒ real round");
+  assert.equal(isExperimentRound({ state: "red" }, defaultLane), false, "no laneCount (legacy row) ⇒ NOT an experiment round — keeps counting");
+
+  // AC2: [experiment red, real red, real red] ⇒ consecutive_red = 2 (the experiment round does not
+  // count) and the window (min 3) does NOT activate — the r268 lane-8 probe no longer pushes it to
+  // activation (the r268+r269+r270 ⇒ 3-window self-lock case becomes r269+r270 ⇒ 2).
+  const mixed = computeSuiteBlocking({
+    rounds: [
+      { round: 268, state: "red", reason: "failed", laneCount: expLane, failures: [{ file: "code/exp.ts" }] },
+      { round: 269, state: "red", reason: "failed", laneCount: defaultLane, failures: [{ file: "code/wd.ts" }] },
+      { round: 270, state: "red", reason: "failed", laneCount: defaultLane, failures: [{ file: "code/wd.ts" }] },
+    ],
+    stateFailures: [],
+    tasks,
+    expand,
+    minRedWindow: 3,
+    defaultLane,
+  });
+  assert.equal(mixed.consecutiveRed, 2, "[exp, real, real] ⇒ consecutive_red = 2 (experiment round excluded from the count)");
+  assert.equal(mixed.windowActive, false, "2 < min 3 ⇒ window NOT active (the r268 case: self-lock released)");
+
+  // AC3 negative-control shape: [real ×3] (all default lane) still counts 3 and activates the window.
+  const real3 = computeSuiteBlocking({
+    rounds: Array.from({ length: 3 }, (_, i) => ({ round: 271 + i, state: "red", reason: "failed", laneCount: defaultLane, failures: [{ file: "code/wd.ts" }] })),
+    stateFailures: [],
+    tasks,
+    expand,
+    minRedWindow: 3,
+    defaultLane,
+  });
+  assert.equal(real3.consecutiveRed, 3, "[real ×3] ⇒ 3 (default-lane real reds still accumulate)");
+  assert.equal(real3.windowActive, true);
+  assert.ok(real3.ids.has("gap-wd"), "a real-red window still attributes the failure to the Touches-hitting task");
+
+  // "skip" semantics pinned: an experiment round in the MIDDLE of real reds is transparent — it
+  // neither counts nor breaks the window (the same rounds with a genuine green would reset to 0).
+  const middle = computeSuiteBlocking({
+    rounds: [
+      { round: 275, state: "red", reason: "failed", laneCount: defaultLane, failures: [{ file: "code/wd.ts" }] },
+      { round: 276, state: "red", reason: "failed", laneCount: expLane, failures: [{ file: "code/exp.ts" }] },
+      { round: 277, state: "red", reason: "failed", laneCount: defaultLane, failures: [{ file: "code/wd.ts" }] },
+    ],
+    stateFailures: [],
+    tasks,
+    expand,
+    minRedWindow: 3,
+    defaultLane,
+  });
+  assert.equal(middle.consecutiveRed, 2, "experiment round in the middle is transparent (neither counts nor breaks)");
 });
 
 test("computeRelevance: suite-blocking flips blocking true + boosts value (AC2/AC3 unit)", () => {
