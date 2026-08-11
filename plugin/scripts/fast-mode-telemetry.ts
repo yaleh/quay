@@ -234,6 +234,109 @@ export function worktreeExists(root, taskId) {
 }
 
 /**
+ * Enumerate ALL open worktrees (`git worktree list --porcelain`): `[{ path, branch }]`. `branch` is
+ * the `refs/heads/...` ref or null for a detached-HEAD worktree. Any git failure → [] (fail-soft:
+ * an unreadable worktree list must not fabricate leaks).
+ * @param {string} root
+ * @returns {Array<{path:string, branch:string|null}>}
+ */
+export function listWorktrees(root) {
+  try {
+    const out = execFileSync("git", ["-C", root, "worktree", "list", "--porcelain"], {
+      encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"],
+    });
+    const worktrees = [];
+    let cur = null;
+    for (const line of out.split("\n")) {
+      if (line.startsWith("worktree ")) {
+        cur = { path: line.slice("worktree ".length), branch: null };
+        worktrees.push(cur);
+      } else if (line.startsWith("branch ") && cur) {
+        cur.branch = line.slice("branch ".length);
+      }
+    }
+    return worktrees;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The taskId carried by a `task/<id>` branch (accepts both `task/<id>` and the full
+ * `refs/heads/task/<id>` ref form). Returns null for any other branch — a non-task worktree
+ * (integration / feat / milestone / detached) is never a task-worktree leak.
+ * @param {string|null|undefined} branch
+ * @returns {string|null}
+ */
+export function taskIdFromBranch(branch) {
+  const m = /^(?:refs\/heads\/)?task\/(.+)$/.exec(branch ?? "");
+  return m ? m[1] : null;
+}
+
+/**
+ * Whether a worktree path follows the fast-mode task-worktree convention:
+ * `<parent-of-main>/quay-worktrees/<task-id>` (CLAUDE.md 正本 inner-brief:104). The MAIN checkout
+ * itself (path === root) and any test fixture outside `quay-worktrees/` (e.g. /tmp) are NOT task
+ * worktrees — they never occupy a fast-mode concurrency slot.
+ * @param {string} worktreePath
+ * @param {string} root — the workspace root (main checkout)
+ * @returns {boolean}
+ */
+export function isQuayWorktreePath(worktreePath, root) {
+  if (!worktreePath || !root) return false;
+  const mainRoot = path.resolve(root);
+  const wt = path.resolve(worktreePath);
+  if (wt === mainRoot) return false;
+  const quayWorktreesDir = path.join(path.dirname(mainRoot), "quay-worktrees");
+  return wt.startsWith(quayWorktreesDir + path.sep);
+}
+
+/**
+ * Detect worktree LEAKS: open quay-worktree whose `task/<id>` branch is already MERGED into the
+ * merge target — the work landed via fan-in but the worktree was never removed
+ * (gap-worktree-leak-after-fan-in-occupies-slot-permanently). Each such leak permanently occupies a
+ * concurrency slot: `worktreeExists`/`worktree-present` reads it as an alive executor, so occupied
+ * climbs monotonically until the worktree is removed.
+ *
+ * PURE: all observable facts arrive via injected arguments (`worktrees` listing + `isMerged`
+ * verdict), so tests inject deterministic facts without faking git; the production wiring
+ * (`listWorktrees` + `isBranchMerged`) is injected at the CLI boundary.
+ *
+ * A worktree is a merged-leak when ALL of:
+ *   1. its path follows the quay-worktrees convention (`isQuayWorktree`, NOT the main checkout);
+ *   2. it checks out a `task/<taskId>` branch;
+ *   3. that branch is merged into the merge target (`isMerged(taskId) === true`).
+ *
+ * Caveat (bounded, documented): a worktree freshly forked from a base commit that a LATER fan-in
+ * carried into the target is indistinguishable from a merged-leak by refs alone — its branch tip IS
+ * an ancestor of the target. This only affects the compliance REPORT (never an auto-remove; a
+ * spurious entry lists a taskId+path for inspection), and only while the fresh worktree sits at the
+ * bare fork base before its first commit — once the task commits, the branch tip leaves the
+ * target's history and the entry clears.
+ * @param {Array<{path:string, branch:string|null}>} worktrees — from listWorktrees (inject in tests)
+ * @param {object} [opts]
+ * @param {(taskId:string) => boolean} [opts.isMerged] — merged-into-target verdict per taskId.
+ *   Default: no probe ⇒ no leak flagged (fail-closed toward "nothing is a leak" without evidence).
+ * @param {(path:string) => boolean} [opts.isQuayWorktree] — path-convention filter. Default:
+ *   `isQuayWorktreePath(path, root)` when `root` is provided, else every path passes.
+ * @returns {Array<{taskId:string, path:string, branch:string}>} — sorted by taskId.
+ */
+export function detectWorktreeLeaks(worktrees, { isMerged, isQuayWorktree } = {}) {
+  const leaks = [];
+  for (const wt of worktrees ?? []) {
+    if (!wt || !wt.path || !wt.branch) continue;
+    const taskId = taskIdFromBranch(wt.branch);
+    if (!taskId) continue;
+    if (isQuayWorktree && !isQuayWorktree(wt.path)) continue;
+    if (isMerged && isMerged(taskId)) {
+      leaks.push({ taskId, path: wt.path, branch: wt.branch });
+    }
+  }
+  leaks.sort((a, b) => a.taskId.localeCompare(b.taskId));
+  return leaks;
+}
+
+/**
  * The task's earliest KNOWN WORK commit (ms epoch) — the reference a `--task-start` must PREDATE to
  * be trustworthy (AC7). A start whose startedAtMs is LATER than this is a backfilled/distorted
  * record: the work was already known to have begun/landed, so the start was written after the fact
@@ -1050,13 +1153,19 @@ export const SLOT_STATUS_CAP_DEFAULT = 3;
  *   Default 0. These are NOT brackets and are counted on top of real_in_flight: real concurrency =
  *   real_in_flight + subagents_in_flight, and they occupy slots (slots_free must never offer a slot
  *   an actually-busy investigation subagent holds).
+ * @param {Array<{taskId:string, path:string, branch:string}>} [opts.worktreeLeaks] — merged-task
+ *   worktrees still present (gap-worktree-leak-after-fan-in-occupies-slot-permanently). Default [].
+ *   A leak is a worktree whose task branch has already been merged (the work landed) but the
+ *   worktree was never removed — it permanently occupies a concurrency slot. The COMPLIANCE verdict
+ *   (`worktree_leak_compliant`) fails exactly when `occupied_slots > cap` AND leaks exist (AC4).
  * @returns {{cap:number, in_progress_total:number, stale_brackets:number, real_in_flight:number,
  *   subagents_in_flight:number, real_concurrency:number, closed_but_live_agents:Array<object>,
+ *   worktree_leaks:Array<object>, worktree_leaks_count:number, worktree_leak_compliant:boolean,
  *   occupied_slots:number, slots_free:number, slot_state:"free"|"full",
  *   brackets_reflect_subagents:boolean, closed_brackets_reflect_processes:boolean,
  *   closed:Array<object>, kept:Array<object>}}
  */
-export function analyzeSlotStatus(inProgress, { cap = SLOT_STATUS_CAP_DEFAULT, executorGone, completed = [], executorPresent, firstKnownCommitMs = null, subagentsInFlight = 0 } = {}) {
+export function analyzeSlotStatus(inProgress, { cap = SLOT_STATUS_CAP_DEFAULT, executorGone, completed = [], executorPresent, firstKnownCommitMs = null, subagentsInFlight = 0, worktreeLeaks = [] } = {}) {
   const { closed, kept } = reconcileInFlight(inProgress ?? [], { executorGone, firstKnownCommitMs });
   const realInFlight = kept.length;
   const closedButLive = detectClosedButLive(completed, { executorPresent });
@@ -1064,6 +1173,8 @@ export function analyzeSlotStatus(inProgress, { cap = SLOT_STATUS_CAP_DEFAULT, e
   const realConcurrency = realInFlight + nonTaskSubagents;
   const occupiedSlots = realConcurrency + closedButLive.length;
   const slotsFree = Math.max(0, cap - occupiedSlots);
+  const leaks = Array.isArray(worktreeLeaks) ? worktreeLeaks : [];
+  const worktreeLeakCompliant = !(occupiedSlots > cap && leaks.length > 0);
   return {
     cap,
     in_progress_total: (inProgress ?? []).length,
@@ -1072,6 +1183,9 @@ export function analyzeSlotStatus(inProgress, { cap = SLOT_STATUS_CAP_DEFAULT, e
     subagents_in_flight: nonTaskSubagents,
     real_concurrency: realConcurrency,
     closed_but_live_agents: closedButLive,
+    worktree_leaks: leaks,
+    worktree_leaks_count: leaks.length,
+    worktree_leak_compliant: worktreeLeakCompliant,
     occupied_slots: occupiedSlots,
     slots_free: slotsFree,
     slot_state: slotsFree > 0 ? "free" : "full",
@@ -1099,6 +1213,11 @@ function printHumanSlotStatus(slot) {
   }
   console.log(`  occupied slots (real concurrency + closed-but-live): ${slot.occupied_slots}`);
   console.log(`  slots free: ${slot.slots_free} (slot_state ${slot.slot_state})`);
+  console.log(`  worktree leaks (branch merged, worktree still present): ${slot.worktree_leaks_count}`);
+  for (const l of slot.worktree_leaks) {
+    console.log(`    ${l.taskId} (${l.path})`);
+  }
+  console.log(`  worktree-leak compliance (occupied>cap AND leaks ⇒ NON-COMPLIANT): ${slot.worktree_leak_compliant ? "COMPLIANT" : "NON-COMPLIANT"}`);
   console.log(`  brackets reflect subagents: ${slot.brackets_reflect_subagents ? "YES" : "NO (stale brackets or missing --task-end)"}`);
   if (slot.closed_but_live_agents.length > 0) {
     console.log(`  closed brackets reflect processes: NO — ${slot.closed_but_live_agents.length} closed-bracket agent(s) still present (bracket-close ≠ agent-exit); their slots are NOT free`);
@@ -1448,6 +1567,14 @@ export async function main(argv) {
     // UNDER-reports real concurrency (0/3 slots while a general-purpose subagent burns CPU). The
     // real count adds the live non-task subagent PROCESSES; real_concurrency = real_in_flight +
     // subagents_in_flight is what the state self-check ① must compare against the cap.
+    // Worktree leaks (gap-worktree-leak-after-fan-in-occupies-slot-permanently): open quay-worktrees
+    // whose task branch is ALREADY merged — the work landed via fan-in but the worktree was never
+    // removed. Each leak permanently occupies a slot (worktree-present reads as an alive executor).
+    // The compliance verdict below fails exactly when occupied > cap AND leaks exist (AC4).
+    const worktreeLeaks = detectWorktreeLeaks(listWorktrees(root), {
+      isMerged: (taskId) => isBranchMerged(root, taskId),
+      isQuayWorktree: (wtPath) => isQuayWorktreePath(wtPath, root),
+    });
     const slot = analyzeSlotStatus(reportWithMeta.inProgress, {
       cap,
       executorGone: makeDefaultExecutorGone(root),
@@ -1459,6 +1586,7 @@ export async function main(argv) {
       executorPresent: makeDefaultExecutorPresent(root),
       firstKnownCommitMs: (taskId) => firstKnownCommitMsByTask(taskId),
       subagentsInFlight: readSubagentsInFlight(),
+      worktreeLeaks,
     });
     if (args.includes("--json")) {
       console.log(JSON.stringify(slot, null, 2));
