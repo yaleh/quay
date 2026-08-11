@@ -435,6 +435,7 @@ test("gap-mcp-entry-for-provider unit: node_modules vs repo-tree discrimination"
     '["node", "./dist/quay-native.js", "mcp"]',
     "windows-style node_modules path -> dist bundle"
   );
+});
 
 // gap-quay-init-launch-settings-template-missing-permissions-and-exclude-dynamic
 // (2026-08-11). `quay init` must lay down `.claude/launch.settings.json` with
