@@ -258,7 +258,10 @@ export function isNotYetFlippedSkip({ id, body, root, excludedNyfIds }) {
  *      (default RED_BACKLOG_CAP_DEFAULT = 2).
  *  @returns {object} { cap, base_cap, effective_cap, arbitration, in_flight_count,
  *      closed_but_live_count, occupied_slots, slots_free, pool, floor, dispatchable_disjoint,
- *      criterion_met, should_refill, no_refill_reason, recommended, scanned }
+ *      criterion_met, should_refill, no_refill_reason, recommended, ranking, scanned } —
+ *      `recommended` is the backward-compatible string-id array; `ranking` (gap-ac36-recommended-
+ *      exposes-sort-key) is the parallel array of {id, deliveryCritical, suiteBlocking, rank} that
+ *      exposes each recommended id's sort axes for AC36 判据②'s mechanical check.
  */
 export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, floorMult = POOL_FLOOR_MULT_DEFAULT, inFlight = [], closedButLive = [], integrationBacklog, redBacklogThreshold = RED_BACKLOG_THRESHOLD_DEFAULT, redBacklogCap = RED_BACKLOG_CAP_DEFAULT }) {
   // PREEMPTIVE HALT (gap-supervisor-preemption AC2): the `.halt` sentinel is a CODE mount point,
@@ -284,6 +287,14 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
   // While halted, no candidate is recommended at all — the human's stop supersedes the pool.
   // (Pool stats are still reported for visibility; the dispatch recommendation is empty.)
   let recommended = [];
+  // RANKING EXPOSURE (gap-ac36-recommended-exposes-sort-key AC2): the `ranking` array carries each
+  // recommended id's sort axes — `deliveryCritical` / `suiteBlocking` (the two axes candidates.sort
+  // ranks on) and its `rank` (0-based position WITHIN `recommended`). Empty while halted (nothing is
+  // recommended ⇒ nothing to rank). This is what makes AC36 判据② mechanical: an independent checker
+  // (ac36-sortkey-criterion-check.ts) can assert "DC task strictly moved forward / same-family
+  // non-DC unchanged / blocking_suite above DC" from two runs' `ranking` arrays instead of a human
+  // eyeballing two JSON dumps. The `recommended` STRING array is unchanged (backward compat).
+  let ranking = [];
   if (!halt.halted) {
     const sharedFiles = walkFiles(root);
     const expand = (globs) => expandDeclaredTouches(globs, root, sharedFiles);
@@ -349,6 +360,21 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
     });
     const { batch } = assembleBatch(candidates, { expand });
     recommended = batch.slice(0, slotsFree);
+    // Build the ranking array from the SORTED candidate order, capped at the same slots_free window
+    // as `recommended` (rank = position within recommended). `candidateById` recovers the parsed
+    // candidate so deliveryCritical comes from the SAME parseCandidate source the sort used — never a
+    // second parser (rule: reuse, no parallel copy). suiteBlocking is derived from the same
+    // suiteBlockingIds set the sort's first axis used.
+    const candidateById = new Map(candidates.map((c) => [c.id, c]));
+    ranking = recommended.map((id, rank) => {
+      const c = candidateById.get(id);
+      return {
+        id,
+        deliveryCritical: c ? c.deliveryCritical : false,
+        suiteBlocking: c ? suiteBlockingIds.has(id) : false,
+        rank,
+      };
+    });
   }
 
   // should_refill — the event-driven go/no-go. Based on the RECOMMENDED set (candidates that pass
@@ -419,6 +445,10 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
     should_refill: shouldRefill,
     no_refill_reason: noRefillReason,
     recommended,
+    // RANKING EXPOSURE (gap-ac36-recommended-exposes-sort-key AC2): per-recommended-id sort axes
+    // ({id, deliveryCritical, suiteBlocking, rank}) so AC36 判据②'s "strict forward movement +
+    // negative control" is mechanically assertable from the JSON alone.
+    ranking,
     scanned: pool.scanned,
   };
 }
