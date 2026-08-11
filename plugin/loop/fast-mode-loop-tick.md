@@ -894,6 +894,20 @@ node --experimental-strip-types plugin/scripts/concurrent-batch-scheduler.ts --r
 
 重叠 → 不可并发，等下一 tick。**不要凭读 Touches 列表目测**——本会话有过目测判断被实测推翻的先例。
 
+3b. **outer 在飞占用（`gap-write-ownership-extend-beyond-tasks-to-outer-core-and-hot-files` AC4）**：
+   outer 主检出的**未提交改动**算占用——outer 正在改的热点实现文件（如 `full-suite-runner.ts`）
+   若同时被 inner 候选列入 `## Touches`，该候选的 inner 分支会在 fan-in 与 outer 主线撞
+   add/add。派发前对每个候选（与任一在飞 peer 或候选自身）用 `--check-pair` + `--outer-inflight`
+   判定；outer 在飞文件清单 = `git -C "$REPO_ROOT" status --short` 的改动路径（可带 glob）：
+
+```bash
+node --no-warnings --experimental-strip-types plugin/scripts/touches-orthogonality-check.ts --check-pair tasks/<id>.md tasks/<peer>.md --outer-inflight <outer在飞文件> --root "$(pwd)"
+# DISJOINT + exit 0 ⇒ 不与 outer 在飞改动冲突，可继续；OVERLAP (outer-inflight occupancy) + exit 1 ⇒ 拒绝派发，等 outer 落盘
+```
+
+   命中 `outer-inflight occupancy` ⇒ **拒绝派发**，不把 outer 在飞文件列进任务 Touches 的替代是
+   在 Proposal 给 outer 改动建议（见下方「核心/loop 文档 outer 独占」）。
+
 4. **分叉基线判定（统一 fork 源，`gap-task-file-develop-integration-drift-fan-in-conflicts` AC2）**：
    任务 worktree **fork 源统一 = integration HEAD**（生效线，与 fan-in 目标一致）。旧的两线
    依赖声明（独立 → develop / 依赖 → integration）**不再是 fork 源判据**——任务文件在
@@ -1243,6 +1257,14 @@ engine 组 + governance 组 == 去重后 realpath 总数」这类**关系**，�
 
 建的任务必须有：`## Proposal`（问题 + 证据 + 选定机制）、`## Acceptance Criteria`（可机械验证）、
 `## Touches`。缺任一项的不算建成。
+
+**核心/loop 文档 outer 独占写（`gap-write-ownership-extend-beyond-tasks-to-outer-core-and-hot-files` AC2）**：
+inner 建任务时**不得**把 `orchestration/orchestrator-*.md` 与 `plugin/loop/orchestrator-loop-tick.md`
+列入 `## Touches`——它们归 outer 独占写（外层执行核 + loop 文档；写所有权分离 `0ce3f2a8` 只覆盖
+`tasks/`，不覆盖这两类，6 条 inner 分支撞 add/add 就是代价）。inner 需要改它们 ⇒ 在 `## Proposal`
+给**改动建议**（要改哪条、改成什么、为什么），由 outer 落盘。**迁移单方新建（AC3）**：迁移窗口内
+（旧路径→新路径，如 `orchestration/*` → `plugin/loop/*`）的新路径**只允许一方新建**——move 一次提交
+由一方完成，另一方只 rebase；同路径两个提交各自 ADD ⇒ fan-in 必 add/add。
 
 **发现问题必须处置**：修，或建任务。**不要静音、不要降级后就走。** 本项目已有四次
 「造了检测机制 → 它正确报警 → 警报无人处理」（RED 测试被改 skip、golden replay 被当预存失败、
