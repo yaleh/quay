@@ -29,8 +29,16 @@
 //
 // Run:
 //   node --experimental-strip-types plugin/scripts/task-contract-check.ts [--root <dir>] [--json]
-//       [--write-ratchet] [--allow-growth] [--reset-baseline] [<task-file.md> ...]
+//       [--write-ratchet] [--allow-growth] [--reset-baseline] [--no-block] [--strict-subset]
+//       [<task-file.md> ...]
 //   scripts/test.sh plugin/test/task-contract-check.test.mjs
+//
+// --no-block (gap-task-file-static-syntax-should-not-block-product-verification, option ①): the
+// verification-round path (run_static_checks + the scoped tier). Task-file Contract/AC syntax
+// violations are REPORTED and recorded in a GROW-ONLY ledger (.quay/task-file-violation-ledger.jsonl)
+// but NEVER set red — a task-file syntax issue is a different risk class from "is the product code
+// usable", so it must not stop the product-verification round. The DEFAULT mode (no --no-block) keeps
+// the shrink-only ratchet blocking behavior for direct invocation / maintenance / mutation tests.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -429,6 +437,43 @@ export function writeRatchet(root, currentEntries, { reset = false } = {}) {
     : `ratchet list written (${currentEntries.length} entry/entries; ceiling ${ceiling})` };
 }
 
+// ── Grow-only ledger (--no-block: task-file violations are RECORDED, never blocking) ────────────────
+// gap-task-file-static-syntax-should-not-block-product-verification option ① — a task-file
+// Contract/AC syntax violation is a different risk class from "is the product code usable", so in
+// --no-block mode (the verification-round path) it must NOT stop the round. The accounting that keeps
+// it visible is a GROW-ONLY ledger at .quay/task-file-violation-ledger.jsonl (gitignored runtime
+// state, same family as verification-round.jsonl): an entry is written once per (checker, violation)
+// pair and NEVER removed — the ledger can only grow, so silent deterioration (task files accumulating
+// syntax violations) stays visible without ever blocking. The checker's DEFAULT mode (no --no-block)
+// keeps the shrink-only ratchet blocking behavior (maintenance / mutation tests).
+export const NO_BLOCK_LEDGER_REL = ".quay/task-file-violation-ledger.jsonl";
+
+export function recordNoBlockLedger(root, checker, violations, { at = new Date().toISOString() } = {}) {
+  const p = path.join(root, NO_BLOCK_LEDGER_REL);
+  const seen = new Set();
+  if (fs.existsSync(p)) {
+    for (const line of fs.readFileSync(p, "utf8").split(/\r?\n/)) {
+      const t = line.trim();
+      if (!t) continue;
+      try {
+        const d = JSON.parse(t);
+        if (d && typeof d.key === "string") seen.add(d.key);
+      } catch { /* malformed line — skip (append-only ledger, never rewrites) */ }
+    }
+  }
+  const rows = [];
+  for (const v of violations) {
+    const key = `${checker}|${v}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    rows.push(JSON.stringify({ key, checker, violation: v, at }));
+  }
+  if (rows.length === 0) return { recorded: 0, ledgerPath: p, rows };
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  fs.appendFileSync(p, rows.join("\n") + "\n");
+  return { recorded: rows.length, ledgerPath: p, rows };
+}
+
 // ── CLI ──────────────────────────────────────────────────────────────────────────────────────────────
 export function runCli(argv) {
   const args = argv.slice();
@@ -438,6 +483,7 @@ export function runCli(argv) {
   let allowGrowth = false;
   let resetBaseline = false;
   let strictSubset = false;
+  let noBlock = false;
   const files = [];
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
@@ -447,6 +493,7 @@ export function runCli(argv) {
     else if (a === "--allow-growth") { allowGrowth = true; }
     else if (a === "--reset-baseline") { resetBaseline = true; }
     else if (a === "--strict-subset") { strictSubset = true; }
+    else if (a === "--no-block") { noBlock = true; }
     else if (a.startsWith("-")) { console.error(`task-contract-check: unknown flag: ${a}`); process.exit(2); }
     else { files.push(a); }
   }
@@ -492,12 +539,18 @@ export function runCli(argv) {
   const dodCeilingBreach =
     dodBaseline.baselineCount !== null && dodBaseline.baseline.size > dodBaseline.baselineCount;
   if (dodCeilingBreach) {
-    console.error(`task-contract-check: dod-suite-line baseline CEILING BREACH — docs/analysis/dod-suite-line-baseline.md has ${dodBaseline.baseline.size} entries but baseline-count: ${dodBaseline.baselineCount}; the grandfather list can only get SHORTER (gap-suite-green-gate-..., AC2)`);
+    // --no-block wording avoids the full-suite-runner's "CEILING BREACH" static-check failure marker —
+    // a task-file checker in no-block mode reports but must never flip the verification round red.
+    console.error(noBlock
+      ? `task-contract-check: dod-suite-line baseline-count STALE (recorded, non-blocking) — docs/analysis/dod-suite-line-baseline.md has ${dodBaseline.baseline.size} entries but baseline-count: ${dodBaseline.baselineCount}; the grandfather list can only get SHORTER (gap-suite-green-gate-..., AC2)`
+      : `task-contract-check: dod-suite-line baseline CEILING BREACH — docs/analysis/dod-suite-line-baseline.md has ${dodBaseline.baseline.size} entries but baseline-count: ${dodBaseline.baselineCount}; the grandfather list can only get SHORTER (gap-suite-green-gate-..., AC2)`);
   }
   const bareDirCeilingBreach =
     bareDirBaseline.baselineCount !== null && bareDirBaseline.baseline.size > bareDirBaseline.baselineCount;
   if (bareDirCeilingBreach) {
-    console.error(`task-contract-check: bare-dir-touches baseline CEILING BREACH — docs/analysis/bare-dir-touches-baseline.md has ${bareDirBaseline.baseline.size} entries but baseline-count: ${bareDirBaseline.baselineCount}; the grandfather list can only get SHORTER (gap-touches-bare-dir-uncertain-declaration-drags-the-pool, AC1)`);
+    console.error(noBlock
+      ? `task-contract-check: bare-dir-touches baseline-count STALE (recorded, non-blocking) — docs/analysis/bare-dir-touches-baseline.md has ${bareDirBaseline.baseline.size} entries but baseline-count: ${bareDirBaseline.baselineCount}; the grandfather list can only get SHORTER (gap-touches-bare-dir-uncertain-declaration-drags-the-pool, AC1)`
+      : `task-contract-check: bare-dir-touches baseline CEILING BREACH — docs/analysis/bare-dir-touches-baseline.md has ${bareDirBaseline.baseline.size} entries but baseline-count: ${bareDirBaseline.baselineCount}; the grandfather list can only get SHORTER (gap-touches-bare-dir-uncertain-declaration-drags-the-pool, AC1)`);
   }
 
   const currentEntries = [...new Set(allViolations)].sort();
@@ -512,22 +565,37 @@ export function runCli(argv) {
   const newOnes = currentEntries.filter((e) => !baseline.has(e));
   const resolved = !subset && baseline.size > 0 ? [...baseline].filter((e) => !currentEntries.includes(e)).sort() : [];
   // --reset-baseline is a deliberate re-baseline: it must NOT be reported as growth.
-  const growth = !subset && !firstBaseline && newOnes.length > 0 && !allowGrowth && !resetBaseline;
+  // --no-block (option ①): task-file violations are RECORDED (grow-only ledger) but never block, so
+  // ratchet growth never contributes to the exit code in the verification-round path.
+  const growth = !noBlock && !subset && !firstBaseline && newOnes.length > 0 && !allowGrowth && !resetBaseline;
 
   let writeOutcome = null;
-  if (writeRatchetFlag && !growth && !subset) {
+  // --no-block never mutates the shrink-only baseline (the grow-only ledger is the accounting);
+  // --write-ratchet stays a maintenance-time action only.
+  if (writeRatchetFlag && !growth && !subset && !noBlock) {
     writeOutcome = writeRatchet(wsRoot, currentEntries, { reset: resetBaseline });
-    if (!writeOutcome.ok) return finish({ json, perTask, allInfo, currentEntries, newOnes, resolved, baselineCount, growth: true, writeOutcome, wsRoot, subset, dodCeilingBreach, bareDirCeilingBreach });
+    if (!writeOutcome.ok) return finish({ json, perTask, allInfo, currentEntries, newOnes, resolved, baselineCount, growth: true, writeOutcome, wsRoot, subset, strictSubset, dodCeilingBreach, bareDirCeilingBreach, noBlock });
   }
 
-  return finish({ json, perTask, allInfo, currentEntries, newOnes, resolved, baselineCount, growth, writeOutcome, wsRoot, subset, strictSubset, dodCeilingBreach, bareDirCeilingBreach });
+  return finish({ json, perTask, allInfo, currentEntries, newOnes, resolved, baselineCount, growth, writeOutcome, wsRoot, subset, strictSubset, dodCeilingBreach, bareDirCeilingBreach, noBlock });
 }
 
-function finish({ json, perTask, allInfo, currentEntries, newOnes, resolved, baselineCount, growth, writeOutcome, wsRoot, subset, strictSubset = false, dodCeilingBreach = false, bareDirCeilingBreach = false }) {
+function finish({ json, perTask, allInfo, currentEntries, newOnes, resolved, baselineCount, growth, writeOutcome, wsRoot, subset, strictSubset = false, dodCeilingBreach = false, bareDirCeilingBreach = false, noBlock = false }) {
+  // --no-block (gap-task-file-static-syntax-should-not-block-product-verification, option ①): a NEW
+  // task-file violation is RECORDED in the grow-only ledger (the "ratchet 只增不减 记账") but never
+  // blocks the verification round — task-file Contract/AC syntax is a different risk class from "is
+  // the product code usable". The ledger write is best-effort (a ledger I/O failure must never turn a
+  // deliberately non-blocking check red).
+  let ledger = null;
+  if (noBlock && newOnes.length > 0) {
+    try { ledger = recordNoBlockLedger(wsRoot, "task-contract-check", newOnes); }
+    catch (e) { console.error(`task-contract-check: ledger write failed (non-blocking, ignored): ${e?.message ?? e}`); }
+  }
   if (json) {
     const report = {
       workspaceRoot: wsRoot,
       subset,
+      noBlock,
       tasksScanned: perTask.length,
       violations: perTask.flatMap((t) => t.violations.map((v) => ({ file: t.file, code: v.code, what: v.what }))),
       info: allInfo.map((i) => ({ file: i.file, code: i.code, what: i.what })),
@@ -538,6 +606,7 @@ function finish({ json, perTask, allInfo, currentEntries, newOnes, resolved, bas
         resolved: resolved,
         growth,
       },
+      ledger,
       dodSuiteLineCeilingBreach: dodCeilingBreach,
       bareDirTouchesCeilingBreach: bareDirCeilingBreach,
       writeOutcome,
@@ -551,23 +620,33 @@ function finish({ json, perTask, allInfo, currentEntries, newOnes, resolved, bas
     }
     console.log("");
     console.log(`violations: ${currentEntries.length} unique across ${violationTasks.length} task(s); info findings (non-ratchet, pre-opt-in baseline): ${allInfo.length} — see --json for details`);
+    if (noBlock && newOnes.length > 0) {
+      console.log(`recorded (non-blocking, grow-only ledger): ${newOnes.length} new task-file violation(s) — task-file syntax does NOT block the verification round (gap-task-file-static-syntax-should-not-block-product-verification)`);
+    }
     if (subset) {
       console.log("subset scan (<task-file> args) — ratchet comparison skipped (it is only meaningful over the full store)");
       if (strictSubset) {
-        console.log("strict-subset mode (scoped static-check tier) — a violation on a scanned task FAILS this run (exit 1); unrelated tasks are not scanned");
+        console.log(noBlock
+          ? "strict-subset mode (scoped static-check tier) — task-file violations REPORTED + ledgered, NOT blocking; unrelated tasks are not scanned"
+          : "strict-subset mode (scoped static-check tier) — a violation on a scanned task FAILS this run (exit 1); unrelated tasks are not scanned");
       }
     } else if (baselineCount !== null) {
-      console.log(`ratchet ceiling: ${baselineCount}; new since baseline: ${newOnes.length}${newOnes.length ? ` (${newOnes.join(", ")})` : ""}; resolved: ${resolved.length}${resolved.length ? ` (${resolved.join(", ")})` : ""}`);
+      console.log(noBlock
+        ? `ratchet ceiling: ${baselineCount}; recorded (non-blocking): ${newOnes.length}${newOnes.length ? ` (${newOnes.join(", ")})` : ""}; resolved: ${resolved.length}${resolved.length ? ` (${resolved.join(", ")})` : ""}`
+        : `ratchet ceiling: ${baselineCount}; new since baseline: ${newOnes.length}${newOnes.length ? ` (${newOnes.join(", ")})` : ""}; resolved: ${resolved.length}${resolved.length ? ` (${resolved.join(", ")})` : ""}`);
     }
     if (writeOutcome) console.log(`write: ${writeOutcome.reason}`);
   }
   // strict-subset (the scoped tier's contract-consumer): a violation on ANY scanned (touched) task
   // is a failure — the touched task's Contract is change-relevant, so scoped MUST catch it (AC4-i).
   // The ratchet comparison stays skipped (unrelated tasks are not scanned, so nothing to compare).
-  const strictFail = strictSubset && subset && perTask.some((t) => t.violations.length > 0);
-  if (dodCeilingBreach && !json) console.log("task-contract-check: DOD-SUITE-LINE BASELINE CEILING BREACH — grandfather list can only get SHORTER");
-  if (bareDirCeilingBreach && !json) console.log("task-contract-check: BARE-DIR-TOUCHES BASELINE CEILING BREACH — grandfather list can only get SHORTER");
-  process.exit(growth || strictFail || dodCeilingBreach || bareDirCeilingBreach ? 1 : 0);
+  // --no-block: strictFail is suppressed (the scoped run is ALSO a verification — task-file syntax
+  // must not stop it), the violation is still reported + ledgered above.
+  const strictFail = !noBlock && strictSubset && subset && perTask.some((t) => t.violations.length > 0);
+  if (dodCeilingBreach && !json) console.log(noBlock ? "task-contract-check: DOD-SUITE-LINE BASELINE-COUNT STALE (recorded, non-blocking) — grandfather list can only get SHORTER" : "task-contract-check: DOD-SUITE-LINE BASELINE CEILING BREACH — grandfather list can only get SHORTER");
+  if (bareDirCeilingBreach && !json) console.log(noBlock ? "task-contract-check: BARE-DIR-TOUCHES BASELINE-COUNT STALE (recorded, non-blocking) — grandfather list can only get SHORTER" : "task-contract-check: BARE-DIR-TOUCHES BASELINE CEILING BREACH — grandfather list can only get SHORTER");
+  const block = !noBlock && (growth || strictFail || dodCeilingBreach || bareDirCeilingBreach);
+  process.exit(block ? 1 : 0);
 }
 
 // Entry point when run directly (not imported).

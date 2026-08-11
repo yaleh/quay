@@ -268,9 +268,15 @@ run_static_checks() {
   # whole-store checkers) gives every test-running invocation — and CI, which inherits it via its
   # single `bash scripts/test.sh` step — the ratchet enforcement for free. exit 1 on ratchet growth
   # aborts the suite (set -euo pipefail), so a NEW violation red-lights the commit, not the dispatch.
+  # --no-block (gap-task-file-static-syntax-should-not-block-product-verification, option ①): this is
+  # a TASK-FILE checker (it scans tasks/*.md Contract/AC syntax) — a task-file syntax issue is a
+  # DIFFERENT risk class from "is the product code usable", so it must NOT stop the product-verification
+  # round. --no-block records new violations in the grow-only ledger (.quay/task-file-violation-ledger.jsonl,
+  # 只增不减 记账) but exits 0; the round proceeds to the test phase. Product-code checkers below keep
+  # their blocking exit. The checker's DEFAULT mode (no --no-block) still blocks for maintenance/mutation.
   # @static-tier always
   # @static-scoped-mode subset-touched
-  run_checker "task-contract-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/task-contract-check.ts" --root "${repo_root}"
+  run_checker "task-contract-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/task-contract-check.ts" --root "${repo_root}" --no-block
   echo "== AC-carryover check (gap-nothing-checks-whether-a-done-task-left-its-acs-behind, AC6) =="
   # @static-tier full  (whole-store ratchet — deferred to the full-suite gate in scoped mode)
   # A done task may leave ACs unchecked ONLY if a successor `## Carries` section names them — the
@@ -281,7 +287,10 @@ run_static_checks() {
   # baseline (docs/analysis/task-ac-carryover-baseline.md) is shrink-only: exit 1 on a NEW unowned
   # AC aborts the suite (set -euo pipefail), red-lighting a done task that just closed with
   # uncarried ACs instead of letting it merge silently.
-  run_checker "task-ac-carryover-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/task-ac-carryover-check.ts" --root "${repo_root}"
+  # --no-block (gap-task-file-static-syntax-should-not-block-product-verification, option ①): same
+  # degradation as task-contract-check above — a NEW unowned AC is ledgered (grow-only) but does not
+  # stop the verification round (task-file syntax ≠ product-code availability).
+  run_checker "task-ac-carryover-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/task-ac-carryover-check.ts" --root "${repo_root}" --no-block
   echo "== ADR-016 screen-use check (gap-adr-016-carve-out-permits-the-whole-screen-hash, AC3) =="
   # ADR-016 Amendment 2026-08-04 boundary (c): whole-screen equality/hash of capture-pane is
   # forbidden. Code-position detection (a capture-pane result flowing into md5sum/sha1sum/cksum in
