@@ -76,6 +76,18 @@ extra: {}
 - tasks/gap-suite-floor-two-longest-files-bound.md（交叉标注——CPUQuota 修正的延续）
 - tasks/gap-systemd-run-cancel-cpuquota-keep-memory-guardrail.md（自身：勾 AC + 贴证据）
 
+### Finding：orangevps 无配额对照跑完——r268 归因证实、但「取消配额更快」假设被推翻、本机测量含开发负载混杂（manager 2026-08-11 09:3x，落点 Finding 不进 Contract）
+
+**① r268 归因证实**：cli.test.mjs 在 orangevps（真 4 核、无 cgroup 配额）lane4=19.8s passed、lane8=39.4s **passed**，未撞 60s 窗 ⇒ r268 超时形失败确系 **2 核硬配额饥饿**，不是 lane8 本身。
+
+**②「拿掉配额就该更快」被推翻**：orangevps main 相 sum_ms 从 lane4=458134ms → lane8=1055276ms，**涨幅 2.30x——比家里 2 核配额下实测的 1.79x 还陡**。实际墙钟 lane4 main=117s、lane8 main=**137s（反而慢 17%）**，整轮估算 lane4≈497s、lane8≈547s（反而慢 10%）。⇒ **无配额下 8 进程挤 4 物理核依然比 4 进程挤 4 核更差，且膨胀系数比 cgroup 节流下更陡**。⇒ **`--test-concurrency` 不应超过物理核数——在两种约束环境下都成立，是今晚最稳的一条；lane8 在任何 4 核环境下都不是杠杆，不必再测。**（未验证假设，不下结论：可能是真实抢占的上下文切换开销比 cgroup 节流更贵，或 IO/tmux 类测试对真实并发争用更敏感。）
+
+**③ 必须标注的混杂因素（影响今晚所有本机估算的可信度）**：orangevps main 相 117s（空场跑）vs 本机 r281 main 相 729s（同 conc=4）——**6.2 倍差，而 CPU 配额只能解释 2 倍（2核→4核）**。差额很可能来自**本机套件是跟活跃开发同时抢机器跑的**（outer/inner 的 subagent 同时在用这台机器的 4 核），orangevps 孤立跑。⇒ **此前「79% CPU 占比」反解、main 相理论地板、16/48 核估算，全部是在【负载环境】下测得的，应标注非孤立值 ⇒ CPUQuota 400% 的收益预测应下调**（膨胀系数论据 + 混杂论据双重指向同一方向：本机对照实验的干净度不如预期）。
+
+**④ 失败分类（如实报告、不猜机制、无归因）**：两轮都失败 12 个（环境性：adr-gate/config-wiring/monitor-mount-check 等，与并发无关）；仅 lane4 失败 19 个、仅 lane8 失败 2 个——**并发更低失败反而更多，违反直觉，无归因**。逐条 lane4-only：blocked-signal-parameterized/timeout、build-evidence-manifest、cap-from-gate、compile-cache、document-gate-fixture、execution-policy(×2)、finding-backpropagate(×2)、gitignore、inner-blocked-signal、resource-gate、restart-readiness-check、ruling-required-wiring、run-identity、workflow-event-schema。若值得查，日志在 orangevps `~/suite-lane4.log`/`~/suite-lane8.log`（已各拉一份到本机 scratchpad）。
+
+**建议**：① CPUQuota 400% 轮若干净，直接与 r281（200%）对比即可，不必再等 orangevps 二次验证；②「本机测量含开发负载混杂」标进相关任务 Finding；③ lane8 系列实验到此为止——两台机器、两种约束都指向同一结论。
+
 ## Contract
 
 measure   suite_scope_cpu_max = `cat /sys/fs/cgroup/*/*/*/*/app.slice/run-p*.scope/cpu.max | head -1` 的 stdout

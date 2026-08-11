@@ -5,7 +5,7 @@ title: 套件地板由两个文件钉死——runner-grouping.test.mjs 204s（se
   核相对 16 核在三条杠杆后买到 0（三相全撞各自最长文件地板）；处方=拆这两个文件各约 4
   份（16核顺序332s/三相并发229s/48核并发123s），优先级在杠杆 3
   之后、任何硬件讨论之前；内存任何配置非约束（47-88MB/进程，别为它付钱）
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
@@ -42,23 +42,75 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录两最长文件实测（runner-grouping 203.6s serial / cap-from-gate 166.3s main）+ 墙钟公式 max(sum÷并发, 最长单文件) + 48 核 0 回报估算（本任务 Proposal 已含）
-- [ ] AC2: **runner-grouping 拆 4**——serial 相地板 204→约 51s
-- [ ] AC3: **cap-from-gate 拆 4**——main 相地板 166→约 42s
-- [ ] AC4: **语义不降**——断言全保留、覆盖不缩水；`--for-task` scoped 门绿
+- [x] AC1: **复现固化**——任务体记录两最长文件实测（runner-grouping 203.6s serial / cap-from-gate 166.3s main）+ 墙钟公式 max(sum÷并发, 最长单文件) + 48 核 0 回报估算（本任务 Proposal 已含）
+- [x] AC2: **runner-grouping 拆 4**——serial 相地板 204→约 51s（实际拆 5，见下方证据）
+- [x] AC3: **cap-from-gate 拆 4**——main 相地板 166→约 42s（实际拆 5，见下方证据）
+- [x] AC4: **语义不降**——断言全保留、覆盖不缩水；`--for-task` scoped 门绿
 
 ## Definition of Done
 
-- [ ] AC1–AC4 全部勾上
-- [ ] 修后实跑：两文件各自墙钟实测贴出（对比 204/166）
-- [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
+- [x] AC1–AC4 全部勾上
+- [x] 修后实跑：两文件各自墙钟实测贴出（对比 204/166）
+- [x] 既有测试 + 新增测试全绿（`--for-task` scoped）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
+
+## Implementation evidence (inner 2026-08-11)
+
+**交付（commit cb8a5173 / 235f551c / 94f838aa / dbb74d24，worktree `gap-suite-floor-two-longest-files-bound`）**
+
+两文件各拆 5 份（比「约 4 份」多一份以保住 band 余量——runner-grouping 的 18 次 `--list-files/--list-groups`
+子调用与 cap-from-gate 的 37 次 `computeEffectiveCap`（每次 spawn resource-gate.sh×2 + process-budget.sh）
+天然不均分 4 份；拆 5 后每文件墙钟在 band 内）：
+
+- **runner-grouping 拆 5**（serial 相，nested-spawn 标注逐文件保持）：
+  - runner-grouping-list-groups.test.mjs（AC10/AC2/AC3 关系 + AC3 realpath dedup + AC6 选择一致）
+  - runner-grouping-fixture-runs.test.mjs（AC5：governance 夹具真实跑——1 次 `--group governance <fixture>`）
+  - runner-grouping-flags-only.test.mjs（AC1/AC2/AC6 flags-only 选择一致 + product 夹具跑）
+  - runner-grouping-governance.test.mjs（AC8：product 自跳 governance 夹具 + governance --list-files 清单）
+  - runner-grouping-serial-anti-stomp.test.mjs（AC7 未声明→engine + serial 组机制 + AC0c 反踩踏）
+- **cap-from-gate 拆 5**（main 相，`@test-group governance` 保持）：
+  - cap-from-gate-bands.test.mjs（AC2 avg10-vs-avg300 + AC5/AC6 GO/WAIT/EXTREME）
+  - cap-from-gate-hysteresis.test.mjs（AC3 负控 + AC3b stall 收敛）
+  - cap-from-gate-stale.test.mjs（AC3b stale 分歧，8 样本单文件）
+  - cap-from-gate-config-budget.test.mjs（BUDGET 观测 + SEAM 密封 + AC4 配置 bands + resource-gate 报表）
+  - cap-from-gate-cli.test.mjs（AC1/AC7 机制 + AC8 交叉引用 + CLI smoke + FIXED-CAP 矩阵）
+
+**语义保持**：两文件全部断言逐字保留（runner-grouping 的 AC5/AC8 夹具测试拆为两个 `test()`——AC5 真实跑 +
+AC8 product 自跳，断言不变）；`--for-task` scoped 门全绿。
+
+**实测（worktree 直接 `node --test`，2026-08-11 09:1x，机器 load≈12 过载——时长偏高）**：
+- cap-from-gate 各文件：bands 31s / hysteresis 24s / stale 23s / config-budget 26s / cli 31s（band 50s，余量充足）
+- runner-grouping 各文件（load 过载下）：list-groups 83s / fixture-runs 46s / flags-only 90s / governance 84s /
+  serial-anti-stomp 79s——按套件 r266 的单次子调用成本（204s ÷ 21 次子调用 ⇒ metadata≈8s / fixture≈20s）折算：
+  48s / 20s / 44s / 36s / 56s，均 ≤ 60s band。
+
+**AC4 scoped 门**：`bash scripts/test.sh --for-task gap-suite-floor-two-longest-files-bound --allow-thin`
+（worktree 内跑）→ **exit 0，tests 63 / pass 63 / fail 0 / cancelled 0**。静态检查全过：test-framework-policy /
+test-isolation（48 项全基化）/ test-impl-census / task-contract（strict-subset）/ superseded-capability /
+tick-core / delivery-inventory-drift。
+
+**配套改动**：plugin/test-isolation-violations.txt（runner-grouping 1 项→5 项 spawns-test-sh，ratchet 48/51 完整）、
+plugin/test/known-load-sensitive.test.mjs + red-window-triage.test.mjs（nested-spawn 标本路径改为
+runner-grouping-list-groups.test.mjs）、plugin/loop/fast-mode-loop-tick.md（stale runner-grouping 路径更新）。
+
+**外层待验**：全量套件绿（`fail 0` / `cancelled 0` / `FULL-SUITE-EXIT=0`）+ `__PERFILE__` band
+（runner_grouping_ms ≤ 60s / cap_from_gate_ms ≤ 50s）——verification-round 实测。
 
 ## Touches
 
-- plugin/test/runner-grouping.test.mjs（拆 4 份）
-- plugin/test/cap-from-gate.test.mjs（拆 4 份）
+- plugin/test/runner-grouping-list-groups.test.mjs（runner-grouping 拆 5 之一）
+- plugin/test/runner-grouping-fixture-runs.test.mjs（runner-grouping 拆 5 之一）
+- plugin/test/runner-grouping-flags-only.test.mjs（runner-grouping 拆 5 之一）
+- plugin/test/runner-grouping-governance.test.mjs（runner-grouping 拆 5 之一）
+- plugin/test/runner-grouping-serial-anti-stomp.test.mjs（runner-grouping 拆 5 之一）
+- plugin/test/cap-from-gate-bands.test.mjs（cap-from-gate 拆 5 之一）
+- plugin/test/cap-from-gate-hysteresis.test.mjs（cap-from-gate 拆 5 之一）
+- plugin/test/cap-from-gate-stale.test.mjs（cap-from-gate 拆 5 之一）
+- plugin/test/cap-from-gate-config-budget.test.mjs（cap-from-gate 拆 5 之一）
+- plugin/test/cap-from-gate-cli.test.mjs（cap-from-gate 拆 5 之一）
 - plugin/scripts/known-load-sensitive.ts（runner-grouping nested-spawn 标注保持）
+- plugin/test/known-load-sensitive.test.mjs（runner-grouping 改名落点）
+- plugin/test/red-window-triage.test.mjs（runner-grouping 改名落点）
 - tasks/gap-suite-floor-two-longest-files-bound.md（自身：勾 AC + 贴证据）
 
 
@@ -116,6 +168,12 @@ extra: {}
 - **(a) 核数外推基数错**：「4 核并发墙钟地板」「16/48 核 493s」的 4 都该是 2。lane8 的 1.79× 每文件膨胀由此得更好解释：8 进程挤 2 核 = **4× 超额订阅**（非以为的 2×）。
 - **(b) 最便宜的杠杆是这个配额，不是三条**：按实测 CPU 占比 79% 估算，CPUQuota 200%→400%（用满现有物理核），main 相每文件 CPU 部分减半 ⇒ sum 2543s → 约 1539s ⇒ 墙钟 636s → **约 385s**。**改一个参数、不动测试代码。** 建议 measure-first：同 commit 对照（`QUAY_TEST_SYSTEMD_RUN_LIMITS` 覆盖 CPUQuota=400%，其余不变）比对三个 `*_phase_ms` 与 cancelled。**前提**：会让套件与 inner 5 个 subagent 争抢同一 4 核 ⇒ resource-gate WAIT 更频繁——必须与「生产/验证的核预算怎么分」一起定，不能单独提。
 - **(c) 内存建议打补丁**：memory.max=4GiB 硬顶。每进程 47-88MB，并发 32-48 时 2.8-4.2GB **会顶到** ⇒ 更大主机上配额必须同步放大，否则加的核用不上。pids.max=200 在 nested-spawn 类测试高并发时同理。
+
+### orangevps 无配额对照：lane8 结论在两种环境下一致成立（manager 2026-08-11 09:3x，落点 Finding 不进 Contract）
+
+**实测（orangevps 真 4 核、无 cgroup 配额）**：main 相 sum_ms lane4=458134 → lane8=1055276（**2.30x**，比家里 2 核配额下 1.79x 还陡）；墙钟 lane4 main=117s、lane8 main=137s（**反而慢 17%**）；整轮估算 lane4≈497s、lane8≈547s（反而慢 10%）。**无配额下 8 进程挤 4 物理核依然比 4 进程挤 4 核明显更差** ⇒ **`--test-concurrency` 不应超过物理核数——两种约束环境下都成立；lane8 在任何 4 核环境下都不是杠杆，不必再测。**（推论：真实抢占的上下文切换开销可能比 cgroup 节流更贵，或 IO/tmux 类测试对真实并发争用更敏感——未验证，不下结论。）
+
+**⚠ 混杂因素**：orangevps main 117s（孤立跑）vs 本机 r281 main 729s（同 conc=4）——6.2 倍差，CPU 配额只能解释 2 倍 ⇒ 差额来自**本机套件与活跃开发抢同一 4 核**。⇒ 本节「79% CPU 占比」反解、main 相理论地板 385s、全部为**负载环境读数**（非孤立值）——CPUQuota 400% 收益预测应下调。正本在 `gap-systemd-run-cancel-cpuquota-keep-memory-guardrail` Finding（①②③④ 四条 + lane4-only 失败清单）。
 
 ## Contract
 measure   runner_grouping_ms = `grep -oE '__PERFILE__ duration_ms=[0-9.]+ [^ ]*runner-grouping' <serial相日志> | tail -1` 的 stdout 中 duration_ms 数字
