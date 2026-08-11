@@ -61,7 +61,10 @@ export const PREEMPT_LEDGER_FILENAME = "supervisor-preempt-ledger.jsonl";
  * The preemption criterion — pure, injected-probe testable. Returns the set of tasks that are
  * deterministically preemptible RIGHT NOW, driven ONLY by queryable facts:
  *   1. a telemetry in-progress bracket (the slot/start fact);
- *   2. `nowMs − startedAtMs > TASK_OVER_90M_MS` (the DURATION fact — over the 90-minute budget);
+ *   2. `nowMs − (workStartedAtMs ?? startedAtMs) > TASK_OVER_90M_MS` (the DURATION fact — over the
+ *      90-minute budget, WORK clock only: the `--work-start` marker, same 口径 as OVER90; a
+ *      touches-overlap defer/queue segment is NOT counted — a task that queued 80min then worked
+ *      20min is NOT preemptible);
  *   3. `taskStatusAllowsOver90m` — the task's own status is still `in-progress` (or the file is
  *      missing): no real progress has landed (the no-progress fact, same gate as gap-over-90m);
  *   4. the reconcile probe does NOT close it — a merged/landed task is done, not stuck.
@@ -71,6 +74,8 @@ export const PREEMPT_LEDGER_FILENAME = "supervisor-preempt-ledger.jsonl";
  * @param {(rec: {taskId:string, runId:string, startedAtMs:number}) => {gone:boolean, reason?:string|null}} [opts.executorGone]
  *   — injected observable-executor probe (tests); default makeOver90ExecutorGone(root).
  * @returns {Promise<{preemptible: Array<{taskId:string, runId:string, startedAtMs:number, minutes:number, keepReason:string|null, reason:string}>, count:number}>}
+ *   — `startedAtMs`/`minutes` reflect the WORK clock (`workStartedAtMs ?? startedAtMs`); a
+ *   never-deferred record falls back to the bracket's startedAtMs byte-identical.
  */
 export async function listPreemptible(root, { nowMs = Date.now(), executorGone } = {}) {
   const events = [];
@@ -79,16 +84,25 @@ export async function listPreemptible(root, { nowMs = Date.now(), executorGone }
   if (rep.inProgress.length === 0) return { preemptible: [], count: 0 };
   const probe = executorGone ?? makeOver90ExecutorGone(root);
   const { kept } = reconcileInFlight(rep.inProgress, { executorGone: probe });
+  // WORK CLOCK ONLY (gap-supervisor-preempt-candidates-work-clock, same 口径 as OVER90): preemptibility
+  // is judged on `workStartedAtMs` (the --work-start marker) — a touches-overlap defer/queue segment
+  // is NOT counted against the 90-minute budget. A never-deferred record falls back to the bracket's
+  // startedAtMs (aggregate/reconcile guarantee byte-identical pre-fix behavior).
   const preemptible = kept
-    .filter((p) => nowMs - p.startedAtMs > TASK_OVER_90M_MS && taskStatusAllowsOver90m(root, p.taskId))
-    .map((p) => ({
-      taskId: p.taskId,
-      runId: p.runId,
-      startedAtMs: p.startedAtMs,
-      minutes: Number(((nowMs - p.startedAtMs) / 60_000).toFixed(1)),
-      keepReason: p.keepReason ?? null,
-      reason: "timeout-no-progress",
-    }))
+    .filter(
+      (p) => nowMs - (p.workStartedAtMs ?? p.startedAtMs) > TASK_OVER_90M_MS && taskStatusAllowsOver90m(root, p.taskId),
+    )
+    .map((p) => {
+      const workMs = p.workStartedAtMs ?? p.startedAtMs;
+      return {
+        taskId: p.taskId,
+        runId: p.runId,
+        startedAtMs: workMs,
+        minutes: Number(((nowMs - workMs) / 60_000).toFixed(1)),
+        keepReason: p.keepReason ?? null,
+        reason: "timeout-no-progress",
+      };
+    })
     .sort((a, b) => a.taskId.localeCompare(b.taskId) || a.runId.localeCompare(b.runId));
   return { preemptible, count: preemptible.length };
 }
