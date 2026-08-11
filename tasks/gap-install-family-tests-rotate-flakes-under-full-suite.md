@@ -152,3 +152,20 @@ AC 勾选状态不变（AC1/3/4/5 勾、AC2 + DoD 留外层）。
   **15/15 绿 / 0 fail / 0 skipped**（EXIT=0，125.2s）——工作树先 `npm install`（postinstall 触发
   sync-vendor.sh 重建 plugin/vendor 产物），env 就绪后测试逻辑未动、单独跑绿由构造保留。
 AC 勾选状态不变（AC1/3/4/5 勾、AC2 + DoD 留外层）。
+
+**再派发复验（inner re-dispatch 2026-08-11，develop HEAD 2be095ae）**：本工作树基于当前 develop
+HEAD 复跑核验全过，与上述证据吻合（实现已随 fan-in 落在 develop，本分支无功能改动、仅此证据增量）：
+- `bash scripts/test.sh --for-task gap-install-family-tests-rotate-flakes-under-full-suite --allow-thin`
+  → **exit 0**。task-contract strict-subset **no violations**（对 4 个 Touches 任务文件）；adr016-screen-use
+  **0 违规**（150 文件扫描）；superseded-capability **PASS**；dead-code-after-return **0 违规**（145 脚本）；
+  tick-core-static **PASS**（39/50/44 全覆）；delivery-inventory-drift-gate **PASS**；
+  selector 0/6 thin allowed（Touches 是 shell 脚本 / 任务文件，非测试文件）。
+- 组系统契约：`runner-grouping + known-load-sensitive + load-sensitive-release-check` 连跑
+  **43/43 绿 / 0 fail / 0 cancelled / 0 skipped**（EXIT=0，132.7s——较 08-10 的 35/35 系两文件测试数增长）。
+- AC3 单独跑（抽样 3）：`quay-init-check-drift + quay-init-drift-report + runtime-landing` 连跑
+  **15/15 绿 / 0 fail / 0 cancelled / 0 skipped**（EXIT=0，36.4s）——测试逻辑未动、单独跑绿由构造保留。
+- AC4 无静默漏测：`known-load-sensitive.ts --list` 权威清单确认 install 家族 12 文件全部标记
+  heavy（install-config-driven-e2e / npm-pack-e2e / quay-init / quay-init-check-drift / quay-init-drift-report /
+  quay-init-laydown-closure / quay-init-loop / quay-init-loop-driver / quay-init-loop-runtime / quay-init-loop-vendor /
+  quay-init-tmux-detection / runtime-landing）+ quay-init-loop-core nested-spawn；serial 相位跑真实测试。
+AC 勾选状态不变（AC1/3/4/5 勾、AC2 + DoD 留外层）。
