@@ -182,3 +182,34 @@ $ node --no-warnings --experimental-strip-types plugin/scripts/threshold-scope-c
 
 无新增代码改动（修复 37948eab 已在 develop）；AC1–AC4 保持勾选，AC5（全量套件）按 DoD
 留待外层 verification-round 验证。
+
+### 内层复核（2026-08-11，fresh worktree from develop d29834f6）
+
+任务再派发时以 develop 头部（d29834f6）fresh worktree 复核，确认修复在最新 develop 上仍成立：
+
+```
+$ ./scripts/test.sh --for-task gap-loop-shipping-threshold-scope-check-old-path-regression --allow-thin
+# 21 pass / 0 fail / 0 cancelled / EXIT=0
+# static 层：task-contract-check 0 违规；threshold-scope-check ratchet ceiling 4 / new since baseline 0
+#   （ratchet 5→4 系先前 suite-fix 3293cf7f 合法收缩：b292ddb2 将 last-pane.txt gitignored 为 runtime state，
+#     stalePaths 2→1；非本任务范围，shrink-only 机制正常，growth=false）
+
+$ node --no-warnings --experimental-strip-types --test plugin/test/loop-shipping.test.mjs
+# 12 pass / 0 fail；Contract measure `grep -c '✖ AC1b'` = 0
+
+$ node --no-warnings --experimental-strip-types --test plugin/test/threshold-scope-check.test.mjs
+# 9 pass / 0 fail（ratchet growth=false, currentCount=baselineCount=4）
+
+$ node --no-warnings --experimental-strip-types --test plugin/test/loop-shipping-necessity-check.test.mjs
+# 3 pass / 0 fail（inert_exclusions 0；manager-tick-log.md retainedNote 使 fresh-checkout 下 necessity 绿）
+
+$ node --no-warnings --experimental-strip-types plugin/scripts/threshold-scope-check.ts --root . --json
+# scanned: [plugin/loop/fast-mode-loop-tick.md, plugin/loop/orchestrator-loop-tick.md, CLAUDE.md]
+# violations: 3  stalePaths: 1  ratchet: { baselineCount: 4, currentCount: 4, growth: false }
+
+# 既有 checker 不回归（shared exclusion-data）：
+#   adr016-screen-use-check 15/15 · no-manager-tick-doc-check 5/5 · instrument-failure-check 11/11
+```
+
+无新增代码改动（修复 37948eab 已在 develop）；AC1–AC4 保持勾选，AC5（全量套件）按 DoD
+留待外层 verification-round 验证。
