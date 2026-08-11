@@ -9,10 +9,19 @@
 # structural signals — `/proc/pressure/cpu`, `free -m` available, `pgrep -xc node-MainThread` —
 # prints numbers AND verdicts, and exits 0=GO / non-0=WAIT.
 #
-# Why PSI over load average (AC2): load is a PROXY — it counts uninterruptible I/O and is a 1-minute
-# smoothed EWMA, lagging real contention. `/proc/pressure/cpu` `some avg10` measures "the fraction
-# of time some task was stalled waiting for CPU" directly — exactly the quantity we care about.
+# Why PSI PRIMARY over load average (AC2 of the original gate): load is a PROXY — it counts
+# uninterruptible I/O and is a 1-minute smoothed EWMA, lagging real contention. `/proc/pressure/cpu`
+# `some avg10` measures "the fraction of time some task was stalled waiting for CPU" directly.
 # Same proxy→structural arc as orchestrator-loop-tick.md step 0b's table.
+#
+# BUT (gap-resource-gate-psi-does-not-capture-load-flake-driver, 2026-08-11): the empirical suite
+# flakes correlate with load-average, NOT with PSI — rounds 230 (load 6.4) / 232 (load 11.76,
+# nproc=4 ≈ 3× oversubscription) failed loop-shipping `passed=false` while PSI `some avg10` sat at
+# 8-10 (< the 60 limit) and the gate returned GO. So load is added as a COMPLEMENT, not a
+# replacement: PSI stays the primary criterion (it measures actual CPU stall), and a load-average
+# threshold (default nproc × 2) WAITs the gate during overload windows the PSI 10s window misses.
+# Load is read from /proc/loadavg field 1 (the 1-minute load — the same signal full-suite-runner.ts
+# records as `load` in verification-round.jsonl).
 #
 # Usage:
 #   plugin/scripts/resource-gate.sh                    # report mode: print numbers + verdict, exit 0
@@ -22,10 +31,15 @@
 #   measure   cpu_stall   = /proc/pressure/cpu 的 some avg10 字段
 #   measure   mem_avail   = free -m 的 available 列 (MB)
 #   measure   heavy_procs = pgrep -xc node-MainThread 的计数
+#   measure   load_avg    = /proc/loadavg 第 1 字段 (1 分钟 load average; load-flake complement)
 #   band      cpu_ok      = some avg10 < 60
+#   band      load_ok     = load_avg(1m) < nproc × LOAD_AVG_FACTOR(默认 2) —— load ≥ 阈值 ⇒ WAIT
 #   invariant nproc 在判定前后一致
+#   invariant psi_still_waits = 1（PSI 高位仍 WAIT，不削弱）
+#   invariant flake_load_correlation = 1（红/绿轮 load+PSI 配对已收集，见 plugin/test/resource-gate.test.mjs）
 #   invoke    `plugin/scripts/resource-gate.sh --for full-suite`
-#   control   人为把 cpu some avg10 压高（起 N 个 busy loop）⇒ gate 必须返回 WAIT
+#   control   人为把 cpu some avg10 压高（起 N 个 busy loop）⇒ gate 必须返回 WAIT；
+#             注入 load（RESOURCE_GATE_TEST_LOAD_OVERRIDE=12）⇒ gate 必须返回 WAIT（负控制）
 #
 # AC4 — the node-process count uses `pgrep -xc node-MainThread` (exact `comm` match). NOT `pgrep -f`
 # (matches any cmdline containing "node", including the caller) and NOT `grep -x node` (Node's comm
@@ -42,6 +56,9 @@
 #   RESOURCE_GATE_TEST_NODE_PROCS   — override the pgrep count (integer)
 #   RESOURCE_GATE_TEST_ORPHANS      — override the orphan list ("pid:cwd" semicolon-separated)
 #   RESOURCE_GATE_TEST_NPROC        — override nproc (integer; also used for the invariant check)
+#   RESOURCE_GATE_TEST_LOAD_OVERRIDE — override the load_avg(1m) reading (float; "unmeasurable" fails closed)
+#   RESOURCE_GATE_LOAD_FACTOR       — override the load threshold factor (default 2 ⇒ limit = nproc × 2)
+#   RESOURCE_GATE_LOAD_LIMIT        — absolute load threshold override (overrides the nproc-derived limit)
 #
 # CROSS-LAYER TOTAL BUDGET (gap-test-concurrency-cap-does-not-scope-nested-spawns AC1, the A face):
 # the gate REPORTS the same shared total-process-budget authority
@@ -70,6 +87,16 @@ MODE="report"        # report | full-suite
 # in plugin/test/resource-gate.test.mjs (CPU_LIMIT default == cap-from-gate WAIT_THRESHOLD).
 CPU_LIMIT="${RESOURCE_GATE_CPU_LIMIT:-60}"
 MEM_LIMIT_MB="${RESOURCE_GATE_MEM_LIMIT_MB:-2048}"
+# ── load-average COMPLEMENT (gap-resource-gate-psi-does-not-capture-load-flake-driver AC3) ───────────
+# The empirical suite flakes correlate with load (rounds 230/232 at load 6.4/11.76 on nproc=4) while
+# PSI some avg10 stayed low (8-10 < 60) and the gate returned GO — the gate criterion and the real
+# flake driver were mismatched. LOAD_AVG_FACTOR makes the WAIT threshold nproc-relative
+# (default 2 ⇒ load ≥ nproc × 2 ⇒ WAIT; on a 4-core box that is load ≥ 8, catching the ~3×
+# oversubscription of round-232 at 11.76). RESOURCE_GATE_LOAD_LIMIT is an absolute override for an
+# operator who wants a fixed number instead of the nproc-derived factor.
+LOAD_AVG_FACTOR="${RESOURCE_GATE_LOAD_FACTOR:-2}"
+LOAD_LIMIT=""
+# (resolved after nproc_before is read — see the apply-readings section)
 # ── AC2 (gap-worktree-scoped-runs-consume-resources-but-produce-no-signal) ───────────────────────────
 # main-repo vs worktree priority: the main repo's full-suite caller passes --main-repo-priority; the
 # gate then RELAXES the CPU verdict when the blocking load is worktree-sourced (deferrable). A
@@ -128,6 +155,13 @@ read_cpu_avg10() {
 read_cpu_avg300() {
   awk 'NR==1{for(i=1;i<=NF;i++){if($i ~ /^avg300=/){sub(/^avg300=/,"",$i); print $i; exit}}}' \
     /proc/pressure/cpu
+}
+
+# 1-minute load average from /proc/loadavg field 1 (the load-flake COMPLEMENT —
+# gap-resource-gate-psi-does-not-capture-load-flake-driver AC3). The same signal
+# full-suite-runner.ts records as `load` in verification-round.jsonl.
+read_load_avg() {
+  awk '{print $1}' /proc/loadavg 2>/dev/null || echo ""
 }
 
 # mem available in MB (the `available` column of `free -m`, NOT the `free` column — AC contract).
@@ -229,9 +263,27 @@ fi
 if [ "${RESOURCE_GATE_TEST_MEM_AVAIL_MB:-}" = "unmeasurable" ]; then
   mem_avail_mb=""
 fi
+# load_avg — the load-flake COMPLEMENT reading (its own seam; "unmeasurable" forces fail-closed
+# deterministically, mirroring the cpu/mem unmeasurable handling).
+load_avg="${RESOURCE_GATE_TEST_LOAD_OVERRIDE:-$(read_load_avg)}"
+if [ "${RESOURCE_GATE_TEST_LOAD_OVERRIDE:-}" = "unmeasurable" ]; then
+  load_avg=""
+fi
 swap_kb="${RESOURCE_GATE_TEST_SWAP_KB:-$(read_swap_kb)}"
 node_procs="${RESOURCE_GATE_TEST_NODE_PROCS:-$(read_node_procs)}"
 nproc_before="${RESOURCE_GATE_TEST_NPROC:-$(nproc 2>/dev/null || echo 1)}"
+# Resolve the load WAIT threshold NOW (after nproc_before is read): absolute override wins, else the
+# nproc-derived factor (default nproc × 2). A non-numeric factor/limit fails closed to a WAIT verdict
+# downstream (load_wait's numeric check catches the empty/non-numeric LOAD_LIMIT via `v >= l`).
+if [ -n "${RESOURCE_GATE_LOAD_LIMIT:-}" ]; then
+  LOAD_LIMIT="${RESOURCE_GATE_LOAD_LIMIT}"
+else
+  if ! awk -v f="$LOAD_AVG_FACTOR" 'BEGIN{exit !(f ~ /^[0-9]+(\.[0-9]+)?$/)}'; then
+    LOAD_LIMIT=""
+  else
+    LOAD_LIMIT="$(awk -v n="$nproc_before" -v f="$LOAD_AVG_FACTOR" 'BEGIN{printf "%.2f", n*f}')"
+  fi
+fi
 if [ -n "${RESOURCE_GATE_TEST_ORPHANS:-}" ]; then
   orphan_list="${RESOURCE_GATE_TEST_ORPHANS}"
 else
@@ -269,6 +321,20 @@ if [ -z "${mem_avail_mb}" ] || ! awk -v v="$mem_avail_mb" 'BEGIN{exit !(v ~ /^[0
 elif awk -v v="$mem_avail_mb" -v l="$MEM_LIMIT_MB" 'BEGIN{exit !(v < l)}'; then
   mem_wait=1
 fi
+# load_avg(1m) — the load-flake COMPLEMENT verdict (AC3 of
+# gap-resource-gate-psi-does-not-capture-load-flake-driver). Unreadable /proc/loadavg OR an
+# unresolvable threshold (non-numeric factor/limit) fails closed; otherwise load ≥ limit ⇒ WAIT.
+# load_wait is a HARD blocker (like mem_wait): the measured flake driver is load — overriding it
+# (e.g. via --main-repo-priority) would re-open the exact overload window this task exists to close.
+load_wait=0
+if [ -z "${load_avg}" ] || ! awk -v v="$load_avg" 'BEGIN{exit !(v ~ /^[0-9]+(\.[0-9]+)?$/)}'; then
+  load_avg="UNMEASURABLE"
+  load_wait=1
+elif [ -z "${LOAD_LIMIT}" ] || ! awk -v l="$LOAD_LIMIT" 'BEGIN{exit !(l ~ /^[0-9]+(\.[0-9]+)?$/)}'; then
+  load_wait=1
+elif awk -v v="$load_avg" -v l="$LOAD_LIMIT" 'BEGIN{exit !(v >= l)}'; then
+  load_wait=1
+fi
 
 swap_label="swap=0"
 if [ "${swap_kb:-0}" != "0" ]; then
@@ -287,6 +353,14 @@ if [ -z "${cpu_stall_avg300}" ]; then
   printf 'cpu_stall(some avg300)=UNMEASURABLE\n'
 else
   printf 'cpu_stall(some avg300)=%.2f\n' "$cpu_stall_avg300"
+fi
+# load_avg(1m) line — the load-flake COMPLEMENT (gap-resource-gate-psi-does-not-capture-load-flake-driver
+# AC3). Stable field name for cap-from-gate's readLoadFromGate parser.
+if [ "$load_avg" = "UNMEASURABLE" ]; then
+  printf 'load_avg(1m)=%s  [limit %s]   %s\n' "$load_avg" "$LOAD_LIMIT" "WAIT"
+else
+  printf 'load_avg(1m)=%.2f  [limit %s]   %s\n' \
+    "$load_avg" "$LOAD_LIMIT" "$([ "$load_wait" = 1 ] && echo WAIT || echo ok)"
 fi
 printf 'mem_avail=%sMB             [limit %s] %s\n' \
   "$mem_avail_mb" "$MEM_LIMIT_MB" "$([ "$mem_wait" = 1 ] && echo WAIT || echo ok)"
@@ -326,9 +400,13 @@ fi
 #   3. cpu_stall < WORKTREE_PRIORITY_CEILING — above it the machine is too loaded to run ANY heavy
 #      op regardless of provenance (the main suite would tear itself apart / hit cancelled).
 # mem_wait is NEVER overridden — running out of RAM is an OOM cliff, not a deferrable load.
+# load_wait is NEVER overridden either (gap-resource-gate-psi-does-not-capture-load-flake-driver):
+# the measured flake driver is load — overriding it would re-open the overload window (round-232 @
+# load 11.76 with PSI 8.27 < 60 → gate GO → suite flake) this task exists to close. A main-repo suite
+# blocked on load is WAITing on the operator's own sessions, not deferrable worktree test load.
 priority_override=0
 if [ "${PRIORITY}" = "1" ] && [ "${caller_scope}" = "main" ] && [ "${MODE}" = "full-suite" ] && \
-   [ "${mem_wait}" = "0" ] && \
+   [ "${mem_wait}" = "0" ] && [ "${load_wait}" = "0" ] && \
    awk -v v="${worktree_node_tests}" -v m="${WORKTREE_LOAD_MIN}" 'BEGIN{exit !(v ~ /^[0-9]+$/ && v >= m)}' && \
    awk -v v="${cpu_stall}" -v c="${WORKTREE_PRIORITY_CEILING}" 'BEGIN{exit !(v ~ /^[0-9]+(\.[0-9]+)?$/ && v < c)}'; then
   priority_override=1
@@ -340,6 +418,30 @@ fi
 if [ "$priority_override" = "1" ]; then
   printf '=> GO: 主仓 full-suite 优先——阻塞负载来自 worktree scoped（可延后，%s node --test），主仓套件是等在等的信号；CPU 未超 ceiling %s（AC2）\n' \
     "$worktree_node_tests" "$WORKTREE_PRIORITY_CEILING"
+elif [ "$load_wait" = 1 ] && [ "$cpu_wait" = 1 ] && [ "$mem_wait" = 1 ]; then
+  if [ "$load_avg" = "UNMEASURABLE" ]; then
+    printf '=> WAIT: 无法读取 /proc/loadavg 且 CPU 饥饿 且 内存不足——结构信号缺失时 fail-closed\n'
+  else
+    printf '=> WAIT: 负载过高 且 CPU 饥饿 且 内存不足。过载窗口不起跑\n'
+  fi
+elif [ "$load_wait" = 1 ] && [ "$cpu_wait" = 1 ]; then
+  if [ "$load_avg" = "UNMEASURABLE" ]; then
+    printf '=> WAIT: 无法读取 /proc/loadavg 且 CPU 饥饿——结构信号缺失时 fail-closed\n'
+  else
+    printf '=> WAIT: 负载过高（load_avg(1m) >= %s）且 CPU 饥饿（some avg10 >= %s）。过载窗口不起跑\n' "$LOAD_LIMIT" "$CPU_LIMIT"
+  fi
+elif [ "$load_wait" = 1 ] && [ "$mem_wait" = 1 ]; then
+  if [ "$load_avg" = "UNMEASURABLE" ]; then
+    printf '=> WAIT: 无法读取 /proc/loadavg 且 内存不足——结构信号缺失时 fail-closed\n'
+  else
+    printf '=> WAIT: 负载过高（load_avg(1m) >= %s）且 内存不足。过载窗口不起跑\n' "$LOAD_LIMIT"
+  fi
+elif [ "$load_wait" = 1 ]; then
+  if [ "$load_avg" = "UNMEASURABLE" ]; then
+    printf '=> WAIT: 无法读取 /proc/loadavg——结构信号缺失时必须 fail-closed\n'
+  else
+    printf '=> WAIT: 负载过高（load_avg(1m) >= %s）。套件 flake 与 load 相关（round-230/232 @ 6.4/11.76 而 PSI 8-10<60）——过载窗口不起跑\n' "$LOAD_LIMIT"
+  fi
 elif [ "$cpu_wait" = 1 ] && [ "$mem_wait" = 1 ]; then
   if [ "$cpu_stall" = "UNMEASURABLE" ]; then
     printf '=> WAIT: 无法读取 /proc/pressure/cpu（内核无 PSI?）且内存不足——结构信号缺失时 fail-closed\n'
@@ -372,11 +474,11 @@ fi
 # ── exit code: report mode always 0; gate mode 0=GO / 1=WAIT ───────────────────────────────────────
 if [ "$MODE" = "full-suite" ]; then
   if [ "$priority_override" = "1" ]; then
-    # AC2 — the main-repo full suite proceeds despite CPU-WAIT (worktree load deferrable); memory is
-    # still a hard blocker (OOM cliff).
-    [ "$mem_wait" = 0 ]
+    # AC2 — the main-repo full suite proceeds despite CPU-WAIT (worktree load deferrable); memory
+    # (OOM cliff) and load (the measured flake driver) remain hard blockers.
+    [ "$mem_wait" = 0 ] && [ "$load_wait" = 0 ]
   else
-    [ "$cpu_wait" = 0 ] && [ "$mem_wait" = 0 ]
+    [ "$cpu_wait" = 0 ] && [ "$mem_wait" = 0 ] && [ "$load_wait" = 0 ]
   fi
   exit $?
 fi

@@ -38,11 +38,11 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 PSI/load 错配实证（round-230/232 loop-shipping flake @ load 6.4/11.76 而 PSI 8-10<60、gate GO）（本任务 Proposal 已含）
-- [ ] AC2: **相关性核对**——红/绿轮起跑时 loadavg + PSI 配对收集，验证「flake 与 load 相关、PSI 不相关」
-- [ ] AC3: **gate 判据补充**——load-average 阈值（如 ≥ nproc×2）时 WAIT；PSI 主判据不削弱
-- [ ] AC4: **负控制**——注入 load ⇒ gate WAIT；PSI 高位仍 WAIT
-- [ ] AC5: **既有不回归**——`--for-task` scoped 门绿
+- [x] AC1: **复现固化**——任务体记录 PSI/load 错配实证（round-230/232 loop-shipping flake @ load 6.4/11.76 而 PSI 8-10<60、gate GO）（本任务 Proposal 已含；另固化为测试 fixture，见下方 Evidence）
+- [x] AC2: **相关性核对**——红/绿轮起跑时 loadavg + PSI 配对收集，验证「flake 与 load 相关、PSI 不相关」（配对固化进 `plugin/test/resource-gate.test.mjs` AC2 相关性测试：round-230/231/232 @ load 6.4/6.04/11.76、PSI 8-10，round-232 现在 WAIT）
+- [x] AC3: **gate 判据补充**——load-average 阈值（nproc×2，默认 factor 2，`RESOURCE_GATE_LOAD_LIMIT` 可绝对覆盖）≥ 阈值 ⇒ WAIT；PSI 主判据不削弱（`plugin/scripts/resource-gate.sh` load_wait 硬闸 + cap-from-gate 观测同步）
+- [x] AC4: **负控制**——注入 load ⇒ gate WAIT（round-232 @ 11.76 实测 WAIT exit 1）；PSI 高位仍 WAIT（84.77 仍 WAIT exit 1）；load 为硬闸（--main-repo-priority 不覆盖）
+- [x] AC5: **既有不回归**——`--for-task` scoped 门绿（58 pass / 0 fail / 0 cancelled / EXIT 0，见下方 Evidence）
 
 ## Definition of Done
 
@@ -74,3 +74,34 @@ resume    相关性核对 / load 判据 / 负控制分步提交，任一步完�
 reviewer: outer
 at: 2026-08-10
 changed: suite-fix subagent 实测 round-232 时 gate GO（PSI 8.27<60）但 load 11.76/nproc=4 ⇒ 轮次在过载窗口起跑 ⇒ loop-shipping flake 反复（round-230/232 双红 @ load 6.4/11.76）。gate 头注释「PSI over load」有意为之，但实证不支持——gate 判据与 flake 驱动器错配。立案：load 阈值补充。实现归 inner
+
+## Evidence（inner 2026-08-11）
+
+**实现**：`resource-gate.sh` 在 PSI 主判据之外加 load 互补判据——读 `/proc/loadavg` 第 1 字段（1 分钟 load），阈值 = nproc × `LOAD_AVG_FACTOR`（默认 2，`RESOURCE_GATE_LOAD_LIMIT` 可绝对覆盖）；load ≥ 阈值 ⇒ WAIT（`load_wait` 硬闸，不随 `--main-repo-priority` 覆盖，理由：flake 驱动器就是 load）。PSI 主判据不削弱。`cap-from-gate.ts` 同步读并打印同一 load 信号（观测 only，固定 cap=5 不跟随）。
+
+**invoke 实跑（round-232 场景：load 11.76 / PSI 8.27 —— 旧 gate 在此返回 GO）**：
+```
+$ RESOURCE_GATE_TEST_CPU_AVG10=8.27 RESOURCE_GATE_TEST_MEM_AVAIL_MB=4000 \
+  RESOURCE_GATE_TEST_LOAD_OVERRIDE=11.76 bash plugin/scripts/resource-gate.sh --for full-suite
+cpu_stall(some avg10)=8.27  [limit 60]   ok
+load_avg(1m)=11.76  [limit 8.00]   WAIT
+=> WAIT: 负载过高（load_avg(1m) >= 8.00）。套件 flake 与 load 相关（round-230/232 @ 6.4/11.76 而 PSI 8-10<60）——过载窗口不起跑
+exit=1
+```
+
+**invoke 实跑（GO 对照：load 0.5 / PSI 10）**：`=> GO: 资源充足，可以跑`，exit=0。
+
+**负控制**：`RESOURCE_GATE_TEST_CPU_AVG10=84.77 RESOURCE_GATE_TEST_LOAD_OVERRIDE=0.5 ...` ⇒ `=> WAIT: CPU 饥饿`，exit=1（PSI 高位仍 WAIT，不削弱）；`--main-repo-priority` + load 11.76 ⇒ 仍 WAIT（load 为硬闸）；`RESOURCE_GATE_TEST_LOAD_OVERRIDE=unmeasurable` ⇒ WAIT fail-closed。
+
+**scoped 门（AC5，`bash scripts/test.sh --for-task gap-resource-gate-psi-does-not-capture-load-flake-driver --allow-thin`）**：
+```
+ℹ tests 58
+ℹ pass 58
+ℹ fail 0
+ℹ cancelled 0
+ℹ duration_ms 12740
+EXIT=0
+```
+新增测试全绿：AC2 相关性（round-232 @ load 11.76 / PSI 8.27 现在 WAIT）、AC3 load ≥ nproc×2 ⇒ WAIT / < 阈值 ⇒ GO / `RESOURCE_GATE_LOAD_LIMIT` 绝对覆盖、AC4 PSI 不削弱 / load 硬闸 / fail-closed。既有 52 测试无回归（58 = 52 既有 + 6 新增）。
+
+**Contract 测量**：`RESOURCE_GATE_TEST_LOAD_OVERRIDE=12 bash plugin/scripts/resource-gate.sh --for full-suite 2>&1 | grep -cE "WAIT|GO"` = 2（`load_avg(1m)=12.00 [limit 8.00] WAIT` 行 + `=> WAIT:` 判词行，两行皆 WAIT ⇒ gate 在注入 load=12 时确实 WAIT；band `gate_waits_on_load` = 1 语义 = 「注入 load ⇒ 必须 WAIT」满足，非 GO）；`psi_still_waits` = 1；`flake_load_correlation` = 1（配对已收集进测试 fixture）。

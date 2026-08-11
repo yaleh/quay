@@ -35,6 +35,14 @@
 // dispatch actuator is 25-min ticks / 15-90-min subagents, and 2 same-direction readings across
 // dispatch points means sustained load, not a transient burst.
 //
+// LOAD COMPLEMENT (gap-resource-gate-psi-does-not-capture-load-flake-driver AC3, 2026-08-11): the
+// resource-gate.sh full-suite gate now ALSO WAITs on load_avg(1m) ≥ nproc×2 — the empirical suite
+// flakes correlate with load (rounds 230/232 at load 6.4/11.76 while PSI some avg10 sat at 8-10 < 60,
+// gate GO). This helper reads and prints the same load_avg(1m) (via resource-gate report mode —
+// single source) so the dispatch point OBSERVES the load criterion the suite gate enforces. Like
+// every band/budget field, the load is OBSERVATION ONLY — effective_cap stays the FIXED 5; it does
+// not follow load (the fixed-cap retirement stands).
+//
 // MECHANISM / STRATEGY separation (manager correction 2026-08-05):
 //   MECHANISM (this file — quay-shipped, downstream adopts via the upgrade channel, never re-invented):
 //     - read cpu `some avg10` at the dispatch point (via resource-gate.sh report mode — single source)
@@ -281,6 +289,21 @@ export function readCpuStallFromGate(repoRoot: string, env: NodeJS.ProcessEnv = 
   return Number.isFinite(v) ? v : null;
 }
 
+/** Read the load_avg(1m) complement from resource-gate.sh REPORT mode (single source — the gate owns
+ *  the /proc/loadavg read + its test seams). Returns null when UNMEASURABLE. gap-resource-gate-psi-
+ *  does-not-capture-load-flake-driver AC3: the gate WAITs on load ≥ nproc×2; here the load is OBSERVED
+ *  at the dispatch point (the same single-source pattern as cpu_stall) but — like every band/budget
+ *  field — participates in NO decision (the effective_cap is the FIXED 5). */
+export function readLoadFromGate(repoRoot: string, env: NodeJS.ProcessEnv = process.env): number | null {
+  const gate = path.join(repoRoot, "plugin", "scripts", "resource-gate.sh");
+  const res = spawnSync("bash", [gate], { cwd: repoRoot, encoding: "utf8", env });
+  if (res.status !== 0) return null;
+  const m = `${res.stdout}\n${res.stderr}`.match(/load_avg\(1m\)=([0-9.]+|UNMEASURABLE)/);
+  if (!m || m[1] === "UNMEASURABLE") return null;
+  const v = Number(m[1]);
+  return Number.isFinite(v) ? v : null;
+}
+
 /** The cap decision. RETIRED as a dynamic decision (gap-fixed-cap-5-dynamic-cap-retired): the
  *  effective_cap returned is the FIXED constant 5; the band/consecutive/budget fields are OBSERVATION
  *  only (printed by main() so the load is visible) and participate in no decision. `stateFile` defaults
@@ -301,6 +324,7 @@ export function computeEffectiveCap(opts: {
   consecutive: number;
   switched: boolean;
   cpu_stall: number | null;
+  load_avg: number | null;
   stateFile: string;
   budget_available: number | null;
   budget_total: number | null;
@@ -312,6 +336,7 @@ export function computeEffectiveCap(opts: {
   const samples = opts.samples ?? HYSTERESIS_SAMPLES_DEFAULT;
   const now = opts.now ?? Date.now();
   const cpuStall = readCpuStallFromGate(repoRoot, env);
+  const loadAvg = readLoadFromGate(repoRoot, env);
   const desired = computeDesiredBand(cpuStall);
   const loaded = loadState(stateFile);
   const { band, consecutive, switched } = applyHysteresis(loaded, desired, samples, now);
@@ -337,6 +362,7 @@ export function computeEffectiveCap(opts: {
     consecutive,
     switched,
     cpu_stall: cpuStall,
+    load_avg: loadAvg,
     stateFile,
     budget_available: budget?.available ?? null,
     budget_total: budget?.total_budget ?? null,
@@ -368,6 +394,9 @@ function main(argv: string[]): number {
   const avg = result.cpu_stall === null ? "UNMEASURABLE" : result.cpu_stall.toFixed(2);
   console.log(
     `signal: cpu_stall(some avg10)=${avg}  bands(go<${WAIT_THRESHOLD}, wait<${EXTREME_THRESHOLD}, extreme>=${EXTREME_THRESHOLD})`,
+  );
+  console.log(
+    `load: load_avg(1m)=${result.load_avg === null ? "unreadable" : result.load_avg.toFixed(2)}  [resource-gate load complement — observation only; the fixed cap does not follow it]`,
   );
   console.log(
     `band: ${result.band}  desired=${result.desired}  consecutive=${result.consecutive}/${samples}  switched=${result.switched ? "yes" : "no"}`,
