@@ -6,8 +6,11 @@ status: todo
 labels:
   - gap
   - defect
-parent: null
-children: []
+  - gap-pool-quality-semantic-gate
+  - gap-apply-promotes-b15-needs-work-tasks
+parent: gap-pool-quality-semantic-gate
+children:
+  - gap-apply-promotes-b15-needs-work-tasks
 extra:
   poolQualityVerdict: needs-work
 ---
@@ -34,9 +37,9 @@ ADR-033 语义闸（`pool-quality-judge` workflow 判 `ready`/`needs-work`/`shou
 
 ## AC（draft）
 
-- [ ] 机制缺口被正式记录并有一条可执行路径（任一选项落地：outer 驱动 inner 改 todo / 判词语义修订 / 明确 parked）
-- [ ] 两个 B15-blocked todo 的最终处置有决策记录（实现 / 撤出 / 明确悬置理由）
-- [ ] 与 `gap-pool-quality-semantic-gate`（判词生产）、`gap-apply-promotes-b15-needs-work-tasks`（B15 消费端）交叉标注
+- [x] 机制缺口被正式记录并有一条可执行路径（任一选项落地：outer 驱动 inner 改 todo / 判词语义修订 / 明确 parked）
+- [x] 两个 B15-blocked todo 的最终处置有决策记录（实现 / 撤出 / 明确悬置理由）
+- [x] 与 `gap-pool-quality-semantic-gate`（判词生产）、`gap-apply-promotes-b15-needs-work-tasks`（B15 消费端）交叉标注
 
 ## DoD（draft）
 
@@ -51,3 +54,23 @@ ADR-033 语义闸（`pool-quality-judge` workflow 判 `ready`/`needs-work`/`shou
 - judge remediation「dispatch to implement ACs」vs verdict=needs-work（wf_59513f29-b3c journal，escalations.md 19:30Z entry）
 - 两任务 frontmatter `extra: {poolQualityVerdict: needs-work}`（2026-08-11 19:30Z outer producer）
 - escalation：`orchestration/escalations.md` 2026-08-11 19:52Z entry
+
+
+## 处置证据（inner 2026-08-11 ~21:1xZ，escalation ① 执行）
+
+**AC1 落地**：escalation ① = outer 直接驱动 inner 改 todo（19:52Z escalation 选项 1）已执行——inner 按 judge
+remediation advice 实现两个 needs-work todo 的实现路径，不依赖 promote 路。机制缺口（无实现路径）由此闭环：
+B15 needs-work todo 现在有「outer 直接指派 → inner 实现 → B15 judge 复核」的可执行路由。
+
+**AC2 处置记录**：
+- **gap-supervisor-deliver-no-wait-for-idle-retry** → **实现完成** @ `9bae86a5`（scoped 66/66）：can-receive 门接入
+  投递前置（pane-state-classify 判 waiting-input；busy → 有界等待/重试 RELIABLE_WAIT_IDLE_S=20/轮 1s；超限
+  fail loud 不发送）。新状态：todo（work 已落地于 worktree 分支，待 B15 judge 复核后 fan-in）。
+- **gap-over90-clock-measures-queue-time-not-work-time** → **实现完成** @ `1b1c6943`（scoped 99/99）：work-clock
+  分离（`--work-start` marker + OVER90 读 workStartedAtMs）；负控制 defer-80+work-20 不触发。新状态：todo
+  （work 已落地于 worktree 分支，待 B15 judge 复核后 fan-in；dispatch-loop `--work-start` 接线为 follow-up）。
+
+**AC3 交叉标注**：frontmatter labels + parent/children 已指向 `gap-pool-quality-semantic-gate`（判词生产）与
+`gap-apply-promotes-b15-needs-work-tasks`（B15 消费端）。
+
+**待外层**：重跑 B15 judge 复核两 todo 的实现；复核通过后 fan-in + closure。
