@@ -280,6 +280,26 @@ export function classifyPaneStateOrthogonal(paneText: string, opts: { lines?: nu
   return { input_state, work_in_flight, region, raw: region };
 }
 
+// ── can-receive (gap-supervisor-deliver-no-wait-for-idle-retry) ─────────────────────────────────────
+// The delivery pre-flight predicate: "can the target's main thread accept typed input RIGHT NOW".
+// supervisor-deliver.sh / send-keys-reliable.sh used to send to a busy/thinking target — text
+// entered the input box but was never committed, so the one-shot send→verify failed every time
+// (measured 2026-08-06). The delivery path now runs this can-receive judgment BEFORE any keystroke.
+// It is the SAME shape classifier session-liveness uses for its busy/idle verdict — the repo's idle
+// judgment is single-sourced here, never duplicated in a consumer (the fix direction's
+// "与 session-liveness 的 idle 判定同源").
+export const DEFAULT_CAN_RECEIVE_WAIT_S = 30;
+export const DEFAULT_CAN_RECEIVE_POLL_S = 2;
+
+/** Pure can-receive predicate — waiting-input is the ONLY receivable state. Reads input_state from
+ * the orthogonal view (classifyPaneStateOrthogonal) so a status-line-only pane (input idle +
+ * background agents — the measured real pane from gap-pane-classify-needs-two-orthogonal-dimensions)
+ * is correctly receivable instead of tier-2 unknown. Every other state (busy / permission-prompt /
+ * error-banner / unknown) is NOT receivable — keystrokes to them land unsubmitted. */
+export function canReceiveInput(paneText: string, opts: { lines?: number } = {}): boolean {
+  return classifyPaneStateOrthogonal(paneText, opts).input_state === "waiting-input";
+}
+
 // ── --check-residue mode (tasks/gap-residue-check-crystallized-as-tool-mode) ─────────────────────
 // "box has text vs actually submitted" must be a TOOL judgment, not role memory (human ruling
 // 2026-08-05, relayed by the manager). The distinguishing criterion is the C-u CLEARING BEHAVIOR
@@ -484,6 +504,85 @@ export function runCheckResidue(argv: string[]): number {
 
   const probe = probeResidueTarget(arg, maxClicks);
   return emit({ ...probe, target: arg, maxClicks }, probe.state === "unknown" ? 1 : 0);
+}
+
+// ── --can-receive mode (gap-supervisor-deliver-no-wait-for-idle-retry) ──────────────────────────────
+// The delivery pre-flight seam. Captures the target pane via tmux (bare `tmux` — resolves via
+// TMUX_TMPDIR, the SAME socket the send path uses) and answers "is the target receivable?"
+// (waiting-input only). A non-receivable target is FAIL CLOSED — the pre-flight gate stops the
+// delivery before any keystroke (the delivery scripts upgrade this to a bounded wait/retry by
+// passing --wait/--poll, see runCanReceiveWait). Same runtime-probe family as probeResidueTarget (a
+// runtime probe; NOT part of the pure classify path).
+//   stdout: the observed input_state ("waiting-input" on success)
+//   exit 0 = receivable · 1 = not receivable / capture failure (fail closed) · 2 = usage
+export function runCanReceive(argv: string[]): number {
+  const positional = argv.filter((a) => !a.startsWith("--"));
+  const target = positional[0];
+  if (!target) {
+    process.stderr.write("usage: pane-state-classify.ts --can-receive <tmux目标>\n");
+    return 2;
+  }
+  const cap = spawnSync("tmux", ["capture-pane", "-p", "-t", target], { encoding: "utf8" });
+  if (cap.status !== 0 || (cap.stdout ?? "").trim() === "") {
+    process.stderr.write(
+      `can-receive: 捕获目标 ${target} 失败/为空——fail closed，不发送（AC5 同源守卫：无内容不判可接收）\n`,
+    );
+    process.stdout.write("unknown\n");
+    return 1;
+  }
+  const o = classifyPaneStateOrthogonal(cap.stdout ?? "");
+  process.stdout.write(o.input_state + "\n");
+  return o.input_state === "waiting-input" ? 0 : 1;
+}
+
+// ── --can-receive-wait mode (gap-supervisor-deliver-no-wait-for-idle-retry, step 2) ───────────────
+// The delivery scripts' BOUNDED WAIT/retry: re-judge `--can-receive` every `--poll` seconds up to
+// `--wait` seconds — the target usually turns waiting-input on its own once its current action
+// finishes, so a busy target is waited on (not failed immediately). Single-sourced here so
+// supervisor-deliver.sh and send-keys-reliable.sh share one loop instead of duplicating it (the
+// fix direction's 有界等待/每轮重判). A bound expiry is fail loud (needs human) — never a silent
+// send to a still-busy target, never an immediate false FAIL to a busy-but-about-to-idle one.
+//   stdout: the last observed input_state ("waiting-input" on success)
+//   exit 0 = became receivable · 1 = not receivable within the bound · 2 = usage
+//   --wait <s>  bounded wait cap (default DEFAULT_CAN_RECEIVE_WAIT_S)
+//   --poll <s>  re-judge interval (default DEFAULT_CAN_RECEIVE_POLL_S)
+export function runCanReceiveWait(argv: string[]): number {
+  const positional = argv.filter((a) => !a.startsWith("--"));
+  const flagValue = (name: string): string | undefined => {
+    const i = argv.indexOf(name);
+    return i !== -1 ? argv[i + 1] : undefined;
+  };
+  const target = positional[0];
+  if (!target) {
+    process.stderr.write(
+      "usage: pane-state-classify.ts --can-receive-wait <tmux目标> [--wait <s>] [--poll <s>]\n",
+    );
+    return 2;
+  }
+  const waitRaw = flagValue("--wait");
+  const pollRaw = flagValue("--poll");
+  const waitS = waitRaw ? Number(waitRaw) : DEFAULT_CAN_RECEIVE_WAIT_S;
+  const pollS = pollRaw ? Number(pollRaw) : DEFAULT_CAN_RECEIVE_POLL_S;
+  const deadline = Date.now() + waitS * 1000;
+  let lastState = "unknown";
+  while (Date.now() < deadline) {
+    const cap = spawnSync("tmux", ["capture-pane", "-p", "-t", target], { encoding: "utf8" });
+    if (cap.status === 0 && (cap.stdout ?? "").trim() !== "") {
+      const o = classifyPaneStateOrthogonal(cap.stdout ?? "");
+      lastState = o.input_state;
+      if (lastState === "waiting-input") {
+        process.stdout.write("waiting-input\n");
+        return 0;
+      }
+    }
+    // Not receivable yet (or a transient capture failure) — re-judge after the poll interval.
+    if (pollS > 0) spawnSync("sleep", [String(pollS)], { stdio: "ignore" });
+  }
+  process.stdout.write(lastState + "\n");
+  process.stderr.write(
+    `can-receive: 目标 ${target} 在 ${waitS}s 内未转为 waiting-input（最后状态 ${lastState}）——fail loud 需人工\n`,
+  );
+  return 1;
 }
 
 // ── in-file self-check (ADR-018 pattern: prove BOTH the RED and GREEN paths) ──────────────────────
@@ -799,6 +898,10 @@ if (isDirect) {
       process.stdout.write(r.state + "\n" + r.region + "\n");
     }
     process.exit(0);
+  } else if (args[0] === "--can-receive") {
+    process.exit(runCanReceive(args.slice(1)));
+  } else if (args[0] === "--can-receive-wait") {
+    process.exit(runCanReceiveWait(args.slice(1)));
   } else if (args[0] === "--check-residue") {
     process.exit(runCheckResidue(args.slice(1)));
   } else {

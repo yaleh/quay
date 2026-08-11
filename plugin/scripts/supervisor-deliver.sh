@@ -151,6 +151,25 @@ if ! DRIVE_EXPECT_WINDOW_NAME="${DRIVE_EXPECT_WINDOW_NAME:-inner}" bash "$SELF_D
   exit 1
 fi
 
+# ── can-receive pre-flight (gap-supervisor-deliver-no-wait-for-idle-retry) ──────────
+# Same bounded can-receive wait as send-keys-reliable.sh's step 0: the fresh path does its own direct
+# send-keys, so it runs the check HERE rather than delegating. The judgment is the SAME
+# pane-state-classify `--can-receive-wait` seam (waiting-input is the only receivable state; a
+# non-receivable target is waited on — bounded, re-judge each round — and only a bound expiry fails
+# loud, needs human). A freshly re-spawned session that has not rendered its prompt yet is waited on,
+# never blindly driven. SUPERVISOR_DELIVER_CAN_RECEIVE_WAIT_S / _POLL_S bound the wait.
+CAN_RECEIVE_WAIT_S="${SUPERVISOR_DELIVER_CAN_RECEIVE_WAIT_S:-30}"
+CAN_RECEIVE_POLL_S="${SUPERVISOR_DELIVER_CAN_RECEIVE_POLL_S:-2}"
+if [ ! -f "$SELF_DIR/pane-state-classify.ts" ]; then
+  echo "supervisor-deliver: 缺少分类器 $SELF_DIR/pane-state-classify.ts——无法判定目标可接收，fail loud" >&2
+  exit 1
+fi
+if ! node --experimental-strip-types "$SELF_DIR/pane-state-classify.ts" --can-receive-wait "$TARGET" --wait "$CAN_RECEIVE_WAIT_S" --poll "$CAN_RECEIVE_POLL_S"; then
+  echo "supervisor-deliver: 目标 $TARGET 在 ${CAN_RECEIVE_WAIT_S}s 内未转为 waiting-input——fail loud 需人工，不发送（不假装送达）" >&2
+  exit 1
+fi
+echo "supervisor-deliver: 目标 $TARGET 可接收（waiting-input）——继续投递" >&2
+
 # Direct reliable send: fresh session has nothing to clear → C-u (harmless), literal text, Enter.
 tmux send-keys -t "$TARGET" C-u 2>/dev/null || true
 sleep 0.5
