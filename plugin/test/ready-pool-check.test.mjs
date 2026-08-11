@@ -562,6 +562,85 @@ test("AC-complete signal is a UNION not a replace: partial/zero/non-ready NOT su
   assert.equal(notYetFlipped(pending, root), false, "neither signal fires → stays in the pool");
 });
 
+// ── no-AC-section fallback (gap-git-history-landed-master-stale-under-two-line-model AC4) ──────────
+// A task with NO `## Acceptance Criteria` checkboxes (total=0) is STRUCTURALLY unable to tick ACs:
+// allAcsChecked is恒 false, so it could never be a done-flip through the checkbox signals and would
+// sit in the ready pool forever (measured 2026-08-11: last-pane / suite-red — the closure probe's
+// systematic undercount). The fallback: when its work HAS landed, the landing itself is its closeout
+// signal — total===0 joins the all-checked / >50% gate. A no-AC task whose work has NOT landed stays
+// dispatchable (stuck-work protection intact).
+
+test("no-AC-section fallback: landed no-AC task is a done-flip; unlanded no-AC task stays in the pool (AC4)", (t) => {
+  const root = makeWorkspace("no-ac");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // Work landed via a (new)-marked touch file that now exists → no-AC task is a done-flip candidate.
+  fs.writeFileSync(path.join(root, "code", "last-pane.ts"), "export const lastPane = 1;\n");
+  const landedNoAc = {
+    status: "ready",
+    body: "## Touches\n- code/last-pane.ts (new)\n## Definition of Done\nstandard",
+  };
+  assert.equal(notYetFlipped(landedNoAc, root), true,
+    "no-AC task whose work has landed is a done-flip candidate (AC4)");
+  // Work NOT landed → no-AC task stays in the dispatchable pool.
+  const unlandedNoAc = {
+    status: "ready",
+    body: "## Touches\n- code/never.ts (new)\n## Definition of Done\nstandard",
+  };
+  assert.equal(notYetFlipped(unlandedNoAc, root), false,
+    "no-AC task whose work has NOT landed stays in the pool (AC4)");
+  // A no-AC section entirely ABSENT (extractSection → null) behaves the same as prose-with-no-boxes.
+  const noAcSection = {
+    status: "ready",
+    body: "## Proposal\nA real proposal paragraph that is more than forty non-whitespace chars.\n## Touches\n- code/never.ts (new)\n",
+  };
+  assert.equal(notYetFlipped(noAcSection, root), false,
+    "absent AC section + unlanded work stays in the pool (AC4)");
+});
+
+test("ready pool: a no-AC task whose work lands on INTEGRATION is a done-flip (two-line model + AC4)", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `ready-pool-2line-${Date.now()}-`));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  fs.mkdirSync(path.join(root, "code"), { recursive: true });
+  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  git("init", "-b", "master", "-q", ".");
+  git("config", "user.email", "test@example.com");
+  git("config", "user.name", "Test");
+  fs.writeFileSync(path.join(root, ".gitkeep"), "base\n");
+  git("add", ".");
+  git("commit", "-q", "-m", "init");
+  // Two-line model: the working line is integration (master stays stale behind it).
+  git("checkout", "-q", "-b", "integration");
+  // A no-AC task: no ## Acceptance Criteria section — structurally unable to tick ACs.
+  writeTask(root, "gap-last-pane-telemetry", {
+    status: "ready",
+    labels: ["gap"],
+    body: [
+      "**type:** execution",
+      "## Proposal",
+      "A real proposal paragraph that is definitely more than forty non-whitespace chars.",
+      "## Touches",
+      "- code/last-pane.ts",
+      "## Definition of Done",
+      "standard DoD — the five clauses; meta-enforcer fixture-pinned.",
+    ].join("\n"),
+  });
+  // Land the work on integration via a fan-in merge that references the task.
+  git("checkout", "-q", "-b", "task/gap-last-pane");
+  fs.writeFileSync(path.join(root, "code", "last-pane.ts"), "export const lastPane = 1;\n");
+  git("add", ".");
+  git("commit", "-q", "-m", "last-pane impl");
+  git("checkout", "-q", "integration");
+  git("merge", "--no-ff", "task/gap-last-pane", "-m", "inner: gap-last-pane-telemetry — emit last-pane evidence", "-q");
+  git("branch", "-D", "task/gap-last-pane");
+
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, integration: "integration" });
+  const byId = Object.fromEntries(r.excluded.map((e) => [e.id, e.reasons]));
+  assert.ok(byId["gap-last-pane-telemetry"]?.includes("not-yet-flipped"),
+    "no-AC task whose work landed on integration is a done-flip (AC4 + two-line model)");
+  assert.equal(r.ready.includes("gap-last-pane-telemetry"), false, "the done-flip task is NOT in the dispatchable pool");
+});
+
 // ── stuck-work vs done-flip (gap-ready-pool-worklanded-traps-stuck-work) ──────────────────────────
 // The not-yet-flipped exclusion used to treat ANY workLanded task as "done, not yet flipped". But
 // workLanded only means "some work landed" — a workLanded task whose ACs are far from complete

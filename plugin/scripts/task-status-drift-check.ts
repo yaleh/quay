@@ -229,8 +229,9 @@ function hasAnyLandedNewTouch(touchesSection, repoRoot) {
 // yet its work may have landed on master (web-board: prose AC, 4 existing-file Touches, merged
 // 0950b0b6/fb1fd520 — taskWorkLanded=false, 3rd re-dispatch 2026-08-05;
 // gap-ready-pool-taskworklanded-underdetects-prose-ac-merged-tasks). This third signal closes that
-// gap: a master-reachable commit whose message references the task AND that modified one of the
-// task's SPECIFIC code-root Touches paths ⇒ the declared work landed.
+// gap: a MAINLINE-reachable commit (integration/develop/master per landingRef — NOT hardcoded master,
+// gap-git-history-landed-master-stale-under-two-line-model) whose message references the task AND
+// that modified one of the task's SPECIFIC code-root Touches paths ⇒ the declared work landed.
 //
 // Anchoring — "the commit is about THIS task, not a coincidental touch" (AC4 negative control):
 //   - the commit message must reference the task by its FULL id, its id without a leading kind
@@ -246,12 +247,13 @@ function hasAnyLandedNewTouch(touchesSection, repoRoot) {
 //     non-bookkeeping). Bookkeeping paths (tasks/**, milestones/**, docs/plans/**, .quay/**,
 //     receipts/**) are pipeline accounting — e.g. the promote-to-ready commit touches ONLY the task's
 //     own file, and must NOT count as landing evidence (AC4 negative control).
-//   - only MASTER-REACHABLE commits count (`git log master -- <paths>`), so a stranded-branch commit
-//     or an unmerged worktree commit does not fire the signal.
+//   - only MAINLINE-REACHABLE commits count (`git log <landingRef> -- <paths>` — integration/
+//     develop/master per landingRef), so a stranded-branch commit or an unmerged worktree commit
+//     does not fire the signal (AC3: the "not a stray branch" intent is preserved).
 //
 // The prior overshoot gap (gap-ready-pool-check-taskworklanded-overshoot-excludes-existing-file-tasks)
 // is NOT re-opened: file EXISTENCE alone never fires this signal — the file must have been MODIFIED
-// by a master-reachable commit that REFERENCES the task.
+// by a mainline-reachable commit that REFERENCES the task.
 const KIND_PREFIX_RE = /^(gap|DIR|QN|exp5|M\d+)[-_]/;
 
 /** The id forms a commit message may use to reference a task: the full id, the id with a leading
@@ -353,13 +355,35 @@ export function taskIdFromTouches(touchesSection) {
   return null;
 }
 
-/** The THIRD landed signal: a master-reachable commit whose message references the task AND that
- *  modified one of the task's SPECIFIC code-root Touches paths (non-glob, non-(new)/(delete),
- *  non-bookkeeping). Skips (does not crash on) Touches paths that do not exist — `git log -- <p>`
- *  on a never-existing path is simply empty. Returns false on any git failure (fail-closed).
+/** The ref whose reachability defines "landed" — the two-line model's working line.
+ *  gap-git-history-landed-master-stale-under-two-line-model: the THIRD landed signal used to
+ *  hardcode `git log master`, but under the two-line model work lands on integration (develop
+ *  advances only via batch-merge) while master stalls (measured 2026-08-11: master stuck at
+ *  ea2208cf/08-06, master..integration=2212) — so everything landed after that read as unlanded.
+ *  Resolution: an explicit opts.ref wins (ready-pool-check's configured --integration/--develop/
+ *  --master, the "配置来源" path); else the first EXISTING ref of integration → develop → master;
+ *  else master (single-line repos / git-history test fixtures that only create master).
+ *  Reachability FROM the chosen ref is what keeps STRANDED-branch commits out — a commit on an
+ *  unmerged task/* branch is not reachable from integration/develop/master, preserving the original
+ *  "only MASTER-REACHABLE commits count" intent (AC3 negative control). */
+export function landingRef(repoRoot, opts = {}) {
+  if (opts.ref) return opts.ref;
+  const candidates = opts.candidates ?? ["integration", "develop", "master"];
+  for (const ref of candidates) {
+    const r = gitTry(repoRoot, ["rev-parse", "--verify", "-q", ref]);
+    if (r.ok && r.out.trim().length > 0) return ref;
+  }
+  return "master";
+}
+
+/** The THIRD landed signal: a mainline-reachable commit (integration/develop/master per landingRef,
+ *  not hardcoded master) whose message references the task AND that modified one of the task's
+ *  SPECIFIC code-root Touches paths (non-glob, non-(new)/(delete), non-bookkeeping). Skips (does
+ *  not crash on) Touches paths that do not exist — `git log -- <p>` on a never-existing path is
+ *  simply empty. Returns false on any git failure (fail-closed).
  *
  *  Two execution paths, SAME judgment:
- *   - DEFAULT (no opts.gitIndex): one `git log master --full-history -- <paths>` per call — the
+ *   - DEFAULT (no opts.gitIndex): one `git log <ref> --full-history -- <paths>` per call — the
  *     original per-task path. Kept for single-task `--check` invocations (Contract invoke), where
  *     the batched index would be strictly more work than one path-limited log.
  *   - BATCHED (opts.gitIndex): ready-pool-check passes a prebuilt buildGitHistoryIndex() so the
@@ -407,7 +431,8 @@ export function gitHistoryLanded(rawTaskText, repoRoot, opts = {}) {
   // change is identical to one parent's (so the fan-in's "merge <task>: …" commit would never
   // appear — web-board's 0950b0b6 was hidden until --full-history). The signal needs those merges
   // (they carry the task reference), so disable simplification.
-  const r = gitTry(repoRoot, ["log", "master", "--full-history", "--format=%H%x00%P%x00%s", "--", ...paths]);
+  const ref = landingRef(repoRoot, opts);
+  const r = gitTry(repoRoot, ["log", ref, "--full-history", "--format=%H%x00%P%x00%s", "--", ...paths]);
   if (!r.ok || !r.out) return false;
   for (const line of r.out.split("\n")) {
     const parts = line.split("\0");
@@ -421,10 +446,10 @@ export function gitHistoryLanded(rawTaskText, repoRoot, opts = {}) {
 }
 
 /** BATCHED git-history source (gap-ready-pool-check-times-out-after-git-history-signal): ONE
- *  `git log` pass over ALL of master, returning every commit with the paths it touched. The pool
- *  check was aggregating ~30-50 per-task `git log master --full-history -- <paths>` calls (each
- *  O(history)) into >150s; this builds the same evidence in O(1) git calls, and gitHistoryLanded
- *  matches in memory via byPath.
+ *  `git log` pass over ALL of the landing ref (integration/develop/master per landingRef), returning
+ *  every commit with the paths it touched. The pool check was aggregating ~30-50 per-task
+ *  `git log <ref> --full-history -- <paths>` calls (each O(history)) into >150s; this builds the
+ *  same evidence in O(1) git calls, and gitHistoryLanded matches in memory via byPath.
  *
  *  `-m` makes each merge emit one record per parent diff; the per-hash path sets are UNIONED so a
  *  merge's touched set = exactly the set of paths for which path-limited `--full-history -- <p>`
@@ -438,10 +463,11 @@ export function buildGitHistoryIndex(repoRoot, opts = {}) {
   // Deliberately NOT via gitTry: the full-history `--name-only` dump can exceed execFileSync's
   // default maxBuffer (measured 1.47MB for this repo at ~3.4k commits → ENOBUFS), so a dedicated
   // call raises the cap. Any failure still fails-closed to an empty index.
+  const ref = landingRef(repoRoot, opts);
   let raw;
   try {
     raw = execFileSync("git", [
-      "log", "master", "--full-history", "-m", "--name-only", "--no-renames",
+      "log", ref, "--full-history", "-m", "--name-only", "--no-renames",
       "--format=%H%x00%P%x00%s",
     ], { cwd: repoRoot, encoding: "utf8", maxBuffer: 256 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"] });
   } catch {
@@ -497,7 +523,7 @@ function _indexHashesForPath(byPath, p) {
   return out.size ? out : null;
 }
 
-// Reusable "the task's declared work has landed on master" predicate — exported for reuse by
+// Reusable "the task's declared work has landed on the mainline" predicate — exported for reuse by
 // ready-pool-check.ts's notYetFlipped (gap-ready-pool-check-counts-merged-not-flipped-tasks-in-the-pool,
 // AC6: reuse the drift-check signal, never a parallel copy). A task's work is judged landed when
 // ANY of the drift-check's three landing-evidence signals fires:
@@ -505,13 +531,15 @@ function _indexHashesForPath(byPath, p) {
 //     status-drift signal — a landed implementation backticks its own identifiers in its ACs); or
 //   - touch: a task-CREATED file (`(new)`-marked Touches entry) now exists on disk — the task
 //     created it ⇒ landed (hasAnyLandedNewTouch); or
-//   - git-history: a master-reachable commit whose message references the task modified one of its
+//   - git-history: a mainline-reachable commit whose message references the task modified one of its
 //     SPECIFIC code-root Touches paths (gitHistoryLanded — catches prose-heavy AC tasks whose
 //     implementation landed but whose AC yields no resolvable symbols and whose Touches modify
-//     existing files; gap-ready-pool-taskworklanded-underdetects-prose-ac-merged-tasks).
+//     existing files; gap-ready-pool-taskworklanded-underdetects-prose-ac-merged-tasks). "Mainline"
+//     is integration/develop/master per landingRef, not hardcoded master (two-line model —
+//     gap-git-history-landed-master-stale-under-two-line-model).
 // Existing-file Touches entries are DELIBERATELY NOT landing evidence by file existence alone: a
-// task that modifies a file which already exists on master is indistinguishable from an un-landed
-// task by file existence — the file is there regardless — so only its own symbols (or the
+// task that modifies a file which already exists on the mainline is indistinguishable from an
+// un-landed task by file existence — the file is there regardless — so only its own symbols (or the
 // git-history of a commit that references it) can prove it landed (the overshoot fix,
 // gap-ready-pool-check-taskworklanded-overshoot-excludes-existing-file-tasks). OR-composed so a
 // merged-not-flipped task is caught by whichever signal it shows. Does NOT depend on AC checkbox

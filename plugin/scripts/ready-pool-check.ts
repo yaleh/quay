@@ -157,9 +157,10 @@ import { isDirectEntry } from "./gate-script-base.ts";
 // Reused "work has landed on master" signal (AC6: reuse, never a parallel copy) — the same
 // symbol-resolution / touch-file evidence task-status-drift-check.ts uses to judge landing.
 // buildGitHistoryIndex is the BATCHED git-history source (gap-ready-pool-check-times-out-after-
-// git-history-signal): ONE `git log` over all of master, matched in memory per task, instead of
-// ~30-50 per-task `git log -- <paths>` calls (each O(history) — the >150s pool-check timeout).
-import { taskWorkLanded, buildGitHistoryIndex, countAcCheckboxes, wordMatch } from "./task-status-drift-check.ts";
+// git-history-signal): ONE `git log` over all of the landing ref (integration/develop/master per
+// landingRef — gap-git-history-landed-master-stale-under-two-line-model), matched in memory per task,
+// instead of ~30-50 per-task `git log -- <paths>` calls (each O(history) — the >150s pool-check timeout).
+import { taskWorkLanded, buildGitHistoryIndex, countAcCheckboxes, landingRef, wordMatch } from "./task-status-drift-check.ts";
 // RETIRED-MECHANISM INTERCEPT (gap-ready-pool-promotion-ignores-retired-mechanism-candidate-check):
 // promotion must NOT advance a candidate that references an ADR-022-deleted classic-pipeline script
 // (prepare-milestone.js / execute-milestone.js / milestone-worktree.ts) without annotation — a todo
@@ -476,15 +477,19 @@ export function commitTraceLanded(taskId, subjects) {
 }
 
 /** True when the task is in the "this batch done, not yet flipped to done" state — the declared
- *  work has landed (task-status-drift-check's symbol-resolution / touch-file / git-history evidence,
- *  OR the COMMIT-TRACE record below) but `status` is still `ready` (fan-in has not flipped it). The
- *  signal is a UNION of three INDEPENDENT closure indicators:
+ *  work has landed on the mainline (task-status-drift-check's symbol-resolution / touch-file /
+ *  git-history evidence — the last over integration/develop/master per landingRef, not hardcoded
+ *  master, gap-git-history-landed-master-stale-under-two-line-model — OR the COMMIT-TRACE record
+ *  below) but `status` is still `ready` (fan-in has not flipped it). The signal is a UNION of three
+ *  INDEPENDENT closure indicators:
  *   (1) taskWorkLanded — work-landed evidence (symbol-resolution / touch-file / git-history) that
  *       catches the "merged-but-AC-incomplete" half (the inner's fan-in merges WITHOUT ticking AC
  *       boxes; gap-ready-pool-check-counts-merged-not-flipped-tasks-in-the-pool). By itself it means
  *       "SOME work landed", NOT "the task is done" — so it excludes ONLY when the ACs are also
  *       complete (all checked) or near-complete (>50% — the "verification-window" done-flip shape,
- *       e.g. gap-dispatch 5/6). A workLanded task whose ACs are far from complete (<50% checked,
+ *       e.g. gap-dispatch 5/6) OR the task has no AC checkboxes at all (total===0 — structurally
+ *       unable to tick ACs, its landing is its closeout; gap-git-history-landed-master-stale-under-
+ *       two-line-model AC4). A workLanded task whose ACs are far from complete (<50% checked,
  *       e.g. gap-session-liveness 4/8) has REAL remaining implementation — STUCK-WORK — and must
  *       stay dispatchable (gap-ready-pool-worklanded-traps-stuck-work AC2), not be trapped out of
  *       both dispatch AND done-flip.
@@ -505,13 +510,19 @@ export function commitTraceLanded(taskId, subjects) {
  *  A task is excluded from the dispatchable pool when ANY of the three fires (a legal done-flip
  *  candidate). `taskId` is passed through so the git-history signal
  *  (gap-ready-pool-taskworklanded-underdetects-prose-ac-merged-tasks) can anchor on the task's own
- *  id without depending on the self-touch Touches entry. `commitTraceSubjects` is the analyzeTasks-built
- *  commit-subject index (ONE `git log --all` per pool scan); null/empty ⇒ the commit-trace signal is off. */
-export function notYetFlipped(task, repoRoot, gitIndex, commitTraceSubjects = null) {
+ *  id without depending on the self-touch Touches entry. `opts` is either the analyzeTasks-built
+ *  commit-subject index (ONE `git log --all` per pool scan; null/empty ⇒ the commit-trace signal is
+ *  off — the legacy caller form) or an options bag `{ ref, commitTraceSubjects }` (the current
+ *  analyzeTasks caller): `ref` names the landing ref (default: landingRef's integration→develop→master
+ *  resolution). */
+export function notYetFlipped(task, repoRoot, gitIndex, opts = null) {
   if (task.status !== "ready") return false;
-  const opts = { taskId: task.id };
-  if (gitIndex) opts.gitIndex = gitIndex; // batched git-history index (see buildGitHistoryIndex)
-  const workLanded = taskWorkLanded(task.body, repoRoot, opts);
+  // opts is EITHER the legacy commit-subject array OR an options bag { ref, commitTraceSubjects }.
+  const commitTraceSubjects = Array.isArray(opts) ? opts : (opts ? opts.commitTraceSubjects : null);
+  const o = { taskId: task.id };
+  if (gitIndex) o.gitIndex = gitIndex; // batched git-history index (see buildGitHistoryIndex)
+  if (opts && !Array.isArray(opts) && opts.ref) o.ref = opts.ref; // landing ref (two-line model)
+  const workLanded = taskWorkLanded(task.body, repoRoot, o);
   // COMMIT-TRACE (gap-nyf-branch-existence-vs-commit-trace): a commit whose subject names the task in
   // the inner:/fan-in: conventions is a PERSISTENT work-landed record — it survives branch deletion AND
   // reads `--all` (the two-line model's integration fan-in invisible to the stale-master git-history
@@ -528,7 +539,14 @@ export function notYetFlipped(task, repoRoot, gitIndex, commitTraceSubjects = nu
   // waiting to flip. Only all-checked or >50% (the verification-window done-flip shape) counts.
   // Threshold is STRICTLY > 0.5 so a task at exactly 50% (gap-session-liveness 4/8) returns to the
   // dispatchable pool (gap-ready-pool-worklanded-traps-stuck-work verification anchor (a)).
-  const doneFlipReady = (workLanded || traced) && (allAcsChecked || acRatio > 0.5);
+  // NO-AC fallback (gap-git-history-landed-master-stale-under-two-line-model AC4): a task with NO
+  // `## Acceptance Criteria` checkboxes (total=0) is STRUCTURALLY unable to tick ACs — allAcsChecked
+  // is always false — so it can never be a done-flip through the checkbox signals and would sit in
+  // the ready pool forever (measured 2026-08-11: last-pane / suite-red). When its work HAS landed
+  // (workLanded OR commit-trace), the landing itself is its closeout signal: total===0 joins the
+  // all-checked / >50% gate. A no-AC task whose work has NOT landed stays dispatchable (workLanded
+  // false keeps doneFlipReady false).
+  const doneFlipReady = (workLanded || traced) && (allAcsChecked || acRatio > 0.5 || total === 0);
   return doneFlipReady || allAcsChecked;
 }
 
@@ -1070,7 +1088,13 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
   // master-history path→commit index ONCE for the whole pool scan — ONE `git log` pass instead of
   // ~30-50 per-task `git log -- <paths>` calls (each O(history) — the >150s pool-check timeout).
   const readyCount = [...allTasks.values()].filter((t) => t.status === "ready").length;
-  const gitIndex = readyCount > 0 ? buildGitHistoryIndex(root) : null;
+  // Landing ref for the git-history signal (gap-git-history-landed-master-stale-under-two-line-model):
+  // follow the two-line model's working line — the CONFIGURED integration/develop/master refs
+  // (--integration/--develop/--master) resolved to the first that exists, so a stale master no longer
+  // misjudges everything landed after it as unlanded. "Config source" = these CLI flags, which the
+  // outer loop drives from .quay/config.yml's branch model (gap-quay-init-never-writes-branch-model-config).
+  const landRef = landingRef(root, { candidates: [integration, develop, master] });
+  const gitIndex = readyCount > 0 ? buildGitHistoryIndex(root, { ref: landRef }) : null;
   // COMMIT-TRACE (gap-nyf-branch-existence-vs-commit-trace): ONE `git log --all` subject pass for the
   // whole pool scan (like buildGitHistoryIndex's batched index — never per-task git calls). Reads
   // `--all` so the two-line model's INTEGRATION fan-in is visible where the stale-master git-history
@@ -1084,7 +1108,7 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
     if (isFixture(t)) reasons.push("fixture");
     if (isParked(t)) reasons.push("parked");
     if (isAcRecord(t)) reasons.push("ac-record");
-    if (notYetFlipped(t, root, gitIndex, commitTraceSubjects)) reasons.push("not-yet-flipped");
+    if (notYetFlipped(t, root, gitIndex, { ref: landRef, commitTraceSubjects })) reasons.push("not-yet-flipped");
     // PROSE-PREREQUISITE GAP (gap-prerequisite-gates-prose-invisible-to-mechanisms AC3): a ready task
     // whose body declares a prerequisite in prose WITHOUT a relation edge is NOT dispatchable — it
     // would be dispatched with an invisible dependency and only a subagent reading the body would
