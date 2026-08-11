@@ -109,6 +109,12 @@
 #                 satisfied → the reverse-edge candidate becomes a genuine conflict (fail-closed, needs
 #                 a human). When omitted, --integration-authoritative files resolve integration-side
 #                 unconditionally (the fixed-direction form).
+#   --deliver     (DIR-123 人裁定 2026-08-11) after a successful land closure (ff or real), launch
+#                 develop-deliver-tgz.sh DETACHED (best-effort, non-blocking — a remote being down
+#                 never fails the merge): builds a fresh hardware-independent quay .tgz at the merged
+#                 develop tip, scp's it to the verification machines B/C, installs with their existing
+#                 Node >=20, and proves `quay serve` returns 200. Freshness is recorded in
+#                 .quay/develop-deliver-state.json; the outer tick retries when stale.
 #   --sync        (gap-cross-machine-sync-has-no-mechanism-only-manual-pushes) after a successful
 #                 merge (ff or real), IMMEDIATELY push the advanced <develop> ref to origin via
 #                 sync-lag-check.sh (the event-driven trigger of the cross-machine sync mechanism —
@@ -194,6 +200,7 @@ develop_ref="develop"
 integration_ref="integration"
 dry_run=0
 sync=0
+deliver=0
 merge_mode=0
 reconcile=0
 # ── FRESHNESS GATE (gap-batch-merge-gate-reads-stale-green) ───────────────────────────────────────
@@ -246,6 +253,7 @@ while [ "$#" -gt 0 ]; do
     --integration-authoritative) int_authoritative_patterns+=("$2"); shift 2 ;;
     --reverse-edge-criterion) reverse_edge_criterion="$2"; shift 2 ;;
     --sync) sync=1; shift ;;
+    --deliver) deliver=1; shift ;;
     --reconcile) reconcile=1; shift ;;
     --skip-freshness-gate) skip_freshness_gate=1; shift ;;
     --skip-worktree-green-gate) skip_worktree_green_gate=1; shift ;;
@@ -442,6 +450,29 @@ do_sync() {
   else
     echo "integration-batch-merge: --sync requested but sync-lag-check.sh not found at ${SCRIPT_DIR}/sync-lag-check.sh; skipping event-driven push (heartbeat will cover it)" >&2
   fi
+  return 0
+}
+
+# --deliver: DIR-123 (人裁定 2026-08-11) — after the land closure advanced <develop>, deliver a FRESH
+# hardware-independent quay .tgz to the verification machines B/C and prove it runs (quay serve → 200).
+# This is the "auto-build after every merge to develop" mechanism: develop advances ONLY via this
+# script, so the hook here is airtight. BEST-EFFORT BY DESIGN: a remote being down must never fail the
+# merge — the deliver failure is logged + recorded in develop-deliver-state.json, and the outer tick
+# retries when the state looks stale. Zero new secrets (local ~/.ssh/id_ed25519 reaches B/C already).
+# The deliver is launched DETACHED (setsid) so it does NOT block the merge round — the build alone
+# (package.sh: dist + sync-vendor + plugin-dist + npm pack) takes minutes.
+do_deliver() {
+  if [ "${deliver}" -ne 1 ]; then
+    return 0
+  fi
+  if [ ! -f "${SCRIPT_DIR}/develop-deliver-tgz.sh" ]; then
+    echo "integration-batch-merge: --deliver requested but develop-deliver-tgz.sh not found at ${SCRIPT_DIR}/develop-deliver-tgz.sh; skipping" >&2
+    return 0
+  fi
+  local deliver_log="${repo_root}/.quay/deliver-run.log"
+  echo "integration-batch-merge: launching detached develop-deliver-tgz.sh (log: ${deliver_log}) — does NOT block this merge"
+  setsid bash "${SCRIPT_DIR}/develop-deliver-tgz.sh" --root "${repo_root}" >"${deliver_log}" 2>&1 < /dev/null &
+  disown 2>/dev/null || true
   return 0
 }
 
@@ -944,6 +975,7 @@ real_merge() {
       echo "integration-batch-merge: measure integration_ff_merges=0"
     fi
     do_sync
+    do_deliver
     if [ "${reconcile}" -eq 1 ] && [ "${dry_run}" -eq 0 ]; then
       reconcile_index "${merge_commit}" || return 1
     fi
@@ -1074,6 +1106,7 @@ if [ "${ff_possible}" -eq 1 ]; then
     fi
     echo "integration-batch-merge: develop=${merge_target}"
     do_sync
+    do_deliver
     if [ "${reconcile}" -eq 1 ] && [ "${dry_run}" -eq 0 ]; then
       reconcile_index "${merge_target}" || exit 1
     fi

@@ -136,6 +136,12 @@ orchestration/inner-idle-log.jsonl
 **/.quay/full-suite.log
 **/.quay/suite-state-events.jsonl
 **/.quay/suite-state-last.json
+# DIR-123 (2026-08-11): develop-deliver-tgz.sh runtime state — same live control-plane-state family as
+# full-suite-state.json (lastDelivered commit + per-host http_code; read by the outer tick for
+# freshness; never committed).
+**/.quay/develop-deliver-state.json
+**/.quay/deliver-run.log
+**/.quay/deliver-worktree-*/
 # gap-slot-free-not-an-event-slots-stay-empty-missed-without-trace: the slot-free trigger's append-
 # only SLOT-FREE event log + its transition memo — same live control-plane-state family as
 # suite-state-events.jsonl / gate-events.jsonl (written by slot-free-trigger.ts, read by the outer
