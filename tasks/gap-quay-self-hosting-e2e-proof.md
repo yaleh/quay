@@ -6,7 +6,7 @@ title: run quay:cold-start's AC8c six-key checklist end to end on quay's own
 status: needs-human
 parent: gap-quay-has-never-self-hosted-its-own-cold-start
 depends_on:
-  - gap-send-keys-verified-hash-check-cannot-tell-typed-from-submitted
+  - gap-pane-state-is-hashed-not-classified-so-needs-input-is-unobservable
   - gap-retire-inner-state-one-observer-targets-by-parameter
   - gap-cold-start-skill-has-no-recovery-branch
   - gap-no-formalized-bare-metal-session-bootstrap
@@ -23,7 +23,7 @@ extra:
 
 Child of [[gap-quay-has-never-self-hosted-its-own-cold-start]] (SH4 in
 `orchestration/SPEC-quay-self-hosts-its-own-cold-start.md`) — the capstone. **Do not dispatch
-until all four of these have landed**: [[gap-send-keys-verified-hash-check-cannot-tell-typed-from-submitted]],
+until all four of these have landed**: [[gap-pane-state-is-hashed-not-classified-so-needs-input-is-unobservable]],
 [[gap-retire-inner-state-one-observer-targets-by-parameter]],
 [[gap-cold-start-skill-has-no-recovery-branch]],
 [[gap-no-formalized-bare-metal-session-bootstrap]]. Running this before those four land would
