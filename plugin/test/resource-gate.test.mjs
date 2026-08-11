@@ -52,6 +52,15 @@ const TEST_SH = path.join(REPO_ROOT, "scripts", "test.sh");
 /** Run the REAL gate with env-seam overrides. Returns { status, stdout } (stderr merged). */
 function runGate(envOverrides = {}, args = []) {
   const env = { ...process.env, ...envOverrides };
+  // Determinism for the OVERLOAD-WINDOW load seam (gap-resource-gate-psi-does-not-capture-load-
+  // flake-driver): the real /proc/loadavg on a busy host (this box: 6.9-7.1 right now, close to the
+  // nproc×2=8 threshold) would nondeterministically flip the new load_wait verdict and break the
+  // verdict-asserting tests. Default the load seam LOW unless a test explicitly drives it — the
+  // load-specific tests (AC4 negative control, psi_still_waits) set RESOURCE_GATE_TEST_LOAD_OVERRIDE
+  // themselves. Same convention the CPU/MEM seams already use (explicit in every verdict test).
+  if (!("RESOURCE_GATE_TEST_LOAD_OVERRIDE" in envOverrides)) {
+    env.RESOURCE_GATE_TEST_LOAD_OVERRIDE = "1";
+  }
   const res = spawnSync("bash", [GATE, ...args], { cwd: REPO_ROOT, encoding: "utf8", env });
   return { status: res.status, stdout: `${res.stdout}\n${res.stderr}` };
 }
@@ -100,16 +109,22 @@ function currentDefaultConcurrency() {
   return Number(res.stdout.trim());
 }
 
-// ── AC2: the gate reads /proc/pressure/cpu some avg10, not load average ────────────────────────────
-test("AC2 — gate reads /proc/pressure/cpu `some avg10` (structural), not load average (proxy)", () => {
+// ── AC2: the gate reads /proc/pressure/cpu some avg10 as PRIMARY; load average is SUPPLEMENTARY ─────
+// gap-resource-gate-psi-does-not-capture-load-flake-driver: PSI `some avg10` alone MISSED the
+// load-flake driver (round-230/231/232: load 6.4/6.04/11.76 with PSI 8-10 < 60 ⇒ gate GO, red rounds).
+// The gate now ALSO reads /proc/loadavg as the OVERLOAD-WINDOW supplementary criterion
+// (load >= nproc × LOAD_OVER_FACTOR ⇒ WAIT). PSI stays the PRIMARY structural CPU-contention signal.
+test("AC2 — gate reads /proc/pressure/cpu `some avg10` as PRIMARY; load average is a SUPPLEMENTARY overload-window criterion", () => {
   const src = fs.readFileSync(GATE, "utf8");
-  // The header comment EXPLAINS why load average is rejected (proxy) — the CODE must not use it.
   const code = src.split("\n").filter((l) => !l.trim().startsWith("#")).join("\n");
   assert.match(src, /\/proc\/pressure\/cpu/, "gate must read /proc/pressure/cpu");
   assert.match(src, /avg10=/, "gate must parse the some avg10 field");
   assert.match(src, /some avg10 < 60|CPU_LIMIT/, "gate must carry the some avg10 < 60 band (unified with cap-from-gate's WAIT_THRESHOLD)");
-  assert.doesNotMatch(code, /load average/, "gate must NOT use load average as the verdict basis");
-  assert.doesNotMatch(code, /\/proc\/loadavg/, "gate must NOT read /proc/loadavg");
+  // The load-average overload-window criterion (AC3) — load is a SUPPLEMENT, PSI stays primary.
+  assert.match(code, /\/proc\/loadavg/, "gate must read /proc/loadavg (the supplementary overload-window signal)");
+  assert.match(src, /LOAD_OVER_FACTOR/, "gate must carry the load >= nproc × LOAD_OVER_FACTOR overload-window band");
+  assert.match(src, /RESOURCE_GATE_TEST_LOAD_OVERRIDE/, "the load test seam must exist");
+  assert.match(src, /NOT a replacement|not a replacement|SUPPLEMENT|supplementary/, "the header must state load is a supplement, not a replacement for PSI");
 });
 
 // ── AC2 (gap-adaptive-concurrency-cap-tied-to-resource-gate): the gate also reports avg300 ─────────
@@ -121,6 +136,62 @@ test("AC2b — gate parses AND prints `some avg300` (the adaptive-cap signal), s
   assert.match(src, /RESOURCE_GATE_TEST_CPU_AVG300/, "the avg300 test seam must exist");
   const r = runGate({ RESOURCE_GATE_TEST_CPU_AVG10: "10", RESOURCE_GATE_TEST_CPU_AVG300: "12.34", RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000" });
   assert.match(r.stdout, /cpu_stall\(some avg300\)=12\.34/, "report mode must print the avg300 line");
+});
+
+// ── AC2-AC4 (gap-resource-gate-psi-does-not-capture-load-flake-driver) ──────────────────────────────
+// Empirical flake correlation (round-230/231/232, suite-fix subagent 2026-08-10 + outer 复核):
+// loop-shipping passed=false at load 6.4 / 6.04 / 11.76 while PSI some avg10 stayed 8-10 < 60 and the
+// gate returned GO — the red rounds tracked LOAD (runnable+uninterruptible queue depth, incl. the
+// loop's own claude sessions), not PSI. AC3 adds the overload-window criterion (load >= nproc ×
+// LOAD_OVER_FACTOR ⇒ WAIT) WITHOUT weakening the PSI primary band; AC4 is the negative control.
+test("AC4 — overload-window negative control: load >= nproc×2 ⇒ WAIT even when PSI is low (round-232 reproduction)", () => {
+  // round-232: load 11.76 / nproc=4 (~3× oversubscription), PSI 8.27 < 60. Old gate: GO. New gate:
+  // load_wait fires (11.76 >= 4×2=8) ⇒ WAIT, exit 1 — the round no longer starts into the overload
+  // window that produced the loop-shipping flake.
+  const r = runGate(
+    { RESOURCE_GATE_TEST_CPU_AVG10: "8.27", RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000", RESOURCE_GATE_TEST_LOAD_OVERRIDE: "11.76", RESOURCE_GATE_TEST_NPROC: "4" },
+    ["--for", "full-suite"],
+  );
+  assert.equal(r.status, 1, `load 11.76 / nproc 4 must WAIT (overload window), got ${r.status}\n${r.stdout}`);
+  assert.match(r.stdout, /loadavg=11\.76/, "the loadavg line must print the reading");
+  assert.match(r.stdout, /=> WAIT: 过载窗口/, "the verdict must name the overload window");
+});
+
+test("AC4 — load below the threshold stays GO (normal machine state, PSI low)", () => {
+  const r = runGate(
+    { RESOURCE_GATE_TEST_CPU_AVG10: "10", RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000", RESOURCE_GATE_TEST_LOAD_OVERRIDE: "3", RESOURCE_GATE_TEST_NPROC: "4" },
+    ["--for", "full-suite"],
+  );
+  assert.equal(r.status, 0, `load 3 / nproc 4 must GO, got ${r.status}\n${r.stdout}`);
+  assert.match(r.stdout, /loadavg=3\.00/, "the loadavg line must print the reading");
+  assert.match(r.stdout, /=> GO/);
+});
+
+test("invariant psi_still_waits — PSI high ⇒ WAIT even when load is low (the supplementary load criterion does NOT weaken the primary)", () => {
+  const r = runGate(
+    { RESOURCE_GATE_TEST_CPU_AVG10: "84.77", RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000", RESOURCE_GATE_TEST_LOAD_OVERRIDE: "1", RESOURCE_GATE_TEST_NPROC: "4" },
+    ["--for", "full-suite"],
+  );
+  assert.equal(r.status, 1, `PSI high must still WAIT, got ${r.status}\n${r.stdout}`);
+  assert.match(r.stdout, /=> WAIT: CPU 饥饿/, "the PSI primary verdict must still name CPU starvation");
+});
+
+test("AC4 — unmeasurable load fails CLOSED (a gate that silently opens when a signal is missing is a quietly-lying instrument)", () => {
+  const r = runGate(
+    { RESOURCE_GATE_TEST_CPU_AVG10: "10", RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000", RESOURCE_GATE_TEST_LOAD_OVERRIDE: "unmeasurable", RESOURCE_GATE_TEST_NPROC: "4" },
+    ["--for", "full-suite"],
+  );
+  assert.equal(r.status, 1, `unmeasurable load must WAIT (fail-closed), got ${r.status}\n${r.stdout}`);
+  assert.match(r.stdout, /loadavg=UNMEASURABLE/, "the output must say UNMEASURABLE, not a fake number");
+});
+
+test("AC2 — the gate's header records the flake/load correlation (the red-round pairs that motivated the supplementary criterion)", () => {
+  // The ## Contract invariant flake_load_correlation: the red-round load+PSI pairs (round-230/231/232
+  // @ load 6.4/6.04/11.76, PSI 8-10 < 60) are recorded in the gate's header, so a future reader sees
+  // WHY load is added — the correlation is pinned, not prose elsewhere.
+  const src = fs.readFileSync(GATE, "utf8");
+  assert.match(src, /round-230\/231\/232|6\.4\/6\.04\/11\.76|11\.76/, "the header must record the flake/load correlation evidence");
+  assert.match(src, /overload.window|OVERLOAD-WINDOW|SUPPLEMENT/, "the header must explain load is the overload-window supplement");
 });
 
 // ── AC4: pgrep -xc node-MainThread (exact comm), never pgrep -f / grep -x node ─────────────────────
@@ -524,12 +595,15 @@ test("AC1 — auto-detection: the gate reports caller_scope=worktree when invoke
 });
 
 test("AC2 — main-repo priority: --main-repo-priority lets the main-repo full suite proceed over worktree scoped load (WAIT->GO at cpu=70)", () => {
+  // LOAD_OVERRIDE=12 ALSO above the nproc×2=8 overload-window threshold: the override must clear the
+  // load_wait too (worktree-sourced load is deferrable — it is exactly what pushes load average high).
   const r = runGate(
     {
       RESOURCE_GATE_TEST_CPU_AVG10: "70",
       RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000",
       RESOURCE_GATE_TEST_CALLER_SCOPE: "main",
       RESOURCE_GATE_TEST_WORKTREE_NODE_TESTS: "6",
+      RESOURCE_GATE_TEST_LOAD_OVERRIDE: "12",
     },
     ["--for", "full-suite", "--main-repo-priority"],
   );
@@ -539,12 +613,15 @@ test("AC2 — main-repo priority: --main-repo-priority lets the main-repo full s
 });
 
 test("AC2 negative — the SAME load WITHOUT --main-repo-priority stays WAIT (the override is opt-in)", () => {
+  // cpu=70 AND load=12 (both WAIT signals); no override ⇒ WAIT. CPU is primary so the verdict names
+  // CPU starvation.
   const r = runGate(
     {
       RESOURCE_GATE_TEST_CPU_AVG10: "70",
       RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000",
       RESOURCE_GATE_TEST_CALLER_SCOPE: "main",
       RESOURCE_GATE_TEST_WORKTREE_NODE_TESTS: "6",
+      RESOURCE_GATE_TEST_LOAD_OVERRIDE: "12",
     },
     ["--for", "full-suite"],
   );
@@ -559,6 +636,7 @@ test("AC2 negative — a WORKTREE caller passing --main-repo-priority stays WAIT
       RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000",
       RESOURCE_GATE_TEST_CALLER_SCOPE: "worktree",
       RESOURCE_GATE_TEST_WORKTREE_NODE_TESTS: "6",
+      RESOURCE_GATE_TEST_LOAD_OVERRIDE: "12",
     },
     ["--for", "full-suite", "--main-repo-priority"],
   );
@@ -572,6 +650,7 @@ test("AC2 negative — CPU above the priority ceiling (>=85) stays WAIT even wit
       RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000",
       RESOURCE_GATE_TEST_CALLER_SCOPE: "main",
       RESOURCE_GATE_TEST_WORKTREE_NODE_TESTS: "6",
+      RESOURCE_GATE_TEST_LOAD_OVERRIDE: "12",
     },
     ["--for", "full-suite", "--main-repo-priority"],
   );
@@ -585,6 +664,7 @@ test("AC2 negative — worktree load below the min threshold (4) does NOT trigge
       RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000",
       RESOURCE_GATE_TEST_CALLER_SCOPE: "main",
       RESOURCE_GATE_TEST_WORKTREE_NODE_TESTS: "2",
+      RESOURCE_GATE_TEST_LOAD_OVERRIDE: "12",
     },
     ["--for", "full-suite", "--main-repo-priority"],
   );

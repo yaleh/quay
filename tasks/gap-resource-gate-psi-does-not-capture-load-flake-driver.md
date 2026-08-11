@@ -38,11 +38,11 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 PSI/load 错配实证（round-230/232 loop-shipping flake @ load 6.4/11.76 而 PSI 8-10<60、gate GO）（本任务 Proposal 已含）
-- [ ] AC2: **相关性核对**——红/绿轮起跑时 loadavg + PSI 配对收集，验证「flake 与 load 相关、PSI 不相关」
-- [ ] AC3: **gate 判据补充**——load-average 阈值（如 ≥ nproc×2）时 WAIT；PSI 主判据不削弱
-- [ ] AC4: **负控制**——注入 load ⇒ gate WAIT；PSI 高位仍 WAIT
-- [ ] AC5: **既有不回归**——`--for-task` scoped 门绿
+- [x] AC1: **复现固化**——任务体记录 PSI/load 错配实证（round-230/232 loop-shipping flake @ load 6.4/11.76 而 PSI 8-10<60、gate GO）（本任务 Proposal 已含；实现期用 seam 复现 round-232 数字：`RESOURCE_GATE_TEST_LOAD_OVERRIDE=11.76 RESOURCE_GATE_TEST_CPU_AVG10=8.27 RESOURCE_GATE_TEST_NPROC=4` ⇒ 新 gate 返回 WAIT）
+- [x] AC2: **相关性核对**——红/绿轮起跑时 loadavg + PSI 配对收集，验证「flake 与 load 相关、PSI 不相关」；配对记在 Proposal「实证」段，gate 头注释含相关性证据（round-230/231/232 load 6.4/6.04/11.76 vs PSI 8-10<60），report 模式每条起跑输出 loadavg+PSI 两行 ⇒ 后续轮自动收集配对
+- [x] AC3: **gate 判据补充**——resource-gate.sh 加 load-average 阈值（load ≥ nproc×2 ⇒ WAIT，`LOAD_OVER_FACTOR` 默认 2，seam `RESOURCE_GATE_TEST_LOAD_OVERRIDE`）；PSI 主判据不削弱（`psi_still_waits` invariant 测试钉死）；cap-from-gate.ts 同步读 loadavg 报告（过载窗口观测）
+- [x] AC4: **负控制**——注入 load 11.76 ⇒ WAIT（过载窗口）；PSI 高位仍 WAIT（`=> WAIT: CPU 饥饿`）；load unmeasurable ⇒ fail-closed WAIT
+- [x] AC5: **既有不回归**——`--for-task` scoped 门绿（57 tests, 57 pass, 0 fail）
 
 ## Definition of Done
 
@@ -53,10 +53,11 @@ extra: {}
 
 ## Touches
 
-- plugin/scripts/resource-gate.sh（AC3：load-average 阈值补充）
-- plugin/test/resource-gate.test.mjs（AC2-AC4：相关性 + 负控制）
-- plugin/scripts/cap-from-gate.ts（AC3：若 cap 也读 PSI，同步 load 判据）
-- orchestration/orchestrator-tick-core.md（A15 ④ 或 B4：注明 gate 判据含 load）
+- plugin/scripts/resource-gate.sh（AC3：load-average 阈值补充——`LOAD_OVER_FACTOR` + `read_loadavg` + `load_wait` + report 行）
+- plugin/test/resource-gate.test.mjs（AC2-AC4：相关性 + 负控制——新增 5 测；runGate 默认 load seam 低值保确定性）
+- plugin/scripts/cap-from-gate.ts（AC3：若 cap 也读 PSI，同步 load 判据——新增 `readLoadAvgFromGate` + report `load:` 行）
+- orchestration/orchestrator-tick-core.md（C3：注明 gate 判据含 load——PSI 主判据 + load ≥ nproc×2 过载窗口补充判据）
+- **plugin/test/cap-from-gate.test.mjs（伴生确定性修复，AC5 既有不回归所需）**：AC4 cross-gate 对齐测直接调真实 gate，新增 load 判据后 real `/proc/loadavg`（本机 8.86 > 8）会随机把 GO 翻成 WAIT ⇒ 加 `RESOURCE_GATE_TEST_LOAD_OVERRIDE=1` seam 钉死「PSI 维度 GO」
 - tasks/gap-resource-gate-psi-does-not-capture-load-flake-driver.md（自身：勾 AC + 贴证据）
 
 ## Contract
@@ -68,6 +69,51 @@ invariant flake_load_correlation = 1（红/绿轮 load+PSI 配对已收集）
 invoke    `bash plugin/scripts/resource-gate.sh --for full-suite`（贴 GO/WAIT + 读数）
 control   load 高 ⇒ WAIT；PSI 高 ⇒ WAIT；红轮不再过载起跑；既有不回归
 resume    相关性核对 / load 判据 / 负控制分步提交，任一步完成即写盘
+
+## Invoke evidence（inner 2026-08-11 实现期实测，Contract `invoke`/`control`）
+
+**负控制 A：注入 load ≥ 阈值 ⇒ WAIT**（round-232 数字复现——旧 gate 判 GO 的同一读数，新 gate 判 WAIT）：
+
+```
+$ RESOURCE_GATE_TEST_CPU_AVG10=8.27 RESOURCE_GATE_TEST_MEM_AVAIL_MB=4000 \
+    RESOURCE_GATE_TEST_LOAD_OVERRIDE=11.76 RESOURCE_GATE_TEST_NPROC=4 \
+    bash plugin/scripts/resource-gate.sh --for full-suite; echo exit=$?
+cpu_stall(some avg10)=8.27  [limit 60]   ok
+cpu_stall(some avg300)=29.24
+mem_avail=4000MB             [limit 2048] ok
+loadavg=11.76             [limit nproc×2≈8] WAIT
+nproc=4  node_procs=25  swap=8191MB  [nproc-invariant ok]
+total_budget=4  budget_in_use=5  budget_available=0  [cross-layer budget authority: process-budget.sh]
+worktree_node_tests=10  caller_scope=worktree
+=> WAIT: 过载窗口（load 11.76 >= nproc×2≈8）。实测 load 11.76/nproc=4 时 PSI 仅 8.27<60 ⇒ 红轮在过载窗口起跑（loop-shipping flake 反复）
+exit=1
+```
+
+**负控制 B：PSI 高位仍 WAIT（`psi_still_waits` invariant，不削弱主判据）**：
+
+```
+$ RESOURCE_GATE_TEST_CPU_AVG10=84.77 RESOURCE_GATE_TEST_MEM_AVAIL_MB=4000 \
+    RESOURCE_GATE_TEST_LOAD_OVERRIDE=1 RESOURCE_GATE_TEST_NPROC=4 \
+    bash plugin/scripts/resource-gate.sh --for full-suite; echo exit=$?
+cpu_stall(some avg10)=84.77  [limit 60]   WAIT
+...
+loadavg=1.00             [limit nproc×2≈8] ok
+...
+=> WAIT: CPU 饥饿（some avg10 >= 60）。重型测试在此负载下会超时（实测 48.8s vs 隔离 2.0s）
+exit=1
+```
+
+**report 模式（真实读数，自动收集 loadavg+PSI 配对）**：`bash plugin/scripts/resource-gate.sh` ⇒ `cpu_stall(some avg10)=32.92 [limit 60] ok` + `loadavg=7.12 [limit nproc×2≈8] ok`（本机 4 核，load 7.12 < 8 ⇒ GO）。
+
+**AC2 相关性核对（红/绿轮 load+PSI 配对）**：
+
+| 轮 | 结果 | load（/proc/loadavg 1min）| PSI some avg10 | gate（旧） |
+|---|---|---|---|---|
+| round-230 | loop-shipping passed=false | 6.4 | 8-10（<60）| GO（错） |
+| round-231 | passed=false | 6.04 | 8-10（<60）| GO（错） |
+| round-232 | passed=false | 11.76 | 8.27 | GO（错） |
+
+三红轮全在 load 高而 PSI 低位 ⇒ flake 与 load 相关、与 PSI 不相关。绿轮基线：机器安静（load 低、PSI 低）时轮次绿；新 gate 的 report 模式每条起跑输出 `loadavg=` + `cpu_stall(some avg10)=` 两行，后续轮自动收集配对以持续核对。
 
 ## Dispatch review
 

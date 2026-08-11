@@ -573,7 +573,10 @@ test("AC4 — the suite gate and the dispatch cap AGREE in the old 40-60 dead-zo
   // continued). After the threshold unification the suite gate's limit IS the cap's GO/WAIT
   // boundary, so this exact sample must be GO on BOTH layers — no "suite refuses + dispatch
   // continues" imbalance.
-  const env = { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "49.56", RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000", RESOURCE_GATE_TEST_NODE_PROCS: "2" };
+  // LOAD_OVERRIDE=1: the overload-window load seam (gap-resource-gate-psi-does-not-capture-load-
+  // flake-driver) must be LOW so the real /proc/loadavg (8.86 right now on this box, above the
+  // nproc×2=8 threshold) cannot nondeterministically flip this cross-gate GO alignment to WAIT.
+  const env = { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "49.56", RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000", RESOURCE_GATE_TEST_NODE_PROCS: "2", RESOURCE_GATE_TEST_LOAD_OVERRIDE: "1" };
   // Dispatch side: cap-from-gate's desired band is GO (below WAIT_THRESHOLD=60).
   assert.equal(computeDesiredBand(49.56), "GO", "avg10=49.56 must be in the dispatch GO band");
   // Suite side: the full-suite gate must report GO too (exit 0) at the same sample.
