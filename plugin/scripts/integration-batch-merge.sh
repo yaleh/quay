@@ -156,13 +156,29 @@
 #                opt-out for callers exercising OTHER gates in isolation; the real orchestrator
 #                invocation never passes it (the gate is ON by default — mechanical, not self-judged).
 #
+#   WORKTREE-GREEN GATE (gap-suite-fix-scope-worktree-green-merge-gate): before ANY merge (ff or real),
+#                the helper requires at least one suite-fix self-test round on record — a
+#                `verification-round.jsonl` line with `scope=worktree` AND `state=green`
+#                (`<repo_root>/.quay/verification-round.jsonl`). The suite-fix subagent's fan-in is the
+#                step that must be gated: without this record there is NO mechanical evidence the
+#                subagent ever self-tested green in its OWN worktree (rounds 230/231 scope=main were the
+#                second subagent waiting on the shared checkout — the A15 ④ 三保障 all silently failed
+#                while each 条文 "没被违反"). Data already exists (full-suite-runner.ts writes
+#                scope/state); this is a CONSUMER-SIDE pre-assertion, NO new mechanism. Fail-closed:
+#                record absent OR present-but-no-worktree+green (scope missing on a legacy line ⇒ not
+#                counted) ⇒ reject the merge with an actionable message (先在自己 worktree 自测绿).
+#                `--skip-worktree-green-gate` is the explicit opt-out for callers exercising OTHER gates
+#                in isolation; the real orchestrator/suite-fix invocation never passes it (ON by default).
+#
 # Exit codes:
 #   0  merge performed (ff or real) OR nothing pending (integration already absorbed into develop);
 #      with --dry-run, the ff-ability / divergence surface was reported without moving any ref
 #   1  NOT a fast-forward and no --merge (needs a human), OR a real code conflict in --merge mode
 #      (fail-closed, nothing moved), OR the object gate blocked (develop-side code files outside the
 #      tested tree — fail-closed, nothing moved), OR the freshness gate blocked (no valid fresh green —
-#      stale/missing/running/non-main-scope suite state — fail-closed, nothing moved)
+#      stale/missing/running/non-main-scope suite state — fail-closed, nothing moved), OR the
+#      worktree-green gate blocked (no scope=worktree+state=green round on record — the suite-fix
+#      subagent never self-tested green in its own worktree — fail-closed, nothing moved)
 #   2  usage / missing ref
 # ── 统一 --help（gap-scripts-sprawl：用法在前、退出 0、无业务副作用）────────────────────
 if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
@@ -189,6 +205,11 @@ reconcile=0
 skip_freshness_gate=0
 freshness_window=3600
 suite_state_file=""
+# ── WORKTREE-GREEN GATE (gap-suite-fix-scope-worktree-green-merge-gate) ──────────────────────────────
+# suite-fix subagent fan-in 前置断言：fan-in 前必须存在 ≥1 条 `scope=worktree` 且 `state=green` 的轮次
+# 记录（verification-round.jsonl），否则拒绝 merge。`--skip-worktree-green-gate` 是显式 opt-out（测试
+# 隔离其他门用）；真实 orchestrator/suite-fix 调用不传（门默认 ON，机械而非自判）。
+skip_worktree_green_gate=0
 # Global for the real-merge temp worktree path (must outlive real_merge() so the EXIT trap can
 # clean it up even under `set -u`).
 tmp_wt=""
@@ -227,6 +248,7 @@ while [ "$#" -gt 0 ]; do
     --sync) sync=1; shift ;;
     --reconcile) reconcile=1; shift ;;
     --skip-freshness-gate) skip_freshness_gate=1; shift ;;
+    --skip-worktree-green-gate) skip_worktree_green_gate=1; shift ;;
     --freshness-window) freshness_window="$2"; shift 2 ;;
     --suite-state-file) suite_state_file="$2"; shift 2 ;;
     *) usage ;;
@@ -737,6 +759,54 @@ print(int(ts), int(st), int(time.time()-ts))
   return 0
 }
 
+# ── WORKTREE-GREEN GATE (gap-suite-fix-scope-worktree-green-merge-gate) ───────────────────────────────
+# suite-fix subagent fan-in 前置断言：fan-in（批量合）前，`.quay/verification-round.jsonl` 必须存在
+# ≥1 条 `scope=worktree` 且 `state=green` 的轮次记录，否则拒绝 merge——「不自测绿不许合」。
+#
+# 为什么需要这条门（manager 2026-08-10 09:4x 决定性读数 + outer 复核）：
+#   第二个 suite-fix subagent（08:50 起）rounds 230/231 全部 `scope=main` —— 它没跑自己的轮次，它在等
+#   共享检出的轮次。其 worktree HEAD = round-231 的 verifiedCommit，修复未提交。A15 ④ 三条保障同时失效
+#   而条文每条「没被违反」：①修到绿才 merge 失效（它等的轮次测的是不含它修复的树）；②未绿退出⇒.halt 失效
+#   （它不会未绿退出，.halt 触发条件结构上永不成立）；③不得修一个等 30min 失效（它正是这么做，只把顺序倒了）。
+#   只有把 `scope` 字段读出来才看得见 —— 本门把该判据机械化。
+#
+# 不新建机件：数据已在 verification-round.jsonl（full-suite-runner.ts 已写 scope/state），只在消费者侧
+# （本 fan-in 路径）加一个前置断言。scope 字段缺失（legacy 行）⇒ 无法判 ⇒ 拒。
+# `--skip-worktree-green-gate` 是显式 opt-out（测试隔离其他门用）；真实 orchestrator/suite-fix 调用不传。
+check_worktree_green_gate() {
+  if [ "${skip_worktree_green_gate}" -eq 1 ]; then
+    echo "integration-batch-merge: worktree-green-gate SKIPPED (--skip-worktree-green-gate)"
+    return 0
+  fi
+  local round_file="${repo_root}/.quay/verification-round.jsonl"
+  local has=""
+  # measure: has_worktree_green_round — Contract measure exactly:
+  #   python3 -c "import json;rs=[json.loads(l) for l in open('.quay/verification-round.jsonl') if l.strip()];
+  #               print(any(r.get('scope')=='worktree' and r.get('state')=='green' for r in rs))"
+  # stdout is Python True/False. Absent file = [] ⇒ False (fail-closed: no record ⇒ reject).
+  has="$(python3 -c "
+import json, sys
+try:
+    with open(sys.argv[1]) as f:
+        rs=[json.loads(l) for l in f if l.strip()]
+except FileNotFoundError:
+    rs=[]
+print(any(r.get('scope')=='worktree' and r.get('state')=='green' for r in rs))
+" "${round_file}" 2>/dev/null || echo "False")"
+  if [ "${has}" = "True" ]; then
+    echo "integration-batch-merge: worktree-green-gate OK — ≥1 scope=worktree+state=green round on record"
+    echo "integration-batch-merge: measure has_worktree_green_round=True"
+    return 0
+  fi
+  echo "integration-batch-merge: measure has_worktree_green_round=False"
+  if [ "${dry_run}" -eq 1 ]; then
+    echo "integration-batch-merge: DRY-RUN — worktree-green gate WOULD fail closed: no scope=worktree+state=green round in ${round_file} (no ref moved in dry-run)"
+    return 0
+  fi
+  echo "integration-batch-merge: WORKTREE-GREEN-GATE FAIL-CLOSED — no scope=worktree+state=green round in ${round_file}; the suite-fix subagent never self-tested green in its OWN worktree ⇒ 不许 merge（不自测绿不许合）; nothing moved" >&2
+  return 1
+}
+
 # Real merge of `integration` into `develop` (merge commit) in a throwaway temp worktree, then advance
 # develop with a CAS on the old tip. Shared-file conflicts auto-resolve develop-authoritative; a real
 # code conflict fails closed (nothing moved). Returns 0 on success, 1 on fail-closed.
@@ -916,6 +986,12 @@ check_object_gate || exit 1
 # as before (no criterion loosened). This is the TIME-AXIS gate, run before any ref moves. In --dry-run
 # this reports the would-block measure without failing.
 check_freshness_gate || exit 1
+
+# ── WORKTREE-GREEN GATE (gap-suite-fix-scope-worktree-green-merge-gate) ───────────────────────────────
+# suite-fix subagent fan-in 前置断言：fan-in（批量合）前，verification-round.jsonl 必须存在 ≥1 条
+# `scope=worktree` 且 `state=green` 的轮次记录（不自测绿不许合）。这是消费者侧（本 fan-in 路径）的门，
+# 数据已由 full-suite-runner.ts 写入，不新建机件。--dry-run 报 would-block 不失败（与其他门一致）。
+check_worktree_green_gate || exit 1
 
 # ── --reconcile: porcelain-empty guard BEFORE any ref moves ──────────────────────────────────────────
 # The guard must run while the index still matches the old HEAD — after the ref moves, the stale index
