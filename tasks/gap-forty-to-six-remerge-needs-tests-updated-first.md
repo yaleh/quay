@@ -294,3 +294,58 @@ strict-subset 三任务文件 no violations、superseded-capability PASS、tick-
 外层动作，inner 不勾；AC5（交叉标注）延后。全量 suite_green=1 归外层 verification-round（clean
 window）验证。**外层注意**：AC3 重合并前需处理 `develop-deliver-tgz.sh`（DIR-123，提交 7c147b39）
 的 catalog 问题声明缺失，否则重合并后 catalog band 复红。
+
+## Evidence（内层复验 2026-08-11 · B9 空槽重派 · integration fork）
+
+**基线**：本 worktree 自 integration HEAD（593ab411）fork（分支
+`task/gap-forty-to-six-remerge-needs-tests-updated-first`）——**非 develop**，含 mcp-entry/cross-host/
+coldstart 最新 merge + develop-deliver-tgz.sh @instrument 修复 f83f1319 + AC1 测试更新
+2163c4c3/2dc55ba9（均 HEAD 祖先）。40→6（8d740326）在树。AC1 测试更新逐文件核验裸脚本形断言
+落位 + Re-instate 标记（session-topology 断 `quay-topology.sh`/`topology-check.sh`、session-bootstrap
+断 `session-bootstrap.sh`、inner-blocked-signal 断 `inner-blocked-signal.ts`、quay-init-loop-driver 断
+`loop-driver-check.sh`，注释标「Re-instate … when 40→6 is re-merged」）、quay-init-loop-core 无
+manager-loop-tick 铺装断言（仅注释提及）、`quay-entry-test-helpers.mjs` 已恢复（quay-session.test.mjs
+纯 import 依赖）。
+
+**环境铺装（gitignored 不入提交）**：`ln -s /home/yale/work/quay/node_modules node_modules`；
+`cp /home/yale/work/quay/.quay/config.yml .quay/`；`bash plugin/scripts/sync-vendor.sh` 铺装 vendor
+dist（plugin/vendor/quay/dist/quay.js + plugin/vendor/quay-native/dist/quay-native.js）。
+
+**复现 + 分诊（dispatch 期望 f83f1319 后 catalog 全绿，实测不全绿）**：
+- catalog --json 复现 exit 1：**1 unclassified = release-freshness-check.sh**（
+  gap-release-freshness-no-recut-mechanism，2026-08-11 16:21 并入 integration，未注册 catalog 五表——
+  与 develop-deliver-tgz.sh 同缺陷类，f83f1319 只修了第一个）。**本趟修复**：capability-catalog.sh 五表
+  （QUESTION/CADENCE/INVALIDATION/LAST_REAFFIRMED/MATCHING）各加 release-freshness-check.sh 条目 +
+  脚本头 @instrument 声明 → **205 declared / 0 unclassified / RC=0**（提交 **e746231b**，worktree 内）。
+  修复后 capability-catalog 隔离 **13 pass / 2 fail**（剩余 2 为 quay-launch 冲突，见下）；
+  release-freshness-check 14/0 · runtime-usage-inventory+delivery-inventory-drift-gate 37/0。
+- **quay-launch.sh entry-surface 冲突（新发现，超 40→6 范围，记录给外层裁断）**：AC1/AC3
+  --entry-surface gate 报「1 internal .sh referenced by consumer-facing docs: quay-launch.sh —
+  Declare in PUBLIC_ENTRYPOINTS OR remove the doc reference」。根因：integration coldstart 提交
+  92d2009b（gap-quay-init-coldstart-usability-launch-not-used-…，16:27）在 shipped tick 文档
+  plugin/loop/orchestrator-loop-tick.md 加了直接 `bash plugin/scripts/quay-launch.sh outer` 调用——
+  **违反 done 任务 gap-quay-launch-sh-is-a-user-facing-surface-should-be-skill-internal（8bf0ef28，
+  人裁定 2026-08-06：quay-launch.sh 必须 skill-internal，不得出现在面向用户的操作说明里）**；
+  develop 的 orchestrator-loop-tick.md 已改 skill-internal 框架（无直接调用），integration 未同步。
+  catalog 测试判定正确（AC3 gate 按设计工作）。**重合并（AC3）前需外层裁断**：(A) 删/改
+  orchestrator-loop-tick.md 直接引用（遵人裁定，推荐），或 (B) 声明 quay-launch.sh public（遵 coldstart
+  引导）。若未决，重合并会把 2 条 entry-surface 红带入 develop，catalog band 复红。
+
+**AC1 受影响族隔离实跑（worktree, integration fork）**：
+- quay-session+session-topology+session-bootstrap+tick-vocabulary **30/0**；
+- inner-blocked-signal **37/0**（isolated 复跑；合跑时有 1 AC4 real-time 负控 flake，全量套件并发负载
+  所致，隔离复跑全绿）；
+- quay-init-loop-driver 15 + quay-init-loop-core 12 + loop-shipping + loop-shipping-necessity-check
+  合跑 pass（除上述 flake 外无 fail）；
+- capability-catalog **13/2**（2 = quay-launch 冲突，非 40→6 非本趟改动）。
+
+**scoped 门**：`bash scripts/test.sh --for-task gap-forty-to-six-remerge-needs-tests-updated-first
+--allow-thin` → **exit 1**。静态检查 **0 违规**（test-framework-policy-check 334 文件 44 条全部基线内
+PASS、test-impl-census 334 clean、task-contract-check strict-subset 三任务文件 no violations、
+superseded-capability PASS、tick-core-static-check PASS）；测试 **13 pass / 2 fail / 0 cancelled**——
+2 fail 均为 quay-launch entry-surface（同上，非 40→6 非本趟改动）。exit 1 完全由 quay-launch 冲突造成。
+
+**AC 勾选**：AC1/AC2 保持 [x]（AC1 受影响族隔离绿；catalog 除 quay-launch 冲突外全绿——该冲突为
+integration 既有缺陷需外层裁断，非 40→6 测试未更新）；AC3/AC4（重合并）外层动作 + 前置需裁断
+quay-launch；AC5 延后。全量 suite_green=1 归外层 verification-round。**本趟非纯复验**：新增代码提交
+**e746231b**（release-freshness-check.sh catalog 五表注册 + @instrument）。
