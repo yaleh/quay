@@ -34,11 +34,11 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录读数矛盾（crystallization #1 vs AC37 #2）+ outer 复核（Touches 含 plugin/test/ 目录 glob → failureFileMatches 匹配任何 test 失败）（本任务 Proposal 已含）
-- [ ] AC2: **目录 glob 不归因**——computeSuiteBlocking 对裸目录 glob 不展开匹配失败文件
-- [ ] AC3: **真 suite-blocker 不回归**——Touches 含具体失败文件名的任务仍正确归因
-- [ ] AC4: **DC 轴恢复**——无 suite-blocker 时 DC 任务排第 1；负控制
-- [ ] AC5: **既有不回归**——`--for-task` scoped 门绿
+- [x] AC1: **复现固化**——任务体记录读数矛盾（crystallization #1 vs AC37 #2）+ outer 复核（Touches 含 plugin/test/ 目录 glob → failureFileMatches 匹配任何 test 失败）（本任务 Proposal 已含）
+- [x] AC2: **目录 glob 不归因**——computeSuiteBlocking 对裸目录 glob 不展开匹配失败文件
+- [x] AC3: **真 suite-blocker 不回归**——Touches 含具体失败文件名的任务仍正确归因
+- [x] AC4: **DC 轴恢复**——无 suite-blocker 时 DC 任务排第 1；负控制
+- [x] AC5: **既有不回归**——`--for-task` scoped 门绿
 
 ## Definition of Done
 
@@ -65,6 +65,40 @@ invariant dc_axis_restored = 1（无 suite-blocker 时 DC 排第 1）
 invoke    `node --no-warnings --experimental-strip-types plugin/scripts/ready-pool-check.ts --root "$PWD" --cap 5 --json`（贴 suite_blocking.tasks）
 control   目录 glob 不归因；真 blocker 不回归；DC 恢复；既有不回归
 resume    归因收紧 / 形状约束 / 测试分步提交，任一步完成即写盘
+
+## Evidence（内层实现 2026-08-11）
+
+**AC2 实现**：`plugin/scripts/touches-orthogonality-check.ts` 的 `parseTouches` 新增返回 `dirGlobs`
+（Set，记录「裸目录声明」经 DIR-106 Fix 3 变成的 `**` glob，如 `plugin/test/` → `plugin/test/**`，
+向后兼容——既有调用方只解构 `{hasSection, globs}`，忽略新字段）。`plugin/scripts/ready-pool-check.ts`
+的 `computeSuiteBlocking` 把 `parsed.dirGlobs` 从归因 glob 集排除后再 `expand`+`failureFileMatches`
+——裸目录 glob（整棵子树）不再参与 suite-blocking 归因；只匹配具体文件路径 glob（含通配符或明确文件名）。
+
+**AC3 不回归**：真 suite-blocker（Touches 含具体失败文件名，如 `code/wd.ts`、`plugin/test/checker-cost.test.mjs`、
+`plugin/scripts/send-keys-verified.sh`）仍正确归因；同一任务「目录 glob + 具体文件」并存时，具体文件仍归因。
+
+**AC4 负控制**：无红窗 ⇒ suite_blocking.tasks 空 ⇒ ready_relevance 排序与 pre-signal 字节一致（既有
+`analyzeTasks: suite-blocking jumps ready_relevance; negative control unchanged` 测试覆盖）；crystallization
+不再仅因 `plugin/test/` 目录 glob 被误判为 suite-blocker ⇒ DC 轴恢复「无真 suite-blocker 时排第 1」。
+
+**Scoped invoke**（`bash scripts/test.sh --for-task gap-suite-blocking-directory-glob-overbroad --allow-thin`）：
+**64 tests · pass 64 · fail 0 · cancelled 0 · skipped 0 · EXIT 0**。新增测试
+`computeSuiteBlocking: bare-directory glob does NOT attribute (AC2 — gap-suite-blocking-directory-glob-overbroad)`
+覆盖：crystallization 型任务（Touches 含 `plugin/test/（各 AC 测试）`）在 plugin/test 失败时不归因；仅目录 glob
+的任务不归因；目录 glob + 具体文件并存时具体文件仍归因。`touches-parser-parity.test.mjs` 8/8 全绿（parseTouches
+改动不破坏多解析器 parity）。
+
+**真实 store 定向模拟**（3 连红窗、失败文件 `plugin/test/checker-cost.test.mjs`，`computeSuiteBlocking` 对
+`tasks/` 全量）：
+```
+suite_blocking.tasks = []
+crystallization flagged (dir glob)? false
+window_active = true consecutiveRed = 3
+spec-file task flagged (real blocker still attributed)? true
+```
+
+**交叉标注**：`tasks/gap-ac36-delivery-critical-priority-axis.md`（blocking_suite 轴污染修复）、
+`tasks/gap-ac36-recommended-exposes-sort-key.md`（同 AC36 验证链）。
 
 ## Dispatch review
 

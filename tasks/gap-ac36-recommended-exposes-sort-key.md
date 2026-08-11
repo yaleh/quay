@@ -117,3 +117,5 @@ capability-catalog / delivery-inventory）。`plugin/test/slot-refill.test.mjs` 
 reviewer: outer
 at: 2026-08-10
 changed: manager 实测——AC36 判据② 不可机械核：recommended 纯字符串数组、顶层键无排序字段，位次前移只能人工比对。立案：recommended 带排序键 + 判据② 机械化。实现归 inner
+
+**同 AC36 验证链（交叉标注，gap-suite-blocking-directory-glob-overbroad 2026-08-11）**：AC36 判据① 的 blocking_suite 第一轴此前被目录 glob 的 over-broad 归因污染——`computeSuiteBlocking`（ready-pool-check.ts）把 Touches 目录 glob（如 `plugin/test/` → `plugin/test/**`）展开匹配任何测试失败，使 crystallization 被误判为 suite-blocker 排到 `recommended` 第 1、DC 被挤到第 2。gap-suite-blocking-directory-glob-overbroad 修复后：裸目录 glob 不参与 suite-blocking 归因（`parseTouches` 新增 `dirGlobs` 元数据，`computeSuiteBlocking` 从归因集排除），真 suite-blocker（Touches 含具体失败文件名）仍归因，blocking_suite 轴不再被污染，DC 轴恢复。

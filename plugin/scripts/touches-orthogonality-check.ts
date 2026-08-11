@@ -60,8 +60,10 @@ export function isOverbroadDeclaration(glob) {
 
 // ── parseTouches ─────────────────────────────────────────────────────────────────────────────────
 // Extract the `## Touches` section's path globs. Accepts `- ` and `* ` bullets.
-// Returns { hasSection, globs }. hasSection distinguishes "no declaration" (→ conservative) from
-// "declared empty".
+// Returns { hasSection, globs, dirGlobs }. hasSection distinguishes "no declaration" (→ conservative)
+// from "declared empty". dirGlobs is a Set of the globs that came from BARE-DIRECTORY declarations
+// (trailing-slash, no wildcard — e.g. `plugin/test/`), carrying the post-Fix-3 `**` form so callers
+// can exclude them from file-level attribution (gap-suite-blocking-directory-glob-overbroad AC2).
 //
 // SINGLE-SOURCE (gap-task-body-has-n-parsers-and-no-authority): the bullet→path parsing (backtick/
 // quote stripping, trailing "(…)" annotation stripping — both outside-backticks and
@@ -73,14 +75,23 @@ export function isOverbroadDeclaration(glob) {
 // trailing-slash directory globs get `**` appended (DIR-106 Fix 3).
 export function parseTouches(text) {
   const { hasSection, section } = extractTouchesSection(text);
-  const globs = parseTouchEntries(section).map((g) => {
+  const globs = [];
+  const dirGlobs = new Set();
+  for (const raw of parseTouchEntries(section)) {
+    let g = raw;
     // DIR-106 Fix 3: normalize trailing-slash directory globs — "milestones/M155/" matches
     // the literal directory string, not files within it. Append ** so the glob expands to
     // all files under that directory. Guard: only when no wildcard is already present.
-    if (g && g.endsWith("/") && !/[*?]/.test(g)) g += "**";
-    return g;
-  });
-  return { hasSection, globs };
+    // A bare-directory declaration is recorded in dirGlobs (post-Fix-3 form) so file-level
+    // attribution (suite-blocking) can skip it — its expansion is a whole subtree, not a file.
+    const isDirGlob = g && g.endsWith("/") && !/[*?]/.test(g);
+    if (isDirGlob) {
+      g += "**";
+      dirGlobs.add(g);
+    }
+    globs.push(g);
+  }
+  return { hasSection, globs, dirGlobs };
 }
 
 // ── matchGlob ────────────────────────────────────────────────────────────────────────────────────

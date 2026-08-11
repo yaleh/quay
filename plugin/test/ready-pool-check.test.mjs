@@ -61,6 +61,8 @@ import {
 } from "../scripts/ready-pool-check.ts";
 import { parseTask } from "../scripts/task-schema.ts";
 import { taskWorkLanded } from "../scripts/task-status-drift-check.ts";
+import { expandDeclaredTouches } from "../scripts/concurrent-batch-scheduler.ts";
+import { walkFiles } from "../scripts/touches-orthogonality-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -1700,6 +1702,56 @@ test("computeSuiteBlocking: round-record failures attribute cross-round + bare-b
   const r3 = computeSuiteBlocking({ rounds: crossRound, stateFailures: [], tasks, expand });
   assert.equal(r3.consecutiveRed, 3);
   assert.ok(r3.ids.has("gap-script"), "an old round's recorded failure attributes across the red window (round-record reverse-lookup)");
+});
+
+test("computeSuiteBlocking: bare-directory glob does NOT attribute (AC2 — gap-suite-blocking-directory-glob-overbroad)", (t) => {
+  // The reported defect: a task whose Touches include `plugin/test/` (a bare directory glob, the
+  // full-width annotation stripped) was being flagged for EVERY failure under plugin/test/ because
+  // DIR-106 Fix 3 turns it into `plugin/test/**` → the REAL fs-backed expander walks the whole
+  // subtree, and any failure file under it matched. Only globs that pin down specific files may
+  // attribute. The expander below is the PRODUCTION one (expandDeclaredTouches over a real walk),
+  // so this test FAILS without the AC2 filter (a bare dir would expand to the failing file).
+  const root = makeWorkspace("dirglob");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, "plugin", "test"), { recursive: true });
+  fs.mkdirSync(path.join(root, "plugin", "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(root, "plugin", "test", "checker-cost.test.mjs"), "");
+  fs.writeFileSync(path.join(root, "plugin", "scripts", "ready-pool-check.ts"), "");
+  const expand = (globs) => expandDeclaredTouches(globs, root, walkFiles(root));
+
+  const tasks = new Map([
+    ["gap-crystallization", { status: "ready", body: "## Touches\n- plugin/test/（各 AC 测试）" }],
+    ["gap-spec-file", { status: "ready", body: "## Touches\n- plugin/test/checker-cost.test.mjs" }],
+  ]);
+  const redRounds = Array.from({ length: 3 }, () => ({
+    state: "red",
+    reason: "failed",
+    failures: [{ file: "plugin/test/checker-cost.test.mjs" }],
+  }));
+  const r = computeSuiteBlocking({ rounds: redRounds, stateFailures: [], tasks, expand });
+  assert.equal(r.windowActive, true);
+  assert.ok(!r.ids.has("gap-crystallization"), "bare-directory glob `plugin/test/` does NOT attribute a subtree failure (AC2)");
+  assert.ok(r.ids.has("gap-spec-file"), "concrete file glob still attributes the same failure (AC3 non-regression)");
+
+  // A task whose Touches are ONLY the directory glob is never suite-blocking.
+  const onlyDir = new Map([
+    ["gap-dir-only", { status: "ready", body: "## Touches\n- plugin/test/" }],
+  ]);
+  const r2 = computeSuiteBlocking({ rounds: redRounds, stateFailures: [], tasks: onlyDir, expand });
+  assert.equal(r2.windowActive, true);
+  assert.equal(r2.ids.size, 0, "a task declaring only a directory glob is not suite-blocking");
+
+  // Mixed: directory glob + concrete file — the concrete file still attributes (real blocker preserved).
+  const mixed = new Map([
+    ["gap-mixed", { status: "ready", body: "## Touches\n- plugin/test/\n- plugin/scripts/ready-pool-check.ts" }],
+  ]);
+  const mixedRounds = Array.from({ length: 3 }, () => ({
+    state: "red",
+    reason: "failed",
+    failures: [{ file: "plugin/scripts/ready-pool-check.ts" }],
+  }));
+  const r3 = computeSuiteBlocking({ rounds: mixedRounds, stateFailures: [], tasks: mixed, expand });
+  assert.ok(r3.ids.has("gap-mixed"), "concrete file touch still attributes even alongside a directory glob (AC3)");
 });
 
 test("computeRelevance: suite-blocking flips blocking true + boosts value (AC2/AC3 unit)", () => {

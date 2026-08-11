@@ -677,7 +677,15 @@ export function computeSuiteBlocking({ rounds, stateFailures, tasks, minRedWindo
     if (task.status !== "ready" && task.status !== "todo") continue;
     const parsed = parseTouches(task.body);
     if (!parsed.hasSection || parsed.globs.length === 0) continue;
-    const declared = expand(parsed.globs);
+    // AC2 (gap-suite-blocking-directory-glob-overbroad): a BARE-DIRECTORY glob (`plugin/test/` —
+    // DIR-106 Fix 3 turns it into `plugin/test/**`) expands to a WHOLE subtree; attributing ANY
+    // failure file under it to the task is over-broad (e.g. a task whose Touches include
+    // `plugin/test/（各 AC 测试）` was being flagged as suite-blocking for every plugin/test
+    // failure). Only globs that pin down specific files (concrete paths or wildcard file globs)
+    // participate in attribution; directory globs are excluded from the declared set.
+    const attributable = parsed.globs.filter((g) => !(parsed.dirGlobs && parsed.dirGlobs.has(g)));
+    if (attributable.length === 0) continue;
+    const declared = expand(attributable);
     // AC3 — match with the shape-normalizing comparator (bare basename AND repo-relative failure
     // files both resolve against declared Touches; see failureFileMatches).
     for (const f of failureFiles) {
