@@ -37,7 +37,7 @@ import {
   setProbeTmpPrefix, sweepTmp, reapLiveOwners, md5, tmux, isolateTmuxEnv, isClaudePid,
   paneHasClaudeChild, waitForAlive, makeHermeticProbe, makePlainPane,
   makeClaudePaneProcess, makeTwoWindowSession, paneSelfIsClaude, waitForSelfClaude,
-  spawnMonitor, waitForOutput, makeBackdatedGitRepo,
+  spawnMonitor, waitForOutput, waitForRounds, makeBackdatedGitRepo,
   makePaneBusy, makePaneIdle,
   makeTmp, cleanup, diskWorktreeRoot, runInit,
 } from "./session-liveness-helpers.mjs";
@@ -332,7 +332,10 @@ test("G — removing .halt resets the staleness baseline: no OVERDUE/REPO-STALL 
     assert.ok(await waitForAlive(p.env, p.session), "probe must be alive first");
     const mon = spawnMonitor(p.env, `gate ${gitRoot} ${p.session}`, { tickLogs: `gate ${tick}`, stallMin: 1, overdueMin: 1 });
     try {
-      await sleep(4000); // ≥3 rounds parked: both suppressed
+      // ≥3 rounds parked: both suppressed, AND the idle baseline establishes PREV_IDLE=1 so the
+      // busy edge below (makePaneBusy + un-halt → SESSION-RESUMED) can fire — waitForRounds is the
+      // load-robust form (a fixed 4s sleep can be as few as one slow round under full-suite load).
+      assert.ok(await waitForRounds(mon, 3, 20000), `monitor must run ≥3 parked rounds:\n${mon.output()}`);
       assert.ok(!/REPO-STALL/.test(mon.output()) && !/SESSION-OVERDUE/.test(mon.output()),
         `parked project must not STALL or OVERDUE:\n${mon.output()}`);
       // reproduce the coordinator's incident: the pane goes to the BUSY SHAPE (classifyPaneState)

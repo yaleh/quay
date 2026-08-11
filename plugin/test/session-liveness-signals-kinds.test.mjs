@@ -66,7 +66,10 @@ test("AC1/AC3/AC6/AC7 — esc to interrupt PRESENCE drives busy/idle; RESUMED ca
     // (same isolation test A uses).
     const mon = spawnMonitor(p.env, `esc ${p.tmp} ${p.session}`, { tickLogs: `esc /nonexistent` });
     try {
-      await sleep(3000); // idle baseline: bash prompt, no busy shape
+      // Idle baseline MUST establish ≥2 rounds so PREV_IDLE=1 is armed BEFORE the busy transition
+      // (RESUMED is an idle→busy edge; a fixed sleep can be one slow round under full-suite load).
+      assert.ok(await waitForRounds(mon, 2, 20000),
+        `idle baseline must establish 2 rounds so PREV_IDLE=1 is armed before the busy edge:\n${mon.output()}`);
       makePaneBusy(p.env, p.session); // type "esc to interrupt" into the input line → busy SHAPE
       const resumed = await waitForOutput(mon, /SESSION-RESUMED esc/, 60000);
       assert.ok(resumed, `RESUMED must fire when esc to interrupt appears:\n${mon.output()}`);
@@ -192,7 +195,10 @@ test("AC6/AC7 — RESUMED carries the cause AND the last-input time from the tra
     assert.ok(await waitForAlive(p.env, p.session), "probe must be alive");
     const mon = spawnMonitor(p.env, `pl ${p.tmp} ${p.session}`, { transcripts: `pl ${x}` });
     try {
-      await sleep(3000); // idle baseline
+      // Idle baseline MUST establish ≥2 rounds so PREV_IDLE=1 is armed BEFORE the busy transition
+      // (RESUMED is an idle→busy edge; a fixed sleep can be one slow round under full-suite load).
+      assert.ok(await waitForRounds(mon, 2, 20000),
+        `idle baseline must establish 2 rounds so PREV_IDLE=1 is armed before the busy edge:\n${mon.output()}`);
       makePaneBusy(p.env, p.session); // shape-busy (ruling D): typed esc → busy shape
       // Window is generous (60000ms, widened from 25000 by
       // gap-load-sensitive-serial-phase-unbounded-growth-measure-first AC5 — the round-206 AC6
@@ -234,7 +240,10 @@ test("AC7 negative control — an EMPTY transcript yields last-input 取不到, 
     assert.ok(await waitForAlive(p.env, p.session), "probe must be alive");
     const mon = spawnMonitor(p.env, `pl ${p.tmp} ${p.session}`, { transcripts: `pl ${x}` });
     try {
-      await sleep(3000); // idle baseline
+      // Idle baseline MUST establish ≥2 rounds so PREV_IDLE=1 is armed BEFORE the busy transition
+      // (RESUMED is an idle→busy edge; a fixed sleep can be one slow round under full-suite load).
+      assert.ok(await waitForRounds(mon, 2, 20000),
+        `idle baseline must establish 2 rounds so PREV_IDLE=1 is armed before the busy edge:\n${mon.output()}`);
       makePaneBusy(p.env, p.session); // shape-busy (ruling D): typed esc → busy shape
       assert.ok(await waitForOutput(mon, /SESSION-RESUMED pl/, 60000), `RESUMED must fire:\n${mon.output()}`);
       const out = mon.output();
@@ -272,7 +281,10 @@ test("AC6 negative control — a script mutation that neutralizes the cause yiel
     assert.ok(await waitForAlive(p.env, p.session), "probe must be alive");
     const mon = spawnMonitor(p.env, `pl ${p.tmp} ${p.session}`, { script: mutated, transcripts: `pl ${x}` });
     try {
-      await sleep(3000); // idle baseline
+      // Idle baseline MUST establish ≥2 rounds so PREV_IDLE=1 is armed BEFORE the busy transition
+      // (RESUMED is an idle→busy edge; a fixed sleep can be one slow round under full-suite load).
+      assert.ok(await waitForRounds(mon, 2, 20000),
+        `idle baseline must establish 2 rounds so PREV_IDLE=1 is armed before the busy edge:\n${mon.output()}`);
       makePaneBusy(p.env, p.session); // shape-busy (ruling D): typed esc → busy shape
       assert.ok(await waitForOutput(mon, /SESSION-RESUMED pl/, 60000), `RESUMED must fire:\n${mon.output()}`);
       const out = mon.output();
@@ -395,16 +407,19 @@ test("AC7/D4 — CANT-SEND 时效：陈旧错误被后续成功应答覆盖 ⇒ 
   const p = makeHermeticProbe("ol-d4fresh");
   const blocked = path.join(p.tmp, "blocked.jsonl");
   const recovered = path.join(p.tmp, "recovered.jsonl");
-  fs.writeFileSync(blocked, [userRecord(isoAgo(10)), assistantRecord(isoAgo(5)),
-    apiErrorRecord(isoAgo(1)), apiErrorRecord(isoAgo(0.5))].join("\n") + "\n");
-  fs.writeFileSync(recovered, [userRecord(isoAgo(10)), apiErrorRecord(isoAgo(5)),
-    assistantRecord(isoAgo(1))].join("\n") + "\n");
+  // writeTranscript backdates the FILE mtime to match the last record's content timestamp
+  // (blocked ≈0.5m ago, recovered = 1m ago). A freshly-written file would read as "transcript 刚写过"
+  // and fire MARKER-STALE noise — a real session's file is as old as its last write, not now.
+  writeTranscript(blocked, [userRecord(isoAgo(10)), assistantRecord(isoAgo(5)),
+    apiErrorRecord(isoAgo(1)), apiErrorRecord(isoAgo(0.5))], 1);
+  writeTranscript(recovered, [userRecord(isoAgo(10)), apiErrorRecord(isoAgo(5)),
+    assistantRecord(isoAgo(1))], 1);
   try {
     assert.ok(await waitForAlive(p.env, p.session), "probe must be alive");
     // 尾随错误正控制：错误在最末（0.5m/1m 前）⇒ CANT-SEND 报。
     const monB = spawnMonitor(p.env, `b ${p.tmp} ${p.session}`, { transcripts: `b ${blocked}`, loopMin: 0, interval: 1 });
     try {
-      assert.ok(await waitForOutput(monB, /SESSION-IDLE-CANT-SEND b/, 8000),
+      assert.ok(await waitForOutput(monB, /SESSION-IDLE-CANT-SEND b/, 30000),
         `AC7 positive control: trailing errors MUST report CANT-SEND:\n${monB.output()}`);
     } finally {
       monB.child.kill("SIGKILL");
@@ -413,11 +428,16 @@ test("AC7/D4 — CANT-SEND 时效：陈旧错误被后续成功应答覆盖 ⇒ 
     // D4 修复：陈旧错误（5m 前）被后续成功应答（1m 前，最后一条 assistant 文本）覆盖 ⇒ 不报 CANT-SEND。
     const monR = spawnMonitor(p.env, `r ${p.tmp} ${p.session}`, { transcripts: `r ${recovered}`, loopMin: 0, interval: 1 });
     try {
-      await sleep(4500); // several idle rounds — a stale-error CANT-SEND would have fired by now
+      // WAIT for the positive instead of a fixed 4.5s sleep: the debounced SESSION-IDLE fires at
+      // round ≥2, and under concurrent-suite load a monitor round can take >2s — the old fixed
+      // window could end before the debounced IDLE fired (r298 wall-clock flake of this test). The
+      // negative (no CANT-SEND) is then still valid: CANT-SEND and SESSION-IDLE are mutually
+      // exclusive at the emit, so a wrongly-blocked recovered session would fire CANT-SEND at
+      // round 1-2 and SESSION-IDLE r would NEVER appear.
+      assert.ok(await waitForOutput(monR, /SESSION-IDLE r/, 30000),
+        `AC7/D4: the recovered session must still report a REGULAR SESSION-IDLE (the freshness gate, not a blind mute):\n${monR.output()}`);
       assert.ok(!/SESSION-IDLE-CANT-SEND/.test(monR.output()),
         `AC7/D4: a stale error superseded by a successful response MUST NOT report CANT-SEND:\n${monR.output()}`);
-      assert.ok(/SESSION-IDLE r/.test(monR.output()),
-        `AC7/D4: the recovered session must still report a REGULAR SESSION-IDLE (the freshness gate, not a blind mute):\n${monR.output()}`);
     } finally {
       monR.child.kill("SIGKILL");
       monR.cleanup();
