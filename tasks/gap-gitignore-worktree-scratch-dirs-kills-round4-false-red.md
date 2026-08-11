@@ -71,6 +71,11 @@ resume 若中断，先跑 measure 读当前忽略状态
       (1) 验证 worktree 运行期单写入者达成（`git worktree lock`）——B 的前提恢复；(2) A1 的 .gitignore
       止血（scratch 目录不再假红）+ A2 的 .worktreeinclude（config.yml 在位）——worktree 环境两个前提
       齐备。三者叠加后重新接回 B。A1 的 .gitignore 行继续保留，是复原环境的一部分。
+      **2026-08-11 交叉标注（同族：worktree 内容假红）：** `gap-loop-shipping-scan-does-not-exclude-worktrees`
+      与本任务同族——外层 worktree 的内容（`.claude/worktrees/agent-*` / `quay-worktrees/*`）被全仓 fs 扫描
+      （`loop-shipping.test.mjs` 的 AC1b/AC2 `walk()`）当作主 repo 内容造成假红。本任务用 .gitignore 止血（
+      `git check-ignore` 不认 fs 遍历，拦不住 walk）；该任务在 `walk()` 遍历层排除 worktree 容器路径。两者互补：
+      gitignore 拦 git 状态层面的脏树假红，`walk()` 排除层拦 fs 遍历层面的假红。
 
 ## Definition of Done
 
