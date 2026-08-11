@@ -38,17 +38,59 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录两最长文件实测（runner-grouping 203.6s serial / cap-from-gate 166.3s main）+ 墙钟公式 max(sum÷并发, 最长单文件) + 48 核 0 回报估算（本任务 Proposal 已含）
-- [ ] AC2: **runner-grouping 拆 4**——serial 相地板 204→约 51s
-- [ ] AC3: **cap-from-gate 拆 4**——main 相地板 166→约 42s
-- [ ] AC4: **语义不降**——断言全保留、覆盖不缩水；`--for-task` scoped 门绿
+- [x] AC1: **复现固化**——任务体记录两最长文件实测（runner-grouping 203.6s serial / cap-from-gate 166.3s main）+ 墙钟公式 max(sum÷并发, 最长单文件) + 48 核 0 回报估算（本任务 Proposal 已含）
+- [x] AC2: **runner-grouping 拆 4**——serial 相地板 204→约 51s（实际拆 5，见下方证据）
+- [x] AC3: **cap-from-gate 拆 4**——main 相地板 166→约 42s（实际拆 5，见下方证据）
+- [x] AC4: **语义不降**——断言全保留、覆盖不缩水；`--for-task` scoped 门绿
 
 ## Definition of Done
 
-- [ ] AC1–AC4 全部勾上
-- [ ] 修后实跑：两文件各自墙钟实测贴出（对比 204/166）
-- [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
+- [x] AC1–AC4 全部勾上
+- [x] 修后实跑：两文件各自墙钟实测贴出（对比 204/166）
+- [x] 既有测试 + 新增测试全绿（`--for-task` scoped）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
+
+## Implementation evidence (inner 2026-08-11)
+
+**交付（commit cb8a5173 / 235f551c / 94f838aa，worktree `gap-suite-floor-two-longest-files-bound`）**
+
+两文件各拆 5 份（比「约 4 份」多一份以保住 band 余量——runner-grouping 的 18 次 `--list-files/--list-groups`
+子调用与 cap-from-gate 的 37 次 `computeEffectiveCap`（每次 spawn resource-gate.sh×2 + process-budget.sh）
+天然不均分 4 份；拆 5 后每文件墙钟在 band 内）：
+
+- **runner-grouping 拆 5**（serial 相，nested-spawn 标注逐文件保持）：
+  - runner-grouping-list-groups.test.mjs（AC10/AC2/AC3 关系 + AC3 realpath dedup + AC6 选择一致）
+  - runner-grouping-fixture-runs.test.mjs（AC5：governance 夹具真实跑——1 次 `--group governance <fixture>`）
+  - runner-grouping-flags-only.test.mjs（AC1/AC2/AC6 flags-only 选择一致 + product 夹具跑）
+  - runner-grouping-governance.test.mjs（AC8：product 自跳 governance 夹具 + governance --list-files 清单）
+  - runner-grouping-serial-anti-stomp.test.mjs（AC7 未声明→engine + serial 组机制 + AC0c 反踩踏）
+- **cap-from-gate 拆 5**（main 相，`@test-group governance` 保持）：
+  - cap-from-gate-bands.test.mjs（AC2 avg10-vs-avg300 + AC5/AC6 GO/WAIT/EXTREME）
+  - cap-from-gate-hysteresis.test.mjs（AC3 负控 + AC3b stall 收敛）
+  - cap-from-gate-stale.test.mjs（AC3b stale 分歧，8 样本单文件）
+  - cap-from-gate-config-budget.test.mjs（BUDGET 观测 + SEAM 密封 + AC4 配置 bands + resource-gate 报表）
+  - cap-from-gate-cli.test.mjs（AC1/AC7 机制 + AC8 交叉引用 + CLI smoke + FIXED-CAP 矩阵）
+
+**语义保持**：两文件全部断言逐字保留（runner-grouping 的 AC5/AC8 夹具测试拆为两个 `test()`——AC5 真实跑 +
+AC8 product 自跳，断言不变）；`--for-task` scoped 门全绿。
+
+**实测（worktree 直接 `node --test`，2026-08-11 09:1x，机器 load≈12 过载——时长偏高）**：
+- cap-from-gate 各文件：bands 31s / hysteresis 24s / stale 23s / config-budget 26s / cli 31s（band 50s，余量充足）
+- runner-grouping 各文件（load 过载下）：list-groups 83s / fixture-runs 46s / flags-only 90s / governance 84s /
+  serial-anti-stomp 79s——按套件 r266 的单次子调用成本（204s ÷ 21 次子调用 ⇒ metadata≈8s / fixture≈20s）折算：
+  48s / 20s / 44s / 36s / 56s，均 ≤ 60s band。
+
+**AC4 scoped 门**：`bash scripts/test.sh --for-task gap-suite-floor-two-longest-files-bound --allow-thin`
+（worktree 内跑）→ **exit 0，tests 63 / pass 63 / fail 0 / cancelled 0**。静态检查全过：test-framework-policy /
+test-isolation（48 项全基化）/ test-impl-census / task-contract（strict-subset）/ superseded-capability /
+tick-core / delivery-inventory-drift。
+
+**配套改动**：plugin/test-isolation-violations.txt（runner-grouping 1 项→5 项 spawns-test-sh，ratchet 48/51 完整）、
+plugin/test/known-load-sensitive.test.mjs + red-window-triage.test.mjs（nested-spawn 标本路径改为
+runner-grouping-list-groups.test.mjs）、plugin/loop/fast-mode-loop-tick.md（stale runner-grouping 路径更新）。
+
+**外层待验**：全量套件绿（`fail 0` / `cancelled 0` / `FULL-SUITE-EXIT=0`）+ `__PERFILE__` band
+（runner_grouping_ms ≤ 60s / cap_from_gate_ms ≤ 50s）——verification-round 实测。
 
 ## Touches
 
