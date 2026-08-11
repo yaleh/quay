@@ -804,6 +804,7 @@ print(any(r.get('scope')=='worktree' and r.get('state')=='green' for r in rs))
     return 0
   fi
   echo "integration-batch-merge: WORKTREE-GREEN-GATE FAIL-CLOSED — no scope=worktree+state=green round in ${round_file}; the suite-fix subagent never self-tested green in its OWN worktree ⇒ 不许 merge（不自测绿不许合）; nothing moved" >&2
+  echo "integration-batch-merge:   fix: 先在自己 worktree 自测绿：node --test <文件> 或 scoped test.sh（bash scripts/test.sh --for-task <task-id> --allow-thin），得到 scope=worktree+state=green 记录后再 fan-in" >&2
   return 1
 }
 
