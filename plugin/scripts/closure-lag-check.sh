@@ -36,23 +36,45 @@
 # The signal is a REPORT, never a gate: it does not block dispatch or the tick. Normal state exits 0
 # silent; a firing condition prints a CLOSURE-LAG-WARN line (stdout) and exits 1.
 #
+# BRACKET CLOSURE (## Contract bracket_close_is_one_writer = 1 — task
+# gap-needs-human-routing-does-not-close-bracket): the closure-pass ALSO owns the telemetry bracket
+# closure for TERMINAL tasks. Any terminal routing (needs-human / done) MUST leave the task's
+# `--task-start` bracket closed in the same round; this script provides the single write path.
+#   --close-task       close ONE task's open bracket (the unified closure point). Reads the runId
+#                      from the telemetry report's inProgress[] by taskId (the caller does NOT need
+#                      to hold the runId — robust against crash-restart). Idempotent: no open
+#                      bracket ⇒ exit 0, no write. Requires --taskId <id> --outcome
+#                      <done|needs-human|abandoned>. Optional --runId <r> skips the report lookup.
+#   --close-terminal   scan ALL inProgress brackets and close those whose task has reached a
+#                      terminal state: status `needs-human` → outcome needs-human; status `done` →
+#                      outcome done; status `ready` with work landed + AC all checked
+#                      (ready-pool-check's not-yet-flipped, the "done-ready" class) → outcome done.
+#                      This is the OUTER's mechanical safety net — it makes the previously-manual
+#                      "needs-human bracket was closed by hand" path mechanical.
+#   --dry-run          (with a close mode) report what WOULD be closed without writing.
+#   --json             (with a close mode) emit machine-readable JSON instead of prose.
+#
 # Usage:
 #   closure-lag-check.sh [--threshold <N>] [--timeout <secs>] [--root <dir>]
-#                        [--json] [--record --flipped <N>] [--help]
+#                        [--json] [--record --flipped <N>]
+#                        [--close-task --taskId <id> --outcome <done|needs-human|abandoned> [--runId <r>]]
+#                        [--close-terminal] [--dry-run] [--help]
 #
 #   (no args)      measure-only: compute the closure-lag signal. 0 = silent, 1 = signal, 2 = error.
 #   --threshold N  not-yet-flipped backlog threshold (default 10; strictly > threshold fires).
 #   --timeout S    closure-pass max age before the overdue signal (default 3600s = 1h).
 #   --root DIR     workspace root (default: auto-derived from this script's location).
-#   --json         measure-only, machine-readable JSON (never mutates).
+#   --json         measure-only JSON (no close mode) OR machine-readable JSON output (with a close mode).
 #   --record       write the closure-pass trace (requires --flipped <N>). Creates .quay/ if absent.
 #   --flipped N    how many tasks this closure pass flipped (with --record).
+#   --close-task / --close-terminal / --dry-run / --taskId / --outcome / --runId — see above.
 #
 # Exit codes:
-#   0  normal (no lag; or --record / --json success with signal=false)
+#   0  normal (no lag; --record / --json success with signal=false; OR a close mode succeeded —
+#      including the idempotent "no open bracket" case, which is NOT an error)
 #   1  closure-lag signal fired (not-yet-flipped > threshold, closure-pass overdue, or trace missing
-#      with pending work) — also --json with signal=true
-#   2  usage / environment error (no node, no workspace, bad args)
+#      with pending work) — also --json with signal=true; OR a close mode's end-event WRITE failed
+#   2  usage / environment error (no node, no workspace, bad args, missing --taskId/--outcome)
 # ── 统一 --help（gap-scripts-sprawl：用法在前、退出 0、无业务副作用）────────────────────
 if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
   _gap_help_lib="$(dirname "${BASH_SOURCE[0]}")/gate-script-lib.sh"
@@ -68,6 +90,11 @@ timeout="3600"
 mode="measure"
 flipped=""
 root_arg=""
+json_out="0"
+dry_run="0"
+task_id=""
+close_outcome=""
+run_id_arg=""
 
 usage() { sed -n 's/^# \{0,1\}//p' "$0" | grep -v '^!' ; }
 
@@ -76,9 +103,15 @@ while [ "$#" -gt 0 ]; do
     --threshold) threshold="${2:-}"; shift 2 ;;
     --timeout) timeout="${2:-}"; shift 2 ;;
     --root) root_arg="${2:-}"; shift 2 ;;
-    --json) mode="json"; shift ;;
+    --json) json_out="1"; [ "${mode}" = "measure" ] && mode="json"; shift ;;
     --record) mode="record"; shift ;;
     --flipped) flipped="${2:-}"; shift 2 ;;
+    --close-task) mode="close-task"; shift ;;
+    --close-terminal) mode="close-terminal"; shift ;;
+    --dry-run) dry_run="1"; shift ;;
+    --taskId) task_id="${2:-}"; shift 2 ;;
+    --outcome) close_outcome="${2:-}"; shift 2 ;;
+    --runId) run_id_arg="${2:-}"; shift 2 ;;
     --help|-h) usage; exit 0 ;;
     *) echo "closure-lag-check: unknown argument: $1" >&2; exit 2 ;;
   esac
@@ -114,6 +147,128 @@ if [ "${mode}" = "record" ]; then
   mkdir -p "$(dirname "${trace_file}")"
   printf '{"ranAt":%s,"flipped":%s,"at":"%s"}\n' "${now}" "${flipped}" "${iso}" > "${trace_file}"
   echo "closure-lag-check: recorded closure-pass trace (ranAt=${now} flipped=${flipped}) → ${trace_file}"
+  exit 0
+fi
+
+# ── --close-task: close ONE task's open bracket (the unified terminal closure point) ───────────────
+# gap-needs-human-routing-does-not-close-bracket: both terminal routings (needs-human at fan-in
+# conflict / OVER90 / REFUTED, and completion → done) call this single write path. Reads the runId
+# from the telemetry report's inProgress[] by taskId (the caller does NOT need to hold it — robust
+# against crash-restart where the runId was lost). Idempotent: no open bracket ⇒ exit 0, no write.
+if [ "${mode}" = "close-task" ]; then
+  if [ -z "${task_id}" ]; then
+    echo "closure-lag-check: --close-task requires --taskId <id>" >&2
+    exit 2
+  fi
+  case "${close_outcome}" in done|needs-human|abandoned) ;; *)
+    echo "closure-lag-check: --close-task requires --outcome <done|needs-human|abandoned>" >&2
+    exit 2 ;;
+  esac
+
+  run_id="${run_id_arg}"
+  if [ -z "${run_id}" ]; then
+    run_id="$(node --no-warnings --experimental-strip-types "${SCRIPT_DIR}/fast-mode-telemetry.ts" --report --json --root "${repo_root}" 2>/dev/null \
+      | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{try{const r=JSON.parse(s);const id=process.argv[1];const f=(r.inProgress||[]).find(p=>p.taskId===id);if(f&&f.runId)process.stdout.write(f.runId)}catch(_){}});' "${task_id}")"
+  fi
+
+  if [ -z "${run_id}" ]; then
+    if [ "${json_out}" = "1" ]; then
+      printf '{"taskId":"%s","closed":false,"runId":null,"outcome":"%s","message":"no open bracket"}\n' "${task_id}" "${close_outcome}"
+    else
+      echo "closure-lag-check: --close-task: no open bracket for ${task_id} (already closed or never started) — nothing to do"
+    fi
+    exit 0
+  fi
+
+  if [ "${dry_run}" = "1" ]; then
+    if [ "${json_out}" = "1" ]; then
+      printf '{"taskId":"%s","closed":false,"runId":"%s","outcome":"%s","message":"dry-run (would close)"}\n' "${task_id}" "${run_id}" "${close_outcome}"
+    else
+      echo "closure-lag-check: --close-task [dry-run]: would close ${task_id} (runId ${run_id}, outcome ${close_outcome})"
+    fi
+    exit 0
+  fi
+
+  if node --no-warnings --experimental-strip-types "${SCRIPT_DIR}/fast-mode-telemetry.ts" --task-end --taskId "${task_id}" --runId "${run_id}" --outcome "${close_outcome}" --root "${repo_root}" >/dev/null 2>&1; then
+    if [ "${json_out}" = "1" ]; then
+      printf '{"taskId":"%s","closed":true,"runId":"%s","outcome":"%s","message":"end event written"}\n' "${task_id}" "${run_id}" "${close_outcome}"
+    else
+      echo "closure-lag-check: --close-task: closed ${task_id} (runId ${run_id}, outcome ${close_outcome})"
+    fi
+    exit 0
+  fi
+  echo "closure-lag-check: --close-task: failed to write end event for ${task_id}" >&2
+  exit 1
+fi
+
+# ── --close-terminal: scan ALL inProgress brackets and close those whose task is terminal ───────────
+# gap-needs-human-routing-does-not-close-bracket AC3: the OUTER's mechanical safety net. Previously
+# the needs-human bracket was closed BY HAND (outer tick, "手动 --task-end needs-human"); this makes
+# that path mechanical. Terminal = status needs-human | done, or done-ready (status ready + work
+# landed + AC all checked — ready-pool-check's not-yet-flipped, the "完成但留 ready" defect class).
+if [ "${mode}" = "close-terminal" ]; then
+  close_terminal_result="$(DRY_RUN="${dry_run}" JSON_OUT="${json_out}" node -e '
+    const { execFileSync } = require("node:child_process");
+    const fs = require("node:fs");
+    const path = require("node:path");
+    const root = process.argv[1];
+    const cli = process.argv[2];   // real plugin/scripts/fast-mode-telemetry.ts
+    const rpc = process.argv[3];   // real plugin/scripts/ready-pool-check.ts
+    const dryRun = process.env.DRY_RUN === "1";
+    const jsonOut = process.env.JSON_OUT === "1";
+    const runCli = (args) => execFileSync("node", ["--no-warnings", "--experimental-strip-types", ...args], { encoding: "utf8" });
+    let report = { inProgress: [] };
+    try { report = JSON.parse(runCli([cli, "--report", "--json", "--root", root])); } catch (_) {}
+    let pool = { excluded: [] };
+    try { pool = JSON.parse(runCli([rpc, "--root", root, "--json"])); } catch (_) {}
+    const notYetFlipped = new Set((pool.excluded || []).filter((e) => (e.reasons || []).includes("not-yet-flipped")).map((e) => e.id));
+    const plan = [];
+    for (const p of report.inProgress || []) {
+      let status = "";
+      const tf = path.join(root, "tasks", p.taskId + ".md");
+      try {
+        const raw = fs.readFileSync(tf, "utf8");
+        const m = raw.match(/^status:\s*(\S+)/m);
+        if (m) status = m[1].replace(/["\x27]/g, "");
+      } catch (_) {}
+      let outcome = "";
+      if (status === "needs-human") outcome = "needs-human";
+      else if (status === "done") outcome = "done";
+      else if (status === "ready" && notYetFlipped.has(p.taskId)) outcome = "done";
+      if (outcome) plan.push({ taskId: p.taskId, runId: p.runId, outcome });
+    }
+    const closed = [];
+    const skipped = [];
+    for (const e of plan) {
+      if (dryRun) { closed.push({ ...e, dryRun: true }); continue; }
+      try {
+        runCli([cli, "--task-end", "--taskId", e.taskId, "--runId", e.runId, "--outcome", e.outcome, "--root", root]);
+        closed.push(e);
+      } catch (_) {
+        skipped.push({ taskId: e.taskId, reason: "end-write-failed" });
+      }
+    }
+    if (jsonOut) {
+      process.stdout.write(JSON.stringify({ scanned: report.inProgress.length, closed, skipped }));
+    } else {
+      if (closed.length === 0) {
+        console.log("closure-lag-check: --close-terminal: no terminal-task brackets to close");
+      }
+      for (const c of closed) {
+        const tag = c.dryRun ? " [dry-run: would close]" : "";
+        console.log(`closure-lag-check: --close-terminal: closed ${c.taskId} (runId ${c.runId}, outcome ${c.outcome})${tag}`);
+      }
+      if (!dryRun && closed.length > 0) {
+        console.log(`closure-lag-check: --close-terminal: closed ${closed.length} terminal-task bracket(s)`);
+      }
+    }
+  ' "${repo_root}" "${SCRIPT_DIR}/fast-mode-telemetry.ts" "${SCRIPT_DIR}/ready-pool-check.ts")"
+  close_terminal_status=$?
+  if [ "${close_terminal_status}" -ne 0 ]; then
+    echo "closure-lag-check: --close-terminal: internal error" >&2
+    exit 2
+  fi
+  printf '%s\n' "${close_terminal_result}"
   exit 0
 fi
 

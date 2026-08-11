@@ -22,7 +22,7 @@
 | A3 | 先判本回合唤起源 | transcript 有 `<task-notification>` ⇒ 走槽位回填(**只重评估派发,不 fan-in、不写任务状态、不重排程**);否则走全流程 (src:287,290) |
 | A4 | 读队列文件 `docs/analysis/batch2-queue-state.md` | 与 `git log`/`git worktree list` 不一致 ⇒ **以 git 为准**并修正文件 (src:379) |
 | A5 | `bash plugin/scripts/supervisor-bus-identity.sh inbox-summary` | 有 `unread:` ⇒ 逐条进本轮决策;本步**只读不写回执** (src:385,389) |
-| A6 | Fan-in 已返回任务(**串行**) | 先 `git -C <wt> rebase $MERGE_TARGET` (src:449) → `git merge --no-ff task/<id>` 合回 `$MERGE_TARGET` (src:457) → `$TEST_COMMAND --for-task <id>` (src:473) → `git worktree remove` + `git branch -d` (src:476);rebase 冲突/merge 冲突/选中集非绿 ⇒ 回退、标 needs-human、**停止本 tick 后续合并与派发** (src:456,472,474);设了 `QUAY_CLAIM_REMOTE` ⇒ `release-task.sh` 释放认领 (src:481) |
+| A6 | Fan-in 已返回任务(**串行**) | 先 `git -C <wt> rebase $MERGE_TARGET` (src:449) → `git merge --no-ff task/<id>` 合回 `$MERGE_TARGET` (src:457) → `$TEST_COMMAND --for-task <id>` (src:473) → `git worktree remove` + `git branch -d` (src:476);rebase 冲突/merge 冲突/选中集非绿 ⇒ 回退、标 needs-human、**停止本 tick 后续合并与派发** (src:456,472,474);设了 `QUAY_CLAIM_REMOTE` ⇒ `release-task.sh` 释放认领 (src:481)。**统一括号闭合点(`gap-needs-human-routing-does-not-close-bracket`,src:605)**:凡标 needs-human 的同一处(冲突/REFUTED/OVER90 等)**必须**先调 `bash plugin/scripts/closure-lag-check.sh --close-task --taskId <id> --outcome needs-human` 关括号;fan-in 成功(merge 落地、无需 further routing)时调 `bash plugin/scripts/closure-lag-check.sh --close-task --taskId <id> --outcome done` 关括号——括号在终止/完成同轮闭合,不停留 inProgress |
 | A7 | `tmux capture-pane -p -t "$TMUX_SESSION" > .quay/last-pane.txt` → `inner-blocked-signal.ts --detect-stop --pane` | 停止条件的机械检查,**写盘是检查本身的后果**;命中任一 ⇒ 不派发、报告、重新排程 (src:520,560) |
 | A8 | 同一 pane 喂 `inner-panel-stale-check.ts --pane … --json` | exit 1 = 括号已关但 agent 行残留冻结 ⇒ 检出该误导窗口 (src:529,533) |
 | A9 | 读外层 `.quay/full-suite-state.json` | `running`/`green` ⇒ 照常派发与合并;`red`+`reason: failed`(或缺失)⇒ 暂缓 `$MERGE_TARGET`→`$FORK_BASELINE` 批量合,新派发按失败位置条件化(共享闸门 `run_static_checks` ⇒ 停派;具体测试文件且与新任务 touches 无关 ⇒ 继续;相交 ⇒ 该任务停派;无法判定 ⇒ fail-closed 停派);`red`+`reason: aborted` ⇒ **不停派**;文件缺失 ⇒ 不阻塞 (src:569-592) |
@@ -32,7 +32,7 @@
 | A13 | `fast-mode-telemetry.ts --slots --cap "${effective_cap:-3}"` | 空槽必须机械可见:`realConcurrency` / `stale_brackets` / `closedButLive` / `slots_free`;`stale_brackets > 0` ⇒ 调 `--reconcile` (src:636,614,1131)。**C17 合规产物(`gap-reconcile-step-skipped-no-compliance-product`):读 `reconcileCompliant`(`--slot-status` 的 `reconcile_compliant` 同值)——`stale_brackets > 0` 且 `reconcileCompliant=false` ⇒ 本 tick 判「未对账」(守与不守记录可区分),**立即调 `--reconcile`(留痕:每次调用写时间戳到 `.workflow-events/reconcile-invocations.jsonl`)**,并把 false+已调 reconcile 记进本 tick tick-log** |
 | A14 | routine track(例常例行) | 读 `.quay/config.yml` `loop.routines:`(默认 `[]` ⇒ 空转)→ `routine-scheduler.ts --iteration <tick 计数>`(exit 0=有 DUE / 3=无)→ `read-probe-spec.ts` 派后台探针 → `routine-file-gate.ts`;**FILE-ONLY,改产品/方法代码=违规丢弃** (src:729-735) |
 | A15 | 派发前逐候选六检查 | ① `touches-orthogonality-check.ts --resolve`(多数条目 MISSING ⇒ 不派发) (src:807) ② 依赖就绪,用 `it0-split-or-commit-check.ts` 的 PARENT-DONE-IFF-CHILDREN (src:811) ③ `concurrent-batch-scheduler.ts --json` 对**所有在飞任务和彼此**两两判 (src:820) ④ `fork-baseline.ts` / `integration-branch-model.ts --fork-baseline` 定分叉基线 (src:839,894) ⑤ `--self-touch`(缺 `tasks/<id>.md` ⇒ 不派发) (src:855) ⑥ 设了 `QUAY_CLAIM_REMOTE` ⇒ `claim-task.sh --check-touches` 先认领 (src:868) |
-| A16 | 派发前每任务 `fast-mode-telemetry.ts --task-start --taskId <id>` | **强制不可跳过**,记下 runId;inner **只写 `--task-start`** (src:599,604,608) |
+| A16 | 派发前每任务 `fast-mode-telemetry.ts --task-start --taskId <id>` | **强制不可跳过**,记下 runId;inner 写 `--task-start` 于派发、写 `--task-end`(经 `closure-lag-check.sh --close-task`)于**终止/完成路由**(src:599,604,608)——括号不在 inProgress 停留是 `gap-needs-human-routing-does-not-close-bracket` 的统一闭合点 |
 | A17 | **必跑** `sync-lag-check.sh --push --branch "$FORK_BASELINE" --root …` | 兜底触发源,不依赖任何完成事件;push 失败(非快进=真分歧)只报告、下 tick 重试,**绝不 force** (src:939,948) |
 | A18 | **账本·声称机制的真实调用**(AC29(a),每 tick):`meta-cc query_session_content role=tool tool_name=ready-pool-check` → `last(timestamp)` | `--apply` 心跳是「工具造好后一次没被调用过」高发项;>3 个 tick 周期无真实调用 ⇒ 写明「已停用/已替代/是缺陷」三选一 (src:647,685) |
 | A19 | **账本·slot-refill**(AC29(a)):`meta-cc query_session_content role=tool tool_name=slot-refill` → `last(timestamp)` | >3 个 tick 周期未调用 ⇒ 三选一写明;slot-refill 与 ready-pool 同族「心跳缺机械产物」 (src:297,747) |
@@ -55,7 +55,7 @@
 | 约束 | 一句话 |
 |---|---|
 | C1 | **inner 零全量套件自跑**——只读外层 suite-state,只跑 `--for-task` 选中集(秒级) (src:488,595) |
-| C2 | **inner 不写任务状态**:不翻 done、不写 `--task-end`、不写轮次记录——收尾是外层 1b 的异步活 (src:400,608,273) |
+| C2 | **inner 不翻 done、不写轮次记录**;写 `--task-end` **仅限终止/完成路由**(经 `closure-lag-check.sh --close-task`,统一闭合点,`gap-needs-human-routing-does-not-close-bracket`)——status 翻转仍由外层 1b 独占 (src:400,608,273) |
 | C3 | **合并必须串行**,且合回 `$MERGE_TARGET`;`$FORK_BASELINE` 只由外层批量合推进 (src:443,505) |
 | C4 | worktree **一律建在 `$WORKTREE_ROOT/<slug>`(磁盘)**,`/tmp` 是 tmpfs、建进去就是重演整机 OOM (src:23,889) |
 | C5 | 派发形态必须 `Agent(run_in_background: true)`——前台派发会阻塞内层、`<task-notification>` 流永不触发 (src:882) |

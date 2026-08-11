@@ -30,6 +30,7 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(__dirname, "..", "..");
 const CHECK = join(repoRoot, "plugin", "scripts", "closure-lag-check.sh");
+const TELEMETRY = join(repoRoot, "plugin", "scripts", "fast-mode-telemetry.ts");
 
 function run(args, opts = {}) {
   const res = spawnSync("bash", [CHECK, ...args], { encoding: "utf8", ...opts });
@@ -223,5 +224,216 @@ test("usage/environment errors exit 2 (no --flipped, unknown arg, not a workspac
     const noTasks = run(["--root", notAWorkspace]);
     assert.equal(noTasks.status, 2, "not-a-workspace (no tasks/) must exit 2");
     assert.match(noTasks.stderr, /not a workspace/);
+  } finally { cleanup(w); }
+});
+
+// ── Bracket closure (gap-needs-human-routing-does-not-close-bracket) ──────────────────────────────
+// The closure-pass ALSO owns the telemetry bracket closure for TERMINAL tasks. Two terminal routings
+// (needs-human, completion→done) must close the `--task-start` bracket in the same round — the
+// "unified bracket-close point" (`--close-task`) and the outer mechanical safety net
+// (`--close-terminal`). AC1 — terminal task brackets close in the same round; AC2 — negative control
+// (construct needs-human routing + completion path ⇒ both brackets close, no OVER90 residue); AC3 —
+// the outer closing routine checks terminal-task brackets mechanically (script, not human).
+
+/** Write one task file with an explicit status. */
+function writeTask(root, id, status, acChecked = true) {
+  const ac = acChecked ? "- [x] an AC item 0 that is long enough" : "- [ ] an AC item 0 that is long enough";
+  const body = [
+    "---",
+    `id: ${id}`,
+    `title: fixture ${id}`,
+    `status: ${status}`,
+    "labels: []",
+    "parent: null",
+    "children: []",
+    "extra: {}",
+    "---",
+    "",
+    "**type:** execution",
+    "",
+    "## Proposal",
+    "A real proposal paragraph that is definitely more than forty non-whitespace chars.",
+    "",
+    "## Acceptance Criteria",
+    ac,
+    "",
+    "## Definition of Done",
+    "standard DoD",
+    "",
+  ].join("\n");
+  writeFileSync(join(root, "tasks", `${id}.md`), body, "utf8");
+}
+
+/** Open a `--task-start` bracket; returns the printed runId. */
+function startBracket(root, taskId) {
+  const res = spawnSync(
+    "node",
+    ["--no-warnings", "--experimental-strip-types", TELEMETRY, "--task-start", "--taskId", taskId, "--root", root],
+    { encoding: "utf8" },
+  );
+  assert.equal(res.status, 0, `--task-start must succeed:\n${res.stdout}${res.stderr}`);
+  return res.stdout.trim();
+}
+
+/** Parse the telemetry report for one workspace. */
+function telemetryReport(root) {
+  const res = spawnSync(
+    "node",
+    ["--no-warnings", "--experimental-strip-types", TELEMETRY, "--report", "--json", "--root", root],
+    { encoding: "utf8" },
+  );
+  return JSON.parse(res.stdout);
+}
+
+// ── AC2 (needs-human routing path): --close-task closes the bracket with outcome needs-human ──────
+
+test("AC2 needs-human — --close-task closes an open bracket with outcome needs-human (same round)", () => {
+  const w = makeWorkspace("ct-nh");
+  try {
+    const runId = startBracket(w, "GAP-NH");
+    writeTask(w, "GAP-NH", "needs-human");
+    const r = run(["--root", w, "--close-task", "--taskId", "GAP-NH", "--outcome", "needs-human"]);
+    assert.equal(r.status, 0, `--close-task must exit 0:\n${r.stdout}${r.stderr}`);
+    assert.match(r.stdout, /closed GAP-NH/);
+    assert.match(r.stdout, /outcome needs-human/);
+
+    // Bracket left inProgress in the same round; the end event PAIRED with the start (tasks[], not orphaned).
+    const rep = telemetryReport(w);
+    assert.equal(rep.inProgress.length, 0, "bracket must leave inProgress in the same round");
+    assert.ok(rep.tasks.some((t) => t.taskId === "GAP-NH" && t.outcome === "needs-human"), "paired end event in tasks[]");
+    assert.equal(rep.orphaned.length, 0, "no orphaned end event (runId was matched)");
+  } finally { cleanup(w); }
+});
+
+// ── AC2 (completion path): --close-task closes the bracket with outcome done ─────────────────────
+
+test("AC2 completion — --close-task closes an open bracket with outcome done (same round)", () => {
+  const w = makeWorkspace("ct-done");
+  try {
+    const runId = startBracket(w, "GAP-DONE");
+    writeTask(w, "GAP-DONE", "done");
+    const r = run(["--root", w, "--close-task", "--taskId", "GAP-DONE", "--outcome", "done"]);
+    assert.equal(r.status, 0, `--close-task must exit 0:\n${r.stdout}${r.stderr}`);
+    assert.match(r.stdout, /closed GAP-DONE/);
+    assert.match(r.stdout, /outcome done/);
+
+    const rep = telemetryReport(w);
+    assert.equal(rep.inProgress.length, 0, "bracket must leave inProgress in the same round");
+    assert.ok(rep.tasks.some((t) => t.taskId === "GAP-DONE" && t.outcome === "done"), "paired end event in tasks[]");
+  } finally { cleanup(w); }
+});
+
+// ── AC2 negative control: --close-task is idempotent (no open bracket ⇒ exit 0, no write) ─────────
+
+test("AC2 negative control — --close-task with no open bracket exits 0 and writes nothing (idempotent)", () => {
+  const w = makeWorkspace("ct-idem");
+  try {
+    const runId = startBracket(w, "GAP-X");
+    writeTask(w, "GAP-X", "done");
+    assert.equal(run(["--root", w, "--close-task", "--taskId", "GAP-X", "--outcome", "done"]).status, 0);
+    // Second call: bracket already closed — idempotent, exit 0, no orphan created.
+    const second = run(["--root", w, "--close-task", "--taskId", "GAP-X", "--outcome", "done"]);
+    assert.equal(second.status, 0, "idempotent re-close must exit 0");
+    assert.match(second.stdout, /no open bracket/);
+
+    // A task that never had a bracket: also exit 0, nothing written.
+    const never = run(["--root", w, "--close-task", "--taskId", "GAP-NEVER", "--outcome", "done"]);
+    assert.equal(never.status, 0, "no-bracket close must exit 0");
+    assert.match(never.stdout, /no open bracket/);
+  } finally { cleanup(w); }
+});
+
+// ── AC2 negative control: invalid --close-task usage exits 2 ─────────────────────────────────────
+
+test("AC2 negative control — --close-task usage errors exit 2 (missing --taskId / bad --outcome)", () => {
+  const w = makeWorkspace("ct-err");
+  try {
+    const noId = run(["--root", w, "--close-task", "--outcome", "done"]);
+    assert.equal(noId.status, 2, "missing --taskId must exit 2");
+    assert.match(noId.stderr, /--taskId/);
+
+    const badOutcome = run(["--root", w, "--close-task", "--taskId", "GAP-X", "--outcome", "bogus"]);
+    assert.equal(badOutcome.status, 2, "bad --outcome must exit 2");
+    assert.match(badOutcome.stderr, /--outcome/);
+  } finally { cleanup(w); }
+});
+
+// ── AC3: --close-terminal scans inProgress and closes terminal-task brackets (needs-human/done/done-ready) ──
+
+test("AC3 — --close-terminal closes needs-human + done + done-ready brackets; leaves non-terminal open", () => {
+  const w = makeWorkspace("ct-scan");
+  try {
+    // Four open brackets: needs-human, done, done-ready (ready + AC checked), and non-terminal todo.
+    startBracket(w, "GAP-NH");
+    writeTask(w, "GAP-NH", "needs-human");
+    startBracket(w, "GAP-DONE");
+    writeTask(w, "GAP-DONE", "done");
+    startBracket(w, "GAP-DR");
+    writeTask(w, "GAP-DR", "ready", true); // done-ready: work landed + AC all checked, status still ready
+    startBracket(w, "GAP-TODO");
+    writeTask(w, "GAP-TODO", "todo", false); // NOT terminal — must stay open
+
+    const r = run(["--root", w, "--close-terminal"]);
+    assert.equal(r.status, 0, `--close-terminal must exit 0:\n${r.stdout}${r.stderr}`);
+    assert.match(r.stdout, /closed GAP-NH .*outcome needs-human/);
+    assert.match(r.stdout, /closed GAP-DONE .*outcome done/);
+    assert.match(r.stdout, /closed GAP-DR .*outcome done/);
+    assert.match(r.stdout, /closed 3 terminal-task bracket\(s\)/);
+
+    const rep = telemetryReport(w);
+    assert.equal(rep.inProgress.length, 1, "only the non-terminal todo bracket remains inProgress");
+    assert.equal(rep.inProgress[0].taskId, "GAP-TODO", "todo bracket must NOT be closed");
+    assert.ok(rep.tasks.some((t) => t.taskId === "GAP-NH" && t.outcome === "needs-human"));
+    assert.ok(rep.tasks.some((t) => t.taskId === "GAP-DONE" && t.outcome === "done"));
+    assert.ok(rep.tasks.some((t) => t.taskId === "GAP-DR" && t.outcome === "done"));
+    assert.equal(rep.orphaned.length, 0, "all closures were paired with real starts");
+  } finally { cleanup(w); }
+});
+
+// ── AC3: --close-terminal --dry-run reports WITHOUT writing ───────────────────────────────────────
+
+test("AC3 — --close-terminal --dry-run reports what would close but writes nothing", () => {
+  const w = makeWorkspace("ct-dry");
+  try {
+    startBracket(w, "GAP-NH");
+    writeTask(w, "GAP-NH", "needs-human");
+
+    const dry = run(["--root", w, "--close-terminal", "--dry-run", "--json"]);
+    assert.equal(dry.status, 0, `dry-run must exit 0:\n${dry.stdout}${dry.stderr}`);
+    const plan = JSON.parse(dry.stdout);
+    assert.equal(plan.scanned, 1);
+    assert.equal(plan.closed.length, 1);
+    assert.equal(plan.closed[0].taskId, "GAP-NH");
+    assert.equal(plan.closed[0].outcome, "needs-human");
+    assert.equal(plan.closed[0].dryRun, true, "dry-run entries are marked");
+
+    // Nothing was written: the bracket is still inProgress.
+    const rep = telemetryReport(w);
+    assert.equal(rep.inProgress.length, 1, "dry-run must not close the bracket");
+    assert.equal(rep.inProgress[0].taskId, "GAP-NH");
+  } finally { cleanup(w); }
+});
+
+// ── AC3: --close-terminal --json emits the machine-readable shape ────────────────────────────────
+
+test("AC3 — --close-terminal --json emits the machine-readable shape after real closures", () => {
+  const w = makeWorkspace("ct-json");
+  try {
+    startBracket(w, "GAP-DONE");
+    writeTask(w, "GAP-DONE", "done");
+    const res = run(["--root", w, "--close-terminal", "--json"]);
+    assert.equal(res.status, 0, `--close-terminal --json must exit 0:\n${res.stdout}${res.stderr}`);
+    const j = JSON.parse(res.stdout);
+    assert.equal(j.scanned, 1);
+    assert.equal(j.closed.length, 1);
+    assert.equal(j.closed[0].taskId, "GAP-DONE");
+    assert.equal(j.closed[0].outcome, "done");
+    assert.equal(j.skipped.length, 0);
+
+    // Re-run: nothing left to close.
+    const again = run(["--root", w, "--close-terminal", "--json"]);
+    const j2 = JSON.parse(again.stdout);
+    assert.equal(j2.scanned, 0);
+    assert.equal(j2.closed.length, 0);
   } finally { cleanup(w); }
 });
