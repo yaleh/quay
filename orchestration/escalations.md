@@ -534,6 +534,17 @@ resource-aware。
 3. **cgroup 任务落地前不挂 trigger**：外层 B3 手工按需起跑套件，cgroup 修好后（套件可能判绿）再重挂 auto-trigger——最省资源；依赖外层记得挂。
 **外层倾向**：先做 1（内层 code fix 根因），在 cgroup 落地前维持 3（trigger 保持停），cgroup 修复的 fan-in 合并后按需手工跑一次真套件验证绿，再重挂 trigger（带 v25 PATH）。
 
+## 2026-08-11 11:2xZ — cgroup 修复已完成且分支 77/77 绿，但 rebase 冲突卡 needs-human（update to 10:5xZ entry）
+**现象**：`gap-full-suite-runner-cgroup-scope-evidence-unfound` 状态 ready→needs-human（inner 11:0xZ tick C16 abort）。inner 报告：分支 `16b5cc65` 的 `findSuiteScopeUnit` 修复**真实现且 77/77 绿**，但 fan-in rebase 到 outer 的 `73e0020f` 时**任务文件冲突**（outer 10:50Z 写该文件加 Dispatch review 段 vs 分支 self-audit）⇒ C16 abort ⇒ needs-human。worktree/branch 保留待处置（inner）。同 tick self-hosting-e2e 也 needs-human（referenced-not-landed：SKILL 指针指向未声明进 laydown set 的 proof doc ⇒ 打红 quay-init.test 5 fail；inner 已回退该 merge + 三处复绿）。
+**为什么升级**：cgroup 是**全量套件判绿的唯一剩余代码障碍** ⇒ 现在同时卡 8 个已 merge 任务的 DoD closure + suite-trigger 重挂。修复代码本身已绿，needs-human 只是任务文件 rebase 冲突这个**簿记问题**——解掉即可 fan-in 恢复全套件。
+**处置**：归 inner（fan-in + 冲突 per-hunk 取并集：保留 outer Dispatch review 段与分支 self-audit 双方新增）；外层下一 idle 窗口优先 steer 该冲突解决。trigger 继续停（维持选项 3）。
+
+## 2026-08-11 12:28Z — cgroup 落地 + 全套件判绿 + trigger 重挂带 v25 PATH（选项 2 执行，10:5xZ/11:2xZ entry 闭环）
+**结果**：cgroup 修复 16b5cc65 经 rebase 合入 develop=bee6378b（inner 12:0xZ per-hunk 并集，零冲突）；outer 12:05Z 手跑全量套件 round 6 **判绿**（3216/3216 fail 0 cancelled 0, commit bee6378b, laneCount 4——本机首次真全量绿，prior 4 轮 red/static-check tests=0）；B1 closure 翻 7 done（commit 71ce6f74），nyf 9→3。
+**重挂（选项 2 执行）**：12:27Z 停后首次重挂 suite-state-trigger，mount env 显式带 v25 PATH（PID environ PATH 首项 v25.2.0；`spawnRetriggerRun` 的 `env:{...process.env}` 继承该 PATH ⇒ retrigger runner 的 test.sh→node 解析 v25，v18 ESM crash-loop 不复发）。**选项 1（inner code fix :726 prepend execPath 目录）仍未落地**——选项 2 已满足运行需要，选项 1 归 inner backlog 作根因修。
+**副作用（设计使然）**：首轮 poll 即 auto-retrigger round 7（runId 324ad208, verifiedCommit 71ce6f74=当前 tip, laneCount 4, resource-gate GO）——suite 对移动 tip 持续判绿的稳态恢复；round 7 验证期 inner 按自家逻辑 hold fan-in。
+**剩余**：nyf 2 需特定套件形态（a15-04 需 workflow-form 轮 / suite-concurrency-8 需 --lane-count 8）；self-hosting needs-human 停放。
+
 
 
 ## 2026-08-09 17:3xZ — 批量合被 freshness-gate 持续拒（round-174b 拒一次，b69266c7 注定再拒）：inner A9 允许套件运行中照常 fan-in，gate COVERAGE 轴要求 suite start ≥ 最后 integration fan-in ⇒ inner 活跃时套件永远不满足 gate
