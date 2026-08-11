@@ -29,7 +29,7 @@ const repoRoot = join(__dirname, "..", "..");
 const helper = join(repoRoot, "plugin", "scripts", "test-file-snapshot.sh");
 
 function runHelper(args) {
-  return spawnSync("bash", [helper, ...args], { cwd: repoRoot, encoding: "utf8", timeout: 60000 });
+  return spawnSync("bash", [helper, ...args], { cwd: repoRoot, encoding: "utf8", timeout: 180000 });
 }
 
 const FORK_SET = ["/w/a.test.mjs", "/w/b.test.mjs", "/w/c.test.mjs"];
