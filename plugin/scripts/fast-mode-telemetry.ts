@@ -27,7 +27,7 @@
 //
 // Run:
 //   node --experimental-strip-types fast-mode-telemetry.ts --task-start --taskId <id> [--root <dir>]
-//   node --experimental-strip-types fast-mode-telemetry.ts --task-end --taskId <id> --runId <r> --outcome <done|needs-human|abandoned> [--root <dir>]
+//   node --experimental-strip-types fast-mode-telemetry.ts --task-end --taskId <id> --runId <r> --outcome <done|needs-human|abandoned|deferred> [--root <dir>]
 //   node --experimental-strip-types fast-mode-telemetry.ts --report [--since <iso>] [--json] [--root <dir>]   (PURE READ)
 //   node --experimental-strip-types fast-mode-telemetry.ts --snapshot [--since <iso>] [--json] [--root <dir>] (explicit persist)
 //   node --experimental-strip-types fast-mode-telemetry.ts --reconcile [--json] [--root <dir>] (close in-flight records whose executor is observably gone)
@@ -462,7 +462,7 @@ export function buildStartEvent({ taskId, runId, executionCwd, baseCommit = null
  * @param {object} opts
  * @param {string} opts.taskId
  * @param {string} opts.runId
- * @param {string} opts.outcome — one of VALID_OUTCOMES (done|needs-human|skipped|error|abandoned)
+ * @param {string} opts.outcome — one of VALID_OUTCOMES (done|needs-human|skipped|error|abandoned|deferred)
  * @param {string} [opts.executionCwd]
  * @param {string|null} [opts.baseCommit]
  * @param {number} [opts.recordedAtMs]
@@ -793,7 +793,7 @@ export function computeHaltedMs(haltEvents, windowStartMs, windowEndMs) {
  *                 `startedAtMsUnreliable` (a backfilled/distorted start) and EXCLUDED from the
  *                 throughput numerator AND denominator. Absent/null ⇒ no annotation (byte-identical
  *                 to pre-fix behavior).
- * @returns {{tasks: Array<{taskId:string,runId:string,minutes:number,outcome:string|null}>, orphaned: Array<{taskId:string,runId:string,outcome:string|null}>, inProgress: Array<{taskId:string,runId:string,startedAtMs:number,startedAtMsUnreliable:boolean}>, reconciled: Array<{taskId:string,runId:string,minutes:number,outcome:string|null,reconcileReason:string,startedAtMsUnreliable:boolean}>, unreliable: Array<{taskId:string,runId:string,minutes:number,outcome:string|null,startedAtMsUnreliable:boolean,startedAtMs:number}>, meanMinutes:number, medianMinutes:number, tasksPerHour:number, serialEquivalentPerHour:number, windowStart:string|null, windowEnd:string|null, windowHours:number, haltedHours:number, halted:Array<{startMs:number,endMs:number}>, blocked: Array<{taskId:string,reason:string|null,sinceMs:number|null,clearedAtMs:number|null,durationMs:number}>, totalBlockedMs:number, longestBlockedMs:number}}
+ * @returns {{tasks: Array<{taskId:string,runId:string,minutes:number,outcome:string|null}>, orphaned: Array<{taskId:string,runId:string,outcome:string|null}>, inProgress: Array<{taskId:string,runId:string,startedAtMs:number,startedAtMsUnreliable:boolean}>, deferred: Array<{taskId:string,runId:string,minutes:number,outcome:string,startedAtMs:number}>, reconciled: Array<{taskId:string,runId:string,minutes:number,outcome:string|null,reconcileReason:string,startedAtMsUnreliable:boolean}>, unreliable: Array<{taskId:string,runId:string,minutes:number,outcome:string|null,startedAtMsUnreliable:boolean,startedAtMs:number}>, meanMinutes:number, medianMinutes:number, tasksPerHour:number, serialEquivalentPerHour:number, windowStart:string|null, windowEnd:string|null, windowHours:number, haltedHours:number, halted:Array<{startMs:number,endMs:number}>, blocked: Array<{taskId:string,reason:string|null,sinceMs:number|null,clearedAtMs:number|null,durationMs:number}>, totalBlockedMs:number, longestBlockedMs:number}}
  */
 export function aggregate(events, { sinceMs = null, nowMs = null, haltEvents = null, firstKnownCommitMsByTask = null } = {}) {
   const fastEvents = events.filter((e) => e && e.stage === FAST_MODE_STAGE);
@@ -822,6 +822,8 @@ export function aggregate(events, { sinceMs = null, nowMs = null, haltEvents = n
   const orphaned = [];
   /** @type {Array<{taskId:string,runId:string,startedAtMs:number,startedAtMsUnreliable:boolean}>} */
   const inProgress = [];
+  /** @type {Array<{taskId:string,runId:string,minutes:number,outcome:string,startedAtMs:number}>} */
+  const deferred = [];
   /** @type {Array<{taskId:string,runId:string,minutes:number,outcome:string|null,reconcileReason:string,startedAtMsUnreliable:boolean}>} */
   const reconciled = [];
   /** @type {Array<{taskId:string,runId:string,minutes:number,outcome:string|null,startedAtMsUnreliable:boolean,startedAtMs:number}>} */
@@ -841,7 +843,11 @@ export function aggregate(events, { sinceMs = null, nowMs = null, haltEvents = n
     const firstCommitMs = firstKnownCommitMsByTask ? firstKnownCommitMsByTask(rec.taskId) : null;
     const startedAtMsUnreliable =
       firstCommitMs != null && startedAtMs != null && startedAtMs > firstCommitMs;
-    if (startedAtMs != null && !reconcileReason && !startedAtMsUnreliable) {
+    // A defer-close (end outcome "deferred") is NOT a completed task: it never contributes to the
+    // throughput window bounds. It pairs a real start with a defer-close end; the task is still
+    // pending (queue), so its bracket open/close instants must not stretch the throughput window.
+    const isDeferredClose = rec.start && end && end.outcome === "deferred";
+    if (startedAtMs != null && !reconcileReason && !startedAtMsUnreliable && !isDeferredClose) {
       earliestStartMs = earliestStartMs == null ? startedAtMs : Math.min(earliestStartMs, startedAtMs);
     }
     if (rec.start && end) {
@@ -849,7 +855,7 @@ export function aggregate(events, { sinceMs = null, nowMs = null, haltEvents = n
       if (sinceMs != null && end.timing.endedAtMs < sinceMs) continue;
       const raw = startedAtMs != null ? (end.timing.endedAtMs - startedAtMs) / 60_000 : 0;
       const minutes = raw > 0 ? raw : 0;
-      if (end.timing.endedAtMs != null && !reconcileReason && !startedAtMsUnreliable) {
+      if (end.timing.endedAtMs != null && !reconcileReason && !startedAtMsUnreliable && !isDeferredClose) {
         latestEndMs = latestEndMs == null ? end.timing.endedAtMs : Math.max(latestEndMs, end.timing.endedAtMs);
       }
       if (reconcileReason != null) {
@@ -857,6 +863,14 @@ export function aggregate(events, { sinceMs = null, nowMs = null, haltEvents = n
         // original start (both real events — never deleted), but it is NOT a completed task: it
         // must never contribute to throughput. Surfaced in `reconciled[]` for the audit trail.
         reconciled.push({ taskId: rec.taskId, runId: rec.runId, minutes, outcome: end.outcome, reconcileReason, startedAtMsUnreliable });
+      } else if (end.outcome === "deferred") {
+        // gap-over90-clock-measures-queue-time-not-work-time: a bracket CLOSED on a touches-overlap
+        // DEFER (--close-task --outcome deferred). The queue segment (bracket open → defer-close)
+        // must NEVER count toward OVER90 (the bracket leaves inProgress) and must NEVER pollute
+        // throughput (surfaced here in `deferred[]`, not `tasks[]`). The task is not complete — it
+        // will be re-`--task-start`ed when work actually begins (fresh clock). startedAtMs is the
+        // bracket's open instant, so a reader can see how long the pre-defer bracket was open.
+        deferred.push({ taskId: rec.taskId, runId: rec.runId, minutes, outcome: "deferred", startedAtMs });
       } else if (startedAtMsUnreliable) {
         // A completed pair whose start is backfilled (startedAtMs later than the task's first known
         // commit) asserts a wall-clock that did not happen — excluded from throughput (AC7).
@@ -878,6 +892,7 @@ export function aggregate(events, { sinceMs = null, nowMs = null, haltEvents = n
   tasks.sort((a, b) => a.taskId.localeCompare(b.taskId));
   orphaned.sort((a, b) => a.taskId.localeCompare(b.taskId) || a.runId.localeCompare(b.runId));
   inProgress.sort((a, b) => a.taskId.localeCompare(b.taskId) || a.runId.localeCompare(b.runId));
+  deferred.sort((a, b) => a.taskId.localeCompare(b.taskId) || a.runId.localeCompare(b.runId));
   reconciled.sort((a, b) => a.taskId.localeCompare(b.taskId) || a.runId.localeCompare(b.runId));
   unreliable.sort((a, b) => a.taskId.localeCompare(b.taskId) || a.runId.localeCompare(b.runId));
 
@@ -948,7 +963,7 @@ export function aggregate(events, { sinceMs = null, nowMs = null, haltEvents = n
   const longestBlockedMs = blocked.length ? Math.max(...blocked.map((b) => b.durationMs)) : 0;
 
   return {
-    tasks, orphaned, inProgress, meanMinutes, medianMinutes,
+    tasks, orphaned, inProgress, deferred, meanMinutes, medianMinutes,
     tasksPerHour, serialEquivalentPerHour,
     windowStart: windowStartMs != null ? new Date(windowStartMs).toISOString() : null,
     windowEnd: windowEndMs != null ? new Date(windowEndMs).toISOString() : null,
@@ -1432,6 +1447,15 @@ function printHumanReport(report, aggFile) {
     console.log(`unreliable (startedAtMs-unreliable, excluded from throughput): ${report.unreliable.length}`);
     for (const u of report.unreliable) console.log(`  ${u.taskId} (runId ${u.runId})`);
   }
+  // Defers (gap-over90-clock-measures-queue-time-not-work-time): brackets closed on a touches-overlap
+  // defer — the queue segment excluded from OVER90 AND from throughput. A task listed here was NOT
+  // completed; it waits in the queue and will be re-`--task-start`ed when work begins.
+  if ((report.deferred ?? []).length) {
+    console.log(`deferred (bracket closed on defer, excluded from OVER90 + throughput): ${report.deferred.length}`);
+    for (const d of report.deferred) {
+      console.log(`  ${d.taskId} (runId ${d.runId}, bracket open ${d.minutes.toFixed(1)}m before defer-close)`);
+    }
+  }
   // Blocked-wait (dead-time) metrics — gap-no-explicit-blocked-signal-from-inner-layer (AC7).
   if ((report.blocked ?? []).length) {
     console.log(`blocked-wait periods: ${report.blocked.length}`);
@@ -1450,7 +1474,7 @@ const usage = `fast-mode-telemetry.ts — fast-mode (direct) execution metering 
 
 Usage:
   node --experimental-strip-types fast-mode-telemetry.ts --task-start --taskId <id> [--root <dir>]
-  node --experimental-strip-types fast-mode-telemetry.ts --task-end --taskId <id> --runId <r> --outcome <done|needs-human|abandoned> [--root <dir>]
+  node --experimental-strip-types fast-mode-telemetry.ts --task-end --taskId <id> --runId <r> --outcome <done|needs-human|abandoned|deferred> [--root <dir>]
   node --experimental-strip-types fast-mode-telemetry.ts --halt-start [--atMs <iso>] [--reason <str>] [--root <dir>]   (record a .halt placement)
   node --experimental-strip-types fast-mode-telemetry.ts --halt-end   [--atMs <iso>] [--root <dir>]                    (record a .halt removal)
   node --experimental-strip-types fast-mode-telemetry.ts --report [--since <iso>] [--json] [--root <dir>]   (PURE READ — never writes)
@@ -1579,7 +1603,7 @@ export async function main(argv) {
     const runId = getArgValue(args, "--runId");
     const outcome = getArgValue(args, "--outcome");
     if (!taskId || !runId || !outcome) {
-      console.error("fast-mode-telemetry: --task-end requires --taskId <id> --runId <r> --outcome <done|needs-human|abandoned>");
+      console.error("fast-mode-telemetry: --task-end requires --taskId <id> --runId <r> --outcome <done|needs-human|abandoned|deferred>");
       return 1;
     }
     if (!VALID_OUTCOMES.includes(outcome)) {

@@ -754,6 +754,54 @@ test("AC2 — over-90m still fires when the task file is MISSING (bracket is the
   }
 });
 
+// gap-over90-clock-measures-queue-time-not-work-time DoD: a task deferred (touches-overlap) that
+// QUEUES 80min then WORKS 20min must NOT trigger OVER90 — the 90-min clock counts WORK time only,
+// never the queue segment. Mechanism under test: the pre-defer bracket is closed via --task-end
+// --outcome deferred (leaving inProgress), and the fresh --task-start when work begins opens a NEW
+// bracket whose startedAtMs is the WORK start. OVER90 reads inProgress — the only open bracket is the
+// 20min-old work one.
+test("OVER90-DEFER DoD — defer 80min then work 20min (total 100min) ⇒ NO over-90m block (queue excluded)", async () => {
+  const tmp = makeTmpWorkspace();
+  try {
+    const telemetry = await import(TELEMETRY);
+    const taskId = "gap-defer-dod";
+    const now = Date.now();
+    // t=-100min: --task-start opens a bracket (pre-defer, at the dispatch decision point).
+    const preRunId = telemetry.generateRunId(taskId);
+    telemetry.writeEvent(telemetry.buildStartEvent({ taskId, runId: preRunId, executionCwd: tmp, baseCommit: null, recordedAtMs: now - 100 * 60_000 }), tmp);
+    // t=-100min: defer decided → close the pre-defer bracket with outcome deferred (queue segment starts).
+    telemetry.writeEvent(telemetry.buildEndEvent({ taskId, runId: preRunId, outcome: "deferred", executionCwd: tmp, baseCommit: null, recordedAtMs: now - 100 * 60_000 }), tmp);
+    // t=-20min: work actually begins → FRESH --task-start (new runId, work clock starts).
+    telemetry.writeEvent(telemetry.buildStartEvent({ taskId, runId: telemetry.generateRunId(taskId), executionCwd: tmp, baseCommit: null, recordedAtMs: now - 20 * 60_000 }), tmp);
+    // The task is genuinely in-progress (working) — the task-status gate must NOT be what blocks the fire.
+    writeTaskFile(tmp, taskId, "in-progress");
+
+    const res = runCli(tmp, "--detect-stop");
+    assert.equal(res.status, 0, res.stderr);
+    assert.ok(!fs.existsSync(BLOCKED_PATH(tmp)), "total elapsed 100min but WORK only 20min ⇒ no over-90m block (queue time excluded)");
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+// POSITIVE CONTROL for the DoD: the same task, same in-progress status, but NO defer — a single
+// bracket open for 91min of genuine work ⇒ OVER90 MUST still fire (the fix only excludes queue, it
+// never masks a genuinely slow/long task).
+test("OVER90-DEFER positive control — 91min of WORK (no defer) still fires over-90m", async () => {
+  const tmp = makeTmpWorkspace();
+  try {
+    await writeBackdatedStartEvent(tmp, "gap-defer-real", 91 * 60 * 1000);
+    writeTaskFile(tmp, "gap-defer-real", "in-progress");
+    const res = runCli(tmp, "--detect-stop");
+    assert.equal(res.status, 0, res.stderr);
+    assert.ok(fs.existsSync(BLOCKED_PATH(tmp)), "a genuine 91min in-progress work bracket must still fire over-90m");
+    const rec = JSON.parse(fs.readFileSync(BLOCKED_PATH(tmp), "utf8"));
+    assert.equal(rec.taskId, "gap-defer-real");
+  } finally {
+    cleanup(tmp);
+  }
+});
+
 test("AC3 — os-anchor recurrence case side by side: status=ready stale bracket is skipped, the genuine in-progress one fires", async () => {
   const tmp = makeTmpWorkspace();
   try {

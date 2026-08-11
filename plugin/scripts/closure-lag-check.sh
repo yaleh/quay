@@ -44,7 +44,10 @@
 #                      from the telemetry report's inProgress[] by taskId (the caller does NOT need
 #                      to hold the runId — robust against crash-restart). Idempotent: no open
 #                      bracket ⇒ exit 0, no write. Requires --taskId <id> --outcome
-#                      <done|needs-human|abandoned>. Optional --runId <r> skips the report lookup.
+#                      <done|needs-human|abandoned|deferred>. Optional --runId <r> skips the report
+#                      lookup. `deferred` (gap-over90-clock-measures-queue-time-not-work-time) is the
+#                      touches-overlap defer-close: the queue segment must NOT count toward OVER90,
+#                      so the bracket is closed on defer and re-`--task-start`ed when work begins.
 #   --close-terminal   scan ALL inProgress brackets and close those whose task has reached a
 #                      terminal state: status `needs-human` → outcome needs-human; status `done` →
 #                      outcome done; status `ready` with work landed + AC all checked
@@ -57,7 +60,7 @@
 # Usage:
 #   closure-lag-check.sh [--threshold <N>] [--timeout <secs>] [--root <dir>]
 #                        [--json] [--record --flipped <N>]
-#                        [--close-task --taskId <id> --outcome <done|needs-human|abandoned> [--runId <r>]]
+#                        [--close-task --taskId <id> --outcome <done|needs-human|abandoned|deferred> [--runId <r>]]
 #                        [--close-terminal] [--dry-run] [--help]
 #
 #   (no args)      measure-only: compute the closure-lag signal. 0 = silent, 1 = signal, 2 = error.
@@ -160,8 +163,8 @@ if [ "${mode}" = "close-task" ]; then
     echo "closure-lag-check: --close-task requires --taskId <id>" >&2
     exit 2
   fi
-  case "${close_outcome}" in done|needs-human|abandoned) ;; *)
-    echo "closure-lag-check: --close-task requires --outcome <done|needs-human|abandoned>" >&2
+  case "${close_outcome}" in done|needs-human|abandoned|deferred) ;; *)
+    echo "closure-lag-check: --close-task requires --outcome <done|needs-human|abandoned|deferred>" >&2
     exit 2 ;;
   esac
 

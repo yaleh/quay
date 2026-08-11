@@ -358,6 +358,27 @@ test("AC2 negative control — --close-task usage errors exit 2 (missing --taskI
   } finally { cleanup(w); }
 });
 
+// ── DEFER-close (gap-over90-clock-measures-queue-time-not-work-time): --close-task --outcome
+//    deferred closes the bracket on a touches-overlap defer — the queue segment must leave
+//    inProgress (so OVER90 never counts it) and route to deferred[], not tasks[]/throughput ────────
+
+test("OVER90-DEFER — --close-task --outcome deferred closes the bracket, routes to deferred[] not tasks[]", () => {
+  const w = makeWorkspace("ct-defer");
+  try {
+    startBracket(w, "GAP-DEFER");
+    const r = run(["--root", w, "--close-task", "--taskId", "GAP-DEFER", "--outcome", "deferred"]);
+    assert.equal(r.status, 0, `--close-task --outcome deferred must exit 0:\n${r.stdout}${r.stderr}`);
+    assert.match(r.stdout, /closed GAP-DEFER/);
+
+    const rep = telemetryReport(w);
+    assert.equal(rep.inProgress.length, 0, "defer-close must leave inProgress (queue segment excluded from OVER90)");
+    assert.equal(rep.tasks.length, 0, "a defer-close is NOT a completed task — never in tasks[]/throughput");
+    assert.equal(rep.deferred.length, 1, "defer-close accounted in deferred[]");
+    assert.equal(rep.deferred[0].taskId, "GAP-DEFER");
+    assert.equal(rep.deferred[0].outcome, "deferred");
+  } finally { cleanup(w); }
+});
+
 // ── AC3: --close-terminal scans inProgress and closes terminal-task brackets (needs-human/done/done-ready) ──
 
 test("AC3 — --close-terminal closes needs-human + done + done-ready brackets; leaves non-terminal open", () => {

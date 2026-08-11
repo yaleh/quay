@@ -657,6 +657,15 @@ inProgress。**派发/收尾这对调用就是遥测从「历史归档」变回�
 subagents-no-slot-visibility` AC4）——本步的 `--task-start` 是派发时的开括号，终止/完成路由的
 `--close-task` 与 外层 1b 的 `--reconcile` 是收尾时的关括号；缺任一半，遥测就退化成只记录历史。
 
+**DEFER-CLOSE（`gap-over90-clock-measures-queue-time-not-work-time`，括号只计工作时间）**：本步
+`--task-start` 对候选开括号，但步骤 4 派发资格检查可能**在派发前**把候选 defer（touches-overlap /
+并发资格）——若不关括号，排队段会算进 OVER90 的 90 分钟时钟（今晚三次 OVER90 停派无一是「工作真的
+超时」）。**defer 时经统一括号闭合点关括号**：`bash plugin/scripts/closure-lag-check.sh --close-task
+--taskId <id> --outcome deferred`（idempotent——无开括号 exit 0 不写）；真正派发（工作开始）时**重新
+`--task-start` 开 fresh 括号**，OVER90 从新 `startedAtMs` 起算 ⇒ 只计实际工作时间。defer-close 在
+遥测是独立 `deferred` 记账（不算完成、不进吞吐、不留 inProgress——见 fast-mode-telemetry.ts aggregate
+的 `deferred[]` 与 slot-refill.ts 的 `deferred` 输出）。
+
 **括号 ≠ subagent（`gap-telemetry-brackets-vs-subagents-no-slot-visibility`）**：`--report` 的
 `inProgress` 是括号视角——红窗遗留的未闭合 start 会让它虚高。要看**真实并发/空槽**，用
 `--slots --cap "${effective_cap:-3}"`（纯读，不写盘）：`real_in_flight` 是执行者仍存活的括号数，
@@ -898,7 +907,10 @@ node --experimental-strip-types plugin/scripts/concurrent-batch-scheduler.ts --r
 # deferred 的 reason 里 `(overlap: <file>)` 指名冲突文件（两个任务要创建同一个文件也会指名）。
 ```
 
-重叠 → 不可并发，等下一 tick。**不要凭读 Touches 列表目测**——本会话有过目测判断被实测推翻的先例。
+重叠 → 不可并发，**defer 并关括号**（`gap-over90-clock-measures-queue-time-not-work-time`：
+`bash plugin/scripts/closure-lag-check.sh --close-task --taskId <id> --outcome deferred`，idempotent），
+等下一 tick；真正派发时**重新 `--task-start`**（fresh 括号，OVER90 只计工作时间）。**不要凭读 Touches
+列表目测**——本会话有过目测判断被实测推翻的先例。
 
 3b. **outer 在飞占用（`gap-write-ownership-extend-beyond-tasks-to-outer-core-and-hot-files` AC4）**：
    outer 主检出的**未提交改动**算占用——outer 正在改的热点实现文件（如 `full-suite-runner.ts`）
