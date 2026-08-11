@@ -13,6 +13,7 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 import { QUAY_CLI, QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
+import { generateConfigContent, mcpEntryForProvider } from "../src/init.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const quayBin = QUAY_CLI;
@@ -369,4 +370,69 @@ test("AC1-collision: quay-native init --loop fails closed and points at /quay:in
   assert.notEqual(out.exitCode, 0, "quay-native init --loop must exit non-zero");
   assert.ok(out.stderr.includes("/quay:init"), "native error must point at /quay:init");
   assert.ok(!fs.existsSync(path.join(dir, ".quay")), "no .quay/ written");
+});
+
+// ---------------------------------------------------------------------------
+// gap-init-scaffolds-mcp-entry-to-raw-ts-fails-on-installed-copy (2026-08-11).
+// `quay init`'s generated config MUST select the provider MCP server launch
+// entry by the RESOLVED provider-path form:
+//   - INSTALLED form (provider path under node_modules, e.g. `./node_modules/quay-native`)
+//     launches the bundled `./dist/quay-native.js` — raw `.ts` under node_modules is
+//     refused by Node >=23.7 (ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING), so the
+//     bundled JS is the only runnable form there.
+//   - DEV form (provider path inside the repo tree, e.g. `./packages/quay-native`)
+//     keeps the raw `./bin/quay-native.ts` entry.
+// ---------------------------------------------------------------------------
+
+test("gap-installed-form: node_modules provider path -> bundled dist mcp_entry", () => {
+  const content = generateConfigContent({
+    providerId: "native",
+    providerPath: "./node_modules/quay-native",
+    isNode: false,
+    isGo: false,
+  });
+  assert.ok(
+    content.includes('mcp_entry: ["node", "./dist/quay-native.js", "mcp"]'),
+    "installed form must launch the bundled dist JS (no type-stripping under node_modules)"
+  );
+  assert.ok(
+    !content.includes('"./bin/quay-native.ts"'),
+    "installed form must NOT reference the raw .ts entry (it would hit ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING)"
+  );
+});
+
+test("gap-dev-form: repo-tree provider path keeps the raw .ts mcp_entry", () => {
+  const content = generateConfigContent({
+    providerId: "native",
+    providerPath: "./packages/quay-native",
+    isNode: false,
+    isGo: false,
+  });
+  assert.ok(
+    content.includes('mcp_entry: ["node", "./bin/quay-native.ts", "mcp"]'),
+    "dev form must keep the raw TypeScript entry"
+  );
+});
+
+test("gap-mcp-entry-for-provider unit: node_modules vs repo-tree discrimination", () => {
+  assert.equal(
+    mcpEntryForProvider("./node_modules/quay-native"),
+    '["node", "./dist/quay-native.js", "mcp"]',
+    "node_modules path -> dist bundle"
+  );
+  assert.equal(
+    mcpEntryForProvider("./packages/quay-native"),
+    '["node", "./bin/quay-native.ts", "mcp"]',
+    "repo-tree path -> raw .ts"
+  );
+  assert.equal(
+    mcpEntryForProvider("../packages/quay-native"),
+    '["node", "./bin/quay-native.ts", "mcp"]',
+    "relative repo-tree path -> raw .ts"
+  );
+  assert.equal(
+    mcpEntryForProvider("C:\\npm\\node_modules\\quay-native"),
+    '["node", "./dist/quay-native.js", "mcp"]',
+    "windows-style node_modules path -> dist bundle"
+  );
 });
