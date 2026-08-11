@@ -844,6 +844,13 @@ function failureFileMatches(declared, file) {
   for (const d of declared) {
     if (d === file) return true;
     const dStr = String(d);
+    // SHAPE CONSTRAINT (gap-suite-blocking-directory-glob-overbroad AC2): a DIRECTORY-SHAPED
+    // declared entry (a bare directory token — e.g. `plugin/test` — whose basename carries no file
+    // extension) is not a FILE, so it must never attribute a failure FILE through the basename
+    // reverse-lookup. Without this guard, a failure file whose basename happens to equal a directory
+    // name (e.g. a bare `test`) would pull in every task that touches a directory of that name.
+    // Concrete file paths (extension-bearing) and file-scoped wildcards are unaffected.
+    if (isDirectoryGlob(dStr)) continue;
     if (fileBare || !dStr.includes("/")) {
       if (dStr.split("/").pop() === fileBase) return true;
     }
