@@ -57,7 +57,11 @@ function makeWorkspace(tag) {
   return dir;
 }
 
-function writeTask(root, id, { status = "todo", labels = [], parent = null, body }) {
+// C8 SELF-TOUCH (tasks/gap-slot-refill-c8-reject-no-backfill): a dispatchable ready task's
+// `## Touches` must include its own `tasks/<id>.md` WITHOUT the `(new)` tag (the inner dispatch gate
+// C8). Fixtures default to carrying the self-file so the C8 gate is exercised realistically; pass
+// `selfTouch: false` to build a C8-REJECTED fixture (a candidate the dispatch gate would refuse).
+function writeTask(root, id, { status = "todo", labels = [], parent = null, body, selfTouch = true } = {}) {
   const fm = [
     "---",
     `id: ${id}`,
@@ -70,7 +74,12 @@ function writeTask(root, id, { status = "todo", labels = [], parent = null, body
     "  schema: v1",
     "---",
   ].join("\n");
-  fs.writeFileSync(path.join(root, "tasks", `${id}.md`), `${fm}\n\n${body}`);
+  let full = `${fm}\n\n${body}`;
+  if (selfTouch && !full.includes(`tasks/${id}.md`)) {
+    // Inject the self-file as the first `## Touches` bullet. No-op when the body lacks `## Touches`.
+    full = full.replace("## Touches\n", `## Touches\n- tasks/${id}.md\n`);
+  }
+  fs.writeFileSync(path.join(root, "tasks", `${id}.md`), full);
 }
 
 // A dispatchable ready task: `(new)` touches on ABSENT files ⇒ stays in the ready pool (not
@@ -1048,4 +1057,81 @@ test("isNotYetFlippedSkip — pure unit: excludedNyfIds arm, merge arm, AC gate,
   // (f) hasFanInMerge itself: merge record fires, and a plain (non-merge) commit never does.
   assert.equal(hasFanInMerge(root, "gap-fanned"), true, "the fan-in merge record is durable evidence");
   assert.equal(hasFanInMerge(root, "gap-nonexistent"), false);
+});
+
+// ── C8 SELF-TOUCH DISPATCH GATE (tasks/gap-slot-refill-c8-reject-no-backfill) ───────────────────────
+// slot-refill's candidate loop used to apply ONLY its own step-4 checks (touches-resolve / deps /
+// disjoint / not-yet-flipped) and NOT the inner dispatch gate C8 — a ready task whose `## Touches`
+// lacks `tasks/<id>.md` (without `(new)`) is refused at dispatch time. The empirical gap (manager
+// 2026-08-10 21:4x): slot-refill recommended top-N candidates that happened to be self-touch-missing,
+// the dispatch side rejected them all, and there was NO backfill — "17 ready dispatchable yet 本 tick
+// 无可派" were simultaneously true. AC2 fix: the loop now applies C8 as a per-candidate gate and
+// CONTINUES past a rejected candidate (backfill), so a dispatchable candidate further down the sorted
+// pool fills the slot; AC4: when EVERY candidate is rejected, recommended is honestly empty (不虚构).
+
+test("C8 SELF-TOUCH — 前 3 候选（按排序）缺 self-touch ⇒ 第 4+ 补位进 recommended (AC2, c8_rejected_candidate_backfilled)", (t) => {
+  const root = makeWorkspace("c8-backfill");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // 前 3 个按 id 排序的候选缺 self-touch（selfTouch:false ⇒ C8 拒），第 4/5 有 self-touch（可派）。
+  // 这正是实证形状：recommended 的「前 N」若恰好缺 C8，必须回填到排序更后的可派候选。
+  writeTask(root, "c8-a", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/c8-a.ts (new)"]), selfTouch: false });
+  writeTask(root, "c8-b", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/c8-b.ts (new)"]), selfTouch: false });
+  writeTask(root, "c8-c", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/c8-c.ts (new)"]), selfTouch: false });
+  writeTask(root, "c8-d", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/c8-d.ts (new)"]) });
+  writeTask(root, "c8-e", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/c8-e.ts (new)"]) });
+
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 5 });
+  assert.equal(r.pool, 5, "all 5 candidates are in the ready pool (self-touch is a dispatch gate, not a pool filter)");
+  assert.equal(r.slots_free, 5);
+  assert.ok(
+    !r.recommended.includes("c8-a") && !r.recommended.includes("c8-b") && !r.recommended.includes("c8-c"),
+    "the 3 self-touch-missing candidates (first in sort order) are NOT recommended — C8 rejected",
+  );
+  assert.ok(
+    r.recommended.includes("c8-d") && r.recommended.includes("c8-e"),
+    "the 4th/5th candidates BACKFILL into recommended — a rejected candidate never empties the refill (c8_rejected_candidate_backfilled)",
+  );
+  assert.equal(r.should_refill, true, "a dispatchable candidate exists ⇒ refill proceeds");
+});
+
+test("C8 SELF-TOUCH — 全候选缺 self-touch ⇒ 如实无可派，不虚构 (AC4, all_rejected_no_fake)", (t) => {
+  const root = makeWorkspace("c8-all-rejected");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "c8-x", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/c8-x.ts (new)"]), selfTouch: false });
+  writeTask(root, "c8-y", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/c8-y.ts (new)"]), selfTouch: false });
+  writeTask(root, "c8-z", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/c8-z.ts (new)"]), selfTouch: false });
+
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 3 });
+  assert.equal(r.pool, 3, "all 3 are in the ready pool");
+  assert.equal(r.recommended.length, 0, "every candidate rejected by C8 ⇒ recommended empty (不虚构, all_rejected_no_fake)");
+  assert.equal(r.should_refill, false, "no dispatchable recommendation ⇒ no refill");
+  assert.match(r.no_refill_reason, /no dispatchable candidate/, "reason names the honest empty recommendation");
+});
+
+test("C8 SELF-TOUCH — (new)-tagged self-file is NOT a self-touch grant ⇒ rejected (the (new) ban is load-bearing)", (t) => {
+  const root = makeWorkspace("c8-newtag");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // The self-file entry exists but carries `(new)` ⇒ selfTouchCheck.ok=false (a (new) self-file would
+  // misjudge every task as work-landed; the ban is load-bearing per touches-orthogonality-check).
+  writeTask(root, "c8-newtag", {
+    status: "ready",
+    labels: ["gap"],
+    body: dispatchableBody(["- code/c8-newtag.ts (new)", "- tasks/c8-newtag.md (new)"]),
+  });
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 3 });
+  assert.equal(r.pool, 1);
+  assert.equal(r.recommended.length, 0, "(new)-tagged self-file ⇒ C8 reject ⇒ not recommended");
+  assert.equal(r.should_refill, false);
+});
+
+test("C8 SELF-TOUCH — a candidate WITH its self-file is still recommended (gate admits, no over-rejection)", (t) => {
+  const root = makeWorkspace("c8-admit");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // writeTask defaults to injecting the self-file ⇒ these are C8-passing dispatchable fixtures; the
+  // C8 gate must admit them (existing step-4 checks / fixtures keep passing — AC3 不回归).
+  writeTask(root, "gap-admit-a", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/admit-a.ts (new)"]) });
+  writeTask(root, "gap-admit-b", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/admit-b.ts (new)"]) });
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 3 });
+  assert.ok(r.recommended.includes("gap-admit-a") && r.recommended.includes("gap-admit-b"), "self-touch-carrying candidates still recommended");
+  assert.equal(r.should_refill, true);
 });
