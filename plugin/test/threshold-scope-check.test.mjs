@@ -1,4 +1,5 @@
 // @test-group governance
+// @load-sensitive child-spawn
 // threshold-scope-check.test.mjs — tasks/gap-quantified-stop-conditions-have-no-scope:
 // the driver-doc prose hygiene checker (quantified stop-conditions must name set+window; named
 // paths must resolve).
