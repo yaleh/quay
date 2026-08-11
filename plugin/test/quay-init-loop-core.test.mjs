@@ -167,6 +167,13 @@ test('AC4 — laid-down tick docs are byte-identical to the product and carry NO
     assert.match(cfg, /repo_root:\s*\/srv\/target/, 'config.yml loop.repo_root must carry the target repo root');
     assert.match(cfg, /test_command:\s*npm test/, 'config.yml loop.test_command must carry the target test command');
     assert.match(cfg, /tmux_session:\s*myproj-0:0\.0/, 'config.yml loop.tmux_session must carry the target tmux session');
+    // gap-quay-init-never-writes-branch-model-config-fork-baseline-merge-target: a BRAND-NEW host's
+    // first quay-init --loop must ship the branch-model keys (fork_baseline: develop /
+    // merge_target: integration) — the negative control (same config BEFORE the fix) lacked both,
+    // so dispatch silently fell back to the retired master-only model. Defaults travel WITH the
+    // quay-init version, never hardcoded master.
+    assert.match(cfg, /fork_baseline:\s*develop/, 'config.yml loop.fork_baseline must ship the develop baseline');
+    assert.match(cfg, /merge_target:\s*integration/, 'config.yml loop.merge_target must ship the integration target');
 
     // The mechanism scripts that used to carry quay literals are now self-locating. The retired
     // inner-state.sh is NOT laid down at all (AC3) — the ONE observer session-liveness.sh is.
