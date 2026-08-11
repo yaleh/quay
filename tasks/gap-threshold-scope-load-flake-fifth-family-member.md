@@ -37,17 +37,17 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 round-215 红（passed=false@7721ms 无断言输出）+ 时序订正（行不在树,红=load-flake 非 CLAUDE.md）+ 签名三要点（本任务 Proposal 已含）
-- [ ] AC2: **@load-sensitive 声明**——threshold-scope-check.test.mjs 声明 @load-sensitive（对照前四同族形态）
-- [ ] AC3: **manifest 收编**——KNOWN-LOAD-SENSITIVE manifest 含 threshold-scope-check
-- [ ] AC4: **serial 相路由**——进 serial 相（并发 1），main 相不再跑
-- [ ] AC5: **既有不回归**——`--for-task` scoped 门绿
+- [x] AC1: **复现固化**——任务体记录 round-215 红（passed=false@7721ms 无断言输出）+ 时序订正（行不在树,红=load-flake 非 CLAUDE.md）+ 签名三要点（本任务 Proposal 已含）
+- [x] AC2: **@load-sensitive 声明**——threshold-scope-check.test.mjs 声明 @load-sensitive（对照前四同族形态）
+- [x] AC3: **manifest 收编**——KNOWN-LOAD-SENSITIVE manifest 含 threshold-scope-check
+- [x] AC4: **serial 相路由**——进 serial 相（并发 1），main 相不再跑
+- [x] AC5: **既有不回归**——`--for-task` scoped 门绿
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全部勾上
-- [ ] 修后实跑：serial 相跑通 + manifest 含该文件（贴输出）
-- [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
+- [x] AC1–AC5 全部勾上
+- [x] 修后实跑：serial 相跑通 + manifest 含该文件（贴输出）
+- [x] 既有测试 + 新增测试全绿（`--for-task` scoped）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
 
 ## Touches
@@ -72,3 +72,36 @@ resume    @load-sensitive / manifest / serial 路由分步提交，任一步完�
 reviewer: outer
 at: 2026-08-10
 changed: manager 分诊(第 5 同族)+ outer 时序订正(round-215 树无 ≥50 行,红=load-flake;≥50 行是独立当前树缺陷已 fix)。裁定:收编 KNOWN-LOAD-SENSITIVE + serial 相,照前四同族套路。实现归 inner
+
+## Implementation evidence（inner 2026-08-11 实跑，worktree task/gap-threshold-scope-load-flake-fifth-family-member fork develop 2060210c）
+
+**分步提交（Contract resume 三步，各步独立 commit）**
+- `23ffec38` — @load-sensitive 声明（`// @load-sensitive child-spawn`，kind 同 relation-sync/checker-cost，AC2）
+- `f68c0408` — manifest 收编（test 头加 KNOWN-LOAD-SENSITIVE header claim；known-load-sensitive.ts child-spawn kind 描述补 threshold-scope-check，AC3）
+- `ef73bdab` — serial 相路由（`@test-group governance`→`serial` + `@load-sensitive-entry 2026-08-11` 记录，AC4）
+
+**Contract invoke（--list 含 threshold-scope-check，AC3）**
+```
+$ node --no-warnings --experimental-strip-types plugin/scripts/known-load-sensitive.ts --list
+plugin/test/threshold-scope-check.test.mjs	child-spawn
+```
+`--check` / `--check-exit` 均 exit 0；`--list-entry` 含 `threshold-scope-check.test.mjs	2026-08-11	child-spawn spawn×9 under suite load (round-215 silent passed=false @7721ms)`。
+Contract measure：`grep -c "threshold-scope-check" plugin/scripts/known-load-sensitive.ts` = 1（band ≥ 1 满足）。
+
+**serial 相路由（AC4）**：test.sh group_of 机制 `grep -m1 -oE '@test-group[[:space:]]+[a-z]+'` 输出 = `serial`；
+`bash scripts/test.sh --list-groups` → serial 22→23，governance 105→104（main 并发体不再含该文件）。
+
+**scoped 门（AC5，DoD 修后实跑）**
+```
+$ bash scripts/test.sh --for-task gap-threshold-scope-load-flake-fifth-family-member --allow-thin
+ℹ tests 31
+ℹ pass 31
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ duration_ms 8327.267807
+SCOPED-EXIT=0
+```
+含 threshold-scope-check.test.mjs 9/9 绿（AC2/AC3/AC4/AC10/AC11/AC9/AC6/default/AC5）+ known-load-sensitive.test.mjs 全绿（AC1-AC4 机械验证，含 --check-exit 对 serial 组 entry 记录的要求）+ 全部 scoped 静态检查 PASS（threshold-scope-check / task-contract-check / delivery-inventory-drift-gate / tick-core-static-check 等）。
+
+**DoD「全量套件绿」**：按执行纪律不跑全量套件，留给外层 verification-round 验证（本任务只出 scoped 门证据）。
