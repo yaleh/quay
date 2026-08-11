@@ -100,6 +100,12 @@ function runRunner({ root, command, laneCount, stateDir, env = {} }) {
   // cgroup-scope wrapper by default (a temp-root fake suite needs no user systemd session); the
   // AC1-AC6 tests below opt in via QUAY_TEST_SYSTEMD_RUN_AVAILABLE=1 / QUAY_TEST_SKIP_SYSTEMD_RUN=0.
   if (!("QUAY_TEST_SKIP_SYSTEMD_RUN" in mergedEnv)) mergedEnv.QUAY_TEST_SKIP_SYSTEMD_RUN = "1";
+  // HERMETICITY: the parent suite launch sets QUAY_TEST_SYSTEMD_RUN_LIMITS (e.g. CPUQuota=400% per
+  // the human ruling). Without clearing it, that override leaks into every child runner via
+  // `...process.env`, so the AC1 "default limits" test would observe 400% instead of the default
+  // 200% the runner uses when the override is absent. Unless a test explicitly provides its own
+  // limits, drop the inherited override so the child uses the runner's DEFAULT_SYSTEMD_RUN_LIMITS.
+  if (!("QUAY_TEST_SYSTEMD_RUN_LIMITS" in env)) delete mergedEnv.QUAY_TEST_SYSTEMD_RUN_LIMITS;
   const child = spawn(process.execPath, args, { stdio: ["ignore", "pipe", "pipe"], env: mergedEnv });
   // Drain pipes so a chatty fake suite cannot block the child.
   child.stdout.on("data", () => {});
