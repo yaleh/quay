@@ -41,18 +41,51 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 scope 决定性读数（第一 subagent rounds 218-221 worktree+green；第二 subagent rounds 230/231 main——从未自测）+ 三保障失效 + round-231 tests=0（本任务 Proposal 已含）
-- [ ] AC2: **fan-in 机械判据**——fan-in 前断言存在 ≥1 条 `scope=worktree` 且 `state=green` 的轮次记录，否则拒绝 merge
-- [ ] AC3: **不新建机件**——数据复用 verification-round.jsonl 的 scope/state；只加前置断言
-- [ ] AC4: **明确失败信息**——拒绝时返回可行动提示（「先在自己 worktree 自测绿：node --test <文件> 或 scoped test.sh」）
-- [ ] AC5: **既有不回归**——`--for-task` scoped 门绿
+- [x] AC1: **复现固化**——任务体记录 scope 决定性读数（第一 subagent rounds 218-221 worktree+green；第二 subagent rounds 230/231 main——从未自测）+ 三保障失效 + round-231 tests=0（本任务 Proposal 已含）
+- [x] AC2: **fan-in 机械判据**——fan-in 前断言存在 ≥1 条 `scope=worktree` 且 `state=green` 的轮次记录，否则拒绝 merge
+- [x] AC3: **不新建机件**——数据复用 verification-round.jsonl 的 scope/state；只加前置断言
+- [x] AC4: **明确失败信息**——拒绝时返回可行动提示（「先在自己 worktree 自测绿：node --test <文件> 或 scoped test.sh」）
+- [x] AC5: **既有不回归**——`--for-task` scoped 门绿
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全部勾上
-- [ ] 修后实跑：无 worktree+green 记录的 fan-in 被拒（贴输出）；有记录放行
-- [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
+- [x] AC1–AC5 全部勾上
+- [x] 修后实跑：无 worktree+green 记录的 fan-in 被拒（贴输出）；有记录放行
+- [x] 既有测试 + 新增测试全绿（`--for-task` scoped）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
+
+## Evidence（inner 2026-08-11 实跑）
+
+**实现位置**：`plugin/scripts/integration-batch-merge.sh` 新增 `check_worktree_green_gate()`（fan-in 前置断言）+ `--skip-worktree-green-gate` opt-out；`plugin/test/integration-batch-merge.test.mjs` 新增 5 个门测试；`orchestration/orchestrator-tick-core.md` A15 ④ 注明机械门；`tasks/gap-ac36-delivery-critical-priority-axis.md` 交叉标注。
+
+**AC2/AC4 实跑（Contract invoke，worktree 无记录）**：
+```
+$ bash plugin/scripts/integration-batch-merge.sh --develop develop --integration integration --dry-run
+integration-batch-merge: measure has_worktree_green_round=False
+integration-batch-merge: DRY-RUN — worktree-green gate WOULD fail closed: no scope=worktree+state=green round in .../.quay/verification-round.jsonl (no ref moved in dry-run)
+integration-batch-merge: measure integration_ff_merges=1 (post: merge target NOT yet ancestor — merge pending)
+EXIT=0 (dry-run 报 would-block；真实路径 exit 1 拒绝 merge)
+```
+真实路径（非 dry-run）拒绝时 stderr：
+```
+integration-batch-merge: WORKTREE-GREEN-GATE FAIL-CLOSED — no scope=worktree+state=green round in ...; the suite-fix subagent never self-tested green in its OWN worktree ⇒ 不许 merge（不自测绿不许合）; nothing moved
+integration-batch-merge:   fix: 先在自己 worktree 自测绿：node --test <文件> 或 scoped test.sh（bash scripts/test.sh --for-task <task-id> --allow-thin），得到 scope=worktree+state=green 记录后再 fan-in
+```
+
+**AC2 放行（临时写入 worktree+green 记录）**：
+```
+integration-batch-merge: worktree-green-gate OK — ≥1 scope=worktree+state=green round on record
+integration-batch-merge: measure has_worktree_green_round=True
+```
+（temp 记录已删，worktree 无残留。）
+
+**AC5 scoped 门**：`bash scripts/test.sh --for-task gap-suite-fix-scope-worktree-green-merge-gate --allow-thin` → EXIT=0，`tests 43 / pass 43 / fail 0 / cancelled 0`；state-worded-clause-check band 0；red-on-omission-audit `scope_worktree_gate_covered=1`。
+
+**提交**（分步：门 / 失败信息 / 测试 / 文档）：
+- `ae41beb9` inner: 门 — fan-in 前置断言 scope=worktree+state=green
+- `80702bef` inner: 失败信息 — 可行动提示
+- `3acf4897` inner: 测试 — 5 个门测试用例
+- `8c69876e` inner: 文档 — orchestrator-tick-core A15 ④ + AC36 交叉标注
 
 ## Touches
 
