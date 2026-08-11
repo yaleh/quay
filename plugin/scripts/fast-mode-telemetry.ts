@@ -472,11 +472,84 @@ export function readHaltEvents(root) {
   return out;
 }
 
+// ── Reconcile-invocation log (gap-reconcile-step-skipped-no-compliance-product, C17) ────────────────
+// The A13 rule "stale_brackets > 0 ⇒ run --reconcile" previously had NO record-observable product
+// separating 守 from 不守 — a tick could observe stale_brackets > 0, skip --reconcile, and nothing
+// in any artifact would differ. This log is that product: `--reconcile` appends one line per
+// INVOCATION (at the START, before any bracket is closed, so even a zero-close run leaves a record),
+// and the pure-read slot views (`--slot-status` / `--slots`) compare the last invocation time against
+// stale_brackets > 0 to answer "did the actor run --reconcile near the last time stale existed?"
+// It is a SEPARATE file from the runId event stream (like halt-events.jsonl): its lines are
+// {type:"reconcile", event:"invoke", atMs}, NOT A1a StageEvents, and readAllEvents excludes it.
+
+/** Fixed filename of the append-only reconcile-invocation log (sibling of halt-events.jsonl, same gitignored dir). */
+export const RECONCILE_LOG_FILENAME = "reconcile-invocations.jsonl";
+
+/** Proximity window for "this round / adjacent" reconcile compliance — one inner tick is 1200–1800s. */
+export const RECONCILE_COMPLIANCE_WINDOW_MS = 30 * 60 * 1000;
+
+/**
+ * Append one reconcile-invocation line to `<root>/.workflow-events/reconcile-invocations.jsonl`.
+ * Called at the START of every `--reconcile` run — an invocation that closes zero brackets (nothing
+ * stale, or stale but all KEPT) still leaves a record, so a later reader can distinguish "ran
+ * --reconcile" from "never ran it". Fail-closed: invalid atMs throws and writes nothing.
+ * @param {string} root
+ * @param {number} [atMs] — epoch ms; defaults to Date.now()
+ * @returns {string} — the log path written
+ */
+export function writeReconcileInvocation(root, atMs = Date.now()) {
+  if (typeof atMs !== "number" || !Number.isFinite(atMs)) {
+    throw new Error(`refusing to write reconcile invocation: atMs must be a finite number, got ${atMs}`);
+  }
+  const eventsDir = path.join(root, ".workflow-events");
+  fs.mkdirSync(eventsDir, { recursive: true });
+  const logPath = path.join(eventsDir, RECONCILE_LOG_FILENAME);
+  fs.appendFileSync(logPath, JSON.stringify({ type: "reconcile", event: "invoke", atMs }) + "\n", "utf8");
+  return logPath;
+}
+
+/**
+ * Read every reconcile-invocation line from `<root>/.workflow-events/reconcile-invocations.jsonl`,
+ * in append order. Malformed lines are skipped silently (never crash the report). Missing file → [].
+ * @param {string} root
+ * @returns {Array<{type:"reconcile", event:"invoke", atMs:number}>}
+ */
+export function readReconcileInvocations(root) {
+  const logPath = path.join(root, ".workflow-events", RECONCILE_LOG_FILENAME);
+  if (!fs.existsSync(logPath)) return [];
+  const out = [];
+  for (const line of fs.readFileSync(logPath, "utf8").split("\n")) {
+    if (line.trim() === "") continue;
+    let e;
+    try {
+      e = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (e && e.type === "reconcile" && e.event === "invoke" && typeof e.atMs === "number" && Number.isFinite(e.atMs)) {
+      out.push(e);
+    }
+  }
+  return out;
+}
+
+/**
+ * The most recent --reconcile invocation's atMs, or null if none was ever recorded.
+ * @param {string} root
+ * @returns {number|null}
+ */
+export function lastReconcileAtMs(root) {
+  const invocations = readReconcileInvocations(root);
+  if (invocations.length === 0) return null;
+  return invocations[invocations.length - 1].atMs;
+}
+
 /**
  * Async-generate every schema-valid event across all `.workflow-events/*.jsonl` files.
  * Malformed lines are skipped by parseEventStream (never crash the report). The halt event log
- * (`halt-events.jsonl`) is explicitly EXCLUDED — its lines are not A1a StageEvents and must never
- * pollute the task pairing (orphaned/inProgress/tasks).
+ * (`halt-events.jsonl`) and the reconcile-invocation log (`reconcile-invocations.jsonl`) are
+ * explicitly EXCLUDED — their lines are not A1a StageEvents and must never pollute the task
+ * pairing (orphaned/inProgress/tasks).
  * @param {string} root
  * @returns {AsyncGenerator<object>}
  */
@@ -485,7 +558,7 @@ export async function* readAllEvents(root) {
   if (!fs.existsSync(eventsDir)) return;
   const files = fs
     .readdirSync(eventsDir)
-    .filter((f) => f.endsWith(".jsonl") && f !== HALT_LOG_FILENAME)
+    .filter((f) => f.endsWith(".jsonl") && f !== HALT_LOG_FILENAME && f !== RECONCILE_LOG_FILENAME)
     .sort();
   for (const file of files) {
     for await (const result of parseEventStream(path.join(eventsDir, file))) {
@@ -1569,6 +1642,17 @@ export async function main(argv) {
   // worktree) are KEPT — fail-closed toward not making the phantom problem into a blindness problem
   // (AC3). Prints { closed, kept, inProgress } as JSON (or human lines).
   if (args.includes("--reconcile")) {
+    // Record the INVOCATION (gap-reconcile-step-skipped-no-compliance-product, C17): one line per
+    // --reconcile run, written BEFORE any bracket is closed so even a zero-close invocation leaves a
+    // record. The pure-read slot views compare stale_brackets > 0 against the last such timestamp to
+    // separate 守 (ran --reconcile near the observation) from 不守 (stale observed, --reconcile never
+    // run — the 04:01 incident shape).
+    try {
+      writeReconcileInvocation(root);
+    } catch (e) {
+      console.error(`fast-mode-telemetry: failed to record reconcile invocation: ${e.message}`);
+      return 1;
+    }
     let reportWithMeta;
     try {
       ({ report: reportWithMeta } = await loadAndAggregate(root, null));
