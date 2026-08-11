@@ -239,7 +239,12 @@ test("noise gate — an idle transition with an OLD tick log IS reported (idle b
     assert.ok(await waitForAlive(p.env, p.session), "probe must be alive first");
     const mon = spawnMonitor(p.env, `gate ${p.tmp} ${p.session}`, { tickLogs: `gate ${tick}`, interval: 1, loopMin: 5 });
     try {
-      await sleep(2500); // idle baseline: PREV_IDLE=1
+      // Idle baseline MUST establish ≥2 rounds so PREV_IDLE=1 is armed BEFORE the busy transition —
+      // the SESSION-RESUMED edge (idle→busy) requires a prior idle round; a fixed 2.5s sleep can be
+      // as few as one slow round (classifier subprocess latency) under full-suite load and the edge
+      // would never arm (same root cause as the AC4 negative control at signals-integration:368).
+      assert.ok(await waitForRounds(mon, 2, 20000),
+        `idle baseline must establish 2 rounds so PREV_IDLE=1 is armed before the busy edge:\n${mon.output()}`);
       makePaneBusy(p.env, p.session); // shape-busy (ruling D): busy shape, not content redraw
       assert.ok(await waitForOutput(mon, /SESSION-RESUMED gate/, 25000), `RESUMED must fire on busy:\n${mon.output()}`);
       makePaneIdle(p.env, p.session); // back to the idle shape
@@ -262,7 +267,12 @@ test("noise gate — an idle transition with a FRESH tick log is SILENT (healthy
     assert.ok(await waitForAlive(p.env, p.session), "probe must be alive first");
     const mon = spawnMonitor(p.env, `gate ${p.tmp} ${p.session}`, { tickLogs: `gate ${tick}`, interval: 1, loopMin: 5 });
     try {
-      await sleep(2500); // idle baseline: PREV_IDLE=1
+      // Idle baseline MUST establish ≥2 rounds so PREV_IDLE=1 is armed BEFORE the busy transition —
+      // the SESSION-RESUMED edge (idle→busy) requires a prior idle round; a fixed 2.5s sleep can be
+      // as few as one slow round (classifier subprocess latency) under full-suite load and the edge
+      // would never arm (same root cause as the AC4 negative control at signals-integration:368).
+      assert.ok(await waitForRounds(mon, 2, 20000),
+        `idle baseline must establish 2 rounds so PREV_IDLE=1 is armed before the busy edge:\n${mon.output()}`);
       makePaneBusy(p.env, p.session); // shape-busy (ruling D)
       assert.ok(await waitForOutput(mon, /SESSION-RESUMED gate/, 25000), `RESUMED must fire on busy (monitor is tracking):\n${mon.output()}`);
       makePaneIdle(p.env, p.session); // back to the idle shape

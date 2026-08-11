@@ -66,7 +66,10 @@ test("AC1/AC3/AC6/AC7 — esc to interrupt PRESENCE drives busy/idle; RESUMED ca
     // (same isolation test A uses).
     const mon = spawnMonitor(p.env, `esc ${p.tmp} ${p.session}`, { tickLogs: `esc /nonexistent` });
     try {
-      await sleep(3000); // idle baseline: bash prompt, no busy shape
+      // Idle baseline MUST establish ≥2 rounds so PREV_IDLE=1 is armed BEFORE the busy transition
+      // (RESUMED is an idle→busy edge; a fixed sleep can be one slow round under full-suite load).
+      assert.ok(await waitForRounds(mon, 2, 20000),
+        `idle baseline must establish 2 rounds so PREV_IDLE=1 is armed before the busy edge:\n${mon.output()}`);
       makePaneBusy(p.env, p.session); // type "esc to interrupt" into the input line → busy SHAPE
       const resumed = await waitForOutput(mon, /SESSION-RESUMED esc/, 60000);
       assert.ok(resumed, `RESUMED must fire when esc to interrupt appears:\n${mon.output()}`);
@@ -192,7 +195,10 @@ test("AC6/AC7 — RESUMED carries the cause AND the last-input time from the tra
     assert.ok(await waitForAlive(p.env, p.session), "probe must be alive");
     const mon = spawnMonitor(p.env, `pl ${p.tmp} ${p.session}`, { transcripts: `pl ${x}` });
     try {
-      await sleep(3000); // idle baseline
+      // Idle baseline MUST establish ≥2 rounds so PREV_IDLE=1 is armed BEFORE the busy transition
+      // (RESUMED is an idle→busy edge; a fixed sleep can be one slow round under full-suite load).
+      assert.ok(await waitForRounds(mon, 2, 20000),
+        `idle baseline must establish 2 rounds so PREV_IDLE=1 is armed before the busy edge:\n${mon.output()}`);
       makePaneBusy(p.env, p.session); // shape-busy (ruling D): typed esc → busy shape
       // Window is generous (60000ms, widened from 25000 by
       // gap-load-sensitive-serial-phase-unbounded-growth-measure-first AC5 — the round-206 AC6
@@ -234,7 +240,10 @@ test("AC7 negative control — an EMPTY transcript yields last-input 取不到, 
     assert.ok(await waitForAlive(p.env, p.session), "probe must be alive");
     const mon = spawnMonitor(p.env, `pl ${p.tmp} ${p.session}`, { transcripts: `pl ${x}` });
     try {
-      await sleep(3000); // idle baseline
+      // Idle baseline MUST establish ≥2 rounds so PREV_IDLE=1 is armed BEFORE the busy transition
+      // (RESUMED is an idle→busy edge; a fixed sleep can be one slow round under full-suite load).
+      assert.ok(await waitForRounds(mon, 2, 20000),
+        `idle baseline must establish 2 rounds so PREV_IDLE=1 is armed before the busy edge:\n${mon.output()}`);
       makePaneBusy(p.env, p.session); // shape-busy (ruling D): typed esc → busy shape
       assert.ok(await waitForOutput(mon, /SESSION-RESUMED pl/, 60000), `RESUMED must fire:\n${mon.output()}`);
       const out = mon.output();
@@ -272,7 +281,10 @@ test("AC6 negative control — a script mutation that neutralizes the cause yiel
     assert.ok(await waitForAlive(p.env, p.session), "probe must be alive");
     const mon = spawnMonitor(p.env, `pl ${p.tmp} ${p.session}`, { script: mutated, transcripts: `pl ${x}` });
     try {
-      await sleep(3000); // idle baseline
+      // Idle baseline MUST establish ≥2 rounds so PREV_IDLE=1 is armed BEFORE the busy transition
+      // (RESUMED is an idle→busy edge; a fixed sleep can be one slow round under full-suite load).
+      assert.ok(await waitForRounds(mon, 2, 20000),
+        `idle baseline must establish 2 rounds so PREV_IDLE=1 is armed before the busy edge:\n${mon.output()}`);
       makePaneBusy(p.env, p.session); // shape-busy (ruling D): typed esc → busy shape
       assert.ok(await waitForOutput(mon, /SESSION-RESUMED pl/, 60000), `RESUMED must fire:\n${mon.output()}`);
       const out = mon.output();

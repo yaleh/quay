@@ -198,7 +198,12 @@ test("AC4 — a pane whose ONLY real change is the agent task line (↓ NN.Nk to
     fs.writeFileSync(tick, "# tick\n");
     const mon = spawnMonitor(p.env, `ac4 ${p.tmp} ${p.session}`, { tickLogs: `ac4 ${tick}` });
     try {
-      await sleep(2500); // idle baseline
+      // Idle baseline MUST establish ≥2 rounds so PREV_IDLE=1 is armed BEFORE the busy transition —
+      // the SESSION-RESUMED edge (idle→busy) requires a prior idle round; a fixed 2.5s sleep can be
+      // as few as one slow round under full-suite load (same root cause as the AC4 negative control
+      // at line 368 below — that test's waitForRounds is the load-robust form).
+      assert.ok(await waitForRounds(mon, 2, 20000),
+        `idle baseline must establish 2 rounds so PREV_IDLE=1 is armed before the busy edge:\n${mon.output()}`);
       // real work in a Claude Code pane: the agent task line is visible (printed) AND the busy
       // shape (esc typed) is present. Idle → busy must surface as SESSION-RESUMED within a few
       // polling cycles (AC7: no debounce was added to the busy path).
@@ -239,7 +244,10 @@ test("AC9 — a known-continuous-work window reports SESSION-RESUMED at most ONC
     fs.writeFileSync(tick, "# tick\n");
     const mon = spawnMonitor(p.env, `ac9 ${p.tmp} ${p.session}`, { tickLogs: `ac9 ${tick}` });
     try {
-      await sleep(2500); // idle baseline
+      // Idle baseline MUST establish ≥2 rounds so PREV_IDLE=1 is armed BEFORE the busy transition
+      // (RESUMED is an idle→busy edge — a fixed sleep can be one slow round under full-suite load).
+      assert.ok(await waitForRounds(mon, 2, 20000),
+        `idle baseline must establish 2 rounds so PREV_IDLE=1 is armed before the busy edge:\n${mon.output()}`);
       // continuous work = the busy shape (esc typed) held across several rounds. With the busy
       // shape present the pane is NEVER judged idle, so RESUMED fires at most once (the real work
       // of the inner session no longer flip-flops idle→busy the way the old masked-hash did).
