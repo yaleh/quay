@@ -1,7 +1,9 @@
 ---
 id: gap-suite-execution-rollback-to-main-session-not-restored-after-crash
-title: "OOM 崩溃后套件执行形态静默回落——.halt 解除后本用 workflow（17:52/20:11/21:01/22:45/00:57 五次调用），01:07 整机 OOM 重启后 r265/266/268/269/270 五轮全部 runner=outer 主会话直跑（2h50m 零 Workflow）；无任何机件把执行形态切回来，崩溃回落与有意改用主会话在记录上不可区分（C17 形状）"
-status: ready
+title: OOM 崩溃后套件执行形态静默回落——.halt 解除后本用 workflow（17:52/20:11/21:01/22:45/00:57
+  五次调用），01:07 整机 OOM 重启后 r265/266/268/269/270 五轮全部 runner=outer 主会话直跑（2h50m 零
+  Workflow）；无任何机件把执行形态切回来，崩溃回落与有意改用主会话在记录上不可区分（C17 形状）
+status: done
 labels:
   - gap
   - defect
