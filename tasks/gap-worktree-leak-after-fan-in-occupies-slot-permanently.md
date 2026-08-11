@@ -64,6 +64,13 @@ extra: {}
 
 > **manager 2026-08-11 05:0x 验证锚补充**：把 git worktree remove 补进 A15 fan-in 序列后，判据是【每次 fan-in 之后 slots-remaining 不下降】；若某轮 fan-in 后它又开始单调下降，说明补的那一步没生效或有别的路径在漏。**这个判据比数 worktree 个数更直接**——它量的正是我们真正在乎的东西（空槽）。
 
+### Finding：验证锚已触发——泄漏复发 + 根因是 subagent prompt 缺 remove（manager 2026-08-11 07:2x，落点 Finding 不进 Contract）
+
+**05:0x 的验证锚在 07:08-07:15 的 7 次 fan-in 后立刻触发**：slots-remaining 从 5 降到 0，`real-in-flight 9 / occupied 9 > cap 5`。**根因（manager 精确指出 + outer 确认）**：`git worktree remove` 在核文档里、**不在实际执行的 fan-in subagent prompt 序列里**——动作在文档、不在执行处 ⇒ 每合一个任务就再漏一个。这正是「文档里写了 ≠ 执行会做」的实例。
+
+**outer 处置（07:2x）**：5 个已合+干净的 worktree（nyf/reconcile-step/serial-install/slot-free/verification-round）目录已被 fan-in subagent 删但留 stale 注册，`git worktree prune` 清掉 ⇒ slots-remaining **0→1**。**4 个不是泄漏**（git-history 未合 / inner-heartbeat / slot-refill-c8 / worktree-leak）：inner 心跳确认 4 subagent 在飞（本任务自己正在修泄漏），realInFlight=4 与心跳一致——删=毁 inner 在飞实现。
+**后续**：fan-in subagent 的 prompt 序列必须含 `git worktree remove` + `git worktree prune`（AC3 的落地形式），否则每次 fan-in 复发一次。
+
 ## Contract
 measure   slots_free_after_cleanup = `node --no-warnings --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --slot-status --cap 5 --json` 的 stdout 中 slots-free 数字
 band      slots_free_restored = (slots_free_after_cleanup > 0)（泄漏清理后空槽恢复——AC2 引用名）
