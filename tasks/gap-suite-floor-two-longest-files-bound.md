@@ -179,6 +179,16 @@ runner-grouping-list-groups.test.mjs）、plugin/loop/fast-mode-loop-tick.md（s
 
 **`gap-systemd-run-cancel-cpuquota-keep-memory-guardrail`（2026-08-11）已落地人的裁定「取消 CPU 配额、保持内存配额」**：`full-suite-runner.ts` `DEFAULT_SYSTEMD_RUN_LIMITS` cpuQuota `200%`→**`400%`**（用满本机 4 物理核），MemoryMax=4G / TasksMax=200 保持。本 Finding 的「4 应是 2」外推基数修正随之再反转：**现行默认回到 4 核满**——本节 (a)/(b) 的 2 核推算全部针对 200% 默认的历史记录；400% 默认下的实测对照（三 `*_phase_ms`）待外层 verification-round。
 
+### Finding：第五个杠杆——run_static_checks 结构性零并发可并行化（manager 2026-08-11 10:5x，落点 Finding 不进 Contract）
+
+**发现来源**：人在追问「boheidc 优化后为什么只快 45s 而不是 main 相单独就有的 77s」时拆四相逐一核对，overhead 相（含 static_checks/resource_gate/build_dist）boheidc 比 orangevps 慢 27.2s（43.2s vs 16.0s），占比接近单核速度比（2.77x）。
+
+**核实（outer 复核）**：`scripts/test.sh:225 run_static_checks()` 内部约 **20+ 个 `run_checker` 调用逐行顺序执行，没有 `&`/`wait`/`xargs -P`，零并发机制**。与 lowconc（有并发旋钮但被单文件钉死）不同——**overhead 是结构性零并发**。各检查器（test-isolation-check/task-contract-check/adr016-screen-use-check/tick-core-static-check 等）彼此独立、只读、无共享状态假设 ⇒ 并行化没有 serial 组 nested-spawn 那种进程膨胀顾虑，**风险低于 serial 并发实验**。
+
+**收益量级**：本机/orangevps 只占约 10-16s，并行化收益不大；**多核机器（boheidc 16核及更大）上 `run_static_checks_ms` 直接暴露单核速度、随核数线性可省——核数优势能兑现的第五个位置**，不需等 serial/lowconc 两个已知杠杆。
+
+**建议形式（不写实现，给方向）**：`xargs -P <N>` 或后台 `&`+`wait` 并行 `run_checker` 调用，N 可固定小数（如 4）或读 nproc。**需保留退出码收集与失败可见性**：当前顺序执行某检查失败会中止，并行化后不能让其失败被其他检查器输出掩盖（checker-cost.jsonl 每 exit 追加 + exit-code 传播是现成约束）。实现归 inner，判定归 outer。
+
 ## Contract
 measure   runner_grouping_ms = `grep -oE '__PERFILE__ duration_ms=[0-9.]+ [^ ]*runner-grouping' <serial相日志> | tail -1` 的 stdout 中 duration_ms 数字
 band      runner_grouping_ms <= 60000（拆 4 后地板 ≤ 约 51s）
