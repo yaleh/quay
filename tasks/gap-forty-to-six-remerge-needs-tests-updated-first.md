@@ -245,3 +245,40 @@ plugin/vendor/quay-native/dist/quay-native.js；首个 catalog 隔离跑的 Wiri
 **AC 勾选**：AC1/AC2 保持 [x]（本趟复验通过）；AC3/AC4（integration→develop 重合并 + 复验）与
 AC5（交叉标注）为外层动作/延后，inner 不勾。全量 suite_green=1 归外层 verification-round（clean
 window）验证。
+
+## Evidence（内层复验 2026-08-11 · 重派）
+
+**基线**：本 worktree 自 develop HEAD（4ec4f5da）fork（分支
+`task/gap-forty-to-six-remerge-needs-tests-updated-first`）。AC1 测试更新（2163c4c3 + 2dc55ba9，
+7 文件）随基线在树内——逐文件核验裸脚本形断言落位：session-topology 断
+`quay-topology.sh`/`topology-check.sh`（注释标「Re-instate … when 40→6 is re-merged」）、
+session-bootstrap 断 `session-bootstrap.sh`、inner-blocked-signal 断 `inner-blocked-signal.ts`
+（注释标「Re-instate … when 40→6 is re-merged」）、quay-init-loop-driver 断
+`loop-driver-check.sh`（注释标「Re-instate … when 40→6 is re-merged」）、quay-init-loop-core 无
+manager-loop-tick 铺装断言（仅注释提及）、`quay-entry-test-helpers.mjs` 已恢复
+（quay-session.test.mjs 纯 import 依赖）。capability-catalog.test.mjs 15 个 test() 无 40→6 入口形
+引用（裸脚本形期望）。inner 本趟无新增代码改动，交付为 **worktree 内复验 + scoped 门绿**。
+
+**环境铺装（worktree 特有，均 gitignored 不入提交）**：`ln -s /home/yale/work/quay/node_modules` 复用主
+checkout node_modules（既有 worktree 同款模式）；`cp /home/yale/work/quay/.quay/config.yml .quay/` 补齐
+gitignored workspace config（inner-blocked-signal 的 `_findRepoRoot` 依赖 `.quay/config.yml` 上溯，
+无则抛 ERR_ASSERTION 无法定位 repo root）；`scripts/test.sh` 的 build_dist_once 自动构建 dist +
+`sync-vendor.sh --sync-dist` 镜像 vendor dist（plugin/vendor/quay/dist/quay.js +
+plugin/vendor/quay-native/dist/quay-native.js）。git status 干净——所有铺装均 gitignored。
+
+**验证（worktree 内隔离实跑）**：
+- 契约 invoke `node --no-warnings --experimental-strip-types --test
+  plugin/test/capability-catalog.test.mjs` → capability-catalog **15 pass / 0 fail / 0 cancelled**，
+  `grep -c 'fail [1-9]'` = 0 → **catalog_fail=0** ✓；
+- AC1 受影响族：quay-session 6/0 · session-topology 10/0 · session-bootstrap 9/0 ·
+  inner-blocked-signal 35/0 · quay-init-loop-driver 15/0 · quay-init-loop-core 12/0 ·
+  tick-vocabulary 5/0 · loop-shipping 12/0 · manager-layer-shipping 7/0 ·
+  loop-shipping-necessity-check 3/0；
+- **scoped 门**：`bash scripts/test.sh --for-task gap-forty-to-six-remerge-needs-tests-updated-first
+  --allow-thin` → **exit 0**。静态检查 0 违规（test-impl-census 326 文件全 clean、test-isolation 44 条
+  全部基线内无新增、task-contract-check strict-subset 三任务文件 no violations、superseded-capability
+  PASS、tick-core-static-check PASS）；测试 **15 pass / 0 fail / 0 cancelled**。
+
+**AC 勾选**：AC1/AC2 保持 [x]（本趟复验通过）；AC3/AC4（integration→develop 重合并 + 复验）与
+AC5（交叉标注）为外层动作/延后，inner 不勾。全量 suite_green=1 归外层 verification-round（clean
+window）验证。
