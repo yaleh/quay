@@ -48,6 +48,11 @@
 // 使用（外层挂 Monitor，冷启动步骤 4b2；或 tick / 排障里跑 --once）：
 //   node --no-warnings --experimental-strip-types plugin/scripts/suite-state-trigger.ts \
 //     [--once]                      # 跑一轮：读状态、检测转变、记录并打印事件（测试接缝 + tick 排障）
+//     [--json]                      # 真 JSON 输出（Contract 机械检查形式；蕴含 --once：秒回、退出 0、
+//                                   #   可解析）。字段：state/finishedAt/finishedAtIso/ageMinutes/
+//                                   #   stopSignal/retrigger/retriggerIdleMs/coveredCommit/coveredTree/events
+//                                   #   —— measure 的 verdict_age_min 与 verdict_commit_delta 由此机械读取
+//                                   #   （gap-green-verdict-ac1-ac2-mechanisms-not-effective AC1/AC2）。
 //     [--monitor]                   # Monitor 模式（默认）：每 --interval 秒跑一轮，把事件打到 stdout
 //                                   #   （外层 Monitor 事件流 → 立即推送，不等 cron）
 //     [--interval <sec>]            # Monitor 轮询间隔（默认 5，目标秒级）
@@ -159,6 +164,19 @@ export interface SuiteState {
    * back to a stale-AGE threshold before declaring a crash.
    */
   pid?: number;
+  /**
+   * AC1 (gap-green-verdict-ac1-ac2-mechanisms-not-effective) — the verdict-covered commit/tree.
+   * `verifiedCommit` is written by full-suite-runner.ts (gap-merge-green-snapshot-verified-commit-
+   * livelock AC2: the integration tip the green verified — the exact commit whose green is on
+   * record). `commit`/`tree` are the legacy/short forms the 2026-08-06 finding observed missing
+   * from the state. The trigger reads them so its verdict record (the `--once --json`
+   * `coveredCommit`/`coveredTree` fields and the event log) reports WHAT the verdict covers — the
+   * Contract measure `verdict_commit_delta = git rev-list --count <verdict-commit>..HEAD`'s
+   * `<verdict-commit>` input. Absent on non-git hermetic roots / legacy states.
+   */
+  verifiedCommit?: string;
+  commit?: string;
+  tree?: string;
 }
 
 /** The AC2 reason-axis route a red state takes (gap-suite-state-has-no-reason-axis-failed-aborted-infra). */
@@ -341,6 +359,15 @@ export interface RunOnceResult {
   retrigger: boolean;
   /** Measured idle ms behind the retrigger decision (null when no terminal anchor). */
   retriggerIdleMs: number | null;
+  /**
+   * AC1 (gap-green-verdict-ac1-ac2-mechanisms-not-effective) — the verdict-covered commit
+   * (`state.verifiedCommit ?? state.commit`), surfaced so the Contract measure
+   * `verdict_commit_delta = git rev-list --count <verdict-commit>..HEAD` has a mechanical
+   * `<verdict-commit>`. Null when the state records none (non-git hermetic root / legacy state).
+   */
+  coveredCommit: string | null;
+  /** AC1 — the verdict-covered tree (`state.tree`), when the state records one. */
+  coveredTree: string | null;
 }
 
 /** AC1/AC3 纯转变检测器：上一个状态 → 下一个状态，产出一条套件状态事件（无转变 = null）。 */
@@ -623,6 +650,13 @@ export function runOnce(root: string, opts?: { idleMs?: number }): RunOnceResult
   }
   const status: SuiteStateValue | "absent" = cur?.state ?? "absent";
 
+  // AC1 (gap-green-verdict-ac1-ac2-mechanisms-not-effective) — the verdict-covered commit/tree.
+  // The runner writes `verifiedCommit`; legacy states may carry `commit`/`tree`. Surfaced in the
+  // RunOnceResult AND the `--once --json` verdict record so the Contract's verdict_commit_delta
+  // has a mechanical <verdict-commit> to diff against HEAD.
+  const coveredCommit = cur?.verifiedCommit ?? cur?.commit ?? null;
+  const coveredTree = cur?.tree ?? null;
+
   const events: SuiteStateEvent[] = [];
   if (cur) {
     if (prev !== null) {
@@ -668,7 +702,7 @@ export function runOnce(root: string, opts?: { idleMs?: number }): RunOnceResult
     // 记忆写失败不阻断本轮检测（下次轮询会重新比较——至多多记一条，不会漏掉红）。
   }
 
-  return { status, events, stopSignal: shouldStopDispatch(cur), retrigger, retriggerIdleMs };
+  return { status, events, stopSignal: shouldStopDispatch(cur), retrigger, retriggerIdleMs, coveredCommit, coveredTree };
 }
 
 function formatEventLine(ev: SuiteStateEvent): string {
@@ -768,14 +802,46 @@ export async function run(argv: string[]): Promise<number> {
   const root = path.resolve(parseArg(argv, "--root") ?? REPO_ROOT);
   const interval = Number(parseArg(argv, "--interval") ?? "5");
   const idleMs = resolveRetriggerIdleMs(argv);
+  const asJson = argv.includes("--json");
 
-  if (argv.includes("--monitor") || !argv.includes("--once")) {
+  // Monitor（默认）模式：--monitor 显式指定，或没有 --once 且不是 --json。
+  // --json 是 Contract 的机械检查形式（gap-green-verdict-ac1-ac2-mechanisms-not-effective AC2/AC3）：
+  // 它蕴含一轮 --once（秒回、退出 0、可解析），所以 `--json` 单独出现时不进常驻监测——
+  // 原 Contract invoke `suite-state-trigger.ts --json` 因此可当机械检查用（不再永不返回）。
+  if (argv.includes("--monitor") || (!asJson && !argv.includes("--once"))) {
     const intervalMs = Number.isFinite(interval) && interval > 0 ? interval * 1000 : 5000;
     return runMonitor(root, intervalMs, idleMs);
   }
 
-  // --once：跑一轮（测试接缝 + tick/排障）
-  const { status, events, stopSignal, retrigger, retriggerIdleMs } = runOnce(root, { idleMs });
+  // --once（或 --json）：跑一轮（测试接缝 + tick/排障 + Contract 机械检查）。
+  const { status, events, stopSignal, retrigger, retriggerIdleMs, coveredCommit, coveredTree } = runOnce(root, { idleMs });
+
+  if (asJson) {
+    // AC2 — `--once --json`（及 `--json`）产出真 JSON，含 finishedAt/state/stopSignal 字段，
+    // 使 Contract measure `verdict_age_min`（finishedAt 距今分钟数字段）与 `verdict_commit_delta`
+    // （<verdict-commit>..HEAD 计数）可机械读取（原输出是两行纯文本，无从取数）。
+    // finishedAt 原样透传（runner 写 epoch 秒；ISO 旧态也可读）；finishedAtIso/ageMinutes 由
+    // parseTerminalFinishedAt 归一化——仅终态（red/green + finishedAt）有值，running/absent 为 null。
+    // coveredCommit/coveredTree 是 AC1 的 verdict 覆盖记录（state.verifiedCommit ?? commit / tree）。
+    const raw = readSuiteState(root);
+    const terminalMs = parseTerminalFinishedAt(raw);
+    const finishedAtIso = terminalMs !== null ? new Date(terminalMs).toISOString() : null;
+    const out = {
+      state: status,
+      finishedAt: raw?.finishedAt ?? null,
+      finishedAtIso,
+      ageMinutes: terminalMs !== null ? (Date.now() - terminalMs) / 60_000 : null,
+      stopSignal,
+      retrigger,
+      retriggerIdleMs,
+      coveredCommit,
+      coveredTree,
+      events,
+    };
+    console.log(JSON.stringify(out));
+    return 0;
+  }
+
   console.log(`SUITE-STATUS ${status}`);
   for (const ev of events) {
     console.log(formatEventLine(ev));

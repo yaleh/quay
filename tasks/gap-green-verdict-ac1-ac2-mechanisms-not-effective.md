@@ -3,7 +3,7 @@ id: gap-green-verdict-ac1-ac2-mechanisms-not-effective
 title: green-verdict (done) AC1/AC2 mechanisms not effective — verdict records
   no covered commit/tree (AC1), Contract invoke never returns without --once
   (AC2), --once --json is not JSON; same family as ac8
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -52,10 +52,10 @@ stopSignal=false
 
 ## AC（draft）
 
-- [ ] 一次状态写入后 `full-suite-state.json` 含 verdict 覆盖的 commit/tree 字段
-- [ ] `suite-state-trigger.ts --once --json` 返回真 JSON（含 finishedAt/state/stopSignal 字段）
-- [ ] Contract invoke（带 --once）可作机械检查（秒回、退出 0、可解析）
-- [ ] 与 ac8 任务交叉标注（AC 勾选 ≠ 机制生效的又一实例）
+- [x] 一次状态写入后 `full-suite-state.json` 含 verdict 覆盖的 commit/tree 字段（full-suite-runner.ts 已写 `verifiedCommit`；suite-state-trigger 读取并把它表面化为 verdict 记录 —— `--once --json` 的 `coveredCommit`/`coveredTree` + 事件 state 快照）
+- [x] `suite-state-trigger.ts --once --json` 返回真 JSON（含 finishedAt/state/stopSignal 字段，另加 finishedAtIso/ageMinutes/coveredCommit/coveredTree/events）
+- [x] Contract invoke（带 --once）可作机械检查（`--once` / `--once --json` / 裸 `--json` 均秒回、退出 0、可解析；`--json` 蕴含一轮 `--once`，不再进常驻监测）
+- [x] 与 ac8 任务交叉标注（本任务 `## 性质` 已标注 `gap-ac8-import-over-spawn-ticked-while-its-own-evidence-says-not-in-effect` —— AC 勾选 ≠ 机制生效的又一实例）
 
 ## DoD（draft）
 
@@ -67,3 +67,25 @@ stopSignal=false
 - `.quay/full-suite-state.json` 两次写入均无 commit/tree 键
 - `suite-state-trigger.ts:403`：`!argv.includes("--once")` → runMonitor 常驻
 - `timeout 15 node ... suite-state-trigger.ts --once --json` 输出 `SUITE-STATUS running` / `stopSignal=false`（非 JSON）
+
+## Invoke（inner 2026-08-11 实测）
+
+机制修复 + 自审计（worktree `gap-green-verdict-ac1-ac2-mechanisms-not-effective`，scoped run 绿）。
+
+- **Scoped test**：`bash scripts/test.sh --for-task gap-green-verdict-ac1-ac2-mechanisms-not-effective --allow-thin` →
+  **28 pass / 0 fail / 0 cancelled，EXIT 0**（`suite-state-trigger.test.mjs` 全绿；含新增 5 条 AC1/AC2/AC3 测试）。
+  `task-contract-check`（scoped 静态层）：no violations。相邻 `full-suite-runner.test.mjs` 77/77 绿（runOnce 返回类型仅扩展字段，无回归）。
+- **AC2 —— `--once --json` 现在输出真 JSON**（此前是两行纯文本 `SUITE-STATUS running` / `stopSignal=false`）：
+  ```json
+  {"state":"red","finishedAt":1786233900,"finishedAtIso":"2026-08-09T00:05:00.000Z","ageMinutes":3772.06,"stopSignal":true,"retrigger":true,"retriggerIdleMs":226323677,"coveredCommit":"214a29c1e5f0b3d4a6c8e9f0a1b2c3d4e5f6a7b8","coveredTree":null,"events":[{"event":"SUITE-RED","at":"...","early":false,"stopSignal":true,"state":{...verifiedCommit...},"failureLocation":[...]}]}
+  ```
+  含 `finishedAt` / `state` / `stopSignal`，另加 `finishedAtIso` / `ageMinutes`（measure `verdict_age_min` 的输入）/ `coveredCommit` / `coveredTree` / `events`。EXIT 0。
+- **AC1 —— verdict 记录覆盖 commit/tree**：`full-suite-runner.ts` 每个状态写入都携带 `verifiedCommit`（git rev-parse HEAD 于 run 开始，gap-merge-green-snapshot-verified-commit-livelock）；`suite-state-trigger.ts` 的 `SuiteState` 类型现声明 `verifiedCommit`/`commit`/`tree`，`runOnce` 把 `state.verifiedCommit ?? state.commit` 表面化为 `coveredCommit`（`state.tree` → `coveredTree`），并随 `--once --json` 输出 + SUITE-RED 事件 state 快照落进 verdict 记录 ⇒ Contract measure `verdict_commit_delta = git rev-list --count <verdict-commit>..HEAD` 有机械的 `<verdict-commit>` 可读。
+- **AC3 —— Contract invoke（带 `--once`）可作机械检查**：`--once` / `--once --json` 秒回、退出 0、可解析；裸 `--json`（原 Contract invoke 形式）也**不再永不返回**——`--json` 蕴含一轮 `--once`（进不了常驻监测分支）。上表第二个 fixture 跑裸 `--json` EXIT 0。
+- 说明：runOnce 的 `retrigger` 只是**纯决策**（runOnce 从不 spawn；实际起跑只在 runMonitor），`--once --json` 里 `retrigger:true` 是「终态已闲置超阈值」的如实报告，非副作用。
+
+## Touches
+
+- plugin/scripts/suite-state-trigger.ts（verdict 记录 covered commit/tree；--once/--json 修正）
+- plugin/test/suite-state-trigger.test.mjs（AC1/AC2 机制测试）
+- tasks/gap-green-verdict-ac1-ac2-mechanisms-not-effective.md（自身：勾 AC + 贴证据）

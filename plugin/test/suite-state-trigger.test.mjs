@@ -318,6 +318,121 @@ test("Contract control (negative) — a green suite produces NO SUITE-RED", () =
   }
 });
 
+// ── AC1/AC2/AC3: green-verdict verdict record (gap-green-verdict-ac1-ac2-mechanisms-not-effective) ──
+// The original green-verdict task's Contract invokes `suite-state-trigger.ts --json` (measure:
+// verdict_age_min = the finishedAt-age field; verdict_commit_delta = git rev-list --count
+// <verdict-commit>..HEAD). Measured NOT effective (2026-08-06): `--json` was not parsed (output was
+// plain text, not JSON), the invoke without `--once` never returned (resident monitor), and the
+// verdict never recorded the covered commit/tree. These tests pin the fixes:
+//   AC1 — the verdict record carries the covered commit/tree (state.verifiedCommit / commit / tree).
+//   AC2 — `--once --json` returns REAL JSON with state/finishedAt/stopSignal fields.
+//   AC3 — the Contract invoke form (`--json`, with or without `--once`) is a mechanical check:
+//         exits 0 fast, output parseable (never enters the resident monitor).
+
+test("AC1 — runOnce surfaces the verdict-covered commit/tree (state.verifiedCommit / state.tree / legacy commit)", () => {
+  const root = tmpRoot();
+  try {
+    writeSuiteState(root, state({
+      state: "red",
+      reason: "failed",
+      finishedAt: Math.floor(Date.now() / 1000),
+      verifiedCommit: "abc123def456",
+      tree: "tree789",
+    }));
+    const res = runOnce(root);
+    assert.equal(res.coveredCommit, "abc123def456", "coveredCommit = state.verifiedCommit");
+    assert.equal(res.coveredTree, "tree789", "coveredTree = state.tree");
+    // the durable event log carries the coverage too (the event's state snapshot passes it through)
+    const log = readSuiteEvents(root);
+    assert.equal(log[0].event, "SUITE-RED", "cold-start-into-red recorded");
+    assert.equal(log[0].state?.verifiedCommit, "abc123def456", "the SUITE-RED event's state carries verifiedCommit");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+  // legacy `commit` form (the field the 2026-08-06 finding observed missing) is honored too
+  const root2 = tmpRoot();
+  try {
+    writeSuiteState(root2, state({ state: "green", finishedAt: Date.now() / 1000, commit: "legacyabc" }));
+    assert.equal(runOnce(root2).coveredCommit, "legacyabc", "legacy `commit` field reads as coveredCommit");
+  } finally {
+    fs.rmSync(root2, { recursive: true, force: true });
+  }
+  // a state with no coverage field (non-git hermetic root) ⇒ null, never a crash
+  const root3 = tmpRoot();
+  try {
+    writeSuiteState(root3, state({ state: "green", finishedAt: Date.now() / 1000 }));
+    assert.equal(runOnce(root3).coveredCommit, null, "no coverage field ⇒ null");
+    assert.equal(runOnce(root3).coveredTree, null, "no tree field ⇒ null");
+  } finally {
+    fs.rmSync(root3, { recursive: true, force: true });
+  }
+});
+
+test("AC2 — `--once --json` returns REAL JSON with state/finishedAt/stopSignal + coveredCommit (AC1)", async () => {
+  const root = tmpRoot();
+  try {
+    const finishedAt = Math.floor(Date.now() / 1000);
+    writeSuiteState(root, state({ state: "green", finishedAt, verifiedCommit: "cafebabe" }));
+    const { code, out } = await runCli(TRIGGER, ["--once", "--json", "--root", root]);
+    assert.equal(code, 0, `--once --json exits 0; got ${code}\n${out}`);
+    let parsed;
+    assert.doesNotThrow(() => { parsed = JSON.parse(out); }, "--once --json output is parseable JSON (not two plain-text lines)");
+    assert.equal(parsed.state, "green", "state field present");
+    assert.equal(parsed.finishedAt, finishedAt, "finishedAt field present");
+    assert.equal(parsed.stopSignal, false, "stopSignal field present; green is not a stop signal");
+    assert.equal(parsed.coveredCommit, "cafebabe", "verdict record carries the covered commit (AC1)");
+    assert.equal(typeof parsed.ageMinutes, "number", "ageMinutes is the verdict_age_min measure input");
+    assert.ok(Array.isArray(parsed.events), "events array present");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC2 — a running state's `--once --json` reports finishedAt/ageMinutes as null (no terminal anchor)", async () => {
+  const root = tmpRoot();
+  try {
+    writeSuiteState(root, state({ state: "running", pid: process.pid }));
+    const { code, out } = await runCli(TRIGGER, ["--once", "--json", "--root", root]);
+    assert.equal(code, 0);
+    const parsed = JSON.parse(out);
+    assert.equal(parsed.state, "running", "running status reported");
+    assert.equal(parsed.finishedAt, null, "running has no finishedAt");
+    assert.equal(parsed.ageMinutes, null, "running has no age (no terminal anchor)");
+    assert.equal(parsed.stopSignal, false, "running never stops dispatch");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC3 — the Contract invoke form `--json` (no --once) is a mechanical check: exits 0, parseable JSON, never hangs", async () => {
+  const root = tmpRoot();
+  try {
+    writeSuiteState(root, state({ state: "red", reason: "failed", finishedAt: null }));
+    const { code, out } = await runCli(TRIGGER, ["--json", "--root", root]);
+    assert.equal(code, 0, "bare --json exits 0 (does NOT enter the resident monitor)");
+    const parsed = JSON.parse(out);
+    assert.equal(parsed.state, "red", "red status reported");
+    assert.equal(parsed.stopSignal, true, "red+failed stops dispatch — the signal is in the verdict record");
+    assert.equal(parsed.finishedAt, null, "early red (finishedAt null) is reported as such");
+    assert.ok(parsed.events.some((e) => e.event === "SUITE-RED"), "the verdict record carries the SUITE-RED transition");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC3 — plain `--once` keeps the human/tick format (SUITE-STATUS + stopSignal= lines)", async () => {
+  const root = tmpRoot();
+  try {
+    writeSuiteState(root, state({ state: "green", finishedAt: Date.now() / 1000 }));
+    const { code, out } = await runCli(TRIGGER, ["--once", "--root", root]);
+    assert.equal(code, 0);
+    assert.match(out, /SUITE-STATUS green/, "plain --once keeps the SUITE-STATUS line");
+    assert.match(out, /stopSignal=false/, "plain --once keeps the stopSignal= line");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("AC6 — this file declares node:test and // @test-group governance", () => {
   const src = read(new URL(import.meta.url));
   assert.ok(src.includes('import { test } from "node:test"'), "uses node:test");
