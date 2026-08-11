@@ -2054,7 +2054,7 @@ test("AC1 unit — buildSystemdRunArgv wraps a command in systemd-run --user --s
     "-p",
     "MemoryMax=4G",
     "-p",
-    "CPUQuota=200%",
+    "CPUQuota=400%",
     "-p",
     "TasksMax=200",
     "bash",
@@ -2071,7 +2071,7 @@ test("AC1 unit — parseSystemdRunLimits merges a seam override over the default
   const l = parseSystemdRunLimits("MemoryMax=64M TasksMax=20");
   assert.equal(l.memoryMax, "64M");
   assert.equal(l.tasksMax, "20");
-  assert.equal(l.cpuQuota, "200%", "an unchanged key keeps the default");
+  assert.equal(l.cpuQuota, "400%", "an unchanged key keeps the default");
   assert.deepEqual(parseSystemdRunLimits(undefined), DEFAULT_SYSTEMD_RUN_LIMITS);
   // an unknown key is ignored (fail-safe — never produce an unparseable scope property)
   assert.deepEqual(parseSystemdRunLimits("MemoryMax=64M Bogus=1"), { ...DEFAULT_SYSTEMD_RUN_LIMITS, memoryMax: "64M" });
@@ -2099,7 +2099,7 @@ test(
       assert.equal(s.state, "green");
       assert.ok(s.systemdRun, "the state carries the systemdRun limits (suite ran inside a cgroup scope)");
       assert.equal(s.systemdRun.memoryMax, "4G");
-      assert.equal(s.systemdRun.cpuQuota, "200%");
+      assert.equal(s.systemdRun.cpuQuota, "400%");
       assert.equal(s.systemdRun.tasksMax, "200");
       // AC1 observable — the applied cgroup attributes (systemctl --user show) land in the state dir
       const evidence = path.join(root, ".quay", "suite-cgroup-evidence.txt");
@@ -2108,7 +2108,7 @@ test(
       assert.match(txt, /scope_unit=run-p\d+-/, "the transient scope unit name is recorded");
       assert.match(txt, /MemoryMax=4294967296/, "MemoryMax=4G applied (bytes)");
       assert.match(txt, /EffectiveTasksMax=200/, "TasksMax=200 applied (effective)");
-      assert.match(txt, /CPUQuotaPerSecUSec=2s/, "CPUQuota=200% applied");
+      assert.match(txt, /CPUQuotaPerSecUSec=4s/, "CPUQuota=400% applied (full 4 physical cores)");
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
       fs.rmSync(dir, { recursive: true, force: true });
