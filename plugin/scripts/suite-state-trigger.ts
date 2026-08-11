@@ -54,6 +54,8 @@
 //     [--retrigger-idle-min <min>]  # 自动重触发阈值（默认 10 = Contract band empty_wait_after_terminal
 //                                   #   <= 10；测试注入短 N 用 QUAY_SUITE_RETRIGGER_IDLE_MS env 或 --once
 //                                   #   配合 --retrigger-idle-min 0.01 这类小数分钟）
+//     [--idle-green-min <min>]      # idle-green 触发阈值（默认 2 = gap-b3-tick-coupled-misses-between-
+//                                   #   tick-merges AC3「持续 idle」；测试注入短 N 用 QUAY_SUITE_IDLE_GREEN_MS env）
 //     [--json]                      # 跑一轮并以 JSON 打印结果（Contract measure idle_green_round_started）
 //     [--root <path>]               # 工作区根（测试接缝；默认仓库根）
 //
@@ -211,10 +213,12 @@ export type SuiteEventKind =
   | "SUITE-RED"
   | "SUITE-GREEN"
   | "SUITE-RUNNING"
-  // gap-b3-tick-coupled-misses-between-tick-merges AC2 — the verification-round START is event-driven,
+  // gap-b3-tick-coupled-misses-between-tick-merges — the verification-round START is event-driven,
   // not a tick-polling side effect: SUITE-MERGE-PENDING (a new merge landed on integration while no
-  // round is in flight) is emitted by runOnce and drives the round start via runMonitor's spawn.
-  | "SUITE-MERGE-PENDING";
+  // round is in flight) and SUITE-IDLE-GREEN (state=green + develop..integration>0 + sustained idle)
+  // are emitted by runOnce and drive the round start via runMonitor's spawn.
+  | "SUITE-MERGE-PENDING"
+  | "SUITE-IDLE-GREEN";
 
 export interface SuiteStateEvent {
   event: SuiteEventKind;
@@ -231,12 +235,14 @@ export interface SuiteStateEvent {
    */
   failureLocation?: FailureLocation[];
   /**
-   * SUITE-MERGE-PENDING (gap-b3-tick-coupled-misses-between-tick-merges AC2) — the git facts behind the
-   * event-driven round start: `pendingCount` (develop..integration unverified commits) and
-   * `integrationHead` (integration tip). A factual projection (translation, not a dispatch decision).
+   * SUITE-MERGE-PENDING / SUITE-IDLE-GREEN (gap-b3-tick-coupled-misses-between-tick-merges) — the git
+   * facts behind the event-driven round start: `pendingCount` (develop..integration unverified commits)
+   * and `integrationHead` (integration tip) for the merge-landing trigger; `idleMs` for the idle-green
+   * trigger. A factual projection (translation, not a dispatch decision).
    */
   pendingCount?: number | null;
   integrationHead?: string | null;
+  idleMs?: number | null;
 }
 
 // ── failure-location classification + shared-gate dispatch conditional ─────────────────────────────
@@ -362,6 +368,14 @@ export interface RunOnceResult {
    * The DECISION is pure; the caller (runMonitor) is the actor that spawns the next round.
    */
   mergePending: boolean;
+  /**
+   * gap-b3-tick-coupled-misses-between-tick-merges AC3 — true when state=green AND develop..integration>0
+   * AND sustained idle since the terminal finishedAt (idle-green 触发, 照 4b2 的模型). The DECISION is
+   * pure; the caller (runMonitor) is the actor that spawns the next round.
+   */
+  idleGreen: boolean;
+  /** Measured idle ms behind the idle-green decision (null when not terminal-with-finishedAt). */
+  idleGreenIdleMs: number | null;
 }
 
 /** AC1/AC3 纯转变检测器：上一个状态 → 下一个状态，产出一条套件状态事件（无转变 = null）。 */
@@ -524,7 +538,7 @@ export function shouldAutoRetrigger(
   return { retrigger: true, idleMs: idle, reason: "idle-exceeded" };
 }
 
-// ── event-driven verification-round START (gap-b3-tick-coupled-misses-between-tick-merges AC2) ───────
+// ── event-driven verification-round START (gap-b3-tick-coupled-misses-between-tick-merges) ───────────
 // The B3 round-start condition (本轮收尾 ≥1 或有新 merge 落地 且 state != running 且 gate 放行) was a
 // TICK-POLLING side effect: the outer tick checked it on its 20-min cadence, so a merge landing between
 // ticks was missed — r271 completed 04:38 green, merges landed 05:01-05:23, and 51 min passed with NO
@@ -534,7 +548,9 @@ export function shouldAutoRetrigger(
 // git refs, and emits an event the moment the condition holds; runMonitor spawns the round):
 //   AC2 — MERGE-LANDING trigger: integration HEAD advances (a new merge landed — fan-in/批量合) AND
 //         state != running AND there are unverified commits (develop..integration > 0) ⇒ start.
-// The DECISION is pure (injectable git state for hermetic tests); runOnce records the event and
+//   AC3 — IDLE-GREEN trigger: state=green AND develop..integration>0 AND sustained idle since the
+//         terminal finishedAt ⇒ start.
+// Both DECISIONS are pure (injectable git state for hermetic tests); runOnce records the event and
 // returns the flag; runMonitor is the actor that spawns (reusing the retrigger spawn — which re-checks
 // the state file is still terminal before launching, so no double-start vs a manual/retrigger start).
 
@@ -574,6 +590,46 @@ export function readGitVerificationState(root: string): GitVerificationState {
   }
 }
 
+export interface IdleGreenDecision {
+  fire: boolean;
+  /** Measured idle ms behind the idle-green decision (null when no terminal anchor). */
+  idleMs: number | null;
+  reason:
+    | "idle-green"
+    | "idle-not-exceeded"
+    | "not-green"
+    | "no-pending"
+    | "no-git"
+    | "throttled";
+}
+
+/**
+ * AC3 — pure idle-green decision: fire when state=green AND develop..integration>0 AND idle since the
+ * terminal finishedAt >= idleMs AND not throttled (one attempt per idle window — the same no-storm rule
+ * as the retrigger's lastRetriggerAt). AC4 negative control: pending==0 / absent git ⇒ NO fire
+ * (无未验证提交不误起). No side effects — the caller spawns.
+ */
+export function shouldStartIdleGreen(
+  state: SuiteState | null,
+  git: GitVerificationState,
+  idleMs: number,
+  lastIdleGreenAtMs: number | null,
+  now = Date.now(),
+): IdleGreenDecision {
+  if (!state || state.state !== "green") return { fire: false, idleMs: null, reason: "not-green" };
+  if (git.pendingCount === null || git.pendingCount <= 0) {
+    return { fire: false, idleMs: null, reason: git.pendingCount === null ? "no-git" : "no-pending" };
+  }
+  const terminalAt = parseTerminalFinishedAt(state);
+  if (terminalAt === null) return { fire: false, idleMs: null, reason: "idle-not-exceeded" };
+  const idle = now - terminalAt;
+  if (idle < idleMs) return { fire: false, idleMs: idle, reason: "idle-not-exceeded" };
+  if (lastIdleGreenAtMs !== null && now - lastIdleGreenAtMs < idleMs) {
+    return { fire: false, idleMs: idle, reason: "throttled" };
+  }
+  return { fire: true, idleMs: idle, reason: "idle-green" };
+}
+
 export interface MergeLandingDecision {
   fire: boolean;
   reason: "merge-landed" | "head-unchanged" | "no-git" | "running" | "no-pending";
@@ -596,6 +652,23 @@ export function shouldStartOnMergeLanding(
   if (state?.state === "running") return { fire: false, reason: "running" };
   if (pendingCount === null || pendingCount <= 0) return { fire: false, reason: "no-pending" };
   return { fire: true, reason: "merge-landed" };
+}
+
+/** The idle-green threshold: --idle-green-min CLI, then QUAY_SUITE_IDLE_GREEN_MS env (test seam), then default. */
+export const DEFAULT_IDLE_GREEN_MS = 2 * 60 * 1000; // 2 min — "sustained idle" with unverified work
+
+export function resolveIdleGreenMs(argv?: string[], opts?: { idleGreenMs?: number }): number {
+  if (opts?.idleGreenMs !== undefined && Number.isFinite(opts.idleGreenMs) && opts.idleGreenMs > 0) return opts.idleGreenMs;
+  if (argv) {
+    const minArg = parseArg(argv, "--idle-green-min");
+    if (minArg !== undefined) {
+      const min = Number(minArg);
+      if (Number.isFinite(min) && min > 0) return Math.round(min * 60 * 1000);
+    }
+  }
+  const envMs = Number(process.env.QUAY_SUITE_IDLE_GREEN_MS);
+  if (Number.isFinite(envMs) && envMs > 0) return envMs;
+  return DEFAULT_IDLE_GREEN_MS;
 }
 
 /** Is a process with this PID currently alive? (ESRCH = no such process = dead; EPERM = exists but not ours = alive.) */
@@ -690,7 +763,7 @@ export function recordTransition(
 
 /**
  * gap-b3-tick-coupled-misses-between-tick-merges — record a ROUND-START trigger event (SUITE-MERGE-
- * PENDING) to the append-only events log. NOT a state transition (the suite state
+ * PENDING / SUITE-IDLE-GREEN) to the append-only events log. NOT a state transition (the suite state
  * does not change); a "the round should start" signal the outer Monitor stream and the events log carry.
  * Fail-open on write failure (the caller still gets the event to print — same discipline as
  * recordTransition). `extra` carries the git facts behind the trigger (pendingCount / integrationHead /
@@ -698,9 +771,9 @@ export function recordTransition(
  */
 export function recordTriggerEvent(
   root: string,
-  kind: "SUITE-MERGE-PENDING",
+  kind: "SUITE-MERGE-PENDING" | "SUITE-IDLE-GREEN",
   state: SuiteState | null,
-  extra: { pendingCount?: number | null; integrationHead?: string | null } = {},
+  extra: { pendingCount?: number | null; integrationHead?: string | null; idleMs?: number | null } = {},
 ): SuiteStateEvent | null {
   const ev: SuiteStateEvent = {
     event: kind,
@@ -727,6 +800,7 @@ export function recordTriggerEvent(
  */
 export interface RunOnceOpts {
   idleMs?: number;
+  idleGreenMs?: number;
   /** gap-b3-tick-coupled-misses-between-tick-merges — injected git facts (hermetic test seam). */
   git?: GitVerificationState | null;
 }
@@ -736,10 +810,12 @@ export function runOnce(root: string, opts?: RunOnceOpts): RunOnceResult {
     state: SuiteStateValue | null;
     lastRetriggerAt?: number | null;
     lastIntegrationHead?: string | null;
+    lastIdleGreenAt?: number | null;
   }>(memoPath(root));
   const prev: SuiteStateValue | null = memo?.state ?? null;
   let lastRetriggerAtMs: number | null = memo?.lastRetriggerAt ?? null;
   let lastIntegrationHead: string | null = memo?.lastIntegrationHead ?? null;
+  let lastIdleGreenAtMs: number | null = memo?.lastIdleGreenAt ?? null;
   let cur = readSuiteState(root);
 
   // AC6 (gap-full-suite-state-red-no-failure-detail-static-check-invisible) — crash-watchdog: a
@@ -806,6 +882,21 @@ export function runOnce(root: string, opts?: RunOnceOpts): RunOnceResult {
   }
   lastIntegrationHead = git.integrationHead ?? lastIntegrationHead;
 
+  // AC3 — idle-green: state=green + develop..integration>0 + sustained idle since the terminal
+  // finishedAt, throttled to one attempt per idle window (same no-storm rule as the retrigger).
+  const idleGreenMs = resolveIdleGreenMs(undefined, opts);
+  const idleGreenDecision = shouldStartIdleGreen(cur, git, idleGreenMs, lastIdleGreenAtMs);
+  const idleGreen = idleGreenDecision.fire;
+  const idleGreenIdleMs = idleGreenDecision.idleMs;
+  if (idleGreen) {
+    const ev = recordTriggerEvent(root, "SUITE-IDLE-GREEN", cur, {
+      pendingCount: git.pendingCount,
+      idleMs: idleGreenDecision.idleMs,
+    });
+    if (ev) events.push(ev);
+    lastIdleGreenAtMs = Date.now();
+  }
+
   try {
     fs.mkdirSync(path.dirname(memoPath(root)), { recursive: true });
     fs.writeFileSync(
@@ -815,6 +906,7 @@ export function runOnce(root: string, opts?: RunOnceOpts): RunOnceResult {
           state: status === "absent" ? null : status,
           ...(lastRetriggerAtMs !== null ? { lastRetriggerAt: lastRetriggerAtMs } : {}),
           ...(lastIntegrationHead !== null ? { lastIntegrationHead } : {}),
+          ...(lastIdleGreenAtMs !== null ? { lastIdleGreenAt: lastIdleGreenAtMs } : {}),
         },
         null,
         2,
@@ -832,6 +924,8 @@ export function runOnce(root: string, opts?: RunOnceOpts): RunOnceResult {
     retrigger,
     retriggerIdleMs,
     mergePending,
+    idleGreen,
+    idleGreenIdleMs,
   };
 }
 
@@ -906,19 +1000,19 @@ export function spawnRetriggerRun(root: string): void {
   }
 }
 
-async function runMonitor(root: string, intervalMs: number, idleMs: number): Promise<number> {
+async function runMonitor(root: string, intervalMs: number, idleMs: number, idleGreenMs: number): Promise<number> {
   // 首轮先跑一次（建立基线/冷启动即红的立即触发），随后按间隔轮询。
   for (;;) {
-    const { events, retrigger, mergePending } = runOnce(root, { idleMs });
+    const { events, retrigger, mergePending, idleGreen } = runOnce(root, { idleMs, idleGreenMs });
     for (const ev of events) {
       // stdout 是外层 Monitor 的事件流 → 立即推送（不等 20 分钟 cron）
       console.log(formatEventLine(ev));
     }
-    if (retrigger || mergePending) {
+    if (retrigger || mergePending || idleGreen) {
       // gap-suite-empty-wait-no-auto-retrigger AC2/AC3 + gap-b3-tick-coupled-misses-between-tick-merges
-      // AC2 — a round should start (empty-wait retrigger / a merge landed): MECHANICALLY start it (not
-      // the outer's tick). spawnRetriggerRun re-checks the state file is still terminal just before
-      // launching, so the two triggers cannot double-start each other.
+      // AC2/AC3 — a round should start (empty-wait retrigger / merge landed / idle-green-with-pending):
+      // MECHANICALLY start it (not the outer's tick). spawnRetriggerRun re-checks the state file is
+      // still terminal just before launching, so the three triggers cannot double-start each other.
       spawnRetriggerRun(root);
     }
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
@@ -934,17 +1028,18 @@ export async function run(argv: string[]): Promise<number> {
   const root = path.resolve(parseArg(argv, "--root") ?? REPO_ROOT);
   const interval = Number(parseArg(argv, "--interval") ?? "5");
   const idleMs = resolveRetriggerIdleMs(argv);
+  const idleGreenMs = resolveIdleGreenMs(argv);
 
   if ((argv.includes("--monitor") || !argv.includes("--once")) && !argv.includes("--json")) {
     const intervalMs = Number.isFinite(interval) && interval > 0 ? interval * 1000 : 5000;
-    return runMonitor(root, intervalMs, idleMs);
+    return runMonitor(root, intervalMs, idleMs, idleGreenMs);
   }
 
   // --once / --json：跑一轮（测试接缝 + tick/排障；--json = machine-readable Contract measure）
-  const res = runOnce(root, { idleMs });
+  const res = runOnce(root, { idleMs, idleGreenMs });
   if (argv.includes("--json")) {
-    // The Contract measure reads this: a JSON object with every event the round fired (SUITE-*
-    // transitions + SUITE-MERGE-PENDING round-start trigger).
+    // The Contract measure (`idle_green_round_started`) reads this: a JSON object with every event the
+    // round fired (SUITE-* transitions + SUITE-MERGE-PENDING / SUITE-IDLE-GREEN round-start triggers).
     console.log(
       JSON.stringify(
         {
@@ -953,7 +1048,9 @@ export async function run(argv: string[]): Promise<number> {
           stopSignal: res.stopSignal,
           retrigger: res.retrigger,
           mergePending: res.mergePending,
+          idleGreen: res.idleGreen,
           retriggerIdleMs: res.retriggerIdleMs,
+          idleGreenIdleMs: res.idleGreenIdleMs,
         },
         null,
         2,
@@ -968,6 +1065,7 @@ export async function run(argv: string[]): Promise<number> {
   console.log(`stopSignal=${res.stopSignal}`);
   console.log(`retrigger=${res.retrigger}${res.retriggerIdleMs !== null ? ` idleMs=${res.retriggerIdleMs}` : ""}`);
   console.log(`mergePending=${res.mergePending}`);
+  console.log(`idleGreen=${res.idleGreen}${res.idleGreenIdleMs !== null ? ` idleMs=${res.idleGreenIdleMs}` : ""}`);
   return 0;
 }
 
