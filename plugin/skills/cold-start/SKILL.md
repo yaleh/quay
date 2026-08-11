@@ -58,6 +58,12 @@ if the consequences are a concrete, checkable list. After this skill completes, 
 true. Report each as `<KEY>: true|false` plus the one-line evidence; `false` on any key = the cold
 start did NOT complete.
 
+**Self-hosting proof (2026-08-11, `gap-quay-self-hosting-e2e-proof`)**: quay itself ran this
+cold-start end-to-end on its own repo (outer session `quay-b`, 09:14–09:25Z) and self-certified all
+seven keys without a human verification step. Full evidence + negative-control comparison in
+`docs/analysis/quay-self-cold-start-proof.md` (the AC8c six-key table in the task body, `grep -c
+'true'` = 6).
+
 | # | Key | Checkable definition | Evidence |
 |---|---|---|---|
 | 1 | `MONITORS-MOUNTED` | ONE Monitor-tool invocation exists for `<root>/plugin/scripts/session-liveness-mount.sh` (the observer — session observation has exactly ONE tool, SPEC-one-observer-two-surfaces.md; the retired per-parameter observer was removed by gap-retire-inner-state-one-observer-targets-by-parameter); `bash <root>/plugin/scripts/monitor-mount-check.sh --json` reports `mounted=true`, `targetOk=true` (2026-08-06: `delivered` retired with the shared events file — the mount check is mounted + targetOk) | the `--json` output (two criteria) |
