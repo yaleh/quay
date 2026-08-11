@@ -51,6 +51,8 @@ import {
   DEFAULT_SYSTEMD_RUN_LIMITS,
   parseSystemdRunLimits,
   systemdRunAvailable,
+  scopeUnitFromCgroupLine,
+  readScopeUnitFromCgroup,
   parsePhaseMsFromLogText,
   parsePhaseMsFromLog,
   appendVerificationRound,
@@ -1876,6 +1878,55 @@ test("AC1 unit — parseSystemdRunLimits merges a seam override over the default
   assert.deepEqual(parseSystemdRunLimits("MemoryMax=64M Bogus=1"), { ...DEFAULT_SYSTEMD_RUN_LIMITS, memoryMax: "64M" });
 });
 
+test("AC2 unit — scopeUnitFromCgroupLine extracts THIS HOST's run-r<hex>.scope transient-scope naming (and rejects non-transient scopes)", () => {
+  // this host's actual systemd naming (verified 2026-08-11): systemd-run --scope registers
+  // run-r<32-hex>.scope, NOT the run-p<pid>-<invocation>.scope the old matcher searched for.
+  assert.equal(
+    scopeUnitFromCgroupLine(
+      "0::/user.slice/user-1000.slice/user@1000.service/app.slice/run-r290c40d0f0dc49399a3fbdd7ab91a09c.scope",
+    ),
+    "run-r290c40d0f0dc49399a3fbdd7ab91a09c.scope",
+  );
+  // cgroup v1 line format (`1:name=systemd:/path`) still parses
+  assert.equal(
+    scopeUnitFromCgroupLine(
+      "1:name=systemd:/user.slice/user-1000.slice/user@1000.service/app.slice/run-r290c40d0f0dc49399a3fbdd7ab91a09c.scope",
+    ),
+    "run-r290c40d0f0dc49399a3fbdd7ab91a09c.scope",
+  );
+  // the classic run-p<pid>-<invocation>.scope form still parses
+  assert.equal(
+    scopeUnitFromCgroupLine("0::/user.slice/user-1000.slice/user@1000.service/app.slice/run-p1234-abc.scope"),
+    "run-p1234-abc.scope",
+  );
+  // non-transient scopes are NOT the suite scope (the cgroup of a freshly-spawned systemd-run may
+  // briefly be init.scope / the caller's tmux-spawn scope — those must be ignored, not captured)
+  assert.equal(scopeUnitFromCgroupLine("0::/user.slice/user-1000.slice/user@1000.service/init.scope"), null);
+  assert.equal(scopeUnitFromCgroupLine("0::/user.slice/user-1000.slice/user@1000.service/app.slice/tmux-spawn-123.scope"), null);
+  assert.equal(scopeUnitFromCgroupLine(""), null);
+  assert.equal(scopeUnitFromCgroupLine("0::"), null);
+});
+
+test("AC2 unit — readScopeUnitFromCgroup reads the scope name from a process cgroup file (injectable path)", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-cg-"));
+  try {
+    const f = path.join(dir, "cgroup");
+    fs.writeFileSync(
+      f,
+      "0::/user.slice/user-1000.slice/user@1000.service/app.slice/run-r290c40d0f0dc49399a3fbdd7ab91a09c.scope\n",
+      "utf8",
+    );
+    assert.equal(readScopeUnitFromCgroup(99999, f), "run-r290c40d0f0dc49399a3fbdd7ab91a09c.scope");
+    // a cgroup that does not yet name a run- scope → null (caller retries)
+    fs.writeFileSync(f, "0::/user.slice/user-1000.slice/user@1000.service/app.slice\n", "utf8");
+    assert.equal(readScopeUnitFromCgroup(99999, f), null);
+    // a missing cgroup file → null
+    assert.equal(readScopeUnitFromCgroup(99999, path.join(dir, "nope")), null);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test(
   "AC1 — the runner wraps the suite in a systemd-run cgroup scope; the applied limits are visible as durable evidence (real systemd)",
   { skip: systemdRunAvailable() ? false : "systemd-run --user --scope not available on this host" },
@@ -1904,9 +1955,15 @@ test(
       const evidence = path.join(root, ".quay", "suite-cgroup-evidence.txt");
       await poll(() => fs.existsSync(evidence), { timeoutMs: 10_000 });
       const txt = fs.readFileSync(evidence, "utf8");
-      assert.match(txt, /scope_unit=run-p\d+-/, "the transient scope unit name is recorded");
+      // the transient scope unit name is recorded — this host names transient scopes run-r<hex>.scope
+      // (gap-full-suite-runner-cgroup-scope-evidence-unfound); other hosts use the classic
+      // run-p<pid>-<invocation>.scope form. Match either.
+      assert.match(txt, /scope_unit=run-(?:r[0-9a-f]{32}\.scope|p\d+-)/, "the transient scope unit name is recorded");
       assert.match(txt, /MemoryMax=4294967296/, "MemoryMax=4G applied (bytes)");
-      assert.match(txt, /EffectiveTasksMax=200/, "TasksMax=200 applied (effective)");
+      // systemd 255 on this host exposes the applied limit as plain `TasksMax=200` (EffectiveTasksMax
+      // is not emitted for scopes); systemd builds that compute an effective value emit
+      // `EffectiveTasksMax=200`. Match either (TasksMax=200 is a substring of EffectiveTasksMax=200).
+      assert.match(txt, /TasksMax=200/, "TasksMax=200 applied (plain or effective)");
       assert.match(txt, /CPUQuotaPerSecUSec=2s/, "CPUQuota=200% applied");
     } finally {
       fs.rmSync(root, { recursive: true, force: true });

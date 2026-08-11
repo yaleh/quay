@@ -43,9 +43,27 @@ AC1 测试随之补一个本机命名形态的 fixture。
 
 ## Acceptance Criteria
 
-- [ ] AC1: `full-suite-runner.test.mjs` 在本机 75/75 全绿（AC1 cgroup-evidence 测试不再 poll 超时），隔离单跑验证
-- [ ] AC2: `findSuiteScopeUnit` 不再只匹配 `run-p<pid>-` 前缀——对本机 systemd 实际 scope 命名健壮（有单测 pin 本机形态）
-- [ ] AC3: 既有 74 个测试零回归（scoped `scripts/test.sh --for-task <id> --allow-thin` 全绿）
+- [x] AC1: `full-suite-runner.test.mjs` 在本机 75/75 全绿（AC1 cgroup-evidence 测试不再 poll 超时），隔离单跑验证
+- [x] AC2: `findSuiteScopeUnit` 不再只匹配 `run-p<pid>-` 前缀——对本机 systemd 实际 scope 命名健壮（有单测 pin 本机形态）
+- [x] AC3: 既有 74 个测试零回归（scoped `scripts/test.sh --for-task <id> --allow-thin` 全绿）
+
+## Invoke evidence（inner 2026-08-11）
+
+实现：`findSuiteScopeUnit` 主路径改为读被 spawn 的 `systemd-run --scope` 进程自己的 cgroup
+（`/proc/<pid>/cgroup` → leaf 即 scope unit 名），对本机 `run-r<hex>.scope` 与经典 `run-p<pid>-*.scope`
+任意命名健壮；`systemctl --user list-units` 的 `run-p<pid>-` 前缀轮询降级为 fallback。新增
+`scopeUnitFromCgroupLine` / `readScopeUnitFromCgroup` 两个可测导出（AC2 单测 pin 本机形态 + 拒绝
+`init.scope`/`tmux-spawn-*.scope` 等非 transient scope）。AC1 测试断言同步放宽：`scope_unit=` 匹配
+`run-r<hex>.scope` 或 `run-p<pid>-` 两形态；`TasksMax=200` 匹配普通或 `EffectiveTasksMax=200`
+（systemd 255 对本机 scope 不暴露 `Effective*`，实测 `systemctl --user show` 无该属性）。
+
+- 隔离单跑 `bash scripts/test.sh plugin/test/full-suite-runner.test.mjs`：
+  `tests 77 / pass 77 / fail 0 / cancelled 0 / skipped 0 / duration_ms 32041.7` — EXIT 0。
+  其中 AC1「runner wraps the suite in a systemd-run cgroup scope; the applied limits are visible as
+  durable evidence (real systemd)」通过（3149.9ms，证据文件正常写出，不再 10s poll 超时）。
+- scoped `bash scripts/test.sh --for-task gap-full-suite-runner-cgroup-scope-evidence-unfound --allow-thin`：
+  `tests 77 / pass 77 / fail 0 / cancelled 0 / skipped 0 / duration_ms 36235.9` — EXIT 0。
+- Contract invariant `full_suite_runner_tests = 75` 现为 77：74 既有 + AC1 恢复 + AC2 新增 2 个本机形态单测（additive，零删除）。
 
 ## Definition of Done
 

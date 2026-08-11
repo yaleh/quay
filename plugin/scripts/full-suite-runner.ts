@@ -890,15 +890,54 @@ export function buildSystemdRunArgv(command: string, limits: SystemdRunLimits = 
 }
 
 /**
- * Find the transient scope unit a spawned `systemd-run --scope` registered. The unit name is
- * `run-p<pid>-<invocation>.scope` where <pid> is the spawned systemd-run process's pid (verified on
- * this host). Polls `systemctl --user list-units` (the scope appears a moment after spawn); returns
- * the unit name or null after `timeoutMs`.
+ * Parse one `/proc/<pid>/cgroup` line into a TRANSIENT scope unit name. The line is
+ * `<hierarchy>:<controllers>:<path>` (v2 unified: `0::/path`, v1: `1:name=systemd:/path`); the leaf
+ * of the path is the unit name. Only `run-*.scope` leaves are accepted — the systemd-run transient
+ * naming family (classic `run-p<pid>-<invocation>.scope`, this host's `run-r<hex>.scope`). Non-
+ * transient scopes (`init.scope`, `tmux-spawn-*.scope`, …) are NOT the suite scope → null.
+ */
+export function scopeUnitFromCgroupLine(line: string): string | null {
+  const m = /^[^:]*:[^:]*:(.+)$/.exec(line.trim());
+  if (!m) return null;
+  const path = m[1];
+  const leaf = path.slice(path.lastIndexOf("/") + 1);
+  return leaf.startsWith("run-") && leaf.endsWith(".scope") ? leaf : null;
+}
+
+/**
+ * Read the transient scope unit the spawned `systemd-run --scope` process currently lives in by
+ * inspecting the process's OWN cgroup (`/proc/<pid>/cgroup`). The scope unit is the leaf of the
+ * cgroup path, which systemd names from its OWN scheme (this host: `run-r<hex>.scope`; other hosts:
+ * `run-p<pid>-<invocation>.scope`) — reading it directly is robust to any transient-scope naming,
+ * unlike matching a hard-coded `run-p<pid>-` prefix. `cgroupFile` is injectable for tests.
+ */
+export function readScopeUnitFromCgroup(pid: number, cgroupFile = `/proc/${pid}/cgroup`): string | null {
+  try {
+    const content = fs.readFileSync(cgroupFile, "utf8");
+    for (const line of content.split("\n")) {
+      const unit = scopeUnitFromCgroupLine(line);
+      if (unit) return unit;
+    }
+  } catch {
+    // pid gone / cgroup unreadable — caller retries
+  }
+  return null;
+}
+
+/**
+ * Find the transient scope unit a spawned `systemd-run --scope` registered. Primary: read the spawned
+ * process's own cgroup — robust to ANY transient-scope naming scheme (this host names scopes
+ * `run-r<hex>.scope`, NOT the `run-p<pid>-<invocation>.scope` a hard-coded prefix would search for, so
+ * `suite-cgroup-evidence.txt` was never written before this fix). Fallback: poll `systemctl --user
+ * list-units` for the classic `run-p<pid>-` prefix form (hosts where the process's cgroup isn't yet
+ * readable / scope-named). Returns the unit name or null after `timeoutMs`.
  */
 export async function findSuiteScopeUnit(pid: number, timeoutMs = 8_000): Promise<string | null> {
   const prefix = `run-p${pid}-`;
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
+    const fromCgroup = readScopeUnitFromCgroup(pid);
+    if (fromCgroup) return fromCgroup;
     try {
       const out = execFileSync("systemctl", ["--user", "list-units", "--type=scope", "--no-legend"], {
         encoding: "utf8",
