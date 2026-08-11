@@ -23,11 +23,42 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import { oldPaths, oldPathPatterns, exclusionEntries } from '../scripts/loop-shipping-exclusion-data.mjs';
+import { oldPaths, oldPathPatterns, exclusionEntries, worktreeContainerPaths } from '../scripts/loop-shipping-exclusion-data.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pluginDir = path.resolve(__dirname, '..');
 const repoRoot = path.resolve(pluginDir, '..');
+
+// ── Shared corpus walk + worktree-container exclusion ──────────────────────────────────────────────
+// walk() is an fs traversal and does NOT respect gitignore: a git worktree under the repo (e.g.
+// .claude/worktrees/agent-*/ or milestones/M*/worktrees/iteration-0) is a COMPLETE content copy whose
+// stale-path strings and file copies would be scanned as if they were the main repo → AC1b/AC2
+// false-red (gap-loop-shipping-scan-does-not-exclude-worktrees). worktreeContainerPaths (single source
+// in loop-shipping-exclusion-data.mjs) supplies every container path; walkCorpus skips them exactly
+// like node_modules/.git/dist.
+function walkCorpus(dir, { excluded = [], includeWorktrees = false } = {}) {
+  const containers = includeWorktrees ? new Set() : worktreeContainerPaths(repoRoot);
+  const isContainer = (p) => [...containers].some((c) => p === c || p.startsWith(c + path.sep));
+  const scanned = [];
+  const walk = (d) => {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      if (e.name === 'node_modules' || e.name === '.git' || e.name === 'dist') continue;
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) {
+        if (isContainer(p) || excluded.some((x) => p === x || p.startsWith(x + path.sep))) continue;
+        walk(p); continue;
+      }
+      if (!/\.(md|sh|mjs|ts|json|yml|js)$/.test(e.name)) continue;
+      if (excluded.some((x) => p === x || p.startsWith(x + path.sep))) continue;
+      scanned.push(p);
+    }
+  };
+  walk(dir);
+  return scanned;
+}
+
+// The AC1b exclusion targets (files/dirs that MAY legitimately mention the old paths).
+const exclusionTargets = () => exclusionEntries(repoRoot, pluginDir).map((e) => e.target);
 
 // ── AC1: the 5 files are inside plugin/; old paths are gone (no shims left behind) ─────────────────
 test('AC1 — the 5 formerly-external mechanism files live in plugin/; the old paths are gone (no compat shells)', () => {
@@ -83,7 +114,6 @@ test('AC1b — after the move, no live reference to the 5 old paths remains (com
   // substrings of their new `plugin/loop/` locations, so plain substring is exact there.
   // Files that MAY legitimately mention the old paths (historical record / target-layout), and
   // are therefore excluded from the "no live reference" scan:
-  const excluded = exclusionEntries(repoRoot, pluginDir).map((e) => e.target);
   const hits = [];
   // Corpus non-emptiness guard (gap-checks-that-verify-an-empty-set family): assert.deepEqual(hits, [])
   // alone would pass silently if walk() returned early, the extension filter changed, or the excluded
@@ -91,22 +121,16 @@ test('AC1b — after the move, no live reference to the 5 old paths remains (com
   // in the corpus, so the scan keeps resolving power.
   let scanned = 0;
   let sawTestSh = false;
-  const walk = (dir) => {
-    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-      if (e.name === 'node_modules' || e.name === '.git' || e.name === 'dist') continue;
-      const p = path.join(dir, e.name);
-      if (e.isDirectory()) { walk(p); continue; }
-      if (!/\.(md|sh|mjs|ts|json|yml|js)$/.test(e.name)) continue;
-      if (excluded.some((x) => p === x || p.startsWith(x + path.sep))) continue;
-      scanned += 1;
-      if (p === path.join(repoRoot, 'scripts', 'test.sh')) sawTestSh = true;
-      const src = fs.readFileSync(p, 'utf8');
-      for (const re of oldPathPatterns) {
-        if (re.test(src)) hits.push(`${path.relative(repoRoot, p)}: contains "${re}"`);
-      }
+  // walkCorpus skips node_modules/.git/dist AND every git worktree container (a worktree is a
+  // complete repo copy whose stale-path strings are not main-repo references).
+  for (const p of walkCorpus(repoRoot, { excluded: exclusionTargets() })) {
+    scanned += 1;
+    if (p === path.join(repoRoot, 'scripts', 'test.sh')) sawTestSh = true;
+    const src = fs.readFileSync(p, 'utf8');
+    for (const re of oldPathPatterns) {
+      if (re.test(src)) hits.push(`${path.relative(repoRoot, p)}: contains "${re}"`);
     }
-  };
-  walk(repoRoot);
+  }
   assert.deepEqual(hits, [], 'no live reference to the moved files\' old paths may remain (update callers to plugin/loop/ + plugin/scripts/)');
   assert.ok(scanned >= 200, `scan corpus must not be empty/starved: only ${scanned} files scanned`);
   assert.ok(sawTestSh, 'scripts/test.sh (a known live caller) must be in the scan corpus');
@@ -156,20 +180,13 @@ test('AC2 — fast-mode-telemetry.ts has ONE physical copy; plugin/scripts/ is a
     'experiments symlink must point at the plugin authority'
   );
   // No OTHER physical copy anywhere under the repo. Use lstatSync so symlinks (the re-export at
-  // experiments/) are not counted as physical copies.
+  // experiments/) are not counted as physical copies. walkCorpus skips node_modules/.git/dist, the
+  // gitignored pack-time snapshot packages/quay/plugin/, AND every git worktree container (a worktree
+  // is a complete repo copy — its fast-mode-telemetry.ts is not a second authority).
   const copies = [];
-  const walk = (dir) => {
-    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-      // Skip the gitignored pack-time snapshot packages/quay/plugin/ (package.sh materializes a
-      // byte-identical copy of plugin/ so the tarball carries it) — it is NOT a second authority.
-      if (e.name === 'node_modules' || e.name === '.git' || e.name === 'dist' ||
-          (dir === path.join(repoRoot, 'packages', 'quay') && e.name === 'plugin')) continue;
-      const p = path.join(dir, e.name);
-      if (e.isDirectory()) walk(p);
-      else if (e.name === 'fast-mode-telemetry.ts' && !fs.lstatSync(p).isSymbolicLink()) copies.push(p);
-    }
-  };
-  walk(repoRoot);
+  for (const p of walkCorpus(repoRoot, { excluded: [path.join(repoRoot, 'packages', 'quay', 'plugin')] })) {
+    if (path.basename(p) === 'fast-mode-telemetry.ts' && !fs.lstatSync(p).isSymbolicLink()) copies.push(p);
+  }
   assert.deepEqual(copies, [canonical], `exactly one physical fast-mode-telemetry.ts expected, got ${JSON.stringify(copies)}`);
 });
 
