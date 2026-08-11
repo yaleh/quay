@@ -373,6 +373,17 @@ run_static_checks() {
   # @static-tier change
   # @static-object orchestration/orchestrator-tick-core.md plugin/scripts/red-on-omission-audit.ts plugin/test/red-on-omission-audit.test.mjs
   run_checker "red-on-omission-audit" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/red-on-omission-audit.ts" --root "${repo_root}"
+  echo "== judgment-consumer check (gap-judgment-computed-not-wired-to-action, AC2 类级纪律 / AC3 系统审计) =="
+  # The judgment→consumer audit: every computed judgment must have an action that consumes it —
+  # 判据算出来了 ≠ 会因它而动. 2026-08-10 三次同形态 (18:4x not-yet-flipped 不查 / 21:4x C8 拒后不回填 /
+  # 22:0x deficit 无触发器读) 是同一类 defect: 信号算了,没接进推荐/触发路径. The checker's registry lists
+  # each judgment → consumer and mechanically verifies the consumer is WIRED in tracked files
+  # (not self-asserted); removing a consumer wiring exits 1 (unfinished>0), so a judgment-computed-
+  # but-unwired regression red-lights the commit. The two ## Contract invariants are
+  # each_judgment_has_consumer / no_consumer_listed_unfinished.
+  # @static-tier change
+  # @static-object orchestration/orchestrator-tick-core.md plugin/scripts/judgment-consumer-check.ts plugin/test/judgment-consumer-check.test.mjs plugin/scripts/slot-refill.ts plugin/scripts/capability-catalog.sh
+  run_checker "judgment-consumer-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/judgment-consumer-check.ts" --root "${repo_root}"
   echo "== tick-core static check (gap-tick-core-zero-static-coverage, AC2-AC7) =="
   # The execution-core static gate: the three *-tick-core.md files (what the three layers ACTUALLY
   # read every tick, the AC30(a) judgment objects) had ZERO static coverage — @static-object pointed

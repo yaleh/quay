@@ -159,6 +159,7 @@ declare -A QUESTION=(
   [inner-forensics.mjs]="Did the inner layer run a given command, at second-granularity, with zero CPU interference?"
   [inner-idle-log.ts]="Why was the inner layer idle (append-only reason log)?"
   [inner-panel-stale-check.ts]="Is an agent line still on the panel after its bracket closed (ended-vs-running state transition, frozen-timer detection)?"
+  [judgment-consumer-check.ts]="Is every computed judgment wired to a consuming action — the 判据→消费动作 mapping, with consumer-less (无消费方) judgments listed unfinished, invariants each_judgment_has_consumer / no_consumer_listed_unfinished (gap-judgment-computed-not-wired-to-action, deficit→B9 --apply / not-yet-flipped→slot-refill / self-touch→C8+backfill)?"
   [inbox-reader.sh]="Does the human channel's manager inbox have a mechanical reader that consumes every delivered message (delivered ≠ read otherwise)?"
   [inner-session-check.sh]="Is the inner session healthy / empty-shell / missing (three-state cold-start self-check)?"
   [instrument-failure-check.ts]="Which of the manager's five documented instrument-failure families does each shell command in the tick docs exhibit (grep self-match, zero-hit-as-absent, pipe-then-exit-status, ...)?"
@@ -497,6 +498,7 @@ declare -A CADENCE=(
   [obligation-ledger.ts]="每轮"
   [semantic-observer-judge.ts]="按需"
   [red-on-omission-audit.ts]="每轮"
+  [judgment-consumer-check.ts]="每轮"
 
 )
 
@@ -703,6 +705,7 @@ declare -A INVALIDATION=(
   [obligation-ledger.ts]="失效前提：轮次仍产生义务账本；若义务跟踪改为别处，本条退休"
   [semantic-observer-judge.ts]="失效前提：inner/outer 状态仍以自由文本（心跳 reason + tick 报告）承载；若观测面改为纯结构化 schema 且无自由文本，本条退休"
   [red-on-omission-audit.ts]="失效前提：执行核仍以 tick-core 文档固化行为；若行为固化面迁出 tick-core/plugin-scripts 文件系统，本条退休"
+  [judgment-consumer-check.ts]="失效前提：判据→消费动作映射仍以 tick-core 文档 / plugin-scripts 文件系统承载；若映射面迁出该文件系统（如全 API 化），本条退休"
 
 )
 
@@ -909,6 +912,7 @@ declare -A LAST_REAFFIRMED=(
   [obligation-ledger.ts]="2026-08-10"
   [semantic-observer-judge.ts]="2026-08-10"
   [red-on-omission-audit.ts]="2026-08-10"
+  [judgment-consumer-check.ts]="2026-08-11"
 
 )
 
@@ -1115,6 +1119,7 @@ declare -A MATCHING=(
   [obligation-ledger.ts]="enumerative"
   [semantic-observer-judge.ts]="keyword"
   [red-on-omission-audit.ts]="keyword"
+  [judgment-consumer-check.ts]="position"
 )
 # ── superseded capability table (gap-retired-script-still-callable, human ruling 2026-08-10) ──
 # One capability = ONE implementation. A superseded implementation must NOT exist in the

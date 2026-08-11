@@ -68,6 +68,10 @@ extra: {}
 
 **Contract**：measure `slot_refill_skips_nyf` = `grep -cE "not-yet-flipped|excluded" plugin/scripts/slot-refill.ts` = **11 ≥ 1**。invariant `nyf_task_not_recommended`（实跑 3 条 fan-in 全部剔除）与 `unfanned_ready_still_recommended`（未 fan-in 仍推荐）均成立。
 
+## 交叉标注（gap-judgment-computed-not-wired-to-action，2026-08-11）
+
+本任务即类级任务「判据算出没接到『会因它而动』的那一步」的**实例 1（18:4x）**——not-yet-flipped 被 ready-pool-check 算出却没接进 slot-refill 推荐路径。消费方已接线：`slot-refill.ts` 第 4 项 step-4 检查跳过 not-yet-flipped（`judgment-consumer-check.ts` registry `not_yet_flipped` 条目机械核对该接线）。
+
 ## Definition of Done
 
 - [ ] AC1–AC4 全部勾上

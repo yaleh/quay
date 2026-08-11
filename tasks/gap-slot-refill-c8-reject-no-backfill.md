@@ -82,3 +82,7 @@ changed: manager 21:4x 实证——22 ready 中 5 缺 self-touch（touches-ortho
 **backfill_present（Contract measure）**：`grep -cE "backfill|continue.*recommended|candidate.*next" plugin/scripts/slot-refill.ts` = 4（≥1）。
 
 **新增测试**（plugin/test/slot-refill.test.mjs）：前 3 缺 self-touch ⇒ 补位第 4+；全拒 ⇒ 无可派；`(new)`-tagged self-file 非 self-touch 授予（拒）；带 self-file 的候选仍被推荐（不误杀）。既有 47 例 + 新增 4 例全绿（51/51）。
+
+## 交叉标注（gap-judgment-computed-not-wired-to-action，2026-08-11）
+
+本任务即类级任务「判据算出没接到『会因它而动』的那一步」的**实例 2（21:4x）**——self-touch-scan 判据算出来，但候选循环不查 C8、派发侧拒了不补位（信号算了，没接进推荐路径）。消费方已接线：`slot-refill.ts` C8 self-touch 拒后回填（`judgment-consumer-check.ts` registry `self_touch_scan` 条目机械核对该接线）。
