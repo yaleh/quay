@@ -43,16 +43,16 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录本次 AC1b/AC2 假红完整输出（.claude/worktrees/agent-a8fd... 前缀路径清单）
-- [ ] AC2: **排除生效**——`walk()` 跳过所有 git worktree 容器路径（.claude/worktrees/ + `git worktree list` 的非主路径），含旧路径的 worktree 不触发 AC1b/AC2
-- [ ] AC3: **正常捕获保留**——主 repo 内真实旧路径引用仍被 AC1b 捕获（负控制）
-- [ ] AC4: **既有不回归**——`--for-task` scoped 门绿
+- [x] AC1: **复现固化**——任务体记录本次 AC1b/AC2 假红完整输出（.claude/worktrees/agent-a8fd... 前缀路径清单）
+- [x] AC2: **排除生效**——`walk()` 跳过所有 git worktree 容器路径（.claude/worktrees/ + `git worktree list` 的非主路径），含旧路径的 worktree 不触发 AC1b/AC2
+- [x] AC3: **正常捕获保留**——主 repo 内真实旧路径引用仍被 AC1b 捕获（负控制）
+- [x] AC4: **既有不回归**——`--for-task` scoped 门绿
 
 ## Definition of Done
 
-- [ ] AC1–AC4 全部勾上
-- [ ] 修后实跑：外层 worktree 存在时 AC1b/AC2 绿（贴输出）；主 repo 造一个旧路径引用仍红
-- [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
+- [x] AC1–AC4 全部勾上
+- [x] 修后实跑：外层 worktree 存在时 AC1b/AC2 绿（贴输出）；主 repo 造一个旧路径引用仍红
+- [x] 既有测试 + 新增测试全绿（`--for-task` scoped）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
 
 ## Touches
@@ -76,3 +76,53 @@ resume    排除逻辑 / 负控制 / 复验分步提交
 reviewer: inner
 at: 2026-08-10
 changed: 立案即补 Dispatch review 段（首版遗漏，被 round static-check 共享闸门捕获——正是本任务描述的「检查器抓问题」的实例）
+
+## 实跑证据（inner 2026-08-11）
+
+**AC1 复现固化（worktree: gap-loop-shipping-scan-does-not-exclude-worktrees）**——构造 `.claude/worktrees/agent-test/README.md`（含旧路径 `orchestration/orchestrator-loop-tick.md` + `docs/analysis/fast-mode-loop-tick.md`）与 `fast-mode-telemetry.ts` 副本，修前运行：
+
+```
+$ node --no-warnings --experimental-strip-types --test plugin/test/loop-shipping.test.mjs
+✖ AC1b — ... AssertionError: actual [
+  '.claude/worktrees/agent-test/README.md: contains "/orchestration\\/orchestrator-loop-tick\\.md/"',
+  '.claude/worktrees/agent-test/README.md: contains "/docs\\/analysis\\/fast-mode-loop-tick\\.md/"' ], expected []
+✖ AC2 — ... exactly one physical fast-mode-telemetry.ts expected, got
+  [".../gap-loop-shipping-scan-does-not-exclude-worktrees/.claude/worktrees/agent-test/fast-mode-telemetry.ts",
+   ".../plugin/scripts/fast-mode-telemetry.ts"]
+ℹ tests 12  pass 10  fail 2
+```
+（与 2026-08-10 agent-a8fd 假红同形：`.claude/worktrees/agent-*` 前缀路径清单）
+
+**AC2 排除生效**——同一 fake worktree 存在下，修后运行（原 12 测 + 3 个新增控制测全绿）：
+
+```
+$ node --no-warnings --experimental-strip-types --test plugin/test/loop-shipping.test.mjs
+✔ AC1b   ✔ AC2   ✔ AC2 real-git-worktree 控制   ✔ AC2 unregistered-residue 控制   ✔ AC3 负控制
+ℹ tests 15  pass 15  fail 0
+```
+
+**AC3 正常捕获保留（负控制）**——主 repo 造一个真实旧路径引用，AC1b 仍红：
+
+```
+$ printf 'this references the OLD path orchestration/orchestrator-loop-tick.md\n' > tmp-old-path-probe.md
+$ node --no-warnings --experimental-strip-types --test --test-name-pattern 'AC1b' plugin/test/loop-shipping.test.mjs
+✖ AC1b — actual [ 'tmp-old-path-probe.md: contains "/orchestration\\/orchestrator-loop-tick\\.md/"' ], expected []
+$ rm tmp-old-path-probe.md   # 移除后全绿
+```
+
+**AC4 既有不回归（--for-task scoped 门）**：
+
+```
+$ bash scripts/test.sh --for-task gap-loop-shipping-scan-does-not-exclude-worktrees --allow-thin
+EXIT 0
+task-contract-check: no violations.
+superseded-capability check: PASS
+tick-core-static-check: PASS
+delivery-inventory drift gate: PASS
+ℹ tests 15  pass 15  fail 0  (loop-shipping + 新增控制)
+```
+
+**实现与提交（worktree, develop fork 51885b79）**：
+- `plugin/scripts/loop-shipping-exclusion-data.mjs`：新增 `worktreeContainerPaths(repoRoot)` 单源导出——显式 `.claude/worktrees/`（兜底未注册 residue）+ `git worktree list --porcelain` 非主路径（覆盖 /home/yale/work/quay-worktrees/*、milestones/M*/worktrees/*、/tmp/*）。main repo root 永不排除。
+- `plugin/test/loop-shipping.test.mjs`：抽出共享 `walkCorpus(dir, {excluded})`，AC1b/AC2 两个 walk 统一跳过 worktree 容器（类似 node_modules/.git/dist）；新增 3 个控制测试（真实 git worktree 排除 / 未注册 residue 排除 / 主 repo 负控制）。
+- 提交：`70d0f6d9`（排除逻辑）、`a4c94fd2`（负控制）——排除逻辑 / 负控制 / 复验分步。
