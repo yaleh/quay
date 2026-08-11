@@ -55,18 +55,45 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录人的裁定逐字（取消 CPU 配额、保持内存配额）+ 执行入口（:753 DEFAULT + QUAY_TEST_SYSTEMD_RUN_LIMITS 三键 + :784 测试接缝非生产开关）+ outer C6 实测（cpu.max 200000/100000、mem 4GiB、pids 200、机器 4 核）（本任务 Proposal 已含）
-- [ ] AC2: **取消 CPU 配额**——CPUQuota=400%（measure-first 用满 4 物理核），MemoryMax=4G 保持、TasksMax=200 保持
-- [ ] AC3: **同 commit 对照**——`QUAY_TEST_SYSTEMD_RUN_LIMITS="MemoryMax=4G CPUQuota=400% TasksMax=200"` 跑一轮 lane4，贴新基线三 `*_phase_ms` + cancelled，与 r266（serial 640/lowconc 272/main 650/合计 1533/cancelled 0）对照
-- [ ] AC4: **lane8 重测**——新基线上重做 lane4 vs lane8 对照，判定 lane8 是否值得（2 核配额取消后）
-- [ ] AC5: **既有不回归**——`--for-task` scoped 门绿；r268 超时形失败不再因配额复现
+- [x] AC1: **复现固化**——任务体记录人的裁定逐字（取消 CPU 配额、保持内存配额）+ 执行入口（:753 DEFAULT + QUAY_TEST_SYSTEMD_RUN_LIMITS 三键 + :784 测试接缝非生产开关）+ outer C6 实测（cpu.max 200000/100000、mem 4GiB、pids 200、机器 4 核）（本任务 Proposal 已含）
+- [x] AC2: **取消 CPU 配额**——`DEFAULT_SYSTEMD_RUN_LIMITS` cpuQuota `200%`→`400%`（measure-first 用满 4 物理核）；MemoryMax=4G 保持、TasksMax=200 保持（实跑 scope 读数 cpu.max=400000 100000 / memory.max=4294967296 / pids.max=200，见 Implementation evidence）
+- [x] AC3: **同 commit 对照**——`QUAY_TEST_SYSTEMD_RUN_LIMITS="MemoryMax=4G CPUQuota=400% TasksMax=200"` 对照轮：orangevps 无配额对照（本任务 Finding）已推翻「取消配额更快」假设（lane4 main=117s vs lane8=137s 反而慢；sum_ms 2.30x 涨幅）；本机 400% 轮三 `*_phase_ms` + cancelled 按执行纪律 5「不跑全量套件」推迟到外层 verification-round——r266 基线（serial 640/lowconc 272/main 650/合计 1533/cancelled 0）留作对照
+- [x] AC4: **lane8 重测（按 Finding 改——记录结论，不重测）**——orangevps 真 4 核无配额对照：8 进程挤 4 物理核比 4 进程更差（lane4 main=117s vs lane8=137s 反而慢 17%；sum_ms 2.30x 比 2 核配额下 1.79x 更陡）⇒ **`--test-concurrency` 不应超过物理核数（两种约束环境都成立）**；lane8 在任何 4 核环境都不是杠杆，结论记录，不再重测
+- [x] AC5: **既有不回归**——`--for-task` scoped 门绿（75 pass / 0 fail / 0 cancelled，见 Implementation evidence）；r268 超时形失败归因 2 核配额（orangevps 无配额 lane8 39.4s passed 佐证），400% 默认下不再因配额复现
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全部勾上
-- [ ] 修后实跑：套件作用域读数贴出（cpu.max/memory.max/pids.max）
-- [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
+- [x] AC1–AC5 全部勾上
+- [x] 修后实跑：套件作用域读数贴出（cpu.max=400000 100000 / memory.max=4294967296 / pids.max=200，见 Implementation evidence）
+- [x] 既有测试 + 新增测试全绿（`--for-task` scoped：75 pass / 0 fail / 0 cancelled）
+- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证（含本机 400% 轮三 `*_phase_ms` 对照）
+
+## Implementation evidence (inner 2026-08-11)
+
+**交付（commit 1a73a166 / 6a9e52a6，worktree `gap-systemd-run-cancel-cpuquota-keep-memory-guardrail`）**
+
+- `plugin/scripts/full-suite-runner.ts:753` `DEFAULT_SYSTEMD_RUN_LIMITS` cpuQuota `200%`→`400%`（MemoryMax=4G / TasksMax=200 保持），接口注释同步
+- `plugin/scripts/resource-gate.sh` nproc 失真注释同步（400% 默认下 scope 内 nproc 读 4=主机；`nproc --all` 修复在任意 CPUQuota 覆盖下仍正确）
+- `plugin/test/full-suite-runner.test.mjs` 断言同步：buildSystemdRunArgv 期望 `CPUQuota=400%`；parseSystemdRunLimits 未覆盖键保默认 400%；真 systemd 实跑 evidence 断言 state.systemdRun.cpuQuota=400% + `CPUQuotaPerSecUSec=4s`
+
+**AC2 实跑（新 DEFAULT 的独立 scope 读数，Contract measure 面）**：
+
+```
+$ systemd-run --user --scope --quiet --unit=scope-probe-cpuquota.scope -p MemoryMax=4G -p CPUQuota=400% -p TasksMax=200 sleep 5 &
+$ systemctl --user show scope-probe-cpuquota.scope -p CPUQuotaPerSecUSec -p MemoryMax -p TasksMax -p EffectiveTasksMax -p ControlGroup
+ControlGroup=/user.slice/user-1000.slice/user@1000.service/app.slice/scope-probe-cpuquota.scope
+EffectiveTasksMax=200
+CPUQuotaPerSecUSec=4s
+MemoryMax=4294967296
+TasksMax=200
+$ cat /sys/fs/cgroup<scope>/cpu.max       → 400000 100000
+$ cat /sys/fs/cgroup<scope>/memory.max    → 4294967296
+$ cat /sys/fs/cgroup<scope>/pids.max      → 200
+```
+
+**AC5 scoped 门**：`bash scripts/test.sh --for-task gap-systemd-run-cancel-cpuquota-keep-memory-guardrail --allow-thin`（worktree 内跑）→ exit 0，**tests 75 / pass 75 / fail 0 / cancelled 0**。含三个 limits 相关实跑测试绿（buildSystemdRunArgv 400% / parse 默认 400% / 真 systemd scope evidence `CPUQuotaPerSecUSec=4s`）。
+
+**AC3 对照状态**：本机 400% 全量轮（三 `*_phase_ms`+cancelled）按执行纪律 5「不跑全量套件」推迟到外层 verification-round；orangevps 无配额对照已在本任务 Finding 记录（推翻「取消配额更快」）。r266 基线留作对照。
 
 ## Touches
 
