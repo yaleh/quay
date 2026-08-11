@@ -1,0 +1,6 @@
+● main
+◯ general-purpose  Reviewing the full diff summary.  17m 13s
+───────────────────────────────
+❯
+───────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← 1 agent · ↓ to manage

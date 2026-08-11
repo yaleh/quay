@@ -10,7 +10,12 @@
 #                          take the timer with it)
 #   delivery adapter     — supervisor-deliver.sh (step ③ — the ONE delivery implementation)
 #   pure delivery check  — transcript-delivery-check.ts (the delivery verdict)
-#   observe adapter      — pane-state-classify.ts (busy/idle/blocked shape classifier)
+#   observe adapter      — pane-state-classify.ts (busy/idle/blocked shape classifier; since
+#                          gap-pane-classify-needs-two-orthogonal-dimensions it exposes the two
+#                          orthogonal fields input_state + work_in_flight — the presence probe below
+#                          stays a health check, not a functional classifier test: machinery and
+#                          behavior are not health-checked here, the behavior gate is the
+#                          pane-state-classify.test.mjs suite)
 #   session liveness     — session-liveness.sh (the per-project monitor)
 #
 # "alive" here is the Contract band: the base layer process does not die with an agent session.

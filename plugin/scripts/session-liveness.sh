@@ -344,28 +344,37 @@ mask_pane() {
   done
 }
 
-# _sl_pane_verdict —— classifyPaneState + AC5 防过滤守卫的【共享实现】（主循环与 --pane-state
-# 接缝共用，避免两处逻辑漂移）。入参：$1 = pane 原始文本。结果写到四个全局：_sl_pane_state /
-# _sl_pane_busy / _sl_pane_intervention / _sl_pane_region。
-#   state ∈ busy|error-banner ⇒ busy=1（真在干活 / 报错，忙闲轴上的忙）；
+# _sl_pane_verdict —— classifyPaneStateOrthogonal + AC5 防过滤守卫的【共享实现】（主循环与
+# --pane-state 接缝共用，避免两处逻辑漂移）。入参：$1 = pane 原始文本。结果写到五个全局：
+# _sl_pane_state / _sl_pane_busy / _sl_pane_intervention / _sl_pane_work_in_flight / _sl_pane_region。
+# 判据（gap-pane-classify-needs-two-orthogonal-dimensions）：读分类器的新两正交字段——input_state
+# （主线程能否收输入）与 work_in_flight（后台 agent 是否在跑）。state 取 input_state：
+#   input_state ∈ busy|error-banner ⇒ busy=1（真在干活 / 报错，忙闲轴上的忙）；
 #   permission-prompt ⇒ busy=0 + intervention=1（需要人/上层介入——不再并进 busy，
 #     gap-permission-prompt-merged-into-busy 的修复：卡权限框与在干活必须可区分）；
 #   waiting-input/unknown ⇒ busy=0 + intervention=0；
+#   work_in_flight 独立存到 _sl_pane_work_in_flight（MARKER-STALE 抑制用：transcript 动 + input
+#     空闲 + agents>0 是自洽组合，非异常——本任务根因）；
 #   空捕获（$1 为空）或分类器区域为空 ⇒ busy=1（AC5：无内容可判不得静默判空闲）。
 _sl_pane_verdict() {
   local raw=$1 cls
-  _sl_pane_state="unknown"; _sl_pane_busy=0; _sl_pane_intervention=0; _sl_pane_region=""
+  _sl_pane_state="unknown"; _sl_pane_busy=0; _sl_pane_intervention=0; _sl_pane_work_in_flight=0; _sl_pane_region=""
   if [ -z "$raw" ]; then
     _sl_pane_busy=1
     return 0
   fi
-  # --classify prints "state\nregion"（纯文本，见 pane-state-classify.ts 接缝注释）。用 bash 字符串
-  # 切分（${var%%$'\n'*} / ${var#*$'\n'}）而不是再开几个 $(...) 子 shell——每轮只多一个 node 子进程，
-  # 压住 mount-count 测试的瞬态进程竞争（M3 注释记录过同类竞争）。
-  cls=$(printf '%s\n' "$raw" | "$SL_NODE" --no-warnings --experimental-strip-types "$SL_CLASSIFY" --classify 2>/dev/null || printf 'unknown\n')
+  # --classify --orthogonal prints "input_state\nwork_in_flight(0|1)\nregion"（纯文本，见
+  # pane-state-classify.ts 接缝注释）。用 bash 字符串切分（${var%%$'\n'*} / ${var#*$'\n'}）而不是再开
+  # 几个 $(...) 子 shell——每轮只多一个 node 子进程，压住 mount-count 测试的瞬态进程竞争（M3 注释
+  # 记录过同类竞争）。
+  cls=$(printf '%s\n' "$raw" | "$SL_NODE" --no-warnings --experimental-strip-types "$SL_CLASSIFY" --classify --orthogonal 2>/dev/null || printf 'unknown\n0\n')
   _sl_pane_state=${cls%%$'\n'*}
   _sl_pane_region=${cls#*$'\n'}
+  # line 2 = work_in_flight（0|1）；line 3+ = 区域。
+  _sl_pane_work_in_flight=${_sl_pane_region%%$'\n'*}
+  _sl_pane_region=${_sl_pane_region#*$'\n'}
   [ -z "$_sl_pane_state" ] && _sl_pane_state="unknown"
+  [ "$_sl_pane_work_in_flight" != "1" ] && _sl_pane_work_in_flight=0
   case "$_sl_pane_state" in
     busy|error-banner) _sl_pane_busy=1; _sl_pane_intervention=0 ;;
     permission-prompt) _sl_pane_busy=0; _sl_pane_intervention=1 ;;
@@ -809,11 +818,13 @@ case "${1:-}" in
   --mask) mask_pane; exit 0 ;;
   --pane-state)
     # 诊断接缝（AC4/AC5 单测直接调用）：从 stdin 读 pane 文本，跑与主循环相同的
-    # _sl_pane_verdict（classifyPaneState + AC5 守卫），打印
-    # "state=<s> busy=<0|1> intervention=<0|1>"。busy 字段保持向后兼容；intervention 是
-    # gap-permission-prompt-merged-into-busy 新增的独立标志（permission-prompt ⇒ intervention=1）。
+    # _sl_pane_verdict（classifyPaneStateOrthogonal + AC5 守卫），打印
+    # "state=<s> busy=<0|1> intervention=<0|1> work_in_flight=<0|1>"。busy 字段保持向后兼容；
+    # intervention 是 gap-permission-prompt-merged-into-busy 新增的独立标志（permission-prompt ⇒
+    # intervention=1）；work_in_flight 是 gap-pane-classify-needs-two-orthogonal-dimensions 的两正交
+    # 字段之二（后台 agent 是否在跑——独立于 input_state，非 busy）。
     _sl_pane_verdict "$(cat)"
-    echo "state=$_sl_pane_state busy=$_sl_pane_busy intervention=$_sl_pane_intervention"
+    echo "state=$_sl_pane_state busy=$_sl_pane_busy intervention=$_sl_pane_intervention work_in_flight=$_sl_pane_work_in_flight"
     exit 0 ;;
   --check)
     # ## Contract measure/invoke 接缝（gap-permission-prompt-merged-into-busy）：自包含自检。
@@ -1359,7 +1370,11 @@ while true; do
         # 只对「心跳是 transcript」的目标成立——tick 日志是 loop 写的，不是会话活动的证据。
         # 假→真沿报一次；不一致率基线由观察者从事件流里数（全忙会话同时报 = TUI 文案变了）。
         # 判据用 pane_idle（屏幕判定）——transcript 侧确定忙时不该报「屏幕判空闲」。
-        if [ "$pane_idle" = "1" ] && [ "$halted" = "0" ] && [ -n "$tr_path" ] && [ -e "$tr_path" ]; then
+        # work_in_flight 抑制（gap-pane-classify-needs-two-orthogonal-dimensions 根因）：屏幕空闲 +
+        # 后台 agent 在跑 + transcript 在动是【自洽组合】（输入空闲 ≠ 会话死了，agent 还在跑）——
+        # 这正是单枚举装不下的 {input空闲+agents在跑} 形态；有 work_in_flight 时 MARKER-STALE 是
+        # 误报，不发出。
+        if [ "$pane_idle" = "1" ] && [ "$halted" = "0" ] && [ "${_sl_pane_work_in_flight:-0}" != "1" ] && [ -n "$tr_path" ] && [ -e "$tr_path" ]; then
           hmod2=$(heartbeat_mtime "$tr_path")
           if [ "$hmod2" != "0" ]; then
             age=$(( $(date +%s) - hmod2 ))
