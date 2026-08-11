@@ -36,11 +36,11 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录三次同族失败(11:12/11:31 AC4、13:14 AC11、13:03 node_modules)+ worktree-include 未接线实证 + node_modules 排除无替代实证(本任务 Proposal 已含)
-- [ ] AC2: **共享脚本**——`provision-verify-worktree.sh` compose worktree-include(config.yml+vendor dist)+ node_modules symlink;幂等;`--dry-run`;fail-closed
-- [ ] AC3: **A15 ④ 契约接线**——执行核在「在自带 worktree 里跑 test.sh」前有显式 provision 步骤,两条路径共用
-- [ ] AC4: **枚举完整**——未来新增缺失文件按声明机制扩展(worktreeinclude 声明 copy / 脚本 link 清单声明 symlink),不现场补单字段
-- [ ] AC5: **既有不回归**——`--for-task` scoped 门绿
+- [x] AC1: **复现固化**——任务体记录三次同族失败(11:12/11:31 AC4、13:14 AC11、13:03 node_modules)+ worktree-include 未接线实证 + node_modules 排除无替代实证(本任务 Proposal 已含)
+- [x] AC2: **共享脚本**——`provision-verify-worktree.sh` compose worktree-include(config.yml+vendor dist)+ node_modules symlink;幂等;`--dry-run`;fail-closed
+- [x] AC3: **A15 ④ 契约接线**——执行核在「在自带 worktree 里跑 test.sh」前有显式 provision 步骤,两条路径共用
+- [x] AC4: **枚举完整**——未来新增缺失文件按声明机制扩展(worktreeinclude 声明 copy / 脚本 link 清单声明 symlink),不现场补单字段
+- [x] AC5: **既有不回归**——`--for-task` scoped 门绿
 
 ## Definition of Done
 
@@ -73,3 +73,42 @@ resume    provision 脚本 / A15 ④ 接线 / 枚举扩展分步提交,任一步
 reviewer: outer
 at: 2026-08-10
 changed: manager 家族裁定(三次同族失败:11:12/11:31 AC4、13:14 AC11、13:03 node_modules)。实证:worktreeinclude 机制存在但接错面(DoD 全量门 DEFERRED,验证路径无消费者);node_modules 排除无替代(「build step symlinks」从未实现);无脚本拥有建验证 worktree 职责。立案:provision-verify-worktree.sh(compose worktree-include + node_modules symlink)+ A15 ④ 显式 substep。实现归 outer 接管(A15 ④ 未绿退出路径),判定归 manager
+
+## Evidence (inner 2026-08-11)
+
+实现说明:本任务机件实现已由 `feat/provision-verify-worktree` 分支落地并合入 develop/integration(script + test + catalog 声明 + A15 ④ provision substep 全在位)。inner 本次完成:在真实 git worktree 上实跑验证 + 跑 scoped 门 + 勾 AC + 贴证据。
+
+**Contract invoke(dry-run,真实 fresh worktree)** —— `verify_worktree_provisioned` stdout 含 `node_modules` ≥1:
+
+```
+$ bash plugin/scripts/provision-verify-worktree.sh --worktree <wt> --root /home/yale/work/quay --dry-run
+provision-verify-worktree: [dry-run] would run worktree-include.sh <wt> (config.yml + vendor dist)
+provision-verify-worktree: [dry-run] would link /home/yale/work/quay/node_modules -> <wt>/node_modules
+provision-verify-worktree: [dry-run] would build packages/quay/dist via npm run build --prefix packages/quay
+# exit 0
+```
+
+**DoD 实跑(真实 git worktree 上 config.yml + node_modules 在位)**:
+
+```
+$ bash plugin/scripts/provision-verify-worktree.sh --worktree <wt> --root /home/yale/work/quay
+provision-verify-worktree: running worktree-include.sh <wt> (config.yml + vendor dist)...
+worktree-include: copied .quay/config.yml -> <wt>/.quay/config.yml
+worktree-include: copied plugin/vendor/quay-native/dist/quay-native.js -> <wt>/plugin/vendor/quay-native/dist/quay-native.js
+worktree-include: copied plugin/vendor/quay/dist/quay.js -> <wt>/plugin/vendor/quay/dist/quay.js
+worktree-include: done — 3 file(s) copied into <wt>
+provision-verify-worktree: linked /home/yale/work/quay/node_modules -> <wt>/node_modules
+provision-verify-worktree: building packages/quay/dist (npm run build --prefix packages/quay)...
+provision-verify-worktree: packages/quay/dist/quay.js built
+# exit 0; 验证: .quay/config.yml 在位、node_modules 是 symlink(→ /home/yale/work/quay/node_modules)、packages/quay/dist/quay.js 在位
+```
+
+**幂等 re-run**: `node_modules already present, keeping` / `packages/quay/dist/quay.js already present, keeping`,exit 0(无错)。
+
+**AC5 scoped 门**(`./scripts/test.sh --for-task gap-provision-verify-worktree-step`):
+
+```
+ℹ tests 20   ℹ pass 20   ℹ fail 0   ℹ cancelled 0   ℹ skipped 0
+=== SCRIPT EXIT: 0 ===
+(含 AC1 node_modules symlink / AC3 idempotent / AC4 dry-run / AC5 fail-closed / AC6 dist build 五条 + capability-catalog 接线全绿)
+```
