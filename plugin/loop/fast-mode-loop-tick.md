@@ -293,7 +293,7 @@ exp5 已退役（`.claude/loop.md` 已删除），`.halt` 从「暂停 exp5 循�
 |---|---|---|
 | ① | 在飞 agent 是否符合文档 | **读槽位视角，不读原始括号**（`gap-telemetry-brackets-vs-subagents-no-slot-visibility`——括号 ≠ subagent，红窗遗留的未闭合 start 会把健康态误判成满负荷）：`node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --slots --cap "${effective_cap:-3}" --root "$(pwd)" --json` 的 **`realConcurrency` ≤ `effective_cap`**（步骤 4 并发上限，**固定 `effective_cap=5`**——人 2026-08-11 裁定与 manager A2/outer A6 对齐；`cap-from-gate.sh` 降为观测输出，读其 `band`/`effective_cap` 记 tick-log 不参与派发裁决）。**`realConcurrency` = `realInFlight`（括号真实在飞）+ `subagentsInFlight`（非任务 subagent 进程——调查型无括号，`gap-telemetry-underreport-nontask-subagents-not-counted-in-slots`）**——**真实并发 = 括号 + 非任务 subagent**，只读 `realInFlight` 会把调查型 subagent 漏算成空槽（实测 0/3 而实际 1 个 187k-token subagent 在跑 ⇒ 真实并发 4 不是 3）。**`realConcurrency > cap` ⇒ 并发违规（真超派发），判据抓住**；`brackets_reflect_subagents: false` ⇒ 有陈旧括号未 reconcile（`--reconcile` 处理）或 `--task-start`/`--task-end` 对没调齐（AC4）——是偏差，对齐而非误判健康。**反向维度（`gap-closed-bracket-leaves-live-agent-consuming-slots`：括号关 ≠ 进程退）**：`--slots` 的 `closedButLive` / `occupied_slots`（= `realConcurrency` + 已关括号但 executor 仍存在者）——**括号关 ≠ 槽空**，executor 仍在（worktree 未清 / 进程未退）的已关括号仍占槽，`occupied_slots > cap` 同样并发违规；该槽不得派新任务。每个在飞任务有 worktree 且在 `$WORKTREE_ROOT/<slug>`（磁盘，非 `/tmp`） |
 | ② | 就绪池是否维护 | `node --experimental-strip-types plugin/scripts/ready-pool-check.ts --root "$(pwd)" --cap "${effective_cap:-3}"` 的 `pool` / `dispatchable_disjoint` 字段（`effective_cap` 见步骤 3.6 前置块）；`pool < floor`（=cap×4）或 `dispatchable_disjoint < cap` 时是否已按步骤 3.6 补晋 |
-| ③ | 是否在偷偷做收尾 | inner 已无收尾职责（步骤 2 不写任务状态、步骤 3.5 只写 `--task-start`；收尾是外层步骤 1b 的异步活）。核对：本回合未合并改动里无 `status: *done` 写入、无 `--task-end` 调用、无轮次记录写入。**closure-lag 留痕/信号是外层 1b 的活**（`.quay/closure-pass-last-run.json` 由外层 `closure-lag-check.sh --record` 写、`closure-lag-check.sh` 是外层 tick 的每 tick 检查）——inner 不写不读不碰（`gap-closure-pass-has-no-lag-signal`）。红窗只停派发/合并推进，不停外层收尾 |
+| ③ | 是否在越界做收尾 | inner 只做终止/完成路由的括号闭合（`closure-lag-check.sh --close-task`，统一闭合点，`gap-needs-human-routing-does-not-close-bracket`）；**不翻 `status: *done`、不写轮次记录、不碰 closure-lag 留痕**——收尾（翻 done + 轮次记录 + `--record` 留痕）是外层步骤 1b 的异步活。核对：本回合未合并改动里无 `status: *done` 写入、无轮次记录写入、无 closure-lag 留痕写入；`--task-end` 调用**仅**出现在终止/完成路由。**closure-lag 留痕/信号是外层 1b 的活**（`.quay/closure-pass-last-run.json` 由外层 `closure-lag-check.sh --record` 写）——inner 不写不读不碰（`gap-closure-pass-has-no-lag-signal`）。红窗只停派发/合并推进，不停外层收尾 |
 | ④ | 停止条件是否被遵守 | 步骤 3 命中项（合并冲突 / OVER90 / ruling-required / 外层 suite-state `state: red` / 就绪队列空 / 窗口新增 needs-human ≥3）命中时是否停止派发；`.halt` 存在则本 tick 空转 |
 
 有明确偏差 ⇒ 向文档对齐：重新执行本文档对应步骤修正（补 worktree 纪律、按步骤 3.6 补就绪池、
@@ -442,10 +442,11 @@ tmux 仅用于紧急控制；投递通道不可认证、丢 `from` 字段）。
 **`verification-round-N` 只关于验证/收尾，不是分派门控**——分派永远是滚动的（见步骤 4），验证轮的
 节奏不约束、不命名、不门控任何一次派发。旧文里把「全量套件批量」当分派单位的说法已随机制根删除。
 
-**只合并与清理，不写任何任务状态。** 全量套件验证已从 inner 移除——它是外层后台异步跑的验证 gate
+**只合并与清理。** 全量套件验证已从 inner 移除——它是外层后台异步跑的验证 gate
 （`orchestrator-loop-tick.md` 步骤 1b「异步收尾例程（verification-round-N）」），inner 的停止条件
-只读外层的 `.quay/full-suite-state.json`（见步骤 3）。inner 在这里**不翻 done、不写轮次记录、
-不写 `--task-end`**。
+只读外层的 `.quay/full-suite-state.json`（见步骤 3）。inner 在这里**不翻 done、不写轮次记录**；
+写 `--task-end` **仅限终止/完成路由**（统一括号闭合点，`gap-needs-human-routing-does-not-close-
+bracket`）——**括号在终止/完成同轮闭合，不停留 inProgress**。翻 done 仍由外层 1b 独占。
 
 **两线分支模型（quay 自身配置启用；`gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point`，AC1/AC2/AC3）**：
 当 workspace 把 `fork_baseline` / `merge_target` 配置为 develop / integration（quay 自身）时，
@@ -500,16 +501,20 @@ tmux 仅用于紧急控制；投递通道不可认证、丢 `from` 字段）。
    worktree 建立时对分叉基线（`$FORK_BASELINE` 或 `$MERGE_TARGET`）取了快照，之后并发合并的其它任务它看不到。
    B3-2 就是这样红的——它的 worktree 建于 B3-1 合并前 13 分钟，于是对全局测试文件计数的断言过期。
    **并发窗口是并发模型固有的，不是偶发**，所以 rebase 是必需步骤不是可选优化。
-   rebase 冲突 → 停止该任务的 fan-in，标 needs-human，报告；不要 `--skip`、不要 `-X ours`。
+   rebase 冲突 → 停止该任务的 fan-in，标 needs-human，**同时关括号**（
+   `bash plugin/scripts/closure-lag-check.sh --close-task --taskId <id> --outcome needs-human`），报告；不要 `--skip`、不要 `-X ours`。
 1. `git merge --no-ff task/<taskId>`（合并目标 = 当前检出的 `$MERGE_TARGET`——两线模型下内层共享检出
    立在 `$MERGE_TARGET` 上，不是 `$FORK_BASELINE`；`$FORK_BASELINE` 只由外层批量合推进）
-2. 冲突 → `git merge --abort`，标 needs-human，**停止本 tick 的后续合并与派发**，报告
+2. 冲突 → `git merge --abort`，标 needs-human，**同时关括号**（`--close-task --taskId <id> --outcome needs-human`），**停止本 tick 的后续合并与派发**，报告
 3. 跑 `$TEST_COMMAND --for-task <taskId>`（该任务自己的选中集，秒级；`TEST_COMMAND` 见 `.quay/config.yml` `loop.test_command`）
-4. 选中集非绿 → 回退该 merge，标 needs-human，停止，报告
+4. 选中集非绿 → 回退该 merge，标 needs-human，**同时关括号**（`--close-task --taskId <id> --outcome needs-human`），停止，报告
 
-合并完成后对每个已合并任务做**合并清理**：`git worktree remove` + `git branch -d`。这只是清理
-worktree/分支——翻 done、写轮次记录、写 `--task-end` 都由外层异步做（`orchestrator-loop-tick.md`
-步骤 1b），inner 不需要也不应该碰。
+合并完成后对每个已合并任务做**合并清理**：`git worktree remove` + `git branch -d`。这是清理
+worktree/分支。**统一括号闭合点（`gap-needs-human-routing-does-not-close-bracket`）**：fan-in 成功
+（merge 落地、任务完成）时 inner 调 `bash plugin/scripts/closure-lag-check.sh --close-task
+--taskId <id> --outcome done` 关括号——括号在完成同轮闭合，不停留 inProgress；任务**完成但无需
+fan-in**（AC 全勾、工作已落地、无合并需要）时同样调 `--close-task --outcome done`。翻 done、写轮次
+记录仍由外层 1b 异步做（`orchestrator-loop-tick.md` 步骤 1b）。
 
 **A6/A15 对齐（`gap-worktree-leak-after-fan-in-occupies-slot-permanently`）**：inner 的 fan-in 序列
 （本步骤：merge --no-ff → --for-task 复测 → `git worktree remove`）与 **outer A15 ④ 的 fan-in 序列已对齐**
@@ -645,11 +650,12 @@ node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --task-sta
 # 记下打印的 runId
 ```
 
-inner 只写 `--task-start`。**`--task-end`（关遥测括号）由外层异步写**（`orchestrator-loop-tick.md`
-步骤 1b），inner 不需要也不应该调它——`--report` 的 `inProgress` 在外层闭合前会显示在飞，这是预期。
-**派发/收尾这对调用就是遥测从「历史归档」变回「当前状态」的机制**（`gap-telemetry-brackets-vs-
-subagents-no-slot-visibility` AC4）——本步的 `--task-start` 是派发时的开括号，外层 1b 的 `--task-end`
-/ `--reconcile` 是收尾时的关括号；缺任一半，遥测就退化成只记录历史。
+inner 写 `--task-start` 于派发、写 `--task-end` 于**终止/完成路由**（统一括号闭合点，
+`gap-needs-human-routing-does-not-close-bracket`，经 `closure-lag-check.sh --close-task`）——
+`--report` 的 `inProgress` 在终止/完成路由前显示在飞是预期，但**终态同轮必须闭合**，不停留
+inProgress。**派发/收尾这对调用就是遥测从「历史归档」变回「当前状态」的机制**（`gap-telemetry-brackets-vs-
+subagents-no-slot-visibility` AC4）——本步的 `--task-start` 是派发时的开括号，终止/完成路由的
+`--close-task` 与 外层 1b 的 `--reconcile` 是收尾时的关括号；缺任一半，遥测就退化成只记录历史。
 
 **括号 ≠ subagent（`gap-telemetry-brackets-vs-subagents-no-slot-visibility`）**：`--report` 的
 `inProgress` 是括号视角——红窗遗留的未闭合 start 会让它虚高。要看**真实并发/空槽**，用
@@ -1109,10 +1115,10 @@ node --no-warnings --experimental-strip-types plugin/scripts/inner-wakeup-heartb
 
 | 情况 | 动作 |
 |---|---|
-| 合并冲突 | abort，needs-human，停止派发 |
+| 合并冲突 | abort，needs-human，**同轮关括号**（`closure-lag-check.sh --close-task --taskId <id> --outcome needs-human`），停止派发 |
 | 外层全量 suite 红（`.quay/full-suite-state.json` `state: red`） | **一律暂缓已完成 agent 的 fan-in**（真正保护）+ 新派发按失败位置条件化：共享闸门（`run_static_checks`）⇒ 停派发；具体测试文件且与新任务触摸集无关 ⇒ 派发继续（`running`/`green` ⇒ 照常；文件缺失不阻塞，等下一 tick） |
-| 对抗审查 2 轮后仍 REFUTED | 标 needs-human，停止该任务 |
-| 任务超 90 分钟 | 中止 subagent，needs-human，不带内重试 |
+| 对抗审查 2 轮后仍 REFUTED | 标 needs-human，**同轮关括号**（`closure-lag-check.sh --close-task --taskId <id> --outcome needs-human`），停止该任务 |
+| 任务超 90 分钟 | 中止 subagent，needs-human，**同轮关括号**（`--close-task --taskId <id> --outcome needs-human`），不带内重试 |
 | **窗口内新增** needs-human ≥3 | 停止派发新任务（2026-08-03 裁定：历史积压不构成——它们是范围决定不是解阻塞，升级给人） |
 | 队列文件与 git 状态矛盾且无法判定 | 停，报告两边的实际内容 |
 | **subagent 触顶**（真实 `Agent` tool_result 里按位置命中的 spawn-limit 错误——A16 11:5x 裁定取消自计数，只认真实错误事件） | **停止派发并升级给人**——不静默转主线程串行（`/clear` 立刻解封、重启带新上限；调高 env 不是修复，只是推迟同一静默失败） |
