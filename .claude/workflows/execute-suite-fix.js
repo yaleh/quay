@@ -109,17 +109,39 @@ log(`Fix done: launched=${fix.launched} head=${fix.worktreeHead} fixed=${(fix.fa
 // ── 脚本控制流的等待：不把等待决策交给任何 agent ─────────────────────────────────
 let lastState = null
 let realRedCount = 0
+let pollCount = 0  // bounded-poll safety (manager 02:4x: advance on process-exit, capped)
 
 while (realRedCount <= maxRounds) {
   let s
   do {
     await new Promise((r) => setTimeout(r, 60_000))
     s = await agent(
-      `Read ${stateDir}/full-suite-state.json and return its state, reason, scope, tests, runId, verifiedCommit. Do not infer — return exactly what the file says. If the file is missing, return {state:'missing'}.
-      Also run: git -C ${worktree} rev-parse HEAD  (the worktree HEAD at this instant) and return it as worktreeHead.`,
-      { schema: { type: 'object', properties: { state: { type: 'string' }, reason: { type: 'string' }, scope: { type: 'string' }, tests: { type: 'number' }, runId: { type: 'string' }, verifiedCommit: { type: 'string' }, worktreeHead: { type: 'string' } }, required: ['state'] } }
+      `Read ${stateDir}/full-suite-state.json and return its state, reason, scope, tests, runId, verifiedCommit, durationMs, pid. Do not infer — return exactly what the file says. If the file is missing, return {state:'missing'}.
+      Also run: git -C ${worktree} rev-parse HEAD  (the worktree HEAD at this instant) and return it as worktreeHead.
+      Also run: ps -p <pid> (if pid is present and non-null) to check whether the runner process is still alive — return processAlive as true/false.`,
+      { schema: { type: 'object', properties: { state: { type: 'string' }, reason: { type: 'string' }, scope: { type: 'string' }, tests: { type: 'number' }, runId: { type: 'string' }, verifiedCommit: { type: 'string' }, durationMs: { type: 'number' }, pid: { type: 'number' }, processAlive: { type: 'boolean' }, worktreeHead: { type: 'string' } }, required: ['state'] } }
     )
-  } while (s.state === 'running')
+    // ⚠️ ADVANCE CRITERION (manager 02:4x): advance only when the RUNNER PROCESS HAS EXITED, NOT when
+    // state≠running. state=red is written WHILE the process is still alive (collecting all failures —
+    // kill-on-red conditioning 5d69e21f + runner AC2 "mark RED immediately while run in progress").
+    // Advancing on state≠running lets the next Fix agent edit the worktree while the previous round is
+    // STILL collecting failures ⇒ failures[] crosses two tree states ⇒ wrong attribution (r265: Fix#2
+    // started 8m16s before the runner exited). "Process exited" = durationMs present (terminal record
+    // only written at exit) OR pid gone (ps -p returns non-zero / processAlive=false). This restores the
+    // worktree-freeze rule ③'s INTENT: Fix must not touch a still-collecting round's tree.
+    const processExited =
+      (s.durationMs != null && s.durationMs > 0) ||
+      (s.pid != null && s.processAlive === false)
+    if (processExited) break
+    // SAFETY (bounded polls): if the state file has neither durationMs nor pid (malformed/edge), do not
+    // spin forever — cap at 2× the expected round length (~60min at 60s polls). The downstream
+    // isNonVerificationTerminal/isRealRedRound classification still handles the state correctly; this
+    // only bounds the wait when the exit signal is undetectable.
+    if (++pollCount > 60) {
+      log(`WARN: no process-exit signal after ${pollCount} polls (state=${s.state}) — advancing on state to avoid infinite wait`)
+      break
+    }
+  } while (true)
 
   lastState = s
   if (s.state === 'green') break
