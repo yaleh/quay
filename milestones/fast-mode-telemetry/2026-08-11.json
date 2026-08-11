@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-11T08:32:12.656Z",
+  "generatedAt": "2026-08-11T14:51:03.146Z",
   "since": null,
   "tasks": [
     {
@@ -72,6 +72,12 @@
       "taskId": "gap-b-machine-periodic-push-backup-to-bare-repo",
       "runId": "fm-gap-b-machine-periodic-push-backup-to-bare-repo-1785985742451-lp6v0p",
       "minutes": 16.551266666666667,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-b3-tick-coupled-misses-between-tick-merges",
+      "runId": "fm-gap-b3-tick-coupled-misses-between-tick-merges-1786435247714-nh6d6a",
+      "minutes": 399.42488333333336,
       "outcome": "done"
     },
     {
@@ -315,6 +321,12 @@
       "outcome": "done"
     },
     {
+      "taskId": "gap-needs-human-routing-does-not-close-bracket",
+      "runId": "fm-gap-needs-human-routing-does-not-close-bracket-1786451932525-0rozft",
+      "minutes": 121.36005,
+      "outcome": "done"
+    },
+    {
       "taskId": "gap-no-criterion-records-its-own-cost-checker-cost-jsonl",
       "runId": "fm-gap-no-criterion-records-its-own-cost-checker-cost-jsonl-1786007852064-2e31zm",
       "minutes": 22.098116666666666,
@@ -393,6 +405,12 @@
       "outcome": "done"
     },
     {
+      "taskId": "gap-over90-clock-measures-queue-time-not-work-time",
+      "runId": "fm-gap-over90-clock-measures-queue-time-not-work-time-1786454009833-2pt423",
+      "minutes": 86.74395,
+      "outcome": "done"
+    },
+    {
       "taskId": "gap-pane-classify-allow-bare-word-and-agent-list-masks-busy",
       "runId": "fm-gap-pane-classify-allow-bare-word-and-agent-list-masks-busy-1786410761438-3ecz50",
       "minutes": 135.08575,
@@ -438,6 +456,12 @@
       "taskId": "gap-quay-init-config-preserving-incremental-upgrade",
       "runId": "fm-gap-quay-init-config-preserving-incremental-upgrade-1786219528489-jll20j",
       "minutes": 580.6827666666667,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-quay-init-laydown-dominant-red-suite-blocker",
+      "runId": "fm-gap-quay-init-laydown-dominant-red-suite-blocker-1786453369242-rpi9gk",
+      "minutes": 97.42703333333333,
       "outcome": "done"
     },
     {
@@ -633,6 +657,18 @@
       "outcome": "done"
     },
     {
+      "taskId": "gap-suite-blocking-directory-glob-overbroad",
+      "runId": "fm-gap-suite-blocking-directory-glob-overbroad-1786444710619-4j82z2",
+      "minutes": 241.75056666666666,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-suite-blocking-experiment-rounds-count-toward-consecutive-red",
+      "runId": "fm-gap-suite-blocking-experiment-rounds-count-toward-consecutive-red-1786436031834-gps98i",
+      "minutes": 386.40291666666667,
+      "outcome": "done"
+    },
+    {
       "taskId": "gap-suite-concurrency-4-vs-8-measurement",
       "runId": "fm-gap-suite-concurrency-4-vs-8-measurement-1785706293549-4af9ik",
       "minutes": 76.29515,
@@ -642,6 +678,12 @@
       "taskId": "gap-suite-cost-model-is-wrong-optimizations-buy-nothing",
       "runId": "fm-gap-suite-cost-model-is-wrong-optimizations-buy-nothing-1785685475162-odoz6u",
       "minutes": 72.18956666666666,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-suite-fix-scope-worktree-green-merge-gate",
+      "runId": "fm-gap-suite-fix-scope-worktree-green-merge-gate-1786446060428-zen4zk",
+      "minutes": 219.27158333333333,
       "outcome": "done"
     },
     {
@@ -693,9 +735,21 @@
       "outcome": "done"
     },
     {
+      "taskId": "gap-systemd-run-cancel-cpuquota-keep-memory-guardrail",
+      "runId": "fm-gap-systemd-run-cancel-cpuquota-keep-memory-guardrail-1786443226919-gd2j9n",
+      "minutes": 266.5111333333333,
+      "outcome": "done"
+    },
+    {
       "taskId": "gap-task-body-has-n-parsers-and-no-authority",
       "runId": "fm-gap-task-body-has-n-parsers-and-no-authority-1785738433602-ttg1t6",
       "minutes": 56.186366666666665,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-task-file-static-syntax-should-not-block-product-verification",
+      "runId": "fm-gap-task-file-static-syntax-should-not-block-product-verification-1786438905044-e3cf7f",
+      "minutes": 338.54723333333334,
       "outcome": "done"
     },
     {
@@ -819,6 +873,12 @@
       "outcome": "done"
     },
     {
+      "taskId": "gap-threshold-scope-load-flake-fifth-family-member",
+      "runId": "fm-gap-threshold-scope-load-flake-fifth-family-member-1786443227384-8vwezi",
+      "minutes": 266.51376666666664,
+      "outcome": "done"
+    },
+    {
       "taskId": "gap-tmp-leak-is-live-r6-absolves-a-file-for-one-cleanup-call",
       "runId": "fm-gap-tmp-leak-is-live-r6-absolves-a-file-for-one-cleanup-call-1785758123038-hkdtnb",
       "minutes": 92.96766666666667,
@@ -865,6 +925,12 @@
       "runId": "fm-gap-web-cannot-show-what-the-loop-is-doing-now-1785736304036-lrq9xl",
       "minutes": 37.52603333333333,
       "outcome": "done"
+    },
+    {
+      "taskId": "gap-write-ownership-extend-beyond-tasks-to-outer-core-and-hot-files",
+      "runId": "fm-gap-write-ownership-extend-beyond-tasks-to-outer-core-and-hot-files-1786442444645-ibi09r",
+      "minutes": 279.566,
+      "outcome": "done"
     }
   ],
   "orphaned": [
@@ -899,39 +965,15 @@
       "outcome": "done"
     }
   ],
-  "inProgress": [
-    {
-      "taskId": "gap-b3-tick-coupled-misses-between-tick-merges",
-      "runId": "fm-gap-b3-tick-coupled-misses-between-tick-merges-1786435247714-nh6d6a",
-      "startedAtMs": 1786435247725,
-      "startedAtMsUnreliable": true
-    },
-    {
-      "taskId": "gap-split-session-liveness-signals-unblocks-lowconc",
-      "runId": "fm-gap-split-session-liveness-signals-unblocks-lowconc-1786435248662-0k2o59",
-      "startedAtMs": 1786435248676,
-      "startedAtMsUnreliable": true
-    },
-    {
-      "taskId": "gap-suite-blocking-experiment-rounds-count-toward-consecutive-red",
-      "runId": "fm-gap-suite-blocking-experiment-rounds-count-toward-consecutive-red-1786436031834-gps98i",
-      "startedAtMs": 1786436031852,
-      "startedAtMsUnreliable": false
-    },
-    {
-      "taskId": "gap-suite-floor-two-longest-files-bound",
-      "runId": "fm-gap-suite-floor-two-longest-files-bound-1786436032349-7la1tw",
-      "startedAtMs": 1786436032364,
-      "startedAtMsUnreliable": true
-    }
-  ],
-  "meanMinutes": 97.6017666666667,
-  "medianMinutes": 56.62085,
-  "tasksPerHour": 0.6728074562879208,
-  "serialEquivalentPerHour": 0.614742970841033,
+  "inProgress": [],
+  "deferred": [],
+  "meanMinutes": 108.11724849462368,
+  "medianMinutes": 61.879616666666664,
+  "tasksPerHour": 0.7034685720649998,
+  "serialEquivalentPerHour": 0.5549530795077865,
   "windowStart": "2026-08-02T10:29:46.000Z",
-  "windowEnd": "2026-08-11T08:31:28.757Z",
-  "windowHours": 214.0285436111111,
+  "windowEnd": "2026-08-11T14:49:58.408Z",
+  "windowHours": 220.33678,
   "haltedHours": 0,
   "halted": [],
   "blocked": [
@@ -948,6 +990,13 @@
       "sinceMs": 1786432080537,
       "clearedAtMs": 1786434497156,
       "durationMs": 2416619
+    },
+    {
+      "taskId": "fast-mode-loop",
+      "reason": "merge-conflict",
+      "sinceMs": 1786437046054,
+      "clearedAtMs": 1786438173737,
+      "durationMs": 1127683
     },
     {
       "taskId": "gap-axis-generator-question-what-range-every-standing-criterion",
@@ -1097,7 +1146,7 @@
       "durationMs": 23903
     }
   ],
-  "totalBlockedMs": 86767354,
+  "totalBlockedMs": 87895037,
   "longestBlockedMs": 38341615,
   "reconciled": [
     {
@@ -2887,6 +2936,14 @@
       "startedAtMs": 1786415850467
     },
     {
+      "taskId": "gap-judgment-computed-not-wired-to-action",
+      "runId": "fm-gap-judgment-computed-not-wired-to-action-1786441120687-r0gtjl",
+      "minutes": 301.5498666666667,
+      "outcome": "needs-human",
+      "startedAtMsUnreliable": true,
+      "startedAtMs": 1786441120697
+    },
+    {
       "taskId": "gap-observer-registry-target-decommission-and-criterion-invalidation",
       "runId": "fm-gap-observer-registry-target-decommission-and-criterion-invalidation-1786061714809-ujqan9",
       "minutes": 193.20131666666666,
@@ -2943,6 +3000,30 @@
       "startedAtMs": 1786054632885
     },
     {
+      "taskId": "gap-split-session-liveness-signals-unblocks-lowconc",
+      "runId": "fm-gap-split-session-liveness-signals-unblocks-lowconc-1786435248662-0k2o59",
+      "minutes": 399.4433666666667,
+      "outcome": "needs-human",
+      "startedAtMsUnreliable": true,
+      "startedAtMs": 1786435248676
+    },
+    {
+      "taskId": "gap-suite-blocking-self-lock-blocks-fix-family",
+      "runId": "fm-gap-suite-blocking-self-lock-blocks-fix-family-1786443913296-0kiq5f",
+      "minutes": 255.0513,
+      "outcome": "needs-human",
+      "startedAtMsUnreliable": true,
+      "startedAtMs": 1786443913315
+    },
+    {
+      "taskId": "gap-suite-floor-two-longest-files-bound",
+      "runId": "fm-gap-suite-floor-two-longest-files-bound-1786436032349-7la1tw",
+      "minutes": 386.4134833333333,
+      "outcome": "needs-human",
+      "startedAtMsUnreliable": true,
+      "startedAtMs": 1786436032364
+    },
+    {
       "taskId": "gap-the-runtime-has-nowhere-safe-to-land",
       "runId": "fm-gap-the-runtime-has-nowhere-safe-to-land-1785998556317-xch9ls",
       "minutes": 26.61785,
@@ -2951,17 +3032,29 @@
       "startedAtMs": 1785998556329
     }
   ],
-  "reconcilable": [
+  "reconcilable": [],
+  "realInFlight": 0,
+  "closedButLive": [
     {
-      "taskId": "gap-suite-blocking-experiment-rounds-count-toward-consecutive-red",
-      "runId": "fm-gap-suite-blocking-experiment-rounds-count-toward-consecutive-red-1786436031834-gps98i",
-      "startedAtMs": 1786436031852,
-      "startedAtMsUnreliable": false,
-      "outcome": "abandoned",
-      "reconcileReason": "worktree-gone-and-no-process"
+      "taskId": "gap-judgment-computed-not-wired-to-action",
+      "runId": "fm-gap-judgment-computed-not-wired-to-action-1786441120687-r0gtjl",
+      "reason": "worktree-present"
+    },
+    {
+      "taskId": "gap-split-session-liveness-signals-unblocks-lowconc",
+      "runId": "fm-gap-split-session-liveness-signals-unblocks-lowconc-1786435248662-0k2o59",
+      "reason": "worktree-present"
+    },
+    {
+      "taskId": "gap-suite-blocking-self-lock-blocks-fix-family",
+      "runId": "fm-gap-suite-blocking-self-lock-blocks-fix-family-1786443913296-0kiq5f",
+      "reason": "worktree-present"
+    },
+    {
+      "taskId": "gap-suite-floor-two-longest-files-bound",
+      "runId": "fm-gap-suite-floor-two-longest-files-bound-1786436032349-7la1tw",
+      "reason": "worktree-present"
     }
   ],
-  "realInFlight": 3,
-  "closedButLive": [],
-  "occupiedSlots": 3
+  "occupiedSlots": 4
 }
