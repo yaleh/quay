@@ -102,3 +102,27 @@ LAID_MANIFEST 缺失时条目惰性——oscillation 同 batch2-queue-state/tick
 
 **AC 勾选**：AC1–AC4 已勾（复现固化 / 排除表收编 / loop-shipping 12/12 / --surface 6/6）。
 AC5（全量套件）未勾——归外层 verification-round；DoD 全量套件行亦未勾。
+
+### 内层复核（2026-08-11，fresh worktree from develop 2be095ae）
+
+任务再派发时以 develop 头部（2be095ae）fresh worktree 复核，确认修复在最新 develop 上仍成立：
+
+```
+$ bash scripts/test.sh --for-task gap-loop-shipping-verify-delivery-surface-consumer-laid-ref --allow-thin
+# 12 pass / 0 fail / 0 cancelled / EXIT=0
+# AC1b 绿；AC2 绿；verify-delivery-surface 功能不丢（--surface 6/6 COVERED）
+
+$ node --no-warnings --experimental-strip-types --test plugin/test/loop-shipping.test.mjs
+# 12 pass / 0 fail / 0 cancelled；Contract measure `grep -c '✖ AC1b'` = 0
+
+$ node --no-warnings --experimental-strip-types --test plugin/test/loop-shipping-necessity-check.test.mjs
+# 3 pass / 0 fail（inert_exclusions=0——全部惰性条目带 retainedNote；
+#   verify-delivery-surface.ts 条目非惰性：LAID_MANIFEST:164 有实命中，抑制真实 AC1b 命中）
+
+$ node --experimental-strip-types plugin/scripts/verify-delivery-surface.ts --surface
+# surface_categories_covered=6/6, spec_is_live=1, PASS: all 6 delivery categories covered
+```
+
+无新增代码改动（修复 `36298bf6` 已在 develop，fan-in `ce824e9b` 已收编；exclusion 条目
+`plugin/scripts/loop-shipping-exclusion-data.mjs:189-193` 存在，reason/retainedNote 完整，
+既有排除条目不动）。AC1–AC4 保持勾选，AC5（全量套件）按 DoD 留待外层 verification-round 验证。
