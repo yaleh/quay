@@ -119,3 +119,5 @@ changed: 本阶段（产品化交付）第一件工作（manager 指定顺序+�
 **AC37 活体样本（交叉标注，gap-ac37-exec-core-ships-with-package 2026-08-10）**：AC37 作为 AC36 判据③（端到端）的活体样本——本任务自带 `delivery-critical` label，经新轴被 inner 派发取走（dispatch 时间戳 > 打 label 时间戳），实现「交付关键路径」从脆弱通道转到常规池排队。AC37 完成后即反向验证 AC36 判据③。
 
 **可验证性缺口已闭环（交叉标注，gap-ac36-recommended-exposes-sort-key 2026-08-10）**：本任务判据②「位次严格前移 + 负控制」原只能**人工比对两次运行**——`--json` 的 `recommended` 是纯字符串数组，不暴露排序键。sibling 任务 `gap-ac36-recommended-exposes-sort-key` 补上：`--json` 新增 `ranking` 数组（`[{id, deliveryCritical, suiteBlocking, rank}]`，`recommended` 字符串数组保持原状），并由 `plugin/scripts/ac36-sortkey-criterion-check.ts` 吃两次运行 JSON 机械断言 (a) DC 严格前移 / (b) 同族非 DC 相对位次不变 / (c) blocking_suite 之上。判据② 从此靠机件，不靠自述。
+
+**交叉标注（gap-suite-fix-scope-worktree-green-merge-gate，2026-08-11）**：本任务（delivery-critical 轴）与本阶段优先级机制的落地互证——suite-fix 收口新增的 fan-in 机械门（`integration-batch-merge.sh` 前置断言 `verification-round.jsonl` 有 ≥1 条 `scope=worktree`+`state=green` 记录，否则拒 merge）是交付关键路径上的机械判据；delivery-critical 任务被 `integration-batch-merge.sh` 批量合 gate 覆盖，二者同属「交付关键」的机械保障层。

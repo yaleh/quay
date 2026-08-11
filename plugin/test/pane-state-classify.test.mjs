@@ -29,6 +29,9 @@ import { spawnSync } from "node:child_process";
 
 import {
   classifyPaneState,
+  classifyPaneStateOrthogonal,
+  paneShowsWorkInFlight,
+  regionLooksLikeClaudePane,
   bottomRegion,
   DEFAULT_BOTTOM_LINES,
   classifyInputResidueStatic,
@@ -378,6 +381,101 @@ test("AC2/AC3 (regression) — busy judgment must not depend on a single string:
     "  ⏵⏵ bypass permissions on · 1 monitor · ← 1 agent · ↓ to manage",
   ].join("\n");
   assert.equal(classifyPaneState(idleAmbient).state, "waiting-input");
+});
+
+// ── two orthogonal dimensions (gap-pane-classify-needs-two-orthogonal-dimensions) ─────────────────
+// AC2 two fields · AC3 work-in-flight independent (not busy) · AC4 expanded panel naturally covered.
+
+test("AC2 — classifyPaneStateOrthogonal returns input_state + work_in_flight; the measured real pane (status line + agent list) reads waiting-input + true", () => {
+  // The measured real pane (manager 2026-08-11 03:5x): status line
+  // `⏵⏵ bypass permissions on (shift+tab to cycle) · ← 1 agent · ↓ to manage` + agent list
+  // (● main / ◯ general-purpose). The single enum has no slot for {input idle + agents running} and
+  // returned unknown; the two fields make it representable.
+  const full = readFixture("orthogonal-input-idle-agents-running-1.txt");
+  const o = classifyPaneStateOrthogonal(full);
+  assert.equal(o.input_state, "waiting-input", `real pane input_state must be waiting-input, got ${o.input_state}`);
+  assert.equal(o.work_in_flight, true, `real pane work_in_flight must be true, got ${o.work_in_flight}`);
+  assert.equal(typeof o.region, "string");
+  assert.equal(o.raw, o.region, "raw passes the bottom region through verbatim");
+
+  // The Contract's status-line-ONLY invoke (no ❯, no agent rows) — the old enum reads unknown
+  // (the reproduced MARKER-STALE root); the orthogonal view reads waiting-input + true.
+  const statusLineOnly = "⏵⏵ bypass permissions on (shift+tab to cycle) · ← 1 agent · ↓ to manage";
+  assert.equal(classifyPaneState(statusLineOnly).state, "unknown", "old enum has no slot (reproduced)");
+  const oLine = classifyPaneStateOrthogonal(statusLineOnly);
+  assert.equal(oLine.input_state, "waiting-input", `status-line-only input_state, got ${oLine.input_state}`);
+  assert.equal(oLine.work_in_flight, true, `status-line-only work_in_flight, got ${oLine.work_in_flight}`);
+});
+
+test("AC3 — `← N agent`/agent list is a work-in-flight flag, NOT a busy flag: idle + `← 1 agent` stays waiting-input with work_in_flight=true", () => {
+  // The old comment's rejection is preserved: `← N agent` renders at idle too, so it must not make
+  // the pane busy. In the orthogonal view it is the independent work-in-flight dimension.
+  const idleWithAgent = [
+    "───────────────────────────────",
+    "❯ ",
+    "───────────────────────────────",
+    "  ⏵⏵ bypass permissions on · 1 monitor · ← 1 agent · ↓ to manage",
+  ].join("\n");
+  const o = classifyPaneStateOrthogonal(idleWithAgent);
+  assert.equal(o.input_state, "waiting-input", "idle + ← 1 agent must NOT be busy (AC3)");
+  assert.equal(o.work_in_flight, true, "← 1 agent is a work-in-flight flag");
+  // A truly idle pane with NO agent indicator reads work_in_flight=false (the flag is not noise).
+  const idleNoAgent = [
+    "───────────────────────────────",
+    "❯ ",
+    "───────────────────────────────",
+    "  ⏵⏵ bypass permissions on · 1 monitor · ↓ to manage",
+  ].join("\n");
+  const o2 = classifyPaneStateOrthogonal(idleNoAgent);
+  assert.equal(o2.input_state, "waiting-input");
+  assert.equal(o2.work_in_flight, false, "no agent indicator ⇒ work_in_flight=false");
+  // The agent LIST alone (no `← N agent`) is also a work-in-flight flag (AGENT_LIST_LINE_RE rows).
+  const agentListOnly = ["● main", "◯ general-purpose  running", "❯"].join("\n");
+  assert.equal(paneShowsWorkInFlight(agentListOnly), true, "agent-list rows ⇒ work_in_flight");
+  // A busy pane (esc to interrupt) reads input_state=busy — work_in_flight stays independent.
+  const busy = [
+    "───────────────────────────────",
+    "❯ ",
+    "───────────────────────────────",
+    "  ⏵⏵ bypass permissions on · 1 monitor · esc to interrupt · ← 1 agent · ↓ to manage",
+  ].join("\n");
+  const ob = classifyPaneStateOrthogonal(busy);
+  assert.equal(ob.input_state, "busy");
+  assert.equal(ob.work_in_flight, true);
+});
+
+test("AC4 — the expanded panel (`↓ to manage`, no ctrl+t) is NATURALLY covered by the orthogonal fields; PANEL_BUSY_RE stays `ctrl+t to hide tasks`", () => {
+  // The real pane's `↓ to manage` is the panel-EXPANDED hint and is NOT a busy flag (it renders at
+  // idle too). Adding it to PANEL_BUSY_RE would turn every idle pane busy — the 成因 B comment's
+  // warning. The orthogonal work_in_flight covers the expanded panel via its agent rows / `← N agent`.
+  const expandedIdle = "⏵⏵ bypass permissions on (shift+tab to cycle) · ← 1 agent · ↓ to manage";
+  const o = classifyPaneStateOrthogonal(expandedIdle);
+  assert.equal(o.input_state, "waiting-input", "↓ to manage must not force busy (AC4 natural coverage)");
+  assert.equal(o.work_in_flight, true);
+  // The genuine 成因 B panel-busy chrome (ctrl+t) still reads input_state=busy.
+  const panelBusy = "⏵⏵ bypass permissions on · 1 monitor · ctrl+t to hide tasks · ← 1 agent · ↓ to manage";
+  assert.equal(classifyPaneStateOrthogonal(panelBusy).input_state, "busy", "ctrl+t to hide tasks is still busy");
+  // regionLooksLikeClaudePane: chrome evidence is what lifts the status-line-only text out of unknown.
+  assert.equal(regionLooksLikeClaudePane(expandedIdle), true);
+  assert.equal(regionLooksLikeClaudePane("a vim help screen\n~ ~ ~\n(1 of 12) help.txt"), false);
+  // tier-2 preserved: a non-Claude screen still reads input_state=unknown.
+  assert.equal(classifyPaneStateOrthogonal("a vim help screen\n~ ~ ~\n(1 of 12) help.txt").input_state, "unknown");
+});
+
+test("AC2/AC4 — the CLI seam --pane-text <real pane> --json exposes input_state + work_in_flight (the Contract measure surface)", () => {
+  const real = "⏵⏵ bypass permissions on (shift+tab to cycle) · ← 1 agent · ↓ to manage";
+  const r = spawnSync(
+    process.execPath,
+    ["--no-warnings", "--experimental-strip-types",
+      path.join(repoRoot, "plugin/scripts/pane-state-classify.ts"), "--pane-text", real, "--json"],
+    { encoding: "utf8" },
+  );
+  assert.equal(r.status, 0, r.stderr);
+  const j = JSON.parse(r.stdout);
+  assert.equal(j.input_state, "waiting-input");
+  assert.equal(j.work_in_flight, true);
+  // The legacy single-enum fields stay on the same seam (superset — old consumers keep state).
+  assert.equal(j.state, "unknown"); // the reproduced old-enum verdict for the status-line-only text
 });
 
 test("AC8: no word or invocation of the forbidden surface in the test or the fixture directory (grep = 0)", () => {

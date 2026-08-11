@@ -38,6 +38,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+// AC3 (gap-serial-install-family-shared-prebuilt-fixture): the install-as-setup test below copies a
+// fresh installed root from the SHARED prebuilt fixture instead of a per-test real install.
+import { laydownWorkspace } from './quay-init-loop-helpers.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pluginDir = path.resolve(__dirname, '..');
@@ -90,9 +93,10 @@ const INIT_ARGS = (ws) => ['--loop', '--root', ws, '--project', 'proj',
 
 // ── AC1 (b) dependency closure: consumers pull their same-dir siblings in ─────────────────────────
 test('AC1 — dependency closure: transcript-delivery-check.ts + cap-from-gate.ts are laid down (sibling deps of laid-down consumers)', () => {
-  const ws = makeTmp();
+  // AC3 (gap-serial-install-family-shared-prebuilt-fixture): the install is pure setup — copy it
+  // from the shared prebuilt fixture (the source-reference assertions below read pluginDir directly).
+  const { ws, install: r } = laydownWorkspace();
   try {
-    const r = runInit(ws, INIT_ARGS(ws));
     assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
     // The consumers ARE laid down (prefix-derived / explicit).
     for (const s of ['send-keys-reliable.sh', 'inner-session-check.sh', 'cap-from-gate.sh']) {

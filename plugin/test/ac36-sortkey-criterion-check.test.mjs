@@ -49,6 +49,14 @@ function writeTask(root, id, { status = "todo", labels = [], parent = null, body
     "  schema: v1",
     "---",
   ].join("\n");
+  // C8 SELF-TOUCH MODELING (gap-slot-refill-c8-reject-no-backfill): a real dispatchable task's
+  // `## Touches` must contain `tasks/<id>.md` WITHOUT `(new)` — the C8 dispatch gate the inner's
+  // A15 gate ⑤ applies pre-dispatch. slot-refill's default self-touch gate rejects a candidate
+  // missing it (recommended stays empty), so fixtures must model a C8-clean body for the
+  // END-TO-END ranking/checker tests to reach slot-refill's recommendation path at all.
+  if (body.includes("## Touches") && !body.includes(`- tasks/${id}.md`)) {
+    body = body.replace(/(## Touches\n)/, `$1- tasks/${id}.md\n`);
+  }
   fs.writeFileSync(path.join(root, "tasks", `${id}.md`), `${fm}\n\n${body}`);
 }
 

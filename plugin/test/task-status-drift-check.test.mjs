@@ -52,6 +52,7 @@ import {
   taskWorkLanded,
   gitHistoryLanded,
   buildGitHistoryIndex,
+  landingRef,
   messageReferencesTask,
   taskIdTokens,
   taskIdFromTouches,
@@ -1330,6 +1331,84 @@ test("git-history: the BATCHED index matches DIRECTORY-style Touches paths (git 
       "per-task path stays negative for the never-dispatched sibling");
     assert.equal(gitHistoryLanded(neverTask, repo, { taskId: neverId, gitIndex: index }), false,
       "batched index stays negative for the never-dispatched sibling");
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+// ── two-line-model landing ref (gap-git-history-landed-master-stale-under-two-line-model) ──────────
+// gitHistoryLanded used to hardcode `git log master`. Under the two-line model work lands on
+// integration (develop advances only via batch-merge) while master stalls (measured 2026-08-11:
+// master stuck at ea2208cf/08-06, master..integration=2212), so everything landed after that read
+// as unlanded. AC2: the ref follows the two-line model — integration/develop per landingRef, and a
+// STALE master no longer misjudges. AC3: a stray-branch commit (never merged into the working line)
+// still does NOT count as landed (negative control).
+
+test("landingRef: opts.ref wins, then integration→develop→master, then master fallback (two-line model)", (t) => {
+  const repo = makeGitHistoryRepo("landingref");
+  try {
+    // Only master exists → fallback to master (single-line repos / legacy fixtures).
+    assert.equal(landingRef(repo), "master", "only-master repo falls back to master");
+    // Two-line model: create develop then integration at the same base.
+    git(repo, "checkout", "-q", "-b", "develop");
+    git(repo, "checkout", "-q", "-b", "integration");
+    assert.equal(landingRef(repo), "integration", "integration is the first existing candidate (working line)");
+    assert.equal(landingRef(repo, { ref: "develop" }), "develop", "explicit opts.ref wins (config source)");
+    assert.equal(landingRef(repo, { ref: "feature/x" }), "feature/x", "explicit opts.ref is trusted verbatim");
+    // Delete integration → develop is now the working line.
+    git(repo, "checkout", "-q", "develop");
+    git(repo, "branch", "-q", "-D", "integration");
+    assert.equal(landingRef(repo), "develop", "develop is the working line when integration is absent");
+    // Explicit candidate list overrides the default chain.
+    assert.equal(landingRef(repo, { candidates: ["master"] }), "master", "explicit candidates win");
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("git-history: two-line model — integration is the landing ref (stale master does not misjudge); a stray branch does NOT land (AC2/AC3)", (t) => {
+  const repo = makeGitHistoryRepo("twoline");
+  try {
+    fs.mkdirSync(path.join(repo, "tasks"), { recursive: true });
+    fs.mkdirSync(path.join(repo, "code"), { recursive: true });
+    // The working line is `integration`; master stays behind as a stale historical ref.
+    git(repo, "checkout", "-q", "-b", "integration");
+    const id = "gap-suite-execution-rollback";
+    const task = gitHistoryTask(id, "- code/rollback.ts");
+    fs.writeFileSync(path.join(repo, "tasks", `${id}.md`), task);
+    // Land the work on integration via a fan-in merge that references the task.
+    git(repo, "checkout", "-q", "-b", "task/gap-suite-execution-rollback");
+    fs.writeFileSync(path.join(repo, "code", "rollback.ts"), "rollback\n");
+    git(repo, "add", ".");
+    git(repo, "commit", "-q", "-m", "rollback impl");
+    git(repo, "checkout", "-q", "integration");
+    git(repo, "merge", "--no-ff", "task/gap-suite-execution-rollback", "-m", "inner: gap-suite-execution-rollback — rollback the stale state", "-q");
+    git(repo, "branch", "-D", "task/gap-suite-execution-rollback");
+    // master has NOT moved — the work is reachable only from integration.
+    assert.equal(gitHistoryLanded(task, repo, { taskId: id }), true,
+      "integration-reachable commit referencing the task ⇒ landed (master staleness no longer misjudges)");
+    // BATCHED index built over the default landing ref (integration exists ⇒ landingRef=integration).
+    const index = buildGitHistoryIndex(repo);
+    assert.equal(gitHistoryLanded(task, repo, { taskId: id, gitIndex: index }), true,
+      "batched index over integration also fires");
+    assert.equal(index.commits.size > 0, true, "index built over integration's history");
+
+    // AC3 negative control: a STRANDED-branch commit (never merged into integration) must NOT fire.
+    const strayId = "gap-stray-work";
+    const strayTask = gitHistoryTask(strayId, "- code/stray.ts");
+    fs.writeFileSync(path.join(repo, "tasks", `${strayId}.md`), strayTask);
+    git(repo, "checkout", "-q", "-b", "task/gap-stray");
+    fs.writeFileSync(path.join(repo, "code", "stray.ts"), "stray\n");
+    git(repo, "add", ".");
+    git(repo, "commit", "-q", "-m", "stray impl");
+    git(repo, "checkout", "-q", "integration");
+    // Leave the branch UNMERGED — its commit is reachable only from task/gap-stray.
+    assert.equal(gitHistoryLanded(strayTask, repo, { taskId: strayId }), false,
+      "a stray-branch commit not merged into integration must NOT be judged landed (AC3)");
+    const index2 = buildGitHistoryIndex(repo);
+    assert.equal(gitHistoryLanded(strayTask, repo, { taskId: strayId, gitIndex: index2 }), false,
+      "stray-branch commit stays unlanded via the batched index (AC3)");
+    git(repo, "branch", "-D", "task/gap-stray"); // cleanup so fixture removal is clean
   } finally {
     fs.rmSync(repo, { recursive: true, force: true });
   }

@@ -432,6 +432,6 @@ function main(argv) {
   process.exit(2);
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
+if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]) && path.basename(process.argv[1]).replace(/.(?:js|ts|mjs)$/, "") === "axis-generator") {
   main(process.argv.slice(2));
 }

@@ -148,7 +148,7 @@ import {
   isBranchMerged,
   reconcileInFlight,
 } from "./fast-mode-telemetry.ts";
-import { classifyPaneState } from "./pane-state-classify.ts";
+import { classifyPaneState, classifyPaneStateOrthogonal } from "./pane-state-classify.ts";
 
 // ── Constants ──────────────────────────────────────────────────────────────────────────────────────────
 
@@ -978,6 +978,12 @@ export function writeRulingObserverState(root, state, target = DEFAULT_TARGET) {
  * "waiting for a human ruling". A real false positive was observed on the manager pane: waiting-input
  * with "← 1 agent" in the status area while its batch fan-in agent was running.
  *
+ * SUPERSEDED for the live observer (gap-pane-classify-needs-two-orthogonal-dimensions): the pane
+ * observer below reads `classifyPaneStateOrthogonal(...).work_in_flight` instead — the classifier's
+ * own work-in-flight field, which ALSO covers agent-list rows BELOW the status area (● main /
+ * ◯ general-purpose) that this status-area-only helper cannot see. Kept exported for backward
+ * compatibility.
+ *
  * @param {string} region — the classifier's bottom region
  * @returns {boolean}
  */
@@ -1194,15 +1200,20 @@ export async function observePaneForRuling(root, {
     };
   }
 
+  // Two orthogonal fields (gap-pane-classify-needs-two-orthogonal-dimensions): input_state answers
+  // "can the main thread receive input", work_in_flight answers "is a background agent running".
+  // waiting-input is suppressed while the session is waiting on its OWN background agent/task;
+  // permission-prompt is never suppressed (a dialog is a human-wait by definition). work_in_flight is
+  // the classifier's own field (agent-list rows / `← N agent` — a PURE PANE check that applies to ANY
+  // target; the outer/manager pane shows the same indicator when waiting on its own subagent); the
+  // telemetry in-progress bracket is INNER-LAYER telemetry, consulted only when observing inner. The
+  // legacy single-enum classifier is kept for the observation result's `state`/`confidence` surface
+  // (pane_decision=… stays waiting-input/busy/permission-prompt for the consumers' back-compat).
+  const orth = classifyPaneStateOrthogonal(paneText);
   const cls = classifyPaneState(paneText);
-  const needsInputShape = cls.state === "waiting-input" || cls.state === "permission-prompt";
-  // waiting-input is suppressed while the session is waiting on its own background agent/task;
-  // permission-prompt is never suppressed (a dialog is a human-wait by definition). The status-area
-  // "← N agent" shape check is a PURE PANE check and applies to ANY target (the outer/manager pane
-  // shows the same indicator when waiting on its own subagent); the telemetry in-progress bracket is
-  // INNER-LAYER telemetry, consulted only when observing inner.
-  const inFlightAgent = cls.state === "waiting-input"
-    ? statusAreaShowsInFlightAgent(cls.region) || (t === "inner" && (await telemetryHasInProgressTask(root)))
+  const needsInputShape = orth.input_state === "waiting-input" || orth.input_state === "permission-prompt";
+  const inFlightAgent = orth.input_state === "waiting-input"
+    ? orth.work_in_flight || (t === "inner" && (await telemetryHasInProgressTask(root)))
     : false;
   const needsInput = needsInputShape && !inFlightAgent;
   const prev = readRulingObserverState(root, t);
@@ -1215,7 +1226,7 @@ export async function observePaneForRuling(root, {
     return { state: cls.state, confidence: cls.confidence, consecutive, needsInput, condition: null, source: paneSource };
   }
 
-  const question = cls.state === "permission-prompt"
+  const question = orth.input_state === "permission-prompt"
     ? `${t} pane shows a permission prompt — the ${t} is stopped on a dialog that needs a ruling (grant/deny), then run --clear`
     : `${t} pane has been waiting for input for ${consecutive} consecutive observations — the ${t} appears stopped without saying why; rule on what to do, then run --clear`;
   const condition = {
@@ -1226,7 +1237,7 @@ export async function observePaneForRuling(root, {
       `pane classified ${cls.state} (confidence ${cls.confidence})`,
       `${consecutive} consecutive needs-input samples (threshold ${samples})`,
       `pane source: ${paneSource}${paneSource === "live" ? " (snapshot stale/absent — live tmux capture)" : ""}`,
-      `bottom region:\n${cls.region}`,
+      `bottom region:\n${orth.region}`,
     ],
   };
   return { state: cls.state, confidence: cls.confidence, consecutive, needsInput, condition, source: paneSource };
@@ -1684,6 +1695,6 @@ export async function main(argv) {
 
 // ── Direct-entry check ───────────────────────────────────────────────────────────────────────────────
 
-if (isDirectEntry(import.meta)) {
+if (isDirectEntry(import.meta, undefined, "inner-blocked-signal")) {
   main(process.argv).then((code) => process.exit(code));
 }

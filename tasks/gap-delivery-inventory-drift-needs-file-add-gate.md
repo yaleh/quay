@@ -63,6 +63,17 @@ extra: {}
   A/D ⇒ 触发；outline 任意状态 ⇒ 满足），新增回归测试钉住该方向（`delivery-inventory-drift-gate.test.mjs`
   第 10 条）。
 
+### Finding：复发 + 新缺陷类（manager 2026-08-11 07:0x——落点 Finding 不进 Contract）
+
+**同对象再红（r279，今晚第 7 次：r216/222/223/226/248/253/279）——但闸是 PASS 的，失败的是状态检查 `--inventory`。** 与 manager 07:08 假设相反：**闸没 merge 盲区**（`bash delivery-inventory-drift-gate.sh --root .` ⇒ PASS）。
+
+**确切根因（manager 三步实测 + outer 复核）**：
+- `verify-delivery-surface.ts --inventory` ⇒ `inventory_drift=1 / exit=1`，九项里只有一项漂移：`[DRIFT] scripts: disk=204 snapshot=202`（其余 gate-scripts/skills/probes/loop/workflows/agents/vendor 全 OK）。
+- 近 6h `plugin/scripts/` 3 个新增逐个查「同提交是否改 outline」：`2b0e1da9 slot-free-trigger.ts` **改了**；`3f19b3c2 ac36-sortkey` **改了**；**`649ee499 suite-execution-form-counter.ts` 没改**——而它的提交信息明写「+ catalog/测试/**delivery-inventory**」。
+- **「提交信息声称 ≠ 文件实际改动」是文件集变化闸（`--diff-filter=AD`）结构上抓不到的类**——闸看的是文件集，不是提交信息的诚实度。outer 已一行修法：outline `scripts=202`→`204`（204=含 checker-mutation-cases + reanchor-prompt.txt 的磁盘实计数），`inventory_drift=0`（commit c90d5d3a）。
+
+**开放问题（manager 交 outer 判断，未验证不下结论）**：闸判定范围 `git diff --name-status "${base}..HEAD"`（:154），`base` 由 :91 `git merge-base HEAD <ref>` 自动推断、:96 退化 `HEAD~1`。`649ee499` 落地 04:51，此后多轮全量跑过而闸全程 PASS ⇒ 要么 base 推断区间不含它，要么落地那轮闸没跑到。无论哪种，现象确定：**漂移存在 2.5h、跨多轮全量、闸全程 PASS，只有状态检查 `--inventory` 抓到**。**变化闸一旦漏掉，状态闸得靠每轮 28min 全量去抓——而它抓到的方式是让整轮变红。** 待查：闸在 detached worktree（套件跑处）上 base 推断出什么。
+
 ## Definition of Done
 
 - [ ] AC1–AC4 全部勾上

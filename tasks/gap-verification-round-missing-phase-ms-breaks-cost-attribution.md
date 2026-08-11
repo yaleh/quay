@@ -1,7 +1,6 @@
 ---
 id: gap-verification-round-missing-phase-ms-breaks-cost-attribution
-title: verification-round.jsonl 不记三个 *_phase_ms ⇒ per_test_ms
-  把截断红轮与完整绿轮混在一起（「700s 退化」误判的来源）；套件耗时归因缺相级读数
+title: "verification-round.jsonl 不记三个 *_phase_ms ⇒ per_test_ms 把截断红轮与完整绿轮混在一起（「700s 退化」误判的来源）；套件耗时归因缺相级读数"
 status: needs-human
 labels:
   - gap
@@ -32,10 +31,34 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 r266 相分解（static 33/serial 640/lowconc 272/main 650）+ 前提更正（08-09 700s=截断红轮非完整轮）（本任务 Proposal 已含）
-- [ ] AC2: **相级读数入台账**——appendVerificationRound 从日志解析 __OVERHEAD__ 三/四相 *_phase_ms 写入记录
-- [ ] AC3: **可区分截断/完整**——per_test_ms 配相级读数后可区分截断红轮与完整绿轮
-- [ ] AC4: **既有不回归**——`--for-task` scoped 门绿
+- [x] AC1: **复现固化**——任务体记录 r266 相分解（static 33/serial 640/lowconc 272/main 650）+ 前提更正（08-09 700s=截断红轮非完整轮）（本任务 Proposal 已含）
+- [x] AC2: **相级读数入台账**——appendVerificationRound 从日志解析 __OVERHEAD__ 三/四相 *_phase_ms 写入记录
+- [x] AC3: **可区分截断/完整**——per_test_ms 配相级读数后可区分截断红轮与完整绿轮
+- [x] AC4: **既有不回归**——`--for-task` scoped 门绿
+
+### invoke 证据（inner 实现，2026-08-11）
+
+**Contract invoke**（`tail -1 .quay/verification-round.jsonl | python3 …`，对真实 runner 产出的新轮）：
+
+```
+{'serial_phase_ms': 640000, 'lowconc_phase_ms': 272000, 'main_phase_ms': 650000, 'static_phase_ms': 33000}
+```
+
+**Contract measure**（`grep -oE "serial_phase_ms|lowconc_phase_ms|main_phase_ms"`）：
+
+```
+serial_phase_ms
+lowconc_phase_ms
+main_phase_ms
+```
+
+**Contract band**：serial+lowconc+main 三者在场（≥2）⇒ OK。**invariant truncated_vs_full_distinguishable=1**：
+- 完整绿轮测试：四相字段全在（static_phase_ms/serial_phase_ms/lowconc_phase_ms/main_phase_ms 均断言相等）。
+- 截断红轮测试：serial_phase_ms+lowconc_phase_ms 在场、`main_phase_ms === undefined`（kill-on-red 截断把 main 相完成标记砍掉）⇒ 记录本身即可区分截断/完整，per_test_ms 不再无相级上下文。
+
+**AC4 scoped 门**：`./scripts/test.sh --for-task gap-verification-round-missing-phase-ms-breaks-cost-attribution`
+→ `ℹ tests 75 · ℹ pass 75 · ℹ fail 0`；scoped static checks 全 PASS（test-framework-policy / test-isolation 44 基线 / test-impl-census 325 clean / task-contract-check violations 0 / superseded-capability / tick-core-static-check / delivery-inventory-drift）。
+新增 3 用例：`AC2/AC3 — a complete round records all four *_phase_ms` · `AC2/AC3 — a kill-on-red-TRUNCATED red round … main_phase_ms ABSENT` · `AC2 backward-compat — no __OVERHEAD__ ⇒ no *_phase_ms fields`。
 
 ## Definition of Done
 

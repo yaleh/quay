@@ -5,6 +5,11 @@ title: run quay:cold-start's AC8c six-key checklist end to end on quay's own
   self-hosting its own cold start
 status: needs-human
 parent: gap-quay-has-never-self-hosted-its-own-cold-start
+depends_on:
+  - gap-send-keys-verified-hash-check-cannot-tell-typed-from-submitted
+  - gap-retire-inner-state-one-observer-targets-by-parameter
+  - gap-cold-start-skill-has-no-recovery-branch
+  - gap-no-formalized-bare-metal-session-bootstrap
 labels:
   - gap
   - milestone-candidate

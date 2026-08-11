@@ -36,7 +36,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, appendFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -56,12 +56,14 @@ function run(args, opts = {}) {
 }
 
 // The merge-mechanics tests below PREDATE the freshness gate (gap-batch-merge-gate-reads-stale-green)
-// — they exercise the object / reconcile / real-merge-conflict gates in isolation and their fixtures
-// have no `.quay/full-suite-state.json`. The freshness gate is ON by default (mechanical, not
-// self-judged); these tests opt out EXPLICITLY via --skip-freshness-gate so the OTHER gates stay
-// reachable. The freshness-gate tests at the bottom run WITHOUT the opt-out.
+// and the worktree-green gate (gap-suite-fix-scope-worktree-green-merge-gate) — they exercise the
+// object / reconcile / real-merge-conflict gates in isolation and their fixtures have no
+// `.quay/full-suite-state.json` and no `.quay/verification-round.jsonl`. Both gates are ON by default
+// (mechanical, not self-judged); these tests opt out EXPLICITLY via --skip-freshness-gate and
+// --skip-worktree-green-gate so the OTHER gates stay reachable. The freshness-gate tests at the bottom
+// run WITHOUT the opt-outs.
 function runMerge(args, opts = {}) {
-  return run([batchMerge, "--skip-freshness-gate", ...args], opts);
+  return run([batchMerge, "--skip-freshness-gate", "--skip-worktree-green-gate", ...args], opts);
 }
 
 function makeTmp(prefix) {
@@ -803,7 +805,9 @@ test("REVERSE-EDGE contract measure: --merge --integration-authoritative 'orches
 // `docOnly` makes the fan-in touch ONLY .md/.jsonl files (the doc-only-exemption shape — the
 // observed phase-goal / SPEC-goal-store / SPEC-edit commits); `codeFile` makes it add a real code
 // file (feature.ts) instead. The default keeps the historical `int-only.txt` fan-in.
-function freshnessRepo(prefix, fanInEpochSec, { docOnly = false, codeFile = false } = {}) {
+// `worktreeRound=false` omits the worktree+green verification-round record (gap-suite-fix-scope-
+// worktree-green-merge-gate) so the worktree-green gate is the gate under test (rejection path).
+function freshnessRepo(prefix, fanInEpochSec, { docOnly = false, codeFile = false, worktreeRound = true } = {}) {
   const dir = makeTmp(prefix);
   initGitRepo(dir);
   mkdirSync(join(dir, "orchestration"), { recursive: true });
@@ -831,6 +835,11 @@ function freshnessRepo(prefix, fanInEpochSec, { docOnly = false, codeFile = fals
   const res = spawnSync("git", ["-C", dir, "commit", "-q", "-m", "fan-in (controlled time)"], { encoding: "utf8", env });
   assert.equal(res.status, 0, `fan-in commit failed: ${res.stderr}`);
   gitCmd(dir, "checkout", "-q", "develop");
+  // gap-suite-fix-scope-worktree-green-merge-gate: the fan-in path requires ≥1 worktree+green round on
+  // record BEFORE merging. These freshness fixtures model the NORMAL shape (a suite-fix subagent already
+  // self-tested green in a worktree, then the current main-scoped green is what freshness judges), so
+  // the worktree-green gate PASSES and the freshness gate stays the gate under test.
+  if (worktreeRound) writeWorktreeGreenRound(dir);
   return dir;
 }
 
@@ -875,6 +884,11 @@ function verifiedMergeRepo(prefix, { verifiedEpochSec, newerEpochSec }) {
   commitAt(dir, "newer fan-in N (after suite start)", newerEpochSec);
 
   gitCmd(dir, "checkout", "-q", "develop");
+  // gap-suite-fix-scope-worktree-green-merge-gate: fan-in requires ≥1 worktree+green round on record;
+  // the verified-merge tests run the FULL gate stack (no skip flags), so give the fixture the normal
+  // shape (suite-fix already self-tested green in a worktree) to keep the verified-commit behavior
+  // under test.
+  writeWorktreeGreenRound(dir);
   return dir;
 }
 
@@ -900,6 +914,19 @@ function writeSuiteStateFile(dir, { state = "green", scope, finishedAtEpoch, sta
   if (verifiedCommit !== undefined) data.verifiedCommit = verifiedCommit;
   const file = join(stateDir, "full-suite-state.json");
   writeFileSync(file, JSON.stringify(data), "utf8");
+  return file;
+}
+
+// Write a worktree+green verification-round record (gap-suite-fix-scope-worktree-green-merge-gate):
+// the fan-in (batch-merge) path requires ≥1 `scope=worktree` AND `state=green` round on record before
+// it will merge. The freshness-gate fixtures use this so the worktree-green gate PASSES and the
+// freshness gate stays the gate under test (their fixture shape: a suite-fix subagent already
+// self-tested green in a worktree, and the current main-scoped green is what freshness judges).
+function writeWorktreeGreenRound(dir, { round = 1, state = "green", scope = "worktree" } = {}) {
+  const stateDir = join(dir, ".quay");
+  mkdirSync(stateDir, { recursive: true });
+  const file = join(stateDir, "verification-round.jsonl");
+  appendFileSync(file, JSON.stringify({ round, state, scope, startedAt: new Date().toISOString(), tests: 3000, runner: "suite-fix" }) + "\n", "utf8");
   return file;
 }
 
@@ -1370,6 +1397,113 @@ test("MERGE-TO-VERIFIED-COMMIT negative control (AC4): WITHOUT verifiedCommit th
     assert.ok(!/MERGE-TO-VERIFIED-COMMIT/.test(r.stdout), "no merge-to-verified path when the snapshot has no verifiedCommit");
     assert.equal(gitCmd(dir, "rev-parse", "develop").stdout.trim(), devBefore, "nothing moved");
     assert.notEqual(gitCmd(dir, "merge-base", "--is-ancestor", "integration", "develop").status, 0);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+// ── WORKTREE-GREEN GATE (gap-suite-fix-scope-worktree-green-merge-gate) ─────────────────────────────
+// suite-fix subagent fan-in 前置断言：fan-in（批量合）前，`.quay/verification-round.jsonl` 必须存在
+// ≥1 条 `scope=worktree` 且 `state=green` 的轮次记录，否则拒绝 merge（不自测绿不许合）。数据已在
+// verification-round.jsonl（full-suite-runner.ts 写 scope/state），不新建机件——只在消费者侧加门。
+// 实证：第二 suite-fix subagent（08:50）rounds 230/231 scope=main，从未在自带 worktree 自测 ⇒ 三保障
+// 同时失效而条文每条「没被违反」——只有读 scope 字段才看得见。这些测试把该判据机械化。
+//
+// These tests run WITHOUT --skip-freshness-gate (the gate under test is the worktree-green gate; a
+// FRESH MAIN-sourced green is provided so the freshness gate passes and the worktree-green gate is the
+// sole blocker on the rejection path).
+
+function wgGreenRepo(prefix, fanInEpochSec) {
+  const dir = freshnessRepo(prefix, fanInEpochSec, { worktreeRound: false });
+  const now = Math.floor(Date.now() / 1000);
+  writeSuiteStateFile(dir, {
+    scope: "main",
+    finishedAtEpoch: now,
+    startedAtIso: new Date(now * 1000).toISOString(),
+  });
+  return dir;
+}
+
+test("WORKTREE-GREEN GATE (AC2/AC4): no scope=worktree+state=green round on record ⇒ batch merge REJECTED, nothing moved, actionable message", () => {
+  const now = Math.floor(Date.now() / 1000);
+  const dir = wgGreenRepo("wgg1", now - 600); // fresh main green, BUT no worktree+green round
+  try {
+    const devBefore = gitCmd(dir, "rev-parse", "develop").stdout.trim();
+    const r = run([batchMerge, "--root", dir]);
+    assert.notEqual(r.status, 0, "a fan-in with NO worktree+green round must be rejected");
+    assert.match(r.stderr, /WORKTREE-GREEN-GATE FAIL-CLOSED/);
+    assert.match(r.stderr, /scope=worktree\+state=green round/);
+    assert.match(r.stderr, /先在自己 worktree 自测绿/, "rejection must carry the actionable fix (AC4)");
+    assert.match(r.stderr, /node --test/, "actionable fix must name node --test (AC4)");
+    assert.match(r.stderr, /scripts\/test\.sh/, "actionable fix must name scoped test.sh (AC4)");
+    assert.match(r.stdout, /measure has_worktree_green_round=False/, "contract measure False on rejection");
+    assert.equal(gitCmd(dir, "rev-parse", "develop").stdout.trim(), devBefore, "nothing moved");
+    assert.notEqual(gitCmd(dir, "merge-base", "--is-ancestor", "integration", "develop").status, 0, "integration NOT absorbed");
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("WORKTREE-GREEN GATE (AC2): a scope=worktree+state=green round on record ⇒ batch merge ALLOWED (develop fast-forwards)", () => {
+  const now = Math.floor(Date.now() / 1000);
+  const dir = freshnessRepo("wgg2", now - 600); // freshnessRepo default: includes the worktree+green round
+  writeSuiteStateFile(dir, {
+    scope: "main",
+    finishedAtEpoch: now,
+    startedAtIso: new Date(now * 1000).toISOString(),
+  });
+  try {
+    const r = run([batchMerge, "--root", dir]);
+    assert.equal(r.status, 0, "with a worktree+green round on record the merge proceeds");
+    assert.match(r.stdout, /worktree-green-gate OK/, "gate reports OK");
+    assert.match(r.stdout, /measure has_worktree_green_round=True/, "contract measure True on allowance");
+    assert.match(r.stdout, /OK — develop fast-forwarded/, "develop advances");
+    assert.equal(gitCmd(dir, "merge-base", "--is-ancestor", "integration", "develop").status, 0, "integration absorbed");
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("WORKTREE-GREEN GATE dry-run: no round ⇒ reports would-block WITHOUT failing (no ref moved)", () => {
+  const now = Math.floor(Date.now() / 1000);
+  const dir = wgGreenRepo("wgg3", now - 600);
+  try {
+    const devBefore = gitCmd(dir, "rev-parse", "develop").stdout.trim();
+    const r = run([batchMerge, "--root", dir, "--dry-run"]);
+    assert.equal(r.status, 0, "dry-run must not fail even when the worktree-green gate would block");
+    assert.match(r.stdout, /DRY-RUN — worktree-green gate WOULD fail closed/);
+    assert.match(r.stdout, /measure has_worktree_green_round=False/);
+    assert.equal(gitCmd(dir, "rev-parse", "develop").stdout.trim(), devBefore, "nothing moved");
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("WORKTREE-GREEN GATE scope-missing legacy line: a round WITHOUT a scope field does NOT satisfy the gate (no worktree+green evidence)", () => {
+  const now = Math.floor(Date.now() / 1000);
+  const dir = wgGreenRepo("wgg4", now - 600);
+  try {
+    // Append a LEGACY round (no scope field) — the gate must NOT count it as worktree+green evidence.
+    const stateDir = join(dir, ".quay");
+    mkdirSync(stateDir, { recursive: true });
+    appendFileSync(join(stateDir, "verification-round.jsonl"), JSON.stringify({ round: 1, state: "green", tests: 3000 }) + "\n", "utf8");
+    const r = run([batchMerge, "--root", dir]);
+    assert.notEqual(r.status, 0, "a legacy round WITHOUT scope is not worktree+green evidence ⇒ rejected");
+    assert.match(r.stderr, /WORKTREE-GREEN-GATE FAIL-CLOSED/);
+    assert.match(r.stdout, /measure has_worktree_green_round=False/);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("WORKTREE-GREEN GATE opt-out: --skip-worktree-green-gate bypasses the gate (other-gate isolation)", () => {
+  const now = Math.floor(Date.now() / 1000);
+  const dir = wgGreenRepo("wgg5", now - 600); // NO worktree+green round
+  try {
+    const r = run([batchMerge, "--skip-worktree-green-gate", "--root", dir]);
+    assert.equal(r.status, 0, "with --skip-worktree-green-gate the merge proceeds (freshness still passes)");
+    assert.match(r.stdout, /worktree-green-gate SKIPPED/);
+    assert.match(r.stdout, /OK — develop fast-forwarded/);
   } finally {
     cleanup(dir);
   }

@@ -128,6 +128,14 @@ function main(argv: string[]): number {
   return 0;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// Bundler-friendly direct-entry guard (gap-shipped-ts-files-are-not-bundled-80-raw-typescript-in-the-
+// artifact): when checker-cost is BUNDLED into another tool (e.g. ready-pool-check), the inlined
+// module shares the bundle's import.meta.url, so URL equality would falsely fire. Basename match
+// distinguishes running checker-cost itself from being inlined into another entry.
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href &&
+  path.basename(process.argv[1]).replace(/\.(?:js|ts|mjs)$/, "") === "checker-cost"
+) {
   process.exitCode = main(process.argv.slice(2));
 }

@@ -50,9 +50,11 @@ import {
   setTaskStatus,
   applyPromotions,
   computeSuiteBlocking,
+  isDirectoryGlob,
   consecutiveRedRounds,
   collectFailureFiles,
   isRedRound,
+  isExperimentRound,
   readJsonLines,
   readVerificationRounds,
   readStateFailures,
@@ -60,6 +62,9 @@ import {
   RED_WINDOW_MIN_DEFAULT,
   isSuiteFixTask,
   exemptFromSuiteBlocking,
+  buildCommitTraceIndex,
+  commitSubjectTracesTask,
+  commitTraceLanded,
 } from "../scripts/ready-pool-check.ts";
 import { parseTask } from "../scripts/task-schema.ts";
 import { taskWorkLanded } from "../scripts/task-status-drift-check.ts";
@@ -320,6 +325,113 @@ test("ready pool excludes a prose-heavy DONE-FLIP via git-history, keeps git-his
   assert.equal(r.ready.includes("gap-unstarted"), true, "a genuinely-unstarted ready task stays in the pool");
 });
 
+// ── COMMIT-TRACE signal (gap-nyf-branch-existence-vs-commit-trace) ────────────────────────────────
+// The not-yet-flipped criterion used to depend on TRANSIENT artifacts: the task/<id> branch existing
+// and unmerged (a branch merged+DELETED makes that signal vanish), and a git-history signal hardcoded
+// to `master` (STALE under the two-line branch model — integration-landed commits invisible to it).
+// Both hid "work already landed, still ready" tasks — the 16 phantom ready tasks (2026-08-11), each
+// verified via `git log --all | grep -E "inner: <id>|fan-in: task/<id>"`. The COMMIT-TRACE signal is
+// PERSISTENT (commit SUBJECTS survive branch deletion) and reads `--all` (covers the integration
+// fan-in). AC2: `inner: <id>` / `fan-in: task/<id>` commit ⇒ work landed ⇒ not dispatchable. AC3: the
+// "别改它" stuck-work guard (gap-ready-pool-worklanded-traps-stuck-work) is preserved — a traced task
+// whose ACs are far from complete stays dispatchable.
+
+test("commitSubjectTracesTask: inner:/fan-in: subject forms trace the task; mere id mentions do not (AC2)", () => {
+  const id = "gap-ac36-recommended-exposes-sort-key";
+  // positive: the four live commit conventions.
+  assert.equal(commitSubjectTracesTask(`inner: ${id} — impl landed`, id), true, "inner: <id> form");
+  assert.equal(commitSubjectTracesTask(`fan-in: task/${id}`, id), true, "fan-in: task/<id> form");
+  assert.equal(commitSubjectTracesTask(`merge: fan-in task/${id} — per-hunk union`, id), true, "merge: fan-in task/<id> form");
+  assert.equal(commitSubjectTracesTask(`merge: fan-in ${id} (A6, task-file evidence)`, id), true, "bare merge: fan-in <id> form");
+  // negative: the id merely MENTIONED elsewhere in a subject is NOT a trace (position-based judgment —
+  // e.g. an outer: closure commit listing many ids must not fire for each).
+  assert.equal(commitSubjectTracesTask(`outer: closure pass 16 tasks — ${id}/fifty-to-six/install → done`, id), false, "id in a list is not a trace");
+  // negative: prefix cross-fire — a LONGER sibling id must not trace a shorter id (delimited word).
+  assert.equal(commitSubjectTracesTask(`inner: ${id}-sibling — impl`, id), false, "longer id must not trace the shorter prefix");
+  assert.equal(commitSubjectTracesTask(`fan-in task/${id}-sibling`, id), false, "longer fan-in id must not trace the shorter prefix");
+  // negative: the git-history merge format the OTHER signal handles (`merge web-board: …`) is not a trace.
+  assert.equal(commitSubjectTracesTask("merge web-board: /board route joins intent/execution/landing", "gap-web-board-needs-an-inconsistency-verdict-it-does-not-have"), false);
+});
+
+test("buildCommitTraceIndex: fail-closed on a non-git root (empty, never throws)", (t) => {
+  const root = makeWorkspace("ct-nongit");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  assert.deepEqual(buildCommitTraceIndex(root), [], "non-git root ⇒ empty index");
+  assert.equal(commitTraceLanded("gap-any", buildCommitTraceIndex(root)), false, "empty index never traces");
+});
+
+test("commit-trace nyf: branch merged+DELETED on integration (master stale) ⇒ done-flip not dispatchable, stuck-work stays, untraced stays (AC2/AC3)", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `ready-pool-ct-${Date.now()}-`));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  fs.mkdirSync(path.join(root, "code"), { recursive: true });
+  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  git("init", "-b", "master", "-q", ".");
+  git("config", "user.email", "test@example.com");
+  git("config", "user.name", "Test");
+  fs.writeFileSync(path.join(root, ".gitkeep"), "base\n");
+  git("add", ".");
+  git("commit", "-q", "-m", "base");
+  // The two-line branch model: work lands on integration; master STAYS at base (stale) — so the
+  // master-based git-history signal (gitHistoryLanded) sees NONE of it. Only the commit-trace signal
+  // (reads --all) can see the integration fan-in.
+  git("checkout", "-q", "-b", "integration");
+  // TRACED DONE-FLIP: work landed via `inner:` impl commit + `fan-in: task/<id>` merge on integration,
+  // branch then DELETED (the transient branch-existence signal vanishes — the commit trace persists).
+  writeTask(root, "gap-traced-done-flip", {
+    status: "ready",
+    labels: ["gap"],
+    body: fourArtifactBody({ checkedAc: 3, touches: ["- code/impl.ts"] }), // prose AC (no backticked symbols), existing-file touch
+  });
+  git("add", ".");
+  git("commit", "-q", "-m", "task file gap-traced-done-flip");
+  git("checkout", "-q", "-b", "task/gap-traced-done-flip");
+  fs.writeFileSync(path.join(root, "code", "impl.ts"), "export const impl = 1;\n");
+  git("add", ".");
+  git("commit", "-q", "-m", "inner: gap-traced-done-flip — impl landed on integration");
+  git("checkout", "-q", "integration");
+  git("merge", "--no-ff", "task/gap-traced-done-flip", "-m", "fan-in: task/gap-traced-done-flip", "-q");
+  git("branch", "-D", "task/gap-traced-done-flip");
+  // TRACED STUCK-WORK: also has an `inner:` commit (and a `merge: fan-in task/<id>` merge) but ACs far
+  // from complete → real remaining implementation → STAYS dispatchable (the "别改它" stuck-work guard).
+  writeTask(root, "gap-traced-stuck", {
+    status: "ready",
+    labels: ["gap"],
+    body: fourArtifactBody({ checkedAc: 0, touches: ["- code/impl-stuck.ts"] }),
+  });
+  git("add", ".");
+  git("commit", "-q", "-m", "task file gap-traced-stuck");
+  git("checkout", "-q", "-b", "task/gap-traced-stuck");
+  fs.writeFileSync(path.join(root, "code", "impl-stuck.ts"), "export const stuck = 1;\n");
+  git("add", ".");
+  git("commit", "-q", "-m", "inner: gap-traced-stuck — partial impl");
+  git("checkout", "-q", "integration");
+  git("merge", "--no-ff", "task/gap-traced-stuck", "-m", "merge: fan-in task/gap-traced-stuck", "-q");
+  git("branch", "-D", "task/gap-traced-stuck");
+  // UNTRACED: no inner:/fan-in: commit anywhere → genuinely fresh ready work.
+  writeTask(root, "gap-unstarted", { status: "ready", labels: ["gap"], body: fourArtifactBody({ touches: ["- code/never.ts"] }) });
+  git("add", ".");
+  git("commit", "-q", "-m", "task file gap-unstarted");
+
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root });
+  const byId = Object.fromEntries(r.excluded.map((e) => [e.id, e.reasons]));
+  // AC2 verification anchor (a): branch merged+DELETED, but the commit trace persists on integration
+  // (invisible to the stale-master git-history signal) ⇒ the done-flip task is NOT dispatchable.
+  assert.ok(
+    byId["gap-traced-done-flip"]?.includes("not-yet-flipped"),
+    "traced done-flip task excluded via commit-trace (master stale, branch deleted)",
+  );
+  assert.equal(r.ready.includes("gap-traced-done-flip"), false, "traced done-flip NOT in the dispatchable pool");
+  // "别改它" (gap-ready-pool-worklanded-traps-stuck-work): a traced task whose ACs are far from complete
+  // is STUCK-WORK with real remaining implementation → stays dispatchable (the commit-trace signal does
+  // NOT bypass the AC gate).
+  assert.equal(byId["gap-traced-stuck"], undefined, "traced-but-AC-incomplete task is stuck-work → not excluded");
+  assert.equal(r.ready.includes("gap-traced-stuck"), true, "traced stuck-work stays in the dispatchable pool");
+  // a genuinely un-traced ready task stays dispatchable (negative control).
+  assert.equal(byId["gap-unstarted"], undefined, "untraced ready task not excluded");
+  assert.equal(r.ready.includes("gap-unstarted"), true, "untraced ready task stays in the dispatchable pool");
+});
+
 test("isFixture / isParked / notYetFlipped unit behavior", (t) => {
   const root = makeWorkspace("n-y-f");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -452,6 +564,85 @@ test("AC-complete signal is a UNION not a replace: partial/zero/non-ready NOT su
   // Neither signal fires → stays in the pool.
   const pending = { status: "ready", body: fourArtifactBody({ touches: ["- code/never.ts"] }) };
   assert.equal(notYetFlipped(pending, root), false, "neither signal fires → stays in the pool");
+});
+
+// ── no-AC-section fallback (gap-git-history-landed-master-stale-under-two-line-model AC4) ──────────
+// A task with NO `## Acceptance Criteria` checkboxes (total=0) is STRUCTURALLY unable to tick ACs:
+// allAcsChecked is恒 false, so it could never be a done-flip through the checkbox signals and would
+// sit in the ready pool forever (measured 2026-08-11: last-pane / suite-red — the closure probe's
+// systematic undercount). The fallback: when its work HAS landed, the landing itself is its closeout
+// signal — total===0 joins the all-checked / >50% gate. A no-AC task whose work has NOT landed stays
+// dispatchable (stuck-work protection intact).
+
+test("no-AC-section fallback: landed no-AC task is a done-flip; unlanded no-AC task stays in the pool (AC4)", (t) => {
+  const root = makeWorkspace("no-ac");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // Work landed via a (new)-marked touch file that now exists → no-AC task is a done-flip candidate.
+  fs.writeFileSync(path.join(root, "code", "last-pane.ts"), "export const lastPane = 1;\n");
+  const landedNoAc = {
+    status: "ready",
+    body: "## Touches\n- code/last-pane.ts (new)\n## Definition of Done\nstandard",
+  };
+  assert.equal(notYetFlipped(landedNoAc, root), true,
+    "no-AC task whose work has landed is a done-flip candidate (AC4)");
+  // Work NOT landed → no-AC task stays in the dispatchable pool.
+  const unlandedNoAc = {
+    status: "ready",
+    body: "## Touches\n- code/never.ts (new)\n## Definition of Done\nstandard",
+  };
+  assert.equal(notYetFlipped(unlandedNoAc, root), false,
+    "no-AC task whose work has NOT landed stays in the pool (AC4)");
+  // A no-AC section entirely ABSENT (extractSection → null) behaves the same as prose-with-no-boxes.
+  const noAcSection = {
+    status: "ready",
+    body: "## Proposal\nA real proposal paragraph that is more than forty non-whitespace chars.\n## Touches\n- code/never.ts (new)\n",
+  };
+  assert.equal(notYetFlipped(noAcSection, root), false,
+    "absent AC section + unlanded work stays in the pool (AC4)");
+});
+
+test("ready pool: a no-AC task whose work lands on INTEGRATION is a done-flip (two-line model + AC4)", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `ready-pool-2line-${Date.now()}-`));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  fs.mkdirSync(path.join(root, "code"), { recursive: true });
+  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  git("init", "-b", "master", "-q", ".");
+  git("config", "user.email", "test@example.com");
+  git("config", "user.name", "Test");
+  fs.writeFileSync(path.join(root, ".gitkeep"), "base\n");
+  git("add", ".");
+  git("commit", "-q", "-m", "init");
+  // Two-line model: the working line is integration (master stays stale behind it).
+  git("checkout", "-q", "-b", "integration");
+  // A no-AC task: no ## Acceptance Criteria section — structurally unable to tick ACs.
+  writeTask(root, "gap-last-pane-telemetry", {
+    status: "ready",
+    labels: ["gap"],
+    body: [
+      "**type:** execution",
+      "## Proposal",
+      "A real proposal paragraph that is definitely more than forty non-whitespace chars.",
+      "## Touches",
+      "- code/last-pane.ts",
+      "## Definition of Done",
+      "standard DoD — the five clauses; meta-enforcer fixture-pinned.",
+    ].join("\n"),
+  });
+  // Land the work on integration via a fan-in merge that references the task.
+  git("checkout", "-q", "-b", "task/gap-last-pane");
+  fs.writeFileSync(path.join(root, "code", "last-pane.ts"), "export const lastPane = 1;\n");
+  git("add", ".");
+  git("commit", "-q", "-m", "last-pane impl");
+  git("checkout", "-q", "integration");
+  git("merge", "--no-ff", "task/gap-last-pane", "-m", "inner: gap-last-pane-telemetry — emit last-pane evidence", "-q");
+  git("branch", "-D", "task/gap-last-pane");
+
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, integration: "integration" });
+  const byId = Object.fromEntries(r.excluded.map((e) => [e.id, e.reasons]));
+  assert.ok(byId["gap-last-pane-telemetry"]?.includes("not-yet-flipped"),
+    "no-AC task whose work landed on integration is a done-flip (AC4 + two-line model)");
+  assert.equal(r.ready.includes("gap-last-pane-telemetry"), false, "the done-flip task is NOT in the dispatchable pool");
 });
 
 // ── stuck-work vs done-flip (gap-ready-pool-worklanded-traps-stuck-work) ──────────────────────────
@@ -1737,6 +1928,125 @@ test("exemptFromSuiteBlocking / isSuiteFixTask: suite-fix marker + failure-hit A
   assert.equal(exemptFromSuiteBlocking(suiteFixTask, "gap-install-family-tests", false), false, "marker alone (no failure-hit) never exempts — not the one fixing THIS red");
 });
 
+test("computeSuiteBlocking: controlled-experiment round (laneCount ≠ default) excluded from consecutive-red (AC2/AC3 — gap-suite-blocking-experiment-rounds-count-toward-consecutive-red)", () => {
+  // r268 was a one-off CONTROLLED EXPERIMENT (lane-8 comparison, --lane-count 8 vs the nproc-derived
+  // default 4): its red is an experiment finding, not a regression — it must not push the consecutive-
+  // red window. Mechanically identifiable: laneCount ≠ defaultLane. The `defaultLane` fixture default
+  // (4) is hermetic — host-nproc independent; the experiment lane 8 is the r268 shape.
+  const defaultLane = 4;
+  const expLane = 8;
+  const tasks = new Map([
+    ["gap-wd", { status: "ready", body: "## Touches\n- code/wd.ts" }],
+  ]);
+  const expand = (globs) => new Set(globs);
+
+  // isExperimentRound predicate: only an EXPLICIT non-default laneCount marks an experiment round.
+  assert.equal(isExperimentRound({ state: "red", laneCount: expLane }, defaultLane), true, "laneCount ≠ default ⇒ experiment round");
+  assert.equal(isExperimentRound({ state: "red", laneCount: defaultLane }, defaultLane), false, "laneCount === default ⇒ real round");
+  assert.equal(isExperimentRound({ state: "red" }, defaultLane), false, "no laneCount (legacy row) ⇒ NOT an experiment round — keeps counting");
+
+  // AC2: [experiment red, real red, real red] ⇒ consecutive_red = 2 (the experiment round does not
+  // count) and the window (min 3) does NOT activate — the r268 lane-8 probe no longer pushes it to
+  // activation (the r268+r269+r270 ⇒ 3-window self-lock case becomes r269+r270 ⇒ 2).
+  const mixed = computeSuiteBlocking({
+    rounds: [
+      { round: 268, state: "red", reason: "failed", laneCount: expLane, failures: [{ file: "code/exp.ts" }] },
+      { round: 269, state: "red", reason: "failed", laneCount: defaultLane, failures: [{ file: "code/wd.ts" }] },
+      { round: 270, state: "red", reason: "failed", laneCount: defaultLane, failures: [{ file: "code/wd.ts" }] },
+    ],
+    stateFailures: [],
+    tasks,
+    expand,
+    minRedWindow: 3,
+    defaultLane,
+  });
+  assert.equal(mixed.consecutiveRed, 2, "[exp, real, real] ⇒ consecutive_red = 2 (experiment round excluded from the count)");
+  assert.equal(mixed.windowActive, false, "2 < min 3 ⇒ window NOT active (the r268 case: self-lock released)");
+
+  // AC3 negative-control shape: [real ×3] (all default lane) still counts 3 and activates the window.
+  const real3 = computeSuiteBlocking({
+    rounds: Array.from({ length: 3 }, (_, i) => ({ round: 271 + i, state: "red", reason: "failed", laneCount: defaultLane, failures: [{ file: "code/wd.ts" }] })),
+    stateFailures: [],
+    tasks,
+    expand,
+    minRedWindow: 3,
+    defaultLane,
+  });
+  assert.equal(real3.consecutiveRed, 3, "[real ×3] ⇒ 3 (default-lane real reds still accumulate)");
+  assert.equal(real3.windowActive, true);
+  assert.ok(real3.ids.has("gap-wd"), "a real-red window still attributes the failure to the Touches-hitting task");
+
+  // "skip" semantics pinned: an experiment round in the MIDDLE of real reds is transparent — it
+  // neither counts nor breaks the window (the same rounds with a genuine green would reset to 0).
+  const middle = computeSuiteBlocking({
+    rounds: [
+      { round: 275, state: "red", reason: "failed", laneCount: defaultLane, failures: [{ file: "code/wd.ts" }] },
+      { round: 276, state: "red", reason: "failed", laneCount: expLane, failures: [{ file: "code/exp.ts" }] },
+      { round: 277, state: "red", reason: "failed", laneCount: defaultLane, failures: [{ file: "code/wd.ts" }] },
+    ],
+    stateFailures: [],
+    tasks,
+    expand,
+    minRedWindow: 3,
+    defaultLane,
+  });
+  assert.equal(middle.consecutiveRed, 2, "experiment round in the middle is transparent (neither counts nor breaks)");
+});
+
+test("isDirectoryGlob: bare dir / dir/** / no-slash dir are directory globs; concrete files + file wildcards are not (AC2 — gap-suite-blocking-directory-glob-overbroad)", () => {
+  // The crystallization Touches entry `plugin/test/（各 AC 测试）` is a bare trailing-slash directory.
+  assert.equal(isDirectoryGlob("plugin/test/"), true, "trailing-slash bare directory");
+  assert.equal(isDirectoryGlob("plugin/test/**"), true, "explicit dir/** form (what parseTouches turns plugin/test/ into)");
+  assert.equal(isDirectoryGlob("plugin/test"), true, "no-slash bare directory token");
+  assert.equal(isDirectoryGlob("plugin/**"), true, "whole-directory glob");
+  assert.equal(isDirectoryGlob("**"), true, "all-files wildcard is directory-like (non-attributable)");
+  assert.equal(isDirectoryGlob("code/wd.ts"), false, "concrete file");
+  assert.equal(isDirectoryGlob("plugin/test/checker-cost.test.mjs"), false, "concrete file under a directory");
+  assert.equal(isDirectoryGlob("plugin/test/*.test.mjs"), false, "file-scoped wildcard");
+  assert.equal(isDirectoryGlob("send-keys-verified.sh"), false, "bare basename file");
+});
+
+test("computeSuiteBlocking: directory glob does NOT attribute; concrete failing filename still does (AC2/AC3 — gap-suite-blocking-directory-glob-overbroad)", () => {
+  const tasks = new Map([
+    // The crystallization shape: Touches carry concrete script files AND a `plugin/test/` directory
+    // glob (各 AC 测试). A failure under plugin/test/ must NOT be attributed via the dir glob.
+    ["gap-crystal-dir", { status: "ready", body: "## Touches\n- plugin/test/\n- plugin/scripts/capability-catalog.sh" }],
+    // A task whose Touches name the CONCRETE failing file must still be attributed.
+    ["gap-real-blocker", { status: "ready", body: "## Touches\n- plugin/test/checker-cost.test.mjs" }],
+    // A task whose Touches name a FILE-SCOPED wildcard over the failing file must still be attributed.
+    ["gap-wildcard", { status: "ready", body: "## Touches\n- plugin/test/*.test.mjs" }],
+  ]);
+  // A test expander mirroring the prod expandDeclaredTouches for the globs under test: concrete
+  // paths resolve to themselves, file-scoped wildcards expand to the concrete file, and a dir glob
+  // WOULD expand to the file — but computeSuiteBlocking must never let the dir glob reach expand.
+  const expand = (globs) => {
+    const set = new Set();
+    for (const g of globs) {
+      if (g === "plugin/test/*.test.mjs") set.add("plugin/test/checker-cost.test.mjs");
+      else if (g === "plugin/test/**") set.add("plugin/test/checker-cost.test.mjs");
+      else set.add(g);
+    }
+    return set;
+  };
+
+  const redRounds = Array.from({ length: 3 }, (_, i) => ({ round: 290 + i, state: "red", reason: "failed", failures: [{ file: "plugin/test/checker-cost.test.mjs" }] }));
+  const r = computeSuiteBlocking({ rounds: redRounds, stateFailures: [], tasks, expand });
+  assert.equal(r.windowActive, true);
+  assert.ok(!r.ids.has("gap-crystal-dir"), "AC2: a directory glob (plugin/test/) does NOT attribute a failure under that directory");
+  assert.ok(r.ids.has("gap-real-blocker"), "AC3: a task whose Touches name the concrete failing file is still a suite-blocker");
+  assert.ok(r.ids.has("gap-wildcard"), "AC3: a file-scoped wildcard that covers the failing file still attributes");
+
+  // The SAME task attributed when the failure hits one of its CONCRETE touches (only the dir glob is
+  // inert — the concrete script touches still participate).
+  const concreteHit = computeSuiteBlocking({
+    rounds: Array.from({ length: 3 }, (_, i) => ({ round: 293 + i, state: "red", reason: "failed", failures: [{ file: "plugin/scripts/capability-catalog.sh" }] })),
+    stateFailures: [],
+    tasks,
+    expand,
+  });
+  assert.ok(concreteHit.ids.has("gap-crystal-dir"), "a concrete touch of the same task still attributes when hit");
+});
+
 test("computeRelevance: suite-blocking flips blocking true + boosts value (AC2/AC3 unit)", () => {
   const empty = new Map();
   // without the signal: plain 1-touch task values at costBenefit 1, blocking false.
@@ -1840,6 +2150,31 @@ test("analyzeTasks: suite red ⇒ suite-fix family dispatchable, unrelated task 
   assert.deepEqual(r.suite_blocking.failure_files, ["plugin/test/install-family.test.mjs"]);
 });
 
+test("analyzeTasks: dir-glob Touches task is NOT suite-blocking in a red window; concrete-file task is (AC4 negative control — gap-suite-blocking-directory-glob-overbroad)", (t) => {
+  const root = makeWorkspace("glob-neg");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // The crystallization shape: Touches carry a concrete script AND the `plugin/test/` directory glob.
+  writeTask(root, "gap-crystal-dir", { status: "ready", labels: ["gap"], body: fourArtifactBody({ touches: ["- plugin/test/", "- plugin/scripts/capability-catalog.sh"] }) });
+  // A task whose Touches name the CONCRETE failing file under that directory.
+  writeTask(root, "gap-real-blocker", { status: "ready", labels: ["gap"], body: fourArtifactBody({ touches: ["- plugin/test/checker-cost.test.mjs"] }) });
+  // The directory must EXIST with the failing file on disk — otherwise the dir glob expands to an
+  // empty set and the test cannot distinguish the fixed (dir glob filtered) from the buggy (dir glob
+  // attributed) behavior. This mirrors the real repo where plugin/test/ is a real directory.
+  fs.mkdirSync(path.join(root, "plugin", "test"), { recursive: true });
+  fs.writeFileSync(path.join(root, "plugin", "test", "checker-cost.test.mjs"), "// fixture\n");
+  const opts = { tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 };
+
+  // 3 consecutive red rounds whose ONLY failing file is under plugin/test/ — the real-repo shape
+  // where the crystallization task used to be a false suite-blocker.
+  writeRounds(root, Array.from({ length: 3 }, (_, i) => ({ round: 320 + i, state: "red", reason: "failed", fail: 1, failures: [{ file: "plugin/test/checker-cost.test.mjs", line: "x" }] })));
+  writeState(root, [{ file: "plugin/test/checker-cost.test.mjs", line: "x" }]);
+  const r = analyzeTasks(opts);
+  assert.equal(r.suite_blocking.window_active, true);
+  assert.deepEqual(r.suite_blocking.tasks, ["gap-real-blocker"], "only the concrete-file task is suite-blocking — the dir-glob task is NOT (AC4 negative control)");
+  const crystal = r.ready_relevance.find((e) => e.id === "gap-crystal-dir");
+  assert.equal(crystal.blocking_suite, false, "the dir-glob task's blocking_suite stays false in a red window");
+});
+
 test("AC5: suite-blocking obligation recorded mechanically in the obligation ledger (JSONL)", (t) => {
   // The ledger is at <repoRoot>/orchestration/manager-obligation-ledger.jsonl — the AC5 deliverable:
   // the "suite-blocker can't get prioritized" obligation is now MECHANICALLY derivable (ready-pool-
@@ -1856,4 +2191,101 @@ test("AC5: suite-blocking obligation recorded mechanically in the obligation led
   for (const key of ["tick", "id", "condition", "reading", "note"]) {
     assert.ok(suite[key] !== undefined && suite[key] !== null && suite[key] !== "", `obligation row carries \`${key}\``);
   }
+});
+
+// ── PROSE-PREREQUISITE GAP (gap-prerequisite-gates-prose-invisible-to-mechanisms) ──────────────────
+// A prerequisite written ONLY as prose (a `[[task-id]]` wikilink inside a "Do not dispatch until …
+// lands / 前置" paragraph) is invisible to every mechanism path that reads relation edges
+// (parent/children/depends_on). The detector makes it FAIL-CLOSED: a ready task with a prose prereq
+// that has NO relation edge is excluded from the dispatchable pool, and a todo candidate with the
+// same shape is ineligible for author→ready promotion.
+
+const PREREQ_BODY = (prereqIds, { withEdge = false } = {}) => {
+  const lines = [
+    "**type:** execution",
+    "## Proposal",
+    "A real proposal paragraph that is definitely more than forty non-whitespace chars in total length.",
+    `**Do not dispatch until all of these have landed**: ${prereqIds.map((p) => `[[${p}]]`).join(", ")}.`,
+    "## Contract",
+    "measure   ready_pool = `node plugin/scripts/ready-pool-check.ts` stdout 的 pool 字段",
+    "band      ready_pool = true",
+    "invoke    `node plugin/scripts/ready-pool-check.ts`",
+    "control   ok",
+    "resume    前置任务全 done 后才 dispatch",
+    "## Acceptance Criteria",
+    "- [ ] an AC item that is long enough to count as a real acceptance criterion box",
+    "## Definition of Done",
+    "standard DoD — the five clauses; meta-enforcer fixture-pinned, definitely long enough content.",
+  ];
+  return lines.join("\n");
+};
+
+test("ready task with prose prereq and NO relation edge ⇒ excluded from the pool (prose-prereq-no-edge)", (t) => {
+  const root = makeWorkspace("prereq-ready");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // The referenced prereq task exists (so the wikilink resolves) but has NO relation edge to the target.
+  writeTask(root, "gap-prereq-a", { status: "done", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-no-edge", {
+    status: "ready",
+    labels: ["gap"],
+    body: PREREQ_BODY(["gap-prereq-a"]),
+  });
+
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 });
+  const ex = r.excluded.find((e) => e.id === "gap-no-edge");
+  assert.ok(ex, "prose-prereq-no-edge ready task must be in the excluded list");
+  assert.ok(ex.reasons.some((s) => s.includes("前置")), `exclusion reason must carry the 前置 literal, got: ${ex.reasons.join(";")}`);
+  assert.equal(r.ready.includes("gap-no-edge"), false, "the task must NOT be in the dispatchable ready pool");
+});
+
+test("prose prereq that IS a relation edge (depends_on) ⇒ NOT excluded; depsReady checks depends_on", (t) => {
+  const root = makeWorkspace("prereq-edge");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-prereq-a", { status: "done", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-prereq-b", { status: "todo", labels: ["gap"], body: fourArtifactBody() });
+  // The prose prereq is ALSO expressed as a depends_on edge (done) ⇒ no gap, stays dispatchable.
+  writeTask(root, "gap-edged-ready", {
+    status: "ready",
+    labels: ["gap"],
+    parent: null,
+    children: [],
+    body: PREREQ_BODY(["gap-prereq-a", "gap-prereq-b"]),
+  });
+  // Add depends_on AFTER writeTask by patching the file (writeTask has no dependsOn param).
+  const file = path.join(root, "tasks", "gap-edged-ready.md");
+  const raw = fs.readFileSync(file, "utf8").replace("parent: null", "depends_on:\n  - gap-prereq-a\n  - gap-prereq-b\nparent: null");
+  fs.writeFileSync(file, raw);
+
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 });
+  assert.equal(r.ready.includes("gap-edged-ready"), true, "prose prereq ALSO expressed as an edge stays dispatchable");
+  assert.equal(r.excluded.some((e) => e.id === "gap-edged-ready"), false);
+
+  // depsReady: gap-prereq-a done + gap-prereq-b todo ⇒ the todo candidate is NOT deps-ready.
+  writeTask(root, "gap-child-cand", { status: "todo", labels: ["gap"], parent: null, children: [], body: PREREQ_BODY([]) });
+  const file2 = path.join(root, "tasks", "gap-child-cand.md");
+  const raw2 = fs.readFileSync(file2, "utf8").replace("parent: null", "depends_on:\n  - gap-prereq-a\n  - gap-prereq-b\nparent: null");
+  fs.writeFileSync(file2, raw2);
+  const r2 = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 });
+  const cand = r2.candidates.find((c) => c.id === "gap-child-cand");
+  assert.equal(cand.depsReady, false, "a depends_on entry not done ⇒ deps NOT ready (parent alone no longer the only dep)");
+});
+
+test("todo candidate with prose prereq and NO edge ⇒ ineligible for promotion (author→ready fail-closed)", (t) => {
+  const root = makeWorkspace("prereq-promo");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-prereq-a", { status: "done", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-cand", {
+    status: "todo",
+    labels: ["gap"],
+    parent: null,
+    children: [],
+    body: PREREQ_BODY(["gap-prereq-a"]),
+  });
+
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1, targetedId: "gap-cand" });
+  assert.equal(r.targeted_promotion.eligible, false, "targeted promotion must reject prose-prereq-no-edge");
+  assert.deepEqual(r.targeted_promotion.checks.prosePrereqGap, ["gap-prereq-a"], "the gap names the missing edge");
+  const cand = r.candidates.find((c) => c.id === "gap-cand");
+  assert.equal(cand.eligible, false, "bulk promotion must reject prose-prereq-no-edge");
+  assert.deepEqual(cand.prosePrereqGap, ["gap-prereq-a"]);
 });
