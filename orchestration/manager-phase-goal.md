@@ -137,6 +137,13 @@ manager 是交付物但不是典型开发过程组件。** 三层统一里 manag
 2. 打了该 label 的任务，在 `--json` 的 `recommended` 里**位次严格前移**（负控制：不打 label 的同族任务位次不变）；
 3. **端到端**：给本阶段任一 AC 的实现任务打上该 label 后，**下一次 inner 派发即取它**（时间戳可核）。
 
+> **判据② 已机械化（gap-ac36-recommended-exposes-sort-key, 2026-08-11）**：判据② 原本只能人工跑两次比对——
+> `--json` 的 `recommended` 是纯字符串数组，不暴露排序字段。修后 `slot-refill --json` **另发 `ranking` 数组**
+> （`[{id, rank, axis, deliveryCritical, suiteBlocking}]`，与 `recommended` 同序），由
+> `plugin/scripts/ac36-sortkey-criterion-check.ts` **机械断言**：ranking 是精确的排序键
+> （blocking_suite ↓, delivery_critical ↓, id ↑），违规按判据腿归类报出（DC 严格前移 / 同族非 DC 位次不变 /
+> blocking_suite 之上）。「判据② 由检查器机械核、非人工比对」不再是自述。
+
 **驱动路径（人 2026-08-10 裁定的通道）**：由 **outer 直接发消息给 inner 要求排入**——
 这条通道人明确指出「不太可靠但存在」，**本条正是用它把"可靠通道"本身做出来**。
 

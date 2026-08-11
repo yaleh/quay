@@ -284,6 +284,16 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
   // While halted, no candidate is recommended at all — the human's stop supersedes the pool.
   // (Pool stats are still reported for visibility; the dispatch recommendation is empty.)
   let recommended = [];
+  // AC36 SORT-KEY EXPOSURE (tasks/gap-ac36-recommended-exposes-sort-key AC2): `recommended` stays a
+  // STRING array (backward-compat — every consumer from the B9 force-dispatch branch to existing
+  // tests reads string ids), and a PARALLEL `ranking` array exposes each recommended entry's sort
+  // keys as an OBJECT { id, rank, axis, deliveryCritical, suiteBlocking }. This is what makes AC36
+  // criterion ② mechanically checkable (gap-ac36-delivery-critical-priority-axis): a checker can
+  // assert "delivery-critical strictly forward + same-family non-DC unchanged + blocking_suite
+  // above" from ONE --json run instead of a human before/after comparison. `axis` is the dominant
+  // sort axis: blocking_suite > delivery_critical > id (a suite-blocking delivery-critical task is
+  // reported as blocking_suite — the axis that actually placed it).
+  let ranking = [];
   if (!halt.halted) {
     const sharedFiles = walkFiles(root);
     const expand = (globs) => expandDeclaredTouches(globs, root, sharedFiles);
@@ -349,6 +359,18 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
     });
     const { batch } = assembleBatch(candidates, { expand });
     recommended = batch.slice(0, slotsFree);
+    // AC36 SORT-KEY EXPOSURE (gap-ac36-recommended-exposes-sort-key AC2): the parallel ranking
+    // array carrying each recommended entry's sort keys (see the declaration above). Built from the
+    // SAME `recommended` order — ranking[i].id === recommended[i] and ranking[i].rank === i — so a
+    // consumer can mechanically assert the sort key (blocking_suite, delivery_critical, id) holds.
+    const candidateById = new Map(candidates.map((c) => [c.id, c]));
+    ranking = recommended.map((id, idx) => {
+      const cand = candidateById.get(id);
+      const suiteBlocking = suiteBlockingIds.has(id);
+      const deliveryCritical = Boolean(cand && cand.deliveryCritical);
+      const axis = suiteBlocking ? "blocking_suite" : deliveryCritical ? "delivery_critical" : "id";
+      return { id, rank: idx, axis, deliveryCritical, suiteBlocking };
+    });
   }
 
   // should_refill — the event-driven go/no-go. Based on the RECOMMENDED set (candidates that pass
@@ -419,6 +441,11 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
     should_refill: shouldRefill,
     no_refill_reason: noRefillReason,
     recommended,
+    // AC36 SORT-KEY EXPOSURE (gap-ac36-recommended-exposes-sort-key AC2): the parallel array that
+    // carries each recommended entry's sort keys ({ id, rank, axis, deliveryCritical, suiteBlocking })
+    // so AC36 criterion ② is mechanically checkable from one --json run. Empty when halted (mirrors
+    // recommended). `recommended` itself is unchanged (string ids, backward-compatible).
+    ranking,
     scanned: pool.scanned,
   };
 }

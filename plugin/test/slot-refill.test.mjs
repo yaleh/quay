@@ -40,6 +40,11 @@ import {
   isNotYetFlippedSkip,
   hasFanInMerge,
 } from "../scripts/slot-refill.ts";
+// AC36 SORT-KEY EXPOSURE + CRITERION-② CHECKER (tasks/gap-ac36-recommended-exposes-sort-key AC2/AC3):
+// the mechanical checker that asserts the (blocking_suite, delivery_critical, id) sort key from the
+// `ranking` array slot-refill now emits — making AC36 criterion ② ("labeled tasks strictly move
+// forward; negative control: same-family unlabeled positions unchanged") mechanically checkable.
+import { checkCriterion2 } from "../scripts/ac36-sortkey-criterion-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -779,6 +784,199 @@ test("DELIVERY-CRITICAL — end-to-end: after labeling, the next refill evaluati
   assert.ok(afterRank < beforeRank, `rank strictly improves: before ${beforeRank} → after ${afterRank}`);
   assert.equal(after.recommended[0], "ac36-e2e", "the next refill would dispatch the labeled task first");
   assert.ok(Date.now() >= labelTs, "dispatch evaluation happens after the label is applied (ts order)");
+});
+
+// ── SORT-KEY EXPOSURE (tasks/gap-ac36-recommended-exposes-sort-key AC2) ─────────────────────────────
+// AC36 criterion ② ("打了 label 的任务在 --json 的 recommended 里位次严格前移；负控制：不打 label 的同族任务位次
+// 不变") was NOT mechanically checkable because `recommended` was a plain STRING array exposing no sort
+// field — a human had to run the CLI twice and eyeball positions. AC2 fix: slot-refill now emits a
+// PARALLEL `ranking` array (one OBJECT per recommended entry: { id, rank, axis, deliveryCritical,
+// suiteBlocking }), keeping `recommended` itself a backward-compatible string array. These tests pin
+// the exposure: ranking parallels recommended, each entry carries the sort keys, the axes are
+// correct (blocking_suite > delivery_critical > id), and the CLI --json carries the ranking.
+
+test("SORT-KEY EXPOSURE — analyzeSlotRefill emits a parallel ranking array exposing each entry's sort keys (AC2)", (t) => {
+  const root = makeWorkspace("sortkey");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "ac36-aaa", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/aaa.ts (new)"]) });
+  writeTask(root, "ac36-bbb", { status: "ready", labels: ["gap", "delivery-critical"], body: dispatchableBody(["- code/bbb.ts (new)"]) });
+  writeTask(root, "ac36-ccc", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/ccc.ts (new)"]) });
+  const opts = { tasksDir: path.join(root, "tasks"), root, cap: 3 };
+
+  const r = analyzeSlotRefill(opts);
+  // recommended stays the backward-compatible STRING array (B9 force-dispatch + existing tests read it).
+  assert.deepEqual(r.recommended, ["ac36-bbb", "ac36-aaa", "ac36-ccc"], "recommended unchanged (string ids, DC first)");
+  // ranking parallels recommended — one object per id, SAME order.
+  assert.ok(Array.isArray(r.ranking), "ranking is an array");
+  assert.equal(r.ranking.length, r.recommended.length, "ranking length matches recommended");
+  assert.deepEqual(r.ranking.map((e) => e.id), r.recommended, "ranking[i].id === recommended[i]");
+  assert.deepEqual(r.ranking.map((e) => e.rank), [0, 1, 2], "rank is the array index");
+  // Each entry exposes the sort keys: id / rank / axis / deliveryCritical / suiteBlocking.
+  assert.deepEqual(r.ranking.find((e) => e.id === "ac36-bbb"), { id: "ac36-bbb", rank: 0, axis: "delivery_critical", deliveryCritical: true, suiteBlocking: false });
+  assert.deepEqual(r.ranking.find((e) => e.id === "ac36-aaa"), { id: "ac36-aaa", rank: 1, axis: "id", deliveryCritical: false, suiteBlocking: false });
+  assert.deepEqual(r.ranking.find((e) => e.id === "ac36-ccc"), { id: "ac36-ccc", rank: 2, axis: "id", deliveryCritical: false, suiteBlocking: false });
+});
+
+test("SORT-KEY EXPOSURE — CLI --json emits ranking as objects carrying the sort keys (AC2 / Contract band: 对象数组或 ranking 数组)", (t) => {
+  const root = makeWorkspace("sortkey-cli");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "ac36-a", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/a.ts (new)"]) });
+  writeTask(root, "ac36-dc", { status: "ready", labels: ["gap", "delivery-critical"], body: dispatchableBody(["- code/dc.ts (new)"]) });
+  const script = path.resolve(__dirname, "..", "scripts", "slot-refill.ts");
+  const out = JSON.parse(execFileSync(
+    process.execPath,
+    ["--no-warnings", "--experimental-strip-types", script, "--root", root, "--cap", "3", "--json"],
+    { encoding: "utf8" },
+  ));
+  assert.ok(Array.isArray(out.ranking), "CLI output carries the ranking array");
+  assert.equal(typeof out.ranking[0], "object", "ranking[0] is an object (the Contract band's 对象数组/ranking 数组)");
+  assert.ok("axis" in out.ranking[0] && "deliveryCritical" in out.ranking[0] && "suiteBlocking" in out.ranking[0], "sort keys exposed");
+  assert.equal(out.ranking[0].id, "ac36-dc", "delivery-critical task ranks first");
+  assert.equal(out.ranking[0].axis, "delivery_critical");
+  assert.deepEqual(out.recommended, ["ac36-dc", "ac36-a"], "recommended stays the string array");
+});
+
+test("SORT-KEY EXPOSURE — a suite-blocking task's ranking entry carries axis=blocking_suite + suiteBlocking=true (AC2)", (t) => {
+  const root = makeWorkspace("sortkey-suite");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "ac36-watchdog", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/wd.ts (new)"]) });
+  writeTask(root, "ac36-dc", { status: "ready", labels: ["gap", "delivery-critical"], body: dispatchableBody(["- code/dc.ts (new)"]) });
+  const opts = { tasksDir: path.join(root, "tasks"), root, cap: 2 };
+  // 3 consecutive red rounds implicating the watchdog task's Touches ⇒ it is a suite-blocker.
+  writeRounds(root, Array.from({ length: 3 }, (_, i) => ({ round: 400 + i, state: "red", reason: "failed", fail: 1, failures: [{ file: "code/wd.ts", line: "x" }] })));
+  writeState(root, [{ file: "code/wd.ts", line: "x" }]);
+  const r = analyzeSlotRefill(opts);
+  assert.equal(r.recommended[0], "ac36-watchdog", "suite-blocker ranks first (above delivery-critical)");
+  const wd = r.ranking.find((e) => e.id === "ac36-watchdog");
+  assert.equal(wd.axis, "blocking_suite", "suite-blocking task's axis is blocking_suite");
+  assert.equal(wd.suiteBlocking, true);
+  const dc = r.ranking.find((e) => e.id === "ac36-dc");
+  assert.equal(dc.axis, "delivery_critical", "delivery-critical task's axis is delivery_critical (below blocking_suite)");
+  assert.equal(dc.suiteBlocking, false);
+  assert.equal(dc.deliveryCritical, true);
+});
+
+// ── CRITERION-② MECHANICAL CHECK (tasks/gap-ac36-recommended-exposes-sort-key AC3) ──────────────────
+// checkCriterion2 reads the ranking array and mechanically asserts the three criterion-② legs:
+// (a) delivery-critical strictly forward (every DC entry ranks before every non-DC entry),
+// (b) negative control (non-DC same-family entries are strictly id-ascending — relative positions
+//     unchanged by a sibling being labeled),
+// (c) blocking_suite above (every suite-blocking entry ranks before every non-suite entry).
+// Plus an optional before/after baseline asserting each DC task's rank strictly decreases after
+// labeling ("打 label 前 → 后位置严格减小"). Fail-closed on a malformed ranking.
+
+test("CRITERION-2 CHECK — passes when the sort key (blocking_suite, delivery_critical, id) holds on a live fixture (AC3)", (t) => {
+  const root = makeWorkspace("ck-pass");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "ac36-sb", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/sb.ts (new)"]) });
+  writeTask(root, "ac36-dc", { status: "ready", labels: ["gap", "delivery-critical"], body: dispatchableBody(["- code/dc.ts (new)"]) });
+  writeTask(root, "ac36-a", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/a.ts (new)"]) });
+  writeTask(root, "ac36-c", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/c.ts (new)"]) });
+  const opts = { tasksDir: path.join(root, "tasks"), root, cap: 4 };
+  writeRounds(root, Array.from({ length: 3 }, (_, i) => ({ round: 500 + i, state: "red", reason: "failed", fail: 1, failures: [{ file: "code/sb.ts", line: "x" }] })));
+  writeState(root, [{ file: "code/sb.ts", line: "x" }]);
+  const r = analyzeSlotRefill(opts);
+  // order: suite-blocker first, then delivery-critical, then non-DC id order.
+  assert.deepEqual(r.recommended, ["ac36-sb", "ac36-dc", "ac36-a", "ac36-c"]);
+  const res = checkCriterion2(r.ranking);
+  assert.equal(res.ok, true, `no criterion-② violation on the correct sort: ${JSON.stringify(res.problems)}`);
+  assert.deepEqual(res.problems, []);
+  assert.equal(res.dcCount, 1);
+  assert.equal(res.suiteCount, 1);
+});
+
+test("CRITERION-2 CHECK — fails on a negative-control violation: non-DC entries not id-ascending (AC3)", () => {
+  const res = checkCriterion2([
+    { id: "z", rank: 0, axis: "id", deliveryCritical: false, suiteBlocking: false },
+    { id: "a", rank: 1, axis: "id", deliveryCritical: false, suiteBlocking: false },
+  ]);
+  assert.equal(res.ok, false);
+  assert.ok(res.problems.some((p) => p.startsWith("negative control:")), `expected negative-control problem, got ${JSON.stringify(res.problems)}`);
+});
+
+test("CRITERION-2 CHECK — fails when a delivery-critical task ranks after a non-DC task (AC3)", () => {
+  const res = checkCriterion2([
+    { id: "aaa", rank: 0, axis: "id", deliveryCritical: false, suiteBlocking: false },
+    { id: "zzz-dc", rank: 1, axis: "delivery_critical", deliveryCritical: true, suiteBlocking: false },
+  ]);
+  assert.equal(res.ok, false);
+  assert.ok(res.problems.some((p) => p.startsWith("delivery-critical strictly forward:")), `expected dc-forward problem, got ${JSON.stringify(res.problems)}`);
+});
+
+test("CRITERION-2 CHECK — fails when a non-suite task ranks above a suite-blocking task (AC3)", () => {
+  const res = checkCriterion2([
+    { id: "plain", rank: 0, axis: "id", deliveryCritical: false, suiteBlocking: false },
+    { id: "sb", rank: 1, axis: "blocking_suite", deliveryCritical: false, suiteBlocking: true },
+  ]);
+  assert.equal(res.ok, false);
+  assert.ok(res.problems.some((p) => p.startsWith("blocking_suite above:")), `expected blocking_suite problem, got ${JSON.stringify(res.problems)}`);
+});
+
+test("CRITERION-2 CHECK — before/after baseline: a DC task's rank strictly decreases after labeling; a non-strict move is caught (AC3)", () => {
+  const before = [
+    { id: "aaa", rank: 0, axis: "id", deliveryCritical: false, suiteBlocking: false },
+    { id: "zzz-dc", rank: 1, axis: "id", deliveryCritical: false, suiteBlocking: false },
+  ];
+  const after = [
+    { id: "zzz-dc", rank: 0, axis: "delivery_critical", deliveryCritical: true, suiteBlocking: false },
+    { id: "aaa", rank: 1, axis: "id", deliveryCritical: false, suiteBlocking: false },
+  ];
+  const ok = checkCriterion2(after, { before });
+  assert.equal(ok.ok, true, `strict move holds (rank 1 → 0): ${JSON.stringify(ok.problems)}`);
+  // Negative control on the strict-move leg: a DC task that does NOT strictly move is caught.
+  const afterBad = [
+    { id: "aaa", rank: 0, axis: "id", deliveryCritical: false, suiteBlocking: false },
+    { id: "zzz-dc", rank: 1, axis: "delivery_critical", deliveryCritical: true, suiteBlocking: false },
+  ];
+  const bad = checkCriterion2(afterBad, { before });
+  assert.equal(bad.ok, false);
+  assert.ok(bad.problems.some((p) => p.startsWith("strict move:")), `expected strict-move problem, got ${JSON.stringify(bad.problems)}`);
+});
+
+test("CRITERION-2 CHECK — fails closed on a malformed ranking; empty ranking passes (AC3 fail-closed)", () => {
+  const missingKey = checkCriterion2([{ id: "a", axis: "id", deliveryCritical: false, suiteBlocking: false }]);
+  assert.equal(missingKey.ok, false);
+  assert.ok(missingKey.problems.some((p) => p.includes("missing required key")), JSON.stringify(missingKey.problems));
+  const rankMismatch = checkCriterion2([{ id: "a", rank: 1, axis: "id", deliveryCritical: false, suiteBlocking: false }]);
+  assert.equal(rankMismatch.ok, false);
+  assert.ok(rankMismatch.problems.some((p) => p.includes("must equal its array index")), JSON.stringify(rankMismatch.problems));
+  const axisInconsistent = checkCriterion2([{ id: "a", rank: 0, axis: "delivery_critical", deliveryCritical: false, suiteBlocking: false }]);
+  assert.equal(axisInconsistent.ok, false);
+  assert.ok(axisInconsistent.problems.some((p) => p.includes("inconsistent with flags")), JSON.stringify(axisInconsistent.problems));
+  assert.equal(checkCriterion2("not-an-array").ok, false);
+  assert.equal(checkCriterion2([]).ok, true, "empty ranking: no entries, nothing to violate");
+});
+
+test("CRITERION-2 CHECK — checker CLI --root exits 0 on a correct fixture; --json-input reads a saved ranking (AC3 end-to-end)", (t) => {
+  const root = makeWorkspace("ck-cli");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "ac36-a", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/a.ts (new)"]) });
+  writeTask(root, "ac36-dc", { status: "ready", labels: ["gap", "delivery-critical"], body: dispatchableBody(["- code/dc.ts (new)"]) });
+  const script = path.resolve(__dirname, "..", "scripts", "ac36-sortkey-criterion-check.ts");
+  const out = execFileSync(
+    process.execPath,
+    ["--no-warnings", "--experimental-strip-types", script, "--root", root, "--cap", "3"],
+    { encoding: "utf8" },
+  );
+  const parsed = JSON.parse(out);
+  assert.equal(parsed.ok, true, `checker CLI passes on the fixture: ${JSON.stringify(parsed.problems)}`);
+  assert.equal(parsed.entryCount, 2);
+  assert.equal(parsed.dcCount, 1);
+  // The slot-refill --json output (a fixture saved to disk) is a valid --json-input for the checker.
+  const slotScript = path.resolve(__dirname, "..", "scripts", "slot-refill.ts");
+  const slotOut = execFileSync(
+    process.execPath,
+    ["--no-warnings", "--experimental-strip-types", slotScript, "--root", root, "--cap", "3", "--json"],
+    { encoding: "utf8" },
+  );
+  const fixture = path.join(root, "slot-refill-output.json");
+  fs.writeFileSync(fixture, slotOut);
+  const fromInput = JSON.parse(execFileSync(
+    process.execPath,
+    ["--no-warnings", "--experimental-strip-types", script, "--json-input", fixture],
+    { encoding: "utf8" },
+  ));
+  assert.equal(fromInput.ok, true, `--json-input read of a saved slot-refill output passes: ${JSON.stringify(fromInput.problems)}`);
 });
 
 // ── NOT-YET-FLIPPED SKIP (tasks/gap-slot-refill-repeats-done-eligible-recommendations) ──────────────
