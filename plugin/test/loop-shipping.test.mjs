@@ -190,6 +190,67 @@ test('AC2 — fast-mode-telemetry.ts has ONE physical copy; plugin/scripts/ is a
   assert.deepEqual(copies, [canonical], `exactly one physical fast-mode-telemetry.ts expected, got ${JSON.stringify(copies)}`);
 });
 
+// ── AC2/AC3 worktree-container controls (gap-loop-shipping-scan-does-not-exclude-worktrees) ────────
+test('AC2 — walk() skips a REAL git worktree (`git worktree list` source): stale refs + a telemetry copy inside it are not scanned', () => {
+  const worktreesDir = path.join(repoRoot, '.claude', 'worktrees');
+  const madeParent = !fs.existsSync(worktreesDir);
+  fs.mkdirSync(worktreesDir, { recursive: true });
+  const wt = path.join(worktreesDir, `ls-control-${process.pid}`);
+  try {
+    execFileSync('git', ['worktree', 'add', '--detach', wt, 'HEAD'], { cwd: repoRoot, stdio: 'pipe' });
+    // The fresh container set must report the registered worktree, and never the main repo root.
+    const containers = worktreeContainerPaths(repoRoot);
+    assert.ok(containers.has(wt), 'a registered git worktree must be reported by worktreeContainerPaths');
+    assert.ok(!containers.has(path.resolve(repoRoot)), 'repoRoot must never be a worktree container');
+    // Stale-path reference + a fast-mode-telemetry.ts copy inside the worktree.
+    fs.writeFileSync(path.join(wt, 'stale-probe.md'), 'old tick-doc path orchestration/orchestrator-loop-tick.md and docs/analysis/fast-mode-loop-tick.md\n');
+    fs.writeFileSync(path.join(wt, 'fast-mode-telemetry.ts'), 'export const worktreeCopy = true;\n');
+    const scanned = walkCorpus(repoRoot, { excluded: exclusionTargets() });
+    assert.ok(!scanned.some((p) => p.startsWith(wt + path.sep)), 'walk() must not scan inside a real git worktree');
+    const copies = scanned.filter((p) => path.basename(p) === 'fast-mode-telemetry.ts' && !fs.lstatSync(p).isSymbolicLink());
+    assert.deepEqual(copies, [path.join(pluginDir, 'scripts', 'fast-mode-telemetry.ts')], 'a git worktree copy of fast-mode-telemetry.ts must not be counted (AC2)');
+  } finally {
+    try { execFileSync('git', ['worktree', 'remove', '--force', wt], { cwd: repoRoot, stdio: 'pipe' }); } catch { /* already gone */ }
+    fs.rmSync(wt, { recursive: true, force: true });
+    if (madeParent) fs.rmSync(worktreesDir, { recursive: true, force: true });
+  }
+});
+
+test('AC2 — walk() skips the .claude/worktrees/ container even for UNREGISTERED residue (the 2026-08-10 agent-* shape)', () => {
+  const worktreesDir = path.join(repoRoot, '.claude', 'worktrees');
+  const madeParent = !fs.existsSync(worktreesDir);
+  fs.mkdirSync(worktreesDir, { recursive: true });
+  const residue = path.join(worktreesDir, `residue-${process.pid}`);
+  try {
+    fs.mkdirSync(residue, { recursive: true });
+    // NOT a registered git worktree (no `.git`): a stale leftover `agent-*`-shaped dir whose content
+    // is a full repo copy — exactly the 2026-08-10 false-red source (agent-a8fd.../README.md). Only
+    // the explicit .claude/worktrees/ container skip catches this (git worktree list does not).
+    fs.writeFileSync(path.join(residue, 'README.md'), 'references orchestration/orchestrator-loop-tick.md\n');
+    fs.writeFileSync(path.join(residue, 'fast-mode-telemetry.ts'), 'export const residueCopy = true;\n');
+    const scanned = walkCorpus(repoRoot, { excluded: exclusionTargets() });
+    assert.ok(!scanned.some((p) => p.startsWith(residue + path.sep)), 'walk() must not scan unregistered residue under .claude/worktrees/');
+    const copies = scanned.filter((p) => path.basename(p) === 'fast-mode-telemetry.ts' && !fs.lstatSync(p).isSymbolicLink());
+    assert.deepEqual(copies, [path.join(pluginDir, 'scripts', 'fast-mode-telemetry.ts')], 'residue fast-mode-telemetry.ts copy must not be counted (AC2)');
+  } finally {
+    fs.rmSync(residue, { recursive: true, force: true });
+    if (madeParent) fs.rmSync(worktreesDir, { recursive: true, force: true });
+  }
+});
+
+test('AC3 — negative control: a REAL old-path reference in the MAIN repo is still caught (normal capture retained)', () => {
+  const probe = path.join(repoRoot, '.loop-shipping-main-repo-probe.md');
+  try {
+    fs.writeFileSync(probe, 'the moved file used to live at orchestration/orchestrator-loop-tick.md\n');
+    const scanned = walkCorpus(repoRoot, { excluded: exclusionTargets() });
+    assert.ok(scanned.includes(probe), 'a probe file in the MAIN repo must be part of the scan corpus (not over-excluded by the worktree skip)');
+    const src = fs.readFileSync(probe, 'utf8');
+    assert.ok(oldPathPatterns.some((re) => re.test(src)), 'the probe old-path reference must trip an AC1b old-path pattern (would be collected as a hit)');
+  } finally {
+    fs.rmSync(probe, { force: true });
+  }
+});
+
 // ── AC7: the shipped plugin subtree excludes per-project state files ───────────────────────────────
 const FORBIDDEN_SUBSTRINGS = ['tick-log.md', 'escalations.md', 'batch2-queue-state.md', 'exp6-', 'ADR-021-'];
 
