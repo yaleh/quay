@@ -31,10 +31,10 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 r266 相分解（static 33/serial 640/lowconc 272/main 650）+ 前提更正（08-09 700s=截断红轮非完整轮）（本任务 Proposal 已含）
-- [ ] AC2: **相级读数入台账**——appendVerificationRound 从日志解析 __OVERHEAD__ 三/四相 *_phase_ms 写入记录
-- [ ] AC3: **可区分截断/完整**——per_test_ms 配相级读数后可区分截断红轮与完整绿轮
-- [ ] AC4: **既有不回归**——`--for-task` scoped 门绿
+- [x] AC1: **复现固化**——任务体记录 r266 相分解（static 33/serial 640/lowconc 272/main 650）+ 前提更正（08-09 700s=截断红轮非完整轮）（本任务 Proposal 已含）
+- [x] AC2: **相级读数入台账**——appendVerificationRound 从日志解析 __OVERHEAD__ 三/四相 *_phase_ms 写入记录
+- [x] AC3: **可区分截断/完整**——per_test_ms 配相级读数后可区分截断红轮与完整绿轮
+- [x] AC4: **既有不回归**——`--for-task` scoped 门绿
 
 ## Definition of Done
 
@@ -57,6 +57,34 @@ invariant truncated_vs_full_distinguishable = 1（per_test_ms 配相级读数可
 invoke    `tail -1 .quay/verification-round.jsonl | python3 -c "import json,sys; r=json.load(sys.stdin); print({k:r.get(k) for k in ['serial_phase_ms','lowconc_phase_ms','main_phase_ms','static_phase_ms']})"`（贴相级读数）
 control   相耗时入台账；截断/完整可区分；既有不回归
 resume    解析 / 入记录 / scoped 门分步提交，任一步完成即写盘
+
+## Execution evidence (inner, 2026-08-11)
+
+**实现**：`appendVerificationRound(stateDir, rec, logFile?)` 新增可选第三参 `logFile`——提供时经 `parsePhaseMsFromLog(logFile)` 解析套件日志的 `__OVERHEAD__ <label>_ms=<N>` 相耗行，把 `run_static_checks_ms→static_phase_ms` / `serial_phase_ms` / `lowconc_phase_ms` / `main_phase_ms` 合并进 verification-round 记录。调用点（full-suite-runner.ts:run）传 `logFile`。非相段（lock_overhead/resource_gate/build_dist/gap_ms_*）与畸形行（ERR-UNSET）被排除。既有 2 参调用（checker-cost/trend-check）不受影响（无 logFile ⇒ 不解析、相字段缺席）。
+
+**Contract invoke（修后实跑，fake-suite 相耗行经 stderr 入日志）**：
+```
+$ tail -1 .quay/verification-round.jsonl | grep -oE "serial_phase_ms|lowconc_phase_ms|main_phase_ms"
+serial_phase_ms
+lowconc_phase_ms
+main_phase_ms
+$ tail -1 .quay/verification-round.jsonl | python3 -c "import json,sys; r=json.load(sys.stdin); print({k:r.get(k) for k in ['serial_phase_ms','lowconc_phase_ms','main_phase_ms','static_phase_ms']})"
+{'serial_phase_ms': 640000, 'lowconc_phase_ms': 272000, 'main_phase_ms': 650000, 'static_phase_ms': 33000}
+$ tail -1 .quay/verification-round.jsonl
+{"round":1,...,"per_test_ms":25.6,"state":"green",...,"static_phase_ms":33000,"serial_phase_ms":640000,"lowconc_phase_ms":272000,"main_phase_ms":650000}
+```
+band 满足（serial+lowconc+main 三者在场）；invariant 满足（e2e 测试证明截断红轮仅 main 在场、serial/lowconc 缺席，与完整绿轮可区分）。
+
+**Scoped 门**：`bash scripts/test.sh --for-task gap-verification-round-missing-phase-ms-breaks-cost-attribution --allow-thin`
+```
+ℹ tests 75   ℹ pass 74   ℹ fail 1   ℹ cancelled 0   duration_ms 41339   EXIT=1
+```
+唯一 fail 为**既有环境性**测试「AC1 — the runner wraps the suite in a systemd-run cgroup scope; the applied limits are visible as durable evidence (real systemd)」（10s poll 等 `suite-cgroup-evidence.txt` 超时）——在 pristine develop（51885b79）同一环境复现相同失败（已实证），与本改动无关（改动只触 appendVerificationRound + 新增解析函数）。排除该测试后整文件 **74/74 绿、0 cancelled、0 skipped**（含新增 3 用例：parsePhaseMsFromLogText 映射 + 完整轮四相在场 + 截断红轮可区分）。
+
+**新增用例**（plugin/test/full-suite-runner.test.mjs，均绿）：
+- AC2 — parsePhaseMsFromLogText maps the four __OVERHEAD__ phase lines and excludes non-phase overhead
+- AC2 — a full round's verification-round record carries the four *_phase_ms parsed from the log
+- AC3 — a truncated kill-on-red round (only main phase ran) is distinguishable: main present, serial/lowconc absent
 
 ## Dispatch review
 
