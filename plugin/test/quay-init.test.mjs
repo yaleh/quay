@@ -141,3 +141,85 @@ test("AC5 — --loop --manager lays all three cores (cold-start readable); quay-
       "the manager core's referenced dep plugin/scripts/quay-session.ts must be laid down");
   } finally { cleanup(ws); }
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
+// gap-quay-init-never-writes-branch-model-config-fork-baseline-merge-target:
+// quay-init.sh's write_provider_config heredoc NEVER wrote fork_baseline/merge_target, so a
+// brand-new host running `quay-init --loop` got loop:{repo_root,test_command,tmux_session,
+// worktree_root} ONLY and dispatch fell back to the pre-cutover master-only model. AC1 (fresh
+// install writes both keys) + Contract measure (source grep ≥ 2) + AC3 (upgrade preserves an
+// existing consumer's values — the manually-configured hosts A/B/ad-arm1 are never re-defaulted).
+// AC2 (negative control — the PRE-fix source wrote no keys) is the manual before-run pasted in the
+// task body: the heredoc's absence is proven by that run, not by a test that could not have run
+// against the pre-fix source.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
+test("AC1 — a FRESH install's generated .quay/config.yml carries fork_baseline/merge_target in the loop section (the branch-model config ships with quay-init)", () => {
+  const ws = makeTmp();
+  try {
+    const r = runInit(ws, INIT_ARGS(ws));
+    assert.equal(r.status, 0, `fresh install must exit 0:\n${r.stderr}`);
+    const cfg = path.join(ws, ".quay", "config.yml");
+    assert.ok(fs.existsSync(cfg), "a fresh install must write .quay/config.yml");
+    const text = fs.readFileSync(cfg, "utf8");
+    assert.match(text, /^\s*fork_baseline: develop$/m,
+      "the fresh config must carry loop.fork_baseline: develop (the current working branch model, not master)");
+    assert.match(text, /^\s*merge_target: integration$/m,
+      "the fresh config must carry loop.merge_target: integration");
+    // The four fast-mode keys must still be present alongside the two branch-model keys.
+    for (const key of ["repo_root", "test_command", "tmux_session", "worktree_root"]) {
+      assert.match(text, new RegExp(`^\\s*${key}:`, "m"), `the fresh config must still carry loop.${key}`);
+    }
+  } finally { cleanup(ws); }
+});
+
+test("Contract measure — quay-init.sh's write_provider_config heredoc carries BOTH keys (config_keys ≥ 2)", () => {
+  const src = path.join(pluginDir, "scripts", "quay-init.sh");
+  const text = fs.readFileSync(src, "utf8");
+  const lines = text.split("\n").filter((l) => l.includes("fork_baseline") || l.includes("merge_target"));
+  assert.ok(lines.length >= 2,
+    `quay-init.sh must mention fork_baseline/merge_target on at least 2 lines (the heredoc writes both keys); got ${lines.length}`);
+  // The actual generated keys live in the heredoc — assert the literal key: value pair exists there.
+  assert.match(text, /^\s*fork_baseline: develop$/m, "the heredoc must spell fork_baseline: develop");
+  assert.match(text, /^\s*merge_target: integration$/m, "the heredoc must spell merge_target: integration");
+});
+
+test("AC3 — the config-preserving upgrade PRESERVES an existing consumer's fork_baseline/merge_target (manually-configured hosts A/B/ad-arm1 are never re-defaulted)", () => {
+  const ws = makeTmp();
+  try {
+    // An organically evolved consumer: custom loop keys + the four fast-mode values, with a
+    // fork_baseline/merge_target that DIFFERS from the fresh-install default (so preservation is
+    // provable — re-stamping the default would be caught by the doesNotMatch below).
+    fs.mkdirSync(path.join(ws, ".quay"), { recursive: true });
+    fs.writeFileSync(path.join(ws, ".quay", "config.yml"), [
+      "providers:",
+      "  native:",
+      "    enabled: true",
+      "    path: /srv/proj/.quay/runtime",
+      "    tasks_dir: /srv/proj/tasks",
+      '    mcp_entry: ["node", "/srv/proj/.quay/runtime/bin/quay-native.js", "mcp"]',
+      "loop:",
+      "  board: native",
+      "  gates: [acceptance]",
+      "  policy: value-typed-ledger",
+      "  fork_baseline: dev-line",
+      "  merge_target: main-line",
+      "  repo_root: /srv/proj",
+      "  test_command: custom-test-cmd",
+      "  tmux_session: proj-session",
+      "  worktree_root: /srv/proj-worktrees",
+      "",
+    ].join("\n"));
+    const r = runInit(ws, INIT_ARGS(ws));
+    assert.equal(r.status, 0, `config-preserving upgrade must exit 0:\n${r.stderr}`);
+    const text = fs.readFileSync(path.join(ws, ".quay", "config.yml"), "utf8");
+    assert.match(text, /^\s*fork_baseline: dev-line$/m,
+      "the upgrade must PRESERVE the consumer's fork_baseline (never re-default it)");
+    assert.match(text, /^\s*merge_target: main-line$/m,
+      "the upgrade must PRESERVE the consumer's merge_target");
+    assert.doesNotMatch(text, /^\s*fork_baseline: develop$/m,
+      "the upgrade must NOT re-stamp the fresh-install default fork_baseline over the consumer's value");
+    // A non-fast-mode custom loop key must survive too (the pre-fix data["loop"] = {...} dropped these).
+    assert.match(text, /^\s*board: native$/m, "the upgrade must keep a non-fast-mode custom loop key (board)");
+    assert.match(text, /^\s*policy: value-typed-ledger$/m, "the upgrade must keep a non-fast-mode custom loop key (policy)");
+  } finally { cleanup(ws); }
+});
