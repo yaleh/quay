@@ -4,7 +4,7 @@ title: threshold-scope-check.test.mjs 套件红 solo 绿——load-flake 第 5
   同族(relation-sync/ create-mcp/proposal-convergence/branch-model 之后);spawnSync×9
   重子进程、@test-group governance 跑 main 相、KNOWN-LOAD-SENSITIVE=0、round-215
   passed=false@7721ms 无断言输出; 处方=收编 KNOWN-LOAD-SENSITIVE + serial 相(前四同族同套路)
-status: ready
+status: done
 labels:
   - gap
   - defect

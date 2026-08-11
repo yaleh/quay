@@ -4,7 +4,7 @@ title: 任务文件 Contract/AC 语法静态违规吃验证机会——近 48h 2
   条失败全是 tasks/*.md 零代码；每 5-6 次验证机会就有 1
   次被前者消耗；「任务文件语法」与「产品代码可用」是两类风险，前者不该有权停掉后者的验证；修法=①降级为只增不减 ratchet 记账不置红，或 ②只阻断
   fan-in 不阻断验证轮
-status: ready
+status: done
 labels:
   - gap
   - defect

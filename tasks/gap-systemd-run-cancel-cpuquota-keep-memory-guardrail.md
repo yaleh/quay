@@ -3,7 +3,7 @@ id: gap-systemd-run-cancel-cpuquota-keep-memory-guardrail
 title: 人的裁定：取消 CPU 配额、保持内存配额——CPUQuota=400%（measure-first 后落实现）、MemoryMax=4G
   不动（OOM 护栏）、TasksMax=200 不动；8 并发差是配额所致非 lane8 本身；r268 两个超时形失败归因配额；先在新配额下跑 lane4
   新基线再重做 lane4 vs lane8 对照
-status: ready
+status: done
 labels:
   - gap
   - defect
