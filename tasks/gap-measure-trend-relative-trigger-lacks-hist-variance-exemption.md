@@ -68,6 +68,14 @@ extra: {}
 
 **注**：本 worktree 从 stale `origin/develop`（2e7ccc5a，缺 d83916e4/c5cb083f 两个同族修复）fork，已将 `measure-trend-check.ts`/`measure-trend-check.test.mjs`/两个同族任务文件同步到当前 develop（b80478db）状态后施加本次修复。
 
+## Evidence（2026-08-11 re-dispatch 重验证）
+
+**重派发背景**：本任务落点提交 `93f87930`（develop 祖先）已含 AC2 修（`rel = !isSmallTest && prevMs > 0 && ratio >= relativeFactor && !withinHistMax`，`withinHistMax` 先于 `rel` 声明避免 TDZ）与 AC3 负控制测试。本次 worktree 从当前 develop（2be095ae）fork，代码即已满足 AC2/AC3，无新增源码 diff——重验证确认实现在场。
+
+**AC2/AC3 重验证（scoped 门）**：`bash scripts/test.sh --for-task gap-measure-trend-relative-trigger-lacks-hist-variance-exemption --allow-thin` → **exit 0，13 pass / 0 fail / 0 cancelled，task-contract-check no violations，violations 0**。两个新增用例绿：`AC2 — in-band relative ≥2× on a large test is NOT flagged (round-199 hist-variance scenario)`（task-check-passthrough 9575→21293 ≤ histMax 23183、acceptance-env 10304→20974 ≤ histMax 21445 ⇒ 0 flag）、`AC3 — relative ≥2× EXCEEDING the historical max still flags (real regression not swallowed)`（a.test 10000→16000→33000 ⇒ 1 growth，reason=relative）。既有 11 用例（小测试豁免、历史方差 absolute 带内/带外、exact-2× control、NO-growth）仍绿 ⇒ AC4 不回归确认。
+
+**AC5**：仍待外层 verification-round 全量套件验证（本内层不勾）。
+
 ## Touches
 
 - plugin/scripts/measure-trend-check.ts（compareLastTwoRounds：relative 触发器加 withinHistMax 守卫，与 absolute 同构）
