@@ -308,3 +308,43 @@ test("AC6: default refs (no --develop/--integration) still return the two-line l
     cleanup(dir);
   }
 });
+
+// ── UNIFIED FORK SOURCE (gap-task-file-develop-integration-drift-fan-in-conflicts, AC2): the
+// task-file-drift ruling — every task worktree forks from integration HEAD (the effective line,
+// matching the fan-in target), regardless of the develop-vs-integration dependency decision.
+// `--force-integration` makes the CLI output the integration ref unconditionally. This is what the
+// tick docs pass so quay's own dispatch never forks a task worktree from develop (whose task files
+// drift behind integration), eliminating the "fork 落后 integration" evidence-segment rebase conflicts.
+
+test("AC2 UNIFIED FORK SOURCE: --force-integration outputs the integration ref for a DISJOINT candidate (no more develop fork)", () => {
+  const dir = makeTmp("force-integration");
+  try {
+    initGitRepo(dir);
+    // The unverified task on integration touches a different file than the candidate.
+    writeTask(dir, "unverified-one", ["packages/quay/src/serve.ts"]);
+    // Candidate touches fork-baseline.ts — DISJOINT from the unverified task, so WITHOUT the flag
+    // it would fork from develop. WITH --force-integration it must fork from integration.
+    writeTask(dir, "candidate-disjoint", ["plugin/scripts/fork-baseline.ts"]);
+
+    const r = runNode([forkBaselineCli, "--root", dir, "--task", join(dir, "tasks", "candidate-disjoint.md"), "--unverified", "unverified-one", "--force-integration"]);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.stdout.trim(), "integration", `--force-integration must fork from integration even for a disjoint candidate: ${r.stdout}`);
+    assert.match(r.stderr, /fork 源统一 = integration HEAD/);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("AC2 UNIFIED FORK SOURCE: --force-integration is REF-AWARE (single-line --develop master --integration master still outputs master)", () => {
+  const dir = makeTmp("force-integration-single");
+  try {
+    initGitRepo(dir);
+    writeTask(dir, "candidate", ["plugin/scripts/fork-baseline.ts"]);
+
+    const r = runNode([forkBaselineCli, "--root", dir, "--task", join(dir, "tasks", "candidate.md"), "--develop", "master", "--integration", "master", "--force-integration"]);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.stdout.trim(), "master", `--force-integration on a single-line workspace must output the configured ref (master), got: ${r.stdout}`);
+  } finally {
+    cleanup(dir);
+  }
+});
