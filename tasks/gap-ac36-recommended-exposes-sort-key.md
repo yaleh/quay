@@ -33,11 +33,11 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 recommended 纯字符串数组 + 顶层键无排序字段实证（本任务 Proposal 已含）
-- [ ] AC2: **排序键暴露**——`--json` 的 recommended（或新增 ranking）暴露每条排序键（blocking_suite / delivery_critical / id）
-- [ ] AC3: **判据② 机械化**——检查器机械断言「DC 任务严格前移 + 同族非 DC 不变 + blocking_suite 之上」
-- [ ] AC4: **既有不回归**——`--for-task` scoped 门绿（含 slot-refill 既有测试）
-- [ ] AC5: **全量套件绿**——verification-round 验证
+- [x] AC1: **复现固化**——任务体记录 recommended 纯字符串数组 + 顶层键无排序字段实证（本任务 Proposal 已含）
+- [x] AC2: **排序键暴露**——`--json` 的 recommended（或新增 ranking）暴露每条排序键（blocking_suite / delivery_critical / id）
+- [x] AC3: **判据② 机械化**——检查器机械断言「DC 任务严格前移 + 同族非 DC 不变 + blocking_suite 之上」
+- [x] AC4: **既有不回归**——`--for-task` scoped 门绿（含 slot-refill 既有测试）
+- [ ] AC5: **全量套件绿**——verification-round 验证（外层 verification-round 的职责）
 
 ## Definition of Done
 
@@ -64,6 +64,53 @@ invariant negative_control_preserved = 1（同族非 DC 位置不变）
 invoke    `node --no-warnings --experimental-strip-types plugin/scripts/slot-refill.ts --root "$PWD" --cap 5 --json`（贴 recommended/ranking 带排序键）
 control   排序键暴露；判据② 机械核；负控制不变；既有不回归
 resume    排序键暴露 / 判据② 检查器 / 测试分步提交，任一步完成即写盘
+
+## Evidence（内层实现 2026-08-11）
+
+**机制选择**：`recommended` 保持纯字符串数组（向后兼容——B9 force-dispatch 分支与既有测试都读字符串 id），
+**另发并行的 `ranking` 数组**（Contract band 的「或 ranking 数组」备选）暴露每条排序键：
+`[{id, rank, axis, deliveryCritical, suiteBlocking}]`，与 `recommended` 同序。`axis` = 主导排序轴
+（blocking_suite > delivery_critical > id；suite-blocking 的 delivery-critical 任务报 blocking_suite）。
+
+**AC2 排序键暴露（Contract invoke）**——`node --no-warnings --experimental-strip-types plugin/scripts/slot-refill.ts --root "$PWD" --cap 5 --json`：
+```
+recommended[0] type: string（向后兼容保持字符串）
+recommended: ["gap-ac36-recommended-exposes-sort-key","gap-verification-round-missing-phase-ms-breaks-cost-attribution",
+              "gap-quay-init-never-writes-branch-model-config-fork-baseline-merge-target",
+              "gap-quay-last-pane-txt-untracked-dirties-tree","gap-resource-gate-psi-does-not-capture-load-flake-driver"]
+ranking: [{id:"gap-ac36-recommended-exposes-sort-key",rank:0,axis:"delivery_critical",deliveryCritical:true,suiteBlocking:false},
+          {id:"gap-verification-round-missing-phase-ms-breaks-cost-attribution",rank:1,axis:"delivery_critical",deliveryCritical:true,suiteBlocking:false},
+          {id:"gap-quay-init-never-writes-branch-model-config-fork-baseline-merge-target",rank:2,axis:"id",deliveryCritical:false,suiteBlocking:false},
+          {id:"gap-quay-last-pane-txt-untracked-dirties-tree",rank:3,axis:"id",deliveryCritical:false,suiteBlocking:false},
+          {id:"gap-resource-gate-psi-does-not-capture-load-flake-driver",rank:4,axis:"id",deliveryCritical:false,suiteBlocking:false}]
+ranking[0] keys: id,rank,axis,deliveryCritical,suiteBlocking
+```
+> **Contract measure 措辞注记**：measure 行写「recommended[0] 是否对象」，但 band 明确「对象数组 **或 ranking 数组**，暴露每条的轴」——
+> 本实现选 band 的第二备选（ranking 数组），`recommended[0]` 保持字符串以保向后兼容（AC4 既有不回归的硬约束）。
+> 判据② 的机械断言读的是 `ranking`，不是 `recommended`。
+
+**AC3 判据② 机械检查器**——`plugin/scripts/ac36-sortkey-criterion-check.ts --root "$PWD" --cap 5`：
+```
+{ ok: true, problems: [], entryCount: 5, dcCount: 2, suiteCount: 0 }   （exit 0）
+```
+`checkCriterion2(ranking)` 机械断言 ranking 是精确排序键（blocking_suite ↓, delivery_critical ↓, id ↑），
+违规按判据腿归类报出：`delivery-critical strictly forward` / `negative control` / `blocking_suite above`，
+并支持可选 `--before` 基线断言「打 label 前 → 后位置严格减小」。负控制（同族非 DC 位次不变）= 同轴组内
+非 DC 条目严格 id 升序（相对 id 序保持，绝不被同族打 label 打乱）。
+
+**AC4 既有不回归**——`bash scripts/test.sh --for-task gap-ac36-recommended-exposes-sort-key --allow-thin`：
+**47 tests · pass 47 · fail 0 · cancelled 0 · skipped 0 · EXIT 0**。
+静态检查全绿（test-framework-policy / test-isolation / test-impl-census / task-contract-check /
+superseded-capability / strategic-doc-staleness / tick-core-static / delivery-inventory-drift-gate /
+capability-catalog / delivery-inventory）。`plugin/test/slot-refill.test.mjs` 既有 38 测试 + 新增 9
+（SORT-KEY EXPOSURE ×3 + CRITERION-2 CHECK ×6）全绿。
+
+**新增/改动文件**：`plugin/scripts/ac36-sortkey-criterion-check.ts`（新，AC3 检查器）、`plugin/scripts/slot-refill.ts`
+（AC2 ranking 数组）、`plugin/test/slot-refill.test.mjs`（AC2/AC3 测试）、`orchestration/manager-phase-goal.md`
+（AC36 判据② 机械化注记）、`tasks/gap-ac36-delivery-critical-priority-axis.md`（交叉标注）。
+新增 plugin/scripts 文件触发的 gate 强制派生/声明更新：`docs/proposals/quay-product-outline.md`
+§6 DELIVERY-INVENTORY（scripts 201→202）、`plugin/scripts/capability-catalog.sh`（QUESTION + cadence/
+失效前提/last_reaffirmed/matching 五表声明）。
 
 ## Dispatch review
 
