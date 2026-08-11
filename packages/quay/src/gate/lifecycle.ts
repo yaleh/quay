@@ -155,6 +155,73 @@ export async function runComplete({ client, id, logPath, actor = "quay-cli", wor
   return { ok: true, reason, exitCode: 0 };
 }
 
+export interface LoopCompleteArgs extends LifecycleArgs {
+  /** loop verification evidence (verification-round-N full-suite green + AC/DoD
+   *  checked by outer 1b). Recorded in the `complete` event payload. */
+  verifiedBy?: string;
+}
+
+/**
+ * `quay-loop complete <task>` — the loop's completion path AS the gate engine
+ * (gap-loop-completion-path-produces-zero-gateevents). The outer async closure
+ * pass (orchestrator-loop-tick.md step 1b "翻 done") routes its ready→done flip
+ * through THIS instead of writing `status: done` directly, so a loop-completed
+ * task records a `complete` pass GateEvent exactly like the CLI's `quay complete`
+ * does — the loop's meter is runnable, not silently unasserted.
+ *
+ * CLI-consistency with `runComplete`:
+ *   - precondition status === "ready"; not-ready → exit 1, NO gate, NO write.
+ *   - when the task carries an acceptance meter it is RUN through the same
+ *     `runGate` engine the CLI uses ("meter is runnable"); a fail keeps status
+ *     unchanged (exit 1), exactly like `quay complete`.
+ *   - a loop task with NO meter (the loop's acceptance is the verification-round,
+ *     which the outer already confirmed) has `verifiedBy` recorded as the
+ *     acceptance evidence instead.
+ * On pass: write status=done (CAS `expectedStatus:"ready"`) + append a `complete`
+ * pass event to `logPath` (`.quay/gate-events.jsonl`), readable via gate-log.
+ */
+export async function runCompleteLoop({ client, id, logPath, actor = "quay-loop", workspaceRoot, verifiedBy }: LoopCompleteArgs): Promise<LifecycleResult> {
+  const task = await client.taskGet(id);
+  if (!task) throw new Error(`no such task: ${id}`);
+  if (task.status !== "ready") {
+    const reason = `illegal transition: ${task.status} cannot complete (must be ready)`;
+    console.log(reason);
+    // @deprecated — process.exitCode set for CLI backward-compat; MCP callers should
+    // read the returned exitCode field and reset process.exitCode after the call.
+    process.exitCode = 1;
+    return { ok: false, reason, exitCode: 1 };
+  }
+
+  const meter = (task.extra as Record<string, unknown>)?.acceptance;
+  const hasMeter = typeof meter === "string" && meter.trim() !== "";
+  let acceptanceReason = verifiedBy ?? "loop verification";
+  if (hasMeter) {
+    const gate = await runGate({ client, id, gate: "acceptance", logPath, actor, workspaceRoot });
+    acceptanceReason = gate.reason;
+    if (!gate.ok) {
+      console.log(`FAIL — ${gate.reason}`);
+      // @deprecated — process.exitCode set for CLI backward-compat; MCP callers should
+      // read the returned exitCode field and reset process.exitCode after the call.
+      process.exitCode = 1;
+      return { ok: false, reason: gate.reason, exitCode: 1 };
+    }
+  }
+
+  await client.taskWrite({ id, status: "done", expectedStatus: "ready" });
+  appendGateEvent(
+    logPath,
+    mkLifecycleEvent({
+      id,
+      gate: "complete",
+      actor,
+      verdict: "pass",
+      payload: { from: "ready", to: "done", ...(verifiedBy ? { verifiedBy } : {}) },
+    })
+  );
+  console.log("PASS — status=done (loop)");
+  return { ok: true, reason: acceptanceReason, exitCode: 0 };
+}
+
 /**
  * `quay adjudicate <task>` — independent, read-only audit pass. Records the
  * mechanical state it can observe (`client.taskCheck`) as an `audit` GateEvent,
