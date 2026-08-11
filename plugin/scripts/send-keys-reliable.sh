@@ -103,18 +103,21 @@ fi
 # ── can-receive pre-flight (gap-supervisor-deliver-no-wait-for-idle-retry) ──────────
 # Before ANY keystroke the target must be RECEIVABLE — otherwise text lands in the input box but is
 # never committed (the measured 2026-08-06 defect: sending to a busy/thinking target made the one-shot
-# send→verify fail every time). The judgment is pane-state-classify's `--can-receive` probe — the SAME
-# shape classifier session-liveness uses for its busy/idle verdict, never a duplicated idle heuristic
-# (the fix direction's 与 session-liveness 的 idle 判定同源). waiting-input is the ONLY receivable
-# state; a non-receivable target is FAIL CLOSED here (the wait/retry upgrade is step 2 —
-# --can-receive-wait, single-sourced in the probe; supervisor-deliver.sh's fresh path calls the same
-# seam).
+# send→verify fail every time). The judgment is pane-state-classify's `--can-receive-wait` probe — the
+# SAME shape classifier session-liveness uses for its busy/idle verdict, never a duplicated idle
+# heuristic (the fix direction's 与 session-liveness 的 idle 判定同源). waiting-input is the ONLY
+# receivable state. A non-receivable target is WAITED on (bounded, re-judge each round) instead of
+# failing immediately; only when the bound expires do we fail loud (needs human). The wait loop lives
+# in the probe (--wait/--poll, single-sourced — supervisor-deliver.sh's fresh path calls the same
+# seam). RELIABLE_CAN_RECEIVE_WAIT_S / RELIABLE_CAN_RECEIVE_POLL_S bound the wait.
+CAN_RECEIVE_WAIT_S="${RELIABLE_CAN_RECEIVE_WAIT_S:-30}"
+CAN_RECEIVE_POLL_S="${RELIABLE_CAN_RECEIVE_POLL_S:-2}"
 if [ ! -f "$SCRIPT_DIR/pane-state-classify.ts" ]; then
   echo "send-keys-reliable: 缺少分类器 $SCRIPT_DIR/pane-state-classify.ts——无法判定目标可接收，fail loud" >&2
   exit 1
 fi
-if ! node --experimental-strip-types "$SCRIPT_DIR/pane-state-classify.ts" --can-receive "$TARGET"; then
-  echo "send-keys-reliable: 目标 $TARGET 当前不可接收（非 waiting-input）——fail closed 不发送，需人工/稍后重试" >&2
+if ! node --experimental-strip-types "$SCRIPT_DIR/pane-state-classify.ts" --can-receive-wait "$TARGET" --wait "$CAN_RECEIVE_WAIT_S" --poll "$CAN_RECEIVE_POLL_S"; then
+  echo "send-keys-reliable: 目标 $TARGET 在 ${CAN_RECEIVE_WAIT_S}s 内未转为 waiting-input——fail loud 需人工，不发送（不假装送达）" >&2
   exit 1
 fi
 echo "send-keys-reliable: 目标 $TARGET 可接收（waiting-input）——继续投递" >&2
