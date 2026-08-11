@@ -42,6 +42,32 @@ const GH_TOKEN_REF = "$GITHUB_TOKEN";
 const GH_TOKEN_SHELL_REF = "${GITHUB_TOKEN}";
 
 /**
+ * Pick the provider MCP server launch entry based on the RESOLVED provider
+ * path form (gap-init-scaffolds-mcp-entry-to-raw-ts-fails-on-installed-copy).
+ *
+ * - INSTALLED form (the provider path contains a `node_modules` segment —
+ *   e.g. `./node_modules/quay-native`, an npm-installed copy): launch the
+ *   bundled dist ESM `./dist/quay-native.js` — the SAME target package.json's
+ *   `bin` field points at. Raw `.ts` under node_modules is refused by Node
+ *   ≥23.7 (`ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`), so the bundled JS
+ *   is the only runnable form there.
+ * - DEV form (the provider path is inside the repo tree — e.g.
+ *   `./packages/quay-native` or a `../../...` repo-relative path): keep the
+ *   raw TypeScript entry `./bin/quay-native.ts`, which runs fine outside
+ *   node_modules.
+ *
+ * The Core's provider launcher resolves mcp_entry relative to provider.path,
+ * so both forms are `./`-relative within the provider package root.
+ */
+export function mcpEntryForProvider(providerPath: string): string {
+  const segments = providerPath.split(/[\\/]+/);
+  const installed = segments.includes("node_modules");
+  return installed
+    ? '["node", "./dist/quay-native.js", "mcp"]'
+    : '["node", "./bin/quay-native.ts", "mcp"]';
+}
+
+/**
  * Generate the full .quay/config.yml content with all 3 sections and inline
  * documentation for every supported field.
  */
@@ -75,7 +101,7 @@ export function generateConfigContent(opts: { providerId: string; providerPath: 
     "    enabled: true",
     "    path: \"" + providerPath + "\"",
     "    tasks_dir: \"./tasks\"",
-    "    mcp_entry: [\"node\", \"./bin/quay-native.ts\", \"mcp\"]",
+    "    mcp_entry: " + mcpEntryForProvider(providerPath),
     "    env:",
     "      QUAY_NATIVE_TASKS_DIR: \"./tasks\"",
     "    # default_task_status: todo   # uncomment to change default status for new tasks",
