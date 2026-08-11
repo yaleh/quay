@@ -74,7 +74,7 @@ start did NOT complete.
 | # | Key | Checkable definition | Evidence |
 |---|---|---|---|
 | 1 | `MONITORS-MOUNTED` | ONE Monitor-tool invocation exists for `<root>/plugin/scripts/session-liveness-mount.sh` (the observer — session observation has exactly ONE tool, SPEC-one-observer-two-surfaces.md; the retired per-parameter observer was removed by gap-retire-inner-state-one-observer-targets-by-parameter); `bash <root>/plugin/scripts/monitor-mount-check.sh --json` reports `mounted=true`, `targetOk=true` (2026-08-06: `delivered` retired with the shared events file — the mount check is mounted + targetOk) | the `--json` output (two criteria) |
-| 2 | `MONITORS-DELIVERING` | **At least one event line from the mounted monitor was delivered to THIS session** (a `SESSION-STATUS` line, a `SESSION-GONE`, a `SESSION-OVERDUE`, a `SESSION-IDLE`, etc. — each observer owns its own stdout stream, 2026-08-06). A running process is NOT evidence; a nohup log file is NOT evidence | the delivered event line(s), verbatim |
+| 2 | `MONITORS-DELIVERING` | **The observer provably produces an event line** — EITHER a transition event from the mounted monitor delivered to THIS session (a `SESSION-GONE`, a `SESSION-BACK`, a `SESSION-IDLE`, a `SESSION-OVERDUE`, etc. — each observer owns its own stdout stream, 2026-08-06), OR (deterministic, preferred) the `bash <root>/plugin/scripts/session-liveness.sh --once` `SESSION-STATUS` line(s). **The resident mount emits ONLY on state TRANSITIONS — a stable session legitimately emits NOTHING, so do NOT wait ~90s for a transition event that may never come (F6, measured 2026-08-11: ad-arm1 outer burned 15min/120.6k token diagnosing this non-problem)**; the `--once` seam is the fast delivery proof. A running process is NOT evidence; a nohup log file is NOT evidence | the `--once` `SESSION-STATUS` line(s) verbatim, or the delivered transition event line(s) |
 | 3 | `CRON-CREATED` | `CronCreate` `*/20 * * * *` succeeded, `CronList` lists it, AND `bash <root>/plugin/scripts/loop-driver-check.sh <root>` reports `LIVE` (exactly ONE driver — not STALLED, not DOUBLE-TRIGGER) | the check output (`loop-driver: LIVE (1) …`) |
 <!-- gap-laydown-derivation-is-sensitive-to-reference-spelling-dependency-closure (AC2/AC3): this
      bare-name reference to transcript-delivery-check.ts (no plugin/scripts/ prefix) is INTENTIONAL
@@ -210,11 +210,24 @@ different ways to be wrong (not mounted / mounted on the wrong project). 2026-08
 (gap-session-liveness-remove-shared-events-and-lock): the old `delivered` criterion (shared events
 file freshness) is GONE — the shared file was removed; observation is a tree, each observer owns its
 own stdout stream, and delivery is verified by THIS session's own Monitor stream (criterion 2 below),
-not by a cross-observer file. Then **wait for at
-least one delivered event line**
-(`session-liveness.sh --once` in the skill's own run is faster; a resident mount emits its events on
-the Monitor stream each round). If no event arrives within ~90s, the monitor is not delivering — **STOP and report**
-`MONITORS-DELIVERING: false`; do not proceed to pretend the loop is up.
+not by a cross-observer file.
+
+**Delivery is proven by the deterministic `--once` seam, not by waiting for a resident event.**
+The resident mount emits ONLY on state TRANSITIONS (SESSION-GONE/BACK/IDLE/RESUMED/OVERDUE/…) — a
+stable session legitimately emits NOTHING, so "no event within ~90s" is NORMAL, not a monitor defect.
+**(F6, measured 2026-08-11: ad-arm1 outer cold start burned 15min/120.6k token diagnosing exactly
+this non-problem — the monitor was fine; it had no state change to report.)** Do NOT wait for a
+transition event that may never come. Instead, get the deterministic delivery proof in seconds:
+
+```bash
+bash <root>/plugin/scripts/session-liveness.sh --once   # SESSION-STATUS <name> alive=... per target
+```
+
+Require `--once` to emit at least one `SESSION-STATUS` line — that line IS the delivered-event
+evidence (criterion 2's `SESSION-STATUS` form). The mount check (mounted+targetOk) proves the
+resident observer is attached; the `--once` line proves the observer can produce events; a later
+real state change will arrive on the Monitor stream. Only a mount-check failure OR an empty `--once`
+output is `MONITORS-DELIVERING: false` — **STOP and report**; do not proceed to pretend the loop is up.
 
 ### 5. Re-create the 20-minute cron — THE single loop driver (session-scoped: dies when the session PROCESS exits)
 

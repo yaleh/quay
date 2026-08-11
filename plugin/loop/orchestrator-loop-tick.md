@@ -308,6 +308,12 @@ bash plugin/scripts/monitor-mount-check.sh --json
 `gap-nothing-checks-whether-the-monitor-is-mounted-or-aimed-right`：挂没挂/挂哪个仓库
 两条判据是**一条不是一条**——只查第一条会漏掉「进程活着、目标错」那次（管理者 18 小时挂错目标）。
 
+**交付判定（F6，measured 2026-08-11 ad-arm1：外层花 15min/120.6k token 诊断「monitor 为什么不发事件」）：
+monitor 只在状态转换时发事件**（SESSION-GONE/BACK/IDLE/RESUMED/OVERDUE…），稳定会话**理应什么都不发**——
+「90 秒没有事件」是正常，不是故障。别等转换事件；要确定性送达证据，跑
+`bash plugin/scripts/session-liveness.sh --once`（每目标一行 `SESSION-STATUS <name> alive=…`，秒级）。
+挂载检查两判据 + `--once` 一行 = 观察者确实挂对且能产事件；之后的真实状态变化会到 Monitor 流上。
+
 **5. 核对前置条件**
 
 `.halt` 是否还在、套件是否绿（读 `.quay/full-suite-state.json` 的 `state`——`green` 绿、`red` 需按
