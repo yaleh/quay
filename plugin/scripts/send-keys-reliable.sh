@@ -163,7 +163,12 @@ echo "send-keys-reliable: 目标 $TARGET 可接收（waiting-input）——继�
 # count as the NEW user message we just sent. The transcript only grows when the receiver
 # commits, so clearing/sending never moves it.
 baseline_bytes=0
-if [ -f "$TARGET_JSONL" ]; then
+if [ -n "$HOST" ]; then
+  # Remote transcript: the baseline is the REMOTE file's size (ssh stat) — the delivery poll's
+  # `--start <bytes>` offset applies to the remote file the checker reads via ssh cat.
+  baseline_bytes=$("$SSH_BIN" "$HOST" "stat -c %s $(printf '%q' "$TARGET_JSONL")" 2>/dev/null || echo 0)
+  baseline_bytes=$((baseline_bytes + 0))
+elif [ -f "$TARGET_JSONL" ]; then
   baseline_bytes=$(stat -c %s "$TARGET_JSONL" 2>/dev/null || true)
   baseline_bytes=$((baseline_bytes + 0))
 fi
@@ -202,7 +207,9 @@ pane_input_box_empty() {
 # handles the NON-fresh case: an already-active session whose empty input box renders as
 # `❯`+NBSP still walks the clear loop (AC2 — no regression).
 fresh_session=0
-if node --experimental-strip-types "$CHECKER" --is-fresh "$TARGET_JSONL" >/dev/null 2>&1; then
+fresh_args=(--is-fresh "$TARGET_JSONL")
+[ -n "$HOST" ] && fresh_args+=(--remote "$HOST")
+if SUPERVISOR_DELIVER_SSH="$SSH_BIN" node --experimental-strip-types "$CHECKER" "${fresh_args[@]}" >/dev/null 2>&1; then
   fresh_session=1
 else
   fresh_rc=$?
@@ -268,7 +275,9 @@ send_key Enter
 # fake TUI. `out=$(node ...)` (NOT a pipeline) — the exit status is the checker's own, captured
 # via $? (rule 2b: no pipeline feeding $?).
 run_checker() {
-  out=$(node --experimental-strip-types "$CHECKER" --check "$TARGET_JSONL" --start "$baseline_bytes" --text "$TEXT" 2>&1)
+  local check_args=(--check "$TARGET_JSONL" --start "$baseline_bytes" --text "$TEXT")
+  [ -n "$HOST" ] && check_args+=(--remote "$HOST")
+  out=$(SUPERVISOR_DELIVER_SSH="$SSH_BIN" node --experimental-strip-types "$CHECKER" "${check_args[@]}" 2>&1)
   local code=$?
   if [ "$code" -eq 2 ]; then
     printf '%s\n' "$out" >&2 2>/dev/null || true

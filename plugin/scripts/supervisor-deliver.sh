@@ -159,6 +159,24 @@ file_exists() {  # file_exists <path> — existence test that works locally AND 
   fi
 }
 
+list_transcripts() {  # list_transcripts <dir> — the .jsonl under a transcripts dir (local or remote)
+  if [ -n "$HOST" ]; then
+    # The leading ~ is LEFT UNQUOTED so the REMOTE shell expands it (never %q — %q would escape it
+    # into a literal filename). The slug is path-derived ([A-Za-z0-9._-]) so it is remote-shell-safe.
+    "$SSH_BIN" "$HOST" "ls ${1}/*.jsonl 2>/dev/null"
+  else
+    ls "$1"/*.jsonl 2>/dev/null
+  fi
+}
+
+file_mtime() {  # file_mtime <path> — epoch-seconds mtime (0 if absent), local or remote
+  if [ -n "$HOST" ]; then
+    "$SSH_BIN" "$HOST" "stat -c %Y $(printf '%q' "$1")" 2>/dev/null || echo 0
+  else
+    stat -c %Y "$1" 2>/dev/null || echo 0
+  fi
+}
+
 # fail-loud precondition: the delivery verdict depends on the pure checker; a missing checker
 # means the deliver-confirmed promise is broken (same rule as send-keys-reliable.sh).
 [ -f "$CHECKER" ] || { echo "supervisor-deliver: 缺少校验器 $CHECKER——无法验证送达（依赖未铺？），fail loud" >&2; exit 1; }
@@ -176,10 +194,14 @@ PRE_SEND_SNAPSHOT=""
 proj_dir=""
 if [ -n "$ROOT" ]; then
   slug="$(printf '%s' "$ROOT" | tr '/' '-')"
-  proj_dir="${HOME:-/home/yale}/.claude/projects/${slug}"
-  if [ -d "$proj_dir" ]; then
-    PRE_SEND_SNAPSHOT="$(ls "$proj_dir"/*.jsonl 2>/dev/null | sort | tr '\n' ' ')"
+  if [ -n "$HOST" ]; then
+    # Remote re-spawn discovery: the transcripts dir is ~/.claude/projects/<slug> on the TARGET
+    # host (the leading ~ is expanded by the remote shell, never %q-quoted).
+    proj_dir="~/.claude/projects/${slug}"
+  else
+    proj_dir="${HOME:-/home/yale}/.claude/projects/${slug}"
   fi
+  PRE_SEND_SNAPSHOT="$(list_transcripts "$proj_dir" | sort | tr '\n' ' ')"
 fi
 
 # ── delivery ─────────────────────────────────────────────────────────────────────────────────────
@@ -259,13 +281,12 @@ send_key Enter 2>/dev/null || true
 # --transcript, wait for exactly that path.
 now=$(date +%s)
 deadline=$(( now + VERIFY_S ))
-while [ "$(date +%s)" -lt "$deadline" ] && { [ -z "$TRANSCRIPT" ] || [ ! -e "$TRANSCRIPT" ]; }; do
-  if [ -n "$ROOT" ] && [ -n "$proj_dir" ] && [ -d "$proj_dir" ]; then
+while [ "$(date +%s)" -lt "$deadline" ] && { [ -z "$TRANSCRIPT" ] || ! file_exists "$TRANSCRIPT"; }; do
+  if [ -n "$ROOT" ] && [ -n "$proj_dir" ]; then
     best=""; best_ts=0
-    for f in "$proj_dir"/*.jsonl; do
-      [ -e "$f" ] || continue
+    for f in $(list_transcripts "$proj_dir"); do
       case " $PRE_SEND_SNAPSHOT " in *" $f "*) continue ;; esac   # skip pre-existing (old session)
-      ts=$(stat -c %Y "$f" 2>/dev/null || echo 0)
+      ts=$(file_mtime "$f")
       if [ "$ts" -gt "$best_ts" ]; then best="$f"; best_ts=$ts; fi
     done
     [ -n "$best" ] && TRANSCRIPT="$best"
@@ -273,14 +294,18 @@ while [ "$(date +%s)" -lt "$deadline" ] && { [ -z "$TRANSCRIPT" ] || [ ! -e "$TR
   sleep 2
 done
 
-if [ -z "$TRANSCRIPT" ] || [ ! -e "$TRANSCRIPT" ]; then
+if [ -z "$TRANSCRIPT" ] || ! file_exists "$TRANSCRIPT"; then
   echo "supervisor-deliver: FAIL——${VERIFY_S}s 内未出现新 transcript（fresh-session 投递后无落盘）；需要人工" >&2
   exit 1
 fi
 
 # Verify delivery via the pure checker (the only trusted signal): a real user message whose
 # content contains the payload, appended since baseline 0 (a fresh file — nothing precedes it).
-out=$(node --experimental-strip-types "$CHECKER" --check "$TRANSCRIPT" --start 0 --text "$PAYLOAD" 2>&1)
+# Cross-host: the checker reads the remote transcript via `ssh <host> cat` (--remote) — the
+# delivered verdict is STILL a content-matching REAL user message, never pane echo (ADR-016).
+check_args=(--check "$TRANSCRIPT" --start 0 --text "$PAYLOAD")
+[ -n "$HOST" ] && check_args+=(--remote "$HOST")
+out=$(SUPERVISOR_DELIVER_SSH="$SSH_BIN" node --experimental-strip-types "$CHECKER" "${check_args[@]}" 2>&1)
 rc=$?
 if [ "$rc" -eq 0 ]; then
   echo "supervisor-deliver: 已送达 $TARGET（fresh-session；transcript 出现内容匹配的真实 user message）"

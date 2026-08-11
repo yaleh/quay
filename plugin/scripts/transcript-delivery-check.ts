@@ -44,6 +44,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 export type DeliveryState = "delivered" | "failed" | "unknown";
@@ -264,8 +265,8 @@ export function tailFromByteOffset(fullText: string, startBytes: number): string
 
 function usageError(message: string): number {
   console.error(`transcript-delivery-check: ${message}`);
-  console.error("usage: transcript-delivery-check.ts --check <transcript.jsonl> [--start <bytes>] --text <sent-text>");
-  console.error("       transcript-delivery-check.ts --is-fresh <transcript.jsonl>");
+  console.error("usage: transcript-delivery-check.ts --check <transcript.jsonl> [--start <bytes>] --text <sent-text> [--remote <host>]");
+  console.error("       transcript-delivery-check.ts --is-fresh <transcript.jsonl> [--remote <host>]");
   console.error("exit: 0 = delivered / fresh · 1 = failed (clear discard evidence) · 2 = usage/IO error · 3 = unknown (no evidence — check first)");
   return 2;
 }
@@ -280,11 +281,36 @@ function readJsonlTail(jsonlPath: string, startBytes: number): { ok: true; fragm
   return { ok: true, fragment: tailFromByteOffset(full, startBytes) };
 }
 
+// ── remote transcript read (gap-supervisor-deliver-cross-host-target-support) ─────────────────────
+// A cross-host delivery's target transcript lives on ANOTHER machine — the local `fs.readFileSync`
+// structurally cannot read it (the pre-fix defect). `--remote <host>` makes the CLI read via
+// `ssh <host> cat <path>` (SUPERVISOR_DELIVER_SSH substitutes the ssh binary — a test mock), and the
+// delivered verdict is STILL a content-matching REAL user message in that transcript — pane echo /
+// send-keys exit codes never enter the verdict (ADR-016: the only trusted signal is the target
+// transcript's committed content; remote does not degrade it). The PURE functions stay pure — only
+// this CLI wrapper reaches over the network, and only to obtain the same string a local read gives.
+function remoteCat(host: string, jsonlPath: string): { ok: true; stdout: string } | { ok: false; error: string } {
+  const sshBin = process.env.SUPERVISOR_DELIVER_SSH || "ssh";
+  const r = spawnSync(sshBin, [host, "cat", jsonlPath], { encoding: "utf8" });
+  if (r.status === 0) return { ok: true, stdout: r.stdout ?? "" };
+  if (r.status === 255) {
+    return { ok: false, error: `cannot reach remote host ${host} (ssh exit 255): ${(r.stderr ?? "").trim()}` };
+  }
+  return { ok: false, error: `cannot cat remote transcript ${host}:${jsonlPath}: ${(r.stderr ?? `ssh exit ${r.status}`).trim()}` };
+}
+
+function readJsonlTailRemote(host: string, jsonlPath: string, startBytes: number): { ok: true; fragment: string } | { ok: false; error: string } {
+  const got = remoteCat(host, jsonlPath);
+  if (!got.ok) return { ok: false, error: got.error };
+  return { ok: true, fragment: tailFromByteOffset(got.stdout, startBytes) };
+}
+
 export function main(argv: string[]): number {
   const args = argv.slice(2);
   let jsonlPath: string | undefined;
   let sentText: string | undefined;
   let startBytes = 0;
+  let remoteHost: string | undefined;
   let mode: "check" | "is-fresh" | undefined;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--check") {
@@ -302,6 +328,9 @@ export function main(argv: string[]): number {
     } else if (args[i] === "--text") {
       sentText = args[i + 1];
       i++;
+    } else if (args[i] === "--remote") {
+      remoteHost = args[i + 1];
+      i++;
     }
   }
   if (!jsonlPath) return usageError("missing --check/--is-fresh <transcript.jsonl>");
@@ -311,6 +340,24 @@ export function main(argv: string[]): number {
     // ENOENT is the NORMAL fresh case (a new claude writes its jsonl only on first input), NOT an
     // IO error — the caller must be able to skip the clear loop before any input has ever been
     // committed. Any other read failure is a real environment error → exit 2 (fail loud).
+    if (remoteHost) {
+      // Remote: `ssh <host> cat <path>`. ssh exit 255 = transport failure (fail loud). Any OTHER
+      // non-zero remote exit means the remote `cat` failed — for a fresh session that is the
+      // ENOENT-equivalent (the file has not been created yet), so it reads as FRESH, exactly like
+      // the local ENOENT branch.
+      const got = remoteCat(remoteHost, jsonlPath);
+      if (got.ok) {
+        const fresh = !hasUserMessages(got.stdout);
+        console.log(`fresh: ${fresh}`);
+        return fresh ? 0 : 1;
+      }
+      if (got.error.startsWith("cannot reach remote host")) {
+        console.error(`transcript-delivery-check: ${got.error}`);
+        return 2;
+      }
+      console.log("fresh: true");
+      return 0;
+    }
     let full: string;
     try {
       full = fs.readFileSync(jsonlPath, "utf8");
@@ -329,7 +376,9 @@ export function main(argv: string[]): number {
   }
   if (sentText === undefined) return usageError("missing --text <sent-text>");
 
-  const read = readJsonlTail(jsonlPath, startBytes);
+  const read = remoteHost
+    ? readJsonlTailRemote(remoteHost, jsonlPath, startBytes)
+    : readJsonlTail(jsonlPath, startBytes);
   if (!read.ok) {
     console.error(`transcript-delivery-check: ${read.error}`);
     return 2;
