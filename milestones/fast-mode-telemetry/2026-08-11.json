@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-11T14:57:39.447Z",
+  "generatedAt": "2026-08-11T15:33:46.710Z",
   "since": null,
   "tasks": [
     {
@@ -976,11 +976,11 @@
   "deferred": [],
   "meanMinutes": 108.11724849462368,
   "medianMinutes": 61.879616666666664,
-  "tasksPerHour": 0.7031067401336767,
+  "tasksPerHour": 0.7011858315299632,
   "serialEquivalentPerHour": 0.5549530795077865,
   "windowStart": "2026-08-02T10:29:46.000Z",
-  "windowEnd": "2026-08-11T14:56:46.610Z",
-  "windowHours": 220.45016944444444,
+  "windowEnd": "2026-08-11T15:33:00.745Z",
+  "windowHours": 221.05409583333332,
   "haltedHours": 0,
   "halted": [],
   "blocked": [
@@ -1514,7 +1514,7 @@
       "minutes": 1116.1975,
       "outcome": "abandoned",
       "reconcileReason": "worktree-gone-and-no-process",
-      "startedAtMsUnreliable": true
+      "startedAtMsUnreliable": false
     },
     {
       "taskId": "gap-forty-to-six-remerge-needs-tests-updated-first",
@@ -1522,7 +1522,7 @@
       "minutes": 693.1571,
       "outcome": "abandoned",
       "reconcileReason": "worktree-gone-and-no-process",
-      "startedAtMsUnreliable": true
+      "startedAtMsUnreliable": false
     },
     {
       "taskId": "gap-full-suite-runner-marks-test-sh-gate-wait-as-failed",
@@ -3039,19 +3039,18 @@
       "startedAtMs": 1785998556329
     }
   ],
-  "reconcilable": [],
-  "realInFlight": 1,
+  "reconcilable": [
+    {
+      "taskId": "gap-forty-to-six-remerge-needs-tests-updated-first",
+      "runId": "fm-gap-forty-to-six-remerge-needs-tests-updated-first-1786459959470-e2zrsv",
+      "startedAtMs": 1786459959514,
+      "startedAtMsUnreliable": true,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process"
+    }
+  ],
+  "realInFlight": 0,
   "closedButLive": [
-    {
-      "taskId": "gap-forty-to-six-remerge-needs-tests-updated-first",
-      "runId": "fm-gap-forty-to-six-remerge-needs-tests-updated-first-1786356624732-ynl3f5",
-      "reason": "worktree-present"
-    },
-    {
-      "taskId": "gap-forty-to-six-remerge-needs-tests-updated-first",
-      "runId": "fm-gap-forty-to-six-remerge-needs-tests-updated-first-1786382007167-vt6p93",
-      "reason": "worktree-present"
-    },
     {
       "taskId": "gap-judgment-computed-not-wired-to-action",
       "runId": "fm-gap-judgment-computed-not-wired-to-action-1786441120687-r0gtjl",
@@ -3073,5 +3072,5 @@
       "reason": "worktree-present"
     }
   ],
-  "occupiedSlots": 7
+  "occupiedSlots": 4
 }
