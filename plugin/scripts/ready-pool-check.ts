@@ -798,6 +798,30 @@ export function collectFailureFiles(rounds, stateFailures) {
   return [...out];
 }
 
+/** gap-suite-blocking-directory-glob-overbroad AC2 — is `glob` a DIRECTORY glob (a bare directory
+ *  such as `plugin/test/` — with or without the trailing slash — or an explicit `dir/**`)? A
+ *  directory glob expands to EVERY file under the directory, so matching it against a failure FILE
+ *  over-attributes: a task whose `## Touches` merely names a directory (e.g. `plugin/test/`) becomes
+ *  a suite-blocker for ANY failure inside it. Only FILE-SCOPED globs — a concrete path like
+ *  `plugin/test/checker-cost.test.mjs`, or a wildcard that targets files like
+ *  `plugin/test/*.test.mjs` — are attributable.
+ *
+ *  A glob is directory-shaped when, after stripping a trailing `/**` (the DIR-106 directory form that
+ *  parseTouches appends to trailing-slash entries) or a trailing `/`, the remainder carries no
+ *  wildcard and its basename has no file extension. (A bare extensionless FILE such as `Makefile` is
+ *  mis-classified directory-shaped too, but failure files are test files with extensions — an
+ *  extensionless path never appears in the failure list, so that false positive is harmless.)
+ */
+export function isDirectoryGlob(glob) {
+  const g = String(glob);
+  if (/^[*?]+$/.test(g)) return true; // all-wildcard glob matches every file — directory-like
+  const m = g.match(/^(.*?)\/\*\*\/?$/);
+  const prefix = (m ? m[1] : g).replace(/\/+$/, "");
+  if (/[*?]/.test(prefix)) return false;
+  const base = prefix.split("/").pop() || "";
+  return !base.includes(".");
+}
+
 /**
  * gap-suite-round-record-missing-failures-field AC3 — does a failure FILE match a task's expanded
  * declared-Touches path set? The failure-file shape is INCONSISTENT across rounds (round-210 bare
@@ -820,6 +844,13 @@ function failureFileMatches(declared, file) {
   for (const d of declared) {
     if (d === file) return true;
     const dStr = String(d);
+    // SHAPE CONSTRAINT (gap-suite-blocking-directory-glob-overbroad AC2): a DIRECTORY-SHAPED
+    // declared entry (a bare directory token — e.g. `plugin/test` — whose basename carries no file
+    // extension) is not a FILE, so it must never attribute a failure FILE through the basename
+    // reverse-lookup. Without this guard, a failure file whose basename happens to equal a directory
+    // name (e.g. a bare `test`) would pull in every task that touches a directory of that name.
+    // Concrete file paths (extension-bearing) and file-scoped wildcards are unaffected.
+    if (isDirectoryGlob(dStr)) continue;
     if (fileBare || !dStr.includes("/")) {
       if (dStr.split("/").pop() === fileBase) return true;
     }
@@ -866,7 +897,14 @@ export function computeSuiteBlocking({ rounds, stateFailures, tasks, minRedWindo
     if (task.status !== "ready" && task.status !== "todo") continue;
     const parsed = parseTouches(task.body);
     if (!parsed.hasSection || parsed.globs.length === 0) continue;
-    const declared = expand(parsed.globs);
+    // gap-suite-blocking-directory-glob-overbroad AC2 — a DIRECTORY glob (a bare directory like
+    // `plugin/test/`, which parseTouches turns into `plugin/test/**`) expands to every file under
+    // the directory, so it would attribute the task as the suite-blocker for ANY failure in that
+    // directory. Directory globs do NOT attribute: only FILE-SCOPED globs (concrete paths or
+    // wildcards that target files) are expanded and matched against failure files.
+    const fileGlobs = parsed.globs.filter((g) => !isDirectoryGlob(g));
+    if (fileGlobs.length === 0) continue;
+    const declared = expand(fileGlobs);
     // AC3 — match with the shape-normalizing comparator (bare basename AND repo-relative failure
     // files both resolve against declared Touches; see failureFileMatches).
     for (const f of failureFiles) {
