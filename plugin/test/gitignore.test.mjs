@@ -1,11 +1,12 @@
 // @test-group engine
-// gitignore.test.mjs — gap-runtime-state-files-not-gitignored (AC2): the 5 runtime-state files
-// under .quay/ must be gitignored so they never appear in `git status --short` (dirty-tree false
-// alarms from restart-readiness-check.sh / clean-tree assertions). The repo's .gitignore matches
-// .quay/* PER-FILE (there is no `**/.quay/*` wildcard — a new runtime file silently falls through
-// until someone adds its line), so this test is the executable guard for the exact recurrence:
-// if a future edit drops one of the per-file lines, `git check-ignore` returns fewer than 5 and
-// this FAILs. Pattern form mirrors the existing `**/.quay/session-liveness.*.json` lines.
+// gitignore.test.mjs — gap-runtime-state-files-not-gitignored (AC2) + the same-class artifact
+// added by gap-quay-last-pane-txt-untracked-dirties-tree: the 6 runtime-state files under .quay/
+// must be gitignored so they never appear in `git status --short` (dirty-tree false alarms from
+// restart-readiness-check.sh / clean-tree assertions). The repo's .gitignore matches .quay/*
+// PER-FILE (there is no `**/.quay/*` wildcard — a new runtime file silently falls through until
+// someone adds its line), so this test is the executable guard for the exact recurrence: if a
+// future edit drops one of the per-file lines, `git check-ignore` returns fewer than 6 and this
+// FAILs. Pattern form mirrors the existing `**/.quay/session-liveness.*.json` lines.
 //
 // Run:
 //   scripts/test.sh plugin/test/gitignore.test.mjs
@@ -34,19 +35,21 @@ function findRepoRoot(startDir) {
 }
 const REPO_ROOT = findRepoRoot(__dirname);
 
-// The 5 runtime-state files this gap adds to .gitignore (task AC2 list, git check-ignore must hit
-// ALL of them). These are the three-layer execution products — last-pane (pane-state-classify),
+// The 6 runtime-state files .gitignore carries per-file entries for (git check-ignore must hit
+// ALL of them). These are the three-layer execution products — last-pane + last-outer-pane
+// (capture-pane pane-state products, pane-state-classify + the manager→outer AC5 watch path),
 // suite-fix chain (cgroup-evidence / chain-heartbeat / health-last-run), B2 closure accounting
 // (closure-pass-last-run). None belongs in git.
 const RUNTIME_STATE_FILES = [
   ".quay/last-pane.txt",
+  ".quay/last-outer-pane.txt",
   ".quay/suite-cgroup-evidence.txt",
   ".quay/suite-chain-heartbeat.json",
   ".quay/suite-health-last-run.json",
   ".quay/closure-pass-last-run.json",
 ];
 
-test("AC2 — all 5 runtime-state files are gitignored (git check-ignore full hit)", () => {
+test("AC2 — all 6 runtime-state files are gitignored (git check-ignore full hit)", () => {
   const out = execFileSync("git", ["check-ignore", ...RUNTIME_STATE_FILES], {
     cwd: REPO_ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
   });

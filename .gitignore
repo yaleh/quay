@@ -134,6 +134,14 @@ orchestration/inner-idle-log.jsonl
 # runtime-state family as full-suite-state.json / gate-events.jsonl; never committed. All 5 were
 # ALSO accidentally tracked via fan-in ae47d845 — git rm --cached'd in the same gap.
 **/.quay/last-pane.txt
+# gap-quay-last-pane-txt-untracked-dirties-tree (2026-08-11): last-outer-pane.txt is the SAME tick
+# §1 observe artifact class as last-pane.txt — the manager→outer capture-pane write
+# (`tmux capture-pane -p -t "$OUTER_SESSION" > .quay/last-outer-pane.txt`,
+# orchestrator-loop-tick.md "管理者盯外层" AC5 path). Ungitignored it reproduced the exact
+# checker divergence the gap documents: tree-hygiene-check (KNOWN SCRATCH patterns only) reported
+# clean while assert-clean-tree (any porcelain) FAILED. Same live runtime-state family as
+# last-pane.txt — never committed.
+**/.quay/last-outer-pane.txt
 **/.quay/suite-cgroup-evidence.txt
 **/.quay/suite-chain-heartbeat.json
 **/.quay/suite-health-last-run.json

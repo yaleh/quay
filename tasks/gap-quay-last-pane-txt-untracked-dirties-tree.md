@@ -41,9 +41,18 @@ extra: {}
 
 ## AC（draft）
 
-- [ ] `git status --porcelain` 在 tick §1 observe 后干净（last-pane.txt 不再显示为 untracked）
-- [ ] `tree-hygiene-check.sh` 与 `assert-clean-tree.sh` 对同一工作树给出**一致**的 clean/dirty 结论
-- [ ] 负控制：构造 last-pane.txt 存在 ⇒ 两个检查器都判干净（或都判脏），不一致即失败
+- [x] `git status --porcelain` 在 tick §1 observe 后干净（last-pane.txt 不再显示为 untracked）
+      —— `.gitignore` 现含 `**/.quay/last-pane.txt`（sibling gap b292ddb2 已加）**及同类 tick 产物
+      `**/.quay/last-outer-pane.txt`（本任务补，orchestrator-loop-tick.md:739 管理者盯外层的
+      capture-pane 写入）。实测：构造两文件 ⇒ `git status --porcelain` 空、`git check-ignore` 两文件全命中。
+- [x] `tree-hygiene-check.sh` 与 `assert-clean-tree.sh` 对同一工作树给出**一致**的 clean/dirty 结论
+      —— 两检查器都读 `git status --porcelain`；gitignore 让 pane 产物对 porcelain 不可见 ⇒ 两者对
+      同一树同判。实测：两 pane 文件存在时 `tree-hygiene-check` exit 0（clean）、`assert-clean-tree --check`
+      exit 0（DELTA PASS）。
+- [x] 负控制：构造 last-pane.txt 存在 ⇒ 两个检查器都判干净（或都判脏），不一致即失败
+      —— 实测：仅 pane 文件（无其它 dirt）⇒ `tree-hygiene-check` clean exit 0、`assert-clean-tree`
+      DELTA PASS exit 0（两检查器都判干净）；修前对照（gitignore 移除时）`?? .quay/last-outer-pane.txt`
+      使 tree-hygiene clean 而 assert-clean-tree FAIL exit 1 —— 正是本任务记录的 divergence。
 
 ## DoD（draft）
 
@@ -70,3 +79,31 @@ extra: {}
 ## Touches
 
 - tasks/gap-quay-last-pane-txt-untracked-dirties-tree.md（自身文件：self-touch，2026-08-10 outer 补——缺此条被 C8 拒派发，见 touches-orthogonality-check --self-touch-scan）
+- .gitignore（补 `**/.quay/last-outer-pane.txt` —— last-pane.txt 的同类 tick §1 observe 产物；last-pane.txt 本身已由 sibling gap b292ddb2 加）
+- plugin/test/gitignore.test.mjs（guard test 扩展：RUNTIME_STATE_FILES 5→6，纳入 last-outer-pane.txt，维持 per-file gitignore 可执行不变量）
+
+## Execution evidence（2026-08-11，worktree `quay-worktrees/gap-quay-last-pane-txt-untracked-dirties-tree`）
+
+**实现**
+
+- `.gitignore`：在 `**/.quay/last-pane.txt` 行后新增 `**/.quay/last-outer-pane.txt`（带注释，标注
+  orchestrator-loop-tick.md:739 「管理者盯外层」AC5 capture-pane 写入，同一运行时状态族）。
+- `plugin/test/gitignore.test.mjs`：RUNTIME_STATE_FILES 数组 5→6（加入 `.quay/last-outer-pane.txt`），
+  测试名/注释同步 5→6。修前此 guard 只守 5 条 per-file 规则，新同类文件会静默漏过。
+
+**scoped 套件（`scripts/test.sh --for-task gap-quay-last-pane-txt-untracked-dirties-tree --allow-thin`）**
+
+- 选择器：0 test file(s)（thin，任务 Touches 原只有 self-file）——scoped 静态层全绿：
+  task-contract-check（strict-subset，0 violations）/ superseded-capability-check（PASS）/
+  tick-core-static-check（AC3 100%、AC4/AC5/AC6 OK）⇒ **EXIT 0**。
+- 显式跑 guard test（`scripts/test.sh plugin/test/gitignore.test.mjs`）：`✔ AC2 — all 6 runtime-state
+  files are gitignored`（1 pass / 0 fail / 0 cancelled）⇒ **EXIT 0**；checker-mutation-check 全绿
+  （22 checkers，0 uncovered）。
+
+**手工验证（负控制）**
+
+- 隔离 temp git repo（自含 tree-hygiene-check 副本）：构造 `.quay/last-pane.txt` + `.quay/last-outer-pane.txt`
+  且 gitignore 含两规则 ⇒ `git status --porcelain` 空、`tree-hygiene-check` clean exit 0、
+  `assert-clean-tree` absolute PASS exit 0、DELTA PASS exit 0 —— **两检查器一致判干净**。
+- 修前对照（移除 gitignore 规则时）：`?? .quay/last-outer-pane.txt` ⇒ `tree-hygiene-check` clean exit 0
+  而 `assert-clean-tree` absolute FAIL exit 1 —— 正是本任务 Finding 记录的 divergence（同类文件复现）。
