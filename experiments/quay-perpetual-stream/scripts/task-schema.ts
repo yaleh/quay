@@ -97,6 +97,57 @@ export function extractSection(fullText, heading) {
 // Splits on the first two `---` fences. Returns { labels, extra, frontmatterRaw, body }. Does NOT
 // pull in a YAML dependency (the store's frontmatter is simple block-scalar/flow); parses labels as
 // either a `- item` block list or a `[a, b]` flow list, and reads the `extra:` block's scalar keys.
+//
+// ── WRITE-OWNERSHIP SEPARATION (gap-task-file-develop-integration-drift-fan-in-conflicts, AC3) ────
+// The frontmatter (which carries `status:`) is owned EXCLUSIVELY by the outer layer (status flips /
+// records). The inner task agent only APPENDS body sections (AC checkbox ticks, Evidence, invoke
+// records) — it never writes frontmatter. `appendBodySection` is the mechanical enforcement of
+// "Evidence 追加，不整体覆盖" (Contract invariant evidence_append_not_overwrite = 1): it edits ONLY
+// the body, leaving the frontmatter block byte-for-byte identical, and FAILS CLOSED if the file has
+// no frontmatter (cannot guarantee write-ownership). Inner uses this (or the same body-only edit
+// discipline) instead of a whole-file rewrite; a whole-file rewrite that changes the frontmatter is
+// a write-ownership violation and a fan-in conflict source.
+export function appendBodySection(fullText, heading, content) {
+  const fmMatch = fullText.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
+  if (!fmMatch) {
+    return { ok: false, reason: "no frontmatter — write-ownership cannot be guaranteed" };
+  }
+  const frontmatterRaw = fmMatch[1];
+  const body = fmMatch[2] ?? "";
+  // Prefer appending to the END of an existing section of the same heading; otherwise create it at
+  // the end of the body. Never touch the frontmatter block.
+  const headingRe = new RegExp(`^##\\s+${heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*$`, "m");
+  let newBody;
+  if (headingRe.test(body)) {
+    // Section already exists → insert the content at the END of that section (true append: the
+    // content lands after the section's current body, before the next heading or EOF).
+    const idx = body.search(headingRe);
+    const sectionStart = idx;
+    const rest = body.slice(sectionStart);
+    const nextHeadingRe = /^##\s/m;
+    const nextMatch = rest.match(nextHeadingRe);
+    // A heading line itself starts with ## — find the NEXT heading AFTER this section's own line.
+    let contentEnd = body.length;
+    if (nextMatch) {
+      const afterOwnHeading = rest.indexOf("\n", 0);
+      if (afterOwnHeading >= 0) {
+        const nextInRest = rest.slice(afterOwnHeading + 1).match(nextHeadingRe);
+        if (nextInRest) contentEnd = sectionStart + afterOwnHeading + 1 + nextInRest.index;
+      }
+    }
+    const before = body.slice(0, contentEnd);
+    const after = body.slice(contentEnd);
+    // Ensure a blank line separates the appended content from the next heading (markdown hygiene).
+    const sep = after.startsWith("\n") ? "" : "\n";
+    newBody = `${before.replace(/\s+$/, "")}\n${content.replace(/\s+$/, "")}${sep}\n${after.replace(/^\n+/, "")}`;
+  } else {
+    const trimmed = body.replace(/\s+$/, "");
+    newBody = trimmed ? `${trimmed}\n\n## ${heading}\n\n${content.replace(/\s+$/, "")}\n` : `## ${heading}\n\n${content.replace(/\s+$/, "")}\n`;
+  }
+  const out = `---\n${frontmatterRaw}\n---\n${newBody}`;
+  return { ok: true, fullText: out, frontmatterUnchanged: true };
+}
+
 export function parseTask(fullText) {
   const fmMatch = fullText.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
   if (!fmMatch) {
