@@ -68,6 +68,14 @@ extra: {}
 
 **2026-08-10 re-dispatch 重验证**：scoped gate 复跑 `./scripts/test.sh --for-task gap-measure-trend-load-noise-false-positive --allow-thin` → **exit 0，13 pass / 0 fail，violations 0**（测试文件现 13 个用例——4 个由后续同族任务 gap-measure-trend-large-test-load-noise / gap-measure-trend-relative-trigger-lacks-hist-variance-exemption 加入同一文件，本任务语义仍绿）。Contract invoke 复现：构造「300ms→800ms（小测试 2.7×）」⇒ **0 flag**；「it0-dod-check 71066→104685ms（+33.6s 绝对）」⇒ **flag（reason=absolute）**；CLI `--json` growth lines=1。
 
+**2026-08-11 re-dispatch 重验证**（worktree `task/gap-measure-trend-load-noise-false-positive` @ develop 2be095ae）：
+- AC1 复现固化为任务体 Proposal（13 flag 全负载噪声、非 sprawl 相关、0 测试运行即红）——本任务 Proposal §实证 已含。
+- AC2/AC3 实现已在 develop（`c5cb083f` 小测试 <5s 相对 ≥2× 豁免 + `d83916e4` 大测试历史方差豁免 + `93f87930` 相对触发同构 withinHistMax guard），本次复跑确认语义仍绿。
+- **scoped 门**：`bash scripts/test.sh --for-task gap-measure-trend-load-noise-false-positive --allow-thin` → **exit 0，13 pass / 0 fail / 0 cancelled，duration 525ms**。
+- **Contract invoke 复现**（临时 history）：构造「small.test 300→800ms（2.7× 相对，小基线）」+「it0-dod-check 71066→104685ms（+33.6s 绝对）」两轮 land ⇒ CLI `--json --no-land` 输出 **1 条 growth**（`/it0-dod-check.test.mjs reason=absolute`），small.test **不 flag**（负载噪声豁免生效）；`grep -c 'growth'` = 1。
+- AC4 不回归：既有 + 同族加入的 13 个用例全绿（上）。
+- AC5（全量套件绿）留外层 verification-round 验证，未勾。
+
 ## Touches
 
 - plugin/scripts/measure-trend-check.ts（候选 A/B/C/D：小测试阈值 / 负载归一 / 连续 2 轮 / 噪声带豁免）
