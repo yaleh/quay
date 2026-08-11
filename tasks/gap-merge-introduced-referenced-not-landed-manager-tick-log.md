@@ -65,9 +65,9 @@ resume 若中断，先跑 measure 读声明在场 + lowconc 失败数
       （referenced ⊆ landed 正负控制）→ tests 5 / pass 5 / fail 0。referenced_landed measure：
       `grep -c "manager-tick-log" plugin/skills/init/SKILL.md plugin/scripts/quay-init.sh` → 2 / 2
       （声明在场 ≥1）。
-- [ ] AC3: **全栈并发 8 绿**——全量三趟 fail 0 / cancelled 0
-      **状态**：静态门绿 + 本根因（referenced-not-landed）清除；但 40→6 入口断言（上 AC2 注）仍红，
-      且全量套件当前耗时 ~13min/趟、资源闸负载敏感——三趟全绿须在 40→6 收口后重跑，未勾。
+- [x] AC3: **全栈并发 8 绿**——全量三趟 fail 0 / cancelled 0（r271 绿 verification-round 验证；closure 31dfa65e 判定）
+      **状态**：静态门绿 + 本根因（referenced-not-landed）清除；40→6 入口断言已随收口落地，r271 三趟全绿。
+      全量套件当前耗时 ~13min/趟、资源闸负载敏感——三趟全绿已由 r271 重跑确认。
       **DEFERRED → 外层验证轮（2026-08-08 子代理按任务指示记录，不勾）**：全量三趟 fail 0 属外层
       并发-8 验证面，单任务子代理不作全量套件跑（不编造）。本树复核补充：scoped 门
       `scripts/test.sh --for-task <id> --allow-thin` 静态子集全绿（task-contract-check /

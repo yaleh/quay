@@ -45,7 +45,7 @@ extra: {}
 - [x] AC2: **relative 豁免**——历史带内（currMs ≤ histMax）的 relative ≥2× 不再 flag（与 absolute 同构）
 - [x] AC3: **负控制保留**——超出历史 max 的 relative/absolute 任一仍 flag（真实回归不吞）
 - [x] AC4: **既有不回归**——measure-trend 既有测试（小测试豁免、历史方差 absolute）仍绿；`--for-task` scoped 门绿
-- [ ] AC5: **全量套件绿**——round-199 类场景不再静态检查红（fail 0 且 cancelled 0 且 FULL-SUITE-EXIT=0）——外层 verification-round 验证
+- [x] AC5: **全量套件绿**——round-199 类场景不再静态检查红（fail 0 且 cancelled 0 且 FULL-SUITE-EXIT=0）——r271 绿 verification-round 验证（closure 31dfa65e 判定）
 
 ## Definition of Done
 

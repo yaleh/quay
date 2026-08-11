@@ -49,7 +49,7 @@ extra: {}
 - [x] AC2: **旧路径引用消除**——threshold-scope-check.ts 不再引用旧部署路径（改 plugin/loop/ 规范路径），或已进排除表
 - [x] AC3: **loop-shipping 绿**——AC1b 回归验证 12/12（含 necessity-check 不炸）
 - [x] AC4: **扫描面不丢**——threshold-scope-check 仍扫 CLAUDE.md + 有效 tick-doc 面（Contract invariant 保持）
-- [ ] AC5: **全量套件绿**——round-200 类场景不再红（fail 0 且 cancelled 0 且 FULL-SUITE-EXIT=0）
+- [x] AC5: **全量套件绿**——round-200 类场景不再红（fail 0 且 cancelled 0 且 FULL-SUITE-EXIT=0）（r271 绿 verification-round 验证；closure 31dfa65e 判定）
 
 ## Definition of Done
 

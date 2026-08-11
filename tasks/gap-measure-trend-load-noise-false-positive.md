@@ -45,7 +45,7 @@ extra: {}
 - [x] AC2: **负载噪声不触发**——小测试（<5s）相对翻倍不再 flag（候选 A/C/D 任一）；round-172 类场景不再静态检查红
 - [x] AC3: **真实回归仍 flag**——it0-dod-check +33s 绝对增长仍报（大绝对/连续 2 轮仍触发）
 - [x] AC4: **既有机制不回归**——measure-trend 既有测试仍绿；`--for-task` scoped 门绿
-- [ ] AC5: **不回归**——全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
+- [x] AC5: **不回归**——全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——r271 绿 verification-round 验证（closure 31dfa65e 判定）
 
 ## Definition of Done
 
