@@ -870,8 +870,9 @@ export function taskStatusAllowsOver90m(root, taskId) {
  *
  * Mechanical: reads the SAME `.workflow-events/` store the tick's own `--task-start`/`--task-end`
  * writes, and asks the telemetry aggregate for inProgress tasks older than TASK_OVER_90M_MS. This
- * is the inner-state.sh OVER90 signal (a task the outer already flags) made into a block: the
- * tick MUST abort the subagent and wait (no inner retry).
+ * is inner-blocked-signal.ts's OWN over-90m detector (reason `task-over-90m`; a task the outer
+ * already flags) made into a block — the over-90m signal is produced HERE, from this telemetry
+ * store, not by any external observer. The tick MUST abort the subagent and wait (no inner retry).
  *
  * AC8 (gap-telemetry-brackets-vs-subagents-no-slot-visibility): the inProgress source is filtered
  * through a RECONCILE-AWARE verdict so a bracket whose work has LANDED (the task's branch was merged
