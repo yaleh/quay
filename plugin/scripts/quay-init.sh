@@ -701,7 +701,7 @@ write_state_file() {
   for root in \
     "plugin/scripts" "plugin/probes" "orchestration" "docs/analysis" \
     ".quay/config.yml" ".quay/quay-init-state.json" ".quay/runtime" \
-    ".claude/workflows" ".claude/agents"; do
+    ".claude/workflows" ".claude/agents" ".claude/launch.settings.json"; do
     if [ -f "$WORKSPACE_ROOT/$root" ]; then
       printf '%s\n' "$root" >> "$laid_rel_file"
     elif [ -d "$WORKSPACE_ROOT/$root" ]; then
@@ -1528,7 +1528,7 @@ auto_commit_laid_down() {
   # unrelated uncommitted work — AC3). Missing paths are skipped; gitignored runtime bundles never
   # reach the stage. Runs in a subshell at the workspace root so the literal `git add` / `git commit`
   # (the Contract invoke's surface) are the real operations, not prose.
-  for p in .gitignore .quay/config.yml .quay/quay-init-state.json plugin/scripts orchestration docs/analysis .claude/workflows .claude/agents tasks; do
+  for p in .gitignore .quay/config.yml .quay/quay-init-state.json plugin/scripts orchestration docs/analysis .claude/workflows .claude/agents .claude/launch.settings.json tasks; do
     if [ -e "$WORKSPACE_ROOT/$p" ]; then
       ( cd "$WORKSPACE_ROOT" && git add -- "$p" ) 2>/dev/null || true
     fi
@@ -1790,6 +1790,25 @@ PYEOF
     # cleanup — a stale copy is backed up + replaced, never silently left in place).
     copy_one "$sl_src" "$sl_dst" clean
     write_session_env
+  fi
+
+  # Launch config (gap-quay-init-coldstart-usability-launch-not-used-... F4/AC2): the checked-in
+  # per-role launch command lives in <target>/.claude/launch.settings.json (settings-schema keys +
+  # _launchSpec for flag-only params), materialized by quay-launch.sh — but quay-init NEVER laid it
+  # down, so a cold-started third-party target had a laid-down quay-launch.sh that FAILED CLOSED
+  # ("launch settings file not found") and consumers hand-started sessions without --settings /
+  # without the role-convention name (measured 2026-08-11 on ad-arm1 archguard). Lay the DEFAULT
+  # template verbatim; the consumer edits model/env per project (the launcher reads it at runtime —
+  # no bake-in). mode "managed" (like tick docs): a target that still equals the previous install's
+  # laid-down hash is stale install → replaced on upgrade; a genuine user edit differs from both
+  # product and hash → CONFLICT, preserved (never a silent overwrite of a customized launch config).
+  ls_src="$PLUGIN_ROOT/.claude/launch.settings.json"
+  ls_dst="$WORKSPACE_ROOT/.claude/launch.settings.json"
+  if [ ! -f "$ls_src" ]; then
+    echo "  WARN: launch settings template missing from plugin: $ls_src" >&2
+  else
+    copy_one "$ls_src" "$ls_dst" managed
+    echo "  launch-config: laid down .claude/launch.settings.json (default template — edit model/env per project; quay-launch.sh materializes it)"
   fi
 
   # AC7b (gap-cold-start-...-eight-steps) + gap-vendor-runtime-not-in-git-clone-broken-mcp-entry

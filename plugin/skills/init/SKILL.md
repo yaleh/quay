@@ -74,6 +74,7 @@ mechanically by quay-init's `verify-referenced-landed` (see below).
 | `scripts/` bare-name mechanism files the docs call without a `plugin/scripts/` prefix (`inner-idle-log.ts`, `it0-split-or-commit-check.ts`, `pipe-exit-code-check.sh`; `heavy-op-token.sh` was retired 2026-08-06) | `plugin/scripts/` |
 | `scripts/gate-script-base.ts`, `workflow-event-schema.mjs`, `task-schema.ts`, `touches-parser.ts`, `wiring-coverage-check.ts` (transitive deps of the checkers — the laid-down mechanism must be functional) | `plugin/scripts/` |
 | `scripts/session-liveness.sh` (the ONE observer; `inner-state.sh` is retired and NOT laid down) | `plugin/scripts/` |
+| `.claude/launch.settings.json` (default launch template — the consumer edits model/env per project; `quay-launch.sh` materializes it, so a cold-started target's launcher does NOT fail closed; `gap-quay-init-coldstart-usability-launch-not-used-...` F4) | `.claude/launch.settings.json` |
 
 ## Loop install: local-state files (self-create) and quay reference docs
 

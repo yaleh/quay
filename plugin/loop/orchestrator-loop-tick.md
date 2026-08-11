@@ -53,11 +53,20 @@ tick 步骤。不要在这之外再起 `/loop`（固定间隔 `/loop` 底层就�
 cd "$REPO_ROOT"    # REPO_ROOT 见 .quay/config.yml loop.repo_root（或 git rev-parse --show-toplevel）
 ```
 
+**启动方式（F4，measured 2026-08-11 ad-arm1 archguard Level3 首跑）：** 本外层会话必须是用**铺下的
+`bash plugin/scripts/quay-launch.sh outer`** 起的（带 `--settings`、窗口名 `quay-outer`），内层必须是用
+`bash plugin/scripts/quay-launch.sh inner` 起的（窗口名 `quay-inner`）；裸机一步是
+`bash plugin/scripts/session-bootstrap.sh <root> inner/outer`。**不是手敲一行 `claude`。** 冷启动检查的是
+「铺下来的 launch 被用起来」——若你的窗口不是这么起的（无 `--settings`、或窗口名是 `inner` 而非 `quay-inner`），
+先经 launcher 重起再继续；`quay-launch.sh --dry-run` 打印每个角色将得到的命令。launch 配置在
+`<root>/.claude/launch.settings.json`（quay-init `--loop` 铺默认模板，按项目改 model/env）。
+
 **1. 读机制与目标**（顺序有意）
 
 | 文件 | 得到什么 |
 |---|---|
-| 本文件其余部分 | 外层的职责、授权边界、tick 步骤 |
+| `orchestration/orchestrator-tick-core.md`（**≤80 行执行核**） | 外层的职责、授权边界、tick 步骤——**冷启动第一份读它**，不要先读本文件全量 |
+| 本文件（**完整理由档案，只在需要某判据的 src: 行号时查**） | 每条判据的实测、理由、代价（F5，measured 2026-08-11：铺下 tick 文档 126,895 字节，消费方冷启动不该第一件事读它） |
 | `orchestration/exp6-phase1-sustained-unattended-operation.md` | 目标、20 条 AC、DoD、四项已定决策 |
 | `orchestration/tick-log.md` | **历史 tick 与动作类型累计分布**——退化判据的唯一来源 |
 | `orchestration/escalations.md` | 已攒给人、尚未处理的非常规项 |
@@ -298,6 +307,12 @@ bash plugin/scripts/monitor-mount-check.sh --json
 任何一条不满足都按冷启动失败处理，不要直接进 tick。
 `gap-nothing-checks-whether-the-monitor-is-mounted-or-aimed-right`：挂没挂/挂哪个仓库
 两条判据是**一条不是一条**——只查第一条会漏掉「进程活着、目标错」那次（管理者 18 小时挂错目标）。
+
+**交付判定（F6，measured 2026-08-11 ad-arm1：外层花 15min/120.6k token 诊断「monitor 为什么不发事件」）：
+monitor 只在状态转换时发事件**（SESSION-GONE/BACK/IDLE/RESUMED/OVERDUE…），稳定会话**理应什么都不发**——
+「90 秒没有事件」是正常，不是故障。别等转换事件；要确定性送达证据，跑
+`bash plugin/scripts/session-liveness.sh --once`（每目标一行 `SESSION-STATUS <name> alive=…`，秒级）。
+挂载检查两判据 + `--once` 一行 = 观察者确实挂对且能产事件；之后的真实状态变化会到 Monitor 流上。
 
 **5. 核对前置条件**
 

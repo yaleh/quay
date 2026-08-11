@@ -25,6 +25,8 @@ All must hold before starting; if any fails, STOP and report which precondition 
 |---|---|
 | loop mechanism laid down | `<root>/plugin/scripts/session-liveness.sh`, `fast-mode-telemetry.ts` exist |
 | tick docs laid down | `<root>/orchestration/orchestrator-loop-tick.md` and `<root>/docs/analysis/fast-mode-loop-tick.md` exist |
+| launch config laid down | `<root>/.claude/launch.settings.json` exists (quay-init `--loop` lays the default template; the consumer edits model/env per project) |
+| **sessions launched via the laid-down launcher** | outer and inner windows were started by **`bash <root>/plugin/scripts/quay-launch.sh <role>`** (or `bash <root>/plugin/scripts/session-bootstrap.sh <root> inner/outer`), which carries `--settings` + the role-convention name (`quay-outer`/`quay-inner`) — **never** a hand-typed bare `claude` one-liner, **never** a non-role window name like `inner` |
 | inner session reachable | tmux session from `<root>/orchestration/session-liveness.env` (`SESSION_TMUX_SESSION=`), else `<project>-0:0.0`, exists (`tmux list-panes -t <session}`) |
 | derived laydown set green | the plugin's DERIVED laydown set is green — `bash <quay-source>/plugin/scripts/laydown-set-check.sh` reports `laydown_set_green: green`. **Gate = the derived set (lay what you verify), NOT the whole suite** — an unrelated suite failure must NOT block the cold start (`gap-cold-start-gate-should-be-derived-laydown-set-green-not-whole-suite`; cross: `gap-red-window-dispatch-stop-should-be-shared-gate-conditional`, same scope axis, different mechanism) |
 
@@ -33,6 +35,17 @@ All must hold before starting; if any fails, STOP and report which precondition 
 (settings-schema keys + `_launchSpec` for flag-only params), materialized by the skill-internal
 launcher `quay-launch.sh` — the user/agent never names the launcher and never hand-types a shell
 one-liner. Verify without starting anything via the launcher's `--dry-run`.
+
+**F4 — the launcher is the ONLY way sessions are started (measured 2026-08-11 ad-arm1 archguard
+Level3 首跑):** the two sessions were hand-started (outer process with NO `--settings`, inner window
+named `inner` instead of the role-convention `quay-inner`), so the laid-down `quay-launch.sh` was
+never used. A session is cold-start-eligible ONLY when it was started by the launcher: outer via
+`bash <root>/plugin/scripts/quay-launch.sh outer` (window name `quay-outer`, carries `--settings`),
+inner via `bash <root>/plugin/scripts/quay-launch.sh inner` (window name `quay-inner`), from bare
+metal via `bash <root>/plugin/scripts/session-bootstrap.sh <root> inner/outer`. If a window exists
+but was NOT started by the launcher (no `--settings` / wrong name), restart it through the launcher
+before proceeding — a cold start in hand-started windows repeats the F4 defect. `quay-launch.sh
+--dry-run` prints the exact command each role would get.
 
 **REQUIRED launch params (both routes, every role, fail-closed)** — the ghost-suggestion
 (reliable-send fault 6) is eliminated AT SOURCE by two params, both REQUIRED, present in EVERY
@@ -61,7 +74,7 @@ start did NOT complete.
 | # | Key | Checkable definition | Evidence |
 |---|---|---|---|
 | 1 | `MONITORS-MOUNTED` | ONE Monitor-tool invocation exists for `<root>/plugin/scripts/session-liveness-mount.sh` (the observer — session observation has exactly ONE tool, SPEC-one-observer-two-surfaces.md; the retired per-parameter observer was removed by gap-retire-inner-state-one-observer-targets-by-parameter); `bash <root>/plugin/scripts/monitor-mount-check.sh --json` reports `mounted=true`, `targetOk=true` (2026-08-06: `delivered` retired with the shared events file — the mount check is mounted + targetOk) | the `--json` output (two criteria) |
-| 2 | `MONITORS-DELIVERING` | **At least one event line from the mounted monitor was delivered to THIS session** (a `SESSION-STATUS` line, a `SESSION-GONE`, a `SESSION-OVERDUE`, a `SESSION-IDLE`, etc. — each observer owns its own stdout stream, 2026-08-06). A running process is NOT evidence; a nohup log file is NOT evidence | the delivered event line(s), verbatim |
+| 2 | `MONITORS-DELIVERING` | **The observer provably produces an event line** — EITHER a transition event from the mounted monitor delivered to THIS session (a `SESSION-GONE`, a `SESSION-BACK`, a `SESSION-IDLE`, a `SESSION-OVERDUE`, etc. — each observer owns its own stdout stream, 2026-08-06), OR (deterministic, preferred) the `bash <root>/plugin/scripts/session-liveness.sh --once` `SESSION-STATUS` line(s). **The resident mount emits ONLY on state TRANSITIONS — a stable session legitimately emits NOTHING, so do NOT wait ~90s for a transition event that may never come (F6, measured 2026-08-11: ad-arm1 outer burned 15min/120.6k token diagnosing this non-problem)**; the `--once` seam is the fast delivery proof. A running process is NOT evidence; a nohup log file is NOT evidence | the `--once` `SESSION-STATUS` line(s) verbatim, or the delivered transition event line(s) |
 | 3 | `CRON-CREATED` | `CronCreate` `*/20 * * * *` succeeded, `CronList` lists it, AND `bash <root>/plugin/scripts/loop-driver-check.sh <root>` reports `LIVE` (exactly ONE driver — not STALLED, not DOUBLE-TRIGGER) | the check output (`loop-driver: LIVE (1) …`) |
 <!-- gap-laydown-derivation-is-sensitive-to-reference-spelling-dependency-closure (AC2/AC3): this
      bare-name reference to transcript-delivery-check.ts (no plugin/scripts/ prefix) is INTENTIONAL
@@ -197,11 +210,24 @@ different ways to be wrong (not mounted / mounted on the wrong project). 2026-08
 (gap-session-liveness-remove-shared-events-and-lock): the old `delivered` criterion (shared events
 file freshness) is GONE — the shared file was removed; observation is a tree, each observer owns its
 own stdout stream, and delivery is verified by THIS session's own Monitor stream (criterion 2 below),
-not by a cross-observer file. Then **wait for at
-least one delivered event line**
-(`session-liveness.sh --once` in the skill's own run is faster; a resident mount emits its events on
-the Monitor stream each round). If no event arrives within ~90s, the monitor is not delivering — **STOP and report**
-`MONITORS-DELIVERING: false`; do not proceed to pretend the loop is up.
+not by a cross-observer file.
+
+**Delivery is proven by the deterministic `--once` seam, not by waiting for a resident event.**
+The resident mount emits ONLY on state TRANSITIONS (SESSION-GONE/BACK/IDLE/RESUMED/OVERDUE/…) — a
+stable session legitimately emits NOTHING, so "no event within ~90s" is NORMAL, not a monitor defect.
+**(F6, measured 2026-08-11: ad-arm1 outer cold start burned 15min/120.6k token diagnosing exactly
+this non-problem — the monitor was fine; it had no state change to report.)** Do NOT wait for a
+transition event that may never come. Instead, get the deterministic delivery proof in seconds:
+
+```bash
+bash <root>/plugin/scripts/session-liveness.sh --once   # SESSION-STATUS <name> alive=... per target
+```
+
+Require `--once` to emit at least one `SESSION-STATUS` line — that line IS the delivered-event
+evidence (criterion 2's `SESSION-STATUS` form). The mount check (mounted+targetOk) proves the
+resident observer is attached; the `--once` line proves the observer can produce events; a later
+real state change will arrive on the Monitor stream. Only a mount-check failure OR an empty `--once`
+output is `MONITORS-DELIVERING: false` — **STOP and report**; do not proceed to pretend the loop is up.
 
 ### 5. Re-create the 20-minute cron — THE single loop driver (session-scoped: dies when the session PROCESS exits)
 

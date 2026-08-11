@@ -28,18 +28,51 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 ad-arm1 archguard 实测（F4 未用 quay-launch.sh / F5 126,895 字节 / F6 15min 120.6k token 自检）
-- [ ] AC2: **launch 可被消费方使用**——铺下的 quay-launch.sh 好用且显眼（冷启动文档指引用它）
-- [ ] AC3: **tick 文档体积可控**——消费方冷启动引导不强制读超大文档（或文档瘦身）
-- [ ] AC4: **自检不占主导**——冷启动自检可跳过/并行/缩短，主要时间花在驱动开发
-- [ ] AC5: **既有不回归**——`--for-task` scoped 门绿
+- [x] AC1: **复现固化**——任务体记录 ad-arm1 archguard 实测（F4 未用 quay-launch.sh / F5 126,895 字节 / F6 15min 120.6k token 自检）
+- [x] AC2: **launch 可被消费方使用**——铺下的 quay-launch.sh 好用且显眼（冷启动文档指引用它）
+- [x] AC3: **tick 文档体积可控**——消费方冷启动引导不强制读超大文档（或文档瘦身）
+- [x] AC4: **自检不占主导**——冷启动自检可跳过/并行/缩短，主要时间花在驱动开发
+- [x] AC5: **既有不回归**——`--for-task` scoped 门绿
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全部勾上
-- [ ] 修后实跑：ad-arm1 冷启动用铺下 launch + 体积/自检读数改善
-- [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
+- [x] AC1–AC5 全部勾上
+- [ ] 修后实跑：ad-arm1 冷启动用铺下 launch + 体积/自检读数改善（外层 verification 实测）
+- [x] 既有测试 + 新增测试全绿（`--for-task` scoped）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
+
+## Evidence（inner 2026-08-11 实跑）
+
+**AC2 — launch 可被消费方使用**：
+- `quay-init --loop` 现在铺下 `.claude/launch.settings.json` 默认模板（`plugin/.claude/launch.settings.json` → `<target>/.claude/launch.settings.json`），quay-launch.sh 不再 fail-closed（修前第三方案冷启动目标没有 settings 文件 ⇒ launcher 报 "launch settings file not found"）。
+- 铺下模板经 launcher 实测 materialize 出 `--settings` + 角色约定名（F4 缺的那一半）：
+  ```
+  $ QUAY_LAUNCH_SETTINGS=plugin/.claude/launch.settings.json bash plugin/scripts/quay-launch.sh outer --dry-run
+  claude --settings plugin/.claude/launch.settings.json --exclude-dynamic-system-prompt-sections --prompt-suggestions false -n quay-outer
+  $ QUAY_LAUNCH_SETTINGS=plugin/.claude/launch.settings.json bash plugin/scripts/quay-launch.sh inner --dry-run
+  claude --settings plugin/.claude/launch.settings.json --exclude-dynamic-system-prompt-sections --prompt-suggestions false -n quay-inner
+  ```
+- 冷启动文档显式指引用铺下的 launch：cold-start SKILL 7 处、orchestrator-loop-tick 7 处 `quay-launch.sh`；Contract measure `grep -c 'quay-launch.sh' <冷启动铺下文档>` ≥ 1 满足（7 ≥ 1）。
+
+**AC3 — tick 文档体积可控（冷启动不强制先读超大文档）**：
+- 内层冷启动第 4 读改为 `orchestration/fast-mode-tick-core.md`（≤80 行执行核），本文件（126,895 字节）降级为「完整理由档案，只在需要某判据 src: 行号时查」；外层冷启动第 1 读同样改为 `orchestration/orchestrator-tick-core.md`。
+- fast-mode-loop-tick.md 冷启动段新增 F5 说明；orchestrator-loop-tick.md 冷启动第 1 步表格加 tick-core 指针行。
+
+**AC4 — 自检不占主导**：
+- cold-start SKILL 步骤 4 与判据 2（MONITORS-DELIVERING）改为**确定性 `--once` 缝**（`bash <root>/plugin/scripts/session-liveness.sh --once` → `SESSION-STATUS <name> alive=…`，秒级），明确「resident monitor 只在状态转换时发事件、稳定会话理应静默——不要等 ~90s 转换事件」（F6 的 15min/120.6k token 非问题）。
+- orchestrator-loop-tick.md 冷启动 4c 加同一条 F6 交付判定说明。
+
+**AC5 — 既有不回归（`--for-task` scoped 门绿）**：
+```
+$ bash scripts/test.sh --for-task gap-quay-init-coldstart-usability-launch-not-used-huge-tick-doc-selftest-dominant --allow-thin
+✔ AC2 — the three exec-core docs are in the derived laydown set ...
+✔ AC2-launch — --loop lays down .claude/launch.settings.json; the laid-down quay-launch.sh materializes --settings + role names
+✔ AC3 — manager-tick-core.md is OPT-IN ...
+✔ AC4 — the referenced⊆landed gate validates the three cores ...
+✔ AC5 — --loop --manager lays all three cores ...
+ℹ tests 5   ℹ pass 5   ℹ fail 0   ℹ cancelled 0
+```
+scoped 静态检查全绿：tick-core-static-check（AC3 src:N 100% / AC4 指针 / AC5 编号 / AC6 一致）、adr016-screen-use-check、superseded-capability、dead-code-after-return、delivery-inventory-drift gate 全 PASS。
 
 ## Touches
 
@@ -51,9 +84,9 @@ extra: {}
 ## Contract
 
 measure   coldstart_uses_laid_launch = `grep -c 'quay-launch.sh' <冷启动铺下文档>` stdout 数字
-band      coldstart_uses_laid_launch ≥ 1（冷启动文档指引用铺下的 launch）
-invariant tick_doc_size_bounded = 1（铺下 tick 文档 ≤ 合理阈值，冷启动不强制先读）
-invoke    `quay-init --loop` 到临时目标后量铺下文档字节 + 冷启动引导（贴证据）
+band      coldstart_uses_laid_launch = ≥ 1（冷启动文档指引用铺下的 launch；实测 cold-start SKILL 7 处 / orchestrator-loop-tick 7 处）
+invariant tick_doc_size_bounded = 1（铺下 tick 文档 ≤ 合理阈值，冷启动不强制先读——冷启动第 1 读改为 ≤80 行 tick-core）
+invoke    `quay-init --loop` 到临时目标后量铺下文档字节 + 冷启动引导（贴证据；已铺 .claude/launch.settings.json 实测 dry-run 输出）
 control   launch 可用；体积可控；自检不占主导；既有不回归
 resume    launch 指引 / 文档体积 / 自检优化分步提交，任一步完成即写盘
 
