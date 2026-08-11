@@ -1,7 +1,7 @@
 ---
 id: gap-supervisor-deliver-cross-host-target-support
 title: supervisor-deliver.sh 需支持跨主机目标（<host>:<tmux-target> 或 --host）——本机 tmux send-keys + 本地 transcript 读取结构上无法投递到另一台机器；manager 已 3 次手搓 ssh tmux send-keys 违规绕过（ADR-016 禁形态）；AC16③ Level3 在 ad-arm1 真实运行使跨主机投递成为常规路径
-status: ready
+status: done
 labels:
   - gap
   - defect
