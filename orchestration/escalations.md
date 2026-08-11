@@ -628,3 +628,9 @@ fix 的注释自己写：「The marker is written by the judge's consumer when a
 4. **新 gap task 记录本死角**（机制缺口：needs-work 无实现路径），由 inner 或外层按任务路径修。
 
 **外层倾向**：选项 1 先落地（成本最低、立即可做），同时选项 4 建 gap 记录机制缺口（防复发）。选项 3 是根治但方向变更需人裁定。**本 tick 不立即执行选项 1**——round 33 在跑、inner 睡到 20:20Z、且这是方向决策，先记录待下次 tick 或人介入时执行。
+
+---
+
+**B15 judge 复核（20:06Z，wf_1731f332-f0b）——判词独立确认 + 首选路线=选项①**：pool-quality judge 判 `gap-b15-needs-work-todo-no-implementation-path`（即选项 4 建的记录任务）= **needs-work / back-to-todo**，判词分布 {ready:0, needsWork:1, shouldRemove:0, uncertain:0}。论证：premise sound（isB15Blocked 双路拦截实证、inner no-action、两 todo 带 marker），但 **work 未落地**（AC1 可执行路径 / AC2 处置决策 / AC3 实际交叉标注全未满，DoD1/DoD2 未满）——本任务只记录了死角与选项，可执行路径显式 pending。**judge 显式点名自指陷阱**：「retreating this very task to todo reproduces the dead-end it documents, so it should be routed back with a concrete implementation/disposition assignment, not left in todo limbo」。**judge 首选路线 = 选项①**：outer 经 supervisor-deliver dispatch inner 重做 B15-blocked todos（naming over90-clock / supervisor-deliver-no-wait）→ 重新跑 judge，让 needs-work 判词携带实现指派而非孤儿 todo；替代=人裁定选项③（判词语义修订）或选项②（显式 park 并记理由）。
+
+**外层执行（20:06Z）**：①producer 契约——`task edit` retreat 本 gap 任务 ready→todo + `extra.poolQualityVerdict: needs-work`（CAS expectedStatus=ready 过，B16 AC3 外层独占 frontmatter）；②判词分布记 tick-log；③**选项①执行候选**——inner 下醒 20:20Z 派发重做三 B15-blocked todo（over90-clock / supervisor-deliver-no-wait / 本 gap 任务），按 judge remediation 逐条给实现/处置指派，避免 todo limbo。状态：pool 1→0，suite 绿（round 34）。
