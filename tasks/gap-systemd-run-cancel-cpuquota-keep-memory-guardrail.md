@@ -115,6 +115,8 @@ $ cat /sys/fs/cgroup<scope>/pids.max      → 200
 
 **建议**：① CPUQuota 400% 轮若干净，直接与 r281（200%）对比即可，不必再等 orangevps 二次验证；②「本机测量含开发负载混杂」标进相关任务 Finding；③ lane8 系列实验到此为止——两台机器、两种约束都指向同一结论。
 
+**⚠ 数据修正（manager 2026-08-11 10:2x，本条作废上文部分数字）**：orangevps/boheidc 最初 31 失败 = 同一根因 **`.quay/config.yml` 缺失**（gitignored、quay-init 生成、新 clone 没有）；scp 修复后失败归零（除 mcp-server 高并发死锁）。**orangevps 干净重跑 main_phase_ms 从「带 31 假失败」的 117s 变 170s**——那 31 个瞬间报错把 sum_ms 显著拉低，**上文 ②③ 及此前任何用那批数据做的外推均已作废**（117s/6.2 倍差/400% 收益下调的定量部分以 170s 重算为准；定性方向不变：本机测量含开发负载混杂、取消配额非纯收益）。boheidc lane16（16核无配额）撞上 mcp-server 死锁，剔除异常值 sum=1493s/289 文件、理论地板≈93.3s（未经验证轮）。死锁本体归内层任务 `gap-mcp-server-test-deadlocks-at-high-test-concurrency`。
+
 ## Contract
 
 measure   suite_scope_cpu_max = `cat /sys/fs/cgroup/*/*/*/*/app.slice/run-p*.scope/cpu.max | head -1` 的 stdout
