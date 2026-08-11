@@ -1,0 +1,70 @@
+---
+id: gap-write-ownership-extend-beyond-tasks-to-outer-core-and-hot-files
+title: "写所有权分离只覆盖了 tasks/（35→7 已验证），没覆盖 orchestration/orchestrator-* 与 plugin/loop/* 与热点实现文件——inner 在改 outer 的执行核/loop 文档/outer 正在改的实现 ⇒ 6 条 fan-in 撞 add/add 卡死；修法=①核心/loop 文档 outer 独占写（inner 给建议、outer 落盘）②迁移窗口内新路径只允许一方新建 ③热点实现文件在有人改时把 outer 在飞改动纳入 touches-orthogonality-check 占用表"
+status: todo
+labels:
+  - gap
+  - defect
+parent: null
+children: []
+extra: {}
+---
+**type:** execution
+
+## Proposal
+
+**写所有权分离（`0ce3f2a8`，2026-08-11 晚）只覆盖了 `tasks/` 的漂移（35→7，效果已验证），没覆盖 `orchestration/orchestrator-*` 与 `plugin/loop/*` 与热点实现文件。** 结果 inner 的任务分支在改 outer 的执行核（`orchestrator-tick-core.md`）、loop 文档（`plugin/loop/orchestrator-loop-tick.md`，且这是从 `orchestration/` 迁移中的新路径 ⇒ 双方各自新建 ⇒ add/add）、以及 outer 正在改的热点实现（`full-suite-runner.ts`，systemd 限额就在里面）——6 条内层完成分支全部卡在 fan-in 冲突上，inner 0 在飞、成为唯一活阻塞。
+
+### 实证（manager 2026-08-11 06:5x 取证 + outer 复核）
+
+- `task/gap-slot-free-not-an-event...`（ahead=4）改的文件含 **`orchestration/orchestrator-tick-core.md`（outer 执行核）**、**`plugin/loop/orchestrator-loop-tick.md`（迁移中新路径 ⇒ 双方各自新建 ⇒ add/add）**、`plugin/loop/fast-mode-loop-tick.md`、`docs/proposals/quay-product-outline.md`、`.gitignore`。
+- `task/gap-verification-round-missing...`（ahead=1）改 **`plugin/scripts/full-suite-runner.ts`** —— outer 同期正在改同一文件（systemd 限额实现）。
+- `task/gap-reconcile-step...`（ahead=4）改 **`orchestration/orchestrator-tick-core.md`**（outer 执行核）。
+- 早先 `0ce3f2a8` 写所有权分离把 `tasks/` 漂移从 35 降到 7（已验证），但没覆盖上述类别。
+
+### 选定机制方向（实现归 inner，判定归 outer）
+
+1. **① `orchestration/orchestrator-*.md` 与 `plugin/loop/orchestrator-loop-tick.md` 归 outer 独占写**——inner 的任务若需要改它们，产出改动建议而不是直接改，由 outer 落盘。与三层既有边界同构（manager 自己的 §0 也是「不碰实现，只给建议」）。
+2. **② 迁移中的文件（旧路径→新路径）在迁移窗口内只允许一方新建**——add/add 的根因是双方各自创建同一新路径；迁移期间应由一方一次性完成 move 并提交，另一方只 rebase。
+3. **③ 热点实现文件（当下是 `full-suite-runner.ts`）在有人在飞改动时，派发前用既有 `touches-orthogonality-check.ts` 把它算作占用**——该检查目前只看 inner 任务之间的 Touches 正交性，看不见 outer 主线正在改什么；应把 outer 自己的在飞改动纳入那张表。
+
+**验证锚**：修后 (a) inner 新派发任务不再把 `orchestration/orchestrator-*.md` / `plugin/loop/orchestrator-loop-tick.md` 列入 Touches（改为在 Proposal 给建议）；(b) 迁移窗口内新路径单方新建、无 add/add；(c) 热点文件在 outer 在飞改动时对 inner 算作占用（touches-orthogonality 拒绝同文件并发）；(d) `--for-task` scoped 门绿。
+
+## Acceptance Criteria
+
+- [ ] AC1: **复现固化**——任务体记录 6 条 resolve-pending 冲突清单 + 类别（outer 执行核 / 迁移新路径 add/add / 热点实现）+ 0ce3f2a8 只覆盖 tasks/（本任务 Proposal 已含）
+- [ ] AC2: **核心/loop 文档 outer 独占**——inner 任务不再直接改 `orchestration/orchestrator-*` 与 `plugin/loop/orchestrator-loop-tick.md`（改为给建议，outer 落盘）
+- [ ] AC3: **迁移单方新建**——迁移窗口内新路径只允许一方新建（move 一次提交，另一方只 rebase）
+- [ ] AC4: **热点占用表**——touches-orthogonality-check 纳入 outer 在飞改动（同文件并发 ⇒ 拒绝派发）
+- [ ] AC5: **既有不回归**——`--for-task` scoped 门绿；新任务不再因写所有权重叠 needs-human
+
+## Definition of Done
+
+- [ ] AC1–AC5 全部勾上
+- [ ] 修后实跑：新派发任务不再撞 outer 核心/热点文件（连续 2 轮无 add/add）
+- [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
+- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
+
+## Touches
+
+- plugin/scripts/touches-orthogonality-check.ts（AC4：outer 在飞改动纳入占用表）
+- plugin/test/touches-orthogonality-check.test.mjs（新增 outer-占用用例）
+- plugin/loop/fast-mode-loop-tick.md 或 inner 派发核（AC2：核心/loop 文档不列 Touches，改给建议）
+- orchestration/orchestrator-tick-core.md（AC2 注明：执行核 outer 独占写）
+- tasks/gap-task-file-develop-integration-drift-fan-in-conflicts.md（交叉标注——0ce3f2a8 的延续，覆盖范围扩展）
+- tasks/gap-write-ownership-extend-beyond-tasks-to-outer-core-and-hot-files.md（自身：勾 AC + 贴证据）
+
+## Contract
+
+measure   inner_touches_outer_core = `grep -lE "orchestration/orchestrator-|plugin/loop/orchestrator-loop-tick" tasks/*.md | wc -l` 的 stdout 数字（新派发任务含核心/loop 路径的 Touches 数）
+band      inner_touches_outer_core = 0（新任务不再把 outer 核心/loop 列进 Touches）
+invariant outer_inflight_in_occupancy = 1（touches-orthogonality 把 outer 在飞改动算占用——源码含 outer-inflight 项）
+invoke    `node --no-warnings --experimental-strip-types plugin/scripts/touches-orthogonality-check.ts --check-pair <任务A> <任务B> --outer-inflight <文件>`（贴 outer 占用拒绝用例）
+control   核心/loop 文档 outer 独占；迁移单方新建；热点占用表；既有不回归
+resume    核心独占写 / 迁移单方 / 占用表 / 测试分步提交，任一步完成即写盘
+
+## Dispatch review
+
+reviewer: outer
+at: 2026-08-11
+changed: manager 06:5x——写所有权分离只覆盖 tasks/（35→7），没覆盖 outer 执行核/loop 文档/热点实现；6 条 inner 分支卡 add/add（slot-free 改 outer 执行核 + 迁移新路径、verification-round 改 outer 正在改的 full-suite-runner、reconcile-step 改 outer 执行核）。处方：①核心/loop outer 独占写 ②迁移单方新建 ③outer 在飞改动纳入 touches-orthogonality 占用表。实现归 inner，判定归 outer
