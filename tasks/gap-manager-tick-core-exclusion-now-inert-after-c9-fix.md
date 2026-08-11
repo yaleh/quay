@@ -1,7 +1,7 @@
 ---
 id: gap-manager-tick-core-exclusion-now-inert-after-c9-fix
 title: "manager-tick-core.md 排除条目在 80d609fd 修掉 C9 旧路径后变 inert——necessity-check 红（actual: [manager-tick-core.md]）；该条目无 retainedNote，修法=移除（引用已修到新路径，不再需要排除）"
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -31,10 +31,10 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 merge 后 necessity-check 红（actual: [manager-tick-core.md]）+ 条目无 retainedNote + 80d609fd 已修 C9（本任务 Proposal 已含）
-- [ ] AC2: **排除条目处置**——移除 manager-tick-core.md 条目（或补 retainedNote 说明保留理由），necessity-check 绿
-- [ ] AC3: **既有不回归**——`--for-task` scoped 门绿；其余排除条目不误伤
-- [ ] AC4: **全量静态检查绿**——`scripts/test.sh` 静态检查阶段无 necessity-check FAIL
+- [x] AC1: **复现固化**——任务体记录 merge 后 necessity-check 红（actual: [manager-tick-core.md]）+ 条目无 retainedNote + 80d609fd 已修 C9（本任务 Proposal 已含）
+- [x] AC2: **排除条目处置**——移除 manager-tick-core.md 条目（或补 retainedNote 说明保留理由），necessity-check 绿
+- [x] AC3: **既有不回归**——`--for-task` scoped 门绿；其余排除条目不误伤
+- [x] AC4: **全量静态检查绿**——`scripts/test.sh` 静态检查阶段无 necessity-check FAIL
 
 ## Definition of Done
 
@@ -64,3 +64,39 @@ resume    条目处置 / scoped 门 / 全量验证分步提交，任一步完成
 reviewer: outer
 at: 2026-08-10
 changed: r260 green + batch-merge 后核出——manager 80d609fd 修掉 C9 旧路径引用，使 27cae7d9 加的 manager-tick-core 排除条目变 inert（无 retainedNote，necessity-check 红）。同时澄清 r259 红因：manager-tick-core 当时已在排除表（27cae7d9 是 r259 树祖先），真红因是 tick-core 机制文件（已修）。修法=移除条目或补 retainedNote。实现归 inner，判定归 outer
+
+## Execution evidence (inner, 2026-08-11)
+
+**实现**：`plugin/scripts/loop-shipping-exclusion-data.mjs` 中 `orchestration/manager-tick-core.md` 排除条目已移除（0 处残留），necessity-check 绿。
+
+**必要性检查（修后实跑）**：
+```
+node --test plugin/test/loop-shipping-necessity-check.test.mjs
+inert_exclusions: 0
+scanned file-level exclusion entries: 31
+inert-but-retained entries: 5
+  inert docs/analysis/batch2-queue-state.md (hits=0) retainedNote=YES
+  inert orchestration/tick-log.md (hits=0) retainedNote=YES
+  inert orchestration/manager-pending.md (hits=0) retainedNote=YES
+  inert orchestration/manager-tick-log.md (hits=0) retainedNote=YES
+  inert packages/quay/plugin (hits=0) retainedNote=YES
+✔ AC1/AC2 — no inert FILE-level exclusion entry without a written retention reason (inert_exclusions = 0)
+✔ AC3 — negative control: injecting a live old-path reference flips an inert target to non-inert
+✔ AC4 — the detector REPORTS an inert entry (fails closed), it does not silently pass
+ℹ tests 3 · pass 3 · fail 0 · cancelled 0
+```
+
+**actual 前后对比**：红时 `actual: ['orchestration/manager-tick-core.md']` → 修后 `inert_exclusions: 0`，actual 不含 manager-tick-core.md（necessity-check 绿）。manager-tick-core.md 的 C9 引用已在新正本 `plugin/loop/orchestrator-loop-tick.md:492`（`orchestration/manager-tick-core.md:74`），旧路径命中 0。
+
+**`--for-task` scoped 门（EXIT=0）**：
+```
+bash scripts/test.sh --for-task gap-manager-tick-core-exclusion-now-inert-after-c9-fix --allow-thin
+# scoped static checks（change-relevant tier）全部 PASS：
+#   test-isolation-check PASS / test-impl-census clean 326 / task-contract-check no violations
+#   superseded-capability PASS / tick-core-static-check PASS (manager-tick-core.md=39/39)
+#   delivery-inventory-drift-gate PASS
+# 必要性检查（scoped 内）：inert_exclusions: 0 · tests 3 · pass 3 · fail 0 · cancelled 0
+# EXIT=0
+```
+
+**其余排除条目不误伤（AC3）**：necessity-check 修后扫描 file-level 条目 31 条，inert-but-retained 5 条（全部带 retainedNote，运行期账本/快照振荡类），无新增 violation。`plugin/test/loop-shipping.test.mjs`（AC1b 全量扫描）pass 12 · fail 0，确认无其它排除目标被误伤。
