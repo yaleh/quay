@@ -510,6 +510,12 @@ tmux 仅用于紧急控制；投递通道不可认证、丢 `from` 字段）。
 worktree/分支——翻 done、写轮次记录、写 `--task-end` 都由外层异步做（`orchestrator-loop-tick.md`
 步骤 1b），inner 不需要也不应该碰。
 
+**A6/A15 对齐（`gap-worktree-leak-after-fan-in-occupies-slot-permanently`）**：inner 的 fan-in 序列
+（本步骤：merge --no-ff → --for-task 复测 → `git worktree remove`）与 **outer A15 ④ 的 fan-in 序列已对齐**
+（`orchestration/orchestrator-tick-core.md` A15 ④ 现含同一 `git worktree remove`）——两层的「合并后清理」是同一条
+纪律，否则在 outer 侧 fan-in 的任务（最近全在 outer 侧执行）会留下 worktree，每合一个任务永久吃一个槽位
+（`worktreeExists` 判存活 = worktree 还在 ⇒ occupied 单调累积 > cap ⇒ 空槽恒 0）。
+
 **两机协作：合并后释放认领（`gap-two-machine-collaboration-git-branch-claiming`）**——若本任务派发时
 经认领协议认领过（`QUAY_CLAIM_REMOTE` 设置了共享裸仓库），合并进 `$MERGE_TARGET` 后**释放认领**：
 `bash plugin/scripts/release-task.sh <taskId> --remote "$QUAY_CLAIM_REMOTE"`（合并+删分支=释放，
