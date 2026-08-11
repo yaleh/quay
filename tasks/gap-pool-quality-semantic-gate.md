@@ -89,7 +89,7 @@ band      pool_quality_judge_ran >= 1（执行核有「调用 workflow」编号�
 invariant should_remove_tier_present = 1（判词含 should-remove）
 invariant trigger_is_mechanical = 1（触发用机械量：pool>25 / 年龄>48h / 每 10 轮）
 invariant judgment_is_agent = 1（判定用 schema agent，脚本只做算术——ADR-033）
-invoke    `node --no-warnings --experimental-strip-types <pool-quality-judge workflow 或脚本> --root <repo>`（跑一次贴判词分布）
+invoke    `node --no-warnings --experimental-strip-types plugin/scripts/pool-quality-judge.ts --root <repo> --demo`（贴判词分布；与 Evidence 段实跑同形）
 control   判词含 should-remove；触发机械量；判定 agent；执行核有编号步骤
 resume    workflow 泛化 / 执行核步骤 / 触发条件分步提交，任一步完成即写盘
 

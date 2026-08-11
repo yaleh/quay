@@ -111,7 +111,7 @@ measure   busy_with_agents_is_busy = `node --no-warnings --experimental-strip-ty
 band      busy_with_agents_is_busy = busy（有 agent 列表时仍判 busy）
 invariant real_permission_still_prompt = 1（真权限框正控制不削弱）
 invariant quote_esc_not_busy = 1（消息正文引述 esc to interrupt 不判 busy）
-invoke    `node --no-warnings --experimental-strip-types --input-type=module -e "import{classifyPaneState}from'./plugin/scripts/pane-state-classify.ts';console.log(JSON.stringify(classifyPaneState(process.argv[1])))" <fixture>`（贴两类对照实验输出）
+invoke    `node --no-warnings --experimental-strip-types plugin/scripts/pane-state-classify.ts --pane-text "<成因B 面板文本>" --json`（贴 state 判定；与 Evidence 段 --pane-text 实跑同形）
 control   缺陷一/缺陷二对照实验全过；真权限框正控制；引述 esc 负控制；busy 判定不回归
 resume    缺陷一 / 缺陷二 / 测试分步提交，任一步完成即写盘
 
