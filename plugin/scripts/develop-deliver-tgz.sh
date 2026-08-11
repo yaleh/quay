@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# @instrument "After a develop merge, was a FRESH hardware-independent quay .tgz built at the develop tip and delivered+verified (quay serve http_code=200) on the verification machines B/C (DIR-123 每次 merge 后自动 deliver)?"
 # develop-deliver-tgz.sh — DIR-123 (人裁定 2026-08-11): after every develop merge, deliver a
 # FRESH, hardware-independent quay artifact to the verification machines B/C and prove it runs.
 #
