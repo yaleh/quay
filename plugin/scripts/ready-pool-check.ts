@@ -676,6 +676,17 @@ export function isSuiteFixTask(task, id) {
   return SUITE_FIX_MARKER_RE.test(`${idStr} ${fm} ${proposal}`);
 }
 
+/** gap-suite-blocking-self-lock-blocks-fix-family AC3 (反向控制) — the exemption is a TWO-condition
+ *  AND: a task is exempt from suite_blocking ONLY when it is a suite-fix task (isSuiteFixTask) AND
+ *  its declared Touches really hit a failing file (failureHit). Neither half alone exempts — a
+ *  non-suite-fix task touching a failing file stays blocked, and a suite-fix task whose Touches do
+ *  NOT intersect THIS red window is not the one fixing it and stays blocked too. Encoded as one
+ *  exported predicate so the reverse control is mechanically testable (a marker alone can never
+ *  release an unrelated task). */
+export function exemptFromSuiteBlocking(task, id, failureHit) {
+  return Boolean(failureHit) && isSuiteFixTask(task, id);
+}
+
 /** Compute the suite-blocking signal for the whole task store.
  *  @param {object} i
  *  @param {Array<object>} i.rounds         verification-round.jsonl rows
@@ -716,7 +727,7 @@ export function computeSuiteBlocking({ rounds, stateFailures, tasks, minRedWindo
     if (!failureHit) continue;
     // AC2/AC3 (gap-suite-blocking-self-lock-blocks-fix-family): a suite-fix task is the very one that
     // must dispatch when the suite is red — exempt it; an unrelated task (no marker) stays blocked.
-    if (isSuiteFixTask(task, id)) continue;
+    if (exemptFromSuiteBlocking(task, id, failureHit)) continue;
     ids.add(id);
   }
   return { ids, consecutiveRed, windowActive: true, failureFiles };
