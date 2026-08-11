@@ -3,7 +3,7 @@ id: gap-runner-grouping-ac7-nested-spawn-load-flake
 title: runner-grouping.test.mjs AC7 nested-spawn 负载 flake——round-168 红（engine+1
   断言失败），solo 18.4s 绿、无 pending commit 触及、同族第 3
   例（install-config/proposal-convergence）
-status: ready
+status: done
 labels:
   - gap
   - defect

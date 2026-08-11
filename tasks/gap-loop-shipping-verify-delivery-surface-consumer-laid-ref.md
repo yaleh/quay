@@ -3,7 +3,7 @@ id: gap-loop-shipping-verify-delivery-surface-consumer-laid-ref
 title: verify-delivery-surface.ts consumer-laid 交付物引用旧 tick-doc 路径且不在
   loop-shipping 排除表——08853779 fan-in 的 cross-cut 回归（round-203 红于 loop-shipping
   AC1b）；consumer-laid 引用是有意的，应收编排除表（同族 adr016/no-manager/instrument-failure）
-status: ready
+status: done
 labels:
   - gap
   - defect

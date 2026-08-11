@@ -36,10 +36,10 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 OOM 前 workflow 5 次调用（17:52-00:57）+ OOM 点 + 回落后 5 轮 runner=outer + meta-cc 零 Workflow（本任务 Proposal 已含）
-- [ ] AC2: **执行形态计数器**——读 verification-round `runner` 字段，`.halt 解除后连续 K 轮 runner=outer ⇒ 报「回落」信号（照 a15-ruling5-counter 形态）
-- [ ] AC3: **主会话越界检测**——连续 K 轮主会话直跑全量（无 subagent 失败前提）即违规信号（人裁定：主会话只起 subagent）
-- [ ] AC4: **既有不回归**——`--for-task` scoped 门绿
+- [x] AC1: **复现固化**——任务体记录 OOM 前 workflow 5 次调用（17:52-00:57）+ OOM 点 + 回落后 5 轮 runner=outer + meta-cc 零 Workflow（本任务 Proposal 已含）
+- [x] AC2: **执行形态计数器**——读 verification-round `runner` 字段，`.halt 解除后连续 K 轮 runner=outer ⇒ 报「回落」信号（照 a15-ruling5-counter 形态）
+- [x] AC3: **主会话越界检测**——连续 K 轮主会话直跑全量（无 subagent 失败前提）即违规信号（人裁定：主会话只起 subagent）
+- [x] AC4: **既有不回归**——`--for-task` scoped 门绿
 
 ## Definition of Done
 
@@ -65,6 +65,29 @@ invariant halt_taken_into_account = 1（.halt 接管期不计数）
 invoke    `node --no-warnings --experimental-strip-types plugin/scripts/suite-execution-form-counter.ts --root "$PWD" --json`（贴 consecutive_outer_rounds）
 control   回落报信号；.halt 期豁免；主会话越界检测
 resume    计数器 / tick 接线 / 测试分步提交，任一步完成即写盘
+
+## Implementation evidence（inner 2026-08-11）
+
+**实现落点（worktree `task/gap-suite-execution-rollback-to-main-session-not-restored-after-crash`，commit 见 outer 汇报）**：
+- `plugin/scripts/suite-execution-form-counter.ts`（新计数器）：读 `.quay/verification-round.jsonl` 的 `runner` 字段，数「尾部连续 runner=outer 套件轮数」（`consecutive_outer_rounds`）；`.halt` 存在 ⇒ 接管期豁免（band=halt-takeover, 0, 不报）。纯函数 `isSuiteRound`/`countConsecutiveOuterRounds`/`judgeConsecutiveOuter` + `--json`/`--root`/`--k`/`--verification-round`/`--halt` 接缝（照 a15-ruling5-counter 形态）。
+- `plugin/test/suite-execution-form-counter.test.mjs`（新增 12 测试）：0/K 分档、`.halt` 豁免、closure-pass 记录跳过、runner 缺失断（缺值=未查）、枚举 runner_counts、非法 `--k` exit 2、缺文件 0 健康。
+- `orchestration/orchestrator-tick-core.md`：新增 A19 读数行（每 tick 跑计数器 + 回落处置：先 `meta-cc query tool_name=Workflow` 核实再动作，判定归 outer）。
+- `plugin/scripts/capability-catalog.sh`：新脚本五字段声明（QUESTION/CADENCE/INVALIDATION/LAST_REAFFIRMED/MATCHING）。
+- `docs/proposals/quay-product-outline.md`：delivery-inventory 快照再生成（新增 plugin/scripts 文件的机械门要求，a15 同款先例）。
+
+**修后实跑（Contract measure `execution_form_counter`，对当前状态 r270 runner=outer）——报回落信号**：
+```json
+{"consecutive_outer_rounds":174,"k":3,"signal":true,"band":"rollback",
+ "action":"驱动切回 workflow",
+ "message":"执行形态回落: 连续 174 轮 runner=outer (>=K=3) ⇒ 主会话直跑越界，驱动切回 workflow",
+ "halt_present":false,"total_records":271,"suite_rounds":189,
+ "runner_counts":{"outer":183,"missing":6}}
+```
+（exit 1）
+
+**`--for-task` scoped 门（AC4）**：`./scripts/test.sh --for-task gap-suite-execution-rollback-to-main-session-not-restored-after-crash` → `TEST_EXIT=0`；27 tests / pass 27 / fail 0 / cancelled 0（含 `plugin/test/suite-execution-form-counter.test.mjs` 12 条全 ✔ + `plugin/test/capability-catalog.test.mjs`；scoped 静态检查含 tick-core-static-check PASS / capability-catalog 0 unclassified）。
+
+**实现时发现的真实缺口（诚实标注，判定归 outer）**：verification-round.jsonl 的 `runner` 字段当前**恒为 "outer"**——`full-suite-runner.ts` 硬编码 `runner: "outer" as const`（无 `--runner` 旗标），workflow 治理的轮次也记录 runner=outer。因此计数器如实报「自最近非-outer 套件轮以来连续 outer 轮数」，而这个数目前=全部历史（runner_counts.workflow=0）。这不影响本计数器抓「OOM 后静默回落」（当前状态必报回落）；但 field 需 workflow-aware（full-suite-runner 支持 `--runner workflow`、execute-suite-fix 传入）才能让计数器在健康 workflow 治理期不误报——已写进脚本头注释 + catalog INVALIDATION 失效前提。判定归 outer：信号触发后先用 meta-cc 核实「最近是否真有 workflow 治理」，再决定是否驱动切回。
 
 ## Dispatch review
 

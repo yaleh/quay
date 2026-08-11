@@ -2,7 +2,7 @@
 id: gap-measure-trend-load-noise-false-positive
 title: measure-trend-check 把负载噪声当趋势——round-172 静态检查 red（13 个文件
   2-3x「增长」全是负载噪声、sprawl 未触碰、0 测试运行即红）；相对 ≥2× 阈值对小测试（300ms→800ms）过敏感
-status: ready
+status: done
 labels:
   - gap
   - defect

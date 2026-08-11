@@ -4,7 +4,7 @@ title: "measure-trend 相对 ≥2× 触发器缺历史方差豁免——高方�
   task-check-passthrough 9575→21293ms 2.22x、acceptance-env 10304→20974ms 2.04x，均
   ≤ 各自历史 max 23183/21445）；d83916e4 只豁免了 absolute 触发器，relative 仍无 withinHistMax
   守卫"
-status: ready
+status: done
 labels:
   - gap
   - defect

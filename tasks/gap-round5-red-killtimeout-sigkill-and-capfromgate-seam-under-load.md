@@ -1,7 +1,8 @@
 ---
 id: gap-round5-red-killtimeout-sigkill-and-capfromgate-seam-under-load
-title: "round-5 套件红（22.1min 真跑完）两个负载相关簇：kill-timeout SIGKILL 被 REGRESSION 拒绝 + cap-from-gate 注入 seam 被套件负载覆盖"
-status: ready
+title: round-5 套件红（22.1min 真跑完）两个负载相关簇：kill-timeout SIGKILL 被 REGRESSION 拒绝 +
+  cap-from-gate 注入 seam 被套件负载覆盖
+status: done
 labels:
   - gap
   - defect

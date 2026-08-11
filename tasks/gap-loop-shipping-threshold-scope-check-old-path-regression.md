@@ -4,7 +4,7 @@ title: quantified-stop-conditions 的 threshold-scope-check.ts 引用旧 tick-do
   loop-shipping 排除表——round-200 全量套件红在 loop-shipping AC1b（176 文件绿仅此 1
   失败）；SCAN_DOCS 扫 docs/analysis/+orchestration/ 旧部署副本，其他
   checker（adr016/no-manager/instrument-failure）都扫 plugin/loop/ 规范路径且已排除
-status: ready
+status: done
 labels:
   - gap
   - defect

@@ -1,7 +1,8 @@
 ---
 id: gap-install-family-tests-rotate-flakes-under-full-suite
-title: "quay-init/install 家族 29 个测试在全量套件下轮换性 flake——每轮不同文件（drift-report/governance、loop-core/serial、runtime-landing…）单独跑恒绿，逐测试打地鼠不收敛"
-status: ready
+title: quay-init/install 家族 29 个测试在全量套件下轮换性
+  flake——每轮不同文件（drift-report/governance、loop-core/serial、runtime-landing…）单独跑恒绿，逐测试打地鼠不收敛
+status: done
 labels:
   - gap
   - defect

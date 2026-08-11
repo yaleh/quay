@@ -1,7 +1,9 @@
 ---
 id: gap-serial-phase-install-test-residue-dependency
-title: "serial 相位 install 测试顺序残留依赖——install-config-driven-e2e 先跑（passed）后 quay-init-loop-core 在串行相位失败（AC2/AC4 init 退出非0）；两测试都做真实 quay-init --loop install，前者的 temp workspace/env 残留污染后者"
-status: ready
+title: serial 相位 install 测试顺序残留依赖——install-config-driven-e2e 先跑（passed）后
+  quay-init-loop-core 在串行相位失败（AC2/AC4 init 退出非0）；两测试都做真实 quay-init --loop
+  install，前者的 temp workspace/env 残留污染后者
+status: done
 labels:
   - gap
   - defect

@@ -2,7 +2,7 @@
 id: gap-measure-trend-large-test-load-noise
 title: measure-trend 假阳性修复不完整——大测试（it0-dod-check 71s）负载下 +33s 仍 flag（历史 35-104s
   宽幅波动证明是噪声），小测试豁免只治 300ms 级没治承重大测试
-status: ready
+status: done
 labels:
   - gap
   - defect
