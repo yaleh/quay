@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-11T20:58:45.190Z",
+  "generatedAt": "2026-08-11T21:27:43.435Z",
   "since": null,
   "tasks": [
     {
@@ -33,6 +33,12 @@
       "outcome": "done"
     },
     {
+      "taskId": "gap-over90-clock-measures-queue-time-not-work-time",
+      "runId": "fm-gap-over90-clock-measures-queue-time-not-work-time-1786479699492-f7vvjz",
+      "minutes": 63.9213,
+      "outcome": "done"
+    },
+    {
       "taskId": "gap-resource-gate-psi-does-not-capture-load-flake-driver",
       "runId": "fm-gap-resource-gate-psi-does-not-capture-load-flake-driver-1786440532328-1cxsyk",
       "minutes": 55.175783333333335,
@@ -45,6 +51,12 @@
       "outcome": "done"
     },
     {
+      "taskId": "gap-supervisor-deliver-no-wait-for-idle-retry",
+      "runId": "fm-gap-supervisor-deliver-no-wait-for-idle-retry-1786479699315-bwk5g8",
+      "minutes": 63.926433333333335,
+      "outcome": "done"
+    },
+    {
       "taskId": "gap-verification-round-missing-phase-ms-breaks-cost-attribution",
       "runId": "fm-gap-verification-round-missing-phase-ms-breaks-cost-attribution-1786440532052-w2mhce",
       "minutes": 55.18248333333333,
@@ -54,31 +66,20 @@
   "orphaned": [],
   "inProgress": [
     {
-      "taskId": "gap-over90-clock-measures-queue-time-not-work-time",
-      "runId": "fm-gap-over90-clock-measures-queue-time-not-work-time-1786479699492-f7vvjz",
-      "startedAtMs": 1786479699501,
-      "startedAtMsUnreliable": false
-    },
-    {
       "taskId": "gap-quay-self-hosting-e2e-proof",
       "runId": "fm-gap-quay-self-hosting-e2e-proof-1786444937426-387z0x",
       "startedAtMs": 1786444937432,
-      "startedAtMsUnreliable": false
-    },
-    {
-      "taskId": "gap-supervisor-deliver-no-wait-for-idle-retry",
-      "runId": "fm-gap-supervisor-deliver-no-wait-for-idle-retry-1786479699315-bwk5g8",
-      "startedAtMs": 1786479699320,
+      "workStartedAtMs": 1786444937432,
       "startedAtMsUnreliable": false
     }
   ],
-  "meanMinutes": 95.23194166666667,
-  "medianMinutes": 55.17913333333333,
-  "tasksPerHour": 0.6958126646167736,
-  "serialEquivalentPerHour": 0.6300407085052783,
+  "meanMinutes": 88.97032666666667,
+  "medianMinutes": 56.853741666666664,
+  "tasksPerHour": 0.8347076833984364,
+  "serialEquivalentPerHour": 0.6743821479356151,
   "windowStart": "2026-08-11T09:28:51.925Z",
-  "windowEnd": "2026-08-11T20:58:42.376Z",
-  "windowHours": 11.4973475,
+  "windowEnd": "2026-08-11T21:27:40.796Z",
+  "windowHours": 11.980241944444444,
   "haltedHours": 0,
   "halted": [],
   "blocked": [],
@@ -288,7 +289,7 @@
   ],
   "unreliable": [],
   "reconcilable": [],
-  "realInFlight": 3,
+  "realInFlight": 1,
   "closedButLive": [],
-  "occupiedSlots": 3
+  "occupiedSlots": 1
 }
