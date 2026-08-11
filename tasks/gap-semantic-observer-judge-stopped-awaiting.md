@@ -5,7 +5,7 @@ title: inner/outer 语义观测器——schema 字段只承载预先想到的需
   {stopped, awaiting, needs, contradictsStructured, confidence}；触发=文本 hash 变化或
   blocked==[] && agentDispatches>=agentLimit；产物=stopped:true 而 tick-log 无升级 ⇒
   变红（AC41③）
-status: ready
+status: done
 labels:
   - gap
   - defect

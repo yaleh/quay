@@ -1,7 +1,7 @@
 ---
 id: gap-loop-shipping-scan-does-not-exclude-worktrees
 title: loop-shipping AC1b/AC2 扫描器不排除 .claude/worktrees/ —— 外层 worktree 存在时假红
-status: ready
+status: done
 labels:
   - gap
   - defect

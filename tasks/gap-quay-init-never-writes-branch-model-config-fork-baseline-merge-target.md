@@ -1,14 +1,17 @@
 ---
 id: gap-quay-init-never-writes-branch-model-config-fork-baseline-merge-target
-title: "quay-init.sh's config-generation heredoc (write_provider_config, line 558-583) NEVER writes
-  fork_baseline/merge_target — grep 'fork_baseline' and 'merge_target' plugin/scripts/quay-init.sh = 0
-  hits; a brand-new host running quay-init --loop today gets loop:{repo_root,test_command,
-  tmux_session,worktree_root} ONLY, so dispatch falls back to the pre-cutover master-only model
-  (gap-dispatch-fork-does-not-read-config-fork-baseline AC4 even names this 'shared default
-  unchanged' as the ACCEPTED negative-control state, not a laydown gap); every host with the key
-  today (A, B, ad-arm1/machine-C) got it via manual/ad-hoc edit, never via the mechanism — manager
-  reproduction-lens probe 2026-08-06 (ad-arm1 real check: config HAS the keys, but git-blame-
-  equivalent traces to manual setup, not quay-init; quay-init.sh source has zero mentions)"
+title: "quay-init.sh's config-generation heredoc (write_provider_config, line
+  558-583) NEVER writes fork_baseline/merge_target — grep 'fork_baseline' and
+  'merge_target' plugin/scripts/quay-init.sh = 0 hits; a brand-new host running
+  quay-init --loop today gets loop:{repo_root,test_command,
+  tmux_session,worktree_root} ONLY, so dispatch falls back to the pre-cutover
+  master-only model (gap-dispatch-fork-does-not-read-config-fork-baseline AC4
+  even names this 'shared default unchanged' as the ACCEPTED negative-control
+  state, not a laydown gap); every host with the key today (A, B,
+  ad-arm1/machine-C) got it via manual/ad-hoc edit, never via the mechanism —
+  manager reproduction-lens probe 2026-08-06 (ad-arm1 real check: config HAS the
+  keys, but git-blame- equivalent traces to manual setup, not quay-init;
+  quay-init.sh source has zero mentions)"
 status: ready
 labels:
   - gap

@@ -3,7 +3,7 @@ id: gap-delivery-inventory-drift-needs-file-add-gate
 title: verify-delivery-surface inventory 漂移无机制 owner——今日同对象红 6 次烧 128.4
   分钟（r216/r222/r223/r226/r248/r253），每次都是「plugin/scripts/ 新增文件但 outline §6
   快照没同步重生」；7d2faf06 只修症状，闸要装在【加脚本】这个动作上
-status: ready
+status: done
 labels:
   - gap
   - defect

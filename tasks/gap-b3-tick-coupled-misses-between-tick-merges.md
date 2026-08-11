@@ -5,7 +5,7 @@ title: B3 验证轮起跑条件 tick 耦合漏掉 tick 间 merge——r271 04:38
   state!=running 且 gate 放行）全满足却没触发 ⇒ 起跑是 tick 轮询的副作用，merge 落在 tick
   之间就漏；处方=验证轮起跑做成事件（merge 落地 ⇒ 检查并起跑），或 suite-state-trigger 增加
   idle-green-有-未验证提交 触发
-status: ready
+status: done
 labels:
   - gap
   - defect

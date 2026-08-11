@@ -4,7 +4,7 @@ title: pane-state-classify 枚举态少一个维度——【主线程能否收�
   MARKER-STALE 是诚实报告非分类器 bug（{input空闲+agents在跑} 判 unknown）；正确形态=两个正交字段
   input_state/work_in_flight；附缺口：PANEL_BUSY_RE 只匹配 ctrl+t（面板折叠态），展开态变 ↓ to
   manage 不命中
-status: ready
+status: done
 labels:
   - gap
   - defect
