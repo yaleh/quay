@@ -92,6 +92,15 @@ const FIXTURE_EXPECTATIONS = {
   // window → waiting-input (idle masking busy — the reverse of gap-session-liveness-busy-mask-idle-
   // with-subagents). The manager measured this exact shape reading waiting-input (0.6) pre-fix.
   "agents-below-status-busy-1.txt": "busy",
+  // REPRODUCTION (gap-pane-classify-busy-truncated-by-column-width, 成因 A, manager 2026-08-11 01:3x):
+  // the inner pane at width=67 truncates the status line's "esc to interrupt" with an ellipsis —
+  // "esc to interru…". The pre-fix BUSY_RE required the full string and read this busy pane as idle
+  // (transcript 6s fresh but SESSION-IDLE). Reconstructed from that real capture; must read busy.
+  "busy-67col-truncated-1.txt": "busy",
+  // REPRODUCTION (same task, 成因 B, manager 2026-08-11 01:5x): the outer pane at width=93 renders
+  // the task/agent management view, which REPLACES "esc to interrupt" with "ctrl+t to hide tasks"
+  // (28/28 agents running). No esc string at all — only the panel chrome proves busy.
+  "busy-outer-panel-1.txt": "busy",
 };
 
 function readFixture(name) {
@@ -350,6 +359,25 @@ test("AC7: hash-regression negative control — a busy fixture relabeled as wait
   // the test catches by asserting the real label contradicts it.
   assert.notEqual(r.state, "waiting-input", "a busy fixture must never be read as waiting-input");
   assert.equal(r.state, "busy");
+});
+
+test("AC2/AC3 (regression) — busy judgment must not depend on a single string: 67-col truncated 'esc to interru…' (成因 A) and the task-panel 'ctrl+t to hide tasks' (成因 B) both read busy, while the ambient '1 monitor · ← 1 agent' counts alone stay waiting-input", () => {
+  // 成因 A — the narrow-window truncation (inner width=67): the TUI omits the status line's tail
+  // with an ellipsis, so "esc to interrupt" renders as "esc to interru…". The pre-fix BUSY_RE
+  // (/esc to interrupt/i) missed it and read this busy pane as idle.
+  assert.equal(classifyPaneState(readFixture("busy-67col-truncated-1.txt")).state, "busy");
+  // 成因 B — the task-panel replacement (outer width=93): the task/agent management view REPLACES
+  // "esc to interrupt" with "ctrl+t to hide tasks". No esc string at all — only the panel chrome.
+  assert.equal(classifyPaneState(readFixture("busy-outer-panel-1.txt")).state, "busy");
+  // Negative control — the AMBIENT counts "1 monitor · ← 1 agent" render even at idle (the
+  // waiting-input fixtures carry them); a status line with ONLY those counts must NOT flip to busy.
+  const idleAmbient = [
+    "───────────────────────────────",
+    "❯ ",
+    "───────────────────────────────",
+    "  ⏵⏵ bypass permissions on · 1 monitor · ← 1 agent · ↓ to manage",
+  ].join("\n");
+  assert.equal(classifyPaneState(idleAmbient).state, "waiting-input");
 });
 
 test("AC8: no word or invocation of the forbidden surface in the test or the fixture directory (grep = 0)", () => {

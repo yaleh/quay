@@ -42,11 +42,52 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录两成因（A 截断 inner 67 列 / B 面板标志替换 outer 93 列）+ 假空闲后果（本任务 Proposal 已含）
-- [ ] AC2: **判据容截断（成因 A）**——BUSY_RE 匹配截断前缀或先剥省略号；67 列截断文本判 busy
-- [ ] AC3: **面板标志判忙（成因 B）**——`← N agent` / `N monitor` / `ctrl+t to hide tasks` 出现 ⇒ 判 busy；outer 面板行判 busy
-- [ ] AC4: **回归 fixture 两条**——inner 67 列截断行 + outer 面板两行钉进 pane-state-classify 测试
-- [ ] AC5: **既有不回归**——`--for-task` scoped 门绿；其它语义标志（waiting-input/permission-prompt）不误判
+- [x] AC1: **复现固化**——任务体记录两成因（A 截断 inner 67 列 / B 面板标志替换 outer 93 列）+ 假空闲后果（本任务 Proposal 已含）
+- [x] AC2: **判据容截断（成因 A）**——BUSY_RE 匹配截断前缀或先剥省略号；67 列截断文本判 busy
+- [x] AC3: **面板标志判忙（成因 B）**——`← N agent` / `N monitor` / `ctrl+t to hide tasks` 出现 ⇒ 判 busy；outer 面板行判 busy
+- [x] AC4: **回归 fixture 两条**——inner 67 列截断行 + outer 面板两行钉进 pane-state-classify 测试
+- [x] AC5: **既有不回归**——`--for-task` scoped 门绿；其它语义标志（waiting-input/permission-prompt）不误判
+
+## Inner implementation evidence（inner 2026-08-11，实现归 inner/判定归 outer）
+
+**成因 A 容截断**——`BUSY_RE` 由 `/esc to interrupt/i` 改为 `/esc to interr/i`（截断前缀，覆盖完整串 + 任一截断），
+并新增 `PANEL_BUSY_RE = /ctrl\+t to hide tasks/i`（成因 B 面板标志判忙）。关键区分：`1 monitor` / `← N agent`
+是**常驻计数**（idle fixture 也带），本身不是忙标志；`ctrl+t to hide tasks` 是面板渲染替换 `esc to interrupt`
+后的**忙态证明**——outer 面板行（含 `ctrl+t`）判 busy，idle 行（仅计数）不误判。
+
+**Contract measure**：`grep -cE "esc to interr|省略号|hide tasks|← N agent|monitor.*ctrl\+t" plugin/scripts/pane-state-classify.ts` → `27`（band ≥1 ✓）
+
+**invoke（成因 B，Contract 原样）**：
+```bash
+$ node --no-warnings --experimental-strip-types plugin/scripts/pane-state-classify.ts --pane-text "⏵⏵ bypass permissions on · 1 monitor · ctrl+t to hide tasks · ← 1 agent · ↓ to manage" --json
+{"state":"busy","confidence":0.9,"region":"⏵⏵ bypass permissions on · 1 monitor · ctrl+t to hide tasks · ← 1 agent · ↓ to manage","raw":"⏵⏵ bypass permissions on · 1 monitor · ctrl+t to hide tasks · ← 1 agent · ↓ to manage"}
+```
+
+**验证锚 (a) 67 列截断判 busy**：
+```bash
+$ node --no-warnings --experimental-strip-types plugin/scripts/pane-state-classify.ts --pane-text "⏵⏵ bypass permissions on (shift+tab to cycle) · esc to interru…" --json
+{"state":"busy","confidence":0.9,"region":"⏵⏵ bypass permissions on (shift+tab to cycle) · esc to interru…","raw":"⏵⏵ bypass permissions on (shift+tab to cycle) · esc to interru…"}
+```
+
+**验证锚 (b) 完整文本判 busy**：
+```bash
+$ node --no-warnings --experimental-strip-types plugin/scripts/pane-state-classify.ts --pane-text "  ⏵⏵ bypass permissions on · 1 monitor · esc to interrupt · ← 1 agent · ↓ to manage" --json
+{"state":"busy","confidence":0.9,"region":"  ⏵⏵ bypass permissions on · 1 monitor · esc to interrupt · ← 1 agent · ↓ to manage","raw":"  ⏵⏵ bypass permissions on · 1 monitor · esc to interrupt · ← 1 agent · ↓ to manage"}
+```
+
+**验证锚 (d) 其它语义标志不误判（idle 常驻计数 → waiting-input）**：
+```
+$ printf '──────\n❯ \n──────\n  ⏵⏵ bypass permissions on · 1 monitor · ← 1 agent · ↓ to manage\n' | node --no-warnings --experimental-strip-types plugin/scripts/pane-state-classify.ts --classify
+waiting-input
+```
+
+**selfcheck**：`pane-state-classify --selfcheck: 28 passed, 0 failed`（原 22 + 新增 6 条 成因 A/B 判据）。
+
+**scoped 门（`--for-task gap-pane-classify-busy-truncated-by-column-width`）**：`tests 23 · pass 23 · fail 0 · cancelled 0`，exit 0；scoped static checks 全 PASS。
+
+**AC3 语义注记**：AC3 字面列了 `← N agent` / `N monitor` / `ctrl+t to hide tasks`，但 `1 monitor` / `← 1 agent`
+常驻于 idle 状态行（waiting-input-manager-* fixture），若单独判忙会误判 idle ⇒ 判据以 `ctrl+t to hide tasks`
+（面板渲染后替换 `esc to interrupt` 的忙态标志）为成因 B 的判别符——outer 面板行（三标志同现）判 busy，idle 行不误判。
 
 ## Definition of Done
 
