@@ -16,6 +16,10 @@
 // ("勾得上就勾、勾不上写理由或留 ready") BEFORE calling this script; this script is the
 // mechanical completion + meter-record, not the AC judge.
 //
+// Package imports are DYNAMIC (pathToFileURL) — the same pattern config-wiring-check.ts
+// uses — so the plugin's `build-plugin-dist` esbuild bundle does NOT try to resolve
+// `../../packages/...` (the plugin bundle is staged WITHOUT the packages/ tree).
+//
 // Usage:
 //   node --no-warnings --experimental-strip-types plugin/scripts/loop-complete-task.ts \
 //     --root <repo-root> --task <id> [--verified-by "<evidence>"] [--actor <actor>]
@@ -24,11 +28,10 @@
 // (non-ready task, or an acceptance meter that failed); 2 = usage error.
 
 import path from "node:path";
-import { pathToFileURL } from "node:url";
-import { createStore } from "../../packages/quay-native/src/store.ts";
-import { loadConfig, activeProvider } from "../../packages/quay/src/config.ts";
-import { runCompleteLoop } from "../../packages/quay/src/gate/lifecycle.ts";
-import { DEFAULT_GATE_LOG_RELATIVE_PATH } from "../../packages/quay/src/gate/gate-log.ts";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(__dirname, "..", "..");
 
 function usage() {
   process.stderr.write(
@@ -52,6 +55,19 @@ export async function main(argv: string[]): Promise<number> {
     usage();
     return 2;
   }
+
+  const { loadConfig, activeProvider } = await import(
+    pathToFileURL(path.join(repoRoot, "packages/quay/src/config.ts")).href
+  );
+  const { createStore } = await import(
+    pathToFileURL(path.join(repoRoot, "packages/quay-native/src/store.ts")).href
+  );
+  const { runCompleteLoop } = await import(
+    pathToFileURL(path.join(repoRoot, "packages/quay/src/gate/lifecycle.ts")).href
+  );
+  const { DEFAULT_GATE_LOG_RELATIVE_PATH } = await import(
+    pathToFileURL(path.join(repoRoot, "packages/quay/src/gate/gate-log.ts")).href
+  );
 
   const loaded = loadConfig(root);
   const { workspaceRoot } = loaded;
