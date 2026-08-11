@@ -760,19 +760,19 @@ export function checkResourceGate(root: string): { ok: boolean; output: string }
 
 export interface SystemdRunLimits {
   memoryMax: string; // -p MemoryMax=4G
-  cpuQuota: string; //  -p CPUQuota=200%
+  cpuQuota: string; //  -p CPUQuota=400% (full 4 physical cores — 人的裁定 gap-systemd-run-cancel-cpuquota-keep-memory-guardrail)
   tasksMax: string; //  -p TasksMax=200
 }
 
 /** The suite's default cgroup scope limits (the Contract invoke's exact values). */
 export const DEFAULT_SYSTEMD_RUN_LIMITS: SystemdRunLimits = {
   memoryMax: "4G",
-  cpuQuota: "200%",
+  cpuQuota: "400%",
   tasksMax: "200",
 };
 
 /**
- * Parse a `MemoryMax=4G CPUQuota=200% TasksMax=200` override string (the QUAY_TEST_SYSTEMD_RUN_LIMITS
+ * Parse a `MemoryMax=4G CPUQuota=400% TasksMax=200` override string (the QUAY_TEST_SYSTEMD_RUN_LIMITS
  * test seam) into a limits object. Unknown / malformed keys fall back to the defaults (fail-safe —
  * a bad seam value must never produce an unparseable scope property).
  */
