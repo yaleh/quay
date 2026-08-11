@@ -4,7 +4,7 @@ title: 人裁定 2026-08-11：release/package 构建须支持 aarch64（覆盖�
   ARM runner；**实现走硬件无关 .tgz 路线**（C 已有 Node v24.19.0 → npm install -g 即覆盖
   aarch64，无需在 ad-arm1 单独建 SEA）；每次 merge 到 develop 后自动 deliver + 验证（解决 release
   新鲜度退化）
-status: todo
+status: done
 labels:
   - directive
   - delivery-critical
@@ -45,7 +45,7 @@ extra: {}
 - [x] AC1–AC5 全部勾上
 - [x] 修后实跑：B/C 安装产物 + http_code=200 证据贴出（见 Evidence）
 - [x] 既有测试 + 新增测试全绿（`--for-task` scoped）
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
+- [x] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
 
 ## Touches
 
@@ -137,3 +137,8 @@ SEA 的 arch-bound 特性使「无 Node 的 aarch64 用户」需要 linux-arm64 
 ## 交叉标注（gap-init-scaffolds-mcp-entry-to-raw-ts-fails-on-installed-copy 修复，2026-08-11）
 
 上述 Evidence「注」里另立案的安装副本 init mcp_entry 缺陷已由 inner 修复：`packages/quay/src/init.ts` 新增 `mcpEntryForProvider()`，按 provider 解析后形态选 mcp_entry（node_modules 安装形态 → `["node","./dist/quay-native.js","mcp"]`；dev 形态 → `["node","./bin/quay-native.ts","mcp"]`），模板第 78 行硬编码移除。今后 C 上安装副本 `quay init` 铺出的 config 自动用 dist-bundle 形态，不再需要手工改写——Level2/Level3 复测可直接从 `quay init` 起步。证据：AC1-AC5 已勾 + 实跑证据贴在该 gap 任务。
+
+
+### DoD 全量绿验证（outer 2026-08-11，五轮连续绿）
+
+DIR-123 相关改动经五轮全量绿验证（r306 3329/3329、r308 3330/3330 等，fail 0 / cancelled 0）：session-liveness 根因修复 + catalog + brace + SUPERSEDED guard 均在合并树内通过。deliver 机制本身连续五轮自动投递 B/C 200（cb8ed732/206ca147/eb29845f/c0379df7/6386ff86）。
