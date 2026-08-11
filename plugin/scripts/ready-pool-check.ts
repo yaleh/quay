@@ -651,6 +651,31 @@ function failureFileMatches(declared, file) {
   return false;
 }
 
+// gap-suite-blocking-self-lock-blocks-fix-family — suite-fix task exemption (AC2). A task whose
+// PURPOSE is the suite is exactly the task that must dispatch when the suite is red — blocking it is
+// the self-lock (.halt 裁定同型: 停派发好让 outer 修红是死锁，修红要靠派发). The marker set is deliberately
+// conservative so the exemption cannot reverse-release an unrelated task (AC3):
+//   - fix        whole word only — "fixture" (the label every fixture carries) is NOT a fix-intent;
+//   - red        whole word only — reduce/redesign/redundant are not "the suite is red";
+//   - 修 / 红     the Chinese fix/red intent chars;
+//   - install    prefix boundary — installation/installer/reinstall are all install-family;
+//   - suite      prefix boundary — suites/suite-blocking/full-suite are all suite-family.
+// The family the self-lock actually hit — gap-install-family / gap-serial-phase-install /
+// gap-suite-* — all carry these markers in their task id.
+const SUITE_FIX_MARKER_RE = /(\bfix(?:e[ds]|ing)?\b|\binstall|\bsuite|修|红|\bred\b)/i;
+
+/** True when a task self-identifies as a suite-fix task — its id, frontmatter title, or ## Proposal
+ *  carries a suite-fix marker (install/suite/fix/red/修/红). Such a task IS the one that must
+ *  dispatch when the suite is red, so it is exempt from suite_blocking attribution (the self-lock
+ *  break, AC2). A task carrying NONE of these markers is an unrelated task touching a failing file —
+ *  it stays suite-blocked (AC3 reverse control). */
+export function isSuiteFixTask(task, id) {
+  const idStr = String(id || (task && task.id) || "");
+  const fm = (task && task.frontmatterRaw) || "";
+  const proposal = extractSection((task && task.body) || "", "Proposal") || "";
+  return SUITE_FIX_MARKER_RE.test(`${idStr} ${fm} ${proposal}`);
+}
+
 /** Compute the suite-blocking signal for the whole task store.
  *  @param {object} i
  *  @param {Array<object>} i.rounds         verification-round.jsonl rows
@@ -662,7 +687,11 @@ function failureFileMatches(declared, file) {
  *  A task is suite-blocking when the window is active AND one of its declared ## Touches expands to
  *  one of the window's failure files. Only dispatchable-status tasks (ready/todo) are candidates — a
  *  done task's work has already landed, so it is never re-prioritized. Negative control (AC4): no
- *  window OR no failure hit ⇒ ids empty. */
+ *  window OR no failure hit ⇒ ids empty. AC2 exemption (gap-suite-blocking-self-lock-blocks-fix-
+ *  family): a SUITE-FIX task (isSuiteFixTask — id/title/Proposal carries install/suite/fix/red/修/红)
+ *  whose Touches hit a failing file is exactly the one dispatched to fix the red, so it is NOT added
+ *  (blocking it is the self-lock). Reverse control (AC3): a non-suite-fix task touching a failing
+ *  file carries no marker and stays in ids. */
 export function computeSuiteBlocking({ rounds, stateFailures, tasks, minRedWindow = RED_WINDOW_MIN_DEFAULT, expand }) {
   const consecutiveRed = consecutiveRedRounds(rounds);
   if (consecutiveRed < minRedWindow) {
@@ -680,9 +709,15 @@ export function computeSuiteBlocking({ rounds, stateFailures, tasks, minRedWindo
     const declared = expand(parsed.globs);
     // AC3 — match with the shape-normalizing comparator (bare basename AND repo-relative failure
     // files both resolve against declared Touches; see failureFileMatches).
+    let failureHit = false;
     for (const f of failureFiles) {
-      if (failureFileMatches(declared, f)) { ids.add(id); break; }
+      if (failureFileMatches(declared, f)) { failureHit = true; break; }
     }
+    if (!failureHit) continue;
+    // AC2/AC3 (gap-suite-blocking-self-lock-blocks-fix-family): a suite-fix task is the very one that
+    // must dispatch when the suite is red — exempt it; an unrelated task (no marker) stays blocked.
+    if (isSuiteFixTask(task, id)) continue;
+    ids.add(id);
   }
   return { ids, consecutiveRed, windowActive: true, failureFiles };
 }
