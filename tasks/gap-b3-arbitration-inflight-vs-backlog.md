@@ -106,6 +106,13 @@ $ ... slot-refill.ts --root <repo> --integration-backlog 60 --json | jq '{cap, e
 
 **DoD 未勾项**（verification-window，待外层）：「修后实跑：红窗+积压 → 派发数 ≤ 窄 cap（贴任务体）；绿窗恢复」与「全量套件绿」——本任务保持 `ready`，不翻 done。
 
+> **交叉标注（2026-08-10，gap-outer-tick-core-b9-coverage-blind-spot——同族：① 的强制链）**：本任务把 ④ 对 ① 的
+> 约束（红窗+高积压 → cap 收窄到 2）接进 slot-refill 的 `effective_cap`；同族管「① 为真（in_flight<cap 且
+> recommended 非空）时外层**必须**派发」——B9 原先只在「队列空」触发，队列不空但在飞=0 且 should_refill=true
+> 是覆盖盲区（2026-08-10 05:00–06:44 连续 ~8 轮 outer 零投递）。该任务另立：orchestrator-tick-core.md A18 必读
+> slot-refill + B9 空槽强制派发分支（should_refill=true 且 recommended 非空 ⇒ 取 1-2 派给 inner）+ B8
+> no-action 不合法判据。
+
 ## Dispatch review
 
 reviewer: outer

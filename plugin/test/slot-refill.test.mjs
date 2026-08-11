@@ -13,6 +13,14 @@
 //   dispatchable candidate ⇒ should_refill=false; the helper never writes/dispatches (pure) ·
 //   AC5 cap semantics: in-flight ≥ cap ⇒ should_refill=false; cap is an input, never hardcoded ·
 //   AC7 idempotent: same inputs ⇒ identical output · AC8 node:test + @test-group governance
+// B9 FORCE-DISPATCH (tasks/gap-outer-tick-core-b9-coverage-blind-spot): the outer tick-core B9 branch
+//   consumes should_refill + recommended as the two independently-readable preconditions of
+//   "空槽强制派发" — should_refill=true AND recommended non-empty ⇒ the tick MUST dispatch 1-2, even when
+//   the dispatch QUEUE is non-empty (the old "queue empty ⇒ refill" trigger was the blind spot). The
+//   tests below pin the PROBE side: the exact blind-spot shape (non-empty queue + in_flight=0 + a
+//   dispatchable recommendation) must be reported as should_refill=true with a non-empty `recommended`
+//   the tick can take 1-2 from; a non-empty queue whose candidates ALL fail step-4 ⇒ recommended empty
+//   ⇒ should_refill=false (无此场景不误报).
 //
 // Run: scripts/test.sh plugin/test/slot-refill.test.mjs
 
@@ -218,6 +226,50 @@ test("should_refill=true with a free slot and a dispatchable candidate (AC2/AC3)
   assert.equal(r.recommended.length, 2, "both disjoint candidates recommended (capped at slots_free=3)");
   assert.ok(r.recommended.includes("gap-a"));
   assert.ok(r.recommended.includes("gap-b"));
+});
+
+// ── B9 空槽强制派发 (tasks/gap-outer-tick-core-b9-coverage-blind-spot) ──────────────────────────────
+// The outer tick-core B9 branch: should_refill=true AND recommended non-empty ⇒ the tick MUST
+// force-dispatch 1-2 from recommended (queue-empty is no longer the only trigger — the 2026-08-10
+// 05:00–06:44 blind spot was a NON-empty queue with in_flight=0 and should_refill=true yet zero
+// dispatch). These tests pin the PROBE side of that force-dispatch chain.
+
+test("B9 FORCE-DISPATCH — non-empty queue + in_flight=0 + recommended non-empty ⇒ should_refill=true, recommended carries 1-2+ dispatchable ids (AC2)", (t) => {
+  const root = makeWorkspace("b9-force");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // A NON-EMPTY ready queue (3 disjoint dispatchable candidates) — the old B9 "queue empty ⇒ refill"
+  // trigger would NOT fire here, which is exactly the blind spot being closed.
+  writeTask(root, "gap-b9-a", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/b9a.ts (new)"]) });
+  writeTask(root, "gap-b9-b", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/b9b.ts (new)"]) });
+  writeTask(root, "gap-b9-c", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/b9c.ts (new)"]) });
+
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 5 });
+  assert.equal(r.pool, 3, "the queue is NON-empty (3 ready candidates)");
+  assert.equal(r.in_flight_count, 0, "in_flight=0 — the queue is non-empty but nothing is running");
+  assert.equal(r.slots_free, 5, "empty slots exist");
+  assert.equal(r.should_refill, true, "should_refill=true — the blind-spot scenario the old B9 missed");
+  assert.equal(r.no_refill_reason, null);
+  assert.ok(r.recommended.length >= 1, "recommended is non-empty — the tick can take 1-2 from it");
+  assert.ok(r.recommended.includes("gap-b9-a") && r.recommended.includes("gap-b9-b") && r.recommended.includes("gap-b9-c"),
+    "all disjoint candidates are recommended (force-dispatch has 1-2+ to pick)");
+});
+
+test("B9 FORCE-DISPATCH — negative control: non-empty queue but recommended empty (no step-4 candidate) ⇒ should_refill=false, no false dispatch (control: 无此场景不误报)", (t) => {
+  const root = makeWorkspace("b9-neg");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // Queue is non-empty, but the ONLY candidate fails the step-4 touches-resolve check (absent files
+  // WITHOUT (new)) ⇒ recommended is empty ⇒ the force-dispatch branch must NOT fire.
+  writeTask(root, "gap-b9-missing", {
+    status: "ready",
+    labels: ["gap"],
+    body: dispatchableBody(["- code/absent-1.ts", "- code/absent-2.ts"]),
+  });
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 5 });
+  assert.equal(r.pool, 1, "the queue is non-empty (1 candidate)");
+  assert.equal(r.slots_free, 5, "slots exist");
+  assert.equal(r.recommended.length, 0, "but no dispatchable recommendation passes step-4");
+  assert.equal(r.should_refill, false, "recommended empty ⇒ should_refill=false ⇒ no force dispatch (无此场景不误报)");
+  assert.match(r.no_refill_reason, /no dispatchable candidate/);
 });
 
 test("recommended is capped at slots_free (AC3)", (t) => {

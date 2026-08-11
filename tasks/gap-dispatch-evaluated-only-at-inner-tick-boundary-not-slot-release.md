@@ -76,6 +76,13 @@ extra:
 > 结构上无法被调起，形态与本任务描述的缺陷完全同形。该任务另立：inner 派发前写 `.quay/inner-agent-budget.json`
 > （spawned/limit/lastSpawnAt/hitLimit）并触顶即升级，把「空槽 + 有货 + 不派」的静默天花板变成外层可读的产物。
 
+> **交叉标注（2026-08-10，gap-outer-tick-core-b9-coverage-blind-spot——同族：外层侧「该派不派」的触发盲区）**：
+> 本任务管 inner 侧「**何时**评估派发」（完成事件 vs tick 边界）；同族管 outer 侧「**该派不派**」——B9 原先只在
+> 「队列空」触发，而 slot-refill 探针（should_refill=true / recommended 非空）与派发动作之间无强制链：队列不空但在飞=0
+> 且 should_refill=true 时 outer 零投递（2026-08-10 05:00–06:44 连续 ~8 轮）。该任务另立：orchestrator-tick-core.md
+> A18 必读 slot-refill 输出 + B9 空槽强制派发分支（should_refill=true 且 recommended 非空 ⇒ 取 1-2 派给 inner）+ B8
+> no-action 不合法判据——把「探针说该派 + 空槽 + 有货」变成 outer 的机械动作。
+
 ## Invoke evidence（scoped 实跑，2026-08-05）
 
 **Contract invoke（tick 文档含事件驱动派发机制的字面命中）**：

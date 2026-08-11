@@ -34,11 +34,16 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 05:00–06:44 零派发实证（meta-cc 0 投递 + B9 队列空触发 + should_refill=true 无动作）（本任务 Proposal 已含）
-- [ ] AC2: **B9 加空槽强制派发分支**——should_refill=true 且 recommended 非空 ⇒ 从 recommended 取 1-2 条派给 inner
-- [ ] AC3: **判据机械化**——执行核 B 产出清单加派发检查；should_refill=true 未派发 ⇒ B8 no-action 不合法
-- [ ] AC4: **tick 必读加 slot-refill**——`slot-refill.ts --json` 的 should_refill/recommended 进 A 段必读
-- [ ] AC5: **既有不回归**——`--for-task` scoped 门绿
+- [x] AC1: **复现固化**——任务体记录 05:00–06:44 零派发实证（meta-cc 0 投递 + B9 队列空触发 + should_refill=true 无动作）（本任务 Proposal 已含）
+  - 证据：复现已固化于本任务 Proposal（2026-08-10 05:00–06:44 连续 ~8 轮 pool=32/dd=13/slots_free=5/should_refill=True 而 outer 零投递；B9 原文触发条件=「队列空」；B3 甲强制动作不在执行核 B 产出清单）
+- [x] AC2: **B9 加空槽强制派发分支**——should_refill=true 且 recommended 非空 ⇒ 从 recommended 取 1-2 条派给 inner
+  - 证据：`orchestration/orchestrator-tick-core.md` B9 新增「空槽强制派发」分支——`should_refill=true`(A18 必读) 且 `recommended` 非空 ⇒ **必须**从 `recommended` 取 1-2 条派给 inner（不填满 cap——被红卡住时不填满但 ≠ 零派发）；「队列空」不再是唯一触发，队列不空但在飞=0 同样必须派发
+- [x] AC3: **判据机械化**——执行核 B 产出清单加派发检查；should_refill=true 未派发 ⇒ B8 no-action 不合法
+  - 证据：`orchestration/orchestrator-tick-core.md` B8 新增「空槽强制链判据」——`should_refill=true` 且 `recommended` 非空而未派发 ⇒ `no-action` 不合法（B8 必须记 `unblock`，从 `recommended` 派发 1-2 条）；B13 ① 标注=slot-refill 空槽强制链；B14 必报含 `should_refill`/`recommended`/`slots_free`；`plugin/test/slot-refill.test.mjs` 新增 2 个 B9 FORCE-DISPATCH 测试（正例：队列不空+in_flight=0+recommended 非空 ⇒ should_refill=true；负控制：recommended 空 ⇒ should_refill=false 不误报）
+- [x] AC4: **tick 必读加 slot-refill**——`slot-refill.ts --json` 的 should_refill/recommended 进 A 段必读
+  - 证据：`orchestration/orchestrator-tick-core.md` A 段新增 A18 必读行——`node --no-warnings --experimental-strip-types plugin/scripts/slot-refill.ts --root "$REPO_ROOT" --cap 5 --json` 读 `should_refill`/`recommended`/`slots_free`/`effective_cap`/`no_refill_reason`；`should_refill=true` 且 `recommended` 非空 ⇒ 本 tick 必须派发
+- [x] AC5: **既有不回归**——`--for-task` scoped 门绿
+  - 证据：worktree 内 `bash scripts/test.sh --for-task gap-outer-tick-core-b9-coverage-blind-spot --allow-thin` 退出 0（37 测试全绿、静态检查含 tick-core-static-check PASS / task-contract-check no violations / test-isolation ratchet 通过）
 
 ## Definition of Done
 
@@ -65,6 +70,25 @@ invariant tick_reads_slot_refill = 1（A 段必读含 slot-refill 输出）
 invoke    `node --no-warnings --experimental-strip-types plugin/scripts/slot-refill.ts --root . --cap 5 --json`（贴 should_refill/recommended）
 control   pool 非空 + in_flight 0 + recommended 非空 ⇒ core 强制派发；无此场景不误报
 resume    B9 分支 / 判据机械化 / tick 必读分步提交，任一步完成即写盘
+
+## Evidence（内层实现 2026-08-10）
+
+**Contract measure（core_forces_dispatch）**：`grep -c "should_refill.*recommended\|recommended 非空" orchestration/orchestrator-tick-core.md` = **5**（band ≥1）——执行核出现空槽强制派发行。
+
+**Contract invoke 实跑（本 worktree，should_refill/recommended）**：
+```
+$ node --no-warnings --experimental-strip-types plugin/scripts/slot-refill.ts --root . --cap 5 --json
+{ "should_refill": true, "no_refill_reason": null, "slots_free": 5, "effective_cap": 5,
+  "in_flight_count": 0, "pool": 19, "dispatchable_disjoint": 9,
+  "recommended": ["gap-forty-to-six-remerge-needs-tests-updated-first"] }
+```
+——正是盲区场景：pool 非空（19）+ in_flight=0 + slots_free=5 + `should_refill=true` 且 `recommended` 非空。修后 B9 空槽强制派发分支要求 outer 从 `recommended` 取 1-2 条派给 inner，不再是「队列空」才触发。
+
+**scoped 门（AC5）**：worktree 内 `bash scripts/test.sh --for-task gap-outer-tick-core-b9-coverage-blind-spot --allow-thin` 退出 0——
+- 静态检查：tick-core-static-check **PASS**（orchestrator-tick-core.md src:N 覆盖 48/48、AC4 pointer targets OK、AC5/AC6 OK）；task-contract-check **no violations**；test-framework-policy-check / test-isolation-check（44 基线无新增）/ superseded-capability / strategic-doc-staleness / state-worded-clause / red-on-omission-audit（uncov=0）/ delivery-inventory-drift-gate 全 PASS。
+- 测试：`plugin/test/slot-refill.test.mjs` **37 pass / 0 fail / exit 0**（含新增 2 个 B9 FORCE-DISPATCH 测试：正例「队列不空+in_flight=0+recommended 非空 ⇒ should_refill=true，recommended 携带可派 1-2 条」；负控制「队列非空但 recommended 空 ⇒ should_refill=false，无此场景不误报」）。
+
+**DoD 未勾项**（verification-window，待外层）：「全量套件绿（fail 0 且 cancelled 0 且 FULL-SUITE-EXIT=0）——外层 verification-round 验证」与「修后实跑：构造 pool 非空 + in_flight=0 + recommended 非空场景 ⇒ core 强制派发」的 live 复跑归外层验证轮。本任务保持 `ready`，不翻 done。
 
 ## Dispatch review
 
