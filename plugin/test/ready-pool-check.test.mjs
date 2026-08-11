@@ -58,6 +58,9 @@ import {
   readStateFailures,
   SUITE_BLOCKING_WEIGHT,
   RED_WINDOW_MIN_DEFAULT,
+  buildCommitTraceIndex,
+  commitSubjectTracesTask,
+  commitTraceLanded,
 } from "../scripts/ready-pool-check.ts";
 import { parseTask } from "../scripts/task-schema.ts";
 import { taskWorkLanded } from "../scripts/task-status-drift-check.ts";
@@ -316,6 +319,113 @@ test("ready pool excludes a prose-heavy DONE-FLIP via git-history, keeps git-his
     "git-history landed but AC-incomplete task is stuck-work → in the dispatchable pool (AC2)");
   assert.equal(byId["gap-web-stuck-work"], undefined, "stuck-work task not excluded (AC2)");
   assert.equal(r.ready.includes("gap-unstarted"), true, "a genuinely-unstarted ready task stays in the pool");
+});
+
+// ── COMMIT-TRACE signal (gap-nyf-branch-existence-vs-commit-trace) ────────────────────────────────
+// The not-yet-flipped criterion used to depend on TRANSIENT artifacts: the task/<id> branch existing
+// and unmerged (a branch merged+DELETED makes that signal vanish), and a git-history signal hardcoded
+// to `master` (STALE under the two-line branch model — integration-landed commits invisible to it).
+// Both hid "work already landed, still ready" tasks — the 16 phantom ready tasks (2026-08-11), each
+// verified via `git log --all | grep -E "inner: <id>|fan-in: task/<id>"`. The COMMIT-TRACE signal is
+// PERSISTENT (commit SUBJECTS survive branch deletion) and reads `--all` (covers the integration
+// fan-in). AC2: `inner: <id>` / `fan-in: task/<id>` commit ⇒ work landed ⇒ not dispatchable. AC3: the
+// "别改它" stuck-work guard (gap-ready-pool-worklanded-traps-stuck-work) is preserved — a traced task
+// whose ACs are far from complete stays dispatchable.
+
+test("commitSubjectTracesTask: inner:/fan-in: subject forms trace the task; mere id mentions do not (AC2)", () => {
+  const id = "gap-ac36-recommended-exposes-sort-key";
+  // positive: the four live commit conventions.
+  assert.equal(commitSubjectTracesTask(`inner: ${id} — impl landed`, id), true, "inner: <id> form");
+  assert.equal(commitSubjectTracesTask(`fan-in: task/${id}`, id), true, "fan-in: task/<id> form");
+  assert.equal(commitSubjectTracesTask(`merge: fan-in task/${id} — per-hunk union`, id), true, "merge: fan-in task/<id> form");
+  assert.equal(commitSubjectTracesTask(`merge: fan-in ${id} (A6, task-file evidence)`, id), true, "bare merge: fan-in <id> form");
+  // negative: the id merely MENTIONED elsewhere in a subject is NOT a trace (position-based judgment —
+  // e.g. an outer: closure commit listing many ids must not fire for each).
+  assert.equal(commitSubjectTracesTask(`outer: closure pass 16 tasks — ${id}/fifty-to-six/install → done`, id), false, "id in a list is not a trace");
+  // negative: prefix cross-fire — a LONGER sibling id must not trace a shorter id (delimited word).
+  assert.equal(commitSubjectTracesTask(`inner: ${id}-sibling — impl`, id), false, "longer id must not trace the shorter prefix");
+  assert.equal(commitSubjectTracesTask(`fan-in task/${id}-sibling`, id), false, "longer fan-in id must not trace the shorter prefix");
+  // negative: the git-history merge format the OTHER signal handles (`merge web-board: …`) is not a trace.
+  assert.equal(commitSubjectTracesTask("merge web-board: /board route joins intent/execution/landing", "gap-web-board-needs-an-inconsistency-verdict-it-does-not-have"), false);
+});
+
+test("buildCommitTraceIndex: fail-closed on a non-git root (empty, never throws)", (t) => {
+  const root = makeWorkspace("ct-nongit");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  assert.deepEqual(buildCommitTraceIndex(root), [], "non-git root ⇒ empty index");
+  assert.equal(commitTraceLanded("gap-any", buildCommitTraceIndex(root)), false, "empty index never traces");
+});
+
+test("commit-trace nyf: branch merged+DELETED on integration (master stale) ⇒ done-flip not dispatchable, stuck-work stays, untraced stays (AC2/AC3)", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `ready-pool-ct-${Date.now()}-`));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  fs.mkdirSync(path.join(root, "code"), { recursive: true });
+  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  git("init", "-b", "master", "-q", ".");
+  git("config", "user.email", "test@example.com");
+  git("config", "user.name", "Test");
+  fs.writeFileSync(path.join(root, ".gitkeep"), "base\n");
+  git("add", ".");
+  git("commit", "-q", "-m", "base");
+  // The two-line branch model: work lands on integration; master STAYS at base (stale) — so the
+  // master-based git-history signal (gitHistoryLanded) sees NONE of it. Only the commit-trace signal
+  // (reads --all) can see the integration fan-in.
+  git("checkout", "-q", "-b", "integration");
+  // TRACED DONE-FLIP: work landed via `inner:` impl commit + `fan-in: task/<id>` merge on integration,
+  // branch then DELETED (the transient branch-existence signal vanishes — the commit trace persists).
+  writeTask(root, "gap-traced-done-flip", {
+    status: "ready",
+    labels: ["gap"],
+    body: fourArtifactBody({ checkedAc: 3, touches: ["- code/impl.ts"] }), // prose AC (no backticked symbols), existing-file touch
+  });
+  git("add", ".");
+  git("commit", "-q", "-m", "task file gap-traced-done-flip");
+  git("checkout", "-q", "-b", "task/gap-traced-done-flip");
+  fs.writeFileSync(path.join(root, "code", "impl.ts"), "export const impl = 1;\n");
+  git("add", ".");
+  git("commit", "-q", "-m", "inner: gap-traced-done-flip — impl landed on integration");
+  git("checkout", "-q", "integration");
+  git("merge", "--no-ff", "task/gap-traced-done-flip", "-m", "fan-in: task/gap-traced-done-flip", "-q");
+  git("branch", "-D", "task/gap-traced-done-flip");
+  // TRACED STUCK-WORK: also has an `inner:` commit (and a `merge: fan-in task/<id>` merge) but ACs far
+  // from complete → real remaining implementation → STAYS dispatchable (the "别改它" stuck-work guard).
+  writeTask(root, "gap-traced-stuck", {
+    status: "ready",
+    labels: ["gap"],
+    body: fourArtifactBody({ checkedAc: 0, touches: ["- code/impl-stuck.ts"] }),
+  });
+  git("add", ".");
+  git("commit", "-q", "-m", "task file gap-traced-stuck");
+  git("checkout", "-q", "-b", "task/gap-traced-stuck");
+  fs.writeFileSync(path.join(root, "code", "impl-stuck.ts"), "export const stuck = 1;\n");
+  git("add", ".");
+  git("commit", "-q", "-m", "inner: gap-traced-stuck — partial impl");
+  git("checkout", "-q", "integration");
+  git("merge", "--no-ff", "task/gap-traced-stuck", "-m", "merge: fan-in task/gap-traced-stuck", "-q");
+  git("branch", "-D", "task/gap-traced-stuck");
+  // UNTRACED: no inner:/fan-in: commit anywhere → genuinely fresh ready work.
+  writeTask(root, "gap-unstarted", { status: "ready", labels: ["gap"], body: fourArtifactBody({ touches: ["- code/never.ts"] }) });
+  git("add", ".");
+  git("commit", "-q", "-m", "task file gap-unstarted");
+
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root });
+  const byId = Object.fromEntries(r.excluded.map((e) => [e.id, e.reasons]));
+  // AC2 verification anchor (a): branch merged+DELETED, but the commit trace persists on integration
+  // (invisible to the stale-master git-history signal) ⇒ the done-flip task is NOT dispatchable.
+  assert.ok(
+    byId["gap-traced-done-flip"]?.includes("not-yet-flipped"),
+    "traced done-flip task excluded via commit-trace (master stale, branch deleted)",
+  );
+  assert.equal(r.ready.includes("gap-traced-done-flip"), false, "traced done-flip NOT in the dispatchable pool");
+  // "别改它" (gap-ready-pool-worklanded-traps-stuck-work): a traced task whose ACs are far from complete
+  // is STUCK-WORK with real remaining implementation → stays dispatchable (the commit-trace signal does
+  // NOT bypass the AC gate).
+  assert.equal(byId["gap-traced-stuck"], undefined, "traced-but-AC-incomplete task is stuck-work → not excluded");
+  assert.equal(r.ready.includes("gap-traced-stuck"), true, "traced stuck-work stays in the dispatchable pool");
+  // a genuinely un-traced ready task stays dispatchable (negative control).
+  assert.equal(byId["gap-unstarted"], undefined, "untraced ready task not excluded");
+  assert.equal(r.ready.includes("gap-unstarted"), true, "untraced ready task stays in the dispatchable pool");
 });
 
 test("isFixture / isParked / notYetFlipped unit behavior", (t) => {
