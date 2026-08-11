@@ -36,6 +36,16 @@
 //      strategic-doc-staleness-check CLI exposes (--pool-candidate <id>, review-cadence AC8) — flagged
 //      ⇒ never eligible, and the intercept is MECHANICALLY recorded in the `intercepted` output
 //      (reason + refs) so a no-promotion is a traceable decision, not a silent skip.
+//   5. B15 POOL-QUALITY VERDICT GUARD (gap-apply-promotes-b15-needs-work-tasks, ADR-033 consumer):
+//      a candidate carrying frontmatter `extra.poolQualityVerdict` with a NON-ready verdict
+//      (needs-work / should-remove / uncertain — the pool-quality-judge vocabulary) was judged by the
+//      ADR-033 semantic gate as NOT mechanically promotable. Before ANY promotion (bulk pool<floor OR
+//      --targeted) the candidate is checked via isB15Blocked — a non-ready verdict ⇒ never eligible,
+//      and the skip is MECHANICALLY recorded in the `intercepted` output (reason "b15-needs-work" +
+//      verdict) so the `--json` diagnostic never lists a B15-todo task as a promotion candidate.
+//      `ready` is the one verdict the gate CONFIRMED dispatchable and never blocks. Without this the
+//      mechanical `--apply` refill re-promoted B15-judged todo tasks when pool < floor, undoing the
+//      semantic gate within the same tick (hit 3× on 2026-08-11; outer reverted via git checkout --).
 //
 // COST ASYMMETRY (AC6 — why the floor biases toward OVER-promotion): over-promotion (promoting a
 // candidate the current tick doesn't dispatch) is FRONT-LOADED, not wasted — the pool is deeper and
@@ -479,6 +489,30 @@ export function isAcRecord(task) {
   return (task.labels || []).includes("ac");
 }
 
+// ── B15 pool-quality verdict guard (gap-apply-promotes-b15-needs-work-tasks, ADR-033 consumer) ────
+// The ADR-033 semantic gate (pool-quality-judge, task gap-pool-quality-semantic-gate) judges pool
+// tasks ready / needs-work / should-remove / uncertain. A NON-ready verdict means the task must NOT
+// be mechanically promoted: needs-work (→ back-to-todo), should-remove (→ remove-or-rescope),
+// uncertain (→ needs-human) all mark a task the mechanical pool<floor refill (`--apply`) must skip —
+// the bug: `--apply` re-promoted B15-judged todo tasks (hit 3× on 2026-08-11), mechanically undoing
+// the semantic gate within the same tick. The marker is frontmatter `extra.poolQualityVerdict:
+// <verdict>` — the SAME verdict vocabulary pool-quality-judge.ts emits (VERDICTS). `ready` is the one
+// verdict that means the gate CONFIRMED dispatchable, so it never blocks. The marker is written by
+// the judge's consumer when a judged task is retreated to todo; this file is the consumer that must
+// NOT promote it.
+export const B15_BLOCKED_VERDICTS = ["needs-work", "should-remove", "uncertain"];
+
+/** True when the task carries a B15 pool-quality verdict that blocks mechanical promotion — a todo
+ *  judged needs-work/should-remove/uncertain by the ADR-033 semantic gate must not be re-promoted by
+ *  `--apply` (or `--targeted`) even when shape-complete and pool < floor. Reads frontmatter
+ *  `extra.poolQualityVerdict` (case/space-insensitive, matching the pool-quality-judge vocabulary). */
+export function isB15Blocked(task) {
+  const v = task && task.extra && task.extra.poolQualityVerdict;
+  if (v === undefined || v === null) return false;
+  const verdict = String(v).trim().toLowerCase();
+  return B15_BLOCKED_VERDICTS.includes(verdict);
+}
+
 /** Parse the `children:` frontmatter field — flow `[a, b]` or block `- a` list. Mirrors the labels
  *  parser in task-schema.ts (lenient; no YAML dep). Returns the child task-id array. */
 export function readChildren(frontmatterRaw) {
@@ -759,6 +793,11 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
   // intercepted, not promoted).
   const staleRefs = judgePoolCandidate(root, id); // null when tasks/<id>.md is missing — not a live candidate
   const retiredMechanism = staleRefs !== null && staleRefs.length > 0;
+  // B15 pool-quality guard (gap-apply-promotes-b15-needs-work-tasks): a todo carrying a non-ready
+  // `extra.poolQualityVerdict` (needs-work/should-remove/uncertain) was judged by the ADR-033 semantic
+  // gate as NOT promotable — the mechanical pool<floor refill must not undo that verdict. `ready` is
+  // the gate's CONFIRMED-dispatchable verdict and never blocks.
+  const b15Blocked = isB15Blocked(task);
   // Touch-disjointness score: how many of the already-pooled ready tasks + in-flight tasks this
   // candidate is pairwise touches-DISJOINT from (checkTouchesPair, the real dispatch judge). Higher
   // = promotes into a pool that stays dispatchable-disjoint (AC4 — disjointness ranks FIRST).
@@ -781,10 +820,16 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
     // is never eligible (the intercept reason is mechanically carried for the `intercepted` output).
     retiredMechanism,
     retiredRefs: staleRefs !== null ? staleRefs : [],
+    // B15 guard (gap-apply-promotes-b15-needs-work-tasks): the candidate carries the blocking flag +
+    // the raw verdict so a no-promotion is a traceable decision (recorded in `intercepted`), never a
+    // silent skip — the same pattern as the retired-mechanism intercept.
+    b15Blocked,
+    b15Verdict: task.extra && task.extra.poolQualityVerdict ? String(task.extra.poolQualityVerdict) : null,
     // AC5: the touchesResolve guard is KEPT — majority-missing candidates are never eligible.
     // AC1: the retired-mechanism guard is ADDED — a candidate targeting a retired pipeline mechanism
     // is never eligible either.
-    eligible: depsReady && four.complete && touchesResolve && !retiredMechanism,
+    // B15: a candidate the ADR-033 semantic gate judged non-ready is never eligible either.
+    eligible: depsReady && four.complete && touchesResolve && !retiredMechanism && !b15Blocked,
   };
 }
 
@@ -830,6 +875,21 @@ export function buildTargetedPromotion(id, task, root, allTasks) {
       checks: { retiredMechanism: true, retiredRefs: staleRefs },
     };
   }
+  // B15 guard (gap-apply-promotes-b15-needs-work-tasks): a target the ADR-033 semantic gate judged
+  // non-ready (extra.poolQualityVerdict ∈ needs-work/should-remove/uncertain) is not promotable —
+  // targeted promotion must not bypass the semantic gate either (the outer could otherwise re-promote
+  // a B15-judged todo via --targeted — the SAME undo the bulk path just closed).
+  if (isB15Blocked(task)) {
+    return {
+      id,
+      found: true,
+      status: task.status,
+      eligible: false,
+      floor_independent: true,
+      reason: `b15-needs-work: ${id} carries extra.poolQualityVerdict "${task.extra.poolQualityVerdict}" — the ADR-033 semantic gate judged it non-ready; not promotable`,
+      checks: { b15Blocked: true, b15Verdict: String(task.extra.poolQualityVerdict) },
+    };
+  }
   const four = artifactsComplete(task.body);
   const depsReady = depsReadyFor(task, allTasks);
   const touches = checkTaskTouchesResolve(task.body, root);
@@ -843,6 +903,7 @@ export function buildTargetedPromotion(id, task, root, allTasks) {
     notFixture: true,
     notParked: true,
     retiredMechanism: false,
+    b15Blocked: false,
   };
   return {
     id,
@@ -1036,6 +1097,13 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
     for (const c of candidates) {
       if (c.retiredMechanism) {
         intercepted.push({ id: c.id, reason: "retired-mechanism", refs: c.retiredRefs });
+      }
+      // B15 guard (gap-apply-promotes-b15-needs-work-tasks): the FULL B15-blocked set is mechanically
+      // recorded — every candidate carrying a non-ready `extra.poolQualityVerdict` is listed with the
+      // verdict. A no-promotion is a traceable decision (the `--json` diagnostic this task's finding
+      // shows must NOT list a B15-todo task as a promotion candidate), never a silent skip.
+      if (c.b15Blocked) {
+        intercepted.push({ id: c.id, reason: "b15-needs-work", verdict: c.b15Verdict });
       }
     }
     for (const c of candidates) {

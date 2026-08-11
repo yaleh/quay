@@ -12,6 +12,11 @@
 // AC3 pool-big-but-all-colliding self-report + no-false-report-on-criterion-met · AC4 disjointness
 //   ranks before kind, incl. in-flight · AC5 touchesResolve guard kept · AC6 cost asymmetry doc
 // AC7 real use · AC8 node:test + @test-group governance
+// B15 pool-quality verdict guard (gap-apply-promotes-b15-needs-work-tasks, ADR-033 consumer): a todo
+//   carrying frontmatter `extra.poolQualityVerdict` with a NON-ready verdict (needs-work / should-remove
+//   / uncertain) is NOT mechanically promotable by --apply or --targeted — the semantic gate must not be
+//   undone by the pool<floor refill. AC1 negative control (B15-todo status unchanged by --apply) ·
+//   AC2 --json promotions excludes B15-todo tasks · the skip is recorded in `intercepted` (traceable).
 //
 // Run: scripts/test.sh plugin/test/ready-pool-check.test.mjs
 
@@ -58,6 +63,8 @@ import {
   readStateFailures,
   SUITE_BLOCKING_WEIGHT,
   RED_WINDOW_MIN_DEFAULT,
+  isB15Blocked,
+  B15_BLOCKED_VERDICTS,
 } from "../scripts/ready-pool-check.ts";
 import { parseTask } from "../scripts/task-schema.ts";
 import { taskWorkLanded } from "../scripts/task-status-drift-check.ts";
@@ -75,7 +82,8 @@ function makeWorkspace(tag) {
   return dir;
 }
 
-function writeTask(root, id, { status = "todo", labels = [], parent = null, children = [], body }) {
+function writeTask(root, id, { status = "todo", labels = [], parent = null, children = [], body, extra = {} }) {
+  const extraKeys = Object.keys(extra);
   const fm = [
     "---",
     `id: ${id}`,
@@ -88,6 +96,7 @@ function writeTask(root, id, { status = "todo", labels = [], parent = null, chil
     ...children.map((c) => `  - ${c}`),
     "extra:",
     "  schema: v1",
+    ...extraKeys.map((k) => `  ${k}: ${extra[k]}`),
     "---",
   ].join("\n");
   fs.writeFileSync(path.join(root, "tasks", `${id}.md`), `${fm}\n\n${body}`);
@@ -1574,6 +1583,96 @@ test("CLI --apply smoke: --root/--cap/--floor-mult/--apply lands promotions + em
   assert.equal(parsed.applied_promotions.length, 1);
   const task = parseTask(fs.readFileSync(path.join(root, "tasks", "gap-candidate.md"), "utf8"));
   assert.match(task.frontmatterRaw, /^status:\s*ready$/m, "CLI --apply lands the promotion on disk");
+});
+
+// ── B15 pool-quality verdict guard (gap-apply-promotes-b15-needs-work-tasks, ADR-033 consumer) ─────
+// The ADR-033 semantic gate (pool-quality-judge) judges pool tasks ready / needs-work / should-remove /
+// uncertain. A NON-ready verdict means the task must NOT be mechanically re-promoted by `--apply` when
+// pool < floor — the bug: B15-judged todo tasks were mechanically re-promoted, undoing the gate (hit
+// 3× on 2026-08-11). The marker is frontmatter `extra.poolQualityVerdict: <verdict>` (the
+// pool-quality-judge verdict vocabulary). AC1 negative control — a B15-judged-todo shape-complete
+// task's status is unchanged by --apply · AC2 --json `promotions` no longer lists B15-todo tasks · the
+// skip is recorded in `intercepted` (traceable, never silent) · `--targeted` cannot bypass the gate.
+
+test("isB15Blocked reads extra.poolQualityVerdict — non-ready verdicts block, ready/missing do not", () => {
+  assert.equal(isB15Blocked(parseTask("---\nid: x\nextra:\n  poolQualityVerdict: needs-work\n---\nbody")), true);
+  assert.equal(isB15Blocked(parseTask("---\nid: x\nextra:\n  poolQualityVerdict: should-remove\n---\nbody")), true);
+  assert.equal(isB15Blocked(parseTask("---\nid: x\nextra:\n  poolQualityVerdict: uncertain\n---\nbody")), true);
+  assert.equal(isB15Blocked(parseTask("---\nid: x\nextra:\n  poolQualityVerdict: ready\n---\nbody")), false,
+    "ready is the B15-CONFIRMED-dispatchable verdict — never blocks");
+  assert.equal(isB15Blocked(parseTask("---\nid: x\n---\nbody")), false, "no marker ⇒ not blocked");
+  assert.equal(isB15Blocked(parseTask("---\nid: x\nextra:\n  schema: v1\n---\nbody")), false, "schema marker alone ⇒ not blocked");
+  assert.equal(isB15Blocked(parseTask("---\nid: x\nextra:\n  poolQualityVerdict: Needs-Work\n---\nbody")), true, "case-insensitive");
+  assert.deepEqual(B15_BLOCKED_VERDICTS, ["needs-work", "should-remove", "uncertain"]);
+});
+
+test("--apply: B15 needs-work todo is NOT promoted when pool < floor (AC1 negative control); promotions excludes it (AC2)", (t) => {
+  const root = makeWorkspace("b15-neg");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-r1", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-r2", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  // A shape-complete todo carrying the B15 needs-work verdict — the exact bug shape (B15 judged it
+  // needs-work → retreated to todo; --apply must NOT mechanically re-promote it).
+  writeTask(root, "gap-b15-needs-work", {
+    status: "todo", labels: ["gap"], body: fourArtifactBody(), extra: { poolQualityVerdict: "needs-work" },
+  });
+  // A CLEAN todo candidate (no marker) — must still promote (negative control for the skip).
+  writeTask(root, "gap-clean", gapTask("gap-clean"));
+
+  const opts = { tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 }; // floor 3, pool 2
+  const r = applyPromotions(opts);
+  assert.equal(r.pool, 2);
+  assert.equal(r.deficit, 1, "pool below floor ⇒ promotion pressure");
+  // AC2: the B15-todo task is NOT in the promotions list.
+  assert.ok(!r.promotions.some((p) => p.id === "gap-b15-needs-work"), "B15 needs-work todo must NOT be in promotions (AC2)");
+  assert.ok(r.promotions.some((p) => p.id === "gap-clean"), "clean todo still promoted (negative control)");
+  // AC1: --apply must not change the B15 todo's status on disk.
+  const task = parseTask(fs.readFileSync(path.join(root, "tasks", "gap-b15-needs-work.md"), "utf8"));
+  assert.match(task.frontmatterRaw, /^status:\s*todo$/m, "B15 needs-work todo stays todo after --apply (AC1)");
+  // Traceability: the candidate is listed (eligible:false, b15Blocked) and recorded in `intercepted`
+  // — a no-promotion is a traceable decision, never a silent skip.
+  const c = r.candidates.find((x) => x.id === "gap-b15-needs-work");
+  assert.ok(c, "B15 todo still appears in candidates (visible, not silently dropped)");
+  assert.equal(c.b15Blocked, true, "candidate carries b15Blocked flag");
+  assert.equal(c.eligible, false, "B15-blocked candidate is not eligible");
+  assert.ok(r.intercepted.some((x) => x.id === "gap-b15-needs-work" && x.reason === "b15-needs-work" && x.verdict === "needs-work"),
+    "B15-blocked candidate recorded in intercepted with verdict (traceable skip)");
+  // The clean candidate DID get promoted on disk.
+  const cleanTask = parseTask(fs.readFileSync(path.join(root, "tasks", "gap-clean.md"), "utf8"));
+  assert.match(cleanTask.frontmatterRaw, /^status:\s*ready$/m, "clean candidate promoted to ready on disk");
+});
+
+test("CLI --apply: B15 needs-work todo stays todo; clean candidate promoted (AC1/AC2)", (t) => {
+  const root = makeWorkspace("b15-cli");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-r1", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-r2", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-b15-needs-work", { status: "todo", labels: ["gap"], body: fourArtifactBody(), extra: { poolQualityVerdict: "needs-work" } });
+  writeTask(root, "gap-clean", gapTask("gap-clean"));
+
+  const script = path.resolve(__dirname, "..", "scripts", "ready-pool-check.ts");
+  const out = execFileSync(process.execPath, ["--experimental-strip-types", script, "--root", root, "--cap", "3", "--floor-mult", "1", "--apply"], { encoding: "utf8" });
+  const parsed = JSON.parse(out);
+  assert.ok(!parsed.promotions.some((p) => p.id === "gap-b15-needs-work"), "promotions excludes the B15 todo (AC2)");
+  assert.ok(parsed.promotions.some((p) => p.id === "gap-clean"), "clean candidate promoted");
+  const task = parseTask(fs.readFileSync(path.join(root, "tasks", "gap-b15-needs-work.md"), "utf8"));
+  assert.match(task.frontmatterRaw, /^status:\s*todo$/m, "B15 todo unchanged on disk (AC1)");
+});
+
+test("--targeted: a B15 needs-work todo target is not promotable; clean target stays promotable (gate not bypassable)", (t) => {
+  const root = makeWorkspace("b15-targeted");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-b15-needs-work", { status: "todo", labels: ["gap"], body: fourArtifactBody(), extra: { poolQualityVerdict: "needs-work" } });
+  writeTask(root, "gap-clean", gapTask("gap-clean"));
+
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, targetedId: "gap-b15-needs-work" });
+  assert.equal(r.targeted_promotion.eligible, false, "B15 needs-work target is not promotable");
+  assert.match(r.targeted_promotion.reason, /b15-needs-work/);
+  assert.equal(r.targeted_promotion.checks.b15Blocked, true);
+
+  const r2 = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, targetedId: "gap-clean" });
+  assert.equal(r2.targeted_promotion.eligible, true, "clean target stays promotable");
+  assert.equal(r2.targeted_promotion.checks.b15Blocked, false, "clean target reports b15Blocked: false");
 });
 
 // ── Suite-blocking signal (tasks/gap-ready-relevance-blind-to-suite-blocking-signal) ────────────────
