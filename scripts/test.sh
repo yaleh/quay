@@ -333,6 +333,18 @@ run_static_checks() {
   # @static-tier change
   # @static-object plugin/loop/fast-mode-loop-tick.md plugin/loop/orchestrator-loop-tick.md orchestration/QUAY-OUTER-HANDOFF.md
   run_checker "drive-contract-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/drive-contract-check.ts" --root "${repo_root}"
+  echo "== judgment-consumer check (gap-judgment-computed-not-wired-to-action, AC2/AC3) =="
+  # The 判据→消费动作 audit — the class-level discipline "每个机械判据必须有消费它的动作" made
+  # mechanical. The registry (plugin/scripts/judgment-consumer-check.ts) lists every audited judgment
+  # with the action that consumes it; a judgment declared `wired` whose consumer patterns do not
+  # verify is the exact defect class (2026-08-10: deficit / not-yet-flipped / self-touch-scan — the
+  # signal was computed, nothing acted on it) and red-lights the commit. A judgment with no consumer
+  # is listed `unfinished` (never silently green). Exit 1 on drift (wired-but-missing or
+  # unfinished-but-stale) aborts the suite. The mutation case exercises the wired→missing→restore
+  # direction; plugin/test/judgment-consumer-check.test.mjs asserts the full-registry audit.
+  # @static-tier change
+  # @static-object orchestration/orchestrator-tick-core.md plugin/loop/fast-mode-tick-core.md plugin/scripts/judgment-consumer-check.ts plugin/scripts/ready-pool-check.ts plugin/scripts/slot-refill.ts plugin/scripts/touches-orthogonality-check.ts plugin/scripts/closure-lag-check.sh plugin/scripts/obligation-ledger.ts plugin/test/judgment-consumer-check.test.mjs
+  run_checker "judgment-consumer-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/judgment-consumer-check.ts" --root "${repo_root}"
   echo "== threshold-scope check (gap-quantified-stop-conditions-have-no-scope, AC2/AC3/AC6/AC7/AC9) =="
   # The driver-doc prose hygiene checker: (1) a quantified stop/trigger condition must name its SET
   # and WINDOW — `needs-human 积压 ≥ 3` (no window) is the 2026-08-03 dispatch-freeze shape, its

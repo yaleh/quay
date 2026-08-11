@@ -69,3 +69,7 @@ resume    回填逻辑 / scoped 门 / 全量验证分步提交，任一步完成
 reviewer: outer
 at: 2026-08-10
 changed: manager 21:4x 实证——22 ready 中 5 缺 self-touch（touches-orthogonality-check --self-touch-scan），inner 报「3 候选缺 C8」而 17 本可派。根因：slot-refill 候选循环不查 C8，派发侧拒了不补位。处方：候选被逐候选门拒后从排序更后补位。outer 已做止血（5 任务补 self-touch，791a8909），本任务做结构解。实现归 inner，判定归 outer
+
+## Cross-annotation（inner 2026-08-11）
+
+本任务 = 类级任务 `gap-judgment-computed-not-wired-to-action` 的 **instance-2（21:4x self-touch-scan）**——「信号算了，没接进推荐/触发路径」。类级纪律「每个机械判据必须有消费它的动作」由 `plugin/scripts/judgment-consumer-check.ts` 审计；本任务的「候选回填」消费动作**未接线**，故 self-touch-scan 在审计 registry 中列 **UNFINISHED**（pendingTask=本任务）。修法落定后（slot-refill 接入「C8 拒后回填」），翻 self-touch-scan 为 wired。

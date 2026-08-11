@@ -35,23 +35,27 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录三次同形态实例（18:4x / 21:4x / 22:0x，各带已立案 id）（本任务 Proposal 已含）
-- [ ] AC2: **类级纪律**——「每个机械判据必须有消费它的动作」固化为可 grep 的文档/检查器
-- [ ] AC3: **系统审计**——「判据→消费动作」映射清单，无消费方列未完成
-- [ ] AC4: **既有不回归**——`--for-task` scoped 门绿
+- [x] AC1: **复现固化**——任务体记录三次同形态实例（18:4x / 21:4x / 22:0x，各带已立案 id）（本任务 Proposal 已含）
+- [x] AC2: **类级纪律**——「每个机械判据必须有消费它的动作」固化为可 grep 的文档/检查器
+- [x] AC3: **系统审计**——「判据→消费动作」映射清单，无消费方列未完成
+- [x] AC4: **既有不回归**——`--for-task` scoped 门绿
 
 ## Definition of Done
 
-- [ ] AC1–AC4 全部勾上
-- [ ] 修后实跑：审计清单含三个实例的消费方（已修/待修标注）；无消费方判据被列为未完成
-- [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
+- [x] AC1–AC4 全部勾上
+- [x] 修后实跑：审计清单含三个实例的消费方（已修/待修标注）；无消费方判据被列为未完成
+- [x] 既有测试 + 新增测试全绿（`--for-task` scoped）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
 
 ## Touches
 
 - orchestration/orchestrator-tick-core.md（类级纪律挂载点——B9 已接 deficit 触发器，纪律可与其同处）
 - plugin/scripts/judgment-consumer-check.ts（审计检查器：判据→消费动作映射——判据清单 + 各自消费动作，无消费方判据列未完成；复用 capability-catalog 的声明）
-- plugin/test/（新增审计测试）
+- plugin/scripts/capability-catalog.sh（judgment-consumer-check 的 QUESTION/CADENCE/失效前提/last-reaffirmed/matching 五表声明）
+- plugin/scripts/checker-mutation-cases/judgment-consumer-check.sh（checker-mutation-check 的 mutation case）
+- scripts/test.sh（judgment-consumer-check 接进 run_static_checks @static-tier change）
+- plugin/test/judgment-consumer-check.test.mjs（新增审计测试）
+- docs/proposals/quay-product-outline.md（§6 DELIVERY-INVENTORY 快照——加脚本的机械后果，drift gate 要求同变更集更新）
 - tasks/gap-slot-refill-c8-reject-no-backfill.md（交叉标注——实例 2）
 - tasks/gap-slot-refill-repeats-done-eligible-recommendations.md（交叉标注——实例 1，已修）
 - tasks/gap-judgment-computed-not-wired-to-action.md（自身：勾 AC + 贴证据）
@@ -71,3 +75,20 @@ resume    纪律文档 / 审计检查器 / scoped 门分步提交，任一步完
 reviewer: outer
 at: 2026-08-10
 changed: manager 22:0x 第三次同形态——deficit 每轮算出无触发器读（B9 只有队列空/阶段目标两触发器），pool 27→17 漂移、39 todo 放着。manager 并列三次（18:4x / 21:4x / 22:0x）问是否值得做成一类。裁定：类级纪律「每个机械判据必须有消费它的动作」+ 系统审计。outer 已先修 B9 第三触发器（77f17d95，接 --apply 自闸心跳）；本任务做纪律+审计。实现归 inner，判定归 outer
+
+## Evidence（inner 2026-08-11 实现）
+
+**修法分三件**（分步提交，Contract resume 形态）：
+
+1. **类级纪律（AC2）**：`orchestration/orchestrator-tick-core.md` B17「判据消费纪律」——「每个机械判据必须有消费它的动作」；B9 的 deficit 第三触发器（`deficit > 0` ⇒ `ready-pool-check.ts --apply`，outer 77f17d95 接线）是本纪律的第一个实例。**measure `consumer_wired`**：`grep -cE "deficit.*--apply|消费|consumer" orchestration/orchestrator-tick-core.md plugin/scripts/capability-catalog.sh` → `orchestrator-tick-core.md:2` + `capability-catalog.sh:62`（≥ 1，band 满足）。
+2. **审计检查器（AC3）**：`plugin/scripts/judgment-consumer-check.ts`——registry 单一正本，6 判据各带消费动作 + 可 grep 验证模式。实跑（`--json`，worktree 根）：
+   - `judgments_total=6 · wired=5 · unfinished=["self-touch-scan"] · drift=false`，exit 0。
+   - 三个实例的消费方：`deficit`=B9 第三触发器（wired，instance-3）；`not-yet-flipped`=slot-refill 第 4 项 step-4 检查（wired，instance-1）；`self-touch-scan`=C8 逐候选门已接线但「候选回填」消费未接线（**UNFINISHED**，instance-2，pendingTask=gap-slot-refill-c8-reject-no-backfill）。
+   - 无消费方判据被列为未完成（invariant `no_consumer_listed_unfinished`）：`unfinished=["self-touch-scan"]` 不静默绿。
+3. **scoped 门（AC4）**：`bash scripts/test.sh --for-task gap-judgment-computed-not-wired-to-action --allow-thin` → **exit 0，21 pass / 0 fail / 0 cancelled**。含新增 `plugin/test/judgment-consumer-check.test.mjs` 6 用例（wired 判据消费验证 / 三实例在场 / 无消费方列未完成 / --judge-entry 负控制：wired 判据消费缺失 exit 1，恢复 exit 0 / unfinished 状态过期 exit 1）。scoped 静态检查选中 `judgment-consumer-check`（@static-object 命中 orchestration/orchestrator-tick-core.md）并绿；`delivery-inventory-drift-gate` PASS（outline §6 快照 204，加脚本同变更集更新）。
+
+**mutation case**：`plugin/scripts/checker-mutation-cases/judgment-consumer-check.sh` 已建并实跑通过（baseline GREEN → 注入「wired 判据消费缺失」RED → restore GREEN），checker-mutation-check 全量 gate 不因新检查器报 uncovered。
+
+**分步提交**：`5f20b063`（纪律文档 B17）→ `a9f1d77c`（审计检查器 + catalog + mutation case + outline 快照）→（scoped 门 + 测试 + 交叉标注，见提交 log）。
+
+**全量套件**：未跑（按指令 scoped 验证）；全量绿由外层 verification-round 验证（DoD 最后一项留白）。
