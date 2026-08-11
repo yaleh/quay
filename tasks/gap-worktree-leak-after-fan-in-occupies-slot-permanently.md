@@ -5,7 +5,7 @@ title: 合并后没删 worktree 的累积泄漏——fast-mode-telemetry:834/:89
   0）；inner A6 fan-in 序列含 worktree remove 但 outer A15 fan-in 没有 ⇒ 最近 fan-in 全在
   outer 侧执行故泄漏；处方=①清已合 worktree ②A15 fan-in 序列补 worktree remove ③slot-status 报
   occupied>cap 且存在【分支已合但 worktree 仍在】⇒ 该轮判不合规
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
@@ -40,16 +40,16 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 12 泄漏 worktree 清单 + 单调累积（occupied 15 > cap 5）+ inner A6 有 remove 而 outer A15 没有（本任务 Proposal 已含）
-- [ ] AC2: **泄漏清理**——已合分支的泄漏 worktree 全部 remove（安全：分支已合，只删工作副本）；`slots_free_restored`（空槽恢复）为真
-- [ ] AC3: **A15 fan-in 补 remove**——outer fan-in 序列 merge 后 `git worktree remove`（与 inner A6 对齐）
-- [ ] AC4: **合规产物**——slot-status 报 occupied>cap 且存在已合残留 ⇒ 判不合规；`--for-task` scoped 门绿
+- [x] AC1: **复现固化**——任务体记录 12 泄漏 worktree 清单 + 单调累积（occupied 15 > cap 5）+ inner A6 有 remove 而 outer A15 没有（本任务 Proposal 已含）
+- [x] AC2: **泄漏清理**——已合分支的泄漏 worktree 全部 remove（安全：分支已合，只删工作副本）；`slots_free_restored`（空槽恢复）为真
+- [x] AC3: **A15 fan-in 补 remove**——outer fan-in 序列 merge 后 `git worktree remove`（与 inner A6 对齐）
+- [x] AC4: **合规产物**——slot-status 报 occupied>cap 且存在已合残留 ⇒ 判不合规；`--for-task` scoped 门绿
 
 ## Definition of Done
 
-- [ ] AC1–AC4 全部勾上
-- [ ] 修后实跑：泄漏清理后 slots-free > 0（贴 slot-status）；A15 fan-in 后无泄漏累积
-- [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
+- [x] AC1–AC4 全部勾上
+- [x] 修后实跑：泄漏清理后 slots-free > 0（贴 slot-status）；A15 fan-in 后无泄漏累积
+- [x] 既有测试 + 新增测试全绿（`--for-task` scoped）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
 
 ## Touches
@@ -93,3 +93,54 @@ at: 2026-08-11
 changed: manager 04:5x 第二次更正（取代 04:42 陈旧括号案）——真因=合并后没删 worktree 的累积泄漏（fast-mode-telemetry:834/:898 判存活=worktree 在）；12 个已合分支 worktree 仍留 ⇒ 每合一个永久吃一槽（occupied 15>cap5）；inner A6 fan-in 有 remove 而 outer A15 没有。outer 复核：清 11 泄漏后 slots-free 0→2。处方：清泄漏 + A15 补 remove + 合规产物。实现归 inner，判定归 outer
 
 > **cross-ref (gap-nyf-branch-existence-vs-commit-trace, 2026-08-11)**：同根形状——拿短暂产物（worktree 存在 / task/<id> 分支存在）当持久事实（执行体存活 / 工作已落地）的信号，短暂产物一消失判据就静默翻转。本任务治「worktree 存在」侧；nyf 任务治「分支存在」侧（nyf 判据换成提交痕迹，不随分支删除失效）。
+
+## Evidence（inner 2026-08-11，实现完成）
+
+**AC1 复现固化**：任务 Proposal 已记录 12 泄漏 worktree 清单 + 单调累积（occupied 15 > cap 5）+ inner A6 有 remove 而 outer A15 没有——复现部分即 Proposal，无需新增。
+
+**AC2 泄漏清理（slots_free_restored 为真）**：对已合分支的泄漏 worktree 跑 `git worktree remove`（安全：分支已合，只删工作副本）。实测清理前后（`--slot-status --cap 5 --json`）：
+```
+清理前: occupied 9, slots_free 0, real_in_flight 9（9 个已合分支 worktree 的 open bracket 全判存活）
+清理后: occupied 4, slots_free 1, real_in_flight 4（slots_free_restored = true）
+```
+清理的 5 个真泄漏（分支 tip 均为 integration 里真实 `merge: fan-in <task>` 的 parent，树干净，删除无损失）：
+`gap-nyf-branch-existence-vs-commit-trace` / `gap-reconcile-step-skipped-no-compliance-product` /
+`gap-serial-install-family-shared-prebuilt-fixture` / `gap-slot-free-not-an-event-slots-stay-empty-missed-without-trace` /
+`gap-verification-round-missing-phase-ms-breaks-cost-attribution`。
+**保留未删**：4 个是 inner 在飞（git-history / inner-heartbeat / slot-refill-c8 / 本任务自身），与 manager 07:2x 心跳 runIds 判别一致——删=毁在飞实现。其中 3 个含未提交工作（slot-refill-c8 的 C8 dispatchGate 实现在 worktree 未提交，任务仍 ready）。
+
+**AC3 A15 fan-in 补 remove**：`orchestration/orchestrator-tick-core.md` A15 ④ fan-in 序列新增 (a1) 步：
+`merge --no-ff → --for-task 复测 → git worktree remove → 批量合`，与 inner A6 对齐；`plugin/loop/fast-mode-loop-tick.md`
+加 A6/A15 对齐注记。**落地形式（manager 07:2x Finding：动作在文档不在执行处）**：`.claude/workflows/execute-suite-fix.js`
+Merge 阶段 prompt 从「验证 worktree 已清理」改为**实际执行** `git worktree remove <verify worktree> && git worktree prune`
+（remove 失败标出、不要 --force）——「文档 + 执行处」双落点。
+（注：orchestrator-tick-core.md 与 fast-mode-loop-tick.md 均 integration 领先 develop，fan-in 时若 add/add 冲突按 C16 报，未 resolve。）
+
+**AC4 合规产物 + scoped 门**：`--slot-status` 新增 `worktree_leaks` / `worktree_leaks_count` / `worktree_leak_compliant`——
+`occupied > cap` 且存在【分支已合但 worktree 仍在】的条目 ⇒ `worktree_leak_compliant=false`（该轮判不合规）；泄漏单独存在或单独超载均判合规。
+真实 repo 复测（含 open bracket + 泄漏，occupied>cap 形态）：
+```
+worktree_leaks_count: 2, real_in_flight: 2, occupied: 2, cap: 1, worktree_leak_compliant: false, slots_free: 0
+```
+scoped 门（`--for-task`，从 worktree 跑，--allow-thin）：
+```
+bash scripts/test.sh --for-task gap-worktree-leak-after-fan-in-occupies-slot-permanently --allow-thin
+EXIT=0 · tests 62 · pass 62 · fail 0 · cancelled 0
+scoped static checks PASS（test-framework-policy / test-isolation / test-impl-census / task-contract / adr016 …）
+```
+新增 6 用例：detectWorktreeLeaks 纯函数（只报已合并 quay-worktree task 分支 / 无探针 fail-closed / taskIdFromBranch /
+isQuayWorktreePath）+ analyzeSlotStatus 合规判定（occupied>cap∧泄漏 ⇒ 不合规；泄漏单独/超载单独均合规）+
+CLI real-git 全生命周期（泄漏检出 → worktree remove 清除 → 槽位释放）。
+
+**与 manager 07:3x runIds Finding 的关系（advisory 边界）**：检出器的「分支已合」判据 = 祖先关系，对**在用** worktree
+（fan-in 之后、subagent 下次提交之前）有**有界误报**——manager Finding 已实证该窗口真实存在。因此本产物是**报告不是清理器**：
+`worktree_leaks` 列候选、`worktree_leak_compliant` 判合规，**永不自动删除**；清理仍按 manager 裁定**人工判别**，直到
+`gap-inner-heartbeat-fields-shrunk-no-minimal-contract` 恢复心跳 `runIds` 后机械化。真正防泄漏的是 AC3（fan-in 即 remove），
+检出器是兜底信号不是清道夫。
+
+**提交 hash**（develop fork 51885b79 之上，5 步分步提交）：
+- bf85d487 合规产物：slot-status 报 worktree-leak ⇒ occupied>cap 判不合规（fast-mode-telemetry.ts）
+- 37f00613 测试：worktree-leak 检测与合规判定用例（fast-mode-telemetry.test.mjs）
+- 42e8d8db A15 fan-in 补 worktree remove（orchestrator-tick-core.md A15 ④ + fast-mode-loop-tick.md A6/A15 对齐）
+- 8c87cb22 检出器 advisory 边界注记（manager 07:3x runIds Finding：报告非清理器）
+- 26d6973d A15 ④ workflow Merge 阶段实际执行 worktree remove（AC3 落地形式，execute-suite-fix.js）
