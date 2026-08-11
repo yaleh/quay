@@ -52,7 +52,8 @@ checker_cost_append() {
 # ── run a criterion, time it, record its cost, return its exit code ────────────────────────────────
 # set -e safe: the `if "$@"` form exempts the command from errexit, so a failing checker is
 # recorded and the FAILURE is propagated via the return code (caller's set -e aborts, unchanged).
-run_checker() {
+# The timed+recorded core is _run_checker_one; run_checker dispatches on RUN_CHECKER_PARALLEL.
+_run_checker_one() {
   local _name="$1"; shift
   local _start _end _ms _rc=0
   _start="$(_checker_cost_now_ns)"
@@ -65,4 +66,97 @@ run_checker() {
   _ms="$(_checker_cost_ms_between "$_start" "$_end")"
   checker_cost_append "$_name" "$_ms" "${CHECKER_COST_N:-1}"
   return "$_rc"
+}
+
+# ── parallel-mode support (gap-run-static-checks-zero-concurrency-can-parallelize) ──────────────────
+# run_static_checks launches ~20 independent read-only checkers; sequential execution was structural
+# zero-concurrency (no &/wait/xargs -P). When RUN_CHECKER_PARALLEL=1, run_checker backgrounds the
+# timed+recorded run (concurrency bounded to STATIC_CHECK_CONCURRENCY — default nproc, "读 nproc";
+# set the var for a fixed N) and returns immediately; the caller MUST call run_checker_parallel_wait
+# before continuing. The wait collects every checker's exit code from a per-run results file and
+# FAILS CLOSED if any failed (AC3 — a failing checker is never masked by its siblings' output, and
+# its name is reported), while every checker's cost row is still appended (AC4 — the backgrounded
+# run completes checker_cost_append before the wait observes it). The scoped tier leaves
+# RUN_CHECKER_PARALLEL unset, so its single evals run synchronously — unchanged.
+
+_run_par_results_file=""
+_run_par_launched=0
+_run_par_max=0
+_run_par_failures=()
+_run_par_first_rc=0
+
+_run_par_done_count() {
+  if [ -n "$_run_par_results_file" ] && [ -f "$_run_par_results_file" ]; then
+    wc -l < "$_run_par_results_file" | tr -d ' '
+  else
+    echo 0
+  fi
+}
+
+# Block while the pool is at capacity (running ≥ _run_par_max). `wait -n` releases a slot the
+# moment ANY backgrounded checker exits; attribution is done later from the results file, so the
+# identity of the just-finished job is irrelevant here.
+_run_par_wait_slot() {
+  while [ "$((_run_par_launched - $(_run_par_done_count)))" -ge "$_run_par_max" ]; do
+    wait -n 2>/dev/null || true
+  done
+}
+
+run_checker() {
+  local _name="$1"; shift
+  if [ "${RUN_CHECKER_PARALLEL:-0}" = "1" ]; then
+    if [ "$_run_par_max" -lt 1 ]; then
+      _run_par_max="${STATIC_CHECK_CONCURRENCY:-}"
+      if [ -z "$_run_par_max" ]; then _run_par_max="$(nproc 2>/dev/null || echo 4)"; fi
+    fi
+    if [ -z "$_run_par_results_file" ]; then
+      _run_par_results_file="$(mktemp "${TMPDIR:-/tmp}/checker-cost-results-XXXXXX")"
+    fi
+    _run_par_wait_slot
+    _run_par_launched=$((_run_par_launched + 1))
+    (
+      _rc=0
+      _run_checker_one "$_name" "$@" || _rc=$?
+      # `|` never appears in a checker name ([A-Za-z0-9_.-]+ documented constraint) — safe split.
+      printf '%s|%s\n' "$_name" "$_rc" >> "$_run_par_results_file"
+    ) &
+    return 0
+  fi
+  _run_checker_one "$_name" "$@"
+}
+
+# Wait for all launched checkers, report any failures, fail closed (AC3). Every exit is recorded
+# (AC4 — each backgrounded _run_checker_one appended before the wait observed it). Returns the FIRST
+# failing checker's exit code (0 if all clean) and resets the pool state for a later call.
+run_checker_parallel_wait() {
+  while [ "$((_run_par_launched - $(_run_par_done_count)))" -gt 0 ]; do
+    wait -n 2>/dev/null || true
+  done
+  local _name _rc _fail=0 _ret=0
+  if [ -n "$_run_par_results_file" ] && [ -f "$_run_par_results_file" ]; then
+    while IFS='|' read -r _name _rc; do
+      if [ -n "$_rc" ] && [ "$_rc" -ne 0 ]; then
+        _fail=1
+        [ "$_run_par_first_rc" -eq 0 ] && _run_par_first_rc="$_rc"
+        _run_par_failures+=("$_name")
+      fi
+    done < "$_run_par_results_file"
+    rm -f "$_run_par_results_file"
+    _run_par_results_file=""
+  fi
+  _ret="$_run_par_first_rc"
+  if [ "$_fail" -ne 0 ]; then
+    local _msg="checker-cost-lib: run_checker_parallel_wait — static checks FAILED (fail-closed): ${_run_par_failures[*]}"
+    _run_par_failures=()
+    _run_par_first_rc=0
+    _run_par_launched=0
+    RUN_CHECKER_PARALLEL=0
+    echo "$_msg" >&2
+    return "$_ret"
+  fi
+  _run_par_failures=()
+  _run_par_first_rc=0
+  _run_par_launched=0
+  RUN_CHECKER_PARALLEL=0
+  return 0
 }

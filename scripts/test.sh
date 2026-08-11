@@ -241,6 +241,15 @@ run_static_checks() {
     echo "scripts/test.sh: QUAY_TEST_SKIP_STATIC_CHECKS=1 — skipping static checks (nested 0-match/smoke run; outer suite ran them)"
     return 0
   fi
+  # Parallel execution (gap-run-static-checks-zero-concurrency-can-parallelize): the ~20 checkers
+  # below are independent, read-only, and share no state — the sequential run was structural
+  # zero-concurrency. RUN_CHECKER_PARALLEL=1 makes run_checker launch each checker in the BACKGROUND,
+  # bounded to STATIC_CHECK_CONCURRENCY (default nproc — "读 nproc"; set the env var for a fixed N).
+  # The trailing run_checker_parallel_wait waits for all and fails closed (non-zero exit, set -e
+  # abort) on ANY checker failure (AC3 — a failing checker's output + name are visible, never masked
+  # by siblings), and every checker's cost row is still appended (AC4 — run_checker's
+  # checker_cost_append completes before the wait observes it). The scoped tier leaves this unset.
+  RUN_CHECKER_PARALLEL=1
   echo "== split-or-commit whole-store check (DIR-026, gap-split-or-commit-not-continuously-checked) =="
   # @static-tier full  (whole-store ratchet — deferred to the full-suite gate in scoped mode)
   run_checker "it0-split-or-commit-check" bash "${repo_root}/plugin/scripts/it0-split-or-commit-check.sh" "${repo_root}"
@@ -446,6 +455,9 @@ run_static_checks() {
   # must be 0 (AC3), and the mechanism also mutates itself (AC4, --selftest).
   # @static-tier full  (the ~13s meta-check on the checkers THEMSELVES — deferred to the full-suite gate)
   run_checker "checker-mutation-check" bash "${repo_root}/plugin/scripts/checker-mutation-check.sh" --check
+  # Wait for all parallelized checkers and fail closed if any failed (see the RUN_CHECKER_PARALLEL
+  # note at the top of this function — AC3 failure visibility, AC4 cost-ledger completeness).
+  run_checker_parallel_wait
 }
 
 # run_scoped_static_checks — the change-relevant static-check TIER for SCOPED task runs
