@@ -25,6 +25,8 @@ All must hold before starting; if any fails, STOP and report which precondition 
 |---|---|
 | loop mechanism laid down | `<root>/plugin/scripts/session-liveness.sh`, `fast-mode-telemetry.ts` exist |
 | tick docs laid down | `<root>/orchestration/orchestrator-loop-tick.md` and `<root>/docs/analysis/fast-mode-loop-tick.md` exist |
+| launch config laid down | `<root>/.claude/launch.settings.json` exists (quay-init `--loop` lays the default template; the consumer edits model/env per project) |
+| **sessions launched via the laid-down launcher** | outer and inner windows were started by **`bash <root>/plugin/scripts/quay-launch.sh <role>`** (or `bash <root>/plugin/scripts/session-bootstrap.sh <root> inner/outer`), which carries `--settings` + the role-convention name (`quay-outer`/`quay-inner`) — **never** a hand-typed bare `claude` one-liner, **never** a non-role window name like `inner` |
 | inner session reachable | tmux session from `<root>/orchestration/session-liveness.env` (`SESSION_TMUX_SESSION=`), else `<project>-0:0.0`, exists (`tmux list-panes -t <session}`) |
 | derived laydown set green | the plugin's DERIVED laydown set is green — `bash <quay-source>/plugin/scripts/laydown-set-check.sh` reports `laydown_set_green: green`. **Gate = the derived set (lay what you verify), NOT the whole suite** — an unrelated suite failure must NOT block the cold start (`gap-cold-start-gate-should-be-derived-laydown-set-green-not-whole-suite`; cross: `gap-red-window-dispatch-stop-should-be-shared-gate-conditional`, same scope axis, different mechanism) |
 
@@ -33,6 +35,17 @@ All must hold before starting; if any fails, STOP and report which precondition 
 (settings-schema keys + `_launchSpec` for flag-only params), materialized by the skill-internal
 launcher `quay-launch.sh` — the user/agent never names the launcher and never hand-types a shell
 one-liner. Verify without starting anything via the launcher's `--dry-run`.
+
+**F4 — the launcher is the ONLY way sessions are started (measured 2026-08-11 ad-arm1 archguard
+Level3 首跑):** the two sessions were hand-started (outer process with NO `--settings`, inner window
+named `inner` instead of the role-convention `quay-inner`), so the laid-down `quay-launch.sh` was
+never used. A session is cold-start-eligible ONLY when it was started by the launcher: outer via
+`bash <root>/plugin/scripts/quay-launch.sh outer` (window name `quay-outer`, carries `--settings`),
+inner via `bash <root>/plugin/scripts/quay-launch.sh inner` (window name `quay-inner`), from bare
+metal via `bash <root>/plugin/scripts/session-bootstrap.sh <root> inner/outer`. If a window exists
+but was NOT started by the launcher (no `--settings` / wrong name), restart it through the launcher
+before proceeding — a cold start in hand-started windows repeats the F4 defect. `quay-launch.sh
+--dry-run` prints the exact command each role would get.
 
 **REQUIRED launch params (both routes, every role, fail-closed)** — the ghost-suggestion
 (reliable-send fault 6) is eliminated AT SOURCE by two params, both REQUIRED, present in EVERY

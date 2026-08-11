@@ -68,6 +68,32 @@ test("AC2 — the three exec-core docs are in the derived laydown set; a --loop 
   } finally { cleanup(ws); }
 });
 
+// ── AC2 (gap-quay-init-coldstart-usability-launch-not-used-... F4): the laid-down launch is usable ────
+// quay-launch.sh reads <target>/.claude/launch.settings.json — a --loop install must lay the default
+// template so a cold-started consumer's quay-launch.sh does NOT fail closed ("launch settings file
+// not found"), and the materialized command carries --settings + the role-convention name.
+test("AC2-launch — --loop lays down .claude/launch.settings.json; the laid-down quay-launch.sh materializes --settings + role names", () => {
+  const { ws, install: r } = laydownWorkspace();
+  try {
+    assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
+    assert.match(r.stdout, /launch-config: laid down .claude\/launch\.settings\.json/,
+      "the install must report the launch-config laydown");
+    const settings = path.join(ws, ".claude", "launch.settings.json");
+    assert.ok(fs.existsSync(settings), "a --loop install must lay .claude/launch.settings.json (the launcher's input)");
+    const s = JSON.parse(fs.readFileSync(settings, "utf8"));
+    assert.ok(s._launchSpec?.roles, "the template must define _launchSpec.roles");
+    const names = new Set(Object.values(s._launchSpec.roles).map((r) => r.name));
+    assert.equal(names.has("quay-outer"), true, "outer role must carry the role-convention name quay-outer");
+    assert.equal(names.has("quay-inner"), true, "inner role must carry the role-convention name quay-inner");
+    // The launcher in the laid-down target materializes --settings + the role name (F4's missing half).
+    const launcher = path.join(ws, "plugin", "scripts", "quay-launch.sh");
+    const dry = spawnSync("bash", [launcher, "outer", "--dry-run"], { encoding: "utf8", env: { ...process.env, QUAY_LAUNCH_SETTINGS: settings } });
+    assert.equal(dry.status, 0, `laid-down quay-launch.sh outer --dry-run must exit 0:\n${dry.stderr}`);
+    assert.ok(dry.stdout.includes("--settings"), "the materialized command must carry --settings");
+    assert.ok(dry.stdout.includes("-n quay-outer"), "the materialized command must carry the role-convention name quay-outer");
+  } finally { cleanup(ws); }
+});
+
 // ── AC3: manager-tick-core is opt-in (--manager), not in the default --loop set ───────────────────────
 test("AC3 — manager-tick-core.md is OPT-IN: absent in a default --loop, present with --manager", () => {
   // Default --loop: the manager core must NOT land. AC3: the default install is pure setup — copy it
