@@ -32,10 +32,10 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 merge 后 necessity-check 红（actual: [manager-tick-core.md]）+ 条目无 retainedNote + 80d609fd 已修 C9（本任务 Proposal 已含）
-- [ ] AC2: **排除条目处置**——移除 manager-tick-core.md 条目（或补 retainedNote 说明保留理由），necessity-check 绿
-- [ ] AC3: **既有不回归**——`--for-task` scoped 门绿；其余排除条目不误伤
-- [ ] AC4: **全量静态检查绿**——`scripts/test.sh` 静态检查阶段无 necessity-check FAIL
+- [x] AC1: **复现固化**——任务体记录 merge 后 necessity-check 红（actual: [manager-tick-core.md]）+ 条目无 retainedNote + 80d609fd 已修 C9（本任务 Proposal 已含）
+- [x] AC2: **排除条目处置**——移除 manager-tick-core.md 条目（或补 retainedNote 说明保留理由），necessity-check 绿
+- [x] AC3: **既有不回归**——`--for-task` scoped 门绿；其余排除条目不误伤
+- [ ] AC4: **全量静态检查绿**——`scripts/test.sh` 静态检查阶段无 necessity-check FAIL——外层 verification-round 验证
 
 ## Definition of Done
 
@@ -65,3 +65,59 @@ resume    条目处置 / scoped 门 / 全量验证分步提交，任一步完成
 reviewer: outer
 at: 2026-08-10
 changed: r260 green + batch-merge 后核出——manager 80d609fd 修掉 C9 旧路径引用，使 27cae7d9 加的 manager-tick-core 排除条目变 inert（无 retainedNote，necessity-check 红）。同时澄清 r259 红因：manager-tick-core 当时已在排除表（27cae7d9 是 r259 树祖先），真红因是 tick-core 机制文件（已修）。修法=移除条目或补 retainedNote。实现归 inner，判定归 outer
+
+## Evidence（内层实现 2026-08-11）
+
+**关键事实：修复已由 suite-fix `3293cf7f` 在 fork 前落地 develop**（commit msg「remove inert
+manager-tick-core exclusion (80d609fd fixed its C9 old-path ref)」）。本任务 worktree fork 自
+develop `51885b79`（已含 `3293cf7f`）。内层本次执行 = 复现固化 + 验证 + scoped 门，而非重复实现。
+`3293cf7f` 的 diff 只删了 `orchestration/manager-tick-core.md` 排除条目（无 retainedNote），未动其余条目。
+
+**AC1 复现（pre-fix 实跑，commit `0c943233` = `3293cf7f^`，80d609fd 已在树内）**：
+```
+$ node --test plugin/test/loop-shipping-necessity-check.test.mjs
+→ AssertionError: inert FILE-level exclusion entries must carry a retainedNote ...
+  + actual: ['orchestration/manager-tick-core.md']
+  - expected: []
+```
+（inert 条目无 retainedNote → necessity-check 红；与任务体记录一致。此即 Contract measure
+`actual: [manager-tick-core.md]` 的实跑来源。）
+
+**AC2 处置后（worktree HEAD `51885b79`）**：
+```
+$ node --test plugin/test/loop-shipping-necessity-check.test.mjs
+inert_exclusions: 0
+scanned file-level exclusion entries: 31
+inert-but-retained entries: 5
+  inert docs/analysis/batch2-queue-state.md (hits=0) retainedNote=YES
+  inert orchestration/tick-log.md (hits=0) retainedNote=YES
+  inert orchestration/manager-pending.md (hits=0) retainedNote=YES
+  inert orchestration/manager-tick-log.md (hits=0) retainedNote=YES
+  inert packages/quay/plugin (hits=0) retainedNote=YES
+✔ AC1/AC2 — no inert FILE-level exclusion entry without a written retention reason
+ℹ tests 3, pass 3, fail 0, cancelled 0
+```
+`grep -c manager-tick-core plugin/scripts/loop-shipping-exclusion-data.mjs` → 0（条目已移除）。
+其余排除条目不误伤：`3293cf7f` diff 仅删 manager-tick-core 条目；necessity-check 31 条目全绿、
+5 个惰性条目均带 retainedNote（batch2-queue-state / tick-log / manager-pending / manager-tick-log /
+packages/quay/plugin）。
+
+**AC3 scoped 门（worktree 内）**：
+```
+$ bash scripts/test.sh --for-task gap-manager-tick-core-exclusion-now-inert-after-c9-fix --allow-thin
+→ EXIT: 0
+  task-contract-check: no violations（--strict-subset 本任务文件）
+  tick-core-static-check: PASS — manager-tick-core.md=39/39 / orchestrator-tick-core.md=50/50 / fast-mode-tick-core.md=44/44
+  superseded-capability-check: PASS; delivery-inventory-drift-gate: PASS; test-impl-census: clean 326
+  loop-shipping-necessity-check: inert_exclusions: 0, 3/3 pass
+```
+注：首次跑因 worktree 无 node_modules（esbuild 缺失）在 dist build 失败；按仓库惯例 symlink
+`node_modules → /home/yale/work/quay/node_modules` 后复跑绿（node_modules 已 gitignore）。
+
+**DoD 补证（integration `846c97f2`）**：
+- `git show integration:orchestration/manager-tick-core.md | grep -cE '<5 个旧路径模式>'` → 0（无旧路径命中）
+- `git show integration:plugin/scripts/loop-shipping-exclusion-data.mjs | grep -c manager-tick-core` → 0（条目已移除）
+- `git merge-base --is-ancestor 3293cf7f integration` → YES（修复已并入 integration）
+
+AC4（全量静态检查阶段）按纪律不跑全量套件，归外层 verification-round 验证；inner scoped 静态阶段
+（含 necessity-check）已绿。
