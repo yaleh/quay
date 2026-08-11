@@ -134,7 +134,7 @@ test("AC2: event-driven path — integration-batch-merge.sh --sync pushes develo
 
     // Event-driven land closure: batch-merge integration→develop WITH --sync.
     const startMs = Date.now();
-    const r = run(batchMerge, ["--skip-freshness-gate", "--root", w.m, "--develop", "develop", "--integration", "integration", "--sync"]);
+    const r = run(batchMerge, ["--skip-freshness-gate", "--skip-worktree-green-gate", "--root", w.m, "--develop", "develop", "--integration", "integration", "--sync"]);
     const elapsedMs = Date.now() - startMs;
     assert.equal(r.status, 0, `batch-merge --sync failed: ${r.stdout}${r.stderr}`);
 
