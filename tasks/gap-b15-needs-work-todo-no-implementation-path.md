@@ -8,9 +8,8 @@ labels:
   - defect
   - gap-pool-quality-semantic-gate
   - gap-apply-promotes-b15-needs-work-tasks
-parent: gap-pool-quality-semantic-gate
-children:
-  - gap-apply-promotes-b15-needs-work-tasks
+parent: null
+children: []
 extra:
   poolQualityVerdict: needs-work
 ---
@@ -70,7 +69,10 @@ B15 needs-work todo 现在有「outer 直接指派 → inner 实现 → B15 judg
   分离（`--work-start` marker + OVER90 读 workStartedAtMs）；负控制 defer-80+work-20 不触发。新状态：todo
   （work 已落地于 worktree 分支，待 B15 judge 复核后 fan-in；dispatch-loop `--work-start` 接线为 follow-up）。
 
-**AC3 交叉标注**：frontmatter labels + parent/children 已指向 `gap-pool-quality-semantic-gate`（判词生产）与
-`gap-apply-promotes-b15-needs-work-tasks`（B15 消费端）。
+**AC3 交叉标注**：frontmatter labels 已指向 `gap-pool-quality-semantic-gate`（判词生产）与
+`gap-apply-promotes-b15-needs-work-tasks`（B15 消费端）。parent/children 指针已撤（2026-08-11
+20:54Z，outer）——父任务 `gap-pool-quality-semantic-gate` 为 done，open child 触发 DIR-026
+CHECK1/CHECK3 冲突（done 父要求全 children done vs 子声明 parent 须登记进父 children）；
+交叉标注以 labels 表达，父任务保持 closed。
 
 **待外层**：重跑 B15 judge 复核两 todo 的实现；复核通过后 fan-in + closure。
