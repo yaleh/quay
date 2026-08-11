@@ -78,6 +78,7 @@ import {
   checkTaskTouchesResolve,
   checkTouchesPair,
   parseTouches,
+  selfTouchCheck,
   findRepoRoot,
   walkFiles,
 } from "./touches-orthogonality-check.ts";
@@ -316,6 +317,18 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
       const file = path.join(tasksDir, `${id}.md`);
       if (!fs.existsSync(file)) continue;
       const text = fs.readFileSync(file, "utf8");
+      // step-4 check 0 (C8 SELF-TOUCH DISPATCH GATE — gap-slot-refill-c8-reject-no-backfill): the inner
+      // dispatch gate C8 (fast-mode-tick-core.md:64) requires every task's `## Touches` to include its
+      // own `tasks/<id>.md` WITHOUT the `(new)` tag; a candidate missing it is rejected AT DISPATCH
+      // TIME. The empirical gap (manager 2026-08-10 21:4x): slot-refill recommended only candidates
+      // that happened to lack self-touch, and the dispatch side rejected them all with NO backfill —
+      // "17 ready dispatchable yet 本 tick 无可派" were simultaneously true. THIS is the structural
+      // fix: slot-refill applies the same per-candidate C8 gate BEFORE recommending, and the loop
+      // continues past a rejected candidate (backfill) so a dispatchable candidate further down the
+      // sorted pool fills the slot — a rejected candidate never empties the recommendation, and only
+      // when EVERY candidate is rejected does `recommended` become empty (AC4: 不虚构).
+      const selfTouch = selfTouchCheck(text, id);
+      if (!selfTouch.ok) continue; // C8-rejected ⇒ backfill: the next candidate replaces it in recommended
       // step-4 check 1: touches-resolve (majority-missing ⇒ not dispatchable).
       if (checkTaskTouchesResolve(text, root).majorityMissing) continue;
       // step-4 check 2: deps-ready (parent done).
@@ -394,7 +407,7 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
   } else if (slotsFree <= 0) {
     noRefillReason = `no free slots (in-flight ${inFlight.length} + closed-but-live ${closedButLive.length} >= cap ${effectiveCap})`;
   } else if (recommended.length === 0) {
-    noRefillReason = "no dispatchable candidate passes step-4 checks (touches-resolve / deps-ready / disjoint-from-in-flight)";
+    noRefillReason = "no dispatchable candidate passes step-4 checks (self-touch C8 / touches-resolve / deps-ready / disjoint-from-in-flight)";
   }
 
   return {

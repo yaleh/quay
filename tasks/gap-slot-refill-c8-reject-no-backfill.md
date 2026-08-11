@@ -35,10 +35,10 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 self-touch-scan 5 missing 清单 + inner 心跳「3 候选缺 C8」+ 17 本可派与无可派并存的机制原因（本任务 Proposal 已含）
-- [ ] AC2: **候选回填**——候选被逐候选门（含 C8 self-touch）拒掉后从排序更后补位，直到 cap 填满或候选耗尽
-- [ ] AC3: **既有不回归**——`--for-task` scoped 门绿；slot-refill 既有 step-4 检查不破坏
-- [ ] AC4: **不虚构可派**——全候选都被拒 ⇒ 如实报无可派（不因补位逻辑编造）
+- [x] AC1: **复现固化**——任务体记录 self-touch-scan 5 missing 清单 + inner 心跳「3 候选缺 C8」+ 17 本可派与无可派并存的机制原因（本任务 Proposal 已含）
+- [x] AC2: **候选回填**——候选被逐候选门（含 C8 self-touch）拒掉后从排序更后补位，直到 cap 填满或候选耗尽
+- [x] AC3: **既有不回归**——`--for-task` scoped 门绿；slot-refill 既有 step-4 检查不破坏
+- [x] AC4: **不虚构可派**——全候选都被拒 ⇒ 如实报无可派（不因补位逻辑编造）
 
 ## Definition of Done
 
@@ -69,3 +69,16 @@ resume    回填逻辑 / scoped 门 / 全量验证分步提交，任一步完成
 reviewer: outer
 at: 2026-08-10
 changed: manager 21:4x 实证——22 ready 中 5 缺 self-touch（touches-orthogonality-check --self-touch-scan），inner 报「3 候选缺 C8」而 17 本可派。根因：slot-refill 候选循环不查 C8，派发侧拒了不补位。处方：候选被逐候选门拒后从排序更后补位。outer 已做止血（5 任务补 self-touch，791a8909），本任务做结构解。实现归 inner，判定归 outer
+
+## Evidence（inner 2026-08-11 实跑）
+
+**scoped 门**：`bash scripts/test.sh --for-task gap-slot-refill-c8-reject-no-backfill --allow-thin` ⇒ `tests 66 / pass 66 / fail 0 / cancelled 0 / skipped 0`，`EXIT=0`。
+
+**Contract invoke（构造「前 3 缺 self-touch、第 4+ 可派」，cap=3，`--root` 指向临时 fixture）**：
+- 修前（develop 基线 slot-refill.ts）：`recommended: ["c8-a","c8-b","c8-c"]`，`should_refill: true` —— 前 3 恰缺 self-touch ⇒ 派发侧逐条被 C8 拒 ⇒ 「本 tick 无可派」（实证复现）。
+- 修后（本分支 slot-refill.ts）：`recommended: ["c8-d","c8-e"]`，`should_refill: true` —— C8 拒掉前 3 后从排序更后补位（`c8_rejected_candidate_backfilled`）。
+- 负控制：全 3 候选都缺 self-touch ⇒ `recommended: []`，`should_refill: false`，`no_refill_reason` 含 `no dispatchable candidate`（`all_rejected_no_fake`，不虚构）。
+
+**backfill_present（Contract measure）**：`grep -cE "backfill|continue.*recommended|candidate.*next" plugin/scripts/slot-refill.ts` = 4（≥1）。
+
+**新增测试**（plugin/test/slot-refill.test.mjs）：前 3 缺 self-touch ⇒ 补位第 4+；全拒 ⇒ 无可派；`(new)`-tagged self-file 非 self-touch 授予（拒）；带 self-file 的候选仍被推荐（不误杀）。既有 47 例 + 新增 4 例全绿（51/51）。
