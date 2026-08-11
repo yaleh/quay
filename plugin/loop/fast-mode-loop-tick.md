@@ -135,7 +135,7 @@ bare-x-vitest-false-red` AC3）。两层绝不同时跑全量套件。
 槽位帽（B 面）、本节的资源闸/外层调度（A 面）**都读这同一预算，不各自推导**：
 - **worker 数**：test.sh 默认并发 = `max(1, floor((total_budget − in_use) / 1.0))`——空闲时 = nproc（墙钟甜点），
   已有嵌套派生（quay-init 族 / 会话族内部 spawn）在跑时自动收口，**嵌套不再绕过上限**（17-19 进程 / load 18.70 的根因）；
-- **槽位帽**：`effective_cap = min(档位cap, max(1, available))`——预算耗尽（available=0）时槽位帽落到 1，饱和主机不再派发；
+- **槽位帽**：**固定 `effective_cap = 5`**（人 2026-08-11 裁定：与 manager A2/outer A6 对齐）——cap-from-gate 的 `min(档位cap, max(1, available))` 公式**降为观测**（读其 band/effective_cap 记 tick-log，不参与派发裁决；动态值曾随负载 2-5 跳压低派发，实证 2026-08-11）；
 - **资源闸**：report 模式输出 `total_budget / budget_in_use / budget_available`（与 test.sh/cap-from-gate 同一权威）。
 验证判据：任何配置下 `ps -e -o comm= | grep -cx node-MainThread` ≤ total_budget。
 **全量套件本身已移到外层后台**（`gap-full-suite-belongs-to-outer-background-above-3-min`，AC1/AC3）：
@@ -291,7 +291,7 @@ exp5 已退役（`.claude/loop.md` 已删除），`.halt` 从「暂停 exp5 循�
 
 | # | 核对项 | 机械判据 |
 |---|---|---|
-| ① | 在飞 agent 是否符合文档 | **读槽位视角，不读原始括号**（`gap-telemetry-brackets-vs-subagents-no-slot-visibility`——括号 ≠ subagent，红窗遗留的未闭合 start 会把健康态误判成满负荷）：`node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --slots --cap "${effective_cap:-3}" --root "$(pwd)" --json` 的 **`realConcurrency` ≤ `effective_cap`**（步骤 4 并发上限，由 `cap-from-gate.sh` 在派发时刻读 cpu 压力（some avg10）算出——见步骤 3.6 前置块；不再固定 3）。**`realConcurrency` = `realInFlight`（括号真实在飞）+ `subagentsInFlight`（非任务 subagent 进程——调查型无括号，`gap-telemetry-underreport-nontask-subagents-not-counted-in-slots`）**——**真实并发 = 括号 + 非任务 subagent**，只读 `realInFlight` 会把调查型 subagent 漏算成空槽（实测 0/3 而实际 1 个 187k-token subagent 在跑 ⇒ 真实并发 4 不是 3）。**`realConcurrency > cap` ⇒ 并发违规（真超派发），判据抓住**；`brackets_reflect_subagents: false` ⇒ 有陈旧括号未 reconcile（`--reconcile` 处理）或 `--task-start`/`--task-end` 对没调齐（AC4）——是偏差，对齐而非误判健康。**反向维度（`gap-closed-bracket-leaves-live-agent-consuming-slots`：括号关 ≠ 进程退）**：`--slots` 的 `closedButLive` / `occupied_slots`（= `realConcurrency` + 已关括号但 executor 仍存在者）——**括号关 ≠ 槽空**，executor 仍在（worktree 未清 / 进程未退）的已关括号仍占槽，`occupied_slots > cap` 同样并发违规；该槽不得派新任务。每个在飞任务有 worktree 且在 `$WORKTREE_ROOT/<slug>`（磁盘，非 `/tmp`） |
+| ① | 在飞 agent 是否符合文档 | **读槽位视角，不读原始括号**（`gap-telemetry-brackets-vs-subagents-no-slot-visibility`——括号 ≠ subagent，红窗遗留的未闭合 start 会把健康态误判成满负荷）：`node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --slots --cap "${effective_cap:-3}" --root "$(pwd)" --json` 的 **`realConcurrency` ≤ `effective_cap`**（步骤 4 并发上限，**固定 `effective_cap=5`**——人 2026-08-11 裁定与 manager A2/outer A6 对齐；`cap-from-gate.sh` 降为观测输出，读其 `band`/`effective_cap` 记 tick-log 不参与派发裁决）。**`realConcurrency` = `realInFlight`（括号真实在飞）+ `subagentsInFlight`（非任务 subagent 进程——调查型无括号，`gap-telemetry-underreport-nontask-subagents-not-counted-in-slots`）**——**真实并发 = 括号 + 非任务 subagent**，只读 `realInFlight` 会把调查型 subagent 漏算成空槽（实测 0/3 而实际 1 个 187k-token subagent 在跑 ⇒ 真实并发 4 不是 3）。**`realConcurrency > cap` ⇒ 并发违规（真超派发），判据抓住**；`brackets_reflect_subagents: false` ⇒ 有陈旧括号未 reconcile（`--reconcile` 处理）或 `--task-start`/`--task-end` 对没调齐（AC4）——是偏差，对齐而非误判健康。**反向维度（`gap-closed-bracket-leaves-live-agent-consuming-slots`：括号关 ≠ 进程退）**：`--slots` 的 `closedButLive` / `occupied_slots`（= `realConcurrency` + 已关括号但 executor 仍存在者）——**括号关 ≠ 槽空**，executor 仍在（worktree 未清 / 进程未退）的已关括号仍占槽，`occupied_slots > cap` 同样并发违规；该槽不得派新任务。每个在飞任务有 worktree 且在 `$WORKTREE_ROOT/<slug>`（磁盘，非 `/tmp`） |
 | ② | 就绪池是否维护 | `node --experimental-strip-types plugin/scripts/ready-pool-check.ts --root "$(pwd)" --cap "${effective_cap:-3}"` 的 `pool` / `dispatchable_disjoint` 字段（`effective_cap` 见步骤 3.6 前置块）；`pool < floor`（=cap×4）或 `dispatchable_disjoint < cap` 时是否已按步骤 3.6 补晋 |
 | ③ | 是否在偷偷做收尾 | inner 已无收尾职责（步骤 2 不写任务状态、步骤 3.5 只写 `--task-start`；收尾是外层步骤 1b 的异步活）。核对：本回合未合并改动里无 `status: *done` 写入、无 `--task-end` 调用、无轮次记录写入。**closure-lag 留痕/信号是外层 1b 的活**（`.quay/closure-pass-last-run.json` 由外层 `closure-lag-check.sh --record` 写、`closure-lag-check.sh` 是外层 tick 的每 tick 检查）——inner 不写不读不碰（`gap-closure-pass-has-no-lag-signal`）。红窗只停派发/合并推进，不停外层收尾 |
 | ④ | 停止条件是否被遵守 | 步骤 3 命中项（合并冲突 / OVER90 / ruling-required / 外层 suite-state `state: red` / 就绪队列空 / 窗口新增 needs-human ≥3）命中时是否停止派发；`.halt` 存在则本 tick 空转 |
@@ -325,14 +325,14 @@ exp5 已退役（`.claude/loop.md` 已删除），`.halt` 从「暂停 exp5 循�
 ### 槽位回填的机械判定（强制）
 
 ```bash
-effective_cap="$(bash plugin/scripts/cap-from-gate.sh 2>/dev/null | sed -n 's/^effective_cap=\([0-9]*\)$/\1/p')"
+effective_cap=5   # 固定 cap（人 2026-08-11 裁定：与 manager A2/outer A6 对齐）；cap-from-gate.sh 降为观测
 node --experimental-strip-types plugin/scripts/slot-refill.ts --root "$(pwd)" --cap "${effective_cap:-3}" --in-flight <仍在跑的任务id逗号分隔> --closed-but-live <已关括号但 executor 仍在的任务id（来自 --slots 的 closedButLive，可空）>
 ```
 
 - stdout 是 JSON。**`slots_free` = 空槽数**（`max(0, cap − 在飞数 − closed_but_live 数)`；在飞数由**本会话自己维护的集合**给出，不是遥测——AC6 括号≠subagent，遥测括号会把已完成任务多算在飞）。**`closed_but_live` 是反向维度**（`gap-closed-bracket-leaves-live-agent-consuming-slots`）：括号已关（`--task-end` 已写）但 executor 进程仍存在（worktree 未清 / 进程未退）的任务 id——它们仍占槽，`--slots` 的 `closedButLive` 机械给出，回填时一并传入，**别把它们的槽当空**。
 - **`should_refill` = 事件驱动 go/no-go**：`slots_free > 0` 且 `recommended` 非空（有候选通过步骤 4 的触摸可解析/依赖就绪/并发资格三道检查）。
 - **`recommended` = 建议立即派发的候选**（至多 `slots_free` 个，生产 disjoint 批，与在飞两两不相交）。用它做派发候选，仍需跑步骤 4 自己的逐候选检查（触摸可解析、依赖就绪、并发资格）。
-- **`no_refill_reason` 非空 = 不派发**：`in-flight ≥ cap`（并发上限语义不变，AC5；cap 仍是 `cap-from-gate.sh` 读 cpu 压力（some avg10）+ 滞回 + 档位配置的产物）、`.halt` 存在（**抢占挂载**，`gap-supervisor-preemption` AC2——代码强制点，任意点生效）或无可派发候选（负控制）。
+- **`no_refill_reason` 非空 = 不派发**：`in-flight ≥ cap`（并发上限语义不变，AC5；**cap 固定 = 5**，人 2026-08-11 裁定，与 manager A2/outer A6 对齐）、`.halt` 存在（**抢占挂载**，`gap-supervisor-preemption` AC2——代码强制点，任意点生效）或无可派发候选（负控制）。
 
 ### 规则
 
@@ -709,12 +709,11 @@ avg10`（对真实过载响应），阈值抬高以剔 churn 基线**：avg10 < 
 容器化硬限额上位解 `orchestration/SPEC-isolation-and-resource-governance-2026-08-05.md`。
 
 ```bash
-effective_cap="$(bash plugin/scripts/cap-from-gate.sh 2>/dev/null | sed -n 's/^effective_cap=\([0-9]*\)$/\1/p')"
-# Contract 的读取形态：`bash <cap-from-gate-helper> 2>&1 | grep -o '[0-9]'`（stdout 数字段）；
-# sed 提取是同一 stdout 的健壮写法（effective_cap= 行是末行）。空值 ⇒ 重跑一次看 stderr。
-# 槽位帽已接跨层总预算（gap-test-concurrency-cap-does-not-scope-nested-spawns AC1/B 面）：
-# effective_cap = min(档位cap, max(1, available))——available 来自 process-budget.sh（全仓
-# node --test 进程预算 = nproc，减去已在跑的 node-MainThread 数）。预算耗尽 ⇒ 落到 1。
+effective_cap=5   # 固定 cap（人 2026-08-11 裁定：与 manager A2/outer A6 对齐）。动态 cap-from-gate 曾随负载 2-5 跳、
+                  # 每个 tick 压低派发（实证：cap 5 ⇒ slotsRemaining=3 而心跳判「cap2 无空槽」）——降为观测不再裁决。
+# 观测（不参与派发裁决，记 tick-log 用）：bash plugin/scripts/cap-from-gate.sh 2>/dev/null | sed -n 's/^effective_cap=\([0-9]*\)$/\1/p'
+# 背景：槽位帽曾接跨层总预算（gap-test-concurrency-cap-does-not-scope-nested-spawns AC1/B 面）；
+# effective_cap = min(档位cap, max(1, available))——available 来自 process-budget.sh。预算耗尽 ⇒ 落到 1。
 ```
 
 ```bash
