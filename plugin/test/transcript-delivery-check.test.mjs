@@ -289,3 +289,53 @@ test("CLI usage: missing --text → exit 2", () => {
   const r = runCli(["--check", "whatever.jsonl"]);
   assert.equal(r.status, 2, `exit 2 expected, got ${r.status}\n${r.stdout}\n${r.stderr}`);
 });
+
+// ── CLI remote: --remote <host> (gap-supervisor-deliver-cross-host-target-support, AC3) ───────────
+// The cross-host delivery's transcript lives on ANOTHER host — the CLI must read it via
+// `ssh <host> cat <path>` (SUPERVISOR_DELIVER_SSH → the hermetic fixtures/mock-ssh.sh). The
+// delivered verdict is STILL a content-matching REAL user message in the target transcript — the
+// remote read only changes WHERE the bytes come from, never what counts as delivered (ADR-016).
+const MOCK_SSH = path.resolve(__dirname, "fixtures", "mock-ssh.sh");
+function runRemoteCli(args) {
+  return spawnSync("node", ["--no-warnings", "--experimental-strip-types", CHECKER, ...args], {
+    encoding: "utf8",
+    env: { ...process.env, SUPERVISOR_DELIVER_SSH: MOCK_SSH },
+  });
+}
+
+test("CLI remote: --check --remote returns the content-match verdict from the remote transcript (delivered not degraded)", () => {
+  withTempJsonl(userStringLine("remote-marker-777") + "\n", (file) => {
+    const r = runRemoteCli(["--check", file, "--text", "remote-marker-777", "--remote", "ad-arm1.wan.hwang.men"]);
+    assert.equal(r.status, 0, `remote delivered expected exit 0, got ${r.status}\n${r.stdout}\n${r.stderr}`);
+    assert.match(r.stdout, /state: delivered/);
+    assert.match(r.stdout, /delivered: true/);
+  });
+});
+
+test("CLI remote: --check --remote still reports UNKNOWN (exit 3) when the remote transcript has no matching evidence", () => {
+  withTempJsonl(userStringLine("hello") + "\n", (file) => {
+    const r = runRemoteCli(["--check", file, "--text", "absent-remote-marker-999", "--remote", "ad-arm1.wan.hwang.men"]);
+    assert.equal(r.status, 3, `remote unknown expected exit 3, got ${r.status}\n${r.stdout}\n${r.stderr}`);
+    assert.match(r.stdout, /state: unknown/);
+    assert.match(r.stdout, /delivered: false/);
+  });
+});
+
+test("CLI remote: --check --remote on a missing remote transcript → exit 2 (fail loud, never a silent false)", () => {
+  const r = runRemoteCli(["--check", path.join(os.tmpdir(), "no-such-remote.jsonl"), "--text", "x", "--remote", "ad-arm1.wan.hwang.men"]);
+  assert.equal(r.status, 2, `remote missing transcript expected exit 2, got ${r.status}\n${r.stdout}\n${r.stderr}`);
+});
+
+test("CLI remote: --is-fresh --remote on an ABSENT remote transcript is FRESH (ENOENT-equivalent → exit 0)", () => {
+  const r = runRemoteCli(["--is-fresh", path.join(os.tmpdir(), "no-such-remote-fresh.jsonl"), "--remote", "ad-arm1.wan.hwang.men"]);
+  assert.equal(r.status, 0, `remote absent fresh expected exit 0, got ${r.status}\n${r.stdout}\n${r.stderr}`);
+  assert.match(r.stdout, /fresh: true/);
+});
+
+test("CLI remote: --is-fresh --remote on a transcript with a real user message is NOT fresh (exit 1)", () => {
+  withTempJsonl(userStringLine("hello") + "\n", (file) => {
+    const r = runRemoteCli(["--is-fresh", file, "--remote", "ad-arm1.wan.hwang.men"]);
+    assert.equal(r.status, 1, `remote non-fresh expected exit 1, got ${r.status}\n${r.stdout}\n${r.stderr}`);
+    assert.match(r.stdout, /fresh: false/);
+  });
+});

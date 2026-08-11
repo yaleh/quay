@@ -52,6 +52,24 @@ fi
 [ -n "$EXPECT" ] || { echo "drive-target-check: 期望窗口名为空——配置错误，fail closed" >&2; exit 2; }
 
 TMUX_CMD="${DRIVE_TMUX:-tmux}"
+HOST="${SUPERVISOR_DELIVER_HOST:-}"
+SSH_BIN="${SUPERVISOR_DELIVER_SSH:-ssh}"
+
+# tmux_cmd <args…> — run a gate tmux interaction locally or on the target host
+# (gap-supervisor-deliver-cross-host-target-support). LOCAL: the DRIVE_TMUX command prefix (a bare
+# `tmux` resolves via TMUX_TMPDIR — the hermetic-socket contract). CROSS-HOST: ONE
+# `ssh <host> tmux <args…>` round-trip per call, each arg shell-quoted (printf %q) so a pane format
+# like '#{window_name}' survives the remote re-parse as a single arg (an unquoted '#' at a word start
+# would start a REMOTE comment and silently drop the format).
+tmux_cmd() {
+  local a q=""
+  if [ -n "$HOST" ]; then
+    for a in "$@"; do q+="$(printf '%q ' "$a")"; done
+    "$SSH_BIN" "$HOST" "tmux ${q}"
+  else
+    $TMUX_CMD "$@"
+  fi
+}
 
 # ── Discipline ①: numeric index rejection (structural — no tmux needed) ───────────────────────────
 # The part after the last ':' is the window/pane part. A purely-numeric window part (0 / 0.0 / 1.0)
@@ -71,7 +89,7 @@ sess="${TARGET%:*}"
 # rc=0 — a typo (`quay-0:innr`) would silently read the active window. `list-windows` membership
 # closes that hole. The pane suffix (`inner.0`) is stripped for the membership check.
 if [ -n "$sess" ]; then
-  if ! wins="$( $TMUX_CMD list-windows -t "$sess" -F '#{window_name}' 2>/dev/null )"; then
+  if ! wins="$( tmux_cmd list-windows -t "$sess" -F '#{window_name}' 2>/dev/null )"; then
     echo "drive-target-check: FAIL——会话 '$sess' 不存在（目标 '$TARGET' 无法送达）" >&2
     exit 1
   fi
@@ -86,7 +104,7 @@ if [ -n "$sess" ]; then
 fi
 
 # ── Discipline ② part 2: the resolved window name must equal the expected name ───────────────────
-resolved="$( $TMUX_CMD display-message -p -t "$TARGET" '#{window_name}' 2>/dev/null | tr -d '\r\n' | sed 's/[[:space:]]*$//' )"
+resolved="$( tmux_cmd display-message -p -t "$TARGET" '#{window_name}' 2>/dev/null | tr -d '\r\n' | sed 's/[[:space:]]*$//' )"
 if [ -z "$resolved" ]; then
   echo "drive-target-check: FAIL——目标 '$TARGET' 不存在（display-message 未解析到窗口名）——无法送达" >&2
   exit 1

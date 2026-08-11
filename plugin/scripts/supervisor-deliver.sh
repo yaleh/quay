@@ -30,10 +30,14 @@
 #
 # Usage:
 #   supervisor-deliver.sh <tmux-target> <payload> [--transcript <path>|--root <path>]
+#   supervisor-deliver.sh <host>:<tmux-target> <payload> [--transcript <path>|--root <path>]
+#   supervisor-deliver.sh <tmux-target> <payload> --host <fqdn> [--transcript <path>|--root <path>]
 # Exit: 0 = delivered (a real user message matching <payload> in the target transcript)
 #       1 = failed (undelivered after bounded retries — needs human)
 #       2 = usage / environment error (fail loud)
 # Env:  SUPERVISOR_DELIVER_VERIFY_S   overall delivery bound (default 60)
+#       SUPERVISOR_DELIVER_HOST       resolved remote host (empty = local); also set by --host/<host>:
+#       SUPERVISOR_DELIVER_SSH        ssh binary (default `ssh`; a test mock substitutes this)
 
 # ── 统一 --help（gap-scripts-sprawl：用法在前、退出 0、无业务副作用）────────────────────
 if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
@@ -51,10 +55,11 @@ TARGET="${1:-}"
 PAYLOAD="${2:-}"
 TRANSCRIPT=""
 ROOT=""
+HOST=""
 VERIFY_S="${SUPERVISOR_DELIVER_VERIFY_S:-60}"
 
 usage() {
-  echo "用法: $0 <tmux目标> <文本> [--transcript <transcript.jsonl>|--root <项目根>] [--verify-s <秒>]" >&2
+  echo "用法: $0 <tmux目标|host:tmux目标> <文本> [--transcript <transcript.jsonl>|--root <项目根>] [--host <fqdn>] [--verify-s <秒>]" >&2
   echo "退出码: 0=已送达 · 1=未送达(需人工) · 2=用法/环境错误" >&2
 }
 
@@ -77,6 +82,11 @@ while [ "$i" -le "$#" ]; do
       [ "$i" -le "$#" ] || { usage; exit 2; }
       VERIFY_S="${!i}"
       ;;
+    --host)
+      i=$(( i + 1 ))
+      [ "$i" -le "$#" ] || { usage; exit 2; }
+      HOST="${!i}"
+      ;;
     *)
       usage
       exit 2
@@ -89,6 +99,86 @@ done
 [ -n "$PAYLOAD" ] || { echo "supervisor-deliver: 文本为空" >&2; exit 2; }
 { [ -n "$TRANSCRIPT" ] || [ -n "$ROOT" ]; } || { echo "supervisor-deliver: 需要 --transcript 或 --root 以解析目标会话 transcript" >&2; exit 2; }
 { [ -n "$TRANSCRIPT" ] && [ -n "$ROOT" ]; } && { echo "supervisor-deliver: --transcript 与 --root 二选一" >&2; exit 2; }
+
+# ── cross-host target resolution (gap-supervisor-deliver-cross-host-target-support) ──────────
+# Two target forms:
+#   <host>:<tmux-target>   e.g. ad-arm1.wan.hwang.men:archguard-0:outer — the first ':'-segment
+#                          (the part BEFORE the <session>:<window> pair) is the HOST. A local tmux
+#                          target is <session>:<window> — exactly ONE ':' — so the implicit host form
+#                          is only taken when the target carries at least TWO ':'.
+#   --host <fqdn>          the explicit form — TARGET is a plain tmux target, HOST separate.
+# When HOST is set, every tmux interaction below routes through `ssh $HOST tmux …` (the env pair
+# SUPERVISOR_DELIVER_HOST / SUPERVISOR_DELIVER_SSH — the SAME seam the checker and classifier read),
+# so a cross-host delivery keeps the identical three-send-keys + pure-verify surface.
+HOST="${HOST:-}"
+SSH_BIN="${SUPERVISOR_DELIVER_SSH:-ssh}"
+if [[ "$TARGET" == *:*:* ]]; then
+  implicit_host="${TARGET%%:*}"
+  TARGET="${TARGET#*:}"
+  if [ -n "$HOST" ] && [ "$HOST" != "$implicit_host" ]; then
+    echo "supervisor-deliver: --host '$HOST' 与目标前缀 '$implicit_host' 冲突——二选一" >&2
+    exit 2
+  fi
+  [ -n "$HOST" ] || HOST="$implicit_host"
+fi
+
+# ── remote-aware delivery helpers (gap-supervisor-deliver-cross-host-target-support) ──────────
+# Every tmux interaction routes through these: LOCAL → bare `tmux` (resolves via TMUX_TMPDIR);
+# CROSS-HOST → ONE `ssh $HOST tmux …` round-trip per call, args shell-quoted (printf %q). The
+# fresh path's three send-keys (C-u / literal text / Enter) are THREE separate ssh invocations —
+# the same "三次分开调用" the local path uses, forwarded over ssh.
+tmux_cmd() {
+  local a q=""
+  if [ -n "$HOST" ]; then
+    for a in "$@"; do q+="$(printf '%q ' "$a")"; done
+    "$SSH_BIN" "$HOST" "tmux ${q}"
+  else
+    tmux "$@"
+  fi
+}
+
+send_key() {  # send_key <C-u|Enter>
+  tmux_cmd send-keys -t "$TARGET" "$1"
+}
+
+send_text_literal() {  # send_text_literal <text> — the -l payload, forwarded exactly over ssh
+  if [ -n "$HOST" ]; then
+    # The payload is base64-embedded and decoded by the REMOTE shell's `$(printf '%s' '<b64>' |
+    # base64 -d)` — the one robust way to carry arbitrary bytes (Chinese, quotes, newlines) through
+    # ssh's argv-join, independent of the remote shell's quoting dialect.
+    local b64
+    b64="$(printf '%s' "$1" | base64 | tr -d '\n')"
+    "$SSH_BIN" "$HOST" "tmux send-keys -t $(printf '%q' "$TARGET") -l \"\$(printf '%s' '$b64' | base64 -d)\""
+  else
+    tmux send-keys -t "$TARGET" -l "$1"
+  fi
+}
+
+file_exists() {  # file_exists <path> — existence test that works locally AND on the remote host
+  if [ -n "$HOST" ]; then
+    "$SSH_BIN" "$HOST" "test -f $(printf '%q' "$1")" 2>/dev/null
+  else
+    [ -e "$1" ]
+  fi
+}
+
+list_transcripts() {  # list_transcripts <dir> — the .jsonl under a transcripts dir (local or remote)
+  if [ -n "$HOST" ]; then
+    # The leading ~ is LEFT UNQUOTED so the REMOTE shell expands it (never %q — %q would escape it
+    # into a literal filename). The slug is path-derived ([A-Za-z0-9._-]) so it is remote-shell-safe.
+    "$SSH_BIN" "$HOST" "ls ${1}/*.jsonl 2>/dev/null"
+  else
+    ls "$1"/*.jsonl 2>/dev/null
+  fi
+}
+
+file_mtime() {  # file_mtime <path> — epoch-seconds mtime (0 if absent), local or remote
+  if [ -n "$HOST" ]; then
+    "$SSH_BIN" "$HOST" "stat -c %Y $(printf '%q' "$1")" 2>/dev/null || echo 0
+  else
+    stat -c %Y "$1" 2>/dev/null || echo 0
+  fi
+}
 
 # fail-loud precondition: the delivery verdict depends on the pure checker; a missing checker
 # means the deliver-confirmed promise is broken (same rule as send-keys-reliable.sh).
@@ -107,10 +197,14 @@ PRE_SEND_SNAPSHOT=""
 proj_dir=""
 if [ -n "$ROOT" ]; then
   slug="$(printf '%s' "$ROOT" | tr '/' '-')"
-  proj_dir="${HOME:-/home/yale}/.claude/projects/${slug}"
-  if [ -d "$proj_dir" ]; then
-    PRE_SEND_SNAPSHOT="$(ls "$proj_dir"/*.jsonl 2>/dev/null | sort | tr '\n' ' ')"
+  if [ -n "$HOST" ]; then
+    # Remote re-spawn discovery: the transcripts dir is ~/.claude/projects/<slug> on the TARGET
+    # host (the leading ~ is expanded by the remote shell, never %q-quoted).
+    proj_dir="~/.claude/projects/${slug}"
+  else
+    proj_dir="${HOME:-/home/yale}/.claude/projects/${slug}"
   fi
+  PRE_SEND_SNAPSHOT="$(list_transcripts "$proj_dir" | sort | tr '\n' ' ')"
 fi
 
 # ── delivery ─────────────────────────────────────────────────────────────────────────────────────
@@ -124,9 +218,12 @@ fi
 # The --root mode ALWAYS takes the fresh path: for a re-spawned session the newest pre-existing
 # jsonl is the OLD session's file and is not the delivery target; the target is the file that
 # appears after the send (the snapshot rule below).
-if [ -z "$ROOT" ] && [ -n "$TRANSCRIPT" ] && [ -e "$TRANSCRIPT" ]; then
+if [ -z "$ROOT" ] && [ -n "$TRANSCRIPT" ] && file_exists "$TRANSCRIPT"; then
   if [ -f "$RELIABLE" ] && [ -x "$RELIABLE" ]; then
-    RELIABLE_DELIVERY_VERIFY_S="$VERIFY_S" bash "$RELIABLE" "$TARGET" "$PAYLOAD" "$TRANSCRIPT"
+    RELIABLE_DELIVERY_VERIFY_S="$VERIFY_S" \
+    SUPERVISOR_DELIVER_HOST="$HOST" \
+    SUPERVISOR_DELIVER_SSH="$SSH_BIN" \
+    bash "$RELIABLE" "$TARGET" "$PAYLOAD" "$TRANSCRIPT"
     exit $?
   fi
   echo "supervisor-deliver: 缺少可靠投递脚本 $RELIABLE——fail loud" >&2
@@ -146,7 +243,9 @@ if [ ! -f "$SELF_DIR/drive-target-check.sh" ]; then
   echo "supervisor-deliver: 缺少前置校验 $SELF_DIR/drive-target-check.sh——无法确认目标是 inner，fail loud" >&2
   exit 1
 fi
-if ! DRIVE_EXPECT_WINDOW_NAME="${DRIVE_EXPECT_WINDOW_NAME:-inner}" bash "$SELF_DIR/drive-target-check.sh" "$TARGET"; then
+if ! DRIVE_EXPECT_WINDOW_NAME="${DRIVE_EXPECT_WINDOW_NAME:-inner}" \
+     SUPERVISOR_DELIVER_HOST="$HOST" SUPERVISOR_DELIVER_SSH="$SSH_BIN" \
+     bash "$SELF_DIR/drive-target-check.sh" "$TARGET"; then
   echo "supervisor-deliver: 目标 $TARGET 未通过前置校验（非 inner 或数字索引）——中止，不发送" >&2
   exit 1
 fi
@@ -164,18 +263,20 @@ if [ ! -f "$SELF_DIR/pane-state-classify.ts" ]; then
   echo "supervisor-deliver: 缺少分类器 $SELF_DIR/pane-state-classify.ts——无法判定目标可接收，fail loud" >&2
   exit 1
 fi
-if ! node --experimental-strip-types "$SELF_DIR/pane-state-classify.ts" --can-receive-wait "$TARGET" --wait "$CAN_RECEIVE_WAIT_S" --poll "$CAN_RECEIVE_POLL_S"; then
+if ! SUPERVISOR_DELIVER_HOST="$HOST" SUPERVISOR_DELIVER_SSH="$SSH_BIN" \
+     node --experimental-strip-types "$SELF_DIR/pane-state-classify.ts" --can-receive-wait "$TARGET" --wait "$CAN_RECEIVE_WAIT_S" --poll "$CAN_RECEIVE_POLL_S"; then
   echo "supervisor-deliver: 目标 $TARGET 在 ${CAN_RECEIVE_WAIT_S}s 内未转为 waiting-input——fail loud 需人工，不发送（不假装送达）" >&2
   exit 1
 fi
 echo "supervisor-deliver: 目标 $TARGET 可接收（waiting-input）——继续投递" >&2
 
 # Direct reliable send: fresh session has nothing to clear → C-u (harmless), literal text, Enter.
-tmux send-keys -t "$TARGET" C-u 2>/dev/null || true
+# Cross-host: THREE separate `ssh <host> tmux send-keys` invocations (the "三次分开调用" contract).
+send_key C-u 2>/dev/null || true
 sleep 0.5
-tmux send-keys -t "$TARGET" -l "$PAYLOAD" 2>/dev/null || true
+send_text_literal "$PAYLOAD" 2>/dev/null || true
 sleep 0.5
-tmux send-keys -t "$TARGET" Enter 2>/dev/null || true
+send_key Enter 2>/dev/null || true
 
 # Bounded wait for the transcript file to appear (the send is what creates it — fault 4's
 # queuing delay is real; poll, never single-check). With --root, prefer a file NOT in the
@@ -183,13 +284,12 @@ tmux send-keys -t "$TARGET" Enter 2>/dev/null || true
 # --transcript, wait for exactly that path.
 now=$(date +%s)
 deadline=$(( now + VERIFY_S ))
-while [ "$(date +%s)" -lt "$deadline" ] && { [ -z "$TRANSCRIPT" ] || [ ! -e "$TRANSCRIPT" ]; }; do
-  if [ -n "$ROOT" ] && [ -n "$proj_dir" ] && [ -d "$proj_dir" ]; then
+while [ "$(date +%s)" -lt "$deadline" ] && { [ -z "$TRANSCRIPT" ] || ! file_exists "$TRANSCRIPT"; }; do
+  if [ -n "$ROOT" ] && [ -n "$proj_dir" ]; then
     best=""; best_ts=0
-    for f in "$proj_dir"/*.jsonl; do
-      [ -e "$f" ] || continue
+    for f in $(list_transcripts "$proj_dir"); do
       case " $PRE_SEND_SNAPSHOT " in *" $f "*) continue ;; esac   # skip pre-existing (old session)
-      ts=$(stat -c %Y "$f" 2>/dev/null || echo 0)
+      ts=$(file_mtime "$f")
       if [ "$ts" -gt "$best_ts" ]; then best="$f"; best_ts=$ts; fi
     done
     [ -n "$best" ] && TRANSCRIPT="$best"
@@ -197,14 +297,18 @@ while [ "$(date +%s)" -lt "$deadline" ] && { [ -z "$TRANSCRIPT" ] || [ ! -e "$TR
   sleep 2
 done
 
-if [ -z "$TRANSCRIPT" ] || [ ! -e "$TRANSCRIPT" ]; then
+if [ -z "$TRANSCRIPT" ] || ! file_exists "$TRANSCRIPT"; then
   echo "supervisor-deliver: FAIL——${VERIFY_S}s 内未出现新 transcript（fresh-session 投递后无落盘）；需要人工" >&2
   exit 1
 fi
 
 # Verify delivery via the pure checker (the only trusted signal): a real user message whose
 # content contains the payload, appended since baseline 0 (a fresh file — nothing precedes it).
-out=$(node --experimental-strip-types "$CHECKER" --check "$TRANSCRIPT" --start 0 --text "$PAYLOAD" 2>&1)
+# Cross-host: the checker reads the remote transcript via `ssh <host> cat` (--remote) — the
+# delivered verdict is STILL a content-matching REAL user message, never pane echo (ADR-016).
+check_args=(--check "$TRANSCRIPT" --start 0 --text "$PAYLOAD")
+[ -n "$HOST" ] && check_args+=(--remote "$HOST")
+out=$(SUPERVISOR_DELIVER_SSH="$SSH_BIN" node --experimental-strip-types "$CHECKER" "${check_args[@]}" 2>&1)
 rc=$?
 if [ "$rc" -eq 0 ]; then
   echo "supervisor-deliver: 已送达 $TARGET（fresh-session；transcript 出现内容匹配的真实 user message）"
