@@ -1,7 +1,7 @@
 ---
 id: gap-ac36-recommended-exposes-sort-key
 title: 'AC36 判据②不可机械核——slot-refill --json 的 recommended 是纯字符串数组，不暴露排序键；位次严格前移+负控制只能人工比对两次运行；处方=recommended 元素改带排序键对象（或另加 ranking 数组），判据②才能机械核对'
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -37,7 +37,7 @@ extra: {}
 - [x] AC2: **排序键暴露**——`--json` 的 recommended（或新增 ranking）暴露每条排序键（blocking_suite / delivery_critical / id）
 - [x] AC3: **判据② 机械化**——检查器机械断言「DC 任务严格前移 + 同族非 DC 不变 + blocking_suite 之上」
 - [x] AC4: **既有不回归**——`--for-task` scoped 门绿（含 slot-refill 既有测试）
-- [ ] AC5: **全量套件绿**——verification-round 验证（外层 verification-round 的职责）
+- [x] AC5: **全量套件绿**——verification-round 验证（round-20 外层 verification-round 判绿：3240/3240 fail 0, verifiedCommit 2833d863ba，本任务 fix 675331ee 为其 ancestor）
 
 ## Definition of Done
 

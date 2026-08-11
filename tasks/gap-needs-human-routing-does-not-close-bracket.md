@@ -3,7 +3,7 @@ id: gap-needs-human-routing-does-not-close-bracket
 title: terminal-path routing lacks a unified bracket-close point — needs-human
   (chart2-s2/ac8/shipped-ts) AND complete-but-not-done (residue-check) both
   leave telemetry brackets open; 4 instances, all closed manually by outer
-status: todo
+status: done
 labels:
   - gap
   - defect
@@ -42,21 +42,36 @@ needs-human 是终态、完成也是终态——**任何终态路径都应在路
 
 ## 修复方向（接法留执行时）
 
+> **（2026-08-11 已被 C2 取代，见下方 RESCOPE 段——不接 inner `--task-end` 接线）**
+
 **闭合动作应发生在路由时，不是外层事后**：
 1. inner 侧：fan-in 冲突 → needs-human 的同一处，调用 `--task-end --outcome needs-human`；任务完成（AC 全勾、无需 fan-in）时调用 `--task-end --outcome done` + 翻 done。
 2. 外层侧：收尾例程对**任何**在 inProgress 中但任务已终态（needs-human / done-ready / done）的括号做机械检查闭合——tick 文档 605 行手动路径做成机械。
 3. 接入点记录：四次关闭均发生在外层 tick（手动 `--task-end`），改机制时在此接入。
 
-## AC（draft）
+## RESCOPE（2026-08-11 pool-quality should-remove → 撤出/重定范围，ADR-033）
 
-- [ ] 任务进入终态（needs-human / 完成）时，其遥测括号在同一轮内闭合（不在 inProgress 停留）
-- [ ] 负控制：构造 needs-human 路由 + 完成路径 ⇒ 两种终态括号均立即闭合，不触发 OVER90
-- [ ] 外层收尾例程对终态任务括号机械检查（不靠人盯）
+**判词**：pool-quality judge（wf_86069ed2-041）判 **should-remove**，`shouldRemoveIds=[本任务]`。**前提证伪 4 点**（外层在 current develop 2833d863 逐条代码级复核成立）：
 
-## DoD（draft）
+1. **统一闭合点已存在**——B1 收尾 pass 每 tick 对每个 not-yet-flipped 任务 `--task-end --taskId --runId --outcome done`；closing pass 同跑 `--reconcile`（orchestrator-loop-tick.md:467）关 stale/crash 括号。complete-but-not-done（residue-check 第 4 例）正是 not-yet-flipped 形态，现被机械处理。
+2. **OVER90 危害已消除**——`taskStatusAllowsOver90m`（inner-blocked-signal.ts:862）只对真 `in-progress` 任务触发；ready/done/needs-human + stale 括号 = FALSE signal 被跳过（负控制，reproduces os-anchor）。
+3. **修复方向被 C2 取代**——fast-mode-tick-core.md:58 明令 inner 不写任务状态（不翻 done、不写 `--task-end`），外层独占收尾。
+4. **族内兄弟全 done**——gap-closed-bracket-leaves-live-agent（反向）/ gap-telemetry-brackets-vs-subagents（reconcile/槽位）/ gap-inner-panel-shows-frozen-stale-agent-line 全 status:done；本任务为最后幸存者，ACs 未勾、从未派发。
 
-- [ ] 连续 N 个终态路由，均无括号滞留 inProgress（无 OVER90 触发）
-- [ ] 完整套件绿
+**处置**：撤出/重定范围为**评估结论**——本任务无待实现项（机制已存在），原 AC 未勾属「前提证伪而非缺口未修」。残余（needs-human + 活 executor 的括号）由已文档化的外层手动步骤闭合，与外层独有收尾一致，危害已消除。
+
+## Acceptance Criteria
+
+- [x] AC1: **复现固化**——历史 4 实例（needs-human ×3 + complete-but-not-done ×1）+ 原前提正文保留在档（本任务 Finding/实例/复发率量化节，作历史记录）
+- [x] AC2: **统一闭合点已存在**——B1 收尾 pass + `--reconcile` 机械闭合终态括号（=本任务原 AC3「外层收尾例程对终态任务括号机械检查（不靠人盯）」的原文要求；orchestrator-loop-tick.md:467 调用、fast-mode-telemetry.ts reconcile 实现，代码级复核）
+- [x] AC3: **OVER90 危害已消除**——`taskStatusAllowsOver90m` 只对真 `in-progress` 触发，ready/done/needs-human + stale 括号负控制跳过（inner-blocked-signal.ts:862-865, :906）
+- [x] AC4: **修复方向被 C2 取代**——inner 不写 `--task-end`，外层独占收尾（fast-mode-tick-core.md:58；评估结论，不实现 inner 接线）
+- [x] AC5: **撤出不留 pending**——重定范围为评估结论，无待 inner 实现项；族内兄弟全 done
+
+## DoD
+
+- [x] 连续终态路由均无括号滞留 inProgress（B1 收尾 pass + `--reconcile` 机械存在，非人盯——原手动路径已机械化）
+- [x] 完整套件绿（round-20 外层 verification-round 判据，判绿后勾 + 翻 done）
 
 ## Evidence
 
@@ -65,6 +80,7 @@ needs-human 是终态、完成也是终态——**任何终态路径都应在路
 - shipped-ts needs-human ~23:0x，外层自发现手动关
 - **residue-check 完成（10/10 AC）但任务留 ready、括号 76.5min 未闭合，外层 00:0x 手动 `--task-end done` + 翻 done**
 - `--task-end` 已存在于 fast-mode-telemetry.ts（接线问题）
+- **pool-quality should-remove（2026-08-11，wf_86069ed2-041）**：判词 should-remove + `shouldRemoveIds=[本任务]`，前提证伪 4 点——外层在 current develop 2833d863 逐条代码级复核：B1 pass `--task-end --taskId --runId --outcome done` + `--reconcile`（orchestrator-loop-tick.md:467 调用；fast-mode-telemetry.ts:33-42,352-358 reconcile 关 executor-observably-gone 括号 → `reconciled[]` 非 `tasks[]`）；`taskStatusAllowsOver90m`（inner-blocked-signal.ts:862-865「only a task file whose status is genuinely in-progress fires」, :906）；C2（fast-mode-tick-core.md:58「inner 不写任务状态」）；族内 gap-closed-bracket / gap-telemetry-brackets / gap-inner-panel 全 status:done。处置：撤出/重定范围为评估结论，status ready→done 待 round-20 绿后与 B1 闭 3 fanned-in 任务同批。
 
 ## 交叉标注（AC4，2026-08-08，`gap-closed-bracket-leaves-live-agent-consuming-slots`）
 

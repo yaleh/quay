@@ -3,7 +3,7 @@ id: gap-green-verdict-ac1-ac2-mechanisms-not-effective
 title: green-verdict (done) AC1/AC2 mechanisms not effective — verdict records
   no covered commit/tree (AC1), Contract invoke never returns without --once
   (AC2), --once --json is not JSON; same family as ac8
-status: ready
+status: done
 labels:
   - gap
   - defect
