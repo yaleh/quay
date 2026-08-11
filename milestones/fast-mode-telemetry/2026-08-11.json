@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-11T21:27:43.435Z",
+  "generatedAt": "2026-08-11T21:32:12.236Z",
   "since": null,
   "tasks": [
     {
@@ -71,15 +71,22 @@
       "startedAtMs": 1786444937432,
       "workStartedAtMs": 1786444937432,
       "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-supervisor-preempt-candidates-work-clock",
+      "runId": "fm-gap-supervisor-preempt-candidates-work-clock-1786483830444-wf9eee",
+      "startedAtMs": 1786483830450,
+      "workStartedAtMs": 1786483830450,
+      "startedAtMsUnreliable": false
     }
   ],
   "meanMinutes": 88.97032666666667,
   "medianMinutes": 56.853741666666664,
-  "tasksPerHour": 0.8347076833984364,
+  "tasksPerHour": 0.8295439496877907,
   "serialEquivalentPerHour": 0.6743821479356151,
   "windowStart": "2026-08-11T09:28:51.925Z",
-  "windowEnd": "2026-08-11T21:27:40.796Z",
-  "windowHours": 11.980241944444444,
+  "windowEnd": "2026-08-11T21:32:09.264Z",
+  "windowHours": 12.05481638888889,
   "haltedHours": 0,
   "halted": [],
   "blocked": [],
@@ -289,7 +296,7 @@
   ],
   "unreliable": [],
   "reconcilable": [],
-  "realInFlight": 1,
+  "realInFlight": 2,
   "closedButLive": [],
-  "occupiedSlots": 1
+  "occupiedSlots": 2
 }
