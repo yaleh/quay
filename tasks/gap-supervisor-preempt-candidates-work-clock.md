@@ -1,7 +1,8 @@
 ---
 id: gap-supervisor-preempt-candidates-work-clock
-title: supervisor-preempt-candidates.listPreemptible 仍读 startedAtMs（排队时钟）判 >90m preemptible——与 over90 work-clock 修复同口径不一致
-status: ready
+title: supervisor-preempt-candidates.listPreemptible 仍读 startedAtMs（排队时钟）判 >90m
+  preemptible——与 over90 work-clock 修复同口径不一致
+status: done
 labels:
   - gap
   - defect
@@ -30,9 +31,9 @@ extra: {}
 
 ## DoD（draft）
 
-- [ ] scoped 测试绿（`bash scripts/test.sh --for-task gap-supervisor-preempt-candidates-work-clock --allow-thin`）
-- [ ] 完整套件绿（回归无破坏）
-- [ ] over90 交叉标注：`gap-over90-clock-measures-queue-time-not-work-time` 的 AC3 follow-up note 指向本任务
+- [x] scoped 测试绿（`bash scripts/test.sh --for-task gap-supervisor-preempt-candidates-work-clock --allow-thin`）——outer 独立复核 13/13 @ 22:0xZ + B15 judge 独立复核 13/13
+- [x] 完整套件绿（回归无破坏）——r41 green（round 41, 3244 pass / 0 fail, commit ed0308be = fan-in 树, 22:00:12Z 终）
+- [x] over90 交叉标注：`gap-over90-clock-measures-queue-time-not-work-time` 的 AC3 follow-up note 指向本任务——:60 已追加「已落地」标注
 
 ## Evidence
 
@@ -43,6 +44,7 @@ extra: {}
 - **负控制实测（scoped run）**：`WORK-CLOCK — negative control: defer 80min + work 20min (100min bracket, 20min work) is NOT preemptible` ⇒ `listPreemptible` 返回 count=0（排队段不计入 90m，不判 preemptible）。正回归 `WORK-CLOCK — never-deferred 91min bracket is still preemptible` ⇒ count=1、minutes=91（未 defer 字节不变）。
 - **scoped 测试结果**：`bash scripts/test.sh --for-task gap-supervisor-preempt-candidates-work-clock --allow-thin` ⇒ **PASS / EXIT 0**，`13 tests / 13 pass / 0 fail / 0 cancelled`（supervisor-preempt-candidates 全 13 例含 2 个新增 WORK-CLOCK 用例）。
 - **over90 交叉标注已落地**：`gap-over90-clock-measures-queue-time-not-work-time` 的 AC3 follow-up note 已追加「已落地」标注（本任务即该 follow-up）。
+- **closure（2026-08-11 外层）**：B15 judge（wf_2bc25014-cee，trigger=every-10-rounds，roundsSinceLastJudge=41）判 **ready**（premiseSound=true, all-checked, recommendation=promote to done）；r41 green（round 41, 3244 pass / 0 fail, commit ed0308be = 本任务 fan-in 树, 22:00:12Z 终）；scoped 13/13（外层独立复核 21:5xZ + judge 独立复核双证）；DoD 3/3 全勾；bracket 已 `--task-end outcome=done`。
 
 ## Touches
 
