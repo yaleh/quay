@@ -25,8 +25,19 @@
 // nonzero on bad input / failed writes — a meter that silently drops is the exact defect this
 // task exists to fix ("the 1-task/hour target has no meter").
 //
+// WORK-CLOCK SEPARATION (gap-over90-clock-measures-queue-time-not-work-time): the OVER90 90-minute
+// budget must measure ACTUAL WORK time, not queue/defer time. A touches-overlap defer opens the
+// bracket (`--task-start`) BEFORE real work begins — the bracket's startedAtMs is the QUEUE-clock
+// start. `--work-start` records the moment the agent actually starts running (same runId, eventKind
+// "work-start", timing.startedAtMs = work start). aggregate() exposes `workStartedAtMs` on
+// inProgress records (the LATEST work-start for the runId, falling back to the bracket's startedAtMs
+// for a never-deferred task — byte-identical behavior). OVER90 in inner-blocked-signal.ts's
+// detectTaskOver90m reads ONLY `workStartedAtMs`, so a task that queues 80min then works 20min
+// (100min bracket, 20min work) does NOT trigger OVER90.
+//
 // Run:
 //   node --experimental-strip-types fast-mode-telemetry.ts --task-start --taskId <id> [--root <dir>]
+//   node --experimental-strip-types fast-mode-telemetry.ts --work-start --taskId <id> --runId <r> [--root <dir>]  (record actual-work start on an open bracket)
 //   node --experimental-strip-types fast-mode-telemetry.ts --task-end --taskId <id> --runId <r> --outcome <done|needs-human|abandoned> [--root <dir>]
 //   node --experimental-strip-types fast-mode-telemetry.ts --report [--since <iso>] [--json] [--root <dir>]   (PURE READ)
 //   node --experimental-strip-types fast-mode-telemetry.ts --snapshot [--since <iso>] [--json] [--root <dir>] (explicit persist)
@@ -341,6 +352,47 @@ export function buildStartEvent({ taskId, runId, executionCwd, baseCommit = null
 }
 
 /**
+ * Build the schema-valid `Fast` work-start event (eventKind 'work-start'). Records the moment the
+ * agent ACTUALLY starts running, keyed to the SAME runId as the bracket's `--task-start` — so the
+ * QUEUE clock (bracket open → work start) is separated from the WORK clock (work start → end).
+ * The dispatch loop calls this when it actually hands the task to a subagent (after any defer /
+ * touches-overlap wait), not when the bracket opens. aggregate() treats it as a work-clock marker,
+ * NOT a start/end pair (never an orphan/in-progress of its own); OVER90 reads ONLY the work clock.
+ * @param {object} opts
+ * @param {string} opts.taskId
+ * @param {string} opts.runId — the runId --task-start printed; the work-start pairs to that bracket
+ * @param {string} [opts.executionCwd]
+ * @param {string|null} [opts.baseCommit]
+ * @param {number} [opts.recordedAtMs]
+ * @returns {object} — a plain object that A1a validateEvent accepts
+ */
+export function buildWorkStartEvent({ taskId, runId, executionCwd, baseCommit = null, recordedAtMs = Date.now() }) {
+  return {
+    schemaVersion: SCHEMA_VERSION,
+    runId,
+    candidateId: String(taskId),
+    taskId: String(taskId),
+    stage: FAST_MODE_STAGE,
+    attempt: 0,
+    timing: { queuedAtMs: null, startedAtMs: recordedAtMs, endedAtMs: null },
+    agentLabel: FAST_MODE_AGENT_LABEL,
+    commandIdentity: "fast-mode-telemetry:work-start",
+    executionCwd: executionCwd ?? process.cwd(),
+    worktreePath: null,
+    baseCommit,
+    candidateCommit: null,
+    outcome: null,
+    waitReason: null,
+    resourceClaim: null,
+    observedWrites: [],
+    isolationMode: null,
+    dispatchMode: "serial",
+    recordedAtMs,
+    eventKind: "work-start",
+  };
+}
+
+/**
  * Build the schema-valid `Fast` end event (eventKind 'end') carrying the terminal outcome.
  * @param {object} opts
  * @param {string} opts.taskId
@@ -603,13 +655,26 @@ export function computeHaltedMs(haltEvents, windowStartMs, windowEndMs) {
  *                 `startedAtMsUnreliable` (a backfilled/distorted start) and EXCLUDED from the
  *                 throughput numerator AND denominator. Absent/null ⇒ no annotation (byte-identical
  *                 to pre-fix behavior).
- * @returns {{tasks: Array<{taskId:string,runId:string,minutes:number,outcome:string|null}>, orphaned: Array<{taskId:string,runId:string,outcome:string|null}>, inProgress: Array<{taskId:string,runId:string,startedAtMs:number,startedAtMsUnreliable:boolean}>, reconciled: Array<{taskId:string,runId:string,minutes:number,outcome:string|null,reconcileReason:string,startedAtMsUnreliable:boolean}>, unreliable: Array<{taskId:string,runId:string,minutes:number,outcome:string|null,startedAtMsUnreliable:boolean,startedAtMs:number}>, meanMinutes:number, medianMinutes:number, tasksPerHour:number, serialEquivalentPerHour:number, windowStart:string|null, windowEnd:string|null, windowHours:number, haltedHours:number, halted:Array<{startMs:number,endMs:number}>, blocked: Array<{taskId:string,reason:string|null,sinceMs:number|null,clearedAtMs:number|null,durationMs:number}>, totalBlockedMs:number, longestBlockedMs:number}}
+ * @returns {{tasks: Array<{taskId:string,runId:string,minutes:number,outcome:string|null}>, orphaned: Array<{taskId:string,runId:string,outcome:string|null}>, inProgress: Array<{taskId:string,runId:string,startedAtMs:number,workStartedAtMs:number|null,startedAtMsUnreliable:boolean}>, reconciled: Array<{taskId:string,runId:string,minutes:number,outcome:string|null,reconcileReason:string,startedAtMsUnreliable:boolean}>, unreliable: Array<{taskId:string,runId:string,minutes:number,outcome:string|null,startedAtMsUnreliable:boolean,startedAtMs:number}>, meanMinutes:number, medianMinutes:number, tasksPerHour:number, serialEquivalentPerHour:number, windowStart:string|null, windowEnd:string|null, windowHours:number, haltedHours:number, halted:Array<{startMs:number,endMs:number}>, blocked: Array<{taskId:string,reason:string|null,sinceMs:number|null,clearedAtMs:number|null,durationMs:number}>, totalBlockedMs:number, longestBlockedMs:number}}
  */
 export function aggregate(events, { sinceMs = null, nowMs = null, haltEvents = null, firstKnownCommitMsByTask = null } = {}) {
   const fastEvents = events.filter((e) => e && e.stage === FAST_MODE_STAGE);
   // Blocked-wait events are NOT task start/end pairs — separate them before the byRun pairing.
   const blockedEvents = fastEvents.filter((e) => e.eventKind === "blocked");
-  const taskEvents = fastEvents.filter((e) => e.eventKind !== "blocked");
+  // WORK-CLOCK (gap-over90-clock-measures-queue-time-not-work-time): `--work-start` markers are NOT
+  // task start/end pairs either — they record when the agent ACTUALLY began running on an open
+  // bracket. Separated like blocked events so they can never pollute orphaned/inProgress, and their
+  // latest timing.startedAtMs per runId becomes the record's workStartedAtMs (the WORK clock that
+  // OVER90 reads). A never-deferred task (no work-start) falls back to the bracket's startedAtMs.
+  const workStartEvents = fastEvents.filter((e) => e.eventKind === "work-start");
+  const taskEvents = fastEvents.filter((e) => e.eventKind !== "blocked" && e.eventKind !== "work-start");
+  const workStartByRun = new Map();
+  for (const e of workStartEvents) {
+    if (e.timing?.startedAtMs != null) {
+      const cur = workStartByRun.get(e.runId);
+      if (cur == null || e.timing.startedAtMs > cur) workStartByRun.set(e.runId, e.timing.startedAtMs);
+    }
+  }
 
   const byRun = new Map();
   for (const e of taskEvents) {
@@ -681,7 +746,15 @@ export function aggregate(events, { sinceMs = null, nowMs = null, haltEvents = n
       orphaned.push({ taskId: rec.taskId, runId: rec.runId, outcome: end.outcome });
     } else if (rec.start && !end) {
       if (sinceMs != null && rec.start.recordedAtMs < sinceMs) continue;
-      inProgress.push({ taskId: rec.taskId, runId: rec.runId, startedAtMs, startedAtMsUnreliable });
+      // WORK-CLOCK (gap-over90-clock-measures-queue-time-not-work-time): workStartedAtMs = the latest
+      // `--work-start` marker for this runId, else the bracket's startedAtMs (never-deferred tasks
+      // are byte-identical to pre-fix). startedAtMs stays the QUEUE-clock start (bracket open).
+      // GUARD: a work-start marker that precedes the bracket start is a misordered call (work cannot
+      // begin before the bracket opened) — fall back to startedAtMs rather than let the work clock
+      // inflate past the bracket age.
+      const ws = workStartByRun.get(rec.runId);
+      const workStartedAtMs = startedAtMs != null && ws != null && ws >= startedAtMs ? ws : startedAtMs;
+      inProgress.push({ taskId: rec.taskId, runId: rec.runId, startedAtMs, workStartedAtMs, startedAtMsUnreliable });
     }
   }
 
@@ -804,7 +877,16 @@ export function reconcileInFlight(inProgress, { executorGone, firstKnownCommitMs
     const startedAtMsUnreliable =
       firstCommit != null && typeof rec.startedAtMs === "number" && rec.startedAtMs > firstCommit;
     const verdict = executorGone ? executorGone(rec) : { gone: false, reason: "no-executor-probe" };
-    const base = { taskId: rec.taskId, runId: rec.runId, startedAtMs: rec.startedAtMs, startedAtMsUnreliable };
+    // WORK-CLOCK (gap-over90-clock-measures-queue-time-not-work-time): carry workStartedAtMs through
+    // the reconcile verdict so detectTaskOver90m (which reads the KEPT records) still sees the work
+    // clock, not the queue clock. Absent ⇒ fall back to startedAtMs (byte-identical for pre-fix data).
+    const base = {
+      taskId: rec.taskId,
+      runId: rec.runId,
+      startedAtMs: rec.startedAtMs,
+      workStartedAtMs: rec.workStartedAtMs ?? rec.startedAtMs ?? null,
+      startedAtMsUnreliable,
+    };
     if (verdict.gone) {
       closed.push({ ...base, outcome: "abandoned", reconcileReason: verdict.reason ?? "executor-gone" });
     } else {
@@ -1152,7 +1234,13 @@ function printHumanReport(report, aggFile) {
     console.log(`in-progress (start without end): ${report.inProgress.length}`);
     for (const p of report.inProgress) {
       const unrel = p.startedAtMsUnreliable ? " [startedAtMs-unreliable]" : "";
-      console.log(`  ${p.taskId} (runId ${p.runId})${unrel}`);
+      // WORK-CLOCK (gap-over90-clock-measures-queue-time-not-work-time): when the work clock started
+      // later than the bracket (a defer/queue segment existed), surface it — that is the clock OVER90
+      // reads. A never-deferred task (workStartedAtMs == startedAtMs) shows no suffix.
+      const work = p.workStartedAtMs != null && p.workStartedAtMs !== p.startedAtMs
+        ? ` (work clock since ${new Date(p.workStartedAtMs).toISOString()})`
+        : "";
+      console.log(`  ${p.taskId} (runId ${p.runId})${unrel}${work}`);
     }
   }
   // Reconcile-aware real in-flight (gap-telemetry-brackets-vs-subagents-no-slot-visibility):
@@ -1199,6 +1287,7 @@ const usage = `fast-mode-telemetry.ts — fast-mode (direct) execution metering 
 
 Usage:
   node --experimental-strip-types fast-mode-telemetry.ts --task-start --taskId <id> [--root <dir>]
+  node --experimental-strip-types fast-mode-telemetry.ts --work-start --taskId <id> --runId <r> [--root <dir>]  (record actual-work start on an open bracket; OVER90 reads only this clock)
   node --experimental-strip-types fast-mode-telemetry.ts --task-end --taskId <id> --runId <r> --outcome <done|needs-human|abandoned> [--root <dir>]
   node --experimental-strip-types fast-mode-telemetry.ts --halt-start [--atMs <iso>] [--reason <str>] [--root <dir>]   (record a .halt placement)
   node --experimental-strip-types fast-mode-telemetry.ts --halt-end   [--atMs <iso>] [--root <dir>]                    (record a .halt removal)
@@ -1319,6 +1408,36 @@ export async function main(argv) {
     }
     // Single line: the runId the caller must hold for --task-end.
     console.log(runId);
+    return 0;
+  }
+
+  // --work-start (gap-over90-clock-measures-queue-time-not-work-time): record the moment the agent
+  // ACTUALLY started running on an already-open bracket. The dispatch loop calls this when it hands
+  // the task to a subagent (AFTER any touches-overlap defer / queue wait), passing the runId that
+  // --task-start printed — so the QUEUE segment (bracket open → work start) is excluded from the
+  // work clock that OVER90 reads. Same schema-valid A1a event shape as --task-start but with
+  // eventKind "work-start"; aggregate() treats it as a work-clock marker, never a start/end pair.
+  if (args.includes("--work-start")) {
+    const taskId = getArgValue(args, "--taskId");
+    const runId = getArgValue(args, "--runId");
+    if (!taskId || !runId) {
+      console.error("fast-mode-telemetry: --work-start requires --taskId <id> --runId <r> (the runId --task-start printed)");
+      return 1;
+    }
+    const event = buildWorkStartEvent({
+      taskId,
+      runId,
+      executionCwd: process.cwd(),
+      baseCommit: getBaseCommit(root),
+      recordedAtMs: Date.now(),
+    });
+    try {
+      writeEvent(event, root);
+    } catch (e) {
+      console.error(`fast-mode-telemetry: ${e.message}`);
+      return 1;
+    }
+    console.log(`fast-mode-telemetry: work-start recorded for ${taskId} (runId ${runId})`);
     return 0;
   }
 

@@ -994,6 +994,147 @@ test("RECONCILE — processAlive detects a live process by runId (AC3 real-proce
   }
 });
 
+// ── Work-clock separation (gap-over90-clock-measures-queue-time-not-work-time) ─────────────────────
+// OVER90's 90-minute clock used to start at the bracket open (`--task-start`), which precedes actual
+// work when a touches-overlap defer queues the task (three false OVER90 triggers in one night —
+// crash-leftover, needs-human-not-closed, queue-time — none was "work really timed out"). The fix
+// separates the QUEUE clock (bracket open → work start) from the WORK clock (work start → end):
+// `--work-start` records the moment the agent actually runs, aggregate() exposes `workStartedAtMs` on
+// inProgress records (falling back to the bracket's startedAtMs for a never-deferred task), and
+// detectTaskOver90m reads ONLY the work clock. A task that queues 80min then works 20min (100min
+// bracket, 20min work) must NOT trigger OVER90.
+
+test("WORK-CLOCK — --work-start writes a schema-valid work-start event paired to the runId", async () => {
+  const tmp = makeTmpWorkspace();
+  try {
+    const schema = await importSchema();
+    const start = runCli(tmp, "--task-start", "--taskId", "gap-work-clock");
+    assert.equal(start.status, 0, start.stderr);
+    const runId = start.stdout.trim();
+
+    const ws = runCli(tmp, "--work-start", "--taskId", "gap-work-clock", "--runId", runId);
+    assert.equal(ws.status, 0, `--work-start should exit 0, got ${ws.status}\nstderr: ${ws.stderr}`);
+
+    const events = readEventsJsonl(tmp, runId);
+    assert.equal(events.length, 2, "start + work-start = 2 events in the same runId log");
+    const ev = events[1];
+    assert.equal(ev.eventKind, "work-start", `eventKind should be "work-start", got "${ev.eventKind}"`);
+    assert.equal(typeof ev.timing.startedAtMs, "number", "work-start must carry a startedAtMs");
+    assert.equal(ev.timing.endedAtMs, null, "work-start is not an end event");
+    assert.equal(ev.runId, runId, "work-start must pair to the bracket's runId");
+    const v = schema.validateEvent(ev);
+    assert.equal(v.ok, true, `work-start event must pass A1a validateEvent: ${JSON.stringify(v)}`);
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test("WORK-CLOCK — --work-start rejects a missing runId (fail-closed)", async () => {
+  const tmp = makeTmpWorkspace();
+  try {
+    const res = runCli(tmp, "--work-start", "--taskId", "gap-work-clock");
+    assert.notEqual(res.status, 0, "--work-start without --runId must fail closed");
+    assert.match(res.stderr, /runId/, `stderr should explain: ${res.stderr}`);
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test("WORK-CLOCK — aggregate exposes workStartedAtMs on inProgress, falling back to startedAtMs", async () => {
+  const cli = await importCli();
+  const t0 = 1_000_000;
+  const workStart = t0 + 80 * 60_000;
+  const runId = cli.generateRunId("deferred");
+  const start = cli.buildStartEvent({ taskId: "deferred", runId, recordedAtMs: t0 });
+  const work = cli.buildWorkStartEvent({ taskId: "deferred", runId, recordedAtMs: workStart });
+  const r = cli.aggregate([start, work], { nowMs: workStart + 20 * 60_000 });
+  assert.equal(r.inProgress.length, 1, "a deferred bracket is a single in-progress record");
+  assert.equal(r.inProgress[0].startedAtMs, t0, "startedAtMs stays the QUEUE-clock start (bracket open)");
+  assert.equal(r.inProgress[0].workStartedAtMs, workStart, "workStartedAtMs is the WORK-clock start");
+  assert.equal(r.orphaned.length, 0, "the work-start marker must not be orphaned");
+  assert.equal(r.tasks.length, 0, "the work-start marker must not complete a task");
+
+  // Never-deferred task: no work-start ⇒ workStartedAtMs falls back to the bracket's startedAtMs.
+  const runId2 = cli.generateRunId("plain");
+  const start2 = cli.buildStartEvent({ taskId: "plain", runId: runId2, recordedAtMs: t0 });
+  const r2 = cli.aggregate([start2], { nowMs: t0 + 10 * 60_000 });
+  assert.equal(r2.inProgress.length, 1);
+  assert.equal(r2.inProgress[0].workStartedAtMs, t0, "no work-start ⇒ work clock = bracket start (byte-identical)");
+});
+
+test("WORK-CLOCK — a lone work-start event never creates an orphaned or in-progress record", async () => {
+  const cli = await importCli();
+  const runId = cli.generateRunId("lone-ws");
+  const ws = cli.buildWorkStartEvent({ taskId: "lone-ws", runId, recordedAtMs: 1_000_000 });
+  const r = cli.aggregate([ws]);
+  assert.equal(r.orphaned.length, 0, "a work-start marker is not a task end");
+  assert.equal(r.inProgress.length, 0, "a work-start marker is not a task start");
+});
+
+test("WORK-CLOCK — a misordered work-start before the bracket start is ignored (work clock cannot precede the bracket)", async () => {
+  const cli = await importCli();
+  const t0 = 1_000_000;
+  const badWorkStart = t0 - 60_000; // work-start BEFORE the bracket opened — impossible in a correct sequence
+  const runId = cli.generateRunId("misordered");
+  const start = cli.buildStartEvent({ taskId: "misordered", runId, recordedAtMs: t0 });
+  const work = cli.buildWorkStartEvent({ taskId: "misordered", runId, recordedAtMs: badWorkStart });
+  const r = cli.aggregate([start, work], { nowMs: t0 + 91 * 60_000 });
+  assert.equal(r.inProgress.length, 1);
+  assert.equal(r.inProgress[0].workStartedAtMs, t0, "a pre-bracket work-start must fall back to the bracket's startedAtMs (never inflate the work clock)");
+});
+
+test("WORK-CLOCK — OVER90 negative control: defer 80min + work 20min (100min bracket) does NOT fire", async () => {
+  const cli = await importCli();
+  const { detectTaskOver90m } = await import(path.join(PLUGIN_SCRIPTS, "inner-blocked-signal.ts"));
+  const tmp = makeTmpWorkspace();
+  try {
+    const now = Date.now();
+    const t0 = now - 100 * 60_000; // bracket opened 100min ago
+    const workStart = t0 + 80 * 60_000; // 80min of queue, then 20min of real work
+    const runId = cli.generateRunId("defer-then-work");
+    cli.writeEvent(cli.buildStartEvent({ taskId: "defer-then-work", runId, recordedAtMs: t0 }), tmp);
+    cli.writeEvent(cli.buildWorkStartEvent({ taskId: "defer-then-work", runId, recordedAtMs: workStart }), tmp);
+    const over = await detectTaskOver90m(tmp);
+    assert.equal(over, null, `OVER90 must NOT fire: total 100min but only 20min work — got ${JSON.stringify(over)}`);
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test("WORK-CLOCK — OVER90 positive control: 91min of real work still fires", async () => {
+  const cli = await importCli();
+  const { detectTaskOver90m } = await import(path.join(PLUGIN_SCRIPTS, "inner-blocked-signal.ts"));
+  const tmp = makeTmpWorkspace();
+  try {
+    const now = Date.now();
+    const t0 = now - 91 * 60_000; // work started 91min ago, immediately at bracket open
+    const runId = cli.generateRunId("genuine-work");
+    cli.writeEvent(cli.buildStartEvent({ taskId: "genuine-work", runId, recordedAtMs: t0 }), tmp);
+    cli.writeEvent(cli.buildWorkStartEvent({ taskId: "genuine-work", runId, recordedAtMs: t0 }), tmp);
+    const over = await detectTaskOver90m(tmp);
+    assert.ok(over && over.taskId === "genuine-work", `OVER90 must fire for 91min of work: ${JSON.stringify(over)}`);
+    assert.match(over.question, /work/, "the question should state the budget is work time");
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test("WORK-CLOCK — OVER90 still fires for a never-deferred 91min bracket (legacy byte-identical)", async () => {
+  const cli = await importCli();
+  const { detectTaskOver90m } = await import(path.join(PLUGIN_SCRIPTS, "inner-blocked-signal.ts"));
+  const tmp = makeTmpWorkspace();
+  try {
+    const now = Date.now();
+    const t0 = now - 91 * 60_000;
+    const runId = cli.generateRunId("legacy-slow");
+    cli.writeEvent(cli.buildStartEvent({ taskId: "legacy-slow", runId, recordedAtMs: t0 }), tmp);
+    const over = await detectTaskOver90m(tmp);
+    assert.ok(over && over.taskId === "legacy-slow", `OVER90 must fire for a 91min never-deferred bracket: ${JSON.stringify(over)}`);
+  } finally {
+    cleanup(tmp);
+  }
+});
+
 // ── Slot status (gap-telemetry-brackets-vs-subagents-no-slot-visibility) ────────────────────────────
 
 test("SLOT-STATUS — 5 stale brackets + 1 real agent ⇒ real_in_flight 1, slots_free 2 (AC5 regression shape)", async () => {
