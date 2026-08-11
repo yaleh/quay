@@ -124,3 +124,5 @@ scoped static checks PASS（task-contract / adr016 / strategic-doc / drive-contr
 - 620e74c2 outer 接线：orchestrator-loop-tick 4b3 + tick-core A18/B9
 - 103464a1 inner 第一件事：fast-mode-loop-tick 醒来第一件事
 - 30505a6a 既有收口：gap-dispatch-evaluated AC3 判据改「醒来第一件事」
+
+> **cross-ref (gap-nyf-branch-existence-vs-commit-trace, 2026-08-11)**：B9 补池判据——真·可派数 = ready − 已落地 − 待fan-in − 冲突 − 前置；nyf 任务把「已落地未翻 done」从分支存在性换成提交痕迹（inner:/fan-in: 提交），使 pool 计数不被幽灵任务灌水，B9 补池补的是真指标。

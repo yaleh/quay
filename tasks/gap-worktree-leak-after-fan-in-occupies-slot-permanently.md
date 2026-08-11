@@ -78,3 +78,5 @@ resume    泄漏清理 / A15 补 remove / 合规产物 / 测试分步提交，�
 reviewer: outer
 at: 2026-08-11
 changed: manager 04:5x 第二次更正（取代 04:42 陈旧括号案）——真因=合并后没删 worktree 的累积泄漏（fast-mode-telemetry:834/:898 判存活=worktree 在）；12 个已合分支 worktree 仍留 ⇒ 每合一个永久吃一槽（occupied 15>cap5）；inner A6 fan-in 有 remove 而 outer A15 没有。outer 复核：清 11 泄漏后 slots-free 0→2。处方：清泄漏 + A15 补 remove + 合规产物。实现归 inner，判定归 outer
+
+> **cross-ref (gap-nyf-branch-existence-vs-commit-trace, 2026-08-11)**：同根形状——拿短暂产物（worktree 存在 / task/<id> 分支存在）当持久事实（执行体存活 / 工作已落地）的信号，短暂产物一消失判据就静默翻转。本任务治「worktree 存在」侧；nyf 任务治「分支存在」侧（nyf 判据换成提交痕迹，不随分支删除失效）。
