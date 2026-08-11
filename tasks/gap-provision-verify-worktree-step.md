@@ -1,7 +1,7 @@
 ---
 id: gap-provision-verify-worktree-step
 title: '建「可跑 suite 的验证 worktree」没有共享步骤——A15 ④ 契约空白 ⇒ 今晚三次同族失败（11:12/11:31 AC4 config.yml 缺失、13:14 AC11 config.yml 缺失、13:03 esbuild/node_modules 缺失）；worktreeinclude 机制存在但从未接进验证路径；修= provision-verify-worktree.sh（compose worktree-include + node_modules symlink）+ A15 ④ 显式 substep'
-status: todo
+status: ready
 labels:
   - gap
   - defect
