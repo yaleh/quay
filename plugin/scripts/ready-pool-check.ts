@@ -1006,6 +1006,12 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
   // intercepted, not promoted).
   const staleRefs = judgePoolCandidate(root, id); // null when tasks/<id>.md is missing — not a live candidate
   const retiredMechanism = staleRefs !== null && staleRefs.length > 0;
+  // SUPERSEDED GUARD (2026-08-11, outer retreat of gap-send-keys-verified): a task whose body carries
+  // the `**SUPERSEDED**` marker (implementation premise deleted by a human ruling) must never be
+  // promoted to ready — the outer retreats such a task to todo, and a promotion mechanism that does
+  // not read the marker silently re-promotes it (dispatchable_disjoint stays a false reading).
+  // Same principle as retiredMechanism: the marker is the mechanism's signal, not a verdict to waive.
+  const superseded = /SUPERSEDED/i.test(task.body);
   // PROSE-PREREQUISITE GAP (gap-prerequisite-gates-prose-invisible-to-mechanisms AC3): a candidate
   // whose body declares a prerequisite in prose WITHOUT a corresponding relation edge must NOT be
   // promoted to ready — it would enter the ready pool with a dependency no mechanism can see.
@@ -1032,6 +1038,9 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
     // is never eligible (the intercept reason is mechanically carried for the `intercepted` output).
     retiredMechanism,
     retiredRefs: staleRefs !== null ? staleRefs : [],
+    // SUPERSEDED guard — a task whose body carries the SUPERSEDED marker is never
+    // promotion-eligible (outer retreat + mechanism would re-promote it otherwise).
+    superseded,
     // PROSE-PREREQUISITE GAP (AC3): prose-declared prereqs with no relation edge — never eligible.
     prosePrereqGap: prosePrereqGapIds,
     // AC5: the touchesResolve guard is KEPT — majority-missing candidates are never eligible.
@@ -1039,7 +1048,9 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
     // is never eligible either.
     // AC3: the prose-prereq-no-edge guard is ADDED — a candidate whose prose prereqs have no relation
     // edge is never eligible (promotion would put an invisible dependency into the ready pool).
-    eligible: depsReady && four.complete && touchesResolve && !retiredMechanism && prosePrereqGapIds.length === 0,
+    // SUPERSEDED guard (2026-08-11): a candidate carrying the SUPERSEDED marker is never eligible —
+    // its implementation premise is deleted by a human ruling (gap-send-keys-verified retreat).
+    eligible: depsReady && four.complete && touchesResolve && !retiredMechanism && !superseded && prosePrereqGapIds.length === 0,
   };
 }
 

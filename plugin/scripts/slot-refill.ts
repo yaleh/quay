@@ -364,6 +364,12 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
       // dispatch side with NO replacement (the "17 dispatchable yet none dispatched" deadlock:
       // pool 有货 + 本 tick 无可派 同时为真).
       if (!selfTouchCheck(text, id).ok) { defer(id, "self-touch-missing-c8"); continue; }
+      // SUPERSEDED FILTER (2026-08-11, outer retreat of gap-send-keys-verified): a ready-pool task
+      // whose body carries the SUPERSEDED marker (implementation premise deleted by a human ruling)
+      // must never be recommended for dispatch — recommending it keeps `recommended` non-empty while
+      // nothing is actually dispatchable (dispatchable_disjoint becomes a false reading). Same
+      // principle as not-yet-flipped: the marker is the mechanism's signal.
+      if (/SUPERSEDED/i.test(text)) { defer(id, "superseded"); continue; }
       // INJECTED DISPATCH GATE (optional): any additional per-candidate check the caller wants to
       // enforce (default none). A rejected candidate (ok:false) is skipped and the loop continues →
       // BACKFILL from later-in-sort candidates, exactly like the built-in step-4 gates — a rejected
