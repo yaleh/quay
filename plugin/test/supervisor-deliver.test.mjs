@@ -100,6 +100,7 @@ test("AC2: delegation — the adapter names its two dependencies and contains no
   const src = fs.readFileSync(SCRIPT, "utf8");
   assert.match(src, /send-keys-reliable\.sh/, "delegates to the hardened reliable-send procedure");
   assert.match(src, /transcript-delivery-check\.ts/, "verifies via the pure delivery checker");
+  assert.match(src, /--can-receive/, "wires the pane-state-classify can-receive pre-flight (the delivery-path consumer of the can-receive probe)");
   // AC2 boundary: no hand-written send-keys logic beyond the fresh-path's three literal calls;
   // the whole-pane hash family (md5/sha1/cksum) stays dead — the verdict is never a hash.
   const words = [["md5", "sum"].join(""), ["sha1", "sum"].join(""), ["ck", "sum"].join("")];
@@ -189,6 +190,31 @@ while IFS= read -r line; do
   [ -n "$line" ] || continue
   printf '{"type":"user","message":{"role":"user","content":"%s"}}\\n' "$line" >> "$TRANSCRIPT"
   printf '❯ ${GHOST_WELCOME}'
+done
+`;
+}
+
+/** A "TUI" that renders a BUSY pane for `flip` seconds (the `esc to interrupt` status flag), then
+ * flips to an idle NBSP prompt. Any line typed during the busy phase is DISCARDED (`read -r -t
+ * 0.1` — a real busy Claude TUI never commits keystrokes sent while it is thinking), so a pre-wait
+ * send can never deliver: only a send AFTER the idle flip lands as a real user message.
+ * `flip` < 0 → busy forever (never flips). */
+function busyFixtureScriptSrc(transcriptPath, flip) {
+  const flipBranch = flip >= 0
+    ? `sleep "${flip}"
+IFS= read -r -t 0.1 dropped 2>/dev/null || true
+printf '\\033[2J\\033[H${FIXTURE_PROMPT}'`
+    : `while :; do sleep 1; done`;
+  return `#!/usr/bin/env bash
+TRANSCRIPT="${transcriptPath}"
+mkdir -p "$(dirname "$TRANSCRIPT")"
+printf '${FIXTURE_PROMPT}'
+printf '\\n  ⏵⏵ bypass permissions on · esc to interrupt · ↓ to manage'
+${flipBranch}
+while IFS= read -r line; do
+  [ -n "$line" ] || continue
+  printf '{"type":"user","message":{"role":"user","content":"%s"}}\\n' "$line" >> "$TRANSCRIPT"
+  printf '${FIXTURE_PROMPT}'
 done
 `;
 }
@@ -320,6 +346,61 @@ test("AC5: --root (re-spawn mode) waits for the NEW transcript NOT in the pre-se
   } finally {
     h.cleanup();
     try { fs.rmSync(root, { recursive: true, force: true }); } catch { /* best-effort */ }
+  }
+});
+
+// ── can-receive pre-flight (gap-supervisor-deliver-no-wait-for-idle-retry) ───────────────────────
+// The existing-session path delegates to send-keys-reliable.sh, which owns the can-receive
+// pre-flight — so a busy target is waited on (bounded) and delivered once idle, NOT an immediate
+// FAIL. The env vars flow through the delegation (RELIABLE_CAN_RECEIVE_WAIT_S/Poll). AC2 (wiring) +
+// AC2/AC3 e2e.
+
+test("AC2/AC3 e2e: adapter delegates the can-receive pre-flight — a BUSY target is waited on then delivered (not an immediate FAIL)", { timeout: 90000 }, async (t) => {
+  const tmuxV = spawnSync("tmux", ["-V"], { encoding: "utf8" });
+  if (tmuxV.error || tmuxV.status !== 0) {
+    t.skip("tmux not available — skipping the real-TUI e2e");
+    return;
+  }
+  const session = uniqueName("sup-busy");
+  const h = newHermeticTmux("sup-busy-");
+  const fixture = path.join(h.tmp, "busy-fixture.sh");
+  const transcript = path.join(h.tmp, "transcript.jsonl");
+  fs.writeFileSync(transcript, `${userStringLine("prior-session-message")}\n`, "utf8");
+  // Busy for 3s, then flips to idle. A pre-wait send (typed during busy) is DISCARDED by the
+  // fixture, so this test passes ONLY if the pre-flight waited for the flip before sending.
+  fs.writeFileSync(fixture, busyFixtureScriptSrc(transcript, 3), "utf8");
+  const marker = `sup-busy-marker-${process.pid}`;
+  let result = null;
+  try {
+    const start = h.newSession(session, `bash ${fixture}`);
+    assert.equal(start.status, 0, `tmux new-session failed: ${start.stderr}`);
+    assert.equal(h.tmx(["rename-window", "-t", `${session}:0`, session]).status, 0, `rename-window failed`);
+    let busy = false;
+    for (let i = 0; i < 100 && !busy; i++) {
+      const cap = h.capture(session);
+      if (cap.status === 0 && cap.stdout.includes("esc to interrupt")) busy = true;
+      else await new Promise((r) => setTimeout(r, 100));
+    }
+    assert.ok(busy, "fixture pane should render the busy flag");
+
+    result = spawnSync("bash", [SCRIPT, session, marker, "--transcript", transcript], {
+      encoding: "utf8",
+      timeout: 90000,
+      env: {
+        ...h.env,
+        DRIVE_EXPECT_WINDOW_NAME: session,
+        SUPERVISOR_DELIVER_VERIFY_S: "20",
+        RELIABLE_CAN_RECEIVE_WAIT_S: "15", // flows through the delegation to send-keys-reliable.sh
+        RELIABLE_CAN_RECEIVE_POLL_S: "1",
+      },
+    });
+    assert.equal(result.status, 0, `adapter busy-wait deliver failed (exit ${result.status}):\nstdout: ${result.stdout}\nstderr: ${result.stderr}`);
+    assert.match(result.stdout, /已送达/, `adapter should report delivery:\n${result.stdout}`);
+    assert.match(result.stdout + result.stderr, /可接收/, `should show the can-receive pre-flight ran:\n${result.stdout}${result.stderr}`);
+    const transcriptText = fs.readFileSync(transcript, "utf8");
+    assert.match(transcriptText, new RegExp(`"content":"${marker}"`), `marker should appear as a real user message:\n${transcriptText}`);
+  } finally {
+    h.cleanup();
   }
 });
 

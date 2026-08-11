@@ -46,6 +46,8 @@ import {
   tailFromByteOffset,
 } from "../scripts/transcript-delivery-check.ts";
 
+import { canReceiveInput } from "../scripts/pane-state-classify.ts";
+
 import { newHermeticTmux } from "./helpers/hermetic-tmux.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -514,6 +516,31 @@ done
 `;
 }
 
+/** A "TUI" that renders a BUSY pane for `flip` seconds (the `esc to interrupt` status flag — the
+ * same shape the classifier reads as busy), then flips to an idle NBSP prompt. Any line typed
+ * during the busy phase is DISCARDED (`read -r -t 0.1` — a real busy Claude TUI never commits
+ * keystrokes sent while it is thinking), so a pre-wait send can never deliver: only a send AFTER the
+ * idle flip lands as a real user message. `flip` < 0 → busy forever (never flips). */
+function busyFixtureScriptSrc(transcriptPath, flip) {
+  const flipBranch = flip >= 0
+    ? `sleep "${flip}"
+IFS= read -r -t 0.1 dropped 2>/dev/null || true
+printf '\\033[2J\\033[H${FIXTURE_PROMPT}'`
+    : `while :; do sleep 1; done`;
+  return `#!/usr/bin/env bash
+TRANSCRIPT="${transcriptPath}"
+mkdir -p "$(dirname "$TRANSCRIPT")"
+printf '${FIXTURE_PROMPT}'
+printf '\\n  ⏵⏵ bypass permissions on · esc to interrupt · ↓ to manage'
+${flipBranch}
+while IFS= read -r line; do
+  [ -n "$line" ] || continue
+  printf '{"type":"user","message":{"role":"user","content":"%s"}}\\n' "$line" >> "$TRANSCRIPT"
+  printf '${FIXTURE_PROMPT}'
+done
+`;
+}
+
 test("AC1 e2e: fresh welcome-screen ghost text (`❯ Try \"fix lint errors\"`) — clear loop SKIPPED (CLEAR_MAX=2, would fail loud if not skipped), text delivered via transcript", { timeout: 90000 }, async (t) => {
   const tmuxV = spawnSync("tmux", ["-V"], { encoding: "utf8" });
   if (tmuxV.error || tmuxV.status !== 0) {
@@ -565,6 +592,146 @@ test("AC1 e2e: fresh welcome-screen ghost text (`❯ Try \"fix lint errors\"`) �
     assert.match(result.stdout, /已送达/, `script should report delivery:\n${result.stdout}`);
     const transcriptText = fs.readFileSync(transcript, "utf8");
     assert.match(transcriptText, new RegExp(`"content":"${marker}"`), `marker should appear as a real user message in the transcript:\n${transcriptText}`);
+  } finally {
+    h.cleanup();
+  }
+});
+
+// ── can-receive pre-flight (gap-supervisor-deliver-no-wait-for-idle-retry) ───────────────────────
+// The delivery path now refuses to send until the target's pane is RECEIVABLE — waiting-input is the
+// only receivable state (busy/thinking targets accept keystrokes into the input box but never commit
+// them — the measured 2026-08-06 defect). The judgment is the SAME pure classifier session-liveness
+// uses for its busy/idle verdict (canReceiveInput — single-sourced, never a duplicated idle
+// heuristic). AC1 (waiting-input 才发) + the pure leg of AC2/AC3.
+
+test("can-receive pure: waiting-input is receivable; busy / permission-prompt / error-banner / unknown are not", () => {
+  const idle = [
+    "───────────────────────────────",
+    "❯ ",
+    "───────────────────────────────",
+    "  ⏵⏵ bypass permissions on · 1 monitor · ← 1 agent · ↓ to manage",
+  ].join("\n");
+  assert.equal(canReceiveInput(idle), true, "waiting-input → receivable");
+  const busy = [
+    "───────────────────────────────",
+    "❯ ",
+    "───────────────────────────────",
+    "  ⏵⏵ bypass permissions on · 1 monitor · esc to interrupt · ↓ to manage",
+  ].join("\n");
+  assert.equal(canReceiveInput(busy), false, "busy → NOT receivable");
+  const permission = [
+    "Quick safety check: Is this a project you created or one you trust?",
+    "❯ 1. Yes, I trust this folder ✔",
+    "  2. No, exit",
+    "Enter to confirm · Esc to cancel",
+  ].join("\n");
+  assert.equal(canReceiveInput(permission), false, "permission-prompt → NOT receivable");
+  assert.equal(canReceiveInput("something went wrong\n───\n❯ \n  status"), false, "error-banner → NOT receivable");
+  assert.equal(canReceiveInput("a vim help screen\n~ ~ ~"), false, "unknown → NOT receivable");
+  // A status-line-only pane (input idle + background agents) IS receivable via the orthogonal view —
+  // sending to it is safe even while subagents run (the input box still accepts text).
+  assert.equal(
+    canReceiveInput("⏵⏵ bypass permissions on (shift+tab to cycle) · ← 1 agent · ↓ to manage"),
+    true,
+    "orthogonal input-idle + work-in-flight → receivable",
+  );
+});
+
+test("AC2/AC3 e2e: a BUSY target is WAITED on (bounded), then delivered once it turns idle — not an immediate FAIL", { timeout: 90000 }, async (t) => {
+  const tmuxV = spawnSync("tmux", ["-V"], { encoding: "utf8" });
+  if (tmuxV.error || tmuxV.status !== 0) {
+    t.skip("tmux not available — skipping the real-TUI e2e");
+    return;
+  }
+  const session = uniqueName("skr-busy");
+  const h = newHermeticTmux("skr-busy-");
+  const fixture = path.join(h.tmp, "busy-fixture.sh");
+  const transcript = path.join(h.tmp, "transcript.jsonl");
+  // NOT fresh: seed the transcript so the existing-session (send-keys-reliable) path is taken.
+  fs.writeFileSync(transcript, `${userStringLine("prior-session-message")}\n`, "utf8");
+  // Busy for 3s, then flips to idle. A pre-wait send (typed during the busy phase) is DISCARDED by
+  // the fixture, so this test passes ONLY if the pre-flight waited for the flip before sending.
+  fs.writeFileSync(fixture, busyFixtureScriptSrc(transcript, 3), "utf8");
+  const marker = `skr-busy-marker-${process.pid}`;
+  let result = null;
+  try {
+    const start = h.newSession(session, `bash ${fixture}`);
+    assert.equal(start.status, 0, `tmux new-session failed: ${start.stderr}`);
+    assert.equal(h.tmx(["rename-window", "-t", `${session}:0`, session]).status, 0, `rename-window failed`);
+
+    // Wait (bounded) for the fixture pane to render the BUSY status flag.
+    let busy = false;
+    for (let i = 0; i < 100 && !busy; i++) {
+      const cap = h.capture(session);
+      if (cap.status === 0 && cap.stdout.includes("esc to interrupt")) busy = true;
+      else await new Promise((r) => setTimeout(r, 100));
+    }
+    assert.ok(busy, "fixture pane should render the busy flag (esc to interrupt)");
+
+    result = spawnSync("bash", [SCRIPT, session, marker, transcript], {
+      encoding: "utf8",
+      timeout: 90000,
+      env: {
+        ...h.env,
+        DRIVE_EXPECT_WINDOW_NAME: session,
+        RELIABLE_CAN_RECEIVE_WAIT_S: "15",
+        RELIABLE_CAN_RECEIVE_POLL_S: "1",
+        RELIABLE_DELIVERY_VERIFY_S: "20",
+      },
+    });
+    assert.equal(result.status, 0, `busy-wait deliver failed (exit ${result.status}):\nstdout: ${result.stdout}\nstderr: ${result.stderr}`);
+    assert.match(result.stdout, /已送达/, `should report delivery:\n${result.stdout}`);
+    assert.match(result.stdout + result.stderr, /可接收/, `should show the can-receive pre-flight ran:\n${result.stdout}${result.stderr}`);
+    const transcriptText = fs.readFileSync(transcript, "utf8");
+    assert.match(transcriptText, new RegExp(`"content":"${marker}"`), `marker should appear as a real user message:\n${transcriptText}`);
+  } finally {
+    h.cleanup();
+  }
+});
+
+test("DoD e2e: a target that NEVER turns idle → bounded wait, fail loud (not an immediate FAIL, not a fake success)", { timeout: 90000 }, async (t) => {
+  const tmuxV = spawnSync("tmux", ["-V"], { encoding: "utf8" });
+  if (tmuxV.error || tmuxV.status !== 0) {
+    t.skip("tmux not available — skipping the real-TUI e2e");
+    return;
+  }
+  const session = uniqueName("skr-busytimeout");
+  const h = newHermeticTmux("skr-busytimeout-");
+  const fixture = path.join(h.tmp, "busy-fixture.sh");
+  const transcript = path.join(h.tmp, "transcript.jsonl");
+  fs.writeFileSync(transcript, `${userStringLine("prior-session-message")}\n`, "utf8");
+  fs.writeFileSync(fixture, busyFixtureScriptSrc(transcript, -1), "utf8"); // busy forever
+  const marker = `skr-timeout-marker-${process.pid}`;
+  let result = null;
+  try {
+    const start = h.newSession(session, `bash ${fixture}`);
+    assert.equal(start.status, 0, `tmux new-session failed: ${start.stderr}`);
+    assert.equal(h.tmx(["rename-window", "-t", `${session}:0`, session]).status, 0, `rename-window failed`);
+    let busy = false;
+    for (let i = 0; i < 100 && !busy; i++) {
+      const cap = h.capture(session);
+      if (cap.status === 0 && cap.stdout.includes("esc to interrupt")) busy = true;
+      else await new Promise((r) => setTimeout(r, 100));
+    }
+    assert.ok(busy, "fixture pane should render the busy flag");
+
+    const started = Date.now();
+    result = spawnSync("bash", [SCRIPT, session, marker, transcript], {
+      encoding: "utf8",
+      timeout: 90000,
+      env: {
+        ...h.env,
+        DRIVE_EXPECT_WINDOW_NAME: session,
+        RELIABLE_CAN_RECEIVE_WAIT_S: "4",
+        RELIABLE_CAN_RECEIVE_POLL_S: "1",
+      },
+    });
+    const elapsed = (Date.now() - started) / 1000;
+    assert.equal(result.status, 1, `busy-timeout must exit 1 (fail loud), got ${result.status}\nstdout: ${result.stdout}\nstderr: ${result.stderr}`);
+    assert.match(result.stderr, /未转为 waiting-input/, `must name the can-receive bound:\n${result.stderr}`);
+    assert.ok(elapsed >= 3.5, `must have WAITED for the bound (elapsed ${elapsed}s ≈ 4s) — an immediate FAIL would not wait:\n${result.stderr}`);
+    const transcriptText = fs.readFileSync(transcript, "utf8");
+    assert.doesNotMatch(transcriptText, new RegExp(`"content":"${marker}"`), `nothing may be sent to a never-idle target:\n${transcriptText}`);
   } finally {
     h.cleanup();
   }
