@@ -125,7 +125,13 @@ invoke    `bash plugin/scripts/quay-init.sh --loop --root <temp-dir>`（贴目�
 control   派生集含核；manager opt-in；referenced⊆landed 生效；冷启动可读
 resume    派生集 / opt-in / 冷启动分步提交，任一步完成即写盘
 
-## Dispatch review
+### Finding：AC4 判据盲区——referenced⊆landed 只验模板源引用，未验消费方铺下文档引用（ad-arm1 archguard 实测 F3，manager 15:2x 自我更正）
+
+**manager 自我更正（2026-08-11 15:2x）**：此前把 AC37 判为「达成」依据是「三份 tick-core 在 plugin/loop/ 下」——**那是在 quay 自己仓库里查的**。phase-goal 原文早就写着「在亲代环境里验交付完整性，会得到一个结构上不可能为假的绿」。实际（ad-arm1 archguard 真实消费方，ssh 实测）：`plugin/loop/` **整个目录没铺下来**，铺下的消费方 tick 文档 `docs/analysis/fast-mode-loop-tick.md` 引用 `plugin/loop/orchestrator-loop-tick.md`（2 次）/`plugin/loop/orchestrator-tick-core.md`/`plugin/loop/fast-mode-loop-tick.md`/`orchestration/fast-mode-tick-core.md`（2 次）**全部指向不存在的路径**，inner 自报「The tick references an execution core that isn't at the expected path」。
+
+**盲区根因**：`verify_referenced_landed`（quay-init.sh:1011）检查的引用集来自 `$PLUGIN_ROOT/skills/*/SKILL.md` + `$PLUGIN_ROOT/loop/*.md`（**模板源**），但**没验证消费方铺下文档（docs/analysis/）的路径引用 ⊆ 真实落点**——c3 exec-core 文档落点是 `orchestration/`（quay-init.sh:929），而消费方 tick 文档引用 `plugin/loop/` 路径，路径映射不匹配且无门拦截。**AC4「referenced ⊆ landed 自动生效」成立但作用域比声称的窄**（只覆盖模板源引用）。
+
+**处置**：AC37 的 AC1-3/5 仍成立（派生集含核、opt-in、冷启动可读）；**AC4 作用域需随 `gap-quay-init-loop-tick-doc-paths-reference-unlanded-plugin-loop`（F3 立案）修正**——门需覆盖消费方铺下文档的路径引用。此为 manager 自我更正的落点记录，AC37 状态暂留 done（缺陷已另案追踪）。
 
 reviewer: outer
 at: 2026-08-10
