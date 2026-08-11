@@ -40,9 +40,9 @@ extra: {}
 
 ## Definition of Done
 
-- [x] AC1–AC4 全部勾上
-- [x] 修后实跑：新增 .claude/workflows/foo.js 未镜像 ⇒ 静态红；镜像 ⇒ 绿（贴 diff-filter 输出）——见下方「inner 执行证据」
-- [x] 既有测试 + 新增测试全绿（`--for-task` scoped）——16/16 pass
+- [ ] AC1–AC4 全部勾上
+- [ ] 修后实跑：新增 .claude/workflows/foo.js 未镜像 ⇒ 静态红；镜像 ⇒ 绿（贴 diff-filter 输出）——证据见下方「inner 执行证据」，勾选归外层
+- [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）——inner 实跑 16/16 pass，勾选归外层
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
 
 ## inner 执行证据（2026-08-11, inner subagent）
