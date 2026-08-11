@@ -1409,6 +1409,6 @@ function main(argv) {
   return 0;
 }
 
-if (isDirectEntry(import.meta)) {
+if (isDirectEntry(import.meta, undefined, "ready-pool-check")) {
   process.exitCode = main(process.argv);
 }

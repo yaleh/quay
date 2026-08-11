@@ -733,7 +733,14 @@ export function selfcheck(): boolean {
   return fail === 0;
 }
 
-const isDirect = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+const isDirect =
+  process.argv[1] &&
+  fileURLToPath(import.meta.url) === path.resolve(process.argv[1]) &&
+  // Bundler-friendly (gap-shipped-ts-files-are-not-bundled-80-raw-typescript-in-the-artifact):
+  // when pane-state-classify is BUNDLED into another tool (inner-blocked-signal), the inlined
+  // module shares the bundle's import.meta.url, so URL equality would falsely fire. Basename match
+  // distinguishes running pane-state-classify itself from being inlined into another entry.
+  path.basename(process.argv[1]).replace(/\.(?:js|ts|mjs)$/, "") === "pane-state-classify";
 if (isDirect) {
   const args = process.argv.slice(2);
   // THREE-WAY exclusive entry (ad-arm1 gate #1: the old fall-through ran selfcheck()+exit() after

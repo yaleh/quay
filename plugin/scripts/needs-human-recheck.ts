@@ -266,6 +266,6 @@ export function main(argv: string[]): number {
   return 0;
 }
 
-if (isDirectEntry(import.meta)) {
+if (isDirectEntry(import.meta, undefined, "needs-human-recheck")) {
   process.exit(main(process.argv));
 }

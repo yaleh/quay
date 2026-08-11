@@ -373,7 +373,7 @@ function usage(): never {
   process.exit(2);
 }
 
-const isDirect = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+const isDirect = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]) && path.basename(process.argv[1]).replace(/.(?:js|ts|mjs)$/, "") === "it0-split-or-commit-check";
 if (isDirect) {
   const args = process.argv.slice(2);
   if (args.includes("--selftest")) {

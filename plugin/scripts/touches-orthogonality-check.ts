@@ -448,6 +448,6 @@ export async function main(argv) {
   return 1;
 }
 
-if (isDirectEntry(import.meta)) {
+if (isDirectEntry(import.meta, undefined, "touches-orthogonality-check")) {
   main(process.argv).then((code) => process.exit(code));
 }

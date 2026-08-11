@@ -1695,6 +1695,6 @@ export async function main(argv) {
 
 // ── Direct-entry check ───────────────────────────────────────────────────────────────────────────────
 
-if (isDirectEntry(import.meta)) {
+if (isDirectEntry(import.meta, undefined, "inner-blocked-signal")) {
   main(process.argv).then((code) => process.exit(code));
 }

@@ -1003,6 +1003,6 @@ export function main(argv) {
   return 0; // ALWAYS 0 — report-only, never a gate
 }
 
-if (isDirectEntry(import.meta)) {
+if (isDirectEntry(import.meta, undefined, "task-status-drift-check")) {
   process.exit(main(process.argv));
 }

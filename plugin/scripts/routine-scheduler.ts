@@ -164,4 +164,4 @@ export async function main(argv) {
   return 0;
 }
 
-if (isDirectEntry(import.meta)) { main(process.argv).then((c) => process.exit(c)); }
+if (isDirectEntry(import.meta, undefined, "routine-scheduler")) { main(process.argv).then((c) => process.exit(c)); }
