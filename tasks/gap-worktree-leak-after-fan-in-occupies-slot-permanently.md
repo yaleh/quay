@@ -67,6 +67,8 @@ invoke    `node --no-warnings --experimental-strip-types plugin/scripts/fast-mod
 control   泄漏清理后空槽恢复；A15 无泄漏累积；reconcile 不变；既有不回归
 resume    泄漏清理 / A15 补 remove / 合规产物 / 测试分步提交，任一步完成即写盘
 
+> **manager 2026-08-11 05:0x 验证锚补充**：把 git worktree remove 补进 A15 fan-in 序列后，判据是【每次 fan-in 之后 slots-remaining 不下降】；若某轮 fan-in 后它又开始单调下降，说明补的那一步没生效或有别的路径在漏。**这个判据比数 worktree 个数更直接**——它量的正是我们真正在乎的东西（空槽）。
+
 ## Dispatch review
 
 reviewer: outer
