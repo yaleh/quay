@@ -549,3 +549,14 @@ resource-aware。
 **根因**：d24e303c（manager 自己的 commit）把 SKILL.md 的 `orchestration/manager-loop-tick.md` 引用改成 `plugin/loop/manager-loop-tick.md`（裸机安装向量 arm-loop 指针）。develop 绿、integration 红。冲突本质 = AC3 机械判据 vs manager 的模板指针意图。
 **外层处置**：建任务 `gap-d24e303c-skill-refs-plugin-loop-violates-ac3`（todo, red-window）；manager 收件箱升级 outer-red-window-d24e303c-ac3-20260812-0336Z.md。外层不可直接修（plugin/ 授权边界外）。**同步与闭包仍被同一根阻塞：缺一次绿验证轮。**
 **选项**：① SKILL.md 引用改回 orchestration/（模板指针用注释携带）；② AC3 测试加 pack-上下文豁免；③ 回退 d24e303c 的 SKILL.md 改动。倾向①（贴合 AC3 语义、不丢 manager 意图）。
+
+
+## 2026-08-12 05:32Z — 结构性死锁：sync 需绿 ↔ 绿需 serial 标注 flaky 测试 ↔ 标注需派发 ↔ 派发被 .halt 挡；本机套件无法可靠绿
+**现象**：合并 vhs（45d1cde1，AC3/store 修复已含）后多次重跑套件（16 lanes × 2 + 8 lanes × 3），**每次失败集不同且全为长测试 flake**（gap-cli-gate-enforcement 38s / select-preflight 124s / acceptance.test 100s / it0 milestone 60s 等），**顺序隔离重跑全部通过**（5/5、37/37、36/36）。唯一确定性真失败 store.test AC5（vhs 新建 2 任务 title YAML 缺陷）**已修**。
+**根因**：长/负载敏感测试在任意并发下超时 flake（需 `@test-group serial` 标注，即 `gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests` 任务）；另 16 lanes 超 TasksMax=200、一次 suite scope OOM（MemoryMax=4G cgroup）、outer 进程第 4 次重启 kill runner。
+**死锁**：.halt「同步前不派发」↔ sync 需绿 ↔ 绿需 serial 标注任务（inner 派发）↔ 派发被 .halt 挡。**结构性，机械上无法自行解开**。
+**选项**：
+1. **B（推荐）**：走 vhs 已验证的 MERGE-TO-VERIFIED-COMMIT + --skip-freshness-gate 完成同步——产品代码 vhs r314 已验证（3361/0），外层增量仅 config/task（session-liveness/CLAUDE.md/tasks）；同步后 .halt 解除条件（同步完成）满足，serial 标注任务可随后正常派发。
+2. 人先解除 .halt 放行 serial 标注任务（inner 修 flaky 测试），绿后再同步——更稳但更慢。
+3. vhs 侧代跑验证 + 同步（vhs 环境稳定）。
+**外层倾向 1（B）**。已升级 manager 3 次（04:35 flakiness / 05:15 instability+OOM / 本条目）未获回应。**另：outer 进程反复重启（4 次）是需根因的基础设施问题**（瘫痪 Monitor/runner/可观测性）。

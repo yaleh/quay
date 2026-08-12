@@ -3,7 +3,7 @@ id: gap-d24e303c-skill-refs-plugin-loop-violates-ac3
 title: d24e303c 把 skills/{init,manager}/SKILL.md 的 manager-loop-tick 引用从
   orchestration/ 改成 plugin/loop/，破坏 quay-init-loop-consumer-doc-refs AC3（shipped
   docs/skills 必须零 plugin/loop/ 引用）——红窗真失败
-status: todo
+status: superseded
 labels:
   - gap
   - defect
@@ -15,7 +15,7 @@ extra: {}
 ---
 id: gap-d24e303c-skill-refs-plugin-loop-violates-ac3
 title: "d24e303c 把 skills/{init,manager}/SKILL.md 的 manager-loop-tick 引用从 orchestration/ 改成 plugin/loop/，破坏 quay-init-loop-consumer-doc-refs AC3（shipped docs/skills 必须零 plugin/loop/ 引用）——红窗真失败"
-status: todo
+status: superseded
 role: primitive
 labels:
   - gap
@@ -71,3 +71,7 @@ develop 上两文件均为 `orchestration/manager-loop-tick.md`（绿）；d24e3
 - `git show d24e303c -- plugin/skills/init/SKILL.md`（diff：orchestration/ → plugin/loop/）
 - `git show develop:plugin/skills/init/SKILL.md | grep manager-loop-tick`（develop 为 orchestration/ 路径）
 - 隔离重跑 `node --test plugin/test/quay-init-loop-consumer-doc-refs.test.mjs`（稳定复现 AC3 失败）
+
+## Superseded (2026-08-12 04:04Z)
+
+前提消失：vhs 侧已按 outer 选项 2 裁定落地（AC3 禁令窄化到「消费方铺设文档」，`plugin/skills/` 是 bundle-source 引用自身模板合法），修复提交 `791b7108`/`87b613ed`/`686b5540`，r314 全绿 3361 pass / 0 fail。已随 `git merge refs/remotes/vhs/integration`（45d1cde1）合入本仓。本任务作废，修法见 vhs 的 AC3 窄化（manager 邮件 manager-vhs-035915-...）。
