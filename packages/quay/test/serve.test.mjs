@@ -142,7 +142,6 @@ async function main() {
     `providers:\n  native:\n    enabled: true\n    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"\n    tasks_dir: "${tasksDir.replaceAll("\\", "\\\\")}"\n    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]\n    env:\n      QUAY_NATIVE_TASKS_DIR: "${tasksDir.replaceAll("\\", "\\\\")}"\n`
   );
 
-  const port = 41730 + (process.pid % 1000);
   const originalCwd = process.cwd();
   let server;
   try {
@@ -151,7 +150,8 @@ async function main() {
     // the isolated workspace so it resolves this test's own throwaway config,
     // not the real repo's .quay/config.yml.
     process.chdir(workspaceRoot);
-    server = await startServer({ port });
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
 
     // --- GET / (list) ---
     const list = await get(port, "/");
@@ -205,12 +205,12 @@ async function main() {
     seedTask(pfxTasksDir, "PFXA-1", { title: "Prefix A task", status: "todo", body: VALID_SECTIONS });
     seedTask(pfxTasksDir, "PFXB-1", { title: "Prefix B task", status: "done", body: VALID_SECTIONS });
 
-    const pfxPort = port + 1;
     const pfxOriginalCwd = process.cwd();
     let pfxServer;
     try {
       process.chdir(pfxWorkspaceRoot);
-      pfxServer = await startServer({ port: pfxPort });
+      pfxServer = await startServer({ port: 0 });
+      const pfxPort = pfxServer.address().port;
 
       // ?prefix=PFXA — should return only PFXA-1, not PFXB-1
       const filteredA = await get(pfxPort, "/?prefix=PFXA");
@@ -270,12 +270,12 @@ async function main() {
     const t1 = Date.now(); while (Date.now() - t1 < 50) { /* spin */ }
     seedTask(sortTasksDir, "SRT-C", { title: "Sort C (most recent)", status: "todo", body: VALID_SECTIONS });
 
-    const sortPort = port + 2;
     const sortOrigCwd = process.cwd();
     let sortServer;
     try {
       process.chdir(sortWorkspaceRoot);
-      sortServer = await startServer({ port: sortPort });
+      sortServer = await startServer({ port: 0 });
+      const sortPort = sortServer.address().port;
 
       // ?sort=updated: SRT-C (most recent) should appear before SRT-A (oldest).
       // Default (?sort=id) alphabetical order would be SRT-A, SRT-B, SRT-C.
@@ -369,12 +369,12 @@ async function main() {
       "## DoD\n- [ ] a sufficiently long definition-of-done line — NOT YET CHECKED\n";
     seedTask(ux3TasksDir, "UX3-2", { title: "Gate-blocked task (todo, AC has no checkboxes)", status: "todo", body: UNCHECKED_SECTIONS });
 
-    const ux3Port = port + 4;
     const ux3OrigCwd = process.cwd();
     let ux3Server;
     try {
       process.chdir(ux3WorkspaceRoot);
-      ux3Server = await startServer({ port: ux3Port });
+      ux3Server = await startServer({ port: 0 });
+      const ux3Port = ux3Server.address().port;
 
       // --- QX-015 (UQ-003): orientation banner removed by DIR-007 (iteration 10) ---
       // Banner was misleading (depicted needs-human as sequential step, not side-branch)
@@ -516,12 +516,12 @@ async function main() {
     seedTask(qx16TasksDir, "BUGONLY-1", { title: "Has only bug label", status: "todo", body: VALID_SECTIONS, labels: ["bug"] });
     seedTask(qx16TasksDir, "NOLAB-1", { title: "Has no labels", status: "done", body: VALID_SECTIONS });
 
-    const qx16Port = port + 5;
     const qx16OrigCwd = process.cwd();
     let qx16Server;
     try {
       process.chdir(qx16WorkspaceRoot);
-      qx16Server = await startServer({ port: qx16Port });
+      qx16Server = await startServer({ port: 0 });
+      const qx16Port = qx16Server.address().port;
 
       // --- QX-016 (CB-013): Web UI multi-label AND-filter ---
       // ?label=bug&label=cli should return only BOTH-1 (has both), not BUGONLY-1 (only bug)
@@ -591,12 +591,12 @@ async function main() {
     seedTask(qx20TasksDir, "TOGGLE-2", { title: "Alpha only task", status: "todo", body: VALID_SECTIONS, labels: ["alpha"] });
     seedTask(qx20TasksDir, "TOGGLE-3", { title: "Gamma search task", status: "done", body: VALID_SECTIONS, labels: ["gamma"] });
 
-    const qx20Port = port + 6;
     const qx20OrigCwd = process.cwd();
     let qx20Server;
     try {
       process.chdir(qx20WorkspaceRoot);
-      qx20Server = await startServer({ port: qx20Port });
+      qx20Server = await startServer({ port: 0 });
+      const qx20Port = qx20Server.address().port;
 
       // --- QX-020 (UQ-019): label-nav toggle semantics ---
       // With ?label=alpha&label=beta active, the label nav should offer toggle links.
@@ -708,12 +708,12 @@ async function main() {
       seedTask(qx23TasksDir, labelId, { title: `Label task ${i}`, status: "todo", body: VALID_SECTIONS, labels: [labelName] });
     }
 
-    const qx23Port = port + 7;
     const qx23OrigCwd = process.cwd();
     let qx23Server;
     try {
       process.chdir(qx23WorkspaceRoot);
-      qx23Server = await startServer({ port: qx23Port });
+      qx23Server = await startServer({ port: 0 });
+      const qx23Port = qx23Server.address().port;
 
       // --- QX-023 (CB-016): body search ---
       // ?q=xyzzy-unique-body-term must return BSRCH-1 (body match) but not BSRCH-2 (no match)
@@ -812,12 +812,12 @@ async function main() {
     // "freq-common"). The last ones alphabetically ("zzz-rare-x", "zzz-rare-y", "zzz-rare-z")
     // will be beyond position 25. Filter by "zzz-rare-z" to trigger the pin.
 
-    const qx26Port = port + 8;
     const qx26OrigCwd = process.cwd();
     let qx26Server;
     try {
       process.chdir(qx26WorkspaceRoot);
-      qx26Server = await startServer({ port: qx26Port });
+      qx26Server = await startServer({ port: 0 });
+      const qx26Port = qx26Server.address().port;
 
       // --- QX-026a (UQ-028): frequency sort puts most-used label first ---
       const freqPage = await get(qx26Port, "/");
@@ -887,12 +887,12 @@ async function main() {
     seedTask(qx28TasksDir, "HDNG-1", { title: "Heading-only body task", status: "todo", body: "## Proposal\n## Plan\n## AC\n## DoD\n" });
     seedTask(qx28TasksDir, "HDNG-2", { title: "Prose body task", status: "todo", body: "## Proposal\n## Plan\nThis line has xyzzy-prose-only-42z token.\n## AC\n## DoD\n" });
 
-    const qx28Port = port + 9;
     const qx28OrigCwd = process.cwd();
     let qx28Server;
     try {
       process.chdir(qx28WorkspaceRoot);
-      qx28Server = await startServer({ port: qx28Port });
+      qx28Server = await startServer({ port: 0 });
+      const qx28Port = qx28Server.address().port;
 
       // Search for "Proposal" — HDNG-1 must NOT match (headings stripped, no prose),
       // HDNG-2 must NOT match either (its prose is "xyzzy-prose-only-42z" — does not contain "Proposal").
@@ -961,12 +961,12 @@ async function main() {
       seedTask(qx34TasksDir, id, { title: `Task ${id}`, status: "todo", labels: [`rare-label-${String(i).padStart(2, "0")}`] });
     }
 
-    const qx34Port = port + 10;
     const qx34OrigCwd = process.cwd();
     let qx34Server;
     try {
       process.chdir(qx34WorkspaceRoot);
-      qx34Server = await startServer({ port: qx34Port });
+      qx34Server = await startServer({ port: 0 });
+      const qx34Port = qx34Server.address().port;
 
       // Test 1 (UQ-032): label count display — nav should show "common-label (3)"
       const homeResp = await get(qx34Port, "/");
@@ -1033,8 +1033,8 @@ async function main() {
     const qx37OrigCwd = process.cwd();
     try {
       process.chdir(qx37WorkspaceRoot);
-      const qx37Port = port + 11;
-      qx37Server = await startServer({ port: qx37Port });
+      qx37Server = await startServer({ port: 0 });
+      const qx37Port = qx37Server.address().port;
 
       // Unfiltered page: mixed-status-label should show count 5 (global total)
       const unfilteredResp = await get(qx37Port, "/");
@@ -1116,8 +1116,8 @@ async function main() {
     const qx41OrigCwd = process.cwd();
     try {
       process.chdir(qx41WorkspaceRoot);
-      const qx41Port = port + 12;
-      qx41Server = await startServer({ port: qx41Port });
+      qx41Server = await startServer({ port: 0 });
+      const qx41Port = qx41Server.address().port;
 
       // Search for the fenced code block content — should be found (SH-003 fix)
       const foundResp = await get(qx41Port, "/?q=bash-comment-token");
@@ -1167,8 +1167,8 @@ async function main() {
     const qx43OrigCwd = process.cwd();
     try {
       process.chdir(qx43WorkspaceRoot);
-      const qx43Port = port + 13;
-      qx43Server = await startServer({ port: qx43Port });
+      qx43Server = await startServer({ port: 0 });
+      const qx43Port = qx43Server.address().port;
 
       const homeResp = await get(qx43Port, "/");
       assert(homeResp.status === 200, "GET / returns 200 (QX-043 setup)");
@@ -1228,8 +1228,8 @@ async function main() {
     const qx46OrigCwd = process.cwd();
     try {
       process.chdir(qx46WorkspaceRoot);
-      const qx46Port = port + 14;
-      qx46Server = await startServer({ port: qx46Port });
+      qx46Server = await startServer({ port: 0 });
+      const qx46Port = qx46Server.address().port;
 
       // Page 1: search returns 25 results across 2 pages → banner shows "Page 1 of 2"
       const page1Resp = await get(qx46Port, "/?q=xyzzy-qx46&page=1");
@@ -1307,8 +1307,8 @@ async function main() {
     const pgszOrigCwd = process.cwd();
     try {
       process.chdir(pgszWorkspaceRoot);
-      const pgszPort = port + 15;
-      pgszServer = await startServer({ port: pgszPort });
+      pgszServer = await startServer({ port: 0 });
+      const pgszPort = pgszServer.address().port;
 
       // Default page size (20): all 5 tasks on page 1, "Page 1 of 1".
       const defaultResp = await get(pgszPort, "/");
@@ -1420,12 +1420,12 @@ async function main() {
     // task-store content, the DIR-001 "malformed frontmatter" category).
     fs.writeFileSync(path.join(badTasksDir, "BADFM-BAD.md"), "this file has no YAML frontmatter delimiters at all\n");
 
-    const badPort = port + 12;
     const badOrigCwd = process.cwd();
     let badServer;
     try {
       process.chdir(badWorkspaceRoot);
-      badServer = await startServer({ port: badPort });
+      badServer = await startServer({ port: 0 });
+      const badPort = badServer.address().port;
 
       // gap-one-unparseable-task-takes-down-the-whole-board: the behavior
       // CHANGED from M26-F4's original "clean 500" — the provider's task_list
@@ -1498,12 +1498,12 @@ async function main() {
     // Pure-data fixture (checkbox body rendered by renderMarkdown) → store write.
     seedTask(cbTasksDir, "CBX-1", { title: "Checkbox render task", status: "todo", body: CHECKBOX_BODY });
 
-    const cbPort = port + 17;
     const cbOrigCwd = process.cwd();
     let cbServer;
     try {
       process.chdir(cbWorkspaceRoot);
-      cbServer = await startServer({ port: cbPort });
+      cbServer = await startServer({ port: 0 });
+      const cbPort = cbServer.address().port;
 
       const cbResp = await get(cbPort, "/task/CBX-1");
       assert(cbResp.status === 200, `GET /task/CBX-1 returns 200 (got ${cbResp.status})`);
@@ -1584,12 +1584,12 @@ async function main() {
         "AC5: `quay task list --json` exposes extra.malformed=['missing-id'] for a missing-id task");
     }
 
-    const mPort = port + 18;
     const mOrigCwd = process.cwd();
     let mServer;
     try {
       process.chdir(mWorkspaceRoot);
-      mServer = await startServer({ port: mPort });
+      mServer = await startServer({ port: 0 });
+      const mPort = mServer.address().port;
 
       const list = await get(mPort, "/");
       assert(list.status === 200, "AC1: GET / returns 200 with a missing-id task present (not 500)");
@@ -1696,12 +1696,12 @@ async function main() {
       "# 外层 tick 记录\n\n| 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |\n|---|---|---|---|---|\n| 2026-08-03 05:45Z | `correct` | 测试 tick 行 | 在飞 OBS-A | 核实 X |\n| 2026-08-03 05:33Z | `no-action` | 更早 tick | - | - |\n"
     );
 
-    const obsPort = port + 22;
     const obsOrigCwd = process.cwd();
     let obsServer;
     try {
       process.chdir(obsWorkspaceRoot);
-      obsServer = await startServer({ port: obsPort });
+      obsServer = await startServer({ port: 0 });
+      const obsPort = obsServer.address().port;
 
       // AC6 baseline: snapshot the working tree before any render.
       const gitBefore = execFileSync("git", ["status", "--porcelain"], { cwd: obsWorkspaceRoot, encoding: "utf8" });

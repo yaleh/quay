@@ -651,7 +651,25 @@ async function main() {
         "",
       ].join("\n")
     );
-    const port = 41800 + (process.pid % 500);
+    // Port-collision fix (gap-serve-family-port-collision): the previous
+    // pid-derived port (base 41800 plus pid-modulo-a-range) overlapped other
+    // serve-family tests' ranges (e.g. serve-adversarial-eval [41720,42239])
+    // and collided deterministically under load. This test's PURPOSE is to
+    // verify an explicit --port is honored, so it must keep passing a real
+    // port number to the CLI (port 0 would forfeit the "exact port passed on
+    // the command line" contract). We obtain a genuinely-free number by
+    // probing with an ephemeral bind (bind 0 → read → close) instead of a
+    // pid-derived guess. The close→child-bind window is a tiny
+    // non-deterministic residual (TOCTOU) — vastly safer than the old
+    // deterministic overlap.
+    const port = await new Promise((resolve, reject) => {
+      const probe = http.createServer();
+      probe.once("error", reject);
+      probe.listen(0, "127.0.0.1", () => {
+        const p = probe.address().port;
+        probe.close(() => resolve(p));
+      });
+    });
     const child = (await import("node:child_process")).spawn(
       "node", [coreBin, "serve", "--port", String(port)],
       { cwd: serveWorkspaceRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }

@@ -69,16 +69,16 @@ async function startFixture({ seed = [] }) {
   makeConfig(workspaceRoot, tasksDir);
   const store = createStore(tasksDir);
   for (const { id, ...fields } of seed) store.write(id, { labels: [], ...fields });
-  const port = 42800 + (process.pid % 900);
   const origCwd = process.cwd();
   process.chdir(workspaceRoot);
   let server;
   try {
-    server = await startServer({ port });
+    server = await startServer({ port: 0 });
   } catch (err) {
     process.chdir(origCwd);
     throw err;
   }
+  const port = server.address().port;
   return { tasksDir, workspaceRoot, port, server, store, origCwd };
 }
 

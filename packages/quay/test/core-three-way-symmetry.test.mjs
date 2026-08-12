@@ -156,8 +156,8 @@ async function main() {
     // -- Web UI leg --
     const originalCwd = process.cwd();
     process.chdir(workspaceRoot);
-    const port = 41830 + (process.pid % 1000);
-    webServer = await startServer({ port });
+    webServer = await startServer({ port: 0 });
+    const port = webServer.address().port;
     process.chdir(originalCwd);
 
     const listPage = await get(port, "/");

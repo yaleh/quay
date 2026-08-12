@@ -109,12 +109,12 @@ async function main() {
       `      QUAY_GITHUB_REPO: "yaleh/quay"\n`
   );
 
-  const port = 42990 + (process.pid % 1000);
   const originalCwd = process.cwd();
   let server;
   try {
     process.chdir(workspaceRoot);
-    server = await startServer({ port });
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
 
     // --- GET / (list) — real GitHub-backed task gh-3 must appear ---
     const list = await get(port, "/");

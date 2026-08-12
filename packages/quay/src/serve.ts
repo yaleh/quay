@@ -89,8 +89,30 @@ export async function startServer({ port = 4173, host = "0.0.0.0" }: StartServer
   // bound all interfaces (0.0.0.0) by default, but the log line claimed `localhost`,
   // misleading the G7 precondition check ("reachable on 0.0.0.0, not localhost-only")
   // into reading it as a localhost-only binding when it was not.
-  server.listen(port, host, () => {
-    console.log(`quay serve: listening on http://${host}:${port}`);
+  //
+  // Port-collision fix (gap-serve-family-port-collision, 2026-08-12): two
+  // startServer lifecycle defects made the pid-derived test-port scheme necessary:
+  // (a) this function resolved BEFORE the bind completed — a caller could not read
+  // `server.address().port` back, so tests could not use the kernel-assigned
+  // ephemeral port (`port: 0`); (b) there was no 'error' handler, so a bind failure
+  // (EADDRINUSE) crashed the process with an unhandled 'error' event instead of a
+  // clean rejection. Both are fixed here: the promise resolves only once the
+  // 'listening' event fires (so `server.address().port` is valid immediately after
+  // `await startServer({ port: 0 })`), and a persistent 'error' handler turns bind
+  // failures into logged rejections. An explicit, user-supplied `port` is still
+  // honored exactly — `port: 0` is only the internal/test convention for asking the
+  // kernel to pick an ephemeral port.
+  server.on("error", (err) => {
+    console.error(`[quay serve] server error:`, (err as Error).stack || String(err));
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("listening", resolve);
+    server.once("error", reject);
+    server.listen(port, host, () => {
+      const addr = server.address();
+      const actualPort = addr && typeof addr === "object" ? addr.port : port;
+      console.log(`quay serve: listening on http://${host}:${actualPort}`);
+    });
   });
 
   // QN-031 (iteration 21): expose the underlying provider client so a caller
