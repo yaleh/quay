@@ -1,4 +1,4 @@
-// @test-group product
+// @test-group serial
 // The `goal-<id>` gate — criterion-as-contract enforcement (SPEC §3), the third gate shape
 // alongside `adr-<id>` (makeAdrGate, shell-out enforcement) and `doc-<id>` (makeDocumentContractGate,
 // in-process contracts). A goal record's `criterion` is a runnable shell command executed via the

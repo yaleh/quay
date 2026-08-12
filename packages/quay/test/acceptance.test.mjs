@@ -1,4 +1,4 @@
-// @test-group product
+// @test-group serial
 // QENG-2 — AC-as-runnable-meter: `quay gate` runs `task.extra.acceptance`.
 //
 // Layered per plan 9 (docs/plans/9-quay-acceptance-meter.md):
