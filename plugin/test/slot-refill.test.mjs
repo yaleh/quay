@@ -52,19 +52,20 @@ function makeWorkspace(tag) {
   return dir;
 }
 
-function writeTask(root, id, { status = "todo", labels = [], parent = null, body, selfTouch = true } = {}) {
+function writeTask(root, id, { status = "todo", labels = [], parent = null, role = null, body, selfTouch = true } = {}) {
   const fm = [
     "---",
     `id: ${id}`,
     `title: fixture ${id}`,
     `status: ${status}`,
+    role ? `role: ${role}` : null,
     "labels:",
     ...labels.map((l) => `  - ${l}`),
     `parent: ${parent}`,
     "extra:",
     "  schema: v1",
     "---",
-  ].join("\n");
+  ].filter((x) => x !== null).join("\n");
   // C8 SELF-TOUCH MODELING (gap-slot-refill-c8-reject-no-backfill): a real dispatchable task's
   // `## Touches` must contain `tasks/<id>.md` WITHOUT `(new)` — the C8 dispatch gate
   // (fast-mode-tick-core.md C8) the inner's A15 gate ⑤ applies pre-dispatch. Fixtures DEFAULT to a
@@ -427,6 +428,52 @@ test("ready candidate whose parent is not done ⇒ not recommended (deps-ready f
   assert.equal(r.pool, 1, "gap-child is ready and in the pool");
   assert.deepEqual(r.recommended, [], "undone-parent ready candidate is not dispatchable");
   assert.equal(r.should_refill, false);
+});
+
+// ── COMPOUND AGGREGATION (gap-compound-depsreadyfor-structural-deadlock AC2 + invariants) ────────────
+// (1) compound_parent_not_dispatchable: a `role: compound` parent is an AGGREGATE (done ⇔ all children
+//     done) — never leaf work — so it must NEVER be recommended and must be deferred with the explicit
+//     reason `compound-not-dispatchable`, NOT `self-touch-missing-c8` (its Touches delegate to children
+//     by convention — no_self_touch_false_negative).
+// (2) a READY child of a compound parent is deps-ready (the compound-parent edge is skipped) ⇒ it IS
+//     recommended — the deadlock direction broken on the dispatch path too.
+
+test("COMPOUND: a ready compound parent is never recommended; deferred compound-not-dispatchable, not self-touch-missing", (t) => {
+  const root = makeWorkspace("compound-norec");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // Ready compound parent with NO self-file (its Touches delegate to children by convention).
+  writeTask(root, "gap-compound", {
+    status: "ready", labels: ["gap"], role: "compound", selfTouch: false,
+    body: dispatchableBody(["- code/comp.ts (new)"]),
+  });
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 3 });
+  assert.equal(r.pool, 1, "compound parent is ready and in the pool");
+  assert.deepEqual(r.recommended, [], "compound parent must NEVER be recommended (aggregate, not leaf work)");
+  const reasons = (r.deferred || []).filter((d) => d.id === "gap-compound").map((d) => d.reason);
+  assert.ok(reasons.includes("compound-not-dispatchable"), "compound deferred with the explicit compound reason");
+  assert.ok(!reasons.includes("self-touch-missing-c8"), "compound must NOT be deferred as self-touch-missing (no false negative)");
+  assert.equal(r.should_refill, false);
+});
+
+test("COMPOUND: a READY child of a compound parent is recommended (compound-parent edge skipped)", (t) => {
+  const root = makeWorkspace("compound-child");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // Compound parent (ready, not done) + a READY child naming it. Pre-fix the child would be deferred
+  // deps-not-ready (parent not done) — the deadlock. Post-fix the compound-parent edge is skipped.
+  writeTask(root, "gap-compound", {
+    status: "ready", labels: ["gap"], role: "compound", selfTouch: false,
+    body: dispatchableBody(["- code/comp.ts (new)"]),
+  });
+  writeTask(root, "gap-compound-child", {
+    status: "ready", labels: ["gap"], parent: "gap-compound", selfTouch: true,
+    body: dispatchableBody(["- code/child.ts (new)"]),
+  });
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 3 });
+  assert.equal(r.pool, 2, "both compound parent and child are ready and in the pool");
+  assert.ok(r.recommended.includes("gap-compound-child"), "a child of a compound parent IS deps-ready and recommended (deadlock broken)");
+  assert.ok(!r.recommended.includes("gap-compound"), "the compound parent itself is still not recommended");
+  const reasons = (r.deferred || []).filter((d) => d.id === "gap-compound").map((d) => d.reason);
+  assert.ok(reasons.includes("compound-not-dispatchable"), "compound parent deferred with the explicit compound reason");
 });
 
 // ── AC3: recommended is production-disjoint (no two colliding candidates) ───────────────────────────
