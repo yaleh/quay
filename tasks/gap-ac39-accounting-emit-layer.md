@@ -43,7 +43,7 @@ inner:   complete=False  missing=[ready-pool-check --apply, slot-refill,
 - [x] AC2: **layer→mechanisms 映射表**——每层 emit 自己的机制读数（cap-from-gate/slot-refill 归 inner，closure-lag-check 归 outer）
 - [x] AC3: **occupancy.in_flight 三层统一**——三层 accounting-emit 都含 in_flight
 - [x] AC4: **AC40② 转正**——AC40② 随 AC39 修复转正（manager/outer 裸跑 complete=True，inner 以其真实调用 complete=True；AC40② 的转正记录在 manager-phase-goal.md，不在 Touches，留外层）
-- [ ] AC5: **既有不回归**——`--for-task` scoped 门绿（**⚠ 被越界机械必需产物阻断，见 Evidence——新增脚本触发 delivery-inventory-drift-gate，需重生成 outline §6 DELIVERY-INVENTORY 快照**）
+- [x] AC5: **既有不回归**——`--for-task` scoped 门绿（初跑被 inventory drift gate 阻断，inner 重生成 DELIVERY-INVENTORY 后 **91/91 绿**，见 Evidence）
 
 ## Definition of Done
 
