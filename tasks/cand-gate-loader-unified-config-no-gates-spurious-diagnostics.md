@@ -32,11 +32,11 @@ config.yml 有 `gates:` 节，故未触发；任何迁移后删掉 gates: 的工
 
 ## Acceptance Criteria
 
-- [ ] 复现：`loadWorkspaceGateMetadata(root)` 对一个只有 `providers:`/`loop:`、无 `gates:` 节的
+- [x] 复现：`loadWorkspaceGateMetadata(root)` 对一个只有 `providers:`/`loop:`、无 `gates:` 节的
   config.yml 产生含「unrecognized gate section 'providers'」的 `diagnostics`。
-- [ ] 修复后：无 `gates:` 节的统一 config.yml 不产生任何「unrecognized gate section」诊断
+- [x] 修复后：无 `gates:` 节的统一 config.yml 不产生任何「unrecognized gate section」诊断
   （legacy `.quay/gates.yml` 的顶层-as-gates-map 行为不变）。
-- [ ] 修复后 `gate-config-loader.test.mjs` / `gate-diagnostics.test.mjs` 保持绿。
+- [x] 修复后 `gate-config-loader.test.mjs` / `gate-diagnostics.test.mjs` 保持绿。
 
 ## Touches
 
@@ -44,3 +44,35 @@ config.yml 有 `gates:` 节，故未触发；任何迁移后删掉 gates: 的工
   gates.yml 源启用「顶层即 gates map」，对 config.yml 源无 gates: 时应返回空 config）
 - packages/quay/test/gate-config-loader.test.mjs
 - tasks/cand-gate-loader-unified-config-no-gates-spurious-diagnostics.md（自身：勾 AC + 贴证据）
+
+## Evidence
+
+**修复**：`packages/quay/src/gate/config/loader.ts` `parseGatesConfig` 的 else-branch 现在仅对
+legacy `.quay/gates.yml` 源（`srcFile` basename 为 `gates.yml`）启用「顶层即 gates map」；
+对 config.yml 源无 `gates:` 节时返回空 config，不再把 `providers`/`loop` 误报为未知 gate 节。
+
+**修复前复现**（`loadWorkspaceGateMetadata` 对无 gates 节 config.yml，stderr）：
+```
+[error] unrecognized gate section 'providers' — expected one of it0, adr, fixed, testPass, coverageFloor, redGreen; section ignored
+[error] unrecognized gate section 'loop' — expected one of it0, adr, fixed, testPass, coverageFloor, redGreen; section ignored
+```
+
+**修复后**：同输入 stderr 为空、diagnostics 数组为空、gates 为空；legacy gates.yml 顶层-as-gates-map
+与 config.yml `gates:` 节内 fail-loud 行为均不变（新增 4 条回归测试于 `gate-config-loader.test.mjs`）。
+
+**Scoped 验证**（worktree 根，`scripts/test.sh --for-task cand-gate-loader-unified-config-no-gates-spurious-diagnostics --allow-thin`，
+thin 因 `loader.ts` 无 basename 配对测试文件，见下）：
+```
+ℹ tests 89  ℹ pass 89  ℹ fail 0  (exit 0)
+```
+
+**AC3 点名的两个测试文件显式跑**：
+```
+gate-config-loader.test.mjs : tests 11, pass 11, fail 0
+gate-diagnostics.test.mjs   : tests 33, pass 33, fail 0
+gate-list-verbose.test.mjs  : tests 10, pass 10, fail 0
+```
+
+**thin 说明**：selector 按 basename 配对解析 Touches，`loader.ts`（basename `loader`）无
+`loader.test.mjs`，任务 `.md` 不解析为测试 → 1/3（0.33）< 0.5 → `test-selection-thin`；
+变化已由 Touches 直接列出的 `gate-config-loader.test.mjs` 覆盖，故以 `--allow-thin` 跑 scoped gate。
