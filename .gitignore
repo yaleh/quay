@@ -47,6 +47,13 @@ packages/quay/plugin/
 # 不假设内容持久). Same gitignored runtime-state family as gate-events.jsonl — a real manager→outer
 # delivery must never appear in `git status --porcelain`.
 **/.quay/outer-inbox/
+# gap-manager-inbox-runtime-state-not-content (2026-08-12): the MANAGER's file-inbox
+# (.quay/manager-inbox/) is the SAME runtime-state family as outer-inbox — machine-local message
+# state, must never be git-tracked. vhs fan-in e851eab1 wrongly imported 113 inbox files (99 from
+# the other machine's history) as tracked content, breaking the A15 "列目录判空" criterion
+# (mtime reset to merge time ⇒ looks like 99 unread). Same gitignored runtime-state family as
+# gate-events.jsonl / outer-inbox.
+**/.quay/manager-inbox/
 # gap-assert-clean-tree-premise-void-under-concurrent-writers (2026-08-07): the before-run
 # porcelain snapshots for the suite-AFTER DELTA assertions (assert-clean-tree.sh --snapshot /
 # tmux-leak-scan.sh --snapshot). Same gitignored runtime-state family as gate-events.jsonl — a

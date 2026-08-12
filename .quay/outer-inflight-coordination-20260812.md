@@ -1,39 +1,41 @@
-# outer 在飞协调序列（2026-08-12 19:13Z 落盘——ADR-009：须跨压缩存活）
+# outer 在飞协调状态（2026-08-12 19:37Z 刷新——ADR-009：须跨压缩存活）
 
-> 本文件是外层在飞协调状态的【持久载体】。压缩/新会话后先读此文件再决定动作。
-> 源：外层会话 902b4528（session 可能压缩/清空，此文件是锚）。
+> **本文件有效期 = 到下一次终态轮次为止，过期即重写。** 压缩/新会话后先读此文件再决定动作。
+> 源：外层会话 902b4528（session 可能饱和/压缩，此文件是锚）。
+> 上次写于 19:13Z，本次因 round 55 红 + SATURATED 于 19:37Z 刷新。
 
-## 当前阻塞：round 52 红（cli-import tsc 回归）→ 已修，round 53 在跑
+## 当前唯一阻塞：round 55 红 = cold-start recovery-branch 回归（inner 在修）
 
-- **根因**：cli-import-migration fan-in（7b5e0385）把 17 verb 搬进 src/cli/*，parseVerbless/parseFlags 无显式返回类型 ⇒ vf 推断为 `{}` ⇒ 73 个 TS2339。
-- **修复（inner）**：src/cli/shared.ts 加 `CliFlags = Record<string, any>` + context.ts + task-edit.ts，tsc=0 已验证。**commit 已落**（9c6b4efd + a1a001ae，含 message-bus tsc + dup frontmatter 修复）。
-- **round 53**（runId 086b8b3a，19:12 起）验证修复 + 那批额外修复。绿后 → 下一轮 batch-merge。
+- **现象**：round 55（27f46d47，vhs fan-in 验证轮）红在 `cold-start-skill.test.mjs`，隔离重跑 5 个 recovery 断言全红。
+- **根因（manager 结构判定，已验证）**：vhs merge 把 cold-start SKILL.md 的整节 **`### 0a. Mid-flight state check`**（路由判定）丢了。
+  round 54 有 / 现在无；`### 0b` 还在；keyword `recovery` 计数反增（3→5）——按关键词"更好"、按结构"没了"。
+- **修法（已回 inner）**：补回 `### 0a` 节（从 `git show 94a56054:plugin/skills/cold-start/SKILL.md` 取），**不是改测试**。
+- **等 inner 修完 → round 56 重验 → batch-merge**。
 
-## vhs-merge：已完整准备，等 inner 类型修后 rebase → fan-in
+## 已完成的弧线（不要再等/再做）
 
-- 分支 task/vhs-merge @ 9ef7ec8e（+ 1b77a057 原合并 + 9ef7ec8e fix）
-- **38 冲突全解**（live vhs 到 bf193276），6 闸全 PASS，负控制 PASS（bin/quay.ts=240 / src/cli=20 / 0 单体）
-- **待 inner 类型修落地 → vhs rebase 一次 → fan-in**（避免 bin/quay.ts 二次冲突）
-- **rebase 时必须做的**：A18→A19 改号（vhs 侧冷启动对账那条，A19 空闲）+ A10 嫁接（保 integration 结构 + vhs「别再 pgrep 不存在脚本」句）—— manager 裁定
+- ✅ **vhs-merge 全链闭环**：fan-in 27f46d47 落地（integration 94a56054→27f46d47，FF）、worktree 移除、分支删除、**冻结已解除**（freeze_violations 全程 0）。
+- ✅ **cli-import tsc 修复**：round 54 绿（4036/0，verifiedCommit=94a56054 含 c19e70a1）= 首个全量证据。
+- ✅ **并发写 FP 判决实验**：round 53 红（并发写 tick 文档）vs round 54 干净窗口绿——同一测试，证实 FP。
 
-## 三条 manager 裁定（已转告相关方）
+## 当前量
 
-1. **A18 语义撞号**（硬规则⑧）：vhs 副本 A18=冷启动对账 vs 源 A18=.halt 接管分析失败 → vhs 条【留】改号 A19
-2. **src:N 漂移前置**：gap-src-n-pointer-rot 必须等 vhs-merge 落地后再推导锚句（32/51 条 N>509 合并后 +10 行位移）
-3. **tsc 口径**：73=integration 基线 / 74=合并树含 vhs intent，修复后都=0
+- integration = 27f46d47，develop = 94a56054，**diverge 101 未动**（round 55 红阻塞 batch-merge）。
+- round 56 待 inner 修复后起跑（verifiedCommit 须含修复）。
+- **干净窗口纪律在效**：验证轮跑完前不向共享树提交。
 
-## 其余已立案任务（vhs-merge 落地后依次 dispatchable）
+## 已立案任务（round 56 绿后依次派发）
 
-- gap-ts-touching-fan-in-needs-typecheck-gate（Touches 含新增/移动 .ts ⇒ fan-in 前跑 ts-typecheck 闸）
+- gap-ts-touching-fan-in-needs-typecheck-gate（Touches 含 .ts ⇒ fan-in 前跑 ts-typecheck 闸）
 - gap-dispatch-gate-blind-to-inflight-merge-worktree（派发闸纳入 merge-worktree 冲突面）
-- gap-verification-round-load-fields-from-systemd（vhs-merge 落地后，避免 full-suite-runner 二次冲突）
-- gap-src-n-pointer-rot-unverifiable-coverage（vhs-merge 落地后）
+- gap-verification-round-load-fields-from-systemd（vhs-merge 已落地，可派发）
+- gap-src-n-pointer-rot-unverifiable-coverage（vhs-merge 已落地，可派发）
+- gap-suite-start-verifies-target-commit（verifiedCommit 起跑/读历史判据）
+- gap-concurrent-write-mutable-tree-false-positive-red（并发写 FP）
+- 覆盖缺口：合并验收 = diff --name-only ∩ 同名测试 ⇒ 必须跑（manager 建议，并入）
 
-## 冻结
+## 已知事项
 
-- manager-write-freeze.txt（10 路径）在效，vhs-merge 落地前
-- freeze_violations=0（manager 只读不写）
-
-## 已知 landmine（归 outer 修）
-
-- orchestration/session-liveness.env 的 SESSION_TRANSCRIPTS 指死会话 f8ef0c53（13:13 重启后），需更新到当前 id 或改动态解析
+- 对表工作：manager 源 orchestration/manager-tick-core.md vs 副本 plugin/loop/manager-tick-core.md = 17 差异块/72 行（A0/A3/A4/A7/A8/A10/A12/A14/A15/A16/A17，副本缺 A0b），round 55 后按完整 diff 做。
+- 冻结已解除，无在效冻结。
+- manager A4 同步（写 tick 文档）推迟到 round 56 后（干净窗口纪律）。
