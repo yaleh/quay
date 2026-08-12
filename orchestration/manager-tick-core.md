@@ -25,7 +25,7 @@
 | A7 | 套件末轮:读 `.quay/verification-round.jsonl`,**先按 `startedAt` 非空过滤再取末条** | ①单状态文件只答「此刻在跑什么」,不答「第 N 轮结果」(它每轮覆盖);②**该 jsonl 是异构日志,两种记录混写**:套件轮次 `{startedAt,durationMs,state,reason,…}` 与收尾轮次 `{at,suiteGreen,closed:[…]}`(实测 75/150 是后者)。**直接取末行会在末行恰为收尾记录时报 `state=None`,看起来像"空记录/记录缺陷",实则是我取错了类型**(2026-08-09 06:3xZ 亲历并误报过一次) (src:1513) |
 | A8 | `git status --porcelain \| wc -l` | 脏树 (src:342) |
 | A9 | `meta-cc query_session_content role=tool tool_name=Workflow` → `last(timestamp)` | §2.4c;>3 个 tick 周期未调用 ⇒ 写明「已停用/已替代/是缺陷」三选一 (src:901) |
-| A10 | **⛔ 动 monitor 前先读判准 ⑨（人 2026-08-10 12:0xZ 裁定）**——挂载/`TaskStop`/换实现/改判据/**改「怎么处置它发来的事件」的策略**,五类动作**动手前必须逐条读完 `manager-tick-criteria.md` 的 ⑨ 表(六次实证错误),并在当轮 tick-log 写明「已读 ⑨ + 本次动作不属其中哪一类(或属第 N 类,已规避)」;未写 = 未读**。**该表第 6 条就是我今天犯的:收到每条事件却一律回「无动作」——把「成因不可信」扩用成「事件不必看」,而【监视器照常发/我照常收/只是不读】在记录上与【我关掉了它】无法区分。** **仪器存活(两项合一)**:①我跑的 `session-liveness` 是不是旧版(逐行 `ps` 看进程与其脚本路径,C1) ②`Monitor` 任务是否还活着(**只认「它是否还在发事件」——`ps`/`TaskList` 对 Monitor 均不完备,判准 ⑨ 第 2、3 条**) | 版本落后 = 观测的是未修版;**本轮发过事件即为 Monitor 存活证据**(档案 §1.4/§1.4e) (src:37,499) |
+| A10 | **仪器存活 + manager 自己的 idle-watch（核判据指向真机制，gap-manager-cold-start-no-falsifiable-checklist AC3）**:①我跑的 `session-liveness` 是不是旧版(逐行 `ps` 看进程与其脚本路径,C1) ②**idle-watch 查法 = `plugin/scripts/monitor-mount-check.sh --json`（`mounted=true` + `targetOk=true`）+ `session-liveness.sh --once` 至少一行 `SESSION-STATUS` + Monitor 事件流**——**不是进程级 pgrep（idle-watch 不是独立脚本；真机制是 `session-liveness-mount.sh` + Monitor 工具任务）**;**别再 pgrep 一个不存在的脚本**（档案 §1.b 那次"判据指向不存在的 outer-liveness.sh"同型,第二次） | 版本落后 = 观测的是未修版;**本轮发过事件即为 Monitor 存活证据**(档案 §1.4/§1.4e) (src:37,499) |
 | A16 | **机件绕过自查**:数本会话里的裸 `tmux send-keys`,**按位置判定——命令位置(行首/`&&`/`;`/管道后)且不在引号内**,非 0 即本轮违规记账 | **首版按关键词匹配,首跑即 3 次假阳性**(我发出的消息正文、我统计脚本里的 grep 模式、台账 JSON 字符串)——**本仓库已解决过两次**(`drive-contract-check.ts`「by POSITION, never by keyword」/`test-framework-policy-check.ts`「strings that merely mention it do not count」),**我在指认「大家绕过已有机件」的同一轮里重造了已解决两次的反模式**,判定手法直接复用那两个 checker,不要重造。近3天按位置真调用 **332**(关键词 339,虚高 7),经机件 323——**大致各半**;分布 **我 263 / outer 56 / 其它 13**,**主要绕过者是我,不是 outer** (src:694) |
 | A12 | **记账两项合一**:①聚合升级项 + 资源仲裁与排序(三项目横向,**无新项也要写「无」**) ②本轮抛给人的「可自判」问题计数(机械计数,判据见 C8) | 档案 §1.c/§1.d/§⑧ (src:689,814) |
 | A17 | **审视者·低频前提抽查(每 20 轮一次,2026-08-10 人批准)**:随机抽 **3 条**硬约束/机件,核**其前提是否仍成立**;产出「被抽条目 + 核验结论」写进 tick-log 第六列 | **这是三层里此前没有的职责**——没有一层负责「定期质疑现有条文的前提是否还成立」;今晚三个 B 类发现(四处 Agent 禁令/`CLAUDE.md:204`/`@static-object` 指错)**全部由人的提问触发,无一由机制发现**。**退休判据白名单(封闭)**:只接受「理由失效(可测,如判准⑥ 答案恒定⇒零信息)」或「已被取代(有替代者,如 ruling F)」;**「最近没用」不是理由**——`nyf-semantic-judge` 全历史仅 1 次调用却是唯一被证明有价值的 workflow。默认处置=**待观察**,回看**全历史**不看近 N 天 (src:1244) |
@@ -50,7 +50,9 @@
   实证 2026-08-09 14:08-15:08:outer 5 次 tick 全判 `no-action`,而①②③在这 5 次里**每次都为真**(在飞 0~1 < cap 4、pool 11 < floor 16、nyf 17——nyf 这个数还是它自己 A10 每轮读出来的),
   欠 15 个强制动作交付 0 个。**我自己同期的 `no-action` 行同样没带这五条读数,是同一个洞**;
   人的原话:「不要再为愚蠢的行为做解释——先想清楚正确的行为是什么,再去看行为是否符合」。
-- **B4 哨兵清扫**:`CronList` → 删所有含 `[manager-tick]` 者 → 建一个。**绝不靠记住的 ID。** (src:954)
+- **B4 哨兵清扫 + cron 证据（AC4）**:`CronList` → 删所有含 `[manager-tick]` 者 → 建一个 → **把 CronList 结果追加记进 `<QUAY_GLOBAL_DIR>/manager/cron-evidence.jsonl`**（一行 (src:954)
+  `{"at":<ISO>,"atEpoch":<epoch>,"mechanism":"cron","sentinel":"[manager-tick]","cronListCount":<N>}`，N = CronList 中含哨兵的任务数）——注册表↔真 cron 由此可外部核实（`manager-arm-loop.sh --verify-cron`）；
+  **不记证据 = 「注册表说武装了」不可信（gap-manager-cold-start-no-falsifiable-checklist 缺陷 3）**。**绝不靠记住的 ID。**
 
 ## C. 硬约束(每条都已付过代价,理由见档案)
 
