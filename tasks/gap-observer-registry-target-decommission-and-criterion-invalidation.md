@@ -15,7 +15,7 @@ title: "no mechanism answers 'is this observer's target still alive/intentional,
   consumer was individually hand-diagnosed and hand-fixed by the manager tonight
   (stop, rescope, restart), with NO shared mechanism; manager 2026-08-06, filed
   per human direction to transfer to outer for class-level design"
-status: needs-human
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -43,6 +43,8 @@ extra:
     step-4b, can be resolved together."
 ---
 **type:** execution
+
+> **翻 done（人 2026-08-12 00:4x 裁定，A 组）**：代码已合入 integration 且被 r308-green 覆盖，AC18 复核 measure 通过。
 
 ## Proposal
 

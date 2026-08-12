@@ -5,7 +5,7 @@ title: .quay/inner-wakeup-heartbeat.json 字段收缩——本轮只写 3
   runIds/blocked/budgetHit/effectiveCap/agentDispatches 全消失；A3 前提=这是唯一回答「inner
   需要什么」的产物，缺 blocked[] ⇒ 无法判 inner 是否卡住（硬规则 6
   缺键=未查≠无阻塞）；处方=心跳字段集最小契约检查，防静默退化成一行自由文本
-status: needs-human
+status: done
 labels:
   - gap
   - defect
@@ -14,6 +14,8 @@ children: []
 extra: {}
 ---
 **type:** execution
+
+> **翻 done（人 2026-08-12 00:4x 裁定，A 组）**：代码已合入 integration 且被 r308-green 覆盖，AC18 复核 measure 通过。
 
 ## Proposal
 

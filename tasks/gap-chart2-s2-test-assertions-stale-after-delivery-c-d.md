@@ -4,7 +4,7 @@ title: chart2-s2 delivery-completeness test asserts stale evidence (both
   false/cov 0.0) since DELIVERY-C/D flipped it to both true — 12-day RED masked
   by 'modulo load-flake' phrasing; update 3 assertions to match real evidence +
   keep fail-closed negative control
-status: needs-human
+status: done
 labels:
   - gap
   - defect
@@ -13,6 +13,8 @@ children: []
 extra: {}
 ---
 **type:** execution
+
+> **翻 done（人 2026-08-12 00:4x 裁定，A 组）**：代码已合入 integration 且被 r308-green 覆盖，AC18 复核 measure 通过。
 
 ## Proposal
 

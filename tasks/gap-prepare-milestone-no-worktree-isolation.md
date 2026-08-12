@@ -1,15 +1,18 @@
 ---
 id: gap-prepare-milestone-no-worktree-isolation
 title: prepare-milestone has no per-milestone worktree isolation
-status: needs-human
+status: todo
 labels:
   - gap
   - defect
   - milestone-candidate
 extra:
   schema: v1
+  superseded: true
+  superseded_at: 2026-08-12
 ---
 **type:** execution
+> **SUPERSEDED / 作废（人 2026-08-12 00:4x 裁定，B 组）**：本任务引用 ADR-022 已物理删除的机制（prepare-milestone.js / execute-milestone.js 等），剩余 AC 要求针对已被删除的 pipeline 取证，**前提已不存在**——不是「完成」是「作废」。历史记录保留，不重开。引用已删机制：prepare-milestone.js + execute-milestone.js + milestone-worktree.ts。
 
 **ADR-022 RE-TRIAGE (2026-08-04, gap-ready-queue-still-lists-eight-tasks-targeting-retired-pipeline-files):**
 status `ready` → `needs-human`. This task is about `prepare-milestone.js`'s per-milestone worktree

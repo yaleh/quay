@@ -3,7 +3,7 @@ id: gap-quay-self-hosting-e2e-proof
 title: run quay:cold-start's AC8c six-key checklist end to end on quay's own
   repo and prove it self-certifies without a human — the capstone of quay
   self-hosting its own cold start
-status: needs-human
+status: todo
 parent: gap-quay-has-never-self-hosted-its-own-cold-start
 depends_on:
   - gap-pane-state-is-hashed-not-classified-so-needs-input-is-unobservable
@@ -18,6 +18,8 @@ extra:
 ---
 
 **type:** execution
+
+> **退回 todo（人 2026-08-12 00:4x 裁定，D 组）**：退回重排。AC16③ 路径，见父任务 compound 树。
 
 ## Proposal
 

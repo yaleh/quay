@@ -5,7 +5,7 @@ title: 空槽不是事件 ⇒ 槽位空闲 4、可派 11 却漏回填——「in
   gap-dispatch-evaluated-only-at-inner-tick-boundary-not-slot-release
   假设缺触发器，实测触发器存在（task-notification 唤醒）但醒来第一件事是 fan-in+报告不是 A11/A12/A13+回填；处方=按
   suite-state-trigger 模型做 slot-free 事件推送
-status: needs-human
+status: done
 labels:
   - gap
   - defect
@@ -15,6 +15,8 @@ children: []
 extra: {}
 ---
 **type:** execution
+
+> **翻 done（人 2026-08-12 00:4x 裁定，A 组）**：代码已合入 integration 且被 r308-green 覆盖，AC18 复核 measure 通过。
 
 ## Proposal
 

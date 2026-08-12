@@ -5,7 +5,7 @@ title: 合并后没删 worktree 的累积泄漏——fast-mode-telemetry:834/:89
   0）；inner A6 fan-in 序列含 worktree remove 但 outer A15 fan-in 没有 ⇒ 最近 fan-in 全在
   outer 侧执行故泄漏；处方=①清已合 worktree ②A15 fan-in 序列补 worktree remove ③slot-status 报
   occupied>cap 且存在【分支已合但 worktree 仍在】⇒ 该轮判不合规
-status: needs-human
+status: done
 labels:
   - gap
   - defect
@@ -15,6 +15,8 @@ children: []
 extra: {}
 ---
 **type:** execution
+
+> **翻 done（人 2026-08-12 00:4x 裁定，A 组）**：代码已合入 integration 且被 r308-green 覆盖，AC18 复核 measure 通过。
 
 ## Proposal
 

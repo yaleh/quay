@@ -1,7 +1,7 @@
 ---
 id: gap-prepare-milestone-no-size-aware-routing
 title: prepare-milestone applies uniform full Proposal+Plan synthesis to every task regardless of implementation scale
-status: needs-human
+status: todo
 labels:
   - gap
   - defect
@@ -13,9 +13,12 @@ children:
   - gap-prepare-milestone-no-size-aware-routing-C
 extra:
   schema: v1
+  superseded: true
+  superseded_at: 2026-08-12
 ---
 
 **type:** execution
+> **SUPERSEDED / 作废（人 2026-08-12 00:4x 裁定，B 组）**：本任务引用 ADR-022 已物理删除的机制（prepare-milestone.js / execute-milestone.js 等），剩余 AC 要求针对已被删除的 pipeline 取证，**前提已不存在**——不是「完成」是「作废」。历史记录保留，不重开。引用已删机制：prepare-milestone.js + execute-milestone.js。
 
 ## Proposal
 

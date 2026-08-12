@@ -3,7 +3,7 @@ id: DIR-119-D
 title: Literally wire phase-DAG Build, read-only audit shards, and deterministic
   Reconcile into execute-milestone.js; add real manifest phase/shard synthesis;
   fix Gate-failure task attribution
-status: needs-human
+status: todo
 labels:
   - milestone-candidate
   - human-steered
@@ -17,9 +17,12 @@ children:
 extra:
   dirStatus: applied
   schema: v1
+  superseded: true
+  superseded_at: 2026-08-12
 ---
 
 **type:** execution
+> **SUPERSEDED / 作废（人 2026-08-09 裁定 + manager 2026-08-12 复核）**：本任务引用的经典 pipeline（prepare-milestone.js / execute-milestone.js / composite-* / milestone-worktree.ts）已被 ADR-022 物理删除，剩余 AC 要求针对已删机制取证，**前提已不存在**。代码确实落地过（见任务体），但不是「完成」是「作废」——历史记录保留。
 
 **ADR-022 关闭（2026-08-09，manager 代写，人 17:4x 裁定关闭，随父任务 DIR-119 一并关闭）**
 

@@ -1,7 +1,7 @@
 ---
 id: gap-prerequisite-gates-prose-invisible-to-mechanisms
 title: "前置门散文化，任何机件都看不见——任务体把前置写成 prose（[[...]] wikilink + resume 前置四任务全 done），而 inner A15② 读 PARENT-DONE-IFF-CHILDREN（parent/child 边）、ready-pool author→ready 闸只验四件产物、派发前检查读依赖字段——三条路径都不看 prose 前置 ⇒ 只有 subagent 读正文才发现（代价=一个槽位空转一轮，且在 ready 池任何读数里不显形）；处方=前置落成真实关系边（parent/children 或 depends_on），author→ready 闸与派发前检查读同一字段，散文形态前置 fail-closed 晋升时即拦"
-status: needs-human
+status: done
 labels:
   - gap
   - defect
@@ -11,6 +11,8 @@ children: []
 extra: {}
 ---
 **type:** execution
+
+> **翻 done（人 2026-08-12 00:4x 裁定，A 组）**：代码已合入 integration 且被 r308-green 覆盖，AC18 复核 measure 通过。
 
 ## Proposal
 

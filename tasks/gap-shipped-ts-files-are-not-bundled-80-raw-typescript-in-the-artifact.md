@@ -10,7 +10,7 @@ title: "the shipped artifact carries 80 RAW .ts files — plugin's TypeScript is
   Node must support that flag; the asymmetry is unexplained — the same artifact
   contains both a bundled Core and unbundled plugin TypeScript; manager
   2026-08-06 filed per human direction after inspecting the package contents"
-status: needs-human
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -32,6 +32,8 @@ extra:
     reconciliation first."
 ---
 **type:** execution
+
+> **翻 done（人 2026-08-12 00:4x 裁定，A 组）**：代码已合入 integration 且被 r308-green 覆盖，AC18 复核 measure 通过。
 
 ## Proposal
 

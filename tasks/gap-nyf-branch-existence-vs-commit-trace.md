@@ -4,7 +4,7 @@ title: "ready-pool 的 not-yet-flipped 判据依赖 task/<id>
   分支是否存在且未合——分支一旦合并并删除，信号消失，任务又像崭新的 ready 工作（16 条幽灵池实证）；与 worktree
   泄漏同根形状：拿短暂产物（分支存在/worktree 存在）当持久事实（工作已落地/执行体存活）的信号，短暂产物一消失判据就静默翻转；处方=nyf
   判据换成持久证据：integration 存在 inner: <id> 或 fan-in: task/<id> 提交 ⇒ 工作已落地，不得再算作可派"
-status: needs-human
+status: done
 labels:
   - gap
   - defect
@@ -14,6 +14,8 @@ children: []
 extra: {}
 ---
 **type:** execution
+
+> **翻 done（人 2026-08-12 00:4x 裁定，A 组）**：代码已合入 integration 且被 r308-green 覆盖，AC18 复核 measure 通过。
 
 ## Proposal
 

@@ -5,7 +5,7 @@ title: taskWorkLanded 第三条信号 gitHistoryLanded 硬编码 master——两
   gitHistory 恒为假；散文 AC + 只改既有文件的任务（治理层大多数）三条信号全假 ⇒ workLanded=false ⇒ 永不判
   not-yet-flipped ⇒ 永远留 ready 池（closure 探针系统性少数 12 条）；处方=ref
   随两线模型走（integration/develop，保留「不算游离分支」原意）
-status: needs-human
+status: done
 labels:
   - gap
   - defect
@@ -15,6 +15,8 @@ children: []
 extra: {}
 ---
 **type:** execution
+
+> **翻 done（人 2026-08-12 00:4x 裁定，A 组）**：代码已合入 integration 且被 r308-green 覆盖，AC18 复核 measure 通过。
 
 ## Proposal
 

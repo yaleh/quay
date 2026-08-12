@@ -3,7 +3,7 @@ id: gap-split-session-liveness-signals-unblocks-lowconc
 title: lowconc 相被单文件 session-liveness-signals.test.mjs（216s >
   sum/3=152s）钉死墙钟（__GROUP__ capped=1）⇒ 拆成 3 个文件，lowconc 272→约
   152s（-120s，算术确定，无需先测）
-status: needs-human
+status: todo
 labels:
   - gap
   - defect
@@ -13,6 +13,8 @@ children: []
 extra: {}
 ---
 **type:** execution
+
+> **退回 todo（人 2026-08-12 00:4x 裁定，D 组）**：退回重排。AC16③ 路径，见父任务 compound 树。
 
 ## Proposal
 
