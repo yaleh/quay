@@ -54,6 +54,6 @@ extra: {}
 
 ## Touches
 
-- plugin/scripts/commit-message-verified-check.ts（新：提交消息 "verified" 断言需验证命令引用的机械检查）
-- plugin/test/commit-message-verified-check.test.mjs（检出「自称 verified 缺验证命令」的提交 + 负控制）
+- plugin/scripts/commit-message-verified-check.ts (new)（提交消息 "verified" 断言需验证命令引用的机械检查）
+- plugin/test/commit-message-verified-check.test.mjs (new)（检出「自称 verified 缺验证命令」的提交 + 负控制）
 - tasks/gap-commit-message-claims-verified-without-verification.md（自身：勾 AC + 贴证据）
