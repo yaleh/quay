@@ -92,7 +92,7 @@ extra: {}
 
 ## Contract
 
-measure   superseded_writable = `node --experimental-strip-types packages/quay-native/bin/quay-native.ts task_write <id> --status superseded` 的退出码
+measure   superseded_writable = `node --experimental-strip-types packages/quay-native/bin/quay-native.ts task_write <id> --status superseded` 的退出码 exit_code 值
 band      superseded_writable = 0（superseded 可经 API 写读）
 invariant superseded_terminal = 1（TRANSITIONS 含 superseded: forward null back null）
 invariant migration_done = 1（18 条迁 superseded，不再有 todo+SUPERSEDED 并存）
