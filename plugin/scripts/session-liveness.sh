@@ -1065,16 +1065,23 @@ session_pid() {  # 按窗口名寻址；pane 索引会漂。找 pane 本体或�
 #   动态（confident）> 配置；low/none → 配置（「会话 id 是配置不去推断」的既有单源语义保持）。
 #   /clear 与 --resume 这类「进程寿命与文件寿命解耦」的已知不可靠情形（文件头 :166-167 注释）——
 #   同一进程的 env 会话 id 可能不随 /clear 轮换、--resume 是旧文件新进程 —— 动态解析不自信，
-#   按配置走。真正的【重启】= 新进程 + 新 env 会话 id ⇒ 动态 confident ⇒ 自愈。
+#   按配置走。真正的【重启】= 新进程 + 新会话 id ⇒ 动态 confident ⇒ 自愈。
 #
 # 解析方法（按可靠度排序，见 _sl_dynamic_transcript）：
-#   A. 进程 env 的 CLAUDE_CODE_SESSION_ID（强信号 / confident）：claude 进程启动时把绑定的会话 id
-#      写进 env。读 /proc/<pid>/environ 得会话 id → transcript = $HOME/.claude/projects/<slug>/<id>.jsonl。
+#   A. ~/.claude/sessions/<pid>.json（PRIMARY / 权威，2026-08-12）：CC 自己维护的 pid→sessionId 映射。
+#      生产环境 claude 进程不导出 CLAUDE_CODE_SESSION_ID / CLAUDE_PROJECT_DIR（实测 /proc/<pid>/environ
+#      无这两个键）⇒ env 路径恒 none ⇒ 观察者回落到配置的（重启前）transcript ⇒ 恒假 OVERDUE / IDLE。
+#      sessions/<pid>.json 重启后立即正确（manager 曾用它做 --resume）。读 sessionId →
+#      transcript = $HOME/.claude/projects/<slug>/<id>.jsonl。防御性读取：文件缺失 / JSON 畸形 /
+#      无 sessionId ⇒ 落到 B。cwd（存在时）realpath 必须等于目标 root——防止把别的项目窗口的 claude
+#      会话 id 误当成此目标的（按 root 的 slug 拼会指向不存在的文件 ⇒ 心跳恒 0 ⇒ OVERDUE 永久静默 =
+#      假阴性，与本任务消灭的盲同类）。
+#   B. 进程 env 的 CLAUDE_CODE_SESSION_ID（SECONDARY / confident，存在时）：claude 进程启动时把绑定的
+#      会话 id 写进 env。读 /proc/<pid>/environ 得会话 id → transcript = $HOME/.claude/projects/<slug>/<id>.jsonl。
 #      交叉核对 CLAUDE_PROJECT_DIR（存在时）的 realpath 必须等于目标 root 的 realpath——防止把别的
-#      项目窗口的 claude 会话 id 误当成此目标的（按 root 的 slug 拼会指向不存在的文件 ⇒ 心跳恒 0 ⇒
-#      OVERDUE 永久静默 = 假阴性，正是本任务消灭的盲的同类）。env 给出会话 id 且项目匹配 ⇒ confident。
-#   B. newest .jsonl 启发式（弱信号 / low，绝不覆盖配置）：项目目录下最近的 .jsonl。多会话同目录时
-#      无法可靠区分哪个属于本窗口（除非经 env，而 env 已经由 A 查过）⇒ 只在【恰好一个】候选且 mtime
+#      项目窗口的 claude 会话 id 误当成此目标的。env 给出会话 id 且项目匹配 ⇒ confident。
+#   C. newest .jsonl 启发式（弱信号 / low，绝不覆盖配置）：项目目录下最近的 .jsonl。多会话同目录时
+#      无法可靠区分哪个属于本窗口（除非经 env，而 env 已经由 B 查过）⇒ 只在【恰好一个】候选且 mtime
 #      新时才报 low；多候选歧义 ⇒ none（任务要求：多候选/无法消歧 ⇒ 配置赢）。
 # 置信度语义：confident → 覆盖配置（restart 自愈）；low / none → 配置赢（单源语义保持）。
 
@@ -1082,10 +1089,32 @@ session_pid() {  # 按窗口名寻址；pane 索引会漂。找 pane 本体或�
 # （pid 由调用方 session_pid 解析，避免重复 tmux 调用）。输出两行：第一行置信度（confident|low|none），
 # 第二行候选路径（low/none 时可为空）。
 _sl_dynamic_transcript() {
-  local name=$1 root=$2 pid=$3 sid projdir slug recent_cnt recent_newest now m f p1 p2
+  local name=$1 root=$2 pid=$3 sid projdir slug recent_cnt recent_newest now m f p1 p2 cwd sessions_file
   [ -n "${pid:-}" ] || { echo "none"; echo ""; return 0; }
   slug=$(printf '%s' "$root" | tr '/' '-')
-  # 方法 A：进程 env 的 CLAUDE_CODE_SESSION_ID（权威）
+
+  # 方法 A：~/.claude/sessions/<pid>.json（PRIMARY / 权威，CC 维护的 pid→sessionId 映射）。
+  # 生产环境 claude 进程不导出 CLAUDE_CODE_SESSION_ID / CLAUDE_PROJECT_DIR，env 路径恒 none ⇒
+  # 观察者回落到配置的（重启前）transcript ⇒ 恒假 OVERDUE/IDLE。sessions/<pid>.json 重启后立即
+  # 正确。防御性读取：文件缺失 / JSON 畸形 / 无 sessionId ⇒ 落到方法 B。
+  sessions_file="$HOME/.claude/sessions/$pid.json"
+  if [ -r "$sessions_file" ]; then
+    sid=$(grep -o '"sessionId":"[^"]*"' "$sessions_file" 2>/dev/null | head -1 | cut -d'"' -f4)
+    if [ -n "$sid" ]; then
+      cwd=$(grep -o '"cwd":"[^"]*"' "$sessions_file" 2>/dev/null | head -1 | cut -d'"' -f4)
+      if [ -n "$cwd" ]; then
+        # 项目交叉核对（realpath 兼容符号链接）：cwd 不匹配 ⇒ 该进程属于别的项目，不是本目标。
+        p1=$(realpath "$cwd" 2>/dev/null || printf '%s' "$cwd")
+        p2=$(realpath "$root" 2>/dev/null || printf '%s' "$root")
+        if [ "$p1" != "$p2" ]; then
+          echo "none"; echo ""; return 0
+        fi
+      fi
+      echo "confident"; echo "$HOME/.claude/projects/$slug/$sid.jsonl"; return 0
+    fi
+  fi
+
+  # 方法 B：进程 env 的 CLAUDE_CODE_SESSION_ID（SECONDARY，存在时权威）
   if [ -r "/proc/$pid/environ" ]; then
     sid=$(tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null | sed -n 's/^CLAUDE_CODE_SESSION_ID=//p' | head -1)
     if [ -n "$sid" ]; then
@@ -1104,7 +1133,7 @@ _sl_dynamic_transcript() {
       echo "confident"; echo "$HOME/.claude/projects/$slug/$sid.jsonl"; return 0
     fi
   fi
-  # 方法 B：newest .jsonl（弱；多候选歧义 → none）。只取「恰好一个且 mtime 近」的候选报 low。
+  # 方法 C：newest .jsonl（弱；多候选歧义 → none）。只取「恰好一个且 mtime 近」的候选报 low。
   recent_cnt=0; recent_newest=""
   now=$(date +%s)
   while IFS= read -r f; do
@@ -1145,10 +1174,12 @@ _sl_configured_transcript_like() {
 # 只对「配置了 transcript 形心跳」的目标做动态覆盖；输出到全局 _sl_eff_transcript，并把动态解析的
 # 置信度/候选路径存 _sl_dyn_conf / _sl_dyn_path 供诊断。
 #   置信度 precedence（任务要求，注释在此钉死）：
-#     confident（窗口当前 claude 进程 env 的 CLAUDE_CODE_SESSION_ID + 项目匹配）⇒ 动态路径赢——
-#       重启自愈：新会话 id 的新 transcript 在下一轮被拾起；
-#     low / none（无进程 / env 无 id / 项目不匹配 / 无项目可核对 / 多候选歧义 / 启发式）⇒ 配置赢——
-#       /clear 与 --resume 等已知不可靠情形保持既有单源语义。
+#     confident（窗口当前 claude 进程经 ~/.claude/sessions/<pid>.json（主）或其 env 的
+#       CLAUDE_CODE_SESSION_ID（次）+ 项目匹配解析出会话 id）⇒ 动态路径赢——
+#       重启自愈：新会话 id 的新 transcript 在下一轮被拾起（生产 env 不导出 CLAUDE_*，主路径
+#       就是 sessions/<pid>.json）；
+#     low / none（无进程 / sessions 文件缺失或畸形 / env 无 id / 项目不匹配 / 无项目可核对 /
+#       多候选歧义 / 启发式）⇒ 配置赢——/clear 与 --resume 等已知不可靠情形保持既有单源语义。
 _sl_effective_transcript() {
   local name=$1 root=$2 pid=$3 cfg dynout
   cfg=$(_sl_configured_transcript_like "$name" "$root" || true)
