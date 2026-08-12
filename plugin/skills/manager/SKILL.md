@@ -305,9 +305,9 @@ allowed-tools: Bash, Read, Monitor
 `plugin/scripts/manager-start.sh`，它建独立 tmux 会话（`quay-manager`）+ 自己的家
 （`$QUAY_GLOBAL_DIR/manager/`）+ 武装 loop 锚点。启动 settings 在裸机取**出厂拷贝**
 `plugin/.claude/launch.settings.json`（npm 产物不带包根 `.claude/`，启动器回退到 plugin 出厂份；
-dev-tree 仍优先包根份——manager 角色 `claude`/`quay-manager` 两份一致）。武装锚点的 prompt 是指针：
-dev-tree/`--loop --manager` 消费项目指 `orchestration/manager-loop-tick.md`，裸机包指存在的那份
-`plugin/loop/manager-loop-tick.md`（AC4 不铺虚空武装器）。
+dev-tree 仍优先包根份——manager 角色 `claude`/`quay-manager` 两份一致）。武装锚点的 prompt 是指针：dev-tree/`--loop --manager` 消费项目指
+`orchestration/manager-loop-tick.md`；裸机包（无 orchestration/）由 `manager-arm-loop.sh`
+按存在性解析指针目标（AC4 不铺虚空武装器——指针解析在脚本内，SKILL 不引 bundle 源码路径）。
 
 ---
 

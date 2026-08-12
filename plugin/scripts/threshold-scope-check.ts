@@ -203,7 +203,13 @@ export function buildFileIndex(root: string): FileIndex {
 export function pathCandidates(token: string): string[] {
   const out: string[] = [];
   for (const w of token.split(/\s+/)) {
-    const w2 = w.replace(/^[`'"(]+/, "").replace(/[),;.]+$/, "");
+    let w2 = w.replace(/^[`'"(]+/, "").replace(/[),;.]+$/, "");
+    // A trailing `:NNN` is a LINE-NUMBER CITATION (`path.md:NNN`), not part of the path — the repo
+    // cites `quay-init.sh:1011` / `inner-brief-2026-08-04-restart.md:103` / `select-preflight.ts:113`
+    // everywhere. Strip it so the citation resolves to its base path (the file itself exists) instead
+    // of being misread as a `stale-path-ext` (stem `x` ext `md` vs candExt `md:16` false positive,
+    // round-312 CLAUDE.md:19). A genuinely-missing `path.md:NNN` still flags (base path missing).
+    w2 = w2.replace(/:\d+$/, "");
     if (w2.length < 3) continue;
     if (w2.startsWith("/") || w2.startsWith("~")) continue;
     if (!w2.includes("/")) {

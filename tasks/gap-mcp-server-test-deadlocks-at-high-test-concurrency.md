@@ -1,7 +1,7 @@
 ---
 id: gap-mcp-server-test-deadlocks-at-high-test-concurrency
 title: packages/quay/test/mcp-server.test.mjs 在 --test-concurrency=16 下死锁（ep_poll 持 socket 句柄不释放, 14+ 分钟无 CPU 进展, pcpu≈0.9%）——同机 conc=4 23.2s passed、orangevps conc=4 20.2s passed ⇒ 只在高并发触发, 是并发相关的资源竞争/死锁非环境缺失; 影响 16-32 核机器的并发验证, 建议修复
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -11,6 +11,8 @@ children: []
 extra: {}
 ---
 **type:** execution
+
+> **翻 done（outer 2026-08-12, r314-green 覆盖）**：代码合入 develop 686b5540（r314 green, 3361 pass/0 fail），AC 勾选 + measure 复核通过。
 
 ## Proposal
 

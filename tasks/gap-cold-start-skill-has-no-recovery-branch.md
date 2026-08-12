@@ -1,8 +1,11 @@
 ---
 id: gap-cold-start-skill-has-no-recovery-branch
 title: "quay:cold-start only knows how to start fresh — it has no branch for recovering a workspace with mid-flight state after a crash, which is what actually happened twice tonight"
-status: todo
+status: ready
 parent: gap-quay-has-never-self-hosted-its-own-cold-start
+depends_on:
+  - gap-send-keys-verified-hash-check-cannot-tell-typed-from-submitted
+  - gap-retire-inner-state-one-observer-targets-by-parameter
 labels:
   - gap
   - milestone-candidate
@@ -88,6 +91,7 @@ resume    分支骨架 + 三状态类接线 + 负控制分步提交
 
 ## Touches
 
+- tasks/gap-cold-start-skill-has-no-recovery-branch.md（自身：勾 AC + 贴证据）
 - plugin/skills/cold-start/SKILL.md
 - plugin/test/cold-start-skill.test.mjs
 

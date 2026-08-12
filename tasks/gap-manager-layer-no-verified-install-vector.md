@@ -1,7 +1,7 @@
 ---
 id: gap-manager-layer-no-verified-install-vector
 title: manager 层无已验证安装向量 — 真实第三方机器不可冷启动（交付缺口）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -12,6 +12,8 @@ children: []
 extra: {}
 ---
 **type:** execution
+
+> **翻 done（outer 2026-08-12, r314-green 覆盖）**：代码合入 develop 686b5540（r314 green, 3361 pass/0 fail），AC 勾选 + measure 复核通过。
 
 ## Proposal
 

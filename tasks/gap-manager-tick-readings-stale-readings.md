@@ -1,7 +1,7 @@
 ---
 id: gap-manager-tick-readings-stale-readings
 title: manager-tick-readings 两处静默陈旧（ticklog 只认旧格式陈旧命中 / liveness 跨主机恒 window-missing）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -11,6 +11,8 @@ children: []
 extra: {}
 ---
 **type:** execution
+
+> **翻 done（outer 2026-08-12, r314-green 覆盖）**：代码合入 develop 686b5540（r314 green, 3361 pass/0 fail），AC 勾选 + measure 复核通过。
 
 ## Proposal
 

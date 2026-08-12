@@ -1,7 +1,7 @@
 ---
 id: gap-compound-depsreadyfor-structural-deadlock
 title: compound 任务 depsReadyFor 结构性死锁 — parent 聚合语义被当前驱语义解（AC16③ 唯一机制堵点）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -11,6 +11,8 @@ children: []
 extra: {}
 ---
 **type:** execution
+
+> **翻 done（outer 2026-08-12, r314-green 覆盖）**：代码合入 develop 686b5540（r314 green, 3361 pass/0 fail），AC 勾选 + measure 复核通过。
 
 ## Proposal
 

@@ -120,8 +120,7 @@ documented reference from a genuine missing file:
 | `orchestration/outer-rulings-2026-08-04-A-F.md` | quay's outer rulings incl. ruling F (superseded-judgment provenance) — not a generic loop deliverable |
 | `orchestration/SPEC-cut-the-waiting.md` | quay's "cut the waiting" spec (referenced by fast-mode-loop-tick §4 dispatch form rationale) — not a generic loop deliverable |
 | `orchestration/REVIEW-cadence.md` | quay's daily-review cadence mechanism (referenced by the shipped manager skill as its cadence hook) — not a generic loop deliverable |
-| `orchestration/manager-loop-tick.md` | quay's manager operational tick doc (the shipped manager skill's §1.5/§1.6 rules are extracted from it) — not a generic loop deliverable |
-| `plugin/loop/manager-loop-tick.md` | the shipped manager tick TEMPLATE (the npm-pack bare-metal `quay manager start` cold-start vector's arm-loop pointer target — `plugin/loop/` ships in the pack but quay-init does NOT lay it into a project's orchestration/; the manager skill's cold-start vector references it as the pointer) — not a project-laid deliverable — declared so referenced ⊆ landed holds |
+| `orchestration/manager-loop-tick.md` | quay's manager operational tick doc (the shipped manager skill's §1.5/§1.6 rules are extracted from it; its consumer landing is the same `orchestration/` path the arm-loop pointer resolves to — the pack's factory template is a runtime detail of `manager-arm-loop.sh`, not a shipped-doc reference) — not a generic loop deliverable |
 | `orchestration/manager-tick-log.md` | quay's manager tick log — gitignored runtime telemetry the manager appends each tick (see `gap-manager-tick-mechanical-checks...`); referenced by the shipped manager-loop-tick template but NOT a loop deliverable — declared so referenced ⊆ landed holds |
 | `orchestration/manager-anchor-check.py` | quay's own manager anchor-check tool (referenced by the opt-in manager exec core, `loop/manager-tick-core.md`) — quay-specific, not a generic loop deliverable — declared so referenced ⊆ landed holds |
 | `orchestration/manager-` (glob) | the opt-in manager exec core's `orchestration/manager-*` glob (its own quay-local manager-layer files) — quay-specific development-process docs, not loop deliverables — declared so referenced ⊆ landed holds |
@@ -145,7 +144,6 @@ documented reference from a genuine missing file:
 <!-- reference-doc: orchestration/SPEC-isolation-and-resource-governance-2026-08-05.md -->
 <!-- reference-doc: orchestration/REVIEW-cadence.md -->
 <!-- reference-doc: orchestration/manager-loop-tick.md -->
-<!-- reference-doc: plugin/loop/manager-loop-tick.md -->
 <!-- reference-doc: orchestration/manager-tick-log.md -->
 <!-- reference-doc: orchestration/SYNTHESIS-four-gaps-2026-08-05.md -->
 <!-- reference-doc: orchestration/SPEC-three-layer-unified-architecture-2026-08-09.md -->
