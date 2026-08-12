@@ -33,11 +33,28 @@ extra: {}
 
 ## AC
 
-- [ ] AC1: 多批运行 `tests/pass/fail` = 各批之和（覆盖式不复现）
-- [ ] AC2: 单批运行行为不变（不回归）
-- [ ] AC3: `failures[]` 与 `tests/pass/fail` 不自相矛盾（有失败行 ⇒ fail≥1 或 cancelled≥1）
-- [ ] AC4: 新测试覆盖 (a)(b)(c)；`--for-task` scoped 门绿
-- [ ] AC5: 既有 full-suite-runner 测试全绿
+- [x] AC1: 多批运行 `tests/pass/fail` = 各批之和（覆盖式不复现）
+- [x] AC2: 单批运行行为不变（不回归）
+- [x] AC3: `failures[]` 与 `tests/pass/fail` 不自相矛盾（有失败行 ⇒ fail≥1 或 cancelled≥1）
+- [x] AC4: 新测试覆盖 (a)(b)(c)；`--for-task` scoped 门绿
+- [x] AC5: 既有 full-suite-runner 测试全绿
+
+## Evidence（inner invoke, 2026-08-12）
+
+**实现**：`plugin/scripts/full-suite-runner.ts` onLine 的 `tapPass/tapFail/tapCancelled` 从覆盖（`=`）改为累加（`+=`）——每个 `node --test` phase（serial→lowconc→main，test.sh:1107/1127/1142）各发一个 spec summary block，`tests` = 各 phase 之和（真实 ~3000），非最后一批。已实测 node:test spec reporter 每个进程恰发一个 summary block（green 与 fail 皆然，并发下不重复），累加无双计风险。
+
+**新增测试**（`plugin/test/full-suite-runner.test.mjs`，4 例）：
+- AC1/AC3 红轮多批：serial `fail 1` + main 全绿 ⇒ pass=9, fail=1, tests=10（旧代码 pass=5/fail=0，自相矛盾——round-12 形状）
+- AC1 绿轮多批：serial(3) + lowconc(7) ⇒ pass=10, tests=10（旧代码 7）
+- AC1/AC3 cancelled 多批：首批 cancelled 1 + 末批 0 ⇒ cancelled=1（旧代码被末批清零为 0）
+- AC2 单批：`# tests 5 / pass 5 / fail 0 / cancelled 0` ⇒ 记录不变（identity，无回归）
+
+**对抗验证**：4 个新测试在旧（覆盖式）runner 上全部失败（pass 5≠9 / 7≠10 / cancelled 0≠1），单批测试新旧皆过 ⇒ 测试真的钉住缺陷。
+
+**scoped 门**：`bash scripts/test.sh --for-task gap-verification-round-counter-overwrites-not-sums` ⇒ `ℹ tests 86 / ℹ pass 86 / ℹ fail 0 / ℹ cancelled 0`（`--for-task` scoped 静态检查 + 全部选中测试绿）。
+**既有测试**：`plugin/test/full-suite-runner.test.mjs` 全绿（86 pass，含 real-systemd 用例）；连带 `suite-execution-form-counter / trend-check / checker-cost / red-window-* / suite-state-trigger / measure-suite-reporter / measure-trend-check / accounting-emit / integration-batch-merge / known-load-sensitive` 全绿，无回归。
+
+**base 说明**：任务文件仅存在于 `integration`（`develop` 是 `integration` 的 40 提交祖先、无此任务文件），故 worktree 从 `integration` 起分支（与派发指令模板的 `develop` 默认值不同——按任务实际所在分支校正）。
 
 ## Definition of Done
 

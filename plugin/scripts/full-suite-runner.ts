@@ -1296,6 +1296,15 @@ export async function run(argv: string[]): Promise<number> {
   // AC6 (gap-no-criterion-records-its-own-cost-checker-cost-jsonl) — per-run pass/fail/cancelled
   // tallies from the TAP summary lines (`# pass N` / `# fail N` / `# cancelled N`), carried into the
   // append-only verification-round record so the suite's duration sequence is queryable by pass/fail.
+  // gap-verification-round-counter-overwrites-not-sums — these are ACCUMULATORS, not last-write-wins
+  // scalars: test.sh's FULL-SUITE default path runs node --test as THREE separate phases (serial →
+  // lowconc → main, scripts/test.sh:1107/1127/1142), each emitting its OWN spec/TAP summary block
+  // (`ℹ pass N` / `ℹ fail N` / `ℹ cancelled N`). The pre-fix `tapPass = Number(m[1])` overwrote on
+  // every block, so `tests` recorded only the LAST phase's counts (~145), never the suite total
+  // (~3000) — and a kill-on-red truncation that cut the stream before the final summary left
+  // tests=0 while failures[] had real content (round-12, 861s, 16 failures). ACCUMULATING across
+  // blocks yields the phase-sum (verified against the real reporter: each node --test process emits
+  // exactly one summary block).
   let tapPass = 0;
   let tapFail = 0;
   let tapCancelled = 0;
@@ -1316,16 +1325,20 @@ export async function run(argv: string[]): Promise<number> {
     logStream.write(line + "\n");
     // Keep the last non-empty stream line for the fail-closed catch-all synthesis (AC1).
     if (line.trim()) lastStreamLine = line;
-    // NOTE (# vs ℹ): this repo's measure-suite-reporter emits the info-glyph forms `ℹ pass N` /
-    // `ℹ fail N` / `ℹ cancelled N`, NOT the TAP `# pass N` forms — so the old `#`-only regexes
-    // never matched and verification-round.jsonl recorded tests/pass/fail=0 for every round (green
-    // AND red). Same family as the testsSeen `# tests` fix (42aad5fe); accept both prefixes.
+    // NOTE (# vs ℹ): test.sh's dual-reporter config (scripts/test.sh:204-207) puts node:test's
+    // built-in spec reporter on stdout, which emits the info-glyph forms `ℹ pass N` / `ℹ fail N` /
+    // `ℹ cancelled N` — NOT the TAP `# pass N` forms — so the old `#`-only regexes never matched
+    // and verification-round.jsonl recorded tests/pass/fail=0 for every round (green AND red). Same
+    // family as the testsSeen `# tests` fix (42aad5fe); accept both prefixes.
+    // gap-verification-round-counter-overwrites-not-sums — ACCUMULATE (+=) instead of overwrite (=):
+    // one summary block per node --test phase, and the verification-round `tests` must be the SUM
+    // across the phases that actually ran, never just the last phase's block (see the AC6 decl above).
     const passM = line.match(/^[#ℹ]\s*pass\s+(\d+)/);
-    if (passM) tapPass = Number(passM[1]);
+    if (passM) tapPass += Number(passM[1]);
     const failM = line.match(/^[#ℹ]\s*fail\s+(\d+)/);
-    if (failM) tapFail = Number(failM[1]);
+    if (failM) tapFail += Number(failM[1]);
     const cancelledM = line.match(/^[#ℹ]\s*cancelled\s+(\d+)/);
-    if (cancelledM) tapCancelled = Number(cancelledM[1]);
+    if (cancelledM) tapCancelled += Number(cancelledM[1]);
     // gap-verification-round-missing-phase-ms-breaks-cost-attribution AC2 — the fixed-overhead
     // phase timings (`__OVERHEAD__ <phase>_ms=N`, test.sh:909-918). Same stream-accumulation family
     // as tapPass/tapFail above (NOT a post-hoc log re-read — the logStream buffer may not be

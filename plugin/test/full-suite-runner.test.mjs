@@ -1334,6 +1334,141 @@ test("AC2 — a GREEN run's verification-round record omits failures (绿轮可�
   }
 });
 
+// ── gap-verification-round-counter-overwrites-not-sums: AC1-AC5 ────────────────────────────────────
+// test.sh's FULL-SUITE default path runs node --test as THREE phases (serial → lowconc → main,
+// scripts/test.sh:1107/1127/1142), each emitting its OWN spec-reporter summary block (`ℹ pass N` /
+// `ℹ fail N` / `ℹ cancelled N`). The pre-fix runner OVERWROTE on each block (tapPass = Number(m[1])),
+// so verification-round.jsonl recorded only the LAST phase's counts — a green round read tests≈145
+// (not the ~3000 total), and a truncated/kill-on-red round that cut the stream before a final
+// summary read tests=0 while failures[] had real content (round-12, 861s, 16 failures). These pin
+// the fix: the counters ACCUMULATE across blocks (verified against the real reporter — each
+// node --test process emits exactly ONE summary block).
+
+test("AC1/AC3 — multi-phase pass/fail/tests = the SUM of every block; a red round's tallies never contradict a non-empty failures[]", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-sumbatch-"));
+  // The round-12 contradiction shape: the failing phase (serial) emits fail 1 FIRST, then the main
+  // phase emits a fully-green block. Pre-fix overwrite: tapFail = 0 (last block), tests = 5 — but
+  // state=red with failures[] non-empty (self-contradiction). Post-fix: pass=9, fail=1, tests=10.
+  const suite = [
+    'echo "selected 2 files (groups=serial)"',
+    'echo "not ok 1 - boom"',
+    'echo "ℹ tests 5"',
+    'echo "ℹ pass 4"',
+    'echo "ℹ fail 1"',
+    'echo "ℹ cancelled 0"',
+    'echo "selected 5 files (groups=main)"',
+    'echo "ℹ tests 5"',
+    'echo "ℹ pass 5"',
+    'echo "ℹ fail 0"',
+    'echo "ℹ cancelled 0"',
+    "exit 1",
+  ].join("\n");
+  const { f, dir } = fakeSuite(suite);
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    assert.equal(code, 1, "runner exits 1 on red");
+    const vrf = path.join(root, ".quay", "verification-round.jsonl");
+    assert.ok(fs.existsSync(vrf), "verification-round.jsonl written");
+    const rec = JSON.parse(fs.readFileSync(vrf, "utf8").split("\n").filter((l) => l.trim())[0]);
+    assert.equal(rec.pass, 9, "pass = sum across phases (4+5), not the last phase's 5");
+    assert.equal(rec.fail, 1, "fail = sum across phases (1+0), not zeroed by the green last block");
+    assert.equal(rec.cancelled, 0, "cancelled = 0");
+    assert.equal(rec.tests, 10, "tests = pass+fail+cancelled = 10, not the last phase's 5");
+    assert.equal(rec.state, "red");
+    assert.ok(Array.isArray(rec.failures) && rec.failures.length >= 1, "red round record carries the failures[] array");
+    assert.ok(rec.fail >= 1 || rec.cancelled >= 1, `AC3 — a failure stream ⇒ fail ≥ 1 or cancelled ≥ 1 (got fail=${rec.fail}, cancelled=${rec.cancelled})`);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC1 green — a multi-phase GREEN run records tests = the sum of every phase block", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-sumbatch-green-"));
+  // Simulates the serial(3) + lowconc(7) phases on a green round: pre-fix the record read
+  // tests=7/pass=7 (last block only); post-fix tests=10/pass=10.
+  const suite = [
+    'echo "selected 1 files (groups=serial)"',
+    'echo "ℹ tests 3"',
+    'echo "ℹ pass 3"',
+    'echo "ℹ fail 0"',
+    'echo "ℹ cancelled 0"',
+    'echo "selected 4 files (groups=lowconc)"',
+    'echo "ℹ tests 7"',
+    'echo "ℹ pass 7"',
+    'echo "ℹ fail 0"',
+    'echo "ℹ cancelled 0"',
+    "exit 0",
+  ].join("\n");
+  const { f, dir } = fakeSuite(suite);
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, "runner exits 0 on green");
+    const rec = JSON.parse(fs.readFileSync(path.join(root, ".quay", "verification-round.jsonl"), "utf8").split("\n").filter((l) => l.trim())[0]);
+    assert.equal(rec.state, "green");
+    assert.equal(rec.pass, 10, "pass sums across phases (3+7)");
+    assert.equal(rec.fail, 0);
+    assert.equal(rec.cancelled, 0);
+    assert.equal(rec.tests, 10, "tests = 10, not the last phase's 7");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC1/AC3 — `ℹ cancelled N` accumulates across blocks too (a cancelled block is never zeroed by a later block)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-sumbatch-cancelled-"));
+  // cancelled lives in the FIRST block; the LAST block is cancelled-0. Pre-fix overwrite: tapCancelled
+  // = 0 and the aggregate red backstop (tapFail>0 || tapCancelled>0) never fired. Post-fix: cancelled=1.
+  const suite = [
+    'echo "ℹ tests 5"',
+    'echo "ℹ pass 4"',
+    'echo "ℹ fail 0"',
+    'echo "ℹ cancelled 1"',
+    'echo "ℹ tests 2"',
+    'echo "ℹ pass 2"',
+    'echo "ℹ fail 0"',
+    'echo "ℹ cancelled 0"',
+    "exit 1",
+  ].join("\n");
+  const { f, dir } = fakeSuite(suite);
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    assert.equal(code, 1, "runner exits 1 (a cancelled test is a failure verdict)");
+    const rec = JSON.parse(fs.readFileSync(path.join(root, ".quay", "verification-round.jsonl"), "utf8").split("\n").filter((l) => l.trim())[0]);
+    assert.equal(rec.cancelled, 1, "cancelled sums across blocks (1+0), not zeroed by the last block");
+    assert.equal(rec.pass, 6, "pass sums across blocks (4+2)");
+    assert.equal(rec.tests, 7, "tests = pass(6) + cancelled(1) = 7");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC2 — a single-phase run records the block's values unchanged (no regression)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-singlebatch-"));
+  // One block ⇒ accumulate() is the identity: the recorded values must equal the block's values
+  // exactly (a single node --test process emits exactly one summary block, so `+=` == `=`).
+  const { f, dir } = fakeSuite(GREEN_SUITE); // "# tests 5 / # pass 5 / # fail 0 / # cancelled 0"
+  try {
+    const child = runRunner({ root, command: `bash ${f}`, laneCount: 8 });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, "runner exits 0 on green");
+    const rec = JSON.parse(fs.readFileSync(path.join(root, ".quay", "verification-round.jsonl"), "utf8").split("\n").filter((l) => l.trim())[0]);
+    assert.equal(rec.state, "green");
+    assert.equal(rec.pass, 5, "single-block pass unchanged");
+    assert.equal(rec.fail, 0, "single-block fail unchanged");
+    assert.equal(rec.cancelled, 0, "single-block cancelled unchanged");
+    assert.equal(rec.tests, 5, "single-block tests unchanged");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("AC2/AC3 e2e — a `✖ <testname> (Nms)` spec-reporter failure line flips red with failures non-empty", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-specx-"));
   const { f, dir } = fakeSuite(
