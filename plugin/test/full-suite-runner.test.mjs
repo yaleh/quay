@@ -1395,7 +1395,7 @@ test("AC2 e2e — a RED suite whose test.sh hangs is killed after the red-grace 
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-killonred-"));
   const { f, dir } = fakeSuite('echo "not ok 1 - boom"; sleep 30'); // red detected, then hangs
   try {
-    const child = runRunner({ root, command: `bash ${f}`, env: { QUAY_TEST_RED_GRACE_MS: "800" } });
+    const child = runRunner({ root, command: `bash ${f}`, env: { QUAY_TEST_RED_GRACE_MS: "800", QUAY_TEST_KILL_ON_RED: "1" } });
     const { code } = await waitExit(child);
     const s = readState(root);
     assert.equal(s.state, "red", "the red conclusion stands");
@@ -1419,7 +1419,7 @@ test("AC2 e2e — a RED suite STILL PRODUCING OUTPUT is NOT killed on red-grace;
     'echo "not ok 1 - boom"; for i in $(seq 1 30); do echo "line $i - still running"; sleep 0.1; done; exit 1',
   );
   try {
-    const child = runRunner({ root, command: `bash ${f}`, env: { QUAY_TEST_RED_GRACE_MS: "800" } });
+    const child = runRunner({ root, command: `bash ${f}`, env: { QUAY_TEST_RED_GRACE_MS: "800", QUAY_TEST_KILL_ON_RED: "1" } });
     const { code } = await waitExit(child);
     const s = readState(root);
     assert.equal(s.state, "red", "the red conclusion stands");
@@ -1591,7 +1591,7 @@ test("AC2/AC3 e2e — a RED/killed round's archived log still carries stderr __O
       "sleep 5\n",
   );
   try {
-    const child = runRunner({ root, command: `bash ${f}`, env: { QUAY_TEST_RED_GRACE_MS: "300" } });
+    const child = runRunner({ root, command: `bash ${f}`, env: { QUAY_TEST_RED_GRACE_MS: "300", QUAY_TEST_KILL_ON_RED: "1" } });
     const { code } = await waitExit(child);
     assert.notEqual(code, 0, "runner exits non-zero on the red");
     const s = readState(root);
@@ -2060,14 +2060,13 @@ test("AC1 unit — buildSystemdRunArgv wraps a command in systemd-run --user --s
     "--scope",
     "--quiet",
     "-p",
-    "MemoryMax=4G",
-    "-p",
-    "TasksMax=200",
+    "MemoryMax=6G",
     "bash",
     "-c",
     "bash scripts/test.sh",
   ]);
   assert.ok(!argv.includes("CPUQuota="), "default argv carries NO CPUQuota — the cgroup has no CPU limit");
+  assert.ok(!argv.includes("TasksMax="), "default argv carries NO TasksMax — the cgroup has no task limit (人 2026-08-12 裁定③)");
   // a custom limit set flows through (explicit cpuQuota IS passed)
   const custom = buildSystemdRunArgv("true", { memoryMax: "64M", cpuQuota: "100%", tasksMax: "20" });
   assert.ok(custom.includes("-p") && custom.includes("MemoryMax=64M"));
@@ -2105,16 +2104,16 @@ test(
       const s = readState(root);
       assert.equal(s.state, "green");
       assert.ok(s.systemdRun, "the state carries the systemdRun limits (suite ran inside a cgroup scope)");
-      assert.equal(s.systemdRun.memoryMax, "4G");
+      assert.equal(s.systemdRun.memoryMax, "6G");
       assert.equal(s.systemdRun.cpuQuota, "");
-      assert.equal(s.systemdRun.tasksMax, "200");
+      assert.equal(s.systemdRun.tasksMax, "");
       // AC1 observable — the applied cgroup attributes (systemctl --user show) land in the state dir
       const evidence = path.join(root, ".quay", "suite-cgroup-evidence.txt");
       await poll(() => fs.existsSync(evidence), { timeoutMs: 10_000 });
       const txt = fs.readFileSync(evidence, "utf8");
       assert.match(txt, /scope_unit=run-[a-z0-9]+\.scope/, "the transient scope unit name is recorded (systemd names it run-<id>.scope — cgroup-derived)");
-      assert.match(txt, /MemoryMax=4294967296/, "MemoryMax=4G applied (bytes)");
-      assert.match(txt, /TasksMax=200/, "TasksMax=200 applied (some systemd reports EffectiveTasksMax, others only TasksMax)");
+      assert.match(txt, /MemoryMax=6442450944/, "MemoryMax=6G applied (bytes)");
+      assert.doesNotMatch(txt, /TasksMax=200/, "no TasksMax=200 passed (人 2026-08-12 裁定③: task limit canceled)");
       assert.match(txt, /CPUQuotaPerSecUSec=(max|infinity)/, "no CPUQuota passed ⇒ cgroup CPU unlimited (max/infinity per systemd)");
     } finally {
       fs.rmSync(root, { recursive: true, force: true });

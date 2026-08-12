@@ -334,6 +334,11 @@ const ABORT_PATTERNS: RegExp[] = [
 export const SUITE_MAX_RUNTIME_MS = Number(process.env.QUAY_TEST_SUITE_MAX_RUNTIME_MS ?? 45 * 60_000);
 export const SUITE_SILENCE_MS = Number(process.env.QUAY_TEST_SUITE_SILENCE_MS ?? 15 * 60_000);
 export const RED_GRACE_MS = Number(process.env.QUAY_TEST_RED_GRACE_MS ?? 30_000);
+// 人 2026-08-12 裁定①（早杀默认关闭）：kill-on-red 让红后 30s 在飞的所有文件记成 `passed=false` 并进
+// failures[] —— 失败集被「杀死时刻的在飞集合」污染（外部 SIGTERM/cgroup OOM 同效），造成「每轮浮出
+// 不同名单」的假象。缺省跑完完整套件、让所有文件自然结束，才能拿到未被截断的失败集合；早杀仅作
+// hung-child 兜底，显式 `QUAY_TEST_KILL_ON_RED=1` 才启用。
+export const KILL_ON_RED = process.env.QUAY_TEST_KILL_ON_RED === "1";
 // manager 2026-08-10 15:2x — failures[] was structurally capped at 1 (push inside the !redDetected
 // guard); now EVERY failure line pushes. Cap the list so a pathological round cannot grow it unbounded.
 export const MAX_RECORDED_FAILURES = 200;
@@ -759,16 +764,16 @@ export function checkResourceGate(root: string): { ok: boolean; output: string }
 // records the cgroup attributes as durable evidence (suite-cgroup-evidence.txt) — the AC1 observable.
 
 export interface SystemdRunLimits {
-  memoryMax: string; // -p MemoryMax=4G
+  memoryMax: string; // -p MemoryMax=<v> — "" = no memory limit
   cpuQuota: string; //  -p CPUQuota=<v> — "" = NO CPU limit (人 2026-08-11 裁定「取消 CPU 配额」; 400% 只是当时 4 核机上等价无限制的 measure-first 临时形态, 搬到多核机变成真限制 ⇒ 持久修法 = 不再传 -p CPUQuota=, 见 gap-systemd-run-cancel-cpuquota-keep-memory-guardrail + CLAUDE.md 推论二)
-  tasksMax: string; //  -p TasksMax=200
+  tasksMax: string; //  -p TasksMax=<v> — "" = NO task limit (人 2026-08-12 裁定③取消 TasksMax=200; 写死的 200 与 CPUQuota 同族, fork: EAGAIN 实证)
 }
 
-/** The suite's default cgroup scope limits. cpuQuota 默认空 = 不设 CPU 上限（人裁定）; MemoryMax=4G 是 01:07 OOM 后保留的内存护栏。 */
+/** The suite's default cgroup scope limits. cpuQuota/tasksMax 默认空 = 不设 CPU/任务上限（人裁定）; MemoryMax=6G（人 2026-08-12 裁定④给的数值, 04:45 真 cgroup OOM 实证 4G 不足, 宿主当时仍 13G 可用）。 */
 export const DEFAULT_SYSTEMD_RUN_LIMITS: SystemdRunLimits = {
-  memoryMax: "4G",
+  memoryMax: "6G",
   cpuQuota: "",
-  tasksMax: "200",
+  tasksMax: "",
 };
 
 /**
@@ -827,13 +832,13 @@ export function buildSystemdRunArgv(command: string, limits: SystemdRunLimits = 
     "--user",
     "--scope",
     "--quiet",
-    "-p",
-    `MemoryMax=${limits.memoryMax}`,
   ];
-  // cpuQuota === "" ⇒ do NOT pass -p CPUQuota= — the cgroup then has NO CPU limit (人裁定持久修法;
-  // a literal like "400%" only equals "unlimited" on the machine it was written for).
+  // memoryMax/cpuQuota/tasksMax 为空 ⇒ 不传对应 -p — cgroup 对该维不设限制（人裁定：不设限制就在机制上
+  // 不传该参数，字面值只在写它的机器上等价于无限制，CLAUDE.md 推论二）。
+  if (limits.memoryMax) argv.push("-p", `MemoryMax=${limits.memoryMax}`);
   if (limits.cpuQuota) argv.push("-p", `CPUQuota=${limits.cpuQuota}`);
-  argv.push("-p", `TasksMax=${limits.tasksMax}`, "bash", "-c", command);
+  if (limits.tasksMax) argv.push("-p", `TasksMax=${limits.tasksMax}`);
+  argv.push("bash", "-c", command);
   return argv;
 }
 
@@ -1379,10 +1384,10 @@ export async function run(argv: string[]): Promise<number> {
       // capped to keep a pathological round from unbounded growth.
       if (!redDetected) {
         redDetected = true;
-        // AC2 kill-on-red: once judged red, let the suite collect its failing-tests summary for RED_GRACE_MS,
-        // then kill the child tree if it STILL hasn't exited — a red suite whose test.sh hangs (a node --test
-        // subprocess stuck) must not leak the runner + single-flight flock (round-164).
-        if (!redGraceArmed) {
+        // AC2 kill-on-red (人 2026-08-12 裁定①：默认 OFF — 早杀把「在飞于杀死时刻」的文件记成 passed=false，
+        // 污染失败集；显式 QUAY_TEST_KILL_ON_RED=1 才启用 hung-child 兜底杀)。关闭时红仍即时翻 state=red
+        // reason=failed + 记 failures，但套件继续跑到自然结束（未截断的失败集）。
+        if (KILL_ON_RED && !redGraceArmed) {
           redGraceArmed = true;
           const rescheduleOrKill = () => {
             if (runDone) return;

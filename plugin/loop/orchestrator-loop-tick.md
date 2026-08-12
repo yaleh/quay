@@ -819,7 +819,7 @@ red 时：
 - `suite_duration < 3 分钟` ⇒ **下放 inner 各任务自己跑**（批概念彻底消除）。
 规则在内外层 loop 文档各写一份；每次全量 suite 的 `durationMs` 就是判定输入。
 
-**三块消除批次**：本条是 **(a) 套件块**；收尾/记账 **(b) 块**；AC/证据 **(c) 块**。三块合起来，inner
+**三块消除批次**：本条是 **(a) 套件块**；收尾/记账 **(b) 块** = `gap-closure-sync-is-the-true-batch-boundary-move-bookkeeping-to-outer-async`（已落地）；AC/证据 **(c) 块** = `gap-closure-could-not-run-in-task-grant-self-touches-for-ac-and-invoke-evidence`（在队列）。三块合起来，inner
 侧只剩「执行 → 合并」，没有任何批次同步点。
 
 ### 1c. 重锚转发（re-anchor，强制——机制不是散文）
