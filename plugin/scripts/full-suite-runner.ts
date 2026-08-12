@@ -551,6 +551,20 @@ export interface SuiteRoundRecord {
   serial_phase_ms?: number;
   lowconc_phase_ms?: number;
   main_phase_ms?: number;
+  /**
+   * gap-ceiling-floor-ms-not-landed-in-verification-round AC1/AC2 — the group floor + capped-file
+   * list from measure-suite-reporter's `__CEILING__ <path> duration_ms=<dur> floor_ms=<floor>
+   * 封顶者/该拆` lines (emitted per capped file when the phase's concurrency > 1 — every real
+   * phase runs cc>1: serial=2 / lowconc=3 / main=8, so any phase can cap). `floor_ms` is the
+   * reporter's GROUP floor (max(sum/concurrency, longest file)) carried verbatim on every
+   * __CEILING__ line of that group; the record keeps the DISTINCT floors across all capped groups,
+   * first-seen order (serial → lowconc → main) — 各相, no phase's reading overwritten. `ceiling`
+   * is the complete 封顶者清单 across all capped phases, in stream order, paths EXACTLY as the
+   * reporter emitted them (no drift, no normalization). AC3 — a round with NO __CEILING__ lines
+   * omits BOTH fields (never fabricates empty/null), same contract as the *_phase_ms fields above.
+   */
+  floor_ms?: number[];
+  ceiling?: string[];
 }
 
 /**
@@ -1331,6 +1345,17 @@ export async function run(argv: string[]): Promise<number> {
   // were actually emitted are present (a truncated kill-on-red round has no main_phase line).
   const phaseMs: Record<string, number> = {};
 
+  // gap-ceiling-floor-ms-not-landed-in-verification-round AC1/AC2/AC3 — accumulate the
+  // measure-suite-reporter's `__CEILING__ <path> duration_ms=<dur> floor_ms=<floor> 封顶者/该拆`
+  // lines (stream-accumulation family: the __OVERHEAD__ phaseMs above, NOT a post-hoc log re-read).
+  // floorMsSeen keeps the DISTINCT group floors across capped groups (each group/phase shares one
+  // floor on every __CEILING__ line — serial→lowconc→main run order ⇒ first-seen order = phase
+  // order); ceilingFiles keeps every capped path in stream order. Both stay empty until a
+  // __CEILING__ line actually fires — a scoped/legacy run with no reporter emits neither, and the
+  // record must not fabricate them (AC3).
+  const floorMsSeen: number[] = [];
+  const ceilingFiles: string[] = [];
+
   const onLine = (line: string) => {
     logStream.write(line + "\n");
     // Keep the last non-empty stream line for the fail-closed catch-all synthesis (AC1).
@@ -1355,6 +1380,18 @@ export async function run(argv: string[]): Promise<number> {
     // flushed at append time, and the stream already carries the identical lines the log gets).
     const overheadM = line.match(/^__OVERHEAD__\s+([A-Za-z0-9_]+)_ms=(\d+)$/);
     if (overheadM) phaseMs[overheadM[1]] = Number(overheadM[2]);
+    // gap-ceiling-floor-ms-not-landed-in-verification-round AC1/AC2 — parse the reporter's
+    // `__CEILING__ <path> duration_ms=<dur> floor_ms=<floor> 封顶者/该拆` line (^ anchored — the
+    // ^__PERFILE__ self-match family: a PASSING test whose NAME quotes the shape is ✔-prefixed and
+    // must not match). Non-greedy path capture up to ` duration_ms=` keeps the path verbatim as the
+    // reporter emitted it (full path, no normalization — AC2 no-drift contract); floor_ms is the
+    // group floor, identical on every __CEILING__ line of that group.
+    const ceilingM = line.match(/^__CEILING__\s+(.+?)\s+duration_ms=(\d+(?:\.\d+)?)\s+floor_ms=(\d+(?:\.\d+)?)/);
+    if (ceilingM) {
+      ceilingFiles.push(ceilingM[1]);
+      const floor = Number(ceilingM[3]); // group 2 is duration_ms; group 3 is floor_ms
+      if (!floorMsSeen.includes(floor)) floorMsSeen.push(floor);
+    }
     // gap-full-suite-state-red-no-failure-detail-static-check-invisible AC2/AC4 — accumulate
     // static-check detail lines on EVERY line (the `VIOLATION:` / summary / ratchet lines appear
     // even on passing runs; they only become failure-relevant when a STATIC_CHECK_FAILURE_PATTERN
@@ -1767,6 +1804,13 @@ export async function run(argv: string[]): Promise<number> {
     ...(phaseMs.serial_phase !== undefined ? { serial_phase_ms: phaseMs.serial_phase } : {}),
     ...(phaseMs.lowconc_phase !== undefined ? { lowconc_phase_ms: phaseMs.lowconc_phase } : {}),
     ...(phaseMs.main_phase !== undefined ? { main_phase_ms: phaseMs.main_phase } : {}),
+    // gap-ceiling-floor-ms-not-landed-in-verification-round AC1/AC3 — the reporter's per-group
+    // floors (各相) + capped-file list. Both appear together (every __CEILING__ line carries a
+    // floor_ms, so floorMsSeen non-empty ⟺ ceilingFiles non-empty), and BOTH are omitted on a
+    // round with no __CEILING__ lines (AC3: no fabricated empty/null — the same absent-field
+    // contract the *_phase_ms spreads above follow).
+    ...(floorMsSeen.length > 0 ? { floor_ms: floorMsSeen } : {}),
+    ...(ceilingFiles.length > 0 ? { ceiling: ceilingFiles } : {}),
   });
   // NOTE: appendVerificationRound above is the ONE suite-duration append per run (the
   // checker-cost.test.mjs AC6 contract: two runs ⇒ exactly two verification-round.jsonl lines).
