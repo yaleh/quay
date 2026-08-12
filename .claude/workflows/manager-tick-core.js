@@ -87,8 +87,14 @@ print('suite=%s/%s dur=%s age=%smin'%(d['state'],d.get('reason'),('%.1fs'%(ms/10
 #   (b) 同族形状——**读数在它最有价值的那个状态下不可用**，与"闸门只在没事时才绿"同构。
 git rev-list --left-right --count develop...integration | awk '{print "diverge="$1"/"$2}'
 echo "commits30m=$(git log --oneline --all --since='30 minutes ago' | grep -vc '^[0-9a-f]* manager:')"
-echo "mon_procs=$(ps -eo args | grep -cE 'SUITE-TERMINAL|full-suite-state\.json' | tr -d ' ') （枚举而非布尔——见下方注释）"
-ps -eo pid,etime,args | grep -E 'SUITE-TERMINAL|full-suite-state\.json' | grep -v grep | sed 's/^\(.\{110\}\).*/\1…/'
+mon_list=$(ps -eo pid,ppid,etime,args --no-headers | grep -E 'SUITE-TERMINAL|full-suite-state\.json' | grep -vE 'shell-snapshots|ugrep|grep -E')
+echo "mon_procs=$(printf '%s' "$mon_list" | grep -c .) （从下面这份清单数出来的；已排除本命令自身）"
+printf '%s\n' "$mon_list" | sed 's/^\(.\{110\}\).*/\1…/'
+# ^ 2026-08-12 23:5x 修：旧写法 ps -eo args | grep -cE … 把【我自己这条命令行】也数进去
+#   （实测同刻：该计数 4–5，而精确枚举只有 1 个真实监视器 + 我自己的 ugrep；下一 tick 真值为 0 时它仍报非零）
+#   ⇒ 它恒 >=1、永远取不到「零监视器」这个值 ⇒ 硬规则 4「结构上不可能取假的量不是测量」。
+#   与同日修掉的 pgrep -c node 恒 0 是同一族的镜像：一个恒零、一个恒非零，都携带零信息。
+#   新写法：先取清单再从清单数，条数与清单必然一致（③ 要求二者都写进 tick-log），且空清单时计数为 0（可取假）。
 python3 orchestration/manager-anchor-check.py
 if [ -f .quay/manager-write-freeze.txt ]; then
   fz=$(grep -v '^#' .quay/manager-write-freeze.txt | grep -v '^$')
