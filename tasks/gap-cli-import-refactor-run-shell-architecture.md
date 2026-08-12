@@ -1,7 +1,7 @@
 ---
 id: gap-cli-import-refactor-run-shell-architecture
 title: CLI import 改造（run()/shell 架构）——派生地板主杠杆
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
@@ -63,3 +63,10 @@ shell: bin/*.ts ≈ 30 行                            // argv → run() → proc
 - [ ] run()/shell 架构 + 逐命令搬迁的 golden-replay 证据 + 实际耗时贴出（见 Evidence）
 - [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
+
+## Touches
+
+- packages/quay/bin/quay.ts（main() → run(argv, ctx) 抽出，shell 薄壳）
+- packages/quay/src/（命令实现迁入的可测纯函数）
+- packages/quay/test/cli.test.mjs（命令行为 → import 直调 run()，零派生）
+- tasks/gap-cli-import-refactor-run-shell-architecture.md（自身：勾 AC + 贴证据）

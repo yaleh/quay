@@ -1,7 +1,7 @@
 ---
 id: gap-split-three-phase-floor-files
 title: 拆三相 floor 文件（最长单文件）——下界 267s → 200s
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
@@ -49,3 +49,11 @@ extra: {}
 - [ ] 拆后 floor 下降 + 总耗时贴出（见 Evidence）
 - [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
+
+## Touches
+
+- packages/quay/test/install-config-driven-e2e.test.mjs（serial floor 107s，拆小）
+- plugin/test/session-liveness-signals-thresholds.test.mjs（lowconc floor 88.2s，拆小）
+- experiments/quay-perpetual-stream/test/select-preflight.test.mjs（main floor 72s，拆小）
+- 上述拆分产出的新测试文件（各拆分子文件）
+- tasks/gap-split-three-phase-floor-files.md（自身：勾 AC + 贴证据）

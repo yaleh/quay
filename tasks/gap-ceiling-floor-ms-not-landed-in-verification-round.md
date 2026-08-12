@@ -1,7 +1,7 @@
 ---
 id: gap-ceiling-floor-ms-not-landed-in-verification-round
 title: __CEILING__/floor_ms 每轮在报但没人读——落进 verification-round
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -45,3 +45,9 @@ extra: {}
 - [ ] 修后实跑：round 记录含 floor_ms + ceiling 贴出（见 Evidence）
 - [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
+
+## Touches
+
+- plugin/scripts/full-suite-runner.ts（解析流加 __CEILING__ → 写 floor_ms/ceiling 到 verification-round 记录）
+- plugin/test/full-suite-runner.test.mjs（__CEILING__ 解析用例）
+- tasks/gap-ceiling-floor-ms-not-landed-in-verification-round.md（自身：勾 AC + 贴证据）
