@@ -62,7 +62,7 @@ extra:
 - [x] 全量套件绿（rounds 70/75/76：守卫实现 + early-red 修复全绿，verifiedCommit 含 071c0fb1）
 - [x] 真实拒绝记录（③）——本仓真 running 轮（runId=bcf3790d）期间提交 tasks/tmp-3-probe.md 被守卫拒（exit 1）+ 完整预检清单（见 Evidence「真实运行记录」段）
 
-**登记**：注册表 mode 断言 = `registryMode="fallback-narrowed"`（A0b③ 前；patterns 已清空，34e96380 实测）。窗口协议：「先清 diverge 再动手」（IDLE-GREEN diverge>0 时 2min 抢 / 清零不触发 ⇒ 窗口≈10min）。断言面精度上限 = @static-object 标注精度（目录级标注拉整目录进面）。
+**登记**：注册表 mode 断言 = `registryMode="fallback-narrowed"`（A0b③ 前；patterns 已清空，34e96380 实测）。**窗口协议（2026-08-12 修正，manager 撤回原模型）**：窗口长度是【有无新提交落地】的函数，非时间函数——「先清 diverge 再动手」只防 IDLE-GREEN，不防 MERGE-LANDING（新提交立即起轮；round 84 起跑于提交后 4s，rounds 82/83/84 全尾随提交）。断言面文件事实上无空闲窗口。断言面精度上限 = @static-object 标注精度（目录级标注拉整目录进面）。
 
 ## Touches
 
