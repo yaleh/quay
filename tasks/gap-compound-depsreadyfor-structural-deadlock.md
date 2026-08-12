@@ -34,16 +34,16 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录死锁双向互等源码位置（ready-pool-check.ts:993 depsReadyFor parent 计入 + slot-refill.ts:366 selfTouch + touches-orthogonality-check.ts:321 字面 tasks/<id>）（本任务 Proposal 已含）
-- [ ] AC2: **聚合语义修复**——`depsReadyFor` 遇 `role: compound` parent 不计入 deps（或 compound 不进可派集只认叶子）
-- [ ] AC3: **cold-start 子树解锁**——两个 todo child（gap-cold-start-skill-has-no-recovery-branch / gap-no-formalized-bare-metal-session-bootstrap）depsReady=True 可派
-- [ ] AC4: **既有不回归**——`--for-task` scoped 门绿
+- [x] AC1: **复现固化**——任务体记录死锁双向互等源码位置（ready-pool-check.ts:993 depsReadyFor parent 计入 + slot-refill.ts:366 selfTouch + touches-orthogonality-check.ts:321 字面 tasks/<id>）（本任务 Proposal 已含；基线实跑：修前两 child depsReady=false）
+- [x] AC2: **聚合语义修复**——`depsReadyFor` 遇 `role: compound` parent 不计入 deps（或 compound 不进可派集只认叶子）
+- [x] AC3: **cold-start 子树解锁**——两个 todo child（gap-cold-start-skill-has-no-recovery-branch / gap-no-formalized-bare-metal-session-bootstrap）depsReady=True 可派
+- [x] AC4: **既有不回归**——`--for-task` scoped 门绿
 
 ## Definition of Done
 
-- [ ] AC1–AC4 全部勾上
-- [ ] 修后实跑：cold-start 两 child depsReady=True 读数贴出
-- [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
+- [x] AC1–AC4 全部勾上
+- [x] 修后实跑：cold-start 两 child depsReady=True 读数贴出（见 ## Evidence）
+- [x] 既有测试 + 新增测试全绿（`--for-task` scoped：171 pass / 0 fail / 0 cancelled）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
 
 ## Touches
@@ -52,6 +52,8 @@ extra: {}
 - plugin/scripts/slot-refill.ts（selfTouchCheck compound 处理）
 - plugin/scripts/touches-orthogonality-check.ts（compound self-touch 判定）
 - plugin/test/ready-pool-check.test.mjs（compound 死锁用例）
+- plugin/test/slot-refill.test.mjs（compound parent 永不推荐 + READY child 可派用例）
+- plugin/test/self-touch-convention.test.mjs（compound self-touch 豁免用例）
 - tasks/gap-quay-has-never-self-hosted-its-own-cold-start.md（交叉标注——死锁解除后子树可派）
 - tasks/gap-compound-depsreadyfor-structural-deadlock.md（自身：勾 AC + 贴证据）
 
@@ -70,3 +72,38 @@ resume    depsReadyFor / slot-refill / touches-orthogonality 分步提交，任�
 reviewer: outer
 at: 2026-08-12
 changed: manager 003351 源码级定位（双向互等）。AC16③ 唯一剩余机制堵点。outer 裁定修法方向（compound parent 不计入 deps / compound 不进可派集）。实现归 inner。
+
+## Evidence
+
+（inner 2026-08-12 实现，工作树 `task/gap-compound-depsreadyfor-structural-deadlock`）
+
+**Contract invoke（AC3 / DoD 实跑读数）**——`ready-pool-check --json` 对 cold-start 两 todo child 的 depsReady：
+
+```
+CANDIDATES: [{"id":"gap-cold-start-skill-has-no-recovery-branch","depsReady":true,...},
+             {"id":"gap-no-formalized-bare-metal-session-bootstrap","depsReady":true,...}]
+```
+
+修前基线（AC1 复现）：两 child `depsReady:false`（parent 未 done ⇒ 死锁双向互等）。
+
+**invariant `compound_parent_not_dispatchable`（AC2）**——`slot-refill --json` 实跑：
+compound parent `gap-quay-has-never-self-hosted-its-own-cold-start` defer 原因
+`compound-not-dispatchable`（不再是 `self-touch-missing-c8`），且不在 `recommended` 中。
+
+**invariant `no_self_touch_false_negative`（AC3）**——`--self-touch-scan --root .` 实跑：
+compound parent 行标记为 `COMPOUND:`（aggregate，无需 self-file），不计入 missing；
+11 ready 任务中仅剩 2 个真实缺 self-file（均为既有无关任务，非本任务引入）。
+
+**scoped 门绿（AC4）**——`bash scripts/test.sh --for-task gap-compound-depsreadyfor-structural-deadlock`：
+`171 pass / 0 fail / 0 cancelled`。新增用例：
+- `ready-pool-check.test.mjs`：compound 死锁用例（compound parent 不阻塞 child；非 compound parent 仍阻塞）+ `isCompoundTask` 单测
+- `slot-refill.test.mjs`：compound parent 永不推荐 + defer 原因断言；READY child of compound parent 被推荐
+- `self-touch-convention.test.mjs`：compound 自触豁免（selfTouchCheck / scan / CLI 双模式）
+
+**实现（分步提交）**：
+1. `ready-pool-check.ts` — `depsReadyFor` compound parent 豁免 + `isCompoundTask`（读 frontmatter `role: compound`）
+2. `slot-refill.ts` — compound-not-dispatchable defer（复合父不进可派集）+ 本地 `depsReadyFor` 读 metaById 判 compound
+3. `touches-orthogonality-check.ts` — `selfTouchCheck` 返回 `compound` 标志；scan/CLI 不把 compound 当缺失
+4. `tasks/gap-quay-has-never-self-hosted-its-own-cold-start.md` — 交叉标注（死锁解除，子树可派）
+
+**DoD 全量套件绿留待外层 verification-round 验证**（C1：inner 只跑 scoped，不跑全量）。
