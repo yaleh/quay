@@ -1,7 +1,7 @@
 ---
 id: cand-config-validate-interval-trigger-drift
 title: config validate 不识别 `interval:<N>m` routine trigger，而运行时与调度器都支持
-status: ready
+status: done
 labels:
   - gap
   - config

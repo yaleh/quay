@@ -1,7 +1,7 @@
 ---
 id: cand-cjk-proposal-slot-word-boundary
 title: store.check() 的 `\b` 使 `## 人的裁定` 提案槽别名永不匹配，与 ready-pool-check 判据分歧
-status: ready
+status: done
 labels:
   - gap
   - gate

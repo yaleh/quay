@@ -1,7 +1,7 @@
 ---
 id: cand-gate-loader-unified-config-no-gates-spurious-diagnostics
 title: 统一 config.yml 无 `gates:` 节时 gate loader 把顶层 providers/loop 误报为未知 gate 节
-status: ready
+status: done
 labels:
   - gap
   - gate

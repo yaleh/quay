@@ -2,7 +2,7 @@
 id: gap-inner-blocked-signal-comment-refs-retired-inner-state-sh
 title: inner-blocked-signal.ts:810 comment references inner-state.sh which no
   longer exists — a comment pointing at a dead mechanism
-status: ready
+status: done
 labels:
   - gap
   - defect

@@ -4,7 +4,7 @@ title: 8e2e49b9 commit message claims "all syntax verified" while carrying real
   merge corruption (trend-check duplicated 2×, 8 task frontmatters broken) —
   commit message is a new AC11 carrier, more dangerous than task body/tick rows
   (history won't re-verify)
-status: ready
+status: done
 labels:
   - gap
   - defect
