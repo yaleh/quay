@@ -86,6 +86,15 @@ start did NOT complete.
 | 6 | `FIRST-TASK` | At least one task is `ready`/`done` on the board and it has been dispatched — `fast-mode-telemetry.ts --report --json --root <root>` shows it in `inProgress` (or the task-start record in #5 references it) | the `--report --json` `inProgress` |
 | 7 | `TOPOLOGY-IN-PLACE` | The two-window session topology is in place per the factory definition — `bash <root>/plugin/scripts/topology-check.sh --session <session> --json` reports `ok: true` (each of `<session>:outer/:inner` exists AND has a claude process, not a bare bash window). manager is cross-project and NOT part of this topology. A single-bash-window session (the meta-cc-3/archguard-4 failure shape) MUST report `ok: false` | the `--json` output (`ok: true` + both windows `ok`) |
 
+**Manager cold start is NOT this checklist** — a project cold start never starts the manager
+(delivery ≠ startup, AC8). The manager layer has its OWN seven-key falsifiable checklist
+(`HOME-IN-PLACE` / `IDLE-WATCH-MOUNTED` / `IDLE-WATCH-DELIVERING` / `CRON-CREATED` /
+`REGISTRY-MATCHES` / `FIRST-TICK-LANDED` / `NOT-STARTED-BY-PROJECT`), documented in
+`plugin/skills/manager/SKILL.md` §6.5, executed by `quay manager start` (+ its
+`idle-watch-mount.txt` intent + `manager-arm-loop.sh --verify`). When a network needs its manager
+started, the operator runs that checklist in the manager's own session — a project outer running
+this skill must NOT create/drive/check the manager (C3; `no-manager-tick-doc-check.ts`).
+
 ## Steps
 
 ### 0. Running-state branch — installed-and-RUNNING vs installed-but-STOPPED (the 已停转 branch)
