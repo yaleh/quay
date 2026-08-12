@@ -27,6 +27,8 @@ export {
   inlineMarkdown,
   relativeTime,
   isSafeRelativeRedirect,
+  renderGitHistorySvg,
+  groupCommitsByBranch,
 } from "./serve-handlers.ts";
 
 export interface StartServerOptions {

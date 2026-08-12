@@ -586,3 +586,77 @@ export async function readBoardExecution(root: string, { nowMs = Date.now() } = 
   }
   return { status: live.status, reason: live.reason, flags, inFlight: live.inFlight };
 }
+
+// ── Git history (gap-git-history-svg-server-rendered) ──────────────────────────────────────────────
+// The /git-history chart's DATA access. git is quarantined HERE (the only serve-path module allowed to
+// know git) — serve-handlers.ts only renders what this returns. Degrades per the header contract
+// (absent → 「无数据」, unreadable → 「读失败」, never throws).
+//
+// THE X-AXIS TRAP IS PINNED AT THE SOURCE: each commit carries its commit TIMESTAMP (%ct — the landing
+// time). The renderer is handed POINTS, never durations. Branch lifespan (first→last commit) is a
+// git-observable existence interval — it is NOT task work hours (measured: 149/164 fan-in branches
+// lived <1h, done before their first commit landed), and real work hours live in telemetry with a
+// ~6% join rate to git. The chart shows only what git can prove: when commits landed and where.
+
+/** Max commits the /git-history chart reads (bounded SVG size, ~31 lanes in this repo's last 500). */
+export const GIT_HISTORY_LIMIT = 500;
+
+export interface GitHistoryCommit {
+  /** Full commit hash. */
+  hash: string;
+  /** Commit timestamp (unix seconds) — the "landing time" the chart's x-axis maps to. */
+  t: number;
+  /** Local branch this commit was reached from (`--source`), e.g. "integration". */
+  ref: string;
+  /** Number of parents. > 1 → a merge commit (the fan-in landing event). */
+  parents: number;
+  subject: string;
+}
+
+export interface GitHistoryResult {
+  status: ObservationStatus;
+  reason: string | null;
+  commits: GitHistoryCommit[];
+}
+
+/**
+ * Read the commit-landing timeline: ONE `git log --branches --source` pass, each line
+ * `%H %ct %S %P %s` (hash / commit-time / source-ref / parents / subject). A non-git
+ * workspace degrades to empty; a git failure degrades to error; never throws.
+ */
+export function readGitHistory(root: string, { limit = GIT_HISTORY_LIMIT }: { limit?: number } = {}): GitHistoryResult {
+  try {
+    const out = execFileSync(
+      "git",
+      ["-C", root, "log", "--branches", "--source", "--date=unix", `-n ${limit}`, "--pretty=format:%H%x1f%ct%x1f%S%x1f%P%x1f%s"],
+      { encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "pipe"] },
+    );
+    const commits: GitHistoryCommit[] = [];
+    for (const line of out.split(/\r?\n/)) {
+      if (!line) continue;
+      const [hash, t, ref, parents, ...subjectParts] = line.split("\x1f");
+      if (!hash || !t || !ref) continue;
+      commits.push({
+        hash,
+        t: Number(t),
+        ref,
+        parents: (parents ?? "").split(/\s+/).filter(Boolean).length,
+        subject: subjectParts.join("\x1f"),
+      });
+    }
+    if (commits.length === 0) {
+      return { status: "empty", reason: "git 仓库无提交记录", commits: [] };
+    }
+    return { status: "ok", reason: null, commits };
+  } catch (err) {
+    const stderr = String((err as { stderr?: Buffer | string }).stderr ?? "");
+    if (stderr.includes("not a git repository")) {
+      return { status: "empty", reason: "工作区不是 git 仓库（无提交记录）", commits: [] };
+    }
+    return {
+      status: "error",
+      reason: `git log 失败：${err instanceof Error ? err.message : String(err)}`,
+      commits: [],
+    };
+  }
+}
