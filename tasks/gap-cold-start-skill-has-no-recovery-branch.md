@@ -91,6 +91,7 @@ resume    分支骨架 + 三状态类接线 + 负控制分步提交
 
 ## Touches
 
+- tasks/gap-cold-start-skill-has-no-recovery-branch.md（自身：勾 AC + 贴证据）
 - plugin/skills/cold-start/SKILL.md
 - plugin/test/cold-start-skill.test.mjs
 
