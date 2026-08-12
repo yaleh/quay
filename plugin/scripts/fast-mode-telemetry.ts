@@ -1902,6 +1902,10 @@ export async function main(argv) {
       realInFlight: reportWithMeta.realInFlight,
       subagentsInFlight,
       realConcurrency,
+      // occupancy.in_flight three-layer UNIFIED (AC39): the explicit occupancy alias the
+      // accounting-emit auto path reads as its in_flight — the real concurrency signal, present
+      // (0 when idle) even in a worktree with no `.quay/config.yml`. Same value as realConcurrency.
+      inFlight: realConcurrency,
       closedButLive,
       occupiedSlots,
       slotsTotal,
