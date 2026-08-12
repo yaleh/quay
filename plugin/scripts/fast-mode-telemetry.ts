@@ -419,6 +419,49 @@ export function generateRunId(taskId) {
   return `fm-${safe}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+// ── fan-in commit traceability (gap-task-telemetry-6-percent-join) ─────────────────────────────────
+// The 6%-join defect: task-landing records (git `merge: fan-in task/<id>` commits) and telemetry
+// records (.workflow-events/<runId>.jsonl) were almost disjoint — no mechanical path from a telemetry
+// taskId to its git branch. The fix has two sides: the fan-in COMMIT carries the runId
+// (`merge: fan-in task/<id> (runId: fm-...)`), and the telemetry END event records the fan-in commit
+// sha (`candidateCommit`). findFanInCommit closes the loop from the telemetry side: given a taskId
+// and/or runId, resolve the fan-in merge commit on HEAD.
+
+/** Escape a literal string for use as a git log --grep regex (runIds contain `.`/`-`). */
+export function escapeGrep(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Resolve the fan-in merge commit for a task execution: the most recent commit on `ref` whose
+ * subject carries the runId (position `(runId: <r>)`, the A6 merge-message convention), falling
+ * back to the task's fan-in merge subject (`merge: fan-in task/<taskId>`). Returns the commit sha,
+ * or null when unresolvable (no git / no matching commit).
+ *
+ * PURE READ — never writes. Best-effort: any git failure → null (fail-soft, never fabricated).
+ * @param {string} root
+ * @param {object} opts
+ * @param {string} [opts.taskId]
+ * @param {string|null} [opts.runId]
+ * @param {string} [opts.ref] — ref to scan (default "HEAD")
+ * @returns {string|null} — the fan-in commit sha, or null
+ */
+export function findFanInCommit(root, { taskId, runId, ref = "HEAD" } = {}) {
+  const patterns = [];
+  if (runId) patterns.push(escapeGrep(runId));
+  if (taskId) patterns.push(`merge: fan-in task/${taskId}`);
+  for (const pat of patterns) {
+    try {
+      const out = execFileSync("git", ["-C", root, "log", ref, "--format=%H", "--grep", pat, "-1"], {
+        encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"],
+      });
+      const sha = out.trim().split("\n")[0];
+      if (sha) return sha;
+    } catch (_) { /* no git / no match — try the next pattern */ }
+  }
+  return null;
+}
+
 // ── Event builders (A1a schema-shaped; pass validateEvent) ───────────────────────────────────────────
 
 /**
@@ -472,7 +515,7 @@ export function buildStartEvent({ taskId, runId, executionCwd, baseCommit = null
  *   throughput. An A1a extra field — forward-compat allowed, VALID_OUTCOMES unchanged.
  * @returns {object} — a plain object that A1a validateEvent accepts
  */
-export function buildEndEvent({ taskId, runId, outcome, executionCwd, baseCommit = null, recordedAtMs = Date.now(), reconcileReason = null }) {
+export function buildEndEvent({ taskId, runId, outcome, executionCwd, baseCommit = null, recordedAtMs = Date.now(), reconcileReason = null, candidateCommit = null }) {
   return {
     schemaVersion: SCHEMA_VERSION,
     runId,
@@ -486,7 +529,7 @@ export function buildEndEvent({ taskId, runId, outcome, executionCwd, baseCommit
     executionCwd: executionCwd ?? process.cwd(),
     worktreePath: null,
     baseCommit,
-    candidateCommit: null,
+    candidateCommit,
     outcome,
     waitReason: null,
     resourceClaim: null,
@@ -878,7 +921,10 @@ export function aggregate(events, { sinceMs = null, nowMs = null, haltEvents = n
       } else {
         // runId carried on completed pairs so the reverse-direction slot detector
         // (gap-closed-bracket-leaves-live-agent-consuming-slots) can probe the executor process.
-        tasks.push({ taskId: rec.taskId, runId: rec.runId, minutes, outcome: end.outcome });
+        // fanInCommit (gap-task-telemetry-6-percent-join): the fan-in merge commit sha recorded on
+        // the end event (candidateCommit) — the mechanical taskId → git branch traceability link
+        // that turns the 6% telemetry/git join into a full one.
+        tasks.push({ taskId: rec.taskId, runId: rec.runId, minutes, outcome: end.outcome, fanInCommit: end.candidateCommit ?? null });
       }
     } else if (end && !rec.start) {
       if (sinceMs != null && end.recordedAtMs < sinceMs) continue;
@@ -1402,7 +1448,10 @@ function printHumanReport(report, aggFile) {
   if (report.since) console.log(`since: ${report.since}`);
   console.log(`completed tasks: ${report.tasks.length}`);
   for (const t of report.tasks) {
-    console.log(`  ${String(t.taskId).padEnd(40)} ${t.minutes.toFixed(1).padStart(8)}m  ${t.outcome ?? "null"}`);
+    // fanInCommit (gap-task-telemetry-6-percent-join): the fan-in merge commit sha, when the end
+    // event recorded one — the mechanical taskId → git traceability link.
+    const fanPart = t.fanInCommit ? `  ${String(t.fanInCommit).slice(0, 12)}` : "";
+    console.log(`  ${String(t.taskId).padEnd(40)} ${t.minutes.toFixed(1).padStart(8)}m  ${t.outcome ?? "null"}${fanPart}`);
   }
   console.log(`mean minutes/task: ${report.meanMinutes.toFixed(2)}`);
   console.log(`median minutes/task: ${report.medianMinutes.toFixed(2)}`);
@@ -1474,7 +1523,8 @@ const usage = `fast-mode-telemetry.ts — fast-mode (direct) execution metering 
 
 Usage:
   node --experimental-strip-types fast-mode-telemetry.ts --task-start --taskId <id> [--root <dir>]
-  node --experimental-strip-types fast-mode-telemetry.ts --task-end --taskId <id> --runId <r> --outcome <done|needs-human|abandoned|deferred> [--root <dir>]
+  node --experimental-strip-types fast-mode-telemetry.ts --task-end --taskId <id> --runId <r> --outcome <done|needs-human|abandoned|deferred> [--fanInCommit <sha>] [--root <dir>]
+  node --experimental-strip-types fast-mode-telemetry.ts --run-id-for --taskId <id> [--root <dir>]     (PURE READ — the open bracket's runId for the A6 fan-in merge message)
   node --experimental-strip-types fast-mode-telemetry.ts --halt-start [--atMs <iso>] [--reason <str>] [--root <dir>]   (record a .halt placement)
   node --experimental-strip-types fast-mode-telemetry.ts --halt-end   [--atMs <iso>] [--root <dir>]                    (record a .halt removal)
   node --experimental-strip-types fast-mode-telemetry.ts --report [--since <iso>] [--json] [--root <dir>]   (PURE READ — never writes)
@@ -1610,6 +1660,14 @@ export async function main(argv) {
       console.error(`fast-mode-telemetry: invalid outcome "${outcome}"; must be one of: ${VALID_OUTCOMES.join(", ")}`);
       return 1;
     }
+    // fan-in commit sha (gap-task-telemetry-6-percent-join): `--fanInCommit <sha>` records the
+    // fan-in merge commit the task's work landed in (stored in the end event's candidateCommit —
+    // the telemetry taskId → git traceability link). When omitted, auto-derive from git: the
+    // commit whose subject carries the runId, or the task's `merge: fan-in task/<id>` commit.
+    let fanInCommit = getArgValue(args, "--fanInCommit") ?? null;
+    if (fanInCommit == null) {
+      fanInCommit = findFanInCommit(root, { taskId, runId });
+    }
     const event = buildEndEvent({
       taskId,
       runId,
@@ -1617,6 +1675,7 @@ export async function main(argv) {
       executionCwd: process.cwd(),
       baseCommit: getBaseCommit(root),
       recordedAtMs: Date.now(),
+      candidateCommit: fanInCommit,
     });
     try {
       writeEvent(event, root);
@@ -1624,7 +1683,26 @@ export async function main(argv) {
       console.error(`fast-mode-telemetry: ${e.message}`);
       return 1;
     }
-    console.log(`fast-mode-telemetry: end event written for ${taskId} (runId ${runId}, outcome ${outcome})`);
+    console.log(`fast-mode-telemetry: end event written for ${taskId} (runId ${runId}, outcome ${outcome}${fanInCommit ? `, fanInCommit ${fanInCommit}` : ""})`);
+    return 0;
+  }
+
+  // --run-id-for (gap-task-telemetry-6-percent-join): PURE READ — print the OPEN bracket's runId
+  // for one taskId, or nothing when no bracket is open. The A6 fan-in step uses this to build the
+  // runId-bearing merge message (`merge: fan-in task/<id> (runId: <r>)`) — the runId the inner
+  // generated at --task-start, recoverable here without the caller having held onto it (robust
+  // against crash-restart, same rationale as --close-task). Never writes a file.
+  if (args.includes("--run-id-for")) {
+    const taskId = getArgValue(args, "--taskId");
+    if (!taskId) {
+      console.error("fast-mode-telemetry: --run-id-for requires --taskId <id>");
+      return 1;
+    }
+    const events = [];
+    for await (const e of readAllEvents(root)) events.push(e);
+    const report = aggregate(events, {});
+    const open = report.inProgress.find((p) => p.taskId === taskId);
+    console.log(open && open.runId ? open.runId : "");
     return 0;
   }
 
