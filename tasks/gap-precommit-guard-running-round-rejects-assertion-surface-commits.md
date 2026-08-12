@@ -62,6 +62,6 @@ extra:
 
 ## Touches
 
-- plugin/scripts/precommit-guard.ts（守卫脚本——commit 包装，或 --install-hook 把共享 checkout 的 .git/hooks/pre-commit 接上；机制二选一，路径为此）
-- plugin/scripts/judged-object-registry.json（断言面注册表，A0b③ 生成；守卫读它，缺失/空回退全 tracked 文件——fail-closed）
+- plugin/scripts/precommit-guard.ts（守卫脚本：commit 包装 或 --install-hook 接 .git/hooks/pre-commit）(new)
+- plugin/scripts/judged-object-registry.json（断言面注册表，A0b③ 生成；缺失/空回退全 tracked——fail-closed）(new)
 - tasks/gap-precommit-guard-running-round-rejects-assertion-surface-commits.md（自身）
