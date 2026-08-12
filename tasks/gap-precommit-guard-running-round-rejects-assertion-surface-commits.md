@@ -1,7 +1,7 @@
 ---
 id: gap-precommit-guard-running-round-rejects-assertion-surface-commits
 title: pre-commit 守卫——state=running 且触及断言面文件 ⇒ 拒提交（覆盖全部写入者，三独立实证）
-status: todo
+status: ready
 labels:
   - gap
   - defect
