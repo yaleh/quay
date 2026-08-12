@@ -517,17 +517,17 @@ echo "load1: $(cut -d' ' -f1 /proc/loadavg)  node: $(pgrep -c node)  mem: $(awk 
 **零事件是"没发生"还是"没收到"，看不出来**；不查就等于默认它活着）：
 
 ```bash
-# ① manager 自己的 idle-watch：查【真实机制】，不查 TaskList，也不 pgrep 不存在的脚本
-#    ⚠️ 上一版写 TaskList——【错的仪器】：TaskList 是待办清单工具，不是后台监视器清单。
-#    ⚠️ 上一版写 `pgrep -af 'idle-watch\.sh'`——【指向不存在的脚本】（gap-manager-cold-start-
-#      no-falsifiable-checklist 缺陷 2）：全库 find `idle-watch.sh` 零结果。真机制 =
-#      `session-liveness-mount.sh`（exec session-liveness.sh）+ Monitor 事件（非独立进程，
-#      pgrep/TaskList 都看不到；唯一证据是是否还在发事件）。判据两条（机械可答）：
-#      - bash plugin/scripts/monitor-mount-check.sh --json   # mounted=true 且 targetOk=true
-#      - bash plugin/scripts/session-liveness.sh --once      # 至少一条 SESSION-STATUS
+# ① manager 自己的 idle-watch：查【Monitor 工具任务 + 事件流】，不查进程，不查 TaskList
+#    ⚠️ 换错仪器史（gap-manager-cold-start-no-falsifiable-checklist 缺陷 2，同位置第三次）：
+#      TaskList（待办清单工具，不是后台监视器清单，实跑 "No tasks found"）→
+#      进程级 pgrep（指向一个全库不存在的脚本）→ 现在。真机制 = session-liveness-mount.sh +
+#      Monitor 工具任务（非独立进程）。判据：
+bash plugin/scripts/monitor-mount-check.sh --json   # mounted=true 且 targetOk=true（两条都要）
+bash plugin/scripts/session-liveness.sh --once      # 至少一行 SESSION-STATUS（投递证明）
 #      （--once 是确定性接缝：稳态会话可能不发射转换事件，等 ~90s 等不来是正常的——F6，
 #       cold-start/SKILL.md 步骤 4；--once 才是快而稳的送达证明。）
 #      常驻挂载命令：Monitor({command: "<quay>/plugin/scripts/session-liveness-mount.sh", ...})
+#   一条不满足 ⇒ 监视器未挂/不响，当轮重挂。
 # ② quay 外层的 session-liveness：进程在不在，且【属主是不是外层】
 pgrep -af 'plugin/scripts/session-liveness\.sh' | while read -r pid _; do
   sid=$(tr '\0' '\n' < /proc/$pid/environ 2>/dev/null | sed -n 's/^CLAUDE_CODE_SESSION_ID=//p')
@@ -536,7 +536,7 @@ done
 ```
 **判读**：② 一个实例都没有 ⇒ §2「外层进程消失要立即报」重新回到无机制状态，**当轮升级**，
 不要像 08-03..08-08 那样让它无声地空着五天。**① 的判据是 monitor-mount-check 的两条 + --once
-的 SESSION-STATUS 行，不是某个进程名——别再把判据写回 `pgrep -af 'idle-watch\.sh'`。**
+的 SESSION-STATUS 行，不是某个进程名——别再把判据写回进程级 pgrep 一个不存在的脚本。**
 
 #### 但「进程还在」只能发现【死掉】，发现不了【活着但不响】（人 2026-08-08 08:1xZ 指出）
 
