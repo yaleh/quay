@@ -65,6 +65,7 @@ import {
   buildCommitTraceIndex,
   commitSubjectTracesTask,
   commitTraceLanded,
+  isCompoundTask,
 } from "../scripts/ready-pool-check.ts";
 import { parseTask } from "../scripts/task-schema.ts";
 import { taskWorkLanded } from "../scripts/task-status-drift-check.ts";
@@ -80,12 +81,13 @@ function makeWorkspace(tag) {
   return dir;
 }
 
-function writeTask(root, id, { status = "todo", labels = [], parent = null, children = [], body }) {
+function writeTask(root, id, { status = "todo", labels = [], parent = null, children = [], role = null, body }) {
   const fm = [
     "---",
     `id: ${id}`,
     `title: fixture ${id}`,
     `status: ${status}`,
+    role ? `role: ${role}` : null,
     `labels:`,
     ...labels.map((l) => `  - ${l}`),
     `parent: ${parent}`,
@@ -94,7 +96,7 @@ function writeTask(root, id, { status = "todo", labels = [], parent = null, chil
     "extra:",
     "  schema: v1",
     "---",
-  ].join("\n");
+  ].filter((x) => x !== null).join("\n");
   fs.writeFileSync(path.join(root, "tasks", `${id}.md`), `${fm}\n\n${body}`);
 }
 
@@ -858,6 +860,73 @@ test("pool < floor but no qualified candidate ⇒ no promotions", (t) => {
   assert.equal(byId["gap-no-dod"].missingArtifacts.includes("dod"), true);
   assert.equal(byId["gap-child"].eligible, false);
   assert.equal(byId["gap-child"].depsReady, false);
+});
+
+// ── COMPOUND AGGREGATION (gap-compound-depsreadyfor-structural-deadlock AC2/AC3) ─────────────────────
+// The structural deadlock: a compound parent (`role: compound`, status ready NOT done) is only done
+// once ALL its children are done (parent-done-iff-children, DIR-026), so a child waiting on its
+// compound parent is 双向互等 (child waits on parent, parent waits on children) ⇒ the whole subtree is
+// permanently un-dispatchable. The fix: `depsReadyFor` treats a compound parent as an AGGREGATION
+// edge (the parent IS the children's sum, not a predecessor) and EXCLUDES it from a child's deps —
+// children dispatch on their own depends_on edges alone. A non-compound (primitive) parent not done
+// STILL blocks its child (predecessor semantics intact — negative control).
+
+test("COMPOUND: a todo child whose parent is `role: compound` IS deps-ready (aggregation, not predecessor)", (t) => {
+  const root = makeWorkspace("compound-deps");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // The compound parent is status `ready` (NOT done) — the exact shape that deadlocks pre-fix: a
+  // child waiting on it can never see it done while any child is open.
+  writeTask(root, "gap-compound-parent", {
+    status: "ready", labels: ["gap"], role: "compound", children: ["gap-compound-child"],
+    body: fourArtifactBody({ touches: ["- code/parent.ts (new)"] }),
+  });
+  // The todo child names the compound parent — pre-fix depsReady=false (parent not done); post-fix
+  // the compound-parent edge is EXCLUDED ⇒ depsReady=true.
+  writeTask(root, "gap-compound-child", {
+    status: "todo", labels: ["gap"], parent: "gap-compound-parent",
+    body: fourArtifactBody({ touches: ["- code/child.ts (new)"] }),
+  });
+  // Negative control: a NON-compound (primitive) parent not done still blocks its child.
+  writeTask(root, "gap-plain-parent", {
+    status: "ready", labels: ["gap"],
+    body: fourArtifactBody({ touches: ["- code/plain.ts (new)"] }),
+  });
+  writeTask(root, "gap-plain-child", {
+    status: "todo", labels: ["gap"], parent: "gap-plain-parent",
+    body: fourArtifactBody({ touches: ["- code/plain-child.ts (new)"] }),
+  });
+
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 });
+  const byId = Object.fromEntries(r.candidates.map((c) => [c.id, c]));
+  assert.equal(byId["gap-compound-child"].depsReady, true,
+    "compound parent (aggregation) must NOT block the child — the structural deadlock is broken");
+  assert.equal(byId["gap-plain-child"].depsReady, false,
+    "a non-compound (primitive) parent not done STILL blocks the child (predecessor semantics intact)");
+});
+
+test("COMPOUND: isCompoundTask reads the frontmatter role (unit, incl. negative + missing-task)", (t) => {
+  const root = makeWorkspace("compound-unit");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-compound-parent", {
+    status: "ready", labels: ["gap"], role: "compound",
+    body: fourArtifactBody({ touches: ["- code/parent.ts (new)"] }),
+  });
+  writeTask(root, "gap-plain-parent", {
+    status: "ready", labels: ["gap"],
+    body: fourArtifactBody({ touches: ["- code/plain.ts (new)"] }),
+  });
+  const all = new Map();
+  for (const f of fs.readdirSync(path.join(root, "tasks")).filter((f) => f.endsWith(".md"))) {
+    const id = f.replace(/\.md$/, "");
+    const task = parseTask(fs.readFileSync(path.join(root, "tasks", f), "utf8"));
+    task.id = id;
+    task.parent = null;
+    all.set(id, task);
+  }
+  assert.equal(isCompoundTask(all.get("gap-compound-parent")), true, "role: compound ⇒ compound");
+  assert.equal(isCompoundTask(all.get("gap-plain-parent")), false, "no role ⇒ not compound");
+  assert.equal(isCompoundTask(all.get("gap-ghost-missing")), false, "missing task ⇒ not compound (fail closed)");
+  assert.equal(isCompoundTask({ body: "no frontmatter" }), false, "task without frontmatterRaw ⇒ not compound");
 });
 
 // ── AC5: candidate with majority-missing Touches is not recommended (guard KEPT) ──────────────────

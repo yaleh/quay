@@ -990,13 +990,33 @@ export function computeSuiteBlocking({ rounds, stateFailures, tasks, minRedWindo
   return { ids, consecutiveRed, windowActive: true, failureFiles };
 }
 
+/** COMPOUND AGGREGATION (gap-compound-depsreadyfor-structural-deadlock AC2): true when the task's
+ *  frontmatter declares `role: compound`. A compound parent is an AGGREGATE — the parent IS the sum
+ *  of its children (children are the parent's implementation, not its successors) — so the
+ *  parent→child relation is a DECOMPOSITION edge, never a prerequisite a child waits on. Exported so
+ *  the slot-refill compound gate shares the SAME judgment (rule: reuse, no parallel copy). A missing
+ *  task / absent `role` ⇒ not compound (fail closed toward the conservative parent-edge behavior). */
+export function isCompoundTask(task) {
+  if (!task || !task.frontmatterRaw) return false;
+  return readFrontField(task.frontmatterRaw, "role") === "compound";
+}
+
 function depsReadyFor(task, allTasks) {
   // ALL prerequisites — parent AND every depends_on entry (gap-prerequisite-gates-prose-invisible-
   // to-mechanisms AC2: prereqs live in relation edges and the author→ready gate reads the SAME field
   // the dispatch check reads). Each must be done; a missing file fails closed.
   const deps = [];
   const parent = task.parent;
-  if (parent && parent !== "null" && parent !== "~") deps.push(parent);
+  if (parent && parent !== "null" && parent !== "~") {
+    // COMPOUND AGGREGATION (gap-compound-depsreadyfor-structural-deadlock AC2): a `role: compound`
+    // parent is an AGGREGATE — the parent is only `done` once ALL its children are done
+    // (parent-done-iff-children, DIR-026), so a child waiting on its compound parent is the
+    // 双向互等 structural deadlock (child waits on parent, parent waits on children). The
+    // compound-parent edge is EXCLUDED from a child's deps — children dispatch on their own
+    // `depends_on` (true predecessor) edges alone. A missing or non-compound parent still pushes the
+    // edge and fails closed below (parent cannot be confirmed done).
+    if (!isCompoundTask(allTasks.get(parent))) deps.push(parent);
+  }
   for (const d of readDependsOn(task.frontmatterRaw)) deps.push(d);
   if (deps.length === 0) return true;
   for (const depId of deps) {
