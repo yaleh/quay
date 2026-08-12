@@ -522,15 +522,21 @@ test("AC4 — a task with NO new plugin/scripts touch does NOT select delivery-i
 test("AC5 — the five historical drift scripts exist and the real bundle snapshot is drift-free", async () => {
   // The 5 prior instances each added a plugin/scripts file without regenerating the outline §6 snapshot
   // (halt-check 175→176, spec-goal 176→178, accounting-emit 178→179, DIR-043 round-169, inner-exec-mode
-  // 181→182). Their scripts must all be present and the current bundle snapshot must match disk.
-  const historical = [
+  // 181→182). Their scripts must all be present and the current bundle snapshot must match disk. The
+  // newer shipped scripts (tmp-leak-pairing-check + stale-ready-audit, added after the last snapshot
+  // regeneration) are legitimate shipped surfaces (declared in capability-catalog.sh at npm-pack-fix
+  // 07adf075) — they are listed here too so a future snapshot edit cannot silently drop them.
+  const shipped = [
     "plugin/scripts/halt-check.sh",
     "plugin/scripts/accounting-emit.ts",
     "plugin/scripts/external-dogfooding-check.ts",
     "plugin/scripts/inner-exec-mode-report.ts",
+    "plugin/scripts/tmp-leak-pairing-check.sh",
+    "plugin/scripts/tmp-leak-pairing-check.ts",
+    "plugin/scripts/stale-ready-audit.ts",
   ];
-  for (const rel of historical) {
-    assert.ok(fs.existsSync(path.join(REPO_ROOT, rel)), `${rel} must exist (a historical drift script)`);
+  for (const rel of shipped) {
+    assert.ok(fs.existsSync(path.join(REPO_ROOT, rel)), `${rel} must exist (a shipped plugin/scripts surface)`);
   }
   const r = runScript(["--inventory", "--root", REPO_ROOT]);
   assert.equal(r.status, 0, `real bundle must be drift-free:\n${r.stdout}`);
