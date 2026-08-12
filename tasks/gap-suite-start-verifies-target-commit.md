@@ -1,7 +1,7 @@
 ---
 id: gap-suite-start-verifies-target-commit
 title: 套件起跑不校验 verifiedCommit 含目标修复 → 一轮 550s 与问题无关
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -58,9 +58,9 @@ git merge-base --is-ancestor c19e70a1 3b2854b6 → NO
 
 ## Definition of Done
 
-- [ ] AC1–AC4 全部勾上
-- [ ] 复现用例（起跑时 verifiedCommit 不含目标 → 拒跑/标注）贴出（见 Evidence）
-- [ ] 全量套件绿
+- [x] AC1–AC4 全部勾上
+- [x] 复现用例（起跑时 verifiedCommit 不含目标 → 拒跑/标注）贴出（见 Evidence）
+- [x] 全量套件绿（round 54005cfe，verifiedCommit 门 e7f168a4 + 记录缺陷 54005cfe 全绿）
 
 ## Touches
 
