@@ -1,5 +1,11 @@
 # inner (fast-mode) tick — 执行核
 
+**切分声明（AC38，2026-08-12 已执行）**：随 `quay-init --loop` 铺到目标项目的 tick 文档（内层
+`docs/analysis/fast-mode-loop-tick.md`、外层 `orchestration/orchestrator-loop-tick.md`）是**产品行为正本**；
+各项目自身网络的**本层实例状态**在各自的 laid-down 副本（quay 自身即 `docs/analysis/fast-mode-loop-tick.md`
+与 `orchestration/orchestrator-loop-tick.md`）。**产品行为进模板 / 本层状态留本层目录**——与 manager 层
+已按同判据切分。
+
 **这份文件是执行路径,不是理由档案。** 理由、实测、代价全在源文档 `docs/analysis/fast-mode-loop-tick.md`(1149 行),本文件只给动作和判据,每条带 `(src:行号)` 指路;
 **纯提取,零发明**——每条都能在源行号逐字核对;源文档一字未改。
 
