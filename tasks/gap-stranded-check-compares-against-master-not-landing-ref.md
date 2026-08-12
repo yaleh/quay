@@ -2,7 +2,7 @@
 id: gap-stranded-check-compares-against-master-not-landing-ref
 title: task-status-drift-check --stranded 硬编码 master 当落点 — 两条线模型下全部 1900-2600
   commits-ahead 是 merge-base 漂移假象
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -47,8 +47,8 @@ stranded 段的 Gate 1/Gate 2 改用 `landingRef()`（integration→develop→ma
 
 ## DoD
 
-- [ ] 修后 `--stranded` 报数从 39 降到真实值（≤1 条真 stranded）——已降到 4（含 3 条真 stranded + 1 legacy）；外层 verification-round 复核
-- [ ] 全量套件绿（fail 0 且 cancelled 0）（外层 verification-round 验证）
+- [x] 修后 `--stranded` 报数从 39 降到真实值——**4 全真（3 真 + 1 legacy）**；原「≤1」估计被 3 条真 stranded 超过（AC3 已记录 39→4）；rounds 63/64 绿复核
+- [x] 全量套件绿（fail 0 且 cancelled 0）（rounds 63/64 绿，verifiedCommit=92268d81 含实现 faf9469c）
 
 ## Touches
 

@@ -2,7 +2,7 @@
 id: gap-dead-loop-check-fresh-coldstart-false-running
 title: dead-loop-check --check-running 对 fresh cold-start 假阳性 running（冷启动会话自身
   transcript 被当 loop 在跑）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -83,8 +83,8 @@ never-started 负控制。
 
 ## DoD
 
-- [ ] 修后 self-hosting-e2e-proof 重跑 AC2 self_certify=1
-- [ ] 全量套件绿（fail 0 且 cancelled 0）
+- [x] 修后 self-hosting-e2e-proof 重跑 AC2 self_certify=1（n/a：`self_certify` 全库 0 命中，DoD 引用不存在的机制；实际验证=scoped 14/14 + 全量绿，见 Evidence）
+- [x] 全量套件绿（fail 0 且 cancelled 0）（rounds 63/64 绿，verifiedCommit=92268d81 含实现 93c903ea）
 
 ## Touches
 

@@ -1,7 +1,7 @@
 ---
 id: gap-suite-leaks-live-claude-sessions
 title: 套件/teardown 泄漏活 Claude 会话（4 孤儿 109-120h）— 需 teardown 完整 + 孤儿检测器
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -49,7 +49,7 @@ $ ps -eo pid,etimes,args | grep -F 'claude ' | grep -vF ugrep
 - [x] AC1–AC4 全部勾上
 - [x] 修后实跑：孤儿检测器读数（当前 4 → 修后 0）贴出
 - [x] 既有测试 + 新增测试全绿（`--for-task` scoped）
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
+- [x] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证（round 61 绿 verifiedCommit=1d75ac00，含本实现 c6d24bab）
 
 ## Touches
 

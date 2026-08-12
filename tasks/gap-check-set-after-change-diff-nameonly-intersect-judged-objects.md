@@ -40,6 +40,11 @@ cp「安全」判定只核了 A 编号维 → 提交前跑覆盖文件的检查 
 2. 改动后自查 / 合并验收时：`git diff --name-only` ∩ 判定对象集合 → 跑交集内全部测试。
 3. 负控制：重现 manager 12a6b18b 的 cp 错误链——改 plugin/loop/manager-tick-core.md 时
    机械求出的集合必须包含 quay-init-loop-consumer-doc-refs（且不含 tick-core-static-check）。
+4. **源与副本各断言一次（manager 2026-08-12，结构性缺口）**：manager-tick-core.test.mjs 的三条机制名断言
+   应对【源 orchestration/manager-tick-core.md 与副本 plugin/loop/manager-tick-core.md】各断言一次——
+   副本=交付正确、源=执行正确；**两者内容允许不同，但这三条机制名必须都在**。现状：套件只守副本，
+   源（manager 每轮实际执行的那份）无人守（tick-core-static-check 只查 src 覆盖与指针目标，不查 A10 指向真机制），
+   贫化的 A10 能长期存在且无人报出。与「判定对象与被执行对象不是同一个东西」同一根。
 
 ## AC
 
@@ -47,6 +52,7 @@ cp「安全」判定只核了 A 编号维 → 提交前跑覆盖文件的检查 
 - [ ] AC2: 改 plugin/loop/manager-tick-core.md 后机械求出的测试集合包含 quay-init-loop-consumer-doc-refs（负控：不含 tick-core-static-check）
 - [ ] AC3: 负控制——重现 12a6b18b 的 cp 错误链，判据在提交前拦住（不靠全量套件兜底）
 - [ ] AC4: 既有测试全绿；`--for-task` scoped 门绿
+- [ ] AC5: manager-tick-core.test.mjs 三条机制名断言对源与副本各断言一次（副本=交付、源=执行；内容允许不同但机制名必须在）
 
 ## Definition of Done
 

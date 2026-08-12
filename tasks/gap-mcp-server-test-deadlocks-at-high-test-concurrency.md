@@ -4,7 +4,7 @@ title: packages/quay/test/mcp-server.test.mjs 在 --test-concurrency=16
   下死锁（ep_poll 持 socket 句柄不释放, 14+ 分钟无 CPU 进展, pcpu≈0.9%）——同机 conc=4 23.2s
   passed、orangevps conc=4 20.2s passed ⇒ 只在高并发触发, 是并发相关的资源竞争/死锁非环境缺失; 影响 16-32
   核机器的并发验证, 建议修复
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -48,9 +48,9 @@ extra: {}
 - [x] AC1–AC5 全部勾上
 - [x] 修后实跑：**长批次尾段复现无挂起**（真实 main 相批次跑几次，该文件排后段，观察是否规律性在后半段死锁；贴 2 次结果）+ conc=4 回归数字——真实 300+ 文件批次跑不了（inner 不跑全量，C1）；改为**确定性复现**：stubborn provider 强制孤儿场景，修前挂死（30s 超时 EXIT 124）、修后 3/3 无挂起（conc=8 4.3/4.3/4.7s）+ conc=4 回归 24.0s（Evidence/AC3、AC4）
 - [x] 既有测试 + 新增测试全绿（`--for-task` scoped）——scoped 86/86（Evidence/AC4）
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证（待外部）
+- [x] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证（round 61 绿 verifiedCommit=1d75ac00，含本实现 735bfe4d）
 - [x] 既有测试 + 新增测试全绿（`--for-task` scoped）——scoped 86/86（Evidence/AC4）
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证（待外部）
+- [x] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证（round 61 绿 verifiedCommit=1d75ac00，含本实现 735bfe4d）
 
 ## Touches
 

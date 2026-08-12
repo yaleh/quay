@@ -32,6 +32,10 @@ extra:
    `git merge-base --is-ancestor <关心的提交> <该轮的 verifiedCommit>`。**机械、就地、不依赖任何注记**（注记会漂）。
    ⇒ round 53 作废不用加注记，读 jsonl 时用同一条判定自然判出「验非目标」。
 4. 纳入 suite-state-trigger 的起跑判据或 outer 起跑前校验。
+5. **verifiedCommit 相等闸（manager 2026-08-12，round 62 实证）**：起跑前确认**本次将验的 commit ≠ 最近绿轮的 commit**
+   且期间无新提交 ⇒ 跳过起轮（round 62 就是 IDLE-GREEN 2min 阈值 < 收尾耗时造成的 400s 同树重复）。
+   **不调 IDLE-GREEN 阈值**（收尾时长是外生变量，硬规则 4 推论）——用「树变没变」判，不用「等了多久」判。
+   与 AC1 是同一字段（verifiedCommit）的两半：AC1 防「验了不该验的树」，本条防「重复验同一棵树」。
 
 ## 真实样本（2026-08-12 19:23，立案当轮第一次真触发）
 
@@ -50,6 +54,7 @@ git merge-base --is-ancestor c19e70a1 3b2854b6 → NO
 - [ ] AC2: 不满足 ⇒ 明确标注「验非目标」/拒绝起跑（不做无意义 550s 轮）
 - [ ] AC3: 负控制——round-53 类（修复落于起跑后）被该判据挡住
 - [ ] AC4: 既有测试全绿；`--for-task` scoped 门绿
+- [ ] AC5: 重复验同一棵树被拦——本次将验的 verifiedCommit == 最近绿轮的 commit 且期间无新提交 ⇒ 跳过起轮（round 61→62 同树 400s 重复被拦住）
 
 ## Definition of Done
 
