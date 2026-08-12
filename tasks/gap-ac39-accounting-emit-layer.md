@@ -57,6 +57,7 @@ inner:   complete=False  missing=[ready-pool-check --apply, slot-refill,
 - plugin/scripts/accounting-emit.ts（layer→mechanisms 映射表）
 - plugin/scripts/accounting-emit-layer-map.ts（新：每层机制注册）
 - plugin/scripts/fast-mode-telemetry.ts（occupancy.in_flight 三层统一）
+- docs/proposals/quay-product-outline.md（DELIVERY-INVENTORY 快照重生成——`verify-delivery-surface.ts --write-inventory`，新脚本落地必需；任务执行时补，原 Touches 漏列）
 - plugin/test/（accounting-emit 三层用例）
 - tasks/gap-ac39-accounting-emit-layer.md（自身：勾 AC + 贴证据）
 
