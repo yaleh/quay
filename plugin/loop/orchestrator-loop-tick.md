@@ -845,7 +845,7 @@ red 时：
 4. **偏差修正若需派发，逐字照搬出厂文档自己的派发规则**（文档是唯一规则源）：重锚 prompt 不做新决策。
 5. **每个 tick 必报**：本轮是否转发重锚、转发时 inner 的空闲判据。
 
-**重锚有效性 = 语义收敛（自述措辞审计）**：重锚的有效性以**语义收敛**度量，不是「重锚发生了」——
+**重锚有效性 = 语义收敛（自述措辞审计）**：重锚的有效性以**语义收敛**度量（`reanchor_effectiveness_is_convergence = 1`），不是「重锚发生了」——
 锚点通道存在 ≠ 词汇收敛。每次重锚后对 inner 最近自述（commit subject / fan-in 注记 / 收尾汇报）跑
 `node --experimental-strip-types plugin/scripts/self-report-vocab-audit.ts --git-log 15
 --exclude-prefix outer: --window 3 --json`，读 stdout 的 `inner_self_report_vocab` 字段（连续 3 轮无
