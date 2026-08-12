@@ -334,6 +334,9 @@ export function judge(
   if (touchedAssertion.length > 0) {
     const startedAt = data.startedAt ?? "unknown";
     const runId = data.runId ?? "unknown";
+    // 拒绝记录：append 一行到 .quay/precommit-guard-rejections.jsonl（runtime-state，gitignored）。
+    // 写失败不阻拒绝（append 是观测记录，不是闸门本体——fail-closed 冲突在此处单向：拒必须发生）。
+    appendRejection(root, { at: new Date().toISOString(), runId, startedAt, files: touchedAssertion, verdict: "reject" });
     return {
       verdict: "reject",
       reason: "running-round-assertion-surface",
@@ -369,6 +372,20 @@ export function judge(
 }
 
 /** 守卫拒绝后给作者的预检清单（等待期可做、只读、可反复）——强制等待让预检可做。 */
+/**
+ * 拒绝记录：append 一行到 <root>/.quay/precommit-guard-rejections.jsonl。
+ * 纯观测（runtime-state，gitignored）——写失败绝不影响闸门判定（append 失败 ⇒ 忽略，拒绝照常发生）。
+ */
+export function appendRejection(root: string, rec: { at: string; runId: string; startedAt: string; files: string[]; verdict: "reject" }): void {
+  try {
+    const dir = path.join(root, ".quay");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.appendFileSync(path.join(dir, "precommit-guard-rejections.jsonl"), JSON.stringify(rec) + "\n", "utf8");
+  } catch {
+    // 写失败不阻拒绝（观测记录丢失不改变拒绝结论）。
+  }
+}
+
 export function preflightChecklist(): string {
   return (
     "预检清单（等待期可做，只读，可反复）：\n" +

@@ -156,6 +156,14 @@ test("AC1-early-red — state=red finishedAt=null (early-red, runner still colle
     assert.equal(out.reason, "running-round-assertion-surface");
     assert.equal(out.isRunning, true, "--json isRunning must be true for early-red");
     assert.equal(out.finishedAt, null, "--json finishedAt must be null for early-red");
+    // 拒绝记录 append 到 .quay/precommit-guard-rejections.jsonl（runtime-state，观测记录）。
+    const ledgerPath = path.join(root, ".quay", "precommit-guard-rejections.jsonl");
+    assert.ok(fs.existsSync(ledgerPath), "rejection ledger must be written");
+    const line = JSON.parse(fs.readFileSync(ledgerPath, "utf8").trim().split("\n").pop());
+    assert.equal(line.verdict, "reject");
+    assert.deepEqual(line.files, ["tasks/early-red.md"]);
+    assert.equal(line.runId, "fixture-run-63");
+    assert.ok(line.at, "ledger line carries ISO timestamp");
   } finally {
     cleanup(root);
   }

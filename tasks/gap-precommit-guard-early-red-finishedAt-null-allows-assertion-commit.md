@@ -42,7 +42,8 @@ extra:
 - [x] AC2: 终态（green/red 且 finishedAt 有值）放行
 - [x] AC3: `--json` 输出含 `finishedAt` + `isRunning`（「为什么放行」可查）
 - [x] AC4: 既有用例不回归；`--for-task` scoped 门绿
-- [ ] AC5: 下轮验证（守卫完整）
+- [x] AC5: 拒绝时 append 一行到 `.quay/precommit-guard-rejections.jsonl`（`{at, runId, startedAt, files, verdict:"reject"}`）；写失败不阻拒绝
+- [ ] AC6: 下轮验证（守卫完整）
 
 ## Evidence
 
@@ -56,7 +57,14 @@ isRunning=true + finishedAt=null）与 AC1-terminal（state=red+finishedAt set �
 
 **scoped 门**：`scripts/test.sh --for-task gap-precommit-guard-early-red-finishedAt-null-allows-assertion-commit`
 → **20 pass / 0 fail / EXIT 0**（原 18 + 新 2）。`npx tsc` 该文件 0 错。task-contract-check 0 违规。
-下轮验证（AC5）归外层 verification-round。
+下轮验证（AC6）归外层 verification-round。
+
+**补充（2026-08-12 外层裁定，AC5）**：拒绝时 append 一行到 `.quay/precommit-guard-rejections.jsonl`
+（`{at, runId, startedAt, files, verdict:"reject"}`）；写失败不阻拒绝（观测记录丢失不改变拒绝结论）。
+gitignore 条目 `**/.quay/precommit-guard-rejections.jsonl`（外层 b68b9dda 已落）。实测：真 running 轮
++ staged tasks/probe.md ⇒ verdict=reject + jsonl 行
+`{"at":"...","runId":"manual-test-run","startedAt":"...","files":["tasks/probe.md"],"verdict":"reject"}`。
+测试扩展 AC1-early-red 断言 ledger 写入。
 
 ## Definition of Done
 
