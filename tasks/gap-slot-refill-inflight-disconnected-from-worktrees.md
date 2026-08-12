@@ -1,7 +1,7 @@
 ---
 id: gap-slot-refill-inflight-disconnected-from-worktrees
 title: slot-refill in_flight=0 而 worktree+telemetry 有在飞任务 ⇒ 仪器不一致
-status: ready
+status: done
 labels:
   - gap
   - defect

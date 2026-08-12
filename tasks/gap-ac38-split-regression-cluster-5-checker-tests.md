@@ -1,7 +1,7 @@
 ---
 id: gap-ac38-split-regression-cluster-5-checker-tests
 title: AC38 切分回归簇（5 条 checker/doc 测试）—— product 模板泛化 vs 测试断言
-status: ready
+status: done
 labels:
   - gap
   - defect
