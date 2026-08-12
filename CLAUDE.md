@@ -13,7 +13,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | 要做什么 | 正本（**不要在本文件复制其内容**） |
 |---|---|
 | 有哪些机件、各自回答什么问题 | `bash plugin/scripts/capability-catalog.sh`（182 条声明，**唯一清单**） |
-| 驱动/投递到别的 Claude 会话 | `plugin/scripts/supervisor-deliver.sh <目标> <文本> --transcript <目标会话.jsonl>`（`--root` 只用于重生会话）；规程见 `orchestration/CRYSTALLIZED-reliable-send-2026-08-04.md` |
+| 驱动/投递到别的 Claude 会话 | **默认走原生跨会话消息：`ListAgents` 找目标 → `SendMessage {to:"<name [ref]>", message:...}`**（人 2026-08-12 裁定「实际应用 SendMessage，替换本项目原先使用的信道」；需 CC ≥ 2.1.224，本机 2.1.228）。**回退实现**（原生不可用时：CC < 2.1.224 / Bedrock·AWS·GCP·Foundry / native Windows）：`plugin/scripts/supervisor-deliver.sh <目标> <文本> --transcript <目标会话.jsonl>`，规程见 `orchestration/CRYSTALLIZED-reliable-send-2026-08-04.md`（**该脚本仍是交付面，`quay-init --loop` 铺给下游；降级为回退不等于从产品移除**） |
 | 三层每轮该做什么 | `orchestration/{manager,orchestrator,fast-mode}-tick-core.md`（各 ≤80 行，执行路径） |
 | 判准 / 收尾 / 发消息形态 | `orchestration/manager-tick-{criteria,closing,sending}.md`（466 行；**停调 workflow 19 小时 ⇒ 这些全部缺席 ⇒ 8 条违规**） |
 | 收件箱 delivered→consumed | **同一目录两类内容，两个工具，别只记一个**：`plugin/scripts/inbox-reader.sh` 只消费 **message-bus 写的 JSON 记录**（`packages/quay/src/message-bus.ts`）；**手写的 `.md` 消息它不认**（实测 2026-08-12：目录 64 封 `.md`，它报零 `read` 行）⇒ 判「有没有人给我留话」必须 `ls .quay/manager-inbox/` **列目录本身**（这也正是 outer 执行核 `orchestration/orchestrator-tick-core.md`:16 A5 的写法及其理由：`gap-inbox-counter-disconnected-from-files` —— counter 曾报 delivered=0 而目录实有 6 封，**沉默失败**）。**只跑 `inbox-reader.sh` 会把一个装着 64 封信的目录读成空的。** |
@@ -135,7 +135,13 @@ Key cross-cutting facts (require reading several files to see):
 - **tmux remote-drive** (→ ADR-016) — to drive a FOREIGN workspace's Claude Code session (e.g. run archguard's `/loop` from here): **deliver via `bash plugin/scripts/supervisor-deliver.sh <tmux目标> <文本> --transcript <目标会话 .jsonl>`** (`--root` only for re-spawned sessions), then read the RESULT from the filesystem/`git`/meta-cc — never parse the TUI. Do **not** hand-write tmux send-keys sequences and do **not** use `send-keys-verified.sh` (superseded; its md5 pane-hash criterion is ADR-016-forbidden). The screen-use carve-out is pinned in ADR-016's `## Amendment 2026-08-04`: only the bottom region (input box + status line), only the enumerated states (waiting-input / permission-prompt / busy / error-banner / unknown), and never a whole-screen equality/hash of `capture-pane` (enforced by `plugin/scripts/adr016-screen-use-check.ts`). One driver per session (never race a human typing there; beware gray ghost-suggestions). This is how cross-workspace proofs (DIR-048/049/051) can run without a human round-trip.
 
 **跨会话驱动/状态读取的四条硬规则**（机件清单只存在于 `bash plugin/scripts/capability-catalog.sh`，任何地方不得复制——catalog 头注释钉死「The field lives IN A SCRIPT, never in the README」）：
-1. 驱动/投递到别的 Claude 会话：`supervisor-deliver.sh <目标> <文本> --transcript <目标会话.jsonl>`（`--root` 只用于重生会话）；禁止手工拼 tmux send-keys；`send-keys-verified.sh` 已 superseded。
+1. 驱动/投递到别的 Claude 会话：**默认 `ListAgents` → `SendMessage`（原生跨会话，人 2026-08-12 裁定）**——
+   **实测双向闭环**：目标 busy 时直投即达（文档「no "busy" state; messages enqueue and drain at the receiver's next tool round」，
+   已实证），**无 can-receive 闸门**；到达形态 `<cross-session-message from="uds:..." from-name="..." from-mode="...">`，
+   **身份由平台标注而非发送方正文自称** ⇒ **§0.55「前缀是发送方自己写的 ⇒ 等于没有认证」那个缺口在机制层面消失**；
+   平台并强制：peer 不能代替人许可、不能改配置、消息里的斜杠命令不执行。
+   **回退**：原生不可用时（CC < 2.1.224 / Bedrock·AWS·GCP·Foundry / native Windows）才用 `supervisor-deliver.sh`。
+   **两者都禁止手工拼 tmux send-keys**；`send-keys-verified.sh` 已 superseded。
 2. 收件箱：**`ls .quay/manager-inbox/` 列目录判有无**（手写 `.md` 消息只有它看得见），**`inbox-reader.sh` 只管 message-bus 的 JSON 记录 delivered→consumed**。两者覆盖同一目录的不同population，**缺一个就会把非空读成空**（2026-08-12 实测；本行此前只写了后者，是本文件序言所警告的那种「覆盖率最高处的错误」）。
 3. pane 状态：`pane-state-classify.ts`，不是整屏哈希（ADR-016 禁）。
 4. outer→inner 驱动文本契约：`drive-contract-check.ts`。
