@@ -129,6 +129,15 @@ export type SuiteStateValue = "running" | "green" | "red";
 // crashes). Consumers route it like aborted (no correctness conclusion ⇒ no code-risk stop-dispatch),
 // but the reason lets them distinguish "deliberately stopped" from "died silently" and re-launch.
 export type SuiteStateReason = "failed" | "aborted" | "infra-error" | "static-check" | "timeout" | "hung" | "crashed";
+// gap-verification-round-reason-self-contradiction — the verification-round RECORD's reason axis. The
+// suite-STATE's reason (SuiteStateReason) drives routeRed/stop-dispatch and is UNCHANGED (it has no
+// fail counter); the ROUND RECORD's reason is recomputed at the COUNTER level so a red round with
+// fail=0 (all tests passed) is never labelled reason='failed' — that combination is self-contradictory
+// (a reader must dig into failures[] to interpret). "gate-failed" = the red came from a GATE/SCAN
+// failure (static-check / perfile-timeout / tmux-leak-scan), carried with a `gate` identity naming
+// WHICH gate/scan failed. The lifecycle reasons (infra-error/aborted/timeout/hung/crashed) keep their
+// existing values — they are already distinct from "failed" and never claim a test failure.
+export type SuiteRoundReason = SuiteStateReason | "gate-failed";
 
 /**
  * One detected suite failure — the FAILURE LOCATION for the red-window dispatch decision
@@ -311,6 +320,24 @@ const FAILURE_PATTERNS: RegExp[] = [
   /^__PERFILE__\s+duration_ms=.*\s+passed=false\b/, // measure-suite-reporter per-file failure: __PERFILE__ duration_ms=<d> <path> passed=false — ^ anchored + FULL reporter shape (candidate B, gap-runner-perfile-pattern-unnchored-self-match-phantom-red): a REAL reporter line starts column-0 with `__PERFILE__ duration_ms=...`; a PASSING test whose NAME quotes the shape (the runner's own e2e test names) is `✔`-prefixed and must not match — same family as the ^✖ fix (c83ce4be)
   /^tmux-leak-scan: FAIL/, // suite-tail leak scan's residual report (candidate C) — ^ anchored: a REAL leak-scan residual starts column-0 with `tmux-leak-scan: FAIL`; a PASSING test whose NAME quotes the shape (the runner's own AC5 e2e name, gap-tmux-leak-scan-pattern-unnchored-self-match-phantom-red) is `✔`-prefixed and must not match — same self-match family as the ^✖ fix (c83ce4be) and ^__PERFILE__ (a1b78104)
 ];
+
+// gap-verification-round-reason-self-contradiction — GATE/SCAN failure lines that flip red while the
+// TAP test counters stay fail=0 (they are per-file / residual reports, NOT node:test tallies): a
+// measure-suite per-file timeout (`__PERFILE__ ... passed=false`) and the suite-tail leak-scan residual
+// (`tmux-leak-scan: FAIL`). These are SUBSET patterns of FAILURE_PATTERNS above — a line matching one
+// of these ALSO flips redDetected via isFailureLine (a leak/per-file-timeout IS a real red). The gate
+// identity lets the round record name WHICH gate/scan failed (reason='gate-failed' + `gate`) so a red
+// round with fail=0 (all tests passed) is never mislabelled reason='failed'.
+const GATE_SCAN_FAILURE_LINES: { gate: string; re: RegExp }[] = [
+  { gate: "perfile-timeout", re: /^__PERFILE__\s+duration_ms=.*\s+passed=false\b/ },
+  { gate: "tmux-leak-scan", re: /^tmux-leak-scan: FAIL/ },
+];
+
+/** The gate/scan identity of a failure line, or null when the line is not a gate/scan failure. */
+export function gateScanCause(line: string): string | null {
+  for (const { gate, re } of GATE_SCAN_FAILURE_LINES) if (re.test(line)) return gate;
+  return null;
+}
 
 // AC5 reason axis (gap-suite-state-has-no-reason-axis-failed-aborted-infra AC1/AC3) — ABORT markers
 // that flip state to red + reason=aborted: the suite emitted NO correctness conclusion. The concrete
@@ -519,7 +546,21 @@ export interface SuiteRoundRecord {
   redAt?: string | null;
   // reason axis (gap-suite-state-has-no-reason-axis-failed-aborted-infra) carried into the
   // sequence so the trend reader can tell a real-failure red from an abort without re-deriving it.
-  reason?: SuiteStateReason | null;
+  // gap-verification-round-reason-self-contradiction — the round-record reason is recomputed at the
+  // COUNTER level: fail>0 ⇒ 'failed'; fail=0 + a gate/scan/static red ⇒ 'gate-failed' (with a `gate`
+  // identity below); the lifecycle reasons (infra-error/aborted/timeout/hung/crashed) keep their
+  // existing values. This is NOT always the same value as the suite-state's reason (which has no
+  // fail counter and drives routeRed/stop-dispatch — that axis is unchanged).
+  reason?: SuiteRoundReason | null;
+  /**
+   * gap-verification-round-reason-self-contradiction — on a reason='gate-failed' round, WHICH
+   * gate/scan failed: 'static-check' (a run_static_checks checker — task-contract /
+   * test-framework-policy / test-isolation ratchet), 'perfile-timeout' (a __PERFILE__ ... passed=false
+   * measure-suite per-file failure), or 'tmux-leak-scan' (the suite-tail leak-scan residual). Absent
+   * on every other round. Carries the gate identity so a reader never has to dig into failures[] to
+   * interpret a fail=0 red.
+   */
+  gate?: string;
   /**
    * gap-merge-green-snapshot-verified-commit-livelock AC2 — the verified commit this round tested
    * (same value as the suite-state's `verifiedCommit`: the integration tip at suite start). Absent
@@ -1332,6 +1373,11 @@ export async function run(argv: string[]): Promise<number> {
   let tapPass = 0;
   let tapFail = 0;
   let tapCancelled = 0;
+  // gap-verification-round-reason-self-contradiction — set when a GATE/SCAN failure line (a subset of
+  // FAILURE_PATTERNS: __PERFILE__ passed=false / tmux-leak-scan: FAIL) flipped red. Distinct from
+  // staticCheckDetected (which names the static-check gate); both feed the round-record reason axis
+  // (fail=0 + a gate/scan cause ⇒ reason='gate-failed' + `gate`). null when no gate/scan line fired.
+  let redGateCause: string | null = null;
   // gap-suite-red-verdict-carries-empty-failures-payload AC1 — the last stream line seen, kept for
   // the fail-closed catch-all synthesis (a generic non-zero exit with no structured failure line has
   // NO failure to extract from — the last output line is the best-effort file-context source so the
@@ -1438,6 +1484,11 @@ export async function run(argv: string[]): Promise<number> {
     if (cancelledMatch) cancelledSeen = Number(cancelledMatch[1]);
     lastOutputAt = Date.now(); // silence guard: any suite output (even a failure line) proves liveness
     if (isFailureLine(line)) {
+      // gap-verification-round-reason-self-contradiction — record the gate/scan identity (if this
+      // line is a __PERFILE__ passed=false / tmux-leak-scan: FAIL subset pattern) so the round
+      // record can name WHICH gate failed when fail=0. First-wins (a round that hits both keeps the
+      // first cause — the round record names one gate).
+      if (!redGateCause) redGateCause = gateScanCause(line);
       // manager 2026-08-10 15:2x (failures[] structurally capped at 1): redFailures.push used to sit
       // inside the !redDetected guard, so after the FIRST failure line flipped redDetected=true, every
       // subsequent failure line was skipped — a round's record named only 1 of its N failures (r240
@@ -1770,6 +1821,28 @@ export async function run(argv: string[]): Promise<number> {
   // comparable across rounds of different sizes. `tests` = pass+fail+cancelled; per_test_ms =
   // durationMs/tests (0 when no tests ran — a no-test run says nothing about per-test cost).
   const tapTests = tapPass + tapFail + tapCancelled;
+  // gap-verification-round-reason-self-contradiction AC1/AC2 — the ROUND RECORD's reason is
+  // recomputed at the COUNTER level (the suite-STATE's reason axis — finalState.reason, which drives
+  // routeRed/stop-dispatch — is UNCHANGED; it has no fail counter). Precedence:
+  //   green                                   ⇒ null (no reason)
+  //   fail>0 OR cancelled>0 (a REAL test failure, incl. cancelled tests) ⇒ 'failed' (unchanged)
+  //   fail=0 + staticCheckDetected            ⇒ 'gate-failed' + gate='static-check'
+  //   fail=0 + redGateCause (perfile/tmux-leak) ⇒ 'gate-failed' + gate=<that gate>
+  //   everything else (infra-error / aborted / timeout / hung / the fail-closed catch-all)
+  //                                          ⇒ keep finalState.reason (unchanged — these never
+  //                                             claim a test failure, so fail=0 is not contradictory)
+  // A red round with fail=0 and reason='failed' is self-contradictory (all tests passed, reason says
+  // failed) — a reader must dig into failures[] to interpret. fail=0 + gate-failed + a named gate
+  // makes it mechanically distinguishable from a test-failure red.
+  const roundReason: SuiteRoundReason | null = green
+    ? null
+    : tapFail > 0 || tapCancelled > 0
+      ? "failed"
+      : staticCheckDetected || redGateCause
+        ? "gate-failed"
+        : (finalState.reason ?? null);
+  const roundGate: string | null =
+    roundReason === "gate-failed" ? (staticCheckDetected ? "static-check" : redGateCause ?? "unknown") : null;
   appendVerificationRound(stateDir, {
     round: 0, // computed from prior line count inside appendVerificationRound
     startedAt,
@@ -1783,7 +1856,8 @@ export async function run(argv: string[]): Promise<number> {
     redAt: redAtIso,
     load: readLoadAvg(),
     state: finalState.state,
-    reason: finalState.reason ?? null,
+    reason: roundReason,
+    ...(roundGate ? { gate: roundGate } : {}),
     runner: base.runner,
     scope,
     // gap-merge-green-snapshot-verified-commit-livelock AC2 — the verified commit this round tested

@@ -380,10 +380,12 @@ test("commit-trace nyf: branch merged+DELETED on integration (master stale) ⇒ 
   git("checkout", "-q", "-b", "integration");
   // TRACED DONE-FLIP: work landed via `inner:` impl commit + `fan-in: task/<id>` merge on integration,
   // branch then DELETED (the transient branch-existence signal vanishes — the commit trace persists).
+  // ALL ACs checked (the commit-trace arm's self-declared completion condition — gap-ready-pool-commit-
+  // trace-subject-not-proof-of-done: a traced task with ANY unchecked AC is NOT landed).
   writeTask(root, "gap-traced-done-flip", {
     status: "ready",
     labels: ["gap"],
-    body: fourArtifactBody({ checkedAc: 3, touches: ["- code/impl.ts"] }), // prose AC (no backticked symbols), existing-file touch
+    body: fourArtifactBody({ checkedAc: 4, touches: ["- code/impl.ts"] }), // prose AC (no backticked symbols), existing-file touch
   });
   git("add", ".");
   git("commit", "-q", "-m", "task file gap-traced-done-flip");
@@ -394,6 +396,46 @@ test("commit-trace nyf: branch merged+DELETED on integration (master stale) ⇒ 
   git("checkout", "-q", "integration");
   git("merge", "--no-ff", "task/gap-traced-done-flip", "-m", "fan-in: task/gap-traced-done-flip", "-q");
   git("branch", "-D", "task/gap-traced-done-flip");
+  // TRACED PARTIAL (gap-ready-pool-commit-trace-subject-not-proof-of-done regression anchor — the
+  // 5-swallowed-tasks shape): an `inner:` subject names the task but the ACs are NOT all checked
+  // (4/4 boxes, 3 checked — an intermediate step commit, not completion), AND the intermediate commit
+  // touches a file OUTSIDE the task's declared Touches (so taskWorkLanded — symbol/touch/git-history
+  // evidence — does NOT fire: only the WEAK subject string names the task). The subject hit alone must
+  // NOT exclude it: it has REAL remaining implementation → STAYS in the pool.
+  writeTask(root, "gap-traced-partial", {
+    status: "ready",
+    labels: ["gap"],
+    body: fourArtifactBody({ checkedAc: 3, touches: ["- code/never-touched.ts"] }),
+  });
+  git("add", ".");
+  git("commit", "-q", "-m", "task file gap-traced-partial");
+  git("checkout", "-q", "-b", "task/gap-traced-partial");
+  fs.writeFileSync(path.join(root, "code", "intermediate.ts"), "export const intermediate = 1;\n");
+  git("add", ".");
+  git("commit", "-q", "-m", "inner: gap-traced-partial — intermediate step (导出 7 函数), not done");
+  git("checkout", "-q", "integration");
+  git("merge", "--no-ff", "task/gap-traced-partial", "-m", "merge: fan-in task/gap-traced-partial", "-q");
+  git("branch", "-D", "task/gap-traced-partial");
+  // TRACED WORKLANDED PARTIAL (the 乙/contradiction population-split anchor): the work REALLY landed
+  // (the inner commit touches the task's OWN Touches file — taskWorkLanded fires via git-history) but
+  // the ACs are NOT all checked (3/4) — a near-complete-but-not-done task. The workLanded arm's >50%
+  // verification-window leniency still excludes it (a real done-flip candidate under
+  // gap-ready-pool-worklanded-traps-stuck-work) — and the excluded entry must carry ac_open=1 so A9
+  // classifies it 乙 (contradiction), NOT silently as done work.
+  writeTask(root, "gap-worklanded-partial", {
+    status: "ready",
+    labels: ["gap"],
+    body: fourArtifactBody({ checkedAc: 3, touches: ["- code/wl-partial.ts"] }),
+  });
+  git("add", ".");
+  git("commit", "-q", "-m", "task file gap-worklanded-partial");
+  git("checkout", "-q", "-b", "task/gap-worklanded-partial");
+  fs.writeFileSync(path.join(root, "code", "wl-partial.ts"), "export const wlPartial = 1;\n");
+  git("add", ".");
+  git("commit", "-q", "-m", "inner: gap-worklanded-partial — impl landed");
+  git("checkout", "-q", "integration");
+  git("merge", "--no-ff", "task/gap-worklanded-partial", "-m", "fan-in: task/gap-worklanded-partial", "-q");
+  git("branch", "-D", "task/gap-worklanded-partial");
   // TRACED STUCK-WORK: also has an `inner:` commit (and a `merge: fan-in task/<id>` merge) but ACs far
   // from complete → real remaining implementation → STAYS dispatchable (the "别改它" stuck-work guard).
   writeTask(root, "gap-traced-stuck", {
@@ -417,6 +459,7 @@ test("commit-trace nyf: branch merged+DELETED on integration (master stale) ⇒ 
 
   const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root });
   const byId = Object.fromEntries(r.excluded.map((e) => [e.id, e.reasons]));
+  const acOpenById = Object.fromEntries(r.excluded.map((e) => [e.id, e.ac_open]));
   // AC2 verification anchor (a): branch merged+DELETED, but the commit trace persists on integration
   // (invisible to the stale-master git-history signal) ⇒ the done-flip task is NOT dispatchable.
   assert.ok(
@@ -424,6 +467,19 @@ test("commit-trace nyf: branch merged+DELETED on integration (master stale) ⇒ 
     "traced done-flip task excluded via commit-trace (master stale, branch deleted)",
   );
   assert.equal(r.ready.includes("gap-traced-done-flip"), false, "traced done-flip NOT in the dispatchable pool");
+  // gap-ready-pool-nyf-split-backlog-vs-contradiction: a done-flip with EVERY completion checkbox
+  // checked is 甲/backlog → ac_open=0 on the excluded entry.
+  assert.equal(acOpenById["gap-traced-done-flip"], 0, "all-checked not-yet-flipped task is 甲/backlog (ac_open=0)");
+  // gap-ready-pool-commit-trace-subject-not-proof-of-done: a subject hit alone (partial ACs unchecked)
+  // must NOT exclude — the 5-swallowed-tasks shape (e.g. gap-cli-import-refactor-run-shell-architecture:
+  // inner "导出 7 函数" intermediate step, AC 5/9 unchecked) stays in the pool with real remaining work.
+  assert.equal(byId["gap-traced-partial"], undefined, "traced-but-AC-partial task is NOT landed → not excluded");
+  assert.equal(r.ready.includes("gap-traced-partial"), true, "traced-partial task stays in the dispatchable pool");
+  // gap-ready-pool-nyf-split-backlog-vs-contradiction: a work-landed near-complete (3/4) task stays
+  // excluded by the workLanded arm's >50% verification-window leniency — but it is 乙/contradiction
+  // (ac_open=1, judged landed but NOT done), so A9 can flag it without re-deriving the checkbox count.
+  assert.equal(byId["gap-worklanded-partial"]?.includes("not-yet-flipped"), true, "worklanded near-complete (3/4) is a done-flip candidate");
+  assert.equal(acOpenById["gap-worklanded-partial"], 1, "worklanded partial task is 乙/contradiction (ac_open=1)");
   // "别改它" (gap-ready-pool-worklanded-traps-stuck-work): a traced task whose ACs are far from complete
   // is STUCK-WORK with real remaining implementation → stays dispatchable (the commit-trace signal does
   // NOT bypass the AC gate).
@@ -432,6 +488,10 @@ test("commit-trace nyf: branch merged+DELETED on integration (master stale) ⇒ 
   // a genuinely un-traced ready task stays dispatchable (negative control).
   assert.equal(byId["gap-unstarted"], undefined, "untraced ready task not excluded");
   assert.equal(r.ready.includes("gap-unstarted"), true, "untraced ready task stays in the dispatchable pool");
+  // The A9 population-split counters: 甲 = done-flip with all boxes checked (backlog), 乙 = judged
+  // landed but a box is open (contradiction, threshold 1).
+  assert.equal(r.nyf_backlog, 1, "exactly one 甲/backlog not-yet-flipped task (the all-checked done-flip)");
+  assert.equal(r.nyf_contradiction, 1, "exactly one 乙/contradiction not-yet-flipped task (the 3/4 worklanded partial)");
 });
 
 test("isFixture / isParked / notYetFlipped unit behavior", (t) => {

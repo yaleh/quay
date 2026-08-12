@@ -181,6 +181,22 @@ test("AC3b — the latency series only counts red+failed rounds (a green round s
   assert.deepEqual(redLatencySeries(rows), [5000, 9000], "green rounds are not latency observations");
 });
 
+test("AC3b — a gate-failed round (fail=0 + reason='gate-failed') IS an early-RED latency observation", () => {
+  // gap-verification-round-reason-self-contradiction: a gate/scan red carries reason='gate-failed'
+  // (NOT 'failed') — it is still a real red with a redAt, so the early-RED latency series must count
+  // it. aborted/infra rounds are still excluded (no correctness conclusion).
+  const rows = [
+    redRound(1, 5000),
+    { ...redRound(2, 7000), fail: 0, reason: "gate-failed", gate: "tmux-leak-scan" },
+    { ...redRound(3, 1000), reason: "aborted" },
+  ];
+  assert.deepEqual(
+    redLatencySeries(rows),
+    [5000, 7000],
+    "gate-failed counts toward early-RED latency; aborted does not",
+  );
+});
+
 // ── per_checker_cost: the checker-cost.jsonl axis (task instance #10) ─────────────────────────────────
 
 test("per_checker_cost — a checker's ms series from checker-cost.jsonl trending up is flagged (ready-pool 35.8→91.2→157 shape)", () => {
