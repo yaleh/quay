@@ -41,7 +41,10 @@
 //         state file untouched (still running/green).
 //   AC5 (reason axis) — red states carry a `reason` field: "failed" (a real failure was
 //         detected — the stop-dispatch signal) or "aborted" (the run produced NO correctness
-//         conclusion — spawn error / signal kill; MUST NOT stop dispatch).
+//         conclusion — spawn error / early gate-WAIT exit; MUST NOT stop dispatch) or
+//         "infra-error" (the DIRECT test.sh child was signal-killed — an environment problem;
+//         gap-infra-error-false-positive-from-test-internal-kill: only the child's EXIT STATUS
+//         classifies this, never a `Killed`/`__ENVFAIL__` marker a test's internal kill prints).
 //
 // It also tees the suite's stdout+stderr to a log file (default .quay/full-suite.log)
 // so the outer's verification gate can grep the 判绿 markers (cancelled 0 /
@@ -226,12 +229,15 @@ export interface SuiteState {
   laneCount: number;
   /**
    * Present only on red (AC5 reason axis — gap-full-suite-runner-concurrency-default-and-gate AC5;
-   * gap-suite-state-has-no-reason-axis-failed-aborted-infra AC1). Three-value reason enum:
+   * gap-suite-state-has-no-reason-axis-failed-aborted-infra AC1). Reason enum:
    *   - "failed"     = a real failure was detected (the stop-dispatch signal).
-   *   - "aborted"    = the run produced NO correctness conclusion (spawn error / signal kill /
-   *                    early gate-WAIT exit) and MUST NOT trigger stop-dispatch.
+   *   - "aborted"    = the run produced NO correctness conclusion (spawn error / early gate-WAIT
+   *                    exit) and MUST NOT trigger stop-dispatch.
    *   - "infra-error" = an environment problem (neither a code failure nor a deliberate abort) —
    *                    ALSO not a code-failure conclusion, so it does NOT stop dispatch on code risk.
+   *                    The DIRECT test.sh child being signal-killed maps here (childKilledBySignal);
+   *                    a stream `Killed`/`__ENVFAIL__` marker from a test's internal subprocess does
+   *                    NOT (gap-infra-error-false-positive-from-test-internal-kill).
    * Legacy red states without `reason` are treated as "failed" (fail-closed toward stopping).
    */
   reason?: SuiteStateReason;
@@ -313,12 +319,17 @@ const FAILURE_PATTERNS: RegExp[] = [
 // running a single test. A real failure line (FAILURE_PATTERNS) still wins over an abort marker
 // (a failure conclusion is never downgraded); an abort marker is only applied when no failure line
 // has been seen. A generic non-zero exit with NEITHER marker stays failed (fail-closed catch-all).
+// NOTE — stream-content kill markers (`__ENVFAIL__` / `Killed` / `SIGKILL`) are deliberately NOT in
+// this list: a test can kill an INTERNAL subprocess (e.g. resource-gate.test.mjs kills a child to
+// test the resource gate) and print `__ENVFAIL__ killed by SIGKILL` while STILL passing — a stream
+// marker is not evidence the RUNNER's direct test.sh child was torn down (gap-infra-error-false-
+// positive-from-test-internal-kill). Only the direct child's EXIT STATUS (childKilledBySignal,
+// below) classifies a signal-kill ⇒ reason=infra-error.
 const ABORT_PATTERNS: RegExp[] = [
   /resource gate says WAIT/, // test.sh internal gate fail-closed — the suite never ran tests
   /not running the full suite/, // same gate-WAIT message (both halves of the canonical line)
   /another full suite holds/, // single-flight lock-WAIT (gap-runner-no-kill-on-red-and-no-max-runtime-hang-leak AC4): a PRIOR run's flock blocked this test.sh → 0 test output → NO correctness conclusion → aborted, not failed
   /single-flight lock; waited/, // same lock-WAIT message (both halves of the canonical line)
-  /__ENVFAIL__/, // 人 2026-08-12 裁定②: 共享 runCli() 助手把环境失败（SIGKILL/SIGTERM/EAGAIN/ENOMEM/无退出码）抛成 __ENVFAIL__ 标记 ⇒ 归 reason=infra-error（环境），不冒充产品红、不触发 stop-dispatch
 ];
 
 // ── suite child liveness guards (gap-runner-no-kill-on-red-and-no-max-runtime-hang-leak AC2/AC3) ────
@@ -1179,7 +1190,6 @@ export async function run(argv: string[]): Promise<number> {
   // conclusion — red + reason=aborted, NOT failed.
   let redDetected = false;
   let abortDetected = false;
-  let envFailDetected = false; // __ENVFAIL__ marker (runCli 助手抛的环境失败) ⇒ reason=infra-error, 不冒充产品红
   // ── suite-child liveness guards (gap-runner-no-kill-on-red-and-no-max-runtime-hang-leak AC2/AC3) ──
   // timedOut / hung are set by the max-runtime / silence timers below; both force a process-tree kill
   // so a hung suite can never leak the runner + flock. The terminal verdict maps them to reason=timeout
@@ -1480,15 +1490,6 @@ export async function run(argv: string[]): Promise<number> {
       process.stderr.write(
         `full-suite-runner: STATIC-CHECK violation detected on stream -> state=red reason=static-check (run still in progress)\n  ${line}\n`
       );
-    } else if (!redDetected && !envFailDetected && line.includes("__ENVFAIL__")) {
-      // 人 2026-08-12 裁定②: 环境失败（SIGKILL/SIGTERM/EAGAIN/ENOMEM/无退出码，runCli 助手抛的标记）
-      // ⇒ state=red reason=infra-error —— 不是产品失败，不触发 stop-dispatch（与 aborted 同语义，但
-      // 区分「环境」与「主动中止」）。
-      envFailDetected = true;
-      writeSuiteState({ state: "red", reason: "infra-error", ...base, finishedAt: null, durationMs: null });
-      process.stderr.write(
-        `full-suite-runner: ENV-failure marker (__ENVFAIL__) on stream -> state=red reason=infra-error (environment, NOT a product failure; no stop-dispatch)\n  ${line}\n`
-      );
     } else if (!redDetected && !abortDetected && isAbortLine(line)) {
       // AC5 reason axis (gap-suite-state-has-no-reason-axis-failed-aborted-infra AC1/AC3): an ABORT
       // marker on the stream (e.g. test.sh's internal resource-gate WAIT fail-closed — the suite
@@ -1551,19 +1552,26 @@ export async function run(argv: string[]): Promise<number> {
   const finishedAt = toEpochSeconds(finishedAtIso);
 
   // AC1/判绿 — green ONLY if no failure/abort marker was detected, no spawn error, and the suite
-  // exited 0. Red carries the three-value reason axis (AC5, gap-suite-state-has-no-reason-axis-
-  // failed-aborted-infra AC1/AC3):
+  // exited 0. Red carries the reason axis (AC5, gap-suite-state-has-no-reason-axis-failed-aborted-
+  // infra AC1/AC3), extended by gap-infra-error-false-positive-from-test-internal-kill:
   //   - redDetected (a real failure line)      ⇒ reason=failed   (stop-dispatch signal).
-  //   - abortDetected / spawnError / the child killed by a signal (code null) ⇒ reason=aborted
+  //   - childKilledBySignal (the DIRECT test.sh child was killed by a signal) ⇒ reason=infra-error
+  //     (environment problem — the suite was torn down mid-run; NO correctness conclusion, does NOT
+  //     stop dispatch). Kill detection is EXIT-STATUS-only: a stream `__ENVFAIL__`/`Killed` marker
+  //     from a TEST's internal subprocess kill (e.g. resource-gate.test.mjs kills a child to test
+  //     the resource gate and prints `__ENVFAIL__ killed by SIGKILL` while STILL passing) is NOT
+  //     evidence the direct test.sh child was torn down, and must not flip the suite (AC1).
+  //   - abortDetected (test.sh gate-WAIT / lock-WAIT early exit) or spawnError ⇒ reason=aborted
   //     (NO correctness conclusion — early-EXIT red is an abort, not a failure).
   //   - a generic non-zero exit with NEITHER marker ⇒ reason=failed (fail-closed catch-all: a
   //     failure we could not match a structured line for is still a failure conclusion).
   // AC5 reason-axis (gap-suite-cutoff-what-tears-test-process-at-session-topology, confirmed
-  // 2026-08-07): a signal-kill is an ABORT (NO correctness conclusion), never a failure — but the
-  // runner's child is `bash -c <test.sh>`, and when test.sh's own node --test CHILD is SIGKILL'd
-  // (07:08→07:21 suite: `scripts/test.sh: line 576: 720326 Killed node --test`), bash reports it as
-  // ITS OWN exit code 128+N (137 for SIGKILL, 143 for SIGTERM), so exit.code !== null AND
-  // exit.signal === null while still being a signal-kill. Detect all three shapes:
+  // 2026-08-07): a signal-kill of the DIRECT child is an ENVIRONMENT failure (reason=infra-error),
+  // never a code failure — but the runner's child is `bash -c <test.sh>`, and when test.sh's own
+  // node --test CHILD is SIGKILL'd (07:08→07:21 suite: `scripts/test.sh: line 576: 720326 Killed
+  // node --test`), bash reports it as ITS OWN exit code 128+N (137 for SIGKILL, 143 for SIGTERM),
+  // so exit.code !== null AND exit.signal === null while still being a signal-kill. Detect all
+  // three shapes:
   //   1. direct signal-kill: node reports code=null + signal=<sig>;           (pre-existing path)
   //   2. the close event carried a signal (exit.signal captured at :539, never classified before);
   //   3. shell 128+N convention (128+1..128+64, the signal range) — the bash-exits-137 case.
@@ -1572,13 +1580,19 @@ export async function run(argv: string[]): Promise<number> {
     exit.signal !== null ||
     (exitCode !== null && exitCode > 128 && exitCode <= 192);
   // gap-full-suite-state-red-no-failure-detail-static-check-invisible AC3 — reason precedence at the
-  // terminal verdict:
+  // terminal verdict (extended by gap-infra-error-false-positive-from-test-internal-kill):
+  //   0. a FULLY GREEN test result (fail=0, cancelled=0, failures=[]) WINS over infra-error: the
+  //      round is state=green (the tests all passed; an infra-error teardown signal after a complete
+  //      green result is NOT a red that blocks the batch-merge — manager 2026-08-12, round-18 shape);
   //   1. a REAL test failure (redDetected) ⇒ reason="failed"   (existing behavior, AC5 — never
   //      downgraded by a static-check marker);
   //   2. a STATIC-CHECK failure with NO test run (!testPhaseStarted — test.sh aborted under set -e
   //      before the node --test phase) ⇒ reason="static-check" (AC2/AC3 — distinguishable);
-  //   3. no correctness conclusion (abort marker / signal kill / spawn error) ⇒ reason="aborted";
-  //   4. everything else ⇒ fail-closed "failed" (the pre-existing catch-all).
+  //   3. the DIRECT test.sh child killed by a signal (childKilledBySignal) with a NON-green test
+  //      result (torn down mid-run — no full green TAP summary) ⇒ reason="infra-error" (environment
+  //      problem — gap-infra-error-false-positive-from-test-internal-kill AC2);
+  //   4. no correctness conclusion (abort marker / spawn error) ⇒ reason="aborted";
+  //   5. everything else ⇒ fail-closed "failed" (the pre-existing catch-all).
   // gap-runner-failure-patterns-miss-info-glyph-and-perfile-failed candidate B — AGGREGATE
   // backstop: if no STRUCTURED failure line matched but the [ #ℹ] summary tallies (the SAME
   // tallies AC6 already records, from `ℹ fail N` / `ℹ cancelled N`) recorded fail>0 or
@@ -1595,14 +1609,31 @@ export async function run(argv: string[]): Promise<number> {
       }),
     );
   }
+  // gap-infra-error-false-positive-from-test-internal-kill (manager analysis 2026-08-12): a round
+  // whose TEST RESULT is fully green (fail=0, cancelled=0, failures=[]) — every test that ran passed
+  // and none were cancelled — is evidence the TESTS ALL PASSED. An infra-error classification
+  // (childKilledBySignal: the direct test.sh child was signal-killed) must then NOT be a red that
+  // blocks the batch-merge freshness gate (round-18: pass=3977 fail=0 cancelled=0 failures=[] but
+  // state=red reason=infra-error blocked a fully-green round). When the test result IS fully green,
+  // the round is GREEN regardless of the teardown signal; infra-error stays a RED only when the run
+  // was torn down BEFORE producing a full green result (fail>0 / cancelled>0 / failures non-empty —
+  // AC2). `(tapPass > 0 || testsSeen > 0)` guards that tests actually RAN: a suite killed before any
+  // TAP summary is NOT "fully green" — it never produced a test result — so a genuine mid-run
+  // teardown with no green evidence stays infra-error.
+  const testsFullyGreen =
+    (tapPass > 0 || testsSeen > 0) && tapFail === 0 && tapCancelled === 0 && redFailures.length === 0;
   const green =
-    !redDetected && !staticCheckDetected && !abortDetected && !envFailDetected && spawnError === null && exitCode === 0;
+    !redDetected && !staticCheckDetected && !abortDetected && spawnError === null &&
+    (exitCode === 0 || (childKilledBySignal && testsFullyGreen));
   // No correctness conclusion (abort) iff: an abort marker was seen, OR the child was killed by a
   // signal (code null), OR it never spawned. A REAL failure conclusion (redDetected) — and now a
   // static-check conclusion (staticCheckDetected) — is never downgraded by an earlier abort marker:
-  // both dominate (AC5: the failure conclusion stands).
+  // both dominate (AC5: the failure conclusion stands). childKilledBySignal is NOT folded into this
+  // "aborted" bucket — it gets its own reason=infra-error (the DIRECT child was torn down = an
+  // environment problem), so a green suite with only a test-internal `__ENVFAIL__`/`Killed` stream
+  // marker stays green (AC1, gap-infra-error-false-positive-from-test-internal-kill).
   const noCorrectnessConclusion =
-    !redDetected && !staticCheckDetected && (envFailDetected || abortDetected || childKilledBySignal || spawnError !== null);
+    !redDetected && !staticCheckDetected && (abortDetected || childKilledBySignal || spawnError !== null);
   const reason: SuiteStateReason = redDetected
     ? "failed"
     : timedOut
@@ -1611,8 +1642,8 @@ export async function run(argv: string[]): Promise<number> {
         ? "hung" // silence guard fired (AC3) — the suite went silent, killed as hung
         : staticCheckDetected && !testPhaseStarted
           ? "static-check"
-          : envFailDetected
-            ? "infra-error" // 人 2026-08-12 裁定②: 环境失败, 不冒充产品红
+          : childKilledBySignal
+            ? "infra-error" // the DIRECT test.sh child was signal-killed ⇒ environment problem (AC2, gap-infra-error-false-positive-from-test-internal-kill)
             : noCorrectnessConclusion
               ? "aborted"
               : "failed";

@@ -1085,11 +1085,14 @@ test("AC5 — a REAL failure after an abort marker is NOT downgraded: reason sta
   }
 });
 
-test("AC5 — a child killed by a signal (SIGKILL) writes reason=aborted (no correctness conclusion)", async () => {
+test("AC5 — a child killed by a signal (SIGKILL) writes reason=infra-error (environment), NOT failed", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-sigkill-"));
-  // A SIGKILL'd suite exits with code=null + signal=SIGKILL: the runner cannot read a verdict, so it
-  // is an abort (no correctness conclusion), NOT a failure. Previously this fell into the fail-closed
-  // catch-all and was mislabelled failed (the early-EXIT-red-as-failed bug).
+  // A SIGKILL'd suite exits with code=null + signal=SIGKILL: the DIRECT test.sh child was torn down
+  // mid-run ⇒ an environment problem (reason=infra-error, no correctness conclusion), NOT a code
+  // failure. Previously this was labelled aborted; gap-infra-error-false-positive-from-test-internal-
+  // kill AC2 re-classifies a signal-killed DIRECT child as infra-error (the EXIT STATUS is the only
+  // reliable kill signal — a stream `Killed`/`__ENVFAIL__` marker from a test's internal subprocess
+  // is NOT).
   const { f, dir } = fakeSuite('echo "about to die"\nkill -9 $$\necho "unreachable"');
   try {
     const child = runRunner({ root, command: `bash ${f}` });
@@ -1097,16 +1100,16 @@ test("AC5 — a child killed by a signal (SIGKILL) writes reason=aborted (no cor
     assert.equal(code, 1, "runner exits 1 on a killed suite");
     const s = await poll(() => {
       const cur = readState(root);
-      return cur && cur.state === "red" && cur.reason === "aborted" ? cur : null;
+      return cur && cur.state === "red" && cur.reason === "infra-error" ? cur : null;
     }, { timeoutMs: 5000 });
-    assert.ok(s, "signal-killed child is final state=red reason=aborted");
+    assert.ok(s, "signal-killed child is final state=red reason=infra-error");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test("AC5 — a SIGKILL'd node --test reported by bash as exit 137 is reason=aborted, NOT failed (the 07:08→07:21 shape)", async () => {
+test("AC5 — a SIGKILL'd node --test reported by bash as exit 137 is reason=infra-error, NOT failed (the 07:08→07:21 shape)", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-137-"));
   // gap-suite-cutoff-what-tears-test-process-at-session-topology (confirmed 2026-08-07): in the real
   // full-suite path test.sh runs `node --test` as a CHILD and bash reports a SIGKILL'd child as its
@@ -1114,6 +1117,9 @@ test("AC5 — a SIGKILL'd node --test reported by bash as exit 137 is reason=abo
   // exit.code=137, exit.signal=null — the pre-fix childKilledBySignal (`exitCode === null`) missed
   // this and mislabelled it reason=failed (a stop-dispatch signal). Reproduce the bash shape:
   //   bash runs a child, the child is SIGKILL'd externally, bash `wait`s it (→137) and exits 137.
+  // gap-infra-error-false-positive-from-test-internal-kill AC2: the DIRECT child exiting 128+N
+  // (a signal-killed descendant) is an environment problem ⇒ reason=infra-error (the runner's own
+  // test.sh child was torn down mid-run), NOT aborted.
   const { f, dir } = fakeSuite(
     'echo "simulating a SIGKILL\'d node --test child"\n' +
       "sleep 30 &\n" +
@@ -1127,15 +1133,16 @@ test("AC5 — a SIGKILL'd node --test reported by bash as exit 137 is reason=abo
   try {
     const child = runRunner({ root, command: `bash ${f}` });
     const { code } = await waitExit(child);
-    assert.equal(code, 1, "runner exits 1 on an aborted suite");
+    assert.equal(code, 1, "runner exits 1 on an infra-error suite");
     const s = await poll(() => {
       const cur = readState(root);
-      return cur && cur.state === "red" && cur.reason === "aborted" ? cur : null;
+      return cur && cur.state === "red" && cur.reason === "infra-error" ? cur : null;
     }, { timeoutMs: 5000 });
-    assert.ok(s, `bash-exits-137 signal-kill is final state=red reason=aborted (got ${JSON.stringify(readState(root))})`);
-    // And the stop-dispatch consumer (runOnce) reports NO stop signal for aborted-red (AC5).
+    assert.ok(s, `bash-exits-137 signal-kill is final state=red reason=infra-error (got ${JSON.stringify(readState(root))})`);
+    // And the stop-dispatch consumer (runOnce) reports NO stop signal for infra-error-red (AC5 —
+    // infra-error, like aborted, does NOT stop dispatch).
     const res = runOnce(root);
-    assert.equal(res.stopSignal, false, "bash-137 aborted-red must NOT trigger stop-dispatch");
+    assert.equal(res.stopSignal, false, "bash-137 infra-error-red must NOT trigger stop-dispatch");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(dir, { recursive: true, force: true });
@@ -1572,17 +1579,112 @@ test("AC2 e2e — a RED suite STILL PRODUCING OUTPUT is NOT killed on red-grace;
   }
 });
 
-test("AC2 e2e — an __ENVFAIL__ marker (runCli helper's environment-failure throw) maps to reason=infra-error, NOT product-red (人 2026-08-12 裁定②)", async () => {
+test("AC1 e2e — a stream __ENVFAIL__ marker (runCli helper's environment-failure throw) from a TEST's INTERNAL kill does NOT flip the suite — exit 0 ⇒ green (gap-infra-error-false-positive-from-test-internal-kill)", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-envfail-"));
-  // The fake suite's stderr carries the runCli helper's ENV_FAIL_MARKER throw (killed by SIGKILL).
+  // The fake suite's stderr carries the runCli helper's ENV_FAIL_MARKER throw (killed by SIGKILL) —
+  // the exact round-18 false-positive shape: resource-gate.test.mjs kills an INTERNAL child to test
+  // the resource gate and prints `__ENVFAIL__ killed by SIGKILL`, while ALL its tests pass (exit 0).
+  // The kill classification must come from the DIRECT test.sh child's EXIT STATUS (childKilledBySignal),
+  // NOT from stream content — a stream marker a test's internal subprocess printed is not evidence the
+  // suite was torn down. exit 0 + no failure line ⇒ state=green (NOT infra-error).
   const { f, dir } = fakeSuite('echo "__ENVFAIL__ killed by SIGKILL: ./bin/quay.js x" >&2; exit 0');
   try {
     const child = runRunner({ root, command: `bash ${f}` });
     const { code } = await waitExit(child);
     const s = readState(root);
-    assert.equal(s.state, "red", "an env failure still lands a red state (no correctness conclusion)");
-    assert.equal(s.reason, "infra-error", `an environment failure must be reason=infra-error, NOT a product red (got ${s.reason})`);
-    assert.ok(code !== 0, "runner exits non-zero on the infra-error");
+    assert.equal(s.state, "green", `a passing suite whose only oddity is a test-internal __ENVFAIL__ stream marker must be GREEN, got ${JSON.stringify(s)}`);
+    assert.ok(!s.reason, `green state carries no reason, got ${JSON.stringify(s)}`);
+    assert.equal(code, 0, "runner exits 0 on the green suite");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC1 e2e — a `Killed node --test` bash job-status line + green TAP tally + exit 0 ⇒ GREEN, NOT infra-error (the round-18 `suite log shows 1 SIGKILL/Killed marker(s)` shape)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-killedline-"));
+  // round 18 (2026-08-12): tests=3977 pass=3977 fail=0 cancelled=0 but the round was mislabelled
+  // infra-error because the log carried a SIGKILL/Killed marker. The marker is a TEST's internal
+  // subprocess being killed (resource-gate.test.mjs kills a child to test the resource gate) — the
+  // DIRECT test.sh child exited 0 with all tests passing. Reproduce the exact shapes: a bash
+  // job-status `Killed node --test` line AND a green TAP summary, then exit 0. The runner must mark
+  // GREEN (kill detection is the DIRECT child's exit status, never a stream marker).
+  const { f, dir } = fakeSuite(
+    'echo "scripts/test.sh: line 576: 720326 Killed node --test"\n' +
+      'echo "__ENVFAIL__ killed by SIGKILL: ./bin/quay.js x" >&2\n' +
+      'echo "# tests 3977"\necho "# pass 3977"\necho "# fail 0"\necho "# cancelled 0"\n' +
+      "exit 0",
+  );
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    const s = readState(root);
+    assert.equal(s.state, "green", `all-pass suite with only Killed/__ENVFAIL__ stream markers must be GREEN, got ${JSON.stringify(s)}`);
+    assert.ok(!s.reason, `green state carries no reason, got ${JSON.stringify(s)}`);
+    assert.equal(code, 0, "runner exits 0 on the green suite");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC1/manager-semantic e2e — a FULLY-GREEN test result (pass>0 fail=0 cancelled=0 failures=[]) + a signal-killed DIRECT child (exit 137) ⇒ GREEN, NOT infra-error red (fully-green test result wins over infra-error)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-greenwins-"));
+  // Manager semantic (2026-08-12, round-18 shape): when the TEST RESULT is fully green — pass>0,
+  // fail=0, cancelled=0, failures=[] — every test that ran passed. An infra-error teardown signal
+  // (here the DIRECT child exits 137: a descendant was SIGKILL'd) must NOT turn that into a
+  // state=red that blocks the batch-merge freshness gate. The fully-green test result is evidence
+  // the TESTS ALL PASSED ⇒ state=green (the reason axis never sees it as red).
+  const { f, dir } = fakeSuite(
+    'echo "scripts/test.sh: line 576: 720326 Killed node --test"\n' +
+      'echo "# tests 3977"\necho "# pass 3977"\necho "# fail 0"\necho "# cancelled 0"\n' +
+      "sleep 30 &\n" +
+      "child=$!\n" +
+      "kill -9 \"$child\"\n" +
+      "wait \"$child\" 2>/dev/null\n" +
+      "exit $?",
+  );
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    const s = readState(root);
+    assert.equal(s.state, "green", `a fully-green test result must win over the infra-error teardown signal, got ${JSON.stringify(s)}`);
+    assert.ok(!s.reason, `green state carries no reason, got ${JSON.stringify(s)}`);
+    assert.equal(code, 0, "runner exits 0 on the green suite (fully-green test result)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC2 e2e — a REAL signal-killed DIRECT test.sh child torn down MID-RUN (no full green TAP summary) is infra-error red, NOT green (AC2 non-regression)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-realkill-"));
+  // AC2 (gap-infra-error-false-positive-from-test-internal-kill): a REAL environment failure — the
+  // runner's DIRECT test.sh child killed by a signal (bash exits 128+N) BEFORE producing a full green
+  // result — must STILL be infra-error. This fake suite prints a `Killed node --test` line and exits
+  // 137 but emits NO full green TAP summary (torn down mid-run): the test result is NOT fully green
+  // (tapPass=0), so infra-error is a red, not green. Distinguishes the two directions: a fully-green
+  // test result wins (previous test); a mid-run teardown with no green evidence stays infra-error red.
+  const { f, dir } = fakeSuite(
+    'echo "scripts/test.sh: line 576: 720326 Killed node --test"\n' +
+      'echo "partial output before teardown"\n' +
+      "sleep 30 &\n" +
+      "child=$!\n" +
+      "kill -9 \"$child\"\n" +
+      "wait \"$child\" 2>/dev/null\n" +
+      "exit $?",
+  );
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    assert.equal(code, 1, "runner exits 1 on the infra-error");
+    const s = await poll(() => {
+      const cur = readState(root);
+      return cur && cur.state === "red" && cur.reason === "infra-error" ? cur : null;
+    }, { timeoutMs: 5000 });
+    assert.ok(s, `signal-killed DIRECT child torn down mid-run is final state=red reason=infra-error (got ${JSON.stringify(readState(root))})`);
+    const res = runOnce(root);
+    assert.equal(res.stopSignal, false, "infra-error-red must NOT trigger stop-dispatch");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(dir, { recursive: true, force: true });
