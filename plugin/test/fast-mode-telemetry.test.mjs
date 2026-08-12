@@ -1745,3 +1745,110 @@ test("WORKTREE-LEAK CLI — real git: merged worktree reads as a leak; removal c
 });
 
 } // ── end governance self-skip (AC6) ──
+
+// ── FAN-IN RUNID BRIDGE (gap-task-telemetry-6-percent-join) ──────────────────────────────────────────
+// The 6% join-rate defect: git fan-in commits and telemetry records barely intersected. The bridge:
+// a fan-in commit subject carries the telemetry runId at a fixed position — "merge: fan-in task/<id>
+// (runId: fm-...)" — and the telemetry reads it back (extractRunIdFromCommitSubject) and traces a
+// taskId → its fan-in commit (findFanInCommitSha). --task-end records the sha (AC3 traceability).
+
+test("FAN-IN BRIDGE — extractRunIdFromCommitSubject parses the runId by POSITION (and rejects absent/malformed)", async () => {
+  const cli = await importCli();
+  assert.equal(
+    cli.extractRunIdFromCommitSubject("merge: fan-in task/gap-x (runId: fm-gap-x-1750-abc123)"),
+    "fm-gap-x-1750-abc123",
+    "the runId in the fixed (runId: …) group is extracted",
+  );
+  assert.equal(
+    cli.extractRunIdFromCommitSubject("merge: fan-in task/gap-x (runId:fm-gap-x-1750-abc123)"),
+    "fm-gap-x-1750-abc123",
+    "no space after the colon is tolerated (position-based, whitespace-insensitive)",
+  );
+  assert.equal(cli.extractRunIdFromCommitSubject("merge: fan-in task/gap-x"), null, "no runId group ⇒ null");
+  assert.equal(cli.extractRunIdFromCommitSubject("Merge branch 'task/gap-x'"), null, "auto merge subject has no runId ⇒ null");
+  assert.equal(cli.extractRunIdFromCommitSubject(null), null, "null subject ⇒ null");
+  assert.equal(cli.extractRunIdFromCommitSubject(""), null, "empty subject ⇒ null");
+});
+
+test("FAN-IN BRIDGE — findFanInCommitSha traces a taskId to its fan-in merge commit (AC3)", async () => {
+  const cli = await importCli();
+  const tmp = makeTmpWorkspace();
+  try {
+    fs.writeFileSync(path.join(tmp, "base.txt"), "base\n", "utf8");
+    gitCmd(tmp, "init", "-q");
+    gitCmd(tmp, "config", "user.email", "test@example.com");
+    gitCmd(tmp, "config", "user.name", "test");
+    gitCmd(tmp, "add", "-A");
+    gitCmd(tmp, "commit", "-q", "-m", "base");
+    gitCmd(tmp, "checkout", "-q", "-b", "task/gap-bridge");
+    fs.writeFileSync(path.join(tmp, "work.txt"), "work\n", "utf8");
+    gitCmd(tmp, "add", "-A");
+    gitCmd(tmp, "commit", "-q", "-m", "work");
+    gitCmd(tmp, "checkout", "-q", "master");
+    const merged = gitCmd(tmp, "merge", "--no-ff", "task/gap-bridge", "-m", "merge: fan-in task/gap-bridge (runId: fm-gap-bridge-1750-abc)");
+    assert.equal(merged.status, 0, merged.stderr);
+    const expected = gitCmd(tmp, "rev-parse", "HEAD").stdout.trim();
+
+    const sha = cli.findFanInCommitSha(tmp, "gap-bridge");
+    assert.equal(sha, expected, "the task's fan-in merge commit is traced");
+    assert.equal(cli.findFanInCommitSha(tmp, "gap-never-landed"), null, "a task never fan-in'd ⇒ null");
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test("FAN-IN BRIDGE — --task-end auto-records the fan-in commit sha when the task's branch was merged (AC3)", async () => {
+  const tmp = makeTmpWorkspace();
+  try {
+    fs.writeFileSync(path.join(tmp, "base.txt"), "base\n", "utf8");
+    gitCmd(tmp, "init", "-q");
+    gitCmd(tmp, "config", "user.email", "test@example.com");
+    gitCmd(tmp, "config", "user.name", "test");
+    gitCmd(tmp, "add", "-A");
+    gitCmd(tmp, "commit", "-q", "-m", "base");
+    gitCmd(tmp, "checkout", "-q", "-b", "task/gap-end-rec");
+    fs.writeFileSync(path.join(tmp, "work.txt"), "work\n", "utf8");
+    gitCmd(tmp, "add", "-A");
+    gitCmd(tmp, "commit", "-q", "-m", "work");
+    gitCmd(tmp, "checkout", "-q", "master");
+    gitCmd(tmp, "merge", "--no-ff", "task/gap-end-rec", "-m", "merge: fan-in task/gap-end-rec (runId: fm-gap-end-rec-1-x)");
+    const fanSha = gitCmd(tmp, "rev-parse", "HEAD").stdout.trim();
+
+    const start = runCli(tmp, "--task-start", "--taskId", "gap-end-rec");
+    assert.equal(start.status, 0, start.stderr);
+    const runId = start.stdout.trim();
+    const end = runCli(tmp, "--task-end", "--taskId", "gap-end-rec", "--runId", runId, "--outcome", "done");
+    assert.equal(end.status, 0, end.stderr);
+
+    const events = readEventsJsonl(tmp, runId);
+    const endEv = events[events.length - 1];
+    assert.equal(endEv.eventKind, "end");
+    assert.equal(endEv.fanInCommitSha, fanSha, "the end event records the fan-in commit sha automatically");
+    assert.equal(endEv.runId, runId);
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test("FAN-IN BRIDGE — --task-end --fanInCommit <sha> overrides the auto-lookup; a non-git root records null", async () => {
+  const tmp = makeTmpWorkspace();
+  try {
+    const start = runCli(tmp, "--task-start", "--taskId", "gap-override");
+    assert.equal(start.status, 0, start.stderr);
+    const runId = start.stdout.trim();
+    const end = runCli(tmp, "--task-end", "--taskId", "gap-override", "--runId", runId, "--outcome", "done", "--fanInCommit", "deadbeef1234");
+    assert.equal(end.status, 0, end.stderr);
+    let ev = readEventsJsonl(tmp, runId);
+    assert.equal(ev[ev.length - 1].fanInCommitSha, "deadbeef1234", "explicit --fanInCommit wins");
+
+    // No git repo → auto-lookup is null (never a wrong sha).
+    const start2 = runCli(tmp, "--task-start", "--taskId", "gap-no-git");
+    const runId2 = start2.stdout.trim();
+    const end2 = runCli(tmp, "--task-end", "--taskId", "gap-no-git", "--runId", runId2, "--outcome", "abandoned");
+    assert.equal(end2.status, 0, end2.stderr);
+    const evs = readEventsJsonl(tmp, runId2);
+    assert.equal(evs[evs.length - 1].fanInCommitSha, null, "no git ⇒ fanInCommitSha null (fail-soft, never a wrong sha)");
+  } finally {
+    cleanup(tmp);
+  }
+});

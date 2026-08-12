@@ -35,10 +35,53 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 6% join 实测（139 git vs 152 遥测，交集 9）（本任务 Proposal 已含）
-- [ ] AC2: **fan-in 带 runId**——`merge: fan-in task/<id>` 提交信息含 `(runId: fm-...)`（按位置可解析）
-- [ ] AC3: **回溯可达**——从遥测 taskId 能机械查到其 fan-in 提交/分支
-- [ ] AC4: **既有不回归**——`--for-task` scoped 门绿
+- [x] AC1: **复现固化**——任务体记录 6% join 实测（139 git vs 152 遥测，交集 9）（本任务 Proposal 已含）
+- [x] AC2: **fan-in 带 runId**——`merge: fan-in task/<id>` 提交信息含 `(runId: fm-...)`（按位置可解析）
+- [x] AC3: **回溯可达**——从遥测 taskId 能机械查到其 fan-in 提交/分支
+- [x] AC4: **既有不回归**——`--for-task` scoped 门绿
+
+## Invoke Evidence（inner 2026-08-12 实跑）
+
+**机制**：`plugin/scripts/integration-batch-merge.sh --fan-in <id> --run-id <runId>` 产出
+`merge: fan-in task/<id> (runId: fm-...)`（按位置可解析，`(runId: …)` 在 subject 固定位置）。
+
+**AC2 实跑（临时 git fixture）**：
+```
+$ integration-batch-merge.sh --fan-in gap-demo --run-id fm-gap-demo-1750-abc123 --root <fixture>
+Merge made by the 'ort' strategy.
+integration-batch-merge: fan-in OK — task/gap-demo merged into master (commit ebcc445…) with runId fm-gap-demo-1750-abc123
+integration-batch-merge: measure fanin_runid_present=true
+$ git log -1 --format=%s
+merge: fan-in task/gap-demo (runId: fm-gap-demo-1750-abc123)
+```
+
+**Contract measure 检查器**（`plugin/scripts/fan-in-runid-check.ts`，对同一 fixture）：
+```
+$ node --experimental-strip-types plugin/scripts/fan-in-runid-check.ts --root <fixture>
+fan-in-runid-check: fan-in commit ebcc445…
+  subject: merge: fan-in task/gap-demo (runId: fm-gap-demo-1750-abc123)
+  runId present: YES (fm-gap-demo-1750-abc123)
+fan-in-runid-check: OK — band fanin_runid_present=true        (exit 0)
+$ node … fan-in-runid-check.ts --root <fixture> --task gap-missing   # 负控：未落地任务
+fan-in-runid-check: FAIL — no-fan-in-commit                        (exit 1)
+```
+
+**AC3 回溯**：`fast-mode-telemetry.ts` 新增 `findFanInCommitSha(root, taskId)`（telemetry taskId → fan-in
+commit sha）+ `extractRunIdFromCommitSubject`（读回 runId）；`--task-end` 自动把 fan-in commit sha 写进
+end event 的 `fanInCommitSha` 字段。实跑（同一 fixture `--task-end` 后 end event）：
+```
+"fanInCommitSha":"ebcc445b994b2a307bb9853214076adb1c116c54"
+```
+
+**AC4 scoped 门绿**：`bash scripts/test.sh --for-task gap-task-telemetry-6-percent-join`
+```
+ℹ tests 128 · ℹ pass 128 · ℹ fail 0 · ℹ cancelled 0
+```
+（选中集 = `integration-batch-merge.test.mjs` + `fast-mode-telemetry.test.mjs` +
+`fan-in-runid-check.test.mjs`；含新增 6+4+3 用例）
+
+**说明**：本 inner 不 fan-in（只提交不合并），故真实仓库尚无 runId 带跑样例；机制与测试已在 fixture 全绿。
+DoD「修后实跑」项待外层 verification-round 用 `--fan-in` 落地首个 runId 携带 fan-in 后补。
 
 ## Definition of Done
 

@@ -125,6 +125,16 @@
 #   --reconcile  after a successful batch merge, reconcile the primary checkout's stale index: run a
 #                porcelain-empty guard first (fail-closed on uncommitted/untracked work, owners
 #                reported), then `git reset --mixed <new develop tip>` — index only, never --hard.
+#   --fan-in <taskId>  FAN-IN MODE (gap-task-telemetry-6-percent-join): per-task fan-in merge of
+#                `task/<taskId>` into the CURRENT CHECKOUT's branch (fast-mode's $MERGE_TARGET),
+#                with the telemetry runId embedded in the commit subject — "merge: fan-in task/<id>
+#                (runId: fm-...)" — the position-parseable bridge that makes git landing records and
+#                telemetry records joinable (the 6% join-rate defect). Requires --run-id. Skips the
+#                batch-merge gates entirely (it exits before them); the batch-merge flow is unchanged
+#                and remains the default when --fan-in is absent.
+#   --run-id <runId>  the telemetry runId (from fast-mode-telemetry.ts --task-start) to embed in the
+#                fan-in commit subject. Must be filename-safe (matches the telemetry runId shape).
+#                Only meaningful with --fan-in.
 #
 #   OBJECT GATE (gap-batch-merge-gate-validates-tip-not-merge-result): before ANY merge (ff or real),
 #                the helper validates the MERGE RESULT, not just the integration tip. The suite tested
@@ -203,6 +213,12 @@ sync=0
 deliver=0
 merge_mode=0
 reconcile=0
+# ── FAN-IN MODE (gap-task-telemetry-6-percent-join) ─────────────────────────────────────────────
+# Per-task fan-in (task/<id> → the current checkout's branch — fast-mode's $MERGE_TARGET) with the
+# telemetry runId embedded in the commit subject. Empty by default (the batch-merge flow is the
+# default); set by --fan-in <taskId> / --run-id <runId>.
+fan_in_task=""
+fan_in_runid=""
 # ── FRESHNESS GATE (gap-batch-merge-gate-reads-stale-green) ───────────────────────────────────────
 # The batch merge may only proceed when the suite green is a FRESH green that actually verified the
 # CURRENT integration tip. Defaults: gate ON (mechanical — the outer's suiteGreen rule and the script's
@@ -259,11 +275,47 @@ while [ "$#" -gt 0 ]; do
     --skip-worktree-green-gate) skip_worktree_green_gate=1; shift ;;
     --freshness-window) freshness_window="$2"; shift 2 ;;
     --suite-state-file) suite_state_file="$2"; shift 2 ;;
+    --fan-in) fan_in_task="$2"; shift 2 ;;
+    --run-id) fan_in_runid="$2"; shift 2 ;;
     *) usage ;;
   esac
 done
 
 [ -d "${repo_root}/.git" ] || [ -f "${repo_root}/.git" ] || { echo "integration-batch-merge: not a git repo: ${repo_root}" >&2; exit 2; }
+
+# ── FAN-IN MODE (gap-task-telemetry-6-percent-join) ─────────────────────────────────────────────
+# Per-task fan-in merge: `task/<taskId>` → the CURRENT CHECKOUT's branch (fast-mode's $MERGE_TARGET;
+# the inner's shared checkout sits on it), with the telemetry runId embedded in the commit subject:
+#   merge: fan-in task/<id> (runId: fm-...)
+# The runId sits at a FIXED, position-parseable location (the trailing `(runId: …)` group) so the
+# two record sets — task landing records (git fan-in commits) and telemetry records (runIds) — become
+# joinable on the runId (the 6% join rate was the defect: git 139 fan-in names vs telemetry 152
+# taskIds, intersection 9). This mode is the MECHANICAL way to produce a runId-carrying fan-in; the
+# batch-merge flow (develop/integration gates below) is untouched and remains the default.
+if [ -n "${fan_in_task}" ]; then
+  if [ -z "${fan_in_runid}" ]; then
+    echo "integration-batch-merge: --fan-in requires --run-id <runId> (the runId from fast-mode-telemetry.ts --task-start)" >&2
+    exit 2
+  fi
+  case "${fan_in_runid}" in
+    *[!A-Za-z0-9._-]*) echo "integration-batch-merge: --run-id \"${fan_in_runid}\" is not filename-safe (must match [A-Za-z0-9._-]+, the telemetry runId shape)" >&2; exit 2 ;;
+  esac
+  if ! git -C "${repo_root}" rev-parse --verify --quiet "refs/heads/task/${fan_in_task}" >/dev/null; then
+    echo "integration-batch-merge: fan-in failed — task branch task/${fan_in_task} not found" >&2
+    exit 1
+  fi
+  # Merge into the checked-out branch (the merge target). --no-ff always creates a merge commit.
+  if ! git -C "${repo_root}" merge --no-ff "task/${fan_in_task}" -m "merge: fan-in task/${fan_in_task} (runId: ${fan_in_runid})"; then
+    git -C "${repo_root}" merge --abort >/dev/null 2>&1 || true
+    echo "integration-batch-merge: fan-in FAILED — merge of task/${fan_in_task} aborted (conflict or error); nothing merged" >&2
+    exit 1
+  fi
+  fan_in_sha="$(git -C "${repo_root}" rev-parse HEAD)"
+  fan_in_target="$(git -C "${repo_root}" branch --show-current 2>/dev/null || echo "<detached>")"
+  echo "integration-batch-merge: fan-in OK — task/${fan_in_task} merged into ${fan_in_target} (commit ${fan_in_sha}) with runId ${fan_in_runid}"
+  echo "integration-batch-merge: measure fanin_runid_present=true"
+  exit 0
+fi
 
 if ! git -C "${repo_root}" rev-parse --verify --quiet "refs/heads/${develop_ref}" >/dev/null; then
   echo "integration-batch-merge: develop ref not found: ${develop_ref}" >&2
