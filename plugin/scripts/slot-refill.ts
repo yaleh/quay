@@ -13,10 +13,22 @@
 // WHAT IT DOES (a DETECTOR/RECOMMENDER, not a gate — always exits 0, never writes tasks/**, never
 // spawns agents, never advances a counter):
 //   1. slots_free = max(0, effective_cap - in_flight_count). The caller passes the CURRENTLY-RUNNING
-//      subagent set EXPLICITLY (--in-flight). The helper deliberately does NOT read telemetry
+//      subagent set EXPLICITLY (--in-flight) — the INNER tick's own maintained set, which is
+//      authoritative for its dispatch decision. The helper deliberately does NOT read RAW telemetry
 //      brackets for the count (AC6: brackets ≠ subagents — gap-telemetry-brackets-vs-subagents-no-
 //      slot-visibility; a completed-but-not-fanned-in task keeps its telemetry bracket open yet its
 //      slot IS free). Completion frees the slot at the <task-notification>, not at fan-in.
+//   MEASURED IN-FLIGHT DEFAULT (gap-slot-refill-inflight-disconnected-from-worktrees): when
+//      --in-flight/--closed-but-live are NOT passed (the OUTER tick A18 / a manual bare `--json`
+//      reading), the in-flight view is MEASURED from the reconcile-aware telemetry `--slot-status`
+//      view — real-in-flight KEPT records (open brackets whose executor is observably present:
+//      process alive / worktree open) + closed-but-live agents + non-task subagents. This is NOT the
+//      raw bracket count AC6 warned about: `--slot-status` applies the same observable-executor
+//      reconcile probe `--reconcile` writes (branch merged / nothing ⇒ CLOSED), so a completed-but-
+//      not-fanned-in task whose work landed is NOT counted. A bare invocation used to silently read
+//      in_flight_count=0 while worktree + telemetry showed tasks in flight — the fix surfaces
+//      `measurement_source` ("explicit-input" | "telemetry-slot-status" | "degraded-no-telemetry") +
+//      `measurement_error` so a 0 is never silent again.
 //   2. Pool stats from ready-pool-check.analyzeTasks (pool / dispatchable_disjoint / criterion_met).
 //   3. should_refill = slots_free > 0 && dispatchable_disjoint >= 1 — the event-driven go/no-go.
 //   4. recommended = up to slots_free candidate ids from the PRODUCTION disjoint batch
@@ -62,6 +74,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { parseTask, extractSection } from "./task-schema.ts";
 import {
   analyzeTasks,
@@ -259,6 +272,19 @@ export function isNotYetFlippedSkip({ id, body, root, excludedNyfIds }) {
  *  @param {Array<{id:string, body:string}>} [o.closedButLive] tasks whose bracket CLOSED but whose
  *      executor is still observably present (from fast-mode-telemetry --slots closedButLive) — their
  *      slots are NOT free.
+ *  @param {number} [o.subagentsInFlight] non-task subagent PROCESSES in flight (no bracket —
+ *      investigation-type subagents, gap-telemetry-underreport-nontask-subagents-not-counted-in-slots).
+ *      They occupy a concurrency slot (occupied_slots / slots_free arithmetic) but carry no task id, so
+ *      they cannot participate in the touches-disjointness check. Default 0.
+ *  @param {string|null} [o.measurementSource] where the in-flight view came from — "explicit-input"
+ *      (the caller passed --in-flight/--closed-but-live), "telemetry-slot-status" (measured from the
+ *      reconcile-aware fast-mode-telemetry --slot-status view), or "degraded-no-telemetry" (the
+ *      measurement failed and the in-flight view fell back to empty). Default null (direct library
+ *      calls that pass inFlight/closedButLive arrays). This is the field that closes
+ *      gap-slot-refill-inflight-disconnected-from-worktrees: a bare `slot-refill --json` must never
+ *      again silently read 0 — the JSON now says whether 0 is measured or a degraded fallback.
+ *  @param {string|null} [o.measurementError] when measurementSource === "degraded-no-telemetry", the
+ *      telemetry failure message (never a silent 0). Default null.
  *  @param {number} [o.integrationBacklog] integration-ahead-of-develop commit count; when omitted it
  *      is read from git (`git rev-list --count develop..integration`), fail-safe 0 on a non-git root /
  *      missing ref. Injectable for tests (a temp dir is not a git repo).
@@ -282,7 +308,7 @@ export function isNotYetFlippedSkip({ id, body, root, excludedNyfIds }) {
  *      exposes-sort-key) is the parallel array of {id, deliveryCritical, suiteBlocking, rank} that
  *      exposes each recommended id's sort axes for AC36 判据②'s mechanical check.
  */
-export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, floorMult = POOL_FLOOR_MULT_DEFAULT, inFlight = [], closedButLive = [], integrationBacklog, redBacklogThreshold = RED_BACKLOG_THRESHOLD_DEFAULT, redBacklogCap = RED_BACKLOG_CAP_DEFAULT, dispatchGate = null }) {
+export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, floorMult = POOL_FLOOR_MULT_DEFAULT, inFlight = [], closedButLive = [], subagentsInFlight = 0, measurementSource = null, measurementError = null, integrationBacklog, redBacklogThreshold = RED_BACKLOG_THRESHOLD_DEFAULT, redBacklogCap = RED_BACKLOG_CAP_DEFAULT, dispatchGate = null }) {
   // PREEMPTIVE HALT (gap-supervisor-preemption AC2): the `.halt` sentinel is a CODE mount point,
   // not a tick-step-0 prose rule. When halted, dispatch is blocked no matter how many slots/candidates
   // exist — the human's stop takes effect at ANY dispatch-recommendation point, mid-flow.
@@ -297,8 +323,10 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
   const effectiveCap = computeArbitratedCap({ baseCap, suiteRed, integrationBacklog: backlog, redBacklogThreshold, redBacklogCap });
   const capNarrowed = effectiveCap !== baseCap;
   const pool = analyzeTasks({ tasksDir, root, cap: effectiveCap, floorMult, inFlight, closedButLive });
-  // A slot is free only when neither a running subagent NOR a closed-bracket-but-live agent holds it.
-  const occupied = inFlight.length + closedButLive.length;
+  // A slot is free only when neither a running subagent NOR a closed-bracket-but-live agent NOR a
+  // non-task investigation subagent holds it. `subagentsInFlight` carries no task id (no bracket), so
+  // it occupies a slot but cannot join the touches-disjointness check below.
+  const occupied = inFlight.length + closedButLive.length + (subagentsInFlight > 0 ? subagentsInFlight : 0);
   const slotsFree = computeSlotsFree(effectiveCap, occupied);
 
   // recommended — the production disjoint batch over the ready pool, filtered by the SAME step-4
@@ -457,7 +485,7 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
     shouldRefill = false;
     noRefillReason = `halted (preemption: .halt present — ${halt.reason}; check with supervisor-preempt.sh halt-check)`;
   } else if (slotsFree <= 0) {
-    noRefillReason = `no free slots (in-flight ${inFlight.length} + closed-but-live ${closedButLive.length} >= cap ${effectiveCap})`;
+    noRefillReason = `no free slots (in-flight ${inFlight.length} + closed-but-live ${closedButLive.length}${subagentsInFlight > 0 ? ` + subagents ${subagentsInFlight}` : ""} >= cap ${effectiveCap})`;
   } else if (recommended.length === 0) {
     noRefillReason = "no dispatchable candidate passes step-4 checks (touches-resolve / deps-ready / disjoint-from-in-flight / self-touch C8)";
   }
@@ -483,6 +511,18 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
     floor_mult: floorMult,
     in_flight_count: inFlight.length,
     closed_but_live_count: closedButLive.length,
+    // NON-TASK SUBAGENTS (gap-telemetry-underreport-nontask-subagents-not-counted-in-slots): the
+    // investigation-subagent PROCESS count that occupies slots but carries no task id. Included in
+    // occupied_slots/slots_free, never in the touches-disjointness check.
+    subagents_in_flight: subagentsInFlight,
+    // MEASUREMENT PROVENANCE (gap-slot-refill-inflight-disconnected-from-worktrees): where the
+    // in-flight view came from. "explicit-input" = the caller passed --in-flight/--closed-but-live
+    // (the inner tick A12 path); "telemetry-slot-status" = measured from the reconcile-aware
+    // fast-mode-telemetry --slot-status view (the outer tick A18 / manual bare `--json` path, which
+    // previously read a SILENT 0); "degraded-no-telemetry" = the measurement failed and measurement_error
+    // names why (never a silent 0).
+    measurement_source: measurementSource,
+    measurement_error: measurementError,
     occupied_slots: occupied,
     slots_free: slotsFree,
     pool: pool.pool,
@@ -521,6 +561,51 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
   };
 }
 
+// ── MEASURED IN-FLIGHT (gap-slot-refill-inflight-disconnected-from-worktrees) ───────────────────────
+// A bare `slot-refill --json` (no --in-flight) used to read in_flight_count=0 even while worktrees +
+// telemetry showed tasks in flight — a counter disconnected from its source, the same "报零而不是报错"
+// family as gap-inbox-counter-disconnected-from-files. The fix: when the caller does NOT pass
+// --in-flight/--closed-but-live (the outer tick A18 / manual path), MEASURE the in-flight view from
+// the authoritative reconcile-aware telemetry `--slot-status` view (real-in-flight kept records +
+// closed-but-live agents + non-task subagents). The inner tick A12 still passes its own maintained
+// --in-flight — that explicit path is byte-unchanged. On measurement failure the view degrades to
+// empty BUT the JSON surfaces measurement_source="degraded-no-telemetry" + measurement_error — the
+// "0" is never silent again.
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const TELEMETRY_CLI = path.join(__dirname, "fast-mode-telemetry.ts");
+
+/** Parse `fast-mode-telemetry.ts --slot-status --json` stdout into the measured in-flight view.
+ *  PURE: injectable for tests — the subprocess spawn lives in measureInFlightFromTelemetry. */
+export function parseSlotStatusOutput(text) {
+  const d = JSON.parse(text);
+  const kept = Array.isArray(d.kept) ? d.kept : [];
+  const closedButLive = Array.isArray(d.closed_but_live_agents) ? d.closed_but_live_agents : [];
+  return {
+    keptIds: kept.map((k) => k.taskId).filter(Boolean),
+    closedButLiveIds: closedButLive.map((c) => c.taskId).filter(Boolean),
+    realInFlight: Number(d.real_in_flight ?? kept.length),
+    closedButLiveCount: closedButLive.length,
+    subagentsInFlight: Number(d.subagents_in_flight ?? 0),
+    occupiedSlots: Number(d.occupied_slots ?? (kept.length + closedButLive.length)),
+  };
+}
+
+/** Spawn the telemetry `--slot-status` CLI (the authoritative reconcile-aware slot view) and parse it
+ *  into the measured in-flight view. Any subprocess/parse failure → { ok:false, error } — the caller
+ *  degrades to empty but MUST surface the error (never a silent 0). */
+export function measureInFlightFromTelemetry({ root, cap }) {
+  try {
+    const out = execFileSync(process.execPath, [
+      "--no-warnings", "--experimental-strip-types", TELEMETRY_CLI,
+      "--slot-status", "--cap", String(cap), "--json", "--root", root,
+    ], { encoding: "utf8", timeout: 15_000, stdio: ["ignore", "pipe", "ignore"] });
+    return { ok: true, ...parseSlotStatusOutput(out) };
+  } catch (e) {
+    return { ok: false, error: e?.message || String(e) };
+  }
+}
+
 function main(argv) {
   let root = null;
   let cap = FIXED_DISPATCH_CAP;
@@ -530,6 +615,13 @@ function main(argv) {
   let integrationBacklog = undefined;
   let redBacklogThreshold = RED_BACKLOG_THRESHOLD_DEFAULT;
   let redBacklogCap = RED_BACKLOG_CAP_DEFAULT;
+  // MEASUREMENT PROVENANCE (gap-slot-refill-inflight-disconnected-from-worktrees): whether the caller
+  // EXPLICITLY supplied the in-flight view. When NEITHER --in-flight nor --closed-but-live is passed,
+  // the in-flight view is MEASURED from the reconcile-aware telemetry --slot-status view — never
+  // silently defaulted to 0 (the defect: a bare `slot-refill --json` read 0 while worktree + telemetry
+  // showed 2 in-flight).
+  let inFlightExplicit = false;
+  let closedButLiveExplicit = false;
   const args = argv.slice(2);
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--root") root = args[++i];
@@ -537,8 +629,10 @@ function main(argv) {
     else if (args[i] === "--cap") cap = Number(args[++i]);
     else if (args[i] === "--floor-mult") floorMult = Number(args[++i]);
     else if (args[i] === "--in-flight") {
+      inFlightExplicit = true;
       inFlightIds = String(args[++i] || "").split(",").map((s) => s.trim()).filter(Boolean);
     } else if (args[i] === "--closed-but-live") {
+      closedButLiveExplicit = true;
       closedButLiveIds = String(args[++i] || "").split(",").map((s) => s.trim()).filter(Boolean);
     } else if (args[i] === "--integration-backlog") {
       integrationBacklog = Number(args[++i]);
@@ -558,9 +652,33 @@ function main(argv) {
     }
     return out;
   };
-  const inFlight = readTasks(inFlightIds);
-  const closedButLive = readTasks(closedButLiveIds);
-  const result = analyzeSlotRefill({ tasksDir: path.join(rootDir, "tasks"), root: rootDir, cap, floorMult, inFlight, closedButLive, integrationBacklog, redBacklogThreshold, redBacklogCap });
+  let inFlight = readTasks(inFlightIds);
+  let closedButLive = readTasks(closedButLiveIds);
+  let subagentsInFlight = 0;
+  let measurementSource = "explicit-input";
+  let measurementError = null;
+  // MEASURED IN-FLIGHT (gap-slot-refill-inflight-disconnected-from-worktrees): a bare invocation (no
+  // --in-flight / --closed-but-live) MEASURES the in-flight view from the authoritative reconcile-aware
+  // telemetry `--slot-status` (real-in-flight kept records + closed-but-live agents + non-task
+  // subagents). This makes the outer tick A18's bare `slot-refill.ts --cap 5 --json` reading consistent
+  // with worktree + telemetry — previously it silently read 0 (and even re-recommended an already
+  // in-flight task). The inner tick A12 still passes its own --in-flight (its maintained set is
+  // authoritative for its dispatch decision), so the explicit path is unchanged. On measurement failure
+  // the view degrades to empty BUT measurement_source="degraded-no-telemetry" + measurement_error are
+  // surfaced — never a silent 0.
+  if (!inFlightExplicit && !closedButLiveExplicit) {
+    const measured = measureInFlightFromTelemetry({ root: rootDir, cap });
+    if (measured.ok) {
+      inFlight = readTasks(measured.keptIds);
+      closedButLive = readTasks(measured.closedButLiveIds);
+      subagentsInFlight = measured.subagentsInFlight;
+      measurementSource = "telemetry-slot-status";
+    } else {
+      measurementSource = "degraded-no-telemetry";
+      measurementError = measured.error;
+    }
+  }
+  const result = analyzeSlotRefill({ tasksDir: path.join(rootDir, "tasks"), root: rootDir, cap, floorMult, inFlight, closedButLive, subagentsInFlight, measurementSource, measurementError, integrationBacklog, redBacklogThreshold, redBacklogCap });
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   return 0;
 }

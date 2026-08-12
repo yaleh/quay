@@ -39,6 +39,7 @@ import {
   readSuiteRed,
   isNotYetFlippedSkip,
   hasFanInMerge,
+  parseSlotStatusOutput,
 } from "../scripts/slot-refill.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -1082,4 +1083,149 @@ test("C8 BACKFILL — injected dispatchGate rejects a mid-rank candidate ⇒ lat
   assert.ok(r.recommended.includes("gap-gate-a"), "unrejected candidate still recommended");
   assert.ok(r.recommended.includes("gap-gate-c"), "later candidate BACKFILLS the rejected slot");
   assert.ok(!r.recommended.includes("gap-gate-b"), "gate-rejected candidate is not recommended (no fabrication)");
+});
+
+// ── MEASURED IN-FLIGHT (tasks/gap-slot-refill-inflight-disconnected-from-worktrees) ───────────────────
+// A bare `slot-refill --json` (no --in-flight) used to read in_flight_count=0 even while worktrees +
+// telemetry showed tasks in flight — the manager's 2026-08-12 field reading (2 worktrees + telemetry
+// inProgress, slot-refill 0), same "counter reports 0 instead of erroring" family as
+// gap-inbox-counter-disconnected-from-files. The fix: when --in-flight/--closed-but-live are NOT
+// passed, MEASURE the in-flight view from the authoritative reconcile-aware telemetry `--slot-status`
+// (kept real-in-flight records + closed-but-live agents + non-task subagents). The inner tick's
+// explicit --in-flight path is byte-unchanged. AC1: 有在飞 ⇒ in_flight_count ≥ 实际数; AC2: 无在飞 ⇒ 0
+// (negative control); AC3: occupied_slots/should_refill consistent with in-flight (never 5 free while
+// 2 occupied); AC4: new tests cover (a)(b)(c); AC5: existing tests stay green.
+
+const TELEMETRY_CLI = path.resolve(__dirname, "..", "scripts", "fast-mode-telemetry.ts");
+const SLOT_REFILL_CLI = path.resolve(__dirname, "..", "scripts", "slot-refill.ts");
+
+/** Run the slot-refill CLI with `--root` + `--cap 5` + extra args, parse the JSON. The child telemetry
+ *  `--slot-status` scan of live subagent processes is made deterministic via QUAY_TELEMETRY_SUBAGENTS=0
+ *  (never depends on whatever else is running on the machine at test time). */
+function runSlotRefillJson(root, extraArgs = []) {
+  return JSON.parse(execFileSync(process.execPath, [
+    "--no-warnings", "--experimental-strip-types", SLOT_REFILL_CLI, "--root", root, "--cap", "5", ...extraArgs,
+  ], { encoding: "utf8", env: { ...process.env, QUAY_TELEMETRY_SUBAGENTS: "0" } }));
+}
+
+/** Write a REAL telemetry start event via the CLI (validated), returning the runId it printed. */
+function runTelemetryTaskStart(root, taskId) {
+  const out = execFileSync(process.execPath, [
+    "--no-warnings", "--experimental-strip-types", TELEMETRY_CLI, "--task-start", "--taskId", taskId, "--root", root,
+  ], { encoding: "utf8", env: { ...process.env, QUAY_TELEMETRY_SUBAGENTS: "0" } });
+  const line = out.trim().split("\n").pop(); // runId is the last stdout line
+  assert.ok(/^fm-/.test(line), `--task-start printed a runId, got: ${line}`);
+  return line;
+}
+
+/** Build a REAL git workspace where `task/<inflightId>` is checked out in an OPEN worktree (the
+ *  reconcile KEEP signal) AND a telemetry start event exists — the exact "有在飞" shape the manager
+ *  read (`git worktree list` + telemetry inProgress). The worktree lives INSIDE the temp root, so a
+ *  plain rmSync(root) cleans both the worktree files and its .git/worktrees metadata. */
+function makeInflightWorkspace(tag, inflightId) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `slot-refill-infl-${tag}-`));
+  fs.mkdirSync(path.join(dir, "tasks"), { recursive: true });
+  fs.mkdirSync(path.join(dir, "code"), { recursive: true });
+  fs.mkdirSync(path.join(dir, ".workflow-events"), { recursive: true });
+  runGit(dir, "init", "-q");
+  runGit(dir, "config", "user.email", "t@t");
+  runGit(dir, "config", "user.name", "t");
+  fs.writeFileSync(path.join(dir, "base.txt"), "base\n");
+  runGit(dir, "add", "-A");
+  runGit(dir, "commit", "-qm", "base");
+  runGit(dir, "branch", "-M", "develop");
+  // The in-flight task's branch, checked out in a worktree (reconcile keep signal) + a start event.
+  runGit(dir, "checkout", "-qb", `task/${inflightId}`);
+  runGit(dir, "checkout", "-q", "develop");
+  runGit(dir, "worktree", "add", path.join(dir, `wt-${inflightId}`), `task/${inflightId}`);
+  runTelemetryTaskStart(dir, inflightId);
+  return dir;
+}
+
+test("parseSlotStatusOutput — pure parser maps kept/closed-but-live/subagents from --slot-status JSON", () => {
+  const parsed = parseSlotStatusOutput(JSON.stringify({
+    real_in_flight: 2,
+    subagents_in_flight: 1,
+    occupied_slots: 4,
+    kept: [{ taskId: "gap-a", keepReason: "worktree-present" }, { taskId: "gap-b", keepReason: "worktree-present" }],
+    closed_but_live_agents: [{ taskId: "gap-ghost", reason: "worktree-present" }],
+  }));
+  assert.deepEqual(parsed.keptIds, ["gap-a", "gap-b"]);
+  assert.deepEqual(parsed.closedButLiveIds, ["gap-ghost"]);
+  assert.equal(parsed.realInFlight, 2);
+  assert.equal(parsed.closedButLiveCount, 1);
+  assert.equal(parsed.subagentsInFlight, 1);
+  assert.equal(parsed.occupiedSlots, 4);
+});
+
+test("MEASURED — bare invocation reads real in-flight from telemetry; never re-recommends it (AC1/AC3)", (t) => {
+  const root = makeInflightWorkspace("pos", "gap-inflight");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-inflight", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/inflight.ts (new)"]) });
+  writeTask(root, "gap-other", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/other.ts (new)"]) });
+
+  // The BARE invocation (no --in-flight) — exactly the manager's field reading that used to report 0.
+  const r = runSlotRefillJson(root);
+  assert.equal(r.measurement_source, "telemetry-slot-status", "the in-flight view is measured, not input");
+  assert.equal(r.measurement_error, null);
+  assert.equal(r.in_flight_count, 1, "AC1: 有在飞 ⇒ in_flight_count ≥ 实际数 (telemetry kept 1)");
+  assert.equal(r.occupied_slots, 1, "AC3: occupied matches telemetry (1), not 0");
+  assert.equal(r.slots_free, 4, "AC3: 5 − 1 occupied = 4 free, never 5 while 1 occupied");
+  assert.ok(!r.recommended.includes("gap-inflight"), "an in-flight task is never re-recommended (touches-overlap with itself)");
+  assert.ok(r.recommended.includes("gap-other"), "a disjoint dispatchable candidate is still recommended");
+});
+
+test("MEASURED — negative control: no events/worktree ⇒ in_flight_count=0, measured source (AC2)", (t) => {
+  const root = makeWorkspace("neg-meas");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-a", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/a.ts (new)"]) });
+
+  const r = runSlotRefillJson(root);
+  assert.equal(r.measurement_source, "telemetry-slot-status");
+  assert.equal(r.in_flight_count, 0, "AC2: 无在飞 ⇒ 0 (negative control)");
+  assert.equal(r.occupied_slots, 0);
+  assert.equal(r.slots_free, 5);
+});
+
+test("MEASURED — explicit --in-flight (inner tick path) reports explicit-input, byte-compatible arithmetic", (t) => {
+  const root = makeWorkspace("expl");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-in", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/in.ts (new)"]) });
+  writeTask(root, "gap-out", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/out.ts (new)"]) });
+
+  // The inner tick A12 passes its own maintained --in-flight → the explicit path, NO telemetry read.
+  const r = runSlotRefillJson(root, ["--in-flight", "gap-in"]);
+  assert.equal(r.measurement_source, "explicit-input");
+  assert.equal(r.in_flight_count, 1);
+  assert.equal(r.occupied_slots, 1);
+  assert.equal(r.slots_free, 4);
+  assert.ok(!r.recommended.includes("gap-in"), "explicit in-flight task not recommended");
+  assert.ok(r.recommended.includes("gap-out"));
+});
+
+test("MEASURED — subagentsInFlight occupies a slot in the pure function (occupied_slots/slots_free)", (t) => {
+  const root = makeWorkspace("subagents");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-a", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/a.ts (new)"]) });
+  // 1 in-flight + 2 investigation subagents (no task id — count only, never in the disjointness check).
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 5, subagentsInFlight: 2 });
+  assert.equal(r.subagents_in_flight, 2);
+  assert.equal(r.occupied_slots, 2, "occupied = 0 in-flight + 2 subagents");
+  assert.equal(r.slots_free, 3);
+  assert.ok(r.recommended.includes("gap-a"), "subagents don't block the disjointness check (no task id to overlap)");
+});
+
+test("MEASURED — telemetry read failure degrades but is never silent (measurement_source + measurement_error)", (t) => {
+  const root = makeWorkspace("deg");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-a", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/a.ts (new)"]) });
+  // `.workflow-events` as a regular FILE makes the telemetry CLI's readdir throw (ENOTDIR) → the
+  // measurement subprocess fails → the JSON must surface the failure, not silently read 0.
+  fs.writeFileSync(path.join(root, ".workflow-events"), "not a dir\n");
+
+  const r = runSlotRefillJson(root);
+  assert.equal(r.measurement_source, "degraded-no-telemetry");
+  assert.ok(r.measurement_error && /ENOTDIR|not a directory|Command failed/.test(r.measurement_error),
+    `measurement_error surfaced, got: ${r.measurement_error}`);
+  assert.equal(r.in_flight_count, 0, "degraded fallback is empty — but the error makes it not-silent");
 });
