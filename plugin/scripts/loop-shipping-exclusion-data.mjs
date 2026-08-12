@@ -160,6 +160,16 @@ export function exclusionEntries(repoRoot, pluginDir) {
       reason: "asserts the laid-down target layout: REQUIRED_PRODUCT_FILES lists the cold-started project's orchestration/ + docs/analysis/ tick-doc paths (the reinstall-gate e2e, landed RED-first; its target-layout references were never added here)",
     },
     {
+      rel: 'packages/quay/test/install-config-driven-e2e-runtime.test.mjs',
+      target: path.join(repoRoot, 'packages', 'quay', 'test', 'install-config-driven-e2e-runtime.test.mjs'),
+      reason: "the RUNTIME-LANDING/BUILD half of the install-config-driven e2e family — split from install-config-driven-e2e.test.mjs by gap-split-three-phase-floor-files (2026-08-12, 6cba27d4; test bodies byte-identical to the pre-split file). productSource() maps the laid-down orchestration/ + docs/analysis/ tick-doc paths back to their plugin/loop/ sources and REQUIRED_PRODUCT_FILES asserts the consumer's laid-down target layout; same target-layout class as the pre-split file excluded above",
+    },
+    {
+      rel: 'packages/quay/test/install-config-driven-e2e-upgrade.test.mjs',
+      target: path.join(repoRoot, 'packages', 'quay', 'test', 'install-config-driven-e2e-upgrade.test.mjs'),
+      reason: "the UPGRADE/CONFIG-PRESERVATION half of the install-config-driven e2e family — split from install-config-driven-e2e.test.mjs by gap-split-three-phase-floor-files (2026-08-12, 6cba27d4; test bodies byte-identical to the pre-split file). productSource() maps the laid-down orchestration/ + docs/analysis/ tick-doc paths back to their plugin/loop/ sources; same target-layout class as the pre-split file excluded above",
+    },
+    {
       rel: 'plugin/test/quay-init-loop-consumer-doc-refs.test.mjs',
       target: path.join(pluginDir, 'test', 'quay-init-loop-consumer-doc-refs.test.mjs'),
       reason: "asserts the consumer-laid layout (docs/analysis/ + orchestration/ paths) — the AC37 consumer-doc-refs install family (gap-quay-init-loop-tick-doc-paths-reference-unlanded-plugin-loop). Same target-layout class as install-config-driven-e2e.test.mjs",
