@@ -107,22 +107,33 @@ session-bootstrap step.
 
 - [ ] AC1: the 3 children + the 2 linked prerequisites all reach `done`, each with its own
       real-run evidence per its own task body — this parent does not restate their evidence
-- [ ] AC2: `gap-quay-self-hosting-e2e-proof`'s six-key checklist, run for real on quay's own repo,
-      is `true` on all six keys without any human-in-the-loop verification step
+- [x] AC2: `gap-quay-self-hosting-e2e-proof`'s six-key checklist, run for real on quay's own repo,
+      is `true` on all six keys without any human-in-the-loop verification step —— **已满足
+      （重跑 2026-08-12，D2 修复后）**：六键**全部 `true`**（真实运行，见
+      `docs/analysis/quay-self-cold-start-proof.md` §2/§3 / 任务 Evidence），且 **「无
+      human-in-the-loop」成立**——step 0 `dead-loop-check.sh` 对 fresh cold-start 自证
+      `never-started`（live + 确定性三类对照），**零 operator 诊断**，冷启动自动走 fresh-start
+      分支 ⇒ `self_certify = 1`。capstone 重跑证据见其任务体 Evidence 重跑段 + proof doc §2–§4
 - [ ] AC3: dispatched in dependency order — the 2 prerequisites land before the SH4 capstone
       attempts to rely on them — verified by merge-commit ordering in `git log`, not asserted
 
 ## Definition of Done
 
-- [ ] The 3 children + the 2 linked prerequisites are all `status: done`
+- [ ] The 3 children + the 2 linked prerequisites are all `status: done`（capstone
+      `gap-quay-self-hosting-e2e-proof` 的 AC 已全部满足、Evidence 已更新——六键全 `true`、
+      **AC2 self_certify = 1**（重跑 2026-08-12），待闸口晋升 done；见其任务体诚实收口）
 - [ ] `gap-quay-self-hosting-e2e-proof`'s six-key table (all `true`) pasted into this task body
+      —— 已贴入其任务体 Evidence；完整命令/输出/缺陷表在
+      `docs/analysis/quay-self-cold-start-proof.md`（六键全 `true`，重跑 self_certify = 1，负对照 §7）
 
 ## Contract
 
 measure   children_done = `grep -l '^status: done' tasks/gap-cold-start-skill-has-no-recovery-branch.md tasks/gap-no-formalized-bare-metal-session-bootstrap.md tasks/gap-quay-self-hosting-e2e-proof.md | wc -l` 输出的计数
 band      children_done = 3（三个 child 全部 done）
 invariant deps_landed = 1（两个 prerequisite：gap-send-keys-verified... 与 gap-retire-inner-state... 已 done）
-invariant capstone_self_certify = 1（SH4 六键表全 true，无 human-in-the-loop）
+invariant capstone_self_certify = 1（SH4 六键表全 true，无 human-in-the-loop）—— **2026-08-12 首跑实测 = 0**
+    （step 0 dead-loop 假阳性需 operator 诊断）→ **重跑（D2 fan-in 2413fe42 后）实测 = 1**：step 0 对
+    fresh cold-start 自证 never-started，零 operator 介入（见 SH4 任务体 Evidence 重跑段 / proof doc §2–§4）
 invoke    `node --no-warnings --experimental-strip-types plugin/scripts/ready-pool-check.ts --root . --json`
 control   ready-pool 该 parent 可晋（fourArtifacts complete + deps ready）；六键表贴任务体
 resume    依赖顺序按 SPEC 落；capstone 最后

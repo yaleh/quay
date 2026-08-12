@@ -125,6 +125,17 @@ This prints `cold_start_state=running|stopped` and, when stopped, `stopped_reaso
 | `stopped` | `waiting-human` | `human-needed` | started before but blocked on human — do NOT report "complete"; tell the human: resolve the needs-human items / give direction, then restart. |
 | `stopped` | `unknown` | `restart` | started before, work available, but the driver died — restart the loop (re-create the cron, re-drive inner). |
 
+> **Known limitation — fresh cold-start false positive (measured 2026-08-12,
+> `gap-quay-self-hosting-e2e-proof` SH4 proof)**: `dead-loop-check.sh` scans the target project's
+> transcript dir for recent user messages. When the cold-start is run BY a session whose own
+> transcript lives in that dir (the normal self-host case — the cold-start outer session IS a
+> session of the target project), the check can report `running` on a project that has never been
+> started. Before accepting `running` on what should be a fresh start, cross-check the two
+> started-markers the stopped branch already reads: `.quay/loop-driver.jsonl` (empty → no driver
+> registered) and `.workflow-events/` (no `--task-start` record → never dispatched). Both empty ⇒
+> the loop was never started ⇒ take the fresh-start path, not `ALREADY-RUNNING`. Fix is routed as a
+> step-0/L2-criterion follow-up (driver+telemetry disambiguation).
+
 The stopped branch **reuses the L2 criterion** instead of inventing a new liveness signal — the dead-loop
 check's `liveness_independent_of_backlog` invariant keeps queue-empty (healthy idle) separate from
 nobody-driving (dead-loop), and this branch additionally reads the target project's own started-marker
