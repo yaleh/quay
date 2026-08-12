@@ -235,8 +235,20 @@ export function paneHasClaudeChild(env, session) {
   return false;
 }
 
-export async function waitForAlive(env, session, timeoutMs = 5000) {
-  const deadline = Date.now() + timeoutMs;
+// ── load-robustness budget (gap-session-liveness-wall-clock-budget-false-positives, 2026-08-12) ──
+// A wait budget here is a HANG-GUARD, never a correctness criterion. Under suite load the real
+// polling loop (session-liveness.sh sleep $INTERVAL) + real tmux + process spawn slow down — events
+// arrive after a tight wall-clock budget → false red. The product isn't broken; the measurement
+// window is too narrow. Every wait helper below polls a REAL signal (a marker line in the monitor's
+// stdout, the round counter, a /proc liveness probe) and uses the budget only as an upper cap so a
+// genuinely hung monitor still fails. 60s is deliberately loose — slow-but-correct passes,
+// hung-but-wrong still fails. A caller's explicit budget is CLAMPED UP to this floor (Math.max), so
+// a tight literal can never reintroduce a false red (hard-rule-4-corollary-2: widen generously).
+export const HANG_GUARD_MS = 60_000;
+function hangGuard(ms) { return Math.max(ms ?? HANG_GUARD_MS, HANG_GUARD_MS); }
+
+export async function waitForAlive(env, session, timeoutMs = HANG_GUARD_MS) {
+  const deadline = Date.now() + hangGuard(timeoutMs);
   while (Date.now() < deadline) {
     if (paneHasClaudeChild(env, session)) return true;
     await sleep(100);
@@ -362,8 +374,8 @@ export function paneSelfIsClaude(env, session) {
   return isClaudePid(p.stdout.trim());
 }
 
-export async function waitForSelfClaude(env, session, timeoutMs = 5000) {
-  const deadline = Date.now() + timeoutMs;
+export async function waitForSelfClaude(env, session, timeoutMs = HANG_GUARD_MS) {
+  const deadline = Date.now() + hangGuard(timeoutMs);
   while (Date.now() < deadline) {
     if (paneSelfIsClaude(env, session)) return true;
     await sleep(100);
@@ -414,8 +426,8 @@ export function spawnMonitor(env, targets, { script = SCRIPT, tickLogs, transcri
 export function countRounds(mon) {
   return (mon.output().match(/# ROUND/g) || []).length;
 }
-export async function waitForRounds(mon, n, timeoutMs = 10000) {
-  const deadline = Date.now() + timeoutMs;
+export async function waitForRounds(mon, n, timeoutMs = HANG_GUARD_MS) {
+  const deadline = Date.now() + hangGuard(timeoutMs);
   while (Date.now() < deadline) {
     if (countRounds(mon) >= n) return true;
     await sleep(100);
@@ -423,8 +435,8 @@ export async function waitForRounds(mon, n, timeoutMs = 10000) {
   return countRounds(mon) >= n;
 }
 
-export async function waitForOutput(mon, pattern, timeoutMs) {
-  const deadline = Date.now() + timeoutMs;
+export async function waitForOutput(mon, pattern, timeoutMs = HANG_GUARD_MS) {
+  const deadline = Date.now() + hangGuard(timeoutMs);
   while (Date.now() < deadline) {
     if (pattern.test(mon.output())) return true;
     await sleep(200);

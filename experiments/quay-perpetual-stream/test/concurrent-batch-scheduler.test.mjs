@@ -6,7 +6,7 @@
 // this module IMPORTS checkTouchesPair from touches-orthogonality-check.mjs, never re-implements it.
 // Run:
 //   node --test experiments/quay-perpetual-stream/test/concurrent-batch-scheduler.test.mjs
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -29,6 +29,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
 const SFX = path.join(__dirname, "..", "fixtures", "scheduler");
 const sfx = (f) => path.join(SFX, f);
+
+// Every mkdtemp receipt/ac dir is removed once at the end of this file (the carrier-array +
+// after() pattern) — a mkdtemp fixture without cleanup leaks a /tmp dir per run.
+const _tmpDirs = [];
+after(() => {
+  for (const dir of _tmpDirs) fs.rmSync(dir, { recursive: true, force: true });
+});
 
 // A fake expander maps a declared glob → concrete file set (hermetic, no fs).
 const fakeExpand = (mapping) => (globs) => {
@@ -295,6 +302,7 @@ test("loadReceiptTouches: null for a missing/absent receipt file", () => {
 
 test("loadReceiptTouches: reads a real receipt's '.touches' array", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cbs-receipt-"));
+  _tmpDirs.push(dir);
   const receiptFile = path.join(dir, "preparation.json");
   fs.writeFileSync(receiptFile, JSON.stringify({ touches: ["a.ts", "b.ts"] }));
   assert.deepEqual(loadReceiptTouches(receiptFile), ["a.ts", "b.ts"]);
@@ -316,6 +324,7 @@ test("applyPreparationExpansion: a candidate with no matching receipt entry is u
 
 test("applyPreparationExpansion: a candidate's checked-Plan receipt expands its effective touches", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cbs-receipt-"));
+  _tmpDirs.push(dir);
   const receiptFile = path.join(dir, "preparation.json");
   fs.writeFileSync(receiptFile, JSON.stringify({ touches: ["y/b.js", "x/a.js"] }));
   const cands = [
@@ -334,6 +343,7 @@ test("applyPreparationExpansion: a candidate's checked-Plan receipt expands its 
 
 test("assembleBatch: a candidate re-evaluated with its EXPANDED touches is deferred for a real overlap the stale declaration hid (DIR-117 iteration-2 item 4, the exact 'not just detectable in isolation' proof)", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cbs-receipt-"));
+  _tmpDirs.push(dir);
   const receiptFile = path.join(dir, "preparation.json");
   // B's checked Plan actually touches x/a.js too, even though B's declared '## Touches' only
   // ever said y/b.js — the exact staleness this item closes.

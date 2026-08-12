@@ -97,10 +97,7 @@
 # MACHINE-READABLE RATCHET CEILING parsed by the check — the list can NEVER exceed this many entries,
 # even at a clean commit. It is permanent: it stays 51 even as entries are removed.
 # Format: <repo-root-relative-test-file>:<rule-key>  ('#' comments and blanks ignored). Sorted.
-experiments/quay-perpetual-stream/test/concurrent-batch-scheduler.test.mjs:mkdtemp-no-cleanup
-experiments/quay-perpetual-stream/test/drain-dispose-corruption-check.test.mjs:mkdtemp-no-cleanup
 experiments/quay-perpetual-stream/test/vmeta-lag-check.test.mjs:fixed-path-write
-packages/quay-backlog/test/backlog-client.test.mjs:mkdtemp-no-cleanup
 packages/quay-native/test/adversarial-eval.test.mjs:fixed-path-write
 packages/quay-native/test/adversarial-eval.test.mjs:process-exit-1
 packages/quay-native/test/cas-write.test.mjs:fixed-path-write
@@ -109,7 +106,6 @@ packages/quay-native/test/compound-gate-recursive.test.mjs:fixed-path-write
 packages/quay-native/test/compound-gate.test.mjs:fixed-path-write
 packages/quay-native/test/create-validation.test.mjs:fixed-path-write
 packages/quay-native/test/create-validation.test.mjs:process-exit-1
-packages/quay-native/test/document-cli.test.mjs:mkdtemp-no-cleanup
 packages/quay-native/test/edit-validation.test.mjs:fixed-path-write
 packages/quay-native/test/edit-validation.test.mjs:process-exit-1
 packages/quay-native/test/gate-checked-state.test.mjs:fixed-path-write
@@ -119,29 +115,11 @@ packages/quay-native/test/lock.test.mjs:fixed-path-write
 packages/quay-native/test/lock.test.mjs:process-exit-1
 packages/quay-native/test/yaml-frontmatter-colon.test.mjs:fixed-path-write
 packages/quay-native/test/yaml-frontmatter-colon.test.mjs:process-exit-1
-packages/quay/test/cli-adr.test.mjs:mkdtemp-no-cleanup
-packages/quay/test/cli-edit-parity-conformance.test.mjs:mkdtemp-no-cleanup
-packages/quay/test/cli-entry.test.mjs:mkdtemp-no-cleanup
-packages/quay/test/cli-migrate.test.mjs:mkdtemp-no-cleanup
-packages/quay/test/delivery-standalone-smoke-gate.test.mjs:mkdtemp-no-cleanup
-packages/quay/test/dir022-remaining-gates.test.mjs:mkdtemp-no-cleanup
-packages/quay/test/dir032-audit-independence.test.mjs:mkdtemp-no-cleanup
-packages/quay/test/document-gate.test.mjs:mkdtemp-no-cleanup
-packages/quay/test/dod-gate-set.test.mjs:mkdtemp-no-cleanup
-packages/quay/test/frontmatter-store-base.test.mjs:mkdtemp-no-cleanup
-packages/quay/test/gap-cli-gate-enforcement.test.mjs:mkdtemp-no-cleanup
-packages/quay/test/gap002-create-ergonomics.iteration-0.test.mjs:mkdtemp-no-cleanup
-packages/quay/test/gap002-create-ergonomics.iteration-0.test.mjs:process-exit-1
-packages/quay/test/gate-list-verbose.test.mjs:mkdtemp-no-cleanup
-packages/quay/test/it0-gates.test.mjs:mkdtemp-no-cleanup
-packages/quay/test/mcp-config-validate.test.mjs:mkdtemp-no-cleanup
-packages/quay/test/provider-abi-conformance.test.mjs:mkdtemp-no-cleanup
 plugin/test/plugin-packaging.test.mjs:shared-build-artifact-write
 plugin/test/runner-grouping-fixture-runs.test.mjs:spawns-test-sh
 plugin/test/runner-grouping-flags-only.test.mjs:spawns-test-sh
 plugin/test/runner-grouping-governance.test.mjs:spawns-test-sh
 plugin/test/runner-grouping-list-groups.test.mjs:spawns-test-sh
 plugin/test/runner-grouping-serial-anti-stomp.test.mjs:spawns-test-sh
-plugin/test/runtime-usage-inventory.test.mjs:mkdtemp-no-cleanup
 plugin/test/select-tests-for-touches.test.mjs:spawns-test-sh
 plugin/test/test-coverage-check.test.mjs:spawns-test-sh

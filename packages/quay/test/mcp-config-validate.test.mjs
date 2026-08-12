@@ -11,7 +11,7 @@
 // AC5: Wiring AC (positive falsification) — spy on validateConfig, call handler, assert invoked.
 // AC6: >=80% coverage on new handler path.
 
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -25,10 +25,18 @@ const quayBin = QUAY_CLI;
 const configValidatePath = path.join(__dirname, "..", "src", "config-validate.ts");
 const mcpHandlersPath = path.join(__dirname, "..", "src", "mcp-handlers.ts");
 
+// Every workspace dir is removed once at the end of this file (the carrier-array + after()
+// pattern) — a mkdtemp fixture without cleanup leaks a /tmp dir per run.
+const _tmpDirs = [];
+after(() => {
+  for (const dir of _tmpDirs) fs.rmSync(dir, { recursive: true, force: true });
+});
+
 // Helpers
 
 function makeWorkspaceBase(configYmlContent, tag) {
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), `quay-dir099c-${tag}-ws-`));
+  _tmpDirs.push(workspaceRoot);
   fs.mkdirSync(path.join(workspaceRoot, ".quay"), { recursive: true });
   fs.writeFileSync(path.join(workspaceRoot, ".quay", "config.yml"), configYmlContent);
   return workspaceRoot;

@@ -44,7 +44,6 @@ packages/quay/test/action-mock-delivery.test.mjs
 packages/quay/test/cli.test.mjs
 packages/quay/test/config.test.mjs
 packages/quay/test/core-three-way-symmetry.test.mjs
-packages/quay/test/gap002-create-ergonomics.iteration-0.test.mjs
 packages/quay/test/mcp-server.test.mjs
 packages/quay/test/provider-env-symmetry.test.mjs
 packages/quay/test/serve-action-delivery.test.mjs

@@ -29,10 +29,17 @@
 // an external grep/glob exclusion list. Opt in with QUAY_TEST_LIVE_GITHUB=1
 // (requires GH_TOKEN / `gh auth login` with write access to yaleh/quay).
 
-import { test } from "node:test";
+import { test, after } from "node:test";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+
+// The native-leg fixture dirs are removed once at the end of this file (the carrier-array +
+// after() pattern) — a mkdtemp fixture without cleanup leaks a /tmp dir per run.
+const _tmpDirs = [];
+after(() => {
+  for (const dir of _tmpDirs) fs.rmSync(dir, { recursive: true, force: true });
+});
 import fs from "node:fs";
 import os from "node:os";
 import YAML from "yaml";
@@ -71,6 +78,8 @@ async function main() {
   // ============================= NATIVE LEG =============================
   const tasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-edit-conf-native-tasks-"));
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-edit-conf-native-ws-"));
+  _tmpDirs.push(tasksDir);
+  _tmpDirs.push(workspaceRoot);
   fs.mkdirSync(path.join(workspaceRoot, ".quay"), { recursive: true });
   fs.writeFileSync(
     path.join(workspaceRoot, ".quay", "config.yml"),
