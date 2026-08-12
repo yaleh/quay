@@ -39,16 +39,16 @@ $ ps -eo pid,etimes,args | grep -F 'claude ' | grep -vF ugrep
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 4 孤儿实测（两对 109h/119h，工作区已删）（本任务 Proposal 已含）
-- [ ] AC2: **teardown 完整**——夹具/worktree teardown 删目录 + 回收进程（不只删目录）
-- [ ] AC3: **孤儿检测器**——枚举 `claude --settings <path>` 进程，工作区目录不存在计孤儿，孤儿>0 即红
-- [ ] AC4: **既有不回归**——`--for-task` scoped 门绿
+- [x] AC1: **复现固化**——任务体记录 4 孤儿实测（两对 109h/119h，工作区已删）（本任务 Proposal 已含）
+- [x] AC2: **teardown 完整**——夹具/worktree teardown 删目录 + 回收进程（不只删目录）
+- [x] AC3: **孤儿检测器**——枚举 `claude --settings <path>` 进程，工作区目录不存在计孤儿，孤儿>0 即红
+- [x] AC4: **既有不回归**——`--for-task` scoped 门绿
 
 ## Definition of Done
 
-- [ ] AC1–AC4 全部勾上
-- [ ] 修后实跑：孤儿检测器读数（当前 4 → 修后 0）贴出
-- [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
+- [x] AC1–AC4 全部勾上
+- [x] 修后实跑：孤儿检测器读数（当前 4 → 修后 0）贴出
+- [x] 既有测试 + 新增测试全绿（`--for-task` scoped）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
 
 ## Touches
@@ -92,3 +92,21 @@ changed: manager 042500 实测（4 孤儿 109-120h）。teardown 不完整 + 无
 1. `orphan-session-check.ts` 的检测器本体保留；补 **list-only/dry-run 模式**（如 `--list`），让验证闸门逻辑时不需要真杀任何东西（manager 设计建议）。
 2. `full-suite-runner.ts` **不**在 run() 末尾自动调用 reclaim。夹具 teardown 回收进程改由 `provision-verify-worktree.sh --teardown` / `integration-batch-merge.sh` 的既有限定路径调用承担；`full-suite-runner.ts` 若保留 reclaim 入口，闸门必须改为「root 是任一承载活循环的检出则拒绝」，且只经显式 `--reclaim` 触发，不经自动路径。
 3. **负控制不固化进套件**（manager 116a770c）：验证闸门逻辑用 list-only/dry-run 跑，不在活的生产进程空间里零隔离地杀任何东西。
+
+## Evidence（inner 2026-08-12 06:5xZ，崩溃恢复后实现完成）
+
+**实现（worktree branch `task/gap-suite-leaks-live-claude-sessions` commit c8c91440）**：
+- 保留 `orphan-session-check.ts`（检测器本体，--json 只读枚举 + --kill-workspace <p> 限定路径）
+- 保留 `integration-batch-merge.sh` stop_sessions_under_worktree（mktemp 具体 tmp worktree 路径）
+- 保留 `provision-verify-worktree.sh --teardown`（--worktree 具体路径 + 既有 --dry-run）
+- **丢弃** `full-suite-runner.ts` 的 `reclaimFixtureSessions` + run() 末尾自动调用（闸门比 self 不比活循环检出；风险敞口=套件运行频率，manager 116a770c）；全文件净删除，仅留一条说明注释
+- 新增 `orphan-session-check.ts --list` / `--dry-run` 模式（验证闸门逻辑 killed=0，绝不真杀）
+- `killProcs` 计数修正：已消失 pid 不再双计（此前 SIGTERM catch 与终检 not-alive 各 +1）
+- 新增 `plugin/test/orphan-session-check.test.mjs`（14 用例）
+
+**验证读数**：
+1. `orphan-session-check.test.mjs` 14/14 绿（3.7s）
+2. `scripts/test.sh --for-task gap-suite-leaks-live-claude-sessions` 全绿（exit 0，隔离违规 0）
+3. 真 /proc 修前读数：`orphan_count=4`（/tmp/quay-suite-int 一对 pid 1517742/1517749 etimes≈403200s + manager-productization2 一对 pid 2625322/2625327 etimes≈439586s）；主检出活会话（pid 365022/365025 ws=/home/yale/work/quay）正确判为 **live**（不误杀——这是崩溃负控制的缺陷点，现由限定路径 + dry-run + 丢弃自动调用三重堵死）
+4. dry-run 命中集合与 4 孤儿逐 pid 一致（killed=0 只读）后执行真实回收：`/tmp/quay-suite-int` killed=2、`manager-productization2` killed=2，failed=0
+5. **修后读数：`orphan_count=0`（exit 0），活循环会话仍存活且判 live** —— DoD「当前 4 → 修后 0」达成
