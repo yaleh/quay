@@ -1,7 +1,7 @@
 ---
 id: gap-loop-shipping-ac1b-still-red-live-old-path-ref
 title: loop-shipping AC1b 仍红——仓库有对 5 个旧路径的活引用
-status: ready
+status: done
 labels:
   - gap
   - defect

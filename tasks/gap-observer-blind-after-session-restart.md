@@ -1,7 +1,7 @@
 ---
 id: gap-observer-blind-after-session-restart
 title: session-liveness 观察者在会话重启后失明（绑定旧 transcript，误报 OVERDUE 且报不出真死）
-status: ready
+status: done
 labels:
   - gap
   - defect

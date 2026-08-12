@@ -1,7 +1,7 @@
 ---
 id: gap-ceiling-floor-ms-not-landed-in-verification-round
 title: __CEILING__/floor_ms 每轮在报但没人读——落进 verification-round
-status: ready
+status: done
 labels:
   - gap
   - defect

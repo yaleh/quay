@@ -1,7 +1,7 @@
 ---
 id: gap-serve-pid-derived-port-collision-family
 title: serve 家族 PID 派生端口重叠 → 确定性碰撞（表现负载敏感 flake）
-status: ready
+status: done
 labels:
   - gap
   - defect
