@@ -90,7 +90,12 @@ test("SESSION-RESUMED then SESSION-IDLE fire when the real probe session goes bu
   const mon = spawnMonitor(env, `probe /tmp ${PROBE_TARGET}`, { tickLogs: `probe /nonexistent` });
   try {
     // 1. let the monitor establish its own idle baseline (≥2 rounds: PREV_HASH + PREV_IDLE=1).
-    await sleep(3500);
+    //    Load-robust (hermetic): wait on the deterministic `# ROUND` marker, never a fixed wall-clock
+    //    sleep — a fixed sleep can complete only ONE round (or none) when monitor rounds stretch under
+    //    concurrent-suite load, leaving PREV_IDLE un-armed so the RESUMED edge can never fire (the
+    //    exact r303 root-cause class, gap-session-liveness-family-hermetic-vs-ambient-load).
+    assert.ok(await waitForRounds(mon, 2, HANG_GUARD_MS),
+      `monitor must establish an idle baseline of ≥2 rounds before driving the probe:\n${mon.output()}`);
 
     // 2. drive the probe busy with a task that runs tens of seconds (flash answers a light
     //    question in ~5s — at INTERVAL=1 a short window could be missed entirely).
@@ -134,7 +139,11 @@ test("SESSION-GONE then SESSION-BACK fire when the probe's claude process vanish
     assert.ok(await waitForAlive(p.env, p.session), "probe claude child must be alive before the monitor starts");
     const mon = spawnMonitor(p.env, `gone ${p.tmp} ${p.session}`, {});
     try {
-      await sleep(2500); // ≥2 rounds: PREV_ALIVE=1 baseline
+      // ≥2 rounds: PREV_ALIVE=1 baseline. Load-robust (hermetic): the `# ROUND` marker is the
+      // deterministic time source — a fixed wall-clock sleep can complete only one slow round under
+      // load, and GONE is a PREV_ALIVE transition (an un-armed baseline would swallow the edge).
+      assert.ok(await waitForRounds(mon, 2, HANG_GUARD_MS),
+        `monitor must establish ≥2 rounds (PREV_ALIVE=1) before the probe is killed:\n${mon.output()}`);
       tmux(["send-keys", "-t", p.session, "kill %1"], p.env); // make it disappear
       tmux(["send-keys", "-t", p.session, "Enter"], p.env);
       assert.ok(await waitForOutput(mon, /SESSION-GONE gone/, 6000), `SESSION-GONE must fire:\n${mon.output()}`);
@@ -295,7 +304,12 @@ test(".halt suppresses REPO-STALL and SESSION-OVERDUE, but NOT SESSION-GONE", { 
 
     const mon = spawnMonitor(p.env, `halted ${gitRoot} ${p.session}`, { tickLogs: `halted ${tick}`, stallMin: 1, overdueMin: 1 });
     try {
-      await sleep(4000); // ≥3 rounds — STALL/OVERDUE would have fired by now if not gated
+      // ≥3 rounds — STALL/OVERDUE would have fired by now if not gated. Load-robust (hermetic):
+      // wait on the `# ROUND` marker, never a fixed wall-clock sleep — under concurrent-suite load a
+      // fixed sleep can complete fewer than the 3 rounds needed to make the suppression check
+      // meaningful (the negative assertions would then pass vacuously rather than truly).
+      assert.ok(await waitForRounds(mon, 3, HANG_GUARD_MS),
+        `monitor must run ≥3 halted rounds for the suppression checks to be meaningful:\n${mon.output()}`);
       const out = mon.output();
       assert.ok(!/REPO-STALL/.test(out), `REPO-STALL must be suppressed for a halted project:\n${out}`);
       assert.ok(!/SESSION-OVERDUE/.test(out), `OVERDUE must be suppressed for a halted project:\n${out}`);
@@ -442,7 +456,10 @@ test("AC6 — no tick log: SESSION-OVERDUE stays silent, other events work, no c
     const mon = spawnMonitor(p.env, `notick ${p.tmp} ${p.session}`,
       { tickLogs: `notick ${path.join(p.tmp, "nope.md")}`, overdueMin: 1 });
     try {
-      await sleep(4000);
+      // Load-robust (hermetic): ≥3 rounds via the `# ROUND` marker — a fixed wall-clock sleep can
+      // complete fewer rounds under load, making the OVERDUE-silence negative check vacuous.
+      assert.ok(await waitForRounds(mon, 3, HANG_GUARD_MS),
+        `monitor must run ≥3 rounds for the OVERDUE-silence check to be meaningful:\n${mon.output()}`);
       assert.ok(!/SESSION-OVERDUE/.test(mon.output()), `OVERDUE must be silent without a tick log:\n${mon.output()}`);
       tmux(["send-keys", "-t", p.session, "kill %1"], p.env);
       tmux(["send-keys", "-t", p.session, "Enter"], p.env);
