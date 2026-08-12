@@ -98,6 +98,54 @@ export const DELIVERY_INVENTORY_CHECKER = {
   commandLine: 'run_checker "delivery-inventory" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/verify-delivery-surface.ts" --inventory',
 };
 
+/**
+ * The registration files a task whose Touches declare a NEW `plugin/scripts/*` file MUST ALSO
+ * authorize in its Touches (gap-new-script-touches-missing-inventory-catalog-registration, AC3). A
+ * new script landing in the plugin-bundle has TWO mechanical-necessity sync products that live
+ * OUTSIDE the script file itself:
+ *   1. `plugin/scripts/capability-catalog.sh`  — the AC1c QUESTION-table declaration line (a new
+ *      script with no declaration is `unclassified` and the catalog exits non-zero);
+ *   2. `docs/proposals/quay-product-outline.md` — the §6 DELIVERY-INVENTORY snapshot (a DERIVED copy
+ *      of disk's bundle counts; a new script drifts disk-vs-snapshot until `--write-inventory`).
+ * When these are NOT in the task's Touches, the dispatched agent is NOT authorized to touch them —
+ * the 3-instance regression this task closes (2 agents overstepped and edited them anyway, 1 agent
+ * correctly stopped). This check turns that "post-hoc authorization" into a dispatch-preflight
+ * precondition: a new-script task whose Touches omit the registration files is flagged
+ * `touches-missing-registration` and must be fixed (add the files to ## Touches) before it can be
+ * worked — the agent either oversteps or stops today, both of which this task removes.
+ */
+export const NEW_SCRIPT_REGISTRATION_REQUIRED = [
+  "plugin/scripts/capability-catalog.sh",
+  "docs/proposals/quay-product-outline.md",
+];
+
+/**
+ * Dispatch-preflight registration check (gap-new-script-touches-missing-inventory-catalog-
+ * registration, AC2/AC3/AC4). Pure: given the task's declared `## Touches` paths and its NEW-file
+ * subset (the `(new)`-tagged and/or git-untracked plugin/scripts paths — the SAME signal
+ * CAPABILITY_CATALOG_CHECKER and DELIVERY_INVENTORY_CHECKER use), return ok:false with reason
+ * `touches-missing-registration` when the task declares a NEW `plugin/scripts/*` file but its
+ * Touches do NOT authorize the registration files. A task with NO new plugin/scripts file is always
+ * ok:true (AC4 negative control — existing scripts are never re-gated, the artifact is not
+ * rescanned whole). A task that declares a new script AND lists all required registration files is
+ * ok:true (AC3 — the fix for the gap is "补 Touches", exactly what the flagged agent is told to do).
+ */
+export function checkTouchesRegistration(touches, newTouches) {
+  const norm = (p) => normalizeRel(String(p));
+  const newScripts = [...new Set((newTouches || []).map(norm).filter(Boolean))]
+    .filter((t) => matchesObject("plugin/scripts/", t));
+  if (newScripts.length === 0) return { ok: true };
+  const declared = new Set((touches || []).map(norm).filter(Boolean));
+  const missing = NEW_SCRIPT_REGISTRATION_REQUIRED.filter((f) => !declared.has(f));
+  if (missing.length === 0) return { ok: true };
+  return {
+    ok: false,
+    reason: "touches-missing-registration",
+    newScript: newScripts[0],
+    missing,
+  };
+}
+
 // ── Repo-root detection (mirrors select-tests-for-touches.ts) ─────────────────────────────────────────
 
 export function findRepoRoot(startDir = path.dirname(fileURLToPath(import.meta.url))) {
@@ -362,7 +410,16 @@ const usage = `select-static-checks-for-touches.ts — mechanical touch→static
 
 Usage:
   node --experimental-strip-types select-static-checks-for-touches.ts --task <id> [--root <dir>]
-      [--touches <csv>] [--commands|--names|--list] [--json]
+      [--touches <csv>] [--commands|--names|--list] [--json] [--check-registration]
+
+Dispatch-preflight registration check (gap-new-script-touches-missing-inventory-catalog-registration):
+  --check-registration — with --task <id>, validate that a task whose ## Touches declare a NEW
+      plugin/scripts file ((new) tag, git-untracked, or the full-width （新：…） marker) ALSO authorizes
+      the registration files (plugin/scripts/capability-catalog.sh + docs/proposals/quay-product-outline.md).
+      Prints JSON { ok, reason, missing, newScript, ... }, exits 0 when ok, 1 when touches-missing-registration.
+      The same check runs implicitly in every --task selection mode: a failing task makes the scoped
+      static-check selection exit non-zero, so scripts/test.sh's scoped gate turns red (fail-closed)
+      instead of dispatching an agent whose Touches do not authorize the sync products.
 
 Selection rule (AC1/AC3, parsed mechanically from scripts/test.sh's run_static_checks body):
   scoped = { tier=always } ∪ { tier=change whose object ∩ touches } − { tier=full }
@@ -403,11 +460,46 @@ export function stripTrailingAnnotation(touch) {
 }
 
 /**
+ * Full-width new-file marker detection (gap-new-script-touches-missing-inventory-catalog-registration,
+ * AC2): the repo's REAL new-script Touches annotations use the FULL-WIDTH form `（新）`/`（新：…）`
+ * (e.g. `plugin/scripts/fan-in-runid-check.ts（新：runId 存在性检查器）` — the 2 overstep instances), while
+ * the shared touches-parser's TAG recognition only reads the ASCII `(new)` spelling (its path
+ * extraction DOES strip full-width annotations, so the path is still found — only the `new` tag is
+ * missed). This normalization layer mirrors the existing full-width annotation stripping
+ * (stripTrailingAnnotation — the scoped tier must never skip a change-relevant signal just because
+ * an annotation used the full-width form). It flags the TAG (a `plugin/scripts/*` bullet whose
+ * trailing full-width/half-width （…)/(…) annotation carries a leading 新 marker) and delegates the
+ * PATH to the ONE shared parser (parseTouchEntriesWithTags) — no second path parser.
+ * @returns {string[]} repo-relative plugin/scripts paths annotated full-width-new
+ */
+export function fullWidthNewScriptPaths(touchesSection) {
+  const out = [];
+  for (const raw of String(touchesSection ?? "").split(/\r?\n/)) {
+    const line = raw.trim();
+    const m = line.match(/^[-*]\s+(.+)$/);
+    if (!m) continue;
+    const annM = m[1].match(/(?:（([^）]*)）|\(([^)]*)\))\s*$/);
+    if (!annM) continue;
+    const annotation = (annM[1] ?? annM[2] ?? "").trim();
+    if (!/^新/.test(annotation)) continue; // 新 / 新：… / 新增 / 新脚本 — the full-width new marker
+    // Reuse the ONE parser for the path (a single bullet parses fine), then require plugin/scripts/*:
+    // a full-width-new file OUTSIDE the plugin bundle is not a registration trigger.
+    const paths = parseTouchEntriesWithTags(line).map((e) => e.path).filter(Boolean);
+    for (const p of paths) {
+      if (matchesObject("plugin/scripts/", p) && !out.includes(p)) out.push(p);
+    }
+  }
+  return out;
+}
+
+/**
  * Read a task body's `## Touches` bullet list (reuses the ONE shared touches parser — AC3), plus
- * the NEW-file subset: touches tagged `(new)` are the authoritative "this task CREATES this file"
- * declaration (gap-capability-catalog-declarations-not-enforced-at-script-creation). The tag-aware
+ * the NEW-file subset: touches tagged `(new)` — OR the full-width `（新）`/`（新：…）` marker the repo's
+ * real new-script Touches actually use (fullWidthNewScriptPaths, AC2) — are the authoritative
+ * "this task CREATES this file" declarations (gap-capability-catalog-declarations-not-enforced-at-
+ * script-creation + gap-new-script-touches-missing-inventory-catalog-registration). The tag-aware
  * parser's path extraction is BYTE-IDENTICAL to the plain one (touches-parser parity contract), so
- * change-relevance matching is unchanged — only the `(new)` tag is additionally surfaced.
+ * change-relevance matching is unchanged — only the new-file tag is additionally surfaced.
  * @returns {{paths:string[], newPaths:string[]}|null}
  */
 function touchesFromTask(root, taskId) {
@@ -418,6 +510,13 @@ function touchesFromTask(root, taskId) {
   const parsed = sec ? parseTouchEntriesWithTags(sec) : [];
   const paths = parsed.map((e) => e.path).filter(Boolean);
   const newPaths = parsed.filter((e) => e.tag === "new").map((e) => e.path).filter(Boolean);
+  // Full-width new-marker augmentation (AC2): the shared parser only tags ASCII `(new)`; the repo's
+  // real new-script Touches use `（新：…）`. Merge those plugin/scripts paths into the new-file subset
+  // so the capability-catalog / delivery-inventory scoped checkers AND the dispatch-preflight
+  // registration check fire for the ACTUAL annotation format, not just the ASCII test fixture form.
+  for (const p of fullWidthNewScriptPaths(sec)) {
+    if (!newPaths.includes(p)) newPaths.push(p);
+  }
   return { paths, newPaths };
 }
 
@@ -430,8 +529,15 @@ export function main(argv) {
   const namesOnly = args.includes("--names");
   const listMode = args.includes("--list");
   const commandsMode = args.includes("--commands");
+  const checkRegOnly = args.includes("--check-registration");
 
   const root = path.resolve(rootArg ?? findRepoRoot());
+  // --check-registration validates a task's ## Touches authorization — it requires a task id (the
+  // --touches CSV mode is a raw file-list with no ## Touches to validate, so it is not a target).
+  if (checkRegOnly && !taskId) {
+    process.stderr.write(`select-static-checks-for-touches: --check-registration requires --task <id> (a file-list --touches has no ## Touches to validate)\n`);
+    return 2;
+  }
   const testSh = path.join(root, TEST_SH_REL);
   if (!fs.existsSync(testSh)) {
     process.stderr.write(`select-static-checks-for-touches: scripts/test.sh not found at ${testSh}\n`);
@@ -484,6 +590,28 @@ export function main(argv) {
 
   const { selected, deferred } = selectStaticChecksForTouches(touches, registry, { newTouches });
 
+  // DISPATCH-PREFLIGHT REGISTRATION CHECK (gap-new-script-touches-missing-inventory-catalog-
+  // registration, AC2/AC3/AC4): a task whose ## Touches declare a NEW plugin/scripts file must ALSO
+  // authorize the registration files — otherwise the dispatched agent is not authorized to touch the
+  // catalog declaration / DELIVERY-INVENTORY snapshot, and either oversteps or stops (the 3-instance
+  // regression). The check runs ONLY in --task mode (the task's ## Touches are the authorization to
+  // validate); the --touches CSV mode is a raw file-list (no ## Touches to validate) and is never
+  // gated (a `--scoped <files>` run keyed to an untracked new script must not false-positive). A
+  // failing task fails the scoped static-check selection (exit 1), which scripts/test.sh's
+  // run_scoped_static_checks_sel treats as a FATAL gate (`if ! cmds=...; then exit 1; fi`) —
+  // fail-closed, the task cannot pass its own scoped run until its Touches authorize the files.
+  const regCheck = taskId ? checkTouchesRegistration(touches, newTouches) : { ok: true };
+
+  if (checkRegOnly) {
+    process.stdout.write(JSON.stringify({
+      taskId: taskId ?? null,
+      touches,
+      newTouches,
+      registrationCheck: regCheck,
+    }, null, 2) + "\n");
+    return regCheck.ok ? 0 : 1;
+  }
+
   if (asJson) {
     process.stdout.write(JSON.stringify({
       taskId: taskId ?? null,
@@ -491,8 +619,17 @@ export function main(argv) {
       selected: selected.map((s) => s.name),
       deferred,
       commands: selected.map((s) => buildCommand(s, root)),
+      registrationCheck: regCheck,
     }, null, 2) + "\n");
-    return 0;
+    return regCheck.ok ? 0 : 1;
+  }
+  if (!regCheck.ok) {
+    process.stderr.write(
+      `select-static-checks-for-touches: ${regCheck.reason} — task declares new plugin/scripts file ` +
+      `"${regCheck.newScript}" but its ## Touches do not authorize the registration file(s): ` +
+      `${regCheck.missing.join(", ")}. Add these to ## Touches before dispatching.\n`,
+    );
+    return 1;
   }
   if (namesOnly) {
     for (const s of selected) process.stdout.write(`${s.name}\n`);
