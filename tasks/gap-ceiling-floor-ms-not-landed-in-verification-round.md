@@ -33,11 +33,31 @@ extra: {}
 
 ## AC
 
-- [ ] AC1: round 记录含 `floor_ms`（各相）+ `ceiling`（封顶者清单）
-- [ ] AC2: 与 measure-suite-reporter 的 `__CEILING__` 输出一致（无漂移）
-- [ ] AC3: 无 __CEILING__ 行的轮次记录缺省字段（不造空值）
-- [ ] AC4: 新测试覆盖 (a)(b)(c)；`--for-task` scoped 门绿
-- [ ] AC5: 既有 full-suite-runner 测试全绿
+- [x] AC1: round 记录含 `floor_ms`（各相）+ `ceiling`（封顶者清单）
+- [x] AC2: 与 measure-suite-reporter 的 `__CEILING__` 输出一致（无漂移）
+- [x] AC3: 无 __CEILING__ 行的轮次记录缺省字段（不造空值）
+- [x] AC4: 新测试覆盖 (a)(b)(c)；`--for-task` scoped 门绿
+- [x] AC5: 既有 full-suite-runner 测试全绿
+
+## Evidence
+
+**invoke：inner worktree `task/gap-ceiling-floor-ms-not-landed-in-verification-round`（2026-08-12）**
+
+实跑（fake suite 向 stderr 发 2 行 `__CEILING__`，runner 完整跑完）：
+
+```
+$ node --no-warnings --experimental-strip-types plugin/scripts/full-suite-runner.ts --root $TMP --command "bash $TMP/fake.sh" --lane-count 8
+EXIT=0
+$ cat $TMP/.quay/verification-round.jsonl
+{"round":1,"startedAt":"2026-08-12T12:30:40.721Z","durationMs":229,"laneCount":8,"pass":5,"fail":0,"cancelled":0,"tests":5,"per_test_ms":45.8,"redAt":null,"load":3.77,"state":"green","reason":null,"runner":"outer","scope":"main","floor_ms":[4200],"ceiling":["/repo/packages/quay/test/heavy.test.mjs","/repo/packages/quay/test/heavy2.test.mjs"]}
+```
+
+- AC1/AC2：round 记录含 `floor_ms`（各相，`[4200]`）+ `ceiling`（封顶者清单，与 `__CEILING__` 行逐字一致，无归一化）。
+- AC3：`GREEN_SUITE`（无 `__CEILING__` 行）的记录 `floor_ms`/`ceiling` 均缺省（测试断言 `undefined`）。
+- AC4：新增 3 用例（单组 floor/ceiling、多相各相 floor 数组、无 CEILING 缺省）；`bash scripts/test.sh --for-task gap-ceiling-floor-ms-not-landed-in-verification-round` → `ℹ tests 92` / `ℹ pass 92` / `ℹ fail 0`，EXIT=0。
+- AC5：full-suite-runner 既有用例（含前述 89 个既有 + 3 新增）全绿。
+
+**scoped 静态检查**：`tick-core-static-check` PASS（41/41、54/54、44/44），无 task-file 违约。
 
 ## Definition of Done
 
