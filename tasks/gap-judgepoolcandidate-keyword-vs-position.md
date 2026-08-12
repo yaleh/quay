@@ -1,7 +1,7 @@
 ---
 id: gap-judgepoolcandidate-keyword-vs-position
 title: judgePoolCandidate 按关键词不按位置 — DIR-103 出处注假阳性标 retired-mechanism（硬规则 2 违规）
-status: todo
+status: done
 labels:
   - gap
   - defect
@@ -11,6 +11,8 @@ children: []
 extra: {}
 ---
 **type:** execution
+
+> **翻 done（outer 2026-08-12, r314-green 686b5540 覆盖）**：代码落地 develop + AC 勾选 + measure 复核通过。
 
 ## Proposal
 

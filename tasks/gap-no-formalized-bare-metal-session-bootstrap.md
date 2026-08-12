@@ -1,7 +1,7 @@
 ---
 id: gap-no-formalized-bare-metal-session-bootstrap
 title: "there is no formalized step for bootstrapping the tmux session layout quay:cold-start assumes already exists — tonight's manager/inner/outer windows were all built by hand"
-status: todo
+status: done
 parent: gap-quay-has-never-self-hosted-its-own-cold-start
 labels:
   - gap
@@ -11,6 +11,8 @@ extra:
 ---
 
 **type:** execution
+
+> **翻 done（outer 2026-08-12, r314-green 686b5540 覆盖）**：代码落地 develop + AC 勾选 + measure 复核通过。
 
 ## Proposal
 
