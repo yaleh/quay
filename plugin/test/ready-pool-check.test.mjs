@@ -66,6 +66,8 @@ import {
   commitSubjectTracesTask,
   commitTraceLanded,
   isCompoundTask,
+  isExternalVerificationItem,
+  isPendingImplementationItem,
 } from "../scripts/ready-pool-check.ts";
 import { parseTask } from "../scripts/task-schema.ts";
 import { taskWorkLanded } from "../scripts/task-status-drift-check.ts";
@@ -102,9 +104,13 @@ function writeTask(root, id, { status = "todo", labels = [], parent = null, chil
 
 // A minimal contract-shape body carrying the four artifacts (Proposal / Contract / AC / DoD).
 // `checkedAc` marks the first N AC boxes `- [x]` (default 0 — all unchecked, the fan-in merge shape).
-function fourArtifactBody({ acBoxes = 4, touches = "", extra = "", checkedAc = 0 } = {}) {
+// `uncheckedText` overrides the text of the UNCHECKED AC boxes — the workLanded arm reads the author-
+// DECLARED annotation at the item END (（待外部）/（待本任务）, closed enum; unannotated = 待本任务
+// fail-closed, gap-ready-pool-remaining-external-vs-implementation), so done-flip fixtures set it to
+// an external-verification item ending in （待外部） (e.g. "全量套件绿（外层 verification-round 验证）（待外部）").
+function fourArtifactBody({ acBoxes = 4, touches = "", extra = "", checkedAc = 0, uncheckedText = "an AC item that is long enough" } = {}) {
   const acLines = Array.from({ length: acBoxes }, (_, i) =>
-    i < checkedAc ? "- [x] an AC item that is long enough" : "- [ ] an AC item that is long enough");
+    i < checkedAc ? "- [x] an AC item that is long enough" : `- [ ] ${uncheckedText}`);
   return [
     "**type:** execution",
     "## Proposal",
@@ -147,13 +153,14 @@ test("ready pool excludes fixture, PARKED, and done-flip ready tasks; keeps stuc
     labels: ["gap"],
     body: "> **PARKED (outer ruling, 2026-08-04) — execution suspended.**\n\n" + fourArtifactBody(),
   });
-  // A MERGED DONE-FLIP ready task: work landed (Touches file exists on disk) AND ACs near-complete
-  // (3/4 — the "verification-window" shape) → not-yet-flipped → not dispatchable.
+  // A MERGED DONE-FLIP ready task: work landed (Touches file exists on disk) AND every remaining
+  // unchecked box is an EXTERNAL-VERIFICATION item (the "verification-window" shape — only the full
+  // suite green remains) → not-yet-flipped → not dispatchable.
   fs.writeFileSync(path.join(root, "code", "landed.ts"), "export const landed = 1;\n");
   writeTask(root, "gap-done-flip", {
     status: "ready",
     labels: ["gap"],
-    body: fourArtifactBody({ checkedAc: 3, touches: ["- code/landed.ts (new)"] }),
+    body: fourArtifactBody({ checkedAc: 3, uncheckedText: "全量套件绿（外层 verification-round 验证）（待外部）", touches: ["- code/landed.ts (new)"] }),
   });
   // STUCK-WORK: work landed but ACs far from complete (0/4) — REAL remaining implementation, NOT a
   // done-flip (gap-ready-pool-worklanded-traps-stuck-work AC2) → stays dispatchable.
@@ -191,11 +198,12 @@ test("pool counts merged-but-AC-incomplete stuck-work, excludes merged done-flip
     labels: ["gap"],
     body: fourArtifactBody({ touches: ["- code/landed.ts (new)"] }), // 0/4 AC checked
   });
-  // DONE-FLIP: work landed AND ACs near-complete (3/4 — the verification-window shape) → excluded.
+  // DONE-FLIP: work landed AND the only remaining unchecked box is an EXTERNAL-VERIFICATION item
+  // (3/4 — the verification-window shape) → excluded.
   writeTask(root, "gap-merged-done-flip", {
     status: "ready",
     labels: ["gap"],
-    body: fourArtifactBody({ checkedAc: 3, touches: ["- code/landed.ts (new)"] }),
+    body: fourArtifactBody({ checkedAc: 3, uncheckedText: "全量套件绿（外层 verification-round 验证）（待外部）", touches: ["- code/landed.ts (new)"] }),
   });
   // A genuinely-unstarted ready task: Touches file does not exist, no resolving symbols → stays.
   writeTask(root, "gap-unstarted", {
@@ -233,12 +241,12 @@ test("existing-file-modifying tasks: not-landed stays, done-flip landed is exclu
     body: fourArtifactBody({ touches: ["- code/existing.ts"] }), // 0/4 AC, no (new), no resolving symbols
   });
   // DONE-FLIP landed: an existing-file task whose work HAS landed via a task-created file ((new)
-  // exists) AND ACs near-complete (3/4) → excluded (AC3).
+  // exists) AND the only remaining unchecked box is an EXTERNAL-VERIFICATION item (3/4) → excluded.
   fs.writeFileSync(path.join(root, "code", "created.ts"), "export const created = 1;\n");
   writeTask(root, "gap-mod-done-flip", {
     status: "ready",
     labels: ["gap"],
-    body: fourArtifactBody({ checkedAc: 3, touches: ["- code/existing.ts", "- code/created.ts (new)"] }),
+    body: fourArtifactBody({ checkedAc: 3, uncheckedText: "全量套件绿（外层 verification-round 验证）（待外部）", touches: ["- code/existing.ts", "- code/created.ts (new)"] }),
   });
   // STUCK-WORK landed: the same landing evidence but ACs far from complete (0/4) → real remaining
   // implementation → stays dispatchable (AC2).
@@ -281,12 +289,12 @@ test("ready pool excludes a prose-heavy DONE-FLIP via git-history, keeps git-his
   git("commit", "-q", "-m", "init");
   // A prose-heavy DONE-FLIP task: ACs yield no resolvable symbols and Touches are existing-file
   // paths (no (new)) — the shape that was under-detected (web-board). Its work lands via a fan-in
-  // merge "merge web-board: …" that modified code/board.ts → git-history fires; ACs near-complete
-  // (3/4) → excluded as done-flip.
+  // merge "merge web-board: …" that modified code/board.ts → git-history fires; the only remaining
+  // unchecked box is an EXTERNAL-VERIFICATION item (3/4) → excluded as done-flip.
   writeTask(root, "gap-web-board-needs-an-inconsistency-verdict-it-does-not-have", {
     status: "ready",
     labels: ["gap"],
-    body: fourArtifactBody({ checkedAc: 3, touches: ["- code/board.ts"] }),
+    body: fourArtifactBody({ checkedAc: 3, uncheckedText: "全量套件绿（外层 verification-round 验证）（待外部）", touches: ["- code/board.ts"] }),
   });
   // A genuinely-unstarted ready task stays in the pool (no commit references it).
   writeTask(root, "gap-unstarted", { status: "ready", labels: ["gap"], body: fourArtifactBody({ touches: ["- code/never.ts"] }) });
@@ -416,12 +424,12 @@ test("commit-trace nyf: branch merged+DELETED on integration (master stale) ⇒ 
   git("checkout", "-q", "integration");
   git("merge", "--no-ff", "task/gap-traced-partial", "-m", "merge: fan-in task/gap-traced-partial", "-q");
   git("branch", "-D", "task/gap-traced-partial");
-  // TRACED WORKLANDED PARTIAL (the 乙/contradiction population-split anchor): the work REALLY landed
-  // (the inner commit touches the task's OWN Touches file — taskWorkLanded fires via git-history) but
-  // the ACs are NOT all checked (3/4) — a near-complete-but-not-done task. The workLanded arm's >50%
-  // verification-window leniency still excludes it (a real done-flip candidate under
-  // gap-ready-pool-worklanded-traps-stuck-work) — and the excluded entry must carry ac_open=1 so A9
-  // classifies it 乙 (contradiction), NOT silently as done work.
+  // TRACED WORKLANDED PARTIAL (criterion ⑦d — a RATIO cannot tell verification from implementation):
+  // the work REALLY landed (the inner commit touches the task's OWN Touches file — taskWorkLanded
+  // fires via git-history) but the remaining unchecked box (3/4) is this task's OWN implementation
+  // ("an AC item that is long enough" — a generic AC, NOT an external-verification item). 3/4 = 75%
+  // > 50% WOULD have been a done-flip under the old ratio — but ANY remaining implementation box
+  // means NOT landed (gap-ready-pool-remaining-external-vs-implementation) → stays dispatchable.
   writeTask(root, "gap-worklanded-partial", {
     status: "ready",
     labels: ["gap"],
@@ -436,6 +444,25 @@ test("commit-trace nyf: branch merged+DELETED on integration (master stale) ⇒ 
   git("checkout", "-q", "integration");
   git("merge", "--no-ff", "task/gap-worklanded-partial", "-m", "fan-in: task/gap-worklanded-partial", "-q");
   git("branch", "-D", "task/gap-worklanded-partial");
+  // TRACED WORKLANDED VERIFY (the awaiting-verification population anchor, e.g. gap-mcp-server): the
+  // work REALLY landed AND every remaining unchecked box is annotated `（待外部）` (the
+  // `全量套件绿 … 外层验证` shape — only the full suite green remains). The workLanded arm excludes it
+  // as a LEGAL done-flip — but the excluded entry carries awaiting_verification:true (the task's
+  // entry into the awaiting-verification state, NOT a 乙/contradiction).
+  writeTask(root, "gap-worklanded-verify", {
+    status: "ready",
+    labels: ["gap"],
+    body: fourArtifactBody({ checkedAc: 3, uncheckedText: "全量套件绿（外层 verification-round 验证）（待外部）", touches: ["- code/wl-verify.ts"] }),
+  });
+  git("add", ".");
+  git("commit", "-q", "-m", "task file gap-worklanded-verify");
+  git("checkout", "-q", "-b", "task/gap-worklanded-verify");
+  fs.writeFileSync(path.join(root, "code", "wl-verify.ts"), "export const wlVerify = 1;\n");
+  git("add", ".");
+  git("commit", "-q", "-m", "inner: gap-worklanded-verify — impl landed");
+  git("checkout", "-q", "integration");
+  git("merge", "--no-ff", "task/gap-worklanded-verify", "-m", "fan-in: task/gap-worklanded-verify", "-q");
+  git("branch", "-D", "task/gap-worklanded-verify");
   // TRACED STUCK-WORK: also has an `inner:` commit (and a `merge: fan-in task/<id>` merge) but ACs far
   // from complete → real remaining implementation → STAYS dispatchable (the "别改它" stuck-work guard).
   writeTask(root, "gap-traced-stuck", {
@@ -475,23 +502,36 @@ test("commit-trace nyf: branch merged+DELETED on integration (master stale) ⇒ 
   // inner "导出 7 函数" intermediate step, AC 5/9 unchecked) stays in the pool with real remaining work.
   assert.equal(byId["gap-traced-partial"], undefined, "traced-but-AC-partial task is NOT landed → not excluded");
   assert.equal(r.ready.includes("gap-traced-partial"), true, "traced-partial task stays in the dispatchable pool");
-  // gap-ready-pool-nyf-split-backlog-vs-contradiction: a work-landed near-complete (3/4) task stays
-  // excluded by the workLanded arm's >50% verification-window leniency — but it is 乙/contradiction
-  // (ac_open=1, judged landed but NOT done), so A9 can flag it without re-deriving the checkbox count.
-  assert.equal(byId["gap-worklanded-partial"]?.includes("not-yet-flipped"), true, "worklanded near-complete (3/4) is a done-flip candidate");
-  assert.equal(acOpenById["gap-worklanded-partial"], 1, "worklanded partial task is 乙/contradiction (ac_open=1)");
-  // "别改它" (gap-ready-pool-worklanded-traps-stuck-work): a traced task whose ACs are far from complete
-  // is STUCK-WORK with real remaining implementation → stays dispatchable (the commit-trace signal does
-  // NOT bypass the AC gate).
+  // gap-ready-pool-remaining-external-vs-implementation (criterion ⑦d): a work-landed 3/4 task whose
+  // remaining unchecked box is this task's OWN implementation is NOT landed — it stays dispatchable
+  // (the old >50% RATIO would have excluded it as a done-flip; the NATURE of the remaining item says
+  // otherwise).
+  assert.equal(byId["gap-worklanded-partial"], undefined, "worklanded 3/4 with an open IMPLEMENTATION box is NOT landed → not excluded");
+  assert.equal(r.ready.includes("gap-worklanded-partial"), true, "worklanded partial task stays in the dispatchable pool");
+  // awaiting-verification (e.g. gap-mcp-server): a work-landed task whose EVERY remaining unchecked box
+  // is annotated `（待外部）` is a LEGAL done-flip — excluded, but the entry carries
+  // awaiting_verification:true (the task's entry into the awaiting-verification state, NOT a
+  // 乙/contradiction).
+  assert.equal(byId["gap-worklanded-verify"]?.includes("not-yet-flipped"), true, "worklanded all-remaining-external (3/4) is a legal done-flip");
+  assert.equal(acOpenById["gap-worklanded-verify"], 1, "awaiting-verification task carries ac_open=1");
+  const verifyEntry = r.excluded.find((e) => e.id === "gap-worklanded-verify");
+  assert.equal(verifyEntry?.awaiting_verification, true, "awaiting-verification excluded entry carries the marker");
+  assert.equal(r.ready.includes("gap-worklanded-verify"), false, "awaiting-verification task is NOT in the dispatchable pool");
+  // "别改它" (gap-ready-pool-worklanded-traps-stuck-work): a traced task whose completion boxes are
+  // far from complete is STUCK-WORK with real remaining implementation → stays dispatchable (the
+  // commit-trace signal does NOT bypass the completion gate).
   assert.equal(byId["gap-traced-stuck"], undefined, "traced-but-AC-incomplete task is stuck-work → not excluded");
   assert.equal(r.ready.includes("gap-traced-stuck"), true, "traced stuck-work stays in the dispatchable pool");
   // a genuinely un-traced ready task stays dispatchable (negative control).
   assert.equal(byId["gap-unstarted"], undefined, "untraced ready task not excluded");
   assert.equal(r.ready.includes("gap-unstarted"), true, "untraced ready task stays in the dispatchable pool");
   // The A9 population-split counters: 甲 = done-flip with all boxes checked (backlog), 乙 = judged
-  // landed but a box is open (contradiction, threshold 1).
+  // landed but an open IMPLEMENTATION box (contradiction, threshold 1), awaiting_verification = every
+  // open box annotated （待外部） (legitimately waiting — the awaiting-verification entry, neither 甲 nor
+  // 乙).
   assert.equal(r.nyf_backlog, 1, "exactly one 甲/backlog not-yet-flipped task (the all-checked done-flip)");
-  assert.equal(r.nyf_contradiction, 1, "exactly one 乙/contradiction not-yet-flipped task (the 3/4 worklanded partial)");
+  assert.equal(r.nyf_contradiction, 0, "no 乙/contradiction — a worklanded 3/4 with an open implementation box is NOT landed (stays in pool)");
+  assert.equal(r.awaiting_verification, 1, "exactly one awaiting-verification task (worklanded, all remaining external)");
 });
 
 test("isFixture / isParked / notYetFlipped unit behavior", (t) => {
@@ -522,9 +562,9 @@ test("isFixture / isParked / notYetFlipped unit behavior", (t) => {
   assert.equal(notYetFlipped(stuckWork, root), false, "merged-but-AC-incomplete stuck-work ready task stays dispatchable");
   const doneFlip = {
     status: "ready",
-    body: "## Acceptance Criteria\n- [x] done\n- [x] done\n- [ ] verify window\n## Touches\n- code/landed.ts (new)\n## Definition of Done\nstandard",
+    body: "## Acceptance Criteria\n- [x] done\n- [x] done\n- [ ] 全量套件绿（外层 verification-round 验证）（待外部）\n## Touches\n- code/landed.ts (new)\n## Definition of Done\nstandard",
   };
-  assert.equal(notYetFlipped(doneFlip, root), true, "merged near-complete ready task is a done-flip and must be excluded");
+  assert.equal(notYetFlipped(doneFlip, root), true, "merged ready task whose only remaining box is external verification is a done-flip and must be excluded");
 
   // A truly-unstarted ready task (work not on master — Touches file absent, no resolving symbols)
   // STAYS in the pool.
@@ -619,9 +659,9 @@ test("AC-complete signal is a UNION not a replace: partial/zero/non-ready NOT su
   assert.equal(notYetFlipped(landedUnchecked, root), false, "landed-but-AC-incomplete ready task is stuck-work → dispatchable (AC2)");
   const landedDoneFlip = {
     status: "ready",
-    body: "## Acceptance Criteria\n- [x] done\n- [x] done\n- [x] done\n- [ ] verify\n## Touches\n- code/landed.ts (new)\n## Definition of Done\nstandard",
+    body: "## Acceptance Criteria\n- [x] done\n- [x] done\n- [x] done\n- [ ] 全量套件绿（外层 verification-round 验证）（待外部）\n## Touches\n- code/landed.ts (new)\n## Definition of Done\nstandard",
   };
-  assert.equal(notYetFlipped(landedDoneFlip, root), true, "landed near-complete (3/4) ready task is a done-flip → still excluded (AC3)");
+  assert.equal(notYetFlipped(landedDoneFlip, root), true, "landed task whose only remaining box is external verification is a done-flip → excluded (AC3)");
 
   // Neither signal fires → stays in the pool.
   const pending = { status: "ready", body: fourArtifactBody({ touches: ["- code/never.ts"] }) };
@@ -709,11 +749,13 @@ test("ready pool: a no-AC task whose work lands on INTEGRATION is a done-flip (t
 
 // ── stuck-work vs done-flip (gap-ready-pool-worklanded-traps-stuck-work) ──────────────────────────
 // The not-yet-flipped exclusion used to treat ANY workLanded task as "done, not yet flipped". But
-// workLanded only means "some work landed" — a workLanded task whose ACs are far from complete
-// (<50% checked) has REAL remaining implementation (stuck-work) and must stay dispatchable (AC2);
-// only a workLanded task that is AC-complete or near-complete (>50% — the "verification-window"
-// done-flip shape) is excluded (AC3). The threshold is STRICTLY > 0.5 so a task at exactly 50%
-// (gap-session-liveness 4/8) returns to the pool (verification anchor (a)).
+// workLanded only means "some work landed" — a workLanded task with an open completion box that is
+// this task's OWN implementation/evidence has REAL remaining implementation (stuck-work) and must
+// stay dispatchable (AC2); only a workLanded task that is completion-complete, OR whose every
+// remaining unchecked box is an EXTERNAL-VERIFICATION item (the "verification-window" done-flip
+// shape — gap-ready-pool-remaining-external-vs-implementation, criterion ⑦d: judged by the NATURE of
+// the remaining items, never a ratio), is excluded (AC3). A task at exactly 50% (gap-session-liveness
+// 4/8 — with non-external remaining items) returns to the pool (verification anchor (a)).
 
 test("stuck-work (workLanded + AC ≤50%) stays dispatchable; done-flip (workLanded + AC >50%) is excluded (AC2/AC3)", (t) => {
   const root = makeWorkspace("stuck-vs-flip");
@@ -725,11 +767,12 @@ test("stuck-work (workLanded + AC ≤50%) stays dispatchable; done-flip (workLan
     labels: ["gap"],
     body: fourArtifactBody({ acBoxes: 8, checkedAc: 4, touches: ["- code/landed.ts (new)"] }),
   });
-  // gap-dispatch shape: work landed and 5/6 ACs checked (only the verification window remains).
+  // gap-dispatch shape: work landed and 5/6 ACs checked — the ONE remaining unchecked box is an
+  // EXTERNAL-VERIFICATION item (only the verification window remains) → excluded.
   writeTask(root, "gap-dispatch", {
     status: "ready",
     labels: ["gap"],
-    body: fourArtifactBody({ acBoxes: 6, checkedAc: 5, touches: ["- code/landed.ts (new)"] }),
+    body: fourArtifactBody({ acBoxes: 6, checkedAc: 5, uncheckedText: "全量套件绿（外层 verification-round 验证）（待外部）", touches: ["- code/landed.ts (new)"] }),
   });
   writeTask(root, "gap-real", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
 
@@ -740,6 +783,100 @@ test("stuck-work (workLanded + AC ≤50%) stays dispatchable; done-flip (workLan
   assert.equal(r.ready.includes("gap-dispatch"), false, "near-complete workLanded task is a done-flip → excluded (AC3)");
   assert.ok(byId["gap-dispatch"]?.includes("not-yet-flipped"), "done-flip task excluded with reason not-yet-flipped (AC3)");
   assert.equal(r.pool, 2, "pool = gap-session-liveness + gap-real");
+});
+
+// ── remaining-external-vs-implementation (gap-ready-pool-remaining-external-vs-implementation) ──────
+// The workLanded arm's "verification-window done-flip" leniency used to be a RATIO (acRatio > 0.5),
+// which could not distinguish "the remaining unchecked boxes depend only on EXTERNAL events (suite
+// green / outer verification-round)" from "the remaining unchecked boxes include this task's OWN
+// implementation/evidence" — the gap-cli-import-refactor misfire (AC 5/5 + DoD 4/4 = 5/9 = 55.6% >
+// 50%: the DoD still carried the run()/shell golden-replay EVIDENCE — real remaining implementation —
+// yet it was excluded as landed). HUMAN ruling (2026-08-12): the ratio is DELETED — the remaining-item
+// nature is DECLARED by the task author at the item END (`（待外部）` / `（待本任务）`, closed enum;
+// UNANNOTATED = 待本任务, fail-closed). ALL remaining items annotated （待外部） ⇒ awaiting-verification
+// (excluded from the dispatchable pool); ANY （待本任务） or unannotated ⇒ stays ready (dispatchable).
+
+test("isExternalVerificationItem / isPendingImplementationItem: the author DECLARED annotation enum (human ruling)", () => {
+  // （待外部） at the item END ⇒ external (the awaiting-verification shape).
+  assert.equal(isExternalVerificationItem("全量套件绿（外层 verification-round 验证）（待外部）"), true, "item ends with （待外部） ⇒ external");
+  assert.equal(isExternalVerificationItem("等外层 verification-round（待外部）"), true, "（待外部） trailing marker");
+  assert.equal(isExternalVerificationItem("full suite green（待外部）"), true, "（待外部） on an EN item");
+  // POSITION: the annotation must be at the END — a （待外部） NOT at the end is not the declared enum
+  // (position-based judgment, hard rule 2).
+  assert.equal(isExternalVerificationItem("（待外部）全量套件绿"), false, "annotation must be at the item END, not the front");
+  // （待本任务） ⇒ this task's own work ⇒ NOT external.
+  assert.equal(isExternalVerificationItem("run()/shell 架构 + 逐命令搬迁的 golden-replay 证据 + 实际耗时贴出（待本任务）"), false, "（待本任务） ⇒ not external");
+  assert.equal(isExternalVerificationItem("拆后 floor 下降 + 总耗时贴出（待本任务）"), false, "（待本任务） evidence ⇒ not external");
+  assert.equal(isPendingImplementationItem("run()/shell 架构 + golden-replay 证据（待本任务）"), true, "isPendingImplementationItem agrees");
+  // FAIL-CLOSED (the decisive direction): an UNANNOTATED unchecked item defaults to 待本任务 — a
+  // missing annotation can never make a task wrongly landed (today's 5-swallowed-tasks defect).
+  assert.equal(isExternalVerificationItem("全量套件绿（外层 verification-round 验证）"), false, "unannotated external-looking item is NOT external (fail-closed)");
+  assert.equal(isExternalVerificationItem("an AC item that is long enough"), false, "unannotated generic item ⇒ not external");
+  assert.equal(isExternalVerificationItem("AC1–AC5 全部勾上"), false, "unannotated ⇒ not external (fail-closed)");
+  // An item annotated with the OLD non-enum marker （外部） is NOT the declared （待外部） ⇒ fail-closed.
+  assert.equal(isExternalVerificationItem("全量套件绿（外层 verification-round 验证）（外部）"), false, "（外部） is NOT in the closed enum ⇒ fail-closed 待本任务");
+});
+
+test(">50% checked but a remaining implementation box ⇒ NOT landed (stays in the dispatchable pool)", (t) => {
+  const root = makeWorkspace("remaining-impl");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // work landed (Touches file exists on disk) AND 3/4 = 75% > 50% — but the ONE remaining unchecked
+  // box is a generic AC item (this task's own implementation). The old >50% ratio would have excluded
+  // it as a done-flip; criterion ⑦d says ANY remaining implementation box ⇒ NOT landed.
+  fs.writeFileSync(path.join(root, "code", "landed.ts"), "export const landed = 1;\n");
+  const task = {
+    status: "ready",
+    body: fourArtifactBody({ checkedAc: 3, touches: ["- code/landed.ts (new)"] }),
+  };
+  assert.equal(notYetFlipped(task, root), false, ">50% with an open implementation box is NOT landed");
+});
+
+test("all remaining unchecked boxes annotated （待外部） ⇒ awaiting-verification (excluded, not dispatchable)", (t) => {
+  const root = makeWorkspace("remaining-ext");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // work landed AND 3/4 checked — the ONE remaining unchecked box is annotated （待外部） (only the full
+  // suite green remains, e.g. gap-mcp-server) ⇒ the task enters awaiting-verification (a legal
+  // done-flip — excluded from the dispatchable pool).
+  fs.writeFileSync(path.join(root, "code", "landed.ts"), "export const landed = 1;\n");
+  const task = {
+    status: "ready",
+    body: fourArtifactBody({ checkedAc: 3, uncheckedText: "全量套件绿（外层 verification-round 验证）（待外部）", touches: ["- code/landed.ts (new)"] }),
+  };
+  assert.equal(notYetFlipped(task, root), true, "all-remaining-external workLanded task enters awaiting-verification (excluded)");
+});
+
+test("AC all checked but DoD has unchecked IMPLEMENTATION boxes ⇒ NOT landed (cli-import shape, human ruling)", (t) => {
+  const root = makeWorkspace("ac-full-dod-open");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // The gap-cli-import-refactor shape: AC 5/5 fully checked, but the DoD still carries this task's
+  // OWN implementation/evidence as UNCHECKED boxes annotated `（待本任务）` (the run()/shell golden-replay
+  // EVIDENCE + scoped test green), plus one `（待外部）` full-suite item. Work LANDED (the code IS merged)
+  // + AC all checked was the old "landed" judgment — but the author DECLARED the implementation items
+  // 待本任务, so the task is NOT landed ⇒ stays in the dispatchable pool.
+  fs.writeFileSync(path.join(root, "code", "landed.ts"), "export const landed = 1;\n");
+  const task = {
+    status: "ready",
+    body: [
+      "**type:** execution",
+      "## Proposal",
+      "A real proposal paragraph that is definitely more than forty non-whitespace chars.",
+      "## Contract",
+      "measure x\nband y\ninvoke z\ncontrol ok\nresume r",
+      "## Acceptance Criteria",
+      "- [x] AC1: done long enough to be a real box",
+      "- [x] AC2: done long enough to be a real box",
+      "- [x] AC3: done long enough to be a real box",
+      "- [x] AC4: done long enough to be a real box",
+      "- [x] AC5: done long enough to be a real box",
+      "## Definition of Done",
+      "- [ ] run()/shell 架构 + 逐命令搬迁的 golden-replay 证据 + 实际耗时贴出（见 Evidence）（待本任务）",
+      "- [ ] 既有测试 + 新增测试全绿（--for-task scoped）（待本任务）",
+      "- [ ] 全量套件绿（外层 verification-round 验证）（待外部）",
+      "## Touches",
+      "- code/landed.ts (new)",
+    ].join("\n"),
+  };
+  assert.equal(notYetFlipped(task, root), false, "AC all-checked but DoD has open 待本任务 boxes ⇒ NOT landed (stays in pool)");
 });
 
 test("artifactsComplete is shape-aware and content-gated", () => {

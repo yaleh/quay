@@ -525,17 +525,64 @@ function extractSectionByShape(body, kind) {
   return null;
 }
 
+/** Extract the text of each UNCHECKED checkbox line in a section (`- [ ]` / `- [~]`; `[x]`/`[X]` are
+ *  checked, `[~]` counts as unchecked matching the gate semantics). */
+function uncheckedItems(section) {
+  if (!section) return [];
+  return (section.match(/^\s*-\s+\[[^xX]\]\s+(.+)$/gm) ?? [])
+    .map((line) => line.replace(/^\s*-\s+\[[^xX]\]\s+/, "").trim())
+    .filter(Boolean);
+}
+
 /** Count the task's SELF-DECLARED completion checkboxes (AC + DoD sections, shape-aware heading
  *  recognition). `checked === total` ⟺ "AC 无未勾项" (every completion box the task body declares is
- *  ticked). A task judged "landed" with unchecked boxes here is a CONTRADICTION (乙), not backlog (甲). */
+ *  ticked). A task judged "landed" with unchecked boxes here is a CONTRADICTION (乙), not backlog (甲)
+ *  — UNLESS every unchecked box is annotated `（待外部）` (see isExternalVerificationItem), the
+ *  awaiting-verification shape. `uncheckedItems` carries the unchecked item TEXTS so the workLanded arm
+ *  can judge their DECLARED nature (all external ⇒ awaiting-verification; any implementation ⇒ NOT
+ *  landed, stays dispatchable). */
 function countCompletionCheckboxes(body) {
-  const ac = countAcCheckboxes(extractSectionByShape(body, "ac"));
-  const dod = countAcCheckboxes(extractSectionByShape(body, "dod"));
+  const acSection = extractSectionByShape(body, "ac");
+  const dodSection = extractSectionByShape(body, "dod");
+  const ac = countAcCheckboxes(acSection);
+  const dod = countAcCheckboxes(dodSection);
   return {
     total: ac.total + dod.total,
     checked: ac.checked + dod.checked,
     unchecked: ac.unchecked + dod.unchecked,
+    uncheckedItems: [...uncheckedItems(acSection), ...uncheckedItems(dodSection)],
   };
+}
+
+// gap-ready-pool-remaining-external-vs-implementation (HUMAN mechanism ruling, 2026-08-12): the
+// workLanded arm's "verification-window done-flip" leniency used to be a RATIO (acRatio > 0.5), which
+// could not distinguish "the remaining unchecked boxes depend only on EXTERNAL events (full suite
+// green / outer verification-round)" from "the remaining unchecked boxes include this task's OWN
+// implementation/evidence" — the gap-cli-import-refactor misfire (AC 5/5 + DoD 4/4 = 5/9 = 55.6% >
+// 50%: the DoD still carried the run()/shell golden-replay EVIDENCE — real remaining implementation —
+// yet it was excluded as "landed"). The human ruling REPLACES the ratio (and ANY wording heuristic —
+// 判据只读注解、不猜) with a DECLARED annotation: the task AUTHOR writes the remaining-item nature at
+// the END of each unchecked item; the criterion only READS the annotation, never guesses.
+//
+// Judgment contract (the ruling):
+//  1. POSITION: the annotation lives at the END of the item text (position-based judgment, hard rule 2).
+//  2. CLOSED ENUM (enumerate, never boolean — hard rule 3): `（待外部）` / `（待本任务）`.
+//       （待外部）   depends only on an EXTERNAL event (suite green / outer verification / someone's merge)
+//       （待本任务）  this task's OWN implementation/evidence to produce
+//  3. FAIL-CLOSED: an UNANNOTATED unchecked item defaults to 待本任务 — if the default were 待外部, a
+//     missing annotation = wrongly landed = today's 5-swallowed-tasks defect recurs.
+//  4. awaiting-verification ⟺ EVERY remaining unchecked item is annotated `（待外部）`; ANY （待本任务）
+//     or unannotated item ⇒ stays ready (dispatchable).
+//  5. The >50% ratio branch is DELETED — its function is taken over by the annotation (a declared
+//     signal, never a guessed ratio).
+export function isExternalVerificationItem(text) {
+  return /（待外部）\s*$/.test(text);
+}
+
+/** True when the unchecked item is NOT declared `（待外部）` — i.e. it is `（待本任务）` OR unannotated
+ *  (the fail-closed default is 待本任务). */
+export function isPendingImplementationItem(text) {
+  return !isExternalVerificationItem(text);
 }
 
 /** True when the task is in the "this batch done, not yet flipped to done" state — the declared
@@ -547,24 +594,27 @@ function countCompletionCheckboxes(body) {
  *   (1) taskWorkLanded — work-landed evidence (symbol-resolution / touch-file / git-history) that
  *       catches the "merged-but-AC-incomplete" half (the inner's fan-in merges WITHOUT ticking AC
  *       boxes; gap-ready-pool-check-counts-merged-not-flipped-tasks-in-the-pool). By itself it means
- *       "SOME work landed", NOT "the task is done" — so it excludes ONLY when the ACs are also
- *       complete (all checked) or near-complete (>50% — the "verification-window" done-flip shape,
- *       e.g. gap-dispatch 5/6) OR the task has no AC checkboxes at all (total===0 — structurally
- *       unable to tick ACs, its landing is its closeout; gap-git-history-landed-master-stale-under-
- *       two-line-model AC4). A workLanded task whose ACs are far from complete (<50% checked,
- *       e.g. gap-session-liveness 4/8) has REAL remaining implementation — STUCK-WORK — and must
- *       stay dispatchable (gap-ready-pool-worklanded-traps-stuck-work AC2), not be trapped out of
- *       both dispatch AND done-flip.
+ *       "SOME work landed", NOT "the task is done" — so it excludes ONLY when the completion
+ *       checkboxes are all checked, OR every remaining unchecked box is annotated `（待外部）`
+ *       (the awaiting-verification done-flip shape — the remaining work depends only on suite green /
+ *       outer verification / someone else's merge; e.g. gap-mcp-server 9/11 with two `全量套件绿` DoD
+ *       boxes),
+ *       OR the task has no completion checkboxes at all (total===0 — structurally unable to tick
+ *       boxes, its landing is its closeout; gap-git-history-landed-master-stale-under-two-line-model
+ *       AC4). A workLanded task with ANY remaining box that is this task's OWN implementation/evidence
+ *       (e.g. gap-cli-import-refactor's run()/shell golden-replay EVIDENCE) has REAL remaining
+ *       implementation — STUCK-WORK — and must stay dispatchable (gap-ready-pool-worklanded-traps-
+ *       stuck-work AC2), not be trapped out of both dispatch AND done-flip.
  *   (2) COMMIT-TRACE (tasks/gap-nyf-branch-existence-vs-commit-trace) — a commit whose SUBJECT names
  *       the task in the `inner: <id>` / `fan-in: task/<id>` / `fan-in <id>` conventions. PERSISTENT:
  *       commit subjects survive branch deletion (the old branch-existence signal vanished when the
  *       merged branch was deleted), and it reads `--all` (the two-line model's INTEGRATION fan-in
  *       invisible to the stale-master git-history signal). Joins workLanded under the SAME
- *       AC-completeness gate — the manager's "别改它" on
- *       gap-ready-pool-worklanded-traps-stuck-work: a traced task whose ACs are far from complete is
- *       STUCK-WORK with real remaining implementation and stays dispatchable.
- *   (3) AC-complete — `all_acs_checked && status == ready` (countAcCheckboxes, total > 0): the
- *       COMPLETION state as written by the checkboxes, independent of AC writing style
+ *       completion-completeness gate — the manager's "别改它" on
+ *       gap-ready-pool-worklanded-traps-stuck-work: a traced task whose completion boxes are not all
+ *       checked is STUCK-WORK with real remaining implementation and stays dispatchable.
+ *   (3) Completion-complete — `all_checked && status == ready` (countCompletionCheckboxes, total > 0):
+ *       the COMPLETION state as written by the checkboxes, independent of AC writing style
  *       (gap-closure-detection-reads-symbols-not-checkboxes). A prose-AC completed task whose work
  *       landed but shows no resolvable symbols / `(new)` touches / git-history reference is invisible
  *       to (1) yet IS a closure candidate — this second signal surfaces it. Complements, never
@@ -596,20 +646,22 @@ export function notYetFlipped(task, repoRoot, gitIndex, opts = null) {
   // checkboxes (AC + DoD, shape-aware: `## AC` / `## AC（draft）` / `## AC (draft)` / `## DoD（draft）`
   // included). The old `extractSection(body, "Acceptance Criteria")` returned null (→ total=0 → the
   // no-AC fallback) for the 9 finding-shape tasks, so a "landed" task with OPEN boxes was swallowed.
-  const { total, checked } = countCompletionCheckboxes(task.body);
-  const allAcsChecked = total > 0 && checked === total;
-  const acRatio = total === 0 ? 0 : checked / total;
-  // AC-completeness gate on the workLanded branch: workLanded alone must NOT exclude an
-  // AC-incomplete task — that shape is stuck-work (real remaining implementation), not done-work
-  // waiting to flip. Only all-checked or >50% (the verification-window done-flip shape) counts.
-  // Threshold is STRICTLY > 0.5 so a task at exactly 50% (gap-session-liveness 4/8) returns to the
-  // dispatchable pool (gap-ready-pool-worklanded-traps-stuck-work verification anchor (a)).
+  const { total, checked, uncheckedItems: remainingItems } = countCompletionCheckboxes(task.body);
+  const allChecked = total > 0 && checked === total;
+  // gap-ready-pool-remaining-external-vs-implementation (HUMAN mechanism ruling, 2026-08-12): the
+  // workLanded arm's "verification-window" leniency is no longer a >50% RATIO (which could not tell
+  // "the remaining unchecked boxes are only external verification" from "the remaining unchecked boxes
+  // include this task's OWN implementation"). The remaining-item nature is DECLARED by the task author
+  // at the END of each unchecked item (`（待外部）` / `（待本任务）`, closed enum; UNANNOTATED = 待本任务,
+  // fail-closed). A workLanded task is a done-flip ONLY when EVERY remaining unchecked completion item
+  // is annotated `（待外部）`; ANY `（待本任务）` or unannotated item ⇒ NOT landed ⇒ stays dispatchable.
+  const remainingAllExternal = remainingItems.length > 0 && remainingItems.every(isExternalVerificationItem);
   // NO-AC fallback (gap-git-history-landed-master-stale-under-two-line-model AC4): a task with NO
   // completion checkboxes — AC nor DoD — anywhere (total=0) is STRUCTURALLY unable to tick boxes:
-  // allAcsChecked is always false, so it can never be a done-flip through the checkbox signals and
-  // would sit in the ready pool forever (measured 2026-08-11: last-pane / suite-red). When its work
-  // HAS landed (workLanded OR commit-trace), the landing itself is its closeout signal: total===0
-  // joins the all-checked / >50% gate. A no-checkbox task whose work has NOT landed stays
+  // allChecked is always false, so it can never be a done-flip through the checkbox signals and would
+  // sit in the ready pool forever (measured 2026-08-11: last-pane / suite-red). When its work HAS
+  // landed (workLanded OR commit-trace), the landing itself is its closeout signal: total===0 joins
+  // the all-checked / remaining-all-external gate. A no-checkbox task whose work has NOT landed stays
   // dispatchable (workLanded false keeps doneFlipReady false).
   // gap-ready-pool-commit-trace-subject-not-proof-of-done (manager 2026-08-12, higher-priority than the
   // reason-axis fix — a false "landed" makes a task disappear from the pool FOREVER): a commit SUBJECT
@@ -619,15 +671,14 @@ export function notYetFlipped(task, repoRoot, gitIndex, opts = null) {
   // completing the work (measured: gap-cli-import-refactor-run-shell-architecture inner committed
   // "导出 7 函数", subject hit ⇒ judged landed ⇒ excluded, but AC 5/9 unchecked, bin/quay.ts did not
   // shrink, cli.test.mjs's 7 derivation points never dropped — 5 ready tasks swallowed by the trace
-  // alone). So the COMMIT-TRACE arm requires the task's SELF-DECLARED completion condition: ALL ACs
-  // checked (or total===0, the no-AC fallback — a no-AC task is structurally unable to tick ACs, its
-  // landing is its closeout). ANY unchecked AC ⇒ NOT landed regardless of the trace. taskWorkLanded
-  // KEEPS its >50% verification-window leniency (it is real merged-code evidence, not a subject string;
-  // gap-ready-pool-worklanded-traps-stuck-work preserved).
-  const commitTraceReady = traced && (allAcsChecked || total === 0);
-  const workLandedReady = workLanded && (allAcsChecked || acRatio > 0.5 || total === 0);
+  // alone). So the COMMIT-TRACE arm requires the task's SELF-DECLARED completion condition: ALL
+  // checkboxes checked (or total===0, the no-AC fallback — a no-AC task is structurally unable to
+  // tick boxes, its landing is its closeout). ANY unchecked checkbox ⇒ NOT landed regardless of the
+  // trace — the trace alone is never enough.
+  const commitTraceReady = traced && (allChecked || total === 0);
+  const workLandedReady = workLanded && (allChecked || remainingAllExternal || total === 0);
   const doneFlipReady = workLandedReady || commitTraceReady;
-  return doneFlipReady || allAcsChecked;
+  return doneFlipReady || allChecked;
 }
 
 export function isFixture(task) {
@@ -1355,7 +1406,8 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
   const ready = [];
   const excluded = [];
   let nyfBacklogCount = 0; // 甲 — not-yet-flipped AND every completion checkbox checked (work done, only the status flip missing)
-  let nyfContradictionCount = 0; // 乙 — not-yet-flipped AND at least one completion checkbox open (judged landed but NOT done — criterion misfire)
+  let nyfContradictionCount = 0; // 乙 — not-yet-flipped AND an open box that is this task's OWN implementation/evidence (judged landed but NOT done — criterion misfire)
+  let awaitingVerificationCount = 0; // awaiting-verification — not-yet-flipped AND every open box is annotated （待外部） (work done, legitimately waiting for suite green / outer verification)
   for (const [id, t] of allTasks) {
     if (t.status !== "ready") continue;
     const reasons = [];
@@ -1363,22 +1415,30 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
     if (isParked(t)) reasons.push("parked");
     if (isAcRecord(t)) reasons.push("ac-record");
     let acOpen = -1; // sentinel: not a not-yet-flipped exclusion (no ac_open field on the entry)
+    let pendingVerification = false;
     const nyf = notYetFlipped(t, root, gitIndex, { ref: landRef, commitTraceSubjects });
     if (nyf) {
       reasons.push("not-yet-flipped");
       // gap-ready-pool-nyf-split-backlog-vs-contradiction (A9 population split): a not-yet-flipped
       // task is 甲/backlog when EVERY completion checkbox the body declares (AC + DoD, shape-aware) is
       // checked (ac_open=0 — work really done, only the fan-in status flip is missing) and
-      // 乙/contradiction when any is unchecked (ac_open>0 — judged "landed" but the task body says NOT
-      // done; ONE such task is a criterion misfire, A9 threshold = 1). The `ac_open` marker rides on
-      // the excluded entry so A9 triggers without re-deriving it; the two counters give the report a
+      // 乙/contradiction when an open box is this task's OWN implementation/evidence (ac_open>0 —
+      // judged "landed" but the task body says NOT done; ONE such task is a criterion misfire, A9
+      // threshold = 1). gap-ready-pool-remaining-external-vs-implementation (human ruling 2026-08-12)
+      // adds the THIRD class — awaiting-verification (ac_open>0 but EVERY open box is annotated
+      // （待外部） — legitimately waiting for suite green / outer verification, NOT a misfire; this is
+      // the task's entry into the awaiting-verification state). The `ac_open` marker rides on the
+      // excluded entry so A9 triggers without re-deriving it; the three counters give the report a
       // ready-made split. gap-ready-pool-commit-trace-subject-not-proof-of-done makes the COMMIT-TRACE
-      // arm already require all-checked — 乙 through this path is the WORK-LANDED arm's >50%
-      // verification-window leniency, which stays (real merged-code evidence, gap-ready-pool-worklanded-
-      // traps-stuck-work preserved).
-      acOpen = countCompletionCheckboxes(t.body).unchecked;
-      if (acOpen > 0) nyfContradictionCount++;
-      else nyfBacklogCount++;
+      // arm already require all-checked — 乙 through this path is the WORK-LANDED arm's
+      // remaining-all-external leniency (real merged-code evidence, gap-ready-pool-worklanded-traps-
+      // stuck-work preserved: any open IMPLEMENTATION box keeps the task dispatchable).
+      const cb = countCompletionCheckboxes(t.body);
+      acOpen = cb.unchecked;
+      pendingVerification = cb.uncheckedItems.length > 0 && cb.uncheckedItems.every(isExternalVerificationItem);
+      if (acOpen > 0 && !pendingVerification) nyfContradictionCount++;
+      else if (acOpen === 0) nyfBacklogCount++;
+      else awaitingVerificationCount++;
     }
     // PROSE-PREREQUISITE GAP (gap-prerequisite-gates-prose-invisible-to-mechanisms AC3): a ready task
     // whose body declares a prerequisite in prose WITHOUT a relation edge is NOT dispatchable — it
@@ -1387,7 +1447,7 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
     // The reason carries the 前置 literal (the Contract measure's grep surface).
     const proseGap = prosePrereqGap(t.body, t.frontmatterRaw, tasksDir);
     if (proseGap.length > 0) reasons.push(`prose-prereq-no-edge (前置无边: ${proseGap.join(",")})`);
-    if (reasons.length > 0) excluded.push({ id, reasons, ...(acOpen >= 0 ? { ac_open: acOpen } : {}) });
+    if (reasons.length > 0) excluded.push({ id, reasons, ...(acOpen >= 0 ? { ac_open: acOpen, ...(pendingVerification ? { awaiting_verification: true } : {}) } : {}) });
     else ready.push(id);
   }
   ready.sort();
@@ -1571,10 +1631,13 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
     excluded,
     // gap-ready-pool-nyf-split-backlog-vs-contradiction (A9 population split): 甲 = nyf + ac_open 0
     // (work done, only the status flip missing — quantity, threshold ≥floor/2); 乙 = nyf + ac_open>0
-    // (judged landed but NOT done — criterion misfire, ONE is enough, threshold 1). A9 reads these
-    // two counters + each excluded entry's `ac_open` without re-deriving the checkbox count.
+    // with an open IMPLEMENTATION box (judged landed but NOT done — criterion misfire, ONE is enough,
+    // threshold 1); awaiting_verification = ac_open>0 but EVERY open box is annotated （待外部）
+    // (legitimately waiting — the task's entry into the awaiting-verification state, neither 甲 nor
+    // 乙). A9 reads these counters + each excluded entry's `ac_open` without re-deriving the count.
     nyf_backlog: nyfBacklogCount,
     nyf_contradiction: nyfContradictionCount,
+    awaiting_verification: awaitingVerificationCount,
     candidates,
     promotions,
     intercepted,
