@@ -26,6 +26,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { MECHANISMS } from "../scripts/accounting-emit-layer-map.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
@@ -221,6 +222,95 @@ test("AC5 — a trace file with an unparseable timestamp is still FOUND (trace p
   assert.equal(c.status, "never-run");
   assert.ok(parsed.missing.includes("mechanism:closure-lag-check.last_run_epoch"), "unreadable exec time mechanically reported");
   assert.equal(status, 1);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+// ── AC39: layer→mechanisms mapping (gap-ac39-accounting-emit-layer) ──────────────────────────────────
+// Pins the AC2 invariant `layer_map_correct` (cap-from-gate/slot-refill → inner,
+// closure-lag-check → outer) and the AC3 invariant `in_flight_all_layers` (occupancy.in_flight
+// present for all three layers, even without a loop config).
+
+test("AC39 layer_map_correct — cap-from-gate/slot-refill belong to INNER, closure-lag-check to OUTER, manager claims NONE of inner's mechanisms", () => {
+  const names = (layer) => (MECHANISMS[layer] ?? []).map((m) => m.name);
+  const inner = names("inner");
+  const outer = names("outer");
+  const manager = names("manager");
+  // cap-from-gate/slot-refill → inner (AC39 root cause: they were wrongly registered on manager)
+  assert.ok(inner.includes("cap-from-gate"), "inner claims cap-from-gate");
+  assert.ok(inner.includes("slot-refill"), "inner claims slot-refill");
+  // closure-lag-check → outer (never inner)
+  assert.ok(outer.includes("closure-lag-check"), "outer claims closure-lag-check");
+  assert.ok(!inner.includes("closure-lag-check"), "closure-lag-check is NOT inner's");
+  // manager must NOT claim inner's mechanisms — that was the defect (字段对齐 ≠ 内容对齐)
+  assert.ok(!manager.includes("cap-from-gate"), "manager does NOT claim cap-from-gate");
+  assert.ok(!manager.includes("slot-refill"), "manager does NOT claim slot-refill");
+  assert.ok(manager.includes("manager-tick-log"), "manager claims its own manager-tick-log");
+  // every layer has ≥1 registered mechanism
+  for (const layer of LAYERS) {
+    assert.ok(Array.isArray(MECHANISMS[layer]) && MECHANISMS[layer].length > 0, `${layer} has ≥1 mechanism`);
+  }
+});
+
+test("AC39 — the MANAGER's four-tuple is complete after the mapping fix (no more cap-from-gate/slot-refill missing)", () => {
+  const root = tmpRoot("ac39-manager-");
+  // manager's only registered mechanism is manager-tick-log, with a real mtime trace.
+  fs.mkdirSync(path.join(root, "orchestration"), { recursive: true });
+  fs.writeFileSync(path.join(root, "orchestration", "manager-tick-log.md"), "# manager tick log\n", "utf8");
+  const { parsed, status } = jsonRun([
+    "--layer", "manager",
+    "--root", root,
+    "--in-flight", "1",
+    "--cap", "3",
+  ]);
+  assert.equal(status, 0, "manager four-tuple complete (exit 0)");
+  assert.equal(parsed.complete, true);
+  assert.deepEqual(parsed.missing, []);
+  const mechNames = parsed.mechanisms.map((m) => m.name);
+  assert.ok(!mechNames.includes("cap-from-gate"), "manager emits NO cap-from-gate");
+  assert.ok(!mechNames.includes("slot-refill"), "manager emits NO slot-refill");
+  assert.equal(mechNames.length, 1, "manager emits only its own manager-tick-log");
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("AC39 — INNER emits cap-from-gate (its own mechanism) and is complete when the layer injects its four real times", () => {
+  const now = Math.floor(Date.now() / 1000);
+  const { parsed, status } = jsonRun([
+    "--layer", "inner",
+    "--in-flight", "2",
+    "--cap", "4",
+    "--mechanism", `ready-pool-check --apply:${now - 30}`,
+    "--mechanism", `slot-refill:${now - 60}`,
+    "--mechanism", `fast-mode-telemetry --task-start:${now - 90}`,
+    "--mechanism", `cap-from-gate:${now - 45}`,
+  ]);
+  assert.equal(status, 0, "inner complete with its corrected four mechanisms (exit 0)");
+  assert.equal(parsed.complete, true);
+  assert.deepEqual(parsed.missing, []);
+  const mechNames = parsed.mechanisms.map((m) => m.name);
+  assert.ok(mechNames.includes("cap-from-gate"), "inner emits cap-from-gate");
+  assert.equal(mechNames.length, 4, "inner emits exactly its four mechanisms");
+  const cg = parsed.mechanisms.find((m) => m.name === "cap-from-gate");
+  assert.equal(cg.status, "fresh", "cap-from-gate fresh from injection");
+});
+
+test("AC39 — occupancy.in_flight is PRESENT for all three layers even with NO .quay/config.yml (AC3 in_flight_all_layers)", () => {
+  const root = tmpRoot("ac39-inflight-");
+  assert.ok(!fs.existsSync(path.join(root, ".quay", "config.yml")), "tmp root has no loop config");
+  for (const layer of LAYERS) {
+    const r = run(
+      ["--layer", layer, "--root", root, "--json"],
+      { env: { ...process.env, QUAY_TELEMETRY_SUBAGENTS: "0" } }
+    );
+    let parsed;
+    try {
+      parsed = JSON.parse(r.stdout);
+    } catch (e) {
+      assert.fail(`${layer}: accounting-emit --json must parse:\n${r.stdout}\n${r.stderr}`);
+    }
+    assert.equal(typeof parsed.occupancy.in_flight, "number", `${layer}: occupancy.in_flight is a number (present)`);
+    assert.ok(!parsed.missing.includes("occupancy.in_flight"), `${layer}: occupancy.in_flight NOT missing`);
+    assert.equal(parsed.occupancy.source, "auto", `${layer}: in_flight read from the shared telemetry meter`);
+  }
   fs.rmSync(root, { recursive: true, force: true });
 });
 
