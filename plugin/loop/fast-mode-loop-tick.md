@@ -509,8 +509,14 @@ bracket`）——**括号在终止/完成同轮闭合，不停留 inProgress**�
    **并发窗口是并发模型固有的，不是偶发**，所以 rebase 是必需步骤不是可选优化。
    rebase 冲突 → 停止该任务的 fan-in，标 needs-human，**同时关括号**（
    `bash plugin/scripts/closure-lag-check.sh --close-task --taskId <id> --outcome needs-human`），报告；不要 `--skip`、不要 `-X ours`。
-1. `git merge --no-ff task/<taskId>`（合并目标 = 当前检出的 `$MERGE_TARGET`——两线模型下内层共享检出
-   立在 `$MERGE_TARGET` 上，不是 `$FORK_BASELINE`；`$FORK_BASELINE` 只由外层批量合推进）
+1. `git merge --no-ff task/<taskId> -m "merge: fan-in task/<taskId> (runId: <runId>)"`（合并目标 = 当前检出的
+   `$MERGE_TARGET`——两线模型下内层共享检出立在 `$MERGE_TARGET` 上，不是 `$FORK_BASELINE`；`$FORK_BASELINE`
+   只由外层批量合推进）。**fan-in 提交必须带 runId（`gap-task-telemetry-6-percent-join`：遥测 taskId → git 分支
+   的可回溯桥，6% join 修法）**——`<runId>` 取 `--task-start` 派发时记的 runId，fan-in 时机械回读（无需持有）：
+   `node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --run-id-for --taskId <taskId> --root "$(pwd)"`；
+   回读为空（无在飞括号）则记 `(runId: unknown)` 并在报告里标注（缺 runId 的 fan-in 提交会被
+   `fan-in-runid-check.ts` 判 fail-closed）。`--close-task --outcome done` 时 `--task-end` 自动把 fan-in
+   commit sha 写进 `candidateCommit`（`--fanInCommit <sha>` 可显式给），报告每条完成任务带 `fanInCommit`。
 2. 冲突 → `git merge --abort`，标 needs-human，**同时关括号**（`--close-task --taskId <id> --outcome needs-human`），**停止本 tick 的后续合并与派发**，报告
 3. 跑 `$TEST_COMMAND --for-task <taskId>`（该任务自己的选中集，秒级；`TEST_COMMAND` 见 `.quay/config.yml` `loop.test_command`）
 4. 选中集非绿 → 回退该 merge，标 needs-human，**同时关括号**（`--close-task --taskId <id> --outcome needs-human`），停止，报告

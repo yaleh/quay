@@ -308,6 +308,22 @@ test("AC2: --merge auto-resolves shared-file conflicts develop-authoritative and
   }
 });
 
+// ── --run-id: real-merge commit carries the runId (gap-task-telemetry-6-percent-join) ──────────────
+
+test("--run-id: a real merge commit's subject carries (runId: <id>)", () => {
+  const dir = divergedRepo("runid");
+  try {
+    const r = runMerge(["--root", dir, "--merge", "--run-id", "fm-ac2-123-abc"]);
+    assert.equal(r.status, 0, `--merge --run-id should succeed: ${r.stdout}${r.stderr}`);
+    assert.match(r.stdout, /measure fanin_runid_present=true/);
+    const subject = gitCmd(dir, "log", "-1", "--format=%s", "develop").stdout.trim();
+    assert.match(subject, /runId: fm-ac2-123-abc/, `merge commit subject must carry the runId, got: ${subject}`);
+    assert.match(subject, /^merge: fan-in /, "the runId-bearing merge subject keeps the fan-in prefix");
+  } finally {
+    cleanup(dir);
+  }
+});
+
 // ── AC3 (load-bearing): real code conflicts FAIL CLOSED even with --merge ──────────────────────────
 
 test("AC3 (load-bearing negative control): --merge on a REAL code conflict fails closed, nothing moved", () => {

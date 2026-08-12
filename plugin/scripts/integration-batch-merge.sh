@@ -125,6 +125,9 @@
 #   --reconcile  after a successful batch merge, reconcile the primary checkout's stale index: run a
 #                porcelain-empty guard first (fail-closed on uncommitted/untracked work, owners
 #                reported), then `git reset --mixed <new develop tip>` — index only, never --hard.
+#   --run-id <id>  embed the runId in a REAL merge commit's message (`(runId: <id>)`,
+#                gap-task-telemetry-6-percent-join) — the telemetry taskId → git traceability link
+#                for the batch-merge fan-in path. No-op on the fast-forward path (creates no commit).
 #
 #   OBJECT GATE (gap-batch-merge-gate-validates-tip-not-merge-result): before ANY merge (ff or real),
 #                the helper validates the MERGE RESULT, not just the integration tip. The suite tested
@@ -203,6 +206,12 @@ sync=0
 deliver=0
 merge_mode=0
 reconcile=0
+# ── runId (gap-task-telemetry-6-percent-join) ───────────────────────────────────────────────────────
+# When a REAL merge commit is created (--merge on divergence), `--run-id <id>` embeds the runId in
+# the commit message (`(runId: <id>)`) — so a fan-in merge's subject carries the runId, making the
+# telemetry taskId → git branch traceability link mechanical (fan-in-runid-check.ts reads it). The
+# fast-forward path creates NO commit (ref-level update-ref), so it has no message to annotate.
+run_id=""
 # ── FRESHNESS GATE (gap-batch-merge-gate-reads-stale-green) ───────────────────────────────────────
 # The batch merge may only proceed when the suite green is a FRESH green that actually verified the
 # CURRENT integration tip. Defaults: gate ON (mechanical — the outer's suiteGreen rule and the script's
@@ -255,6 +264,7 @@ while [ "$#" -gt 0 ]; do
     --sync) sync=1; shift ;;
     --deliver) deliver=1; shift ;;
     --reconcile) reconcile=1; shift ;;
+    --run-id) run_id="$2"; shift 2 ;;
     --skip-freshness-gate) skip_freshness_gate=1; shift ;;
     --skip-worktree-green-gate) skip_worktree_green_gate=1; shift ;;
     --freshness-window) freshness_window="$2"; shift 2 ;;
@@ -948,11 +958,23 @@ real_merge() {
     fi
   fi
 
-  # Commit the merge (uses git's prepared MERGE_MSG from the --no-commit merge).
-  if ! git -C "${tmp_wt}" commit -q --no-edit; then
-    echo "integration-batch-merge: real-merge commit failed (nothing moved)" >&2
-    git -C "${tmp_wt}" merge --abort >/dev/null 2>&1 || true
-    return 1
+  # Commit the merge. Default: git's prepared MERGE_MSG from the --no-commit merge. With --run-id
+  # (gap-task-telemetry-6-percent-join), embed the runId in the message so the fan-in merge's subject
+  # carries it — the telemetry taskId → git branch traceability link fan-in-runid-check.ts reads.
+  if [ -n "${run_id:-}" ]; then
+    echo "integration-batch-merge: real-merge commit carries runId ${run_id}"
+    if ! git -C "${tmp_wt}" commit -q -m "merge: fan-in ${integration_ref}→${develop_ref} (runId: ${run_id})"; then
+      echo "integration-batch-merge: real-merge commit failed (nothing moved)" >&2
+      git -C "${tmp_wt}" merge --abort >/dev/null 2>&1 || true
+      return 1
+    fi
+    echo "integration-batch-merge: measure fanin_runid_present=true"
+  else
+    if ! git -C "${tmp_wt}" commit -q --no-edit; then
+      echo "integration-batch-merge: real-merge commit failed (nothing moved)" >&2
+      git -C "${tmp_wt}" merge --abort >/dev/null 2>&1 || true
+      return 1
+    fi
   fi
   merge_commit="$(git -C "${tmp_wt}" rev-parse HEAD)"
 
