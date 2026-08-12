@@ -196,6 +196,11 @@ export function exclusionEntries(repoRoot, pluginDir) {
       target: path.join(pluginDir, 'test', 'task-contract-check.test.mjs'),
       reason: "fixtures test the invoke-entry-path criterion with OLD-path invoke commands (historical done tasks); data, not live refs",
     },
+    {
+      rel: 'plugin/test/outer-loop-tick-split.test.mjs',
+      target: path.join(pluginDir, 'test', 'outer-loop-tick-split.test.mjs'),
+      reason: "the AC38 outer-doc-split test asserts BOTH the plugin/loop/ template AND the orchestration/ deployed instance copy — orchestration/orchestrator-loop-tick.md is the AC38 instance landing (a real materialized deployed copy, excluded above), not a stale source-copy reference; same target-layout class as quay-init-loop-consumer-doc-refs / no-manager-tick-doc-check",
+    },
     { rel: 'README.md', target: path.join(repoRoot, 'README.md'), reason: "the cold-start section documents the TARGET project's laid-down layout (orchestration/ + docs/analysis/)" },
     {
       rel: 'experiments/quay-perpetual-stream/fixtures/scheduler',
