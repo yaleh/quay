@@ -75,10 +75,10 @@ extra: {}
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全部勾上
-- [ ] 拆后 floor 下降 + 总耗时贴出（见 Evidence）
-- [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
+- [ ] AC1–AC5 全部勾上（待本任务）
+- [ ] 拆后 floor 下降 + 总耗时贴出（见 Evidence）（待本任务）
+- [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）（待本任务）
+- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证（待外部）
 
 ## Touches
 
