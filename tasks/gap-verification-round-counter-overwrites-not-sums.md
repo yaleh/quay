@@ -1,7 +1,7 @@
 ---
 id: gap-verification-round-counter-overwrites-not-sums
 title: verification-round tests/pass/fail 是覆盖式计数器（最后一批），非套件总量
-status: ready
+status: done
 labels:
   - gap
   - defect
