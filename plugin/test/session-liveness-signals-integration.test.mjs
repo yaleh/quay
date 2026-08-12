@@ -34,7 +34,7 @@ import {
   SCRIPT, tmuxAvailable,
   setProbeTmpPrefix, sweepTmp, reapLiveOwners, tmux, isolateTmuxEnv, isClaudePid,
   paneHasClaudeChild, waitForAlive, makeHermeticProbe,
-  spawnMonitor, waitForOutput, waitForRounds, countRounds,
+  spawnMonitor, waitForOutput, waitForRounds, waitForMoreRounds, countRounds,
   makePaneBusy, makePaneIdle, makePanePermissionPrompt, startTouchLoop, cleanup,
   userRecord, assistantRecord, apiErrorRecord, isoAgo,
   assistantToolUseRecord, assistantTextRecord, userInputRecord, writeTranscript,
@@ -223,7 +223,11 @@ test("AC4 — a pane whose ONLY real change is the agent task line (↓ NN.Nk to
       tmux(["send-keys", "-t", p.session, "printf '◯ general-purpose Reading session-liveness.test.mjs 1m 41s · ↓ 61.2k tokens\\n'"], p.env);
       tmux(["send-keys", "-t", p.session, "Enter"], p.env);
       makePaneBusy(p.env, p.session); // re-affirm the busy shape in the status area
-      await sleep(3500); // ≥3 rounds
+      // ≥3 MORE busy rounds — load-robust (hermetic): the `# ROUND` marker is the deterministic time
+      // source; a fixed wall-clock sleep can complete fewer rounds under load, weakening the
+      // no-false-IDLE check (waitForMoreRounds, not waitForRounds — the monitor has already run).
+      assert.ok(await waitForMoreRounds(mon, 3, HANG_GUARD_MS),
+        `monitor must run ≥3 MORE busy rounds for the no-false-IDLE check:\n${mon.output()}`);
       assert.ok(!/SESSION-IDLE ac4/.test(mon.output()),
         `AC4: the advancing agent task line must NOT read as idle (real work continues):\n${mon.output()}`);
     } finally {
@@ -255,7 +259,12 @@ test("AC9 — a known-continuous-work window reports SESSION-RESUMED at most ONC
       makePaneBusy(p.env, p.session);
       assert.ok(await waitForOutput(mon, /SESSION-RESUMED ac9/, 30000),
         `AC9: RESUMED must fire once on the busy transition:\n${mon.output()}`);
-      await sleep(5000); // ≥4 more rounds of continuous busy shape (esc stays in the input line)
+      // ≥4 MORE rounds of continuous busy shape (esc stays in the input line). Load-robust
+      // (hermetic): the `# ROUND` marker is the deterministic time source — a fixed wall-clock sleep
+      // can complete fewer rounds under load, making the "at most once / no IDLE" check vacuous
+      // (waitForMoreRounds, not waitForRounds — the monitor has already run).
+      assert.ok(await waitForMoreRounds(mon, 4, HANG_GUARD_MS),
+        `monitor must run ≥4 MORE continuous busy rounds:\n${mon.output()}`);
       const resumedCount = (mon.output().match(/SESSION-RESUMED ac9/g) || []).length;
       assert.ok(resumedCount <= 1, `AC9: continuous busy work must report RESUMED at most once, got ${resumedCount}:\n${mon.output()}`);
       assert.ok(!/SESSION-IDLE ac9/.test(mon.output()),
@@ -338,19 +347,29 @@ test("AC3 — a permission-prompt pane emits SESSION-INTERVENTION-REQUIRED immed
     assert.ok(await waitForAlive(p.env, p.session), "probe must be alive");
     const mon = spawnMonitor(p.env, `intv ${p.tmp} ${p.session}`, { interval: 1 });
     try {
-      await sleep(2000); // idle baseline (bash prompt → unknown → busy=0)
+      // idle baseline (bash prompt → unknown → busy=0). Load-robust (hermetic): the `# ROUND`
+      // marker is the deterministic time source — a fixed wall-clock sleep can complete ZERO rounds
+      // under load, so the first permission-prompt round would observe PREV_INTERVENTION unset and
+      // the edge semantics of the test would be ill-founded.
+      assert.ok(await waitForRounds(mon, 2, HANG_GUARD_MS),
+        `idle baseline must establish 2 rounds before the permission-prompt edge:\n${mon.output()}`);
       makePanePermissionPrompt(p.env, p.session);
       // Fires IMMEDIATELY (not waiting for PERM_PROMPT_WARN_ROUNDS busy rounds or transcript
       // staleness) — the AC3 requirement: permission-prompt 出现即触发 escalate/报告.
       assert.ok(await waitForOutput(mon, /SESSION-INTERVENTION-REQUIRED intv/, 30000),
         `permission-prompt must fire SESSION-INTERVENTION-REQUIRED immediately:\n${mon.output()}`);
-      // hold the permission-prompt a few more rounds → the edge must NOT re-fire every round.
-      await sleep(2500);
+      // hold the permission-prompt a few MORE rounds → the edge must NOT re-fire every round.
+      assert.ok(await waitForMoreRounds(mon, 2, HANG_GUARD_MS),
+        `monitor must hold the permission-prompt ≥2 MORE rounds for the edge-trigger check:\n${mon.output()}`);
       let c = (mon.output().match(/SESSION-INTERVENTION-REQUIRED intv/g) || []).length;
       assert.equal(c, 1, `the intervention event must be edge-triggered (once per spell), got ${c}:\n${mon.output()}`);
       // leaving permission-prompt (back to idle) re-arms the edge → a new permission-prompt fires again.
       makePaneIdle(p.env, p.session);
-      await sleep(2000);
+      // ≥1 MORE non-permission-prompt round resets PERM_CONSEC + PREV_INTERVENTION so the edge
+      // re-arms — wait on the marker (a fixed sleep can complete no round under load, keeping the
+      // edge armed; waitForMoreRounds because the monitor has already run many rounds).
+      assert.ok(await waitForMoreRounds(mon, 1, HANG_GUARD_MS),
+        `monitor must observe ≥1 MORE idle round to re-arm the intervention edge:\n${mon.output()}`);
       makePanePermissionPrompt(p.env, p.session);
       const deadline = Date.now() + HANG_GUARD_MS;
       while (Date.now() < deadline && (mon.output().match(/SESSION-INTERVENTION-REQUIRED intv/g) || []).length < 2) await sleep(200);
@@ -379,7 +398,12 @@ test("AC4 — normal busy (esc to interrupt) does NOT fire SESSION-INTERVENTION-
       // busy semantics preserved: the busy transition still fires SESSION-RESUMED.
       assert.ok(await waitForOutput(mon, /SESSION-RESUMED intvb/, 15000),
         `busy must still fire SESSION-RESUMED (busy semantics preserved):\n${mon.output()}`);
-      await sleep(3500); // several busy rounds
+      // several MORE busy rounds — load-robust (hermetic): wait on the `# ROUND` marker so the
+      // negative control observes a real span of busy rounds (a fixed wall-clock sleep can complete
+      // fewer rounds under load, weakening the no-INTERVENTION check; waitForMoreRounds because the
+      // monitor has already run).
+      assert.ok(await waitForMoreRounds(mon, 3, HANG_GUARD_MS),
+        `monitor must run ≥3 MORE busy rounds for the AC4 negative control:\n${mon.output()}`);
       assert.ok(!/SESSION-INTERVENTION-REQUIRED intvb/.test(mon.output()),
         `normal busy must NOT fire SESSION-INTERVENTION-REQUIRED (AC4 negative control):\n${mon.output()}`);
     } finally {

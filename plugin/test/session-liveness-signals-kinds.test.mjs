@@ -38,7 +38,7 @@ import {
   makePaneBusy, makePaneIdle, makePanePermissionPrompt, startTouchLoop, cleanup,
   userRecord, assistantRecord, apiErrorRecord, isoAgo,
   assistantToolUseRecord, assistantTextRecord, userInputRecord, writeTranscript,
-  assistantUsageRecord,
+  assistantUsageRecord, HANG_GUARD_MS,
 } from "./session-liveness-helpers.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -110,7 +110,11 @@ test("AC2 — transcript fresh + screen idle ⇒ SESSION-MARKER-STALE (cross pos
     assert.ok(await waitForAlive(p.env, p.session), "probe must be alive");
     const mon = spawnMonitor(p.env, `ms ${p.tmp} ${p.session}`, { transcripts: `ms ${x}` });
     try {
-      await sleep(4000); // ≥3 rounds with a STALE transcript: no marker-stale
+      // ≥3 rounds with a STALE transcript: no marker-stale. Load-robust (hermetic): wait on the
+      // `# ROUND` marker — a fixed wall-clock sleep can complete fewer rounds under load, making the
+      // silence negative check vacuous rather than truly asserted.
+      assert.ok(await waitForRounds(mon, 3, HANG_GUARD_MS),
+        `monitor must run ≥3 stale-transcript rounds for the silence check:\n${mon.output()}`);
       assert.ok(!/SESSION-MARKER-STALE/.test(mon.output()),
         `stale transcript must not fire marker-stale:\n${mon.output()}`);
       // now the transcript advances (session definitely writing) while the pane stays idle
@@ -136,7 +140,10 @@ test("AC2 — a fresh TICK LOG (not a transcript) + idle pane does NOT fire mark
     assert.ok(await waitForAlive(p.env, p.session), "probe must be alive");
     const mon = spawnMonitor(p.env, `ts ${p.tmp} ${p.session}`, { tickLogs: `ts ${tick}` });
     try {
-      await sleep(4000);
+      // Load-robust (hermetic): ≥3 rounds via the `# ROUND` marker so the no-marker-stale negative
+      // check observes a real span of rounds (a fixed wall-clock sleep can complete fewer under load).
+      assert.ok(await waitForRounds(mon, 3, HANG_GUARD_MS),
+        `monitor must run ≥3 fresh-tick rounds for the silence check:\n${mon.output()}`);
       assert.ok(!/SESSION-MARKER-STALE/.test(mon.output()),
         `fresh tick log is NOT session evidence; must NOT fire marker-stale:\n${mon.output()}`);
     } finally {
@@ -161,7 +168,11 @@ test("AC9 — idle + transcript with isApiErrorMessage structural field ⇒ SESS
     // healthy/stale target: idle + no API errors in the window → no CANT-SEND
     const monH = spawnMonitor(p.env, `h ${p.tmp} ${p.session}`, { transcripts: `h ${healthy}` });
     try {
-      await sleep(4000); // several rounds of steady idle
+      // several rounds of steady idle — load-robust (hermetic): wait on the `# ROUND` marker so the
+      // no-CANT-SEND negative check observes a real span (a fixed wall-clock sleep can complete fewer
+      // rounds under load, making the silence check vacuous).
+      assert.ok(await waitForRounds(monH, 3, HANG_GUARD_MS),
+        `monitor must run ≥3 steady-idle rounds for the no-CANT-SEND check:\n${monH.output()}`);
       assert.ok(!/SESSION-IDLE-CANT-SEND/.test(monH.output()),
         `healthy/stale idle must NOT report CANT-SEND:\n${monH.output()}`);
     } finally {
@@ -348,7 +359,13 @@ test("阶段四 AC2（承重条）— 饱和会话与普通忙会话产出不同
     try {
       assert.ok(await waitForOutput(monSat, /SESSION-SATURATED sat/, 8000),
         `AC2: saturated fixture MUST fire SESSION-SATURATED:\n${monSat.output()}`);
-      await sleep(3500);
+      // ≥3 more rounds for both observers — load-robust (hermetic): wait on the `# ROUND` markers so
+      // the "ordinary busy is NOT saturated" / "saturated is NOT idle" negative checks observe a real
+      // span (a fixed wall-clock sleep can complete fewer rounds under load, making them vacuous).
+      assert.ok(await waitForRounds(monBusy, 3, HANG_GUARD_MS),
+        `monBusy must run ≥3 rounds for the not-saturated check:\n${monBusy.output()}`);
+      assert.ok(await waitForRounds(monSat, 3, HANG_GUARD_MS),
+        `monSat must run ≥3 rounds for the not-idle check:\n${monSat.output()}`);
       assert.ok(!/SESSION-SATURATED busy/.test(monBusy.output()),
         `AC2: an ordinary busy fixture must NOT fire SESSION-SATURATED (different event):\n${monBusy.output()}`);
       // 饱和 fixture 在「忙」维度也是 busy（最后一条 user → transcript_busy=1），但不得报 IDLE——

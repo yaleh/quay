@@ -435,6 +435,22 @@ export async function waitForRounds(mon, n, timeoutMs = HANG_GUARD_MS) {
   return countRounds(mon) >= n;
 }
 
+// waitForMoreRounds(mon, n, ...) — wait for the monitor to complete n ADDITIONAL rounds from NOW.
+// waitForRounds is ABSOLUTE (count >= n); once a monitor has already run many rounds it returns
+// immediately, so the "hold the shape for ≥N more rounds" checks (edge-trigger, negative-control
+// spans) need this DELTA form. Same hermetic principle as waitForRounds: the `# ROUND` marker is the
+// deterministic time source (time injection), never a fixed wall-clock sleep — the 60s hang-guard is
+// only an upper cap so a genuinely hung monitor still fails (slow-but-correct passes under load).
+export async function waitForMoreRounds(mon, n, timeoutMs = HANG_GUARD_MS) {
+  const target = countRounds(mon) + n;
+  const deadline = Date.now() + hangGuard(timeoutMs);
+  while (Date.now() < deadline) {
+    if (countRounds(mon) >= target) return true;
+    await sleep(100);
+  }
+  return countRounds(mon) >= target;
+}
+
 export async function waitForOutput(mon, pattern, timeoutMs = HANG_GUARD_MS) {
   const deadline = Date.now() + hangGuard(timeoutMs);
   while (Date.now() < deadline) {
