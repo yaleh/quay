@@ -28,6 +28,13 @@ import {
   detectShape,
   contractKeysPresent,
 } from "../src/store.ts";
+// Single-judge consistency check (gap-cjk-proposal-slot-word-boundary AC2): the
+// author→ready shape judgment is "the single judge quay and meta-cc must share"
+// (CLAUDE.md). ready-pool-check.ts is the meta-cc side — importing its
+// `artifactsComplete` (side-effect-free; main() is guarded by isDirectEntry) lets
+// this test assert both gates agree on the CJK proposal-slot body. Precedent:
+// serve.test.mjs imports plugin/scripts/fast-mode-telemetry.ts the same way.
+import { artifactsComplete } from "../../../plugin/scripts/ready-pool-check.ts";
 
 const substantive = (label) =>
   `${label} — this is real, substantive prose describing the ${label.toLowerCase()} in enough detail to exceed the minimum content threshold for this section, well past forty characters.`;
@@ -149,6 +156,52 @@ test("AC6: a DIR-template (Finding) task passes author->ready — Finding satisf
       `Finding must satisfy the proposal slot; got ${JSON.stringify(r.artifacts)}`
     );
     assert.equal(r.ok, true, `finding task should pass; got ${JSON.stringify(r)}`);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("CJK proposal-slot alias (gap-cjk-proposal-slot-word-boundary): `## 人的裁定` satisfies the contract shape's proposal artifact and agrees with ready-pool-check", () => {
+  const { store, dir } = freshStore();
+  try {
+    // contract shape where the proposal-slot is the directive-variant `## 人的裁定`
+    // (registered in SHAPE_REGISTRY.contract.sections.proposal). Before the fix a
+    // `\b`-based heading match made this alias DEAD: 定 (CJK) and the following
+    // newline are both non-`\w`, so `\b` had no boundary and proposal read false —
+    // store.check() returned ok:false "missing artifacts: proposal" while
+    // ready-pool-check.artifactsComplete() returned proposal:true (the divergence
+    // this task records).
+    const body =
+      `## 人的裁定\n${substantive("人的裁定")}\n` +
+      `## Contract\n` +
+      "```\n" +
+      `measure gate_fail_by_shape = \`task check <id>\` failures per shape\n` +
+      `band gate_fail_by_shape = 0 for every compliant registered shape\n` +
+      `invariant dispatch is not a waiver; every shape has a complete contract\n` +
+      `invoke \`task check <id>\`\n` +
+      `control declared shape missing its own required section must be red\n` +
+      `resume register the shape set and required sections before changing check\n` +
+      "```\n" +
+      `## AC\n- [x] a real, checkable acceptance criterion\n- [x] another one\n` +
+      `## DoD\n${substantive("DoD")}\n`;
+    store.write("CJK-PROP", { title: "cjk-proposal-slot", status: "todo", body });
+    const r = store.check("CJK-PROP");
+    assert.equal(r.shape, "contract");
+    assert.equal(
+      r.artifacts.proposal,
+      true,
+      `人的裁定 must satisfy the proposal slot; got ${JSON.stringify(r.artifacts)}`
+    );
+    assert.equal(r.ok, true, `CJK proposal-slot contract task should pass; got ${JSON.stringify(r)}`);
+    // Single-judge consistency (AC2): the same body must read proposal:true in
+    // ready-pool-check.artifactsComplete too — both gates now use the same
+    // whole-line-exact (`\b`-free) heading semantics.
+    const pc = artifactsComplete(body);
+    assert.equal(
+      pc.artifacts.proposal,
+      true,
+      `ready-pool-check must agree with store.check on the CJK alias; got ${JSON.stringify(pc.artifacts)}`
+    );
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
