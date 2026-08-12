@@ -50,6 +50,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDirectEntry } from "./gate-script-base.ts";
+// REUSE (gap-judgepoolcandidate-keyword-vs-position): the same code-span stripper the ready-pool
+// prose-prereq detector uses (ready-pool-check.ts:641) — single source, no parallel copy.
+import { stripCodeSpans } from "./ready-pool-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -195,7 +198,24 @@ export function scanStrategicDocs(root: string): DocResult[] {
 export function judgePoolCandidate(root: string, taskId: string): StaleRef[] | null {
   const abs = path.join(root, "tasks", `${taskId}.md`);
   if (!fs.existsSync(abs)) return null;
-  return scanText(fs.readFileSync(abs, "utf8"));
+  // POSITION-NOT-KEYWORD (gap-judgepoolcandidate-keyword-vs-position — hard rule 2): a mention of a
+  // deleted script inside an inline code span (backticks) is a QUOTE, not a live reference — a
+  // provenance note ("Split … a real `prepare-milestone.js` ProposalReview run …"), an example, or a
+  // historical record. DIR-103 line 25 ("Split 2026-08-01 … a real `prepare-milestone.js`
+  // ProposalReview run …") was mis-flagged this way and permanently marked retired-mechanism even
+  // though the task's subject is the LIVE acceptance-runner.ts. Strip inline code spans BEFORE
+  // matching, reusing the stripCodeSpans technique ready-pool-check.ts uses for its prose-prereq
+  // detector (single source, no parallel copy). Line-preserving and FENCE-AWARE: fence markers are
+  // left intact (a bare ``` must not be turned into a stray backtick, or scanText's own ```-skip
+  // below would silently stop skipping fenced content), and stripCodeSpans is applied only OUTSIDE
+  // fences — so StaleRef.line stays the true file line and fenced verbatim output is still skipped.
+  const lines = fs.readFileSync(abs, "utf8").split("\n");
+  let inFence = false;
+  for (let i = 0; i < lines.length; i++) {
+    if (/^\s*```/.test(lines[i])) { inFence = !inFence; continue; }
+    if (!inFence) lines[i] = stripCodeSpans(lines[i]);
+  }
+  return scanText(lines.join("\n"));
 }
 
 function usage(): never {

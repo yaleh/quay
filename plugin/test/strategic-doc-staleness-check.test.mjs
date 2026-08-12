@@ -61,15 +61,21 @@ function makeWorkspace() {
   return dir;
 }
 
-test("AC8 — pool-candidate mode flags gap-prepare-milestone-no-size-aware-routing", () => {
+test("AC8 — pool-candidate mode flags gap-prepare-milestone-no-size-aware-routing (genuine plain-text ref survives)", () => {
+  // AC8 regression control (gap-judgepoolcandidate-keyword-vs-position, 2026-08-12): the task is
+  // STILL flagged, but only via its GENUINE plain-text reference — line 31 "execute-milestone.js
+  // touch; …" (a live reference to the ADR-022-deleted script). The backticked provenance-note hit
+  // ("a real `prepare-milestone.js` ProposalReview run …") is a QUOTE, not a live reference, so the
+  // position-not-keyword fix removes it — this assertion pins that the backticked class no longer
+  // flags while the plain-text class still does (AC3/AC4: genuine retired-mechanism still blocked).
   const res = run("--pool-candidate", "gap-prepare-milestone-no-size-aware-routing", "--json");
   assert.equal(res.status, 1, `expected exit 1 (flagged), got ${res.status}:\n${res.stdout}${res.stderr}`);
   const out = JSON.parse(res.stdout);
   assert.equal(out.mode, "pool-candidate");
   assert.equal(out.flagged, true);
   const hits = out.refs.map((r) => r.hit);
-  assert.ok(hits.includes("prepare-milestone.js"), `expected prepare-milestone.js hit, got ${hits}`);
   assert.ok(hits.includes("execute-milestone.js"), `expected execute-milestone.js hit, got ${hits}`);
+  assert.ok(!hits.includes("prepare-milestone.js"), `backticked provenance-note hit must be gone, got ${hits}`);
 });
 
 test("AC8 — a candidate that mentions the deleted scripts ONLY under a strong ADR-022 annotation is clean", () => {
@@ -81,6 +87,54 @@ test("AC8 — a candidate that mentions the deleted scripts ONLY under a strong 
   assert.equal(res.status, 0, `expected clean, got ${res.status}:\n${res.stdout}${res.stderr}`);
   const out = JSON.parse(res.stdout);
   assert.equal(out.flagged, false);
+});
+
+test("POSITION-NOT-KEYWORD (gap-judgepoolcandidate-keyword-vs-position) — a provenance note quoting a deleted script in backticks is clean (DIR-103 repro)", () => {
+  // DIR-103's false positive: the deleted script name appears in backticks inside a "Split …
+  // ProposalReview run" provenance note (line 25) AND in a backticked Requested-action mention
+  // (line 59) — both are QUOTES, not live references (the task's subject is the LIVE
+  // acceptance-runner.ts). A mention inside an inline code span must not flag the candidate.
+  const ws = makeWorkspace();
+  fs.mkdirSync(path.join(ws, "tasks"), { recursive: true });
+  fs.writeFileSync(
+    path.join(ws, "tasks", "DIR-103-like.md"),
+    [
+      "## Proposal",
+      "",
+      "Improve the acceptance runner's operability.",
+      "",
+      "**Split 2026-08-01 (DIR-026 SPLIT-OR-COMMIT):** a real `prepare-milestone.js`",
+      "`ProposalReview` run against this task's Proposal returned needs-human.",
+      "",
+      "## Requested action",
+      "",
+      "Execute A; each is independently `prepare-milestone.js` + `execute-milestone.js` dispatched.",
+      "",
+    ].join("\n"),
+  );
+  const res = runIn(ws, "--pool-candidate", "DIR-103-like", "--json");
+  assert.equal(res.status, 0, `backticked provenance/quote mentions must be clean, got ${res.status}:\n${res.stdout}`);
+  const out = JSON.parse(res.stdout);
+  assert.equal(out.flagged, false, `expected clean, got refs: ${JSON.stringify(out.refs)}`);
+  fs.rmSync(ws, { recursive: true, force: true });
+});
+
+test("POSITION-NOT-KEYWORD (gap-judgepoolcandidate-keyword-vs-position) — a PLAIN-TEXT deleted-script reference is still flagged (no over-strip)", () => {
+  // The fix strips inline code spans ONLY. A plain-text reference to a deleted script (not inside
+  // backticks) is still a live reference to a retired mechanism and must keep flagging (AC4: the
+  // guard is not relaxed).
+  const ws = makeWorkspace();
+  fs.mkdirSync(path.join(ws, "tasks"), { recursive: true });
+  fs.writeFileSync(
+    path.join(ws, "tasks", "genuine-retired.md"),
+    "## Proposal\n\nTarget mechanism: prepare-milestone.js (live).\n",
+  );
+  const res = runIn(ws, "--pool-candidate", "genuine-retired", "--json");
+  assert.equal(res.status, 1, `plain-text reference must flag, got ${res.status}:\n${res.stdout}`);
+  const out = JSON.parse(res.stdout);
+  assert.equal(out.flagged, true);
+  assert.ok(out.refs.some((r) => r.hit === "prepare-milestone.js"), `expected prepare-milestone.js hit, got ${JSON.stringify(out.refs)}`);
+  fs.rmSync(ws, { recursive: true, force: true });
 });
 
 test("annotation rule — a strong retirement marker on the wrapped previous line suppresses", () => {
