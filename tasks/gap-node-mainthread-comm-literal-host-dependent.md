@@ -1,7 +1,8 @@
 ---
 id: gap-node-mainthread-comm-literal-host-dependent
-title: node-MainThread comm 字面量在 boheidc 恒 0（真 comm=MainThread）——resource-gate/process-budget/orphan 静默失效，机械检查背书错误字面量
-status: todo
+title: node-MainThread comm 字面量在 boheidc 恒 0（真
+  comm=MainThread）——resource-gate/process-budget/orphan 静默失效，机械检查背书错误字面量
+status: ready
 labels:
   - gap
   - defect
