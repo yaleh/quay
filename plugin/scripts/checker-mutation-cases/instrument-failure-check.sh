@@ -35,6 +35,11 @@ checker_cmd() {
   node --no-warnings --experimental-strip-types "${checker_dir}/instrument-failure-check.ts" --gate --root "$1" >/dev/null 2>&1
 }
 
+# JSON gate result: { ok, counts, baselines, ... } — used to compute the adaptive inject count.
+checker_json() {
+  node --no-warnings --experimental-strip-types "${checker_dir}/instrument-failure-check.ts" --gate --root "$1" --json 2>/dev/null
+}
+
 # GREEN baseline: the real documented surface (a byte-identical copy) → exit 0.
 copy_surface "${workdir}"
 if checker_cmd "${workdir}"; then :; else
@@ -42,11 +47,20 @@ if checker_cmd "${workdir}"; then :; else
   exit 4
 fi
 
-# INJECT (shrink-only): a NEW family-1 self-match command appended to a scanned doc → MUST go RED.
-echo "" >> "${workdir}/orchestration/orchestrator-loop-tick.md"
-echo "> pgrep -f 'quay.ts serve' 又一条自匹配" >> "${workdir}/orchestration/orchestrator-loop-tick.md"
+# INJECT (shrink-only): push family-1 over its baseline → MUST go RED.
+# Adaptive inject count: baseline - current + 1. From any green surface (current ≤ baseline,
+# guaranteed by the baseline check above) this always exceeds FAMILY_BASELINE[1], so the checker
+# cannot stay green regardless of doc churn. (Pre-2026-08-12 this hardcoded ONE instance, which
+# broke when the AC38 doc-split shrank family-1 from 2 to 1 — injecting 1 gave 1→2 ≤ baseline=2,
+# a stale-mutation-case false-green, exactly the 7e6cec77 static-check red.)
+read -r cur base <<< "$(checker_json "${workdir}" | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{const j=JSON.parse(d);console.log(j.counts[1],j.baselines[1])})')"
+inject=$(( base - cur + 1 ))
+for _ in $(seq 1 "${inject}"); do
+  echo "" >> "${workdir}/orchestration/orchestrator-loop-tick.md"
+  echo "> pgrep -f 'quay.ts serve' 又一条自匹配" >> "${workdir}/orchestration/orchestrator-loop-tick.md"
+done
 if checker_cmd "${workdir}"; then
-  echo "STAYED-GREEN — injected a new failure-form instance did not redden the checker" >&2
+  echo "STAYED-GREEN — injected family-1 instances beyond baseline did not redden the checker" >&2
   exit 3
 fi
 
