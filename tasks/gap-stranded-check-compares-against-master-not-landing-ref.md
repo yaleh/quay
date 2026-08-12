@@ -73,3 +73,9 @@ stranded 段的 Gate 1/Gate 2 改用 `landingRef()`（integration→develop→ma
 1. `--stranded`：**39 → 4**（gap-suite-leaks/a15-ruling5/chart2 全清除；send-keys-verified 仍报 1 ahead 真 stranded；M239 legacy + self-hosting 保留分支 + semantic-observer reverted 真保留）
 2. `task-status-drift-check.test.mjs`：**51/51 绿**（含 AC1 experiments/plugin 镜像字节一致 + stranded 负控制 + entriesInBranchDiff divergent-diff 用例）
 3. `--for-task` scoped 门：全绿（隔离违规 0、task-contract 无违规）
+
+**复跑核验（inner 2026-08-12 第二次执行，worktree task/gap-stranded-check-compares-against-master-not-landing-ref @ integration 1d75ac00）**：
+- 改动已随 `faf9469c` 在 integration；worktree 内 plugin 与 experiments 镜像 `diff -q` 字节一致（AC1 保持）。
+- `scripts/test.sh --for-task gap-stranded-check-compares-against-master-not-landing-ref`：**52 tests / 51 pass / 0 fail / 0 cancelled / 1 skipped**（skipped 为 `QUAY_TEST_REAL_STORE=1` opt-in 全量仓库扫描）。
+- scoped 静态门全绿：test-framework-policy PASS、test-isolation PASS（26 条全 baseline，无新增）、task-contract **no violations**、tmp-leak-pairing PASS、superseded-capability PASS、tick-core-static PASS、delivery-inventory drift gate PASS。
+- `--stranded` 实跑：**39 假象 → 3 真**（master..integration 已增至 3910）。三条全真：`task/a1-fix`（integration..branch=1）、`task/gap-dead-loop-check-fresh-coldstart-false-running`（integration..branch=1）、`task/verify-worktree`（Gate 3 has-uncommitted，worktree 未提交改动）。此前假 stranded 的 gap-suite-leaks/a15-ruling5/chart2 分支已 fan-in 清理，无一条报 2066/489/2593 的 master-lag 假象。
