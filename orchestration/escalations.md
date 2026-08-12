@@ -560,3 +560,8 @@ resource-aware。
 2. 人先解除 .halt 放行 serial 标注任务（inner 修 flaky 测试），绿后再同步——更稳但更慢。
 3. vhs 侧代跑验证 + 同步（vhs 环境稳定）。
 **外层倾向 1（B）**。已升级 manager 3 次（04:35 flakiness / 05:15 instability+OOM / 本条目）未获回应。**另：outer 进程反复重启（4 次）是需根因的基础设施问题**（瘫痪 Monitor/runner/可观测性）。
+## 2026-08-12 09:17Z — suite-state-trigger 在 runner 仍活时重触发（双套件事故）
+- **现象**：state=red（runner 早红后仍收集）期间任意 integration HEAD 前移（本此=我的收尾 commit）⇒ trigger `state != running` 条件判定「不在跑」⇒ 重触发第二个 8-lane 套件。2×8 竞争 + 新 runner 截断共享 full-suite.log + 新 runner 的 terminal write（runId 更新）让旧 runner 的 guarded state write 全部被 generation guard 丢弃。
+- **已试**：精确 pid 杀新 runner 树；把 state 重写回旧 runner（runId 19e5a998, state=running）恢复其后续 write；旧 runner 继续收集未受影响（in-memory failures[] 完整）。
+- **为何超权**：修复 suite-state-trigger.ts 是 plugin/scripts 实现+测试 ⇒ task 路径（外层不可直接改实现）。
+- **选项**：① trigger 重触发前校验 state.pid 进程存活（/proc 存在且是 runner）——最直接；② runner 早红后不再把 state 标 red 直到真正停（改早红语义，代价大）；③ trigger 等 finishedAt != null 才允许重触发。
