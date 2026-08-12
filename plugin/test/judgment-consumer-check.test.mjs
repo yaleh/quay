@@ -6,9 +6,9 @@
 //         audit: the registry (judgment-consumer-check.ts) lists every audited judgment with the
 //         action that consumes it, and the real-repo audit passes (all `wired` entries verify).
 //   AC3 — the systematic audit "判据→消费动作" mapping: the real-repo audit lists the three 2026-08-10
-//         instances (deficit / not-yet-flipped / self-touch-scan) and lists the no-consumer judgment
-//         (self-touch-scan's candidate-backfill consumer, still pending) as UNFINISHED — never
-//         silently green (invariant no_consumer_listed_unfinished = 1).
+//         instances (deficit / not-yet-flipped / self-touch-scan). self-touch-scan's candidate-backfill
+//         consumer landed (gap-slot-refill-c8-reject-no-backfill 84a64047) so ALL judgments are wired
+//         — no consumer listed unfinished (invariant no_consumer_listed_unfinished = 0).
 //   AC4 — the negative control via --judge-entry: a judgment declared `wired` whose consumer pattern
 //         is MISSING must exit 1 (the defect class: signal computed, no action wired); restoring the
 //         consumer returns to exit 0. The unfinished-stale direction (fix-marker present while still
@@ -60,17 +60,18 @@ const WIRED_ENTRY = JSON.stringify({
   status: "wired",
 });
 
-test("AC2/AC3 — real-repo audit passes: 6 judgments, 5 wired, self-touch-scan listed unfinished", () => {
+test("AC2/AC3 — real-repo audit passes: 6 judgments, 6 wired, self-touch-scan now wired (backfill landed)", () => {
   const res = run("--json");
   assert.equal(res.status, 0, `real-repo audit must pass, got ${res.status}:\n${res.stdout}${res.stderr}`);
   const out = JSON.parse(res.stdout);
   assert.equal(out.mode, "judgment-consumer-audit");
   assert.equal(out.judgments_total, 6, `registry must have 6 audited judgments, got ${out.judgments_total}`);
-  assert.equal(out.wired, 5, `5 judgments wired, got ${out.wired}`);
+  assert.equal(out.wired, 6, `6 judgments wired, got ${out.wired}`);
   assert.equal(out.drift, false, "no drift — every wired entry verifies its consumer");
-  assert.ok(
-    out.unfinished.includes("self-touch-scan"),
-    `the no-consumer judgment (self-touch-scan) must be listed unfinished, got ${JSON.stringify(out.unfinished)}`,
+  assert.equal(
+    out.unfinished.length,
+    0,
+    `no-consumer judgment must be zero (self-touch-scan backfill landed), got ${JSON.stringify(out.unfinished)}`,
   );
 });
 
@@ -80,7 +81,7 @@ test("AC3 — the registry lists the three 2026-08-10 instances with consumers (
   assert.match(res.stdout, /deficit/, "deficit (instance-3) must be in the registry");
   assert.match(res.stdout, /not-yet-flipped/, "not-yet-flipped (instance-1) must be in the registry");
   assert.match(res.stdout, /self-touch-scan/, "self-touch-scan (instance-2) must be in the registry");
-  assert.match(res.stdout, /UNFINISHED/, "the unfinished marker must be visible in --list");
+  assert.match(res.stdout, /wired/, "the wired marker must be visible in --list");
   // every entry carries a consumer action (hasConsumer invariant).
   assert.match(res.stdout, /consumer:/, "every registry entry declares its consuming action");
 });

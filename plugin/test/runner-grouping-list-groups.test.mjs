@@ -76,11 +76,25 @@ test("AC10/AC2/AC3: --list-groups reports per-group counts of the deduped glob",
 });
 
 test("AC3: realpath dedup — --list-files count + serial equals --list-groups total (12 symlinks not double-run)", () => {
-  const files = runTestSh("--list-files").trim().split("\n").filter(Boolean);
-  const g = parseGroups(runTestSh("--list-groups"));
-  // The default --list-files EXCLUDES the serial group (routed to the concurrency-1 phase) and
-  // INCLUDES the lowconc phase files (routed to the concurrency-3 phase), so the dedup
-  // relationship is files + serial == total.
+  // The two glob reads are NON-ATOMIC. A sibling serial-family test (serial-anti-stomp, running
+  // concurrently at serial concurrency=2) briefly creates a zz-* fixture in the SHARED plugin/test
+  // dir; if it lands between --list-files and --list-groups, one count shifts by exactly 1 and the
+  // relationship reads as a false +1 (round-310: 346 !== 345 — a transient fixture, not a partition
+  // break; it passes in isolation and clears on the next read). A GENUINE partition violation is
+  // deterministic and fails every re-read, so re-read a bounded number of times and require the
+  // relationship to hold stably — the retry only clears the transient-window false positive, never
+  // papers over a real break (same philosophy as the AC7 membership fix, gap-runner-grouping-ac7-
+  // nested-spawn-load-flake).
+  let files = [];
+  let g = null;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    files = runTestSh("--list-files").trim().split("\n").filter(Boolean);
+    g = parseGroups(runTestSh("--list-groups"));
+    // The default --list-files EXCLUDES the serial group (routed to the concurrency-1 phase) and
+    // INCLUDES the lowconc phase files (routed to the concurrency-3 phase), so the dedup
+    // relationship is files + serial == total.
+    if (files.length + g.serial === g.total) break;
+  }
   assert.equal(files.length + g.serial, g.total);
   // all paths are already realpaths (no duplicates by construction)
   assert.equal(new Set(files).size, files.length);

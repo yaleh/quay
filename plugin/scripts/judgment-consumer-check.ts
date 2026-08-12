@@ -9,7 +9,7 @@
 //   instance-1 18:4x — not-yet-flipped computed by ready-pool-check, slot-refill never read excluded
 //                       (fixed: slot-refill step-4 check, gap-slot-refill-repeats-done-eligible-recommendations)
 //   instance-2 21:4x — self-touch-scan computed, C8-rejected candidates not backfilled
-//                       (止血 fixed; structural backfill OPEN, gap-slot-refill-c8-reject-no-backfill)
+//                       (止血 fixed; structural backfill LANDED 84a64047, gap-slot-refill-c8-reject-no-backfill)
 //   instance-3 22:0x — deficit computed every round, no trigger read it (fixed: B9 third trigger,
 //                       `ready-pool-check --apply`, outer 77f17d95)
 //
@@ -104,17 +104,16 @@ export const JUDGMENT_CONSUMERS: JudgmentConsumer[] = [
     judgment: "self-touch-scan",
     producer: "plugin/scripts/touches-orthogonality-check.ts",
     consumer:
-      "C8 逐候选门已接线（缺 self-touch ⇒ 拒派发）；但候选回填（C8 拒后从排序更后补位）未接线——消费缺失待修",
+      "slot-refill step-4 check 5 C8 逐候选门已接线（缺 self-touch ⇒ defer 拒派发）；C8 拒后从排序更后回填补位（gap-slot-refill-c8-reject-no-backfill 84a64047）",
     verify: [
       { file: "plugin/scripts/touches-orthogonality-check.ts", pattern: "--self-touch-scan", expect: "present" },
       { file: "plugin/loop/fast-mode-tick-core.md", pattern: "--self-touch", expect: "present" },
-      // fix-marker: 一旦 slot-refill 接入「C8 拒后回填」，此模式出现 → 状态应翻 wired（现在是 stale）。
-      { file: "plugin/scripts/slot-refill.ts", pattern: "self-touch|backfill|逐候选门", expect: "absent" },
+      // wired proof: slot-refill 的 C8 逐候选门 + 回填（selfTouchCheck / self-touch-missing-c8 defer）已在。
+      { file: "plugin/scripts/slot-refill.ts", pattern: "selfTouchCheck|self-touch-missing-c8|backfill", expect: "present" },
     ],
-    status: "unfinished",
-    instance: "instance-2 (21:4x self-touch-scan 候选被 C8 拒后不回填, 待回填)",
-    pendingTask: "gap-slot-refill-c8-reject-no-backfill",
-    note: "止血 791a8909（5 任务补 self-touch）；结构解（回填）待 gap-slot-refill-c8-reject-no-backfill。",
+    status: "wired",
+    instance: "instance-2 (21:4x self-touch-scan 候选被 C8 拒后不回填, 已修 84a64047)",
+    note: "止血 791a8909（5 任务补 self-touch）；结构解（回填）84a64047 已接线。",
   },
   {
     judgment: "dispatchable_disjoint（双算审计）",
