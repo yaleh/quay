@@ -104,7 +104,14 @@ test("AC3 — manager-start.sh --check-idle-watch is mechanically executable (tw
   // With no resident monitor mounted, the check must report ok:false (mounted=false) — never a
   // "looks mounted" green. The --once seam is delivery proof and can emit SESSION-STATUS even
   // without a resident mount, but mounted+targetOk is the necessary first criterion.
-  const r = spawnSync("bash", [MANAGER_START, "--check-idle-watch", "--json"], { encoding: "utf8" });
+  // MANAGER_MOUNT_CHECK_CMD seam: mock monitor-mount-check as "no mount" so the test is independent
+  // of whether the host actually has a resident monitor (main checkout has one via A2 — a real
+  // mounted monitor would legitimately report ok:true, which the old environment-dependent
+  // assertion misread as a failure).
+  const r = spawnSync("bash", [MANAGER_START, "--check-idle-watch", "--json"], {
+    encoding: "utf8",
+    env: { ...process.env, MANAGER_MOUNT_CHECK_CMD: "bash -c 'echo {\\\"mounted\\\":false,\\\"targetOk\\\":false}'" },
+  });
   assert.equal(r.status, 1, "check-idle-watch with no mounted monitor must exit 1 (fail-closed)");
   assert.match(r.stdout, /"mounted":false/, "mounted must be false when no session-liveness resident process exists");
   assert.match(r.stdout, /"ok":false/, "ok must be false when the idle-watch is not mounted");

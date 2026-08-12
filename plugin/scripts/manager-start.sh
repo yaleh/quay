@@ -102,7 +102,7 @@ ARM_CMD="${MANAGER_ARM_CMD:-$REPO_ROOT/plugin/scripts/manager-arm-loop.sh}"
 #   ② 至少一条 SESSION-STATUS（session-liveness.sh --once）——观测者真能产事件
 # 缺一即未挂好，exit 1。
 if [ "$CHECK_IDLE_WATCH" = 1 ]; then
-  MOUNT_JSON="$(bash "$REPO_ROOT/plugin/scripts/monitor-mount-check.sh" --json 2>/dev/null)"
+  MOUNT_JSON="$("${MANAGER_MOUNT_CHECK_CMD:-bash $REPO_ROOT/plugin/scripts/monitor-mount-check.sh}" --json 2>/dev/null)"
   MOUNTED="$(printf '%s' "$MOUNT_JSON" | sed -n 's/.*"mounted": *\(true\|false\).*/\1/p' | head -1)"
   TARGET_OK="$(printf '%s' "$MOUNT_JSON" | sed -n 's/.*"targetOk": *\(true\|false\).*/\1/p' | head -1)"
   ONCE_OUT="$(bash "$REPO_ROOT/plugin/scripts/session-liveness.sh" --once 2>&1)"
