@@ -90,6 +90,22 @@ echo "commits30m=$(git log --oneline --all --since='30 minutes ago' | grep -vc '
 echo "mon_procs=$(ps -eo args | grep -cE 'SUITE-TERMINAL|full-suite-state\.json' | tr -d ' ') （枚举而非布尔——见下方注释）"
 ps -eo pid,etime,args | grep -E 'SUITE-TERMINAL|full-suite-state\.json' | grep -v grep | sed 's/^\(.\{110\}\).*/\1…/'
 python3 orchestration/manager-anchor-check.py
+if [ -f .quay/manager-write-freeze.txt ]; then
+  fz=$(grep -v '^#' .quay/manager-write-freeze.txt | grep -v '^$')
+  since=$(date -u -d "@$(stat -c %Y .quay/manager-write-freeze.txt)" +%Y-%m-%dT%H:%M:%SZ)
+  echo "freeze_active=1 paths=$(echo "$fz" | wc -l) since=$since"
+  echo "freeze_violations=$(git log --since="$since" --format='' --name-only 2>/dev/null | sort -u | grep -Fx "$fz" | tee /tmp/.mgr-fz-hit | wc -l)"
+  [ -s /tmp/.mgr-fz-hit ] && { echo "  ⚠️ 冻结成立后仍被改的路径（逐条）："; sed 's/^/    /' /tmp/.mgr-fz-hit; }
+  # 负控制：谓词对一个已知在清单内的路径必须命中，否则 0 是谓词坏不是真 0（今天补的「零计数」那一半）
+  echo "freeze_predicate_selftest=$(echo 'plugin/scripts/manager-start.sh' | grep -cFx "$fz")  # 必须=1"
+else
+  echo "freeze_active=0（无冻结清单）"
+fi
+# ^ 2026-08-12：vhs-merge 那棵树持有 10 个未解冲突,其中 7 个是 manager 层文件。outer 请求冻结、我确认。
+#   **不写成承诺而写成读数,是因为 C17**：一条规则若「守」与「不守」在记录上无法区分,它就只能靠意志——
+#   而我今天已实证过一次「守不住」（C8 读了 7 次引用了 7 次仍违反 8 次）。
+#   ⇒ 违反表现为 freeze_violations 非 0 + 逐条列出路径（枚举而非布尔,硬规则③）。
+#   解冻条件写在清单文件头部;删除清单时须在 tick-log 记一行。
 echo "=== inbox（A15：判据是列目录本身，不看计数器；最近 5 封 + 总数）==="
 ls -la --time-style=+%H:%MZ .quay/manager-inbox/ 2>/dev/null | tail -n +2 | sort -k6 -r | head -5
 echo "inbox_total=$(ls -1 .quay/manager-inbox/ 2>/dev/null | wc -l)"
