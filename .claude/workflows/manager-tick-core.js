@@ -61,10 +61,10 @@ lat=$(gh release view --json tagName -q .tagName 2>/dev/null); echo "release=$la
 python3 -c "import json;d=json.load(open('packages/quay/package.json'));print('plugin_in_files='+str('plugin' in d.get('files',[])))"
 python3 -c "import json;print('manifest='+json.load(open('plugin/.claude-plugin/plugin.json'))['version'])"
 grep -o 'avg10=[0-9.]*' /proc/pressure/cpu | head -1; echo "load1=$(cut -d' ' -f1 /proc/loadavg) node=$(pgrep -cf 'bin/node')"
-# ^ 2026-08-12：`pgrep -c node`（按 comm 匹配）在本机【恒返回 0】——实测同一时刻 `pgrep -cf node`=68、
-#   `ps -eo args | grep -c '^/home/yale/.nvm.*bin/node'`=24、load1=14.08。而 `ps -eo comm | grep -cx node` 也=0
+# ^ 2026-08-12：\`pgrep -c node\`（按 comm 匹配）在本机【恒返回 0】——实测同一时刻 \`pgrep -cf node\`=68、
+#   \`ps -eo args | grep -c '^/home/yale/.nvm.*bin/node'\`=24、load1=14.08。而 \`ps -eo comm | grep -cx node\` 也=0
 #   ⇒ 本机 node 进程的 comm 不是字面 "node"。**一个恒为 0 的读数携带零信息**——与已退休的判准 ⑥、
-#   与 mon_outer 那个「硬编码签名⇒恒 DEAD」的布尔同族。改为 `-f` 按完整命令行匹配。
+#   与 mon_outer 那个「硬编码签名⇒恒 DEAD」的布尔同族。改为 \`-f\` 按完整命令行匹配。
 #   **一般形态：读数与 load1 这类独立量矛盾时，先怀疑读法，别急着当成系统状态突变（⑤）。**
 for p in quay archguard meta-cc; do [ -f /home/yale/work/$p/.halt ] && echo "halt:$p"; done
 tmux list-panes -a -F '#{session_name}:#{window_name}=#{pane_current_command}' 2>/dev/null | grep quay-0 | tr '\n' ' '; echo
@@ -72,10 +72,10 @@ echo "outer_bq=$(tail -40 orchestration/tick-log.md | grep -oE '^> \*\*[0-9]{2}:
 echo "outer_tbl=$(grep -m1 '^| 2026' orchestration/tick-log.md | grep -oE '[0-9]{2}:[0-9]{2}Z')"
 echo "outer_li=$(tail -40 orchestration/tick-log.md | grep -oE '^- \`[0-9]{2}:[0-9]{2}[xZ]*\`' | tail -1)"
 echo "outer_any=$(tail -40 orchestration/tick-log.md | grep -oE '[0-9]{2}:[0-9]{2}[xX]?Z' | tail -1)  # 三种写死格式全空时的兜底"
-# ^ 2026-08-12：outer 的 tick-log 换到【第三种】格式（`- \`HH:MMZ\` \`verb\` — …` 列表项），
+# ^ 2026-08-12：outer 的 tick-log 换到【第三种】格式（\`- \`HH:MMZ\` \`verb\` — …\` 列表项），
 #   而上面两条写死格式的读法【都】静默返回空——正是 manager-loop-tick.md:665 钉过的
 #   「日志格式是会变的，而写死格式的读法不会报错，只会安静地返回旧值」，这次连旧值都没有，返回空。
-#   ⇒ 加第三种 + 一个不依赖行首形态的兜底。**判读：`outer_any` 有值而前三个全空 ⇒ 格式又变了，当轮补读法。**
+#   ⇒ 加第三种 + 一个不依赖行首形态的兜底。**判读：\`outer_any\` 有值而前三个全空 ⇒ 格式又变了，当轮补读法。**
 python3 -c "
 import json,os,time
 d=json.load(open('.quay/full-suite-state.json'))

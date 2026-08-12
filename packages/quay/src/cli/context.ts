@@ -9,6 +9,8 @@
 // plus the raw argv/sub/rest (verb-less commands and init/migrate/manager/run
 // re-parse from [sub, ...rest] exactly as they did inside bin/quay.ts).
 
+import type { CliFlags } from "./shared.ts";
+
 export interface CliCtx {
   /** the full command line as dispatch received it — `[cmd, sub, ...rest]` */
   argv: string[];
@@ -17,7 +19,7 @@ export interface CliCtx {
   /** tokens after sub */
   rest: string[];
   /** `parseFlags(rest)` — flags after sub (pre-dispatch --json validation applied) */
-  flags: Record<string, unknown>;
+  flags: CliFlags;
   /** `parseFlags(rest).positional` */
   positional: string[];
   /** --json / --format json normalization result (null --format already errored) */
