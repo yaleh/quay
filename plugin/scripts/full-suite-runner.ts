@@ -844,9 +844,25 @@ export function buildSystemdRunArgv(command: string, limits: SystemdRunLimits = 
  * the unit name or null after `timeoutMs`.
  */
 export async function findSuiteScopeUnit(pid: number, timeoutMs = 8_000): Promise<string | null> {
-  const prefix = `run-p${pid}-`;
   const start = Date.now();
+  // Preferred: the child's OWN cgroup names its scope directly. systemd transient-scope naming is
+  // `run-<uuid>.scope` — the older `run-p<pid>-` form (the heuristic below) NEVER matches on this
+  // systemd, so the AC1 evidence was silently never captured and the hermetic cgroup test polled
+  // to timeout. /proc/<pid>/cgroup is authoritative regardless of systemd's naming scheme.
+  const fromCgroup = (): string | null => {
+    try {
+      const cg = fs.readFileSync(`/proc/${pid}/cgroup`, "utf8");
+      const m = cg.match(/\/(run-[^/\n]+\.scope)\s*$/m);
+      if (m) return m[1];
+    } catch {
+      // transient — retry
+    }
+    return null;
+  };
+  const prefix = `run-p${pid}-`;
   while (Date.now() - start < timeoutMs) {
+    const cgUnit = fromCgroup();
+    if (cgUnit) return cgUnit;
     try {
       const out = execFileSync("systemctl", ["--user", "list-units", "--type=scope", "--no-legend"], {
         encoding: "utf8",

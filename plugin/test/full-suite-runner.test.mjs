@@ -2112,10 +2112,10 @@ test(
       const evidence = path.join(root, ".quay", "suite-cgroup-evidence.txt");
       await poll(() => fs.existsSync(evidence), { timeoutMs: 10_000 });
       const txt = fs.readFileSync(evidence, "utf8");
-      assert.match(txt, /scope_unit=run-p\d+-/, "the transient scope unit name is recorded");
+      assert.match(txt, /scope_unit=run-[a-z0-9]+\.scope/, "the transient scope unit name is recorded (systemd names it run-<id>.scope — cgroup-derived)");
       assert.match(txt, /MemoryMax=4294967296/, "MemoryMax=4G applied (bytes)");
-      assert.match(txt, /EffectiveTasksMax=200/, "TasksMax=200 applied (effective)");
-      assert.match(txt, /CPUQuotaPerSecUSec=max/, "no CPUQuota passed ⇒ cgroup CPU unlimited (max)");
+      assert.match(txt, /TasksMax=200/, "TasksMax=200 applied (some systemd reports EffectiveTasksMax, others only TasksMax)");
+      assert.match(txt, /CPUQuotaPerSecUSec=(max|infinity)/, "no CPUQuota passed ⇒ cgroup CPU unlimited (max/infinity per systemd)");
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
       fs.rmSync(dir, { recursive: true, force: true });
