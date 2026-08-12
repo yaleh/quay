@@ -853,7 +853,7 @@ red 时：
 **重锚有效性 = 语义收敛（自述措辞审计）**：重锚的有效性以**语义收敛**度量（`reanchor_effectiveness_is_convergence = 1`），不是「重锚发生了」——
 锚点通道存在 ≠ 词汇收敛。**doc-side 与 audit 双侧成对、缺一不可**：出厂措辞由词汇规范任务
 （`gap-split-batch-vocabulary-dispatch-rolling-vs-verification-round`）落到 doc-side，本步审计负责机械判据——
-**单独做任一条都解决不了**：只改文档不跑审计，内部化的 batch 措辞不会收敛；只跑审计不订正措辞，每轮都报漂移。
+**单独做任一条都解决不了**：只改文档不跑 `self-report-vocab-audit` 审计，内部化的 batch 措辞不会收敛；只跑审计不订正措辞，每轮都报漂移。
 每次重锚后对 inner 最近自述（commit subject / fan-in 注记 / 收尾汇报）跑
 `node --experimental-strip-types plugin/scripts/self-report-vocab-audit.ts --git-log 15
 --exclude-prefix outer: --window 3 --json`，读 stdout 的 `inner_self_report_vocab` 字段（连续 3 轮无
