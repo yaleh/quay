@@ -50,12 +50,13 @@ function cleanup(root) {
 function taskBody(id, touches, opts = {}) {
   const status = opts.status ?? "ready";
   const symbol = opts.symbol ?? "noSuchSymbolXYZ";
+  const role = opts.role ? `role: ${opts.role}\n` : "";
   const labels = opts.labels ? `labels:\n${opts.labels.map((l) => `  - ${l}`).join("\n")}\n` : "";
   return `---
 id: ${id}
 title: fixture ${id}
 status: ${status}
-${labels}extra:
+${role}${labels}extra:
   schema: v1
 ---
 
@@ -179,6 +180,60 @@ test("AC1: scanReadyTasksSelfTouch reports ready tasks missing their self-file; 
     assert.deepEqual(rows.map((r) => r.id), ["a", "b", "c"], "ready, non-fixture tasks scanned in id order; todo + fixture skipped");
     assert.deepEqual(rows.filter((r) => r.ok).map((r) => r.id), ["a"]);
     assert.deepEqual(rows.filter((r) => !r.ok).map((r) => r.id), ["b", "c"]);
+  } finally {
+    cleanup(ws);
+  }
+});
+
+test("AC1: a `role: compound` task is recognized as compound — NOT a self-touch false negative", () => {
+  // Compound task whose Touches delegate to children (the aggregation convention) — no self-file.
+  const compoundBody = taskBody("comp", "- plugin/scripts/foo.ts", { role: "compound" });
+  const r = selfTouchCheck(compoundBody, "comp");
+  assert.equal(r.ok, false, "a compound genuinely has no self-file entry in its Touches");
+  assert.equal(r.compound, true, "…and the checker must recognize it as compound");
+  assert.equal(r.expected, "tasks/comp.md");
+
+  // Negative: a primitive task missing its self-file is NOT compound — a real self-touch violation.
+  const plainBody = taskBody("plain", "- plugin/scripts/foo.ts");
+  const p = selfTouchCheck(plainBody, "plain");
+  assert.equal(p.ok, false);
+  assert.equal(p.compound, false, "a primitive missing its self-file is a genuine violation, not compound");
+});
+
+test("AC1: scanReadyTasksSelfTouch includes a ready compound but does NOT count it as missing", () => {
+  const ws = makeWorkspace("compound-scan", {
+    "tasks/comp.md": taskBody("comp", "- plugin/scripts/foo.ts", { role: "compound" }), // compound, no self-file
+    "tasks/plain.md": taskBody("plain", "- plugin/scripts/foo.ts"),                      // primitive, missing self-file
+  });
+  try {
+    const rows = scanReadyTasksSelfTouch(path.join(ws, "tasks"));
+    assert.deepEqual(rows.map((r) => r.id), ["comp", "plain"], "both ready tasks scanned in id order");
+    const comp = rows.find((r) => r.id === "comp");
+    assert.equal(comp.ok, false);
+    assert.equal(comp.compound, true, "compound row flagged compound");
+    const plain = rows.find((r) => r.id === "plain");
+    assert.equal(plain.ok, false);
+    assert.equal(plain.compound, false, "primitive missing row stays a genuine violation");
+    // The consumer rule: missing = !ok && !compound — only `plain` is missing.
+    assert.deepEqual(rows.filter((r) => !r.ok && !r.compound).map((r) => r.id), ["plain"]);
+  } finally {
+    cleanup(ws);
+  }
+});
+
+test("AC1: --self-touch / --self-touch-scan treat a ready compound as convention-exempt (exit 0, no false negative)", () => {
+  const ws = makeWorkspace("compound-cli", {
+    "tasks/comp.md": taskBody("comp", "- plugin/scripts/foo.ts", { role: "compound" }),
+  });
+  try {
+    const scan = runCli(ws, "--self-touch-scan", "--root", ws);
+    assert.equal(scan.status, 0, "a ready compound alone must NOT fail the self-touch scan");
+    assert.match(scan.stdout, /COMPOUND/);
+    assert.doesNotMatch(scan.stdout, /missing self-file entry — 1/);
+
+    const single = runCli(ws, "--self-touch", path.join(ws, "tasks", "comp.md"), "--root", ws);
+    assert.equal(single.status, 0, "the per-candidate --self-touch gate does not flag a compound");
+    assert.match(single.stdout, /COMPOUND/);
   } finally {
     cleanup(ws);
   }
