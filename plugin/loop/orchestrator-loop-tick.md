@@ -28,15 +28,21 @@
 > **工作分支模型（gap-two-layer-loop-tick-docs-hardcode-master-not-wired-to-existing-branch-model）**：
 > 工作分支名是**策略**（各项目自身 branch 模型现状），不是机制——本文件是下游项目经升级通道消费的
 > 共享模板。`FORK_BASELINE`（已验证基线）与 `MERGE_TARGET`（待验证汇入点）**默认都是 `master`**
-> （单线：从 master 分叉、合回 master——未做 branch cutover 的下游行为不变）。quay 自身在
-> `.quay/config.yml` 覆盖成 `fork_baseline: develop` / `merge_target: integration`（两线，本文件
-> 步骤 3b 的批量合即 `$MERGE_TARGET`→`$FORK_BASELINE`）。含分支操作的命令先读这两个值代入，不要字面写死。
+> （单线：从 master 分叉、合回 master——未做 branch cutover 的下游行为不变）；下游项目可在
+> `.quay/config.yml` `loop:` 节覆盖 `fork_baseline` / `merge_target`（两线模型）。**本模板不写死任何
+> 项目的具体分支取值**——quay 自身网络的两线取值（develop / integration）是本层实例状态，见 quay 仓库
+> `orchestration/orchestrator-loop-tick.md` 的「本层状态」节。含分支操作的命令先读这两个值代入，不要字面写死。
 >
-> **切分声明（AC38，2026-08-10）**：本文件是**产品行为正本**（随 `quay-init --loop` 原样铺到目标项目
-> `orchestration/orchestrator-loop-tick.md`）。quay 自身网络的**本层状态**（工作分支两线、integration
-> 作 checkout、项目列表、tmux 布局）在 quay 仓库的 `orchestration/orchestrator-loop-tick.md` 副本。
-> **产品行为进 plugin / 本层状态留 orchestration**——与 manager 层已按同判据切分（产品模板 322 行 vs
-> quay 状态 1505 行；本对 1309/1164 同构）。冷启动 skill 与 tick 核引用同一批行为文件（AC3）。
+> **切分声明（AC38，2026-08-12 执行切分）**：本文件是**产品行为正本**（随 `quay-init --loop` 原样铺到
+> 目标项目 `orchestration/orchestrator-loop-tick.md`）。**切分边界**：**产品行为进 plugin / 本层实例状态
+> 留 orchestration**——与 manager 层已按同判据切分（产品模板 vs quay 状态）同形。quay 自身网络的**本层
+> 状态**（工作分支两线、integration 作 checkout、项目列表、tmux 布局、以及每一条判据的实测与代价）在
+> quay 仓库的 `orchestration/orchestrator-loop-tick.md` 副本。冷启动 skill 与 tick 核引用同一批行为文件
+> （AC3）。**机械判据（AC38 Contract）**：对「本文件」与「本层状态副本
+> `orchestration/orchestrator-loop-tick.md`」跑 `comm -3 <(sort <本文件>) <(sort <orchestration 副本>) | wc -l`
+> 即两份独有行数——切分后本文件（产品模板）独有 = 产品行为、orchestration 副本独有 = 本层实例状态，
+> 各自主题单一。（`plugin/loop/` 是随包分发路径、不被 quay-init 铺出，故文档正文不写该字面量——铺到
+> 目标项目后本文件即 `orchestration/orchestrator-loop-tick.md`，路径以落地为准。）
 
 **启动方式**（在编排会话，即本会话或 `/clear` 后的新会话）：按下方「冷启动」步骤操作——**循环驱动
 只有一个**：步骤 4 的 `CronCreate`（20 分钟 cron）。Monitor 是事件监测，不是驱动。两个都做完再进
@@ -53,13 +59,15 @@ tick 步骤。不要在这之外再起 `/loop`（固定间隔 `/loop` 底层就�
 cd "$REPO_ROOT"    # REPO_ROOT 见 .quay/config.yml loop.repo_root（或 git rev-parse --show-toplevel）
 ```
 
-**启动方式（F4，measured 2026-08-11 ad-arm1 archguard Level3 首跑）：** 本外层会话必须是用**铺下的
+**启动方式（F4，measured 2026-08-11）：** 本外层会话必须是用**铺下的
 `bash plugin/scripts/quay-launch.sh outer`** 起的（带 `--settings`、窗口名 `quay-outer`），内层必须是用
 `bash plugin/scripts/quay-launch.sh inner` 起的（窗口名 `quay-inner`）；裸机一步是
 `bash plugin/scripts/session-bootstrap.sh <root> inner/outer`。**不是手敲一行 `claude`。** 冷启动检查的是
 「铺下来的 launch 被用起来」——若你的窗口不是这么起的（无 `--settings`、或窗口名是 `inner` 而非 `quay-inner`），
 先经 launcher 重起再继续；`quay-launch.sh --dry-run` 打印每个角色将得到的命令。launch 配置在
-`<root>/.claude/launch.settings.json`（quay-init `--loop` 铺默认模板，按项目改 model/env）。
+`<root>/.claude/launch.settings.json`（quay-init `--loop` 铺默认模板，按项目改 model/env）。窗口名
+（`quay-outer` / `quay-inner`）是**本项目拓扑的实例值**，随 `quay-init --loop` 铺到目标项目时由
+`loop.tmux_session` / 窗口约定代入——本模板不写死具体会话名。
 
 **1. 读机制与目标**（顺序有意）
 
@@ -477,7 +485,8 @@ node --no-warnings --experimental-strip-types plugin/scripts/manager-observation
   `MANAGER_SESSION_ID` 给出，否则 `--self` 可能把 manager 当外层。
 - **违规报出（AC2）**：任何 PANE/TICKLOG/TRANSCRIPT/ANALYZE 命中 ⇒ 退出码 1、打印违规行；本 tick
   停止后续动作，按「授权边界」升级给人（step 5）。**违反即停**——运行时约束不是建议。
-- **负控制（AC3，不误报）**：指向 inner 的 capture-pane（`-t "$TMUX_SESSION"` / `quay-0:inner`）
+- **负控制（AC3，不误报）**：指向 inner 的 capture-pane（`-t "$TMUX_SESSION:inner"`，窗口名由
+  `loop.tmux_session` + `:inner` 约定代入——quay 实例是 `quay-0:inner`，见本层状态）
   不计数；**manager→outer 的发布不计数**（`supervisor-bus-identity.sh inbox-summary`、读 manager 的
   inbox/bus——那是 manager 向本层交付，不属于 C3 的 outer→manager 方向）；基于转述的指控（本层
   transcript 里散文提到 manager）不被当作证据——**只数真实 tool 调用**。
@@ -726,7 +735,8 @@ node --experimental-strip-types plugin/scripts/task-contract-check.ts --root <re
 
 ### 0d. 跨项目暂停/恢复（人 2026-08-03 裁定：用 `.halt`，粗糙可接受）
 
-三个项目（quay / archguard / meta-cc）各自的**唯一开关**就是仓库根的 `.halt`：
+**目标项目清单**（本层观察/暂停/优先级面向的每个项目）各自的**唯一开关**就是仓库根的 `.halt`：
+（目标项目清单是**本网络的实例值**——quay 网络是 quay / archguard / meta-cc，见 `orchestration/orchestrator-loop-tick.md` 本层状态节；本模板不写死）
 
 ```bash
 # 暂停
@@ -756,7 +766,7 @@ rm <repo>/.halt
 **外层每个 tick 必须报三个项目的 `.halt` 状态**——这是「暂停后忘了」的唯一防线：
 
 ```bash
-# 每个目标项目的根见各自 .quay/config.yml loop.repo_root（quay 自己的清单：quay/archguard/meta-cc）
+# 每个目标项目的根见各自 .quay/config.yml loop.repo_root（目标项目清单 = 本网络实例值，不写死）
 # `.halt` 是控制面不是传感器：没有 `.halt` 只回答「下一个边界不停」，不回答「项目在不在跑」——
 # 一个没有循环在跑的项目同样打印这一行。措辞因此是「未暂停」而不是「运行中」。
 for d in <目标项目根清单>; do
@@ -765,8 +775,8 @@ for d in <目标项目根清单>; do
 done
 ```
 
-**优先级（人已裁定）**：**quay 高于 archguard / meta-cc**。
-必要时暂停后两者以保本仓推进。**优先级由暂停哪个项目执行，不进跨项目令牌**——
+**优先级（人已裁定，各网络自定）**：**本仓高于其它目标项目**（quay 网络：quay 高于 archguard /
+meta-cc，见本层状态节）。必要时暂停后两者以保本仓推进。**优先级由暂停哪个项目执行，不进跨项目令牌**——
 令牌只回答「现在谁能跑重型操作」，不回答「谁更重要」。
 
 ### 1. 观察（只读，不动手）
@@ -1061,20 +1071,23 @@ tick 做一次收尾 pass。
    （REPO-STALL / NOT-WATCHED / GONE / 陈旧拓扑 / watchdog 复活）即 `stale`、退出 1；
    **`stale_observer_reports` 必须恒为 0（band）**。无新系统 crontab：观测者保留各自既有触发，
    本表只是每次读取时先查；`--audit` 与 `sync-lag-check` 同款双触发源（tick 心跳 + land 后事件驱动）。
-3.5 **批量合回 develop（两线模型的合并机制，`gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point` AC3）**：
-    integration 只从 develop 长出、只往 develop 合回 ⇒ 永远是 develop 后代 ⇒ **fast-forward 无冲突**
-    （`orchestration/SPEC-branching-model-integration-branch-2026-08-05.md`）。`suiteGreen` 为 true 时，
-    把 integration 快进合到 develop（本层共享检出保持在 integration 上，develop 不是检出分支）：
+3.5 **批量合回 `$FORK_BASELINE`（两线模型的合并机制，`gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point` AC3）**：
+    `$MERGE_TARGET` 只从 `$FORK_BASELINE` 长出、只往 `$FORK_BASELINE` 合回 ⇒ 永远是 `$FORK_BASELINE`
+    后代 ⇒ **fast-forward 无冲突**。`suiteGreen` 为 true 时，把 `$MERGE_TARGET` 快进合到
+    `$FORK_BASELINE`（本层共享检出保持在 `$MERGE_TARGET` 上，`$FORK_BASELINE` 不是检出分支；两线取值
+    见 `.quay/config.yml` `loop:` 节，quay 实例 = `fork_baseline: develop` / `merge_target: integration`，
+    机制详述见本层状态节引用的 branch-model SPEC）：
     ```bash
-    # ff 安全判据：develop 是 integration 的祖先（integration 是 develop 后代）
-    git merge-base --is-ancestor develop integration && git branch -f develop integration
-    # 等价机械判据（helper CLI）：--is-ancestor develop integration 输出 ancestor（exit 0）
+    # ff 安全判据：$FORK_BASELINE 是 $MERGE_TARGET 的祖先（$MERGE_TARGET 是 $FORK_BASELINE 后代）
+    git merge-base --is-ancestor "$FORK_BASELINE" "$MERGE_TARGET" && git branch -f "$FORK_BASELINE" "$MERGE_TARGET"
+    # 等价机械判据（helper CLI）：--is-ancestor <baseline> <merge-target> 输出 ancestor（exit 0）
     ```
-    - **`--is-ancestor develop integration` 是硬前置**：develop 不是 integration 祖先（两线不变量被
-      破坏）⇒ `git branch -f` 不执行，标 needs-human、按「红窗分诊」处置，**绝不自动合**。
-    - **红窗期（`state: red`）不做批量合回**——integration 照常接收 inner 的任务合并（结构性消除
-      停派，`fast-mode-loop-tick.md` 步骤 2），develop 保持冻结，直到下一轮 verification-round 绿。
-    - **pending 窗口**：`git log --oneline develop..integration` 在红窗期应**非空**（Contract
+    - **`--is-ancestor <$FORK_BASELINE> <$MERGE_TARGET>` 是硬前置**：`$FORK_BASELINE` 不是
+      `$MERGE_TARGET` 祖先（两线不变量被破坏）⇒ `git branch -f` 不执行，标 needs-human、按「红窗分诊」
+      处置，**绝不自动合**。
+    - **红窗期（`state: red`）不做批量合回**——`$MERGE_TARGET` 照常接收 inner 的任务合并（结构性消除
+      停派，`fast-mode-loop-tick.md` 步骤 2），`$FORK_BASELINE` 保持冻结，直到下一轮 verification-round 绿。
+    - **pending 窗口**：`git log --oneline "$FORK_BASELINE".."$MERGE_TARGET"` 在红窗期应**非空**（Contract
       invoke）——那些正是下一轮批量 fast-forward 的待验证合并。
 4. **写轮次记录**：追加一行到 `.quay/verification-round.jsonl`：
    ```json
@@ -1088,9 +1101,10 @@ tick 做一次收尾 pass。
      定位到本轮 merge 引入就回退该 merge + 回退对应翻 done）。
 5. **真实下游安装/升级/冷启动验证（real-target verification，`gap-install-upgrade-verification-targets-real-downstream-workspaces`）**：
    安装/升级/冷启动验证不再只跑 mkdtemp 合成夹具（`install-config-driven-e2e.test.mjs` 是 **synthetic** 线）——
-   每个验证轮对**真实下游**（archguard / meta-cc，见 §1 的 `<目标项目根清单>`）跑一次**只读**升级检查，报结论：
+   每个验证轮对**真实下游**（真实目标清单 = 各工作区自己的策略，见 §1 的 `<目标项目根清单>` /
+   `QUAY_REAL_TARGETS`）跑一次**只读**升级检查，报结论：
    ```bash
-   for t in /home/yale/work/archguard /home/yale/work/meta-cc; do
+   for t in <目标项目根1> <目标项目根2>; do     # quay 实例：/home/yale/work/archguard /home/yale/work/meta-cc
      bash plugin/scripts/real-target-verify.sh --target "$t"
    done
    ```
