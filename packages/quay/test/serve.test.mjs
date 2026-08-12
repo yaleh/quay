@@ -456,6 +456,12 @@ async function main() {
         listForBanner.body.includes("ready"),
         "GET / page still contains 'ready' status (filter nav) (CR-010, UQ-016)"
       );
+      // --- gap-superseded-modeled-as-task-lifecycle-terminal: superseded is a modeled
+      // terminal and renders as an independent filter-nav bucket (AC3) ---
+      assert(
+        listForBanner.body.includes("superseded"),
+        "GET / page contains 'superseded' status as an independent filter-nav bucket (AC3, superseded terminal)"
+      );
 
       // --- QX-013 (UQ-013): error banner rendered on list page when ?error= is in URL ---
       const errorInURL = await get(ux3Port, "/?error=Gate+check+failed");

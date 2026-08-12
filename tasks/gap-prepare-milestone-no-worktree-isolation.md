@@ -1,7 +1,7 @@
 ---
 id: gap-prepare-milestone-no-worktree-isolation
 title: prepare-milestone has no per-milestone worktree isolation
-status: todo
+status: superseded
 labels:
   - gap
   - defect

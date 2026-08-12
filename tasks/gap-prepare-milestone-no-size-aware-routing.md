@@ -1,7 +1,8 @@
 ---
 id: gap-prepare-milestone-no-size-aware-routing
-title: prepare-milestone applies uniform full Proposal+Plan synthesis to every task regardless of implementation scale
-status: todo
+title: prepare-milestone applies uniform full Proposal+Plan synthesis to every
+  task regardless of implementation scale
+status: superseded
 labels:
   - gap
   - defect

@@ -402,7 +402,7 @@ Usage:
   quay mcp
 
 Options for task list:
-  --status <status>   Filter by status (todo, ready, done, needs-human)
+  --status <status>   Filter by status (todo, ready, done, needs-human, superseded)
   --label <label>     Filter by label (repeatable: --label A --label B for AND-filter)
   --prefix <prefix>   Filter by task id prefix (e.g. QX for QX-* tasks)
   --sort id|status|updated  Sort by id, status, or last-updated time (default: insertion order)
@@ -420,7 +420,7 @@ Options for task create:
   --title <title>      Title for the new task (REQUIRED — hard usage error, no provider call, if missing or empty)
   --body <text>        Initial body text (mutually exclusive with --body-file)
   --body-file <path>   Read initial body from a file ("-" for stdin; mutually exclusive with --body)
-  --status <status>    Initial status (todo, ready, done, needs-human)
+  --status <status>    Initial status (todo, ready, done, needs-human, superseded)
   --labels <a,b>       Comma-separated initial labels
   --parent <id>        Parent task id
   --children <a,b>     Comma-separated child task ids
@@ -429,7 +429,7 @@ Options for task create:
 
 Options for task edit:
   --title <title>       New title (see note below: required and non-empty if <task-id> does not yet exist)
-  --status <status>     New status (todo, ready, done, needs-human)
+  --status <status>     New status (todo, ready, done, needs-human, superseded)
   --body <text>         Replace body with this text (mutually exclusive with --body-file)
   --body-file <path>    Replace body with file contents ("-" for stdin; mutually exclusive with --body)
   --labels <a,b>        Comma-separated labels (replaces existing labels)

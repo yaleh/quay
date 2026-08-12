@@ -1,9 +1,9 @@
 // Lifecycle — the thin status-WRITING layer over the QENG-1/2 gate engine
-// (QENG-3). quay's status model {todo, ready, done, needs-human} ARE the phases
-// (proposal §Non-goals — no epicd Pipeline port); this module writes those
-// statuses behind gate + legal-transition guards, plus an independent
-// adjudication pass. No new gate logic, no Provider ABI change: it reuses
-// `runGate` (engine.js) and `client.taskGet/taskWrite/taskCheck` only.
+// (QENG-3). quay's status model {todo, ready, done, needs-human, superseded}
+// ARE the phases (proposal §Non-goals — no epicd Pipeline port); this module
+// writes those statuses behind gate + legal-transition guards, plus an
+// independent adjudication pass. No new gate logic, no Provider ABI change:
+// it reuses `runGate` (engine.js) and `client.taskGet/taskWrite/taskCheck` only.
 //
 // The four verbs:
 //   runComplete   — precondition status==="ready"; acceptance gate; on pass write done.
@@ -38,6 +38,10 @@ export const TRANSITIONS: Record<string, { forward: string | null; back: string 
   ready: { forward: "done", back: "todo" },
   done: { forward: null, back: "ready" },
   "needs-human": { forward: null, back: "todo" },
+  // `superseded` is a HARD terminal (outer ruling 2026-08-12): the task's
+  // premise was deleted/voided and must not be revived — no forward edge, no
+  // back edge. Resurrection requires a human re-filing a fresh task.
+  superseded: { forward: null, back: null },
 };
 
 /** next status, or null if terminal/unknown */
