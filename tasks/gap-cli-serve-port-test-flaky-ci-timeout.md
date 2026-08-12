@@ -3,7 +3,7 @@ id: gap-cli-serve-port-test-flaky-ci-timeout
 title: cli.test.mjs's "quay serve --port" reachability test fails under real CI
   resource contention — fixed 5s poll budget too tight under
   --test-concurrency=8
-status: done
+status: ready
 labels:
   - gap
   - defect
