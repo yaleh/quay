@@ -40,7 +40,20 @@ done
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 # 显式 QUAY_LAUNCH_SETTINGS 可覆盖 settings 文件路径（测试/负控制用；默认检查进仓库的那份）。
-SETTINGS_FILE="${QUAY_LAUNCH_SETTINGS:-${REPO_ROOT}/.claude/launch.settings.json}"
+# gap-manager-layer-no-verified-install-vector (bare-metal 冷启动向量): 在 npm pack 的裸机安装里
+# `.claude/launch.settings.json` 不在包根（npm `files` 只随包根 plugin/ 走），它在
+# `plugin/.claude/launch.settings.json`（plugin 交付面）。dev-tree 的包根 settings 带 deepseek
+# 917k 角色 env（外层/inner 用），是开发树的优先选择；裸机包只有 plugin 拷贝（manager 角色的
+# launcher=claude / name=quay-manager 两份一致）——回退到它，`quay manager start` 才能在裸机
+# 冷启动。fallback 顺序：显式 env > 包根 dev-tree settings > plugin 出厂 settings。
+SETTINGS_FILE="${QUAY_LAUNCH_SETTINGS:-}"
+if [ -z "$SETTINGS_FILE" ]; then
+  if [ -f "${REPO_ROOT}/.claude/launch.settings.json" ]; then
+    SETTINGS_FILE="${REPO_ROOT}/.claude/launch.settings.json"
+  else
+    SETTINGS_FILE="${REPO_ROOT}/plugin/.claude/launch.settings.json"
+  fi
+fi
 
 if [[ -z "$ROLE" ]]; then
   echo "ERROR: role required (manager|outer|inner) — see _launchSpec.roles in ${SETTINGS_FILE}" >&2
