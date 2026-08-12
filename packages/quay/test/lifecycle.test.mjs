@@ -78,7 +78,7 @@ function resetExit() {
 // Phase A / Stage A1 — transition table + pure helpers
 // ===========================================================================
 
-test("A1: TRANSITIONS models todo→ready, ready↔todo/done, done→ready, needs-human→todo retreat", () => {
+test("A1: TRANSITIONS models todo→ready, ready↔todo/done, done→ready, needs-human→todo retreat, superseded hard-terminal", () => {
   assert.equal(TRANSITIONS.todo.forward, "ready");
   assert.equal(TRANSITIONS.todo.back, null);
   assert.equal(TRANSITIONS.ready.forward, "done");
@@ -87,6 +87,9 @@ test("A1: TRANSITIONS models todo→ready, ready↔todo/done, done→ready, need
   assert.equal(TRANSITIONS.done.back, "ready");
   assert.equal(TRANSITIONS["needs-human"].forward, null);
   assert.equal(TRANSITIONS["needs-human"].back, "todo");
+  // superseded is a hard terminal: no forward, no back (outer ruling 2026-08-12)
+  assert.equal(TRANSITIONS.superseded.forward, null);
+  assert.equal(TRANSITIONS.superseded.back, null);
 });
 
 test("A1: legalForward / legalBack return the edge or null (incl. unknown status)", () => {
@@ -95,6 +98,8 @@ test("A1: legalForward / legalBack return the edge or null (incl. unknown status
   assert.equal(legalBack("ready"), "todo");
   assert.equal(legalBack("todo"), null);
   assert.equal(legalBack("needs-human"), "todo");
+  assert.equal(legalForward("superseded"), null, "superseded has no forward edge");
+  assert.equal(legalBack("superseded"), null, "superseded has no back edge (hard terminal)");
   assert.equal(legalForward("bogus"), null);
   assert.equal(legalBack("bogus"), null);
 });
@@ -110,6 +115,8 @@ test("A1: assertTransition throws on every null edge and is silent on legal edge
   assert.throws(() => assertTransition("todo", "back"), /illegal transition: todo cannot back/);
   assert.throws(() => assertTransition("done", "forward"), /illegal transition: done cannot forward/);
   assert.throws(() => assertTransition("needs-human", "forward"), /illegal transition: needs-human cannot forward/);
+  assert.throws(() => assertTransition("superseded", "forward"), /illegal transition: superseded cannot forward/);
+  assert.throws(() => assertTransition("superseded", "back"), /illegal transition: superseded cannot back/);
 });
 
 // ===========================================================================
@@ -459,6 +466,45 @@ test("A4 [AC6]: runRetreat ready→todo still works (no regression on existing r
   resetExit();
 });
 
+test("A5 [AC2]: superseded is a hard terminal — runPromote throws illegal transition, no write", async () => {
+  resetExit();
+  const logPath = tmpLog("superseded-promote");
+  const client = stubClient({ id: "T-SUP1", status: "superseded", extra: {} });
+  await assert.rejects(
+    () => runPromote({ client, id: "T-SUP1", logPath }),
+    /illegal transition: superseded cannot forward/
+  );
+  assert.equal(client._state.status, "superseded", "status must be unchanged");
+  assert.equal(queryGateEvents(logPath, { pipeline_id: "T-SUP1" }).length, 0, "no gate event written");
+  resetExit();
+});
+
+test("A5 [AC2]: superseded is a hard terminal — runRetreat throws illegal transition, no write", async () => {
+  resetExit();
+  const logPath = tmpLog("superseded-retreat");
+  const client = stubClient({ id: "T-SUP2", status: "superseded", extra: {} });
+  await assert.rejects(
+    () => runRetreat({ client, id: "T-SUP2", reason: "try to revive", logPath }),
+    /illegal transition: superseded cannot back/
+  );
+  assert.equal(client._state.status, "superseded", "status must be unchanged");
+  assert.equal(queryGateEvents(logPath, { pipeline_id: "T-SUP2" }).length, 0, "no gate event written");
+  resetExit();
+});
+
+test("A5 [AC2]: superseded is a hard terminal — runComplete rejects precondition (must be ready), no gate", async () => {
+  resetExit();
+  const logPath = tmpLog("superseded-complete");
+  const client = stubClient({ id: "T-SUP3", status: "superseded", extra: { acceptance: "true" } });
+  const r = await runComplete({ client, id: "T-SUP3", logPath });
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /illegal transition: superseded cannot complete \(must be ready\)/);
+  assert.equal(process.exitCode, 1);
+  assert.equal(client._state.status, "superseded", "status must be unchanged");
+  assert.equal(queryGateEvents(logPath, { pipeline_id: "T-SUP3" }).length, 0, "no gate event written");
+  resetExit();
+});
+
 // ===========================================================================
 // Phase C — real CLI against a native-provider workspace (AC1-AC3)
 // Provider MAP form WITH mcp_entry — mirrors gap-cli-gate-enforcement.test.mjs.
@@ -587,6 +633,36 @@ test("C [AC3]: `quay promote <nonexistent-id>` → clean `no such task: ...` mes
   assert.notEqual(r.status, 0, `expected nonzero; got ${r.status}, stdout=${r.stdout}`);
   assert.match(r.stderr, /^no such task: NOPE-MISSING\s*$/m, `expected exact clean message line; got stderr=${JSON.stringify(r.stderr)}`);
   assert.ok(!STACK_FRAME_PATTERN.test(r.stderr), `stderr must NOT contain a raw stack trace; got: ${r.stderr}`);
+});
+
+test("C [SUPERSEDED]: `quay promote <superseded>` → nonzero + `illegal transition: superseded cannot forward`, no stack trace", () => {
+  const { workspaceRoot, tasksDir } = makeWorkspace("ac3-superseded-promote");
+  runNative(["task", "create", "LC-SUP", "--title", "superseded promote", "--status", "superseded",
+    "--body", validSections + acDodChecked], tasksDir);
+  const r = runQuay(["promote", "LC-SUP"], workspaceRoot);
+  assert.notEqual(r.status, 0, `expected nonzero; got ${r.status}, stdout=${r.stdout}`);
+  assert.match(r.stderr, /^illegal transition: superseded cannot forward\s*$/m, `expected exact clean message line; got stderr=${JSON.stringify(r.stderr)}`);
+  assert.ok(!STACK_FRAME_PATTERN.test(r.stderr), `stderr must NOT contain a raw stack trace; got: ${r.stderr}`);
+});
+
+test("C [SUPERSEDED]: `quay retreat <superseded> --reason x` → nonzero + `illegal transition: superseded cannot back` (hard terminal, no revival)", () => {
+  const { workspaceRoot, tasksDir } = makeWorkspace("ac3-superseded-retreat");
+  runNative(["task", "create", "LC-SUP2", "--title", "superseded retreat", "--status", "superseded",
+    "--body", validSections + acDodChecked], tasksDir);
+  const r = runQuay(["retreat", "LC-SUP2", "--reason", "try to revive"], workspaceRoot);
+  assert.notEqual(r.status, 0, `expected nonzero; got ${r.status}, stdout=${r.stdout}`);
+  assert.match(r.stderr, /^illegal transition: superseded cannot back\s*$/m, `expected exact clean message line; got stderr=${JSON.stringify(r.stderr)}`);
+  assert.ok(!STACK_FRAME_PATTERN.test(r.stderr), `stderr must NOT contain a raw stack trace; got: ${r.stderr}`);
+});
+
+test("C [SUPERSEDED]: `quay task edit <id> --status superseded` succeeds (superseded_writable)", () => {
+  const { workspaceRoot, tasksDir } = makeWorkspace("superseded-writable");
+  runNative(["task", "create", "LC-WR", "--title", "writable", "--status", "todo",
+    "--body", validSections + acDodChecked], tasksDir);
+  const r = runQuay(["task", "edit", "LC-WR", "--status", "superseded"], workspaceRoot);
+  assert.equal(r.status, 0, `expected exit 0; got ${r.status}, stdout=${r.stdout}, stderr=${r.stderr}`);
+  const after = JSON.parse(runQuay(["task", "view", "LC-WR", "--json"], workspaceRoot).stdout);
+  assert.equal(after.status, "superseded");
 });
 
 // --- exp5-M-GATE-CLI-ARG-ORDER: flag-before-id on the lifecycle verb-less commands ---
