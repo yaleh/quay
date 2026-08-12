@@ -5,6 +5,7 @@
 // All shared rendering helpers live here; serve.ts imports them from here.
 
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { execFileSync } from "node:child_process";
 import path from "node:path";
 import type { ProviderClient } from "./provider-client.ts";
 import { readLive, readJournal, readBoardLanding, readBoardExecution, type LiveResult, type JournalResult, type JournalSection, type BoardLanding, type BoardExecution } from "./observation.ts";
@@ -848,7 +849,7 @@ export async function handleTaskList(
       <!-- QX-015 orientation banner removed by DIR-007 (iteration 10): misleading
            needs-human placement + disproportionate layout cost. -->
       <h1>Quay — task list (${escapeHtml(manifest.id)} provider)</h1>
-      <p class="meta"><a href="/live">live</a> · <a href="/journal">journal</a> · <a href="/adr">ADRs →</a> · <a href="/goal">goals →</a> · <a href="/doc">docs →</a></p>
+      <p class="meta"><a href="/live">live</a> · <a href="/journal">journal</a> · <a href="/git-history">git-history →</a> · <a href="/adr">ADRs →</a> · <a href="/goal">goals →</a> · <a href="/doc">docs →</a></p>
       ${errorParam ? html`<div class="error-banner" role="alert"><strong>Error:</strong> ${escapeHtml(errorParam)}</div>` : ""}
       ${successParam ? html`<div class="success-banner" role="status"><strong>Done:</strong> ${escapeHtml(successParam)}</div>` : ""}
       ${prefixNav ? html`<p class="meta">Prefix: ${prefixNav}</p>` : ""}
@@ -1428,6 +1429,193 @@ export async function handleBoard(
   res.end(renderBoardPage({ landing, execution, intentStatus, intentReason, rows }));
 }
 
+// ── /git-history — 服务端渲染 git history SVG (gap-git-history-svg-server-rendered) ──────────
+// Pure server-rendered SVG: zero client JS, zero new deps (no gitgraph.js / Mermaid / React), no
+// build step. The chart plots COMMITS LANDED over time: x 轴 = 落地时刻 (committer date), y 轴 =
+// 当日提交数 (per-day histogram). It deliberately carries NO duration/effort semantics — git branch
+// lifespan ≠ task effort, and telemetry (the real effort source) shares only ~6% with git history,
+// so the page never pretends to know how long a task took (AC3). The data is read by shelling out
+// to `git` (the same class of workspace-observation tool observation.ts's readRecentCommits
+// already uses); a non-git workspace degrades to a 200 page with a visible note, never a 500.
+
+const GIT_LOG_SEP = "\x1f"; // unit separator — subject may contain spaces, never this byte
+
+interface GitHistoryCommit {
+  hash: string;
+  committerTs: number; // epoch seconds
+  author: string;
+  subject: string;
+}
+
+function readGitHistoryCommits(root: string, maxCommits: number): { commits: GitHistoryCommit[] } | { error: string } {
+  try {
+    const out = execFileSync(
+      "git",
+      ["-C", root, "log", "--all", `--max-count=${maxCommits}`, `--pretty=format:%H${GIT_LOG_SEP}%ct${GIT_LOG_SEP}%an${GIT_LOG_SEP}%s`],
+      { encoding: "utf8", timeout: 15_000, stdio: ["ignore", "pipe", "pipe"] }
+    );
+    const commits: GitHistoryCommit[] = [];
+    for (const line of out.split("\n")) {
+      if (!line) continue;
+      const [hash, tsRaw, author, ...subjectParts] = line.split(GIT_LOG_SEP);
+      const ts = Number(tsRaw);
+      if (!hash || !Number.isFinite(ts)) continue;
+      commits.push({ hash, committerTs: ts, author: author ?? "", subject: subjectParts.join(GIT_LOG_SEP) });
+    }
+    return { commits };
+  } catch (err) {
+    const stderr = String((err as { stderr?: Buffer | string }).stderr ?? "");
+    if (stderr.includes("not a git repository")) {
+      return { error: "工作区不是 git 仓库（无提交记录）" };
+    }
+    return { error: `git log 失败：${err instanceof Error ? err.message : String(err)}` };
+  }
+}
+
+/** Bucket commits into local calendar days. Each day is a 1-day-wide histogram column — a count
+ * of commits LANDED that day, never a duration bar (AC3). */
+function bucketCommitsByDay(commits: GitHistoryCommit[]): Array<{ date: string; count: number; dayStartTs: number }> {
+  const map = new Map<string, { date: string; count: number; dayStartTs: number }>();
+  for (const c of commits) {
+    const d = new Date(c.committerTs * 1000);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    let b = map.get(key);
+    if (!b) {
+      const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime() / 1000;
+      b = { date: key, count: 0, dayStartTs: dayStart };
+      map.set(key, b);
+    }
+    b.count += 1;
+  }
+  return [...map.values()].sort((a, b) => a.dayStartTs - b.dayStartTs);
+}
+
+function renderGitHistorySvg(buckets: Array<{ date: string; count: number; dayStartTs: number }>): string {
+  const W = 860;
+  const H = 300;
+  const PAD = { top: 24, right: 24, bottom: 44, left: 48 };
+  const plotW = W - PAD.left - PAD.right;
+  const plotH = H - PAD.top - PAD.bottom;
+
+  if (buckets.length === 0) {
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="git history — 窗口内无提交"><text x="${W / 2}" y="${H / 2}" text-anchor="middle" font-family="system-ui" font-size="14" fill="#555">窗口内无提交</text></svg>`;
+  }
+
+  const maxCount = Math.max(...buckets.map((b) => b.count));
+  const minTs = buckets[0].dayStartTs;
+  const maxTs = buckets[buckets.length - 1].dayStartTs + 86400; // right edge = end of last day
+  const span = Math.max(1, maxTs - minTs);
+  const x = (ts: number) => PAD.left + ((ts - minTs) / span) * plotW;
+  const y = (count: number) => PAD.top + plotH - (count / maxCount) * plotH;
+  const colW = Math.min(16, Math.max(2, (plotW / buckets.length) * 0.72));
+
+  const rects = buckets.map((b) => {
+    const cx = x(b.dayStartTs + 43200); // noon of the day — the column's x position
+    const cy = y(b.count);
+    const h = PAD.top + plotH - cy;
+    return `<rect x="${(cx - colW / 2).toFixed(1)}" y="${cy.toFixed(1)}" width="${colW.toFixed(1)}" height="${h.toFixed(1)}" fill="#0066cc" data-date="${b.date}" data-count="${b.count}"><title>${b.date}: ${b.count} commits</title></rect>`;
+  }).join("\n");
+
+  // Y-axis gridlines + labels (0 / half / max), recessive grid.
+  const yTicks = [0, Math.ceil(maxCount / 2), maxCount].filter((v, i, a) => a.indexOf(v) === i);
+  const yGrid = yTicks.map((t) => {
+    const yy = y(t);
+    return `<line x1="${PAD.left}" y1="${yy.toFixed(1)}" x2="${PAD.left + plotW}" y2="${yy.toFixed(1)}" stroke="#dee2e6" stroke-width="1"/><text x="${PAD.left - 6}" y="${(yy + 4).toFixed(1)}" text-anchor="end" font-family="system-ui" font-size="11" fill="#555">${t}</text>`;
+  }).join("\n");
+
+  // X-axis date labels — at most ~6, first anchored start, last anchored end (avoid overflow).
+  const labelEvery = Math.max(1, Math.ceil(buckets.length / 6));
+  const xLabels = buckets.map((b, i) => {
+    if (i % labelEvery !== 0 && i !== buckets.length - 1) return "";
+    const cx = x(b.dayStartTs + 43200);
+    const anchor = i === 0 ? "start" : i === buckets.length - 1 ? "end" : "middle";
+    return `<text x="${cx.toFixed(1)}" y="${H - 16}" text-anchor="${anchor}" font-family="system-ui" font-size="11" fill="#555">${b.date}</text>`;
+  }).join("\n");
+
+  const baseline = `<line x1="${PAD.left}" y1="${(PAD.top + plotH).toFixed(1)}" x2="${PAD.left + plotW}" y2="${(PAD.top + plotH).toFixed(1)}" stroke="#666" stroke-width="1.5"/>`;
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="git history — 提交落地密度（横轴=落地时刻，纵轴=当日提交数，无工时语义）" style="background:#fff;border-radius:6px;box-shadow:0 1px 3px rgba(0,0,0,.08);max-width:100%;height:auto">
+${baseline}
+${yGrid}
+${rects}
+${xLabels}
+</svg>`;
+}
+
+function renderGitHistoryPage(opts: {
+  meta: string;
+  svg: string;
+  buckets: Array<{ date: string; count: number }>;
+  recent: GitHistoryCommit[];
+  error: string | null;
+}): string {
+  const dayRows = opts.buckets.map((b) => html`<tr><td><code>${escapeHtml(b.date)}</code></td><td>${b.count}</td></tr>`).join("\n");
+  const recentRows = opts.recent.map((c) => html`<tr>
+    <td><code>${escapeHtml(c.hash.slice(0, 7))}</code></td>
+    <td>${escapeHtml(c.author)}</td>
+    <td>${escapeHtml(c.subject)}</td>
+  </tr>`).join("\n");
+  return html`<!doctype html>
+    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay git history — 提交落地密度">${pageStyles()}<title>Git history</title></head>
+    <body><main>
+      <p class="meta"><a href="/">← tasks</a> · <a href="/live">live</a> · <a href="/journal">journal</a> · <a href="/adr">ADRs →</a> · <a href="/goal">goals →</a> · <a href="/doc">docs →</a> · <strong>git-history</strong></p>
+      <h1>Git history — 提交落地密度</h1>
+      <p class="meta">横轴 = 落地时刻（committer date）· 纵轴 = 当日提交数 · ${opts.meta} · <strong>无持续时间/工时语义</strong>（git 分支寿命 ≠ 任务工时，遥测与 git 仅约 6% 相交）</p>
+      ${opts.error ? html`<div class="error-banner" role="alert"><strong>读失败:</strong> ${escapeHtml(opts.error)}</div>` : ""}
+      ${opts.svg}
+      <h2>按日提交数（落地时刻 → 当日提交数）</h2>
+      ${opts.buckets.length === 0 ? html`<p class="meta">窗口内无提交。</p>` : html`<table>
+        <tr><th>日期</th><th>提交数</th></tr>
+        ${dayRows}
+      </table>`}
+      <h2>最近提交</h2>
+      ${opts.recent.length === 0 ? html`<p class="meta">无提交记录。</p>` : html`<table>
+        <tr><th>hash</th><th>author</th><th>subject</th></tr>
+        ${recentRows}
+      </table>`}
+    </main></body></html>`;
+}
+
+export async function handleGitHistory(
+  req: IncomingMessage,
+  res: ServerResponse,
+  url: URL,
+  cfg: { workspaceRoot: string },
+): Promise<void> {
+  const MAX_COMMITS = 5000;
+  const read = readGitHistoryCommits(cfg.workspaceRoot, MAX_COMMITS);
+  if ("error" in read) {
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+    res.end(renderGitHistoryPage({
+      meta: "0 commits",
+      svg: renderGitHistorySvg([]),
+      buckets: [],
+      recent: [],
+      error: read.error,
+    }));
+    return;
+  }
+
+  const commits = read.commits;
+  const daysParam = parseInt(url.searchParams.get("days") || "", 10);
+  const windowDays = Number.isFinite(daysParam) && daysParam >= 1 ? Math.min(daysParam, 3650) : 30;
+  const cutoff = Math.floor(Date.now() / 1000) - windowDays * 86400;
+  const inWindow = commits.filter((c) => c.committerTs >= cutoff);
+  const shown = inWindow.length > 0 ? inWindow : commits;
+  const buckets = bucketCommitsByDay(shown);
+  const windowLabel = inWindow.length > 0 ? `最近 ${windowDays} 天` : "全部历史";
+  const total = shown.length;
+
+  res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+  res.end(renderGitHistoryPage({
+    meta: `${windowLabel} · ${total} commits · ${buckets.length} 天`,
+    svg: renderGitHistorySvg(buckets),
+    buckets,
+    recent: commits.slice(0, 20),
+    error: null,
+  }));
+}
+
 // ── Facade dispatcher (M99 pattern: single entry point keeps startServer outDegree low) ──
 
 export async function handleAllRoutes(
@@ -1462,6 +1650,13 @@ export async function handleAllRoutes(
   // checker (observation.ts's readBoardLanding) so per-task agreement holds by construction.
   if (url.pathname === "/board") {
     await handleBoard(req, res, url, client, manifest, cfg);
+    return;
+  }
+
+  // gap-git-history-svg-server-rendered: server-rendered git history SVG. Reads git via the same
+  // workspace-observation path as /live + /journal (observation.ts shells out to git too).
+  if (url.pathname === "/git-history") {
+    await handleGitHistory(req, res, url, cfg);
     return;
   }
 
