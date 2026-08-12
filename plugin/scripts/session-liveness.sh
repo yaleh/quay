@@ -846,7 +846,7 @@ case "${1:-}" in
   --last-message-type)
     [ -n "${2:-}" ] || { echo "用法: $0 --last-message-type <transcript>" >&2; exit 2; }
     transcript_last_message_type "$2"; exit 0 ;;
-  -h|--help) echo "用法: $0 [--once] [--selfcheck [--json]] [--states] [--saturation <t>] [--mask] [--pane-state] [--check] [--api-errors <t>] [--last-input <t>] [--last-message-type <t>] [--perm-warn-verdict <rounds> <tx_age>]"; exit 0 ;;
+  -h|--help) echo "用法: $0 [--once] [--selfcheck [--json]] [--states] [--saturation <t>] [--mask] [--pane-state] [--check] [--api-errors <t>] [--last-input <t>] [--last-message-type <t>] [--perm-warn-verdict <rounds> <tx_age>] [--resolve-transcript <name> <root> <pid>] [--dynamic-transcript <name> <root> <pid>]"; exit 0 ;;
 esac
 
 # ── 本项目根：自定位（同 inner-state.sh）。SESSION_ROOT 是测试接缝，生产不设。 ──────────────
@@ -1055,6 +1055,146 @@ session_pid() {  # 按窗口名寻址；pane 索引会漂。找 pane 本体或�
   echo ""
 }
 
+# ── 动态 transcript 解析（observer-blind-fix，2026-08-12）────────────────────────────────
+# 缺陷：观察者把每个目标的 transcript 路径绑到【挂载时配置】（SESSION_TRANSCRIPTS，见 transcript_for）。
+# 会话【重启】（新会话 id = 新 transcript 路径，如 ~/.claude/projects/<slug>/<新id>.jsonl）后观察者
+# 继续盯旧路径 ⇒ 恒假 SESSION-OVERDUE（旧文件不再动），且真死时反而无事件（已经狼来了）。tmux 窗口名
+# 不随重启变（pane 在同一窗口里重生）⇒ 窗口名是稳定键、会话 id / transcript 路径是变化值。
+#
+# 修法：每轮从目标窗口的【当前进程】重新解析 transcript（不缓存）。优先级：
+#   动态（confident）> 配置；low/none → 配置（「会话 id 是配置不去推断」的既有单源语义保持）。
+#   /clear 与 --resume 这类「进程寿命与文件寿命解耦」的已知不可靠情形（文件头 :166-167 注释）——
+#   同一进程的 env 会话 id 可能不随 /clear 轮换、--resume 是旧文件新进程 —— 动态解析不自信，
+#   按配置走。真正的【重启】= 新进程 + 新 env 会话 id ⇒ 动态 confident ⇒ 自愈。
+#
+# 解析方法（按可靠度排序，见 _sl_dynamic_transcript）：
+#   A. 进程 env 的 CLAUDE_CODE_SESSION_ID（强信号 / confident）：claude 进程启动时把绑定的会话 id
+#      写进 env。读 /proc/<pid>/environ 得会话 id → transcript = $HOME/.claude/projects/<slug>/<id>.jsonl。
+#      交叉核对 CLAUDE_PROJECT_DIR（存在时）的 realpath 必须等于目标 root 的 realpath——防止把别的
+#      项目窗口的 claude 会话 id 误当成此目标的（按 root 的 slug 拼会指向不存在的文件 ⇒ 心跳恒 0 ⇒
+#      OVERDUE 永久静默 = 假阴性，正是本任务消灭的盲的同类）。env 给出会话 id 且项目匹配 ⇒ confident。
+#   B. newest .jsonl 启发式（弱信号 / low，绝不覆盖配置）：项目目录下最近的 .jsonl。多会话同目录时
+#      无法可靠区分哪个属于本窗口（除非经 env，而 env 已经由 A 查过）⇒ 只在【恰好一个】候选且 mtime
+#      新时才报 low；多候选歧义 ⇒ none（任务要求：多候选/无法消歧 ⇒ 配置赢）。
+# 置信度语义：confident → 覆盖配置（restart 自愈）；low / none → 配置赢（单源语义保持）。
+
+# _sl_dynamic_transcript —— 从目标窗口当前 claude 进程解析 transcript。入参：$1=名字 $2=项目根 $3=pid
+# （pid 由调用方 session_pid 解析，避免重复 tmux 调用）。输出两行：第一行置信度（confident|low|none），
+# 第二行候选路径（low/none 时可为空）。
+_sl_dynamic_transcript() {
+  local name=$1 root=$2 pid=$3 sid projdir slug recent_cnt recent_newest now m f p1 p2
+  [ -n "${pid:-}" ] || { echo "none"; echo ""; return 0; }
+  slug=$(printf '%s' "$root" | tr '/' '-')
+  # 方法 A：进程 env 的 CLAUDE_CODE_SESSION_ID（权威）
+  if [ -r "/proc/$pid/environ" ]; then
+    sid=$(tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null | sed -n 's/^CLAUDE_CODE_SESSION_ID=//p' | head -1)
+    if [ -n "$sid" ]; then
+      projdir=$(tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null | sed -n 's/^CLAUDE_PROJECT_DIR=//p' | head -1)
+      if [ -n "$projdir" ]; then
+        # 项目交叉核对（realpath 兼容符号链接）：不匹配 ⇒ 该进程属于别的项目，不是本目标。
+        p1=$(realpath "$projdir" 2>/dev/null || printf '%s' "$projdir")
+        p2=$(realpath "$root" 2>/dev/null || printf '%s' "$root")
+        if [ "$p1" != "$p2" ]; then
+          echo "none"; echo ""; return 0
+        fi
+      else
+        # 无 CLAUDE_PROJECT_DIR 可核对 ⇒ 不敢置信（怕取到别项目 ⇒ 假阴性）⇒ 低置信，配置赢。
+        echo "low"; echo "$HOME/.claude/projects/$slug/$sid.jsonl"; return 0
+      fi
+      echo "confident"; echo "$HOME/.claude/projects/$slug/$sid.jsonl"; return 0
+    fi
+  fi
+  # 方法 B：newest .jsonl（弱；多候选歧义 → none）。只取「恰好一个且 mtime 近」的候选报 low。
+  recent_cnt=0; recent_newest=""
+  now=$(date +%s)
+  while IFS= read -r f; do
+    [ -e "$f" ] || continue
+    m=$(stat -c %Y "$f" 2>/dev/null || echo 0)
+    # 「近」= 最近 OVERDUE_MIN 分钟内有写入（新 transcript 刚创建即近；旧会话的陈旧 transcript 不算）。
+    if [ "$m" -ge "$(( now - OVERDUE_MIN * 60 ))" ] 2>/dev/null; then
+      recent_cnt=$((recent_cnt + 1))
+      [ -n "$recent_newest" ] || recent_newest="$f"
+    fi
+  done < <(ls -t "$HOME/.claude/projects/$slug/"*.jsonl 2>/dev/null)
+  if [ "$recent_cnt" -eq 1 ]; then
+    echo "low"; echo "$recent_newest"; return 0
+  fi
+  echo "none"; echo ""; return 0
+}
+
+# _sl_configured_transcript_like —— 该目标【配置】的 transcript 形心跳路径：SESSION_TRANSCRIPTS 优先
+# （transcript_for 解析），其次 *.jsonl 的 SESSION_HEARTBEATS。空 = 目标心跳不是 transcript（目录/自定义
+# 文件/默认多源外层心跳）→ 不做动态覆盖（调用方已选定特定源，单源语义保持，见文件头 :61）。
+_sl_configured_transcript_like() {
+  local name=$1 root=$2 v
+  if t=$(transcript_for "$name" "$root"); then printf '%s\n' "$t"; return 0; fi
+  if [ -n "${SESSION_HEARTBEATS:-}" ]; then
+    while read -r n v; do
+      [ -n "${n:-}" ] || continue
+      if [ "$n" = "$name" ]; then
+        case "$v" in
+          *.jsonl) printf '%s\n' "$v"; return 0 ;;
+        esac
+      fi
+    done <<< "$SESSION_HEARTBEATS"
+  fi
+  return 1
+}
+
+# _sl_effective_transcript —— 每轮生效的 transcript 路径（observer-blind-fix 的优先级落点）。
+# 只对「配置了 transcript 形心跳」的目标做动态覆盖；输出到全局 _sl_eff_transcript，并把动态解析的
+# 置信度/候选路径存 _sl_dyn_conf / _sl_dyn_path 供诊断。
+#   置信度 precedence（任务要求，注释在此钉死）：
+#     confident（窗口当前 claude 进程 env 的 CLAUDE_CODE_SESSION_ID + 项目匹配）⇒ 动态路径赢——
+#       重启自愈：新会话 id 的新 transcript 在下一轮被拾起；
+#     low / none（无进程 / env 无 id / 项目不匹配 / 无项目可核对 / 多候选歧义 / 启发式）⇒ 配置赢——
+#       /clear 与 --resume 等已知不可靠情形保持既有单源语义。
+_sl_effective_transcript() {
+  local name=$1 root=$2 pid=$3 cfg dynout
+  cfg=$(_sl_configured_transcript_like "$name" "$root" || true)
+  _sl_dyn_conf="none"; _sl_dyn_path=""
+  if [ -n "$cfg" ]; then
+    dynout=$(_sl_dynamic_transcript "$name" "$root" "$pid")
+    _sl_dyn_conf=${dynout%%$'\n'*}
+    _sl_dyn_path=${dynout#*$'\n'}
+  fi
+  if [ "$_sl_dyn_conf" = "confident" ] && [ -n "$_sl_dyn_path" ]; then
+    _sl_eff_transcript="$_sl_dyn_path"
+  else
+    _sl_eff_transcript="$cfg"
+  fi
+}
+
+# _sl_effective_heartbeat —— 每轮生效的心跳路径（observer-blind-fix）：目标的心跳源是 transcript 形
+# 且 _sl_eff_transcript 已被 confident 动态解析覆盖（restart 自愈）⇒ 心跳用动态路径——否则 OVERDUE /
+# IDLE 噪声闸门仍盯旧 transcript（盲）。自定义目录心跳 / 默认多源外层心跳不在此列（单源语义保持）。
+_sl_effective_heartbeat() {
+  local name=$1 root=$2 hb cfg
+  hb=$(heartbeat_for "$name" "$root")
+  if [ -n "${_sl_eff_transcript:-}" ] && [ "$hb" != "$_sl_eff_transcript" ]; then
+    if cfg=$(_sl_configured_transcript_like "$name" "$root") && [ "$cfg" = "$hb" ]; then
+      hb="$_sl_eff_transcript"
+    fi
+  fi
+  printf '%s\n' "$hb"
+}
+
+# 诊断/单测接缝（observer-blind-fix；放在函数定义之后，因 _sl_effective_transcript 依赖 transcript_for）：
+if [ "${1:-}" = "--resolve-transcript" ]; then
+  # 打印给定目标在给定 pid（窗口当前 claude 进程）下的【生效 transcript 路径】——confident 动态 > 配置。
+  # 空 = 无 transcript 形心跳配置 / 无法解析。用法：--resolve-transcript <name> <root> <pid>
+  [ $# -ge 4 ] || { echo "用法: $0 --resolve-transcript <name> <root> <pid>" >&2; exit 2; }
+  _sl_effective_transcript "$2" "$3" "$4"
+  printf '%s\n' "$_sl_eff_transcript"
+  exit 0
+fi
+if [ "${1:-}" = "--dynamic-transcript" ]; then
+  # 打印 _sl_dynamic_transcript 的原始输出（第一行置信度 confident|low|none，第二行候选路径）。
+  [ $# -ge 4 ] || { echo "用法: $0 --dynamic-transcript <name> <root> <pid>" >&2; exit 2; }
+  _sl_dynamic_transcript "$2" "$3" "$4"
+  exit 0
+fi
+
 # ── 无挂载门（2026-08-06 人裁定：彻底去掉互斥锁）──────────────────────────────────────────
 # 观测对目标【纯只读】（只有 tmux capture-pane / git log / stat，零写入）——只读天然不排他，
 # 两个观察者盯同一 pane 的代价只是每周期多一次 capture-pane，互不影响也不需要互相知情。互斥锁
@@ -1159,8 +1299,11 @@ while true; do
 
     # 该目标的 transcript 路径（AC2/AC7/AC9 用）：SESSION_TRANSCRIPTS 配置了才有；
     # 没有 → tr_path 空，AC2 交叉正控制与 AC9 发不出请求检查对该目标不适用（tick 日志不是会话证据）。
+    # observer-blind-fix：每轮从窗口当前进程动态解析（restart 自愈）；confident 动态 > 配置，
+    # low/none → 配置（优先级见 _sl_effective_transcript）。
     tr_path=""
-    tr_path=$(transcript_for "$name" "$root" || true)
+    _sl_effective_transcript "$name" "$root" "${pid:-}"
+    tr_path="$_sl_eff_transcript"
 
     # 停机基线（协调方 2026-08-03 样本）：解除停机那一刻重置陈旧度起点。监视器每轮自己观察
     # .halt 从存在→不存在，不需要额外状态源。archguard 停泊 310 分钟后删 .halt，同一轮打出
@@ -1336,7 +1479,7 @@ while true; do
           IDLE_REPORTED[$name]=1
           hmin="?"
           hmod=$(heartbeat_mtime_for "$name" "$root")
-          hb=$(heartbeat_for "$name" "$root"); hmin="?"
+          hb=$(_sl_effective_heartbeat "$name" "$root"); hmin="?"
           hmod=$(effective_heartbeat_mtime "$name" "$root" "${hb:-/nonexistent}")
           [ "$hmod" != "0" ] && hmin=$(( ( $(date +%s) - hmod ) / 60 ))
           halt_msg=$([ "$halted" = "1" ] && echo "（该项目已暂停，空闲是预期状态）" || echo "")
@@ -1480,7 +1623,7 @@ while true; do
     # 默认外层心跳 = 多源 max mtime（effective_heartbeat_mtime：git 提交 / queue-state /
     # tick-log / 分诊记录 / verification-round.jsonl 任一最新即活）——红窗处置写 queue-state+提交
     # 不写 tick-log 仍保持心跳新鲜（gap-outer-heartbeat-source-inverts-under-incident-handling）。
-    hb=$(heartbeat_for "$name" "$root")
+    hb=$(_sl_effective_heartbeat "$name" "$root")
     if [ "$alive" = "1" ] && [ "$halted" = "0" ] && [ -n "${hb:-}" ]; then
       hmod=$(effective_heartbeat_mtime "$name" "$root" "$hb")
       if [ "$hmod" != "0" ]; then
