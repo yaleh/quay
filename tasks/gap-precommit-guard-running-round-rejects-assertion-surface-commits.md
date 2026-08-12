@@ -60,7 +60,7 @@ extra:
 - [x] AC1–AC6 全部勾上（AC1 现已含 early-red：isRunning = state==="running" || finishedAt==null，071c0fb1）
 - [x] 负控制样例贴出（见 Evidence）
 - [x] 全量套件绿（rounds 70/75/76：守卫实现 + early-red 修复全绿，verifiedCommit 含 071c0fb1）
-- [ ] 真实拒绝记录（③）——本仓真 running 轮期间提交断言面文件被拒 + 留记录（probe 曾失败于 early-red 缺口已修复；manager 建议勿与修复落地绑一起，下一 running 轮产）
+- [x] 真实拒绝记录（③）——本仓真 running 轮（runId=bcf3790d）期间提交 tasks/tmp-3-probe.md 被守卫拒（exit 1）+ 完整预检清单（见 Evidence「真实运行记录」段）
 
 **登记**：注册表 mode 断言 = `registryMode="fallback-narrowed"`（A0b③ 前；patterns 已清空，34e96380 实测）。窗口协议：「先清 diverge 再动手」（IDLE-GREEN diverge>0 时 2min 抢 / 清零不触发 ⇒ 窗口≈10min）。断言面精度上限 = @static-object 标注精度（目录级标注拉整目录进面）。
 
@@ -113,3 +113,18 @@ scoped 静态层（capability-catalog / delivery-inventory / task-contract / adr
 （`capability-catalog.sh` / `docs/proposals/quay-product-outline.md`），scoped 静态层据此以
 `touches-missing-registration` 拒派。已按 gap-new-script-touches-missing-inventory-catalog-registration
 AC3 补全（本文件 `## Touches` 段 + 两登记文件 + 测试文件），这是该 gap 类的既定修复（补 Touches）。
+
+**真实运行记录（③，本仓真 running 轮，2026-08-12 22:19）**：round（runId=bcf3790d，startedAt=22:18:57.601Z，
+state=running）期间 probe 提交 `tasks/tmp-3-probe.md`（有效任务文件）→ 守卫**拒（exit 1）**，原文：
+```
+pre-commit 守卫：一轮正在跑（state=running, finishedAt=null, runId=bcf3790d-7dd1-4bfd-bae5-6e902881c23a, startedAt=2026-08-12T22:18:57.601Z），本次提交触及断言面文件（1 个），会使该轮结论不可用。
+用 --allow-dirty-round 显式覆盖，或等终态（green/red）后再提交。
+拒绝文件：tasks/tmp-3-probe.md
+预检清单（等待期可做，只读，可反复）：
+  1. 等该轮终态：state 文件转 green/red 后再提交（最安全）。
+  2. 看进度：tail -f .quay/full-suite.log（该轮 stdout 日志）。
+  3. 只读复核：读任务/读 diff/审阅已落地的 commit（git log）。
+  4. 若确需立即提交且确认无害：显式 QUAY_ALLOW_DIRTY_ROUND=1 git commit …（有记录可追责）。
+```
+probe 无残留（reset+rm，轮次不受影响）。**守卫 reject 路径在本仓证明（非 worktree）——early-red 修复（071c0fb1）
+让 state=running 真拒（上次 round 71 probe 灾难正是 early-red 放行）。**

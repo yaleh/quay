@@ -54,6 +54,11 @@ packages/quay/plugin/
 # (mtime reset to merge time ⇒ looks like 99 unread). Same gitignored runtime-state family as
 # gate-events.jsonl / outer-inbox.
 **/.quay/manager-inbox/
+# gap-precommit-guard-rejections-runtime-state (2026-08-12): the pre-commit guard's rejection ledger
+# (.quay/precommit-guard-rejections.jsonl) — runtime state (one line per rejected commit during a
+# running round), same family as gate-events.jsonl. NEVER committed: it is the guard's "did it
+# actually run" product — countably verifiable, not provenance.
+**/.quay/precommit-guard-rejections.jsonl
 # gap-assert-clean-tree-premise-void-under-concurrent-writers (2026-08-07): the before-run
 # porcelain snapshots for the suite-AFTER DELTA assertions (assert-clean-tree.sh --snapshot /
 # tmux-leak-scan.sh --snapshot). Same gitignored runtime-state family as gate-events.jsonl — a
