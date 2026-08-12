@@ -1,7 +1,7 @@
 ---
 id: gap-ac39-accounting-emit-layer
 title: "AC39: 三层 accounting-emit 按层定制（layer→mechanisms 映射表，occupancy.in_flight 跨层共性）"
-status: ready
+status: done
 labels:
   - gap
   - defect

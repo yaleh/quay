@@ -1,7 +1,8 @@
 ---
 id: gap-new-script-touches-missing-inventory-catalog-registration
-title: 新脚本任务 Touches 默认不含 DELIVERY-INVENTORY/capability-catalog 同步文件 ⇒ 三次越界（2 次事后补授权 + 1 次停手），检测机制已有但 Touches 授权缺口未堵
-status: ready
+title: 新脚本任务 Touches 默认不含 DELIVERY-INVENTORY/capability-catalog 同步文件 ⇒ 三次越界（2
+  次事后补授权 + 1 次停手），检测机制已有但 Touches 授权缺口未堵
+status: done
 labels:
   - gap
   - defect
