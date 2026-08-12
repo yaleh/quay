@@ -2,7 +2,7 @@
 id: gap-judgment-computed-not-wired-to-action
 title: 判据算出没接到「会因它而动」的那一步——2026-08-10 三次同形态（slot-refill 不查 excluded / C8 拒后不回填 /
   deficit 无触发器读）；类级纪律：每个机械判据必须有消费它的动作
-status: needs-human
+status: done
 labels:
   - gap
   - defect
@@ -12,6 +12,8 @@ children: []
 extra: {}
 ---
 **type:** execution
+
+> **翻 done（outer 2026-08-12）**：fan-in 分支 2cc67f78 经 r311-green 验证（3346 pass/0 fail），代码在 develop。A组 裁定剩余 2 条 + loop-completion AC16③ 路径。
 
 ## Proposal
 

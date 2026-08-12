@@ -4,7 +4,7 @@ title: loop 完成任务路径不产生 GateEvent（meter is runnable, not asser
   archguard TASK-81 全程零 gate 事件，同机 CLI 路径 TEST-002 有 4
   条（dod/promote/acceptance/complete pass）；.quay/gate-events.jsonl 在 loop
   workspace 不存在
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -14,6 +14,8 @@ children: []
 extra: {}
 ---
 **type:** execution
+
+> **翻 done（outer 2026-08-12）**：fan-in 分支 2cc67f78 经 r311-green 验证（3346 pass/0 fail），代码在 develop。A组 裁定剩余 2 条 + loop-completion AC16③ 路径。
 
 ## Proposal
 
