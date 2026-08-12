@@ -128,3 +128,5 @@ pre-commit 守卫：一轮正在跑（state=running, finishedAt=null, runId=bcf3
 ```
 probe 无残留（reset+rm，轮次不受影响）。**守卫 reject 路径在本仓证明（非 worktree）——early-red 修复（071c0fb1）
 让 state=running 真拒（上次 round 71 probe 灾难正是 early-red 放行）。**
+**jsonl 计数能力在位（57878bd1 append 实现 + gitignore），首次写入待自然发生**（下一次真 running 轮拒绝时，
+`.quay/precommit-guard-rejections.jsonl` 才出现首行——「可数可查」是能力，不是已有记录）。
