@@ -7,7 +7,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import path from "node:path";
 import type { ProviderClient } from "./provider-client.ts";
-import { readLive, readJournal, readBoardLanding, readBoardExecution, type LiveResult, type JournalResult, type JournalSection, type BoardLanding, type BoardExecution } from "./observation.ts";
+import { readLive, readJournal, readBoardLanding, readBoardExecution, readGitHistory, type LiveResult, type JournalResult, type JournalSection, type BoardLanding, type BoardExecution, type GitHistoryCommit, type GitHistoryResult } from "./observation.ts";
 import { createGoalStore } from "./goal-store.ts";
 import { createDocumentStore } from "./document-store.ts";
 // live-state discriminator texts (gap-live-cannot-tell-a-dead-loop-from-an-unwired-one) — the
@@ -848,7 +848,7 @@ export async function handleTaskList(
       <!-- QX-015 orientation banner removed by DIR-007 (iteration 10): misleading
            needs-human placement + disproportionate layout cost. -->
       <h1>Quay — task list (${escapeHtml(manifest.id)} provider)</h1>
-      <p class="meta"><a href="/live">live</a> · <a href="/journal">journal</a> · <a href="/adr">ADRs →</a> · <a href="/goal">goals →</a> · <a href="/doc">docs →</a></p>
+      <p class="meta"><a href="/live">live</a> · <a href="/journal">journal</a> · <a href="/git-history">git-history</a> · <a href="/adr">ADRs →</a> · <a href="/goal">goals →</a> · <a href="/doc">docs →</a></p>
       ${errorParam ? html`<div class="error-banner" role="alert"><strong>Error:</strong> ${escapeHtml(errorParam)}</div>` : ""}
       ${successParam ? html`<div class="success-banner" role="status"><strong>Done:</strong> ${escapeHtml(successParam)}</div>` : ""}
       ${prefixNav ? html`<p class="meta">Prefix: ${prefixNav}</p>` : ""}
@@ -1428,6 +1428,211 @@ export async function handleBoard(
   res.end(renderBoardPage({ landing, execution, intentStatus, intentReason, rows }));
 }
 
+// ── /git-history — server-rendered SVG of the commit-landing timeline (gap-git-history-svg-server-rendered) ──
+//
+// Data access is quarantined in observation.readGitHistory (the ONLY serve-path module allowed to
+// know git); this file only renders. The SVG is built by STRING CONCATENATION — no template engine,
+// no new dependency, and no <script> anywhere (zero client JS, the AC4 invariant; the browser's
+// native <title> tooltip is used, which needs no JS).
+//
+// THE X-AXIS SEMANTIC IS THE COMMIT LANDING TIME (%ct), NOT A DURATION. git branch lifespan ≠ task
+// work hours (measured: 149/164 fan-in branches lived <1h — the task finished before its first commit
+// even landed), and real work hours live in telemetry with a ~6% join rate to git. So the chart draws
+// only what git can prove: when commits landed (points), on which branch lane (Y), and where the
+// merges are (orange diamonds = the fan-in landing events). The branch interval line is explicitly a
+// 「存活区间」(existence span), never labeled as work time.
+
+// SVG color/ink tokens — the blue/orange pair validated all-pairs in light mode (dataviz skill);
+// branch identity is carried by LANE POSITION + direct label, never by a cycled hue.
+const GIT_SVG_BLUE = "#2a78d6";   // regular commit point
+const GIT_SVG_ORANGE = "#eb6834"; // merge commit point (diamond)
+const GIT_SVG_INK = "#52514e";    // secondary ink (text)
+const GIT_SVG_MUTED = "#898781";  // muted (axis labels)
+const GIT_SVG_GRID = "#e1e0d9";   // hairline gridline
+const GIT_SVG_SURFACE = "#fcfcfb"; // chart surface
+
+export interface GitHistoryBranch {
+  ref: string;
+  commits: Array<{ hash: string; t: number; parents: number; subject: string }>;
+  firstT: number;
+  lastT: number;
+}
+
+/**
+ * Group commits into per-branch lanes, ordered by most-recent landing time (desc) then name.
+ * A commit reached via multiple refs is attributed to the one `--source` picked in the git
+ * traversal — the chart shows where the traversal saw it land, not a full DAG (honest scope).
+ */
+export function groupCommitsByBranch(commits: GitHistoryCommit[]): GitHistoryBranch[] {
+  const byRef = new Map<string, GitHistoryBranch>();
+  for (const c of commits) {
+    let b = byRef.get(c.ref);
+    if (!b) {
+      b = { ref: c.ref, commits: [], firstT: c.t, lastT: c.t };
+      byRef.set(c.ref, b);
+    }
+    b.commits.push(c);
+    if (c.t < b.firstT) b.firstT = c.t;
+    if (c.t > b.lastT) b.lastT = c.t;
+  }
+  // Within a lane, render commits oldest→newest (left→right along the interval line). git log
+  // yields newest-first, but element order is only cosmetic; ascending keeps the segment + points
+  // in reading order and makes the x-axis mapping deterministic to test.
+  for (const b of byRef.values()) b.commits.sort((a, c) => a.t - c.t || a.hash.localeCompare(c.hash));
+  return [...byRef.values()].sort((a, b) => b.lastT - a.lastT || a.ref.localeCompare(b.ref));
+}
+
+function pad2(n: number): string {
+  return n < 10 ? `0${n}` : String(n);
+}
+
+/** "Nice" x-axis tick positions+labels for a [x0,x1] unix-second window. */
+function niceTicks(x0: number, x1: number, maxTicks = 6): Array<{ x: number; label: string }> {
+  const span = x1 - x0;
+  const rawStep = span / Math.max(maxTicks, 1);
+  const steps = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 10800, 21600, 43200, 86400, 172800, 604800, 1209600, 2592000];
+  let step = steps[steps.length - 1];
+  for (const s of steps) {
+    if (s >= rawStep) { step = s; break; }
+  }
+  const ticks: Array<{ x: number; label: string }> = [];
+  const start = Math.ceil(x0 / step) * step;
+  const fine = span <= 3 * 86400; // <3-day window → clock time; wider → date
+  for (let x = start; x <= x1; x += step) {
+    const d = new Date(x * 1000);
+    const label = fine
+      ? `${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`
+      : `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+    ticks.push({ x, label });
+  }
+  return ticks;
+}
+
+function isoTime(t: number): string {
+  const d = new Date(t * 1000);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+}
+
+/**
+ * Render the commit-landing timeline as a pure, dependency-free SVG string. Returns "" when the
+ * history is degraded/empty (the page then shows the 无数据/读失败 note instead). Deterministic on
+ * its input — the AC3 x-axis semantics (landing time, not duration) are testable directly here.
+ */
+export function renderGitHistorySvg(history: GitHistoryResult): string {
+  if (history.status !== "ok" || history.commits.length === 0) return "";
+  const branches = groupCommitsByBranch(history.commits);
+  const M = { top: 34, right: 170, bottom: 40, left: 10 };
+  const laneH = 26;
+  const W = 940;
+  const plotW = W - M.left - M.right;
+  const H = M.top + M.bottom + branches.length * laneH;
+
+  const ts = history.commits.map((c) => c.t);
+  const t0 = Math.min(...ts);
+  const t1 = Math.max(...ts);
+  const rawSpan = Math.max(t1 - t0, 1);
+  const pad = rawSpan < 3600 ? 3600 : rawSpan * 0.02; // single-instant window still gets a visible plot
+  const x0 = t0 - pad;
+  const x1 = t1 + pad;
+  const xSpan = x1 - x0;
+  const X = (t: number): number => M.left + ((t - x0) / xSpan) * plotW;
+
+  const ticks = niceTicks(x0, x1);
+  const gridlines = ticks.map((tk) => {
+    const gx = X(tk.x);
+    return `<line x1="${gx.toFixed(1)}" y1="${M.top}" x2="${gx.toFixed(1)}" y2="${H - M.bottom}" stroke="${GIT_SVG_GRID}" stroke-width="1" />` +
+      `<text x="${gx.toFixed(1)}" y="${H - M.bottom + 16}" font-size="10" fill="${GIT_SVG_MUTED}" text-anchor="middle">${escapeHtml(tk.label)}</text>`;
+  }).join("");
+
+  const lanes = branches.map((b, i) => {
+    const y = M.top + i * laneH + laneH / 2;
+    const xFirst = X(b.firstT);
+    const xLast = X(b.lastT);
+    const seg = b.commits.length > 1
+      ? `<line x1="${xFirst.toFixed(1)}" y1="${y.toFixed(1)}" x2="${xLast.toFixed(1)}" y2="${y.toFixed(1)}" stroke="${GIT_SVG_GRID}" stroke-width="2" />`
+      : "";
+    const points = b.commits.map((c) => {
+      const cx = X(c.t);
+      const tooltip = `${escapeHtml(c.hash.slice(0, 7))} · ${isoTime(c.t)} · ${escapeHtml(c.subject)}`;
+      if (c.parents > 1) {
+        const s = 4; // 8px diamond (the mark-spec ≥8px marker)
+        return `<rect x="${(cx - s).toFixed(1)}" y="${(y - s).toFixed(1)}" width="${2 * s}" height="${2 * s}" transform="rotate(45 ${cx} ${y})" fill="${GIT_SVG_ORANGE}"><title>merge ${tooltip}</title></rect>`;
+      }
+      return `<circle cx="${cx.toFixed(1)}" cy="${y.toFixed(1)}" r="4" fill="${GIT_SVG_BLUE}"><title>${tooltip}</title></circle>`;
+    }).join("");
+    return `<g>${seg}${points}<text x="${(W - M.right + 8).toFixed(1)}" y="${(y + 3).toFixed(1)}" font-size="11" fill="${GIT_SVG_INK}">${escapeHtml(b.ref)}</text></g>`;
+  }).join("");
+
+  // In-SVG legend: the two mark kinds (merge vs regular). Identity is never color-alone — the
+  // legend pairs each hue with its mark shape + label.
+  const legend = `<g font-size="10" fill="${GIT_SVG_INK}">
+    <circle cx="${M.left + 6}" cy="18" r="4" fill="${GIT_SVG_BLUE}" /><text x="${M.left + 16}" y="22">普通提交</text>
+    <rect x="${M.left + 92}" y="14" width="8" height="8" transform="rotate(45 ${M.left + 96} 18)" fill="${GIT_SVG_ORANGE}" /><text x="${M.left + 106}" y="22">合并提交（fan-in 落地）</text>
+  </g>`;
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="Git commit landing timeline; x-axis is commit landing time, not work duration" style="background:${GIT_SVG_SURFACE};max-width:100%;height:auto;border:1px solid ${GIT_SVG_GRID};border-radius:6px;font-family:system-ui,-apple-system,sans-serif;">
+${legend}
+${gridlines}
+${lanes}
+</svg>`;
+}
+
+/**
+ * Render the full /git-history HTML page. Zero <script> tags by construction (AC4): the page is
+ * static server-rendered HTML + one inline SVG; interactivity is limited to the browser's native
+ * SVG <title> tooltip.
+ */
+function renderGitHistoryPage(history: GitHistoryResult): string {
+  const statusNote = history.status === "error"
+    ? html`<p class="meta"><strong>读失败</strong> — ${escapeHtml(history.reason || "")}</p>`
+    : history.status === "empty"
+      ? html`<p class="meta"><strong>无数据</strong> — ${escapeHtml(history.reason || "")}</p>`
+      : "";
+  const chart = history.status === "ok" && history.commits.length > 0 ? renderGitHistorySvg(history) : "";
+  const nCommits = history.commits.length;
+  const branches = history.status === "ok" ? groupCommitsByBranch(history.commits) : [];
+  const mergeCount = history.commits.filter((c) => c.parents > 1).length;
+
+  const summaryRows = branches.map((b) => html`<tr>
+    <td>${escapeHtml(b.ref)}</td>
+    <td>${escapeHtml(isoTime(b.firstT))}</td>
+    <td>${escapeHtml(isoTime(b.lastT))}</td>
+    <td>${b.commits.length}</td>
+    <td>${b.commits.filter((c) => c.parents > 1).length}</td>
+  </tr>`).join("\n");
+  const summaryTable = branches.length > 0 ? html`<h2>分支汇总（git 可证的事实，非工时）</h2>
+    <table>
+      <tr><th>分支</th><th>首提交落地</th><th>末提交落地</th><th>提交数</th><th>合并数</th></tr>
+      ${summaryRows}
+    </table>` : "";
+
+  return html`<!doctype html>
+    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay git history — commit landing timeline (server-rendered SVG, zero client JS)">${pageStyles()}<title>Git history — commit landing timeline</title></head>
+    <body><main>
+      <p class="meta"><a href="/">← tasks</a> · <a href="/live">live</a> · <a href="/journal">journal</a> · <a href="/git-history">git-history</a> · <a href="/adr">ADRs →</a></p>
+      <h1>Git History — 提交落地时间轴</h1>
+      <p class="meta"><strong>横轴 = 提交落地时刻（git commit time），不是工时/持续时间。</strong> git 分支存活区间 ≠ 任务工时（实测 149/164 fan-in 分支寿命 &lt;1h——任务在首提交落地前就干完了）。真工时不在此图中：它在遥测里（#55，join 率仅 ~6%）。菱形 = 合并提交（fan-in 落地事件）。当前窗口：最近 ${nCommits} 条提交、${mergeCount} 个合并（跨所有本地分支）。</p>
+      ${statusNote}
+      ${chart}
+      ${summaryTable}
+    </main></body></html>`;
+}
+
+export async function handleGitHistory(
+  req: IncomingMessage,
+  res: ServerResponse,
+  cfg: { workspaceRoot: string },
+): Promise<void> {
+  let history: GitHistoryResult;
+  try {
+    history = readGitHistory(cfg.workspaceRoot);
+  } catch (err) {
+    history = { status: "error", reason: `internal: ${err instanceof Error ? err.message : String(err)}`, commits: [] };
+  }
+  res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+  res.end(renderGitHistoryPage(history));
+}
+
 // ── Facade dispatcher (M99 pattern: single entry point keeps startServer outDegree low) ──
 
 export async function handleAllRoutes(
@@ -1454,6 +1659,11 @@ export async function handleAllRoutes(
 
   if (url.pathname === "/journal") {
     await handleJournal(req, res, cfg);
+    return;
+  }
+
+  if (url.pathname === "/git-history") {
+    await handleGitHistory(req, res, cfg);
     return;
   }
 
