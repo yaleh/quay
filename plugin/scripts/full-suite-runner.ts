@@ -318,6 +318,7 @@ const ABORT_PATTERNS: RegExp[] = [
   /not running the full suite/, // same gate-WAIT message (both halves of the canonical line)
   /another full suite holds/, // single-flight lock-WAIT (gap-runner-no-kill-on-red-and-no-max-runtime-hang-leak AC4): a PRIOR run's flock blocked this test.sh → 0 test output → NO correctness conclusion → aborted, not failed
   /single-flight lock; waited/, // same lock-WAIT message (both halves of the canonical line)
+  /__ENVFAIL__/, // 人 2026-08-12 裁定②: 共享 runCli() 助手把环境失败（SIGKILL/SIGTERM/EAGAIN/ENOMEM/无退出码）抛成 __ENVFAIL__ 标记 ⇒ 归 reason=infra-error（环境），不冒充产品红、不触发 stop-dispatch
 ];
 
 // ── suite child liveness guards (gap-runner-no-kill-on-red-and-no-max-runtime-hang-leak AC2/AC3) ────
@@ -1178,6 +1179,7 @@ export async function run(argv: string[]): Promise<number> {
   // conclusion — red + reason=aborted, NOT failed.
   let redDetected = false;
   let abortDetected = false;
+  let envFailDetected = false; // __ENVFAIL__ marker (runCli 助手抛的环境失败) ⇒ reason=infra-error, 不冒充产品红
   // ── suite-child liveness guards (gap-runner-no-kill-on-red-and-no-max-runtime-hang-leak AC2/AC3) ──
   // timedOut / hung are set by the max-runtime / silence timers below; both force a process-tree kill
   // so a hung suite can never leak the runner + flock. The terminal verdict maps them to reason=timeout
@@ -1465,6 +1467,15 @@ export async function run(argv: string[]): Promise<number> {
       process.stderr.write(
         `full-suite-runner: STATIC-CHECK violation detected on stream -> state=red reason=static-check (run still in progress)\n  ${line}\n`
       );
+    } else if (!redDetected && !envFailDetected && line.includes("__ENVFAIL__")) {
+      // 人 2026-08-12 裁定②: 环境失败（SIGKILL/SIGTERM/EAGAIN/ENOMEM/无退出码，runCli 助手抛的标记）
+      // ⇒ state=red reason=infra-error —— 不是产品失败，不触发 stop-dispatch（与 aborted 同语义，但
+      // 区分「环境」与「主动中止」）。
+      envFailDetected = true;
+      writeSuiteState({ state: "red", reason: "infra-error", ...base, finishedAt: null, durationMs: null });
+      process.stderr.write(
+        `full-suite-runner: ENV-failure marker (__ENVFAIL__) on stream -> state=red reason=infra-error (environment, NOT a product failure; no stop-dispatch)\n  ${line}\n`
+      );
     } else if (!redDetected && !abortDetected && isAbortLine(line)) {
       // AC5 reason axis (gap-suite-state-has-no-reason-axis-failed-aborted-infra AC1/AC3): an ABORT
       // marker on the stream (e.g. test.sh's internal resource-gate WAIT fail-closed — the suite
@@ -1572,13 +1583,13 @@ export async function run(argv: string[]): Promise<number> {
     );
   }
   const green =
-    !redDetected && !staticCheckDetected && !abortDetected && spawnError === null && exitCode === 0;
+    !redDetected && !staticCheckDetected && !abortDetected && !envFailDetected && spawnError === null && exitCode === 0;
   // No correctness conclusion (abort) iff: an abort marker was seen, OR the child was killed by a
   // signal (code null), OR it never spawned. A REAL failure conclusion (redDetected) — and now a
   // static-check conclusion (staticCheckDetected) — is never downgraded by an earlier abort marker:
   // both dominate (AC5: the failure conclusion stands).
   const noCorrectnessConclusion =
-    !redDetected && !staticCheckDetected && (abortDetected || childKilledBySignal || spawnError !== null);
+    !redDetected && !staticCheckDetected && (envFailDetected || abortDetected || childKilledBySignal || spawnError !== null);
   const reason: SuiteStateReason = redDetected
     ? "failed"
     : timedOut
@@ -1587,9 +1598,11 @@ export async function run(argv: string[]): Promise<number> {
         ? "hung" // silence guard fired (AC3) — the suite went silent, killed as hung
         : staticCheckDetected && !testPhaseStarted
           ? "static-check"
-          : noCorrectnessConclusion
-            ? "aborted"
-            : "failed";
+          : envFailDetected
+            ? "infra-error" // 人 2026-08-12 裁定②: 环境失败, 不冒充产品红
+            : noCorrectnessConclusion
+              ? "aborted"
+              : "failed";
   // AC4 candidate B — on a static-check red, failures[] carries the violation details (task + type),
   // each marked staticCheck:true so suite-state-trigger's classifyFailure routes them to the shared
   // gate. On a test-failure red, failures[] carries the real test failures (unchanged, AC5).

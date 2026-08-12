@@ -1437,6 +1437,23 @@ test("AC2 e2e — a RED suite STILL PRODUCING OUTPUT is NOT killed on red-grace;
   }
 });
 
+test("AC2 e2e — an __ENVFAIL__ marker (runCli helper's environment-failure throw) maps to reason=infra-error, NOT product-red (人 2026-08-12 裁定②)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-envfail-"));
+  // The fake suite's stderr carries the runCli helper's ENV_FAIL_MARKER throw (killed by SIGKILL).
+  const { f, dir } = fakeSuite('echo "__ENVFAIL__ killed by SIGKILL: ./bin/quay.js x" >&2; exit 0');
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    const s = readState(root);
+    assert.equal(s.state, "red", "an env failure still lands a red state (no correctness conclusion)");
+    assert.equal(s.reason, "infra-error", `an environment failure must be reason=infra-error, NOT a product red (got ${s.reason})`);
+    assert.ok(code !== 0, "runner exits non-zero on the infra-error");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("AC2 e2e — MULTIPLE failure lines each push into failures[] (manager 2026-08-10 15:2x: structurally capped at 1 before; now every failure records)", async () => {
   // r240 TAP reported fail=7 but failures[] held only the FIRST failure's name — the push sat inside
   // the !redDetected guard that flips true on line 1. This fake suite emits THREE not-ok lines; all
