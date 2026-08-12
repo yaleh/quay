@@ -48,12 +48,12 @@ extra:
 
 ## AC
 
-- [ ] AC1: 守卫存在，state=running 且触及断言面文件 ⇒ 拒提交（exit 非 0）+ 明确消息
-- [ ] AC2: fail-loud——state 文件缺失/null ⇒ 拒（不给看似合理的值）
-- [ ] AC3: 覆盖全部写入者（outer/manager/inner 的提交都过守卫）
-- [ ] AC4: 断言面集合从测试自声明判定对象聚合（非手工维护）
-- [ ] AC5: 负控制——重现 round 63 形态（inner 在 running 轮提交任务体）被拦住；round 60 形态（约定后 26s 提交）被拦
-- [ ] AC6: 既有测试全绿；`--for-task` scoped 门绿
+- [x] AC1: 守卫存在，state=running 且触及断言面文件 ⇒ 拒提交（exit 非 0）+ 明确消息
+- [x] AC2: fail-loud——state 文件缺失/null ⇒ 拒（不给看似合理的值）
+- [x] AC3: 覆盖全部写入者（outer/manager/inner 的提交都过守卫）
+- [x] AC4: 断言面集合从测试自声明判定对象聚合（非手工维护）
+- [x] AC5: 负控制——重现 round 63 形态（inner 在 running 轮提交任务体）被拦住；round 60 形态（约定后 26s 提交）被拦
+- [x] AC6: 既有测试全绿；`--for-task` scoped 门绿
 
 ## Definition of Done
 
@@ -63,6 +63,50 @@ extra:
 
 ## Touches
 
-- plugin/scripts/precommit-guard.ts（守卫脚本：commit 包装 或 --install-hook 接 .git/hooks/pre-commit）(new)
-- plugin/scripts/judged-object-registry.json（断言面注册表，A0b③ 生成；缺失/空回退全 tracked——fail-closed）(new)
-- tasks/gap-precommit-guard-running-round-rejects-assertion-surface-commits.md（自身）
+- plugin/scripts/precommit-guard.ts (new)
+- plugin/scripts/judged-object-registry.json (new)
+- plugin/scripts/capability-catalog.sh
+- docs/proposals/quay-product-outline.md
+- plugin/test/precommit-guard.test.mjs (new)
+- tasks/gap-precommit-guard-running-round-rejects-assertion-surface-commits.md
+
+> 注（new-script 登记补全，gap-new-script-touches-missing-inventory-catalog-registration）：本任务
+> 声明新建 `plugin/scripts/precommit-guard.ts`，依 AC3 必须同时在 Touches 授权登记文件
+> `plugin/scripts/capability-catalog.sh`（AC1c 五行声明）与 `docs/proposals/quay-product-outline.md`
+> （§6 DELIVERY-INVENTORY 快照再生成 scripts 216→218），否则 scoped 静态层以
+> `touches-missing-registration` 拒派。测试文件随 basename 配对被选中。
+
+## Evidence
+
+**机制**：`plugin/scripts/precommit-guard.ts` 以共享 pre-commit 钩子落地（`--install-hook` 写
+`<git-dir>/hooks/pre-commit` → 覆盖 outer/manager/inner 及名单之外的一切提交者，AC3），也可作为
+commit 包装脚本直接运行。判定读 `.quay/full-suite-state.json`：`state=running` 且本次提交触及断言面
+⇒ 拒（exit 1）+ 预检清单；state 文件缺失/state 字段 null ⇒ 拒（fail-loud，AC2）。断言面 =
+`plugin/scripts/judged-object-registry.json` 的 patterns（A0b③ 聚合，守卫只读、非手工维护）；
+缺失/空 ⇒ 回退**收窄面** `tasks/**` + `plugin/loop/**` + `scripts/test.sh` 的 `@static-object` 聚合
+（外层裁定 B 修正：全 tracked 回退 4113/4316 实测不可用；聚合机械覆盖 orchestration/*-tick-core.md
+——12a6b18b manager 亲手闯的类，fail-closed 保留，AC4）。`--allow-dirty-round` /
+`QUAY_ALLOW_DIRTY_ROUND=1` 显式覆盖（有记录可追责，AC6）。
+
+**scoped 验证**（worktree `gap-precommit-guard-running-round-rejects-assertion-surface-commits`，
+`scripts/test.sh --for-task gap-precommit-guard-running-round-rejects-assertion-surface-commits`）：
+scoped 静态层（capability-catalog / delivery-inventory / task-contract / adr016 / …）全过；
+测试 **33/33 pass / 0 fail**（含 `precommit-guard.test.mjs` 18 项 + `capability-catalog.test.mjs`）。
+守卫为单文件自包含（无 gate-script-base 依赖），已实测真实 `git commit` 过已安装钩子：running 轮 +
+任务体 ⇒ 拒（exit 1）+ 预检清单；`QUAY_ALLOW_DIRTY_ROUND=1` ⇒ 放行（commit 落地）。
+
+**负控制样例**（`plugin/test/precommit-guard.test.mjs`，temp git repo fixture）：
+- round 63 形态（inner 在 running 轮提交任务体）⇒ `running-round-assertion-surface`，exit 1 ✓
+- round 60 形态（start 后 26s 提交）⇒ 同拒（state=running 即信号，不依赖 elapsed）✓
+- fail-loud：state 文件缺失 ⇒ `state-file-missing`；state=null ⇒ `state-null`，均 exit 1 ✓
+- 回退收窄（ruling B）：registry 缺失/空 ⇒ tasks/** + plugin/loop/** 命中被拒；
+  `README.md`（面外）放行；`scripts/test.sh` 的 @static-object（orchestration/manager-tick-core.md）
+  经聚合进入回退面并被拒 ✓
+- 覆盖：`--install-hook` 写共享钩子（含指纹）、拒覆写无关钩子、`--uninstall-hook` 移除 ✓
+- 显式覆盖：`--allow-dirty-round` 与 `QUAY_ALLOW_DIRTY_ROUND=1` 均放行（reason 可追责）✓
+- 终态：state=green ⇒ 触及断言面也放行 ✓
+
+**Touches 补全说明**：原 Touches 只列两个新文件 + 自身，未列 new-script 登记文件
+（`capability-catalog.sh` / `docs/proposals/quay-product-outline.md`），scoped 静态层据此以
+`touches-missing-registration` 拒派。已按 gap-new-script-touches-missing-inventory-catalog-registration
+AC3 补全（本文件 `## Touches` 段 + 两登记文件 + 测试文件），这是该 gap 类的既定修复（补 Touches）。

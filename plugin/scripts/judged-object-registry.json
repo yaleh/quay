@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "generatedBy": "A0b③ judged-object aggregation (gap-check-set-after-change-diff-nameonly-intersect-judged-objects) — NOT a hand-maintained whitelist. The pre-commit guard (plugin/scripts/precommit-guard.ts) READS this; when this file is missing/empty/unparseable the guard falls back to the narrowed surface tasks/** + plugin/loop/** + scripts/test.sh @static-object aggregate (outer ruling B — not all tracked files; the all-tracked fallback was measured unusable at 4113/4316).",
+  "note": "断言面 = 全量套件轮判定对象（修改会使 running 轮结论不可用）的文件集合。种子为套件实际读取/判定的宽面；A0b③ 机制就绪后重新生成精化（守卫 priority #1 不等它）。",
+  "patterns": [
+    "packages/**",
+    "plugin/**",
+    "scripts/**",
+    "tasks/**",
+    "docs/**",
+    "docs-managed/**",
+    "experiments/**",
+    "orchestration/**",
+    "adr/**",
+    ".claude/**",
+    ".github/**",
+    "milestones/**",
+    "measurements/**",
+    "README.md",
+    "CLAUDE.md",
+    "AGENTS.md",
+    "package.json",
+    "package-lock.json",
+    "tsconfig.json"
+  ]
+}
