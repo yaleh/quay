@@ -206,6 +206,23 @@ sync=0
 deliver=0
 merge_mode=0
 reconcile=0
+
+# gap-suite-leaks-live-claude-sessions — stop every claude session whose --settings workspace is under
+# the given worktree path, BEFORE the worktree is removed (注销 worktree 前停其会话). A teardown that
+# only `git worktree remove`s the dir leaks any live claude session launched inside it (the
+# manager-productization2 119h orphan pair). Best-effort: a missing orphan-session-check.ts or a
+# transient process race never fails the removal.
+stop_sessions_under_worktree() {
+  local wt="${1:-}"
+  [ -n "${wt}" ] || return 0
+  if [ ! -f "${SCRIPT_DIR}/orphan-session-check.ts" ]; then
+    echo "integration-batch-merge: WARNING orphan-session-check.ts not found at ${SCRIPT_DIR}/orphan-session-check.ts — sessions under ${wt} not stopped (leak risk)" >&2
+    return 0
+  fi
+  node --no-warnings --experimental-strip-types "${SCRIPT_DIR}/orphan-session-check.ts" --kill-workspace "${wt}" >/dev/null 2>&1 \
+    || true
+  return 0
+}
 # ── runId (gap-task-telemetry-6-percent-join) ───────────────────────────────────────────────────────
 # When a REAL merge commit is created (--merge on divergence), `--run-id <id>` embeds the runId in
 # the commit message (`(runId: <id>)`) — so a fan-in merge's subject carries the runId, making the
@@ -857,6 +874,9 @@ real_merge() {
   tmp_wt="$(mktemp -d "${TMPDIR:-/tmp}/integration-batch-merge.XXXXXX")" || { echo "integration-batch-merge: mktemp failed" >&2; return 1; }
 
   cleanup() {
+    # gap-suite-leaks-live-claude-sessions: 注销 worktree 前先停其会话 — a teardown that only removes
+    # the dir leaks live claude sessions launched inside the worktree. Stop them first.
+    stop_sessions_under_worktree "${tmp_wt}"
     git -C "${repo_root}" worktree remove --force "${tmp_wt}" >/dev/null 2>&1 || true
     rm -rf "${tmp_wt}" >/dev/null 2>&1 || true
   }
