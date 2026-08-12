@@ -1227,7 +1227,9 @@ plugin bundle（`scripts` 117 · `gate-scripts` · `skills` 13 · `probes` · `l
 |---|---|---|
 | **① 新鲜度** | **达成** | `.quay/develop-deliver-state.json`：`lastDelivered=6386ff86…`、`hosts {B:200, C:200}`、`timestamp 2026-08-11T23:39:41Z`；**`develop 领先 lastDelivered = 0`**。（旧 release 口径下此项为「落后 2335」——**口径一换，同一天的同一份产物从最差项变成达成项**。） |
 | **② 完整性** | **达成** | ad-arm1 `archguard/.quay/quay-init-state.json` 记 **124 个 laidFiles**（scripts 94 / probes 5 / orchestration 11 / docs 6 / .quay 5 / .claude 3）；落盘实测 `plugin/scripts` **57 个**、tick 文档 **4 份**、skills 2 个，且 `quay-init --loop` **真正驱动起了循环**（8 小时、7 个任务）。**关键前提已核实：该机器上没有 quay 开发树**（`ls -d /home/yale/work/quay` 为空）⇒ 不是亲代自验。 |
-| **③ 可用性** | **未达成（原因已具名）** | 两层循环确实在第三方项目上真跑了（8h / 7 任务 / 3 处真实产品代码变更），**但没有任何一个任务是从 `todo` 起始的**——`git log --diff-filter=A` 逐条查 TASK-81..87 首次入库状态，**7 条全部 `status=ready`**。根因不在循环，在配置：archguard 的 `.quay/config.yml` 写着 **`default_task_status: ready`** ⇒ **`todo` 在那个项目上从不出现，author→ready 闸从未被执行过一次**。 |
+| **③ 可用性** | ~~未达成（原因已具名）~~ **达成（03:5xZ 更正，见下）** | ~~两层循环确实在第三方项目上真跑了（8h / 7 任务 / 3 处真实产品代码变更），**但没有任何一个任务是从 `todo` 起始的**——`git log --diff-filter=A` 逐条查 TASK-81..87 首次入库状态，**7 条全部 `status=ready`**。根因不在循环，在配置：archguard 的 `.quay/config.yml` 写着 **`default_task_status: ready`** ⇒ **`todo` 在那个项目上从不出现，author→ready 闸从未被执行过一次**。~~ |
+
+**⚠️ 2026-08-12 03:5xZ 更正（本表这一行是我自己的采样错误，已在 `manager-tick-log.md` 03:5xZ 行认领并更正）**：上面「未达成」的判定只查了 `TASK-81..87` 这 7 条（人当时问「7 个任务用时多少」给定的采样范围），**把该范围的结论当成了总体结论**——硬规则 5（来源完备性）字面要求我知道，却没意识到这次的输入范围不是全体。改用 `git log --diff-filter=A` 逐条查 archguard **全部 61 条**任务的首次入库状态：**28 条**（TASK-30/31/53-68/70-80）确实 `todo` 起始且已 `done`，且是在一台**无 quay 开发树**的机器上、用 `--deliver` 的 build 跑的（sha256 逐文件比对已证）。**⇒ AC16③ 早已达成，远在这次「关两个堵点」之前**；`default_task_status: ready` 这条配置**确实使新任务不走闸**，但「零覆盖」是错的说法——历史上 28 条走过。outer 于 07:3xZ 在 `outer-035449-ack` 中独立确认（「双确认」）。**第三条独立验证路径**（继 orangevps 实机、archguard 28-task 之后）：`gap-quay-has-never-self-hosted-its-own-cold-start` compound（2026-08-12 11:28Z，quay 用自己 ship 的 `quay:cold-start` 冷启动了自己，`self_certify=1`，零 operator 诊断）。**AC16 三条至此全部达成，已双确认+一次自我更正+一次独立第三方路径印证。**
 
 ### 【已裁定】AC16① 判据换形状 —— outer 2026-08-12 01:36Z
 
