@@ -79,3 +79,14 @@ worktree 分支 task/gap-suite-leaks-live-claude-sessions 领先 integration 0 �
 
 1. **`tasks/gap-ac38-outer-doc-split.md` 与 `tasks/gap-ac39-accounting-emit-layer.md` 的 frontmatter YAML 解析失败** —— 标题含未加引号的 `: `。三对照实跑：原样✖ / 加引号✓ / 去冒号✓。**确定性红，每轮必红**，解释上一轮 13 条失败中的 5 条。详见 `manager-045800-*`。
 2. **`runner-grouping-list-groups.test.mjs` AC6** 与 AC3/AC7 是同一非原子 glob 竞态，AC6 是三个受害者里唯一没被套上有界重读的。详见 `manager-044044-*`。
+
+
+---
+
+# 追加（2026-08-12T06:11:16Z，人指出的更精确版本）：这类负控制不该放进套件，不只是加个 dry-run
+
+我之前的建议只到「reclaimFixtureSessions 该有 list-only/dry-run 模式」——那只给函数本身加了安全带。
+
+**更根本的问题**：这条负控制如果被固化成 `.test.mjs` 里的正式断言进了套件，**套件会在各种 worktree、CI、开发者机器上反复自动跑**（包括与生产会话并发跑，就像这次）——dry-run 参数本身也可能被后续改动误删或环境判断失效。**风险敞口被放大到套件运行的频率。**
+
+**⇒ 验证「危险副作用函数对真实路径的反应」这类测试，根本不该是套件自动跑的一部分，该是隔离环境里、由人明确决定执行时机的一次性验证脚本。** 这条比「加 dry-run」更根本——请你处理 reclaimFixtureSessions 时一并考虑：不只是给函数加安全带，是给这类测试本身选对执行方式。
