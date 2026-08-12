@@ -426,7 +426,8 @@ export function generateRunId(taskId) {
 // mechanical path to its code. The bridge: a fan-in commit subject carries the telemetry runId at a
 // FIXED position — `merge: fan-in task/<id> (runId: fm-...)` — so the two record sets join on the
 // runId. These helpers (a) read the runId back out of a fan-in subject (the position-parseable
-// `(runId: …)` group) and (b) trace a telemetry taskId → its fan-in landing commit (AC3 traceability).
+// `(runId: …)` group), (b) trace a telemetry taskId → its fan-in landing commit (AC3 traceability),
+// and (c) resolve a fan-in commit by runId/taskId on a ref.
 
 /** The position-parseable runId group in a fan-in commit subject: `(runId: <filename-safe id>)`. */
 export const RUN_ID_IN_SUBJECT_RE = /\(runId:\s*([A-Za-z0-9._-]+)\)/;
@@ -442,6 +443,11 @@ export function extractRunIdFromCommitSubject(subject) {
   if (!subject) return null;
   const m = RUN_ID_IN_SUBJECT_RE.exec(String(subject));
   return m ? m[1] : null;
+}
+
+/** Escape a literal string for use as a git log --grep regex (runIds contain `.`/`-`). */
+export function escapeGrep(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 /**
@@ -474,6 +480,37 @@ export function findFanInCommitSha(root, taskId) {
   }
   return null;
 }
+
+/**
+ * Resolve the fan-in merge commit for a task execution: the most recent commit on `ref` whose
+ * subject carries the runId (position `(runId: <r>)`, the A6 merge-message convention), falling
+ * back to the task's fan-in merge subject (`merge: fan-in task/<taskId>`). Returns the commit sha,
+ * or null when unresolvable (no git / no matching commit).
+ *
+ * PURE READ — never writes. Best-effort: any git failure → null (fail-soft, never fabricated).
+ * @param {string} root
+ * @param {object} opts
+ * @param {string} [opts.taskId]
+ * @param {string|null} [opts.runId]
+ * @param {string} [opts.ref] — ref to scan (default "HEAD")
+ * @returns {string|null} — the fan-in commit sha, or null
+ */
+export function findFanInCommit(root, { taskId, runId, ref = "HEAD" } = {}) {
+  const patterns = [];
+  if (runId) patterns.push(escapeGrep(runId));
+  if (taskId) patterns.push(`merge: fan-in task/${taskId}`);
+  for (const pat of patterns) {
+    try {
+      const out = execFileSync("git", ["-C", root, "log", ref, "--format=%H", "--grep", pat, "-1"], {
+        encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"],
+      });
+      const sha = out.trim().split("\n")[0];
+      if (sha) return sha;
+    } catch (_) { /* no git / no match — try the next pattern */ }
+  }
+  return null;
+}
+
 
 // ── Event builders (A1a schema-shaped; pass validateEvent) ───────────────────────────────────────────
 
@@ -533,7 +570,7 @@ export function buildStartEvent({ taskId, runId, executionCwd, baseCommit = null
  *   allowed, REQUIRED_FIELDS unchanged.
  * @returns {object} — a plain object that A1a validateEvent accepts
  */
-export function buildEndEvent({ taskId, runId, outcome, executionCwd, baseCommit = null, recordedAtMs = Date.now(), reconcileReason = null, fanInCommitSha = null }) {
+export function buildEndEvent({ taskId, runId, outcome, executionCwd, baseCommit = null, recordedAtMs = Date.now(), reconcileReason = null, candidateCommit = null }) {
   return {
     schemaVersion: SCHEMA_VERSION,
     runId,
@@ -547,7 +584,7 @@ export function buildEndEvent({ taskId, runId, outcome, executionCwd, baseCommit
     executionCwd: executionCwd ?? process.cwd(),
     worktreePath: null,
     baseCommit,
-    candidateCommit: null,
+    candidateCommit,
     outcome,
     waitReason: null,
     resourceClaim: null,
@@ -557,7 +594,7 @@ export function buildEndEvent({ taskId, runId, outcome, executionCwd, baseCommit
     recordedAtMs,
     eventKind: "end",
     reconcileReason,
-    fanInCommitSha,
+    fanInCommitSha: candidateCommit,
   };
 }
 
@@ -940,7 +977,10 @@ export function aggregate(events, { sinceMs = null, nowMs = null, haltEvents = n
       } else {
         // runId carried on completed pairs so the reverse-direction slot detector
         // (gap-closed-bracket-leaves-live-agent-consuming-slots) can probe the executor process.
-        tasks.push({ taskId: rec.taskId, runId: rec.runId, minutes, outcome: end.outcome });
+        // fanInCommit (gap-task-telemetry-6-percent-join): the fan-in merge commit sha recorded on
+        // the end event (candidateCommit) — the mechanical taskId → git branch traceability link
+        // that turns the 6% telemetry/git join into a full one.
+        tasks.push({ taskId: rec.taskId, runId: rec.runId, minutes, outcome: end.outcome, fanInCommit: end.candidateCommit ?? null });
       }
     } else if (end && !rec.start) {
       if (sinceMs != null && end.recordedAtMs < sinceMs) continue;
@@ -1464,7 +1504,10 @@ function printHumanReport(report, aggFile) {
   if (report.since) console.log(`since: ${report.since}`);
   console.log(`completed tasks: ${report.tasks.length}`);
   for (const t of report.tasks) {
-    console.log(`  ${String(t.taskId).padEnd(40)} ${t.minutes.toFixed(1).padStart(8)}m  ${t.outcome ?? "null"}`);
+    // fanInCommit (gap-task-telemetry-6-percent-join): the fan-in merge commit sha, when the end
+    // event recorded one — the mechanical taskId → git traceability link.
+    const fanPart = t.fanInCommit ? `  ${String(t.fanInCommit).slice(0, 12)}` : "";
+    console.log(`  ${String(t.taskId).padEnd(40)} ${t.minutes.toFixed(1).padStart(8)}m  ${t.outcome ?? "null"}${fanPart}`);
   }
   console.log(`mean minutes/task: ${report.meanMinutes.toFixed(2)}`);
   console.log(`median minutes/task: ${report.medianMinutes.toFixed(2)}`);
@@ -1537,6 +1580,7 @@ const usage = `fast-mode-telemetry.ts — fast-mode (direct) execution metering 
 Usage:
   node --experimental-strip-types fast-mode-telemetry.ts --task-start --taskId <id> [--root <dir>]
   node --experimental-strip-types fast-mode-telemetry.ts --task-end --taskId <id> --runId <r> --outcome <done|needs-human|abandoned|deferred> [--fanInCommit <sha>] [--root <dir>]  (--fanInCommit overrides the auto-looked-up fan-in commit sha)
+  node --experimental-strip-types fast-mode-telemetry.ts --run-id-for --taskId <id> [--root <dir>]     (PURE READ — the open bracket's runId for the A6 fan-in merge message)
   node --experimental-strip-types fast-mode-telemetry.ts --halt-start [--atMs <iso>] [--reason <str>] [--root <dir>]   (record a .halt placement)
   node --experimental-strip-types fast-mode-telemetry.ts --halt-end   [--atMs <iso>] [--root <dir>]                    (record a .halt removal)
   node --experimental-strip-types fast-mode-telemetry.ts --report [--since <iso>] [--json] [--root <dir>]   (PURE READ — never writes)
@@ -1626,6 +1670,56 @@ async function loadAndAggregate(root, sinceArg) {
 }
 
 /**
+ * FAST slot view (QUAY_TELEMETRY_FAST_SLOTS=1) — the occupancy.in_flight source accounting-emit.ts's
+ * autoOccupancy uses (task gap-ac39-accounting-emit-layer, AC3: occupancy.in_flight 三层统一).
+ *
+ * The full `loadAndAggregate` is heavy in a large workspace: it annotates EVERY task's throughput
+ * with git history lookups (makeFirstKnownCommitMsByTask — measured ~20s at 369 tasks) and
+ * reverse-scans every closed bracket for closed-but-live agents (detectClosedButLive — ~10s). Slot
+ * VISIBILITY only needs the open-bracket reconcile (few brackets) + non-task subagents; both heavy
+ * annotations are irrelevant to `realConcurrency`, the number the accounting-emit occupancy reads.
+ * Skipping them makes the per-tick in_flight read ~0.6s instead of ~30s.
+ *
+ * Output contract is a SUBSET of the full --slots view with the same core fields: realInFlight /
+ * realConcurrency / reconcileCompliant are computed identically; `closedButLive` is empty (the
+ * reverse-dimension scan is the expensive part and does not change realConcurrency) and
+ * `occupiedSlots` = realConcurrency. PURE READ — never writes.
+ */
+async function loadSlotsFast(root) {
+  const events = [];
+  for await (const e of readAllEvents(root)) events.push(e);
+  const haltEvents = readHaltEvents(root);
+  // firstKnownCommitMsByTask: null → aggregate skips the per-task git history (AC7 annotation is a
+  // throughput nicety, irrelevant to slot visibility; the code is null-safe at line "firstCommitMs =
+  // firstKnownCommitMsByTask ? ... : null").
+  const report = aggregate(events, { nowMs: Date.now(), haltEvents, firstKnownCommitMsByTask: null });
+  let reconcilable = [];
+  let realInFlight = report.inProgress.length;
+  try {
+    const { closed } = reconcileInFlight(report.inProgress, {
+      executorGone: makeDefaultExecutorGone(root),
+      firstKnownCommitMs: () => null,
+    });
+    reconcilable = closed;
+    realInFlight = report.inProgress.length - closed.length;
+  } catch (_) {
+    reconcilable = [];
+    realInFlight = report.inProgress.length;
+  }
+  return {
+    report: {
+      generatedAt: new Date().toISOString(),
+      since: null,
+      ...report,
+      reconcilable,
+      realInFlight,
+      closedButLive: [],
+      occupiedSlots: realInFlight,
+    },
+  };
+}
+
+/**
  * CLI main. @param {string[]} argv — process.argv @returns {Promise<number>} exit code
  */
 export async function main(argv) {
@@ -1675,8 +1769,10 @@ export async function main(argv) {
     // Fan-in commit sha (gap-task-telemetry-6-percent-join AC3): `--fanInCommit <sha>` overrides;
     // otherwise auto-lookup the task's fan-in merge commit (best-effort — null when never fan-in'd
     // or git unavailable, so a needs-human/abandoned/deferred close records null, not a wrong sha).
-    const fanInCommitArg = getArgValue(args, "--fanInCommit");
-    const fanInCommitSha = fanInCommitArg ?? findFanInCommitSha(root, taskId);
+    let fanInCommit = getArgValue(args, "--fanInCommit") ?? null;
+    if (fanInCommit == null) {
+      fanInCommit = findFanInCommit(root, { taskId, runId }) ?? findFanInCommitSha(root, taskId);
+    }
     const event = buildEndEvent({
       taskId,
       runId,
@@ -1684,7 +1780,7 @@ export async function main(argv) {
       executionCwd: process.cwd(),
       baseCommit: getBaseCommit(root),
       recordedAtMs: Date.now(),
-      fanInCommitSha: fanInCommitSha ?? null,
+      candidateCommit: fanInCommit,
     });
     try {
       writeEvent(event, root);
@@ -1692,7 +1788,26 @@ export async function main(argv) {
       console.error(`fast-mode-telemetry: ${e.message}`);
       return 1;
     }
-    console.log(`fast-mode-telemetry: end event written for ${taskId} (runId ${runId}, outcome ${outcome})`);
+    console.log(`fast-mode-telemetry: end event written for ${taskId} (runId ${runId}, outcome ${outcome}${fanInCommit ? `, fanInCommit ${fanInCommit}` : ""})`);
+    return 0;
+  }
+
+  // --run-id-for (gap-task-telemetry-6-percent-join): PURE READ — print the OPEN bracket's runId
+  // for one taskId, or nothing when no bracket is open. The A6 fan-in step uses this to build the
+  // runId-bearing merge message (`merge: fan-in task/<id> (runId: <r>)`) — the runId the inner
+  // generated at --task-start, recoverable here without the caller having held onto it (robust
+  // against crash-restart, same rationale as --close-task). Never writes a file.
+  if (args.includes("--run-id-for")) {
+    const taskId = getArgValue(args, "--taskId");
+    if (!taskId) {
+      console.error("fast-mode-telemetry: --run-id-for requires --taskId <id>");
+      return 1;
+    }
+    const events = [];
+    for await (const e of readAllEvents(root)) events.push(e);
+    const report = aggregate(events, {});
+    const open = report.inProgress.find((p) => p.taskId === taskId);
+    console.log(open && open.runId ? open.runId : "");
     return 0;
   }
 
@@ -1872,8 +1987,17 @@ export async function main(argv) {
       }
     }
     let reportWithMeta;
+    // Fast slot view (QUAY_TELEMETRY_FAST_SLOTS=1): the per-tick occupancy.in_flight source
+    // (accounting-emit.ts autoOccupancy). Skips the per-task git-history + closed-but-live scans
+    // (~30s → ~0.6s in a large workspace) — both irrelevant to realConcurrency, the number the
+    // accounting-emit occupancy reads. Same core slot fields; closedButLive is empty by design.
+    const useFast = process.env.QUAY_TELEMETRY_FAST_SLOTS === "1";
     try {
-      ({ report: reportWithMeta } = await loadAndAggregate(root, null));
+      if (useFast) {
+        reportWithMeta = (await loadSlotsFast(root)).report;
+      } else {
+        ({ report: reportWithMeta } = await loadAndAggregate(root, null));
+      }
     } catch (e) {
       console.error(`fast-mode-telemetry: ${e.message}`);
       return 1;

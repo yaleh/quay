@@ -1922,6 +1922,13 @@ export async function run(argv: string[]): Promise<number> {
   } catch {
     // best-effort — a measure-history failure never fails the suite verdict
   }
+  // gap-suite-leaks-live-claude-sessions — process reclaim does NOT live in the runner: it was
+  // removed (2026-08-12, manager 116a770c ruling) because its gate compared `root` against this
+  // runner's own REPO_ROOT (self), not against the live-loop checkouts, so a worktree runner with
+  // `--root <main-repo>` passed the gate and killed the very sessions driving the loop. Fixture
+  // teardown process reclaim is now owned by the limited-path callers: provision-verify-worktree.sh
+  // --teardown and integration-batch-merge.sh (both scoped to an explicit worktree path). Never
+  // re-add an automatic reclaim here — the negative control must not run in the live suite path.
   process.stderr.write(
     `full-suite-runner: FINAL state=${finalState.state}${finalState.reason ? ` reason=${finalState.reason}` : ""} durationMs=${durationMs} exit=${exitCode}\n`
   );

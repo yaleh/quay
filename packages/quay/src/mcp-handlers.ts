@@ -102,7 +102,7 @@ export function registerTaskHandlers(
         "Proxies the Provider's own task_list tool via Core's MCP client fan-out.",
       inputSchema: {
         provider: z.string().optional().describe("Provider id to query (defaults to the first-enabled Provider in .quay/config.yml)."),
-        status: z.string().optional().describe("Filter by task status (e.g. 'todo', 'ready', 'done', 'needs-human'). Omit to include all statuses."),
+        status: z.string().optional().describe("Filter by task status (e.g. 'todo', 'ready', 'done', 'needs-human', 'superseded'). Omit to include all statuses."),
         label: z.union([z.array(z.string()), z.string()]).optional().describe("Array of label strings for AND-join filtering (all specified labels must be present). A single string is accepted for backward compatibility. Omit to include all tasks regardless of labels."),
         prefix: z.string().optional().describe("Filter by task-id prefix, case-insensitive (e.g. 'QX' returns QX-001, QX-002, ...). Reduces response size for large multi-experiment workspaces."),
         search: z.string().optional().describe("Full-text search: case-insensitive substring match on task title + body content. Markdown heading lines (e.g. ## Proposal, ## Plan) are excluded from the body match to avoid template boilerplate false positives."),
@@ -209,7 +209,7 @@ export function registerTaskHandlers(
         provider: z.string().optional().describe("Provider id to write to (defaults to the first-enabled Provider in .quay/config.yml)."),
         id: z.string().describe("Task id to write/patch (e.g. 'QX-029')."),
         title: z.string().optional().describe("New title. Omit to leave unchanged."),
-        status: z.string().optional().describe("New status ('todo', 'ready', 'needs-human', 'done'). Omit to leave unchanged."),
+        status: z.string().optional().describe("New status ('todo', 'ready', 'needs-human', 'done', 'superseded'). Omit to leave unchanged."),
         labels: z.array(z.string()).optional().describe("Replacement label array (replaces all existing labels). Omit to leave unchanged."),
         parent: z.string().nullable().optional().describe("Parent task id, or null to clear. Omit to leave unchanged."),
         children: z.array(z.string()).optional().describe("Replacement children array. Omit to leave unchanged."),

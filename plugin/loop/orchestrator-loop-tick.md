@@ -3,10 +3,38 @@
 **角色**：本项目的**外层**——双层持续开发的上层。内层是开发会话（tmux `$TMUX_SESSION`），它执行任务；
 外层观察它、消解它的停摆、必要时纠偏，并把真正需要人的事攒起来。
 
-**本文件是随 `quay-init --loop` 铺设的通用外层驱动**（铺到 `<workspace>/orchestration/orchestrator-loop-tick.md`，
-字节一致，配置驱动——与内层 tick 文档 `docs/analysis/fast-mode-loop-tick.md` 同一形态）。quay 自身网络的
-**本层状态**（工作分支两线、integration 作 checkout、项目列表、tmux 布局）在 quay 仓库的
-`orchestration/orchestrator-loop-tick.md` 副本；本模板是**任何新主机安装 quay 后都会得到的那一份**。
+> **模板参数（gap-install-rewrites-files-so-upgrade-cannot-tell-who-changed-them）**：本文件是随
+> quay 插件包分发的外层 tick 文档（铺到目标项目时是 `orchestration/orchestrator-loop-tick.md`，内层铺到
+> `docs/analysis/fast-mode-loop-tick.md`）。
+> `quay-init --loop` **原样铺出**（字节相同，不做文本替换）——目标项目的值（`repo_root` /
+> `test_command` / `tmux_session`）集中在一个配置文件 `.quay/config.yml` 的 `loop:` 节里，
+> 脚本与本 tick 在**运行时读取**它们，不在落地时烘焙。铺到目标项目时的位置：
+> `orchestration/orchestrator-loop-tick.md`（外层）/ `docs/analysis/fast-mode-loop-tick.md`（内层）。
+> 模板正文本体不含任何具体仓库路径、测试命令或 tmux 会话字面量。
+>
+> **目标项目值引用约定**：`REPO_ROOT` / `TEST_COMMAND` / `TMUX_SESSION` / `FORK_BASELINE` /
+> `MERGE_TARGET` 五个名字在本文件中指 `.quay/config.yml` `loop:` 节的对应值
+> （`repo_root` / `test_command` / `tmux_session` / `fork_baseline` / `merge_target`）。
+> 执行含这些名字的命令前，先读该文件把值代入——不要凭记忆。
+>
+> **工作分支模型（gap-two-layer-loop-tick-docs-hardcode-master-not-wired-to-existing-branch-model）**：
+> 工作分支名是**策略**（各项目自身 branch 模型现状），不是机制——本文件是下游项目经升级通道消费的
+> 共享模板。`FORK_BASELINE`（已验证基线）与 `MERGE_TARGET`（待验证汇入点）**默认都是 `master`**
+> （单线：从 master 分叉、合回 master——未做 branch cutover 的下游行为不变）；下游项目可在
+> `.quay/config.yml` `loop:` 节覆盖 `fork_baseline` / `merge_target`（两线模型）。**本模板不写死任何
+> 项目的具体分支取值**——quay 自身网络的两线取值（develop / integration）是本层实例状态，见 quay 仓库
+> `orchestration/orchestrator-loop-tick.md` 的「本层状态」节。含分支操作的命令先读这两个值代入，不要字面写死。
+>
+> **切分声明（AC38，2026-08-12 执行切分）**：本文件是**产品行为正本**（随 `quay-init --loop` 原样铺到
+> 目标项目 `orchestration/orchestrator-loop-tick.md`）。**切分边界**：**产品行为进 plugin / 本层实例状态
+> 留 orchestration**——与 manager 层已按同判据切分（产品模板 vs quay 状态）同形。quay 自身网络的**本层
+> 状态**（工作分支两线、integration 作 checkout、项目列表、tmux 布局、以及每一条判据的实测与代价）在
+> quay 仓库的 `orchestration/orchestrator-loop-tick.md` 副本。冷启动 skill 与 tick 核引用同一批行为文件
+> （AC3）。**机械判据（AC38 Contract）**：对「本文件」与「本层状态副本
+> `orchestration/orchestrator-loop-tick.md`」跑 `comm -3 <(sort <本文件>) <(sort <orchestration 副本>) | wc -l`
+> 即两份独有行数——切分后本文件（产品模板）独有 = 产品行为、orchestration 副本独有 = 本层实例状态，
+> 各自主题单一。（`plugin/loop/` 是随包分发路径、不被 quay-init 铺出，故文档正文不写该字面量——铺到
+> 目标项目后本文件即 `orchestration/orchestrator-loop-tick.md`，路径以落地为准。）
 
 **网络特有值不是本文件的常量**：项目列表、仓库路径、tmux 窗口名、工作分支名是外层自己的运行上下文——
 按本网络实际情况代入，**不要照抄任何示例**。目标项目的值集中在一个配置文件 `.quay/config.yml` 的 `loop:`
@@ -54,15 +82,15 @@
 cd "$REPO_ROOT"    # REPO_ROOT 见 .quay/config.yml loop.repo_root（或 git rev-parse --show-toplevel）
 ```
 
-**启动方式**：本外层会话必须是用**铺下的 `bash plugin/scripts/quay-launch.sh outer`** 起的（带
-`--settings`、窗口名按本网络约定，如 `<项目>-outer`），内层必须是用
-`bash plugin/scripts/quay-launch.sh inner` 起的。**不是手敲一行 `claude`。** 冷启动检查的是
-「铺下来的 launch 被用起来」——若你的窗口不是这么起的，先经 launcher 重起再继续；
-`quay-launch.sh --dry-run` 打印每个角色将得到的命令。launch 配置在
-`<root>/.claude/launch.settings.json`（`quay-init --loop` 铺默认模板，按项目改 model/env）。
-**从裸机到会话是 ONE COMMAND**：`plugin/scripts/session-bootstrap.sh <root> <layout>`（inner/outer 或
-full layout）——它创建每个命名窗口（幂等）、经 checked-in launcher 起每个角色的 Claude Code 进程、
-验证进程真的活着（fail-closed），冷启动 skill 的「inner 会话可达」前置由此满足。
+**启动方式（F4，measured 2026-08-11）：** 本外层会话必须是用**铺下的
+`bash plugin/scripts/quay-launch.sh outer`** 起的（带 `--settings`、窗口名 `quay-outer`），内层必须是用
+`bash plugin/scripts/quay-launch.sh inner` 起的（窗口名 `quay-inner`）；裸机一步是
+`bash plugin/scripts/session-bootstrap.sh <root> inner/outer`。**不是手敲一行 `claude`。** 冷启动检查的是
+「铺下来的 launch 被用起来」——若你的窗口不是这么起的（无 `--settings`、或窗口名是 `inner` 而非 `quay-inner`），
+先经 launcher 重起再继续；`quay-launch.sh --dry-run` 打印每个角色将得到的命令。launch 配置在
+`<root>/.claude/launch.settings.json`（quay-init `--loop` 铺默认模板，按项目改 model/env）。窗口名
+（`quay-outer` / `quay-inner`）是**本项目拓扑的实例值**，随 `quay-init --loop` 铺到目标项目时由
+`loop.tmux_session` / 窗口约定代入——本模板不写死具体会话名。
 
 **1. 读机制与目标**（顺序有意）
 
@@ -331,11 +359,21 @@ node --no-warnings --experimental-strip-types plugin/scripts/manager-observation
   --since <上次审计的 ISO 时刻> --json
 ```
 
-- **会话目标显式，不猜**（`--self` 只作多会话并存时的回退，打印被选会话、须人工核对）。
-- **违规报出**：任何 PANE/TICKLOG/TRANSCRIPT/ANALYZE 命中 ⇒ 退出码 1、打印违规行；本 tick 停止后续
-  动作，按「授权边界」升级给人。**违反即停**——运行时约束不是建议。
-- **负控制（不误报）**：指向 inner 的 capture-pane 不计数；更上层→本层的发布不计数（那是交付，不属
-  本层→更上层方向）；基于转述的指控不被当作证据——**只数真实 tool 调用**。
+- **会话目标显式，不猜**（`--self` 只作多会话并存时的回退，打印被选会话、须人工核对；找不到/不唯一
+  就显式传 `--transcript` 本层会话 jsonl——**绝不猜**）。manager 的会话 id 用 `--config`/环境变量
+  `MANAGER_SESSION_ID` 给出，否则 `--self` 可能把 manager 当外层。
+- **违规报出（AC2）**：任何 PANE/TICKLOG/TRANSCRIPT/ANALYZE 命中 ⇒ 退出码 1、打印违规行；本 tick
+  停止后续动作，按「授权边界」升级给人（step 5）。**违反即停**——运行时约束不是建议。
+- **负控制（AC3，不误报）**：指向 inner 的 capture-pane（`-t "$TMUX_SESSION:inner"`，窗口名由
+  `loop.tmux_session` + `:inner` 约定代入——本网络实例见 orchestration 副本的「本层状态」节）
+  不计数；**manager→outer 的发布不计数**（`supervisor-bus-identity.sh inbox-summary`、读 manager 的
+  inbox/bus——那是 manager 向本层交付，不属于 C3 的 outer→manager 方向）；基于转述的指控（本层
+  transcript 里散文提到 manager）不被当作证据——**只数真实 tool 调用**。
+- **独立审计（方向合法）**：manager 对本层跑同一检查器（manager→outer 观测是合法方向，不受 C3
+  约束）——`node --no-warnings --experimental-strip-types <repo>/plugin/scripts/manager-observation-runtime-check.ts --root <repo> --session <本层会话id> --json`。
+- **交叉标注（AC4）**：本步是 `gap-manager-productization-five-constraints` AC4 文档层检查的**补充，
+  不是替换**——文档层管「tick 文档不得含创建/驱动/检查 manager 的步骤」，运行时约束管「运行时实际
+  观测/检查动作为零」，两条正交、都要。
 
 ## Tick 步骤
 
@@ -490,8 +528,8 @@ node --experimental-strip-types plugin/scripts/task-contract-check.ts --root <re
 
 ### 0d. 跨项目暂停/恢复：用 `.halt`
 
-各目标项目（本网络的 quay 项目清单，见 `.quay/config.yml` `loop.repo_root` 各自的项目根）各自的
-**唯一开关**就是仓库根的 `.halt`：
+**目标项目清单**（本层观察/暂停/优先级面向的每个项目）各自的**唯一开关**就是仓库根的 `.halt`：
+（目标项目清单是**本网络的实例值**——见 `orchestration/orchestrator-loop-tick.md` 本层状态节；本模板不写死）
 
 ```bash
 # 暂停
@@ -515,12 +553,19 @@ fail-closed**（权限/是目录/I/O 错误 → 判为已暂停）；空文件�
 ```bash
 bash plugin/scripts/halt-check.sh --for outer --json \
   --projects <目标项目根1,目标项目根2,...>
+# 每个目标项目的根见各自 .quay/config.yml loop.repo_root（目标项目清单 = 本网络实例值，不写死）
+# `.halt` 是控制面不是传感器：没有 `.halt` 只回答「下一个边界不停」，不回答「项目在不在跑」——
+# 一个没有循环在跑的项目同样打印这一行。措辞因此是「未暂停」而不是「运行中」。
 # 人读 fallback（兼容旧式）：
 for d in <目标项目根清单>; do
   printf "%-12s %s\n" "$(basename $d)" \
     "$([ -f "$d/.halt" ] && echo "暂停: $(head -c 80 $d/.halt)" || echo 未暂停)"
 done
 ```
+
+**优先级（人已裁定，各网络自定）**：**本仓高于其它目标项目**（各网络的优先级取值见本层状态节）。
+必要时暂停后两者以保本仓推进。**优先级由暂停哪个项目执行，不进跨项目令牌**——
+令牌只回答「现在谁能跑重型操作」，不回答「谁更重要」。
 
 ### 1. 观察（只读，不动手）
 
@@ -705,50 +750,71 @@ tick-log 与 commit message 沿用同一词汇：派发写「滚动派发」，�
      退出非 0、不移动任何 ref、needs-human——**绝不 blind --ours/--theirs**；
    - **measure**：`git merge-base --is-ancestor <$MERGE_TARGET> <$FORK_BASELINE>` 退出码（band = 0 =
      `$MERGE_TARGET` 的提交已全部并入 `$FORK_BASELINE`）；
-   - **invoke**：`git log --oneline $FORK_BASELINE..$MERGE_TARGET`（红窗期不空——`$MERGE_TARGET` 照常
-     接收，直到本轮 suiteGreen 才批量合）。
-   - **对象闸门**：批量合前校验**合并结果**，不是只验 tip——套件测的是 `$MERGE_TARGET` tip，批量合放行
-     的是 `$MERGE_TARGET` ⊕ `$FORK_BASELINE` 的合并结果。three-dot 判定（`git diff --name-only
-     <merge-base> <$FORK_BASELINE>`）：含代码文件（.ts/.js/.mjs/.sh）⇒ **fail-closed 不移动任何 ref、
-     报出文件清单**——该代码从未进过被测树；纯 .md/tasks 文件放行。
-   - **新鲜度闸门**：批量合前校验绿是**新鲜绿**，不是只读 `state==green`。两维都要求：**age**
-     （`finishedAt` 距今 ≤ `--freshness-window`，默认 3600s）且 **coverage**（suite 开始时间 ≥ 最近一次
-     `$MERGE_TARGET` fan-in 的 commit time）。任一违反 / state 非 green / 缺 state 文件 ⇒ **fail-closed
-     不移动任何 ref**。
-   - **`--reconcile`（主检出对账步骤由脚本提供，调用方不得各自发明）**：批量合是 REF-LEVEL
-     （update-ref CAS，「主检出从不被脚本触碰」）——对账步骤由脚本自己提供：ref 移动前先断言
-     `git status --porcelain` 为空，非空即失败退出并报出属主（不静默毁数据）；合后 `git reset --mixed
-     <新 tip>` 刷新 index，**绝不用 --hard**。
-   suiteGreen 为 false（red/aborted/缺 state）**或绿不新鲜** ⇒ **不跑批量合**——红窗期 `$MERGE_TARGET`
-   照常接收任务合并，只是 `$FORK_BASELINE` 不推进。**`--dry-run` 先跑**核对 pre-check 与 pending 面，
-   再实跑。
-3c. **跨机同步心跳（`sync-lag-check.sh`，兜底必跑）**：每个 tick（含轻触）**无条件**跑一次
-   `bash plugin/scripts/sync-lag-check.sh --push --branch "$FORK_BASELINE" --root "$REPO_ROOT"`——它问
-   「本地 `$FORK_BASELINE` 是否领先 `origin/$FORK_BASELINE`」，领先即 push（复用非强推/幂等的
-   `periodic-push-backup.sh` 本体），**不依赖任何完成事件**。这是兜底触发源：3b 的事件驱动路径负责
-   「land 收口同一轮内推送」的加速，本步负责「万一事件驱动漏了」的必跑保底。**同步落后量机械可读**：
-   `bash plugin/scripts/sync-lag-check.sh --json --branch "$FORK_BASELINE" --root "$REPO_ROOT"` 输出
-   `unpushed` / `behind` / `leads` 字段。push 失败（非快进 = 真分歧）只报告、不覆写、下一 tick 重试。
-3d. **观测者注册表心跳（`observer-registry.sh --audit`，兜底必跑）**：每个 tick（含轻触）**无条件**跑
-   一次 `bash plugin/scripts/observer-registry.sh --audit --json`——它问「有没有被登记下线的目标，且所有
-   观测者是否都正确报『已下线』」。被下线的目标写一次在 `orchestration/observer-registry.conf`（人/更
-   上层显式 `--register-offline`，观测者从不自行猜），所有观测者从同一处读。`--audit` 是负控制：对每个
-   offline 目标重建 4 个消费者读面，任一仍报旧状态即 `stale`、退出 1；**`stale_observer_reports` 必须
-   恒为 0（band）**。
-3.5 **批量合回 `$FORK_BASELINE`（两线模型的合并机制）**：`$MERGE_TARGET` 只从 `$FORK_BASELINE` 长出、
-   只往 `$FORK_BASELINE` 合回 ⇒ 永远是 `$FORK_BASELINE` 后代 ⇒ **fast-forward 无冲突**。`suiteGreen`
-   为 true 时，把 `$MERGE_TARGET` 快进合到 `$FORK_BASELINE`（本层共享检出保持在 `$MERGE_TARGET` 上，
-   `$FORK_BASELINE` 不是检出分支）：
-   ```bash
-   # ff 安全判据：$FORK_BASELINE 是 $MERGE_TARGET 的祖先（$MERGE_TARGET 是 $FORK_BASELINE 后代）
-   git merge-base --is-ancestor "$FORK_BASELINE" "$MERGE_TARGET" && git branch -f "$FORK_BASELINE" "$MERGE_TARGET"
-   ```
-   - **`--is-ancestor` 是硬前置**：`$FORK_BASELINE` 不是 `$MERGE_TARGET` 祖先（两线不变量被破坏）⇒
-     `git branch -f` 不执行，标 needs-human，**绝不自动合**。
-   - **红窗期（`state: red`）不做批量合回**——`$MERGE_TARGET` 照常接收 inner 的任务合并，`$FORK_BASELINE`
-     保持冻结，直到下一轮 verification-round 绿。
-   - **pending 窗口**：`git log --oneline $FORK_BASELINE..$MERGE_TARGET` 在红窗期应**非空**——那些正是
-     下一轮批量 fast-forward 的待验证合并。
+   - **invoke**：`git log --oneline $FORK_BASELINE..$MERGE_TARGET`（红窗期不空——`$MERGE_TARGET` 照常接收，
+     直到本轮 suiteGreen 才批量合）。
+   - **对象闸门（`integration-batch-merge.sh` 自带，`gap-batch-merge-gate-validates-tip-not-merge-result`）**：
+     批量合前校验**合并结果**，不是只验 tip——套件测的是 `$MERGE_TARGET` tip，批量合放行的是
+     `$MERGE_TARGET` ⊕ `$FORK_BASELINE` 的合并结果，两者只在 `$FORK_BASELINE` 侧无新提交时才等价。
+     three-dot 判定（`git diff --name-only <merge-base> <$FORK_BASELINE>` 即 `$FORK_BASELINE` 侧自分歧点
+     起的变更）：含代码文件（.ts/.js/.mjs/.sh）⇒ **fail-closed 不移动任何 ref、报出文件清单**——该代码
+     从未进过被测树，合并结果会带上未测代码；纯 .md/tasks 文件放行（2026-08-08 报告那 5 个文件）。与
+     stale-green 不同轴：那是时间轴（绿旧/树旧），这是对象轴（被测对象 ≠ 被放行对象）。`$FORK_BASELINE`
+     侧有代码提交需先 fan-in 到 `$MERGE_TARGET` 补测再批量合。
+   - **新鲜度闸门（`integration-batch-merge.sh` 自带，`gap-batch-merge-gate-reads-stale-green`）**：
+     批量合前校验绿是**新鲜绿**，不是只读 `state==green`——7b1ac3a1（2026-08-08 06:07:22）在前后零次
+     suite 的情况下拿 02:50→03:02 的三小时前旧绿当通行证，测的是完全不同的一批提交。两维都要求：
+     **age**（`finishedAt` 距今 ≤ `--freshness-window`，默认 3600s）且 **coverage**（suite 开始时间 ≥
+     最近一次 integration fan-in 的 commit time——fan-in 在 suite 之后落地说明绿没测过当前待合 tip）。
+     任一违反 / state 非 green / 缺 state 文件 ⇒ **fail-closed 不移动任何 ref**（「无有效绿」）。
+     与对象闸门不同轴：本闸门是**时间轴**（绿旧/树旧），对象闸门是**对象轴**（被测对象 ≠ 被放行对象）。
+   - **`integration-batch-merge.sh --reconcile`（主检出对账步骤由脚本提供，`gap-batch-merge-reconcile-destroys-uncommitted-work`）**：批量合是
+     REF-LEVEL（update-ref CAS，「主检出从不被脚本触碰」）——当主检出正检出的分支就是被推进的
+     `$FORK_BASELINE` 时，ref 被从底下换掉后 HEAD/index 变陈旧。**对账步骤由脚本自己提供，调用方不得各自发明**
+     （inner 曾发明 `git reset --hard HEAD`，2026-08-08 08:08:24 销毁了 manager 未提交编辑，真实数据丢失一次）：
+     ref 移动前先断言 `git status --porcelain` 为空，非空即失败退出并报出属主（不静默毁数据）；合后
+     `git reset --mixed <新 tip>` 刷新 index，**绝不用 --hard**（`--mixed` 默认即刷新 index 不碰工作区；
+     `--hard` 额外覆盖工作区 = 唯一有害那件，对账不需要它）。**Land 锁边界**：锁防交错不防销毁——
+     「拿到锁≠能动工作区」；共享主检出对账不得覆盖共存会话的未提交内容。
+   suiteGreen 为 false（red/aborted/缺 state）**或绿不新鲜（stale-green，见上 freshness gate）** ⇒ **不跑批量合**——
+   红窗期 `$MERGE_TARGET` 照常接收任务合并，只是 `$FORK_BASELINE` 不推进（结构性消除「红窗必须停派发」；
+   `$FORK_BASELINE` 永不从未验证树推进）。旧绿（7b1ac3a1 场景：3 小时前）同样不是有效绿——不批量合。
+   **`--dry-run` 先跑**核对 pre-check 与 pending 面，再实跑。
+3c. **跨机同步心跳（`sync-lag-check.sh`，兜底必跑——`gap-cross-machine-sync-has-no-mechanism-only-manual-pushes`）**：
+   每个 tick（含轻触）**无条件**跑一次 `bash plugin/scripts/sync-lag-check.sh --push --branch "$FORK_BASELINE" --root "$REPO_ROOT"`——
+   它问「本地 `$FORK_BASELINE` 是否领先 `origin/$FORK_BASELINE`」，领先即 push（复用非强推/幂等的
+   `periodic-push-backup.sh` 本体），**不依赖任何完成事件**。这是兜底触发源：3b 的事件驱动路径负责「land
+   收口同一轮内推送」的加速，本步负责「万一事件驱动漏了 / 跨机各自主检出悄悄积累」的必跑保底。
+   **同步落后量机械可读（AC3）**：`bash plugin/scripts/sync-lag-check.sh --json --branch "$FORK_BASELINE" --root "$REPO_ROOT"`
+   输出 `unpushed` / `behind` / `leads` 字段——「本地领先 origin 几笔」从此有测量，不再靠人 `git log`。
+   心跳读 `--json` 的 `leads` 或直接跑 `--push` 均等价（`--push` = 测 + 领先即推）。push 失败（非快进 =
+   真分歧）只报告、不覆写、下一 tick 重试——正是 fail-closed 兜底。
+3d. **观测者注册表心跳（`observer-registry.sh --audit`，兜底必跑——`gap-observer-registry-target-decommission-and-criterion-invalidation`）**：
+   每个 tick（含轻触）**无条件**跑一次 `bash plugin/scripts/observer-registry.sh --audit --json`——
+   它问「有没有被登记下线的目标，且所有观测者是否都正确报『已下线』」。被下线的目标写一次在
+   `orchestration/observer-registry.conf`（人/管理者显式 `--register-offline`，观测者从不自行猜），
+   所有观测者（os-anchor-watchdog / session-liveness 的 git-staleness、coverage 读面 / topology-check）
+   从同一处读。`--audit` 是 AC3 负控制：对每个 offline 目标重建 4 个消费者读面，任一仍报旧状态
+   （REPO-STALL / NOT-WATCHED / GONE / 陈旧拓扑 / watchdog 复活）即 `stale`、退出 1；
+   **`stale_observer_reports` 必须恒为 0（band）**。无新系统 crontab：观测者保留各自既有触发，
+   本表只是每次读取时先查；`--audit` 与 `sync-lag-check` 同款双触发源（tick 心跳 + land 后事件驱动）。
+3.5 **批量合回 `$FORK_BASELINE`（两线模型的合并机制，`gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point` AC3）**：
+    `$MERGE_TARGET` 只从 `$FORK_BASELINE` 长出、只往 `$FORK_BASELINE` 合回 ⇒ 永远是 `$FORK_BASELINE`
+    后代 ⇒ **fast-forward 无冲突**。`suiteGreen` 为 true 时，把 `$MERGE_TARGET` 快进合到
+    `$FORK_BASELINE`（本层共享检出保持在 `$MERGE_TARGET` 上，`$FORK_BASELINE` 不是检出分支；两线取值
+    见 `.quay/config.yml` `loop:` 节，quay 实例 = `fork_baseline: develop` / `merge_target: integration`，
+    机制详述见本层状态节引用的 branch-model SPEC）：
+    ```bash
+    # ff 安全判据：$FORK_BASELINE 是 $MERGE_TARGET 的祖先（$MERGE_TARGET 是 $FORK_BASELINE 后代）
+    git merge-base --is-ancestor "$FORK_BASELINE" "$MERGE_TARGET" && git branch -f "$FORK_BASELINE" "$MERGE_TARGET"
+    # 等价机械判据（helper CLI）：--is-ancestor <baseline> <merge-target> 输出 ancestor（exit 0）
+    ```
+    - **`--is-ancestor <$FORK_BASELINE> <$MERGE_TARGET>` 是硬前置**：`$FORK_BASELINE` 不是
+      `$MERGE_TARGET` 祖先（两线不变量被破坏）⇒ `git branch -f` 不执行，标 needs-human、按「红窗分诊」
+      处置，**绝不自动合**。
+    - **红窗期（`state: red`）不做批量合回**——`$MERGE_TARGET` 照常接收 inner 的任务合并（结构性消除
+      停派，`fast-mode-loop-tick.md` 步骤 2），`$FORK_BASELINE` 保持冻结，直到下一轮 verification-round 绿。
+    - **pending 窗口**：`git log --oneline "$FORK_BASELINE".."$MERGE_TARGET"` 在红窗期应**非空**（Contract
+      invoke）——那些正是下一轮批量 fast-forward 的待验证合并。
 4. **写轮次记录**：追加一行到 `.quay/verification-round.jsonl`：
    ```json
    {"round": <N>, "at": "<ISO 来自 date -u>", "suiteGreen": <bool>, "closed": ["<id>", ...]}
@@ -757,18 +823,20 @@ tick-log 与 commit message 沿用同一词汇：派发写「滚动派发」，�
    的判绿结果。**inner 的停止条件现在直接读 suite-state**（`fast-mode-loop-tick.md` 步骤 3），本文件的
    轮次记录只是收尾记账，不再被 inner 读取：
    - 缺 suite-state ⇒ inner 不阻塞（外层还没跑第一轮）；
-   - `state: red` ⇒ inner 停止派发 + 暂缓 fan-in，本层按「红窗分诊」处置。
+   - `state: red` ⇒ inner 停止派发 + 暂缓 fan-in，本层按「红窗分诊」处置（bisect 定位新引入还是既有；
+     定位到本轮 merge 引入就回退该 merge + 回退对应翻 done）。
    **收尾记账的机械判据**：本轮 `closed` 非空（≥1 收尾）⇒ **追加前**读 `.quay/verification-round.jsonl`
    尾部 round 得 `last`，断言 `N == last+1`；**追加后**再断言尾部 round == `N`。任一断言失败即**本轮
    tick 异常**，不得静默跳过。本轮 `closed` 为空（无收尾）⇒ **不要求写 jsonl**（负控制）。
 5. **落盘聚合**：本轮收尾后跑一次
    `node --no-warnings --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --snapshot`，
    否则被 git 跟踪的聚合文件不反映本轮结果。
-6. **真实下游安装/升级/冷启动验证（real-target verification）**：安装/升级/冷启动验证不再只跑合成夹具
-   ——每个验证轮对**真实下游**（各工作区自己的策略，`QUAY_REAL_TARGETS`）跑一次**只读**升级检查，报
-   结论：
+6. **真实下游安装/升级/冷启动验证（real-target verification，`gap-install-upgrade-verification-targets-real-downstream-workspaces`）**：
+   安装/升级/冷启动验证不再只跑 mkdtemp 合成夹具（`install-config-driven-e2e.test.mjs` 是 **synthetic** 线）——
+   每个验证轮对**真实下游**（真实目标清单 = 各工作区自己的策略，见 §1 的 `<目标项目根清单>` /
+   `QUAY_REAL_TARGETS`）跑一次**只读**升级检查，报结论：
    ```bash
-   for t in <真实目标根清单>; do
+   for t in <目标项目根1> <目标项目根2>; do     # 目标项目根清单见 orchestration 副本「本层状态」节
      bash plugin/scripts/real-target-verify.sh --target "$t"
    done
    ```

@@ -12,6 +12,13 @@
 **行号注（2026-08-09，`gap-fast-mode-loop-tick-duplicate-paste-blocks` 去重）**：源文档删 5 处重复粘贴段
 （L270/271、459-471 rebase、820-832 scheduler、956-961 步骤6+判绿三条件），1200→1173，`src:N` 前移 ≈27 行——**按内容核对不按行号**;去重是合并非删减,语义均保留 (任务体 Evidence)。
 
+**切分声明（AC38，2026-08-12）**：本核引用的同一批行为文件已按**产品行为 / 本层实例状态**切分——内层
+产品模板随 `quay-init --loop` 铺到 `docs/analysis/fast-mode-loop-tick.md`、外层产品模板铺到
+`orchestration/orchestrator-loop-tick.md`（两者正文不含 quay 特有实例值）、外层 quay 实例状态在 quay
+仓库自己的 `orchestration/orchestrator-loop-tick.md` 副本、管理者在 `orchestration/manager-loop-tick.md`。
+内层核的 src:N 基准仍是 `docs/analysis/fast-mode-loop-tick.md`（laid-down 副本，与产品模板同源）；外层
+产品行为引用外层模板落地副本，quay 网络特有值引用 quay 自己的 orchestration 副本。
+
 **立此文件的原因**(2026-08-09):执行路径与理由档案混在同一份千行文档里,一次重读无法当 checklist
 执行 ⇒ 实际被执行的是注意力当轮选中的部分。两次实证:outer 的「强制」步骤在 1095 行文档第 687 行、
 静默停摆 8.5 小时;nyf-semantic-judge 工作流(49c0be86)用完即弃——4 次 done-flip 真产出却因执行核无「调用」步骤而丢。
@@ -29,7 +36,7 @@
 | A3 | 先判本回合唤起源 | transcript 有 `<task-notification>` ⇒ 走槽位回填(**只重评估派发,不 fan-in、不写任务状态、不重排程**);否则走全流程 (src:287,290) |
 | A4 | 读队列文件 `docs/analysis/batch2-queue-state.md` | 与 `git log`/`git worktree list` 不一致 ⇒ **以 git 为准**并修正文件 (src:379) |
 | A5 | `bash plugin/scripts/supervisor-bus-identity.sh inbox-summary` | 有 `unread:` ⇒ 逐条进本轮决策;本步**只读不写回执** (src:385,389) |
-| A6 | Fan-in 已返回任务(**串行**) | 先 `git -C <wt> rebase $MERGE_TARGET` (src:449) → `git merge --no-ff task/<id>` 合回 `$MERGE_TARGET` (src:457) → `$TEST_COMMAND --for-task <id>` (src:473) → `git worktree remove` + `git branch -d` (src:476);rebase 冲突/merge 冲突/选中集非绿 ⇒ 回退、标 needs-human、**停止本 tick 后续合并与派发** (src:456,472,474);设了 `QUAY_CLAIM_REMOTE` ⇒ `release-task.sh` 释放认领 (src:481) |
+| A6 | Fan-in 已返回任务(**串行**) | 先 `git -C <wt> rebase $MERGE_TARGET` (src:449) → `git merge --no-ff task/<id> -m "merge: fan-in task/<id> (runId: <runId>)"` 合回 `$MERGE_TARGET` (**fan-in 提交必须带 runId**——`fast-mode-telemetry.ts --run-id-for --taskId <id>` 机械回读派发时记的 runId;`gap-task-telemetry-6-percent-join` 遥测 taskId→git 可回溯桥) (src:457) → `$TEST_COMMAND --for-task <id>` (src:473) → `git worktree remove` + `git branch -d` (src:476);rebase 冲突/merge 冲突/选中集非绿 ⇒ 回退、标 needs-human、**停止本 tick 后续合并与派发** (src:456,472,474);设了 `QUAY_CLAIM_REMOTE` ⇒ `release-task.sh` 释放认领 (src:481) |
 | A7 | `tmux capture-pane -p -t "$TMUX_SESSION" > .quay/last-pane.txt` → `inner-blocked-signal.ts --detect-stop --pane` | 停止条件的机械检查,**写盘是检查本身的后果**;命中任一 ⇒ 不派发、报告、重新排程 (src:520,560) |
 | A8 | 同一 pane 喂 `inner-panel-stale-check.ts --pane … --json` | exit 1 = 括号已关但 agent 行残留冻结 ⇒ 检出该误导窗口 (src:529,533) |
 | A9 | 读外层 `.quay/full-suite-state.json` | `running`/`green` ⇒ 照常派发与合并;`red`+`reason: failed`(或缺失)⇒ 暂缓 `$MERGE_TARGET`→`$FORK_BASELINE` 批量合,新派发按失败位置条件化(共享闸门 `run_static_checks` ⇒ 停派;具体测试文件且与新任务 touches 无关 ⇒ 继续;相交 ⇒ 该任务停派;无法判定 ⇒ fail-closed 停派);`red`+`reason: aborted` ⇒ **不停派**;文件缺失 ⇒ 不阻塞 (src:569-592) |

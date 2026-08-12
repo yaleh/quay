@@ -2,7 +2,7 @@
 id: gap-plancheck-no-diminishing-returns-exit
 title: "No diminishing-returns exit: a round that fails to reduce blocking
   findings still burns the remaining round budget"
-status: done
+status: superseded
 labels:
   - gap
   - defect

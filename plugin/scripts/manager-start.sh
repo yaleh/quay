@@ -9,17 +9,23 @@
 #   - 设自己的家：$QUAY_GLOBAL_DIR/manager/（状态、tick 日志、观测器配置；C2）
 #   - 起会话时锚点确定性建立（AC5）：装上 manager 自己的 `/loop` 作为其中一步——冷启动后锚点必然
 #     在位。本脚本负责把「武装」的确定性步骤做成出厂命令（manager-arm-loop.sh），而不是靠谁记得。
+#   - 挂 idle-watch 的确定性步骤（AC5，gap-manager-cold-start-no-falsifiable-checklist 缺陷1）：
+#     bash 不能调 Monitor 工具 ⇒ 本脚本把「挂载意图」写成家目录下 idle-watch-mount.txt（要执行的
+#     Monitor 命令 + 两个核实判据），manager 会话照此执行。真机制是 session-liveness-mount.sh +
+#     Monitor 事件（非独立进程，pgrep 看不到）——判据 = monitor-mount-check.sh --json
+#     （mounted+targetOk）+ session-liveness.sh --once（SESSION-STATUS 行）。
 #
 # 2026-08-06 范围收窄（人裁定）：OS watchdog / OS cron / Desktop 定时任务全部禁用；唯一允许的调度
 # 锚点是 Claude Code 自己的 loop/cron（AC5）。本脚本不装 systemd unit、不写 crontab。
 #
 # 用法：
-#   manager-start.sh [--session <sess>] [--dry-run] [--json] [--home <dir>]
-#     --session <sess>  目标 tmux 会话（默认：MANAGER_START_SESSION → 读
-#                       <repo>/plugin/skills/manager 的 _launchSpec.roles.manager.name → quay-manager）
-#     --dry-run          只打印将执行的命令，不实际改动（校验用）
-#     --json             JSON 输出（机器消费）；默认人读表格 + 退出码
-#     --home <dir>       覆盖 manager 家目录（默认 $QUAY_GLOBAL_DIR/manager/ → $HOME/.quay-global/manager/）
+#   manager-start.sh [--session <sess>] [--dry-run] [--json] [--home <dir>] [--check-idle-watch]
+#     --session <sess>    目标 tmux 会话（默认：MANAGER_START_SESSION → 读
+#                         <repo>/plugin/skills/manager 的 _launchSpec.roles.manager.name → quay-manager）
+#     --dry-run           只打印将执行的命令，不实际改动（校验用）
+#     --json              JSON 输出（机器消费）；默认人读表格 + 退出码
+#     --home <dir>        覆盖 manager 家目录（默认 $QUAY_GLOBAL_DIR/manager/ → $HOME/.quay-global/manager/）
+#     --check-idle-watch  只核实 idle-watch 是否挂好（monitor-mount-check + --once 接缝），不改动
 #
 # 冷启动判据（gap-manager-cold-start-no-falsifiable-checklist AC2/AC4）：
 #   本脚本在 manager 家下写两份可证伪产物——
@@ -56,9 +62,10 @@ SESSION="${MANAGER_START_SESSION:-}"
 DRY_RUN=0
 JSON=0
 HOME_DIR="${MANAGER_START_HOME:-}"
+CHECK_IDLE_WATCH=0
 
 usage() {
-  sed -n '1,40p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '1,46p' "$0" | sed 's/^# \{0,1\}//'
   exit 0
 }
 
@@ -68,10 +75,11 @@ while [ $# -gt 0 ]; do
     --dry-run) DRY_RUN=1; shift ;;
     --json) JSON=1; shift ;;
     --home) HOME_DIR="$2"; shift 2 ;;
+    --check-idle-watch) CHECK_IDLE_WATCH=1; shift ;;
     --help|-h) usage ;;
     *)
       echo "ERROR: manager start accepts NO project args (C5: start 与 adopt 分开). Unknown argument: $1" >&2
-      echo "       (expected --session <sess> | --dry-run | --json | --home <dir>)" >&2
+      echo "       (expected --session <sess> | --dry-run | --json | --home <dir> | --check-idle-watch)" >&2
       exit 2
       ;;
   esac
@@ -98,6 +106,41 @@ LAUNCH_CMD="${MANAGER_LAUNCH_CMD:-bash $REPO_ROOT/plugin/scripts/quay-launch.sh 
 # 值 = 一个可执行路径（脚本 / 命令）。manager-start 用 `bash <path> --home …` 调用。
 ARM_CMD="${MANAGER_ARM_CMD:-$REPO_ROOT/plugin/scripts/manager-arm-loop.sh}"
 
+# ── --check-idle-watch：只核实 idle-watch 是否挂好，不改动（AC3 判据的机械执行面）────────────
+# 真机制 = session-liveness-mount.sh + Monitor 事件（非独立进程）。判据两条：
+#   ① mounted + targetOk（monitor-mount-check.sh --json）——挂上了、挂对仓库
+#   ② 至少一条 SESSION-STATUS（session-liveness.sh --once）——观测者真能产事件
+# 缺一即未挂好，exit 1。
+if [ "$CHECK_IDLE_WATCH" = 1 ]; then
+  MOUNT_JSON="$("${MANAGER_MOUNT_CHECK_CMD:-bash $REPO_ROOT/plugin/scripts/monitor-mount-check.sh}" --json 2>/dev/null)"
+  MOUNTED="$(printf '%s' "$MOUNT_JSON" | sed -n 's/.*"mounted": *\(true\|false\).*/\1/p' | head -1)"
+  TARGET_OK="$(printf '%s' "$MOUNT_JSON" | sed -n 's/.*"targetOk": *\(true\|false\).*/\1/p' | head -1)"
+  ONCE_OUT="$(bash "$REPO_ROOT/plugin/scripts/session-liveness.sh" --once 2>&1)"
+  STATUS_LINES="$(printf '%s\n' "$ONCE_OUT" | grep -c 'SESSION-STATUS' || true)"
+  OK=1
+  [ "$MOUNTED" = "true" ] || OK=0
+  [ "$TARGET_OK" = "true" ] || OK=0
+  [ "${STATUS_LINES:-0}" -ge 1 ] || OK=0
+  if [ "$JSON" = 1 ]; then
+    printf '{"mounted":%s,"targetOk":%s,"sessionStatusLines":%s,"ok":%s}\n' \
+      "$([ "$MOUNTED" = "true" ] && echo true || echo false)" \
+      "$([ "$TARGET_OK" = "true" ] && echo true || echo false)" \
+      "${STATUS_LINES:-0}" \
+      "$([ "$OK" = 1 ] && echo true || echo false)"
+  else
+    printf '%-18s %s\n' "mounted" "$MOUNTED"
+    printf '%-18s %s\n' "target-ok" "$TARGET_OK"
+    printf '%-18s %s\n' "session-status-lines" "${STATUS_LINES:-0}"
+    if [ "$OK" = 1 ]; then
+      echo "idle-watch-delivering: mounted + targetOk + at least one SESSION-STATUS"
+    else
+      echo "idle-watch-NOT-OK: run the Monitor mount in the manager session per <home>/idle-watch-mount.txt" >&2
+    fi
+  fi
+  [ "$OK" = 1 ] || exit 1
+  exit 0
+fi
+
 if [ "$DRY_RUN" = 1 ]; then
   cat <<EOF
 would-create-home: mkdir -p $HOME_DIR
@@ -106,6 +149,7 @@ would-write-checklist: $HOME_DIR/cold-start-checklist.md
 would-write-idlewatch-config: $HOME_DIR/idle-watch.env
 would-launch-session: tmux new-session -d -s $SESSION -n manager "$LAUNCH_CMD"
 would-arm-loop: $ARM_CMD --home $HOME_DIR
+would-mount-idle-watch: write $HOME_DIR/idle-watch-mount.txt (manager session mounts session-liveness-mount.sh via Monitor; verify with monitor-mount-check.sh --json + session-liveness.sh --once)
 EOF
   exit 0
 fi
@@ -185,12 +229,45 @@ else
   ARM_STATE="armed"
 fi
 
-# 冷启动三键启动态（AC2）：#1 SESSION-CREATED / #2 HOME-CREATED / #3 LOOP-ARMED 在启动后即为真；
-# #4 CRON-EVIDENCED / #5 IDLE-WATCH-MOUNTED / #6 MONITORS-DELIVERING 由首 tick 填。
+# 冷启动键（AC2 + AC5）：#1 SESSION-CREATED / #2 HOME-CREATED / #3 LOOP-ARMED 在启动后即为真；
+# #4 CRON-EVIDENCED / #5 IDLE-WATCH-MOUNTED / #6 MONITORS-DELIVERING 由首 tick 填；
+# idle-watch 挂载意图（AC5）写成家目录工件，外部可核实（--check-idle-watch）。
 CHECKLIST_EXISTS=$([ -f "$CHECKLIST" ] && echo true || echo false)
+# ── 挂 idle-watch（AC5：冷启动后观测锚点必然在位；gap-manager-cold-start-no-falsifiable-checklist
+#    缺陷1）。bash 不能调 Monitor 工具，本步把「挂载意图」写成家目录下的确定性工件——
+#    manager 会话照此执行 Monitor 挂载；判据是两条机械可答的核实（--check-idle-watch 已实现）：
+#    monitor-mount-check.sh --json 的 mounted+targetOk，与 session-liveness.sh --once 的
+#    SESSION-STATUS 行。写成文件而不是只打印，是让「该挂 idle-watch」这个动作有落点——
+#    冷启动后任何一轮 tick / 任何外部核实都能回来对账。──────────────────────────────────────
+IDLE_WATCH_INTENT="$HOME_DIR/idle-watch-mount.txt"
+mkdir -p "$HOME_DIR"
+cat > "$IDLE_WATCH_INTENT" <<EOF
+# manager idle-watch mount intent — 由 manager 会话执行（bash 不能调 Monitor 工具）。
+# 真机制 = session-liveness-mount.sh（exec session-liveness.sh）+ Monitor 事件；非独立进程，
+# pgrep/TaskList 看不到——唯一证据是是否还在发事件。来源：manager-start.sh 冷启动步骤。
+# 生成：$(date -u +%Y-%m-%dT%H:%M:%SZ)
+#
+# 执行（在 manager 会话内，Monitor 工具）：
+#   Monitor({command: "$REPO_ROOT/plugin/scripts/session-liveness-mount.sh",
+#            description: "manager idle-watch: quay outer/inner 转闲 (SESSION-IDLE/OVERDUE/GONE/BACK)",
+#            persistent: true, timeout_ms: 3600000})
+#
+# 核实（两条判据，缺一即未挂好；外部可跑 \`quay manager start --check-idle-watch\`）：
+#   ① bash $REPO_ROOT/plugin/scripts/monitor-mount-check.sh --json   # mounted=true 且 targetOk=true
+#   ② bash $REPO_ROOT/plugin/scripts/session-liveness.sh --once      # 至少一条 SESSION-STATUS
+#
+# 6 分钟阈值、事件 triage 见 plugin/loop/manager-loop-tick.md §1.4/§1.6。
+EOF
+if [ -f "$IDLE_WATCH_INTENT" ]; then
+  IDLE_WATCH_STATE="intent-written"
+else
+  IDLE_WATCH_STATE="failed"
+  echo "WARNING: manager-start: could not write idle-watch mount intent to $IDLE_WATCH_INTENT" >&2
+fi
+
 if [ "$JSON" = 1 ]; then
   cat <<EOF
-{"session":"$SESSION","home":"$HOME_DIR","sessionState":"$SESSION_STATE","armState":"$ARM_STATE","checklist":"$CHECKLIST","checklistWritten":$CHECKLIST_EXISTS,"created":$([ "$CREATED_SESSION" = 1 ] && echo true || echo false)}
+{"session":"$SESSION","home":"$HOME_DIR","sessionState":"$SESSION_STATE","armState":"$ARM_STATE","checklist":"$CHECKLIST","checklistWritten":$CHECKLIST_EXISTS,"idleWatchState":"$IDLE_WATCH_STATE","created":$([ "$CREATED_SESSION" = 1 ] && echo true || echo false)}
 EOF
 else
   printf '%-14s %s\n' "session" "$SESSION"
@@ -198,11 +275,13 @@ else
   printf '%-14s %s\n' "session-state" "$SESSION_STATE"
   printf '%-14s %s\n' "arm-state" "$ARM_STATE"
   printf '%-14s %s\n' "checklist" "$CHECKLIST ($([ "$CHECKLIST_EXISTS" = true ] && echo 'written — 7 keys, #1-#3 启动态已真' || echo MISSING))"
+  printf '%-14s %s\n' "idle-watch" "$IDLE_WATCH_STATE ($HOME_DIR/idle-watch-mount.txt)"
   if [ "$ARM_STATE" = "armed" ]; then
     echo "manager started: $SESSION ($HOME_DIR)"
   else
     echo "manager started: $SESSION ($HOME_DIR) — WARNING: loop anchor not armed"
   fi
+  echo "idle-watch: run the Monitor mount per $IDLE_WATCH_INTENT, then \`quay manager start --check-idle-watch\`"
 fi
 
 # 失败即非零：会话建不起来或锚没装上都要大声，不能静默绿。

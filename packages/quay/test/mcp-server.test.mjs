@@ -365,6 +365,22 @@ async function main() {
     );
   }
 
+  // ---- 7b. superseded is a writable status via MCP (gap-superseded-modeled-as-task-lifecycle-terminal) ----
+  {
+    // MCP-A1 is currently "done" (set by step 7). Writing it to superseded
+    // proves the Core MCP layer accepts the newly modeled terminal status.
+    const r = await core.callTool({ name: "task_write", arguments: { id: "MCP-A1", status: "superseded", provider: "native" } });
+    assert(
+      r.structuredContent?.task?.status === "superseded",
+      "task_write via `quay mcp` can write the modeled superseded terminal status"
+    );
+    const afterSup = await core.callTool({ name: "task_get", arguments: { id: "MCP-A1", provider: "native" } });
+    assert(
+      afterSup.structuredContent.task.status === "superseded",
+      "task_get confirms MCP-A1 persisted as superseded (read-back after MCP write)"
+    );
+  }
+
   // ---- 8. Error paths ----
   {
     const rUnknownProvider = await core.callTool({ name: "task_list", arguments: { provider: "does-not-exist" } });

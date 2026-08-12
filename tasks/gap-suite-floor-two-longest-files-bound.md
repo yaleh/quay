@@ -1,7 +1,11 @@
 ---
 id: gap-suite-floor-two-longest-files-bound
-title: "套件地板由两个文件钉死——runner-grouping.test.mjs 204s（serial，nested-spawn，安装夹具救不了）+ cap-from-gate.test.mjs 166s（main）⇒ 每一相墙钟 = max(sum÷并发, 最长单文件)，核数够多后第二项接管 ⇒ 48 核相对 16 核在三条杠杆后买到 0（三相全撞各自最长文件地板）；处方=拆这两个文件各约 4 份（16核顺序332s/三相并发229s/48核并发123s），优先级在杠杆 3 之后、任何硬件讨论之前；内存任何配置非约束（47-88MB/进程，别为它付钱）"
-status: todo
+title: 套件地板由两个文件钉死——runner-grouping.test.mjs 204s（serial，nested-spawn，安装夹具救不了）+
+  cap-from-gate.test.mjs 166s（main）⇒ 每一相墙钟 = max(sum÷并发, 最长单文件)，核数够多后第二项接管 ⇒ 48
+  核相对 16 核在三条杠杆后买到 0（三相全撞各自最长文件地板）；处方=拆这两个文件各约 4
+  份（16核顺序332s/三相并发229s/48核并发123s），优先级在杠杆 3
+  之后、任何硬件讨论之前；内存任何配置非约束（47-88MB/进程，别为它付钱）
+status: superseded
 labels:
   - gap
   - defect

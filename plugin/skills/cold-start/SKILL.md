@@ -86,17 +86,14 @@ start did NOT complete.
 | 6 | `FIRST-TASK` | At least one task is `ready`/`done` on the board and it has been dispatched — `fast-mode-telemetry.ts --report --json --root <root>` shows it in `inProgress` (or the task-start record in #5 references it) | the `--report --json` `inProgress` |
 | 7 | `TOPOLOGY-IN-PLACE` | The two-window session topology is in place per the factory definition — `bash <root>/plugin/scripts/topology-check.sh --session <session> --json` reports `ok: true` (each of `<session>:outer/:inner` exists AND has a claude process, not a bare bash window). manager is cross-project and NOT part of this topology. A single-bash-window session (the meta-cc-3/archguard-4 failure shape) MUST report `ok: false` | the `--json` output (`ok: true` + both windows `ok`) |
 
-### Manager cold start — a SEPARATE 7-key falsifiable checklist (NOT this skill)
-
-The project cold start does NOT start the manager (delivery ≠ startup, AC8). The manager cold start
-has its OWN falsifiable observable-consequences checklist, **aligned with the outer's seven here**:
-`SESSION-CREATED` / `HOME-CREATED` / `MONITORS-MOUNTED` / `MONITORS-DELIVERING` / `LOOP-ARMED` /
-`CRON-EVIDENCED` / `CHECKLIST-REPORTED` — defined in full in `plugin/skills/manager/SKILL.md` §7a
-(each key carries a checkable definition + evidence; one false ⇒ the manager cold start did NOT
-complete). `manager-start.sh` writes the checklist scaffold at `<home>/cold-start-checklist.md`; the
-first manager tick fills the mount/evidence keys (`manager-tick-core.md` A10/B4). Registry↔real-cron
-consistency is verified by `manager-arm-loop.sh --verify-cron` — never trust `loop-registry.txt`
-alone (gap-manager-cold-start-no-falsifiable-checklist defect 3).
+**Manager cold start is NOT this checklist** — a project cold start never starts the manager
+(delivery ≠ startup, AC8). The manager layer has its OWN seven-key falsifiable checklist
+(`HOME-IN-PLACE` / `IDLE-WATCH-MOUNTED` / `IDLE-WATCH-DELIVERING` / `CRON-CREATED` /
+`REGISTRY-MATCHES` / `FIRST-TICK-LANDED` / `NOT-STARTED-BY-PROJECT`), documented in
+`plugin/skills/manager/SKILL.md` §6.5, executed by `quay manager start` (+ its
+`idle-watch-mount.txt` intent + `manager-arm-loop.sh --verify`). When a network needs its manager
+started, the operator runs that checklist in the manager's own session — a project outer running
+this skill must NOT create/drive/check the manager (C3; `no-manager-tick-doc-check.ts`).
 
 ## Steps
 
@@ -128,6 +125,17 @@ This prints `cold_start_state=running|stopped` and, when stopped, `stopped_reaso
 | `stopped` | `waiting-human` | `human-needed` | started before but blocked on human — do NOT report "complete"; tell the human: resolve the needs-human items / give direction, then restart. |
 | `stopped` | `unknown` | `restart` | started before, work available, but the driver died — restart the loop (re-create the cron, re-drive inner). |
 
+> **Known limitation — fresh cold-start false positive (measured 2026-08-12,
+> `gap-quay-self-hosting-e2e-proof` SH4 proof)**: `dead-loop-check.sh` scans the target project's
+> transcript dir for recent user messages. When the cold-start is run BY a session whose own
+> transcript lives in that dir (the normal self-host case — the cold-start outer session IS a
+> session of the target project), the check can report `running` on a project that has never been
+> started. Before accepting `running` on what should be a fresh start, cross-check the two
+> started-markers the stopped branch already reads: `.quay/loop-driver.jsonl` (empty → no driver
+> registered) and `.workflow-events/` (no `--task-start` record → never dispatched). Both empty ⇒
+> the loop was never started ⇒ take the fresh-start path, not `ALREADY-RUNNING`. Fix is routed as a
+> step-0/L2-criterion follow-up (driver+telemetry disambiguation).
+
 The stopped branch **reuses the L2 criterion** instead of inventing a new liveness signal — the dead-loop
 check's `liveness_independent_of_backlog` invariant keeps queue-empty (healthy idle) separate from
 nobody-driving (dead-loop), and this branch additionally reads the target project's own started-marker
@@ -136,64 +144,53 @@ nobody-driving (dead-loop), and this branch additionally reads the target projec
 `tasks/gap-l2-continuous-health-dead-loop-criterion-loop-running-not-installed.md` records this branch
 as its first cold-start consumer.
 
-### 0a. Mid-flight state check — recovery branch vs fresh-start branch (the 恢复分支)
+### 0b. Recovery branch — mid-flight state exists, converge THEN cold-start
 
-The running-state branch (step 0) decides RUNNING vs STOPPED. This branch decides HOW to start a
-STOPPED, already-laid-down loop — fresh vs recover. The fresh-start path (steps 1-9) assumes
-"nothing started, start clean"; it has NO step for a workspace whose last run crashed mid-flight
-leaving real state behind. That state class is real, not speculative: tonight's two real OOM
-recoveries both hit it, and both were done by hand because there was nowhere in this skill to point
-at. When the mechanism is laid down AND the loop is
-stopped, enumerate the three mid-flight state classes with **existing tools only** (no new detection
-logic — reuse what's there):
+Fresh-start steps 1-9 assume a genuinely clean workspace. A workspace whose loop CRASHED mid-task
+(today's two real OOM recoveries, both done by hand from a manually-written brief because the skill had
+no recovery branch) has real mid-flight state that must be resolved BEFORE any tick can safely resume —
+merged-but-unclosed tasks, orphaned worktrees/branches, ghost telemetry `--task-start` records with no
+matching `--task-end`. A cold-start over such a workspace without converging first re-dispenses the
+mid-flight task and double-books the board.
 
-```bash
-# ① orphaned task branch — a `task/*` branch NOT reachable from the mainline ref
-git -C <root> branch --list "task/*"          # every task branch
-git -C <root> branch --merged <mainline-ref>  # the reachable ones — the rest are orphaned candidates
-git -C <root> worktree list                   # in-flight worktrees (cross-checked against ②)
-# ② ghost telemetry — a `--task-start` bracket whose taskId has NO in-flight worktree
-node --experimental-strip-types <root>/plugin/scripts/fast-mode-telemetry.ts --report --json --root <root>
-#   → read inProgress[]: every {taskId} must appear in `git worktree list`; one that does NOT is a ghost
-# ③ status drift — code landed but the status field never followed
-node --experimental-strip-types <root>/plugin/scripts/task-status-drift-check.ts --json
-#   → read suspects[]: a todo/ready task whose AC symbols resolve in the tree on a MERGED task/* branch
-```
+**Select recovery (NOT fresh-start) when the mechanism is already laid down (the step-1 preconditions
+hold) AND at least one of the three state classes below is present.** Enumerate all three with the
+EXISTING tools — zero new detection logic (invariant `zero_new_detection = 1`):
 
-`<mainline-ref>` is the repo's landing ref (`master`, or `integration`/`develop` per landingRef — the
-same ref the drift check's stranded-branch classification uses; never hardcode a different one).
+| # | State class | Existing tool(s) | Mid-flight signal |
+|---|---|---|---|
+| 1 | mid-flight worktree | `git worktree list` + `git branch --list "task/*"` + `git merge-base --is-ancestor <branch> <landing-ref>` | a `task/*` branch NOT reachable from the landing ref (integration → develop → master) whose telemetry has a `--task-start` and no matching `--task-end` |
+| 2 | ghost telemetry | `fast-mode-telemetry.ts --report --json --root <root>` | an `inProgress[]` record whose `taskId` has NO in-flight worktree (`git worktree list` has no `task/<taskId>`) and no live process |
+| 3 | task-status drift | `task-status-drift-check.ts` (+ `--stranded`) | a status-drift suspect on a `task/*` branch reachable from the landing ref (code landed, `status:` field never followed) |
 
-**Routing decision (both directions, checkable):** take the RECOVERY branch (step 0b) **if and only
-if** the mechanism is laid down AND at least one of ① ② ③ reports a non-empty finding. All three
-clean ⇒ take the FRESH-START branch (steps 1-9) unchanged. A genuinely clean workspace MUST route
-to fresh-start — the negative control: never false-positive into recovery.
+**ALL THREE CLEAN → the fresh-start branch (steps 1-9).** ANY finding → the recovery steps below.
 
-### 0b. Recovery branch — converge to a trustworthy starting point, THEN enter the same tick loop
+**Recovery steps — resolve each finding with the existing mechanism, then RE-RUN all three checks;
+only an all-clean re-run converges forward:**
 
-Not a parallel process: resolve the mid-flight state until the three checks (step 0a) come back
-clean, then continue into the **SAME** AC8c observable-consequences checklist the fresh-start branch
-uses (steps 1-9) — no second acceptance framework, no separately-invented criteria.
+1. **merged-but-unclosed task (drift)** — the `status:` field lags code that already landed. Close it
+   through the normal close path with REAL evidence (this session's own
+   `gap-init-guesses-the-tmux-session...` fix is the worked example): verify the ACs' declared work
+   actually landed (`task-status-drift-check.ts --check <id>` + the task's Touches exist on the
+   landing ref), then set `status: done` via the same gate — never fabricate evidence, never paste a
+   plausible AC onto an unverified task.
+2. **orphaned worktree / branch** — verify against the landing ref: if the branch IS an ancestor
+   (`git merge-base --is-ancestor <branch> <landing-ref>` — the work already landed), remove the
+   worktree (`git worktree remove <path>`) and delete the branch (`git branch -d <branch>`); if it
+   has commits NOT on the landing ref, the work is REAL — MERGE it, never delete (fail-closed: the
+   same rule that forbids `--clean-stale` of a branch with commits).
+3. **ghost telemetry** — a `--task-start` record whose executor is observably gone. Run
+   `fast-mode-telemetry.ts --reconcile --root <root>`: it writes a real `--task-end` (outcome
+   `abandoned`, `reconcileReason` set) ONLY when the executor is OBSERVABLY gone (branch merged /
+   worktree gone / process gone — never age). A record whose task is genuinely done or still-todo has
+   its ghost record DELETED (`rm <root>/.workflow-events/<runId>.jsonl`). NEVER backfill a
+   plausible-but-fabricated `--task-end`.
 
-1. **Enumerate** — record the findings from step 0a. The three existing checks ARE the enumeration;
-   do not re-implement any detection.
-2. **Resolve** each state class:
-   - **status drift / merged-but-unclosed** (③) — the code landed on a merged `task/*` branch but
-     `status:` never followed. Close it PROPERLY with real evidence: set `status: done` with the AC
-     checkboxes the drift check shows resolved, or `status: ready` when an AC requires a real
-     dispatch. Worked example: this session's own `gap-init-guesses-the-tmux-session...` fix. Never
-     paper over a task whose artifacts are genuinely missing by promoting past them.
-   - **orphaned worktree/branch** (①) — a `task/*` branch not reachable from the mainline ref.
-     Verify the branch is an **ancestor of the mainline ref**; if it IS (already-merged residue),
-     remove the stranded worktree (`git worktree remove`) and delete the branch (`git branch -d`).
-     If it is NOT an ancestor (real unmerged work), do NOT delete — the work is preserved on the
-     branch; escalate to needs-human with the branch as evidence.
-   - **ghost telemetry** (②) — a `--task-start` record whose taskId has no in-flight worktree.
-     Verify against the task's REAL state (`tasks/<taskId>.md` status field). If the task is
-     genuinely done or still-todo, DELETE the ghost record (remove its line from
-     `.workflow-events/<runId>.jsonl`). **NEVER backfill a plausible-but-fabricated `--task-end`** —
-     a fabricated end event claims an outcome the crashed executor never recorded.
-3. **Converge** — re-run the three checks (step 0a). ONLY when all three come back clean does the
-   recovery branch enter the SAME AC8c checklist (steps 1-9).
+Once the re-run of all three checks is clean, the recovery branch CONVERGES into the SAME AC8c
+checklist and steps 1-9 the fresh-start branch uses — there is no second acceptance framework (AC3).
+The report is the same seven-key AC8c output; a recovery that converges is reported `COMPLETE`, one
+that cannot make all three checks clean is reported "installed but unrecovered" with the remaining
+findings — never "complete".
 
 ### 1. Locate root, project, session
 

@@ -134,8 +134,11 @@ test("AC1 — a never-started project is detected as stopped (not 'complete') by
   } finally { p.cleanup(); }
 });
 
-test("AC1 — a genuinely running project (recent commit) is reported running, not stopped", () => {
-  const p = makeProject({ commitAgeSec: 0, started: false, taskStatuses: [] });
+test("AC1 — a genuinely running project (recent commit + start markers) is reported running, not stopped", () => {
+  // A genuinely running loop has start markers (.quay/loop-driver.jsonl + .workflow-events task-start,
+  // gap-dead-loop-check-fresh-coldstart-false-running): transcript/commit activity alone is NOT proof
+  // the loop is running — a fresh cold-start session writes its own transcript while running step 1-9.
+  const p = makeProject({ commitAgeSec: 0, started: true, taskStatuses: [] });
   try {
     const res = p.runCheckRunning();
     assert.equal(res.status, 0, res.stderr);
@@ -146,6 +149,21 @@ test("AC1 — a genuinely running project (recent commit) is reported running, n
       "a running loop must not emit stopped_reason (keeps the Contract grep 'stopped' clean at 0)");
     assert.ok(!/stopped/.test(res.stdout),
       "a running loop's output must not contain the word 'stopped' at all");
+  } finally { p.cleanup(); }
+});
+
+test("AC1 — a fresh commit WITHOUT start markers is never-started, not running", () => {
+  // The fix's negative control via the git-commit signal: a freshly-set-up project commits, but that
+  // commit is setup, not a running loop. No driver registration / no task-start telemetry => never
+  // started (was: misreported running, which sent cold-start step 0 down the ALREADY-RUNNING branch).
+  const p = makeProject({ commitAgeSec: 0, started: false, taskStatuses: [] });
+  try {
+    const res = p.runCheckRunning();
+    assert.equal(res.status, 0, res.stderr);
+    const f = parseFields(res.stdout);
+    assert.equal(f.cold_start_state, "stopped");
+    assert.equal(f.stopped_reason, "never-started");
+    assert.equal(f.next_step, "restart");
   } finally { p.cleanup(); }
 });
 

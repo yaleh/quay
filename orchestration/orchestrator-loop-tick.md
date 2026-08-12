@@ -32,12 +32,15 @@
 > `.quay/config.yml` `loop:` 节的 `fork_baseline` / `merge_target`。所有含分支操作的命令代入这两个值，
 > 不要字面写死。共享模板 `plugin/loop/orchestrator-loop-tick.md` 的工作分支名**可配置**（默认单线，
 > 供未做 cutover 的下游经升级通道消费），本副本是 quay 自己的两线落地——两者角色分工见任务体 AC5。
-> **切分声明（AC38，2026-08-12 已执行）**：本文件是 quay 自身消费的**本层实例状态**（工作分支两线、
-> integration 作 checkout、项目列表、tmux 布局、本实验各 AC 的进度与既有裁定）；**产品行为正本**在
-> `plugin/loop/orchestrator-loop-tick.md`（外层这个角色该怎么做的通用机制，随 `quay-init --loop` 原样铺到
-> 目标项目即本路径）。**产品行为进 plugin / 本层状态留 orchestration**——与 manager 层已按同判据切分
-> （产品模板 322 行 vs quay 状态 1647 行；本对切分后 1066/1269，共同 532 行——共享的是命令块与脚本名，
-> 各自独有可解释为产品行为 / 本层实例状态）。冷启动 skill 与 tick 核引用同一批行为文件（AC3）。
+> **切分声明（AC38，2026-08-12 执行切分）**：本文件是 quay 自身消费的**本层实例状态**（工作分支两线、
+> integration 作 checkout、项目列表、tmux 布局、以及每一条判据在本仓的实测与代价）；**产品行为正本**在
+> `plugin/loop/orchestrator-loop-tick.md`（随 `quay-init --loop` 原样铺到目标项目即本路径）。
+> **切分边界**：**产品行为进 plugin / 本层实例状态留 orchestration**——与 manager 层已按同判据切分
+> （产品模板 vs quay 状态）同形。**本文件的独有内容 = 本层实例状态**（quay 网络取值 / 历史实测 /
+> 判据代价），plugin 模板的独有内容 = 产品行为（随包交付、任何项目通用的外层规则）。冷启动 skill 与
+> tick 核引用同一批行为文件（AC3）。**机械判据（AC38 Contract）**：
+> `comm -3 <(sort plugin/loop/orchestrator-loop-tick.md) <(sort orchestration/orchestrator-loop-tick.md) | wc -l`
+> 即两份独有行数——切分后各自主题单一。**本层状态汇总见下方 `## 本层状态` 节。**
 > **⚠️ 2026-08-09 结构性修正（外层的 WORKING CHECKOUT 切到 integration）**：此前的故障链是「立项/记账
 > 提交落 develop ⇒ 不变式被破（develop-only 累积）⇒ ff 前需并回 integration ⇒ 验证期 tip 被记账推走 ⇒
 > 绿过期」——冻结窗口只是手段不是机制。长效解法：**外层工作 checkout = integration**，develop 只经 ff
@@ -351,6 +354,27 @@ materialized command contains the flag (the launcher's `--dry-run` output must i
 **外层存在的唯一理由：消费内层的停止条件。** 内层撞到「合并冲突 / 套件红 / 审查 2 轮后仍 REFUTED /
 超 90 分钟 / needs-human 积压 ≥3」就停下等人——外层就是那个「人」的常规部分。内层仍然停，只是停的
 时长从「到人回来」变成「到下一个 20 分钟 tick」。
+
+## 本层状态（quay 网络的实例值——AC38 切分后集中在此）
+
+**本文件是 quay 自身消费的实例状态；产品行为（通用外层规则）在 `plugin/loop/orchestrator-loop-tick.md`。**
+本节的取值是 quay 网络自己的落地，**不是**产品模板的常量——下游项目各自在 `.quay/config.yml` `loop:`
+节里给值。切分后本文件的**独有内容 = 本层实例状态**，plugin 模板的独有内容 = 产品行为。
+
+| 实例量 | quay 取值 | 消费处 |
+|---|---|---|
+| 工作分支两线 | `fork_baseline: develop` / `merge_target: integration`（`.quay/config.yml` `loop:` 节） | 步骤 3b / 3.5 批量合 |
+| 外层工作 checkout | **integration**（2026-08-09 结构性修正，见文件头 ⚠️）——外层一切提交落 integration，develop 只经 ff（batch-merge）前进 | 启动方式 / 各提交步 |
+| 目标项目清单 | quay / archguard / meta-cc（`/home/yale/work/<p>`） | 步骤 0d `.halt` 轮询 / 优先级 |
+| tmux 窗口 | outer = `quay-outer`（launch 配置 `quay-launch.sh outer`）、inner = `quay-0:inner`、manager = `quay-0:manager` | 冷启动 / 驱动 / 观察 |
+| 跨项目优先级 | **quay 高于 archguard / meta-cc**（人已裁定） | 步骤 0d |
+| 真实下游验证目标 | `/home/yale/work/archguard` / `/home/yale/work/meta-cc`（`QUAY_REAL_TARGETS`） | 步骤 5 real-target |
+| 层间 tick 间隔 | inner transcript 心跳源 mtime age 阈值 30min；目标 = `quay-0:inner` pane pid | 步骤 0b3 |
+| suite-health / 熔融-结晶 | 见文末 `## suite-health 三件套` / `## 熔融-结晶张力五方向` | A15 / 判准 |
+
+**切分纪律**：quay 特有的判据取值与历史实测留在本文件（理由档案）；任何项目通用的规则改
+`plugin/loop/orchestrator-loop-tick.md`（产品模板）。新增一个 quay 特有实例值 → 写进本表；新增一条
+通用规则 → 写进 plugin 模板。两处不互拷正文。
 
 ## 授权边界（已与人约定，不可自行放宽）
 

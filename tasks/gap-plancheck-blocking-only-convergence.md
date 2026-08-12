@@ -2,7 +2,7 @@
 id: gap-plancheck-blocking-only-convergence
 title: "PlanCheck converges on zero findings (unreachable) instead of zero
   blocking findings — 93% of tasks burn all 3 rounds, 79% fail"
-status: done
+status: superseded
 labels:
   - gap
   - defect

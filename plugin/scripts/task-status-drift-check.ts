@@ -614,24 +614,26 @@ export function listWorkBranches(repoRoot) {
   return r.out.split("\n").map((l) => l.trim().replace(/^[*+]\s*/, "")).filter(Boolean);
 }
 
-// Find the merge commit on master whose SECOND parent is branchTip (the worktree Land flow's
-// `git merge --no-ff <branch>` always puts the branch tip as the second parent — matching only
-// parts[2] provably selects the branch's own Land merge), then return the merge-added files that are
-// missing from master's CURRENT tree (a `git revert` of the merge removes exactly those files).
-function _mergeAddedMissing(repoRoot, tipSha) {
-  const merges = gitTry(repoRoot, ["log", "--merges", "--format=%H %P", "master"]);
+// Find the merge commit on the LANDING ref (integration/develop/master per landingRef — NOT
+// hardcoded master, gap-stranded-check-compares-against-master-not-landing-ref) whose SECOND parent
+// is branchTip (the worktree Land flow's `git merge --no-ff <branch>` always puts the branch tip as
+// the second parent — matching only parts[2] provably selects the branch's own Land merge), then
+// return the merge-added files that are missing from the landing ref's CURRENT tree (a `git revert`
+// of the merge removes exactly those files).
+function _mergeAddedMissing(repoRoot, tipSha, landing = "master") {
+  const merges = gitTry(repoRoot, ["log", "--merges", "--format=%H %P", landing]);
   if (!merges.ok) return { error: merges.out };
   let merge = null;
   for (const line of merges.out.split("\n")) {
     const parts = line.split(/\s+/);
     if (parts.length >= 3 && parts[2] === tipSha) { merge = parts[0]; break; }
   }
-  if (!merge) return { error: `no merge commit on master has branch tip ${tipSha} as a parent` };
+  if (!merge) return { error: `no merge commit on ${landing} has branch tip ${tipSha} as a parent` };
   const added = gitTry(repoRoot, ["diff", "--name-only", "--diff-filter=A", `${merge}^1..${merge}`]);
   if (!added.ok) return { error: added.out };
   const missing = [];
   for (const f of added.out.split("\n").filter(Boolean)) {
-    if (!gitTry(repoRoot, ["cat-file", "-e", `master:${f}`]).ok) missing.push(f);
+    if (!gitTry(repoRoot, ["cat-file", "-e", `${landing}:${f}`]).ok) missing.push(f);
   }
   return { missing };
 }
@@ -648,8 +650,8 @@ function _worktreeForBranch(repoRoot, branch) {
   return null;
 }
 
-function _shortstatInsertions(repoRoot, branch) {
-  const r = gitTry(repoRoot, ["diff", `master...${branch}`, "--shortstat"]);
+function _shortstatInsertions(repoRoot, branch, landing = "master") {
+  const r = gitTry(repoRoot, ["diff", `${landing}...${branch}`, "--shortstat"]);
   if (!r.ok) return null;
   const m = r.out.match(/(\d+)\s+insertions?\(\+\)/);
   return m ? Number(m[1]) : null;
@@ -660,37 +662,41 @@ function _lastCommitDate(repoRoot, branch) {
   return r.ok ? r.out : null;
 }
 
-// Classify one `milestone/*`|`task/*` branch against master using the three-gate criterion. Returns
+// Classify one `milestone/*`|`task/*` branch against the LANDING ref (integration/develop/master
+// per landingRef — gap-stranded-check-compares-against-master-not-landing-ref: under the two-line
+// model work lands on integration (develop advances only via batch-merge) while master stalls, so
+// a hardcoded master merge-base misclassifies every integration-merged task/* branch as
+// "commits ahead of master" → false stranded). Returns
 // { branch, classification, aheadCount, insertions, lastCommitDate, worktreeRel, detail }.
-export function classifyBranch(repoRoot, branch) {
+export function classifyBranch(repoRoot, branch, landing = "master") {
   const wt = _worktreeForBranch(repoRoot, branch);
   const base = { branch, worktreeRel: wt };
-  const ancestor = gitTry(repoRoot, ["merge-base", "--is-ancestor", branch, "master"]);
+  const ancestor = gitTry(repoRoot, ["merge-base", "--is-ancestor", branch, landing]);
   if (!ancestor.ok) {
-    const cnt = gitTry(repoRoot, ["rev-list", "--count", branch, "--not", "master"]);
+    const cnt = gitTry(repoRoot, ["rev-list", "--count", branch, "--not", landing]);
     const aheadCount = cnt.ok ? Number(cnt.out) : NaN;
     return {
       ...base, classification: "has-commits",
       aheadCount: Number.isFinite(aheadCount) ? aheadCount : null,
-      insertions: _shortstatInsertions(repoRoot, branch),
+      insertions: _shortstatInsertions(repoRoot, branch, landing),
       lastCommitDate: _lastCommitDate(repoRoot, branch),
     };
   }
-  // Gate 2 — merged; check revert only for merge-entered branches (tip NOT on master's first-parent).
+  // Gate 2 — merged; check revert only for merge-entered branches (tip NOT on landing's first-parent).
   const tip = gitTry(repoRoot, ["rev-parse", branch]);
-  const firstParent = gitTry(repoRoot, ["rev-list", "--first-parent", "master"]);
+  const firstParent = gitTry(repoRoot, ["rev-list", "--first-parent", landing]);
   let onFirstParent = false;
   if (tip.ok && firstParent.ok) onFirstParent = firstParent.out.split("\n").includes(tip.out);
   if (!onFirstParent) {
-    const m = _mergeAddedMissing(repoRoot, tip.out);
+    const m = _mergeAddedMissing(repoRoot, tip.out, landing);
     if (m.error) return { ...base, classification: "error", detail: m.error };
     if (m.missing.length > 0) {
       const shown = m.missing.slice(0, 5).join(", ");
       return {
         ...base, classification: "merged-then-reverted", aheadCount: 0,
-        insertions: _shortstatInsertions(repoRoot, branch),
+        insertions: _shortstatInsertions(repoRoot, branch, landing),
         lastCommitDate: _lastCommitDate(repoRoot, branch),
-        detail: `${m.missing.length} merge-added file(s) missing from master: ${shown}${m.missing.length > 5 ? ` (+${m.missing.length - 5} more)` : ""}`,
+        detail: `${m.missing.length} merge-added file(s) missing from ${landing}: ${shown}${m.missing.length > 5 ? ` (+${m.missing.length - 5} more)` : ""}`,
       };
     }
   }
@@ -700,7 +706,7 @@ export function classifyBranch(repoRoot, branch) {
     if (st.ok && st.out !== "") {
       return {
         ...base, classification: "has-uncommitted", aheadCount: 0,
-        insertions: _shortstatInsertions(repoRoot, branch),
+        insertions: _shortstatInsertions(repoRoot, branch, landing),
         lastCommitDate: _lastCommitDate(repoRoot, branch),
         detail: `worktree has uncommitted/untracked changes:\n${st.out}`,
       };
@@ -709,11 +715,15 @@ export function classifyBranch(repoRoot, branch) {
   return { ...base, classification: "merged-clean", aheadCount: 0 };
 }
 
-// The stranded-branch report: every live worktree branch whose work is NOT cleanly on master
+// The stranded-branch report: every live worktree branch whose work is NOT cleanly on the LANDING
+// ref (integration/develop/master per landingRef — NOT hardcoded master, gap-stranded-check-
+// compares-against-master-not-landing-ref: under the two-line model work lands on integration while
+// master stalls, so a master-based check false-flagged every integration-merged task/* branch).
 // (has-commits, merged-then-reverted, has-uncommitted). merged-clean branches are excluded.
-export function strandedBranches(repoRoot) {
+export function strandedBranches(repoRoot, opts = {}) {
+  const landing = landingRef(repoRoot, opts);
   return listWorkBranches(repoRoot)
-    .map((b) => classifyBranch(repoRoot, b))
+    .map((b) => classifyBranch(repoRoot, b, landing))
     .filter((c) => c.classification !== "merged-clean");
 }
 
@@ -731,9 +741,9 @@ export function strandedBranches(repoRoot) {
 // correctly stays reverse-drift while noisy-agent's prepare-milestone.js — absent from master, on
 // M239 — correctly reclassifies to stranded-not-merged). Globs are skipped (the exact-path signal is
 // the common case).
-export function entriesInBranchDiff(repoRoot, entries, branch) {
+export function entriesInBranchDiff(repoRoot, entries, branch, landing = "master") {
   if (entries.length === 0) return false;
-  const r = gitTry(repoRoot, ["diff", "--name-only", `master...${branch}`]);
+  const r = gitTry(repoRoot, ["diff", "--name-only", `${landing}...${branch}`]);
   if (!r.ok) return false;
   const diverged = new Set(r.out.split("\n").filter(Boolean));
   return entries.some((e) => !(e.includes("*") || e.includes("?")) && diverged.has(e));
@@ -756,7 +766,7 @@ export function entriesInBranchDiff(repoRoot, entries, branch) {
 //     the mirror-image false classification (2026-08-02: A2/A5 were reported "done but never landed"
 //     when their code sat on unmerged branches — the wrong disposition would have rebuilt landed work).
 // `strandedBranches` is the branch-level report list (from strandedBranches()) used to reclassify.
-export function scanTasks({ repoRoot, tasksDir = path.join(repoRoot, "tasks"), ratioFloor = 0.6, roots = CODE_ROOTS, strandedBranches: strandedList = [] }) {
+export function scanTasks({ repoRoot, tasksDir = path.join(repoRoot, "tasks"), ratioFloor = 0.6, roots = CODE_ROOTS, strandedBranches: strandedList = [], landing = "master" }) {
   const suspects = [];
   const reverse = [];
   const closedWithoutWork = [];
@@ -800,7 +810,7 @@ export function scanTasks({ repoRoot, tasksDir = path.join(repoRoot, "tasks"), r
       const acBoxes = countAcCheckboxes(ac);
       if (acBoxes.total > 0 && acBoxes.checked === 0 && !hasDoneChildren(raw, tasksDir)) {
         const codeEntries = parseTouchEntries(touchesSection).filter((e) => isCodeTouchEntry(e));
-        const strandedHit = strandedList.find((sb) => entriesInBranchDiff(repoRoot, codeEntries, sb.branch));
+        const strandedHit = strandedList.find((sb) => entriesInBranchDiff(repoRoot, codeEntries, sb.branch, landing));
         closedWithoutWork.push({
           taskId: f.replace(/\.md$/, ""),
           status,
@@ -825,7 +835,7 @@ export function scanTasks({ repoRoot, tasksDir = path.join(repoRoot, "tasks"), r
         // correct disposition is to MERGE the branch, never to rebuild. (has-uncommitted branches
         // never match: uncommitted files are not in any diff.)
         const codeEntries = parseTouchEntries(touchesSection).filter((e) => isCodeTouchEntry(e));
-        const strandedHit = strandedList.find((sb) => entriesInBranchDiff(repoRoot, codeEntries, sb.branch));
+        const strandedHit = strandedList.find((sb) => entriesInBranchDiff(repoRoot, codeEntries, sb.branch, landing));
         if (strandedHit) {
           strandedTasks.push({
             taskId: f.replace(/\.md$/, ""),
@@ -966,6 +976,7 @@ export function main(argv) {
     return 0;
   }
   const stranded = strandedBranches(repoRoot);
+  const landing = landingRef(repoRoot);
   if (strandedOnly) {
     // Fast branch-only path (restart-readiness-check.sh and the outer tick consume this): no task
     // store scan, just the stranded-branch report. Still exits 0 — report-only, never a gate.
@@ -974,7 +985,7 @@ export function main(argv) {
       : formatStrandedText(stranded));
     return 0;
   }
-  const { suspects, reverse, closedWithoutWork, strandedTasks, scanned } = scanTasks({ repoRoot, strandedBranches: stranded });
+  const { suspects, reverse, closedWithoutWork, strandedTasks, scanned } = scanTasks({ repoRoot, strandedBranches: stranded, landing });
   if (json) {
     if (closedOnly) {
       // `--closed-direction --json` emits a bare ARRAY of closed-without-work entries so

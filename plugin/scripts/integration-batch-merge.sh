@@ -132,9 +132,12 @@
 #                telemetry records joinable (the 6% join-rate defect). Requires --run-id. Skips the
 #                batch-merge gates entirely (it exits before them); the batch-merge flow is unchanged
 #                and remains the default when --fan-in is absent.
-#   --run-id <runId>  the telemetry runId (from fast-mode-telemetry.ts --task-start) to embed in the
-#                fan-in commit subject. Must be filename-safe (matches the telemetry runId shape).
-#                Only meaningful with --fan-in.
+#   --run-id <id>  the telemetry runId (from fast-mode-telemetry.ts --task-start). REQUIRED by
+#                --fan-in <taskId> (embedded in the fan-in commit subject, position-parseable). In the
+#                batch-merge path (--merge on divergence) it is embedded in the REAL merge commit's
+#                message (`(runId: <id>)`) — the telemetry taskId → git traceability link
+#                fan-in-runid-check.ts reads. Must be filename-safe. No-op on the fast-forward path
+#                (creates no commit).
 #
 #   OBJECT GATE (gap-batch-merge-gate-validates-tip-not-merge-result): before ANY merge (ff or real),
 #                the helper validates the MERGE RESULT, not just the integration tip. The suite tested
@@ -218,7 +221,30 @@ reconcile=0
 # telemetry runId embedded in the commit subject. Empty by default (the batch-merge flow is the
 # default); set by --fan-in <taskId> / --run-id <runId>.
 fan_in_task=""
-fan_in_runid=""
+
+# gap-suite-leaks-live-claude-sessions — stop every claude session whose --settings workspace is under
+# the given worktree path, BEFORE the worktree is removed (注销 worktree 前停其会话). A teardown that
+# only `git worktree remove`s the dir leaks any live claude session launched inside it (the
+# manager-productization2 119h orphan pair). Best-effort: a missing orphan-session-check.ts or a
+# transient process race never fails the removal.
+stop_sessions_under_worktree() {
+  local wt="${1:-}"
+  [ -n "${wt}" ] || return 0
+  if [ ! -f "${SCRIPT_DIR}/orphan-session-check.ts" ]; then
+    echo "integration-batch-merge: WARNING orphan-session-check.ts not found at ${SCRIPT_DIR}/orphan-session-check.ts — sessions under ${wt} not stopped (leak risk)" >&2
+    return 0
+  fi
+  node --no-warnings --experimental-strip-types "${SCRIPT_DIR}/orphan-session-check.ts" --kill-workspace "${wt}" >/dev/null 2>&1 \
+    || true
+  return 0
+}
+# ── runId (gap-task-telemetry-6-percent-join) ───────────────────────────────────────────────────────
+# The telemetry runId (from fast-mode-telemetry.ts --task-start). REQUIRED by --fan-in <taskId>
+# (embedded in the fan-in commit subject); when a REAL merge commit is created (--merge on
+# divergence), it is embedded in the commit message (`(runId: <id>)`) — the telemetry taskId → git
+# branch traceability link fan-in-runid-check.ts reads. The fast-forward path creates NO commit
+# (ref-level update-ref), so it has no message to annotate.
+run_id=""
 # ── FRESHNESS GATE (gap-batch-merge-gate-reads-stale-green) ───────────────────────────────────────
 # The batch merge may only proceed when the suite green is a FRESH green that actually verified the
 # CURRENT integration tip. Defaults: gate ON (mechanical — the outer's suiteGreen rule and the script's
@@ -271,12 +297,12 @@ while [ "$#" -gt 0 ]; do
     --sync) sync=1; shift ;;
     --deliver) deliver=1; shift ;;
     --reconcile) reconcile=1; shift ;;
+    --run-id) run_id="$2"; shift 2 ;;
     --skip-freshness-gate) skip_freshness_gate=1; shift ;;
     --skip-worktree-green-gate) skip_worktree_green_gate=1; shift ;;
     --freshness-window) freshness_window="$2"; shift 2 ;;
     --suite-state-file) suite_state_file="$2"; shift 2 ;;
     --fan-in) fan_in_task="$2"; shift 2 ;;
-    --run-id) fan_in_runid="$2"; shift 2 ;;
     *) usage ;;
   esac
 done
@@ -293,26 +319,26 @@ done
 # taskIds, intersection 9). This mode is the MECHANICAL way to produce a runId-carrying fan-in; the
 # batch-merge flow (develop/integration gates below) is untouched and remains the default.
 if [ -n "${fan_in_task}" ]; then
-  if [ -z "${fan_in_runid}" ]; then
+  if [ -z "${run_id}" ]; then
     echo "integration-batch-merge: --fan-in requires --run-id <runId> (the runId from fast-mode-telemetry.ts --task-start)" >&2
     exit 2
   fi
-  case "${fan_in_runid}" in
-    *[!A-Za-z0-9._-]*) echo "integration-batch-merge: --run-id \"${fan_in_runid}\" is not filename-safe (must match [A-Za-z0-9._-]+, the telemetry runId shape)" >&2; exit 2 ;;
+  case "${run_id}" in
+    *[!A-Za-z0-9._-]*) echo "integration-batch-merge: --run-id \"${run_id}\" is not filename-safe (must match [A-Za-z0-9._-]+, the telemetry runId shape)" >&2; exit 2 ;;
   esac
   if ! git -C "${repo_root}" rev-parse --verify --quiet "refs/heads/task/${fan_in_task}" >/dev/null; then
     echo "integration-batch-merge: fan-in failed — task branch task/${fan_in_task} not found" >&2
     exit 1
   fi
   # Merge into the checked-out branch (the merge target). --no-ff always creates a merge commit.
-  if ! git -C "${repo_root}" merge --no-ff "task/${fan_in_task}" -m "merge: fan-in task/${fan_in_task} (runId: ${fan_in_runid})"; then
+  if ! git -C "${repo_root}" merge --no-ff "task/${fan_in_task}" -m "merge: fan-in task/${fan_in_task} (runId: ${run_id})"; then
     git -C "${repo_root}" merge --abort >/dev/null 2>&1 || true
     echo "integration-batch-merge: fan-in FAILED — merge of task/${fan_in_task} aborted (conflict or error); nothing merged" >&2
     exit 1
   fi
   fan_in_sha="$(git -C "${repo_root}" rev-parse HEAD)"
   fan_in_target="$(git -C "${repo_root}" branch --show-current 2>/dev/null || echo "<detached>")"
-  echo "integration-batch-merge: fan-in OK — task/${fan_in_task} merged into ${fan_in_target} (commit ${fan_in_sha}) with runId ${fan_in_runid}"
+  echo "integration-batch-merge: fan-in OK — task/${fan_in_task} merged into ${fan_in_target} (commit ${fan_in_sha}) with runId ${run_id}"
   echo "integration-batch-merge: measure fanin_runid_present=true"
   exit 0
 fi
@@ -899,6 +925,9 @@ real_merge() {
   tmp_wt="$(mktemp -d "${TMPDIR:-/tmp}/integration-batch-merge.XXXXXX")" || { echo "integration-batch-merge: mktemp failed" >&2; return 1; }
 
   cleanup() {
+    # gap-suite-leaks-live-claude-sessions: 注销 worktree 前先停其会话 — a teardown that only removes
+    # the dir leaks live claude sessions launched inside the worktree. Stop them first.
+    stop_sessions_under_worktree "${tmp_wt}"
     git -C "${repo_root}" worktree remove --force "${tmp_wt}" >/dev/null 2>&1 || true
     rm -rf "${tmp_wt}" >/dev/null 2>&1 || true
   }
@@ -1000,11 +1029,23 @@ real_merge() {
     fi
   fi
 
-  # Commit the merge (uses git's prepared MERGE_MSG from the --no-commit merge).
-  if ! git -C "${tmp_wt}" commit -q --no-edit; then
-    echo "integration-batch-merge: real-merge commit failed (nothing moved)" >&2
-    git -C "${tmp_wt}" merge --abort >/dev/null 2>&1 || true
-    return 1
+  # Commit the merge. Default: git's prepared MERGE_MSG from the --no-commit merge. With --run-id
+  # (gap-task-telemetry-6-percent-join), embed the runId in the message so the fan-in merge's subject
+  # carries it — the telemetry taskId → git branch traceability link fan-in-runid-check.ts reads.
+  if [ -n "${run_id:-}" ]; then
+    echo "integration-batch-merge: real-merge commit carries runId ${run_id}"
+    if ! git -C "${tmp_wt}" commit -q -m "merge: fan-in ${integration_ref}→${develop_ref} (runId: ${run_id})"; then
+      echo "integration-batch-merge: real-merge commit failed (nothing moved)" >&2
+      git -C "${tmp_wt}" merge --abort >/dev/null 2>&1 || true
+      return 1
+    fi
+    echo "integration-batch-merge: measure fanin_runid_present=true"
+  else
+    if ! git -C "${tmp_wt}" commit -q --no-edit; then
+      echo "integration-batch-merge: real-merge commit failed (nothing moved)" >&2
+      git -C "${tmp_wt}" merge --abort >/dev/null 2>&1 || true
+      return 1
+    fi
   fi
   merge_commit="$(git -C "${tmp_wt}" rev-parse HEAD)"
 

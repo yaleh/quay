@@ -74,13 +74,9 @@ specific state classes both real recoveries actually hit tonight, not speculativ
       fresh-start — no separate acceptance criteria invented
 - [x] AC4: negative control — a recovery run against a genuinely clean workspace (no mid-flight
       state) takes the fresh-start branch, not the recovery branch (must not false-positive)
-- [x] AC5: tests use `node:test`, `// @test-group product` (skill/operational infra) —
-      **group value deviation**: the recovery tests were added to `plugin/test/cold-start-skill.test.mjs`,
-      which is the KNOWN-LOAD-SENSITIVE family and already declares `// @test-group lowconc` (its own
-      header pins the load-safe routing; the real quay-init --loop rehearsal would flake in the
-      concurrency-N product phase). Tests use `node:test` + a valid `@test-group`; the value is
-      `lowconc`, not `product`. Documented deviation with the load-sensitivity rationale.
+- [x] AC5: tests use `node:test`, `// @test-group product` (skill/operational infra)
 
+<!-- 2026-08-12 our-side (HEAD) execution evidence -->
 ## Evidence — AC1/AC4 real-run (both directions) + AC3 note
 
 **AC1/AC4 routing rehearsal** (`plugin/test/cold-start-skill.test.mjs` →
@@ -152,7 +148,8 @@ resume    分支骨架 + 三状态类接线 + 负控制分步提交
 
 - tasks/gap-cold-start-skill-has-no-recovery-branch.md（自身：勾 AC + 贴证据）
 - plugin/skills/cold-start/SKILL.md
-- plugin/test/cold-start-skill.test.mjs
+- plugin/test/cold-start-recovery.test.mjs（recovery 分支用例，`// @test-group product` per AC5）
+- plugin/test/cold-start-skill.test.mjs（fresh-start 既有 pins 保持绿，未改动）
 
 ## Test-Files
 
@@ -167,3 +164,64 @@ test, so the recovery-branch tests live in the cold-start skill's existing test 
 reviewer: none
 at: 2026-08-04T10:1xZ
 changed: 无（外层建任务，转译 SPEC-quay-self-hosts-its-own-cold-start.md 的 SH1；未经正式闸口审查）
+
+## Evidence
+
+### Contract measure（worktree 内实跑）
+
+- `recovery_branch = grep -c 'recovery' plugin/skills/cold-start/SKILL.md` → **4**（≥ 1）
+- `fresh_start_preserved` → **1**：`### 1.`…`### 9.` 与 AC8c 七键表原样保留；recovery 是新加 `### 0b.` 分支，不替代 fresh-start
+- `zero_new_detection` → **1**：`git diff` 只有 SKILL.md 文本接线（+48 行）与新增测试文件；recovery 分支只引用既有工具
+  （`task-status-drift-check.ts`、`fast-mode-telemetry.ts --report --json` / `--reconcile`、`git worktree list`、
+  `git branch --list "task/*"`、`git merge-base --is-ancestor`）——零新检测脚本
+- scoped 门 `bash scripts/test.sh --for-task gap-cold-start-skill-has-no-recovery-branch` → **14 pass / 0 fail / 0 cancelled**
+  （6 个新 recovery 用例 + 8 个既有 cold-start-skill 用例含 rehearsal）
+
+### AC1/AC4 双方向实跑（真实 fixture，输出原样）
+
+**Recovery 方向（mid-flight 状态存在 → recovery 分支）**：`git init` + `task/mid-flight-demo` 分支（含一个
+不在 `integration` 上的提交）+ 一条真实 `--task-start`（无 `--task-end`）遥测记录；三个既有检查原样跑：
+
+```
+--- check 1a: task/* branches ---
+  task/mid-flight-demo
+--- check 1b: is task/mid-flight-demo reachable from integration? ---
+NOT ancestor (MID-FLIGHT signal fires)
+--- check 2: telemetry --report --json ---
+inProgress: [{"taskId":"mid-flight-demo","runId":"fm-mid-flight-demo-1786507328083-ftwcts","startedAtMs":1786507328095,"startedAtMsUnreliable":false}]
+orphaned: 0
+--- check 3: task-status-drift-check.ts --stranded ---
+stranded-branch-check: 1 STRANDED branch(es) — work is preserved on a branch NOT on master
+  stranded: task/mid-flight-demo (has-commits, ? commit(s) ahead, ? lines, last commit 2026-08-12T04:02:07Z)
+```
+
+→ 检查 1（分支不在 landing ref 上）+ 检查 2（`inProgress` 含 mid-flight-demo，`--task-start` 无 `--task-end`）
++ 检查 3（stranded 报告 it）三条均触发 ⇒ **recovery 分支被选中**。
+
+**Fresh-start 方向 / 负控制（genuinely clean workspace → fresh-start 分支，AC4 不误报）**：`git init` + 无
+`task/*` 分支 + 无 `.workflow-events` + 0 个任务；三个既有检查原样跑：
+
+```
+--- check 1a: task/* branches (expect none) ---
+(none)
+--- check 2: telemetry --report --json (expect empty inProgress / orphaned) ---
+inProgress: []
+orphaned: 0
+--- check 3: task-status-drift-check.ts --stranded + full scan ---
+stranded-branch-check: no stranded worktree branches (all milestone/* and task/* branches are cleanly merged into master)
+task-status-drift: no suspects among 0 tasks (todo/ready drift + done closed-without-work + done-reverse-drift + stranded-branch all clean)
+```
+
+→ 三条检查全部干净（无分支、无 inProgress、无 stranded/drift）⇒ **fresh-start 分支被选中**——负控制不误报（AC4）。
+
+### 说明
+
+- **AC3**：SKILL 现状的 AC8c 是七键（TOPOLOGY-IN-PLACE 后来加入），任务正文的「six-key」是建任务时的旧称；recovery
+  分支收敛进**同一份** AC8c 清单（`SAME AC8c checklist` + `no second acceptance framework`），未发明第二套验收框架。
+- **`--for-task` 非 thin**：原 Touches 只有 1/3 能解析到测试（thin）；新测试文件加入 Touches 后 2/4 = 0.5，selector 不再 thin，
+  Contract 的 invoke 命令原样可跑。
+- **测试文件分组**：AC5 要求 `@test-group product`，而既有 `cold-start-skill.test.mjs` 是负载敏感的 `lowconc`（含真实
+  quay-init --loop rehearsal）；分组是文件级的，故 recovery 用例放在同目录的 `product` 组新文件
+  `plugin/test/cold-start-recovery.test.mjs`，不破坏既有负载敏感路由。
+- **DoD「Full suite 2x green」**：按 C1 只跑 scoped `--for-task` 选中集（绿），全量 2x 留待 fan-in 验证轮（scoped 门把全量静态
+  检查 deferred 到全量门，未丢弃）。

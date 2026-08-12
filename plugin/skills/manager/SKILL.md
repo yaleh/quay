@@ -324,35 +324,26 @@ dev-tree 仍优先包根份——manager 角色 `claude`/`quay-manager` 两份�
 
 ---
 
-## 7a. 冷启动 — 可证伪判据清单（observable consequences，对齐 outer 7 条）
+## 6.5 冷启动可证伪判据（observable consequences，对齐 outer 的 7 条）
 
-manager 冷启动 = `manager-start.sh`（建家 / 建会话 / 武装 loop / 写清单）+ 首 tick（挂 idle-watch、
-记 cron 证据）。**冷启动没有可证伪完成判据 = 缺陷 4**（outer 有 7 条 observable consequences，
-manager 曾经 0 条）。修后完成判据 = 下列 7 条**可证伪项全部为真**；一条为假 ⇒ 未完成。
+**外层的冷启动有 7 条可证伪判据（cold-start/SKILL.md observable consequences），manager 曾经一条
+都没有——「说启动了」没有任何可以被证伪的完成定义。** 本条补上：**manager 冷启动完成后，以下
+七条必须全部为真**；任何一条为假 = 冷启动未完成。报告每条为 `<KEY>: true|false` + 一行证据。
+（判据的正本随包，`quay manager start` 写的 `idle-watch-mount.txt` 与 `manager-arm-loop.sh --verify`
+是本清单的机械执行面。）
 
-| # | Key | 可检查判据 | 证据 / 由谁填 |
+| # | Key | 可证伪判据（checkable definition） | 证据 |
 |---|---|---|---|
-| 1 | SESSION-CREATED | `tmux has-session -t <session>` 且 pane 有 claude 进程（非裸 bash） | manager-start.sh（启动态即真） |
-| 2 | HOME-CREATED | `<home>/identity` 存在且 `role=manager` | manager-start.sh |
-| 3 | LOOP-ARMED | `manager-arm-loop.sh --home <home> --validate` 0 且 loop-registry.txt 恰一条 `[manager-tick]` | manager-start.sh → manager-arm-loop.sh |
-| 4 | CRON-EVIDENCED | `manager-arm-loop.sh --home <home> --verify-cron` 0（注册表↔真 CronCreate/CronList 证据一致且新鲜） | 首 tick（B4 记 cron-evidence.jsonl） |
-| 5 | IDLE-WATCH-MOUNTED | `monitor-mount-check.sh --json` 报 `mounted=true` + `targetOk=true` | 首 tick（挂 session-liveness-mount.sh，非独立脚本） |
-| 6 | MONITORS-DELIVERING | `session-liveness.sh --once` 至少一行 `SESSION-STATUS` | 首 tick（--once 接缝） |
-| 7 | CHECKLIST-REPORTED | `<home>/cold-start-checklist.md` 七键全 true 且各有证据 | 全部填完后为 true |
+| 1 | `HOME-IN-PLACE` | manager 家 `$QUAY_GLOBAL_DIR/manager/` 三件套齐：`identity`（role=manager）+ `loop-registry.txt`（arm 后恰一条 `[manager-tick]`）+ `manager-tick-log.md`（tick 落行） | `ls` 三个文件 + `grep -c '\[manager-tick\]' loop-registry.txt` |
+| 2 | `IDLE-WATCH-MOUNTED` | 常驻观测者已挂：`bash <quay>/plugin/scripts/monitor-mount-check.sh --json` 报 `mounted=true` 且 `targetOk=true`（真机制 = `session-liveness-mount.sh` + Monitor 事件，非 `idle-watch.sh`——那脚本不存在） | `--json` 输出两条 |
+| 3 | `IDLE-WATCH-DELIVERING` | 观测者能产事件：`bash <quay>/plugin/scripts/session-liveness.sh --once` 至少一条 `SESSION-STATUS`（确定性接缝；稳态会话不发射转换事件是正常的，别等 ~90s） | `--once` 的 `SESSION-STATUS` 行逐字 |
+| 4 | `CRON-CREATED` | `CronList` 恰一 `[manager-tick]`（agent 在会话内确认；bash 看不到） | `CronList` 输出 |
+| 5 | `REGISTRY-MATCHES` | 注册表 ↔ 真 cron 可核实：`bash <quay>/plugin/scripts/manager-arm-loop.sh --verify --home <home>` 报 `registry-verified`（恰一哨兵 + 新鲜 CronCreate 收据；`registry-only` = 注册表说武装了但没核实 = 缺陷） | `--verify` 输出 |
+| 6 | `FIRST-TICK-LANDED` | 首轮 tick 落行：`bash <quay>/plugin/scripts/manager-tick-log-check.sh --log <home>/manager-tick-log.md` PASS | check 输出 |
+| 7 | `NOT-STARTED-BY-PROJECT` | manager 是跨项目第三层，**不属于任何项目的 `outer`+`inner` 拓扑**——`topology-check.sh --session <proj>` 只报两窗口，`quay manager start` 拒收项目参数（start/adopt 分离，C5） | topology `--json` + start 拒绝输出 |
 
-判据要点（可证伪 = 每条都能给 true/false + 一行证据）：
-
-- **判据 3/4 分开**：**「注册表说武装了」≠「真的有 cron」**（缺陷 3）——`LOOP-ARMED` 只证注册表，
-  `CRON-EVIDENCED` 才证会话内真的执行了 CronCreate/CronList（`manager-arm-loop.sh --verify-cron`
-  核对 `<home>/cron-evidence.jsonl` 的 mechanism / sentinel / cronListCount / 新鲜度）。
-- **判据 5/6 用真机制**：idle-watch 是 `session-liveness-mount.sh` + Monitor 工具任务（非独立进程，
-  缺陷 1 修复），查它用 `monitor-mount-check.sh --json` + `session-liveness.sh --once`，
-  **不是对不存在的独立脚本做进程 pgrep**（缺陷 2）。
-
-冷启动完成后，把 `<home>/cold-start-checklist.md` 的七键读数（true/false + 一行证据）贴出，
-即复现完成判据；任何一键为假即「未完成」。
-
----
+判据能机械回答的四问：**idle-watch 发事件?（#2/#3）cron 存在?（#4/#5）首轮 tick 留痕?（#6）
+家目录三件套齐?（#1）**——没有一条是「agent 说完成了」。
 
 ## 7. 方法论来源（AC6）——SPEC-*.md 索引，不批量结晶
 

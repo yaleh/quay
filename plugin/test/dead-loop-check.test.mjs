@@ -45,13 +45,18 @@ function isoAgo(ageSec) {
   return new Date(Date.now() - ageSec * 1000).toISOString();
 }
 
-// makeProject({ commitAgeSec, userMsgAgeSec, withTasks }) → { root, transcriptDir, run, cleanup }
+// makeProject({ commitAgeSec, userMsgAgeSec, withTasks, withDriver, withTelemetry }) →
+//   { root, transcriptDir, run, cleanup }
 //   commitAgeSec: "none" = no git repo at all; 0 = create a commit now (fresh); number > 0 =
 //     backdate the commit's committer date by that many seconds.
 //   userMsgAgeSec: "none" = no transcript dir/file; number = latest user message is that many
 //     seconds old (0 = now).
 //   withTasks: true = create a non-empty tasks/ backlog (to prove queue-emptiness is NOT the signal).
-function makeProject({ commitAgeSec, userMsgAgeSec, withTasks = false }) {
+//   withDriver: true = write .quay/loop-driver.jsonl (cold-start step 5 driver registration) —
+//     the start evidence that distinguishes a real running loop from a fresh cold-start session.
+//   withTelemetry: true = write .workflow-events/*.jsonl with a task-start record (inner dispatch
+//     telemetry) — the alternative start evidence.
+function makeProject({ commitAgeSec, userMsgAgeSec, withTasks = false, withDriver = false, withTelemetry = false }) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "dead-loop-"));
   const root = path.join(tmp, "proj");
   const transcriptDir = path.join(tmp, "transcripts");
@@ -81,6 +86,17 @@ function makeProject({ commitAgeSec, userMsgAgeSec, withTasks = false }) {
   if (withTasks) {
     fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
     fs.writeFileSync(path.join(root, "tasks", "T-1.md"), "---\nid: T-1\n---\nbacklog entry");
+  }
+
+  if (withDriver) {
+    fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+    fs.writeFileSync(path.join(root, ".quay", "loop-driver.jsonl"),
+      '{"mechanism":"cron","interval":"*/20 * * * *","source":"cold-start"}\n');
+  }
+  if (withTelemetry) {
+    fs.mkdirSync(path.join(root, ".workflow-events"), { recursive: true });
+    fs.writeFileSync(path.join(root, ".workflow-events", "events.jsonl"),
+      '{"type":"task-start","taskId":"T-1","timestamp":"2026-08-12T00:00:00Z"}\n');
   }
 
   const run = (args = []) =>
@@ -165,6 +181,93 @@ test("AC2: NON-EMPTY queue + no drive/commit => dead (nobody driving, not queue-
     assert.equal(f.has_git_commit, "0");
     assert.equal(f.has_transcript_user_msg, "0");
     assert.equal(f.liveness_independent_of_backlog, "1");
+  } finally { p.cleanup(); }
+});
+
+// ── --check-running mode: transcript activity alone is NOT the loop running ─────────────────────────
+// (gap-dead-loop-check-fresh-coldstart-false-running) — a fresh cold-start's outer session writes its
+// OWN transcript while running step 1-9, so loop_alive=alive (transcript activity) must be corroborated
+// by start evidence (.quay/loop-driver.jsonl or .workflow-events task-start) before reporting running:
+//   alive + start evidence ⇒ running；alive + none ⇒ stopped/never-started.
+
+test("check-running: fresh transcript + NO start evidence => stopped/never-started (was: running)", () => {
+  // Core negative control: cold-start session activity looks alive, but without driver/telemetry the
+  // loop has never started. This was the false positive (running) before the fix.
+  const p = makeProject({ commitAgeSec: 29 * 3600, userMsgAgeSec: 0 });
+  try {
+    const res = p.run(["--check-running"]);
+    assert.equal(res.status, 0, res.stderr);
+    const f = parseFields(res.stdout);
+    assert.equal(f.cold_start_state, "stopped");
+    assert.equal(f.stopped_reason, "never-started");
+    assert.equal(f.next_step, "restart");
+  } finally { p.cleanup(); }
+});
+
+test("check-running: fresh commit + NO start evidence => stopped/never-started (was: running)", () => {
+  // Same false-positive class via the git-commit signal: a freshly-set-up project commits, but that
+  // commit is setup, not a running loop. Without driver/telemetry it has never started.
+  const p = makeProject({ commitAgeSec: 0, userMsgAgeSec: "none" });
+  try {
+    const res = p.run(["--check-running"]);
+    assert.equal(res.status, 0, res.stderr);
+    const f = parseFields(res.stdout);
+    assert.equal(f.cold_start_state, "stopped");
+    assert.equal(f.stopped_reason, "never-started");
+    assert.equal(f.next_step, "restart");
+  } finally { p.cleanup(); }
+});
+
+test("check-running: fresh transcript + .quay/loop-driver.jsonl => running", () => {
+  // Driver registration (cold-start step 5) is start evidence: a real loop has started.
+  const p = makeProject({ commitAgeSec: 29 * 3600, userMsgAgeSec: 0, withDriver: true });
+  try {
+    const res = p.run(["--check-running"]);
+    assert.equal(res.status, 0, res.stderr);
+    const f = parseFields(res.stdout);
+    assert.equal(f.cold_start_state, "running");
+    assert.equal(f.next_step, "none");
+    assert.equal(f.stopped_reason, undefined,
+      "a running loop must not emit stopped_reason (keeps the Contract grep 'stopped' clean at 0)");
+  } finally { p.cleanup(); }
+});
+
+test("check-running: fresh transcript + .workflow-events task-start (no driver) => running", () => {
+  // Inner-dispatch telemetry is the alternative start evidence, even without the driver registration.
+  const p = makeProject({ commitAgeSec: 29 * 3600, userMsgAgeSec: 0, withTelemetry: true });
+  try {
+    const res = p.run(["--check-running"]);
+    assert.equal(res.status, 0, res.stderr);
+    const f = parseFields(res.stdout);
+    assert.equal(f.cold_start_state, "running");
+    assert.equal(f.next_step, "none");
+  } finally { p.cleanup(); }
+});
+
+test("check-running: NO fresh transcript/commit + NO start evidence => stopped/never-started (dead path)", () => {
+  // The stopped branch keeps its behavior: dead (no liveness) + never started => never-started.
+  const p = makeProject({ commitAgeSec: 29 * 3600, userMsgAgeSec: 29 * 3600 });
+  try {
+    const res = p.run(["--check-running"]);
+    assert.equal(res.status, 0, res.stderr);
+    const f = parseFields(res.stdout);
+    assert.equal(f.cold_start_state, "stopped");
+    assert.equal(f.stopped_reason, "never-started");
+    assert.equal(f.next_step, "restart");
+  } finally { p.cleanup(); }
+});
+
+test("check-running: started-but-stopped (driver exists, stale, empty backlog) => queue-empty", () => {
+  // Regresses the extracted dl_has_start reuse in the stopped branch: has_start still routes
+  // started-but-stopped projects to queue-empty (not never-started) when the backlog is empty.
+  const p = makeProject({ commitAgeSec: 29 * 3600, userMsgAgeSec: 29 * 3600, withDriver: true, withTasks: false });
+  try {
+    const res = p.run(["--check-running"]);
+    assert.equal(res.status, 0, res.stderr);
+    const f = parseFields(res.stdout);
+    assert.equal(f.cold_start_state, "stopped");
+    assert.equal(f.stopped_reason, "queue-empty");
+    assert.equal(f.next_step, "backlog-empty");
   } finally { p.cleanup(); }
 });
 

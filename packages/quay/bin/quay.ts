@@ -402,7 +402,7 @@ Usage:
   quay mcp
 
 Options for task list:
-  --status <status>   Filter by status (todo, ready, done, needs-human)
+  --status <status>   Filter by status (todo, ready, done, needs-human, superseded)
   --label <label>     Filter by label (repeatable: --label A --label B for AND-filter)
   --prefix <prefix>   Filter by task id prefix (e.g. QX for QX-* tasks)
   --sort id|status|updated  Sort by id, status, or last-updated time (default: insertion order)
@@ -420,7 +420,7 @@ Options for task create:
   --title <title>      Title for the new task (REQUIRED — hard usage error, no provider call, if missing or empty)
   --body <text>        Initial body text (mutually exclusive with --body-file)
   --body-file <path>   Read initial body from a file ("-" for stdin; mutually exclusive with --body)
-  --status <status>    Initial status (todo, ready, done, needs-human)
+  --status <status>    Initial status (todo, ready, done, needs-human, superseded)
   --labels <a,b>       Comma-separated initial labels
   --parent <id>        Parent task id
   --children <a,b>     Comma-separated child task ids
@@ -429,7 +429,7 @@ Options for task create:
 
 Options for task edit:
   --title <title>       New title (see note below: required and non-empty if <task-id> does not yet exist)
-  --status <status>     New status (todo, ready, done, needs-human)
+  --status <status>     New status (todo, ready, done, needs-human, superseded)
   --body <text>         Replace body with this text (mutually exclusive with --body-file)
   --body-file <path>    Replace body with file contents ("-" for stdin; mutually exclusive with --body)
   --labels <a,b>        Comma-separated labels (replaces existing labels)
@@ -1816,8 +1816,10 @@ Usage:
   quay manager arm                   (re)arm the manager loop anchor (sentinel-idempotent; AC5/AC5c)
 
 Flags:
-  --dry-run    Print the plan without changing anything (start/adopt/arm)
-  --json       Machine-readable output
+  --dry-run            Print the plan without changing anything (start/adopt/arm)
+  --json               Machine-readable output
+  --check-idle-watch   (start) verify the manager's idle-watch is mounted+delivering (AC3)
+  --verify             (arm) externally verify the loop-registry carries a fresh CronCreate receipt (AC4)
 
 The manager is CROSS-PROJECT (SPEC-manager-productization C2): its session (quay-manager), home
 (\$QUAY_GLOBAL_DIR/manager/) and loop anchor belong to no single project. 'start' and 'adopt' are
@@ -1866,6 +1868,7 @@ separate commands on purpose (C5: two commands, not one parameterised command).
       const args = [];
       if (mgrFlags["dry-run"]) args.push("--dry-run");
       if (mgrFlags.json) args.push("--json");
+      if (mgrFlags["check-idle-watch"]) args.push("--check-idle-watch");
       process.exitCode = runManagerScript(managerStart, args) ?? 1;
       return;
     }
@@ -1886,6 +1889,7 @@ separate commands on purpose (C5: two commands, not one parameterised command).
       const args = [];
       if (mgrFlags["dry-run"]) args.push("--dry-run");
       if (mgrFlags.json) args.push("--json");
+      if (mgrFlags.verify) args.push("--verify");
       process.exitCode = runManagerScript(managerArm, args) ?? 1;
       return;
     }

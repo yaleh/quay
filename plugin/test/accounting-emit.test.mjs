@@ -253,7 +253,9 @@ test("AC39 layer_map_correct — cap-from-gate/slot-refill belong to INNER, clos
 
 test("AC39 — the MANAGER's four-tuple is complete after the mapping fix (no more cap-from-gate/slot-refill missing)", () => {
   const root = tmpRoot("ac39-manager-");
-  // manager's only registered mechanism is manager-tick-log, with a real mtime trace.
+  const now = Math.floor(Date.now() / 1000);
+  // manager's registered mechanisms (AC39 merged map): manager-tick-log (real mtime trace) +
+  // Workflow + session-liveness (injected via --mechanism with recent epochs).
   fs.mkdirSync(path.join(root, "orchestration"), { recursive: true });
   fs.writeFileSync(path.join(root, "orchestration", "manager-tick-log.md"), "# manager tick log\n", "utf8");
   const { parsed, status } = jsonRun([
@@ -261,6 +263,8 @@ test("AC39 — the MANAGER's four-tuple is complete after the mapping fix (no mo
     "--root", root,
     "--in-flight", "1",
     "--cap", "3",
+    "--mechanism", `Workflow:${now - 30}`,
+    "--mechanism", `session-liveness:${now - 60}`,
   ]);
   assert.equal(status, 0, "manager four-tuple complete (exit 0)");
   assert.equal(parsed.complete, true);
@@ -268,7 +272,7 @@ test("AC39 — the MANAGER's four-tuple is complete after the mapping fix (no mo
   const mechNames = parsed.mechanisms.map((m) => m.name);
   assert.ok(!mechNames.includes("cap-from-gate"), "manager emits NO cap-from-gate");
   assert.ok(!mechNames.includes("slot-refill"), "manager emits NO slot-refill");
-  assert.equal(mechNames.length, 1, "manager emits only its own manager-tick-log");
+  assert.equal(mechNames.length, 3, "manager emits its own manager-tick-log/Workflow/session-liveness");
   fs.rmSync(root, { recursive: true, force: true });
 });
 

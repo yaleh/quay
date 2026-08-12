@@ -43,16 +43,19 @@ import type { Task } from "../../quay/src/abi.ts";
 const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/;
 
 /**
- * Map a Backlog.md free-form status string onto quay's 4-state model
- * (todo/ready/done/needs-human — design §3). Backlog.md statuses observed
- * in the wild are lane-prefixed free text ("Basic: Backlog", "Epic: Done",
- * bare "Done", etc.) — there is no fixed enum to switch on. Rule (stated,
- * not silently guessed): the string "Done" appearing anywhere in the status
+ * Map a Backlog.md free-form status string onto quay's task-status model
+ * (todo/ready/done/needs-human/superseded — design §3 + the superseded
+ * terminal added 2026-08-12). Backlog.md statuses observed in the wild are
+ * lane-prefixed free text ("Basic: Backlog", "Epic: Done", bare "Done",
+ * etc.) — there is no fixed enum to switch on. Rule (stated, not silently
+ * guessed): the string "Done" appearing anywhere in the status
  * (case-insensitive) maps to quay's terminal `done`; everything else
  * (Backlog, In Progress, To Do, Blocked, ...) maps to `todo` — the single
  * non-terminal state that is always a safe, conservative default (a task
  * mapped to `todo` can still be advanced through quay's normal lifecycle;
  * a wrongly-terminal mapping would silently hide real remaining work).
+ * `superseded` is intentionally NOT produced here: Backlog.md has no lane
+ * for voided work, so an ambiguous line must not be silently made terminal.
  */
 export function mapStatus(rawStatus: unknown): "todo" | "done" {
   if (typeof rawStatus !== "string") return "todo";

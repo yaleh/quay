@@ -1,9 +1,16 @@
 // @test-group product
-// gap-git-history-svg-server-rendered — /git-history must return a SERVER-RENDERED SVG with zero
-// client JS and zero new deps. AC2: the route returns a real `<svg`; AC3: x 轴 = 落地时刻 with NO
-// duration/effort semantics (a per-day histogram — each column is a 1-day bucket of commits LANDED,
-// never a duration bar; the page names the two traps); AC4: zero `<script>` tags in the whole page
-// and no new dependencies; AC5: a non-git workspace degrades to 200 (never a 500).
+// gap-git-history-svg-server-rendered — /git-history must return a SERVER-RENDERED SVG whose
+// x-axis is commit LANDING time (not duration), with zero <script> tags (AC4 zero client JS) and
+// zero new dependencies. The two task traps are pinned by the renderer's contract and tested here:
+//   Trap 1 — the x-axis is the commit landing moment, not a duration: git branch lifespan ≠ task
+//            work hours (measured: 149/164 fan-in branches lived <1h — the task finished before its
+//            first commit even landed). The test asserts x maps monotonically to commit time and the
+//            page's note says 落地时刻/非工时.
+//   Trap 2 — the chart does NOT fake knowing work hours: it draws only what git proves (points at
+//            commit times, branch existence intervals, merges). No duration/work-hour marks exist.
+//
+// renderGitHistorySvg is a PURE function (deterministic on its input), so the x-axis semantic is
+// unit-tested directly; the route is integration-tested against a real git-init'd workspace.
 //
 // Run (scoped): node --test packages/quay/test/serve-handlers.test.mjs
 import { test } from "node:test";
@@ -16,11 +23,16 @@ import os from "node:os";
 import net from "node:net";
 import http from "node:http";
 import { startServer } from "../src/serve.ts";
+import { renderGitHistorySvg, groupCommitsByBranch } from "../src/serve-handlers.ts";
+import { readGitHistory } from "../src/observation.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
+import { createStore } from "../../quay-native/src/store.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const nativeBin = QUAY_NATIVE_CLI;
 const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin");
+
+const DAY = 86400;
 
 function freePort() {
   return new Promise((resolve) => {
@@ -42,146 +54,192 @@ function get(port, urlPath) {
   });
 }
 
-/** Write a native-provider config.yml for the given workspace. */
-function writeConfig(ws, tasksDir) {
+/** A commit fixture for the pure renderer (shape matches observation.GitHistoryCommit). */
+function c(hash, t, ref, parents, subject) {
+  return { hash, t, ref, parents, subject };
+}
+
+// ── AC3 unit: x-axis = landing time, monotonic; no duration semantics ──────────
+
+test("AC3: renderGitHistorySvg maps x monotonically to commit landing time (not duration)", () => {
+  const t0 = 1_700_000_000;
+  const history = {
+    status: "ok",
+    reason: null,
+    commits: [
+      c("aaa0000", t0, "integration", 1, "base"),
+      c("bbb0000", t0 + 3 * DAY, "integration", 1, "second"),
+      c("ccc0000", t0 + 6 * DAY, "integration", 1, "third"),
+    ],
+  };
+  const svg = renderGitHistorySvg(history);
+  assert.ok(svg.startsWith("<svg"), "renderer returns an SVG document");
+  assert.ok(svg.includes("</svg>"), "SVG is well-formed (closes </svg>)");
+
+  // Lane circles (ignore the legend circle at a fixed x) — the three commits' cx must increase
+  // strictly with time, pinning the x-axis semantic = commit landing time.
+  const cxs = [...svg.matchAll(/<circle cx="([0-9.]+)"/g)].map((m) => Number(m[1]));
+  assert.ok(cxs.length >= 4, `legend + 3 commit points present (got ${cxs.length})`);
+  const lane = cxs.slice(1); // drop the legend marker
+  assert.equal(lane.length, 3);
+  assert.ok(lane[0] < lane[1] && lane[1] < lane[2],
+    `x increases with commit time: ${lane.map((v) => v.toFixed(1)).join(" < ")}`);
+});
+
+test("AC3: single-instant window still renders a finite plot (no NaN), zero <script>", () => {
+  const history = {
+    status: "ok",
+    reason: null,
+    commits: [
+      c("aaa0000", 1_700_000_000, "integration", 1, "only"),
+      c("bbb0000", 1_700_000_000, "task/x", 2, "merge at same instant"),
+    ],
+  };
+  const svg = renderGitHistorySvg(history);
+  assert.ok(svg.includes("<svg"), "renders even when every commit shares one timestamp");
+  assert.ok(!svg.includes("NaN"), "no NaN leaks into the SVG for a zero-width window");
+  assert.ok(!svg.includes("<script"), "zero client JS: no <script> in the SVG");
+});
+
+test("AC3: merge commits are marked distinctly (orange diamond), regular commits blue circles", () => {
+  const history = {
+    status: "ok",
+    reason: null,
+    commits: [
+      c("aaa0000", 1_700_000_000, "integration", 1, "base"),
+      c("bbb0000", 1_700_000_100, "integration", 2, "merge fan-in"),
+    ],
+  };
+  const svg = renderGitHistorySvg(history);
+  assert.ok(svg.includes('fill="#2a78d6"'), "regular commit uses the validated blue");
+  assert.ok(svg.includes('fill="#eb6834"'), "merge commit uses the validated orange");
+  assert.ok(svg.includes('rotate(45'), "merge commit is a diamond (rotated square)");
+  assert.ok(svg.includes("合并提交（fan-in 落地）"), "legend labels the merge kind");
+});
+
+test("AC3: degradation — non-ok or empty history renders no chart (page shows 无数据/读失败)", () => {
+  assert.equal(renderGitHistorySvg({ status: "empty", reason: "x", commits: [] }), "");
+  assert.equal(renderGitHistorySvg({ status: "error", reason: "y", commits: [] }), "");
+  assert.equal(renderGitHistorySvg({ status: "ok", reason: null, commits: [] }), "");
+});
+
+test("groupCommitsByBranch groups into lanes sorted by most-recent landing, commits oldest-first", () => {
+  const branches = groupCommitsByBranch([
+    c("aaa", 1_700_000_000, "integration", 1, "a"),
+    c("bbb", 1_700_000_300, "task/z", 1, "z"),
+    c("ccc", 1_700_000_200, "integration", 1, "c"),
+  ]);
+  assert.deepEqual(branches.map((b) => b.ref), ["task/z", "integration"], "most-recent-landing branch first");
+  const integration = branches.find((b) => b.ref === "integration");
+  assert.deepEqual(integration.commits.map((x) => x.hash), ["aaa", "ccc"], "lane commits oldest→newest");
+});
+
+// ── AC2/AC4 integration: real git workspace, /git-history returns SVG, zero <script> ──
+
+function makeWorkspace(prefix) {
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), `${prefix}ws-`));
+  const tasksDir = path.join(ws, "tasks");
+  fs.mkdirSync(tasksDir, { recursive: true });
   fs.mkdirSync(path.join(ws, ".quay"), { recursive: true });
   fs.writeFileSync(
     path.join(ws, ".quay", "config.yml"),
     `providers:\n  native:\n    enabled: true\n    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"\n    tasks_dir: "${tasksDir.replaceAll("\\", "\\\\")}"\n    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]\n    env:\n      QUAY_NATIVE_TASKS_DIR: "${tasksDir.replaceAll("\\", "\\\\")}"\n`
   );
+  return { ws, tasksDir };
 }
 
-/** Build a git-inited native workspace whose README accumulates the fixture commits. */
-function makeGitWorkspace(prefix) {
-  const ws = fs.mkdtempSync(path.join(os.tmpdir(), `${prefix}ws-`));
-  const tasksDir = path.join(ws, "tasks");
-  fs.mkdirSync(tasksDir, { recursive: true });
-  writeConfig(ws, tasksDir);
-  execFileSync("git", ["init", "-q"], { cwd: ws });
-  fs.writeFileSync(path.join(ws, "README.md"), "git-history fixture workspace\n");
-  execFileSync("git", ["-c", "user.email=test@test", "-c", "user.name=test", "add", "."], { cwd: ws });
-  // Base commit is dated 400 days ago so it stays OUTSIDE every window this suite uses (default 30,
-  // ?days=100) — the histogram assertions count only the explicit fixture commits.
-  const baseIso = new Date(Date.now() - 400 * 86400 * 1000).toISOString();
-  execFileSync("git", ["-c", "user.email=test@test", "-c", "user.name=test", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "fixture base"], {
-    cwd: ws,
-    env: { ...process.env, GIT_AUTHOR_DATE: baseIso, GIT_COMMITTER_DATE: baseIso },
-  });
-  // commit(msg, daysAgo): a commit dated `daysAgo` whole days before now (same wall-clock hour, so
-  // spaced dates land on distinct LOCAL calendar days regardless of timezone).
-  const commit = (msg, daysAgo) => {
-    const iso = new Date(Date.now() - daysAgo * 86400 * 1000).toISOString();
-    fs.appendFileSync(path.join(ws, "README.md"), `${msg}\n`);
-    execFileSync("git", ["-c", "user.email=test@test", "-c", "user.name=test", "add", "."], { cwd: ws });
-    execFileSync("git", ["-c", "user.email=test@test", "-c", "user.name=test", "-c", "commit.gpgsign=false", "commit", "-q", "-m", msg], {
-      cwd: ws,
-      env: { ...process.env, GIT_AUTHOR_DATE: iso, GIT_COMMITTER_DATE: iso },
-    });
+/**
+ * git commit helper with a fixed clock so the chart has a non-trivial x window.
+ * Each commit appends to its OWN file (per-branch), so the later `--no-ff` merge is conflict-free.
+ */
+function gitCommit(ws, msg, { t, file = "log.txt" }) {
+  const env = {
+    ...process.env,
+    GIT_AUTHOR_DATE: new Date(t * 1000).toISOString(),
+    GIT_COMMITTER_DATE: new Date(t * 1000).toISOString(),
   };
-  return { ws, commit };
+  fs.appendFileSync(path.join(ws, file), `${msg}\n`);
+  execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "add", "-A"], { cwd: ws, env });
+  execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", msg], { cwd: ws, env });
 }
 
-test("AC2/AC3/AC4: /git-history returns a server-rendered SVG histogram with zero client JS and no duration semantics", async () => {
-  const { ws, commit } = makeGitWorkspace("gh-ac2-");
-  commit("gh-feature-1", 3);
-  commit("gh-feature-2", 2);
-  commit("gh-feature-3", 1);
+test("AC2/AC4: GET /git-history returns a server-rendered SVG page with zero <script> tags", async () => {
+  const { ws, tasksDir } = makeWorkspace("gh-");
   const cwd0 = process.cwd();
   let server;
   try {
+    // git init + an initial commit
+    execFileSync("git", ["init", "-q"], { cwd: ws });
+    fs.writeFileSync(path.join(ws, "README.md"), "git-history fixture\n");
+    execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "add", "-A"], { cwd: ws });
+    execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "init"], { cwd: ws });
+
+    // main line commits, then a feature branch, then a merge (2-parent commit)
+    gitCommit(ws, "main one", { t: 1_700_000_000 });
+    gitCommit(ws, "main two", { t: 1_700_000_200 });
+    execFileSync("git", ["checkout", "-q", "-b", "feature/alpha"], { cwd: ws });
+    gitCommit(ws, "feature alpha one", { t: 1_700_000_300, file: "feature.txt" });
+    gitCommit(ws, "feature alpha two", { t: 1_700_000_400, file: "feature.txt" });
+    execFileSync("git", ["checkout", "-q", "master"], { cwd: ws });
+    gitCommit(ws, "main three", { t: 1_700_000_500 });
+    execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "merge", "-q", "--no-ff", "feature/alpha", "-m", "merge feature/alpha"], { cwd: ws });
+
+    // seed a task so startServer (which talks to the provider) has a store to read
+    createStore(tasksDir).write("GH-1", { title: "git-history task", status: "todo" });
+
     const port = await freePort();
     process.chdir(ws);
     server = await startServer({ port });
 
-    const page = await get(port, "/git-history");
-    assert.equal(page.status, 200, "AC2: GET /git-history returns 200");
-    const body = page.body;
+    const r = await get(port, "/git-history");
+    assert.equal(r.status, 200, "GET /git-history returns 200");
+    const svgCount = (r.body.match(/<svg/g) || []).length;
+    assert.ok(svgCount >= 1, `AC2/band: response contains ≥1 <svg (got ${svgCount})`);
+    assert.ok(r.body.includes("feature/alpha"), "chart shows the feature branch lane");
+    assert.ok(r.body.includes("master") || r.body.includes("main"), "chart shows the main branch lane");
+    const scriptCount = (r.body.match(/<script/g) || []).length;
+    assert.equal(scriptCount, 0, `AC4/invariant: zero <script> tags (got ${scriptCount})`);
+    assert.ok(r.body.includes("落地时刻"), "page disclaims the x-axis = landing time");
+    assert.ok(r.body.includes("非工时"), "page explicitly says NOT work hours (the AC3 trap)");
+    assert.ok(r.body.includes("分支汇总"), "accessibility: a data table view is present");
 
-    // AC2: a real server-rendered <svg> is present.
-    assert.ok(/<svg/.test(body), `AC2: body contains <svg (got ${body.length} chars)`);
-    assert.ok(/<rect /.test(body), "AC2: the SVG renders per-day histogram columns");
-
-    // AC4: zero client JS anywhere in the page.
-    assert.equal((body.match(/<script/g) || []).length, 0, "AC4: zero <script> tags in /git-history");
-
-    // AC3: x 轴 = 落地时刻, no duration/effort semantics — the two traps are named on the page.
-    assert.ok(body.includes("落地时刻"), "AC3: page names 落地时刻 as the x axis");
-    assert.ok(body.includes("无持续时间/工时语义"), "AC3: page states no duration/effort semantics");
-
-    // The histogram is per-day: each fixture commit (3 distinct local days) is one 1-day column.
-    const countAttrs = body.match(/data-count="(\d+)"/g) || [];
-    assert.equal(countAttrs.length, 3, `AC2: one column per fixture day (got ${countAttrs.length})`);
-    const total = countAttrs.reduce((acc, m) => acc + Number(/data-count="(\d+)"/.exec(m)[1]), 0);
-    assert.equal(total, 3, "AC2: per-day counts sum to the 3 fixture commits");
-    const dateAttrs = body.match(/data-date="\d{4}-\d{2}-\d{2}"/g) || [];
-    assert.equal(dateAttrs.length, 3, "AC2: each column carries a YYYY-MM-DD landing date");
-
-    // The recent-commits table renders the fixture subjects.
-    assert.ok(body.includes("gh-feature-3"), "AC2: recent-commits table shows the newest fixture subject");
-    assert.ok(body.includes("gh-feature-1"), "AC2: recent-commits table shows the oldest fixture subject");
-
-    // The histogram must NOT contain a duration bar — no horizontal line spans more than a column
-    // (the only <line> elements are the y-axis gridlines + baseline, all vertical/horizontal axis
-    // furniture). Sanity: assert the page carries no <script> and the SVG is column-only.
-    assert.ok(!/<\/script>/.test(body), "AC4: no closing </script> either");
+    // readGitHistory is also directly exercised (the route's data source)
+    const hist = readGitHistory(ws);
+    assert.equal(hist.status, "ok");
+    assert.ok(hist.commits.some((x) => x.ref === "feature/alpha"), "git history source sees the feature branch");
+    assert.ok(hist.commits.some((x) => x.parents > 1), "git history source sees a merge commit");
   } finally {
+    if (server) {
+      server.close();
+      if (server.client) await server.client.close();
+    }
     process.chdir(cwd0);
-    if (server) { server.close(); if (server.client) await server.client.close(); }
+    fs.rmSync(tasksDir, { recursive: true, force: true });
     fs.rmSync(ws, { recursive: true, force: true });
   }
 });
 
-test("AC5/degradation: a non-git workspace returns 200 with a visible 读失败 note (never 500)", async () => {
-  const ws = fs.mkdtempSync(path.join(os.tmpdir(), "gh-deg-"));
-  const tasksDir = path.join(ws, "tasks");
-  fs.mkdirSync(tasksDir, { recursive: true });
-  writeConfig(ws, tasksDir); // deliberately NO git init — non-git workspace
+test("AC5: /git-history degrades to 200 「无数据」 on a non-git workspace (never 500)", async () => {
+  const { ws, tasksDir } = makeWorkspace("gh-deg-");
   const cwd0 = process.cwd();
   let server;
   try {
+    // NO git init — the workspace is not a git repo
+    createStore(tasksDir).write("GH-DEG", { title: "degraded", status: "todo" });
     const port = await freePort();
     process.chdir(ws);
     server = await startServer({ port });
-
-    const page = await get(port, "/git-history");
-    assert.equal(page.status, 200, "AC5: /git-history still returns 200 on a non-git workspace");
-    assert.ok(page.body.includes("读失败"), "AC5: a visible 读失败 note names the failure");
-    assert.ok(page.body.includes("git 仓库") || page.body.includes("git log"), "AC5: the note explains the git cause");
-    assert.ok(/<svg/.test(page.body), "AC5: the empty-state SVG still renders");
-    assert.equal((page.body.match(/<script/g) || []).length, 0, "AC4: zero <script> tags even in degraded mode");
+    const r = await get(port, "/git-history");
+    assert.equal(r.status, 200, "non-git workspace still returns 200 (never 500)");
+    assert.ok(r.body.includes("无数据"), "page renders 「无数据」 for a non-git workspace");
+    assert.equal((r.body.match(/<script/g) || []).length, 0, "degraded page still has zero <script>");
   } finally {
+    if (server) {
+      server.close();
+      if (server.client) await server.client.close();
+    }
     process.chdir(cwd0);
-    if (server) { server.close(); if (server.client) await server.client.close(); }
-    fs.rmSync(ws, { recursive: true, force: true });
-  }
-});
-
-test("AC2: /git-history supports a ?days=N window (default 30; narrow window filters the histogram)", async () => {
-  const { ws, commit } = makeGitWorkspace("gh-days-");
-  commit("gh-old-commit", 40); // 40 days ago — outside a 30-day window
-  commit("gh-recent-commit", 2); // 2 days ago — inside
-  const cwd0 = process.cwd();
-  let server;
-  try {
-    const port = await freePort();
-    process.chdir(ws);
-    server = await startServer({ port });
-
-    // Default 30-day window: only the recent commit is shown (one column), but the recent-commits
-    // table still lists both (the raw top-N of git log).
-    const page30 = await get(port, "/git-history");
-    const count30 = (page30.body.match(/data-count="(\d+)"/g) || []).reduce((a, m) => a + Number(/data-count="(\d+)"/.exec(m)[1]), 0);
-    assert.equal(count30, 1, "AC2: default 30-day window shows only the recent commit (data-count sum = 1)");
-    assert.ok(page30.body.includes("gh-recent-commit"), "AC2: recent commit subject is in the recent table");
-    assert.ok(page30.body.includes("gh-old-commit"), "AC2: the 40-day-old commit still appears in the recent table (it's raw git log, not windowed)");
-
-    // ?days=100 widens the window to include both → two columns.
-    const page100 = await get(port, "/git-history?days=100");
-    const count100 = (page100.body.match(/data-count="(\d+)"/g) || []).reduce((a, m) => a + Number(/data-count="(\d+)"/.exec(m)[1]), 0);
-    assert.equal(count100, 2, "AC2: ?days=100 widens the window to both commits (data-count sum = 2)");
-  } finally {
-    process.chdir(cwd0);
-    if (server) { server.close(); if (server.client) await server.client.close(); }
+    fs.rmSync(tasksDir, { recursive: true, force: true });
     fs.rmSync(ws, { recursive: true, force: true });
   }
 });

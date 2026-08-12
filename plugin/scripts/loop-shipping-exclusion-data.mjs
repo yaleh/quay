@@ -275,5 +275,11 @@ export function exclusionEntries(repoRoot, pluginDir) {
     // old-path pattern hit EXCEPT the verify-delivery-surface.ts entry, which carries a retainedNote:
     // its old-path references live in LAID_MANIFEST (consumer-laid deliverables) that is absent from
     // a SOURCE-only checkout but present in the main-checkout state the AC1b scan flags.
+    { rel: '.quay', target: path.join(repoRoot, '.quay'), reason: "runtime directory (manager-inbox / fan-in-preserve / full-suite-state / gate-events / inner-wakeup-heartbeat etc.) — gitignored but walk() is an fs traversal that does NOT respect gitignore, so the ledger/message files are swept into the corpus and their quoted deployed tick-doc paths (e.g. outer-recovery-ack quoting orchestrator-loop-tick.md) false-red AC1b on the MAIN checkout (the verify-worktree path has no .quay, which is why the workflow passes while main stays red — gap-loop-shipping-ac1b-main-excludes-quay-and-outer-doc-split). Same class as the orchestration/tick-log.md + manager-pending.md runtime-ledger entries above: the runtime files document the DEPLOYED target layout as living reference, not a stale source-copy" },
+    {
+      rel: 'plugin/test/outer-doc-split.test.mjs',
+      target: path.join(pluginDir, 'test', 'outer-doc-split.test.mjs'),
+      reason: "asserts the AC38 doc-split target layout — the check verifies no live reference to the 5 old paths remains in the moved docs, so its own AC1b-style assertion strings reference the old paths as the CHECK OBJECT (same target-layout class as quay-init-loop-consumer-doc-refs.test.mjs / install-config-driven-e2e.test.mjs / quay-init-loop.test.mjs — the check exists to police the old paths, so the scan must not flag the check itself as the reference)",
+    },
   ];
 }

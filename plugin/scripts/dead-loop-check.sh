@@ -133,6 +133,24 @@ dl_latest_commit_epoch() {
   git -C "$r" log -1 --format=%ct 2>/dev/null || echo 0
 }
 
+# dl_has_start <root> —— 这个循环「启动过」吗（输出 1/0）。证据 = cold-start step 5 写的 driver 注册
+# （.quay/loop-driver.jsonl）+ inner 派发写的 task-start 遥测（.workflow-events/*.jsonl）。
+# 为什么需要它：transcript 活动（loop_alive=alive）只说明「有会话在写 transcript」，无法区分
+# 「冷启动 driver 会话在跑 step 1-9」vs「真 loop 在跑」——fresh cold-start 时冷启动外层会话自己
+# 的 transcript 正被写入，会被误判成 loop 在跑（gap-dead-loop-check-fresh-coldstart-false-running）。
+# 只有 driver 注册 / task-start 遥测能证明 loop 已真正起过（或正在派发）。--check-running 的 alive
+# 与 stopped 分支共用同一佐证，避免两处各写一份漂移。
+dl_has_start() {
+  local r=$1
+  if [ -f "$r/.quay/loop-driver.jsonl" ]; then echo 1; return 0; fi
+  if ls "$r"/.workflow-events/*.jsonl >/dev/null 2>&1; then
+    if grep -l 'task-start\|"task-start"' "$r"/.workflow-events/*.jsonl >/dev/null 2>&1; then
+      echo 1; return 0
+    fi
+  fi
+  echo 0
+}
+
 # ── 判定 ──────────────────────────────────────────────────────────────────────────────────────────
 now=$(date +%s)
 window_secs=$(( window_min * 60 ))
@@ -169,20 +187,33 @@ fi
 #   next_step=none|restart|human-needed|backlog-empty
 # 复用本脚本的 L2 判据（transcript user 消息 + git 提交时间窗）——不新造 liveness 信号。
 # 交叉标注：tasks/gap-l2-continuous-health-dead-loop-criterion-loop-running-not-installed.md（AC4）。
+# 收紧（gap-dead-loop-check-fresh-coldstart-false-running）：loop_alive=alive 不能直接判 running——
+# fresh cold-start 时冷启动外层会话自己的 transcript 正被写入（step 1-9），会被误判成 loop 在跑。
+# alive 需 driver/telemetry 佐证（dl_has_start）区分「真 loop 在跑」vs「冷启动会话活动」：
+#   alive + has_start ⇒ running；alive + 无 has_start ⇒ stopped/never-started。
 if [ "$check_running" = "1" ]; then
   if [ "$loop_alive" = "alive" ]; then
-    # running 不输出 stopped_reason —— 保证 Contract measure `grep -c 'stopped\|dead-loop\|已停'`
-    # 只在 stopped 时 >= 1（running 时 0），band「已停转被识别」不因字段名被平凡满足。
-    echo "cold_start_state=running"
-    echo "next_step=none"
+    # transcript/提交有活动——但可能只是 fresh cold-start 的冷启动 driver 会话自己在写 transcript
+    # （step 1-9），不是真 loop。必须用 driver/telemetry 佐证区分：
+    #   alive + has_start ⇒ 真 loop 在跑（running）
+    #   alive + 无 has_start ⇒ fresh cold-start（never-started）——冷启动会话活动 ≠ loop 在跑。
+    if [ "$(dl_has_start "$root")" = "1" ]; then
+      # running 不输出 stopped_reason —— 保证 Contract measure `grep -c 'stopped\|dead-loop\|已停'`
+      # 只在 stopped 时 >= 1（running 时 0），band「已停转被识别」不因字段名被平凡满足。
+      echo "cold_start_state=running"
+      echo "next_step=none"
+    else
+      # 从未启动：装好了但从没真正起过——下一步是【起起来】（对 cold-start 而言是首次启动，非 resume）。
+      # （此处 loop_alive=alive 只因冷启动会话自己的 transcript 活动，不是真 loop。）
+      echo "cold_start_state=stopped"
+      echo "stopped_reason=never-started"
+      echo "next_step=restart"
+    fi
   else
     # 已停转——区分「从未启动」vs「启动过但停了」，并给可执行下一步。
-    # has_start：这个循环启动过吗？证据 = cold-start step 5 写的 driver 注册 + inner 派发写的 task-start 遥测。
-    has_start=0
-    if [ -f "$root/.quay/loop-driver.jsonl" ]; then has_start=1; fi
-    if ls "$root"/.workflow-events/*.jsonl >/dev/null 2>&1; then
-      if grep -l 'task-start\|"task-start"' "$root"/.workflow-events/*.jsonl >/dev/null 2>&1; then has_start=1; fi
-    fi
+    # has_start：这个循环启动过吗？证据 = cold-start step 5 写的 driver 注册 + inner 派发写的
+    # task-start 遥测（与 alive 分支共用 dl_has_start，同一佐证，避免两处各写一份漂移）。
+    has_start=$(dl_has_start "$root")
     if [ "$has_start" = "0" ]; then
       # 从未启动：装好了但从没真正起过——下一步是【起起来】（对 cold-start 而言是首次启动，非 resume）。
       echo "cold_start_state=stopped"

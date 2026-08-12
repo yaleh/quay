@@ -85,9 +85,9 @@ DoD「修后实跑」项待外层 verification-round 用 `--fan-in` 落地首个
 
 ## Definition of Done
 
-- [ ] AC1–AC4 全部勾上
-- [ ] 修后实跑：新 fan-in 提交含 runId + 回溯样例贴出
-- [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
+- [x] AC1–AC4 全部勾上
+- [x] 修后实跑：新 fan-in 提交含 runId + 回溯样例贴出
+- [x] 既有测试 + 新增测试全绿（`--for-task` scoped）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
 
 ## Touches
@@ -114,3 +114,46 @@ resume    fan-in runId / 遥测回溯 / 检查器 / 测试分步提交，任一�
 reviewer: outer
 at: 2026-08-12
 changed: manager 021354 实测（6% join）。fan-in 提交带 runId 桥接两套记录。实现归 inner。
+
+## Evidence (inner, 2026-08-12)
+
+**AC2 实跑 —— 新 fan-in 提交带 runId（修后 fixture 实测）**：
+```
+$ git log -1 --format='%h %s'
+99dd774 merge: fan-in task/gap-demo (runId: fm-gap-demo-1786509932190-d5n1j3)
+```
+
+**AC3 回溯可达 —— 检查器 `fanin_runid_present=true` + `telemetry_traceable=true`**（对上面那笔 fan-in 提交 + 它的 `.workflow-events/<runId>.jsonl`）：
+```
+$ node --experimental-strip-types plugin/scripts/fan-in-runid-check.ts --root <dir> --commit 99dd774dab626aa994baa1233fd11bd9ac5e61d9 --taskId gap-demo --json
+{
+  "fanin_runid_present": true,
+  "faninRunId": "fm-gap-demo-1786509932190-d5n1j3",
+  "telemetry_traceable": true,
+  "commit": "99dd774dab626aa994baa1233fd11bd9ac5e61d9",
+  "subject": "merge: fan-in task/gap-demo (runId: fm-gap-demo-1786509932190-d5n1j3)"
+}
+```
+
+**遥测侧 —— `--task-end` 自动把 fan-in commit sha 写进 `candidateCommit`，`--report` 每条完成任务带 `fanInCommit`**：
+```
+$ node ... fast-mode-telemetry.ts --task-end --taskId gap-demo --runId fm-gap-demo-... --outcome done --root <dir>
+fast-mode-telemetry: end event written for gap-demo (runId fm-gap-demo-..., outcome done, fanInCommit 99dd774dab62...)
+$ node ... fast-mode-telemetry.ts --report --json --root <dir>
+tasks: [('gap-demo', '99dd774dab62', 'fm-gap-demo-17865099...')]   # taskId → runId → fan-in commit
+```
+
+**实现落点**（按位置可解析，零新 schema）：
+- `plugin/loop/fast-mode-loop-tick.md` 步骤 2 A6 —— `git merge --no-ff task/<id> -m "merge: fan-in task/<id> (runId: <runId>)"`；`<runId>` 用 `fast-mode-telemetry.ts --run-id-for --taskId <id>` 机械回读派发时记的 runId（无需持有，容错 crash-restart）。
+- `plugin/scripts/fast-mode-telemetry.ts` —— 新 `--run-id-for`（PURE READ）+ `--task-end --fanInCommit <sha>`（缺省从 git 自动解析，`findFanInCommit` 按 runId/`merge: fan-in task/<id>` 找提交）→ 存进 end event 的 `candidateCommit`（A1a 既有字段）→ `--report` tasks 带 `fanInCommit`。
+- `plugin/scripts/fan-in-runid-check.ts` —— 新检查器：`measure fanin_runid_present`（最新 fan-in 提交 subject 是否含 `runId:`，`RUN_ID_POSITION_RE` 按位置解析）+ `invariant telemetry_traceable`（runId → `.workflow-events/<runId>.jsonl`，`--taskId` 时再校验该事件文件引用该 taskId）。
+- `plugin/scripts/integration-batch-merge.sh` —— 新 `--run-id <id>`：real-merge 提交信息带 `(runId: <id>)`（ff 路径不建提交，no-op）；`measure fanin_runid_present=true` 打出。
+- `plugin/scripts/capability-catalog.sh` + `docs/proposals/quay-product-outline.md §6 DELIVERY-INVENTORY` —— 新检查器入清单 + 交付面快照。
+
+**AC4 既有不回归（scoped）**：
+- `node --test plugin/test/fan-in-runid-check.test.mjs` → 10/10 pass（AC2 正/负、AC3 正/负、`--fanInCommit` 记录、自动解析、`--run-id-for`）。
+- `node --test plugin/test/fast-mode-telemetry.test.mjs` → 72/72 pass（既有，未回归）。
+- `node --test plugin/test/integration-batch-merge.test.mjs` → 44/44 pass（43 既有 + 1 新 `--run-id`）。
+- `scripts/test.sh --for-task gap-task-telemetry-6-percent-join` 静态层：`task-contract-check` / `adr016-screen-use-check` / `dead-code-after-return-check` / `tick-core-static-check` / `superseded-capability-check` / `test-impl-census-check` 全绿；`delivery-inventory-drift-gate` 初红 → `verify-delivery-surface.ts --write-inventory` 重生成后绿。**worktree 缺 `node_modules`/vendor 无法建 dist**（`esbuild ERR_MODULE_NOT_FOUND`），`--for-task` 的 dist-build + 测试执行步需在主检出跑 —— 所选 3 个测试文件已在 worktree 直接跑绿。全量套件留外层 verification-round 验证。
+
+**Check — Contract invoke 形态**：`git log --oneline -3 | grep -E 'fan-in.*runId'` 对修后 fan-in 提交成立（见 AC2 样例 `merge: fan-in task/gap-demo (runId: fm-...)`）。
