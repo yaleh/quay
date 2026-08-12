@@ -97,3 +97,27 @@ never-started 负控制。
 reviewer: inner
 at: 2026-08-12
 changed: self-hosting-e2e-proof 运行中实测（D2）。dead-loop-check loop_alive=alive 判定无法区分冷启动 driver 会话 transcript 活动与真 loop 在跑。
+
+## Evidence
+
+（scoped 验证，2026-08-12，task 分支 `task/gap-dead-loop-check-fresh-coldstart-false-running`，fork 自 integration @ 1d75ac00）
+
+实现已在 integration `93c903ea`（inner 实现）合并。本 agent 复验 + 记录证据：
+
+1. `bash scripts/test.sh --for-task gap-dead-loop-check-fresh-coldstart-false-running` → exit 0
+   - dead-loop-check.test.mjs 14/14（pass 14 / fail 0 / cancelled 0）
+   - 静态闸全过：task-contract-check no violations / adr016-screen-use-check 0 / superseded-capability PASS / dead-code-after-return 0 / tick-core-static-check PASS / delivery-inventory-drift-gate PASS
+2. `node --test plugin/test/cold-start-check-running.test.mjs` → 10/10（pass 10 / fail 0 / cancelled 0）——同步修正后的 cold-start 消费方不回归
+3. 手动复现（fresh clone + 活跃 transcript + 无 driver/telemetry）：
+   ```
+   cold_start_state=stopped
+   stopped_reason=never-started
+   next_step=restart
+   ```
+   修前此场景报 `cold_start_state=running`（假阳性）。同一 clone 加 `.quay/loop-driver.jsonl` 后：
+   ```
+   cold_start_state=running
+   next_step=none
+   ```
+
+AC 1-4 已勾选；DoD 两条（self-hosting-e2e-proof 重跑 AC2 self_certify=1、全量套件绿）不在本次 scoped 范围，留待外层。
