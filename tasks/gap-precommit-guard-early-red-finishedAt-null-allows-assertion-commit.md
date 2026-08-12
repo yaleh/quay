@@ -1,7 +1,7 @@
 ---
 id: gap-precommit-guard-early-red-finishedAt-null-allows-assertion-commit
 title: precommit-guard early-red 缺口——state=red 但 finishedAt=null（runner 仍活收集）时守卫放行断言面提交
-status: todo
+status: done
 labels:
   - gap
   - defect
@@ -43,7 +43,7 @@ extra:
 - [x] AC3: `--json` 输出含 `finishedAt` + `isRunning`（「为什么放行」可查）
 - [x] AC4: 既有用例不回归；`--for-task` scoped 门绿
 - [x] AC5: 拒绝时 append 一行到 `.quay/precommit-guard-rejections.jsonl`（`{at, runId, startedAt, files, verdict:"reject"}`）；写失败不阻拒绝
-- [ ] AC6: 下轮验证（守卫完整）
+- [x] AC6: 下轮验证（守卫完整）——round（57878bd1 jsonl-append + early-red 修复）绿认证；③ 真实拒绝记录已在守卫任务 Evidence（runId=bcf3790d）
 
 ## Evidence
 
@@ -68,9 +68,9 @@ gitignore 条目 `**/.quay/precommit-guard-rejections.jsonl`（外层 b68b9dda �
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全部勾上
-- [ ] 修复 diff + early-red 拒绝实测贴出（见 Evidence）
-- [ ] 既有测试全绿（`--for-task` scoped）
+- [x] AC1–AC5 全部勾上
+- [x] 修复 diff + early-red 拒绝实测贴出（见 Evidence）
+- [x] 既有测试全绿（`--for-task` scoped）——scoped 20/0
 
 ## Touches
 
