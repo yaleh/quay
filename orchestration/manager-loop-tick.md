@@ -947,6 +947,12 @@ outer 步骤 1c 逐字 `cat` 转发），由 **grep 断言 + `reanchor-prompt.te
 - **重挂 cron 必须 `cat` 这个文件**，把它的内容原样放进 `CronCreate`
   ——**绝不从上下文里凭记忆重打**。这与"绝不靠记住的 ID"是同一条纪律的两半：
   ID 不许记，**内容也不许记**。
+- **重挂后写回收据（AC4，gap-manager-cold-start-no-falsifiable-checklist 缺陷 3）**：
+  `CronList` 确认新 cron 在位后，把它的真实 id 写回注册表
+  `bash <repo>/plugin/scripts/manager-arm-loop.sh --record-cron <id> --home <home>`；
+  外部核实 `bash <repo>/plugin/scripts/manager-arm-loop.sh --verify --home <home>`
+  ——`registry-verified` = 有收据，`registry-only` = 注册表说武装了但没核实（缺陷形态）。
+  **「注册表说武装了」≠「真有 cron」**——CronCreate 会话内做，外部看不到，收据是唯一证据。
 - 每轮由 `READ_CMD` 自动跑 `python3 orchestration/manager-anchor-check.py`，
   读数里会出现 `anchor_check=OK` 或 `anchor_check=VIOLATED: …`
 
