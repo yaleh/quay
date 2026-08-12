@@ -535,3 +535,17 @@ resource-aware。
 2. **batch-merge 加 quiescent 前置**：先验 integration 最近 N 分钟无新 fan-in 再起跑套件（gate 侧等待，不动 A9）——外层/脚本侧，可机械执行。
 3. **接受现状**：inner 压力测试结束后自然 quiesce，届时套件可满足 gate——零改动，但 batch-merge 在 active 期持续阻塞，44+ commit 积压 develop 不前进（AC19 两线模型不完整运转）。
 **外层倾向**：选项 2（不动 inner A9，外层起跑套件前先查 quiescence），或接受选项 3 直到压力测试收尾；不建议选项 1（套件期暂停内层吞吐，与 fixed-cap 目标相悖）。
+
+
+## 2026-08-12 03:32Z — .halt 在位；integration/develop 同步（38 commit）被 batch-merge 双闸阻塞：无 scope=worktree 绿记录
+**现象**：manager 03:20 放 .halt「同步 integration/develop 后改在 integration 上开发；同步完成前不派发」。develop 落后 integration 38 commit（纯 fast-forward）。batch-merge 双闸 fail-closed：① freshness 闸（full-suite-state.json 缺绿）② worktree-green 闸（verification-round.jsonl 无 scope=worktree+state=green）。11 个 not-yet-flipped 任务 DoD 均含「全量套件绿」，同步与闭包被同一根阻塞。
+**外层已尝试**：修复 threshold-scope 静态违规（CLAUDE.md 反引号 `:16` → stale-path-ext，baseline 4→5→4）提交 c3e051bd；补挂 suite-state-trigger；全量套件已由 SUITE-RETRIGGER 自动在 main checkout 起跑（scope=main）。**注意：我误用 `full-suite-runner.ts --help`（无 --help 分支）触发了一次真套件（03:28 static-check 红）——与 2026-08-09 上届外层同型错误，教训已在上条 escalations 记录**。
+**为什么需要裁定**：套件绿后 worktree-green 闸仍缺 scope=worktree 记录。选项：① 在 verify worktree 跑全量到绿（A15 execute-suite-fix workflow，重操作）；② 38 提交以记账/配置为主、main 全量绿足够时走 `--skip-worktree-green-gate` 逃生口（上届 outer 在 verified-commit 场景用过 --skip-freshness-gate 先例）。
+**外层倾向**：等 main 套件结果；绿后若改动面确为记账/配置为主则倾向选项②（逃生口），若含产品代码改动则走选项①（worktree 全量）。已同步 manager 收件箱（outer-halt-sync-status-20260812-0332Z.md）。
+
+
+## 2026-08-12 03:36Z — 红窗：d24e303c（manager 裸机安装向量）破坏 AC3，套件红（stop-dispatch），同步被此红阻塞
+**现象**：全量套件 runId 1d0bac1d 03:34 早红。唯一确定性失败 `quay-init-loop-consumer-doc-refs.test.mjs` AC3：`plugin/skills/{init,manager}/SKILL.md` 引用 `plugin/loop/manager-loop-tick.md`（打包源路径，AC3 要求 shipped docs/skills 零 plugin/loop/ 引用）。隔离重跑稳定复现，非 flake。
+**根因**：d24e303c（manager 自己的 commit）把 SKILL.md 的 `orchestration/manager-loop-tick.md` 引用改成 `plugin/loop/manager-loop-tick.md`（裸机安装向量 arm-loop 指针）。develop 绿、integration 红。冲突本质 = AC3 机械判据 vs manager 的模板指针意图。
+**外层处置**：建任务 `gap-d24e303c-skill-refs-plugin-loop-violates-ac3`（todo, red-window）；manager 收件箱升级 outer-red-window-d24e303c-ac3-20260812-0336Z.md。外层不可直接修（plugin/ 授权边界外）。**同步与闭包仍被同一根阻塞：缺一次绿验证轮。**
+**选项**：① SKILL.md 引用改回 orchestration/（模板指针用注释携带）；② AC3 测试加 pack-上下文豁免；③ 回退 d24e303c 的 SKILL.md 改动。倾向①（贴合 AC3 语义、不丢 manager 意图）。
