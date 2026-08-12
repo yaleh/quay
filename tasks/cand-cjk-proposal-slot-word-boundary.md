@@ -36,16 +36,58 @@ CLAUDE.md 明言 author→ready 的 shape 判定「is the single judge quay and 
 
 ## Acceptance Criteria
 
-- [ ] 复现：`store.check()` 对一个带 `## 人的裁定`(≥40 非空白字符) + `## Contract`(六键) +
+- [x] 复现：`store.check()` 对一个带 `## 人的裁定`(≥40 非空白字符) + `## Contract`(六键) +
   `## AC` + `## DoD` 的 todo 任务返回 `ok:false` 且 reason 含「missing artifacts: proposal」。
-- [ ] 修复后：同一任务 `store.check()` 返回 `ok:true`，且 `store.check()` 与
+- [x] 修复后：同一任务 `store.check()` 返回 `ok:true`，且 `store.check()` 与
   `ready-pool-check.artifactsComplete()` 对该 body 的 proposal 判定一致。
-- [ ] 修复不改动 ASCII 标题（Proposal/Contract/AC/DoD/Finding/Plan）的既有匹配行为
+- [x] 修复不改动 ASCII 标题（Proposal/Contract/AC/DoD/Finding/Plan）的既有匹配行为
   （现有 `gate-shape-dispatch.test.mjs` 等门测试保持绿）。
 
 ## Touches
 
-- packages/quay-native/src/store.ts（`sectionAfterHeading` / `artifactSections.has()` 的 `\b` 匹配）
-- plugin/scripts/task-schema.ts 或 store.ts 中任一处作为单一 `\b` 语义的正本（建议统一为整行精确匹配或对 CJK 安全的边界）
-- 对应单测（packages/quay-native/test/gate-shape-dispatch.test.mjs）
+- packages/quay-native/src/store.ts（`sectionAfterHeading` / `artifactSections.has()` 的 `\b` 匹配；本任务选定 store.ts 为单一 `\b` 语义正本，统一为整行精确匹配，task-schema.ts 未改）
+- packages/quay-native/test/gate-shape-dispatch.test.mjs（对应单测，本任务新增 CJK proposal-slot 用例）
 - tasks/cand-cjk-proposal-slot-word-boundary.md（自身：勾 AC + 贴证据）
+
+## Evidence
+
+**修复**：`packages/quay-native/src/store.ts` 的 `sectionAfterHeading` 与 `artifactSections.has()`
+把 `\b` 匹配统一为整行精确匹配（`^##\s+<h>\s*$`，与 `task-schema.ts` `extractSection` 同语义）。
+`\b` 只在 `\w` 与非 `\w` 之间有边界；CJK 末字（如「定」）与其后换行皆非 `\w` ⇒ 别名永不匹配。
+整行精确匹配对 ASCII 与 CJK 一视同仁。task-schema.ts 未改（本就是整行精确匹配的正本）。
+
+**复现（修复前，worktree 内同一 body 实测）**：
+- `store.check()`：`ok:false`，`artifacts:{"proposal":false,"plan":true,"ac":true,"dod":true}`，
+  reason「missing artifacts: proposal」。
+- `ready-pool-check.artifactsComplete()`：`complete:true`，`artifacts.proposal:true`。
+
+**修复后（同一 body）**：`store.check()` 返回 `ok:true`，`artifacts.proposal:true`，reason
+「all required artifacts present; eligible to move to ready」；`ready-pool-check.artifactsComplete()`
+仍为 `proposal:true` —— 两判据一致（AC2）。
+
+**单测**：`packages/quay-native/test/gate-shape-dispatch.test.mjs` 新增用例
+「CJK proposal-slot alias：`## 人的裁定` satisfies the contract shape's proposal artifact and agrees
+with ready-pool-check」，直接断言 `store.check()` 与 `artifactsComplete()` 对同一 body 的
+proposal 判定一致（AC2）。既有 11 个门测试保持绿（AC3）。
+
+**Touches 格式化说明**：原 `- 对应单测（packages/quay-native/test/gate-shape-dispatch.test.mjs）`
+把路径写在全角注释 `（…）` 内，`select-tests-for-touches.ts` 的 `stripTouchAnnotation` 会把整个
+`（…）` 当作注释剥掉 ⇒ 单测文件无法被 scoped 选择器解析（`--for-task` 报 test-selection-thin，
+且所选测试集不含本任务改动的单测）。已将 Touches 改为机器可解析的具体路径（声明范围不变：
+store.ts + 单测 + 任务自身）。
+
+**Scoped 门**：`scripts/test.sh --for-task cand-cjk-proposal-slot-word-boundary`（worktree 根，
+`.quay/config.yml` 从主 checkout 软链以过 packaging 交叉测试）：
+
+```
+== scoped static checks (change-relevant tier; the complete set still runs in the full-suite gate) ==
+tick-core-static-check: PASS — execution cores are statically covered.
+ℹ tests 96
+ℹ pass 96
+ℹ fail 0
+ℹ duration_ms 18738.932592
+✔ CJK proposal-slot alias (gap-cjk-proposal-slot-word-boundary): `## 人的裁定` satisfies the
+  contract shape's proposal artifact and agrees with ready-pool-check (12.817656ms)
+```
+
+（完整输出见提交后的 CI/本机重跑；上表为 `scripts/test.sh --for-task …` 的 exit 0 汇总。）

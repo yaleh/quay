@@ -130,6 +130,17 @@ export function detectShape(body: string): TaskShape {
  */
 export function sectionAfterHeading(body: string, headings: string[]): string {
   for (const h of headings) {
+    // Whole-line EXACT heading match — deliberately NOT `\b`. A `\b` is only a
+    // boundary between a `\w` char and a non-`\w` char; both the last char of a
+    // CJK heading (e.g. 定 in `## 人的裁定`) and the following newline are
+    // non-`\w`, so `\b` is a no-op there and a CJK alias NEVER matches — the
+    // registered `人的裁定` proposal-slot was dead code, diverging from
+    // ready-pool-check.ts (which uses task-schema.ts extractSection's
+    // `^(##+)\s*<heading>\s*$` whole-line match and recognizes the same alias).
+    // `^##\s+<h>\s*$` matches ASCII headings byte-for-byte as before and CJK
+    // headings the same way — one consistent `\b`-free semantics as the single
+    // judge.
+    //
     // QN-005 fix (iteration 2): `\Z` is NOT a valid JavaScript regex
     // end-of-string anchor (JS has no \Z metacharacter) — the engine took
     // it as a literal capital "Z", and with the `i` (case-insensitive)
@@ -138,9 +149,17 @@ export function sectionAfterHeading(body: string, headings: string[]): string {
     // by the iteration-1 G3 audit against QN-005's own AC text, which
     // contains the word "zero"). Correct JS end-of-string lookahead is
     // `(?![\s\S])` (no characters remain).
-    const re = new RegExp(`^##\\s+${h}\\b([\\s\\S]*?)(?=^##\\s|(?![\\s\\S]))`, "im");
-    const m = re.exec(body);
-    if (m) return m[1];
+    const headingRe = new RegExp(`^##\\s+${h}\\s*$`, "im");
+    const m = headingRe.exec(body);
+    if (!m) continue;
+    // Content = everything after the heading line up to the next `## ` heading
+    // (or end of body). `^##\s` (a line starting with exactly two hashes +
+    // whitespace) is the next-heading boundary — nested `### ` subheadings do
+    // NOT terminate the section (unchanged from the previous `(?=^##\s|…)`).
+    const rest = body.slice(m.index + m[0].length);
+    const nextRe = /^##\s/m;
+    const next = rest.match(nextRe);
+    return next ? rest.slice(0, next.index) : rest;
   }
   return "";
 }
@@ -1023,7 +1042,12 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
     }
     const has = (headings) => {
       for (const h of headings) {
-        if (!new RegExp(`^##\\s+${h}\\b`, "im").test(body)) continue;
+        // Whole-line exact presence check (same CJK-safe, `\b`-free semantics
+        // as sectionAfterHeading): `\b` is a no-op between two non-word chars,
+        // so `## 人的裁定` (last char 定 is CJK, next char is the newline)
+        // never matched the old `^##\s+人的裁定\b` — the registered alias was
+        // dead code and the proposal artifact read false for a present section.
+        if (!new RegExp(`^##\\s+${h}\\s*$`, "im").test(body)) continue;
         const content = sectionAfterHeading(body, [h]);
         const nonWhitespaceLen = content.replace(/\s/g, "").length;
         if (nonWhitespaceLen >= MIN_SECTION_CHARS) return true;
