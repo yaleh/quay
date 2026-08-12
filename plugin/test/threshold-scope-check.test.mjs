@@ -182,6 +182,35 @@ test("AC11 — a reference to a nonexistent file MUST be reported; the same text
   }
 });
 
+// ── line-number citations (round-312 false positive) ────────────────────────────────────────────────
+test("AC11b — a `path:NNN` LINE-NUMBER citation resolves to its base path: existing path + :NNN stays clean; a genuinely-missing path + :NNN still flags", () => {
+  // `orchestration/orchestrator-tick-core.md:16` cites line 16 of a file that EXISTS — the base path
+  // resolves, so it must NOT be reported (round-312 red was this false positive: stale-path-ext on
+  // CLAUDE.md:19 because the `:16` suffix was treated as part of the path).
+  const cited = "请核对 `orchestration/orchestrator-tick-core.md:16` 与 `scripts/test.sh:5`。\n";
+  const { res: r1, dir: d1 } = tmpDoc(cited);
+  try {
+    assert.equal(r1.status, 0, `existing-path + :NNN citation must be clean, got ${r1.status}:\n${r1.stdout}${r1.stderr}`);
+    const out = JSON.parse(r1.stdout);
+    assert.equal(out.stalePaths.length, 0, `expected 0 stale paths, got ${JSON.stringify(out.stalePaths)}`);
+  } finally {
+    fs.rmSync(d1, { recursive: true, force: true });
+  }
+
+  // A genuinely-missing path carries the line citation the SAME way — the base path is gone, so it
+  // must STILL be reported (the citation suffix must not hide a real stale path).
+  const missing = "请核对 `nowhere/missing.ts:12`。\n";
+  const { res: r2, dir: d2 } = tmpDoc(missing);
+  try {
+    assert.equal(r2.status, 1, `missing-path + :NNN citation must still flag, got ${r2.status}:\n${r2.stdout}${r2.stderr}`);
+    const out = JSON.parse(r2.stdout);
+    assert.equal(out.stalePaths.length, 1, `expected 1 stale path, got ${JSON.stringify(out.stalePaths)}`);
+    assert.equal(out.stalePaths[0].path, "nowhere/missing.ts", `flagged path must be the base (no :NNN), got ${out.stalePaths[0].path}`);
+  } finally {
+    fs.rmSync(d2, { recursive: true, force: true });
+  }
+});
+
 // ── AC9 + three-layer stale-path judgment on the REAL CLAUDE.md ─────────────────────────────────────
 test("AC9 — the real CLAUDE.md stale-path run: local references (basename-exists shorthand) are NOT reported; the one unresolvable path is", () => {
   const res = run("--judge", "CLAUDE.md", "--json");

@@ -88,12 +88,16 @@ async function main() {
     ].join("\n")
   );
 
-  const port = 41900 + (process.pid % 500);
   const originalCwd = process.cwd();
   let server;
   try {
     process.chdir(workspaceRoot);
-    server = await startServer({ port });
+    // Ephemeral port (0): the fixed PID-derived range (41900 + pid%500) collided under the 4-lane
+    // parallel suite (two processes whose PIDs differ by exactly 500 compute the same port →
+    // EADDRINUSE at round 313). The OS assigns a free port; read it back after 'listening'.
+    server = await startServer({ port: 0 });
+    await new Promise((resolve) => server.once("listening", resolve));
+    const port = server.address().port;
 
     const res = await get(port, "/");
     assert(res.status === 200, "GET / returns 200 (got " + res.status + ")");
