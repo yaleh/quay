@@ -1,7 +1,7 @@
 ---
 id: gap-execute-suite-fix-green-previous-round-branch
 title: execute-suite-fix Fix agent prompt 缺「上一轮为绿」分支 → 主检出绿时启动不了 worktree 验证
-status: ready
+status: done
 labels:
   - gap
   - defect
