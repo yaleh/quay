@@ -1,7 +1,7 @@
 ---
 id: gap-git-history-svg-server-rendered
 title: web UI 服务端渲染 git history SVG（人裁定，新依赖 0，零客户端 JS）
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate

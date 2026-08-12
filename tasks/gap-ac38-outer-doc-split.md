@@ -1,7 +1,7 @@
 ---
 id: gap-ac38-outer-doc-split
 title: "AC38: outer 双份文档漂移未切分（按 manager 先例同形切分）"
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate

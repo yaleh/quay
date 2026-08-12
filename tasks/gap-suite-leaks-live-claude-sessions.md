@@ -1,7 +1,7 @@
 ---
 id: gap-suite-leaks-live-claude-sessions
 title: 套件/teardown 泄漏活 Claude 会话（4 孤儿 109-120h）— 需 teardown 完整 + 孤儿检测器
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -74,3 +74,21 @@ resume    孤儿检测器 / teardown / 测试分步提交，任一步完成即�
 reviewer: outer
 at: 2026-08-12
 changed: manager 042500 实测（4 孤儿 109-120h）。teardown 不完整 + 无孤儿检测器。outer 裁定修法。实现归 inner。
+
+### 追加（2026-08-12 崩溃后恢复裁定——负控制杀了 outer/inner 后的处置判定）
+
+**崩溃根因**：subagent 实现的 `reclaimFixtureSessions(root)` 负控制从 worktree 绝对路径 import，闸门 `path.resolve(root) === REPO_ROOT` 比的是 runner 自己（worktree），负控制传主检出 root ⇒ 放行 ⇒ `sessionsUnderWorkspace(procs, 主检出)` 匹到 outer/inner ⇒ SIGTERM→SIGKILL。**声称保护 X，实际保护 self；worktree 里 self ≠ X。**
+
+**对 4 项未提交改动的处置判定（保留/丢弃，逐项）**：
+
+| 文件 | 判定 | 理由 |
+|---|---|---|
+| `orphan-session-check.ts`（新，339 行） | **保留** | 检测器本体，默认 `--json` 只读枚举；`--kill-workspace <path>` 限定到具体路径，正确形态 |
+| `full-suite-runner.ts` 的 `reclaimFixtureSessions` + run() 末尾自动调用 | **丢弃（危险接入点）** | 闸门比 self 不比「活循环检出」；且固化进每轮套件判定后自动跑，风险敞口=套件运行频率（manager 116a770c）。改法见下 |
+| `integration-batch-merge.sh` 的 `stop_sessions_under_worktree "${tmp_wt}"` | **保留** | 限定到 `mktemp` 的具体 tmp worktree 路径 |
+| `provision-verify-worktree.sh --teardown` 的 `--kill-workspace ${worktree}` | **保留** | 限定到 `--worktree` 参数的具体路径，且已有 `--dry-run` |
+
+**修正后的实现方向（inner 执行）**：
+1. `orphan-session-check.ts` 的检测器本体保留；补 **list-only/dry-run 模式**（如 `--list`），让验证闸门逻辑时不需要真杀任何东西（manager 设计建议）。
+2. `full-suite-runner.ts` **不**在 run() 末尾自动调用 reclaim。夹具 teardown 回收进程改由 `provision-verify-worktree.sh --teardown` / `integration-batch-merge.sh` 的既有限定路径调用承担；`full-suite-runner.ts` 若保留 reclaim 入口，闸门必须改为「root 是任一承载活循环的检出则拒绝」，且只经显式 `--reclaim` 触发，不经自动路径。
+3. **负控制不固化进套件**（manager 116a770c）：验证闸门逻辑用 list-only/dry-run 跑，不在活的生产进程空间里零隔离地杀任何东西。

@@ -1,7 +1,7 @@
 ---
 id: gap-manager-cold-start-no-falsifiable-checklist
 title: manager 冷启动无证伪判据 + 3 缺陷（idle-watch 不挂/判据指向不存在脚本/注册表≠真 cron）
-status: ready
+status: done
 labels:
   - gap
   - defect
