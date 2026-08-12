@@ -124,6 +124,54 @@ nobody-driving (dead-loop), and this branch additionally reads the target projec
 `tasks/gap-l2-continuous-health-dead-loop-criterion-loop-running-not-installed.md` records this branch
 as its first cold-start consumer.
 
+### 0b. Recovery branch — mid-flight state exists, converge THEN cold-start
+
+Fresh-start steps 1-9 assume a genuinely clean workspace. A workspace whose loop CRASHED mid-task
+(today's two real OOM recoveries, both done by hand from a manually-written brief because the skill had
+no recovery branch) has real mid-flight state that must be resolved BEFORE any tick can safely resume —
+merged-but-unclosed tasks, orphaned worktrees/branches, ghost telemetry `--task-start` records with no
+matching `--task-end`. A cold-start over such a workspace without converging first re-dispenses the
+mid-flight task and double-books the board.
+
+**Select recovery (NOT fresh-start) when the mechanism is already laid down (the step-1 preconditions
+hold) AND at least one of the three state classes below is present.** Enumerate all three with the
+EXISTING tools — zero new detection logic (invariant `zero_new_detection = 1`):
+
+| # | State class | Existing tool(s) | Mid-flight signal |
+|---|---|---|---|
+| 1 | mid-flight worktree | `git worktree list` + `git branch --list "task/*"` + `git merge-base --is-ancestor <branch> <landing-ref>` | a `task/*` branch NOT reachable from the landing ref (integration → develop → master) whose telemetry has a `--task-start` and no matching `--task-end` |
+| 2 | ghost telemetry | `fast-mode-telemetry.ts --report --json --root <root>` | an `inProgress[]` record whose `taskId` has NO in-flight worktree (`git worktree list` has no `task/<taskId>`) and no live process |
+| 3 | task-status drift | `task-status-drift-check.ts` (+ `--stranded`) | a status-drift suspect on a `task/*` branch reachable from the landing ref (code landed, `status:` field never followed) |
+
+**ALL THREE CLEAN → the fresh-start branch (steps 1-9).** ANY finding → the recovery steps below.
+
+**Recovery steps — resolve each finding with the existing mechanism, then RE-RUN all three checks;
+only an all-clean re-run converges forward:**
+
+1. **merged-but-unclosed task (drift)** — the `status:` field lags code that already landed. Close it
+   through the normal close path with REAL evidence (this session's own
+   `gap-init-guesses-the-tmux-session...` fix is the worked example): verify the ACs' declared work
+   actually landed (`task-status-drift-check.ts --check <id>` + the task's Touches exist on the
+   landing ref), then set `status: done` via the same gate — never fabricate evidence, never paste a
+   plausible AC onto an unverified task.
+2. **orphaned worktree / branch** — verify against the landing ref: if the branch IS an ancestor
+   (`git merge-base --is-ancestor <branch> <landing-ref>` — the work already landed), remove the
+   worktree (`git worktree remove <path>`) and delete the branch (`git branch -d <branch>`); if it
+   has commits NOT on the landing ref, the work is REAL — MERGE it, never delete (fail-closed: the
+   same rule that forbids `--clean-stale` of a branch with commits).
+3. **ghost telemetry** — a `--task-start` record whose executor is observably gone. Run
+   `fast-mode-telemetry.ts --reconcile --root <root>`: it writes a real `--task-end` (outcome
+   `abandoned`, `reconcileReason` set) ONLY when the executor is OBSERVABLY gone (branch merged /
+   worktree gone / process gone — never age). A record whose task is genuinely done or still-todo has
+   its ghost record DELETED (`rm <root>/.workflow-events/<runId>.jsonl`). NEVER backfill a
+   plausible-but-fabricated `--task-end`.
+
+Once the re-run of all three checks is clean, the recovery branch CONVERGES into the SAME AC8c
+checklist and steps 1-9 the fresh-start branch uses — there is no second acceptance framework (AC3).
+The report is the same seven-key AC8c output; a recovery that converges is reported `COMPLETE`, one
+that cannot make all three checks clean is reported "installed but unrecovered" with the remaining
+findings — never "complete".
+
 ### 1. Locate root, project, session
 
 - `root = $(pwd)` (this skill runs inside the target project's outer session).
