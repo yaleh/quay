@@ -60,6 +60,7 @@ extra: {}
 - plugin/test/self-report-vocab-check.test.mjs（AC3 归属裁定落位）
 - plugin/test/inner-session-check.test.mjs（AC2 degraded-state 命名）
 - plugin/test/loop-shipping.test.mjs（AC1b/AC1c 旧路径清理）
+- plugin/scripts/loop-shipping-exclusion-data.mjs（排除表补 outer-loop-tick-split.test.mjs——AC38 实例落点引用合法非 stale；任务执行时补，原 Touches 漏列）
 - plugin/skills/cold-start/SKILL.md（step 3 degraded-state 命名，若需）
 - plugin/loop/orchestrator-loop-tick.md（product 注记或 /loop 落点校正，若需）
 - tasks/gap-ac38-split-regression-cluster-5-checker-tests.md（自身：勾 AC + 贴证据）
