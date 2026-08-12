@@ -1,0 +1,255 @@
+// @test-group lowconc
+// @load-sensitive wall-clock
+// session-liveness-restart.test.mjs — observer-blind-fix: a session RESTART in the same tmux window
+// must make the observer pick up the NEW transcript on its next poll (self-heal, no re-mount), while
+// ambiguous dynamic resolution falls back to the configured SESSION_TRANSCRIPTS (config contract kept).
+//
+// DEFECT (source-level proven): the observer binds each target's transcript path at STARTUP via
+// SESSION_TRANSCRIPTS (the "会话 id 是【配置，不去推断】" contract). When a session RESTARTS (new session
+// id = new transcript path, e.g. ~/.claude/projects/<slug>/<new-id>.jsonl), the observer keeps
+// watching the OLD transcript path: perpetual false SESSION-OVERDUE (the old transcript never moves
+// again) and blindness to a real death (already crying wolf). The tmux WINDOW name does NOT change
+// across a restart, so the window name is the stable key; the session id / transcript path is the
+// changing value.
+//
+// FIX (implemented in session-liveness.sh, exercised here):
+//   * Each poll the transcript is resolved FRESH from the target window's CURRENT process:
+//     pane_pid → the claude process → CLAUDE_CODE_SESSION_ID in /proc/<pid>/environ (plus a
+//     CLAUDE_PROJECT_DIR cross-check) → $HOME/.claude/projects/<slug>/<id>.jsonl.
+//   * Only a CONFIDENT dynamic resolution (env session id + project match) overrides the configured
+//     SESSION_TRANSCRIPTS; low/none (no process, no env id, project mismatch, multiple candidate
+//     transcripts, heuristic) falls back to the config — preserving the "don't infer" contract for
+//     the known-unreliable /clear and --resume cases (source comments at :166-167 document why
+//     pid→transcript can be unreliable there).
+//
+// SPLIT CONCURRENCY SAFETY: this file runs as its OWN node process at cc=3. It owns the /tmp prefix
+// "session-liveness-restart-" — the hermetic probe constructors create dirs under it (via
+// setProbeTmpPrefix) and the after() sweeps ONLY it, so it can never delete a sibling file's probe.
+//
+// KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — real processes +
+// tmux timing; passes isolated under low load. Routed to the `lowconc` group.
+//
+// Run: node --test plugin/test/session-liveness-restart.test.mjs
+
+import { test, after } from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import {
+  SCRIPT, tmuxAvailable,
+  setProbeTmpPrefix, sweepTmp, reapLiveOwners, tmux, isolateTmuxEnv, isClaudePid,
+  waitForAlive, spawnMonitor, waitForOutput, waitForRounds, countRounds,
+  __registerProbeTmp, __unregisterProbeTmp,
+} from "./session-liveness-helpers.mjs";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// OWN the /tmp probe prefix for this split file (see SPLIT CONCURRENCY SAFETY above).
+setProbeTmpPrefix("session-liveness-restart-");
+
+after(() => {
+  reapLiveOwners();
+  sweepTmp("session-liveness-restart-");
+});
+
+const slugOf = (dir) => dir.replace(/[\\/]+/g, "-");
+const transcriptFor = (home, root, sid) => path.join(home, ".claude", "projects", slugOf(root), `${sid}.jsonl`);
+
+// makeEnvProbe(session, claudeProjectDir, sid) — a private tmux server + a pane whose shell owns a
+// claude-cmdline child carrying explicit CLAUDE_CODE_SESSION_ID / CLAUDE_PROJECT_DIR (the env a real
+// claude session has). The child is `exec -a claude-probe sleep 10000 &`. Pass sid=null to make a
+// probe with those vars EMPTIED (deterministic "no env session id" — independent of the runner's env).
+function makeEnvProbe(session, claudeProjectDir, sid) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "session-liveness-restart-"));
+  __registerProbeTmp(tmp);
+  const sockDir = path.join(tmp, "sock");
+  fs.mkdirSync(sockDir, { recursive: true });
+  const env = isolateTmuxEnv(sockDir);
+  const newS = tmux(["new-session", "-d", "-x", "200", "-y", "50", "-s", session, "bash"], env);
+  assert.equal(newS.status, 0, `tmux new-session failed: ${newS.stderr}`);
+  const envPrefix = sid === null
+    ? `CLAUDE_CODE_SESSION_ID= CLAUDE_PROJECT_DIR=`
+    : `CLAUDE_CODE_SESSION_ID=${sid} CLAUDE_PROJECT_DIR=${claudeProjectDir}`;
+  tmux(["send-keys", "-t", session, `${envPrefix} exec -a claude-probe sleep 10000 &`], env);
+  tmux(["send-keys", "-t", session, "Enter"], env);
+  return {
+    tmp, env, session,
+    cleanup() {
+      __unregisterProbeTmp(tmp);
+      tmux(["kill-session", "-t", session], env);
+      try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* best-effort */ }
+    },
+  };
+}
+
+// claudeChildPid(env, session) — the pane's direct claude child pid (the claude-probe stand-in).
+function claudeChildPid(env, session) {
+  const panePid = tmux(["list-panes", "-t", session, "-F", "#{pane_pid}"], env).stdout.trim();
+  const kids = spawnSync("pgrep", ["-P", panePid], { encoding: "utf8" });
+  for (const k of (kids.stdout ?? "").trim().split("\n").filter(Boolean)) {
+    if (isClaudePid(k)) return k;
+  }
+  return "";
+}
+
+test("R1 — a session restart in the same window makes the observer resolve the NEW transcript on the next poll (self-heal, no re-mount)", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "session-liveness-restart-"));
+  const oldSid = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+  const newSid = "11111111-aaaa-4bbb-8ccc-000000000001";
+  const p = makeEnvProbe("restart-sh", root, oldSid);
+  const home = path.join(root, "home");
+  const oldTranscript = transcriptFor(home, root, oldSid);
+  const newTranscript = transcriptFor(home, root, newSid);
+  try {
+    fs.mkdirSync(path.dirname(oldTranscript), { recursive: true });
+    fs.writeFileSync(oldTranscript, "{}\n"); // the OLD session's transcript is FRESH at mount
+    assert.ok(await waitForAlive(p.env, p.session), "probe must be alive first");
+    const mon = spawnMonitor({ ...p.env, HOME: home, SESSION_ROOT: root },
+      `inner ${root} ${p.session}`,
+      { transcripts: `inner ${oldSid}`, overdueMin: 1, interval: 1 });
+    try {
+      // baseline: fresh old transcript + old session → no OVERDUE (config wiring works)
+      const before = countRounds(mon);
+      assert.ok(await waitForRounds(mon, before + 2, 20000), `baseline rounds must pass:\n${mon.output()}`);
+      assert.ok(!/SESSION-OVERDUE/.test(mon.output()),
+        `baseline (fresh old transcript) must have no OVERDUE:\n${mon.output()}`);
+
+      // RESTART in the same window: kill the old claude, spawn a NEW one with a NEW session id.
+      // The window name (tmux session) is unchanged — the pane is respawned in place.
+      const newCmd = `CLAUDE_CODE_SESSION_ID=${newSid} CLAUDE_PROJECT_DIR=${root} exec -a claude-probe sleep 10000 &`;
+      tmux(["send-keys", "-t", p.session, `kill %1; ${newCmd}`], p.env);
+      tmux(["send-keys", "-t", p.session, "Enter"], p.env);
+      fs.writeFileSync(newTranscript, "{}\n"); // the NEW session's transcript is FRESH
+      assert.ok(await waitForAlive(p.env, p.session), "the new claude child must come up");
+      // the dead session's transcript stops moving — if the observer is still bound to it, OVERDUE fires
+      spawnSync("touch", ["-d", "3 hours ago", oldTranscript], { encoding: "utf8" });
+
+      // let the observer poll a few rounds: it MUST pick up the new fresh transcript (self-heal).
+      const before2 = countRounds(mon);
+      assert.ok(await waitForRounds(mon, before2 + 3, 20000), `post-restart rounds must pass:\n${mon.output()}`);
+      assert.ok(!/SESSION-OVERDUE/.test(mon.output()),
+        `after a restart the observer must self-heal to the NEW fresh transcript (no OVERDUE). If it were still watching the OLD frozen transcript, OVERDUE would fire:\n${mon.output()}`);
+
+      // positive control: the observer IS watching the NEW transcript — freeze it → OVERDUE fires.
+      spawnSync("touch", ["-d", "3 hours ago", newTranscript], { encoding: "utf8" });
+      assert.ok(await waitForOutput(mon, /SESSION-OVERDUE inner/, 8000),
+        `positive control: freezing the NEW transcript must fire OVERDUE (proves the observer switched to it):\n${mon.output()}`);
+    } finally {
+      mon.child.kill("SIGKILL");
+      mon.cleanup();
+    }
+  } finally {
+    p.cleanup();
+    try { fs.rmSync(root, { recursive: true, force: true }); } catch { /* best-effort */ }
+  }
+});
+
+test("R2 — ambiguous dynamic resolution (no env session id + multiple fresh candidates) falls back to the configured SESSION_TRANSCRIPTS (config contract preserved)", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  const cfgSid = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+  const p = makeEnvProbe("restart-ambig", null, null); // no session env id (deterministic)
+  const home = path.join(p.tmp, "home");
+  const cfgTranscript = transcriptFor(home, p.tmp, cfgSid);
+  // two OTHER fresh transcripts in the same project dir → the newest-.jsonl heuristic is AMBIGUOUS
+  const other1 = transcriptFor(home, p.tmp, "11111111-aaaa-4bbb-8ccc-000000000001");
+  const other2 = transcriptFor(home, p.tmp, "22222222-aaaa-4bbb-8ccc-000000000002");
+  try {
+    fs.mkdirSync(path.dirname(cfgTranscript), { recursive: true });
+    fs.writeFileSync(cfgTranscript, "{}\n");
+    spawnSync("touch", ["-d", "3 hours ago", cfgTranscript], { encoding: "utf8" }); // configured transcript STALE
+    fs.writeFileSync(other1, "{}\n");
+    fs.writeFileSync(other2, "{}\n"); // fresh candidates (mtime now)
+    assert.ok(await waitForAlive(p.env, p.session), "probe must be alive first");
+    const mon = spawnMonitor({ ...p.env, HOME: home, SESSION_ROOT: p.tmp },
+      `inner ${p.tmp} ${p.session}`,
+      { transcripts: `inner ${cfgSid}`, overdueMin: 1, interval: 1 });
+    try {
+      // dynamic is ambiguous (no env session id; TWO fresh candidates) → config wins → the observer
+      // watches the STALE configured transcript → OVERDUE fires. If dynamic had wrongly picked a
+      // fresh candidate, OVERDUE would be silent (the config contract would be broken).
+      assert.ok(await waitForOutput(mon, /SESSION-OVERDUE inner/, 8000),
+        `ambiguous dynamic resolution must fall back to the configured transcript (stale → OVERDUE). If dynamic had wrongly picked a fresh candidate, no OVERDUE:\n${mon.output()}`);
+    } finally {
+      mon.child.kill("SIGKILL");
+      mon.cleanup();
+    }
+  } finally {
+    p.cleanup();
+  }
+});
+
+test("R3 — seam: a confident dynamic resolution (env session id + project match) overrides the configured SESSION_TRANSCRIPTS (restart self-heal path)", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "session-liveness-restart-"));
+  const home = path.join(root, "home");
+  const sid = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+  const otherSid = "11111111-aaaa-4bbb-8ccc-000000000001";
+  const p = makeEnvProbe("restart-seam", root, sid);
+  try {
+    assert.ok(await waitForAlive(p.env, p.session), "probe must be alive first");
+    fs.mkdirSync(path.dirname(transcriptFor(home, root, sid)), { recursive: true });
+    fs.writeFileSync(transcriptFor(home, root, sid), "{}\n"); // the process's OWN (new) transcript
+    const pid = claudeChildPid(p.env, p.session);
+    assert.ok(pid, "the probe must have a claude child");
+    const r = spawnSync("bash", [SCRIPT, "--resolve-transcript", "inner", root, pid], {
+      encoding: "utf8",
+      env: {
+        ...p.env, HOME: home, SESSION_ROOT: root,
+        SESSION_TARGETS: `inner ${root} ${p.session}`,
+        SESSION_TRANSCRIPTS: `inner ${otherSid}`, // config points at a DIFFERENT (old) session id
+      },
+    });
+    assert.equal(r.status, 0, `--resolve-transcript must exit 0:\n${r.stderr}`);
+    assert.equal(r.stdout.trim(), transcriptFor(home, root, sid),
+      `confident dynamic must win over the config (restart self-heal). Got: ${r.stdout.trim()}`);
+    // the raw dynamic resolution reports confident + the candidate path
+    const d = spawnSync("bash", [SCRIPT, "--dynamic-transcript", "inner", root, pid], {
+      encoding: "utf8",
+      env: { ...p.env, HOME: home, SESSION_ROOT: root, SESSION_TARGETS: `inner ${root} ${p.session}` },
+    });
+    assert.equal(d.status, 0, `--dynamic-transcript must exit 0:\n${d.stderr}`);
+    assert.match(d.stdout, /^confident\n/,
+      `dynamic resolution must be confident for an env-carrying claude process:\n${d.stdout}`);
+  } finally {
+    p.cleanup();
+    try { fs.rmSync(root, { recursive: true, force: true }); } catch { /* best-effort */ }
+  }
+});
+
+test("R4 — seam: a claude process for a DIFFERENT project (CLAUDE_PROJECT_DIR mismatch) is NOT trusted — the configured SESSION_TRANSCRIPTS wins", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "session-liveness-restart-"));
+  const otherRoot = fs.mkdtempSync(path.join(os.tmpdir(), "session-liveness-restart-other-"));
+  const home = path.join(root, "home");
+  const cfgSid = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+  const p = makeEnvProbe("restart-xproj", otherRoot, cfgSid);
+  try {
+    assert.ok(await waitForAlive(p.env, p.session), "probe must be alive first");
+    fs.mkdirSync(path.dirname(transcriptFor(home, root, cfgSid)), { recursive: true });
+    fs.writeFileSync(transcriptFor(home, root, cfgSid), "{}\n");
+    const pid = claudeChildPid(p.env, p.session);
+    assert.ok(pid, "the probe must have a claude child");
+    const r = spawnSync("bash", [SCRIPT, "--resolve-transcript", "inner", root, pid], {
+      encoding: "utf8",
+      env: {
+        ...p.env, HOME: home, SESSION_ROOT: root,
+        SESSION_TARGETS: `inner ${root} ${p.session}`,
+        SESSION_TRANSCRIPTS: `inner ${cfgSid}`,
+      },
+    });
+    assert.equal(r.status, 0, `--resolve-transcript must exit 0:\n${r.stderr}`);
+    assert.equal(r.stdout.trim(), transcriptFor(home, root, cfgSid),
+      `a project-mismatched process must NOT override the config (else a wrong-project transcript path could suppress OVERDUE = a new blindness). Got: ${r.stdout.trim()}`);
+    const d = spawnSync("bash", [SCRIPT, "--dynamic-transcript", "inner", root, pid], {
+      encoding: "utf8",
+      env: { ...p.env, HOME: home, SESSION_ROOT: root, SESSION_TARGETS: `inner ${root} ${p.session}` },
+    });
+    assert.equal(d.status, 0, `--dynamic-transcript must exit 0:\n${d.stderr}`);
+    assert.match(d.stdout, /^none\n/,
+      `a project-mismatched claude process must resolve to none (not confident):\n${d.stdout}`);
+  } finally {
+    p.cleanup();
+    try { fs.rmSync(root, { recursive: true, force: true }); } catch { /* best-effort */ }
+    try { fs.rmSync(otherRoot, { recursive: true, force: true }); } catch { /* best-effort */ }
+  }
+});
