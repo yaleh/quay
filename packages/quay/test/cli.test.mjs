@@ -1902,6 +1902,24 @@ async function block26(spawnOpts) {
     ["task list --json", ["task", "list", "--json"]],
     ["task list --json --page-size 1", ["task", "list", "--json", "--page-size", "1"]],
     ["config validate", ["config", "validate"]],
+    // gap-cli-import-command-migration-into-src (AC3): golden-replay for the
+    // command handlers migrated from bin/quay.ts's dispatch body into
+    // src/cli/<command>.ts. Read-only commands only — a mutating command
+    // (task create/edit, complete/promote/retreat, run, migrate, init) would
+    // make the second side of the spawn-vs-import pair see mutated state and
+    // falsely diverge; those handlers are covered by the serial command-
+    // behavior blocks (which exercise the SAME migrated handlers via
+    // runImport) plus the verbatim-move guarantee.
+    ["task view CLI-1", ["task", "view", "CLI-1"]],
+    ["task view CLI-1 --json", ["task", "view", "CLI-1", "--json"]],
+    ["task check CLI-1", ["task", "check", "CLI-1"]],
+    ["task check CLI-1 --json", ["task", "check", "CLI-1", "--json"]],
+    ["action list CLI-1 --json", ["action", "list", "CLI-1", "--json"]],
+    ["adr list", ["adr", "list"]],
+    ["gate --list", ["gate", "--list"]],
+    ["config validate --json", ["config", "validate", "--json"]],
+    ["gate-log CLI-1", ["gate-log", "CLI-1"]],
+    ["gate-log CLI-1 --json", ["gate-log", "CLI-1", "--json"]],
   ];
   for (const [name, args] of pairs) {
     const [spawned, imported] = await Promise.all([
