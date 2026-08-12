@@ -1429,6 +1429,23 @@ test("--targeted: a clean target stays promotable (retiredMechanism false in che
   const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, targetedId: "gap-clean-target" });
   assert.equal(r.targeted_promotion.eligible, true, "clean target is promotable");
   assert.equal(r.targeted_promotion.checks.retiredMechanism, false, "clean target reports retiredMechanism: false");
+  assert.equal(r.targeted_promotion.checks.superseded, false, "clean target reports superseded: false");
+});
+
+test("--targeted: a SUPERSEDED target is not promotable (superseded reason)", (t) => {
+  // gap-judgepoolcandidate-keyword-vs-position companion: the targeted path now reads the
+  // **SUPERSEDED** marker (bulk already did). Without it, a task whose premise a human ruling
+  // deleted (e.g. gap-split-decision-finality-not-enforced, superseded 2026-08-12) becomes
+  // targeted-promotable once its backticked retired-script mentions are correctly read as quotes.
+  const root = makeWorkspace("retired-targeted-superseded");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-split-decision-finality-not-enforced", gapTask("gap-split-decision-finality-not-enforced", {
+    body: fourArtifactBody({ extra: "\n> **SUPERSEDED / 作废** premise deleted by a human ruling.\n" }),
+  }));
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, targetedId: "gap-split-decision-finality-not-enforced" });
+  assert.equal(r.targeted_promotion.eligible, false, "SUPERSEDED target is not promotable");
+  assert.match(r.targeted_promotion.reason, /superseded/);
+  assert.equal(r.targeted_promotion.checks.superseded, true, "the check records superseded: true");
 });
 
 test("CLI smoke: --root emits the intercepted array (empty when no retired candidate)", (t) => {

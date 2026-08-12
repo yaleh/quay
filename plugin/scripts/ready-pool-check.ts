@@ -1137,6 +1137,24 @@ export function buildTargetedPromotion(id, task, root, allTasks) {
   if (isParked(task)) {
     return { id, found: true, status: task.status, eligible: false, floor_independent: true, reason: "parked" };
   }
+  // SUPERSEDED GUARD (gap-judgepoolcandidate-keyword-vs-position, 2026-08-12): the TARGETED path
+  // previously never read the **SUPERSEDED** marker — buildCandidate's comment warns "a promotion
+  // mechanism that does not read the marker silently re-promotes it", and targeted was exactly that
+  // (bulk reads it at buildCandidate). A task whose implementation premise is deleted by a human
+  // ruling must not be promoted by an outer stage-goal selection either — a task like
+  // gap-split-decision-finality-not-enforced (superseded 2026-08-12) would otherwise become
+  // targeted-promotable once its backticked retired-script mentions are correctly read as quotes.
+  if (/SUPERSEDED/i.test(task.body)) {
+    return {
+      id,
+      found: true,
+      status: task.status,
+      eligible: false,
+      floor_independent: true,
+      reason: `superseded: ${id} carries the SUPERSEDED marker (premise deleted by a human ruling) — not promotable`,
+      checks: { superseded: true },
+    };
+  }
   // RETIRED-MECHANISM INTERCEPT (gap-ready-pool-promotion-ignores-retired-mechanism-candidate-check):
   // the same pool-candidate stale check gates TARGETED promotion too — an outer stage-goal selection
   // must not promote a candidate that references an ADR-022-deleted classic-pipeline script.
@@ -1169,6 +1187,7 @@ export function buildTargetedPromotion(id, task, root, allTasks) {
     prosePrereqGap: prosePrereqGapIds,
     notFixture: true,
     notParked: true,
+    superseded: false,
     retiredMechanism: false,
   };
   return {
