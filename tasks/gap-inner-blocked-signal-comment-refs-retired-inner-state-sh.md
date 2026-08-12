@@ -28,8 +28,8 @@ extra: {}
 
 ## AC（draft）
 
-- [ ] `inner-blocked-signal.ts` 无对 `inner-state.sh` 的引用（grep 零命中）
-- [ ] 注释指向实际存在的机制或注明退役
+- [x] `inner-blocked-signal.ts` 无对 `inner-state.sh` 的引用（grep 零命中）
+- [x] 注释指向实际存在的机制或注明退役
 
 ## DoD（draft）
 
@@ -40,6 +40,8 @@ extra: {}
 
 - `sed -n '808,812p' plugin/scripts/inner-blocked-signal.ts`：注释含 "inner-state.sh OVER90 signal"（实测现位于 :873，行号漂移）
 - `find . -name 'inner-state.sh'` = 0 命中（文件不存在）
+- 修复（2026-08-12）：`plugin/scripts/inner-blocked-signal.ts:873` 注释改为「this file's own OVER90 detection」，不再引用已退役的 inner-state.sh；`grep -n "inner-state" plugin/scripts/inner-blocked-signal.ts` = 0 命中（AC1 零引用满足），同一 docstring 的 :871-872 已说明实际机制（读 `.workflow-events/` 遥测库 + TASK_OVER_90M_MS 判定）
+- scoped 验证（2026-08-12）：`scripts/test.sh --for-task gap-inner-blocked-signal-comment-refs-retired-inner-state-sh` → scoped static checks 全绿（task-contract-check 0 violations）+ `plugin/test/inner-blocked-signal.test.mjs` **37 pass / 0 fail**，OVERALL EXIT 0
 
 ## Touches
 
