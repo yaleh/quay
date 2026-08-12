@@ -243,6 +243,14 @@ export interface SuiteStateEvent {
   pendingCount?: number | null;
   integrationHead?: string | null;
   idleMs?: number | null;
+  /**
+   * SUITE-MERGE-PENDING only (gap-suite-state-trigger-retriggers-while-runner-alive) — true when the
+   * merge landed on a state=red whose RUNNER is STILL ALIVE (early-RED: finishedAt null + live pid).
+   * The event is still emitted (bookkeeping — a merge DID land), but the round must NOT start: the
+   * running runner is still collecting its full failure set, and a second runner is the double-suite
+   * accident. The spawn is suppressed (runMonitor → spawnRetriggerRun bails on isRunnerInFlight).
+   */
+  waitRunner?: boolean;
 }
 
 // ── failure-location classification + shared-gate dispatch conditional ─────────────────────────────
@@ -376,6 +384,15 @@ export interface RunOnceResult {
   idleGreen: boolean;
   /** Measured idle ms behind the idle-green decision (null when not terminal-with-finishedAt). */
   idleGreenIdleMs: number | null;
+  /**
+   * gap-suite-state-trigger-retriggers-while-runner-alive — true when a round START trigger fired but
+   * the suite's RUNNER is still in flight (state=red + finishedAt null + live pid — early-RED). The
+   * merge DID land (SUITE-MERGE-PENDING recorded), but a second runner must NOT launch while the live
+   * runner is still collecting (the double-suite accident). The caller (runMonitor) still routes through
+   * spawnRetriggerRun, whose isRunnerInFlight check is the ACTOR that suppresses the spawn (re-reading
+   * the state file — race-safe if the runner finished in between). Pure decision; no side effects.
+   */
+  waitRunner: boolean;
 }
 
 /** AC1/AC3 纯转变检测器：上一个状态 → 下一个状态，产出一条套件状态事件（无转变 = null）。 */
@@ -707,6 +724,27 @@ export function detectCrashedRunner(state: SuiteState | null, now = Date.now()):
 }
 
 /**
+ * gap-suite-state-trigger-retriggers-while-runner-alive — is the suite's RUNNER still in flight?
+ * state=red is NOT "round over": the runner writes red EARLY (finishedAt null — the first failure flips
+ * the state while the run KEEPS COLLECTING its full failure set, KILL_ON_RED=off), so a merge landing
+ * on an early-red with a LIVE runner must NOT start a second runner — that is the double-suite accident
+ * (2×8 lanes racing + the new runner truncating the shared log the old runner's fd sits past + the new
+ * runner's terminal write being generation-guarded away). A runner is in flight iff:
+ *   - the state has NO terminal timestamp (finishedAt == null — the round has not concluded), AND
+ *   - the state carries a pid whose process is alive (a real full-suite-runner still running).
+ * finishedAt != null (a terminal round) TRUMPS pid liveness ⇒ round over ⇒ safe to retrigger. pid
+ * absent/dead ⇒ cannot confirm a live runner ⇒ treated as over (fail-open toward retriggering —
+ * preserves legacy behavior for pid-less states). Mirrors detectCrashedRunner's "death is only certain
+ * when we hold a pid whose process is gone" discipline (the SAME isProcessAlive check).
+ */
+export function isRunnerInFlight(state: SuiteState | null): boolean {
+  if (!state) return false;
+  if (state.finishedAt !== null && state.finishedAt !== undefined) return false; // terminal — round over
+  if (typeof state.pid !== "number" || !Number.isFinite(state.pid) || state.pid <= 0) return false;
+  return isProcessAlive(state.pid);
+}
+
+/**
  * AC6 — write the crash-watchdog's terminal state to disk, guarded: the file is only overwritten if
  * it STILL holds the SAME run's `running` state (a newer runner may have established a new generation
  * since our read — the watchdog must never clobber it). Fail-open: a write failure never crashes the
@@ -773,7 +811,7 @@ export function recordTriggerEvent(
   root: string,
   kind: "SUITE-MERGE-PENDING" | "SUITE-IDLE-GREEN",
   state: SuiteState | null,
-  extra: { pendingCount?: number | null; integrationHead?: string | null; idleMs?: number | null } = {},
+  extra: { pendingCount?: number | null; integrationHead?: string | null; idleMs?: number | null; waitRunner?: boolean } = {},
 ): SuiteStateEvent | null {
   const ev: SuiteStateEvent = {
     event: kind,
@@ -873,10 +911,16 @@ export function runOnce(root: string, opts?: RunOnceOpts): RunOnceResult {
   // current tip (so a stable tip never re-fires); the trigger only fires on the transition.
   const mergeDecision = shouldStartOnMergeLanding(lastIntegrationHead, git.integrationHead, git.pendingCount, cur);
   const mergePending = mergeDecision.fire;
+  // gap-suite-state-trigger-retriggers-while-runner-alive — a merge may land while the runner is STILL
+  // ALIVE on an early-red (state=red + finishedAt null + live pid): the merge-landing trigger still
+  // fires (the event is recorded — a merge DID land), but the round must NOT start (waitRunner — the
+  // live runner is still collecting its full failure set; a second runner is the double-suite accident).
+  const waitRunner = mergePending && isRunnerInFlight(cur);
   if (mergePending) {
     const ev = recordTriggerEvent(root, "SUITE-MERGE-PENDING", cur, {
       pendingCount: git.pendingCount,
       integrationHead: git.integrationHead,
+      waitRunner,
     });
     if (ev) events.push(ev);
   }
@@ -924,6 +968,7 @@ export function runOnce(root: string, opts?: RunOnceOpts): RunOnceResult {
     retrigger,
     retriggerIdleMs,
     mergePending,
+    waitRunner,
     idleGreen,
     idleGreenIdleMs,
   };
@@ -937,7 +982,8 @@ function formatEventLine(ev: SuiteStateEvent): string {
     : "";
   return (
     `${ev.event} state=${ev.state?.state ?? "?"} early=${ev.early} ` +
-    `stopSignal=${ev.stopSignal} at=${ev.at}${locSummary}`
+    `stopSignal=${ev.stopSignal} at=${ev.at}${locSummary}` +
+    (ev.waitRunner ? " waitRunner=true" : "")
   );
 }
 
@@ -970,6 +1016,19 @@ export function retriggerRunnerArgs(root: string, state: SuiteState | null): str
 export function spawnRetriggerRun(root: string): void {
   const state = readSuiteState(root);
   if (!state || state.state === "running") return; // AC4: a round is already in flight — never double-start
+  // gap-suite-state-trigger-retriggers-while-runner-alive — state=red with a LIVE runner is early-RED
+  // (the runner flipped state on the FIRST failure but is STILL COLLECTING its full failure set,
+  // KILL_ON_RED=off). "state != running" is NOT "round over": starting a second runner here is the
+  // double-suite accident (2×8 lanes racing + the new runner truncating the shared log the old runner's
+  // fd sits past + the new runner's terminal write being generation-guarded away). Re-check the state
+  // file (the actor is race-safe — if the runner finished in the meantime, this falls through to spawn).
+  if (isRunnerInFlight(state)) {
+    console.log(
+      `SUITE-RETRIGGER-WAIT-RUNNER root=${root} state=${state.state} ` +
+        `runId=${state.runId ?? "?"} pid=${state.pid ?? "none"} at=${new Date().toISOString()}`,
+    );
+    return;
+  }
   const runner = path.join(__dirname, "full-suite-runner.ts");
   const args = ["--no-warnings", "--experimental-strip-types", runner, ...retriggerRunnerArgs(root, state)];
   const logPath = path.join(root, ".quay", "full-suite-retrigger.log");
@@ -1048,6 +1107,7 @@ export async function run(argv: string[]): Promise<number> {
           stopSignal: res.stopSignal,
           retrigger: res.retrigger,
           mergePending: res.mergePending,
+          waitRunner: res.waitRunner,
           idleGreen: res.idleGreen,
           retriggerIdleMs: res.retriggerIdleMs,
           idleGreenIdleMs: res.idleGreenIdleMs,
@@ -1065,6 +1125,7 @@ export async function run(argv: string[]): Promise<number> {
   console.log(`stopSignal=${res.stopSignal}`);
   console.log(`retrigger=${res.retrigger}${res.retriggerIdleMs !== null ? ` idleMs=${res.retriggerIdleMs}` : ""}`);
   console.log(`mergePending=${res.mergePending}`);
+  console.log(`waitRunner=${res.waitRunner}`);
   console.log(`idleGreen=${res.idleGreen}${res.idleGreenIdleMs !== null ? ` idleMs=${res.idleGreenIdleMs}` : ""}`);
   return 0;
 }

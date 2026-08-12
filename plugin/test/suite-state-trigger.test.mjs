@@ -55,6 +55,9 @@ import {
   readGitVerificationState,
   resolveIdleGreenMs,
   DEFAULT_IDLE_GREEN_MS,
+  // gap-suite-state-trigger-retriggers-while-runner-alive — runner-liveness before retrigger
+  isRunnerInFlight,
+  spawnRetriggerRun,
 } from "../scripts/suite-state-trigger.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -784,6 +787,125 @@ test("AC2 — readGitVerificationState reads integration head + develop..integra
     const git = readGitVerificationState(root);
     assert.equal(git.integrationHead, integrationHead, "integration head resolved");
     assert.ok(git.pendingCount >= 1, "develop..integration count resolved (unverified commits present)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ── gap-suite-state-trigger-retriggers-while-runner-alive ─────────────────────────────────────────
+// A merge landing on a state=red whose RUNNER is STILL ALIVE (early-RED: finishedAt null + live pid)
+// must NOT start a second runner — the double-suite accident (2×8 lanes racing + the new runner
+// truncating the shared log the old runner's fd sits past + the new runner's terminal write being
+// generation-guarded away). state=red does NOT mean "round over": the runner flips red on the FIRST
+// failure but keeps collecting its full failure set (KILL_ON_RED=off).
+//
+//   AC1 — check state.pid liveness BEFORE retriggering; alive ⇒ NO RETRIGGER (SUITE-MERGE-PENDING +
+//         waitRunner marker emitted instead)
+//   AC2 — runner DEAD (pid absent/dead or finishedAt set) ⇒ behavior unchanged (retrigger as normal)
+//   AC3 — negative control — state=running (live runner) ⇒ any merge does NOT retrigger (unchanged)
+
+test("gap-suite AC1/AC2/AC3 — isRunnerInFlight is pure: a LIVE runner on an early-red is in flight; dead / terminal / no-pid are not", () => {
+  // (a) runner ALIVE + state=red + finishedAt null ⇒ IN FLIGHT (the double-suite shape — must NOT retrigger)
+  assert.equal(
+    isRunnerInFlight({ state: "red", reason: "failed", finishedAt: null, pid: process.pid }),
+    true,
+    "early-red with a LIVE runner is in flight (AC1 — suppress the retrigger)",
+  );
+  // (b) runner DEAD + state=red + finishedAt null ⇒ NOT in flight — the round is effectively over
+  assert.equal(
+    isRunnerInFlight({ state: "red", reason: "failed", finishedAt: null, pid: deadPid() }),
+    false,
+    "early-red with a DEAD runner is not in flight (AC2 — retrigger as normal)",
+  );
+  // (b2) finishedAt set (terminal) trumps pid liveness even with a LIVE pid ⇒ round over
+  assert.equal(
+    isRunnerInFlight({ state: "red", reason: "failed", finishedAt: 123456, pid: process.pid }),
+    false,
+    "a terminal red (finishedAt set) is NOT in flight even with a live pid (AC2 — finishedAt criterion)",
+  );
+  // (c) state=running + live pid + finishedAt null ⇒ in flight (the running-state family — never retrigger)
+  assert.equal(
+    isRunnerInFlight({ state: "running", finishedAt: null, pid: process.pid }),
+    true,
+    "running + live runner is in flight",
+  );
+  // edge cases — fail-open toward NOT in flight (preserves legacy behavior for pid-less states)
+  assert.equal(isRunnerInFlight({ state: "red", reason: "failed", finishedAt: null }), false, "no pid ⇒ not in flight");
+  assert.equal(isRunnerInFlight({ state: "red", reason: "failed", finishedAt: null, pid: 0 }), false, "pid 0 ⇒ not in flight");
+  assert.equal(isRunnerInFlight({ state: "green", finishedAt: 123, pid: process.pid }), false, "green terminal ⇒ not in flight");
+  assert.equal(isRunnerInFlight(null), false, "absent state ⇒ not in flight");
+});
+
+test("gap-suite AC1 — runOnce on a merge landing over an early-red with a LIVE runner emits SUITE-MERGE-PENDING + waitRunner (no double-suite)", () => {
+  const { root } = gitRoot(1);
+  try {
+    // early-red: the runner flipped red on the first failure but is STILL COLLECTING (finishedAt null,
+    // live pid = the test process). A merge lands in this window — the exact accident shape.
+    writeSuiteState(root, state({ state: "red", reason: "failed", finishedAt: null, pid: process.pid }));
+    const first = runOnce(root, { idleGreenMs: 10_000_000 });
+    assert.equal(first.mergePending, false, "first observation establishes the baseline, does not fire");
+    assert.equal(first.waitRunner, false, "baseline has no wait-runner");
+
+    // Advance integration with a NEW merge while state stays early-red + runner alive.
+    execSync("git checkout -q integration", { cwd: root, stdio: "ignore" });
+    fs.writeFileSync(path.join(root, "a.txt"), "base + 1 + 2\n", "utf8");
+    execSync("git add a.txt && git commit -q -m merge2", { cwd: root, stdio: "ignore" });
+    execSync("git checkout -q develop", { cwd: root, stdio: "ignore" });
+    const second = runOnce(root, { idleGreenMs: 10_000_000 });
+    assert.equal(second.mergePending, true, "a NEW merge on early-red still emits the merge-landing trigger (the merge DID land)");
+    assert.equal(second.waitRunner, true, "runner alive + early-red ⇒ wait-runner: do NOT start a second runner (AC1)");
+    const ev = second.events.find((e) => e.event === "SUITE-MERGE-PENDING");
+    assert.ok(ev, "SUITE-MERGE-PENDING event recorded");
+    assert.equal(ev.waitRunner, true, "the event carries the waitRunner marker (round deferred, not started)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("gap-suite AC2 — runOnce on a merge landing over an early-red with a DEAD runner emits SUITE-MERGE-PENDING WITHOUT waitRunner (retrigger as normal)", () => {
+  const { root } = gitRoot(1);
+  try {
+    // early-red but the runner is DEAD (killed mid-run — no terminal write): the round is effectively
+    // over, so a merge landing SHOULD retrigger as normal (AC2 — behavior unchanged).
+    writeSuiteState(root, state({ state: "red", reason: "failed", finishedAt: null, pid: deadPid() }));
+    runOnce(root, { idleGreenMs: 10_000_000 }); // baseline
+
+    execSync("git checkout -q integration", { cwd: root, stdio: "ignore" });
+    fs.writeFileSync(path.join(root, "a.txt"), "base + 1 + 3\n", "utf8");
+    execSync("git add a.txt && git commit -q -m merge3", { cwd: root, stdio: "ignore" });
+    execSync("git checkout -q develop", { cwd: root, stdio: "ignore" });
+    const res = runOnce(root, { idleGreenMs: 10_000_000 });
+    assert.equal(res.mergePending, true, "a NEW merge on early-red fires the merge-landing trigger");
+    assert.equal(res.waitRunner, false, "runner dead ⇒ NOT wait-runner — retrigger as normal (AC2)");
+    const ev = res.events.find((e) => e.event === "SUITE-MERGE-PENDING");
+    assert.ok(ev, "SUITE-MERGE-PENDING event recorded");
+    assert.equal(ev.waitRunner, false, "event carries no waitRunner marker");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("gap-suite AC1 — spawnRetriggerRun REFUSES to launch a second runner while the runner is alive (early-red → SUITE-RETRIGGER-WAIT-RUNNER)", () => {
+  const root = tmpRoot();
+  try {
+    // The exact double-suite shape: state=red early (finishedAt null) with a LIVE runner pid.
+    writeSuiteState(root, state({ state: "red", reason: "failed", finishedAt: null, pid: process.pid }));
+    const logs = [];
+    const origLog = console.log;
+    console.log = (...args) => logs.push(args.join(" "));
+    try {
+      spawnRetriggerRun(root);
+    } finally {
+      console.log = origLog;
+    }
+    assert.ok(logs.some((l) => l.includes("SUITE-RETRIGGER-WAIT-RUNNER")), "wait-runner signal logged (no launch)");
+    assert.ok(!logs.some((l) => l.startsWith("SUITE-RETRIGGER ")), "NO real SUITE-RETRIGGER launch happened");
+    assert.ok(!fs.existsSync(path.join(root, ".quay", "full-suite-retrigger.log")), "no retrigger log — the runner was never spawned");
+    // the state file is untouched (still early-red — the next round waits for THIS runner to finish)
+    const s = readSuiteState(root);
+    assert.equal(s.state, "red");
+    assert.equal(s.finishedAt, null);
+    assert.equal(s.pid, process.pid, "the live runner pid is preserved");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
