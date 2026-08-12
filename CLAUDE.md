@@ -16,7 +16,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | 驱动/投递到别的 Claude 会话 | `plugin/scripts/supervisor-deliver.sh <目标> <文本> --transcript <目标会话.jsonl>`（`--root` 只用于重生会话）；规程见 `orchestration/CRYSTALLIZED-reliable-send-2026-08-04.md` |
 | 三层每轮该做什么 | `orchestration/{manager,orchestrator,fast-mode}-tick-core.md`（各 ≤80 行，执行路径） |
 | 判准 / 收尾 / 发消息形态 | `orchestration/manager-tick-{criteria,closing,sending}.md`（466 行；**停调 workflow 19 小时 ⇒ 这些全部缺席 ⇒ 8 条违规**） |
-| 收件箱 delivered→consumed | `plugin/scripts/inbox-reader.sh`（**不是 `ls`**） |
+| 收件箱 delivered→consumed | **同一目录两类内容，两个工具，别只记一个**：`plugin/scripts/inbox-reader.sh` 只消费 **message-bus 写的 JSON 记录**（`packages/quay/src/message-bus.ts`）；**手写的 `.md` 消息它不认**（实测 2026-08-12：目录 64 封 `.md`，它报零 `read` 行）⇒ 判「有没有人给我留话」必须 `ls .quay/manager-inbox/` **列目录本身**（这也正是 outer 执行核 `orchestration/orchestrator-tick-core.md:16` A5 的写法及其理由：`gap-inbox-counter-disconnected-from-files` —— counter 曾报 delivered=0 而目录实有 6 封，**沉默失败**）。**只跑 `inbox-reader.sh` 会把一个装着 64 封信的目录读成空的。** |
 | pane 状态 | `plugin/scripts/pane-state-classify.ts`（底部区域 + 枚举态，**不是整屏哈希**） |
 | **诊断「空槽 + 池里有货 + 就是不派」** | **先查 subagent 预算,不要先怀疑机制** —— harness 有**会话级累计** spawn 上限，触顶后**静默降级为主线程串行**，三层执行核都不写它。识别：目标会话 transcript 里搜 `Subagent spawn limit reached`；实测燃烧率 ~60 次/天 ⇒ 默认额度约 **3 天**寿命，**任何长于 3 天的自主运行必然撞它**。数值、环境变量名、`/clear` 是否重置、两个易混旋钮（会话累计 vs 并发）——**正本在 `tasks/gap-inner-subagent-budget-invisible.md`，不在此处复制**（数值随 Claude Code 版本变）。**代价实证 2026-08-10：三层 + 人共花数小时反复误诊为「outer 不派发」「inner 自锁」「唤醒链断」，全错。** |
 
@@ -129,7 +129,7 @@ Key cross-cutting facts (require reading several files to see):
 
 **跨会话驱动/状态读取的四条硬规则**（机件清单只存在于 `bash plugin/scripts/capability-catalog.sh`，任何地方不得复制——catalog 头注释钉死「The field lives IN A SCRIPT, never in the README」）：
 1. 驱动/投递到别的 Claude 会话：`supervisor-deliver.sh <目标> <文本> --transcript <目标会话.jsonl>`（`--root` 只用于重生会话）；禁止手工拼 tmux send-keys；`send-keys-verified.sh` 已 superseded。
-2. 收件箱 delivered→consumed：`inbox-reader.sh`，不是 `ls`。
+2. 收件箱：**`ls .quay/manager-inbox/` 列目录判有无**（手写 `.md` 消息只有它看得见），**`inbox-reader.sh` 只管 message-bus 的 JSON 记录 delivered→consumed**。两者覆盖同一目录的不同population，**缺一个就会把非空读成空**（2026-08-12 实测；本行此前只写了后者，是本文件序言所警告的那种「覆盖率最高处的错误」）。
 3. pane 状态：`pane-state-classify.ts`，不是整屏哈希（ADR-016 禁）。
 4. outer→inner 驱动文本契约：`drive-contract-check.ts`。
 
