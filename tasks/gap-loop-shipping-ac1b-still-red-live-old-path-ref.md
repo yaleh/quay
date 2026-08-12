@@ -44,11 +44,11 @@ scripts/resource-gate.sh
 
 ## AC
 
-- [ ] AC1: AC1b 扫描 hits 精确对象已定位（文件+路径+引入 commit）
-- [ ] AC2: 修复（排除合法引用 / 更新真引用到新路径）
-- [ ] AC3: loop-shipping.test.mjs 隔离全绿
-- [ ] AC4: `--for-task` scoped 门绿；既有测试全绿
-- [ ] AC5: 无回归（其它 AC 仍绿）
+- [x] AC1: AC1b 扫描 hits 精确对象已定位（文件+路径+引入 commit）
+- [x] AC2: 修复（排除合法引用 / 更新真引用到新路径）
+- [x] AC3: loop-shipping.test.mjs 隔离全绿
+- [x] AC4: `--for-task` scoped 门绿；既有测试全绿
+- [x] AC5: 无回归（其它 AC 仍绿）
 
 ## Definition of Done
 
@@ -57,9 +57,33 @@ scripts/resource-gate.sh
 - [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
 
+## Evidence
+
+**AC1b 扫描 hits 精确对象（4 条，`assert.deepEqual(hits, [])` actual）**：
+
+| 文件 | 路径引用 | 引入 commit |
+|---|---|---|
+| `packages/quay/test/install-config-driven-e2e-runtime.test.mjs` | `orchestration/orchestrator-loop-tick.md`（`productSource()` L108 + `REQUIRED_PRODUCT_FILES` L260） | `6cba27d4` |
+| `packages/quay/test/install-config-driven-e2e-runtime.test.mjs` | `docs/analysis/fast-mode-loop-tick.md`（`productSource()` L111 + `REQUIRED_PRODUCT_FILES` L261） | `6cba27d4` |
+| `packages/quay/test/install-config-driven-e2e-upgrade.test.mjs` | `orchestration/orchestrator-loop-tick.md`（`productSource()` L111） | `6cba27d4` |
+| `packages/quay/test/install-config-driven-e2e-upgrade.test.mjs` | `docs/analysis/fast-mode-loop-tick.md`（`productSource()` L114） | `6cba27d4` |
+
+**引入者**：`6cba27d4`（2026-08-12 12:41:51, "tasks: split three phase floor files — serial 107→48s / lowconc 88→43.5s / main 72→38.8s (gap-split-three-phase-floor-files)"）。`git merge-base --is-ancestor e63439d6 6cba27d4` → YES：split 提交在 round-18 全绿（e63439d6）之后，故引入后红。split 将已排除的 `packages/quay/test/install-config-driven-e2e.test.mjs`（REQUIRED_PRODUCT_FILES 列 target-layout tick-doc 路径）切成 runtime + upgrade 两个新文件，旧路径引用随之复制（文件头注明 "Test BODIES are byte-identical to the pre-split file"）。
+
+**修复**：`plugin/scripts/loop-shipping-exclusion-data.mjs` 加两条 file-level 排除项（在 pre-split `install-config-driven-e2e.test.mjs` 条目之后）：
+- `packages/quay/test/install-config-driven-e2e-runtime.test.mjs`
+- `packages/quay/test/install-config-driven-e2e-upgrade.test.mjs`
+
+两者均为 **target-layout 合法引用**（与已排除的 pre-split 文件同类）：`productSource()` 把消费端落地路径（orchestration/ + docs/analysis/）映射回 plugin/loop/ 源；`REQUIRED_PRODUCT_FILES` 断言 quay-init --loop 在消费项目里落下的 tick-doc 布局。**不是**指向已移动机制的陈旧引用 ⇒ 走「加排除条目」分支而非「更新调用方」。两条新条目均非惰性（各 2 hits），necessity-check 无需 retainedNote。
+
+**验证**：
+- `node --test plugin/test/loop-shipping.test.mjs plugin/test/loop-shipping-necessity-check.test.mjs` → 18 pass / 0 fail（AC1b + necessity-check 全绿，`inert_exclusions: 0`）。
+- `bash scripts/test.sh --for-task gap-loop-shipping-ac1b-still-red-live-old-path-ref --allow-thin` → exit 0，23 pass / 0 fail / 0 cancelled（含 install-config-driven e2e 全家 + loop-shipping 全家 + task-contract-check no violations；scoped 静态检查层全过）。
+
 ## Touches
 
-- plugin/test/loop-shipping.test.mjs（AC1b 扫描 hits 定位）
-- plugin/scripts/loop-shipping-exclusion-data.mjs（排除合法引用，若需）
-- 引用旧路径的调用方文件（更新到新路径 plugin/loop/ 或 plugin/scripts/，定位后）
+- plugin/test/loop-shipping.test.mjs（AC1b 扫描 hits 定位——只读定位，未改）
+- plugin/scripts/loop-shipping-exclusion-data.mjs（排除合法引用：已加 install-config-driven-e2e-runtime / install-config-driven-e2e-upgrade 两条 target-layout 排除）
+- packages/quay/test/install-config-driven-e2e-runtime.test.mjs（定位的 hits 文件，target-layout 引用，未改——排除不更新）
+- packages/quay/test/install-config-driven-e2e-upgrade.test.mjs（定位的 hits 文件，target-layout 引用，未改——排除不更新）
 - tasks/gap-loop-shipping-ac1b-still-red-live-old-path-ref.md（自身：勾 AC + 贴证据）
