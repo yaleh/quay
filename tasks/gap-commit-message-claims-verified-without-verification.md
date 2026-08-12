@@ -37,9 +37,9 @@ extra: {}
 
 ## AC（draft）
 
-- [ ] 提交消息的 "verified" 类断言必须伴随可复现的验证命令/引用（负控制：无命令则 flag）
-- [ ] 一条机械检查能检出「提交消息自称 verified 但缺验证命令」的提交
-- [ ] 与 `gap-ac8-import-over-spawn-ticked-...`（AC 勾选 ≠ 机制生效）与 `manager-phase-goal.md` AC11 交叉标注
+- [x] 提交消息的 "verified" 类断言必须伴随可复现的验证命令/引用（负控制：无命令则 flag）
+- [x] 一条机械检查能检出「提交消息自称 verified 但缺验证命令」的提交
+- [x] 与 `gap-ac8-import-over-spawn-ticked-...`（AC 勾选 ≠ 机制生效）与 `manager-phase-goal.md` AC11 交叉标注
 
 ## DoD（draft）
 
@@ -52,8 +52,22 @@ extra: {}
 - `82b1a719`（20:43:05）修复 trend-check 复制 2 份；`9c6b4efd` 修 8 个 frontmatter
 - d = 13:02:03 → 20:43:05 = 7h41m（`orchestration/ANALYSIS-when-should-B-develop-...md` 已记，c1085e6b）
 
+### 实现证据（2026-08-12，worktree 实跑）
+
+- **scoped 门**：`scripts/test.sh --for-task gap-commit-message-claims-verified-without-verification` → （见下方实跑输出；含本检查器 selftest + 测试 + capability-catalog + delivery-inventory + 相关静态检查）。
+- **检查器 RED（8e2e49b9 形态，裸断言无命令）**：`commit-message-verified-check.ts --root <repo> --depth 100` → `violations: 1`，`claim='all syntax verified'`，**EXIT=1**（负控制）。
+- **检查器 GREEN（同一断言带验证命令）**：`subject='merge: 45 conflicts resolved (...; all syntax verified — scripts/test.sh green)'` → `violations: 0`，**EXIT=0**。
+- **selftest**：`commit-message-verified-check.ts --selftest` → 13/13 passed。
+- **mutation case**：`checker-mutation-cases/commit-message-verified-check.sh` → GREEN baseline → INJECT 裸断言必红 → RESTORE 命令引用必绿（full-suite `checker-mutation-check` 用）。
+- **AC3 交叉标注**：本检查器即「机械生效 ≠ 勾选」的实例——被接进 `run_static_checks`（@static-tier change，scoped + full 都跑），裸 verified 断言在下次测试即红，而不是等到 7h41m 后发现；对齐 `gap-ac8-import-over-spawn-ticked-...`（AC 勾选 ≠ 机制生效）与 `manager-phase-goal.md` AC11（verified 断言必须带验证命令 + 负控制）。
+- **Touches 补注册文件说明**：本任务是「新 plugin/scripts 脚本任务」，`select-static-checks-for-touches.ts` 的 `checkTouchesRegistration` 要求 Touches 含 `capability-catalog.sh` + `quay-product-outline.md` 否则 scoped 门 fail-closed（`touches-missing-registration`）。故按该机制补 Touches，并实现 catalog 声明 + inventory 再生成；另接线需要 `scripts/test.sh` + mutation case，一并补入 Touches。
+
 ## Touches
 
 - plugin/scripts/commit-message-verified-check.ts (new)
 - plugin/test/commit-message-verified-check.test.mjs (new)
-- tasks/gap-commit-message-claims-verified-without-verification.md（自身：勾 AC + 贴证据）
+- plugin/scripts/checker-mutation-cases/commit-message-verified-check.sh (new)
+- scripts/test.sh（接线到 run_static_checks，@static-tier change）
+- plugin/scripts/capability-catalog.sh（AC1c 声明：QUESTION/CADENCE/INVALIDATION/LAST_REAFFIRMED/MATCHING 五行）
+- docs/proposals/quay-product-outline.md（§6 DELIVERY-INVENTORY 快照再生成：scripts 214→215）
+- tasks/gap-commit-message-claims-verified-without-verification.md（自身：勾 AC + 贴证据 + 补 Touches 注册文件）
