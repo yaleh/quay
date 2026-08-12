@@ -6,7 +6,7 @@
 import path from "node:path";
 import fs from "node:fs/promises";
 import fsSync from "node:fs";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { spawnSync } from "node:child_process";
 
 function fsSyncExists(p) {
@@ -107,7 +107,7 @@ async function withGuardedErrors(fn) {
 // human-readable output, which is exactly the bug this closes.
 // Returns { json: boolean } | null (null = invalid --format value, caller
 // should print an error and exit 1).
-function resolveJsonFlag(flags) {
+export function resolveJsonFlag(flags) {
   if (flags.format === undefined) {
     return { json: flags.json === true };
   }
@@ -123,7 +123,7 @@ function resolveJsonFlag(flags) {
 // means "no limit" (existing behavior, preserved); an explicitly-invalid
 // value (0, negative, non-numeric) is a hard usage error, not a silent
 // fall-back to "show everything" (UQ-048).
-function resolvePageSize(flags) {
+export function resolvePageSize(flags) {
   if (flags["page-size"] === undefined) {
     return { pageSize: null, error: null };
   }
@@ -138,7 +138,7 @@ function resolvePageSize(flags) {
   return { pageSize: n, error: null };
 }
 
-function parseFlags(argv) {
+export function parseFlags(argv) {
   const flags = {};
   const positional = [];
   for (let i = 0; i < argv.length; i++) {
@@ -181,7 +181,7 @@ function parseFlags(argv) {
 // `[sub, ...rest]` — exactly as the `run` command already does — so the id and
 // flags are recovered flag-aware, in either order. Returns { flags, id }; `id`
 // is undefined when no positional was given (caller must emit a usage error).
-function parseVerbless(sub, rest) {
+export function parseVerbless(sub, rest) {
   const { flags, positional } = parseFlags([sub, ...rest].filter((a) => a !== undefined));
   return { flags, id: positional[0] };
 }
@@ -344,7 +344,7 @@ async function connectNamedProvider(cfg, providerId) {
 // Mirror of serve.js's relativeTime() — kept self-contained here to avoid importing
 // serve.js (which starts an HTTP server as a side effect of startServer() being called
 // on import in some scenarios, and imports http/config/connectProvider at module load).
-function relativeTimeCli(ts) {
+export function relativeTimeCli(ts) {
   const elapsed = Date.now() - ts;
   if (elapsed < 0) return "just now";
   const seconds = Math.floor(elapsed / 1000);
@@ -362,7 +362,7 @@ function relativeTimeCli(ts) {
 // /^#+\s/) are template boilerplate ("## Proposal", "## Plan", "## AC",
 // "## DoD") that appear in every task body and cause false positives when
 // users search for those terms. Closes CB-017 (significant).
-function stripHeadings(text) {
+export function stripHeadings(text) {
   return (text || "").split("\n").filter((line) => !/^#+\s/.test(line)).join(" ");
 }
 
@@ -641,9 +641,77 @@ Environment contract — when the default 'acceptance' gate spawns a command:
   }
 }
 
-async function main() {
-  const [, , cmd, sub, ...rest] = process.argv;
-  const { flags, positional } = parseFlags(rest);
+// ── run() — the import-callable Core CLI (gap-cli-import-refactor-run-shell-architecture) ──
+// run(argv, ctx) is the whole former main() body: the command dispatch is now a
+// testable unit that RETURNS { code, stdout, stderr } instead of only writing to
+// the real process streams. The shell at the bottom of this file is a thin
+// argv → run() → exit/write wrapper; tests import run() directly and call it
+// with ctx.capture to get the command's output as return values (zero process
+// derivation for command-behavior coverage).
+//
+// ctx (all optional):
+//   capture: boolean — capture stdout/stderr into the return value
+//   cwd: string      — process.chdir() for the run's duration (restored after)
+//   env: object      — process.env key overrides for the run's duration (restored after)
+//
+// Golden-replay guarantee (AC4): the command dispatch below is byte-for-byte the
+// former main() body — no command behavior was rewritten during import-ification,
+// so shell mode (run(argv) with no ctx) and capture mode (run(argv, { capture: true }))
+// execute the exact same code path. Equivalence is verified by the golden-replay
+// blocks in packages/quay/test/cli-run.test.mjs (spawn vs run() byte-compare).
+export async function run(argv, ctx = {}) {
+  process.exitCode = 0;
+  const capture = ctx.capture === true;
+  const prevCwd = process.cwd();
+  let chdirRestore = null;
+  const envSavedKeys = [];
+  const envSavedValues = [];
+  let outBuf = "";
+  let errBuf = "";
+  const origStdoutWrite = process.stdout.write;
+  const origStderrWrite = process.stderr.write;
+
+  if (typeof ctx.cwd === "string" && ctx.cwd !== prevCwd) {
+    process.chdir(ctx.cwd);
+    chdirRestore = prevCwd;
+  }
+  if (ctx.env) {
+    for (const k of Object.keys(ctx.env)) {
+      envSavedKeys.push(k);
+      envSavedValues.push(process.env[k]);
+      if (ctx.env[k] === undefined) delete process.env[k];
+      else process.env[k] = ctx.env[k];
+    }
+  }
+  if (capture) {
+    process.stdout.write = (s) => { outBuf += s; return true; };
+    process.stderr.write = (s) => { errBuf += s; return true; };
+  }
+
+  try {
+    await dispatch(argv);
+    return { code: process.exitCode, stdout: outBuf, stderr: errBuf };
+  } catch (err) {
+    console.error(err.stack || String(err));
+    process.exitCode = 1;
+    return { code: 1, stdout: outBuf, stderr: errBuf };
+  } finally {
+    if (origStdoutWrite) process.stdout.write = origStdoutWrite;
+    if (origStderrWrite) process.stderr.write = origStderrWrite;
+    if (ctx.env) {
+      for (let i = 0; i < envSavedKeys.length; i++) {
+        const k = envSavedKeys[i];
+        if (envSavedValues[i] === undefined) delete process.env[k];
+        else process.env[k] = envSavedValues[i];
+      }
+    }
+    if (chdirRestore !== null) process.chdir(chdirRestore);
+  }
+
+  // ── the command dispatch (former main() body, unchanged) ──
+  async function dispatch(argv) {
+    const [cmd, sub, ...rest] = argv;
+    const { flags, positional } = parseFlags(rest);
 
   // UQ-047 (M08-merge-recover): top-level --version / -V. Prints the real
   // packages/quay/package.json version (via src/version.js, which is also
@@ -1210,7 +1278,7 @@ async function main() {
     const { startServer } = await import("../src/serve.ts");
     // `serve` has no subcommand token — reparse from argv[2] so `--port` etc.
     // is read correctly instead of being swallowed into `sub`.
-    const { flags: serveFlags } = parseFlags(process.argv.slice(3));
+    const { flags: serveFlags } = parseFlags(argv.slice(1));
     await startServer({
       port: serveFlags.port ? Number(serveFlags.port) : undefined,
       host: serveFlags.host || undefined,
@@ -1829,9 +1897,33 @@ separate commands on purpose (C5: two commands, not one parameterised command).
   // QX-005: updated fallback with --help hint (UQ-001/UQ-002).
   console.error("usage: quay <init|task list|view|create|edit|check|gate|gate-log|complete|adjudicate|promote|retreat|run|migrate|config validate|action list|serve|mcp|manager start|manager adopt> ...\nRun `quay --help` for full usage documentation.");
   process.exitCode = 1;
+    }
 }
 
-main().catch((err) => {
-  console.error(err.stack || String(err));
-  process.exitCode = 1;
-});
+// ── thin shell (gap-cli-import-refactor-run-shell-architecture) ──
+// argv → run() → exit/write. run() already writes to the real process streams
+// in shell mode (no ctx.capture) and returns the exit code; the shell maps that
+// onto process.exitCode and handles a top-level rejection the same way the old
+// `main().catch()` did (a thrown error that run() itself did not absorb — run()
+// catches command errors and returns { code: 1 }, so this catch is only reached
+// for errors thrown OUTSIDE run()'s dispatch, i.e. wrapper-setup failures).
+//
+// Entrypoint-guarded (ESM): this shell must run ONLY when this file is the
+// main module. When a test imports run() from this file, the module still
+// executes top-to-bottom, and an UNGUARDED shell would fire `run([])` with the
+// test's own process.argv — its async finally would later restore
+// process.stdout.write/process.stderr.write and clobber the capture patch the
+// test's run(ctx.capture) installed mid-dispatch (the module-load run stays
+// pending until the test's first await, then its finally reverts the write
+// patch, so command output leaks to the real process streams instead of the
+// capture buffer). The import.meta.url === process.argv[1] check is the
+// standard ESM main-module test and is byte-identical under the esbuild dist
+// bundle (import.meta.url is rewritten to the bundle's own file:// URL).
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  run(process.argv.slice(2)).then((res) => {
+    if (typeof res.code === "number") process.exitCode = res.code;
+  }).catch((err) => {
+    console.error(err.stack || String(err));
+    process.exitCode = 1;
+  });
+}
