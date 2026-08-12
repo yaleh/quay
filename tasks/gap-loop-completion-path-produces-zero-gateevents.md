@@ -70,12 +70,12 @@ gate-events.jsonl 从「不存在」→「有 complete pass 事件」。
 
 **AC4 证据（CLI 不回归）**：`packages/quay/test/lifecycle.test.mjs` 全部 CLI 路径用例（complete fail/pass/precondition、adjudicate、promote、retreat、DIR-102）在 scoped 门中全绿；`runComplete` 未改动。
 
-**AC5 证据（--for-task scoped 门绿）**：
+**AC5 证据（--for-task scoped 门绿，worktree 实跑）**：
 
 ```
-$ bash scripts/test.sh --scoped packages/quay/test/lifecycle.test.mjs plugin/test/gate-event-store.test.mjs
-ℹ tests 46   ℹ pass 46   ℹ fail 0   ℹ cancelled 0
-scoped static checks 全 PASS（test-framework-policy-check / test-isolation-check / test-impl-census-check / superseded-capability-check / tick-core-static-check）
+$ bash scripts/test.sh --for-task gap-loop-completion-path-produces-zero-gateevents --allow-thin
+ℹ tests 139   ℹ pass 139   ℹ fail 0   ℹ cancelled 0   (FINAL EXIT=0)
+scoped static checks 全 PASS（test-framework-policy-check / test-isolation-check / task-contract-check（band 修复后无违规）/ adr016-screen-use-check / superseded-capability-check / dead-code-after-return-check / strategic-doc-staleness-check / tick-core-static-check / delivery-inventory-drift-gate）
 ```
 
 **负控制**：todo 任务 → exit 1 + `illegal transition` + 不写事件；带 failing meter → 留 ready + acceptance fail 事件（不硬翻）。
@@ -94,7 +94,7 @@ scoped static checks 全 PASS（test-framework-policy-check / test-isolation-che
 ## Contract
 
 measure   loop_gate_event_count = `ssh ad-arm1 'wc -l ~/work/archguard/.quay/gate-events.jsonl'` stdout 数字
-band      loop_gate_event_count ≥ 1（loop 完成任务后 gate-events.jsonl 非空）
+band      loop_gate_event_count = ≥ 1（loop 完成任务后 gate-events.jsonl 非空）
 invariant loop_uses_gate_engine = 1（loop 完成路径经与 CLI 一致的 gate 引擎）
 invoke    `ssh ad-arm1 'cd ~/work/archguard && quay gate-log <TASK-8X>'`（贴 gate 事件）
 control   loop 完成写事件；gate-log 可读；CLI 不回归；既有不回归

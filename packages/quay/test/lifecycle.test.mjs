@@ -27,6 +27,7 @@ import {
   legalBack,
   assertTransition,
   runComplete,
+  runCompleteLoop,
   runAdjudicate,
   runPromote,
   runRetreat,
@@ -162,6 +163,79 @@ test("A2: runComplete throws on a missing task", async () => {
   const logPath = tmpLog("complete-missing");
   const client = { taskGet: async () => null };
   await assert.rejects(() => runComplete({ client, id: "MISSING", logPath }), /no such task: MISSING/);
+});
+
+// ===========================================================================
+// Phase A / Stage A2b — runCompleteLoop (the loop completion path AS the gate
+// engine; gap-loop-completion-path-produces-zero-gateevents). A loop task with
+// NO acceptance meter records a `complete` pass event (the loop's acceptance is
+// the verification-round, passed in via `verifiedBy`); a loop task WITH a meter
+// is CLI-consistent and RUNS it (fail → no status change, exactly like runComplete).
+// ===========================================================================
+
+test("A2b: runCompleteLoop on a meterless ready task — status done + ONE complete pass event carrying verifiedBy", async () => {
+  resetExit();
+  const logPath = tmpLog("complete-loop-nometer");
+  const client = stubClient({ id: "T-L1", status: "ready", extra: {} });
+  const r = await runCompleteLoop({ client, id: "T-L1", logPath, verifiedBy: "verification-round-3 green + AC/DoD checked" });
+  assert.equal(r.ok, true);
+  assert.equal(process.exitCode, 0);
+  assert.equal(client._state.status, "done");
+  const events = queryGateEvents(logPath, { pipeline_id: "T-L1" });
+  assert.equal(events.length, 1, "meterless loop completion writes exactly one (complete) event — the loop's meter is the verification-round, not extra.acceptance");
+  assert.equal(events[0].gate, "complete");
+  assert.equal(events[0].verdict, "pass");
+  assert.equal(events[0].actor, "quay-loop");
+  assert.deepEqual(events[0].payload, { from: "ready", to: "done", verifiedBy: "verification-round-3 green + AC/DoD checked" });
+  resetExit();
+});
+
+test("A2b: runCompleteLoop on a ready task WITH a passing meter — CLI-consistent acceptance + complete events", async () => {
+  resetExit();
+  const logPath = tmpLog("complete-loop-passmeter");
+  const client = stubClient({ id: "T-L2", status: "ready", extra: { acceptance: "true" } });
+  const r = await runCompleteLoop({ client, id: "T-L2", logPath });
+  assert.equal(r.ok, true);
+  assert.equal(client._state.status, "done");
+  const events = queryGateEvents(logPath, { pipeline_id: "T-L2" });
+  assert.deepEqual(events.map((e) => e.gate), ["acceptance", "complete"]);
+  assert.equal(events[1].verdict, "pass");
+  assert.deepEqual(events[1].payload, { from: "ready", to: "done" });
+  resetExit();
+});
+
+test("A2b: runCompleteLoop on a ready task WITH a FAILING meter — status stays ready, ONE acceptance fail event, exit 1", async () => {
+  resetExit();
+  const logPath = tmpLog("complete-loop-failmeter");
+  const client = stubClient({ id: "T-L3", status: "ready", extra: { acceptance: "false" } });
+  const r = await runCompleteLoop({ client, id: "T-L3", logPath });
+  assert.equal(r.ok, false);
+  assert.equal(process.exitCode, 1);
+  assert.equal(client._state.status, "ready", "status unchanged on meter fail — the loop must not bypass a present meter");
+  const events = queryGateEvents(logPath, { pipeline_id: "T-L3" });
+  assert.equal(events.length, 1);
+  assert.equal(events[0].gate, "acceptance");
+  assert.equal(events[0].verdict, "fail");
+  resetExit();
+});
+
+test("A2b: runCompleteLoop on a non-ready (todo) task — exit 1, NO gate, NO write", async () => {
+  resetExit();
+  const logPath = tmpLog("complete-loop-precond");
+  const client = stubClient({ id: "T-L4", status: "todo", extra: {} });
+  const r = await runCompleteLoop({ client, id: "T-L4", logPath });
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /illegal transition: todo cannot complete \(must be ready\)/);
+  assert.equal(process.exitCode, 1);
+  assert.equal(client._state.status, "todo", "status must be unchanged");
+  assert.equal(queryGateEvents(logPath, { pipeline_id: "T-L4" }).length, 0, "no gate event written");
+  resetExit();
+});
+
+test("A2b: runCompleteLoop throws on a missing task", async () => {
+  const logPath = tmpLog("complete-loop-missing");
+  const client = { taskGet: async () => null };
+  await assert.rejects(() => runCompleteLoop({ client, id: "MISSING", logPath }), /no such task: MISSING/);
 });
 
 // ===========================================================================

@@ -907,8 +907,18 @@ tick 做一次收尾 pass。
      `node --no-warnings --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --task-end
      --taskId <id> --runId <r> --outcome done`。若 `inProgress[]` 里找不到该任务的 runId（无对应
      `--task-start`），跳过 `--task-end`，只翻 done。
-   - **翻 done**：核对 AC/DoD 是否真实满足（与旧 inner fan-in 同一纪律：勾得上就勾、勾不上写理由
-     或留 `ready`），然后写 `tasks/<id>.md` 的 `status: ready → done`（写 `tasks/` 是外层授权范围）。
+   - **翻 done（经 gate 引擎，`gap-loop-completion-path-produces-zero-gateevents`）**：先核对 AC/DoD
+     是否真实满足（与旧 inner fan-in 同一纪律：勾得上就勾、勾不上写理由或留 `ready`），勾完**不再手搓
+     直接写文件**，而是调机件
+     ```bash
+     node --no-warnings --experimental-strip-types plugin/scripts/loop-complete-task.ts \
+       --root "$REPO_ROOT" --task <id> --verified-by "verification-round-N 全量套件绿 + AC/DoD 核过"
+     ```
+     它经 QENG-3 `runCompleteLoop`（lifecycle.ts，与 CLI `quay complete` 同一 gate 引擎：runGate +
+     appendGateEvent + CAS taskWrite）写 `status: ready → done`，并追加 `complete` pass GateEvent 到
+     `.quay/gate-events.jsonl`（`quay gate-log <id>` 可读）。写 `tasks/` 仍是外层授权范围——只是状态
+     翻转现在经机件记录 meter，不再绕过引擎零事件。exit 1（非 ready / acceptance meter 失败）⇒ 记进
+     本轮报告、任务留 `ready`，不硬翻。
    - 记进本轮 `closed` 清单。
    - `needs-human` 任务不在 `not-yet-flipped` 里（工作没落地）；其遥测括号由 `--reconcile`（执行者
      已消失）或本层手动 `--task-end --outcome needs-human` 闭合，别让它滞留 `inProgress` 触发 OVER90。
