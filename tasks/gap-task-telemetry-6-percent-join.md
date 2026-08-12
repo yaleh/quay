@@ -52,6 +52,8 @@ extra: {}
 - plugin/scripts/integration-batch-merge.sh（fan-in 提交带 runId）
 - plugin/scripts/fast-mode-telemetry.ts（遥测记录存 fan-in commit sha / 读 runId）
 - plugin/scripts/fan-in-runid-check.ts（新：runId 存在性检查器）
+- plugin/scripts/capability-catalog.sh（新检查器 catalog 声明——unclassified==0 band 必需；任务执行时补，原 Touches 漏列）
+- docs/proposals/quay-product-outline.md（DELIVERY-INVENTORY snapshot 计数更新——inventory drift gate 必需；任务执行时补，原 Touches 漏列）
 - plugin/test/（fan-in runId 用例）
 - tasks/gap-task-telemetry-6-percent-join.md（自身：勾 AC + 贴证据）
 
