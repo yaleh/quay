@@ -86,6 +86,18 @@ start did NOT complete.
 | 6 | `FIRST-TASK` | At least one task is `ready`/`done` on the board and it has been dispatched — `fast-mode-telemetry.ts --report --json --root <root>` shows it in `inProgress` (or the task-start record in #5 references it) | the `--report --json` `inProgress` |
 | 7 | `TOPOLOGY-IN-PLACE` | The two-window session topology is in place per the factory definition — `bash <root>/plugin/scripts/topology-check.sh --session <session> --json` reports `ok: true` (each of `<session>:outer/:inner` exists AND has a claude process, not a bare bash window). manager is cross-project and NOT part of this topology. A single-bash-window session (the meta-cc-3/archguard-4 failure shape) MUST report `ok: false` | the `--json` output (`ok: true` + both windows `ok`) |
 
+### Manager cold start — a SEPARATE 7-key falsifiable checklist (NOT this skill)
+
+The project cold start does NOT start the manager (delivery ≠ startup, AC8). The manager cold start
+has its OWN falsifiable observable-consequences checklist, **aligned with the outer's seven here**:
+`SESSION-CREATED` / `HOME-CREATED` / `MONITORS-MOUNTED` / `MONITORS-DELIVERING` / `LOOP-ARMED` /
+`CRON-EVIDENCED` / `CHECKLIST-REPORTED` — defined in full in `plugin/skills/manager/SKILL.md` §7a
+(each key carries a checkable definition + evidence; one false ⇒ the manager cold start did NOT
+complete). `manager-start.sh` writes the checklist scaffold at `<home>/cold-start-checklist.md`; the
+first manager tick fills the mount/evidence keys (`manager-tick-core.md` A10/B4). Registry↔real-cron
+consistency is verified by `manager-arm-loop.sh --verify-cron` — never trust `loop-registry.txt`
+alone (gap-manager-cold-start-no-falsifiable-checklist defect 3).
+
 ## Steps
 
 ### 0. Running-state branch — installed-and-RUNNING vs installed-but-STOPPED (the 已停转 branch)

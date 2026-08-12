@@ -517,11 +517,14 @@ echo "load1: $(cut -d' ' -f1 /proc/loadavg)  node: $(pgrep -c node)  mem: $(awk 
 **零事件是"没发生"还是"没收到"，看不出来**；不查就等于默认它活着）：
 
 ```bash
-# ① manager 自己的 idle-watch：查【进程】，不查 TaskList
-#    ⚠️ 上一版这里写"TaskList 里应有 running 的 idle 监视器"——【错的仪器】：
-#      TaskList 是待办清单工具，不是后台监视器清单；实跑返回 "No tasks found"。
-#      写下来 3 分钟就踩了自己刚写的"判据指向已不存在的对象"那一条。
-pgrep -af 'idle-watch\.sh' | grep -v ' grep '   # 无输出 ⇒ 监视器已死，当轮重挂
+# ① manager 自己的 idle-watch：查【Monitor 工具任务 + 事件流】，不查进程，不查 TaskList
+#    ⚠️ 换错仪器史（gap-manager-cold-start-no-falsifiable-checklist 缺陷 2，同位置第三次）：
+#      TaskList（待办清单工具，不是后台监视器清单，实跑 "No tasks found"）→
+#      进程级 pgrep（指向一个全库不存在的脚本）→ 现在。真机制 = session-liveness-mount.sh +
+#      Monitor 工具任务（非独立进程）。判据：
+bash plugin/scripts/monitor-mount-check.sh --json   # mounted=true 且 targetOk=true（两条都要）
+bash plugin/scripts/session-liveness.sh --once      # 至少一行 SESSION-STATUS（投递证明）
+#   一条不满足 ⇒ 监视器未挂/不响，当轮重挂。
 # ② quay 外层的 session-liveness：进程在不在，且【属主是不是外层】
 pgrep -af 'plugin/scripts/session-liveness\.sh' | while read -r pid _; do
   sid=$(tr '\0' '\n' < /proc/$pid/environ 2>/dev/null | sed -n 's/^CLAUDE_CODE_SESSION_ID=//p')

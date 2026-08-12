@@ -324,6 +324,36 @@ dev-tree 仍优先包根份——manager 角色 `claude`/`quay-manager` 两份�
 
 ---
 
+## 7a. 冷启动 — 可证伪判据清单（observable consequences，对齐 outer 7 条）
+
+manager 冷启动 = `manager-start.sh`（建家 / 建会话 / 武装 loop / 写清单）+ 首 tick（挂 idle-watch、
+记 cron 证据）。**冷启动没有可证伪完成判据 = 缺陷 4**（outer 有 7 条 observable consequences，
+manager 曾经 0 条）。修后完成判据 = 下列 7 条**可证伪项全部为真**；一条为假 ⇒ 未完成。
+
+| # | Key | 可检查判据 | 证据 / 由谁填 |
+|---|---|---|---|
+| 1 | SESSION-CREATED | `tmux has-session -t <session>` 且 pane 有 claude 进程（非裸 bash） | manager-start.sh（启动态即真） |
+| 2 | HOME-CREATED | `<home>/identity` 存在且 `role=manager` | manager-start.sh |
+| 3 | LOOP-ARMED | `manager-arm-loop.sh --home <home> --validate` 0 且 loop-registry.txt 恰一条 `[manager-tick]` | manager-start.sh → manager-arm-loop.sh |
+| 4 | CRON-EVIDENCED | `manager-arm-loop.sh --home <home> --verify-cron` 0（注册表↔真 CronCreate/CronList 证据一致且新鲜） | 首 tick（B4 记 cron-evidence.jsonl） |
+| 5 | IDLE-WATCH-MOUNTED | `monitor-mount-check.sh --json` 报 `mounted=true` + `targetOk=true` | 首 tick（挂 session-liveness-mount.sh，非独立脚本） |
+| 6 | MONITORS-DELIVERING | `session-liveness.sh --once` 至少一行 `SESSION-STATUS` | 首 tick（--once 接缝） |
+| 7 | CHECKLIST-REPORTED | `<home>/cold-start-checklist.md` 七键全 true 且各有证据 | 全部填完后为 true |
+
+判据要点（可证伪 = 每条都能给 true/false + 一行证据）：
+
+- **判据 3/4 分开**：**「注册表说武装了」≠「真的有 cron」**（缺陷 3）——`LOOP-ARMED` 只证注册表，
+  `CRON-EVIDENCED` 才证会话内真的执行了 CronCreate/CronList（`manager-arm-loop.sh --verify-cron`
+  核对 `<home>/cron-evidence.jsonl` 的 mechanism / sentinel / cronListCount / 新鲜度）。
+- **判据 5/6 用真机制**：idle-watch 是 `session-liveness-mount.sh` + Monitor 工具任务（非独立进程，
+  缺陷 1 修复），查它用 `monitor-mount-check.sh --json` + `session-liveness.sh --once`，
+  **不是对不存在的独立脚本做进程 pgrep**（缺陷 2）。
+
+冷启动完成后，把 `<home>/cold-start-checklist.md` 的七键读数（true/false + 一行证据）贴出，
+即复现完成判据；任何一键为假即「未完成」。
+
+---
+
 ## 7. 方法论来源（AC6）——SPEC-*.md 索引，不批量结晶
 
 以下 17 份 SPEC（均在 `orchestration/` 目录下）是方法论来源，**逐个按需结晶，不批量**。本 SKILL 只列索引，不复制其内容：
