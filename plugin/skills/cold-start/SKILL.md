@@ -136,6 +136,65 @@ nobody-driving (dead-loop), and this branch additionally reads the target projec
 `tasks/gap-l2-continuous-health-dead-loop-criterion-loop-running-not-installed.md` records this branch
 as its first cold-start consumer.
 
+### 0a. Mid-flight state check — recovery branch vs fresh-start branch (the 恢复分支)
+
+The running-state branch (step 0) decides RUNNING vs STOPPED. This branch decides HOW to start a
+STOPPED, already-laid-down loop — fresh vs recover. The fresh-start path (steps 1-9) assumes
+"nothing started, start clean"; it has NO step for a workspace whose last run crashed mid-flight
+leaving real state behind. That state class is real, not speculative: tonight's two real OOM
+recoveries both hit it, and both were done by hand because there was nowhere in this skill to point
+at. When the mechanism is laid down AND the loop is
+stopped, enumerate the three mid-flight state classes with **existing tools only** (no new detection
+logic — reuse what's there):
+
+```bash
+# ① orphaned task branch — a `task/*` branch NOT reachable from the mainline ref
+git -C <root> branch --list "task/*"          # every task branch
+git -C <root> branch --merged <mainline-ref>  # the reachable ones — the rest are orphaned candidates
+git -C <root> worktree list                   # in-flight worktrees (cross-checked against ②)
+# ② ghost telemetry — a `--task-start` bracket whose taskId has NO in-flight worktree
+node --experimental-strip-types <root>/plugin/scripts/fast-mode-telemetry.ts --report --json --root <root>
+#   → read inProgress[]: every {taskId} must appear in `git worktree list`; one that does NOT is a ghost
+# ③ status drift — code landed but the status field never followed
+node --experimental-strip-types <root>/plugin/scripts/task-status-drift-check.ts --json
+#   → read suspects[]: a todo/ready task whose AC symbols resolve in the tree on a MERGED task/* branch
+```
+
+`<mainline-ref>` is the repo's landing ref (`master`, or `integration`/`develop` per landingRef — the
+same ref the drift check's stranded-branch classification uses; never hardcode a different one).
+
+**Routing decision (both directions, checkable):** take the RECOVERY branch (step 0b) **if and only
+if** the mechanism is laid down AND at least one of ① ② ③ reports a non-empty finding. All three
+clean ⇒ take the FRESH-START branch (steps 1-9) unchanged. A genuinely clean workspace MUST route
+to fresh-start — the negative control: never false-positive into recovery.
+
+### 0b. Recovery branch — converge to a trustworthy starting point, THEN enter the same tick loop
+
+Not a parallel process: resolve the mid-flight state until the three checks (step 0a) come back
+clean, then continue into the **SAME** AC8c observable-consequences checklist the fresh-start branch
+uses (steps 1-9) — no second acceptance framework, no separately-invented criteria.
+
+1. **Enumerate** — record the findings from step 0a. The three existing checks ARE the enumeration;
+   do not re-implement any detection.
+2. **Resolve** each state class:
+   - **status drift / merged-but-unclosed** (③) — the code landed on a merged `task/*` branch but
+     `status:` never followed. Close it PROPERLY with real evidence: set `status: done` with the AC
+     checkboxes the drift check shows resolved, or `status: ready` when an AC requires a real
+     dispatch. Worked example: this session's own `gap-init-guesses-the-tmux-session...` fix. Never
+     paper over a task whose artifacts are genuinely missing by promoting past them.
+   - **orphaned worktree/branch** (①) — a `task/*` branch not reachable from the mainline ref.
+     Verify the branch is an **ancestor of the mainline ref**; if it IS (already-merged residue),
+     remove the stranded worktree (`git worktree remove`) and delete the branch (`git branch -d`).
+     If it is NOT an ancestor (real unmerged work), do NOT delete — the work is preserved on the
+     branch; escalate to needs-human with the branch as evidence.
+   - **ghost telemetry** (②) — a `--task-start` record whose taskId has no in-flight worktree.
+     Verify against the task's REAL state (`tasks/<taskId>.md` status field). If the task is
+     genuinely done or still-todo, DELETE the ghost record (remove its line from
+     `.workflow-events/<runId>.jsonl`). **NEVER backfill a plausible-but-fabricated `--task-end`** —
+     a fabricated end event claims an outcome the crashed executor never recorded.
+3. **Converge** — re-run the three checks (step 0a). ONLY when all three come back clean does the
+   recovery branch enter the SAME AC8c checklist (steps 1-9).
+
 ### 1. Locate root, project, session
 
 - `root = $(pwd)` (this skill runs inside the target project's outer session).
