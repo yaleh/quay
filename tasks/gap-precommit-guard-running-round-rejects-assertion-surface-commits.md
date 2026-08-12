@@ -31,7 +31,9 @@ extra:
      **参照系缺失时谓词必须崩，不给看似合理的值**（`[ -nt 不存在文件 ]` 恒真 / 裸文件名判存在失败等）。
 2. **断言面集合不手工维护**：从测试自声明的判定对象聚合（A0b③ 机制，
    `gap-check-set-after-change-diff-nameonly-intersect-judged-objects`）——守卫的白名单手工维护会与测试漂移，
-   正是它要防的病的同一形态。
+   正是它要防的病的同一形态。**具体落点：`plugin/scripts/judged-object-registry.json`（A0b③ 生成）。
+   守卫读它，缺失/空则回退到全 tracked 文件（`git ls-files`）——fail-closed，宁严勿松**
+   （round 60/63 形态全挡；A0b③ 是精化不是前置，守卫 priority #1 不等它）。
 3. **覆盖全部写入者**：outer / manager / inner 的提交都过守卫（shared hook 或各层 commit 命令改走包装脚本）——
    约定的参与方名单不可维护，守卫必须覆盖名单之外的写入者。
 4. **守卫拒绝后给预检清单**：作者被拒时手里应已有一份预检清单（等待期可做、只读、可反复），
@@ -60,6 +62,6 @@ extra:
 
 ## Touches
 
-- pre-commit 钩子 / commit 包装脚本（plugin/scripts/ 或 scripts/）
-- 断言面判定对象注册表（与 gap-check-set-after-change-diff-nameonly-intersect-judged-objects 共享）
+- plugin/scripts/precommit-guard.ts（守卫脚本——commit 包装，或 --install-hook 把共享 checkout 的 .git/hooks/pre-commit 接上；机制二选一，路径为此）
+- plugin/scripts/judged-object-registry.json（断言面注册表，A0b③ 生成；守卫读它，缺失/空回退全 tracked 文件——fail-closed）
 - tasks/gap-precommit-guard-running-round-rejects-assertion-surface-commits.md（自身）
