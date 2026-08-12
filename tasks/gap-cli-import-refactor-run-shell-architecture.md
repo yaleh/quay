@@ -1,7 +1,7 @@
 ---
 id: gap-cli-import-refactor-run-shell-architecture
 title: CLI import 改造（run()/shell 架构）——派生地板主杠杆
-status: ready
+status: done
 labels:
   - gap
   - mechanism
