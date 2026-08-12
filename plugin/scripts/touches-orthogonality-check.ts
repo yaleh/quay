@@ -299,6 +299,14 @@ export function checkTaskTouchesResolve(taskBody, root) {
   return { hasSection, ...checkTouchesResolve(entries, root) };
 }
 
+/** Frontmatter `role` field (raw value, null when absent) — the compound self-touch exemption's
+ *  single read of the full task text (which INCLUDES the frontmatter). `role: compound` is the
+ *  explicit aggregation marker (see ready-pool-check.ts's isCompoundTask for the same judgment). */
+function frontmatterRole(taskBody) {
+  const m = String(taskBody || "").match(/^role:\s*["']?([^\s"']+)/m);
+  return m ? m[1] : null;
+}
+
 // ── self-touch check (gap-closure-could-not-run-in-task-grant-self-touches-for-ac-and-invoke-evidence) ──
 // (c) block of the three-block batch elimination: every task's `## Touches` MUST include its own
 // task file `tasks/<id>.md` — WITHOUT the `(new)` annotation. The self-file grants the executing
@@ -309,6 +317,13 @@ export function checkTaskTouchesResolve(taskBody, root) {
 // emptying the ready pool (gap-ready-pool-check-taskworklanded-overshoot-excludes-existing-file-tasks).
 // checkTouchesPair is UNAFFECTED: the self-file is unique per task (tasks/A.md ≠ tasks/B.md), so two
 // tasks touching only their own files stay disjoint (filesDisjoint: overlaps.length === 0).
+// COMPOUND AGGREGATION (gap-compound-depsreadyfor-structural-deadlock AC3): a `role: compound`
+// parent's ## Touches delegates to its children by convention ("(compound task — see each child's own
+// ## Touches)"), so it structurally never carries a self-file. That is NOT a self-touch violation
+// (a compound is never dispatched to an executor as leaf work — 派发只认叶子) — `compound:true`
+// distinguishes "aggregate, no self-file needed" from a primitive missing its grant, so the scan /
+// slot-refill never report a compound as a false self-touch negative (invariant
+// no_self_touch_false_negative).
 export function selfTouchEntry(taskBody, taskId) {
   const { hasSection, section } = extractTouchesSection(taskBody);
   if (!hasSection) return null;
@@ -316,13 +331,16 @@ export function selfTouchEntry(taskBody, taskId) {
   return parseTouchEntriesWithTags(section).find((e) => e.path === expected) ?? null;
 }
 
-/** { ok, expected, entry } — ok: true iff the task's Touches contains `tasks/<id>.md` and that
- *  entry carries no `(new)` tag (a `(delete)` self-file is likewise not a grant). */
+/** { ok, expected, entry, compound } — ok: true iff the task's Touches contains `tasks/<id>.md` and
+ *  that entry carries no `(new)` tag (a `(delete)` self-file is likewise not a grant). A task whose
+ *  frontmatter declares `role: compound` returns `ok:false` + `compound:true` — an aggregate that by
+ *  convention carries no self-file (consumers must NOT count it as a missing self-touch). */
 export function selfTouchCheck(taskBody, taskId) {
   const expected = `tasks/${taskId}.md`;
   const entry = selfTouchEntry(taskBody, taskId);
   const ok = entry !== null && entry.tag !== "new";
-  return { ok, expected, entry };
+  const compound = frontmatterRole(taskBody) === "compound";
+  return { ok, expected, entry, compound };
 }
 
 // True when the task frontmatter declares the `fixture` label (block list `labels:\n  - fixture` or
@@ -360,8 +378,8 @@ export function scanReadyTasksSelfTouch(tasksDir) {
     const raw = fs.readFileSync(path.join(tasksDir, f), "utf8");
     if (!/^status:\s*["']?ready["']?\s*$/m.test(raw)) continue;
     if (isFixtureTask(raw)) continue;
-    const { ok, expected, entry } = selfTouchCheck(raw, id);
-    out.push({ id, ok, expected, entry });
+    const { ok, expected, entry, compound } = selfTouchCheck(raw, id);
+    out.push({ id, ok, expected, entry, compound });
   }
   out.sort((a, b) => a.id.localeCompare(b.id));
   return out;
@@ -437,9 +455,17 @@ function mainSelfTouch(args) {
   if (!fs.existsSync(file)) { process.stderr.write(`ERROR: task not found: ${file}\n`); return 2; }
   const body = fs.readFileSync(file, "utf8");
   const id = path.basename(file, ".md");
-  const { ok, expected } = selfTouchCheck(body, id);
+  const { ok, expected, compound } = selfTouchCheck(body, id);
   if (ok) {
     process.stdout.write(`SELF-TOUCH ${file}: ok (Touches includes ${expected} without (new))\n`);
+    return 0;
+  }
+  // COMPOUND AGGREGATION (gap-compound-depsreadyfor-structural-deadlock AC3): a `role: compound`
+  // task's Touches delegates to children by convention — the absence of a self-file is NOT a
+  // self-touch violation, so the per-candidate gate does not flag it (exit 0). Dispatchability of a
+  // compound is a separate question answered by slot-refill (compound-parent-not-dispatchable).
+  if (compound) {
+    process.stdout.write(`SELF-TOUCH ${file}: COMPOUND (aggregate — Touches delegate to children; no self-file needed)\n`);
     return 0;
   }
   process.stdout.write(`SELF-TOUCH ${file}: MISSING ${expected} (without (new)) in ## Touches — not dispatchable\n`);
@@ -456,9 +482,14 @@ function mainSelfTouchScan(args) {
   }
   const rootDir = root ? path.resolve(root) : findRepoRoot(process.cwd());
   const rows = scanReadyTasksSelfTouch(path.join(rootDir, "tasks"));
-  const missing = rows.filter((r) => !r.ok);
+  // COMPOUND AGGREGATION (gap-compound-depsreadyfor-structural-deadlock AC3): a `role: compound`
+  // ready task is an aggregate — it never carries a self-file by convention, so it is NOT counted as
+  // a missing self-touch (no false negative). The row is still printed (visible), just not in
+  // `missing`.
+  const missing = rows.filter((r) => !r.ok && !r.compound);
   for (const r of rows) {
     if (r.ok) process.stdout.write(`  ok:      ${r.id} (touches ${r.expected})\n`);
+    else if (r.compound) process.stdout.write(`  COMPOUND:${r.id} (aggregate — Touches delegate to children; no self-file needed)\n`);
     else process.stdout.write(`  MISSING: ${r.id} (expected ${r.expected} in ## Touches without (new))\n`);
   }
   process.stdout.write(

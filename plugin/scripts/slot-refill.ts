@@ -159,27 +159,36 @@ function readFrontField(frontmatterRaw, key) {
 }
 
 /** Parent done (or absent) ⇒ deps ready. Mirrors ready-pool-check's depsReadyFor; fail-closed when
- *  the parent file is missing (cannot confirm done). */
-function depsReadyFor(task, statusById) {
+ *  the parent file is missing (cannot confirm done). COMPOUND AGGREGATION (gap-compound-depsreadyfor-
+ *  structural-deadlock AC2): a `role: compound` parent is an AGGREGATE — the parent is only `done`
+ *  once ALL its children are done, so a child waiting on its compound parent is the 双向互等 deadlock
+ *  (child waits on parent, parent waits on children). The compound-parent edge is therefore skipped;
+ *  a child of a compound dispatches on its own depends_on edges alone. */
+function depsReadyFor(task, metaById) {
   const parent = task.parent;
   if (!parent || parent === "null" || parent === "~") return true;
-  const status = statusById.get(parent);
-  if (status === undefined) return false;
-  return status === "done";
+  const meta = metaById.get(parent);
+  if (meta === undefined) return false; // parent file missing → fail closed
+  if (meta.role === "compound") return true; // aggregation, not a predecessor
+  return meta.status === "done";
 }
 
-/** Status map for all tasks in the store (id → frontmatter status), for the deps-ready filter. */
-function buildStatusById(tasksDir) {
-  const statusById = new Map();
-  if (!fs.existsSync(tasksDir)) return statusById;
+/** Per-task dispatch metadata (id → { status, role }), for the deps-ready filter and the compound
+ *  aggregation exemption. ONE pass over the store (no parallel scan). */
+function buildTaskMetaById(tasksDir) {
+  const metaById = new Map();
+  if (!fs.existsSync(tasksDir)) return metaById;
   for (const f of fs.readdirSync(tasksDir)) {
     if (!f.endsWith(".md")) continue;
     const id = f.replace(/\.md$/, "");
     const raw = fs.readFileSync(path.join(tasksDir, f), "utf8");
     const task = parseTask(raw);
-    statusById.set(id, readFrontField(task.frontmatterRaw, "status") || "");
+    metaById.set(id, {
+      status: readFrontField(task.frontmatterRaw, "status") || "",
+      role: readFrontField(task.frontmatterRaw, "role") || "",
+    });
   }
-  return statusById;
+  return metaById;
 }
 
 /** DURABLE FAN-IN SIGNAL (gap-slot-refill-repeats-done-eligible-recommendations): whether the task's
@@ -313,7 +322,7 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
   if (!halt.halted) {
     const sharedFiles = walkFiles(root);
     const expand = (globs) => expandDeclaredTouches(globs, root, sharedFiles);
-    const statusById = buildStatusById(tasksDir);
+    const metaById = buildTaskMetaById(tasksDir);
     // Concurrency eligibility must also respect closed-bracket-but-live agents' touches — a closed
     // bracket does NOT free the touches a still-live agent is working on.
     const inFlightParsed = [...(inFlight || []), ...(closedButLive || [])].map((t) => ({ id: t.id, touches: parseTouches(t.body) }));
@@ -344,7 +353,14 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
       // step-4 check 2: deps-ready (parent done).
       const task = parseTask(text);
       task.parent = readFrontField(task.frontmatterRaw, "parent");
-      if (!depsReadyFor(task, statusById)) { defer(id, "deps-not-ready"); continue; }
+      // COMPOUND NOT-LEAF (gap-compound-depsreadyfor-structural-deadlock AC2 + invariant
+      // compound_parent_not_dispatchable): a `role: compound` parent is an AGGREGATE — it is DONE
+      // when its children are done, so it is never leaf work and must NEVER be recommended for
+      // dispatch (派发只认叶子). Deferring it here with an explicit reason ALSO stops it reaching the
+      // self-touch check — its ## Touches delegate to children by convention, so the absence of a
+      // self-file is NOT a self-touch false negative (invariant no_self_touch_false_negative).
+      if (readFrontField(task.frontmatterRaw, "role") === "compound") { defer(id, "compound-not-dispatchable"); continue; }
+      if (!depsReadyFor(task, metaById)) { defer(id, "deps-not-ready"); continue; }
       // step-4 check 3: concurrency eligibility — disjoint from every currently-running subagent.
       const parsed = parseTouches(text);
       let blocked = null;

@@ -19,6 +19,14 @@ extra:
 
 **type:** execution
 
+> **交叉标注（2026-08-12，gap-compound-depsreadyfor-structural-deadlock）：结构性死锁已解除。**
+> 本 compound 子树此前永久不可派：`depsReadyFor` 把 parent（compound 分解，聚合语义）当
+> 前驱要求「父 done」，而 compound parent 只有在 children 全 done 后才可能 done —— 双向互等。
+> 修法：`depsReadyFor` 遇 `role: compound` 的 parent 不再计入 deps（聚合 ≠ 前驱）；compound
+> parent 本身也不进可派集（派发只认叶子）。修后本子树的两个 todo child
+> （gap-cold-start-skill-has-no-recovery-branch / gap-no-formalized-bare-metal-session-bootstrap）
+> depsReady=True 可派。实现提交见该任务分支。
+
 ## Proposal
 
 Human direction (2026-08-04, relayed by the manager, written up as
