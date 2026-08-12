@@ -132,7 +132,7 @@ if [ ! -f "$SCRIPT_DIR/drive-target-check.sh" ]; then
   echo "send-keys-reliable: 缺少前置校验 $SCRIPT_DIR/drive-target-check.sh——无法确认目标是 inner，fail loud" >&2
   exit 1
 fi
-if ! DRIVE_EXPECT_WINDOW_NAME="${DRIVE_EXPECT_WINDOW_NAME:-inner}" \
+if ! DRIVE_EXPECT_WINDOW_NAME="${DRIVE_EXPECT_WINDOW_NAME:-${TARGET##*:}}" \
      SUPERVISOR_DELIVER_HOST="$HOST" SUPERVISOR_DELIVER_SSH="$SSH_BIN" \
      bash "$SCRIPT_DIR/drive-target-check.sh" "$TARGET"; then
   echo "send-keys-reliable: 目标 $TARGET 未通过前置校验（非 inner 或数字索引）——中止，不发送" >&2

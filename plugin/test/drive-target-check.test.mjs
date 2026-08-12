@@ -92,12 +92,13 @@ test("usage: --expect without a value exits 2", () => {
   assert.match(r.stderr, /--expect 需要窗口名/);
 });
 
-test("env: the expected window name defaults to inner and is overridable via DRIVE_EXPECT_WINDOW_NAME", () => {
-  // No tmux is needed for the default-value semantics: a wrong name fails, an override changes the
-  // expected name — but both need a real session. This just pins the default at `inner` via the
-  // script source (the incident's exact window identity).
+test("env: the expected window name defaults to the target's OWN window part (derived, never hardcoded inner), overridable via DRIVE_EXPECT_WINDOW_NAME", () => {
+  // No tmux is needed for the default-value semantics. The default is derived from TARGET's window
+  // part (after the last ':') — driving `session:outer` expects `outer`, `session:inner` expects
+  // `inner` (human 2026-08-12 裁定: no hardcoded inner, so non-inner drives work). An explicit
+  // DRIVE_EXPECT_WINDOW_NAME still overrides.
   const src = fs.readFileSync(GATE, "utf8");
-  assert.match(src, /DRIVE_EXPECT_WINDOW_NAME:-inner/, "default expected window name is inner");
+  assert.match(src, /DRIVE_EXPECT_WINDOW_NAME:-\$\{TARGET##\*:\}/, "default expected window name derives from TARGET's window part");
   assert.match(src, /list-windows/, "window-part membership closes tmux's silent-active-window fallback");
 });
 
@@ -117,8 +118,10 @@ test("② real-but-wrong window: a `claude` window targeted as the drive target 
     assert.equal(h.newSession(session, "sleep 30").status, 0);
     assert.equal(h.tmx(["rename-window", "-t", `${session}:0`, "inner"]).status, 0);
     assert.equal(h.tmx(["new-window", "-d", "-t", session, "-n", "claude", "sleep 30"]).status, 0);
-    const r = run([`${session}:claude`], h.env); // default expect=inner
-    assert.equal(r.status, 1, `claude window must fail closed, got ${r.status}\n${r.stdout}\n${r.stderr}`);
+    // default expect now derives from TARGET (claude → expect claude, passes) — the incident guard
+    // is the MISMATCH: target claude but explicitly expect=inner → fails closed.
+    const r = run([`${session}:claude`, "--expect", "inner"], h.env);
+    assert.equal(r.status, 1, `claude window with expect=inner must fail closed, got ${r.status}\n${r.stdout}\n${r.stderr}`);
     assert.match(r.stderr, /窗口名/, `must report the resolved window name:\n${r.stderr}`);
     assert.match(r.stderr, /claude/, `must name the actual window (claude):\n${r.stderr}`);
   } finally {

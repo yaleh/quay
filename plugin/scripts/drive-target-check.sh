@@ -44,7 +44,11 @@ set -uo pipefail
 TARGET="${1:-}"
 [ -n "$TARGET" ] || { echo "drive-target-check: 缺少目标——用法: bash $(basename "$0") <tmux目标> [--expect <窗口名>]" >&2; exit 2; }
 
-EXPECT="${DRIVE_EXPECT_WINDOW_NAME:-inner}"
+# Default the expected window name to the target's OWN window part (the part after the last ':'),
+# so driving `session:outer` expects `outer` and `session:inner` expects `inner` — never a
+# hardcoded `inner` that breaks non-inner drives (human 2026-08-12 裁定, gap-drive-sent-to-manager-
+# pane-not-inner 三条纪律的 generalize：显式传 DRIVE_EXPECT_WINDOW_NAME 仍覆盖此推导)。
+EXPECT="${DRIVE_EXPECT_WINDOW_NAME:-${TARGET##*:}}"
 if [ "${2:-}" = "--expect" ]; then
   [ $# -ge 3 ] || { echo "drive-target-check: --expect 需要窗口名" >&2; exit 2; }
   EXPECT="$3"
