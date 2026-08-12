@@ -165,7 +165,10 @@ export function redLatencySeries(rows: SuiteRoundRow[]): number[] {
   const out: number[] = [];
   for (const r of rows) {
     if (r.state !== "red") continue;
-    if (r.reason !== undefined && r.reason !== "failed") continue; // aborted/infra = no correctness conclusion
+    // aborted/infra/timeout/hung/crashed = no correctness conclusion; failed AND gate-failed are
+    // real reds (the round did not go green) — a gate/scan red (fail=0 + reason='gate-failed') still
+    // carries a redAt (the moment the gate/scan line flipped red), so it IS an early-RED observation.
+    if (r.reason !== undefined && r.reason !== "failed" && r.reason !== "gate-failed") continue;
     if (!r.redAt || !r.startedAt) continue;
     const latency = Date.parse(String(r.redAt)) - Date.parse(String(r.startedAt));
     if (Number.isFinite(latency) && latency >= 0) out.push(latency);

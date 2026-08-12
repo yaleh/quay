@@ -501,6 +501,43 @@ export function commitTraceLanded(taskId, subjects) {
   return subjects.some((s) => commitSubjectTracesTask(s, taskId));
 }
 
+// gap-ready-pool-completion-checkboxes-shape-aware — the not-yet-flipped criterion's "AC 无未勾项"
+// conjunct (gap-ready-pool-commit-trace-subject-not-proof-of-done) and the A9 population split
+// (gap-ready-pool-nyf-split-backlog-vs-contradiction) must SEE the task's ACTUAL completion checkboxes.
+// The old `extractSection(body, "Acceptance Criteria")` misses the `## AC` / `## AC（draft）` / `## AC
+// (draft)` / `## DoD（draft）` headings that real finding-shape gap-* tasks use (same draft-heading
+// family the author→ready gate's SHAPE_SECTIONS already recognizes) — a task judged "landed" with open
+// checkboxes under those headings got total=0 (the no-AC fallback) and was silently swallowed. Reuse
+// the shape-aware heading registry so "AC 无未勾项" means what the task body actually declares.
+function extractSectionByShape(body, kind) {
+  const literal = kind === "ac" ? "Acceptance Criteria" : "Definition of Done";
+  const shape = detectShape(body);
+  const spec = SHAPE_SECTIONS[shape];
+  const headings = spec ? spec[kind] : [];
+  // Try the shape's registered headings (covers `## AC` / `## AC（draft）` / `## AC (draft)` for the
+  // finding shape), then the literal full heading as a fallback (a task with NO shape-defining heading
+  // — unknown shape — still has its `## Acceptance Criteria` section read; the no-AC fallback must not
+  // fire on a task that HAS checkboxes under a shape-less heading).
+  for (const h of [...headings, literal]) {
+    const sec = extractSection(body, escapeRegExp(h));
+    if (sec !== null) return sec;
+  }
+  return null;
+}
+
+/** Count the task's SELF-DECLARED completion checkboxes (AC + DoD sections, shape-aware heading
+ *  recognition). `checked === total` ⟺ "AC 无未勾项" (every completion box the task body declares is
+ *  ticked). A task judged "landed" with unchecked boxes here is a CONTRADICTION (乙), not backlog (甲). */
+function countCompletionCheckboxes(body) {
+  const ac = countAcCheckboxes(extractSectionByShape(body, "ac"));
+  const dod = countAcCheckboxes(extractSectionByShape(body, "dod"));
+  return {
+    total: ac.total + dod.total,
+    checked: ac.checked + dod.checked,
+    unchecked: ac.unchecked + dod.unchecked,
+  };
+}
+
 /** True when the task is in the "this batch done, not yet flipped to done" state — the declared
  *  work has landed on the mainline (task-status-drift-check's symbol-resolution / touch-file /
  *  git-history evidence — the last over integration/develop/master per landingRef, not hardcoded
@@ -555,8 +592,11 @@ export function notYetFlipped(task, repoRoot, gitIndex, opts = null) {
   // gap-ready-pool-worklanded-traps-stuck-work): a traced task whose ACs are far from complete is
   // STUCK-WORK with real remaining implementation and stays dispatchable.
   const traced = commitTraceSubjects ? commitTraceLanded(task.id, commitTraceSubjects) : false;
-  const ac = extractSection(task.body, "Acceptance Criteria");
-  const { total, checked } = countAcCheckboxes(ac);
+  // gap-ready-pool-completion-checkboxes-shape-aware — count the task's SELF-DECLARED completion
+  // checkboxes (AC + DoD, shape-aware: `## AC` / `## AC（draft）` / `## AC (draft)` / `## DoD（draft）`
+  // included). The old `extractSection(body, "Acceptance Criteria")` returned null (→ total=0 → the
+  // no-AC fallback) for the 9 finding-shape tasks, so a "landed" task with OPEN boxes was swallowed.
+  const { total, checked } = countCompletionCheckboxes(task.body);
   const allAcsChecked = total > 0 && checked === total;
   const acRatio = total === 0 ? 0 : checked / total;
   // AC-completeness gate on the workLanded branch: workLanded alone must NOT exclude an
@@ -565,13 +605,28 @@ export function notYetFlipped(task, repoRoot, gitIndex, opts = null) {
   // Threshold is STRICTLY > 0.5 so a task at exactly 50% (gap-session-liveness 4/8) returns to the
   // dispatchable pool (gap-ready-pool-worklanded-traps-stuck-work verification anchor (a)).
   // NO-AC fallback (gap-git-history-landed-master-stale-under-two-line-model AC4): a task with NO
-  // `## Acceptance Criteria` checkboxes (total=0) is STRUCTURALLY unable to tick ACs — allAcsChecked
-  // is always false — so it can never be a done-flip through the checkbox signals and would sit in
-  // the ready pool forever (measured 2026-08-11: last-pane / suite-red). When its work HAS landed
-  // (workLanded OR commit-trace), the landing itself is its closeout signal: total===0 joins the
-  // all-checked / >50% gate. A no-AC task whose work has NOT landed stays dispatchable (workLanded
-  // false keeps doneFlipReady false).
-  const doneFlipReady = (workLanded || traced) && (allAcsChecked || acRatio > 0.5 || total === 0);
+  // completion checkboxes — AC nor DoD — anywhere (total=0) is STRUCTURALLY unable to tick boxes:
+  // allAcsChecked is always false, so it can never be a done-flip through the checkbox signals and
+  // would sit in the ready pool forever (measured 2026-08-11: last-pane / suite-red). When its work
+  // HAS landed (workLanded OR commit-trace), the landing itself is its closeout signal: total===0
+  // joins the all-checked / >50% gate. A no-checkbox task whose work has NOT landed stays
+  // dispatchable (workLanded false keeps doneFlipReady false).
+  // gap-ready-pool-commit-trace-subject-not-proof-of-done (manager 2026-08-12, higher-priority than the
+  // reason-axis fix — a false "landed" makes a task disappear from the pool FOREVER): a commit SUBJECT
+  // naming the task is a WEAKER work-landed signal than taskWorkLanded (which reads symbol-resolution /
+  // touch-file / git-history evidence of the MERGED CODE). A subject hit only proves "someone committed
+  // with the task id in the subject" — an INNER's intermediate-step commit can name the id without
+  // completing the work (measured: gap-cli-import-refactor-run-shell-architecture inner committed
+  // "导出 7 函数", subject hit ⇒ judged landed ⇒ excluded, but AC 5/9 unchecked, bin/quay.ts did not
+  // shrink, cli.test.mjs's 7 derivation points never dropped — 5 ready tasks swallowed by the trace
+  // alone). So the COMMIT-TRACE arm requires the task's SELF-DECLARED completion condition: ALL ACs
+  // checked (or total===0, the no-AC fallback — a no-AC task is structurally unable to tick ACs, its
+  // landing is its closeout). ANY unchecked AC ⇒ NOT landed regardless of the trace. taskWorkLanded
+  // KEEPS its >50% verification-window leniency (it is real merged-code evidence, not a subject string;
+  // gap-ready-pool-worklanded-traps-stuck-work preserved).
+  const commitTraceReady = traced && (allAcsChecked || total === 0);
+  const workLandedReady = workLanded && (allAcsChecked || acRatio > 0.5 || total === 0);
+  const doneFlipReady = workLandedReady || commitTraceReady;
   return doneFlipReady || allAcsChecked;
 }
 
@@ -1299,13 +1354,32 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
   const commitTraceSubjects = readyCount > 0 ? buildCommitTraceIndex(root) : [];
   const ready = [];
   const excluded = [];
+  let nyfBacklogCount = 0; // 甲 — not-yet-flipped AND every completion checkbox checked (work done, only the status flip missing)
+  let nyfContradictionCount = 0; // 乙 — not-yet-flipped AND at least one completion checkbox open (judged landed but NOT done — criterion misfire)
   for (const [id, t] of allTasks) {
     if (t.status !== "ready") continue;
     const reasons = [];
     if (isFixture(t)) reasons.push("fixture");
     if (isParked(t)) reasons.push("parked");
     if (isAcRecord(t)) reasons.push("ac-record");
-    if (notYetFlipped(t, root, gitIndex, { ref: landRef, commitTraceSubjects })) reasons.push("not-yet-flipped");
+    let acOpen = -1; // sentinel: not a not-yet-flipped exclusion (no ac_open field on the entry)
+    const nyf = notYetFlipped(t, root, gitIndex, { ref: landRef, commitTraceSubjects });
+    if (nyf) {
+      reasons.push("not-yet-flipped");
+      // gap-ready-pool-nyf-split-backlog-vs-contradiction (A9 population split): a not-yet-flipped
+      // task is 甲/backlog when EVERY completion checkbox the body declares (AC + DoD, shape-aware) is
+      // checked (ac_open=0 — work really done, only the fan-in status flip is missing) and
+      // 乙/contradiction when any is unchecked (ac_open>0 — judged "landed" but the task body says NOT
+      // done; ONE such task is a criterion misfire, A9 threshold = 1). The `ac_open` marker rides on
+      // the excluded entry so A9 triggers without re-deriving it; the two counters give the report a
+      // ready-made split. gap-ready-pool-commit-trace-subject-not-proof-of-done makes the COMMIT-TRACE
+      // arm already require all-checked — 乙 through this path is the WORK-LANDED arm's >50%
+      // verification-window leniency, which stays (real merged-code evidence, gap-ready-pool-worklanded-
+      // traps-stuck-work preserved).
+      acOpen = countCompletionCheckboxes(t.body).unchecked;
+      if (acOpen > 0) nyfContradictionCount++;
+      else nyfBacklogCount++;
+    }
     // PROSE-PREREQUISITE GAP (gap-prerequisite-gates-prose-invisible-to-mechanisms AC3): a ready task
     // whose body declares a prerequisite in prose WITHOUT a relation edge is NOT dispatchable — it
     // would be dispatched with an invisible dependency and only a subagent reading the body would
@@ -1313,7 +1387,7 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
     // The reason carries the 前置 literal (the Contract measure's grep surface).
     const proseGap = prosePrereqGap(t.body, t.frontmatterRaw, tasksDir);
     if (proseGap.length > 0) reasons.push(`prose-prereq-no-edge (前置无边: ${proseGap.join(",")})`);
-    if (reasons.length > 0) excluded.push({ id, reasons });
+    if (reasons.length > 0) excluded.push({ id, reasons, ...(acOpen >= 0 ? { ac_open: acOpen } : {}) });
     else ready.push(id);
   }
   ready.sort();
@@ -1495,6 +1569,12 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
     report: buildReport({ pool, floor, cap, floorMult, dispatchableDisjoint, criterionMet, poolBigAllColliding, deficit, landingBlocked: landing.landing_blocked, landingReason: landing.reason }),
     ready,
     excluded,
+    // gap-ready-pool-nyf-split-backlog-vs-contradiction (A9 population split): 甲 = nyf + ac_open 0
+    // (work done, only the status flip missing — quantity, threshold ≥floor/2); 乙 = nyf + ac_open>0
+    // (judged landed but NOT done — criterion misfire, ONE is enough, threshold 1). A9 reads these
+    // two counters + each excluded entry's `ac_open` without re-deriving the checkbox count.
+    nyf_backlog: nyfBacklogCount,
+    nyf_contradiction: nyfContradictionCount,
     candidates,
     promotions,
     intercepted,

@@ -78,6 +78,14 @@ function readState(root) {
   return fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, "utf8")) : null;
 }
 
+/** Read the LAST verification-round.jsonl record (null when the ledger is absent/empty). */
+function lastRoundRecord(root) {
+  const f = path.join(root, ".quay", "verification-round.jsonl");
+  if (!fs.existsSync(f)) return null;
+  const lines = fs.readFileSync(f, "utf8").trim().split("\n").filter(Boolean);
+  return lines.length ? JSON.parse(lines[lines.length - 1]) : null;
+}
+
 /** Write a fake "test suite" bash script; returns { dir, f }. */
 function fakeSuite(scriptBody) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-fake-"));
@@ -1980,6 +1988,148 @@ test("AC5 e2e — a `tmux-leak-scan: FAIL` residual line (candidate C) flips red
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── gap-verification-round-reason-self-contradiction: the round-record reason is counter-level ───────
+// A red round with fail=0 (all tests passed) must NEVER be labelled reason='failed' (self-contradictory).
+// The suite-STATE's reason stays unchanged (routeRed/stop-dispatch semantics are pinned); only the
+// verification-round RECORD reason is recomputed: fail>0 ⇒ 'failed'; fail=0 + a gate/scan/static red
+// ⇒ 'gate-failed' + a `gate` identity; infra-error/aborted/timeout/hung/crashed keep their values.
+
+test("AC1 — fail>0 (a real test failure) ⇒ round-record reason='failed', no gate field (unchanged)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-reason-fail-"));
+  const { f, dir } = fakeSuite('echo "not ok 1 - boom"\necho "ℹ tests 1"\necho "ℹ pass 0"\necho "ℹ fail 1"\necho "ℹ cancelled 0"\nexit 1');
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    assert.equal(code, 1, "runner exits 1 on red");
+    const rec = lastRoundRecord(root);
+    assert.ok(rec, "a verification-round record is appended");
+    assert.equal(rec.state, "red");
+    assert.equal(rec.fail, 1, "fail counter > 0");
+    assert.equal(rec.reason, "failed", "fail>0 is reason=failed (a real test failure, unchanged)");
+    assert.ok(!("gate" in rec), "no gate field on a test-failure red");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC1 — fail=0 + tmux-leak-scan ⇒ round-record reason='gate-failed' + gate='tmux-leak-scan'", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-reason-leak-"));
+  // The round-167/self-contradiction shape: a leak-scan residual flips red, but the TAP test
+  // counters stay fail=0 — the record must name the GATE, not say 'failed'.
+  const { f, dir } = fakeSuite(
+    'echo "tmux-leak-scan: FAIL — NEW residual test tmux servers/dirs after the run (delta vs the before-run snapshot; prefixes: skv-|session-liveness-|ol-tok-|enter-repro-):" >&2\n' +
+      'echo "ℹ tests 3989"\necho "ℹ pass 3989"\necho "ℹ fail 0"\necho "ℹ cancelled 0"\nexit 1',
+  );
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    assert.equal(code, 1, "runner exits 1 on red");
+    const s = readState(root);
+    assert.equal(s.state, "red");
+    assert.equal(s.reason, "failed", "the suite-STATE reason stays failed (unchanged — routeRed/stop-dispatch pinned)");
+    const rec = lastRoundRecord(root);
+    assert.ok(rec, "a verification-round record is appended");
+    assert.equal(rec.state, "red");
+    assert.equal(rec.fail, 0, "all tests passed (fail=0)");
+    assert.equal(rec.reason, "gate-failed", "fail=0 + a gate/scan red is reason=gate-failed, NOT failed (self-contradiction fixed)");
+    assert.equal(rec.gate, "tmux-leak-scan", "the round record names the gate that failed");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC1 — fail=0 + __PERFILE__ passed=false ⇒ round-record reason='gate-failed' + gate='perfile-timeout'", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-reason-pf-"));
+  const { f, dir } = fakeSuite(
+    'echo "__PERFILE__ duration_ms=3580.991183 packages/quay/test/verify-delivery-surface.test.mjs passed=false"\n' +
+      'echo "ℹ tests 3989"\necho "ℹ pass 3989"\necho "ℹ fail 0"\necho "ℹ cancelled 0"\nexit 1',
+  );
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    assert.equal(code, 1, "runner exits 1 on red");
+    const rec = lastRoundRecord(root);
+    assert.ok(rec, "a verification-round record is appended");
+    assert.equal(rec.fail, 0, "all tests passed (fail=0)");
+    assert.equal(rec.reason, "gate-failed", "a per-file timeout red with fail=0 is reason=gate-failed");
+    assert.equal(rec.gate, "perfile-timeout", "the round record names the per-file timeout gate");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC1 — fail=0 + static-check ⇒ round-record reason='gate-failed' + gate='static-check'", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-reason-sc-"));
+  // The static-check red shape: the checker fails before the test phase (set -e), so no TAP summary —
+  // fail=0 — and the STATE reason is 'static-check'. The round RECORD normalizes to gate-failed +
+  // gate='static-check' so every gate/scan red with fail=0 is counter-distinguishable.
+  const { f, dir } = fakeSuite(
+    'echo "VIOLATION: tasks/gap-foo.md — V1: Contract block missing invariant line"\n' +
+      'echo "violations: 11 unique across 9 task(s); info findings (non-ratchet, pre-opt-in baseline): 0"\n' +
+      'echo "ratchet ceiling: 6; new since baseline: 6 (tasks/gap-foo.md: V1); resolved: 0"\n' +
+      "exit 1",
+  );
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    assert.equal(code, 1, "runner exits 1 on a static-check red");
+    const s = readState(root);
+    assert.equal(s.state, "red");
+    assert.equal(s.reason, "static-check", "the suite-STATE reason stays static-check (unchanged)");
+    const rec = lastRoundRecord(root);
+    assert.ok(rec, "a verification-round record is appended");
+    assert.equal(rec.state, "red");
+    assert.equal(rec.fail, 0, "no tests ran (fail=0)");
+    assert.equal(rec.reason, "gate-failed", "a static-check red with fail=0 is reason=gate-failed");
+    assert.equal(rec.gate, "static-check", "the round record names the static-check gate");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC1 — green round-record reason stays null; infra-error keeps reason='infra-error' (d — semantics unchanged)", async () => {
+  // GREEN: the round record carries reason=null (green rounds carry no reason), unchanged.
+  const greenRoot = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-reason-green-"));
+  const gf = fakeSuite(GREEN_SUITE);
+  try {
+    const child = runRunner({ root: greenRoot, command: `bash ${gf.f}`, laneCount: 8 });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, "runner exits 0 on green");
+    const rec = lastRoundRecord(greenRoot);
+    assert.ok(rec, "a verification-round record is appended");
+    assert.equal(rec.state, "green");
+    assert.equal(rec.reason, null, "green round carries no reason (unchanged)");
+    assert.ok(!("gate" in rec), "no gate field on green");
+  } finally {
+    fs.rmSync(greenRoot, { recursive: true, force: true });
+    fs.rmSync(gf.dir, { recursive: true, force: true });
+  }
+  // INFRA-ERROR: a signal-killed DIRECT child (no TAP summary → fail=0) keeps reason='infra-error'
+  // in the round record (unchanged — infra-error never claims a test failure).
+  const irRoot = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-reason-infra-"));
+  const inf = fakeSuite('echo "about to die"\nkill -9 $$\necho "unreachable"');
+  try {
+    const child = runRunner({ root: irRoot, command: `bash ${inf.f}` });
+    const { code } = await waitExit(child);
+    assert.equal(code, 1, "runner exits 1 on a killed suite");
+    const s = await poll(() => {
+      const cur = readState(irRoot);
+      return cur && cur.state === "red" && cur.reason === "infra-error" ? cur : null;
+    }, { timeoutMs: 5000 });
+    assert.ok(s, "state reason=infra-error (unchanged)");
+    const rec = lastRoundRecord(irRoot);
+    assert.ok(rec, "a verification-round record is appended");
+    assert.equal(rec.reason, "infra-error", "a signal-killed round keeps reason=infra-error, NOT gate-failed (unchanged)");
+  } finally {
+    fs.rmSync(irRoot, { recursive: true, force: true });
+    fs.rmSync(inf.dir, { recursive: true, force: true });
   }
 });
 
