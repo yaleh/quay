@@ -6,7 +6,7 @@
 export interface Task {
   id: string;
   title: string;
-  status: 'todo' | 'ready' | 'done' | 'needs-human';
+  status: 'todo' | 'ready' | 'done' | 'needs-human' | 'superseded';
   role: 'primitive' | 'compound';
   labels: string[];
   parent: string | null;
