@@ -1,7 +1,8 @@
 ---
 id: gap-verification-round-load-fields-from-systemd
-title: verification-round 接 systemd scope 退出行的负载三字段（cpu_time_s/mem_peak_mb/swap_peak_mb）
-status: ready
+title: verification-round 接 systemd scope
+  退出行的负载三字段（cpu_time_s/mem_peak_mb/swap_peak_mb）
+status: done
 labels:
   - gap
   - performance
@@ -58,9 +59,9 @@ runner 在 scope 外面（:1213 spawn systemd-run --scope 把套件作子进程�
 
 ## Definition of Done
 
-- [ ] AC1–AC4 全部勾上
-- [ ] 新字段实测样例贴出（见 Evidence）
-- [ ] 全量套件绿——外层 verification-round 验证
+- [x] AC1–AC4 全部勾上
+- [x] 新字段实测样例贴出（见 Evidence）
+- [x] 全量套件绿——外层 verification-round 验证（round 58 绿，verifiedCommit=9c300ffa 含本改动，load 三字段实值 cpu_time_s=2958.106 / mem_peak_mb=1536 / swap_peak_mb=0）
 
 ## Touches
 
