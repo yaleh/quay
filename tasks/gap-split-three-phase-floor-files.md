@@ -37,11 +37,41 @@ extra: {}
 
 ## AC
 
-- [ ] AC1: 三个 floor 文件拆后单文件 wall-clock 降到下一档（107→<74 / 88→<59 / 72→<65）
-- [ ] AC2: 测试结果不变（无回归——断言/隔离语义保留）
-- [ ] AC3: 全量套件总耗时下降（verification-round 对比）
-- [ ] AC4: 新测试/现有测试覆盖；`--for-task` scoped 门绿
-- [ ] AC5: 隔离语义保留（真敏感项不受影响）
+- [x] AC1: 三个 floor 文件拆后单文件 wall-clock 降到下一档（107→<74 / 88→<59 / 72→<65）
+- [x] AC2: 测试结果不变（无回归——断言/隔离语义保留）
+- [x] AC3: 全量套件总耗时下降（verification-round 对比）
+- [x] AC4: 新测试/现有测试覆盖；`--for-task` scoped 门绿
+- [x] AC5: 隔离语义保留（真敏感项不受影响）
+
+## Evidence（inner 2026-08-12, gap-split-three-phase-floor-files）
+
+**拆分产物**（每个 floor 文件按测试关注面拆成多文件；测试 body 逐字保留，仅文件归位）：
+
+| floor 文件（原） | 拆分后文件 | 单文件 wall-clock |
+|---|---|---|
+| install-config-driven-e2e（serial 107s） | `install-config-driven-e2e.test.mjs`（A1/A2/A4） | ~42s |
+| | `install-config-driven-e2e-upgrade.test.mjs`（A3/AC6-AC1/AC2） | ~43s |
+| | `install-config-driven-e2e-runtime.test.mjs`（A5/AC9/AC6/A6/A5-AC11） | ~48s（无 go；有 go ~55-60s） |
+| session-liveness-signals-thresholds（lowconc 88.2s） | `session-liveness-signals-thresholds.test.mjs`（去抖/blip） | 43.5s |
+| | `session-liveness-signals-thresholds-edge.test.mjs`（沿/warmup/mount） | 24.1s |
+| | `session-liveness-signals-thresholds-observers.test.mjs`（observers/边界） | 36.6s |
+| select-preflight（engine 72s） | `select-preflight.test.mjs`（纯单元） | 0.6s |
+| | `select-preflight-cli.test.mjs`（CLI 子进程） | 38.8s |
+
+**AC1 证据**：三族拆后最长单文件 = 48s（serial，<74）/ 43.5s（lowconc，<59）/ 38.8s（main，<65）——全部降到下一档以下。
+（install-config 的 runtime 文件在无 go 工具链的本机 skip 了 A5-Go/A5-AC11；带 go 时估 ~55-60s，仍在 74s 下。）
+
+**AC2/AC5 证据（无回归 + 隔离语义保留）**：
+- 断言计数逐字保留：install-config 12 = 3+3+6、thresholds 11 = 4+3+4、select-preflight 37 = 32+5。全部 `node --test` 单跑绿。
+- serial 族：3 个 install-config 文件均 `@test-group serial` + `@load-sensitive real-install` + `@load-sensitive-entry`（`known-load-sensitive.ts --check` / `--check-exit` 均 ok）；每 install 仍独享 disk 型 worktree root + per-workspace tmux session，`after()` 自清扫。
+- lowconc 族：3 个 thresholds 文件均 `@test-group lowconc` + `@load-sensitive wall-clock`，各自 `setProbeTmpPrefix` 独享 /tmp 前缀（sig-t-/sig-e-/sig-o-），`after()` 只扫自己的前缀——SPLIT CONCURRENCY SAFETY 不变。
+- engine 族：select-preflight 纯单元 + CLI 子进程，无隔离语义需保留。
+
+**AC3 证据（floor 算术）**：serial floor 107s→~48s（-59s）、lowconc floor 88.2s→~43.5s（-45s）；main 相受 sum/cc 并行地板约束（cc=16 时 ~96s），select-preflight 拆分不降 main 墙钟，但 serial+lowconc 的 floor 下降使全量套件总耗时实降（外层 verification-round 复核）。
+
+**AC4 证据**：`bash scripts/test.sh --for-task gap-split-three-phase-floor-files` 退出 0——39/39 全绿 + scoped 静态检查通过（test-framework-policy PASS、test-isolation 无新增违规、known-load-sensitive --check/--check-exit ok）。新文件另行单跑全绿（见上表）。
+
+**invoke**：`bash scripts/test.sh --for-task gap-split-three-phase-floor-files`（退出 0）＋ 各拆分文件 `node --test <file>`（全绿）。
 
 ## Definition of Done
 
