@@ -131,12 +131,12 @@ test("AC2/AC3/AC4: / returns 200; the unparseable task is an explicit malformed 
   fs.writeFileSync(path.join(tasksDir, "UNPARSE-1.md"), BAD_FRONTMATTER);
   writeConfig(ws, tasksDir);
 
-  const port = 41900 + (process.pid % 500);
   const orig = process.cwd();
   let server;
   try {
     process.chdir(ws);
-    server = await startServer({ port });
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
 
     // ── inject direction ──
     const list = await get(port, "/");
@@ -207,12 +207,12 @@ test("AC5: the web board 500s on a genuine task_list failure, never a silent 200
   const ws = fs.mkdtempSync(path.join(os.tmpdir(), "quay-unparse-ac5-ws-"));
   writeConfig(ws, tasksDir);
 
-  const port = 41910 + (process.pid % 500);
   const orig = process.cwd();
   let server;
   try {
     process.chdir(ws);
-    server = await startServer({ port });
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
     // sanity: with a valid (empty) store the list page renders 200.
     const before = await get(port, "/");
     assert.equal(before.status, 200, "precondition: GET / is 200 with a healthy store");

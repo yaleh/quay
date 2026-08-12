@@ -240,12 +240,12 @@ async function main() {
     `providers:\n  native:\n    enabled: true\n    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"\n    tasks_dir: "${tasksDir.replaceAll("\\", "\\\\")}"\n    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]\n    env:\n      QUAY_NATIVE_TASKS_DIR: "${tasksDir.replaceAll("\\", "\\\\")}"\n`
   );
 
-  const port = 47180 + (process.pid % 1000);
   const originalCwd = process.cwd();
   let server;
   try {
     process.chdir(workspaceRoot);
-    server = await startServer({ port });
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
 
     // ── GET / (task list page) ───────────────────────────────────────────
     // Browser-rendered observation (playwright MCP, iteration 1):

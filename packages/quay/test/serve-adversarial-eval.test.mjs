@@ -108,12 +108,12 @@ async function testMalformedTaskFileDegradesSafely() {
 
   writeConfig(workspaceRoot, tasksDir);
 
-  const port = 41720 + (process.pid % 500);
   const originalCwd = process.cwd();
   let server;
   try {
     process.chdir(workspaceRoot);
-    server = await startServer({ port });
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
 
     // gap-one-unparseable-task-takes-down-the-whole-board: the malformed-file
     // behavior CHANGED from ADV-001/002's original "clean 500". The provider's
@@ -178,12 +178,12 @@ async function testDetailRouteOpenRedirectBackslashBypass() {
   );
   writeConfig(workspaceRoot, tasksDir);
 
-  const port = 41740 + (process.pid % 500);
   const originalCwd = process.cwd();
   let server;
   try {
     process.chdir(workspaceRoot);
-    server = await startServer({ port });
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
 
     const backslashTarget = encodeURIComponent("/\\evil.com");
     const resp = await get(port, `/task/RDR-2?from=${backslashTarget}`);

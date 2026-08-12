@@ -39,8 +39,8 @@ before(async () => {
     `providers:\n  native:\n    enabled: true\n    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"\n    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]\n    env:\n      QUAY_NATIVE_TASKS_DIR: "${tasksDir.replaceAll("\\", "\\\\")}"\n      QUAY_NATIVE_ADR_DIR: "${adrDir.replaceAll("\\", "\\\\")}"\n`);
   originalCwd = process.cwd();
   process.chdir(workspaceRoot);
-  port = 41830 + (process.pid % 900);
-  server = await startServer({ port });
+  server = await startServer({ port: 0 });
+  port = server.address().port;
 });
 
 after(async () => {

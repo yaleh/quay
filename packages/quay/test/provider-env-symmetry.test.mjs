@@ -96,7 +96,11 @@ async function main() {
     // parallel suite (two processes whose PIDs differ by exactly 500 compute the same port →
     // EADDRINUSE at round 313). The OS assigns a free port; read it back after 'listening'.
     server = await startServer({ port: 0 });
-    await new Promise((resolve) => server.once("listening", resolve));
+    // startServer() now awaits the 'listening' event before resolving (serve.ts,
+    // port-collision fix), so the explicit once("listening") wait that used to
+    // be required here is gone — re-registering it now would hang (the event has
+    // already fired and EventEmitter never replays past events). Read the bound
+    // port back directly.
     const port = server.address().port;
 
     const res = await get(port, "/");
