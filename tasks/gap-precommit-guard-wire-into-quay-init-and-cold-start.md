@@ -5,7 +5,6 @@ status: todo
 labels:
   - gap
   - mechanism
-parent: gap-precommit-guard-running-round-rejects-assertion-surface-commits
 children: []
 extra:
   schema: execution
