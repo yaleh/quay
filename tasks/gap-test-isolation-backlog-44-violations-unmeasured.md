@@ -150,12 +150,14 @@ AC7 夹具保留在共享 `plugin/test/` 维持断言语义，`@test-group seria
 
 - plugin/scripts/test-isolation-check.ts（基线 + 棘轮逻辑）
 - plugin/test-framework-policy-exemptions.txt 或等价基线文件（模式复用）
-- plugin/test/runner-grouping.test.mjs（AC7 夹具写法）
+- plugin/test/runner-grouping-serial-anti-stomp.test.mjs（AC7 夹具写法——runner-grouping 拆分后保留 AC7 夹具的 serial 文件）
 - plugin/test/test-file-snapshot.test.mjs 或 plugin/scripts/test-file-snapshot.sh（排除 zz-* 夹具）
 - tasks/gap-no-test-framework-policy-for-new-tests.md（AC3 交叉标注——任务体原写
   `gap-test-framework-policy-for-new-tests.md`，真实文件为 `gap-no-test-framework-policy-for-new-tests.md`，
   2026-08-08 执行时修正；此修正同时让 task-contract --strict-subset 可解析该 Touches 条目）
 - tasks/gap-known-load-sensitive-rule-is-doc-only-no-mechanical-triage.md（AC5 交叉标注）
+
+> **Touches 修正（2026-08-12）**：`plugin/test/runner-grouping.test.mjs` → `plugin/test/runner-grouping-serial-anti-stomp.test.mjs`——runner-grouping.test.mjs 已被 gap-suite-floor-two-longest-files-bound 拆为 5 个文件，AC7 夹具保留在拆分后的 serial 文件。其余 Touches 均为现存文件。
 
 ## Contract
 

@@ -51,10 +51,12 @@ extra: {}
 ## Touches
 
 - plugin/scripts/known-load-sensitive.ts（kind=heavy 机制定义 + 缺省 kind 补齐）
-- plugin/scripts/known-load-sensitive.test.mjs（新增 kind 判据测试）
+- plugin/test/known-load-sensitive.test.mjs（新增 kind 判据测试）
 - plugin/scripts/ 或 scripts/test.sh（--check-exit 从格式闸升级为分级闸）
 - plugin/test/ 各泳道成员（重分 kind 标注）
 - tasks/gap-suite-tiering-kind-heavy-not-a-mechanism.md（自身：勾 AC + 贴证据）
+
+> **Touches 修正（2026-08-12）**：`plugin/scripts/known-load-sensitive.test.mjs` → `plugin/test/known-load-sensitive.test.mjs`——该测试文件实际在 `plugin/test/`（`plugin/scripts/known-load-sensitive.ts` 才是脚本本体）。其余 Touches 均为现存文件。
 
 ## Contract
 

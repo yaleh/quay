@@ -1,12 +1,14 @@
 ---
 id: gap-workflow-metadata-warn-omissions
 title: "Workflow metadata WARN-level omissions — decide fix or document"
-status: todo
+status: done
 labels:
   - gap
   - milestone-candidate
 extra:
   schema: v1
+  superseded: true
+  superseded_at: 2026-08-12
 ---
 
 **type:** execution
@@ -70,3 +72,7 @@ resume    逐 WARN 类决策（修 or 记录）分步提交
 reviewer: none
 at: 2026-08-09
 changed: 无（本任务补 ## Contract 六键晋级 Contract，非新派发，无 review 记录）
+
+## Superseded (2026-08-12)
+
+引用 ADR-022 已物理删除的工作流（execute-milestone.js / prepare-milestone.js 双镜像）：本任务的 14 条 WARN 全部针对已删机制的元数据遗漏。检查器 workflow-metadata-conformance.mjs 仍在（it0-dod-check.ts clause 14 调用），但其描述对象已删，WARN 已不再存在。前提不存在，作废保留历史——不重开。

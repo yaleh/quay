@@ -2,7 +2,7 @@
 id: gap-prepare-milestone-no-size-aware-routing-A
 title: "Size estimation + fast-lane routing: estimateTaskSize +
   PrepareRoutingDecision in prepare-milestone"
-status: todo
+status: done
 labels:
   - gap
   - defect
@@ -13,6 +13,8 @@ extra:
     gap-prepare-milestone-no-size-aware-routing-A
     experiments/quay-perpetual-stream/charters/M239-gap-prepare-milestone-no-size-aware-routing-A.md
     milestones/M239/absorb-entry.md
+  superseded: true
+  superseded_at: 2026-08-12
 ---
 **type:** execution
 
@@ -474,3 +476,7 @@ Standard inherited-core DoD clauses apply.
 - `tasks/gap-prepare-milestone-no-size-aware-routing-A.md`
 - `milestones/M239/routing-decision.json`
 - `docs/plans/M239-gap-prepare-milestone-no-size-aware-routing-a.md`
+
+## Superseded (2026-08-12)
+
+引用 ADR-022 已物理删除的机制（prepare-milestone.js 双镜像）：estimateTaskSize / PrepareRoutingDecision 均设计在经典 prepare-milestone Preflight pipeline 上，fast mode 无对应物。前提不存在，作废保留历史——不重开。

@@ -2,7 +2,7 @@
 id: gap-split-decision-finality-not-enforced
 title: "Split decisions are not final: 15 redundant dispatches re-ran
   prepare-milestone on tasks already ruled SPLIT"
-status: todo
+status: done
 labels:
   - gap
   - defect

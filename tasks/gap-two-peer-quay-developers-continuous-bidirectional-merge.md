@@ -51,6 +51,15 @@ quay 开发者需要**持续合并彼此进展**。这比「--slot-status 单点
 - [ ] AC5: 与 gap-a-to-b-code-downsync-missing-slot-status-not-on-b（needs-human 撤回）交叉标注——
        本任务是其正确框架替代
 
+## Definition of Done
+
+- [ ] AC1–AC5 全部勾上
+- [ ] 实跑：A 能拉到 B 最新 + B 能拉到 A 最新（对称，双向各非零）——`git log` 对比贴出
+- [ ] 权威「最新」定义落盘（develop/GitHub 共识点或人裁定的其它模型）并在机制中生效
+- [ ] B 机 `--slot-status` 等工具随双向合并到达（grep=0 → 非零）
+- [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
+- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
+
 ## Touches
 
 - plugin/scripts/（双向合并同步，扩展 claim-task / integration）

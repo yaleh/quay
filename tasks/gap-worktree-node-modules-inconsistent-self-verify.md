@@ -63,6 +63,14 @@ resume 先定 setup 步骤（符号链接 vs 复制 vs install），再接派发
 - [ ] AC4: 检查器（若有）接执行者并被真实触发一次
 - [ ] AC5: 测试用 `node:test` 且带 `// @test-group governance`
 
+## Definition of Done
+
+- [ ] AC1–AC5 全部勾上
+- [ ] 实跑：新建 worktree 不跑 setup ⇒ `scripts/test.sh` 构建阶段 fail-closed；跑了 setup ⇒ 能自证（贴两路径输出）
+- [ ] 派发流程已接入 setup（内层派发 prompt 或派发工具），新 worktree 不再依赖 agent 记得建 node_modules
+- [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
+- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
+
 ## Touches
 
 - （待定：新 `dispatch-worktree-setup.sh` + 派发 prompt 模板 + 测试；若加检查器则 `scripts/test.sh` 的 `run_static_checks`）
