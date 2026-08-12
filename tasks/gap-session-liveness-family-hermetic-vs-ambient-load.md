@@ -45,3 +45,14 @@ extra: {}
 - [ ] hermetic 化后 conc 8/10/12 实跑结果贴出（见 Evidence）
 - [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
+
+## Touches
+
+- plugin/test/session-liveness-events.test.mjs（locate 环境/时间敏感点，hermetic 化）
+- plugin/test/session-liveness-signals-integration.test.mjs
+- plugin/test/session-liveness-signals-kinds.test.mjs
+- plugin/test/session-liveness-target.test.mjs
+- plugin/test/worktree-root-fs-check.test.mjs
+- plugin/test/session-liveness-helpers.mjs（spawnMonitor 共享 helper——若 hermetic 手法在此收敛）
+- plugin/scripts/session-liveness.sh（若环境扫描点在此，加确定性 override/时间注入）
+- tasks/gap-session-liveness-family-hermetic-vs-ambient-load.md（自身：勾 AC + 贴证据）
