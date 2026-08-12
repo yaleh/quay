@@ -1,7 +1,7 @@
 ---
 id: gap-slot-refill-inflight-disconnected-from-worktrees
 title: slot-refill in_flight=0 而 worktree+telemetry 有在飞任务 ⇒ 仪器不一致
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -45,3 +45,9 @@ extra: {}
 - [ ] 修后实跑：有在飞 worktree 时 slot-refill in_flight 读数贴出（见 Evidence）
 - [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
+
+## Touches
+
+- plugin/scripts/slot-refill.ts（in_flight 计数源修正——读 telemetry inProgress 权威源）
+- plugin/test/slot-refill.test.mjs（有/无在飞两态用例）
+- tasks/gap-slot-refill-inflight-disconnected-from-worktrees.md（自身：勾 AC + 贴证据）

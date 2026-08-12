@@ -1,7 +1,7 @@
 ---
 id: gap-ac38-split-regression-cluster-5-checker-tests
 title: AC38 切分回归簇（5 条 checker/doc 测试）—— product 模板泛化 vs 测试断言
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -52,3 +52,14 @@ extra: {}
 - [ ] 五文件隔离重跑全绿（证据贴出）
 - [ ] `--for-task gap-ac38-split-regression-cluster-5-checker-tests` scoped 门绿
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
+
+## Touches
+
+- plugin/test/threshold-scope-check.test.mjs（AC6 计数断言 3→2）
+- plugin/test/instrument-failure-check.test.mjs（注入量自适应）
+- plugin/test/self-report-vocab-check.test.mjs（AC3 归属裁定落位）
+- plugin/test/inner-session-check.test.mjs（AC2 degraded-state 命名）
+- plugin/test/loop-shipping.test.mjs（AC1b/AC1c 旧路径清理）
+- plugin/skills/cold-start/SKILL.md（step 3 degraded-state 命名，若需）
+- plugin/loop/orchestrator-loop-tick.md（product 注记或 /loop 落点校正，若需）
+- tasks/gap-ac38-split-regression-cluster-5-checker-tests.md（自身：勾 AC + 贴证据）
