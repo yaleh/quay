@@ -266,7 +266,19 @@ function runSlotRefill(root, cap = 3) {
   return JSON.parse(execFileSync(
     process.execPath,
     ["--no-warnings", "--experimental-strip-types", script, "--root", root, "--cap", String(cap), "--json"],
-    { encoding: "utf8" },
+    // LOAD-SENSITIVE FIX (ac36 4/6 flake): a bare `slot-refill --json` (no --in-flight) MEASURES the
+    // in-flight view via fast-mode-telemetry --slot-status, whose non-task-subagent count scans
+    // /proc GLOBALLY (unscoped to --root — readSubagentsInFlight()/scanNonTaskSubagents in
+    // fast-mode-telemetry.ts). Under full-suite load the outer loop's live subagents inflate that
+    // count, which shrinks slots_free and CAPS `recommended` to fewer tasks than this fixture asserts
+    // (observed: before.recommended ['ac36-aaa'] / after.recommended ['ac36-e2e'] instead of both) —
+    // the test passed isolated but failed 4/6 full-suite runs. QUAY_TELEMETRY_SUBAGENTS is the
+    // telemetry CLI's OWN documented deterministic override (readSubagentsInFlight: "so slot
+    // arithmetic never depends on what else happens to be running on the machine at test time").
+    // Pinning it to 0 hermeticizes the E2E against ambient load while STILL exercising the real
+    // slot-refill CLI end-to-end (the DoD 实跑 shape). The temp root has no telemetry store, so the
+    // only ambient input this shuts off is the /proc subagent scan — nothing the assertion relies on.
+    { encoding: "utf8", env: { ...process.env, QUAY_TELEMETRY_SUBAGENTS: "0" } },
   ));
 }
 
