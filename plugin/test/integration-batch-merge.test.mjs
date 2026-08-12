@@ -1508,3 +1508,76 @@ test("WORKTREE-GREEN GATE opt-out: --skip-worktree-green-gate bypasses the gate 
     cleanup(dir);
   }
 });
+
+// ── FAN-IN MODE (gap-task-telemetry-6-percent-join) ─────────────────────────────────────────────────
+// Per-task fan-in (task/<id> → the current checkout) with the telemetry runId embedded in the commit
+// subject at a fixed position-parseable location — the bridge that makes git landing records and
+// telemetry records joinable (the 6% join-rate defect). The batch-merge flow (develop/integration
+// gates) is untouched; this mode is the mechanical way to produce a runId-carrying fan-in commit.
+test("FAN-IN MODE — --fan-in <id> --run-id <r> merges the task branch with the runId in the subject", () => {
+  const dir = makeTmp("fanin");
+  try {
+    initGitRepo(dir);
+    writeFileSync(join(dir, "base.txt"), "base\n", "utf8");
+    commitAll(dir, "base");
+    gitCmd(dir, "branch", "-M", "master");
+    gitCmd(dir, "checkout", "-q", "-b", "task/gap-fanin-a");
+    writeFileSync(join(dir, "work.txt"), "work\n", "utf8");
+    commitAll(dir, "task work");
+    gitCmd(dir, "checkout", "-q", "master");
+
+    const r = runMerge(["--fan-in", "gap-fanin-a", "--run-id", "fm-gap-fanin-a-1750-abc123", "--root", dir]);
+    assert.equal(r.status, 0, `fan-in should exit 0: ${r.stdout}${r.stderr}`);
+    assert.match(r.stdout, /measure fanin_runid_present=true/);
+    const subject = gitCmd(dir, "log", "-1", "--format=%s").stdout.trim();
+    assert.equal(subject, "merge: fan-in task/gap-fanin-a (runId: fm-gap-fanin-a-1750-abc123)",
+      "the fan-in commit subject must carry the runId at the fixed position");
+    // Two parents: a real merge commit.
+    const parents = gitCmd(dir, "rev-list", "--parents", "-n", "1", "HEAD").stdout.trim().split(" ").length;
+    assert.equal(parents, 3, "fan-in merge commit has two parents (base + task branch)");
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("FAN-IN MODE negative — --fan-in without --run-id fails closed (exit 2), nothing merged", () => {
+  const dir = makeTmp("fanin2");
+  try {
+    initGitRepo(dir);
+    writeFileSync(join(dir, "base.txt"), "base\n", "utf8");
+    commitAll(dir, "base");
+    gitCmd(dir, "branch", "-M", "master");
+    gitCmd(dir, "checkout", "-q", "-b", "task/gap-fanin-b");
+    writeFileSync(join(dir, "work.txt"), "work\n", "utf8");
+    commitAll(dir, "task work");
+    gitCmd(dir, "checkout", "-q", "master");
+    const before = gitCmd(dir, "rev-parse", "HEAD").stdout.trim();
+
+    const r = runMerge(["--fan-in", "gap-fanin-b", "--root", dir]);
+    assert.equal(r.status, 2, "missing --run-id is a usage error");
+    assert.match(r.stderr, /--fan-in requires --run-id/);
+    assert.equal(gitCmd(dir, "rev-parse", "HEAD").stdout.trim(), before, "nothing merged");
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("FAN-IN MODE negative — a non-filename-safe --run-id fails closed (exit 2); a missing task branch fails closed (exit 1)", () => {
+  const dir = makeTmp("fanin3");
+  try {
+    initGitRepo(dir);
+    writeFileSync(join(dir, "base.txt"), "base\n", "utf8");
+    commitAll(dir, "base");
+    gitCmd(dir, "branch", "-M", "master");
+
+    const badRunId = runMerge(["--fan-in", "gap-fanin-c", "--run-id", "../../evil", "--root", dir]);
+    assert.equal(badRunId.status, 2, "a path-traversal runId must be rejected");
+    assert.match(badRunId.stderr, /not filename-safe/);
+
+    const missingBranch = runMerge(["--fan-in", "gap-fanin-c", "--run-id", "fm-gap-fanin-c-1750-x", "--root", dir]);
+    assert.equal(missingBranch.status, 1, "a missing task branch must fail closed");
+    assert.match(missingBranch.stderr, /task branch task\/gap-fanin-c not found/);
+  } finally {
+    cleanup(dir);
+  }
+});

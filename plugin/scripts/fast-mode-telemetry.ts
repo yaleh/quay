@@ -27,7 +27,7 @@
 //
 // Run:
 //   node --experimental-strip-types fast-mode-telemetry.ts --task-start --taskId <id> [--root <dir>]
-//   node --experimental-strip-types fast-mode-telemetry.ts --task-end --taskId <id> --runId <r> --outcome <done|needs-human|abandoned|deferred> [--root <dir>]
+//   node --experimental-strip-types fast-mode-telemetry.ts --task-end --taskId <id> --runId <r> --outcome <done|needs-human|abandoned|deferred> [--fanInCommit <sha>] [--root <dir>]  (--fanInCommit overrides the auto-looked-up fan-in commit sha)
 //   node --experimental-strip-types fast-mode-telemetry.ts --report [--since <iso>] [--json] [--root <dir>]   (PURE READ)
 //   node --experimental-strip-types fast-mode-telemetry.ts --snapshot [--since <iso>] [--json] [--root <dir>] (explicit persist)
 //   node --experimental-strip-types fast-mode-telemetry.ts --reconcile [--json] [--root <dir>] (close in-flight records whose executor is observably gone)
@@ -419,6 +419,62 @@ export function generateRunId(taskId) {
   return `fm-${safe}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+// ── Fan-in runId bridge (gap-task-telemetry-6-percent-join) ──────────────────────────────────────────
+// The defect: task landing records (git fan-in merge commits) and telemetry records were only 6%
+// joinable (manager 2026-08-12 021354: git 139 fan-in names vs telemetry 152 taskIds, intersection 9)
+// — a landed task had no mechanical path to its run duration, and a telemetry record had no
+// mechanical path to its code. The bridge: a fan-in commit subject carries the telemetry runId at a
+// FIXED position — `merge: fan-in task/<id> (runId: fm-...)` — so the two record sets join on the
+// runId. These helpers (a) read the runId back out of a fan-in subject (the position-parseable
+// `(runId: …)` group) and (b) trace a telemetry taskId → its fan-in landing commit (AC3 traceability).
+
+/** The position-parseable runId group in a fan-in commit subject: `(runId: <filename-safe id>)`. */
+export const RUN_ID_IN_SUBJECT_RE = /\(runId:\s*([A-Za-z0-9._-]+)\)/;
+
+/**
+ * Extract the runId from a fan-in merge-commit subject BY POSITION — the trailing `(runId: <id>)`
+ * group. Null when absent (a pre-bridge fan-in, or a subject that is not a runId-carrying fan-in).
+ * Pure — no git, no filesystem.
+ * @param {string|null|undefined} subject
+ * @returns {string|null}
+ */
+export function extractRunIdFromCommitSubject(subject) {
+  if (!subject) return null;
+  const m = RUN_ID_IN_SUBJECT_RE.exec(String(subject));
+  return m ? m[1] : null;
+}
+
+/**
+ * The fan-in merge commit that landed `task/<taskId>` — the NEWEST merge commit whose message matches
+ * the fan-in convention and references the task. Resolution order (first match wins, each the newest
+ * such commit):
+ *   1. `task/<taskId>` in the commit message — catches `merge: fan-in task/<id>` and git's own
+ *      `Merge branch 'task/<id>'`.
+ *   2. `fan-in <taskId>` in the message — catches the bare-id convention `merge: fan-in <id>`.
+ *
+ * Returns the full commit sha, or null when no such commit exists (not yet fan-in'd / branch never
+ * merged / git unavailable — fail-soft). This is the AC3 traceability primitive: a telemetry taskId
+ * → its landing commit/branch, mechanically.
+ * @param {string} root
+ * @param {string} taskId
+ * @returns {string|null}
+ */
+export function findFanInCommitSha(root, taskId) {
+  const safe = String(taskId).replace(/[^A-Za-z0-9._-]/g, "");
+  if (!safe) return null;
+  const patterns = [`task/${safe}`, `fan-in ${safe}`];
+  for (const pat of patterns) {
+    try {
+      const out = execFileSync("git", ["-C", root, "log", "--all", "--merges", "--format=%H", "-1", "--grep", pat], {
+        encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"],
+      });
+      const line = out.trim();
+      if (line) return line;
+    } catch (_) { /* no matching merge commit / git unavailable — try the next pattern */ }
+  }
+  return null;
+}
+
 // ── Event builders (A1a schema-shaped; pass validateEvent) ───────────────────────────────────────────
 
 /**
@@ -470,9 +526,14 @@ export function buildStartEvent({ taskId, runId, executionCwd, baseCommit = null
  *   `--reconcile` closing a phantom in-flight record (executor observably gone). aggregate() routes
  *   such pairs to `reconciled[]` (never `tasks[]`), so a reconcile-close can never pollute
  *   throughput. An A1a extra field — forward-compat allowed, VALID_OUTCOMES unchanged.
+ * @param {string|null} [opts.fanInCommitSha] — the fan-in merge commit that landed the task's branch
+ *   (gap-task-telemetry-6-percent-join AC3 traceability: a telemetry record → its landing commit).
+ *   `--task-end` auto-populates it via findFanInCommitSha; null when the task was never fan-in'd
+ *   (needs-human/abandoned/deferred) or git is unavailable. An A1a extra field — forward-compat
+ *   allowed, REQUIRED_FIELDS unchanged.
  * @returns {object} — a plain object that A1a validateEvent accepts
  */
-export function buildEndEvent({ taskId, runId, outcome, executionCwd, baseCommit = null, recordedAtMs = Date.now(), reconcileReason = null }) {
+export function buildEndEvent({ taskId, runId, outcome, executionCwd, baseCommit = null, recordedAtMs = Date.now(), reconcileReason = null, fanInCommitSha = null }) {
   return {
     schemaVersion: SCHEMA_VERSION,
     runId,
@@ -496,6 +557,7 @@ export function buildEndEvent({ taskId, runId, outcome, executionCwd, baseCommit
     recordedAtMs,
     eventKind: "end",
     reconcileReason,
+    fanInCommitSha,
   };
 }
 
@@ -1474,7 +1536,7 @@ const usage = `fast-mode-telemetry.ts — fast-mode (direct) execution metering 
 
 Usage:
   node --experimental-strip-types fast-mode-telemetry.ts --task-start --taskId <id> [--root <dir>]
-  node --experimental-strip-types fast-mode-telemetry.ts --task-end --taskId <id> --runId <r> --outcome <done|needs-human|abandoned|deferred> [--root <dir>]
+  node --experimental-strip-types fast-mode-telemetry.ts --task-end --taskId <id> --runId <r> --outcome <done|needs-human|abandoned|deferred> [--fanInCommit <sha>] [--root <dir>]  (--fanInCommit overrides the auto-looked-up fan-in commit sha)
   node --experimental-strip-types fast-mode-telemetry.ts --halt-start [--atMs <iso>] [--reason <str>] [--root <dir>]   (record a .halt placement)
   node --experimental-strip-types fast-mode-telemetry.ts --halt-end   [--atMs <iso>] [--root <dir>]                    (record a .halt removal)
   node --experimental-strip-types fast-mode-telemetry.ts --report [--since <iso>] [--json] [--root <dir>]   (PURE READ — never writes)
@@ -1610,6 +1672,11 @@ export async function main(argv) {
       console.error(`fast-mode-telemetry: invalid outcome "${outcome}"; must be one of: ${VALID_OUTCOMES.join(", ")}`);
       return 1;
     }
+    // Fan-in commit sha (gap-task-telemetry-6-percent-join AC3): `--fanInCommit <sha>` overrides;
+    // otherwise auto-lookup the task's fan-in merge commit (best-effort — null when never fan-in'd
+    // or git unavailable, so a needs-human/abandoned/deferred close records null, not a wrong sha).
+    const fanInCommitArg = getArgValue(args, "--fanInCommit");
+    const fanInCommitSha = fanInCommitArg ?? findFanInCommitSha(root, taskId);
     const event = buildEndEvent({
       taskId,
       runId,
@@ -1617,6 +1684,7 @@ export async function main(argv) {
       executionCwd: process.cwd(),
       baseCommit: getBaseCommit(root),
       recordedAtMs: Date.now(),
+      fanInCommitSha: fanInCommitSha ?? null,
     });
     try {
       writeEvent(event, root);
