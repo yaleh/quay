@@ -1,7 +1,10 @@
 ---
 id: gap-suite-tiering-kind-heavy-not-a-mechanism
-title: "泳道分级破口——known-load-sensitive kind=heavy 是兜底桶非机制陈述（serial 24 成员 16 个 kind=heavy，lowconc→serial 9 文件 8 heavy+1 child-spawn，无一命中 serial 的机制判据 nested-spawn/wall-clock）；--check-exit 只验填没填不验理由是否命中本泳道 kind 集（格式闸非分级闸）⇒ 给 heavy 真机制定义（真安装/真 npm pack、进程与 IO 放大 N×）+ 不满足回 lowconc + --check-exit 升级为分级闸"
-status: ready
+title: 泳道分级破口——known-load-sensitive kind=heavy 是兜底桶非机制陈述（serial 24 成员 16 个
+  kind=heavy，lowconc→serial 9 文件 8 heavy+1 child-spawn，无一命中 serial 的机制判据
+  nested-spawn/wall-clock）；--check-exit 只验填没填不验理由是否命中本泳道 kind 集（格式闸非分级闸）⇒ 给
+  heavy 真机制定义（真安装/真 npm pack、进程与 IO 放大 N×）+ 不满足回 lowconc + --check-exit 升级为分级闸
+status: done
 labels:
   - gap
   - defect
