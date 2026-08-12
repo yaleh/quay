@@ -37,11 +37,11 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录约束（纯服务端、零 JS、零新依赖）+ 两陷阱（工时不可推 / 遥测不相交）（本任务 Proposal 已含）
-- [ ] AC2: **服务端 SVG 路由**——`/git-history` 返回服务端渲染 SVG（复用 html/escapeHtml/pageStyles/renderMarkdown）
-- [ ] AC3: **不假装知道工时**——图横轴=落地时刻，无持续时间/工时语义
-- [ ] AC4: **零新依赖零客户端 JS**——`<script>` 标签 0 个，package.json 无新依赖
-- [ ] AC5: **既有不回归**——`--for-task` scoped 门绿
+- [x] AC1: **复现固化**——任务体记录约束（纯服务端、零 JS、零新依赖）+ 两陷阱（工时不可推 / 遥测不相交）（本任务 Proposal 已含）
+- [x] AC2: **服务端 SVG 路由**——`/git-history` 返回服务端渲染 SVG（复用 html/escapeHtml/pageStyles/renderMarkdown）
+- [x] AC3: **不假装知道工时**——图横轴=落地时刻，无持续时间/工时语义
+- [x] AC4: **零新依赖零客户端 JS**——`<script>` 标签 0 个，package.json 无新依赖
+- [x] AC5: **既有不回归**——`--for-task` scoped 门绿
 
 ## Definition of Done
 
@@ -72,3 +72,34 @@ resume    SVG 路由 / 测试 / 不假装工时分步提交，任一步完成即
 reviewer: outer
 at: 2026-08-12
 changed: 人 022037 裁定（服务端 git history SVG）。约束 + 两陷阱由 manager 实测。实现归 inner。
+
+## Inner evidence（inner 2026-08-12 实跑，SCOPED ONLY）
+
+**Contract measure（invoke 实跑）** —— `node --experimental-strip-types packages/quay/bin/quay.ts serve --port 18000` + curl：
+
+```
+$ curl -s http://localhost:18000/git-history | grep -c '<svg'
+1
+$ curl -s http://localhost:18000/git-history | grep -o '<script' | wc -l
+0
+$ curl -s -o /dev/null -w '%{http_code}\n' http://localhost:18000/git-history
+200
+```
+
+`git_history_svg = 1 >= 1` ✓；`zero_client_js`：整页 `<script>` 计数 0 ✓；`no_new_deps`：仅新增 `node:child_process`（builtin），package.json 无改动 ✓。
+
+**Scoped 门** —— `bash scripts/test.sh --for-task gap-git-history-svg-server-rendered`（含新增 `serve-handlers.test.mjs` 3 例 + `serve.test.mjs` 既有回归 + cross-cut）：
+
+```
+ℹ tests 82
+ℹ suites 0
+ℹ pass 82
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ duration_ms 29855.744808
+```
+
+新增测试（serve-handlers.test.mjs，全绿）：AC2/AC3/AC4 直测（`/git-history` 返回 `<svg`、每-fixture-day 一列、`data-count` 求和 = 3、整页 `<script>` 0 个、页上明示「落地时刻」+「无持续时间/工时语义」）；AC5 降级（非 git 工作区 200 + 读失败，零 `<script>`）；`?days=N` 窗口过滤。
+
+**REFUTE（内部对抗，1 轮）**：无阻断发现——XSS 面仅日期/计数（数值安全），author/subject 走 `escapeHtml`；`?days=` 非法值回落 30；空仓库/非 git 降级 200 不 500；`MAX_COMMITS=5000` 封顶 SVG 体积。
