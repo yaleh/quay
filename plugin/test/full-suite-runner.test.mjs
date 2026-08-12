@@ -2608,7 +2608,7 @@ test("AC2/AC3 — the default run passes QUAY_SERIAL_CONCURRENCY=6 and QUAY_LOWC
     assert.equal(code, 0, `runner exits 0 on green, got ${code}`);
     await poll(() => fs.existsSync(envLog));
     const line = fs.readFileSync(envLog, "utf8").trim();
-    assert.equal(line, "SERIAL=6 LOWCONC=6", `defaults must be serial=6 lowconc=6, got: ${line}`);
+    assert.equal(line, "SERIAL=12 LOWCONC=12", `defaults must be serial=12 lowconc=12, got: ${line}`);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

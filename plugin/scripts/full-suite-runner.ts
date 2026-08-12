@@ -655,8 +655,8 @@ export function defaultLaneCount(): number {
  * --lowconc-concurrency, which the runner passes to test.sh as QUAY_SERIAL_CONCURRENCY /
  * QUAY_LOWCONC_CONCURRENCY so a FUTURE controlled experiment can re-measure before the next bump.
  */
-export const DEFAULT_SERIAL_CONCURRENCY = 6;
-export const DEFAULT_LOWCONC_CONCURRENCY = 6;
+export const DEFAULT_SERIAL_CONCURRENCY = 12;
+export const DEFAULT_LOWCONC_CONCURRENCY = 12;
 
 /** Parse a positive-integer arg (e.g. --serial-concurrency 2); NaN/<1 → null (caller errors). */
 function parsePositiveIntArg(argv: string[], name: string): number | null {
