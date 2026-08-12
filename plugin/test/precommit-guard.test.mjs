@@ -141,6 +141,43 @@ test("AC1b — running round + staged NON-assertion-surface file ⇒ allow (regi
   }
 });
 
+// ── AC1-early-red: state=red + finishedAt=null (runner still collecting) ⇒ reject ─────────────────────
+
+test("AC1-early-red — state=red finishedAt=null (early-red, runner still collecting) ⇒ reject assertion-surface commit", () => {
+  const root = makeGitRepo();
+  try {
+    writeState(root, { ...RUNNING_STATE, state: "red", reason: "failed" });
+    writeRegistry(root, ["tasks/**", "packages/**"]);
+    stage(root, "tasks/early-red.md");
+    const res = runGuard(root);
+    assert.equal(res.status, 1, `expected reject (early-red), got ${res.status}: ${res.stderr}`);
+    const out = JSON.parse(res.stdout);
+    assert.equal(out.verdict, "reject");
+    assert.equal(out.reason, "running-round-assertion-surface");
+    assert.equal(out.isRunning, true, "--json isRunning must be true for early-red");
+    assert.equal(out.finishedAt, null, "--json finishedAt must be null for early-red");
+  } finally {
+    cleanup(root);
+  }
+});
+
+test("AC1-terminal — state=red finishedAt set (round finished) ⇒ allow", () => {
+  const root = makeGitRepo();
+  try {
+    writeState(root, { ...RUNNING_STATE, state: "red", reason: "failed", finishedAt: 1786572515000, durationMs: 500000 });
+    writeRegistry(root, ["tasks/**", "packages/**"]);
+    stage(root, "tasks/terminal.md");
+    const res = runGuard(root);
+    assert.equal(res.status, 0, `expected allow (terminal), got ${res.status}: ${res.stdout}`);
+    const out = JSON.parse(res.stdout);
+    assert.equal(out.verdict, "allow");
+    assert.equal(out.isRunning, false, "--json isRunning must be false for terminal round");
+    assert.ok(out.finishedAt != null, "--json finishedAt must be present for terminal round");
+  } finally {
+    cleanup(root);
+  }
+});
+
 // ── AC2: fail-loud on missing/null state file ─────────────────────────────────────────────────────────
 
 test("AC2 — state file MISSING ⇒ reject (fail-loud, never a plausible-looking value)", () => {

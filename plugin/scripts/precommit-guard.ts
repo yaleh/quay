@@ -311,12 +311,14 @@ export function judge(
     };
   }
 
-  // 终态（green/red/…）⇒ 放行。只有 running 触发守卫。
-  if (state !== RUNNING) {
+  // 轮是否在跑（early-red 完备：state=red 但 finishedAt=null 时 runner 仍活收集，同样触守卫）。
+  // finishedAt 是权威「轮结束没有」字段（与 parseTerminalFinishedAt 同判据）。
+  const isRunning = state === RUNNING || data.finishedAt == null;
+  if (!isRunning) {
     return {
       verdict: "allow",
       reason: "not-running",
-      message: `pre-commit 守卫：state=${state}，无运行中的轮，放行。`,
+      message: `pre-commit 守卫：state=${state}, finishedAt=${data.finishedAt ?? "null"}，无运行中的轮，放行。`,
       state: data,
       stateFile,
       assertionSurface: surface.files,
@@ -336,7 +338,7 @@ export function judge(
       verdict: "reject",
       reason: "running-round-assertion-surface",
       message:
-        `pre-commit 守卫：一轮正在跑（state=running, runId=${runId}, startedAt=${startedAt}），` +
+        `pre-commit 守卫：一轮正在跑（state=${data.state}, finishedAt=${data.finishedAt ?? "null"}, runId=${runId}, startedAt=${startedAt}），` +
         `本次提交触及断言面文件（${touchedAssertion.length} 个），会使该轮结论不可用。\n` +
         "用 --allow-dirty-round 显式覆盖，或等终态（green/red）后再提交。\n" +
         "拒绝文件：" + touchedAssertion.slice(0, 10).join(", ") +
@@ -512,6 +514,8 @@ function main(): number {
           reason: verdict.reason,
           message: verdict.message,
           state: verdict.state,
+          finishedAt: verdict.state?.finishedAt ?? null,
+          isRunning: verdict.state != null && (verdict.state.state === "running" || verdict.state.finishedAt == null),
           assertionSurfaceCount: verdict.assertionSurface.length,
           staged: verdict.staged,
           touchedAssertion: verdict.touchedAssertion,
