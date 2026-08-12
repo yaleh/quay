@@ -1,7 +1,7 @@
 ---
 id: gap-suite-start-verifies-target-commit
 title: 套件起跑不校验 verifiedCommit 含目标修复 → 一轮 550s 与问题无关
-status: todo
+status: ready
 labels:
   - gap
   - defect
