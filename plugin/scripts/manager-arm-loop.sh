@@ -24,13 +24,28 @@
 # CronCreate 工具（见 manager-loop-tick.md 的武装步骤）。这样哨兵清扫逻辑可被机械测试（AC5c 负
 # 控制），而工具映射在文档中写成约定。
 #
+# 注册表↔真 cron 核实（gap-manager-cold-start-no-falsifiable-checklist AC4）：哨兵行只是「武装」，
+# 不等于「真有 cron」——真正的 CronCreate 在会话内做，bash 看不到。本脚本把核实做成两段：
+#   --record-cron <id>   会话内 agent 在 CronCreate + CronList 确认后，把真实 cron id 连同
+#                        ISO 时刻写回注册表的哨兵行（形如 `… |cron:<id>|verified:<ISO>`）。
+#                        一个空哨兵行（无收据）不再是「已核实」。
+#   --verify             从外部判定注册表状态：恰好一个哨兵 且 该行带 cron:<id> 且 verified:<ISO>
+#                        在 STALE 窗口内 ⇒ `registry-verified`（exit 0）；缺任一条 ⇒
+#                        `registry-only` / `registry-missing` / `registry-multiple` / `receipt-stale`
+#                        （exit 1）。这样「注册表说武装了」与「注册表说武装了且真 cron 已核实」
+#                        在记录上可区分——不会再有「无机件能外部核实」的 manager。
+#
 # 用法：
 #   manager-arm-loop.sh [--home <dir>] [--store <file>] [--dry-run] [--json] [--validate]
-#     --home <dir>     manager 家目录（默认 $QUAY_GLOBAL_DIR/manager/ → $HOME/.quay-global/manager/）
-#     --store <file>   cron 注册表文件（默认 <home>/loop-registry.txt）
-#     --dry-run        只打印将执行的步骤，不改注册表
-#     --json           JSON 输出
-#     --validate       只验证「哨兵/指针规则已在文档中」，不改注册表（AC5c 文档规则检查）
+#                       [--record-cron <cronId>] [--verify] [--stale-seconds <n>]
+#     --home <dir>        manager 家目录（默认 $QUAY_GLOBAL_DIR/manager/ → $HOME/.quay-global/manager/）
+#     --store <file>      cron 注册表文件（默认 <home>/loop-registry.txt）
+#     --dry-run           只打印将执行的步骤，不改注册表
+#     --json              JSON 输出
+#     --validate          只验证「哨兵/指针/收据规则已在文档中」，不改注册表（AC5c 文档规则检查）
+#     --record-cron <id>  把 CronCreate 的核实收据（cron id + 时刻）写回注册表哨兵行（AC4）
+#     --verify            外部核实注册表 ↔ 真 cron（registry-verified exit 0，registry-only 等 exit 1）
+#     --stale-seconds <n> --verify 的收据新鲜度窗口（默认 604800 = 7 天；超过报 receipt-stale）
 #
 # 依赖：无（纯 shell + 文件操作）。
 # ── 统一 --help（gap-scripts-sprawl：用法在前、退出 0、无业务副作用）────────────────────
@@ -50,9 +65,12 @@ STORE=""
 DRY_RUN=0
 JSON=0
 VALIDATE=0
+RECORD_CRON=""
+VERIFY=0
+STALE_SECONDS="${MANAGER_ARM_STALE_SECONDS:-604800}"
 
 usage() {
-  sed -n '1,32p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '1,44p' "$0" | sed 's/^# \{0,1\}//'
   exit 0
 }
 
@@ -63,9 +81,12 @@ while [ $# -gt 0 ]; do
     --dry-run) DRY_RUN=1; shift ;;
     --json) JSON=1; shift ;;
     --validate) VALIDATE=1; shift ;;
+    --record-cron) RECORD_CRON="$2"; shift 2 ;;
+    --verify) VERIFY=1; shift ;;
+    --stale-seconds) STALE_SECONDS="$2"; shift 2 ;;
     --help|-h) usage ;;
     *)
-      echo "ERROR: unknown argument: $1 (expected --home <dir> | --store <file> | --dry-run | --json | --validate)" >&2
+      echo "ERROR: unknown argument: $1 (expected --home <dir> | --store <file> | --dry-run | --json | --validate | --record-cron <id> | --verify | --stale-seconds <n>)" >&2
       exit 2
       ;;
   esac
@@ -76,6 +97,12 @@ STORE="${STORE:-${HOME_DIR}/loop-registry.txt}"
 
 # ── 哨兵前缀（AC5c 的固定可推导前缀）────────────────────────────────────────────────────────
 SENTINEL="[manager-tick]"
+# 哨兵行的收据尾缀（AC4）：` |cron:<id>|verified:<ISO>`。判定用字面串（grep -qF，`|` 在
+# ERE 里是或运算——ID_RE/AT_RE 用 `\|` 转义成字面竖线，否则空分支恒真、把空哨兵误判成
+# registry-verified，AC4 核实会当场失效）。RECEIPT_STRIP 用于剥离旧收据尾缀。
+ID_PAT='\|cron:[^|[:space:]]+'
+AT_PAT='\|verified:[0-9]{4}-[0-9]{2}-[0-9]{2}T'
+RECEIPT_STRIP='s/[[:space:]]*\|cron:[^|]*\|verified:[^|[:space:]]*$//'
 # prompt = 指针（AC5c 规则 1：只携带指针，不携带指令内容）
 # 指针目标 = 存在的那份（AC4 不铺虚空武装器）：
 #   - dev-tree / quay-init --loop --manager 的消费项目：`orchestration/manager-loop-tick.md`（活文档）
@@ -86,7 +113,7 @@ if [ ! -f "${REPO_ROOT}/${POINTER_DOC}" ] && [ -f "${REPO_ROOT}/plugin/loop/mana
 fi
 POINTER_PROMPT="Run the manager tick per <repo>/${POINTER_DOC}"
 
-# ── AC5c --validate：哨兵/指针规则已在文档中（机械可查，不依赖会话）─────────────────────────
+# ── AC5c --validate：哨兵/指针/收据规则已在文档中（机械可查，不依赖会话）────────────────────
 if [ "$VALIDATE" = 1 ]; then
   TICK_DOC="${TICK_DOC:-$REPO_ROOT/plugin/loop/manager-loop-tick.md}"
   if [ ! -f "$TICK_DOC" ]; then
@@ -108,8 +135,11 @@ if [ "$VALIDATE" = 1 ]; then
     # 规则 2：哨兵清扫（按哨兵删除同名旧任务再建一个）——文档必须出现哨兵前缀约定
     sentinel_ok=0
     printf '%s' "$doc" | grep -qF "$SENTINEL" && sentinel_ok=1
-    if [ "$pointer_ok" = 1 ] && [ "$sentinel_ok" = 1 ]; then
-      echo "VALIDATE-OK: $TICK_DOC carries the sentinel + pointer-only arm contract"
+    # 规则 3（AC4）：注册表↔真 cron 核实——文档必须出现「record-cron / 写回收据」约定
+    receipt_ok=0
+    printf '%s' "$doc" | grep -q 'record-cron\|--record-cron\|核实收据\|写回收据\|cron.*收据' && receipt_ok=1
+    if [ "$pointer_ok" = 1 ] && [ "$sentinel_ok" = 1 ] && [ "$receipt_ok" = 1 ]; then
+      echo "VALIDATE-OK: $TICK_DOC carries the sentinel + pointer-only + cron-receipt arm contract"
       exit 0
     fi
     # A transient empty/partial read (a concurrent writer's window) is the round-4 flake; retry
@@ -118,7 +148,90 @@ if [ "$VALIDATE" = 1 ]; then
   done
   if [ "$pointer_ok" != 1 ]; then missing="$missing pointer-rule"; fi
   if [ "$sentinel_ok" != 1 ]; then missing="$missing sentinel"; fi
+  if [ "$receipt_ok" != 1 ]; then missing="$missing cron-receipt"; fi
   echo "VALIDATE-FAIL: manager-loop-tick.md missing AC5c rules:$missing" >&2
+  exit 1
+fi
+
+# ── AC4 --record-cron <id>：把 CronCreate 的核实收据写回注册表哨兵行 ─────────────────────────
+# 会话内 agent 在 CronCreate + CronList 确认后调用本段（bash 自己看不到会话内 cron，收据是
+# agent 用 CronList 返回的真实 id 写的）。一个带收据的哨兵行 ≠ 空哨兵行——--verify 据此区分
+# `registry-verified` 与 `registry-only`。
+if [ -n "$RECORD_CRON" ]; then
+  if [ ! -f "$STORE" ]; then
+    echo "ERROR: manager-arm-loop --record-cron: registry $STORE missing (run arm first)" >&2
+    exit 1
+  fi
+  LINE_COUNT="$(grep -c "$SENTINEL" "$STORE" 2>/dev/null || echo 0)"
+  if [ "$LINE_COUNT" != "1" ]; then
+    echo "ERROR: manager-arm-loop --record-cron: expected exactly ONE $SENTINEL line to attach the receipt, got $LINE_COUNT" >&2
+    exit 1
+  fi
+  NOW_ISO="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  # 剥离旧收据尾缀（可重复 --record-cron，同一次 arm 周期内换 id/重写不累积两条）
+  sed -E "${RECEIPT_STRIP}" "$STORE" > "${STORE}.tmp"
+  # 在哨兵行行尾附上新收据（只在哨兵行上附，不动其它行）
+  awk -v sent="$SENTINEL" -v rec=" |cron:${RECORD_CRON}|verified:${NOW_ISO}" \
+    '{ if ($0 ~ sent) print $0 rec; else print $0 }' "${STORE}.tmp" > "${STORE}.tmp2"
+  mv "${STORE}.tmp2" "$STORE"
+  rm -f "${STORE}.tmp"
+  if [ "$JSON" = 1 ]; then
+    printf '{"cronId":"%s","verifiedAt":"%s","store":"%s"}\n' "$RECORD_CRON" "$NOW_ISO" "$STORE"
+  else
+    printf '%-14s %s\n' "cron-id" "$RECORD_CRON"
+    printf '%-14s %s\n' "verified-at" "$NOW_ISO"
+    printf '%-14s %s\n' "store" "$STORE"
+    echo "record-cron-ok: receipt written to the registry sentinel line"
+  fi
+  exit 0
+fi
+
+# ── AC4 --verify：从外部核实注册表 ↔ 真 cron ────────────────────────────────────────────────
+# 判据（机械可答）：①恰好一个哨兵行 ②该行带 `cron:<id>` ③该行带 `verified:<ISO>` ④收据新鲜
+# （now - verified <= STALE_SECONDS）。缺① ⇒ registry-missing / registry-multiple；缺②③ ⇒
+# registry-only（这正是「注册表说武装了、实际没核实」的缺陷形态）；缺④ ⇒ receipt-stale。
+if [ "$VERIFY" = 1 ]; then
+  verify_reason() {
+    if [ ! -f "$STORE" ]; then echo "registry-missing"; return; fi
+    local n; n="$(grep -c "$SENTINEL" "$STORE" 2>/dev/null || echo 0)"
+    if [ "$n" = "0" ]; then echo "registry-missing"; return; fi
+    if [ "$n" -gt 1 ]; then echo "registry-multiple"; return; fi
+    local line; line="$(grep "$SENTINEL" "$STORE" | head -1)"
+    if ! printf '%s' "$line" | grep -qE "$ID_PAT"; then echo "registry-only"; return; fi
+    if ! printf '%s' "$line" | grep -qE "$AT_PAT"; then echo "registry-only"; return; fi
+    local at; at="$(printf '%s' "$line" | sed -n 's/.*|verified:\([^|[:space:]]*\).*/\1/p' | head -1)"
+    local at_epoch now_epoch; now_epoch="$(date -u +%s)"
+    at_epoch="$(date -u -d "$at" +%s 2>/dev/null)"
+    if [ -z "$at_epoch" ]; then echo "receipt-unparseable"; return; fi
+    local age=$(( now_epoch - at_epoch ))
+    if [ "$age" -gt "$STALE_SECONDS" ] || [ "$age" -lt 0 ]; then echo "receipt-stale"; return; fi
+    echo "registry-verified"
+  }
+  REASON="$(verify_reason)"
+  if [ "$REASON" = "registry-verified" ]; then
+    if [ "$JSON" = 1 ]; then
+      printf '{"verified":true,"state":"%s","store":"%s","staleSeconds":%s}\n' "$REASON" "$STORE" "$STALE_SECONDS"
+    else
+      printf '%-14s %s\n' "state" "$REASON"
+      printf '%-14s %s\n' "store" "$STORE"
+      printf '%-14s %s\n' "stale-seconds" "$STALE_SECONDS"
+      echo "registry-matches-cron: the loop-registry sentinel carries a fresh CronCreate receipt"
+    fi
+    exit 0
+  fi
+  if [ "$JSON" = 1 ]; then
+    printf '{"verified":false,"state":"%s","store":"%s"}\n' "$REASON" "$STORE"
+  else
+    printf '%-14s %s\n' "state" "$REASON"
+    printf '%-14s %s\n' "store" "$STORE"
+    case "$REASON" in
+      registry-only)      echo "registry-only: the registry says armed but carries NO CronCreate receipt (the AC4 defect)";;
+      registry-missing)   echo "registry-missing: no $SENTINEL entry in $STORE";;
+      registry-multiple)  echo "registry-multiple: expected exactly ONE $SENTINEL entry";;
+      receipt-stale)      echo "receipt-stale: the cron receipt is older than ${STALE_SECONDS}s";;
+      receipt-unparseable) echo "receipt-unparseable: the verified timestamp is not an ISO instant";;
+    esac
+  fi
   exit 1
 fi
 

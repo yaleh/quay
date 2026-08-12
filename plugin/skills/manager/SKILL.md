@@ -324,6 +324,27 @@ dev-tree 仍优先包根份——manager 角色 `claude`/`quay-manager` 两份�
 
 ---
 
+## 6.5 冷启动可证伪判据（observable consequences，对齐 outer 的 7 条）
+
+**外层的冷启动有 7 条可证伪判据（cold-start/SKILL.md observable consequences），manager 曾经一条
+都没有——「说启动了」没有任何可以被证伪的完成定义。** 本条补上：**manager 冷启动完成后，以下
+七条必须全部为真**；任何一条为假 = 冷启动未完成。报告每条为 `<KEY>: true|false` + 一行证据。
+（判据的正本随包，`quay manager start` 写的 `idle-watch-mount.txt` 与 `manager-arm-loop.sh --verify`
+是本清单的机械执行面。）
+
+| # | Key | 可证伪判据（checkable definition） | 证据 |
+|---|---|---|---|
+| 1 | `HOME-IN-PLACE` | manager 家 `$QUAY_GLOBAL_DIR/manager/` 三件套齐：`identity`（role=manager）+ `loop-registry.txt`（arm 后恰一条 `[manager-tick]`）+ `manager-tick-log.md`（tick 落行） | `ls` 三个文件 + `grep -c '\[manager-tick\]' loop-registry.txt` |
+| 2 | `IDLE-WATCH-MOUNTED` | 常驻观测者已挂：`bash <quay>/plugin/scripts/monitor-mount-check.sh --json` 报 `mounted=true` 且 `targetOk=true`（真机制 = `session-liveness-mount.sh` + Monitor 事件，非 `idle-watch.sh`——那脚本不存在） | `--json` 输出两条 |
+| 3 | `IDLE-WATCH-DELIVERING` | 观测者能产事件：`bash <quay>/plugin/scripts/session-liveness.sh --once` 至少一条 `SESSION-STATUS`（确定性接缝；稳态会话不发射转换事件是正常的，别等 ~90s） | `--once` 的 `SESSION-STATUS` 行逐字 |
+| 4 | `CRON-CREATED` | `CronList` 恰一 `[manager-tick]`（agent 在会话内确认；bash 看不到） | `CronList` 输出 |
+| 5 | `REGISTRY-MATCHES` | 注册表 ↔ 真 cron 可核实：`bash <quay>/plugin/scripts/manager-arm-loop.sh --verify --home <home>` 报 `registry-verified`（恰一哨兵 + 新鲜 CronCreate 收据；`registry-only` = 注册表说武装了但没核实 = 缺陷） | `--verify` 输出 |
+| 6 | `FIRST-TICK-LANDED` | 首轮 tick 落行：`bash <quay>/plugin/scripts/manager-tick-log-check.sh --log <home>/manager-tick-log.md` PASS | check 输出 |
+| 7 | `NOT-STARTED-BY-PROJECT` | manager 是跨项目第三层，**不属于任何项目的 `outer`+`inner` 拓扑**——`topology-check.sh --session <proj>` 只报两窗口，`quay manager start` 拒收项目参数（start/adopt 分离，C5） | topology `--json` + start 拒绝输出 |
+
+判据能机械回答的四问：**idle-watch 发事件?（#2/#3）cron 存在?（#4/#5）首轮 tick 留痕?（#6）
+家目录三件套齐?（#1）**——没有一条是「agent 说完成了」。
+
 ## 7. 方法论来源（AC6）——SPEC-*.md 索引，不批量结晶
 
 以下 17 份 SPEC（均在 `orchestration/` 目录下）是方法论来源，**逐个按需结晶，不批量**。本 SKILL 只列索引，不复制其内容：

@@ -296,13 +296,22 @@ OS cron、Desktop 定时任务全部禁用（人 2026-08-06 三条裁定）。�
 
 1. `CronList` —— 列出全部 cron；
 2. 删除所有含 `[manager-tick]` 前缀者（sweep by sentinel, never by remembered id）；
-3. `CronCreate` 恰好一个，prompt 为**指针**（见 7.2）。
+3. `CronCreate` 恰好一个，prompt 为**指针**（见 7.2）；
+4. **写回收据（AC4）**：`CronList` 确认新 cron 在位后，把它的真实 id 写回注册表——
+   `bash <repo>/plugin/scripts/manager-arm-loop.sh --record-cron <id> --home <home>`。
+   一个空哨兵行（无收据）只是「注册表说武装了」，**不是**「真有 cron」——会话内 cron 外部
+   看不到，收据是唯一让外部能区分「武装」与「武装且已核实」的机件。外部核实命令：
+   `bash <repo>/plugin/scripts/manager-arm-loop.sh --verify --home <home>`
+   （`registry-verified` = 有收据；`registry-only` = 只有哨兵、无收据 = 缺陷形态）。
 
 **判据**：
 - ① 在**不知道任何 cron ID** 的前提下连续执行两次武装步骤 ⇒ `CronList` 必须恰好一个 manager loop；
-- ② **负控制**：先人为建两个重复的 manager loop，再执行同一武装步骤 ⇒ 必须收敛回恰好一个。
+- ② **负控制**：先人为建两个重复的 manager loop，再执行同一武装步骤 ⇒ 必须收敛回恰好一个；
+- ③（AC4）`--verify` 必须先 `registry-only`（刚 arm、未 record）、后 `registry-verified`
+  （record 之后）——「武装」与「武装且真 cron 已核实」在记录上可区分。
 
-机械落地：`plugin/scripts/manager-arm-loop.sh`（文件接缝上做哨兵清扫，`--validate` 查本条规则）。
+机械落地：`plugin/scripts/manager-arm-loop.sh`（文件接缝上做哨兵清扫 + 收据核实，
+`--validate` 查本 7.1 的三条规则）。
 
 ### 7.2 prompt 是指针，不是指令内容（AC5c 规则 1）
 
