@@ -60,6 +60,8 @@ import {
   readStateFailures,
   SUITE_BLOCKING_WEIGHT,
   RED_WINDOW_MIN_DEFAULT,
+  isSuiteFixTask,
+  exemptFromSuiteBlocking,
   buildCommitTraceIndex,
   commitSubjectTracesTask,
   commitTraceLanded,
@@ -1893,6 +1895,39 @@ test("computeSuiteBlocking: round-record failures attribute cross-round + bare-b
   assert.ok(r3.ids.has("gap-script"), "an old round's recorded failure attributes across the red window (round-record reverse-lookup)");
 });
 
+test("exemptFromSuiteBlocking / isSuiteFixTask: suite-fix marker + failure-hit AND-gate (AC2/AC3 reverse control)", () => {
+  const suiteFixTask = {
+    id: "gap-install-family-tests",
+    frontmatterRaw: "id: gap-install-family-tests\ntitle: install family flake rotate under full-suite\nstatus: ready",
+    body: "## Proposal\nfix the install-family suite flake — this task IS the suite fix.\n## Touches\n- plugin/test/install-family.test.mjs",
+  };
+  const serialInstall = {
+    id: "gap-serial-phase-install-test-residue",
+    frontmatterRaw: "id: gap-serial-phase-install-test-residue\ntitle: serial phase install test residue dependency\nstatus: ready",
+    body: "## Proposal\nserial phase install residue — fix the ordering dependency.\n## Touches\n- plugin/test/serial-install.test.mjs",
+  };
+  // unrelated: no marker anywhere (id/title/Proposal) — a "fixture" title must NOT read as fix-intent,
+  // and a Proposal that merely MENTIONS the suite (no fix-intent co-occurrence) must NOT exempt either
+  // (the AC3 over-exemption case the end-to-end demo caught).
+  const unrelated = {
+    id: "gap-watchdog",
+    frontmatterRaw: "id: gap-watchdog\ntitle: fixture gap-watchdog\nstatus: ready",
+    body: "## Proposal\nwatch the dispatch pool and report health — nothing to do with the suite.\n## Touches\n- plugin/scripts/ready-pool-check.ts",
+  };
+
+  // AC2: the suite-fix family self-identifies (id + title carry install/suite).
+  assert.equal(isSuiteFixTask(suiteFixTask, "gap-install-family-tests"), true, "gap-install-family id/title marker ⇒ suite-fix task");
+  assert.equal(isSuiteFixTask(serialInstall, "gap-serial-phase-install-test-residue"), true, "gap-serial-phase-install id marker ⇒ suite-fix task");
+  // AC3 reverse control: the unrelated task (no marker — "fixture" is NOT fix-intent) is NOT suite-fix.
+  assert.equal(isSuiteFixTask(unrelated, "gap-watchdog"), false, "unrelated task carries no marker (fixture ≠ fix)");
+
+  // The exemption is a TWO-condition AND: marker AND failure-hit. Both must hold.
+  assert.equal(exemptFromSuiteBlocking(suiteFixTask, "gap-install-family-tests", true), true, "suite-fix task + real failure-hit ⇒ exempt (dispatchable)");
+  assert.equal(exemptFromSuiteBlocking(serialInstall, "gap-serial-phase-install-test-residue", true), true, "serial-phase-install + failure-hit ⇒ exempt");
+  assert.equal(exemptFromSuiteBlocking(unrelated, "gap-watchdog", true), false, "unrelated task + failure-hit ⇒ NOT exempt (stays blocked)");
+  assert.equal(exemptFromSuiteBlocking(suiteFixTask, "gap-install-family-tests", false), false, "marker alone (no failure-hit) never exempts — not the one fixing THIS red");
+});
+
 test("computeSuiteBlocking: controlled-experiment round (laneCount ≠ default) excluded from consecutive-red (AC2/AC3 — gap-suite-blocking-experiment-rounds-count-toward-consecutive-red)", () => {
   // r268 was a one-off CONTROLLED EXPERIMENT (lane-8 comparison, --lane-count 8 vs the nproc-derived
   // default 4): its red is an experiment finding, not a regression — it must not push the consecutive-
@@ -2075,6 +2110,44 @@ test("analyzeTasks: suite-blocking jumps ready_relevance; negative control uncha
   const green = analyzeTasks(opts);
   assert.equal(green.suite_blocking.window_active, false);
   assert.deepEqual(green.ready_relevance.map((e) => e.id), ["gap-plain-ready", "gap-watchdog"], "green round clears the window ⇒ no re-rank");
+});
+
+test("analyzeTasks: suite red ⇒ suite-fix family dispatchable, unrelated task still blocked (AC2/AC3 — gap-suite-blocking-self-lock-blocks-fix-family)", (t) => {
+  const root = makeWorkspace("suitelock");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // The suite-fix family — ids carry install/suite markers (the self-lock victims from the task's
+  // empirical record: gap-install-family + gap-serial-phase-install were among the 22 blocked).
+  writeTask(root, "gap-install-family-tests-rotate-flakes-under-full-suite", {
+    status: "ready", labels: ["gap"],
+    body: fourArtifactBody({ touches: ["- plugin/test/install-family.test.mjs (fix)"] }),
+  });
+  writeTask(root, "gap-serial-phase-install-test-residue-dependency", {
+    status: "ready", labels: ["gap"],
+    body: fourArtifactBody({ touches: ["- plugin/test/serial-install.test.mjs (fix)"] }),
+  });
+  // Unrelated task touching a failing suite file — no suite-fix marker — must stay blocked (AC3).
+  writeTask(root, "gap-watchdog-unrelated", {
+    status: "ready", labels: ["gap"],
+    body: fourArtifactBody({ touches: ["- plugin/test/install-family.test.mjs"] }),
+  });
+
+  const opts = { tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 };
+
+  // 3 consecutive red rounds whose failure hits the suite infra file the fix-family touches.
+  writeRounds(root, Array.from({ length: 3 }, (_, i) => ({ round: 220 + i, state: "red", reason: "failed", fail: 1, failures: [{ file: "plugin/test/install-family.test.mjs", line: "x" }] })));
+  writeState(root, [{ file: "plugin/test/install-family.test.mjs", line: "x" }]);
+
+  const r = analyzeTasks(opts);
+  assert.equal(r.suite_blocking.window_active, true);
+  assert.equal(r.suite_blocking.consecutive_red, 3);
+  assert.ok(!r.suite_blocking.tasks.includes("gap-install-family-tests-rotate-flakes-under-full-suite"),
+    "AC2: gap-install-family (suite-fix) stays dispatchable under the red window — self-lock broken");
+  assert.ok(!r.suite_blocking.tasks.includes("gap-serial-phase-install-test-residue-dependency"),
+    "AC2: gap-serial-phase-install (suite-fix) stays dispatchable");
+  assert.ok(r.suite_blocking.tasks.includes("gap-watchdog-unrelated"),
+    "AC3 reverse control: unrelated task touching the failing suite file is still blocked");
+  // The exemption must NOT make the window vanish — the failing file is still reported.
+  assert.deepEqual(r.suite_blocking.failure_files, ["plugin/test/install-family.test.mjs"]);
 });
 
 test("analyzeTasks: dir-glob Touches task is NOT suite-blocking in a red window; concrete-file task is (AC4 negative control — gap-suite-blocking-directory-glob-overbroad)", (t) => {
