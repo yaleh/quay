@@ -246,10 +246,11 @@ test("AC6/default — the real-repo gate exits 0 and the current violation set m
   assert.equal(out.ratchet.currentCount, current, `ratchet currentCount must equal the violation+stale total`);
   assert.equal(out.ratchet.growth, false, `no growth on the current docs`);
   assert.equal(out.ratchet.currentCount, out.ratchet.baselineCount, `current violation set must match the shrink-only baseline`);
-  // The threshold violations include the two 2026-08-03 dispatch-freeze shapes (needs-human 积压 ≥3)
-  // plus the 注册表 ≥2 stop-condition surfaced by the canonical plugin/loop/ scan surface.
+  // The two 2026-08-03 dispatch-freeze shapes (needs-human 积压 ≥3) remain on the current surface.
+  // AC38 切分后 注册表 ≥2 stop-condition 退出 canonical plugin/loop/ 扫描面 → 只剩 2 条 `≥` 违例
+  // （re-baselined 5969b096 4→3，AC38 doc-split 又收缩 3→2）。
   const thresholdHits = out.violations.filter((v) => v.hit.includes("≥"));
-  assert.equal(thresholdHits.length, 3, `expected 3 unscoped count-threshold violations, got ${thresholdHits.length}`);
+  assert.equal(thresholdHits.length, 2, `expected 2 unscoped count-threshold violations (current surface), got ${thresholdHits.length}`);
 });
 
 // ── the ratchet data file exists and is well-formed (the AC5 deliverable) ───────────────────────────

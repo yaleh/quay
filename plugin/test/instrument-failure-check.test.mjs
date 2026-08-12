@@ -192,11 +192,20 @@ test("--gate: a NEW failure-form instance beyond the baseline red-lights (shrink
   copySurfaceTo(dir);
   // Baseline gate on the copied surface must PASS (same counts as the real repo).
   assert.equal(runChecker(["--gate", "--root", dir]).status, 0);
-  // Inject a NEW family-1 self-match command into a scanned doc → count 3 > baseline 2 → RED.
+  // INJECT (shrink-only): push family-1 over its baseline → MUST go RED.
+  // Adaptive inject count: baseline - current + 1. From any green surface (current ≤ baseline,
+  // guaranteed by the baseline check above) this always exceeds FAMILY_BASELINE[1], so the checker
+  // cannot stay green regardless of doc churn. (Same fix as checker-mutation-cases/instrument-failure-check.sh
+  // 431f591d — pre-2026-08-12 this hardcoded ONE instance, which broke when the AC38 doc-split shrank
+  // family-1 from 2 to 1: injecting 1 gave 1→2 ≤ baseline=2, a stale-mutation-case false-green.)
+  const gateJson = JSON.parse(runChecker(["--gate", "--root", dir, "--json"]).stdout);
+  const inject = gateJson.baselines[1] - gateJson.counts[1] + 1;
   const target = path.join(dir, "orchestration/orchestrator-loop-tick.md");
-  fs.appendFileSync(target, "\n> pgrep -f 'quay.ts serve' 又一条自匹配\n");
+  for (let i = 0; i < inject; i++) {
+    fs.appendFileSync(target, "\n> pgrep -f 'quay.ts serve' 又一条自匹配\n");
+  }
   const res = runChecker(["--gate", "--root", dir]);
-  assert.equal(res.status, 1, `expected RED after injecting a new family-1 instance: ${res.stdout}`);
+  assert.equal(res.status, 1, `expected RED after injecting ${inject} family-1 instance(s) beyond baseline: ${res.stdout}`);
   assert.match(res.stdout, /FAMILY-1.*ABOVE-BASELINE|shrink-only/);
 });
 

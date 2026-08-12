@@ -238,9 +238,11 @@ from-bare-metal step that produces a session with live claude windows, after whi
 factory/check applies idempotently. **Cross-annotation
 (`gap-outer-self-checks-and-creates-inner-session`):** this step is the
 build-by-definition half; the OUTER's own cold-start path
-(`orchestration/orchestrator-loop-tick.md` step 3) independently SELF-CHECKS inner in three
+(`orchestration/orchestrator-loop-tick.md` step 3) independently SELF-CHECKS inner in four
 states — healthy (window+process+user message) ⇒ untouched, empty-shell (window+process, no user
-message) ⇒ driven not rebuilt, missing (no window or process) ⇒ calls this same factory.
+message) ⇒ driven not rebuilt, missing (no window or process) ⇒ calls this same factory; a
+discovery-sourced transcript (`transcriptSource==discovery`) is **degraded** (fail-closed — stderr
+alarm, never silently healthy/empty-shell).
 
 ```bash
 bash <root>/plugin/scripts/quay-topology.sh --session <session>        # build: outer/inner per definition (idempotent; manager is cross-project, not built here)

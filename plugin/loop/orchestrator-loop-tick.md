@@ -86,7 +86,7 @@ node --experimental-strip-types plugin/scripts/task-status-drift-check.ts
 **3. 自检内层会话**——不是「找到」，是「确保」
 
 内层不再是「找到就行」——冷启动第 3 步改为**自检**：inner 窗口在不在、claude 进程活不活、
-transcript 有没有真实 user 消息（被驱动过）。三态判定与处理（判据用可信的：窗口按名寻址、
+transcript 有没有真实 user 消息（被驱动过）。四态判定与处理（判据用可信的：窗口按名寻址、
 进程看 `/proc` cmdline、user 消息看 transcript——不用 pane 哈希假阳、不用 heartbeat 冻结假警）：
 
 | 状态 | 判定 | 处理 |
@@ -94,9 +94,10 @@ transcript 有没有真实 user 消息（被驱动过）。三态判定与处理
 | **健康** | inner 窗口存在 **且** claude 进程存在 **且** transcript 有真实 user 消息 | **什么都不做**（权限边界——已存在的 inner 可能是更上层建的，外层无权判断/重建/改参数），直接进入正常驱动流程 |
 | **空壳** | inner 窗口存在 **且** claude 进程存在 **但** transcript 无真实 user 消息（被拉起但未驱动） | **驱动而非重建**——不丢可能已有的上下文，接手预建的会话 |
 | **缺失** | inner 窗口不存在 **或** 无 claude 进程 | 调 `quay-topology.sh` 创建**两窗口**拓扑（outer+inner）+ 起 inner claude（checked-in launch 命令），然后驱动 inner |
+| **降级（degraded）** | transcript 由**发现路径**启发式获得（`transcriptSource==discovery`），非显式结构解析——无法确认是当前 inner 会话 | **fail-closed**：不得按 healthy 放行、按 degraded 处理——stderr 报警（discovery/degraded/WARNING），驱动前先核对所选 transcript 确是当前 inner 会话（如 inner claude 进程启动时刻之后的），确认不了就驱动——驱动不重建，代价有界 |
 
 ```bash
-bash plugin/scripts/inner-session-check.sh --json   # 三态自检：{state: healthy|empty-shell|missing, window, process, transcript, transcriptFresh}
+bash plugin/scripts/inner-session-check.sh --json   # 四态自检：{state: healthy|empty-shell|missing|degraded, window, process, transcript, transcriptSource, transcriptFresh}
 ```
 
 按 `state` 分派：
@@ -117,9 +118,12 @@ bash plugin/scripts/inner-session-check.sh --json   # 三态自检：{state: hea
 
 **transcript 路径解析**（inner-session-check.sh）：`--transcript` 显式 > `SESSION_TRANSCRIPTS` 配置
 > `orchestration/session-liveness.env` > 发现（`$HOME/.claude/projects/<root-slug>/` 里最晚修改、
-且不是外层自己的 jsonl，标 `source=discovery`）。找不到 transcript = fresh = 空壳判据（驱动不重建）。
-**发现路径是启发式**：`healthy` 判定若来自 `source=discovery`，先确认所选 transcript 确实是**当前**
-inner 会话的（例如 inner claude 进程启动时刻之后的），否则按空壳驱动——驱动不重建，代价有界。
+且不是外层自己的 jsonl）。`transcriptSource` 记录来源：显式/配置 = 结构来源，发现路径 = `discovery`。
+找不到 transcript = fresh = 空壳判据（驱动不重建）。
+**发现路径是启发式（fail-closed）**：`transcriptSource==discovery` 时自检报 **`degraded`**——**不得按 healthy
+放行、按 degraded 处理**（stderr 报警 discovery/degraded/WARNING，绝不自作聪明静默放行）。先确认所选
+transcript 确实是**当前** inner 会话的（例如 inner claude 进程启动时刻之后的），确认不了就驱动——驱动不重建，
+代价有界。
 
 **4. 重建 cron —— 唯一的循环驱动，这一步最容易漏**
 
@@ -172,7 +176,8 @@ cron，对检查器等于不存在**（这正是「照文档冷启动必然报 S
 （被铺下的 skill + loop 文档引用的 `plugin/scripts/*`），所以「套件失败且与该铺设集无关」不得阻塞冷启动；
 「铺设集内部失败」必须阻塞。该 set 由 grep 铺下的文档机械导出（与 quay-init.sh 的 `derive_loop_scripts()`
 同源，不手改）：grep 正则（`plugin/scripts/` 前缀的 token，不是字面路径）扫
-`<root>/plugin/skills/*/SKILL.md` 与 `<root>/plugin/loop/*.md` 导出。
+`<root>/plugin/skills/*/SKILL.md` 与 loop tick 文档（铺到目标项目时是
+`orchestration/orchestrator-loop-tick.md` 与 `docs/analysis/fast-mode-loop-tick.md`）导出。
 跑门：
 
 ```bash
@@ -846,7 +851,10 @@ red 时：
 5. **每个 tick 必报**：本轮是否转发重锚、转发时 inner 的空闲判据。
 
 **重锚有效性 = 语义收敛（自述措辞审计）**：重锚的有效性以**语义收敛**度量（`reanchor_effectiveness_is_convergence = 1`），不是「重锚发生了」——
-锚点通道存在 ≠ 词汇收敛。每次重锚后对 inner 最近自述（commit subject / fan-in 注记 / 收尾汇报）跑
+锚点通道存在 ≠ 词汇收敛。**doc-side 与 audit 双侧成对、缺一不可**：出厂措辞由词汇规范任务
+（`gap-split-batch-vocabulary-dispatch-rolling-vs-verification-round`）落到 doc-side，本步审计负责机械判据——
+**单独做任一条都解决不了**：只改文档不跑审计，内部化的 batch 措辞不会收敛；只跑审计不订正措辞，每轮都报漂移。
+每次重锚后对 inner 最近自述（commit subject / fan-in 注记 / 收尾汇报）跑
 `node --experimental-strip-types plugin/scripts/self-report-vocab-audit.ts --git-log 15
 --exclude-prefix outer: --window 3 --json`，读 stdout 的 `inner_self_report_vocab` 字段（连续 3 轮无
 batch 式自述 = 收敛）与 `converged`。「Batch of N fully merged」式门控汇报 = 漂移（被审计标记）；
