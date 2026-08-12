@@ -171,7 +171,7 @@ export async function handleTaskEdit({ positional, flags, wantsJson }: CliCtx) {
     if (flags.acceptance !== undefined) {
       const cmd = Array.isArray(flags.acceptance) ? flags.acceptance.join(" && ") : flags.acceptance;
       const current = await client.taskGet(id);
-      patch.extra = { ...(current?.extra ?? {}), ...(patch.extra ?? {}), acceptance: cmd };
+      patch.extra = { ...(current?.extra ?? {}), ...((patch.extra ?? {}) as Record<string, unknown>), acceptance: cmd };
     }
     const t = await client.taskWrite({ id, ...patch });
     if (wantsJson) printJson(t);

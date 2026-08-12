@@ -22,6 +22,16 @@ import { resolveWorkspaceRootOrThrow } from "../gate/config/loader.ts";
 import { connectProvider } from "../provider-client.ts";
 import { resolveProviderEnv } from "../provider-env.ts";
 
+// CliFlags — the dynamic flag bag produced by parseFlags/parseVerbless.
+// Flag values are strings (--key value), booleans (a bare --key), or arrays of
+// strings (repeated flags, e.g. --label A --label B). The object is keyed
+// arbitrarily by whichever flags a command surface declares, so it is typed as
+// a loose `any`-valued record — restoring the dynamic-shape behavior of the
+// pre-migration bin/quay.ts dispatch (gap-cli-import-command-migration-into-src
+// dropped the type; the handlers read verb-specific fields like gate/file/json/
+// provider/root directly off it).
+export type CliFlags = Record<string, any>;
+
 export function fsSyncExists(p) {
   try { fsSync.accessSync(p); return true; } catch { return false; }
 }
@@ -81,7 +91,7 @@ export async function withGuardedErrors(fn) {
 // human-readable output, which is exactly the bug this closes.
 // Returns { json: boolean } | null (null = invalid --format value, caller
 // should print an error and exit 1).
-export function resolveJsonFlag(flags) {
+export function resolveJsonFlag(flags: CliFlags): { json: boolean } | null {
   if (flags.format === undefined) {
     return { json: flags.json === true };
   }
@@ -97,7 +107,7 @@ export function resolveJsonFlag(flags) {
 // means "no limit" (existing behavior, preserved); an explicitly-invalid
 // value (0, negative, non-numeric) is a hard usage error, not a silent
 // fall-back to "show everything" (UQ-048).
-export function resolvePageSize(flags) {
+export function resolvePageSize(flags: CliFlags): { pageSize: number | null; error: string | null } {
   if (flags["page-size"] === undefined) {
     return { pageSize: null, error: null };
   }
@@ -112,7 +122,7 @@ export function resolvePageSize(flags) {
   return { pageSize: n, error: null };
 }
 
-export function parseFlags(argv) {
+export function parseFlags(argv: string[]): { flags: CliFlags; positional: string[] } {
   const flags = {};
   const positional = [];
   for (let i = 0; i < argv.length; i++) {
@@ -155,7 +165,7 @@ export function parseFlags(argv) {
 // `[sub, ...rest]` — exactly as the `run` command already does — so the id and
 // flags are recovered flag-aware, in either order. Returns { flags, id }; `id`
 // is undefined when no positional was given (caller must emit a usage error).
-export function parseVerbless(sub, rest) {
+export function parseVerbless(sub: string | undefined, rest: string[]): { flags: CliFlags; id: string | undefined } {
   const { flags, positional } = parseFlags([sub, ...rest].filter((a) => a !== undefined));
   return { flags, id: positional[0] };
 }
@@ -250,7 +260,7 @@ export function pinAcceptanceEnv({ workspaceRoot, cwd, timeout, envFile }) {
   // (unset by default); a pre-set env var wins — never clobber.
 }
 
-export async function withProvider(fn, { providerId, root } = {}) {
+export async function withProvider(fn, { providerId, root }: { providerId?: string; root?: string } = {}) {
   // gap-task-list-root-does-not-scope-config-lookup: `--root <path>` scopes
   // config discovery to <path> — the start of the .quay/config.yml search is
   // moved from process.cwd() to <path> (walk-up), and a --root with no config
