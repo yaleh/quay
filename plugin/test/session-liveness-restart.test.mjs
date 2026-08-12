@@ -14,13 +14,21 @@
 //
 // FIX (implemented in session-liveness.sh, exercised here):
 //   * Each poll the transcript is resolved FRESH from the target window's CURRENT process:
-//     pane_pid → the claude process → CLAUDE_CODE_SESSION_ID in /proc/<pid>/environ (plus a
-//     CLAUDE_PROJECT_DIR cross-check) → $HOME/.claude/projects/<slug>/<id>.jsonl.
-//   * Only a CONFIDENT dynamic resolution (env session id + project match) overrides the configured
-//     SESSION_TRANSCRIPTS; low/none (no process, no env id, project mismatch, multiple candidate
-//     transcripts, heuristic) falls back to the config — preserving the "don't infer" contract for
-//     the known-unreliable /clear and --resume cases (source comments at :166-167 document why
+//     pane_pid → the claude process → (PRIMARY) $HOME/.claude/sessions/<pid>.json (CC-maintained
+//     pid→sessionId, authoritative and correct right after a restart) OR (SECONDARY)
+//     CLAUDE_CODE_SESSION_ID in /proc/<pid>/environ (plus a CLAUDE_PROJECT_DIR cross-check)
+//     → $HOME/.claude/projects/<slug>/<id>.jsonl.
+//   * Only a CONFIDENT dynamic resolution (sessions/<pid>.json sessionId, or env session id +
+//     project match) overrides the configured SESSION_TRANSCRIPTS; low/none (no process, no
+//     sessions file / malformed, no env id, project mismatch, multiple candidate transcripts,
+//     heuristic) falls back to the config — preserving the "don't infer" contract for the
+//     known-unreliable /clear and --resume cases (source comments at :166-167 document why
 //     pid→transcript can be unreliable there).
+//   * TEST-CONDITION FIX (2026-08-12): the sessions/<pid>.json path exists because in PRODUCTION the
+//     claude process does NOT export CLAUDE_CODE_SESSION_ID / CLAUDE_PROJECT_DIR into /proc/<pid>/environ
+//     — the env path returns none and the observer falls back to the stale pre-restart transcript
+//     (perpetual false SESSION-OVERDUE). The tests MUST assert resolution works with NO CLAUDE_* env
+//     vars (R5/R6 use makeNoEnvProbe + assertNoClaudeEnvVars), not just with them present.
 //
 // SPLIT CONCURRENCY SAFETY: this file runs as its OWN node process at cc=3. It owns the /tmp prefix
 // "session-liveness-restart-" — the hermetic probe constructors create dirs under it (via
@@ -85,6 +93,31 @@ function makeEnvProbe(session, claudeProjectDir, sid) {
   };
 }
 
+// makeNoEnvProbe(session) — a private tmux server + a pane whose shell owns a claude-cmdline child
+// whose environ carries NO CLAUDE_CODE_SESSION_ID / CLAUDE_PROJECT_DIR AT ALL (the PRODUCTION
+// condition — 实测 2026-08-12: claude does not export these into /proc/<pid>/environ). `unset` runs
+// in the pane shell before the backgrounded exec, so the sleep's environ is stripped of both vars
+// regardless of what the runner's own env exports. Used by the sessions/<pid>.json resolution tests.
+function makeNoEnvProbe(session) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "session-liveness-restart-"));
+  __registerProbeTmp(tmp);
+  const sockDir = path.join(tmp, "sock");
+  fs.mkdirSync(sockDir, { recursive: true });
+  const env = isolateTmuxEnv(sockDir);
+  const newS = tmux(["new-session", "-d", "-x", "200", "-y", "50", "-s", session, "bash"], env);
+  assert.equal(newS.status, 0, `tmux new-session failed: ${newS.stderr}`);
+  tmux(["send-keys", "-t", session, "unset CLAUDE_CODE_SESSION_ID CLAUDE_PROJECT_DIR; exec -a claude-probe sleep 10000 &"], env);
+  tmux(["send-keys", "-t", session, "Enter"], env);
+  return {
+    tmp, env, session,
+    cleanup() {
+      __unregisterProbeTmp(tmp);
+      tmux(["kill-session", "-t", session], env);
+      try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* best-effort */ }
+    },
+  };
+}
+
 // claudeChildPid(env, session) — the pane's direct claude child pid (the claude-probe stand-in).
 function claudeChildPid(env, session) {
   const panePid = tmux(["list-panes", "-t", session, "-F", "#{pane_pid}"], env).stdout.trim();
@@ -93,6 +126,28 @@ function claudeChildPid(env, session) {
     if (isClaudePid(k)) return k;
   }
   return "";
+}
+
+// writeSessionFile(home, pid, { sessionId, cwd }) — write a CC-maintained ~/.claude/sessions/<pid>.json
+// mapping (the authoritative pid→sessionId source the fix reads; same shape as the real files on disk).
+function writeSessionFile(home, pid, { sessionId, cwd }) {
+  const dir = path.join(home, ".claude", "sessions");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `${pid}.json`),
+    `${JSON.stringify({ pid: Number(pid), sessionId, cwd })}\n`);
+}
+
+// assertNoClaudeEnvVars(pid) — the TEST-CONDITION FIX: assert the fixture actually reproduces the
+// production condition (NO CLAUDE_CODE_SESSION_ID / CLAUDE_PROJECT_DIR in /proc/<pid>/environ). A
+// fix that only works when those env vars are exported must FAIL this assertion, not pass.
+function assertNoClaudeEnvVars(pid) {
+  const environ = fs.readFileSync(`/proc/${pid}/environ`, "utf8");
+  const lines = environ.split("\0");
+  const claudeVars = lines.filter((kv) => kv.startsWith("CLAUDE_"));
+  assert.ok(!lines.some((kv) => kv.startsWith("CLAUDE_CODE_SESSION_ID=")),
+    `probe pid ${pid} must NOT carry CLAUDE_CODE_SESSION_ID (production condition). Found in: ${claudeVars.join(" | ")}`);
+  assert.ok(!lines.some((kv) => kv.startsWith("CLAUDE_PROJECT_DIR=")),
+    `probe pid ${pid} must NOT carry CLAUDE_PROJECT_DIR (production condition). Found in: ${claudeVars.join(" | ")}`);
 }
 
 test("R1 — a session restart in the same window makes the observer resolve the NEW transcript on the next poll (self-heal, no re-mount)", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
@@ -149,7 +204,7 @@ test("R1 — a session restart in the same window makes the observer resolve the
 
 test("R2 — ambiguous dynamic resolution (no env session id + multiple fresh candidates) falls back to the configured SESSION_TRANSCRIPTS (config contract preserved)", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
   const cfgSid = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
-  const p = makeEnvProbe("restart-ambig", null, null); // no session env id (deterministic)
+  const p = makeNoEnvProbe("restart-ambig"); // NO CLAUDE_* env vars AND no sessions/<pid>.json (deterministic)
   const home = path.join(p.tmp, "home");
   const cfgTranscript = transcriptFor(home, p.tmp, cfgSid);
   // two OTHER fresh transcripts in the same project dir → the newest-.jsonl heuristic is AMBIGUOUS
@@ -251,5 +306,98 @@ test("R4 — seam: a claude process for a DIFFERENT project (CLAUDE_PROJECT_DIR 
     p.cleanup();
     try { fs.rmSync(root, { recursive: true, force: true }); } catch { /* best-effort */ }
     try { fs.rmSync(otherRoot, { recursive: true, force: true }); } catch { /* best-effort */ }
+  }
+});
+
+test("R5 — seam: a claude process with NO CLAUDE_* env vars but a ~/.claude/sessions/<pid>.json mapping resolves confident to its transcript (the production self-heal path)", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "session-liveness-restart-"));
+  const home = path.join(root, "home");
+  const sid = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+  const otherSid = "11111111-aaaa-4bbb-8ccc-000000000001";
+  const p = makeNoEnvProbe("restart-sessions-seam");
+  try {
+    assert.ok(await waitForAlive(p.env, p.session), "probe must be alive first");
+    const pid = claudeChildPid(p.env, p.session);
+    assert.ok(pid, "the probe must have a claude child");
+    // THE TEST-CONDITION FIX: the fixture must reproduce the production condition — the claude
+    // process's environ carries NO CLAUDE_CODE_SESSION_ID / CLAUDE_PROJECT_DIR. A fix that only
+    // works with those env vars exported FAILS here.
+    assertNoClaudeEnvVars(pid);
+
+    // the CC-maintained authoritative mapping: pid → sessionId (correct right after a restart)
+    writeSessionFile(home, pid, { sessionId: sid, cwd: root });
+    fs.mkdirSync(path.dirname(transcriptFor(home, root, sid)), { recursive: true });
+    fs.writeFileSync(transcriptFor(home, root, sid), "{}\n"); // the process's OWN (new) transcript
+
+    const r = spawnSync("bash", [SCRIPT, "--resolve-transcript", "inner", root, pid], {
+      encoding: "utf8",
+      env: {
+        ...p.env, HOME: home, SESSION_ROOT: root,
+        SESSION_TARGETS: `inner ${root} ${p.session}`,
+        SESSION_TRANSCRIPTS: `inner ${otherSid}`, // config points at a DIFFERENT (old) session id
+      },
+    });
+    assert.equal(r.status, 0, `--resolve-transcript must exit 0:\n${r.stderr}`);
+    assert.equal(r.stdout.trim(), transcriptFor(home, root, sid),
+      `the sessions/<pid>.json path must resolve the NEW session's transcript WITHOUT env vars (restart self-heal). Got: ${r.stdout.trim()}`);
+
+    const d = spawnSync("bash", [SCRIPT, "--dynamic-transcript", "inner", root, pid], {
+      encoding: "utf8",
+      env: { ...p.env, HOME: home, SESSION_ROOT: root, SESSION_TARGETS: `inner ${root} ${p.session}` },
+    });
+    assert.equal(d.status, 0, `--dynamic-transcript must exit 0:\n${d.stderr}`);
+    assert.match(d.stdout, /^confident\n/,
+      `sessions/<pid>.json must be confident for a no-env-var claude process (production condition):\n${d.stdout}`);
+  } finally {
+    p.cleanup();
+    try { fs.rmSync(root, { recursive: true, force: true }); } catch { /* best-effort */ }
+  }
+});
+
+test("R6 — a no-env-var claude process (sessions/<pid>.json maps it to a NEW session) makes the observer resolve the NEW transcript on every poll (production restart self-heal, no re-mount)", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "session-liveness-restart-"));
+  const home = path.join(root, "home");
+  const newSid = "11111111-aaaa-4bbb-8ccc-000000000001";
+  const oldSid = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+  const p = makeNoEnvProbe("restart-sessions-full");
+  try {
+    assert.ok(await waitForAlive(p.env, p.session), "probe must be alive first");
+    const pid = claudeChildPid(p.env, p.session);
+    assert.ok(pid, "the probe must have a claude child");
+    assertNoClaudeEnvVars(pid); // production condition: no CLAUDE_* env vars
+
+    // the CC-maintained mapping (what exists right after a restart): pid → NEW session id
+    writeSessionFile(home, pid, { sessionId: newSid, cwd: root });
+    const newTranscript = transcriptFor(home, root, newSid);
+    fs.mkdirSync(path.dirname(newTranscript), { recursive: true });
+    fs.writeFileSync(newTranscript, "{}\n"); // the NEW session's transcript is FRESH
+
+    // config points at a DIFFERENT (old, pre-restart) session id whose transcript is FROZEN — if the
+    // observer were still bound to config (the pre-fix defect), OVERDUE would fire immediately.
+    const oldTranscript = transcriptFor(home, root, oldSid);
+    fs.writeFileSync(oldTranscript, "{}\n");
+    spawnSync("touch", ["-d", "3 hours ago", oldTranscript], { encoding: "utf8" });
+
+    const mon = spawnMonitor({ ...p.env, HOME: home, SESSION_ROOT: root },
+      `inner ${root} ${p.session}`,
+      { transcripts: `inner ${oldSid}`, overdueMin: 1, interval: 1 });
+    try {
+      // baseline: the observer must resolve the NEW fresh transcript via sessions/<pid>.json (no OVERDUE)
+      const before = countRounds(mon);
+      assert.ok(await waitForRounds(mon, before + 2, 20000), `baseline rounds must pass:\n${mon.output()}`);
+      assert.ok(!/SESSION-OVERDUE/.test(mon.output()),
+        `the observer must self-heal to the sessions-file-resolved NEW transcript (no OVERDUE). If it were watching the FROZEN configured old transcript, OVERDUE would fire:\n${mon.output()}`);
+
+      // positive control: the observer IS watching the NEW transcript — freeze it → OVERDUE fires.
+      spawnSync("touch", ["-d", "3 hours ago", newTranscript], { encoding: "utf8" });
+      assert.ok(await waitForOutput(mon, /SESSION-OVERDUE inner/, 8000),
+        `positive control: freezing the NEW transcript must fire OVERDUE (proves the observer resolved it via sessions/<pid>.json):\n${mon.output()}`);
+    } finally {
+      mon.child.kill("SIGKILL");
+      mon.cleanup();
+    }
+  } finally {
+    p.cleanup();
+    try { fs.rmSync(root, { recursive: true, force: true }); } catch { /* best-effort */ }
   }
 });
