@@ -20,7 +20,9 @@
 //               never reports (AC3).
 //   - AC3/AC4 rehearsal (CLI): the real-repo run reports the three known instances (M136's
 //               plugin-packaging, AC11's select-tests-for-touches; relation-sync is fixed and
-//               must NOT report) and the 7 remaining process.exit(1) harnesses.
+//               must NOT report) and the 6 remaining process.exit(1) harnesses (gap002 was fixed
+//               by the tmp-leak fix d887ab12 — it now imports node:test + uses an after() cleanup
+//               hook instead of process.exit(1), so it is out of R4's rule scope).
 //   - AC5 ratchet (CLI rehearsal): adding a new violation file → check FAILS; fixing it → PASSES.
 //   - AC7: a deliberately-constructed violating test file is reported by the CLI.
 //
@@ -511,7 +513,7 @@ test("AC5 ratchet: current==data file passes; new/grown/stale/malformed entries 
 });
 
 // ── AC3/AC4 real-repo rehearsal: the known instances appear, relation-sync is quiet ─────────────────
-test("AC3/AC4 rehearsal: real repo reports the three known instances + the 7 remaining process.exit(1)s", () => {
+test("AC3/AC4 rehearsal: real repo reports the three known instances + the 6 remaining process.exit(1)s", () => {
   const res = spawnSync("node", ["--experimental-strip-types", CHECK_TS, "--list"], { encoding: "utf8", timeout: 60_000 });
   assert.equal(res.status, 0, res.stderr);
   const lines = res.stdout.trim().split("\n").filter(Boolean);
@@ -537,7 +539,9 @@ test("AC3/AC4 rehearsal: real repo reports the three known instances + the 7 rem
   ]) {
     assert.ok(!lines.some((l) => l.startsWith(`${f}:shared-root-mkdtemp`)), `${f} R8 must not report (fixed to os.tmpdir):\n${res.stdout}`);
   }
-  // AC4: the 7 remaining known process.exit(1) harnesses (AC7 list, minus the fixed relation-sync)
+  // AC4: the 6 remaining known process.exit(1) harnesses (AC7 list, minus the fixed relation-sync
+  // and gap002 — the tmp-leak fix d887ab12 made gap002 import node:test + use an after() cleanup
+  // hook, so R4's hand-rolled-only scope no longer applies to it).
   for (const f of [
     "packages/quay-native/test/adversarial-eval.test.mjs",
     "packages/quay-native/test/cas-write.test.mjs",
@@ -545,11 +549,10 @@ test("AC3/AC4 rehearsal: real repo reports the three known instances + the 7 rem
     "packages/quay-native/test/edit-validation.test.mjs",
     "packages/quay-native/test/lock.test.mjs",
     "packages/quay-native/test/yaml-frontmatter-colon.test.mjs",
-    "packages/quay/test/gap002-create-ergonomics.iteration-0.test.mjs",
   ]) {
     assert.ok(lines.includes(`${f}:process-exit-1`), `missing AC4 process.exit(1) file ${f}:\n${res.stdout}`);
   }
-  assert.equal(byRule("process-exit-1").length, 7, `expected exactly 7 process-exit-1 entries:\n${res.stdout}`);
+  assert.equal(byRule("process-exit-1").length, 6, `expected exactly 6 process-exit-1 entries:\n${res.stdout}`);
 });
 
 // ── AC7: a deliberately-constructed violating test file is reported by the CLI ──────────────────────
