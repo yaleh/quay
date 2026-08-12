@@ -37,11 +37,11 @@ extra: {}
 
 ## AC
 
-- [ ] AC1: 重触发前校验 `state.pid` 进程存活；存活 ⇒ 不发 RETRIGGER（发 SUITE-MERGE-PENDING + `wait-runner`）
-- [ ] AC2: runner 已死（pid 不存在或 `finishedAt != null`）时行为不变——照常 RETRIGGER
-- [ ] AC3: 负控制——state=running（runner 活）时任何 merge 不重触发（既有行为不回归）
-- [ ] AC4: 新测试覆盖 (a)(b)(c) 三态；`--for-task` scoped 门绿
-- [ ] AC5: 既有 suite-state-trigger 链测试绿（`--fail-fast-check` 退出 0 = 链完好）
+- [x] AC1: 重触发前校验 `state.pid` 进程存活；存活 ⇒ 不发 RETRIGGER（发 SUITE-MERGE-PENDING + `wait-runner`）
+- [x] AC2: runner 已死（pid 不存在或 `finishedAt != null`）时行为不变——照常 RETRIGGER
+- [x] AC3: 负控制——state=running（runner 活）时任何 merge 不重触发（既有行为不回归）
+- [x] AC4: 新测试覆盖 (a)(b)(c) 三态；`--for-task` scoped 门绿
+- [x] AC5: 既有 suite-state-trigger 链测试绿（`--fail-fast-check` 退出 0 = 链完好）
 
 ## Definition of Done
 
@@ -55,3 +55,26 @@ extra: {}
 - plugin/scripts/suite-state-trigger.ts（RETRIGGER 前校验 state.pid 进程存活）
 - plugin/test/suite-state-trigger.test.mjs（三态用例）
 - tasks/gap-suite-state-trigger-retriggers-while-runner-alive.md（自身：勾 AC + 贴证据）
+
+## Invoke Evidence（inner 2026-08-12，SCOPED ONLY）
+
+**机制落地**（`plugin/scripts/suite-state-trigger.ts`）：
+- 新增纯判据 `isRunnerInFlight(state)`：`finishedAt == null` 且 `pid` 进程存活（`isProcessAlive`，与既有 crash-watchdog 同一判据）⇒ 仍算在跑；`finishedAt != null`（终态）或 pid 缺/死 ⇒ 已终。
+- `runOnce` 的 SUITE-MERGE-PENDING 分支：merge 落地仍照常发事件（记账），但 `waitRunner = mergePending && isRunnerInFlight(cur)`，事件与 `RunOnceResult` 均携带 `waitRunner` 标记。
+- `spawnRetriggerRun`（发射 RETRIGGER 的唯一点）：读 state 后、spawn 前再校验 `isRunnerInFlight` —— 存活 ⇒ 打 `SUITE-RETRIGGER-WAIT-RUNNER` 且不 launch（TOCTOU 安全：runOnce 与 spawn 之间 runner 若已终，则照常 launch）。`--json`/`--once` 输出新增 `waitRunner`。
+
+**scoped 门**：`bash scripts/test.sh --for-task gap-suite-state-trigger-retriggers-while-runner-alive`
+```
+ℹ tests 36  ℹ pass 36  ℹ fail 0  ℹ cancelled 0
+```
+含 `--fail-fast-check`（AC5，退出 0，链完好）；scoped 静态检查全部 PASS（test-framework-policy / test-isolation / task-contract-check / superseded-capability / tick-core-static-check / delivery-inventory-drift-gate）。
+
+**新增四用例（覆盖 (a)(b)(c) 三态）**：
+1. `isRunnerInFlight` 纯判据：活 runner + red ⇒ in-flight；死 pid + red ⇒ 不在跑；`finishedAt` 非空（活 pid 亦然）⇒ 不在跑；running + 活 pid ⇒ 在跑；无 pid/pid=0/green/absent ⇒ 不在跑。
+2. AC1 集成：merge 落地 + 早红 + **活** runner ⇒ `SUITE-MERGE-PENDING` 带 `waitRunner:true`（不重触发）。
+3. AC2 集成：merge 落地 + 早红 + **死** runner ⇒ `SUITE-MERGE-PENDING` 不带 waitRunner（照常 RETRIGGER）。
+4. AC1 actor：`spawnRetriggerRun` 在早红 + 活 runner 下打 `SUITE-RETRIGGER-WAIT-RUNNER`、无 `SUITE-RETRIGGER`、无 `full-suite-retrigger.log`（runner 未被 spawn）、state 未动。
+
+**兄弟回归**：`red-window-shared-gate.test.mjs` + `slot-free-trigger.test.mjs` 29 全绿；`full-suite-runner.test.mjs` 80 绿 / 1 环境性失败（`AC1 — … systemd-run cgroup scope (real systemd)` poll 超时——stash 后基线同样失败，与本次改动无关）。
+
+**DoD「修后实跑」**：见上面用例 4 —— 以测试进程自身的活 pid 构造「runner 活 + state=red + merge 触发路径」⇒ `spawnRetriggerRun` 拒绝起第二个 runner（机械证据：WAIT-RUNNER 信号 + 无 spawn + 无 log + state 未动）。全量套件绿由外层 verification-round 验证。
