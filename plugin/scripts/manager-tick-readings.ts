@@ -37,11 +37,18 @@ export const HZ = 100; // Linux USER_HZ（/proc/<pid>/stat starttime 的 tick �
 export interface Project {
   name: string;
   dir: string;
+  /** 配置的 tmux 会话名。为空时回退 `name` / `name-*` 前缀推导（本地项目）。
+   *  archguard 真名 `archguard-0` 且在 ad-arm1（跨主机）——从配置取，不硬编码推导
+   *  （gap-manager-tick-readings-stale-readings 缺陷②）。 */
+  session?: string;
+  /** 跨主机 fqdn（空 = 本机）。跨主机 liveness 走 supervisor-deliver.sh 的 `<host>:<target>` 形态
+   *  （a15dc33c；supervisor-deliver.sh 交叉标注）。 */
+  host?: string;
 }
 
 export const DEFAULT_PROJECTS: Project[] = [
   { name: "quay", dir: "/home/yale/work/quay" },
-  { name: "archguard", dir: "/home/yale/work/archguard" },
+  { name: "archguard", dir: "/home/yale/work/archguard", session: "archguard-0", host: "ad-arm1.wan.hwang.men" },
   { name: "meta-cc", dir: "/home/yale/work/meta-cc" },
 ];
 
@@ -51,7 +58,12 @@ export function parseProjects(env: NodeJS.ProcessEnv = process.env): Project[] {
   return raw.trim().split(/\s+/).map((pair) => {
     const eq = pair.indexOf("=");
     if (eq < 0) return { name: pair, dir: "" };
-    return { name: pair.slice(0, eq), dir: pair.slice(eq + 1) };
+    const name = pair.slice(0, eq);
+    const [dir, session, host] = pair.slice(eq + 1).split(":");
+    const project: Project = { name, dir: dir ?? "" };
+    if (session) project.session = session;
+    if (host) project.host = host;
+    return project;
   });
 }
 
@@ -68,10 +80,14 @@ export interface PaneInfo {
   cmd: string;
 }
 
-/** 只读 tmux：`env -u TMUX tmux -S <socket> list-panes -a`（读真实默认服务端，同 session-liveness.sh AC3）。 */
-export function tmuxListPanes(socket: string, env: NodeJS.ProcessEnv = process.env): PaneInfo[] {
-  const seam = env[TMUX_LIST_PANES_SEAM];
-  const raw = seam !== undefined ? seam : runTmuxListPanes(socket, env);
+export const PANE_FMT = "#{session_name}:#{window_name}\t#{pane_pid}\t#{pane_current_command}";
+/** 跨主机 tmux 只读接缝（测试模拟 `ssh <host> tmux list-panes` 输出，不经网络）。 */
+export const REMOTE_TMUX_LIST_PANES_SEAM = "MTR_REMOTE_TMUX_LIST_PANES";
+/** ssh 二进制接缝（测试 mock 替换；同 supervisor-deliver.sh 的 SUPERVISOR_DELIVER_SSH 机制）。 */
+export const SSH_SEAM = "MTR_SSH";
+
+/** 共享的 pane 行解析：`<session>:<window>\t<pane_pid>\t<pane_current_command>`。 */
+export function parsePanes(raw: string): PaneInfo[] {
   if (!raw) return [];
   return raw.split("\n").filter(Boolean).map((line) => {
     const [sw, panePid, cmd] = line.split("\t");
@@ -85,10 +101,37 @@ export function tmuxListPanes(socket: string, env: NodeJS.ProcessEnv = process.e
   });
 }
 
+/** 只读 tmux：`env -u TMUX tmux -S <socket> list-panes -a`（读真实默认服务端，同 session-liveness.sh AC3）。 */
+export function tmuxListPanes(socket: string, env: NodeJS.ProcessEnv = process.env): PaneInfo[] {
+  const seam = env[TMUX_LIST_PANES_SEAM];
+  const raw = seam !== undefined ? seam : runTmuxListPanes(socket, env);
+  return parsePanes(raw);
+}
+
+/** 跨主机只读 tmux：`ssh <host> tmux list-panes -a -F ...`（supervisor-deliver.sh 的
+ *  `<host>:<target>` 形态——同一跨主机寻址约定，a15dc33c 落地）。失败/不可达 ⇒ 空（window-missing，fail-safe）。 */
+export function remoteTmuxListPanes(host: string, env: NodeJS.ProcessEnv = process.env): PaneInfo[] {
+  const seam = env[REMOTE_TMUX_LIST_PANES_SEAM];
+  const raw = seam !== undefined ? seam : runRemoteTmuxListPanes(host, env);
+  return parsePanes(raw);
+}
+
+function runRemoteTmuxListPanes(host: string, env: NodeJS.ProcessEnv): string {
+  const ssh = env[SSH_SEAM] || "ssh";
+  // 远端命令整体作为 ssh 的单个参数（ssh 会吞 -F 当自己的 config 选项——必须整体引号，同
+  // supervisor-deliver.sh 的 `printf %q` 处理）。tmux -F 不解释 `\t`，故制表符用 bash `$'\t'`
+  // ANSI-C 引用在远端展开成真 tab（远端 shell 为 bash）。
+  const sq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
+  const fmt = PANE_FMT.split("\t").map(sq).join("$'\\t'");
+  const res = spawnSync(ssh, [host, `tmux list-panes -a -F ${fmt}`], { encoding: "utf8", env });
+  if (res.status !== 0) return "";
+  return res.stdout || "";
+}
+
 function runTmuxListPanes(socket: string, env: NodeJS.ProcessEnv): string {
   const res = spawnSync(
     "env",
-    ["-u", "TMUX", "tmux", "-S", socket, "list-panes", "-a", "-F", "#{session_name}:#{window_name}\t#{pane_pid}\t#{pane_current_command}"],
+    ["-u", "TMUX", "tmux", "-S", socket, "list-panes", "-a", "-F", PANE_FMT],
     { encoding: "utf8", env },
   );
   if (res.status !== 0) return "";
@@ -164,20 +207,28 @@ export interface OuterReading {
   exists: boolean;
   panePid: string;
   cmd: string;
+  host: string;
+  session: string;
 }
 
-/** 按窗口名寻址（会话前缀匹配 + 窗口名 == outer），不按 pane 索引（索引会漂，§1.b 已成文）。 */
-export function outerReadings(projects: Project[], panes: PaneInfo[]): OuterReading[] {
+/** 按窗口名寻址（窗口名 == outer），不按 pane 索引（索引会漂，§1.b 已成文）。
+ *  `panes` 可以是 pane 数组（所有项目同一来源，向后兼容）或按项目解析的函数——
+ *  跨主机项目（`p.host` 非空）经 `remoteTmuxListPanes` 查远端 tmux，会话名取 `p.session`（配置），
+ *  不硬编码推导（缺陷②）。 */
+export function outerReadings(projects: Project[], panes: PaneInfo[] | ((p: Project) => PaneInfo[])): OuterReading[] {
+  const listPanes = typeof panes === "function" ? panes : () => panes;
   const readings: OuterReading[] = [];
   for (const p of projects) {
-    const matches = panes.filter(
-      (pn) => pn.window === "outer" && (pn.session === p.name || pn.session.startsWith(`${p.name}-`)),
+    const sessionName = p.session ?? p.name;
+    const matches = listPanes(p).filter(
+      (pn) => pn.window === "outer" &&
+        (pn.session === sessionName || (p.session == null && pn.session.startsWith(`${p.name}-`))),
     );
     if (matches.length === 0) {
-      readings.push({ project: p.name, target: `${p.name}:outer`, exists: false, panePid: "", cmd: "" });
+      readings.push({ project: p.name, target: `${p.name}:outer`, exists: false, panePid: "", cmd: "", host: p.host ?? "", session: sessionName });
     } else {
       for (const m of matches) {
-        readings.push({ project: p.name, target: `${m.session}:${m.window}`, exists: true, panePid: m.panePid, cmd: m.cmd });
+        readings.push({ project: p.name, target: `${m.session}:${m.window}`, exists: true, panePid: m.panePid, cmd: m.cmd, host: p.host ?? "", session: sessionName });
       }
     }
   }
@@ -189,20 +240,83 @@ export function truncate(s: string, n: number): string {
   return `${s.slice(0, n - 3)}...`;
 }
 
-/** 各外层最新的那一行 tick 日志。
- *  格式一（quay/meta-cc）：`| 2026-...`，最新在最前 → 取第一个匹配行。
- *  格式二（archguard）：表格行 `| N | 时刻 | ...`，最新在最后 → 取最后一个匹配行。
- *  （散文里的 `grep -m1 '^| 2026'` 只认格式一，对 archguard 恒零命中 —— §4「零命中当没发生」的实例。） */
-export function latestTickLog(project: Project, maxLen = 200): string {
-  if (!project.dir) return "no-dir";
+/** 各外层最新的那一行 tick 日志（多时代解析，缺陷①修复）。
+ *
+ *  三个时代/格式：
+ *    1. 旧倒序 dated（quay/meta-cc）：`| 2026-08-09 10:04Z | ...`，最新在最前，386→463 条；
+ *    2. 新追加顺序（inner 节 / blockquote）：`## 2026-08-12 03:2xZ tick — ...` / `> **01:3xZ ...**`，
+ *       按追加顺序无（或部分有）日期；
+ *    3. archguard 式：`| N | HH:MMZ | ...`，最新在最后。
+ *  全局最新：dated 行取最大 epoch（跨时代可比）；无日期行按位置（append-only 顺序）取最后，
+ *  若其位置晚于最新 dated 行则它是更新的追加内容。无日期且无 mtime 锚定 ⇒ 显式 `stale-unknown`
+ *  （不再返回「看似正常」的旧行——调用方无从分辨「外层面多天没 tick」与「读数解析不到」）。 */
+export type TickFreshness = "dated" | "positional" | "unknown" | "none";
+
+export interface TickLogReading {
+  row: string;
+  freshness: TickFreshness;
+  dateEpoch?: number;
+}
+
+const DATED_RE = /^(?:\|\s*|#{1,3}\s*|>\s*\*\*\s*)(\d{4})-(\d{2})-(\d{2})\s+(\d{1,2}):(\d{1,2})/;
+const UNDATED_QUOTE_RE = /^>\s*\*\*\s*\d{1,2}:\d{1,2}/;
+const UNDATED_HEADER_RE = /^#{1,3}\s*\d{1,2}:\d{1,2}/;
+const UNDATED_TABLE_RE = /^\|\s*\d+\s*\|/;
+
+function datedEpoch(m: RegExpMatchArray): number {
+  // 分钟可能被外层匿名化（`03:2xZ`）——按已给数字解析，同日同小时不影响「哪个最新」的跨日比较。
+  return Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5])) / 1000;
+}
+
+export function latestTickLogReading(project: Project, opts?: { mtimeEpoch?: number }): TickLogReading {
+  if (!project.dir) return { row: "no-dir", freshness: "none" };
   const p = path.join(project.dir, "orchestration", "tick-log.md");
-  if (!fs.existsSync(p)) return "no-tick-log";
+  if (!fs.existsSync(p)) return { row: "no-tick-log", freshness: "none" };
   const text = fs.readFileSync(p, "utf8");
-  const dated = text.match(/^\| 2026[^\n]*/m);
-  if (dated) return truncate(dated[0], maxLen);
-  const tableRows = text.match(/^\|\s*\d+\s*\|[^\n]*/gm) || [];
-  if (tableRows.length > 0) return truncate(tableRows[tableRows.length - 1], maxLen);
-  return "no-tick-row";
+  const lines = text.split("\n");
+
+  let mtimeEpoch = opts?.mtimeEpoch;
+  if (mtimeEpoch === undefined) {
+    try { mtimeEpoch = Math.floor(fs.statSync(p).mtimeMs / 1000); } catch { mtimeEpoch = 0; }
+  }
+
+  let bestDated: { epoch: number; row: string; pos: number } | null = null;
+  let bestUndated: { row: string; pos: number } | null = null;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const dm = line.match(DATED_RE);
+    if (dm) {
+      const epoch = datedEpoch(dm);
+      if (!bestDated || epoch > bestDated.epoch || (epoch === bestDated.epoch && i > bestDated.pos)) {
+        bestDated = { epoch, row: line, pos: i };
+      }
+      continue;
+    }
+    if (UNDATED_QUOTE_RE.test(line) || UNDATED_HEADER_RE.test(line) || UNDATED_TABLE_RE.test(line)) {
+      if (!bestUndated || i > bestUndated.pos) bestUndated = { row: line, pos: i };
+    }
+  }
+
+  if (!bestDated && !bestUndated) return { row: "no-tick-row", freshness: "none" };
+
+  // 全局最新：dated 取最大 epoch（覆盖旧倒序表与新 ## 节）；无日期行按位置（append-only）。
+  // 若无日期行的位置晚于最新 dated 行 ⇒ 它是之后追加的内容（更可能更新），取它但标注 freshness=positional。
+  if (bestDated && (!bestUndated || bestDated.pos >= bestUndated.pos)) {
+    return { row: bestDated.row, freshness: "dated", dateEpoch: bestDated.epoch };
+  }
+  // 无日期行是全局最新：回退到文件 mtime 锚定（mtime 可得 ⇒ positional；不可得 ⇒ 显式 stale-unknown）。
+  if (bestUndated && (mtimeEpoch ?? 0) > 0) {
+    return { row: bestUndated.row, freshness: "positional" };
+  }
+  return { row: "stale-unknown", freshness: "unknown" };
+}
+
+/** 字符串形态（向后兼容）：返回最新行（截断）或显式哨兵。`opts.mtimeEpoch` 供测试注入 mtime。 */
+export function latestTickLog(project: Project, maxLen = 200, opts?: { mtimeEpoch?: number }): string {
+  const r = latestTickLogReading(project, opts);
+  if (r.freshness === "none" || r.freshness === "unknown") return r.row;
+  return truncate(r.row, maxLen);
 }
 
 export interface StatInfo {
@@ -320,12 +434,26 @@ export interface RenderOpts {
   env?: NodeJS.ProcessEnv;
 }
 
+/** 跨主机 pane 解析：本地项目一次 list-panes；跨主机项目按 host 走 ssh（带缓存）。 */
+export function resolvePanes(
+  projects: Project[],
+  socket: string,
+  env: NodeJS.ProcessEnv,
+): (p: Project) => PaneInfo[] {
+  const localPanes = tmuxListPanes(socket, env);
+  const remoteCache = new Map<string, PaneInfo[]>();
+  return (p: Project): PaneInfo[] => {
+    if (!p.host) return localPanes;
+    if (!remoteCache.has(p.host)) remoteCache.set(p.host, remoteTmuxListPanes(p.host, env));
+    return remoteCache.get(p.host)!;
+  };
+}
+
 export function render(projects: Project[], opts: RenderOpts): string {
   const env = opts.env ?? process.env;
   const procRoot = opts.procRoot ?? "/proc";
-  const panes = tmuxListPanes(opts.socket, env);
   const resources = resourceReadings(procRoot);
-  const outer = outerReadings(projects, panes);
+  const outer = outerReadings(projects, resolvePanes(projects, opts.socket, env));
   const entryCommit = entryLastCommitEpoch(opts.repoRoot, env);
   const monitors = monitorInstances(entryCommit, procRoot);
   const goal = goalReading(opts.repoRoot);
@@ -338,8 +466,12 @@ export function render(projects: Project[], opts: RenderOpts): string {
   lines.push(`resource.node_count ${resources.nodeCount}`);
   lines.push(`resource.mem_available_mb ${resources.memAvailMb}`);
   for (const o of outer) {
-    if (o.exists) lines.push(`outer.liveness ${o.target} pane_pid=${o.panePid} cmd=${o.cmd}`);
-    else lines.push(`outer.liveness ${o.target} window-missing`);
+    if (o.exists) {
+      const hostPart = o.host ? ` host=${o.host}` : "";
+      lines.push(`outer.liveness ${o.target} alive pane_pid=${o.panePid} cmd=${o.cmd}${hostPart}`);
+    } else {
+      lines.push(`outer.liveness ${o.target} window-missing`);
+    }
   }
   for (const p of projects) lines.push(`outer.ticklog ${p.name} ${latestTickLog(p)}`);
   lines.push(`goal.phase_ac_checked ${goal.checked}/${goal.total} ${goal.file}`);
@@ -353,12 +485,62 @@ export function render(projects: Project[], opts: RenderOpts): string {
   return `${lines.join("\n")}\n`;
 }
 
+/** 单读数子命令（Contract invoke）：`manager-tick-readings.ts outer.ticklog [name…]`
+ *  / `outer.liveness <target>`。target 形态 `<project>[:<window>]` 或 `<host>:<session>:<window>`。 */
+export function renderSelected(cmd: string, args: string[], projects: Project[], opts: RenderOpts): string {
+  const env = opts.env ?? process.env;
+  const lines: string[] = [];
+
+  if (cmd === "outer.ticklog") {
+    const names = args.length > 0 ? new Set(args) : null;
+    for (const p of projects) {
+      if (names && !names.has(p.name)) continue;
+      lines.push(`outer.ticklog ${p.name} ${latestTickLog(p)}`);
+    }
+  } else if (cmd === "outer.liveness") {
+    const target = args[0] ?? "";
+    const parts = target.split(":");
+    let projName: string;
+    let window = "outer";
+    if (parts.length === 1) projName = parts[0];
+    else if (parts.length === 2) { projName = parts[0]; window = parts[1]; }
+    else { projName = parts[1]; window = parts[2]; }
+    const project = projects.find((p) => p.name === projName);
+    if (!project) {
+      lines.push(`outer.liveness ${target || "<missing>"} unknown-project`);
+      return `${lines.join("\n")}\n`;
+    }
+    const panes = project.host ? remoteTmuxListPanes(project.host, env) : tmuxListPanes(opts.socket, env);
+    const sessionName = project.session ?? project.name;
+    const matches = panes.filter(
+      (pn) => pn.window === window &&
+        (pn.session === sessionName || (project.session == null && pn.session.startsWith(`${project.name}-`))),
+    );
+    const canonical = `${projName}:${window}`;
+    if (matches.length === 0) {
+      lines.push(`outer.liveness ${canonical} window-missing`);
+    } else {
+      for (const m of matches) {
+        const hostPart = project.host ? ` host=${project.host}` : "";
+        lines.push(`outer.liveness ${canonical} alive pane_pid=${m.panePid} cmd=${m.cmd} session=${m.session}${hostPart}`);
+      }
+    }
+  }
+  return `${lines.join("\n")}\n`;
+}
+
 export function main(argv: string[], opts?: { env?: NodeJS.ProcessEnv }): number {
   const env = opts?.env ?? process.env;
   const here = path.dirname(fileURLToPath(import.meta.url));
   const repoRoot = path.resolve(here, "..", "..");
   const projects = parseProjects(env);
   const socket = defaultTmuxSocket(env);
+  const args = argv.slice(2);
+  const cmd = args[0] ?? "";
+  if (cmd === "outer.ticklog" || cmd === "outer.liveness") {
+    process.stdout.write(renderSelected(cmd, args.slice(1), projects, { socket, repoRoot, env }));
+    return 0;
+  }
   process.stdout.write(render(projects, { socket, repoRoot, env }));
   return 0;
 }

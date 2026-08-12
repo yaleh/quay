@@ -106,6 +106,9 @@ done
 #                          (the part BEFORE the <session>:<window> pair) is the HOST. A local tmux
 #                          target is <session>:<window> — exactly ONE ':' — so the implicit host form
 #                          is only taken when the target carries at least TWO ':'.
+# 交叉标注（gap-manager-tick-readings-stale-readings，缺陷②）：manager-tick-readings.ts 的跨主机
+# liveness 复用这同一 `<host>:<target>` 寻址约定——archguard 的 outer 会话 `archguard-0` 在
+# ad-arm1，manager 经 `ssh <host> tmux list-panes` 只读解析（remoteTmuxListPanes）。
 #   --host <fqdn>          the explicit form — TARGET is a plain tmux target, HOST separate.
 # When HOST is set, every tmux interaction below routes through `ssh $HOST tmux …` (the env pair
 # SUPERVISOR_DELIVER_HOST / SUPERVISOR_DELIVER_SSH — the SAME seam the checker and classifier read),
