@@ -21,6 +21,16 @@
 #     --json             JSON 输出（机器消费）；默认人读表格 + 退出码
 #     --home <dir>       覆盖 manager 家目录（默认 $QUAY_GLOBAL_DIR/manager/ → $HOME/.quay-global/manager/）
 #
+# 冷启动判据（gap-manager-cold-start-no-falsifiable-checklist AC2/AC4）：
+#   本脚本在 manager 家下写两份可证伪产物——
+#     <home>/cold-start-checklist.md   —— 7 条 observable consequences（对齐 outer 7 条），
+#                                        冷启动完成 = 七键全 true；一条为假 ⇒ 未完成
+#     <home>/idle-watch.env           —— manager 自己的 idle-watch 观测配置（缺陷 1 修复：
+#                                        确定性建立；首 tick 按此挂载，真机制 = session-liveness-mount.sh
+#                                        + Monitor 工具任务，非独立脚本）
+#   启动本身完成 SESSION-CREATED / HOME-CREATED / LOOP-ARMED 三键；CRON-EVIDENCED（--verify-cron）
+#   与 IDLE-WATCH-MOUNTED / MONITORS-DELIVERING 由首 tick 填（manager-tick-core.md B4/A10）。
+#
 # 测试接缝：
 #   MANAGER_START_SESSION         覆盖会话名
 #   MANAGER_START_HOME            覆盖家目录（等价 --home）
@@ -92,6 +102,8 @@ if [ "$DRY_RUN" = 1 ]; then
   cat <<EOF
 would-create-home: mkdir -p $HOME_DIR
 would-write-identity: $HOME_DIR/identity
+would-write-checklist: $HOME_DIR/cold-start-checklist.md
+would-write-idlewatch-config: $HOME_DIR/idle-watch.env
 would-launch-session: tmux new-session -d -s $SESSION -n manager "$LAUNCH_CMD"
 would-arm-loop: $ARM_CMD --home $HOME_DIR
 EOF
@@ -103,6 +115,45 @@ mkdir -p "$HOME_DIR"
 IDENTITY="$HOME_DIR/identity"
 if [ ! -f "$IDENTITY" ]; then
   printf 'role=manager\nsession=%s\ncreated=%s\n' "$SESSION" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$IDENTITY"
+fi
+
+# ── 冷启动可证伪产物（AC2/AC4，gap-manager-cold-start-no-falsifiable-checklist）────────────────
+# ① <home>/cold-start-checklist.md —— 7 条 observable consequences（对齐 outer 7 条）。
+#    冷启动完成 = 七键全 true；一条为假 ⇒ 未完成。启动态填三键，首 tick 填其余（B4/A10）。
+CHECKLIST="$HOME_DIR/cold-start-checklist.md"
+if [ ! -f "$CHECKLIST" ]; then
+  cat > "$CHECKLIST" <<'MDEOF'
+# manager cold-start — observable consequences（falsifiable checklist）
+
+冷启动完成判据 = 下列 7 条可证伪项**全部为真**（对齐 outer 的 7 条 observable consequences）。
+一条为假 ⇒ manager 冷启动未完成。每键给出可检查判据与证据。
+
+| # | Key | 可检查判据 | 证据 |
+|---|---|---|---|
+| 1 | SESSION-CREATED | `tmux has-session -t <SESSION>` 且 pane 有 claude 进程（非裸 bash） | 启动时已建会话（manager-start.sh） |
+| 2 | HOME-CREATED | `<home>/identity` 存在，含 `role=manager` | 启动时已写（manager-start.sh） |
+| 3 | LOOP-ARMED | `manager-arm-loop.sh --home <home> --validate` 退出 0，且 `<home>/loop-registry.txt` 恰一条 `[manager-tick]` | 启动时已武装（manager-arm-loop.sh；失败时 manager-start 非零退出） |
+| 4 | CRON-EVIDENCED | `manager-arm-loop.sh --home <home> --verify-cron` 退出 0（注册表↔真 CronCreate/CronList 证据一致且新鲜） | 首 tick 填（manager-tick-core.md B4 记 `<home>/cron-evidence.jsonl`） |
+| 5 | IDLE-WATCH-MOUNTED | `monitor-mount-check.sh --json` 报 `mounted=true` + `targetOk=true`（manager 自己的 idle-watch） | 首 tick 填（挂载 `session-liveness-mount.sh`，非独立脚本） |
+| 6 | MONITORS-DELIVERING | `session-liveness.sh --once` 至少一行 `SESSION-STATUS` | 首 tick 填（--once 接缝） |
+| 7 | CHECKLIST-REPORTED | 本文件七键全为 true 且各有证据 | 全部填完后为 true |
+
+启动态预期满足：#1 #2 #3（arm 失败时 manager-start 非零退出）。待首 tick：#4 #5 #6。全 true 才可报 COMPLETE。
+MDEOF
+fi
+
+# ② <home>/idle-watch.env —— manager 自己的 idle-watch 观测配置（缺陷 1 修复：确定性建立）。
+#    真机制 = session-liveness-mount.sh + Monitor 工具任务（非独立脚本）。
+IDLE_WATCH_ENV="$HOME_DIR/idle-watch.env"
+if [ ! -f "$IDLE_WATCH_ENV" ]; then
+  cat > "$IDLE_WATCH_ENV" <<'ENVEOF'
+# manager 自己的 idle-watch 观测配置（缺陷 1 修复，gap-manager-cold-start-no-falsifiable-checklist）。
+# 真机制：session-liveness-mount.sh + Monitor 工具任务（非独立脚本 —— 全库无独立 idle-watch 脚本）。
+# 用法：首 tick 按此挂载（manager-tick-core.md A10 判据 → monitor-mount-check.sh --json）。
+IDLE_WATCH_THRESHOLD_MIN=6
+IDLE_WATCH_MOUNT_ENTRY=bash <repo>/plugin/scripts/session-liveness-mount.sh
+IDLE_WATCH_DELIVERY_SEAM=bash <repo>/plugin/scripts/session-liveness.sh --once
+ENVEOF
 fi
 
 # ── 建独立会话（幂等：会话已存在且 claude 在位 ⇒ 不动）────────────────────────────────────
@@ -134,15 +185,19 @@ else
   ARM_STATE="armed"
 fi
 
+# 冷启动三键启动态（AC2）：#1 SESSION-CREATED / #2 HOME-CREATED / #3 LOOP-ARMED 在启动后即为真；
+# #4 CRON-EVIDENCED / #5 IDLE-WATCH-MOUNTED / #6 MONITORS-DELIVERING 由首 tick 填。
+CHECKLIST_EXISTS=$([ -f "$CHECKLIST" ] && echo true || echo false)
 if [ "$JSON" = 1 ]; then
   cat <<EOF
-{"session":"$SESSION","home":"$HOME_DIR","sessionState":"$SESSION_STATE","armState":"$ARM_STATE","created":$([ "$CREATED_SESSION" = 1 ] && echo true || echo false)}
+{"session":"$SESSION","home":"$HOME_DIR","sessionState":"$SESSION_STATE","armState":"$ARM_STATE","checklist":"$CHECKLIST","checklistWritten":$CHECKLIST_EXISTS,"created":$([ "$CREATED_SESSION" = 1 ] && echo true || echo false)}
 EOF
 else
   printf '%-14s %s\n' "session" "$SESSION"
   printf '%-14s %s\n' "home" "$HOME_DIR"
   printf '%-14s %s\n' "session-state" "$SESSION_STATE"
   printf '%-14s %s\n' "arm-state" "$ARM_STATE"
+  printf '%-14s %s\n' "checklist" "$CHECKLIST ($([ "$CHECKLIST_EXISTS" = true ] && echo 'written — 7 keys, #1-#3 启动态已真' || echo MISSING))"
   if [ "$ARM_STATE" = "armed" ]; then
     echo "manager started: $SESSION ($HOME_DIR)"
   else

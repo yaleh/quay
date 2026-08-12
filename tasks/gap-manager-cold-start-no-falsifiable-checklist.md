@@ -30,11 +30,11 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 4 缺陷实测（idle-watch 不挂 / 判据指向不存在脚本 / 注册表≠真 cron / 无证伪判据）（本任务 Proposal 已含）
-- [ ] AC2: **可证伪判据**——manager 冷启动有 observable consequences（对齐 outer 7 条）
-- [ ] AC3: **判据指向真实机制**——核里查 idle-watch 的判据改用 session-liveness-mount.sh + Monitor 事件（非 pgrep 不存在的 idle-watch.sh）
-- [ ] AC4: **注册表↔真 cron 核实**——manager 的 CronCreate 可外部核实（非只信 loop-registry.txt）
-- [ ] AC5: **既有不回归**——`--for-task` scoped 门绿
+- [x] AC1: **复现固化**——任务体记录 4 缺陷实测（idle-watch 不挂 / 判据指向不存在脚本 / 注册表≠真 cron / 无证伪判据）（本任务 Proposal 已含）— 证据：Proposal §缺陷1–4 逐条记录；`plugin/test/manager-cold-start.test.mjs` AC1 测试 grep 任务体四短语全中
+- [x] AC2: **可证伪判据**——manager 冷启动有 observable consequences（对齐 outer 7 条）— 证据：`plugin/skills/manager/SKILL.md` §7a 新增 7 键可证伪清单（SESSION-CREATED/HOME-CREATED/LOOP-ARMED/CRON-EVIDENCED/IDLE-WATCH-MOUNTED/MONITORS-DELIVERING/CHECKLIST-REPORTED）；`grep -c 'observable\|证伪\|判据' plugin/skills/manager/SKILL.md` = **14**（band ≥7 过）；`grep -c 'observable' plugin/skills/manager/SKILL.md` = **2**（invoke 过）；`manager-start.sh` 启动写 `<home>/cold-start-checklist.md` 七键脚手架
+- [x] AC3: **判据指向真实机制**——核里查 idle-watch 的判据改用 session-liveness-mount.sh + Monitor 事件（非 pgrep 不存在的 idle-watch.sh）— 证据：① `plugin/loop/manager-tick-core.md` A10 改用 `monitor-mount-check.sh --json`（mounted+targetOk）+ `session-liveness.sh --once`（SESSION-STATUS）+ Monitor 事件流；② **活档案 `orchestration/manager-loop-tick.md` ①巡检块（原 `pgrep 'idle-watch.sh'` 所在行）同样改为真机制**（AC3 在活路径上闭合）；③ `manager-tick-core.test.mjs` no_false_instrument 测试断言覆盖两处（shipped core + live archive）
+- [x] AC4: **注册表↔真 cron 核实**——manager 的 CronCreate 可外部核实（非只信 loop-registry.txt）— 证据：`manager-arm-loop.sh --verify-cron` 新增（注册表恰一条哨兵 ∧ `<home>/cron-evidence.jsonl` 会话内 CronCreate/CronList 证据 mechanism/sentinel/cronListCount≥1/atEpoch≥注册表 mtime）；`manager-tick-core.md` B4 记证据；`manager-arm-loop.test.mjs` 6 用例全绿
+- [x] AC5: **既有不回归**——`--for-task` scoped 门绿 — 证据：`bash scripts/test.sh --for-task gap-manager-cold-start-no-falsifiable-checklist` 退出 0；**20 pass / 0 fail / 0 cancelled**；静态检查全过（含 tick-core-static-check AC3 41/41 + AC4/AC5/AC6、task-contract-check no violations）；既有 manager-productization + manager-install-vector（14 用例）另行直跑全绿
 
 ## Definition of Done
 
@@ -53,6 +53,13 @@ extra: {}
 - plugin/skills/manager/SKILL.md（§7a 可证伪清单——Contract measure/invoke 落点；原 Touches 漏列，agent 实际改动后合规化）
 - plugin/test/（manager 冷启动用例）
 - tasks/gap-manager-cold-start-no-falsifiable-checklist.md（自身：勾 AC + 贴证据）
+
+## Test-Files
+
+- plugin/test/manager-cold-start.test.mjs
+- plugin/test/manager-start.test.mjs
+- plugin/test/manager-arm-loop.test.mjs
+- plugin/test/manager-tick-core.test.mjs
 
 ## Contract
 

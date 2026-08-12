@@ -25,14 +25,19 @@
 # 控制），而工具映射在文档中写成约定。
 #
 # 用法：
-#   manager-arm-loop.sh [--home <dir>] [--store <file>] [--dry-run] [--json] [--validate]
+#   manager-arm-loop.sh [--home <dir>] [--store <file>] [--dry-run] [--json] [--validate] [--verify-cron]
 #     --home <dir>     manager 家目录（默认 $QUAY_GLOBAL_DIR/manager/ → $HOME/.quay-global/manager/）
 #     --store <file>   cron 注册表文件（默认 <home>/loop-registry.txt）
 #     --dry-run        只打印将执行的步骤，不改注册表
 #     --json           JSON 输出
 #     --validate       只验证「哨兵/指针规则已在文档中」，不改注册表（AC5c 文档规则检查）
+#     --verify-cron    注册表↔真 cron 核实（gap-manager-cold-start-no-falsifiable-checklist AC4）：
+#                      loop-registry.txt 恰一条哨兵 且 <home>/cron-evidence.jsonl 有会话内
+#                      CronCreate/CronList 后写下的证据（mechanism=cron / sentinel 匹配 /
+#                      cronListCount>=1 / atEpoch >= 注册表 mtime）。任一不满足 ⇒ 退出 1，
+#                      不再「注册表说武装了」就当作真有 cron。
 #
-# 依赖：无（纯 shell + 文件操作）。
+# 依赖：无（纯 shell + 文件操作；--verify-cron 解析证据 JSON 用 python3，与 monitor-mount-check.sh 同）。
 # ── 统一 --help（gap-scripts-sprawl：用法在前、退出 0、无业务副作用）────────────────────
 if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
   _gap_help_lib="$(dirname "${BASH_SOURCE[0]}")/gate-script-lib.sh"
@@ -50,9 +55,10 @@ STORE=""
 DRY_RUN=0
 JSON=0
 VALIDATE=0
+VERIFY_CRON=0
 
 usage() {
-  sed -n '1,32p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '1,34p' "$0" | sed 's/^# \{0,1\}//'
   exit 0
 }
 
@@ -63,9 +69,10 @@ while [ $# -gt 0 ]; do
     --dry-run) DRY_RUN=1; shift ;;
     --json) JSON=1; shift ;;
     --validate) VALIDATE=1; shift ;;
+    --verify-cron) VERIFY_CRON=1; shift ;;
     --help|-h) usage ;;
     *)
-      echo "ERROR: unknown argument: $1 (expected --home <dir> | --store <file> | --dry-run | --json | --validate)" >&2
+      echo "ERROR: unknown argument: $1 (expected --home <dir> | --store <file> | --dry-run | --json | --validate | --verify-cron)" >&2
       exit 2
       ;;
   esac
@@ -85,6 +92,62 @@ if [ ! -f "${REPO_ROOT}/${POINTER_DOC}" ] && [ -f "${REPO_ROOT}/plugin/loop/mana
   POINTER_DOC="plugin/loop/manager-loop-tick.md"
 fi
 POINTER_PROMPT="Run the manager tick per <repo>/${POINTER_DOC}"
+
+# ── AC4 --verify-cron：注册表↔真 cron 核实（gap-manager-cold-start-no-falsifiable-checklist）───
+# 「注册表说武装了」≠「真的有 cron」（缺陷 3）：manager-arm-loop.sh 只维护 loop-registry.txt；
+# 真正的 CronCreate/CronList 在会话内做，外部必须能核实二者一致。核实证据 =
+# <home>/cron-evidence.jsonl —— 由会话内 tick（manager-tick-core.md B4）在 CronCreate+CronList
+# 成功后追加一行 {"at":ISO,"atEpoch":<epoch>,"mechanism":"cron","sentinel":"[manager-tick]",
+# "cronListCount":<N>}。--verify-cron 校验：注册表恰一条哨兵 ∧ 证据存在 ∧ mechanism/sentinel/
+# cronListCount 匹配 ∧ atEpoch ≥ 注册表 mtime（证据是武装后写的，不是旧残片）。任一不满足 ⇒ 退出 1。
+if [ "$VERIFY_CRON" = 1 ]; then
+  EVIDENCE="$(dirname "$STORE")/cron-evidence.jsonl"
+  if [ ! -f "$STORE" ]; then
+    echo "VERIFY-CRON-FAIL: not-armed — loop-registry $STORE missing (run manager-arm-loop.sh --home <home> first)" >&2
+    exit 1
+  fi
+  REG_COUNT="$(grep -c "$SENTINEL" "$STORE" 2>/dev/null || echo 0)"
+  if [ "$REG_COUNT" != "1" ]; then
+    echo "VERIFY-CRON-FAIL: registry-count — expected exactly ONE $SENTINEL entry, got $REG_COUNT" >&2
+    exit 1
+  fi
+  if [ ! -f "$EVIDENCE" ]; then
+    echo "VERIFY-CRON-FAIL: no-cron-evidence — $EVIDENCE missing (真 cron 未被会话内 CronCreate/CronList 记录；注册表≠真 cron)" >&2
+    exit 1
+  fi
+  REG_MTIME="$(stat -c %Y "$STORE" 2>/dev/null || echo 0)"
+  EVIDENCE_JSON="$(tail -n 1 "$EVIDENCE" 2>/dev/null)"
+  OUT="$(QUAY_ARM_EVIDENCE_JSON="$EVIDENCE_JSON" QUAY_ARM_REG_MTIME="$REG_MTIME" QUAY_ARM_SENTINEL="$SENTINEL" python3 -c '
+import os, json
+try:
+    d = json.loads(os.environ.get("QUAY_ARM_EVIDENCE_JSON", ""))
+    at = d.get("atEpoch"); mech = d.get("mechanism"); sent = d.get("sentinel"); cnt = d.get("cronListCount")
+    if mech != "cron":
+        print("ERR mechanism=%r (expected \"cron\")" % mech); raise SystemExit(0)
+    if sent != os.environ["QUAY_ARM_SENTINEL"]:
+        print("ERR sentinel=%r (expected %s)" % (sent, os.environ["QUAY_ARM_SENTINEL"])); raise SystemExit(0)
+    if not isinstance(cnt, int) or cnt < 1:
+        print("ERR cronListCount=%r (expected >= 1)" % (cnt,)); raise SystemExit(0)
+    if not isinstance(at, int) or at < int(os.environ["QUAY_ARM_REG_MTIME"]):
+        print("ERR stale-evidence atEpoch=%r < registry mtime %s (证据不是武装后写的)" % (at, os.environ["QUAY_ARM_REG_MTIME"])); raise SystemExit(0)
+    print("OK %d %d" % (at, cnt))
+except SystemExit:
+    pass
+except Exception as e:
+    print("ERR parse: %s" % e)
+')"
+  if [ "${OUT%% *}" = "OK" ]; then
+    if [ "$JSON" = 1 ]; then
+      printf '{"verify":"ok","sentinel":"%s","store":"%s","evidence":"%s","cronListCount":%s}\n' \
+        "$SENTINEL" "$STORE" "$EVIDENCE" "${OUT##* }"
+    else
+      echo "VERIFY-CRON-OK: registry↔cron evidence consistent — one $SENTINEL entry, cronListCount=${OUT##* } (evidence $EVIDENCE)"
+    fi
+    exit 0
+  fi
+  echo "VERIFY-CRON-FAIL: ${OUT#ERR }" >&2
+  exit 1
+fi
 
 # ── AC5c --validate：哨兵/指针规则已在文档中（机械可查，不依赖会话）─────────────────────────
 if [ "$VALIDATE" = 1 ]; then
