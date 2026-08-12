@@ -1,5 +1,10 @@
 # outer tick — 执行核
 
+**切分声明（AC38，2026-08-12 已执行）**：本核的源文档 `orchestration/orchestrator-loop-tick.md` 是 quay
+自身消费的**本层实例状态**（工作分支两线、integration 作 checkout、项目列表、既有裁定）；**产品行为正本**
+是外层这个角色该怎么做的通用机制，随 `quay-init --loop` 原样铺到目标项目即 `orchestration/orchestrator-loop-tick.md`
+（本路径）。**产品行为进模板 / 本层状态留 orchestration**——与 manager 层已按同判据切分。
+
 **这份文件是执行路径,不是理由档案。** 理由、实测、代价全部在 `orchestration/orchestrator-loop-tick.md`(1095 行)里,
 本文件只给动作和判据;每条尾部的 `(src:N)` 是该条在源文档里的行号——**用它机械核对有没有漏抽**。
 **立此文件的原因**(2026-08-09):源文档 `### 1b 异步收尾例程(强制)`写着「每 tick 执行」却位于第 687 行,**静默停摆 8.5 小时无人发现**(`git log | grep 'outer: close'` 从每 ~20 分钟一次变为零),同期 not-yet-flipped 从 61% 涨到 82%。

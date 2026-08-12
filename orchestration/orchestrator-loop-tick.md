@@ -32,10 +32,12 @@
 > `.quay/config.yml` `loop:` 节的 `fork_baseline` / `merge_target`。所有含分支操作的命令代入这两个值，
 > 不要字面写死。共享模板 `plugin/loop/orchestrator-loop-tick.md` 的工作分支名**可配置**（默认单线，
 > 供未做 cutover 的下游经升级通道消费），本副本是 quay 自己的两线落地——两者角色分工见任务体 AC5。
-> **切分声明（AC38，2026-08-10）**：本文件是 quay 自身消费的**本层状态**（工作分支两线、integration
-> 作 checkout、项目列表）；**产品行为正本**在 `plugin/loop/orchestrator-loop-tick.md`（随 `quay-init --loop`
-> 原样铺到目标项目即本路径）。**产品行为进 plugin / 本层状态留 orchestration**——与 manager 层已按同判据
-> 切分（产品模板 322 行 vs quay 状态 1505 行）。冷启动 skill 与 tick 核引用同一批行为文件（AC3）。
+> **切分声明（AC38，2026-08-12 已执行）**：本文件是 quay 自身消费的**本层实例状态**（工作分支两线、
+> integration 作 checkout、项目列表、tmux 布局、本实验各 AC 的进度与既有裁定）；**产品行为正本**在
+> `plugin/loop/orchestrator-loop-tick.md`（外层这个角色该怎么做的通用机制，随 `quay-init --loop` 原样铺到
+> 目标项目即本路径）。**产品行为进 plugin / 本层状态留 orchestration**——与 manager 层已按同判据切分
+> （产品模板 322 行 vs quay 状态 1647 行；本对切分后 1066/1269，共同 532 行——共享的是命令块与脚本名，
+> 各自独有可解释为产品行为 / 本层实例状态）。冷启动 skill 与 tick 核引用同一批行为文件（AC3）。
 > **⚠️ 2026-08-09 结构性修正（外层的 WORKING CHECKOUT 切到 integration）**：此前的故障链是「立项/记账
 > 提交落 develop ⇒ 不变式被破（develop-only 累积）⇒ ff 前需并回 integration ⇒ 验证期 tip 被记账推走 ⇒
 > 绿过期」——冻结窗口只是手段不是机制。长效解法：**外层工作 checkout = integration**，develop 只经 ff
