@@ -300,6 +300,15 @@ allowed-tools: Bash, Read, Monitor
 - **manager**：`claude`（Anthropic 默认模型，不带 917k 覆盖——917k 只给 deepseek 角色，避免真实窗口
   之上压缩过晚导致 API 报错，session-launch-recipes §5）
 
+**冷启动向量（bare-metal，gap-manager-layer-no-verified-install-vector）**：第三方裸机（无 quay 开发树）
+装 manager 的**已验证路径**是 `npm i -g <quay.tgz>` 后 `quay manager start`——CLI 从安装包定位
+`plugin/scripts/manager-start.sh`，它建独立 tmux 会话（`quay-manager`）+ 自己的家
+（`$QUAY_GLOBAL_DIR/manager/`）+ 武装 loop 锚点。启动 settings 在裸机取**出厂拷贝**
+`plugin/.claude/launch.settings.json`（npm 产物不带包根 `.claude/`，启动器回退到 plugin 出厂份；
+dev-tree 仍优先包根份——manager 角色 `claude`/`quay-manager` 两份一致）。武装锚点的 prompt 是指针：
+dev-tree/`--loop --manager` 消费项目指 `orchestration/manager-loop-tick.md`，裸机包指存在的那份
+`plugin/loop/manager-loop-tick.md`（AC4 不铺虚空武装器）。
+
 ---
 
 ## 6. 交付 vs 启动独立（AC8）——一个 network 一个 manager

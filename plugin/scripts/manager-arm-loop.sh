@@ -4,7 +4,9 @@
 #
 # 人 2026-08-06 裁定：manager 的调度锚点只能用 Claude Code 自己的 loop/cron（/loop → CronCreate）。
 # AC5c 把 manda 的两条机制固化为规则：
-#   1. prompt 是指针（只指向 <repo>/orchestration/manager-loop-tick.md），不携带指令内容——
+#   1. prompt 是指针（只指向 loop tick 文档的正本——dev-tree 优先
+#      <repo>/orchestration/manager-loop-tick.md，npm-pack 裸机只有出厂模板
+#      <repo>/plugin/loop/manager-loop-tick.md——选存在的那份，AC4 不铺虚空武装器），不携带指令内容——
 #      /clear 与 /compact 不杀会话、cron 照常触发，但上下文没了；技能体只装「如何武装」，
 #      不装「触发后做什么」（触发后现读 reference/）。
 #   2. 身份用可推导的哨兵串，不用记住的 ID——武装前无条件按哨兵清扫同名旧任务，再建一个
@@ -75,7 +77,14 @@ STORE="${STORE:-${HOME_DIR}/loop-registry.txt}"
 # ── 哨兵前缀（AC5c 的固定可推导前缀）────────────────────────────────────────────────────────
 SENTINEL="[manager-tick]"
 # prompt = 指针（AC5c 规则 1：只携带指针，不携带指令内容）
-POINTER_PROMPT="Run the manager tick per <repo>/orchestration/manager-loop-tick.md"
+# 指针目标 = 存在的那份（AC4 不铺虚空武装器）：
+#   - dev-tree / quay-init --loop --manager 的消费项目：`orchestration/manager-loop-tick.md`（活文档）
+#   - npm-pack 裸机（无 orchestration/，只有出厂模板）：`plugin/loop/manager-loop-tick.md`
+POINTER_DOC="orchestration/manager-loop-tick.md"
+if [ ! -f "${REPO_ROOT}/${POINTER_DOC}" ] && [ -f "${REPO_ROOT}/plugin/loop/manager-loop-tick.md" ]; then
+  POINTER_DOC="plugin/loop/manager-loop-tick.md"
+fi
+POINTER_PROMPT="Run the manager tick per <repo>/${POINTER_DOC}"
 
 # ── AC5c --validate：哨兵/指针规则已在文档中（机械可查，不依赖会话）─────────────────────────
 if [ "$VALIDATE" = 1 ]; then

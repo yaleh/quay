@@ -118,10 +118,12 @@
       "label": "循环文档",
       "deliverables": [
         "plugin/loop/fast-mode-loop-tick.md",
-        "plugin/loop/orchestrator-loop-tick.md"
+        "plugin/loop/orchestrator-loop-tick.md",
+        "plugin/loop/manager-loop-tick.md",
+        "plugin/skills/manager/SKILL.md"
       ],
       "attribution": ["gap-productize-the-manager-layer"],
-      "criterion": "outer+inner 两层 tick 文档随包（铺入 docs/analysis/ 与 orchestration/）；manager 层缺 → 归属 gap-productize-the-manager-layer"
+      "criterion": "三层 tick 文档随包（outer+inner 铺入 docs/analysis/ 与 orchestration/；manager 层 = plugin/loop/manager-loop-tick.md 出厂模板 + plugin/skills/manager/SKILL.md 可安装结晶）"
     },
     {
       "id": 3,
