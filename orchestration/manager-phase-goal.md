@@ -1159,6 +1159,59 @@ plugin bundle（`scripts` 117 · `gate-scripts` · `skills` 13 · `probes` · `l
 **我把它用在了外层的任务上，却没用在自己的目标文件上** —— 巡检项一旦不随 AC 更新，
 就会变成读旧数字的仪式。人 2026-08-07 指出后才发现。
 
+---
+
+## 【AC16 修正条款 —— 人 2026-08-12 00:2xZ 直接裁定】
+
+**人的原话**：「**修改 AC16，仅要求安装和使用 build 而不是 release。**」
+
+**上文三条判据中凡出现「release」处，一律以「build」为准。** 按硬规则 8（编号不得复用）
+**不就地改写上文、不改 AC16 这个编号**——旧文保留可见，本条款注明日期与裁定人，
+使修正前后的历次判定仍可比较（此前所有「③未达成」的判词都是按 release 口径作出的，
+换口径后它们不自动变成达成，须按新判据重新求值一次）。
+
+**修正后的三条判据**：
+
+1. **新鲜度**：最新 **build**（`--deliver` 投出去的那份，非 GitHub release tag）与 `develop` 的提交差有上限。
+   ⇒ **读数来源是 `.quay/develop-deliver-state.json` 的 `lastDelivered`（写者 `plugin/scripts/develop-deliver-tgz.sh`），不再读 `gh release view`。**
+2. **完整性**：**build 产物包含 plugin bundle**——判定方式：从 **build 产物**（不是 git clone）
+   安装到一台干净机器，`quay-init --loop` 能铺设出 tick 文档 + skills + scripts 并真正驱动起来。
+3. **可用性（端到端）**：用 **build 装出来的那份**，在一个**非 quay 项目**上跑通一次真实的
+   两层循环（至少一个任务从 todo 到落地）。
+
+**这次修正保留了什么、放弃了什么（写清楚，免得下次误读为「判据放宽了」）**：
+
+- **保留（要害所在）**：**验收方不得是亲代**。原判据的真正内容从来不是「必须走 GitHub release」，
+  而是「**装的那份必须是打包产物，且装的那台机器上不能有 quay 开发树**」——
+  因为「A 在结构上无法验证自己的 release」（见上文分工轴表格）：开发树在场时，
+  `/home/yale/work/quay` 可解析、vendor 已就位，测「装得上吗」测到的是「开发树还在不在」，
+  **是一个结构上不可能取假的绿**（硬规则 4）。**这条对 build 同样成立，一字不改。**
+- **放弃**：「必须先切一个 GitHub release tag」这个**人工闸**。它不测任何技术性质——
+  切 tag 是一个人的动作，把它压在 AC16③ 前面，等于让一条端到端可用性判据
+  被一个与可用性无关的手工步骤卡死（实测：`v0.4.0..develop` = **2335** 提交，
+  而 `--deliver` 已连续五轮自动把 develop 构建投到 B/C，**真实的交付通道根本不经过 release**）。
+
+**⇒ 判读要点**：判「装的是不是 build」仍须比对**内容哈希或 commit sha**，不得以版本号为据
+（2026-08-12 实测：`pluginVersion` 在 release 与 dev-deliver 两种来源下同为 `0.4.0`，
+版本号在此不是来源的函数）——**换口径不豁免举证方式**。
+
+### 换口径后的重新求值（2026-08-12 00:2xZ，manager 当场实测，非沿用旧判词）
+
+| 判据 | 状态 | 依据（可复核） |
+|---|---|---|
+| **① 新鲜度** | **达成** | `.quay/develop-deliver-state.json`：`lastDelivered=6386ff86…`、`hosts {B:200, C:200}`、`timestamp 2026-08-11T23:39:41Z`；**`develop 领先 lastDelivered = 0`**。（旧 release 口径下此项为「落后 2335」——**口径一换，同一天的同一份产物从最差项变成达成项**。） |
+| **② 完整性** | **达成** | ad-arm1 `archguard/.quay/quay-init-state.json` 记 **124 个 laidFiles**（scripts 94 / probes 5 / orchestration 11 / docs 6 / .quay 5 / .claude 3）；落盘实测 `plugin/scripts` **57 个**、tick 文档 **4 份**、skills 2 个，且 `quay-init --loop` **真正驱动起了循环**（8 小时、7 个任务）。**关键前提已核实：该机器上没有 quay 开发树**（`ls -d /home/yale/work/quay` 为空）⇒ 不是亲代自验。 |
+| **③ 可用性** | **未达成（原因已具名）** | 两层循环确实在第三方项目上真跑了（8h / 7 任务 / 3 处真实产品代码变更），**但没有任何一个任务是从 `todo` 起始的**——`git log --diff-filter=A` 逐条查 TASK-81..87 首次入库状态，**7 条全部 `status=ready`**。根因不在循环，在配置：archguard 的 `.quay/config.yml` 写着 **`default_task_status: ready`** ⇒ **`todo` 在那个项目上从不出现，author→ready 闸从未被执行过一次**。 |
+
+**③ 的这个缺口不是「差一点」，是「整条闸没被覆盖」**：author→ready 闸（shape-aware 的
+`artifactsComplete` 判据）**正是本仓库此刻池荒的直接成因**（2026-08-12 00:1x 实测：16 个候选
+全部 `eligible=false`）。而**第三方项目上它一次都没跑过** ⇒ 我们对「这个闸在别人项目上表现如何」
+的了解是 **0**，却已把它当成产品面的一部分交付了出去。
+
+**最便宜的闭合路径（归 outer/人裁定，我不改第三方配置）**：把 archguard 的
+`default_task_status` 改为 `todo`，让**一个**任务真实走一遍 `todo → author→ready 闸 → ready → 落地`。
+一个任务即可闭合 ③，同时首次获得 author→ready 闸在第三方项目上的行为数据。
+
 **归属**：release 怎么打、`files` 字段怎么改、SEA 要不要继续、版本号怎么定＝**outer 的机制决定**；
 manager 只核对上面三条判据的实测值，不代其设计发布流程。
 
@@ -2236,11 +2289,54 @@ outer **看见了并且诊断接得完整**（`aac97a8f` 的提交信息自己�
 晋级自然触发 → 修机制的任务进场。反过来不行。**
 
 **manager 侧的核对**（我每 tick 做，属 AC23 的层间检查）：
-采样 `in-flight`、`cap`（**用 `cap-from-gate.sh` 的 `effective_cap`，不用回退值**，见 ②i-F）、
-`slot-refill` 的 `recommended`；若槽未满，查 outer 本轮 tick 有没有出现上述四类处置之一。
+采样 `in-flight`、`cap`、`slot-refill` 的 `recommended`；若槽未满，查 outer 本轮 tick
+有没有出现上述四类处置之一。
+
+**⚠️ 2026-08-12 更正（本行此前与人的后续裁定冲突，属我自己文件里的漂移）**：
+本段原写「**用 `cap-from-gate.sh` 的 `effective_cap`，不用回退值**」——**该指令已作废**。
+**人 2026-08-09 裁定：固定 `cap=5`；动态 cap 停用；`cap-from-gate`/`process-budget`
+降级为纯观测，不得参与任何裁决。** 我 2026-08-11 08:4x 还亲自据此判定 inner 未采纳该裁定，
+**却没发现同一条陈旧指令就写在我自己这份 AC 里**。⇒ 读数一律用 `--cap 5` 显式传入
+（不带会回退 `CONCURRENCY_CAP_DEFAULT=3` 而给出 `floor=12` 假读数）。
 
 **⚠️ 不覆盖什么**：本条不要求「槽必须满」——可能确实无可做之事；
 只要求**槽未满时上游被追查过、且被退回的候选当轮离开可派发集**。
+**这一格的空缺已于 2026-08-12 实测撞上，补为 AC25b（下条），不就地改写本条编号（硬规则 8）。**
+
+### AC25b（机制·上游追查的补格，2026-08-12 manager 实测后立）：满槽也要判占用者可推进性
+
+**立此条的实测（2026-08-12 00:0xZ）**：`in_flight=5 = cap`，**槽是满的，AC25 因此恒不触发**；
+而逐条枚举五个占用者得到的真值是——3 条 `needs-human` **静止 11.6-11.7 小时**
+（最后动作均为 `merge: catch up integration into task/…`，之后无任何进展）、
+1 条已合入 integration 却未删的**泄漏** worktree（`provision-verify`，ahead=0）、
+只有 1 条是真实推进中的工作。**⇒ 5 个槽里 4 个被无法自行推进的对象占着，inner 因无空槽而 idle。**
+
+**要害**：AC25 的触发量 `in-flight` 是一个**计数**——它在「空槽无货」与「满槽全堵」这两种
+**机制状态完全相反**的情形下报同一个数字，两者的可观测症状也相同（inner 不派发、吞吐低）。
+**⇒ 把「有对象占着」等同于「有工作在进行」，正是硬规则 3（枚举，不布尔）所防的布尔化。**
+我自己也栽在同一处：先据吞吐比推断「槽空着」并投给 outer，再据 worktree 陈旧推断「是泄漏」，
+**25 分钟内两次把推断当发现，两次都错**（台账 `OB-INFERRED-SLOTS-EMPTY-THEN-INFERRED-LEAK-BOTH-WRONG-IN-25-MINUTES`）。
+
+**判据（可机械核对）**：
+```
+触发：in-flight >= cap（槽满——即 AC25 明说不覆盖的那一格）
+动作：逐条枚举每个占用者，取四个字段：
+      {worktree, 分支, 是否已合入 integration, 对应任务 status, 分支最后提交时刻}
+      凡满足任一「不可推进」条件者，当轮处置：
+        ① 已合入 integration（ahead=0）        => 泄漏，移除 worktree 释放槽
+        ② 任务 status = needs-human            => 裁定或退回 todo，二者之一
+        ③ 分支最后提交早于阈值（默认 4 小时）   => 追查为何静止，给出处置
+判读：**槽满 且 存在「不可推进」占用者 且 本轮无任何处置 ⇒ 违规。**
+      **不得以「槽满」为由跳过上游追查——满槽不是在飞的证据。**
+```
+
+**与 AC25 的关系**：AC25 判「槽未满」，AC25b 判「槽满」，两条合起来才无死角；
+**任何一轮都必落进其中恰好一条**，不存在两条都不触发的读数组合。
+**这正是 AC25 的判读此前可以被一个满槽读数静默绕过的原因。**
+
+**首次生效实证（2026-08-12 00:18-00:20）**：本条立起后连报两轮，outer 于 00:18:46 / 00:19:09 / 00:20:02
+连续 fan-in 了其中三条（`suite-blocking-self-lock` / `suite-floor-two-longest` / `loop-completion-path`）
+——**槽位从「满而全堵」回到真实可用**。判据立起到堵点解开约 20 分钟。
 
 #### 【AC25 的前置缺口 —— AC26，2026-08-08 13:2xZ 人直接给出后实测确认】
 
