@@ -1,7 +1,7 @@
 ---
 id: gap-loop-shipping-ac1b-still-red-live-old-path-ref
 title: loop-shipping AC1b 仍红——仓库有对 5 个旧路径的活引用
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -56,3 +56,10 @@ scripts/resource-gate.sh
 - [ ] hits 对象 + 引入者 + 修复贴出（见 Evidence）
 - [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
+
+## Touches
+
+- plugin/test/loop-shipping.test.mjs（AC1b 扫描 hits 定位）
+- plugin/scripts/loop-shipping-exclusion-data.mjs（排除合法引用，若需）
+- 引用旧路径的调用方文件（更新到新路径 plugin/loop/ 或 plugin/scripts/，定位后）
+- tasks/gap-loop-shipping-ac1b-still-red-live-old-path-ref.md（自身：勾 AC + 贴证据）
