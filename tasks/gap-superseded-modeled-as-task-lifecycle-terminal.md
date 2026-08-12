@@ -63,7 +63,7 @@ extra: {}
 
 **invoke（Contract）**：`task list --status superseded` 列出全部 18 条。
 
-**测试**：`packages/quay/test/lifecycle.test.mjs` 加 superseded 硬终态用例（A1 TRANSITIONS/legal*/assertTransition + A5 runPromote/runRetreat/runComplete + C 级 CLI promote/retreat/writable），49 pass；`serve.test.mjs` 加 superseded 独立桶断言；`mcp-server.test.mjs` 加 superseded 可写读回断言。`scripts/test.sh --for-task --allow-thin` 选择集 147 测试全绿（fail 0 / cancelled 0）。全量套件绿由外层 verification-round 验证（DoD 未勾）。
+**测试**：`packages/quay/test/lifecycle.test.mjs` 加 superseded 硬终态用例（A1 TRANSITIONS/legal*/assertTransition + A5 runPromote/runRetreat/runComplete + C 级 CLI promote/retreat/writable），49 pass；`serve.test.mjs` 加 superseded 独立桶断言；`mcp-server.test.mjs` 加 superseded 可写读回断言。`scripts/test.sh --for-task gap-superseded-modeled-as-task-lifecycle-terminal`（Touches 选择集 17 文件）**169 测试，168 pass / 0 fail / 0 cancelled（1 自跳过 live），exit 0**。全量套件绿由外层 verification-round 验证（DoD 未勾）。
 
 ## Test-Files
 
