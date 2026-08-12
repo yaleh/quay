@@ -1614,6 +1614,56 @@ async function loadAndAggregate(root, sinceArg) {
 }
 
 /**
+ * FAST slot view (QUAY_TELEMETRY_FAST_SLOTS=1) — the occupancy.in_flight source accounting-emit.ts's
+ * autoOccupancy uses (task gap-ac39-accounting-emit-layer, AC3: occupancy.in_flight 三层统一).
+ *
+ * The full `loadAndAggregate` is heavy in a large workspace: it annotates EVERY task's throughput
+ * with git history lookups (makeFirstKnownCommitMsByTask — measured ~20s at 369 tasks) and
+ * reverse-scans every closed bracket for closed-but-live agents (detectClosedButLive — ~10s). Slot
+ * VISIBILITY only needs the open-bracket reconcile (few brackets) + non-task subagents; both heavy
+ * annotations are irrelevant to `realConcurrency`, the number the accounting-emit occupancy reads.
+ * Skipping them makes the per-tick in_flight read ~0.6s instead of ~30s.
+ *
+ * Output contract is a SUBSET of the full --slots view with the same core fields: realInFlight /
+ * realConcurrency / reconcileCompliant are computed identically; `closedButLive` is empty (the
+ * reverse-dimension scan is the expensive part and does not change realConcurrency) and
+ * `occupiedSlots` = realConcurrency. PURE READ — never writes.
+ */
+async function loadSlotsFast(root) {
+  const events = [];
+  for await (const e of readAllEvents(root)) events.push(e);
+  const haltEvents = readHaltEvents(root);
+  // firstKnownCommitMsByTask: null → aggregate skips the per-task git history (AC7 annotation is a
+  // throughput nicety, irrelevant to slot visibility; the code is null-safe at line "firstCommitMs =
+  // firstKnownCommitMsByTask ? ... : null").
+  const report = aggregate(events, { nowMs: Date.now(), haltEvents, firstKnownCommitMsByTask: null });
+  let reconcilable = [];
+  let realInFlight = report.inProgress.length;
+  try {
+    const { closed } = reconcileInFlight(report.inProgress, {
+      executorGone: makeDefaultExecutorGone(root),
+      firstKnownCommitMs: () => null,
+    });
+    reconcilable = closed;
+    realInFlight = report.inProgress.length - closed.length;
+  } catch (_) {
+    reconcilable = [];
+    realInFlight = report.inProgress.length;
+  }
+  return {
+    report: {
+      generatedAt: new Date().toISOString(),
+      since: null,
+      ...report,
+      reconcilable,
+      realInFlight,
+      closedButLive: [],
+      occupiedSlots: realInFlight,
+    },
+  };
+}
+
+/**
  * CLI main. @param {string[]} argv — process.argv @returns {Promise<number>} exit code
  */
 export async function main(argv) {
@@ -1882,8 +1932,17 @@ export async function main(argv) {
       }
     }
     let reportWithMeta;
+    // Fast slot view (QUAY_TELEMETRY_FAST_SLOTS=1): the per-tick occupancy.in_flight source
+    // (accounting-emit.ts autoOccupancy). Skips the per-task git-history + closed-but-live scans
+    // (~30s → ~0.6s in a large workspace) — both irrelevant to realConcurrency, the number the
+    // accounting-emit occupancy reads. Same core slot fields; closedButLive is empty by design.
+    const useFast = process.env.QUAY_TELEMETRY_FAST_SLOTS === "1";
     try {
-      ({ report: reportWithMeta } = await loadAndAggregate(root, null));
+      if (useFast) {
+        reportWithMeta = (await loadSlotsFast(root)).report;
+      } else {
+        ({ report: reportWithMeta } = await loadAndAggregate(root, null));
+      }
     } catch (e) {
       console.error(`fast-mode-telemetry: ${e.message}`);
       return 1;
