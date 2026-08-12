@@ -780,7 +780,7 @@ tick-log 与 commit message 沿用同一词汇：派发写「滚动派发」，�
 |---|---|---|
 | → `red` + `reason: failed`（或缺失） | `SUITE-RED`（`stopSignal:true` 确认 stop-dispatch 信号在位；**携带失败位置** `failureLocation` = `state.failures` 的分类：共享闸门 vs 具体测试文件） | **立即**进下面的「红窗分诊」（不等下一次 cron；**派发停/续按失败位置条件化**——共享闸门（`run_static_checks`）⇒ 停；具体测试文件且与新任务触摸集无关 ⇒ 续） |
 | → `red` + `reason: aborted` | `SUITE-RED`（`stopSignal:false`——套件未完成、无正确性结论，**不触发停派**） | **记录 + 等重跑**：不挡 inner 派发；re-tick 时按起跑条件重起 |
-| → `running` | `SUITE-RUNNING` | 「RUNNING 乐观派发执行者」：池有 `dispatchable_disjoint ≥ cap` 就按步骤 4 驱动 inner 照常派发 |
+| → `running` | `SUITE-RUNNING` | 「RUNNING 乐观派发执行者」：池有 `dispatchable_disjoint ≥ cap` 就按步骤 4 驱动 inner 照常派发（不待轮——(a) 块 AC4 的乐观行为被实际动用，AC3） |
 | → `green` | `SUITE-GREEN` | 平静基线，无处置 |
 
 **空槽状态自动触发者（空槽事件执行者层）**：`slot-free-trigger.ts`（Monitor，冷启动 4b3 挂上）在
