@@ -4,14 +4,14 @@
 //
 // Canonical task view-model (quay-native-design.md §2, quay-proposal.md §7.1):
 //   id, title, status, labels, parent, children  (+ body markdown)
-// status ∈ {todo, ready, done, needs-human}      (design §3)
+// status ∈ {todo, ready, done, needs-human, superseded}   (design §3 + superseded terminal)
 
 import fs from "node:fs";
 import path from "node:path";
 import YAML from "yaml";
 import type { Task } from '../../quay/src/abi.ts';
 
-export const VALID_STATUSES = ["todo", "ready", "done", "needs-human"];
+export const VALID_STATUSES = ["todo", "ready", "done", "needs-human", "superseded"];
 
 /**
  * SHAPE_REGISTRY (AC1, single source of truth): the one place the task-shape →
