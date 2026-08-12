@@ -97,3 +97,7 @@ resume    第 4 项检查 / scoped 门 / 全量验证分步提交，任一步完
 reviewer: outer
 at: 2026-08-10
 changed: manager 18:4x 核到实现层——slot-refill :243 只遍历 pool.ready + 3 项 step-4 检查，not-yet-flipped/excluded grep 0 命中，而 ready-pool-check 已算出 16 excluded/14 nyf。今日 25 条重派提交自述。处方：第 4 项 step-4 检查跳过 not-yet-flipped（manager 推荐 B）。实现归 inner，判定归 outer
+
+## Cross-annotation（inner 2026-08-11）
+
+本任务 = 类级任务 `gap-judgment-computed-not-wired-to-action` 的 **instance-1（18:4x not-yet-flipped）**——「信号算了，没接进推荐路径」。类级纪律「每个机械判据必须有消费它的动作」由 `plugin/scripts/judgment-consumer-check.ts` 审计；本任务的修法（slot-refill 第 4 项 step-4 检查 `isNotYetFlippedSkip`）即 not-yet-flipped 的消费动作，在审计 registry 中列 **wired**。
