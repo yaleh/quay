@@ -44,14 +44,32 @@ pgrep -xc node-MainThread => 0；pgrep -cf 'bin/node' => 26（真值同量级非
 
 ## Plan
 
-1. **候选 pid 列表来源不写死 comm 字面量**：cmdline 取候选 → 既有 `is_test_cmdline` 分类（process-budget.sh 已有该层）；
-   或运行时解析一次真实 comm 并**自检「命中数 > 0 否则报仪器故障」**（把「仪器坏了」变成可报）。
-2. **AC4 禁 `pgrep -f` 的理由保留**（会把 MCP 等非测试 node 算成测试 worker）——不能简单改 `-f`。
-3. 机械检查（instrument-failure-check / resource-gate.test）同步修正——不背书恒 0 字面量。
+1. **候选 pid 列表来源不写死 comm 字面量**：cmdline 取候选 → 既有 `is_test_cmdline` 分类（process-budget.sh 已有该层）。
+2. **自检用双读法互校（非单读命中≥1——调用方自己就是 node 时命中≥1 是结构必然，硬规则 4 的不可取假量）**：
+   ```
+   comm_count    = comm 精确匹配计数
+   cmdline_count = cmdline 取候选（bin/node）计数
+   if comm_count==0 && cmdline_count>0 ⇒ 报【仪器故障】（不是「机器空闲」）
+   ```
+   **不需要知道正确 comm ⇒ 换机/换 Node 继续有效**——写「读宿主的关系」不写字面量（推论二要的形态）。
+3. **AC4 禁 `pgrep -f` 的理由保留**（会把 MCP 等非测试 node 算成测试 worker）——不能简单改 `-f`。
+4. **机械检查同步修正**（instrument-failure-check 族1/族4 fixture、resource-gate.test.mjs:202-207）——不背书恒 0 字面量。
+5. **本任务【取代】gap-no-resource-awareness AC4 / gap-fixed-cap-5 AC4**——不改 7 个 done 任务体的 AC
+   （改历史=改完「当时验了什么」不可考；cp 教训：更正前提须回滚产物，正确形态=新任务显式取代 + 只改活代码）。
+6. **7 个引用任务体三判（manager 2026-08-12，按位置）**：
+   - A=会把修复顶回去 3 条：`gap-no-resource-awareness-heavy-ops-run-blind:182`（AC4 强制字面量 + 明文禁 -f/grep -x node）/
+     `gap-fixed-cap-5-dynamic-cap-retired:85`（AC4 钉死枚举来源）/ `gap-manager-instrument-failures-need-mechanical-detection-not-carefulness:85-87`
+     （仪器故障检查器 fixture 把错字面量当正确形式=活代码，改了才不会复发）
+   - B=机制在本机 inert 2 条：`gap-process-budget-counts-infra-as-test-concurrency-cap-pinned-1`（分类输入恒空 ⇒ in_use 恒 0，
+     修复把「高估」修成「恒零」）/ `gap-worktree-scoped-runs-consume-resources-but-produce-no-signal:132`（measure 恒 0，
+     该任务全部价值消失）
+   - C=派生 2 条：`gap-test-concurrency-cap-does-not-scope-nested-spawns`（vhs 基线，只影响复测能力）/
+     `gap-concurrency-derivation-reverted-...`（叙述，无独立判据）
 
 ## AC
 
-- [ ] AC1: 候选 pid 获取不依赖 comm 字面量（cmdline 取候选走 is_test_cmdline，或运行时解析真 comm + 自检命中>0 否则报仪器故障）
+- [ ] AC1: 候选 pid 获取不依赖 comm 字面量（cmdline 取候选走 is_test_cmdline 分类）
+- [ ] AC1b: 双读法自检——comm_count==0 && cmdline_count>0 ⇒ 报仪器故障（非「机器空闲」）；不需要知道正确 comm
 - [ ] AC2: resource-gate node_procs / orphan / worktree-scoped 三个读数非恒 0（真套件跑时有值）
 - [ ] AC3: process-budget budget_in_use 非恒 0（真测试进程跑时有值）
 - [ ] AC4: 机械检查修正（不背书 node-MainThread 字面量）；负控：旧字面量被报仪器故障
