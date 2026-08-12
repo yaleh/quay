@@ -60,11 +60,22 @@ echo "PC=$(git log --oneline --since='1 day ago' | wc -l)"
 lat=$(gh release view --json tagName -q .tagName 2>/dev/null); echo "release=$lat ahead=$(git rev-list --count $lat..develop 2>/dev/null)"
 python3 -c "import json;d=json.load(open('packages/quay/package.json'));print('plugin_in_files='+str('plugin' in d.get('files',[])))"
 python3 -c "import json;print('manifest='+json.load(open('plugin/.claude-plugin/plugin.json'))['version'])"
-grep -o 'avg10=[0-9.]*' /proc/pressure/cpu | head -1; echo "load1=$(cut -d' ' -f1 /proc/loadavg) node=$(pgrep -c node)"
+grep -o 'avg10=[0-9.]*' /proc/pressure/cpu | head -1; echo "load1=$(cut -d' ' -f1 /proc/loadavg) node=$(pgrep -cf 'bin/node')"
+# ^ 2026-08-12：`pgrep -c node`（按 comm 匹配）在本机【恒返回 0】——实测同一时刻 `pgrep -cf node`=68、
+#   `ps -eo args | grep -c '^/home/yale/.nvm.*bin/node'`=24、load1=14.08。而 `ps -eo comm | grep -cx node` 也=0
+#   ⇒ 本机 node 进程的 comm 不是字面 "node"。**一个恒为 0 的读数携带零信息**——与已退休的判准 ⑥、
+#   与 mon_outer 那个「硬编码签名⇒恒 DEAD」的布尔同族。改为 `-f` 按完整命令行匹配。
+#   **一般形态：读数与 load1 这类独立量矛盾时，先怀疑读法，别急着当成系统状态突变（⑤）。**
 for p in quay archguard meta-cc; do [ -f /home/yale/work/$p/.halt ] && echo "halt:$p"; done
 tmux list-panes -a -F '#{session_name}:#{window_name}=#{pane_current_command}' 2>/dev/null | grep quay-0 | tr '\n' ' '; echo
 echo "outer_bq=$(tail -40 orchestration/tick-log.md | grep -oE '^> \*\*[0-9]{2}:[0-9]{2}Z' | tail -1)"
 echo "outer_tbl=$(grep -m1 '^| 2026' orchestration/tick-log.md | grep -oE '[0-9]{2}:[0-9]{2}Z')"
+echo "outer_li=$(tail -40 orchestration/tick-log.md | grep -oE '^- \`[0-9]{2}:[0-9]{2}[xZ]*\`' | tail -1)"
+echo "outer_any=$(tail -40 orchestration/tick-log.md | grep -oE '[0-9]{2}:[0-9]{2}[xX]?Z' | tail -1)  # 三种写死格式全空时的兜底"
+# ^ 2026-08-12：outer 的 tick-log 换到【第三种】格式（`- \`HH:MMZ\` \`verb\` — …` 列表项），
+#   而上面两条写死格式的读法【都】静默返回空——正是 manager-loop-tick.md:665 钉过的
+#   「日志格式是会变的，而写死格式的读法不会报错，只会安静地返回旧值」，这次连旧值都没有，返回空。
+#   ⇒ 加第三种 + 一个不依赖行首形态的兜底。**判读：`outer_any` 有值而前三个全空 ⇒ 格式又变了，当轮补读法。**
 python3 -c "
 import json,os,time
 d=json.load(open('.quay/full-suite-state.json'))
@@ -79,6 +90,33 @@ echo "commits30m=$(git log --oneline --all --since='30 minutes ago' | grep -vc '
 echo "mon_procs=$(ps -eo args | grep -cE 'SUITE-TERMINAL|full-suite-state\.json' | tr -d ' ') （枚举而非布尔——见下方注释）"
 ps -eo pid,etime,args | grep -E 'SUITE-TERMINAL|full-suite-state\.json' | grep -v grep | sed 's/^\(.\{110\}\).*/\1…/'
 python3 orchestration/manager-anchor-check.py
+if [ -f .quay/manager-write-freeze.txt ]; then
+  fz=$(grep -v '^#' .quay/manager-write-freeze.txt | grep -v '^$')
+  since=$(date -u -d "@$(stat -c %Y .quay/manager-write-freeze.txt)" +%Y-%m-%dT%H:%M:%SZ)
+  echo "freeze_active=1 paths=$(echo "$fz" | wc -l) since=$since"
+  echo "freeze_violations=$(git log --since="$since" --format='' --name-only 2>/dev/null | sort -u | grep -Fx "$fz" | tee /tmp/.mgr-fz-hit | wc -l)"
+  [ -s /tmp/.mgr-fz-hit ] && { echo "  ⚠️ 冻结成立后仍被改的路径（逐条）："; sed 's/^/    /' /tmp/.mgr-fz-hit; }
+  # 负控制：谓词对一个已知在清单内的路径必须命中，否则 0 是谓词坏不是真 0（今天补的「零计数」那一半）
+  echo "freeze_predicate_selftest=$(echo 'plugin/scripts/manager-start.sh' | grep -cFx "$fz")  # 必须=1"
+else
+  echo "freeze_active=0（无冻结清单）"
+fi
+# ^ 2026-08-12：vhs-merge 那棵树持有 10 个未解冲突,其中 7 个是 manager 层文件。outer 请求冻结、我确认。
+#   **不写成承诺而写成读数,是因为 C17**：一条规则若「守」与「不守」在记录上无法区分,它就只能靠意志——
+#   而我今天已实证过一次「守不住」（C8 读了 7 次引用了 7 次仍违反 8 次）。
+#   ⇒ 违反表现为 freeze_violations 非 0 + 逐条列出路径（枚举而非布尔,硬规则③）。
+#   解冻条件写在清单文件头部;删除清单时须在 tick-log 记一行。
+echo "=== inbox（A15：判据是列目录本身，不看计数器；最近 5 封 + 总数）==="
+ls -la --time-style=+%H:%MZ .quay/manager-inbox/ 2>/dev/null | tail -n +2 | sort -k6 -r | head -5
+echo "inbox_total=$(ls -1 .quay/manager-inbox/ 2>/dev/null | wc -l)"
+# ^ 2026-08-12 补进执行点（人问「是你的 tick 操作漏了？」后查实）：A15「收件箱每轮必查」此前只写在
+#   orchestration/manager-tick-core.md 的散文核里，而【本 READ_CMD 从不测它】——我 10:20Z 查过一次后
+#   连续两轮 tick 未查，期间漏读 outer 10:39Z 报的 round-18 infra-error 根因（resource-gate.test.mjs
+#   故意杀子进程、stderr 的 Killed 被 childKilledBySignal 误判）与 10:28Z 点名给 manager 的 inner /clear 裁定。
+#   代价：我 10:54Z 把 outer 已报过的事当作自己的发现讲回给它，且我那版只有症状没有根因。
+#   ⚠️ A15 本身就是 2026-08-09 那次漏读 6 封 archguard 报告之后补的——**上次只补进散文核、没补进执行点，
+#   于是同一个漏读复发**。这正是档案点名的「修正写在复盘小节、执行块不动 = 修了个没人执行的副本」。
+#   ⇒ 判据放进读数块：漏查会表现为读数里缺这一块（可被 ⑥′ 自检抓到），而不是靠我记得。
 # ^ 2026-08-07：我把 suite 监视器从 suite-state-trigger --monitor 换成了自记 prev 的轮询
 #   （原因：suite-state-trigger 用共享的 .quay/suite-state-last.json 做边沿触发，
 #    outer 也挂着一个实例，两者互偷事件——我那个挂了 1h45m 零事件）。

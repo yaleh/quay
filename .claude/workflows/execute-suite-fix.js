@@ -99,8 +99,9 @@ ${CONTEXT}
 1. 读 ${stateDir}/full-suite-state.json 与 ${stateDir}/verification-round.jsonl 末尾：当前是否已有 suite 在跑（state=running）？上一轮红的话 failures[] 是什么？
 2. 若上一轮是真实红轮（reason=failed 且 tests>=2900）：读【全部】failures[] 与归档日志，逐条诊断根因并修复，在 worktree 里 commit。
 3. 若上一轮是非验证终态（static-check/aborted/timeout/截断）：修掉阻塞它的东西（静态检查红先修静态检查；resource-gate WAIT/single-flight lock 则等待）。
-4. 然后【启动】全量 suite：${launchCmd} —— 前台 Bash 跑（&+disown 立即返回），然后轮询 state.json 最多 ~20s 直到 state=running 出现（短促确认），再返回。禁止 Bash(run_in_background:true)。
-5. 若 suite 已经在跑（state=running），直接返回，不重复启动。
+4. 若上一轮为绿（state=green）：仍需在 worktree 启动一轮全量 suite，以产出 scope=worktree 的验证记录（batch-merge 闸的唯一数据源）。
+5. 然后【启动】全量 suite：${launchCmd} —— 前台 Bash 跑（&+disown 立即返回），然后轮询 state.json 最多 ~20s 直到 state=running 出现（短促确认），再返回。禁止 Bash(run_in_background:true)。
+6. 若 suite 已经在跑（state=running），直接返回，不重复启动。
 返回 { launched: bool, runId, worktreeHead: 当前 worktree HEAD, failuresFixed: string[], note }。
 不要做任何等待决策——等待由 workflow 脚本控制。`,
   { schema: { type: 'object', properties: { launched: { type: 'boolean' }, runId: { type: 'string' }, worktreeHead: { type: 'string' }, failuresFixed: { type: 'array', items: { type: 'string' } }, note: { type: 'string' } }, required: ['launched', 'worktreeHead'] } }
