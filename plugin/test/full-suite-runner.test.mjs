@@ -51,6 +51,10 @@ import {
   DEFAULT_SYSTEMD_RUN_LIMITS,
   parseSystemdRunLimits,
   systemdRunAvailable,
+  parseSystemdConsumedLine,
+  parseSystemdTimespanToSeconds,
+  parseSystemdBytesToMb,
+  readScopeConsumedLoad,
 } from "../scripts/full-suite-runner.ts";
 import { runOnce, classifyFailure, routeRed, shouldStopDispatch, shouldDispatchOnRed } from "../scripts/suite-state-trigger.ts";
 
@@ -2916,4 +2920,193 @@ test("AC6 — routeRed/shouldStopDispatch treat crashed like aborted (no code-ri
   assert.notEqual("crashed", "aborted", "crashed is a DISTINCT reason value from aborted (consumer can distinguish)");
   assert.equal(shouldStopDispatch({ state: "red", reason: "failed" }), true, "test-failure red still stops (unchanged, AC5)");
   assert.equal(shouldStopDispatch({ state: "red", reason: "static-check" }), true, "static-check red still stops (unchanged, AC3)");
+});
+
+// ── gap-verification-round-load-fields-from-systemd ────────────────────────────────────────────────
+// The runner must carry three systemd-scope load fields (cpu_time_s / mem_peak_mb / swap_peak_mb)
+// into each verification-round record, parsed from the scope's `Consumed` journal line. Traps
+// (manager 2026-08-12): (1) scope_unit is captured at round START into the round's OWN record, never
+// re-read from the shared single-slot suite-cgroup-evidence.txt at teardown; (2) the Consumed line
+// appears ~2s AFTER the scope ends, so the read is a BOUNDED poll, not an immediate read; (3) a read
+// failure is explicit null + reason, never 0.
+
+test("load-fields unit — parseSystemdTimespanToSeconds handles s / min+s / h+min+s forms", () => {
+  assert.ok(Math.abs(parseSystemdTimespanToSeconds("3.005s") - 3.005) < 1e-6, "decimal seconds");
+  assert.ok(Math.abs(parseSystemdTimespanToSeconds("48min 3.887s") - (48 * 60 + 3.887)) < 1e-6, "min+s");
+  assert.ok(Math.abs(parseSystemdTimespanToSeconds("1h 2min 3.456s") - 3723.456) < 1e-6, "h+min+s");
+  assert.equal(parseSystemdTimespanToSeconds("not a timespan"), null, "garbage -> null");
+  assert.equal(parseSystemdTimespanToSeconds(""), null, "empty -> null");
+});
+
+test("load-fields unit — parseSystemdBytesToMb converts IEC binary units (never misreads B as zero-absence)", () => {
+  assert.ok(Math.abs(parseSystemdBytesToMb("1.4G") - 1.4 * 1024) < 0.01, "1.4G (IEC) -> 1433.6 MB");
+  assert.equal(parseSystemdBytesToMb("0B"), 0, "0B -> 0 MB (a REAL zero, distinct from null absence)");
+  assert.equal(parseSystemdBytesToMb("512M"), 512, "512M -> 512 MB");
+  assert.equal(parseSystemdBytesToMb("1024K"), 1, "1024K -> 1 MB");
+  assert.equal(parseSystemdBytesToMb("1.5GiB"), 1.5 * 1024, "1.5GiB (explicit iB suffix)");
+  assert.equal(parseSystemdBytesToMb("abc"), null, "garbage -> null");
+});
+
+test("load-fields unit — parseSystemdConsumedLine parses the REAL full-suite Consumed line (48min + IEC memory)", () => {
+  const p = parseSystemdConsumedLine(
+    "Aug 12 18:42:48 ser702195427338 systemd[2938]: run-r8f2917794c3948958290f71b58ccbdae.scope: Consumed 48min 3.887s CPU time, 1.4G memory peak, 0B memory swap peak.",
+  );
+  assert.ok(p, "the real observed full-suite Consumed line parses");
+  assert.ok(Math.abs(p.cpu_time_s - (48 * 60 + 3.887)) < 1e-6, "48min 3.887s CPU -> seconds");
+  assert.ok(Math.abs(p.mem_peak_mb - 1.4 * 1024) < 0.01, "1.4G memory peak -> 1433.6 MB");
+  assert.equal(p.swap_peak_mb, 0, "0B memory swap peak -> 0 MB (real zero)");
+});
+
+test("load-fields unit — parseSystemdConsumedLine CPU-time-only line → mem/swap null (memory accounting off), never 0", () => {
+  const p = parseSystemdConsumedLine(
+    "Aug 12 18:47:13 ser702195427338 systemd[2938]: run-r8736381d406c478b9c514ff138f59979.scope: Consumed 3.071s CPU time.",
+  );
+  assert.ok(p, "a CPU-time-only Consumed line parses");
+  assert.ok(Math.abs(p.cpu_time_s - 3.071) < 1e-6, "3.071s CPU");
+  assert.equal(p.mem_peak_mb, null, "memory peak ABSENT in the line -> null, never 0 (trap 3)");
+  assert.equal(p.swap_peak_mb, null, "swap peak ABSENT in the line -> null, never 0");
+});
+
+test("load-fields unit — parseSystemdConsumedLine handles 1h form and rejects non-Consumed lines", () => {
+  const p = parseSystemdConsumedLine(
+    "run-x.scope: Consumed 1h 2min 3.456s CPU time, 512M memory peak, 10M memory swap peak.",
+  );
+  assert.ok(p, "1h 2min 3.456s form parses");
+  assert.ok(Math.abs(p.cpu_time_s - 3723.456) < 1e-6);
+  assert.equal(p.mem_peak_mb, 512, "512M -> 512 MB");
+  assert.equal(p.swap_peak_mb, 10, "10M -> 10 MB");
+  assert.equal(parseSystemdConsumedLine("Aug 12 18:42:48 h systemd[1]: Started run-x.scope."), null, "Started line is not a Consumed line");
+  assert.equal(parseSystemdConsumedLine("no consumed shape here"), null, "unrelated line -> null");
+});
+
+test("load-fields unit — readScopeConsumedLoad seam: a Consumed line yields the three fields + null error", async () => {
+  process.env.QUAY_TEST_JOURNALCTL_OUTPUT =
+    "Aug 12 18:42:48 h systemd[2938]: run-seam.scope: Consumed 2957.234s CPU time, 1.5G memory peak, 0B memory swap peak.";
+  try {
+    const r = await readScopeConsumedLoad("run-seam.scope", "2026-08-12T00:00:00.000Z");
+    assert.equal(r.load_read_error, null, "a full read has no error");
+    assert.ok(Math.abs(r.cpu_time_s - 2957.234) < 1e-6, "cpu_time_s parsed (the ≈2957s/round stable denominator)");
+    assert.ok(Math.abs(r.mem_peak_mb - 1.5 * 1024) < 0.01, "mem_peak_mb parsed (1.5G)");
+    assert.equal(r.swap_peak_mb, 0, "swap_peak_mb 0B");
+  } finally {
+    delete process.env.QUAY_TEST_JOURNALCTL_OUTPUT;
+  }
+});
+
+test("load-fields unit — readScopeConsumedLoad seam: no Consumed line → explicit null + reason (trap 3), NEVER 0", async () => {
+  process.env.QUAY_TEST_JOURNALCTL_OUTPUT = "Aug 12 18:42:48 h systemd[2938]: Started run-seam.scope.";
+  try {
+    const r = await readScopeConsumedLoad("run-seam.scope", "2026-08-12T00:00:00.000Z");
+    assert.equal(r.cpu_time_s, null, "cpu_time_s null, never 0");
+    assert.equal(r.mem_peak_mb, null, "mem_peak_mb null, never 0");
+    assert.equal(r.swap_peak_mb, null, "swap_peak_mb null, never 0");
+    assert.match(r.load_read_error, /no Consumed line/, "the reason names the failure");
+  } finally {
+    delete process.env.QUAY_TEST_JOURNALCTL_OUTPUT;
+  }
+});
+
+test("load-fields — a round record carries scope_unit + the three load fields (seam), load_read_error null", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-load-ok-"));
+  const { f, dir } = fakeSuite(GREEN_SUITE);
+  try {
+    const child = runRunner({
+      root,
+      command: `bash ${f}`,
+      laneCount: 2,
+      env: {
+        QUAY_TEST_SCOPE_UNIT: "run-seam-ok.scope",
+        QUAY_TEST_JOURNALCTL_OUTPUT:
+          "Aug 12 18:42:48 h systemd[2938]: run-seam-ok.scope: Consumed 2957.234s CPU time, 1.5G memory peak, 0B memory swap peak.",
+      },
+    });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, "a green hermetic round stays green with the load seam set");
+    const rec = lastRoundRecord(root);
+    assert.equal(rec.scope_unit, "run-seam-ok.scope", "the record carries THIS round's captured scope_unit (trap 1 — round-captured, not shared-file)");
+    assert.ok(Math.abs(rec.cpu_time_s - 2957.234) < 1e-6, "cpu_time_s landed in the record");
+    assert.ok(Math.abs(rec.mem_peak_mb - 1.5 * 1024) < 0.01, "mem_peak_mb landed in the record");
+    assert.equal(rec.swap_peak_mb, 0, "swap_peak_mb landed in the record");
+    assert.equal(rec.load_read_error, null, "a full read has load_read_error null");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("load-fields trap-1 反证 — TWO rounds carry DIFFERENT scope_unit (round-captured, not a shared-file re-read)", async () => {
+  // Two hermetic rounds with DIFFERENT seam units. If the record re-read the shared single-slot
+  // suite-cgroup-evidence.txt at teardown, both records would name the SAME last-written unit — the
+  // shadow-copy-drift shape. Distinct values prove each record carries ITS round's captured unit.
+  const units = ["run-seam-a.scope", "run-seam-b.scope"];
+  for (const unit of units) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-load-trap1-"));
+    const { f, dir } = fakeSuite(GREEN_SUITE);
+    try {
+      const child = runRunner({
+        root,
+        command: `bash ${f}`,
+        laneCount: 2,
+        env: {
+          QUAY_TEST_SCOPE_UNIT: unit,
+          QUAY_TEST_JOURNALCTL_OUTPUT: `Aug 12 h systemd[1]: ${unit}: Consumed 3.000s CPU time, 128M memory peak, 0B memory swap peak.`,
+        },
+      });
+      await waitExit(child);
+      const rec = lastRoundRecord(root);
+      assert.equal(rec.scope_unit, unit, `round record names ITS round's unit ${unit}`);
+      // Hermetic mode never writes the shared evidence file — if the record re-read it, scope_unit
+      // would be ABSENT; the seam-captured value proves the record reads the memory variable.
+      assert.ok(!fs.existsSync(path.join(root, ".quay", "suite-cgroup-evidence.txt")), "no shared evidence file written (hermetic)");
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+});
+
+test("load-fields trap-3 — a failed journal read lands EXPLICIT null + load_read_error (never 0)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-load-fail-"));
+  const { f, dir } = fakeSuite(GREEN_SUITE);
+  try {
+    const child = runRunner({
+      root,
+      command: `bash ${f}`,
+      laneCount: 2,
+      env: {
+        QUAY_TEST_SCOPE_UNIT: "run-seam-fail.scope",
+        QUAY_TEST_JOURNALCTL_OUTPUT: "Started run-seam-fail.scope (no Consumed line yet).",
+      },
+    });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, "a load-read failure never fails the suite verdict (best-effort)");
+    const rec = lastRoundRecord(root);
+    assert.equal(rec.scope_unit, "run-seam-fail.scope", "scope_unit still captured (trap 1)");
+    assert.equal(rec.cpu_time_s, null, "cpu_time_s explicit null, never 0 (trap 3)");
+    assert.equal(rec.mem_peak_mb, null, "mem_peak_mb explicit null, never 0 (trap 3)");
+    assert.equal(rec.swap_peak_mb, null, "swap_peak_mb explicit null, never 0 (trap 3)");
+    assert.match(rec.load_read_error, /no Consumed line/, "the reason names the failure (trap 3)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("load-fields — a NON-systemd round (no scope unit) OMITS all four load fields (缺键 contract, reader tolerates absence)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-load-absent-"));
+  const { f, dir } = fakeSuite(GREEN_SUITE);
+  try {
+    const child = runRunner({ root, command: `bash ${f}`, laneCount: 2 }); // no QUAY_TEST_SCOPE_UNIT seam
+    const { code } = await waitExit(child);
+    assert.equal(code, 0);
+    const rec = lastRoundRecord(root);
+    assert.equal(rec.scope_unit, undefined, "no scope_unit on a non-systemd round");
+    assert.equal(rec.cpu_time_s, undefined, "no cpu_time_s on a non-systemd round");
+    assert.equal(rec.mem_peak_mb, undefined, "no mem_peak_mb on a non-systemd round");
+    assert.equal(rec.swap_peak_mb, undefined, "no swap_peak_mb on a non-systemd round");
+    assert.equal(rec.load_read_error, undefined, "no load_read_error on a non-systemd round");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

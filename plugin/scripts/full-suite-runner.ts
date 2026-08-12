@@ -517,6 +517,182 @@ export function readLoadAvg(): number {
   }
 }
 
+// ── gap-verification-round-load-fields-from-systemd ────────────────────────────────────────────────
+// The phase-lane experiment (#26) needs a per-round 关注负载 (load focus) axis. systemd already
+// records the consumed CPU time / memory peak / memory swap peak for every scope and writes a
+// `Consumed` journal line when the scope exits (`journalctl --user -u <scope_unit>`). The runner
+// captures the scope_unit at round START (the fire-and-forget below), then reads the Consumed line
+// with BOUNDED POLLING (the line appears ~2s AFTER the scope ends) and carries the three fields into
+// the verification-round record — zero new instrumentation, kernel-accumulated exact values (NOT the
+// 34×5s-sample 20.8% extrapolation). Traps (manager 2026-08-12, adopted verbatim):
+//   1. suite-cgroup-evidence.txt is a SINGLE-SLOT file overwritten each round — the scope_unit must
+//      be captured into THIS round's OWN record at round start, NOT read back from the shared file
+//      at teardown (shadow-copy-drift shape).
+//   2. the Consumed line appears ~2s AFTER the round ends — reading the journal at subprocess-exit is
+//      empty; poll with a bounded timeout (≤5s, 200ms interval). The runner lives OUTSIDE the scope
+//      (it spawns systemd-run --scope wrapping the suite), so it survives the child's exit and is
+//      eligible to poll.
+//   3. a failed read must be explicit null + reason, NEVER 0 (硬规则⑥ 缺值=未查≠为假) —
+//      `mem_peak_mb: 0` reads as "this round used no memory"; `cpu_time_s: 0` makes the parallelism
+//      quotient infinite.
+
+/** A parsed systemd `Consumed` journal line. mem/swap are null when the line omitted them (memory
+ * accounting off — the line is then `Consumed <T> CPU time.`); cpu_time_s is always present when the
+ * line matched. */
+export interface ParsedConsumedLine {
+  cpu_time_s: number;
+  mem_peak_mb: number | null;
+  swap_peak_mb: number | null;
+}
+
+/** The round's scope-load read result: the three fields + a read-error reason (trap 3 — never 0). */
+export interface ScopeConsumedLoadRead {
+  cpu_time_s: number | null;
+  mem_peak_mb: number | null;
+  swap_peak_mb: number | null;
+  load_read_error: string | null;
+}
+
+/** Convert systemd's human timespan (`3.005s`, `48min 3.887s`, `1h 2min 3.456s`) to seconds. */
+export function parseSystemdTimespanToSeconds(raw: string): number | null {
+  const parts = raw.match(/(\d+(?:\.\d+)?)\s*(h|min|s)/g);
+  if (!parts) return null;
+  let total = 0;
+  for (const p of parts) {
+    const m = p.match(/(\d+(?:\.\d+)?)\s*(h|min|s)/);
+    if (!m) return null;
+    const v = Number(m[1]);
+    if (!Number.isFinite(v)) return null;
+    if (m[2] === "h") total += v * 3600;
+    else if (m[2] === "min") total += v * 60;
+    else total += v;
+  }
+  return total;
+}
+
+/** Convert systemd's human byte size (`1.4G`, `512M`, `0B` — IEC binary units) to MB. */
+export function parseSystemdBytesToMb(raw: string): number | null {
+  const m = String(raw).trim().match(/^(\d+(?:\.\d+)?)\s*([KMGTPE]?)(?:i?B)?$/i);
+  if (!m) return null;
+  const v = Number(m[1]);
+  if (!Number.isFinite(v)) return null;
+  const unit = m[2].toUpperCase();
+  const mult =
+    unit === "K"
+      ? 1024
+      : unit === "M"
+        ? 1024 ** 2
+        : unit === "G"
+          ? 1024 ** 3
+          : unit === "T"
+            ? 1024 ** 4
+            : unit === "P"
+              ? 1024 ** 5
+              : unit === "E"
+                ? 1024 ** 6
+                : 1;
+  return (v * mult) / 1024 ** 2;
+}
+
+/**
+ * Parse a systemd `Consumed` journal line:
+ *   `run-<uuid>.scope: Consumed 48min 3.887s CPU time, 1.4G memory peak, 0B memory swap peak.`
+ * Returns null when the line has no Consumed shape (e.g. the scope's `Started …` line). mem/swap are
+ * null when the line omitted them (memory accounting off — the line is then `Consumed <T> CPU time.`).
+ */
+export function parseSystemdConsumedLine(line: string): ParsedConsumedLine | null {
+  const m = /Consumed\s+(.+?)\s+CPU time/i.exec(line);
+  if (!m) return null;
+  const cpu_time_s = parseSystemdTimespanToSeconds(m[1]);
+  if (cpu_time_s === null) return null;
+  const memM = /,\s*(\S+)\s+memory peak/i.exec(line);
+  const swapM = /,\s*(\S+)\s+memory swap peak/i.exec(line);
+  return {
+    cpu_time_s,
+    mem_peak_mb: memM ? parseSystemdBytesToMb(memM[1]) : null,
+    swap_peak_mb: swapM ? parseSystemdBytesToMb(swapM[1]) : null,
+  };
+}
+
+/** Find the first `Consumed` line in a journalctl blob and parse it (null when absent). */
+export function parseConsumedFromJournalOutput(output: string): ParsedConsumedLine | null {
+  for (const l of output.split("\n")) {
+    const parsed = parseSystemdConsumedLine(l);
+    if (parsed) return parsed;
+  }
+  return null;
+}
+
+/**
+ * Read the scope's `Consumed` journal line with BOUNDED POLLING (trap 2 — the line appears ~2s AFTER
+ * the scope ends; a single read at subprocess-exit is empty). Polls `journalctl --user -u <unit>
+ * --since <startedAt> --no-pager` every intervalMs until a Consumed line appears or timeoutMs elapses
+ * (≤5s default). Returns explicit null + load_read_error on ANY failure (trap 3 — never 0).
+ * Seam (hermetic): QUAY_TEST_JOURNALCTL_OUTPUT — when set, the "journal output" is read from the env
+ * var exactly once (no journalctl, no polling) so deterministic hermetic tests exercise the same
+ * parse-and-record path without a real systemd scope.
+ */
+export async function readScopeConsumedLoad(
+  scopeUnit: string,
+  sinceIso: string,
+  opts: { timeoutMs?: number; intervalMs?: number } = {},
+): Promise<ScopeConsumedLoadRead> {
+  const timeoutMs = opts.timeoutMs ?? 5_000;
+  const intervalMs = opts.intervalMs ?? 200;
+  const seam = process.env.QUAY_TEST_JOURNALCTL_OUTPUT;
+  const deadline = Date.now() + timeoutMs;
+  let lastError: string | null = null;
+  for (;;) {
+    let output: string;
+    if (seam !== undefined) {
+      // Hermetic seam — single-shot, no polling (deterministic).
+      const found = parseConsumedFromJournalOutput(seam);
+      if (found) {
+        return {
+          cpu_time_s: found.cpu_time_s,
+          mem_peak_mb: found.mem_peak_mb,
+          swap_peak_mb: found.swap_peak_mb,
+          load_read_error:
+            found.mem_peak_mb === null || found.swap_peak_mb === null
+              ? "Consumed line reported CPU time but not memory peak/swap (memory accounting off)"
+              : null,
+        };
+      }
+      return {
+        cpu_time_s: null,
+        mem_peak_mb: null,
+        swap_peak_mb: null,
+        load_read_error: `no Consumed line in QUAY_TEST_JOURNALCTL_OUTPUT seam for ${scopeUnit}`,
+      };
+    }
+    try {
+      output = execFileSync(
+        "journalctl",
+        ["--user", "-u", scopeUnit, "--since", sinceIso, "--no-pager"],
+        { encoding: "utf8", timeout: 2_000, stdio: ["ignore", "pipe", "ignore"] },
+      );
+      const found = parseConsumedFromJournalOutput(output);
+      if (found) {
+        return {
+          cpu_time_s: found.cpu_time_s,
+          mem_peak_mb: found.mem_peak_mb,
+          swap_peak_mb: found.swap_peak_mb,
+          load_read_error:
+            found.mem_peak_mb === null || found.swap_peak_mb === null
+              ? "Consumed line reported CPU time but not memory peak/swap (memory accounting off)"
+              : null,
+        };
+      }
+      lastError = `no Consumed line in journal for ${scopeUnit} within ${timeoutMs}ms`;
+    } catch (e) {
+      lastError = `journalctl failed: ${e instanceof Error ? e.message : String(e)}`;
+    }
+    if (Date.now() >= deadline) break;
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+  return { cpu_time_s: null, mem_peak_mb: null, swap_peak_mb: null, load_read_error: lastError ?? "unknown" };
+}
+
 export interface SuiteRoundRecord {
   round: number;
   startedAt: string;
@@ -606,6 +782,25 @@ export interface SuiteRoundRecord {
    */
   floor_ms?: number[];
   ceiling?: string[];
+  /**
+   * gap-verification-round-load-fields-from-systemd — the suite cgroup scope's consumed CPU time /
+   * memory peak / memory swap peak, parsed from systemd's `Consumed` journal line (kernel-accumulated
+   * exact values — the phase-lane experiment's per-round 关注负载 axis, zero new instrumentation).
+   * `scope_unit` is THIS round's own scope unit, captured at round START into the round record (trap
+   * 1 — NEVER read back from the shared single-slot suite-cgroup-evidence.txt at teardown; that file
+   * is overwritten every round). The three fields are numbers when the Consumed line reported them,
+   * explicit null when the line omitted them (memory accounting off) or the read failed — NEVER 0
+   * (trap 3: `mem_peak_mb: 0` reads as "this round used no memory"; `cpu_time_s: 0` makes the
+   * parallelism quotient infinite). `load_read_error` names the failure reason (null on a full read).
+   * All four are present only when the runner wrapped the suite in a systemd-run --scope (the real
+   * full-suite path) or a hermetic seam injected a scope unit; ABSENT on non-systemd rounds (reader
+   * tolerates absence, same contract as the *_phase_ms fields).
+   */
+  scope_unit?: string;
+  cpu_time_s?: number | null;
+  mem_peak_mb?: number | null;
+  swap_peak_mb?: number | null;
+  load_read_error?: string | null;
 }
 
 /**
@@ -1205,6 +1400,12 @@ export async function run(argv: string[]): Promise<number> {
   // available (otherwise the exact same bash -c <command> as before). systemd-run --scope runs the
   // command synchronously in the foreground and propagates its exit code, so the close-event /
   // signal / exit-code handling below is byte-for-behavior identical.
+  // gap-verification-round-load-fields-from-systemd — THIS round's cgroup scope unit, captured at
+  // round START into the round's OWN record (trap 1 — NOT read back from the shared single-slot
+  // suite-cgroup-evidence.txt at teardown; that file is overwritten every round, so re-reading it is
+  // the shadow-copy-drift shape). Set by the fire-and-forget below on the real full-suite path, or by
+  // the QUAY_TEST_SCOPE_UNIT hermetic seam when a test injects one.
+  let roundScopeUnit: string | null = null;
   let child: import("node:child_process").ChildProcess;
   if (useSystemdRun) {
     const sdArgv = buildSystemdRunArgv(command, systemdLimits);
@@ -1219,12 +1420,15 @@ export async function run(argv: string[]): Promise<number> {
       // the WHOLE tree (test.sh + its node --test children) — a hung subprocess can't leak the flock.
       detached: true,
     });
-    // AC1 evidence — fire-and-forget: find the scope unit and dump its applied cgroup properties to
-    // <state-dir>/suite-cgroup-evidence.txt (best-effort; never fails the run).
+    // AC1 evidence — fire-and-forget: find the scope unit, capture it into THIS round's record, and
+    // dump its applied cgroup properties to <state-dir>/suite-cgroup-evidence.txt (best-effort; never
+    // fails the run). `roundScopeUnit` is set as a side effect so the round-record write at the end
+    // reads THIS round's unit from memory, never the shared file (trap 1).
     const evidenceStateDir = stateDir;
     const evidenceLimits = systemdLimits;
     void (async () => {
       const unit = await findSuiteScopeUnit(child.pid);
+      roundScopeUnit = unit;
       if (unit) recordSystemdRunEvidence(evidenceStateDir, unit, evidenceLimits);
     })();
   } else {
@@ -1236,6 +1440,11 @@ export async function run(argv: string[]): Promise<number> {
       detached: true,
     });
   }
+  // Hermetic seam — QUAY_TEST_SCOPE_UNIT injects the round's scope unit WITHOUT a real systemd scope
+  // (deterministic round-record tests for trap 1/2/3). Only applied when the real capture above has
+  // NOT set one (a real systemd run never has this env set, and a seam test never enters the
+  // useSystemdRun branch — the two are mutually exclusive).
+  if (!roundScopeUnit) roundScopeUnit = process.env.QUAY_TEST_SCOPE_UNIT ?? null;
 
   // AC5 (reason axis) — a signal-kill ⇒ red + reason=aborted (NO correctness conclusion), so the
   // inner's stop-dispatch does NOT fire on an abort. A previously-detected real failure (redDetected)
@@ -1813,6 +2022,26 @@ export async function run(argv: string[]): Promise<number> {
   // here reverts to the default crash behavior — the state is already terminal.
   process.removeListener("uncaughtException", writeCrashTerminal);
   process.removeListener("unhandledRejection", writeCrashTerminal);
+  // gap-verification-round-load-fields-from-systemd — read THIS round's scope `Consumed` journal line
+  // (bounded poll ≤5s / 200ms — the line appears ~2s AFTER the scope ends, trap 2; the runner lives
+  // OUTSIDE the scope so it survives the child's exit and is eligible to poll). Best-effort: a read
+  // failure yields explicit null + load_read_error (trap 3 — never 0), and never fails the verdict.
+  // Runs only when roundScopeUnit was captured at round START (the real fire-and-forget or the
+  // hermetic QUAY_TEST_SCOPE_UNIT seam); a non-systemd round omits the fields entirely (缺键 — same
+  // contract as the *_phase_ms spreads).
+  let scopeConsumedLoad: ScopeConsumedLoadRead | null = null;
+  if (roundScopeUnit) {
+    try {
+      scopeConsumedLoad = await readScopeConsumedLoad(roundScopeUnit, startedAt);
+    } catch (e) {
+      scopeConsumedLoad = {
+        cpu_time_s: null,
+        mem_peak_mb: null,
+        swap_peak_mb: null,
+        load_read_error: `scope load read crashed: ${e instanceof Error ? e.message : String(e)}`,
+      };
+    }
+  }
   // AC6 — append the run to the suite-duration SEQUENCE (never overwrite the single-state file).
   // The full-suite-state.json's durationMs is this run's point value; verification-round.jsonl keeps
   // the history so the sequence survives rounds (gap-no-criterion-records-its-own-cost AC6).
@@ -1885,6 +2114,22 @@ export async function run(argv: string[]): Promise<number> {
     // contract the *_phase_ms spreads above follow).
     ...(floorMsSeen.length > 0 ? { floor_ms: floorMsSeen } : {}),
     ...(ceilingFiles.length > 0 ? { ceiling: ceilingFiles } : {}),
+    // gap-verification-round-load-fields-from-systemd — THIS round's scope unit + the parsed
+    // Consumed-load fields. Present only when roundScopeUnit was captured at round START (real
+    // systemd-run or the QUAY_TEST_SCOPE_UNIT seam); a non-systemd round omits ALL FOUR (缺键 — a
+    // reader must tolerate absence, same contract as the *_phase_ms fields). When scopeConsumedLoad
+    // is set, the three fields are values or EXPLICIT null + load_read_error carries the reason
+    // (trap 3 — never 0). `scope_unit` is the round-captured memory value, never a shared-file re-read
+    // (trap 1).
+    ...(roundScopeUnit ? { scope_unit: roundScopeUnit } : {}),
+    ...(scopeConsumedLoad
+      ? {
+          cpu_time_s: scopeConsumedLoad.cpu_time_s,
+          mem_peak_mb: scopeConsumedLoad.mem_peak_mb,
+          swap_peak_mb: scopeConsumedLoad.swap_peak_mb,
+          load_read_error: scopeConsumedLoad.load_read_error,
+        }
+      : {}),
   });
   // NOTE: appendVerificationRound above is the ONE suite-duration append per run (the
   // checker-cost.test.mjs AC6 contract: two runs ⇒ exactly two verification-round.jsonl lines).
