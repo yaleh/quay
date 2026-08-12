@@ -66,6 +66,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { createStore } from "../../quay-native/src/store.ts";
 
@@ -275,8 +276,26 @@ test("A1 — two workspaces with genuinely different derived test commands lay d
   // ws2: go.mod → derives "go test ./..." (meta-cc rung).
   fs.writeFileSync(path.join(ws2, "go.mod"), "module example.com/proj\n\ngo 1.22\n");
 
-  const r1 = runInit(ws1);
-  const r2 = runInit(ws2);
+  // The install-family serial phase runs this file CONCURRENTLY with 26 other real-install test
+  // files (gap-split-three-phase-floor-files moved the byte-identity core into a file that shares
+  // the serial phase with the quay-init-loop fixture builders). The round-38 A1 failure
+  // (`differing=["plugin/scripts/session-liveness.sh"]`, the ONLY non-byte-identical file) was a
+  // MID-SUITE SOURCE CHANGE: the outer loop merged the observer-sessions-fix (25d60d38, which
+  // rewrites plugin/scripts/session-liveness.sh) into the shared checkout 44s into round 38
+  // (verified: round 38 start 15:19:41 on 4f1f050b, merge 15:20:25 → bbb19e46; rounds 39/40 on the
+  // merged commit were GREEN). A1's two installs straddled the merge — one laid the OLD
+  // session-liveness.sh, the other the NEW — so the cross-workspace byte-identity broke even
+  // though the laydown mechanism itself is deterministic. Freeze a PRIVATE copy of the plugin
+  // source and run BOTH installs from it, so the determinism contract is isolated from
+  // shared-checkout noise (a concurrent fixture build or in-flight merge can no longer change the
+  // source between the two installs). The byte-identity contract is NOT weakened: a laydown that
+  // baked the derived test command into a product file would still differ across the two workspaces
+  // even with a frozen source (the frozen copy is the same current plugin, copied once at start).
+  const frozenPlugin = makeWorkspace("install-e2e-frozenplugin-");
+  fs.cpSync(PLUGIN_ROOT, frozenPlugin, { recursive: true });
+
+  const r1 = runInit(ws1, { pluginRoot: frozenPlugin });
+  const r2 = runInit(ws2, { pluginRoot: frozenPlugin });
   assert.equal(r1.status, 0, `ws1 install failed:\n${r1.stderr}`);
   assert.equal(r2.status, 0, `ws2 install failed:\n${r2.stderr}`);
 
@@ -292,9 +311,29 @@ test("A1 — two workspaces with genuinely different derived test commands lay d
   assert.deepEqual(laid2, laid1, `both workspaces must lay down the SAME product set; ws1=${JSON.stringify(laid1)} ws2=${JSON.stringify(laid2)}`);
 
   // The core A1 assertion: byte-identical laid-down files, only config differs.
+  // On failure, emit an actionable diagnostic (which workspace's file drifted, the first
+  // differing byte offset, and whether each side still matches the plugin source) so a
+  // recurrence is immediately diagnosable rather than an opaque byte-identity failure.
   const diffs = crossWorkspaceDiffs(ws1, ws2);
-  assert.deepEqual(diffs, [],
-    `A1: laid-down files must be byte-identical across the two workspaces (only the config file may differ); differing=${JSON.stringify(diffs)}`);
+  if (diffs.length > 0) {
+    const dbg = [];
+    for (const rel of diffs) {
+      const b1 = fs.readFileSync(path.join(ws1, rel));
+      const b2 = fs.readFileSync(path.join(ws2, rel));
+      dbg.push(`${rel} ws1.sha256=${createHash("sha256").update(b1).digest("hex").slice(0, 16)} ws2.sha256=${createHash("sha256").update(b2).digest("hex").slice(0, 16)} len1=${b1.length} len2=${b2.length}`);
+      const n = Math.min(b1.length, b2.length);
+      for (let i = 0; i < n; i++) {
+        if (b1[i] !== b2[i]) {
+          dbg.push(`  first diff @ ${i}: ws1=[${b1.slice(Math.max(0, i - 30), i + 30).toString("utf8").replace(/\n/g, "\\n")}] ws2=[${b2.slice(Math.max(0, i - 30), i + 30).toString("utf8").replace(/\n/g, "\\n")}]`);
+          break;
+        }
+      }
+      dbg.push(`  ws1 identical to plugin source: ${fs.readFileSync(productSource(rel)).equals(b1)}`);
+      dbg.push(`  ws2 identical to plugin source: ${fs.readFileSync(productSource(rel)).equals(b2)}`);
+    }
+    assert.deepEqual(diffs, [],
+      `A1: laid-down files must be byte-identical across the two workspaces (only the config file may differ); differing=${JSON.stringify(diffs)}\n  ${dbg.join("\n  ")}`);
+  }
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════
