@@ -1340,11 +1340,21 @@ test("FAST-SLOTS — QUAY_TELEMETRY_FAST_SLOTS=1 reports the same realInFlight/r
     cli.writeEvent(cli.buildStartEvent({ taskId: "closed-live", runId }), tmp);
     cli.writeEvent(cli.buildEndEvent({ taskId: "closed-live", runId, outcome: "done" }), tmp);
 
-    const full = JSON.parse(runCli(tmp, "--slots", "--cap", "1", "--json").stdout);
+    // Deterministic slot arithmetic for BOTH paths (the full path's runCli default-pins subagents to
+    // 0, but this test's exact occupiedSlots assertion must hold even when the ambient env sets
+    // QUAY_TELEMETRY_SUBAGENTS — so pin 0 explicitly for both full and fast). The fast path also
+    // scans the live machine for non-task subagents
+    // (gap-telemetry-underreport-nontask-subagents-not-counted-in-slots), so the pin is what makes
+    // the fast-vs-full comparison non-flaky under a concurrent suite.
+    const full = JSON.parse(
+      runCliEnv(tmp, { QUAY_TELEMETRY_SUBAGENTS: "0" }, "--slots", "--cap", "1", "--json").stdout,
+    );
     assert.equal(full.closedButLive.length, 1, "full path detects the closed-but-live agent");
     assert.equal(full.occupiedSlots, 1);
 
-    const fast = JSON.parse(runCliEnv(tmp, { QUAY_TELEMETRY_FAST_SLOTS: "1" }, "--slots", "--cap", "1", "--json").stdout);
+    const fast = JSON.parse(
+      runCliEnv(tmp, { QUAY_TELEMETRY_FAST_SLOTS: "1", QUAY_TELEMETRY_SUBAGENTS: "0" }, "--slots", "--cap", "1", "--json").stdout,
+    );
     // Core in-flight numbers IDENTICAL — the value accounting-emit's autoOccupancy reads.
     assert.equal(fast.realInFlight, full.realInFlight, "fast realInFlight matches full");
     assert.equal(fast.realConcurrency, full.realConcurrency, "fast realConcurrency matches full");
