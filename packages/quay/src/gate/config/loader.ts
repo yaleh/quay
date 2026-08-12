@@ -184,7 +184,16 @@ function parseGatesConfig(text: string, srcFile?: string): {
   if (doc.contents.has("gates")) {
     const gNode = doc.contents.get("gates", true);
     if (YAML.isMap(gNode)) gatesMap = gNode;
-  } else { gatesMap = doc.contents; }
+  } else {
+    // Top-level-as-gates-map applies ONLY to a legacy .quay/gates.yml source.
+    // A unified config.yml without a `gates:` section carries providers/loop/
+    // etc. at the top level — treating it as a gates map fabricates phantom
+    // "unrecognized gate section 'providers'/'loop'" diagnostics via the
+    // fail-loud scan below. Return empty for any non-legacy source
+    // (cand-gate-loader-unified-config-no-gates-spurious-diagnostics).
+    const isLegacyGatesYml = srcFile !== undefined && path.basename(srcFile) === "gates.yml";
+    if (isLegacyGatesYml) gatesMap = doc.contents;
+  }
   if (!gatesMap) return { config: srcFile ? { ...empty, srcFile } : empty, adrLines: [] };
 
   // DIR-100-C: fail-loud scan of top-level keys (M226 scope, wired through emitDiagnostic)

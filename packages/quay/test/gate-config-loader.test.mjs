@@ -17,7 +17,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { readGatesConfig } from "../src/gate/config/loader.ts";
+import { readGatesConfig, loadWorkspaceGateMetadata } from "../src/gate/config/loader.ts";
 import { makeTmpDir } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 
 function tmpWs(tag) {
@@ -27,6 +27,23 @@ function tmpWs(tag) {
 }
 
 const EMPTY_SHAPE = { it0: [], adr: [], fixed: [], testPass: [], coverageFloor: [], redGreen: [] };
+
+/** Monkeypatch process.stderr.write around fn() to capture diagnostic output. */
+function captureStderr(fn) {
+  const chunks = [];
+  const orig = process.stderr.write;
+  process.stderr.write = (chunk, encoding, cb) => {
+    chunks.push(typeof chunk === "string" ? chunk : chunk.toString());
+    if (typeof cb === "function") cb();
+    return true;
+  };
+  try {
+    const result = fn();
+    return { result, stderr: chunks.join("") };
+  } finally {
+    process.stderr.write = orig;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Branch A (config.yml present) — regression guard: the still-correct path
@@ -148,4 +165,66 @@ test("GREEN: config.yml present with an EMPTY gates: section -> empty shape (not
 
 test("GREEN: no workspaceRoot -> empty shape (existing guard, unchanged)", () => {
   assert.deepEqual(readGatesConfig(""), EMPTY_SHAPE);
+});
+
+// ---------------------------------------------------------------------------
+// cand-gate-loader-unified-config-no-gates-spurious-diagnostics — a unified
+// config.yml WITHOUT a `gates:` section is a legal configuration (built-in
+// gates only) and must NOT be mistaken for a legacy top-level gates map, which
+// would fabricate phantom "unrecognized gate section 'providers'/'loop'"
+// diagnostics through the fail-loud scan.
+// ---------------------------------------------------------------------------
+
+test("GREEN (unified config, no gates:): config.yml with only providers/loop emits NO 'unrecognized gate section' diagnostics (phantom-diagnostic regression)", () => {
+  const ws = tmpWs("no-gates-phantom");
+  fs.writeFileSync(
+    path.join(ws, ".quay", "config.yml"),
+    "providers:\n  native:\n    enabled: true\nloop:\n  milestones: []\n"
+  );
+  const { result: meta, stderr } = captureStderr(() => loadWorkspaceGateMetadata(ws));
+  assert.equal(stderr, "", `no-gates config.yml must emit zero diagnostics, got: ${stderr}`);
+  assert.equal(meta.diagnostics.length, 0, "diagnostics array must be empty");
+  assert.equal(Object.keys(meta.gates).length, 0, "no workspace gates for a no-gates config.yml");
+});
+
+test("GREEN (unified config, no gates:): readGatesConfig returns empty shape with srcFile provenance, zero diagnostics", () => {
+  const ws = tmpWs("no-gates-read");
+  fs.writeFileSync(
+    path.join(ws, ".quay", "config.yml"),
+    "providers:\n  native:\n    enabled: true\n"
+  );
+  const { result: cfg, stderr } = captureStderr(() => readGatesConfig(ws));
+  assert.equal(stderr, "", `readGatesConfig must emit zero diagnostics, got: ${stderr}`);
+  assert.deepEqual(
+    {
+      it0: cfg.it0, adr: cfg.adr, fixed: cfg.fixed,
+      testPass: cfg.testPass, coverageFloor: cfg.coverageFloor, redGreen: cfg.redGreen,
+    },
+    EMPTY_SHAPE,
+    "no-gates config.yml -> empty content shape"
+  );
+  assert.equal(cfg.srcFile, path.join(ws, ".quay", "config.yml"), "srcFile provenance (DIR-104)");
+});
+
+test("GREEN (regression guard): config.yml WITH a gates: section + unknown key STILL fires fail-loud (intended behavior preserved)", () => {
+  const ws = tmpWs("with-gates-fail-loud");
+  fs.writeFileSync(
+    path.join(ws, ".quay", "config.yml"),
+    "providers:\n  native:\n    enabled: true\ngates:\n  unknown_section:\n    - name: x\n      command: y\n"
+  );
+  const { stderr } = captureStderr(() => loadWorkspaceGateMetadata(ws));
+  assert.ok(stderr.includes("unrecognized gate section 'unknown_section'"),
+    `fail-loud must still fire for unknown keys INSIDE a gates: section, got: ${stderr}`);
+});
+
+test("GREEN (regression guard): legacy gates.yml top-level-as-gates-map still fires fail-loud for unknown keys (unchanged)", () => {
+  const ws = tmpWs("legacy-fail-loud");
+  fs.writeFileSync(
+    path.join(ws, ".quay", "gates.yml"),
+    "fixed:\n  - name: legacy-gate\n    script: \"./legacy.sh\"\nunknown_section:\n  - name: x\n    command: y\n"
+  );
+  const { result: meta, stderr } = captureStderr(() => loadWorkspaceGateMetadata(ws));
+  assert.ok(stderr.includes("unrecognized gate section 'unknown_section'"),
+    `legacy gates.yml top-level-as-map must still fail loud, got: ${stderr}`);
+  assert.ok(meta.gates["legacy-gate"], "legacy fixed gate must still be registered");
 });
