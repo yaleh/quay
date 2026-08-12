@@ -46,10 +46,40 @@ step 0 在 `loop_alive=alive` 时，不能直接判 running——需佐证区分
 
 ## AC
 
-- [ ] 复现固化——任务体记录 fresh cold-start 假阳性（transcript 活动被当 loop 在跑）
-- [ ] dead-loop-check 对 fresh clone 报 stopped/never-started（而非 running）
-- [ ] cold-start skill step 0 不再误走 ALREADY-RUNNING 分支
-- [ ] 既有 dead-loop-check 测试不回归
+- [x] 复现固化——任务体记录 fresh cold-start 假阳性（transcript 活动被当 loop 在跑）
+- [x] dead-loop-check 对 fresh clone 报 stopped/never-started（而非 running）
+- [x] cold-start skill step 0 不再误走 ALREADY-RUNNING 分支
+- [x] 既有 dead-loop-check 测试不回归
+
+## 修后验证（inner 实现 agent，2026-08-12）
+
+`loop_alive=alive` 的 `--check-running` 判定已收紧：alive 时先查 `dl_has_start` 佐证
+（`.quay/loop-driver.jsonl` driver 注册 + `.workflow-events/*.jsonl` task-start 遥测），
+alive + has_start ⇒ `running`；alive + 无佐证 ⇒ `stopped/never-started`。佐证提取为
+`dl_has_start()`，stopped 分支复用同一函数（行为不变，仅去重）。
+
+**手动复现（fresh clone：活跃 transcript + 无 driver/telemetry）**：
+```
+cold_start_state=stopped
+stopped_reason=never-started
+next_step=restart
+```
+修前此场景报 `cold_start_state=running`（假阳性）。
+
+**修法用例（dead-loop-check.test.mjs 新增 6 条）**：
+- fresh transcript + 无佐证 ⇒ stopped/never-started（核心负控制，修前 running）
+- fresh commit + 无佐证 ⇒ stopped/never-started（git 信号同形假阳性）
+- fresh transcript + `.quay/loop-driver.jsonl` ⇒ running
+- fresh transcript + `.workflow-events` task-start ⇒ running（无 driver 也可）
+- dead + 无佐证 ⇒ stopped/never-started（既有行为不变）
+- started-but-stopped（有 driver、陈旧、backlog 空）⇒ queue-empty（stopped 分支复用 dl_has_start 不回归）
+
+**cold-start-check-running.test.mjs 同步修正**：原「fresh commit + started:false ⇒ running」用例
+编码的就是本缺陷语义，改为 started:true（真 running 必带启动佐证）+ 新增 fresh commit 无佐证 ⇒
+never-started 负控制。
+
+**读数**：`dead-loop-check.test.mjs` 14/14；`cold-start-check-running.test.mjs` 10/10；
+`bash scripts/test.sh --for-task gap-dead-loop-check-fresh-coldstart-false-running` exit 0（fail 0 / cancelled 0）。
 
 ## DoD
 
