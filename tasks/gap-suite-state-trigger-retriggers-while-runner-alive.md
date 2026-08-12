@@ -1,7 +1,7 @@
 ---
 id: gap-suite-state-trigger-retriggers-while-runner-alive
 title: suite-state-trigger 在 runner 仍活时重触发 ⇒ 双套件事故（state=red ≠ 轮次已终）
-status: todo
+status: ready
 labels:
   - gap
   - defect
