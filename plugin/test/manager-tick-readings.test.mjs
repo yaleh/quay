@@ -14,15 +14,18 @@ import {
   parseProjects,
   defaultTmuxSocket,
   tmuxListPanes,
+  remoteTmuxListPanes,
   projectStatus,
   resourceReadings,
   outerReadings,
   latestTickLog,
+  latestTickLogReading,
   readStat,
   monitorInstances,
   entryLastCommitEpoch,
   goalReading,
   render,
+  renderSelected,
 } from "../scripts/manager-tick-readings.ts";
 
 function tmpdir(t) {
@@ -101,10 +104,37 @@ test("manager-tick-readings: outerReadings reports window-missing as a labeled l
   const panes = [{ session: "quay-0", window: "outer", panePid: "2989418", cmd: "claude" }];
   const out = outerReadings(DEFAULT_PROJECTS, panes);
   assert.equal(out.length, 3); // 三项目各一行，不缺行
-  assert.deepEqual(out[0], { project: "quay", target: "quay-0:outer", exists: true, panePid: "2989418", cmd: "claude" });
+  assert.deepEqual(out[0], { project: "quay", target: "quay-0:outer", exists: true, panePid: "2989418", cmd: "claude", host: "", session: "quay" });
   assert.equal(out[1].exists, false);
   assert.equal(out[2].exists, false);
   assert.equal(out[1].target, "archguard:outer");
+});
+
+test("manager-tick-readings: outerReadings resolves cross-host archguard by configured session, not hardcoded prefix (缺陷②/AC3)", () => {
+  const projects = [
+    { name: "quay", dir: "/x" },
+    { name: "archguard", dir: "/x", session: "archguard-0", host: "ad-arm1.wan.hwang.men" },
+  ];
+  const local = [{ session: "quay-0", window: "outer", panePid: "1", cmd: "claude" }];
+  const remote = [{ session: "archguard-0", window: "outer", panePid: "295132", cmd: "claude" }];
+  const out = outerReadings(projects, (p) => (p.host ? remote : local));
+  assert.equal(out.length, 2);
+  assert.deepEqual(out[1], {
+    project: "archguard", target: "archguard-0:outer", exists: true, panePid: "295132", cmd: "claude",
+    host: "ad-arm1.wan.hwang.men", session: "archguard-0",
+  });
+  // 负控制：远端只有 archguard-1，配置说 archguard-0 ⇒ 仍 window-missing（会话名从配置取，不 prefix 推导）
+  const remoteWrong = [{ session: "archguard-1", window: "outer", panePid: "9", cmd: "claude" }];
+  const out2 = outerReadings(projects, (p) => (p.host ? remoteWrong : local));
+  assert.equal(out2[1].exists, false);
+  assert.equal(out2[1].target, "archguard:outer");
+});
+
+test("manager-tick-readings: remoteTmuxListPanes honors the MTR_REMOTE_TMUX_LIST_PANES seam (cross-host tmux read-only)", () => {
+  const env = { MTR_REMOTE_TMUX_LIST_PANES: "archguard-0:outer\t295132\tclaude\narchguard-0:inner\t307974\tclaude\n" };
+  const panes = remoteTmuxListPanes("ad-arm1.wan.hwang.men", env);
+  assert.equal(panes.length, 2);
+  assert.deepEqual(panes[0], { session: "archguard-0", window: "outer", panePid: "295132", cmd: "claude" });
 });
 
 test("manager-tick-readings: latestTickLog handles quay dated format and archguard table format", (t) => {
@@ -123,6 +153,44 @@ test("manager-tick-readings: latestTickLog handles quay dated format and archgua
   write(none.dir, "orchestration/tick-log.md", "# nothing\n");
   assert.equal(latestTickLog(none), "no-tick-row");
   assert.equal(latestTickLog({ name: "x", dir: "" }), "no-dir");
+});
+
+test("manager-tick-readings: latestTickLog returns the newest dated row across eras, not the stale old-format one (缺陷①/AC2)", (t) => {
+  // 真实 quay 形状：旧倒序表 + `> **` inner tick + 新 `## YYYY-MM-DD HH:MMZ tick` 节（追加顺序）。
+  // 修复前 `grep '^| 2026'` 稳定返回 08-09 陈旧行；修复后必须取全局最新 = 08-12 节。
+  const quay = { name: "quay", dir: tmpdir(t) };
+  write(quay.dir, "orchestration/tick-log.md", [
+    "# 外层 tick 记录",
+    "| 2026-08-09 10:04Z | `correct` | round-162 红…",
+    "> **02:1xZ inner tick（capability-catalog 真测试失败）**:",
+    "## 2026-08-12 03:2xZ tick — #50 fan-in 完成（compound 死锁解除）; #54 派发",
+    "- **#54 派发**：gap-manager-tick-readings-stale-readings",
+  ].join("\n"));
+  const row = latestTickLog(quay);
+  assert.ok(row.includes("2026-08-12"), row);
+  assert.ok(row.startsWith("## 2026-08-12 03:2xZ"), row);
+  const r = latestTickLogReading(quay);
+  assert.equal(r.freshness, "dated");
+});
+
+test("manager-tick-readings: latestTickLog falls back to mtime for an undated positional winner (AC2)", (t) => {
+  // 只有无日期行（如 archguard 表 / 无日期 ## 节）且文件 mtime 可得 ⇒ positional，返回该行。
+  const p = { name: "archguard", dir: tmpdir(t) };
+  write(p.dir, "orchestration/tick-log.md", "| 1 | 09:53Z | first\n| 145 | 11:30Z | newest\n");
+  const r = latestTickLogReading(p, { mtimeEpoch: 1786000000 });
+  assert.equal(r.freshness, "positional");
+  assert.ok(r.row.startsWith("| 145 | 11:30Z"), r.row);
+  assert.ok(latestTickLog(p).startsWith("| 145 | 11:30Z"), latestTickLog(p));
+});
+
+test("manager-tick-readings: latestTickLog emits stale-unknown when the newest row is undated and mtime is unavailable (AC2 invariant)", (t) => {
+  // 无日期行 + 无 mtime 锚定 ⇒ 无法确定新鲜度，显式 stale-unknown（绝不返回「看似正常」的旧行）。
+  const p = { name: "x", dir: tmpdir(t) };
+  write(p.dir, "orchestration/tick-log.md", "> **02:1xZ inner tick（…）**:\n## 03:0xZ tick — 无日期节\n");
+  assert.equal(latestTickLogReading(p, { mtimeEpoch: 0 }).row, "stale-unknown");
+  assert.equal(latestTickLog(p, 200, { mtimeEpoch: 0 }), "stale-unknown");
+  // mtime 可得 ⇒ 同一文件返回该行（positional），不再是 stale-unknown
+  assert.equal(latestTickLogReading(p, { mtimeEpoch: 1786000000 }).freshness, "positional");
 });
 
 test("manager-tick-readings: readStat parses ppid + starttime→epoch via btime", (t) => {
@@ -191,6 +259,38 @@ test("manager-tick-readings: render emits the full fixed labeled structure (AC3 
   assert.ok(lines.some((l) => l.startsWith("monitor.mounted ")), lines.join(";"));
   assert.ok(lines.some((l) => l.startsWith("monitor.instances ")), lines.join(";"));
   assert.ok(lines.some((l) => l.startsWith("monitor.entry_last_commit ")), lines.join(";"));
+});
+
+test("manager-tick-readings: render resolves archguard liveness cross-host via MTR_REMOTE_TMUX_LIST_PANES (缺陷②/AC3)", (t) => {
+  const dir = tmpdir(t);
+  const env = {
+    MTR_PROJECTS: "quay=" + dir + " archguard=" + dir + ":archguard-0:ad-arm1.wan.hwang.men",
+    MTR_TMUX_LIST_PANES: "quay-0:outer\t2989418\tclaude\n",
+    MTR_REMOTE_TMUX_LIST_PANES: "archguard-0:outer\t295132\tclaude\n",
+  };
+  write(dir, "orchestration/tick-log.md", "# log\n");
+  const out = render(parseProjects(env), { socket: "/sock", repoRoot: dir, env });
+  assert.ok(out.includes("outer.liveness quay-0:outer alive pane_pid=2989418 cmd=claude"), out);
+  assert.ok(out.includes("outer.liveness archguard-0:outer alive pane_pid=295132 cmd=claude host=ad-arm1.wan.hwang.men"), out);
+  assert.ok(!out.includes("outer.liveness archguard:outer window-missing"), out);
+});
+
+test("manager-tick-readings: renderSelected emits targeted outer.ticklog / outer.liveness readings (Contract invoke)", (t) => {
+  const dir = tmpdir(t);
+  const env = {
+    MTR_PROJECTS: "quay=" + dir + " archguard=" + dir + ":archguard-0:ad-arm1.wan.hwang.men meta-cc=" + dir,
+    MTR_TMUX_LIST_PANES: "quay-0:outer\t2989418\tclaude\n",
+    MTR_REMOTE_TMUX_LIST_PANES: "archguard-0:outer\t295132\tclaude\n",
+  };
+  const projects = parseProjects(env);
+  write(dir, "orchestration/tick-log.md", "## 2026-08-12 03:2xZ tick — #54 派发\n");
+  const tlog = renderSelected("outer.ticklog", ["quay"], projects, { socket: "/sock", repoRoot: dir, env });
+  assert.ok(tlog.startsWith("outer.ticklog quay ## 2026-08-12"), tlog);
+  const live = renderSelected("outer.liveness", ["archguard:outer"], projects, { socket: "/sock", repoRoot: dir, env });
+  assert.ok(live.startsWith("outer.liveness archguard:outer alive"), live);
+  assert.ok(live.includes("session=archguard-0") && live.includes("host=ad-arm1.wan.hwang.men"), live);
+  const missing = renderSelected("outer.liveness", ["meta-cc:outer"], projects, { socket: "/sock", repoRoot: dir, env });
+  assert.ok(missing.includes("window-missing"), missing);
 });
 
 test("manager-tick-readings: tmux is read-only and identity is pane-based (AC2/AC4 hard constraints)", () => {
