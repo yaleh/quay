@@ -1,4 +1,7 @@
 // @test-group serial
+// @load-sensitive nested-spawn
+// @load-sensitive-entry 2026-08-08 A-class nested full-suite spawn (spawns scripts/test.sh --for-task, a nested runner with its own worker pool — gap-suite-tiering-kind-heavy-not-a-mechanism 补缺省 kind)
+// KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — A-class nested scripts/test.sh spawn (routed to serial by gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests)
 // select-tests-for-touches.test.mjs — gap-test-selection-not-scoped-to-touches: RED/GREEN tests
 // for the mechanical per-task test selector (select-tests-for-touches.ts, byte-identical mirror).
 // Covers AC1–AC11 and the DoD's "tests cover AC2–AC9", plus the cross-cut marker AC2–AC6 of

@@ -1,4 +1,7 @@
 // @test-group serial
+// @load-sensitive child-spawn
+// @load-sensitive-entry 2026-08-12 real shell criteria executed via the acceptance-runner shape; moved product→serial 2026-08-12 (8-lane flakes, isolated 5/5 — gap-suite-tiering-kind-heavy-not-a-mechanism 补缺省 kind)
+// KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — runs real shell-command criteria (criterion: "true"/"false" spawn shells)
 // The `goal-<id>` gate — criterion-as-contract enforcement (SPEC §3), the third gate shape
 // alongside `adr-<id>` (makeAdrGate, shell-out enforcement) and `doc-<id>` (makeDocumentContractGate,
 // in-process contracts). A goal record's `criterion` is a runnable shell command executed via the

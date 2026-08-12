@@ -16,17 +16,26 @@
 // emits the family list: {file, kind} pairs. One root cause = one kind; different root causes =
 // different kinds (判读不得混用):
 //
-//   wall-clock    — real processes + tmux/session timing (session-liveness family, cold-start-skill)
+//   wall-clock    — real processes + tmux/session timing (session-liveness family, cold-start-skill;
+//                   delivery-standalone-smoke-gate — real-wall-clock-wait smoke gates)
 //   nested-spawn  — spawns nested node --test / full-suite sub-suites (runner-grouping,
-//                   quay-init-loop-core)
-//   heavy         — real subprocess + port binding (serve.test.mjs)
+//                   quay-init-loop-core, select-tests-for-touches)
+//   real-install  — real npm pack + real install / real quay-init --loop install into a throwaway
+//                   target (install/quay-init family). RE-ADMISSION MECHANISM
+//                   (gap-suite-tiering-kind-heavy-not-a-mechanism): `heavy` was a catch-all bucket for
+//                   "slow / 曾 flake" — a SYMPTOM, not a mechanism — and 16 of 24 serial members rode
+//                   it (三分之二). It is now split into real-install (the install/quay-init family)
+//                   and child-spawn (the real-subprocess family). `heavy` is removed from KINDS: a
+//                   serial member declaring `heavy` is rejected FAIL-closed by --check-exit (分级闸).
 //   child-spawn   — spawns real child processes whose spawn/kill is load-race-prone under full-suite
 //                   concurrency (relation-sync.test.mjs spawns 2 real node child processes for the
 //                   file-lock cross-reparent proof; round-209 silent passed=false at 1932ms —
 //                   gap-relation-sync-load-flake-child-spawn-under-suite). threshold-scope-check.test.mjs
 //                   joins the child-spawn family (round-215 silent passed=false at 7721ms — the fifth
-//                   family member, gap-threshold-scope-load-flake-fifth-family-member). Sibling
-//                   family to create-mcp / proposal-convergence (which declare `heavy`).
+//                   family member, gap-threshold-scope-load-flake-fifth-family-member). Also carries
+//                   the former-heavy real-subprocess members: proposal-convergence (20-child),
+//                   create / create-mcp (real MCP/fake-gh subprocess), acceptance / goal-gate
+//                   (real shell/CLI criteria), serve (real subprocess + port binding).
 //
 // Commands:
 //   node --no-warnings --experimental-strip-types plugin/scripts/known-load-sensitive.ts --list
@@ -58,9 +67,21 @@ import { isDirectEntry } from "./gate-script-base.ts";
 /** The grep literal the doc's batch-run protocol uses (kept as the marker identity). */
 export const MARKER = "KNOWN-LOAD-SENSITIVE";
 
-/** The known root-cause kinds. One root cause = one kind; different root causes = different kinds. */
-export const KINDS = ["wall-clock", "nested-spawn", "heavy", "child-spawn"] as const;
+/** The known root-cause kinds. One root cause = one kind; different root causes = different kinds.
+ * `heavy` was removed (gap-suite-tiering-kind-heavy-not-a-mechanism): it was a "slow/曾 flake" catch-all
+ * bucket, not a mechanism — split into real-install (install/quay-init family) + child-spawn (the
+ * real-subprocess family). Every kind is now a mechanism statement. */
+export const KINDS = ["wall-clock", "nested-spawn", "real-install", "child-spawn"] as const;
 export type LoadSensitiveKind = (typeof KINDS)[number];
+
+/**
+ * The SERIAL lane's allowed mechanism-kind set (分级闸, gap-suite-tiering-kind-heavy-not-a-mechanism
+ * AC4). A serial-group family member must declare a kind from this set — a catch-all (`heavy`) or an
+ * unknown kind is NOT an admission reason and fails `--check-exit` FAIL-closed. wall-clock is allowed
+ * in BOTH serial (real-wall-clock-wait) and lowconc (hermetic session-observation); the kind describes
+ * the root cause, the lane is a separate routing decision.
+ */
+export const SERIAL_KINDS = ["wall-clock", "nested-spawn", "real-install", "child-spawn"] as const;
 
 /** The canonical test glob scripts/test.sh owns (single source — do not hand-write a second copy). */
 export const TEST_GLOB_PARTS = ["packages/*/test/*.test.mjs", "plugin/test/*.test.mjs"];
@@ -347,6 +368,52 @@ export function checkSerialEntries(root) {
   return violations;
 }
 
+// ── Tiering gate (gap-suite-tiering-kind-heavy-not-a-mechanism AC4) — --check-exit 升级为分级闸 ──
+
+export interface SerialKindViolation {
+  rel: string;
+  /** The declared @load-sensitive kind that is NOT a serial-lane mechanism kind. */
+  kind: string;
+  reason: string;
+}
+
+/**
+ * 分级闸 (AC4, gap-suite-tiering-kind-heavy-not-a-mechanism) — every serial-group family member's
+ * `@load-sensitive <kind>` must be a mechanism kind in the serial lane's allowed set (SERIAL_KINDS).
+ * A serial member declaring a catch-all/unknown kind (e.g. the retired `heavy` bucket) is an
+ * un-reviewable admission — its entry reason does NOT hit this lane's kind set — and is rejected
+ * FAIL-closed. This upgrades `--check-exit` from a FORMAT gate (did the reason get filled in?) to a
+ * TIERING gate (is the reason a kind in this lane's set?): a downgrade can no longer be bought with a
+ * bare annotation — it must hit the mechanism set. Returns the violation list (empty = invariant
+ * holds). Non-family serial members (no @load-sensitive) are NOT subject to the kind check — their
+ * admission is visible through the family manifest's absence and is outer's review concern.
+ * @param {string} root
+ * @returns {SerialKindViolation[]}
+ */
+export function checkSerialKinds(root) {
+  const violations = [];
+  for (const rel of listTestFiles(root)) {
+    const p = path.join(root, rel);
+    let text;
+    try {
+      text = fs.readFileSync(p, "utf8");
+    } catch {
+      continue;
+    }
+    if (!isSerialGroupFile(text)) continue;
+    const kind = parseLoadSensitiveAnnotation(text);
+    if (kind === null) continue; // not a family member — the entry-record + kind invariants don't apply
+    if (!SERIAL_KINDS.includes(kind)) {
+      violations.push({
+        rel,
+        kind,
+        reason: `serial-group family member declares @load-sensitive ${kind} — NOT a serial-lane mechanism kind (allowed: ${SERIAL_KINDS.join(", ")}). A ${kind} admission reason does not hit this lane's kind set (分级闸; the 'heavy' 兜底桶 has been retired — re-tag to a mechanism kind or re-split the lane)`,
+      });
+    }
+  }
+  return violations;
+}
+
 /**
  * One `--list-entry` line for a family member, or null when it has no entry record.
  * `<rel>\t<date>\t<reason>` (the reason may contain spaces — it is the LAST field).
@@ -373,8 +440,10 @@ Usage:
       # exit-mechanism review hook: one line per family member WITH an entry record,
       # <rel-file>\\t<date>\\t<reason>, sorted by entry date (oldest first = longest in serial)
   node --experimental-strip-types known-load-sensitive.ts --check-exit [--root <dir>]
-      # AC4 invariant: every serial-group family member carries @load-sensitive-entry
-      # (进入原因+进入时间); exit 1 on a violation
+      # 分级闸 (AC4 + gap-suite-tiering-kind-heavy-not-a-mechanism): every serial-group family
+      # member carries @load-sensitive-entry (进入原因+进入时间) AND declares a serial-lane mechanism
+      # kind (wall-clock|nested-spawn|real-install|child-spawn); exit 1 on a violation. A catch-all
+      # kind (e.g. the retired 'heavy' 兜底桶) is FAIL-closed — a downgrade must hit the lane's set.
 
 Exit: 0 ok; 1 a --check/--check-exit invariant violation; 2 usage/env error.`;
 
@@ -438,17 +507,26 @@ export function main(argv) {
   }
 
   if (checkExitMode) {
-    const violations = checkSerialEntries(root);
-    if (violations.length > 0) {
-      for (const v of violations) {
+    // 分级闸 (gap-suite-tiering-kind-heavy-not-a-mechanism AC4): --check-exit now runs BOTH the
+    // exit-mechanism invariant (every serial family member records 进入原因+进入时间) AND the tiering
+    // invariant (every serial family member's kind is a mechanism kind in this lane's set). A serial
+    // admission that is missing either is rejected FAIL-closed — a downgrade can no longer be bought
+    // with a bare annotation, it must hit the lane's mechanism kind set.
+    const entryViolations = checkSerialEntries(root);
+    const kindViolations = checkSerialKinds(root);
+    if (entryViolations.length > 0 || kindViolations.length > 0) {
+      for (const v of entryViolations) {
+        process.stderr.write(`known-load-sensitive --check-exit: ${v.rel}: ${v.reason}\n`);
+      }
+      for (const v of kindViolations) {
         process.stderr.write(`known-load-sensitive --check-exit: ${v.rel}: ${v.reason}\n`);
       }
       process.stderr.write(
-        `known-load-sensitive --check-exit: ${violations.length} serial-group family member(s) without an entry record — add // @load-sensitive-entry <YYYY-MM-DD> <reason> to each (AC4, serial exit mechanism)\n`
+        `known-load-sensitive --check-exit: ${entryViolations.length + kindViolations.length} violation(s) — serial-group family members must carry (1) an @load-sensitive-entry <date> <reason> record AND (2) a serial-lane mechanism kind (${SERIAL_KINDS.join(", ")}); a ${kindViolations.length ? "non-mechanism/catch-all kind" : "missing entry"} is FAIL-closed (分级闸, gap-suite-tiering-kind-heavy-not-a-mechanism)\n`
       );
       return 1;
     }
-    process.stdout.write("known-load-sensitive --check-exit: ok — every serial-group family member records 进入原因+进入时间 (serial exit mechanism AC4)\n");
+    process.stdout.write("known-load-sensitive --check-exit: ok — every serial-group family member records 进入原因+进入时间 AND declares a serial-lane mechanism kind (分级闸)\n");
     return 0;
   }
 

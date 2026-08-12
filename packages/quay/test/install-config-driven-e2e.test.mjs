@@ -1,5 +1,5 @@
 // @test-group serial
-// @load-sensitive heavy
+// @load-sensitive real-install
 // @load-sensitive-entry 2026-08-09 real-install e2e; install family rotated flakes under full-suite load (rounds 160-162)
 // KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — real-install e2e:
 // each test spawns a real quay-init.sh --loop subprocess tree. The install/quay-init family rotated
