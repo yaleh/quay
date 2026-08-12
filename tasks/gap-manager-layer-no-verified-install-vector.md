@@ -34,6 +34,8 @@ extra: {}
 
 **根因**：唯一被真实使用过的交付向量是 `quay-init` 铺进项目，而它按设计排除 manager（cross-project 不进项目拓扑）；设计中承接 manager 的那条向量（「any quay install can bring up a manager」）要求机器上存在一个 quay install，ad-arm1 上并不存在，也从未被走通过一次。
 
+**交叉标注（gap-manager-tick-readings-stale-readings，#54，2026-08-12）**：两任务合并为「manager 跨项目/跨主机可观测性」。本任务管**安装向量**（manager 件能铺到裸机）；#54 管**读数**（manager 机件铺过去后，对「本机之外的项目」要看得见——ticklog 多格式解析 + liveness 跨主机，含 archguard 的 `archguard-0` 会话名与 ad-arm1 主机从配置取，走 supervisor-deliver `<host>:<target>` 形态）。
+
 **对 AC16② 的影响（manager 说准确不夸大）**：AC16② 判据原文「quay-init --loop 能铺设出 tick 文档 + skills + scripts 并真正驱动起来」——它确实做到了（两层循环真跑了 8 小时），故 ② 维持达成。manager 的交付缺口不在 ② 字面判据内，属于一条未被任何 AC 覆盖的面。
 
 **修法方向（outer 裁定）**：①给 manager 一条可验证的安装向量（`npm i -g` 后 `quay manager start` 能在裸机跑通），并把它做成一条判据；②在此之前，不要铺 `manager-arm-loop.sh`——铺一个指向不存在文件的武装器，比不铺更坏。
