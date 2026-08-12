@@ -1203,7 +1203,23 @@ plugin bundle（`scripts` 117 · `gate-scripts` · `skills` 13 · `probes` · `l
 | **② 完整性** | **达成** | ad-arm1 `archguard/.quay/quay-init-state.json` 记 **124 个 laidFiles**（scripts 94 / probes 5 / orchestration 11 / docs 6 / .quay 5 / .claude 3）；落盘实测 `plugin/scripts` **57 个**、tick 文档 **4 份**、skills 2 个，且 `quay-init --loop` **真正驱动起了循环**（8 小时、7 个任务）。**关键前提已核实：该机器上没有 quay 开发树**（`ls -d /home/yale/work/quay` 为空）⇒ 不是亲代自验。 |
 | **③ 可用性** | **未达成（原因已具名）** | 两层循环确实在第三方项目上真跑了（8h / 7 任务 / 3 处真实产品代码变更），**但没有任何一个任务是从 `todo` 起始的**——`git log --diff-filter=A` 逐条查 TASK-81..87 首次入库状态，**7 条全部 `status=ready`**。根因不在循环，在配置：archguard 的 `.quay/config.yml` 写着 **`default_task_status: ready`** ⇒ **`todo` 在那个项目上从不出现，author→ready 闸从未被执行过一次**。 |
 
-### ① 的阈值从未定过 —— 2026-08-12 01:3x 暴露（本条此前不可求值而我未发现）
+### 【已裁定】AC16① 判据换形状 —— outer 2026-08-12 01:36Z
+
+**裁定内容**：**AC16① =「距上一次成功 deliver 的时长 ≤ 60 分钟」**；**提交差降为报告量**（仍机械可读，但不做闸）。
+
+**outer 给出的依据（与我 013607 报的形状问题一致，且它补了实测）**：本次 batch-merge 实测
+01:3x 差 = **32**（deliver 尚未完成）→ 01:34:20 deliver 完成后差 = **0**。**同一事件在 2 分钟内
+把差值从 32 打到 0** ⇒ 提交差不可作阈；而「距上次成功 deliver 时长」单调，可作阈。
+
+**⇒ 本条自此可求值**（此前是「不可求值」，见下条历史记录）。**读数来源**：
+`.quay/develop-deliver-state.json` 的 `timestamp` 与当前时刻之差；`hosts` 需全部 200。
+
+**两层归属别混**：**数字由 outer 定（它已定 60min）；判据文本落在本文件是我的事**——
+outer 说「判据文本更新归我」指的是它把该裁定落进 DIR-123 任务体与 delivery-manifest 注释，
+**那不能替代本文件**。**一条裁定只落到部分层，正是今晚 AC25 那条陈旧指令的成因**
+（我 08-09 就据人的固定 cap=5 裁定判过 inner 未采纳，却没发现同一条陈旧指令写在我自己 AC 里）。
+
+### ① 的阈值从未定过 —— 2026-08-12 01:3x 暴露（历史记录，已由上条裁定关闭）
 
 **判据原文**：「最新 build 与 `develop` 的提交差**有上限**」，并注明「**具体数字/形态由 outer 定，manager 不代定**」。
 **该数字至今没有人定过。**
