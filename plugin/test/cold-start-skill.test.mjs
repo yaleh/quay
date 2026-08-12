@@ -171,3 +171,99 @@ test('rehearsal — a real --task-start against a quay-init --loop project write
     assert.match(record, /task-start|taskId/, 'the record must carry the task-start event shape');
   } finally { cleanup(ws); }
 });
+
+// ── Recovery branch (gap-cold-start-skill-has-no-recovery-branch) ─────────────────────────────────
+// The cold-start skill has exactly one path: "mechanism not laid down → lay down → mount → cron →
+// drive → prove." It had NO branch for a workspace whose last run crashed mid-flight leaving real
+// state behind (the two real OOM recoveries). The recovery branch (steps 0a/0b) routes to a
+// recovery procedure when mid-flight state exists and to the unchanged fresh-start path when it
+// does not, reusing the EXISTING detection tools (task-status-drift-check.ts / fast-mode-telemetry
+// --report / git worktree list + git branch) — zero new detection logic.
+
+// Contract measure: recovery_branch = `grep -c 'recovery' SKILL.md` ≥ 1.
+test('recovery — the skill defines a recovery branch distinct from the fresh-start branch (Contract: recovery ≥ 1)', () => {
+  const recoveryMentions = (skillSrc.match(/recovery/g) || []).length;
+  assert.ok(recoveryMentions >= 1, `SKILL.md must mention 'recovery' at least once (got ${recoveryMentions})`);
+  assert.match(skillSrc, /### 0a\. Mid-flight state check/, 'the skill must define the recovery-vs-fresh-start routing');
+  assert.match(skillSrc, /### 0b\. Recovery branch/, 'the skill must have a recovery-branch section');
+  // Invariant fresh_start_preserved: the recovery branch does NOT replace the fresh-start path.
+  assert.match(skillSrc, /### 1\. Locate root, project, session/, 'the fresh-start steps must remain');
+});
+
+test('recovery AC1/AC4 — the routing is stated in BOTH directions (recovery on mid-flight state; fresh-start when clean — never false-positive)', () => {
+  assert.match(skillSrc, /if and only\s+if/, 'the routing must be a checkable iff');
+  assert.match(skillSrc, /All three\s+clean/, 'a clean result must route to fresh-start');
+  assert.match(skillSrc, /negative control/, 'the negative control must be named');
+  assert.match(skillSrc, /never false-positive into recovery/, 'a clean workspace must not take the recovery branch');
+});
+
+test('recovery AC2 — the three state classes are enumerated via EXISTING tools, not new detection logic', () => {
+  // State class ③ — status drift: reuses task-status-drift-check.ts.
+  assert.match(skillSrc, /task-status-drift-check\.ts/, 'state class ③ must reuse task-status-drift-check.ts');
+  // State class ② — ghost telemetry: reuses fast-mode-telemetry.ts --report --json.
+  assert.match(skillSrc, /fast-mode-telemetry\.ts --report --json/, 'state class ② must reuse fast-mode-telemetry.ts --report');
+  // State class ① — orphaned worktree/branch: reuses git worktree list + git branch --list "task/*".
+  assert.match(skillSrc, /git worktree list/, 'the orphaned-worktree check must reuse git worktree list');
+  assert.match(skillSrc, /branch --list "task\/\*"/, 'the orphaned-branch check must reuse git branch --list "task/*"');
+  // Reuse is stated — no new detection.
+  assert.match(skillSrc, /existing tools only/, 'the recovery branch must state it reuses existing tools');
+  assert.match(skillSrc, /no new detection/i, 'the skill must state zero new detection logic');
+});
+
+test('recovery AC3 — the recovery branch converges into the SAME AC8c checklist, no second acceptance framework', () => {
+  assert.match(skillSrc, /SAME AC8c/, 'the recovery branch must converge into the same AC8c observable-consequences checklist');
+  assert.match(skillSrc, /no second acceptance framework/, 'no separate acceptance criteria may be invented');
+  assert.match(skillSrc, /all three come back clean/i, 'convergence must be gated on all three checks clean');
+});
+
+test('recovery — ghost-telemetry resolution deletes the record when verified done/still-todo, never backfills a fabricated --task-end', () => {
+  assert.match(skillSrc, /NEVER backfill a plausible-but-fabricated `--task-end`/, 'the skill must forbid fabricating a --task-end');
+  assert.match(skillSrc, /DELETE the ghost record/, 'the resolution must delete the ghost record');
+  assert.match(skillSrc, /verify against the task's REAL state/i, 'the resolution must verify real task state first');
+});
+
+// ── Recovery routing rehearsal (AC1/AC4, both directions) ──────────────────────────────────────────
+// The routing decision the skill documents (step 0a) is: recovery iff the mechanism is laid down AND
+// any of the three checks reports a non-empty finding; all clean ⇒ fresh-start. This rehearsal drives
+// the two extremes with the EXISTING tool the skill names for state class ② (fast-mode-telemetry
+// --report): a ghost `--task-start` record (an inProgress entry whose taskId has NO in-flight worktree)
+// must route to recovery; an empty .workflow-events must route to fresh-start (the negative control).
+function gitWorktreeHas(root, taskId) {
+  const wt = spawnSync('git', ['-C', root, 'worktree', 'list', '--porcelain'], { encoding: 'utf8' });
+  if (wt.status !== 0) return false;
+  return wt.stdout.includes(`quay-worktrees/${taskId}`);
+}
+test('recovery routing rehearsal — a ghost --task-start routes to recovery; a clean workspace routes to fresh-start (AC1/AC4)', () => {
+  const root = diskWorktreeRoot(); // disk-backed (not tmpfs)
+  fs.mkdirSync(path.join(root, '.workflow-events'), { recursive: true });
+  try {
+    // git init so `git branch --list "task/*"` / `git worktree list` are meaningful and hermetic.
+    const gi = spawnSync('git', ['init', '-q', root], { encoding: 'utf8' });
+    assert.equal(gi.status, 0, `git init must succeed:\n${gi.stderr}`);
+
+    // NEGATIVE CONTROL (AC4): a clean workspace (no .workflow-events records) → fresh-start.
+    const clean = spawnSync('node', ['--experimental-strip-types',
+      path.join(pluginDir, 'scripts', 'fast-mode-telemetry.ts'),
+      '--report', '--json', '--root', root], { cwd: root, encoding: 'utf8' });
+    assert.equal(clean.status, 0, `clean --report must succeed:\n${clean.stderr}`);
+    const cleanReport = JSON.parse(clean.stdout);
+    assert.ok(Array.isArray(cleanReport.inProgress), 'clean report must carry inProgress[]');
+    const cleanGhost = cleanReport.inProgress.filter((r) => !gitWorktreeHas(root, r.taskId));
+    assert.equal(cleanGhost.length, 0,
+      'a clean workspace must have zero ghost telemetry records → routes to fresh-start, never recovery');
+
+    // POSITIVE CONTROL (AC1): a ghost --task-start record (taskId with NO in-flight worktree) → recovery.
+    const ts = spawnSync('node', ['--experimental-strip-types',
+      path.join(pluginDir, 'scripts', 'fast-mode-telemetry.ts'),
+      '--task-start', '--taskId', 'ghost-task', '--root', root], { cwd: root, encoding: 'utf8' });
+    assert.equal(ts.status, 0, `--task-start must succeed:\n${ts.stderr}`);
+    const dirty = spawnSync('node', ['--experimental-strip-types',
+      path.join(pluginDir, 'scripts', 'fast-mode-telemetry.ts'),
+      '--report', '--json', '--root', root], { cwd: root, encoding: 'utf8' });
+    assert.equal(dirty.status, 0, `dirty --report must succeed:\n${dirty.stderr}`);
+    const dirtyReport = JSON.parse(dirty.stdout);
+    const ghost = dirtyReport.inProgress.filter((r) => r.taskId === 'ghost-task' && !gitWorktreeHas(root, r.taskId));
+    assert.equal(ghost.length, 1,
+      'a ghost --task-start must surface in inProgress[] with no worktree → the routing takes the recovery branch');
+  } finally { cleanup(root); }
+});

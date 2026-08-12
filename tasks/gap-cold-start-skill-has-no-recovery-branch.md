@@ -62,17 +62,74 @@ specific state classes both real recoveries actually hit tonight, not speculativ
 
 ## Acceptance Criteria
 
-- [ ] AC1: precondition check correctly routes to the recovery branch when mid-flight state
+- [x] AC1: precondition check correctly routes to the recovery branch when mid-flight state
       exists, and to the fresh-start branch when it doesn't (both directions demonstrated, real
       fixture or real repo state, output pasted)
-- [ ] AC2: all three state classes (unclosed merged task, orphaned worktree/branch, ghost
+- [x] AC2: all three state classes (unclosed merged task, orphaned worktree/branch, ghost
       telemetry) are detected using existing tools, not new ones — grep the diff for zero new
       detection logic beyond wiring
-- [ ] AC3: recovery branch, once it converges, passes the SAME AC8c six-key checklist as
+- [x] AC3: recovery branch, once it converges, passes the SAME AC8c six-key checklist as
       fresh-start — no separate acceptance criteria invented
-- [ ] AC4: negative control — a recovery run against a genuinely clean workspace (no mid-flight
+- [x] AC4: negative control — a recovery run against a genuinely clean workspace (no mid-flight
       state) takes the fresh-start branch, not the recovery branch (must not false-positive)
-- [ ] AC5: tests use `node:test`, `// @test-group product` (skill/operational infra)
+- [x] AC5: tests use `node:test`, `// @test-group product` (skill/operational infra) —
+      **group value deviation**: the recovery tests were added to `plugin/test/cold-start-skill.test.mjs`,
+      which is the KNOWN-LOAD-SENSITIVE family and already declares `// @test-group lowconc` (its own
+      header pins the load-safe routing; the real quay-init --loop rehearsal would flake in the
+      concurrency-N product phase). Tests use `node:test` + a valid `@test-group`; the value is
+      `lowconc`, not `product`. Documented deviation with the load-sensitivity rationale.
+
+## Evidence — AC1/AC4 real-run (both directions) + AC3 note
+
+**AC1/AC4 routing rehearsal** (`plugin/test/cold-start-skill.test.mjs` →
+`recovery routing rehearsal`): a hermetic fixture drives the two extremes of the SKILL's step-0a
+decision (recovery iff the mechanism is laid down AND any of the three checks reports a finding;
+all clean ⇒ fresh-start). Real `fast-mode-telemetry.ts --task-start/--report` runs:
+
+```
+=== AC4 NEGATIVE CONTROL: clean workspace ===
+inProgress: []
+RULES: clean inProgress empty => FRESH-START (no mid-flight state)
+git task branches: 0
+=== AC1 POSITIVE CONTROL: ghost --task-start (no worktree) ===
+fm-ghost-task-1786523366882-lift4u
+inProgress: [{"taskId":"ghost-task","runId":"fm-ghost-task-1786523366882-lift4u",...}]
+ghost-task in inProgress: 1
+git worktree has quay-worktrees/ghost-task: false
+RULES: ghost record with no worktree => RECOVERY (mid-flight state exists)
+```
+
+**Real-repo state-class demonstration** (the three checks the SKILL reuses, run on this repo — all
+three non-empty ⇒ recovery is the real, not speculative, path):
+
+```
+=== state class ①: task/* branches not reachable from mainline ===
+* task/gap-cold-start-skill-has-no-recovery-branch      (git branch --merged master: none)
+=== state class ②: ghost telemetry ===  (see AC1 fixture above: inProgress ghost-task, no worktree)
+=== state class ③: status-drift suspects (real repo) ===
+suspects: [{"taskId":"gap-split-decision-finality-not-enforced","matchedSymbols":["_recordSplitDecisionCli","splitScopeHash","decideSplitAdjudication","scopeHash"],"touchesAllExist":true}]
+status-drift-suspect count: 1 => RECOVERY (code landed, status never followed)
+```
+
+**Scoped gate** (thin selection — 2 of 3 Touches are non-test files; the accepted thin-form
+invocation per `docs/analysis/fast-mode-execution-prompt.md`):
+
+```
+bash scripts/test.sh --for-task gap-cold-start-skill-has-no-recovery-branch --allow-thin
+  → tests 14, pass 14, fail 0, cancelled 0, EXIT 0
+```
+
+**AC3 note**: the AC text says "six-key"; the current AC8c checklist is SEVEN keys
+(`TOPOLOGY-IN-PLACE` was added after this task was written). The recovery branch converges into the
+SAME current checklist (steps 1-9), never a separate framework — the "no second acceptance
+criteria" requirement is what AC3 enforces.
+
+**AC2 note**: `git diff` over the two product files adds only SKILL prose (recovery steps 0a/0b)
++ tests. Zero new detection logic — the three state classes reuse `task-status-drift-check.ts`,
+`fast-mode-telemetry.ts --report --json`, and `git worktree list` + `git branch --list "task/*"`
+(the only added git call is `git branch --merged <mainline-ref>` for reachability, which the
+"not reachable from mainline" state class requires and which is stock git plumbing, not new
+detection).
 
 ## Definition of Done
 
@@ -94,6 +151,14 @@ resume    分支骨架 + 三状态类接线 + 负控制分步提交
 - tasks/gap-cold-start-skill-has-no-recovery-branch.md（自身：勾 AC + 贴证据）
 - plugin/skills/cold-start/SKILL.md
 - plugin/test/cold-start-skill.test.mjs
+
+## Test-Files
+
+- plugin/test/cold-start-skill.test.mjs
+
+Rule 4 declared coupling for the SKILL.md touch: the basename convention cannot map `SKILL.md` → a
+test, so the recovery-branch tests live in the cold-start skill's existing test file
+(`plugin/test/cold-start-skill.test.mjs`), declared here.
 
 ## Dispatch review
 
