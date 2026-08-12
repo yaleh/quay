@@ -1,7 +1,7 @@
 ---
 id: gap-precommit-guard-running-round-rejects-assertion-surface-commits
 title: pre-commit 守卫——state=running 且触及断言面文件 ⇒ 拒提交（覆盖全部写入者，三独立实证）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -57,9 +57,12 @@ extra:
 
 ## Definition of Done
 
-- [ ] AC1–AC6 全部勾上
-- [ ] 负控制样例贴出（见 Evidence）
-- [ ] 全量套件绿
+- [x] AC1–AC6 全部勾上（AC1 现已含 early-red：isRunning = state==="running" || finishedAt==null，071c0fb1）
+- [x] 负控制样例贴出（见 Evidence）
+- [x] 全量套件绿（rounds 70/75/76：守卫实现 + early-red 修复全绿，verifiedCommit 含 071c0fb1）
+- [ ] 真实拒绝记录（③）——本仓真 running 轮期间提交断言面文件被拒 + 留记录（probe 曾失败于 early-red 缺口已修复；manager 建议勿与修复落地绑一起，下一 running 轮产）
+
+**登记**：注册表 mode 断言 = `registryMode="fallback-narrowed"`（A0b③ 前；patterns 已清空，34e96380 实测）。窗口协议：「先清 diverge 再动手」（IDLE-GREEN diverge>0 时 2min 抢 / 清零不触发 ⇒ 窗口≈10min）。断言面精度上限 = @static-object 标注精度（目录级标注拉整目录进面）。
 
 ## Touches
 
