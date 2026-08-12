@@ -20,6 +20,7 @@ extra: {}
 - `packages/quay/bin/quay.ts` **1838 行，main() 独占 1194 行（64%），export 数 = 0** —— 命令实现锁在不导出的 main() 里，**物理上只能靠派生测**。17 个辅助纯函数里 parseVerbless / resolveJsonFlag / resolvePageSize / relativeTimeCli 各自 **0 测试覆盖**。
 - **现状是又慢又漏**，不是"用派生换了更好覆盖"。
 - 已有正面样板：119 个测试文件直接 import src/scripts 测纯函数（既定原则）。`bin/quay.ts` 是从没被改造的例外。
+- **头号靶子（manager 2026-08-12 execve 实测）**：`packages/quay/test/cli.test.mjs` = **286 execve（测过最高）**、隔离墙钟 **35.7s（占 main 相 1/4-1/3）**、1806 行 / 7 静态派生点 / @test-group product。**它测的就是 CLI 本身 ⇒ run()/shell 改造收益直接兑现**。7 静态点 → 286 execve = **1:40 比例**（静态计数估算法不可用的直接实证——AC 的「按 execve 实测」由此坐实）。
 
 **人裁定方向（原话）**：「用更少的进程用 import 的形式覆盖更多测试，而仅执行少量命令行测试？这样保障覆盖面但优化性能？提供实现一个尽可能薄的 CLI 最外层，而保障尽可能多的 CLI 功能都可以用 import 形式测试。」
 
