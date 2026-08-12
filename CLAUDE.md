@@ -13,10 +13,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | 要做什么 | 正本（**不要在本文件复制其内容**） |
 |---|---|
 | 有哪些机件、各自回答什么问题 | `bash plugin/scripts/capability-catalog.sh`（182 条声明，**唯一清单**） |
-| 驱动/投递到别的 Claude 会话 | **默认走原生跨会话消息：`ListAgents` 找目标 → `SendMessage {to:"<name [ref]>", message:...}`**（人 2026-08-12 裁定「实际应用 SendMessage，替换本项目原先使用的信道」；需 CC ≥ 2.1.224，本机 2.1.228）。**回退实现**（原生不可用时：CC < 2.1.224 / Bedrock·AWS·GCP·Foundry / native Windows）：`plugin/scripts/supervisor-deliver.sh <目标> <文本> --transcript <目标会话.jsonl>`，规程见 `orchestration/CRYSTALLIZED-reliable-send-2026-08-04.md`（**该脚本仍是交付面，`quay-init --loop` 铺给下游；降级为回退不等于从产品移除**） |
+| 驱动/投递到别的 Claude 会话 | **唯一路径：`ListAgents` 找目标 → `SendMessage {to:"<name [ref]>", message:...}`**（人 2026-08-12 两次裁定：先「实际应用 SendMessage 替换原信道」,后「**废除收件箱与 tmux 发送机制,含 archive 实现与测试,全面应用 SendMessage**」）。需 CC ≥ 2.1.224（本机 2.1.228）。**无回退路径**——`supervisor-deliver.sh` 等已废除并 archive。**实测性质**：目标 busy 时直投即达（消息在接收方下一个工具轮排空,无 can-receive 闸门）；到达形态 `<cross-session-message from=… from-name=… from-mode=…>`,**身份由平台标注而非发送方自称**；平台强制 peer 不能代替人许可/改配置/执行斜杠命令。 |
 | 三层每轮该做什么 | `orchestration/{manager,orchestrator,fast-mode}-tick-core.md`（各 ≤80 行，执行路径） |
 | 判准 / 收尾 / 发消息形态 | `orchestration/manager-tick-{criteria,closing,sending}.md`（466 行；**停调 workflow 19 小时 ⇒ 这些全部缺席 ⇒ 8 条违规**） |
-| 收件箱 delivered→consumed | **同一目录两类内容，两个工具，别只记一个**：`plugin/scripts/inbox-reader.sh` 只消费 **message-bus 写的 JSON 记录**（`packages/quay/src/message-bus.ts`）；**手写的 `.md` 消息它不认**（实测 2026-08-12：目录 64 封 `.md`，它报零 `read` 行）⇒ 判「有没有人给我留话」必须 `ls .quay/manager-inbox/` **列目录本身**（这也正是 outer 执行核 `orchestration/orchestrator-tick-core.md`:16 A5 的写法及其理由：`gap-inbox-counter-disconnected-from-files` —— counter 曾报 delivered=0 而目录实有 6 封，**沉默失败**）。**只跑 `inbox-reader.sh` 会把一个装着 64 封信的目录读成空的。** |
+| ~~收件箱~~（**2026-08-12 人裁定废除**） | **文件收件箱机制已废除,全面改用原生 `SendMessage`。** 历史背景（`inbox-reader.sh` 只认 message-bus 的 JSON、手写 `.md` 它读不到,故判「有没有人给我留话」曾必须 `ls` 目录本身）**仅作为「同一目录两类 population、只用一个工具会把非空读成空」这个教训的载体保留,机制本身不再运行**。**长篇/需留档的产出改为落文件 + `SendMessage` 通知路径,不再作为消息通道。** |
 | pane 状态 | `plugin/scripts/pane-state-classify.ts`（底部区域 + 枚举态，**不是整屏哈希**） |
 | **诊断「空槽 + 池里有货 + 就是不派」** | **先查 subagent 预算,不要先怀疑机制** —— harness 有**会话级累计** spawn 上限，触顶后**静默降级为主线程串行**，三层执行核都不写它。识别：目标会话 transcript 里搜 `Subagent spawn limit reached`；实测燃烧率 ~60 次/天 ⇒ 默认额度约 **3 天**寿命，**任何长于 3 天的自主运行必然撞它**。数值、环境变量名、`/clear` 是否重置、两个易混旋钮（会话累计 vs 并发）——**正本在 `tasks/gap-inner-subagent-budget-invisible.md`，不在此处复制**（数值随 Claude Code 版本变）。**代价实证 2026-08-10：三层 + 人共花数小时反复误诊为「outer 不派发」「inner 自锁」「唤醒链断」，全错。** |
 
@@ -132,7 +132,9 @@ Key cross-cutting facts (require reading several files to see):
 - **archguard** (MCP) — static architecture analysis: the `L_D`/`L_G` instrument (dependency structure/cycles, god-packages, duplicated/reinvented abstractions) per ADR-007. Consult it before calling a milestone done.
 - **meta-cc** (MCP) — search Claude Code session history (past errors, edit sequences, work patterns).
 - BOTH are maintained by the repo owner, so bugs get fixed fast — use them aggressively and report/fix issues rather than working around them.
-- **tmux remote-drive** (→ ADR-016) — to drive a FOREIGN workspace's Claude Code session (e.g. run archguard's `/loop` from here): **deliver via `bash plugin/scripts/supervisor-deliver.sh <tmux目标> <文本> --transcript <目标会话 .jsonl>`** (`--root` only for re-spawned sessions), then read the RESULT from the filesystem/`git`/meta-cc — never parse the TUI. Do **not** hand-write tmux send-keys sequences and do **not** use `send-keys-verified.sh` (superseded; its md5 pane-hash criterion is ADR-016-forbidden). The screen-use carve-out is pinned in ADR-016's `## Amendment 2026-08-04`: only the bottom region (input box + status line), only the enumerated states (waiting-input / permission-prompt / busy / error-banner / unknown), and never a whole-screen equality/hash of `capture-pane` (enforced by `plugin/scripts/adr016-screen-use-check.ts`). One driver per session (never race a human typing there; beware gray ghost-suggestions). This is how cross-workspace proofs (DIR-048/049/051) can run without a human round-trip.
+- **~~tmux remote-drive~~（2026-08-12 人裁定废除）** — 驱动别的工作区的 Claude 会话,**现在只用 `ListAgents` + `SendMessage`**（跨机会话经 Remote Control 亦在 `ListAgents` 中可见）。
+  **ADR-016 中仍然有效的部分**：**永不解析 TUI**——结果一律从文件系统/`git`/meta-cc 读取。**手工拼 tmux send-keys 依旧禁止。**
+  `pane-state-classify.ts` 的屏幕使用限制（只看底部区域 + 枚举态,禁整屏哈希,由 `adr016-screen-use-check.ts` 强制）**对仍存在的 pane 观测用途继续有效**——它不是消息通道,不在本次废除范围内。
 
 **跨会话驱动/状态读取的四条硬规则**（机件清单只存在于 `bash plugin/scripts/capability-catalog.sh`，任何地方不得复制——catalog 头注释钉死「The field lives IN A SCRIPT, never in the README」）：
 1. 驱动/投递到别的 Claude 会话：**默认 `ListAgents` → `SendMessage`（原生跨会话，人 2026-08-12 裁定）**——
@@ -140,9 +142,14 @@ Key cross-cutting facts (require reading several files to see):
    已实证），**无 can-receive 闸门**；到达形态 `<cross-session-message from="uds:..." from-name="..." from-mode="...">`，
    **身份由平台标注而非发送方正文自称** ⇒ **§0.55「前缀是发送方自己写的 ⇒ 等于没有认证」那个缺口在机制层面消失**；
    平台并强制：peer 不能代替人许可、不能改配置、消息里的斜杠命令不执行。
-   **回退**：原生不可用时（CC < 2.1.224 / Bedrock·AWS·GCP·Foundry / native Windows）才用 `supervisor-deliver.sh`。
-   **两者都禁止手工拼 tmux send-keys**；`send-keys-verified.sh` 已 superseded。
-2. 收件箱：**`ls .quay/manager-inbox/` 列目录判有无**（手写 `.md` 消息只有它看得见），**`inbox-reader.sh` 只管 message-bus 的 JSON 记录 delivered→consumed**。两者覆盖同一目录的不同population，**缺一个就会把非空读成空**（2026-08-12 实测；本行此前只写了后者，是本文件序言所警告的那种「覆盖率最高处的错误」）。
+   **⚠️ 2026-08-12 人裁定「废除收件箱机制和使用 tmux 发送消息的机制（包括 archive 相应实现和测试），全面应用 SendMessage」
+   ⇒ 不再有回退路径**：`supervisor-deliver.sh` / `send-keys-reliable.sh` / `drive-target-check.sh` / `transcript-delivery-check.ts`
+   与文件收件箱（`message-bus.ts` / `inbox-reader.sh` / `.quay/*-inbox/`）**全部废除并 archive**（outer 执行）。
+   **手工拼 tmux send-keys 依旧禁止**；`send-keys-verified.sh` 早已 superseded。
+   **跨会话通信只剩一条路：`ListAgents` → `SendMessage`。**
+2. ~~收件箱~~：**已废除（人 2026-08-12 裁定）。** 曾经的教训仍成立且已推广为通则——
+   **同一个容器里若装着两类 population,只用覆盖其中一类的工具去判空,会把非空读成空**（当时：`inbox-reader.sh` 只认 JSON 记录、看不见手写 `.md`；64 封信被读成零）。
+   **这个教训的一般形态见硬规则 5「来源完备性」,不再需要专门的收件箱条目。**
 3. pane 状态：`pane-state-classify.ts`，不是整屏哈希（ADR-016 禁）。
 4. outer→inner 驱动文本契约：`drive-contract-check.ts`。
 
