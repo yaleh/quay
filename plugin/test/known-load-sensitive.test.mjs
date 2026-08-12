@@ -105,10 +105,10 @@ test("AC1 — kindForFile resolves the two root causes distinctly (no conflation
   const family = scanFamily(REPO_ROOT);
   assert.equal(kindForFile(family, "plugin/test/session-liveness-events.test.mjs"), "wall-clock");
   assert.equal(kindForFile(family, "plugin/test/cold-start-skill.test.mjs"), "wall-clock");
-  assert.equal(kindForFile(family, "plugin/test/runner-grouping.test.mjs"), "nested-spawn");
+  assert.equal(kindForFile(family, "plugin/test/runner-grouping-list-groups.test.mjs"), "nested-spawn");
   assert.equal(kindForFile(family, "plugin/test/quay-init-loop-core.test.mjs"), "nested-spawn");
   assert.equal(kindForFile(family, "plugin/test/definitely-not-a-test.test.mjs"), undefined);
-  assert.equal(isFamilyMember(family, "plugin/test/runner-grouping.test.mjs"), true);
+  assert.equal(isFamilyMember(family, "plugin/test/runner-grouping-list-groups.test.mjs"), true);
   assert.equal(isFamilyMember(family, "plugin/test/full-suite-runner.test.mjs"), false);
 });
 
@@ -131,7 +131,7 @@ test("Contract invoke — --list emits one <rel>\\t<kind> line per family member
 });
 
 test("Contract invoke — --kind prints the kind for a family member, empty for a non-member", () => {
-  const member = runCli(["--kind", "plugin/test/runner-grouping.test.mjs"]);
+  const member = runCli(["--kind", "plugin/test/runner-grouping-list-groups.test.mjs"]);
   assert.equal(member.status, 0, member.stdout + member.stderr);
   assert.equal(member.stdout.trim(), "nested-spawn");
 
