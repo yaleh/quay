@@ -32,11 +32,12 @@ extra: {}
 - [ ] AC2: **按位置判定**——judgePoolCandidate 排除出处标记行（Split/ProposalReview/历史/CLOSEOUT）或限定 Touches/Plan/Contract 段内命中
 - [ ] AC3: **DIR-103 解锁**——修复后 DIR-103 eligible=True（不再被误标 retired-mechanism）
 - [ ] AC4: **既有不回归**——`--for-task` scoped 门绿；真 retired-mechanism 仍被拦
+- [ ] AC5: **自身解锁自证**——修复后本任务自身 eligible=True（不再被 retired-mechanism 假阳性吃掉；直接派发任务，绕过池闸——池闸正是 bug 本身，outer 裁定选项 1）
 
 ## Definition of Done
 
-- [ ] AC1–AC4 全部勾上
-- [ ] 修后实跑：DIR-103 eligible 读数 + 真 retired-mechanism 仍拦贴出
+- [ ] AC1–AC5 全部勾上
+- [ ] 修后实跑：DIR-103 eligible 读数 + 真 retired-mechanism 仍拦 + 本任务自身 eligible 贴出
 - [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
 
