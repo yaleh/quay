@@ -1,7 +1,7 @@
 ---
 id: gap-suite-tiering-kind-heavy-not-a-mechanism
 title: "泳道分级破口——known-load-sensitive kind=heavy 是兜底桶非机制陈述（serial 24 成员 16 个 kind=heavy，lowconc→serial 9 文件 8 heavy+1 child-spawn，无一命中 serial 的机制判据 nested-spawn/wall-clock）；--check-exit 只验填没填不验理由是否命中本泳道 kind 集（格式闸非分级闸）⇒ 给 heavy 真机制定义（真安装/真 npm pack、进程与 IO 放大 N×）+ 不满足回 lowconc + --check-exit 升级为分级闸"
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -54,6 +54,8 @@ extra: {}
 - plugin/test/known-load-sensitive.test.mjs（新增 kind 判据测试）
 - plugin/scripts/ 或 scripts/test.sh（--check-exit 从格式闸升级为分级闸）
 - plugin/test/ 各泳道成员（重分 kind 标注）
+- packages/*/test/ 各泳道成员（重分 kind 标注——canonical glob 含 packages，移除 heavy 后必须重标；任务执行时补，原 Touches 漏列）
+- experiments/*/test/ 各泳道成员（重分 kind 标注——canonical glob 含 experiments，同上；任务执行时补）
 - tasks/gap-suite-tiering-kind-heavy-not-a-mechanism.md（自身：勾 AC + 贴证据）
 
 > **Touches 修正（2026-08-12）**：`plugin/scripts/known-load-sensitive.test.mjs` → `plugin/test/known-load-sensitive.test.mjs`——该测试文件实际在 `plugin/test/`（`plugin/scripts/known-load-sensitive.ts` 才是脚本本体）。其余 Touches 均为现存文件。
