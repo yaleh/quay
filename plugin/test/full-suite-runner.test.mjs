@@ -299,6 +299,104 @@ test("AC2 backward-compat — a suite with NO __OVERHEAD__ emission records NO *
   }
 });
 
+// ── gap-ceiling-floor-ms-not-landed-in-verification-round: AC1/AC2/AC3 (floor_ms / ceiling) ────────
+// measure-suite-reporter.mjs emits `__CEILING__ <path> duration_ms=<dur> floor_ms=<floor> 封顶者/该拆`
+// per capped file (cc>1 phases only) — the "which file is the ceiling / should be split" reading.
+// The runner must carry floor_ms + the capped-file list into the verification-round record so the
+// reading is per-round-visible without re-parsing the log.
+
+test("AC1/AC2 — __CEILING__ lines land floor_ms + ceiling (封顶者清单) into the verification-round record", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-ceil-"));
+  // The fake suite emits __CEILING__ lines to STDERR exactly like measure-suite-reporter.mjs does
+  // (full path, duration_ms, floor_ms, 封顶者/该拆 — the ^-anchored no-drift shape), then a green
+  // TAP summary. Both lines share one group's floor_ms=4200 (every __CEILING__ line of a group
+  // carries the group floor verbatim).
+  const suite = [
+    'echo "__CEILING__ /repo/packages/quay/test/heavy.test.mjs duration_ms=3580.99 floor_ms=4200 封顶者/该拆" >&2',
+    'echo "__CEILING__ /repo/packages/quay/test/heavy2.test.mjs duration_ms=4100 floor_ms=4200 封顶者/该拆" >&2',
+    'echo "# tests 5"',
+    'echo "# pass 5"',
+    'echo "# fail 0"',
+    'echo "# cancelled 0"',
+    "exit 0",
+  ].join("\n");
+  const { f, dir } = fakeSuite(suite);
+  try {
+    const child = runRunner({ root, command: `bash ${f}`, laneCount: 8 });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, `runner exits 0 on green, got ${code}`);
+    const vrf = path.join(root, ".quay", "verification-round.jsonl");
+    assert.ok(fs.existsSync(vrf), "verification-round.jsonl written");
+    const rec = JSON.parse(fs.readFileSync(vrf, "utf8").split("\n").filter((l) => l.trim())[0]);
+    // AC1 — both fields present on a round that saw __CEILING__ lines. Both __CEILING__ lines share
+    // one group's floor_ms (every __CEILING__ line of a group carries the group floor verbatim), so
+    // the distinct-floors array is the single value [4200].
+    assert.deepEqual(rec.floor_ms, [4200], "floor_ms = the distinct group floors (各相) the __CEILING__ lines carried");
+    // AC2 — the ceiling list matches the reporter's __CEILING__ output verbatim (paths, no drift).
+    assert.deepEqual(rec.ceiling, [
+      "/repo/packages/quay/test/heavy.test.mjs",
+      "/repo/packages/quay/test/heavy2.test.mjs",
+    ], "ceiling = the 封顶者清单 exactly as the reporter emitted it (stream order, no normalization)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC1 — a round with __CEILING__ lines from MULTIPLE phases keeps each group's floor_ms (各相, no overwrite)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-ceil-multi-"));
+  // The real full-suite runs three node --test phases (serial cc=2 / lowconc cc=3 / main cc=8),
+  // each emitting its OWN __CEILING__ lines with ITS OWN group floor. The record must keep all
+  // distinct floors, first-seen order (serial → lowconc → main), not just the last one.
+  const suite = [
+    'echo "__CEILING__ /repo/packages/quay/test/serial-heavy.test.mjs duration_ms=2300 floor_ms=2400 封顶者/该拆" >&2',
+    'echo "__CEILING__ /repo/packages/quay/test/lowconc-heavy.test.mjs duration_ms=4100 floor_ms=4200 封顶者/该拆" >&2',
+    'echo "__CEILING__ /repo/packages/quay/test/main-heavy.test.mjs duration_ms=8100 floor_ms=8200 封顶者/该拆" >&2',
+    'echo "# tests 5"',
+    'echo "# pass 5"',
+    'echo "# fail 0"',
+    'echo "# cancelled 0"',
+    "exit 0",
+  ].join("\n");
+  const { f, dir } = fakeSuite(suite);
+  try {
+    const child = runRunner({ root, command: `bash ${f}`, laneCount: 8 });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, `runner exits 0 on green, got ${code}`);
+    const vrf = path.join(root, ".quay", "verification-round.jsonl");
+    const rec = JSON.parse(fs.readFileSync(vrf, "utf8").split("\n").filter((l) => l.trim())[0]);
+    assert.deepEqual(rec.floor_ms, [2400, 4200, 8200], "floor_ms keeps EACH phase's group floor (各相) in stream order");
+    assert.deepEqual(rec.ceiling, [
+      "/repo/packages/quay/test/serial-heavy.test.mjs",
+      "/repo/packages/quay/test/lowconc-heavy.test.mjs",
+      "/repo/packages/quay/test/main-heavy.test.mjs",
+    ], "ceiling = the full 封顶者清单 across all capped phases");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC3 — a round with NO __CEILING__ lines omits floor_ms and ceiling (no fabricated empties)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-ceil-none-"));
+  // A scoped/legacy suite (or a serial cc=1 phase — the split criterion is NOT applied there) never
+  // emits __CEILING__ lines. The record must NOT fabricate floor_ms=0 / ceiling=[] — same absent-
+  // field contract as the *_phase_ms backward-compat test above.
+  const { f, dir } = fakeSuite(GREEN_SUITE);
+  try {
+    const child = runRunner({ root, command: `bash ${f}`, laneCount: 8 });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, `runner exits 0 on green, got ${code}`);
+    const vrf = path.join(root, ".quay", "verification-round.jsonl");
+    const rec = JSON.parse(fs.readFileSync(vrf, "utf8").split("\n").filter((l) => l.trim())[0]);
+    assert.equal(rec.floor_ms, undefined, "no floor_ms on a non-__CEILING__ suite");
+    assert.equal(rec.ceiling, undefined, "no ceiling on a non-__CEILING__ suite");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // ── gap-merge-green-snapshot-verified-commit-livelock: AC2 (verifiedCommit / commit) ────────────────
 
 test("AC2 — a git-repo run records verifiedCommit (the integration tip at suite start) in the state AND the round record", async () => {
