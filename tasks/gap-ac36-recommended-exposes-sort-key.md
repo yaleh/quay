@@ -3,7 +3,7 @@ id: gap-ac36-recommended-exposes-sort-key
 title: AC36 判据②不可机械核——slot-refill --json 的 recommended
   是纯字符串数组，不暴露排序键；位次严格前移+负控制只能人工比对两次运行；处方=recommended 元素改带排序键对象（或另加 ranking
   数组），判据②才能机械核对
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -13,6 +13,8 @@ children: []
 extra: {}
 ---
 **type:** execution
+
+> **翻 done（outer 2026-08-12, r314-green 覆盖）**：代码合入 develop 686b5540（r314 green, 3361 pass/0 fail），AC 勾选 + measure 复核通过。
 
 ## Proposal
 

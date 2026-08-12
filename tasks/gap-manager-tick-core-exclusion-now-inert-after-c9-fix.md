@@ -2,7 +2,7 @@
 id: gap-manager-tick-core-exclusion-now-inert-after-c9-fix
 title: "manager-tick-core.md 排除条目在 80d609fd 修掉 C9 旧路径后变 inert——necessity-check
   红（actual: [manager-tick-core.md]）；该条目无 retainedNote，修法=移除（引用已修到新路径，不再需要排除）"
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -12,6 +12,8 @@ children: []
 extra: {}
 ---
 **type:** execution
+
+> **翻 done（outer 2026-08-12, r314-green 覆盖）**：代码合入 develop 686b5540（r314 green, 3361 pass/0 fail），AC 勾选 + measure 复核通过。
 
 ## Proposal
 
