@@ -361,8 +361,14 @@ bash <root>/plugin/scripts/send-keys-reliable.sh <session> "执行 <root>/docs/a
 (`<target-transcript.jsonl>` = the inner session's OWN transcript jsonl, e.g.
 `~/.claude/projects/<encoded-cwd>/<session-id>.jsonl`.) `send-keys-reliable.sh` exits 0 only when
 that transcript shows a real user message containing the drive text (delivery confirmed). If it
-exits non-zero, inner is unreachable / the text was not delivered — **STOP**; do not claim the
-inner start.
+exits non-zero, inner is unreachable / the text was not delivered — **but before concluding STOP,
+re-run the SAME delivery checker (`transcript-delivery-check.ts`) against the materialized target
+transcript once it exists**. A fresh inner's transcript legitimately does not exist at poll time
+(`ENOENT`), so `send-keys-reliable.sh` fail-louds `exit 1` even when the drive text WAS delivered —
+measured 2026-08-12 on quay's own cold start (SH4): first drive exited 1 (ENOENT), re-check on the
+materialized transcript returned `state: delivered, delivered: true` with the drive text as a real
+user message (ts 03:12:08). Only a re-check that STILL cannot match the drive text means
+non-delivery — then **STOP**; do not claim the inner start.
 
 ### 7. Dispatch the first task
 
