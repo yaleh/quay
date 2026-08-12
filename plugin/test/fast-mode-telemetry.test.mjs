@@ -1314,6 +1314,60 @@ test("SLOT-STATUS CLI — real git: closed bracket + worktree REMOVED reads as g
   }
 });
 
+// ── Fast slot view (QUAY_TELEMETRY_FAST_SLOTS=1) — accounting-emit's occupancy.in_flight source ─────
+// (task gap-ac39-accounting-emit-layer, AC3: occupancy.in_flight 三层统一). The full --slots
+// aggregation is heavy in a large workspace (~30s: per-task git history + closed-but-live reverse
+// scan); the fast view skips both annotations — they are irrelevant to realConcurrency, the number
+// accounting-emit's autoOccupancy reads. Contract: realInFlight/realConcurrency are IDENTICAL to the
+// full path; closedButLive is empty by design (the reverse-dimension scan is the expensive part).
+
+test("FAST-SLOTS — QUAY_TELEMETRY_FAST_SLOTS=1 reports the same realInFlight/realConcurrency as the full --slots view", async () => {
+  const cli = await importCli();
+  const tmp = makeTmpWorkspace();
+  try {
+    fs.writeFileSync(path.join(tmp, ".gitignore"), ".workflow-events/\n", "utf8");
+    fs.mkdirSync(path.join(tmp, "tasks"), { recursive: true });
+    fs.writeFileSync(path.join(tmp, "tasks", "closed-live.md"), "---\nid: closed-live\n---\n", "utf8");
+    gitCmd(tmp, "init", "-q");
+    gitCmd(tmp, "config", "user.email", "test@example.com");
+    gitCmd(tmp, "config", "user.name", "test");
+    assert.equal(gitCmd(tmp, "add", "-A").status, 0);
+    assert.equal(gitCmd(tmp, "commit", "-m", "seed").status, 0);
+    // CLOSED bracket whose branch is STILL checked out in an open worktree — the reverse-dimension
+    // defect shape the FULL path detects as closedButLive; the fast path deliberately skips it.
+    assert.equal(gitCmd(tmp, "worktree", "add", "-b", "task/closed-live", path.join(tmp, "wt-closed-live")).status, 0);
+    const runId = cli.generateRunId("closed-live");
+    cli.writeEvent(cli.buildStartEvent({ taskId: "closed-live", runId }), tmp);
+    cli.writeEvent(cli.buildEndEvent({ taskId: "closed-live", runId, outcome: "done" }), tmp);
+
+    // Deterministic slot arithmetic for BOTH paths (the full path's runCli default-pins subagents to
+    // 0, but this test's exact occupiedSlots assertion must hold even when the ambient env sets
+    // QUAY_TELEMETRY_SUBAGENTS — so pin 0 explicitly for both full and fast). The fast path also
+    // scans the live machine for non-task subagents
+    // (gap-telemetry-underreport-nontask-subagents-not-counted-in-slots), so the pin is what makes
+    // the fast-vs-full comparison non-flaky under a concurrent suite.
+    const full = JSON.parse(
+      runCliEnv(tmp, { QUAY_TELEMETRY_SUBAGENTS: "0" }, "--slots", "--cap", "1", "--json").stdout,
+    );
+    assert.equal(full.closedButLive.length, 1, "full path detects the closed-but-live agent");
+    assert.equal(full.occupiedSlots, 1);
+
+    const fast = JSON.parse(
+      runCliEnv(tmp, { QUAY_TELEMETRY_FAST_SLOTS: "1", QUAY_TELEMETRY_SUBAGENTS: "0" }, "--slots", "--cap", "1", "--json").stdout,
+    );
+    // Core in-flight numbers IDENTICAL — the value accounting-emit's autoOccupancy reads.
+    assert.equal(fast.realInFlight, full.realInFlight, "fast realInFlight matches full");
+    assert.equal(fast.realConcurrency, full.realConcurrency, "fast realConcurrency matches full");
+    assert.equal(fast.bracketsInFlight, full.bracketsInFlight, "fast bracketsInFlight matches full");
+    assert.equal(fast.reconcileCompliant, full.reconcileCompliant, "fast reconcileCompliant matches full");
+    // The reverse-dimension scan is deliberately skipped — closedButLive empty, occupiedSlots = realConcurrency.
+    assert.deepEqual(fast.closedButLive, [], "fast path does not run the closed-but-live reverse scan");
+    assert.equal(fast.occupiedSlots, fast.realConcurrency, "fast occupiedSlots = realConcurrency");
+  } finally {
+    cleanup(tmp);
+  }
+});
+
 // ── Non-task subagents in-flight (gap-telemetry-underreport-nontask-subagents-not-counted-in-slots) ──
 // The UNDER-REPORT direction: an investigation-type subagent (general-purpose / Explore / Plan) has
 // NO --task-start bracket, so the bracket-based real_in_flight read 0 while the subagent burned CPU —

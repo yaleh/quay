@@ -65,6 +65,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import { layerMechanisms, LAYER_MECHANISMS } from "./accounting-emit-layer-map.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SCRIPT_DIR = __dirname;
@@ -74,48 +75,24 @@ const JUDGEMENTS = ["已停用", "已替代", "是缺陷"];
 const LAYERS = ["outer", "inner", "manager"];
 
 // ── per-layer mechanism registry (the layer's CLAIMED mechanisms; auto-traces where real) ──────────────
-// `trace` is present ONLY for mechanisms with a real, defined on-disk trace in a live workspace.
-// Everything else is injected by the layer via `--mechanism` (its meta-cc-gathered times).
-// periodHours is the mechanism's claimed period (SPEC 2.5: compare last real exec vs claimed period).
+// The layer → mechanisms mapping lives in accounting-emit-layer-map.ts (AC39): each layer emits its
+// OWN mechanisms — cap-from-gate/slot-refill 归 inner, closure-lag-check 归 outer, and manager emits
+// its own (manager-tick-log / Workflow / session-liveness). This builder resolves the map + per-name
+// defs (period + trace). `trace` is present ONLY for mechanisms with a real, defined on-disk trace
+// in a live workspace; everything else is injected by the layer via `--mechanism` (its meta-cc-
+// gathered times). periodHours is the mechanism's claimed period (SPEC 2.5: compare last real exec
+// vs claimed period).
 type MechanismSpec = {
   name: string;
   periodHours: number;
   trace?: { file?: string; dir?: string; keys: string[]; mtime?: boolean };
 };
 
-const MECHANISMS: Record<string, MechanismSpec[]> = {
-  outer: [
-    {
-      name: "closure-lag-check",
-      periodHours: 1,
-      trace: { file: ".quay/closure-pass-last-run.json", keys: ["ranAt", "at"] },
-    },
-    {
-      name: "verification-round",
-      periodHours: 24,
-      trace: { file: ".quay/verification-round.jsonl", keys: ["at", "startedAt", "finishedAt"] },
-    },
-    {
-      name: "full-suite-runner",
-      periodHours: 24,
-      trace: { file: ".quay/full-suite-state.json", keys: ["finishedAt", "startedAt"] },
-    },
-  ],
-  inner: [
-    { name: "ready-pool-check --apply", periodHours: 0.42 },
-    { name: "slot-refill", periodHours: 0.42 },
-    { name: "fast-mode-telemetry --task-start", periodHours: 0.42 },
-  ],
-  manager: [
-    {
-      name: "manager-tick-log",
-      periodHours: 0.33,
-      trace: { file: "orchestration/manager-tick-log.md", keys: [], mtime: true },
-    },
-    { name: "cap-from-gate", periodHours: 0.33 },
-    { name: "slot-refill", periodHours: 0.33 },
-  ],
-};
+// Resolved once at module load; `layerMechanisms` fails closed (throws) on a stale map entry, so a
+// mechanism-name typo in the map is a hard error, never a silently-dropped mechanism.
+const MECHANISMS: Record<string, MechanismSpec[]> = Object.fromEntries(
+  Object.keys(LAYER_MECHANISMS).map((layer) => [layer, layerMechanisms(layer)])
+);
 
 // ── timestamp helpers ─────────────────────────────────────────────────────────────────────────────────
 function toEpochSeconds(v: unknown): number | null {
@@ -196,26 +173,42 @@ function readTimestampFromFile(file: string, keys: string[]): { epoch: number | 
 }
 
 // ── occupancy auto-collection (guarded; never a hang) ─────────────────────────────────────────────────
-function autoOccupancy(root: string): { inFlight: number | null; cap: number | null } {
+// Unified across the three layers (AC39/AC3): cap from cap-from-gate.sh, in_flight from
+// fast-mode-telemetry.ts --slots → realConcurrency (the REAL concurrency = open-bracket executors +
+// non-task subagents). Each half that is not already supplied by flag is auto-collected — a
+// half-complete occupancy (cap known, in_flight missing) is the exact observed defect (manager
+// 034125: `effective_cap` auto-read but `in_flight` null), so the two halves are NEVER left with one
+// missing when the loop config exists to source it.
+function autoOccupancy(root: string, capOverride: number | null, inFlightOverride: number | null): { inFlight: number | null; cap: number | null } {
   // Only attempt when the workspace has a loop config (cap-from-gate reads .quay/config.yml).
   if (!fs.existsSync(path.join(root, ".quay", "config.yml"))) {
-    return { inFlight: null, cap: null };
+    return { inFlight: inFlightOverride, cap: capOverride };
   }
-  let cap: number | null = null;
-  const capRes = spawnSync("bash", [path.join(SCRIPT_DIR, "cap-from-gate.sh"), "--root", root], {
-    encoding: "utf8",
-    timeout: 15000,
-  });
-  if (capRes.status === 0 && capRes.stdout) {
-    const m = capRes.stdout.match(/^effective_cap=([0-9]+)$/m);
-    if (m) cap = Number(m[1]);
+  let cap: number | null = capOverride;
+  if (cap === null) {
+    const capRes = spawnSync("bash", [path.join(SCRIPT_DIR, "cap-from-gate.sh"), "--root", root], {
+      encoding: "utf8",
+      timeout: 30000,
+    });
+    if (capRes.status === 0 && capRes.stdout) {
+      const m = capRes.stdout.match(/^effective_cap=([0-9]+)$/m);
+      if (m) cap = Number(m[1]);
+    }
   }
-  let inFlight: number | null = null;
-  if (cap !== null) {
+  let inFlight: number | null = inFlightOverride;
+  if (inFlight === null && cap !== null) {
     const slotsRes = spawnSync(
       "node",
       ["--no-warnings", "--experimental-strip-types", path.join(SCRIPT_DIR, "fast-mode-telemetry.ts"), "--slots", "--cap", String(cap), "--root", root, "--json"],
-      { encoding: "utf8", timeout: 15000 }
+      {
+        encoding: "utf8",
+        // The full --slots aggregation is heavy in a large workspace (~30s: per-task git history +
+        // closed-but-live scan). QUAY_TELEMETRY_FAST_SLOTS=1 selects fast-mode-telemetry.ts's fast
+        // slot view (~0.6s) which skips those annotations — they are irrelevant to realConcurrency.
+        // Bounded long (90s) so even the un-optimized full path completes without a spurious SIGTERM.
+        timeout: 90000,
+        env: { ...process.env, QUAY_TELEMETRY_FAST_SLOTS: "1" },
+      }
     );
     if (slotsRes.status === 0 && slotsRes.stdout) {
       try {
@@ -460,19 +453,25 @@ function main() {
   const mechs = specs.map((s) => assembleMechanism(s, root, args.mechanisms));
 
   // ── ② occupancy ──────────────────────────────────────────────────────────────────────────────────
+  // Unified across the three layers (AC39/AC3): auto-collect EACH missing half from the workspace's
+  // loop config, not only when both halves are absent. A half-complete tuple (cap known, in_flight
+  // missing) was the observed defect (manager 034125); it must never be emitted as-is when the loop
+  // config exists to source the missing half.
   let inFlight: number | null = args.inFlight;
   let cap: number | null = args.cap;
   let occSource = "flag";
-  if (inFlight === null && cap === null && !args.noRegistry) {
-    const auto = autoOccupancy(root);
-    if (auto.cap !== null || auto.inFlight !== null) {
+  if (!args.noRegistry) {
+    const auto = autoOccupancy(root, cap, inFlight);
+    if (inFlight === null && auto.inFlight !== null) {
       inFlight = auto.inFlight;
-      cap = auto.cap;
-      occSource = "auto";
-    } else {
-      occSource = "none";
+      occSource = occSource === "flag" ? "flag+auto" : "auto";
     }
-  } else if (inFlight === null && cap === null) {
+    if (cap === null && auto.cap !== null) {
+      cap = auto.cap;
+      occSource = occSource === "flag" ? "flag+auto" : "auto";
+    }
+  }
+  if (occSource === "flag" && inFlight === null && cap === null) {
     occSource = "none";
   }
   let ratio: number | null = null;
