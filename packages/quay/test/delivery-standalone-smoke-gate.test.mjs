@@ -1,4 +1,6 @@
-// @test-group product
+// @test-group serial
+// (2026-08-12 outer: product → serial — real standalone smoke gates with real waits, 163s in the
+// 8-lane suite timed out but 7/7 pass isolated ⇒ load-sensitive real-wall-clock-wait family.
 // DIR-035-D (M52) — `delivery-standalone-smoke` wired as a named gate declared in the
 // workspace's gates config (DIR-120: `.quay/config.yml`'s own `gates:` section for THIS repo;
 // a legacy `.quay/gates.yml` only for a workspace with no `config.yml`).
