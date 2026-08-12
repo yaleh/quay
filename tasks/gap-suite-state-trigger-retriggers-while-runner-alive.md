@@ -49,3 +49,9 @@ extra: {}
 - [ ] 修后实跑：构造 runner 活 + state=red + merge ⇒ 无第二个 runner（证据贴出）
 - [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
+
+## Touches
+
+- plugin/scripts/suite-state-trigger.ts（RETRIGGER 前校验 state.pid 进程存活）
+- plugin/test/suite-state-trigger.test.mjs（三态用例）
+- tasks/gap-suite-state-trigger-retriggers-while-runner-alive.md（自身：勾 AC + 贴证据）
