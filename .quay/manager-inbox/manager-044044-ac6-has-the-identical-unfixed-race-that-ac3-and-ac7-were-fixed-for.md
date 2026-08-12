@@ -81,3 +81,48 @@ AC3 的注释已经论证过它为什么安全——「真正的分区破坏是�
 
 `packages/quay-backlog/test/backlog-client.test.mjs` 在同一轮里被 triage 归为 not-in-family。
 我**没有查它的根因**（未查 ≠ 无关）。
+
+---
+
+# 追加（2026-08-12T04:49:11Z）：这轮红**不止一件事**，第二件我不知道原因
+
+失败从 5 条涨到 **7 条**，多出来的那条**不是 AC6 同族**：
+
+```
+✖ AC5: real-store scan — 0 parse failures; hazardous titles read back unchanged (5345.4ms)
+   file=packages/quay-native/test/store.test.mjs   in_family=None  kind=None
+```
+
+按文件汇总：`3x runner-grouping-list-groups(in_family=True)` + `1x backlog-client` + `1x store.test.mjs` + 2 条无文件上下文。
+
+**⇒ 只修 AC6 不会让这轮变绿。**
+
+## 我查了什么、否定了什么、不知道什么
+
+**查了（按位置，不按猜测）**：`packages/quay-native/test/store.test.mjs:262-265` —— 该测试 `readdirSync(REPO_ROOT/tasks)` 扫全部 `.md` 并逐个 `readFileSync` + YAML 解析，断言 0 解析失败 / 无截断 / 无缺 title。
+
+**我的第一反应是**：它扫的是共享 `tasks/` 目录，而 04:46 那三条 fan-in 正在批量写任务文件 ⇒ 与 AC6 同一结构类（断言跨越被并发写入的共享目录）。
+
+**这个猜想我自己否定了**：该轮跑在 `--root /home/yale/work/quay-worktrees/verify-32e2a91c`，worktree 有**独立**工作树——
+```
+主检出 tasks/    inode 806554   1017 个 .md
+worktree tasks/  inode 5377837  1016 个 .md   ← 差的 1 个正是 04:28 建的 #61，晚于该 worktree 的 commit 32e2a91c
+```
+**inode 不同 ⇒ 真隔离，主检出的并发写进不去。猜想不成立。**
+
+**不知道的**：AC5 到底为什么红。我在主检出 `.quay/` 和该 worktree 的 `.quay/` 里都**没找到本轮的日志**
+（主检出的 `full-suite.log` mtime 是 08-11T23:33，5 小时前，不是本轮的；worktree 下无 `.log`）。
+**所以我拿不到 AC5 的实际断言输出，也就不给根因。**（我今晚已经在一条线索上连给过四个错误解释，这次到此为止。）
+
+**如果你知道本轮日志写在哪，那一行 assert 的 diff 就能定案** —— 它会直接打印是哪个任务文件、哪种失败（no frontmatter / YAML 异常 / 缺 title / 截断）。
+
+## 附带一个看起来像 triage 归属错的读数（不确定，供你一眼）
+
+state 文件里这一行：
+```
+✖ AC6: --group product,engine ∪ --group lowconc selects the same files as no-args (61791.4ms)
+   file = packages/quay-backlog/test/backlog-client.test.mjs
+```
+**同一条 AC6 断言文本被归到了 `backlog-client.test.mjs` 名下**，而 AC6 只存在于 `runner-grouping-list-groups.test.mjs`。
+像是 `red-window-triage` 的文件归属在日志交错时串了行。**我没查它的实现，只是标出来** ——
+如果照这个归属去修，会修错文件。
