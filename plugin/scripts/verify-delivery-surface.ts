@@ -78,10 +78,19 @@ export const MANIFEST: DeliveryCategory[] = [
     id: 2,
     name: "loop-docs",
     label: "循环文档",
-    deliverables: ["plugin/loop/fast-mode-loop-tick.md", "plugin/loop/orchestrator-loop-tick.md"],
+    // gap-manager-layer-no-verified-install-vector (manager 件入清单): 三层 tick 文档全部随包。
+    // outer+inner 铺入 docs/analysis/ 与 orchestration/；manager 层 = 出厂模板
+    // plugin/loop/manager-loop-tick.md + 可安装结晶 plugin/skills/manager/SKILL.md（npm-pack 裸机
+    // `quay manager start` 冷启动向量的管理器锚点）——不再只是「归属 gap-productize-the-manager-layer」。
+    deliverables: [
+      "plugin/loop/fast-mode-loop-tick.md",
+      "plugin/loop/orchestrator-loop-tick.md",
+      "plugin/loop/manager-loop-tick.md",
+      "plugin/skills/manager/SKILL.md",
+    ],
     attribution: ["gap-productize-the-manager-layer"],
     criterion:
-      "outer+inner 两层 tick 文档随包（铺入 docs/analysis/ 与 orchestration/）；manager 层缺 → 归属 gap-productize-the-manager-layer",
+      "三层 tick 文档随包（outer+inner 铺入 docs/analysis/ 与 orchestration/；manager 层 = plugin/loop/manager-loop-tick.md 出厂模板 + plugin/skills/manager/SKILL.md 可安装结晶）",
   },
   {
     id: 3,
