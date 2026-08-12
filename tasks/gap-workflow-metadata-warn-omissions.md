@@ -1,12 +1,12 @@
 ---
 id: gap-workflow-metadata-warn-omissions
-title: "Workflow metadata WARN-level omissions — decide fix or document"
-status: todo
+title: Workflow metadata WARN-level omissions — decide fix or document
+status: needs-human
 labels:
   - gap
   - milestone-candidate
 extra:
-  schema: v1
+  disposition: "retired-mechanism: ADR-022 已删机制前提证伪, outer A1-处置 2026-08-12 撤出候选池交人裁决"
 ---
 
 **type:** execution

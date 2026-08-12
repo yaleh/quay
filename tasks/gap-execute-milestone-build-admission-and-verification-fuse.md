@@ -2,7 +2,7 @@
 id: gap-execute-milestone-build-admission-and-verification-fuse
 title: execute-milestone has no size-aware Build admission, bounded verification
   ladder, or repeated-test failure fuse
-status: todo
+status: needs-human
 labels:
   - gap
   - milestone-candidate
@@ -10,7 +10,7 @@ labels:
 parent: null
 children: []
 extra:
-  schema: v1
+  disposition: "retired-mechanism: ADR-022 已删机制前提证伪, outer A1-处置 2026-08-12 撤出候选池交人裁决"
 ---
 
 **type:** execution

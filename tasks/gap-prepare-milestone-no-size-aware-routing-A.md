@@ -2,17 +2,14 @@
 id: gap-prepare-milestone-no-size-aware-routing-A
 title: "Size estimation + fast-lane routing: estimateTaskSize +
   PrepareRoutingDecision in prepare-milestone"
-status: todo
+status: needs-human
 labels:
   - gap
   - defect
   - milestone-candidate
   - human-steered
 extra:
-  acceptance: bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh
-    gap-prepare-milestone-no-size-aware-routing-A
-    experiments/quay-perpetual-stream/charters/M239-gap-prepare-milestone-no-size-aware-routing-A.md
-    milestones/M239/absorb-entry.md
+  disposition: "retired-mechanism: ADR-022 已删机制前提证伪, outer A1-处置 2026-08-12 撤出候选池交人裁决"
 ---
 **type:** execution
 
