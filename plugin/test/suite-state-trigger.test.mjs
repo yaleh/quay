@@ -58,6 +58,12 @@ import {
   // gap-suite-state-trigger-retriggers-while-runner-alive — runner-liveness before retrigger
   isRunnerInFlight,
   spawnRetriggerRun,
+  // gap-suite-start-verifies-target-commit — verifiedCommit 起跑闸 (AC1 验非目标 / AC5 同树)
+  readVerifiedCommit,
+  verifiedTreeContainsCommit,
+  readLastGreenCommit,
+  checkVerificationStartGates,
+  resolveVerifyTarget,
 } from "../scripts/suite-state-trigger.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -565,6 +571,20 @@ function gitRoot(ahead = 1) {
   return { root, developHead, integrationHead, ahead };
 }
 
+/** Create a new commit on the CURRENT branch of `root`; returns its full sha. */
+function commit(root, msg, content = "x\n") {
+  fs.writeFileSync(path.join(root, "a.txt"), content, "utf8");
+  execSync("git add -A && git commit -q -m " + JSON.stringify(msg), { cwd: root, stdio: "ignore" });
+  return execSync("git rev-parse HEAD", { cwd: root, encoding: "utf8" }).trim();
+}
+
+/** Append a verification-round.jsonl record to `<root>/.quay/` (test seam for readLastGreenCommit). */
+function writeRound(root, rec) {
+  const file = path.join(root, ".quay", "verification-round.jsonl");
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.appendFileSync(file, JSON.stringify(rec) + "\n", "utf8");
+}
+
 // ── AC2: merge 落地触发 (merge landing trigger) ─────────────────────────────────────────────────────
 
 test("AC2 — shouldStartOnMergeLanding is pure: a head ADVANCE with pending + non-running fires; no advance / running / no-pending do not", () => {
@@ -909,4 +929,205 @@ test("gap-suite AC1 — spawnRetriggerRun REFUSES to launch a second runner whil
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+// ── gap-suite-start-verifies-target-commit: verifiedCommit 起跑闸 (AC1 验非目标 / AC5 同树) ──────────
+// The defect: verifiedCommit is written by the runner but never READ/comparED against "the fix commit
+// this round intends to verify" — round 53 started on verifiedCommit=3b2854b6 BEFORE the type fix
+// c19e70a1 landed, so it verified the PRE-FIX tree (red was expected, 550s wasted). Two half-gates,
+// the SAME field: AC1 blocks verifying a tree that does NOT contain the target fix; AC5 blocks
+// re-verifying the SAME tree as the last green round (round 61→62 400s duplicate).
+
+test("AC1 — verifiedTreeContainsCommit is the shared ancestor predicate (round-53 class: a LATER fix is NOT in the verified tree)", () => {
+  const { root } = gitRoot(0); // develop == integration == base, HEAD on develop
+  try {
+    const base = execSync("git rev-parse develop", { cwd: root, encoding: "utf8" }).trim();
+    // A LATER fix commit (a descendant of base) — the round-53 shape: verified tree = base, fix = c19e70a1-class.
+    execSync("git checkout -q integration", { cwd: root, stdio: "ignore" });
+    const fix = commit(root, "type fix", "fix\n");
+    execSync("git checkout -q develop", { cwd: root, stdio: "ignore" });
+    // round-53: `git merge-base --is-ancestor c19e70a1 3b2854b6` → NO ⇒ the verified tree does NOT contain the fix
+    assert.equal(verifiedTreeContainsCommit(fix, base, root), false, "a later fix is NOT an ancestor of the verified pre-fix tree (验非目标)");
+    assert.equal(verifiedTreeContainsCommit(base, base, root), true, "the verified tree contains itself");
+    assert.equal(verifiedTreeContainsCommit(base, fix, root), true, "the fix tree CONTAINS the pre-fix base (ancestor)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC1 — verifiedTreeContainsCommit fails CLOSED on a non-git root / unresolvable commit (cannot confirm containment)", () => {
+  const root = tmpRoot(); // not a git repo
+  try {
+    assert.equal(verifiedTreeContainsCommit("a".repeat(40), "b".repeat(40), root), false, "non-git root ⇒ cannot confirm ⇒ false");
+    assert.equal(verifiedTreeContainsCommit("a".repeat(40), undefined, root), false, "missing verified ⇒ false");
+    assert.equal(verifiedTreeContainsCommit("", "b".repeat(40), root), false, "missing expected ⇒ false");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC1 — the round-53 historical judgment is IN-PLACE, no annotation: verifiedTreeContainsCommit(c19e70a1-class, round53.commit, root) → false", () => {
+  const { root } = gitRoot(0);
+  try {
+    const base = execSync("git rev-parse develop", { cwd: root, encoding: "utf8" }).trim();
+    execSync("git checkout -q integration", { cwd: root, stdio: "ignore" });
+    const fix = commit(root, "the type fix", "fix\n");
+    execSync("git checkout -q develop", { cwd: root, stdio: "ignore" });
+    // Two historical round records (the 真实样本 shape): round 52/53 verified pre-fix trees.
+    // A reader asks the SAME predicate per round — NO annotation on the jsonl (注记会漂).
+    const round53 = { round: 53, state: "red", commit: base }; // verifiedCommit=3b2854b6-class
+    const round61 = { round: 61, state: "green", commit: fix }; // the fix IS in this tree
+    assert.equal(verifiedTreeContainsCommit(fix, round53.commit, root), false, "round-53 red does NOT answer 'did the fix work' ⇒ 验非目标");
+    assert.equal(verifiedTreeContainsCommit(fix, round61.commit, root), true, "a round whose tree contains the fix DOES answer it");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC1 — checkVerificationStartGates blocks (验非目标) when the to-be-verified tree does NOT contain the explicit target", () => {
+  const { root } = gitRoot(0);
+  try {
+    execSync("git checkout -q integration", { cwd: root, stdio: "ignore" });
+    const fix = commit(root, "the target fix", "fix\n");
+    execSync("git checkout -q develop", { cwd: root, stdio: "ignore" });
+    // HEAD on develop = base (pre-fix). The target fix landed AFTER — NOT in the tree ⇒ block.
+    const gates = checkVerificationStartGates(root, { verifyTarget: fix });
+    assert.equal(gates.verifyingNonTarget, true, "target not in the tree ⇒ 验非目标");
+    assert.equal(gates.blocks, true, "start is blocked");
+    assert.equal(gates.reason, "verify-target", "reason names the AC1 gate");
+    // A tree that DOES contain the target passes.
+    execSync("git checkout -q integration", { cwd: root, stdio: "ignore" });
+    const ok = checkVerificationStartGates(root, { verifyTarget: fix });
+    assert.equal(ok.blocks, false, "a tree containing the target is NOT blocked");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC1 — default target = integration HEAD: a worktree full-suite on an OLDER tree is blocked (验非目标)", () => {
+  const { root } = gitRoot(0);
+  try {
+    execSync("git checkout -q integration", { cwd: root, stdio: "ignore" });
+    const fix = commit(root, "new integration commit", "fix\n"); // integration head ADVANCES past develop
+    execSync("git checkout -q develop", { cwd: root, stdio: "ignore" }); // tested tree = old develop HEAD
+    // No explicit target ⇒ the gate defaults to integrationHead (fix). The tested develop tree does
+    // NOT contain fix ⇒ the round would verify a tree OLDER than the integration tip ⇒ 验非目标.
+    const gates = checkVerificationStartGates(root);
+    assert.equal(gates.targetCommit, fix, "default target = integration head");
+    assert.equal(gates.verifyingNonTarget, true, "tested tree older than the integration tip is 验非目标");
+    assert.equal(gates.blocks, true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC5 — readLastGreenCommit scans verification-round.jsonl BACKWARDS for the last GREEN round's commit", () => {
+  const root = tmpRoot();
+  try {
+    assert.equal(readLastGreenCommit(root), null, "no rounds file ⇒ null");
+    // newest-first: a red round with a NEWER commit, then a green round with an OLDER commit.
+    writeRound(root, { round: 2, state: "red", commit: "b".repeat(40) });
+    writeRound(root, { round: 1, state: "green", commit: "a".repeat(40) });
+    assert.equal(readLastGreenCommit(root), "a".repeat(40), "the last GREEN round's commit is returned (red skipped)");
+    // a green round with NO commit (legacy/hermetic) is skipped; earlier green still found
+    writeRound(root, { round: 3, state: "green" });
+    assert.equal(readLastGreenCommit(root), "a".repeat(40), "a commit-less green round is tolerated (skipped)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC5 — checkVerificationStartGates blocks (同树重复) when the to-be-verified tree EQUALS the last green round's tree", () => {
+  const { root } = gitRoot(0);
+  try {
+    const base = execSync("git rev-parse HEAD", { cwd: root, encoding: "utf8" }).trim();
+    // The last green round verified `base`; the tree has NOT changed (HEAD still = base) ⇒ same tree.
+    writeRound(root, { round: 61, state: "green", commit: base });
+    const gates = checkVerificationStartGates(root);
+    assert.equal(gates.sameTreeAsLastGreen, true, "to-be-verified tree == last green tree (round 61→62 shape)");
+    assert.equal(gates.blocks, true, "start is blocked");
+    assert.equal(gates.reason, "same-tree", "reason names the AC5 gate");
+    // A NEW commit on the tree ⇒ not the same tree ⇒ no AC5 block.
+    const fix = commit(root, "new work", "y\n");
+    const after = checkVerificationStartGates(root);
+    assert.equal(after.sameTreeAsLastGreen, false, "the tree changed ⇒ not the same-tree repeat");
+    assert.equal(after.blocks, false, "a changed tree is NOT blocked by AC5");
+    void fix;
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC5 — spawnRetriggerRun SUPPRESSES the same-tree duplicate (SUITE-SKIP-SAME-TREE, no spawn) — round 61→62 shape", () => {
+  const { root } = gitRoot(0);
+  try {
+    const base = execSync("git rev-parse HEAD", { cwd: root, encoding: "utf8" }).trim();
+    // A green terminal state + the last green round on the SAME tree → idle-green would fire, AC5 skips.
+    writeSuiteState(root, state({ state: "green", finishedAt: Math.floor(Date.now() / 1000) }));
+    writeRound(root, { round: 61, state: "green", commit: base });
+    const logs = [];
+    const origLog = console.log;
+    console.log = (...args) => logs.push(args.join(" "));
+    try {
+      spawnRetriggerRun(root);
+    } finally {
+      console.log = origLog;
+    }
+    assert.ok(logs.some((l) => l.startsWith("SUITE-SKIP-SAME-TREE")), "SUITE-SKIP-SAME-TREE logged (AC5 annotation)");
+    assert.ok(!logs.some((l) => l.startsWith("SUITE-RETRIGGER ")), "NO round was launched");
+    assert.ok(!fs.existsSync(path.join(root, ".quay", "full-suite-retrigger.log")), "no retrigger log — the runner was never spawned");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC1 — spawnRetriggerRun SUPPRESSES a round whose tree does NOT contain the target fix (SUITE-SKIP-NON-TARGET, no spawn) — round-53 class", () => {
+  const { root } = gitRoot(0);
+  try {
+    execSync("git checkout -q integration", { cwd: root, stdio: "ignore" });
+    const fix = commit(root, "the target type fix", "fix\n"); // lands AFTER the tested tree was cut
+    execSync("git checkout -q develop", { cwd: root, stdio: "ignore" });
+    writeSuiteState(root, state({ state: "green", finishedAt: Math.floor(Date.now() / 1000) }));
+    const logs = [];
+    const origLog = console.log;
+    console.log = (...args) => logs.push(args.join(" "));
+    try {
+      spawnRetriggerRun(root, { verifyTarget: fix });
+    } finally {
+      console.log = origLog;
+    }
+    assert.ok(logs.some((l) => l.startsWith("SUITE-SKIP-NON-TARGET")), "SUITE-SKIP-NON-TARGET logged (AC2: 明确标注验非目标)");
+    assert.ok(!logs.some((l) => l.startsWith("SUITE-RETRIGGER ")), "NO round was launched (拒绝起跑 — 不做无意义 550s 轮)");
+    assert.ok(!fs.existsSync(path.join(root, ".quay", "full-suite-retrigger.log")), "no retrigger log — the runner was never spawned");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC1/AC5 — a NORMAL round start (changed tree, contains target) is NOT blocked by the gates", () => {
+  const { root } = gitRoot(0);
+  try {
+    const base = execSync("git rev-parse HEAD", { cwd: root, encoding: "utf8" }).trim();
+    writeRound(root, { round: 61, state: "green", commit: base }); // last green on base
+    // A NEW commit lands (the tree changes) and IS the target ⇒ both gates pass.
+    const fix = commit(root, "new verified work", "y\n");
+    const gates = checkVerificationStartGates(root, { verifyTarget: fix });
+    assert.equal(gates.blocks, false, "a changed tree containing the target is startable");
+    assert.equal(gates.reason, null);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("resolveVerifyTarget — --verify-target CLI wins over QUAY_SUITE_VERIFY_TARGET env, then null default", () => {
+  const target = "c19e70a1".padEnd(40, "0");
+  assert.equal(resolveVerifyTarget(["--verify-target", target]), target, "CLI --verify-target resolves");
+  assert.equal(resolveVerifyTarget([], { verifyTarget: target }), target, "opts seam resolves");
+  process.env.QUAY_SUITE_VERIFY_TARGET = target;
+  try {
+    assert.equal(resolveVerifyTarget([]), target, "env QUAY_SUITE_VERIFY_TARGET resolves when no CLI/opts");
+  } finally {
+    delete process.env.QUAY_SUITE_VERIFY_TARGET;
+  }
+  assert.equal(resolveVerifyTarget([]), null, "no target ⇒ null (caller defaults to integration head / no gate)");
 });

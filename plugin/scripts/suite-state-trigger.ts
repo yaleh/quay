@@ -56,6 +56,10 @@
 //                                   #   配合 --retrigger-idle-min 0.01 这类小数分钟）
 //     [--idle-green-min <min>]      # idle-green 触发阈值（默认 2 = gap-b3-tick-coupled-misses-between-
 //                                   #   tick-merges AC3「持续 idle」；测试注入短 N 用 QUAY_SUITE_IDLE_GREEN_MS env）
+//     [--verify-target <commit>]    # gap-suite-start-verifies-target-commit AC1：本轮「想验证的修复提交」。
+//                                   #   起跑前 `git merge-base --is-ancestor <target> <被测树 HEAD>`；target
+//                                   #   不在被测树里 ⇒ SUITE-SKIP-NON-TARGET 拒绝起跑（round-53 类）。
+//                                   #   未设时默认取 integration HEAD（验 worktree 测旧树的场景）。env: QUAY_SUITE_VERIFY_TARGET
 //     [--json]                      # 跑一轮并以 JSON 打印结果（Contract measure idle_green_round_started）
 //     [--root <path>]               # 工作区根（测试接缝；默认仓库根）
 //
@@ -416,6 +420,9 @@ function eventsPath(root: string): string {
 function memoPath(root: string): string {
   return path.join(root, ".quay", "suite-state-last.json");
 }
+function roundsPath(root: string): string {
+  return path.join(root, ".quay", "verification-round.jsonl");
+}
 
 function readJson<T>(p: string): T | null {
   try {
@@ -607,6 +614,129 @@ export function readGitVerificationState(root: string): GitVerificationState {
   }
 }
 
+// ── verifiedCommit 起跑闸 (gap-suite-start-verifies-target-commit, AC1 + AC5) ─────────────────────────
+// `verifiedCommit`（runner 在套件起跑时写的被测树 HEAD）此前只有人写、没人读 —— 一轮可以起跑在一个
+// 「不含本轮想验证的修复提交」的树上（round 53：verifiedCommit=3b2854b6 起跑先于类型修复 c19e70a1，
+// 550s 验了修复前树，红是预期，结果不采信）。两半闸，同一字段：
+//   AC1 — 验非目标闸：起跑前 `git merge-base --is-ancestor <期望修复提交> <verifiedCommit>`；
+//         期望修复提交不在被测树里 ⇒ 拒绝起跑/标注「验非目标」（round-53 类被拦住）。
+//   AC5 — 同树重复闸：本次将验的 tree == 最近绿轮的 commit（期间无新提交 ⇒ 树没变）⇒ 跳过起轮
+//         （round 61→62 是 IDLE-GREEN 2min 阈值 < 收尾耗时造成的 400s 同树重复；不调阈值，用「树变没变」判）。
+// 读历史轮次用同一条 `verifiedTreeContainsCommit`（机械、就地、不依赖任何注记 —— 注记会漂）。
+
+/**
+ * Read the commit a round WOULD verify — `git rev-parse HEAD` in the tested checkout at the decision
+ * point (the same value full-suite-runner.ts records as `verifiedCommit` at run start). The trigger
+ * reads it BEFORE the runner spends 400-550s so it can gate the start. Not a git checkout ⇒ undefined
+ * (fail-open — the AC1/AC5 gates both pass when they cannot read a tree).
+ */
+export function readVerifiedCommit(root: string): string | undefined {
+  try {
+    const out = execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: root,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    return /^[0-9a-f]{40,}$/i.test(out) ? out : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * AC1 — the SHARED "does this verified tree contain the target commit?" judgment
+ * (`git merge-base --is-ancestor <expected> <verified>` exits 0 iff <expected> is an ancestor of
+ * <verified> — i.e. <verified> CONTAINS <expected>). Used BOTH:
+ *   - at round START (gate the spawn — 验非目标 if the target has not landed yet), AND
+ *   - when READING historical rounds from verification-round.jsonl (Plan step 3 — judge in place,
+ *     NO annotation: `verifiedTreeContainsCommit(c19e70a1, round53.commit, root)` → false ⇒
+ *     round 53 验的不是目标树，其红不回答「类型修好没有」).
+ * Fail-closed: an unresolvable commit / non-git root ⇒ false (cannot CONFIRM containment ⇒ treat as
+ * 验非目标, so a round never starts on a tree we cannot prove contains the target).
+ */
+export function verifiedTreeContainsCommit(expected: string, verified: string | undefined, root: string): boolean {
+  if (!expected || !verified) return false;
+  try {
+    execFileSync("git", ["merge-base", "--is-ancestor", expected, verified], {
+      cwd: root,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * AC5 — the last GREEN round's verified commit (verification-round.jsonl `commit` field), scanning
+ * BACKWARDS (newest first) for the last state==="green" record. null when none / unreadable / a green
+ * round without a commit (legacy or hermetic non-git root). This is the "did the tree change" anchor:
+ * if the to-be-verified tree EQUALS this, a new round would re-verify the SAME tree (round 61→62
+ * 400s same-tree duplicate) — judge by tree change, never by "how long we waited" (收尾时长是外生变量).
+ */
+export function readLastGreenCommit(root: string): string | null {
+  try {
+    const text = fs.readFileSync(roundsPath(root), "utf8");
+    const lines = text.split("\n").filter(Boolean);
+    for (let i = lines.length - 1; i >= 0; i--) {
+      let rec: { state?: string; commit?: string };
+      try {
+        rec = JSON.parse(lines[i]);
+      } catch {
+        continue;
+      }
+      if (rec.state === "green" && typeof rec.commit === "string" && /^[0-9a-f]{40,}$/i.test(rec.commit)) {
+        return rec.commit;
+      }
+    }
+  } catch {
+    // fail-open — a missing/unreadable rounds file has no last-green anchor (no AC5 skip)
+  }
+  return null;
+}
+
+/** The round-start gate's verdict (AC1 + AC5) — the startup preconditions on ANY round spawn. */
+export interface VerificationStartGates {
+  /** The commit a round would verify (HEAD in the tested checkout at the decision). */
+  verifiedCommit: string | undefined;
+  /** The target fix commit the round is INTENDED to verify (AC1). Null when unset (no AC1 gate). */
+  targetCommit: string | null;
+  /** AC1 — true when a target is set AND the to-be-verified tree does NOT contain it (验非目标). */
+  verifyingNonTarget: boolean;
+  /** AC5 — true when the to-be-verified tree EQUALS the last green round's tree (same-tree repeat). */
+  sameTreeAsLastGreen: boolean;
+  /** True when the round start is BLOCKED by a gate (AC1 验非目标 or AC5 同树重复). */
+  blocks: boolean;
+  reason: "verify-target" | "same-tree" | null;
+}
+
+/**
+ * Compute the AC1+AC5 round-start gates. `verifyTarget` (explicit, from --verify-target /
+ * QUAY_SUITE_VERIFY_TARGET / opts) wins; otherwise the target DEFAULTS to the integration head (the
+ * commit the round is meant to verify — the tip with unverified commits), which catches a worktree
+ * full-suite whose tested tree is OLDER than the integration tip (验非目标). Fail-open: a non-git /
+ * unreadable root yields verifiedCommit undefined + lastGreen null ⇒ neither gate blocks.
+ */
+export function checkVerificationStartGates(
+  root: string,
+  opts: { verifyTarget?: string | null } = {},
+): VerificationStartGates {
+  const git = readGitVerificationState(root);
+  const targetCommit = resolveVerifyTarget(undefined, opts) ?? git.integrationHead;
+  const verifiedCommit = readVerifiedCommit(root);
+  const verifyingNonTarget = targetCommit !== null && !verifiedTreeContainsCommit(targetCommit, verifiedCommit, root);
+  const lastGreen = readLastGreenCommit(root);
+  const sameTreeAsLastGreen = verifiedCommit !== undefined && lastGreen !== null && verifiedCommit === lastGreen;
+  if (verifyingNonTarget) {
+    return { verifiedCommit, targetCommit, verifyingNonTarget, sameTreeAsLastGreen, blocks: true, reason: "verify-target" };
+  }
+  if (sameTreeAsLastGreen) {
+    return { verifiedCommit, targetCommit, verifyingNonTarget, sameTreeAsLastGreen, blocks: true, reason: "same-tree" };
+  }
+  return { verifiedCommit, targetCommit, verifyingNonTarget, sameTreeAsLastGreen, blocks: false, reason: null };
+}
+
 export interface IdleGreenDecision {
   fire: boolean;
   /** Measured idle ms behind the idle-green decision (null when no terminal anchor). */
@@ -686,6 +816,21 @@ export function resolveIdleGreenMs(argv?: string[], opts?: { idleGreenMs?: numbe
   const envMs = Number(process.env.QUAY_SUITE_IDLE_GREEN_MS);
   if (Number.isFinite(envMs) && envMs > 0) return envMs;
   return DEFAULT_IDLE_GREEN_MS;
+}
+
+/**
+ * gap-suite-start-verifies-target-commit AC1 — the round's intended verification target (the fix
+ * commit this round must verify). Resolution order: opts (test seam) → --verify-target CLI →
+ * QUAY_SUITE_VERIFY_TARGET env → null (caller falls back to the integration head / no gate).
+ */
+export function resolveVerifyTarget(argv?: string[], opts?: { verifyTarget?: string | null }): string | null {
+  if (opts?.verifyTarget) return opts.verifyTarget;
+  if (argv) {
+    const arg = parseArg(argv, "--verify-target");
+    if (arg) return arg;
+  }
+  const env = process.env.QUAY_SUITE_VERIFY_TARGET;
+  return env || null;
 }
 
 /** Is a process with this PID currently alive? (ESRCH = no such process = dead; EPERM = exists but not ours = alive.) */
@@ -1013,7 +1158,7 @@ export function retriggerRunnerArgs(root: string, state: SuiteState | null): str
  * landed between the decision and here has written `running` ⇒ bail (the manual round IS the round).
  * The runner's stderr/stdout diagnostics tee to <root>/.quay/full-suite-retrigger.log.
  */
-export function spawnRetriggerRun(root: string): void {
+export function spawnRetriggerRun(root: string, opts?: { verifyTarget?: string | null }): void {
   const state = readSuiteState(root);
   if (!state || state.state === "running") return; // AC4: a round is already in flight — never double-start
   // gap-suite-state-trigger-retriggers-while-runner-alive — state=red with a LIVE runner is early-RED
@@ -1027,6 +1172,29 @@ export function spawnRetriggerRun(root: string): void {
       `SUITE-RETRIGGER-WAIT-RUNNER root=${root} state=${state.state} ` +
         `runId=${state.runId ?? "?"} pid=${state.pid ?? "none"} at=${new Date().toISOString()}`,
     );
+    return;
+  }
+  // gap-suite-start-verifies-target-commit — AC1 + AC5 verifiedCommit gates: a round must not start
+  // (a) on a tree that does NOT contain the target fix commit (验非目标 — round-53 class: 550s
+  // wasted verifying the pre-fix tree), nor (b) re-verifying the SAME tree as the last green round
+  // (round 61→62: 400s same-tree duplicate). Both gates are pure (checkVerificationStartGates); the
+  // SUITE-SKIP line is the visible annotation on the Monitor event stream (AC2: 明确标注/拒绝起跑).
+  // The gates run AFTER the in-flight check so a live runner always wins (the double-suite accident
+  // is never averted by a tree gate).
+  const gates = checkVerificationStartGates(root, opts);
+  if (gates.blocks) {
+    if (gates.reason === "verify-target") {
+      console.log(
+        `SUITE-SKIP-NON-TARGET root=${root} target=${gates.targetCommit ?? "?"} ` +
+          `verified=${gates.verifiedCommit ?? "none"} reason=验非目标 at=${new Date().toISOString()}`,
+      );
+    } else if (gates.reason === "same-tree") {
+      const lastGreen = readLastGreenCommit(root);
+      console.log(
+        `SUITE-SKIP-SAME-TREE root=${root} verified=${gates.verifiedCommit ?? "?"} ` +
+          `lastGreen=${lastGreen ?? "?"} reason=同树重复 at=${new Date().toISOString()}`,
+      );
+    }
     return;
   }
   const runner = path.join(__dirname, "full-suite-runner.ts");
@@ -1059,7 +1227,13 @@ export function spawnRetriggerRun(root: string): void {
   }
 }
 
-async function runMonitor(root: string, intervalMs: number, idleMs: number, idleGreenMs: number): Promise<number> {
+async function runMonitor(
+  root: string,
+  intervalMs: number,
+  idleMs: number,
+  idleGreenMs: number,
+  verifyTarget: string | null,
+): Promise<number> {
   // 首轮先跑一次（建立基线/冷启动即红的立即触发），随后按间隔轮询。
   for (;;) {
     const { events, retrigger, mergePending, idleGreen } = runOnce(root, { idleMs, idleGreenMs });
@@ -1072,7 +1246,10 @@ async function runMonitor(root: string, intervalMs: number, idleMs: number, idle
       // AC2/AC3 — a round should start (empty-wait retrigger / merge landed / idle-green-with-pending):
       // MECHANICALLY start it (not the outer's tick). spawnRetriggerRun re-checks the state file is
       // still terminal just before launching, so the three triggers cannot double-start each other.
-      spawnRetriggerRun(root);
+      // gap-suite-start-verifies-target-commit — the verifiedCommit gates (AC1 验非目标 / AC5 同树) live
+      // inside spawnRetriggerRun: the trigger STILL fires (the merge DID land / idle-green DID occur —
+      // observability), the gates suppress the actual spawn when the tree is wrong or unchanged.
+      spawnRetriggerRun(root, { verifyTarget });
     }
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
@@ -1088,10 +1265,11 @@ export async function run(argv: string[]): Promise<number> {
   const interval = Number(parseArg(argv, "--interval") ?? "5");
   const idleMs = resolveRetriggerIdleMs(argv);
   const idleGreenMs = resolveIdleGreenMs(argv);
+  const verifyTarget = resolveVerifyTarget(argv);
 
   if ((argv.includes("--monitor") || !argv.includes("--once")) && !argv.includes("--json")) {
     const intervalMs = Number.isFinite(interval) && interval > 0 ? interval * 1000 : 5000;
-    return runMonitor(root, intervalMs, idleMs, idleGreenMs);
+    return runMonitor(root, intervalMs, idleMs, idleGreenMs, verifyTarget);
   }
 
   // --once / --json：跑一轮（测试接缝 + tick/排障；--json = machine-readable Contract measure）

@@ -50,11 +50,11 @@ git merge-base --is-ancestor c19e70a1 3b2854b6 → NO
 
 ## AC
 
-- [ ] AC1: 起跑时校验 verifiedCommit 含目标修复提交（git merge-base --is-ancestor）
-- [ ] AC2: 不满足 ⇒ 明确标注「验非目标」/拒绝起跑（不做无意义 550s 轮）
-- [ ] AC3: 负控制——round-53 类（修复落于起跑后）被该判据挡住
-- [ ] AC4: 既有测试全绿；`--for-task` scoped 门绿
-- [ ] AC5: 重复验同一棵树被拦——本次将验的 verifiedCommit == 最近绿轮的 commit 且期间无新提交 ⇒ 跳过起轮（round 61→62 同树 400s 重复被拦住）
+- [x] AC1: 起跑时校验 verifiedCommit 含目标修复提交（git merge-base --is-ancestor）
+- [x] AC2: 不满足 ⇒ 明确标注「验非目标」/拒绝起跑（不做无意义 550s 轮）
+- [x] AC3: 负控制——round-53 类（修复落于起跑后）被该判据挡住
+- [x] AC4: 既有测试全绿；`--for-task` scoped 门绿
+- [x] AC5: 重复验同一棵树被拦——本次将验的 verifiedCommit == 最近绿轮的 commit 且期间无新提交 ⇒ 跳过起轮（round 61→62 同树 400s 重复被拦住）
 
 ## Definition of Done
 
@@ -65,5 +65,43 @@ git merge-base --is-ancestor c19e70a1 3b2854b6 → NO
 ## Touches
 
 - plugin/scripts/suite-state-trigger.ts（起跑前置校验）
-- plugin/scripts/full-suite-runner.ts（若需要）
+- plugin/scripts/full-suite-runner.ts（若需要 —— 本实现未改 runner；verifiedCommit 写入已存在，起跑闸全在 trigger）
+- plugin/test/suite-state-trigger.test.mjs（被触脚本的伴生测试——`--for-task` 选择器按 Touches 把该测试拉进门）
 - tasks/gap-suite-start-verifies-target-commit.md（自身）
+
+## Evidence（2026-08-12，scoped 门绿）
+
+**机制**：`suite-state-trigger.ts` 新增两半 verifiedCommit 起跑闸（同一字段，`spawnRetriggerRun` 起跑前判定）：
+- **AC1 验非目标**：`checkVerificationStartGates` → `git merge-base --is-ancestor <target> <被测树 HEAD>`。target 优先 `--verify-target <commit>` / `QUAY_SUITE_VERIFY_TARGET` env，缺省取 integration HEAD（验 worktree 测旧树的场景）。target 不在被测树 ⇒ `SUITE-SKIP-NON-TARGET` 标注 + 拒绝起跑（round-53 类：修复落于起跑后 ⇒ 550s 验修复前树被拦）。
+- **AC5 同树重复**：`readLastGreenCommit`（verification-round.jsonl 倒扫最后绿轮 commit）——本次将验树 == 最近绿轮树 ⇒ `SUITE-SKIP-SAME-TREE` 跳过起轮（round 61→62 400s 同树重复被拦；用「树变没变」判，不调 IDLE-GREEN 阈值）。
+- **读历史轮次同一条判定**：`verifiedTreeContainsCommit(c19e70a1, round.commit, root)` 就地判「验非目标」，无注记。
+
+**scoped 门**：`scripts/test.sh --for-task gap-suite-start-verifies-target-commit`（worktree 根）退出 0：
+
+```
+== scoped static checks (change-relevant tier) ==
+task-contract-check: no violations.
+superseded-capability check: PASS
+tick-core-static-check: PASS — execution cores are statically covered.
+delivery-inventory drift gate: PASS
+
+ℹ tests 155
+ℹ pass 155
+ℹ fail 0
+ℹ cancelled 0
+```
+
+**新增 11 个测试**（plugin/test/suite-state-trigger.test.mjs，AC1/AC3/AC5 直接钉住）：
+- `AC1 — verifiedTreeContainsCommit is the shared ancestor predicate (round-53 class: a LATER fix is NOT in the verified tree)` → false
+- `AC1 — the round-53 historical judgment is IN-PLACE, no annotation` → 判「验非目标」
+- `AC1 — checkVerificationStartGates blocks (验非目标) when the to-be-verified tree does NOT contain the explicit target`
+- `AC1 — default target = integration HEAD: a worktree full-suite on an OLDER tree is blocked (验非目标)`
+- `AC1 — spawnRetriggerRun SUPPRESSES a round whose tree does NOT contain the target fix (SUITE-SKIP-NON-TARGET, no spawn) — round-53 class`
+- `AC5 — readLastGreenCommit scans verification-round.jsonl BACKWARDS for the last GREEN round's commit`
+- `AC5 — checkVerificationStartGates blocks (同树重复) when the to-be-verified tree EQUALS the last green round's tree`
+- `AC5 — spawnRetriggerRun SUPPRESSES the same-tree duplicate (SUITE-SKIP-SAME-TREE, no spawn) — round 61→62 shape`
+- `AC1/AC5 — a NORMAL round start (changed tree, contains target) is NOT blocked by the gates`
+- `resolveVerifyTarget — --verify-target CLI wins over QUAY_SUITE_VERIFY_TARGET env, then null default`
+- `AC1 — verifiedTreeContainsCommit fails CLOSED on a non-git root / unresolvable commit`
+
+既有测试全绿：`plugin/test/suite-state-trigger.test.mjs` 47/47、`plugin/test/full-suite-runner.test.mjs` 108/108（未改 runner，回归绿）。
