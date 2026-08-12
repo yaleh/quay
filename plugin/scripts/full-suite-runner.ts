@@ -760,14 +760,14 @@ export function checkResourceGate(root: string): { ok: boolean; output: string }
 
 export interface SystemdRunLimits {
   memoryMax: string; // -p MemoryMax=4G
-  cpuQuota: string; //  -p CPUQuota=400% (full 4 physical cores — 人的裁定 gap-systemd-run-cancel-cpuquota-keep-memory-guardrail)
+  cpuQuota: string; //  -p CPUQuota=<v> — "" = NO CPU limit (人 2026-08-11 裁定「取消 CPU 配额」; 400% 只是当时 4 核机上等价无限制的 measure-first 临时形态, 搬到多核机变成真限制 ⇒ 持久修法 = 不再传 -p CPUQuota=, 见 gap-systemd-run-cancel-cpuquota-keep-memory-guardrail + CLAUDE.md 推论二)
   tasksMax: string; //  -p TasksMax=200
 }
 
-/** The suite's default cgroup scope limits (the Contract invoke's exact values). */
+/** The suite's default cgroup scope limits. cpuQuota 默认空 = 不设 CPU 上限（人裁定）; MemoryMax=4G 是 01:07 OOM 后保留的内存护栏。 */
 export const DEFAULT_SYSTEMD_RUN_LIMITS: SystemdRunLimits = {
   memoryMax: "4G",
-  cpuQuota: "400%",
+  cpuQuota: "",
   tasksMax: "200",
 };
 
@@ -822,21 +822,19 @@ export function systemdRunAvailable(): boolean {
  * string the un-limited path spawns (the --test-concurrency splice etc. are untouched).
  */
 export function buildSystemdRunArgv(command: string, limits: SystemdRunLimits = DEFAULT_SYSTEMD_RUN_LIMITS): string[] {
-  return [
+  const argv = [
     "systemd-run",
     "--user",
     "--scope",
     "--quiet",
     "-p",
     `MemoryMax=${limits.memoryMax}`,
-    "-p",
-    `CPUQuota=${limits.cpuQuota}`,
-    "-p",
-    `TasksMax=${limits.tasksMax}`,
-    "bash",
-    "-c",
-    command,
   ];
+  // cpuQuota === "" ⇒ do NOT pass -p CPUQuota= — the cgroup then has NO CPU limit (人裁定持久修法;
+  // a literal like "400%" only equals "unlimited" on the machine it was written for).
+  if (limits.cpuQuota) argv.push("-p", `CPUQuota=${limits.cpuQuota}`);
+  argv.push("-p", `TasksMax=${limits.tasksMax}`, "bash", "-c", command);
+  return argv;
 }
 
 /**

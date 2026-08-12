@@ -2052,6 +2052,8 @@ function memAvailMb() {
 
 test("AC1 unit — buildSystemdRunArgv wraps a command in systemd-run --user --scope with the exact limit properties", () => {
   const argv = buildSystemdRunArgv("bash scripts/test.sh", DEFAULT_SYSTEMD_RUN_LIMITS);
+  // DEFAULT has cpuQuota:"" ⇒ NO -p CPUQuota= (人裁定: 不设 CPU 上限; a literal only equals
+  // "unlimited" on the machine it was written for — CLAUDE.md 推论二)
   assert.deepEqual(argv, [
     "systemd-run",
     "--user",
@@ -2060,14 +2062,13 @@ test("AC1 unit — buildSystemdRunArgv wraps a command in systemd-run --user --s
     "-p",
     "MemoryMax=4G",
     "-p",
-    "CPUQuota=400%",
-    "-p",
     "TasksMax=200",
     "bash",
     "-c",
     "bash scripts/test.sh",
   ]);
-  // a custom limit set flows through
+  assert.ok(!argv.includes("CPUQuota="), "default argv carries NO CPUQuota — the cgroup has no CPU limit");
+  // a custom limit set flows through (explicit cpuQuota IS passed)
   const custom = buildSystemdRunArgv("true", { memoryMax: "64M", cpuQuota: "100%", tasksMax: "20" });
   assert.ok(custom.includes("-p") && custom.includes("MemoryMax=64M"));
   assert.ok(custom.includes("CPUQuota=100%") && custom.includes("TasksMax=20"));
@@ -2077,7 +2078,7 @@ test("AC1 unit — parseSystemdRunLimits merges a seam override over the default
   const l = parseSystemdRunLimits("MemoryMax=64M TasksMax=20");
   assert.equal(l.memoryMax, "64M");
   assert.equal(l.tasksMax, "20");
-  assert.equal(l.cpuQuota, "400%", "an unchanged key keeps the default");
+  assert.equal(l.cpuQuota, "", "an unchanged key keeps the default (no CPU quota — 人裁定)");
   assert.deepEqual(parseSystemdRunLimits(undefined), DEFAULT_SYSTEMD_RUN_LIMITS);
   // an unknown key is ignored (fail-safe — never produce an unparseable scope property)
   assert.deepEqual(parseSystemdRunLimits("MemoryMax=64M Bogus=1"), { ...DEFAULT_SYSTEMD_RUN_LIMITS, memoryMax: "64M" });
@@ -2105,7 +2106,7 @@ test(
       assert.equal(s.state, "green");
       assert.ok(s.systemdRun, "the state carries the systemdRun limits (suite ran inside a cgroup scope)");
       assert.equal(s.systemdRun.memoryMax, "4G");
-      assert.equal(s.systemdRun.cpuQuota, "400%");
+      assert.equal(s.systemdRun.cpuQuota, "");
       assert.equal(s.systemdRun.tasksMax, "200");
       // AC1 observable — the applied cgroup attributes (systemctl --user show) land in the state dir
       const evidence = path.join(root, ".quay", "suite-cgroup-evidence.txt");
@@ -2114,7 +2115,7 @@ test(
       assert.match(txt, /scope_unit=run-p\d+-/, "the transient scope unit name is recorded");
       assert.match(txt, /MemoryMax=4294967296/, "MemoryMax=4G applied (bytes)");
       assert.match(txt, /EffectiveTasksMax=200/, "TasksMax=200 applied (effective)");
-      assert.match(txt, /CPUQuotaPerSecUSec=4s/, "CPUQuota=400% applied (full 4 physical cores)");
+      assert.match(txt, /CPUQuotaPerSecUSec=max/, "no CPUQuota passed ⇒ cgroup CPU unlimited (max)");
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
       fs.rmSync(dir, { recursive: true, force: true });

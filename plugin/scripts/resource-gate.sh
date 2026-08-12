@@ -268,15 +268,14 @@ fi
 node_procs="${RESOURCE_GATE_TEST_NODE_PROCS:-$(read_node_procs)}"
 # gap-systemd-run-cpuquota-scope-distorts-nproc — the OVERLOAD-WINDOW criterion compares the HOST-WIDE
 # loadavg against a processor count, so it must use the HOST online CPU count, not the cgroup-scoped
-# nproc. full-suite-runner.ts wraps the suite in `systemd-run --user --scope -p CPUQuota=400%` (default
-# since gap-systemd-run-cancel-cpuquota-keep-memory-guardrail; the earlier 200% default made `nproc` read
-# 2 on a 4-core host, undercounting host capacity and turning a mild 1.25× host load (5.0/4) into a
-# permanent false WAIT (5.0 ≥ 2×2=4), aborting the suite at 0 tests — verified: the runner's own gate
-# consultation, run OUTSIDE the scope, GOes at nproc=4 while test.sh's internal fail-closed gate INSIDE
-# the scope WAITs at nproc=2; the load-over calibration in the LOAD_OVER_FACTOR comment is host nproc).
-# `nproc --all` reports the host online CPU count regardless of the caller's affinity/cgroup — still
-# correct under any CPUQuota override (the QUAY_TEST_SYSTEMD_RUN_LIMITS seam can set CPUQuota=200%);
-# RESOURCE_GATE_TEST_NPROC remains the deterministic test seam.
+# nproc. full-suite-runner.ts wraps the suite in `systemd-run --user --scope` with MemoryMax/TasksMax
+# and (when explicitly overridden) CPUQuota. The DEFAULT since 人 2026-08-12 (gap-systemd-run-cancel-
+# cpuquota-keep-memory-guardrail 持久修法) passes NO -p CPUQuota= ⇒ the cgroup has no CPU limit. The
+# earlier 400% default made `nproc` read 4 on a 4-core host (equiv unlimited there) but became a REAL
+# 4/16-core cap on multi-core hosts (CLAUDE.md 推论二). `nproc --all` reports the host online CPU
+# count regardless of the caller's affinity/cgroup — still correct under any CPUQuota override (the
+# QUAY_TEST_SYSTEMD_RUN_LIMITS seam can set CPUQuota=200%); RESOURCE_GATE_TEST_NPROC remains the
+# deterministic test seam.
 nproc_before="${RESOURCE_GATE_TEST_NPROC:-$(nproc --all 2>/dev/null || nproc 2>/dev/null || echo 1)}"
 if [ -n "${RESOURCE_GATE_TEST_ORPHANS:-}" ]; then
   orphan_list="${RESOURCE_GATE_TEST_ORPHANS}"
