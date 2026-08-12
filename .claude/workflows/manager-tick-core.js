@@ -79,6 +79,17 @@ echo "commits30m=$(git log --oneline --all --since='30 minutes ago' | grep -vc '
 echo "mon_procs=$(ps -eo args | grep -cE 'SUITE-TERMINAL|full-suite-state\.json' | tr -d ' ') （枚举而非布尔——见下方注释）"
 ps -eo pid,etime,args | grep -E 'SUITE-TERMINAL|full-suite-state\.json' | grep -v grep | sed 's/^\(.\{110\}\).*/\1…/'
 python3 orchestration/manager-anchor-check.py
+echo "=== inbox（A15：判据是列目录本身，不看计数器；最近 5 封 + 总数）==="
+ls -la --time-style=+%H:%MZ .quay/manager-inbox/ 2>/dev/null | tail -n +2 | sort -k6 -r | head -5
+echo "inbox_total=$(ls -1 .quay/manager-inbox/ 2>/dev/null | wc -l)"
+# ^ 2026-08-12 补进执行点（人问「是你的 tick 操作漏了？」后查实）：A15「收件箱每轮必查」此前只写在
+#   orchestration/manager-tick-core.md 的散文核里，而【本 READ_CMD 从不测它】——我 10:20Z 查过一次后
+#   连续两轮 tick 未查，期间漏读 outer 10:39Z 报的 round-18 infra-error 根因（resource-gate.test.mjs
+#   故意杀子进程、stderr 的 Killed 被 childKilledBySignal 误判）与 10:28Z 点名给 manager 的 inner /clear 裁定。
+#   代价：我 10:54Z 把 outer 已报过的事当作自己的发现讲回给它，且我那版只有症状没有根因。
+#   ⚠️ A15 本身就是 2026-08-09 那次漏读 6 封 archguard 报告之后补的——**上次只补进散文核、没补进执行点，
+#   于是同一个漏读复发**。这正是档案点名的「修正写在复盘小节、执行块不动 = 修了个没人执行的副本」。
+#   ⇒ 判据放进读数块：漏查会表现为读数里缺这一块（可被 ⑥′ 自检抓到），而不是靠我记得。
 # ^ 2026-08-07：我把 suite 监视器从 suite-state-trigger --monitor 换成了自记 prev 的轮询
 #   （原因：suite-state-trigger 用共享的 .quay/suite-state-last.json 做边沿触发，
 #    outer 也挂着一个实例，两者互偷事件——我那个挂了 1h45m 零事件）。
