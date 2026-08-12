@@ -101,7 +101,7 @@ bash plugin/scripts/inner-session-check.sh --json   # 三态自检：{state: hea
 
 - **`healthy`** ⇒ 什么都不做——不重建、不重启、不改启动参数（权限边界，负控制：健康 inner 不被动）。
   继续步骤 4（重建 cron）。
-- **`empty-shell`** ⇒ **驱动** inner（send-keys-reliable，transcript 验证送达，不假设成功）：
+- **`empty-shell`** ⇒ **驱动** inner（**默认原生 SendMessage：ListAgents 寻址 inner、busy 直投、身份平台标注**；原生不可用时回退 send-keys-reliable，transcript 验证送达，不假设成功）：
   ```bash
   bash plugin/scripts/send-keys-reliable.sh "$TMUX_SESSION:inner" "执行 $REPO_ROOT/docs/analysis/fast-mode-loop-tick.md 中的 tick 指令" <inner-transcript>
   ```
@@ -110,9 +110,9 @@ bash plugin/scripts/inner-session-check.sh --json   # 三态自检：{state: hea
   bash plugin/scripts/quay-topology.sh --session "$TMUX_SESSION"          # 两窗口工厂（outer+inner，幂等；manager 跨项目，不建）
   bash plugin/scripts/topology-check.sh --session "$TMUX_SESSION" --json   # 验证：ok:true = 两窗口各有 claude 进程
   ```
-  创建后 **INNER-DRIVEN 验证送达**：transcript 出现真实 user 消息（send-keys-reliable 的
-  `transcript-delivery-check.ts` 判据），不假设成功。**工厂失败/验证不过 ⇒ 升级给人**（step 5），
-  不静默继续——建不出来就进不了正常驱动流程。
+  创建后 **INNER-DRIVEN 验证送达**：原生 SendMessage 通道以 send 结果/回执确认；回退通道看
+  transcript 出现真实 user 消息（send-keys-reliable 的 `transcript-delivery-check.ts` 判据），不假设成功。
+  **工厂失败/验证不过 ⇒ 升级给人**（step 5），不静默继续——建不出来就进不了正常驱动流程。
 
 **transcript 路径解析**（inner-session-check.sh）：`--transcript` 显式 > `SESSION_TRANSCRIPTS` 配置
 > `orchestration/session-liveness.env` > 发现（`$HOME/.claude/projects/<root-slug>/` 里最晚修改、
@@ -961,9 +961,10 @@ drift，管理者实测 + 裁定）：inner 的 Cron 调用数 = 0、整晚 59 �
    空闲时长**，外层 cron（`*/20`）仍是唯一节奏源。
 2. **转发固定常量，逐字原样**：转发的文本 = `plugin/scripts/reanchor-prompt.txt` 的内容，
    **逐字原样**（`cat plugin/scripts/reanchor-prompt.txt` 读出来发），**不是本层现写的新段落**。
-   送达走既有 send-keys 信道（`C-u` → 常量文本 → `Enter`，三次分开调用；发完 `capture-pane` 确认
+   送达**默认走原生 SendMessage**（ListAgents 寻址、busy 直投、身份平台标注）;**原生不可用时回退
+   既有 send-keys 信道**（`C-u` → 常量文本 → `Enter`，三次分开调用；发完 `capture-pane` 确认
    出现新的 `⏺` 输出——未确认送达的重锚等于没发）。**这不是新增唤醒源**：节奏仍是唯一 `*/20` cron，
-   信道仍是既有 send-keys，只是把固定文本从文件转发出去。
+   信道只是把固定文本从文件转发出去。
 3. **唤醒契约 = 一致性核对，不是调度**（AC2）：重锚 prompt 是「重读出厂 `fast-mode-loop-tick.md` +
    按「状态自检清单」核对当前状态是否符合（在飞 / 就绪池 / 收尾 / 停止条件四查）+ 明确偏差向文档
    自我修正」。它**零派发指令**——机械保证是 grep 断言：

@@ -3,6 +3,12 @@
 # orchestration/CRYSTALLIZED-reliable-send-2026-08-04.md as a script (AC1-AC3 of
 # tasks/gap-reliable-send-crystallize-the-five-failure-modes-into-a-script).
 #
+# FALLBACK delivery path (human ruling 2026-08-12): the DEFAULT cross-session delivery channel is
+# now NATIVE SendMessage (ListAgents addressing; busy targets receive directly; identity + platform
+# are annotated). This script is the reliable-send engine of the FALLBACK tmux/transcript delivery
+# path, used when native cross-session messages are unavailable: Claude Code < 2.1.224,
+# Bedrock/AWS/GCP/Foundry, native Windows, or non-Claude targets. NOT deleted, behavior UNCHANGED.
+#
 # WHY (the five measured failure modes — each happened 2026-08-04, not inferred):
 #   1. C-u only clears the CURRENT line (readline kill-line); a long multi-line message needs
 #      many C-u presses (a 1554-byte message needed 30). → loop C-u + capture-pane until the

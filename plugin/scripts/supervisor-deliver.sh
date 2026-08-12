@@ -2,10 +2,17 @@
 # supervisor-deliver.sh — the supervisor base layer's DELIVERY interface
 # (tasks/gap-supervisor-base-layer-outside-sessions-architecture, step ③).
 #
+# FALLBACK delivery path (human ruling 2026-08-12): the DEFAULT cross-session delivery channel is
+# now NATIVE SendMessage (ListAgents addressing; busy targets receive directly; identity + platform
+# are annotated on the message). This script — and send-keys-reliable.sh / drive-target-check.sh /
+# transcript-delivery-check.ts — is the FALLBACK for environments where native cross-session
+# messages are unavailable: Claude Code < 2.1.224, Bedrock/AWS/GCP/Foundry, native Windows, or
+# non-Claude targets. NOT deleted and behavior UNCHANGED.
+#
 # deliver(target, payload) -> delivered | failed — expressed BY INTENT, never by terminal
-# verbs. This is the ONLY delivery implementation: a consumer that wants text to reach a
-# Claude Code session calls THIS and learns delivered|failed. No consumer hand-writes a
-# tmux send-keys sequence.
+# verbs. Within the FALLBACK path this is the ONLY delivery implementation: a consumer that
+# wants text to reach a Claude Code session in a native-unavailable environment calls THIS and
+# learns delivered|failed. No consumer hand-writes a tmux send-keys sequence.
 #
 # WHY ONE PLACE (SPEC-integration-architecture §4.3f): the ONE unreliable operation — TUI
 # keystroke injection — goes from "3 agents each hand-write" to "one hardened implementation

@@ -2,6 +2,12 @@
 # drive-target-check.sh — fail-closed pre-flight gate for a tmux target used to DRIVE or OBSERVE a
 # Claude session window (tasks/gap-drive-sent-to-manager-pane-not-inner — the three disciplines).
 #
+# FALLBACK delivery path (human ruling 2026-08-12): the DEFAULT cross-session delivery channel is
+# now NATIVE SendMessage (ListAgents addressing; busy targets receive directly; identity + platform
+# are annotated). This gate is the fail-closed target-identity half of the FALLBACK tmux-drive
+# path, used when native cross-session messages are unavailable: Claude Code < 2.1.224,
+# Bedrock/AWS/GCP/Foundry, native Windows, or non-Claude targets. NOT deleted, behavior UNCHANGED.
+#
 # Incident (2026-08-10): the outer loop drove the inner via `quay-0:0.0` — window 0 was `claude`
 # (the MANAGER, pid 2983389), not inner (`quay-0:inner`, pid 2989409). 6 send-keys in 2 dispatches
 # all landed in the manager's input box, and the manager's transcript (b8dc91a6) was read as the
