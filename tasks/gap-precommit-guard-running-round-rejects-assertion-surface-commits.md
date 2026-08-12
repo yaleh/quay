@@ -6,6 +6,7 @@ labels:
   - gap
   - defect
   - mechanism
+  - delivery-critical
 parent: null
 children: []
 extra:
