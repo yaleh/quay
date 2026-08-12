@@ -1,7 +1,7 @@
 ---
 id: gap-task-telemetry-6-percent-join
 title: 任务落地记录与遥测记录 6% join — fan-in 提交需带 runId 桥接两套记录
-status: todo
+status: ready
 labels:
   - gap
   - defect

@@ -1,7 +1,7 @@
 ---
 id: gap-manager-cold-start-no-falsifiable-checklist
 title: manager 冷启动无证伪判据 + 3 缺陷（idle-watch 不挂/判据指向不存在脚本/注册表≠真 cron）
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -48,7 +48,9 @@ extra: {}
 - plugin/scripts/manager-start.sh（挂 idle-watch + 可证伪判据）
 - plugin/scripts/manager-arm-loop.sh（注册表↔真 cron 核实）
 - plugin/loop/manager-tick-core.md（idle-watch 判据指向真实机制）
+- orchestration/manager-loop-tick.md（AC3 live 位置：① 巡检块 pgrep → 真实机制；任务执行时补——原 Touches 漏列，agent 实际改动后合规化）
 - plugin/skills/cold-start/SKILL.md（manager 冷启动判据对齐 outer 7 条）
+- plugin/skills/manager/SKILL.md（§7a 可证伪清单——Contract measure/invoke 落点；原 Touches 漏列，agent 实际改动后合规化）
 - plugin/test/（manager 冷启动用例）
 - tasks/gap-manager-cold-start-no-falsifiable-checklist.md（自身：勾 AC + 贴证据）
 
