@@ -39,7 +39,7 @@ import {
   makeClaudePaneProcess, makeTwoWindowSession, paneSelfIsClaude, waitForSelfClaude,
   spawnMonitor, waitForOutput, waitForRounds, makeBackdatedGitRepo,
   makePaneBusy, makePaneIdle,
-  makeTmp, cleanup, diskWorktreeRoot, runInit,
+  makeTmp, cleanup, diskWorktreeRoot, runInit, HANG_GUARD_MS,
 } from "./session-liveness-helpers.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -81,8 +81,8 @@ test("SESSION-RESUMED then SESSION-IDLE fire when the real probe session goes bu
   };
 
   // 0. the probe must be idle before we drive it (it may be mid-answer from a prior run).
-  const baseline = await waitStableHash(30000);
-  assert.ok(baseline !== null, `probe must reach a stable idle baseline before driving (never settled in 30s)`);
+  const baseline = await waitStableHash(HANG_GUARD_MS);
+  assert.ok(baseline !== null, `probe must reach a stable idle baseline before driving (never settled within the hang-guard)`);
 
   // tickLogs pins the tick path to a nonexistent file so tmin="?" under the noise gate
   // (SESSION-IDLE reports when tmin is unknown) — otherwise tmin reads the REAL quay tick-log mtime
@@ -103,7 +103,7 @@ test("SESSION-RESUMED then SESSION-IDLE fire when the real probe session goes bu
     assert.ok(resumed, `SESSION-RESUMED must fire when the probe goes busy:\n${mon.output()}`);
 
     // 4. wait for the probe to come back idle (busy task done, answer rendered, prompt stable).
-    const settled = await waitStableHash(50000);
+    const settled = await waitStableHash(HANG_GUARD_MS);
     assert.ok(settled !== null, `probe must return to a stable idle state after the busy task`);
 
     // 5. the busy→idle transition must surface as SESSION-IDLE within a few rounds of settling.
@@ -187,7 +187,7 @@ test("B3 — a child whose cmdline contains a .claude path substring but whose p
       });
     };
     const hasDotChild = () => childCmdlines().some((c) => c.includes(".claude"));
-    const deadline = Date.now() + 5000;
+    const deadline = Date.now() + HANG_GUARD_MS;
     while (Date.now() < deadline && !hasDotChild()) await sleep(100);
     assert.ok(hasDotChild(), `the .claude-path child must be present for the control to be real`);
     // the CONTROL must be real: a child's full cmdline contains "claude" — the OLD grep matched it.

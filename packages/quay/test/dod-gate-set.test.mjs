@@ -11,7 +11,7 @@
 //
 // Run: node --test --experimental-test-coverage packages/quay/test/*.mjs
 
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -19,8 +19,16 @@ import path from "node:path";
 
 import { loadWorkspaceGates, listGates } from "../src/gate/registry.ts";
 
+// Every workspace dir is removed once at the end of this file (the carrier-array + after()
+// pattern) — a mkdtemp fixture without cleanup leaks a /tmp dir per run.
+const _tmpDirs = [];
+after(() => {
+  for (const dir of _tmpDirs) fs.rmSync(dir, { recursive: true, force: true });
+});
+
 function tmpWorkspace(tag) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), `quay-dodgateset-${tag}-`));
+  _tmpDirs.push(dir);
   fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
   return dir;
 }

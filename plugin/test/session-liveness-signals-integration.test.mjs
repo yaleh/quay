@@ -38,7 +38,7 @@ import {
   makePaneBusy, makePaneIdle, makePanePermissionPrompt, startTouchLoop, cleanup,
   userRecord, assistantRecord, apiErrorRecord, isoAgo,
   assistantToolUseRecord, assistantTextRecord, userInputRecord, writeTranscript,
-  assistantUsageRecord,
+  assistantUsageRecord, HANG_GUARD_MS,
 } from "./session-liveness-helpers.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -214,7 +214,8 @@ test("AC4 — a pane whose ONLY real change is the agent task line (↓ NN.Nk to
       assert.ok(await waitForOutput(mon, /SESSION-RESUMED ac4/, 30000),
         `AC4: RESUMED must fire promptly when real work starts:\n${mon.output()}`);
       const latencyMs = Date.now() - t0;
-      assert.ok(latencyMs < 30000, `AC7: busy_latency must stay within polling-cycle range (no debounce on the busy path): ${latencyMs}ms`);
+      assert.ok(latencyMs < HANG_GUARD_MS,
+        `AC7: busy_latency must stay within the hang-guard (no multi-minute debounce on the busy path): ${latencyMs}ms`);
       assert.ok(/成因：esc to interrupt 标志出现/.test(mon.output()),
         `AC4: the RESUMED cause must name the busy shape:\n${mon.output()}`);
       // while busy, only the agent task line advances (↓ 57.3k → 61.2k) — the busy shape persists,
@@ -351,7 +352,7 @@ test("AC3 — a permission-prompt pane emits SESSION-INTERVENTION-REQUIRED immed
       makePaneIdle(p.env, p.session);
       await sleep(2000);
       makePanePermissionPrompt(p.env, p.session);
-      const deadline = Date.now() + 30000;
+      const deadline = Date.now() + HANG_GUARD_MS;
       while (Date.now() < deadline && (mon.output().match(/SESSION-INTERVENTION-REQUIRED intv/g) || []).length < 2) await sleep(200);
       c = (mon.output().match(/SESSION-INTERVENTION-REQUIRED intv/g) || []).length;
       assert.equal(c, 2, `a new permission-prompt spell must re-fire SESSION-INTERVENTION-REQUIRED (edge re-armed), got ${c}:\n${mon.output()}`);

@@ -2,7 +2,7 @@
 // Stage 3 — Core CLI `quay adr` verbs, exercised end-to-end against a native
 // provider whose QUAY_NATIVE_ADR_DIR points at a throwaway dir. ADRs are a
 // SEPARATE kind: they must never appear in `quay task list`.
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -15,6 +15,17 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const quayBin = QUAY_CLI;
 const nativeBin = QUAY_NATIVE_CLI;
 const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin");
+
+// Every workspace triple (tasks + adr + root) is removed once at the end of this file — the
+// carrier-array + after() pattern — so `adr-cli-*` never accumulates a /tmp dir per run.
+const _workspaces = [];
+after(() => {
+  for (const ws of _workspaces) {
+    fs.rmSync(ws.tasksDir, { recursive: true, force: true });
+    fs.rmSync(ws.adrDir, { recursive: true, force: true });
+    fs.rmSync(ws.workspaceRoot, { recursive: true, force: true });
+  }
+});
 
 function makeWorkspace(tag) {
   const tasksDir = fs.mkdtempSync(path.join(os.tmpdir(), `adr-cli-${tag}-tasks-`));
@@ -35,7 +46,9 @@ function makeWorkspace(tag) {
       "",
     ].join("\n")
   );
-  return { workspaceRoot, tasksDir, adrDir };
+  const ws = { workspaceRoot, tasksDir, adrDir };
+  _workspaces.push(ws);
+  return ws;
 }
 
 function runQuay(args, cwd) {

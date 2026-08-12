@@ -261,6 +261,15 @@ run_static_checks() {
   # @static-tier change
   # @static-object plugin/test/ packages/*/test/ experiments/*/test/
   run_checker "test-isolation-check" bash "${repo_root}/plugin/scripts/test-isolation-check.sh" "${repo_root}"
+  echo "== tmp-leak pairing check (gap-tmp-leak-... 2026-08-12 /tmp audit: 3389 dirs / 1.1GB) =="
+  # Mechanical "修完不复发" gate: every mkdtemp/mkdtempSync result in a test file MUST be paired with
+  # a cleanup (rmSync / after() carrier / caller-cleans-return). BLOCKS (exit 1) on any unpaired
+  # mkdtemp — unlike test-isolation-check's R6 rule, which reports the same class but is baselined
+  # (报出而不阻断). The corpus is at ZERO unpaired mkdtemps after the leak fix; a regression goes RED
+  # and aborts the suite (set -euo pipefail), so a fixed file can never silently re-leak.
+  # @static-tier change
+  # @static-object plugin/test/ packages/*/test/ experiments/*/test/
+  run_checker "tmp-leak-pairing-check" bash "${repo_root}/plugin/scripts/tmp-leak-pairing-check.sh" "${repo_root}"
   echo "== test-impl-census check (gap-experiment-legacy-reclaim-and-touches-heuristic AC5) =="
   # Mechanized criterion "被测实现不存在的测试文件随实现删除": a test file that imports a
   # scripts/<name> module that exists NOWHERE (plugin/scripts, experiments/scripts, repo scripts/

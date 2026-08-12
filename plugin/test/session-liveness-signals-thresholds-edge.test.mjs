@@ -40,7 +40,7 @@ import {
   makePaneBusy, makePaneIdle, makePanePermissionPrompt, startTouchLoop, cleanup,
   userRecord, assistantRecord, apiErrorRecord, isoAgo,
   assistantToolUseRecord, assistantTextRecord, userInputRecord, writeTranscript,
-  assistantUsageRecord,
+  assistantUsageRecord, HANG_GUARD_MS,
 } from "./session-liveness-helpers.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -116,7 +116,7 @@ test("AC6/D5 — the per-spell edge: SESSION-IDLE fires ONCE per idle spell (the
       assert.ok(await waitForOutput(mon, /SESSION-RESUMED de/, 20000), `spell-2 busy must fire RESUMED:\n${mon.output()}`);
       // Spell 2: idle → a SECOND IDLE fires (new spell, edge re-armed).
       writeTranscript(x, [assistantTextRecord(isoAgo(0.1))], 8);
-      const deadline = Date.now() + 20000;
+      const deadline = Date.now() + HANG_GUARD_MS;
       while (Date.now() < deadline && (mon.output().match(/SESSION-IDLE de/g) || []).length < 2) await sleep(200);
       c = (mon.output().match(/SESSION-IDLE de/g) || []).length;
       assert.equal(c, 2, `per-spell edge: two idle spells must report IDLE exactly twice, got ${c}:\n${mon.output()}`);

@@ -4,7 +4,7 @@
 //
 // Run: scripts/test.sh packages/quay/test/gate-list-verbose.test.mjs
 
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -16,8 +16,16 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const quayBin = path.resolve(__dirname, "..", "bin", "quay.ts");
 
+// Every workspace dir is removed once at the end of this file (the carrier-array + after()
+// pattern) — a mkdtemp fixture without cleanup leaks a /tmp dir per run.
+const _tmpDirs = [];
+after(() => {
+  for (const dir of _tmpDirs) fs.rmSync(dir, { recursive: true, force: true });
+});
+
 function tmpWs(tag) {
   const ws = fs.mkdtempSync(path.join(os.tmpdir(), "quay-glv-" + tag + "-"));
+  _tmpDirs.push(ws);
   fs.mkdirSync(path.join(ws, ".quay"), { recursive: true });
   return ws;
 }

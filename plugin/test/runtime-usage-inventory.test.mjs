@@ -20,7 +20,7 @@
 //   scripts/test.sh --for-task gap-no-inventory-of-what-the-two-layer-mode-actually-runs
 //   scripts/test.sh plugin/test/runtime-usage-inventory.test.mjs
 
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -42,6 +42,13 @@ import {
   DORMANT_BY_DECISION,
   TEST_GLOB_PATTERNS,
 } from "../scripts/runtime-usage-inventory.ts";
+
+// Every synthetic-repo dir is removed once at the end of this file (the carrier-array + after()
+// pattern) — a mkdtemp fixture without cleanup leaks a /tmp dir per run.
+const _tmpDirs = [];
+after(() => {
+  for (const dir of _tmpDirs) fs.rmSync(dir, { recursive: true, force: true });
+});
 
 if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").includes("governance")) {
   test("governance group skipped", { skip: "set QUAY_TEST_GROUPS=governance to run" }, () => {});
@@ -213,6 +220,7 @@ if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").inc
   // ── AC7 + AC4: end-to-end buildInventory over a SYNTHETIC transcript dir ────────────────────
   test("AC7: buildInventory computes the main→long diff (low-frequency ≠ dead)", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "rui-test-"));
+    _tmpDirs.push(tmp);
     const root = path.join(tmp, "repo");
     // Minimal repo: two scripts, one workflow, one dormant.
     fs.mkdirSync(path.join(root, "plugin", "scripts"), { recursive: true });
@@ -266,6 +274,7 @@ if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").inc
 
   test("REFUTE: wrapper-indirect honors gate_delegate_ts and ignores echo mentions", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "rui-wrap-"));
+    _tmpDirs.push(tmp);
     const root = path.join(tmp, "repo");
     fs.mkdirSync(path.join(root, "experiments", "quay-perpetual-stream", "scripts"), { recursive: true });
     fs.mkdirSync(path.join(root, "scripts"), { recursive: true });
@@ -325,6 +334,7 @@ if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").inc
 
   test("buildInstrumentsManifest: derived count + visible admission filter", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "rui-instr-"));
+    _tmpDirs.push(tmp);
     const root = path.join(tmp, "repo");
     fs.mkdirSync(path.join(root, "plugin", "scripts"), { recursive: true });
     fs.writeFileSync(path.join(root, "plugin", "scripts", "alpha.ts"), "// alpha.ts — answers the alpha question.\nexport const a = 1;\n");

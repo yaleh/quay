@@ -4,7 +4,7 @@
 // shape; `validate` is the NEW verb printing contract-validator.js's
 // validateContracts() results as a pass/fail table, exit 0/1). RED-first per
 // ADR-001 (TDD).
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -16,8 +16,17 @@ import { QUAY_NATIVE_CLI } from "../../quay/test/helpers/cli-entry.mjs";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const nativeBin = QUAY_NATIVE_CLI;
 
+// Every docs dir is removed once at the end of this file (the carrier-array + after() pattern) —
+// a mkdtemp fixture without cleanup leaks a /tmp dir per run.
+const _tmpDirs = [];
+after(() => {
+  for (const dir of _tmpDirs) fs.rmSync(dir, { recursive: true, force: true });
+});
+
 function tmpDocsDir(tag) {
-  return fs.mkdtempSync(path.join(os.tmpdir(), `quay-doc-cli-${tag}-`));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `quay-doc-cli-${tag}-`));
+  _tmpDirs.push(dir);
+  return dir;
 }
 
 function runNative(args, docsDir) {

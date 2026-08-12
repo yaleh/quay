@@ -15,7 +15,7 @@
 //
 // Run: node --test --experimental-test-coverage packages/quay/test/*.mjs
 
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -38,12 +38,21 @@ const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
 // would when run from this repo's own workspace root (see registry.js).
 const gate = (name) => resolveGate(name, REPO_ROOT);
 
+// Every tmp dir / workspace pair is removed once at the end of this file — the carrier-array +
+// after() pattern — so `quay-m39-*` never accumulates a /tmp dir per run.
+const _tmpDirs = [];
+after(() => {
+  for (const dir of _tmpDirs) fs.rmSync(dir, { recursive: true, force: true });
+});
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 function tmpDir(tag) {
-  return fs.mkdtempSync(path.join(os.tmpdir(), `quay-m39-${tag}-`));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `quay-m39-${tag}-`));
+  _tmpDirs.push(dir);
+  return dir;
 }
 
 function runQuay(args, cwd, extraEnv = {}) {
@@ -81,6 +90,8 @@ function runNative(args, tasksDir) {
 function makeWorkspace(tag) {
   const tasksDir = fs.mkdtempSync(path.join(os.tmpdir(), `quay-m39-${tag}-tasks-`));
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), `quay-m39-${tag}-ws-`));
+  _tmpDirs.push(tasksDir);
+  _tmpDirs.push(workspaceRoot);
   fs.mkdirSync(path.join(workspaceRoot, ".quay"), { recursive: true });
   fs.writeFileSync(
     path.join(workspaceRoot, ".quay", "config.yml"),

@@ -25,7 +25,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const pluginDir = path.resolve(__dirname, "..");
 
 export function makeTmp(prefix = "quay-init-") {
-  return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  _tmpDirs.push(dir);
+  return dir;
 }
 export function cleanup(dir) {
   try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort */ }
@@ -38,10 +40,19 @@ export function cleanup(dir) {
 // The dirs land in a carrier array cleaned by an after() hook (the doc-store/adr-store pattern),
 // so R6 does not read the helper-return as an uncovered mkdtemp leak.
 const _worktreeTestRoots = [];
+// Every makeTmp() dir created by this helper (incl. every laydownWorkspace copy) is removed once at
+// the end of the importing test file — the shared fixture (/var/tmp, content-addressed) is the one
+// deliberate exception, and it never goes through makeTmp. Without this, each `laydownWorkspace`
+// copy leaked a `rtv-*` / `laydown-*` dir per run (measured: 120 `rtv-*` dirs / run family).
+const _tmpDirs = [];
 after(() => {
   for (const d of _worktreeTestRoots) {
     try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* best-effort */ }
   }
+  for (const d of _tmpDirs) {
+    try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* best-effort */ }
+  }
+  _tmpDirs.length = 0;
 });
 export function diskWorktreeRoot() {
   let dir = null;

@@ -3,7 +3,7 @@
 // out of adr-store.js so document-store.js can reuse the same
 // parse/serialize/lock/filename-resolution logic without coupling the two
 // object kinds' schemas together. RED-first per ADR-001 (TDD).
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -16,8 +16,17 @@ import {
   slugify,
 } from "../src/frontmatter-store-base.ts";
 
+// Every tmp dir is removed once at the end of this file (the carrier-array + after() pattern) — a
+// mkdtemp fixture without cleanup leaks a /tmp dir per run.
+const _tmpDirs = [];
+after(() => {
+  for (const dir of _tmpDirs) fs.rmSync(dir, { recursive: true, force: true });
+});
+
 function tmpDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "frontmatter-store-base-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "frontmatter-store-base-"));
+  _tmpDirs.push(dir);
+  return dir;
 }
 
 test("parseFrontmatter extracts YAML frontmatter + body", () => {
