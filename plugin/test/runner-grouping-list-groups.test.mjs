@@ -75,26 +75,37 @@ test("AC10/AC2/AC3: --list-groups reports per-group counts of the deduped glob",
   assert.ok(g.product > 0 && g.engine > 0 && g.governance > 0 && g.serial > 0 && g.lowconc > 0);
 });
 
-test("AC3: realpath dedup — --list-files count + serial equals --list-groups total (12 symlinks not double-run)", () => {
-  // The two glob reads are NON-ATOMIC. A sibling serial-family test (serial-anti-stomp, running
-  // concurrently at serial concurrency=2) briefly creates a zz-* fixture in the SHARED plugin/test
-  // dir; if it lands between --list-files and --list-groups, one count shifts by exactly 1 and the
-  // relationship reads as a false +1 (round-310: 346 !== 345 — a transient fixture, not a partition
-  // break; it passes in isolation and clears on the next read). A GENUINE partition violation is
-  // deterministic and fails every re-read, so re-read a bounded number of times and require the
-  // relationship to hold stably — the retry only clears the transient-window false positive, never
-  // papers over a real break (same philosophy as the AC7 membership fix, gap-runner-grouping-ac7-
-  // nested-spawn-load-flake).
-  let files = [];
-  let g = null;
+// Any assertion here that reads the SHARED plugin/test dir with MORE THAN ONE glob read is
+// NON-ATOMIC: a sibling serial-family test (serial-anti-stomp, running concurrently at serial
+// concurrency=2) briefly creates a zz-* fixture in the SHARED plugin/test dir; if it lands between
+// two reads, one count shifts by exactly 1 (AC3) or the byte concatenation differs (AC6) — a
+// transient-window false positive (round-310: 346 !== 345 — a transient fixture, not a partition
+// break; it passes in isolation and clears on the next read). A GENUINE partition violation is
+// deterministic and fails every re-read, so re-read a bounded number of times and require the
+// relationship to hold stably — the retry only clears the transient-window false positive, never
+// papers over a real break (same philosophy as the AC7 membership fix, gap-runner-grouping-ac7-
+// nested-spawn-load-flake).
+function readStable(read, relationship) {
+  let values = null;
   for (let attempt = 0; attempt < 4; attempt++) {
-    files = runTestSh("--list-files").trim().split("\n").filter(Boolean);
-    g = parseGroups(runTestSh("--list-groups"));
-    // The default --list-files EXCLUDES the serial group (routed to the concurrency-1 phase) and
-    // INCLUDES the lowconc phase files (routed to the concurrency-3 phase), so the dedup
-    // relationship is files + serial == total.
-    if (files.length + g.serial === g.total) break;
+    values = read();
+    if (relationship(values)) break;
   }
+  return values;
+}
+
+test("AC3: realpath dedup — --list-files count + serial equals --list-groups total (12 symlinks not double-run)", () => {
+  const { files, g } = readStable(
+    () => {
+      const files = runTestSh("--list-files").trim().split("\n").filter(Boolean);
+      const g = parseGroups(runTestSh("--list-groups"));
+      // The default --list-files EXCLUDES the serial group (routed to the concurrency-1 phase) and
+      // INCLUDES the lowconc phase files (routed to the concurrency-3 phase), so the dedup
+      // relationship is files + serial == total.
+      return { files, g };
+    },
+    ({ files, g }) => files.length + g.serial === g.total,
+  );
   assert.equal(files.length + g.serial, g.total);
   // all paths are already realpaths (no duplicates by construction)
   assert.equal(new Set(files).size, files.length);
@@ -106,10 +117,19 @@ test("AC6: --group product,engine ∪ --group lowconc selects the same files as 
   // only applies to exactly `product,engine` (is_default_set), so the no-args selection is the
   // concatenation of `--group product,engine --list-files` and `--group lowconc --list-files`
   // (same build_deduped_files order). gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive.
-  const noArgs = runTestSh("--list-files");
-  const body = runTestSh("--group", "product,engine", "--list-files");
-  const low = runTestSh("--group", "lowconc", "--list-files");
-  // body ends with a trailing newline after its last file; splice body's trailing newline and
-  // append low directly so the concatenation is byte-identical to no-args.
+  // THREE non-atomic glob reads here (wider exposure than AC3's two), and the assertion is
+  // byte-exact concatenation equality — serial-anti-stomp landing in ANY window makes it unequal.
+  // Bounded re-read until the concatenation holds stably, same as AC3 (readStable above).
+  const { noArgs, body, low } = readStable(
+    () => {
+      const noArgs = runTestSh("--list-files");
+      const body = runTestSh("--group", "product,engine", "--list-files");
+      const low = runTestSh("--group", "lowconc", "--list-files");
+      // body ends with a trailing newline after its last file; splice body's trailing newline and
+      // append low directly so the concatenation is byte-identical to no-args.
+      return { noArgs, body, low };
+    },
+    ({ noArgs, body, low }) => body.replace(/\n$/, "") + "\n" + low === noArgs,
+  );
   assert.equal(body.replace(/\n$/, "") + "\n" + low, noArgs);
 });
