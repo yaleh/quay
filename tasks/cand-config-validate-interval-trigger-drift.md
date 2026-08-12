@@ -39,13 +39,26 @@ DIR-100 结构校验层与运行时之间真实漂移：`interval:` 是被设计
 
 ## Acceptance Criteria
 
-- [ ] 复现：`config-validate.ts` 的 `checkRoutines` 对 `trigger: "interval:5m"` 的 routine 报 error。
-- [ ] 修复后：`interval:<N>m`（N≥1）通过校验；`interval:0m` / `interval:1x` 仍报 error
+- [x] 复现：`config-validate.ts` 的 `checkRoutines` 对 `trigger: "interval:5m"` 的 routine 报 error。
+- [x] 修复后：`interval:<N>m`（N≥1）通过校验；`interval:0m` / `interval:1x` 仍报 error
   （与 `readLoopParams`/`routine-scheduler` 语义一致）。
-- [ ] 修复不改变 `every(N)` / `on(<event>)` 的既有校验；`config-validate.test.mjs` 保持绿。
+- [x] 修复不改变 `every(N)` / `on(<event>)` 的既有校验；`config-validate.test.mjs` 保持绿。
 
 ## Touches
 
 - packages/quay/src/config-validate.ts（`checkRoutines` 的 trigger 正则）
 - packages/quay/test/config-validate.test.mjs
 - tasks/cand-config-validate-interval-trigger-drift.md（自身：勾 AC + 贴证据）
+
+## Evidence
+
+修复：`config-validate.ts` 的 `checkRoutines` trigger 正则从
+`/^(every\(\s*\d+\s*\)|on\(\s*[\w-]+\s*\))$/` 对齐到运行时 `readLoopParams`
+（loop-params.ts:202）接受的 `/^(every\(\s*\d+\s*\)|interval:\s*\d+\s*m|on\(\s*[\w-]+\s*\))$/`，
+并新增与运行时一致的 `interval:<N>m` 的 N>=1 检查（`interval:0m` 报 error）。
+`every(N)` / `on(<event>)` 既有校验不变。`config-validate.test.mjs` 新增 4 个用例：
+`interval:30m` 通过（含 finding 的"无 gates 节"精确复现）、`interval:0m` 报
+"N must be >= 1"、`interval:1x` 报 invalid。
+
+Scoped gate（`scripts/test.sh --for-task cand-config-validate-interval-trigger-drift`）：
+8 个 Touches 关联测试文件，129 tests pass / 0 fail。config-validate.test.mjs 单独跑：51 pass / 0 fail。

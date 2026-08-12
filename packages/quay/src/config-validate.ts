@@ -521,16 +521,19 @@ function checkRoutines(loopParsed: unknown | null): ConfigIssue[] {
         severity: "error",
         field: `loop.routines[${i}].trigger`,
         message: `Routine "${entry.name ?? `[${i}]`}" is missing required field "trigger"`,
-        suggestion: 'Must be "every(N)" (N>=1) or "on(<event>)"',
+        suggestion: 'Must be "every(N)" (N>=1), "interval:<N>m" (N>=1), or "on(<event>)"',
       });
     } else {
       const triggerStr = entry.trigger.trim();
-      if (!/^(every\(\s*\d+\s*\)|on\(\s*[\w-]+\s*\))$/.test(triggerStr)) {
+      // Mirrors loop-params readLoopParams (packages/quay/src/loop-params.ts): the
+      // runtime accepts every(N) / interval:<N>m / on(<event>). This regex must not
+      // drift from the runtime — interval:<N>m is the two-layer time form (DIR-056).
+      if (!/^(every\(\s*\d+\s*\)|interval:\s*\d+\s*m|on\(\s*[\w-]+\s*\))$/.test(triggerStr)) {
         issues.push({
           severity: "error",
           field: `loop.routines[${i}].trigger`,
           message: `Routine "${entry.name ?? `[${i}]`}" trigger "${triggerStr}" is invalid`,
-          suggestion: 'Must be "every(N)" (N>=1) or "on(<event>)"',
+          suggestion: 'Must be "every(N)" (N>=1), "interval:<N>m" (N>=1), or "on(<event>)"',
         });
       } else {
         const m = triggerStr.match(/^every\(\s*(\d+)\s*\)$/);
@@ -539,6 +542,14 @@ function checkRoutines(loopParsed: unknown | null): ConfigIssue[] {
             severity: "error",
             field: `loop.routines[${i}].trigger`,
             message: `Routine "${entry.name ?? `[${i}]`}" trigger "every(${m[1]})" invalid — N must be >= 1`,
+          });
+        }
+        const intervalMatch = triggerStr.match(/^interval:\s*(\d+)\s*m$/);
+        if (intervalMatch && Number(intervalMatch[1]) < 1) {
+          issues.push({
+            severity: "error",
+            field: `loop.routines[${i}].trigger`,
+            message: `Routine "${entry.name ?? `[${i}]`}" trigger "interval:${intervalMatch[1]}m" invalid — N must be >= 1`,
           });
         }
       }
