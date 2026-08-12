@@ -204,7 +204,7 @@ declare -A QUESTION=(
   [periodic-push-backup.sh]="Can this repo's current branch be periodically pushed to the shared bare backup repo (non-force, idempotent)?"
   [pipe-exit-code-check.sh]="Does a pipeline propagate its last command's exit code correctly?"
   [portfolio-choice.ts]="Which non-overlapping milestone portfolio should the next cycle pursue?"
-  [precommit-guard.ts]="Is a commit being made while a suite round is running (state=running in .quay/full-suite-state.json) AND it touches assertion-surface files (plugin/scripts/judged-object-registry.json, falling back to ALL tracked files) — the pre-commit guard that makes 'no commits during a round' mechanically enforced for ALL writers (outer/manager/inner), fail-loud on a missing/null state file, with an explicit --allow-dirty-round override?"
+  [precommit-guard.ts]="Is a commit being made while a suite round is running (state=running in .quay/full-suite-state.json) AND it touches assertion-surface files (plugin/scripts/judged-object-registry.json; missing/empty falls back to the narrowed surface tasks/** + plugin/loop/** + scripts/test.sh @static-object aggregate) — the pre-commit guard that makes 'no commits during a round' mechanically enforced for ALL writers (outer/manager/inner), fail-loud on a missing/null state file, with an explicit --allow-dirty-round override?"
   [prefriction-count.sh]="How many newly-filed tasks had no triggering failure/alarm/contradiction at filing (the falsifiable pre-friction count)?"
   [preparation-feedback.ts]="What feedback should the preparation phase return to the proposer?"
   [prepare-admission-check.ts]="Is it safe for this milestone to acquire the single-flight admission lease?"

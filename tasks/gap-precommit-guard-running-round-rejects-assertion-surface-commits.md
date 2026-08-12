@@ -83,13 +83,15 @@ extra:
 commit 包装脚本直接运行。判定读 `.quay/full-suite-state.json`：`state=running` 且本次提交触及断言面
 ⇒ 拒（exit 1）+ 预检清单；state 文件缺失/state 字段 null ⇒ 拒（fail-loud，AC2）。断言面 =
 `plugin/scripts/judged-object-registry.json` 的 patterns（A0b③ 聚合，守卫只读、非手工维护）；
-缺失/空 ⇒ 回退全 tracked（`git ls-files`），fail-closed（AC4）。`--allow-dirty-round` /
+缺失/空 ⇒ 回退**收窄面** `tasks/**` + `plugin/loop/**` + `scripts/test.sh` 的 `@static-object` 聚合
+（外层裁定 B 修正：全 tracked 回退 4113/4316 实测不可用；聚合机械覆盖 orchestration/*-tick-core.md
+——12a6b18b manager 亲手闯的类，fail-closed 保留，AC4）。`--allow-dirty-round` /
 `QUAY_ALLOW_DIRTY_ROUND=1` 显式覆盖（有记录可追责，AC6）。
 
 **scoped 验证**（worktree `gap-precommit-guard-running-round-rejects-assertion-surface-commits`，
 `scripts/test.sh --for-task gap-precommit-guard-running-round-rejects-assertion-surface-commits`）：
 scoped 静态层（capability-catalog / delivery-inventory / task-contract / adr016 / …）全过；
-测试 **30/30 pass / 0 fail**（含 `precommit-guard.test.mjs` 15 项 + `capability-catalog.test.mjs`）。
+测试 **33/33 pass / 0 fail**（含 `precommit-guard.test.mjs` 18 项 + `capability-catalog.test.mjs`）。
 守卫为单文件自包含（无 gate-script-base 依赖），已实测真实 `git commit` 过已安装钩子：running 轮 +
 任务体 ⇒ 拒（exit 1）+ 预检清单；`QUAY_ALLOW_DIRTY_ROUND=1` ⇒ 放行（commit 落地）。
 
@@ -97,7 +99,9 @@ scoped 静态层（capability-catalog / delivery-inventory / task-contract / adr
 - round 63 形态（inner 在 running 轮提交任务体）⇒ `running-round-assertion-surface`，exit 1 ✓
 - round 60 形态（start 后 26s 提交）⇒ 同拒（state=running 即信号，不依赖 elapsed）✓
 - fail-loud：state 文件缺失 ⇒ `state-file-missing`；state=null ⇒ `state-null`，均 exit 1 ✓
-- 回退：registry 缺失/空 ⇒ 全 tracked 为断言面，`README.md` 也拒 ✓
+- 回退收窄（ruling B）：registry 缺失/空 ⇒ tasks/** + plugin/loop/** 命中被拒；
+  `README.md`（面外）放行；`scripts/test.sh` 的 @static-object（orchestration/manager-tick-core.md）
+  经聚合进入回退面并被拒 ✓
 - 覆盖：`--install-hook` 写共享钩子（含指纹）、拒覆写无关钩子、`--uninstall-hook` 移除 ✓
 - 显式覆盖：`--allow-dirty-round` 与 `QUAY_ALLOW_DIRTY_ROUND=1` 均放行（reason 可追责）✓
 - 终态：state=green ⇒ 触及断言面也放行 ✓

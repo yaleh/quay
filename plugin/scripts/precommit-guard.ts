@@ -15,8 +15,11 @@
 //   state 文件缺失 / state 字段 null ⇒ 拒（fail-loud——参照系缺失时谓词必须崩，
 //     不给看似合理的值；AC2）
 //   断言面集合 = plugin/scripts/judged-object-registry.json 的 patterns（A0b③ 生成，
-//     非手工维护；守卫只读它）。缺失/空/不可解析 ⇒ 回退到全 tracked 文件
-//     （git ls-files）——fail-closed，宁严勿松（round 60/63 形态全挡；A0b③ 是精化不是前置）。
+//     非手工维护；守卫只读它）。缺失/空/不可解析 ⇒ 回退「实证闯祸类 + 判定对象声明」：
+//     tasks/**（round 60/63/67）+ plugin/loop/**（cp 事故面）+ scripts/test.sh 的
+//     @static-object 聚合（套件检查器判定对象，含 orchestration/*-tick-core.md）——
+//     不再回退全 tracked（4113/4316 实测不可用，外层裁定 B 修正；fail-closed 保留）。
+//     A0b③ 是精化不是前置。
 //   --allow-dirty-round（CLI 参数或 QUAY_ALLOW_DIRTY_ROUND=1 环境变量）显式覆盖——
 //     有记录可追责，不静默绕过。
 //
@@ -63,7 +66,7 @@ export interface Verdict {
   staged: string[];
   touchedAssertion: string[];
   override: boolean;
-  registryMode: "registry" | "fallback-all-tracked" | "error";
+  registryMode: "registry" | "fallback-narrowed" | "error";
 }
 
 // ── 小工具 ───────────────────────────────────────────────────────────────────────────────────────────
@@ -133,7 +136,13 @@ function escapeRegExp(s: string): string {
   return out;
 }
 
-/** glob 匹配：`**` 跨目录任意；`*` 单段任意；字面路径前缀/精确匹配。 */
+/**
+ * glob/path 匹配——语义镜像 select-static-checks-for-touches.ts 的 matchesObject
+ * （判定对象语义单源，本守卫不另造一套）：globstar（折叠为 `.*`）、单段通配、
+ * 字面目录前缀（`docs/proposals/`）、字面文件精确匹配。含通配的 pattern 视作前缀 + 尾通配
+ * （形如 `packages/…/test/` 的目录通配按 `^packages/…/test/.*$` 匹配），与 @static-object
+ * 标注的语义一致。注意：块注释里不写 `*` 紧跟 `/` 的字面量（会提前闭合注释）。
+ */
 export function matchesGlob(pattern: string, rel: string): boolean {
   const p = String(pattern).replace(/\\/g, "/");
   const t = String(rel).replace(/\\/g, "/");
@@ -146,17 +155,31 @@ export function matchesGlob(pattern: string, rel: string): boolean {
     }
     return t === rest || t.endsWith(`/${rest}`);
   }
-  if (p.includes("**")) {
-    const [head, ...tail] = p.split("**");
-    const re = new RegExp(
-      `^${head.split("*").map(escapeRegExp).join("[^/]*")}.*${tail.join("**").split("*").map(escapeRegExp).join("[^/]*")}$`,
-    );
-    return re.test(t);
-  }
   if (p.includes("*")) {
-    return new RegExp(`^${p.split("*").map(escapeRegExp).join("[^/]*")}$`).test(t);
+    return new RegExp(`^${p.split("*").map(escapeRegExp).join(".*")}.*$`).test(t);
   }
+  if (p.endsWith("/")) return t.startsWith(p);
   return t === p || t.startsWith(`${p}/`);
+}
+
+/**
+ * scripts/test.sh 的 `@static-object` 标注聚合（判定对象由被约束者声明，机械派生、不手列）。
+ * 这些是套件内检查器的判定对象——轮中改它们会让检查在改后状态上跑 ⇒ 可翻转轮结论
+ * （12a6b18b 改 orchestration/manager-tick-core.md 落在 round 53 窗口，manager 亲手闯的类）。
+ * 无 scripts/test.sh（如临时测试仓）⇒ 返回 []，fallback 退回 tasks/** + plugin/loop/** 两组。
+ */
+export function staticObjectPatterns(root: string): string[] {
+  const testSh = path.join(root, "scripts", "test.sh");
+  if (!fs.existsSync(testSh)) return [];
+  const src = fs.readFileSync(testSh, "utf8");
+  const patterns = new Set<string>();
+  for (const line of src.split("\n")) {
+    const m = line.match(/^\s*#\s*@static-object\s+(.+)$/);
+    if (m) {
+      for (const tok of m[1].trim().split(/\s+/).filter(Boolean)) patterns.add(tok);
+    }
+  }
+  return [...patterns];
 }
 
 // ── 断言面集合 ───────────────────────────────────────────────────────────────────────────────────────
@@ -168,12 +191,18 @@ export interface RegistryShape {
 }
 
 /**
- * 从测试自声明的判定对象聚合的断言面（A0b③ 生成，非手工维护）。守卫只读它：
- *   - 注册表存在、可解析、patterns 为非空数组 ⇒ 用其 patterns 对全 tracked 文件求交；
- *   - 缺失 / 空 / 不可解析 ⇒ 回退全 tracked 文件（fail-closed，宁严勿松）。
+ * 断言面集合 = 实证闯祸类 ∪ @static-object 聚合 ∪ 注册表派生面（外层裁定 B 修正收窄 seed patterns）。
+ * 守卫只读注册表（A0b③ 生成，非手工维护）：
+ *   - 注册表存在、可解析、patterns 为非空数组 ⇒ 用其 patterns 对全 tracked 文件求交（registry 分支）；
+ *   - 缺失 / 空 / 不可解析 ⇒ 回退「实证闯祸类 + 判定对象声明」：
+ *       tasks/**（round 60/63/67 全在这）+ plugin/loop/**（cp 事故面）
+ *       + scripts/test.sh 的 @static-object 聚合（套件检查器的判定对象；含 orchestration/*-tick-core.md）
+ *     ——不再回退全 tracked（4113/4316 实测不可用，ruling B）。
  */
+export const FALLBACK_TROUBLE_CLASSES = ["tasks/**", "plugin/loop/**"] as const;
+
 export function resolveAssertionSurface(root: string): {
-  mode: "registry" | "fallback-all-tracked";
+  mode: "registry" | "fallback-narrowed";
   patterns: string[];
   files: string[];
 } {
@@ -191,7 +220,9 @@ export function resolveAssertionSurface(root: string): {
     }
   }
   if (patterns.length === 0) {
-    return { mode: "fallback-all-tracked", patterns: [], files: tracked };
+    const fallback = [...FALLBACK_TROUBLE_CLASSES, ...staticObjectPatterns(root)];
+    const files = tracked.filter((f) => fallback.some((p) => matchesGlob(p, f)));
+    return { mode: "fallback-narrowed", patterns: [], files };
   }
   const files = tracked.filter((f) => patterns.some((p) => matchesGlob(p, f)));
   return { mode: "registry", patterns, files };

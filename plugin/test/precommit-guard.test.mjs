@@ -19,7 +19,10 @@
 //         invokes the guard; --uninstall-hook removes it (a shared hook covers outer/manager/inner
 //         and anyone else — the participant list is not maintainable, the hook is)
 //   AC4 — assertion surface aggregates from the A0b③ judged-object registry (NOT a hand-maintained
-//         whitelist); missing/empty registry ⇒ fall back to ALL tracked files (fail-closed, strict)
+//         whitelist); missing/empty registry ⇒ fall back to the NARROWED surface tasks/** +
+//         plugin/loop/** + scripts/test.sh @static-object aggregate (outer ruling B — the all-tracked
+//         fallback was measured unusable at 4113/4316; the @static-object aggregate mechanically
+//         covers the tick-core judgment objects, the 12a6b18b manager-accident class)
 //   AC5 — negative controls: round 63 shape (inner commits a TASK file while running ⇒ blocked) and
 //         round 60 shape (commit 26s after start ⇒ blocked, state=running regardless of elapsed);
 //         terminal state (green/red) ⇒ allowed even when touching the assertion surface
@@ -209,33 +212,92 @@ test("AC3b — install-hook refuses to overwrite an unrelated pre-existing hook"
   }
 });
 
-// ── AC4: assertion surface from A0b③ registry; fallback to all tracked ───────────────────────────────
+// ── AC4: assertion surface from A0b③ registry; fallback narrowed (outer ruling B) ────────────────────
 
-test("AC4 — EMPTY/missing registry ⇒ fall back to ALL tracked files (fail-closed, strict over loose)", () => {
+test("AC4 — EMPTY/missing registry ⇒ fallback to tasks/** + plugin/loop/** (empirical trouble classes)", () => {
   const root = makeGitRepo();
   try {
     writeState(root, RUNNING_STATE);
-    // no registry file at all
-    stage(root, "README.md", "changed\n"); // NOT in any narrow whitelist, but MUST be blocked by fallback
+    // no registry file at all → fallback-narrowed (tasks/** + plugin/loop/**; no scripts/test.sh here)
+    stage(root, "tasks/fallback.md"); // round 60/63/67 class — in tasks/**
     const res = runGuard(root);
-    assert.equal(res.status, 1, `expected reject via fallback, got ${res.status}`);
+    assert.equal(res.status, 1, `expected reject via narrowed fallback, got ${res.status}`);
     const out = JSON.parse(res.stdout);
-    assert.equal(out.registryMode, "fallback-all-tracked");
-    assert.deepEqual(out.touchedAssertion, ["README.md"]);
+    assert.equal(out.registryMode, "fallback-narrowed");
+    assert.deepEqual(out.touchedAssertion, ["tasks/fallback.md"]);
   } finally {
     cleanup(root);
   }
 });
 
-test("AC4b — empty patterns array in the registry ⇒ same fallback (fail-closed)", () => {
+test("AC4b — empty patterns array in the registry ⇒ same narrowed fallback (fail-closed)", () => {
   const root = makeGitRepo();
   try {
     writeState(root, RUNNING_STATE);
     writeRegistry(root, []);
-    stage(root, "README.md", "changed\n");
+    stage(root, "tasks/fallback.md");
     const res = runGuard(root);
-    assert.equal(res.status, 1, `expected reject via empty-registry fallback, got ${res.status}`);
-    assert.equal(JSON.parse(res.stdout).registryMode, "fallback-all-tracked");
+    assert.equal(res.status, 1, `expected reject via empty-registry narrowed fallback, got ${res.status}`);
+    assert.equal(JSON.parse(res.stdout).registryMode, "fallback-narrowed");
+  } finally {
+    cleanup(root);
+  }
+});
+
+test("AC4c — narrowed fallback ALSO covers plugin/loop/** (cp-accident surface)", () => {
+  const root = makeGitRepo();
+  try {
+    writeState(root, RUNNING_STATE);
+    stage(root, "plugin/loop/fast-mode-tick-core.md");
+    const res = runGuard(root);
+    assert.equal(res.status, 1, `plugin/loop/** must be blocked by fallback, got ${res.status}`);
+    assert.equal(JSON.parse(res.stdout).registryMode, "fallback-narrowed");
+    assert.deepEqual(JSON.parse(res.stdout).touchedAssertion, ["plugin/loop/fast-mode-tick-core.md"]);
+  } finally {
+    cleanup(root);
+  }
+});
+
+test("AC4d — narrowed fallback does NOT cover arbitrary tracked files (README.md allowed)", () => {
+  const root = makeGitRepo();
+  try {
+    writeState(root, RUNNING_STATE);
+    stage(root, "README.md", "changed\n"); // outside tasks/** + plugin/loop/** + static-object → allowed
+    const res = runGuard(root);
+    assert.equal(res.status, 0, `README.md must be allowed by narrowed fallback, got ${res.status}`);
+    assert.equal(JSON.parse(res.stdout).registryMode, "fallback-narrowed");
+  } finally {
+    cleanup(root);
+  }
+});
+
+test("AC4e — fallback aggregates scripts/test.sh @static-object annotations (tick-core class)", () => {
+  const root = makeGitRepo();
+  try {
+    writeState(root, RUNNING_STATE);
+    // A scripts/test.sh declaring orchestration/manager-tick-core.md as a checker judgment object —
+    // 12a6b18b (manager cp accident) class. The @static-object aggregation must pull it into the
+    // fallback even with no registry present.
+    const testShDir = path.join(root, "scripts");
+    fs.mkdirSync(testShDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(testShDir, "test.sh"),
+      [
+        "#!/usr/bin/env bash",
+        "run_static_checks() {",
+        '  run_checker "tick-core-static-check" node foo.ts --root "$root"',
+        "  # @static-object orchestration/manager-tick-core.md orchestration/orchestrator-tick-core.md",
+        "}",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    stage(root, "orchestration/manager-tick-core.md");
+    const res = runGuard(root);
+    assert.equal(res.status, 1, `@static-object-derived file must be blocked, got ${res.status}`);
+    const out = JSON.parse(res.stdout);
+    assert.equal(out.registryMode, "fallback-narrowed");
+    assert.deepEqual(out.touchedAssertion, ["orchestration/manager-tick-core.md"]);
   } finally {
     cleanup(root);
   }
