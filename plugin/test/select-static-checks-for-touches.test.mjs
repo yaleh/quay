@@ -153,7 +153,11 @@ t("AC1 — a `(new)`-tagged plugin/scripts touch selects capability-catalog (CLI
   const root = makeWorkspace({});
   writeTestSh(root);
   try {
-    writeTask(root, "t-new", "## Touches\n- plugin/scripts/ghost-check.sh (new)\n- tasks/t-new.md\n");
+    // A compliant new-script task ALSO authorizes the registration files
+    // (gap-new-script-touches-missing-inventory-catalog-registration AC3) — so the CLI selection
+    // (which fail-closes on a missing registration) exits 0 and this test exercises the SELECTION.
+    writeTask(root, "t-new",
+      "## Touches\n- plugin/scripts/ghost-check.sh (new)\n- plugin/scripts/capability-catalog.sh\n- docs/proposals/quay-product-outline.md\n- tasks/t-new.md\n");
     const r = runSelCli(root, "--task", "t-new", "--json");
     assert.equal(r.status, 0, r.stderr);
     const out = JSON.parse(r.stdout);
@@ -174,7 +178,8 @@ t("AC1 — a git-untracked plugin/scripts touch selects capability-catalog even 
   fs.writeFileSync(path.join(root, "plugin", "scripts", "ghost-check.sh"), "#!/usr/bin/env bash\necho hi\n");
   gitInit(root);
   try {
-    writeTask(root, "t-untracked", "## Touches\n- plugin/scripts/ghost-check.sh\n- tasks/t-untracked.md\n");
+    writeTask(root, "t-untracked",
+      "## Touches\n- plugin/scripts/ghost-check.sh\n- plugin/scripts/capability-catalog.sh\n- docs/proposals/quay-product-outline.md\n- tasks/t-untracked.md\n");
     const r = runSelCli(root, "--task", "t-untracked", "--names");
     assert.equal(r.status, 0, r.stderr);
     assert.match(r.stdout, /^capability-catalog$/m,
@@ -203,7 +208,8 @@ t("AC2 — a task declaring a new script NOT in the catalog QUESTION table makes
   fs.writeFileSync(path.join(root, "plugin", "scripts", "ghost-check.sh"),
     "#!/usr/bin/env bash\n# a brand-new checker with no declared question\necho hi\n");
   try {
-    writeTask(root, "t-ghost", "## Touches\n- plugin/scripts/ghost-check.sh (new)\n- tasks/t-ghost.md\n");
+    writeTask(root, "t-ghost",
+      "## Touches\n- plugin/scripts/ghost-check.sh (new)\n- plugin/scripts/capability-catalog.sh\n- docs/proposals/quay-product-outline.md\n- tasks/t-ghost.md\n");
     // The scoped tier emits the catalog command for this task…
     const r = runSelCli(root, "--task", "t-ghost", "--commands");
     assert.equal(r.status, 0, r.stderr);
@@ -299,6 +305,133 @@ t("AC4 — isGitUntracked unit: false for non-git, false for tracked, true for a
     spawnSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init"], { cwd: root, encoding: "utf8" });
     assert.equal(mod.isGitUntracked(root, "plugin/scripts/untracked-ghost.sh"), true);
     assert.equal(mod.isGitUntracked(root, "plugin/scripts/tracked-existing.sh"), false);
+  } finally {
+    cleanup(root);
+  }
+});
+
+// ── gap-new-script-touches-missing-inventory-catalog-registration ─────────────────────────────────────
+// AC2/AC3/AC4 — dispatch-preflight registration check: a task whose ## Touches declare a NEW
+// plugin/scripts file ((new) tag, git-untracked, or the full-width （新：…） marker the repo's real
+// new-script Touches use) MUST ALSO authorize the registration files (capability-catalog.sh +
+// quay-product-outline.md). Missing ⇒ the scoped static-check selection exits non-zero with
+// `touches-missing-registration` (fail-closed: the task cannot pass its own scoped run until its
+// Touches authorize the sync products — the 3-instance overstep/stop regression this task closes).
+
+const REG_CATALOG = "plugin/scripts/capability-catalog.sh";
+const REG_OUTLINE = "docs/proposals/quay-product-outline.md";
+
+t("AC2 — a new plugin/scripts touch without the registration files ⇒ touches-missing-registration (pure)", async () => {
+  const mod = await importMod();
+  assert.deepEqual(mod.NEW_SCRIPT_REGISTRATION_REQUIRED, [REG_CATALOG, REG_OUTLINE], "AC3 file list");
+  const r = mod.checkTouchesRegistration(
+    ["tasks/foo.md", "plugin/scripts/new-check.ts"],
+    ["plugin/scripts/new-check.ts"],
+  );
+  assert.equal(r.ok, false);
+  assert.equal(r.reason, "touches-missing-registration");
+  assert.equal(r.newScript, "plugin/scripts/new-check.ts");
+  assert.deepEqual(r.missing, [REG_CATALOG, REG_OUTLINE]);
+});
+
+t("AC2 — missing registration fails the scoped selection CLI end-to-end (--check-registration / --json / --commands)", async () => {
+  const root = makeWorkspace({});
+  writeTestSh(root);
+  try {
+    writeTask(root, "bad-reg", "## Touches\n- plugin/scripts/ghost-check.ts (new)\n- tasks/bad-reg.md\n");
+    // --check-registration: the dedicated dispatch-preflight mode, exit 1 + machine JSON.
+    const r = runSelCli(root, "--task", "bad-reg", "--check-registration");
+    assert.equal(r.status, 1, r.stderr);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.registrationCheck.reason, "touches-missing-registration");
+    assert.deepEqual(out.registrationCheck.missing, [REG_CATALOG, REG_OUTLINE]);
+    // --json: also exits 1 (fail-closed) and carries registrationCheck for machine consumers.
+    const rj = runSelCli(root, "--task", "bad-reg", "--json");
+    assert.equal(rj.status, 1, rj.stderr);
+    assert.equal(JSON.parse(rj.stdout).registrationCheck.ok, false);
+    // --commands: the mode scripts/test.sh's run_scoped_static_checks_sel consumes — a non-zero
+    // selector exit is a FATAL gate there, so the scoped run turns red (fail-closed, not silent).
+    const rc = runSelCli(root, "--task", "bad-reg", "--commands");
+    assert.equal(rc.status, 1);
+    assert.match(rc.stderr, /touches-missing-registration/);
+    assert.match(rc.stderr, /ghost-check\.ts/);
+  } finally {
+    cleanup(root);
+  }
+});
+
+t("AC2 — the full-width （新：…） marker (the repo's REAL annotation form) is a new-script trigger", async () => {
+  const root = makeWorkspace({});
+  writeTestSh(root);
+  try {
+    // Instance-2 shape (gap-task-telemetry-6-percent-join): `plugin/scripts/fan-in-runid-check.ts（新：…）`.
+    writeTask(root, "fw-reg",
+      "## Touches\n- plugin/scripts/fan-in-runid-check.ts（新：runId 存在性检查器）\n- tasks/fw-reg.md\n");
+    const r = runSelCli(root, "--task", "fw-reg", "--check-registration");
+    assert.equal(r.status, 1, r.stderr);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.registrationCheck.reason, "touches-missing-registration");
+    assert.equal(out.registrationCheck.newScript, "plugin/scripts/fan-in-runid-check.ts");
+    assert.deepEqual(out.registrationCheck.missing, [REG_CATALOG, REG_OUTLINE]);
+  } finally {
+    cleanup(root);
+  }
+});
+
+t("AC3 — a new plugin/scripts touch WITH the registration files in Touches ⇒ ok (the fix for the gap)", async () => {
+  const mod = await importMod();
+  const r = mod.checkTouchesRegistration(
+    ["plugin/scripts/new-check.ts", REG_CATALOG, REG_OUTLINE],
+    ["plugin/scripts/new-check.ts"],
+  );
+  assert.deepEqual(r, { ok: true });
+  // CLI end-to-end: a compliant task passes --check-registration AND still emits the scoped commands.
+  const root = makeWorkspace({});
+  writeTestSh(root);
+  try {
+    writeTask(root, "ok-reg",
+      `## Touches\n- plugin/scripts/new-check.ts (new)\n- ${REG_CATALOG}\n- ${REG_OUTLINE}\n- tasks/ok-reg.md\n`);
+    const r0 = runSelCli(root, "--task", "ok-reg", "--check-registration");
+    assert.equal(r0.status, 0, r0.stderr);
+    assert.equal(JSON.parse(r0.stdout).registrationCheck.ok, true);
+    const rc = runSelCli(root, "--task", "ok-reg", "--commands");
+    assert.equal(rc.status, 0, rc.stderr);
+    assert.match(rc.stdout, /capability-catalog\.sh/, "scoped commands still emitted for a compliant task");
+  } finally {
+    cleanup(root);
+  }
+});
+
+t("AC4 — negative controls: no new script, non-bundle new file, and partial registration are judged correctly", async () => {
+  const mod = await importMod();
+  // No new plugin/scripts file ⇒ ok regardless of whether the registration files are in Touches.
+  assert.deepEqual(mod.checkTouchesRegistration(["tasks/foo.md", "plugin/scripts/claim-task.sh"], []), { ok: true });
+  // A new file OUTSIDE the plugin bundle is not a registration trigger.
+  assert.deepEqual(
+    mod.checkTouchesRegistration(["tasks/foo.md", "docs/proposals/exp5-x.md"], ["docs/proposals/exp5-x.md"]),
+    { ok: true },
+  );
+  // Only ONE registration file present ⇒ the OTHER is reported missing (no silent pass).
+  const partial = mod.checkTouchesRegistration(
+    ["plugin/scripts/new-check.ts", REG_CATALOG],
+    ["plugin/scripts/new-check.ts"],
+  );
+  assert.equal(partial.ok, false);
+  assert.deepEqual(partial.missing, [REG_OUTLINE]);
+  // An existing (tracked) script edit — no (new) tag, nothing untracked — is not gated (zero impact
+  // on non-new-script tasks, AC4).
+  const root = makeWorkspace({});
+  writeTestSh(root);
+  try {
+    fs.mkdirSync(path.join(root, "plugin", "scripts"), { recursive: true });
+    fs.writeFileSync(path.join(root, "plugin", "scripts", "existing-check.ts"), "export const x = 1;\n");
+    gitInit(root);
+    spawnSync("git", ["add", "plugin/scripts/existing-check.ts"], { cwd: root, encoding: "utf8" });
+    spawnSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init"], { cwd: root, encoding: "utf8" });
+    writeTask(root, "existing", "## Touches\n- plugin/scripts/existing-check.ts\n- tasks/existing.md\n");
+    const r = runSelCli(root, "--task", "existing", "--check-registration");
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(JSON.parse(r.stdout).registrationCheck.ok, true);
   } finally {
     cleanup(root);
   }
