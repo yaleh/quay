@@ -51,3 +51,9 @@ extra: {}
 - `git log -1 --format=%s 8e2e49b9`：含 "all syntax verified"
 - `82b1a719`（20:43:05）修复 trend-check 复制 2 份；`9c6b4efd` 修 8 个 frontmatter
 - d = 13:02:03 → 20:43:05 = 7h41m（`orchestration/ANALYSIS-when-should-B-develop-...md` 已记，c1085e6b）
+
+## Touches
+
+- plugin/scripts/commit-message-verified-check.ts（新：提交消息 "verified" 断言需验证命令引用的机械检查）
+- plugin/test/commit-message-verified-check.test.mjs（检出「自称 verified 缺验证命令」的提交 + 负控制）
+- tasks/gap-commit-message-claims-verified-without-verification.md（自身：勾 AC + 贴证据）

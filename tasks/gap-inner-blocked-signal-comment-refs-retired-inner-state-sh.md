@@ -38,5 +38,11 @@ extra: {}
 
 ## Evidence
 
-- `sed -n '808,812p' plugin/scripts/inner-blocked-signal.ts`：注释含 "inner-state.sh OVER90 signal"
+- `sed -n '808,812p' plugin/scripts/inner-blocked-signal.ts`：注释含 "inner-state.sh OVER90 signal"（实测现位于 :873，行号漂移）
 - `find . -name 'inner-state.sh'` = 0 命中（文件不存在）
+
+## Touches
+
+- plugin/scripts/inner-blocked-signal.ts（:873 注释 inner-state.sh → 退役注记/指向真实机制）
+- plugin/test/inner-blocked-signal.test.mjs（注释无 inner-state.sh 引用断言，若需）
+- tasks/gap-inner-blocked-signal-comment-refs-retired-inner-state-sh.md（自身：勾 AC + 贴证据）
