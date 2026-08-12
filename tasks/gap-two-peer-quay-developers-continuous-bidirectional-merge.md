@@ -1,7 +1,7 @@
 ---
 id: gap-two-peer-quay-developers-continuous-bidirectional-merge
 title: "TWO PEER quay developers (A/B machines) need CONTINUOUS BIDIRECTIONAL merge of each other's progress — the authority question (who is 'latest' for whom) is UNDEFINED; unlike archguard's one-way 'quay releases, downstream consumes', A and B both develop quay itself; claim-task.sh/branch-model already did TASK CLAIMING + integration branch but NOT bidirectional CODE merge (B's 40+ commits incl new SKILL.md exist only on B; A's master evolves --slot-status etc and B never pulls); human frame correction 2026-08-06 04:5xZ (replaces narrow gap-a-to-b-code-downsync-missing-slot-status-not-on-b which is withdrawn): symmetric 'both machines continuously apply latest and develop on latest', not 'A reaches B' one-way; whether this merges with config-preserving/claim-task/branch-model into one larger design OR stays separate small tasks is the outer ruling requested"
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -99,3 +99,16 @@ changed: 人框架更正（对称双向 + 权威未定义）替代窄任务。�
 
 **本任务状态**：保持 todo——方案待人确认后，本任务按 develop/GitHub 模式实现双向合并（AC1 双向、
 AC2 权威=develop/GitHub、AC3 B 机工具到达）。若方案被拒，回退 integration 共识。
+
+## Evidence（outer 2026-08-12 只读评估——vhs 合并第一实例）
+
+**触发条件**（manager 2026-08-12 与 outer 协商）：cli-import fan-in → 立即评估 vhs 合并；拖过 24h → 先合 vhs 再重构。cli-import 已落地（96ec81c7），触发已满足。
+
+**实测冲突面**（3-way merge-file 实测，非 merge-tree 粗数）：
+- `refs/remotes/vhs/integration` = 47543120（领先 96），我方领先 139，真分叉点 a1f8c8e4（14h）
+- merge-tree「43 changed in both」→ 实际 **32 真冲突 / 11 自动干净**
+- **bin/quay.ts 自动干净**（我方 run()/shell 改 6-344 行区，vhs 改 402-1821，hunk 不重叠）
+- 真冲突聚类：tasks 17（add/add 超集类，per-hunk 取并集）/ tick-core 文档 7（orchestrator-loop-tick 8 冲突区）/ plugin scripts 闸 6（fast-mode-telemetry 5、accounting-emit 4、manager-arm 4、integration-batch-merge 2、capability-catalog 2、manager-start 2——验证机件类敏感，读两边意图）/ skills 2 / serve-handlers 3 区
+- orchestration/manager-* 双改 4 条（manager-loop-tick/manager-tick-core + plugin/loop/manager-tick-core）——确认「manager 产出重」为持续冲突源
+
+**执行计划**：round 绿后在临时 worktree 做合并（不碰主检出）；tasks 取并集；验证机件类（plugin/scripts 闸）逐块读两边意图，不盲解；合完 scoped 绿 → 全量验证轮 → fan-in。

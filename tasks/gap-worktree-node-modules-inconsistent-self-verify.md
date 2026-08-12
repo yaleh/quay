@@ -1,7 +1,7 @@
 ---
 id: gap-worktree-node-modules-inconsistent-self-verify
 title: "Some worktrees can't self-verify: node_modules presence is agent-dependent, so verification falls back to the shared checkout (where mutations land)"
-status: todo
+status: ready
 labels:
   - gap
 extra:
