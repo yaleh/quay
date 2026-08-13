@@ -166,6 +166,21 @@ export interface SuiteState {
    * back to a stale-AGE threshold before declaring a crash.
    */
   pid?: number;
+  /**
+   * gap-concurrent-write-mutable-tree-false-positive-red — the tested checkout's HEAD at terminal
+   * time (the runner records it — see full-suite-runner.ts's field of the same name). Together with
+   * the START head (verifiedCommit) it expresses whether the tree was MUTATED MID-ROUND (commits
+   * landed in the shared tree while the suite ran on it). Absent on legacy / non-git states.
+   */
+  terminalCommit?: string;
+  /**
+   * gap-concurrent-write-mutable-tree-false-positive-red — true when the runner detected the tree was
+   * MUTATED MID-ROUND (start HEAD ≠ terminal HEAD — concurrent writers committed to the shared tree
+   * while the suite ran on it). Any red carrying this flag is a CONCURRENT-WRITE FALSE-POSITIVE
+   * CANDIDATE (AC2), NOT a proven code failure on a pinned tree. Absent on legacy / non-git states ⇒
+   * the existing attribution stands unchanged.
+   */
+  treeMutatedMidRound?: boolean;
 }
 
 /** The AC2 reason-axis route a red state takes (gap-suite-state-has-no-reason-axis-failed-aborted-infra). */
@@ -255,6 +270,15 @@ export interface SuiteStateEvent {
    * accident. The spawn is suppressed (runMonitor → spawnRetriggerRun bails on isRunnerInFlight).
    */
   waitRunner?: boolean;
+  /**
+   * gap-concurrent-write-mutable-tree-false-positive-red — SUITE-RED only: true when the red state
+   * carries `treeMutatedMidRound` (the tree was MUTATED MID-ROUND — concurrent writes landed in the
+   * shared tree while the suite ran ⇒ this red is a FALSE-POSITIVE CANDIDATE, round-53 class). A
+   * factual projection of state.treeMutatedMidRound (translation, not a dispatch decision — the
+   * outer triage decides what to do with it). Absent on reds without the flag (the existing
+   * attribution stands unchanged).
+   */
+  concurrentWrite?: boolean;
 }
 
 // ── failure-location classification + shared-gate dispatch conditional ─────────────────────────────
@@ -316,6 +340,21 @@ export function classifyFailure(input: SuiteFailure | string): FailureLocation {
   // 3. cannot determine the location — fail-closed toward stopping (cannot confirm it is an
   //    unrelated specific-test failure).
   return { kind: "unknown", line };
+}
+
+/**
+ * gap-concurrent-write-mutable-tree-false-positive-red AC2 — the red-attribution check: is this red
+ * a CONCURRENT-WRITE FALSE-POSITIVE CANDIDATE? true when the state carries `treeMutatedMidRound`
+ * (the runner detected the tree was MUTATED MID-ROUND — start HEAD ≠ terminal HEAD — concurrent
+ * writers committed to the shared tree while the suite ran on it). Round-53 class: the SAME
+ * quay-init-loop-core test red while 4 writers committed mid-round, then passed green the next clean
+ * window — the red is a FALSE-POSITIVE CANDIDATE, NOT a proven code failure on a pinned tree.
+ * A signal, not a blanket round-discard: the red's failures are still recorded and attributed; this
+ * annotation lets the triage weight them accordingly. Absent / false ⇒ the existing attribution
+ * stands (the round ran on a pinned tree).
+ */
+export function isConcurrentWriteFalsePositiveCandidate(state: SuiteState | null): boolean {
+  return state?.state === "red" && state.treeMutatedMidRound === true;
 }
 
 /**
@@ -934,6 +973,11 @@ export function recordTransition(
     ...(kind === "SUITE-RED" && nextState.failures
       ? { failureLocation: nextState.failures.map((f) => classifyFailure(f)) }
       : {}),
+    // gap-concurrent-write-mutable-tree-false-positive-red — carry the concurrent-write FALSE-POSITIVE
+    // CANDIDATE annotation on the SUITE-RED event (factual projection of state.treeMutatedMidRound —
+    // the runner detected the tree was mutated mid-round). Translation, not a dispatch decision; the
+    // outer triage decides what to do with the annotation.
+    ...(kind === "SUITE-RED" && nextState.treeMutatedMidRound === true ? { concurrentWrite: true } : {}),
   };
   try {
     fs.mkdirSync(path.dirname(eventsPath(root)), { recursive: true });
@@ -1128,7 +1172,8 @@ function formatEventLine(ev: SuiteStateEvent): string {
   return (
     `${ev.event} state=${ev.state?.state ?? "?"} early=${ev.early} ` +
     `stopSignal=${ev.stopSignal} at=${ev.at}${locSummary}` +
-    (ev.waitRunner ? " waitRunner=true" : "")
+    (ev.waitRunner ? " waitRunner=true" : "") +
+    (ev.concurrentWrite ? " concurrentWrite=true" : "")
   );
 }
 
