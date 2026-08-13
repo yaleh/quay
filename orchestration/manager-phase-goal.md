@@ -1597,6 +1597,15 @@ meta-cc 仍停（其内层会话在违反 `.halt` 后被自己的 outer 终止�
 > 人 2026-08-06 给出的新阶段目标 2）。**不再单独追踪**——两个判据测同一件事会重演本文件
 > 已经犯过的"AC15 命名撞车"错误。下方内容保留，因为它记录了这条判据被提出时的实测背景。
 
+> **权威模型（2026-08-06 05:4xZ 人裁定，`gap-two-peer-quay-developers-continuous-bidirectional-merge` AC2 落盘）**：
+> 两个对等 quay 开发者（A/B 机）的「谁对谁是权威最新」定义如下——**develop = 跨机汇合点（唯一）**、
+> **GitHub = 唯一跨机同步点**（两机都 push/pull GitHub 的 develop，**两机不再直接同步**）、**master 冻结**
+> （仅人要求时才从 develop 同步）、任务分支 push 到 GitHub（认领/备份）。双向合并 = 每机**上行**
+> （`sync-lag-check.sh --push`，本地 develop → origin/develop，已落地）+ **下行**（`sync-lag-check.sh --pull`，
+> origin/develop → 本地 develop，人框架「两台机器都持续应用最新并在最新上开发」；`claim-task.sh --sync` /
+> `integration-batch-merge.sh --sync-pull` 在下行点接入）。真分歧（本地与 origin 各有对方缺的提交）fail-closed，
+> 不盲 `--ours/--theirs`——交循环的红窗/合并处理。
+
 **背景（实测，持续未解，本判据前已连续多轮报告）**：A/B 两机各自独立运转 quay 开发，
 **任务板已实测分叉**——同一个 `gap-productize-the-manager-layer`，B 机 00:10 已 `done`，
 A 机同一时刻仍 `todo`；`claim-task.sh`（认领协议，2026-08-06 00:21 落地）**至今没有一次真实调用**

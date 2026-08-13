@@ -62,8 +62,16 @@ quay 开发者需要**持续合并彼此进展**。这比「--slot-status 单点
 
 ## Touches
 
-- plugin/scripts/claim-task.sh（双向合并同步，扩展 claim-task）+ plugin/scripts/integration-batch-merge.sh（扩展 integration）
-- orchestration/manager-phase-goal.md（AC15 扩展：双向合并 + 权威定义）
+- plugin/scripts/sync-lag-check.sh（下行 `--pull`：双向合并的缺失方向，严格落后 fast-forward，真分歧 fail-closed）
+- plugin/scripts/claim-task.sh（`--sync`：认领前下行「develop on latest」）
+- plugin/scripts/integration-batch-merge.sh（`--sync-pull`：批量合前下行，合基含对方最新）
+- plugin/scripts/capability-catalog.sh（sync-lag-check 描述扩为双向）
+- plugin/skills/init/SKILL.md（既有 wiring 缺陷修复：manager SKILL 引用的 SPEC-dispatch-ordering-semantic 补 reference-doc 声明）
+- plugin/loop/fast-mode-loop-tick.md（4a 双向心跳：--push + --pull）
+- plugin/loop/orchestrator-loop-tick.md（3c 双向心跳：--push + --pull）
+- orchestration/manager-phase-goal.md（AC15 权威模型落盘：双向合并 + 权威定义）
+- plugin/test/sync-lag-check.test.mjs（--pull / --sync-pull 测试）
+- plugin/test/claim-task.test.mjs（--sync 测试）
 - tasks/gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point.md（AC4 交叉标注）
 - tasks/gap-a-to-b-code-downsync-missing-slot-status-not-on-b.md（AC5 交叉标注）
 - tasks/gap-two-peer-quay-developers-continuous-bidirectional-merge.md（自身，C8 self-touch）
@@ -113,3 +121,37 @@ AC2 权威=develop/GitHub、AC3 B 机工具到达）。若方案被拒，回退 
 - orchestration/manager-* 双改 4 条（manager-loop-tick/manager-tick-core + plugin/loop/manager-tick-core）——确认「manager 产出重」为持续冲突源
 
 **执行计划**：round 绿后在临时 worktree 做合并（不碰主检出）；tasks 取并集；验证机件类（plugin/scripts 闸）逐块读两边意图，不盲解；合完 scoped 绿 → 全量验证轮 → fan-in。
+
+## 实施（2026-08-13，worktree 落地——双向合并机制）
+
+**机制载体（人框架「两台机器都持续应用最新并在最新上开发」对称落地）**：
+
+1. **`sync-lag-check.sh --pull`（下行方向，双向合并的核心缺失半）**：fetch origin/<branch>，
+   本地严格落后（behind>0 且 unpushed==0，本地无 origin 缺的提交）⇒ fast-forward 本地 <branch> 到
+   origin/<branch>——把对方最新应用到本地再开发。**真分歧**（本地与 origin 各有对方缺的提交）**fail-closed**
+   （exit 1，不动 ref，报告 behind/ahead 面）——不盲 `--ours/--theirs`，交循环红窗/合并处理。`--dry-run`/`--json`
+   不移动任何 ref。
+2. **`claim-task.sh --sync`（认领前下行）**：认领任务前把 fork-baseline（develop）从 claim remote 拉到本地——
+   "develop on latest"。真分歧 ⇒ 认领被拒（exit 1，nothing moved），先解决分歧再认领。
+3. **`integration-batch-merge.sh --sync-pull`（批量合前下行）**：integration→develop 批量合**之前**把
+   origin/develop 拉到本地 develop，使合基含对方最新；真分歧 ⇒ 批量合 fail-closed。
+4. **心跳接线**：`fast-mode-loop-tick.md` 4a / `orchestrator-loop-tick.md` 3c 每个 tick 无条件跑
+   `--push` + `--pull`——双向连续同步。
+5. **权威模型落盘**：`manager-phase-goal.md` AC15 记录人 2026-08-06 裁定——develop=跨机汇合点（唯一）、
+   GitHub=唯一跨机同步点、master 冻结、任务分支 push GitHub；双向合并 = 每机上行+下行。
+
+**AC 状态**：
+- AC1（双向代码合并）：✅ `sync-lag-check --pull` + `claim-task --sync` + `integration-batch-merge --sync-pull`，
+  sync-lag-check.test.mjs「AC1 (downsync)」「AC1 (downsync symmetric)」两向实跑（A 拉 B + B 拉 A）。
+- AC2（权威「最新」定义）：✅ 人裁定 develop/GitHub 落盘 manager-phase-goal.md AC15 + sync-lag-check 头注释。
+- AC3（B 机 --slot-status 到达）：✅ 下行 fast-forward 把 peer 提交带到本地（test：peer 推 → machine --pull → 本地到 peer tip）。
+- AC4（与 gap-branch-model 交叉标注）：✅ tasks/gap-branch-model-… 加 AC 交叉标注。
+- AC5（与 gap-a-to-b-code-downsync 交叉标注）：✅ tasks/gap-a-to-b-code-downsync-… 撤回节加 AC5 交叉标注。
+
+**scoped 验证（worktree 内 `scripts/test.sh --for-task … --allow-thin`）**：87/87 pass，fail 0，cancelled 0，
+exit 0；静态检查（task-contract / test-isolation / capability-catalog wiring 等）全 PASS。
+（顺带修复既有 wiring 缺陷：`plugin/skills/init/SKILL.md` 补 `SPEC-dispatch-ordering-semantic-2026-08-13.md`
+的 reference-doc 声明——manager SKILL 引用它但 quay-init 落盘集未声明，capability-catalog.test.mjs 红。）
+
+**尚未做（属于后续合并执行，非本机制任务）**：vhs 96 提交与本地 139 提交的真合并（32 真冲突，见上「实测冲突面」
+执行计划）——那是机制的第一真实实例，按计划 round 绿后在临时 worktree 逐块读两边意图合并。

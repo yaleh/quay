@@ -319,3 +319,86 @@ test("adversarial: an UNREACHABLE shared remote FAILS CLOSED (exit 2), never a s
     cleanup(w.root);
   }
 });
+
+// ── --sync: the DOWNSYNC half of the bidirectional merge (gap-two-peer-quay-developers-…) ─────────
+// Before claiming, --sync pulls the fork-baseline (develop) from the claim remote into the LOCAL
+// develop — "develop on latest" (the human frame 2026-08-06: both machines continuously apply latest
+// and develop on latest, symmetric). The claim itself is unchanged; the downsync is a pre-step that
+// fast-forwards local develop when strictly behind and FAILS CLOSED on a true divergence.
+
+test("--sync: before claiming, the machine's local develop is fast-forwarded to origin/develop (develop on latest)", () => {
+  const w = makeWorld("sync");
+  try {
+    // A publishes develop to the shared repo (the claim remote, as a configured `origin`).
+    git(w.a, "checkout", "-q", "-b", "develop");
+    writeFileSync(join(w.a, "base.txt"), "base\n", "utf8");
+    assert.equal(git(w.a, "add", "-A").status, 0);
+    assert.equal(git(w.a, "commit", "-q", "-m", "develop base").status, 0, "develop base commit");
+    assert.equal(git(w.a, "push", "-q", "-u", "origin", "develop").status, 0, "publish develop to origin");
+    const baseTip = git(w.a, "rev-parse", "develop").stdout.trim();
+
+    // A peer (another clone) advances origin/develop.
+    const peer = join(w.root, "peer");
+    assert.equal(git(w.root, "clone", "-q", w.shared, peer).status, 0, "clone peer");
+    git(peer, "config", "user.name", "peer");
+    git(peer, "config", "user.email", "peer@example.com");
+    git(peer, "checkout", "-q", "-b", "develop", "origin/develop");
+    writeFileSync(join(peer, "peer.txt"), "peer work\n", "utf8");
+    assert.equal(git(peer, "add", "-A").status, 0);
+    assert.equal(git(peer, "commit", "-q", "-m", "peer develop work").status, 0, "peer develop commit");
+    assert.equal(git(peer, "push", "-q", "origin", "develop").status, 0, "peer pushes develop");
+    const peerTip = git(peer, "rev-parse", "develop").stdout.trim();
+
+    // A claims a task WITH --sync: local develop (stale, at base) is fast-forwarded to origin/develop
+    // (peerTip) BEFORE the claim. The claim remote is the configured `origin` (the shared repo).
+    writeTask(w.a, "sync_task", ["plugin/scripts/claim-task.ts"]);
+    const c = run(claimTask, ["sync_task", "--root", w.a, "--remote", "origin", "--sync"]);
+    assert.equal(c.status, 0, `--sync claim failed: ${c.stdout}${c.stderr}`);
+    assert.match(c.stdout, /fast-forwarded local develop by 1 commit/, "--sync ran the downsync first");
+    assert.match(c.stdout, /claimed: task\/sync_task/, "the claim proceeded after the downsync");
+    assert.equal(git(w.a, "rev-parse", "develop").stdout.trim(), peerTip, "local develop now at the peer's latest (develop on latest)");
+    assert.notEqual(baseTip, peerTip, "the machine actually moved onto the peer's latest");
+  } finally {
+    cleanup(w.root);
+  }
+});
+
+test("--sync negative control: a TRUE divergence FAILS CLOSED — the claim is refused, nothing moved", () => {
+  const w = makeWorld("syncdiv");
+  try {
+    git(w.a, "checkout", "-q", "-b", "develop");
+    writeFileSync(join(w.a, "base.txt"), "base\n", "utf8");
+    assert.equal(git(w.a, "add", "-A").status, 0);
+    assert.equal(git(w.a, "commit", "-q", "-m", "develop base").status, 0);
+    assert.equal(git(w.a, "push", "-q", "-u", "origin", "develop").status, 0, "publish develop to origin");
+
+    // Peer advances origin/develop.
+    const peer = join(w.root, "peer");
+    assert.equal(git(w.root, "clone", "-q", w.shared, peer).status, 0, "clone peer");
+    git(peer, "config", "user.name", "peer");
+    git(peer, "config", "user.email", "peer@example.com");
+    git(peer, "checkout", "-q", "-b", "develop", "origin/develop");
+    writeFileSync(join(peer, "peer.txt"), "peer work\n", "utf8");
+    assert.equal(git(peer, "add", "-A").status, 0);
+    assert.equal(git(peer, "commit", "-q", "-m", "peer develop work").status, 0);
+    assert.equal(git(peer, "push", "-q", "origin", "develop").status, 0, "peer pushes develop");
+
+    // A makes a LOCAL develop commit it has NOT pushed — now both sides diverged.
+    git(w.a, "checkout", "-q", "develop");
+    writeFileSync(join(w.a, "local.txt"), "local work\n", "utf8");
+    assert.equal(git(w.a, "add", "-A").status, 0);
+    assert.equal(git(w.a, "commit", "-q", "-m", "machine local develop work").status, 0);
+    const localTip = git(w.a, "rev-parse", "develop").stdout.trim();
+
+    // Claim with --sync on a true divergence → REFUSED (exit 1), nothing claimed, nothing moved.
+    writeTask(w.a, "sync_div_task", ["plugin/scripts/claim-task.ts"]);
+    const c = run(claimTask, ["sync_div_task", "--root", w.a, "--remote", "origin", "--sync"]);
+    assert.notEqual(c.status, 0, "a divergent --sync claim must fail closed");
+    assert.equal(c.status, 1, "divergence exit must be 1");
+    assert.match(`${c.stdout}${c.stderr}`, /DIVERGENCE|diverged|downsync FAILED/);
+    assert.equal(git(w.a, "rev-parse", "develop").stdout.trim(), localTip, "local develop NOT moved (no blind merge)");
+    assert.equal(git(w.a, "ls-remote", "--heads", "origin", "refs/heads/task/sync_div_task").stdout.trim(), "", "the task was NOT claimed");
+  } finally {
+    cleanup(w.root);
+  }
+});

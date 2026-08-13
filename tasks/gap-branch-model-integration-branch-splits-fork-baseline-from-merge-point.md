@@ -75,6 +75,12 @@ disjointness 排序在做）——**能并发的任务恰好就是不在乎基�
 > （基线快照 helper `plugin/scripts/test-file-snapshot.sh` + B3-2 场景 fixture `plugin/test/test-file-snapshot.test.mjs`，
 > scoped 5/5 绿）。模型轮次上线时无需再被断言噪声遮蔽。
 
+> **AC 交叉标注——integration 分支扩展到双向代码合并（2026-08-13，来自 `tasks/gap-two-peer-quay-developers-continuous-bidirectional-merge.md` AC4）**：
+> 本任务（integration 分支模型）已做「多源汇入」的**单机**一侧；`gap-two-peer-quay-developers-continuous-bidirectional-merge`
+> 把它扩展到**跨机对等**：两个 quay 开发者（A/B 机）各自把本地 develop 与 GitHub origin/develop 双向同步
+> （`sync-lag-check.sh --push` 上行 + `--pull` 下行），integration 分支仍是「待验证汇入点」，只是汇入源现在
+> 跨主机。权威「最新」= develop/GitHub（人 2026-08-06 裁定，见该任务 AC2/manager-phase-goal.md AC15 权威模型）。
+
 > **AC3 FF-only 假设否证交叉标注（2026-08-07，来自 `tasks/gap-integration-batch-merge-ff-only-contradicts-real-merge-ruling.md`）**：
 > 本任务 AC3 的机制假设「integration→develop 永远 fast-forward（integration 永远是 develop 后代，
 > SPEC §4）」**已被 2026-08-06 23:48 实证否证**（develop 直提 271 次、对齐后一分钟内又领先 3 提交）。

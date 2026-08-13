@@ -119,6 +119,13 @@
 #                 merge (ff or real), IMMEDIATELY push the advanced <develop> ref to origin via
 #                 sync-lag-check.sh (the event-driven trigger of the cross-machine sync mechanism —
 #                 the push happens in the SAME round as the land closure, not at the next tick).
+#   --sync-pull   (gap-two-peer-quay-developers-continuous-bidirectional-merge AC1) BEFORE the batch
+#                 merge, run the DOWNSYNC half of the bidirectional merge: pull origin/<develop> into
+#                 the LOCAL <develop> via sync-lag-check.sh --pull, so the merge base includes the
+#                 peer's latest (the human frame: both machines continuously apply latest and develop
+#                 on latest). A TRUE divergence (local develop AND origin/develop each have commits the
+#                 other lacks) FAILS CLOSED (nothing moved) — the real bidirectional merge is the
+#                 loop's own red-window/merge handling, never a blind --ours/--theirs at land time.
 #                 The merge is the primary outcome; a push failure (non-fast-forward = a real
 #                 cross-machine divergence) is REPORTED and does not roll the ref back — the
 #                 every-tick heartbeat retries it.
@@ -213,6 +220,7 @@ develop_ref="develop"
 integration_ref="integration"
 dry_run=0
 sync=0
+sync_pull=0
 deliver=0
 merge_mode=0
 reconcile=0
@@ -295,6 +303,7 @@ while [ "$#" -gt 0 ]; do
     --integration-authoritative) int_authoritative_patterns+=("$2"); shift 2 ;;
     --reverse-edge-criterion) reverse_edge_criterion="$2"; shift 2 ;;
     --sync) sync=1; shift ;;
+    --sync-pull) sync_pull=1; shift ;;
     --deliver) deliver=1; shift ;;
     --reconcile) reconcile=1; shift ;;
     --run-id) run_id="$2"; shift 2 ;;
@@ -350,6 +359,26 @@ fi
 if ! git -C "${repo_root}" rev-parse --verify --quiet "refs/heads/${integration_ref}" >/dev/null; then
   echo "integration-batch-merge: integration ref not found: ${integration_ref}" >&2
   exit 2
+fi
+
+# ── --sync-pull: the DOWNSYNC half of the bidirectional merge (two peer developers) ─────────────────
+# Before the batch merge, pull origin/<develop> into the LOCAL <develop> so the merge base includes
+# the peer's latest ("apply latest and develop on latest" — the human frame 2026-08-06). A TRUE
+# divergence (local AND origin each have commits the other lacks) FAILS CLOSED (nothing moved) — the
+# real bidirectional merge is the loop's own red-window/merge handling. Runs BEFORE develop_tip is
+# captured so the pull result is what every gate and the CAS evaluate.
+if [ "${sync_pull}" -eq 1 ]; then
+  if [ -f "${SCRIPT_DIR}/sync-lag-check.sh" ]; then
+    sp_out="$(bash "${SCRIPT_DIR}/sync-lag-check.sh" --root "${repo_root}" --branch "${develop_ref}" --remote origin --pull 2>&1)"
+    sp_rc=$?
+    printf '%s\n' "${sp_out}"
+    if [ "${sp_rc}" -ne 0 ]; then
+      echo "integration-batch-merge: --sync-pull downsync FAILED (exit ${sp_rc}) — local ${develop_ref} and origin/${develop_ref} diverged or origin unreachable; NOT batch-merging on a diverged base (never a blind --ours/--theirs); nothing moved" >&2
+      exit 1
+    fi
+  else
+    echo "integration-batch-merge: --sync-pull requested but sync-lag-check.sh not found at ${SCRIPT_DIR}/sync-lag-check.sh; skipping downsync (merge base may be stale)" >&2
+  fi
 fi
 
 develop_tip="$(git -C "${repo_root}" rev-parse "refs/heads/${develop_ref}")"
