@@ -2630,7 +2630,7 @@ manager 的活是：每 tick 采样 AC20 的五条、维护 AC21-AC24 的取证�
 - [x] **AC50** 主检出分支切换可验收，在飞任务不断裂（2026-08-13 12:0xZ 达成：判据1 `develop..integration=0` · 判据2 五棵 worktree 逐条枚举无携带非自己的提交 · 判据3 `HEAD=develop` · 判据5 `gap-ac51`/`gap-ac53` 两棵新树 fork 自 develop 实证 + r140/r141 双绿 + `981eac34` fan-in；**判据4 已移交 AC48**）
 - [x] **AC51** 断言面拆分：文档检查在提交那一刻跑（2026-08-13 10:5xZ **3/3 达成**：判据1 `test.sh:433` "absent from the scoped tier BY CONSTRUCTION" + merge 路径漏洞由 `4eb0fc35` 堵上；判据2 实测 2097ms vs 全量 437000ms＝208×；判据3 **真失败演示原样输出**——`Fix: add "<!-- reference-doc: … -->" to plugin/skills/init/SKILL.md, or fix the doc's path…`，确切字面量+目标文件+两条替代修法）
 - [ ] **AC52** 依赖任务串行化，fork 基线无例外
-- [ ] **AC53** 自选唤醒机件的结束条件不变式
+- [x] **AC53** 自选唤醒机件的结束条件不变式（2026-08-13 18:2xZ **4/4 达成**：判据1 落成**写入拒绝式**不变量 `inner-wakeup-heartbeat.ts:176/:296`（比 report-only 更强——在禁止状态下**写不进去**）· 判据2 五个字段全部在位（实测键名打印，**AC 原文「现状：全部缺席」已过期**）· 判据3 `.quay/inner-wakeup-heartbeat.jsonl` 追加式存在 · 判据4 `inner-wakeup-heartbeat.test.mjs:327` 逐字「the **7th-same-shape replay**: WRITER REFUSES (exit 1) an END heartbeat while dispatchable work waits」，19 pass 0 fail）
 
 ## AC42（结构）：验证不再发生在任何共享可变检出上
 
@@ -3111,8 +3111,17 @@ slot-refill   : should_refill=True  no_refill_reason=None
 
 2. **决策依据与决策结果同条记录**：心跳在**选定 `delaySeconds` 的那一刻**，
    必须把它据以决策的读数一并落盘：`slots_free` / `dispatchable_disjoint` / `pool` / `should_refill` / `no_refill_reason`。
-   **现状：这五个字段全部缺席**（实测键名 = `agentDispatches, agentLimit, blocked, budgetCritical, budgetHit,
-   delaySeconds, effectiveCap, reason, runIds, ts`）⇒ **记录在结构上无法区分「没货可派」与「有货不派」**（硬规则 ⑨）。
+   ~~**现状：这五个字段全部缺席**~~（旧实测键名 = `agentDispatches, agentLimit, blocked, budgetCritical, budgetHit,
+   delaySeconds, effectiveCap, reason, runIds, ts`）⇒ 当时**记录在结构上无法区分「没货可派」与「有货不派」**（硬规则 ⑨）。
+   **✅ 已达成（2026-08-13 18:2xZ 实测，先打印键名再取值）**：
+   `['agentDispatches','blocked','budgetHit','delaySeconds','dispatchable_disjoint','effectiveCap',
+   'no_refill_reason','pool','reason','runIds','should_refill','slots_free','ts']`
+   —— **五个字段（`should_refill`/`slots_free`/`dispatchable_disjoint`/`pool`/`no_refill_reason`）全部在位**，
+   且落盘值自洽：`should_refill=False · slots_free=0 · dispatchable_disjoint=6 · pool=6 ·
+   no_refill_reason="no free slots (in-flight 5 + closed-but-live 0 >= cap 5)"`。
+   **⚠️ 本行的「现状」句在达成后仍留在原地约数小时 ——「现状」和判据一样会比它的前提活得更久**：
+   照它字面读会报一个**已经关闭的缺口**。**A20 第①步（先核判据再看实现）今天第三次生效，这次方向相反：
+   它挡住的不是"把做对的验成不合格"，而是"把已修好的报成还没修"。**
    **事后重算不算数**——池子会变，重算得到的是另一个时刻的量（硬规则 ④）。
 
 3. **可回看**：心跳改**追加式**（jsonl），不再是会被下一轮整体覆盖的单槽快照。
