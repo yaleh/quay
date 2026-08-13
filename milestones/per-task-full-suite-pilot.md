@@ -109,3 +109,70 @@
 - 运行器：`plugin/scripts/full-suite-runner.ts --root <wt>`；state/log 写入各 run 独立 /tmp 路径，不污染主 checkout gate 信号。
 - 一次性测量环境准备：`worktree-include.sh` provision 各被测 worktree（非生产脚本改动）；测量后已清理 2 个 detached 测量 worktree。
 - **实害记录（本试点对生产的影响）**：run 2 的 3 个并发启动使 round 150 的全局轮被 single-flight lock 饿死并 abort（0 tests）。此影响本身就是 AC3 未成立的证据；恢复由下一轮全局轮自动完成。
+
+## 7. 2-slot 并发重测（gap-spec11-stage2-retest-with-concurrency，2026-08-13 15:17–15:29）
+
+> 任务：`gap-spec11-stage2-retest-with-concurrency`（status ready）。2-slot 锁已落地（91327d37，QUAY_MAX_CONCURRENT_SUITES 进代码 + 相预算 H÷S + 资源闸按槽记账），本段按任务 AC/DoD 重测试点 AC3b 门：per-task 全量在 =2 并发下的端到端吞吐 + 前置自检。模式 (b) 如实记账继承试点（人 2026-08-13 裁定）。
+
+### 测量设置
+- 被测 commit：**7486cc87**（任务 worktree HEAD，含 2-slot 锁 91327d37）
+- 并发度：`QUAY_MAX_CONCURRENT_SUITES`=2（旋钮名非字面量；实现 = 两把共享锁文件 `<git-common-dir>/full-suite.lock.0/.1`，git-common-dir 指向主仓库 .git ⇒ 跨全部 worktree 争同一组锁）
+- 相预算：hostParallelism(16) ÷ 2 = **8 lanes/suite**（实测锁日志 `concurrent_suite_slots=2 per_suite_lane_budget=8`）
+- 2 个 scope=worktree 全量：**Suite A（任务 wt gap-spec11-stage2-retest-with-concurrency）** + **Suite B（measure-spec11-stage2-b 新建 wt）**，各 8 lanes，同 commit
+- 运行器：`plugin/scripts/full-suite-runner.ts --root <wt> --state-dir /tmp/spec11-retest/{a,b}`（state/log 独立 /tmp，不污染主 gate 信号）
+- 前置：两 wt 均 `worktree-include.sh` provision（config.yml + vendor dist）+ node_modules 符号链接
+
+### AC1 前置自检（2 scope=worktree 轮同时 running）—— ✅ 通过
+
+| suite | worktree | startedAt | state | scope | laneCount | 2-slot 锁槽位 |
+|---|---|---|---|---|---|---|
+| A | 任务 wt | 15:17:40 | running | worktree | 8 | **slot .0**（full-suite.lock.0） |
+| B | measure-spec11-stage2-b | 15:17:43 | running | worktree | 8 | **slot .1**（full-suite.lock.1） |
+
+- watcher 15:18:22 确认「both A and B running」；锁日志逐条确认 A 持 `.0`、B 持 `.1`（**不同槽位，非排队**）。
+- **⇒ AC1 前置自检通过**：读数窗口内确有 2 个 scope=worktree 轮同时 running、各持独立槽位。**1-slot 锁时代的结构性阻塞（试点 run2：并发启动被串行化 + 落败 abort）已被 2-slot 锁移除。**
+
+### 结果
+
+| suite | worktree | 结果 | durationMs | 测试数 | 说明 |
+|---|---|---|---|---|---|
+| A | 任务 wt | **green** | 661422（11.0 min） | 4336 / 0 fail / 0 cancelled | 8 lanes |
+| B | measure-spec11-stage2-b | **green** | 663325（11.1 min） | 4336 / 0 fail / 0 cancelled | 8 lanes |
+
+两套同 commit（7486cc87）全量 **4336 tests / 0 fail / 0 cancelled** 全绿 —— 与主轮参考 4336 一致。低并发阶段 main_phase_ms≈273s、lowconc_phase_ms≈132s（8 lanes 的预期墙钟）。
+
+### 全局轮干扰（模式 b 如实记账）
+
+- **round 164 于 15:18:56 启动（runner），被 2-slot 锁阻塞等待 ~10 min**（15:19:23 state=flip 至 running，log 只见锁横幅；两槽均被我的 suite A/B 持有）。
+- **round 164 于 ~15:28:42 在 suite A 释放 slot .0 后取得槽位并开跑 —— 延迟未 abort**（log 确认 `acquired full-suite single-flight slot 0`）。
+- **与试点对照**：试点 round 150 被 1-slot 锁**饿死并 abort（0 tests）**；本次 round 164 在 2-slot 锁下**等待后正常开跑**。2-slot 锁的 fail-closed（600s 等待，非 3-GO）按设计工作：第 3 套件等槽、槽空即进。
+- 恢复：round 164 后续正常完成（下一轮观测）。
+
+### 吞吐（窗口 15:17:40 → 15:28:47，11.1 min = 0.185 h）
+
+| 量 | 读数 |
+|---|---|
+| 窗口内 develop 提交 | 2（全为 manager 例程提交，非任务 fan-in） |
+| 窗口内 A6 fan-in（合入 develop 任务数） | **0** ⇒ 0/h |
+| 同窗基线（fresh 重算，非历史常量） | last 2h **2.50/h** · last 4h **4.25/h** · last 6h **4.83/h** · last 8h **3.62/h**（A6 fan-in 率） |
+| 对照 + 单向有效性 | **0 < 基线 ⇒ 未定（含干扰）**，不进 AC4 判定 |
+| 备注 | 窗口前 15 min（15:03–15:17）develop 也 0 fan-in —— 管道处于低活动期，0 是外生时序非测量致因 |
+
+### 结论（AC 状态）
+
+| AC | 状态 | 证据 |
+|---|---|---|
+| AC1 | ✅ **通过** | 2 个 scope=worktree 轮同时 running、各持独立槽位（15:17:40/43 + watcher 15:18:22 + 锁日志 slot .0/.1） |
+| AC2 | ✅ **读数贴出** | 并发 per-task 全量吞吐读数见上表（0/h vs 基线 2.50–4.83/h） |
+| AC3 | ✅ **单向有效性应用** | 0 < 基线 ⇒ **未定（含干扰）**（不构成成立方向证据，也不构成不成立） |
+| AC4 | ✅ **路由正确** | 未定 ⇒ **保持 OPEN**（不停全局轮，AC43/AC45 不标 cancelled）；本子代理无停轮/标 cancelled 权限，路由作为建议记录 |
+| AC5 | ✅ **达成** | 2 套全量 4336/0/0 全绿（既有测试全绿）；`--for-task gap-spec11-stage2-retest-with-concurrency --allow-thin` scoped 门 exit 0 |
+
+**成立判断：AC3b 吞吐门【未定（含干扰）】**。
+- **机制维度成立**：AC1 前置自检通过 + 2 套 scope=worktree 全量并发全绿 —— **1-slot 锁的结构性并发阻塞已被 2-slot 锁移除**（试点 run2 的串行化+abort 不再发生；round 164 第 3 套件等待后正常开跑而非被 abort）。
+- **端到端吞吐门未定（含干扰）**：窗口 0 A6 fan-in < 基线 2.50–4.83/h；且窗口前管道已 0 fan-in 15 min —— 无法区分「方案本身」与「管道低活动期」。短窗口（11 min）+ 低活动期是该读数噪声的来源，非并发测量的否定。
+- **⇒ 停全局轮的前提（AC3b 成立）未达成**；机制证据（AC1+2 全绿）是成立方向的强证据，需在管道活跃期/静默窗口（(a) 模式）重测吞吐以定案。
+
+## 5b. AC43/AC45 处置建议（重测后）
+
+**保持 OPEN（不标 cancelled）**：AC3b 吞吐门未定（含干扰）⇒ 停跑全局轮前提未达成 ⇒ AC43（套件无 VCS 知识）/AC45（记录 per-task 化）继续存在。**机制层面已获强证据**：per-task 全量并发（2 套同时跑）结构上可行且全绿 —— AC43/AC45 的取消只差吞吐门的定量确认（需管道活跃期/静默窗口重测）。
