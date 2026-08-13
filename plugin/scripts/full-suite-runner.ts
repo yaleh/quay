@@ -285,6 +285,25 @@ export interface SuiteState {
    * states (the runner omits the field when it cannot resolve a HEAD).
    */
   verifiedCommit?: string;
+  /**
+   * gap-concurrent-write-mutable-tree-false-positive-red — the TESTED CHECKOUT's HEAD at TERMINAL
+   * time (same resolution as verifiedCommit — `git rev-parse HEAD` — read AFTER the suite child
+   * closes, just before the verdict write). Together with `verifiedCommit` (the START head) it
+   * expresses whether the tree was MUTATED MID-ROUND: when the two differ, concurrent writers
+   * committed to the shared tree while the suite ran on it — a red in that round is a
+   * CONCURRENT-WRITE FALSE-POSITIVE CANDIDATE (round-53 class: 4 writers committed mid-round, the
+   * SAME quay-init-loop-core test passed green the next clean window). An ANNOTATION, never itself
+   * a red/green criterion (AC1 — 非红判据). Absent on non-git hermetic roots (like verifiedCommit).
+   */
+  terminalCommit?: string;
+  /**
+   * gap-concurrent-write-mutable-tree-false-positive-red — true when the tree was MUTATED MID-ROUND
+   * (verifiedCommit !== terminalCommit). Consumers attribute any red carrying this flag as a
+   * concurrent-write FALSE-POSITIVE CANDIDATE (AC2), NOT a proven code failure on a pinned tree.
+   * Present whenever verifiedCommit is (git roots); false on a pinned (unchanged) tree — the
+   * explicit negative control (AC3). Absent on non-git hermetic roots.
+   */
+  treeMutatedMidRound?: boolean;
 }
 
 // AC2 — failure markers that flip state to red the MOMENT they appear on the suite's
@@ -963,6 +982,24 @@ export function readVerifiedCommit(root: string): string | undefined {
 }
 
 /**
+ * gap-concurrent-write-mutable-tree-false-positive-red — read the tested checkout's CURRENT HEAD and
+ * compare with the round's START head (verifiedCommit): whether the tree has been MUTATED since the
+ * round started (concurrent writers committed to the shared tree while the suite ran on it). Used BOTH
+ * at EARLY-red time (provisional — the tree may keep moving; memoized per run) and at the TERMINAL
+ * verdict (definitive — the full-window comparison, start HEAD vs terminal HEAD, AC1). Git roots only;
+ * a non-git hermetic root yields `treeMutatedMidRound: false` (never fabricates a commit).
+ */
+export function readTreeMutation(
+  root: string,
+  startHead: string | undefined,
+): { terminalCommit: string | undefined; treeMutatedMidRound: boolean } {
+  const terminalCommit = readVerifiedCommit(root);
+  const treeMutatedMidRound =
+    startHead !== undefined && terminalCommit !== undefined && startHead !== terminalCommit;
+  return { terminalCommit, treeMutatedMidRound };
+}
+
+/**
  * gap-worktree-scoped-runs-consume-resources-but-produce-no-signal AC1/AC2 — whether a checkout is a
  * LINKED git worktree (git-dir != git-common-dir). The main repo is NOT a worktree; a temp non-git
  * dir (a hermetic test root) is NOT a worktree. Used to (a) tag the suite state with `scope` so
@@ -1518,6 +1555,20 @@ export async function run(argv: string[]): Promise<number> {
   const redFailures: SuiteFailure[] = [];
   let pendingFailure: SuiteFailure | null = null;
   let detailRemaining = 0;
+  // gap-concurrent-write-mutable-tree-false-positive-red — PROVISIONAL tree-mutation annotation at
+  // EARLY-red time (memoized): the FIRST red write fires the SUITE-RED event, so it must carry the
+  // concurrent-write FP-candidate annotation for the event to show it (the terminal write later
+  // carries the definitive full-window comparison). Computed ONCE (a `git rev-parse` per failure
+  // line would be wasteful — up to MAX_RECORDED_FAILURES writes); HEAD only advances within a round,
+  // so the memo never goes stale. A non-git hermetic root yields {} (no annotation, byte-stable).
+  let redMutation: { terminalCommit?: string; treeMutatedMidRound?: boolean } | null = null;
+  const readRedMutation = (): { terminalCommit?: string; treeMutatedMidRound?: boolean } => {
+    if (redMutation === null) {
+      const m = readTreeMutation(root, verifiedCommit);
+      redMutation = verifiedCommit !== undefined && m.terminalCommit !== undefined ? m : {};
+    }
+    return redMutation;
+  };
   // AC1 (gap-quality-criteria-are-point-in-time-no-trend-criteria) — per-run metric recording.
   // Parsed from the suite's TAP summary (`# tests N`, `# cancelled N`) so the verification-round
   // record carries tests/cancelled/perTestMs — the input of the trend criterion (trend-check.ts).
@@ -1674,7 +1725,7 @@ export async function run(argv: string[]): Promise<number> {
           const idx = redFailures.indexOf(pendingFailure);
           if (idx !== -1) redFailures[idx] = enriched;
           // file found — re-write state so the SUITE-RED event carries it (idempotent).
-          writeSuiteState({ state: "red", reason: "failed", ...base, finishedAt: null, durationMs: null, failures: redFailures });
+          writeSuiteState({ state: "red", reason: "failed", ...base, finishedAt: null, durationMs: null, failures: redFailures, ...readRedMutation() });
         }
       }
       if (detailRemaining <= 0) pendingFailure = null;
@@ -1752,6 +1803,10 @@ export async function run(argv: string[]): Promise<number> {
         finishedAt: null,
         durationMs: null,
         failures: redFailures,
+        // gap-concurrent-write-mutable-tree-false-positive-red — provisional FP-candidate annotation
+        // (memoized): if the tree was ALREADY mutated when the failure flipped red, the SUITE-RED
+        // event carries concurrentWrite=true (the terminal write later has the definitive comparison).
+        ...readRedMutation(),
       });
       process.stderr.write(
         `full-suite-runner: FAILURE detected on stream -> state=red reason=failed (run still in progress)\n  ${line}\n`
@@ -1775,6 +1830,9 @@ export async function run(argv: string[]): Promise<number> {
         ...base,
         finishedAt: null,
         durationMs: null,
+        // gap-concurrent-write-mutable-tree-false-positive-red — provisional FP-candidate annotation
+        // (memoized), same as the test-failure early-red write.
+        ...readRedMutation(),
         staticCheck: {
           violations: staticCheckViolations,
           taskCount: staticCheckTaskCount,
@@ -1840,6 +1898,16 @@ export async function run(argv: string[]): Promise<number> {
 
   // Flush the log stream before writing the final verdict.
   await new Promise<void>((resolve) => logStream.end(resolve));
+
+  // gap-concurrent-write-mutable-tree-false-positive-red — the DEFINITIVE start-vs-terminal HEAD
+  // comparison (AC1): read the tested checkout's HEAD at TERMINAL time (the suite child has closed;
+  // the verdict is about to be written) and compare with the START head (verifiedCommit). start HEAD
+  // ≠ terminal HEAD ⇒ concurrent writers committed to the shared tree while the suite ran on it —
+  // the round's tree was MUTATED MID-ROUND (round-53 class: 4 writers committed mid-round; the SAME
+  // quay-init-loop-core test passed green the next clean window). Any red in such a round is a
+  // CONCURRENT-WRITE FALSE-POSITIVE CANDIDATE (AC2), not a proven code failure on a pinned tree.
+  // A non-git hermetic root omits both fields (the annotation never fabricates a commit).
+  const { terminalCommit, treeMutatedMidRound } = readTreeMutation(root, verifiedCommit);
 
   const finishedAtIso = new Date().toISOString();
   const durationMs = Date.parse(finishedAtIso) - Date.parse(startedAt);
@@ -1972,7 +2040,17 @@ export async function run(argv: string[]): Promise<number> {
     ];
   }
   const finalState: SuiteState = green
-    ? { state: "green", ...base, finishedAt, durationMs }
+    ? {
+        state: "green",
+        ...base,
+        finishedAt,
+        durationMs,
+        // gap-concurrent-write-mutable-tree-false-positive-red — carry the tree-mutation annotation
+        // on green too: a green round with a mid-round-mutated tree is a weaker green (the suite did
+        // not run on a pinned checkout), and the explicit field keeps the negative control visible
+        // (treeMutatedMidRound: false on a clean window). Git roots only (verifiedCommit defined).
+        ...(verifiedCommit && terminalCommit ? { terminalCommit, treeMutatedMidRound } : {}),
+      }
     : {
         state: "red",
         reason,
@@ -1981,6 +2059,11 @@ export async function run(argv: string[]): Promise<number> {
         durationMs,
         // carry the failure location(s) — the SUITE-RED event's failureLocation source
         ...(spawnError === null ? { failures: finalFailures } : {}),
+        // gap-concurrent-write-mutable-tree-false-positive-red — carry the tree-mutation annotation
+        // on red: start HEAD ≠ terminal HEAD ⇒ this red is a CONCURRENT-WRITE FALSE-POSITIVE
+        // CANDIDATE (round-53 class) — a signal, NOT a blanket round-discard (the failures are still
+        // recorded; the attribution is annotated). Git roots only.
+        ...(verifiedCommit && terminalCommit ? { terminalCommit, treeMutatedMidRound } : {}),
         ...(staticCheckDetected
           ? {
               staticCheck: {
@@ -2092,6 +2175,12 @@ export async function run(argv: string[]): Promise<number> {
     // gap-merge-green-snapshot-verified-commit-livelock AC2 — the verified commit this round tested
     // (same value the state carries). Absent on non-git hermetic roots.
     ...(verifiedCommit ? { commit: verifiedCommit } : {}),
+    // gap-concurrent-write-mutable-tree-false-positive-red — the tree-mutation annotation (start
+    // HEAD vs terminal HEAD) rides the round record so the historical round sequence is queryable
+    // for "was this red a concurrent-write FALSE-POSITIVE candidate" (round-53 class) WITHOUT
+    // re-deriving it — the same conditional as the state write (git roots only; the record never
+    // fabricates a commit).
+    ...(verifiedCommit && terminalCommit ? { treeMutatedMidRound, terminalCommit } : {}),
     // gap-suite-round-record-missing-failures-field AC2 — a RED round carries the SAME SuiteFailure
     // array the suite-state write carries (finalFailures — the redFailures/staticCheckFailures the
     // state already recorded), so verification-round.jsonl becomes a multi-round-queryable sequence

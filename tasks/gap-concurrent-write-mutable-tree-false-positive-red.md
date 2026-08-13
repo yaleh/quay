@@ -35,10 +35,10 @@ round 54 干净窗口（19:23:39-19:30:16 零提交）**同一测试绿（67s PA
 
 ## AC
 
-- [ ] AC1: 验证轮起跑/终态比对 HEAD，树被移动 ⇒ 明确标注（非红判据）
-- [ ] AC2: 红归因前查「窗口内提交」，并发写 ⇒ 标注假阳性候选
-- [ ] AC3: 负控制——round-53 类（同轮提交）被检出并标注
-- [ ] AC4: 既有测试全绿；`--for-task` scoped 门绿
+- [x] AC1: 验证轮起跑/终态比对 HEAD，树被移动 ⇒ 明确标注（非红判据）
+- [x] AC2: 红归因前查「窗口内提交」，并发写 ⇒ 标注假阳性候选
+- [x] AC3: 负控制——round-53 类（同轮提交）被检出并标注
+- [x] AC4: 既有测试全绿；`--for-task` scoped 门绿
 
 ## Definition of Done
 
@@ -51,3 +51,30 @@ round 54 干净窗口（19:23:39-19:30:16 零提交）**同一测试绿（67s PA
 - plugin/scripts/full-suite-runner.ts（起跑/终态 HEAD 比对）
 - plugin/scripts/suite-state-trigger.ts（红归因前查窗口提交）
 - tasks/gap-concurrent-write-mutable-tree-false-positive-red.md（自身）
+
+## Evidence
+
+**机制**（AC1/AC2/AC3，`--for-task gap-concurrent-write-mutable-tree-false-positive-red` 门绿，161 tests / 0 fail）：
+
+1. **`full-suite-runner.ts`（起跑/终态 HEAD 比对，AC1）**：起跑已记 `verifiedCommit`（start HEAD）；
+   终态写入前（suite child close 后、verdict write 前）再读一次 HEAD 得 `terminalCommit`，
+   比较得 `treeMutatedMidRound = verifiedCommit !== undefined && terminalCommit !== undefined &&
+   verifiedCommit !== terminalCommit`。两者一并写入 `full-suite-state.json`（red 与 green 都带，git root 上
+   恒在；非 git hermetic root 两字段皆缺 → AC1 exact-shape 测试 byte-stable）与 `verification-round.jsonl`
+   round record。**这是标注（非红判据）**——不改 verdict、不改 reason、不整轮作废。
+   另加 `readTreeMutation()` 辅助 + 早期红写（failure line / static-check / pendingFailure 重写）的
+   memoized 临时标注，使 SUITE-RED 事件在 common 路径（early-red test failure）上也能带 `concurrentWrite`。
+
+2. **`suite-state-trigger.ts`（红归因前查窗口提交，AC2）**：`isConcurrentWriteFalsePositiveCandidate(state)` —
+   `state?.state === "red" && state.treeMutatedMidRound === true` 时该红为并发写假阳性候选（round-53 类）。
+   SUITE-RED 事件在 `recordTransition` 里对带 `treeMutatedMidRound` 的红加 `concurrentWrite: true`
+   （factual projection，非派发决策）；`formatEventLine` 的 Monitor 流也打 `concurrentWrite=true`。
+
+3. **负控制（AC3）**：`full-suite-runner.test.mjs` 复现「同轮提交 ⇒ 标假阳性」——fake suite 起跑后 `sleep 1`
+   再 `git commit --allow-empty`（模拟 round-53 的并发写者），suite 红/绿都验证
+   `state.treeMutatedMidRound === true` + round record 带 `terminalCommit`；干净窗口（零提交）⇒
+   `treeMutatedMidRound === false`。`suite-state-trigger.test.mjs` 验证纯函数 + SUITE-RED 事件标注 +
+   无标注负控制。
+
+**scoped 输出**（`scripts/test.sh --for-task gap-concurrent-write-mutable-tree-false-positive-red`）：
+`ℹ tests 161 / ℹ pass 161 / ℹ fail 0 / ℹ cancelled 0 / duration_ms 86694`。

@@ -64,6 +64,9 @@ import {
   readLastGreenCommit,
   checkVerificationStartGates,
   resolveVerifyTarget,
+  // gap-concurrent-write-mutable-tree-false-positive-red — the red-attribution check (concurrent
+  // writes in the window ⇒ FALSE-POSITIVE candidate)
+  isConcurrentWriteFalsePositiveCandidate,
 } from "../scripts/suite-state-trigger.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -250,6 +253,78 @@ test("AC2 — routeRed routes by reason: failed/legacy→red-window-triage, abor
   assert.equal(routeRed({ state: "green" }), "proceed", "green proceeds");
   assert.equal(routeRed({ state: "running" }), "proceed", "running proceeds");
   assert.equal(routeRed(null), "proceed", "absent state file proceeds");
+});
+
+// ── gap-concurrent-write-mutable-tree-false-positive-red: AC2 (red-attribution checks window) ───────
+// The suite runs a MUTATING working tree — any red must be checked for mid-round concurrent commits
+// BEFORE attribution. The runner marks `treeMutatedMidRound` on the state; the trigger exposes the
+// check (`isConcurrentWriteFalsePositiveCandidate`) and carries the annotation on the SUITE-RED event
+// (`concurrentWrite: true`). The dispatch decision is NOT changed — the annotation is a signal, not a
+// blanket round-discard.
+
+test("AC2 unit — isConcurrentWriteFalsePositiveCandidate is pure: red + treeMutatedMidRound ⇒ FP candidate; otherwise not", () => {
+  // round-53 class: red + the tree was mutated mid-round ⇒ FALSE-POSITIVE candidate
+  assert.equal(
+    isConcurrentWriteFalsePositiveCandidate({ state: "red", reason: "failed", treeMutatedMidRound: true }),
+    true,
+    "red + treeMutatedMidRound ⇒ concurrent-write FALSE-POSITIVE candidate",
+  );
+  // a red on a pinned tree (treeMutatedMidRound false / absent) is NOT an FP candidate — attribution stands
+  assert.equal(
+    isConcurrentWriteFalsePositiveCandidate({ state: "red", reason: "failed", treeMutatedMidRound: false }),
+    false,
+    "red on a pinned tree is NOT an FP candidate (negative control)",
+  );
+  assert.equal(
+    isConcurrentWriteFalsePositiveCandidate({ state: "red", reason: "failed" }),
+    false,
+    "legacy red (no treeMutatedMidRound) is NOT an FP candidate — existing attribution stands",
+  );
+  assert.equal(
+    isConcurrentWriteFalsePositiveCandidate({ state: "green", treeMutatedMidRound: true }),
+    false,
+    "green is never an FP candidate (the annotation is a red-attribution signal)",
+  );
+  assert.equal(isConcurrentWriteFalsePositiveCandidate(null), false, "absent state is not an FP candidate");
+});
+
+test("AC2 — a red state carrying treeMutatedMidRound=true fires SUITE-RED with concurrentWrite=true (round-53 class annotated)", () => {
+  const root = tmpRoot();
+  try {
+    writeSuiteState(
+      root,
+      state({
+        state: "red",
+        reason: "failed",
+        finishedAt: null,
+        treeMutatedMidRound: true,
+        terminalCommit: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      }),
+    );
+    const res = runOnce(root);
+    const redEv = res.events.find((e) => e.event === "SUITE-RED");
+    assert.ok(redEv, "SUITE-RED fires on the red flip");
+    assert.equal(redEv.concurrentWrite, true, "the SUITE-RED event carries concurrentWrite=true (FALSE-POSITIVE candidate)");
+    assert.equal(res.stopSignal, true, "the stop-dispatch signal is UNCHANGED (the annotation is a signal, not a discard)");
+    // durable events log carries the annotation too
+    const log = readSuiteEvents(root);
+    assert.equal(log.some((e) => e.event === "SUITE-RED" && e.concurrentWrite === true), true, "events.jsonl records concurrentWrite=true");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC2 negative control — a red WITHOUT treeMutatedMidRound fires SUITE-RED with NO concurrentWrite flag (pinned tree)", () => {
+  const root = tmpRoot();
+  try {
+    writeSuiteState(root, state({ state: "red", reason: "failed", finishedAt: null }));
+    const res = runOnce(root);
+    const redEv = res.events.find((e) => e.event === "SUITE-RED");
+    assert.ok(redEv, "SUITE-RED fires on the red flip");
+    assert.equal(redEv.concurrentWrite, undefined, "no concurrentWrite flag on a pinned-tree red (negative control)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("AC5 — runOnce reports stopSignal=false for red+aborted and true for red+failed", () => {

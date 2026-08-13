@@ -471,6 +471,109 @@ test("AC2 — the worktree state mirror carries the SAME verifiedCommit (SYNC BR
   }
 });
 
+// ── gap-concurrent-write-mutable-tree-false-positive-red: AC1/AC3 (start vs terminal HEAD compare) ──
+// The suite runs a MUTATING working tree, not a pinned checkout — a red in a round where concurrent
+// writers committed mid-round is a FALSE-POSITIVE CANDIDATE (round-53 class: 4 writers committed
+// mid-round, the SAME quay-init-loop-core test passed green the next clean window). The runner reads
+// HEAD at START (verifiedCommit) AND at TERMINAL; a difference ⇒ treeMutatedMidRound=true on the
+// state + round record (the annotation, not a red/green criterion).
+
+test("AC1/AC3 — a git-repo round where a CONCURRENT commit lands MID-ROUND is marked treeMutatedMidRound=true (round-53 class detected)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-mut-"));
+  execSync("git init -q", { cwd: root });
+  execSync("git config user.name fsr-test", { cwd: root });
+  execSync("git config user.email fsr@example.com", { cwd: root });
+  fs.writeFileSync(path.join(root, "a.txt"), "a\n", "utf8");
+  execSync("git add -A && git commit -q -m base", { cwd: root });
+  const startHead = execSync("git rev-parse HEAD", { cwd: root, encoding: "utf8" }).trim();
+  // The fake suite: after a short delay (the suite is "running"), a CONCURRENT WRITER commits to the
+  // shared tree (round-53 class) — then the suite itself passes. The tree was MUTATED under the run.
+  const { f, dir } = fakeSuite(
+    'sleep 1\n' +
+      'git commit --allow-empty -q -m "concurrent writer mid-round"\n' +
+      'echo "# tests 1"\necho "# pass 1"\necho "# fail 0"\necho "# cancelled 0"\nexit 0',
+  );
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, "runner exits 0 on green");
+    const terminalHead = execSync("git rev-parse HEAD", { cwd: root, encoding: "utf8" }).trim();
+    assert.notEqual(terminalHead, startHead, "the concurrent commit landed mid-round");
+    const s = readState(root);
+    assert.equal(s.state, "green", "the annotation never flips green/red (AC1 — 非红判据)");
+    assert.equal(s.verifiedCommit, startHead, "state carries the START head");
+    assert.equal(s.terminalCommit, terminalHead, "state carries the TERMINAL head");
+    assert.equal(s.treeMutatedMidRound, true, "start HEAD ≠ terminal HEAD ⇒ tree mutated mid-round (round-53 class detected)");
+    const rec = lastRoundRecord(root);
+    assert.equal(rec.treeMutatedMidRound, true, "round record carries treeMutatedMidRound");
+    assert.equal(rec.terminalCommit, terminalHead, "round record carries the terminal commit");
+    assert.equal(rec.commit, startHead, "round record still carries the verified (start) commit");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC1/AC3 — a RED round with a mid-round concurrent commit carries treeMutatedMidRound=true (the false-positive-red signal on red)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-mutred-"));
+  execSync("git init -q", { cwd: root });
+  execSync("git config user.name fsr-test", { cwd: root });
+  execSync("git config user.email fsr@example.com", { cwd: root });
+  fs.writeFileSync(path.join(root, "a.txt"), "a\n", "utf8");
+  execSync("git add -A && git commit -q -m base", { cwd: root });
+  const startHead = execSync("git rev-parse HEAD", { cwd: root, encoding: "utf8" }).trim();
+  // A concurrent writer commits mid-round AND the suite ALSO fails — the red carries the
+  // concurrent-write FP-candidate annotation (a signal, not a blanket discard: reason stays failed).
+  const { f, dir } = fakeSuite(
+    'sleep 1\n' +
+      'git commit --allow-empty -q -m "concurrent writer mid-round"\n' +
+      'echo "not ok 1 - boom"\nexit 1',
+  );
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    assert.equal(code, 1, "runner exits 1 on red");
+    const terminalHead = execSync("git rev-parse HEAD", { cwd: root, encoding: "utf8" }).trim();
+    assert.notEqual(terminalHead, startHead, "the concurrent commit landed mid-round");
+    const s = readState(root);
+    assert.equal(s.state, "red", "the red verdict is unchanged (the annotation does not discard the round)");
+    assert.equal(s.reason, "failed", "a real failure line keeps reason=failed (the stop-dispatch signal is not downgraded)");
+    assert.equal(s.treeMutatedMidRound, true, "red carries treeMutatedMidRound=true (concurrent-write FALSE-POSITIVE CANDIDATE)");
+    assert.equal(s.terminalCommit, terminalHead, "red carries the terminal head");
+    const rec = lastRoundRecord(root);
+    assert.equal(rec.treeMutatedMidRound, true, "round record carries the FP-candidate annotation");
+    assert.equal(rec.reason, "failed", "round-record reason unchanged (signal, not discard)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC3 negative control — a git-repo round with NO mid-round commit is treeMutatedMidRound=false (pinned tree, clean window)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-nomut-"));
+  execSync("git init -q", { cwd: root });
+  execSync("git config user.name fsr-test", { cwd: root });
+  execSync("git config user.email fsr@example.com", { cwd: root });
+  fs.writeFileSync(path.join(root, "a.txt"), "a\n", "utf8");
+  execSync("git add -A && git commit -q -m base", { cwd: root });
+  const head = execSync("git rev-parse HEAD", { cwd: root, encoding: "utf8" }).trim();
+  const { f, dir } = fakeSuite(GREEN_SUITE);
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, "runner exits 0 on green");
+    const s = readState(root);
+    assert.equal(s.treeMutatedMidRound, false, "clean window (zero commits) ⇒ tree NOT mutated mid-round (negative control)");
+    assert.equal(s.terminalCommit, head, "terminal HEAD == start HEAD on a pinned-tree round");
+    assert.equal(s.verifiedCommit, head, "start HEAD == terminal HEAD == the same commit");
+    const rec = lastRoundRecord(root);
+    assert.equal(rec.treeMutatedMidRound, false, "round record carries treeMutatedMidRound=false on a pinned round");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // ── gap-suite-state-split-across-worktree-and-gate: AC1/AC2/AC3 (--state-dir split) ────────────────
 
 test("AC1/AC2 — --state-dir decouples the state/log write location from --root (the tested checkout)", async () => {
