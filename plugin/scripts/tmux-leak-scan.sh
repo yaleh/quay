@@ -43,6 +43,18 @@ run_root=""
 if [ -n "${QUAY_RUN_ID:-}" ]; then
   run_root="/tmp/quay-run-${QUAY_RUN_ID}"
 fi
+# --scope <dir> (gap-leak-residue-per-run-namespace-isolation 2026-08-13): override the scan scope
+# to a TEST-LOCAL subroot. The default namespaced scope (/tmp/quay-run-<runId>/) is SHARED by every
+# test in the suite, so leak-simulation tests see each other's fixtures as residue (round 131:
+# tmux-leak-scan R2/R3 × test-isolation DELTA cross-flagged). A test passes --scope
+# /tmp/quay-run-<runId>/leaktest-<pid>/ so the scan covers ONLY its own simulated leakage.
+scope_dir=""
+case "${1:-}" in
+  --scope) scope_dir="${2:-}"; shift 2 ;;
+esac
+if [ -n "${scope_dir}" ]; then
+  run_root="${scope_dir}"
+fi
 # Human-readable scan scope for messages (the run subtree when namespaced, else the prefix list).
 scan_desc="${run_root}"
 [ -n "${scan_desc}" ] || scan_desc="${prefixes}"
