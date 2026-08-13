@@ -1,7 +1,7 @@
 ---
 id: gap-leak-scan-temp-off-cert-path-expiry
 title: leak-scan R3/DELTA 临时移出认证路径——到期放回（移除源修复后）
-status: todo
+status: done
 labels:
   - gap
   - mechanism
@@ -58,3 +58,8 @@ AC5/DELTA 的「genuine-leak dir 在 reap-wait bound 内被移除」断言在**�
 - plugin/test/tmux-leak-scan.test.mjs（@test-group engine→governance + TEMP-OFF-CERT-PATH）
 - plugin/test/test-isolation-check.test.mjs（同上）
 - tasks/gap-leak-scan-temp-off-cert-path-expiry.md（自身——到期）
+
+**到期达成（2026-08-13 round 140 绿证，已放回 engine）**：Fix A（fixture 移出 sweep 面，
+`os.tmpdir()/leakscan-fixture-*`）由 round 140 green（failures=0）实证——R3/DELTA 不再被
+sweepRunNamespace 清。到期条件「fixture 移出 sweep 清扫面」达成 ⇒ 两文件放回 `@test-group engine`
++ 删 self-skip block。本任务 done。round 141 验证放回后 R3/DELTA 不红。
