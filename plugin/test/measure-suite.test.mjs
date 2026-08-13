@@ -180,3 +180,57 @@ test("serial (cc=1) does NOT apply the split criterion (AC3 exception)", () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// gap-reduce-sync-spawn-floor-suite-slowdown: the reporter gained an OPT-IN
+// execve/process-spawn counter (QUAY_TEST_EXECVE_COUNT=1) — the suite's
+// biggest time cost was spawn count × per-process-start floor, and the
+// verification anchor is a before/after suite compared on (execve 总数,
+// 各相墙钟). These two tests pin the opt-in contract: the __EXECVE__ line is
+// emitted with a real (>= worker + children) count when enabled, and absent
+// (zero overhead) when not.
+test("reporter counts process spawns when QUAY_TEST_EXECVE_COUNT=1 (execve proxy)", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "measure-suite-execve-"));
+  try {
+    // A test file that spawns two long-lived (2.5s) node children via spawnSync.
+    // The children stay alive across many 100ms reporter polls, so the /proc
+    // watcher reliably observes them. Count is a lower bound: the file's own
+    // worker process + its two spawned children = at least 3 distinct pids.
+    const spawnerFile = path.join(dir, "spawner.test.mjs");
+    writeFileSync(
+      spawnerFile,
+      `import { test } from "node:test";\n` +
+        `import { spawnSync } from "node:child_process";\n` +
+        `test("spawns long-lived children", () => {\n` +
+        `  spawnSync(process.execPath, ["-e", "setTimeout(()=>{}, 2500)"], { stdio: "ignore" });\n` +
+        `  spawnSync(process.execPath, ["-e", "setTimeout(()=>{}, 2500)"], { stdio: "ignore" });\n` +
+        `});\n`
+    );
+    const env = { ...process.env, QUAY_TEST_EXECVE_COUNT: "1" };
+    delete env.NODE_TEST_CONTEXT;
+    const res = spawnSync(
+      "node",
+      ["--test", "--test-concurrency=8", `--test-reporter=${reporterPath}`, "--test-reporter-destination=stderr", spawnerFile],
+      { encoding: "utf8", env }
+    );
+    assert.equal(res.status, 0, `suite should pass; stderr tail: ${res.stderr.slice(-300)}`);
+    const m = res.stderr.match(/^__EXECVE__ total=(\d+)$/m);
+    assert.ok(m, `__EXECVE__ line must be emitted when QUAY_TEST_EXECVE_COUNT=1:\n${res.stderr}`);
+    const total = Number(m[1]);
+    assert.ok(total >= 3, `__EXECVE__ total (${total}) should count the worker + its 2 spawned children`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("reporter does NOT emit __EXECVE__ when QUAY_TEST_EXECVE_COUNT is unset (opt-in, zero overhead default)", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "measure-suite-execve-off-"));
+  try {
+    const f = path.join(dir, "plain.test.mjs");
+    writeFileSync(f, `import { test } from "node:test";\ntest("x", () => {});\n`);
+    const res = runWithReporter([f]); // runWithReporter does NOT set the env
+    assert.equal(res.status, 0, `suite should pass; stderr tail: ${res.stderr.slice(-300)}`);
+    assert.doesNotMatch(res.stderr, /^__EXECVE__/m, "execve line must be absent by default (zero overhead)");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

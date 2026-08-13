@@ -19,35 +19,28 @@
 
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { QUAY_VERSION } from "../src/version.ts";
-import { parseFlags, resolveJsonFlag } from "../src/cli/shared.ts";
+// gap-reduce-sync-spawn-floor-suite-slowdown: parseFlags/resolveJsonFlag come
+// from the LIGHT ./cli/flags.ts (NOT ./cli/shared.ts), so the eager pre-dispatch
+// plumbing no longer drags in the provider machinery (config/provider-client/
+// provider-env/gate-config-loader) that cli/shared.ts imports — the per-spawn
+// floor for `--version`/`--help` and every verb drops with it.
+import { parseFlags, resolveJsonFlag } from "../src/cli/flags.ts";
 import { printHelp } from "../src/cli/help.ts";
-// Command handlers — one module per verb family, migrated verbatim from this
-// dispatch body (each is import-callable directly, zero process derivation).
-import { handleAdr } from "../src/cli/adr.ts";
-import { handleTaskList } from "../src/cli/task-list.ts";
-import { handleTaskView } from "../src/cli/task-view.ts";
-import { handleTaskCreate } from "../src/cli/task-create.ts";
-import { handleTaskEdit } from "../src/cli/task-edit.ts";
-import { handleTaskCheck } from "../src/cli/task-check.ts";
-import { handleActionList, handleActionRun } from "../src/cli/action.ts";
-import { handleServe } from "../src/cli/serve.ts";
-import { handleMcp } from "../src/cli/mcp.ts";
-import { handleInit } from "../src/cli/init.ts";
-import { handleConfigValidate } from "../src/cli/config.ts";
-import { handleGate } from "../src/cli/gate.ts";
-import { handleGateLog } from "../src/cli/gate-log.ts";
-import {
-  handleComplete,
-  handleAdjudicate,
-  handlePromote,
-  handleRetreat,
-} from "../src/cli/lifecycle.ts";
-import { handleRun } from "../src/cli/run.ts";
-import { handleMigrate } from "../src/cli/migrate.ts";
-import { handleManager } from "../src/cli/manager.ts";
 // Pure-helper re-exports — cli.test.mjs block27 import-calls these from
-// ../bin/quay.ts (zero-coverage pure-helper tests, AC2).
-export { parseFlags, resolveJsonFlag, parseVerbless, resolvePageSize, relativeTimeCli, stripHeadings } from "../src/cli/shared.ts";
+// ../bin/quay.ts (zero-coverage pure-helper tests, AC2). Re-exported from
+// flags.ts (the light module) so the re-export never pulls the provider graph.
+export { parseFlags, resolveJsonFlag, parseVerbless, resolvePageSize, relativeTimeCli, stripHeadings } from "../src/cli/flags.ts";
+
+// gap-reduce-sync-spawn-floor-suite-slowdown: the command handlers are now
+// loaded LAZILY (dynamic import at dispatch) instead of eagerly at module load.
+// The CLI is spawned ~200+ times per suite and its per-spawn floor was dominated
+// by loading the WHOLE handler graph (gate engine, MCP server, serve machinery,
+// provider clients) even for `--version` / `--help` / a bare `task list`. Each
+// handler module is still import-callable directly (zero process derivation) and
+// the dispatch behavior is byte-identical — only WHEN the module graph loads
+// changed (deferred to first use of each verb). esbuild bundles the dynamic
+// imports into the same single dist/quay.js file and evaluates each module
+// lazily on first import, so the prebuilt bundle's per-spawn floor drops too.
 
 // ── run() — the import-callable Core CLI (gap-cli-import-refactor-run-shell-architecture) ──
 // run(argv, ctx) is the whole former main() body: the command dispatch is now a
@@ -177,33 +170,37 @@ export async function run(argv, ctx = {}) {
   const ctx = { argv, sub, rest, flags, positional, wantsJson };
 
   // ── verb routing → src/cli/<command>.ts handlers ──
-  if (cmd === "adr") return handleAdr(ctx);
-  if (cmd === "task" && sub === "list") return handleTaskList(ctx);
-  if (cmd === "task" && sub === "view") return handleTaskView(ctx);
-  if (cmd === "task" && sub === "create") return handleTaskCreate(ctx);
-  if (cmd === "task" && sub === "edit") return handleTaskEdit(ctx);
-  if (cmd === "task" && sub === "check") return handleTaskCheck(ctx);
-  if (cmd === "action" && sub === "list") return handleActionList(ctx);
-  if (cmd === "action" && sub === "run") return handleActionRun(ctx);
-  if (cmd === "serve") return handleServe(ctx);
-  if (cmd === "mcp") return handleMcp(ctx);
-  if (cmd === "init") return handleInit(ctx);
+  // gap-reduce-sync-spawn-floor-suite-slowdown: each handler is now loaded via
+  // dynamic import AT DISPATCH (deferred), so an invocation of one verb never
+  // loads the handler modules of the other 20 verbs (the old per-spawn floor).
+  // Behavior is unchanged — same module, same ctx, same return value.
+  if (cmd === "adr") return (await import("../src/cli/adr.ts")).handleAdr(ctx);
+  if (cmd === "task" && sub === "list") return (await import("../src/cli/task-list.ts")).handleTaskList(ctx);
+  if (cmd === "task" && sub === "view") return (await import("../src/cli/task-view.ts")).handleTaskView(ctx);
+  if (cmd === "task" && sub === "create") return (await import("../src/cli/task-create.ts")).handleTaskCreate(ctx);
+  if (cmd === "task" && sub === "edit") return (await import("../src/cli/task-edit.ts")).handleTaskEdit(ctx);
+  if (cmd === "task" && sub === "check") return (await import("../src/cli/task-check.ts")).handleTaskCheck(ctx);
+  if (cmd === "action" && sub === "list") return (await import("../src/cli/action.ts")).handleActionList(ctx);
+  if (cmd === "action" && sub === "run") return (await import("../src/cli/action.ts")).handleActionRun(ctx);
+  if (cmd === "serve") return (await import("../src/cli/serve.ts")).handleServe(ctx);
+  if (cmd === "mcp") return (await import("../src/cli/mcp.ts")).handleMcp(ctx);
+  if (cmd === "init") return (await import("../src/cli/init.ts")).handleInit(ctx);
   // DIR-099-A: config validate/check + unknown config subcommand both route here.
-  if (cmd === "config") return handleConfigValidate(ctx);
+  if (cmd === "config") return (await import("../src/cli/config.ts")).handleConfigValidate(ctx);
   // QENG-1: gate (verb-less: id in `sub`; `--list` detected as sub === "--list").
-  if (cmd === "gate") return handleGate(ctx);
-  if (cmd === "gate-log") return handleGateLog(ctx);
+  if (cmd === "gate") return (await import("../src/cli/gate.ts")).handleGate(ctx);
+  if (cmd === "gate-log") return (await import("../src/cli/gate-log.ts")).handleGateLog(ctx);
   // QENG-3: complete/adjudicate/promote/retreat lifecycle (verb-less, id in `sub`).
-  if (cmd === "complete") return handleComplete(ctx);
-  if (cmd === "adjudicate") return handleAdjudicate(ctx);
-  if (cmd === "promote") return handlePromote(ctx);
-  if (cmd === "retreat") return handleRetreat(ctx);
+  if (cmd === "complete") return (await import("../src/cli/lifecycle.ts")).handleComplete(ctx);
+  if (cmd === "adjudicate") return (await import("../src/cli/lifecycle.ts")).handleAdjudicate(ctx);
+  if (cmd === "promote") return (await import("../src/cli/lifecycle.ts")).handlePromote(ctx);
+  if (cmd === "retreat") return (await import("../src/cli/lifecycle.ts")).handleRetreat(ctx);
   // QENG-4: `quay run` driver (verb-less, no positional id).
-  if (cmd === "run") return handleRun(ctx);
+  if (cmd === "run") return (await import("../src/cli/run.ts")).handleRun(ctx);
   // DIR-039: `quay migrate --from <id> --to <id>`.
-  if (cmd === "migrate") return handleMigrate(ctx);
+  if (cmd === "migrate") return (await import("../src/cli/migrate.ts")).handleMigrate(ctx);
   // Manager commands (C1-C5): start/adopt/arm.
-  if (cmd === "manager") return handleManager(ctx);
+  if (cmd === "manager") return (await import("../src/cli/manager.ts")).handleManager(ctx);
 
   // QX-005: updated fallback with --help hint (UQ-001/UQ-002).
   console.error("usage: quay <init|task list|view|create|edit|check|gate|gate-log|complete|adjudicate|promote|retreat|run|migrate|config validate|action list|serve|mcp|manager start|manager adopt> ...\nRun `quay --help` for full usage documentation.");

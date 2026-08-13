@@ -36,6 +36,75 @@
 // The reporter is a measurement instrument only — it never touches test files or
 // assertions.
 import path from "node:path";
+import { readdirSync, readFileSync } from "node:fs";
+
+// gap-reduce-sync-spawn-floor-suite-slowdown: opt-in EXECVE (process-spawn)
+// counting. The suite's biggest time cost was spawn count × per-process-start
+// floor (the CLI's eager provider-machinery load). This reporter now counts
+// process spawns so a before/after suite can be compared on (execve 总数,
+// 各相墙钟) — the task's verification anchor (a). Counting is OFF by default
+// (zero overhead in normal runs) and enabled with QUAY_TEST_EXECVE_COUNT=1.
+//
+// Mechanism: the reporter runs INSIDE the main `node --test` runner process.
+// Every test file runs as a child process of that runner, and every child
+// subprocess those files spawn (e.g. the quay CLI) is a deeper descendant. A
+// low-frequency /proc watcher records every descendant PID it ever observes;
+// each distinct PID ≈ one process spawn ≈ one execve (node's child_process
+// always fork+exec). The count is a lower bound (a spawn that forks and execs
+// entirely between two 100ms polls is missed), but the same instrument applied
+// before/after is a consistent relative measure — exactly what the anchor needs.
+const EXECVE_COUNT_ENV = "QUAY_TEST_EXECVE_COUNT";
+
+/** Union of a pid's live children across all its threads (/proc/<pid>/task/<tid>/children). */
+function childrenOf(pid) {
+  const out = new Set();
+  let tids;
+  try {
+    tids = readdirSync(`/proc/${pid}/task`);
+  } catch {
+    return out; // pid already gone (race) — no children to read
+  }
+  for (const tid of tids) {
+    try {
+      const raw = readFileSync(`/proc/${pid}/task/${tid}/children`, "utf8").trim();
+      if (raw) {
+        for (const c of raw.split(/\s+/)) {
+          const n = Number(c);
+          if (Number.isInteger(n) && n > 0) out.add(n);
+        }
+      }
+    } catch {
+      // thread exited mid-scan — skip it
+    }
+  }
+  return out;
+}
+
+/**
+ * DFS over the live process tree rooted at `rootPid`, adding every descendant
+ * PID to `seen` (idempotent across calls — `seen` persists between polls so a
+ * process that spawned and later exited is still counted once).
+ *
+ * `visited` is PER-WALK (fresh each call): it dedups expansion of the SAME pid
+ * within one walk but never prunes across walks. `seen` is the persistent
+ * accumulator — every observed child is added unconditionally, so a grandchild
+ * that spawns after its parent was first observed is still discovered on a
+ * later walk (the parent is re-expanded because it is not in `visited`).
+ */
+function collectDescendants(rootPid, seen) {
+  const stack = [rootPid];
+  const visited = new Set();
+  while (stack.length > 0) {
+    const pid = stack.pop();
+    if (visited.has(pid)) continue;
+    visited.add(pid);
+    for (const child of childrenOf(pid)) {
+      seen.add(child);
+      stack.push(child);
+    }
+  }
+  return seen;
+}
 
 /** Read `--test-concurrency=N` from process.execArgv (both = and space spellings). */
 function readConcurrency() {
@@ -59,6 +128,20 @@ export default async function* perFileReporter(source) {
   /** full path -> { dur, passed } */
   const files = new Map();
 
+  // ── opt-in execve/process-spawn counter (see EXECVE_COUNT_ENV above) ──────
+  // A 100ms /proc poll adds ~1ms per tick — only paid when explicitly enabled.
+  const execveCounting = process.env[EXECVE_COUNT_ENV] === "1";
+  const seenPids = new Set();
+  let spawnWatcher = null;
+  if (execveCounting) {
+    collectDescendants(process.pid, seenPids);
+    spawnWatcher = setInterval(() => {
+      collectDescendants(process.pid, seenPids);
+    }, 100);
+    // Never keep the test process alive for the watcher's sake.
+    if (typeof spawnWatcher.unref === "function") spawnWatcher.unref();
+  }
+
   for await (const e of source) {
     if (e.type !== "test:complete" || !e.data || !e.data.file) continue;
     const d = e.data;
@@ -77,6 +160,19 @@ export default async function* perFileReporter(source) {
       // greppable by the suite-cost gate.
       console.error(`__PERFILE__ duration_ms=${dur} ${d.file} passed=${passed}`);
     }
+  }
+
+  // ── execve/process-spawn total (opt-in; skipped in normal runs) ───────────
+  // Final sweep after the last test:complete — the file's worker has exited by
+  // then, so its spawned children (which the worker waited on) have too, but
+  // the sweep catches any still-alive straggler and the persistent `seen` set
+  // already holds every earlier-observed pid.
+  if (execveCounting) {
+    clearInterval(spawnWatcher);
+    collectDescendants(process.pid, seenPids);
+    // seenPids holds every distinct descendant process ever observed ≈ total
+    // process spawns ≈ execve count (a lower bound — see the header note).
+    console.error(`__EXECVE__ total=${seenPids.size}`);
   }
 
   // ── group floor + ceiling determination (auto-evaluated split criterion) ──────────
