@@ -1040,7 +1040,7 @@ git -C "$REPO_ROOT" worktree add $WORKTREE_ROOT/<slug> -b task/<id> "$FORK_BASEL
   它统一建 `node_modules` 符号链接 → 共享检出 node_modules（主检出无 node_modules 的裸 clone 则 fall back
   到 worktree 内 `npm install`）+ 用现有 `worktree-include.sh` 落 `.quay/config.yml`。**这是机制，不是 agent
   记得**（实测 2026-08-03：tasklist 建了符号链接能自证、tokenwait 没建不能自证——验证落点越靠近共享检出，
-  污染被扫进 master 的风险越高）。不跑 setup 的 worktree 在 `scripts/test.sh` 构建阶段 fail-closed
+  污染被扫进 master 的风险越高）。不跑 setup 的 worktree 在套件构建阶段 fail-closed
   （`Cannot find package esbuild`——那个 fail-closed 本身是对的，拒绝在可能陈旧的 bundle 上跑测试），
   且缺 `.quay/config.yml` 无法解析 workspace 根（round-5「Cannot find repo root」崩溃族）。
 - **每个任务 worktree 都从 `$FORK_BASELINE`（develop HEAD）分叉**——旧「fork 源统一 = integration」
