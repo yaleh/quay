@@ -1,7 +1,7 @@
 ---
 id: gap-a1-freeze-unlanded-content-preserve
 title: c1c0aa41 A1 freeze 未落地修复——合入 develop 保内容（load-flake 任务缺失的最后一块）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -64,9 +64,9 @@ c1c0aa41 是否在 develop 祖先中           ⇒ 否（仅存于 task/a1-fix �
 
 ## Definition of Done
 
-- [ ] 内容合入 develop 且全量套件绿（terminalCommit 记录）。
-- [ ] 未发现因 freeze 引入的字节身份断言回归（grep 确认 freeze 逻辑在位且生效）。
-- [ ] `task/a1-fix` 树清理完成，无 ahead>0 且未落地内容残留。
+- [x] 内容合入 develop 且全量套件绿（round 158 绿，terminalCommit a6a8436c 含 01bd6442）。
+- [x] 未发现因 freeze 引入的字节身份断言回归（scoped A1/A2/A4 3/3 绿 + round 158 全量绿；freeze 逻辑在 develop :294-297）。
+- [x] `task/a1-fix` 树清理完成（worktree 已清），无 ahead>0 未落地残留。
 
 ## Touches
 

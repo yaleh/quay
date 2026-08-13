@@ -1,7 +1,7 @@
 ---
 id: gap-ts-touching-fan-in-needs-typecheck-gate
 title: fan-in 准入只看 scoped 绿——新增/移动 .ts 文件的场景漏掉 ts-typecheck 闸
-status: ready
+status: done
 labels:
   - gap
   - defect
