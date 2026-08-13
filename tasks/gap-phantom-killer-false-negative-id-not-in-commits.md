@@ -44,15 +44,15 @@ done-but-not-flipped phantom——实现早已在 develop（deba6463/8a8fc8f6/f1
 
 ## Acceptance Criteria
 
-- [ ] AC1 发生率观察点建立（假阴性计数）。
-- [ ] AC2 task-body 侧 landed 信号实现（若评估通过）：ACs 全勾 + 未勾项均为外层验证 ⇒ 视同 landed。
-- [ ] AC3 负控制：superseded-modeled 形态判 landed；真新任务判非 landed。
-- [ ] AC4 既有 phantom-killer 测试全绿；`--for-task` scoped 门绿。
+- [x] AC1 发生率观察点建立（假阴性计数）。
+- [x] AC2 task-body 侧 landed 信号实现（若评估通过）：ACs 全勾 + 未勾项均为外层验证 ⇒ 视同 landed。
+- [x] AC3 负控制：superseded-modeled 形态判 landed；真新任务判非 landed。
+- [x] AC4 既有 phantom-killer 测试全绿；`--for-task` scoped 门绿。
 
 ## Definition of Done
 
-- [ ] 发生率记录 + 补法实现（或评估后明确不做 + 理由）。
-- [ ] 无假阴性回归（已落地不被推荐）。
+- [x] 发生率记录 + 补法实现（或评估后明确不做 + 理由）。
+- [x] 无假阴性回归（已落地不被推荐）。
 
 ## Touches
 
@@ -62,4 +62,28 @@ done-but-not-flipped phantom——实现早已在 develop（deba6463/8a8fc8f6/f1
 
 ## Evidence
 
-（落地后回填）
+（inner 2026-08-13 落地，见提交信息）
+
+**AC1 发生率观察点**：slot-refill 结果 JSON 新增 `phantom_killer_false_negative_caught` ——
+每次求值中「body-side landed 信号抓到、而 git-grep `hasLandedImplementation` 漏掉」的 ready 任务数
+（`bodyLanded && !gitLanded`）。0 表示本次求值未观察到假阴性方向。实证基线 = **1**（
+superseded-modeled，今日 17 条 landed-but-not-flipped 中被假阴性漏判的唯一一条）。
+
+**AC2 补法实现**：`isBodyLanded(body)`（slot-refill.ts 导出）——ACs 全勾 + 未勾项均为外层验证
+⇒ 视同 landed，OR 进派发判定的 landed 信号：`const landed = hasLandedImplementation(root,id) || isBodyLanded(text)`。
+外层验证项识别 = 复用 pool 单一来源 `isExternalVerificationItem`（`（待外部）`）+ 新增
+`isOuterVerificationItem` 外层全量验证族（`全量套件绿…——外层 verification-round 验证` /
+`外层全量验证`）。`isLandedCodeComplete` 第三臂同步从 `isExternalVerificationItem` 扩为
+`isOuterVerificationItem`（非平行造：`（待外部）` 臂仍走 pool 单一来源）。`isBodyLanded` 要求
+`total > 0`——无复选框的真新任务不得仅凭任务体判 landed（防假阳性）。
+
+**AC3 负控制（实测）**：
+- superseded-modeled 形态（实现提交无 id、ACs 全勾 + 唯一未勾是外层全量套件项 `——外层 verification-round 验证`）
+  → `isBodyLanded` true → **判 landed**，deferred `landed-implementation`，不再被推荐。
+- 真新任务（lanes-nproc 类，id 只命中 task-creation 提交 tasks/<id>.md）→ `hasLandedImplementation` false +
+  `isBodyLanded` false → **判非 landed**，仍被推荐。`phantom_killer_false_negative_caught` 保持 0。
+
+**AC4 scoped 门**：`scripts/test.sh --for-task gap-phantom-killer-false-negative-id-not-in-commits --allow-thin`
+**exit 0**——72/72 pass、0 fail、0 cancelled；静态检查全 PASS（含 task-contract-check: no violations）。
+slot-refill.test.mjs 新增 3 条 PHANTOM-KILLER FALSE NEGATIVE 用例（含 `makeLandedNoIdWorkspace`
+真 git 仓库——develop 上实现已 merge 但无任何提交消息含任务 id）。

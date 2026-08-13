@@ -49,6 +49,12 @@ import {
   // landed-implementation evidence when it is an implementation landing point (packages/ ·
   // plugin/scripts/ · plugin/test/ · scripts/ · src/), not a docs/milestones/telemetry sidecar.
   isImplementationClassFile,
+  // PHANTOM-KILLER FALSE NEGATIVE (tasks/gap-phantom-killer-false-negative-id-not-in-commits): the
+  // task-body-side landed signal (ACs 全勾 + 未勾项均为外层验证 ⇒ 视同 landed — the OR-in alternative to
+  // the git-grep, which misses landed tasks whose implementation commits never carry the id) + the
+  // outer-verification family recognizer it reuses.
+  isBodyLanded,
+  isOuterVerificationItem,
 } from "../scripts/slot-refill.ts";
 // AC2 (gap-delivery-critical-label-at-promote-not-after-dispatch): the promote gate is the fix's
 // label DETERMINATION point — applyPromotions (ready-pool-check --apply heartbeat) flips todo→ready
@@ -1311,6 +1317,67 @@ function makeTaskOnlyCommitWorkspace(tag, taskId) {
   return dir;
 }
 
+/** Build a REAL temp git repo where the task's implementation LANDED on develop but NO commit
+ *  message carries the task id — the exact phantom-killer FALSE-NEGATIVE shape
+ *  (gap-phantom-killer-false-negative-id-not-in-commits): hasLandedImplementation's `git log develop
+ *  --grep <id>` misses EVERY commit (the empirical gap-superseded-modeled case — deba6463/8a8fc8f6/
+ *  f12863a8/8bf44f9f/2d3caab0/23c8fee3 all ancestor on develop but their messages say "VALID_STATUSES
+ *  加 superseded", never the id), so the pure-git signal returns false and the task is ONLY caught by
+ *  the OR-in body-side signal (isBodyLanded). */
+function makeLandedNoIdWorkspace(tag, landedId) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `slot-refill-fn-${tag}-`));
+  fs.mkdirSync(path.join(dir, "tasks"), { recursive: true });
+  fs.mkdirSync(path.join(dir, "plugin", "scripts"), { recursive: true });
+  runGit(dir, "init", "-q");
+  runGit(dir, "config", "user.email", "t@t");
+  runGit(dir, "config", "user.name", "t");
+  fs.writeFileSync(path.join(dir, "base.txt"), "base\n");
+  runGit(dir, "add", "-A");
+  runGit(dir, "commit", "-qm", "base");
+  runGit(dir, "branch", "-M", "develop");
+  runGit(dir, "checkout", "-qb", "feature/superseded");
+  fs.writeFileSync(path.join(dir, "plugin", "scripts", "impl.ts"), "// implementation\n");
+  runGit(dir, "add", "-A");
+  runGit(dir, "commit", "-qm", "VALID_STATUSES 加 superseded");
+  runGit(dir, "checkout", "-q", "develop");
+  runGit(dir, "merge", "--no-ff", "feature/superseded", "-m", "merge: superseded lifecycle modeling");
+  // Sanity: the landedId appears in NO develop commit message (the false-negative precondition).
+  const hits = runGit(dir, "log", "develop", "--format=%s", "--grep", landedId);
+  assert.equal(hits.trim(), "", `precondition: no develop commit names ${landedId}`);
+  return dir;
+}
+
+/** The superseded-modeled task-body SHAPE that reproduced the phantom-killer false negative
+ *  (gap-superseded-modeled-as-task-lifecycle-terminal at the empirical moment): ACs 全勾 (5/5) + the
+ *  ONLY unchecked completion item is the outer full-suite verification — annotated `——外层 verification-
+ *  round 验证`, NOT `（待外部）` (the exact form the fail-closed isExternalVerificationItem misses). */
+function bodyLandedOuterUncheckedBody() {
+  return [
+    "**type:** execution",
+    "## Proposal",
+    "A real proposal paragraph that is definitely more than forty non-whitespace chars.",
+    "## Contract",
+    "measure   slot = `node plugin/scripts/slot-refill.ts` stdout 的 slots_free 字段",
+    "band      slot = ≥0",
+    "invoke    `node plugin/scripts/slot-refill.ts`",
+    "control   in-flight≥cap ⇒ should_refill false",
+    "resume    分步提交",
+    "## Touches",
+    "- code/impl.ts (new)", // (new) ⇒ touches-resolve-safe; NOT landed-evidence — the git-grep is the ONLY miss
+    "## Acceptance Criteria",
+    "- [x] AC1: the superseded lifecycle is modeled",
+    "- [x] AC2: VALID_STATUSES accepts superseded",
+    "- [x] AC3: web/MCP surfaces superseded",
+    "- [x] AC4: migration of 18 tasks done",
+    "- [x] AC5: existing tests green",
+    "## Definition of Done",
+    "- [x] AC1–AC5 全部勾上",
+    "- [x] 修后实跑：superseded 可经 API 写读 + web 独立成桶",
+    "- [x] 既有测试 + 新增测试全绿（`--for-task` scoped）",
+    "- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证",
+  ].join("\n");
+}
+
 test("LANDED-IMPLEMENTATION — a ready task whose implementation is merged into develop (declared-touches signals missed it) is NOT recommended; deferred landed-implementation (AC1/AC2/AC3)", (t) => {
   const root = makeLandedWorkspace("pos", "gap-landed", { mergeMessage: "merge: gap-landed — landing" });
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -1383,6 +1450,64 @@ test("LANDED-IMPLEMENTATION — hasLandedImplementation pure: nonexistent id fal
   const nonGit = makeWorkspace("nongit");
   t.after(() => fs.rmSync(nonGit, { recursive: true, force: true }));
   assert.equal(hasLandedImplementation(nonGit, "gap-anything"), false, "non-git root ⇒ fail-safe false (no false positive from an unavailable source)");
+});
+
+// ── PHANTOM-KILLER FALSE NEGATIVE (tasks/gap-phantom-killer-false-negative-id-not-in-commits) ───────
+// hasLandedImplementation reads `git log develop --grep <taskId>` — when the implementation commits
+// never carry the task id (the empirical case: gap-superseded-modeled-as-task-lifecycle-terminal, impl
+// deba6463 etc. on develop, ACs 8/9 with the ONLY unchecked item the outer full-suite verification,
+// status ready → still recommended) the grep misses and a LANDED task is still recommended. The fix
+// ORs in a task-body-side landed signal (isBodyLanded — ACs 全勾 + every remaining unchecked item is
+// outer-verification （待外部）/「外层全量验证」⇒ 视同 landed, AC2). Negative control: a genuinely-new task
+// (lanes-nproc/two-peer class — id matches only task-creation/frame commits) judges NOT landed (AC3).
+// AC1: the incidence observation point — phantom_killer_false_negative_caught counts body-caught /
+// git-missed tasks.
+
+test("PHANTOM-KILLER FALSE NEGATIVE — a landed task whose implementation commits never carry the id (superseded-modeled shape) is NOT recommended (AC1/AC2/AC3)", (t) => {
+  const root = makeLandedNoIdWorkspace("body", "gap-superseded");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // Pure-git: NO develop commit names the id ⇒ hasLandedImplementation is false — the false negative.
+  assert.equal(hasLandedImplementation(root, "gap-superseded"), false, "git-grep misses the id-less implementation (the false negative)");
+  // Body-side: ACs 全勾 + the ONLY unchecked item is the outer full-suite verification ⇒ landed.
+  const body = bodyLandedOuterUncheckedBody();
+  assert.equal(isOuterVerificationItem("全量套件绿（`fail 0`）——外层 verification-round 验证"), true, "the outer full-suite item is recognized as outer-verification (AC2)");
+  assert.equal(isBodyLanded(body), true, "ACs 全勾 + 唯一未勾是外层验证 ⇒ body-side landed (AC2)");
+  assert.equal(isLandedCodeComplete(body), true, "the completion gate also recognizes the outer family (AC2)");
+  // End-to-end: the landed-but-id-less task is deferred, NOT recommended; a genuinely-new peer still is.
+  writeTask(root, "gap-superseded", { status: "ready", labels: ["gap"], body });
+  writeTask(root, "gap-fresh", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/fresh.ts (new)"]) });
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 3 });
+  assert.ok(!r.recommended.includes("gap-superseded"), "id-less landed task is NOT recommended (AC2)");
+  const reasons = (r.deferred || []).filter((d) => d.id === "gap-superseded").map((d) => d.reason);
+  assert.ok(reasons.includes("landed-implementation"), `deferred landed-implementation, got: ${reasons.join(",")}`);
+  assert.ok(r.recommended.includes("gap-fresh"), "a genuinely-new ready task is still recommended (AC3 negative control)");
+  assert.equal(r.phantom_killer_false_negative_caught, 1, "the body-side catch of a git-missed task is counted (AC1)");
+});
+
+test("PHANTOM-KILLER FALSE NEGATIVE — a genuinely-new task (lanes-nproc/two-peer class, id in task-creation commit only) judges NOT landed (AC3 negative control)", (t) => {
+  const root = makeTaskOnlyCommitWorkspace("neg", "gap-lanes-nproc");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // The id matches only the task-creation commit (tasks/<id>.md) — not implementation-class ⇒ git
+  // signal false; the body is a genuinely-new dispatchable body with OPEN implementation ACs ⇒
+  // body-side signal false. Judge NOT landed.
+  const body = dispatchableBody(["- code/lanes.ts (new)"]);
+  assert.equal(hasLandedImplementation(root, "gap-lanes-nproc"), false, "task-creation-only commit is not landed implementation (AC3)");
+  assert.equal(isBodyLanded(body), false, "a genuinely-new task with open ACs is NOT body-side landed (AC3)");
+  writeTask(root, "gap-lanes-nproc", { status: "ready", labels: ["gap"], body });
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 3 });
+  assert.ok(r.recommended.includes("gap-lanes-nproc"), "a genuinely-new ready task is still recommended (AC3)");
+  assert.equal(r.phantom_killer_false_negative_caught, 0, "no false-negative catch for a genuinely-new task (AC1)");
+});
+
+test("PHANTOM-KILLER FALSE NEGATIVE — isBodyLanded pure: no-checkbox body NOT landed from body alone; （待外部）-annotated body landed (AC2 fail-safe)", () => {
+  assert.equal(isBodyLanded(landedNoCheckboxBody()), false, "a no-checkbox task is NOT judged landed from body alone (would be a false positive)");
+  assert.equal(isBodyLanded(dispatchableBody(["- code/x.ts (new)"])), false, "an open-AC dispatchable body is not landed");
+  const annotated = bodyLandedOuterUncheckedBody().replace(
+    "- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证",
+    "- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）（待外部）",
+  );
+  assert.equal(isBodyLanded(annotated), true, "（待外部）-annotated outer item ⇒ body-side landed (reuses the pool's single-source predicate)");
+  assert.equal(isOuterVerificationItem("AC1: a long enough acceptance criterion item number 1"), false, "an implementation AC is NOT outer-verification (fail-closed)");
 });
 
 // ── IMPLEMENTATION-CLASS FILE CLASS (gap-slot-refill-landed-detection-implementation-file-classes) ──
