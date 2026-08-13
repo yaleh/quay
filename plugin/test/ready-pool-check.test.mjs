@@ -36,6 +36,7 @@ import {
   computePoolFloor,
   maxMutuallyDisjointSubset,
   PARKED_MARKER_RE,
+  SUPERSEDED_MARKER_RE,
   computeRelevance,
   readChildren,
   strategicTraceable,
@@ -49,6 +50,9 @@ import {
   LANDING_BEHIND_THRESHOLD_DEFAULT,
   setTaskStatus,
   applyPromotions,
+  applyRevaluations,
+  retreatReadyToTodo,
+  buildTargetedPromotion,
   ensureDeliveryCriticalLabel,
   computeSuiteBlocking,
   isDirectoryGlob,
@@ -134,8 +138,29 @@ function fourArtifactBody({ acBoxes = 4, touches = "", extra = "", checkedAc = 0
   ].join("\n");
 }
 
-function gapTask(id, opts) {
-  return { id, status: "todo", labels: ["gap"], body: fourArtifactBody(opts), ...opts };
+// AC1 (gap-ac46-pool-criteria-in-gate): the todo→ready promotion gate now requires the candidate's
+// OWN tasks/<id>.md in ## Touches without `(new)` (C8 self-touch — the dispatch gate's grant). Todo
+// fixtures are promotion candidates by default, so gapTask injects the self-touch into the body
+// unless the test already declared it (a test that specifically wants self-touch-MISSING passes an
+// explicit `touches`/`body` omitting it). `withSelfTouch` appends `- tasks/<id>.md` to the body's
+// `## Touches` section, or adds the section when the body has none.
+function withSelfTouch(body, id) {
+  const line = `- tasks/${id}.md`;
+  const idx = body.indexOf("## Touches");
+  if (idx === -1) return `${body}\n## Touches\n${line}\n`;
+  // Insert the self-touch after the LAST line of the existing Touches section (before the next `## ` heading or EOF).
+  const rest = body.slice(idx);
+  const nextHeading = rest.indexOf("\n## ");
+  const cut = nextHeading === -1 ? body.length : idx + nextHeading;
+  return body.slice(0, cut) + `\n${line}` + body.slice(cut);
+}
+
+function gapTask(id, opts = {}) {
+  // When the test passes an explicit `touches` (not a full `body`), thread them through fourArtifactBody.
+  const body = opts.body
+    ? withSelfTouch(opts.body, id)
+    : fourArtifactBody({ ...opts, touches: [...((opts.touches || []).map((t) => (t.startsWith("- ") ? t : `- ${t}`))), `- tasks/${id}.md`] });
+  return { id, status: "todo", labels: ["gap"], ...opts, body };
 }
 
 function dirTask(id, opts) {
@@ -1176,8 +1201,11 @@ test("candidate order: touches-resolvable sorts before non-resolvable within a k
   writeTask(root, "gap-resolvable", gapTask("gap-resolvable", {
     body: fourArtifactBody({ touches: ["- code/exists.ts"] }),
   }));
+  // AC1 (gap-ac46-pool-criteria-in-gate): gapTask injects the C8 self-touch, and the self-touch file
+  // EXISTS (writeTask wrote it) — so a single missing real touch is no longer the majority. Two
+  // missing real touches keep the candidate majority-missing even with the (existing) self-touch.
   writeTask(root, "gap-unresolvable", gapTask("gap-unresolvable", {
-    body: fourArtifactBody({ touches: ["- code/missing.ts"] }),
+    body: fourArtifactBody({ touches: ["- code/missing.ts", "- code/also-missing.ts"] }),
   }));
 
   const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 });
@@ -1611,7 +1639,10 @@ test("value-degradation AC2/AC3: a large-touches strategic task floats above a s
   const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1, topN: 4 });
   assert.equal(r.top_relevance[0].id, "gap-pilot", "large-touches strategic task must rank FIRST (not bottom out)");
   assert.equal(r.top_relevance[0].strategic, true);
-  assert.equal(r.top_relevance[0].value, Number((STRATEGIC_WEIGHT + 1 / 8).toFixed(3)));
+  // AC1 (gap-ac46-pool-criteria-in-gate): gapTask now injects the C8 self-touch (`- tasks/<id>.md`),
+  // which touchesScale counts as a declared touch — gap-pilot's 8 real touches become 9 (8 + self-touch)
+  // ⇒ cost = 1/9, value = STRATEGIC_WEIGHT + 1/9.
+  assert.equal(r.top_relevance[0].value, Number((STRATEGIC_WEIGHT + 1 / 9).toFixed(3)));
   // the blocking-via-depends_on task ranks above the plain ones (blocking 2 + costBenefit 1 = 3 > 1).
   assert.equal(r.top_relevance[1].id, "gap-dep", "depends_on-blocking task ranks above plain");
   assert.equal(r.top_relevance[1].blocking, true);
@@ -2891,12 +2922,14 @@ test("todo candidate with prose prereq and NO edge ⇒ ineligible for promotion 
   const root = makeWorkspace("prereq-promo");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   writeTask(root, "gap-prereq-a", { status: "done", labels: ["gap"], body: fourArtifactBody() });
+  // AC1 (gap-ac46-pool-criteria-in-gate): the candidate needs its C8 self-touch so it PASSES the
+  // self-touch gate and the prose-prereq gap (not self-touch) becomes the blocking reason.
   writeTask(root, "gap-cand", {
     status: "todo",
     labels: ["gap"],
     parent: null,
     children: [],
-    body: PREREQ_BODY(["gap-prereq-a"]),
+    body: withSelfTouch(PREREQ_BODY(["gap-prereq-a"]), "gap-cand"),
   });
 
   const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1, targetedId: "gap-cand" });
@@ -2905,4 +2938,187 @@ test("todo candidate with prose prereq and NO edge ⇒ ineligible for promotion 
   const cand = r.candidates.find((c) => c.id === "gap-cand");
   assert.equal(cand.eligible, false, "bulk promotion must reject prose-prereq-no-edge");
   assert.deepEqual(cand.prosePrereqGap, ["gap-prereq-a"]);
+});
+
+// ── AC46 — pool-layer static criteria into the todo→ready gate + ready↔todo revaluation executor ──
+// (tasks/gap-ac46-pool-criteria-in-gate-plus-revaluation-executor)
+//   AC1  compound / self-touch / deps / touches-resolve / artifacts gate the todo→ready promotion
+//        ITSELF (rejected at the gate with a reason, not deferred after entering the pool).
+//   AC2  bidirectional revaluation executor: re-runs the static conditions on the ready pool; decay ⇒
+//        ready.back="todo" auto-executes with a grep-able 阻碍原因 + 去向 record.
+//   AC3  negative control: a clean pool revaluates to zero; a decayed task is reported explicitly
+//        (never a silent stay).
+//   AC5  production negative-control samples (real task bodies, 2026-08-13 定向晋升 operation):
+//        compound + self-touch must be REJECTED, the three clean tasks ADMITTED.
+
+test("SUPERSEDED_MARKER_RE: bold marker matches; bare word does not (position-based, hard-rule ②)", () => {
+  assert.equal(SUPERSEDED_MARKER_RE.test("> **SUPERSEDED / 作废** premise deleted by a human ruling."), true, "bold marker matches");
+  assert.equal(SUPERSEDED_MARKER_RE.test("**SUPERSEDED**"), true, "bare bold marker matches");
+  assert.equal(SUPERSEDED_MARKER_RE.test("SUPERSEDED"), false, "bare word is NOT a marker");
+  assert.equal(SUPERSEDED_MARKER_RE.test("the superseded-capability checker runs in CI"), false, "discussing the category is NOT a marker");
+  assert.equal(SUPERSEDED_MARKER_RE.test("some superseded mechanism"), false, "lowercase word in prose is NOT a marker");
+});
+
+test("AC46 marker fix: a candidate DISCUSSING superseded is promotable; a candidate CARRYING the marker is not (both directions)", (t) => {
+  const root = makeWorkspace("superseded-marker-fix");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(root, "code", "a.ts"), "export const a = 1;\n");
+  writeTask(root, "gap-discusses-superseded", gapTask("gap-discusses-superseded", {
+    body: fourArtifactBody({
+      touches: ["- code/a.ts", "- tasks/gap-discusses-superseded.md"],
+      extra: "\nThe superseded-capability checker runs in the full-suite gate. This task is NOT superseded — it is live work.\n",
+    }),
+  }));
+  writeTask(root, "gap-carries-marker", gapTask("gap-carries-marker", {
+    body: fourArtifactBody({
+      touches: ["- code/a.ts", "- tasks/gap-carries-marker.md"],
+      extra: "\n> **SUPERSEDED / 作废** premise deleted by a human ruling.\n",
+    }),
+  }));
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 1, floorMult: 1 }); // floor 1, pool 0 → scan candidates
+  const discusses = r.candidates.find((c) => c.id === "gap-discusses-superseded");
+  const carries = r.candidates.find((c) => c.id === "gap-carries-marker");
+  assert.ok(discusses, "discuss candidate is scanned");
+  assert.equal(discusses.superseded, false, "discussing the word is NOT superseded (before the fix the bare word wrongly blocked it)");
+  assert.equal(discusses.eligible, true, "discuss candidate is promotable");
+  assert.ok(carries, "marker candidate is scanned");
+  assert.equal(carries.superseded, true, "carrying the marker IS superseded");
+  assert.equal(carries.eligible, false, "marker candidate is not promotable");
+  // The marker candidate is recorded in `intercepted` with the superseded reason (traceable no-promotion).
+  assert.ok(r.intercepted.some((i) => i.id === "gap-carries-marker" && i.reason === "superseded"), "superseded intercept recorded");
+});
+
+test("AC5 production negative control: the promotion gate rejects compound/self-touch samples and admits the clean three (real task bodies)", () => {
+  const repoRoot = path.resolve(__dirname, "..", "..");
+  const tasksDir = path.join(repoRoot, "tasks");
+  const rejectIds = ["gap-quay-has-never-self-hosted-its-own-cold-start", "gap-worktree-node-modules-inconsistent-self-verify"];
+  const admitIds = ["gap-spec11-stage2-retest-with-concurrency", "gap-slot-refill-clique-ignores-landed-touches", "gap-landing-target-branch-consistency-check"];
+  // Build allTasks from the REAL task files (REAL statuses — a dependency that is done stays done, so
+  // the gate's deps check resolves; the negative-control SAMPLES are real, never fabricated).
+  const allTasks = new Map();
+  for (const f of fs.readdirSync(tasksDir).filter((x) => x.endsWith(".md"))) {
+    const id = f.replace(/\.md$/, "");
+    const raw = fs.readFileSync(path.join(tasksDir, f), "utf8");
+    const task = parseTask(raw);
+    task.id = id;
+    task.status = (raw.match(/^status:\s*(\S+)/m) || [])[1] || "";
+    allTasks.set(id, task);
+  }
+  for (const id of rejectIds) {
+    assert.ok(allTasks.has(id), `reject sample ${id} exists in the real store`);
+    const task = { ...allTasks.get(id), status: "todo" }; // the promotion gate evaluates todo→ready
+    const tp = buildTargetedPromotion(id, task, repoRoot, allTasks);
+    assert.equal(tp.eligible, false, `${id} must be REJECTED by the gate`);
+    if (id === "gap-quay-has-never-self-hosted-its-own-cold-start") {
+      assert.equal(tp.checks.compound, true, `${id} is role:compound → rejected for compound`);
+    } else {
+      assert.equal(tp.checks.selfTouchOk, false, `${id} lacks its own self-touch → rejected for self-touch`);
+    }
+  }
+  for (const id of admitIds) {
+    assert.ok(allTasks.has(id), `admit sample ${id} exists in the real store`);
+    const task = { ...allTasks.get(id), status: "todo" };
+    const tp = buildTargetedPromotion(id, task, repoRoot, allTasks);
+    assert.equal(tp.eligible, true, `${id} must be ADMITTED by the gate`);
+    assert.equal(tp.checks.superseded, false, `${id} is not superseded (marker-fix direction: discussion ≠ marker)`);
+    assert.equal(tp.checks.compound, false, `${id} is not compound`);
+    assert.equal(tp.checks.selfTouchOk, true, `${id} has its self-touch`);
+  }
+});
+
+test("AC1: compound and self-touch-missing todo candidates are rejected at the bulk promotion gate (not deferred after ready)", (t) => {
+  const root = makeWorkspace("ac1-gate");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(root, "code", "foo.ts"), "export const foo = 1;\n");
+  writeTask(root, "gap-compound-candidate", gapTask("gap-compound-candidate", { role: "compound" }));
+  // Bypass gapTask's self-touch injection on purpose: this fixture declares a resolving touch but
+  // deliberately OMITS tasks/<id>.md — the C8 self-touch-missing case the gate must reject.
+  writeTask(root, "gap-self-touch-missing", {
+    status: "todo",
+    labels: ["gap"],
+    body: fourArtifactBody({ touches: ["- code/foo.ts"] }),
+  });
+  writeTask(root, "gap-clean-candidate", gapTask("gap-clean-candidate", {
+    body: fourArtifactBody({ touches: ["- code/foo.ts", "- tasks/gap-clean-candidate.md"] }),
+  }));
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 1, floorMult: 1 }); // floor 1, pool 0 → scan
+  const compound = r.candidates.find((c) => c.id === "gap-compound-candidate");
+  const selfTouch = r.candidates.find((c) => c.id === "gap-self-touch-missing");
+  const clean = r.candidates.find((c) => c.id === "gap-clean-candidate");
+  assert.ok(compound && selfTouch && clean, "all three candidates scanned");
+  assert.equal(compound.eligible, false, "compound candidate is not promotable");
+  assert.equal(compound.compound, true, "compound candidate carries the compound flag (blocking reason)");
+  assert.equal(selfTouch.eligible, false, "self-touch-missing candidate is not promotable");
+  assert.equal(selfTouch.selfTouchOk, false, "self-touch-missing candidate carries the selfTouchOk flag (blocking reason)");
+  assert.equal(clean.eligible, true, "clean candidate stays promotable");
+  // The blocking reasons are recorded in `intercepted` (traceable no-promotion, same discipline as retired).
+  assert.ok(r.intercepted.some((i) => i.id === "gap-compound-candidate" && i.reason === "compound-not-dispatchable"), "compound intercept recorded");
+  assert.ok(r.intercepted.some((i) => i.id === "gap-self-touch-missing" && i.reason === "self-touch-missing-c8"), "self-touch intercept recorded");
+  assert.ok(!r.promotions.some((p) => p.id === "gap-compound-candidate"), "compound candidate never promoted");
+  assert.ok(!r.promotions.some((p) => p.id === "gap-self-touch-missing"), "self-touch candidate never promoted");
+  assert.ok(r.promotions.some((p) => p.id === "gap-clean-candidate"), "clean candidate is promoted");
+});
+
+test("AC2: revaluation detector — a clean ready pool revaluates to zero (negative control, no silent stay)", (t) => {
+  const root = makeWorkspace("reval-clean");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(root, "code", "a.ts"), "export const a = 1;\n");
+  // Two clean ready tasks (self-touch present + touches resolve + four artifacts).
+  writeTask(root, "gap-ready-a", { status: "ready", labels: ["gap"], body: fourArtifactBody({ touches: ["- code/a.ts", "- tasks/gap-ready-a.md"] }) });
+  writeTask(root, "gap-ready-b", { status: "ready", labels: ["gap"], body: fourArtifactBody({ touches: ["- code/a.ts", "- tasks/gap-ready-b.md"] }) });
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root });
+  assert.equal(r.revaluation_count, 0, "clean ready pool ⇒ zero decayed tasks");
+  assert.deepEqual(r.revaluation, [], "clean ready pool ⇒ empty revaluation array");
+});
+
+test("AC2: revaluation detector — a decayed ready task (superseded marker) is reported with reason + destination todo", (t) => {
+  const root = makeWorkspace("reval-decay");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(root, "code", "a.ts"), "export const a = 1;\n");
+  writeTask(root, "gap-ready-superseded", { status: "ready", labels: ["gap"], body: "> **SUPERSEDED / 作废** premise deleted.\n\n" + fourArtifactBody({ touches: ["- code/a.ts", "- tasks/gap-ready-superseded.md"] }) });
+  writeTask(root, "gap-ready-clean", { status: "ready", labels: ["gap"], body: fourArtifactBody({ touches: ["- code/a.ts", "- tasks/gap-ready-clean.md"] }) });
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root });
+  assert.equal(r.revaluation_count, 1, "one decayed ready task");
+  const entry = r.revaluation.find((x) => x.id === "gap-ready-superseded");
+  assert.ok(entry, "the superseded ready task is in revaluation");
+  assert.ok(entry.reasons.includes("superseded"), "reason carries 'superseded'");
+  assert.equal(entry.destination, "todo", "destination is the legal ready.back=todo");
+  assert.ok(!r.revaluation.some((x) => x.id === "gap-ready-clean"), "the clean ready task is NOT revalued");
+});
+
+test("AC2: applyRevaluations writes ready→todo + a grep-able ## Revaluation body record; retreatReadyToTodo is fail-closed", (t) => {
+  const root = makeWorkspace("reval-apply");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(root, "code", "a.ts"), "export const a = 1;\n");
+  writeTask(root, "gap-ready-decay", { status: "ready", labels: ["gap"], body: "> **SUPERSEDED / 作废** premise deleted.\n\n" + fourArtifactBody({ touches: ["- code/a.ts", "- tasks/gap-ready-decay.md"] }) });
+  writeTask(root, "gap-ready-clean", { status: "ready", labels: ["gap"], body: fourArtifactBody({ touches: ["- code/a.ts", "- tasks/gap-ready-clean.md"] }) });
+
+  const r = applyRevaluations({ tasksDir: path.join(root, "tasks"), root });
+  assert.equal(r.should_revaluate, true, "decayed tasks present ⇒ should_revaluate");
+  assert.equal(r.applied_revaluations.length, 1, "one retreat written");
+  const applied = r.applied_revaluations[0];
+  assert.equal(applied.id, "gap-ready-decay");
+  assert.equal(applied.ok, true);
+  assert.equal(applied.from, "ready");
+  assert.equal(applied.to, "todo");
+
+  // The retreat is on disk: status flipped AND a ## Revaluation record (grep-able 阻碍原因 + 去向) appended.
+  const after = fs.readFileSync(path.join(root, "tasks", "gap-ready-decay.md"), "utf8");
+  assert.match(after, /^status:\s*todo\s*$/m, "status flipped ready → todo");
+  assert.match(after, /## Revaluation/, "grep-able ## Revaluation record appended");
+  assert.match(after, /去向：ready → todo/, "record carries the destination");
+  assert.match(after, /阻碍原因：superseded/, "record carries the blocking reason");
+  // The clean task is untouched.
+  const cleanAfter = fs.readFileSync(path.join(root, "tasks", "gap-ready-clean.md"), "utf8");
+  assert.match(cleanAfter, /^status:\s*ready\s*$/m, "clean ready task untouched");
+
+  // retreatReadyToTodo fail-closed: a non-ready task / missing / no-frontmatter never write.
+  writeTask(root, "gap-already-todo", { status: "todo", labels: ["gap"], body: fourArtifactBody() });
+  const nr = retreatReadyToTodo(root, "gap-already-todo", ["x"]);
+  assert.equal(nr.ok, false, "already-todo ⇒ fail closed");
+  assert.equal(nr.reason, "not-ready");
+  const miss = retreatReadyToTodo(root, "does-not-exist", ["x"]);
+  assert.equal(miss.ok, false, "missing ⇒ fail closed");
+  fs.writeFileSync(path.join(root, "tasks", "gap-no-fm.md"), "no frontmatter here");
+  assert.equal(retreatReadyToTodo(root, "gap-no-fm", ["x"]).ok, false, "no-frontmatter ⇒ fail closed");
 });
