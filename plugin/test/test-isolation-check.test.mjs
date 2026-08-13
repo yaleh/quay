@@ -6,8 +6,13 @@
 // governance. EXPIRY: restore to engine when the removal-source fix lands (R2 reaper / scope
 // collision trace) — the trace task owns it. STILL RUNS in --for-task / --group governance scoped
 // gates (防真泄漏回归无人发现). WAS @test-group engine.
-// @load-sensitive wall-clock
-// @load-sensitive-entry 2026-08-13 wall-clock (AC5/tmux-leak-scan DELTA reap-wait timing races under full-suite load; round 132 green / 133 red same tree, isolated rerun green — partition as in-family flake, not regression)
+// @load-sensitive fixture-vs-sweeper
+// @load-sensitive-entry 2026-08-13 fixture-vs-sweeper (manager root cause): DELTA's genuine-leak dir
+// was swept by sweepRunNamespace() — the sweeper removes run-root children WITHOUT a live tmux owner,
+// and a plain-mkdir fixture (no owner) is judged orphan. Isolated runs don't concurrency-sweep ⇒
+// green; full-suite does ⇒ deterministic red (rounds 133-136). Fix A: fixtures at
+// os.tmpdir()/leakscan-fixture-* (outside the run-root the sweeper scans). The --scope isolation from
+// round 131 is preserved.
 // test-isolation-check.test.mjs — gap-test-isolation-contract-is-unwritten: RED/GREEN tests for
 // the test-isolation contract scan + shrink-only violation ratchet (test-isolation-check.ts).
 // Covers AC1–AC8:
@@ -460,15 +465,12 @@ test("AC5/clean-tree DELTA: pre-existing dirt is excluded; only newly-added item
 test("AC5/tmux-leak-scan DELTA: pre-existing matches are excluded; only NEW matches leak", { skip: skipAll }, () => {
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "test-tmux-leak-delta-"));
   const SCAN_SH = path.join(REPO_ROOT, "plugin", "scripts", "tmux-leak-scan.sh");
-  // The DELTA test's leak dirs live under a TEST-LOCAL scope subroot (--scope), so the scan covers
-  // ONLY this test's simulated leakage — the shared /tmp/quay-run-<runId>/ root is scanned by every
-  // leak-simulation test in the suite and they cross-flagged each other's fixtures (round 131).
-  const deltaBase = process.env.QUAY_RUN_ID
-    ? path.join(os.tmpdir(), `quay-run-${process.env.QUAY_RUN_ID}`)
-    : os.tmpdir();
-  fs.mkdirSync(deltaBase, { recursive: true });
-  const scope = path.join(deltaBase, `leaktest-${process.pid}-${Math.random().toString(36).slice(2, 8)}`);
-  fs.mkdirSync(scope, { recursive: true });
+  // Fix A (2026-08-13 manager root cause): the DELTA test's leak dirs live under a TEST-LOCAL scope
+  // OUTSIDE the run-root (os.tmpdir()/leakscan-fixture-*) so sweepRunNamespace() — which removes the
+  // run-root's owner-dead children — cannot sweep them. The --scope arg points the scan at this
+  // test-local root. (Round 131: shared run-root cross-flagged; rounds 133-136: sweeper removed the
+  // owner-dead fixture dir, deterministic-under-load.)
+  const scope = fs.mkdtempSync(path.join(os.tmpdir(), "leakscan-fixture-"));
   const preDir = path.join(scope, "skv-delta-test-preexisting");
   const newDir = path.join(scope, "skv-delta-test-newleak");
   const runScan = (mode) => spawnSync("bash", [SCAN_SH, "--scope", scope, mode, scratch], { encoding: "utf8", timeout: 30_000 });

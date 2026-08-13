@@ -6,8 +6,12 @@
 // governance. EXPIRY: restore to engine when the removal-source fix lands (R2 reaper / scope
 // collision trace) — the trace task owns it. STILL RUNS in --for-task / --group governance scoped
 // gates (防真泄漏回归无人发现). WAS @test-group engine.
-// @load-sensitive wall-clock
-// @load-sensitive-entry 2026-08-13 wall-clock (reap-wait R2/R3 timing races under full-suite load; round 132 green / 133 red same tree, isolated rerun green — partition as in-family flake, not regression)
+// @load-sensitive fixture-vs-sweeper
+// @load-sensitive-entry 2026-08-13 fixture-vs-sweeper (manager root cause): R3's genuine-leak dir was
+// swept by sweepRunNamespace() — the sweeper removes run-root children WITHOUT a live tmux owner, and
+// a plain-mkdir fixture (no owner) is judged orphan. Isolated runs don't concurrency-sweep ⇒ green;
+// full-suite does ⇒ deterministic red (rounds 133-136). Fix A: fixtures at os.tmpdir()/leakscan-fixture-*
+// (outside the run-root the sweeper scans). The --scope isolation from round 131 is preserved.
 // tmux-leak-scan.test.mjs — gap-leak-scan-reap-race-false-red: RED/GREEN tests for the suite-tail
 // leak scan's BOUNDED REAP-WAIT. The defect: at suite end `tmux-leak-scan.sh --check` raced with
 // teardown reaping of test-spawned tmux servers — under load a still-exiting server (its process
@@ -49,20 +53,15 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
 const SCAN_SH = path.join(REPO_ROOT, "plugin", "scripts", "tmux-leak-scan.sh");
 
-// A unique /tmp/session-liveness-* dir under the leak-scan's watched prefix.
-// Each test uses a TEST-LOCAL scope subroot (--scope) so the scan covers ONLY that test's
-// simulated leakage — the shared /tmp/quay-run-<runId>/ root is scanned by every leak-simulation
-// test in the suite, and they cross-flagged each other's fixtures as residue (round 131 R2/R3 ×
-// DELTA). The subroot lives under the namespace root (or os.tmpdir() in legacy mode) so it is
-// visible to the scan only via --scope. Mirrors probeRoot() for the base.
+// A unique /tmp/leakscan-fixture-* dir OUTSIDE the run-root (Fix A, 2026-08-13 manager root cause):
+// R3/DELTA's genuine-leak dir was removed by sweepRunNamespace() — the sweeper reads the run-root's
+// children and removes any dir WITHOUT a live tmux owner (owner-liveness criterion). A plain-mkdir
+// fixture (no live owner) is judged "orphan" and swept under full-suite load (isolated runs don't
+// concurrency-sweep ⇒ pass; suite does ⇒ deterministic red, round 133-136). Fix: scope dirs live at
+// os.tmpdir()/leakscan-fixture-* — a prefix the sweeper does NOT scan (it only reads quay-run-* and
+// the run-root's children). The leak-scan test still passes --scope to point the scan at it.
 function makeScopeRoot() {
-  const base = process.env.QUAY_RUN_ID
-    ? path.join(os.tmpdir(), `quay-run-${process.env.QUAY_RUN_ID}`)
-    : os.tmpdir();
-  fs.mkdirSync(base, { recursive: true });
-  const scope = path.join(base, `leaktest-${process.pid}-${Math.random().toString(36).slice(2, 8)}`);
-  fs.mkdirSync(scope, { recursive: true });
-  return scope;
+  return fs.mkdtempSync(path.join(os.tmpdir(), "leakscan-fixture-"));
 }
 
 // The fake-leak dir under the test's own scope subroot.
