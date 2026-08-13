@@ -2,7 +2,7 @@
 id: gap-priority-has-no-mechanism-reader
 title: 优先级没有机制读者——P1/P2 写在散文里，--apply 按 disjointness-first 字典序取前 deficit
   个；修=priority label 在可行集内 tiebreaker，不越过安全约束（C17 闭合）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -53,7 +53,7 @@ touch-disjointness = 安全约束（并发正确性）——不可让步
 
 - [x] AC1–AC4 全部勾上
 - [x] 实测：有/无 priority label 的推荐序对照贴出（P1/P2 从切线外到切线内）
-- [ ] 全量套件绿
+- [x] 全量套件绿
 
 ## Touches
 

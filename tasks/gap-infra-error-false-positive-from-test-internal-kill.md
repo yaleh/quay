@@ -1,7 +1,7 @@
 ---
 id: gap-infra-error-false-positive-from-test-internal-kill
 title: resource-gate 测试内部 kill 触发 runner 误判 infra-error（② 假阳性）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -53,9 +53,9 @@ extra: {}
 ## Definition of Done
 
 - [x] AC1–AC5 全部勾上
-- [ ] 修后实跑：含 resource-gate 的全绿套件 reason=green 贴出（外层 verification-round 全量跑）
+- [x] 修后实跑：含 resource-gate 的全绿套件 reason=green 贴出（外层 verification-round 全量跑）
 - [x] 既有测试 + 新增测试全绿（`--for-task` scoped：161/161，fail 0 cancelled 0）
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
+- [x] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
 
 ## Touches
 
