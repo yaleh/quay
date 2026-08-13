@@ -1,7 +1,7 @@
 ---
 id: gap-malformed-task-silent-vanish-no-alert
 title: 坏 frontmatter 静默移除任务——唯一信号是 task list stdout 一行 Warning，无任何检查读它（不可见与不存在同形，硬规则④）
-status: todo
+status: ready
 labels:
   - gap
   - defect
