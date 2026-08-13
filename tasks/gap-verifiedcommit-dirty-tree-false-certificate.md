@@ -1,7 +1,7 @@
 ---
 id: gap-verifiedcommit-dirty-tree-false-certificate
 title: verifiedCommit 在脏树下是假证书——声明的是 commit 对象，被测的是工作树，两者之差无任何检查（round 记录无树字段）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -111,7 +111,7 @@ round 记录带上【被实际读取内容的标识】，最低限度三样（ma
 
 - [x] AC1–AC5 全部勾上
 - [x] 负控样例贴出（见 Evidence 下半段：round 4a3fc0be 形态被测试检出/标注「treeDirty:true + tree ≠ HEAD 树」）
-- [ ] 全量套件绿（worktree subagent 只跑 scoped 门 + full-suite-runner.test.mjs 全绿；全量套件由外层在 fan-in 后跑）
+- [x] 全量套件绿（round 166 绿验 a46c72f1 所在树，4348/0）
 
 ## Touches
 

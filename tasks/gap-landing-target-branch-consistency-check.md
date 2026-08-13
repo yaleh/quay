@@ -1,7 +1,7 @@
 ---
 id: gap-landing-target-branch-consistency-check
 title: 任务落地目标分支无校验——按位置检查覆盖「落地目标 == 当前前锋分支」（机制家族第 4 次）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -42,16 +42,16 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1 检查器存在：任务落地目标分支 ≠ 前锋分支时 fail，按位置报告（文件+行+目标分支）。
-- [ ] AC2 前锋分支判定不硬编码：由 `develop..integration` 关系推出，分支模型变动时读宿主、不写死。
-- [ ] AC3 检查接入静态检查泳道，有产物（mutation case fixture 保真）。
-- [ ] AC4 启用时全池扫描一遍，修正所有不一致的落地目标表述，无残留。
+- [x] AC1 检查器存在：任务落地目标分支 ≠ 前锋分支时 fail，按位置报告（文件+行+目标分支）。（落地 ff2e449d，round 166 绿 4348/0 验）
+- [x] AC2 前锋分支判定不硬编码：由 `develop..integration` 关系推出，分支模型变动时读宿主、不写死。（落地 ff2e449d，round 166 绿 4348/0 验）
+- [x] AC3 检查接入静态检查泳道，有产物（mutation case fixture 保真）。（落地 ff2e449d，round 166 绿 4348/0 验）
+- [x] AC4 启用时全池扫描一遍，修正所有不一致的落地目标表述，无残留。（落地 ff2e449d，round 166 绿 4348/0 验）
 
 ## Definition of Done
 
-- [ ] 检查器静态泳道绿跑（scoped 0 fail），对已知反例（历史 integration 落地目标）报出并被修正。
-- [ ] 无假阴性：`develop..integration=0` 成立时只接受 develop；假阳性 fixture 全部通过。
-- [ ] `gap-a1-freeze-unlanded-content-preserve` 这类任务不会再因落地目标错误被退回（检查在位）。
+- [x] 检查器静态泳道绿跑（scoped 0 fail），对已知反例（历史 integration 落地目标）报出并被修正。（落地 ff2e449d，round 166 绿 4348/0 验）
+- [x] 无假阴性：`develop..integration=0` 成立时只接受 develop；假阳性 fixture 全部通过。（落地 ff2e449d，round 166 绿 4348/0 验）
+- [x] `gap-a1-freeze-unlanded-content-preserve` 这类任务不会再因落地目标错误被退回（检查在位）。（落地 ff2e449d，round 166 绿 4348/0 验）
 
 ## Touches
 
