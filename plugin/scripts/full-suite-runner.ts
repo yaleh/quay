@@ -779,6 +779,262 @@ export function readLoadAvg(): number {
   }
 }
 
+// ── gap-phase-boundary-differential-accounting ─────────────────────────────────────────────────────
+// Per-phase DIFFERENTIAL accounting of MONOTONIC CUMULATIVE counters at each phase boundary
+// (static→serial→lowconc→main→end + inter-phase gaps). Reads are DIFFERENTIAL — the cumulative
+// cgroup counters (`cpu.stat usage_usec`, `cpu.pressure`/`io.pressure` `some … total=`) are read
+// once at each boundary and the phase's usage is the DIFF between consecutive reads — never periodic
+// sampling of an instantaneous rate. The counters are kernel-accumulated EXACT totals, so a phase's
+// cpu_usec is the exact CPU consumed inside that phase's window, and the derived quantities
+// (相利用率=cpu_usec/(wall×lanes), 相饱和度=cpu_usec/(wall×nproc), 等待占比=psi diff/wall) answer
+// 「这一相是算得多还是等得久」 directly from the record — no wall-clock + code-constant 推算.
+//
+// The counter source is the SUITE CHILD's cgroup (resolved from /proc/<pid>/cgroup — cgroup v2;
+// the child's process tree accumulates the phase CPU). Hermetic seam for deterministic tests:
+//   QUAY_TEST_CGROUP_DIR    — override the cgroup dir (real files read from it).
+//   QUAY_TEST_CGROUP_SCRIPT — JSON map phase-name → {cpu_usec, psi_cpu_total, psi_io_total}
+//                             (counters AT THE START of that phase; key "round_end" = the finalize
+//                             read). When set, overrides file reads entirely.
+// Fail-open (硬规则⑥ 缺值=未查≠为假): an unreadable counter yields EXPLICIT null cpu/psi fields +
+// a read-error reason, NEVER a fabricated 0 (a 0 cpu_usec would read as "idle" — a wrong claim).
+
+export interface PhaseCounters {
+  cpu_usec: number;
+  psi_cpu_total: number;
+  psi_io_total: number;
+}
+
+export interface PhaseCountersRead {
+  counters: PhaseCounters | null;
+  read_error: string | null;
+  cgroup_dir: string | null;
+}
+
+/** One per-phase differential record (the task's `phase, wall_ms, cpu_usec, psi_cpu_total, psi_io_total, lanes`). */
+export interface PhaseDiffRecord {
+  phase: string;
+  wall_ms: number;
+  cpu_usec: number | null;
+  psi_cpu_total: number | null;
+  psi_io_total: number | null;
+  lanes: number;
+}
+
+/** Resolve the cgroup v2 directory of a process (its CPU/PSI counters), or the QUAY_TEST_CGROUP_DIR seam. */
+export function resolveCgroupV2Dir(pid: number): string | null {
+  const seam = process.env.QUAY_TEST_CGROUP_DIR;
+  if (seam) return path.resolve(seam);
+  try {
+    const line = String(fs.readFileSync(`/proc/${pid}/cgroup`, "utf8"))
+      .split("\n")
+      .map((l) => l.trim())
+      .find((l) => l.startsWith("0::"));
+    if (!line) return null;
+    const rel = line.slice("0::".length).trim();
+    const root = "/sys/fs/cgroup";
+    if (!rel || rel === "/") return root;
+    const full = path.join(root, rel);
+    // Guard: the resolved path must stay under the cgroup v2 root (a malformed /proc entry must not
+    // escape into arbitrary filesystem reads).
+    const relCheck = path.relative(root, full);
+    if (relCheck.startsWith("..") || path.isAbsolute(relCheck)) return null;
+    return full;
+  } catch {
+    return null;
+  }
+}
+
+/** Parse a cgroup v2 `cpu.stat` for `usage_usec <n>` (null when absent). */
+export function parseCpuStatUsageUsec(text: string): number | null {
+  const m = /^usage_usec\s+(\d+)$/m.exec(text);
+  if (!m) return null;
+  const v = Number(m[1]);
+  return Number.isFinite(v) ? v : null;
+}
+
+/** Parse a cgroup v2 `cpu.pressure` / `io.pressure` `some` line for `total=<n>` (null when absent). */
+export function parsePressureSomeTotal(text: string): number | null {
+  for (const line of text.split("\n")) {
+    const t = line.trim();
+    if (!t.startsWith("some")) continue;
+    const m = /total=(\d+)/.exec(t);
+    if (m) {
+      const v = Number(m[1]);
+      if (Number.isFinite(v)) return v;
+    }
+  }
+  return null;
+}
+
+/** Read the three monotonic cumulative counters from a cgroup dir (null + reason on any failure). */
+export function readPhaseCounters(cgroupDir: string): PhaseCountersRead {
+  try {
+    const cpuStat = String(fs.readFileSync(path.join(cgroupDir, "cpu.stat"), "utf8"));
+    const cpuPressure = String(fs.readFileSync(path.join(cgroupDir, "cpu.pressure"), "utf8"));
+    const ioPressure = String(fs.readFileSync(path.join(cgroupDir, "io.pressure"), "utf8"));
+    const cpu_usec = parseCpuStatUsageUsec(cpuStat);
+    const psi_cpu_total = parsePressureSomeTotal(cpuPressure);
+    const psi_io_total = parsePressureSomeTotal(ioPressure);
+    if (cpu_usec === null || psi_cpu_total === null || psi_io_total === null) {
+      return {
+        counters: null,
+        read_error: `counter file missing required field (cpu_usec=${cpu_usec} psi_cpu=${psi_cpu_total} psi_io=${psi_io_total}) in ${cgroupDir}`,
+        cgroup_dir: cgroupDir,
+      };
+    }
+    return { counters: { cpu_usec, psi_cpu_total, psi_io_total }, read_error: null, cgroup_dir: cgroupDir };
+  } catch (e) {
+    return {
+      counters: null,
+      read_error: `cgroup counter read failed: ${e instanceof Error ? e.message : String(e)}`,
+      cgroup_dir: cgroupDir,
+    };
+  }
+}
+
+interface PhaseCgroupScript {
+  [phaseKey: string]: PhaseCounters;
+}
+
+/**
+ * Per-phase differential accumulator. Holds the current phase, the counter snapshot at its start,
+ * and the completed phase records. boundary()/finalize() read the counters at the boundary, diff
+ * against the phase-start snapshot, push one record, and roll the snapshot forward. All reads are
+ * fail-open (null cpu/psi + read_error on any failure — never a fabricated 0).
+ */
+export class PhaseDifferentialAccounting {
+  records: PhaseDiffRecord[] = [];
+  read_error: string | null = null;
+
+  private readonly childPid: number;
+  private readonly lanesFor: (phase: string) => number;
+  private startCounters: PhaseCounters | null = null;
+  private startWallMs = 0;
+  private currentPhase = "";
+  private countersDir: string | null = null;
+  private readonly script: PhaseCgroupScript | null;
+
+  /** The phase currently being accumulated ("" after finalize). */
+  get phase(): string {
+    return this.currentPhase;
+  }
+
+  constructor(childPid: number, lanesFor: (phase: string) => number) {
+    this.childPid = childPid;
+    this.lanesFor = lanesFor;
+    const seam = process.env.QUAY_TEST_CGROUP_SCRIPT;
+    if (seam) {
+      try {
+        this.script = JSON.parse(seam) as PhaseCgroupScript;
+      } catch {
+        this.script = null;
+        this.read_error = `QUAY_TEST_CGROUP_SCRIPT is not valid JSON`;
+      }
+    } else {
+      this.script = null;
+    }
+  }
+
+  /** Read the counters at the moment a phase is ABOUT TO START (keyed by that phase in the seam). */
+  private readFor(nextPhase: string): PhaseCountersRead {
+    if (this.script) {
+      const c = this.script[nextPhase];
+      if (!c) {
+        return { counters: null, read_error: `phase script has no snapshot for '${nextPhase}'`, cgroup_dir: null };
+      }
+      return { counters: { ...c }, read_error: null, cgroup_dir: null };
+    }
+    this.countersDir = this.countersDir ?? resolveCgroupV2Dir(this.childPid);
+    if (!this.countersDir) {
+      return { counters: null, read_error: `could not resolve the suite cgroup (pid ${this.childPid})`, cgroup_dir: null };
+    }
+    return readPhaseCounters(this.countersDir);
+  }
+
+  /** Establish the baseline + open the first phase. */
+  init(firstPhase: string): void {
+    this.currentPhase = firstPhase;
+    this.startWallMs = Date.now();
+    const r = this.readFor(firstPhase);
+    this.startCounters = r.counters;
+    if (r.read_error) this.read_error = r.read_error;
+  }
+
+  /** Close the current phase (record its differential) and open the next. */
+  boundary(nextPhase: string): void {
+    const now = Date.now();
+    const wall_ms = now - this.startWallMs;
+    const r = this.readFor(nextPhase);
+    const cur = r.counters;
+    let cpu_usec: number | null = null;
+    let psi_cpu_total: number | null = null;
+    let psi_io_total: number | null = null;
+    if (this.startCounters && cur) {
+      cpu_usec = Math.max(0, cur.cpu_usec - this.startCounters.cpu_usec);
+      psi_cpu_total = Math.max(0, cur.psi_cpu_total - this.startCounters.psi_cpu_total);
+      psi_io_total = Math.max(0, cur.psi_io_total - this.startCounters.psi_io_total);
+    }
+    this.records.push({
+      phase: this.currentPhase,
+      wall_ms: Math.max(0, wall_ms),
+      cpu_usec,
+      psi_cpu_total,
+      psi_io_total,
+      lanes: this.lanesFor(this.currentPhase),
+    });
+    if (r.read_error) this.read_error = r.read_error;
+    this.startCounters = cur;
+    this.startWallMs = now;
+    this.currentPhase = nextPhase;
+    this.countersDir = r.cgroup_dir ?? this.countersDir;
+  }
+
+  /**
+   * Rename the in-flight phase (and its just-pushed record). Used to REPAIR a spurious gap record:
+   * when a phase between serial and main is EMPTY (its start marker never fires — e.g. an empty
+   * lowconc group), the gap opened at serial's __GROUP__ actually spans the MAIN interval. The
+   * caller renames it to "main" (its wall/cpu ARE main's) before closing main→end.
+   */
+  replacePhase(newPhase: string): void {
+    const last = this.records[this.records.length - 1];
+    if (last && last.phase === this.currentPhase) {
+      last.phase = newPhase;
+      last.lanes = this.lanesFor(newPhase);
+    }
+    this.currentPhase = newPhase;
+  }
+
+  /** Close the final phase at round end (the "end"/tail record). */
+  finalize(): void {
+    if (!this.currentPhase) return;
+    const lastPhase = this.currentPhase;
+    // The finalize read is the ROUND-END snapshot. In the seam, key "round_end"; on the real path
+    // it reads the child's cgroup one last time (a destroyed systemd scope yields null — fail-open).
+    const now = Date.now();
+    const wall_ms = now - this.startWallMs;
+    const r = this.readFor("round_end");
+    const cur = r.counters;
+    let cpu_usec: number | null = null;
+    let psi_cpu_total: number | null = null;
+    let psi_io_total: number | null = null;
+    if (this.startCounters && cur) {
+      cpu_usec = Math.max(0, cur.cpu_usec - this.startCounters.cpu_usec);
+      psi_cpu_total = Math.max(0, cur.psi_cpu_total - this.startCounters.psi_cpu_total);
+      psi_io_total = Math.max(0, cur.psi_io_total - this.startCounters.psi_io_total);
+    }
+    this.records.push({
+      phase: lastPhase,
+      wall_ms: Math.max(0, wall_ms),
+      cpu_usec,
+      psi_cpu_total,
+      psi_io_total,
+      lanes: this.lanesFor(lastPhase),
+    });
+    if (r.read_error) this.read_error = r.read_error;
+    this.currentPhase = "";
+  }
+}
+
 // ── gap-verification-round-load-fields-from-systemd ────────────────────────────────────────────────
 // The phase-lane experiment (#26) needs a per-round 关注负载 (load focus) axis. systemd already
 // records the consumed CPU time / memory peak / memory swap peak for every scope and writes a
@@ -1127,6 +1383,21 @@ export interface SuiteRoundRecord {
    */
   tmux_cleaned?: number;
   tmux_cleaned_dirs?: string[];
+  /**
+   * gap-phase-boundary-differential-accounting AC1/AC2 — the per-phase DIFFERENTIAL records
+   * (static→serial→lowconc→main→end + inter-phase gaps): one entry per phase, each
+   * {phase, wall_ms, cpu_usec, psi_cpu_total, psi_io_total, lanes} where cpu_usec / psi_* are the
+   * DIFFERENTIAL of the monotonic cumulative cgroup counters across that phase's window (kernel-
+   * accumulated exact totals, never a periodic sample). The derived quantities are directly
+   * computable from the records + the round's nproc: 相利用率=cpu_usec/(wall×lanes),
+   * 相饱和度=cpu_usec/(wall×nproc), 等待占比=psi_cpu_total/wall — answering 「这一相是算得多还是
+   * 等得久」 without wall-clock + code-constant 推算. cpu/psi are explicit null when the counter
+   * read failed (缺键, never 0). Present on EVERY round the suite child spawned (green, red, abort,
+   * crash — the trap writes it too); absent only on early returns before the child spawned (no
+   * phases ran). `phase_counter_error` names the failure reason when the counters were unreadable.
+   */
+  phases?: PhaseDiffRecord[];
+  phase_counter_error?: string | null;
 }
 
 /**
@@ -2119,6 +2390,24 @@ export async function run(argv: string[]): Promise<number> {
   // runner can always take over from a stale/legacy state.
   writeSuiteState({ state: "running", ...base, finishedAt: null, durationMs: null }, { establish: true });
 
+  // gap-phase-boundary-differential-accounting — the per-phase differential accumulator. Declared
+  // HERE (before the crash trap below so the trap can write the phase records) and initialized right
+  // after the child spawns. `lanes` per phase = the concurrency that phase actually ran at (serial
+  // and lowconc have their OWN phase concurrency; the static/end/gap phases are serial ⇒ 1).
+  let phaseAccount: PhaseDifferentialAccounting | null = null;
+  const phaseLanes = (phase: string): number => {
+    switch (phase) {
+      case "serial":
+        return serialConcurrency;
+      case "lowconc":
+        return lowconcConcurrency;
+      case "main":
+        return laneCount;
+      default:
+        return 1;
+    }
+  };
+
   // AC6 (gap-full-suite-state-red-no-failure-detail-static-check-invisible) — in-process crash
   // terminal state: an uncaught exception / unhandled rejection must NOT leave state=running on disk
   // forever (consumers would keep thinking the suite is in flight while the runner is dead). These
@@ -2127,11 +2416,16 @@ export async function run(argv: string[]): Promise<number> {
   // check, next read). The handlers are removed right after the normal terminal verdict write so a
   // late error in post-verdict teardown can never overwrite the correct green/red with a spurious
   // crashed.
+  // gap-phase-boundary-differential-accounting — the trap ALSO lands the phase accounting: a crash
+  // mid-round must not lose the per-phase differential records accumulated so far (trap/finally
+  // 写入 — abort/早退/红轮都有账). The crashed state carries the phases and a best-effort phase-only
+  // verification-round row is appended (the normal appendVerificationRound never runs on this path).
   const writeCrashTerminal = (err: unknown) => {
     const at = new Date().toISOString();
     process.stderr.write(
       `full-suite-runner: uncaught ${err instanceof Error ? err.message : String(err)} -> state=red reason=crashed (runner died mid-run)\n`,
     );
+    const crashedPhases = phaseAccount ? phaseAccount.records : [];
     try {
       writeSuiteState({
         state: "red",
@@ -2139,9 +2433,36 @@ export async function run(argv: string[]): Promise<number> {
         ...base,
         finishedAt: toEpochSeconds(at),
         durationMs: Date.parse(at) - Date.parse(startedAt),
+        ...(crashedPhases.length > 0 ? { phases: crashedPhases } : {}),
       });
     } catch {
       // best-effort — never mask the original crash with a write failure
+    }
+    // The crash path bypasses appendVerificationRound (the normal round-record write) — append a
+    // best-effort phase-carrying round row so an abort/crash round still has accounting in the
+    // verification-round.jsonl sequence (fixes the inherited cpu_time_s-missing bias on red rounds).
+    if (phaseAccount) {
+      try {
+        appendVerificationRound(stateDir, {
+          round: 0, // computed from prior line count inside appendVerificationRound
+          startedAt,
+          durationMs: Date.parse(at) - Date.parse(startedAt),
+          laneCount,
+          pass: 0,
+          fail: 0,
+          cancelled: 0,
+          tests: 0,
+          load: readLoadAvg(),
+          state: "red",
+          reason: "crashed",
+          runner: base.runner,
+          scope,
+          phases: phaseAccount.records,
+          ...(phaseAccount.read_error ? { phase_counter_error: phaseAccount.read_error } : {}),
+        });
+      } catch {
+        // best-effort — never mask the original crash with a ledger write failure
+      }
     }
     // gap-verification-round-in-one-shot-worktree — close the one-shot worktree on a catchable crash
     // (an uncatchable SIGKILL leaks it for worktree-branch-hygiene-check.sh to reclaim).
@@ -2152,11 +2473,15 @@ export async function run(argv: string[]): Promise<number> {
   process.once("unhandledRejection", writeCrashTerminal);
   // Test seam (hermetic, never set in production): throw an uncaught exception shortly after the
   // `running` write so the AC6 in-process crash-terminal path is exercised deterministically (the
-  // handler above must write state=red reason=crashed before the process dies).
-  if (process.env.QUAY_TEST_CRASH_AFTER_RUNNING === "1") {
+  // handler above must write state=red reason=crashed before the process dies). The value is the
+  // delay in ms (default 30); a longer delay lets a phase-boundary test crash AFTER the stream
+  // markers have been processed, so the crash trap's `phases` write is exercised non-vacuously.
+  if (process.env.QUAY_TEST_CRASH_AFTER_RUNNING !== undefined) {
+    const delayMs = Number(process.env.QUAY_TEST_CRASH_AFTER_RUNNING);
+    const crashDelay = Number.isFinite(delayMs) && delayMs > 0 ? delayMs : 30;
     setTimeout(() => {
       throw new Error("QUAY_TEST_CRASH_AFTER_RUNNING");
-    }, 30);
+    }, crashDelay);
   }
 
   // gap-resource-gate-no-single-flight-lock-two-suite-overlap → gap-single-flight-lock-2-slot-concurrent-
@@ -2247,6 +2572,13 @@ export async function run(argv: string[]): Promise<number> {
   // NOT set one (a real systemd run never has this env set, and a seam test never enters the
   // useSystemdRun branch — the two are mutually exclusive).
   if (!roundScopeUnit) roundScopeUnit = process.env.QUAY_TEST_SCOPE_UNIT ?? null;
+
+  // gap-phase-boundary-differential-accounting — initialize the per-phase differential accumulator
+  // with the SUITE CHILD's pid (the counter source: the child's cgroup accumulates the phase CPU).
+  // `static` is the first phase (baseline → first phase-start marker). This is the ONE accumulator
+  // for the whole run — its records ride the verification-round row at the end AND the crash trap.
+  phaseAccount = new PhaseDifferentialAccounting(child.pid, phaseLanes);
+  phaseAccount.init("static");
 
   // AC5 (reason axis) — a signal-kill ⇒ red + reason=aborted (NO correctness conclusion), so the
   // inner's stop-dispatch does NOT fire on an abort. A previously-detected real failure (redDetected)
@@ -2435,10 +2767,111 @@ export async function run(argv: string[]): Promise<number> {
   const floorMsSeen: number[] = [];
   const ceilingFiles: string[] = [];
 
+  // gap-phase-boundary-differential-accounting — REAL-TIME phase-boundary detection (the runner
+  // reads the monotonic cumulative counters at each boundary and records the phase that JUST
+  // completed — one record per phase). The boundaries are detected from the stream markers test.sh
+  // emits AT phase edges (no test.sh change needed — the reporter already emits them):
+  //   - `selected N files (groups=serial)` / `overlap: running …` ⇒ static→serial boundary
+  //   - `selected N files (groups=lowconc)`                       ⇒ (gap→)lowconc boundary
+  //   - measure-suite-reporter `__GROUP__ …` (ONE per node --test run, AT ITS END) ⇒ that phase's
+  //     node --test finished: serial→gap_serial_to_lowconc, lowconc→main, main→end
+  //   - `__OVERHEAD__` burst (right after main) ⇒ main→end FALLBACK (a no-__GROUP__ reporter variant)
+  // The record sequence is static → serial → gap_serial_to_lowconc → lowconc → main → end. A child
+  // that never emits any marker stays "static" and finalize() records the WHOLE round as one static
+  // phase ⇒ every spawned round gets ≥1 phase record (AC4 coverage 100%, incl. red/abort rounds).
+  let phaseNodeActive = false; // a phase's node --test is the current stream producer (its __GROUP__ closes it)
+  let overlapPhaseActive = false; // the QUAY_PHASE_OVERLAP combined serial+lowconc window is active
+  let mainClosed = false; // the main→end boundary already fired
+  const phaseMarkerSerialStart = /^selected \d+ files?\s+\(groups=serial\)/;
+  const phaseMarkerLowconcStart = /^selected \d+ files?\s+\(groups=lowconc\)/;
+  const phaseMarkerOverlap = /^overlap:\s+running/;
+  const phaseGroupEnd = /^__GROUP__\s+/;
+  const phaseOverheadBurst = /^__OVERHEAD__\s+/;
+
   const onLine = (line: string) => {
     logStream.write(line + "\n");
     // Keep the last non-empty stream line for the fail-closed catch-all synthesis (AC1).
     if (line.trim()) lastStreamLine = line;
+    // gap-phase-boundary-differential-accounting — the phase-boundary state machine (reads the
+    // cumulative counters at each boundary and records the completed phase). Pure addition: it
+    // cannot flip the verdict, and a boundary-detection failure only affects the `phases` field.
+    if (phaseAccount) {
+      if (phaseMarkerSerialStart.test(line)) {
+        // static→serial (sequential path). Closes whatever phase was open (static, or a gap if the
+        // previous phase's __GROUP__ already fired) and opens serial.
+        phaseAccount.boundary("serial");
+        phaseNodeActive = true;
+        overlapPhaseActive = false;
+      } else if (phaseMarkerOverlap.test(line)) {
+        // static→ the combined serial+lowconc window (QUAY_PHASE_OVERLAP). The window's per-process
+        // __GROUP__ lines are NOT boundaries (the other process is still running); it closes at the
+        // __OVERHEAD__ burst. test.sh itself reports lowconc_phase_ms=0 on overlap (subsumed).
+        phaseAccount.boundary("serial");
+        phaseNodeActive = false;
+        overlapPhaseActive = true;
+      } else if (phaseMarkerLowconcStart.test(line)) {
+        // (serial or gap_serial_to_lowconc)→lowconc.
+        phaseAccount.boundary("lowconc");
+        phaseNodeActive = true;
+      } else if (phaseGroupEnd.test(line)) {
+        if (overlapPhaseActive) {
+          // serial+lowconc run in parallel — each emits its own __GROUP__; do NOT close the combined
+          // window on the first one (the other is still running). It closes at the __OVERHEAD__ burst.
+        } else if (phaseNodeActive) {
+          // A phase's node --test just finished: serial→gap, lowconc→main.
+          if (phaseAccount.phase === "serial") {
+            phaseAccount.boundary("gap_serial_to_lowconc");
+          } else if (phaseAccount.phase === "lowconc") {
+            phaseAccount.boundary("main");
+          }
+          phaseNodeActive = false;
+        } else if (phaseAccount.phase === "main") {
+          // main's own __GROUP__ (phaseNodeActive is false during main) ⇒ main→end.
+          phaseAccount.boundary("end");
+          mainClosed = true;
+        } else if (phaseAccount.phase === "lowconc") {
+          // A __GROUP__ fired for lowconc but phaseNodeActive was already false (e.g. the start
+          // marker was missed) — close lowconc→main.
+          phaseAccount.boundary("main");
+        } else if (phaseAccount.phase === "gap_serial_to_lowconc") {
+          // LOWCONC IS EMPTY (its start marker never fired): this __GROUP__ is MAIN's. The gap
+          // record opened at serial's __GROUP__ actually spans the MAIN interval — repair it to
+          // "main" (its wall/cpu ARE main's) and close main→end.
+          phaseAccount.replacePhase("main");
+          phaseAccount.boundary("end");
+          mainClosed = true;
+        }
+      } else if (phaseOverheadBurst.test(line) && !mainClosed) {
+        // The __OVERHEAD__ burst fires right after main completes. On the sequential path this is
+        // the main→end FALLBACK (a reporter variant that emitted no __GROUP__); on the overlap path
+        // it closes the combined serial+lowconc window.
+        if (overlapPhaseActive) {
+          phaseAccount.boundary("end");
+          overlapPhaseActive = false;
+          mainClosed = true;
+        } else if (phaseNodeActive && phaseAccount.phase === "lowconc") {
+          // The lowconc __GROUP__ was missed — the burst is both the lowconc→main and main→end
+          // boundary (approximate; the burst carries the exact wall timings for the reader).
+          phaseAccount.boundary("main");
+          phaseAccount.boundary("end");
+          phaseNodeActive = false;
+          mainClosed = true;
+        } else if (phaseAccount.phase === "main") {
+          phaseAccount.boundary("end");
+          mainClosed = true;
+        } else if (phaseAccount.phase === "lowconc") {
+          phaseAccount.boundary("main");
+          phaseAccount.boundary("end");
+          mainClosed = true;
+        } else if (phaseAccount.phase === "gap_serial_to_lowconc") {
+          // LOWCONC IS EMPTY (its start marker never fired) — the gap record spans the MAIN
+          // interval; repair it to "main" and close main→end.
+          phaseAccount.replacePhase("main");
+          phaseAccount.boundary("end");
+          mainClosed = true;
+        }
+      }
+    }
     // NOTE (# vs ℹ): test.sh's dual-reporter config (scripts/test.sh:204-207) puts node:test's
     // built-in spec reporter on stdout, which emits the info-glyph forms `ℹ pass N` / `ℹ fail N` /
     // `ℹ cancelled N` — NOT the TAP `# pass N` forms — so the old `#`-only regexes never matched
@@ -3023,6 +3456,11 @@ export async function run(argv: string[]): Promise<number> {
         : (finalState.reason ?? null);
   const roundGate: string | null =
     roundReason === "gate-failed" ? (staticCheckDetected ? "static-check" : redGateCause ?? "unknown") : null;
+  // gap-phase-boundary-differential-accounting — CLOSE the final phase at round end. This runs on
+  // EVERY normal-exit path (green, red, abort, timeout, hung, static-check) so the round record
+  // below always carries the completed phase sequence. A child that never emitted a phase marker
+  // still records its whole wall as one `static` phase — coverage is 100% for every spawned round.
+  phaseAccount?.finalize();
   appendVerificationRound(stateDir, {
     round: 0, // computed from prior line count inside appendVerificationRound
     startedAt,
@@ -3127,6 +3565,12 @@ export async function run(argv: string[]): Promise<number> {
     // 50 cleaned paths (cap — a pathological round must not grow the record unboundedly). Both
     // omitted when nothing was cleaned (绿轮可无, same absent-field contract as *_phase_ms).
     ...(tmuxCleaned > 0 ? { tmux_cleaned: tmuxCleaned, tmux_cleaned_dirs: tmuxCleanedDirs } : {}),
+    // gap-phase-boundary-differential-accounting AC1/AC2 — the per-phase differential records
+    // (static→serial→gap_serial_to_lowconc→lowconc→main→end). Present on EVERY round the suite
+    // child spawned (finalize above guarantees ≥1 record; the crash trap writes its own row). The
+    // counter-read failure reason rides `phase_counter_error` (缺键, never a fabricated 0).
+    ...(phaseAccount ? { phases: phaseAccount.records } : {}),
+    ...(phaseAccount?.read_error ? { phase_counter_error: phaseAccount.read_error } : {}),
   });
   // NOTE: appendVerificationRound above is the ONE suite-duration append per run (the
   // checker-cost.test.mjs AC6 contract: two runs ⇒ exactly two verification-round.jsonl lines).

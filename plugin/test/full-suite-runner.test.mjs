@@ -59,6 +59,11 @@ import {
   parseSystemdTimespanToSeconds,
   parseSystemdBytesToMb,
   readScopeConsumedLoad,
+  parseCpuStatUsageUsec,
+  parsePressureSomeTotal,
+  resolveCgroupV2Dir,
+  readPhaseCounters,
+  PhaseDifferentialAccounting,
   snapshotAssertionSurface,
   detectAssertionSurfaceEdits,
   concurrentSuiteSlots,
@@ -116,11 +121,13 @@ function fakeSuite(scriptBody) {
 }
 
 /** Spawn the runner against a temp root with a fake command. */
-function runRunner({ root, command, laneCount, stateDir, env = {} }) {
+function runRunner({ root, command, laneCount, stateDir, env = {}, serialConcurrency, lowconcConcurrency }) {
   const args = ["--no-warnings", "--experimental-strip-types", RUNNER, "--root", root];
   if (stateDir) args.push("--state-dir", stateDir);
   if (command) args.push("--command", command);
   if (laneCount !== undefined && laneCount !== null) args.push("--lane-count", String(laneCount));
+  if (serialConcurrency !== undefined) args.push("--serial-concurrency", String(serialConcurrency));
+  if (lowconcConcurrency !== undefined) args.push("--lowconc-concurrency", String(lowconcConcurrency));
   const mergedEnv = { ...process.env, ...env };
   // AC3 seam — hermetic tests skip the REAL resource gate by default; the AC3 tests override it
   // (QUAY_TEST_SKIP_RESOURCE_GATE != "1") and force GO/WAIT via the gate's RESOURCE_GATE_TEST_* seams.
@@ -354,6 +361,283 @@ test("AC2 backward-compat — a suite with NO __OVERHEAD__ emission records NO *
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── gap-phase-boundary-differential-accounting: AC1/AC2/AC3/AC4 ────────────────────────────────────
+// Per-phase DIFFERENTIAL accounting of MONOTONIC CUMULATIVE counters at each phase boundary
+// (static→serial→gap_serial_to_lowconc→lowconc→main→end). The hermetic seam QUAY_TEST_CGROUP_SCRIPT
+// maps phase-name → counter snapshot (the counters AT THE START of that phase; "round_end" = the
+// finalize read), so the differentials are deterministic. A fake suite emits the real-time phase
+// markers (`selected N files (groups=…)` / measure-suite `__GROUP__` / `__OVERHEAD__`) the runner
+// detects at the boundaries.
+
+// 7 snapshots → 6 differentials: static, serial, gap_serial_to_lowconc, lowconc, main, end.
+const PHASE_SUITE = [
+  'echo "selected 3 files (groups=serial)"',
+  'echo "__GROUP__ concurrency=2 files=3 sum_ms=100 floor_ms=60 capped=0"',
+  'echo "selected 5 files (groups=lowconc)"',
+  'echo "__GROUP__ concurrency=3 files=5 sum_ms=200 floor_ms=90 capped=1"',
+  'echo "__OVERHEAD__ run_static_checks_ms=1000 partial=1"',
+  'echo "# tests 8"',
+  'echo "# pass 8"',
+  'echo "# fail 0"',
+  'echo "# cancelled 0"',
+  "exit 0",
+].join("\n");
+
+const PHASE_SCRIPT = JSON.stringify({
+  static: { cpu_usec: 1000, psi_cpu_total: 500, psi_io_total: 10 },
+  serial: { cpu_usec: 5000, psi_cpu_total: 2000, psi_io_total: 30 },
+  gap_serial_to_lowconc: { cpu_usec: 5100, psi_cpu_total: 2100, psi_io_total: 31 },
+  lowconc: { cpu_usec: 9000, psi_cpu_total: 4000, psi_io_total: 50 },
+  main: { cpu_usec: 20000, psi_cpu_total: 9000, psi_io_total: 100 },
+  end: { cpu_usec: 20100, psi_cpu_total: 9100, psi_io_total: 102 },
+  round_end: { cpu_usec: 20500, psi_cpu_total: 9300, psi_io_total: 105 },
+});
+
+test("AC1 — phase-boundary differential records land for static→serial→gap→lowconc→main→end (one record per phase)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-phd-"));
+  const { f, dir } = fakeSuite(PHASE_SUITE);
+  try {
+    // Explicit phase concurrency makes the `lanes` assertions host-independent.
+    const child = runRunner({
+      root,
+      command: `bash ${f}`,
+      laneCount: 8,
+      serialConcurrency: 2,
+      lowconcConcurrency: 3,
+      env: { QUAY_TEST_CGROUP_SCRIPT: PHASE_SCRIPT },
+    });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, `runner exits 0 on green, got ${code}`);
+    const rec = lastRoundRecord(root);
+    assert.ok(rec, "round record written");
+    const phases = rec.phases || [];
+    assert.deepEqual(
+      phases.map((p) => p.phase),
+      ["static", "serial", "gap_serial_to_lowconc", "lowconc", "main", "end"],
+      "one record per phase, in run order",
+    );
+    // static = serial-snapshot − static-snapshot
+    assert.equal(phases[0].cpu_usec, 5000 - 1000, "static cpu differential");
+    assert.equal(phases[0].psi_cpu_total, 2000 - 500, "static psi-cpu differential");
+    assert.equal(phases[0].psi_io_total, 30 - 10, "static psi-io differential");
+    assert.equal(phases[0].lanes, 1, "static runs serial ⇒ lanes 1");
+    // serial = gap-snapshot − serial-snapshot
+    assert.equal(phases[1].cpu_usec, 5100 - 5000, "serial cpu differential");
+    assert.equal(phases[1].lanes, 2, "serial lanes = --serial-concurrency");
+    // gap = lowconc-snapshot − gap-snapshot
+    assert.equal(phases[2].cpu_usec, 9000 - 5100, "gap cpu differential");
+    assert.equal(phases[2].lanes, 1, "inter-phase gap is serial shell ⇒ lanes 1");
+    // lowconc = main-snapshot − lowconc-snapshot
+    assert.equal(phases[3].cpu_usec, 20000 - 9000, "lowconc cpu differential");
+    assert.equal(phases[3].lanes, 3, "lowconc lanes = --lowconc-concurrency");
+    // main = end-snapshot − main-snapshot
+    assert.equal(phases[4].cpu_usec, 20100 - 20000, "main cpu differential");
+    assert.equal(phases[4].lanes, 8, "main lanes = the round laneCount");
+    // end = round_end-snapshot − end-snapshot
+    assert.equal(phases[5].cpu_usec, 20500 - 20100, "end cpu differential");
+    assert.equal(phases[5].lanes, 1, "end is the serial round tail ⇒ lanes 1");
+    assert.equal(rec.phase_counter_error, undefined, "seam provides every snapshot — no counter error");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC2 — the derived quantities (相利用率/相饱和度/等待占比) are directly computable from the records + the round's nproc", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-phd2-"));
+  const { f, dir } = fakeSuite(PHASE_SUITE);
+  try {
+    const child = runRunner({ root, command: `bash ${f}`, laneCount: 8, env: { QUAY_TEST_CGROUP_SCRIPT: PHASE_SCRIPT } });
+    await waitExit(child);
+    const rec = lastRoundRecord(root);
+    const phases = rec.phases || [];
+    assert.ok(phases.length >= 5, "records present");
+    assert.equal(typeof rec.nproc, "number", "round carries nproc (the 相饱和度 denominator)");
+    for (const p of phases) {
+      assert.equal(typeof p.wall_ms, "number", `${p.phase} carries wall_ms`);
+      assert.equal(typeof p.cpu_usec, "number", `${p.phase} carries cpu_usec`);
+      assert.equal(typeof p.psi_cpu_total, "number", `${p.phase} carries psi_cpu_total`);
+      assert.equal(typeof p.lanes, "number", `${p.phase} carries lanes`);
+      // 相利用率 = cpu_usec/(wall×lanes); 相饱和度 = cpu_usec/(wall×nproc);
+      // 等待占比 = psi_cpu_total/wall — all directly from the record (+ the round nproc).
+      const util = p.wall_ms > 0 && p.lanes > 0 ? p.cpu_usec / (p.wall_ms * p.lanes) : null;
+      const sat = p.wall_ms > 0 && rec.nproc > 0 ? p.cpu_usec / (p.wall_ms * rec.nproc) : null;
+      const wait = p.wall_ms > 0 ? p.psi_cpu_total / p.wall_ms : null;
+      assert.ok(util === null || Number.isFinite(util), `${p.phase} 相利用率 computable`);
+      assert.ok(sat === null || Number.isFinite(sat), `${p.phase} 相饱和度 computable`);
+      assert.ok(wait === null || Number.isFinite(wait), `${p.phase} 等待占比 computable`);
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC3 negative control — a deliberately ABORTED round (child signal-killed mid-suite) still carries the phase records", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-phd3-"));
+  // The fake suite emits the serial-start marker + serial's __GROUP__, starts lowconc, then SIGTERMs
+  // itself — the abort path (the direct child is signal-killed ⇒ no correctness conclusion). The
+  // phase records accumulated up to the kill must survive in the round record.
+  const suite = [
+    'echo "selected 3 files (groups=serial)"',
+    'echo "__GROUP__ concurrency=2 files=3 sum_ms=100 floor_ms=60 capped=0"',
+    'echo "selected 5 files (groups=lowconc)"',
+    "kill -TERM $$",
+  ].join("\n");
+  const { f, dir } = fakeSuite(suite);
+  try {
+    const child = runRunner({ root, command: `bash ${f}`, laneCount: 8, env: { QUAY_TEST_CGROUP_SCRIPT: PHASE_SCRIPT } });
+    const { code } = await waitExit(child);
+    assert.notEqual(code, 0, "aborted round exits non-zero");
+    const rec = lastRoundRecord(root);
+    assert.ok(rec, "round record written on the abort path");
+    const phases = rec.phases || [];
+    assert.ok(phases.length >= 3, `the phases that ran are still recorded (got ${phases.length})`);
+    const names = phases.map((p) => p.phase);
+    assert.ok(names.includes("static") && names.includes("serial"), `static+serial recorded on abort (got ${names.join(",")})`);
+    assert.ok(phases.every((p) => typeof p.cpu_usec === "number"), "cpu differentials not lost on abort");
+    assert.equal(phases[phases.length - 1].phase, "lowconc", "the in-flight phase is closed at round end");
+    assert.equal(typeof phases[phases.length - 1].cpu_usec, "number", "the in-flight phase still gets a cpu reading");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC4 — a RED round carries the phase records (coverage incl. red rounds — the cpu_time_s-missing bias fix)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-phd4-"));
+  const suite = [
+    'echo "selected 3 files (groups=serial)"',
+    'echo "__GROUP__ concurrency=2 files=3 sum_ms=100 floor_ms=60 capped=0"',
+    'echo "selected 5 files (groups=lowconc)"',
+    'echo "not ok 1 - a test failure"',
+    'echo "# tests 8"',
+    'echo "# fail 1"',
+    'echo "# pass 7"',
+    'echo "# cancelled 0"',
+    "exit 1",
+  ].join("\n");
+  const { f, dir } = fakeSuite(suite);
+  try {
+    const child = runRunner({ root, command: `bash ${f}`, laneCount: 8, env: { QUAY_TEST_CGROUP_SCRIPT: PHASE_SCRIPT } });
+    const { code } = await waitExit(child);
+    assert.equal(code, 1, "red round exits 1");
+    const rec = lastRoundRecord(root);
+    assert.equal(rec.state, "red");
+    assert.equal(rec.reason, "failed");
+    assert.ok(rec.phases && rec.phases.length >= 3, "red round carries the phases that ran");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC4 — a suite with NO phase markers still records ≥1 phase (every spawned round has accounting)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-phd5-"));
+  const { f, dir } = fakeSuite(GREEN_SUITE);
+  try {
+    const child = runRunner({ root, command: `bash ${f}`, laneCount: 8, env: { QUAY_TEST_CGROUP_SCRIPT: PHASE_SCRIPT } });
+    await waitExit(child);
+    const rec = lastRoundRecord(root);
+    assert.ok(rec.phases && rec.phases.length >= 1, "a marker-less round records its whole wall as one phase");
+    assert.equal(rec.phases[0].phase, "static");
+    assert.equal(typeof rec.phases[0].cpu_usec, "number", "whole-round cpu differential present");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC4 — a runner CRASH mid-round writes the phase records via the trap (state + a phase-only round row)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-phd6-"));
+  // Emit the serial-start marker + serial's __GROUP__, then sleep — the crash (QUAY_TEST_CRASH_AFTER_
+  // RUNNING=500 throws 500ms after the running write, well AFTER the accumulator initialized at spawn
+  // AND after the stream markers were processed) fires while the serial phase's records are already
+  // accumulated but the suite is still in flight.
+  const suite = [
+    'echo "selected 3 files (groups=serial)"',
+    'echo "__GROUP__ concurrency=2 files=3 sum_ms=100 floor_ms=60 capped=0"',
+    "sleep 2",
+  ].join("\n");
+  const { f, dir } = fakeSuite(suite);
+  try {
+    const child = runRunner({
+      root,
+      command: `bash ${f}`,
+      laneCount: 8,
+      env: { QUAY_TEST_CGROUP_SCRIPT: PHASE_SCRIPT, QUAY_TEST_CRASH_AFTER_RUNNING: "500" },
+    });
+    await waitExit(child);
+    const s = readState(root);
+    assert.equal(s.state, "red");
+    assert.equal(s.reason, "crashed");
+    assert.ok(s.phases && s.phases.length >= 1, "crashed state carries the phase records");
+    const rec = lastRoundRecord(root);
+    assert.ok(rec && rec.phases && rec.phases.length >= 1, "crash path appends a phase-carrying round row");
+    assert.equal(rec.state, "red");
+    assert.equal(rec.reason, "crashed");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("unit — the cgroup counter parsers handle the REAL cgroup v2 shapes", () => {
+  assert.equal(parseCpuStatUsageUsec("usage_usec 963001371675\nuser_usec 419965954062\nsystem_usec 305143213852\n"), 963001371675);
+  assert.equal(parseCpuStatUsageUsec(""), null, "absent usage_usec ⇒ null (缺键), never 0");
+  assert.equal(
+    parsePressureSomeTotal("some avg10=0.00 avg60=0.00 avg300=0.06 total=10975837195\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0\n"),
+    10975837195,
+  );
+  assert.equal(parsePressureSomeTotal("full avg10=0.00 avg60=0.00 avg300=0.00 total=0\n"), null, "no `some` line ⇒ null");
+});
+
+test("unit — readPhaseCounters reads the three cumulative counters from a cgroup dir (explicit seam dir)", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-cg-"));
+  try {
+    fs.writeFileSync(path.join(dir, "cpu.stat"), "usage_usec 123\nuser_usec 1\n");
+    fs.writeFileSync(path.join(dir, "cpu.pressure"), "some avg10=0 avg60=0 avg300=0 total=456\n");
+    fs.writeFileSync(path.join(dir, "io.pressure"), "some avg10=0 avg60=0 avg300=0 total=789\n");
+    const r = readPhaseCounters(dir);
+    assert.deepEqual(r.counters, { cpu_usec: 123, psi_cpu_total: 456, psi_io_total: 789 });
+    assert.equal(r.read_error, null);
+    // A missing file fails open with a reason — never a fabricated 0.
+    fs.rmSync(path.join(dir, "io.pressure"));
+    const r2 = readPhaseCounters(dir);
+    assert.equal(r2.counters, null);
+    assert.ok(r2.read_error && r2.read_error.includes("io.pressure"), "read error names the missing file");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("unit — PhaseDifferentialAccounting computes exact differentials from the phase-script seam", () => {
+  const before = process.env.QUAY_TEST_CGROUP_SCRIPT;
+  process.env.QUAY_TEST_CGROUP_SCRIPT = JSON.stringify({
+    static: { cpu_usec: 1000, psi_cpu_total: 500, psi_io_total: 10 },
+    serial: { cpu_usec: 5000, psi_cpu_total: 2000, psi_io_total: 30 },
+    main: { cpu_usec: 5500, psi_cpu_total: 2300, psi_io_total: 33 },
+    round_end: { cpu_usec: 6000, psi_cpu_total: 2500, psi_io_total: 40 },
+  });
+  try {
+    const acc = new PhaseDifferentialAccounting(999999, (p) => (p === "serial" ? 2 : 1));
+    acc.init("static");
+    acc.boundary("serial");
+    acc.boundary("main"); // closes serial
+    acc.finalize(); // closes main, reads round_end
+    const phases = acc.records.map((r) => ({ phase: r.phase, cpu_usec: r.cpu_usec, psi_cpu_total: r.psi_cpu_total, lanes: r.lanes }));
+    assert.deepEqual(phases, [
+      { phase: "static", cpu_usec: 5000 - 1000, psi_cpu_total: 2000 - 500, lanes: 1 },
+      { phase: "serial", cpu_usec: 5500 - 5000, psi_cpu_total: 2300 - 2000, lanes: 2 },
+      { phase: "main", cpu_usec: 6000 - 5500, psi_cpu_total: 2500 - 2300, lanes: 1 },
+    ]);
+    assert.equal(acc.read_error, null);
+  } finally {
+    if (before === undefined) delete process.env.QUAY_TEST_CGROUP_SCRIPT;
+    else process.env.QUAY_TEST_CGROUP_SCRIPT = before;
   }
 });
 
