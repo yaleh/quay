@@ -51,15 +51,15 @@ vhs merge（commit 1b77a057）在 `plugin/skills/cold-start/SKILL.md` 上丢失�
 
 ## Acceptance Criteria
 
-- [ ] AC1: `node --test plugin/test/cold-start-skill.test.mjs` 隔离绿——**5 条 recovery 断言全过**
+- [x] AC1: `node --test plugin/test/cold-start-skill.test.mjs` 隔离绿——**5 条 recovery 断言全过**
       （Contract / AC1/AC4 / AC2 / AC3 / ghost-telemetry），整文件 14/14
-- [ ] AC2: `npx tsc --noEmit -p tsconfig.json` 0 errors
-- [ ] AC3: `scripts/test.sh --for-task gap-vhs-merge-dropped-cold-start-0a-recovery-routing --allow-thin`
+- [x] AC2: `npx tsc --noEmit -p tsconfig.json` 0 errors
+- [x] AC3: `scripts/test.sh --for-task gap-vhs-merge-dropped-cold-start-0a-recovery-routing --allow-thin`
       绿（thin：skill doc 改动无 basename 测试对，`cold-start-skill.test.mjs` 是直接声明测试）
-- [ ] AC4: 结构断言——0a 节在 0b 前；双向路由（`if and only if` + `never false-positive into recovery`）；
+- [x] AC4: 结构断言——0a 节在 0b 前；双向路由（`if and only if` + `never false-positive into recovery`）；
       `existing tools only`；0b 含 `all three come back clean` / `DELETE the ghost record` /
       `verify against the task's REAL state`（round-54 原文短语，逐字）
-- [ ] AC5: 0a 节与 `cd7f6da9` lines 139-170 **逐字一致**（`git diff` 对照）；vhs 侧 fresh-start
+- [x] AC5: 0a 节与 `cd7f6da9` lines 139-170 **逐字一致**（`git diff` 对照）；vhs 侧 fresh-start
       steps 1-9 内容未改动
 
 ## Touches
@@ -77,3 +77,20 @@ vhs merge（commit 1b77a057）在 `plugin/skills/cold-start/SKILL.md` 上丢失�
 - [ ] tsc 0 errors
 - [ ] scoped gate（--for-task --allow-thin）绿
 - [ ] 提交在 `task/gap-vhs-merge-dropped-cold-start-0a-recovery-routing` 分支，不 merge/push/flip status
+
+## Execution record (2026-08-13)
+
+**关键发现：修复已在分支历史中（commit `b15b1533`，「gap: vhs merge 丢失 cold-start SKILL.md 0a
+路由节（round 55 红）」），位于本任务分支 fork 点 `bf0629dc` 之前即已合入。** 工作树干净，
+SKILL.md 无需再改——本次执行是对已提交状态的逐项验证（未 flip status，保持 `ready`，符合 DoD）：
+
+- 隔离测试 `node --test plugin/test/cold-start-skill.test.mjs` → **14/14 绿**（5 条 recovery 断言全过）
+- `npx tsc --noEmit -p tsconfig.json` → **0 errors**
+- scoped gate `scripts/test.sh --for-task gap-vhs-merge-dropped-cold-start-0a-recovery-routing
+  --allow-thin` → **exit 0，14/14 绿**
+- AC4 结构断言 8/8 PASS（0a 在 0b 前；`if and only if` + `never false-positive into recovery`；
+  `existing tools only`；0b 含 `all three come back clean` / `DELETE the ghost record` /
+  `verify against the task's REAL state`；0b 头逐字）
+- AC5 0a 逐字对照 `cd7f6da9` lines 139-170 → **MATCH（32 行，逐字一致）**；b15b1533 的 SKILL.md
+  diff 未触碰 fresh-start steps 1-9（仅后续无关 commit 8781f798 加了新 step 1c，属另一任务）
+- pre-commit guard 判定 `allow`（state=green，无运行中的轮）
