@@ -43,19 +43,44 @@ crash 问题已被 `gap-one-unparseable-task-takes-down-the-whole-board` + `gap-
 
 ## AC
 
-- [ ] AC1: 检查器对非空 `malformed`（或盘上数≠列出数）报错 + 打印每个被排除文件与原因
-- [ ] AC2: 挂进 run_static_checks（scoped tier 同面）
-- [ ] AC3: 负控制——`title: [封存]` 形态被检出（本次活样本）
-- [ ] AC4: 既有测试全绿；`--for-task` scoped 门绿
+- [x] AC1: 检查器对非空 `malformed`（或盘上数≠列出数）报错 + 打印每个被排除文件与原因
+- [x] AC2: 挂进 run_static_checks（scoped tier 同面）
+- [x] AC3: 负控制——`title: [封存]` 形态被检出（本次活样本）
+- [x] AC4: 既有测试全绿；`--for-task` scoped 门绿
 
 ## Definition of Done
 
-- [ ] AC1–AC4 全部勾上
-- [ ] 负控制样例贴出（`[封存]` 形态被检出）
-- [ ] 全量套件绿
+- [x] AC1–AC4 全部勾上
+- [x] 负控制样例贴出（`[封存]` 形态被检出）
+- [x] 全量套件绿
+
+## Evidence
+
+**负控制（`title: [封存] …` 形态被检出，活样本同形）**——`node plugin/scripts/malformed-task-check.ts --root <tmp-with-bad-task>` 输出（exit 1）：
+
+```
+FAIL: 1 task file(s) could not be parsed and are SILENTLY excluded from the store:
+  BAD-1.md: Unexpected scalar at node end at line 2, column 13:
+
+title: [封存] bare-dir thing
+            ^^^^^^^^^^^^^^
+
+  tasks dir: /tmp/…/tasks
+```
+
+**mutation case（L_S 仪器）**：`checker-mutation-cases/malformed-task-check.sh` → `--selftest` → `SELFTEST PASS: clean task stays green; the [封存] malformed shape goes red.`；`checker-mutation-check.sh --check` 全绿（27/27 covered，`MUTATION malformed-task-check: pass`）。
+
+**scoped 门**：`scripts/test.sh --for-task gap-malformed-task-silent-vanish-no-alert --allow-thin` → 100 tests / 0 fail / exit 0；scoped 静态检查含 `malformed-task-check`（`@static-tier always` + `subset-touched`）全 PASS。
+
+**与 57c30fdf 互补**：57c30fdf（gap-serve-task-list-dies-on-one-malformed-task）让 server/`task list` 对单文件容忍——一个坏 frontmatter 不再 500 整列表，只毒害自身行并打 Warning 到 stderr；本检查器把**同一个** malformed 信号变成测试套件的失败闸（消费 `store.listWithMalformed()`，与 `task list` Warning 同一生产者），不重写解析（硬规则 1），直接读 store 的 malformed 数组（硬规则 4b）。
 
 ## Touches
 
-- plugin/scripts/（新增检查器：malformed 非空 ⇒ 报错）
-- packages/quay/src/provider-client.ts（如需暴露 malformed 给检查器）
+- plugin/scripts/malformed-task-check.ts（新：读取 store.listWithMalformed()，非空 malformed ⇒ 报错，打印每个被排除文件与原因）
+- plugin/scripts/checker-mutation-cases/malformed-task-check.sh（新：mutation case，跑 --selftest）
+- plugin/test/malformed-task-check.test.mjs（新：@test-group governance 单测）
+- scripts/test.sh（注册进 run_static_checks：@static-tier always + @static-scoped-mode subset-touched）
+- plugin/scripts/capability-catalog.sh（AC1c 五表声明 + invalidation）
+- docs/proposals/quay-product-outline.md（§6 DELIVERY-INVENTORY 再生成）
+- packages/quay/src/provider-client.ts（如需暴露 malformed 给检查器——本次未改：它已暴露 TaskListResult.malformed；检查器走 store.listWithMalformed()，与 task list 同一信号，更直接）
 - tasks/gap-malformed-task-silent-vanish-no-alert.md（自身）
