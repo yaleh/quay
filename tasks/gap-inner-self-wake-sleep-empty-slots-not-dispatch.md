@@ -126,10 +126,11 @@ one-per-wake 不是 inner 没填满/偷懒，inner 派 1 条是**严格遵守文
       现跑 slot-refill 的 `no_refill_reason` 参与判定，心跳里该字段仅作展示不参与（硬规则 4b 自产量
       不能判其生产者）；负控制必加：机件说无阻塞理由（no_refill_reason=None）∧ 心跳写自述散文 ⇒ 闸
       仍拒（checker exit 1 / writer 拒写零写入），已入自动化测试（checker 3 纯 + 1 CLI、writer 1 CLI）
+- [x] AC9: EXIT:0 捕获（manager 2026-08-13 裁定补）——写心跳命令的非零退出码不得被吞（`|| true`/管道/`set +e` 皆禁）；构造一次拒绝 ⇒ 调用方（子进程 spawn）看到非零退出码，已入自动化负控制（writer 新增 exit-code-capture 用例：status=1 + 合法写 status=0 对照）
 
 ## Definition of Done
 
-- [x] AC1–AC7 全部勾上
+- [x] AC1–AC9 全部勾上
 - [x] 负控制样例贴出（04:02:52Z + 04:22Z + 07:13 + 第六样本 四样本回放报红）
 - [ ] 六时刻验收（outer 裁定 2026-08-13 + manager 追加第六样本）：重放 04:25 / 04:48 / 06:40 / 07:05 / 07:13 /
       第六样本 读数，判据①必须六次全红——任一不红 = 不变式写窄了（07:13 + 第六样本已自动化回放报红；
@@ -227,6 +228,21 @@ noReason=false ⇒ 闸被绕过（硬规则 4b：自产量不能判其生产者�
 **scoped 门**（worktree 内 `scripts/test.sh --for-task ... --allow-thin`）：
 **149 pass / 0 fail / 0 cancelled，exit 0**（checker 文件 51 pass、writer 文件 18 pass；
 checker 44→51 = 新增 3 纯负控制 + 1 CLI 负控制 + 04:02:52Z CLI 改为机件回放）。
+
+**AC53 EXIT:0 捕获（manager 2026-08-13 裁定）——写心跳命令非零退出码审计 + 负控制**：
+
+**逐站点审计（三处文档化调用，均无吞退出码构造）**：
+- `plugin/loop/fast-mode-tick-core.md:64`（B3 写命令）：裸 `node ...` 调用，无 `|| true`/管道/`set +e`/尾 `;`/`&&` 链/`$(...)`；line 63 已明示「写入方拒绝心跳、exit 非 0 ⇒ 本 tick 不得重排 sleep,回步骤 4 派发」。本次补一行「若该命令 exit 非 0 ⇒ 立即回步骤 4，禁止吞退出码」。
+- `orchestration/fast-mode-tick-core.md:50`（B3 写命令）：裸 `node ...` 调用，无任何吞退出码构造；line 51 已有显式后置条件「若该写心跳命令 exit 非 0 ⇒ 本 tick 不得 ScheduleWakeup 睡,立即回步骤 4 派发」。本次补「禁止 `|| true`/管道/`set +e`」。
+- `plugin/loop/fast-mode-loop-tick.md:1141`（步骤 6 bash 块）：裸 `node ... \` 多行续行，无 `|| true`/管道/`;`/`&&`；line 1136 已明示「exit 非 0 ⇒ 本 tick 不得 ScheduleWakeup 睡，回步骤 4 派发」。本次补「禁止吞掉非零退出码」。
+- 无 shell wrapper / tick 脚本程序化调用该写入方（全仓 grep：仅测试文件 spawn 它；任务体引用均为历史/证据记录，非活调用面）。⇒ 审计结论：**非零退出码在文档化调用路径上不被吞**；负控制测试从调用方侧机械钉死「拒绝 ⇒ 看到非零退出」。
+
+**负控制（自动化测试）**：`plugin/test/inner-wakeup-heartbeat.test.mjs` 新增「AC53 EXIT:0 捕获」用例——构造一次拒绝（可派 workspace + 空 in-flight ⇒ 结束不变式违例），断言调用方（spawnSync）看到子进程 status=1（非 0、恰好 1）+ stderr 带拒绝理由 + 零写入；对照：同一 harness 对合法写看到 status=0（证明 harness 不是恒非零）。
+
+**scoped 门**（worktree 内 `scripts/test.sh --for-task gap-inner-self-wake-sleep-empty-slots-not-dispatch --allow-thin`）：
+**150 pass / 0 fail / 0 cancelled，exit 0**（writer 文件 19 pass：18→19 = 新增 AC9 exit-code-capture 用例）；
+静态检查 task-contract-check / adr016-screen-use-check / superseded-capability-check / judgment-consumer-check /
+delivery-inventory-drift-gate 全 PASS。
 
 ## Touches
 
