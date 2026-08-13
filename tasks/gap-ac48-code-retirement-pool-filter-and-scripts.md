@@ -1,7 +1,7 @@
 ---
 id: gap-ac48-code-retirement-pool-filter-and-scripts
 title: AC48 代码面承接——ready-pool-check pool 过滤层取消 + integration-branch-model.ts/integration-batch-merge.sh 退役标注
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -40,16 +40,16 @@ brief 里、没有任务承接——**manager 2026-08-13 三法查证无承接�
 
 ## Acceptance Criteria
 
-- [ ] AC1 ready-pool-check pool 过滤层取消（`pool < floor` 门控移除），引用加退役标注不删。
-- [ ] AC2 A22 行为验证：`--apply` 合格候选照晋（不看 pool 大小）、无候选零写（负控制）。
-- [ ] AC3 integration-branch-model.ts / integration-batch-merge.sh 退役标注落地（不删，理由档案）。
-- [ ] AC4 既有 ready-pool-check / integration-batch-merge / branch-model 测试全绿；`--for-task` scoped 门绿。
-- [ ] AC5 AC48 判据2 代码面完成（三件退役动作中代码两件 = 本任务；分支+文档已由 outer 完成）。
+- [x] AC1 ready-pool-check pool 过滤层取消（`pool < floor` 门控移除），引用加退役标注不删。
+- [x] AC2 A22 行为验证：`--apply` 合格候选照晋（不看 pool 大小）、无候选零写（负控制）。
+- [x] AC3 integration-branch-model.ts / integration-batch-merge.sh 退役标注落地（不删，理由档案）。
+- [x] AC4 既有 ready-pool-check / integration-batch-merge / branch-model 测试全绿；`--for-task` scoped 门绿。
+- [x] AC5 AC48 判据2 代码面完成（三件退役动作中代码两件 = 本任务；分支+文档已由 outer 完成）。
 
 ## Definition of Done
 
-- [ ] pool 过滤层取消 + 两脚本退役标注落地，负控制通过。
-- [ ] AC48 判据2 代码面闭合（与 outer 的 doc/ops 面合并即 AC48 判据2 完整）。
+- [x] pool 过滤层取消 + 两脚本退役标注落地，负控制通过。
+- [x] AC48 判据2 代码面闭合（与 outer 的 doc/ops 面合并即 AC48 判据2 完整）。
 
 ## Touches
 
