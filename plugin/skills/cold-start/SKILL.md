@@ -254,6 +254,26 @@ green** — that is the too-wide criterion this gate replaces. Only the derived 
 start. The check **never falls back to the whole suite**: if 0 test files resolve from the derived
 set it fails closed (red) — a silent "nothing checked" green is not an acceptable gate.
 
+### 1c. Install the pre-commit guard hook (provisioned = active)
+
+**Why**: the pre-commit guard (`plugin/scripts/precommit-guard.ts`, shipped by `quay-init --loop`)
+is only ACTIVE when its hook is installed. The hook is **CLONE-LOCAL** (`.git/hooks/pre-commit`) —
+a fresh clone, or a project laid down before the guard wiring shipped, has NO hook and the guard
+never runs. "Built ≠ active" is exactly the gap the guard task exists to close: a guard that is never
+invoked is as good as not merged. Cold-start auto-installs the hook so the guard is active from the
+first commit after this recovery/start — and because the hook lives in `.git/hooks`, it PERSISTS
+across session recovery (no re-install needed after a crash/restart in the same clone).
+
+```bash
+node --no-warnings --experimental-strip-types <root>/plugin/scripts/precommit-guard.ts --install-hook --root <root>
+# exit 0 → the hook is installed (idempotent). A pre-existing UNRELATED hook makes it exit 2
+#           (never a silent clobber) — merge the guard shim into the existing hook, then re-run.
+ls -l <root>/.git/hooks/pre-commit   # verify — present and executable
+```
+
+Require exit 0 AND the hook file present. Non-git workspaces (no `.git/hooks`) skip — there is no
+commit surface to guard.
+
 ### 2. Build and verify the two-window session topology (AC4 — the other half of 装得上)
 
 The session the loop lives in is built **by definition**, never hand-assembled

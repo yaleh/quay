@@ -916,11 +916,21 @@ derive_loop_scripts() {
   #   the tick docs WITHOUT a `plugin/scripts/` path and are not bare-resolved by the mechanism corpus, so
   #   (a)/(b) derivation misses them — a cold-started project would run the gates and fail on missing
   #   checkers. Deliberate explicit additions (same class as the other checker transitive deps above).
+  #   precommit-guard.ts (gap-precommit-guard-wire-into-quay-init-and-cold-start): the SHARED pre-commit
+  #   guard ships with the loop so a provisioned project has the guard script laid down for its
+  #   `--install-hook` step (quay-init --loop installs the hook post-laydown; cold-start re-verifies it).
+  #   The guard is a CROSS-CUTTING mechanism (covers ALL writers — outer/manager/inner), not a
+  #   tick-doc-invoked script, so (a)/(b) derivation from the docs would miss it; the cold-start skill
+  #   ALSO references it by path (rule (a)), but the explicit entry keeps the guard shipping even if a
+  #   future doc edit drops that reference. The guard's data dependency judged-object-registry.json is
+  #   NOT shipped — it is A0b③ GENERATED per project (empty patterns ⇒ the guard takes its narrowed
+  #   fallback tasks/** + plugin/loop/** + scripts/test.sh @static-object aggregate, which is the
+  #   intended target behavior).
   printf '%s\n' inner-idle-log.ts it0-split-or-commit-check.ts pipe-exit-code-check.sh \
     gate-script-base.ts workflow-event-schema.mjs task-schema.ts touches-parser.ts wiring-coverage-check.ts \
     capability-catalog.sh l1-delivery-surface-check.ts dead-loop-check.sh inner-blocked-signal.ts \
     inner-forensics.mjs task-contract-check.ts task-status-drift-check.ts touches-orthogonality-check.ts \
-    verify-delivery-surface.ts >> "$out"
+    verify-delivery-surface.ts precommit-guard.ts >> "$out"
   # (c3) exec-core tick docs (gap-ac37-exec-core-ships-with-package): the three ≤80-line execution
   #   cores ship with the loop so an installed project can read "每轮该做什么" — the shipped tick
   #   templates (orchestrator-loop-tick.md / fast-mode-loop-tick.md) reference them by the
@@ -1924,6 +1934,34 @@ if [ "$DRY_RUN" = true ]; then
   echo "  auto-commit: SKIP (--dry-run — nothing was written, nothing to commit)"
 else
   auto_commit_laid_down
+fi
+
+# ── pre-commit guard hook (gap-precommit-guard-wire-into-quay-init-and-cold-start AC1) ────────────────
+# The pre-commit guard (plugin/scripts/precommit-guard.ts, laid down by --loop above) is only ACTIVE
+# when the hook is installed — "built ≠ active" is the exact gap this wiring closes. The hook is
+# CLONE-LOCAL (.git/hooks/pre-commit): provisioning the guard here means the guard runs for every
+# subsequent commit in THIS clone (provisioned = active). It is installed AFTER the auto-commit —
+# a fresh target has no .quay/full-suite-state.json yet, and the guard FAILS-LOUD on a missing state
+# file (AC2 of the guard task: 参照系缺失时谓词必须崩), which would block quay-init's OWN delivery
+# commit. Order: lay down → auto-commit → install hook ⇒ the auto-commit is not blocked and every
+# later commit is guarded. Non-git targets skip (no commit surface); --dry-run skips (nothing written).
+if [ "$DO_LOOP" = true ]; then
+  if [ "$DRY_RUN" = true ]; then
+    echo "  pre-commit guard hook: SKIP (--dry-run — nothing written)"
+  elif ! git -C "$WORKSPACE_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo "  pre-commit guard hook: SKIP (target is not a git repository — no commit surface to guard)"
+  elif [ ! -f "$WORKSPACE_ROOT/plugin/scripts/precommit-guard.ts" ]; then
+    echo "ERROR: pre-commit guard script not laid down (plugin/scripts/precommit-guard.ts missing) — hook not installed" >&2
+    exit 2
+  else
+    if node --no-warnings --experimental-strip-types "$WORKSPACE_ROOT/plugin/scripts/precommit-guard.ts" --install-hook --root "$WORKSPACE_ROOT"; then
+      : # installed (idempotent) — the install line is on the guard's stdout
+    else
+      echo "ERROR: pre-commit guard hook install failed (precommit-guard.ts --install-hook returned non-zero)." >&2
+      echo "       A pre-existing UNRELATED pre-commit hook refuses to be clobbered — merge the guard shim manually, then re-run quay-init (idempotent)." >&2
+      exit 2
+    fi
+  fi
 fi
 
 # ── summary ─────────────────────────────────────────────────────────────────────────────────────────
