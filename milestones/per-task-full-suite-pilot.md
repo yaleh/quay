@@ -176,3 +176,53 @@
 ## 5b. AC43/AC45 处置建议（重测后）
 
 **保持 OPEN（不标 cancelled）**：AC3b 吞吐门未定（含干扰）⇒ 停跑全局轮前提未达成 ⇒ AC43（套件无 VCS 知识）/AC45（记录 per-task 化）继续存在。**机制层面已获强证据**：per-task 全量并发（2 套同时跑）结构上可行且全绿 —— AC43/AC45 的取消只差吞吐门的定量确认（需管道活跃期/静默窗口重测）。
+
+## 8. ≥2h 不劣化重测（gap-spec11-retest-2h-nondegradation，2026-08-13 16:10–18:10）
+
+> 任务：`gap-spec11-retest-2h-nondegradation`（status ready）。AC3b 门已修正为**不劣化设计**（本窗口 fan-in/h ≥ 紧邻前同长度窗口 fan-in/h，同长度+紧邻），这是停全局轮关键路径的最后一步。模式 (b) 如实记账继承（人 2026-08-13 裁定）。前置自检纪律：启动测量套件前确认主 checkout `.quay/full-suite-state.json` 非 running。
+
+### 测量设置
+- 被测 commit：**ab185ef3**（measure-nondegrad-a/b HEAD；develop 在窗口前 5s 前进到 b08f1538，为 task-flip 提交，无代码变更，等价）
+- 并发度：`QUAY_MAX_CONCURRENT_SUITES`=2（共享锁文件 `<git-common-dir>/full-suite.lock.0/.1`，跨全部 worktree 争同一组锁；两把 `flock -n`，满则等任一释放，fail-closed 600s）
+- 相预算：hostParallelism(16) ÷ 2 = **8 lanes/suite**
+- 2 个 scope=worktree 全量：**Suite A（measure-nondegrad-a）** + **Suite B（measure-nondegrad-b）**，各 8 lanes，同 commit ab185ef3
+- 运行器：`plugin/scripts/full-suite-runner.ts --root <wt> --state-dir /tmp/spec11-nondegrad/{a,b} --lane-count 8 --sync`（state/log 独立 /tmp，不污染主 gate 信号）
+- 前置：两 wt 均 `worktree-include.sh` provision（config.yml + vendor dist）+ node_modules 符号链接
+- 主轮衔接：round 166（16:03:21 启动，runner=outer scope=main）于 **16:09:53 绿**（durationMs 392892 ≈ 6.5 min）后释放槽位；测量套件于 16:10:07 启动、16:10:09 进入 running
+
+### AC1 前置自检（S=2 个 scope=worktree 轮同时 running）—— ✅ 通过
+
+| suite | worktree | startedAt | state | scope | laneCount | 2-slot 锁槽位 |
+|---|---|---|---|---|---|---|
+| A | measure-nondegrad-a | 16:10:09.340 | running | worktree | 8 | **slot .0**（full-suite.lock.0） |
+| B | measure-nondegrad-b | 16:10:09.336 | running | worktree | 8 | **slot .1**（full-suite.lock.1） |
+
+- 观测者 16:10:23 确认「both A and B RUNNING」（orchestrator 轮询）；锁文件 `fuser` 确认两槽各被一 suite 持有（非排队）。
+- **⇒ AC1 前置自检通过**：读数窗口（16:10:23 起）内确有 2 个 scope=worktree 轮同时 running、各持独立槽位。与重测（15:17）一致，2-slot 锁下并发启动无串行化、无 abort。
+
+### 结果
+
+| suite | worktree | 结果 | durationMs | 测试数 | 说明 |
+|---|---|---|---|---|---|
+| A | measure-nondegrad-a | **green** | 550349（9.2 min） | 4348 / 0 fail / 0 cancelled | 8 lanes |
+| B | measure-nondegrad-b | **red**（reason=failed） | 549390（9.2 min） | 4348 测试 / **1 flaky 失败** | 8 lanes |
+
+- **Suite B 红因（flaky，非代码缺陷）**：`plugin/test/supervisor-observe.test.mjs` AC3d（process_state self-match negative control，--comm bash）。**同 commit ab185ef3 在 Suite A（14906ms passed）与 round 166（14446ms passed）均绿** ⇒ 2-slot 并发负载下 timing 敏感测试的环境性 flake，非被测代码缺陷。这是本测量对「per-task 并发全量」的**一个真实干扰观测**：时序敏感测试在 2-slot 并发下可 flake。
+
+### 紧邻前同长度窗口基线（14:10:23–16:10:23，即本窗口前 2h）
+
+| 量 | 读数 |
+|---|---|
+| A6 fan-in（合入 develop） | **7**（14:16 91327d37 / 14:27 133c507c / 15:37 50375bfe / 15:39 ab5b8f1a / 15:40 1798ca81 / 15:58 ff2e449d / 16:01 a46c72f1） |
+| 基线 fan-in/h | **7 / 2.0h = 3.50/h** |
+| 全局轮 | rounds 160–166（7 轮，2 red：round 160 static-check red 33.6s / round 162 static-check red 27.0s；round 166 于窗口末尾 16:03 启动、16:09 绿） |
+| 污染标注 | **含集中 closure**：15:37–15:40 三连 fan-in（50375bfe→ab5b8f1a→1798ca81，~3 min 内 3 个）；round 164 durationMs=1013819（**17 min**）因上一测量（spec11-stage2 重测 15:17–15:29）持 2 槽被锁等待 ~10 min —— 前窗本身即含上一测量的锁等待污染 |
+
+### 本窗口（16:10:23 → 18:10:23，≥2h）—— 读数窗口结束（18:10）后回填
+| 量 | 读数 |
+|---|---|
+| 窗口内 A6 fan-in（合入 develop 任务数） | 待填（observer 18:10 计算） |
+| 本窗口 fan-in/h | 待填 |
+| 不劣化判定 | 待填（本窗口 ≥ 3.50/h ⇒ 不劣化成立；否则按单向有效性记未定） |
+| 本窗口污染 | round 166 末尾（16:03–16:09）+ 测量套件持 2 槽 16:10:07–16:19（下一全局轮被锁等待，与 round 164 同形）+ 后续轮待填；集中 closure 待填 |
+| 前窗污染 | rounds 160–166（7 轮，2 red）；round 164 durationMs=1013819（17 min，锁等待）；**含集中 closure**：15:37–15:40 三连 fan-in |

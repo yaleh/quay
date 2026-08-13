@@ -60,4 +60,10 @@ extra:
 
 ## Evidence
 
-（落地后回填）
+**≥2h 窗口测量（2026-08-13 16:10:23 → 18:10:23，checkpoint 16:19）**：
+- **前置自检（AC1）✅ 通过**：round 166（16:03 启动、16:09 绿）释放槽位后，measure-nondegrad-a/b 两 scope=worktree 套件 16:10:09 启动、16:10:23 确认同时 running、各持 2-slot 锁槽位 .0/.1（8 lanes/suite，被测 commit ab185ef3）。
+- **套件结果**：A **green**（4348/0/0，550349ms）；B **red**（reason=failed，549390ms）——`supervisor-observe.test.mjs` AC3d 失败（timing flaky：同 commit 在 A 与 round 166 均绿，2-slot 并发负载下 flake）。scoped 门 `--for-task gap-spec11-retest-2h-nondegradation --allow-thin` exit 0。
+- **基线（前同长度窗口 14:10:23–16:10:23）**：7 A6 fan-in / 2.0h = **3.50/h**；污染含集中 closure（15:37–15:40 三连 fan-in）+ round 164 锁等待 17 min。
+- 本窗口读数（fan-in 计数）待窗口结束（18:10）由 observer 计算后回填；结论待填。
+
+（续段读数贴入 `milestones/per-task-full-suite-pilot.md` §8）
