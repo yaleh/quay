@@ -2,7 +2,7 @@
 id: gap-node-mainthread-comm-literal-host-dependent
 title: node-MainThread comm 字面量在 boheidc 恒 0（真
   comm=MainThread）——resource-gate/process-budget/orphan 静默失效，机械检查背书错误字面量
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -78,9 +78,9 @@ pgrep -xc node-MainThread => 0；pgrep -cf 'bin/node' => 26（真值同量级非
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全部勾上
-- [ ] 读数样例贴出（见 Evidence：真套件跑时 node_procs/budget_in_use 非零）
-- [ ] 全量套件绿
+- [x] AC1–AC5 全部勾上
+- [x] 读数样例贴出（见 Evidence：真套件跑时 node_procs/budget_in_use 非零）
+- [x] 全量套件绿（round 93 green，commit=c8f6596b，tests=4150，fan-in 后干净树认证）
 
 ## Touches
 

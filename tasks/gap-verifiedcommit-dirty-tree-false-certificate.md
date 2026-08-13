@@ -60,6 +60,17 @@ scope_unit serial_phase_ms startedAt state static_phase_ms swap_peak_mb tests`�
 没做错什么；让它变成污染的是 2 秒前的一次合规提交。任何一层在动手编辑的那一刻都无法知道自己的编辑何时被暴露。
 （`./undefined` 就是 untracked 文件，今天真的参与了一次事故——untracked 不是「可忽略」。）
 
+**自造脏（manager 2026-08-13 新发现——改变缺陷性质）**：脏树里有一块不是任何人忘了提交，是套件自己造的：
+```
+git diff package-lock.json → 1 insertion / 3 deletions（三处 "peer": true 被删——npm peer 标记重写）
+package-lock.json mtime = 2026-08-13 00:08:14（round 90 终态 00:06:22 与 round 91 起跑 ~00:08 之间的 install/build 阶段）
+```
+⇒ 强指向：跑轮自身（npm install / build_dist）会改写主 checkout 里这个被跟踪文件（未做确证实验——
+`git checkout -- package-lock.json` 再跑一轮属改树，不在活 checkout 上做）。⇒ **即使三层纪律完美，
+verifiedCommit 仍可能是假证书——轮子在跑的过程中把自己脚下的树改脏了。**
+⇒ **脏净判定必须区分【外来脏】（人/agent 编辑）与【自造脏】（跑轮副作用）**：后者不能靠「大家别乱动」
+消除，只能靠隔离（worktree/快照）或把该文件排除出判定并说明理由。
+
 ## Plan
 
 round 记录带上【被实际读取内容的标识】，最低限度三样（manager 约束，不是实现）：
