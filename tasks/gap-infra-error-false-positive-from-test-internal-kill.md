@@ -1,7 +1,7 @@
 ---
 id: gap-infra-error-false-positive-from-test-internal-kill
 title: resource-gate 测试内部 kill 触发 runner 误判 infra-error（② 假阳性）
-status: todo
+status: ready
 labels:
   - gap
   - defect

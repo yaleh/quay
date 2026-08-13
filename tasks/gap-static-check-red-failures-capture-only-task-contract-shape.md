@@ -2,7 +2,7 @@
 id: gap-static-check-red-failures-capture-only-task-contract-shape
 title: verification-round failures[] 在 static-check 红时只抓 task-contract
   形状——真因（fail-closed 检查器）零条进记录
-status: todo
+status: ready
 labels:
   - gap
   - defect

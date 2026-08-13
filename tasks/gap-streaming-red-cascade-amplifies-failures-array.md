@@ -1,7 +1,7 @@
 ---
 id: gap-streaming-red-cascade-amplifies-failures-array
 title: 早红级联放大 failures[]——state=running 断言被级联红 + 无 file 条目不可归因（round 129/130 双实证）
-status: todo
+status: ready
 labels:
   - gap
   - defect

@@ -1,7 +1,7 @@
 ---
 id: gap-runner-spawn-single-flight
 title: runner 层 spawn 前单飞——重触发风暴（merge-pending 反复真）的根修
-status: todo
+status: ready
 labels:
   - gap
   - defect
