@@ -41,6 +41,11 @@ import {
   hasFanInMerge,
   parseSlotStatusOutput,
 } from "../scripts/slot-refill.ts";
+// AC2 (gap-delivery-critical-label-at-promote-not-after-dispatch): the promote gate is the fix's
+// label DETERMINATION point — applyPromotions (ready-pool-check --apply heartbeat) flips todo→ready
+// AND writes the delivery-critical label at promote time ("标签与 ready 同现"). The e2e test uses it
+// to model the CORRECT timing (label at promote), then asserts slot-refill's sort key consumes it.
+import { applyPromotions } from "../scripts/ready-pool-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -199,11 +204,18 @@ test("FIXED-CAP — --cap not passed ⇒ default 5, floor = 5 × 4 = 20 (AC3, sl
   assert.equal(r.slots_free, 5, "0 in-flight ⇒ 5 free slots at the fixed cap");
 
   // CLI without --cap: JSON carries cap=5 and floor=20.
+  // LOAD-SENSITIVE (gap-delivery-critical-label-at-promote-not-after-dispatch AC4): a bare
+  // `slot-refill` (no --in-flight) MEASURES the in-flight view via fast-mode-telemetry --slot-status,
+  // whose non-task-subagent count scans /proc GLOBALLY — under a concurrent full suite the live lane
+  // processes inflate that count and shrink slots_free (measured: 5→4 under round-109's 16 lanes).
+  // QUAY_TELEMETRY_SUBAGENTS is the telemetry CLI's OWN documented deterministic override (same pin
+  // fast-mode-telemetry.test.mjs / ac36-sortkey-criterion-check.test.mjs apply for exact-count
+  // assertions). Pinning it to 0 hermeticizes the exact slots_free=5 assertion against ambient load.
   const script = path.resolve(__dirname, "..", "scripts", "slot-refill.ts");
   const out = execFileSync(
     process.execPath,
     ["--experimental-strip-types", script, "--root", root],
-    { encoding: "utf8" },
+    { encoding: "utf8", env: { ...process.env, QUAY_TELEMETRY_SUBAGENTS: "0" } },
   );
   const parsed = JSON.parse(out);
   assert.equal(parsed.cap, 5, "CLI --cap default is 5");
@@ -564,10 +576,15 @@ test("CLI smoke: --root/--cap/--in-flight produces JSON with the refill fields (
   writeTask(root, "gap-a", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/a.ts (new)"]) });
   writeTask(root, "gap-b", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/b.ts (new)"]) });
   const script = path.resolve(__dirname, "..", "scripts", "slot-refill.ts");
+  // LOAD-SENSITIVE (gap-delivery-critical-label-at-promote-not-after-dispatch AC4): a bare
+  // `slot-refill` (no --in-flight) MEASURES the in-flight view via the /proc-GLOBAL non-task-subagent
+  // scan — under a concurrent full suite the live lane processes inflate it and shrink slots_free
+  // (measured: 3→2 under round-109's 16 lanes). QUAY_TELEMETRY_SUBAGENTS=0 is the telemetry CLI's own
+  // documented deterministic override (same pin the ac36 e2e and fast-mode-telemetry tests apply).
   const out = execFileSync(
     process.execPath,
     ["--experimental-strip-types", script, "--root", root, "--cap", "3"],
-    { encoding: "utf8" },
+    { encoding: "utf8", env: { ...process.env, QUAY_TELEMETRY_SUBAGENTS: "0" } },
   );
   const parsed = JSON.parse(out);
   assert.equal(typeof parsed.slots_free, "number");
@@ -749,10 +766,12 @@ test("ARBITRATION — CLI with a real git repo: git-read backlog drives the narr
   writeTask(root, "gap-a", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/a.ts (new)"]) });
   writeState(root, [{ file: "code/a.ts" }]); // state red
   const script = path.resolve(__dirname, "..", "scripts", "slot-refill.ts");
+  // QUAY_TELEMETRY_SUBAGENTS=0: this run asserts exact slots_free — the telemetry CLI's /proc-GLOBAL
+  // non-task-subagent scan must not shrink it under a concurrent full suite.
   const redOut = JSON.parse(execFileSync(
     process.execPath,
     ["--no-warnings", "--experimental-strip-types", script, "--root", root, "--json"],
-    { encoding: "utf8" },
+    { encoding: "utf8", env: { ...process.env, QUAY_TELEMETRY_SUBAGENTS: "0" } },
   ));
   assert.equal(redOut.arbitration.integration_backlog, 55, "git-read backlog (develop..integration), not injected");
   assert.equal(redOut.arbitration.cap_narrowed, true);
@@ -763,7 +782,7 @@ test("ARBITRATION — CLI with a real git repo: git-read backlog drives the narr
   const greenOut = JSON.parse(execFileSync(
     process.execPath,
     ["--no-warnings", "--experimental-strip-types", script, "--root", root, "--json"],
-    { encoding: "utf8" },
+    { encoding: "utf8", env: { ...process.env, QUAY_TELEMETRY_SUBAGENTS: "0" } },
   ));
   assert.equal(greenOut.arbitration.cap_narrowed, false);
   assert.equal(greenOut.effective_cap, 5, "green ⇒ effective cap restored");
@@ -861,34 +880,104 @@ test("DELIVERY-CRITICAL — a false-positive dir-glob suite-blocker does NOT dem
   assert.ok(r.recommended.includes("gap-crystal-dir"), "the dir-glob task is still dispatchable (ranked after the DC task)");
 });
 
-test("DELIVERY-CRITICAL — end-to-end: after labeling, the next refill evaluation picks the labeled task (dispatch eval > label ts) (AC4)", (t) => {
+test("DELIVERY-CRITICAL — end-to-end: a delivery-critical task promoted (todo→ready) ranks FIRST in the next refill (AC2 promote-time semantics)", (t) => {
   const root = makeWorkspace("ac36-e2e");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  // ac36-aaa sorts BEFORE ac36-e2e in id order, so the labeled task is NOT first before labeling —
-  // the label must strictly move it from rank 1 to rank 0.
+  // ac36-aaa is READY unlabeled; ac36-e2e is a TODO carrying the delivery-critical label. The promote
+  // gate flips it to ready WITH the label ("标签与 ready 同现") — the fix's timing: the label exists
+  // when the task enters the ready pool, so the sort key is in place for the NEXT selection.
   writeTask(root, "ac36-aaa", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/aaa.ts (new)"]) });
-  writeTask(root, "ac36-e2e", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/e2e.ts (new)"]) });
+  // dispatchableBody's stock AC item is 36 non-whitespace chars — BELOW the author→ready gate's 40-char
+  // MIN_SECTION_CHARS. The todo task must pass the four-artifacts gate to be promoted, so give it an
+  // AC section that clears the threshold (a real ready-pool candidate would carry a full AC item).
+  const todoBody = dispatchableBody(["- code/e2e.ts (new)"]).replace(
+    "- [ ] an AC item that is long enough",
+    "- [ ] a sufficiently long acceptance criterion item that clears the four-artifact author gate",
+  );
+  writeTask(root, "ac36-e2e", { status: "todo", labels: ["gap", "delivery-critical"], body: todoBody });
   const script = path.resolve(__dirname, "..", "scripts", "slot-refill.ts");
+  // QUAY_TELEMETRY_SUBAGENTS=0: this run asserts an EXACT 2-task recommended window — the telemetry
+  // CLI's /proc-GLOBAL non-task-subagent scan must not shrink slots_free under a concurrent suite.
   const run = () => JSON.parse(execFileSync(
     process.execPath,
     ["--no-warnings", "--experimental-strip-types", script, "--root", root, "--cap", "3", "--json"],
-    { encoding: "utf8" },
+    { encoding: "utf8", env: { ...process.env, QUAY_TELEMETRY_SUBAGENTS: "0" } },
   ));
 
+  // Before promotion the task is TODO — not in the ready pool / recommended at all.
   const before = run();
-  assert.deepEqual(before.recommended, ["ac36-aaa", "ac36-e2e"], "id order before labeling");
-  const beforeRank = before.recommended.indexOf("ac36-e2e");
-  assert.equal(beforeRank, 1, "labeled task starts at rank 1 (id order)");
+  assert.deepEqual(before.recommended, ["ac36-aaa"], "a TODO task is not in recommended (not in the ready pool)");
 
-  // Apply the delivery-critical label; record the wall-clock label time before the next refill eval.
-  const labelTs = Date.now();
+  // Promote ac36-e2e todo→ready, carrying the label (the promote gate's --apply write).
+  const promoted = applyPromotions({ tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 });
+  assert.equal(promoted.should_apply, true);
+  assert.equal(promoted.applied_promotions[0].deliveryCritical, true, "the promote record exposes the delivery-critical determination");
+  const raw = fs.readFileSync(path.join(root, "tasks", "ac36-e2e.md"), "utf8");
+  assert.match(raw, /^status:\s*ready$/m, "status landed on disk");
+  assert.match(raw, /delivery-critical/, "the label co-occurs with ready in the frontmatter");
+
+  // The next refill picks the delivery-critical task first (moved from OUTSIDE the window INTO rank 0).
+  const after = run();
+  assert.deepEqual(after.recommended, ["ac36-e2e", "ac36-aaa"], "the promoted delivery-critical task ranks first");
+  const afterRank = after.recommended.indexOf("ac36-e2e");
+  assert.equal(afterRank, 0, "strict forward movement: outside (before) → rank 0 (after)");
+});
+
+test("DELIVERY-CRITICAL — negative control: a post-dispatch label is NOT recorded as AC36 triggered; the in-flight DC task surfaces in delivery_critical_in_flight (AC2/AC3)", (t) => {
+  const root = makeWorkspace("ac36-inflight-neg");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // The exact defect timing: the task is READY and DISPATCHED (in-flight) BEFORE the label lands.
+  writeTask(root, "ac36-aaa", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/aaa.ts (new)"]) });
+  writeTask(root, "ac36-e2e", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/e2e.ts (new)"]) });
+  const script = path.resolve(__dirname, "..", "scripts", "slot-refill.ts");
+  // QUAY_TELEMETRY_SUBAGENTS=0: this run asserts exact recommended/ranking — the telemetry CLI's
+  // /proc-GLOBAL non-task-subagent scan must not shrink slots_free under a concurrent suite.
+  const run = (inFlight) => JSON.parse(execFileSync(
+    process.execPath,
+    ["--no-warnings", "--experimental-strip-types", script, "--root", root, "--cap", "3", "--json", ...(inFlight ? ["--in-flight", inFlight] : [])],
+    { encoding: "utf8", env: { ...process.env, QUAY_TELEMETRY_SUBAGENTS: "0" } },
+  ));
+
+  // Before dispatch: both ready, id order (no label yet).
+  const before = run("");
+  assert.deepEqual(before.recommended, ["ac36-aaa", "ac36-e2e"], "id order before the label");
+
+  // Dispatch ac36-e2e (in-flight), THEN apply the delivery-critical label (post-dispatch).
+  writeTask(root, "ac36-e2e", { status: "ready", labels: ["gap", "delivery-critical"], body: dispatchableBody(["- code/e2e.ts (new)"]) });
+  const after = run("ac36-e2e");
+  // The in-flight DC task is legitimately ABSENT from recommended (touches-overlap-in-flight
+  // self-exclusion — AC2: 已在飞任务不要求出现在 recommended).
+  assert.ok(!after.recommended.includes("ac36-e2e"), "in-flight DC task is NOT recommended (self-excluded)");
+  assert.deepEqual(after.recommended, ["ac36-aaa"], "only the dispatchable non-DC task is recommended");
+  // The post-dispatch label did NOT move the task into the ranking — the negative control is
+  // mechanically visible in delivery_critical_in_flight (in-flight, NOT ranked ⇒ NOT AC36 triggered).
+  assert.ok(Array.isArray(after.delivery_critical_in_flight), "delivery_critical_in_flight field is exposed");
+  assert.ok(after.delivery_critical_in_flight.includes("ac36-e2e"), "the post-dispatch-labeled in-flight task is surfaced as in-flight, not ranked");
+  assert.equal(after.ranking.length, 1, "ranking holds only the dispatchable task — no false AC36 trigger for the in-flight task");
+});
+
+test("DELIVERY-CRITICAL — pure: a delivery-critical in-flight task is excluded from recommended AND named in delivery_critical_in_flight (AC2/AC3)", (t) => {
+  const root = makeWorkspace("ac36-inflight-pure");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "ac36-aaa", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/aaa.ts (new)"]) });
   writeTask(root, "ac36-e2e", { status: "ready", labels: ["gap", "delivery-critical"], body: dispatchableBody(["- code/e2e.ts (new)"]) });
 
-  const after = run();
-  const afterRank = after.recommended.indexOf("ac36-e2e");
-  assert.ok(afterRank < beforeRank, `rank strictly improves: before ${beforeRank} → after ${afterRank}`);
-  assert.equal(after.recommended[0], "ac36-e2e", "the next refill would dispatch the labeled task first");
-  assert.ok(Date.now() >= labelTs, "dispatch evaluation happens after the label is applied (ts order)");
+  // The inner tick's authoritative path: inFlight is passed as the running-subagent set (the dispatch
+  // already happened — the label landed AFTER the task was picked).
+  const r = analyzeSlotRefill({
+    tasksDir: path.join(root, "tasks"),
+    root,
+    cap: 3,
+    inFlight: [inFlightTask("ac36-e2e", ["- code/e2e.ts (new)"])],
+  });
+  assert.ok(!r.recommended.includes("ac36-e2e"), "in-flight DC task is not recommended (self-excluded)");
+  assert.deepEqual(r.delivery_critical_in_flight, ["ac36-e2e"], "the in-flight DC task is surfaced, NOT ranked — the negative control");
+  assert.ok(!r.ranking.some((e) => e.id === "ac36-e2e"), "the in-flight DC task has no ranking entry — not a false AC36 trigger");
+
+  // Negative control: NO in-flight DC task ⇒ the field is empty.
+  const r2 = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 3 });
+  assert.deepEqual(r2.delivery_critical_in_flight, [], "no in-flight DC task ⇒ empty");
+  assert.deepEqual(r2.recommended, ["ac36-e2e", "ac36-aaa"], "without in-flight exclusion the DC task ranks first (the axis works)");
 });
 
 // ── RANKING EXPOSURE (tasks/gap-ac36-recommended-exposes-sort-key AC2) ───────────────────────────────

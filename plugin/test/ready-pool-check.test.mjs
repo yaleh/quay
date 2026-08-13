@@ -49,6 +49,7 @@ import {
   LANDING_BEHIND_THRESHOLD_DEFAULT,
   setTaskStatus,
   applyPromotions,
+  ensureDeliveryCriticalLabel,
   computeSuiteBlocking,
   isDirectoryGlob,
   consecutiveRedRounds,
@@ -2048,6 +2049,115 @@ test("CLI --apply smoke: --root/--cap/--floor-mult/--apply lands promotions + em
   assert.equal(parsed.applied_promotions.length, 1);
   const task = parseTask(fs.readFileSync(path.join(root, "tasks", "gap-candidate.md"), "utf8"));
   assert.match(task.frontmatterRaw, /^status:\s*ready$/m, "CLI --apply lands the promotion on disk");
+});
+
+// ── DELIVERY-CRITICAL AT PROMOTE (tasks/gap-delivery-critical-label-at-promote-not-after-dispatch) ─
+// The delivery-critical label's effect point is the dispatch-time sort key; it was being applied
+// AFTER dispatch (the guard task dispatched 21:21:10, labeled 21:26:17 — 5min7s late), so the task
+// entered the ready pool unlabeled and self-excluded from the ranking once in flight. AC1 fix: the
+// promote gate DETERMINES delivery-critical at promote (todo→ready) and writes the label together
+// with the ready status ("标签与 ready 同现") — so the sort key is in place for the NEXT selection.
+
+test("ensureDeliveryCriticalLabel — adds delivery-critical to a block-list labels field (AC1)", () => {
+  const fm = "id: gap-x\ntitle: x\nstatus: todo\nlabels:\n  - gap\n  - defect\nparent: null\n";
+  const r = ensureDeliveryCriticalLabel(fm);
+  assert.equal(r.deliveryCritical, true);
+  assert.equal(r.added, true);
+  assert.match(r.fm, /labels:\n  - gap\n  - defect\n  - delivery-critical/);
+  assert.match(r.fm, /^parent: null$/m, "next top-level key preserved");
+});
+
+test("ensureDeliveryCriticalLabel — adds delivery-critical to a flow-list labels field (AC1)", () => {
+  const fm = "id: gap-x\ntitle: x\nstatus: todo\nlabels: [gap, defect]\nparent: null\n";
+  const r = ensureDeliveryCriticalLabel(fm);
+  assert.equal(r.deliveryCritical, true);
+  assert.equal(r.added, true);
+  assert.match(r.fm, /labels: \[gap, defect, delivery-critical\]/);
+});
+
+test("ensureDeliveryCriticalLabel — appends a labels block when the frontmatter has none (AC1)", () => {
+  const fm = "id: gap-x\ntitle: x\nstatus: todo\nparent: null\n";
+  const r = ensureDeliveryCriticalLabel(fm);
+  assert.equal(r.deliveryCritical, true);
+  assert.equal(r.added, true);
+  assert.match(r.fm, /labels:\n  - delivery-critical/);
+  assert.match(r.fm, /^parent: null$/m, "existing frontmatter preserved");
+});
+
+test("ensureDeliveryCriticalLabel — idempotent when delivery-critical is already present (AC1)", () => {
+  const fm = "id: gap-x\ntitle: x\nstatus: todo\nlabels:\n  - gap\n  - delivery-critical\nparent: null\n";
+  const r = ensureDeliveryCriticalLabel(fm);
+  assert.equal(r.deliveryCritical, true);
+  assert.equal(r.added, false, "no duplicate item added");
+  assert.equal(r.fm, fm, "frontmatter byte-unchanged when the label is already present");
+});
+
+test("setTaskStatus with ensureDeliveryCritical writes status AND the delivery-critical label at promote (AC1 — 标签与 ready 同现)", (t) => {
+  const root = makeWorkspace("sts-dc");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const body = "**type:** execution\n\n## Proposal\nA real proposal paragraph long enough to be counted.\n\n## Plan\nA real plan paragraph long enough to be counted.\n";
+  writeTask(root, "gap-crit", { status: "todo", labels: ["gap"], body });
+
+  const out = setTaskStatus(root, "gap-crit", "ready", { ensureDeliveryCritical: true });
+  assert.equal(out.ok, true);
+  assert.equal(out.to, "ready");
+  assert.equal(out.deliveryCritical, true, "the promote record exposes the determination");
+
+  const raw = fs.readFileSync(path.join(root, "tasks", "gap-crit.md"), "utf8");
+  assert.match(raw, /^status:\s*ready$/m, "status flipped to ready");
+  assert.match(raw, /^\s+- delivery-critical$/m, "delivery-critical label co-occurs with ready");
+  assert.match(raw, /^\s+- gap$/m, "existing label preserved");
+});
+
+test("setTaskStatus WITHOUT ensureDeliveryCritical does NOT add the label (AC1 negative control)", (t) => {
+  const root = makeWorkspace("sts-dc-neg");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const body = "**type:** execution\n\n## Proposal\nA real proposal paragraph long enough to be counted.\n\n## Plan\nA real plan paragraph long enough to be counted.\n";
+  writeTask(root, "gap-plain", { status: "todo", labels: ["gap"], body });
+
+  const out = setTaskStatus(root, "gap-plain", "ready");
+  assert.equal(out.ok, true);
+  assert.equal(out.deliveryCritical, false, "a non-determined promotion exposes deliveryCritical:false");
+
+  const raw = fs.readFileSync(path.join(root, "tasks", "gap-plain.md"), "utf8");
+  assert.match(raw, /^status:\s*ready$/m, "status flipped to ready");
+  assert.doesNotMatch(raw, /delivery-critical/, "no label was invented for a non-delivery-critical task");
+});
+
+test("applyPromotions: a delivery-critical todo enters ready WITH its label (AC1 — label co-occurs with ready)", (t) => {
+  const root = makeWorkspace("apply-dc");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-r1", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-r2", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-crit", gapTask("gap-crit", { labels: ["gap", "delivery-critical"] }));
+
+  const opts = { tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 }; // floor 3, pool 2
+  const r = applyPromotions(opts);
+  assert.equal(r.should_apply, true);
+  assert.equal(r.applied_promotions.length, 1);
+  assert.equal(r.applied_promotions[0].id, "gap-crit");
+  assert.equal(r.applied_promotions[0].deliveryCritical, true, "the applied record exposes the delivery-critical determination");
+
+  const task = parseTask(fs.readFileSync(path.join(root, "tasks", "gap-crit.md"), "utf8"));
+  assert.match(task.frontmatterRaw, /^status:\s*ready$/m, "status landed on disk");
+  assert.ok(task.labels.includes("delivery-critical"), "the label is in the frontmatter at ready-entry (标签与 ready 同现)");
+});
+
+test("applyPromotions: a non-delivery-critical candidate is promoted WITHOUT the label (AC1 negative control)", (t) => {
+  const root = makeWorkspace("apply-dc-neg");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-r1", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-r2", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-plain", gapTask("gap-plain"));
+
+  const opts = { tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 }; // floor 3, pool 2
+  const r = applyPromotions(opts);
+  assert.equal(r.applied_promotions.length, 1);
+  assert.equal(r.applied_promotions[0].deliveryCritical, false, "no determination for an unlabeled candidate");
+
+  const task = parseTask(fs.readFileSync(path.join(root, "tasks", "gap-plain.md"), "utf8"));
+  assert.match(task.frontmatterRaw, /^status:\s*ready$/m);
+  assert.ok(!task.labels.includes("delivery-critical"), "no label invented — negative control");
 });
 
 // ── Suite-blocking signal (tasks/gap-ready-relevance-blind-to-suite-blocking-signal) ────────────────

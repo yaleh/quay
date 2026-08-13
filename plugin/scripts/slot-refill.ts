@@ -355,6 +355,14 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
   // in the result so the tick can close deferred candidates' open brackets (--close-task --outcome
   // deferred). slot-refill stays PURE; it only reports.
   let deferred = [];
+  // AC2/AC3 (gap-delivery-critical-label-at-promote-not-after-dispatch): the delivery-critical tasks
+  // EXCLUDED from this round's recommendation because they are IN-FLIGHT (deferred with a
+  // `touches-overlap-in-flight` reason — the "被自己挤出 ranking" case: a task already dispatched is
+  // self-excluded by its own in-flight touches). An in-flight DC task is legitimately absent from
+  // `recommended`/`ranking` (the axis already acted at the PREVIOUS selection that dispatched it); a
+  // label applied AFTER dispatch shows up HERE — in-flight, NOT ranked — which is the negative
+  // control "派发后补标签不被误记为 AC36 已触发". Empty while halted (nothing is evaluated).
+  let deliveryCriticalInFlight = [];
   if (!halt.halted) {
     const sharedFiles = walkFiles(root);
     const expand = (globs) => expandDeclaredTouches(globs, root, sharedFiles);
@@ -386,6 +394,16 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
     // instead of the queue segment silently accruing toward OVER90.
     const candidates = [];
     const defer = (id, reason) => deferred.push({ id, reason });
+    // AC2/AC3 (gap-delivery-critical-label-at-promote-not-after-dispatch): a delivery-critical task
+    // deferred by in-flight occupancy (touches-overlap-in-flight) is an IN-FLIGHT DC task — the label
+    // arrived after (or at) dispatch, so the task is legitimately absent from this round's ranking.
+    // It is surfaced in `delivery_critical_in_flight` (NOT in `recommended`/`ranking`), which is the
+    // negative control "派发后补标签不被误记为 AC36 已触发".
+    const dcLabels = (task) => Array.isArray(task.labels) && task.labels.includes("delivery-critical");
+    const deferInFlightDc = (task, id, reason) => {
+      defer(id, reason);
+      if (dcLabels(task)) deliveryCriticalInFlight.push(id);
+    };
     for (const id of pool.ready) {
       const file = path.join(tasksDir, `${id}.md`);
       if (!fs.existsSync(file)) { defer(id, "task-file-missing"); continue; }
@@ -412,12 +430,12 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
       // only merge-clear candidates fall through to the peer arm.
       const parsed = parseTouches(text);
       const mergeBlock = mergeSurfaceBlock(parsed, mergeSurfaces, expand);
-      if (mergeBlock.blocked) { defer(id, `touches-overlap-in-flight (merge-worktree ${mergeBlock.name})`); continue; }
+      if (mergeBlock.blocked) { deferInFlightDc(task, id, `touches-overlap-in-flight (merge-worktree ${mergeBlock.name})`); continue; }
       let blocked = null;
       for (const inf of inFlightParsed) {
         if (!checkTouchesPair(parsed, inf.touches, expand).disjoint) { blocked = inf.id; break; }
       }
-      if (blocked) { defer(id, `touches-overlap-in-flight (peer ${blocked})`); continue; }
+      if (blocked) { deferInFlightDc(task, id, `touches-overlap-in-flight (peer ${blocked})`); continue; }
       // step-4 check 4: not-yet-flipped — work already landed (fan-in merged / master-landed), don't
       // re-dispatch a subagent to re-verify it (gap-slot-refill-repeats-done-eligible-recommendations).
       if (isNotYetFlippedSkip({ id, body: text, root, excludedNyfIds })) { defer(id, "not-yet-flipped"); continue; }
@@ -579,6 +597,12 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
     // ({id, deliveryCritical, suiteBlocking, rank}) so AC36 判据②'s "strict forward movement +
     // negative control" is mechanically assertable from the JSON alone.
     ranking,
+    // AC2/AC3 (gap-delivery-critical-label-at-promote-not-after-dispatch): the delivery-critical
+    // tasks EXCLUDED from this round's recommendation because they are IN-FLIGHT (touches-overlap-
+    // in-flight). Distinct from `ranking`/`recommended` (which hold only the dispatchable set): an
+    // in-flight DC task is legitimately absent from the ranking, and a post-dispatch label is
+    // surfaced HERE as "in-flight, NOT ranked" — the negative control, never a false AC36 trigger.
+    delivery_critical_in_flight: deliveryCriticalInFlight,
     scanned: pool.scanned,
   };
 }
