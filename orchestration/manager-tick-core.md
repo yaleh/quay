@@ -68,21 +68,7 @@
   实证 2026-08-09 14:08-15:08:outer 5 次 tick 全判 `no-action`,而①②③在这 5 次里**每次都为真**(在飞 0~1 < cap 4、pool 11 < floor 16、nyf 17——nyf 这个数还是它自己 A10 每轮读出来的),
   欠 15 个强制动作交付 0 个。**我自己同期的 `no-action` 行同样没带这五条读数,是同一个洞**;
   人的原话:「不要再为愚蠢的行为做解释——先想清楚正确的行为是什么,再去看行为是否符合」。
-  **B3b「待发」产物(2026-08-13 16:4xZ 立,因当日【四次】"说了要发却先写回话、人问才发")**:凡在回话里写下「我这就发／我会发给 outer」等承诺,**必须在同一轮 tick-log 的熔态列记 `待发:<主题>`**;**下一轮若该标记仍在 ⇒ 违规**。**为什么需要**:tick-log 的纪律有产物(不写就看得见),**而对话里的承诺没有**——我把"先发后写"写进核之后仍违反四次,**说明写进核不够,缺的是产物**(C17 原话:一条规则若「守」与「不守」在记录上无法区分,它就只能靠意志)。**判据机械可核**:`grep '待发:'` tick-log 末两行——前一行有、后一行无 = 已兑现;两行都在 = 违规。
-- **B4 哨兵清扫 + cron 证据（AC4）**:`CronList` → 删所有含 `[manager-tick]` 者 → 建一个 → **把 CronList 结果追加记进 `<QUAY_GLOBAL_DIR>/manager/cron-evidence.jsonl`**（一行 (src:961 "重挂 cron 必须 `cat` 这个文件")
-  `{"at":<ISO>,"atEpoch":<epoch>,"mechanism":"cron","sentinel":"[manager-tick]","cronListCount":<N>}`，N = CronList 中含哨兵的任务数）
-  **+ 必须紧接着 `bash plugin/scripts/manager-arm-loop.sh --record-cron <新建的 cron id>`,再 `--verify` 确认 `state=registry-verified`。**
-  **⚠️ 两个参数陷阱,2026-08-13 10:2xZ 实测各栽一次（本行原文就是其中一个的来源）**：
-  ①**本行原写 `--verify-cron`,该 flag 不存在**——脚本报 `ERROR: unknown argument`,正确是 `--verify`（**死 flag 写在我自己的执行核里,与 44 处 src:N 漂移、「≤80 行」退休判据同族:必经路径上的指针会过期而无人报错**）；
-  ②**不要传 `--home`**——`manager-arm-loop.sh:41` 正本写「默认 `$QUAY_GLOBAL_DIR/manager/`」,我传 `--home $HOME/.quay-global` 少了一级 ⇒ 得 `registry-missing`,
-  **那是我造出来的假故障,不是真状态**（硬规则 5:在错的地方搜不到 X 不等于 X 不存在——registry 就在深一级）。
-  **首次真跑此条即抓到一个真缺陷**:`state=registry-only`「the registry says armed but carries NO CronCreate receipt (the AC4 defect)」
-  ⇒ **我此前每轮都扫哨兵、但从未写收据,A19 判据② 一直不成立而无人发现**;补 `--record-cron` 后转 `registry-verified`。
-  **不记证据 = 「注册表说武装了」不可信（gap-manager-cold-start-no-falsifiable-checklist 缺陷 3）**。**绝不靠记住的 ID。**
-
-## C. 硬约束(每条都已付过代价,理由见档案)
-
-| 约束 | 一句话 |
+  **B3b「待发」产物(2026-08-13 16:4xZ 立,因当日【四次】"说了要发却先写回话、人问才发")**:凡在回话里写下「我这就发／我会发给 outer」等承诺,**必须在同一轮 tick-log 的熔态列记 `待发:<主题>`**;**下一轮若该标记仍在 ⇒ 违规**。**为什么需要**:tick-log 的纪律有产物(不写就看得见),**而对话里的承诺没有**——我把"先发后写"写进核之后仍违反四次,**说明写进核不够,缺的是产物**(C17 原话:一条规则若「守」与「不守」在记录上无法区分,它就只能靠意志)。**判据【第三版,2026-08-13 17:0xZ——前两版都错,错法相同】**:**不从散文里切字段**,改用**独立容器**——承诺时 `echo "<主题>" >> .quay/manager-pending-send.txt`,发出后删除该行;判据＝**该文件非空即违规**(`wc -l`)。**前两版为什么都错**:①`grep '待发:' 末两行` ⇒ **本规则自身的描述文本含 `待发:<主题>`**,第一次执行就假阳性;②改 `awk -F'熔｜' 取 $2` ⇒ **tick-log 行没有真正的列结构,熔态列之后就是正文、无终止符**,`$2` 把整行剩余都算进来,仍命中正文。**两版栽在同一处:想用关键词或分隔符从【散文】里切出一个字段。** ⇒ **一般形态(今日第 N 次,这次是我自己造的产物)**:**要一个可机械核的标记,就给它一个独立容器,不要在散文里加关键词**——同 `**PARKED` 胜过"任务体写不现在做"、同"倾向正本用文件而非 SendMessage"。 | 约束 | 一句话 |
 |---|---|
 | C1 | **计数是结论不是读数**——要给数量,先 `grep -a <pat> <file>` 逐行打印,禁止直接 `grep -c` (src:480 "for p in quay archguard meta-cc") |
 | C2 | 进程计数用 `ps -eo pid,etime,args \| grep -v shell-snapshots \| grep -v ugrep \| grep -- "$P"`;本机 `grep` 是 ugrep 函数,`grep -v grep` 失效 (src:1539 "### C2 —— 本机 `grep` 是 ugrep 函数") |
