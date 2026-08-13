@@ -3027,8 +3027,38 @@ round 110：同一 SPEC ⇒ quay-init referenced⊆landed 红（reference-doc �
    **⇒ 更正后的判据**：`fork-baseline.ts` 的**生产调用点不再传 `--force-integration`**，
    且新建 worktree 的 `git rev-list develop..<分支>` 为空或只含它自己的提交；
    `integration-branch-model.ts` 整个模块按"零生产调用者"走**退役**流程，不是"退化为常量"。
+   **⚠️ 归属澄清（2026-08-13 18:1xZ）——防【双重归属】，它是今晨那次失败的镜像**：
+   今晨的失败是 **AC46 指向一个不覆盖它的 AC**（pool 取消无人承接）；**这里的风险方向相反——
+   模块退役同时落在 AC52(本条) 与 AC48(收尾：拆脚手架) 的字面范围内 ⇒ 两边都可以假设对方在做。**
+   **⇒ 裁定：`integration-branch-model.ts` 的模块退役归 AC48**（它与 integration 分支退役、pool 过滤层取消
+   是同一批收尾动作，前置相同且已全绿）；**本条只保留【前两个 clause】作为 AC52 的判据**，
+   模块退役在本条记为指针，不重复计入 AC52 的达成判定。
+   **实测（2026-08-13 18:1xZ，逐条打印命中而非计数）**：
+   **clause A ✅** —— `--force-integration` 已退役：`fork-baseline.ts:173-175` 传它即 `exit 2`
+   （逐字 "`--force-integration` is RETIRED"），17 处命中**逐条看全部是退役实现/退役告示/文档描述，
+   零个生产调用点**；`fast-mode-tick-core.md:48` A15④ 逐字「新模型一律 develop，`--force-integration` 已退役」。
+   **clause B ✅** —— 6 棵 worktree 逐条 `git rev-list --count develop..<branch>`：`0/1/0/0/1/1`，
+   **每个 ahead 提交都是它自己任务的提交**，无一携带别的任务的提交。
+   **⚠️ 这里差点误判一条**：`task/gap-wt-node-modules-negctrl` 的 ahead 提交属于**另一条任务**——
+   查了才知 **`tasks/gap-wt-node-modules-negctrl.md` 不存在 ⇒ 它不是任务，是 AC49 的负控制工作树**，
+   判据1「所有**任务**一律 fork 自 develop」不适用于它。**（硬规则②「命中的是不是我要的」：
+   不查任务文件是否存在，就会把一个负控制读成一次违规。）**
+   **clause C（已移交 AC48）** —— 零生产调用者**已确认且已写进正本**：
+   `capability-catalog.sh:197` 逐字「forkBaseline() has ZERO production callers (confirmed 2026-08-13)
+   … module slated for retirement per AC52」；非测试引用只剩它自己的 usage 串 + catalog 条目
+   + `unverified-integration-task-ids.ts:5` 的一行注释。**退役动作本身未执行。**
 2. **依赖就绪判据存在且机械**：`任务声明的依赖全部 status: done 且其提交已在 develop 上` 才可派发；
    **可复用件已有**：`it0-split-or-commit-check.ts` 的 PARENT-DONE-IFF-CHILDREN。
+   **实测（2026-08-13 18:1xZ）——本条是【两个合取项】，只有第一个有机械读者**：
+   **第一合取项 ✅** `ready-pool-check.ts:1344 depsReadyFor` 读 **`parent` 与每一条 `depends_on`**，
+   逐条要求 `status === "done"`，**dep 文件缺失即 fail closed**，且已排除 compound 父边
+   （`gap-compound-depsreadyfor-structural-deadlock` 的双向互等死锁）；接进 `:1513 eligible`。
+   **第二合取项「其提交已在 develop 上」无任何机械读者** —— 实现只判 `status`，不判提交落地。
+   **⇒ 按硬规则 12 不为它要机制，先给发生率**：本轮实测
+   `awaiting_verification=0 · nyf_backlog=0 · closed_but_live=[]` ⇒ **当前"已 done 但未落 develop"的任务 = 0 条**
+   （翻 done 已于今日移交 inner 且在 fan-in 那一刻翻 ⇒ `done` 与"已在 develop"目前同时发生）。
+   **⇒ 记观察项，触发条件写死**：**若出现第 1 条 `status: done` 而其提交不在 develop 上的任务、
+   且它被当作某任务的依赖放行 ⇒ 第二合取项才需要机械读者**；在此之前 `depsReadyFor` 已满足本判据的可判定部分。
 
 **代价（明写，人已知悉）**：**吞吐下降**——依赖链上的任务不能重叠。
 **为什么可接受**：①依赖任务本就该串行（并行是在赌 touches 不冲突）；
