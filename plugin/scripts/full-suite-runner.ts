@@ -220,6 +220,16 @@ export interface SuiteStateStaticCheck {
   ceiling: number | null;
   newSinceBaseline: number | null;
   details: StaticCheckViolation[];
+  /**
+   * gap-static-check-red-failures-capture-only-task-contract-shape AC2 — the FAIL-CLOSED checkers
+   * (which checker failed + its exit code), SEPARATED from the `details` VIOLATION lines (which
+   * violation lines the stream carried). A checker that fail-closed (checker-cost-lib's
+   * `STATIC_CHECK_FAILED: <name> exit=<rc>` — e.g. threshold-scope-check in round 84) has ZERO
+   * VIOLATION detail lines to its name; before this field the round record only captured the
+   * task-contract VIOLATION shapes and the real cause was invisible. `failures[]` carries BOTH
+   * (each marked staticCheck:true); this field is the machine-readable separated 真因.
+   */
+  failedCheckers?: FailClosedChecker[];
 }
 
 export interface SuiteState {
@@ -469,12 +479,16 @@ const STATIC_CHECK_FAILURE_PATTERNS: RegExp[] = [
   /ceiling was RAISED/, // shrink-only ceiling raised (task-framework-policy / test-isolation / task-contract)
   /CEILING BREACH/, // dod-suite-line grandfather-list ceiling breach
   /\bFAIL:\s*\d+\s+(?:ratchet\s+)?violation/, // test-framework-policy (`FAIL: N violation(s):`) / test-isolation (`FAIL: N ratchet violation(s):`)
+  /^STATIC_CHECK_FAILED:/, // checker-cost-lib fail-closed (gap-static-check-red-failures-capture-only-task-contract-shape): a run_static_checks checker exited non-zero — the real cause line round-84's failures[] could not see (it only knew the task-contract VIOLATION shapes)
 ];
 // DETAIL lines (appear on passing runs too — baselined violations are listed; only failure-relevant
 // when a FAILURE marker above is present):
 const STATIC_CHECK_VIOLATION_RE = /^VIOLATION:\s*(\S+)\s*[—\-]\s*([^:]+):\s*(.*)$/;
 const STATIC_CHECK_SUMMARY_RE = /^violations:\s*(\d+)\s+unique across\s*(\d+)\s+task/;
 const STATIC_CHECK_RATCHET_RE = /^ratchet ceiling:\s*(\d+);\s*new since baseline:\s*(\d+)/;
+// checker-cost-lib fail-closed line (gap-static-check-red-failures-capture-only-task-contract-shape):
+//   STATIC_CHECK_FAILED: <name> exit=<rc>  (one line per failing checker, on stderr)
+const STATIC_CHECK_FAILED_RE = /^STATIC_CHECK_FAILED:\s*(\S+)\s+exit=(\d+)/;
 
 /** Does a stream line carry a STATIC-CHECK FAILURE signal (a passing run never emits it)? */
 export function isStaticCheckFailureLine(line: string): boolean {
@@ -509,6 +523,52 @@ export function extractStaticCheckDetail(line: string): {
   const ratchetM = STATIC_CHECK_RATCHET_RE.exec(line);
   if (ratchetM) return { ceiling: Number(ratchetM[1]), newSinceBaseline: Number(ratchetM[2]) };
   return null;
+}
+
+/**
+ * One fail-closed static-check checker (gap-static-check-red-failures-capture-only-task-contract-shape):
+ * checker-cost-lib's run_checker_parallel_wait emits `STATIC_CHECK_FAILED: <name> exit=<rc>` (one line
+ * per failing checker) when a run_static_checks checker exits non-zero. This is the ROUND-84 真因 shape —
+ * a checker that fail-closed (e.g. threshold-scope-check) with ZERO VIOLATION detail lines to its name,
+ * so the old failures[] capture (task-contract VIOLATION shapes only) recorded nothing about it. `name`
+ * is the checker id, `exitCode` the checker's own exit code (the FIRST failing checker's code is what
+ * run_checker_parallel_wait returns), `line` the raw stream line.
+ */
+export interface FailClosedChecker {
+  name: string;
+  exitCode: number;
+  line: string;
+}
+
+/**
+ * Parse ONE checker-cost-lib fail-closed line into a FailClosedChecker (best-effort; null when the
+ * line is not a `STATIC_CHECK_FAILED:` shape or carries an unparseable exit code).
+ */
+export function extractFailClosedChecker(line: string): FailClosedChecker | null {
+  const m = STATIC_CHECK_FAILED_RE.exec(line);
+  if (!m) return null;
+  const exitCode = Number(m[2]);
+  if (!Number.isInteger(exitCode) || exitCode < 0) return null;
+  return { name: m[1], exitCode, line };
+}
+
+/**
+ * The SuiteFailure[] for a static-check red (gap-static-check-red-failures-capture-only-task-contract-shape
+ * AC1): the VIOLATION detail lines (each carrying the violated file) AND the fail-closed checkers (each
+ * carrying the checker name in its raw `line`), all marked `staticCheck: true` so suite-state-trigger's
+ * classifyFailure routes them to the shared gate. The TWO facts — which checker failed vs which violation
+ * lines appeared — are SEPARATE in the record (AC2): the machine-readable separation lives in
+ * staticCheck.failedCheckers (fail-closed) vs staticCheck.details (violation lines); failures[] carries
+ * both for the shared-gate dispatch decision.
+ */
+export function buildStaticCheckFailures(
+  details: StaticCheckViolation[],
+  failClosed: FailClosedChecker[],
+): SuiteFailure[] {
+  return [
+    ...details.map((d) => ({ line: d.line, file: d.file, staticCheck: true })),
+    ...failClosed.map((c) => ({ line: c.line, staticCheck: true })),
+  ];
 }
 
 function parseArg(argv: string[], name: string): string | undefined {
@@ -1916,6 +1976,11 @@ export async function run(argv: string[]): Promise<number> {
   // NOT a test failure.
   let staticCheckDetected = false;
   const staticCheckDetails: StaticCheckViolation[] = [];
+  // gap-static-check-red-failures-capture-only-task-contract-shape — the FAIL-CLOSED checkers
+  // (`STATIC_CHECK_FAILED: <name> exit=<rc>` lines) — the round-84 真因 a task-contract-shape-only
+  // capture could not see. Accumulated on every line alongside staticCheckDetails; failures[] +
+  // staticCheck.failedCheckers carry them on a static-check red (AC1/AC2).
+  const failClosedCheckers: FailClosedChecker[] = [];
   let staticCheckViolations: number | null = null;
   let staticCheckTaskCount: number | null = null;
   let staticCheckCeiling: number | null = null;
@@ -2093,6 +2158,13 @@ export async function run(argv: string[]): Promise<number> {
       if (staticDetail.ceiling !== undefined) staticCheckCeiling = staticDetail.ceiling;
       if (staticDetail.newSinceBaseline !== undefined) staticCheckNewSinceBaseline = staticDetail.newSinceBaseline;
     }
+    // gap-static-check-red-failures-capture-only-task-contract-shape — accumulate FAIL-CLOSED
+    // checker lines (`STATIC_CHECK_FAILED: <name> exit=<rc>`, checker-cost-lib). A fail-closed
+    // checker is the 真因 of a static-check red but emits NO VIOLATION detail line — the old
+    // capture (task-contract shapes only) recorded ZERO entries for it. Accumulate on every line
+    // (same as staticCheckDetails); only failure-relevant when the failure marker fires below.
+    const failClosed = extractFailClosedChecker(line);
+    if (failClosed) failClosedCheckers.push(failClosed);
     // Enrich a pending failure with its file context (TAP detail block / stack frames follow the
     // `not ok` line; the file is NOT on the failure line itself). Best-effort, bounded lookahead.
     if (pendingFailure && detailRemaining > 0) {
@@ -2201,11 +2273,7 @@ export async function run(argv: string[]): Promise<number> {
       // is never downgraded (the isFailureLine branch above wins); `testsSeen === 0` guards that
       // this is genuinely the pre-test static-check phase, not test output shaped like a checker.
       staticCheckDetected = true;
-      const staticFailures: SuiteFailure[] = staticCheckDetails.map((d) => ({
-        line: d.line,
-        file: d.file,
-        staticCheck: true,
-      }));
+      const staticFailures: SuiteFailure[] = buildStaticCheckFailures(staticCheckDetails, failClosedCheckers);
       writeSuiteState({
         state: "red",
         reason: "static-check",
@@ -2221,6 +2289,9 @@ export async function run(argv: string[]): Promise<number> {
           ceiling: staticCheckCeiling,
           newSinceBaseline: staticCheckNewSinceBaseline,
           details: staticCheckDetails,
+          // gap-static-check-red-failures-capture-only-task-contract-shape AC2 — the fail-closed
+          // checkers (round-84 真因) separated from the violation `details`.
+          failedCheckers: failClosedCheckers,
         },
         failures: staticFailures,
       });
@@ -2404,14 +2475,13 @@ export async function run(argv: string[]): Promise<number> {
             : noCorrectnessConclusion
               ? "aborted"
               : "failed";
-  // AC4 candidate B — on a static-check red, failures[] carries the violation details (task + type),
-  // each marked staticCheck:true so suite-state-trigger's classifyFailure routes them to the shared
-  // gate. On a test-failure red, failures[] carries the real test failures (unchanged, AC5).
-  const staticCheckFailures: SuiteFailure[] = staticCheckDetails.map((d) => ({
-    line: d.line,
-    file: d.file,
-    staticCheck: true,
-  }));
+  // AC4 candidate B — on a static-check red, failures[] carries the violation details (task + type)
+  // AND the fail-closed checkers (gap-static-check-red-failures-capture-only-task-contract-shape AC1:
+  // the round-84 真因 — a checker that fail-closed has ZERO violation lines, so the old capture
+  // recorded nothing about it). Each marked staticCheck:true so suite-state-trigger's classifyFailure
+  // routes them to the shared gate. On a test-failure red, failures[] carries the real test failures
+  // (unchanged, AC5).
+  const staticCheckFailures: SuiteFailure[] = buildStaticCheckFailures(staticCheckDetails, failClosedCheckers);
   let finalFailures: SuiteFailure[] = redDetected ? redFailures : staticCheckDetected ? staticCheckFailures : redFailures;
   // gap-suite-red-verdict-carries-empty-failures-payload AC1 — a red verdict must NEVER carry an
   // EMPTY failures payload. The fail-closed catch-all (a generic non-zero exit with no structured
@@ -2473,6 +2543,9 @@ export async function run(argv: string[]): Promise<number> {
                 ceiling: staticCheckCeiling,
                 newSinceBaseline: staticCheckNewSinceBaseline,
                 details: staticCheckDetails,
+                // gap-static-check-red-failures-capture-only-task-contract-shape AC2 — the fail-closed
+                // checkers (which checker failed + exit code) separated from the violation `details`.
+                failedCheckers: failClosedCheckers,
               },
             }
           : {}),

@@ -50,16 +50,51 @@ contract-line-unknown / invoke-evidence-missing / dispatch-review-missing；提�
 
 ## AC
 
-- [ ] AC1: failures[] 在 static-check 红时记录【真因】（fail-closed 的检查器名 + 退出码），不只 task-contract 形状
-- [ ] AC2: 「哪条检查失败」与「哪些违规行」在记录里分开
-- [ ] AC3: 负控——round 84 形态（threshold-scope fail-closed）在记录里出现真因
-- [ ] AC4: 既有测试全绿；`--for-task` scoped 门绿
+- [x] AC1: failures[] 在 static-check 红时记录【真因】（fail-closed 的检查器名 + 退出码），不只 task-contract 形状
+- [x] AC2: 「哪条检查失败」与「哪些违规行」在记录里分开
+- [x] AC3: 负控——round 84 形态（threshold-scope fail-closed）在记录里出现真因
+- [x] AC4: 既有测试全绿；`--for-task` scoped 门绿（scoped gate EXIT=0，122 tests pass；负控新测通过）
 
 ## Definition of Done
 
-- [ ] AC1–AC4 全部勾上
-- [ ] 负控样例贴出（见 Evidence：round 84 形态的真因出现在 failures[]）
-- [ ] 全量套件绿
+- [x] AC1–AC4 全部勾上
+- [x] 负控样例贴出（见 Evidence：round 84 形态的真因出现在 failures[]）
+- [ ] 全量套件绿（worktree 内未跑全量 —— outer 的职责）
+
+## Evidence（负控样例，2026-08-13 工作树实测）
+
+fake-suite 复现 round 84 形态：threshold-scope-check fail-closed（checker-cost-lib 的机器行 `STATIC_CHECK_FAILED: threshold-scope-check exit=1`）
++ task-contract --no-block 的非阻塞 VIOLATION 行。修复后 `full-suite-runner` 的 `failures[]`：
+
+```json
+{
+  "state": "red",
+  "reason": "static-check",
+  "failures": [
+    { "line": "VIOLATION: tasks/gap-foo.md — contract-line-unknown: Contract block missing invariant line",
+      "file": "tasks/gap-foo.md", "staticCheck": true },
+    { "line": "STATIC_CHECK_FAILED: threshold-scope-check exit=1", "staticCheck": true }
+  ],
+  "staticCheck": {
+    "details": [
+      { "file": "tasks/gap-foo.md", "code": "contract-line-unknown",
+        "what": "Contract block missing invariant line",
+        "line": "VIOLATION: tasks/gap-foo.md — contract-line-unknown: ..." }
+    ],
+    "failedCheckers": [ { "name": "threshold-scope-check", "exitCode": 1,
+        "line": "STATIC_CHECK_FAILED: threshold-scope-check exit=1" } ]
+  }
+}
+```
+
+- AC1：`failures[]` 第 2 条 = `STATIC_CHECK_FAILED: threshold-scope-check exit=1`（真因，fail-closed 检查器名 + 退出码）——不再只有 task-contract 形状。
+- AC2：`staticCheck.details`（哪些违规行）与 `staticCheck.failedCheckers`（哪条检查失败）分开两个字段。
+- AC3：round 84 形态的真因（threshold-scope fail-closed）出现在 `failures[]` 与 `verification-round.jsonl` 的 `failures[]`（round record: `reason=gate-failed gate=static-check` + `failures[]` 含 threshold-scope-check）。
+- 机件变更：`checker-cost-lib.sh` 的 `run_checker_parallel_wait` 为每个 fail-closed 检查器输出机器可解析行
+  `STATIC_CHECK_FAILED: <name> exit=<rc>`（原人类可读摘要保留）；`full-suite-runner.ts` 的
+  `isStaticCheckFailureLine`/`extractFailClosedChecker`/`buildStaticCheckFailures` 捕获之。
+- 新测试：`full-suite-runner.test.mjs`（AC1/AC2 负控 e2e + extractFailClosedChecker/buildStaticCheckFailures 单测）、
+  `checker-cost.test.mjs`（机器行断言）。
 
 ## Touches
 

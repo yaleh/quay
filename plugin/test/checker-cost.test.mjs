@@ -368,6 +368,16 @@ test("AC2/AC3/AC4 — parallel run_checker fails closed with the failing name vi
   // never masked by its siblings' (parallel) output.
   assert.equal(res.status, 3, `parallel wait returns the first failing checker's exit code (got ${res.status}): ${res.stderr}`);
   assert.match(res.stderr, /par-fail/, `the failing checker's name is reported (AC3, not masked): ${res.stderr}`);
+  // gap-static-check-red-failures-capture-only-task-contract-shape — the fail-closed line must be
+  // MACHINE-PARSEABLE (`STATIC_CHECK_FAILED: <name> exit=<rc>`, one line per failing checker) so
+  // full-suite-runner can record the 真因 into failures[] (a checker that fail-closed emits no
+  // task-contract VIOLATION line — round-84's capture saw zero of them).
+  assert.match(
+    res.stderr,
+    /^STATIC_CHECK_FAILED: par-fail exit=3$/m,
+    `a machine-parseable STATIC_CHECK_FAILED line is emitted with the name + exit code: ${res.stderr}`,
+  );
+  assert.doesNotMatch(res.stderr, /^STATIC_CHECK_FAILED: par-ok-1/, "passing checkers never emit a fail-closed line");
   // AC4: every checker's cost row is appended — the failure must not lose sibling rows.
   const rows = readLedgerRows(root);
   assert.equal(rows.length, 3, `all three cost rows appended despite the failure (AC4): ${res.stderr}`);

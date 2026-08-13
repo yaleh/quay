@@ -128,6 +128,15 @@ run_checker() {
 # Wait for all launched checkers, report any failures, fail closed (AC3). Every exit is recorded
 # (AC4 — each backgrounded _run_checker_one appended before the wait observed it). Returns the FIRST
 # failing checker's exit code (0 if all clean) and resets the pool state for a later call.
+#
+# FAIL-CLOSED MACHINE LINE (gap-static-check-red-failures-capture-only-task-contract-shape): the
+# human-readable summary (`static checks FAILED (fail-closed): <names>(exit=<rc>)`) is what a human
+# reads, but full-suite-runner's failures[] capture cannot regex the summary shape (it only knew the
+# task-contract VIOLATION/summary/ratchet forms — a fail-closed checker's 真因 got ZERO entries into
+# the round record). Emit ONE machine-parseable line per failing checker on stderr:
+#   STATIC_CHECK_FAILED: <name> exit=<rc>
+# The runner's isStaticCheckFailureLine + extractFailClosedChecker parse this into failures[] (the
+# 真因: fail-closed checker name + exit code), separated from the VIOLATION detail lines (AC2).
 run_checker_parallel_wait() {
   while [ "$((_run_par_launched - $(_run_par_done_count)))" -gt 0 ]; do
     wait -n 2>/dev/null || true
@@ -138,7 +147,7 @@ run_checker_parallel_wait() {
       if [ -n "$_rc" ] && [ "$_rc" -ne 0 ]; then
         _fail=1
         [ "$_run_par_first_rc" -eq 0 ] && _run_par_first_rc="$_rc"
-        _run_par_failures+=("$_name")
+        _run_par_failures+=("${_name}|${_rc}")
       fi
     done < "$_run_par_results_file"
     rm -f "$_run_par_results_file"
@@ -146,7 +155,19 @@ run_checker_parallel_wait() {
   fi
   _ret="$_run_par_first_rc"
   if [ "$_fail" -ne 0 ]; then
-    local _msg="checker-cost-lib: run_checker_parallel_wait — static checks FAILED (fail-closed): ${_run_par_failures[*]}"
+    local _msg="checker-cost-lib: run_checker_parallel_wait — static checks FAILED (fail-closed): "
+    local _entry _parsed_name _parsed_rc _first=1
+    for _entry in "${_run_par_failures[@]}"; do
+      _parsed_name="${_entry%%|*}"
+      _parsed_rc="${_entry##*|}"
+      echo "STATIC_CHECK_FAILED: ${_parsed_name} exit=${_parsed_rc}" >&2
+      if [ "$_first" -eq 1 ]; then
+        _msg="${_msg}${_parsed_name}(exit=${_parsed_rc})"
+        _first=0
+      else
+        _msg="${_msg} ${_parsed_name}(exit=${_parsed_rc})"
+      fi
+    done
     _run_par_failures=()
     _run_par_first_rc=0
     _run_par_launched=0
