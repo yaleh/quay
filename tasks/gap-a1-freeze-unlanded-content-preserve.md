@@ -1,0 +1,73 @@
+---
+id: gap-a1-freeze-unlanded-content-preserve
+title: c1c0aa41 A1 freeze 未落地修复——合入 integration 保内容（load-flake 任务缺失的最后一块）
+status: ready
+labels:
+  - gap
+  - defect
+  - mechanism
+parent: null
+children: []
+extra:
+  schema: execution
+---
+
+**type:** execution
+
+## Proposal
+
+**发现（2026-08-13，outer 供给侧 strand 扫描）**：`task/a1-fix` 分支上有 1 个 ahead 提交
+`c1c0aa41`（2026-08-12 16:19Z，"A1 — freeze plugin source so a mid-suite merge can't break
+byte-identity"，`packages/quay/test/install-config-driven-e2e.test.mjs` **+43 −4**），
+**无对应任务文件**。
+
+**它是不是 strand**（manager 逐位置核验，C5 看内容不看祖先）：
+
+```
+c1c0aa41 是否在 develop 祖先中           ⇒ 否（仅存于 task/a1-fix 分支）
+内容是否已被等价落地                     ⇒ 否：develop 该文件 368 行 / 分支 407 行，
+                                          develop grep -ic 'freeze|frozen' = 0
+⇒ 这 43 行在整个仓库里只有一个副本，就在这棵树的分支上。
+```
+
+**归属**：提交信息 + Touches 指向 **`gap-install-config-driven-e2e-load-flake`（status: done）**——
+其 Touches 正含 `packages/quay/test/install-config-driven-e2e.test.mjs`，A1 正是 byte-identity 核心。
+即：**done 任务的一个未合入的补全提交**。与 cli-import（bin/quay.ts→src/cli/，Touches 无此文件）**无关**。
+
+**为什么不按 strand 清**：ahead>0 且内容未等价落地 ⇒ 按 strand 清 = 丢 43 行真东西。
+判定为**无主的未合修复**，走「立案承接」路径。
+
+## Plan
+
+1. **先保内容**：把 `c1c0aa41` 的内容合入 integration——
+   `git merge task/a1-fix` 已实测 **0 冲突**（merge-tree 校验，integration 含其 merge-base bbb19e46）。
+2. **scoped 验证**：在 worktree 内跑 `scripts/test.sh --for-task gap-a1-freeze-unlanded-content-preserve`
+   （或直接以 install-config-driven-e2e 族为 scoped 面），确认 freeze 逻辑在 integration 最新代码上绿。
+3. **fan-in 合入**：A6 流程 merge → 全量套件验（round 157 或后续）。
+4. **保内容成功后清树**：`task/a1-fix` 分支 + worktree 才可 clean-stale。
+5. **证据回填**：在本任务 + `gap-install-config-driven-e2e-load-flake` 任务体贴 verifiedCommit 证据。
+
+## Acceptance Criteria
+
+- [ ] AC1 `c1c0aa41` 的内容（freeze 逻辑 +43 −4）已合入 integration，`integration` 上该文件
+      与 a1-fix 分支版本一致（diff 为空或仅下游后续改动）。
+- [ ] AC2 scoped 测试绿（install-config-driven-e2e 族，--for-task 或等价 scoped 面），freeze
+      在 integration 最新代码上不破坏 byte-identity 断言。
+- [ ] AC3 合入后全量套件绿（round 验），且 `task/a1-fix` 工作树已清（内容已保，树可清）。
+- [ ] AC4 证据落盘：本任务与 load-flake 任务体各贴 verifiedCommit。
+
+## Definition of Done
+
+- [ ] 内容合入 integration 且全量套件绿（terminalCommit 记录）。
+- [ ] 未发现因 freeze 引入的字节身份断言回归（grep 确认 freeze 逻辑在位且生效）。
+- [ ] `task/a1-fix` 树清理完成，无 ahead>0 且未落地内容残留。
+
+## Touches
+
+- packages/quay/test/install-config-driven-e2e.test.mjs（c1c0aa41 的落地面）
+- tasks/gap-a1-freeze-unlanded-content-preserve.md（自身：勾 AC + 贴证据）
+- tasks/gap-install-config-driven-e2e-load-flake.md（证据回填，不改其 done 状态）
+
+## Evidence
+
+（任务落地后回填 verifiedCommit）
