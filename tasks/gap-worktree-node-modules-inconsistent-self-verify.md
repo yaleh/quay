@@ -57,25 +57,87 @@ resume 先定 setup 步骤（符号链接 vs 复制 vs install），再接派发
 
 ## Acceptance Criteria
 
-- [ ] AC1: 标准 setup 脚本落地，符号链接或 install 两条路径都有测试
-- [ ] AC2: 派发流程接入 setup（写进内层派发 prompt 或派发工具），新 worktree 不再依赖 agent 记得
-- [ ] AC3: 负控制——不跑 setup 的 worktree 在构建阶段 fail-closed（贴实跑输出）；跑了 setup 的能自证
-- [ ] AC4: 检查器（若有）接执行者并被真实触发一次
-- [ ] AC5: 测试用 `node:test` 且带 `// @test-group governance`
+- [x] AC1: 标准 setup 脚本落地，符号链接或 install 两条路径都有测试
+- [x] AC2: 派发流程接入 setup（写进内层派发 prompt 或派发工具），新 worktree 不再依赖 agent 记得
+- [x] AC3: 负控制——不跑 setup 的 worktree 在构建阶段 fail-closed（贴实跑输出）；跑了 setup 的能自证
+- [x] AC4: 检查器（若有）接执行者并被真实触发一次
+- [x] AC5: 测试用 `node:test` 且带 `// @test-group governance`
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全部勾上
-- [ ] 实跑：新建 worktree 不跑 setup ⇒ `scripts/test.sh` 构建阶段 fail-closed；跑了 setup ⇒ 能自证（贴两路径输出）
-- [ ] 派发流程已接入 setup（内层派发 prompt 或派发工具），新 worktree 不再依赖 agent 记得建 node_modules
-- [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
+- [x] AC1–AC5 全部勾上
+- [x] 实跑：新建 worktree 不跑 setup ⇒ `scripts/test.sh` 构建阶段 fail-closed；跑了 setup ⇒ 能自证（贴两路径输出）
+- [x] 派发流程已接入 setup（内层派发 prompt 或派发工具），新 worktree 不再依赖 agent 记得建 node_modules
+- [x] 既有测试 + 新增测试全绿（`--for-task` scoped，30/30）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
 
+## Evidence（inner 2026-08-13 实跑）
+
+**负控制（新建 worktree 不跑 setup ⇒ fail-closed）**——`git worktree add` 后不跑任何 setup，直接跑 scoped 门：
+
+```
+$ cd /home/yale/work/quay-worktrees/gap-wt-node-modules-negctrl && scripts/test.sh --for-task gap-worktree-node-modules-inconsistent-self-verify --allow-thin
+REAL_EXIT=2
+... Cannot find package 'yaml' imported from .../packages/quay-native/src/store.ts   ← 静态检查遇缺 node_modules fail-closed
+```
+
+同一 worktree 直接跑构建（任务体记录的 esbuild fail-closed，逐字复现）：
+
+```
+$ node packages/quay/scripts/build-dist.mjs
+Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'esbuild' imported from .../packages/quay/scripts/build-dist.mjs
+```
+
+**正控制（跑 setup ⇒ 能自证）**——同一 worktree 跑 `bash plugin/scripts/dispatch-worktree-setup.sh <wt>`：
+
+```
+dispatch-worktree-setup: linked /home/yale/work/quay/node_modules -> .../gap-wt-node-modules-negctrl/node_modules
+worktree-include: copied .quay/config.yml -> .../.quay/config.yml
+worktree-include: done — 3 file(s) copied
+```
+
+再跑 scoped 门：
+
+```
+$ scripts/test.sh --for-task gap-worktree-node-modules-inconsistent-self-verify --allow-thin
+REAL_EXIT=0
+ℹ tests 30 · ℹ pass 30 · ℹ fail 0 · ℹ cancelled 0
+```
+
+**检查器触发一次（AC4）**——对真实仓库扫描（扫描到 2 个缺 node_modules 的在飞 task worktree，正是本任务要消除的不一致）：
+
+```
+$ bash plugin/scripts/worktree-node-modules-check.sh --root <repo>
+worktree-node-modules-check: 5 task worktrees checked, 2 MISSING node_modules
+worktree-node-modules-check: MISSING node_modules — self-verification will fail at the build phase; ...
+```
+
+**派发流程接入（AC2）**：`plugin/loop/fast-mode-loop-tick.md` 派发 prompt 在 `git worktree add` 后新增强制步骤
+`bash plugin/scripts/dispatch-worktree-setup.sh $WORKTREE_ROOT/<slug>`（node_modules + config.yml，机制不靠 agent 记得）。
+
+**L_S mutation case（coordinator 全量认证红根因修复，2026-08-13）**：`worktree-node-modules-check` 注册进
+`run_static_checks` 但缺 mutation case ⇒ `checker-mutation-check` 报 `uncovered`。已补
+`plugin/scripts/checker-mutation-cases/worktree-node-modules-check.sh`（hermetic 临时 git repo + 一个 task/* worktree：
+GREEN 基线 → 删 node_modules → `--fail` 变红 + report-only 报 MISSING → 恢复 → 绿）。重验：
+```
+$ bash plugin/scripts/checker-mutation-check.sh --check
+RESULT: PASS — every registered checker went RED under its injected defect and GREEN on restore; mutations_that_stayed_green = 0.
+checkers_with_mutation: 29 · uncovered: 0
+```
+
 **AC46 第一层（outer 2026-08-13）**：本任务 Touches 仍为「待定」（未声明 dispatch-worktree-setup.sh 等落点），self-touch 缺失 ⇒ 非 ready-可派，retreat 回 todo。待 Touches 落定（新 setup 脚本设计）再晋 ready。
+**AC46 已落定（inner 2026-08-13）**：Touches 已声明（`dispatch-worktree-setup.sh` + `worktree-node-modules-check.sh` + 测试 + 派发 prompt + catalog 五表 + `scripts/test.sh` 接入），self-touch 在列，任务已 ready 并落地。
 
 ## Touches
 
-- （待定：新 `dispatch-worktree-setup.sh` + 派发 prompt 模板 + 测试；若加检查器则 `scripts/test.sh` 的 `run_static_checks`）
+- plugin/scripts/dispatch-worktree-setup.sh (new)
+- plugin/scripts/worktree-node-modules-check.sh (new)
+- plugin/scripts/checker-mutation-cases/worktree-node-modules-check.sh (new，L_S mutation case)
+- plugin/test/dispatch-worktree-setup.test.mjs (new)
+- plugin/scripts/capability-catalog.sh（两个新脚本的五表声明：QUESTION/CADENCE/INVALIDATION/LAST_REAFFIRMED/MATCHING）
+- docs/proposals/quay-product-outline.md（§6 DELIVERY-INVENTORY 快照重新生成，scripts 224→226）
+- scripts/test.sh（run_static_checks 接入 worktree-node-modules-check，@static-tier full）
+- plugin/loop/fast-mode-loop-tick.md（派发 prompt：worktree add 后强制先跑 dispatch-worktree-setup.sh）
 - tasks/gap-worktree-node-modules-inconsistent-self-verify.md（自身，C8 self-touch）
 ## Dispatch review
 

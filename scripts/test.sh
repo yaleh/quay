@@ -291,6 +291,17 @@ run_static_checks() {
   # @static-tier change
   # @static-object plugin/test/ packages/*/test/ experiments/*/test/
   run_checker "test-impl-census-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/test-impl-census-check.ts" --root "${repo_root}"
+  echo "== worktree node_modules readiness (gap-worktree-node-modules-inconsistent-self-verify) =="
+  # Mechanized invariant "every dispatched task worktree can self-verify": a task worktree whose
+  # node_modules is absent fails closed at the build phase (Cannot find package esbuild) and its
+  # verification silently falls back to the shared checkout where mutations land — the exact
+  # inconsistency this gap task closes. REPORT-ONLY (exit 0) by default: a peer task's worktree
+  # mid-setup is a transient state, so a hard-fail here would red the suite for the wrong reason;
+  # the "missing ⇒ report" output makes the invariant observable on every full-suite run. --fail
+  # (manual) flips it to fail-closed. dispatch-worktree-setup.sh is the mechanism that prevents
+  # the missing state; this checker makes the prevention observable.
+  # @static-tier full  (whole-store observability — deferred to the full-suite gate in scoped mode)
+  run_checker "worktree-node-modules-check" bash "${repo_root}/plugin/scripts/worktree-node-modules-check.sh" --root "${repo_root}"
   echo "== ## Contract consumer check (gap-dispatch-gate-has-no-checklist-and-no-trace, AC6) =="
   # gap-contract-ratchet-has-no-runner-and-grew-tenfold-unnoticed: this checker had NO runner — its
   # shrink-only ratchet list (docs/analysis/contract-violations.md) grew 1 -> 12 unnoticed because

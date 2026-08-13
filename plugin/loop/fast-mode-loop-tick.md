@@ -1031,6 +1031,18 @@ per-task 验证模型下 fan-in 直连 develop，依赖由派发闸串行化，�
 ```bash
 git -C "$REPO_ROOT" worktree add $WORKTREE_ROOT/<slug> -b task/<id> "$FORK_BASELINE"
 ```
+- **worktree 建立后先 setup（`gap-worktree-node-modules-inconsistent-self-verify`）**：`git worktree add`
+  只落被跟踪文件，gitignored 运行时文件（`node_modules`、`.quay/config.yml`）缺失 ⇒ 自证失败。subagent
+  **必须先跑**：
+  ```bash
+  bash plugin/scripts/dispatch-worktree-setup.sh $WORKTREE_ROOT/<slug>
+  ```
+  它统一建 `node_modules` 符号链接 → 共享检出 node_modules（主检出无 node_modules 的裸 clone 则 fall back
+  到 worktree 内 `npm install`）+ 用现有 `worktree-include.sh` 落 `.quay/config.yml`。**这是机制，不是 agent
+  记得**（实测 2026-08-03：tasklist 建了符号链接能自证、tokenwait 没建不能自证——验证落点越靠近共享检出，
+  污染被扫进 master 的风险越高）。不跑 setup 的 worktree 在套件构建阶段 fail-closed
+  （`Cannot find package esbuild`——那个 fail-closed 本身是对的，拒绝在可能陈旧的 bundle 上跑测试），
+  且缺 `.quay/config.yml` 无法解析 workspace 根（round-5「Cannot find repo root」崩溃族）。
 - **每个任务 worktree 都从 `$FORK_BASELINE`（develop HEAD）分叉**——旧「fork 源统一 = integration」
   （`--force-integration`）已退役；它当初要解的任务文件证据段冲突（实证 2026-08-10：round5-red
   c3583844 vs 2c1539d7 同文件不同段）由 **rebase-重跑循环**吸收：fan-in 前先 rebase 新 develop，
