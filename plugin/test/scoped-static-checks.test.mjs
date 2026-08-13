@@ -175,6 +175,7 @@ t("AC1 — a test-file touch selects the test ratchets + contract consumer, defe
     registry,
   );
   const names = selected.map((s) => s.name);
+  const regNames = registry.map((s) => s.name);
   // Change-relevant: the test-file ratchets (a test file is touched) + the always contract consumer.
   assert.ok(names.includes("test-framework-policy-check"), `test-framework-policy selected: ${names}`);
   assert.ok(names.includes("test-isolation-check"), `test-isolation selected: ${names}`);
@@ -184,9 +185,12 @@ t("AC1 — a test-file touch selects the test ratchets + contract consumer, defe
   assert.deepEqual(contract.touchedTasks, ["tasks/foo.md"]);
   // checker-mutation + unrelated repo-level ratchets are DEFERRED (full gate catches them).
   assert.ok(deferred.includes("checker-mutation-check"), `checker-mutation deferred: ${deferred}`);
-  assert.ok(deferred.includes("strategic-doc-staleness-check"), `strategic-doc deferred: ${deferred}`);
-  assert.ok(deferred.includes("drive-contract-check"), `drive-contract deferred: ${deferred}`);
   assert.ok(deferred.includes("adr016-screen-use-check"), `adr016 deferred (no .sh touched): ${deferred}`);
+  // AC51 (gap-ac51-assertion-surface-split): the DOC-CLASS checkers (strategic-doc / drive-contract)
+  // moved OUT of the scoped registry entirely (their home is run_doc_checks → pre-commit). They are
+  // neither selected nor deferred — they are absent from the scoped surface by construction.
+  assert.ok(!regNames.includes("strategic-doc-staleness-check"), "strategic-doc moved to pre-commit (run_doc_checks), not in scoped registry");
+  assert.ok(!regNames.includes("drive-contract-check"), "drive-contract moved to pre-commit (run_doc_checks), not in scoped registry");
   // AC2 partition: every checker is either selected or deferred — nothing is dropped.
   for (const c of registry) {
     const inSel = names.includes(c.name);
@@ -195,7 +199,7 @@ t("AC1 — a test-file touch selects the test ratchets + contract consumer, defe
   }
 });
 
-t("AC1 — a docs touch selects the doc ratchet, defers the test ratchets", async () => {
+t("AC1 — a docs touch selects NO doc ratchet (AC51: doc checks live at pre-commit), defers the test ratchets", async () => {
   const mod = await importMod();
   const registry = mod.parseStaticCheckRegistry(fs.readFileSync(TEST_SH, "utf8"));
   const { selected, deferred } = mod.selectStaticChecksForTouches(
@@ -203,11 +207,15 @@ t("AC1 — a docs touch selects the doc ratchet, defers the test ratchets", asyn
     registry,
   );
   const names = selected.map((s) => s.name);
-  assert.ok(names.includes("strategic-doc-staleness-check"), `strategic-doc selected: ${names}`);
+  const regNames = registry.map((s) => s.name);
+  // AC51: strategic-doc is no longer in the scoped registry (run_doc_checks → pre-commit), so a
+  // docs touch selects no doc ratchet here — the pre-commit hook runs it at commit time instead.
+  assert.ok(!regNames.includes("strategic-doc-staleness-check"), "strategic-doc not in scoped registry");
+  assert.ok(!names.includes("strategic-doc-staleness-check"), `strategic-doc NOT selected (pre-commit): ${names}`);
   assert.ok(!names.includes("test-framework-policy-check"), `test ratchet NOT selected: ${names}`);
   assert.ok(deferred.includes("test-framework-policy-check"));
   assert.ok(deferred.includes("checker-mutation-check"));
-  // A shell-script touch selects adr016.
+  // A shell-script touch selects adr016 (adr016 is CODE-class — it scans .sh/.bash too).
   const r2 = mod.selectStaticChecksForTouches(["plugin/scripts/foo.sh", "tasks/foo.md"], registry);
   assert.ok(r2.selected.map((s) => s.name).includes("adr016-screen-use-check"));
 });
@@ -303,22 +311,28 @@ t("AC4-i — the scoped contract consumer catches a touched task's Contract viol
 
 // ── AC4-ii: an unrelated repo-level ratchet violation ⇒ scoped defers, full must catch ───────────────
 
-t("AC4-ii — a strategic-doc ratchet violation is DEFERRED by scoped (docs not touched) and still in the full set", async () => {
+t("AC4-ii — an unrelated CODE-class ratchet violation is DEFERRED by scoped (object not touched) and still in the full set", async () => {
   const mod = await importMod();
   const registry = mod.parseStaticCheckRegistry(fs.readFileSync(TEST_SH, "utf8"));
-  // The change touches ONLY a test file + its own task — NOT docs/proposals.
+  // The change touches ONLY a test file + its own task — no .sh/.bash, so adr016's object is
+  // untouched (adr016 is CODE-class — it scans **/*.sh **/*.bash — so it stays in run_static_checks).
   const { selected, deferred } = mod.selectStaticChecksForTouches(
     ["tasks/foo.md", "plugin/test/foo.test.mjs"],
     registry,
   );
-  // Scoped does NOT run the strategic-doc ratchet.
-  assert.ok(!selected.map((s) => s.name).includes("strategic-doc-staleness-check"));
-  assert.ok(deferred.includes("strategic-doc-staleness-check"), "deferred (not silently dropped)");
+  // Scoped does NOT run the adr016 ratchet.
+  assert.ok(!selected.map((s) => s.name).includes("adr016-screen-use-check"));
+  assert.ok(deferred.includes("adr016-screen-use-check"), "deferred (not silently dropped)");
   // Full set still contains it — the full-suite gate MUST catch it.
-  assert.ok(registry.some((c) => c.name === "strategic-doc-staleness-check"));
+  assert.ok(registry.some((c) => c.name === "adr016-screen-use-check"));
   // And the full registry's runner line is still the whole-store scan (unchanged by the tier).
-  const doc = registry.find((c) => c.name === "strategic-doc-staleness-check");
-  assert.match(doc.commandLine, /strategic-doc-staleness-check\.ts/);
+  const doc = registry.find((c) => c.name === "adr016-screen-use-check");
+  assert.match(doc.commandLine, /adr016-screen-use-check\.ts/);
+  // AC51 (gap-ac51-assertion-surface-split): the DOC-CLASS ratchet (strategic-doc) is NOT in this
+  // registry at all — it moved to run_doc_checks → pre-commit. Scoped defers it by CONSTRUCTION
+  // (absent from the scoped surface), and the full-suite gate no longer runs it either; the
+  // pre-commit hook (plugin/scripts/precommit-guard.ts) is its gate.
+  assert.ok(!registry.some((c) => c.name === "strategic-doc-staleness-check"), "strategic-doc moved to pre-commit (run_doc_checks), absent from scoped+full registries");
 });
 
 // ── buildCommand: subset-touched expands to --strict-subset + the touched task file ─────────────────
@@ -364,14 +378,31 @@ t("AC2 — every run_static_checks checker checker-mutation-check sees is in the
   const mod = await importMod();
   const registry = mod.parseStaticCheckRegistry(fs.readFileSync(TEST_SH, "utf8"));
   const tierNames = new Set(registry.map((c) => c.name));
+  // AC51 (gap-ac51-assertion-surface-split): the DOC-CLASS checkers moved to run_doc_checks
+  // (pre-commit), so they are NOT in the tier registry (which parses run_static_checks only) —
+  // but the mutation manifest still lists them (checker-mutation-check.sh parses BOTH functions).
+  const DOC_CLASS = new Set([
+    "strategic-doc-staleness-check",
+    "drive-contract-check",
+    "threshold-scope-check",
+    "state-worded-clause-check",
+    "red-on-omission-audit",
+    "tick-core-static-check",
+    "instrument-failure-check",
+  ]);
   // checker-mutation-check.sh's own manifest parser (list_run_static_checks_checkers) extracts the
-  // same invocation set from run_static_checks — the tier registry must cover all of them.
+  // same invocation set from run_static_checks + run_doc_checks — the tier registry must cover the
+  // CODE-class subset, and must EXCLUDE the doc-class (pre-commit) subset.
   const list = spawnSync("bash", [path.join(REPO_ROOT, "plugin", "scripts", "checker-mutation-check.sh"), "--list"], {
     cwd: REPO_ROOT,
     encoding: "utf8",
   });
   assert.equal(list.status, 0, list.stderr);
   for (const m of list.stdout.matchAll(/^(\S+)\s+yes\s+run_static_checks$/gm)) {
-    assert.ok(tierNames.has(m[1]), `checker ${m[1]} must be in the tier registry`);
+    if (DOC_CLASS.has(m[1])) {
+      assert.ok(!tierNames.has(m[1]), `doc-class ${m[1]} must NOT be in the tier registry (moved to pre-commit run_doc_checks)`);
+    } else {
+      assert.ok(tierNames.has(m[1]), `checker ${m[1]} must be in the tier registry`);
+    }
   }
 });
