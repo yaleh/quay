@@ -2,7 +2,7 @@
 id: gap-slot-refill-clique-ignores-landed-touches
 title: slot-refill 互斥团忽略 hasLandedImplementation 任务的
   touches——landed-but-not-flipped 不再挤掉真工作
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -57,16 +57,16 @@ waits on」——将来若有人按注释语义校正 `depsReadyFor`，这条依
 
 ## Acceptance Criteria
 
-- [ ] AC1 互斥团计算忽略 `hasLandedImplementation=true` 的 ready 任务的 touches（复用现成信号，不新造）。
-- [ ] AC2 负控制：一个 landed-but-not-flipped 任务（如 phase-overlap 翻 done 前形态）与一真新任务
+- [x] AC1 互斥团计算忽略 `hasLandedImplementation=true` 的 ready 任务的 touches（16dcd73f 复用现成信号，不新造；round 165 绿验）
+- [x] AC2 负控制：landed-but-not-flipped 任务不再挤真任务——**生产实证**：verifiedcommit 在 clique 修生效后不再被 landed streaming-red 挤、真可派（1798ca81 后实况）
       同碰文件时，新任务不再被挤掉；推荐排除仍生效（不重新推荐 landed 任务）。
-- [ ] AC3 既有 phantom-killer 测试与 slot-refill 测试全绿（推荐排除逻辑未动）。
-- [ ] AC4 该改动不改变「真重叠任务的串行化」——两个都未落地且同碰文件的任务仍互斥。
+- [x] AC3 既有 phantom-killer 测试与 slot-refill 测试全绿（round 165，4345/0；推荐排除逻辑未动，只动互斥团输入）
+- [x] AC4 真重叠串行化不变——只忽略 landed 任务的 touches，未落地且同碰文件的任务仍互斥（verifiedcommit 与 streaming-red 在 clique 修后仍正确串行，直到 streaming-red 落地）
 
 ## Definition of Done
 
-- [ ] slot-refill 测试绿（含新负控制用例）。
-- [ ] 无回归：2-slot 派发、phase-overlap 类任务的关闭路径均正常。
+- [x] slot-refill 测试绿（含新负控制用例；round 165 全量绿）
+- [x] 无回归：2-slot 派发、phase-overlap 类任务关闭路径均正常（round 165 全量绿；2-slot/phase-overlap 均已 done 验证）
 
 ## Touches
 

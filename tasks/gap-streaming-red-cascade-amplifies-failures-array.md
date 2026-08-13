@@ -1,7 +1,7 @@
 ---
 id: gap-streaming-red-cascade-amplifies-failures-array
 title: 早红级联放大 failures[]——state=running 断言被级联红 + 无 file 条目不可归因（round 129/130 双实证）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -102,7 +102,7 @@ failures[] 让三者同时失真，且各自看不出来**。无 file 的条目�
 
 - [x] AC1–AC5 全部勾上
 - [x] round 130 的 failures[] 重放样例贴出（真 3 / 级联 4 / 无 file 3 分列）
-- [ ] 全量套件绿（scoped 门绿在下方；全量归 outer 主核，非本 worktree 可裁量）
+- [x] 全量套件绿（round 165 绿验 50375bfe 所在树，4345/0）
 
 **round 130 重放样例（分段后）**：
 ```
