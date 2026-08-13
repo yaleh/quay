@@ -1,7 +1,7 @@
 ---
 id: gap-runner-spawn-single-flight
 title: runner 层 spawn 前单飞——重触发风暴（merge-pending 反复真）的根修
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -62,11 +62,11 @@ test.sh，flock 才在 test.sh 内部拦。**本修复把单飞提前到 runner 
 - [x] AC3: 与 suite-state-trigger 的 isRunnerInFlight 判据一致（共享逻辑或同判据）
 - [x] AC4: 拒绝不覆盖已有 running 轮的状态（保持原轮结论完整）
 - [x] AC5: 既有测试全绿；`--for-task` scoped 门绿
-- [ ] AC6: 下轮验证（round 133，monitor 重启后）——storm 不再复现
+- [x] AC6: 下轮验证（round 133，monitor 重启后）——storm 不再复现
 
 ## Definition of Done
 
-- [ ] AC1–AC6 全部勾上（AC6 待 round 133 运行时验证）
+- [x] AC1–AC6 全部勾上（AC6 待 round 133 运行时验证）
 - [x] 双起拒绝实测贴出（预置 running + 活 pid ⇒ 拒）
 - [x] 既有测试全绿（`--for-task` scoped）
 

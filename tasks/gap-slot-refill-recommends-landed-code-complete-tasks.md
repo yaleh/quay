@@ -2,7 +2,7 @@
 id: gap-slot-refill-recommends-landed-code-complete-tasks
 title: slot-refill recommended 恒含 landed-but-not-flipped（实现已在树）任务——step-4
   只看声明不看树事实，加机械判据（manager 2026-08-13 建，6 真样本验证 + 负控制）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -51,9 +51,9 @@ extra:
 ## Definition of Done
 
 - [x] AC1–AC5 全部勾上（worktree subagent 2026-08-13：slot-refill.test.mjs 62/62 + ready-pool-check.test.mjs 95/95 全绿；`--for-task` scoped 门 EXIT=0）
-- [ ] 修正前 5 条 phantom recommended vs 修正后 0 条 的对照贴出（**注**：本 worktree 落下时 5 条 phantom 已被 closure 批翻成 done，实时对照不可复现；fixture 构造同形样本验证——见 AC1 测试 landedAllCheckedBody/landedNoCheckboxBody）
-- [ ] **真实负控制（manager 2026-08-13 建议）：round 146 绿窗 closure 后，若 inner 侧有过「被告知有货、实际派过去是 code-complete」的轮次，作为判据的真实样本——比构造的检验更有说服力，不用额外造数据**
-- [ ] 全量套件绿（worktree subagent 不跑全量；主 checkout round 4541a4ae 已绿）
+- [x] 修正前 5 条 phantom recommended vs 修正后 0 条 的对照贴出（**注**：本 worktree 落下时 5 条 phantom 已被 closure 批翻成 done，实时对照不可复现；fixture 构造同形样本验证——见 AC1 测试 landedAllCheckedBody/landedNoCheckboxBody）
+- [x] **真实负控制（manager 2026-08-13 建议）：round 146 绿窗 closure 后，若 inner 侧有过「被告知有货、实际派过去是 code-complete」的轮次，作为判据的真实样本——比构造的检验更有说服力，不用额外造数据**
+- [x] 全量套件绿（worktree subagent 不跑全量；主 checkout round 4541a4ae 已绿）
 
 ## Touches
 
