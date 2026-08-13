@@ -26,6 +26,9 @@ contract-line-unknown / invoke-evidence-missing / dispatch-review-missing；提�
   （注释原文：三种形状是【task-contract-check 的】VIOLATION / summary / ratchet 行）
 - `task-contract-check.ts:635` 输出 "ratchet ceiling: N; recorded (non-blocking): …"；`:649` `process.exit(block ? 1 : 0)`
   ——这 25 条是【非阻塞】噪声
+- **调用点事实（②i-F：手动跑生产工具前查调用点实参，2026-08-12）**：`scripts/test.sh:297` 调 task-contract-check 传
+  `--no-block`——非阻塞噪声行是调用点【明确要求】的输出形态（只增不减记账、exit 0），不是检查器毛病；
+  手动裸跑（不带 --no-block，checker DEFAULT 模式仍阻塞）会得到 18 条假违规（near-misreport 成因，manager 查调用点后拦截）。
 - 真红那行 `checker-cost-lib: run_checker_parallel_wait — static checks FAILED (fail-closed): threshold-scope-check`
   不匹配正则 ⇒ **零条进 failures[]**
 
