@@ -288,3 +288,151 @@ plugin/test/plugin-packaging.test.mjs:686/693       execFileSync('git',['check-i
 ---
 
 **本文件不排优先级、不建 AC**——AC 与阶段目标见 `orchestration/manager-phase-goal.md` 的对应小节；实现归 outer / inner。
+
+---
+
+# 13. 断言面拆分：文档检查下沉到 pre-commit（人 2026-08-13 裁定 (b)）
+
+## 13.1 为什么必须拆——「文档编辑不需要走测试」这个前提被实测否定
+
+**人的裁定 ②** 原意是"需要测试的变更走 inner+worktree，文档编辑不用"。**实测否定该前提，证据是 manager 自己制造的两次**：
+
+```
+round 84  ：manager 编辑 CLAUDE.md（纯方法论文字）⇒ threshold-scope-check 红（「命中≥1」被判 unscoped 计数阈值）
+round 109 ：manager 新增 orchestration/SPEC-*.md（纯文档）⇒ manager-layer-shipping AC6 红（全集索引未同步）
+round 110 ：同一 SPEC 又撞 quay-init 的 referenced⊆landed 闸（reference-doc 未声明）
+```
+
+**断言面的实测覆盖（枚举 `@static-object` 声明，不是推测）**：
+```
+CLAUDE.md / orchestration/ / tasks/ / docs/proposals/ / plugin/loop/*.md
+⇒ 正是 manager 与 outer 每天写的地方
+```
+**⇒ 不拆的话，新模型下 `develop` 会有一批【从未经套件验证、却有能力让套件变红】的提交，
+"主目录始终工作在经过 suite 测试的 develop"这个目标不成立。**
+
+## 13.2 拆法（人裁定 (b)）
+
+| 类别 | 检查什么 | 何时跑 | 判据形态 |
+|---|---|---|---|
+| **文档类** | 文档自身的内部一致性：全集索引同步、reference-doc 声明、阈值须带窗口、指向已删代码、措辞规范 | **pre-commit，秒级** | 只读被改文件 + 少量全集清单，**不跑任何测试** |
+| **代码类** | 产品行为、回归、契约 | **全量 suite（worktree 内）** | 不变 |
+
+**判别标准（写成可机械判定的，避免"哪类"变成人工裁量）**：
+**一个检查若其输入【只有文档文件】且不执行被测代码 ⇒ 文档类。**
+今晚已知的文档类候选（实测撞过的三个 + 同族）：
+```
+threshold-scope-check          （扫 3 份 driver doc 的计数阈值措辞）
+manager-layer-shipping AC6     （SPEC 全集 ⊆ manager SKILL 索引）
+quay-init referenced⊆landed    （被引用文件 ⊆ 落地集 ∪ 声明集）
+strategic-doc-staleness-check  （文档指向已删脚本）
+state-worded-clause-check / tick-core-static-check（tick 文档措辞与结构）
+```
+
+## 13.3 拆分带来的第二个收益（不是副作用，是主要动机之一）
+
+**现在文档错误要等一轮 8 分钟套件才发现**（round 84/109/110 三次实证），
+**且失败信息不告诉你"该加到哪一行"**。下沉到 pre-commit 后：
+- **反馈从 8 分钟变成秒级**
+- **失败点与犯错点在同一次操作里**——这正是 §13.4 那条机制缺陷的解药
+
+## 13.4 附带必须一起修的机制缺陷：**全集判据对新增者不可见**
+
+**实测（manager 今晚在自己身上连中两次）**：
+```
+落一个新 SPEC 文件需要同步的地方（事前一处都不知道）：
+  ① plugin/skills/manager/SKILL.md 的方法论索引    ← AC6 全集判据
+  ② plugin/skills/init/SKILL.md 的 reference-doc  ← referenced⊆landed 闸
+两个判据本身都是对的（正是防"新增了没人知道"），但它们【只在事后惩罚，不在当下引导】
+```
+**⇒ 判据要求**：这类全集检查失败时**必须给出补救位置**
+（形如 `add "<!-- reference-doc: X -->" to plugin/skills/init/SKILL.md:171`），
+**而不是只说"X 未声明"**。**这一条与 13.2 的下沉是同一件事的两半**：
+下沉解决"何时报"，补救位置解决"报了之后知不知道怎么办"。
+
+---
+
+# 14. 依赖任务的 fork 基线：串行化（人 2026-08-13 裁定）
+
+**问题**：现有机制（`plugin/scripts/integration-branch-model.ts:46`）
+```
+独立任务          → fork 自 develop（已验证）
+声明依赖 / touches 与 integration 上未验证任务重叠 → fork 自 integration（携带未验证前序）
+```
+**新模型下 integration 消失 ⇒ 第二条分支无落点。**
+
+**人裁定**：**B 等 A 合入 develop 后再派**（串行化）。
+```
+任务 B 依赖任务 A ⇒ B 不派发，直到 A 的 worktree 套件绿 + merge 回 develop
+⇒ B fork 时 develop 已含 A ⇒ 【所有任务一律 fork 自 develop，无例外】
+⇒ forkBaseline() 退化为常量 "develop"，该函数与其 integration 分支一并退役（随 AC48）
+```
+
+**代价（明写，人已知悉）**：**吞吐下降**——依赖链上的任务不能重叠执行。
+**为什么可接受**：① 依赖任务本就该串行（并行只是在赌 touches 不冲突）；
+② 今晚实测并发上限是 2（§4.2），本来就没有大量并行余量；
+③ 它换来的是**"一律 fork 自 develop"这个无例外的不变量**——
+**无例外的规则不需要判断，也就不会判断错**（与 §1 的 `develop` 不变量同源）。
+
+**实现要求**：派发闸需要一个**依赖就绪判据**——
+`任务声明的依赖任务全部 status: done 且其提交已在 develop 上`。
+**已有可复用件**：`it0-split-or-commit-check.ts` 的 PARENT-DONE-IFF-CHILDREN（inner tick A15② 已在用）。
+
+---
+
+# 15. 主检出的分支切换过程（格式参照 `PLAN-develop-branch-cutover-2026-08-06.md`，人指定）
+
+## 15.1 目标终态（一句话）
+
+**主工作目录（`/home/yale/work/quay`）checkout 在 `develop`；`integration` 分支不存在；
+所有任务 worktree 从 `develop` fork、验证后直接 merge 回 `develop`。**
+
+## 15.2 已核实的事实（实测，非推测，2026-08-13 03:0xZ）
+
+```
+主检出当前 checkout = integration（不是 develop）——git rev-parse --abbrev-ref HEAD
+develop 领先 0 / integration 领先 2
+活跃 worktree 6 个，其中 3 个的 merge-base 只在 integration 上（develop 没有）：
+  gap-concurrent-write-mutable-tree-false-positive-red       merge-base(integration)=c23bf2fa
+  gap-delivery-critical-label-at-promote-not-after-dispatch  同上
+  gap-src-n-pointer-rot-unverifiable-coverage                同上
+另 3 个（a1-fix / any-checkbox-fix / verify-worktree）的 merge-base 两边一致
+develop 上的直接提交来源（近 6h）：outer 16 / tasks 13 / merge 8 / inner 6 / manager 2
+```
+
+## 15.3 最大的真实风险
+
+**那 3 个 fork 自 integration 独有提交的在飞任务**：若先停用 integration，它们的合并路径断裂
+（其基线在 develop 上不存在）。**这不是理论风险，是当前就存在的 3 个具体对象。**
+
+## 15.4 迁移步骤（按顺序；每一步都必须在前一步验证通过后才做）
+
+**阶段一：清空 integration 的独有内容**
+1. 等 integration 上所有已合并任务通过一次全量套件（现行机制）；
+2. `integration → develop` 批量合并（现有 `integration-batch-merge.sh --merge`，非新造）；
+3. **验收**：`git rev-list --count develop..integration` = 0（integration 无 develop 缺失的提交）。
+
+**阶段二：在飞任务收口（3 个具体对象，逐个处置，不批量）**
+4. 每个 fork 自 integration 的在飞任务：**要么**完成并 merge（走现行路径），**要么** rebase 到 develop；
+5. **验收**：`git worktree list` 中每个 worktree 的 `merge-base(develop, <branch>)` 均存在于 develop
+   （逐条枚举打印，不是计数）。
+
+**阶段三：切主检出**
+6. 主检出 `git checkout develop`；
+7. **验收**：`git rev-parse --abbrev-ref HEAD` = `develop`，且工作树无未提交的产品文件改动。
+
+**阶段四：机制改分支名（落到文档与脚本，不是口头约定）**
+8. `FORK_BASELINE`/`MERGE_TARGET` 相关：三层 tick 文档中所有 `integration` 引用改为 `develop`；
+9. `forkBaseline()` 退化为常量（§14）；`integration-batch-merge.sh` 标退役（**不删**，理由档案）；
+10. **验收**：全仓 `grep -rn 'integration'` 在**执行路径**上零命中（注释/历史记录允许保留）。
+
+**阶段五：验证**
+11. 观察一个完整的任务生命周期（fork develop → worktree → 套件绿 → merge develop）；
+12. **验收**：该任务的 round 记录里 `scope=worktree`，且 `develop` 的新 HEAD 是它的 merge 提交；
+13. **负控制**：故意在主检出编辑一个断言面文档，确认**不再**使任何在跑的轮变红（AC42 判据 3）。
+
+## 15.5 我（manager）不会做的事
+
+- **不代任何一方执行 git 分支操作**（checkout/merge/branch -d）——那是 outer 的执行面；
+- **不裁定在飞任务的去留**（完成还是 rebase）——那是 outer 按任务状态判；
+- **只做**：提供上述可机械核对的验收判据、每 tick 采样其读数、发现偏离时报出。

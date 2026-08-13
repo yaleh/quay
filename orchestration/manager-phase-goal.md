@@ -2727,3 +2727,77 @@ manager 的活是：每 tick 采样 AC20 的五条、维护 AC21-AC24 的取证�
 
 **manager 本阶段的具体活**：每 tick 采样 AC42-AC48 的可机械读判据、维护 SPEC 的实测基线段、
 并在自己的判定里先做到 AC49 那三条。
+
+---
+
+## AC50（过程）：主检出的分支切换可验收，且在飞任务不被切断
+
+**来源**：人 2026-08-13 复查时指出「重点检查目标工作模式与主工作目录的切换过程」，
+manager 核实后发现 **SPEC 完全没写切换过程**（`grep 主检出|checkout|HEAD` 只命中"验证不发生在主检出上"）。
+**正本**：`SPEC-per-task-suite-verification-2026-08-13.md` §15（格式参照 `PLAN-develop-branch-cutover-2026-08-06.md`，人指定）。
+
+**判据（五条，按顺序，前一条不成立不得进下一条）**：
+1. **integration 清空**：`git rev-list --count develop..integration` = 0。
+2. **在飞任务不断裂**：`git worktree list` 中每个 worktree 的 `merge-base(develop, <branch>)`
+   **逐条枚举打印**均存在于 develop（不是计数——今晚已实证计数会把"没查"读成"没问题"）。
+3. **主检出已切**：`git rev-parse --abbrev-ref HEAD` = `develop`，且工作树无未提交的产品文件改动。
+4. **执行路径无 integration**：全仓 `grep -rn 'integration'` 在执行路径上零命中（注释/历史记录允许）。
+5. **一次真实生命周期自证**：一个任务 fork develop → worktree → 套件绿 → merge develop，
+   其 round 记录 `scope=worktree` 且 develop 新 HEAD 是它的 merge 提交。
+
+**今晚基线（2026-08-13 03:0xZ 实测）**：
+```
+① develop..integration = 2   ⇒ 未满足
+② 6 个 worktree 中【3 个】的 merge-base 只在 integration 上（c23bf2fa）⇒ 未满足，且这是当前最大的真实风险
+③ 主检出 HEAD = integration  ⇒ 未满足
+④/⑤ 未开始
+```
+
+**⚠️ 不覆盖**：不规定谁执行（那是 outer 的执行面）；不规定在飞任务是"做完"还是"rebase"（按任务状态判）。
+**manager 只提供上述可机械核对的判据 + 每 tick 采样，不代执行 git 操作。**
+
+---
+
+## AC51（机制）：断言面拆分——文档检查在提交那一刻跑，不进全量套件
+
+**来源**：人 2026-08-13 裁定选项 (b)。**正本**：SPEC §13。
+
+**判据（三条）**：
+1. **分类可机械判定**：一个检查若其输入**只有文档文件**且不执行被测代码 ⇒ 文档类，跑在 pre-commit；
+   否则代码类，跑在 worktree 内的全量套件。**分类不得靠人工裁量**。
+2. **反馈时延**：文档类检查从"改错"到"被告知"**秒级**（当前实测是 8 分钟一轮）。
+3. **⭐ 失败必须给补救位置**：全集类判据失败时输出形如
+   `add "<!-- reference-doc: X -->" to plugin/skills/init/SKILL.md:171`，**不得只说"X 未声明"**。
+
+**今晚基线（三次实证，全部由 manager 自己制造）**：
+```
+round 84 ：编辑 CLAUDE.md（纯文档）⇒ threshold-scope-check 红，8 分钟后才知道
+round 109：新增 SPEC ⇒ manager-layer-shipping AC6 红（全集索引未同步），失败信息未给补救位置
+round 110：同一 SPEC ⇒ quay-init referenced⊆landed 红（reference-doc 未声明），同样未给补救位置
+⇒ 三条判据【全部未满足】
+```
+
+**⚠️ 这条同时修掉一个已确认的机制缺陷**：**全集判据对【新增者】不可见**——
+它只在事后惩罚，不在当下引导。**今晚已在同一个人（manager）身上连中两次，第三次会落在别人身上。**
+
+**⚠️ 不覆盖**：不要求删除任何现有检查（只改**何时跑**与**失败怎么说**）；
+不要求 pre-commit 检查覆盖代码类（那仍归全量套件）。
+
+---
+
+## AC52（机制）：依赖任务串行化，`fork` 基线无例外
+
+**来源**：人 2026-08-13 裁定「B 等 A 合入后再派」。**正本**：SPEC §14。
+
+**判据（两条）**：
+1. **无例外的不变量**：所有任务一律 fork 自 `develop`；
+   `integration-branch-model.ts:46 forkBaseline()` 退化为常量（其 `"integration"` 分支随 AC48 退役）。
+2. **依赖就绪判据存在且机械**：`任务声明的依赖全部 status: done 且其提交已在 develop 上` 才可派发；
+   **可复用件已有**：`it0-split-or-commit-check.ts` 的 PARENT-DONE-IFF-CHILDREN。
+
+**代价（明写，人已知悉）**：**吞吐下降**——依赖链上的任务不能重叠。
+**为什么可接受**：①依赖任务本就该串行（并行是在赌 touches 不冲突）；
+②今晚实测并发上限 2，本无大量并行余量；③换来"一律 fork 自 develop"这个**无例外**的不变量——
+**无例外的规则不需要判断，也就不会判断错。**
+
+**⚠️ 不覆盖**：不改变 touches 正交性检查（那管的是并发安全，与依赖声明正交）。
