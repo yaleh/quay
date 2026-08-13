@@ -39,7 +39,7 @@ extra:
 **⚠️ 前置自检（对「还有没有第三个串行化者」免疫，manager 2026-08-13）：记 AC3b 读数前，确认这一刻真有 QUAY_MAX_CONCURRENT_SUITES 个（当前 2）`scope=worktree` 的轮同时 `state=running`；拿不到这个读数就不许记——否则试点会贴出【串行吞吐】被当并发用（判据前提不成立而输出正常）。**
 
 - [x] AC3b: **可取假门 = 端到端吞吐对照**——per-task 全量在 QUAY_MAX_CONCURRENT_SUITES 并发下，**单位时间合入 develop 的任务数** ≥ 同窗基线（**基线在试点期同窗重算，非引用历史常量**；历史读数仅为证明量可测：近 6h fan-in 14 任务=2.33/h、全局轮 25 轮占 59% 墙钟、red 19/green 6=76% 红）。**不设数值阈值（硬规则 4 推论：成本结构未知前不设阈值——基线是实测不是拍脑袋）**。**⚠️ (b) 读数的单向有效性（manager 2026-08-13）：(b) 干扰测量【只能】作"成立"方向的证据——达标 ⇒ 可信且比静默窗口更强（被抢 58% 时间仍达标）；不达标 ⇒ 记为「未定（含干扰）」，不进 AC4 判定（干扰本身足以解释，无法区分"方案不行"与"被全局轮压"）**
-- [x] AC4: 试点成立 ⇒ 全局轮停跑 + AC43/AC45 标 cancelled（非实现）；**不成立 ⇒ 回退【仅在 (a) 静默窗口下的不达标才触发】——(b) 含干扰的不达标记为「未定（含干扰）」不回退**（否则 26 核当量压 16 核的 (b) 结果会否掉一个本可成立的方向，带一份看起来完整的证据）
+- [~] AC4: **两分支均未触发**（成立未发生；回退按 AC3b 未定不触发——勿读成「已停跑全局轮/已标 cancelled」）——试点成立 ⇒ 全局轮停跑 + AC43/AC45 标 cancelled（非实现）；**不成立 ⇒ 回退【仅在 (a) 静默窗口下的不达标才触发】——(b) 含干扰的不达标记为「未定（含干扰）」不回退**（否则 26 核当量压 16 核的 (b) 结果会否掉一个本可成立的方向，带一份看起来完整的证据）
 - [x] AC5: 既有测试全绿；`--for-task` scoped 门绿
 
 ## Definition of Done
@@ -64,7 +64,7 @@ extra:
 - **Run 1b（provision 后隔离）**：全量 **green**，376s，4271 tests / 0 fail，scope=worktree，无全局轮干扰 → **AC1 ✅**。
 - **Run 2（3 个并发启动）**：run2-pilot green（401s）、run2-b green（768s wall，锁释放后才开跑）、**run2-a red/aborted（0 tests）**。**机件发现 ②（决定性）**：`test.sh` 全量路径的 **single-flight lock**（跨 worktree 排他 flock，`<git-common-dir>/full-suite.lock`，等 600s 超时 abort）把并发串行化；round 150 全局轮被同一把锁**饿死并 abort（0 tests）**。
 - **吞吐**：试点窗口 1.88/h < 同窗基线 2.21/h ⇒ **AC3b 未定（含干扰）**（模式 b 单向有效性，不进 AC4）。
-- **结论**：**试点未成立（并发维度被 single-flight lock 机制阻塞）**；AC43/AC45 保持 OPEN（不标 cancelled）。后续改造关键输入 = 重设计 single-flight lock（per-task 作用域/去全局锁）+ 任务 worktree provision 前置 + per-task lane 预算。
+- **结论**：**per-task 全量本身已验证可行（AC1 ✅，4271 tests / 0 fail 绿）**；**并发维度未能测量**——被跨 worktree 共享的 single-flight lock 结构性阻塞（机制障碍，非方案否证）。AC3b 未定（含干扰，不进 AC4）。AC43/AC45 保持 OPEN（不标 cancelled）。后续改造关键输入 = 重设计 single-flight lock（per-task 作用域/去全局锁）+ 任务 worktree provision 前置 + per-task lane 预算。
 - AC 状态：AC1 ✅ / AC2 ⚠️（3 worktree green，fan-in 未做，本子代理禁 merge）/ AC3 ❌（锁阻塞）/ AC3b ⚠️ 未定 / AC4 ⚠️ 未触发 / AC5 ✅。
 - **实害记录**：run 2 使 round 150 全局轮 abort（0 tests）——此影响即 AC3 未成立的证据。**⚠️ 锁方向（人 2026-08-13 裁定，覆盖「测量绕过锁」——那配方作废）：不是测量绕锁，是把安全约束上界从 1 槽提到 2 槽（产品能力）。** 两个串行化者都改：①单飞锁 1→2 槽（两把锁文件 full-suite.lock.0/.1 依次 flock -n 试、都占满阻塞等任一释放——无新依赖、保留 flock 崩溃自动释放）；②资源闸预算按 2 槽算（只改锁第 2 个会撞闸 exit 1）。**相预算 = hostParallelism() ÷ 并发槽数**（1 套件⇒16、2 套件⇒各 8——人的 8 是 16÷2 的实例非字面量；AC44 原则 + 除数）。
 
