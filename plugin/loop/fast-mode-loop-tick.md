@@ -299,7 +299,7 @@ exp5 已退役（`.claude/loop.md` 已删除），`.halt` 从「暂停 exp5 循�
 |---|---|---|
 | ① | 在飞 agent 是否符合文档 | **读槽位视角，不读原始括号**（`gap-telemetry-brackets-vs-subagents-no-slot-visibility`——括号 ≠ subagent，红窗遗留的未闭合 start 会把健康态误判成满负荷）：`node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --slots --cap "${effective_cap:-3}" --root "$(pwd)" --json` 的 **`realConcurrency` ≤ `effective_cap`**（步骤 4 并发上限，**固定 `effective_cap=5`**——人 2026-08-11 裁定与 manager A2/outer A6 对齐；`cap-from-gate.sh` 降为观测输出，读其 `band`/`effective_cap` 记 tick-log 不参与派发裁决）。**`realConcurrency` = `realInFlight`（括号真实在飞）+ `subagentsInFlight`（非任务 subagent 进程——调查型无括号，`gap-telemetry-underreport-nontask-subagents-not-counted-in-slots`）**——**真实并发 = 括号 + 非任务 subagent**，只读 `realInFlight` 会把调查型 subagent 漏算成空槽（实测 0/3 而实际 1 个 187k-token subagent 在跑 ⇒ 真实并发 4 不是 3）。**`realConcurrency > cap` ⇒ 并发违规（真超派发），判据抓住**；`brackets_reflect_subagents: false` ⇒ 有陈旧括号未 reconcile（`--reconcile` 处理）或 `--task-start`/`--task-end` 对没调齐（AC4）——是偏差，对齐而非误判健康。**反向维度（`gap-closed-bracket-leaves-live-agent-consuming-slots`：括号关 ≠ 进程退）**：`--slots` 的 `closedButLive` / `occupied_slots`（= `realConcurrency` + 已关括号但 executor 仍存在者）——**括号关 ≠ 槽空**，executor 仍在（worktree 未清 / 进程未退）的已关括号仍占槽，`occupied_slots > cap` 同样并发违规；该槽不得派新任务。每个在飞任务有 worktree 且在 `$WORKTREE_ROOT/<slug>`（磁盘，非 `/tmp`） |
 | ② | 就绪池是否维护 | `node --experimental-strip-types plugin/scripts/ready-pool-check.ts --root "$(pwd)" --cap "${effective_cap:-3}"` 的 `pool` / `dispatchable_disjoint` 字段（`effective_cap` 见步骤 3.6 前置块）；`pool < floor`（=cap×4）或 `dispatchable_disjoint < cap` 时是否已按步骤 3.6 补晋 |
-| ③ | 是否在越界做收尾 | inner 只做终止/完成路由的括号闭合（`closure-lag-check.sh --close-task`，统一闭合点，`gap-needs-human-routing-does-not-close-bracket`）；**不翻 `status: *done`、不写轮次记录、不碰 closure-lag 留痕**——收尾（翻 done + 轮次记录 + `--record` 留痕）是外层步骤 1b 的异步活。核对：本回合未合并改动里无 `status: *done` 写入、无轮次记录写入、无 closure-lag 留痕写入；`--task-end` 调用**仅**出现在终止/完成路由。**closure-lag 留痕/信号是外层 1b 的活**（`.quay/closure-pass-last-run.json` 由外层 `closure-lag-check.sh --record` 写）——inner 不写不读不碰（`gap-closure-pass-has-no-lag-signal`）。红窗只停派发/合并推进，不停外层收尾 |
+| ③ | 是否在越界做收尾 | inner 只做终止/完成路由的括号闭合（`closure-lag-check.sh --close-task`，统一闭合点，`gap-needs-human-routing-does-not-close-bracket`）；**不翻 `status: *done`、不写轮次记录、不碰 closure-lag 留痕**——收尾（翻 done 由 inner 自有绿证后执行；轮次记录 + `--record` 留痕是外层步骤 1b 的异步活）。核对：本回合未合并改动里无 `status: *done` 写入、无轮次记录写入、无 closure-lag 留痕写入；`--task-end` 调用**仅**出现在终止/完成路由。**closure-lag 留痕/信号是外层 1b 的活**（`.quay/closure-pass-last-run.json` 由外层 `closure-lag-check.sh --record` 写）——inner 不写不读不碰（`gap-closure-pass-has-no-lag-signal`）。红窗只停派发/合并推进，不停外层收尾 |
 | ④ | 停止条件是否被遵守 | 步骤 3 命中项（合并冲突 / OVER90 / ruling-required / 外层 suite-state `state: red` / 就绪队列空 / 窗口新增 needs-human ≥3）命中时是否停止派发；`.halt` 存在则本 tick 空转 |
 
 有明确偏差 ⇒ 向文档对齐：重新执行本文档对应步骤修正（补 worktree 纪律、按步骤 3.6 补就绪池、
@@ -453,9 +453,10 @@ tmux 仅用于紧急控制；投递通道不可认证、丢 `from` 字段）。
 
 **只合并与清理。** 全量套件验证已从 inner 移除——它是外层后台异步跑的验证 gate
 （`orchestrator-loop-tick.md` 步骤 1b「异步收尾例程（verification-round-N）」），inner 的停止条件
-只读外层的 `.quay/full-suite-state.json`（见步骤 3）。inner 在这里**不翻 done、不写轮次记录**；
-写 `--task-end` **仅限终止/完成路由**（统一括号闭合点，`gap-needs-human-routing-does-not-close-
-bracket`）——**括号在终止/完成同轮闭合，不停留 inProgress**。翻 done 仍由外层 1b 独占。
+inner 在**自有 per-task 绿证后翻 done**（2026-08-13 移交：per-task 全量在 fan-in 前已有、inner 自有认证
+——AC46 判据3 退出条件「per-task 全量成为默认认证之日 ⇒ 翻 done 移交 inner」当天满足；外层不再代翻）。
+写 `--task-end` 用于括号闭合（统一闭合点，`gap-needs-human-routing-does-not-close-bracket`），
+终止/完成同轮闭合、不停留 inProgress。
 
 **两线分支模型（quay 自身配置启用；`gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point`，AC1/AC2/AC3）**：
 当 workspace 把 `fork_baseline` / `merge_target` 配置为 develop / integration（quay 自身）时，
@@ -551,7 +552,7 @@ bracket`）——**括号在终止/完成同轮闭合，不停留 inProgress**�
 worktree/分支。**统一括号闭合点（`gap-needs-human-routing-does-not-close-bracket`）**：fan-in 成功
 （merge 落地、任务完成）时 inner 调 `bash plugin/scripts/closure-lag-check.sh --close-task
 --taskId <id> --outcome done` 关括号——括号在完成同轮闭合，不停留 inProgress；任务**完成但无需
-fan-in**（AC 全勾、工作已落地、无合并需要）时同样调 `--close-task --outcome done`。翻 done、写轮次
+fan-in**（AC 全勾、工作已落地、无合并需要）时同样调 `--close-task --outcome done`。翻 done（inner 自有绿证后）、写轮次
 记录仍由外层 1b 异步做（`orchestrator-loop-tick.md` 步骤 1b）。
 
 **A6/A15 对齐（`gap-worktree-leak-after-fan-in-occupies-slot-permanently`）**：inner 的 fan-in 序列
