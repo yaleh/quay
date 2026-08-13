@@ -71,7 +71,7 @@ export const MARKER = "KNOWN-LOAD-SENSITIVE";
  * `heavy` was removed (gap-suite-tiering-kind-heavy-not-a-mechanism): it was a "slow/曾 flake" catch-all
  * bucket, not a mechanism — split into real-install (install/quay-init family) + child-spawn (the
  * real-subprocess family). Every kind is now a mechanism statement. */
-export const KINDS = ["wall-clock", "nested-spawn", "real-install", "child-spawn"] as const;
+export const KINDS = ["wall-clock", "nested-spawn", "real-install", "child-spawn", "fixture-vs-sweeper"] as const;
 export type LoadSensitiveKind = (typeof KINDS)[number];
 
 /**
@@ -81,7 +81,7 @@ export type LoadSensitiveKind = (typeof KINDS)[number];
  * in BOTH serial (real-wall-clock-wait) and lowconc (hermetic session-observation); the kind describes
  * the root cause, the lane is a separate routing decision.
  */
-export const SERIAL_KINDS = ["wall-clock", "nested-spawn", "real-install", "child-spawn"] as const;
+export const SERIAL_KINDS = ["wall-clock", "nested-spawn", "real-install", "child-spawn", "fixture-vs-sweeper"] as const;
 
 /** The canonical test glob scripts/test.sh owns (single source — do not hand-write a second copy). */
 export const TEST_GLOB_PARTS = ["packages/*/test/*.test.mjs", "plugin/test/*.test.mjs"];
