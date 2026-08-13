@@ -38,7 +38,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { makeTmp, cleanup, diskWorktreeRoot, runInit, extractRefs, declaredSet, pluginDir, laydownWorkspace } from "./quay-init-loop-helpers.mjs";
+import { makeTmp, cleanup, diskWorktreeRoot, runInit, extractRefs, declaredSet, pluginDir, laydownTemplate, laydownWorkspace } from "./quay-init-loop-helpers.mjs";
 
 // ── AC3: dry-run lists would-copy; real run lays down the full set ─────────────────────────────────
 test('AC3 — --loop --dry-run lists would-copy items for the full loop mechanism', () => {
@@ -65,9 +65,15 @@ test('AC3 — --loop --dry-run lists would-copy items for the full loop mechanis
 });
 
 test('AC3 — a real --loop run lays down the full two-layer mechanism set', () => {
-  // AC2 (gap-serial-segment-77-percent-cost-reduction-runner-grouping-listfiles): runs from the
-  // shared READ-ONLY laydown template (one real quay-init --loop per FILE process) — the laid-down
-  // state is byte-identical, so the mechanism-set assertions are unchanged.
+  // AC2 (gap-serial-segment-77-percent-cost-reduction-runner-grouping-listfiles) + the SHARED
+  // prebuilt fixture (gap-quay-init-loop-tests-not-wired-to-shared-fixture AC1): this file's
+  // install-as-setup tests copy from the SHARED content-addressed fixture — ONE real quay-init
+  // --loop per SERIAL PHASE, not per FILE (quay-init-loop-helpers.mjs sharedFixture →
+  // laydownTemplate → laydownWorkspace). The laid-down state is byte-identical to a fresh real
+  // install, so the mechanism-set assertions are unchanged. The direct laydownTemplate() reference
+  // below is the explicit shared-fixture wiring (AC1: this file hits sharedFixture/laydownTemplate).
+  const template = laydownTemplate();
+  assert.ok(template.ws && template.install, 'the shared prebuilt fixture must be serving this file (AC1)');
   const { ws, install: r } = laydownWorkspace();
   try {
     assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
@@ -114,6 +120,9 @@ test('AC3 — a real --loop run lays down the full two-layer mechanism set', () 
 // (AC1, cmp-checkable); the target values (repo_root/test_command/tmux_session) live in ONE
 // config file (.quay/config.yml `loop:`, AC2) and are read at runtime, never baked in (AC3).
 test('AC4 — laid-down tick docs are byte-identical to the product and carry NO target values (they live in .quay/config.yml loop:)', () => {
+  // BEHAVIOR test: verifies a config-driven install with CUSTOM target values (myproj / npm test /
+  // /srv/target) lands byte-identical docs + those exact values in config.yml. The shared prebuilt
+  // fixture is installed with the STANDARD args, so this test keeps a real install by design.
   const ws = makeTmp();
   try {
     const r = runInit(ws, ['--loop', '--root', ws, '--project', 'myproj',
@@ -202,6 +211,10 @@ test('AC3 — no detection source: --loop fails closed, naming every location it
 // Measured on three real projects, each on a different rung:
 //   quay ⇒ scripts/test.sh → "bash scripts/test.sh"; archguard ⇒ package.json scripts.test → "npm test";
 //   meta-cc ⇒ go.mod → "go test ./..."; Cargo.toml → "cargo test".
+// BEHAVIOR tests (NOT install-as-setup): each needs a FRESH unconfigured workspace carrying one
+// specific detection source, so they cannot use the shared prebuilt fixture (a single fixed-config
+// already-installed tree). They keep their real installs by design (the detection + config-write
+// path is the mechanism under test).
 test('AC2 — detection ladder: scripts/test.sh is detected as bash scripts/test.sh (quay convention)', () => {
   const ws = makeTmp();
   try {
@@ -283,9 +296,11 @@ test('AC2 — an explicit --test-command takes priority over detection', () => {
 // must NOT require a separate `git rm` step nor a --force flag. Localizable prose (tick docs) stays
 // preserve-mode: a local edit is a conflict, listed and left untouched (upgrade path, AC5).
 test('AC4 — a stale same-name mechanism file is residue: backed up, replaced, and reported (no --force needed)', () => {
-  // AC2: the copy starts from the shared READ-ONLY laydown template (already fully installed);
-  // pre-placing a stale product file and RE-RUNNING init exercises the residue-cleanup path
-  // (the re-run emits the cleaned-residue/backup report and the byte-identical verify).
+  // AC2 + SHARED prebuilt fixture (gap-quay-init-loop-tests-not-wired-to-shared-fixture): the copy
+  // starts from the shared READ-ONLY fixture (one real install per serial phase — laydownWorkspace
+  // cp -a's the content-addressed fixture); pre-placing a stale product file and RE-RUNNING init
+  // exercises the residue-cleanup path (the re-run emits the cleaned-residue/backup report and the
+  // byte-identical verify).
   const { ws } = laydownWorkspace();
   try {
     // Pre-place a stale copy of a product mechanism file (a hot-copy leftover) with different content.

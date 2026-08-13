@@ -22,14 +22,20 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { makeTmp, cleanup, diskWorktreeRoot, runInit, extractRefs, declaredSet, pluginDir, laydownWorkspace } from "./quay-init-loop-helpers.mjs";
+import { makeTmp, cleanup, diskWorktreeRoot, runInit, extractRefs, declaredSet, pluginDir, laydownTemplate, laydownWorkspace } from "./quay-init-loop-helpers.mjs";
 
 // AC1/AC2 — session-liveness.sh is laid down VERBATIM (cp, not render_substitutions); the
 // per-project session is CONFIG, generated into orchestration/session-liveness.env.
 test('AC1/AC2 — session-liveness.sh is copied verbatim; the session is generated config, not a script rewrite', () => {
-  // AC2 (gap-serial-segment-77-percent-cost-reduction-runner-grouping-listfiles): runs from the
-  // shared READ-ONLY laydown template (one real quay-init --loop per file) — the laid-down state
-  // is byte-identical to a fresh real install, so the assertion surface is unchanged.
+  // AC2 (gap-serial-segment-77-percent-cost-reduction-runner-grouping-listfiles) + the SHARED
+  // prebuilt fixture (gap-quay-init-loop-tests-not-wired-to-shared-fixture AC1): this file's
+  // install-as-setup tests copy from the SHARED content-addressed fixture — ONE real quay-init
+  // --loop per SERIAL PHASE, not per FILE (quay-init-loop-helpers.mjs sharedFixture →
+  // laydownTemplate → laydownWorkspace). The laid-down state is byte-identical to a fresh real
+  // install, so the assertion surface is unchanged. The direct laydownTemplate() reference below
+  // is the explicit shared-fixture wiring (AC1: this file hits sharedFixture/laydownTemplate).
+  const template = laydownTemplate();
+  assert.ok(template.ws && template.install, 'the shared prebuilt fixture must be serving this file (AC1)');
   const { ws, install: r } = laydownWorkspace();
   try {
     assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
@@ -122,6 +128,12 @@ test('AC7b — --loop writes a .quay/config.yml whose provider mcp_entry is proj
   } finally { cleanup(ws); }
 });
 
+// ── Vendor-runtime mechanism tests (AC1/AC7b/AC3/AC4): BEHAVIOR tests, NOT install-as-setup. Each
+// builds a temp COPY of the plugin with a MODIFIED runtime state (bundles removed / stubbed
+// sync-vendor / fake bundles / pre-existing config), then runs a real install against it. They
+// cannot use the shared prebuilt fixture (a single fixed-config already-installed tree built from
+// the REAL plugin) — the vendor-runtime mechanism under test needs a modified plugin source. These
+// keep their real installs (and their fs.cpSync of pluginDir) by design.
 test('AC1 — when the plugin has no built runtime bundles and auto-build cannot produce them, --loop FAILS CLOSED (exit non-zero, no complete)', () => {
   // Construct the no-bundle scenario deterministically: a temp COPY of the plugin with the Core
   // and native provider bundles removed (fresh-clone state — dist/ is gitignored). The real
@@ -198,6 +210,9 @@ test('AC7b — a plugin source WITH built runtimes lays them into the target (pr
 // gap-the-runtime-has-nowhere-safe-to-land AC10 — the runtime is install-generated product, not
 // source, so quay-init MUST write the .gitignore entry itself (never an instruction to the user —
 // that is exactly the manual patch G0 bans). Idempotent + non-destructive.
+// The "writes the entry itself" + "APPENDS" tests are BEHAVIOR tests of the install-time gitignore
+// handling (need a fresh install with a pre-existing user gitignore), so they keep real installs;
+// the "CREATES" test is install-as-setup and copies from the SHARED prebuilt fixture.
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
 test('AC10 — quay-init writes the .gitignore runtime entry itself; a pre-existing same-name entry is NOT duplicated and the user gitignore is NOT overwritten', () => {
   const ws = makeTmp();
