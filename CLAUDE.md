@@ -95,6 +95,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
     ——内容落地但归属记成 outer，写在提交信息里的判据理由（负控制/为何不设阈值）全部丢失**；②同日 outer 把 3 个 task 文件 staged 等窗口，
     **若 manager 先提交，三条任务的立案理由会变成一条 manager 提交的附带内容**（已拦下）。
     **两次都不是"忘了提交"，是"以为索引归自己"。** 不绕过守卫是对的；**错的是在 add 之后去等**。
+    **11b 同源，换对象：工作树本身就是生产输入。** 派发计算（`ready-pool-check` 等）读的是**盘上的 `tasks/*.md`，不是 git**
+    ⇒ **谁改了盘上的任务体，谁就【立即】改变了另外两层的派发计算——不需要提交，也没有任何守卫拦。**
+    **实证 2026-08-13**：4 条任务的 `## Touches` 由目录级收窄为具体文件后，**在未提交状态下** `dispatchable_disjoint` 即由 4 升到 7、`criterion_met` 翻 True。
+    ⇒ **危险是它的镜像形态：「已生效而未记录」**——未提交的改动正在影响生产，而对任何读 git 的人不可见；
+    **一次 `git checkout -- tasks/` 或"清理工作树"就会静默回退它，且 git 历史里没有任何痕迹说明它曾经变过。**
+    〔无独立产物；靠 11 的 `git diff --cached` 与「改了盘上任务体就当场提交」共同覆盖〕
 
 ## What this repo is
 
