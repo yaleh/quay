@@ -1,7 +1,8 @@
 ---
 id: gap-quay-init-loop-tests-not-wired-to-shared-fixture
-title: quay-init-loop-core/runtime 两个相的地板未接共享 prebuilt fixture（机制在消费者无，今晚第 6 同族；接上则 serial/lowconc 地板同降，方案 A/B 天花板打开）——等人裁定
-status: ready
+title: quay-init-loop-core/runtime 两个相的地板未接共享 prebuilt fixture（机制在消费者无，今晚第 6
+  同族；接上则 serial/lowconc 地板同降，方案 A/B 天花板打开）——等人裁定
+status: done
 labels:
   - gap
   - exploration

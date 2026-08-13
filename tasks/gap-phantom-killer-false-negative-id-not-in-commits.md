@@ -2,7 +2,7 @@
 id: gap-phantom-killer-false-negative-id-not-in-commits
 title: phantom-killer 假阴性——hasLandedImplementation 靠 commit-message
   id-grep，实现提交不含 id 则漏判落地 ⇒ 已落地任务被推荐派发
-status: ready
+status: done
 labels:
   - gap
   - defect

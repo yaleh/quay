@@ -1,7 +1,7 @@
 ---
 id: gap-check-set-after-change-diff-nameonly-intersect-judged-objects
 title: 改任何文件后跑哪些测试，用 git diff --name-only ∩ 测试自声明的判定对象机械求出（A0b③ 指错检查对象）
-status: ready
+status: done
 labels:
   - gap
   - defect
