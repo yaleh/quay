@@ -1,7 +1,7 @@
 ---
 id: gap-npm-pack-ac3-gate-counter-example-refs
 title: npm-pack-e2e 红 — package.sh AC3 gate 把反例引用当活引用（4 反例 + 2 真引用需声明）
-status: todo
+status: ready
 labels:
   - gap
   - defect

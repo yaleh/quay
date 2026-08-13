@@ -1,7 +1,7 @@
 ---
 id: gap-tick-core-drift-check-not-in-suite
 title: tick-core --check-drift 存在但不在 run_static_checks——三份执行核双向漂移（A12 行号 :31 vs :45 已实际误导；第五次同族：仪器在消费者无）
-status: todo
+status: ready
 labels:
   - gap
   - defect

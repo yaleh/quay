@@ -1,7 +1,7 @@
 ---
 id: gap-precommit-guard-merge-bypass
 title: git merge --no-ff 绕过 pre-commit 守卫——断言面文件经 merge 落地不触发（inner 实测 2 commit→2 fire / 1 merge→0 fire；round 123 污染即活样本）
-status: todo
+status: ready
 labels:
   - gap
   - defect

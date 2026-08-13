@@ -1,7 +1,7 @@
 ---
 id: gap-src-n-anchor-coupling
 title: src:N 行号引用 + ANCHOR_K 窗口 + fail-closed 全套件 abort 的耦合
-status: todo
+status: ready
 labels:
   - gap
   - defect

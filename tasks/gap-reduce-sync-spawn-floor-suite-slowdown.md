@@ -1,7 +1,7 @@
 ---
 id: gap-reduce-sync-spawn-floor-suite-slowdown
 title: 套件耗时大头 = 派生次数 × 进程启动地板（~180-245s）——减少/降低单次派生
-status: todo
+status: ready
 labels:
   - gap
   - defect

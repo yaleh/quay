@@ -1,7 +1,7 @@
 ---
 id: gap-red-window-cap-trigger-backlog-not-suite-red
 title: 红窗降 cap 触发条件过严——`suite_red && backlog>50` 双条件（backlog=10 未达 ⇒ 红窗 cap 仍 5）；人裁定红窗本身即触发降 cap + red_backlog_cap=2 字面量需记录 + 不得停派（死锁）
-status: todo
+status: ready
 labels:
   - gap
   - defect

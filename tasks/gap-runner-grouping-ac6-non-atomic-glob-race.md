@@ -1,7 +1,7 @@
 ---
 id: gap-runner-grouping-ac6-non-atomic-glob-race
 title: runner-grouping-list-groups AC6 与 AC3/AC7 同一非原子 glob 竞态 — 唯一没被套上有界重读的受害者
-status: todo
+status: ready
 labels:
   - gap
   - defect

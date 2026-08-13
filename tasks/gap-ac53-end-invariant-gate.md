@@ -1,7 +1,7 @@
 ---
 id: gap-ac53-end-invariant-gate
 title: AC53 判据①机械执行——结束不变式的结构性闸（无合法退出路径）
-status: todo
+status: ready
 labels:
   - gap
   - defect

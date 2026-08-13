@@ -1,7 +1,7 @@
 ---
 id: gap-main-checkout-cutover-to-develop-stage-3
 title: 主检出切 develop（SPEC §15.4 阶段三）——项目主工作目录保持 develop 分支（人 08:0xZ 指令①）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
