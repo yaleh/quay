@@ -14,7 +14,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 |---|---|
 | 有哪些机件、各自回答什么问题 | `bash plugin/scripts/capability-catalog.sh`（182 条声明，**唯一清单**） |
 | 驱动/投递到别的 Claude 会话 | **默认：`ListAgents` → `SendMessage`**（人 2026-08-12 裁定「实际应用 SendMessage」；需 Claude Code 2.1.224 或更新,本机 2.1.228）。**实测**：目标 busy 直投即达（无 can-receive 闸门）；到达形态 `<cross-session-message from=… from-name=… from-mode=…>`,**身份由平台标注而非发送方自称**；平台强制 peer 不能代替人许可/改配置/**执行斜杠命令**。**旧机件保留可用但非默认路径**（人 2026-08-12 裁定「还保留原实现和测试,但尽量减少对其使用」）：`supervisor-deliver.sh` / `send-keys-reliable.sh` / `drive-target-check.sh` / `transcript-delivery-check.ts` / `message-bus.ts` / `inbox-reader.sh`。**保留的两个不可替代用途**：①**控制面**——`/clear` 等斜杠命令原生通道办不到（文档明确 "Commands don't run"）,只能走 tmux 输入；②**下游交付面**——Claude Code 低于 2.1.224 者 / Bedrock·AWS·GCP·Foundry / native Windows。**手工拼 tmux send-keys 仍禁止。** |
-| 三层每轮该做什么 | `orchestration/{manager,orchestrator,fast-mode}-tick-core.md`（各 ≤80 行，执行路径） |
+| 三层每轮该做什么 | `orchestration/{manager,orchestrator,fast-mode}-tick-core.md`（执行路径；**强制判据是 `tick-core-static-check.ts` 的 (src:N) 覆盖率=100%，不是行数**——本行原写「各 ≤80 行」，而该判据已被 AC30(a) 明确退休（`tick-core-static-check.ts:70/:94` 自证「n=3 placeholder，已 RETIRED」），实测 106/100/81 三个全超却无人报错：**一个被退休的判据留在本文件里，正是本文件开头警告的那种漂移**） |
 | 判准 / 收尾 / 发消息形态 | `orchestration/manager-tick-{criteria,closing,sending}.md`（466 行；**停调 workflow 19 小时 ⇒ 这些全部缺席 ⇒ 8 条违规**） |
 | 收件箱（**保留但非默认**，人 2026-08-12「还保留原实现和测试，但尽量减少对其使用」） | **默认改用 `SendMessage`；文件收件箱保留可用。** 若使用它，**判「有没有人给我留话」必须 `ls .quay/manager-inbox/` 列目录本身**——`inbox-reader.sh` 只消费 message-bus 写的 JSON 记录，**手写的 `.md` 它不认**（实测 2026-08-12：目录 64 封 `.md`，它报零 `read` 行）。**一般形态见硬规则 5：同一容器装两类 population，只用覆盖其一的工具去判空，会把非空读成空。** |
 | pane 状态 | `plugin/scripts/pane-state-classify.ts`（底部区域 + 枚举态，**不是整屏哈希**） |
@@ -65,6 +65,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
    **而 `instrument-failure-check` 的 fixture 正把该字面量断言为「正确形式」——检查通过恰恰证明用了恒零的读法。**
    **该自检不需要知道正确字面量是什么 ⇒ 换机换版本继续有效**；而「让工具去数它自己所在的那个进程」
    是硬规则 4 的不可取假量，**不算自检**。一般形态：**恒零/恒真的读数携带零信息，且与「一切正常」同形。**
+4b. **代理量会与实际偏离——优先观测直接量，不要叠加未经测试的过滤/派生**（人 2026-08-13 逐字裁定）。〔**无产物，靠自觉**〕
+    **与硬规则 4 的分工**：4 管「结构上不可能取假」的量（恒真/恒零/自证）；**本条管「本来能取假、但因为中间隔了一层未经验证的过滤而不再反映实际」的量**。
+    **一天内五个实例（全部真实发生，全部退出码 0、结构完整、数字合理）**：
+    `resource.node_count` 的 comm 正则（本机 comm=`MainThread` ⇒ 恒 0，而 `pgrep -cf 'bin/node'`=25）；
+    `outer.ticklog` 的行形谓词（要求 `YYYY-MM-DD HH:MM`，实际行是 `` - `04:09Z` `` ⇒ **291 行真样本命中 0**，恒报「没写 tick 行」）；
+    `goal.phase_ac_checked` 的复选框正则（本阶段 12 条 AC 一个复选框都没有 ⇒ **贡献恒零**，`4/14` 测的是十天前那个阶段）；
+    inner 心跳的 `runIds`（**陈旧 50 分钟**，指向早已 fan-in 完的任务）与 `slot-refill` 的 `in_flight_count`（滞后，我差点据此报假缺陷）。
+    **操作含义**：判「某层是否在干活」用 **git 提交时间戳 / `git worktree list` / `/proc/<pid>/cwd`** 这类**外部可核**的量，
+    **不要用它自己写的心跳、自己维护的在飞集合、自己解析出的计数**——**后者在它停摆时恰好也停止更新，与「一切正常」同形**。
+    **最省事的自检**：一个量若由被测对象自己产生，它就不能用来判断被测对象是否活着（循环论证）。
+
 5. **来源完备性**：在某来源搜不到 X，只有当该来源对 X 完备时才等于「X 不存在」。〔**一般情形无产物，靠自觉**〕
    **最危险的实例是批量删除，它有产物**：每次删文档 ≥50 行前，必须先产出**落点映射**——
    被删内容的**每一个**独有词条 → 它的新正本路径，并把该映射贴进删除提交。
