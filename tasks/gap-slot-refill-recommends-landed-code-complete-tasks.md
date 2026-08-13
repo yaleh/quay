@@ -42,21 +42,22 @@ extra:
 
 ## AC
 
-- [ ] AC1: slot-refill/ready-pool 的 recommended 对「实现已在树」任务排除（git 判据：message 含 id + `-m --first-parent` 文件在 tasks/ 外）
-- [ ] AC2: 判据可取假——负控制（不存在 id / 仅任务文件）⇒ 不排除
-- [ ] AC3: merge 落地提交正确识别（`-m --first-parent` 使 merge 的文件列表可见；不加时 0 文件——实证 7418c615）
-- [ ] AC4: 任务体/文档提交不误判为「实现」（文件必须在 tasks/ 外）
-- [ ] AC5: 既有测试全绿；`--for-task` scoped 门绿
+- [x] AC1: slot-refill/ready-pool 的 recommended 对「实现已在树」任务排除（git 判据：message 含 id + `-m --first-parent` 文件在 tasks/ 外）
+- [x] AC2: 判据可取假——负控制（不存在 id / 仅任务文件）⇒ 不排除
+- [x] AC3: merge 落地提交正确识别（`-m --first-parent` 使 merge 的文件列表可见；不加时 0 文件——实证 7418c615）
+- [x] AC4: 任务体/文档提交不误判为「实现」（文件必须在 tasks/ 外）
+- [x] AC5: 既有测试全绿；`--for-task` scoped 门绿
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全部勾上
-- [ ] 修正前 5 条 phantom recommended vs 修正后 0 条 的对照贴出
+- [x] AC1–AC5 全部勾上（worktree subagent 2026-08-13：slot-refill.test.mjs 62/62 + ready-pool-check.test.mjs 95/95 全绿；`--for-task` scoped 门 EXIT=0）
+- [ ] 修正前 5 条 phantom recommended vs 修正后 0 条 的对照贴出（**注**：本 worktree 落下时 5 条 phantom 已被 closure 批翻成 done，实时对照不可复现；fixture 构造同形样本验证——见 AC1 测试 landedAllCheckedBody/landedNoCheckboxBody）
 - [ ] **真实负控制（manager 2026-08-13 建议）：round 146 绿窗 closure 后，若 inner 侧有过「被告知有货、实际派过去是 code-complete」的轮次，作为判据的真实样本——比构造的检验更有说服力，不用额外造数据**
-- [ ] 全量套件绿
+- [ ] 全量套件绿（worktree subagent 不跑全量；主 checkout round 4541a4ae 已绿）
 
 ## Touches
 
-- plugin/scripts/slot-refill.ts（或 ready-pool-check.ts 的 recommended 计算）
-- plugin/test/slot-refill.test.mjs（或 ready-pool-check.test.mjs：landed 排除 + 负控制用例）
+- plugin/scripts/slot-refill.ts（step-4 新增 `hasLandedImplementation` + `isLandedCodeComplete` 判据）
+- plugin/scripts/ready-pool-check.ts（导出 `countCompletionCheckboxes` 复用——shape-aware 完成度计数，单一来源）
+- plugin/test/slot-refill.test.mjs（landed 排除 + 负控制 + stuck-work 保护 + AC3 -m 实证用例）
 - tasks/gap-slot-refill-recommends-landed-code-complete-tasks.md（自身）
