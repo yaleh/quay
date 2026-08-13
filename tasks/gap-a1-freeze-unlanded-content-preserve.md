@@ -45,7 +45,7 @@ c1c0aa41 是否在 develop 祖先中           ⇒ 否（仅存于 task/a1-fix �
    `git merge task/a1-fix` 对 develop 已实测 **0 冲突**（merge-tree 校验，merge-base bbb19e46 在 develop 祖先中）；
    若 rebase 到 develop 遇冲突，先 rebase 再合。
 2. **scoped 验证**：在 worktree 内跑 `scripts/test.sh --for-task gap-a1-freeze-unlanded-content-preserve`
-   （或直接以 install-config-driven-e2e 族为 scoped 面），确认 freeze 逻辑在 integration 最新代码上绿。
+   （或直接以 install-config-driven-e2e 族为 scoped 面），确认 freeze 逻辑在 develop 最新代码上绿。
 3. **fan-in 合入**：A6 流程 merge → 全量套件验（round 157 或后续）。
 4. **保内容成功后清树**：`task/a1-fix` 分支 + worktree 才可 clean-stale。
 5. **证据回填**：在本任务 + `gap-install-config-driven-e2e-load-flake` 任务体贴 verifiedCommit 证据。
@@ -55,7 +55,7 @@ c1c0aa41 是否在 develop 祖先中           ⇒ 否（仅存于 task/a1-fix �
 - [ ] AC1 `c1c0aa41` 的内容（freeze 逻辑 +43 −4）已合入 develop，`develop` 上该文件
       与 a1-fix 分支版本一致（diff 为空或仅下游后续改动），且 `develop..integration = 0` 保持。
 - [ ] AC2 scoped 测试绿（install-config-driven-e2e 族，--for-task 或等价 scoped 面），freeze
-      在 integration 最新代码上不破坏 byte-identity 断言。
+      在 develop 最新代码上不破坏 byte-identity 断言。
 - [ ] AC3 合入后全量套件绿（round 验），且 `task/a1-fix` 工作树已清（内容已保，树可清）。
 - [ ] AC4 证据落盘：本任务与 load-flake 任务体各贴 verifiedCommit。
 
