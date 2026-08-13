@@ -2,7 +2,7 @@
 id: gap-loop-shipping-ac1b-main-excludes-quay-and-outer-doc-split
 title: loop-shipping AC1b 在 main 确定性红 — walkCorpus 未排除 .quay/ +
   outer-doc-split.test.mjs 未入表
-status: todo
+status: ready
 labels:
   - gap
   - defect

@@ -619,7 +619,7 @@ exit 1 = 面板仍有「已结束/冻结」agent 行（括号已关但行未清�
 
 **无法从仓库状态机械判定的条件**（本 tick 判断后同样要落盘，见「阻塞信号」节）：
 - `.halt` 存在 —— **不写阻塞信号**（外层主动暂停，不是「等裁定」；写了一个小时后
-  `restart-readiness-check.sh` 检查 7 会因「内层在等裁定」拒绝解除停机，死锁）
+  `experiments/quay-perpetual-stream/scripts/restart-readiness-check.sh` 检查 7 会因「内层在等裁定」拒绝解除停机，死锁）
 - **窗口内新增** needs-human ≥ 3（2026-08-03 外层裁定：**不是总数**——历史积压不构成停止理由，
   它需要派发才能解开；意图是「产出 needs-human 的速度超过消解速度」。判据是**窗口内新增数**，
   不是仓库里 needs-human 的总数。分诊规则见 `orchestrator-loop-tick.md` 步骤 3）
@@ -1358,10 +1358,12 @@ clause-14 降为 advisory、既有失败记在已 done 的任务体里）。
 
 **判据（机械可核）**：inner 的吞吐恒等于 1 的机制根是「主线程串行做实现，不走派发路径」——
 85 分钟 Bash 162 / Edit 41 / Agent 2，41 次 Edit 全在主线程改产品脚本。修法不是「禁止主线程 Edit」，
-是「**常规 ready 任务的实现必须派 subagent；主线程只做红窗快修 + 编排 + 立案**」。每 tick 报两数：
+是「**产品文件的实现/修复必须派 subagent + worktree；主线程只做只读诊断 + 编排 + 立案**」
+（人 2026-08-13 裁定——红窗快修也不例外：红窗快修恰恰最需要隔离，它改的是正在让套件变红的文件）。
+每 tick 报两数：
 
 ```bash
-node --no-warnings --experimental-strip-types plugin/scripts/inner-exec-mode-report.ts --json
+node --no-warnings --experimental-strip-types plugin/scripts/inner-exec-mode-report.ts --since <本 tick 起点> --json
 # { main_thread_edits, agent_dispatches, total_edits, edits_no_file_path, session, ... }
 ```
 
@@ -1375,14 +1377,32 @@ node --no-warnings --experimental-strip-types plugin/scripts/inner-exec-mode-rep
 （即常规实现被主线程直接 Edit 掉了、没有任何派发）⇒ 违反「常规 ready 任务实现必须派 subagent」。
 helper 只报数、不裁决——「当轮是否红窗」由 tick 的 suite-state 读判，判据是两层读数合起来的。
 
-**红窗快修白名单（AC3，不误报）**：以下主线程产品文件 Edit **允许**、不判违——
-1. **红窗即时修复**：suite-red 分诊后针对失败文件的即刻修复（文档写明的快路径；
-   measure-trend/ready-pool 那类即时修复属此类）。
-2. **任务立案/编排**：写任务体、勾 AC、贴证据、编辑 `tasks/*.md`（helper 结构上不计入
-   `main_thread_edits`——`tasks/` 不是产品文件，白名单在计数源头兑现）。
-3. **tick 文档/编排文档编辑**：`orchestration/*.md`、`docs/analysis/*.md` 的编辑属编排，
-   不计入产品文件 Edit（同 2，计数源头排除）。
+**红窗豁免（人 2026-08-13 修正——红窗不再整体豁免）**：红窗快修恰恰最需要隔离（改的是正在让套件变红的
+文件）。主线程仅豁免**只读诊断**（跑命令/读日志/看 diff，不写产品文件）。**产品文件编辑一律
+subagent + worktree，红窗也不例外。** 以下仍属主线程允许（helper 结构上不计入 `main_thread_edits`——
+非产品文件）：
+1. **任务立案/编排**：写任务体、勾 AC、贴证据、编辑 `tasks/*.md`（`tasks/` 不是产品文件）。
+2. **tick 文档/编排文档编辑**：`orchestration/*.md`、`docs/analysis/*.md` 属编排，非产品文件。
 
-**机械上报触发**：当 `main_thread_edits` 大（> 3）**且** `agent_dispatches == 0` **且** 当轮不是
-红窗轮（suite-state 非 red）⇒ 本 tick 必须在 tick-log 里显式写出「执行模式违规候选」并说明为什么
-这轮的主线程 Edit 属于/不属于白名单——把散文的「记得派 subagent」变成每轮被检查的数字。
+**机械上报触发**：当 `main_thread_edits > 0`（产品文件主线程编辑）⇒ 本 tick 必须在 tick-log 里显式写出
+「执行模式违规候选」（红窗不豁免，只读诊断除外）——把散文的「记得派 subagent」变成每轮被检查的数字。
+
+## 直接量优先于代理量（人 2026-08-13 裁定②，方法论硬约束——逐字）
+
+> **本项目许多代理量都出现了与实际情况的偏离，所以应尽可能观测更直接的量，避免附加未经测试的过滤和代理量。**
+
+判「自己/对方有没有在动」，用直接量：
+
+| 用这些（**直接量**） | 不要用这些（**已证偏离的代理**） |
+|---|---|
+| `git worktree list` 里的任务 worktree 条数 | 心跳 `runIds`（实测陈旧 50 分钟） |
+| worktree 内的活进程（`/proc/<pid>/cwd` 实测） | `slot-refill` 的 `in_flight_count`（实测滞后） |
+| 最后一次**提交**的时间戳（git，客观） | 心跳 `ts`（自己不醒就不更新——判活性是循环论证） |
+| 盘上任务文件的 `status:`（枚举） | `pool` 计数（含结构不可派发 / 解析失败被静默排除的） |
+
+**不要为检查发明新的过滤/派生量**——今晚四个读数因「加了一层未经验证的过滤」而失真（`node_count` 的
+comm 正则 / `outer.ticklog` 的行形谓词 / `phase_ac_checked` 的复选框正则 / Touches 解析器）。再加一层新过滤就是第五个。
+
+**① 冗余保底（人 2026-08-13 裁定）**：两层（inner + outer）tick 都检查槽位与任务。任一层的自驱失效时，
+另一层能发现——**这是冗余不是重复**（2026-08-13 实测：inner 睡 55 分钟无产出、心跳 58 分钟陈旧、
+worktree 内 0 活进程——自驱会整段消失，另一层必须能发现）。
