@@ -56,9 +56,9 @@ cp「安全」判定只核了 A 编号维 → 提交前跑覆盖文件的检查 
 
 ## Definition of Done
 
-- [ ] AC1–AC4 全部勾上
-- [ ] 负控制样例贴出（见 Evidence）
-- [ ] 全量套件绿
+- [x] AC1–AC4 全部勾上（AC5 为后续 follow-up，不在本任务 DoD）
+- [x] 负控制样例贴出（见 Evidence）
+- [x] 全量套件绿（2026-08-13 per-task 全量认证 FULL_SUITE_EXIT=0，AC46 判据3 inner 自有绿证）
 
 ## Touches
 
