@@ -1148,6 +1148,8 @@ node --no-warnings --experimental-strip-types plugin/scripts/inner-wakeup-heartb
   --reason 'tick heartbeat'
 ```
 
+**运行该写心跳命令时禁止吞掉非零退出码（`|| true` / 管道 / `set +e` 都不行；AC53 EXIT:0 捕获）——exit 非 0 是结构性强制的唯一信号，吞掉 = 闸失效。**
+
 外层每个 tick 读该产物判新鲜（`orchestrator-tick-core.md` A13，`inner-wakeup-heartbeat-check.ts`）；
 `ts` 距今 > 3 个 tick 周期（5400s）⇒ 外层报「inner 兜底心跳断」并升级——把「断了不可见」变成「断了 3 周期即报」。
 

@@ -379,6 +379,47 @@ test("AC53 AC2 (gap-ac53-end-invariant-gate) — NEGATIVE CONTROL: a prose --no-
   }
 });
 
+test("AC53 EXIT:0 捕获（manager 2026-08-13 裁定）— 构造一次拒绝 ⇒ 调用方（spawnSync）看到写入方的非零退出码，未被吞掉", () => {
+  // The writer's non-zero exit IS the structural enforcement (gap-ac53-end-invariant-gate): a refusal
+  // must be OBSERVABLE by the caller, or the tick could swallow it (`|| true` / pipe / set +e) and
+  // sleep anyway. This negative control constructs a rejection (dispatchable work waiting → the
+  // end-invariant is violated) and asserts the CALLER sees the child's ACTUAL exit — non-zero, and
+  // exactly 1 (the writer's refusal code), with the refusal reason on stderr. The paired control
+  // proves the harness distinguishes: the same spawn sees 0 for a legitimate write.
+  const root = makeDispatchableWorkspace("iwuh-exit-");
+  try {
+    // Precondition: the direct slot-refill must see dispatchable work (should_refill=true) so this
+    // is a true refusal, not a trivial write.
+    const direct = runDirectSlotRefill({ root, inFlightIds: [], cap: 5 });
+    assert.equal(direct.ok, true, "direct slot-refill must succeed");
+    assert.equal(direct.refill.should_refill, true, `fixture must be dispatchable:\n${JSON.stringify(direct.refill)}`);
+    // Construct the rejection: an END heartbeat while dispatchable work waits, with an empty
+    // no_refill_reason (the exact 有货不派 shape the AC2 end-invariant flags).
+    const violatingArgs = [...FULL_ARGS];
+    const idxShould = FULL_ARGS.indexOf("--should-refill");
+    violatingArgs[idxShould + 1] = "true";
+    const idxReason = FULL_ARGS.indexOf("--no-refill-reason");
+    violatingArgs[idxReason + 1] = "null";
+    const w = runWriter(root, violatingArgs);
+    // THE ASSERTION THE RULING ASKS FOR: the caller sees a NON-ZERO exit — not 0, not swallowed.
+    assert.notEqual(w.status, 0, `the caller must observe a non-zero exit on a writer refusal:\n${w.stdout}\n${w.stderr}`);
+    assert.equal(w.status, 1, `the refusal exit must be exactly 1 (the writer's refusal code):\n${w.stdout}\n${w.stderr}`);
+    assert.match(w.stderr, /结束不变式违例/, "the caller must also see the refusal reason on stderr");
+    assert.ok(!fs.existsSync(path.join(root, ".quay", "inner-wakeup-heartbeat.jsonl")), "NOTHING must be written on refusal");
+    // CONTROL (proves the harness is not forcing non-zero): the SAME spawn sees 0 for a legitimate
+    // write (bare temp dir → no dispatchable work → should_refill=false → the write proceeds).
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "iwuh-exitctl-"));
+    try {
+      const ok = runWriter(tmp, FULL_ARGS);
+      assert.equal(ok.status, 0, `the same harness must see 0 for a legitimate write:\n${ok.stdout}\n${ok.stderr}`);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("AC53 AC2 (gap-ac53-end-invariant-gate) — a legitimately-ending tick (full in-flight, no free slots) WRITES exit 0", () => {
   // Negative control: should_refill=false (no free slots — all 5 slots held by in-flight) is a
   // legitimate end condition; the writer must WRITE (exit 0) with the DIRECT measurement's keys.
