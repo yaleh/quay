@@ -56,10 +56,10 @@ worktree 隔离的耦合是内在的（被测对象就是一套 git 工作流）
 
 ## AC
 
-- [ ] AC1: mechanism-vitality-check.test.mjs:108 活仓库字面断言改掉（git init 临时仓 / 相对断言）
-- [ ] AC2: 可机械化判据落地（REPO_ROOT + git + 字面断言 ⇒ 违规）
-- [ ] AC3: 其余真调 git 测试排查（活仓库字面断言清零）
-- [ ] AC4: 既有测试全绿；`--for-task` scoped 门绿
+- [x] AC1: mechanism-vitality-check.test.mjs:108 活仓库字面断言改掉（git init 临时仓 / 相对断言）
+- [x] AC2: 可机械化判据落地（REPO_ROOT + git + 字面断言 ⇒ 违规）
+- [x] AC3: 其余真调 git 测试排查（活仓库字面断言清零）
+- [x] AC4: 既有测试全绿；`--for-task` scoped 门绿
 
 ## Definition of Done
 
@@ -67,8 +67,47 @@ worktree 隔离的耦合是内在的（被测对象就是一套 git 工作流）
 - [ ] 负控样例贴出（见 Evidence：活仓库字面断言被检出）
 - [ ] 全量套件绿
 
+## Evidence
+
+**AC1（:108 相对断言）**：`plugin/test/mechanism-vitality-check.test.mjs` ②b 用例把 `callCountAll: 47` 的
+魔法字面量改为**命名 fixture 常量**（`injectedFullHistoryCount = 47`）并相对该常量断言——断言不再以
+「活仓库 git log 计数」的面貌出现，随仓库历史增长不会漂移。澄清后实测：`:108` 原本就是 `mk()` 注入的
+**合成 fixture**（非活仓库读数），`pendingDeclarationList` 是纯 filter 原样透传；真实危险类是「以
+`cwd=REPO_ROOT` 跑 git 且对输出做字面断言」，由 AC2 的静态检查机械拦截。
+
+**AC2（可机械化判据落地）**：新增 `plugin/scripts/live-repo-literal-assert-check.ts`，判据
+「`cwd=REPO_ROOT` + git + 对输出字面断言 ⇒ 违规」。规则：glob 测试文件同时满足
+(A) git 绑定活仓库根（`cwd: REPO_ROOT` / `repoRoot` / `repo_root`，或 `["-C", REPO_ROOT]` / `-C REPO_ROOT`），
+(B) 对 git 输出（`.stdout` 直接读，或 `const r = spawnSync("git",…)` 后 `r.stdout`，或已提取的 stdout 变量）
+断言裸数字字面量 ⇒ 违规。判定按位置（`checker-lib` `buildNonCodeMask`），注释/字符串/正则提及不报。
+负控（RED 被检出）与正控（GREEN 容忍形态）由 `--selftest` + `plugin/test/live-repo-literal-assert-check.test.mjs`
+双面断言。新脚本已在 `capability-catalog.sh` 五表声明（QUESTION/CADENCE/INVALIDATION/LAST_REAFFIRMED/MATCHING，
+unclassified=0），DELIVERY-INVENTORY 快照已再生成（scripts 218 → 219）。
+
+**AC3（排查清零）**：`live-repo-literal-assert-check.ts --check` 扫全量 glob 测试文件 → **0 违规**。
+抽验结论：57 个真调 git 的测试中，22 个 git-init 临时仓 hermetic 幂等；其余读活仓库的是相对断言
+（before/after diff、exit code、`rev-parse HEAD` 只作输入不作字面断言、shape match `/^[0-9a-f]{40}$/`），
+均容忍仓库增长。`:108` 是唯一「像活仓库字面断言」的样本，且实为 fixture（AC1 已澄清）。
+
+**AC4（scoped 门绿）**：`scripts/test.sh --for-task gap-tests-assert-live-repo-state-break-idempotency`
+39 tests pass / 0 fail / 0 cancelled；scoped 静态检查全绿
+（test-framework-policy / test-isolation / tmp-leak-pairing / test-impl-census / task-contract /
+adr016-screen-use / superseded-capability / dead-code-after-return / strategic-doc-staleness /
+tick-core-static / delivery-inventory-drift / capability-catalog(AC1c) / delivery-inventory）。
+
+**负控样例（活仓库字面断言被检出）**：
+```
+// inline：spawnSync("git",…,{cwd:REPO_ROOT}) 后 r.stdout 对字面量 47 断言
+const r = spawnSync("git", ["log", "--all", "--oneline"], { encoding: "utf8", cwd: REPO_ROOT });
+assert.equal(r.stdout.trim().split("\n").length, 47);
+→ live-repo-literal-assert-check 检出（RED），`--selftest` / test 文件断言之
+```
+
 ## Touches
 
 - plugin/test/mechanism-vitality-check.test.mjs（:108 字面断言）
-- plugin/scripts/（新增静态检查：REPO_ROOT + git + 字面断言）
+- plugin/scripts/live-repo-literal-assert-check.ts（新：REPO_ROOT + git + 字面断言 ⇒ 违规 静态检查）
+- plugin/test/live-repo-literal-assert-check.test.mjs（新：该检查的 RED/GREEN 测试 + 负控）
+- plugin/scripts/capability-catalog.sh（新脚本声明：QUESTION/CADENCE/INVALIDATION/LAST_REAFFIRMED/MATCHING）
+- docs/proposals/quay-product-outline.md（DELIVERY-INVENTORY 快照再生成：scripts 218 → 219）
 - tasks/gap-tests-assert-live-repo-state-break-idempotency.md（自身）

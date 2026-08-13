@@ -100,12 +100,19 @@ test("②a cadence bands enumerate members per band (枚举式, 不是布尔)", 
 
 // ── ②b 全历史表态: 待表态清单携带全历史证据 ─────────────────────────────────────────────────────────
 test("②b pending list carries full-history evidence (callCountAll) — 表态须回看全历史", () => {
+  // 注入的全历史证据是合成 fixture（随 mk() 传入，非活仓库读数）——断言相对该 fixture 自身
+  // （相对断言），不依赖活仓库 git 历史，故随仓库增长不会漂移（gap-tests-assert-live-repo-state-break-idempotency AC1）。
+  const injectedFullHistoryCount = 47;
   const pending = pendingDeclarationList(
-    [mk({ file: "ancient.ts", cadence: "每轮", lastTouchTs: NOW - 10 * DAY, callCountAll: 47 })],
+    [mk({ file: "ancient.ts", cadence: "每轮", lastTouchTs: NOW - 10 * DAY, callCountAll: injectedFullHistoryCount })],
     NOW,
   );
   assert.equal(pending.length, 1);
-  assert.equal(pending[0].callCountAll, 47, "full-history git log --all commit count is surfaced for the reviewer");
+  assert.equal(
+    pending[0].callCountAll,
+    injectedFullHistoryCount,
+    "待表态条目携带注入的全历史证据字段 (fixture 相对断言, 非活仓库字面量)",
+  );
 });
 
 // ── ②c/②d 退休规则 ────────────────────────────────────────────────────────────────────────────────
