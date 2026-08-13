@@ -343,7 +343,7 @@ test("AC2 — multiple observers mount the SAME target in parallel (no lock, no 
   }
 });
 
-test("阶段四 AC2（承重条）— 饱和会话与普通忙会话产出不同事件：饱和 fixture 触发 SESSION-SATURATED，普通忙 fixture 不触发（且不误报 IDLE）", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+test("阶段四 AC2（承重条）— 饱和会话与普通忙会话产出不同事件：饱和 fixture 触发 SESSION-DISABLED，普通忙 fixture 不触发（且不误报 IDLE）", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
   const p = makeHermeticProbe("ol-sat2");
   const satX = path.join(p.tmp, "saturated.jsonl");
   const busyX = path.join(p.tmp, "busy.jsonl");
@@ -357,8 +357,8 @@ test("阶段四 AC2（承重条）— 饱和会话与普通忙会话产出不同
     const monSat = spawnMonitor(p.env, `sat ${p.tmp} ${p.session}`, { transcripts: `sat ${satX}` });
     const monBusy = spawnMonitor(p.env, `busy ${p.tmp} ${p.session}`, { transcripts: `busy ${busyX}` });
     try {
-      assert.ok(await waitForOutput(monSat, /SESSION-SATURATED sat/, 8000),
-        `AC2: saturated fixture MUST fire SESSION-SATURATED:\n${monSat.output()}`);
+      assert.ok(await waitForOutput(monSat, /SESSION-DISABLED sat/, 8000),
+        `AC2: saturated fixture MUST fire SESSION-DISABLED:\n${monSat.output()}`);
       // ≥3 more rounds for both observers — load-robust (hermetic): wait on the `# ROUND` markers so
       // the "ordinary busy is NOT saturated" / "saturated is NOT idle" negative checks observe a real
       // span (a fixed wall-clock sleep can complete fewer rounds under load, making them vacuous).
@@ -366,10 +366,10 @@ test("阶段四 AC2（承重条）— 饱和会话与普通忙会话产出不同
         `monBusy must run ≥3 rounds for the not-saturated check:\n${monBusy.output()}`);
       assert.ok(await waitForRounds(monSat, 3, HANG_GUARD_MS),
         `monSat must run ≥3 rounds for the not-idle check:\n${monSat.output()}`);
-      assert.ok(!/SESSION-SATURATED busy/.test(monBusy.output()),
-        `AC2: an ordinary busy fixture must NOT fire SESSION-SATURATED (different event):\n${monBusy.output()}`);
+      assert.ok(!/SESSION-DISABLED busy/.test(monBusy.output()),
+        `AC2: an ordinary busy fixture must NOT fire SESSION-DISABLED (different event):\n${monBusy.output()}`);
       // 饱和 fixture 在「忙」维度也是 busy（最后一条 user → transcript_busy=1），但不得报 IDLE——
-      // 它报的是 SESSION-SATURATED，与普通忙可区分（AC2：同事件 = 维度仍未测量）。
+      // 它报的是 SESSION-DISABLED，与普通忙可区分（AC2：同事件 = 维度仍未测量）。
       assert.ok(!/SESSION-IDLE sat/.test(monSat.output()),
         `AC2: the saturated target must not be misreported as idle (it is saturated, distinguishable):\n${monSat.output()}`);
     } finally {
