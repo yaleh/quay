@@ -128,3 +128,19 @@ runner 经 env 下发，**worktree 跑也必须传**，否则归属仍混）。
    携带 `tmux_cleaned: 1` / `tmux_cleaned_dirs: ["/tmp/quay-run-stale1234"]`；runner stderr 打印
    `pre-suite cleanup removed 1 stale /tmp/quay-run-* namespace(s)`。
 3. **孤儿不累积**：跑完 scoped + runner 测试后 `ls -d /tmp/quay-run-* | wc -l` = 0（post-suite 自清生效）。
+
+**回归修复（2026-08-13，round 123/124 实证）**：per-run-namespace 在 `full-suite-runner.ts` 里 runtime
+import `../test/session-liveness-helpers.mjs` —— 但 `package.sh` 的 build-plugin-dist **排除 plugin/test/**
+（"quay's own suite — not a user-facing deliverable"），esbuild 解析 `../test/session-liveness-helpers.mjs`
+失败 ⇒ plugin-dist 构建崩 ⇒ tarball 从未产出 ⇒ **8 条 npm-pack-e2e 全红**（round 123/124；round 122 合入前绿）。
+
+**修法（生产模块抽取，单一真源）**：5 个 fs-only 运行时 sweep 函数（`runIdOf`/`runNamespaceRoot`/
+`dirHasLiveOwner`/`sweepRunNamespaces`/`sweepRunNamespace`）从 test helper 抽到新生产模块
+`plugin/scripts/session-liveness-sweep.mjs`（随 npm-pack bundle 走）；helper 改为 import + re-export
+（单一真源，session-liveness 测试族 import 面不变）；runner import 改指生产模块；capability-catalog.sh
+补 5 张声明表（QUESTION/CADENCE/INVALIDATION/LAST_REAFFIRMED/MATCHING）——扫 glob 含 *.mjs 故新模块必须
+声明（否则 AC1c unclassified 拒绝）；DELIVERY-INVENTORY §6 snapshot regen（scripts 219→220）。
+
+**Scoped 验证全绿**：npm-pack-e2e 9/0（此前 8 红）· session-liveness 族 51/0 · capability-catalog 15/0 ·
+tmux-test-isolation 9/0 · `--for-task gap-leak-residue-per-run-namespace-isolation` 116/0 ·
+one-shot-worktree 166/0 · idempotency 39/0。

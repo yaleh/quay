@@ -114,22 +114,32 @@ test("AC2 — the cleanup surface has no name-based batch kill of session-livene
   // whole-file grep would self-trip, so we scan the EXECUTABLE function bodies (brace-matched),
   // which are the cleanup path proper. sweepTmp/dirHasLiveOwner must be fs-only (no spawn, no
   // pkill/killall); tmux-leak-scan.sh is a READ-ONLY assertion (scans pgrep/ls, never kills).
-  const helper = fs.readFileSync(path.join(__dirname, "..", "test", "session-liveness-helpers.mjs"), "utf8");
-  const fnBody = (name) => {
-    const start = helper.indexOf(`export function ${name}`);
-    assert.ok(start !== -1, `helper ${name} must exist`);
-    let i = helper.indexOf("{", start);
-    let depth = 0;
-    for (let j = i; j < helper.length; j++) {
-      if (helper[j] === "{") depth++;
-      else if (helper[j] === "}") { depth--; if (depth === 0) return helper.slice(i, j + 1); }
+  // dirHasLiveOwner + the two runner sweepers moved to the PRODUCTION sweep module (plugin/scripts/
+  // session-liveness-sweep.mjs, gap-leak-residue-per-run-namespace-isolation — a runtime import from
+  // the test helper broke build-plugin-dist), so scan BOTH: the helper for sweepTmp, the production
+  // module for dirHasLiveOwner/sweepRunNamespaces/sweepRunNamespace.
+  const fnBodies = (src, names) => {
+    const bodies = {};
+    for (const name of names) {
+      const start = src.indexOf(`export function ${name}`);
+      assert.ok(start !== -1, `cleanup function ${name} must exist in scanned source`);
+      let i = src.indexOf("{", start);
+      let depth = 0;
+      for (let j = i; j < src.length; j++) {
+        if (src[j] === "{") depth++;
+        else if (src[j] === "}") { depth--; if (depth === 0) { bodies[name] = src.slice(i, j + 1); break; } }
+      }
+      assert.ok(bodies[name], `could not brace-match ${name}`);
     }
-    throw new Error(`could not brace-match ${name}`);
+    return bodies;
   };
-  for (const name of ["sweepTmp", "dirHasLiveOwner"]) {
-    const body = fnBody(name);
+  const helper = fs.readFileSync(path.join(__dirname, "..", "test", "session-liveness-helpers.mjs"), "utf8");
+  const sweepModule = fs.readFileSync(path.join(__dirname, "..", "scripts", "session-liveness-sweep.mjs"), "utf8");
+  const helperBodies = fnBodies(helper, ["sweepTmp"]);
+  const sweepBodies = fnBodies(sweepModule, ["dirHasLiveOwner", "sweepRunNamespaces", "sweepRunNamespace"]);
+  for (const body of [...Object.values(helperBodies), ...Object.values(sweepBodies)]) {
     assert.ok(!/(?:pkill|killall|spawnSync|spawn)\s*\(/.test(body),
-      `${name} executable body must not contain a name-based kill or process spawn (fs-only cleanup): ${body}`);
+      `cleanup executable body must not contain a name-based kill or process spawn (fs-only cleanup): ${body}`);
   }
   const scan = fs.readFileSync(path.join(__dirname, "..", "scripts", "tmux-leak-scan.sh"), "utf8");
   const code = scan.split("\n").filter((l) => !l.trim().startsWith("#")).join("\n");

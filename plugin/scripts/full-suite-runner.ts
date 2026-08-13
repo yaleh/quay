@@ -118,7 +118,10 @@ import { scanFamily, kindForFile } from "./known-load-sensitive.ts";
 // (the 2026-08-08 two-layer-blind invariant: cleanup is PATH-OWNERSHIP + OWNER-LIVENESS based,
 // never a name-based batch kill). `sweepRunNamespaces` = pre-suite orphan sweeper over ALL
 // /tmp/quay-run-* dirs; `sweepRunNamespace(id)` = post-suite clean of THIS run's own subtree.
-import { sweepRunNamespaces, sweepRunNamespace } from "../test/session-liveness-helpers.mjs";
+// These are RUNTIME fs-only sweepers — they live in plugin/scripts/session-liveness-sweep.mjs
+// (a PRODUCTION module, shipped in the npm-pack bundle), NOT the test helper: package.sh excludes
+// plugin/test/ from the bundle, so importing from there breaks build-plugin-dist (round 123/124).
+import { sweepRunNamespaces, sweepRunNamespace } from "./session-liveness-sweep.mjs";
 // gap-single-file-test-duration-trend-unwatched AC1/AC2 (fan-in 9edf2cb9, hand-merged into the
 // develop→integration convergence 2026-08-09): land the suite's per-file __PERFILE__ duration
 // history + compare against the last round (the trend dimension — per-file durations WATCHED round

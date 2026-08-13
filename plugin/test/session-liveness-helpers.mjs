@@ -32,6 +32,17 @@ import { setTimeout as sleep } from "node:timers/promises";
 // probe path (env === process.env, targeting the manager box's REAL quay-0 session) deliberately
 // keeps the default-socket resolution — it never starts/kills a server.
 import { tmux as isolatedTmux } from "../scripts/tmux-session.ts";
+// RUNTIME per-run namespace sweep functions (gap-leak-residue-per-run-namespace-isolation):
+// full-suite-runner.ts imports them directly, so they MUST live in a PRODUCTION module
+// (plugin/scripts/session-liveness-sweep.mjs — shipped in the npm-pack bundle), NOT here:
+// package.sh excludes plugin/test/ from the bundle, so a runner→test-helper import broke
+// build-plugin-dist (round 123/124 real regression). This helper RE-EXPORTS them so the
+// session-liveness test family keeps resolving the same names (single source of truth).
+import {
+  runIdOf, runNamespaceRoot, dirHasLiveOwner,
+  sweepRunNamespaces, sweepRunNamespace,
+} from "../scripts/session-liveness-sweep.mjs";
+export { runIdOf, runNamespaceRoot, dirHasLiveOwner, sweepRunNamespaces, sweepRunNamespace };
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const SCRIPT = path.resolve(__dirname, "..", "scripts", "session-liveness.sh");
@@ -57,21 +68,9 @@ let probeTmpPrefix = "session-liveness-";
 export function setProbeTmpPrefix(p) { probeTmpPrefix = p; }
 export function probeTmpPrefixOf() { return probeTmpPrefix; }
 
-/** The runId the runner delivered via QUAY_RUN_ID ("" when this process is not namespaced —
- * a scoped/direct test invocation, or a legacy caller). The runner uses a SHORT id (8 hex
- * chars derived from the state-file UUID) so the tmux socket sun_path (~107 bytes) stays
- * well under the bound. */
-export function runIdOf() {
-  return (process.env.QUAY_RUN_ID ?? "").trim();
-}
-
-/** The per-run namespace root for `id`, or null when `id` is empty (no namespace). */
-export function runNamespaceRoot(id = runIdOf()) {
-  return id ? path.join(os.tmpdir(), `quay-run-${id}`) : null;
-}
-
 /** The base directory probes are created under: the per-run namespace when QUAY_RUN_ID is
- * set, else the legacy os.tmpdir(). The namespace dir is created on first use. */
+ * set, else the legacy os.tmpdir(). The namespace dir is created on first use.
+ * (runIdOf/runNamespaceRoot are imported+re-exported from the production sweep module above.) */
 function probeRoot() {
   const root = runNamespaceRoot();
   if (root === null) return os.tmpdir();
@@ -96,35 +95,7 @@ function probeRoot() {
 //     is FORBIDDEN in the cleanup path (invariant no_pkill_by_name_on_live = 1 — the sweep test
 //     scans the executable bodies for it).
 //   * The residue-vs-in-use criterion is OWNER LIVENESS (dirHasLiveOwner), NOT name/path prefix.
-export function dirHasLiveOwner(dir) {
-  // A live tmux server holds a unix socket under <dir>/sock (a hermetic probe started it with
-  // TMUX_TMPDIR=<dir>/sock). /proc/net/unix lists only sockets bound by LIVE processes, so a stale
-  // socket FILE with no live holder does NOT count as an owner.
-  let abs;
-  try { abs = fs.realpathSync(dir); } catch { return false; } // gone → not "alive"
-  try {
-    const netUnix = fs.readFileSync("/proc/net/unix", "utf8");
-    for (const line of netUnix.split("\n")) {
-      const parts = line.trim().split(/\s+/);
-      if (parts.length >= 8) { // num: ref protocol flags type st inode path
-        const sock = parts.slice(7).join(" ");
-        if (sock.startsWith(abs + "/")) return true;
-      }
-    }
-  } catch { /* /proc/net/unix unreadable — fall through to the environ check */ }
-  try {
-    const procs = fs.readdirSync("/proc").filter((n) => /^\d+$/.test(n));
-    for (const p of procs) {
-      try {
-        const environ = fs.readFileSync(`/proc/${p}/environ`, "utf8");
-        for (const kv of environ.split("\0")) {
-          if (kv.startsWith("TMUX_TMPDIR=") && kv.slice("TMUX_TMPDIR=".length).startsWith(abs + "/")) return true;
-        }
-      } catch { /* pid exited mid-scan */ }
-    }
-  } catch { /* /proc unreadable */ }
-  return false;
-}
+// dirHasLiveOwner is IMPORTED + re-exported from plugin/scripts/session-liveness-sweep.mjs above.
 
 // sweepTmp(...prefixes) — remove leftover probe dirs under the given prefixes (the suite-tail
 // tmux-leak-scan's /tmp class). Each split test file's after() calls this with its OWN prefixes.
@@ -158,46 +129,8 @@ export function sweepTmp(...prefixes) {
 // matching the sweepTmp/dirHasLiveOwner executable-body contract the sweep test pins. Returns
 // { cleaned, dirs } so the runner can record the count + WHICH dirs into the verification-round
 // record (AC3 — the leak is an observable metric, never a silently-cleared signal).
-export function sweepRunNamespaces() {
-  const cleaned = [];
-  let entries = [];
-  try { entries = fs.readdirSync(os.tmpdir()); } catch { return { cleaned: 0, dirs: cleaned }; }
-  for (const name of entries) {
-    if (!name.startsWith("quay-run-")) continue;
-    const abs = path.join(os.tmpdir(), name);
-    let isDir = false;
-    try { isDir = fs.statSync(abs).isDirectory(); } catch { continue; }
-    if (!isDir) continue;
-    if (dirHasLiveOwner(abs)) continue; // a live owner anywhere in the namespace → in-use, never clean
-    try { fs.rmSync(abs, { recursive: true, force: true }); } catch { /* best-effort */ continue; }
-    cleaned.push(abs);
-  }
-  return { cleaned: cleaned.length, dirs: cleaned };
-}
-
-/** Clean ONE run's namespace (the runner's own post-suite pass): remove owner-dead residue
- * under `/tmp/quay-run-<id>/`, then the (now residue-free, owner-dead) namespace root itself.
- * Skips the whole namespace when it has a live owner. fs-only, same invariant as above. */
-export function sweepRunNamespace(id) {
-  const root = runNamespaceRoot(id);
-  if (root === null) return { cleaned: 0, dirs: [] };
-  const cleaned = [];
-  let entries = [];
-  try { entries = fs.readdirSync(root); } catch { return { cleaned: 0, dirs: [] }; }
-  for (const name of entries) {
-    const abs = path.join(root, name);
-    let isDir = false;
-    try { isDir = fs.statSync(abs).isDirectory(); } catch { continue; }
-    if (!isDir) continue;
-    if (dirHasLiveOwner(abs)) continue;
-    try { fs.rmSync(abs, { recursive: true, force: true }); } catch { /* best-effort */ continue; }
-    cleaned.push(abs);
-  }
-  try {
-    if (!dirHasLiveOwner(root)) fs.rmSync(root, { recursive: true, force: true });
-  } catch { /* best-effort */ }
-  return { cleaned: cleaned.length, dirs: cleaned };
-}
+// sweepRunNamespaces/sweepRunNamespace are IMPORTED + re-exported from
+// plugin/scripts/session-liveness-sweep.mjs above (single source of truth).
 
 // ── hermetic-probe residue reaper (gap-session-liveness-cancelled-test-skips-finally) ──────────
 // KNOWN-LOAD-SENSITIVE: under suite load a hermetic-probe test can be CANCELLED mid-run by
