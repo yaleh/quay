@@ -2738,8 +2738,14 @@ manager 核实后发现 **SPEC 完全没写切换过程**（`grep 主检出|chec
 
 **判据（五条，按顺序，前一条不成立不得进下一条）**：
 1. **integration 清空**：`git rev-list --count develop..integration` = 0。
-2. **在飞任务不断裂**：`git worktree list` 中每个 worktree 的 `merge-base(develop, <branch>)`
-   **逐条枚举打印**均存在于 develop（不是计数——今晚已实证计数会把"没查"读成"没问题"）。
+2. **在飞任务不断裂**：对每个 worktree 分支，`git rev-list develop..<branch>` **逐条枚举打印**，
+   其中**不得出现不属于该任务自己的提交**（出现即说明它 fork 自 integration 独有的点，切换会切断它）。
+   **⚠️ 本条判据在 2026-08-13 03:2xZ 被更正过一次，原文是恒真的**：
+   原判据写"`merge-base(develop,<branch>)` 均存在于 develop"——**而 `merge-base(develop,X)` 按定义就是
+   develop 的祖先，永远为真**（硬规则 4：结构上不可能取假的量不是测量）。
+   **是我跑了一遍才发现**：六个 worktree 全部报"在 develop 上=在"，而实际有 3 个含 `c23bf2fa`
+   （只在 integration 上的提交）——**恒真判据把真实风险读成了零风险**。
+   **正确判据靠"分支相对 develop 多出哪些提交"，不靠 merge-base 的祖先关系。**
 3. **主检出已切**：`git rev-parse --abbrev-ref HEAD` = `develop`，且工作树无未提交的产品文件改动。
 4. **执行路径无 integration**：全仓 `grep -rn 'integration'` 在执行路径上零命中（注释/历史记录允许）。
 5. **一次真实生命周期自证**：一个任务 fork develop → worktree → 套件绿 → merge develop，
