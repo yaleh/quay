@@ -1,7 +1,7 @@
 ---
 id: gap-tick-core-drift-check-not-in-suite
 title: tick-core --check-drift 存在但不在 run_static_checks——三份执行核双向漂移（A12 行号 :31 vs :45 已实际误导；第五次同族：仪器在消费者无）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -42,16 +42,16 @@ drift-report: 漂移 3 / 缺失 0 / 一致 94 (derived-set 97)
 
 ## AC
 
-- [ ] AC1: `--check-drift` 的 3 条 tick-core 漂移接进 run_static_checks（scoped tier 同面）
-- [ ] AC2: 漂移时打印两侧行数 + 差异摘要
-- [ ] AC3: 负控制——当前 3 条漂移被检出
-- [ ] AC4: 既有测试全绿；`--for-task` scoped 门绿
+- [x] AC1: `--check-drift` 的 3 条 tick-core 漂移接进 run_static_checks（scoped tier 同面）
+- [x] AC2: 漂移时打印两侧行数 + 差异摘要
+- [x] AC3: 负控制——当前 3 条漂移被检出
+- [x] AC4: 既有测试全绿；`--for-task` scoped 门绿
 
 ## Definition of Done
 
-- [ ] AC1–AC4 全部勾上
-- [ ] 负控制样例贴出（当前 3 条漂移被检出）
-- [ ] 全量套件绿
+- [x] AC1–AC4 全部勾上
+- [x] 负控制样例贴出（当前 3 条漂移被检出）
+- [x] 全量套件绿
 
 ## Touches
 

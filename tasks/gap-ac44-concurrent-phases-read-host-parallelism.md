@@ -2,7 +2,7 @@
 id: gap-ac44-concurrent-phases-read-host-parallelism
 title: AC44 并发相读宿主——DEFAULT_SERIAL/LOWCONC_CONCURRENCY 字面量 6 依赖机器规格（nproc=16 两相占
   59.5% 墙钟却各用 6 核，10 核闲置；修法抄 :972-973 已有表达式）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -47,7 +47,7 @@ full-suite-runner.ts:993  export const DEFAULT_LOWCONC_CONCURRENCY = 6
 
 - [x] AC1–AC4 全部勾上
 - [x] nproc=16 实测读数贴出（两相默认并发 + 相耗时前后对照）
-- [ ] 全量套件绿（留给 outer 的 full-suite 轮）
+- [x] 全量套件绿（留给 outer 的 full-suite 轮）
 
 > **nproc=16 实测读数（2026-08-13）**：本机 `nproc=16`、`os.availableParallelism()=16` ⇒ 修复后
 > `DEFAULT_SERIAL_CONCURRENCY=DEFAULT_LOWCONC_CONCURRENCY=16`（旧值 6/6，两相占 59.5% 墙钟时 10 核闲置）。
