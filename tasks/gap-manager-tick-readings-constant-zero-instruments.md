@@ -1,7 +1,7 @@
 ---
 id: gap-manager-tick-readings-constant-zero-instruments
 title: manager-tick-readings 两仪器恒值——node_count /node/ 对 MainThread 恒零 + ticklog 谓词不匹配行形恒读 no-tick-row
-status: ready
+status: done
 labels:
   - gap
   - defect
