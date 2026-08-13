@@ -2813,6 +2813,32 @@ npm-pack-e2e [real-install]「tarball bin → dist/quay.js 缺失」：round 123
 
 **⚠️ 不覆盖**：不改变"完成"的语义（仍是自声明勾选框），只改**判据的作用域**。
 
+**A20 四步实测（2026-08-13 18:4xZ）——判据本身已达成，但取证暴露了一件更要紧的事**：
+**(1) 谓词作用域 ✅** `ready-pool-check.ts:688-694 countCompletionCheckboxes` 逐字
+`unchecked: ac.unchecked + dod.unchecked`（`extractSectionByShape(body,"ac")` ＋ `…"dod"`）
+⇒ **AC 段与 DoD 段一并计入，判据字面要求已满足。**
+**(2) 命名反例 ✅ 判对了，但它同时证明【没有人在翻 done 那一刻调它】**：
+`gap-cli-import-refactor-run-shell-architecture` **现在是 `status: done`，而它仍有 4 个未勾框、全部在 DoD**
+（`:81-84`，含「AC1–AC5 全部勾上」「全量套件绿……外层 verification-round 验证」）。
+⇒ **谓词是对的，翻 done 的闸没调它。**
+**⇒ 精确剩余 = 【消费者缺失】，不是【谓词错】**——而**归属今天变了**：
+AC46 判据3 已把翻 done 移交 inner ⇒ **该谓词的调用点应落在 inner 的翻 done 路径上**。
+**(3) 规模——只给上界，并标明为什么不给真值**：粗谓词 `grep -c '^- \[ \]'`（全文，非按段）
+得 **439 / 1069 done 任务（41.1%）**。**这是上界不是真值**，两个理由都必须写出来：
+① 我的谓词扫全文，`countCompletionCheckboxes` 只扫 AC/DoD 两段；
+② **抽样打印前 3 条命中**（硬规则② 非零半边）显示它们是 `DIR-014/021/022`，
+未勾框确实在 AC/DoD 段内，**但那些标题带后缀**——`## Acceptance Criteria (runnable — …)`、
+`## Definition of Done — REAL LANDING is the bar` ⇒ **`extractSectionByShape` 对带后缀标题命不命中，
+直接决定真值是接近 439 还是远低于它**，而那正是本仓库已经栽过的 shape-aware 那一族
+（`（draft）` 变体当初就是为此加的）。**⇒ 真值由 outer/inner 用真谓词测，我不代跑。**
+**(4) 与在飞任务的冲突核查——结论：今天不冲突，但触发条件写死**：
+`gap-phantom-killer-false-negative-id-not-in-commits`[ready] 的候选补法是
+「ACs 全勾 + 未勾项均为外层验证 ⇒ **视同 landed**」，**字面上与本 AC 的「任何未勾框 ⇒ 不算 landed」相反**。
+**按位置查消费者**：`isLandedCodeComplete` / `hasLandedImplementation` **在 `slot-refill.ts` 之外零消费者**，
+文件内唯一用处是 `:589 defer(id,"landed-implementation")` ⇒ **只用于【推荐排除】，从不决定翻 done**
+⇒ **两者答的是不同问题（"还要不要派" vs "能不能翻 done"），共用一个词而已，今天不冲突。**
+**⇒ 触发条件（一行可查）**：**这两个谓词一旦出现翻 done 路径上的消费者，AC47 即被静默击穿。**
+
 ---
 
 ## AC48（收尾）：integration 分支退役 **+ pool 过滤层取消**，且退役发生在最后
