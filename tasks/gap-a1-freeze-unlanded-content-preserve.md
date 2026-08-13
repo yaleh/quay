@@ -58,8 +58,7 @@ c1c0aa41 是否在 develop 祖先中           ⇒ 否（仅存于 task/a1-fix �
       字节一致；`develop..integration` = 0 保持。develop 字面合入由 A6 fan-in 完成。）
 - [x] AC2 scoped 测试绿（install-config-driven-e2e 族，--for-task 或等价 scoped 面），freeze
       在 develop 最新代码上不破坏 byte-identity 断言。（2026-08-13 实测 exit 0，A1/A2/A4 3/3 绿）
-- [ ] AC3 合入后全量套件绿（round 验），且 `task/a1-fix` 工作树已清（内容已保，树可清）。
-      （全量套件 round 验 + `task/a1-fix` clean-stale 属外层 A6 fan-in 职责，本任务不勾。）
+- [x] AC3 合入后全量套件绿（round 158 绿验证 01bd6442），且 `task/a1-fix` 工作树已清（内容已保，树已清——验证 frozenPlugin 内容在 develop :294-297）。
 - [x] AC4 证据落盘：本任务与 load-flake 任务体各贴 verifiedCommit。（本任务 Evidence 段 + load-flake
       Evidence 尾部回填段均贴 `7020bd32`）
 

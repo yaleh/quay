@@ -42,7 +42,7 @@ extra:
 
 - [x] AC1–AC4 全部勾上
 - [x] 复现用例（新增 .ts 任务 → fan-in 前置跑闸）贴出（见 Evidence）
-- [ ] 全量套件绿（待外部）
+- [x] 全量套件绿（round 158 绿验证 2b736f1e）
 
 ## Evidence
 
