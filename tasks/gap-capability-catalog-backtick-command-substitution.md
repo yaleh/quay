@@ -35,6 +35,7 @@ extra:
 - [ ] AC2: `--json` 退出 0、无 IndexError、行结构完整（tab 分隔 ROWS 不被新行打断）
 - [ ] AC3: `--table` 摘要数字与修复前一致（无 catalog 项丢失）
 - [ ] AC4: capability-catalog.test.mjs 全绿；`--for-task` scoped 门绿
+- [ ] AC5: 机械检查（outer 2026-08-13 追加 scope）——capability-catalog.sh 数据值（QUESTION[] 等）含命令替换（反引号 `` ` `` 或 `$(`）⇒ 静态红：capability-catalog.sh 顶部新增 AC5 fail-fast 门 + capability-catalog.test.mjs 负控制（反引号与 `$(` 双方向注入均 exit 非零）
 
 ## Definition of Done
 
@@ -43,5 +44,6 @@ extra:
 
 ## Touches
 
-- plugin/scripts/capability-catalog.sh（:208 反引号移除）
+- plugin/scripts/capability-catalog.sh（:208 反引号移除；顶部新增 AC5 命令替换静态门 + 头注释退出状态说明）
+- plugin/test/capability-catalog.test.mjs（AC5 负控制测试：反引号 / `$(` 双方向）
 - tasks/gap-capability-catalog-backtick-command-substitution.md（自身）
