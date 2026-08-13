@@ -34,7 +34,7 @@ extra: {}
 3. **执行保障**：A15 心跳（meta-cc Agent timestamp）缺失 3 轮 ⇒ .halt；再 3 轮 ⇒ /clear。
 4. **终止**：首轮诊断轮收全集（QUAY_TEST_RED_GRACE_MS 大值不 fail-fast）→ 一轮修全部 + 一轮验证 ≈ 2–3 轮；上限按全集大小 + 1 验证轮，未绿 ⇒ .halt + outer 停其它事。
 
-**验证锚**：实跑已产 (a) outer 起 suite-fix-merge subagent（run_in_background:true）成功且产生 heartbeat ts（04:10 a4da8d45）；(b) 修复落到 integration（fan-in）且 develop 到确切提交（待实跑完成确认）；(c) 评价 subagent 产出 suite-health-last-run.json 带时间戳。
+**验证锚**：实跑已产 (a) outer 起 suite-fix-merge subagent（run_in_background:true）成功且产生 heartbeat ts（04:10 a4da8d45）；(b) 修复落到 integration（fan-in）且 develop 到确切提交（待实跑完成确认）；(c) 评价 subagent 产出 suite-health-last-run.json 带时间戳。`landing-exception: 2026-08-12 实跑史实（旧模型 integration 汇入点），非当前落地目标声明；前锋分支已迁 develop，本条只陈述史实、无漂移指令`
 
 ## Acceptance Criteria
 
