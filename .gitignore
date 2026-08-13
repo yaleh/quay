@@ -253,3 +253,11 @@ orchestration/manager-pending.md
 # last-run epoch-ms map (written by the run-routines skill after each probe fires, read by
 # routine-scheduler.ts's interval:<N>m triggers every tick). Same gitignored runtime-state family as
 **/.quay/routine-last-run.json
+
+# gap-task-store-parse-cost-0-8s-compounds-suite-slowdown (2026-08-13): the native store's
+# persistent parse cache — a runtime derived artifact written to <tasksDir>/.quay-parse-cache.json
+# by store.ts's list() surface (frontmatter keyed by mtimeMs/size; never tracked, rebuildable
+# from the .md files themselves on any machine). Same gitignored runtime-state family as the
+# routine-last-run / tick-log entries above: it is a cache, not code, and git status must stay
+# clean when the CLI or a test materializes it.
+**/.quay-parse-cache.json

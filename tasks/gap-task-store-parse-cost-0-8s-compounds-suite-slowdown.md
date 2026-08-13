@@ -55,4 +55,6 @@ extra: {}
 
 ## Touches
 
+- packages/quay-native/src/store.ts（持久化解析缓存实现）
+- packages/quay-native/test/parse-cache.test.mjs（AC1/AC2/AC3 新测试）
 - tasks/gap-task-store-parse-cost-0-8s-compounds-suite-slowdown.md（自身，C8 self-touch）

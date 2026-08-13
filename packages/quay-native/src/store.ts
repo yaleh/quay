@@ -550,8 +550,123 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
   // next get() re-reads fresh. The cache remains a win for the common
   // unchanged-file case (repeated get() on an unmodified task still hits); it
   // only becomes correct-by-construction for the read-after-write case.
+  //
+  // gap-task-store-parse-cost-0-8s-compounds-suite-slowdown: invalidate the
+  // persistent layer too (below), so a write is never served from a previous
+  // process's parse of the same file.
   function invalidateCache(id: string): void {
     parsedCache.delete(id);
+    persistentCache.delete(id);
+    persistentCacheDirty = true;
+  }
+
+  // Persistent parse cache (gap-task-store-parse-cost-0-8s-compounds-suite-slowdown,
+  // AC1/AC2/AC3). The in-process parsedCache above is per-process: a fresh CLI
+  // invocation is a fresh Node process, so `task list` paid the FULL cold
+  // read+YAML-parse of the store on every call (~686ms for 1110 files, measured
+  // 2026-08-13). This persistent layer makes the parse result SURVIVE across
+  // processes: a small JSON file next to the store holds each task's
+  // YAML-parsed frontmatter keyed by (mtimeMs, size), so a later process
+  // validates every file with a cheap statSync (~10ms for the whole store) and
+  // only readFileSync+YAML.parses the files that actually changed.
+  //
+  // WHAT IS CACHED: frontmatter ONLY, never the body. The profile that chose
+  // this mechanism: of the ~686ms cold store.list() for 1110 files, YAML.parse
+  // is ~395ms (the dominant cost) and readFileSync is ~142ms. `task list` must
+  // return the body anyway, so bodies are re-read from disk (fresh, never
+  // stale); the cache eliminates the YAML.parse. A full frontmatter+body cache
+  // was measured and REJECTED: a 10.9MB JSON cache took ~200ms to load — SLOWER
+  // than reading the 1110 raw files (~140ms) — so caching bodies is
+  // net-negative at this store's scale.
+  //
+  // CORRECTNESS (AC2/AC3): the (mtimeMs, size) key is the same heuristic the
+  // in-process cache already uses — an added file is absent from the cache, an
+  // edited file's mtime/size differs → cache miss → fresh parse, and a deleted
+  // file fails statSync → never served. A corrupt/missing cache file degrades
+  // to a cold parse (ensurePersistentCacheLoaded catches everything; the cache
+  // is an optimization, never a correctness input). The pathological
+  // same-size-same-mtime rewrite is the SAME accepted heuristic limitation the
+  // in-process cache already documents.
+  const PERSISTENT_CACHE_VERSION = 1;
+  const PERSISTENT_CACHE_FILENAME = ".quay-parse-cache.json";
+  const persistentCachePath = path.join(tasksDir, PERSISTENT_CACHE_FILENAME);
+  const persistentCache = new Map<string, { mtimeMs: number; size: number; frontmatter: Record<string, unknown> }>();
+  let persistentCacheLoaded = false;
+  let persistentCacheDirty = false;
+
+  /** Read the on-disk cache into `persistentCache` (merge: an entry already
+   *  present — e.g. added by this process's own write() cold parse — keeps the
+   *  fresh in-memory value; a stale disk entry is harmless because the walk
+   *  re-parses on any (mtimeMs, size) mismatch). Lazy: only the batch surfaces
+   *  (list / listWithMalformed) call this, so a standalone `task get <id>` never
+   *  pays the load (the task's own note: "task get 0.18s 是定向读取不付税"). */
+  function ensurePersistentCacheLoaded(): void {
+    if (persistentCacheLoaded) return;
+    persistentCacheLoaded = true;
+    let raw: string;
+    try {
+      raw = fs.readFileSync(persistentCachePath, "utf8");
+    } catch {
+      return; // absent or unreadable → start empty; the next dirty flush rebuilds it
+    }
+    let data: { version?: number; entries?: Record<string, unknown> };
+    try {
+      data = JSON.parse(raw) as { version?: number; entries?: Record<string, unknown> };
+    } catch {
+      return; // corrupt cache → rebuild on the next flush
+    }
+    if (data.version !== PERSISTENT_CACHE_VERSION || typeof data.entries !== "object" || data.entries === null) {
+      return;
+    }
+    for (const [id, entry] of Object.entries(data.entries)) {
+      const e = entry as { mtimeMs?: unknown; size?: unknown; frontmatter?: unknown };
+      if (
+        e && typeof e.mtimeMs === "number" && typeof e.size === "number" &&
+        typeof e.frontmatter === "object" && e.frontmatter !== null
+      ) {
+        persistentCache.set(id, { mtimeMs: e.mtimeMs, size: e.size, frontmatter: e.frontmatter as Record<string, unknown> });
+      }
+    }
+  }
+
+  /** Write the in-memory persistent cache to disk IF the batch operation dirtied
+   *  it. No-op when clean; silent no-op on write failure (the cache is an
+   *  optimization — a read-only store / disk-full / permission error must never
+   *  break `task list`). Atomic (tmp + rename): a crash leaves either the old or
+   *  the new file, never a torn one. */
+  function flushPersistentCache(): void {
+    if (!persistentCacheDirty) return;
+    persistentCacheDirty = false;
+    try {
+      // Prune entries whose task file no longer exists so the cache does not grow
+      // unbounded as the store's backlog shrinks.
+      const liveIds = new Set(listIds());
+      for (const id of [...persistentCache.keys()]) {
+        if (!liveIds.has(id)) persistentCache.delete(id);
+      }
+      const payload = JSON.stringify({ version: PERSISTENT_CACHE_VERSION, entries: Object.fromEntries(persistentCache) });
+      const tmpPath = `${persistentCachePath}.tmp`;
+      fs.writeFileSync(tmpPath, payload, "utf8");
+      fs.renameSync(tmpPath, persistentCachePath);
+    } catch {
+      // swallow — cache is an optimization, never a correctness input
+    }
+  }
+
+  /** AC2 guard: the persistent cache JSON-round-trips the frontmatter, so a
+   *  frontmatter carrying a type JSON cannot faithfully encode (Date, Map, Set,
+   *  function, ...) must NOT be persisted — serving a silently-mangled reload
+   *  (Date → ISO string, Map → {}) would violate "data consistent with a direct
+   *  parse". Such entries are simply never cached persistently (the in-process
+   *  parsedCache still holds the exact parse). The real store's frontmatter is
+   *  all JSON-safe (scanned 2026-08-13, 1110/1110), so this is a defensive net,
+   *  not the hot path. */
+  function isJsonSafe(v: unknown): boolean {
+    if (v === null || typeof v === "string" || typeof v === "number" || typeof v === "boolean") return true;
+    if (Array.isArray(v)) return v.every(isJsonSafe);
+    if (v instanceof Date || v instanceof Map || v instanceof Set) return false;
+    if (typeof v === "object") return Object.values(v as Record<string, unknown>).every(isJsonSafe);
+    return false; // undefined, function, symbol, bigint
   }
 
   // QX-018 (experiment 4, iteration 4): get() now includes updatedAt (file mtime
@@ -584,10 +699,48 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
         children: (cached.frontmatter.children as string[] | undefined)?.slice() ?? [],
       }, cached.body, stat!.mtimeMs, id);
     }
+    // Persistent-cache hit: the YAML parse survived a previous process. Confirm
+    // the file's frontmatter block is still intact, then serve the cached
+    // frontmatter with a freshly-read body (bodies are never cached, so they
+    // cannot go stale). Falls through to the cold parse when the block is gone
+    // (a file corrupted in place must fail loudly, exactly like the cold path).
+    const pCached = stat ? persistentCache.get(id) : undefined;
+    if (pCached && pCached.mtimeMs === stat!.mtimeMs && pCached.size === stat!.size) {
+      // Direct readFileSync (no existsSync — get() already stat'd this file):
+      // the whole body read is the one cost a persistent hit cannot avoid.
+      let pRaw: string | null = null;
+      try {
+        pRaw = fs.readFileSync(taskFile, "utf8");
+      } catch {
+        // file vanished between stat and read → fall through; the cold readRaw
+        // below re-asserts absence and returns the same null contract.
+      }
+      if (pRaw !== null) {
+        const pm = FRONTMATTER_RE.exec(pRaw);
+        if (pm) {
+          const pBody = pm[2] ?? "";
+          const pFrontmatter = pCached.frontmatter;
+          parsedCache.set(id, { mtimeMs: stat!.mtimeMs, size: stat!.size, frontmatter: pFrontmatter, body: pBody });
+          return toViewModel({
+            ...pFrontmatter,
+            labels: (pFrontmatter.labels as string[] | undefined)?.slice() ?? [],
+            children: (pFrontmatter.children as string[] | undefined)?.slice() ?? [],
+          }, pBody, stat!.mtimeMs, id);
+        }
+      }
+    }
     const raw = readRaw(id);
     if (raw === null) return null;
     const { frontmatter, body } = parse(raw);
-    if (stat) parsedCache.set(id, { mtimeMs: stat.mtimeMs, size: stat.size, frontmatter, body });
+    if (stat) {
+      parsedCache.set(id, { mtimeMs: stat.mtimeMs, size: stat.size, frontmatter, body });
+      // AC2: only persist frontmatter that survives a JSON round-trip byte-for-
+      // byte; a non-JSON-safe frontmatter stays in-process-only (still exact).
+      if (isJsonSafe(frontmatter)) {
+        persistentCache.set(id, { mtimeMs: stat.mtimeMs, size: stat.size, frontmatter });
+        persistentCacheDirty = true;
+      }
+    }
     return toViewModel(frontmatter, body, stat ? stat.mtimeMs : undefined, id);
   }
 
@@ -734,7 +887,14 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
     // is the provider's task_list ABI surface — via listWithMalformed() — that
     // becomes tolerant; the CLI's plain `task list` keeps the loud, clear
     // error (DIR-001 safe degradation) rather than silently dropping a file.
-    return walkTasks(filter, (_id, err) => { throw err; });
+    //
+    // gap-task-store-parse-cost-0-8s-compounds-suite-slowdown: prime the
+    // persistent parse cache before the walk and flush any newly-parsed entries
+    // after it, so a fresh-process list only re-parses files that changed.
+    ensurePersistentCacheLoaded();
+    const tasks = walkTasks(filter, (_id, err) => { throw err; });
+    flushPersistentCache();
+    return tasks;
   }
 
   /**
@@ -751,9 +911,11 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
     filter: { status?: string; label?: string } = {},
   ): { tasks: (Task & { updatedAt?: number })[]; malformed: Array<{ file: string; error: string }> } {
     const malformed: Array<{ file: string; error: string }> = [];
+    ensurePersistentCacheLoaded();
     const tasks = walkTasks(filter, (id, err) => {
       malformed.push({ file: `${id}.md`, error: (err as Error).message });
     });
+    flushPersistentCache();
     return { tasks, malformed };
   }
 
