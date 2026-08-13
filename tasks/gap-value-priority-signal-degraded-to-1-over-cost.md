@@ -63,3 +63,12 @@ extra:
 - 三轴回归用例（`plugin/test/ready-pool-check.test.mjs` `value-degradation` 组）：strategic 取 `SPEC §11` 形式取 Y、blocking 经 `depends_on` 反向边取 Y、大 touches 战略任务在 `--top` 排序中浮到 plain 小任务之上（value 序列非单调 1/cost）。
 
 **scoped 门**：`scripts/test.sh --for-task gap-value-priority-signal-degraded-to-1-over-cost --allow-thin` 绿（scoped 静态检查全 PASS；95/95 测试通过，含 3 条新增 value-degradation 回归）。
+**生产覆盖读数（2026-08-13 追加，manager 复核后）**——三轴在 production 上确实能取 Y，但当前 population 输入稀疏：
+
+① **探针（机制层，outer 实测）**：喂 `SPEC §11 阶段 2`（试点真实引用形态）→ `strategic=true, value=4.0`；`depends_on` 反向边 ×2 → `blocking=true, value=2.0`；plain-prose "spec" → `strategic=false`（大小写敏感正确）。三轴在够格输入上翻 Y。
+
+② **生产实例（ready_relevance，manager + outer 独立复核一致）**：`gap-quay-has-never-self-hosted-its-own-cold-start` 读 `value 6 · strategic Y · blocking Y（3 children · parent-ref 3）· suite-blocking N`。信号在生产 live，非仅 fixture/探针。
+
+③ **覆盖率读数与含义**：ready 池任一轴取 Y = **1/13**，todo = **0/8** ⇒ 全体活跃 **1/21**。**信号通、但输入稀疏**——对 20/21 的候选，`value` 实际仍只由 `cost`（1/touches）决定 ⇒ 「任务越大排得越后」这一现象在当前数据上基本仍成立。**这不推翻本任务结论**（机制已修、三轴可判别），但读本任务的人应知道：**当前看到的排序仍是按大小走的，不是按价值**。等出现更多战略/阻塞类候选（如 SPEC/FINDING 引用、被 depends_on 的任务）后，三轴才真正参与排序。
+
+④ （观察，不追）cold-start 任务 `cost 0 touches`（未声明 Touches 按高成本处理）——其 value=6 中多少来自该缺省，值得后续看一眼，但不改本任务结论。
