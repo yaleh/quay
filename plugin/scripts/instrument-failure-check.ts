@@ -34,8 +34,10 @@
 //   --scan <file...>   measure mode (the ## Contract surface). Prints one `FAMILY-<n>` line per
 //                      detected family (the Contract measure greps `^FAMILY-`), then per-hit detail.
 //                      Exit 0 always (measure, never a gate).
-//   --gate [--root]    static-tier gate (wired into scripts/test.sh run_static_checks). Scans the
-//                      DEFAULT_SURFACE (the five tick docs). Enforces:
+//   --gate [--root]    static-tier gate (wired into scripts/test.sh run_static_checks). Scans
+//                      gateSurface(root) = DEFAULT_SURFACE (the five tick docs) ∪ plugin/scripts/
+//                      instrument scripts (*.ts + *.sh — AC3, gap-manager-tick-readings-constant-
+//                      zero-instruments). Enforces:
 //                        (a) band   — every family fires ≥1 time (the Contract `detected_families
 //                            ≥ 5`; "五族必须有机械检出路径" as an executable invariant). A family
 //                            with 0 detections exits 1.
@@ -72,6 +74,23 @@ export const DEFAULT_SURFACE = [
   "plugin/loop/orchestrator-loop-tick.md",
 ];
 
+/** --gate 扫描面 = DEFAULT_SURFACE（5 份驱动 markdown）∪ plugin/scripts/ 仪器脚本（*.ts + *.sh）。
+ *  (gap-manager-tick-readings-constant-zero-instruments AC3) 恒值仪器全部住在 plugin/scripts/*.{ts,sh}
+ *  ——两个恒值读数（manager-tick-readings.ts 的 node_count comm 正则 / outer.ticklog 行形谓词）是
+ *  手工发现的，--gate 若只看 markdown 就永远看不见缺陷所在处。root 下无 plugin/scripts 目录
+ *  （测试 temp-dir 等）⇒ 该子集跳过（fail-open 到纯 markdown 面，band + shrink-only 语义仍覆盖）。 */
+export function gateSurface(root: string): string[] {
+  const instrumentsDir = path.join(root, "plugin", "scripts");
+  let instruments: string[] = [];
+  if (fs.existsSync(instrumentsDir)) {
+    instruments = fs.readdirSync(instrumentsDir)
+      .filter((f) => f.endsWith(".ts") || f.endsWith(".sh"))
+      .map((f) => path.join("plugin", "scripts", f))
+      .sort();
+  }
+  return [...DEFAULT_SURFACE, ...instruments];
+}
+
 /**
  * Shrink-only per-family baselines — the number of real hits each family produces on the
  * CURRENT documented surface (measured 2026-08-08 at the task's land: 2/5/2/7/10; family 4
@@ -79,12 +98,16 @@ export const DEFAULT_SURFACE = [
  * extension for host-dependent node comm literals (`grep -cx node-MainThread` / `pgrep -xc
  * node-MainThread` / `pgrep -c node` now fire family 4: boheidc Node v24.19.0 comm=`MainThread`
  * ⇒ the old "full literal" silently reads 0, so a bare node comm-literal count WITHOUT a cmdline
- * cross-check is the same fragment-as-process-name failure the family already caught). Each family
- * has at least one real, documented instance per AC1. A NEW failure-form instance beyond these
- * counts red-lights the gate. To rebaseline after an INTENTIONAL doc change, re-run --gate and
- * copy the `detected` numbers here (the audit trail is in the git history of this constant).
+ * cross-check is the same fragment-as-process-name failure the family already caught). REBASELINED
+ * AGAIN to 2/11/15/20/26 at gap-manager-tick-readings-constant-zero-instruments (2026-08-13): the
+ * --gate surface now ALSO scans plugin/scripts/*.{ts,sh} instrument scripts (AC3 — the instruments
+ * live there and the gate previously only looked at markdown), which raises the documented hit
+ * counts; family 4 also gained the in-language `/proc/<pid>/comm` read predicate. Each family has
+ * at least one real, documented instance per AC1. A NEW failure-form instance beyond these counts
+ * red-lights the gate. To rebaseline after an INTENTIONAL doc change, re-run --gate and copy the
+ * `detected` numbers here (the audit trail is in the git history of this constant).
  */
-export const FAMILY_BASELINE: Record<number, number> = { 1: 2, 2: 5, 3: 2, 4: 10, 5: 10 };
+export const FAMILY_BASELINE: Record<number, number> = { 1: 2, 2: 11, 3: 15, 4: 20, 5: 26 };
 
 // ── Per-family detectors (PURE: line text → boolean) ──────────────────────────────────────────────────
 // The detectors scan a whole line (fenced code lines, inline backtick code, and prose that names a
@@ -135,12 +158,19 @@ export function detectFamily3(line: string): boolean {
  *  knowledge of the correct comm ⇒ works across machines/Node versions. A line carrying a cmdline
  *  cross-check (cmdline / is_test_cmdline / 双读 / dual.read) is the safe form and does NOT fire. */
 export function detectFamily4(line: string): boolean {
-  const hasCmdlineCrossCheck = /cmdline|is_test_cmdline|双读|dual.read/.test(line);
+  const hasCmdlineCrossCheck = /cmdline|is_test_cmdline|双读|dual\.read|argv/.test(line);
   // EXTENSION — bare node comm literal as an exact/regex count, no cmdline cross-check.
   // `-[cx]{1,2}` covers both pgrep's `-xc` and grep's `-cx` flag orders.
+  // EXTENSION (gap-manager-tick-readings-constant-zero-instruments) — in-language /proc/<pid>/comm
+  // read as a node-process count: a `comm` value matched against a node literal/regex
+  // (`/node/.test(comm)`) WITHOUT a cmdline cross-check fires — the same fragment/host-dependent-
+  // literal-as-process-name failure in JS/TS (boheidc Node v24 comm=`MainThread` ⇒ `/node/` regex
+  // reads 0; `pgrep -c node` reads 0). A line carrying a cmdline cross-check (cmdline / argv /
+  // 双读 / dual.read) is the safe form and does NOT fire.
   if (!hasCmdlineCrossCheck) {
     if (/(pgrep|grep)\s+-[cx]{1,2}\s+node(-MainThread)?\b/.test(line)) return true;
     if (/\bcomm=(node|MainThread)\b/.test(line)) return true;
+    if (/(\.test\(comm\)|readFileSync\([^)]*["']comm["'])/.test(line) && /\bnode\b|MainThread/.test(line)) return true;
   }
   // Original rule — a fragment of the real comm (no hyphen) never matches.
   if (!line.includes("comm=")) return false;
@@ -247,8 +277,9 @@ Usage:
   node --experimental-strip-types instrument-failure-check.ts --scan <file...> [--json]
       measure mode — print one FAMILY-<n> line per detected family + per-hit detail. Exit 0.
   node --experimental-strip-types instrument-failure-check.ts --gate [--root <dir>] [--json]
-      static-tier gate — scan DEFAULT_SURFACE; require (a) all 5 families ≥1 hit (band),
-      (b) each family ≤ FAMILY_BASELINE[n] (shrink-only). Exit 1 on violation.
+      static-tier gate — scan gateSurface(root) = DEFAULT_SURFACE ∪ plugin/scripts/*.{ts,sh}
+      (AC3); require (a) all 5 families ≥1 hit (band), (b) each family ≤ FAMILY_BASELINE[n]
+      (shrink-only). Exit 1 on violation.
 
 Exit codes: 0 PASS/measure · 1 gate FAIL · 2 usage/env error.`;
 
@@ -319,7 +350,10 @@ export function main(argv: string[]): number {
   }
 
   if (args.includes("--gate")) {
-    const files = DEFAULT_SURFACE.map((f) => path.join(root, f));
+    // AC3 (gap-manager-tick-readings-constant-zero-instruments): scan DEFAULT_SURFACE ∪
+    // plugin/scripts/ 仪器脚本（gateSurface）。相对路径 list 供 JSON 输出与测试核对。
+    const relSurface = gateSurface(root);
+    const files = relSurface.map((f) => path.join(root, f));
     const missing = files.filter((f) => !fs.existsSync(f));
     if (missing.length > 0) {
       console.error(`instrument-failure-check: --gate surface missing files under --root ${root}:`);
@@ -345,6 +379,7 @@ export function main(argv: string[]): number {
           {
             mode: "gate",
             ok,
+            files: relSurface,
             counts: counts,
             baselines: FAMILY_BASELINE,
             bandFailures: bandFailures.map((f) => f.id),

@@ -17,6 +17,8 @@ import {
   remoteTmuxListPanes,
   projectStatus,
   resourceReadings,
+  listNodePids,
+  countNodeCommLiteral,
   outerReadings,
   latestTickLog,
   latestTickLogReading,
@@ -83,21 +85,43 @@ test("manager-tick-readings: projectStatus reads .halt presence and first line",
   assert.equal(projectStatus({ name: "x", dir: "" }), "no-dir");
 });
 
-test("manager-tick-readings: resourceReadings counts node by pgrep semantics (comm regex) excluding self", (t) => {
+test("manager-tick-readings: resourceReadings counts node by CMDLINE (host-independent) with dual-read self-check (AC1b)", (t) => {
   const dir = tmpdir(t);
   const proc = path.join(dir, "proc");
   write(proc, "pressure/cpu", "some avg10=61.28 avg60=1.00 avg300=1.00 total=0");
   write(proc, "loadavg", "7.23 1.11 1.00 3/456 78901");
   write(proc, "meminfo", "MemTotal:       32000000 kB\nMemAvailable:    28211200 kB\n");
-  // 两个 node 进程（comm=node-MainThread，pgrep node 会命中）+ 一个 bash
-  write(proc, "101/comm", "node-MainThread");
-  write(proc, "102/comm", "node-MainThread");
+  // boheidc 形状：node 进程 comm=`MainThread`（不含 "node" 子串，旧 /node/ 正则恒零），cmdline argv[0] 才是 node。
+  write(proc, "101/cmdline", "node\0/app.js\0");
+  write(proc, "101/comm", "MainThread");
+  write(proc, "102/cmdline", "/usr/bin/node\0--version\0");
+  write(proc, "102/comm", "MainThread");
+  write(proc, "103/cmdline", "bash\0--rcfile\0");
   write(proc, "103/comm", "bash");
   const r = resourceReadings(proc, 9999);
   assert.equal(r.cpuSomeAvg10, "61.28");
   assert.equal(r.load1, "7.23");
-  assert.equal(r.nodeCount, 2);
+  assert.equal(r.nodeCount, 2); // cmdline 枚举：node + /usr/bin/node
+  assert.equal(r.nodeCommLiteral, 0); // 交叉侧 comm 字面量（node-MainThread）在本机恒 0
+  assert.equal(r.nodeInstrumentFailure, true); // comm 0 && cmdline 2 ⇒ 报【仪器故障】
   assert.equal(r.memAvailMb, 27550); // 28211200 kB / 1024
+});
+
+test("manager-tick-readings: listNodePids/countNodeCommLiteral dual-read on the old-host comm shape (no instrument failure)", (t) => {
+  const dir = tmpdir(t);
+  const proc = path.join(dir, "proc");
+  write(proc, "101/cmdline", "node\0/app.js\0");
+  write(proc, "101/comm", "node-MainThread"); // 旧宿主 Node comm
+  write(proc, "102/cmdline", "/usr/bin/node\0--version\0");
+  write(proc, "102/comm", "node-MainThread");
+  write(proc, "103/cmdline", "bash\0--rcfile\0");
+  write(proc, "103/comm", "bash");
+  assert.deepEqual(listNodePids(proc, 9999), [101, 102]);
+  assert.equal(countNodeCommLiteral(proc, 9999), 2); // 交叉侧命中 ⇒ 双读互校 ok
+  const r = resourceReadings(proc, 9999);
+  assert.equal(r.nodeCount, 2);
+  assert.equal(r.nodeCommLiteral, 2);
+  assert.equal(r.nodeInstrumentFailure, false);
 });
 
 test("manager-tick-readings: outerReadings reports window-missing as a labeled line, not silence (AC3)", () => {
@@ -171,6 +195,22 @@ test("manager-tick-readings: latestTickLog returns the newest dated row across e
   assert.ok(row.startsWith("## 2026-08-12 03:2xZ"), row);
   const r = latestTickLogReading(quay);
   assert.equal(r.freshness, "dated");
+});
+
+test("manager-tick-readings: latestTickLog parses the quay dash-tick shape `- \\`HH:MMZ\\` \\`action\\`` (AC2)", (t) => {
+  // 修复前四谓词（DATED/QUOTE/HEADER/TABLE）全不命中 dash tick ⇒ 恒 no-tick-row。
+  // 修复后 `- \`04:09Z\` \`unblock\` — …` 被 UNDATED_DASH_RE 命中，按追加顺序取最后一行。
+  const quay = { name: "quay", dir: tmpdir(t) };
+  write(quay.dir, "orchestration/tick-log.md", [
+    "- `03:31Z` `unblock` — 冷启动后首个常规 tick。",
+    "  - 后续：reconcile 关闭冷启动括号（缩进子行不是 tick 行）。",
+    "- `04:09Z` `correct` — 方向性违规认领。",
+    "- `04:22Z` `no-action` — 等裁定。",
+  ].join("\n"));
+  const r = latestTickLogReading(quay);
+  assert.notEqual(r.row, "no-tick-row", "dash-tick 行必须被识别（AC2：对当前真实文件能亮红）");
+  assert.ok(r.row.includes("04:22Z"), r.row);
+  assert.equal(r.freshness, "positional"); // 无日期行 + mtime 可得 ⇒ positional
 });
 
 test("manager-tick-readings: latestTickLog falls back to mtime for an undated positional winner (AC2)", (t) => {
@@ -252,6 +292,8 @@ test("manager-tick-readings: render emits the full fixed labeled structure (AC3 
   assert.ok(lines.some((l) => l.startsWith("resource.cpu_some_avg10 ")), lines.join(";"));
   assert.ok(lines.some((l) => l.startsWith("resource.load1 ")), lines.join(";"));
   assert.ok(lines.some((l) => l.startsWith("resource.node_count ")), lines.join(";"));
+  assert.ok(lines.some((l) => l.startsWith("resource.node_comm_literal ")), lines.join(";"));
+  assert.ok(lines.some((l) => l.startsWith("resource.node_dual_read ")), lines.join(";"));
   assert.ok(lines.some((l) => l.startsWith("resource.mem_available_mb ")), lines.join(";"));
   assert.ok(lines.some((l) => l.startsWith("outer.liveness quay-0:outer ")), lines.join(";"));
   assert.ok(lines.some((l) => l.startsWith("outer.ticklog quay ")), lines.join(";"));

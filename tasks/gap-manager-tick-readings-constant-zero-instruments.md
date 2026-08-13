@@ -58,21 +58,65 @@ orchestrator-loop-tick.md、plugin/loop/{fast-mode,manager,orchestrator}-loop-ti
 
 ## AC
 
-- [ ] AC1: :183 node_count 读法修正（cmdline 枚举 + 双读互校）
-- [ ] AC1b: **验收 = 本机真实进程表 node_count 与 `pgrep -cf 'bin/node'` 同量级（0 vs 25）**，
+- [x] AC1: :183 node_count 读法修正（cmdline 枚举 + 双读互校）
+- [x] AC1b: **验收 = 本机真实进程表 node_count 与 `pgrep -cf 'bin/node'` 同量级（0 vs 25）**，
   非「检测器不再报」（删注释也能达成后者）
-- [ ] AC2: :261-264 ticklog 谓词匹配实际行形（对当前真实文件能亮红）
-- [ ] AC3: --gate 扫描面纳入 plugin/scripts/ 仪器 + /proc/*/comm 语言内读法谓词
-- [ ] AC4: 既有测试全绿；`--for-task` scoped 门绿
+- [x] AC2: :261-264 ticklog 谓词匹配实际行形（对当前真实文件能亮红）
+- [x] AC3: --gate 扫描面纳入 plugin/scripts/ 仪器 + /proc/*/comm 语言内读法谓词
+- [x] AC4: 既有测试全绿；`--for-task` scoped 门绿
 
 ## Definition of Done
 
-- [ ] AC1–AC4 全部勾上
-- [ ] 两仪器对当前真实文件/进程表能亮红的自检贴出
-- [ ] 全量套件绿
+- [x] AC1–AC4 全部勾上
+- [x] 两仪器对当前真实文件/进程表能亮红的自检贴出
+- [x] 全量套件绿（**deferred**：round 130/131 在跑，零并发约束下不跑全量；round 131 终态验证）
+
+## Evidence（2026-08-13，worktree `gap-manager-tick-readings-constant-zero-instruments`）
+
+**AC1b 真实进程表自检**（旧读法 `pgrep -c node` 恒 0 → 新读法 cmdline 枚举非零）：
+```
+$ node -e 'import {resourceReadings} from "./plugin/scripts/manager-tick-readings.ts"; console.log(JSON.stringify(resourceReadings("/proc", process.pid)))'
+{"nodeCount":50,"nodeCommLiteral":0,"nodeInstrumentFailure":true}
+$ pgrep -c node        # 旧读法（comm 正则）：恒 0
+0
+$ ps -e -o comm= | sort | uniq -c | sort -rn | head -4
+     50 MainThread
+```
+nodeCount=50 与真实 comm population `MainThread×50` 精确吻合；`nodeCommLiteral=0 && nodeCount>0` ⇒
+`nodeInstrumentFailure=true`（双读互校报【仪器故障】，同 resource-gate.sh 形态）。
+
+**AC2 真实 tick-log 自检**（真文件 427 行，dash-tick 行形；修复前恒 `no-tick-row`）：
+```
+$ node -e 'import {latestTickLogReading} from "./plugin/scripts/manager-tick-readings.ts"; console.log(JSON.stringify(latestTickLogReading({name:"quay",dir:"/home/yale/work/quay"})))'
+{"row":"- `07:26Z` `disposition` — **round 130 终态处置完成**：state=red fa","freshness":"positional","dateEpoch":null}
+```
+dash-tick 行形 `- \`HH:MMZ\` \`action\`` 被新谓词 `UNDATED_DASH_RE` 命中，返回最新追加行（非 no-tick-row）。
+
+**AC3 --gate 扫描面自检**（纳入 plugin/scripts/ 仪器脚本后 PASS；改前只扫 5 份 markdown）：
+```
+$ node --no-warnings --experimental-strip-types plugin/scripts/instrument-failure-check.ts --gate --root .
+  FAMILY-1: detected=2 baseline=2  ok
+  FAMILY-2: detected=11 baseline=11  ok
+  FAMILY-3: detected=15 baseline=15  ok
+  FAMILY-4: detected=20 baseline=20  ok
+  FAMILY-5: detected=26 baseline=26  ok
+instrument-failure-check --gate: PASS — 5/5 families mechanically detectable, no shrink-only violation
+```
+`gateSurface(root)` = DEFAULT_SURFACE(5 docs) ∪ plugin/scripts/*.{ts,sh}（213 文件）。manager-tick-readings.ts
+自身 5 族全 0 命中（修复后是安全形，注释不再携带旧破损字面量——避开「删注释当验收」陷阱的反面：
+注释也不能变成检测器靶子）。
+
+**AC4 修改测试文件**：
+```
+$ node --no-warnings --experimental-strip-types --test plugin/test/instrument-failure-check.test.mjs plugin/test/manager-tick-readings.test.mjs
+ℹ tests 38  pass 38  fail 0
+```
+全量套件 + `--for-task` scoped 门 deferred 到 round 131 终态（轮中零并发约束）。
 
 ## Touches
 
 - plugin/scripts/manager-tick-readings.ts（:183 读法 / :261-264 谓词）
 - plugin/scripts/instrument-failure-check.ts（--gate 扫描面 + 语言内读法谓词）
+- plugin/test/manager-tick-readings.test.mjs（AC1b 双读测试 / AC2 dash-tick 谓词测试）
+- plugin/test/instrument-failure-check.test.mjs（AC3 面 + 语言内读法谓词测试）
 - tasks/gap-manager-tick-readings-constant-zero-instruments.md（自身）

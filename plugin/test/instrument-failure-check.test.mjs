@@ -28,6 +28,7 @@ import {
   FAMILIES,
   DEFAULT_SURFACE,
   FAMILY_BASELINE,
+  gateSurface,
   detectFamily1,
   detectFamily2,
   detectFamily3,
@@ -106,6 +107,17 @@ test("AC2 family 4 (fragment-or-host-dependent-literal-as-process-name): correct
   // comm-literal count WITHOUT a cmdline cross-check fires family 4.
   assert.deepEqual(famsOn("ps -e -o comm= | grep -cx node-MainThread"), [4]);
   assert.deepEqual(famsOn("pgrep -xc node-MainThread"), [4]);
+
+  // Error (gap-manager-tick-readings-constant-zero-instruments): in-language /proc/<pid>/comm read
+  // matched against a node regex as a count, WITHOUT a cmdline cross-check — the SAME fragment /
+  // host-dependent-literal-as-process-name failure in JS/TS (boheidc Node v24 comm=`MainThread` ⇒
+  // `/node/` regex reads 0). The read line alone (no node predicate) and the cmdline-cross-checked
+  // safe form (argv / readCmdline) do NOT fire; the dual-read cross-check full literal with a
+  // hyphen does NOT fire either.
+  assert.deepEqual(famsOn("if (/node/.test(comm)) nodeCount++;"), [4]);
+  assert.deepEqual(famsOn('const comm = fs.readFileSync(path.join(procRoot, d, "comm"), "utf8").trim();'), []);
+  assert.deepEqual(famsOn('const exe = argv[0]; if (exe === "node" || exe.endsWith("/node")) nodeCount++;'), []);
+  assert.deepEqual(famsOn('if (comm === "node-MainThread") count++;'), []);
 });
 
 test("AC2 family 5 (derived-view-as-real-time): correct form 0 hits, error form MUST report", () => {
@@ -142,6 +154,27 @@ test("gate PASS on the real repo: band + shrink-only both hold (counts within ba
   const res = runChecker(["--gate", "--root", repoRoot]);
   assert.equal(res.status, 0, res.stdout);
   assert.match(res.stdout, /PASS/);
+});
+
+test("AC3: --gate scans plugin/scripts instrument scripts, not just the 5 markdown docs", () => {
+  const surface = gateSurface(repoRoot);
+  // DEFAULT_SURFACE is unchanged (the ## Contract measure stays the 5 docs).
+  assert.equal(DEFAULT_SURFACE.length, 5);
+  // The gate surface extends it with every plugin/scripts instrument script (*.ts + *.sh).
+  assert.ok(surface.length > DEFAULT_SURFACE.length, `expected instruments added, got ${surface.length}`);
+  assert.ok(surface.includes("plugin/scripts/manager-tick-readings.ts"), "the constant-zero instrument script must be on the gate surface");
+  assert.ok(surface.some((f) => f.endsWith(".sh")), "expected at least one .sh instrument on the surface");
+  assert.ok(surface.some((f) => f.endsWith(".ts")), "expected at least one .ts instrument on the surface");
+  // The --gate CLI actually uses that surface (the JSON `files` field carries the relative list).
+  const j = JSON.parse(runChecker(["--gate", "--root", repoRoot, "--json"]).stdout);
+  assert.equal(j.files.length, surface.length);
+  assert.ok(j.files.includes("plugin/scripts/manager-tick-readings.ts"));
+});
+
+test("AC3: gateSurface is lenient when plugin/scripts is absent (temp-dir gate still scans the doc surface)", (t) => {
+  const dir = makeTmpDir("ifc-gatesurf-");
+  // No plugin/scripts under the temp dir ⇒ instruments subset skipped.
+  assert.deepEqual(gateSurface(dir), DEFAULT_SURFACE);
 });
 
 // ── Negative controls through the real CLI on a crafted surface ─────────────────────────────────────
@@ -183,6 +216,33 @@ test("AC2 CLI negative control: a fixture with all five CORRECT forms reports 0 
   assert.equal(res.status, 0);
   const familyLines = (res.stdout.match(/^FAMILY-/gm) ?? []).length;
   assert.equal(familyLines, 0, `expected 0 FAMILY- lines for correct forms, got ${familyLines}: ${res.stdout}`);
+});
+
+test("AC3: a crafted .ts file with the in-language comm regex count reports family 4 through the CLI", () => {
+  const dir = makeTmpDir("ifc-ts-");
+  fs.writeFileSync(
+    path.join(dir, "instrument.ts"),
+    "// 恒值仪器：comm 正则读法（无 cmdline 交叉校验）\n" +
+    "const comm = fs.readFileSync(path.join(procRoot, d, \"comm\"), \"utf8\").trim();\n" +
+    "if (/node/.test(comm)) nodeCount++;\n", // ← 旧 manager-tick-readings.ts:183 同形
+  );
+  const res = runChecker(["--scan", path.join(dir, "instrument.ts")]);
+  assert.equal(res.status, 0);
+  assert.match(res.stdout, /FAMILY-4/, `expected the in-language comm regex count to report family 4: ${res.stdout}`);
+});
+
+test("AC3: the cmdline-cross-checked safe form reports 0 family-4 hits through the CLI", () => {
+  const dir = makeTmpDir("ifc-ts-ok-");
+  fs.writeFileSync(
+    path.join(dir, "instrument.ts"),
+    "const exe = readCmdline(pid, procRoot)[0] ?? \"\";\n" + // cmdline 交叉校验（安全形）
+    "if (exe === \"node\" || exe.endsWith(\"/node\")) nodeCount++;\n" +
+    "if (comm === \"node-MainThread\") crossCount++;\n", // 双读交叉侧字面量（含连字符，安全形）
+  );
+  const res = runChecker(["--scan", path.join(dir, "instrument.ts")]);
+  assert.equal(res.status, 0);
+  const familyLines = (res.stdout.match(/^FAMILY-/gm) ?? []).length;
+  assert.equal(familyLines, 0, `expected 0 FAMILY lines for the safe form, got ${familyLines}: ${res.stdout}`);
 });
 
 // ── --gate semantics: band and shrink-only red-light the right way ───────────────────────────────────
