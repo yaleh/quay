@@ -634,3 +634,37 @@ fix 的注释自己写：「The marker is written by the judge's consumer when a
 **B15 judge 复核（20:06Z，wf_1731f332-f0b）——判词独立确认 + 首选路线=选项①**：pool-quality judge 判 `gap-b15-needs-work-todo-no-implementation-path`（即选项 4 建的记录任务）= **needs-work / back-to-todo**，判词分布 {ready:0, needsWork:1, shouldRemove:0, uncertain:0}。论证：premise sound（isB15Blocked 双路拦截实证、inner no-action、两 todo 带 marker），但 **work 未落地**（AC1 可执行路径 / AC2 处置决策 / AC3 实际交叉标注全未满，DoD1/DoD2 未满）——本任务只记录了死角与选项，可执行路径显式 pending。**judge 显式点名自指陷阱**：「retreating this very task to todo reproduces the dead-end it documents, so it should be routed back with a concrete implementation/disposition assignment, not left in todo limbo」。**judge 首选路线 = 选项①**：outer 经 supervisor-deliver dispatch inner 重做 B15-blocked todos（naming over90-clock / supervisor-deliver-no-wait）→ 重新跑 judge，让 needs-work 判词携带实现指派而非孤儿 todo；替代=人裁定选项③（判词语义修订）或选项②（显式 park 并记理由）。
 
 **外层执行（20:06Z）**：①producer 契约——`task edit` retreat 本 gap 任务 ready→todo + `extra.poolQualityVerdict: needs-work`（CAS expectedStatus=ready 过，B16 AC3 外层独占 frontmatter）；②判词分布记 tick-log；③**选项①执行候选**——inner 下醒 20:20Z 派发重做三 B15-blocked todo（over90-clock / supervisor-deliver-no-wait / 本 gap 任务），按 judge remediation 逐条给实现/处置指派，避免 todo limbo。状态：pool 1→0，suite 绿（round 34）。
+
+## 2026-08-12 23:01Z（待裁决，23:28Z 强化）— inner 池干声明收敛：authorable 缺口 + 连续 no-action
+
+**现象**：inner >26h 无产出（最后 commit 9681c9f4 @08-11 21:33Z），就绪池 0/20（floor=20, cap=5）持续为空。A1 处置（8155db63，6× retiredMechanism todo→needs-human）后 inner 仍**连续 no-action**：22:57Z tick「继续 idle tick」、23:28Z 唤醒窗口 tick 明确回写「Tick 完成 — no-action tick（B2）」+ 心跳 reason「pool still 0; outer no new action since 8155db63」——**两轮均未答复升级的 ① ② 评估请求（能否补 DoD/shape、2× deps 能否解），也未补 authorable DoD**。
+
+**池干根因拆解（外层独立核实，shape 判定源码级）**：6 候选全 eligible=False——**2× authorable**（gap-test-isolation-backlog-44 / gap-two-peer：shape=contract, missing=[dod]，inner 补 DoD 即晋——本可补而未补）+ 1× 缺 dod（gap-worktree-node-modules-inconsistent-self-verify）+ 1× unknown-shape（TG 裸 todo 9 行空体）+ 2× deps NOT-ready（gap-cold-start / gap-no-formalized-bare-metal，fourArtifacts=True 但 deps 未就绪，非 authorable）。
+
+**外层已试**：①A1 处置 6× retiredMechanism todo→needs-human（8155db63，intercepted 6→0）；②inner 心跳确认读到处置（22:26Z reason「outer dispositioned...remaining 4 incomplete + 2 deps」）；③shape 判定疑义闭环（ready-pool-check JSON `shape: None` 是 buildCandidate 无 `shape` 字段，真实信号 fourArtifacts/missingArtifacts）；④B1 核 2 nyf（gap-a15-04 / gap-suite-concurrency-8）AC 未满，非 done-flip 积压；⑤ready-pool-check --cap 5 权威读数 pool=0/deficit=20 持续；⑥升级后不再派发（等待裁决）。
+
+**为何超权**：选项均需人裁决——收敛/暂停 loop、驱动 inner 补 DoD（绕 inner 自决）、或澄清任务归属。外层单方面驱动 inner 补 DoD 是方向性介入。
+
+**选项**：
+1. **人裁决收敛/暂停**：inner 池干声明确认，停止观察或经 `.halt` 暂停，等方向调整。
+2. **人要求 inner 补 4× DoD（外层驱动）**：外层经 supervisor-deliver 指名 inner 下轮 tick 补 gap-test-isolation-backlog-44 / gap-two-peer 的 DoD（作者自证），TG 决定去留，worktree-nm 澄清真实任务。
+3. **人澄清 gap-worktree-nm 真实任务**：queue-state 原清单名称在 tasks/ 无对应文件，需 inner/人澄清其指向 gap-worktree-node-modules-inconsistent-self-verify 还是别的。
+
+**inner 06:30Z 答复（08-13 冷启动后首 tick，重写「inner 未答复」断言）**：升级发出后旧 inner 会话两轮 no-action 未答复（22:57Z/23:28Z），但 08-13 06:25Z 冷启动重建的 inner（会话 6742c03d）在**首 tick 即答复 ① ② 评估**：①**3× authorable 确认**——gap-test-isolation-backlog-44 / gap-two-peer / gap-worktree-node-modules-inconsistent-self-verify 四件套仅缺 `## DoD`（depsReady、touchesResolve 均 true，**补 DoD 即晋**），其中 **gap-worktree-nm = gap-worktree-node-modules-inconsistent-self-verify**（澄清选项③）；②**2× 战略任务死锁**——gap-cold-start / gap-no-formalized-bare-metal（价值 4.5/4.25）的 parent `gap-quay-has-never-self-hosted-its-own-cold-start` 是 needs-human（children 未 done ⇒ 伞形不可完成），而 children 的 depsReady=false 又因 parent 非 done ⇒ **圆形依赖，inner 无法解，必须人处置**；③**TG 建议删除/澄清**（裸 todo `title: x` 9 行空体，unknown-shape，非 authorable）。**「inner 未答复」不再是事实——inner 已自答并明确其能做（补 DoD）与不能做（解 parent 死锁）的边界，升级选项 2 的驱动面收窄为 3× authorable DoD + TG 处置 + 2× parent 死锁裁决**。
+
+## 2026-08-13 06:36Z（待裁决，B4 分叉触发）— integration/develop 双线分叉 705/177：批量合盲区掩盖真实积压
+
+**现象**：`origin/integration` 领先 `develop` **705 commits**（integration-only，含 **128 个 inner fan-in merges**，最新 f004c24f @08-13 04:01，以及 08-13 的 manager 提交 c23bf2fa/2de41fab/4592b68e 等新阶段目标+验证 SPEC 工作），而 `develop` 仅领先 integration **177**（外层 telemetry 快照 + A1 处置 8155db63）。merge-base = 51885b79 @08-11 04:11——**integration 非 develop 祖先（真分叉，非 FF）**。
+
+**B4 判据双触发（不静默累积）**：①integration 领先 develop 705 > 50 阈值；②develop 最后 commit 08-12 23:42，至 06:36 ≈7h 未前进 > 6h 阈值（无论 suite 红绿）。
+
+**根因（批量合盲区，机制级）**：`integration-batch-merge.sh` 的 `report_divergence()` 用 `refs/heads/${integration_ref}..refs/heads/${develop_ref}` 量 ahead，但**本地没有 `refs/heads/integration` 分支**（integration 只存在于 `origin/integration`，remote-only）——`git rev-list` 对不存在的 ref 报错，被 `|| echo 0` 吞成 **ahead 0 假象**。结果：B4 每轮读「integration ahead 0」判断无积压，实际 origin/integration 持续累积。**先前 tick-log 里所有「integration ahead 0」/「无新 merge 需批量合」记录都建立在这个假读之上**（2026-08-10 裁定「integration 领先 develop >50 ⇒ escalate」从未有机会触发）。
+
+**为何超权**：①修 `integration-batch-merge.sh` 量 `origin/integration`（或先 `git fetch`）是**脚本/机制改动**——外层不写码（A15④），归 inner 或执行核正本修订；②直接手动 merge integration→develop 是真实合并动作，需 batch-merge 的对象门（unmerged_develop_files=0，develop 侧代码文件先过套件）把关，外层无权绕过。
+
+**选项**：
+1. **inner 修批量合 ref 解析（推荐）**：`integration-batch-merge.sh` 在缺本地 `integration` ref 时改量 `origin/integration`（或 dry-run 前置 fetch），让 B4 读回真实 ahead——分叉 705 现形后，依 B4 流程在 suite green 且 develop 侧代码已过验证后批量合。
+2. **人裁定合并时机/顺序**：先等 23:01Z 池干裁决（inner 是否停摆）再谈合并——因为 705 里含大量未进 develop 的 inner 产出，若 inner 停摆属实，合并前应先确认 develop 侧 177（telemetry+A1）与 integration 侧 705 的并集是否都过套件。
+3. **人确认这是正常累积而非故障**：若 integration→develop 的批量合本就该由某条未挂起的机械路径定期执行而当前未执行，则修该路径；若两线长期分叉是设计使然（develop 只承载外层决策、integration 承载全部内层产出），则 B4 判据 2026-08-10 裁定的「>50 ⇒ escalate」阈值在两层长期并存下**永远触发**，该阈值本身需按新模型重裁。
+
+**外层倾向**：选项 1 是机制修复（让 B4 恢复真实测量），选项 3 的第 3 段需人确认模型语义——两条都指向同一个问题：**本地 integration ref 缺失使 B4 判据长期空转，705 积压一直没被看见**。**升级裁决前外层不派发**（与 23:01Z 同 hold）。
