@@ -44,6 +44,8 @@ import {
   isAbortLine,
   isStaticCheckFailureLine,
   extractStaticCheckDetail,
+  extractFailClosedChecker,
+  buildStaticCheckFailures,
   isGitWorktree,
   readStateRunId,
   writeStateGuarded,
@@ -1335,6 +1337,85 @@ test("AC2/AC3/AC4 — a static-check-red run writes reason=static-check + machin
     assert.equal(loc.kind, "shared-gate", "classifyFailure classifies the static-check failure as shared-gate");
     const res = runOnce(root);
     assert.equal(res.stopSignal, true, "runOnce reports stopSignal for static-check red");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC2 unit — extractFailClosedChecker parses checker-cost-lib's fail-closed machine line; isStaticCheckFailureLine flags it", () => {
+  // gap-static-check-red-failures-capture-only-task-contract-shape: the round-84 真因 line
+  // (threshold-scope-check fail-closed) did NOT match the old task-contract-shape patterns — this
+  // pins that it now flags + parses.
+  const fc = extractFailClosedChecker("STATIC_CHECK_FAILED: threshold-scope-check exit=1");
+  assert.deepEqual(fc, { name: "threshold-scope-check", exitCode: 1, line: "STATIC_CHECK_FAILED: threshold-scope-check exit=1" });
+  assert.equal(isStaticCheckFailureLine("STATIC_CHECK_FAILED: threshold-scope-check exit=1"), true, "the fail-closed machine line IS a static-check failure marker");
+  assert.equal(extractFailClosedChecker("checker-cost-lib: run_checker_parallel_wait — static checks FAILED (fail-closed): threshold-scope-check(exit=1)"), null, "the human summary line is NOT machine-parsed (only the STATIC_CHECK_FAILED: line is)");
+  assert.equal(extractFailClosedChecker("not ok 1 - boom"), null);
+  assert.equal(extractFailClosedChecker("STATIC_CHECK_FAILED: no-exit-code"), null, "missing exit=<rc> is not a parseable fail-closed checker");
+});
+
+test("AC1/AC2 — buildStaticCheckFailures carries BOTH the VIOLATION details AND the fail-closed checkers, all staticCheck:true", () => {
+  const suite = buildStaticCheckFailures(
+    [{ file: "tasks/gap-foo.md", code: "V1", what: "x", line: "VIOLATION: tasks/gap-foo.md — V1: x" }],
+    [{ name: "threshold-scope-check", exitCode: 1, line: "STATIC_CHECK_FAILED: threshold-scope-check exit=1" }],
+  );
+  assert.equal(suite.length, 2, "both the violation detail and the fail-closed checker are recorded");
+  assert.equal(suite[0].file, "tasks/gap-foo.md", "the VIOLATION entry carries the violated file");
+  assert.equal(suite[1].line.includes("threshold-scope-check"), true, "the fail-closed entry carries the checker name");
+  assert.ok(suite.every((f) => f.staticCheck === true), "every static-check entry is marked staticCheck:true (shared-gate routing)");
+});
+
+test("gap-static-check-red-failures-capture-only-task-contract-shape — a FAIL-CLOSED checker (round-84 真因) is captured in failures[] + staticCheck.failedCheckers, separated from the violation details", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-fc-"));
+  // The round-84 shape: threshold-scope-check fail-closed (checker-cost-lib's machine line on stderr)
+  // while task-contract --no-block emits VIOLATION lines + "recorded (non-blocking)" (exit-0 noise).
+  // BEFORE this task, failures[] captured ONLY the 25 task-contract VIOLATION entries and the real
+  // cause (threshold-scope-check) had ZERO entries — the defect this task fixes.
+  const { f, dir } = fakeSuite(
+    'echo "VIOLATION: tasks/gap-foo.md — contract-line-unknown: Contract block missing invariant line"\n' +
+      'echo "recorded (non-blocking, grow-only ledger): 1 new task-file violation(s)"\n' +
+      'echo "STATIC_CHECK_FAILED: threshold-scope-check exit=1" >&2\n' +
+      'echo "checker-cost-lib: run_checker_parallel_wait — static checks FAILED (fail-closed): threshold-scope-check(exit=1)" >&2\n' +
+      "exit 1",
+  );
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    assert.equal(code, 1, "runner exits 1 on the fail-closed static-check red");
+    const s = readState(root);
+    assert.equal(s.state, "red");
+    assert.equal(s.reason, "static-check", "a checker-cost-lib fail-closed red is reason=static-check, NOT failed");
+    assert.ok(s.staticCheck, "machine-readable staticCheck field present");
+    // AC1 — the fail-closed checker (真因) is in failures[], not just the task-contract VIOLATION shape.
+    const fcEntry = Array.isArray(s.failures) ? s.failures.find((x) => x.line.includes("threshold-scope-check")) : undefined;
+    assert.ok(fcEntry, `failures[] records the fail-closed checker 真因: ${JSON.stringify(s.failures)}`);
+    assert.equal(fcEntry.staticCheck, true, "the fail-closed entry is marked static-check (shared-gate routing)");
+    // AC2 — the two facts are separated: failedCheckers (which checker failed) vs details (violation lines).
+    assert.ok(
+      Array.isArray(s.staticCheck.failedCheckers) && s.staticCheck.failedCheckers.length === 1,
+      `staticCheck.failedCheckers carries the fail-closed checker: ${JSON.stringify(s.staticCheck.failedCheckers)}`,
+    );
+    assert.equal(s.staticCheck.failedCheckers[0].name, "threshold-scope-check", "checker name");
+    assert.equal(s.staticCheck.failedCheckers[0].exitCode, 1, "checker exit code");
+    assert.ok(
+      Array.isArray(s.staticCheck.details) && s.staticCheck.details.length === 1,
+      "staticCheck.details still carries the VIOLATION lines (separate from failedCheckers)",
+    );
+    assert.equal(s.staticCheck.details[0].file, "tasks/gap-foo.md", "the violation detail carries the task file");
+    // The fail-closed entry routes to the shared gate (dispatch stops on a static-check red).
+    const loc = classifyFailure(fcEntry);
+    assert.equal(loc.kind, "shared-gate", "the fail-closed checker entry routes to the shared gate");
+    assert.equal(shouldStopDispatch(s), true, "static-check red stops dispatch (shared-gate failure)");
+    // AC3 — the verification-round record (the authoritative red round) carries the SAME failures[]
+    // with the fail-closed 真因 (round-84 形态: threshold-scope fail-closed appears in the record).
+    const round = lastRoundRecord(root);
+    assert.ok(
+      round && Array.isArray(round.failures) && round.failures.some((x) => x.line.includes("threshold-scope-check")),
+      "verification-round failures[] carries the fail-closed checker 真因: " + JSON.stringify(round),
+    );
+    assert.equal(round.reason, "gate-failed", "round record reason=gate-failed (fail=0 static-check red)");
+    assert.equal(round.gate, "static-check", "round record names gate=static-check");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(dir, { recursive: true, force: true });
