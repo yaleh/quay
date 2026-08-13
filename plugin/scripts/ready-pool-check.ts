@@ -22,7 +22,12 @@
 //   2. Report `dispatchable_disjoint` — the size of the largest subset of the pool whose members are
 //      pairwise touches-disjoint (checkTouchesPair disjoint, using the SAME declared-path expander
 //      the dispatch gate uses — concrete paths resolve whether or not they exist, wildcards expand
-//      against the tree). THIS is the criterion, not the raw pool count: `dispatchable_disjoint >=
+//      against the tree). CAVEAT: "concrete paths resolve whether or not they exist" describes ONLY
+//      the DISJOINTNESS expander here (two not-yet-existing paths can still collide if they share a
+//      prefix). The ADMISSION gate (`touchesResolve` below) is stricter: a non-(new) Touches entry
+//      MUST exist on disk, or the candidate fails touchesResolve — so a PRE-CLAIMED new file must be
+//      tagged `(new)` (touches-parser.ts) to be admission-eligible (gap-check-set-…-judged-objects).
+//      THIS is the criterion, not the raw pool count: `dispatchable_disjoint >=
 //      cap` is satisfied when 5 all-disjoint candidates are ready, and gets flagged when 30 all-
 //      colliding ones are. floor is the MEANS; dispatchable capacity is the RESULT.
 //   3. When pool < floor (floor = cap × 4, default 12), recommend todo→ready promotions in a DEFINED

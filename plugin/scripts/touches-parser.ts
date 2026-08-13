@@ -108,6 +108,12 @@ export function parseTouchEntriesWithTags(touchesSection) {
 // touching that dir — measured: branch-model's `plugin/scripts/（…，若成脚本）` expanded to 100+ files and
 // sank 5/6 pool candidates). Rule: declare a CONCRETE path, or PRE-CLAIM an explicit candidate path
 // (e.g. `plugin/scripts/branch-helper.sh`), never a bare dir with '若成脚本'-style uncertainty.
+// NEW-FILE COROLLARY: if the pre-claimed file does NOT exist yet, mark the entry `(new)` — the
+// trailing-annotation form (`path/file.ts (new)`) is what parseTouchEntriesWithTags extracts as
+// tag="new" (NOT a mid-line `(new)` — the annotation must be the LAST `(...)` on the bullet). The
+// admission gate's `touchesResolve` then counts it as resolveable-by-construction instead of MISSING
+// (gap-check-set-after-change-diff-nameonly-intersect-judged-objects: mid-line `(new)` before a
+// full-width（…）annotation was NOT captured → tag=null → entry treated as a missing file).
 // This module provides the MECHANICAL flag; the consumer check (task-contract-check.ts
 // `bare-dir-uncertain-touch`) wires it to the task store + a shrink-only baseline.
 export const UNCERTAIN_TOUCH_ANNOTATION_RE = /若成|若作|若|或等价|或|可能|也许|待定|暂定|拟|说不定|未定/;
