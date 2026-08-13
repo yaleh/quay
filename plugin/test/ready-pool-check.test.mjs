@@ -59,6 +59,7 @@ import {
   readJsonLines,
   readVerificationRounds,
   readStateFailures,
+  countUnattributedFailures,
   SUITE_BLOCKING_WEIGHT,
   RED_WINDOW_MIN_DEFAULT,
   isSuiteFixTask,
@@ -2378,6 +2379,52 @@ test("consecutiveRedRounds / isRedRound / collectFailureFiles window detection (
   assert.equal(consecutiveRedRounds([{ round: 1, state: "red", reason: "failed" }]), 1);
   assert.deepEqual(collectFailureFiles(rounds, []), ["code/wd.ts"], "per-round failures collected");
   assert.deepEqual(collectFailureFiles(rounds, [{ file: "code/other.ts" }]), ["code/wd.ts", "code/other.ts"], "state failures unioned in");
+});
+
+test("AC5 — collectFailureFiles slices to the CURRENT red window, not all history (gap-streaming-red-cascade-amplifies-failures-array: 239 → ~12 negative control)", () => {
+  // The pre-fix defect: the Set only grew across ALL red rounds — a task touching ANY historical
+  // failing file was blocked ("touched any history", not "touches the current red cause"), tightening
+  // monotonically until the pool locked. windowSize = consecutiveRed slices to the current window.
+  const rounds = [
+    // 200 historical red rounds with an old failure file
+    ...Array.from({ length: 200 }, (_, i) => ({ round: 100 + i, state: "red", reason: "failed", failures: [{ file: "code/old.ts" }] })),
+    // the current 3-round red window with the CURRENT failure file
+    { round: 300, state: "red", reason: "failed", failures: [{ file: "code/current.ts" }] },
+    { round: 301, state: "red", reason: "failed", failures: [{ file: "code/current.ts" }] },
+    { round: 302, state: "red", reason: "failed", failures: [{ file: "code/current.ts" }] },
+  ];
+  // no windowSize ⇒ all history (the pre-fix behavior)
+  assert.deepEqual(collectFailureFiles(rounds, []), ["code/old.ts", "code/current.ts"], "no window ⇒ all history");
+  // windowSize = 3 (the current consecutive-red count) ⇒ only the current window's file
+  assert.deepEqual(collectFailureFiles(rounds, [], 3), ["code/current.ts"], "window-sliced ⇒ current red cause only (the 239→~12 negative control)");
+  assert.deepEqual(collectFailureFiles(rounds, [], 1), ["code/current.ts"], "a 1-round window still resolves the latest file");
+});
+
+test("AC6 — countUnattributedFailures counts no-file entries that collectFailureFiles must drop (30% round-130 drop rate → explicit)", () => {
+  // Round 130 shape: 10 failures = 3 real (file) + 4 cascade + 3 no-file. The no-file entries are
+  // structurally un-attributable to a task's Touches — but they must be COUNTED, not silently dropped.
+  const rounds = [
+    { round: 400, state: "red", reason: "failed",
+      failures: [
+        { file: "plugin/test/checker-cost.test.mjs" },
+        { line: "✖ AC2 — ready-pool-check run 3x ... (no file)" },
+        { line: "✖ AC1 — while the suite runs ... (no file)" },
+      ],
+      unattributed: [{ line: "✖ AC1 — while the suite runs ... (no file, mirror)" }],
+    },
+    { round: 401, state: "red", reason: "failed", failures: [{ file: "plugin/test/checker-cost.test.mjs" }] },
+    { round: 402, state: "red", reason: "failed", failures: [{ file: "plugin/test/checker-cost.test.mjs" }] },
+  ];
+  // no-file in failures[] + unattributed[] segments of the CURRENT 3-round window:
+  // round 400 has 2 no-file in failures[] + 1 in unattributed[] = 3 (rounds 401/402 all have files).
+  assert.equal(countUnattributedFailures(rounds, [], [], 3), 3, "no-file entries counted (failures[] + unattributed[]), current window only");
+  // state-level failures[] + unattributed[] feed the count too. A derived cascade entry (which HAS a
+  // file) is NOT a no-file entry and is NOT counted here — it is listed in the state's `derived` field
+  // instead (AC1) and excluded from failureFiles by construction.
+  assert.equal(countUnattributedFailures(rounds, [{ line: "state no-file" }], [{ line: "state unattributed" }], 3),
+    5, "state failures + unattributed no-file entries counted (3 round + 2 state)");
+  // no windowSize ⇒ all rounds (backward-compatible behavior).
+  assert.equal(countUnattributedFailures(rounds, [], [], undefined), 3);
 });
 
 test("computeSuiteBlocking: red window + Touches hit ⇒ task flagged; negative controls (AC2/AC4)", () => {

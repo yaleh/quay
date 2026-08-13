@@ -49,6 +49,8 @@ import {
   isGitWorktree,
   readStateRunId,
   writeStateGuarded,
+  segmentFailures,
+  isStateAssertingTestFile,
   buildSystemdRunArgv,
   DEFAULT_SYSTEMD_RUN_LIMITS,
   parseSystemdRunLimits,
@@ -85,6 +87,14 @@ function statePath(root) {
 function readState(root) {
   const p = statePath(root);
   return fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, "utf8")) : null;
+}
+
+/** gap-streaming-red-cascade-amplifies-failures-array AC1/AC2 — the FULL failure payload of a red
+ *  state: `failures[]` (main set) + `unattributed[]` (no-file real failures, segmented OUT of
+ *  failures[]). A red verdict carries a non-empty payload in at least one of the two — the
+ *  gap-suite-red-verdict-carries-empty-failures-payload invariant holds over the SUM. */
+function redPayload(s) {
+  return (s && (s.failures || [])).concat(s && s.unattributed ? s.unattributed : []);
 }
 
 /** Read the LAST verification-round.jsonl record (null when the ledger is absent/empty). */
@@ -1116,18 +1126,24 @@ test("AC6 — this task cross-annotates the shared stop-dispatch family (gap-red
   );
 });
 
-test("AC1 — while the suite runs, state=running with finishedAt/durationMs null", async () => {
+test("AC1 — while the suite runs, state=running (or early-red) with finishedAt/durationMs null", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-root-"));
   const { f, dir } = fakeSuite('echo "started"\nsleep 2\necho "# fail 0"\nexit 0');
   try {
     const child = runRunner({ root, command: `bash ${f}` });
-    const running = await poll(() => {
+    // gap-streaming-red-cascade-amplifies-failures-array AC1 — the assertion is "the round is IN
+    // FLIGHT" (state ∈ {running, red}, finishedAt null), NOT "the round is still green" (state ===
+    // running). When the runner EARLY-REDS (AC2 — a load-sensitive failure flips the shared state red
+    // mid-run), a `state === "running"`-only assertion reads red and fails — the round-130 cascade
+    // that amplified failures[] 3×. Both running and red are non-terminal in-flight states with
+    // finishedAt null; the round's actual verdict is pinned by the terminal write below.
+    const inFlight = await poll(() => {
       const s = readState(root);
-      return s && s.state === "running" ? s : null;
-    }, { timeoutMs: 1500 });
-    assert.equal(running.runner, "outer");
-    assert.equal(running.finishedAt, null, "finishedAt null while running");
-    assert.equal(running.durationMs, null, "durationMs null while running");
+      return s && (s.state === "running" || s.state === "red") ? s : null;
+    }, { timeoutMs: 5000 });
+    assert.equal(inFlight.runner, "outer");
+    assert.equal(inFlight.finishedAt, null, "finishedAt null while the round is in flight");
+    assert.equal(inFlight.durationMs, null, "durationMs null while the round is in flight");
     const { code } = await waitExit(child);
     assert.equal(code, 0);
     assert.equal(readState(root).state, "green");
@@ -1561,8 +1577,8 @@ test("AC5 — a real test failure dominates a static-check marker: reason stays 
     const s = readState(root);
     assert.equal(s.state, "red");
     assert.equal(s.reason, "failed", "a real test failure is reason=failed, never downgraded to static-check (AC5)");
-    assert.ok(s.failures && s.failures.length >= 1, "failures[] carries failures");
-    assert.equal(s.failures[0].staticCheck, undefined, "failures[] carries the REAL test failure (not a static-check entry)");
+    assert.ok(redPayload(s).length >= 1, "the red payload carries failures");
+    assert.equal(redPayload(s)[0].staticCheck, undefined, "the payload carries the REAL test failure (not a static-check entry)");
     assert.ok(s.staticCheck, "the staticCheck field is still recorded alongside (both facts present)");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -1703,11 +1719,13 @@ test("AC5 — a generic non-zero exit with NO failure/abort marker stays reason=
     assert.equal(s.state, "red");
     assert.equal(s.reason, "failed", "an unmatched non-zero exit stays fail-closed failed");
     // gap-suite-red-verdict-carries-empty-failures-payload AC1 — a red verdict must NEVER carry an
-    // EMPTY failures payload: the fail-closed catch-all used to write failures=[] (the SUITE-RED
+    // EMPTY failure payload: the fail-closed catch-all used to write failures=[] (the SUITE-RED
     // event's dispatch rule has no input). Now the runner synthesizes one best-effort entry from the
-    // last stream line so the red-window dispatch rule has a failure to classify.
-    assert.ok(s.failures && s.failures.length >= 1, `a red verdict carries a non-empty failures[]; got ${JSON.stringify(s.failures)}`);
-    assert.ok(s.failures[0].line, "the synthesized failure carries a line (the last stream output)");
+    // last stream line so the red-window dispatch rule has a failure to classify. The synthesized
+    // entry carries no file (the line `something went wrong` has no path), so it rides
+    // `unattributed[]` — the payload lives in failures[] OR unattributed[] (AC1/AC2 segmentation).
+    assert.ok(redPayload(s).length >= 1, `a red verdict carries a non-empty failure payload (failures[] or unattributed[]); got ${JSON.stringify(s)}`);
+    assert.ok(redPayload(s)[0].line, "the synthesized failure carries a line (the last stream output)");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(dir, { recursive: true, force: true });
@@ -1817,7 +1835,7 @@ test("AC2/AC3 e2e — an `ℹ fail 1` (info-glyph summary) suite flips red with 
     const s = readState(root);
     assert.equal(s.state, "red", "ℹ fail 1 flips state to red (AC2 — the reporter glyph form is recognized)");
     assert.equal(s.reason, "failed", "ℹ fail 1 is a REAL test failure (stop-dispatch signal)");
-    assert.ok(s.failures && s.failures.length >= 1, `failures[] must be non-empty (measure failures_nonempty_on_info_red >= 1); got ${JSON.stringify(s.failures)}`);
+    assert.ok(redPayload(s).length >= 1, `the red payload must be non-empty (measure failures_nonempty_on_info_red >= 1); got ${JSON.stringify(s)}`);
     // redAt is carried on the verification-round record (the early-RED detection-latency axis) —
     // the round-149 record had redAt=null; a recognized failure line must timestamp it.
     const roundFile = path.join(root, ".quay", "verification-round.jsonl");
@@ -1847,17 +1865,17 @@ test("AC2 — a RED run's verification-round record carries the failures[] array
     assert.equal(code, 1, "runner exits 1 on red");
     const s = readState(root);
     assert.equal(s.state, "red", "not ok 1 flips state to red");
-    assert.ok(s.failures && s.failures.length >= 1, `suite-state carries failures[]; got ${JSON.stringify(s.failures)}`);
+    assert.ok(redPayload(s).length >= 1, `suite-state carries a failure payload; got ${JSON.stringify(s)}`);
     const roundFile = path.join(root, ".quay", "verification-round.jsonl");
     assert.ok(fs.existsSync(roundFile), "verification-round.jsonl written");
     const rounds = fs.readFileSync(roundFile, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
     assert.ok(rounds.length >= 1, "a verification-round record is appended");
     const rec = rounds[rounds.length - 1];
     assert.equal(rec.state, "red", "round record state is red");
-    assert.ok("failures" in rec, "red round record carries the failures field (Contract: red_round_failures_recorded = 1)");
-    assert.ok(Array.isArray(rec.failures), "red round record failures is an array");
-    assert.equal(rec.failures.length, s.failures.length, "round-record failures mirror the suite-state failures (same array)");
-    assert.equal(rec.failures[0].line, s.failures[0].line, "round-record failure line equals the state failure line");
+    assert.ok("failures" in rec || "unattributed" in rec, "red round record carries the failures field (Contract: red_round_failures_recorded = 1)");
+    assert.ok(Array.isArray(rec.failures || rec.unattributed), "red round record failures is an array");
+    assert.equal(redPayload(rec).length, redPayload(s).length, "round-record failures mirror the suite-state failures (same array)");
+    assert.equal(redPayload(rec)[0].line, redPayload(s)[0].line, "round-record failure line equals the state failure line");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(dir, { recursive: true, force: true });
@@ -1923,7 +1941,7 @@ test("AC1/AC3 — multi-phase pass/fail/tests = the SUM of every block; a red ro
     assert.equal(rec.cancelled, 0, "cancelled = 0");
     assert.equal(rec.tests, 10, "tests = pass+fail+cancelled = 10, not the last phase's 5");
     assert.equal(rec.state, "red");
-    assert.ok(Array.isArray(rec.failures) && rec.failures.length >= 1, "red round record carries the failures[] array");
+    assert.ok(redPayload(rec).length >= 1, "red round record carries the failure payload (failures[] or unattributed[])");
     assert.ok(rec.fail >= 1 || rec.cancelled >= 1, `AC3 — a failure stream ⇒ fail ≥ 1 or cancelled ≥ 1 (got fail=${rec.fail}, cancelled=${rec.cancelled})`);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -2028,8 +2046,8 @@ test("AC2/AC3 e2e — a `✖ <testname> (Nms)` spec-reporter failure line flips 
     const s = readState(root);
     assert.equal(s.state, "red", "✖ <name> (Nms) flips state to red (AC2)");
     assert.equal(s.reason, "failed");
-    assert.ok(s.failures && s.failures.length >= 1, `failures[] carries the spec-reporter failure (AC3); got ${JSON.stringify(s.failures)}`);
-    assert.match(s.failures[0].line, /✖ AC1\/AC2 — the real bundle inventory/, "the failure line records the failing test name");
+    assert.ok(redPayload(s).length >= 1, `the red payload carries the spec-reporter failure (AC3); got ${JSON.stringify(s)}`);
+    assert.match(redPayload(s)[0].line, /✖ AC1\/AC2 — the real bundle inventory/, "the failure line records the failing test name");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(dir, { recursive: true, force: true });
@@ -2082,7 +2100,7 @@ test("AC2 e2e — a RED suite whose test.sh hangs is killed after the red-grace 
     const s = readState(root);
     assert.equal(s.state, "red", "the red conclusion stands");
     assert.equal(s.reason, "failed", `a REAL failure (not ok) is never downgraded to timeout/hung: got ${s.reason}`);
-    assert.ok(s.failures && s.failures.length >= 1, `the not-ok failure must be recorded; got ${JSON.stringify(s.failures)}`);
+    assert.ok(redPayload(s).length >= 1, `the not-ok failure must be recorded; got ${JSON.stringify(s)}`);
     assert.ok(code !== 0, "runner exits non-zero on the red");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -2106,7 +2124,7 @@ test("AC2 e2e — a RED suite STILL PRODUCING OUTPUT is NOT killed on red-grace;
     const s = readState(root);
     assert.equal(s.state, "red", "the red conclusion stands");
     assert.equal(s.reason, "failed", `a real failure is never downgraded to timeout/hung: got ${s.reason}`);
-    assert.ok(s.failures && s.failures.length >= 1, `the not-ok failure must be recorded; got ${JSON.stringify(s.failures)}`);
+    assert.ok(redPayload(s).length >= 1, `the not-ok failure must be recorded; got ${JSON.stringify(s)}`);
     // The suite ran its full body (all 30 'still running' lines) and exited itself — the runner did
     // NOT kill it at the red-grace seam (a kill would cut the output short).
     assert.ok(code !== 0, "runner exits non-zero on the red");
@@ -2245,8 +2263,8 @@ test("AC2 e2e — MULTIPLE failure lines each push into failures[] (manager 2026
     const s = readState(root);
     assert.equal(s.state, "red");
     assert.equal(s.reason, "failed");
-    assert.ok(s.failures.length >= 3, `all 3 failure lines must be recorded; got ${JSON.stringify(s.failures)}`);
-    const names = s.failures.map((x) => x.line).join(" ");
+    assert.ok(redPayload(s).length >= 3, `all 3 failure lines must be recorded; got ${JSON.stringify(s)}`);
+    const names = redPayload(s).map((x) => x.line).join(" ");
     assert.match(names, /alpha/, "first failure recorded");
     assert.match(names, /beta/, "second failure recorded (was dropped by the !redDetected cap)");
     assert.match(names, /gamma/, "third failure recorded");
@@ -2417,8 +2435,8 @@ test("AC5 e2e — a `tmux-leak-scan: FAIL` residual line (candidate C) flips red
     const s = readState(root);
     assert.equal(s.state, "red", "tmux-leak-scan FAIL flips state to red (candidate C — leak is a real residual)");
     assert.equal(s.reason, "failed");
-    assert.ok(s.failures && s.failures.length >= 1, `failures[] carries the leak-scan residual (AC5); got ${JSON.stringify(s.failures)}`);
-    assert.match(s.failures[0].line, /tmux-leak-scan: FAIL/, "the leak-scan FAIL line is the recorded failure");
+    assert.ok(redPayload(s).length >= 1, `the red payload carries the leak-scan residual (AC5); got ${JSON.stringify(s)}`);
+    assert.match(redPayload(s)[0].line, /tmux-leak-scan: FAIL/, "the leak-scan FAIL line is the recorded failure");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(dir, { recursive: true, force: true });
@@ -3548,6 +3566,73 @@ test("load-fields — a NON-systemd round (no scope unit) OMITS all four load fi
     assert.equal(rec.mem_peak_mb, undefined, "no mem_peak_mb on a non-systemd round");
     assert.equal(rec.swap_peak_mb, undefined, "no swap_peak_mb on a non-systemd round");
     assert.equal(rec.load_read_error, undefined, "no load_read_error on a non-systemd round");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── gap-streaming-red-cascade-amplifies-failures-array: AC1/AC2 segmentation (derived + unattributed) ──
+// The round-130 defect: a load-sensitive flake (checker-cost) early-reds the shared state; the suite's
+// OWN state-asserting tests (full-suite-runner / laydown-set-check) then read red and fail — a CASCADE
+// that amplified the round's failures[] 3× (3 real + 4 cascade + 3 no-file = 10). AC1 marks cascade
+// entries `derived` and segments them OUT of failures[]; AC2 segments no-file entries into
+// `unattributed`. These pin the segmentation.
+
+test("AC1 unit — segmentFailures: cascade entries (state-asserting test files) → derived, NOT failures[]", () => {
+  const seg = segmentFailures([
+    { line: "✖ AC1 — while the suite runs, state=running with finishedAt/durationMs null (1564ms)", file: "plugin/test/full-suite-runner.test.mjs" },
+    { line: "✖ AC1 — while the suite runs, state=running with finishedAt/durationMs null (1564ms)", file: "plugin/test/laydown-set-check.test.mjs" },
+    { line: "__PERFILE__ .../plugin/test/checker-cost.test.mjs passed=false", file: "plugin/test/checker-cost.test.mjs", in_family: true, kind: "child-spawn" },
+  ]);
+  assert.equal(isStateAssertingTestFile("plugin/test/full-suite-runner.test.mjs"), true, "full-suite-runner is a state-asserting test file");
+  assert.equal(isStateAssertingTestFile("plugin/test/checker-cost.test.mjs"), false, "checker-cost is NOT state-asserting");
+  assert.equal(seg.derived.length, 2, "both cascade entries land in derived");
+  assert.ok(seg.derived.every((f) => f.derived === "cascade"), "derived entries are marked derived: 'cascade'");
+  assert.equal(seg.failures.length, 1, "failures[] main set keeps ONLY the real file-attributable failure");
+  assert.equal(seg.failures[0].file, "plugin/test/checker-cost.test.mjs", "the real failure keeps its file in the main set");
+});
+
+test("AC1/AC2 unit — segmentFailures: no-file entries → unattributed, NOT failures[]", () => {
+  const seg = segmentFailures([
+    { line: "✖ AC2 — ready-pool-check run 3x (35.8→91.2→157.0) yields a readable cost+load sequence (11779ms)" },
+    { line: "not ok 1 - boom" },
+    { line: "__PERFILE__ .../plugin/test/tmux-leak-scan.test.mjs passed=false", file: "plugin/test/tmux-leak-scan.test.mjs" },
+  ]);
+  assert.equal(seg.unattributed.length, 2, "both no-file entries land in unattributed");
+  assert.equal(seg.failures.length, 1, "failures[] main set keeps the file-attributable entry");
+  assert.equal(seg.failures[0].file, "plugin/test/tmux-leak-scan.test.mjs");
+  assert.equal(seg.derived.length, 0, "no cascade entries here");
+});
+
+test("AC1/AC2 e2e — a fake suite that fails ONLY a state-asserting test file (plus a real no-file failure) writes derived + unattributed, and failures[] carries neither", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-seg-"));
+  const { f, dir } = fakeSuite(
+    'echo "not ok 1 - boom"\n' +
+      'echo "  location: plugin/test/full-suite-runner.test.mjs:1119:1"\n' +
+      'echo "✖ AC1 — while the suite runs, state=running with finishedAt/durationMs null (1564.34609ms)"\n' +
+      "exit 1",
+  );
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    assert.equal(code, 1, "runner exits 1 on red");
+    const s = readState(root);
+    assert.equal(s.state, "red");
+    // The `not ok 1 - boom` line: the detail lookahead resolves `location: plugin/test/full-suite-
+    // runner.test.mjs` → a STATE-ASSERTING file ⇒ cascade ⇒ derived. The `✖ AC1 — ...` line carries
+    // no file ⇒ unattributed. failures[] main set is EMPTY (both populations segmented out).
+    assert.ok(Array.isArray(s.derived) && s.derived.length >= 1, `derived carries the cascade entry; got ${JSON.stringify(s.derived)}`);
+    assert.ok(s.derived.some((f) => f.file === "plugin/test/full-suite-runner.test.mjs"), "the derived entry names the state-asserting file");
+    assert.ok(Array.isArray(s.unattributed) && s.unattributed.length >= 1, `unattributed carries the no-file entry; got ${JSON.stringify(s.unattributed)}`);
+    assert.ok(s.unattributed.some((f) => /AC1 — while the suite runs/.test(f.line)), "the unattributed entry is the no-file cascade line");
+    // Both populations are OUT of the failures[] main set (the round-130 "三数一致" property).
+    assert.ok(!(s.failures || []).some((f) => f.file === "plugin/test/full-suite-runner.test.mjs"), "failures[] main set excludes the cascade entry");
+    // The round record mirrors the SAME segmentation (byte-identical to the state write).
+    const rec = lastRoundRecord(root);
+    assert.equal(redPayload(rec).length, redPayload(s).length, "round-record payload mirrors the suite-state payload");
+    assert.equal((rec.derived || []).length, (s.derived || []).length, "round-record derived mirrors the suite-state derived");
+    assert.equal((rec.unattributed || []).length, (s.unattributed || []).length, "round-record unattributed mirrors the suite-state unattributed");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(dir, { recursive: true, force: true });

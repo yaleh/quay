@@ -189,6 +189,18 @@ export interface SuiteFailure {
    * test failures.
    */
   staticCheck?: boolean;
+  /**
+   * gap-streaming-red-cascade-amplifies-failures-array AC1 — "cascade" when this entry is a failure
+   * of a KNOWN suite-state-asserting test file (full-suite-runner.test.mjs / laydown-set-check.test.mjs —
+   * tests that read the shared `.quay/full-suite-state.json` and assert `state=running with finishedAt
+   * null while the suite runs`). When the runner EARLY-REDS (AC2 — the shared state flips to red the
+   * moment a load-sensitive test fails), these tests — running LATER in the same suite — read the red
+   * state and fail: a CASCADE failure, NOT an independent code failure. Marked + segmented OUT of
+   * failures[] (the triage / stop-dispatch / red-rate input) into the `derived` array so an early-red
+   * can never amplify failures[] with its own consumers' assertions (round 130: ×3 full-suite-runner +
+   * ×1 laydown-set-check amplified the checker-cost flake's failures[] 3×). Absent on real failures.
+   */
+  derived?: "cascade";
 }
 
 /**
@@ -307,6 +319,19 @@ export interface SuiteState {
    * unrelated specific test).
    */
   failures?: SuiteFailure[];
+  /**
+   * gap-streaming-red-cascade-amplifies-failures-array AC1/AC2 — the SEGMENTED-OUT populations of a
+   * red round, kept OUT of `failures[]` (the triage / stop-dispatch / red-rate input) so they can
+   * never be amplified or mis-attributed:
+   *   `derived`      — CASCADE failures (KNOWN suite-state-asserting test files that fail reading the
+   *                    early-red shared state — marked `derived: "cascade"`; round-130 ×3+×1 shape).
+   *   `unattributed` — failures with NO `file` (round-130 "×3 (no file)" — the population `--partition`
+   *                    could only throw into not-in-family). Present only when non-empty (绿轮可无).
+   * `failures[]` main set = real, file-attributable, non-cascade failures only — the round-130 three
+   * counts (verification-round fail / outer early-read / state terminal) finally agree on it.
+   */
+  derived?: SuiteFailure[];
+  unattributed?: SuiteFailure[];
   /**
    * Present on red+static-check (gap-full-suite-state-red-no-failure-detail-static-check-invisible
    * AC2): machine-readable violation counts when the red was caused by a run_static_checks checker
@@ -569,6 +594,74 @@ export function buildStaticCheckFailures(
     ...details.map((d) => ({ line: d.line, file: d.file, staticCheck: true })),
     ...failClosed.map((c) => ({ line: c.line, staticCheck: true })),
   ];
+}
+
+// gap-streaming-red-cascade-amplifies-failures-array AC1 — the KNOWN suite-state-asserting TEST FILES:
+// tests that read the shared `.quay/full-suite-state.json` and assert `state=running with finishedAt
+// null while the suite runs` (full-suite-runner.test.mjs AC1 / laydown-set-check.test.mjs AC1). When
+// the runner EARLY-REDS (AC2 — the shared state flips to red the moment a load-sensitive test fails),
+// these tests — running LATER in the same suite — read the red state and fail: a CASCADE failure, NOT
+// an independent code failure (round 130: ×3 full-suite-runner + ×1 laydown-set-check — the
+// checker-cost flake's early-red amplified the round's failures[] 3×). This is the assertion-surface
+// manifest: it must be extended whenever a NEW test file starts reading the shared suite-state and
+// asserting on its in-flight shape.
+const STATE_ASSERTING_TEST_FILES = new Set([
+  "plugin/test/full-suite-runner.test.mjs",
+  "plugin/test/laydown-set-check.test.mjs",
+]);
+
+/** True when a failure's file is a KNOWN suite-state-asserting test file (a cascade candidate). */
+export function isStateAssertingTestFile(file: string | undefined): boolean {
+  return typeof file === "string" && STATE_ASSERTING_TEST_FILES.has(file);
+}
+
+/**
+ * gap-streaming-red-cascade-amplifies-failures-array AC1/AC2 — SEGMENT a round's failure entries so
+ * `failures[]` (the triage / stop-dispatch / red-rate input) never carries the two populations that
+ * distort it:
+ *   - CASCADE entries (`derived: "cascade"`) — failures of KNOWN suite-state-asserting test files
+ *     that fail reading the early-red shared state, NOT because the code under test broke. They get
+ *     their own `derived` array (round 130: ×3 full-suite-runner + ×1 laydown-set-check).
+ *   - UNATTRIBUTED entries (no `file`) — the round-130 "×3 (no file)" population that `--partition`
+ *     could only throw into not-in-family. They get their own `unattributed` array (AC2/AC6 — listed,
+ *     never silently dropped).
+ * `failures[]` main set = real, file-attributable, non-cascade failures only. The round-130 three
+ * counts (verification-round fail / outer early-read / state terminal) finally agree on this set.
+ */
+export function segmentFailures(failures: SuiteFailure[]): {
+  failures: SuiteFailure[];
+  derived: SuiteFailure[];
+  unattributed: SuiteFailure[];
+} {
+  const main: SuiteFailure[] = [];
+  const derived: SuiteFailure[] = [];
+  const unattributed: SuiteFailure[] = [];
+  for (const f of failures ?? []) {
+    if (isStateAssertingTestFile(f.file)) derived.push({ ...f, derived: "cascade" });
+    else if (!f.file) unattributed.push(f);
+    else main.push(f);
+  }
+  return { failures: main, derived, unattributed };
+}
+
+/**
+ * gap-streaming-red-cascade-amplifies-failures-array AC1/AC2 — the segmented failure fields for a
+ * state/round write. `failures` is OMITTED when the main set is empty (the gap-suite-red-verdict-
+ * carries-empty-failures-payload invariant: a red verdict never writes `failures: []` — the derived /
+ * unattributed fields carry the payload instead); `derived` / `unattributed` are present only when
+ * non-empty.
+ */
+export function segmentedFailureFields(failures: SuiteFailure[]): {
+  failures?: SuiteFailure[];
+  derived?: SuiteFailure[];
+  unattributed?: SuiteFailure[];
+} {
+  const seg = segmentFailures(failures);
+  return {
+    ...(seg.failures.length ? { failures: seg.failures } : {}),
+    ...(seg.derived.length ? { derived: seg.derived } : {}),
+    ...(seg.unattributed.length ? { unattributed: seg.unattributed } : {}),
+  };
 }
 
 function parseArg(argv: string[], name: string): string | undefined {
@@ -893,6 +986,16 @@ export interface SuiteRoundRecord {
    * tolerate its absence.
    */
   failures?: SuiteFailure[];
+  /**
+   * gap-streaming-red-cascade-amplifies-failures-array AC1/AC2 — the round record carries the SAME
+   * segmented populations the suite-state write carries (`derived` = cascade entries, `unattributed` =
+   * no-file entries), so the historical red-round sequence is queryable for "was this round's red
+   * cascade-amplified / unattributable" without re-deriving it — and collectFailureFiles never sees
+   * them (they are not task-Touches-attributable). Present only when non-empty (绿轮可无); a reader
+   * must tolerate their absence.
+   */
+  derived?: SuiteFailure[];
+  unattributed?: SuiteFailure[];
   /**
    * gap-verification-round-missing-phase-ms-breaks-cost-attribution AC2 — per-phase cost readings
    * from test.sh's `__OVERHEAD__ <phase>_ms=N` fixed-overhead instrumentation (emitted on the
@@ -2203,7 +2306,7 @@ export async function run(argv: string[]): Promise<number> {
           const idx = redFailures.indexOf(pendingFailure);
           if (idx !== -1) redFailures[idx] = enriched;
           // file found — re-write state so the SUITE-RED event carries it (idempotent).
-          writeSuiteState({ state: "red", reason: "failed", ...base, finishedAt: null, durationMs: null, failures: redFailures, ...readRedMutation() });
+          writeSuiteState({ state: "red", reason: "failed", ...base, finishedAt: null, durationMs: null, ...segmentedFailureFields(redFailures), ...readRedMutation() });
         }
       }
       if (detailRemaining <= 0) pendingFailure = null;
@@ -2280,7 +2383,7 @@ export async function run(argv: string[]): Promise<number> {
         ...base,
         finishedAt: null,
         durationMs: null,
-        failures: redFailures,
+        ...segmentedFailureFields(redFailures),
         // gap-concurrent-write-mutable-tree-false-positive-red — provisional FP-candidate annotation
         // (memoized): if the tree was ALREADY mutated when the failure flipped red, the SUITE-RED
         // event carries concurrentWrite=true (the terminal write later has the definitive comparison).
@@ -2525,6 +2628,17 @@ export async function run(argv: string[]): Promise<number> {
       }),
     ];
   }
+  // gap-streaming-red-cascade-amplifies-failures-array AC1/AC2 — the failure fields for the terminal
+  // write. Segmented ONLY on a TEST-failure red (redDetected): cascade entries (state-asserting test
+  // files) go to `derived`, no-file entries to `unattributed` — the round-130 cascade amplification
+  // (3×) is out of failures[] main. A STATIC-CHECK red (staticCheckDetected && !redDetected) keeps
+  // ALL its entries in failures[] UNCHANGED: the fail-closed checker entries (round-84 真因) carry NO
+  // file but are routed by their `staticCheck: true` marker to the shared gate — segmenting them out
+  // would silently drop the shared-gate dispatch input (gap-static-check-red-failures-capture-only-
+  // task-contract-shape's failures[] Contract).
+  const failureFields = staticCheckDetected && !redDetected
+    ? { failures: finalFailures }
+    : segmentedFailureFields(finalFailures);
   const finalState: SuiteState = green
     ? {
         state: "green",
@@ -2547,8 +2661,12 @@ export async function run(argv: string[]): Promise<number> {
         ...base,
         finishedAt,
         durationMs,
-        // carry the failure location(s) — the SUITE-RED event's failureLocation source
-        ...(spawnError === null ? { failures: finalFailures } : {}),
+        // carry the failure location(s) — the SUITE-RED event's failureLocation source. Segmented
+        // (gap-streaming-red-cascade-amplifies-failures-array AC1/AC2): failures[] main set carries
+        // only real file-attributable non-cascade failures; cascade + no-file entries ride the
+        // `derived` / `unattributed` fields instead. A static-check red keeps ALL entries in
+        // failures[] (the fail-closed checkers are routed by their staticCheck marker, not a file).
+        ...(spawnError === null ? failureFields : {}),
         // gap-concurrent-write-mutable-tree-false-positive-red — carry the tree-mutation annotation
         // on red: start HEAD ≠ terminal HEAD ⇒ this red is a CONCURRENT-WRITE FALSE-POSITIVE
         // CANDIDATE (round-53 class) — a signal, NOT a blanket round-discard (the failures are still
@@ -2714,9 +2832,11 @@ export async function run(argv: string[]): Promise<number> {
     // gap-suite-round-record-missing-failures-field AC2 — a RED round carries the SAME SuiteFailure
     // array the suite-state write carries (finalFailures — the redFailures/staticCheckFailures the
     // state already recorded), so verification-round.jsonl becomes a multi-round-queryable sequence
-    // for "failed file → task Touches" attribution. Green rounds omit it (绿轮可无) — all other
+    // for "failed file → task Touches" attribution. Segmented (gap-streaming-red-cascade-amplifies-
+    // failures-array AC1/AC2): the main `failures` set + the `derived`/`unattributed` populations —
+    // byte-identical to the suite-state write. Green rounds omit them (绿轮可无) — all other
     // round-record fields stay byte-identical for non-red rounds.
-    ...(finalState.state === "red" ? { failures: finalFailures } : {}),
+    ...(finalState.state === "red" ? failureFields : {}),
     // gap-verification-round-missing-phase-ms-breaks-cost-attribution AC2/AC3 — carry the per-phase
     // cost readings (test.sh's `__OVERHEAD__ <phase>_ms` lines, already tee'd to the log). Only a
     // phase that RAN is present: a kill-on-red-truncated round is missing main_phase_ms (the kill
@@ -2906,10 +3026,17 @@ async function failFastCheck(): Promise<number> {
     const code = await run(["--root", tmp, "--command", fakeCommand, "--fail-fast-check"]);
     const { status, events, stopSignal } = runOnce(tmp);
     const redEv = events.find((e) => e.event === "SUITE-RED") ?? null;
-    const failures = redEv?.state?.failures ?? redEv?.failureLocation ?? [];
+    const state = redEv?.state;
+    // gap-streaming-red-cascade-amplifies-failures-array AC1/AC2 — the failure location may ride
+    // `state.failures` (real file-attributable entries) OR `state.unattributed` (a no-file real
+    // failure — the `not ok 1 - fail-fast-check` control line carries no file). Both are the
+    // SUITE-RED event's failureLocation for the dispatch decision; count both.
+    const failures = state?.failures ?? redEv?.failureLocation ?? [];
+    const unattributed = state?.unattributed ?? [];
+    const payloadCount = failures.length + unattributed.length;
     console.log(
       `fail-fast-check: suite exit=${code} state=${status} reason=${redEv?.state?.reason ?? "?"} stopSignal=${stopSignal} ` +
-        `failures=${failures.length} suiteRedEvent=${redEv ? `recorded early=${redEv.early}` : "MISSING"} events=${events.length}`,
+        `failures=${failures.length} unattributed=${unattributed.length} suiteRedEvent=${redEv ? `recorded early=${redEv.early}` : "MISSING"} events=${events.length}`,
     );
     if (code !== 1) {
       console.error("fail-fast-check FAIL: expected the fake suite to exit 1 (red)");
@@ -2931,9 +3058,9 @@ async function failFastCheck(): Promise<number> {
       console.error(`fail-fast-check FAIL: expected reason=failed on the red state, got ${redEv.state?.reason}`);
       return 1;
     }
-    if (failures.length === 0) {
+    if (payloadCount === 0) {
       console.error(
-        "fail-fast-check FAIL: expected the SUITE-RED event to carry the failure location (state.failures / failureLocation) — the red-window dispatch decision needs it",
+        "fail-fast-check FAIL: expected the SUITE-RED event to carry the failure location (state.failures / state.unattributed / failureLocation) — the red-window dispatch decision needs it",
       );
       return 1;
     }

@@ -1009,15 +1009,35 @@ export function readVerificationRounds(root) {
   return readJsonLines(path.join(root, ".quay", "verification-round.jsonl"));
 }
 
+/** Parse <root>/.quay/full-suite-state.json once (the shared snapshot read, freshness never asserted
+ *  here — the caller (computeSuiteBlocking) gates the use on its consecutive-red window, so a stale
+ *  snapshot is discarded before it can drive a verdict). Absent/unparseable ⇒ null. */
+function readStateOnce(root) {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(root, ".quay", "full-suite-state.json"), "utf8"));
+  } catch {
+    return null;
+  }
+}
+
 /** Read <root>/.quay/full-suite-state.json's failures[] — the LATEST run's failure detail
  *  ({file,line}[]). Absent/unparseable/no failures ⇒ []. */
 export function readStateFailures(root) {
-  try {
-    const st = JSON.parse(fs.readFileSync(path.join(root, ".quay", "full-suite-state.json"), "utf8"));
-    return Array.isArray(st && st.failures) ? st.failures : [];
-  } catch {
-    return [];
-  }
+  const st = readStateOnce(root);
+  return Array.isArray(st && st.failures) ? st.failures : [];
+}
+
+/** gap-streaming-red-cascade-amplifies-failures-array AC6 — read the state file's SEGMENTED-OUT
+ *  failure populations (`unattributed[]` no-file entries + `derived[]` cascade entries). The latest
+ *  run's full-suite-state.json carries them (when non-empty); absent/unparseable ⇒ []. Kept OUT of
+ *  readStateFailures (the failureFiles source) so the two populations never become task-Touches-
+ *  attributable — they are exactly the ones collectFailureFiles structurally drops (AC6 counts them). */
+export function readStateFailureSegments(root) {
+  const st = readStateOnce(root);
+  return {
+    unattributed: Array.isArray(st && st.unattributed) ? st.unattributed : [],
+    derived: Array.isArray(st && st.derived) ? st.derived : [],
+  };
 }
 
 /** Classify one verification-round row as RED (suite not green). Canonical rows carry `state`
@@ -1060,16 +1080,45 @@ export function isExperimentRound(r, defaultLane) {
 /** Collect the failure-file set implicated by a set of red rounds + the state file's failures.
  *  A round may carry its own `failures` array (fixture / the round-record writer — gap-suite-round-
  *  record-missing-failures-field AC2 now writes failures[] into red round records); the state file's
- *  failures[] is the production source for the LATEST red run. Files are repo-relative paths. */
-export function collectFailureFiles(rounds, stateFailures) {
+ *  failures[] is the production source for the LATEST red run. Files are repo-relative paths.
+ *  gap-streaming-red-cascade-amplifies-failures-array AC5 — `windowSize` (the CURRENT red window's
+ *  consecutive-red count) SLICES the rounds to the last `windowSize` rows: before this, collectFailureFiles
+ *  accumulated ALL red rounds' files (a Set that only grows) — 239 historical files vs ~12 in the
+ *  current 3-round window — so `touches ∩ failure_files ⇒ stop-dispatch` blocked "touched any
+ *  historical failing file", not "touches the current red cause" (monotonic tightening toward a
+ *  locked pool, each step looking normal). Omit windowSize (or pass 0/null) for the pre-slice
+ *  all-history behavior (backward compat). A no-file entry is NOT silently dropped from the COUNT —
+ *  see countUnattributedFailures (AC6); it just cannot join the file set (nothing to attribute). */
+export function collectFailureFiles(rounds, stateFailures, windowSize) {
+  const windowRounds = windowSize != null && windowSize > 0 ? rounds.slice(-windowSize) : rounds;
   const out = new Set();
-  for (const r of rounds) {
+  for (const r of windowRounds) {
     if (Array.isArray(r && r.failures)) {
       for (const f of r.failures) if (f && f.file) out.add(String(f.file));
     }
   }
   for (const f of stateFailures || []) if (f && f.file) out.add(String(f.file));
   return [...out];
+}
+
+/** gap-streaming-red-cascade-amplifies-failures-array AC6 — count the NO-FILE failure entries in a
+ *  red window that collectFailureFiles must structurally drop (a no-file entry cannot attribute to a
+ *  task's Touches set). Before this task the drop was SILENT (round 130: 3 of 10 failures = 30% had
+ *  no file — invisible to every consumer). Reads the round records' `failures` + `unattributed`
+ *  segments and the state's `failures` + `unattributed` (derived cascade entries are NOT counted here:
+ *  they carry a file and are separately listed in the state's `derived` field — AC1). Same
+ *  `windowSize` slicing as collectFailureFiles (AC5). */
+export function countUnattributedFailures(rounds, stateFailures, stateUnattributed, windowSize) {
+  const windowRounds = windowSize != null && windowSize > 0 ? rounds.slice(-windowSize) : rounds;
+  let n = 0;
+  const bump = (f) => { if (!(f && f.file)) n++; };
+  for (const r of windowRounds) {
+    for (const f of (r && r.failures) || []) bump(f);
+    for (const f of (r && r.unattributed) || []) bump(f);
+  }
+  for (const f of stateFailures || []) bump(f);
+  for (const f of stateUnattributed || []) bump(f);
+  return n;
 }
 
 /** gap-suite-blocking-directory-glob-overbroad AC2 — is `glob` a DIRECTORY glob (a bare directory
@@ -1183,6 +1232,10 @@ export function exemptFromSuiteBlocking(task, id, failureHit) {
  *  @param {object} i
  *  @param {Array<object>} i.rounds         verification-round.jsonl rows
  *  @param {Array<object>} i.stateFailures  full-suite-state.json failures[]
+ *  @param {Array<object>} [i.stateUnattributed]  full-suite-state.json unattributed[] (no-file entries;
+ *                                          the derived[] cascade entries are NOT counted as
+ *                                          unattributed — they carry a file and are listed in the
+ *                                          state's `derived` field instead, AC1)
  *  @param {Map<string,object>} i.tasks     id → task ({body})
  *  @param {number} [i.minRedWindow]        consecutive red rounds required (default RED_WINDOW_MIN_DEFAULT)
  *  @param {(globs:string[])=>Set<string>} i.expand  declared-Touches expander (fs-backed in prod)
@@ -1192,7 +1245,8 @@ export function exemptFromSuiteBlocking(task, id, failureHit) {
  *                                          consecutive-red count (AC2 — gap-suite-blocking-experiment-
  *                                          rounds-count-toward-consecutive-red). Injectable for hermetic
  *                                          tests.
- *  @returns {{ ids:Set<string>, consecutiveRed:number, windowActive:boolean, failureFiles:string[] }}
+ *  @returns {{ ids:Set<string>, consecutiveRed:number, windowActive:boolean, failureFiles:string[],
+ *              unattributedCount:number }}
  *  A task is suite-blocking when the window is active AND one of its declared ## Touches expands to
  *  one of the window's failure files. Only dispatchable-status tasks (ready/todo) are candidates — a
  *  done task's work has already landed, so it is never re-prioritized. Negative control (AC4): no
@@ -1200,8 +1254,17 @@ export function exemptFromSuiteBlocking(task, id, failureHit) {
  *  family): a SUITE-FIX task (isSuiteFixTask — id/title/Proposal carries install/suite/fix/red/修/红)
  *  whose Touches hit a failing file is exactly the one dispatched to fix the red, so it is NOT added
  *  (blocking it is the self-lock). Reverse control (AC3): a non-suite-fix task touching a failing
- *  file carries no marker and stays in ids. */
-export function computeSuiteBlocking({ rounds, stateFailures, tasks, minRedWindow = RED_WINDOW_MIN_DEFAULT, expand, defaultLane = defaultLaneCount() }) {
+ *  file carries no marker and stays in ids.
+ *  gap-streaming-red-cascade-amplifies-failures-array AC5 — failureFiles is sliced to the CURRENT
+ *  red window (`consecutiveRed`), never all history (the 239→~12 negative control).
+ *  gap-streaming-red-cascade-amplifies-failures-array AC3 — the old fail-open branch
+ *  (`failureFiles.length === 0 ⇒ windowActive=true + ids=空`, "a possibly-open gate") is ELIMINATED:
+ *  an active red window with NOTHING attributable is a real state, not a mislabeled "possibly-open
+ *  gate". windowActive stays TRUE (slot-refill's cap narrowing reads it — the red window ALONE
+ *  narrows the cap per the 2026-08-13 human ruling), ids stays empty (nothing to attribute), and
+ *  `unattributedCount` reports the no-file/derived population that collectFailureFiles structurally
+ *  drops (AC6 — the drop is explicit, not silent). */
+export function computeSuiteBlocking({ rounds, stateFailures, stateUnattributed = [], tasks, minRedWindow = RED_WINDOW_MIN_DEFAULT, expand, defaultLane = defaultLaneCount() }) {
   // gap-suite-blocking-experiment-rounds-count-toward-consecutive-red AC2: a one-off CONTROLLED-
   // EXPERIMENT round (laneCount ≠ nproc-derived default) is an experiment finding, not a regression —
   // it must not push the consecutive-red window. Skip such rounds ENTIRELY (count AND failure
@@ -1211,12 +1274,13 @@ export function computeSuiteBlocking({ rounds, stateFailures, tasks, minRedWindo
   const realRounds = rounds.filter((r) => !isExperimentRound(r, defaultLane));
   const consecutiveRed = consecutiveRedRounds(realRounds);
   if (consecutiveRed < minRedWindow) {
-    return { ids: new Set(), consecutiveRed, windowActive: false, failureFiles: [] };
+    return { ids: new Set(), consecutiveRed, windowActive: false, failureFiles: [], unattributedCount: 0 };
   }
-  const failureFiles = collectFailureFiles(realRounds, stateFailures);
-  if (failureFiles.length === 0) {
-    return { ids: new Set(), consecutiveRed, windowActive: true, failureFiles: [] };
-  }
+  // AC5 — slice to the CURRENT red window only (the 239→~12 negative control: pre-slice the Set only
+  // grew, so a task touching ANY historical failing file was blocked — "touched any history", not
+  // "touches the current red cause").
+  const failureFiles = collectFailureFiles(realRounds, stateFailures, consecutiveRed);
+  const unattributedCount = countUnattributedFailures(realRounds, stateFailures, stateUnattributed, consecutiveRed);
   const ids = new Set();
   for (const [id, task] of tasks) {
     if (task.status !== "ready" && task.status !== "todo") continue;
@@ -1242,7 +1306,7 @@ export function computeSuiteBlocking({ rounds, stateFailures, tasks, minRedWindo
     if (exemptFromSuiteBlocking(task, id, failureHit)) continue;
     ids.add(id);
   }
-  return { ids, consecutiveRed, windowActive: true, failureFiles };
+  return { ids, consecutiveRed, windowActive: true, failureFiles, unattributedCount };
 }
 
 /** COMPOUND AGGREGATION (gap-compound-depsreadyfor-structural-deadlock AC2): true when the task's
@@ -1641,6 +1705,9 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
   const suiteBlocking = computeSuiteBlocking({
     rounds: readVerificationRounds(root),
     stateFailures: readStateFailures(root),
+    // gap-streaming-red-cascade-amplifies-failures-array AC6 — the state's segmented-out populations
+    // (unattributed + derived) feed the not-attributable count; they never join failureFiles.
+    ...readStateFailureSegments(root),
     tasks: allTasks,
     minRedWindow: redWindowMin,
     expand,
@@ -1814,11 +1881,16 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
     // red-window signal — which tasks are currently blocking the full suite (blocking_suite=true in
     // ready_relevance / top_relevance), the window count, and the failure files that implicate them.
     // slot-refill consumes `tasks` to rank the suite-blocker first. A SIGNAL, not a gate.
+    // gap-streaming-red-cascade-amplifies-failures-array AC3/AC5/AC6: failure_files is the CURRENT
+    // red window only (not all history — 239→~12); unattributed_count makes the no-file/derived
+    // population visible (never silently dropped). window_active stays true on any active red window
+    // (slot-refill cap narrowing reads it) even when nothing is file-attributable.
     suite_blocking: {
       consecutive_red: suiteBlocking.consecutiveRed,
       min_red_window: redWindowMin,
       window_active: suiteBlocking.windowActive,
       failure_files: [...suiteBlocking.failureFiles].sort(),
+      unattributed_count: suiteBlocking.unattributedCount,
       tasks: [...suiteBlocking.ids].sort(),
     },
     report: buildReport({ pool, floor, cap, floorMult, dispatchableDisjoint, criterionMet, poolBigAllColliding, deficit, landingBlocked: landing.landing_blocked, landingReason: landing.reason }),
