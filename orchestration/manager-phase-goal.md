@@ -2619,7 +2619,7 @@ manager 的活是：每 tick 采样 AC20 的五条、维护 AC21-AC24 的取证�
 - [ ] **AC48** integration 分支退役，且发生在最后
 - [ ] **AC49** 每个改动在隔离环境里自证
 - [x] **AC50** 主检出分支切换可验收，在飞任务不断裂（2026-08-13 12:0xZ 达成：判据1 `develop..integration=0` · 判据2 五棵 worktree 逐条枚举无携带非自己的提交 · 判据3 `HEAD=develop` · 判据5 `gap-ac51`/`gap-ac53` 两棵新树 fork 自 develop 实证 + r140/r141 双绿 + `981eac34` fan-in；**判据4 已移交 AC48**）
-- [ ] **AC51** 断言面拆分：文档检查在提交那一刻跑
+- [x] **AC51** 断言面拆分：文档检查在提交那一刻跑（2026-08-13 10:5xZ **3/3 达成**：判据1 `test.sh:433` "absent from the scoped tier BY CONSTRUCTION" + merge 路径漏洞由 `4eb0fc35` 堵上；判据2 实测 2097ms vs 全量 437000ms＝208×；判据3 **真失败演示原样输出**——`Fix: add "<!-- reference-doc: … -->" to plugin/skills/init/SKILL.md, or fix the doc's path…`，确切字面量+目标文件+两条替代修法）
 - [ ] **AC52** 依赖任务串行化，fork 基线无例外
 - [ ] **AC53** 自选唤醒机件的结束条件不变式
 
