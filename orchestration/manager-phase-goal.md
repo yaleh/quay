@@ -3153,6 +3153,31 @@ round 110：同一 SPEC ⇒ quay-init referenced⊆landed 红（reference-doc �
    **⇒ 记观察项，触发条件写死**：**若出现第 1 条 `status: done` 而其提交不在 develop 上的任务、
    且它被当作某任务的依赖放行 ⇒ 第二合取项才需要机械读者**；在此之前 `depsReadyFor` 已满足本判据的可判定部分。
 
+   **✅ 该观察项于 2026-08-13 19:4xZ 被【结构性关闭】，且不是靠加读者关闭的**：
+   当日实测到 5 个 `status:` 翻转在主检出盘上生效而未进 git（最长 **49.5 分钟**，载荷是**完成记录**），
+   根因是 AC46 判据3 的移交**只移交了"谁来翻"，没移交"谁来提交那次翻转"**。
+   处置分歧有两形态，**manager 裁定取 (a2)**（这是结构性、跨层的选择，不交由 inner 自定）：
+   ```
+   (a1) 主检出直接 commit 翻转    ← 否决
+   (a2) 在自己的 worktree 内翻，靠 fan-in merge 带进 develop   ← 采纳
+   ```
+   **理由①（授权模型）**：`touches-orthogonality-check.ts:440-444` 逐字
+   「a ready candidate whose Touches does not grant its own file is NOT dispatchable —
+   the executing agent has **no authorization** to tick its AC boxes … at completion」
+   ⇒ **self-touch 闸的全部理由就是让执行者在【自有 worktree 里】改自己的任务文件**；
+   (a1) 保留该闸又开一条绕行路径 ⇒ **把一条已生效的闸架空。**
+   **理由②（就是本观察项）**：**(a2) 使 `status: done` 与"提交已在 develop 上"不可分离
+   ⇒ 第二合取项【不需要机械读者】，因为那个状态在结构上不存在**；
+   而 **(a1) 恰恰制造"已 done 未落 develop" ⇒ 把本观察项变成真缺陷**。
+   **⇒ 同一个选择，(a2) 关掉这个缺口，(a1) 打开它。**
+   **对"dispatch 延迟"的反驳**：那正是正确语义——任务的工作进 develop 之前，
+   本就不该被别的任务当作已完成的依赖；在飞槽位由 `slot-refill` 的 in-flight 集合处理、
+   **不依赖 status 翻转** ⇒ 不造成空槽误判。
+   **硬约束（写死）**：**不得出现"翻转写在主检出、内容留在 worktree"的拆开形态**——
+   那是把一次原子的完成声明拆成两半，**两半在崩溃/清理时会各自留下不同的残迹**；
+   当日那 49.5 分钟就是这两半分离的最短版本。
+   **实现面（worktree 内改 frontmatter 的具体形态、与 A6 门的先后）归 outer+inner，manager 不指定。**
+
 **代价（明写，人已知悉）**：**吞吐下降**——依赖链上的任务不能重叠。
 **为什么可接受**：①依赖任务本就该串行（并行是在赌 touches 不冲突）；
 ②今晚实测并发上限 2，本无大量并行余量；③换来"一律 fork 自 develop"这个**无例外**的不变量——
