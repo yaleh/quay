@@ -2618,7 +2618,7 @@ manager 的活是：每 tick 采样 AC20 的五条、维护 AC21-AC24 的取证�
 - [ ] **AC47** 完成判定覆盖 AC + DoD
 - [ ] **AC48** integration 分支退役，且发生在最后
 - [ ] **AC49** 每个改动在隔离环境里自证
-- [ ] **AC50** 主检出分支切换可验收，在飞任务不断裂
+- [x] **AC50** 主检出分支切换可验收，在飞任务不断裂（2026-08-13 12:0xZ 达成：判据1 `develop..integration=0` · 判据2 五棵 worktree 逐条枚举无携带非自己的提交 · 判据3 `HEAD=develop` · 判据5 `gap-ac51`/`gap-ac53` 两棵新树 fork 自 develop 实证 + r140/r141 双绿 + `981eac34` fan-in；**判据4 已移交 AC48**）
 - [ ] **AC51** 断言面拆分：文档检查在提交那一刻跑
 - [ ] **AC52** 依赖任务串行化，fork 基线无例外
 - [ ] **AC53** 自选唤醒机件的结束条件不变式
@@ -2799,9 +2799,22 @@ manager 核实后发现 **SPEC 完全没写切换过程**（`grep 主检出|chec
    （只在 integration 上的提交）——**恒真判据把真实风险读成了零风险**。
    **正确判据靠"分支相对 develop 多出哪些提交"，不靠 merge-base 的祖先关系。**
 3. **主检出已切**：`git rev-parse --abbrev-ref HEAD` = `develop`，且工作树无未提交的产品文件改动。
-4. **执行路径无 integration**：全仓 `grep -rn 'integration'` 在执行路径上零命中（注释/历史记录允许）。
-5. **一次真实生命周期自证**：一个任务 fork develop → worktree → 套件绿 → merge develop，
-   其 round 记录 `scope=worktree` 且 develop 新 HEAD 是它的 merge 提交。
+4. **【2026-08-13 12:0xZ 移出本 AC，见下】** —— 原判据4「执行路径无 integration」**已移交 AC48**。
+   **移出理由（两条，都是实测）**：①**它与 AC48「integration 退役发生在最后」顺序冲突**——
+   `integration-batch-merge.sh` / `fork-baseline.ts` 的 integration 分支在退役前必须存在，
+   **因此判据4 在 AC48 之前【不可能】满足，把它留在 AC50 会让 AC50 永远勾不上，即使切换早已完成**；
+   ②**原判据按关键词匹配，而 `integration` 在本仓有多个语义**——实测 23 处命中里
+   **3 处是 `build-evidence-manifest.ts` 的 evidence class `"integration"`（与分支无关）**，
+   按关键词判会把它们算成违规（**又一次"按关键词不按位置"**）。
+   ⇒ **AC48 接手时应写成**：执行路径上不再有把 `integration` 当作**分支名**使用的地方
+   （`ForkBaseline` 类型 / `forkBaseline()` 返回值 / `integration_ref` / `$MERGE_TARGET` 解析），
+   **evidence class 等同名不同义的用法不计**。
+5. **一次真实生命周期自证**：一个任务 fork develop → worktree → 套件绿 → merge develop。
+   **取证（2026-08-13 12:0xZ 更正）**：①该任务的 worktree 曾存在且 `git rev-list develop..<其分支>` 为空或只含自身提交；
+   ②其 fan-in 之后有一轮 **`state=green`** 的全量轮（`tests` 达全量量级）；③`develop` 的新 HEAD 含该 merge 提交。
+   **⚠️ 原文取证写「round 记录 `scope=worktree`」——与判据1/2 同一个错**：
+   `full-suite-runner.ts:1445` 的 `scope` 记的是**发起方检出**（注释自述用途是让等待者区分
+   worktree-origin 与 main-repo 套件），**不是测试跑在哪** ⇒ 它恒为 `main`，拿它取证则判据5 永不满足。
 
 6. **⭐ 推进度必须每 tick 可读，且停滞可报**（2026-08-13 08:1xZ 新增，因为「几小时零推进」此前只能靠
    manager 手工审计才发现）：manager 每 tick 记录本 AC 的**三个核心读数**——
