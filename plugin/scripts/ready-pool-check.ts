@@ -174,6 +174,11 @@ import { judgePoolCandidate } from "./strategic-doc-staleness-check.ts";
 // laneCount ≠ this default and is excluded from the consecutive-red count; its red is an experiment
 // finding, not a regression.
 import { defaultLaneCount } from "./full-suite-runner.ts";
+// MERGE-WORKTREE SURFACE (tasks/gap-dispatch-gate-blind-to-inflight-merge-worktree): the open-worktree
+// enumerator (`git worktree list --porcelain`) — single source (fast-mode-telemetry's listWorktrees,
+// not a parallel porcelain parser). The merge-worktree detector below reuses it to find worktrees
+// where a MERGE is in flight.
+import { listWorktrees } from "./fast-mode-telemetry.ts";
 
 /** Default concurrency cap (max in-flight subagents) — CONSERVATIVE FALLBACK for manual runs with
  *  no --cap. The tick's dispatch decision point passes the ADAPTIVE cap from cap-from-gate.sh
@@ -306,6 +311,108 @@ export function detectLandingBlocked(root, { develop = "develop", integration = 
     stalenessMs,
     behindThreshold,
   });
+}
+
+// ── MERGE-WORKTREE SURFACE (tasks/gap-dispatch-gate-blind-to-inflight-merge-worktree) ─────────────
+// The dispatch gate's touches-overlap judgment used to cover only in-flight TASK worktrees (the peer
+// set slot-refill/ready-pool-check rank against) — a worktree where a MERGE is in flight holds a
+// conflict surface (`git -C <wt> diff --name-only HEAD`, the merge's uncommitted surface) that was
+// STRUCTURALLY invisible: outer deferred tasks that collide with the merge surface got dispatched
+// anyway by the inner's slot-refill (the vhs-merge coordination accident: `deferred` showed only
+// `peer <task>` reasons, none naming the merge worktree). These helpers surface merge-in-flight
+// worktrees + their conflict surfaces so the touches-overlap judgment — slot-refill's step-4 check
+// AND ready-pool-check's dispatchable_disjoint criterion — can include them. Fail-soft throughout:
+// a non-git root / unreadable worktree list ⇒ [] (never a fabricated block from an unavailable
+// source — hard rule 5: absent evidence is not a verdict).
+
+/** True when `wtPath`'s index has unmerged entries — the `UU` state git leaves during a CONFLICTED
+ *  merge (a real merge with conflicts writes stages 1/2/3 into the index; `git ls-files -u` lists
+ *  them). This is the AC3 negative-control shape. Fail-soft: any git failure ⇒ false. */
+export function hasUnmergedEntries(wtPath) {
+  try {
+    const out = execFileSync("git", ["-C", wtPath, "ls-files", "-u"], {
+      encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"],
+    });
+    return out.trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/** True when a git MERGE is in progress in `wtPath` — the MERGE_HEAD file exists (`git merge` writes
+ *  it from the start of the merge, before any conflict resolution). A worktree mid-merge is exactly
+ *  the "merge 中的 worktree" whose uncommitted surface is a conflict surface for new dispatches. */
+export function mergeHeadPresent(wtPath) {
+  try {
+    const p = execFileSync("git", ["-C", wtPath, "rev-parse", "--git-path", "MERGE_HEAD"], {
+      encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    return p.length > 0 && fs.existsSync(p);
+  } catch {
+    return false;
+  }
+}
+
+/** True when a git MERGE is in flight in `wtPath` — MERGE_HEAD present OR unmerged (`UU`) entries.
+ *  The union is deliberate: MERGE_HEAD catches an in-progress merge before conflicts are detected;
+ *  unmerged entries catch a conflicted merge even if MERGE_HEAD has been removed (the negative-control
+ *  shape). A task worktree without a merge in progress carries neither ⇒ never flagged. */
+export function isMergeWorktree(wtPath) {
+  return mergeHeadPresent(wtPath) || hasUnmergedEntries(wtPath);
+}
+
+/** The merge's uncommitted surface: `git -C <wt> diff --name-only HEAD` — every file the in-flight
+ *  merge has changed relative to HEAD (conflicts AND cleanly-merged changes; verified: a conflicted
+ *  merge lists both the `UU` conflict path and the staged clean-merge additions). Repo-relative
+ *  paths. Fail-soft: git failure ⇒ [] (never a fabricated surface). */
+export function diffNameOnlyHead(wtPath) {
+  try {
+    const out = execFileSync("git", ["-C", wtPath, "diff", "--name-only", "HEAD"], {
+      encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"],
+    });
+    return out.split("\n").map((s) => s.trim()).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+/** Enumerate the conflict surfaces of all in-flight MERGE worktrees under `root`. The MAIN checkout
+ *  itself is excluded — the outer's own hot-file edits in the main tree are the SEPARATE
+ *  `--outer-inflight` occupancy axis (fast-mode-loop-tick.md step 3b), not a merge surface. Returns
+ *  `[{ name, path, files }]`: `name` is the worktree basename (the identifier the deferred reason
+ *  names), `path` its absolute path, `files` the `git diff --name-only HEAD` surface (non-empty).
+ *  Fail-soft: non-git root / unreadable worktree list / empty surface ⇒ [] — never a fabricated
+ *  block. */
+export function computeMergeWorktreeSurfaces(root) {
+  const worktrees = listWorktrees(root);
+  const out = [];
+  for (const wt of worktrees) {
+    if (!wt.path || path.resolve(wt.path) === path.resolve(root)) continue; // main checkout, not a merge worktree
+    if (!isMergeWorktree(wt.path)) continue;
+    const files = diffNameOnlyHead(wt.path);
+    if (files.length === 0) continue; // a merge with no changed surface blocks nothing
+    out.push({ name: path.basename(wt.path), path: wt.path, files });
+  }
+  return out;
+}
+
+/** The merge-worktree arm of the touches-overlap judgment — the DEFERRED-REASON DISTINCTION (AC2):
+ *  a candidate's parsed touches vs every in-flight merge worktree's conflict surface. Returns
+ *  `{ blocked, name }`: `name` is the merge worktree basename when the candidate's touches overlap
+ *  its surface (the caller builds the reason `touches-overlap-in-flight (merge-worktree <name>)`),
+ *  `null` when no merge surface blocks it (the PEER arm then applies — peer reasons stay distinct,
+ *  never silently conflated). Uses the SAME checkTouchesPair the peer arm uses, with the merge
+ *  surface as a synthetic parsed-touches side (`hasSection: true, globs: files` — concrete paths
+ *  always participate whether or not they exist on disk, the declared-path rule). */
+export function mergeSurfaceBlock(parsed, surfaces, expand) {
+  for (const s of surfaces || []) {
+    if (!Array.isArray(s.files) || s.files.length === 0) continue;
+    const surfaceParsed = { hasSection: true, globs: s.files };
+    if (!checkTouchesPair(parsed, surfaceParsed, expand).disjoint) {
+      return { blocked: true, name: s.name };
+    }
+  }
+  return { blocked: false, name: null };
 }
 
 // ── Value-prioritization relevance signal (tasks/gap-value-prioritization-has-no-mechanism) ─────────
@@ -1508,7 +1615,16 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
   // consuming-slots): a new dispatch must be pairwise-disjoint from a still-present executor's touches
   // even if its telemetry bracket already closed — bracket-close ≠ agent-exit.
   const inFlightParsed = [...(inFlight || []), ...(closedButLive || [])].map((t) => ({ id: t.id, touches: parseTouches(t.body) }));
-  const dispatchableDisjoint = maxMutuallyDisjointSubset(poolParsed.map((p) => p.touches), expand);
+  // MERGE-WORKTREE SURFACE (tasks/gap-dispatch-gate-blind-to-inflight-merge-worktree): the
+  // dispatchable_disjoint criterion must not count a candidate that collides with an in-flight MERGE
+  // worktree's conflict surface — such a candidate is NOT actually dispatchable (its fan-in would
+  // collide with the merge), so counting it inflates the dispatchable capacity. A candidate whose
+  // touches overlap a merge surface is excluded from the subset count (it stays in pool.ready —
+  // slot-refill's per-candidate step-4 check defers it with the explicit merge-worktree reason).
+  // Fail-soft: no merge worktree in flight ⇒ the filter is a no-op (dispatchable_disjoint unchanged).
+  const mergeSurfaces = computeMergeWorktreeSurfaces(root);
+  const dispatchablePoolParsed = poolParsed.filter((p) => !mergeSurfaceBlock(p.touches, mergeSurfaces, expand).blocked);
+  const dispatchableDisjoint = maxMutuallyDisjointSubset(dispatchablePoolParsed.map((p) => p.touches), expand);
 
   const criterionMet = dispatchableDisjoint >= cap;
   // AC3 self-report: pool big (≥ floor) but all colliding (< cap mutually-disjoint) ⇒ the mechanism

@@ -80,6 +80,14 @@ import {
   analyzeTasks,
   POOL_FLOOR_MULT_DEFAULT,
   readGitRevCount,
+  // MERGE-WORKTREE SURFACE (tasks/gap-dispatch-gate-blind-to-inflight-merge-worktree): the
+  // merge-in-flight detector + its touches-overlap judge. The dispatch gate's touches-overlap
+  // judgment must include in-flight MERGE worktrees' conflict surfaces (the vhs-merge accident:
+  // outer deferred merge-colliding tasks, inner dispatched them because the gate only saw in-flight
+  // TASK worktrees). computeMergeWorktreeSurfaces finds the merge worktrees (MERGE_HEAD / UU), and
+  // mergeSurfaceBlock distinguishes a merge-worktree overlap from a peer-task overlap (AC2).
+  computeMergeWorktreeSurfaces,
+  mergeSurfaceBlock,
 } from "./ready-pool-check.ts";
 // NOT-YET-FLIPPED SKIP (gap-slot-refill-repeats-done-eligible-recommendations): the AC-completeness
 // gate (countAcCheckboxes — the SAME gate ready-pool-check's notYetFlipped applies, so an AC-incomplete
@@ -350,6 +358,12 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
   if (!halt.halted) {
     const sharedFiles = walkFiles(root);
     const expand = (globs) => expandDeclaredTouches(globs, root, sharedFiles);
+    // MERGE-WORKTREE SURFACE (tasks/gap-dispatch-gate-blind-to-inflight-merge-worktree): the conflict
+    // surfaces of in-flight MERGE worktrees (the merge's uncommitted `git diff --name-only HEAD`).
+    // Computed ONCE per evaluation — a merge in flight is a structural condition of the whole dispatch
+    // decision, not a per-candidate read. Fail-soft: no merge in flight ⇒ [] (step-4 check 3 is
+    // byte-unchanged — the peer arm alone applies, AC4 negative control).
+    const mergeSurfaces = computeMergeWorktreeSurfaces(root);
     const metaById = buildTaskMetaById(tasksDir);
     // Concurrency eligibility must also respect closed-bracket-but-live agents' touches — a closed
     // bracket does NOT free the touches a still-live agent is working on.
@@ -389,8 +403,16 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
       // self-file is NOT a self-touch false negative (invariant no_self_touch_false_negative).
       if (readFrontField(task.frontmatterRaw, "role") === "compound") { defer(id, "compound-not-dispatchable"); continue; }
       if (!depsReadyFor(task, metaById)) { defer(id, "deps-not-ready"); continue; }
-      // step-4 check 3: concurrency eligibility — disjoint from every currently-running subagent.
+      // step-4 check 3: concurrency eligibility — disjoint from every currently-running subagent AND
+      // from every in-flight MERGE worktree's conflict surface (gap-dispatch-gate-blind-to-inflight-
+      // merge-worktree: a merge worktree holding a conflict surface was structurally invisible — the
+      // vhs-merge accident — so a task the OUTER deferred as merge-colliding was dispatched anyway by
+      // the inner's refill). The merge-worktree arm is checked FIRST so a candidate that collides with
+      // a merge surface is deferred with the EXPLICIT merge-worktree reason (AC2: 不再只报 peer), and
+      // only merge-clear candidates fall through to the peer arm.
       const parsed = parseTouches(text);
+      const mergeBlock = mergeSurfaceBlock(parsed, mergeSurfaces, expand);
+      if (mergeBlock.blocked) { defer(id, `touches-overlap-in-flight (merge-worktree ${mergeBlock.name})`); continue; }
       let blocked = null;
       for (const inf of inFlightParsed) {
         if (!checkTouchesPair(parsed, inf.touches, expand).disjoint) { blocked = inf.id; break; }
