@@ -329,6 +329,202 @@ export function canReceiveInput(paneText: string, opts: { lines?: number } = {})
   return classifyPaneStateOrthogonal(paneText, opts).input_state === "waiting-input";
 }
 
+// ── transcript decisions (gap-session-liveness-decision-import-refactor, 2026-08-13) ──────────────
+// The session-liveness monitor's TRANSCRIPT-derived judgments — "last message type", "trailing API
+// error count", "context saturation", "last user input" — were bash grep/tail functions inside
+// session-liveness.sh, coverable only by spawning the script (and, inside the loop, real tmux).
+// They are PURE decisions over transcript content (JSONL lines), so they live HERE, importable by
+// tests (zero real time, load-immune — AC1), while the shell keeps a thin subprocess seam
+// (--transcript). Each function mirrors the bash original's line-scan semantics EXACTLY (same
+// patterns, same stop conditions) — see session-liveness.sh's transcript_last_message_type /
+// transcript_api_error_count / transcript_cache_read_tokens / transcript_context_saturation /
+// last_user_input_epoch. The shell contract (the seams and the loop wiring) is unchanged; only the
+// decision layer moved here.
+
+export type TranscriptMessageType = "pending-tool-use" | "pure-text" | "user-input" | "unknown";
+
+/** True iff the line is a MESSAGE record (top-level type assistant|user), as opposed to metadata
+ * (type=system/mode/last-prompt/file-history-*). Mirrors the shell's
+ * `grep -E '"type":"(assistant|user)"'` record filter: content-block types (text/thinking/tool_use/
+ * tool_result) are NOT assistant/user, so they never match. */
+function isMessageRecord(line: string): boolean {
+  return line.includes('"type":"assistant"') || line.includes('"type":"user"');
+}
+
+/** Last MESSAGE type (stage-3 AC1): scan from the tail for the last top-level assistant/user record
+ * (skipping metadata), then:
+ *   user           → user-input (new input / tool_result receipt — model about to answer: busy);
+ *   assistant w/ tool_use block → pending-tool-use (round in progress: busy);
+ *   assistant w/o  → pure-text (candidate idle);
+ *   none found     → unknown.
+ * Mirrors session-liveness.sh transcript_last_message_type (tail-500 + full-scan fallback are
+ * together equivalent to scanning all lines from the end). */
+export function transcriptLastMessageType(lines: string[]): TranscriptMessageType {
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i];
+    if (!isMessageRecord(line)) continue;
+    if (line.includes('"type":"user"')) return "user-input";
+    if (line.includes('"type":"tool_use"')) return "pending-tool-use";
+    return "pure-text";
+  }
+  return "unknown";
+}
+
+/** Count of TRAILING isApiErrorMessage records within the last `window` lines (AC9 / D4 timeliness):
+ * from the newest record backward, count consecutive assistant/user records carrying the structural
+ * flag; stop at the first assistant/user record WITHOUT it (a successful reply resets the count).
+ * Metadata lines are skipped, not treated as a boundary. Mirrors the shell's tail|tac loop. */
+export function trailingApiErrorCount(lines: string[], window = 200): number {
+  const tail = lines.slice(-window);
+  let n = 0;
+  for (let i = tail.length - 1; i >= 0; i--) {
+    const line = tail[i];
+    if (!isMessageRecord(line)) continue;
+    if (/"isApiErrorMessage"\s*:\s*true/.test(line)) n++;
+    else break;
+  }
+  return n;
+}
+
+/** Last assistant API response's usage.cache_read_input_tokens (context usage proxy, stage-4 AC3);
+ * null when no transcript / no usage record (caller treats as unknown — never guess). Mirrors the
+ * shell's tail-1000 grep + full-scan fallback (together equivalent to scanning all lines). */
+export function transcriptCacheReadTokens(lines: string[]): number | null {
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const m = lines[i].match(/"cache_read_input_tokens":(\d+)/);
+    if (m) return Number(m[1]);
+  }
+  return null;
+}
+
+/** Whether the last MESSAGE is an unanswered user input (received a new instruction, model has not
+ * replied). Mirrors last_message_is_unanswered_input. */
+export function lastMessageIsUnansweredInput(lines: string[]): boolean {
+  return transcriptLastMessageType(lines) === "user-input";
+}
+
+export type ContextSaturation = "saturated" | "unsaturated" | "unknown";
+
+/** Stage-4 composite saturation: cache_read_input_tokens ≥ saturationTokens AND the last message is
+ * an unanswered user input → saturated; low context, or high context but still answering
+ * (auto-compact is normal) → unsaturated; no usage record → unknown (silent, don't guess). */
+export function transcriptContextSaturation(lines: string[], saturationTokens: number): ContextSaturation {
+  const cache = transcriptCacheReadTokens(lines);
+  if (cache === null) return "unknown";
+  if (cache >= saturationTokens) {
+    return lastMessageIsUnansweredInput(lines) ? "saturated" : "unsaturated";
+  }
+  return "unsaturated";
+}
+
+/** Epoch (seconds) of the last type=user record's timestamp; null when absent/unparseable. Mirrors
+ * last_user_input_epoch (AC7: the "last received input" payload on SESSION-RESUMED). */
+export function lastUserInputEpoch(lines: string[]): number | null {
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i];
+    if (line.includes('"type":"user"')) {
+      const m = line.match(/"timestamp":"([^"]+)"/);
+      if (m) {
+        const ms = Date.parse(m[1]);
+        if (!Number.isNaN(ms)) return Math.floor(ms / 1000);
+      }
+      return null;
+    }
+  }
+  return null;
+}
+
+// ── monitor verdict + event decisions (moved from session-liveness.sh) ────────────────────────────
+
+/** Transcript side of the fused busy (stage-3 AC1): pending-tool-use / user-input ⇒ busy (zero
+ * idle-miss is the hard upper bound — a pending tool_use must never report idle). */
+export function transcriptBusyFromMessageType(ttype: TranscriptMessageType): boolean {
+  return ttype === "pending-tool-use" || ttype === "user-input";
+}
+
+/** Fused busy = pane_busy || transcript_busy; idle = NOT fused_busy (stage-3 AC1/AC5). */
+export function fusedIdle(paneBusy: boolean, transcriptBusy: boolean): boolean {
+  return !(paneBusy || transcriptBusy);
+}
+
+export interface IdleReportParams {
+  idle: boolean;
+  idleConsec: number;
+  idleReported: boolean;
+  rounds: number;
+  debounceRounds: number;
+}
+
+/** D5-sharpened SESSION-IDLE report gate (stage-3 AC2 / 2026-08-08): consecutive fused-idle ≥
+ * debounceRounds AND this spell not yet reported (IDLE_REPORTED edge) AND past the warm-up round.
+ * -ge (not -eq): the counter keeps matching past the threshold — one spell's report right is not
+ * destroyed by a -eq miss. */
+export function idleReportReady(p: IdleReportParams): boolean {
+  return p.idle && p.idleConsec >= p.debounceRounds && !p.idleReported && p.rounds > 1;
+}
+
+export interface ResumedReportParams {
+  resumePending: boolean;
+  busyConsec: number;
+  rounds: number;
+  debounceRounds: number;
+}
+
+/** D3 same-depth debounce for SESSION-RESUMED: the busy spell must be confirmed ≥ debounceRounds
+ * rounds (a 1-round busy blip does not produce an orphan RESUMED) and not the warm-up round. */
+export function resumedReportReady(p: ResumedReportParams): boolean {
+  return p.resumePending && p.busyConsec >= p.debounceRounds && p.rounds > 1;
+}
+
+/** Candidate B no-infinite-silence verdict (AC4): permission-prompt persisting ≥ warnRounds with a
+ * transcript not written in txWindow seconds ⇒ warn; fresh transcript (cross positive control) or
+ * sub-threshold rounds or no transcript (txAge<0) ⇒ ok. Mirrors _sl_perm_prompt_warn_verdict. */
+export function permPromptWarnVerdict(
+  rounds: number,
+  txAge: number,
+  opts: { warnRounds?: number; txWindow?: number } = {},
+): "warn" | "ok" {
+  const warnRounds = opts.warnRounds ?? 3;
+  const txWindow = opts.txWindow ?? 60;
+  if (rounds >= warnRounds) {
+    if (txAge < 0) return "ok";
+    if (txAge > txWindow) return "warn";
+    return "ok";
+  }
+  return "ok";
+}
+
+export interface PaneVerdict {
+  state: string;
+  busy: boolean;
+  intervention: boolean;
+  work_in_flight: boolean;
+  region_empty: boolean;
+}
+
+/** The monitor's pane verdict in ONE decision (mirrors session-liveness.sh _sl_pane_verdict):
+ *   empty capture ⇒ busy=1 (AC5 anti-filter: nothing to judge is never silently idle);
+ *   input_state busy|error-banner ⇒ busy=1 (real work / error);
+ *   permission-prompt ⇒ busy=0 intervention=1 (needs human/upper-layer — NOT busy);
+ *   waiting-input/unknown ⇒ busy=0 intervention=0 (unknown ambiguity falls to transcript fusion);
+ *   empty bottom region ⇒ busy=1 (AC5: no content to judge). */
+export function classifyPaneVerdict(paneText: string): PaneVerdict {
+  if (paneText === "") {
+    return { state: "unknown", busy: true, intervention: false, work_in_flight: false, region_empty: true };
+  }
+  const o = classifyPaneStateOrthogonal(paneText);
+  let busy = false;
+  let intervention = false;
+  if (o.input_state === "busy" || o.input_state === "error-banner") {
+    busy = true;
+  } else if (o.input_state === "permission-prompt") {
+    intervention = true;
+  }
+  const region_empty = o.region === "";
+  if (region_empty) busy = true;
+  return { state: o.input_state, busy, intervention, work_in_flight: o.work_in_flight, region_empty };
+}
+
 // ── --check-residue mode (tasks/gap-residue-check-crystallized-as-tool-mode) ─────────────────────
 // "box has text vs actually submitted" must be a TOOL judgment, not role memory (human ruling
 // 2026-08-05, relayed by the manager). The distinguishing criterion is the C-u CLEARING BEHAVIOR
@@ -612,6 +808,117 @@ export function runCanReceiveWait(argv: string[]): number {
     `can-receive: 目标 ${target} 在 ${waitS}s 内未转为 waiting-input（最后状态 ${lastState}）——fail loud 需人工\n`,
   );
   return 1;
+}
+
+// ── session-liveness decision seams (gap-session-liveness-decision-import-refactor) ────────────────
+// The shell's per-round transcript judgments moved here as pure functions; these three run* entry
+// points are the shell's subprocess seams (the "shell contract" — the pure functions stay importable
+// for decision tests, the shell keeps byte-compatible output).
+
+/** `--transcript <file>` seam: read ONE transcript file and emit ALL transcript-derived decisions in
+ * a single node subprocess — a transcript target pays one extra node spawn per round, not six bash
+ * grep/tail spawns. Flags: --saturation-tokens N (default 450000), --api-error-window N (default
+ * 200). Output (plain text, one per line):
+ *   line 1: last_message_type        (pending-tool-use|pure-text|user-input|unknown)
+ *   line 2: trailing_api_error_count (integer)
+ *   line 3: cache_read_tokens        (integer, or "unknown")
+ *   line 4: context_saturation       (saturated|unsaturated|unknown)
+ *   line 5: last_user_input_epoch    (epoch seconds, or "unknown")
+ * A missing/unreadable file yields the all-default set (unknown/0/unknown/unknown/unknown) — the
+ * same defaults the bash functions produce for a missing transcript. */
+export function runTranscript(argv: string[]): number {
+  const positional = argv.filter((a) => !a.startsWith("--"));
+  const flagValue = (name: string): string | undefined => {
+    const i = argv.indexOf(name);
+    return i !== -1 ? argv[i + 1] : undefined;
+  };
+  const file = positional[0];
+  if (!file) {
+    process.stderr.write(
+      "usage: pane-state-classify.ts --transcript <transcript.jsonl> [--saturation-tokens N] [--api-error-window N]\n",
+    );
+    return 2;
+  }
+  const satRaw = flagValue("--saturation-tokens");
+  const winRaw = flagValue("--api-error-window");
+  const saturationTokens = satRaw ? Number(satRaw) : 450000;
+  const apiWindow = winRaw ? Number(winRaw) : 200;
+  let lines: string[] = [];
+  try {
+    const content = fs.readFileSync(file, "utf8");
+    // split("\n") yields a trailing "" for a file ending in "\n"; tail's line semantics do NOT count
+    // that final newline as an extra (empty) line — drop one trailing "" so window slices match
+    // `tail -n N` exactly (a trailing-newline-only file counts as zero lines, not one blank line).
+    lines = content.split("\n");
+    if (lines.length && lines[lines.length - 1] === "") lines.pop();
+  } catch {
+    // missing/unreadable → defaults (matches the bash functions' missing-file behavior)
+  }
+  const mt = transcriptLastMessageType(lines);
+  const n = trailingApiErrorCount(lines, apiWindow);
+  const cache = transcriptCacheReadTokens(lines);
+  const sat = transcriptContextSaturation(lines, saturationTokens);
+  const lep = lastUserInputEpoch(lines);
+  process.stdout.write(
+    [
+      mt,
+      String(n),
+      cache === null ? "unknown" : String(cache),
+      sat,
+      lep === null ? "unknown" : String(lep),
+    ].join("\n") + "\n",
+  );
+  return 0;
+}
+
+/** `--perm-warn-verdict <rounds> <tx_age>` seam (candidate B pure verdict). Flags:
+ * --warn-rounds N (default 3), --tx-window N (default 60). Prints warn|ok. */
+export function runPermPromptWarnVerdict(argv: string[]): number {
+  const positional = argv.filter((a) => !a.startsWith("--"));
+  const flagValue = (name: string): string | undefined => {
+    const i = argv.indexOf(name);
+    return i !== -1 ? argv[i + 1] : undefined;
+  };
+  const roundsRaw = positional[0];
+  const txAgeRaw = positional[1];
+  if (roundsRaw === undefined || txAgeRaw === undefined) {
+    process.stderr.write(
+      "usage: pane-state-classify.ts --perm-warn-verdict <rounds> <tx_age_secs|-1> [--warn-rounds N] [--tx-window N]\n",
+    );
+    return 2;
+  }
+  const warnRoundsRaw = flagValue("--warn-rounds");
+  const txWindowRaw = flagValue("--tx-window");
+  const opts = {
+    warnRounds: warnRoundsRaw ? Number(warnRoundsRaw) : undefined,
+    txWindow: txWindowRaw ? Number(txWindowRaw) : undefined,
+  };
+  process.stdout.write(permPromptWarnVerdict(Number(roundsRaw), Number(txAgeRaw), opts) + "\n");
+  return 0;
+}
+
+/** `--pane-verdict` seam: read pane text on stdin, emit the monitor's full pane verdict (the same
+ * decision _sl_pane_verdict makes, single-sourced in classifyPaneVerdict). Pure — no tmux, no file.
+ * Output (plain text, one per line):
+ *   line 1: state=<input_state>
+ *   line 2: busy=<0|1>
+ *   line 3: intervention=<0|1>
+ *   line 4: work_in_flight=<0|1>
+ *   line 5: region_empty=<0|1>
+ * The shell parses these with ${var%%$'\n'*} (no extra subprocess), matching the --classify seam's
+ * bash-parse discipline (M3 comment). */
+export function runPaneVerdict(stdin: string): number {
+  const v = classifyPaneVerdict(stdin);
+  process.stdout.write(
+    [
+      `state=${v.state}`,
+      `busy=${v.busy ? "1" : "0"}`,
+      `intervention=${v.intervention ? "1" : "0"}`,
+      `work_in_flight=${v.work_in_flight ? "1" : "0"}`,
+      `region_empty=${v.region_empty ? "1" : "0"}`,
+    ].join("\n") + "\n",
+  );
+  return 0;
 }
 
 // ── in-file self-check (ADR-018 pattern: prove BOTH the RED and GREEN paths) ──────────────────────
@@ -933,6 +1240,19 @@ if (isDirect) {
     process.exit(runCanReceiveWait(args.slice(1)));
   } else if (args[0] === "--check-residue") {
     process.exit(runCheckResidue(args.slice(1)));
+  } else if (args[0] === "--transcript") {
+    process.exit(runTranscript(args.slice(1)));
+  } else if (args[0] === "--perm-warn-verdict") {
+    process.exit(runPermPromptWarnVerdict(args.slice(1)));
+  } else if (args[0] === "--pane-verdict") {
+    // Same async-stdin shape as --classify: read the pane text on stdin, emit the full verdict.
+    let input = "";
+    process.stdin.setEncoding("utf8");
+    process.stdin.on("data", (d) => { input += d; });
+    process.stdin.on("end", () => {
+      process.exit(runPaneVerdict(input));
+    });
+    process.stdin.resume();
   } else {
     const ok = selfcheck();
     process.exit(ok ? 0 : 1);

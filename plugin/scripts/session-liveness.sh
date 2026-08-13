@@ -344,11 +344,11 @@ mask_pane() {
   done
 }
 
-# _sl_pane_verdict —— classifyPaneStateOrthogonal + AC5 防过滤守卫的【共享实现】（主循环与
-# --pane-state 接缝共用，避免两处逻辑漂移）。入参：$1 = pane 原始文本。结果写到五个全局：
-# _sl_pane_state / _sl_pane_busy / _sl_pane_intervention / _sl_pane_work_in_flight / _sl_pane_region。
-# 判据（gap-pane-classify-needs-two-orthogonal-dimensions）：读分类器的新两正交字段——input_state
-# （主线程能否收输入）与 work_in_flight（后台 agent 是否在跑）。state 取 input_state：
+# _sl_pane_verdict —— 完整 pane 判定的【共享实现】（主循环与 --pane-state 接缝共用）。入参：$1 =
+# pane 原始文本。结果写到五个全局：_sl_pane_state / _sl_pane_busy / _sl_pane_intervention /
+# _sl_pane_work_in_flight / _sl_pane_region。
+# 判据在 pane-state-classify.ts 的 classifyPaneVerdict（gap-session-liveness-decision-import-refactor
+# 决策层 import 化——同一份判定 import 直调可测、零真实时间/负载免疫）：
 #   input_state ∈ busy|error-banner ⇒ busy=1（真在干活 / 报错，忙闲轴上的忙）；
 #   permission-prompt ⇒ busy=0 + intervention=1（需要人/上层介入——不再并进 busy，
 #     gap-permission-prompt-merged-into-busy 的修复：卡权限框与在干活必须可区分）；
@@ -356,6 +356,9 @@ mask_pane() {
 #   work_in_flight 独立存到 _sl_pane_work_in_flight（MARKER-STALE 抑制用：transcript 动 + input
 #     空闲 + agents>0 是自洽组合，非异常——本任务根因）；
 #   空捕获（$1 为空）或分类器区域为空 ⇒ busy=1（AC5：无内容可判不得静默判空闲）。
+# --pane-verdict 输出 "state=..\nbusy=..\nintervention=..\nwork_in_flight=..\nregion_empty=.."（纯
+# 文本）。用 bash 字符串切分（${var%%$'\n'*} / ${var#*$'\n'}）而不是再开几个 $(...) 子 shell——每轮
+# 只多一个 node 子进程，压住 mount-count 测试的瞬态进程竞争（M3 注释记录过同类竞争）。
 _sl_pane_verdict() {
   local raw=$1 cls
   _sl_pane_state="unknown"; _sl_pane_busy=0; _sl_pane_intervention=0; _sl_pane_work_in_flight=0; _sl_pane_region=""
@@ -363,24 +366,18 @@ _sl_pane_verdict() {
     _sl_pane_busy=1
     return 0
   fi
-  # --classify --orthogonal prints "input_state\nwork_in_flight(0|1)\nregion"（纯文本，见
-  # pane-state-classify.ts 接缝注释）。用 bash 字符串切分（${var%%$'\n'*} / ${var#*$'\n'}）而不是再开
-  # 几个 $(...) 子 shell——每轮只多一个 node 子进程，压住 mount-count 测试的瞬态进程竞争（M3 注释
-  # 记录过同类竞争）。
-  cls=$(printf '%s\n' "$raw" | "$SL_NODE" --no-warnings --experimental-strip-types "$SL_CLASSIFY" --classify --orthogonal 2>/dev/null || printf 'unknown\n0\n')
-  _sl_pane_state=${cls%%$'\n'*}
-  _sl_pane_region=${cls#*$'\n'}
-  # line 2 = work_in_flight（0|1）；line 3+ = 区域。
-  _sl_pane_work_in_flight=${_sl_pane_region%%$'\n'*}
-  _sl_pane_region=${_sl_pane_region#*$'\n'}
+  cls=$(printf '%s\n' "$raw" | "$SL_NODE" --no-warnings --experimental-strip-types "$SL_CLASSIFY" --pane-verdict 2>/dev/null || printf 'state=unknown\nbusy=1\nintervention=0\nwork_in_flight=0\nregion_empty=1\n')
+  _sl_pane_state=${cls%%$'\n'*}; _sl_pane_state=${_sl_pane_state#state=}; cls=${cls#*$'\n'}
+  _sl_pane_busy=${cls%%$'\n'*}; _sl_pane_busy=${_sl_pane_busy#busy=}; cls=${cls#*$'\n'}
+  _sl_pane_intervention=${cls%%$'\n'*}; _sl_pane_intervention=${_sl_pane_intervention#intervention=}; cls=${cls#*$'\n'}
+  _sl_pane_work_in_flight=${cls%%$'\n'*}; _sl_pane_work_in_flight=${_sl_pane_work_in_flight#work_in_flight=}; cls=${cls#*$'\n'}
+  # line 5 = region_empty（0|1）：区域为空 ⇒ _sl_pane_region 置空（AC5 空区域 WARN 用），否则置非空占位。
+  _sl_pane_region=${cls%%$'\n'*}; _sl_pane_region=${_sl_pane_region#region_empty=}
+  if [ "$_sl_pane_region" = "0" ]; then _sl_pane_region="nonempty"; else _sl_pane_region=""; fi
   [ -z "$_sl_pane_state" ] && _sl_pane_state="unknown"
   [ "$_sl_pane_work_in_flight" != "1" ] && _sl_pane_work_in_flight=0
-  case "$_sl_pane_state" in
-    busy|error-banner) _sl_pane_busy=1; _sl_pane_intervention=0 ;;
-    permission-prompt) _sl_pane_busy=0; _sl_pane_intervention=1 ;;
-    *) _sl_pane_busy=0; _sl_pane_intervention=0 ;;   # waiting-input / unknown → 闲；unknown 的歧义由 transcript 融合兜底
-  esac
-  [ -z "$_sl_pane_region" ] && _sl_pane_busy=1
+  # classifyPaneVerdict 已把 region_empty ⇒ busy=1；这里再守一道（与分类器同判据，兜底 parse 失败）。
+  [ "$_sl_pane_region" = "" ] && _sl_pane_busy=1
 }
 
 # _sl_perm_prompt_warn_verdict —— 候选 B 的【纯判据】（gap-permission-prompt-vs-dismissable-prompt-
@@ -389,19 +386,12 @@ _sl_pane_verdict() {
 # 输出：warn（N ≥ PERM_PROMPT_WARN_ROUNDS 且 transcript 陈旧/不可用）| ok（否则）。
 #   交叉正控制：transcript 最近写入 ≤ PERM_PROMPT_TX_WINDOW ⇒ 会话确定在动，不 WARN（真忙）。
 #   无 transcript 配置 ⇒ 交叉控制无从确认，不 WARN（pane-only 观察者已有 D5 pane-only 审计 WARN）。
+# 判定逻辑在 pane-state-classify.ts 的 permPromptWarnVerdict（决策层 import 直调覆盖）。
 _sl_perm_prompt_warn_verdict() {
   local rounds=$1 tx_age=$2
-  if [ "$rounds" -ge "${PERM_PROMPT_WARN_ROUNDS:-3}" ] 2>/dev/null; then
-    if [ "$tx_age" -lt 0 ]; then
-      echo "ok"   # 无 transcript 可交叉核对——不报（条件未确认，绝不因「无法确认」而报）
-    elif [ "$tx_age" -gt "${PERM_PROMPT_TX_WINDOW:-60}" ]; then
-      echo "warn"
-    else
-      echo "ok"   # transcript 刚写过——会话确实在动，不是卡死的假 permission-prompt
-    fi
-  else
-    echo "ok"
-  fi
+  "$SL_NODE" --no-warnings --experimental-strip-types "$SL_CLASSIFY" --perm-warn-verdict "$rounds" "$tx_age" \
+    --warn-rounds "${PERM_PROMPT_WARN_ROUNDS:-3}" --tx-window "${PERM_PROMPT_TX_WINDOW:-60}" 2>/dev/null \
+    || echo "ok"
 }
 
 # transcript_api_error_count —— 「当前被 429 卡住」的计数（AC9 结构性字段 + AC7/D4 时效）。
@@ -419,116 +409,100 @@ _sl_perm_prompt_warn_verdict() {
 # `isApiErrorMessage: true` 或转义键 `\"isApiErrorMessage\":…`，前导不是裸 `"`，不会误命中。
 # 元数据行（非 assistant/user 消息）跳过、不作为「成功应答」边界（与 transcript_last_message_type
 # 同源；真实 transcript 尾部常有 mode/summary 等元数据）。
+# ── 决策层 import 化（gap-session-liveness-decision-import-refactor，2026-08-13）──────────────────
+# 以下 transcript 判定（last_message_type / api_error_count / cache_read_tokens /
+# context_saturation / last_user_input_epoch）的【判定逻辑】已迁入 pane-state-classify.ts（纯函数，
+# import 直调可测，零真实时间/负载免疫——AC1）。本 shell 保留判定【调用】分类器：每个判定函数委托
+# `node pane-state-classify.ts --transcript <file>` 读同一份 JSONL、一次算出全部判定（一个 node
+# 子进程同时出五个值），再把各值送回。行为与原 bash grep/tail 实现逐字段一致（tail 窗口语义相同：
+# 文件尾 newline 不产生额外空行；last_message 的 tail-500+兜底全扫 ≡ 从尾全扫）。
+# 主循环每轮一次 `_sl_transcript_batch` 填全局，各判定函数与接缝复用这些全局——一个 transcript 目标
+# 每轮只多一个 node 子进程（而非每判定一次 grep/tail 派生，M3 瞬态进程竞争教训）。
+_sl_tx_last_mt=""; _sl_tx_api_n=""; _sl_tx_cache=""; _sl_tx_sat=""; _sl_tx_lep=""
+_sl_transcript_batch() {
+  local file=$1 out
+  _sl_tx_last_mt="unknown"; _sl_tx_api_n="0"; _sl_tx_cache="unknown"; _sl_tx_sat="unknown"; _sl_tx_lep="unknown"
+  [ -n "$file" ] || return 0
+  out=$("$SL_NODE" --no-warnings --experimental-strip-types "$SL_CLASSIFY" --transcript "$file" \
+    --saturation-tokens "${SATURATION_TOKENS:-450000}" --api-error-window "${API_ERROR_WINDOW:-200}" 2>/dev/null) \
+    || return 0
+  _sl_tx_last_mt=${out%%$'\n'*}; out=${out#*$'\n'}
+  _sl_tx_api_n=${out%%$'\n'*}; out=${out#*$'\n'}
+  _sl_tx_cache=${out%%$'\n'*}; out=${out#*$'\n'}
+  _sl_tx_sat=${out%%$'\n'*}; out=${out#*$'\n'}
+  _sl_tx_lep=${out%%$'\n'*}
+}
+
+# transcript_api_error_count —— 「当前被 429 卡住」的计数（AC9 结构性字段 + AC7/D4 时效）。
+# 结构字段 = 顶层 JSON 键 `"isApiErrorMessage":true`（只有 API 被拒记录才有，实测 archguard
+# 被 429 拒绝会话最近 200 条为 6、健康/陈旧会话为 0）。不用 429 文案（绑死供应商文案，换端点
+# 即失效）；不用「transcript 是否增长」（429 也会被写进 transcript，增长分不开两种空闲）。
+# AC7/D4 时效：只数【尾随】的错误记录——从尾向前扫最近 API_ERROR_WINDOW 条，数连续的
+# isApiErrorMessage 记录，遇到第一条非错误消息（最近一次成功应答）即停。一次瞬时 429 被后续
+# 正常应答覆盖后就不再计数（D4 复现：13:04 错误→13:08 正常应答，旧判据让 13:06/13:09/13:11
+# 连报三条 CANT-SEND——一次瞬时网络错误把此后 26 分钟的每次空闲都升级成叫人告警）。判定逻辑在
+# pane-state-classify.ts 的 trailingApiErrorCount（决策层 import 直调覆盖）。
 transcript_api_error_count() {
-  local t=$1 n=0 line
-  while IFS= read -r line; do
-    case "$line" in
-      *'"type":"assistant"'*|*'"type":"user"'*)
-        if printf '%s' "$line" | grep -q '"isApiErrorMessage"[[:space:]]*:[[:space:]]*true'; then
-          n=$(( n + 1 ))
-        else
-          break
-        fi
-        ;;
-    esac
-  done < <(tail -n "$API_ERROR_WINDOW" "$t" 2>/dev/null | tac 2>/dev/null)
-  printf '%s\n' "$n"
+  _sl_transcript_batch "$1"
+  printf '%s\n' "$_sl_tx_api_n"
 }
 
 # transcript_last_message_type —— transcript 最后一条【消息】的类型（阶段三 AC1）。决定「候选闲」
-# 还是「确定忙」；输出：
-#   pending-tool-use  最后一条消息是 assistant 且 content 含 tool_use 块 = 回合进行中，确定忙
-#   pure-text         最后一条消息是 assistant 且 content 无 tool_use（纯文本/思考）= 候选闲
-#   user-input        最后一条消息是 user（新输入或 tool_result 回执）= 模型即将应答，按忙处理
-#   unknown           取不到/无消息记录
-# 扫描只认顶层 type=assistant|user 的记录（跳过 system/mode/last-prompt/file-history-* 等元数据），
-# 从尾部向前找最后一条消息——「最后一条消息」才是忙闲判据，不是「文件最后一行」（那常是元数据，
-# 实测距文件尾 ≤2 行的元数据会盖住真正的最后消息）。grep 模式 `"type":"assistant"` 只命中顶层：
-# content 块的类型是 text/thinking/tool_use/tool_result，message 对象的类型是 message，都不是
-# assistant；同理 `"type":"user"` 只命中顶层 user 记录（tool_result 块的类型是 tool_result）。
-# tail 界 500 行提速（最后一条消息实测距文件尾 ≤2 行）；无匹配再全扫兜底。
+# 还是「确定忙」；输出：pending-tool-use / pure-text / user-input / unknown。判定逻辑在
+# pane-state-classify.ts 的 transcriptLastMessageType（import 直调覆盖）。
 transcript_last_message_type() {
-  local t=$1 line
-  line=$(tail -n 500 "$t" 2>/dev/null | grep -E '"type":"(assistant|user)"' | tail -1)
-  [ -n "$line" ] || line=$(grep -E '"type":"(assistant|user)"' "$t" 2>/dev/null | tail -1)
-  [ -n "$line" ] || { echo "unknown"; return 0; }
-  case "$line" in
-    *'"type":"user"'*)
-      echo "user-input" ;;
-    *)
-      if printf '%s' "$line" | grep -q '"type":"tool_use"'; then
-        echo "pending-tool-use"
-      else
-        echo "pure-text"
-      fi ;;
-  esac
+  _sl_transcript_batch "$1"
+  printf '%s\n' "$_sl_tx_last_mt"
 }
 
 # last_user_input_epoch —— transcript 里最近一条 type=user 记录的时间戳转 epoch（AC7）。
 # 会话收到输入（打字 / send-keys / loop 注入的提示）都会写 type=user 记录；「最后一次收到输入
-# 的时刻」= 最近一条这种记录的 timestamp。返回空 = 取不到（无匹配/解析失败）。
+# 的时刻」= 最近一条这种记录的 timestamp。返回空 = 取不到（无匹配/解析失败）。判定逻辑在
+# pane-state-classify.ts 的 lastUserInputEpoch。
 last_user_input_epoch() {
-  local t=$1 line ts
-  line=$(grep '"type":"user"' "$t" 2>/dev/null | tail -1)
-  [ -n "$line" ] || return 1
-  ts=$(printf '%s' "$line" | grep -o '"timestamp":"[^"]*"' | head -1 | cut -d'"' -f4)
-  [ -n "$ts" ] || return 1
-  date -d "$ts" +%s 2>/dev/null || return 1
+  _sl_transcript_batch "$1"
+  [ "$_sl_tx_lep" != "unknown" ] && [ -n "$_sl_tx_lep" ] || return 1
+  printf '%s\n' "$_sl_tx_lep"
+  return 0
 }
 
 # ── 阶段四：上下文饱和度（gap-session-liveness-cannot-see-context-saturation-...，2026-08-07）──
-# 三个纯函数，全部读 transcript 的结构字段，不碰屏幕百分比文本（AC3）。
+# 判定全部读 transcript 的结构字段，不碰屏幕百分比文本（AC3）；判定逻辑在 pane-state-classify.ts。
 
 # transcript_cache_read_tokens —— 最近 assistant API 响应的 usage.cache_read_input_tokens（缓存前缀
 # 大小 = 上下文实际用量）。结构化源：该字段只在 assistant 响应的 usage 对象里出现，工具回执/元数据
-# 记录没有。tail 界 1000 行提速（最近一次 usage 距文件尾很近）；无匹配再全扫兜底。返回 "unknown" =
-# 取不到（无 transcript / 无 usage 记录）。
+# 记录没有。返回 "unknown" = 取不到（无 transcript / 无 usage 记录）。判定逻辑在
+# pane-state-classify.ts 的 transcriptCacheReadTokens。
 transcript_cache_read_tokens() {
-  local t=$1 line n
-  [ -e "$t" ] && [ -r "$t" ] || { echo "unknown"; return 1; }
-  line=$(tail -n 1000 "$t" 2>/dev/null | grep -oE '"cache_read_input_tokens":[0-9]+' | tail -1)
-  [ -n "$line" ] || line=$(grep -oE '"cache_read_input_tokens":[0-9]+' "$t" 2>/dev/null | tail -1)
-  [ -n "$line" ] || { echo "unknown"; return 1; }
-  n=${line##*:}
-  printf '%s\n' "$n"
+  _sl_transcript_batch "$1"
+  printf '%s\n' "$_sl_tx_cache"
 }
 
 # last_message_is_unanswered_input —— 最后一条【消息】是否未获回应的 user 输入（收到新指令但模型尚未
 # 应答）。复用 transcript_last_message_type 的消息定位（跳过 system/mode 等元数据）：最后一条是 user =
 # yes（收进了但没答出来）；最后一条是 assistant = no（还在应答/已应答）。
 last_message_is_unanswered_input() {
-  local t=$1 mtype
-  mtype=$(transcript_last_message_type "$t")
-  [ "$mtype" = "user-input" ] && echo "yes" || echo "no"
+  _sl_transcript_batch "$1"
+  [ "$_sl_tx_last_mt" = "user-input" ] && echo "yes" || echo "no"
 }
 
 # transcript_context_saturation —— 上下文饱和度的复合判据（AC4/任务约束 2：饱和≠故障，见即报的是
-# 「饱和且随后指令未被响应」）：
-#   saturated   cache_read_input_tokens ≥ SATURATION_TOKENS 且最后一条是未应答 user 输入
-#   unsaturated 其它（上下文低，或上下文高但仍在应答——auto-compact 是正常机制，不报）
-#   unknown     取不到 transcript / 无 usage 记录（静默，不猜）
+# 「饱和且随后指令未被响应」）：saturated / unsaturated / unknown。判定逻辑在
+# pane-state-classify.ts 的 transcriptContextSaturation。
 transcript_context_saturation() {
-  local t=$1 cache last
-  cache=$(transcript_cache_read_tokens "$t")
-  [ "$cache" = "unknown" ] && { echo "unknown"; return 1; }
-  if [ "$cache" -ge "$SATURATION_TOKENS" ] 2>/dev/null; then
-    last=$(last_message_is_unanswered_input "$t")
-    if [ "$last" = "yes" ]; then echo "saturated"; else echo "unsaturated"; fi
-  else
-    echo "unsaturated"
-  fi
+  _sl_transcript_batch "$1"
+  printf '%s\n' "$_sl_tx_sat"
 }
 
 # transcript_saturation_report —— --saturation 接缝（AC1：一条命令报出目标会话的上下文饱和度）。
-# 打印判据 + 原始代理值，供观察者/测试直接读。
+# 打印判据 + 原始代理值，供观察者/测试直接读。格式化留在本 shell（表述层），判据来自分类器。
 transcript_saturation_report() {
-  local t=$1 cache sat
+  local t=$1
   [ -e "$t" ] && [ -r "$t" ] || { echo "unknown (no readable transcript)"; return 1; }
-  cache=$(transcript_cache_read_tokens "$t")
-  sat=$(transcript_context_saturation "$t")
-  case "$sat" in
-    saturated)   echo "saturated cache_read_input_tokens=${cache} (context ≥ ${SATURATION_TOKENS} + last message unanswered user input)" ;;
-    unsaturated) echo "unsaturated cache_read_input_tokens=${cache}" ;;
+  _sl_transcript_batch "$t"
+  case "$_sl_tx_sat" in
+    saturated)   echo "saturated cache_read_input_tokens=${_sl_tx_cache} (context ≥ ${SATURATION_TOKENS} + last message unanswered user input)" ;;
+    unsaturated) echo "unsaturated cache_read_input_tokens=${_sl_tx_cache}" ;;
     *)           echo "unknown (no assistant usage record)" ;;
   esac
 }
@@ -1335,6 +1309,11 @@ while true; do
     tr_path=""
     _sl_effective_transcript "$name" "$root" "${pid:-}"
     tr_path="$_sl_eff_transcript"
+    # 决策层 import 化（gap-session-liveness-decision-import-refactor）：transcript 判定一次批量算出，
+    # 本轮各判定读取 _sl_tx_* 全局（一个 node 子进程出一份全部判定，而非每判定一次派生）。
+    if [ -n "$tr_path" ]; then
+      _sl_transcript_batch "$tr_path"
+    fi
 
     # 停机基线（协调方 2026-08-03 样本）：解除停机那一刻重置陈旧度起点。监视器每轮自己观察
     # .halt 从存在→不存在，不需要额外状态源。archguard 停泊 310 分钟后删 .halt，同一轮打出
@@ -1421,10 +1400,10 @@ while true; do
         pane_idle=$(( 1 - pane_busy ))
         # 阶段三（AC1）：transcript 最后一条消息类型接入忙闲判据。transcript 侧优先级更高——
         # pending-tool-use / user-input ⇒ 确定忙，无论 pane 如何（AC5 忙判据零漏报）。
+        # 判定来自本轮 _sl_transcript_batch 的 _sl_tx_last_mt（分类器 transcriptLastMessageType）。
         transcript_busy=0
         if [ -n "$tr_path" ] && [ -e "$tr_path" ]; then
-          ttype=$(transcript_last_message_type "$tr_path")
-          case "$ttype" in
+          case "$_sl_tx_last_mt" in
             pending-tool-use|user-input) transcript_busy=1 ;;
             *) transcript_busy=0 ;;
           esac
@@ -1478,8 +1457,9 @@ while true; do
             [ -n "${RESUME_CAUSE[$name]}" ] || RESUME_CAUSE[$name]="状态变化"
             RESUME_LASTIN[$name]="取不到"
             if [ -n "$tr_path" ] && [ -r "$tr_path" ]; then
-              if lep=$(last_user_input_epoch "$tr_path") && [ -n "$lep" ]; then
-                lmin=$(( ( $(date +%s) - lep ) / 60 ))
+              # 判定来自本轮 _sl_transcript_batch 的 _sl_tx_lep（分类器 lastUserInputEpoch）。
+              if [ -n "$_sl_tx_lep" ] && [ "$_sl_tx_lep" != "unknown" ]; then
+                lmin=$(( ( $(date +%s) - _sl_tx_lep ) / 60 ))
                 [ "$lmin" -lt 0 ] && lmin=0
                 RESUME_LASTIN[$name]="${lmin} 分钟前"
               fi
@@ -1519,7 +1499,8 @@ while true; do
           # 与常规 IDLE 互斥：能发请求才谈「没活干」，故这里直接二选一。
           api_n=0; api_blocked=0
           if [ -n "$tr_path" ] && [ -e "$tr_path" ]; then
-            api_n=$(transcript_api_error_count "$tr_path")
+            # 判定来自本轮 _sl_transcript_batch 的 _sl_tx_api_n（分类器 trailingApiErrorCount）。
+            api_n=$_sl_tx_api_n
             api_blocked=$([ "$api_n" -ge "$API_ERROR_MIN" ] 2>/dev/null && echo 1 || echo 0)
           fi
           PREV_API_BLOCKED[$name]=$api_blocked
@@ -1564,7 +1545,8 @@ while true; do
         # AC9（盲点13）每轮复查：覆盖「早已空闲、随后才被 429」的情形（转换时已查一次并钉住
         # PREV_API_BLOCKED；这里对持续空闲会话每轮复查，假→真沿再报一次）。
         if [ "$idle" = "1" ] && [ "$halted" = "0" ] && [ -n "$tr_path" ] && [ -e "$tr_path" ]; then
-          api_n2=$(transcript_api_error_count "$tr_path")
+          # 判定来自本轮 _sl_transcript_batch 的 _sl_tx_api_n（分类器 trailingApiErrorCount）。
+          api_n2=$_sl_tx_api_n
           api_blocked2=$([ "$api_n2" -ge "$API_ERROR_MIN" ] 2>/dev/null && echo 1 || echo 0)
           if [ "$api_blocked2" = "1" ] && [ "${PREV_API_BLOCKED[$name]:-0}" = "0" ]; then
             sl_emit "SESSION-IDLE-CANT-SEND $name 的会话空闲且发不出请求（transcript 尾部连续 ${api_n2} 条 isApiErrorMessage 结构字段，未被后续应答覆盖——AC7/D4 时效）——不可自愈类，立即升级给人"
@@ -1625,7 +1607,8 @@ while true; do
       # 区别于普通「忙」（AC2）：busy 会话若还在应答（最后一条是 assistant）不报 saturated。仅配置了
       # transcript（SESSION_TRANSCRIPTS）的目标适用——tick 日志不是会话证据。边沿触发。
       if [ -n "$tr_path" ] && [ -r "$tr_path" ]; then
-        sat=$(transcript_context_saturation "$tr_path")
+        # 判定来自本轮 _sl_transcript_batch 的 _sl_tx_sat（分类器 transcriptContextSaturation）。
+        sat=$_sl_tx_sat
         if [ "$sat" = "saturated" ]; then
           if [ "${PREV_SATURATED[$name]:-0}" = "0" ]; then
             sl_emit "SESSION-SATURATED $name 的会话上下文已饱和（cache_read_input_tokens ≥ ${SATURATION_TOKENS} 且最后一条是未应答的用户输入）——活着但可能收不进新指令；区别于普通「忙」（AC2）"
