@@ -147,6 +147,54 @@ test("AC1c — a new script without a declared question is unclassified and the 
   }
 });
 
+// ── AC5 (task): no command substitution in data values (gap-capability-catalog-backtick-command-substitution) ──
+// A backtick or $( inside a double-quoted data value is EXECUTED by bash at load time — the
+// data/code boundary punched through by a quote (round 143 red: a backtick `bash scripts/test.sh
+// --static-checks-doc` in QUESTION[precommit-guard.ts] ran the whole doc-check suite on every
+// catalog load and broke the tab-separated ROWS → --json IndexError). The catalog's own AC5 gate
+// must fail loud on both injection forms and pass on the fixed baseline.
+test("AC5 no-command-substitution — a data value containing a backtick or $( makes the catalog exit non-zero (negative control + restore)", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cap-cat-cs-"));
+  try {
+    fs.mkdirSync(path.join(tmp, "plugin", "scripts"), { recursive: true });
+    for (const f of derivedScripts()) {
+      fs.copyFileSync(path.join(SCRIPTS_DIR, f), path.join(tmp, "plugin", "scripts", f));
+    }
+    const catTmp = path.join(tmp, "plugin", "scripts", "capability-catalog.sh");
+    const src = fs.readFileSync(CATALOG, "utf8");
+    // Anchor: the capability-catalog.sh QUESTION line (first `[capability-catalog.sh]="..."` in the file).
+    const anchor = /^(\s*\[capability-catalog\.sh\]="[^"]*)(")$/m;
+
+    // Baseline: the fixed catalog (no injection) passes the AC5 gate.
+    const base = spawnSync("bash", [catTmp, "--json"], { encoding: "utf8" });
+    assert.equal(base.status, 0, `baseline catalog must pass the AC5 gate:\n${base.stderr}`);
+
+    // Fail direction 1: a BACKTICK inside a QUESTION value (command substitution injection).
+    const btInjected = src.replace(anchor, '$1 — runs `echo injected` now$2');
+    assert.notEqual(btInjected, src, "the backtick must actually be injected");
+    fs.writeFileSync(catTmp, btInjected);
+    const failBt = spawnSync("bash", [catTmp, "--json"], { encoding: "utf8" });
+    assert.notEqual(failBt.status, 0, "a backtick in a data value must make the catalog exit non-zero (AC5 gate)");
+    assert.match(failBt.stderr, /AC5 no-command-substitution/, "the gate names the AC5 failure");
+    assert.match(failBt.stderr, /capability-catalog\.sh/, "the gate points at the injecting line");
+
+    // Fail direction 2: $( ) inside a QUESTION value.
+    const dollarInjected = src.replace(anchor, '$1 — computes $(echo injected) now$2');
+    assert.notEqual(dollarInjected, src, "the $() must actually be injected");
+    fs.writeFileSync(catTmp, dollarInjected);
+    const failDollar = spawnSync("bash", [catTmp, "--json"], { encoding: "utf8" });
+    assert.notEqual(failDollar.status, 0, "$( ) in a data value must make the catalog exit non-zero (AC5 gate)");
+    assert.match(failDollar.stderr, /AC5 no-command-substitution/, "the gate names the AC5 failure");
+
+    // Pass direction: restored catalog passes again.
+    fs.writeFileSync(catTmp, src);
+    const pass = spawnSync("bash", [catTmp, "--json"], { encoding: "utf8" });
+    assert.equal(pass.status, 0, `restored catalog must pass the AC5 gate:\n${pass.stderr}`);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 // ── AC1/AC3: delivery-form entry surface (gap-shipped-artifact-carries-86-loose-shell-scripts-as-the-delivery-form) ──
 test("AC1/AC3 — --entry-surface passes at baseline: every consumer-doc-referenced .sh is a declared public entry point", () => {
   const r = runCatalog(["--entry-surface"]);

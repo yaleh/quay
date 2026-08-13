@@ -48,9 +48,11 @@
 #                                                        #   nor be taught in SKILL/README; exit 1 otherwise
 #
 # Exit status: 0 when every shipped check declares its question (unclassified == 0)
-# AND (in --entry-surface mode) no internal .sh is referenced by consumer-facing docs;
-# 1 when any check is unclassified (AC1c gate) or the delivery-form gate fails (AC3).
-# The `--json` mode uses the same AC1c gate.
+# AND no data value contains a command-substitution pattern (AC5 gate — backtick or $()
+# in a double-quoted value would execute at load time) AND (in --entry-surface mode) no
+# internal .sh is referenced by consumer-facing docs;
+# 1 when any check is unclassified (AC1c gate), the AC5 gate fires, or the delivery-form
+# gate fails (AC3). The `--json` mode uses the same AC1c/AC5 gates.
 #
 # Output shape (--json): a top-level JSON array of
 #   {"file": "<basename>", "question": "<question>" | null, "ships": true|false}
@@ -71,6 +73,23 @@ set -euo pipefail
 # installed target project (the laid-down copy at <workspace>/plugin/scripts/).
 SELF="$(readlink -f "$0" 2>/dev/null || echo "$0")"
 SELF_DIR="$(cd "$(dirname "$SELF")" 2>/dev/null && pwd || true)"
+
+# ── AC5 gate (no command substitution in data values) — fail-fast BEFORE any array ──
+# assignment: a backtick or $( inside a double-quoted data value is EXECUTED by bash during
+# the assignment, punching through the data/code boundary (round 143 red — a backtick
+# `bash scripts/test.sh --static-checks-doc` in QUESTION[precommit-guard.ts] ran the whole
+# doc-check suite on every catalog load and its multiline output broke the tab-separated
+# ROWS structure → --json IndexError). Static scan of the SOURCE TEXT (not the evaluated
+# values) so the injection point itself is caught before it executes. A data value line is
+# `  [name]="..."` (two-space indent); comment lines (leading `#`) are not data values.
+_cs_violations="$(grep -nE '^  \[[^]]+\]="[^"]*(`|\$\()' "${SELF_DIR}/capability-catalog.sh" || true)"
+if [ -n "${_cs_violations}" ]; then
+  echo "FAIL (AC5 no-command-substitution): a data value in capability-catalog.sh contains a command-substitution pattern (backtick or \$( ) inside a double-quoted value)." >&2
+  echo "  It would execute at load time and break the tab-separated ROWS — write the command as plain text." >&2
+  printf '%s\n' "${_cs_violations}" | sed 's/^/  /' >&2
+  exit 1
+fi
+unset _cs_violations
 
 # ── capability declarations (AC1a: ONE machine-readable line per shipped check) ────
 # Format: [<basename>]="<the question this check makes askable>"
@@ -205,7 +224,7 @@ declare -A QUESTION=(
   [periodic-push-backup.sh]="Can this repo's current branch be periodically pushed to the shared bare backup repo (non-force, idempotent)?"
   [pipe-exit-code-check.sh]="Does a pipeline propagate its last command's exit code correctly?"
   [portfolio-choice.ts]="Which non-overlapping milestone portfolio should the next cycle pursue?"
-  [precommit-guard.ts]="At commit time: ① do the DOC-CLASS checks pass (AC51 断言面拆分 — doc consistency checks moved out of the full suite into pre-commit: `bash scripts/test.sh --static-checks-doc`, seconds-level feedback instead of an 8-minute round, and editing docs no longer makes a running round red)? ② is a commit being made while a suite round is running (state=running in .quay/full-suite-state.json) AND it touches CODE-class assertion-surface files (the doc files are excluded via run_doc_checks' @static-class doc objects; plugin/scripts/judged-object-registry.json; missing/empty falls back to the narrowed surface tasks/** + plugin/loop/** + scripts/test.sh @static-object aggregate minus doc-class) — the pre-commit guard that makes 'no commits during a round' mechanically enforced for ALL writers (outer/manager/inner), fail-loud on a missing/null state file, with an explicit --allow-dirty-round override that does NOT bypass doc-check failures?"
+  [precommit-guard.ts]="At commit time: ① do the DOC-CLASS checks pass (AC51 断言面拆分 — doc consistency checks moved out of the full suite into pre-commit: bash scripts/test.sh --static-checks-doc, seconds-level feedback instead of an 8-minute round, and editing docs no longer makes a running round red)? ② is a commit being made while a suite round is running (state=running in .quay/full-suite-state.json) AND it touches CODE-class assertion-surface files (the doc files are excluded via run_doc_checks' @static-class doc objects; plugin/scripts/judged-object-registry.json; missing/empty falls back to the narrowed surface tasks/** + plugin/loop/** + scripts/test.sh @static-object aggregate minus doc-class) — the pre-commit guard that makes 'no commits during a round' mechanically enforced for ALL writers (outer/manager/inner), fail-loud on a missing/null state file, with an explicit --allow-dirty-round override that does NOT bypass doc-check failures?"
   [prefriction-count.sh]="How many newly-filed tasks had no triggering failure/alarm/contradiction at filing (the falsifiable pre-friction count)?"
   [preparation-feedback.ts]="What feedback should the preparation phase return to the proposer?"
   [prepare-admission-check.ts]="Is it safe for this milestone to acquire the single-flight admission lease?"
