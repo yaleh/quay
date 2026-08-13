@@ -82,11 +82,15 @@ if [ -n "$TRUTH" ]; then
   esac
 fi
 
-# 判据 0：日志必须存在。
+# 判据 0：日志缺失 ⇒ NOT-EVALUATED（exit 0），不是 FAIL。
+# tick-log.md 是 gitignored runtime 文件——fresh verify worktree（provision 只拷 gitignored 运行时文件
+# 的 symlink，不拷 tick-log）里它【合法缺失】；此时 checker 无法评估，应如实报 NOT-EVALUATED 而非
+# FAIL（否则接线后每个 fresh-worktree 全量认证都会因缺日志红）。同 NOT-EVALUATED 原则：缺输入 ⇒
+# 「没查成」的可区分取值，不是「查过且不合格」（manager 2026-08-13）。
 if [ ! -f "$LOG" ]; then
-  if [ "$JSON" = 1 ]; then printf '{"ok":false,"reason":"no-log","log":"%s"}\n' "$LOG"
-  else echo "outer-tick-log-check: FAIL — outer tick log not found: $LOG"; fi
-  exit 1
+  if [ "$JSON" = 1 ]; then printf '{"ok":true,"evaluated":false,"reason":"no-log","log":"%s"}\n' "$LOG"
+  else echo "outer-tick-log-check: NOT-EVALUATED — tick-log not found: $LOG（fresh worktree 缺 gitignored 运行时日志属合法；无法评估）"; fi
+  exit 0
 fi
 
 # 取最后一个 tick 段（`- \`HH:MMZ\`` bullet 起，到文件尾）。真实 tick-log 用 bullet 行

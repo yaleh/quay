@@ -130,10 +130,11 @@ test("AC4 — 陈旧行（mtime 超上界）+ 实测真值已变 ⇒ 不误报�
 
 // ── 边界 ─────────────────────────────────────────────────────────────────────────────
 
-test("AC2 — 日志缺失 fail-closed", () => {
+test("AC2 — 日志缺失 NOT-EVALUATED（exit 0）——fresh worktree 合法缺 gitignored tick-log，不 FAIL", () => {
   const r = spawnSync("bash", [CHECKER, "--log", "/nonexistent/tick-log.md", "--json"], { encoding: "utf8" });
-  assert.equal(r.status, 1);
+  assert.equal(r.status, 0, `expect exit 0: ${r.stdout}`);
   assert.match(r.stdout, /no-log/);
+  assert.match(r.stdout, /"evaluated":false/, "missing log must report evaluated:false (NOT-EVALUATED), not FAIL");
 });
 
 test("AC2 — 无 tick 段 fail-closed", () => {
