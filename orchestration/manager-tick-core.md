@@ -51,7 +51,14 @@
   欠 15 个强制动作交付 0 个。**我自己同期的 `no-action` 行同样没带这五条读数,是同一个洞**;
   人的原话:「不要再为愚蠢的行为做解释——先想清楚正确的行为是什么,再去看行为是否符合」。
 - **B4 哨兵清扫 + cron 证据（AC4）**:`CronList` → 删所有含 `[manager-tick]` 者 → 建一个 → **把 CronList 结果追加记进 `<QUAY_GLOBAL_DIR>/manager/cron-evidence.jsonl`**（一行 (src:961 "重挂 cron 必须 `cat` 这个文件")
-  `{"at":<ISO>,"atEpoch":<epoch>,"mechanism":"cron","sentinel":"[manager-tick]","cronListCount":<N>}`，N = CronList 中含哨兵的任务数）——注册表↔真 cron 由此可外部核实（`manager-arm-loop.sh --verify-cron`）；
+  `{"at":<ISO>,"atEpoch":<epoch>,"mechanism":"cron","sentinel":"[manager-tick]","cronListCount":<N>}`，N = CronList 中含哨兵的任务数）
+  **+ 必须紧接着 `bash plugin/scripts/manager-arm-loop.sh --record-cron <新建的 cron id>`,再 `--verify` 确认 `state=registry-verified`。**
+  **⚠️ 两个参数陷阱,2026-08-13 10:2xZ 实测各栽一次（本行原文就是其中一个的来源）**：
+  ①**本行原写 `--verify-cron`,该 flag 不存在**——脚本报 `ERROR: unknown argument`,正确是 `--verify`（**死 flag 写在我自己的执行核里,与 44 处 src:N 漂移、「≤80 行」退休判据同族:必经路径上的指针会过期而无人报错**）；
+  ②**不要传 `--home`**——`manager-arm-loop.sh:41` 正本写「默认 `$QUAY_GLOBAL_DIR/manager/`」,我传 `--home $HOME/.quay-global` 少了一级 ⇒ 得 `registry-missing`,
+  **那是我造出来的假故障,不是真状态**（硬规则 5:在错的地方搜不到 X 不等于 X 不存在——registry 就在深一级）。
+  **首次真跑此条即抓到一个真缺陷**:`state=registry-only`「the registry says armed but carries NO CronCreate receipt (the AC4 defect)」
+  ⇒ **我此前每轮都扫哨兵、但从未写收据,A19 判据② 一直不成立而无人发现**;补 `--record-cron` 后转 `registry-verified`。
   **不记证据 = 「注册表说武装了」不可信（gap-manager-cold-start-no-falsifiable-checklist 缺陷 3）**。**绝不靠记住的 ID。**
 
 ## C. 硬约束(每条都已付过代价,理由见档案)
