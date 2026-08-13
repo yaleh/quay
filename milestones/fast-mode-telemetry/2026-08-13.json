@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-13T05:05:22.758Z",
+  "generatedAt": "2026-08-13T07:22:00.875Z",
   "since": null,
   "tasks": [
     {
@@ -120,6 +120,13 @@
       "minutes": 29.614633333333334,
       "outcome": "done",
       "fanInCommit": null
+    },
+    {
+      "taskId": "gap-leak-residue-per-run-namespace-isolation",
+      "runId": "fm-gap-leak-residue-per-run-namespace-isolation-1786595094220-jixap1",
+      "minutes": 49.67225,
+      "outcome": "done",
+      "fanInCommit": "25e7915d412066e3ccfbfd633a71bacd3c484580"
     },
     {
       "taskId": "gap-leak-scan-reap-race-false-red",
@@ -248,11 +255,25 @@
       "fanInCommit": null
     },
     {
+      "taskId": "gap-tests-assert-live-repo-state-break-idempotency",
+      "runId": "fm-gap-tests-assert-live-repo-state-break-idempotency-1786595388876-wddmez",
+      "minutes": 45.08405,
+      "outcome": "done",
+      "fanInCommit": "b73d4f5c29d576cbc8be2994fa095a4e680bd142"
+    },
+    {
       "taskId": "gap-verification-round-counter-overwrites-not-sums",
       "runId": "fm-gap-verification-round-counter-overwrites-not-sums-1786527981773-tnox8v",
       "minutes": 13.545416666666666,
       "outcome": "done",
       "fanInCommit": null
+    },
+    {
+      "taskId": "gap-verification-round-in-one-shot-worktree",
+      "runId": "fm-gap-verification-round-in-one-shot-worktree-1786595388524-l44mu3",
+      "minutes": 44.9265,
+      "outcome": "done",
+      "fanInCommit": "776632e95b0ebbcd3e53b7352aa16e3314ad6808"
     },
     {
       "taskId": "gap-verification-round-load-fields-from-systemd",
@@ -272,32 +293,20 @@
   "orphaned": [],
   "inProgress": [
     {
-      "taskId": "gap-leak-residue-per-run-namespace-isolation",
-      "runId": "fm-gap-leak-residue-per-run-namespace-isolation-1786595094220-jixap1",
-      "startedAtMs": 1786595094237,
-      "startedAtMsUnreliable": true
-    },
-    {
-      "taskId": "gap-tests-assert-live-repo-state-break-idempotency",
-      "runId": "fm-gap-tests-assert-live-repo-state-break-idempotency-1786595388876-wddmez",
-      "startedAtMs": 1786595388891,
-      "startedAtMsUnreliable": true
-    },
-    {
-      "taskId": "gap-verification-round-in-one-shot-worktree",
-      "runId": "fm-gap-verification-round-in-one-shot-worktree-1786595388524-l44mu3",
-      "startedAtMs": 1786595388542,
+      "taskId": "gap-inner-self-wake-sleep-empty-slots-not-dispatch",
+      "runId": "fm-gap-inner-self-wake-sleep-empty-slots-not-dispatch-1786604260279-jte39h",
+      "startedAtMs": 1786604260311,
       "startedAtMsUnreliable": true
     }
   ],
   "deferred": [],
-  "meanMinutes": 26.695427192982457,
-  "medianMinutes": 24.247958333333333,
-  "tasksPerHour": 1.701466084171577,
-  "serialEquivalentPerHour": 2.247575944983284,
+  "meanMinutes": 28.149000813008133,
+  "medianMinutes": 24.812566666666665,
+  "tasksPerHour": 1.6661894997956885,
+  "serialEquivalentPerHour": 2.1315143794472795,
   "windowStart": "2026-08-12T06:45:12.994Z",
-  "windowEnd": "2026-08-13T05:05:14.244Z",
-  "windowHours": 22.333680555555556,
+  "windowEnd": "2026-08-13T07:21:38.356Z",
+  "windowHours": 24.607045,
   "haltedHours": 0,
   "halted": [],
   "blocked": [
@@ -340,7 +349,13 @@
     }
   ],
   "reconcilable": [],
-  "realInFlight": 3,
-  "closedButLive": [],
-  "occupiedSlots": 3
+  "realInFlight": 1,
+  "closedButLive": [
+    {
+      "taskId": "gap-session-liveness-family-hermetic-vs-ambient-load",
+      "runId": "fm-gap-session-liveness-family-hermetic-vs-ambient-load-1786560515455-mdxubg",
+      "reason": "worktree-present"
+    }
+  ],
+  "occupiedSlots": 2
 }

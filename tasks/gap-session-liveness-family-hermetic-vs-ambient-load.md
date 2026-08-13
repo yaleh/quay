@@ -1,7 +1,7 @@
 ---
 id: gap-session-liveness-family-hermetic-vs-ambient-load
 title: session-liveness 家族 hermetic 化（消 lowconc 并发天花板）
-status: ready
+status: done
 labels:
   - gap
   - defect

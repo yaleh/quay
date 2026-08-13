@@ -1,7 +1,7 @@
 ---
 id: gap-split-three-phase-floor-files
 title: 拆三相 floor 文件（最长单文件）——下界 267s → 200s
-status: ready
+status: done
 labels:
   - gap
   - mechanism
