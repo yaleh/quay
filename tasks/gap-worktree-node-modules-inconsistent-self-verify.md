@@ -1,7 +1,7 @@
 ---
 id: gap-worktree-node-modules-inconsistent-self-verify
 title: "Some worktrees can't self-verify: node_modules presence is agent-dependent, so verification falls back to the shared checkout (where mutations land)"
-status: ready
+status: todo
 labels:
   - gap
 extra:
@@ -70,6 +70,8 @@ resume 先定 setup 步骤（符号链接 vs 复制 vs install），再接派发
 - [ ] 派发流程已接入 setup（内层派发 prompt 或派发工具），新 worktree 不再依赖 agent 记得建 node_modules
 - [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
+
+**AC46 第一层（outer 2026-08-13）**：本任务 Touches 仍为「待定」（未声明 dispatch-worktree-setup.sh 等落点），self-touch 缺失 ⇒ 非 ready-可派，retreat 回 todo。待 Touches 落定（新 setup 脚本设计）再晋 ready。
 
 ## Touches
 
