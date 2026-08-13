@@ -1,7 +1,7 @@
 ---
 id: gap-precommit-guard-blocks-commits-not-working-tree-edits
 title: 守卫威胁模型只覆盖一半——拦提交不拦工作树编辑（污染源是编辑；首条 jsonl 记录同时证明机制会写 + 覆盖缺口）
-status: todo
+status: ready
 labels:
   - gap
   - defect

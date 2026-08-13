@@ -1,7 +1,7 @@
 ---
 id: gap-concurrent-write-mutable-tree-false-positive-red
 title: 验证轮在可变工作树上跑——同轮提交到共享树 ⇒ 假阳性红（对照实验证实）
-status: todo
+status: ready
 labels:
   - gap
   - defect

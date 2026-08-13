@@ -1,7 +1,7 @@
 ---
 id: gap-cli-import-migration-ts-typecheck-regression
 title: cli-import-migration fan-in 引入 tsc 回归（73 错，ctx 类型注解丢失）
-status: todo
+status: ready
 labels:
   - gap
   - defect

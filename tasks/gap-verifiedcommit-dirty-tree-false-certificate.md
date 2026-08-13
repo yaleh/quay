@@ -1,7 +1,7 @@
 ---
 id: gap-verifiedcommit-dirty-tree-false-certificate
 title: verifiedCommit 在脏树下是假证书——声明的是 commit 对象，被测的是工作树，两者之差无任何检查（round 记录无树字段）
-status: todo
+status: ready
 labels:
   - gap
   - defect

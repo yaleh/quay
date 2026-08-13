@@ -1,7 +1,7 @@
 ---
 id: gap-dispatch-gate-blind-to-inflight-merge-worktree
 title: 派发闸看不见在飞 merge worktree 的冲突面 → 缓派失效（inner 派掉了外层缓派的任务）
-status: todo
+status: ready
 labels:
   - gap
   - defect

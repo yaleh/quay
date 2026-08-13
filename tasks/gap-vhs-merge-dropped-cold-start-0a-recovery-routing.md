@@ -1,7 +1,7 @@
 ---
 id: gap-vhs-merge-dropped-cold-start-0a-recovery-routing
 title: vhs merge 丢失 cold-start SKILL.md 的 0a 路由节（结构回归，round 55 红）
-status: todo
+status: ready
 labels:
   - gap
   - defect

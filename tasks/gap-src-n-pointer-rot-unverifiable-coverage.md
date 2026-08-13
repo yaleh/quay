@@ -1,7 +1,7 @@
 ---
 id: gap-src-n-pointer-rot-unverifiable-coverage
 title: AC30(a) (src:N) 覆盖率是结构上不可能取假的量——行号指针腐烂而闸门每轮报 100%
-status: todo
+status: ready
 labels:
   - gap
   - defect
