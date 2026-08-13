@@ -42,6 +42,8 @@ workflow   <project>/<session>/subagents/workflows/<run>/agent-*.jsonl
 
 **负控制不必构造（manager 边界：不生成新实验数据）**——历史已有：**OOM 后 5 轮 runner=outer 零 Workflow、主会话直跑**。回放那几轮：必须报 main-session（OOM 5 轮）；必须【不】报 main-session（由 suite-fix workflow 发起的轮）。两侧都用既有记录。
 
+**单点直接反例（manager 2026-08-13 实采，比 140/140 恒 outer 更有说服力——那条是统计，这条是同一条记录内部的自相矛盾）**：`gap-spec-11-…-pilot/.quay/full-suite-state.json`（11:20:11Z 起跑）**scope=worktree（inner 的 subagent 在自有 worktree 跑的轮）而 runner=outer**。transcript 类别判据在这条记录上应报 subagent/workflow，**绝不该报 main-session**——作为重写后的负控制样本。
+
 ## 对 workflow 停调记录的更正（manager 2026-08-13）
 
 「runner 恒 outer ⇒ 不驱动切回 workflow」**理由用错了方向**：零信息判据在**两个方向都不是证据**——既不能说"该用 workflow"，也不能说"不该用"。

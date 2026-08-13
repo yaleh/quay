@@ -7,6 +7,7 @@ labels:
   - gap
   - defect
   - mechanism
+  - priority:p2
 parent: null
 children: []
 extra:
