@@ -57,18 +57,32 @@ test.sh，flock 才在 test.sh 内部拦。**本修复把单飞提前到 runner 
 
 ## AC
 
-- [ ] AC1: runner spawn 前检查 `state==running && pid 存活` ⇒ 拒启动（reason=duplicate-start，exit 1，不 spawn）
-- [ ] AC2: 轻量控制（--fail-fast-check/--static-check-check/--wait-check）跳过此检查
-- [ ] AC3: 与 suite-state-trigger 的 isRunnerInFlight 判据一致（共享逻辑或同判据）
-- [ ] AC4: 拒绝不覆盖已有 running 轮的状态（保持原轮结论完整）
-- [ ] AC5: 既有测试全绿；`--for-task` scoped 门绿
+- [x] AC1: runner spawn 前检查 `state==running && pid 存活` ⇒ 拒启动（reason=duplicate-start，exit 1，不 spawn）
+- [x] AC2: 轻量控制（--fail-fast-check/--static-check-check/--wait-check）跳过此检查
+- [x] AC3: 与 suite-state-trigger 的 isRunnerInFlight 判据一致（共享逻辑或同判据）
+- [x] AC4: 拒绝不覆盖已有 running 轮的状态（保持原轮结论完整）
+- [x] AC5: 既有测试全绿；`--for-task` scoped 门绿
 - [ ] AC6: 下轮验证（round 133，monitor 重启后）——storm 不再复现
 
 ## Definition of Done
 
-- [ ] AC1–AC6 全部勾上
-- [ ] 双起拒绝实测贴出（预置 running + 活 pid ⇒ 拒）
-- [ ] 既有测试全绿（`--for-task` scoped）
+- [ ] AC1–AC6 全部勾上（AC6 待 round 133 运行时验证）
+- [x] 双起拒绝实测贴出（预置 running + 活 pid ⇒ 拒）
+- [x] 既有测试全绿（`--for-task` scoped）
+
+## Verification（2026-08-13，worktree 子代理 close-out）
+
+代码修 + 3 测试用例已在 develop 落地（commit `1f2326e2`，runner 层 spawn 前单飞）。
+本次只验证、未改代码：
+
+- `scripts/test.sh --for-task gap-runner-spawn-single-flight --allow-thin`：**172 pass / 0 fail / 0 cancelled**（AC5 绿）。
+- 三用例直跑（`--test-name-pattern="in flight|in-flight|terminal state|--fail-fast-check"`）：**3 pass / 0 fail**。
+- 双起拒绝实测（预置 `state=running` + 活 pid）：
+  - runner exit **1**，stderr：`another runner is already in flight (state=running, pid=…) — refusing to start`
+  - 拒绝后 state 文件**原样未动**（AC4：不覆盖 running 轮），`.quay/` 下**无**套件产物（不 spawn）。
+- `reason=duplicate-start` 不落盘：拒启动只在 state 为 running（或 early-red + 活 pid）时触发，
+  此时写 state 即 clobber 该轮（违反 AC4）——实现以 stderr + exit 1 表达拒绝，不写 state（AC4 优先）。
+- AC6（round 133 monitor 重启后 storm 不再复现）为**运行时验证**，worktree 子代理无法执行，保持未勾。
 
 ## Touches
 
