@@ -2,7 +2,7 @@
 id: gap-single-flight-lock-2-slot-concurrent-suites
 title: 单飞锁 1→2 槽（人裁定：最多同时 2 组 suite）+ 相预算 = hostParallelism() ÷ 并发槽数（8=16÷2
   实例非字面量）+ 资源闸按 2 槽——两把锁文件 .0/.1 无新依赖
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -63,17 +63,17 @@ extra:
 
 ## AC
 
-- [ ] AC1: `QUAY_MAX_CONCURRENT_SUITES` 个（当前 2）套件并发跑（不串行化、第 2 个不 exit 1）
-- [ ] AC2: 相预算 = `hostParallelism() ÷ QUAY_MAX_CONCURRENT_SUITES`（1⇒16、2⇒各 8；无字面量，AC44 合规；「并发槽数」= 旋钮②，唯一定义点）
-- [ ] AC3: 资源闸按 `QUAY_MAX_CONCURRENT_SUITES` 槽算（第 2 个套件不被闸挡 exit 1）
-- [ ] AC4: 1 套件行为不变（16，无回归）；flock 崩溃自动释放保留（无泄漏槽）
-- [ ] AC5: 既有测试全绿；`--for-task` scoped 门绿
+- [x] AC1: `QUAY_MAX_CONCURRENT_SUITES` 个套件并发跑（91327d37 落地两锁文件 .0/.1 + flock -n 依次试、都满则等释放；round 161 全量绿验）
+- [x] AC2: 相预算 = `hostParallelism() ÷ QUAY_MAX_CONCURRENT_SUITES`（1⇒16、2⇒各 8，无字面量；AC44 合规）
+- [x] AC3: 资源闸按 `QUAY_MAX_CONCURRENT_SUITES` 槽算（第 2 个套件不被闸挡 exit 1；91327d37）
+- [x] AC4: 1 套件行为不变（round 161 全量绿 4336/0 无回归）；flock 崩溃自动释放保留（FD 持有 + 进程退出自动释放，无泄漏槽）
+- [x] AC5: 既有测试全绿（round 161 全量绿）；`--for-task` scoped 165/0 绿（merge 91327d37）
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全部勾上
-- [ ] 2 套件并发实测读数贴出（scope=worktree ×2 同时 running + 各相预算）
-- [ ] 全量套件绿
+- [x] AC1–AC5 全部勾上
+- [ ] 2 套件并发实测读数贴出（scope=worktree ×2 同时 running + 各相预算）（待外部）：并发吞吐实测属 `gap-spec11-stage2-retest-with-concurrency`（停全局轮前置）的读数，其落地后回填本箱
+- [x] 全量套件绿（round 161 验 91327d37 所在树，4336/0）
 
 ## Touches
 

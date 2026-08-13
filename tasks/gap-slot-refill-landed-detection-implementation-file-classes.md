@@ -2,7 +2,7 @@
 id: gap-slot-refill-landed-detection-implementation-file-classes
 title: phantom-killer 假阳性——hasLandedImplementation 只认实现类文件（排除
   docs/milestones/telemetry 旁路）
-status: ready
+status: done
 labels:
   - gap
   - defect
