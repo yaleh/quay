@@ -1,7 +1,7 @@
 ---
 id: gap-leak-scan-reap-race-false-red
 title: tmux-leak-scan 与测试回收竞态——重载下回收慢于 run 末扫描 ⇒ session-liveness 测试自己的残留被扫成 NEW 假红
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -89,9 +89,9 @@ delta 判据按路径计数，不判「残留是否仍被活测试进程持有�
 
 ## Definition of Done
 
-- [ ] AC1–AC3 全部勾上
-- [ ] 负控样例贴出（见 Evidence：round 95 形态不复发）
-- [ ] 全量套件绿
+- [x] AC1–AC3 全部勾上
+- [x] 负控样例贴出（见 Evidence：round 95 形态不复发，R2/R3）
+- [x] 全量套件绿（round 101 green，commit=cfdb688f，tests=4166）
 
 ## Touches
 

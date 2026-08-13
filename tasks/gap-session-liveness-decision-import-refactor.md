@@ -1,7 +1,7 @@
 ---
 id: gap-session-liveness-decision-import-refactor
 title: session-liveness 决策层 import 化（①结构性——决策进 pane-state-classify.ts + 测试分层）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -44,14 +44,14 @@ extra: {}
 - [x] AC2: 管道测试预算只防挂死（不判对错）
 - [x] AC3: 真 tmux 起用次数下降（实测对比）
 - [x] AC4: 断言不变；`--for-task` scoped 门绿
-- [ ] AC5: 全量套件绿 + 无回归
+- [x] AC5: 全量套件绿 + 无回归
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全部勾上
-- [ ] 判定 import 化清单 + tmux 起用对比贴出（见 Evidence）
-- [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
-- [ ] 全量套件绿——外层 verification-round 验证
+- [x] AC1–AC5 全部勾上
+- [x] 判定 import 化清单 + tmux 起用对比贴出（见 Evidence）
+- [x] 既有测试 + 新增测试全绿（`--for-task` scoped）
+- [x] 全量套件绿——外层 verification-round 验证（round 101 green，commit=cfdb688f，tests=4166）
 
 ## Touches
 
