@@ -2807,3 +2807,55 @@ round 110：同一 SPEC ⇒ quay-init referenced⊆landed 红（reference-doc �
 **无例外的规则不需要判断，也就不会判断错。**
 
 **⚠️ 不覆盖**：不改变 touches 正交性检查（那管的是并发安全，与依赖声明正交）。
+
+---
+
+## AC53（机制）：自选唤醒的机件必须把「决策依据」与「决策结果」写在同一条记录里，且不得在「有货可派」的状态下结束一轮
+
+**来源**：人 2026-08-13 04:1xZ 亲自核实 inner 空转后裁定「建议解决方案，加入本阶段目标和 AC，推进」。
+**这是「空槽 + 池里有货 + 就是不派」的第三种成因**，与 CLAUDE.md 已记的两种（subagent 预算触顶 / inner 占用回合做主线程编辑）**都不同**，
+且**新模型（AC42-AC52）不会修掉它**——per-task 验证改的是「验证在哪跑」，不是「谁来叫醒派发」。
+
+**实测（2026-08-13 04:08Z，三个独立读数同时取）**：
+```
+A9 判据       : suite state=running ⇒ 落在【照常派发】支（不是停派支）
+slot-refill   : should_refill=True  no_refill_reason=None
+                slots_free=5  in_flight_count=0  pool=16  dispatchable_disjoint=5
+                landing_blocked=False  suite_blocking.window_active=False   ← 每一道闸都开着
+心跳          : ts=04:02:52Z  delaySeconds=1500  runIds=[]
+                reason="ALL tasks landed, 0 in-flight; sync pushed"
+⇒ 它在收完尾、落到 0 在飞之后，带着 5 个空槽对 5 个可派任务，自选睡 25 分钟
+⇒ 自锁：0 在飞 ⇒ 无完成事件 ⇒ 唯一唤醒源只剩那个 25 分钟心跳 ⇒ 继续 0 在飞
+```
+
+**判据（四条）**：
+
+1. **结束条件不变式（无例外形，这是真正的修法）**：
+   一轮 tick **不得在** `should_refill=true ∧ slots_free>0 ∧ dispatchable_disjoint>0 ∧ no_refill_reason 为空`
+   这个状态下结束。要么继续派发直到其中一项为假，要么**写出一个 `no_refill_reason`**。
+   **⚠️ 刻意不设「延迟超过 N 秒才算异常」的数值阈值**——那会把判定变成「多长算长」的裁量，
+   而在上述状态下**任何**正延迟都没有正当理由（正当理由本身就是 `no_refill_reason`，机件已在算）。
+   **无例外的规则不需要判断，也就不会判断错**（与 AC52 同源）。
+
+2. **决策依据与决策结果同条记录**：心跳在**选定 `delaySeconds` 的那一刻**，
+   必须把它据以决策的读数一并落盘：`slots_free` / `dispatchable_disjoint` / `pool` / `should_refill` / `no_refill_reason`。
+   **现状：这五个字段全部缺席**（实测键名 = `agentDispatches, agentLimit, blocked, budgetCritical, budgetHit,
+   delaySeconds, effectiveCap, reason, runIds, ts`）⇒ **记录在结构上无法区分「没货可派」与「有货不派」**（硬规则 ⑨）。
+   **事后重算不算数**——池子会变，重算得到的是另一个时刻的量（硬规则 ④）。
+
+3. **可回看**：心跳改**追加式**（jsonl），不再是会被下一轮整体覆盖的单槽快照。
+   **理由是今晚同一形状撞了两次**：吞吐报告 §2.3(b) 里 3 个 agent 回合永久挂死在
+   `full-suite-state.json` 的 runId 上，正因为那也是单槽文件、而历史在 `suite-state-events.jsonl` 里。
+   **在会被覆盖的单槽容器里找历史值，搜不到 ≠ 没发生过**（硬规则 ⑤）。
+
+4. **⭐ 负控制（判据必须被证明能返回「不通过」）**：
+   把**今晚 04:02:52Z 这条真实心跳**连同同时刻的 slot-refill 读数回放进判据 1，**必须报出异常**。
+   一个从未在真实历史样本上亮过红的判据，不算判据（硬规则 ④ + 今晚 AC50 判据2 恒真的教训）。
+
+**这一族不止 inner —— 一并标注（不扩大本 AC 的验收面，只标注同族）**：
+今晚三个「自己决定何时再醒」的机件里有两个同形失效——
+① inner 心跳（本条）；② outer 的轮终等待器（退出条件 `runId=<已被覆盖的值>`，**结构上不可能成立**，
+最长挂死 106 分钟、峰值 5.36 agent-小时，已清理但缺陷未修）。**③ `suite-state-trigger` 未查。**
+
+**⚠️ 不覆盖**：不规定唤醒的实现形式（cron / `ScheduleWakeup` / 完成事件）——那是执行面的选择；
+不改 `effectiveCap`；不要求 inner 变成"永不休眠"（有 `no_refill_reason` 时长睡是对的）。
