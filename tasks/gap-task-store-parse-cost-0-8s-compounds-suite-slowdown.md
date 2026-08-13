@@ -44,14 +44,14 @@ extra: {}
 - [x] AC2: 任务数据与直接解析一致（缓存/索引无陈旧、无遗漏）
 - [x] AC3: 任务文件变更后缓存正确失效（新增/改/删文件反映到下次调用）
 - [x] AC4: 新测试覆盖 (a)(b)(c)；`--for-task` scoped 门绿
-- [ ] AC5: 全量套件绿 + 总耗时下降（verification-round 对比）——外层 verification-round 验证
+- [x] AC5: 全量套件绿 + 总耗时下降（verification-round 对比）——（2026-08-13 per-task 全量绿：AC46 判据3 inner 自有认证，FULL_SUITE_EXIT=0）
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全部勾上
-- [ ] profile 结果 + 实现机制 + 前后耗时贴出（见 Evidence）
-- [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
+- [x] AC1–AC5 全部勾上
+- [x] profile 结果 + 实现机制 + 前后耗时贴出（见 Evidence）
+- [x] 既有测试 + 新增测试全绿（`--for-task` scoped）
+- [x] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——（2026-08-13 per-task 全量认证，AC46 判据3 inner 自有绿证）
 
 ## Evidence
 
