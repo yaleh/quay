@@ -69,7 +69,7 @@ resume 先定 setup 步骤（符号链接 vs 复制 vs install），再接派发
 - [x] 实跑：新建 worktree 不跑 setup ⇒ `scripts/test.sh` 构建阶段 fail-closed；跑了 setup ⇒ 能自证（贴两路径输出）
 - [x] 派发流程已接入 setup（内层派发 prompt 或派发工具），新 worktree 不再依赖 agent 记得建 node_modules
 - [x] 既有测试 + 新增测试全绿（`--for-task` scoped，30/30）
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
+- [x] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——（2026-08-13 per-task 全量认证 3885/0，AC46 判据3 inner 自有绿证）
 
 ## Evidence（inner 2026-08-13 实跑）
 
