@@ -33,6 +33,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   parsePerFileLines,
+  normalizePerFileKey,
   computeLogDigest,
   readHistoryRounds,
   landMeasureHistory,
@@ -69,6 +70,33 @@ test("AC3 — parsePerFileLines matches measure-suite-reporter's __PERFILE__ lin
   assert.deepEqual(recs[1], { file: "/repo/b.test.mjs", durationMs: 1000.5, passed: false });
   // Duration must be > 0 (a crashed/0-ms file is not a comparable measurement).
   assert.equal(parsePerFileLines("__PERFILE__ duration_ms=0 /repo/x.test.mjs passed=false\n").length, 0);
+});
+
+test("constraint 6 — normalizePerFileKey strips the verify-round worktree root (same file across rounds keys once)", () => {
+  // The same physical test file under two different per-task worktree roots MUST map to ONE key
+  // (basename 归一 — gap-phase-overlap-two-phase-parallel-exploration constraint 6; 1179 full-path
+  // "files" vs ~360 real). The key keeps package context (repo-root-relative), so `cli.test.mjs` in
+  // packages/quay and packages/quay-github do NOT collide (measure-suite-reporter.mjs:156).
+  assert.equal(
+    normalizePerFileKey("/home/yale/work/quay-worktrees/gap-aaa-1a2b3c/packages/quay/test/cli.test.mjs"),
+    "packages/quay/test/cli.test.mjs",
+  );
+  assert.equal(
+    normalizePerFileKey("/home/yale/work/quay-worktrees/gap-bbb-9z8y7x/packages/quay/test/cli.test.mjs"),
+    "packages/quay/test/cli.test.mjs",
+  );
+  assert.equal(
+    normalizePerFileKey("/home/yale/work/quay-worktrees/gap-ccc-000/packages/quay-github/test/cli.test.mjs"),
+    "packages/quay-github/test/cli.test.mjs",
+    "same basename in another package stays distinct",
+  );
+  // A path already outside any worktree (shared-checkout dev run) is returned unchanged.
+  assert.equal(normalizePerFileKey("/home/yale/work/quay/packages/quay/test/a.test.mjs"), "/home/yale/work/quay/packages/quay/test/a.test.mjs");
+  // The parser applies the normalization, so a landed history record carries the stable key.
+  const recs = parsePerFileLines(
+    "__PERFILE__ duration_ms=120 /home/yale/work/quay-worktrees/gap-aaa-1a2b3c/packages/quay/test/a.test.mjs passed=true\n",
+  );
+  assert.deepEqual(recs, [{ file: "packages/quay/test/a.test.mjs", durationMs: 120, passed: true }]);
 });
 
 test("AC3 — computeLogDigest is order-independent and content-sensitive", () => {

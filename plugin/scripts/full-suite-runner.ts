@@ -2702,6 +2702,12 @@ export async function run(argv: string[]): Promise<number> {
     ...(phaseMs.serial_phase !== undefined ? { serial_phase_ms: phaseMs.serial_phase } : {}),
     ...(phaseMs.lowconc_phase !== undefined ? { lowconc_phase_ms: phaseMs.lowconc_phase } : {}),
     ...(phaseMs.main_phase !== undefined ? { main_phase_ms: phaseMs.main_phase } : {}),
+    // gap-phase-overlap-two-phase-parallel-exploration AC1 — the round record carries whether the
+    // suite ran the two-phase-overlap scheduling (serial+lowconc in PARALLEL). Absent on a sequential
+    // round (the same absent-field contract as the *_phase_ms spreads): the before/after comparison
+    // (task constraint 3: green-round serial_phase_ms + lowconc_phase_ms) can distinguish overlap
+    // rounds from baseline rounds in verification-round.jsonl without relying on wall-clock timing.
+    ...(process.env.QUAY_PHASE_OVERLAP === "1" ? { phase_overlap: true } : {}),
     // gap-ceiling-floor-ms-not-landed-in-verification-round AC1/AC3 — the reporter's per-group
     // floors (各相) + capped-file list. Both appear together (every __CEILING__ line carries a
     // floor_ms, so floorMsSeen non-empty ⟺ ceilingFiles non-empty), and BOTH are omitted on a

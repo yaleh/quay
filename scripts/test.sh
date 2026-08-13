@@ -678,6 +678,18 @@ default_test_concurrency() {
 SERIAL_CONCURRENCY="${QUAY_SERIAL_CONCURRENCY:-2}"
 LOWCONC_CONCURRENCY="${QUAY_LOWCONC_CONCURRENCY:-3}"
 
+# ── phase-overlap knob (gap-phase-overlap-two-phase-parallel-exploration, AC1) ────────────────────
+# QUAY_PHASE_OVERLAP=1 runs the serial and lowconc phases in PARALLEL on the FULL-SUITE path (each at
+# its OWN $SERIAL_CONCURRENCY / $LOWCONC_CONCURRENCY) instead of sequentially — the two-phase-overlap
+# exploration (serial+lowconc 并行, 预期 −154s/轮: the 331s sequential window 177+154 becomes
+# max(177,154)≈177s). This changes phase SCHEDULING only, never a concurrency value (AC4: one
+# variable at a time — $SERIAL_CONCURRENCY / $LOWCONC_CONCURRENCY stay exactly as configured; the
+# "两个 6" in the task title reflects the author's reading, the live defaults here are 2/3 and are
+# NOT part of this exploration's variable). Default 0 = the prior sequential serial→lowconc→main
+# order; clearing the env var (unset it) is the ONE-KEY ROLLBACK that restores the baseline
+# scheduling — the exploration's definition is that it must be possible to roll back.
+PHASE_OVERLAP="${QUAY_PHASE_OVERLAP:-0}"
+
 # has_explicit_concurrency <args...> — whether the args already carry a --test-concurrency flag
 # (either the `=` spelling with a numeric value, or the SPACE spelling with a numeric value). When it
 # does, the derived default MUST NOT be prepended: an explicit flag is the SINGLE concurrency source.
@@ -1152,34 +1164,64 @@ run_selected() {
     # AC3: round 95 skipped serial when main was red, so serial failures were invisible).
     local serial_files=() sf serial_code
     while IFS= read -r sf; do serial_files+=("$sf"); done < <(select_files "serial")
-    [ "$oh_full" -eq 1 ] && oh_t5=$(_oh_mark)
-    if [ "${#serial_files[@]}" -gt 0 ]; then
-      echo "selected ${#serial_files[@]} files (groups=serial)"
-      node --test --test-concurrency="$SERIAL_CONCURRENCY" $(suite_reporter_flags) "${serial_files[@]}"
-      serial_code=$?
-      [ "$serial_code" -eq 0 ] || code="$serial_code"
-    fi
-    [ "$oh_full" -eq 1 ] && oh_t5b=$(_oh_mark)
-    # LOWCONC phase (gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive, AC1/AC4): the
-    # hermetic-but-load-sensitive files (B-class session-observation family, each private socket /
-    # wall-clock wait — the install/quay-init family LEFT this group for serial in round 162,
-    # gap-install-family-tests-rotate-flakes-under-full-suite) run in their OWN phase at
-    # `--test-concurrency=$LOWCONC_CONCURRENCY` (default 3) — not the derived default and not 8 — so
-    # wait-type tests get timely scheduling. The phase runs even if another phase failed (report all
-    # failures); its exit code merges into `code`. Runs BEFORE the main body so a lowconc failure is
-    # judged red at the phase boundary (gap-phase-order-serial-lowconc-before-main). The default 3 is
-    # deliberate (AC4) and does NOT add a derived-concurrency literal site (resource-gate AC5 pins
-    # exactly 5 `--test-concurrency="$(default_test_concurrency)"` sites).
-    local lowconc_files=() lf
+    # LOWCONC selection hoisted BEFORE the serial run so the overlap branch can launch both phases in
+    # parallel. In the SEQUENTIAL branch the lowconc selection used to run right before the lowconc
+    # phase; hoisting it here shifts that selection time into gap_ms_pre_to_serial (a diagnostic gap,
+    # NEVER a phase metric) — serial_phase_ms / lowconc_phase_ms / main_phase_ms are unchanged, so the
+    # before/after comparison metric (serial_phase_ms + lowconc_phase_ms, task constraint 3) is byte-
+    # identical between this and the pre-change sequential scheduling.
+    local lowconc_files=() lf lowconc_code
     while IFS= read -r lf; do lowconc_files+=("$lf"); done < <(select_files "lowconc")
-    [ "$oh_full" -eq 1 ] && oh_t6=$(_oh_mark)
-    if [ "${#lowconc_files[@]}" -gt 0 ]; then
-      echo "selected ${#lowconc_files[@]} files (groups=lowconc)"
-      node --test --test-concurrency="$LOWCONC_CONCURRENCY" $(suite_reporter_flags) "${lowconc_files[@]}"
-      local lcode=$?
-      [ "$lcode" -eq 0 ] || code="$lcode"
+    # PHASE OVERLAP (gap-phase-overlap-two-phase-parallel-exploration AC1): when QUAY_PHASE_OVERLAP=1
+    # AND both phases are non-empty, run serial + lowconc in PARALLEL (each at its OWN concurrency,
+    # $SERIAL_CONCURRENCY / $LOWCONC_CONCURRENCY — scheduling-only, never a value change, AC4).
+    # Default OFF = the prior sequential order; clearing the env var is the ONE-KEY ROLLBACK. Expected
+    # saving: the sequential serial+lowconc window (177+154=331s) becomes max(177,154)≈177s.
+    if [ "$PHASE_OVERLAP" -eq 1 ] && [ "${#serial_files[@]}" -gt 0 ] && [ "${#lowconc_files[@]}" -gt 0 ]; then
+      [ "$oh_full" -eq 1 ] && oh_t5=$(_oh_mark)
+      echo "overlap: running ${#serial_files[@]} serial + ${#lowconc_files[@]} lowconc files in parallel (serial conc=$SERIAL_CONCURRENCY, lowconc conc=$LOWCONC_CONCURRENCY)"
+      local serial_pid lowconc_pid
+      node --test --test-concurrency="$SERIAL_CONCURRENCY" $(suite_reporter_flags) "${serial_files[@]}" & serial_pid=$!
+      node --test --test-concurrency="$LOWCONC_CONCURRENCY" $(suite_reporter_flags) "${lowconc_files[@]}" & lowconc_pid=$!
+      wait "$serial_pid"; serial_code=$?
+      wait "$lowconc_pid"; lowconc_code=$?
+      [ "$serial_code" -eq 0 ] || code="$serial_code"
+      [ "$lowconc_code" -eq 0 ] || code="$lowconc_code"
+      # Overlap timing: the two phases share ONE window. serial_phase_ms = the combined window and
+      # lowconc_phase_ms = 0 (subsumed — the analyst's serial+lowconc sum == the overlap window).
+      # gap_ms_serial_to_lowconc = 0 (no transition gap by construction).
+      [ "$oh_full" -eq 1 ] && { oh_t5b=$(_oh_mark); oh_t6="$oh_t5b"; oh_t6b="$oh_t5b"; }
+    else
+      # SEQUENTIAL baseline (unchanged scheduling). Timing markers preserve the historical semantics:
+      # oh_t5 = after serial selection / before serial, oh_t5b = after serial, oh_t6 = after lowconc
+      # selection / before lowconc, oh_t6b = after lowconc.
+      [ "$oh_full" -eq 1 ] && oh_t5=$(_oh_mark)
+      if [ "${#serial_files[@]}" -gt 0 ]; then
+        echo "selected ${#serial_files[@]} files (groups=serial)"
+        node --test --test-concurrency="$SERIAL_CONCURRENCY" $(suite_reporter_flags) "${serial_files[@]}"
+        serial_code=$?
+        [ "$serial_code" -eq 0 ] || code="$serial_code"
+      fi
+      [ "$oh_full" -eq 1 ] && oh_t5b=$(_oh_mark)
+      # LOWCONC phase (gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive, AC1/AC4): the
+      # hermetic-but-load-sensitive files (B-class session-observation family, each private socket /
+      # wall-clock wait — the install/quay-init family LEFT this group for serial in round 162,
+      # gap-install-family-tests-rotate-flakes-under-full-suite) run in their OWN phase at
+      # `--test-concurrency=$LOWCONC_CONCURRENCY` (default 3) — not the derived default and not 8 — so
+      # wait-type tests get timely scheduling. The phase runs even if another phase failed (report all
+      # failures); its exit code merges into `code`. Runs BEFORE the main body so a lowconc failure is
+      # judged red at the phase boundary (gap-phase-order-serial-lowconc-before-main). The default 3 is
+      # deliberate (AC4) and does NOT add a derived-concurrency literal site (resource-gate AC5 pins
+      # exactly 5 `--test-concurrency="$(default_test_concurrency)"` sites).
+      [ "$oh_full" -eq 1 ] && oh_t6=$(_oh_mark)
+      if [ "${#lowconc_files[@]}" -gt 0 ]; then
+        echo "selected ${#lowconc_files[@]} files (groups=lowconc)"
+        node --test --test-concurrency="$LOWCONC_CONCURRENCY" $(suite_reporter_flags) "${lowconc_files[@]}"
+        local lcode=$?
+        [ "$lcode" -eq 0 ] || code="$lcode"
+      fi
+      [ "$oh_full" -eq 1 ] && oh_t6b=$(_oh_mark)
     fi
-    [ "$oh_full" -eq 1 ] && oh_t6b=$(_oh_mark)
     # MAIN phase (the concurrency-N default body) — runs LAST, after serial/lowconc
     # (gap-phase-order-serial-lowconc-before-main): a serial/lowconc failure is now judged red at
     # the phase boundary, never after the entire main phase's cost has been paid.
