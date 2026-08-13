@@ -2628,8 +2628,14 @@ manager 的活是：每 tick 采样 AC20 的五条、维护 AC21-AC24 的取证�
 **判据（三条全须成立，逐条可机械核对）**：
 1. **零共享检出验证**：任一次 suite 运行的 `--root` 指向一个**该次运行专属的 worktree**，
    取证：round 记录里 `scope` 字段 + 该 worktree 路径存在于 `git worktree list` 且在跑完后被 teardown。
-2. **主检出无套件**：主检出（`/home/yale/work/quay`）上**不再有** `full-suite-runner.ts --root <主检出>` 进程。
-   取证：`ps -eo args | grep -- '--root /home/yale/work/quay'`（按位置，非关键词）连续 N 轮为 0。
+2. **主检出无套件**：**跑测试的工作进程**的 `cwd` 不在主检出。
+   取证：遍历 `/proc/<pid>/cwd`，`node --test` / `scripts/test.sh` 工作进程中 cwd 落在 `/home/yale/work/quay`
+   的条数连续 N 轮为 0（`/tmp/quay-*` 属测试自造工作区，不计）。
+   **⚠️ 本判据 2026-08-13 07:4xZ 更正过一次：原文与已落地实现结构性脱钩。** 原文 grep
+   `full-suite-runner.ts --root <主检出>`，而新实现是「runner 以主检出为根 → provision 一次性 worktree
+   → 测试跑在 worktree」⇒ runner 的 `--root` 永远是主检出，**照字面本判据永不满足，即使目标已达成**。
+   实测 07:4xZ：runner `--root=主检出`（原判据判"不满足"），7 个 `node --test` 工作进程 cwd 全在 worktree
+   （新判据判"实质达成"），**而仍有 2 个 `test.sh` 的 cwd 在主检出——那才是本判据该抓的真残留**。
 3. **manager/outer 的文档编辑不再需要窗口纪律**：即在主检出编辑 `orchestration/`、`tasks/`、`CLAUDE.md`
    **不会**使任何在跑的轮变红。取证：一次**故意**的对照实验——轮运行期间编辑断言面文件，轮仍绿。
 
@@ -2789,6 +2795,15 @@ manager 核实后发现 **SPEC 完全没写切换过程**（`grep 主检出|chec
 4. **执行路径无 integration**：全仓 `grep -rn 'integration'` 在执行路径上零命中（注释/历史记录允许）。
 5. **一次真实生命周期自证**：一个任务 fork develop → worktree → 套件绿 → merge develop，
    其 round 记录 `scope=worktree` 且 develop 新 HEAD 是它的 merge 提交。
+
+6. **⭐ 推进度必须每 tick 可读，且停滞可报**（2026-08-13 08:1xZ 新增，因为「几小时零推进」此前只能靠
+   manager 手工审计才发现）：manager 每 tick 记录本 AC 的**三个核心读数**——
+   `develop..integration` 计数 · 主检出 `HEAD` · fork 基线断裂的 worktree 数——
+   **连续 3 个 tick 三者全部无变化 ⇒ 在 tick-log 报「阶段目标停滞」并投递 outer**。
+   **判据刻意只用这三个已在采集的直接量，不新造机件**（人 08:5x 定调不要搞复杂）。
+   **今晚实证**：08-13 03:0x→08:1x 约 5 小时里三读数分别 2→17 / integration→integration / 3→3，
+   **全部朝反方向或不动，而期间派出去的每一条都是正确性修复或对旧结构的优化**——
+   这件事直到人亲自质问才被说出来，**没有任何读数把它报出来过**。
 
 **今晚基线（2026-08-13 03:0xZ 实测）**：
 ```

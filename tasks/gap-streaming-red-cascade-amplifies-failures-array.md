@@ -42,16 +42,24 @@ failures[] 让三者同时失真，且各自看不出来**。无 file 的条目�
    容忍早红：`state ∈ {running, red}` 且 `finishedAt null`（断言的是「轮在跑」，不是「轮还绿」）。
 2. 无 file 条目单列（`unattributed` 段），不进 failures[] 主集。
 3. 附带：`computeSuiteBlocking`（ready-pool-check.ts:1175-1176）的 fail-open 分支
-   `failureFiles.length===0 ⇒ windowActive=true + ids=空`——连续红 ≥3 但无文件收集 ⇒ 无 suite-blocker
-   ⇒ 派发照进红窗。同族，一并核 collectFailureFiles 对混合 schema 轮次的读取。
+   `failureFiles.length===0 ⇒ windowActive=true + ids=空`——**manager 核后基本不可达**（collectFailureFiles
+   累积全历史、无窗口 ⇒ 要空须全历史无任何带 file 失败；实测 127 轮中 49 轮有 file）。撤回「可能开着的闸」。
+4. **真问题（manager 2026-08-13，同处）**：`collectFailureFiles` **累积全历史**（Set 只增不减）——
+   全历史 239 个 vs 最近 3 轮 12 个 ⇒ **`touches ∩ failure_files ⇒ 停派` 挡的是「碰过任何历史失败文件」
+   的任务，不是「碰当前红因」的任务**；单调收紧直至锁死池子，每步都看似正常（红窗确实活跃）。最小修法：
+   只取**当前红窗内**轮次（`consecutiveRedRounds` 已算出连续红长度，切片即可）。验收：修前 239 → 修后 ≈12，
+   **前后差本身即负控制**。另：`collectFailureFiles` 的 `if (f && f.file)` **静默丢弃无 file 条目**
+   （round 130 的 10 条里 3 条无 file = 30% 被静默丢弃）——与「无 file 单列」同处，一并修。
 
 ## AC
 
 - [ ] AC1: 级联红不再混入 failures[] 主集（derived 标记或断言修正，round 130 三数一致）
 - [ ] AC2: 无 file 条目单列可归因
-- [ ] AC3: computeSuiteBlocking fail-open 分支消除或 fail-closed
+- [ ] AC3: computeSuiteBlocking fail-open 分支消除或 fail-closed（或证明不可达并注释）
 - [ ] AC4: 早红轮 + 负载 flake 并存时，`--band` / triage / 停派三者读数不再被级联放大
-- [ ] AC5: 既有测试全绿；`--for-task` scoped 门绿
+- [ ] AC5: **collectFailureFiles 只取当前红窗内轮次**——修后全历史 239 → 最近 3 轮 ≈12，前后差即负控制
+- [ ] AC6: 无 file 条目不再静默丢弃（单列或计全），30% 丢弃率归零
+- [ ] AC7: 既有测试全绿；`--for-task` scoped 门绿
 
 ## Definition of Done
 

@@ -254,7 +254,12 @@ plugin/test/plugin-packaging.test.mjs:686/693       execFileSync('git',['check-i
   · failures[] provenance + gate 具体名 + verdictSource —— 防未来误归因
   · execute-suite-fix.js 的 logFile 守卫 + "模板 ${x} ⊆ 守卫集"机械检查
 
-阶段 1：outer 的批量 verification-round 先迁进一次性 worktree（本方案的子集，风险最小）
+阶段 1（⚠️ 2026-08-13 08:0xZ 经人质问后【更正定性】）：outer 的批量 verification-round 迁进一次性 worktree
+  **原文写「本方案的子集，风险最小」——定性错误。** 人的目标形态里**根本没有 outer 的批量轮**
+  （每任务在自己 worktree 里跑全量、绿了直接 merge 回 develop），**给批量轮加隔离不是本方案的子集，
+  是给一个【即将被取消的机制】做优化**——正是人 08:5x 亲口否掉的那一类。
+  **代价实证**：推进它的这段时间里，人要的两条不但没前进，`develop..integration` 从 2 退到 17。
+  ⇒ **本阶段保留为已发生的事实记录，不再作为路径步骤；真正的前置是阶段零与阶段三。**
   · 复用 §3 的五块地基；同时落 §5 的 commit 知识外移（wrapper 记录 commit/dirty/treeHash）
   · 验收：连续 N 轮绿 + 记录里能引用（而非自述）"被测树是干净的那个 commit"
 
