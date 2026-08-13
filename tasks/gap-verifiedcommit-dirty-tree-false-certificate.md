@@ -101,17 +101,17 @@ round 记录带上【被实际读取内容的标识】，最低限度三样（ma
 
 ## AC
 
-- [ ] AC1: 起跑时记录树脏净状态进 round 记录（dirty 标志**含 untracked**；脏 ⇒ verifiedCommit 不声明「已验证」）
-- [ ] AC2: round 记录含被测内容 tree hash（tracked 部分，write-tree）
-- [ ] AC3: 负控——round 4a3fc0be 形态（vc=1a5da8ee + 工作树 ≠ HEAD 树 ≠ index 树）被检出/标注
-- [ ] AC4: 既有测试全绿；`--for-task` scoped 门绿
-- [ ] AC5: `treeMutatedMidRound === true` ⇒ state 不得写 green（写 infra-error / void:true），SUITE-GREEN / SUITE-MERGE-PENDING 不得发出
+- [x] AC1: 起跑时记录树脏净状态进 round 记录（dirty 标志**含 untracked**；脏 ⇒ verifiedCommit 不声明「已验证」）
+- [x] AC2: round 记录含被测内容 tree hash（tracked 部分，write-tree）
+- [x] AC3: 负控——round 4a3fc0be 形态（vc=1a5da8ee + 工作树 ≠ HEAD 树 ≠ index 树）被检出/标注
+- [x] AC4: 既有测试全绿；`--for-task` scoped 门绿
+- [x] AC5: `treeMutatedMidRound === true` ⇒ state 不得写 green（写 infra-error / void:true），SUITE-GREEN / SUITE-MERGE-PENDING 不得发出
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全部勾上
-- [ ] 负控样例贴出（见 Evidence：round 4a3fc0be 形态被标注「验未被记录树」）
-- [ ] 全量套件绿
+- [x] AC1–AC5 全部勾上
+- [x] 负控样例贴出（见 Evidence 下半段：round 4a3fc0be 形态被测试检出/标注「treeDirty:true + tree ≠ HEAD 树」）
+- [ ] 全量套件绿（worktree subagent 只跑 scoped 门 + full-suite-runner.test.mjs 全绿；全量套件由外层在 fan-in 后跑）
 
 ## Touches
 
@@ -164,3 +164,32 @@ batch-merge 以该绿推进 develop→1a5da8ee 可走（2026-08-13 00:15 已执�
 其余 **113 轮是 `None` = 未测量，不是「未变更」**（硬规则⑥）。能说的只有「被测量的 9 轮里 2 轮被污染（22%）」，
 **不能说「122 轮里 1.6%」**。样本太小，别拿 22% 支撑任何阈值；它只够说明「这类污染不是孤例」。
 真实率需字段积累到几十轮——外层在 tick-log 持续记分母。
+
+**实现后（2026-08-13，worktree subagent，commit 见 Touches）——负控样例与 AC5 后果**：
+
+**AC1/AC2/AC3 负控（round 4a3fc0be 形态被检出/标注）**——`plugin/test/full-suite-runner.test.mjs`
+新增「AC1/AC2/AC3 — a DIRTY tested tree at round start is recorded … the round-90/4a3fc0be
+false-certificate shape detected」：temp git repo 造出【工作树 ≠ HEAD 树 ≠ index 树】（staged 编辑 +
+unstaged 编辑 + untracked `untracked.txt`），绿轮后 round 记录带：
+```
+treeDirty: true          # dirty 标志含 untracked（porcelain `?? untracked.txt` 在）
+tree: <stash create 树>   # ≠ HEAD 树 ≠ index 树 —— 被测内容的 tracked 树（write-tree 同族）
+commit: <startHead>       # 既有 verifiedCommit —— 证书指名的 commit
+```
+⇒ 4a3fc0be 形态（vc=1a5da8ee + 工作树 ≠ HEAD 树 ≠ index 树）现在被【检出+标注】：
+绿证书不再「无人知道它假」。同一文件还加 clean 树负控（treeDirty:false + tree==HEAD 树）与
+untracked-only 脏（treeDirty:true 而 tracked tree==HEAD 树——两字段独立轴）。
+
+**AC5（下半段）后果接上**——`treeMutatedMidRound === true` 现在有后果（round-121 形态被测试改为）：
+```
+state=red  reason=infra-error  void:true  treeMutatedMidRound:true
+```
+state 不写 green ⇒ SUITE-GREEN / SUITE-MERGE-PENDING 结构上不发出；
+`integration-batch-merge.sh:754` 的 `state==green` 闸挡住放行未经测试的对象（绿方向假证书不再被 merge 信任）。
+
+**assert-clean-tree.sh 启用**——`full-suite-runner.ts` 的 `readTreeState()` 起跑时调用它
+（绝对模式，exit 0=净 / 1=脏；status≠1 ⇒ fail-open 无检测），成为其第一个 runner 调用方
+（引用 0→1）；suite-AFTER 闸仍按 17:1x 裁定保持禁用（头部补注说明新角色）。
+
+**AC4 门**——`scripts/test.sh --for-task gap-verifiedcommit-dirty-tree-false-certificate --allow-thin`
+全绿：change-relevant 静态检查 PASS + `full-suite-runner.test.mjs` 129/129（GATE_EXIT=0）。

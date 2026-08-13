@@ -311,6 +311,14 @@ export interface SuiteState {
    */
   reason?: SuiteStateReason;
   /**
+   * gap-verifiedcommit-dirty-tree-false-certificate AC5 — VOIDED-CERTIFICATE marker: true when this
+   * round's tests PASSED but its tested tree was MUTATED MID-ROUND (treeMutatedMidRound=true ⇒
+   * state=red reason=infra-error instead of green — a FALSE CERTIFICATE, round-121 class). Lets a
+   * reader distinguish "voided green" from a real failure without re-deriving it. Absent on every
+   * non-voided state.
+   */
+  void?: boolean;
+  /**
    * Present on red+failed — the failure line(s) that flipped red, with best-effort file context.
    * This is what the SUITE-RED event carries (failureLocation) so the inner dispatch decision can
    * distinguish a SHARED-GATE failure (run_static_checks — every scoped run pays it ⇒ stop dispatch)
@@ -358,6 +366,27 @@ export interface SuiteState {
    * states (the runner omits the field when it cannot resolve a HEAD).
    */
   verifiedCommit?: string;
+  /**
+   * gap-verifiedcommit-dirty-tree-false-certificate AC1/AC2 — the TESTED root's tree state at round
+   * START: whether the working tree was DIRTY (git status --porcelain, which INCLUDES untracked `??`
+   * entries — ./undefined 等 untracked 不能漏在外面) and the tested-content tree hash (tracked part —
+   * `git stash create`'s tree = working-tree tracked content, staged+unstaged; HEAD tree when clean).
+   * A dirty round's `verifiedCommit` is a FALSE CERTIFICATE (it declares the commit, but what was
+   * tested is the working tree — the round-90/4a3fc0be shape: vc=1a5da8ee while 工作树 ≠ HEAD 树 ≠
+   * index 树). The dirty flag is the disclaiming annotation: `treeDirty: true` ⇒ verifiedCommit does
+   * NOT declare "已验证". Together `tree` makes "does this later commit reproduce the tested tree" a
+   * comparison (`tree === <commit>^{tree}`), not an assumption. Present on git roots (like
+   * verifiedCommit); absent on non-git hermetic roots.
+   */
+  treeDirty?: boolean;
+  /**
+   * gap-verifiedcommit-dirty-tree-false-certificate AC2 — the TESTED content's tree hash (tracked
+   * part) at round start: `git stash create`'s tree (the working tree's tracked content) when the
+   * tree is dirty, else `HEAD^{tree}`. Sibling of `treeDirty` (present together on git roots, absent
+   * together on non-git hermetic roots). A green round whose `tree` ≠ `verifiedCommit^{tree}` tested
+   * a tree that was never committed — its certificate is void.
+   */
+  tree?: string;
   /**
    * gap-concurrent-write-mutable-tree-false-positive-red — the TESTED CHECKOUT's HEAD at TERMINAL
    * time (same resolution as verifiedCommit — `git rev-parse HEAD` — read AFTER the suite child
@@ -955,6 +984,13 @@ export interface SuiteRoundRecord {
   // fail counter and drives routeRed/stop-dispatch — that axis is unchanged).
   reason?: SuiteRoundReason | null;
   /**
+   * gap-verifiedcommit-dirty-tree-false-certificate AC5 — VOIDED-CERTIFICATE marker: true when this
+   * round's tests PASSED but its tested tree was MUTATED MID-ROUND (treeMutatedMidRound=true ⇒
+   * state=red reason=infra-error instead of green). Lets the round sequence distinguish a voided
+   * green (false certificate) from a real failure. Absent on every non-voided round.
+   */
+  void?: boolean;
+  /**
    * gap-verification-round-reason-self-contradiction — on a reason='gate-failed' round, WHICH
    * gate/scan failed: 'static-check' (a run_static_checks checker — task-contract /
    * test-framework-policy / test-isolation ratchet), 'perfile-timeout' (a __PERFILE__ ... passed=false
@@ -969,6 +1005,19 @@ export interface SuiteRoundRecord {
    * on non-git hermetic roots / legacy rows.
    */
   commit?: string;
+  /**
+   * gap-verifiedcommit-dirty-tree-false-certificate AC1 — the round-start DIRTY flag for the tested
+   * root (git status --porcelain incl. untracked). `true` ⇒ the round's `commit` is a FALSE
+   * CERTIFICATE (the round-90/4a3fc0be shape). Same conditional as the state write (git roots only).
+   */
+  treeDirty?: boolean;
+  /**
+   * gap-verifiedcommit-dirty-tree-false-certificate AC2 — the tested content's tree hash (tracked
+   * part) at round start (`git stash create`'s tree when dirty, else `HEAD^{tree}`). Makes
+   * "was this round's green a certificate for its `commit`" a comparison (`tree === commit^{tree}`).
+   * Same conditional as the state write (git roots only).
+   */
+  tree?: string;
   /**
    * gap-precommit-guard-blocks-commits-not-working-tree-edits — the same assertion-surface mid-round
    * EDIT annotation the suite-state carries, on the round record so the historical sequence is
@@ -1255,6 +1304,46 @@ export function readVerifiedCommit(root: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * gap-verifiedcommit-dirty-tree-false-certificate AC1/AC2 — the TESTED root's tree state at round
+ * START: the dirty flag (via plugin/scripts/assert-clean-tree.sh — its FIRST runner caller; the
+ * absolute mode exits 0 on a clean tree, 1 on a dirty one, and its output names WHAT is dirty) plus
+ * the tested-content tree hash (tracked part — `git stash create`'s commit tree = working-tree
+ * tracked content, staged+unstaged; HEAD tree when nothing to stash). A non-git hermetic root yields
+ * undefined (never fabricates a tree — same contract as verifiedCommit).
+ */
+export function readTreeState(root: string): TreeState | undefined {
+  let treeDirty: boolean;
+  try {
+    const assertClean = path.join(__dirname, "assert-clean-tree.sh");
+    try {
+      // Exit 0 = clean; exit 1 = dirty (the FAIL branch); exit 2 = usage / not a git work tree —
+      // any status OTHER than 1 degrades to undefined (fail open: no detection, never a verdict).
+      execFileSync("bash", [assertClean, root], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+      treeDirty = false;
+    } catch (e) {
+      const status = (e as { status?: unknown }).status;
+      if (status !== 1) return undefined;
+      treeDirty = true;
+    }
+    const stashCreate = execFileSync("git", ["stash", "create"], { cwd: root, encoding: "utf8" }).trim();
+    const tree = /^[0-9a-f]{40,}$/i.test(stashCreate)
+      ? execFileSync("git", ["rev-parse", `${stashCreate}^{tree}`], { cwd: root, encoding: "utf8" }).trim()
+      : execFileSync("git", ["rev-parse", "HEAD^{tree}"], { cwd: root, encoding: "utf8" }).trim();
+    return { treeDirty, tree };
+  } catch {
+    return undefined;
+  }
+}
+
+export interface TreeState {
+  /** True when the tested working tree has ANY change vs HEAD — INCLUDING untracked files. */
+  treeDirty: boolean;
+  /** Tested-content tree hash (tracked part) — `git stash create`'s tree (working-tree tracked
+   *  content) when dirty, else `HEAD^{tree}`. */
+  tree: string;
 }
 
 /**
@@ -1850,6 +1939,16 @@ export async function run(argv: string[]): Promise<number> {
   // fails the round).
   const assertionSnapshot = snapshotAssertionSurface(root);
 
+  // gap-verifiedcommit-dirty-tree-false-certificate AC1/AC2 — the TESTED tree's state at round START:
+  // dirty flag (incl. untracked) + tested-content tree hash (tracked part). Computed AFTER one-shot
+  // provisioning so an isolated round measures the FROZEN worktree (clean = HEAD tree ⇒ the round's
+  // verifiedCommit is a TRUE certificate by construction) and a non-isolated round measures the tree
+  // it actually reads (dirty ⇒ verifiedCommit is a FALSE CERTIFICATE — round-90/4a3fc0be shape).
+  // Non-git hermetic roots omit both fields (like verifiedCommit). The dirty flag is an ANNOTATION
+  // (AC1: 脏 ⇒ verifiedCommit 不声明「已验证」), never a green/red criterion on its own — the
+  // certificate-voiding consequence is reserved for AC5's treeMutatedMidRound.
+  const treeState = readTreeState(root);
+
   // gap-systemd-run-limits-for-suite-and-heavy-ops — wrap the spawned suite in a systemd-run --user
   // --scope cgroup scope. The limit is kernel-enforced for the scope's lifetime and bounds ONE
   // process group, so a PID/memory blowout inside the suite kills the SUITE's scope, never the
@@ -1884,6 +1983,12 @@ export async function run(argv: string[]): Promise<number> {
     scope,
     runId,
     ...(verifiedCommit ? { verifiedCommit } : {}),
+    // gap-verifiedcommit-dirty-tree-false-certificate AC1/AC2 — the tested tree's round-start state
+    // (dirty flag incl. untracked + tested-content tree hash). Carried on EVERY state write (running
+    // included) so suite-state-trigger's SUITE-RUNNING event and any state reader can see at a glance
+    // whether the round's verifiedCommit is a false certificate. Git roots only (same conditional as
+    // verifiedCommit).
+    ...(treeState ? { treeDirty: treeState.treeDirty, tree: treeState.tree } : {}),
     // gap-verification-round-in-one-shot-worktree — the round ran in a one-shot worktree (the tested
     // tree physically != the mutable main checkout). scope stays "main" (it IS the main verification
     // signal the inner waits for); this field names the ISOLATION the round actually used so a reader
@@ -2577,9 +2682,25 @@ export async function run(argv: string[]): Promise<number> {
   // teardown with no green evidence stays infra-error.
   const testsFullyGreen =
     (tapPass > 0 || testsSeen > 0) && tapFail === 0 && tapCancelled === 0 && redFailures.length === 0;
-  const green =
+  const testsGreen =
     !redDetected && !staticCheckDetected && !abortDetected && spawnError === null &&
     (exitCode === 0 || (childKilledBySignal && testsFullyGreen));
+  // gap-verifiedcommit-dirty-tree-false-certificate AC5 — a would-be-green verdict whose TESTED TREE
+  // was MUTATED MID-ROUND (verifiedCommit !== terminalCommit — a concurrent writer committed to the
+  // tested tree while the round ran) is a FALSE CERTIFICATE: the green measured a tree that was NOT
+  // pinned to the certified commit (round-121 shape: state=green + treeMutatedMidRound=true let
+  // SUITE-GREEN / SUITE-MERGE-PENDING fire for a tree that was never the certified commit's tree).
+  // The annotation treeMutatedMidRound is now CONSEQUENTIAL — the state must NOT be written green.
+  // Instead the round is VOIDED: state=red + reason=infra-error (an ENVIRONMENT problem — the tested
+  // tree was not stable; NO correctness conclusion — this is not a test failure) + `void: true` so any
+  // reader can distinguish a voided certificate from a real failure. The non-green terminal state
+  // STRUCTURALLY prevents SUITE-GREEN / SUITE-MERGE-PENDING (suite-state-trigger fires them on a
+  // green transition). Git roots only (treeMutatedMidRound is absent on non-git hermetic roots ⇒
+  // never voided there); a REAL failure in the same round keeps its red (voiding only demotes the
+  // would-be-green certificate, never the failed verdict).
+  const treeMutated = treeMutatedMidRound === true;
+  const voided = testsGreen && treeMutated;
+  const green = testsGreen && !treeMutated;
   // No correctness conclusion (abort) iff: an abort marker was seen, OR the child was killed by a
   // signal (code null), OR it never spawned. A REAL failure conclusion (redDetected) — and now a
   // static-check conclusion (staticCheckDetected) — is never downgraded by an earlier abort marker:
@@ -2589,9 +2710,11 @@ export async function run(argv: string[]): Promise<number> {
   // marker stays green (AC1, gap-infra-error-false-positive-from-test-internal-kill).
   const noCorrectnessConclusion =
     !redDetected && !staticCheckDetected && (abortDetected || childKilledBySignal || spawnError !== null);
-  const reason: SuiteStateReason = redDetected
-    ? "failed"
-    : timedOut
+  const reason: SuiteStateReason = voided
+    ? "infra-error" // AC5 — a would-be-green certificate voided by a mid-round-mutated tested tree (environment problem, NO correctness conclusion)
+    : redDetected
+      ? "failed"
+      : timedOut
       ? "timeout" // max-runtime fired (AC3) — NO correctness conclusion, killed the child tree
       : hung
         ? "hung" // silence guard fired (AC3) — the suite went silent, killed as hung
@@ -2636,9 +2759,11 @@ export async function run(argv: string[]): Promise<number> {
   // file but are routed by their `staticCheck: true` marker to the shared gate — segmenting them out
   // would silently drop the shared-gate dispatch input (gap-static-check-red-failures-capture-only-
   // task-contract-shape's failures[] Contract).
-  const failureFields = staticCheckDetected && !redDetected
-    ? { failures: finalFailures }
-    : segmentedFailureFields(finalFailures);
+  const failureFields = voided
+    ? {} // AC5 — a voided round has NO failures (its tests passed; the certificate is void, not failed)
+    : staticCheckDetected && !redDetected
+      ? { failures: finalFailures }
+      : segmentedFailureFields(finalFailures);
   const finalState: SuiteState = green
     ? {
         state: "green",
@@ -2646,9 +2771,10 @@ export async function run(argv: string[]): Promise<number> {
         finishedAt,
         durationMs,
         // gap-concurrent-write-mutable-tree-false-positive-red — carry the tree-mutation annotation
-        // on green too: a green round with a mid-round-mutated tree is a weaker green (the suite did
-        // not run on a pinned checkout), and the explicit field keeps the negative control visible
-        // (treeMutatedMidRound: false on a clean window). Git roots only (verifiedCommit defined).
+        // on green too: the explicit field keeps the negative control visible (treeMutatedMidRound:
+        // false on a clean window). Since gap-verifiedcommit-dirty-tree-false-certificate AC5 a green
+        // with treeMutatedMidRound=true is IMPOSSIBLE (a mutated-tree round is voided instead), so
+        // this carry is the explicit negative control only. Git roots only (verifiedCommit defined).
         ...(verifiedCommit && terminalCommit ? { terminalCommit, treeMutatedMidRound } : {}),
         // gap-precommit-guard-blocks-commits-not-working-tree-edits — carry the assertion-surface
         // mid-round-EDIT annotation on green too: a green whose tested tree had an assertion-surface
@@ -2658,6 +2784,11 @@ export async function run(argv: string[]): Promise<number> {
     : {
         state: "red",
         reason,
+        // gap-verifiedcommit-dirty-tree-false-certificate AC5 — a VOIDED certificate marker: the
+        // round's tests PASSED but its tested tree was MUTATED MID-ROUND, so the state is red
+        // (infra-error) instead of green. `void: true` lets any reader distinguish "this round's
+        // green was voided (false certificate)" from a real test failure without re-deriving it.
+        ...(voided ? { void: true } : {}),
         ...base,
         finishedAt,
         durationMs,
@@ -2809,6 +2940,10 @@ export async function run(argv: string[]): Promise<number> {
     load: readLoadAvg(),
     state: finalState.state,
     reason: roundReason,
+    // gap-verifiedcommit-dirty-tree-false-certificate AC5 — the same `void: true` marker the state
+    // carries: this round's tests PASSED but its tree was MUTATED MID-ROUND ⇒ a VOIDED certificate
+    // (state=red, reason=infra-error). Lets the round sequence distinguish voided-green from failed.
+    ...(voided ? { void: true } : {}),
     ...(roundGate ? { gate: roundGate } : {}),
     runner: base.runner,
     scope,
@@ -2819,6 +2954,12 @@ export async function run(argv: string[]): Promise<number> {
     // gap-merge-green-snapshot-verified-commit-livelock AC2 — the verified commit this round tested
     // (same value the state carries). Absent on non-git hermetic roots.
     ...(verifiedCommit ? { commit: verifiedCommit } : {}),
+    // gap-verifiedcommit-dirty-tree-false-certificate AC1/AC2 — the tested tree's round-start state
+    // (dirty flag incl. untracked + tested-content tree hash) rides the round record so the historical
+    // sequence is queryable for "was this round's verifiedCommit a FALSE CERTIFICATE (dirty tree)" /
+    // "does a later commit reproduce the tested tree" WITHOUT re-deriving it — the same conditional
+    // as the state write (git roots only; the record never fabricates a tree).
+    ...(treeState ? { treeDirty: treeState.treeDirty, tree: treeState.tree } : {}),
     // gap-concurrent-write-mutable-tree-false-positive-red — the tree-mutation annotation (start
     // HEAD vs terminal HEAD) rides the round record so the historical round sequence is queryable
     // for "was this red a concurrent-write FALSE-POSITIVE candidate" (round-53 class) WITHOUT
