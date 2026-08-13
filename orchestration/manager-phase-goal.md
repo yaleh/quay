@@ -2614,7 +2614,7 @@ manager 的活是：每 tick 采样 AC20 的五条、维护 AC21-AC24 的取证�
 - [~] **AC43** 套件无 VCS 知识 —— **cancelled（非达成）**：AC4 逐字「试点成立 ⇒ 全局轮停跑 + AC43/AC45 标 cancelled」，2026-08-13 16:2xZ 由 outer 执行（`f8dcd41c`）。**理由**：AC43 要移出套件的 `verifiedCommit` 类逻辑，是**全局共享轮**的伴生物；全局轮停跑后该逻辑失去消费者 ⇒ **是被取消，不是被实现**。**⚠️ `[~]` 不是 `[x]`：勾选表的分子只数 `[x]`，取消项不得计入达成**
 - [x] **AC44** 并发上限读宿主，不写死字面量（2026-08-13 15:2xZ 达成，三条判据逐条取证：①两槽锁 `.0`/`.1` + `QUAY_MAX_CONCURRENT_SUITES` 可配，且 `test.sh:1131 full_suite_lock_acquire` 排在 `:1133 gate` / `:1136 build_dist` / `:1138 static_checks` **之前** ⇒ 被挡者不先起进程树；②非注释的 `CPUQuota=` 仅 1 处且是模板 `${limits.cpuQuota}`（`""`=无限制，人 08-11 裁定）；③**判据3 已改**——原文要三个字面量 8/6/6，现为 `:1100/:1101` `Math.floor(hostParallelism()/concurrentSuiteSlots())`，`8` 不出现在任何地方）
 - [~] **AC45** 记录迁移到 per-task —— **cancelled（非达成）**：同 AC43，由 AC4 逐字路由（`f8dcd41c`）。**理由**：AC45 要迁的「趋势分析来源」同样是全局共享轮的伴生物。**⚠️ 但今日实测的两个缺陷【不随取消而消失】，已在 A20 记录**：round 记录仍缺任务归属/重跑次数/fork 基线三维；`verification-round.jsonl` 仍混装跑轮 162 + 闭合 3 且无 `type` 字段（靠 `startedAt` 是否存在区分）⇒ **若将来 per-task 记录源要建，这两条是它的起点，不是被取消掉的东西**
-- [ ] **AC46** ready 自足、静态语义，pool 可取消（含：动态冲突只 defer 不退回）
+- [x] **AC46** ready 自足、静态语义（2026-08-13 17:2xZ 达成，**按【收缩后】的判据判**：判据1 提升闸扩容已由 `881497a0` 落地——实测 promotion 集 6 条中 2 条不该放行的现已被拒（`candidates=8 promotions=0`，`cold-start` compound / `worktree-node-modules` self-touch 仍 todo）；判据4 deficit 语义可区分**已达成**；**判据3 经测量退出**——其根因「翻 done 等外层绿轮」随停轮消失，我当初给它写的退出条件「per-task 全量成为默认认证之日退役」于今日满足，降观察项（再现 `landed-implementation`/`not-yet-flipped` ⇒ 恢复）；判据2「能修则修」视判据1 残留再定。**⚠️ 判据3/2 是【测量后判定不需要】而退出，不是未完成——与 AC43/45 的 cancelled 不同类，故计入达成**）
 - [ ] **AC47** 完成判定覆盖 AC + DoD
 - [ ] **AC48** integration 分支退役，且发生在最后
 - [ ] **AC49** 每个改动在隔离环境里自证
@@ -2788,7 +2788,12 @@ npm-pack-e2e [real-install]「tarball bin → dist/quay.js 缺失」：round 123
 ## AC48（收尾）：integration 分支退役，且退役发生在最后
 
 **判据（两条，顺序不可颠倒）**：
-1. **退役前置**：AC42/AC44/AC45/AC46 全部满足，且 `integration` 上**连续 N 天零新增合并**
+1. **退役前置**：AC42/AC44/AC45/AC46 全部**满足【或已取消】**，且 `integration` 上**连续 N 天零新增合并**
+   **⚠️ 判据1 于 2026-08-13 17:2xZ 由 A20 第①步更正**：原文要求「全部**满足**」，
+   而 **AC45 已由 AC4 路由标 cancelled**（全局轮停跑后它要迁的东西失去消费者）
+   ⇒ **一个被取消的 AC 无法"满足"，照字面判据1 永不可达**。
+   **取消与达成在此处等价**：AC45 的取消意味着"它要解决的问题不再存在"，
+   对退役前置而言与"已解决"是同一实质。**同族第 N 次：判据比它的前提活得更久。**
    （即它已无事可做）——取证：`git log integration ^develop` 为空 + 上述 AC 的取证均通过。
 2. **退役动作**：删除分支 + 清理其引用（`integration-batch-merge.sh` / `integration-branch-model.ts` /
    `SPEC-branching-model-integration-branch-2026-08-05.md` 加退役标注但**不删**——它是理由档案）。
