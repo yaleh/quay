@@ -99,3 +99,9 @@ integration 分支），但**只做了任务认领，没做双向代码合并**�
 
 **替代**：见 `gap-two-peer-quay-developers-continuous-bidirectional-merge`（另立，替代本任务）。
 本任务标记 needs-human 存档（框架更正留痕），不按原范围派发。
+
+**AC5 交叉标注（2026-08-13，来自 `tasks/gap-two-peer-quay-developers-continuous-bidirectional-merge.md` AC5）**：
+本任务（A→B 单向下行缺失）是**正确框架的窄症状**，已由对等任务整体替代——不是「A 的进展到不了 B」单向，
+而是「两台机器都持续应用最新并在最新上开发」对称双向。落地载体：`sync-lag-check.sh --pull`（下行，严格落后即
+fast-forward，真分歧 fail-closed）+ `claim-task.sh --sync` / `integration-batch-merge.sh --sync-pull`（下行接入点）。
+B 机 `--slot-status` 等工具随双向合并到达（原 AC1/AC2 症状），见替代任务的 AC3 与 sync-lag-check.test.mjs。

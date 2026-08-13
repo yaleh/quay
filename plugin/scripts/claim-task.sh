@@ -31,7 +31,7 @@
 # claim remote is configured), so single-machine dispatch is byte-for-behavior unchanged.
 #
 # Usage:
-#   claim-task.sh <task-id> [--root <repo>] [--remote <remote>] [--check-touches] [--dry-run]
+#   claim-task.sh <task-id> [--root <repo>] [--remote <remote>] [--check-touches] [--sync] [--dry-run]
 #   claim-task.sh --status <task-id> [--root <repo>] [--remote <remote>]
 #   claim-task.sh --reclaim <task-id> [--stale-after <hours>] [--root <repo>] [--remote <remote>]
 #
@@ -40,13 +40,22 @@
 #                   branch-cutover model). Default:
 #                   $QUAY_CLAIM_REMOTE; REQUIRED (fail-closed — no silent claim on an unstated remote).
 #   --check-touches AC2: refuse the claim if the candidate's ## Touches overlap any in-flight task/*
+#   --sync          (gap-two-peer-quay-developers-continuous-bidirectional-merge AC1/AC3) BEFORE
+#                   claiming, run the DOWNSYNC half of the bidirectional merge: pull the fork-baseline
+#                   (default develop) from the claim remote into the local branch, so this machine
+#                   "develops on latest" (the human frame: both machines continuously apply latest and
+#                   develop on latest, symmetric). Delegates to sync-lag-check.sh --pull; a TRUE
+#                   divergence (local AND remote each have commits the other lacks) FAILS CLOSED — the
+#                   claim is refused with the divergence reported, never a blind merge at claim time.
+#   --sync-branch   the branch to downsync with --sync (default: develop — the FORK_BASELINE).
 #   --dry-run       check everything WITHOUT pushing the claim branch
 #   --stale-after   (--reclaim only) reclaim only when the existing claim's commit is older than this
 #                   many hours (default 6)
 #
 # Exit codes:
 #   0  claimed (the empty task/<id> marker is now on the claim remote) — or would be (--dry-run)
-#   1  not claimed: already-claimed / touches-overlap (--check-touches) / reclaim refused (not stale)
+#   1  not claimed: already-claimed / touches-overlap (--check-touches) / reclaim refused (not stale) /
+#      --sync downsync refused (true divergence — nothing moved, resolve before claiming)
 #   2  usage / no claim remote / task file missing / remote unreachable
 # ── 统一 --help（gap-scripts-sprawl：用法在前、退出 0、无业务副作用）────────────────────
 if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
@@ -97,6 +106,24 @@ do_claim() {
   validate_id "$id"
   [ -n "$remote" ] || { echo "claim-task: no claim remote — set QUAY_CLAIM_REMOTE or pass --remote" >&2; exit 2; }
   [ -f "$repo_root/tasks/$id.md" ] || { echo "claim-task: task file not found: tasks/$id.md" >&2; exit 2; }
+
+  # 0. --sync: the DOWNSYNC half of the bidirectional merge (two peer developers — "develop on latest").
+  #    Pull the fork-baseline from the claim remote into the LOCAL branch BEFORE claiming, so this
+  #    machine develops on the peer's latest (not a stale baseline). Fail-closed on a true divergence.
+  if [ "${sync}" -eq 1 ]; then
+    if [ -f "${SCRIPT_DIR}/sync-lag-check.sh" ]; then
+      local sync_out sync_rc
+      sync_out="$(bash "${SCRIPT_DIR}/sync-lag-check.sh" --root "${repo_root}" --branch "${sync_branch}" --remote "${remote}" --pull 2>&1)"
+      sync_rc=$?
+      printf '%s\n' "${sync_out}"
+      if [ "${sync_rc}" -ne 0 ]; then
+        echo "claim-task: --sync downsync FAILED (exit ${sync_rc}) — local ${sync_branch} and ${remote}/${sync_branch} diverged or remote unreachable; resolve before claiming (never a blind merge at claim time)" >&2
+        exit 1
+      fi
+    else
+      echo "claim-task: --sync requested but sync-lag-check.sh not found at ${SCRIPT_DIR}/sync-lag-check.sh; skipping downsync" >&2
+    fi
+  fi
 
   # One network call, fail-closed on an unreachable shared repo.
   local heads
@@ -238,6 +265,8 @@ do_reclaim() {
 mode="claim"
 check_touches=0
 dry_run=0
+sync=0
+sync_branch="develop"
 stale_after=6
 id=""
 
@@ -246,6 +275,8 @@ while [ "$#" -gt 0 ]; do
     --root) repo_root="$2"; shift 2 ;;
     --remote) remote="$2"; shift 2 ;;
     --check-touches) check_touches=1; shift ;;
+    --sync) sync=1; shift ;;
+    --sync-branch) sync_branch="$2"; shift 2 ;;
     --dry-run) dry_run=1; shift ;;
     --status) mode="status"; shift ;;
     --reclaim) mode="reclaim"; shift ;;

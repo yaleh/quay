@@ -150,6 +150,95 @@ test("AC2: event-driven path — integration-batch-merge.sh --sync pushes develo
   }
 });
 
+// ── AC1 (--sync-pull): the event-driven DOWNSYNC — the batch merge pulls the peer's latest first ──
+// gap-two-peer-quay-developers-continuous-bidirectional-merge AC1: integration-batch-merge.sh
+// --sync-pull runs sync-lag-check.sh --pull on <develop> BEFORE the batch merge, so the merge base
+// includes the peer's latest ("apply latest and develop on latest" — the human frame). When local
+// develop is strictly behind origin/develop, the downsync fast-forwards it before the merge runs.
+
+test("AC1 (--sync-pull): the batch merge pulls the peer's origin/develop into local develop BEFORE merging (develop on latest)", () => {
+  const w = makeWorld("ac2pull");
+  try {
+    // Two-line world: develop published; integration forks and adds a DISTINCT file (so the
+    // post-pull real merge of integration ⊕ (develop+peer) has no file.txt conflict).
+    git(w.m, "checkout", "-q", "-b", "develop");
+    writeFileSync(join(w.m, "file.txt"), "base\n", "utf8");
+    assert.equal(git(w.m, "add", "-A").status, 0);
+    assert.equal(git(w.m, "commit", "-q", "-m", "develop base").status, 0);
+    assert.equal(git(w.m, "push", "-q", "-u", "origin", "develop").status, 0, "publish develop");
+    git(w.m, "checkout", "-q", "-b", "integration");
+    writeFileSync(join(w.m, "int-work.txt"), "integration work\n", "utf8");
+    assert.equal(git(w.m, "add", "-A").status, 0);
+    assert.equal(git(w.m, "commit", "-q", "-m", "integration work").status, 0);
+
+    // The PEER advances origin/develop with a DIFFERENT file — local develop is strictly behind.
+    const peer = join(w.root, "peer");
+    assert.equal(git(w.root, "clone", "-q", w.shared, peer).status, 0, "clone peer");
+    git(peer, "config", "user.name", "peer");
+    git(peer, "config", "user.email", "peer@example.com");
+    git(peer, "checkout", "-q", "-b", "develop", "origin/develop");
+    writeFileSync(join(peer, "peer-work.txt"), "peer work\n", "utf8");
+    assert.equal(git(peer, "add", "-A").status, 0);
+    assert.equal(git(peer, "commit", "-q", "-m", "peer's develop work").status, 0);
+    assert.equal(git(peer, "push", "-q", "origin", "develop").status, 0, "peer pushes develop");
+    const peerTip = bareRef(w.shared, "refs/heads/develop");
+
+    // --sync-pull pulls origin/develop into local develop BEFORE the merge (the downsync half); the
+    // batch merge then real-merges integration on top (--merge — after the pull, integration is not a
+    // descendant of develop, exactly the "merge base includes the peer's latest" bidirectional shape).
+    const r = run(batchMerge, ["--skip-freshness-gate", "--skip-worktree-green-gate", "--root", w.m, "--develop", "develop", "--integration", "integration", "--sync-pull", "--merge"]);
+    assert.equal(r.status, 0, `batch-merge --sync-pull --merge failed: ${r.stdout}${r.stderr}`);
+    assert.match(r.stdout, /fast-forwarded local develop by 1 commit/, "--sync-pull ran the downsync");
+    // The merged develop contains BOTH the peer's work and the integration work.
+    assert.match(r.stdout, /OK — develop fast-forwarded|real merge|merged/, "the batch merge completed");
+    assert.equal(git(w.m, "rev-parse", "develop").stdout.trim() !== "", true, "develop advanced");
+    assert.equal(bareRef(w.shared, "refs/heads/develop"), peerTip, "origin/develop untouched by --sync-pull alone (no --sync push)");
+  } finally {
+    cleanup(w.root);
+  }
+});
+
+test("AC1 negative control (--sync-pull divergence): the batch merge FAILS CLOSED on a true divergence — nothing moved", () => {
+  const w = makeWorld("ac2pulldiv");
+  try {
+    git(w.m, "checkout", "-q", "-b", "develop");
+    writeFileSync(join(w.m, "file.txt"), "base\n", "utf8");
+    assert.equal(git(w.m, "add", "-A").status, 0);
+    assert.equal(git(w.m, "commit", "-q", "-m", "develop base").status, 0);
+    assert.equal(git(w.m, "push", "-q", "-u", "origin", "develop").status, 0, "publish develop");
+    git(w.m, "checkout", "-q", "-b", "integration");
+    writeFileSync(join(w.m, "int-work.txt"), "integration work\n", "utf8");
+    assert.equal(git(w.m, "add", "-A").status, 0);
+    assert.equal(git(w.m, "commit", "-q", "-m", "integration work").status, 0);
+
+    // Peer advances origin/develop.
+    const peer = join(w.root, "peer");
+    assert.equal(git(w.root, "clone", "-q", w.shared, peer).status, 0, "clone peer");
+    git(peer, "config", "user.name", "peer");
+    git(peer, "config", "user.email", "peer@example.com");
+    git(peer, "checkout", "-q", "-b", "develop", "origin/develop");
+    writeFileSync(join(peer, "peer-work.txt"), "peer work\n", "utf8");
+    assert.equal(git(peer, "add", "-A").status, 0);
+    assert.equal(git(peer, "commit", "-q", "-m", "peer's develop work").status, 0);
+    assert.equal(git(peer, "push", "-q", "origin", "develop").status, 0, "peer pushes develop");
+    const peerTip = bareRef(w.shared, "refs/heads/develop");
+
+    // Machine makes a LOCAL develop commit (diverges from origin/develop) — then batch-merges.
+    git(w.m, "checkout", "-q", "develop");
+    writeFileSync(join(w.m, "local-work.txt"), "local work\n", "utf8");
+    assert.equal(git(w.m, "add", "-A").status, 0);
+    assert.equal(git(w.m, "commit", "-q", "-m", "machine's local develop work").status, 0);
+
+    const r = run(batchMerge, ["--skip-freshness-gate", "--skip-worktree-green-gate", "--root", w.m, "--develop", "develop", "--integration", "integration", "--sync-pull"]);
+    assert.notEqual(r.status, 0, "--sync-pull on a true divergence must fail closed");
+    assert.match(`${r.stdout}${r.stderr}`, /DIVERGENCE|downsync FAILED/);
+    // Nothing moved: origin/develop untouched (no blind merge, no push).
+    assert.equal(bareRef(w.shared, "refs/heads/develop"), peerTip, "origin/develop untouched by the failed merge");
+  } finally {
+    cleanup(w.root);
+  }
+});
+
 // ── AC3: sync lag is mechanically readable, and measure modes never mutate ───────────────────────
 
 test("AC3: --json reports the lag (unpushed/behind/leads) and NEVER pushes; --dry-run never pushes", () => {
@@ -288,6 +377,153 @@ test("fail-closed: not-a-git-repo / missing remote / missing local branch exit 2
     const r3 = run(syncCheck, ["--root", w.m, "--remote", "no-such-remote"]);
     assert.equal(r3.status, 2, "missing remote must exit 2");
     assert.match(r3.stderr, /remote not found/);
+  } finally {
+    cleanup(w.root);
+  }
+});
+
+// ── --pull: the DOWNSYNC direction (bidirectional merge, gap-two-peer-quay-developers-…) ──────────
+// The authority model (PLAN-develop-branch-cutover): develop/GitHub is the cross-machine convergence
+// point; each machine BOTH pushes (--push) AND pulls (--pull) origin/develop. --pull is the missing
+// reverse direction: fetch origin/develop, and when local develop is strictly behind (has nothing
+// origin lacks), fast-forward local develop to origin/develop — "apply latest, develop on latest".
+//
+// Coverage map:
+//   AC1 — downsync really works: the PEER pushes a commit to origin; the machine (strictly behind)
+//         runs --pull ⇒ local develop advances to origin/develop (before/after asserted).
+//   AC1-symmetric — the reverse exists too: a commit the MACHINE pushes reaches the peer's --pull
+//         (the two directions are symmetric — A pulls B, B pulls A).
+//   divergence-negative — both sides have commits the other lacks ⇒ --pull FAILS CLOSED (exit 1,
+//         nothing moved) — never a blind --ours/--theirs at sync time.
+//   measure-modes — --pull --dry-run and --json never move the local ref.
+
+function behindCount(m, branch) {
+  const r = git(m, "rev-list", "--count", `${branch}..origin/${branch}`);
+  assert.equal(r.status, 0, `rev-list behind failed: ${r.stderr}`);
+  return Number(r.stdout.trim());
+}
+
+test("AC1 (downsync): a peer-pushed develop commit reaches the machine via --pull (fast-forward, strictly behind)", () => {
+  const w = makeWorld("pullac1");
+  try {
+    git(w.m, "checkout", "-q", "-b", "develop");
+    commit(w.m, "develop base");
+    assert.equal(git(w.m, "push", "-q", "-u", "origin", "develop").status, 0, "publish develop");
+    const baseTip = git(w.m, "rev-parse", "develop").stdout.trim();
+
+    // The PEER (a second clone) adds a commit to origin/develop.
+    const peer = join(w.root, "peer");
+    assert.equal(git(w.root, "clone", "-q", w.shared, peer).status, 0, "clone peer");
+    git(peer, "config", "user.name", "peer");
+    git(peer, "config", "user.email", "peer@example.com");
+    git(peer, "checkout", "-q", "-b", "develop", "origin/develop");
+    git(peer, "checkout", "-q", "develop");
+    const peerTip = commit(peer, "peer's develop work");
+    assert.equal(git(peer, "push", "-q", "origin", "develop").status, 0, "peer pushes develop");
+    assert.equal(bareRef(w.shared, "refs/heads/develop"), peerTip, "origin/develop advanced");
+
+    // The machine is strictly behind (nothing local to lose): origin/develop has advanced on the bare
+    // repo, while the machine's local develop (and its stale tracking ref) is still at base.
+    assert.equal(bareRef(w.shared, "refs/heads/develop"), peerTip, "origin/develop advanced (bare repo)");
+    assert.equal(git(w.m, "rev-parse", "develop").stdout.trim(), baseTip, "machine develop still at base");
+    assert.equal(git(w.m, "rev-parse", "origin/develop").stdout.trim(), baseTip, "machine's tracking ref is stale (still at base)");
+
+    // The DOWNSYNC: --pull fast-forwards local develop to origin/develop.
+    const r = run(syncCheck, ["--root", w.m, "--branch", "develop", "--pull"]);
+    assert.equal(r.status, 0, `--pull failed: ${r.stdout}${r.stderr}`);
+    assert.match(r.stdout, /fast-forwarded local develop by 1 commit/);
+    assert.equal(git(w.m, "rev-parse", "develop").stdout.trim(), peerTip, "local develop advanced to origin/develop");
+    assert.equal(behindCount(w.m, "develop"), 0, "after: machine is in sync");
+  } finally {
+    cleanup(w.root);
+  }
+});
+
+test("AC1 (downsync symmetric): a MACHINE-pushed develop commit reaches the peer via the PEER's --pull", () => {
+  const w = makeWorld("pullac1sym");
+  try {
+    git(w.m, "checkout", "-q", "-b", "develop");
+    commit(w.m, "develop base");
+    assert.equal(git(w.m, "push", "-q", "-u", "origin", "develop").status, 0, "publish develop");
+
+    // A second clone is the PEER, and the MACHINE advances origin/develop.
+    const peer = join(w.root, "peer");
+    assert.equal(git(w.root, "clone", "-q", w.shared, peer).status, 0, "clone peer");
+    git(peer, "config", "user.name", "peer");
+    git(peer, "config", "user.email", "peer@example.com");
+    git(peer, "checkout", "-q", "-b", "develop", "origin/develop");
+    const peerBase = git(peer, "rev-parse", "develop").stdout.trim();
+
+    const machineTip = commit(w.m, "machine's develop work");
+    assert.equal(git(w.m, "push", "-q", "origin", "develop").status, 0, "machine pushes develop");
+
+    // The PEER runs --pull (the symmetric direction) and receives the MACHINE's commit.
+    const r = run(syncCheck, ["--root", peer, "--branch", "develop", "--pull"]);
+    assert.equal(r.status, 0, `peer --pull failed: ${r.stdout}${r.stderr}`);
+    assert.equal(git(peer, "rev-parse", "develop").stdout.trim(), machineTip, "peer develop advanced to machine's tip");
+    assert.notEqual(peerBase, machineTip, "the peer actually moved");
+  } finally {
+    cleanup(w.root);
+  }
+});
+
+test("AC1 negative control (divergence): --pull FAILS CLOSED when BOTH sides have commits the other lacks — nothing moved", () => {
+  const w = makeWorld("pulldiv");
+  try {
+    git(w.m, "checkout", "-q", "-b", "develop");
+    commit(w.m, "develop base");
+    assert.equal(git(w.m, "push", "-q", "-u", "origin", "develop").status, 0, "publish develop");
+
+    // Peer advances origin/develop.
+    const peer = join(w.root, "peer");
+    assert.equal(git(w.root, "clone", "-q", w.shared, peer).status, 0, "clone peer");
+    git(peer, "config", "user.name", "peer");
+    git(peer, "config", "user.email", "peer@example.com");
+    git(peer, "checkout", "-q", "-b", "develop", "origin/develop");
+    const peerTip = commit(peer, "peer's develop work");
+    assert.equal(git(peer, "push", "-q", "origin", "develop").status, 0, "peer pushes develop");
+
+    // Machine makes a LOCAL develop commit it has NOT pushed — now both sides diverged.
+    const localTip = commit(w.m, "machine's local develop work");
+
+    const r = run(syncCheck, ["--root", w.m, "--branch", "develop", "--pull"]);
+    assert.notEqual(r.status, 0, "--pull on a true divergence must fail closed");
+    assert.equal(r.status, 1, "divergence exit must be 1");
+    assert.match(`${r.stdout}${r.stderr}`, /DIVERGENCE/);
+    assert.equal(git(w.m, "rev-parse", "develop").stdout.trim(), localTip, "local develop NOT moved (no blind merge)");
+    assert.equal(bareRef(w.shared, "refs/heads/develop"), peerTip, "origin/develop untouched");
+  } finally {
+    cleanup(w.root);
+  }
+});
+
+test("AC3 measure modes: --pull --dry-run and --json never move the local ref", () => {
+  const w = makeWorld("pulldry");
+  try {
+    git(w.m, "checkout", "-q", "-b", "develop");
+    commit(w.m, "develop base");
+    assert.equal(git(w.m, "push", "-q", "-u", "origin", "develop").status, 0, "publish develop");
+
+    // Peer advances origin/develop so the machine is strictly behind.
+    const peer = join(w.root, "peer");
+    assert.equal(git(w.root, "clone", "-q", w.shared, peer).status, 0, "clone peer");
+    git(peer, "config", "user.name", "peer");
+    git(peer, "config", "user.email", "peer@example.com");
+    git(peer, "checkout", "-q", "-b", "develop", "origin/develop");
+    commit(peer, "peer's develop work");
+    assert.equal(git(peer, "push", "-q", "origin", "develop").status, 0, "peer pushes develop");
+
+    const before = git(w.m, "rev-parse", "develop").stdout.trim();
+    const dr = run(syncCheck, ["--root", w.m, "--branch", "develop", "--pull", "--dry-run"]);
+    assert.equal(dr.status, 0, `--pull --dry-run failed: ${dr.stdout}${dr.stderr}`);
+    assert.match(dr.stdout, /WOULD fast-forward/);
+    assert.equal(git(w.m, "rev-parse", "develop").stdout.trim(), before, "--dry-run did NOT move local develop");
+
+    const j = run(syncCheck, ["--root", w.m, "--branch", "develop", "--json"]);
+    assert.equal(j.status, 0, `--json failed: ${j.stdout}${j.stderr}`);
+    const s = JSON.parse(j.stdout);
+    assert.equal(s.behind, 1, "--json reports the behind lag (the downsync measure)");
+    assert.equal(git(w.m, "rev-parse", "develop").stdout.trim(), before, "--json did NOT move local develop");
   } finally {
     cleanup(w.root);
   }

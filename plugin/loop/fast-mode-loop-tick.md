@@ -1073,7 +1073,7 @@ A-D: {"disjoint":true,"overlaps":[],"reason":"disjoint file-sets"}   # 合规：
 **以本节为准执行，并向外层标注矛盾**，不静默服从散文。产品不被散文覆盖的机械承载
 是这一句，不是「指望外层永远记得不复述」。
 
-### 4a. 跨机同步心跳（`sync-lag-check.sh`，兜底必跑——`gap-cross-machine-sync-has-no-mechanism-only-manual-pushes`）
+### 4a. 跨机同步心跳（`sync-lag-check.sh`，兜底必跑——`gap-cross-machine-sync-has-no-mechanism-only-manual-pushes` + `gap-two-peer-quay-developers-continuous-bidirectional-merge`）
 
 **每个 tick（含轻触）无条件跑一次** `bash plugin/scripts/sync-lag-check.sh --push --branch "$FORK_BASELINE" --root "$(pwd)"`——
 它问「本地 `$FORK_BASELINE`（quay: develop）是否领先 `origin/$FORK_BASELINE`」，领先即 push（复用非强推/幂等的
@@ -1082,9 +1082,16 @@ A-D: {"disjoint":true,"overlaps":[],"reason":"disjoint file-sets"}   # 合规：
 `$FORK_BASELINE` 悄悄积累」，每 tick 也会把本地领先推上 origin。**内层与外层同挂**——两机各层 tick 都是
 心跳（幂等，up-to-date 退出 0）。
 
+**双向合并的 DOWNSYNC 半（两个对等 quay 开发者，人框架 2026-08-06「两台机器都持续应用最新并在最新上开发」）**：
+**同一 tick 里接着跑** `bash plugin/scripts/sync-lag-check.sh --pull --branch "$FORK_BASELINE" --root "$(pwd)"`——
+它问「`origin/$FORK_BASELINE` 是否领先本地 `$FORK_BASELINE` 且本地无 origin 缺的提交（严格落后）」，是则把本地
+`$FORK_BASELINE` fast-forward 到 `origin/$FORK_BASELINE`（纯下行同步——把对方最新应用到本地，再在最新上开发）。
+**真分歧**（本地与 origin 各有对方缺的提交）**fail-closed**（不盲 `--ours/--theirs`，报告分歧面，交循环的红窗/合并处理）。
+
 **同步落后量机械可读（AC3）**：`bash plugin/scripts/sync-lag-check.sh --json --branch "$FORK_BASELINE" --root "$(pwd)"`
-输出 `unpushed` / `behind` / `leads` 字段——「本地领先 origin 几笔」有测量。心跳跑 `--push` = 测 + 领先即推；
-push 失败（非快进 = 真分歧）只报告、不覆写、下一 tick 重试（fail-closed，绝不 force）。
+输出 `unpushed` / `behind` / `leads` 字段——「本地领先 origin 几笔」与「落后 origin 几笔」都有测量。心跳跑
+`--push` = 测 + 领先即推；`--pull` = 测 + 严格落后即拉。push 失败（非快进 = 真分歧）只报告、不覆写、下一 tick
+重试（fail-closed，绝不 force）。
 
 ### 4b. Routine 检查（探针 standing track，每 tick 判定 due——`gap-probe-mechanism-dead-15-days-rewire-to-two-layer`）
 

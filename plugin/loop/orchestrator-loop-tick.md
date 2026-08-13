@@ -779,13 +779,17 @@ tick-log 与 commit message 沿用同一词汇：派发写「滚动派发」，�
    红窗期 `$MERGE_TARGET` 照常接收任务合并，只是 `$FORK_BASELINE` 不推进（结构性消除「红窗必须停派发」；
    `$FORK_BASELINE` 永不从未验证树推进）。旧绿（7b1ac3a1 场景：3 小时前）同样不是有效绿——不批量合。
    **`--dry-run` 先跑**核对 pre-check 与 pending 面，再实跑。
-3c. **跨机同步心跳（`sync-lag-check.sh`，兜底必跑——`gap-cross-machine-sync-has-no-mechanism-only-manual-pushes`）**：
+3c. **跨机同步心跳（`sync-lag-check.sh`，兜底必跑——`gap-cross-machine-sync-has-no-mechanism-only-manual-pushes` + `gap-two-peer-quay-developers-continuous-bidirectional-merge`）**：
    每个 tick（含轻触）**无条件**跑一次 `bash plugin/scripts/sync-lag-check.sh --push --branch "$FORK_BASELINE" --root "$REPO_ROOT"`——
    它问「本地 `$FORK_BASELINE` 是否领先 `origin/$FORK_BASELINE`」，领先即 push（复用非强推/幂等的
    `periodic-push-backup.sh` 本体），**不依赖任何完成事件**。这是兜底触发源：3b 的事件驱动路径负责「land
    收口同一轮内推送」的加速，本步负责「万一事件驱动漏了 / 跨机各自主检出悄悄积累」的必跑保底。
+   **双向合并的 DOWNSYNC 半（两个对等 quay 开发者，人框架 2026-08-06「两台机器都持续应用最新并在最新上开发」）**：
+   同一 tick 里接着跑 `bash plugin/scripts/sync-lag-check.sh --pull --branch "$FORK_BASELINE" --root "$REPO_ROOT"`——
+   严格落后（origin 有本地缺的提交、本地无 origin 缺的）即把本地 `$FORK_BASELINE` fast-forward 到
+   `origin/$FORK_BASELINE`（把对方最新应用到本地再开发）；真分歧 fail-closed（不盲 `--ours/--theirs`）。
    **同步落后量机械可读（AC3）**：`bash plugin/scripts/sync-lag-check.sh --json --branch "$FORK_BASELINE" --root "$REPO_ROOT"`
-   输出 `unpushed` / `behind` / `leads` 字段——「本地领先 origin 几笔」从此有测量，不再靠人 `git log`。
+   输出 `unpushed` / `behind` / `leads` 字段——「本地领先 origin 几笔」与「落后 origin 几笔」从此有测量，不再靠人 `git log`。
    心跳读 `--json` 的 `leads` 或直接跑 `--push` 均等价（`--push` = 测 + 领先即推）。push 失败（非快进 =
    真分歧）只报告、不覆写、下一 tick 重试——正是 fail-closed 兜底。
 3d. **观测者注册表心跳（`observer-registry.sh --audit`，兜底必跑——`gap-observer-registry-target-decommission-and-criterion-invalidation`）**：
