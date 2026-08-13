@@ -64,11 +64,11 @@ runner 经 env 下发，**worktree 跑也必须传**，否则归属仍混）。
 
 ## AC
 
-- [ ] AC1: 每次运行独立 `/tmp/quay-run-<runId>/` 前缀（worktree 跑也拿到 env）
-- [ ] AC2: 统一清理按路径归属+属主存活（不按名字），跑在 leak-scan 前
-- [ ] AC3: 清理计数进轮记录（泄漏降级为指标不消失）
-- [ ] AC4: 负控——跨运行残留互不可见 / 孤儿不累积
-- [ ] AC5: 既有测试全绿；`--for-task` scoped 门绿
+- [x] AC1: 每次运行独立 `/tmp/quay-run-<runId>/` 前缀（worktree 跑也拿到 env）
+- [x] AC2: 统一清理按路径归属+属主存活（不按名字），跑在 leak-scan 前
+- [x] AC3: 清理计数进轮记录（泄漏降级为指标不消失）
+- [x] AC4: 负控——跨运行残留互不可见 / 孤儿不累积
+- [x] AC5: 既有测试全绿；`--for-task` scoped 门绿
 
 ## Definition of Done
 
@@ -82,3 +82,49 @@ runner 经 env 下发，**worktree 跑也必须传**，否则归属仍混）。
 - plugin/scripts/full-suite-runner.ts（runId env 下发 / 统一清理调用 / 清理计数写轮记录）
 - plugin/scripts/tmux-leak-scan.sh（扫描只扫本轮子树）
 - tasks/gap-leak-residue-per-run-namespace-isolation.md（自身）
+
+## Evidence
+
+**实现（2026-08-13，task agent）**：
+
+- **per-run namespace（AC1）**：`session-liveness-helpers.mjs` 新增 `runIdOf()` / `runNamespaceRoot(id)` /
+  `probeRoot()`。`QUAY_RUN_ID` 由 runner 下发时，探针根从 `os.tmpdir()` 改为
+  `/tmp/quay-run-<shortRunId>/`（`sweepTmp` 与四个探针构造器 `makeHermeticProbe`/`makePlainPane`/
+  `makeClaudePaneProcess`/`makeTwoWindowSession` 全部改走 `probeRoot()`）。runner（`full-suite-runner.ts`）
+  从 state-file UUID 派生 **8 hex 短 id**（`runId.replace(/-/g,"").slice(0,8)`），经 `QUAY_RUN_ID` env 下发
+  给 child（systemd 与非 systemd 两条 spawn 路径都传），故 worktree 全量跑（同一 env 流）同样拿到。
+  `QUAY_RUN_ID` 未设（scoped/direct 跑）时回退到 `os.tmpdir()` 旧布局——既有测试 byte-for-behavior 不变。
+  sun_path 约束：短 id 下探针 socket 路径 ≈70 字符，远低于 ~107 字节上限。
+- **统一清理（AC2）**：runner 在套件启动**前**调 `sweepRunNamespaces()`（扫全部 `/tmp/quay-run-*`，
+  删**属主已死**者——路径归属 + `dirHasLiveOwner()` 属主存活判据，绝无按名批量杀，invariant
+  no_pkill_by_name_on_live=1）；这先于 suite-tail leak-scan，满足「清理跑在 leak-scan 前」次序约束。
+  套件结束后再 `sweepRunNamespace(ownId)` 清本 run 子树（孤儿不累积）。
+- **清理计数进轮记录（AC3）**：`verification-round.jsonl` 新增 `tmux_cleaned`（本轮清理掉的 owner-dead
+  残留目录数）+ `tmux_cleaned_dirs`（前 50 个路径）。有残留才写（绿轮可无）；live-owner 真泄漏仍红
+  （gate 完整），owner-dead 残留被清理并计数（泄漏降级为可观测指标，不消失）。
+- **leak-scan 只扫本轮子树（AC4）**：`tmux-leak-scan.sh` 在 `QUAY_RUN_ID` 设置时只扫
+  `/tmp/quay-run-<runId>/*`（dir）+ `pgrep -a tmux | grep -F <run_root>`（proc），跨运行残留互不可见；
+  未设时保留历史 `/tmp/skv-* session-liveness-* ...` 前缀语义。reap-wait 机制原样保留。
+
+**Scoped 验证（`scripts/test.sh --for-task gap-leak-residue-per-run-namespace-isolation`，worktree 根）**：
+```
+ℹ tests 116
+ℹ pass 116
+ℹ fail 0
+ℹ cancelled 0
+ℹ duration_ms 82909
+```
+（select-tests-for-touches 解析 Touches → `full-suite-runner.test.mjs` + `tmux-leak-scan.test.mjs`，2/4 Touches 解析为测试，另 2 项为 helpers/自身无直接测试文件。）
+
+**补充验证（helper 改造不破坏既有测试）**：
+- `session-liveness-sweep.test.mjs`：5/5 pass（sweepTmp/dirHasLiveOwner owner-liveness 语义保持）
+- `session-liveness-events.test.mjs` + `heartbeat`：32 pass / 1 skip（skip 为 real-probe 可用性） / 0 fail
+
+**负控样例（AC4 / DoD 第二项）**：
+1. **跨运行残留互不可见**：`/tmp/quay-run-other999/session-liveness-leftover` 存在时，`QUAY_RUN_ID=test4321`
+   leak-scan `--check` 输出 `clean — no NEW residual`（exit 0）；而 `QUAY_RUN_ID=test1234` 同子树内残留则
+   `FAIL — NEW residual ... STILL PRESENT`（exit 1）——归属隔离成立。
+2. **清理计数在轮记录**：预置 `/tmp/quay-run-stale1234/subdir` 后跑 runner（fake green suite），round record
+   携带 `tmux_cleaned: 1` / `tmux_cleaned_dirs: ["/tmp/quay-run-stale1234"]`；runner stderr 打印
+   `pre-suite cleanup removed 1 stale /tmp/quay-run-* namespace(s)`。
+3. **孤儿不累积**：跑完 scoped + runner 测试后 `ls -d /tmp/quay-run-* | wc -l` = 0（post-suite 自清生效）。

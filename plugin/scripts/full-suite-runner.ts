@@ -104,6 +104,12 @@ import { fileURLToPath } from "node:url";
 import { runOnce } from "./suite-state-trigger.ts";
 import { getLoad1 } from "./checker-cost.ts";
 import { scanFamily, kindForFile } from "./known-load-sensitive.ts";
+// gap-leak-residue-per-run-namespace-isolation — the runner-level unified cleanup REUSES the
+// owner-liveness criterion (dirHasLiveOwner) already implemented in the session-liveness helpers
+// (the 2026-08-08 two-layer-blind invariant: cleanup is PATH-OWNERSHIP + OWNER-LIVENESS based,
+// never a name-based batch kill). `sweepRunNamespaces` = pre-suite orphan sweeper over ALL
+// /tmp/quay-run-* dirs; `sweepRunNamespace(id)` = post-suite clean of THIS run's own subtree.
+import { sweepRunNamespaces, sweepRunNamespace } from "../test/session-liveness-helpers.mjs";
 // gap-single-file-test-duration-trend-unwatched AC1/AC2 (fan-in 9edf2cb9, hand-merged into the
 // develop→integration convergence 2026-08-09): land the suite's per-file __PERFILE__ duration
 // history + compare against the last round (the trend dimension — per-file durations WATCHED round
@@ -820,6 +826,17 @@ export interface SuiteRoundRecord {
   mem_peak_mb?: number | null;
   swap_peak_mb?: number | null;
   load_read_error?: string | null;
+  /**
+   * gap-leak-residue-per-run-namespace-isolation AC3 — the run's unified-cleanup count + WHICH
+   * owner-dead residue dirs the runner's cleanup passes removed (pre-suite stale /tmp/quay-run-*
+   * namespaces + post-suite own-namespace residue). `tmux_cleaned` = the count; `tmux_cleaned_dirs`
+   * = the first 50 cleaned paths (cap). Present ONLY when something was cleaned (绿轮可无 — a run
+   * with no residue omits both, same absent-field contract as *_phase_ms). The leak signal is
+   * degraded from a gate to an observable metric: a genuinely leaked LIVE server still reds the
+   * suite-tail leak-scan (the gate is intact); owner-dead residue is cleaned + counted here.
+   */
+  tmux_cleaned?: number;
+  tmux_cleaned_dirs?: string[];
 }
 
 /**
@@ -1314,6 +1331,39 @@ export async function run(argv: string[]): Promise<number> {
   // still own the generation or it is dropped (gap-full-suite-state-race-last-write-wins-no-
   // generation-guard AC1/AC4).
   const runId = randomUUID();
+  // gap-leak-residue-per-run-namespace-isolation AC1 — the per-run NAMESPACE id delivered to the
+  // child (and hence to every node --test probe via session-liveness-helpers.mjs's QUAY_RUN_ID):
+  // a SHORT id (8 hex chars from the state-file UUID) so the tmux socket sun_path (~107 bytes —
+  // the current probe socket path ≈52 chars, one short layer keeps it well under) never blows the
+  // bound. Every producer inherits it from the child env, INCLUDING worktree runs (the same env
+  // flow — a worktree full-suite run passes --root <worktree>, not a different spawn path).
+  const shortRunId = runId.replace(/-/g, "").slice(0, 8);
+
+  // gap-leak-residue-per-run-namespace-isolation AC2/AC3 — RUNNER-LEVEL UNIFIED CLEANUP runs
+  // BEFORE the suite starts (and hence before the suite-tail leak-scan — the 次序 constraint):
+  // remove every stale /tmp/quay-run-* namespace whose owner is DEAD (PATH-OWNERSHIP +
+  // OWNER-LIVENESS via sweepRunNamespaces→dirHasLiveOwner, NEVER a name-based batch kill —
+  // invariant no_pkill_by_name_on_live = 1). This is the orphan-accumulation guard (the
+  // 4375-leftover-dirs class): the leak-scan later scans ONLY this run's fresh subtree, so
+  // prior-run residue is neither misattributed (AC4 cross-run invisible) nor accumulated. The
+  // count is carried into the verification-round record (AC3 — the leak is an observable metric,
+  // never a silently-cleared signal). Best-effort — a cleanup failure must never fail the run.
+  let preCleaned: { cleaned: number; dirs: string[] } = { cleaned: 0, dirs: [] };
+  try {
+    preCleaned = sweepRunNamespaces();
+    if (preCleaned.cleaned > 0) {
+      process.stderr.write(
+        `full-suite-runner: pre-suite cleanup removed ${preCleaned.cleaned} stale /tmp/quay-run-* namespace(s) (owner-dead residue)\n`,
+      );
+    }
+  } catch (e) {
+    process.stderr.write(`full-suite-runner: pre-suite cleanup failed (continuing): ${e instanceof Error ? e.message : String(e)}\n`);
+  }
+  // Ensure this run's namespace exists so the suite-tail leak-scan's before-run snapshot has a
+  // stable subtree to scan (empty at start; the session-liveness probes create under it).
+  try {
+    fs.mkdirSync(path.join(os.tmpdir(), `quay-run-${shortRunId}`), { recursive: true });
+  } catch { /* best-effort */ }
 
   // gap-systemd-run-limits-for-suite-and-heavy-ops — wrap the spawned suite in a systemd-run --user
   // --scope cgroup scope. The limit is kernel-enforced for the scope's lifetime and bounds ONE
@@ -1452,7 +1502,7 @@ export async function run(argv: string[]): Promise<number> {
     child = spawn(sdArgv[0], sdArgv.slice(1), {
       cwd: root,
       stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, ...phaseConcurrencyEnv },
+      env: { ...process.env, ...phaseConcurrencyEnv, QUAY_RUN_ID: shortRunId },
       // detached: the suite child becomes a process-group leader so killChildTree() can terminate
       // the WHOLE tree (test.sh + its node --test children) — a hung subprocess can't leak the flock.
       detached: true,
@@ -1472,7 +1522,7 @@ export async function run(argv: string[]): Promise<number> {
     child = spawn("bash", ["-c", command], {
       cwd: root,
       stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, ...phaseConcurrencyEnv },
+      env: { ...process.env, ...phaseConcurrencyEnv, QUAY_RUN_ID: shortRunId },
       // detached: same as the systemd-run spawn — process-group leader for killChildTree().
       detached: true,
     });
@@ -2125,6 +2175,30 @@ export async function run(argv: string[]): Promise<number> {
       };
     }
   }
+  // gap-leak-residue-per-run-namespace-isolation AC2/AC3 — POST-SUITE cleanup of THIS run's own
+  // namespace (/tmp/quay-run-<shortRunId>/): remove owner-dead residue under it so the NEXT run's
+  // pre-suite sweeper never sees it (accumulation guard). The suite-tail leak-scan ALREADY scanned
+  // this subtree inside test.sh — a genuine live-owner leak still red'd there (the gate is intact);
+  // owner-dead residue (a cancelled-test leftover dir, a reaped-but-not-removed dir) is cleaned
+  // here and COUNTED into the round record (AC3 — the leak is an observable metric, not a silently
+  // cleared signal). Best-effort — a cleanup failure must never change the verdict.
+  let postCleaned: { cleaned: number; dirs: string[] } = { cleaned: 0, dirs: [] };
+  try {
+    postCleaned = sweepRunNamespace(shortRunId);
+    if (postCleaned.cleaned > 0) {
+      process.stderr.write(
+        `full-suite-runner: post-suite cleanup removed ${postCleaned.cleaned} owner-dead residue dir(s) from /tmp/quay-run-${shortRunId}\n`,
+      );
+    }
+  } catch (e) {
+    process.stderr.write(`full-suite-runner: post-suite cleanup failed (continuing): ${e instanceof Error ? e.message : String(e)}\n`);
+  }
+  // The combined cleanup count + WHICH dirs (pre-suite stale namespaces + post-suite own residue),
+  // for the round record. Capped so a pathological round cannot grow the record unboundedly.
+  const allCleanedDirs = [...preCleaned.dirs, ...postCleaned.dirs];
+  const tmuxCleaned = allCleanedDirs.length;
+  const tmuxCleanedDirs = allCleanedDirs.slice(0, 50);
+
   // AC6 — append the run to the suite-duration SEQUENCE (never overwrite the single-state file).
   // The full-suite-state.json's durationMs is this run's point value; verification-round.jsonl keeps
   // the history so the sequence survives rounds (gap-no-criterion-records-its-own-cost AC6).
@@ -2219,6 +2293,13 @@ export async function run(argv: string[]): Promise<number> {
           load_read_error: scopeConsumedLoad.load_read_error,
         }
       : {}),
+    // gap-leak-residue-per-run-namespace-isolation AC3 — the run's unified-cleanup count + WHICH
+    // dirs (pre-suite stale namespaces + post-suite own-residue), so a leak is an OBSERVABLE
+    // METRIC in the round record, never a silently-cleared signal. `tmux_cleaned` = number of
+    // owner-dead residue dirs this run's cleanup passes removed; `tmux_cleaned_dirs` = the first
+    // 50 cleaned paths (cap — a pathological round must not grow the record unboundedly). Both
+    // omitted when nothing was cleaned (绿轮可无, same absent-field contract as *_phase_ms).
+    ...(tmuxCleaned > 0 ? { tmux_cleaned: tmuxCleaned, tmux_cleaned_dirs: tmuxCleanedDirs } : {}),
   });
   // NOTE: appendVerificationRound above is the ONE suite-duration append per run (the
   // checker-cost.test.mjs AC6 contract: two runs ⇒ exactly two verification-round.jsonl lines).
