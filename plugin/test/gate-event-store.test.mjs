@@ -140,3 +140,28 @@ test("AC2: loop-complete-task respects a present acceptance meter — failing me
   assert.equal(events[0].gate, "acceptance");
   assert.equal(events[0].verdict, "fail");
 });
+
+// ── AC47 (gap-ac47-completion-predicate-consumer-fail-closed, AC4): the inner flip-done path refuses ─
+// a task whose AC/DoD section it cannot READ (sectionFound:false) — the completion predicate must not
+// silently pass a task with unverifiable AC/DoD (the DIR-014 fail-open: 5 unchecked boxes under a
+// suffixed heading were judged complete). REFUSE and report 「AC/DoD 段未识别」, leave status unchanged.
+
+test("AC47: loop-complete-task REFUSES flip-done when the AC/DoD section is unrecognized (sectionFound:false)", () => {
+  const { workspaceRoot, tasksDir } = makeTmpWorkspace("loop-ac47-refuse", { nativeBin, nativeProviderDir });
+  // A ready task whose AC/DoD headings are ABSENT/unregistered (a suffixed heading the SHAPE_SECTIONS
+  // registry does not cover) — countCompletionCheckboxes sectionFound:false → the flip-done must fail
+  // CLOSED, not silently pass (the completion predicate cannot verify its AC/DoD).
+  const unreadableBody =
+    "## Proposal\nA real proposal paragraph that is definitely more than forty non-whitespace chars.\n" +
+    "## Acceptance Criteria (runnable — a variant NOT registered in SHAPE_SECTIONS)\n- [ ] an unchecked box\n" +
+    "## Definition of Done (an unregistered variant)\nstandard DoD prose\n";
+  runNative(["task", "create", "LGE-AC47", "--title", "unreadable-ac", "--status", "ready",
+    "--body", unreadableBody], tasksDir);
+
+  const r = runLoopComplete(workspaceRoot, "LGE-AC47");
+  assert.equal(r.status, 1, `expected exit 1 (refused); got ${r.status}, stdout=${r.stdout}, stderr=${r.stderr}`);
+  assert.match(r.stderr, /AC\/DoD 段未识别/, `expected the 「AC/DoD 段未识别」 refusal; got stderr=${r.stderr}`);
+  assert.equal(viewTask(workspaceRoot, "LGE-AC47").status, "ready", "status stays ready — the flip-done is refused");
+  const logPath = path.join(workspaceRoot, ".quay", "gate-events.jsonl");
+  assert.equal(fs.existsSync(logPath), false, "no gate event is written for a refused flip-done");
+});

@@ -123,11 +123,24 @@ export function isDistinctiveName(id) {
 // the gate semantics. This is the decisive closed-without-work signal: it uses the gate's own language
 // (checkboxes), not fragile symbol resolution.
 export function countAcCheckboxes(acSection) {
-  if (!acSection) return { total: 0, checked: 0, unchecked: 0 };
+  if (acSection == null) {
+    // FAIL-CLOSED (gap-ac47-completion-predicate-consumer-fail-closed, AC1): an ABSENT / UNREADABLE
+    // section (extractSectionByShape returned null — e.g. an UNREGISTERED suffixed heading like
+    // `## Acceptance Criteria (runnable — …)`) must NOT read as `{ unchecked: 0 }`. That conflation
+    // made the completion predicate judge a task "complete" whose AC/DoD it never saw (live: DIR-014
+    // has 5 unchecked boxes under a suffixed heading, yet countCompletionCheckboxes reported
+    // {total:0, checked:0, unchecked:0} → judged passing; hard rule 3 — a boolean conflated "the
+    // object is gone" with "checked, zero unchecked"). `sectionFound:false` is the distinguishable
+    // state for readers that check it; `total: NaN` is the STRUCTURAL guarantee that OLD
+    // destructuring read-patterns (`const { total, checked } = …`) cannot obtain a pass:
+    // `total === 0` and `checked === total` are both FALSE for NaN, so every pre-existing consumer
+    // fails CLOSED without being edited (the "not rely on remembering each consumer" closure, C17).
+    return { total: NaN, checked: NaN, unchecked: NaN, sectionFound: false };
+  }
   const boxes = acSection.match(/^\s*-\s+\[(.)\]/gm) ?? [];
   let checked = 0;
   for (const b of boxes) if (/\[[xX]\]/.test(b)) checked++;
-  return { total: boxes.length, checked, unchecked: boxes.length - checked };
+  return { total: boxes.length, checked, unchecked: boxes.length - checked, sectionFound: true };
 }
 
 // Word-boundary symbol search across the code roots (grep -w; vendored/milestone/build trees are

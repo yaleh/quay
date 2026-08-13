@@ -60,7 +60,11 @@ import {
 // label DETERMINATION point — applyPromotions (ready-pool-check --apply heartbeat) flips todo→ready
 // AND writes the delivery-critical label at promote time ("标签与 ready 同现"). The e2e test uses it
 // to model the CORRECT timing (label at promote), then asserts slot-refill's sort key consumes it.
-import { applyPromotions } from "../scripts/ready-pool-check.ts";
+// AC47 (gap-ac47-completion-predicate-consumer-fail-closed): the shape-aware completion counter (the
+// single source both slot-refill's landed gate and ready-pool-check's notYetFlipped consume) — needed
+// directly for the AC2 all-5-consumers negative control on the DIR-014 suffixed-heading shape.
+import { applyPromotions, countCompletionCheckboxes } from "../scripts/ready-pool-check.ts";
+import { countAcCheckboxes } from "../scripts/task-status-drift-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -1213,6 +1217,13 @@ function landedNoCheckboxBody() {
     "resume    分步提交",
     "## Touches",
     "- code/future.ts (new)", // does NOT exist — not landed-evidence, but touches-resolve-safe ((new))
+    // AC47 (gap-ac47-completion-predicate-consumer-fail-closed, AC1): the AC heading MUST be present
+    // (even box-less) for sectionFound=true. Under the fail-closed fix an ABSENT AC section reads
+    // total=NaN → isLandedCodeComplete=false → the "landing is its closeout" path (total===0) is
+    // unreachable. This fixture tests the no-CHECKBOX closeout, so the AC section is present but has
+    // zero checkboxes (total still 0, sectionFound now true).
+    "## Acceptance Criteria",
+    "prose acceptance criteria with no checkboxes at all",
     "## Definition of Done",
     "standard DoD — the five clauses; meta-enforcer fixture-pinned.",
   ].join("\n");
@@ -1594,6 +1605,87 @@ test("LANDED-IMPLEMENTATION — isLandedCodeComplete: all-checked true, open imp
     "- [ ] AC3: await external verification （待外部）",
   );
   assert.equal(isLandedCodeComplete(ext), true, "every remaining item （待外部） ⇒ code-complete (awaiting verification)");
+});
+
+// ── AC47 fail-closed (gap-ac47-completion-predicate-consumer-fail-closed) ─────────────────────────
+// DIR-014's LIVE fail-open shape: `## Acceptance Criteria (runnable — …)` suffixed heading (NOT
+// recognized by the literal `## Acceptance Criteria` extractSection) carrying 5 unchecked boxes, and
+// `## Definition of Done — REAL LANDING is the bar`. Before the fix countAcCheckboxes(null) returned
+// {unchecked: 0} → countCompletionCheckboxes {total:0, checked:0, unchecked:0} → judged complete
+// (fail-open, manager 2026-08-13). After the fix: AC3 REGISTERS the suffixed headings (section found,
+// the 5 boxes counted) AND the fail-closed NaN backstop covers any UNREGISTERED variant. Either way NO
+// consumer reports "complete/landed".
+function dir014SuffixedBody() {
+  return [
+    "## Finding",
+    "A finding paragraph that is definitely more than forty non-whitespace chars.",
+    "## Acceptance Criteria (runnable — artifacts are necessary-not-sufficient)",
+    "- [ ] item 1: the milestone carries a real Proposal section",
+    "- [ ] item 2: the plan reference resolves to an existing docs/plans file",
+    "- [ ] item 3: the enforcement is real, not prose (it0-dod-check exits non-zero on a stub)",
+    "- [ ] item 4: OUTER-LOOP step 5 invokes quay-task-to-plan as the operative route",
+    "- [ ] item 5: the two-class policy is the default, not discretionary",
+    "## Definition of Done — REAL LANDING is the bar, not artifacts",
+    "NOT done when the skill is wired in prose — a green fixture alone is NOT sufficient.",
+  ].join("\n");
+}
+
+test("AC47 — SHAPE_SECTIONS registration: the DIR-014 suffixed AC/DoD headings ARE recognized and its 5 unchecked boxes are counted (AC3)", () => {
+  const cb = countCompletionCheckboxes(dir014SuffixedBody());
+  assert.equal(cb.sectionFound, true, "registered suffixed headings are recognized (sectionFound:true)");
+  assert.equal(cb.total, 5, "the 5 unchecked boxes under the suffixed AC heading are COUNTED (AC3)");
+  assert.equal(cb.checked, 0);
+  assert.equal(cb.unchecked, 5);
+});
+
+test("AC47 — negative control on DIR-014's suffixed-heading + 5 unchecked boxes: NONE of the 5 consumers reports complete/landed (AC2)", (t) => {
+  const body = dir014SuffixedBody();
+  const cb = countCompletionCheckboxes(body);
+  // 1. slot-refill:373 isLandedCodeComplete (the MAIN fail-open — fed landed judgment): not landed.
+  assert.equal(isLandedCodeComplete(body), false, "DIR-014 shape is NOT judged landed (AC2)");
+  assert.equal(isBodyLanded(body), false, "the body-side landed OR-in also does NOT fire (AC2)");
+  // 2. slot-refill:274 isNotYetFlippedSkip (destructures countAcCheckboxes): not wrongly skipped. Its
+  //    literal `## Acceptance Criteria` extractSection cannot see the suffixed heading → section
+  //    found=false → fail-closed (not a not-yet-flipped skip).
+  const root = makeLandedWorkspace("ac47-nyf", "gap-ac47-ctl");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  assert.equal(hasFanInMerge(root, "gap-ac47-ctl"), true, "precondition: the id's branch was fanned in");
+  assert.equal(
+    isNotYetFlippedSkip({ id: "gap-ac47-ctl", body, root, excludedNyfIds: new Set() }),
+    false,
+    "unreadable literal AC section ⇒ NOT a not-yet-flipped skip (AC2)",
+  );
+  // 3. ready-pool-check:793 allChecked (countCompletionCheckboxes + `total > 0 && checked === total`):
+  //    total=5, checked=0 → allChecked false.
+  assert.equal(cb.total > 0 && cb.checked === cb.total, false, "not all-checked (AC2)");
+  // 4. ready-pool-check:1754 acOpen = cb.unchecked → 5 (not 0) → NOT the "clean backlog" (甲) split.
+  assert.equal(cb.unchecked === 0, false, "acOpen=5 ≠ 0 ⇒ NOT mis-split as clean backlog (AC2)");
+  // 5. task-status-drift-check:810 closed-without-work guard `acBoxes.total > 0` — it reads the LITERAL
+  //    `## Acceptance Criteria` section (extractSection → null for the suffixed heading) → countAcCheckboxes
+  //    is fail-closed NaN → NaN > 0 is false → the guard does NOT fire → not flagged "pass" (AC2).
+  const literalAc = null; // the suffixed heading is invisible to the literal extractSection
+  const acBoxes = countAcCheckboxes(literalAc);
+  assert.equal(acBoxes.total > 0 && acBoxes.checked === 0, false, "closed-without-work guard does not fire on an unreadable section (AC2)");
+  assert.equal(Number.isNaN(acBoxes.total), true, "the fail-closed NaN shape is what makes old read-patterns structurally unable to pass");
+});
+
+test("AC47 — an UNREGISTERED suffixed variant fails CLOSED (sectionFound:false, no consumer can judge complete/landed)", () => {
+  // `## Acceptance Criteria for the OLD design` is NOT in SHAPE_SECTIONS — prefix-matching would
+  // wrongly swallow it; explicit registration means it is unrecognized → fail-closed.
+  const unregistered = [
+    "## Contract",
+    "measure   x = 1",
+    "## Acceptance Criteria for the OLD design",
+    "- [ ] a real remaining unchecked box",
+    "## Definition of Done",
+    "standard",
+  ].join("\n");
+  const cb = countCompletionCheckboxes(unregistered);
+  assert.equal(cb.sectionFound, false, "an unregistered suffixed heading is NOT recognized (AC3)");
+  assert.equal(Number.isNaN(cb.total), true, "absent/unrecognized section ⇒ total NaN (fail-closed structural guarantee)");
+  assert.equal(cb.total === 0, false, "total is NOT 0 — the old fail-open ({unchecked:0} → complete) is impossible");
+  assert.equal(isLandedCodeComplete(unregistered), false, "an unregistered-variant task is NOT judged landed (AC1/AC2)");
+  assert.equal(isBodyLanded(unregistered), false, "an unregistered-variant task is NOT judged body-side landed (AC1/AC2)");
 });
 
 // ── MUTEX-CLIQUE LANDED-IGNORE (tasks/gap-slot-refill-clique-ignores-landed-touches) ─────────────────
