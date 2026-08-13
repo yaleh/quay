@@ -679,15 +679,12 @@ function makeGitWorkspace(tag, ahead) {
   return dir;
 }
 
-test("computeArbitratedCap — red + backlog > threshold narrows; every other combo keeps base (AC2 pure)", () => {
-  assert.equal(computeArbitratedCap({ baseCap: 5, suiteRed: true, integrationBacklog: 60 }), 2, "red + backlog 60 > 50 ⇒ redBacklogCap");
-  assert.equal(computeArbitratedCap({ baseCap: 5, suiteRed: true, integrationBacklog: 51 }), 2, "strict >: 51 > 50 narrows");
-  assert.equal(computeArbitratedCap({ baseCap: 5, suiteRed: true, integrationBacklog: 50 }), 5, "threshold is strict >: 50 not > 50");
-  assert.equal(computeArbitratedCap({ baseCap: 5, suiteRed: false, integrationBacklog: 60 }), 5, "green suite ⇒ cap restores (invariant cap_restores_on_green)");
-  assert.equal(computeArbitratedCap({ baseCap: 5, suiteRed: true, integrationBacklog: 0 }), 5, "red + no backlog ⇒ no effect (invariant no_backlog_no_effect)");
-  // custom threshold/cap are honored
-  assert.equal(computeArbitratedCap({ baseCap: 5, suiteRed: true, integrationBacklog: 30, redBacklogThreshold: 20, redBacklogCap: 3 }), 3);
-  assert.equal(computeArbitratedCap({ baseCap: 5, suiteRed: true, integrationBacklog: 10, redBacklogThreshold: 20, redBacklogCap: 3 }), 5);
+test("computeArbitratedCap — red window active narrows to redBacklogCap; inactive keeps base (AC1 pure)", () => {
+  assert.equal(computeArbitratedCap({ baseCap: 5, redWindowActive: true }), 2, "red window active ⇒ redBacklogCap (2)");
+  assert.equal(computeArbitratedCap({ baseCap: 5, redWindowActive: false }), 5, "no red window ⇒ base cap unchanged");
+  // custom redBacklogCap honored; an inactive window still keeps base
+  assert.equal(computeArbitratedCap({ baseCap: 5, redWindowActive: true, redBacklogCap: 3 }), 3);
+  assert.equal(computeArbitratedCap({ baseCap: 5, redWindowActive: false, redBacklogCap: 3 }), 5);
 });
 
 test("readSuiteRed — state red ⇒ true; green/running/absent/unparseable ⇒ false (A11 parity)", (t) => {
@@ -705,19 +702,23 @@ test("readSuiteRed — state red ⇒ true; green/running/absent/unparseable ⇒ 
   assert.equal(readSuiteRed(root), false, "unparseable ⇒ fail-safe proceed");
 });
 
-test("ARBITRATION — analyzeSlotRefill narrows the effective cap under red suite + high backlog (AC2)", (t) => {
-  const root = makeWorkspace("arb-narrow");
+test("ARBITRATION — red window ALONE narrows the cap even with backlog below the old threshold (AC1 regression)", (t) => {
+  const root = makeWorkspace("arb-redwindow");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   writeTask(root, "gap-a", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/a.ts (new)"]) });
-  writeState(root, [{ file: "code/a.ts" }]); // state red
-  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, integrationBacklog: 60 });
+  // 3 consecutive red rounds ⇒ window ACTIVE. Backlog 10 is BELOW the retired 50 threshold — the
+  // measured defect: under `suite_red && backlog > 50` the cap stayed 5 during a red round at
+  // backlog 10. Now the red window ALONE triggers the narrowing.
+  writeRounds(root, Array.from({ length: 3 }, (_, i) => ({ round: 240 + i, state: "red", reason: "failed", fail: 1, failures: [{ file: "code/a.ts", line: "x" }] })));
+  writeState(root, [{ file: "code/a.ts" }]);
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, integrationBacklog: 10 });
   assert.equal(r.base_cap, 5, "base cap is the fixed 5");
-  assert.equal(r.effective_cap, 2, "red + backlog 60 ⇒ narrowed to redBacklogCap");
+  assert.equal(r.effective_cap, 2, "red window active + backlog 10 < 50 ⇒ narrowed to redBacklogCap (regression: old trigger needed backlog > 50)");
   assert.equal(r.cap, 2, "the consumed cap is the effective (arbitrated) cap");
   assert.equal(r.arbitration.cap_narrowed, true);
+  assert.equal(r.arbitration.red_window_active, true);
   assert.equal(r.arbitration.suite_red, true);
-  assert.equal(r.arbitration.integration_backlog, 60);
-  assert.equal(r.arbitration.backlog_threshold, 50);
+  assert.equal(r.arbitration.integration_backlog, 10);
   assert.equal(r.arbitration.red_backlog_cap, 2);
   assert.equal(r.slots_free, 2, "dispatch capped at the narrowed cap");
 });
@@ -728,6 +729,7 @@ test("ARBITRATION — recommended is capped at the NARROWED cap, not the base ca
   for (const id of ["gap-r1", "gap-r2", "gap-r3", "gap-r4", "gap-r5"]) {
     writeTask(root, id, { status: "ready", labels: ["gap"], body: dispatchableBody([`- code/${id}.ts (new)`]) });
   }
+  writeRounds(root, Array.from({ length: 3 }, (_, i) => ({ round: 250 + i, state: "red", reason: "failed", fail: 1, failures: [{ file: "code/r1.ts", line: "x" }] })));
   writeState(root, [{ file: "code/r1.ts" }]); // state red
   const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, integrationBacklog: 80 });
   assert.equal(r.effective_cap, 2);
@@ -735,35 +737,38 @@ test("ARBITRATION — recommended is capped at the NARROWED cap, not the base ca
   assert.equal(r.recommended.length, 2, "5 dispatchable candidates but the narrowed cap admits only 2 — WIP not added behind the red gate");
 });
 
-test("ARBITRATION — green restores full cap; red without backlog has no effect; absent state proceeds (AC2 invariants)", (t) => {
+test("ARBITRATION — no red window keeps full cap even with high backlog; red state alone is not the trigger; absent state proceeds (AC2 invariants)", (t) => {
   const root = makeWorkspace("arb-green");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   writeTask(root, "gap-a", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/a.ts (new)"]) });
-  // green + high backlog ⇒ cap restores (cap_restores_on_green)
+  // green window + high backlog ⇒ cap stays full (backlog is NO LONGER part of the trigger)
+  writeRounds(root, Array.from({ length: 3 }, (_, i) => ({ round: 260 + i, state: "green", reason: "pass", fail: 0 })));
   fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
   fs.writeFileSync(path.join(root, ".quay", "full-suite-state.json"), JSON.stringify({ state: "green", fail: 0 }));
   const green = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, integrationBacklog: 80 });
-  assert.equal(green.effective_cap, 5, "green suite ⇒ cap restores to full");
+  assert.equal(green.effective_cap, 5, "green window ⇒ cap stays full (backlog 80 is irrelevant — not a trigger)");
   assert.equal(green.arbitration.cap_narrowed, false);
-  // red + backlog below/at threshold ⇒ no narrowing
+  assert.equal(green.arbitration.red_window_active, false);
+  // red STATE file but green ROUNDS (no consecutive-red window) ⇒ no narrowing — the state alone is
+  // not the trigger, the WINDOW is
   writeState(root, [{ file: "code/a.ts" }]);
-  const redSmall = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, integrationBacklog: 10 });
-  assert.equal(redSmall.effective_cap, 5, "red but backlog ≤ threshold ⇒ no narrowing");
-  assert.equal(redSmall.arbitration.cap_narrowed, false);
-  // red + no backlog ⇒ no effect (no_backlog_no_effect)
-  const redZero = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, integrationBacklog: 0 });
-  assert.equal(redZero.effective_cap, 5, "red but no backlog ⇒ no effect");
-  assert.equal(redZero.arbitration.cap_narrowed, false);
-  // missing state file + high backlog ⇒ not red-blocked ⇒ proceed
+  const redNoWindow = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, integrationBacklog: 80 });
+  assert.equal(redNoWindow.effective_cap, 5, "suite state red but no consecutive-red window ⇒ no narrowing");
+  assert.equal(redNoWindow.arbitration.cap_narrowed, false);
+  assert.equal(redNoWindow.arbitration.red_window_active, false);
+  assert.equal(redNoWindow.arbitration.suite_red, true, "suite_red is still reported as a diagnostic");
+  // absent state + no rounds ⇒ not red-blocked ⇒ proceed
   fs.rmSync(path.join(root, ".quay", "full-suite-state.json"));
+  fs.rmSync(path.join(root, ".quay", "verification-round.jsonl"));
   const noState = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, integrationBacklog: 80 });
-  assert.equal(noState.effective_cap, 5, "absent suite state ⇒ not red-blocked ⇒ no narrowing");
+  assert.equal(noState.effective_cap, 5, "absent suite state + no window ⇒ no narrowing");
 });
 
-test("ARBITRATION — CLI with a real git repo: git-read backlog drives the narrowing; green restores (AC4)", (t) => {
+test("ARBITRATION — CLI with a real git repo: a red window narrows the cap; green window restores (AC4)", (t) => {
   const root = makeGitWorkspace("redbacklog", 55);
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   writeTask(root, "gap-a", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/a.ts (new)"]) });
+  writeRounds(root, Array.from({ length: 3 }, (_, i) => ({ round: 270 + i, state: "red", reason: "failed", fail: 1, failures: [{ file: "code/a.ts", line: "x" }] })));
   writeState(root, [{ file: "code/a.ts" }]); // state red
   const script = path.resolve(__dirname, "..", "scripts", "slot-refill.ts");
   // QUAY_TELEMETRY_SUBAGENTS=0: this run asserts exact slots_free — the telemetry CLI's /proc-GLOBAL
@@ -773,11 +778,13 @@ test("ARBITRATION — CLI with a real git repo: git-read backlog drives the narr
     ["--no-warnings", "--experimental-strip-types", script, "--root", root, "--json"],
     { encoding: "utf8", env: { ...process.env, QUAY_TELEMETRY_SUBAGENTS: "0" } },
   ));
-  assert.equal(redOut.arbitration.integration_backlog, 55, "git-read backlog (develop..integration), not injected");
+  assert.equal(redOut.arbitration.integration_backlog, 55, "git-read backlog (develop..integration) still reported as a diagnostic");
+  assert.equal(redOut.arbitration.red_window_active, true);
   assert.equal(redOut.arbitration.cap_narrowed, true);
-  assert.equal(redOut.effective_cap, 2, "red + real backlog 55 > 50 ⇒ narrowed");
+  assert.equal(redOut.effective_cap, 2, "red window (3 consecutive red rounds) ⇒ narrowed to redBacklogCap");
   assert.equal(redOut.slots_free, 2);
-  // green state ⇒ cap restores to full
+  // green window ⇒ cap restores to full
+  writeRounds(root, Array.from({ length: 3 }, (_, i) => ({ round: 273 + i, state: "green", reason: "pass", fail: 0 })));
   fs.writeFileSync(path.join(root, ".quay", "full-suite-state.json"), JSON.stringify({ state: "green", fail: 0 }));
   const greenOut = JSON.parse(execFileSync(
     process.execPath,
@@ -785,17 +792,18 @@ test("ARBITRATION — CLI with a real git repo: git-read backlog drives the narr
     { encoding: "utf8", env: { ...process.env, QUAY_TELEMETRY_SUBAGENTS: "0" } },
   ));
   assert.equal(greenOut.arbitration.cap_narrowed, false);
-  assert.equal(greenOut.effective_cap, 5, "green ⇒ effective cap restored");
+  assert.equal(greenOut.effective_cap, 5, "green window ⇒ effective cap restored");
 });
 
-test("ARBITRATION — default (no red/backlog) is byte-forward-compatible: cap stays the base cap (AC5 no-regress)", (t) => {
+test("ARBITRATION — default (no red window/backlog) is byte-forward-compatible: cap stays the base cap (AC5 no-regress)", (t) => {
   const root = makeWorkspace("arb-default");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   writeTask(root, "gap-a", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/a.ts (new)"]) });
   const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root });
-  assert.equal(r.cap, 5, "no red suite + no git backlog ⇒ fixed cap unchanged");
+  assert.equal(r.cap, 5, "no red window + no git backlog ⇒ fixed cap unchanged");
   assert.equal(r.effective_cap, 5);
   assert.equal(r.arbitration.cap_narrowed, false);
+  assert.equal(r.arbitration.red_window_active, false);
   assert.equal(r.arbitration.integration_backlog, 0, "non-git temp root fails safe to 0");
   assert.equal(r.slots_free, 5);
 });
