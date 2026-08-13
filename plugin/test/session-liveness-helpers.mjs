@@ -70,8 +70,11 @@ export function probeTmpPrefixOf() { return probeTmpPrefix; }
 
 /** The base directory probes are created under: the per-run namespace when QUAY_RUN_ID is
  * set, else the legacy os.tmpdir(). The namespace dir is created on first use.
- * (runIdOf/runNamespaceRoot are imported+re-exported from the production sweep module above.) */
-function probeRoot() {
+ * (runIdOf/runNamespaceRoot are imported+re-exported from the production sweep module above.)
+ * Exported so sweepTmp callers can create residue in the SAME base the sweeper scans (AC4/AC3
+ * in session-liveness-sweep.test.mjs: a residue created under os.tmpdir() is invisible to
+ * sweepTmp when the runner namespaced the run — the round 126 wall-clock regression). */
+export function probeRoot() {
   const root = runNamespaceRoot();
   if (root === null) return os.tmpdir();
   fs.mkdirSync(root, { recursive: true, mode: 0o700 });

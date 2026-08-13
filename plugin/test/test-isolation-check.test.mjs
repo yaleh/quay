@@ -445,8 +445,16 @@ test("AC5/clean-tree DELTA: pre-existing dirt is excluded; only newly-added item
 test("AC5/tmux-leak-scan DELTA: pre-existing matches are excluded; only NEW matches leak", () => {
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "test-tmux-leak-delta-"));
   const SCAN_SH = path.join(REPO_ROOT, "plugin", "scripts", "tmux-leak-scan.sh");
-  const preDir = "/tmp/skv-delta-test-preexisting";
-  const newDir = "/tmp/skv-delta-test-newleak";
+  // The DELTA test's leak dirs must live under the SAME base the scan covers: the per-run
+  // namespace root when QUAY_RUN_ID is set (the runner's namespaced mode scans only that subtree),
+  // else the legacy os.tmpdir() prefixes. A /tmp/skv-* dir is invisible to a namespaced scan
+  // (round 126 AC5/tmux-leak-scan DELTA failure). Mirrors makeTmpDirPath in tmux-leak-scan.test.mjs.
+  const deltaBase = process.env.QUAY_RUN_ID
+    ? path.join(os.tmpdir(), `quay-run-${process.env.QUAY_RUN_ID}`)
+    : os.tmpdir();
+  fs.mkdirSync(deltaBase, { recursive: true });
+  const preDir = path.join(deltaBase, "skv-delta-test-preexisting");
+  const newDir = path.join(deltaBase, "skv-delta-test-newleak");
   try {
     // PASS: a pre-existing match is excluded (recorded in the before-run snapshot).
     fs.mkdirSync(preDir, { recursive: true });
