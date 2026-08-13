@@ -62,6 +62,8 @@ import {
   snapshotAssertionSurface,
   detectAssertionSurfaceEdits,
   concurrentSuiteSlots,
+  hostParallelism,
+  countHeldSuiteLocks,
 } from "../scripts/full-suite-runner.ts";
 import { runOnce, classifyFailure, routeRed, shouldStopDispatch, shouldDispatchOnRed } from "../scripts/suite-state-trigger.ts";
 
@@ -1018,6 +1020,154 @@ test("AC2 — concurrentSuiteSlots() reads QUAY_MAX_CONCURRENT_SUITES (the singl
   } finally {
     if (prev === undefined) delete process.env.QUAY_MAX_CONCURRENT_SUITES;
     else process.env.QUAY_MAX_CONCURRENT_SUITES = prev;
+  }
+});
+
+// ── gap-lanes-nproc-concurrent-suites-accounting: AC1/AC2/AC3 (nproc + concurrent-suite count) ──────
+// After the 2-slot lock, the concurrent-suite count is a NEW variable: two full suites can now run at
+// once, so the same wall-clock reading has a different meaning under 1-suite vs 2-suite concurrency.
+// Every verification-round record must carry nproc (read-host) + the configured slot count +
+// the ACTUAL concurrently-running count so a cross-round comparison can attribute "this round is
+// slower" to machine concurrency rather than to the change being measured.
+
+test("AC1 — a round records nproc (read-host) + concurrentSuiteSlots + concurrentSuitesRunning in verification-round.jsonl", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-lanes-"));
+  const lockDir = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-lanes-lock-"));
+  const { f, dir } = fakeSuite(GREEN_SUITE);
+  try {
+    // RESOURCE_GATE_NPROC is the deterministic host-read seam (os.availableParallelism() is not
+    // controllable in a test); FULL_SUITE_LOCK_FILE pins the lock probe to a temp dir with NO held
+    // slots (a lone round — no other suite running); QUAY_MAX_CONCURRENT_SUITES pinned so the parent
+    // suite's env cannot leak a different knob value into the round record.
+    const child = runRunner({
+      root,
+      command: `bash ${f}`,
+      laneCount: 4,
+      env: {
+        RESOURCE_GATE_NPROC: "8",
+        QUAY_MAX_CONCURRENT_SUITES: "2",
+        FULL_SUITE_LOCK_FILE: path.join(lockDir, "full-suite.lock"),
+      },
+    });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, `runner exits 0 on green, got ${code}`);
+    const rec = lastRoundRecord(root);
+    assert.ok(rec, "verification-round.jsonl written");
+    assert.equal(rec.nproc, 8, `nproc = host parallelism (read-host seam), got ${rec.nproc}`);
+    assert.equal(rec.concurrentSuiteSlots, 2, `concurrentSuiteSlots = QUAY_MAX_CONCURRENT_SUITES (the 2-slot knob), got ${rec.concurrentSuiteSlots}`);
+    assert.equal(rec.concurrentSuitesRunning, 1, `a lone round (no other suite holds a slot) runs at concurrency 1, got ${rec.concurrentSuitesRunning}`);
+    assert.equal(hostParallelism(), Number.isFinite(Number(process.env.RESOURCE_GATE_NPROC)) ? Number(process.env.RESOURCE_GATE_NPROC) : hostParallelism(), "hostParallelism() is a number (read-host, never a literal)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(lockDir, { recursive: true, force: true });
+  }
+});
+
+test("AC2 — 2-suite round records concurrentSuitesRunning=2, mechanically distinct from a 1-suite round (=1) [negative control]", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-lanes2-"));
+  const lockDir = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-lanes2-lock-"));
+  const lockFile = path.join(lockDir, "full-suite.lock");
+  const { f, dir } = fakeSuite(GREEN_SUITE);
+  let holder = null;
+  try {
+    // Hold slot .0 as if ANOTHER full suite is mid-run (the 2-slot lock's other slot). The holder is
+    // a detached flock whose whole process group is killed at teardown (flock holds the slot for the
+    // lifetime of its `sleep 30` command; killing the group releases it — verified in sandbox).
+    holder = spawn("flock", [lockFile + ".0", "-c", "sleep 30"], { stdio: "ignore", detached: true });
+    await new Promise((r) => setTimeout(r, 200)); // let flock actually take the slot
+    // Confirm the probe reads the held slot (the seam itself is sound before asserting the record).
+    // The probe reads FULL_SUITE_LOCK_FILE from ITS OWN process env — the parent test process must
+    // set it for the self-check (the child runner gets it via runRunner's env).
+    const prevLockEnv = process.env.FULL_SUITE_LOCK_FILE;
+    process.env.FULL_SUITE_LOCK_FILE = lockFile;
+    try {
+      assert.equal(countHeldSuiteLocks(root), 1, "countHeldSuiteLocks() sees the held other-suite slot (seam self-check)");
+    } finally {
+      if (prevLockEnv === undefined) delete process.env.FULL_SUITE_LOCK_FILE;
+      else process.env.FULL_SUITE_LOCK_FILE = prevLockEnv;
+    }
+
+    const child = runRunner({
+      root,
+      command: `bash ${f}`,
+      laneCount: 4,
+      env: {
+        RESOURCE_GATE_NPROC: "8",
+        QUAY_MAX_CONCURRENT_SUITES: "2",
+        FULL_SUITE_LOCK_FILE: lockFile,
+      },
+    });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, `runner exits 0 on green, got ${code}`);
+    const rec = lastRoundRecord(root);
+    assert.ok(rec, "verification-round.jsonl written");
+    assert.equal(rec.concurrentSuiteSlots, 2, `slot count = 2, got ${rec.concurrentSuiteSlots}`);
+    assert.equal(rec.concurrentSuitesRunning, 2, `a 2-suite round (one other slot held) records concurrentSuitesRunning=2, got ${rec.concurrentSuitesRunning}`);
+    assert.equal(rec.nproc, 8, `nproc recorded, got ${rec.nproc}`);
+    // AC2 negative control — the LONE-round AC1 test above records concurrentSuitesRunning=1; this
+    // round records 2. The two records are mechanically distinguishable on the concurrency axis, so a
+    // cross-round comparison can tell "this round ran alongside another suite" from "it ran alone".
+    assert.notEqual(rec.concurrentSuitesRunning, 1, "2-suite round MUST differ from the lone-round record");
+  } finally {
+    if (holder) {
+      try { process.kill(-holder.pid, "SIGKILL"); } catch { /* already gone */ }
+      try { holder.kill("SIGKILL"); } catch { /* already gone */ }
+    }
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(lockDir, { recursive: true, force: true });
+  }
+});
+
+test("AC3 — concurrentSuitesRunning never exceeds the slot count (a queued third suite is not a 3rd running suite)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-lanes3-"));
+  const lockDir = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-lanes3-lock-"));
+  const lockFile = path.join(lockDir, "full-suite.lock");
+  const { f, dir } = fakeSuite(GREEN_SUITE);
+  let h0 = null;
+  let h1 = null;
+  try {
+    // BOTH slots held (a hypothetical world where this round would be queued): the record must STILL
+    // cap concurrentSuitesRunning at the slot count (2) — never report a 3rd running suite.
+    h0 = spawn("flock", [lockFile + ".0", "-c", "sleep 30"], { stdio: "ignore", detached: true });
+    h1 = spawn("flock", [lockFile + ".1", "-c", "sleep 30"], { stdio: "ignore", detached: true });
+    await new Promise((r) => setTimeout(r, 200));
+    const prevLockEnv = process.env.FULL_SUITE_LOCK_FILE;
+    process.env.FULL_SUITE_LOCK_FILE = lockFile;
+    try {
+      assert.equal(countHeldSuiteLocks(root), 2, "both slots held (seam self-check)");
+    } finally {
+      if (prevLockEnv === undefined) delete process.env.FULL_SUITE_LOCK_FILE;
+      else process.env.FULL_SUITE_LOCK_FILE = prevLockEnv;
+    }
+
+    const child = runRunner({
+      root,
+      command: `bash ${f}`,
+      laneCount: 4,
+      env: {
+        RESOURCE_GATE_NPROC: "8",
+        QUAY_MAX_CONCURRENT_SUITES: "2",
+        FULL_SUITE_LOCK_FILE: lockFile,
+      },
+    });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, `runner exits 0 on green, got ${code}`);
+    const rec = lastRoundRecord(root);
+    assert.ok(rec, "verification-round.jsonl written");
+    assert.equal(rec.concurrentSuiteSlots, 2, `slot count = 2, got ${rec.concurrentSuiteSlots}`);
+    assert.equal(rec.concurrentSuitesRunning, 2, `both slots held ⇒ concurrency capped at the slot count 2, got ${rec.concurrentSuitesRunning}`);
+  } finally {
+    for (const h of [h0, h1]) {
+      if (h) {
+        try { process.kill(-h.pid, "SIGKILL"); } catch { /* already gone */ }
+        try { h.kill("SIGKILL"); } catch { /* already gone */ }
+      }
+    }
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(lockDir, { recursive: true, force: true });
   }
 });
 

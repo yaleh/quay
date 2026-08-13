@@ -46,6 +46,16 @@
 //         gap-infra-error-false-positive-from-test-internal-kill: only the child's EXIT STATUS
 //         classifies this, never a `Killed`/`__ENVFAIL__` marker a test's internal kill prints).
 //
+// Task: gap-lanes-nproc-concurrent-suites-accounting (2026-08-13)
+//   AC1/AC2/AC3 — every verification-round record carries the round's CONCURRENCY VARIABLES so a
+//         cross-round comparison can attribute "this round is slower" to machine concurrency rather
+//         than to the change being measured: `nproc` (host parallelism, os.availableParallelism() —
+//         read-host, never a literal, hard-rule-4 推论二 family), `concurrentSuiteSlots` (the
+//         configured QUAY_MAX_CONCURRENT_SUITES, the 2-slot knob ②), `concurrentSuitesRunning` (the
+//         ACTUAL number of suites running at the same time as this round = 1 + the slots OTHER suites
+//         held at round start, capped at the slot count). After the 2-slot lock, concurrent-suite
+//         count is a NEW variable; not recording it makes cross-round comparison impossible.
+//
 // It also tees the suite's stdout+stderr to a log file (default .quay/full-suite.log)
 // so the outer's verification gate can grep the 判绿 markers (cancelled 0 /
 // FULL-SUITE-EXIT=0 / tests N = reference).
@@ -950,6 +960,19 @@ export interface SuiteRoundRecord {
   startedAt: string;
   durationMs: number;
   laneCount: number;
+  // gap-lanes-nproc-concurrent-suites-accounting AC1/AC3 — the CONCURRENCY VARIABLES of the round, so
+  // a cross-round wall-clock comparison can attribute "this round is slower" to machine concurrency
+  // rather than to the change being measured. nproc = host parallelism (os.availableParallelism(),
+  // read-host NEVER a literal — the SAME expression as defaultLaneCount's derivation, hard-rule-4
+  // 推论二 family); concurrentSuiteSlots = the configured QUAY_MAX_CONCURRENT_SUITES (the 2-slot knob
+  // ②, the single definition point); concurrentSuitesRunning = the ACTUAL number of full suites running
+  // at the same time as this round (1 for this round's own slot + the slots OTHER suites held at round
+  // start, capped at the slot count — a queued third suite is not a 3rd running suite). Optional for
+  // backward compatibility with earlier appended lines — a reader must tolerate their absence (the
+  // same absent-field contract as *_phase_ms / scope_unit).
+  nproc?: number;
+  concurrentSuiteSlots?: number;
+  concurrentSuitesRunning?: number;
   pass: number;
   fail: number;
   cancelled: number;
@@ -1224,12 +1247,71 @@ export function defaultLaneCount(): number {
  * value that happens to equal the current host's capacity becomes a real silent limit (or silent
  * oversubscription) on a different host. Read the host instead.
  */
-function hostParallelism(): number {
+export function hostParallelism(): number {
   const ncpuRaw = process.env.RESOURCE_GATE_NPROC ?? String(
     typeof os.availableParallelism === "function" ? os.availableParallelism() : os.cpus().length,
   );
   const ncpu = Number(ncpuRaw);
   return Number.isFinite(ncpu) && ncpu >= 1 ? ncpu : 1;
+}
+
+// ── gap-lanes-nproc-concurrent-suites-accounting: nproc + concurrent-suite accounting ────────────────
+
+/**
+ * Resolve the single-flight 2-slot lock files the SAME way scripts/test.sh's full_suite_lock does:
+ * `${FULL_SUITE_LOCK_FILE}` env override → `git rev-parse --git-common-dir` (the SHARED lock dir ALL
+ * worktrees of this repo contend on — a per-checkout lock would NOT serialize across worktrees, the
+ * 2026-08-07 two-worktree incident) → fall back to `<root>/.git`. Returns the two slot paths [.0, .1].
+ * `root` is the tested checkout the probe runs against (git-common-dir is resolved from it, matching
+ * test.sh's cwd — a relative git-common-dir is resolved against root, absolute paths pass through).
+ */
+function suiteLockPaths(root: string): [string, string] {
+  const envOverride = process.env.FULL_SUITE_LOCK_FILE;
+  let base: string;
+  if (envOverride) {
+    base = envOverride;
+  } else {
+    let commonDir: string | null = null;
+    try {
+      commonDir = execFileSync("git", ["rev-parse", "--git-common-dir"], { cwd: root, encoding: "utf8" }).trim();
+    } catch {
+      commonDir = null;
+    }
+    if (!commonDir) commonDir = ".git";
+    base = path.join(path.resolve(root, commonDir), "full-suite.lock");
+  }
+  return [`${base}.0`, `${base}.1`];
+}
+
+/** Non-blocking probe of ONE slot: false = FREE, true = HELD (another suite is mid-run). A missing
+ *  parent dir (no suite has ever locked here — a non-git hermetic test root) reads as FREE: flock(1)
+ *  cannot probe a nonexistent path (exits 66/ENOENT), and creating stray lock files must not fabricate
+ *  a "held" slot. The probe holds the slot for the lifetime of `true` (µs) and releases — it is a
+ *  READ, not an acquisition (the suite's own slot is acquired later, inside test.sh). */
+function probeLockHeld(lockFile: string): boolean {
+  if (!fs.existsSync(path.dirname(lockFile))) return false;
+  try {
+    execFileSync("flock", ["-n", lockFile, "true"], { stdio: "ignore" });
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * gap-lanes-nproc-concurrent-suites-accounting AC1 — the number of single-flight lock slots CURRENTLY
+ * held by OTHER suites at probe time (0..S, S = concurrentSuiteSlots()). Best-effort: any resolution /
+ * probe error degrades to 0 (fail-open — accounting never blocks or fails a run; a lone round records
+ * concurrentSuitesRunning=1 regardless). The probe is a READ (see probeLockHeld) — it never contends
+ * with the suite's own lock acquisition, which happens AFTER this probe in the spawned test.sh.
+ */
+export function countHeldSuiteLocks(root: string): number {
+  try {
+    const [l0, l1] = suiteLockPaths(root);
+    return (probeLockHeld(l0) ? 1 : 0) + (probeLockHeld(l1) ? 1 : 0);
+  } catch {
+    return 0;
+  }
 }
 
 /**
@@ -2088,6 +2170,21 @@ export async function run(argv: string[]): Promise<number> {
   // available (otherwise the exact same bash -c <command> as before). systemd-run --scope runs the
   // command synchronously in the foreground and propagates its exit code, so the close-event /
   // signal / exit-code handling below is byte-for-behavior identical.
+  // gap-lanes-nproc-concurrent-suites-accounting AC1 — capture the round's concurrency variables AT
+  // ROUND START (the same point the state writes its verifiedCommit/tree snapshot), AFTER one-shot
+  // worktree provisioning (git-common-dir from a worktree resolves to the SHARED main `.git` — the
+  // same locks test.sh contends on). nproc = host parallelism (read-host, never a literal);
+  // concurrentSuiteSlots = the configured QUAY_MAX_CONCURRENT_SUITES; concurrentSuitesRunning = 1
+  // (this round's own slot) + the slots OTHER suites hold at probe time, capped at the slot count —
+  // the ACTUAL concurrency this round experienced, carried into the verification-round record at the
+  // END (the record's nproc/concurrentSuiteSlots/concurrentSuitesRunning fields).
+  const roundNproc = hostParallelism();
+  const roundConcurrentSuiteSlots = concurrentSuiteSlots();
+  const roundConcurrentSuitesRunning = Math.min(
+    1 + countHeldSuiteLocks(root),
+    roundConcurrentSuiteSlots,
+  );
+
   // gap-verification-round-load-fields-from-systemd — THIS round's cgroup scope unit, captured at
   // round START into the round's OWN record (trap 1 — NOT read back from the shared single-slot
   // suite-cgroup-evidence.txt at teardown; that file is overwritten every round, so re-reading it is
@@ -2931,6 +3028,13 @@ export async function run(argv: string[]): Promise<number> {
     startedAt,
     durationMs,
     laneCount,
+    // gap-lanes-nproc-concurrent-suites-accounting AC1/AC2/AC3 — the round's concurrency variables
+    // (captured at round start; always present on new rows so a cross-round comparison can attribute
+    // wall-clock differences to the concurrency axis — 2-slot lock made concurrent-suite count a NEW
+    // variable that must be recorded for the "1 套件轮 vs 2 套件轮" negative control to be queryable).
+    nproc: roundNproc,
+    concurrentSuiteSlots: roundConcurrentSuiteSlots,
+    concurrentSuitesRunning: roundConcurrentSuitesRunning,
     pass: tapPass,
     fail: tapFail,
     cancelled: tapCancelled,
