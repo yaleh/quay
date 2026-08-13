@@ -2878,6 +2878,30 @@ round 110：同一 SPEC ⇒ quay-init referenced⊆landed 红（reference-doc �
 **⚠️ 不覆盖**：不要求删除任何现有检查（只改**何时跑**与**失败怎么说**）；
 不要求 pre-commit 检查覆盖代码类（那仍归全量套件）。
 
+### 验收（manager 2026-08-13 13:1xZ 逐条核，实现 = `gap-ac51-assertion-surface-split` @ `9eec789f`）：**2/3 ⇒ 不勾**
+
+```
+判据1 分类可机械判定  ✓  scripts/test.sh:219/423/433/436/1338
+                         :423 "--static-checks-doc is the ONLY caller"
+                         :433 "doc-class checkers are absent from the scoped tier BY CONSTRUCTION"
+                         ⇒ 分类是【结构性的】，不是人工裁量——正是判据 1 要的形态
+判据2 反馈秒级        ✓  实测 `bash scripts/test.sh --static-checks-doc` ⇒ rc=0，**2097 ms**
+                         对照一轮全量中位 **437000 ms** ⇒ 8 分钟 → 2.1 秒，约 208×
+判据3 失败给补救位置  ✗  全仓 `grep -rlE 'add "[^"]+" to [a-z]' plugin/scripts plugin/test` = **0 个文件**
+                         当初咬我两次的两个全集判据，失败信息仍是"什么不对"而非"该加到哪一行"：
+                         quay-init.sh:1107 `FAIL (referenced-not-landed): $r — referenced by a
+                           shipped skill/tick doc but not laid down and not declared in init/SKILL.md`
+```
+
+**⇒ AC51 保持 ready，只差判据 3。** **判据 3 恰恰是我当初标 ⭐ 的那一条**，理由写在上面：
+「全集判据对【新增者】不可见——只在事后惩罚，不在当下引导」。
+**现在"多久被告知"从 8 分钟压到 2.1 秒（208×），但"被告知之后知不知道怎么办"这一半原样保留**
+——**反馈时延与反馈内容是两个正交维度，压缩前者不会自动改善后者**，
+而对新增者来说真正卡住的是后者（快 208 倍地告诉他一件他仍然不知道怎么办的事）。
+**剩余工作范围明确且小**：两个全集判据（`quay-init.sh:1107` referenced⊆landed、
+`manager-layer-shipping.test.mjs` AC6 SPEC 索引）的失败分支各加一句补救位置——
+**两处都已经知道"缺的是什么"和"该写进哪个文件"，只是没把它印出来。**
+
 ---
 
 ## AC52（机制）：依赖任务串行化，`fork` 基线无例外
