@@ -555,6 +555,142 @@ test("AC51 — a doc file whose checker FAILS is blocked even though it would be
   }
 });
 
+// ── gap-precommit-guard-merge-bypass: pre-merge-commit hook (merge-path coverage) ───────────────
+// The defect (inner 2026-08-13): `git merge --no-ff` does NOT fire pre-commit (git runs pre-commit
+// only from git-commit(1)) — assertion-surface files landed via a merge bypassed the guard entirely
+// (empirical: 2 commits → 2 fires / 1 merge → 0 fires; round 123's mid-round idempotency fan-in merge
+// was a live sample). The fix: --install-hook ALSO wires pre-merge-commit, which git-merge runs for a
+// `--no-ff` merge after carrying it out and before creating the merge commit; at that moment the index
+// holds the merged result so the guard's stagedFiles() read IS the merge's incoming file set. A blocked
+// pre-merge-commit leaves MERGE_HEAD + staged changes (git does NOT auto-abort) — the caller must
+// `git merge --abort` (the A6 fan-in merge-failure path already does).
+
+// A custom pre-merge-commit hook in the scratch repo that invokes the REAL guard with --merge
+// (the --install-hook shim cannot be used end-to-end in a scratch repo — it resolves the guard via
+// $ROOT/plugin/scripts/precommit-guard.ts, which does not exist in a scratch repo).
+function writeMergeHook(root, guardPath) {
+  const hooksDir = path.join(root, ".git", "hooks");
+  fs.mkdirSync(hooksDir, { recursive: true });
+  const shim = [
+    "#!/usr/bin/env bash",
+    `exec node --no-warnings --experimental-strip-types "${guardPath}" --root "${root}" --merge`,
+    "",
+  ].join("\n");
+  fs.writeFileSync(path.join(hooksDir, "pre-merge-commit"), shim, { mode: 0o755 });
+}
+
+// A scratch repo with a task branch `task/feature` that ADDS an assertion-surface file
+// (tasks/pollution.md — the round-123 shape: assertion-surface landed via a merge).
+function makeMergeFixture() {
+  const root = makeGitRepo();
+  const task = run("git", ["checkout", "-q", "-b", "task/feature"], root);
+  assert.equal(task.status, 0, "create task branch");
+  stage(root, "tasks/pollution.md", "round 123 pollution\n");
+  const commit = run("git", ["commit", "-q", "-m", "add task pollution"], root);
+  assert.equal(commit.status, 0, `task commit: ${commit.stderr}`);
+  const back = run("git", ["checkout", "-q", "main"], root);
+  assert.equal(back.status, 0, "back to main");
+  return root;
+}
+
+test("gap-merge-bypass AC1 — --install-hook wires BOTH pre-commit and pre-merge-commit; --uninstall-hook removes both", () => {
+  const root = makeGitRepo();
+  try {
+    const install = run("node", ["--no-warnings", "--experimental-strip-types", GUARD, "--root", root, "--install-hook"], root);
+    assert.equal(install.status, 0, `install-hook: ${install.stderr}`);
+    const preCommit = path.join(root, ".git", "hooks", "pre-commit");
+    const preMerge = path.join(root, ".git", "hooks", "pre-merge-commit");
+    assert.ok(fs.existsSync(preCommit), "pre-commit hook written");
+    assert.ok(fs.existsSync(preMerge), "pre-merge-commit hook written");
+    const mergeShim = fs.readFileSync(preMerge, "utf8");
+    assert.ok(mergeShim.includes("precommit-guard.ts"), "merge shim invokes the guard");
+    assert.ok(mergeShim.includes("--merge"), "merge shim passes --merge");
+    assert.ok(!mergeShim.includes("precommit-guard.ts.ts"), "merge shim must not double the extension");
+    assert.ok((fs.statSync(preMerge).mode & 0o111) !== 0, "merge hook is executable");
+
+    const uninstall = run("node", ["--no-warnings", "--experimental-strip-types", GUARD, "--root", root, "--uninstall-hook"], root);
+    assert.equal(uninstall.status, 0, `uninstall-hook: ${uninstall.stderr}`);
+    assert.ok(!fs.existsSync(preCommit), "pre-commit hook removed");
+    assert.ok(!fs.existsSync(preMerge), "pre-merge-commit hook removed");
+  } finally {
+    cleanup(root);
+  }
+});
+
+test("gap-merge-bypass AC1b — install refuses to overwrite an unrelated pre-existing pre-merge-commit hook", () => {
+  const root = makeGitRepo();
+  try {
+    const mergeHook = path.join(root, ".git", "hooks", "pre-merge-commit");
+    fs.writeFileSync(mergeHook, "#!/usr/bin/env bash\necho unrelated merge hook\n", { mode: 0o755 });
+    const install = run("node", ["--no-warnings", "--experimental-strip-types", GUARD, "--root", root, "--install-hook"], root);
+    assert.equal(install.status, 2, "refuses to clobber an unrelated pre-merge-commit hook");
+    assert.ok(fs.readFileSync(mergeHook, "utf8").includes("unrelated merge hook"), "original hook untouched");
+  } finally {
+    cleanup(root);
+  }
+});
+
+test("gap-merge-bypass AC2 — round-123 shape: git merge --no-ff landing assertion-surface during a running round is BLOCKED (no merge commit)", () => {
+  const root = makeMergeFixture();
+  try {
+    writeState(root, RUNNING_STATE);
+    writeRegistry(root, ["tasks/**"]);
+    writeMergeHook(root, GUARD);
+    const merge = run("git", ["merge", "--no-ff", "task/feature", "-m", "merge: fan-in task/feature (runId: fm-x)"], root);
+    assert.notEqual(merge.status, 0, `merge must be blocked, got ${merge.status}: ${merge.stdout} ${merge.stderr}`);
+    // Hook stdout/stderr both surface on the merge's stderr — the guard's rejection message is there.
+    assert.ok((merge.stdout + merge.stderr).includes("触及断言面"), "block message names the assertion surface");
+    // git leaves MERGE_HEAD + staged changes (does NOT auto-abort) — the caller must abort.
+    const mergeHead = run("git", ["rev-parse", "-q", "--verify", "MERGE_HEAD"], root);
+    assert.equal(mergeHead.status, 0, "MERGE_HEAD present (merge left in progress for the caller to abort)");
+    const log = run("git", ["log", "--oneline", "-1"], root).stdout.trim();
+    assert.ok(!log.includes("fan-in"), "no merge commit created");
+    // The rejection ledger records kind=merge.
+    const ledgerPath = path.join(root, ".quay", "precommit-guard-rejections.jsonl");
+    assert.ok(fs.existsSync(ledgerPath), "rejection ledger written");
+    const line = JSON.parse(fs.readFileSync(ledgerPath, "utf8").trim().split("\n").pop());
+    assert.equal(line.kind, "merge", "ledger records kind=merge");
+    assert.deepEqual(line.files, ["tasks/pollution.md"]);
+  } finally {
+    cleanup(root);
+  }
+});
+
+test("gap-merge-bypass AC2b — same merge with NO running round (terminal green) is ALLOWED", () => {
+  const root = makeMergeFixture();
+  try {
+    writeState(root, { ...RUNNING_STATE, state: "green", finishedAt: Date.now() / 1000 });
+    writeRegistry(root, ["tasks/**"]);
+    writeMergeHook(root, GUARD);
+    const merge = run("git", ["merge", "--no-ff", "task/feature", "-m", "merge: fan-in task/feature (runId: fm-x)"], root);
+    assert.equal(merge.status, 0, `merge must succeed when no round is running, got ${merge.status}: ${merge.stdout} ${merge.stderr}`);
+    const log = run("git", ["log", "--oneline", "-2"], root).stdout;
+    assert.ok(log.includes("fan-in"), "merge commit created");
+  } finally {
+    cleanup(root);
+  }
+});
+
+test("gap-merge-bypass AC3 — --merge flag: running + assertion-surface staged ⇒ reject with merge-context message and kind=merge ledger", () => {
+  const root = makeGitRepo();
+  try {
+    writeState(root, RUNNING_STATE);
+    writeRegistry(root, ["tasks/**"]);
+    stage(root, "tasks/new.md");
+    const res = runGuard(root, ["--merge"]);
+    assert.equal(res.status, 1, `expected reject, got ${res.status}`);
+    const out = JSON.parse(res.stdout);
+    assert.equal(out.verdict, "reject");
+    assert.equal(out.reason, "running-round-assertion-surface");
+    assert.equal(out.merge, true, "--json carries merge context");
+    assert.ok(out.message.includes("本次merge"), "message says merge (not 提交)");
+    const line = JSON.parse(fs.readFileSync(path.join(root, ".quay", "precommit-guard-rejections.jsonl"), "utf8").trim().split("\n").pop());
+    assert.equal(line.kind, "merge");
+  } finally {
+    cleanup(root);
+  }
+});
+
 // ── Real-repo smoke: the guard runs against THIS repo without crashing ───────────────────────────────
 
 test("real-repo smoke — guard runs against the real repo (no crash, readable verdict)", () => {
