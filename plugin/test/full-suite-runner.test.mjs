@@ -59,6 +59,7 @@ import {
   readScopeConsumedLoad,
   snapshotAssertionSurface,
   detectAssertionSurfaceEdits,
+  concurrentSuiteSlots,
 } from "../scripts/full-suite-runner.ts";
 import { runOnce, classifyFailure, routeRed, shouldStopDispatch, shouldDispatchOnRed } from "../scripts/suite-state-trigger.ts";
 
@@ -841,23 +842,54 @@ test("AC16 — --lane-count N propagates --test-concurrency=N into the spawned t
 
 // ── gap-full-suite-runner-concurrency-default-and-gate: AC1/AC2/AC3/AC4 ─────────────────────────────
 
-test("AC1 — default laneCount is NPROC-derived (nproc=4 → 4); spawned command carries ONE --test-concurrency=4", async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-ac1-"));
-  const { argsLog } = fakeTestShRecordingArgs(root);
+test("AC1 — default laneCount is NPROC-derived ÷ concurrent-suite slots (nproc=4, slots=1 → 4; slots=2 → 2); spawned command carries ONE --test-concurrency", async () => {
+  // gap-single-flight-lock-2-slot-concurrent-suites AC2 — the per-suite MAIN lane budget is
+  // hostParallelism ÷ QUAY_MAX_CONCURRENT_SUITES (1 suite ⇒ 4, 2 suites ⇒ each 2 on nproc=4). The
+  // old single-suite behavior (nproc → 4) is exactly the slots=1 case. RESOURCE_GATE_NPROC /
+  // QUAY_MAX_CONCURRENT_SUITES are the deterministic seams (env on the spawned runner).
+  for (const [slots, expected] of [["1", 4], ["2", 2]]) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-ac1-"));
+    const { argsLog } = fakeTestShRecordingArgs(root);
+    try {
+      // NO --lane-count, NO --command → default path; RESOURCE_GATE_NPROC=4 forces the derivation.
+      // AMPLIFICATION = 1.0 (AC5 cost-side-verified 2026-08-08 — zero cancelled at c4/c8, nproc is
+      // the wall-clock sweet spot).
+      const child = runRunner({ root, env: { RESOURCE_GATE_NPROC: "4", QUAY_MAX_CONCURRENT_SUITES: slots } });
+      const { code } = await waitExit(child);
+      assert.equal(code, 0, `runner exits 0 on green (slots=${slots}), got ${code}`);
+      const s = readState(root);
+      assert.equal(s.laneCount, expected, `derived default laneCount = max(1, floor(4/1.0/${slots})) = ${expected} (slots=${slots}), got ${s.laneCount}`);
+      await poll(() => fs.existsSync(argsLog));
+      const args = fs.readFileSync(argsLog, "utf8").trim();
+      assert.equal(args, `--test-concurrency=${expected}`, `exactly ONE --test-concurrency=<derived> spliced (slots=${slots}), got: ${args}`);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("AC2 — concurrentSuiteSlots() reads QUAY_MAX_CONCURRENT_SUITES (the single definition point) with a clamped fallback", () => {
+  // gap-single-flight-lock-2-slot-concurrent-suites — the concurrent-suite slot count S is the
+  // SINGLE definition point for "how many suites may run at once" (旋钮②, current 2). An invalid/zero
+  // setting fails OPEN to the single-suite default (2 is the current knob value; a misconfigured host
+  // degrades to the old 1-slot behavior, never to 0 lanes). The value is clamped to an integer >= 1.
+  const prev = process.env.QUAY_MAX_CONCURRENT_SUITES;
   try {
-    // NO --lane-count, NO --command → default path; RESOURCE_GATE_NPROC=4 forces the derivation.
-    // AMPLIFICATION = 1.0 (AC5 cost-side-verified 2026-08-08 — zero cancelled at c4/c8, nproc is
-    // the wall-clock sweet spot), so 4 cores → 4 lanes.
-    const child = runRunner({ root, env: { RESOURCE_GATE_NPROC: "4" } });
-    const { code } = await waitExit(child);
-    assert.equal(code, 0, `runner exits 0 on green, got ${code}`);
-    const s = readState(root);
-    assert.equal(s.laneCount, 4, "derived default laneCount = max(1, floor(4/1.0)) = 4 (cost-side-verified, was 1 under the 2.1 guard)");
-    await poll(() => fs.existsSync(argsLog));
-    const args = fs.readFileSync(argsLog, "utf8").trim();
-    assert.equal(args, "--test-concurrency=4", `exactly ONE --test-concurrency=<derived> spliced, got: ${args}`);
+    delete process.env.QUAY_MAX_CONCURRENT_SUITES;
+    assert.equal(concurrentSuiteSlots(), 2, "default slot count = 2 (旋钮② current value)");
+    process.env.QUAY_MAX_CONCURRENT_SUITES = "1";
+    assert.equal(concurrentSuiteSlots(), 1, "1 slot = the old single-flight behavior (AC4: no regression)");
+    process.env.QUAY_MAX_CONCURRENT_SUITES = "2";
+    assert.equal(concurrentSuiteSlots(), 2);
+    process.env.QUAY_MAX_CONCURRENT_SUITES = "3";
+    assert.equal(concurrentSuiteSlots(), 3, "a future bump to 3 slots reads through (勿把 2 当设计常量)");
+    process.env.QUAY_MAX_CONCURRENT_SUITES = "0";
+    assert.equal(concurrentSuiteSlots(), 2, "zero fails open to the single default, never 0 lanes");
+    process.env.QUAY_MAX_CONCURRENT_SUITES = "abc";
+    assert.equal(concurrentSuiteSlots(), 2, "non-numeric fails open to the single default");
   } finally {
-    fs.rmSync(root, { recursive: true, force: true });
+    if (prev === undefined) delete process.env.QUAY_MAX_CONCURRENT_SUITES;
+    else process.env.QUAY_MAX_CONCURRENT_SUITES = prev;
   }
 });
 
@@ -866,10 +898,12 @@ test("AC2 — the splice is REPLACE: an existing --test-concurrency=8 (= and spa
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-ac2-"));
     const { argsLog } = fakeTestShRecordingArgs(root);
     try {
+      // slots=1 pins the derived default to nproc (4) so the REPLACE assertion targets the splice
+      // (single flag), not the ÷ slots derivation (covered by the AC1 test above).
       const child = runRunner({
         root,
         command: `bash scripts/test.sh ${existing}`,
-        env: { RESOURCE_GATE_NPROC: "4" },
+        env: { RESOURCE_GATE_NPROC: "4", QUAY_MAX_CONCURRENT_SUITES: "1" },
       });
       const { code } = await waitExit(child);
       assert.equal(code, 0, `runner exits 0 on green (existing '${existing}'), got ${code}`);
@@ -3243,23 +3277,27 @@ function fakeTestShRecordingPhaseEnv(root) {
   return { envLog };
 }
 
-test("AC1/AC3 — the default run passes HOST-READ phase concurrency (os.availableParallelism) to the child test.sh", async () => {
-  // gap-ac44-concurrent-phases-read-host-parallelism AC1/AC3: the phase-concurrency defaults are
-  // host-read (os.availableParallelism()), NOT the machine-spec-dependent literal 6 (hard-rule-4
-  // 推论二 — same defect class as cpuQuota:"400%"). RESOURCE_GATE_NPROC is the deterministic test
-  // seam (the SAME source expression as defaultLaneCount's :972-973 derivation), so nproc=7 →
-  // serial=7 lowconc=7 regardless of the host this suite actually runs on.
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-phaseenv-default-"));
-  const { envLog } = fakeTestShRecordingPhaseEnv(root);
-  try {
-    const child = runRunner({ root, laneCount: 4, env: { RESOURCE_GATE_NPROC: "7" } });
-    const { code } = await waitExit(child);
-    assert.equal(code, 0, `runner exits 0 on green, got ${code}`);
-    await poll(() => fs.existsSync(envLog));
-    const line = fs.readFileSync(envLog, "utf8").trim();
-    assert.equal(line, "SERIAL=7 LOWCONC=7", `host-read defaults must follow the host (nproc=7 → 7/7), got: ${line}`);
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
+test("AC1/AC3 — the default run passes HOST-READ phase concurrency (os.availableParallelism ÷ slots) to the child test.sh", async () => {
+  // gap-ac44-concurrent-phases-read-host-parallelism AC1/AC3 + gap-single-flight-lock-2-slot-concurrent-
+  // suites AC2: the phase-concurrency defaults are host-read (os.availableParallelism()) DIVIDED by the
+  // concurrent-suite slot count, NOT the machine-spec-dependent literal 6 (hard-rule-4 推论二 — same
+  // defect class as cpuQuota:"400%"). RESOURCE_GATE_NPROC is the deterministic test seam (the SAME
+  // source expression as defaultLaneCount's derivation) and QUAY_MAX_CONCURRENT_SUITES the slot seam:
+  // nproc=7 → serial=7 lowconc=7 with slots=1 (the old 1-suite behavior), serial=3 lowconc=3 with
+  // slots=2 (floor(7/2)) regardless of the host this suite actually runs on.
+  for (const [slots, serial, lowconc] of [["1", "7", "7"], ["2", "3", "3"]]) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-phaseenv-default-"));
+    const { envLog } = fakeTestShRecordingPhaseEnv(root);
+    try {
+      const child = runRunner({ root, laneCount: 4, env: { RESOURCE_GATE_NPROC: "7", QUAY_MAX_CONCURRENT_SUITES: slots } });
+      const { code } = await waitExit(child);
+      assert.equal(code, 0, `runner exits 0 on green (slots=${slots}), got ${code}`);
+      await poll(() => fs.existsSync(envLog));
+      const line = fs.readFileSync(envLog, "utf8").trim();
+      assert.equal(line, `SERIAL=${serial} LOWCONC=${lowconc}`, `host-read defaults ÷ slots (nproc=7, slots=${slots} → ${serial}/${lowconc}), got: ${line}`);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   }
 });
 
