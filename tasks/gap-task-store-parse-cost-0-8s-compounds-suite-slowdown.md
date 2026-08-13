@@ -52,3 +52,7 @@ extra: {}
 - [ ] profile 结果 + 实现机制 + 前后耗时贴出（见 Evidence）
 - [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
+
+## Touches
+
+- tasks/gap-task-store-parse-cost-0-8s-compounds-suite-slowdown.md（自身，C8 self-touch）

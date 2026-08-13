@@ -51,8 +51,9 @@ npm-pack-e2e 20.6s / sea-artifact-consumer-e2e 17.3s / manager-install-vector 5.
 ## Definition of Done
 
 - [ ] AC1–AC4 全部勾上
-- [ ] 前后相耗时对照样例贴出
-- [ ] 全量套件绿
+- [ ] 前后相耗时对照样例贴出（shared-fixture 接线前后，同窗基线）
+- [ ] 全量套件绿（per-task 验证模式）
+- [ ] shared-fixture 接线后 quay-init-loop 族测试无回归（连接真实 fixture 而非重复构造）
 
 ## Touches
 

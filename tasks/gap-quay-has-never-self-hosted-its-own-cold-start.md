@@ -147,3 +147,5 @@ resume    依赖顺序按 SPEC 落；capstone 最后
 reviewer: none
 at: 2026-08-04T10:1xZ
 changed: 无（外层建任务，转译人/管理者给出的规格；未经正式闸口审查——`reviewer: none` 是被记录的选择）
+
+**A22 处置（2026-08-13，outer）**：本任务为 compound（children 是实现），非叶子可派——AC46 判据1 提升闸正确拒之。**不硬拆**（拆不动——子任务各自独立立项更合理）；作为 parent 跟踪子任务，写「明确的阻碍原因」（判据2 认可产出）。

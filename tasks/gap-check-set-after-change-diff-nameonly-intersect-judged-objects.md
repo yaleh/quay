@@ -62,6 +62,6 @@ cp「安全」判定只核了 A 编号维 → 提交前跑覆盖文件的检查 
 
 ## Touches
 
-- 判定对象声明解析机件（plugin/scripts/ 或 plugin/test/）
-- 作者自查 / 合并验收机件（gate 或 scripts/）
+- plugin/scripts/check-set-after-change-check.ts（判定对象声明解析机件——新建检查器，具体文件）
+- plugin/scripts/checker-mutation-cases/check-set-after-change.sh（合并验收机件 mutation case）
 - tasks/gap-check-set-after-change-diff-nameonly-intersect-judged-objects.md（自身）

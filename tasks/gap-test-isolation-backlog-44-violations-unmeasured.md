@@ -146,6 +146,12 @@ AC7 夹具保留在共享 `plugin/test/` 维持断言语义，`@test-group seria
 
 新违规 exit 1 / 既有 44 exit 0 见上（AC1/AC2 实测段）。AC6 的夹具竞态由快照侧排除 + serial 路由消除。
 
+## Definition of Done
+
+- [ ] AC1–AC4 全部勾上
+- [ ] 44 条 backlog 的隔离 violation 读数贴出（-v 或等价证据）
+- [ ] 全量套件绿（per-task 验证）
+
 ## Touches
 
 - plugin/scripts/test-isolation-check.ts（基线 + 棘轮逻辑）
@@ -158,7 +164,7 @@ AC7 夹具保留在共享 `plugin/test/` 维持断言语义，`@test-group seria
 - tasks/gap-known-load-sensitive-rule-is-doc-only-no-mechanical-triage.md（AC5 交叉标注）
 
 > **Touches 修正（2026-08-12）**：`plugin/test/runner-grouping.test.mjs` → `plugin/test/runner-grouping-serial-anti-stomp.test.mjs`——runner-grouping.test.mjs 已被 gap-suite-floor-two-longest-files-bound 拆为 5 个文件，AC7 夹具保留在拆分后的 serial 文件。其余 Touches 均为现存文件。
-
+- tasks/gap-test-isolation-backlog-44-violations-unmeasured.md（自身，C8 self-touch）
 ## Contract
 
 measure   iso_violations = `bash plugin/scripts/test-isolation-check.ts` stdout 的 violation 总数

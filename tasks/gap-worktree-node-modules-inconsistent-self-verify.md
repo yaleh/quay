@@ -76,7 +76,7 @@ resume 先定 setup 步骤（符号链接 vs 复制 vs install），再接派发
 ## Touches
 
 - （待定：新 `dispatch-worktree-setup.sh` + 派发 prompt 模板 + 测试；若加检查器则 `scripts/test.sh` 的 `run_static_checks`）
-
+- tasks/gap-worktree-node-modules-inconsistent-self-verify.md（自身，C8 self-touch）
 ## Dispatch review
 
 reviewer: outer
