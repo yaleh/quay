@@ -471,6 +471,23 @@ run_doc_checks() {
   run_checker "tick-core-static-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/tick-core-static-check.ts" --root "${repo_root}"
   _doc_rc=$(( _doc_rc || $? ))
   # @static-class doc
+  # @static-object orchestration/manager-tick-core.md orchestration/orchestrator-tick-core.md orchestration/fast-mode-tick-core.md plugin/loop/manager-tick-core.md plugin/loop/orchestrator-tick-core.md plugin/loop/fast-mode-tick-core.md
+  echo "  [doc-check] tick-core-drift-check"
+  # gap-tick-core-drift-check-not-in-suite: the three execution cores ship in TWO copies each —
+  # orchestration/*-tick-core.md (what the three layers ACTUALLY read every tick) and
+  # plugin/loop/*-tick-core.md (the shipped/laid-down copy quay-init --loop delivers). quay-init's
+  # `--check-drift` report already LISTED these but had NO suite consumer (the fifth "instrument
+  # exists, consumer doesn't" instance — A12 line :31 vs :45 actually misled a round). Wired here at
+  # the pre-commit doc surface (AC51 — the check's objects are tick-core DOCS, so it lives with the
+  # sibling tick-core-static-check in run_doc_checks, not the code-class run_static_checks gate).
+  # --no-block: the CURRENT 3 drifts are pre-existing (AC3 negative control — the check prints RED);
+  # blocking every commit until a follow-up reconciles the pairs would halt the loop, so the check
+  # REPORTS the drift at every commit (visible) without blocking. The hard `--check-drift` mode is
+  # mutation-tested (checker-mutation-cases/tick-core-static-check.sh) and is the enforcement once
+  # the pairs are reconciled.
+  run_checker "tick-core-drift-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/tick-core-static-check.ts" --check-drift --no-block --root "${repo_root}"
+  _doc_rc=$(( _doc_rc || $? ))
+  # @static-class doc
   # @static-object orchestration/manager-loop-tick.md plugin/loop/fast-mode-loop-tick.md plugin/loop/manager-loop-tick.md plugin/loop/orchestrator-loop-tick.md
   echo "  [doc-check] instrument-failure-check"
   run_checker "instrument-failure-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/instrument-failure-check.ts" --gate --root "${repo_root}"

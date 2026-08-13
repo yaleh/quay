@@ -1364,8 +1364,8 @@ PYEOF
 # deliverable, not a pass/fail gate (Contract band: parseable; missing/drift upgradeable to 0 via
 # --loop or listed).
 compute_drift_report() {
-  local ws="$1" drift=0 missing=0 consistent=0 n=0 s tgt rel src
-  local -a drift_list=() missing_list=()
+  local ws="$1" drift=0 missing=0 consistent=0 n=0 s tgt rel src i
+  local -a drift_list=() missing_list=() drift_src=() drift_tgt=()
   for s in "${LOOP_SCRIPTS[@]}"; do
     # opt-in exec core (gap-ac37-exec-core-ships-with-package): manager-tick-core lands only with
     # --manager; when not requested AND not already present in the target it is not a defect — skip
@@ -1390,12 +1390,20 @@ compute_drift_report() {
     elif cmp -s "$src" "$tgt"; then
       consistent=$((consistent + 1))
     else
-      drift=$((drift + 1)); drift_list+=("$rel")
+      drift=$((drift + 1)); drift_list+=("$rel"); drift_src+=("$src"); drift_tgt+=("$tgt")
     fi
   done
   echo "drift-report: 漂移 ${drift} / 缺失 ${missing} / 一致 ${consistent} (derived-set ${n})"
-  for rel in "${drift_list[@]}"; do
+  # AC2 (gap-tick-core-drift-check-not-in-suite): a drift entry prints BOTH sides' line counts + a
+  # diff summary (not a "drift/consistent" boolean) so a reader sees the magnitude/character of the
+  # drift. The `drift:` line itself is unchanged (tests parse it); the 行数/diff lines are additive.
+  for i in "${!drift_list[@]}"; do
+    rel="${drift_list[$i]}"; src="${drift_src[$i]}"; tgt="${drift_tgt[$i]}"
     echo "  drift: $rel — target differs from the plugin's current delivery (stale install or local edit); --loop upgrade backs it up + reports, never silent"
+    echo "    行数: $(wc -l < "$src") (plugin: ${src#"$PLUGIN_ROOT/"}) vs $(wc -l < "$tgt") (target: ${tgt#"$ws/"})"
+    local _dstat
+    _dstat="$(diff -U0 "$src" "$tgt" 2>/dev/null | grep -c '^[+-][^+-]' || true)"
+    echo "    diff: ${_dstat} changed lines (unified diff, 0-context)"
   done
   for rel in "${missing_list[@]}"; do
     echo "  missing: $rel — not installed (target froze at install time); --loop upgrade auto-adds it"
