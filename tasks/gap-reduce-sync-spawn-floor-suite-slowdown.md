@@ -1,7 +1,7 @@
 ---
 id: gap-reduce-sync-spawn-floor-suite-slowdown
 title: 套件耗时大头 = 派生次数 × 进程启动地板（~180-245s）——减少/降低单次派生
-status: ready
+status: todo
 labels:
   - gap
   - defect
@@ -53,3 +53,9 @@ extra: {}
 - [ ] 派生点清单 + 分类 + 改后耗时贴出（见 Evidence）
 - [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
+
+## Touches
+
+- packages/quay/bin/quay.ts（CLI 派生点）
+- plugin/scripts/measure-suite-reporter.mjs（execve 计数）
+- tasks/gap-reduce-sync-spawn-floor-suite-slowdown.md（自身）

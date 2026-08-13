@@ -1,7 +1,7 @@
 ---
 id: gap-runner-grouping-ac6-non-atomic-glob-race
 title: runner-grouping-list-groups AC6 与 AC3/AC7 同一非原子 glob 竞态 — 唯一没被套上有界重读的受害者
-status: ready
+status: todo
 labels:
   - gap
   - defect
@@ -56,3 +56,8 @@ extra: {}
 1. isolation 单跑 `node --experimental-strip-types --test plugin/test/runner-grouping-list-groups.test.mjs` → **3/3 绿**（AC10 6.5s / AC3 20.4s / AC6 30.4s，57.5s 总）
 2. `--for-task` scoped 静态门通过（与 #61 同批）
 3. 该文件仍标注 `@test-group serial` + `@load-sensitive nested-spawn`，串行组路由不改变（并发不回归由外层 verification-round 观察）
+
+## Touches
+
+- plugin/test/runner-grouping-list-groups.test.mjs（AC6 有界重读）
+- tasks/gap-runner-grouping-ac6-non-atomic-glob-race.md（自身）

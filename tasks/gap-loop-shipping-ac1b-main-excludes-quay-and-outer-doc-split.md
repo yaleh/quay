@@ -2,7 +2,7 @@
 id: gap-loop-shipping-ac1b-main-excludes-quay-and-outer-doc-split
 title: loop-shipping AC1b 在 main 确定性红 — walkCorpus 未排除 .quay/ +
   outer-doc-split.test.mjs 未入表
-status: ready
+status: todo
 labels:
   - gap
   - defect
@@ -60,3 +60,12 @@ extra: {}
 1. `node --test --test-name-pattern=AC1b plugin/test/loop-shipping.test.mjs`：**✔ pass 1 / fail 0**（修复前 ✖ 9 命中）
 2. `loop-shipping.test.mjs` 全量：**15/15 绿**
 3. `loop-shipping-necessity-check.test.mjs`：**3/3 绿**（新条目通过 inert-entry 检测——.quay/ 与 outer-doc-split 均有实际命中，非冗余）
+
+## Touches
+
+- orchestration/orchestrator-loop-tick.md
+- plugin/scripts/loop-shipping-exclusion-data.mjs
+- plugin/test/loop-shipping.test.mjs
+- plugin/test/outer-doc-split.test.mjs
+- plugin/test/loop-shipping-necessity-check.test.mjs
+- tasks/gap-loop-shipping-ac1b-main-excludes-quay-and-outer-doc-split.md（自身）

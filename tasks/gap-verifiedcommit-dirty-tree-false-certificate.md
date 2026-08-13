@@ -71,6 +71,22 @@ verifiedCommit 仍可能是假证书——轮子在跑的过程中把自己脚�
 ⇒ **脏净判定必须区分【外来脏】（人/agent 编辑）与【自造脏】（跑轮副作用）**：后者不能靠「大家别乱动」
 消除，只能靠隔离（worktree/快照）或把该文件排除出判定并说明理由。
 
+**下半段（2026-08-13 补，manager round 121 实测量出——同一因果链，分两条会分家）**：上面是「被测 ≠
+声称 commit、且无字段记录」。**下半段是：差异现在【被测出来了】（`treeMutatedMidRound`），但【没有后果】**：
+```
+round 121 记录（idx=120，全部键枚举，不截断）：
+  commit=7139fc22  state=green  reason=None  treeMutatedMidRound=True
+  verdict / infraError / void / voided = 三个键都不存在
+事件流照常走完认证路径：
+  04:48:07 SUITE-RUNNING       verifiedCommit=7139fc22
+  04:55:45 SUITE-GREEN         verifiedCommit=7139fc22
+  04:55:55 SUITE-MERGE-PENDING verifiedCommit=7139fc22
+```
+任何读 `state` 的下游看到一个干净的 green，**没有任何字段告诉它这轮不算数**。
+「作废」只活在外层的 tick-log 散文里——**正是硬规则⑨：守与不守在记录上无法区分**。
+⇒ **最小修法（不新机制，接上已有仪器的后果）**：`treeMutatedMidRound === true` ⇒
+**`state` 不得写 `green`**（写 `infra-error` 或加 `void: true`），且 `SUITE-GREEN` / `SUITE-MERGE-PENDING` 不得发出。
+
 ## Plan
 
 round 记录带上【被实际读取内容的标识】，最低限度三样（manager 约束，不是实现）：
@@ -89,10 +105,11 @@ round 记录带上【被实际读取内容的标识】，最低限度三样（ma
 - [ ] AC2: round 记录含被测内容 tree hash（tracked 部分，write-tree）
 - [ ] AC3: 负控——round 4a3fc0be 形态（vc=1a5da8ee + 工作树 ≠ HEAD 树 ≠ index 树）被检出/标注
 - [ ] AC4: 既有测试全绿；`--for-task` scoped 门绿
+- [ ] AC5: `treeMutatedMidRound === true` ⇒ state 不得写 green（写 infra-error / void:true），SUITE-GREEN / SUITE-MERGE-PENDING 不得发出
 
 ## Definition of Done
 
-- [ ] AC1–AC4 全部勾上
+- [ ] AC1–AC5 全部勾上
 - [ ] 负控样例贴出（见 Evidence：round 4a3fc0be 形态被标注「验未被记录树」）
 - [ ] 全量套件绿
 
@@ -142,3 +159,8 @@ batch-merge 以该绿推进 develop→1a5da8ee 可走（2026-08-13 00:15 已执�
 「2026-08-13 00:3xZ，outer 需要声明 round 93 跑在干净树上，而记录中无字段可引 ⇒ 只能自述。」
 ——不是「绿轮出错」，而是「被迫【断言】一件本该可以【引用】的事」；半小时后的读者只能选择相信，
 不能核。一次可指认的、发生过的不可核验——比任何论证都更能说明为什么要加那三个字段。
+
+**计量边界（manager 2026-08-13——必须说清，别被当成全量）**：`treeMutatedMidRound` 只在 **9/122** 轮存在，
+其余 **113 轮是 `None` = 未测量，不是「未变更」**（硬规则⑥）。能说的只有「被测量的 9 轮里 2 轮被污染（22%）」，
+**不能说「122 轮里 1.6%」**。样本太小，别拿 22% 支撑任何阈值；它只够说明「这类污染不是孤例」。
+真实率需字段积累到几十轮——外层在 tick-log 持续记分母。

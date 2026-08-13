@@ -1,7 +1,7 @@
 ---
 id: QENG-5-DEMO-PASS
 title: exp5 DoD via quay gate — demo PASS
-status: ready
+status: todo
 labels:
   - initiative:epicd-engine-port
   - fixture

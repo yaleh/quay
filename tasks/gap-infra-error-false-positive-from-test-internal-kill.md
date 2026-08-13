@@ -1,7 +1,7 @@
 ---
 id: gap-infra-error-false-positive-from-test-internal-kill
 title: resource-gate 测试内部 kill 触发 runner 误判 infra-error（② 假阳性）
-status: ready
+status: todo
 labels:
   - gap
   - defect
@@ -43,3 +43,9 @@ extra: {}
 - [ ] 修后实跑：含 resource-gate 的全绿套件 reason=green 贴出
 - [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
+
+## Touches
+
+- plugin/scripts/full-suite-runner.ts（childKilledBySignal / abort 检测路径——直接子进程退出状态判定）
+- plugin/test/resource-gate.test.mjs（kill 场景隔离）
+- tasks/gap-infra-error-false-positive-from-test-internal-kill.md（自身）

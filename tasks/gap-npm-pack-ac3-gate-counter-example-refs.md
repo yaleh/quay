@@ -1,7 +1,7 @@
 ---
 id: gap-npm-pack-ac3-gate-counter-example-refs
 title: npm-pack-e2e 红 — package.sh AC3 gate 把反例引用当活引用（4 反例 + 2 真引用需声明）
-status: ready
+status: todo
 labels:
   - gap
   - defect
@@ -57,3 +57,11 @@ extra: {}
 3. `capability-catalog.test.mjs`：15/15 绿（不回归）
 
 **根因链条**：#61（c6d24bab）引入 orphan-session-check.ts → 未在 capability-catalog 五表声明 → AC1c unclassified=1 → capability-catalog exit 1 → package.sh --entry-surface 前置失败 → npm-pack-e2e 全红。
+
+## Touches
+
+- packages/quay/scripts/capability-catalog.sh（orphan-session-check.ts 五表声明）
+- packages/quay/scripts/package.sh（AC3 --entry-surface 前置）
+- plugin/scripts/orphan-session-check.ts
+- packages/quay/test/npm-pack-e2e.test.mjs
+- tasks/gap-npm-pack-ac3-gate-counter-example-refs.md（自身）
