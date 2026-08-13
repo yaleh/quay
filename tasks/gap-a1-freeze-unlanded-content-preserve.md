@@ -1,6 +1,6 @@
 ---
 id: gap-a1-freeze-unlanded-content-preserve
-title: c1c0aa41 A1 freeze 未落地修复——合入 integration 保内容（load-flake 任务缺失的最后一块）
+title: c1c0aa41 A1 freeze 未落地修复——合入 develop 保内容（load-flake 任务缺失的最后一块）
 status: ready
 labels:
   - gap
@@ -39,8 +39,11 @@ c1c0aa41 是否在 develop 祖先中           ⇒ 否（仅存于 task/a1-fix �
 
 ## Plan
 
-1. **先保内容**：把 `c1c0aa41` 的内容合入 integration——
-   `git merge task/a1-fix` 已实测 **0 冲突**（merge-tree 校验，integration 含其 merge-base bbb19e46）。
+1. **先保内容**：把 `c1c0aa41` 的内容合入 **develop**——develop 是当前前锋分支
+   （`develop..integration = 0` 不变式，AC48 integration 退役在册，AC50 判据1 采样此量）。
+   **不往 integration 合**：那会把 `develop..integration` 从 0 变非 0，重开两线、破已勾 AC。
+   `git merge task/a1-fix` 对 develop 已实测 **0 冲突**（merge-tree 校验，merge-base bbb19e46 在 develop 祖先中）；
+   若 rebase 到 develop 遇冲突，先 rebase 再合。
 2. **scoped 验证**：在 worktree 内跑 `scripts/test.sh --for-task gap-a1-freeze-unlanded-content-preserve`
    （或直接以 install-config-driven-e2e 族为 scoped 面），确认 freeze 逻辑在 integration 最新代码上绿。
 3. **fan-in 合入**：A6 流程 merge → 全量套件验（round 157 或后续）。
@@ -49,8 +52,8 @@ c1c0aa41 是否在 develop 祖先中           ⇒ 否（仅存于 task/a1-fix �
 
 ## Acceptance Criteria
 
-- [ ] AC1 `c1c0aa41` 的内容（freeze 逻辑 +43 −4）已合入 integration，`integration` 上该文件
-      与 a1-fix 分支版本一致（diff 为空或仅下游后续改动）。
+- [ ] AC1 `c1c0aa41` 的内容（freeze 逻辑 +43 −4）已合入 develop，`develop` 上该文件
+      与 a1-fix 分支版本一致（diff 为空或仅下游后续改动），且 `develop..integration = 0` 保持。
 - [ ] AC2 scoped 测试绿（install-config-driven-e2e 族，--for-task 或等价 scoped 面），freeze
       在 integration 最新代码上不破坏 byte-identity 断言。
 - [ ] AC3 合入后全量套件绿（round 验），且 `task/a1-fix` 工作树已清（内容已保，树可清）。
@@ -58,7 +61,7 @@ c1c0aa41 是否在 develop 祖先中           ⇒ 否（仅存于 task/a1-fix �
 
 ## Definition of Done
 
-- [ ] 内容合入 integration 且全量套件绿（terminalCommit 记录）。
+- [ ] 内容合入 develop 且全量套件绿（terminalCommit 记录）。
 - [ ] 未发现因 freeze 引入的字节身份断言回归（grep 确认 freeze 逻辑在位且生效）。
 - [ ] `task/a1-fix` 树清理完成，无 ahead>0 且未落地内容残留。
 
