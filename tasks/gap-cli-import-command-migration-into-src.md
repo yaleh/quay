@@ -1,7 +1,7 @@
 ---
 id: gap-cli-import-command-migration-into-src
 title: cli-import 后续期——逐命令实现搬迁进 src/（run() 壳已就位）
-status: ready
+status: done
 labels:
   - gap
   - performance

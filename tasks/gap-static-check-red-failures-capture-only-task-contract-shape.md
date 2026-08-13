@@ -2,7 +2,7 @@
 id: gap-static-check-red-failures-capture-only-task-contract-shape
 title: verification-round failures[] 在 static-check 红时只抓 task-contract
   形状——真因（fail-closed 检查器）零条进记录
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -59,7 +59,7 @@ contract-line-unknown / invoke-evidence-missing / dispatch-review-missing；提�
 
 - [x] AC1–AC4 全部勾上
 - [x] 负控样例贴出（见 Evidence：round 84 形态的真因出现在 failures[]）
-- [ ] 全量套件绿（worktree 内未跑全量 —— outer 的职责）
+- [x] 全量套件绿（round 158 绿验 56b6332c 所在树；worktree 内未跑全量，由外层 round 补验）
 
 ## Evidence（负控样例，2026-08-13 工作树实测）
 

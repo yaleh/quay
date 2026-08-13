@@ -1,7 +1,7 @@
 ---
 id: gap-two-peer-quay-developers-continuous-bidirectional-merge
 title: "TWO PEER quay developers (A/B machines) need CONTINUOUS BIDIRECTIONAL merge of each other's progress — the authority question (who is 'latest' for whom) is UNDEFINED; unlike archguard's one-way 'quay releases, downstream consumes', A and B both develop quay itself; claim-task.sh/branch-model already did TASK CLAIMING + integration branch but NOT bidirectional CODE merge (B's 40+ commits incl new SKILL.md exist only on B; A's master evolves --slot-status etc and B never pulls); human frame correction 2026-08-06 04:5xZ (replaces narrow gap-a-to-b-code-downsync-missing-slot-status-not-on-b which is withdrawn): symmetric 'both machines continuously apply latest and develop on latest', not 'A reaches B' one-way; whether this merges with config-preserving/claim-task/branch-model into one larger design OR stays separate small tasks is the outer ruling requested"
-status: ready
+status: todo
 labels:
   - gap
   - defect
@@ -66,6 +66,7 @@ quay 开发者需要**持续合并彼此进展**。这比「--slot-status 单点
 - orchestration/manager-phase-goal.md（AC15 扩展：双向合并 + 权威定义）
 - tasks/gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point.md（AC4 交叉标注）
 - tasks/gap-a-to-b-code-downsync-missing-slot-status-not-on-b.md（AC5 交叉标注）
+- tasks/gap-two-peer-quay-developers-continuous-bidirectional-merge.md（自身，C8 self-touch）
 
 ## Contract
 

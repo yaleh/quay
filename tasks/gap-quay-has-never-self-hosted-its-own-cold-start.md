@@ -1,7 +1,7 @@
 ---
 id: gap-quay-has-never-self-hosted-its-own-cold-start
 title: "quay should be able to start itself with its own shipped quay:cold-start skill, at the same formal-AC rigor as the skill promises other projects"
-status: ready
+status: todo
 role: compound
 depends_on:
   - gap-send-keys-verified-hash-check-cannot-tell-typed-from-submitted

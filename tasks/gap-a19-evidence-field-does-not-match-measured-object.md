@@ -2,7 +2,7 @@
 id: gap-a19-evidence-field-does-not-match-measured-object
 title: A19 取证字段与被测对象不对应（runner 恒 outer 140/140 零反例）——重写：执行形态=launch tool_use 的
   transcript 文件类别（主会话/agent/workflow 互斥），invariant 换可取假者（manager 2026-08-13 规格）
-status: ready
+status: done
 labels:
   - gap
   - defect

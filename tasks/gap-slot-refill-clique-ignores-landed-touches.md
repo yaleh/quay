@@ -5,8 +5,10 @@ status: todo
 labels:
   - gap
   - mechanism
-parent: null
+parent: gap-slot-refill-landed-detection-implementation-file-classes
 children: []
+depends_on:
+  - gap-slot-refill-landed-detection-implementation-file-classes
 extra:
   schema: execution
 ---
@@ -31,6 +33,18 @@ DoD meta 箱），`isLandedCodeComplete` 不排除它 ⇒ 它留在 ready 池 �
 **原则**：landed-but-not-flipped 任务的实现已在树里，不会（也不该）被重新派发——其 touches
 对「谁可以和谁并行」的互斥判断**不应再算作活跃冲突**。这不是放行重叠派发（安全约束不变），
 是**已落地内容不再占派发空间**。
+
+**⚠️ 前置依赖（manager 2026-08-13 裁定：独立立案 + 声明依赖，不并进）**：本任务要在
+`hasLandedImplementation` 谓词收窄之后才可落地——`gap-slot-refill-landed-detection-implementation-file-classes`。
+**理由（安全性质）**：假阳性谓词 + 「忽略其 touches」= 一条实际没落地、真会冲突的任务，其 touches 被当作
+不存在 ⇒ 与真冲突方被判 disjoint ⇒ 同时派发 ⇒ 两个 subagent 改同一批文件。**disjointness 是安全约束**——
+让有假阳性的谓词去关闭它，比「landed 任务挤占池位」严重得多（后者只是慢，前者会真冲突）。
+**⚠️ 本依赖当前【无机械强制】——软挡，不是硬挡**（manager 2026-08-13 裁定）：`depends_on` 目前
+【零读者】（depsReadyFor 读 `parent` 不读 `depends_on`）；`parent` 的文档语义是「分解」（children 是
+parent 的实现、不是前置），用它表达前置只是当前实现的副产物，代码注释明说「never a prerequisite a child
+waits on」——将来若有人按注释语义校正 `depsReadyFor`，这条依赖会**静默消失**。**实际约束来自本任务保持
+`status: todo`**（不进 ready 池即不可派）。**在 AC52 扩闸读 `depends_on` 之前，谁提升本任务谁负责先确认
+谓词任务 `gap-slot-refill-landed-detection-implementation-file-classes` 已 done。**
 
 ## Plan
 
