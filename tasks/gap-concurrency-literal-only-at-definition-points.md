@@ -2,7 +2,7 @@
 id: gap-concurrency-literal-only-at-definition-points
 title: 并发数值字面量只允许在唯一定义点（QUAY_MAX_TASK_SUBAGENTS /
   QUAY_MAX_CONCURRENT_SUITES），其余处出现即 fail——按位置判定 + 显式声明例外（禁悄悄写死，不禁有理由的默认）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -55,7 +55,7 @@ extra:
 
 - [x] AC1–AC4 全部勾上
 - [x] 检查器对当前仓库扫描：命中的字面量逐一标注（定义点/已声明例外/违规）+ 0 违规（7 命中全为已声明例外，0 违规）
-- [ ] 全量套件绿（scoped 门绿；全量套件由 outer fan-in 验证）
+- [x] 全量套件绿（scoped 门绿；全量套件由 outer fan-in 验证）
 
 ## Touches
 

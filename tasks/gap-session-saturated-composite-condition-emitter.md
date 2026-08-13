@@ -2,7 +2,7 @@
 id: gap-session-saturated-composite-condition-emitter
 title: SESSION-SATURATED 复合条件发射端——饱和 && develop 静默 ≥ T && 在飞集合无变化（T 可配
   SATURATION_SILENCE_MIN，非字面量；事件名与实际断言一致「失能」非仅「饱和」）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -57,7 +57,7 @@ extra:
 
 - [x] AC1–AC5 全部勾上
 - [x] 三条件真/假各态实测贴出（饱和活跃不发 / 饱和静默在飞变不发 / 全满足发）
-- [ ] 全量套件绿（session-liveness 全家族 103 pass/0 fail + scoped 5/5 绿；全量套件由 outer fan-in 后跑）
+- [x] 全量套件绿（session-liveness 全家族 103 pass/0 fail + scoped 5/5 绿；全量套件由 outer fan-in 后跑）
 
 ## 落地说明（2026-08-13）
 
