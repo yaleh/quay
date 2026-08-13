@@ -2796,8 +2796,18 @@ round 110：同一 SPEC ⇒ quay-init referenced⊆landed 红（reference-doc �
 **来源**：人 2026-08-13 裁定「B 等 A 合入后再派」。**正本**：SPEC §14。
 
 **判据（两条）**：
-1. **无例外的不变量**：所有任务一律 fork 自 `develop`；
-   `integration-branch-model.ts:46 forkBaseline()` 退化为常量（其 `"integration"` 分支随 AC48 退役）。
+1. **无例外的不变量**：所有任务一律 fork 自 `develop`。
+   **⚠️ 本判据 2026-08-13 04:5xZ 更正过一次，原文是空判据**：原文写「`integration-branch-model.ts:46
+   forkBaseline()` 退化为常量」——**但该函数零生产调用者，让一个没人调的函数"退化"什么也不改变**。
+   **更糟的是：这件事我自己四天前就记过**——`orchestration/SPEC-three-layer-unified-architecture-2026-08-09.md:24`
+   写着「机制建好但没有消费者 | `forkBaseline()` 默认分支从未走到（49/49 fork 自 integration）」，
+   `:139` 写着「`forkBaseline` / `decideIntegrationToDevelopMerge` **均无生产调用者**」。
+   **我写 AC52 时没查自己的正本，于是给一个已知的死函数写了一条修改要求**（硬规则⑤ 来源完备性，
+   受害者是我自己的 AC）。**真正在决定 fork 基线的是 `plugin/scripts/fork-baseline.ts` 的
+   `--force-integration` 显式分支**（`:182-186`），quay 自身派发一律传它。
+   **⇒ 更正后的判据**：`fork-baseline.ts` 的**生产调用点不再传 `--force-integration`**，
+   且新建 worktree 的 `git rev-list develop..<分支>` 为空或只含它自己的提交；
+   `integration-branch-model.ts` 整个模块按"零生产调用者"走**退役**流程，不是"退化为常量"。
 2. **依赖就绪判据存在且机械**：`任务声明的依赖全部 status: done 且其提交已在 develop 上` 才可派发；
    **可复用件已有**：`it0-split-or-commit-check.ts` 的 PARENT-DONE-IFF-CHILDREN。
 

@@ -365,7 +365,10 @@ state-worded-clause-check / tick-core-static-check（tick 文档措辞与结构�
 ```
 任务 B 依赖任务 A ⇒ B 不派发，直到 A 的 worktree 套件绿 + merge 回 develop
 ⇒ B fork 时 develop 已含 A ⇒ 【所有任务一律 fork 自 develop，无例外】
-⇒ forkBaseline() 退化为常量 "develop"，该函数与其 integration 分支一并退役（随 AC48）
+⇒ 【更正 2026-08-13 04:5xZ】真正决定基线的是 `fork-baseline.ts:182-186` 的 `--force-integration`，
+   不是 `integration-branch-model.ts:46 forkBaseline()`——后者**零生产调用者**，
+   `SPEC-three-layer-unified-architecture-2026-08-09.md:24/:139` 四天前已记（我写本节时没查自己的正本）。
+   ⇒ 动作是【生产调用点不再传 `--force-integration`】+ 该死模块走退役流程，不是"让它退化为常量"
 ```
 
 **代价（明写，人已知悉）**：**吞吐下降**——依赖链上的任务不能重叠执行。
@@ -411,6 +414,46 @@ develop 上的直接提交来源（近 6h）：outer 16 / tasks 13 / merge 8 / i
 1. 等 integration 上所有已合并任务通过一次全量套件（现行机制）；
 2. `integration → develop` 批量合并（现有 `integration-batch-merge.sh --merge`，非新造）；
 3. **验收**：`git rev-list --count develop..integration` = 0（integration 无 develop 缺失的提交）。
+
+**⚠️ 阶段零（2026-08-13 04:4xZ 新增，实测证明原顺序不可收敛 —— 必须最先做）**
+
+0. **把 worktree 建立基线从 `$MERGE_TARGET` 改成 `develop`。**
+   **实测证据（本次 tick 采样，不是推理）**：
+   ```
+   04:28:02Z  outer 提交 92d7a41c（AC53 立案）—— integration 独有，develop 上没有
+   04:30:14Z  worktree gap-tests-assert-live-repo-state-break-idempotency  建立
+   04:30:15Z  worktree gap-verification-round-in-one-shot-worktree         建立
+   逐条枚举 git rev-list develop..<branch>：两者各含 1 条【不属于自己】的提交 = 92d7a41c
+   ⇒ 早先基线里那 3 个 fork 自 c23bf2fa 的 worktree 已排空，但 2 个【新的】立刻补位
+   ⇒ 该集合不是在缩小，是在轮换。阶段二在与派发赛跑，且派发一直赢。
+   ```
+   **⚠️ 根因已于 04:5xZ 更正一次 —— 我第一版写的「两处文本矛盾」是错的，且我犯的正是自己批评过的错（只读一行就下结论）。**
+   我读了 `fast-mode-loop-tick.md:953`「worktree 建立命令一律取 `$MERGE_TARGET`」就判定它与
+   `integration-branch-model.ts:46 forkBaseline()`（独立任务 fork 自 develop）矛盾。**读全上下文后真相相反**：
+   ```
+   :949  fork-baseline.ts … --develop "$FORK_BASELINE" --integration "$MERGE_TARGET" --force-integration
+   :950  # stdout: $MERGE_TARGET（统一 = integration HEAD；--force-integration 强制，无视依赖声明）
+   :956  依赖声明语义保留在 fork-baseline.ts 默认路径（单线下游用），quay 自身派发用 --force-integration 统一
+   fork-baseline.ts:182-186  if (forceIntegration) { 输出 integrationRef }  ← 显式分支，有署名理由
+   ```
+   ⇒ **「100% worktree fork 自 integration」是刻意设计，不是矛盾。** 它的理由是一个已立案已修的缺陷：
+   `gap-task-file-develop-integration-drift-fan-in-conflicts` —— **fork 点 = fan-in 目标**，
+   否则任务文件的证据段会与 integration 上已更新的同名文件 rebase 冲突。
+
+   **真正成立的两条（与上面无关，独立成立）**：
+   ① **`integration-branch-model.ts:46 forkBaseline()` 零生产调用者**（outer 枚举：定义 + 同模块 CLI +
+      三条单测；`fork-baseline.ts` 不 import 它）⇒ **同一概念两套并行实现，CLAUDE.md 记的是死的那套**。
+   ② **AC50 的不可收敛是真的**（上面那组时间戳与枚举不受影响）。
+
+   **⇒ 因此阶段零的动作要改写：不是「修一处矛盾」，而是【先解掉 `--force-integration` 当初要解的那个问题】。**
+   直接把基线指向 develop 会**重新引入一个已修缺陷**。
+   **新模型下它的解法已经存在，只是必须明写**：per-task 验证下任务直接 fan-in `develop`，
+   任务文件漂移由 **`A6` 已有的「先 `git rebase $MERGE_TARGET` 再 merge」+ 人已裁定的 rebase-重跑循环**吸收
+   ——**代价是 rebase 后要重跑套件**，这正是人 2026-08-13 裁定④「同意 Rebase-重跑循环的必要性」所买的东西。
+   **阶段零的验收因此要同时证明这一点，不能只证基线变了。**
+
+0b. **验收**：新建一个 worktree，`git rev-list develop..<其分支>` 为空（或只含它自己的提交）。
+    **必须在阶段二之前通过**——否则阶段二排空多少，派发就补回多少。
 
 **阶段二：在飞任务收口（3 个具体对象，逐个处置，不批量）**
 4. 每个 fork 自 integration 的在飞任务：**要么**完成并 merge（走现行路径），**要么** rebase 到 develop；
