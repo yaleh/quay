@@ -72,10 +72,17 @@ resume 先定 setup 步骤（符号链接 vs 复制 vs install），再接派发
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
 
 **AC46 第一层（outer 2026-08-13）**：本任务 Touches 仍为「待定」（未声明 dispatch-worktree-setup.sh 等落点），self-touch 缺失 ⇒ 非 ready-可派，retreat 回 todo。待 Touches 落定（新 setup 脚本设计）再晋 ready。
+**AC46 已落定（inner 2026-08-13）**：Touches 已声明（`dispatch-worktree-setup.sh` + `worktree-node-modules-check.sh` + 测试 + 派发 prompt + catalog 五表 + `scripts/test.sh` 接入），self-touch 在列，任务已 ready 并落地。
 
 ## Touches
 
-- （待定：新 `dispatch-worktree-setup.sh` + 派发 prompt 模板 + 测试；若加检查器则 `scripts/test.sh` 的 `run_static_checks`）
+- plugin/scripts/dispatch-worktree-setup.sh (new)
+- plugin/scripts/worktree-node-modules-check.sh (new)
+- plugin/test/dispatch-worktree-setup.test.mjs (new)
+- plugin/scripts/capability-catalog.sh（两个新脚本的五表声明：QUESTION/CADENCE/INVALIDATION/LAST_REAFFIRMED/MATCHING）
+- docs/proposals/quay-product-outline.md（§6 DELIVERY-INVENTORY 快照重新生成，scripts 224→226）
+- scripts/test.sh（run_static_checks 接入 worktree-node-modules-check，@static-tier full）
+- plugin/loop/fast-mode-loop-tick.md（派发 prompt：worktree add 后强制先跑 dispatch-worktree-setup.sh）
 - tasks/gap-worktree-node-modules-inconsistent-self-verify.md（自身，C8 self-touch）
 ## Dispatch review
 
