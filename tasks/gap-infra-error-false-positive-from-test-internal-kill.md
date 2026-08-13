@@ -29,19 +29,32 @@ extra: {}
 3. 修 + 单测（构造 resource-gate 测试 kill 场景 ⇒ 不触发；真 test.sh 被杀 ⇒ 触发）。
 4. 回归：full-suite-runner 测试 + `--for-task` scoped + 一轮确认。
 
+## Implementation
+
+（落地提交 `058f38b1b`，机制①：runner kill 检测改 exit-status-only）：
+1. `full-suite-runner.ts` `childKilledBySignal` 只认**直接 test.sh 子进程退出状态**（code=null+signal / close 事件 signal / bash 128+N），
+   流内容 `Killed`/`__ENVFAIL__` 字样不再触发（已从 abort 检测移除）。
+2. 全绿测试结果（tapPass>0 且 tapFail=0 且 tapCancelled=0 且 failures=[]）**压过** infra-error 拆除信号 ⇒ state=green
+   （round-18 shape：pass=3977 fail=0 cancelled=0 标 green）；infra-error 只在中途拆除且无全绿 TAP 摘要时保留（AC2 不回归）。
+3. `plugin/test/resource-gate.test.mjs` 无需改动——`git log -S kill/SIGKILL` 证明该文件从未有 kill 场景
+   （round-18 的 `Killed` 标记系误归因；机制① 在 runner 层隔离，不依赖测试层改动）。
+4. 新测试落在 `plugin/test/full-suite-runner.test.mjs`：:2007（`__ENVFAIL__` 流标记 + exit 0 ⇒ green）、
+   :2029（`Killed node --test` 行 + 绿 TAP + exit 0 ⇒ green，round-18 shape）、:2056（全绿结果 + 直接子进程被信号杀 exit 137 ⇒ green）、
+   :2085（中途拆除无绿摘要 ⇒ infra-error 红）、:1513/:1537（SIGKILL / bash-exits-137 ⇒ infra-error，AC2）。
+
 ## AC
 
-- [ ] AC1: resource-gate 测试内部 kill 不再触发 infra-error（全绿套件标 green）
-- [ ] AC2: 真实环境失败（test.sh 被信号杀）仍触发 infra-error（不回归）
-- [ ] AC3: `failures[]` 与 reason 一致（无真实失败 ⇒ 非 infra-error 除非真环境）
-- [ ] AC4: 新测试覆盖 (a)(b)；`--for-task` scoped 门绿
-- [ ] AC5: 既有 full-suite-runner 测试全绿
+- [x] AC1: resource-gate 测试内部 kill 不再触发 infra-error（全绿套件标 green）
+- [x] AC2: 真实环境失败（test.sh 被信号杀）仍触发 infra-error（不回归）
+- [x] AC3: `failures[]` 与 reason 一致（无真实失败 ⇒ 非 infra-error 除非真环境）
+- [x] AC4: 新测试覆盖 (a)(b)；`--for-task` scoped 门绿
+- [x] AC5: 既有 full-suite-runner 测试全绿
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全部勾上
-- [ ] 修后实跑：含 resource-gate 的全绿套件 reason=green 贴出
-- [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
+- [x] AC1–AC5 全部勾上
+- [ ] 修后实跑：含 resource-gate 的全绿套件 reason=green 贴出（外层 verification-round 全量跑）
+- [x] 既有测试 + 新增测试全绿（`--for-task` scoped：161/161，fail 0 cancelled 0）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
 
 ## Touches
