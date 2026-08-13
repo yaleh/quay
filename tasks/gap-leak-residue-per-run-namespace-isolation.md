@@ -144,3 +144,11 @@ import `../test/session-liveness-helpers.mjs` —— 但 `package.sh` 的 build-
 **Scoped 验证全绿**：npm-pack-e2e 9/0（此前 8 红）· session-liveness 族 51/0 · capability-catalog 15/0 ·
 tmux-test-isolation 9/0 · `--for-task gap-leak-residue-per-run-namespace-isolation` 116/0 ·
 one-shot-worktree 166/0 · idempotency 39/0。
+
+**第二次回归修复（2026-08-13，round 126 实证）**：npm-pack 修好后，round 126 仍红在
+`session-liveness-sweep.test.mjs` AC4/AC3「owner-dead residue must be removed by cleanup」。
+根因：per-run 命名空间下 `sweepTmp` 扫描 `probeRoot()`（= `/tmp/quay-run-<runId>/`），但测试的
+residue 直接建在 `os.tmpdir()` —— 两 base 不同 ⇒ sweeper 看不见该 residue ⇒ 存活 ⇒ 断言失败
+（round 122 无命名空间时两 base 相同，故绿）。修法：helper 导出 `probeRoot()`，测试 residue 改建在
+`probeRoot()` 下（与 sweeper 同 base）。验证：`QUAY_RUN_ID=testns1234 node --test` 5/5（命名空间，
+此前失败路径）；无命名空间 5/5。scoped 门待 round 126 terminal 后重跑。

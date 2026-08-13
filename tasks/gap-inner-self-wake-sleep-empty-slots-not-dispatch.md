@@ -34,6 +34,19 @@ slot-refill   : should_refill=True  no_refill_reason=None
 **醒 ≠ 派**：04:02 那一轮「醒着、5 空槽、5 可派、然后自选睡 25 分钟」——同一决策在 04:27 复现。
 25 分钟不是实际地板：实测 slot-refill 调用间 4 段 54-149 分钟空档、合计占 12h 窗口 52%。
 
+**三次复现同一形状、理由每次不同（manager 2026-08-13——证明不是被具体条款挡住，是缺不变式）**：
+```
+04:02  "ALL tasks landed, 0 in-flight"
+04:48  "awaiting fan-in at round terminal"
+06:40  "verification round ebb9877d running"   ← 机制里不存在的闸
+```
+06:40 那次：`should_refill=True / no_refill_reason=None / slots_free=5 / in_flight=0 / pool=20 /
+dispatchable_disjoint=10 / landing_blocked=False`——**每一道闸都开着，10 个可派对 5 个空槽**，
+而 reason 写「verification round running」（A9 原文 `running/green ⇒ 照常派发与合并`）。
+**混淆源**：把 A6 fan-in 的「等轮终」当成了派发闸——派发只建新 worktree、不碰共享检出，与轮无关。
+⇒ **行为完全相同（满池自睡 1500s）、理由每次不同 ⇒ 不是被某条款挡住，是缺「不得在有货时结束一轮」的不变式
+（AC53 判据①）**。
+
 **自举陷阱**：修本任务的工作会被本任务描述的缺陷本身推迟 ⇒ 必须外力打破
 （人 04:2xZ 直接指示 outer 显式驱动 inner）。**已实证**：04:23Z SendMessage 直接驱动 ⇒
 inner 立即派发 per-run namespace（驱动前 0 在飞 25min+、驱动后立即派）——AC53 负控制的第三实证。
@@ -71,6 +84,9 @@ one-per-wake 不是 inner 没填满/偷懒，inner 派 1 条是**严格遵守文
    从未在真实历史样本上亮过红的判据不算判据（AC50 判据2 恒真教训）。
    **第二真实样本（04:22Z）**：inner idle 19min / should_refill=true / slots_free=5 / in-flight=0 /
    pool=20=floor——与第一样本成对，修后「不再复现」有对照。
+   **第三真实样本（06:40Z）**：should_refill=true / slots_free=5 / in_flight=0 / pool=20 / dd=10 /
+   reason="verification round ebb9877d running"（机制里不存在的闸）——同一形状第三次复现、理由不同，
+   证明不是条款挡住而是缺不变式。
 
 **两点明确纳入**：
 - AC42-52 不修这条——per-task 验证改的是「验证在哪跑」，不是「谁叫醒派发」；自锁在新模型下一模一样。
