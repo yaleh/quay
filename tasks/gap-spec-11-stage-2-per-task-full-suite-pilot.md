@@ -68,3 +68,4 @@ extra:
 - AC 状态：AC1 ✅ / AC2 ⚠️（3 worktree green，fan-in 未做，本子代理禁 merge）/ AC3 ❌（锁阻塞）/ AC3b ⚠️ 未定 / AC4 ⚠️ 未触发 / AC5 ✅。
 - **实害记录**：run 2 使 round 150 全局轮 abort（0 tests）——此影响即 AC3 未成立的证据。**⚠️ 锁方向（人 2026-08-13 裁定，覆盖「测量绕过锁」——那配方作废）：不是测量绕锁，是把安全约束上界从 1 槽提到 2 槽（产品能力）。** 两个串行化者都改：①单飞锁 1→2 槽（两把锁文件 full-suite.lock.0/.1 依次 flock -n 试、都占满阻塞等任一释放——无新依赖、保留 flock 崩溃自动释放）；②资源闸预算按 2 槽算（只改锁第 2 个会撞闸 exit 1）。**相预算 = hostParallelism() ÷ 并发槽数**（1 套件⇒16、2 套件⇒各 8——人的 8 是 16÷2 的实例非字面量；AC44 原则 + 除数）。
 
+- **Run 3（配方机械验证，子代理 2026-08-13 12:00）**：按 outer/manager relay 的配方（`FULL_SUITE_LOCK_FILE=<per-wt>` + `QUAY_TEST_SKIP_RESOURCE_GATE=1`）在 3 个 worktree 同时启动全量——11:59:40 **3 个 scope=worktree 同时 state=running（前置自检通过，配方机械生效）**；随后全部 red/aborted，根因是**外层 worktree 清理中途移除未注册测量 worktree**（`getcwd: cannot access parent directories`），非测试失败。**人 2026-08-13 裁定配方作废**（锁方向见上，2 槽产品能力为 follow-on）⇒ run 3 仅作配方机械生效证据，不作 AC3b 吞吐读数。
