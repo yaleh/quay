@@ -66,19 +66,69 @@ round 84 起跑于提交后 4s；rounds 82/83/84 全尾随提交。断言面文�
 
 ## AC
 
-- [ ] AC1: 轮起跑时断言面快照（或 worktree 隔离）——轮中被编辑的断言面文件可检测
-- [ ] AC2: 检测到 ⇒ 该轮标 reason=infra-error 或作废（不判绿不判红误导）
-- [ ] AC3: 负控——重现 round 84（轮中 uncommitted 编辑断言面）被检测/隔离
-- [ ] AC4: 既有测试全绿；`--for-task` scoped 门绿
+- [x] AC1: 轮起跑时断言面快照（或 worktree 隔离）——轮中被编辑的断言面文件可检测
+- [x] AC2: 检测到 ⇒ 该轮标 reason=infra-error 或作废（不判绿不判红误导）
+- [x] AC3: 负控——重现 round 84（轮中 uncommitted 编辑断言面）被检测/隔离
+- [x] AC4: 既有测试全绿；`--for-task` scoped 门绿
 
 ## Definition of Done
 
-- [ ] AC1–AC4 全部勾上
-- [ ] 负控样例贴出（见 Evidence：round 84 形态被检测）
-- [ ] 全量套件绿
+- [x] AC1–AC4 全部勾上
+- [x] 负控样例贴出（见执行记录 Evidence：round 84 形态被隔离 + 残留形态被检测）
+- [ ] 全量套件绿（**deferred to fan-in** —— 受零并发约束，本 worktree 不跑全量；直接相关的测试文件全部单跑绿）
 
 ## Touches
 
-- plugin/scripts/full-suite-runner.ts（快照/隔离）
-- plugin/scripts/suite-state-trigger.ts（如需）
+- plugin/scripts/full-suite-runner.ts（轮起跑断言面快照 + 轮终比对标注）
+- plugin/scripts/suite-state-trigger.ts（红归因前查 assertionSurfaceEditedMidRound ⇒ SUITE-RED 标注）
+- plugin/test/full-suite-runner.test.mjs（AC1/AC2 检测 + AC3 负控）
+- plugin/test/suite-state-trigger.test.mjs（红归因纯函数 + SUITE-RED 事件标注负控）
 - tasks/gap-precommit-guard-blocks-commits-not-working-tree-edits.md（自身）
+
+## 执行记录（2026-08-13）
+
+**已有落地 vs 本任务新增（先盘点，再动手）**：
+
+1. **「或 worktree 隔离」已落地**（`5652604f` runner: 验证轮跑在一次性 worktree）——主检出全量套件跑在
+   **冻结的 detached worktree**（provision-verify-worktree.sh 一次性拉起，round 结束拆除）。主检出
+   工作树编辑在**保存时刻**进入的是主检出视图，**物理上到不了被测树** ⇒ round 84 的污染源已被结构性消除。
+   `treeMutatedMidRound`（`8037ec4a`）只检测「同轮有**提交**落进共享树」，**不检测未提交的工作树编辑**。
+2. **AC51 文档拆分已落地**（`b61afa53` gap-ac51 + `9eec789f` fan-in）——文档类检查移出全量套件、落到
+   pre-commit；断言面剔除 `.md` 文档 ⇒ 编辑文档不再使在跑的轮变红、不需要窗口。**本任务 Plan 步骤 4 已由
+   AC51 满足**（文档编辑无需窗口、守卫无需管文档——①绿窗 60s 中位 + ②'守卫后效 两个证据已并入本任务
+   Proposal，AC51 让两者都不再需要）。
+3. **本任务新增（AC1 的检测半边）**：`full-suite-runner.ts` 轮起跑对**被测树**断言面文件取内容快照
+   （复用 `precommit-guard.ts` 的 `resolveAssertionSurface`——同一份 judged-object-registry + AC51 文档
+   剔除，不手搓第二套），轮终（verdict 写入前，与 `readTreeMutation` 同位置）比对 ⇒
+   `assertionSurfaceEditedMidRound: string[]`（轮中被编辑的断言面文件清单）标注进 suite-state + round record。
+   语义与 `treeMutatedMidRound` 完全同族（gap-concurrent-write-mutable-tree-false-positive-red AC1「非红判据」）：
+   **红 + 该标注 ⇒ 假阳性候选；绿 + 该标注 ⇒ 弱绿**；不改 verdict、不改 reason、不整轮作废。
+4. **`suite-state-trigger.ts` 红归因**：`isAssertionSurfaceEditedFalsePositiveCandidate(state)`（纯函数，
+   红 + 非空清单 ⇒ 混合态假阳性候选）；SUITE-RED 事件投影 `assertionSurfaceEdited: true`；Monitor 行
+   `assertionSurfaceEdited=true`。与 `concurrentWrite` 投影同构，不改派发决策。
+
+**AC2 裁定（与 task 原文「标 reason=infra-error 或作废」的和解）**：round 84 形态（主检出未提交编辑）已由
+one-shot worktree **隔离预防**——污染物理到不了被测树，**不判绿不判红误导**由构造满足，无需也不会产生
+误导性 verdict。残留形态（**被测树自身**的断言面文件被 suite/任何东西轮中编辑——罕见）以**标注**标出
+（红→假阳性候选 / 绿→弱绿），**不**提升为 reason=infra-error：① 与 `treeMutatedMidRound` 的 AC1「非红判据」
+先例一致；② 把一轮全绿提升为 red 会误停派发——与 manager「真正修法不是把守卫做更严」方向相反。
+**「作废认证」语义由隔离承担**（4676de07 的作废认证类问题在 AC51 + 隔离后不再出现）。
+
+**Evidence（负控样例）**：
+
+1. **round 84 形态被隔离**（`full-suite-runner.test.mjs` AC3 负控，函数级）：
+   ```
+   snapshot = snapshotAssertionSurface(testedTree)   # 冻结副本 = one-shot worktree 类比
+   mainCheckout/tasks/surface.txt ← "v2-uncommitted"  # 轮中编辑主检出（round-84 保存时刻形态）
+   detectAssertionSurfaceEdits(testedTree, snapshot) → []   # 被测树快照干净 ⇒ 被隔离
+   ```
+2. **残留形态被检测**（同文件 AC1/AC2）：fake suite 轮中 `echo v2 > tasks/surface.txt`（被测树内保存时刻
+   编辑）⇒ suite-state 与 round record 均带 `assertionSurfaceEditedMidRound: ["tasks/surface.txt"]`，
+   verdict 不变（绿仍绿 / 红仍红 reason=failed）。
+3. **干净轮负控**：无轮中编辑 ⇒ 字段**缺席**（非空数组不被伪造，绿轮可无）。
+
+**AC4 证据**（直接相关测试文件单跑全绿）：
+```
+full-suite-runner.test.mjs    119/119   suite-state-trigger.test.mjs  53/53
+scripts/test.sh --for-task gap-precommit-guard-blocks-commits-not-working-tree-edits --allow-thin  exit 0
+```

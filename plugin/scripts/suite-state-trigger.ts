@@ -181,6 +181,13 @@ export interface SuiteState {
    * the existing attribution stands unchanged.
    */
   treeMutatedMidRound?: boolean;
+  /**
+   * gap-precommit-guard-blocks-commits-not-working-tree-edits — the runner's assertion-surface
+   * mid-round-EDIT annotation (the TESTED tree's assertion-surface files EDITED MID-ROUND — the running
+   * round read them at two states ⇒ a MIXED-STATE FALSE-POSITIVE CANDIDATE). Absent / empty ⇒ the
+   * existing attribution stands unchanged.
+   */
+  assertionSurfaceEditedMidRound?: string[];
 }
 
 /** The AC2 reason-axis route a red state takes (gap-suite-state-has-no-reason-axis-failed-aborted-infra). */
@@ -279,6 +286,14 @@ export interface SuiteStateEvent {
    * attribution stands unchanged).
    */
   concurrentWrite?: boolean;
+  /**
+   * gap-precommit-guard-blocks-commits-not-working-tree-edits — SUITE-RED only: true when the red state
+   * carries `assertionSurfaceEditedMidRound` (an assertion-surface file in the TESTED tree was EDITED
+   * MID-ROUND — the running round read it at two states ⇒ this red is a MIXED-STATE FALSE-POSITIVE
+   * CANDIDATE). A factual projection of state.assertionSurfaceEditedMidRound (translation, not a
+   * dispatch decision — the outer triage decides what to do with it). Absent on reds without the flag.
+   */
+  assertionSurfaceEdited?: boolean;
 }
 
 // ── failure-location classification + shared-gate dispatch conditional ─────────────────────────────
@@ -355,6 +370,19 @@ export function classifyFailure(input: SuiteFailure | string): FailureLocation {
  */
 export function isConcurrentWriteFalsePositiveCandidate(state: SuiteState | null): boolean {
   return state?.state === "red" && state.treeMutatedMidRound === true;
+}
+
+/**
+ * gap-precommit-guard-blocks-commits-not-working-tree-edits — the red-attribution check parallel to
+ * isConcurrentWriteFalsePositiveCandidate: is this red a MIXED-STATE FALSE-POSITIVE CANDIDATE because
+ * an assertion-surface file in the TESTED tree was edited mid-round? true when the state carries a
+ * non-empty `assertionSurfaceEditedMidRound` (the runner's round-start snapshot vs round-end compare
+ * detected a change). Same signal-not-discard semantics: the failures are still recorded and
+ * attributed; this annotation lets the triage weight them as a mixed-state candidate. Absent/empty ⇒
+ * the existing attribution stands.
+ */
+export function isAssertionSurfaceEditedFalsePositiveCandidate(state: SuiteState | null): boolean {
+  return state?.state === "red" && Array.isArray(state.assertionSurfaceEditedMidRound) && state.assertionSurfaceEditedMidRound.length > 0;
 }
 
 /**
@@ -978,6 +1006,11 @@ export function recordTransition(
     // the runner detected the tree was mutated mid-round). Translation, not a dispatch decision; the
     // outer triage decides what to do with the annotation.
     ...(kind === "SUITE-RED" && nextState.treeMutatedMidRound === true ? { concurrentWrite: true } : {}),
+    // gap-precommit-guard-blocks-commits-not-working-tree-edits — carry the assertion-surface
+    // mid-round-EDIT FALSE-POSITIVE CANDIDATE annotation on SUITE-RED (factual projection of
+    // state.assertionSurfaceEditedMidRound — the runner detected a TESTED-tree assertion-surface file
+    // edited mid-round). Translation, not a dispatch decision; the outer triage decides what to do.
+    ...(kind === "SUITE-RED" && isAssertionSurfaceEditedFalsePositiveCandidate(nextState) ? { assertionSurfaceEdited: true } : {}),
   };
   try {
     fs.mkdirSync(path.dirname(eventsPath(root)), { recursive: true });
@@ -1173,7 +1206,8 @@ function formatEventLine(ev: SuiteStateEvent): string {
     `${ev.event} state=${ev.state?.state ?? "?"} early=${ev.early} ` +
     `stopSignal=${ev.stopSignal} at=${ev.at}${locSummary}` +
     (ev.waitRunner ? " waitRunner=true" : "") +
-    (ev.concurrentWrite ? " concurrentWrite=true" : "")
+    (ev.concurrentWrite ? " concurrentWrite=true" : "") +
+    (ev.assertionSurfaceEdited ? " assertionSurfaceEdited=true" : "")
   );
 }
 

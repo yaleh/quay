@@ -55,6 +55,8 @@ import {
   parseSystemdTimespanToSeconds,
   parseSystemdBytesToMb,
   readScopeConsumedLoad,
+  snapshotAssertionSurface,
+  detectAssertionSurfaceEdits,
 } from "../scripts/full-suite-runner.ts";
 import { runOnce, classifyFailure, routeRed, shouldStopDispatch, shouldDispatchOnRed } from "../scripts/suite-state-trigger.ts";
 
@@ -597,6 +599,138 @@ test("AC3 negative control — a git-repo round with NO mid-round commit is tree
     assert.equal(s.verifiedCommit, head, "start HEAD == terminal HEAD == the same commit");
     const rec = lastRoundRecord(root);
     assert.equal(rec.treeMutatedMidRound, false, "round record carries treeMutatedMidRound=false on a pinned round");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── gap-precommit-guard-blocks-commits-not-working-tree-edits: assertion-surface mid-round edit
+// detection ────────────────────────────────────────────────────────────────────────────────────────
+// Round-84 shape (manager 2026-08-12): an UNCOMMITTED working-tree EDIT to an assertion-surface file
+// enters the running round's view at SAVE time, not commit time — the pre-commit guard fires at the
+// commit and cannot stop it. The one-shot worktree isolation (5652604f) PREVENTS the main-checkout
+// shape; this detection catches a mid-round EDIT to the TESTED tree's assertion-surface files (AC1 —
+// round-start snapshot vs round-end compare), annotated like treeMutatedMidRound (AC2 — a red is a
+// FALSE-POSITIVE CANDIDATE, a green is a weaker green; never a green/red criterion — AC1 非红判据).
+
+test("AC1/AC2 — a mid-round EDIT to an assertion-surface file in the TESTED tree is detected (assertionSurfaceEditedMidRound)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-asurf-"));
+  execSync("git init -q", { cwd: root });
+  execSync("git config user.name fsr-test", { cwd: root });
+  execSync("git config user.email fsr@example.com", { cwd: root });
+  // tasks/** is in the fallback-narrowed assertion surface (no judged-object-registry in the temp root)
+  fs.mkdirSync(path.join(root, "tasks"));
+  fs.writeFileSync(path.join(root, "tasks", "surface.txt"), "v1\n", "utf8");
+  execSync("git add -A && git commit -q -m base", { cwd: root });
+  // The fake suite: after a short delay (the suite is "running"), it REWRITES an assertion-surface
+  // file mid-round — the round-84 SAVE-time pollution shape (uncommitted, in the tested tree) — then passes.
+  const { f, dir } = fakeSuite(
+    'sleep 1\n' +
+      'echo "v2-uncommitted" > tasks/surface.txt\n' +
+      'echo "# tests 1"\necho "# pass 1"\necho "# fail 0"\necho "# cancelled 0"\nexit 0',
+  );
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, "runner exits 0 on green");
+    const s = readState(root);
+    assert.equal(s.state, "green", "the annotation never flips green/red (AC1 — 非红判据)");
+    assert.deepEqual(s.assertionSurfaceEditedMidRound, ["tasks/surface.txt"], "the mid-round-edited assertion-surface file is DETECTED");
+    assert.equal(s.treeMutatedMidRound, false, "no commit landed — the concurrent-write annotation is clean (independent axes)");
+    const rec = lastRoundRecord(root);
+    assert.deepEqual(rec.assertionSurfaceEditedMidRound, ["tasks/surface.txt"], "round record carries the mid-round-edit detection");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC1/AC2 — a RED round with a mid-round assertion-surface edit carries assertionSurfaceEditedMidRound (the false-positive-red signal on red)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-asurf-red-"));
+  execSync("git init -q", { cwd: root });
+  execSync("git config user.name fsr-test", { cwd: root });
+  execSync("git config user.email fsr@example.com", { cwd: root });
+  fs.mkdirSync(path.join(root, "tasks"));
+  fs.writeFileSync(path.join(root, "tasks", "surface.txt"), "v1\n", "utf8");
+  execSync("git add -A && git commit -q -m base", { cwd: root });
+  // The suite edits an assertion-surface file mid-round AND ALSO fails — the red carries the
+  // mixed-state FP-candidate annotation (a signal, not a blanket discard: reason stays failed).
+  const { f, dir } = fakeSuite(
+    'sleep 1\n' +
+      'echo "v2-uncommitted" > tasks/surface.txt\n' +
+      'echo "not ok 1 - boom"\nexit 1',
+  );
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    assert.equal(code, 1, "runner exits 1 on red");
+    const s = readState(root);
+    assert.equal(s.state, "red", "the red verdict is unchanged (the annotation does not discard the round)");
+    assert.equal(s.reason, "failed", "a real failure line keeps reason=failed (the stop-dispatch signal is not downgraded)");
+    assert.deepEqual(s.assertionSurfaceEditedMidRound, ["tasks/surface.txt"], "red carries the assertion-surface FP-candidate annotation");
+    const rec = lastRoundRecord(root);
+    assert.deepEqual(rec.assertionSurfaceEditedMidRound, ["tasks/surface.txt"], "round record carries the FP-candidate annotation");
+    assert.equal(rec.reason, "failed", "round-record reason unchanged (signal, not discard)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC3 negative control — a mid-round UNCOMMITTED edit to the MAIN checkout (round-84 shape) is ISOLATED: the TESTED-tree snapshot stays clean", async () => {
+  // mainCheckout = where the round-84 writer edits (uncommitted, mid-round);
+  // testedTree = a FROZEN copy the running round actually reads (the one-shot-worktree analog —
+  //   the worktree materializes the committed HEAD, so uncommitted main-checkout edits are never in it).
+  const main = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-asurf-main-"));
+  execSync("git init -q", { cwd: main });
+  execSync("git config user.name fsr-test", { cwd: main });
+  execSync("git config user.email fsr@example.com", { cwd: main });
+  fs.mkdirSync(path.join(main, "tasks"));
+  fs.writeFileSync(path.join(main, "tasks", "surface.txt"), "v1\n", "utf8");
+  execSync("git add -A && git commit -q -m base", { cwd: main });
+
+  const tested = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-asurf-tested-"));
+  execSync("git init -q", { cwd: tested });
+  execSync("git config user.name fsr-test", { cwd: tested });
+  execSync("git config user.email fsr@example.com", { cwd: tested });
+  fs.mkdirSync(path.join(tested, "tasks"));
+  fs.writeFileSync(path.join(tested, "tasks", "surface.txt"), "v1\n", "utf8");
+  execSync("git add -A && git commit -q -m base", { cwd: tested });
+
+  try {
+    // round-start snapshot over the TESTED tree (what the running round reads)
+    const snap = snapshotAssertionSurface(tested);
+    assert.ok(snap.files.includes("tasks/surface.txt"), "the assertion-surface snapshot covers the tested tree's file");
+    // MID-ROUND: the round-84 writer edits the MAIN checkout — UNCOMMITTED (save-time pollution shape)
+    fs.writeFileSync(path.join(main, "tasks", "surface.txt"), "v2-uncommitted\n", "utf8");
+    // round-end compare over the TESTED tree: the main-checkout edit did NOT reach it
+    const changed = detectAssertionSurfaceEdits(tested, snap);
+    assert.deepEqual(changed, [], "round-84 shape is ISOLATED — the tested-tree snapshot stays clean (被隔离)");
+  } finally {
+    fs.rmSync(main, { recursive: true, force: true });
+    fs.rmSync(tested, { recursive: true, force: true });
+  }
+});
+
+test("AC3 negative control — a clean round (no mid-round edit) carries NO assertionSurfaceEditedMidRound", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-asurf-clean-"));
+  execSync("git init -q", { cwd: root });
+  execSync("git config user.name fsr-test", { cwd: root });
+  execSync("git config user.email fsr@example.com", { cwd: root });
+  fs.mkdirSync(path.join(root, "tasks"));
+  fs.writeFileSync(path.join(root, "tasks", "surface.txt"), "v1\n", "utf8");
+  execSync("git add -A && git commit -q -m base", { cwd: root });
+  const { f, dir } = fakeSuite(GREEN_SUITE);
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, "runner exits 0 on green");
+    const s = readState(root);
+    assert.equal(s.state, "green", "clean round is green");
+    assert.ok(!("assertionSurfaceEditedMidRound" in s), "absent on a clean round (绿轮可无 — no fabricated empty array)");
+    const rec = lastRoundRecord(root);
+    assert.ok(!("assertionSurfaceEditedMidRound" in rec), "round record omits the field on a clean round");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(dir, { recursive: true, force: true });
