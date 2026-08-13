@@ -27,6 +27,17 @@ extra:
 
 **AC4 成立条件改为完整版**：①单任务正确性 ✅ ①b 合并后正确性（本任务落地后 ✅）②并发能力 ✅ ③等待与阻塞 ✅——全满足才停全局轮 + AC43/45 cancelled。
 
+**⚠️ 并发 merge 缺口（manager 2026-08-13 补）**：两条 merge 并发时——A 基于 develop@T0 merge→验绿→push，
+B 基于 develop@T0 merge→验绿→push（B 验的树【不含 A 改动】）⇒ 两个都绿、合起来的 develop 从未被整体验过
+= ①b 本身。**实测**：integration-batch-merge.sh 无 land 锁（flock/.lock 命中 0）；近 6h fan-in 29 次、
+相邻间隔 <10min 有 15 次、最小 32s ⇒ **重叠是常态**（全量要 7.1min）。
+
+**补法**：`merge → 全量 → push` **整体持一把单槽 land 锁**（与套件的 2 槽锁【不是同一把】——2 槽锁管「同时跑几套件」，
+land 锁管「同时落几个 merge」）。**代价要说清**：land 锁单槽 ⇒ merge 路径串行化 ≈ 4.7/h × 7.1min ≈ **33 min/h（55%）**
+——这是 (A) 的真实成本（比纯 per-merge 多一层「必须串行」），但仍优于现状（43 min/h 共享轮 + merge 本身等待）。
+**降成本替代（不牺牲 ①b）**：批量 land——攒 N 个已各自验绿的分支一次 merge 后跑一次全量再 push（N=2 减半），
+但引入「谁和谁一批」调度，**现在不做**，仅说明降成本有不牺牲覆盖的路。
+
 ## Plan
 
 1. A6 fan-in 门从 scoped 升级为**全量**：`git merge --no-ff` 前在 worktree 内跑全量（`$TEST_COMMAND` 全量，非 scoped）。
@@ -37,6 +48,8 @@ extra:
 ## Acceptance Criteria
 
 - [ ] AC1 A6 fan-in 门在 worktree 内、merge 后 push 前跑**全量**（非 scoped）。
+- [ ] AC1b **land 锁（单槽）**：`merge → 全量 → push` 整体持一把单槽 land 锁（与 2 槽套件锁不同把）；
+      并发 merge 不绕过它——B 验的树必须含 A 已 push 的改动（①b 在并发下不复现）。
 - [ ] AC2 负控制：跨任务交互破坏（各自绿、合并后互破）被 (A) 门抓到（fixture 或真实样例）。
 - [ ] AC3 主检出只读保持（AC42 判据2：全量在 worktree 内）。
 - [ ] AC4 吞吐：全局轮可停（(A) 承接 ①b 覆盖）；AC4 停轮条件完整。
