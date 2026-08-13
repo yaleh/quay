@@ -87,3 +87,11 @@ AC3 对照（同测试 `order-priority-safety`）：higher-disjoint 的无 prior
 **活样本（manager 裁定定向晋升时自纠）**：两个同尺寸互斥集——
 `{landing-target, clique, streaming-red}` 与 `{retest, clique, streaming-red}`，
 机制（slot-refill 排序）选了前者，因为 **排序里没有"重要性"维度**（touch-disjointness → gap>DIR → touches-resolvable，无优先级）。而 retest 是**停全局轮链条上唯一承接者**，被 landing-target（同碰 test.sh）挡着延迟了。**两个集等价，机制取哪个都合规；是我们要的那一维它看不见。** `priority:` label 至今零读者——本任务（271c102a）落地后这一维仍未接上。
+
+
+**第二活样本（2026-08-13，比 P1/P2 更有说服力——人亲口的优先级指令被排序无视）**：人指令「Outer 处理任务时
+仍应优先本阶段目标和 AC 对应任务」，三条性能探索任务体也明写「排停全局轮关键路径之后」。**实测 candidates
+排序：`gap-per-test-tail-percentiles-conditional`（任务体明写「条件触发，不现在做」）排第 1，停全局轮唯一前置
+`gap-spec11-retest-2h-nondegradation` 排第 3**——下一次 `--apply` 会先晋「不要现在做」的任务。且该任务
+排第 1 很可能是 value=1/cost 退化（touches 最少顶最前）。**人的裁定与机制建议都是散文，排序看不见两者。**
+（处置：条件任务已标 `**PARKED`——有读者的机制标记；其余两条排关键路径之后靠定向晋升严格子集。）
