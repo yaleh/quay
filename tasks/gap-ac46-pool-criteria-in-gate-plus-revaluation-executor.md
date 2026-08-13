@@ -70,6 +70,12 @@ compound×1 retreat / self-touch×1 retreat+补 Touches ⇒ pool 9→4。**但�
 - [ ] 当前池经一次重评扫描，无静默留池任务（或全部给出明确去向）。
 - [ ] 判据4 的 deficit 读数在池变化时保持可区分。
 
+**判据3 执行者的署名退出条件（manager 2026-08-13 修正其上一轮意见）**：本执行者是【过渡设施】，不是永久 sweeper。
+`per-task 全量成为默认认证之日 ⇒ 翻 done 移交 inner ⇒ 本执行者退役`。理由：**认证在谁手上，状态权就在谁手上**
+（fast-mode-loop-tick.md:456——inner 只读外层 full-suite-state.json，拿不到绿轮认证，故翻 done 归外层；per-task 全量一旦
+成为默认，inner 在自己树里就有绿证，翻 done 必然移交 inner）。**若建成无期限 sweeper，会把过渡状态固化**——inner 永远不翻、
+sweeper 永远清，而「认证已移交」再没人去改。退役判据随任务 AC 写死。
+
 ## Touches
 
 - plugin/scripts/ready-pool-check.ts（提升闸扩展：静态判据准入）
