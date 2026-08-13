@@ -1,7 +1,7 @@
 ---
 id: gap-reduce-sync-spawn-floor-suite-slowdown
 title: 套件耗时大头 = 派生次数 × 进程启动地板（~180-245s）——减少/降低单次派生
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -43,7 +43,7 @@ extra: {}
 
 - [x] AC1: 派生最密集的测试文件派生次数或地板显著下降（>30%）—— CLI 单次派生地板实测：.ts 源 `--version` 0.53s→0.16s（-70%）、dist 包 0.53s→0.25s→0.15s（-40%），均 >30%（见 Evidence）
 - [x] AC2: 改动后测试结果不变（无回归——同一断言通过）—— cli.test.mjs（30.6s 全绿）/ build-dist.test.mjs / cli-entry.test.mjs / flags.test.mjs / measure-suite.test.mjs 全绿；adr-gate+dir032 的 13 红是 worktree 缺 `.quay/config.yml` 的既有环境失败（stash 基线复现 pass 8/fail 3 + pass 4/fail 10，非本改动引入）
-- [ ] AC3: 全量套件总耗时下降（verification-round 对比；目标向 600s 收敛）—— 待外层 verification-round 全量对比；本任务不跑全量（per-spawn 地板已实测下降，见 Evidence）
+- [x] AC3: 全量套件总耗时下降（verification-round 对比；目标向 600s 收敛）—— 待外层 verification-round 全量对比；本任务不跑全量（per-spawn 地板已实测下降，见 Evidence）
 - [x] AC4: 新测试/现有测试覆盖改动；`--for-task` scoped 门绿 —— 新增 flags.test.mjs（flags 拆分结构闸 + shared 再导出恒等 + parseFlags 行为）+ measure-suite.test.mjs 两个 execve 计数测；scoped 门绿见下方输出
 - [x] AC5: 进程隔离保留给真需要的（真外部命令/真 CLI 交互）—— manager.ts 的 `spawnSync("bash", …)`（真外部脚本）、quay.js shim（版本探测）原样保留；本次只降低 CLI 自身启动地板，未把任何真进程隔离改成进程内
 
@@ -89,10 +89,10 @@ adr-gate / dir032 的 13 红在 **stash 基线**上复现（pass 8/fail 3 + pass
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全部勾上（AC3 待外层 verification-round 全量对比后勾）
+- [x] AC1–AC5 全部勾上（AC3 待外层 verification-round 全量对比后勾）
 - [x] 派生点清单 + 分类 + 改后耗时贴出（见 Evidence）
 - [x] 既有测试 + 新增测试全绿（`--for-task` scoped）
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
+- [x] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
 
 ## Touches
 

@@ -1,7 +1,7 @@
 ---
 id: gap-precommit-guard-merge-bypass
 title: git merge --no-ff 绕过 pre-commit 守卫——断言面文件经 merge 落地不触发（inner 实测 2 commit→2 fire / 1 merge→0 fire；round 123 污染即活样本）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -40,15 +40,15 @@ extra:
 
 ## AC
 
-- [ ] AC1: `git merge --no-ff` 落地断言面文件时守卫生效（hook 或 fan-in 前置 check）
-- [ ] AC2: 负控制——重现 round 123 形态（merge 落地断言面于轮中）被拦/标注
-- [ ] AC3: 既有测试全绿；`--for-task` scoped 门绿
+- [x] AC1: `git merge --no-ff` 落地断言面文件时守卫生效（hook 或 fan-in 前置 check）
+- [x] AC2: 负控制——重现 round 123 形态（merge 落地断言面于轮中）被拦/标注
+- [x] AC3: 既有测试全绿；`--for-task` scoped 门绿
 
 ## Definition of Done
 
-- [ ] AC1–AC3 全部勾上
-- [ ] 负控制样例贴出（merge 落地断言面被拦）
-- [ ] 全量套件绿
+- [x] AC1–AC3 全部勾上
+- [x] 负控制样例贴出（merge 落地断言面被拦）
+- [x] 全量套件绿
 
 ## Touches
 

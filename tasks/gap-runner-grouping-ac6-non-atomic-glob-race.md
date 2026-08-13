@@ -1,7 +1,7 @@
 ---
 id: gap-runner-grouping-ac6-non-atomic-glob-race
 title: runner-grouping-list-groups AC6 与 AC3/AC7 同一非原子 glob 竞态 — 唯一没被套上有界重读的受害者
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -47,8 +47,8 @@ extra: {}
 
 ## DoD
 
-- [ ] 修后 3 轮并发套件 AC6 不再红（外层 verification-round 验证）
-- [ ] 全量套件绿（fail 0 且 cancelled 0）（外层 verification-round 验证）
+- [x] 修后 3 轮并发套件 AC6 不再红（外层 verification-round 验证）
+- [x] 全量套件绿（fail 0 且 cancelled 0）（外层 verification-round 验证）
 
 ## Evidence（inner 2026-08-12 06:5xZ，commit a90cb600）
 

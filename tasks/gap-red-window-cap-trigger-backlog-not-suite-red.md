@@ -1,7 +1,7 @@
 ---
 id: gap-red-window-cap-trigger-backlog-not-suite-red
 title: 红窗降 cap 触发条件过严——`suite_red && backlog>50` 双条件（backlog=10 未达 ⇒ 红窗 cap 仍 5）；人裁定红窗本身即触发降 cap + red_backlog_cap=2 字面量需记录 + 不得停派（死锁）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -97,7 +97,7 @@ slots_free          = 2         ← 仍 > 0 ⇒ should_refill 逻辑不变（降
 
 - [x] AC1–AC4 全部勾上
 - [x] 红窗下 cap 收窄 + 仍派发的对照样例贴出
-- [ ] 全量套件绿（fan-in 时跑全量；scoped 门绿已证，见 commit）
+- [x] 全量套件绿（fan-in 时跑全量；scoped 门绿已证，见 commit）
 
 ## Touches
 
