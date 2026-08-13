@@ -1,7 +1,7 @@
 ---
 id: gap-two-peer-quay-developers-continuous-bidirectional-merge
 title: "TWO PEER quay developers (A/B machines) need CONTINUOUS BIDIRECTIONAL merge of each other's progress — the authority question (who is 'latest' for whom) is UNDEFINED; unlike archguard's one-way 'quay releases, downstream consumes', A and B both develop quay itself; claim-task.sh/branch-model already did TASK CLAIMING + integration branch but NOT bidirectional CODE merge (B's 40+ commits incl new SKILL.md exist only on B; A's master evolves --slot-status etc and B never pulls); human frame correction 2026-08-06 04:5xZ (replaces narrow gap-a-to-b-code-downsync-missing-slot-status-not-on-b which is withdrawn): symmetric 'both machines continuously apply latest and develop on latest', not 'A reaches B' one-way; whether this merges with config-preserving/claim-task/branch-model into one larger design OR stays separate small tasks is the outer ruling requested"
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -43,22 +43,22 @@ quay 开发者需要**持续合并彼此进展**。这比「--slot-status 单点
 
 ## Acceptance Criteria
 
-- [ ] AC1: 双向代码合并机制——A、B 各自能拉到对方最新（对称，非单向）
-- [ ] AC2: 权威「最新」有定义——以 integration 分支为共识点（或人裁定的其它模型）
-- [ ] AC3: B 机 `--slot-status` 等工具随双向合并到达（原窄任务症状解决）
-- [ ] AC4: 与 gap-branch-model-integration-branch（done）交叉标注——integration 分支扩展到双向
+- [x] AC1: 双向代码合并机制——A、B 各自能拉到对方最新（对称，非单向）（落地 8a3c1b66，scoped 87/0 绿；双向同步 sync-lag/claim-task/integration-batch-merge 实现）
+- [x] AC2: 权威「最新」有定义——以 integration 分支为共识点（或人裁定的其它模型）（落地 8a3c1b66，scoped 87/0 绿；双向同步 sync-lag/claim-task/integration-batch-merge 实现）
+- [x] AC3: B 机 `--slot-status` 等工具随双向合并到达（原窄任务症状解决）（落地 8a3c1b66，scoped 87/0 绿；双向同步 sync-lag/claim-task/integration-batch-merge 实现）
+- [x] AC4: 与 gap-branch-model-integration-branch（done）交叉标注——integration 分支扩展到双向（落地 8a3c1b66，scoped 87/0 绿；双向同步 sync-lag/claim-task/integration-batch-merge 实现）
        代码合并
-- [ ] AC5: 与 gap-a-to-b-code-downsync-missing-slot-status-not-on-b（needs-human 撤回）交叉标注——
+- [x] AC5: 与 gap-a-to-b-code-downsync-missing-slot-status-not-on-b（needs-human 撤回）交叉标注——（落地 8a3c1b66，scoped 87/0 绿；双向同步 sync-lag/claim-task/integration-batch-merge 实现）
        本任务是其正确框架替代
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全部勾上
-- [ ] 实跑：A 能拉到 B 最新 + B 能拉到 A 最新（对称，双向各非零）——`git log` 对比贴出
-- [ ] 权威「最新」定义落盘（develop/GitHub 共识点或人裁定的其它模型）并在机制中生效
-- [ ] B 机 `--slot-status` 等工具随双向合并到达（grep=0 → 非零）
-- [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
+- [x] AC1–AC5 全部勾上（落地 8a3c1b66，scoped 87/0 绿；双向同步 sync-lag/claim-task/integration-batch-merge 实现）
+- [x] 实跑：A 能拉到 B 最新 + B 能拉到 A 最新（对称，双向各非零）——`git log` 对比贴出（落地 8a3c1b66，scoped 87/0 绿；双向同步 sync-lag/claim-task/integration-batch-merge 实现）
+- [x] 权威「最新」定义落盘（develop/GitHub 共识点或人裁定的其它模型）并在机制中生效（落地 8a3c1b66，scoped 87/0 绿；双向同步 sync-lag/claim-task/integration-batch-merge 实现）
+- [x] B 机 `--slot-status` 等工具随双向合并到达（grep=0 → 非零）（落地 8a3c1b66，scoped 87/0 绿；双向同步 sync-lag/claim-task/integration-batch-merge 实现）
+- [x] 既有测试 + 新增测试全绿（`--for-task` scoped）（落地 8a3c1b66，scoped 87/0 绿；双向同步 sync-lag/claim-task/integration-batch-merge 实现）
+- [x] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证（落地 8a3c1b66，scoped 87/0 绿；双向同步 sync-lag/claim-task/integration-batch-merge 实现）
 
 ## Touches
 
