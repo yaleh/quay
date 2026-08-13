@@ -309,41 +309,41 @@ test("AC6: default refs (no --develop/--integration) still return the two-line l
   }
 });
 
-// ── UNIFIED FORK SOURCE (gap-task-file-develop-integration-drift-fan-in-conflicts, AC2): the
-// task-file-drift ruling — every task worktree forks from integration HEAD (the effective line,
-// matching the fan-in target), regardless of the develop-vs-integration dependency decision.
-// `--force-integration` makes the CLI output the integration ref unconditionally. This is what the
-// tick docs pass so quay's own dispatch never forks a task worktree from develop (whose task files
-// drift behind integration), eliminating the "fork 落后 integration" evidence-segment rebase conflicts.
+// ── RETIRED UNIFIED FORK SOURCE (gap-worktree-fork-baseline-always-integration): the previous
+// task-file-drift ruling — every task worktree forks from integration HEAD via `--force-integration` —
+// is RETIRED. Under the per-task-suite-verification model (human directive ② + SPEC
+// per-task-suite-verification-2026-08-13 §14/§15.4) the worktree fork baseline is develop again;
+// dependencies are serialized by the dispatch gate (A15②) and task-file drift is absorbed by the A6
+// rebase-rerun loop. The dependency-decision DEFAULT is retained (tests above).
 
-test("AC2 UNIFIED FORK SOURCE: --force-integration outputs the integration ref for a DISJOINT candidate (no more develop fork)", () => {
-  const dir = makeTmp("force-integration");
+test("RETIRED UNIFIED FORK SOURCE: --force-integration FAILS loud (exit 2, stderr names the retirement)", () => {
+  const dir = makeTmp("force-integration-retired");
   try {
     initGitRepo(dir);
-    // The unverified task on integration touches a different file than the candidate.
-    writeTask(dir, "unverified-one", ["packages/quay/src/serve.ts"]);
-    // Candidate touches fork-baseline.ts — DISJOINT from the unverified task, so WITHOUT the flag
-    // it would fork from develop. WITH --force-integration it must fork from integration.
     writeTask(dir, "candidate-disjoint", ["plugin/scripts/fork-baseline.ts"]);
 
     const r = runNode([forkBaselineCli, "--root", dir, "--task", join(dir, "tasks", "candidate-disjoint.md"), "--unverified", "unverified-one", "--force-integration"]);
-    assert.equal(r.status, 0, r.stderr);
-    assert.equal(r.stdout.trim(), "integration", `--force-integration must fork from integration even for a disjoint candidate: ${r.stdout}`);
-    assert.match(r.stderr, /fork 源统一 = integration HEAD/);
+    assert.equal(r.status, 2, `retired --force-integration must fail loud, got status ${r.status}: ${r.stdout}${r.stderr}`);
+    assert.match(r.stderr, /RETIRED/);
+    assert.match(r.stderr, /A6 rebase-rerun loop/);
+    assert.equal(r.stdout.trim(), "", "retired flag must NOT write a baseline to stdout");
   } finally {
     cleanup(dir);
   }
 });
 
-test("AC2 UNIFIED FORK SOURCE: --force-integration is REF-AWARE (single-line --develop master --integration master still outputs master)", () => {
-  const dir = makeTmp("force-integration-single");
+test("RETIRED UNIFIED FORK SOURCE: default path still decides develop for a disjoint candidate (no flag)", () => {
+  const dir = makeTmp("force-integration-disjoint-default");
   try {
     initGitRepo(dir);
-    writeTask(dir, "candidate", ["plugin/scripts/fork-baseline.ts"]);
+    // The unverified task on integration touches a different file than the candidate.
+    writeTask(dir, "unverified-one", ["packages/quay/src/serve.ts"]);
+    // Candidate touches fork-baseline.ts — DISJOINT from the unverified task ⇒ develop.
+    writeTask(dir, "candidate-disjoint", ["plugin/scripts/fork-baseline.ts"]);
 
-    const r = runNode([forkBaselineCli, "--root", dir, "--task", join(dir, "tasks", "candidate.md"), "--develop", "master", "--integration", "master", "--force-integration"]);
+    const r = runNode([forkBaselineCli, "--root", dir, "--task", join(dir, "tasks", "candidate-disjoint.md"), "--unverified", "unverified-one"]);
     assert.equal(r.status, 0, r.stderr);
-    assert.equal(r.stdout.trim(), "master", `--force-integration on a single-line workspace must output the configured ref (master), got: ${r.stdout}`);
+    assert.equal(r.stdout.trim(), "develop", `disjoint candidate without the retired flag must fork from develop, got: ${r.stdout}`);
   } finally {
     cleanup(dir);
   }

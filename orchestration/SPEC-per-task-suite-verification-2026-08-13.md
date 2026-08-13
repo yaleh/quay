@@ -457,6 +457,14 @@ develop 上的直接提交来源（近 6h）：outer 16 / tasks 13 / merge 8 / i
    ——**代价是 rebase 后要重跑套件**，这正是人 2026-08-13 裁定④「同意 Rebase-重跑循环的必要性」所买的东西。
    **阶段零的验收因此要同时证明这一点，不能只证基线变了。**
 
+   **阶段零已落地（`gap-worktree-fork-baseline-always-integration`，2026-08-13）**：
+   - `fork-baseline.ts` 的 **`--force-integration` 已退役**——现在传它 **exit 2**（fail-loud，不静默忽略）；
+     默认路径（依赖判定）保留给单线下游与 branch-model 测试。
+   - 派发 tick 文档（`fast-mode-loop-tick.md` 步骤 4 + 派发节）**fork 源一律 = `$FORK_BASELINE`（develop HEAD）**，
+     不再调 `fork-baseline.ts` 定分叉点；worktree 建立 = `git worktree add … "$FORK_BASELINE"`。
+   - 三层 tick-core 的 **A15④ 已同步**：分叉基线 = `$FORK_BASELINE`（新模型一律 develop）。
+   - 漂移吸收 = **A6 rebase-重跑循环**（fan-in 前 rebase 新 develop，冲突就地合并、套件重跑通过再合并）。
+
 0b. **验收**：新建一个 worktree，`git rev-list develop..<其分支>` 为空（或只含它自己的提交）。
     **必须在阶段二之前通过**——否则阶段二排空多少，派发就补回多少。
 
