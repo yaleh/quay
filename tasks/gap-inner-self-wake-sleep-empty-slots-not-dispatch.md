@@ -18,7 +18,8 @@ extra:
 ## Proposal
 
 **第三种成因（人 2026-08-13 裁定 AC53，与 CLAUDE.md 已记两种都不同）**：空槽+池有货+不派，
-不是 subagent 预算触顶，也不是 inner 占回合做主线程编辑，而是 **inner 在满池状态下自选长睡**。
+不是 subagent 预算触顶，也不是 inner 占回合做主线程编辑，而是 **inner 在满池状态下长睡**（
+「自选」只是表象——根因见下，它只是在照文档执行）。
 
 **实测（04:08Z 三读数同时取）**：
 ```
@@ -36,6 +37,25 @@ slot-refill   : should_refill=True  no_refill_reason=None
 **自举陷阱**：修本任务的工作会被本任务描述的缺陷本身推迟 ⇒ 必须外力打破
 （人 04:2xZ 直接指示 outer 显式驱动 inner）。**已实证**：04:23Z SendMessage 直接驱动 ⇒
 inner 立即派发 per-run namespace（驱动前 0 在飞 25min+、驱动后立即派）——AC53 负控制的第三实证。
+
+**根因更正（manager 2026-08-13，改写修法——旧结论「不是机制上限、是它自己选」错了一半）**：
+one-per-wake 不是 inner 没填满/偷懒，inner 派 1 条是**严格遵守文档**。上限存在，只是不在 recommended 那处。
+**同一份文档里两行互相矛盾 + 执行核转述模糊版 ⇒ 三处三种口径，谁执行谁自己挑一个**：
+
+| 位置 | 文本 |
+|---|---|
+| `plugin/loop/fast-mode-loop-tick.md:321`（A12 执行文本） | 「should_refill=true 且 recommended 非空 ⇒ 立即按步骤 4 派发 **1-2 条**」 |
+| `plugin/loop/fast-mode-loop-tick.md:340`（recommended 字段说明） | 「recommended = 建议立即派发的候选（**至多 slots_free 个**）」——**候选集怎么算**，不是派几个 |
+| `plugin/loop/fast-mode-tick-core.md:45`（执行核 A12） | 「按步骤 4 逐候选检查后派发」——**模糊版，不写数量** |
+
+`slot-refill.ts:34` 的 "up to slots_free" 同样只是候选集上限。**「外力推一次只填一个槽」不是 inner 偷懒，
+是它照做**（照 :321 的 1-2 条字面量）。
+
+**修法三件，缺一不可**：
+1. **定死一个口径**：应是「派到 `should_refill` 变假或达 `slots_free`」（不变式驱动）——不是「1-2 条」
+   这个凭空的字面量（**硬规则 4 推论二形状**：一个不依赖任何宿主/负载读数的写死数字）；
+2. **`:321` / `:340` / 执行核 `:45` 三处同步**——改一处等于没改，下一个照文档办事的人会把它改回去；
+3. 实现按①，并在**每次派发后重估**不变式（派一条 → 重跑 slot-refill → 仍 `should_refill ∧ 有槽` 则再派）。
 
 ## 判据四条（正本 orchestration/manager-phase-goal.md AC53）
 
@@ -66,10 +86,13 @@ inner 立即派发 per-run namespace（驱动前 0 在飞 25min+、驱动后立�
 - [ ] AC3: 心跳改追加式 jsonl（可回看）
 - [ ] AC4: 负控制——回放 04:02:52Z 真心跳+slot-refill 必须报红
 - [ ] AC5: 既有测试全绿；`--for-task` scoped 门绿
+- [ ] AC6: 派发口径三处同步定一——不变式驱动「派到 should_refill 变假或达 slots_free」，弃「1-2 条」字面量
+      （`plugin/loop/fast-mode-loop-tick.md:321/:340` + 执行核 `fast-mode-tick-core.md` A12 三处一致）
+- [ ] AC7: 每次派发后重估不变式（派一条 → 重跑 slot-refill → 仍 `should_refill ∧ 有槽` 则再派）
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全部勾上
+- [ ] AC1–AC7 全部勾上
 - [ ] 负控制样例贴出（04:02:52Z + 04:22Z 两样本回放报红）
 - [ ] 全量套件绿
 
@@ -77,4 +100,6 @@ inner 立即派发 per-run namespace（驱动前 0 在飞 25min+、驱动后立�
 
 - plugin/scripts/inner-wakeup-heartbeat-check.ts（或 inner 心跳写入方——五键落盘 + 追加式 jsonl）
 - plugin/scripts/slot-refill.ts（如需）
+- plugin/loop/fast-mode-loop-tick.md（:321「1-2 条」→ 不变式驱动 + :340 说明同步）
+- plugin/loop/fast-mode-tick-core.md + orchestration/fast-mode-tick-core.md（执行核 A12 口径同步）
 - tasks/gap-inner-self-wake-sleep-empty-slots-not-dispatch.md（自身）
