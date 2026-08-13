@@ -1,7 +1,7 @@
 ---
 id: gap-leak-residue-per-run-namespace-isolation
 title: tmux 残留无 per-run namespace——跨运行归属混 + 遗留累积（人 2026-08-13 方向；runner 级统一清理的前提）
-status: ready
+status: done
 labels:
   - gap
   - defect

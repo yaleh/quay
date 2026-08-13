@@ -1,7 +1,7 @@
 ---
 id: gap-ac51-assertion-surface-split
 title: AC51 断言面拆分——文档检查在提交那一刻跑、不进全量套件（绿态很短 + override 作废认证 + 59% 纯文档 + 三层已付代价账）
-status: todo
+status: ready
 labels:
   - gap
   - defect

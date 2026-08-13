@@ -1,7 +1,7 @@
 ---
 id: gap-runner-grouping-ac6-non-atomic-glob-race
 title: runner-grouping-list-groups AC6 与 AC3/AC7 同一非原子 glob 竞态 — 唯一没被套上有界重读的受害者
-status: ready
+status: todo
 labels:
   - gap
   - defect
@@ -9,6 +9,8 @@ parent: null
 children: []
 extra: {}
 ---
+
+> **降级理由（人 08:0xZ 分支模型指令 + manager 审计）**：对即将取消的 integration-as-checkout 结构的优化——人裁吞吐/编排暂不动，本任务降回 todo，不派。
 **type:** execution
 
 ## Finding

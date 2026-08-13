@@ -1,7 +1,8 @@
 ---
 id: gap-tests-assert-live-repo-state-break-idempotency
-title: 测试读活仓库状态断言字面量——mechanism-vitality-check.test.mjs:108 callCountAll===47 随历史漂移；可机械化判据
-status: ready
+title: 测试读活仓库状态断言字面量——mechanism-vitality-check.test.mjs:108 callCountAll===47
+  随历史漂移；可机械化判据
+status: done
 labels:
   - gap
   - defect

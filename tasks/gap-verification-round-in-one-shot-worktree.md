@@ -1,7 +1,7 @@
 ---
 id: gap-verification-round-in-one-shot-worktree
 title: 验证轮跑在一次性 worktree（--root <wt> --state-dir <主 .quay>）——结构性消守卫缺口/假证书/自造脏三条
-status: ready
+status: done
 labels:
   - gap
   - defect

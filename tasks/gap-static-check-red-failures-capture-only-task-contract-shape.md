@@ -1,7 +1,8 @@
 ---
 id: gap-static-check-red-failures-capture-only-task-contract-shape
-title: verification-round failures[] 在 static-check 红时只抓 task-contract 形状——真因（fail-closed 检查器）零条进记录
-status: ready
+title: verification-round failures[] 在 static-check 红时只抓 task-contract
+  形状——真因（fail-closed 检查器）零条进记录
+status: todo
 labels:
   - gap
   - defect
@@ -11,6 +12,8 @@ children: []
 extra:
   schema: execution
 ---
+
+> **降级理由（人 08:0xZ 分支模型指令 + manager 审计）**：对即将取消的 integration-as-checkout 结构的优化——人裁吞吐/编排暂不动，本任务降回 todo，不派。
 
 **type:** execution
 

@@ -1,7 +1,8 @@
 ---
 id: gap-suite-fix-logfile-not-in-guard-launchcmd-undefined-path
-title: execute-suite-fix launchCmd 模板把 logFile 缺值拼成字面量 undefined → 日志落根 + 每轮覆盖 + Fix agent 指向坏路径
-status: ready
+title: execute-suite-fix launchCmd 模板把 logFile 缺值拼成字面量 undefined → 日志落根 + 每轮覆盖 +
+  Fix agent 指向坏路径
+status: todo
 labels:
   - gap
   - defect
@@ -11,6 +12,8 @@ children: []
 extra:
   schema: execution
 ---
+
+> **降级理由（人 08:0xZ 分支模型指令 + manager 审计）**：对即将取消的 integration-as-checkout 结构的优化——人裁吞吐/编排暂不动，本任务降回 todo，不派。
 
 **type:** execution
 
