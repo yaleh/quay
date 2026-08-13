@@ -2869,3 +2869,17 @@ slot-refill   : should_refill=True  no_refill_reason=None
 
 **⚠️ 不覆盖**：不规定唤醒的实现形式（cron / `ScheduleWakeup` / 完成事件）——那是执行面的选择；
 不改 `effectiveCap`；不要求 inner 变成"永不休眠"（有 `no_refill_reason` 时长睡是对的）。
+
+---
+
+## 人 2026-08-13 05:5xZ 两条裁定（落进 AC46 / 关闭 touches 方向）
+
+1. **动态冲突（touches 与在飞重叠）只延后，不退回 todo** —— 与 AC46「ready 静态语义」一致：
+   ready 的含义不得依赖"此刻在飞什么"。已有原语 `deferred`（`slot-refill` 已在输出），不新造。
+2. **「一个在飞任务挡住 16/20」现在可以接受，不要把它搞得更复杂。**
+   ⇒ **关闭以下方向，不立 AC、不派任务**：①裸目录一律拒（去掉 `bare-dir-uncertain-touch` 的 uncertain 条件）
+   ③区域级正交（同文件不同函数可并行）。**证据已记在 tick-log 05:4xZ，供将来重启该方向时直接取用，不重测。**
+   **仍然保留的只有一条，且它不靠吞吐理由成立**：**ready 池里有结构上不可派发的任务**——
+   无 `## Touches` ⇒ A15① `MISSING ⇒ 不派发` fail-closed ⇒ **永远出不去，却计入 pool**。
+   实测 7 条（2 条是 `QENG-5-DEMO-*` 门引擎夹具，另 5 条是真任务）。
+   **这违反 AC46「ready 自足」本身，与冲突/吞吐无关**，处置=退回 todo 补 Touches，用已有 `retreat`，无新机制。
