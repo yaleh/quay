@@ -120,6 +120,31 @@ test('AC1/AC4 — derived-set tests all pass ⇒ laydown_set_green: green, exit 
   } finally { cleanup(fx); }
 });
 
+test('AC1 early-red immunity — a RED shared .quay/full-suite-state.json in the fixture root does NOT flip the laydown gate (the cold-start gate never reads the suite state)', () => {
+  // gap-streaming-red-cascade-amplifies-failures-array AC1/AC4 — round 130 mis-attributed a cascade
+  // failure to this file; the cold-start gate (laydown-set-check.sh) reads ONLY the derived laydown
+  // set's test results, never `.quay/full-suite-state.json`. A red shared state in the fixture root
+  // (the round-130 early-red shape) must leave a green derived set green — the gate is immune to
+  // cascade by construction (its AC1 asserts "铺什么验什么", not "整个套件绿").
+  const fx = makeFixture();
+  try {
+    writeFixtureFiles(fx, {
+      skillRefs: ['plugin/scripts/fake-a.sh'],
+      loopRefs: ['plugin/scripts/fake-b.ts'],
+      tests: { 'fake-a.test.mjs': PASSING_TEST, 'fake-b.test.mjs': PASSING_TEST },
+    });
+    // Simulate the early-red shared state the runner writes mid-round (state=red + finishedAt null).
+    fs.mkdirSync(path.join(fx, '.quay'), { recursive: true });
+    fs.writeFileSync(path.join(fx, '.quay', 'full-suite-state.json'),
+      JSON.stringify({ state: 'red', reason: 'failed', finishedAt: null, failures: [{ file: 'plugin/test/checker-cost.test.mjs' }] }, null, 2),
+      'utf8');
+    const r = runHelper(['--root', fx, '--json']);
+    assert.equal(r.status, 0, `green fixture must stay green even with a red shared state:\n${r.stdout}\n${r.stderr}`);
+    const j = JSON.parse(r.stdout);
+    assert.equal(j.laydown_set_green, 'green', 'the laydown gate verdict is independent of the shared suite-state (cascade-immune)');
+  } finally { cleanup(fx); }
+});
+
 test('AC4 positive control — a FAILING derived-set test ⇒ red, exit 1 (blocks cold-start)', () => {
   const fx = makeFixture();
   try {

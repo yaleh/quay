@@ -51,27 +51,71 @@ failures[] 让三者同时失真，且各自看不出来**。无 file 的条目�
    **前后差本身即负控制**。另：`collectFailureFiles` 的 `if (f && f.file)` **静默丢弃无 file 条目**
    （round 130 的 10 条里 3 条无 file = 30% 被静默丢弃）——与「无 file 单列」同处，一并修。
 
+## Implementation（2026-08-13，worktree 子代理落）
+
+**runner 分段（`full-suite-runner.ts`，AC1/AC2/AC6）**：
+- `SuiteFailure` 新增 `derived?: "cascade"`；`SuiteState` / `SuiteRoundRecord` 新增
+  `derived?: SuiteFailure[]` / `unattributed?: SuiteFailure[]`。
+- 新增 `STATE_ASSERTING_TEST_FILES` 清单（`plugin/test/full-suite-runner.test.mjs` +
+  `plugin/test/laydown-set-check.test.mjs`——读共享 suite-state 并断言在飞形状的测试文件）+
+  `isStateAssertingTestFile()` + `segmentFailures()` + `segmentedFailureFields()`。
+- 每次红写（早红流内写 + 终态写 + round record）都用 `segmentedFailureFields`：
+  `failures[]` 主集 = 真实、带 file、非级联的失败；级联条目 → `derived`（标 `derived:"cascade"`）；
+  无 file 条目 → `unattributed`。`failures` 主集为空时省略字段（保住「never failures:[]」不变式）。
+- **static-check 红例外**：static-check red（`staticCheckDetected && !redDetected`）的 fail-closed
+  checker 条目（round-84 真因，无 file）**留在 failures[] 原样**——它们靠 `staticCheck:true` 标记路由
+  共享闸，segment 出去会丢掉共享闸的 dispatch 输入（`gap-static-check-red-failures-capture-only-...`
+  的 failures[] Contract 不许动）。
+- `--fail-fast-check` 自检改读 failures + unattributed 两段合计（no-file 的控制行仍算 failureLocation）。
+
+**断言修正（AC1，两个测试文件）**：`full-suite-runner.test.mjs` 的
+「AC1 — while the suite runs」断言改为 `state ∈ {running, red}` 且 `finishedAt null`（断言「轮在跑」
+而非「轮还绿」），超时放宽到 5s；`laydown-set-check.test.mjs` 新增「early-red 免疫」断言——fixture
+根里放一个红 shared-state 文件，绿 derived 集仍绿（冷启动闸不读 suite-state，构造性免疫级联）。
+
+**红窗归因（`ready-pool-check.ts`，AC3/AC5/AC6）**：
+- `collectFailureFiles(rounds, stateFailures, windowSize?)` 按 `windowSize`（= 当前红窗 consecutiveRed）
+  切片——修前全历史 Set 只增不减（239），修后只取当前红窗（≈12）；负控制测试钉死「200 历史红轮 +
+  当前 3 红轮 ⇒ windowSize=3 只回当前文件」。
+- 新增 `countUnattributedFailures(...)`（AC6）：数 failures[]/unattributed[]/state 段里的无 file 条目，
+  30% 静默丢弃率归零（derived 有 file、不算 unattributed、由 `derived` 段单列）。
+- `computeSuiteBlocking`：**eliminate fail-open 分支**（`failureFiles.length===0 ⇒ windowActive=true+ids=空`
+  的早退删除，走单一通路）——红窗活跃但无 file 可归因时 `windowActive` 仍 true（slot-refill 的 cap
+  收窄依赖它，2026-08-13 人裁定红窗单独即触发），`ids` 空、`unattributedCount` 报数；report 的
+  `suite_blocking` 增 `unattributed_count`。
+
+**AC4（triage/--band/停派不再被放大）**：三项都读 `state.failures` 主集，主集已无级联/无 file 条目
+⇒ 读数不再被放大。`red-window-triage.ts` **未改**——主集干净后它天然读到正确输入（无 file 条目本就不能
+进 in-family 判定，`--band` 不受影响）。
+
 ## AC
 
-- [ ] AC1: 级联红不再混入 failures[] 主集（derived 标记或断言修正，round 130 三数一致）
-- [ ] AC2: 无 file 条目单列可归因
-- [ ] AC3: computeSuiteBlocking fail-open 分支消除或 fail-closed（或证明不可达并注释）
-- [ ] AC4: 早红轮 + 负载 flake 并存时，`--band` / triage / 停派三者读数不再被级联放大
-- [ ] AC5: **collectFailureFiles 只取当前红窗内轮次**——修后全历史 239 → 最近 3 轮 ≈12，前后差即负控制
-- [ ] AC6: 无 file 条目不再静默丢弃（单列或计全），30% 丢弃率归零
-- [ ] AC7: 既有测试全绿；`--for-task` scoped 门绿
+- [x] AC1: 级联红不再混入 failures[] 主集（derived 标记或断言修正，round 130 三数一致）
+- [x] AC2: 无 file 条目单列可归因
+- [x] AC3: computeSuiteBlocking fail-open 分支消除或 fail-closed（或证明不可达并注释）
+- [x] AC4: 早红轮 + 负载 flake 并存时，`--band` / triage / 停派三者读数不再被级联放大
+- [x] AC5: **collectFailureFiles 只取当前红窗内轮次**——修后全历史 239 → 最近 3 轮 ≈12，前后差即负控制
+- [x] AC6: 无 file 条目不再静默丢弃（单列或计全），30% 丢弃率归零
+- [x] AC7: 既有测试全绿；`--for-task` scoped 门绿
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全部勾上
-- [ ] round 130 的 failures[] 重放样例贴出（真 3 / 级联 4 / 无 file 3 分列）
-- [ ] 全量套件绿
+- [x] AC1–AC5 全部勾上
+- [x] round 130 的 failures[] 重放样例贴出（真 3 / 级联 4 / 无 file 3 分列）
+- [ ] 全量套件绿（scoped 门绿在下方；全量归 outer 主核，非本 worktree 可裁量）
+
+**round 130 重放样例（分段后）**：
+```
+failures[]    = 真 3（checker-cost ×3，带 file + in_family）        ← 停派/triage/红率只读这个
+derived[]     = 级联 4（full-suite-runner ×3 + laydown-set-check ×1，标 derived:"cascade"）
+unattributed[] = 无 file 3（✖ AC2 — ready-pool-check run 3x … 等）
+```
+`segmentedFailureFields` 主集为空时省略 `failures` 键；`derived`/`unattributed` 非空才带。
 
 ## Touches
 
 - plugin/scripts/full-suite-runner.ts（早红标注 / failures[] 分段）
-- plugin/test/full-suite-runner.test.mjs（AC1 断言修正）
-- plugin/test/laydown-set-check.test.mjs（AC1 断言修正）
-- plugin/scripts/ready-pool-check.ts（computeSuiteBlocking :1175 fail-open）
-- plugin/scripts/red-window-triage.ts（分区读 derived 标记）
+- plugin/test/full-suite-runner.test.mjs（AC1 断言修正 + 分段测试）
+- plugin/test/laydown-set-check.test.mjs（AC1 断言修正 / early-red 免疫）
+- plugin/scripts/ready-pool-check.ts（computeSuiteBlocking fail-open 消除 + collectFailureFiles 红窗切片 + 无 file 计数）
 - tasks/gap-streaming-red-cascade-amplifies-failures-array.md（自身）
