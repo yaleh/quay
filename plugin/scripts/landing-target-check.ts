@@ -128,8 +128,16 @@ export function branchSet(root: string): Set<string> {
  * AC2 — forward branch from the two-line relation, reading the host:
  *   develop..integration==0 (integration ⊆ develop) ⇒ develop; integration..develop==0 ⇒ integration;
  *   both==0 (equal refs) ⇒ develop (the two-line default); neither ⇒ diverged (invariant broken).
+ * AC48 (2026-08-13) — integration branch RETIRED: the two-line model is retired in favor of single-line
+ * develop (per-task verification forks from develop and merges back). When the integration ref no
+ * longer exists, the two-line relation cannot be computed and the forward branch is trivially develop
+ * (single-line). This is a MODEL MIGRATION read off the host, not a hardcoded name: a downstream that
+ * still HAS the integration branch keeps the two-line formula below.
  */
 export function forwardBranch(root: string): ForwardResult {
+  if (!branchSet(root).has("integration")) {
+    return { forward: "develop", model: "single-line", evidence: "integration retired (AC48) — single-line develop-forward" };
+  }
   const di = gitRevListCount(root, "develop..integration");
   const id = gitRevListCount(root, "integration..develop");
   if (di === null || id === null) {
