@@ -445,31 +445,33 @@ test("AC5/clean-tree DELTA: pre-existing dirt is excluded; only newly-added item
 test("AC5/tmux-leak-scan DELTA: pre-existing matches are excluded; only NEW matches leak", () => {
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "test-tmux-leak-delta-"));
   const SCAN_SH = path.join(REPO_ROOT, "plugin", "scripts", "tmux-leak-scan.sh");
-  // The DELTA test's leak dirs must live under the SAME base the scan covers: the per-run
-  // namespace root when QUAY_RUN_ID is set (the runner's namespaced mode scans only that subtree),
-  // else the legacy os.tmpdir() prefixes. A /tmp/skv-* dir is invisible to a namespaced scan
-  // (round 126 AC5/tmux-leak-scan DELTA failure). Mirrors makeTmpDirPath in tmux-leak-scan.test.mjs.
+  // The DELTA test's leak dirs live under a TEST-LOCAL scope subroot (--scope), so the scan covers
+  // ONLY this test's simulated leakage — the shared /tmp/quay-run-<runId>/ root is scanned by every
+  // leak-simulation test in the suite and they cross-flagged each other's fixtures (round 131).
   const deltaBase = process.env.QUAY_RUN_ID
     ? path.join(os.tmpdir(), `quay-run-${process.env.QUAY_RUN_ID}`)
     : os.tmpdir();
   fs.mkdirSync(deltaBase, { recursive: true });
-  const preDir = path.join(deltaBase, "skv-delta-test-preexisting");
-  const newDir = path.join(deltaBase, "skv-delta-test-newleak");
+  const scope = path.join(deltaBase, `leaktest-${process.pid}-${Math.random().toString(36).slice(2, 8)}`);
+  fs.mkdirSync(scope, { recursive: true });
+  const preDir = path.join(scope, "skv-delta-test-preexisting");
+  const newDir = path.join(scope, "skv-delta-test-newleak");
+  const runScan = (mode) => spawnSync("bash", [SCAN_SH, "--scope", scope, mode, scratch], { encoding: "utf8", timeout: 30_000 });
   try {
     // PASS: a pre-existing match is excluded (recorded in the before-run snapshot).
     fs.mkdirSync(preDir, { recursive: true });
-    let res = spawnSync("bash", [SCAN_SH, "--snapshot", scratch], { encoding: "utf8", timeout: 30_000 });
+    let res = runScan("--snapshot");
     assert.equal(res.status, 0, `snapshot must succeed:\n${res.stdout}\n${res.stderr}`);
-    res = spawnSync("bash", [SCAN_SH, "--check", scratch], { encoding: "utf8", timeout: 30_000 });
+    res = runScan("--check");
     assert.equal(res.status, 0, `a pre-existing match must not trip the DELTA check:\n${res.stdout}\n${res.stderr}`);
     assert.match(res.stdout, /no NEW residual test tmux servers\/dirs/);
 
     // RED (negative control): a NEW match after the snapshot IS this run's leak → FAIL, listing
     // the new match but NOT the pre-existing one.
-    res = spawnSync("bash", [SCAN_SH, "--snapshot", scratch], { encoding: "utf8", timeout: 30_000 });
+    res = runScan("--snapshot");
     assert.equal(res.status, 0);
     fs.mkdirSync(newDir, { recursive: true });
-    res = spawnSync("bash", [SCAN_SH, "--check", scratch], { encoding: "utf8", timeout: 30_000 });
+    res = runScan("--check");
     assert.equal(res.status, 1, `a NEW match after the snapshot must FAIL:\n${res.stdout}\n${res.stderr}`);
     assert.match(res.stderr, /NEW residual test tmux servers\/dirs/);
     assert.match(res.stderr, /skv-delta-test-newleak/);
@@ -477,12 +479,13 @@ test("AC5/tmux-leak-scan DELTA: pre-existing matches are excluded; only NEW matc
 
     // fail-closed: --check with no snapshot.
     fs.rmSync(path.join(scratch, ".quay", "tmux-leak-scan.snapshot"), { force: true });
-    res = spawnSync("bash", [SCAN_SH, "--check", scratch], { encoding: "utf8", timeout: 30_000 });
+    res = runScan("--check");
     assert.equal(res.status, 1, `--check without a snapshot must fail closed:\n${res.stdout}\n${res.stderr}`);
     assert.match(res.stderr, /no before-run snapshot/);
   } finally {
     fs.rmSync(newDir, { recursive: true, force: true });
     fs.rmSync(preDir, { recursive: true, force: true });
+    fs.rmSync(scope, { recursive: true, force: true });
     fs.rmSync(scratch, { recursive: true, force: true });
   }
 });
