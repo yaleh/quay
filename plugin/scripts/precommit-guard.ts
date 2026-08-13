@@ -1,6 +1,20 @@
 #!/usr/bin/env node
-// precommit-guard.ts — 提交那一刻的守卫：① 文档类检查（AC51 断言面拆分）；② 拒绝「轮 running
-// 且触及断言面」的提交（覆盖全部写入者）。
+// precommit-guard.ts — 写入那一刻的守卫：① 文档类检查（AC51 断言面拆分）；② 拒绝「轮 running
+// 且触及断言面」的写入（覆盖全部写入者）。
+//
+// MERGE-PATH COVERAGE (gap-precommit-guard-merge-bypass, 2026-08-13): `git merge --no-ff` does NOT
+// fire the pre-commit hook (git runs pre-commit only from git-commit(1)) — so assertion-surface files
+// landed via a merge bypassed the guard entirely (inner's empirical test: 2 commits → 2 fires /
+// 1 merge → 0 fires; round 123's idempotency fan-in merge was a live sample — the guard never saw it).
+// The fix is the PRE-MERGE-COMMIT hook (--install-hook writes BOTH pre-commit and pre-merge-commit):
+// git-merge(1) runs pre-merge-commit for a `--no-ff` merge after carrying it out and BEFORE creating
+// the merge commit, and it can abort the merge by exiting non-zero. At that moment the index holds the
+// merged result, so the SAME `stagedFiles()` read (`git diff --cached --name-only`) is the merge's
+// incoming file set — judge() needs no new write-path logic, only the --merge flag for message/ledger
+// clarity. A blocked merge leaves MERGE_HEAD + staged changes (git does NOT auto-abort); the caller
+// (e.g. the A6 fan-in failure path) must `git merge --abort`. Fast-forward merges create no merge
+// commit, so pre-merge-commit does not fire for them — the guard's merge coverage is scoped to the
+// --no-ff family (the fan-in convention, round-123 shape).
 //
 // ② 的实证（2026-08-12，三独立支撑，manager 判定）：「round 期间零提交」约定守不住：
 //   ① 约定无产物（C17）——round 60 约定后 26s 即破（外层 47023142）；
@@ -35,17 +49,21 @@
 //
 // 使用（本仓库路径）：
 //   node --no-warnings --experimental-strip-types plugin/scripts/precommit-guard.ts [--root <dir>]
-//       [--allow-dirty-round] [--install-hook] [--uninstall-hook] [--json] [--help]
-//   --install-hook     把 <git-dir>/hooks/pre-commit 写成调用本守卫的 shim（幂等）
-//   --uninstall-hook   移除 <git-dir>/hooks/pre-commit 中的本守卫 shim（幂等）
-//   --json             机器可读输出（{verdict, reason, state, assertionSurface, staged}）
+//       [--allow-dirty-round] [--install-hook] [--uninstall-hook] [--json] [--merge] [--help]
+//   --install-hook     把 <git-dir>/hooks/pre-commit 与 <git-dir>/hooks/pre-merge-commit 写成调用
+//                      本守卫的 shim（幂等；pre-merge-commit 带 --merge）——commit 与 merge 两个
+//                      写路径同覆盖（merge 路径：gap-precommit-guard-merge-bypass）
+//   --uninstall-hook   移除上述两个钩子中的本守卫 shim（幂等）
+//   --json             机器可读输出（{verdict, reason, state, assertionSurface, staged, merge}）
+//   --merge            本轮判定在 merge 上下文（pre-merge-commit 钩子传此 flag；消息与拒绝台账
+//                      标注 kind=merge，判定逻辑与 commit 完全一致）
 //   --allow-dirty-round / QUAY_ALLOW_DIRTY_ROUND=1  显式覆盖 B（记录可追责；A 仍生效）
 //
 // 退出码：0 = 放行；1 = 拒（doc-check-failed / running+断言面 / fail-loud 缺失/null）；
 // 2 = 用法/环境错。
 //
-// 作为 pre-commit 钩子运行时 git 不传参数，--allow-dirty-round 只能经
-// QUAY_ALLOW_DIRTY_ROUND=1 环境变量显式给出（git commit 前设置）。
+// 作为钩子运行时 git 不传参数，--allow-dirty-round 只能经
+// QUAY_ALLOW_DIRTY_ROUND=1 环境变量显式给出（git commit / git merge 前设置）。
 //
 // <!-- enforcement: plugin/scripts/precommit-guard.ts -->
 
@@ -347,9 +365,12 @@ export function readSuiteState(root: string): { stateFile: string | null; data: 
 
 export function judge(
   root: string,
-  opts: { allowDirtyRound: boolean; staged?: string[] } = { allowDirtyRound: false },
+  opts: { allowDirtyRound: boolean; staged?: string[]; merge?: boolean } = { allowDirtyRound: false },
 ): Verdict {
   const allowOverride = opts.allowDirtyRound;
+  // merge 上下文（pre-merge-commit 钩子 / --merge）：判定逻辑与 commit 完全一致（stagedFiles() 在
+  // pre-merge-commit 时刻读 git diff --cached = merge 引入的文件集），仅消息与台账标注 kind 区分。
+  const mergeContext = opts.merge === true;
 
   const { stateFile, data } = readSuiteState(root);
   const surface = resolveAssertionSurface(root);
@@ -456,16 +477,17 @@ export function judge(
   if (touchedAssertion.length > 0) {
     const startedAt = data.startedAt ?? "unknown";
     const runId = data.runId ?? "unknown";
+    const kind = mergeContext ? "merge" : "commit";
     // 拒绝记录：append 一行到 .quay/precommit-guard-rejections.jsonl（runtime-state，gitignored）。
     // 写失败不阻拒绝（append 是观测记录，不是闸门本体——fail-closed 冲突在此处单向：拒必须发生）。
-    appendRejection(root, { at: new Date().toISOString(), runId, startedAt, files: touchedAssertion, verdict: "reject" });
+    appendRejection(root, { at: new Date().toISOString(), runId, startedAt, files: touchedAssertion, verdict: "reject", kind });
     return {
       verdict: "reject",
       reason: "running-round-assertion-surface",
       message:
         `pre-commit 守卫：一轮正在跑（state=${data.state}, finishedAt=${data.finishedAt ?? "null"}, runId=${runId}, startedAt=${startedAt}），` +
-        `本次提交触及断言面文件（${touchedAssertion.length} 个），会使该轮结论不可用。\n` +
-        "用 --allow-dirty-round 显式覆盖，或等终态（green/red）后再提交。\n" +
+        `本次${kind}触及断言面文件（${touchedAssertion.length} 个），会使该轮结论不可用。\n` +
+        `用 --allow-dirty-round 显式覆盖，或等终态（green/red）后再${mergeContext ? "merge" : "提交"}。\n` +
         "拒绝文件：" + touchedAssertion.slice(0, 10).join(", ") +
         (touchedAssertion.length > 10 ? ` …(+${touchedAssertion.length - 10})` : "") + "\n" +
         preflightChecklist(),
@@ -498,7 +520,7 @@ export function judge(
  * 拒绝记录：append 一行到 <root>/.quay/precommit-guard-rejections.jsonl。
  * 纯观测（runtime-state，gitignored）——写失败绝不影响闸门判定（append 失败 ⇒ 忽略，拒绝照常发生）。
  */
-export function appendRejection(root: string, rec: { at: string; runId: string; startedAt: string; files: string[]; verdict: "reject" }): void {
+export function appendRejection(root: string, rec: { at: string; runId: string; startedAt: string; files: string[]; verdict: "reject"; kind?: "commit" | "merge" }): void {
   try {
     const dir = path.join(root, ".quay");
     fs.mkdirSync(dir, { recursive: true });
@@ -536,10 +558,35 @@ function hookShim(root: string): string {
   ].join("\n");
 }
 
+/**
+ * The pre-merge-commit hook shim (merge-path coverage, gap-precommit-guard-merge-bypass). git runs
+ * pre-merge-commit for `git merge --no-ff` after carrying out the merge and BEFORE creating the merge
+ * commit (pre-commit is NOT fired for merges — git-merge does not go through git-commit's hook path;
+ * the task's empirical test: 2 commits → 2 fires / 1 merge → 0 fires). At that moment the index holds
+ * the merged result, so the guard's stagedFiles() read (`git diff --cached`) IS the merge's incoming
+ * file set — the SAME judge() logic applies; `--merge` only relabels the message/ledger kind.
+ */
+export function preMergeCommitShim(root: string): string {
+  return [
+    "#!/usr/bin/env bash",
+    `# ${HOOK_FINGERPRINT} — installed by plugin/scripts/precommit-guard.ts --install-hook`,
+    "# pre-merge-commit guard: ① runs the DOC-CLASS checks at merge time (AC51 断言面拆分);",
+    "# ② rejects MERGES while a suite round is running AND the merge lands code-class assertion-surface",
+    "# files (git merge --no-ff does NOT fire pre-commit — this hook is the merge-path coverage,",
+    "# gap-precommit-guard-merge-bypass; round 123's mid-round fan-in merge was the live sample).",
+    "# Round-window override (recorded, not silent): QUAY_ALLOW_DIRTY_ROUND=1 git merge …",
+    "# (the override does NOT bypass doc-check failures — those are content errors, not round risk).",
+    'ROOT="$(git rev-parse --show-toplevel)"',
+    `exec node --no-warnings --experimental-strip-types "$ROOT/plugin/scripts/${HOOK_FINGERPRINT}" --root "$ROOT" --merge`,
+    "",
+  ].join("\n");
+}
+
 export function installHook(root: string): string {
   const gd = gitDir(root);
   const hooksDir = path.join(gd, "hooks");
   fs.mkdirSync(hooksDir, { recursive: true });
+  // pre-commit (commit write-path) — the original guard hook (idempotent; refuses unrelated hook).
   const hookPath = path.join(hooksDir, "pre-commit");
   const shim = hookShim(root);
   if (fs.existsSync(hookPath) && !fs.readFileSync(hookPath, "utf8").includes(HOOK_FINGERPRINT)) {
@@ -549,37 +596,58 @@ export function installHook(root: string): string {
     );
   }
   fs.writeFileSync(hookPath, shim, { mode: 0o755 });
+  // pre-merge-commit (merge write-path — gap-precommit-guard-merge-bypass): git merge --no-ff does
+  // NOT fire pre-commit, so the merge path needs its own hook. Same guard, --merge context.
+  const mergeHookPath = path.join(hooksDir, "pre-merge-commit");
+  const mergeShim = preMergeCommitShim(root);
+  if (fs.existsSync(mergeHookPath) && !fs.readFileSync(mergeHookPath, "utf8").includes(HOOK_FINGERPRINT)) {
+    throw new Error(
+      `pre-existing pre-merge-commit hook at ${mergeHookPath} does not carry the ${HOOK_FINGERPRINT} fingerprint; ` +
+        "refusing to overwrite. Merge manually.",
+    );
+  }
+  fs.writeFileSync(mergeHookPath, mergeShim, { mode: 0o755 });
   return hookPath;
 }
 
 export function uninstallHook(root: string): { removed: boolean; hookPath: string } {
   const gd = gitDir(root);
-  const hookPath = path.join(gd, "hooks", "pre-commit");
-  if (fs.existsSync(hookPath)) {
-    const content = fs.readFileSync(hookPath, "utf8");
-    if (content.includes(HOOK_FINGERPRINT)) {
-      fs.rmSync(hookPath, { force: true });
-      return { removed: true, hookPath };
+  const hooksDir = path.join(gd, "hooks");
+  let removed = false;
+  // Remove BOTH the pre-commit and pre-merge-commit guard shims (idempotent; a hook that does not
+  // carry the fingerprint is left untouched — never clobber an unrelated hook).
+  for (const name of ["pre-commit", "pre-merge-commit"]) {
+    const hookPath = path.join(hooksDir, name);
+    if (fs.existsSync(hookPath)) {
+      const content = fs.readFileSync(hookPath, "utf8");
+      if (content.includes(HOOK_FINGERPRINT)) {
+        fs.rmSync(hookPath, { force: true });
+        removed = true;
+      }
     }
   }
-  return { removed: false, hookPath };
+  return { removed, hookPath: path.join(hooksDir, "pre-commit") };
 }
 
 // ── CLI ───────────────────────────────────────────────────────────────────────────────────────────────
 
-const USAGE = `precommit-guard.ts — 提交那一刻的守卫：① 文档类检查（AC51 断言面拆分）；② 拒绝「轮
-running 且触及（代码类）断言面」的提交（覆盖全部写入者）
+const USAGE = `precommit-guard.ts — 写入那一刻的守卫：① 文档类检查（AC51 断言面拆分）；② 拒绝「轮
+running 且触及（代码类）断言面」的提交/merge（覆盖全部写入者；merge 路径经 pre-merge-commit 钩子，
+gap-precommit-guard-merge-bypass）
 
 用法:
   node --experimental-strip-types plugin/scripts/precommit-guard.ts [--root <dir>]
-       [--allow-dirty-round] [--install-hook] [--uninstall-hook] [--json] [--help]
+       [--allow-dirty-round] [--install-hook] [--uninstall-hook] [--json] [--merge] [--help]
 
 参数:
-  --install-hook      把 <git-dir>/hooks/pre-commit 写成调用本守卫的 shim（幂等）
-  --uninstall-hook    移除 <git-dir>/hooks/pre-commit 中的本守卫 shim（幂等）
+  --install-hook      把 <git-dir>/hooks/pre-commit 与 <git-dir>/hooks/pre-merge-commit 写成调用
+                      本守卫的 shim（幂等；pre-merge-commit 带 --merge）
+  --uninstall-hook    移除上述两个钩子中的本守卫 shim（幂等）
+  --merge             本轮判定在 merge 上下文（pre-merge-commit 钩子传此 flag；判定逻辑与 commit
+                      一致，仅消息与台账 kind 标注）
   --allow-dirty-round 显式覆盖轮窗口门 B（等价 QUAY_ALLOW_DIRTY_ROUND=1；有记录可追责；
                      不覆盖文档类检查 A——那是内容错误，不是轮风险）
-  --json              机器可读输出（{verdict, reason, message, docCheckOutput, ...}）
+  --json              机器可读输出（{verdict, reason, message, docCheckOutput, merge, ...}）
   --help              本帮助
 
 退出码: 0=放行 1=拒（doc-check-failed / running+断言面 / fail-loud 缺失/null） 2=用法/环境错`;
@@ -595,6 +663,7 @@ function main(): number {
   let json = false;
   let install = false;
   let uninstall = false;
+  let mergeContext = false;
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
     if (a === "--root") {
@@ -607,6 +676,8 @@ function main(): number {
       install = true;
     } else if (a === "--uninstall-hook") {
       uninstall = true;
+    } else if (a === "--merge") {
+      mergeContext = true;
     } else {
       console.error(`unknown arg: ${a}\n\n${USAGE}`);
       return 2;
@@ -644,7 +715,7 @@ function main(): number {
 
   let verdict: Verdict;
   try {
-    verdict = judge(root, { allowDirtyRound });
+    verdict = judge(root, { allowDirtyRound, merge: mergeContext });
   } catch (e) {
     console.error(`precommit-guard: internal error: ${(e as Error).message}`);
     return 2;
@@ -666,6 +737,7 @@ function main(): number {
           override: verdict.override,
           registryMode: verdict.registryMode,
           docCheckOutput: verdict.docCheckOutput ?? null,
+          merge: mergeContext,
         },
         null,
         2,
