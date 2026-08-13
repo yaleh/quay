@@ -2687,6 +2687,19 @@ npm-pack-e2e [real-install]「tarball bin → dist/quay.js 缺失」：round 123
 1. **套件内零 git 调用**：`plugin/scripts/full-suite-runner.ts` + `scripts/test.sh` 中，
    `git` 的调用点数 = 0（当前：`readVerifiedCommit()` `:956`、`isGitWorktree()` `:990` 等，非零）。
    **commit / dirty / treeHash 的记录职责移交外层 wrapper。**
+   **⚠️ 判据1 于 2026-08-13 15:4xZ 由 A20 第①步查出【与后来的裁定冲突】，按下文改写。**
+   **冲突在哪**：本判据写于 per-task worktree 架构落地之前。此后人裁定的形态（AC42「验证跑在一次性
+   worktree」＋ AC49「每个改动在隔离环境自证」＋ 2 槽锁）**要求套件【自己】provision/teardown worktree、
+   并按 `git-common-dir` 定位锁文件** ⇒ 实测 runner 内 **12 处**、`test.sh` 内 **6 处** git 调用，其中
+   `git worktree add --detach`(:1392)、`git rev-parse --git-dir/--git-common-dir`(:1359/:1360)、teardown(:1408)
+   **全是【架构要求】** ⇒ **「零 git 调用」现在既不可能、也不该要——照它验会把一个按裁定做对的实现判成不合格。**
+   **⇒ 改为区分【VCS 知识】与【VCS 机制】**：
+   **禁止「知识」**——套件不得自行读取并写入**认证语义**字段：`verifiedCommit` / `terminalCommit` /
+   `treeMutatedMidRound` / dirty / treeHash（`:1253` 的 `git rev-parse HEAD` 属此类，`:360-376` 是其字段），
+   这些的记录职责移交外层 wrapper。
+   **允许「机制」**——provision/teardown 一次性 worktree、按 `git-common-dir` 定位单飞锁：
+   它们不构成"套件懂 VCS 语义"，只是"套件用 VCS 做隔离"，**正是 AC42/AC49 要求它做的事**。
+   取证：上述**认证语义字段**在 `full-suite-runner.ts` 的**产生点**数 = 0（按位置，引用/注释不算）。
 2. **测试仅操作自建临时仓**：任何测试文件中 git 调用的 `cwd`/`-C` 若解析到仓库根内、且不来自
    `mkdtemp`/`tmpdir` 家族 ⇒ 违规，**由一个机械检查器判定**（不是靠人扫）。
 
