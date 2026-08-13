@@ -1,7 +1,7 @@
 ---
 id: gap-spec11-retest-2h-nondegradation
 title: per-task 全量吞吐 ≥2h 不劣化重测——AC3b 门定死后停全局轮的最后一步
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
