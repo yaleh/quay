@@ -348,33 +348,16 @@ dev-tree 仍优先包根份——manager 角色 `claude`/`quay-manager` 两份�
 判据能机械回答的四问：**idle-watch 发事件?（#2/#3）cron 存在?（#4/#5）首轮 tick 留痕?（#6）
 家目录三件套齐?（#1）**——没有一条是「agent 说完成了」。
 
-## 7. 方法论来源（AC6）——SPEC-*.md 索引，不批量结晶
+## 7. 方法论来源（AC6）——SPEC 索引唯一正本 = 上文 "Methodology sources"，不批量结晶
 
-以下 17 份 SPEC（均在 `orchestration/` 目录下）是方法论来源，**逐个按需结晶，不批量**。本 SKILL 只列索引，不复制其内容：
-
-| 文件 | 主题 |
-|---|---|
-| `orchestration/SPEC-branching-model-integration-branch-2026-08-05.md` | 双线分支模型（已验证基线 + 待验证汇入点） |
-| `orchestration/SPEC-cold-start-one-liner.md` | 冷启动一条命令 |
-| `orchestration/SPEC-complete-delivery-surface-2026-08-05.md` | 完整交付面 |
-| `orchestration/SPEC-cut-the-waiting.md` | 削减等待 |
-| `orchestration/SPEC-inbox-service-2026-08-08.md` | 收件箱服务（agent 间通信信道） |
-| `orchestration/SPEC-instruments-behind-one-entry.md` | 仪器统一入口 |
-| `orchestration/SPEC-integration-architecture-2026-08-05.md` | 集成架构（汇入点 / 批量合并） |
-| `orchestration/SPEC-isolation-and-resource-governance-2026-08-05.md` | 隔离与资源治理 |
-| `orchestration/SPEC-manager-productization-2026-08-05.md` | manager 产品化（五约束 + 建造/运行归属） |
-| `orchestration/SPEC-methodology-as-a-deliverable.md` | 方法论作为交付物 |
-| `orchestration/SPEC-no-text-substitution-at-install.md` | 安装不做文本替换 |
-| `orchestration/SPEC-one-observer-two-surfaces.md` | 单观察者双面 |
-| `orchestration/SPEC-outer-liveness-productization.md` | outer 存活产品化 |
-| `orchestration/SPEC-quay-self-hosts-its-own-cold-start.md` | quay 自托管冷启动 |
-| `orchestration/SPEC-state-crystallization-2026-08-05.md` | 状态结晶 |
-| `orchestration/SPEC-suite-speed.md` | 套件速度 |
-| `orchestration/SPEC-typed-axes-and-standing-dynamics.md` | 类型化轴与常设动态 |
+SPEC-*.md 的索引**唯一正本**见上文 "Methodology sources" bullet list，逐个按需结晶，不批量。
+本节原有一张中文索引表，是同一份索引的**陈旧副本**（表头写死「17 份」，实盘数量随文件增删已漂移，
+而 AC6 只扫 `src.includes(spec)`、分不清「索引了一次」与「索引在陈旧副本里」⇒ 无任何检查报出），
+已于 2026-08-13 删除；不写数量字面量（硬规则 4 推论二）。各行的落点映射见删除提交。
 
 **引用约定**：本 SKILL 引用的 `orchestration/` 文件（REVIEW-cadence.md、manager-loop-tick.md、SPEC-*）
-是 quay 的参考文档，**不是 loop 机制交付物**——已在 `plugin/skills/init/SKILL.md` 声明为
-`reference-doc`（verify-referenced-landed 不变量：被引用的文件要么被铺设、要么被声明）。
+是 quay 的参考文档，**逐个按需结晶，不批量**，不是 loop 机制交付物——已在 `plugin/skills/init/SKILL.md`
+声明为 `reference-doc`（verify-referenced-landed 不变量：被引用的文件要么被铺设、要么被声明）。
 
 ---
 
