@@ -64,9 +64,12 @@ function famsOn(line) {
 // ── AC2: per-family positive/negative controls (the 承重条) ─────────────────────────────────────────
 
 test("AC2 family 1 (self-match): correct form 0 hits, error form MUST report", () => {
-  // Correct: `pgrep -xc`/`pgrep -x` exact match, or comm= exact match — no `-f` with an inline literal.
-  assert.deepEqual(famsOn("pgrep -xc node-MainThread"), []);
-  assert.deepEqual(famsOn("ps -e -o comm= | grep -cx node-MainThread"), []);
+  // Correct: `pgrep -xc`/`pgrep -x` exact match — no `-f` with an inline literal. A node comm
+  // literal (`pgrep -xc node-MainThread`) is NOT used as a correct-form example here — it is
+  // host-dependent (boheidc Node v24.19.0 comm=`MainThread` ⇒ 恒 0) and fires family 4 instead
+  // (gap-node-mainthread-comm-literal-host-dependent).
+  assert.deepEqual(famsOn("pgrep -xc bash"), []);
+  assert.deepEqual(famsOn("ps -e -o pid= -o comm= | awk '$2 == \"bash\"'"), []);
   // Error: `pgrep -f '<literal>'` — the query's own argv contains the pattern ⇒ self-match.
   assert.deepEqual(famsOn("pgrep -f 'quay.ts serve --host <ip>'"), [1]);
   assert.deepEqual(famsOn("pgrep -f \"session-liveness.sh\""), [1]);
@@ -74,12 +77,12 @@ test("AC2 family 1 (self-match): correct form 0 hits, error form MUST report", (
 
 test("AC2 family 2 (zero-hit-as-absent): correct form 0 hits, error form MUST report", () => {
   // Correct: a grep -c count used as a count (no zero-is-absence annotation), or a count with a
-  // positive control.
-  assert.deepEqual(famsOn("ps -e -o comm= | grep -cx node-MainThread"), []);
+  // positive control. A node comm literal is avoided here — it fires family 4 (host-dependent).
+  assert.deepEqual(famsOn("ps -e -o args= | grep -c '/bin/node'"), []);
   assert.deepEqual(famsOn("n=$(grep -c ok file); echo \"$n matches\""), []);
   // Error: grep -c count annotated/asserted as "0 = nothing" — zero-hit treated as absence.
   assert.deepEqual(famsOn("ps -e -o comm= | grep -cx node   # 0 = 没有 node 在跑"), [2, 4]);
-  assert.deepEqual(famsOn("grep -cx node && echo 0 命中 不存在"), [2]);
+  assert.deepEqual(famsOn("grep -cx node && echo 0 命中 不存在"), [2, 4]);
 });
 
 test("AC2 family 3 (pipe-then-$?): correct form 0 hits, error form MUST report", () => {
@@ -91,13 +94,18 @@ test("AC2 family 3 (pipe-then-$?): correct form 0 hits, error form MUST report",
   assert.deepEqual(famsOn("cmd | grep x && echo $?"), [3]);
 });
 
-test("AC2 family 4 (fragment-as-process-name): correct form 0 hits, error form MUST report", () => {
-  // Correct: comm= compared against the FULL comm (node-MainThread), or pgrep -xc exact match.
-  assert.deepEqual(famsOn("ps -e -o comm= | grep -cx node-MainThread"), []);
-  assert.deepEqual(famsOn("pgrep -xc node-MainThread"), []);
-  // Error: bare fragment (comm=node) never matches the real comm (node-MainThread).
+test("AC2 family 4 (fragment-or-host-dependent-literal-as-process-name): correct form 0 hits, error form MUST report", () => {
+  // Correct: a cmdline-based / dual-read cross-checked node count — no bare comm literal.
+  assert.deepEqual(famsOn("ps -e -o args= | grep -c '/bin/node'"), []);
+  assert.deepEqual(famsOn("comm=$(grep -cx node-MainThread) cmd=$(pgrep -cf 'bin/node') — 双读互校"), []);
+  // Error: bare fragment (comm=node) never matches the real comm.
   assert.deepEqual(famsOn("ps -e -o comm= | grep -cx node"), [4]);
   assert.deepEqual(famsOn("comm=node 永不匹配"), [4]);
+  // Error (gap-node-mainthread-comm-literal-host-dependent): even the "full" node comm literal is
+  // host/Node-version-dependent (boheidc Node v24.19.0 comm=`MainThread` ⇒ 恒 0) — a bare node
+  // comm-literal count WITHOUT a cmdline cross-check fires family 4.
+  assert.deepEqual(famsOn("ps -e -o comm= | grep -cx node-MainThread"), [4]);
+  assert.deepEqual(famsOn("pgrep -xc node-MainThread"), [4]);
 });
 
 test("AC2 family 5 (derived-view-as-real-time): correct form 0 hits, error form MUST report", () => {
@@ -165,8 +173,8 @@ test("AC2 CLI negative control: a fixture with all five CORRECT forms reports 0 
   writeSurface(
     dir,
     [
-      "pgrep -xc node-MainThread", // family 1 correct
-      "ps -e -o comm= | grep -cx node-MainThread # count matches the real comm", // 2+4 correct
+      "pgrep -xc bash", // family 1 correct (exact match, no self-match)
+      "ps -e -o args= | grep -c '/bin/node' # cmdline-based count, no bare comm literal", // 2+4 correct
       "echo \"$?\" | cat", // family 3 correct (read before pipe)
       "读 .quay/full-suite-state.json 的 startedAt 核对新鲜度", // family 5 correct
     ].join("\n"),

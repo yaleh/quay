@@ -6,7 +6,7 @@
 #
 # Both layers (inner loop's test.sh, outer loop's orchestrator-loop-tick) call this BEFORE a heavy
 # operation (a full test suite) instead of each layer eyeballing `load` and guessing. It reads
-# structural signals — `/proc/pressure/cpu`, `free -m` available, `pgrep -xc node-MainThread` —
+# structural signals — `/proc/pressure/cpu`, `free -m` available, node pids via cmdline —
 # prints numbers AND verdicts, and exits 0=GO / non-0=WAIT.
 #
 # Why PSI stays the PRIMARY signal (AC2): `/proc/pressure/cpu` `some avg10` measures "the fraction
@@ -26,7 +26,7 @@
 # Contract (from the task's ## Contract block):
 #   measure   cpu_stall   = /proc/pressure/cpu 的 some avg10 字段
 #   measure   mem_avail   = free -m 的 available 列 (MB)
-#   measure   heavy_procs = pgrep -xc node-MainThread 的计数
+#   measure   heavy_procs = node 进程数（cmdline 枚举，host 无关——不写字面量 comm）
 #   measure   loadavg     = /proc/loadavg 的 1-min 字段（过载窗口补充判据, gap-resource-gate-psi-does-not-capture-load-flake-driver）
 #   band      cpu_ok      = some avg10 < 60
 #   band      load_ok     = load < nproc × LOAD_OVER_FACTOR（默认 2）——过载窗口 WAIT
@@ -36,9 +36,11 @@
 #   control   人为把 cpu some avg10 压高（起 N 个 busy loop）⇒ gate 必须返回 WAIT
 #   control   注入 load ≥ nproc×2（RESOURCE_GATE_TEST_LOAD_OVERRIDE）⇒ gate 必须返回 WAIT
 #
-# AC4 — the node-process count uses `pgrep -xc node-MainThread` (exact `comm` match). NOT `pgrep -f`
-# (matches any cmdline containing "node", including the caller) and NOT `grep -x node` (Node's comm
-# is `node-MainThread`, so that spelling always returns 0 — this repo has stepped on both twice).
+# AC4 — the node-process count enumerates via CMDLINE (host-independent — the `node-MainThread` comm
+# literal is host/Node-version-dependent: boheidc Node v24.19.0 comm=`MainThread` ⇒ 恒 0). NOT
+# `pgrep -f` (matches any cmdline containing "node", including the caller) and NOT `grep -x node`
+# (a fragment — always returns 0; this repo has stepped on both twice). The comm literal survives
+# only as the dual-read self-check cross-count (count_comm_node_mainthread).
 #
 # AC10 — orphaned node processes (ppid=1 AND cwd ends with " (deleted)") are printed as a separate
 # line. They do NOT participate in the GO/WAIT verdict — but if they are never listed, they are
@@ -54,7 +56,7 @@
 #
 # CROSS-LAYER TOTAL BUDGET (gap-test-concurrency-cap-does-not-scope-nested-spawns AC1, the A face):
 # the gate REPORTS the same shared total-process-budget authority
-# (plugin/scripts/process-budget.sh — total_budget = nproc, in_use = node-MainThread procs across
+# (plugin/scripts/process-budget.sh — total_budget = nproc, in_use = node procs across
 # ALL worktrees) that scripts/test.sh's default_concurrency_formula and cap-from-gate.ts consume.
 # A worktree's full-suite caller and the outer runner therefore see the shared budget numbers, not a
 # per-layer read. Fail-open: an unreadable authority prints `unreadable` rather than wedging the gate.
@@ -167,23 +169,60 @@ read_loadavg() {
   awk '{print $1}' /proc/loadavg
 }
 
-# real node process count — exact `comm` match (AC4).
+# list_node_cmdline_pids — enumerate node pids by CMDLINE, NOT a comm literal.
+# (gap-node-mainthread-comm-literal-host-dependent) The `node-MainThread` comm literal is
+# HOST-DEPENDENT: boheidc (Node v24.19.0) reports comm=`MainThread`, so `pgrep -xc node-MainThread`
+# silently returns 0 there (measured: comm `node-MainThread`=0 while cmdline node candidates=64, the
+# real node count). A node process's cmdline argv[0] (the first `ps -o args=` field) is the node
+# binary (`node` or a path ending in `/node`) — stable across hosts/Node versions. The comm literal
+# survives ONLY as the dual-read self-check cross-count (count_comm_node_mainthread). Fail-open: a
+# pid that exited between the ps snapshot and use is simply not in the snapshot.
+list_node_cmdline() {
+  ps -ww -e -o pid= -o args= 2>/dev/null | awk '
+    {
+      exe = $2
+      if (exe == "node" || exe ~ /\/node$/) {
+        cmdline = substr($0, index($0, exe))
+        print $1 "\t" cmdline
+      }
+    }
+  '
+}
+
+list_node_cmdline_pids() {
+  list_node_cmdline | cut -f1
+}
+
+# count_comm_node_mainthread — the OLD comm-literal count (`node-MainThread`), kept ONLY as the
+# dual-read self-check cross-count. On hosts where Node's comm differs (boheidc comm=`MainThread`)
+# this returns 0 while cmdline sees node procs — the instrument-failure signal. "Reading the
+# relationship", not a hardcoded "correct" literal (CLAUDE.md hard rule 4 推论二).
+count_comm_node_mainthread() {
+  ps -e -o pid= -o comm= 2>/dev/null | awk '$2 == "node-MainThread" { c++ } END { print c+0 }'
+}
+
+# real node process count — CMDLINE-based enumeration (host-independent, AC2). The old
+# `pgrep -xc node-MainThread` comm literal is host/Node-version-dependent (boheidc comm=`MainThread`
+# ⇒ 恒 0) — gap-node-mainthread-comm-literal-host-dependent. The comm literal survives only as the
+# dual-read self-check cross-count.
 read_node_procs() {
-  pgrep -xc node-MainThread 2>/dev/null || echo 0
+  list_node_cmdline_pids | wc -l
 }
 
 # orphaned node processes: ppid=1 AND cwd ends with " (deleted)". Informational only (AC10).
+# Candidate pids from cmdline (host-independent — the old `pgrep -x node-MainThread` enumeration
+# source was empty on hosts whose comm differs, so orphan detection NEVER reported). ONE ps pass gets
+# pid+ppid; readlink /proc/<pid>/cwd runs ONLY for the ppid=1 candidates (not every node pid).
 read_orphans() {
   local pid ppid cwd
-  while IFS= read -r pid; do
+  while IFS=' ' read -r pid ppid; do
     [ -n "${pid:-}" ] || continue
-    ppid="$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ' || true)"
     [ "${ppid:-}" = "1" ] || continue
     cwd="$(readlink "/proc/$pid/cwd" 2>/dev/null || true)"
     case "$cwd" in
       *" (deleted)"*) printf 'pid=%s ppid=1 cwd=%s\n' "$pid" "$cwd" ;;
     esac
-  done < <(pgrep -x node-MainThread 2>/dev/null || true)
+  done < <(ps -ww -e -o pid= -o ppid= -o args= 2>/dev/null | awk '$3 == "node" || $3 ~ /\/node$/ { print $1, $2 }')
 }
 
 # ── worktree-awareness (gap-worktree-scoped-runs-consume-resources-but-produce-no-signal) ────────────
@@ -216,16 +255,26 @@ read_linked_worktree_paths() {
   ' || true
 }
 
-# Count node --test (node-MainThread) processes whose cwd is inside a linked worktree — the deferrable
+# Count node --test (node) processes whose cwd is inside a linked worktree — the deferrable
 # worktree-scoped load. The ## Contract measure (`ps ... | grep /quay-worktrees/`) is the path-derived
 # equivalent: any node --test running from a linked worktree is worktree-scoped. cwd-based, not
 # args-based, so a worktree node --test is detected even when its args do not spell the worktree path.
+# Candidate pids from cmdline (host-independent — the old `pgrep -x node-MainThread` source was empty
+# on hosts whose comm differs, so the worktree-vs-main distinction NEVER held).
 read_worktree_node_tests() {
-  local count=0 pid cwd
+  local count=0 pid cmdline cwd
   local -a paths
   mapfile -t paths < <(read_linked_worktree_paths)
   if [ "${#paths[@]}" -eq 0 ]; then echo 0; return; fi
-  for pid in $(pgrep -x node-MainThread 2>/dev/null || true); do
+  # Filter to TEST processes (node --test / test-file) BEFORE the readlink — infra (mcp/serve/monitor)
+  # is not worktree-scoped load, and skipping it keeps the readlink count small on a busy host.
+  while IFS=$'\t' read -r pid cmdline; do
+    [ -n "${pid:-}" ] || continue
+    case "${cmdline}" in
+      *--test*) : ;;
+      *.test.mjs|*.test.js|*.test.ts|*.test.mts|*.test.cts|*_test.mjs|*_test.js) : ;;
+      *) continue ;;
+    esac
     cwd="$(readlink "/proc/${pid}/cwd" 2>/dev/null || true)"
     [ -n "${cwd}" ] || continue
     local p
@@ -235,7 +284,7 @@ read_worktree_node_tests() {
         "${p}"|"${p}"/*) count=$((count+1)); break ;;
       esac
     done
-  done
+  done < <(list_node_cmdline)
   echo "${count}"
 }
 
@@ -287,6 +336,21 @@ fi
 # worktrees or real node --test processes).
 caller_scope="${RESOURCE_GATE_TEST_CALLER_SCOPE:-$(detect_caller_scope)}"
 worktree_node_tests="${RESOURCE_GATE_TEST_WORKTREE_NODE_TESTS:-$(read_worktree_node_tests)}"
+# ── dual-read self-check (gap-node-mainthread-comm-literal-host-dependent, AC1b) ─────────────────────
+# The comm literal is host-dependent, so the gate NEVER trusts it as the enumeration source — but it
+# IS cross-read against the cmdline candidate count to DETECT a host whose comm differs (the boheidc
+# shape): comm_count==0 && cmdline_count>0 ⇒ the old literal silently reads 0 ⇒ report INSTRUMENT
+# FAILURE (a reader must never misread "0" as "machine idle"). "Reading the relationship", not the
+# literal — no knowledge of the correct comm required, works across machines/Node versions. Seams
+# override both sides for deterministic tests:
+#   RESOURCE_GATE_TEST_COMM_COUNT    — override the comm exact-match count (integer)
+#   RESOURCE_GATE_TEST_CMDLINE_COUNT — override the cmdline node-candidate count (integer)
+comm_count="${RESOURCE_GATE_TEST_COMM_COUNT:-$(count_comm_node_mainthread)}"
+cmdline_count="${RESOURCE_GATE_TEST_CMDLINE_COUNT:-$(list_node_cmdline_pids | wc -l)}"
+instrument_failure=0
+if [ "${comm_count}" -eq 0 ] && [ "${cmdline_count}" -gt 0 ]; then
+  instrument_failure=1
+fi
 
 # ── invariant: nproc must not change between the before-read and the after-read ─────────────────────
 # The host-CPU read (nproc --all, see the comment at nproc_before) must be stable within one gate
@@ -360,6 +424,11 @@ else
 fi
 printf 'nproc=%s  node_procs=%s  %s  [nproc-invariant %s]\n' \
   "$nproc_before" "$node_procs" "$swap_label" "$nproc_invariant"
+printf 'node_comm_mainthread=%s  node_cmdline_procs=%s  [dual-read self-check: %s]\n' \
+  "$comm_count" "$cmdline_count" "$([ "${instrument_failure}" = "1" ] && echo INSTRUMENT-FAILURE || echo ok)"
+if [ "${instrument_failure}" = "1" ]; then
+  printf 'instrument_failure: comm 字面量 node-MainThread 恒 0 但 cmdline 见 %s 个 node 进程 —— comm 是宿主/Node 版本相关的（本机 comm=MainThread）; 读数以 cmdline 为准，勿按 comm 判空\n' "$cmdline_count"
+fi
 # AC1 (gap-test-concurrency-cap-does-not-scope-nested-spawns) — the CROSS-LAYER total budget line
 # from the shared authority (process-budget.sh, same script test.sh/cap-from-gate read). A worktree
 # caller sees total_budget / budget_in_use / budget_available — the numbers that bound EVERY layer's

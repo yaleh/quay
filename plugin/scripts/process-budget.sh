@@ -2,7 +2,7 @@
 # plugin/scripts/process-budget.sh — the cross-layer TOTAL PROCESS BUDGET authority
 # (gap-test-concurrency-cap-does-not-scope-nested-spawns, AC1).
 #
-# The single authority for "how many node --test (node-MainThread) processes the WHOLE repo may run
+# The single authority for "how many node --test (node) processes the WHOLE repo may run
 # at once, across ALL worktrees". Every layer that would otherwise derive its own concurrency reads
 # THIS instead of each deriving its own:
 #   - scripts/test.sh default_concurrency_formula  (C face — top-level worker count)
@@ -82,28 +82,53 @@ is_test_cmdline() {
   return 1
 }
 
-# list_node_mainthread_pids — enumerate ALL node-MainThread pids (EXACT comm match — the same
-# spelling resource-gate.sh uses; `grep -x node` and `pgrep -f` both fail on Node's comm). Uses
-# `ps -e -o pid= -o comm=` (the process list form CLAUDE.md's memory note calls out) with an awk
-# exact-match on the 15-char `node-MainThread` comm, so the enumeration is deterministic even where
-# pgrep is absent (minimal containers). NEVER `ps | grep node`: grepping for "node" matches npm /
-# node-*/other node-named comms, and on this box grep is a ugrep function so a `grep -v grep`
-# exclusion silently fails — the grep process itself gets counted (gap-fixed-cap-5-dynamic-cap-retired
-# AC4: the "报 5 实 1" overcount was exactly an infra-counted-as-test miscount).
-list_node_mainthread_pids() {
-  ps -e -o pid= -o comm= 2>/dev/null | awk '$2 == "node-MainThread" { print $1 }'
+# list_node_cmdline — enumerate node pids WITH their cmdline ("pid<TAB>cmdline" per line), from ONE
+# `ps -ww -e -o pid= -o args=` pass. A node process's argv[0] (the first args field) is the node
+# binary (`node` or a path ending in `/node`) — stable across hosts/Node versions.
+# (gap-node-mainthread-comm-literal-host-dependent) The `node-MainThread` comm literal is
+# HOST-DEPENDENT: boheidc (Node v24.19.0) reports comm=`MainThread`, so any enumeration keyed on it
+# silently returns 0 there (measured: comm `node-MainThread`=0 while cmdline node candidates=64, the
+# real node count). The comm literal survives ONLY as the dual-read self-check cross-count
+# (count_comm_node_mainthread). NEVER `ps | grep node`: grepping for "node" matches npm / node-*/
+# other node-named comms, and on this box grep is a ugrep function so a `grep -v grep` exclusion
+# silently fails — the grep process itself gets counted (gap-fixed-cap-5-dynamic-cap-retired AC4: the
+# "报 5 实 1" overcount was exactly an infra-counted-as-test miscount). Fail-open: a pid that exited
+# between the ps snapshot and classification is simply not in the snapshot — never wedges the budget.
+list_node_cmdline() {
+  ps -ww -e -o pid= -o args= 2>/dev/null | awk '
+    {
+      exe = $2
+      if (exe == "node" || exe ~ /\/node$/) {
+        cmdline = substr($0, index($0, exe))
+        print $1 "\t" cmdline
+      }
+    }
+  '
 }
 
-# read_test_procs — count node-MainThread processes currently running that classify as TEST
-# (throttle-able). Enumerate via list_node_mainthread_pids (exact comm), then classify each pid's
-# /proc/<pid>/cmdline. A pid whose cmdline is unreadable (already exited) is not counted — fail-open
-# on a race, never wedges the budget.
+# list_node_cmdline_pids — just the pids (the dual-read cmdline candidate count + callers that only
+# need the pid set).
+list_node_cmdline_pids() {
+  list_node_cmdline | cut -f1
+}
+
+# count_comm_node_mainthread — the OLD comm-literal count (`node-MainThread`), kept ONLY as the
+# dual-read self-check cross-count. On hosts where Node's comm differs (boheidc comm=`MainThread`)
+# this returns 0 while cmdline sees node procs — the instrument-failure signal. "Reading the
+# relationship", not a hardcoded "correct" literal (CLAUDE.md hard rule 4 推论二).
+count_comm_node_mainthread() {
+  ps -e -o pid= -o comm= 2>/dev/null | awk '$2 == "node-MainThread" { c++ } END { print c+0 }'
+}
+
+# read_test_procs — count node processes currently running that classify as TEST
+# (throttle-able). One ps pass (list_node_cmdline) enumerates node candidates with their cmdline;
+# each is classified by is_test_cmdline. No per-pid /proc read.
 read_test_procs() {
   local count=0 pid cmdline
-  for pid in $(list_node_mainthread_pids); do
-    cmdline="$(tr '\0' ' ' < "/proc/${pid}/cmdline" 2>/dev/null || true)"
+  while IFS=$'\t' read -r pid cmdline; do
+    [ -n "${pid:-}" ] || continue
     if is_test_cmdline "${cmdline}"; then count=$((count + 1)); fi
-  done
+  done < <(list_node_cmdline)
   echo "${count}"
 }
 
@@ -137,6 +162,22 @@ fi
 if ! [[ "${total_budget}" =~ ^[0-9]+$ ]]; then total_budget="$(nproc 2>/dev/null || echo 1)"; fi
 if ! [[ "${in_use}" =~ ^[0-9]+$ ]]; then in_use="$(read_test_procs)"; fi
 
+# ── dual-read self-check (gap-node-mainthread-comm-literal-host-dependent, AC1b) ─────────────────────
+# The comm literal is host-dependent, so the budget NEVER trusts it as the enumeration source — but it
+# IS cross-read against the cmdline candidate count to DETECT a host whose comm differs (the boheidc
+# shape): comm_count==0 && cmdline_count>0 ⇒ the old literal silently reads 0 ⇒ report INSTRUMENT
+# FAILURE (a reader must never misread "0" as "machine idle"). "Reading the relationship", not the
+# literal — the check needs NO knowledge of the correct comm, so it works across machines/Node
+# versions. Seams override both sides for deterministic tests:
+#   RESOURCE_GATE_TEST_COMM_COUNT    — override the comm exact-match count (integer)
+#   RESOURCE_GATE_TEST_CMDLINE_COUNT — override the cmdline node-candidate count (integer)
+comm_count="${RESOURCE_GATE_TEST_COMM_COUNT:-$(count_comm_node_mainthread)}"
+cmdline_count="${RESOURCE_GATE_TEST_CMDLINE_COUNT:-$(list_node_cmdline_pids | wc -l)}"
+instrument_failure=0
+if [ "${comm_count}" -eq 0 ] && [ "${cmdline_count}" -gt 0 ]; then
+  instrument_failure=1
+fi
+
 available=$(( total_budget - in_use ))
 if [ "${available}" -lt 0 ]; then available=0; fi
 
@@ -147,5 +188,11 @@ if [ "${available}" -ge 1 ]; then
   printf 'verdict=GO\n'
 else
   printf 'verdict=WAIT\n'
+fi
+printf 'node_comm_mainthread=%s\n' "${comm_count}"
+printf 'node_cmdline_procs=%s\n' "${cmdline_count}"
+printf 'instrument_failure=%s\n' "${instrument_failure}"
+if [ "${instrument_failure}" = "1" ]; then
+  printf 'instrument_failure_note=comm 字面量 node-MainThread 恒 0 但 cmdline 见 %s 个 node 进程 —— comm 是宿主/Node 版本相关的（本机 comm=MainThread）; 读数以 cmdline 为准，勿按 comm 判空\n' "${cmdline_count}"
 fi
 exit 0

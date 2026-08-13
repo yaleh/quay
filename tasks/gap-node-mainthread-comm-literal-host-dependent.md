@@ -69,12 +69,12 @@ pgrep -xc node-MainThread => 0；pgrep -cf 'bin/node' => 26（真值同量级非
 
 ## AC
 
-- [ ] AC1: 候选 pid 获取不依赖 comm 字面量（cmdline 取候选走 is_test_cmdline 分类）
-- [ ] AC1b: 双读法自检——comm_count==0 && cmdline_count>0 ⇒ 报仪器故障（非「机器空闲」）；不需要知道正确 comm
-- [ ] AC2: resource-gate node_procs / orphan / worktree-scoped 三个读数非恒 0（真套件跑时有值）
-- [ ] AC3: process-budget budget_in_use 非恒 0（真测试进程跑时有值）
-- [ ] AC4: 机械检查修正（不背书 node-MainThread 字面量）；负控：旧字面量被报仪器故障
-- [ ] AC5: 既有测试全绿；`--for-task` scoped 门绿
+- [x] AC1: 候选 pid 获取不依赖 comm 字面量（cmdline 取候选走 is_test_cmdline 分类）
+- [x] AC1b: 双读法自检——comm_count==0 && cmdline_count>0 ⇒ 报仪器故障（非「机器空闲」）；不需要知道正确 comm
+- [x] AC2: resource-gate node_procs / orphan / worktree-scoped 三个读数非恒 0（真套件跑时有值）
+- [x] AC3: process-budget budget_in_use 非恒 0（真测试进程跑时有值）
+- [x] AC4: 机械检查修正（不背书 node-MainThread 字面量）；负控：旧字面量被报仪器故障
+- [x] AC5: 既有测试全绿；`--for-task` scoped 门绿
 
 ## Definition of Done
 
@@ -89,3 +89,33 @@ pgrep -xc node-MainThread => 0；pgrep -cf 'bin/node' => 26（真值同量级非
 - plugin/test/resource-gate.test.mjs（字面量断言修正）
 - plugin/scripts/instrument-failure-check.ts（「正确形式」断言修正）
 - tasks/gap-node-mainthread-comm-literal-host-dependent.md（自身）
+
+## Evidence（2026-08-13，worktree `task/gap-node-mainthread-comm-literal-host-dependent`）
+
+**改动形态（对应 Plan 1/2）**：
+- 候选 pid 枚举 = 单次 `ps -ww -e -o pid= -o args=`，取 argv[0] 为 `node` / `*/node` 的进程
+  （`list_node_cmdline` / `list_node_cmdline_pids`）→ 不写字面量 comm。
+- `is_test_cmdline` 分类层不变（process-budget.sh 已有）——候选进来后照旧分 infra vs test worker。
+- 双读自检：`comm_count = count_comm_node_mainthread`（旧字面量，仅作交叉读数）对
+  `cmdline_count = list_node_cmdline_pids | wc -l`；`comm_count==0 && cmdline_count>0 ⇒ instrument_failure=1`。
+  **不需要知道正确 comm**——换机/换 Node 继续有效（读「关系」不读字面量）。
+- 机械检查同步修正：`instrument-failure-check.ts` family-4 扩展（裸 node comm 字面量计数
+  无 cmdline 交叉即报族4，baseline 7→10 重钉）；`resource-gate.test.mjs` 字面量断言改为
+  cmdline 断言 + 双读负控。
+
+**双读自检实测（本机 boheidc，Node v24.19.0，真 host）**：
+```
+resource-gate.sh:
+  nproc=16  node_procs=106  ...           # 旧读法恒 0
+  node_comm_mainthread=0  node_cmdline_procs=100  [dual-read self-check: INSTRUMENT-FAILURE]
+  instrument_failure: comm 字面量 node-MainThread 恒 0 但 cmdline 见 100 个 node 进程
+  total_budget=16  budget_in_use=31  budget_available=0   # 旧 in_use 恒 0
+process-budget.sh:
+  in_use=32  available=0  verdict=WAIT     # 旧 in_use 恒 0、available 恒=nproc
+  node_comm_mainthread=0  node_cmdline_procs=104
+  instrument_failure=1
+```
+⇒ AC2/AC3 满足：真测试进程跑时 node_procs/budget_in_use 非零；AC1b 负控（旧字面量被报仪器故障）成立。
+
+**scoped 门绿**：`scripts/test.sh --for-task gap-node-mainthread-comm-literal-host-dependent` exit 0，
+53 tests pass（resource-gate.test.mjs 42 + instrument-failure-check.test.mjs 11），scoped static checks 过。

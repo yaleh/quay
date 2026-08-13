@@ -4,7 +4,9 @@
 // default_test_concurrency) as a MECHANICAL mechanism, not prose:
 //
 //   AC2 — the gate reads /proc/pressure/cpu `some avg10` (structural), never load average (proxy)
-//   AC4 — it counts `pgrep -xc node-MainThread` (exact comm), never `pgrep -f` / `grep -x node`
+//   AC4 — it counts node procs via CMDLINE (host-independent — the `node-MainThread` comm literal
+//         is host/Node-version-dependent, boheidc comm=`MainThread` ⇒ 恒 0), never `pgrep -f` /
+//         `grep -x node`; the comm literal survives only as the dual-read self-check cross-count
 //   AC3 — GO ↔ WAIT both directions, deterministically via the env test seams (no busy-loop flake)
 //   AC6 — mem_avail < 2048MB → WAIT + prints RSS top-5
 //   AC10 — orphaned node procs printed on their own line, excluded from the GO/WAIT verdict
@@ -194,17 +196,48 @@ test("AC2 — the gate's header records the flake/load correlation (the red-roun
   assert.match(src, /overload.window|OVERLOAD-WINDOW|SUPPLEMENT/, "the header must explain load is the overload-window supplement");
 });
 
-// ── AC4: pgrep -xc node-MainThread (exact comm), never pgrep -f / grep -x node ─────────────────────
-test("AC4 — gate counts `pgrep -xc node-MainThread` (exact comm), never `pgrep -f` / `grep -x node`", () => {
+// ── AC4: CMDLINE-based node count (host-independent), never a comm literal / pgrep -f / grep -x node
+// (gap-node-mainthread-comm-literal-host-dependent) The old `pgrep -xc node-MainThread` enumeration
+// was HOST-DEPENDENT: boheidc (Node v24.19.0) reports comm=`MainThread`, so it silently returned 0
+// there. The gate now enumerates node pids via CMDLINE; the node-MainThread literal survives ONLY as
+// the dual-read self-check cross-count.
+test("AC4 — gate counts node procs via CMDLINE (host-independent), not a comm literal; keeps the dual-read self-check", () => {
   const src = fs.readFileSync(GATE, "utf8");
   // The header comment may MENTION the forbidden spellings (as warnings) — the CODE must not.
   const code = src.split("\n").filter((l) => !l.trim().startsWith("#")).join("\n");
-  assert.match(src, /pgrep -xc node-MainThread/, "gate must use `pgrep -xc node-MainThread`");
-  assert.match(src, /node-MainThread/, "the comm name must be node-MainThread (Node's actual comm)");
+  assert.match(src, /list_node_cmdline_pids|\/proc\/.*cmdline/, "gate must enumerate node pids via cmdline");
+  assert.doesNotMatch(code, /pgrep -xc node-MainThread/, "gate must NOT enumerate via the host-dependent comm literal `pgrep -xc node-MainThread`");
   assert.doesNotMatch(code, /pgrep -f/, "gate must NOT use `pgrep -f` (matches any cmdline containing node)");
-  // NB: `pgrep -x node-MainThread` legitimately CONTAINS the substring "grep -x node" — the check
-  // is for `grep` as a standalone command (a preceding letter, as in "pgrep", means it is not).
-  assert.doesNotMatch(code, /(^|[^a-zA-Z])grep -x node\b/m, "gate must NOT use `grep -x node` (comm is node-MainThread → always 0)");
+  // NB: a bare `grep -x node` (standalone grep, not pgrep) is a fragment — always 0 on a host whose
+  // comm is `node-MainThread`, and ALSO 0 on boheidc (comm=`MainThread`).
+  assert.doesNotMatch(code, /(^|[^a-zA-Z])grep -x node\b/m, "gate must NOT use `grep -x node` as a standalone command (fragment — always 0)");
+  // The dual-read self-check cross-reads the comm literal against cmdline candidates.
+  assert.match(src, /count_comm_node_mainthread|node_comm_mainthread/, "gate must carry the dual-read comm cross-count");
+  assert.match(src, /list_node_cmdline_pids|node_cmdline_procs/, "gate must carry the dual-read cmdline candidate count");
+  assert.match(src, /instrument_failure|INSTRUMENT-FAILURE/, "gate must report instrument failure on the dual-read mismatch");
+});
+
+test("AC4 negative control — the old comm literal is reported as INSTRUMENT FAILURE when comm=0 but cmdline>0 (the boheidc shape)", () => {
+  const r = runGate({
+    RESOURCE_GATE_TEST_CPU_AVG10: "10",
+    RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000",
+    RESOURCE_GATE_TEST_COMM_COUNT: "0",
+    RESOURCE_GATE_TEST_CMDLINE_COUNT: "5",
+  });
+  assert.match(r.stdout, /node_comm_mainthread=0/, "the comm cross-count must be reported");
+  assert.match(r.stdout, /node_cmdline_procs=5/, "the cmdline candidate count must be reported");
+  assert.match(r.stdout, /INSTRUMENT-FAILURE/, "comm=0 with cmdline=5 must report instrument failure, not machine idle");
+});
+
+test("AC4 negative control — a matching comm literal (comm>0) is NOT instrument failure", () => {
+  const r = runGate({
+    RESOURCE_GATE_TEST_CPU_AVG10: "10",
+    RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000",
+    RESOURCE_GATE_TEST_COMM_COUNT: "2",
+    RESOURCE_GATE_TEST_CMDLINE_COUNT: "2",
+  });
+  assert.match(r.stdout, /node_comm_mainthread=2/, "the comm cross-count must be reported");
+  assert.doesNotMatch(r.stdout, /INSTRUMENT-FAILURE/, "comm>0 is a normal reading");
 });
 
 // ── AC3: GO ↔ WAIT both directions via deterministic seams ─────────────────────────────────────────
@@ -355,7 +388,7 @@ test("AC5b — the derivation is BUDGET-AWARE: in_use node processes subtract fr
   const b = spawnSync("bash", [budgetScript], { cwd: REPO_ROOT, encoding: "utf8", env: seam });
   assert.equal(b.status, 0, `process-budget.sh must exit 0\n${b.stderr}`);
   assert.match(b.stdout, /total_budget=4/, "total_budget = nproc (the single authority)");
-  assert.match(b.stdout, /in_use=3/, "in_use = the running node-MainThread count");
+  assert.match(b.stdout, /in_use=3/, "in_use = the running node process count (cmdline-classified)");
   assert.match(b.stdout, /available=1/, "available = max(0, total_budget - in_use)");
 });
 
@@ -474,6 +507,35 @@ test("AC4 — in_use matches the ACTUAL test-worker count: 1 test worker among i
   });
   assert.equal(infraOnly.status, 0);
   assert.match(infraOnly.stdout, /in_use=0/, "pure infra ⇒ in_use=0 (infra is a resident constant, not test concurrency)");
+});
+
+// ── DUAL-READ SELF-CHECK (gap-node-mainthread-comm-literal-host-dependent, AC1b/AC4) ────────────────
+// The comm literal (`node-MainThread`) is host/Node-version-dependent: on boheidc (Node v24.19.0) the
+// node comm is `MainThread`, so a comm-literal enumeration silently reads 0. process-budget.sh now
+// enumerates via CMDLINE (never the literal) and cross-reads the comm count: comm=0 && cmdline>0 ⇒
+// INSTRUMENT FAILURE (never "machine idle").
+test("AC1b/AC4 — process-budget reports instrument_failure when comm=0 but cmdline>0 (the boheidc shape)", () => {
+  const budgetScript = path.join(REPO_ROOT, "plugin", "scripts", "process-budget.sh");
+  const r = spawnSync("bash", [budgetScript], {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+    env: { ...process.env, RESOURCE_GATE_TEST_NPROC: "4", RESOURCE_GATE_TEST_COMM_COUNT: "0", RESOURCE_GATE_TEST_CMDLINE_COUNT: "5" },
+  });
+  assert.equal(r.status, 0, `process-budget.sh must exit 0\n${r.stdout}${r.stderr}`);
+  assert.match(r.stdout, /node_comm_mainthread=0/, "the comm cross-count must be reported");
+  assert.match(r.stdout, /node_cmdline_procs=5/, "the cmdline candidate count must be reported");
+  assert.match(r.stdout, /instrument_failure=1/, "comm=0 with cmdline=5 must report instrument failure, not machine idle");
+});
+
+test("AC1b/AC4 — process-budget with a matching comm literal (comm>0) is NOT instrument failure", () => {
+  const budgetScript = path.join(REPO_ROOT, "plugin", "scripts", "process-budget.sh");
+  const r = spawnSync("bash", [budgetScript], {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+    env: { ...process.env, RESOURCE_GATE_TEST_NPROC: "4", RESOURCE_GATE_TEST_COMM_COUNT: "2", RESOURCE_GATE_TEST_CMDLINE_COUNT: "2" },
+  });
+  assert.equal(r.status, 0);
+  assert.match(r.stdout, /instrument_failure=0/, "comm>0 is a normal reading");
 });
 
 test("AC5 — process-budget.sh header documents the counting scope (test procs only; infra is a resident constant)", () => {
