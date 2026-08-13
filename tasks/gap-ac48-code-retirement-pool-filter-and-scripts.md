@@ -1,7 +1,7 @@
 ---
 id: gap-ac48-code-retirement-pool-filter-and-scripts
 title: AC48 代码面承接——ready-pool-check pool 过滤层取消 + integration-branch-model.ts/integration-batch-merge.sh 退役标注
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
