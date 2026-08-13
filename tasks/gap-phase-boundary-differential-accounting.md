@@ -77,4 +77,11 @@ abort／早退／红轮都有账。
 
 ## Evidence
 
-（落地后回填）
+（2026-08-13 落地，worktree `gap-phase-boundary-differential-accounting`）
+
+- **实现**：`plugin/scripts/full-suite-runner.ts` 新增 `PhaseDifferentialAccounting`（`/sys/fs/cgroup` v2 单调累计计数器差分，`cpu.stat usage_usec` + `cpu.pressure`/`io.pressure` `some total`，按相边界读一次并差分——不周期采样）。边界由流中实时标记检出：`selected N files (groups=serial|lowconc)` / `overlap: running`（相起点）+ measure-suite `__GROUP__`（每相 node --test 结束）+ `__OVERHEAD__` 突发（main→end 兜底）。
+- **记录形状**：每相一条 `{phase, wall_ms, cpu_usec, psi_cpu_total, psi_io_total, lanes}` 进 verification-round.jsonl 的 `phases` 字段；相序 `static→serial→gap_serial_to_lowconc→lowconc→main→end`。`phase_counter_error` 携带不可读原因（缺键≠0）。
+- **全退出路径写入**：正常路径 `finalize()`（绿/红/abort/timeout/hung 都到）+ crash trap（`writeCrashTerminal` 写 state 的 `phases` 并 append 一条 phase-only round 行）。红轮/截断轮/无标记轮都有 ≥1 条相记录。
+- **负控制**：fake suite 中途 SIGTERM 自杀 → 相记录完整（static+serial+lowconc，in-flight 相在 round 末关闭）。
+- **测试**：`plugin/test/full-suite-runner.test.mjs` +9 用例（AC1 六相差分、AC2 派生量可算、AC3 abort 负控制、AC4 红/无标记/crash 覆盖、3 个单元）。既有 132 用例全绿；`--for-task` scoped 门绿。
+- **派生量**：相利用率=cpu_usec/(wall×lanes)、相饱和度=cpu_usec/(wall×nproc)、等待占比=psi_cpu_total/wall——记录 + round `nproc` 直接可算，不再靠相墙钟+代码常量推算。
