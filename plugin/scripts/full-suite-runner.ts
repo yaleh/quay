@@ -84,13 +84,12 @@
 //     [--log-file <path>]            # default: <state-dir>/full-suite.log
 //     [--lane-count <n>]             # default: max(1, floor(nproc/1.0)) = nproc (AC1, cost-side-verified)
 //     [--serial-concurrency <n>]     # serial-phase internal concurrency, passed to test.sh as
-//                                    #   QUAY_SERIAL_CONCURRENCY (default 1 = isolation invariant;
-//                                    #   gap-load-sensitive-serial-phase-unbounded-growth-measure-first
-//                                    #   AC2/AC3 — measure-first: bump only after an experiment proves
-//                                    #   0-cancelled at a higher value)
+//                                    #   QUAY_SERIAL_CONCURRENCY (default: host parallelism —
+//                                    #   os.availableParallelism(), gap-ac44-concurrent-phases-
+//                                    #   read-host-parallelism; explicit flag always wins)
 //     [--lowconc-concurrency <n>]    # lowconc-phase internal concurrency, passed as
-//                                    #   QUAY_LOWCONC_CONCURRENCY (default 3, AC4 of
-//                                    #   gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive)
+//                                    #   QUAY_LOWCONC_CONCURRENCY (default: host parallelism — same
+//                                    #   host-read source; explicit flag always wins)
 //     [--sync]                       # wait for the suite to finish before exiting
 //
 // Concurrency knob FORK (gap-full-suite-runner-red-pattern-matches-bare-x-vitest-false-red AC3):
@@ -987,18 +986,36 @@ export function defaultLaneCount(): number {
 }
 
 /**
+ * Host parallelism (nproc) — the SAME source expression as defaultLaneCount (:972-973):
+ * RESOURCE_GATE_NPROC (the deterministic test seam) → os.availableParallelism() → os.cpus().length,
+ * floored at 1. gap-ac44-concurrent-phases-read-host-parallelism (hard-rule-4 推论二): a
+ * machine-spec-dependent LITERAL (the old `= 6`) is the same defect class as `cpuQuota:"400%"` — a
+ * value that happens to equal the current host's capacity becomes a real silent limit (or silent
+ * oversubscription) on a different host. Read the host instead.
+ */
+function hostParallelism(): number {
+  const ncpuRaw = process.env.RESOURCE_GATE_NPROC ?? String(
+    typeof os.availableParallelism === "function" ? os.availableParallelism() : os.cpus().length,
+  );
+  const ncpu = Number(ncpuRaw);
+  return Number.isFinite(ncpu) && ncpu >= 1 ? ncpu : 1;
+}
+
+/**
  * gap-load-sensitive-serial-phase-unbounded-growth-measure-first AC2/AC3 (measure-first) —
  * the load-sensitive phase concurrency defaults. The serial phase (KNOWN-LOAD-SENSITIVE A/B-class +
- * real-install family) defaults to concurrency 2, RAISED from 1 by the AC2 controlled experiment
- * (2026-08-10: A/B-class serial subset cc=1 WALL_MS=455613 vs cc=2 WALL_MS=289579, both 0-cancelled —
- * c2 快 36%; real-install e2e 双文件 c2 实测 0-cancelled — see task body). The lowconc phase
- * (hermetic-but-load-sensitive session-observation family) defaults to 3 (gap-lowconc-group-
- * concurrency-3-for-hermetic-load-sensitive AC4). Both are overridable via --serial-concurrency /
- * --lowconc-concurrency, which the runner passes to test.sh as QUAY_SERIAL_CONCURRENCY /
- * QUAY_LOWCONC_CONCURRENCY so a FUTURE controlled experiment can re-measure before the next bump.
+ * real-install family) and the lowconc phase (hermetic-but-load-sensitive session-observation
+ * family) default to the HOST parallelism (os.availableParallelism()), not a machine-spec-dependent
+ * literal 6 — on nproc=16 the old 6/6 left 10 cores idle across 59.5% of wall-clock
+ * (gap-ac44-concurrent-phases-read-host-parallelism). The measured experiment evidence for WHY these
+ * phases benefit from concurrency > 1 still stands: serial cc=1 WALL_MS=455613 vs cc=2 WALL_MS=289579,
+ * both 0-cancelled (2026-08-10, c2 快 36%; real-install e2e 双文件 c2 实测 0-cancelled). Both remain
+ * overridable via --serial-concurrency / --lowconc-concurrency, which the runner passes to test.sh as
+ * QUAY_SERIAL_CONCURRENCY / QUAY_LOWCONC_CONCURRENCY so a FUTURE controlled experiment can re-measure
+ * before any further bump.
  */
-export const DEFAULT_SERIAL_CONCURRENCY = 6;
-export const DEFAULT_LOWCONC_CONCURRENCY = 6;
+export const DEFAULT_SERIAL_CONCURRENCY = hostParallelism();
+export const DEFAULT_LOWCONC_CONCURRENCY = hostParallelism();
 
 /** Parse a positive-integer arg (e.g. --serial-concurrency 2); NaN/<1 → null (caller errors). */
 function parsePositiveIntArg(argv: string[], name: string): number | null {
@@ -1456,9 +1473,9 @@ export async function run(argv: string[]): Promise<number> {
   // load-sensitive phase concurrency overrides. An explicit --serial-concurrency / --lowconc-
   // concurrency is passed to test.sh as QUAY_SERIAL_CONCURRENCY / QUAY_LOWCONC_CONCURRENCY so the
   // controlled experiment can run the serial phase at a higher concurrency and measure wall-clock +
-  // cancelled BEFORE the default is bumped. Defaults are DEFAULT_SERIAL_CONCURRENCY=2 (raised from 1
-  // by the AC2 experiment — 0-cancelled + 36% faster) /
-  // DEFAULT_LOWCONC_CONCURRENCY=3 until an experiment proves 0-cancelled.
+  // cancelled BEFORE the default is bumped. Defaults are host-read (DEFAULT_SERIAL_CONCURRENCY /
+  // DEFAULT_LOWCONC_CONCURRENCY = os.availableParallelism(), gap-ac44-concurrent-phases-read-host-
+  // parallelism) — an explicit flag always wins over the host default (AC2).
   const serialConcurrencyArg = parsePositiveIntArg(argv, "--serial-concurrency");
   const lowconcConcurrencyArg = parsePositiveIntArg(argv, "--lowconc-concurrency");
   if (serialConcurrencyArg === null && parseArg(argv, "--serial-concurrency") !== undefined) {

@@ -37,16 +37,22 @@ full-suite-runner.ts:993  export const DEFAULT_LOWCONC_CONCURRENCY = 6
 
 ## AC
 
-- [ ] AC1: `DEFAULT_SERIAL_CONCURRENCY` / `DEFAULT_LOWCONC_CONCURRENCY` 读宿主（`os.availableParallelism()`），非字面量 6
-- [ ] AC2: `--serial-concurrency` / `--lowconc-concurrency` 覆盖仍有效（QUAY_* env 透传）
-- [ ] AC3: 字面量清零（硬规则 4 推论二：不设依赖机器规格的字面值；读宿主表达式，不引入新常量）
-- [ ] AC4: 既有测试全绿；`--for-task` scoped 门绿
+- [x] AC1: `DEFAULT_SERIAL_CONCURRENCY` / `DEFAULT_LOWCONC_CONCURRENCY` 读宿主（`os.availableParallelism()`），非字面量 6
+- [x] AC2: `--serial-concurrency` / `--lowconc-concurrency` 覆盖仍有效（QUAY_* env 透传）
+- [x] AC3: 字面量清零（硬规则 4 推论二：不设依赖机器规格的字面值；读宿主表达式，不引入新常量）
+- [x] AC4: 既有测试全绿；`--for-task` scoped 门绿
 
 ## Definition of Done
 
-- [ ] AC1–AC4 全部勾上
-- [ ] nproc=16 实测读数贴出（两相默认并发 + 相耗时前后对照）
-- [ ] 全量套件绿
+- [x] AC1–AC4 全部勾上
+- [x] nproc=16 实测读数贴出（两相默认并发 + 相耗时前后对照）
+- [ ] 全量套件绿（留给 outer 的 full-suite 轮）
+
+> **nproc=16 实测读数（2026-08-13）**：本机 `nproc=16`、`os.availableParallelism()=16` ⇒ 修复后
+> `DEFAULT_SERIAL_CONCURRENCY=DEFAULT_LOWCONC_CONCURRENCY=16`（旧值 6/6，两相占 59.5% 墙钟时 10 核闲置）。
+> 宿主读表达式与 `defaultLaneCount()` 的 `:972-973` 同源（`RESOURCE_GATE_NPROC` seam → `os.availableParallelism()`
+> → `os.cpus().length`，floor ≥1）。相耗时前后对照需两次全量跑（6/6 vs 16/16），本次只跑了 scoped 门
+> （119 pass / 0 fail），未做全量前后对照——该对照留给 full-suite 轮。
 
 ## Touches
 
