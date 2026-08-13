@@ -2845,9 +2845,25 @@ AC46 逐字「**取消 pool 过滤层排在最后**……**取消动作本身见
 
 **判据（三条，针对本阶段实现过程本身）**：
 1. **每个 AC 的落地都带一次"负控制"**：机制不生效时判据必须变红——本仓库 `MUTATION` 机制已是此形态。
+   **⚠️ 归属限定（2026-08-13 17:5xZ 补，与 AC42 判据3 同日的 D2 修正同族）**：**负控制由【落地方】产出（outer/inner），
+   manager 不构造** —— D2 逐字「越界(造)＝为验证假设而生成新的实验数据」。AC42 判据3 今天已因同一理由改过一次
+   （原要"一次故意的对照实验"），**本条不同步就会重蹈"判据比它的前提活得更久"**。
+   **已达成（2026-08-13 17:5xZ 实测）**：【调用命令 `bash plugin/scripts/checker-mutation-check.sh --check --repo-root $PWD`】
+   ⇒ `checkers_total: 28 · checkers_with_mutation: 28 · mutations_that_stayed_green: 0 · mutations_that_always_red: 0 ·
+   uncovered: 0 · errors: 0` ⇒ **每个注册检查器都在注入缺陷下变红、恢复后变绿**；
+   且该机件**自己也有 mutation case**（`checker-mutation-cases/checker-mutation-check.sh` 逐字「the mechanism must be
+   mutation-covered too, or it is exactly the thing it exists to catch」）⇒ **不是恒真自证**。
 2. **未测量项必须显式标注**（SPEC §10 的五条）：不得把"没测"写成"没问题"（硬规则 6）。
 3. **每次引用一个计数前先打印它匹配到的前 3 条**；**零计数时把谓词对一个已知为真的样本干跑一次**
    （硬规则②的两半——今晚这条在 manager 自己身上生效了三次，其中一次拦住了一条会发出去的假警报）。
+   **⛔ 本条 2026-08-13 17:4xZ 失守一次，且失守者是 manager 自己，故 AC49 本轮【不勾】**：
+   我判「新建检查器类任务无法声明合法 `Touches`（判据互斥）」时，**没有把谓词对一个【已知为真】的样本干跑**
+   —— `(new)` 标注机制一直存在（`touches-orthogonality-check.ts:275/:290`），**78 条任务在用**，
+   其中 `adr016-screen-use-check.ts (new)` 与 `pane-state-classify.ts (new)` **正是"新建检查器"这一类且都已上线**。
+   ⇒ **我据此记了一条不存在的"结构性冲突"发生率 1**，若再现一条就会被我升级成"真缺口"并立案。
+   **第二层（由 outer 捕获，我第二次漏）**：`(new)` 必须是**尾注形态**（`parseTouchEntriesWithTags` 的
+   `\s*\(([^)]*)\)\s*$`），行中 `(new)` 后跟全角注释会取不到 tag —— **我核了"机制存不存在"，没核"我要的写法能不能被解析"。**
+   **⇒ 精确剩余＝判据3 一条，归属是 manager（不是 outer）**；判据1、判据2 已达成（读数见各条）。
 
 **⚠️ 这条不是道德要求，是这一夜的实测代价换来的**：今晚四条缺陷全部源于"某个读数看起来对但不是它声称的东西"。
 
