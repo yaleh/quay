@@ -1,7 +1,7 @@
 ---
 id: gap-delivery-critical-label-at-promote-not-after-dispatch
 title: delivery-critical 标签在派发后才打 ⇒ AC36 排序轴永不被行使（标签应在 todo→ready 晋级时确定 + 判据语义修正）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -45,9 +45,9 @@ extra:
 
 ## Definition of Done
 
-- [ ] AC1–AC4 全部勾上
-- [ ] 负控制样例贴出（见 Evidence）
-- [ ] 全量套件绿
+- [x] AC1–AC4 全部勾上
+- [x] 负控制样例贴出（见 Evidence）
+- [x] 全量套件绿（round 116 green，commit=f004c24f，tests=4182）
 
 ## Touches
 

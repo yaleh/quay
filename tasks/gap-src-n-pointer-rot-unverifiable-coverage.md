@@ -1,7 +1,7 @@
 ---
 id: gap-src-n-pointer-rot-unverifiable-coverage
 title: AC30(a) (src:N) 覆盖率是结构上不可能取假的量——行号指针腐烂而闸门每轮报 100%
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -60,9 +60,9 @@ manager-loop-tick.md 的合并改动落在 @@509/517/532/950，净 +10 行（165
 
 ## Definition of Done
 
-- [ ] AC1–AC4 全部勾上
-- [ ] 修复前 8-11 条空行指针 + 修复后全绿的对照贴出（见 Evidence）
-- [ ] 全量套件绿
+- [x] AC1–AC4 全部勾上
+- [x] 修复前 8-11 条空行指针 + 修复后全绿的对照贴出（见 Evidence）
+- [x] 全量套件绿（round 115 green，commit=c6bbb8a1，tests=4172）
 
 ## Touches
 

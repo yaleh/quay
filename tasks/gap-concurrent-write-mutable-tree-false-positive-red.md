@@ -1,7 +1,7 @@
 ---
 id: gap-concurrent-write-mutable-tree-false-positive-red
 title: 验证轮在可变工作树上跑——同轮提交到共享树 ⇒ 假阳性红（对照实验证实）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -42,9 +42,9 @@ round 54 干净窗口（19:23:39-19:30:16 零提交）**同一测试绿（67s PA
 
 ## Definition of Done
 
-- [ ] AC1–AC4 全部勾上
-- [ ] 复现用例（同轮提交 ⇒ 标假阳性）贴出（见 Evidence）
-- [ ] 全量套件绿
+- [x] AC1–AC4 全部勾上
+- [x] 复现用例（同轮提交 ⇒ 标假阳性）贴出（见 Evidence）
+- [x] 全量套件绿（round 115 green，commit=c6bbb8a1，tests=4172）
 
 ## Touches
 
