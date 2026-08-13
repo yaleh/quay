@@ -1,7 +1,7 @@
 ---
 id: gap-inner-self-wake-sleep-empty-slots-not-dispatch
 title: inner 满池自选长睡——空槽+池有货+不派的第三种成因（决策依据与结果分记录 / 有货可派不结束一轮）
-status: todo
+status: ready
 labels:
   - gap
   - defect

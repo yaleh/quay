@@ -1,7 +1,8 @@
 ---
 id: gap-worktree-fork-baseline-always-integration
-title: 阶段零——worktree 建立基线 integration→develop（新模型 fan-in 直连 develop + rebase-重跑循环吸收任务文件漂移；验收双证①基线 ②rebase 后不冲突）
-status: todo
+title: 阶段零——worktree 建立基线 integration→develop（新模型 fan-in 直连 develop +
+  rebase-重跑循环吸收任务文件漂移；验收双证①基线 ②rebase 后不冲突）
+status: ready
 labels:
   - gap
   - defect
