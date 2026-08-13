@@ -8,7 +8,7 @@
 
 - AC1：试点任务在**自有 worktree** 跑**全量套件**（非 scoped），scope=worktree + state=green 记录。
 - AC2：N（≥2）个试点任务 per-task 全量绿 + A6 fan-in。
-- AC3/AC3b：≥3 并发下 per-task 全量**端到端吞吐** ≥ 同窗基线（不设数值阈值；基线同窗重算）。
+- AC3/AC3b：**=2 并发下**（人 2026-08-13 裁定并发度 =2，最多同时 2 组 suite）per-task 全量**端到端吞吐** ≥ 同窗基线（不设数值阈值；基线同窗重算）。⚠️ 前置自检：记 AC3b 读数前须确认 2 个 scope=worktree 轮同时 state=running。
 - AC4：成立 ⇒ 全局轮停跑 + AC43/AC45 cancelled；不成立 ⇒ 回退（仅 (a) 静默窗口不达标触发）。
 - DoD：全局轮占墙钟比 + 红轮率前后对照；成立/不成立结论 + AC43/AC45 处置。
 
@@ -55,7 +55,15 @@
 - **机件发现 ②（决定性）——single-flight lock 使 ≥3 并发 per-task 全量不可能**：`scripts/test.sh` 全量路径持有**跨全部 worktree 的排他 flock**（`<git-common-dir>/full-suite.lock`，git-common-dir 指向主仓库 .git，全部 worktree 争同一把锁），**整个全量 run 持有**（acquire 于 test.sh:1033，release 于 :1207）。第二个并发全量启动 flock 阻塞最多 600s，超时 fail-closed（`not starting … waited 600s`）。实测：3 个并发启动被**串行化成 2 个顺序全量 + 1 个 abort**，无真正并发。
 - **并发 per-task 全量直接饿死全局轮（模式 b 如实记账的实害）**：round 150（11:42:11 触发）的 one-shot suite 同样要抢这把锁，被 run2-pilot/run2-b 持有 → 等 600s → **aborted，0 tests**（`# suite red aborted`）。即：per-task 并发全量与全局轮**互斥**，同时存在时全局轮被 abort。
 - 并发期负载：load1 采样 5–20（3×16 lanes 启动时尖峰 14.6/20.3/17.9），后回落；资源 gate 全程 GO（budget 超订但 PSI/load 未触 WAIT 线）。
-- **⇒ 这是试点的核心输出**：per-task 全量的并发前提（≥3 同时在跑）**当前机制下结构上不可达**——single-flight lock 把并发串行化并把落败者 abort（600s 后）。后续 full-suite-runner per-task 改造必须重设计这把锁（per-task 作用域 / 去全局锁改 resource-gate-only），否则 per-task 全量只能顺序跑。
+- **⇒ 这是试点的核心输出**：per-task 全量的并发前提**当前机制下结构上不可达**——single-flight lock 把并发串行化并把落败者 abort（600s 后）。后续 full-suite-runner per-task 改造必须重设计这把锁（per-task 作用域 / 去全局锁改 resource-gate-only），否则 per-task 全量只能顺序跑。
+
+### Run 3 — 锁配方机械验证 + 人裁定（=2、配方作废、2 槽锁方向）
+
+- **背景**：011b1469 后 outer/manager relay 给测量配方（`FULL_SUITE_LOCK_FILE=<per-wt 路径>` + `QUAY_TEST_SKIP_RESOURCE_GATE=1`），要求重测 AC3b 并先确认 ≥3 同时 state=running。本子代理按配方在 3 个 provision worktree（任务 wt + pilot-measure-a/b，develop HEAD 4d6cbc40）同时启动全量（run 3）。
+- **前置自检（≥3 同时 running）**：11:59:40 三个 state 文件**同时 state=running**（startedAt 11:59:35.058/.095/.081，scope=worktree）——**配方机械上生效**（锁与资源闸均被绕过，3 个并发启动全部进入 running）。
+- **run 3 结果**：全部 suite 在静态检查阶段 red/aborted——根因是**外层 worktree 清理在 run 中途删除了未注册的测量 worktree**（`getcwd: cannot access parent directories` + `checker-mutation-cases/*.sh: No such file`，即整棵 worktree 树在 suite 下消失），非测试失败（# tests 0）。这是**第二个结构障碍**：未注册/已合并分支的 worktree 会被外层 fan-in 清理中途移除。
+- **⚠️ 人 2026-08-13 裁定（覆盖配方）**：**配方作废**——「不是测量绕锁，是把安全约束上界从 1 槽提到 2 槽（产品能力）」。两个串行化者都改：①单飞锁 1→2 槽（两把锁文件 `full-suite.lock.0/.1` 依次 `flock -n` 试、都占满则阻塞等任一释放——无新依赖、保留 flock 崩溃自动释放）；②资源闸预算按 2 槽算（只改锁第 2 个会撞闸 exit 1）。**相预算 = hostParallelism() ÷ 并发槽数**（1 套件⇒16、2 套件⇒各 8——8 是 16÷2 的实例非字面量）。AC3 并发度从 ≥3 **收缩为 =2**（人裁定最多 2 组 suite）。
+- **⇒ run 3 数据仅作配方机械生效的证据（前置自检通过），不作 AC3b 吞吐读数**：配方已被裁定作废，吞吐读数必须以 2 槽产品能力（follow-on 改造后）为准。
 
 ### 吞吐（试点窗口 11:20–11:52，32 min = 0.53 h）
 
@@ -73,23 +81,25 @@
 |---|---|---|
 | AC1 | ✅ **达成** | run 1b green：自有 worktree、全量非 scoped、scope=worktree + state=green（4271 tests / 0 fail） |
 | AC2 | ⚠️ 部分（机制达成，fan-in 未做） | 3 个 worktree 全量 green（run1b/run2-pilot/run2-b，同 commit b2f26003）；**A6 fan-in 未执行**（本子代理禁 merge；试点任务自身未合回 develop） |
-| AC3 | ❌ **未达成（机制阻塞）** | ≥3 并发被 single-flight lock 串行化 + 落败 abort + 饿死全局轮 —— 结构上不可达，非噪声 |
-| AC3b | ⚠️ **未定（含干扰）** | 窗口吞吐 1.88/h < 2.21/h 基线；模式 (b) 单向有效性 ⇒ 不构成不成立，不进 AC4 |
+| AC3 | ❌ **未达成（机制阻塞）** | =2 并发（人 2026-08-13 裁定）当前 1 槽 single-flight lock **同样不可达**（run 2 实证：并发启动被串行化 + 落败 abort + 饿死全局轮 round 150）；人已裁定修复方向 = 2 槽锁（产品能力，follow-on） |
+| AC3b | ⚠️ **未定（含干扰）** | 窗口吞吐 1.88/h < 2.21/h 基线；且 =2 并发读数须以 2 槽产品能力（follow-on 改造）为基准（配方已被裁定作废） |
 | AC4 | ⚠️ 未触发 | 模式 (b) 未定 ⇒ 不回退；但试点未成立 ⇒ **全局轮不停跑，AC43/AC45 不标 cancelled** |
 | AC5 | ✅ **达成** | 既有测试全绿（run1b/run2 全量 4271 tests 绿）；`--for-task gap-spec-11-… --allow-thin` scoped 门 exit 0 |
 
-**成立判断：试点【未成立】（并发维度被 single-flight lock 机制阻塞）。**
+**成立判断：试点【未成立】（=2 并发维度被 1 槽 single-flight lock 机制阻塞；人已裁定修复方向）。**
 - 顺序维度成立：per-task 全量在任务自有（provision 后）worktree 全绿（AC1 ✅），验证完整、无需全局轮。
-- 并发维度不成立：AC3 要求的 ≥3 并发当前机制下**不可达**——single-flight lock 串行化 + abort 落败者 + 饿死全局轮（round 150 被 abort 是实害）。
-- 吞吐门（AC3b）为**未定（含干扰）**，按模式 (b) 不触发回退，但也不支持「成立 ⇒ 停跑全局轮」。
+- 并发维度不成立：AC3 的 =2 并发（人 2026-08-13 裁定）当前 1 槽锁**同样不可达**——run 2 实证串行化 + abort 落败者 + 饿死全局轮（round 150 被 abort 是实害）；run 3 配方机械上可达 3 同时 running（前置自检通过）但配方已被人裁定作废。
+- 吞吐门（AC3b）为**未定（含干扰）**：窗口 1.88/h < 2.21/h；且 =2 并发读数须以 2 槽产品能力为基准（follow-on 改造，非测量绕锁）。
+- **人裁定的修复方向（覆盖测量配方）**：单飞锁 1→2 槽（`full-suite.lock.0/.1` 双文件 `flock -n`）+ 资源闸预算按 2 槽算 + 相预算 = hostParallelism() ÷ 并发槽数。此即 follow-on（full-suite-runner per-task 语义）的锁重设计输入。
 
 ## 5. AC43/AC45 处置建议
 
 **保持 OPEN（不标 cancelled）**：试点未成立 ⇒ 停跑全局轮的前提未达成 ⇒ AC43（套件无 VCS 知识）/AC45（记录 per-task 化）继续存在。
-**给后续改造的唯一关键输入**：single-flight lock（`test.sh` 全量路径的跨 worktree 排他 flock + 600s-fail-closed）是 per-task 全量并发的结构阻塞。full-suite-runner per-task 语义改造必须先解决：
-1. 锁的作用域（per-task 独立锁 / 去全局锁改 resource-gate-only）；锁本来是 2026-08-07 双 cc8 事故的防回归，去掉要有等价保护。
+**给后续改造的关键输入**：single-flight lock（`test.sh` 全量路径的跨 worktree 排他 flock + 600s-fail-closed）是 per-task 全量并发的结构阻塞。**人 2026-08-13 已裁定锁方向**（覆盖测量配方）：不是绕锁，是把安全约束上界从 1 槽提到 2 槽（产品能力）——①单飞锁 1→2 槽（`full-suite.lock.0/.1` 依次 `flock -n` 试、都占满阻塞等任一释放）；②资源闸预算按 2 槽算；③相预算 = hostParallelism() ÷ 并发槽数。full-suite-runner per-task 语义改造还必须解决：
+1. 锁的作用域（按人裁定改 2 槽，非 per-task 独立锁；锁本来是 2026-08-07 双 cc8 事故的防回归，2 槽保留等价保护）。
 2. 任务 worktree 的 provision 前置（`worktree-include.sh` 跑进任务 worktree 创建流程，否则裸 worktree 全量 6 测红）。
-3. 并发下每 task 的 lane 预算（默认 16 lanes × N 并发 = 严重超订；AC3b 稳态模型 6.5 核当量/task）。
+3. **未注册/已合并分支 worktree 会被外层 fan-in 清理中途移除**（run 3 实证：并发 suite 中整棵 worktree 树消失）——per-task 全量跑在已注册任务 worktree 上即不触发此问题，但测量/并发场景需注意。
+4. 并发下每 task 的 lane 预算（人裁定相预算 = host÷槽数；AC3b 稳态模型 6.5 核当量/task）。
 
 ## 6. 测量方法备注（诚实记账）
 
