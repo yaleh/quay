@@ -420,8 +420,10 @@ export function mergeSurfaceBlock(parsed, surfaces, expand) {
 // Three signal sources, all mechanical:
 //   strategic — body references a written strategic question: the orchestration/ strategic-doc
 //               naming convention FINDING-* / SYNTHESIS-* / SPEC-* / REVIEW-cadence (grep).
-//   blocking  — parent/children frontmatter: the task is a parent (children non-empty) OR is named
-//               as `parent:` by another task — landing it unblocks that dependent.
+//   blocking  — dependency reverse edges: the task is a parent (children non-empty) OR is named
+//               as `parent:` by another task OR is listed in another task's `depends_on` (the
+//               depends_on reverse-edge, gap-value-priority-signal-degraded-to-1-over-cost AC1) —
+//               landing it unblocks that dependent.
 //   cost      — declared Touches scale (parseTouches glob count; a MISSING Touches section is
 //               unknown scope, treated as high cost — the same conservative stance the dispatch gate
 //               takes: no usable Touches collides with everything).
@@ -432,7 +434,13 @@ export function mergeSurfaceBlock(parsed, surfaces, expand) {
 // high-benefit breaks ties within a class. Sort is value desc (stable by id asc). Output to JSON as
 // `top_relevance` (the --top N todo query) + `ready_relevance` (the ready pool, "who to dispatch
 // next" — AC6). The existing gap-* > DIR-* / disjointness promotion ORDER is untouched (AC4).
-export const STRATEGIC_REF_RE = /FINDING-|SYNTHESIS-|SPEC-|REVIEW-cadence/;
+// gap-value-priority-signal-degraded-to-1-over-cost AC1 — the strategic axis取数 bug: the old regex
+// required a literal hyphen after the strategic-doc prefix (`SPEC-`), so a body that references the
+// strategic doc as `SPEC §11 阶段 2` (the pilot's actual reference form — the SPEC doc is cited by
+// section, not by hyphenated filename) read strategic N. Word-boundary matching catches BOTH forms:
+// `SPEC §11` (space+section) and `SPEC-per-task-suite-verification-2026-08-13.md` (hyphenated doc
+// name). Still case-sensitive (a lowercase `spec` in prose is not a strategic-doc reference).
+export const STRATEGIC_REF_RE = /\b(?:SPEC|FINDING|SYNTHESIS)\b|REVIEW-cadence/;
 export const STRATEGIC_WEIGHT = 4;
 export const BLOCKING_WEIGHT = 2;
 
@@ -915,16 +923,27 @@ export function touchesScale(body) {
  *  (gap-ready-relevance-blind-to-suite-blocking-signal AC2): a task implicated in the current
  *  suite-blocking window gets `blocking` flipped true, `blocking_suite` true, and a value bonus
  *  (SUITE_BLOCKING_WEIGHT) so it jumps the dispatch queue. */
-export function computeRelevance(id, task, childrenByTask = new Map(), parentRefCount = new Map(), suiteBlockingIds = null) {
+export function computeRelevance(id, task, childrenByTask = new Map(), parentRefCount = new Map(), suiteBlockingIds = null, dependedOnCount = new Map()) {
   const strategic = strategicTraceable(task.body);
   const children = childrenByTask.get(id) || [];
   const suiteBlocking = suiteBlockingIds ? suiteBlockingIds.has(id) : false;
-  const blocking = children.length > 0 || (parentRefCount.get(id) || 0) > 0 || suiteBlocking;
+  // gap-value-priority-signal-degraded-to-1-over-cost AC1 — the blocking axis取数 gap: blocking read
+  // only parent/children frontmatter, so a task that OTHER tasks `depends_on` (a reverse dependency
+  // edge — its landing unblocks dependents, the same semantic as being named parent) read blocking N.
+  // `dependedOnCount` counts how many tasks list this id in their `depends_on`; >0 flips blocking true.
+  const dependedOn = (dependedOnCount.get(id) || 0) > 0;
+  const blocking = children.length > 0 || (parentRefCount.get(id) || 0) > 0 || dependedOn || suiteBlocking;
   const { hasSection, count } = touchesScale(task.body);
   const cost = hasSection ? count : 0;
   const costBenefit = hasSection && count > 0 ? Math.min(1, 1 / count) : 0;
   const value = (strategic ? STRATEGIC_WEIGHT : 0) + (blocking ? BLOCKING_WEIGHT : 0) + (suiteBlocking ? SUITE_BLOCKING_WEIGHT : 0) + costBenefit;
   const v = Number(value.toFixed(3));
+  // reason's blocking clause names the blocking source(s): children / parent-ref / depends-on / suite.
+  const blockSources = [];
+  if (children.length > 0) blockSources.push(`${children.length} ${children.length === 1 ? "child" : "children"}`);
+  if ((parentRefCount.get(id) || 0) > 0) blockSources.push(`parent-ref ${parentRefCount.get(id)}`);
+  if (dependedOn) blockSources.push(`depends-on ${dependedOnCount.get(id)}`);
+  if (suiteBlocking) blockSources.push("suite");
   return {
     id,
     strategic,
@@ -934,7 +953,7 @@ export function computeRelevance(id, task, childrenByTask = new Map(), parentRef
     value: v,
     reason:
       `value ${v} · strategic ${strategic ? "Y" : "N"} · ` +
-      `blocking ${blocking ? `Y(${children.length} ${children.length === 1 ? "child" : "children"})` : "N"} · ` +
+      `blocking ${blocking ? `Y(${blockSources.join(" · ")})` : "N"} · ` +
       `suite-blocking ${suiteBlocking ? "Y" : "N"} · ` +
       `cost ${cost} touch${cost === 1 ? "" : "es"}`,
   };
@@ -1283,7 +1302,7 @@ export function maxMutuallyDisjointSubset(parsed, expand) {
   return best;
 }
 
-function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, expand, childrenByTask = new Map(), parentRefCount = new Map()) {
+function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, expand, childrenByTask = new Map(), parentRefCount = new Map(), dependedOnCount = new Map()) {
   const kind = classifyKind(id);
   const touches = checkTaskTouchesResolve(task.body, root);
   const touchesResolve = !touches.majorityMissing;
@@ -1336,8 +1355,9 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
     // 同现). Same frontmatter-labels source the dispatch sort reads.
     deliveryCritical,
     // AC1 (gap-value-prioritization-has-no-mechanism): every candidate carries the relevance signal —
-    // strategic traceability (grep) + blocking (parent/children fields) + cost (touches parsed scale).
-    relevance: computeRelevance(id, task, childrenByTask, parentRefCount),
+    // strategic traceability (grep) + blocking (parent/children/depends_on reverse edges) + cost
+    // (touches parsed scale).
+    relevance: computeRelevance(id, task, childrenByTask, parentRefCount, null, dependedOnCount),
     // AC1/AC2: the retired-mechanism guard — a candidate that references an ADR-022-deleted script
     // is never eligible (the intercept reason is mechanically carried for the `intercepted` output).
     retiredMechanism,
@@ -1500,10 +1520,17 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
   // as its parent, so the maps are precomputed here rather than re-scanned per task).
   const childrenByTask = new Map();
   const parentRefCount = new Map();
+  // gap-value-priority-signal-degraded-to-1-over-cost AC1 — the depends_on reverse-edge index: how
+  // many tasks list this id in their `depends_on`. A task others depend on IS blocking (its landing
+  // unblocks dependents) — the same semantic as being named `parent`. Built once like parentRefCount.
+  const dependedOnCount = new Map();
   for (const [id, t] of allTasks) {
     childrenByTask.set(id, readChildren(t.frontmatterRaw));
     if (t.parent && t.parent !== "null" && t.parent !== "~") {
       parentRefCount.set(t.parent, (parentRefCount.get(t.parent) || 0) + 1);
+    }
+    for (const d of readDependsOn(t.frontmatterRaw)) {
+      dependedOnCount.set(d, (dependedOnCount.get(d) || 0) + 1);
     }
   }
 
@@ -1597,7 +1624,7 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
   // (AC6), which the gap-* > DIR-* mechanical tiebreak alone cannot give. Both carry per-entry
   // { strategic, blocking, blocking_suite, cost, value, reason }. Existing promotion order is
   // untouched (AC4).
-  const relevanceOf = (id) => computeRelevance(id, allTasks.get(id), childrenByTask, parentRefCount, suiteBlocking.ids);
+  const relevanceOf = (id) => computeRelevance(id, allTasks.get(id), childrenByTask, parentRefCount, suiteBlocking.ids, dependedOnCount);
   const todoRelevance = [...allTasks.values()]
     .filter((t) => t.status === "todo" && !isFixture(t) && !isParked(t))
     .map((t) => relevanceOf(t.id))
@@ -1668,7 +1695,7 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
     for (const [id, t] of allTasks) {
       if (t.status !== "todo") continue;
       if (isFixture(t) || isParked(t)) continue; // never promotion candidates
-      candidates.push(buildCandidate(id, t, root, allTasks, poolParsed, inFlightParsed, expand, childrenByTask, parentRefCount));
+      candidates.push(buildCandidate(id, t, root, allTasks, poolParsed, inFlightParsed, expand, childrenByTask, parentRefCount, dependedOnCount));
     }
     // AC4: disjointness FIRST (how many pool/in-flight tasks the candidate is pairwise-disjoint
     // from), then `gap-*` > `DIR-*`, then touches-resolvable before not.
@@ -1714,7 +1741,7 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
     for (const [id, t] of allTasks) {
       if (t.status !== "todo") continue;
       if (isFixture(t) || isParked(t)) continue;
-      const c = buildCandidate(id, t, root, allTasks, poolParsed, inFlightParsed, expand, childrenByTask, parentRefCount);
+      const c = buildCandidate(id, t, root, allTasks, poolParsed, inFlightParsed, expand, childrenByTask, parentRefCount, dependedOnCount);
       ranked.push({ id, kind: c.kind, kindOrder: c.kindOrder, relevance: c.relevance, eligible: c.eligible, reason: c.relevance.reason });
     }
     ranked.sort(
