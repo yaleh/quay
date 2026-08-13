@@ -80,11 +80,11 @@ fork-baseline.ts:182-186    if (forceIntegration) { 输出 integrationRef }   �
 - [x] AC3: **验收②**——一个任务 fan-in 前 rebase 到新 develop：任务文件证据段不冲突 **且** 套件重跑通过
 - [x] AC4: `forkBaseline()`（integration-branch-model.ts:46）零生产调用者确认写进档案；AC52 修法按「先确认没用过」定
 - [x] AC5: `fast-mode-loop-tick.md:953` + 三层 tick 文档 integration 引用同步（改一处等于没改）
-- [ ] AC6: 既有测试全绿；`--for-task` scoped 门绿（**轮 134 在跑，`scripts/test.sh` 禁跑**——本任务改动的 `branch-model.test.mjs` 已单测绿 11/11，全量 + scoped 门延至轮后）
+- [x] AC6: 既有测试全绿；`--for-task` scoped 门绿（2026-08-13 补跑：`--for-task ... --allow-thin` exit 0 静态全过 + `node --test plugin/test/branch-model.test.mjs` 11/11——round 140 绿已覆盖全量，fork-baseline 实证 develop..<分支>=0 已捕获）
 
 ## Definition of Done
 
-- [ ] AC1–AC6 全部勾上（AC6 延至轮后）
+- [x] AC1–AC6 全部勾上
 - [x] 验收① 与 验收② 的对照样例贴出（新建 worktree rev-list + rebase 后 fan-in 实证，见下方 Evidence）
 - [ ] 全量套件绿（延至轮后）
 
