@@ -55,7 +55,7 @@ extra:
 ## Touches
 
 - packages/quay/bin/quay.ts（薄壳化：dispatch 体缩减）
-- packages/quay/src/（新搬迁命令模块）
+- packages/quay/src/cli/（新搬迁命令模块——具体子目录，非整 packages/quay/src/）
 - packages/quay/test/cli.test.mjs（import 直调扩展 + golden-replay）
 - tasks/gap-cli-import-command-migration-into-src.md（自身）
 

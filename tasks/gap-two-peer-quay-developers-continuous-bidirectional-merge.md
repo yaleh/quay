@@ -62,7 +62,7 @@ quay 开发者需要**持续合并彼此进展**。这比「--slot-status 单点
 
 ## Touches
 
-- plugin/scripts/（双向合并同步，扩展 claim-task / integration）
+- plugin/scripts/claim-task.sh（双向合并同步，扩展 claim-task）+ plugin/scripts/integration-batch-merge.sh（扩展 integration）
 - orchestration/manager-phase-goal.md（AC15 扩展：双向合并 + 权威定义）
 - tasks/gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point.md（AC4 交叉标注）
 - tasks/gap-a-to-b-code-downsync-missing-slot-status-not-on-b.md（AC5 交叉标注）

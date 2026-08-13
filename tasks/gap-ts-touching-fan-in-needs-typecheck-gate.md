@@ -46,5 +46,5 @@ extra:
 
 ## Touches
 
-- plugin/scripts/（fan-in 准入检查，ts-typecheck 前置）
+- plugin/scripts/integration-batch-merge.sh（fan-in 准入检查加 ts-typecheck 前置判据——具体文件，非目录声明）
 - tasks/gap-ts-touching-fan-in-needs-typecheck-gate.md（自身）
