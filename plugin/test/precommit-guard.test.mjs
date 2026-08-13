@@ -440,6 +440,121 @@ test("AC6c — override also applies to the fail-loud missing-state case (explic
   }
 });
 
+// ── AC51 断言面拆分 (gap-ac51-assertion-surface-split): doc checks at pre-commit + doc exclusion ──────
+
+// A quay-shaped fixture: scripts/test.sh with a run_doc_checks() that declares a doc-class checker
+// (`@static-class doc` + `@static-object orchestration/manager-tick-core.md CLAUDE.md`) and shells
+// to plugin/scripts/fake-doc-check.sh (exit 0 = doc checks pass, exit 1 = a doc check fails).
+function makeQuayFixture(docExit = 0) {
+  const root = makeGitRepo();
+  const scriptsDir = path.join(root, "scripts");
+  fs.mkdirSync(scriptsDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(scriptsDir, "test.sh"),
+    [
+      "#!/usr/bin/env bash",
+      "set -euo pipefail",
+      'repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"',
+      "run_doc_checks() {",
+      "  echo '== doc-class fixture =='",
+      "  # @static-class doc",
+      "  # @static-object orchestration/manager-tick-core.md CLAUDE.md",
+      '  bash "${repo_root}/plugin/scripts/fake-doc-check.sh" "${repo_root}"',
+      "}",
+      'if [ "${1:-}" = "--static-checks-doc" ]; then',
+      "  run_doc_checks",
+      "  exit 0",
+      "fi",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  const pkgDir = path.join(root, "plugin", "scripts");
+  fs.mkdirSync(pkgDir, { recursive: true });
+  fs.writeFileSync(path.join(pkgDir, "fake-doc-check.sh"), `#!/usr/bin/env bash\nexit ${docExit}\n`, "utf8");
+  return root;
+}
+
+test("AC51 — a DOC file (doc-class object) staged during a running round is ALLOWED (doc excluded from assertion surface)", () => {
+  const root = makeQuayFixture(0); // doc checks pass
+  try {
+    writeState(root, RUNNING_STATE);
+    // registry lists the doc file, but docClassFiles() (run_doc_checks @static-class doc) excludes it.
+    writeRegistry(root, ["orchestration/manager-tick-core.md", "tasks/**"]);
+    stage(root, "orchestration/manager-tick-core.md", "changed\n");
+    const res = runGuard(root);
+    assert.equal(res.status, 0, `doc edit must be allowed during running round, got ${res.status}: ${res.stdout}`);
+    const out = JSON.parse(res.stdout);
+    assert.equal(out.verdict, "allow");
+    assert.equal(out.reason, "no-assertion-surface-touched");
+    assert.deepEqual(out.touchedAssertion, []);
+  } finally {
+    cleanup(root);
+  }
+});
+
+test("AC51 — a TASK file staged during a running round is STILL rejected (tasks/** stays in the surface)", () => {
+  const root = makeQuayFixture(0);
+  try {
+    writeState(root, RUNNING_STATE);
+    writeRegistry(root, ["orchestration/manager-tick-core.md", "tasks/**"]);
+    stage(root, "tasks/gap-some-body-update.md");
+    const res = runGuard(root);
+    assert.equal(res.status, 1, `task edit must stay blocked, got ${res.status}`);
+    assert.equal(JSON.parse(res.stdout).reason, "running-round-assertion-surface");
+  } finally {
+    cleanup(root);
+  }
+});
+
+test("AC51 — a failing doc check rejects the commit at pre-commit (reason doc-check-failed, output carried)", () => {
+  const root = makeQuayFixture(1); // fake-doc-check exits 1 → doc check fails
+  try {
+    writeState(root, RUNNING_STATE);
+    writeRegistry(root, ["tasks/**"]);
+    stage(root, "README.md", "changed\n");
+    const res = runGuard(root);
+    assert.equal(res.status, 1, `doc-check failure must reject, got ${res.status}: ${res.stdout}`);
+    const out = JSON.parse(res.stdout);
+    assert.equal(out.verdict, "reject");
+    assert.equal(out.reason, "doc-check-failed");
+    assert.ok(out.docCheckOutput && out.docCheckOutput.length > 0, "doc-check-failed must carry the checker output");
+    assert.ok(out.message.includes("文档类检查失败"), "message names the doc-check failure");
+  } finally {
+    cleanup(root);
+  }
+});
+
+test("AC51 — --allow-dirty-round does NOT override a doc-check failure (content error, not round risk)", () => {
+  const root = makeQuayFixture(1);
+  try {
+    writeState(root, RUNNING_STATE);
+    writeRegistry(root, ["tasks/**"]);
+    stage(root, "README.md", "changed\n");
+    const res = runGuard(root, ["--allow-dirty-round"]);
+    assert.equal(res.status, 1, `override must NOT bypass doc-check failure, got ${res.status}`);
+    assert.equal(JSON.parse(res.stdout).reason, "doc-check-failed");
+  } finally {
+    cleanup(root);
+  }
+});
+
+test("AC51 — a doc file whose checker FAILS is blocked even though it would be excluded from the round surface", () => {
+  // Negative control pairing: the doc is outside the running-round assertion surface (so the round
+  // gate alone would allow it), but the pre-commit doc check itself must still gate the commit.
+  const root = makeQuayFixture(1);
+  try {
+    writeState(root, RUNNING_STATE);
+    writeRegistry(root, ["orchestration/manager-tick-core.md"]);
+    stage(root, "orchestration/manager-tick-core.md", "bad doc\n");
+    const res = runGuard(root);
+    assert.equal(res.status, 1, `a doc edit with a failing doc check must reject, got ${res.status}`);
+    assert.equal(JSON.parse(res.stdout).reason, "doc-check-failed");
+  } finally {
+    cleanup(root);
+  }
+});
+
 // ── Real-repo smoke: the guard runs against THIS repo without crashing ───────────────────────────────
 
 test("real-repo smoke — guard runs against the real repo (no crash, readable verdict)", () => {

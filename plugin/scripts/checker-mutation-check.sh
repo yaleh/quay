@@ -60,14 +60,17 @@ WORKFLOWS_GLOB="${repo_root}/.github/workflows/*.yml"
 # ── arg defaults ───────────────────────────────────────────────────────────────────────────────────
 meta_inject=""
 
-# ── manifest parsing (AC1: from run_static_checks + CI, never hand-written) ───────────────────────
+# ── manifest parsing (AC1: from run_static_checks + run_doc_checks + CI, never hand-written) ──────
 
-# Parse scripts/test.sh's run_static_checks() function body for plugin/scripts/<name>.(sh|ts).
+# Parse scripts/test.sh's run_static_checks() AND run_doc_checks() function bodies for
+# plugin/scripts/<name>.(sh|ts). The doc-class checkers MOVED to run_doc_checks under AC51
+# (gap-ac51-assertion-surface-split — they now run at pre-commit, not in the full suite), but their
+# mutation cases MUST stay in this manifest — the L_S instrument is not weakened by the split.
 list_run_static_checks_checkers() {
   if [ ! -f "$TEST_SH" ]; then
     return 0
   fi
-  awk '/^run_static_checks\(\)/{f=1;next} f && /^}/{f=0} f' "$TEST_SH" \
+  awk '/^run_static_checks\(\)|^run_doc_checks\(\)/{f=1;next} f && /^}/{f=0} f' "$TEST_SH" \
     | grep -oE '\$\{repo_root\}/plugin/scripts/[A-Za-z0-9_.-]+\.(sh|ts)' \
     | sed -E 's#.*/plugin/scripts/##; s/\.(sh|ts)$//' \
     | sort -u

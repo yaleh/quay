@@ -1,7 +1,8 @@
 #!/usr/bin/env node
-// precommit-guard.ts — 拒绝「轮 running 且触及断言面」的提交（覆盖全部写入者）。
+// precommit-guard.ts — 提交那一刻的守卫：① 文档类检查（AC51 断言面拆分）；② 拒绝「轮 running
+// 且触及断言面」的提交（覆盖全部写入者）。
 //
-// 实证（2026-08-12，三独立支撑，manager 判定）：「round 期间零提交」约定守不住：
+// ② 的实证（2026-08-12，三独立支撑，manager 判定）：「round 期间零提交」约定守不住：
 //   ① 约定无产物（C17）——round 60 约定后 26s 即破（外层 47023142）；
 //   ② 连事后都难区分——要靠人拿 startedAt 逐笔比对 commit 时刻；
 //   ③ 参与方不完整且名单无人维护（最硬）——inner 从不在约定里，round 63 窗口内
@@ -10,17 +11,26 @@
 //   因此机制 = 共享 pre-commit 钩子（--install-hook 写入 <git-dir>/hooks/pre-commit）——
 //   不是各层各自记得调的 commit 包装。约定参与方名单不可维护，钩子天然覆盖所有提交者。
 //
+// AC51 断言面拆分（gap-ac51-assertion-surface-split, SPEC §13）：文档类检查（strategic-doc-
+// staleness / drive-contract / threshold-scope / state-worded-clause / red-on-omission /
+// tick-core-static / instrument-failure）从全量套件移出，落到本守卫（提交那一刻）跑——
+// 见 runDocChecks()：shell 到 `bash scripts/test.sh --static-checks-doc`（run_doc_checks 单源）。
+// 因为它们不再进套件，文档文件不再被在跑的轮读取 ⇒ 断言面剔除文档（docClassFiles），
+// 编辑文档不再使在跑的轮变红、也不需要窗口（① 踏空 / ②' override 作废认证 全消失）。
+//
 // 判定（读 .quay/full-suite-state.json）：
-//   state == "running" 且 本次提交触及断言面文件 ⇒ 拒提交（exit 1）+ 打印预检清单
-//   state 文件缺失 / state 字段 null ⇒ 拒（fail-loud——参照系缺失时谓词必须崩，
-//     不给看似合理的值；AC2）
+//   A. 文档类检查：失败 ⇒ 拒提交（reason=doc-check-failed），输出含失败检查器的文件+行号
+//      （= 补救位置，SPEC §13.4）。--allow-dirty-round 只覆盖 B，不覆盖 A。
+//   B. state == "running" 且 本次提交触及（代码类）断言面文件 ⇒ 拒提交（exit 1）+ 预检清单
+//   state 文件缺失 / state 字段 null ⇒ 拒（fail-loud——参照系缺失时谓词必须崩，AC2）
 //   断言面集合 = plugin/scripts/judged-object-registry.json 的 patterns（A0b③ 生成，
 //     非手工维护；守卫只读它）。缺失/空/不可解析 ⇒ 回退「实证闯祸类 + 判定对象声明」：
 //     tasks/**（round 60/63/67）+ plugin/loop/**（cp 事故面）+ scripts/test.sh 的
 //     @static-object 聚合（套件检查器判定对象，含 orchestration/*-tick-core.md）——
 //     不再回退全 tracked（4113/4316 实测不可用，外层裁定 B 修正；fail-closed 保留）。
-//     A0b③ 是精化不是前置。
-//   --allow-dirty-round（CLI 参数或 QUAY_ALLOW_DIRTY_ROUND=1 环境变量）显式覆盖——
+//     AC51 起：该面再剔除 scripts/test.sh run_doc_checks() 的 `# @static-class doc` 对象的
+//     .md 文档（docClassFiles）——文档检查已移到 pre-commit，不再被套件读取。
+//   --allow-dirty-round（CLI 参数或 QUAY_ALLOW_DIRTY_ROUND=1 环境变量）显式覆盖 B——
 //     有记录可追责，不静默绕过。
 //
 // 使用（本仓库路径）：
@@ -29,9 +39,10 @@
 //   --install-hook     把 <git-dir>/hooks/pre-commit 写成调用本守卫的 shim（幂等）
 //   --uninstall-hook   移除 <git-dir>/hooks/pre-commit 中的本守卫 shim（幂等）
 //   --json             机器可读输出（{verdict, reason, state, assertionSurface, staged}）
-//   --allow-dirty-round / QUAY_ALLOW_DIRTY_ROUND=1  显式覆盖（记录可追责）
+//   --allow-dirty-round / QUAY_ALLOW_DIRTY_ROUND=1  显式覆盖 B（记录可追责；A 仍生效）
 //
-// 退出码：0 = 放行；1 = 拒（running+断言面 / fail-loud 缺失/null）；2 = 用法/环境错。
+// 退出码：0 = 放行；1 = 拒（doc-check-failed / running+断言面 / fail-loud 缺失/null）；
+// 2 = 用法/环境错。
 //
 // 作为 pre-commit 钩子运行时 git 不传参数，--allow-dirty-round 只能经
 // QUAY_ALLOW_DIRTY_ROUND=1 环境变量显式给出（git commit 前设置）。
@@ -40,7 +51,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -67,6 +78,8 @@ export interface Verdict {
   touchedAssertion: string[];
   override: boolean;
   registryMode: "registry" | "fallback-narrowed" | "error";
+  /** AC51: doc-class check failure output (present when reason === "doc-check-failed"). */
+  docCheckOutput?: string;
 }
 
 // ── 小工具 ───────────────────────────────────────────────────────────────────────────────────────────
@@ -182,6 +195,87 @@ export function staticObjectPatterns(root: string): string[] {
   return [...patterns];
 }
 
+// ── AC51 文档类（pre-commit 检查）───────────────────────────────────────────────────────────────────
+
+/**
+ * Doc-class object patterns — the union of `# @static-object` annotations in scripts/test.sh's
+ * run_doc_checks() body (AC51 断言面拆分, SPEC §13.2 — the doc-consistency checkers moved to
+ * pre-commit). A missing run_doc_checks() / missing test.sh ⇒ [] (nothing excluded — conservative:
+ * a non-quay workspace has no doc checks to move, so nothing drops out of the assertion surface).
+ */
+export function docClassPatterns(root: string): string[] {
+  const testSh = path.join(root, "scripts", "test.sh");
+  if (!fs.existsSync(testSh)) return [];
+  const src = fs.readFileSync(testSh, "utf8");
+  const lines = src.split("\n");
+  let start = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (/^run_doc_checks\(\)\s*\{/.test(lines[i])) { start = i; break; }
+  }
+  if (start === -1) return [];
+  let end = lines.length;
+  for (let i = start + 1; i < lines.length; i++) {
+    if (/^\}/.test(lines[i])) { end = i; break; }
+  }
+  const patterns = new Set<string>();
+  for (const line of lines.slice(start + 1, end)) {
+    const m = line.match(/^\s*#\s*@static-object\s+(.+)$/);
+    if (m) for (const tok of m[1].trim().split(/\s+/).filter(Boolean)) patterns.add(tok);
+  }
+  return [...patterns];
+}
+
+/**
+ * The concrete DOC files excluded from the running-round assertion surface under AC51: tracked
+ * files that are (a) markdown documents (`.md`, incl. CLAUDE.md) AND (b) match a doc-class object
+ * pattern. The doc checkers' NON-doc objects (their own `.ts` / `.test.mjs` implementations) are
+ * deliberately NOT excluded — those are code still read by the running suite (their unit tests run
+ * in the glob), so modifying them during a round must stay blocked.
+ */
+export function docClassFiles(root: string): Set<string> {
+  const patterns = docClassPatterns(root);
+  if (patterns.length === 0) return new Set();
+  const tracked = allTrackedFiles(root);
+  const docFiles = new Set<string>();
+  for (const f of tracked) {
+    if (!/\.md$/i.test(f)) continue;
+    if (patterns.some((p) => matchesGlob(p, f))) docFiles.add(f);
+  }
+  return docFiles;
+}
+
+/** Run the doc-class static checks at the pre-commit moment (AC51). See the header comment. */
+export interface DocCheckResult {
+  ok: boolean;
+  output: string;
+}
+
+export function runDocChecks(root: string): DocCheckResult {
+  const testSh = path.join(root, "scripts", "test.sh");
+  if (!fs.existsSync(testSh)) return { ok: true, output: "" };
+  // AC51 portability: the doc-check gate is only ACTIVE where the split is actually implemented —
+  // the workspace's scripts/test.sh must declare the doc-check surface (run_doc_checks + the
+  // `--static-checks-doc` branch). A third-party workspace with a plain test.sh must NOT start
+  // rejecting every commit (its test.sh would fall through to an unknown-arg error).
+  const src = fs.readFileSync(testSh, "utf8");
+  if (!/^run_doc_checks\(\)\s*\{/m.test(src) || !src.includes("--static-checks-doc")) {
+    return { ok: true, output: "" };
+  }
+  try {
+    const res = spawnSync("bash", [testSh, "--static-checks-doc"], {
+      cwd: root,
+      encoding: "utf8",
+      timeout: 120_000,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const output = `${res.stdout ?? ""}${res.stderr ?? ""}`;
+    if (res.status !== 0) return { ok: false, output };
+    return { ok: true, output };
+  } catch (e) {
+    return { ok: false, output: String((e as Error).message) };
+  }
+}
+
 // ── 断言面集合 ───────────────────────────────────────────────────────────────────────────────────────
 
 export interface RegistryShape {
@@ -198,6 +292,8 @@ export interface RegistryShape {
  *       tasks/**（round 60/63/67 全在这）+ plugin/loop/**（cp 事故面）
  *       + scripts/test.sh 的 @static-object 聚合（套件检查器的判定对象；含 orchestration/*-tick-core.md）
  *     ——不再回退全 tracked（4113/4316 实测不可用，ruling B）。
+ *   - AC51 起两个分支都再剔除 docClassFiles()（run_doc_checks 的 `# @static-class doc` 对象里
+ *     的 .md 文档）——文档检查已移到 pre-commit，不再被套件读取，编辑文档不再使在跑的轮变红。
  */
 export const FALLBACK_TROUBLE_CLASSES = ["tasks/**", "plugin/loop/**"] as const;
 
@@ -219,12 +315,14 @@ export function resolveAssertionSurface(root: string): {
       patterns = []; // 不可解析 ⇒ 回退（fail-closed）
     }
   }
+  const docFiles = docClassFiles(root);
+  const excludeDoc = (files: string[]): string[] => files.filter((f) => !docFiles.has(f));
   if (patterns.length === 0) {
     const fallback = [...FALLBACK_TROUBLE_CLASSES, ...staticObjectPatterns(root)];
-    const files = tracked.filter((f) => fallback.some((p) => matchesGlob(p, f)));
+    const files = excludeDoc(tracked.filter((f) => fallback.some((p) => matchesGlob(p, f))));
     return { mode: "fallback-narrowed", patterns: [], files };
   }
-  const files = tracked.filter((f) => patterns.some((p) => matchesGlob(p, f)));
+  const files = excludeDoc(tracked.filter((f) => patterns.some((p) => matchesGlob(p, f))));
   return { mode: "registry", patterns, files };
 }
 
@@ -257,7 +355,31 @@ export function judge(
   const surface = resolveAssertionSurface(root);
   const staged = opts.staged ?? stagedFiles(root);
 
-  // 显式覆盖（AC6，有记录可追责，不静默绕过）——最先检查：作者显式接受一切不确定性
+  // A. 文档类检查（AC51 断言面拆分——文档检查在提交这一刻跑，不进全量套件）。失败 ⇒ 拒。
+  //    失败输出含检查器打印的文件+行号 = 补救位置（SPEC §13.4）。--allow-dirty-round 只覆盖 B
+  //    （轮窗口风险），不覆盖 A（文档内容错误）。
+  const docResult = runDocChecks(root);
+  if (!docResult.ok) {
+    return {
+      verdict: "reject",
+      reason: "doc-check-failed",
+      message:
+        "pre-commit 守卫：文档类检查失败（AC51 断言面拆分——文档检查在提交这一刻跑，不再等一轮套件）。\n" +
+        "失败检查器的输出含文件+行号（= 补救位置）；修复后重新提交。\n" +
+        "─── 文档类检查输出 ───\n" +
+        docResult.output,
+      state: data,
+      stateFile,
+      assertionSurface: surface.files,
+      staged,
+      touchedAssertion: [],
+      override: false,
+      registryMode: surface.mode,
+      docCheckOutput: docResult.output,
+    };
+  }
+
+  // B. 轮窗口门（AC6 显式覆盖有记录可追责，不静默绕过）——作者显式接受一切不确定性
   // （含 state 缺失/fail-loud 情形）。reason 恒定 allow-dirty-round-override，可追责。
   if (allowOverride) {
     return {
@@ -402,9 +524,12 @@ function hookShim(root: string): string {
   return [
     "#!/usr/bin/env bash",
     `# ${HOOK_FINGERPRINT} — installed by plugin/scripts/precommit-guard.ts --install-hook`,
-    "# pre-commit guard: reject commits while a suite round is running AND the commit touches",
+    "# pre-commit guard: ① runs the DOC-CLASS checks at commit time (AC51 断言面拆分 — doc checks",
+    "# are no longer in the full suite, so editing docs no longer makes a running round red);",
+    "# ② rejects commits while a suite round is running AND the commit touches code-class",
     "# assertion-surface files (covers ALL writers — the shared hook, not an agreed participant list).",
-    "# Override (recorded, not silent): QUAY_ALLOW_DIRTY_ROUND=1 git commit …",
+    "# Round-window override (recorded, not silent): QUAY_ALLOW_DIRTY_ROUND=1 git commit …",
+    "# (the override does NOT bypass doc-check failures — those are content errors, not round risk).",
     'ROOT="$(git rev-parse --show-toplevel)"',
     `exec node --no-warnings --experimental-strip-types "$ROOT/plugin/scripts/${HOOK_FINGERPRINT}" --root "$ROOT"`,
     "",
@@ -442,7 +567,8 @@ export function uninstallHook(root: string): { removed: boolean; hookPath: strin
 
 // ── CLI ───────────────────────────────────────────────────────────────────────────────────────────────
 
-const USAGE = `precommit-guard.ts — 拒绝「轮 running 且触及断言面」的提交（覆盖全部写入者）
+const USAGE = `precommit-guard.ts — 提交那一刻的守卫：① 文档类检查（AC51 断言面拆分）；② 拒绝「轮
+running 且触及（代码类）断言面」的提交（覆盖全部写入者）
 
 用法:
   node --experimental-strip-types plugin/scripts/precommit-guard.ts [--root <dir>]
@@ -451,11 +577,12 @@ const USAGE = `precommit-guard.ts — 拒绝「轮 running 且触及断言面」
 参数:
   --install-hook      把 <git-dir>/hooks/pre-commit 写成调用本守卫的 shim（幂等）
   --uninstall-hook    移除 <git-dir>/hooks/pre-commit 中的本守卫 shim（幂等）
-  --allow-dirty-round 显式覆盖（等价 QUAY_ALLOW_DIRTY_ROUND=1；有记录可追责）
-  --json              机器可读输出（{verdict, reason, message, ...}）
+  --allow-dirty-round 显式覆盖轮窗口门 B（等价 QUAY_ALLOW_DIRTY_ROUND=1；有记录可追责；
+                     不覆盖文档类检查 A——那是内容错误，不是轮风险）
+  --json              机器可读输出（{verdict, reason, message, docCheckOutput, ...}）
   --help              本帮助
 
-退出码: 0=放行 1=拒（running+断言面 / fail-loud 缺失/null） 2=用法/环境错`;
+退出码: 0=放行 1=拒（doc-check-failed / running+断言面 / fail-loud 缺失/null） 2=用法/环境错`;
 
 function main(): number {
   const args = process.argv.slice(2);
@@ -538,6 +665,7 @@ function main(): number {
           touchedAssertion: verdict.touchedAssertion,
           override: verdict.override,
           registryMode: verdict.registryMode,
+          docCheckOutput: verdict.docCheckOutput ?? null,
         },
         null,
         2,

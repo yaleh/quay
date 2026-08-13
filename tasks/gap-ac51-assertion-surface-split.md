@@ -71,18 +71,60 @@ docs/proposals/ / plugin/loop/*.md` ⇒ **正是三层每天写的地方**。
 
 ## AC
 
-- [ ] AC1: 文档类检查从全量套件移出（提交时刻跑 / pre-commit）
-- [ ] AC2: 负控制——故意在主检出编辑一个断言面文档，确认**不再**使任何在跑的轮变红（SPEC :475 AC42 判据 3）
-- [ ] AC3: 既有测试全绿；`--for-task` scoped 门绿
+- [x] AC1: 文档类检查从全量套件移出（提交时刻跑 / pre-commit）
+- [x] AC2: 负控制——故意在主检出编辑一个断言面文档，确认**不再**使任何在跑的轮变红（SPEC :475 AC42 判据 3）
+- [x] AC3: 既有测试全绿；`--for-task` scoped 门绿
 
 ## Definition of Done
 
-- [ ] AC1–AC3 全部勾上
-- [ ] 负控制样例贴出（主检出编辑断言面文档、在跑轮不变红）
-- [ ] 全量套件绿
+- [x] AC1–AC3 全部勾上
+- [x] 负控制样例贴出（主检出编辑断言面文档、在跑轮不变红）
+- [ ] 全量套件绿（**deferred to fan-in** —— 受零并发约束，本 worktree 不跑全量；直接相关的测试文件全部单跑绿）
+
+## 执行记录（2026-08-13）
+
+**改动**（AC51 断言面拆分，SPEC §13，人裁定 (b)）：
+- `scripts/test.sh`：7 个文档类检查器（strategic-doc-staleness / drive-contract / threshold-scope /
+  state-worded-clause / red-on-omission / tick-core-static / instrument-failure）从 `run_static_checks()`
+  （全量套件闸）移出，进新的 `run_doc_checks()`（`# @static-class doc` 标注），唯一调用方是
+  `scripts/test.sh --static-checks-doc`（pre-commit）。`run_static_checks` 只剩 15 个代码类检查器。
+- `plugin/scripts/precommit-guard.ts`：
+  - `runDocChecks()` —— 提交那一刻 shell 到 `bash scripts/test.sh --static-checks-doc`，任一文档检查
+    失败 ⇒ 拒提交（reason=`doc-check-failed`，输出含文件+行号 = 补救位置 SPEC §13.4）。portability：
+    test.sh 没有 `run_doc_checks`/`--static-checks-doc` 的第三方 workspace 不启用该闸。
+  - `docClassFiles()` —— 从 `run_doc_checks` 的 `@static-class doc` 对象的 `.md` 文件派生「文档面」；
+    `resolveAssertionSurface` 两个分支（registry / fallback-narrowed）都剔除文档面 ⇒ 断言面只剩代码类，
+    编辑文档不再使在跑的轮变红（`--allow-dirty-round` 只覆盖轮窗口门，不覆盖文档检查失败）。
+- `plugin/scripts/checker-mutation-check.sh`：manifest 解析 `run_static_checks` ∪ `run_doc_checks`
+  （移出的文档检查器的 mutation case 仍进全量套件 —— L_S 不被削弱）。
+- 测试更新：`plugin/test/precommit-guard.test.mjs` 加 5 条 AC51 用例（文档编辑在跑轮放行 / task 仍拦 /
+  文档检查失败拒 / allow-dirty-round 不覆盖文档失败 / 文档失败即使被排除也拦）；`scoped-static-checks
+  .test.mjs` 与 `tick-core-static-check.test.mjs` 的 wiring 断言改为 run_doc_checks / 移出 scoped。
+
+**AC1 证据**：`awk` 枚举 —— `run_static_checks` 内文档检查器 0 个，`run_doc_checks` 内 7 个；且
+`bash scripts/test.sh --static-checks-doc` 干净跑绿（~1.3s）。
+
+**AC2 负控制（真实样例，worktree 上模拟 running 轮）**：
+```
+state=written-running (runId=ac51-neg-control, finishedAt=null)
+staged=orchestration/manager-tick-core.md      ← 断言面文档（tick-core-static/state-worded 对象）
+guard_exit=0  verdict=allow  reason=no-assertion-surface-touched  touchedAssertion=[]
+（同轮下 tasks/ 文件仍拦：reason=running-round-assertion-surface）
+```
+
+**AC3 证据**（直接相关的测试文件单跑全绿）：
+```
+precommit-guard.test.mjs            25/25   scoped-static-checks.test.mjs  11/11
+tick-core-static-check.test.mjs     14/14   checker-mutation-check.test.mjs 11/11
+select-static-checks-for-touches    16/16   checker-cost.test.mjs           12/12
+red-window-shared-gate.test.mjs     14/14   + 7 个文档检查器自身的测试全绿
+capability-catalog --json           exit 0（无 unclassified）
+scripts/test.sh --for-task gap-ac51-assertion-surface-split --allow-thin  exit 0
+```
 
 ## Touches
 
 - plugin/scripts/（文档检查下沉 pre-commit 的实现）
 - scripts/test.sh（全量套件移出文档类检查）
+- plugin/test/（断言面拆分相关测试更新：precommit-guard / scoped-static-checks / tick-core-static-check —— 行为变更的必然产物，anti-drift 认证）
 - tasks/gap-ac51-assertion-surface-split.md（自身）

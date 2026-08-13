@@ -305,16 +305,24 @@ test("the real repo passes all four criteria (src:N 100% + pointers + numbering 
   assert.equal(out.ac6.ok, true);
 });
 
-test("AC7: the checker is registered in scripts/test.sh run_static_checks with @static-tier always", () => {
+test("AC7: the checker is registered in scripts/test.sh run_doc_checks with @static-class doc (AC51 断言面拆分)", () => {
+  // AC51 (gap-ac51-assertion-surface-split): the doc-consistency checkers moved OUT of the full
+  // suite (run_static_checks) INTO run_doc_checks, whose ONLY caller is the pre-commit guard
+  // (`scripts/test.sh --static-checks-doc`). The registration assertion is unchanged in spirit —
+  // the checker must still be wired, just into the pre-commit surface, marked @static-class doc.
   const testSh = fs.readFileSync(path.join(REPO_ROOT, "scripts/test.sh"), "utf8");
-  const body = testSh.slice(testSh.indexOf("run_static_checks()"));
-  const end = body.indexOf("\n}\n");
-  const func = end === -1 ? body : body.slice(0, end + 3);
-  const checkerLine = func.split("\n").find((l) => l.includes("tick-core-static-check"));
-  assert.ok(checkerLine, "tick-core-static-check not wired into run_static_checks");
-  const tierLine = func.split("\n")
-    .slice(0, func.split("\n").indexOf(checkerLine))
+  const lines = testSh.split("\n");
+  const start = lines.findIndex((l) => /^run_doc_checks\(\)\s*\{/.test(l));
+  assert.ok(start >= 0, "run_doc_checks() function not found in scripts/test.sh");
+  const relEnd = lines.slice(start + 1).findIndex((l) => /^\}/.test(l));
+  assert.ok(relEnd >= 0, "run_doc_checks() body not closed in scripts/test.sh");
+  const func = lines.slice(start, start + 1 + relEnd).join("\n");
+  const funcLines = func.split("\n");
+  const checkerLine = funcLines.find((l) => l.includes("tick-core-static-check"));
+  assert.ok(checkerLine, "tick-core-static-check not wired into run_doc_checks");
+  const classLine = funcLines
+    .slice(0, funcLines.indexOf(checkerLine))
     .reverse()
-    .find((l) => /@static-tier|@static-object/.test(l));
-  assert.ok(tierLine && /@static-tier\s+always/.test(tierLine), `expected @static-tier always, got: ${tierLine}`);
+    .find((l) => /@static-class/.test(l));
+  assert.ok(classLine && /@static-class\s+doc/.test(classLine), `expected @static-class doc, got: ${classLine}`);
 });
