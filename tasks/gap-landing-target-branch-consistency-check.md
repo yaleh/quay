@@ -58,6 +58,9 @@ extra:
 - plugin/scripts/landing-target-check.ts（新检查器）
 - plugin/scripts/checker-mutation-cases/landing-target-check.sh（新检查器 mutation case）
 - scripts/test.sh（run_static_checks 接入，同 concurrency-literal 接入点）
+- plugin/scripts/capability-catalog.sh（新检查器五表声明：QUESTION/CADENCE/INVALIDATION/LAST_REAFFIRMED/MATCHING）
+- docs/proposals/quay-product-outline.md（delivery-inventory 快照重生成：scripts 223→224）
+- tasks/gap-suite-fix-merge-subagent-implementation.md（AC4 全池扫描唯一 reconcile：line 37 补 `landing-exception:` 标注）
 - tasks/gap-landing-target-branch-consistency-check.md（自身）
 
 ## Evidence

@@ -372,6 +372,19 @@ run_static_checks() {
   # @static-tier change
   # @static-object plugin/scripts/ scripts/ plugin/scripts/concurrency-literal-check.ts plugin/test/concurrency-literal-check.test.mjs
   run_checker "concurrency-literal-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/concurrency-literal-check.ts" --gate --root "${repo_root}"
+  echo "== landing-target branch-consistency check (gap-landing-target-branch-consistency-check, AC1-AC4) =="
+  # 任务落地目标分支必须 == 当前前锋分支（develop..integration=0 不变式；机制家族第 4 次——「落地路径」
+  # 字段与当前分支模型的一致性没有消费者）。前锋分支由 git 关系读宿主推出（integration ⊆ develop ⇒
+  # develop; develop ⊆ integration ⇒ integration; 发散 ⇒ 模型损坏 fail-closed）——不硬编码分支名,
+  # 分支模型迁移时同一公式自动跟随（AC2）。扫描任务体作者面（title/Proposal/Plan/Contract/Finding）
+  # 的落地目标表述（合入 X / merge 到 X / 落到 X / 落地 X, X 必须是真实分支名——"落地 ADR-016" /
+  # "merge into 1" 不是落地目标）; 历史记录（已/经/由/被 + 后/前）、否定（未/不/勿）、引例（「合入 X」）
+  # 与显式 `landing-exception:` 例外（AC4 的「本次例外何时清回 0」说明）不算声明。exit 1 目标≠前锋即红
+  # （set -euo pipefail）—— 一条新写的错误落地目标在提交时刻红,不靠手工勾选表。mutation case:
+  # plugin/scripts/checker-mutation-cases/landing-target-check.sh（基线→注入→恢复→例外→模型迁移）。
+  # @static-tier change
+  # @static-object tasks/ scripts/test.sh plugin/scripts/landing-target-check.ts plugin/scripts/checker-mutation-cases/landing-target-check.sh
+  run_checker "landing-target-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/landing-target-check.ts" --gate --root "${repo_root}"
   echo "== commit-message verified-claim check (gap-commit-message-claims-verified-without-verification, AC11) =="
   # Commit messages are an AC11 carrier: merge commit 8e2e49b9's message claimed "all syntax
   # verified" while carrying real merge corruption (trend-check.ts duplicated 2×, 8 task
