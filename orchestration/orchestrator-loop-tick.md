@@ -363,8 +363,8 @@ materialized command contains the flag (the launcher's `--dry-run` output must i
 
 | 实例量 | quay 取值 | 消费处 |
 |---|---|---|
-| 工作分支两线 | `fork_baseline: develop` / `merge_target: integration`（`.quay/config.yml` `loop:` 节） | 步骤 3b / 3.5 批量合 |
-| 外层工作 checkout | **integration**（2026-08-09 结构性修正，见文件头 ⚠️）——外层一切提交落 integration，develop 只经 ff（batch-merge）前进 | 启动方式 / 各提交步 |
+| 工作分支（**单线**，AC48 2026-08-13 退役 integration） | `fork_baseline: develop` / `merge_target: develop`（`.quay/config.yml` `loop:` 节）——per-task 模型：任务从 develop fork、worktree 内验证、merge 回 develop | 步骤 3b / A6 fan-in |
+| 外层工作 checkout | **develop**（AC50 已切，AC48 确认 integration 退役）——外层一切提交落 develop，无第二线 | 启动方式 / 各提交步 |
 | 目标项目清单 | quay / archguard / meta-cc（`/home/yale/work/<p>`） | 步骤 0d `.halt` 轮询 / 优先级 |
 | tmux 窗口 | outer = `quay-outer`（launch 配置 `quay-launch.sh outer`）、inner = `quay-0:inner`、manager = `quay-0:manager` | 冷启动 / 驱动 / 观察 |
 | 跨项目优先级 | **quay 高于 archguard / meta-cc**（人已裁定） | 步骤 0d |

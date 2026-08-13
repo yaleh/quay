@@ -86,7 +86,7 @@ test("AC2 — the plugin template defers quay instance values to the orchestrati
 test("AC3 — the orchestration file carries the quay instance values (本层状态 section)", () => {
   const instanceSection = orchSrc.slice(orchSrc.indexOf("## 本层状态"));
   assert.match(instanceSection, /develop/, "本层状态 must carry fork_baseline: develop");
-  assert.match(instanceSection, /integration/, "本层状态 must carry merge_target: integration");
+  assert.match(instanceSection, /merge_target: develop/, "本层状态 must carry the single-line develop target (AC48 2026-08-13 retired integration)");
   assert.match(instanceSection, /quay \/ archguard \/ meta-cc/, "本层状态 must carry the quay project list");
   assert.match(instanceSection, /quay-0:inner/, "本层状态 must carry the tmux window layout");
 });
