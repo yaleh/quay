@@ -1,4 +1,6 @@
 // @test-group engine
+// @load-sensitive wall-clock
+// @load-sensitive-entry 2026-08-13 wall-clock (AC5/tmux-leak-scan DELTA reap-wait timing races under full-suite load; round 132 green / 133 red same tree, isolated rerun green — partition as in-family flake, not regression)
 // test-isolation-check.test.mjs — gap-test-isolation-contract-is-unwritten: RED/GREEN tests for
 // the test-isolation contract scan + shrink-only violation ratchet (test-isolation-check.ts).
 // Covers AC1–AC8:
