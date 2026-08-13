@@ -28,13 +28,81 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
-import { REQUIRED_HEARTBEAT_FIELDS } from "../scripts/inner-wakeup-heartbeat-check.ts";
-import { buildHeartbeat, parseJsonArg } from "../scripts/inner-wakeup-heartbeat.ts";
+import {
+  REQUIRED_HEARTBEAT_FIELDS,
+  judgeEndInvariant,
+} from "../scripts/inner-wakeup-heartbeat-check.ts";
+import { buildHeartbeat, parseJsonArg, runDirectSlotRefill } from "../scripts/inner-wakeup-heartbeat.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..", "..");
 const WRITER = path.join(repoRoot, "plugin", "scripts", "inner-wakeup-heartbeat.ts");
 const CHECKER = path.join(repoRoot, "plugin", "scripts", "inner-wakeup-heartbeat-check.ts");
+
+// ── fixture helpers (mirror slot-refill.test.mjs — a REAL workspace so the writer's DIRECT
+//    slot-refill re-run sees a dispatchable pool) ────────────────────────────────────────────────────
+
+function makeWorkspace(tag) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), tag));
+  fs.mkdirSync(path.join(dir, "tasks"), { recursive: true });
+  fs.mkdirSync(path.join(dir, "code"), { recursive: true });
+  return dir;
+}
+
+function writeTask(root, id, { status = "todo", labels = [], parent = null, body, selfTouch = true } = {}) {
+  const fm = [
+    "---",
+    `id: ${id}`,
+    `title: fixture ${id}`,
+    `status: ${status}`,
+    "labels:",
+    ...labels.map((l) => `  - ${l}`),
+    `parent: ${parent}`,
+    "extra:",
+    "  schema: v1",
+    "---",
+  ].filter((x) => x !== null).join("\n");
+  if (selfTouch && body.includes("## Touches") && !body.includes(`- tasks/${id}.md`)) {
+    body = body.replace(/(## Touches\n)/, `$1- tasks/${id}.md\n`);
+  }
+  fs.writeFileSync(path.join(root, "tasks", `${id}.md`), `${fm}\n\n${body}`);
+}
+
+/** A C8-clean ready task (self-touch present, `(new)` touches on ABSENT files ⇒ stays dispatchable). */
+function dispatchableBody(touches) {
+  return [
+    "**type:** execution",
+    "## Proposal",
+    "A real proposal paragraph that is definitely more than forty non-whitespace chars.",
+    "## Contract",
+    "measure   slot = slot-refill stdout slots_free",
+    "band      slot = >=0",
+    "invoke    node plugin/scripts/slot-refill.ts",
+    "control   in-flight>=cap => should_refill false",
+    "resume    分步提交",
+    "## Touches",
+    ...touches,
+    "## Acceptance Criteria",
+    "- [ ] an AC item that is long enough",
+    "## Definition of Done",
+    "standard DoD — the five clauses; meta-enforcer fixture-pinned.",
+  ].join("\n");
+}
+
+/** A workspace with ONE dispatchable ready task + an empty in-flight set — the 7th-same-shape
+ *  precondition (should_refill=true, free slots, dispatchable work, empty reason). */
+function makeDispatchableWorkspace(tag) {
+  const root = makeWorkspace(tag);
+  writeTask(root, "gap-fixture-dispatchable", {
+    status: "ready",
+    body: dispatchableBody([
+      "- tasks/gap-fixture-dispatchable.md",
+      "- code/fixture-a.ts (new)",
+      "- code/fixture-b.ts (new)",
+    ]),
+  });
+  return root;
+}
 
 // ── pure: buildHeartbeat ──────────────────────────────────────────────────────────────────────────────
 
@@ -140,6 +208,10 @@ const FULL_ARGS = [
   "--effective-cap", "3",
   "--agent-dispatches", "1",
   "--budget-hit", "false",
+  // AC53 AC1 (gap-ac53-end-invariant-gate): the session's in-flight set is REQUIRED. The bare temp
+  // dirs below have no tasks/ store ⇒ the writer's DIRECT slot-refill re-run reads an empty pool ⇒
+  // should_refill=false ⇒ the end-invariant gate passes (no dispatchable work) and the write proceeds.
+  "--in-flight", "",
   "--delay-seconds", "1500",
   // AC53 AC1: the five dispatch-state keys (should_refill=false ⇒ the round-trip checker verdict is
   // ALIVE — no AC2 end-invariant violation).
@@ -252,24 +324,109 @@ test("AC53 AC1 fail-closed — writer REFUSES a heartbeat missing the dispatch-s
   }
 });
 
-test("AC53 AC2 — a written violating heartbeat (should_refill=true + empty reason) trips the checker's end-invariant (exit 1)", () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "iwuh-viol-"));
+test("AC53 AC2 (gap-ac53-end-invariant-gate) — the 7th-same-shape replay: WRITER REFUSES (exit 1) an END heartbeat while dispatchable work waits, writes NOTHING", () => {
+  // The 7th-same-shape (task Proposal): should_refill=true ∧ slots_free=5 ∧ dispatchable>0 ∧
+  // no_refill_reason=null — the tick "记录 reason 然后睡" shape. Recording a reason never stopped the
+  // sleep; the structural gate must refuse the WRITE itself (exit non-zero), so the caller has NO
+  // LEGAL EXIT to reschedule sleep.
+  const root = makeDispatchableWorkspace("iwuh-viol-");
   try {
-    // The 04:02:52Z negative-control shape: should_refill=true, slots_free=5, dispatchable_disjoint=5,
-    // pool=16, no_refill_reason=null — a round that ENDED while dispatchable work remained.
+    // Direct re-run MUST see a dispatchable candidate (should_refill=true) — the precondition that
+    // makes this a true negative-control replay.
+    const direct = runDirectSlotRefill({ root, inFlightIds: [], cap: 5 });
+    assert.equal(direct.ok, true, "direct slot-refill must succeed");
+    assert.equal(direct.refill.should_refill, true, `fixture must be dispatchable:\n${JSON.stringify(direct.refill)}`);
     const violatingArgs = [...FULL_ARGS];
     const idxShould = FULL_ARGS.indexOf("--should-refill");
     violatingArgs[idxShould + 1] = "true";
     const idxReason = FULL_ARGS.indexOf("--no-refill-reason");
     violatingArgs[idxReason + 1] = "null";
-    const w = runWriter(tmp, violatingArgs);
-    assert.equal(w.status, 0, `writer must write the violating shape:\n${w.stdout}\n${w.stderr}`);
+    // --in-flight '' (the fixture's empty in-flight set) is already in FULL_ARGS.
+    const w = runWriter(root, violatingArgs);
+    assert.equal(w.status, 1, `writer must REFUSE the violating end heartbeat:\n${w.stdout}\n${w.stderr}`);
+    assert.match(w.stderr, /结束不变式违例/, "the refusal must name 结束不变式违例");
+    assert.match(w.stderr, /inner-round-ended-with-dispatchable-work/, "the refusal reason must be end-invariant-violated");
+    assert.ok(!fs.existsSync(path.join(root, ".quay", "inner-wakeup-heartbeat.jsonl")), "NOTHING must be written on refusal");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC53 AC2 (gap-ac53-end-invariant-gate) — a legitimately-ending tick (full in-flight, no free slots) WRITES exit 0", () => {
+  // Negative control: should_refill=false (no free slots — all 5 slots held by in-flight) is a
+  // legitimate end condition; the writer must WRITE (exit 0) with the DIRECT measurement's keys.
+  const root = makeWorkspace("iwuh-full-");
+  try {
+    const inflight = [];
+    for (let i = 1; i <= 5; i++) {
+      const id = `gap-fixture-inflight-${i}`;
+      writeTask(root, id, { status: "ready", body: dispatchableBody([`- tasks/${id}.md`, `- code/f${i}.ts (new)`]) });
+      inflight.push(id);
+    }
+    const args = [...FULL_ARGS];
+    const idxInf = args.indexOf("--in-flight");
+    args[idxInf + 1] = inflight.join(",");
+    const idxSlots = args.indexOf("--slots-free");
+    args[idxSlots + 1] = "0";
+    const idxShould = args.indexOf("--should-refill");
+    args[idxShould + 1] = "false";
+    const w = runWriter(root, args);
+    assert.equal(w.status, 0, `writer must write a legitimately-ending heartbeat:\n${w.stdout}\n${w.stderr}`);
+    const hb = JSON.parse(fs.readFileSync(path.join(root, ".quay", "inner-wakeup-heartbeat.jsonl"), "utf8"));
+    assert.equal(hb.should_refill, false, "written dispatch-state must be the DIRECT measurement (should_refill=false)");
+    assert.equal(hb.slots_free, 0, "written slots_free must be the DIRECT measurement (0 — all slots held)");
+    assert.match(hb.no_refill_reason, /no free slots/, "the written reason must be the mechanism's no-free-slots reason");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC53 AC1 (gap-ac53-end-invariant-gate) — writer REFUSES (exit 1) when --in-flight is omitted (cannot verify the end-invariant)", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "iwuh-noinf-"));
+  try {
+    // Drop "--in-flight" and its value (the pair right after --budget-hit / before --delay-seconds).
+    const idx = FULL_ARGS.indexOf("--in-flight");
+    const args = FULL_ARGS.filter((_, i) => i < idx || i >= idx + 2);
+    const r = runWriter(tmp, args);
+    assert.equal(r.status, 1, `missing --in-flight must be refused:\n${r.stdout}\n${r.stderr}`);
+    assert.match(r.stderr, /--in-flight 必填/, "the refusal must name --in-flight 必填");
+    assert.match(r.stderr, /end-invariant-gate-requires-in-flight/, "the refusal reason must be end-invariant-gate-requires-in-flight");
+    assert.ok(!fs.existsSync(path.join(tmp, ".quay", "inner-wakeup-heartbeat.jsonl")), "NOTHING must be written on refusal");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("AC53 AC1 (gap-ac53-end-invariant-gate) — runDirectSlotRefill returns the DIRECT measurement from a real workspace", () => {
+  const root = makeDispatchableWorkspace("iwuh-direct-");
+  try {
+    const r = runDirectSlotRefill({ root, inFlightIds: [], cap: 5 });
+    assert.equal(r.ok, true);
+    assert.equal(r.refill.should_refill, true, "a free-slot + dispatchable fixture must say should_refill=true");
+    assert.ok(r.refill.slots_free > 0, `slots_free must be > 0 (got ${r.refill.slots_free})`);
+    assert.ok(r.refill.dispatchable_disjoint >= 1, `dispatchable_disjoint must be >= 1 (got ${r.refill.dispatchable_disjoint})`);
+    assert.equal(r.refill.no_refill_reason, null, "should_refill=true carries no reason (the mechanism's null)");
+    // judgeEndInvariant on the DIRECT result must report the violation.
+    const inv = judgeEndInvariant(r.refill);
+    assert.equal(inv.violated, true, "the direct result must violate the end-invariant");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC53 AC2 (gap-ac53-end-invariant-gate) — judgeEndInvariant rejects a heartbeat the writer OVERRIDES away (writer + checker stay consistent)", () => {
+  // The writer writes the DIRECT measurement's five keys, so a written heartbeat is checker-ALIVE.
+  // On a bare temp dir (no tasks) the DIRECT measurement is should_refill=false — the writer writes
+  // it, and the CHECKER must accept it (no false RED).
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "iwuh-rt2-"));
+  try {
+    const w = runWriter(tmp, FULL_ARGS);
+    assert.equal(w.status, 0, `writer must write on a bare temp dir (no dispatchable work):\n${w.stdout}\n${w.stderr}`);
     const c = runChecker(tmp);
-    assert.equal(c.status, 1, `checker must RED on the violating heartbeat:\n${c.stdout}\n${c.stderr}`);
+    assert.equal(c.status, 0, `checker must accept the writer's DIRECT-measured heartbeat:\n${c.stdout}\n${c.stderr}`);
     const out = JSON.parse(c.stdout);
-    assert.equal(out.verdict, "DEAD");
-    assert.equal(out.status, "invariant-violated");
-    assert.equal(out.reason, "inner-round-ended-with-dispatchable-work");
+    assert.equal(out.verdict, "ALIVE");
+    assert.equal(out.endInvariant.violated, false);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
