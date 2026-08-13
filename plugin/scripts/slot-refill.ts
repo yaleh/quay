@@ -518,6 +518,11 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
     // writes) — it surfaces `deferred` so the caller (the tick) can mechanically close those brackets
     // instead of the queue segment silently accruing toward OVER90.
     const candidates = [];
+    // MUTEX-CLIQUE LANDED-IGNORE (tasks/gap-slot-refill-clique-ignores-landed-touches): ids of
+    // hasLandedImplementation=true candidates that PASS the recommendation exclusion (landed but NOT
+    // code-complete — stuck-work with real remaining implementation, gap-ready-pool-worklanded-traps-
+    // stuck-work). Their touches must NOT occupy the batch clique (see the assembleBatch call below).
+    const landedCandidateIds = new Set();
     const defer = (id, reason) => deferred.push({ id, reason });
     // AC2/AC3 (gap-delivery-critical-label-at-promote-not-after-dispatch): a delivery-critical task
     // deferred by in-flight occupancy (touches-overlap-in-flight) is an IN-FLIGHT DC task — the label
@@ -572,7 +577,11 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
       // on the literal `## Acceptance Criteria` heading (the all-checked phantom tasks under `## AC`
       // were invisible to extractSection) — AND gated by the shape-aware completion check so an
       // AC-incomplete landed task (stuck-work with real remaining implementation) stays dispatchable.
-      if (hasLandedImplementation(root, id) && isLandedCodeComplete(text)) { defer(id, "landed-implementation"); continue; }
+      // MUTEX-CLIQUE LANDED-IGNORE (tasks/gap-slot-refill-clique-ignores-landed-touches): the `landed`
+      // signal is computed ONCE here and reused below — an AC-incomplete landed task stays a candidate
+      // (stuck-work), but its id is recorded so its touches never enter the batch clique.
+      const landed = hasLandedImplementation(root, id);
+      if (landed && isLandedCodeComplete(text)) { defer(id, "landed-implementation"); continue; }
       // step-4 check 5: C8 SELF-TOUCH (gap-slot-refill-c8-reject-no-backfill) — the dispatch gate
       // (fast-mode-tick-core.md C8) requires the candidate's OWN `tasks/<id>.md` in ## Touches
       // WITHOUT `(new)`. A candidate lacking it is NOT dispatchable — the inner's A15 gate ⑤ would
@@ -596,6 +605,9 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
         const g = dispatchGate({ id, text, task });
         if (g === false || (g && g.ok === false)) { defer(id, "dispatch-gate-reject"); continue; }
       }
+      // MUTEX-CLIQUE LANDED-IGNORE (tasks/gap-slot-refill-clique-ignores-landed-touches): record the
+      // landed-but-not-code-complete id so the batch clique below can exclude its touches.
+      if (landed) landedCandidateIds.add(id);
       candidates.push(parseCandidate(id, text));
     }
     // SUITE-BLOCKING RANK (gap-ready-relevance-blind-to-suite-blocking-signal AC3): a task the
@@ -621,8 +633,23 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
       if (ad !== bd) return ad - bd;
       return a.id.localeCompare(b.id);
     });
-    const { batch } = assembleBatch(candidates, { expand });
-    recommended = batch.slice(0, slotsFree);
+    // MUTEX-CLIQUE LANDED-IGNORE (tasks/gap-slot-refill-clique-ignores-landed-touches): a
+    // landed-but-not-flipped task's implementation is ALREADY in the tree — it won't (and shouldn't) be
+    // re-dispatched as NEW work, so its touches must NOT occupy the batch clique (they would block a
+    // genuinely-dispatchable task that touches the same file — the measured phase-overlap → 2-slot
+    // exclusion: P1 dropped from recommended AND deferred, in-clique crowding with no reading). The
+    // RECOMMENDATION exclusion (landed && code-complete above) is UNCHANGED; here the landed candidate
+    // is removed from the clique computation ONLY, then re-appended AFTER the batch so the stuck-work
+    // landed task stays dispatchable (gap-ready-pool-worklanded-traps-stuck-work parity) but never
+    // crowds out real work. AC4: two NON-landed tasks touching the same file remain mutually exclusive.
+    const cliqueCandidates = landedCandidateIds.size === 0
+      ? candidates
+      : candidates.filter((c) => !landedCandidateIds.has(c.id));
+    const { batch } = assembleBatch(cliqueCandidates, { expand });
+    const landedRecommended = landedCandidateIds.size === 0
+      ? []
+      : candidates.filter((c) => landedCandidateIds.has(c.id)).map((c) => c.id);
+    recommended = [...batch, ...landedRecommended].slice(0, slotsFree);
     // Build the ranking array from the SORTED candidate order, capped at the same slots_free window
     // as `recommended` (rank = position within recommended). `candidateById` recovers the parsed
     // candidate so deliveryCritical comes from the SAME parseCandidate source the sort used — never a

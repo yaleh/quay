@@ -76,4 +76,21 @@ waits on」——将来若有人按注释语义校正 `depsReadyFor`，这条依
 
 ## Evidence
 
-（落地后回填）
+**落地（task 分支，未合并）**：`plugin/scripts/slot-refill.ts` 在 batch clique 计算中把
+`hasLandedImplementation(root, id)=true` 的候选**从互斥团剔除**（`landedCandidateIds` 集合——check 4b 里
+每候选只算一次 `hasLandedImplementation`，推荐排除逻辑不动），团计算完后再**追加回 recommended**（stuck-work
+落地任务仍可派，但不再占团内冲突）。效果：landed-but-not-flipped 任务（phase-overlap 形态）的 touches
+不再挤掉同碰文件的真新任务（实测缺陷 P1「既不在 recommended、也不在 deferred」的团内排挤）。
+
+**scoped gate**（`scripts/test.sh --for-task gap-slot-refill-clique-ignores-landed-touches --allow-thin`）：
+`EXIT=0`，68 pass / 0 fail；静态检查全绿（test-framework-policy / test-isolation / tmp-leak-pairing /
+test-impl-census / task-contract-check "no violations" / malformed-task / superseded-capability /
+concurrency-literal / judgment-consumer / delivery-inventory-drift）。
+
+**新用例**（`plugin/test/slot-refill.test.mjs`）：
+- AC1/AC2 正例：makeLandedWorkspace 落地任务（2/5 开箱，phase-overlap 前形态）与真新任务同碰
+  `scripts/test.sh` ⇒ 真新任务进 recommended（不被挤掉），落地 stuck-work 任务仍可派（仅 touches 出团）；
+- AC2 守卫：code-complete 落地任务仍不进 recommended（推荐排除仍生效）；
+- AC4 回归：两个都未落地且同碰文件的任务仍互斥（真重叠串行化未放松）。
+
+**合并/翻 done 由 outer 负责**（本分支不 merge、不 push、不改状态）。

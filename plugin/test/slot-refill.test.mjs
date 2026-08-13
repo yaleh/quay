@@ -1452,6 +1452,81 @@ test("LANDED-IMPLEMENTATION — isLandedCodeComplete: all-checked true, open imp
   assert.equal(isLandedCodeComplete(ext), true, "every remaining item （待外部） ⇒ code-complete (awaiting verification)");
 });
 
+// ── MUTEX-CLIQUE LANDED-IGNORE (tasks/gap-slot-refill-clique-ignores-landed-touches) ─────────────────
+// The phantom-killer's recommendation exclusion (landed && code-complete) did NOT cover the impact of a
+// landed-but-NOT-code-complete task's touches on the MUTEX CLIQUE: its implementation is already in the
+// tree (it won't/shouldn't be re-dispatched as new work), yet its `## Touches` kept occupying the batch
+// clique and crowded out a genuinely-dispatchable task touching the same file — the measured
+// phase-overlap → 2-slot exclusion (P1 dropped from recommended AND deferred, in-clique crowding with no
+// reading). AC1: the clique computation ignores the touches of hasLandedImplementation=true ready tasks
+// (reusing the existing signal, never a new fetch); AC2: a landed-but-not-flipped task + a real new task
+// touching the same file ⇒ the new task is NOT crowded out, and the recommendation exclusion for a
+// code-complete landed task still holds; AC4: two NON-landed tasks touching the same file remain mutually
+// exclusive (the change never relaxes real-overlap serialization).
+
+test("CLIQUE-LANDED — AC1/AC2: a landed-but-not-flipped task's touches leave the mutex clique (phase-overlap shape); the real task touching the same file is recommended; the stuck-work landed task stays dispatchable", (t) => {
+  const root = makeLandedWorkspace("clique-pos", "gap-overlap");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // The shared file BOTH conflicting tasks touch must EXIST (a non-(new) touch resolves to the tree).
+  fs.mkdirSync(path.join(root, "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(root, "scripts", "test.sh"), "#!/bin/sh\necho test\n");
+  // gap-overlap: implementation LANDED (plugin/scripts/impl.ts merged into develop — hasLandedImplementation
+  // fires) but 2/5 open implementation ACs ⇒ isLandedCodeComplete=false — the exact phase-overlap
+  // pre-flip shape (landed-but-not-code-complete, e.g. a DoD meta box not annotated （待外部）). Touches
+  // scripts/test.sh (the shared file) — and it is NOT not-yet-flipped (2/5 ≤ 50%), NOT deferred by the
+  // recommendation exclusion (not code-complete), so it reaches the candidate list.
+  writeTask(root, "gap-overlap", {
+    status: "ready", labels: ["gap"],
+    body: landedStuckWorkBody(2, 5).replace("- plugin/scripts/impl.ts", "- scripts/test.sh"),
+  });
+  // gap-p1: a genuinely-dispatchable NEW task touching the SAME file (the measured 2-slot task P1).
+  writeTask(root, "gap-p1", {
+    status: "ready", labels: ["gap"],
+    body: dispatchableBody(["- scripts/test.sh", "- code/p1.ts (new)"]),
+  });
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 5 });
+  // AC1/AC2 primary: P1 IS recommended — its clique collision with the landed task's touches is ignored
+  // (pre-fix the landed task's touches blocked it in the batch: neither recommended nor deferred).
+  assert.ok(r.recommended.includes("gap-p1"), "AC2: the real new task is NOT crowded out by the landed task's touches");
+  // AC1/stuck-work parity: the landed-but-not-code-complete task stays a candidate and is recommended —
+  // it is NOT deferred; only its touches leave the clique (gap-ready-pool-worklanded-traps-stuck-work).
+  assert.ok(r.recommended.includes("gap-overlap"), "AC1: the landed stuck-work task stays dispatchable (only its touches are clique-exempt)");
+  // The real task ranks BEFORE the landed stuck-work task (landed touches never displace real work).
+  assert.ok(
+    r.recommended.indexOf("gap-p1") < r.recommended.indexOf("gap-overlap"),
+    "the genuinely-dispatchable task is recommended before the landed stuck-work task",
+  );
+});
+
+test("CLIQUE-LANDED — AC2 guard: the recommendation exclusion (landed && code-complete) still holds — a code-complete landed task is not re-recommended even in the same fixture", (t) => {
+  const root = makeLandedWorkspace("clique-guard", "gap-complete");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // gap-complete: implementation LANDED (merged into develop) AND all completion boxes checked ⇒
+  // code-complete. The recommendation exclusion must still keep it out of recommended (AC2: 不重新推荐
+  // landed 任务) — it is pool-excluded (allChecked) and/or deferred landed-implementation, never in the
+  // batch clique.
+  writeTask(root, "gap-complete", { status: "ready", labels: ["gap"], body: landedAllCheckedBody() });
+  // gap-fresh: a genuinely-new ready task (no landing record) — must still be recommended.
+  writeTask(root, "gap-fresh", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/fresh.ts (new)"]) });
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 3 });
+  assert.ok(!r.recommended.includes("gap-complete"), "AC2: a code-complete landed task is still excluded from recommendation");
+  assert.ok(r.recommended.includes("gap-fresh"), "AC2: a genuinely-new ready task is still recommended");
+});
+
+test("CLIQUE-LANDED — AC4: two NON-landed tasks touching the same file remain mutually exclusive (the change never relaxes real-overlap serialization)", (t) => {
+  const root = makeWorkspace("clique-ac4");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // Neither task is landed (makeWorkspace is a non-git temp dir ⇒ hasLandedImplementation fails safe to
+  // false) and BOTH touch the same file — the batch clique must still serialize them (AC4).
+  writeTask(root, "gap-a", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/shared.ts (new)"]) });
+  writeTask(root, "gap-b", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/shared.ts (new)"]) });
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 5 });
+  const hasA = r.recommended.includes("gap-a");
+  const hasB = r.recommended.includes("gap-b");
+  assert.ok(!(hasA && hasB), "AC4: two non-landed tasks touching the same file are never both recommended");
+  assert.equal(r.recommended.length, 1, "AC4: exactly one of the colliding non-landed pair is recommended");
+});
+
 // ── C8 SELF-TOUCH / BACKFILL (tasks/gap-slot-refill-c8-reject-no-backfill) ──────────────────────────
 // slot-refill's candidate loop used to apply only its OWN step-4 checks (touches-resolve / deps /
 // concurrency / nyf) and NOT the inner dispatch side's C8 self-touch gate. It therefore recommended
