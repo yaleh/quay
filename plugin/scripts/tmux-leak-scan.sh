@@ -31,6 +31,22 @@ set -uo pipefail
 
 prefixes='skv-|session-liveness-|ol-tok-|enter-repro-'
 
+# gap-leak-residue-per-run-namespace-isolation (2026-08-13): when the runner delivered QUAY_RUN_ID,
+# the suite's probe tmp root is the PER-RUN namespace /tmp/quay-run-<runId>/ (session-liveness-
+# helpers.mjs probeRoot). This scan then covers ONLY that subtree — "本轮创建的东西 = 一棵子树" — so
+# residue from a DIFFERENT run (a previous round, a concurrent worktree) is never attributed to this
+# run (AC4 negative control), and the runner's unified cleanup has a PATH-OWNERSHIP + OWNER-LIVENESS
+# criterion (dirHasLiveOwner) instead of the forbidden name-based kill. Without QUAY_RUN_ID (scoped /
+# direct runs, legacy callers) the scan keeps the historical /tmp prefixes. The runId is a SHORT id
+# (8 hex chars from the state-file UUID) so the tmux socket sun_path stays under the ~107-byte bound.
+run_root=""
+if [ -n "${QUAY_RUN_ID:-}" ]; then
+  run_root="/tmp/quay-run-${QUAY_RUN_ID}"
+fi
+# Human-readable scan scope for messages (the run subtree when namespaced, else the prefix list).
+scan_desc="${run_root}"
+[ -n "${scan_desc}" ] || scan_desc="${prefixes}"
+
 mode="absolute"
 root=""
 case "${1:-}" in
@@ -48,13 +64,24 @@ fi
 snapshot="${root}/.quay/tmux-leak-scan.snapshot"
 
 # Normalized single sorted set of match lines (proc lines + dir lines), so `comm` is deterministic.
+# Namespaced mode: dirs under the run's own subtree + tmux procs referencing it (a hermetic probe's
+# `tmux -S /tmp/quay-run-<id>/...` client carries the run root in its argv). Legacy mode: the
+# historical /tmp prefixes + procs carrying a characteristic prefix.
 scan_matches() {
   local leaked_procs=""
   if command -v pgrep >/dev/null 2>&1; then
-    leaked_procs="$(pgrep -a tmux 2>/dev/null | grep -E "${prefixes}" || true)"
+    if [ -n "$run_root" ]; then
+      leaked_procs="$(pgrep -a tmux 2>/dev/null | grep -F "${run_root}" || true)"
+    else
+      leaked_procs="$(pgrep -a tmux 2>/dev/null | grep -E "${prefixes}" || true)"
+    fi
   fi
   local leaked_dirs=""
-  leaked_dirs="$(ls -d /tmp/skv-* /tmp/session-liveness-* /tmp/ol-tok-* /tmp/enter-repro-* 2>/dev/null || true)"
+  if [ -n "$run_root" ]; then
+    leaked_dirs="$(ls -d "${run_root}"/* 2>/dev/null || true)"
+  else
+    leaked_dirs="$(ls -d /tmp/skv-* /tmp/session-liveness-* /tmp/ol-tok-* /tmp/enter-repro-* 2>/dev/null || true)"
+  fi
   {
     [ -n "$leaked_procs" ] && printf '%s\n' "$leaked_procs"
     [ -n "$leaked_dirs" ] && printf '%s\n' "$leaked_dirs"
@@ -109,20 +136,28 @@ if [ "$mode" = "check" ]; then
     waited_ms=$((waited_ms + poll_ms))
   done
   rm -f "$snapshot"
-  echo "tmux-leak-scan: FAIL — NEW residual test tmux servers/dirs STILL PRESENT after ${waited_ms}ms reap-wait (delta vs the before-run snapshot; prefixes: skv-|session-liveness-|ol-tok-|enter-repro-):" >&2
+  echo "tmux-leak-scan: FAIL — NEW residual test tmux servers/dirs STILL PRESENT after ${waited_ms}ms reap-wait (delta vs the before-run snapshot; scan scope: ${scan_desc}):" >&2
   printf '%s\n' "$new_matches" >&2
   exit 1
 fi
 
-# absolute (historical) mode
+# absolute (historical) mode — same run-subtree / legacy-prefix split as scan_matches.
 leaked_procs=""
 if command -v pgrep >/dev/null 2>&1; then
-  leaked_procs="$(pgrep -a tmux 2>/dev/null | grep -E "${prefixes}" || true)"
+  if [ -n "$run_root" ]; then
+    leaked_procs="$(pgrep -a tmux 2>/dev/null | grep -F "${run_root}" || true)"
+  else
+    leaked_procs="$(pgrep -a tmux 2>/dev/null | grep -E "${prefixes}" || true)"
+  fi
 fi
-leaked_dirs="$(ls -d /tmp/skv-* /tmp/session-liveness-* /tmp/ol-tok-* /tmp/enter-repro-* 2>/dev/null || true)"
+if [ -n "$run_root" ]; then
+  leaked_dirs="$(ls -d "${run_root}"/* 2>/dev/null || true)"
+else
+  leaked_dirs="$(ls -d /tmp/skv-* /tmp/session-liveness-* /tmp/ol-tok-* /tmp/enter-repro-* 2>/dev/null || true)"
+fi
 
 if [ -n "${leaked_procs}" ] || [ -n "${leaked_dirs}" ]; then
-  echo "tmux-leak-scan: FAIL — residual test tmux servers/dirs after the run (prefixes: skv-|session-liveness-|ol-tok-|enter-repro-):" >&2
+  echo "tmux-leak-scan: FAIL — residual test tmux servers/dirs after the run (scan scope: ${scan_desc}):" >&2
   if [ -n "${leaked_procs}" ]; then
     while IFS= read -r line; do [ -n "${line}" ] && echo "  tmux: ${line}" >&2; done <<< "${leaked_procs}"
   fi
@@ -132,5 +167,5 @@ if [ -n "${leaked_procs}" ] || [ -n "${leaked_dirs}" ]; then
   exit 1
 fi
 
-echo "tmux-leak-scan: clean — no residual test tmux servers/dirs (prefixes: skv-|session-liveness-|ol-tok-|enter-repro-)"
+echo "tmux-leak-scan: clean — no residual test tmux servers/dirs (scan scope: ${scan_desc})"
 exit 0
