@@ -1,6 +1,15 @@
 // plugin/scripts/ready-pool-check.ts — the "ready-pool maintenance" mechanism
 // (tasks/gap-promotion-cadence-is-role-volition-not-product-mechanism).
 //
+// RETIRED FILTER LAYER (AC48, 2026-08-13 — tasks/gap-ac48-code-retirement-pool-filter-and-scripts):
+// the `pool < floor` (floor = cap × 4) gate on todo→ready BULK promotion is CANCELLED. A22 runs
+// `--apply` every tick; after AC48 it promotes EVERY eligible todo candidate regardless of pool size
+// (合格即晋, 不看 pool 大小) — matching SPEC-task-status-flow's target model (outer 修不合格 + 尽力晋,
+// 不考虑 pool). The `pool`/`floor`/`deficit` fields remain as REPORTED signals (report string /
+// judgment-consumer still read them) but no longer GATE bulk promotion. Negative control: no eligible
+// candidate ⇒ `promotions` empty ⇒ zero writes. This header note + the in-body annotations are the
+// REASON ARCHIVE for the retired gate (kept, not deleted).
+//
 // PROBLEM IT FIXES: todo→ready promotion cadence/priority used to live in an outer's VOLUNTARY
 // AC-queue (`orchestration/outer-phase-goal.md`) — role volition that vanishes when the session or
 // model changes. A cold-start session had nothing to inherit: `fast-mode-loop-tick.md` had ZERO
@@ -30,14 +39,18 @@
 //      THIS is the criterion, not the raw pool count: `dispatchable_disjoint >=
 //      cap` is satisfied when 5 all-disjoint candidates are ready, and gets flagged when 30 all-
 //      colliding ones are. floor is the MEANS; dispatchable capacity is the RESULT.
-//   3. When pool < floor (floor = cap × 4, default 12), recommend todo→ready promotions in a DEFINED
-//      order: touch-disjointness FIRST (vs the pool + in-flight candidates, checkTouchesPair), then
-//      the explicit `priority:*` label tiebreaker (p1 > p2 > none — gap-priority-has-no-mechanism-
-//      reader AC1; a PREFERENCE that only decides WITHIN an equal-disjointness bucket, never above
-//      the safety axis, AC3), then `gap-*` defects before `DIR-*` capabilities (other kinds last),
-//      then touches-resolvable before not. Only candidates with deps ready + four artifacts complete
-//      + touches resolve + not fixture + not PARKED are eligible (合格). The touchesResolve guard is
-//      KEPT (AC5 — ADR-022 lesson: a big pool only promotes cleanly, never pollutes).
+//   3. RETIRED pool<floor GATE (AC48, 2026-08-13): this step USED to say "When pool < floor
+//      (floor = cap × 4, default 12), recommend todo→ready promotions..." — the pool<floor condition
+//      GATED the bulk promotion. AC48 CANCELS that gate: the promotion now runs for EVERY eligible
+//      todo candidate regardless of pool size (合格即晋 — see the header RETIRED FILTER LAYER note).
+//      The ORDER stays: touch-disjointness FIRST (vs the pool + in-flight candidates,
+//      checkTouchesPair), then the explicit `priority:*` label tiebreaker (p1 > p2 > none —
+//      gap-priority-has-no-mechanism-reader AC1; a PREFERENCE that only decides WITHIN an equal-
+//      disjointness bucket, never above the safety axis, AC3), then `gap-*` defects before `DIR-*`
+//      capabilities (other kinds last), then touches-resolvable before not. Only candidates with deps
+//      ready + four artifacts complete + touches resolve + not fixture + not PARKED are eligible (合格).
+//      The touchesResolve guard is KEPT (AC5 — ADR-022 lesson: a big pool only promotes cleanly,
+//      never pollutes).
 //   4. RETIRED-MECHANISM INTERCEPT (gap-ready-pool-promotion-ignores-retired-mechanism-candidate-check,
 //      AC1/AC2/AC4): a candidate that references an ADR-022-deleted classic-pipeline script
 //      (prepare-milestone.js / execute-milestone.js / milestone-worktree.ts) without annotation is a
@@ -103,15 +116,16 @@
 //   --apply              HEARTBEAT MODE (gap-ready-pool-promotion-same-class-as-slot-refill): the
 //                        tick heartbeat (fast-mode-loop-tick.md step 3.6) runs ready-pool-check
 //                        unconditionally each tick. The detector/recommender above answers "which
-//                        todo→ready promotions would reach the floor" but the ACTUAL status write
+//                        todo→ready promotions would be made" but the ACTUAL status write
 //                        used to depend on the inner's volition (manually running `quay promote`
 //                        per candidate) — a forced doc step with no mechanical guarantee, the SAME
 //                        root cause as gap-slot-refill-only-triggered-on-completion-not-tick-
 //                        heartbeat (slot-refill only answered, nobody asked). `--apply` closes the
-//                        loop: pool < floor AND promotions non-empty ⇒ the recommended promotions
-//                        LAND ON DISK (frontmatter `status: todo → ready` in tasks/<id>.md),
-//                        no volition (AC1); pool ≥ floor OR promotions empty ⇒ ZERO writes
-//                        (AC3 negative control — no busy-work). Output is the analyzeTasks JSON
+//                        loop: promotions non-empty ⇒ the recommended promotions LAND ON DISK
+//                        (frontmatter `status: todo → ready` in tasks/<id>.md), no volition (AC1).
+//                        RETIRED GATE (AC48): the pool<floor condition is gone — every eligible
+//                        candidate promotes regardless of pool size (合格即晋); the negative control is
+//                        promotions empty ⇒ ZERO writes (no busy-work). Output is the analyzeTasks JSON
 //                        plus `should_apply` and `applied_promotions`. Default (no `--apply`) is
 //                        UNCHANGED: a pure detector/recommender that never writes tasks/**.
 //   --cap / --floor-mult   override the derived floor (default cap=3, floor-mult=4 ⇒ floor 12)
@@ -126,9 +140,10 @@
 //   --targeted <id>        TARGETED-PROMOTION QUERY (gap-targeted-promotion-operation-does-not-exist):
 //                          emit `targeted_promotion` for ONE task id — the OUTER's stage-goal
 //                          selection mechanically validated (four artifacts / deps / touches-resolve /
-//                          not fixture / not PARKED) + the `quay promote <id>` command. NOT gated on
-//                          `pool < floor` (AC2 — decoupled from the bulk refill). Bulk `promotions`
-//                          output is unchanged (AC3).
+//                          not fixture / not PARKED) + the `quay promote <id>` command. Never gated on
+//                          `pool < floor` (AC2). Since AC48 the BULK path also no longer gates on
+//                          `pool < floor` (合格即晋), so targeted and bulk agree on the same eligible set —
+//                          targeted remains the outer's stage-goal pick (selection = outer).
 //   --json                 accepted for Contract parity; output is always JSON
 //
 // ADAPTIVE CAP (gap-adaptive-concurrency-cap-tied-to-resource-gate): at dispatch time the tick calls
@@ -206,7 +221,9 @@ export const CONCURRENCY_CAP_DEFAULT = 3;
 export const POOL_FLOOR_MULT_DEFAULT = 4;
 
 /** The healthy ready-pool floor: pool must be ≥ this before promotion pressure releases.
- *  floor = cap × 4 (cap=3 ⇒ 12). SINGLE SOURCE — no hardcoded 3 anywhere. */
+ *  floor = cap × 4 (cap=3 ⇒ 12). SINGLE SOURCE — no hardcoded 3 anywhere.
+ *  RETIRED GATE (AC48): this is now a REPORTED signal only — it no longer GATES bulk promotion
+ *  (the pool<floor condition was cancelled; A22 promotes every eligible candidate, 合格即晋). */
 export const POOL_FLOOR = CONCURRENCY_CAP_DEFAULT * POOL_FLOOR_MULT_DEFAULT;
 
 /** floor = cap × floorMult (default 4×). The one definition of the floor; analyzeTasks calls this.
@@ -215,7 +232,9 @@ export const POOL_FLOOR = CONCURRENCY_CAP_DEFAULT * POOL_FLOOR_MULT_DEFAULT;
  * from ②true to ②false without any work — the "obligation disappears when the machine is busy"
  * channel. Fix: floor uses the WINDOW-MAX cap, never the current one. `floorCap` is the caller's
  * view of the max cap in the window (>= current cap); when omitted, the conservative floor cap
- * DEFAULT is used so the floor can never drop below cap × floorMult for the default cap. */
+ * DEFAULT is used so the floor can never drop below cap × floorMult for the default cap.
+ * RETIRED GATE (AC48): the floor still DERIVES the reported `deficit`/`pool_big_all_colliding`
+ * fields but no longer gates the bulk promotion path. */
 export function computePoolFloor(cap = CONCURRENCY_CAP_DEFAULT, floorMult = POOL_FLOOR_MULT_DEFAULT, floorCap?: number) {
   // floorCap undefined ⇒ pure `cap × floorMult` (the existing math — small explicit caps in
   // tests/experiments stay exact). floorCap passed ⇒ floor uses max(cap, floorCap) so a volatile
@@ -1916,65 +1935,68 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
     now,
   });
 
-  // Candidates are only meaningful when promotion pressure exists (pool < floor) — the script's
-  // whole job is "recommend promotions to reach the floor". When the pool is already at/above floor
-  // the candidate scan is skipped entirely (keeps the real-store output small).
+  // RETIRED GATE (AC48, 2026-08-13 — tasks/gap-ac48-code-retirement-pool-filter-and-scripts): this
+  // block USED to be wrapped in `if (deficit > 0)` — the `pool < floor` bulk-promotion gate — and
+  // capped at `deficit` promotions. AC48 CANCELS the gate: the candidate scan ALWAYS runs and EVERY
+  // eligible candidate is promoted (合格即晋, 不看 pool 大小), matching SPEC-task-status-flow's target
+  // model (outer 修不合格 + 尽力晋). `pool`/`floor`/`deficit` remain as REPORTED signals (report
+  // string / judgment-consumer), they no longer gate. Negative control: no eligible candidate ⇒ an
+  // empty `promotions` array ⇒ zero writes in applyPromotions.
   const candidates = [];
   const promotions = [];
   const intercepted = [];
-  if (deficit > 0) {
-    for (const [id, t] of allTasks) {
-      if (t.status !== "todo") continue;
-      if (isFixture(t) || isParked(t)) continue; // never promotion candidates
-      candidates.push(buildCandidate(id, t, root, allTasks, poolParsed, inFlightParsed, expand, childrenByTask, parentRefCount, dependedOnCount));
+  for (const [id, t] of allTasks) {
+    if (t.status !== "todo") continue;
+    if (isFixture(t) || isParked(t)) continue; // never promotion candidates
+    candidates.push(buildCandidate(id, t, root, allTasks, poolParsed, inFlightParsed, expand, childrenByTask, parentRefCount, dependedOnCount));
+  }
+  // AC4: disjointness FIRST (how many pool/in-flight tasks the candidate is pairwise-disjoint
+  // from) — the non-negotiable concurrency-safety axis (AC3: priority NEVER overrides it); then
+  // the `priority:*` label tiebreaker (p1 > p2 > none, WITHIN an equal-disjointness bucket —
+  // gap-priority-has-no-mechanism-reader AC1); then `gap-*` > `DIR-*`; then touches-resolvable
+  // before not. Infinity-rank (no priority) minus Infinity-rank is NaN ⇒ falsy ⇒ falls through
+  // to the next key; Infinity-rank minus a registered level is ±Infinity ⇒ registered wins.
+  candidates.sort(
+    (a, b) =>
+      b.disjointScore - a.disjointScore ||
+      a.priority - b.priority ||
+      a.kindOrder - b.kindOrder ||
+      (a.touchesResolve === b.touchesResolve ? 0 : a.touchesResolve ? -1 : 1),
+  );
+  // AC4 (gap-ready-pool-promotion-ignores-retired-mechanism-candidate-check): the FULL
+  // retired-mechanism intercept set is mechanically recorded — every candidate that references an
+  // ADR-022-deleted script is listed with reason + refs (not only the ones that happen to sort
+  // inside the promotion window). A no-promotion is a traceable decision, never a silent skip.
+  for (const c of candidates) {
+    if (c.retiredMechanism) {
+      intercepted.push({ id: c.id, reason: "retired-mechanism", refs: c.retiredRefs });
     }
-    // AC4: disjointness FIRST (how many pool/in-flight tasks the candidate is pairwise-disjoint
-    // from) — the non-negotiable concurrency-safety axis (AC3: priority NEVER overrides it); then
-    // the `priority:*` label tiebreaker (p1 > p2 > none, WITHIN an equal-disjointness bucket —
-    // gap-priority-has-no-mechanism-reader AC1); then `gap-*` > `DIR-*`; then touches-resolvable
-    // before not. Infinity-rank (no priority) minus Infinity-rank is NaN ⇒ falsy ⇒ falls through
-    // to the next key; Infinity-rank minus a registered level is ±Infinity ⇒ registered wins.
-    candidates.sort(
-      (a, b) =>
-        b.disjointScore - a.disjointScore ||
-        a.priority - b.priority ||
-        a.kindOrder - b.kindOrder ||
-        (a.touchesResolve === b.touchesResolve ? 0 : a.touchesResolve ? -1 : 1),
-    );
-    // AC4 (gap-ready-pool-promotion-ignores-retired-mechanism-candidate-check): the FULL
-    // retired-mechanism intercept set is mechanically recorded — every candidate that references an
-    // ADR-022-deleted script is listed with reason + refs (not only the ones that happen to sort
-    // inside the promotion window). A no-promotion is a traceable decision, never a silent skip.
-    for (const c of candidates) {
-      if (c.retiredMechanism) {
-        intercepted.push({ id: c.id, reason: "retired-mechanism", refs: c.retiredRefs });
-      }
-      // AC1 (gap-ac46-pool-criteria-in-gate): the compound/self-touch gate rejections are recorded in
-      // `intercepted` too (with the blocking reason) so a promotion that does NOT happen is a traceable
-      // decision, not a silent skip — the same discipline as the retired-mechanism intercept.
-      if (c.superseded) intercepted.push({ id: c.id, reason: "superseded" });
-      if (c.compound) intercepted.push({ id: c.id, reason: "compound-not-dispatchable" });
-      if (!c.selfTouchOk) intercepted.push({ id: c.id, reason: "self-touch-missing-c8" });
-    }
-    for (const c of candidates) {
-      if (promotions.length >= deficit) break;
-      if (!c.eligible) continue;
-      promotions.push({
-        id: c.id,
-        disjointScore: c.disjointScore,
-        // PRIORITY TIEBREAKER (gap-priority-has-no-mechanism-reader): the promotion record carries
-        // the candidate's priority label (p1/p2, or 0 when none) so a caller can see WHICH tiebreak
-        // promoted it — the "P1/P2 from outside the tangent to inside" DoD evidence. 0 = no label.
-        priority: Number.isFinite(c.priority) ? c.priority : 0,
-        reason:
-          `${c.kind}-* candidate · disjoint ${c.disjointScore}/${poolParsed.length + inFlightParsed.length} · ` +
-          `deps ${c.depsReady ? "ready" : "NOT-ready"} · ` +
-          `touches ${c.touchesResolve ? "resolve" : "MISSING"} · ` +
-          `four-artifacts ${c.fourArtifacts ? "complete" : `INCOMPLETE (${c.missingArtifacts.join(",")})`}` +
-          (c.compound ? " · compound-NOT-dispatchable" : "") +
-          (c.selfTouchOk ? "" : " · self-touch-MISSING"),
-      });
-    }
+    // AC1 (gap-ac46-pool-criteria-in-gate): the compound/self-touch gate rejections are recorded in
+    // `intercepted` too (with the blocking reason) so a promotion that does NOT happen is a traceable
+    // decision, not a silent skip — the same discipline as the retired-mechanism intercept.
+    if (c.superseded) intercepted.push({ id: c.id, reason: "superseded" });
+    if (c.compound) intercepted.push({ id: c.id, reason: "compound-not-dispatchable" });
+    if (!c.selfTouchOk) intercepted.push({ id: c.id, reason: "self-touch-missing-c8" });
+  }
+  // RETIRED GATE (AC48): the `promotions.length >= deficit` cap is removed — the bulk path now
+  // promotes EVERY eligible candidate (合格即晋), not just enough to reach the floor.
+  for (const c of candidates) {
+    if (!c.eligible) continue;
+    promotions.push({
+      id: c.id,
+      disjointScore: c.disjointScore,
+      // PRIORITY TIEBREAKER (gap-priority-has-no-mechanism-reader): the promotion record carries
+      // the candidate's priority label (p1/p2, or 0 when none) so a caller can see WHICH tiebreak
+      // promoted it — the "P1/P2 from outside the tangent to inside" DoD evidence. 0 = no label.
+      priority: Number.isFinite(c.priority) ? c.priority : 0,
+      reason:
+        `${c.kind}-* candidate · disjoint ${c.disjointScore}/${poolParsed.length + inFlightParsed.length} · ` +
+        `deps ${c.depsReady ? "ready" : "NOT-ready"} · ` +
+        `touches ${c.touchesResolve ? "resolve" : "MISSING"} · ` +
+        `four-artifacts ${c.fourArtifacts ? "complete" : `INCOMPLETE (${c.missingArtifacts.join(",")})`}` +
+        (c.compound ? " · compound-NOT-dispatchable" : "") +
+        (c.selfTouchOk ? "" : " · self-touch-MISSING"),
+    });
   }
 
   // AC2 (gap-value-prioritization-has-no-mechanism): the priority query — "当前 todo 里价值最高的
@@ -2071,10 +2093,11 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
 // The tick doc's step 3.6 ("就绪池 < floor ⇒ 本 tick 补晋") was a FORCED prose step whose actual
 // execution depended on the inner's volition — the same root cause as slot-refill-only-triggered-on-
 // completion-not-tick-heartbeat (a detector that answers, with nothing mechanical guaranteed to ask
-// it). `--apply` closes the loop: when pool < floor AND promotions non-empty, the recommended
-// promotions land on disk (status todo → ready) as a side effect of the unconditional tick-heartbeat
-// invocation — no volition (AC1). The negative control (AC3) is structural: `promotions` is only
-// computed when deficit > 0, so pool ≥ floor OR an empty promotions array ⇒ zero writes.
+// it). `--apply` closes the loop: promotions non-empty ⇒ the recommended promotions land on disk
+// (status todo → ready) as a side effect of the unconditional tick-heartbeat invocation — no volition
+// (AC1). RETIRED GATE (AC48): the `pool < floor AND` condition was cancelled — every eligible
+// candidate promotes regardless of pool size (合格即晋). The negative control (AC3) is structural:
+// an empty `promotions` array (no eligible candidate) ⇒ zero writes.
 
 /** Ensure the frontmatter carries the `delivery-critical` label. Mirrors parseTask's label reading
  *  (task-schema.ts — block list OR flow list OR absent), then ADDS the label when missing. This is
@@ -2151,10 +2174,15 @@ export function setTaskStatus(root, id, newStatus, opts = {}) {
 }
 
 /** HEARTBEAT MODE entry: run the same analysis as `analyzeTasks` (all options pass through) and —
- *  when pool < floor AND promotions non-empty — land the recommended promotions on disk. Returns the
- *  full analyzeTasks result plus `should_apply` (the AC1 condition) and `applied_promotions` (the
- *  per-candidate setTaskStatus outcome). Purely additive: the default (non-`--apply`) output is
- *  byte-unchanged for existing consumers.
+ *  when promotions non-empty — land the recommended promotions on disk. Returns the full analyzeTasks
+ *  result plus `should_apply` (the AC1 condition) and `applied_promotions` (the per-candidate
+ *  setTaskStatus outcome). Purely additive: the default (non-`--apply`) output is byte-unchanged for
+ *  existing consumers.
+ *
+ *  RETIRED GATE (AC48, 2026-08-13): `should_apply` used to require `deficit > 0` (pool < floor). That
+ *  condition is CANCELLED — every eligible candidate promotes regardless of pool size (合格即晋, 不看
+ *  pool 大小). The negative control is now purely structural: an empty `promotions` array (no eligible
+ *  candidate) ⇒ `should_apply` false ⇒ zero writes.
  *
  *  AC1 (gap-delivery-critical-label-at-promote-not-after-dispatch): the delivery-critical label is
  *  DETERMINED AT PROMOTE — each promoted candidate's deliveryCritical status comes from its own
@@ -2165,7 +2193,7 @@ export function setTaskStatus(root, id, newStatus, opts = {}) {
  *  for the NEXT selection, instead of being applied (too late) after dispatch. */
 export function applyPromotions(opts) {
   const result = analyzeTasks(opts);
-  const shouldApply = result.deficit > 0 && result.promotions.length > 0;
+  const shouldApply = result.promotions.length > 0;
   const applied = [];
   if (shouldApply) {
     const candidateById = new Map(result.candidates.map((c) => [c.id, c]));
