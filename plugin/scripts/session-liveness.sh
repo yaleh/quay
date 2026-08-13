@@ -213,9 +213,11 @@
 #     transcript 的 usage 结构字段，不是屏幕文本，不会把当初消灭的 chrome 噪声引回主判据。
 #   * 复合判据（AC4/任务约束 2）：saturated = cache_read_input_tokens ≥ SATURATION_TOKENS 且最后一条
 #     消息是未获回应的 user 输入（收到新指令但尚未应答 = 收不进）。饱和本身不是故障——auto-compact 是
-#     正常机制；只有「饱和且随后指令未被响应」的形态才报 SESSION-SATURATED（区别于普通「忙」）。
-#   * 事件：SESSION-SATURATED（会话面，边沿触发，见下节）。只在配置了 transcript（SESSION_TRANSCRIPTS）
-#     的目标上适用——tick 日志是 loop 写的，不是会话证据（同 AC9 的 CANT-SEND 适用面）。
+#     正常机制；只有「饱和且随后指令未被响应」的形态才报 SESSION-DISABLED（区别于普通「忙」）。
+#   * 事件：SESSION-DISABLED（会话面，边沿触发，见下节；gap-session-saturated-composite-condition-
+#     emitter 选 A：事件名与实际断言一致——「失能」而非仅「饱和」，三条件全满足才发：饱和 &&
+#     develop 静默 ≥ SATURATION_SILENCE_MIN && 在飞 worktree 集合无变化）。只在配置了 transcript
+#     （SESSION_TRANSCRIPTS）的目标上适用——tick 日志是 loop 写的，不是会话证据（同 AC9 的 CANT-SEND 适用面）。
 #   * 已知盲区：cache_read_input_tokens 只在 assistant API 响应里出现（工具回执/纯元数据记录没有）；
 #     取不到时饱和度判据静默（unknown），不猜。transcript 不携带模型上下文窗口大小，阈值
 #     SATURATION_TOKENS 是对 fleet 实测标定的默认（45 万：外层 62.5 万仍在应答=未饱和、内层 31 万=
@@ -235,9 +237,10 @@
 #                             阶段一实测 transcript 最大间隙 20.5min，30min 早报 15min 且留余量
 #   SESSION-IDLE-CANT-SEND    不可自愈（发不出请求不会自愈）→ 宁可误报：见即报（AC9）
 #   SESSION-MARKER-STALE      检测类（标志失效）→ 无阈值、见即报，随事件流观察不一致率
-#   SESSION-SATURATED         检测类（上下文饱和，复合判据）→ 边沿触发；仅配置了 transcript 的目标适用
+#   SESSION-DISABLED          检测类（饱和 && develop 静默 ≥T && 在飞集合无变化，复合判据）→ 边沿触发；
+#                             仅配置了 transcript 的目标适用；T=SATURATION_SILENCE_MIN 可配（非字面量 30）
 #   REPO-STALL                仓库信号（非会话面，AC8 裁定承载）→ STALL_MIN=45 保持
-# 环境：  INTERVAL / STALL_MIN / LOOP_MIN / OVERDUE_MIN / SATURATION_TOKENS（阈值）
+# 环境：  INTERVAL / STALL_MIN / LOOP_MIN / OVERDUE_MIN / SATURATION_TOKENS / SATURATION_SILENCE_MIN（阈值）
 #         SESSION_TARGETS / SESSION_HEARTBEATS / SESSION_TRANSCRIPTS（多目标覆盖；每行 "<名字> <值>"）
 #         SESSION_ROOT（测试接缝：覆盖自定位的项目根）
 
@@ -267,6 +270,12 @@ IDLE_DEBOUNCE_ROUNDS=${IDLE_DEBOUNCE_ROUNDS:-2}
 # 默认 45 万是对 fleet 实测的标定：外层 62.5 万仍在应答=未饱和、内层 31 万=未饱和、48.3 万且未应答输入=
 # 饱和（正控制）。SATURATION_TOKENS 可在环境变量/配置文件里按机型调（跨机可用，AC5）。
 SATURATION_TOKENS=${SATURATION_TOKENS:-450000}
+# 阶段四复合条件（gap-session-saturated-composite-condition-emitter，2026-08-13）：SESSION-DISABLED
+# 的「该层 develop 提交静默」子条件阈值 T。T 可配（env/配置文件，同 SATURATION_TOKENS 形态），
+# 非字面量 30（manager 2026-08-13 裁定：「T 用现有配置或读宿主，不写字面量 30」）。语义：目标
+# workspace 的 develop 分支最后一次提交距今 ≥ 此分钟数 = 该层静默。默认 10（> 实测非静默的 1 分钟，
+# < OVERDUE_MIN=30 的「可能已死」），跨机可用按机型调。
+SATURATION_SILENCE_MIN=${SATURATION_SILENCE_MIN:-10}
 # 候选 B（gap-permission-prompt-vs-dismissable-prompt-classifier AC4，2026-08-08）：
 # permission-prompt 持续 ≥PERM_PROMPT_WARN_ROUNDS 轮且 transcript 最近 PERM_PROMPT_TX_WINDOW 秒未写入
 # ⇒ 报一次 WARN（不无限静默）。兜底判据：分类器候选 A 只排除已知可忽略提示（问卷带 (optional)/Dismiss）；
@@ -280,7 +289,8 @@ EXPECTED_CYCLE_MIN=20
 declare -A PREV_ALIVE PREV_STALL PREV_OVERDUE PREV_STATE PREV_IDLE PREV_HALTED UNHALT_TS \
   PREV_BUSY_SEM PREV_API_BLOCKED PREV_MARKER_STALE PREV_PANE_EMPTY IDLE_CONSEC SEEN_BUSY \
   PREV_SATURATED IDLE_REPORTED ROUNDS PERM_CONSEC PREV_PERM_WARNED \
-  BUSY_CONSEC RESUME_PENDING RESUME_CAUSE RESUME_LASTIN PREV_INTERVENTION
+  BUSY_CONSEC RESUME_PENDING RESUME_CAUSE RESUME_LASTIN PREV_INTERVENTION \
+  PREV_WT_SET PREV_WT_KNOWN
 
 # ── classifyPaneState 消费者（ADR-016 Amendment 2026-08-04 / 裁定 D）───────────────────────────
 # 忙闲判据读 pane 的【底部区域形状】（纯函数 pane-state-classify.ts），不是整屏哈希。SL_CLASSIFY /
@@ -505,6 +515,42 @@ transcript_saturation_report() {
     unsaturated) echo "unsaturated cache_read_input_tokens=${_sl_tx_cache}" ;;
     *)           echo "unknown (no assistant usage record)" ;;
   esac
+}
+
+# ── 阶段四复合条件子判据（gap-session-saturated-composite-condition-emitter，2026-08-13）────────────
+# SESSION-DISABLED 发射端把 manager 的三条件逐条判搬进判断本身（选 A）：饱和 && develop 静默 ≥ T
+# && 在飞 worktree 集合无变化。两个子判据 + 一个复合判定（纯函数）。
+
+# _sl_develop_silent —— 该层 develop 分支提交静默 ≥ SATURATION_SILENCE_MIN 分钟？按目标的 workspace
+# 解析（git -C "$root" log -1 --format=%ct develop）。输出 1=静默（子条件 pass）/ 0=活跃（block）。
+# 无 git 仓库 / 无 develop 分支 / git 失败 ⇒ 无法证明「该层在动」⇒ 视为静默（pass，不挡发射）。
+_sl_develop_silent() {
+  local root=$1 dev_ts now age_min
+  dev_ts=$(git -C "$root" log -1 --format=%ct develop 2>/dev/null)
+  [ -n "$dev_ts" ] || { echo 1; return 0; }
+  now=$(date +%s)
+  age_min=$(( (now - dev_ts) / 60 ))
+  [ "$age_min" -ge "$SATURATION_SILENCE_MIN" ] && echo 1 || echo 0
+}
+
+# _sl_worktree_set —— 目标 workspace 的【在飞 worktree 名字集合】：git worktree list --porcelain 的
+# worktree 路径 basename，排序去重；非 git 仓库 ⇒ 空。集合差 = 有变化（复用 manager 判据6 的集合差
+# 手法，不用时间戳——「没变化」必须跨两轮同集合才成立）。
+_sl_worktree_set() {
+  local root=$1 p
+  git -C "$root" worktree list --porcelain 2>/dev/null | awk -F' ' '/^worktree /{print $2}' \
+    | while read -r p; do basename "$p"; done | sort
+}
+
+# _sl_sat_disabled_verdict —— 复合判定（纯函数）：三条件全满足 ⇒ emit，否则 hold。
+# $1 = sat（$_sl_tx_sat，分类器 transcriptContextSaturation 输出）；
+# $2 = dev_silent（_sl_develop_silent：0|1）；$3 = wt_unchanged（0|1，在飞集合连续两轮无变化）。
+_sl_sat_disabled_verdict() {
+  if [ "$1" = "saturated" ] && [ "$2" = "1" ] && [ "$3" = "1" ]; then
+    echo emit
+  else
+    echo hold
+  fi
 }
 
 # ── 外层多源心跳（gap-outer-heartbeat-source-inverts-under-incident-handling，2026-08-05）────────────
@@ -783,7 +829,7 @@ case "${1:-}" in
     echo "SESSION-IDLE-CANT-SEND — 空闲且发不出请求"
     echo "REPO-STALL — 仓库信号（非会话面）"
     echo "SESSION-STATUS — --once 接缝状态行"
-    echo "SESSION-SATURATED — 上下文已饱和（saturated: alive but cannot take input）"
+    echo "SESSION-DISABLED — 会话已失能（disabled：饱和(saturated)&& develop 静默 ≥SATURATION_SILENCE_MIN && 在飞 worktree 集合无变化）"
     echo "SESSION-INTERVENTION-REQUIRED — 需要人/上层介入（permission-prompt 卡权限框，非 busy，单列可检测）"
     exit 0 ;;
   --saturation)
@@ -1599,31 +1645,54 @@ while true; do
         fi
       fi
 
-      # 事件 6：SESSION-SATURATED（阶段四，gap-session-liveness-cannot-see-context-saturation-...）——
-      # 上下文饱和度。复合判据（结构化源，非屏幕百分比，AC3）：最近 assistant 消息的
-      # usage.cache_read_input_tokens（缓存前缀 = 上下文用量）≥ SATURATION_TOKENS 且最后一条消息是
-      # 未获回应的 user 输入（收到新指令但未应答 = 收不进）。与文件头有意排除的屏幕 token 计数行无涉；
-      # 饱和不是故障（auto-compact 是正常机制），只有「饱和且随后指令未被响应」的复合形态才报（AC4）。
-      # 区别于普通「忙」（AC2）：busy 会话若还在应答（最后一条是 assistant）不报 saturated。仅配置了
-      # transcript（SESSION_TRANSCRIPTS）的目标适用——tick 日志不是会话证据。边沿触发。
+      # 事件 6：SESSION-DISABLED（阶段四，gap-session-saturated-composite-condition-emitter，2026-08-13）——
+      # 复合条件发射端（选 A，manager 2026-08-13）：把 manager 的「三条件逐条判」搬进发射端，事件名
+      # 与实际断言一致（「失能」而非仅「饱和」）。三条件全满足才发：
+      #   ① 饱和（现有：最近 assistant 消息 usage.cache_read_input_tokens ≥ SATURATION_TOKENS
+      #      且最后一条是未获回应的 user 输入——结构化源，非屏幕百分比，AC3；分类器判定来自本轮
+      #      _sl_transcript_batch 的 _sl_tx_sat）；
+      #   ② 该层 develop 提交静默 ≥ SATURATION_SILENCE_MIN（T 可配，非字面量 30）；
+      #   ③ 在飞 worktree 集合无变化（集合差手法，不用时间戳；首轮无基线 ⇒ 判「有变化」，不误发）。
+      # 饱和不是故障（auto-compact 是正常机制）；只有「饱和且静默且冻结」的失能形态才报（AC4 不关
+      # 事件，真饱和到失能仍报）。区别于普通「忙」（AC2）：busy 会话若还在应答（最后一条是 assistant）
+      # 不报 saturated。仅配置了 transcript（SESSION_TRANSCRIPTS）的目标适用——tick 日志不是会话证据。
+      # 边沿触发（PREV_SATURATED 承担；按【复合判定】置位，非按裸饱和——复合首次为真才发一次）。
       if [ -n "$tr_path" ] && [ -r "$tr_path" ]; then
-        # 判定来自本轮 _sl_transcript_batch 的 _sl_tx_sat（分类器 transcriptContextSaturation）。
         sat=$_sl_tx_sat
         if [ "$sat" = "saturated" ]; then
-          if [ "${PREV_SATURATED[$name]:-0}" = "0" ]; then
-            sl_emit "SESSION-SATURATED $name 的会话上下文已饱和（cache_read_input_tokens ≥ ${SATURATION_TOKENS} 且最后一条是未应答的用户输入）——活着但可能收不进新指令；区别于普通「忙」（AC2）"
+          dev_silent=$(_sl_develop_silent "$root")
+          wt_set=$(_sl_worktree_set "$root")
+          if [ "${PREV_WT_KNOWN[$name]:-0}" = "1" ] && [ "$wt_set" = "${PREV_WT_SET[$name]:-}" ]; then
+            wt_unchanged=1
+          else
+            wt_unchanged=0
           fi
-          PREV_SATURATED[$name]=1
+          PREV_WT_SET[$name]=$wt_set
+          PREV_WT_KNOWN[$name]=1
+          verdict=$(_sl_sat_disabled_verdict "$sat" "$dev_silent" "$wt_unchanged")
+          if [ "$verdict" = "emit" ]; then
+            if [ "${PREV_SATURATED[$name]:-0}" = "0" ]; then
+              sl_emit "SESSION-DISABLED $name 的会话已失能（disabled：cache_read_input_tokens ≥ ${SATURATION_TOKENS} && develop 静默 ≥ ${SATURATION_SILENCE_MIN}min && 在飞 worktree 集合无变化）——活着但收不进新指令且无推进；区别于普通「忙」（AC2）"
+            fi
+            PREV_SATURATED[$name]=1
+          else
+            PREV_SATURATED[$name]=0
+          fi
         else
           PREV_SATURATED[$name]=0
+          PREV_WT_KNOWN[$name]=0
+          PREV_WT_SET[$name]=""
         fi
       else
         PREV_SATURATED[$name]=0
+        PREV_WT_KNOWN[$name]=0
+        PREV_WT_SET[$name]=""
       fi
     else
       PREV_STATE[$name]=""; PREV_IDLE[$name]="unset"; PREV_API_BLOCKED[$name]=0; PREV_MARKER_STALE[$name]=0
       PREV_PANE_EMPTY[$name]=0
       IDLE_CONSEC[$name]=0; SEEN_BUSY[$name]=0; PREV_SATURATED[$name]=0
+      PREV_WT_SET[$name]=""; PREV_WT_KNOWN[$name]=0
       IDLE_REPORTED[$name]=0; ROUNDS[$name]=0
       PERM_CONSEC[$name]=0; PREV_PERM_WARNED[$name]=0
       PREV_INTERVENTION[$name]=0
