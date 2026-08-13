@@ -2,7 +2,7 @@
 id: gap-concurrency-literal-only-at-definition-points
 title: 并发数值字面量只允许在唯一定义点（QUAY_MAX_TASK_SUBAGENTS /
   QUAY_MAX_CONCURRENT_SUITES），其余处出现即 fail——按位置判定 + 显式声明例外（禁悄悄写死，不禁有理由的默认）
-status: todo
+status: ready
 labels:
   - gap
   - defect

@@ -2,7 +2,7 @@
 id: gap-session-saturated-composite-condition-emitter
 title: SESSION-SATURATED 复合条件发射端——饱和 && develop 静默 ≥ T && 在飞集合无变化（T 可配
   SATURATION_SILENCE_MIN，非字面量；事件名与实际断言一致「失能」非仅「饱和」）
-status: todo
+status: ready
 labels:
   - gap
   - defect

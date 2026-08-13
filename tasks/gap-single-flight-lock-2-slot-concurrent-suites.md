@@ -2,7 +2,7 @@
 id: gap-single-flight-lock-2-slot-concurrent-suites
 title: 单飞锁 1→2 槽（人裁定：最多同时 2 组 suite）+ 相预算 = hostParallelism() ÷ 并发槽数（8=16÷2
   实例非字面量）+ 资源闸按 2 槽——两把锁文件 .0/.1 无新依赖
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
