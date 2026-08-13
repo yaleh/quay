@@ -1,7 +1,7 @@
 ---
 id: gap-ac47-completion-predicate-consumer-fail-closed
 title: AC47 谓词装上翻 done 闸前置：fail-open 修复 + 消费者落 inner 翻 done 路径 + 历史 done 不得当证据
-status: ready
+status: done
 labels:
   - gap
   - mechanism
