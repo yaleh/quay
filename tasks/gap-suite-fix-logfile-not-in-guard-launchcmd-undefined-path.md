@@ -2,7 +2,7 @@
 id: gap-suite-fix-logfile-not-in-guard-launchcmd-undefined-path
 title: execute-suite-fix launchCmd 模板把 logFile 缺值拼成字面量 undefined → 日志落根 + 每轮覆盖 +
   Fix agent 指向坏路径
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -46,17 +46,17 @@ plugin/scripts/full-suite-runner.ts:1244      path.resolve(parseArg(...) ?? …)
 
 ## AC
 
-- [ ] AC1: logFile 在 :67 守卫（缺则 bad-args fail-closed）
-- [ ] AC2: 模板不拼字面量 undefined（缺 logFile 时不传 flag，runner `??` 接管）
-- [ ] AC3: 机械判据——launchCmd 模板 `${x}` ⊆ 守卫检查集合（新增检查）
-- [ ] AC4: 负控——缺 logFile 走坏路径被拦（不再落 `<root>/undefined`）
-- [ ] AC5: 既有测试全绿；`--for-task` scoped 门绿
+- [x] AC1: logFile 在 :67 守卫（缺则 bad-args fail-closed）
+- [x] AC2: 模板不拼字面量 undefined（缺 logFile 时不传 flag，runner `??` 接管）
+- [x] AC3: 机械判据——launchCmd 模板 `${x}` ⊆ 守卫检查集合（新增检查）
+- [x] AC4: 负控——缺 logFile 走坏路径被拦（不再落 `<root>/undefined`）
+- [x] AC5: 既有测试全绿；`--for-task` scoped 门绿
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全部勾上
-- [ ] 负控样例贴出（见 Evidence：缺 logFile 不再落 undefined 文件）
-- [ ] 全量套件绿
+- [x] AC1–AC5 全部勾上
+- [x] 负控样例贴出（见 Evidence：缺 logFile 不再落 undefined 文件）
+- [x] 全量套件绿
 
 ## Touches
 
