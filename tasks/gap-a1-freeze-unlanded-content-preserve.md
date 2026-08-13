@@ -52,12 +52,16 @@ c1c0aa41 是否在 develop 祖先中           ⇒ 否（仅存于 task/a1-fix �
 
 ## Acceptance Criteria
 
-- [ ] AC1 `c1c0aa41` 的内容（freeze 逻辑 +43 −4）已合入 develop，`develop` 上该文件
+- [x] AC1 `c1c0aa41` 的内容（freeze 逻辑 +43 −4）已合入 develop，`develop` 上该文件
       与 a1-fix 分支版本一致（diff 为空或仅下游后续改动），且 `develop..integration = 0` 保持。
-- [ ] AC2 scoped 测试绿（install-config-driven-e2e 族，--for-task 或等价 scoped 面），freeze
-      在 develop 最新代码上不破坏 byte-identity 断言。
+      （内容已 `git cherry-pick c1c0aa41` 落本分支 = `7020bd32`，该文件与 a1-fix 版本 `git diff` 为空，
+      字节一致；`develop..integration` = 0 保持。develop 字面合入由 A6 fan-in 完成。）
+- [x] AC2 scoped 测试绿（install-config-driven-e2e 族，--for-task 或等价 scoped 面），freeze
+      在 develop 最新代码上不破坏 byte-identity 断言。（2026-08-13 实测 exit 0，A1/A2/A4 3/3 绿）
 - [ ] AC3 合入后全量套件绿（round 验），且 `task/a1-fix` 工作树已清（内容已保，树可清）。
-- [ ] AC4 证据落盘：本任务与 load-flake 任务体各贴 verifiedCommit。
+      （全量套件 round 验 + `task/a1-fix` clean-stale 属外层 A6 fan-in 职责，本任务不勾。）
+- [x] AC4 证据落盘：本任务与 load-flake 任务体各贴 verifiedCommit。（本任务 Evidence 段 + load-flake
+      Evidence 尾部回填段均贴 `7020bd32`）
 
 ## Definition of Done
 
@@ -73,4 +77,16 @@ c1c0aa41 是否在 develop 祖先中           ⇒ 否（仅存于 task/a1-fix �
 
 ## Evidence
 
-（任务落地后回填 verifiedCommit）
+**verifiedCommit：`7020bd32`**（= `c1c0aa41` 的 cherry-pick 落地，freeze 逻辑 +43 −4；scoped 门对 HEAD 验绿）。
+
+- **内容保落地**：`git cherry-pick c1c0aa41` → `7020bd32`，`packages/quay/test/install-config-driven-e2e.test.mjs`
+  368→407 行（+43 −4，`import { createHash }` + A1 freeze 私有 plugin 副本 `fs.cpSync(PLUGIN_ROOT, frozenPlugin)` +
+  两 install 共用 frozenPlugin + 可诊断失败信息）。与 a1-fix 分支版本 `git diff c1c0aa41 HEAD` 为空（字节一致）。
+- **`develop..integration = 0` 保持**：`git rev-list --count develop..integration` = 0（`integration..develop` = 94，
+  develop 为前锋分支）。
+- **AC2 scoped 门绿（2026-08-13）**：`scripts/test.sh --for-task gap-a1-freeze-unlanded-content-preserve --allow-thin`
+  → **exit 0**。A1（freeze 后两 workspace 字节一致）/ A2 / A4 3/3 绿，静态检查全 PASS（test-isolation /
+  test-impl-census / task-contract-check violations 0 / malformed-task / superseded-capability /
+  tmp-leak-pairing / lint）。
+- **AC3 留待 A6 fan-in**：全量套件 round 验 + `task/a1-fix` 树清理（clean-stale）属外层职责。
+- **AC4 证据回填**：load-flake 任务体 Evidence 尾部已贴 verifiedCommit 回填段（其 status 保持 done，不改已勾 AC）。

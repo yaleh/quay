@@ -139,6 +139,13 @@ product files (only the config differs)`，17.8s。）
 **DoD 剩余（不勾，属外层 verification-round）**：`修后实跑：连续 2 轮 full green 不含该文件`（Contract measure
 `install_e2e_red_rounds_after_fix` 需 full-suite 日志）+ 全量套件绿。
 
+**Backfill（2026-08-13，gap-a1-freeze-unlanded-content-preserve 保内容）**：`task/a1-fix` 分支的孤儿提交
+`c1c0aa41`（2026-08-12，"A1 — freeze plugin source so a mid-suite merge can't break byte-identity"，本文件
++43 −4）——即本任务 Touches 中 install-config-driven-e2e.test.mjs 的字节一致核心补全（round-38 A1 失败的
+根因是 suite 中途源变更而非负载/分裂）——已由 sibling 任务 `gap-a1-freeze-unlanded-content-preserve`
+承接保内容：`git cherry-pick c1c0aa41` → verifiedCommit **`7020bd32`**，scoped 门绿（A1/A2/A4 3/3，exit 0）。
+本任务 status 保持 **done**，此处仅做证据回填，不改动任何已勾 AC 与既有 Evidence。
+
 ## Dispatch review
 
 reviewer: outer
