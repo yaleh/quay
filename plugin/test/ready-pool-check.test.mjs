@@ -69,6 +69,7 @@ import {
   isCompoundTask,
   isExternalVerificationItem,
   isPendingImplementationItem,
+  priorityLevel,
 } from "../scripts/ready-pool-check.ts";
 import { parseTask } from "../scripts/task-schema.ts";
 import { taskWorkLanded } from "../scripts/task-status-drift-check.ts";
@@ -1217,6 +1218,81 @@ test("promotion ranks touch-disjointness first (vs pool + in-flight), kind as se
   const idxInfD = r.candidates.findIndex((c) => c.id === "gap-inf-disjoint");
   const idxInfC = r.candidates.findIndex((c) => c.id === "ARCH-colliding-inf");
   assert.ok(idxInfD < idxInfC, "disjoint-from-in-flight ranks before colliding-with-in-flight");
+});
+
+// ── PRIORITY TIEBREAKER (gap-priority-has-no-mechanism-reader, AC1/AC3): the explicit `priority:*`
+//    label (p1 > p2 > none) is read from the SAME frontmatter-labels source the dispatch sort reads
+//    (parseTask/parseCandidate), and re-orders promotion candidates WITHIN an equal-disjointness
+//    bucket — the "priority has a MECHANISM reader" fix (C17 closure). AC3: it NEVER overrides the
+//    disjointness safety axis (a higher-disjoint no-priority candidate still ranks first).
+
+test("priorityLevel maps p1/p2/none to ascending sort ranks (p1=1, p2=2, none=Infinity; unknown level fail-open)", () => {
+  assert.equal(priorityLevel(["gap", "priority:p1"]), 1);
+  assert.equal(priorityLevel(["gap", "priority:p2"]), 2);
+  assert.equal(priorityLevel(["gap"]), Infinity, "no priority label ⇒ none (last)");
+  assert.equal(priorityLevel(["gap", "priority:urgent"]), Infinity, "an unregistered level is fail-open (no rank)");
+  assert.equal(priorityLevel([]), Infinity);
+});
+
+test("candidate order: priority tiebreaker p1 > p2 > none within equal disjointness (AC1)", (t) => {
+  const root = makeWorkspace("order-priority");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  for (const f of ["code/pool.ts", "code/other.ts", "code/other2.ts", "code/other3.ts"]) {
+    fs.writeFileSync(path.join(root, f), "export const x = 1;\n");
+  }
+  // Pool: 1 ready task touching code/pool.ts; no in-flight ⇒ every disjoint candidate scores 1.
+  writeTask(root, "gap-pool", { status: "ready", labels: ["gap"], body: fourArtifactBody({ touches: ["- code/pool.ts"] }) });
+  writeTask(root, "gap-plain", gapTask("gap-plain", { body: fourArtifactBody({ touches: ["- code/other.ts"] }) }));
+  writeTask(root, "gap-p2", gapTask("gap-p2", { labels: ["gap", "priority:p2"], body: fourArtifactBody({ touches: ["- code/other2.ts"] }) }));
+  writeTask(root, "gap-p1", gapTask("gap-p1", { labels: ["gap", "priority:p1"], body: fourArtifactBody({ touches: ["- code/other3.ts"] }) }));
+
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 });
+  assert.deepEqual(r.candidates.map((c) => c.id), ["gap-p1", "gap-p2", "gap-plain"], "p1 before p2 before none at equal disjointness");
+  const byId = Object.fromEntries(r.candidates.map((c) => [c.id, c]));
+  assert.equal(byId["gap-p1"].priority, 1);
+  assert.equal(byId["gap-p2"].priority, 2);
+  assert.equal(byId["gap-plain"].priority, Infinity);
+  // The pick loop follows the sort: the p1 candidate is promoted first, and the record exposes the rank.
+  assert.equal(r.promotions[0].id, "gap-p1", "p1 candidate promoted first");
+  assert.equal(r.promotions[0].priority, 1, "promotion record exposes the priority rank");
+});
+
+test("candidate order: priority never overrides the disjointness safety axis (AC3)", (t) => {
+  const root = makeWorkspace("order-priority-safety");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  for (const f of ["code/pool.ts", "code/inflight.ts", "code/other.ts"]) {
+    fs.writeFileSync(path.join(root, f), "export const x = 1;\n");
+  }
+  // Pool: 1 ready task touching code/pool.ts; in-flight: 1 touching code/inflight.ts.
+  // code/other.ts is disjoint from BOTH ⇒ disjointScore 2 (max). code/pool.ts collides the pool ⇒ 1.
+  writeTask(root, "gap-pool", { status: "ready", labels: ["gap"], body: fourArtifactBody({ touches: ["- code/pool.ts"] }) });
+  writeTask(root, "gap-no-priority-disjoint", gapTask("gap-no-priority-disjoint", { body: fourArtifactBody({ touches: ["- code/other.ts"] }) }));
+  writeTask(root, "gap-p1-colliding", gapTask("gap-p1-colliding", { labels: ["gap", "priority:p1"], body: fourArtifactBody({ touches: ["- code/pool.ts"] }) }));
+
+  const inFlight = [{ id: "gap-inflight", body: fourArtifactBody({ touches: ["- code/inflight.ts"] }) }];
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1, inFlight });
+  assert.deepEqual(
+    r.candidates.map((c) => c.id),
+    ["gap-no-priority-disjoint", "gap-p1-colliding"],
+    "disjointness ranks before priority — a p1 colliding candidate cannot jump a disjoint no-priority one",
+  );
+  assert.equal(r.promotions[0].id, "gap-no-priority-disjoint", "AC3: safety first — the disjoint no-priority candidate is promoted first");
+});
+
+test("candidate order: priority beats the gap>DIR kind tiebreak within equal disjointness (AC1)", (t) => {
+  const root = makeWorkspace("order-priority-kind");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  for (const f of ["code/pool.ts", "code/other.ts"]) {
+    fs.writeFileSync(path.join(root, f), "export const x = 1;\n");
+  }
+  // Pool: 1 ready task touching code/pool.ts. Both candidates are disjoint from the pool (score 1);
+  // the kind tiebreak (gap before DIR) is outranked by the explicit priority label.
+  writeTask(root, "gap-pool", { status: "ready", labels: ["gap"], body: fourArtifactBody({ touches: ["- code/pool.ts"] }) });
+  writeTask(root, "gap-plain", gapTask("gap-plain", { body: fourArtifactBody({ touches: ["- code/other.ts"] }) }));
+  writeTask(root, "DIR-p1", dirTask("DIR-p1", { labels: ["milestone-candidate", "priority:p1"], body: fourArtifactBody({ touches: ["- code/other.ts"] }) }));
+
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 });
+  assert.deepEqual(r.candidates.map((c) => c.id), ["DIR-p1", "gap-plain"], "within equal disjointness, priority:p1 beats the gap>DIR kind tiebreak");
 });
 
 // ── REVERSE DIRECTION (gap-closed-bracket-leaves-live-agent-consuming-slots): closed-but-live agents

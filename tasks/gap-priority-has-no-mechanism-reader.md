@@ -44,15 +44,15 @@ touch-disjointness = 安全约束（并发正确性）——不可让步
 
 ## AC
 
-- [ ] AC1: ready-pool 排序在可行集（disjoint）内部按 `priority:` label tiebreaker（p1>p2>无），不越过安全约束
-- [ ] AC2: 试点（spec-11）标 `priority:p1`、ac44 标 `priority:p2`——优先级有机制读者（C17 闭合）
-- [ ] AC3: priority 不覆盖 disjointness（不可让步的安全约束保持优先）
-- [ ] AC4: 既有测试全绿；`--for-task` scoped 门绿
+- [x] AC1: ready-pool 排序在可行集（disjoint）内部按 `priority:` label tiebreaker（p1>p2>无），不越过安全约束
+- [x] AC2: 试点（spec-11）标 `priority:p1`、ac44 标 `priority:p2`——优先级有机制读者（C17 闭合）
+- [x] AC3: priority 不覆盖 disjointness（不可让步的安全约束保持优先）
+- [x] AC4: 既有测试全绿；`--for-task` scoped 门绿
 
 ## Definition of Done
 
-- [ ] AC1–AC4 全部勾上
-- [ ] 实测：有/无 priority label 的推荐序对照贴出（P1/P2 从切线外到切线内）
+- [x] AC1–AC4 全部勾上
+- [x] 实测：有/无 priority label 的推荐序对照贴出（P1/P2 从切线外到切线内）
 - [ ] 全量套件绿
 
 ## Touches
@@ -62,3 +62,22 @@ touch-disjointness = 安全约束（并发正确性）——不可让步
 - tasks/gap-ac44-concurrent-phases-read-host-parallelism.md（priority:p2 label）
 - plugin/test/ready-pool-check.test.mjs（priority tiebreaker + 不越过 disjointness 用例）
 - tasks/gap-priority-has-no-mechanism-reader.md（自身）
+
+## 执行记录（2026-08-13，worktree 子代理）
+
+**实现（AC1/AC3）**：`plugin/scripts/ready-pool-check.ts` 新增 `priorityLevel(labels)`（读 `priority:p1`=1 / `priority:p2`=2 / 无=Infinity；未注册级 fail-open 不越权），`buildCandidate` 把它读进候选的 `priority` 字段，晋升排序链插入为第二键——`disjointScore DESC`（安全约束，AC3 永不越过）→ `priority ASC`（可行集内 tiebreaker，p1>p2>无）→ `kindOrder`（gap>DIR 保留）→ `touchesResolve`。`promotions` 记录带 `priority` 字段（无=0），调用方可看到是哪一层 tiebreak 晋的级。
+
+**AC2（label 已就位）**：spec-11 与 ac44 在 fork 时已带 `priority:p1` / `priority:p2`（先前 commit 已落），本任务无需再改 label——机制读者是本任务的交付。两条任务已是 done，非 todo 候选，机制改动不触及其晋升。
+
+**DoD 实测（有/无 priority label 推荐序对照，合成 store：pool=1、floor=3、deficit=2、5 个同 disjoint 的合格 gap 候选）**：
+```
+WITHOUT priority：candidate order = gap-alpha gap-beta gap-delta gap-eps gap-gamma（字典序）
+                  promoted = gap-alpha gap-beta（p1/p2 靠 id 运气，非机制）
+WITH    priority：candidate order = gap-beta[p1] gap-alpha[p2] gap-delta gap-eps gap-gamma
+                  promoted = gap-beta(#1) gap-alpha(#2)（priority 是机制读者）
+```
+AC3 对照（同测试 `order-priority-safety`）：higher-disjoint 的无 priority 候选仍排在 lower-disjoint 的 `priority:p1` 候选之前——安全约束不可越过。
+
+**测试（AC4）**：`plugin/test/ready-pool-check.test.mjs` 新增 4 用例（`priorityLevel` 映射、可行集内 p1>p2>无、priority 不覆盖 disjointness、priority 胜过 kind 的 gap>DIR），单文件 99/99 绿；`--for-task` scoped 门绿见下。真实 store 干跑：pool=14 ≥ floor=12 ⇒ 无晋升压力，输出正常无崩溃。
+
+**全量套件绿：留给 outer（本子代理只跑 scoped 门）。**
