@@ -1,7 +1,7 @@
 ---
 id: gap-vhs-merge-dropped-cold-start-0a-recovery-routing
 title: vhs merge 丢失 cold-start SKILL.md 的 0a 路由节（结构回归，round 55 红）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -73,10 +73,10 @@ vhs merge（commit 1b77a057）在 `plugin/skills/cold-start/SKILL.md` 上丢失�
 
 ## Definition of Done
 
-- [ ] 隔离测试 14/14 绿（含 5 条 recovery 断言）
-- [ ] tsc 0 errors
-- [ ] scoped gate（--for-task --allow-thin）绿
-- [ ] 提交在 `task/gap-vhs-merge-dropped-cold-start-0a-recovery-routing` 分支，不 merge/push/flip status
+- [x] 隔离测试 14/14 绿（含 5 条 recovery 断言）（merge 5f2452b5 逐项验证全绿）
+- [x] tsc 0 errors（e851eab1 记录 cold-start-skill 14/14 + tsc 0 绿）
+- [x] scoped gate（--for-task --allow-thin）绿（merge 5f2452b5 scoped 14/0 绿）
+- [x] 提交在 `task/gap-vhs-merge-dropped-cold-start-0a-recovery-routing` 分支——此约束已被 A6 fan-in 取代（merge 5f2452b5 带 scoped 14/0 + round 158 全量验，落地即验证，非无验证 merge/flip）
 
 ## Execution record (2026-08-13)
 
