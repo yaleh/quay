@@ -27,10 +27,12 @@
 //      colliding ones are. floor is the MEANS; dispatchable capacity is the RESULT.
 //   3. When pool < floor (floor = cap × 4, default 12), recommend todo→ready promotions in a DEFINED
 //      order: touch-disjointness FIRST (vs the pool + in-flight candidates, checkTouchesPair), then
-//      `gap-*` defects before `DIR-*` capabilities (other kinds last), then touches-resolvable before
-//      not. Only candidates with deps ready + four artifacts complete + touches resolve + not fixture
-//      + not PARKED are eligible (合格). The touchesResolve guard is KEPT (AC5 — ADR-022 lesson: a big
-//      pool only promotes cleanly, never pollutes).
+//      the explicit `priority:*` label tiebreaker (p1 > p2 > none — gap-priority-has-no-mechanism-
+//      reader AC1; a PREFERENCE that only decides WITHIN an equal-disjointness bucket, never above
+//      the safety axis, AC3), then `gap-*` defects before `DIR-*` capabilities (other kinds last),
+//      then touches-resolvable before not. Only candidates with deps ready + four artifacts complete
+//      + touches resolve + not fixture + not PARKED are eligible (合格). The touchesResolve guard is
+//      KEPT (AC5 — ADR-022 lesson: a big pool only promotes cleanly, never pollutes).
 //   4. RETIRED-MECHANISM INTERCEPT (gap-ready-pool-promotion-ignores-retired-mechanism-candidate-check,
 //      AC1/AC2/AC4): a candidate that references an ADR-022-deleted classic-pipeline script
 //      (prepare-milestone.js / execute-milestone.js / milestone-worktree.ts) without annotation is a
@@ -816,6 +818,21 @@ export function isAcRecord(task) {
   return (task.labels || []).includes("ac");
 }
 
+/** PRIORITY TIEBREAKER (gap-priority-has-no-mechanism-reader, C17): read the explicit `priority:*`
+ *  frontmatter label — the SAME labels source the dispatch sort reads (parseTask/parseCandidate,
+ *  cf. the delivery-critical read at buildCandidate). A promotion-candidate's priority is a
+ *  PREFERENCE, never a safety override: it only decides order WITHIN an equal-disjointness bucket
+ *  (the promotion sort ranks disjointScore FIRST — the non-negotiable concurrency-safety axis).
+ *  Returns a numeric rank used as an ASCENDING sort key: p1=1 (earliest), p2=2, no priority=Infinity
+ *  (last). An unregistered `priority:*` level (neither p1 nor p2, e.g. the distinct `priority:urgent`
+ *  human-steered milestone convention) is treated as no-priority — fail-open: an unregistered level
+ *  never outranks a registered one. */
+export function priorityLevel(labels = []) {
+  if (labels.includes("priority:p1")) return 1;
+  if (labels.includes("priority:p2")) return 2;
+  return Infinity;
+}
+
 /** Parse the `children:` frontmatter field — flow `[a, b]` or block `- a` list. Mirrors the labels
  *  parser in task-schema.ts (lenient; no YAML dep). Returns the child task-id array. */
 export function readChildren(frontmatterRaw) {
@@ -1331,6 +1348,11 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
   // setTaskStatus/applyPromotions. A candidate with no frontmatter / no such label ⇒ false
   // (conservative default, matching the dispatch side).
   const deliveryCritical = (task.labels || []).includes("delivery-critical");
+  // PRIORITY TIEBREAKER (gap-priority-has-no-mechanism-reader): the explicit `priority:*` label
+  // (p1 > p2 > none), read from the SAME frontmatter-labels source (parseTask) the dispatch sort
+  // reads. A PREFERENCE, never a safety override — the promotion sort ranks disjointScore FIRST
+  // (AC3), and priority only breaks ties within an equal-disjointness bucket.
+  const priority = priorityLevel(task.labels || []);
   // PROSE-PREREQUISITE GAP (gap-prerequisite-gates-prose-invisible-to-mechanisms AC3): a candidate
   // whose body declares a prerequisite in prose WITHOUT a corresponding relation edge must NOT be
   // promoted to ready — it would enter the ready pool with a dependency no mechanism can see.
@@ -1354,6 +1376,10 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
     // determination — consumed by applyPromotions so the label is written AT PROMOTE (标签与 ready
     // 同现). Same frontmatter-labels source the dispatch sort reads.
     deliveryCritical,
+    // PRIORITY TIEBREAKER (gap-priority-has-no-mechanism-reader): the candidate's explicit
+    // `priority:*` label rank (p1=1, p2=2, none=Infinity) — consumed by the promotion sort as the
+    // tiebreaker WITHIN an equal-disjointness bucket (AC1). Never above disjointScore (AC3).
+    priority,
     // AC1 (gap-value-prioritization-has-no-mechanism): every candidate carries the relevance signal —
     // strategic traceability (grep) + blocking (parent/children/depends_on reverse edges) + cost
     // (touches parsed scale).
@@ -1698,10 +1724,15 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
       candidates.push(buildCandidate(id, t, root, allTasks, poolParsed, inFlightParsed, expand, childrenByTask, parentRefCount, dependedOnCount));
     }
     // AC4: disjointness FIRST (how many pool/in-flight tasks the candidate is pairwise-disjoint
-    // from), then `gap-*` > `DIR-*`, then touches-resolvable before not.
+    // from) — the non-negotiable concurrency-safety axis (AC3: priority NEVER overrides it); then
+    // the `priority:*` label tiebreaker (p1 > p2 > none, WITHIN an equal-disjointness bucket —
+    // gap-priority-has-no-mechanism-reader AC1); then `gap-*` > `DIR-*`; then touches-resolvable
+    // before not. Infinity-rank (no priority) minus Infinity-rank is NaN ⇒ falsy ⇒ falls through
+    // to the next key; Infinity-rank minus a registered level is ±Infinity ⇒ registered wins.
     candidates.sort(
       (a, b) =>
         b.disjointScore - a.disjointScore ||
+        a.priority - b.priority ||
         a.kindOrder - b.kindOrder ||
         (a.touchesResolve === b.touchesResolve ? 0 : a.touchesResolve ? -1 : 1),
     );
@@ -1720,6 +1751,10 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
       promotions.push({
         id: c.id,
         disjointScore: c.disjointScore,
+        // PRIORITY TIEBREAKER (gap-priority-has-no-mechanism-reader): the promotion record carries
+        // the candidate's priority label (p1/p2, or 0 when none) so a caller can see WHICH tiebreak
+        // promoted it — the "P1/P2 from outside the tangent to inside" DoD evidence. 0 = no label.
+        priority: Number.isFinite(c.priority) ? c.priority : 0,
         reason:
           `${c.kind}-* candidate · disjoint ${c.disjointScore}/${poolParsed.length + inFlightParsed.length} · ` +
           `deps ${c.depsReady ? "ready" : "NOT-ready"} · ` +
