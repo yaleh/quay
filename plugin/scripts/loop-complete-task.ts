@@ -29,6 +29,11 @@
 
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+// AC47 (gap-ac47-completion-predicate-consumer-fail-closed, AC4): the flip-done path's AC/DoD
+// section-recognition consumer — the same shape-aware completion counter the pool/slot-refill use
+// (single source, never a parallel copy). A plugin→plugin static import (ready-pool-check imports no
+// packages/ tree), so the esbuild plugin bundle resolves it fine.
+import { countCompletionCheckboxes } from "./ready-pool-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..", "..");
@@ -91,6 +96,24 @@ export async function main(argv: string[]): Promise<number> {
   };
 
   const logPath = path.join(workspaceRoot, DEFAULT_GATE_LOG_RELATIVE_PATH);
+  // AC47 (gap-ac47-completion-predicate-consumer-fail-closed, AC4): the inner flip-done gate must NOT
+  // silently pass a task whose AC/DoD section it cannot READ. Before running the QENG complete loop,
+  // verify the task's AC/DoD sections are RECOGNIZED (sectionFound) — an ABSENT/UNREGISTERED section
+  // (e.g. `## Acceptance Criteria (runnable — …)` before AC3 registration) would otherwise be judged
+  // complete with its unchecked boxes unseen. sectionFound:false ⇒ REFUSE the flip-done and report
+  // "AC/DoD 段未识别" (fail-closed, not a silent pass). The checkbox-completeness judgment itself
+  // stays the caller's (the outer 1b "勾得上就勾、勾不上写理由或留 ready" before invoking this
+  // script) — this check is the "can we even READ the AC/DoD" safety net, not a re-judge.
+  const existing = await store.get(id);
+  if (existing?.body) {
+    const { sectionFound } = countCompletionCheckboxes(existing.body);
+    if (!sectionFound) {
+      process.stderr.write(
+        `REFUSE flip done for ${id}: AC/DoD 段未识别 (sectionFound=false — no recognizable AC/DoD section)\n`
+      );
+      return 1;
+    }
+  }
   const r = await runCompleteLoop({ client, id, logPath, actor: actor ?? "quay-loop", workspaceRoot, verifiedBy });
   // runCompleteLoop sets process.exitCode for CLI backward-compat; reset it so a
   // long-running parent (outer session) isn't polluted, and use the returned field.

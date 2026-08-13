@@ -71,21 +71,21 @@ extractSectionByShape 认不出 `## Acceptance Criteria (runnable — …)` 这�
 
 ## Acceptance Criteria
 
-- [ ] AC1 fail-closed：`extractSectionByShape` 返回 null（段未识别）⇒ 不计为完成；`sectionFound:false` 可区分于「段存在且零未勾」。
-- [ ] AC2 负控制（**全部 5 个消费者**，一行可查）：对 DIR-014（带后缀标题+未勾框），没有任何一个消费者报「完成/landed」——
+- [x] AC1 fail-closed：`extractSectionByShape` 返回 null（段未识别）⇒ 不计为完成；`sectionFound:false` 可区分于「段存在且零未勾」。
+- [x] AC2 负控制（**全部 5 个消费者**，一行可查）：对 DIR-014（带后缀标题+未勾框），没有任何一个消费者报「完成/landed」——
       `slot-refill.ts:373 isLandedCodeComplete` 不判 landed · `slot-refill.ts:274 isNotYetFlippedSkip` 不误放行 ·
       `ready-pool-check.ts:793` 不判 allChecked · `ready-pool-check.ts:1754` 不误分「干净积压」·
       `task-status-drift-check.ts:810` 不误过。
-- [ ] AC3 SHAPE_SECTIONS 登记带后缀变体；未登记变体走 fail-closed。
-- [ ] AC4 消费者落 inner 翻 done 路径：`sectionFound:false` 时拒绝翻 done 并报「AC/DoD 段未识别」。
-- [ ] AC5 历史 done 不当证据：任务体写明「任何机制不得把历史 done 当作 AC/DoD 已满足的证据」。
-- [ ] AC6 既有测试全绿；`--for-task` scoped 门绿。
+- [x] AC3 SHAPE_SECTIONS 登记带后缀变体；未登记变体走 fail-closed。
+- [x] AC4 消费者落 inner 翻 done 路径：`sectionFound:false` 时拒绝翻 done 并报「AC/DoD 段未识别」。
+- [x] AC5 历史 done 不当证据：任务体写明「任何机制不得把历史 done 当作 AC/DoD 已满足的证据」。
+- [x] AC6 既有测试全绿；`--for-task` scoped 门绿。
 
 ## Definition of Done
 
-- [ ] fail-closed 修复落地 + 负控制通过（DIR-014 不再判合格）。
-- [ ] 消费者落翻 done 路径 + `sectionFound:false` 拒绝并报出。
-- [ ] 历史 done 不当证据禁令写入任务体。
+- [x] fail-closed 修复落地 + 负控制通过（DIR-014 不再判合格）。
+- [x] 消费者落翻 done 路径 + `sectionFound:false` 拒绝并报出。
+- [x] 历史 done 不当证据禁令写入任务体。
 
 ## Touches
 
@@ -97,4 +97,32 @@ extractSectionByShape 认不出 `## Acceptance Criteria (runnable — …)` 这�
 
 ## Evidence
 
-（落地后回填）
+（2026-08-13 落地回填，scoped 门绿 234/234 + 4 个单测文件全绿）
+
+**fail-closed 形态（AC1）**：`countAcCheckboxes(acSection == null)` 返回 `{ total: NaN, checked: NaN, unchecked: NaN, sectionFound: false }` ——
+`sectionFound:false` 是「段不存在/未识别」的可区分态；`total: NaN` 是结构保证（旧解构读法 `const { total, checked } = …` 里
+`total === 0` 与 `checked === total` 对 NaN 恒假 ⇒ 不靠记得改每个消费者）。「段存在且零未勾」保持 `{total:0, checked:0, unchecked:0, sectionFound:true}`。
+`plugin/scripts/task-status-drift-check.ts` 与 `experiments/quay-perpetual-stream/scripts/task-status-drift-check.ts` 镜像同步（AC1 byte-identical 测试保持绿）。
+
+**AC2 负控制（对真实 DIR-014，一行可查）**：
+```
+countCompletionCheckboxes(DIR-014) → { total: 5, checked: 0, unchecked: 5, sectionFound: true }   # 修复前是 {total:0, unchecked:0} ⇒ 误判合格
+1. slot-refill isLandedCodeComplete → false（不判 landed）
+1b. slot-refill isBodyLanded → false
+3. ready-pool-check allChecked (total>0 && checked===total) → false（不判 allChecked）
+4. ready-pool-check acOpen = cb.unchecked = 5 → clean-backlog(acOpen===0) → false（不误分「干净积压」）
+5. task-status-drift-check :810 guard（literal extractSection 对后缀标题 → null → countAcCheckboxes fail-closed NaN）→ false（不误过）
+2. slot-refill isNotYetFlippedSkip → 单测内以真实 merge workspace 验证 false（literal extractSection 见不到后缀标题 ⇒ sectionFound false ⇒ 不误放行）
+```
+
+**AC3 SHAPE_SECTIONS 登记**：`AC_SUFFIX_VARIANTS` = `["Acceptance Criteria (runnable)", "Acceptance Criteria (runnable — artifacts are necessary-not-sufficient)"]`；
+`DOD_SUFFIX_VARIANTS` = `["Definition of Done — REAL LANDING is the bar, not artifacts", "Definition of Done — REAL LANDING, subtractive (DIR-026 Reading A preserved)"]`；
+每个 shape 的 ac/dod 数组 spread 登记。未登记变体（如 `## Acceptance Criteria for the OLD design`）→ sectionFound:false → fail-closed（单测覆盖）。
+
+**AC4 翻 done 消费者**：`plugin/scripts/loop-complete-task.ts` 在 `runCompleteLoop` 前 `countCompletionCheckboxes(existing.body)`，
+`sectionFound:false` ⇒ `REFUSE flip done for <id>: AC/DoD 段未识别`，退出 1、状态不动、无 gate event（gate-event-store.test.mjs 新增用例绿）。
+
+**AC5 历史 done 不当证据**：Plan 第 4 条已写明「任何机制不得把历史 `done` 当作「AC/DoD 已满足」的证据」——前向闸只保证从今往后。
+
+**测试**：`scripts/test.sh --for-task gap-ac47-completion-predicate-consumer-fail-closed --allow-thin` → 234 pass / 0 fail / 1 opt-in skip。
+单测文件：task-status-drift-check 51 pass · slot-refill 75 pass（含 3 条 AC47 负控制/登记新用例）· ready-pool-check 108 pass（no-AC fallback 测试按 fail-closed 语义更新）· gate-event-store 4 pass（含 AC4 拒绝用例）。

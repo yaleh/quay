@@ -271,7 +271,13 @@ export function isNotYetFlippedSkip({ id, body, root, excludedNyfIds }) {
   if (excludedNyfIds.has(id)) return true;
   if (!hasFanInMerge(root, id)) return false;
   const ac = extractSection(body, "Acceptance Criteria");
-  const { total, checked } = countAcCheckboxes(ac);
+  const { total, checked, sectionFound } = countAcCheckboxes(ac);
+  // AC47 (gap-ac47-completion-predicate-consumer-fail-closed, AC1/AC2): an ABSENT/UNREADABLE AC
+  // section (extractSection → null, e.g. a suffixed/unregistered heading) is fail-CLOSED — do NOT
+  // treat it as "total=0 → not a skip". With the countAcCheckboxes fail-closed shape this guard is
+  // redundant (total is NaN ⇒ the arithmetic below already returns false), but it makes the
+  // fail-closed intent explicit at this consumer.
+  if (!sectionFound) return false;
   if (total === 0) return false;
   const allAcsChecked = checked === total;
   const acRatio = checked / total;
@@ -386,7 +392,13 @@ export function isOuterVerificationItem(text) {
  *  wrongly trap it). Reuses the pool's single-source countCompletionCheckboxes / isExternalVerificationItem
  *  (the outer family is the ONLY addition), never a parallel copy. */
 export function isLandedCodeComplete(body) {
-  const { total, checked, uncheckedItems } = countCompletionCheckboxes(body);
+  const { total, checked, uncheckedItems, sectionFound } = countCompletionCheckboxes(body);
+  // AC47 (gap-ac47-completion-predicate-consumer-fail-closed, AC1/AC2): an ABSENT/UNRECOGNIZED
+  // AC/DoD section is fail-CLOSED — never "landed". This is the main fail-open consumer (the
+  // LANDED-IMPLEMENTATION recommendation path): DIR-014's 5 unchecked boxes under a suffixed heading
+  // previously read as {total:0} → total===0 → judged landed. Now sectionFound:false returns false
+  // (and countCompletionCheckboxes total is NaN, so `total===0` is structurally unreachable).
+  if (!sectionFound) return false;
   if (total === 0) return true;
   if (checked === total) return true;
   return uncheckedItems.length > 0 && uncheckedItems.every(isOuterVerificationItem);
@@ -406,7 +418,11 @@ export function isLandedCodeComplete(body) {
  *  from body alone (that would be a phantom-killer FALSE POSITIVE: genuinely-new no-checkbox work
  *  swallowed). Reuses the single-source countCompletionCheckboxes + isOuterVerificationItem. */
 export function isBodyLanded(body) {
-  const { total, checked, uncheckedItems } = countCompletionCheckboxes(body);
+  const { total, checked, uncheckedItems, sectionFound } = countCompletionCheckboxes(body);
+  // AC47 (gap-ac47-completion-predicate-consumer-fail-closed, AC1/AC2): fail-closed on an
+  // ABSENT/UNRECOGNIZED AC/DoD section — a body whose completion predicate cannot read its AC/DoD is
+  // never judged body-side landed (matches isLandedCodeComplete's fail-closed).
+  if (!sectionFound) return false;
   if (total === 0) return false;
   if (checked === total) return true;
   return uncheckedItems.length > 0 && uncheckedItems.every(isOuterVerificationItem);

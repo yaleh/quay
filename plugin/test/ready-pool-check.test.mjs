@@ -704,25 +704,39 @@ test("AC-complete signal is a UNION not a replace: partial/zero/non-ready NOT su
 // signal — total===0 joins the all-checked / >50% gate. A no-AC task whose work has NOT landed stays
 // dispatchable (stuck-work protection intact).
 
-test("no-AC-section fallback: landed no-AC task is a done-flip; unlanded no-AC task stays in the pool (AC4)", (t) => {
+test("no-AC-section fallback (AC4, AC47-corrected): present-but-boxless landed no-AC task is a done-flip; ABSENT AC section is fail-closed", (t) => {
   const root = makeWorkspace("no-ac");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  // Work landed via a (new)-marked touch file that now exists → no-AC task is a done-flip candidate.
+  // Work landed via a (new)-marked touch file that now exists.
   fs.writeFileSync(path.join(root, "code", "last-pane.ts"), "export const lastPane = 1;\n");
-  const landedNoAc = {
+  // PRESENT `## Acceptance Criteria` heading with ZERO checkboxes (prose only) — the "段存在且零未勾"
+  // state: total=0, sectionFound=true ⇒ the no-AC closeout fallback PRESERVED (landing is its
+  // closeout) — a done-flip candidate (AC4, unchanged by the AC47 fail-closed fix).
+  const landedProseNoBox = {
+    status: "ready",
+    body: "## Acceptance Criteria\nno checkboxes at all\n## Touches\n- code/last-pane.ts (new)\n## Definition of Done\nstandard",
+  };
+  assert.equal(notYetFlipped(landedProseNoBox, root), true,
+    "present-but-boxless no-AC task whose work has landed is a done-flip candidate (AC4)");
+  // ABSENT `## Acceptance Criteria` heading (extractSectionByShape → null) — the AC47 fail-closed
+  // shape: sectionFound=false ⇒ countCompletionCheckboxes total is NaN ⇒ the total===0 closeout
+  // arm is STRUCTURALLY unreachable ⇒ NOT a done-flip, even with work landed. (Deliberate change:
+  // gap-ac47-completion-predicate-consumer-fail-closed — an unreadable section must not be judged
+  // complete, else DIR-014's 5 unchecked boxes under a suffixed heading are swallowed.)
+  const landedAbsentAc = {
     status: "ready",
     body: "## Touches\n- code/last-pane.ts (new)\n## Definition of Done\nstandard",
   };
-  assert.equal(notYetFlipped(landedNoAc, root), true,
-    "no-AC task whose work has landed is a done-flip candidate (AC4)");
-  // Work NOT landed → no-AC task stays in the dispatchable pool.
+  assert.equal(notYetFlipped(landedAbsentAc, root), false,
+    "ABSENT AC section + landed work is fail-closed (NOT a done-flip — the section was never read)");
+  // Work NOT landed → no-AC task stays in the dispatchable pool (present or absent section).
   const unlandedNoAc = {
     status: "ready",
     body: "## Touches\n- code/never.ts (new)\n## Definition of Done\nstandard",
   };
   assert.equal(notYetFlipped(unlandedNoAc, root), false,
     "no-AC task whose work has NOT landed stays in the pool (AC4)");
-  // A no-AC section entirely ABSENT (extractSection → null) behaves the same as prose-with-no-boxes.
+  // A no-AC section entirely ABSENT (extractSection → null) + unlanded work stays in the pool.
   const noAcSection = {
     status: "ready",
     body: "## Proposal\nA real proposal paragraph that is more than forty non-whitespace chars.\n## Touches\n- code/never.ts (new)\n",
@@ -745,7 +759,10 @@ test("ready pool: a no-AC task whose work lands on INTEGRATION is a done-flip (t
   git("commit", "-q", "-m", "init");
   // Two-line model: the working line is integration (master stays stale behind it).
   git("checkout", "-q", "-b", "integration");
-  // A no-AC task: no ## Acceptance Criteria section — structurally unable to tick ACs.
+  // A no-checkbox task: `## Acceptance Criteria` heading PRESENT but with zero checkboxes (the
+  // "段存在且零未勾" state — sectionFound:true, total:0) — structurally unable to tick ACs, so its
+  // landing is its closeout (AC4 no-AC fallback, PRESERVED by the AC47 fail-closed fix; the fix
+  // only fails-closed on an ABSENT/unreadable section, not a present-but-boxless one).
   writeTask(root, "gap-last-pane-telemetry", {
     status: "ready",
     labels: ["gap"],
@@ -755,6 +772,8 @@ test("ready pool: a no-AC task whose work lands on INTEGRATION is a done-flip (t
       "A real proposal paragraph that is definitely more than forty non-whitespace chars.",
       "## Touches",
       "- code/last-pane.ts",
+      "## Acceptance Criteria",
+      "prose acceptance criteria with no checkboxes at all",
       "## Definition of Done",
       "standard DoD — the five clauses; meta-enforcer fixture-pinned.",
     ].join("\n"),

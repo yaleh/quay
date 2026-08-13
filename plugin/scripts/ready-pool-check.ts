@@ -498,6 +498,25 @@ export const RED_WINDOW_MIN_DEFAULT = 3;
 // their AC/DoD sections. They ARE the AC/DoD artifacts — the `（draft）` suffix is a heading-label
 // convention, not an absent section — so the four-artifacts gate must count them, or those todo tasks
 // are wrongly ineligible for author→ready promotion (the 38-todo shape-vs-gate mismatch).
+// AC/DoD SUFFIXED-HEADING VARIANTS (gap-ac47-completion-predicate-consumer-fail-closed, AC3):
+// suffixed AC/DoD headings real directive tasks in this store use — `## Acceptance Criteria
+// (runnable)`, `## Acceptance Criteria (runnable — artifacts are necessary-not-sufficient)`,
+// `## Definition of Done — REAL LANDING is the bar, not artifacts`, `## Definition of Done — REAL
+// LANDING, subtractive (…)`. Explicitly REGISTERED (manager 2026-08-13 preference) rather than
+// prefix-matched — a prefix would ALSO swallow `## Acceptance Criteria for the OLD design`, adding
+// uncertainty to an already-fragile matcher. An UNREGISTERED suffixed variant is NOT matched here and
+// therefore fails CLOSED at countAcCheckboxes (null section → NaN total → every consumer fails
+// "complete/landed"), consistent with the existing `（draft）`-variant handling (explicit registration,
+// unregistered ⇒ fail-closed).
+const AC_SUFFIX_VARIANTS = [
+  "Acceptance Criteria (runnable)",
+  "Acceptance Criteria (runnable — artifacts are necessary-not-sufficient)",
+];
+const DOD_SUFFIX_VARIANTS = [
+  "Definition of Done — REAL LANDING is the bar, not artifacts",
+  "Definition of Done — REAL LANDING, subtractive (DIR-026 Reading A preserved)",
+];
+
 const SHAPE_SECTIONS = {
   contract: {
     // `## 人的裁定` is the directive-variant proposal-slot (type: directive tasks
@@ -506,19 +525,19 @@ const SHAPE_SECTIONS = {
     // finding's `## Finding` mapping into the proposal-slot.
     proposal: ["Proposal", "人的裁定"],
     plan: ["Contract"],
-    ac: ["AC", "Acceptance Criteria"],
-    dod: ["DoD", "Definition of Done"],
+    ac: ["AC", "Acceptance Criteria", ...AC_SUFFIX_VARIANTS],
+    dod: ["DoD", "Definition of Done", ...DOD_SUFFIX_VARIANTS],
   },
   finding: {
     proposal: ["Finding"],
-    ac: ["AC", "Acceptance Criteria", "AC（draft）", "AC (draft)"],
-    dod: ["DoD", "Definition of Done", "DoD（draft）", "DoD (draft)"],
+    ac: ["AC", "Acceptance Criteria", "AC（draft）", "AC (draft)", ...AC_SUFFIX_VARIANTS],
+    dod: ["DoD", "Definition of Done", "DoD（draft）", "DoD (draft)", ...DOD_SUFFIX_VARIANTS],
   },
   plan: {
     proposal: ["Proposal"],
     plan: ["Plan"],
-    ac: ["AC", "Acceptance Criteria"],
-    dod: ["DoD", "Definition of Done"],
+    ac: ["AC", "Acceptance Criteria", ...AC_SUFFIX_VARIANTS],
+    dod: ["DoD", "Definition of Done", ...DOD_SUFFIX_VARIANTS],
   },
   // proposal shape (2026-08-11, mirrors store.ts SHAPE_REGISTRY): a task whose own
   // complete contract is Proposal / AC / DoD with NO plan dimension — symmetric
@@ -528,8 +547,8 @@ const SHAPE_SECTIONS = {
   // dimension. Adding a fabricated `## Contract` would be a shape change, not a fix.
   proposal: {
     proposal: ["Proposal"],
-    ac: ["AC", "Acceptance Criteria"],
-    dod: ["DoD", "Definition of Done"],
+    ac: ["AC", "Acceptance Criteria", ...AC_SUFFIX_VARIANTS],
+    dod: ["DoD", "Definition of Done", ...DOD_SUFFIX_VARIANTS],
   },
 };
 
@@ -690,11 +709,22 @@ export function countCompletionCheckboxes(body) {
   const dodSection = extractSectionByShape(body, "dod");
   const ac = countAcCheckboxes(acSection);
   const dod = countAcCheckboxes(dodSection);
+  // sectionFound (gap-ac47-completion-predicate-consumer-fail-closed, AC1/AC4): FALSE when EITHER the
+  // AC or DoD section is ABSENT / UNRECOGNIZED (extractSectionByShape null). When a section is
+  // absent, its count is NaN (countAcCheckboxes fail-closed), so `total/checked/unchecked` are NaN —
+  // every aggregate consumer (isLandedCodeComplete / isBodyLanded / notYetFlipped) fails "complete/
+  // landed" structurally. `sectionFound` is the explicit, distinguishable read for consumers that
+  // check it directly (the flip-done gate refuses on sectionFound:false). A section PRESENT but with
+  // ZERO checkboxes stays `total: 0` + sectionFound:true — the "段存在且零未勾" state, distinct from
+  // "段不存在".
   return {
     total: ac.total + dod.total,
     checked: ac.checked + dod.checked,
     unchecked: ac.unchecked + dod.unchecked,
     uncheckedItems: [...uncheckedItems(acSection), ...uncheckedItems(dodSection)],
+    acSectionFound: ac.sectionFound,
+    dodSectionFound: dod.sectionFound,
+    sectionFound: ac.sectionFound && dod.sectionFound,
   };
 }
 

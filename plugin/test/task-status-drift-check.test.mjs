@@ -691,8 +691,20 @@ test("countAcCheckboxes: counts GFM boxes; only [x]/[X] counts as checked ([~] p
   assert.equal(r.total, 5);
   assert.equal(r.checked, 2);
   assert.equal(r.unchecked, 3);
-  assert.deepEqual(countAcCheckboxes(null), { total: 0, checked: 0, unchecked: 0 });
-  assert.deepEqual(countAcCheckboxes("no boxes here"), { total: 0, checked: 0, unchecked: 0 });
+  assert.equal(r.sectionFound, true, "a present section is marked sectionFound:true");
+  // AC47 fail-closed (gap-ac47-completion-predicate-consumer-fail-closed, AC1): an ABSENT section
+  // must NOT read as { unchecked: 0 } (that conflated "checked, zero unchecked" with "no section
+  // found"). sectionFound:false is the distinguishable state; total NaN is the structural guarantee
+  // that old destructuring read-patterns cannot get a pass (total===0 / checked===total both false).
+  const absent = countAcCheckboxes(null);
+  assert.equal(absent.sectionFound, false, "an absent/unreadable section is distinguishable (sectionFound:false)");
+  assert.ok(Number.isNaN(absent.total) && Number.isNaN(absent.checked) && Number.isNaN(absent.unchecked),
+    "absent section counts are NaN — old destructuring reads cannot obtain a pass");
+  assert.equal(absent.total === 0, false, "total===0 is false for an absent section");
+  assert.equal(absent.checked === absent.total, false, "checked===total is false for an absent section");
+  // A PRESENT section with no boxes stays { total: 0, unchecked: 0 } + sectionFound:true — the
+  // "段存在且零未勾" state, distinct from "段不存在".
+  assert.deepStrictEqual(countAcCheckboxes("no boxes here"), { total: 0, checked: 0, unchecked: 0, sectionFound: true });
 });
 
 test("AC2 (closed): LIVE-SPECIMEN reproduction — done + 0 AC checked + Touches files NOT in tree ⇒ reported as closed-without-work", () => {
