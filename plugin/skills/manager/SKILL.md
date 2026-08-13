@@ -166,6 +166,7 @@ rules* but does not re-implement each SPEC. Index (under `orchestration/` in the
 - `orchestration/SPEC-cold-start-one-liner.md` — cold-start one-liner (delivery surface)
 - `orchestration/SPEC-complete-delivery-surface-2026-08-05.md` — the complete delivery surface (six classes; this skill is the loop-documentation class-2 owner)
 - `orchestration/SPEC-cut-the-waiting.md` — waiting / dispatch-form rationale
+- `orchestration/SPEC-dispatch-ordering-semantic-2026-08-13.md` — dispatch-ordering semantics (structure-vs-semantics cut / inner chooses / preference-passing three-part)
 - `orchestration/SPEC-inbox-service-2026-08-08.md` — the inbox service (agent-to-agent communication channel: manager/outer/inner via a per-project background service, tmux demoted to emergency control)
 - `orchestration/SPEC-instruments-behind-one-entry.md` — instrument discovery behind one entry
 - `orchestration/SPEC-isolation-and-resource-governance-2026-08-05.md` — isolation + resource governance
