@@ -523,6 +523,19 @@ bracket`）——**括号在终止/完成同轮闭合，不停留 inProgress**�
    「主检出只读诊断」裁定（`gap-a6-fan-in-verify-before-merge-in-worktree`）。**选中集非绿 ⇒ 丢弃该 worktree 的
    未合状态**（共享检出零污染、无需回退操作），标 needs-human，**同时关括号**（`--close-task --taskId <id>
    --outcome needs-human`），**停止本 tick 的后续合并与派发**，报告。
+1.5. **ts-typecheck 前置（`gap-ts-touching-fan-in-needs-typecheck-gate`）**——与 scoped 门并列的 fan-in 准入维度：
+   任务 `## Touches` 含**新增/移动 `.ts`**（diff vs `$MERGE_TARGET` 的 `--diff-filter=ACR`）⇒ 类型图改变，scoped
+   选中集不背书（round 52 红：cli-import-migration 17 个新 .ts scoped 79/0 绿但 `npx tsc --noEmit` 73 错全在
+   src/cli/）⇒ **在 worktree 内先跑 ts-typecheck 闸**：
+   ```bash
+   node --experimental-strip-types plugin/scripts/fan-in-ts-typecheck-gate.ts --task <taskId> \
+     --worktree $WORKTREE_ROOT/<slug> --merge-target $MERGE_TARGET
+   ```
+   该脚本读 `## Touches`、算 `$MERGE_TARGET...HEAD` 的新增/移动 `.ts`，命中则执行 ts-typecheck 闸命令
+   （`.quay/config.yml` `gates.testPass.ts-typecheck`，ADR-013 工作区数据；config 缺失时回退 canonical
+   per-package loop），`cwd` = worktree（测的是本任务的树）。**exit 1（typecheck 红）⇒ 丢弃 worktree 未合状态、
+   标 needs-human、关括号、停止本 tick 后续合并与派发**；**exit 2（git diff 不可用）同样 fail-closed 停**。
+   exit 0（无新增/移动 .ts，或 typecheck 绿）⇒ 继续步骤 2。`--check-only` 可先筛哪些任务要付 ~20s 闸。
 2. **绿才 merge（后合）**：`git merge --no-ff task/<taskId> -m "merge: fan-in task/<taskId> (runId: <runId>)"`
    （合并目标 = 当前检出的 `$MERGE_TARGET`——两线模型下内层共享检出立在 `$MERGE_TARGET` 上，不是 `$FORK_BASELINE`；
    `$FORK_BASELINE` 只由外层批量合推进）。**fan-in 提交必须带 runId（`gap-task-telemetry-6-percent-join`：遥测 taskId →
@@ -542,7 +555,7 @@ fan-in**（AC 全勾、工作已落地、无合并需要）时同样调 `--close
 记录仍由外层 1b 异步做（`orchestrator-loop-tick.md` 步骤 1b）。
 
 **A6/A15 对齐（`gap-worktree-leak-after-fan-in-occupies-slot-permanently`）**：inner 的 fan-in 序列
-（本步骤：`cd <wt>` 内 `--for-task` 复测 → 绿才 merge --no-ff → `git worktree remove`）与 **outer A15 ④ 的 fan-in 序列已对齐**
+（本步骤：`cd <wt>` 内 `--for-task` 复测 + ts-typecheck 前置（新增/移动 .ts 时）→ 绿才 merge --no-ff → `git worktree remove`）与 **outer A15 ④ 的 fan-in 序列已对齐**
 （`orchestration/orchestrator-tick-core.md` A15 ④ 现含同一 `git worktree remove`）——两层的「合并后清理」是同一条
 纪律，否则在 outer 侧 fan-in 的任务（最近全在 outer 侧执行）会留下 worktree，每合一个任务永久吃一个槽位
 （`worktreeExists` 判存活 = worktree 还在 ⇒ occupied 单调累积 > cap ⇒ 空槽恒 0）。
