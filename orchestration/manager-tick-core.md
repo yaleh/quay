@@ -68,6 +68,7 @@
   实证 2026-08-09 14:08-15:08:outer 5 次 tick 全判 `no-action`,而①②③在这 5 次里**每次都为真**(在飞 0~1 < cap 4、pool 11 < floor 16、nyf 17——nyf 这个数还是它自己 A10 每轮读出来的),
   欠 15 个强制动作交付 0 个。**我自己同期的 `no-action` 行同样没带这五条读数,是同一个洞**;
   人的原话:「不要再为愚蠢的行为做解释——先想清楚正确的行为是什么,再去看行为是否符合」。
+  **B3b「待发」产物(2026-08-13 16:4xZ 立,因当日【四次】"说了要发却先写回话、人问才发")**:凡在回话里写下「我这就发／我会发给 outer」等承诺,**必须在同一轮 tick-log 的熔态列记 `待发:<主题>`**;**下一轮若该标记仍在 ⇒ 违规**。**为什么需要**:tick-log 的纪律有产物(不写就看得见),**而对话里的承诺没有**——我把"先发后写"写进核之后仍违反四次,**说明写进核不够,缺的是产物**(C17 原话:一条规则若「守」与「不守」在记录上无法区分,它就只能靠意志)。**判据机械可核**:`grep '待发:'` tick-log 末两行——前一行有、后一行无 = 已兑现;两行都在 = 违规。
 - **B4 哨兵清扫 + cron 证据（AC4）**:`CronList` → 删所有含 `[manager-tick]` 者 → 建一个 → **把 CronList 结果追加记进 `<QUAY_GLOBAL_DIR>/manager/cron-evidence.jsonl`**（一行 (src:961 "重挂 cron 必须 `cat` 这个文件")
   `{"at":<ISO>,"atEpoch":<epoch>,"mechanism":"cron","sentinel":"[manager-tick]","cronListCount":<N>}`，N = CronList 中含哨兵的任务数）
   **+ 必须紧接着 `bash plugin/scripts/manager-arm-loop.sh --record-cron <新建的 cron id>`,再 `--verify` 确认 `state=registry-verified`。**
