@@ -115,6 +115,16 @@ worktree-node-modules-check: MISSING node_modules — self-verification will fai
 **派发流程接入（AC2）**：`plugin/loop/fast-mode-loop-tick.md` 派发 prompt 在 `git worktree add` 后新增强制步骤
 `bash plugin/scripts/dispatch-worktree-setup.sh $WORKTREE_ROOT/<slug>`（node_modules + config.yml，机制不靠 agent 记得）。
 
+**L_S mutation case（coordinator 全量认证红根因修复，2026-08-13）**：`worktree-node-modules-check` 注册进
+`run_static_checks` 但缺 mutation case ⇒ `checker-mutation-check` 报 `uncovered`。已补
+`plugin/scripts/checker-mutation-cases/worktree-node-modules-check.sh`（hermetic 临时 git repo + 一个 task/* worktree：
+GREEN 基线 → 删 node_modules → `--fail` 变红 + report-only 报 MISSING → 恢复 → 绿）。重验：
+```
+$ bash plugin/scripts/checker-mutation-check.sh --check
+RESULT: PASS — every registered checker went RED under its injected defect and GREEN on restore; mutations_that_stayed_green = 0.
+checkers_with_mutation: 29 · uncovered: 0
+```
+
 **AC46 第一层（outer 2026-08-13）**：本任务 Touches 仍为「待定」（未声明 dispatch-worktree-setup.sh 等落点），self-touch 缺失 ⇒ 非 ready-可派，retreat 回 todo。待 Touches 落定（新 setup 脚本设计）再晋 ready。
 **AC46 已落定（inner 2026-08-13）**：Touches 已声明（`dispatch-worktree-setup.sh` + `worktree-node-modules-check.sh` + 测试 + 派发 prompt + catalog 五表 + `scripts/test.sh` 接入），self-touch 在列，任务已 ready 并落地。
 
@@ -122,6 +132,7 @@ worktree-node-modules-check: MISSING node_modules — self-verification will fai
 
 - plugin/scripts/dispatch-worktree-setup.sh (new)
 - plugin/scripts/worktree-node-modules-check.sh (new)
+- plugin/scripts/checker-mutation-cases/worktree-node-modules-check.sh (new，L_S mutation case)
 - plugin/test/dispatch-worktree-setup.test.mjs (new)
 - plugin/scripts/capability-catalog.sh（两个新脚本的五表声明：QUESTION/CADENCE/INVALIDATION/LAST_REAFFIRMED/MATCHING）
 - docs/proposals/quay-product-outline.md（§6 DELIVERY-INVENTORY 快照重新生成，scripts 224→226）
