@@ -282,6 +282,22 @@ if [ -n "$L2_FAIL" ]; then
   exit 1
 fi
 
+# NOT-EVALUATED: ACTION unparseable（真实 tick-log 在 step 2 前无 `- 动作分类:` 行）。
+# L1/L2 每条检查都以 ACTION 可解析为前提；ACTION 为空 ⇒ 所有分支跳过。此时【不得】输出
+# PASS/self-consistent——一个结构上不可能报红的 checker 的绿与「一切正常」同形（硬规则 4），
+# 会让记录上看起来 B13 正在被执行而其实没有（manager 2026-08-13：把「没检查」变成「一个恒绿
+# 的假保证」更糟）。如实报 NOT-EVALUATED，exit 0 不产生新红；PASS 与 NOT-EVALUATED 从此可区分。
+# ⚠️ Step 2 的验收 = NOT-EVALUATED 从输出里消失（每行都能被评估），不是「套件绿」——套件绿
+# 恰恰是没评估的表现。
+if [ -z "$ACTION" ]; then
+  if [ "$JSON" = 1 ]; then
+    printf '{"ok":true,"evaluated":false,"reason":"no-action-classification","tickTime":"%s","fresh":%s}\n' "$TICK_TIME" "$IS_FRESH"
+  else
+    echo "outer-tick-log-check: NOT-EVALUATED — 本行无 \`- 动作分类:\` 字段，B13 举证未被检验（step 2 前的预期状态）"
+  fi
+  exit 0
+fi
+
 # PASS
 if [ "$JSON" = 1 ]; then
   printf '{"ok":true,"action":"%s","tickTime":"%s","fresh":%s,"checked":true}\n' "${ACTION:-<none>}" "$TICK_TIME" "$IS_FRESH"

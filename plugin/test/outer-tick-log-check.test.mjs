@@ -142,6 +142,23 @@ test("AC2 — 无 tick 段 fail-closed", () => {
   assert.match(r.stdout, /no-tick-section/);
 });
 
+// ── NOT-EVALUATED（manager 2026-08-13）：真实 tick-log 在 step 2 前无 `- 动作分类:` 行 ⇒
+// ACTION 恒空 ⇒ 每条检查（L1/L2）都跳过。此时必须如实报 NOT-EVALUATED（exit 0，可区分于 PASS），
+// 不得输出 "PASS / self-consistent"——一个结构上不可能报红的 checker 的绿与「一切正常」同形
+// （硬规则 4），会把「没检查」伪装成「在检查」。step 2 的验收 = NOT-EVALUATED 从输出消失。──────
+test("NOT-EVALUATED — 行无 `- 动作分类:` 字段 ⇒ 如实报 not-evaluated（exit 0），不是 PASS", () => {
+  const r = runChecker({
+    log: "- `15:21Z` `tick` — 无动作分类行的 fixture\n- 类型: no-action（测试）\n",
+    truth: "00000",
+    root: NO_ROOT,
+  });
+  assert.equal(r.status, 0, `expect exit 0: ${r.stdout}`);
+  // runChecker uses --json; the NOT-EVALUATED JSON carries evaluated:false + reason:no-action-classification
+  assert.match(r.stdout, /"evaluated":false/, "must report evaluated:false (not PASS), so the un-evaluated state is distinguishable");
+  assert.match(r.stdout, /no-action-classification/, "the reason must name the un-classified action state");
+  assert.doesNotMatch(r.stdout, /"checked":true/, "a checker that cannot parse ACTION must not print the PASS checked:true form");
+});
+
 // ── L2 trace 窗口锚定该 tick 起点（gap-outer-tick-log-check-trace-window-anchored-at-log-mtime）
 // 旧代码窗口起点 = log mtime（--since=@<mtime>）：act-then-log 下证据提交严格在 log 前 ⇒ 永远在
 // 窗外 ⇒ 动作行假红。新代码窗口 = [该 tick 起点, log 写入时刻]：证据必然落窗，log 后无关提交被
