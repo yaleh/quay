@@ -170,6 +170,7 @@ documented reference from a genuine missing file:
 <!-- reference-doc: orchestration/SPEC-three-layer-unified-architecture-2026-08-09.md -->
 <!-- reference-doc: orchestration/SPEC-goal-store-2026-08-09.md -->
 <!-- reference-doc: orchestration/SPEC-dispatch-ordering-semantic-2026-08-13.md -->
+<!-- reference-doc: orchestration/SPEC-task-status-flow-target-vs-actual-2026-08-13.md -->
 <!-- reference-doc: orchestration/SPEC-per-task-suite-verification-2026-08-13.md -->
 <!-- reference-doc: orchestration/manager-anchor-check.py -->
 <!-- reference-doc: orchestration/manager- -->
