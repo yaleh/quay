@@ -40,11 +40,11 @@ extra: {}
 
 ## AC
 
-- [ ] AC1: CLI `task list` 真实仓库调用耗时下降 ≥50%（0.8s 解析削减）
-- [ ] AC2: 任务数据与直接解析一致（缓存/索引无陈旧、无遗漏）
-- [ ] AC3: 任务文件变更后缓存正确失效（新增/改/删文件反映到下次调用）
-- [ ] AC4: 新测试覆盖 (a)(b)(c)；`--for-task` scoped 门绿
-- [ ] AC5: 全量套件绿 + 总耗时下降（verification-round 对比）
+- [x] AC1: CLI `task list` 真实仓库调用耗时下降 ≥50%（0.8s 解析削减）
+- [x] AC2: 任务数据与直接解析一致（缓存/索引无陈旧、无遗漏）
+- [x] AC3: 任务文件变更后缓存正确失效（新增/改/删文件反映到下次调用）
+- [x] AC4: 新测试覆盖 (a)(b)(c)；`--for-task` scoped 门绿
+- [ ] AC5: 全量套件绿 + 总耗时下降（verification-round 对比）——外层 verification-round 验证
 
 ## Definition of Done
 
@@ -52,6 +52,21 @@ extra: {}
 - [ ] profile 结果 + 实现机制 + 前后耗时贴出（见 Evidence）
 - [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
+
+## Evidence
+
+**Profile（2026-08-13，1110 文件，`store.list()` 冷解析 686ms）**：
+- readdir+sort 0.3ms / statSync 13ms / readFileSync 142ms / **YAML.parse 395ms（主导）** / 聚合 5ms。
+- 进程内 parsedCache 让同进程第二次 list 只要 10.5ms —— 但每次 CLI 调用是新进程，进程内缓存从不跨进程生效 ⇒ 每次 `task list` 付全额冷解析。
+
+**选定机制**：持久化 `(mtimeMs, size)` 键控解析缓存（`<tasksDir>/.quay-parse-cache.json`，只存 frontmatter，585KB）。body 永远从盘上重读（实测缓存 body 的 10.9MB JSON 加载 ~200ms，比读 1110 个原文件 ~140ms 还慢，否决）。惰性加载：只有 list/listWithMalformed 加载缓存 ⇒ `task get`（0.18s 定向读）不付税。isJsonSafe 守卫：Date/Map/Set 等非 JSON 安全 frontmatter 不进缓存（AC2）。
+
+**前后耗时（A/B，同机同载，stash 原代码对照；并发 full-suite 在跑，数字偏大但对照公平）**：
+- 原 `task list` 中位 1.34s（3 次取样区间 1.34–2.14s）；改后（缓存命中）中位 0.575s（0.51–0.65s）。
+- **全调用削减 ≈57%**；解析成本（总 − 空库固定 0.34s）1.00s → 0.24s = **≈76% 削减**。
+- `--for-task` scoped 门绿：**92 pass / 0 fail**（含 parse-cache.test.mjs 8 个新测试 + store.test.mjs 6 个既有）；root `tsc --noEmit` 0 错。
+
+**测试**：`packages/quay-native/test/parse-cache.test.mjs` —— 8 个用例覆盖 AC1 机制（篡改缓存前端证明被读取）、AC2 一致（新进程数据逐字节相同、损坏缓存降级、非 JSON 安全排除）、AC3 失效（改/增/删文件下次调用即反映、写后立即可见）。
 
 ## Touches
 
