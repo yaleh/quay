@@ -3162,28 +3162,32 @@ function fakeTestShRecordingPhaseEnv(root) {
   return { envLog };
 }
 
-test("AC2/AC3 — the default run passes QUAY_SERIAL_CONCURRENCY=6 and QUAY_LOWCONC_CONCURRENCY=6 to the child test.sh", async () => {
-  // measure-first (gap-load-sensitive-serial-phase-unbounded-growth-measure-first AC2/AC3): the
-  // runner's phase-concurrency defaults are the experiment-validated values (serial=2 raised from 1
-  // by the AC2 controlled experiment — 0-cancelled + 36% faster; lowconc=3); a future experiment
-  // overrides them explicitly, never silently changing the default.
+test("AC1/AC3 — the default run passes HOST-READ phase concurrency (os.availableParallelism) to the child test.sh", async () => {
+  // gap-ac44-concurrent-phases-read-host-parallelism AC1/AC3: the phase-concurrency defaults are
+  // host-read (os.availableParallelism()), NOT the machine-spec-dependent literal 6 (hard-rule-4
+  // 推论二 — same defect class as cpuQuota:"400%"). RESOURCE_GATE_NPROC is the deterministic test
+  // seam (the SAME source expression as defaultLaneCount's :972-973 derivation), so nproc=7 →
+  // serial=7 lowconc=7 regardless of the host this suite actually runs on.
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-phaseenv-default-"));
   const { envLog } = fakeTestShRecordingPhaseEnv(root);
   try {
-    const child = runRunner({ root, laneCount: 4 });
+    const child = runRunner({ root, laneCount: 4, env: { RESOURCE_GATE_NPROC: "7" } });
     const { code } = await waitExit(child);
     assert.equal(code, 0, `runner exits 0 on green, got ${code}`);
     await poll(() => fs.existsSync(envLog));
     const line = fs.readFileSync(envLog, "utf8").trim();
-    assert.equal(line, "SERIAL=6 LOWCONC=6", `defaults must be serial=6 lowconc=6, got: ${line}`);
+    assert.equal(line, "SERIAL=7 LOWCONC=7", `host-read defaults must follow the host (nproc=7 → 7/7), got: ${line}`);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("AC2/AC3 — --serial-concurrency 2 propagates QUAY_SERIAL_CONCURRENCY=2 into the child test.sh (controlled experiment)", async () => {
+test("AC2 — --serial-concurrency 2 / --lowconc-concurrency 5 WIN over the host-read default (controlled experiment)", async () => {
   // The AC2 controlled experiment: run the serial phase at concurrency 2, measure wall-clock +
   // cancelled, and only bump the default if 0-cancelled holds (measure-first, not blind tuning).
+  // RESOURCE_GATE_NPROC=12 pins a host default of 12/12 — the explicit 2/5 must still win (AC2:
+  // the override channel is preserved over the host-read default, gap-ac44-concurrent-phases-read-
+  // host-parallelism).
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-phaseenv-s2-"));
   const { envLog } = fakeTestShRecordingPhaseEnv(root);
   try {
@@ -3191,7 +3195,12 @@ test("AC2/AC3 — --serial-concurrency 2 propagates QUAY_SERIAL_CONCURRENCY=2 in
       "--no-warnings", "--experimental-strip-types", RUNNER, "--root", root,
       "--lane-count", "4", "--serial-concurrency", "2", "--lowconc-concurrency", "5",
     ];
-    const mergedEnv = { ...process.env, QUAY_TEST_SKIP_RESOURCE_GATE: "1", QUAY_TEST_SKIP_SYSTEMD_RUN: "1" };
+    const mergedEnv = {
+      ...process.env,
+      QUAY_TEST_SKIP_RESOURCE_GATE: "1",
+      QUAY_TEST_SKIP_SYSTEMD_RUN: "1",
+      RESOURCE_GATE_NPROC: "12",
+    };
     const child = spawn(process.execPath, args, { stdio: ["ignore", "pipe", "pipe"], env: mergedEnv });
     child.stdout.on("data", () => {});
     child.stderr.on("data", () => {});
@@ -3199,7 +3208,7 @@ test("AC2/AC3 — --serial-concurrency 2 propagates QUAY_SERIAL_CONCURRENCY=2 in
     assert.equal(code, 0, `runner exits 0 on green with serial-concurrency 2, got ${code}`);
     await poll(() => fs.existsSync(envLog));
     const line = fs.readFileSync(envLog, "utf8").trim();
-    assert.equal(line, "SERIAL=2 LOWCONC=5", `--serial-concurrency/--lowconc-concurrency must propagate, got: ${line}`);
+    assert.equal(line, "SERIAL=2 LOWCONC=5", `--serial-concurrency/--lowconc-concurrency must propagate over the host default, got: ${line}`);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
