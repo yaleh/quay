@@ -13,6 +13,8 @@ extra:
 
 **type:** execution
 
+**PARKED**（2026-08-13，AC4 观察期——①b 已降级为观察项：停轮后若出现「两个各自绿的 merge 组合」追溯红 ⇒ ①b 实证才做本任务；无此形态不补。land 锁/fan-in 升级在观察期证据前不做。）
+
 ## Proposal
 
 **①b 缺口（manager 2026-08-13 自纠）**：AC3b 拆分时 ①「正确性」只证了【单任务】——per-task 全量验「我的分支 + 当时 develop」，不是【合并后】的正确性。A6 fan-in 门是 **scoped**（`tasks/gap-a6-…`：scoped 门在 merge 之前），⇒ 两条任务各自 per-task 全量绿 + scoped 绿，**但合并后在 scoped 范围外互相破坏 ⇒ 当前没有任何东西会抓到**——除了全局轮（它在合并后的 develop 上跑全量）。**停全局轮失去的不是冗余，是【跨任务交互】这一层覆盖。**

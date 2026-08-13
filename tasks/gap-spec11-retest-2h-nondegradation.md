@@ -1,7 +1,7 @@
 ---
 id: gap-spec11-retest-2h-nondegradation
 title: per-task 全量不劣化判定（三结构量对照）——AC3b 门定死后停全局轮的最后一步
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -83,3 +83,14 @@ extra:
 - **scoped 门**：`--for-task gap-spec11-retest-2h-nondegradation --allow-thin` exit 0（task-contract / malformed-task / superseded-capability / landing-target 全 PASS）。
 
 （续段读数贴入 `milestones/per-task-full-suite-pilot.md` §8）
+
+## Closure（2026-08-13，AC4 执行——停全局轮带观察期）
+
+**①b 前置撤回（manager 逐字）**：manager 曾以 ①b（合并后正确性）为停轮前置并要求 land 锁；**后撤回**——
+①b 是检测延迟非漏检（每个新任务 fork develop 跑全量会抓到），且 164 轮无一红归因于跨任务交互
+（reason 分布：failed 66 / gate-failed 5 / static-check 1 / infra-error 1 / aborted 1）。
+**以未测量的残差设前置，是当日反复批评的错误形态。**
+
+**AC4 执行（观察期可回退）**：停全局轮触发（非 .halt）；观察期判据（可取假）：停轮后若出现红、
+且可追溯到「两个各自绿的 merge 组合」⇒ ①b 实证 ⇒ 恢复全局轮或补 land 锁；无此形态 ⇒ ①b 保持未实证不补。
+**AC43/45 标 cancelled（AC4 逐字）**。land 锁 / fan-in 门升级【不做】，等观察期证据。三结构量成立不变。
