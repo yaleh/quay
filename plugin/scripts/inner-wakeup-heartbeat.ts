@@ -57,11 +57,12 @@ import {
   checkDispatchStateContract,
   judgeEndInvariant,
   INVARIANT_VIOLATED_REASON,
+  runMachineSlotRefill,
 } from "./inner-wakeup-heartbeat-check.ts";
 // AC53 AC1 (gap-ac53-end-invariant-gate): the writer re-runs slot-refill with DIRECT measurements
 // (--in-flight = this session's in-flight set) before an END-of-tick heartbeat write — the DIRECT
 // result is the end-invariant judge, never the heartbeat's self-report.
-import { analyzeSlotRefill, FIXED_DISPATCH_CAP } from "./slot-refill.ts";
+import { FIXED_DISPATCH_CAP } from "./slot-refill.ts";
 
 /** Serialize a JSON arg (array / number / boolean) — arrays must be JSON-parseable. PURE. */
 export function parseJsonArg(value, flagName) {
@@ -146,37 +147,16 @@ export function writeHeartbeat(root, heartbeat) {
  * not stop the sleep; only a structural refusal does).
  * Fail-closed: a slot-refill error ⇒ { ok:false } (cannot verify ⇒ cannot write). PURE-reader reuse
  * of analyzeSlotRefill (never writes, never dispatches, never advances a counter).
+ * Backward-compat alias of runMachineSlotRefill — the checker's single source of the machine slot-refill
+ * read (gap-inner-self-wake-sleep-empty-slots-not-dispatch AC53 判据①: the end-invariant judges machine
+ * output, never the heartbeat's self-report).
  * @param {object} o
  * @param {string} o.root workspace root (the <root>/tasks store)
  * @param {string[]} o.inFlightIds the session's in-flight task ids (comma-separated --in-flight)
  * @param {number} [o.cap] dispatch cap — default FIXED_DISPATCH_CAP (5), the tick's effective cap
  * @returns {{ok:true, refill:object}|{ok:false, error:string}}
  */
-export function runDirectSlotRefill({ root, inFlightIds, cap = FIXED_DISPATCH_CAP }) {
-  const rootDir = root || ".";
-  const tasksDir = path.join(rootDir, "tasks");
-  const readTasks = (ids) => {
-    const out = [];
-    for (const id of ids) {
-      const file = path.join(tasksDir, `${id}.md`);
-      if (!fs.existsSync(file)) continue; // advisory — a vanished id is not a failure
-      out.push({ id, body: fs.readFileSync(file, "utf8") });
-    }
-    return out;
-  };
-  try {
-    const refill = analyzeSlotRefill({
-      tasksDir,
-      root: rootDir,
-      cap,
-      inFlight: readTasks(inFlightIds),
-      measurementSource: "explicit-input",
-    });
-    return { ok: true, refill };
-  } catch (e) {
-    return { ok: false, error: e?.message || String(e) };
-  }
-}
+export const runDirectSlotRefill = runMachineSlotRefill;
 
 function usage() {
   console.error(`inner-wakeup-heartbeat.ts — inner 兜底心跳写入方（结构化字段）
