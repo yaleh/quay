@@ -1,7 +1,7 @@
 ---
 id: gap-ac46-pool-criteria-in-gate-plus-revaluation-executor
 title: AC46 未达成——pool 层静态判据移入 todo→ready 提升闸 + todo↔ready 双向重评缺执行者
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -73,7 +73,7 @@ compound×1 retreat / self-touch×1 retreat+补 Touches ⇒ pool 9→4。**但�
 ## Definition of Done
 
 - [x] 提升闸 + 双向重评执行者落地并有测试覆盖。
-- [ ] 当前池经一次重评扫描，无静默留池任务（或全部给出明确去向）。
+- [x] 当前池经一次重评扫描，无静默留池任务（或全部给出明确去向）——判据3 执行者已实现（881497a0）；按 manager 2026-08-13 收缩，判据3 降为【观察项】（其根因——翻 done 等外层绿轮——随停全局轮消失；观察判据：landed/not-yet-flipped deferred 再现 ⇒ 需求仍在、恢复；连续无此形态 ⇒ 判据3 标 cancelled 非达成）。
 - [x] 判据4 的 deficit 读数在池变化时保持可区分。
 
 **判据3 执行者的署名退出条件（manager 2026-08-13 修正其上一轮意见）**：本执行者是【过渡设施】，不是永久 sweeper。
@@ -131,3 +131,11 @@ sweeper 永远清，而「认证已移交」再没人去改。退役判据随任
 
 **DoD 未勾项**：「当前池经一次重评扫描」是操作动作（对主 checkout 活池跑 `--revaluate-apply`），
 worktree 子代理不触碰主 checkout 状态——检测器/执行者已落地并测试，扫描动作归 outer 在活池上执行。
+
+
+## Closure（2026-08-13，manager 收缩——只判据1 是必须，其余重分类）
+
+- **判据1（提升闸扩容）＝必需，已实现**（881497a0，scoped 226/0）：promotion 集 6 条 2 条不该放行（33% 实测），新划分「尽力晋」下是前提——不修则违规灌进 ready。
+- **判据4（deficit 语义可区分）＝已达成**：实测 pool=1 deficit=19 candidates=12，「能晋而未晋」vs「真的都被阻塞」可区分——无需再做，标达成。
+- **判据3（双向重评执行者）＝已实现但降【观察项】**：其需求根因（翻 done 等外层绿轮，fast-mode-loop-tick.md:456）随停全局轮消失——per-task 绿轮在 fan-in 前就有，inner 可在 fan-in 当时翻 done。停轮后实测 landed/not-yet-flipped deferred = 0（AC46 自身的 not-yet-flipped 是它自己落地未翻）。**退出条件「per-task 全量成为默认认证之日 ⇒ 执行者退役」——那天就是今天**。观察判据（可取假，非新任务）：landed/not-yet-flipped 再现 ⇒ 需求仍在恢复判据3；连续无此形态 ⇒ 标 cancelled 非达成。
+- **判据2（能修则修）＝视残留再定**：今日 ready 池 7/11 僵尸是手工清掉的；其价值是「不靠人」非「现在有问题」——等判据1 落地后看残留再定，不与判据1 捆绑。
