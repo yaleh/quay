@@ -44,6 +44,11 @@ import {
   // "implementation already in the tree" predicate + its shape-aware completion gate.
   hasLandedImplementation,
   isLandedCodeComplete,
+  // IMPLEMENTATION-CLASS FILE (gap-slot-refill-landed-detection-implementation-file-classes): the
+  // whitelist predicate that narrows hasLandedImplementation — a non-tasks/ file only counts as
+  // landed-implementation evidence when it is an implementation landing point (packages/ ·
+  // plugin/scripts/ · plugin/test/ · scripts/ · src/), not a docs/milestones/telemetry sidecar.
+  isImplementationClassFile,
 } from "../scripts/slot-refill.ts";
 // AC2 (gap-delivery-critical-label-at-promote-not-after-dispatch): the promote gate is the fix's
 // label DETERMINATION point — applyPromotions (ready-pool-check --apply heartbeat) flips todo→ready
@@ -1152,7 +1157,7 @@ function landedAllCheckedBody() {
     "control   in-flight≥cap ⇒ should_refill false",
     "resume    分步提交",
     "## Touches",
-    "- code/impl.ts", // NOT (new): the merged implementation file exists in the tree
+    "- plugin/scripts/impl.ts", // NOT (new): the merged implementation file exists in the tree
     "## AC",
     "- [x] AC1: the landed implementation is verified",
     "- [x] AC2: the landed implementation is green",
@@ -1205,7 +1210,7 @@ function landedStuckWorkBody(nChecked, nTotal) {
     "control   in-flight≥cap ⇒ should_refill false",
     "resume    分步提交",
     "## Touches",
-    "- code/impl.ts", // the merged implementation file (exists in the tree) — workLanded fires, but the completion gate (open impl boxes) keeps it dispatchable
+    "- plugin/scripts/impl.ts", // the merged implementation file (exists in the tree) — workLanded fires, but the completion gate (open impl boxes) keeps it dispatchable
     "## Acceptance Criteria",
     ...acs,
     "## Definition of Done",
@@ -1214,19 +1219,20 @@ function landedStuckWorkBody(nChecked, nTotal) {
 }
 
 /** Build a REAL temp git repo where the task's implementation LANDED on develop — a MERGE whose
- *  message contains the task id AND whose first-parent diff changed files outside tasks/
- *  (`code/impl.ts`) — the exact "实现已在树" shape (AC3's "-m --first-parent" visibility case: plain
- *  `git show --name-only` prints 0 files for a merge). `mergeMessage` defaults to the canonical
- *  `fan-in: task/<id>` (the realistic landing); tests that need the NEW step-4 check to fire pass a
- *  NEUTRAL message (`merge: <id> — landing`) so ready-pool-check's commit-trace arm does NOT also fire
- *  (a traced task is excluded at the pool level before the candidate loop runs). The task's own
- *  tasks/<id>.md is written by the caller AFTER (in the working tree, uncommitted — develop history
- *  carries only the implementation). */
+ *  message contains the task id AND whose first-parent diff changed an IMPLEMENTATION-CLASS file
+ *  (`plugin/scripts/impl.ts`) — the exact "实现已在树" shape (AC3's "-m --first-parent" visibility
+ *  case: plain `git show --name-only` prints 0 files for a merge; and the 2026-08-13 narrowing: the
+ *  file must be implementation-class, not just any non-tasks/ sidecar). `mergeMessage` defaults to the
+ *  canonical `fan-in: task/<id>` (the realistic landing); tests that need the NEW step-4 check to fire
+ *  pass a NEUTRAL message (`merge: <id> — landing`) so ready-pool-check's commit-trace arm does NOT
+ *  also fire (a traced task is excluded at the pool level before the candidate loop runs). The task's
+ *  own tasks/<id>.md is written by the caller AFTER (in the working tree, uncommitted — develop
+ *  history carries only the implementation). */
 function makeLandedWorkspace(tag, landedId, opts = {}) {
   const { mergeMessage = `fan-in: task/${landedId}` } = opts;
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), `slot-refill-landed-${tag}-`));
   fs.mkdirSync(path.join(dir, "tasks"), { recursive: true });
-  fs.mkdirSync(path.join(dir, "code"), { recursive: true });
+  fs.mkdirSync(path.join(dir, "plugin", "scripts"), { recursive: true });
   runGit(dir, "init", "-q");
   runGit(dir, "config", "user.email", "t@t");
   runGit(dir, "config", "user.name", "t");
@@ -1235,11 +1241,34 @@ function makeLandedWorkspace(tag, landedId, opts = {}) {
   runGit(dir, "commit", "-qm", "base");
   runGit(dir, "branch", "-M", "develop");
   runGit(dir, "checkout", "-qb", `task/${landedId}`);
-  fs.writeFileSync(path.join(dir, "code", "impl.ts"), "// implementation\n");
+  fs.writeFileSync(path.join(dir, "plugin", "scripts", "impl.ts"), "// implementation\n");
   runGit(dir, "add", "-A");
   runGit(dir, "commit", "-qm", `implement ${landedId}`);
   runGit(dir, "checkout", "-q", "develop");
   runGit(dir, "merge", "--no-ff", `task/${landedId}`, "-m", mergeMessage);
+  return dir;
+}
+
+/** Build a REAL temp git repo where develop has a commit whose message contains the task id BUT the
+ *  commit changed ONLY `tasks/<taskId>.md` plus ONE sidecar file (a doc / telemetry path like
+ *  docs/… or milestones/…). The predicate must NOT fire — the sidecar is not implementation-class
+ *  (gap-slot-refill-landed-detection-implementation-file-classes: the phantom-killer false positives
+ *  51699289 / 1f99e276 — a task-creation/analysis commit that incidentally touched a sidecar). */
+function makeSidecarCommitWorkspace(tag, taskId, sidecarPath) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `slot-refill-sidecar-${tag}-`));
+  fs.mkdirSync(path.join(dir, "tasks"), { recursive: true });
+  fs.mkdirSync(path.dirname(path.join(dir, sidecarPath)), { recursive: true });
+  runGit(dir, "init", "-q");
+  runGit(dir, "config", "user.email", "t@t");
+  runGit(dir, "config", "user.name", "t");
+  fs.writeFileSync(path.join(dir, "base.txt"), "base\n");
+  runGit(dir, "add", "-A");
+  runGit(dir, "commit", "-qm", "base");
+  runGit(dir, "branch", "-M", "develop");
+  fs.writeFileSync(path.join(dir, "tasks", `${taskId}.md`), `---\nid: ${taskId}\nstatus: ready\n---\n\nstub\n`);
+  fs.writeFileSync(path.join(dir, sidecarPath), "sidecar\n");
+  runGit(dir, "add", "-A");
+  runGit(dir, "commit", "-qm", `task: create ${taskId} (+ sidecar)`);
   return dir;
 }
 
@@ -1323,7 +1352,7 @@ test("LANDED-IMPLEMENTATION — AC3: the merge's file list is INVISIBLE without 
   assert.equal(withoutM.trim(), "", "without -m a merge shows 0 files (AC3 pitfall)");
   // `-m --first-parent` diffs against the first parent → the merged implementation file is visible.
   const withM = runGit(root, "show", "-m", "--first-parent", "--name-only", "--format=", mergeSha);
-  assert.ok(withM.includes("code/impl.ts"), `-m --first-parent reveals the merged files, got: ${withM}`);
+  assert.ok(withM.includes("plugin/scripts/impl.ts"), `-m --first-parent reveals the merged files, got: ${withM}`);
   // The predicate consumes exactly that shape.
   assert.equal(hasLandedImplementation(root, "gap-landed"), true, "the merge landing is recognized (AC3)");
 });
@@ -1335,6 +1364,79 @@ test("LANDED-IMPLEMENTATION — hasLandedImplementation pure: nonexistent id fal
   const nonGit = makeWorkspace("nongit");
   t.after(() => fs.rmSync(nonGit, { recursive: true, force: true }));
   assert.equal(hasLandedImplementation(nonGit, "gap-anything"), false, "non-git root ⇒ fail-safe false (no false positive from an unavailable source)");
+});
+
+// ── IMPLEMENTATION-CLASS FILE CLASS (gap-slot-refill-landed-detection-implementation-file-classes) ──
+// The phantom-killer fix: hasLandedImplementation used to count ANY non-tasks/ file as landed-
+// implementation evidence — a task-creation/analysis commit that incidentally touched a doc or
+// telemetry sidecar (streaming-red 51699289 touched milestones/fast-mode-telemetry/*.json;
+// worktree-node-modules 1f99e276 touched docs/analysis/*.md) judged the task "landed" with AC 0/10,
+// no fan-in — real work suppressed by the killer. The evidence file must be IMPLEMENTATION-CLASS:
+// packages/ · plugin/scripts/ · plugin/test/ · scripts/ · src/ (AC1 whitelist); docs/milestones/
+// .quay/ telemetry sidecars never count (AC2 negative controls); a real landed task still judges true
+// (AC3 positive control).
+
+test("LANDED-IMPLEMENTATION — AC1: isImplementationClassFile whitelist — implementation landing points true, docs/milestones/.quay/telemetry sidecars false", () => {
+  for (const p of [
+    "packages/quay/src/gate/engine.js",
+    "plugin/scripts/slot-refill.ts",
+    "plugin/test/slot-refill.test.mjs",
+    "scripts/test.sh",
+    "src/main.ts",
+  ]) {
+    assert.equal(isImplementationClassFile(p), true, `${p} is an implementation-class landing point`);
+  }
+  for (const p of [
+    "tasks/gap-x.md",
+    "docs/analysis/batch2-queue-state.md",
+    "milestones/fast-mode-telemetry/2026-08-13.json",
+    ".quay/config.yml",
+    "adr/ADR-001.md",
+    "orchestration/manager-tick-core.md",
+    "CLAUDE.md",
+    "orchestration/manager-obligation-ledger.jsonl",
+  ]) {
+    assert.equal(isImplementationClassFile(p), false, `${p} is a sidecar / doc / telemetry path, NOT implementation-class`);
+  }
+});
+
+test("LANDED-IMPLEMENTATION — AC2 NEGATIVE CONTROLS: a commit touching only tasks/ + a doc/telemetry sidecar is NOT landed (streaming-red 51699289 shape / worktree-node-modules 1f99e276 shape)", (t) => {
+  // streaming-red shape: the task-creation commit 51699289 incidentally touched
+  // milestones/fast-mode-telemetry/2026-08-13.json (+ tasks/*.md) ⇒ must judge FALSE (AC 0/10, no fan-in).
+  const streaming = makeSidecarCommitWorkspace(
+    "neg-streaming",
+    "gap-streaming-red-cascade-amplifies-failures-array",
+    "milestones/fast-mode-telemetry/2026-08-13.json",
+  );
+  t.after(() => fs.rmSync(streaming, { recursive: true, force: true }));
+  assert.equal(hasLandedImplementation(streaming, "gap-streaming-red-cascade-amplifies-failures-array"), false,
+    "streaming-red (milestones/ telemetry sidecar) is NOT landed implementation — real work not suppressed (AC2)");
+
+  // worktree-node-modules shape: the analysis commit 1f99e276 incidentally touched
+  // docs/analysis/batch2-queue-state.md (+ tasks/*.md) ⇒ must judge FALSE (AC 0/10, no fan-in).
+  const wtnm = makeSidecarCommitWorkspace(
+    "neg-wtnm",
+    "gap-worktree-node-modules-inconsistent-self-verify",
+    "docs/analysis/batch2-queue-state.md",
+  );
+  t.after(() => fs.rmSync(wtnm, { recursive: true, force: true }));
+  assert.equal(hasLandedImplementation(wtnm, "gap-worktree-node-modules-inconsistent-self-verify"), false,
+    "worktree-node-modules (docs/ sidecar) is NOT landed implementation — real work not suppressed (AC2)");
+});
+
+test("LANDED-IMPLEMENTATION — AC3 POSITIVE CONTROL: a real landed task (implementation-class file changed, id in the merge message) still judges TRUE", (t) => {
+  // The runner-spawn code commit 1f2326e2 changed plugin/scripts/full-suite-runner.ts +
+  // plugin/test/full-suite-runner.test.mjs — but its message does NOT name the task id, so the
+  // grep-based predicate cannot see it. The representative real landed task whose develop merge DOES
+  // name the id AND changed an implementation-class file is the predecessor of this very predicate:
+  // gap-slot-refill-recommends-landed-code-complete-tasks (fan-in c6fc14a7 changed plugin/scripts/
+  // ready-pool-check.ts + plugin/scripts/slot-refill.ts + plugin/test/slot-refill.test.mjs). The
+  // fixture rebuilds that exact shape (merge message names the id; first-parent diff changed
+  // plugin/scripts/impl.ts — an implementation-class landing point).
+  const root = makeLandedWorkspace("pos-real", "gap-slot-refill-recommends-landed-code-complete-tasks");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  assert.equal(hasLandedImplementation(root, "gap-slot-refill-recommends-landed-code-complete-tasks"), true,
+    "a real landed task (implementation-class file changed, id in the merge message) still judges TRUE (AC3 positive control)");
 });
 
 test("LANDED-IMPLEMENTATION — isLandedCodeComplete: all-checked true, open implementation items false (stuck-work), (待外部)-only true", () => {

@@ -273,26 +273,63 @@ export function isNotYetFlippedSkip({ id, body, root, excludedNyfIds }) {
   return allAcsChecked || acRatio > 0.5;
 }
 
+/** IMPLEMENTATION-CLASS FILE PREFIXES (gap-slot-refill-landed-detection-implementation-file-classes):
+ *  the whitelist of file prefixes that count as "implementation evidence" for the landed-implementation
+ *  signal. A develop commit naming the task id is NOT landed evidence by itself — the non-tasks/ file
+ *  it changed must be an implementation landing point (packages/ · plugin/scripts/ · plugin/test/ ·
+ *  scripts/ · src/). Doc / decision / telemetry sidecars (docs/, milestones/, .quay/, adr/,
+ *  orchestration/, goals/, measurements/) are NOT implementation — a task-creation or analysis commit
+ *  that incidentally touched a sidecar must not judge the task "landed". Real phantom-killer false
+ *  positives killed by this whitelist: gap-streaming-red-cascade-amplifies-failures-array (commit
+ *  51699289 incidentally touched milestones/fast-mode-telemetry/2026-08-13.json ⇒ now false) and
+ *  gap-worktree-node-modules-inconsistent-self-verify (commit 1f99e276 incidentally touched
+ *  docs/analysis/batch2-queue-state.md ⇒ now false); a real landed task still judges true (e.g.
+ *  gap-slot-refill-recommends-landed-code-complete-tasks — merge c6fc14a7 changed plugin/scripts/
+ *  slot-refill.ts). */
+const IMPLEMENTATION_CLASS_PREFIXES = [
+  "packages/",
+  "plugin/scripts/",
+  "plugin/test/",
+  "scripts/",
+  "src/",
+];
+
+/** A file path is "implementation-class" when it starts with one of the implementation landing-point
+ *  prefixes (see IMPLEMENTATION_CLASS_PREFIXES). Sidecar / doc / telemetry paths (docs/, milestones/,
+ *  .quay/, adr/, orchestration/) are NOT implementation-class — they can be touched incidentally by a
+ *  task-creation or analysis commit and must never count as landed-implementation evidence. Pure +
+ *  exported for unit tests. */
+export function isImplementationClassFile(p) {
+  return IMPLEMENTATION_CLASS_PREFIXES.some((pre) => p.startsWith(pre));
+}
+
 /** LANDED-IMPLEMENTATION signal (tasks/gap-slot-refill-recommends-landed-code-complete-tasks): whether
  *  a ready task's IMPLEMENTATION is already in the tree — the "landed-but-not-flipped" shape the
  *  recommended list kept recommending (a dispatch would only re-verify already-landed work; observed
  *  4-6 times in one day: ac53-end-invariant / src-n-anchor / precommit-guard / npm-pack / catalog /
  *  runner-grouping — all "代码已合进 develop、ACs 全勾、只差绿轮验证后的 closure").
  *
- *  Mechanical predicate (manager 2026-08-13, validated on 6 real samples + negative control):
+ *  Mechanical predicate (manager 2026-08-13, validated on 6 real samples + negative control; narrowed
+ *  2026-08-13 by gap-slot-refill-landed-detection-implementation-file-classes):
  *    实现已在树(id) := ∃ develop 提交，其 message 含 <task-id>
- *                    且 git show --name-only -m --first-parent 的文件里有 tasks/ 以外者
- *  Two pitfalls (both handled):
+ *                    且 git show --name-only -m --first-parent 的文件里有【实现类】(packages/ ·
+ *                    plugin/scripts/ · plugin/test/ · scripts/ · src/) 文件
+ *  Three pitfalls (all handled):
  *    1. message-only grep ⇒ FALSE POSITIVE (task-creation/body commits also name the id) — the
  *       predicate requires a file OUTSIDE tasks/ (the implementation file) before it fires.
  *    2. missing `-m --first-parent` ⇒ FALSE NEGATIVE — the landing commit is usually a MERGE, and
  *       `git show --name-only` prints ZERO files for a merge by default (measured 7418c615: 0 files
  *       without -m, 4-5 with). `-m` diffs against each parent, `--first-parent` keeps the merge's own
  *       first-parent diff — the merge's changes vs develop.
+ *    3. ANY non-tasks/ file counting as implementation ⇒ FALSE POSITIVE (phantom-killer: streaming-red
+ *       51699289 touched milestones/fast-mode-telemetry/*.json; worktree-node-modules 1f99e276 touched
+ *       docs/analysis/*.md — both judged "landed" with AC 0/10, no fan-in). The evidence file must be
+ *       an IMPLEMENTATION-CLASS file (isImplementationClassFile) — docs/milestones/.quay/telemetry
+ *       sidecars never count.
  *  ONE git call: `git log --name-only -m --first-parent --grep <id> develop` returns each matching
  *  commit (marker line `@@COMMIT@@<hash>`) followed by its first-parent file list; a non-marker line
- *  outside `tasks/` is the landed-implementation evidence. Fail-safe: any git failure / non-git root /
- *  no develop ref ⇒ false (never a positive from an unavailable source). */
+ *  outside `tasks/` that is implementation-class is the landed-implementation evidence. Fail-safe: any
+ *  git failure / non-git root / no develop ref ⇒ false (never a positive from an unavailable source). */
 export function hasLandedImplementation(root, taskId) {
   try {
     const out = execFileSync(
@@ -305,7 +342,11 @@ export function hasLandedImplementation(root, taskId) {
       const t = line.trim();
       if (!t) continue;
       if (t.startsWith("@@COMMIT@@")) { inCommit = true; continue; }
-      if (inCommit && !t.startsWith("tasks/")) return true;
+      // NARROWED 2026-08-13 (gap-slot-refill-landed-detection-implementation-file-classes): the evidence
+      // file must be an IMPLEMENTATION-CLASS file, not ANY non-tasks/ file — docs/milestones/.quay/
+      // telemetry sidecars touched incidentally by a task-creation/analysis commit are not
+      // implementation (phantom-killer false positives 51699289 / 1f99e276).
+      if (inCommit && isImplementationClassFile(t)) return true;
     }
     return false;
   } catch {

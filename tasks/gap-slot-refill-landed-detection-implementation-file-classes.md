@@ -39,16 +39,36 @@ clique 任务谁负责先确认本任务已 done。本任务 done 后，clique �
 
 ## AC
 
-- [ ] AC1: `hasLandedImplementation` 只认实现类文件的提交（排除 docs/milestones/telemetry 旁路）
-- [ ] AC2: 负控制——streaming-red 51699289 与 worktree-node-modules 1f99e276 判 false（真实工作不被压制）
-- [ ] AC3: 正控制——真实 landed 任务仍判 true（runner-spawn 1f2326e2 等）
-- [ ] AC4: 既有测试全绿；`--for-task` scoped 门绿
+- [x] AC1: `hasLandedImplementation` 只认实现类文件的提交（排除 docs/milestones/telemetry 旁路）
+- [x] AC2: 负控制——streaming-red 51699289 与 worktree-node-modules 1f99e276 判 false（真实工作不被压制）
+- [x] AC3: 正控制——真实 landed 任务仍判 true（runner-spawn 1f2326e2 等）
+- [x] AC4: 既有测试全绿；`--for-task` scoped 门绿
 
 ## Definition of Done
 
-- [ ] AC1–AC4 全部勾上
-- [ ] 正/负控制样本贴出（见 Evidence：51699289/1f99e276 判 false、真实 landed 仍判 true）
-- [ ] 白名单覆盖实现类文件（packages/·plugin/scripts/·plugin/test/·scripts/），docs/milestones/telemetry 排除
+- [x] AC1–AC4 全部勾上
+- [x] 正/负控制样本贴出（见 Evidence：51699289/1f99e276 判 false、真实 landed 仍判 true）
+- [x] 白名单覆盖实现类文件（packages/·plugin/scripts/·plugin/test/·scripts/），docs/milestones/telemetry 排除
+
+## Evidence
+
+**新谓词**（`plugin/scripts/slot-refill.ts`）：非 tasks/ 的「实现证据」文件必须是实现类
+`isImplementationClassFile`（`packages/` · `plugin/scripts/` · `plugin/test/` · `scripts/` · `src/` 白名单）；
+docs/ · milestones/ · .quay/ · adr/ · orchestration/ 等旁路不算。
+
+真实仓库（`/home/yale/work/quay`）验证，修复前 → 修复后：
+
+- `gap-streaming-red-cascade-amplifies-failures-array`（51699289 顺手碰 `milestones/fast-mode-telemetry/2026-08-13.json`）：
+  **true（误判）→ false**（AC 0/10、无 fan-in，真实工作不再被 killer 压制）
+- `gap-worktree-node-modules-inconsistent-self-verify`（1f99e276 顺手碰 `docs/analysis/batch2-queue-state.md`）：
+  **true（误判）→ false**
+- 正控制 `gap-slot-refill-recommends-landed-code-complete-tasks`（fan-in c6fc14a7 改了
+  `plugin/scripts/slot-refill.ts` / `plugin/test/slot-refill.test.mjs`）：**false → true**——真实 landed 仍被识别。
+
+**关于 AC3 样本 runner-spawn 1f2326e2 的说明**：其代码提交 1f2326e2 消息（"fix: runner 层 spawn 前单飞…"）
+不含任务 id `gap-runner-spawn-single-flight`，`git log --grep` 机制无法命中 ⇒ 旧谓词本就判 false，
+不能作 grep 系谓词的正控制。故正控制改用【develop 可及、提交消息含任务 id、改了实现类文件】的真实
+landed 任务 `gap-slot-refill-recommends-landed-code-complete-tasks`（本谓词的前身任务）。
 
 ## Touches
 
