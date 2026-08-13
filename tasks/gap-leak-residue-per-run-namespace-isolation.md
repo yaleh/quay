@@ -152,3 +152,5 @@ residue 直接建在 `os.tmpdir()` —— 两 base 不同 ⇒ sweeper 看不见�
 （round 122 无命名空间时两 base 相同，故绿）。修法：helper 导出 `probeRoot()`，测试 residue 改建在
 `probeRoot()` 下（与 sweeper 同 base）。验证：`QUAY_RUN_ID=testns1234 node --test` 5/5（命名空间，
 此前失败路径）；无命名空间 5/5。scoped 门待 round 126 terminal 后重跑。
+
+**第三次回归修复（2026-08-13，round 131 实证，--scope 子根覆盖）**：fix2（namespace base 可见性）修好后，round 131 仍红在 leak-scan R2/R3 + test-isolation DELTA。根因：命名空间模式扫描范围 = `/tmp/quay-run-<runId>/`（ls -d 全目录无前缀过滤），同一 suite 所有泄漏模拟测试的 fixture 都建在这个共享根下 ⇒ 互相把对方 fixture 当「本轮残留」⇒ 互扫全红。修法：`tmux-leak-scan.sh` 加 `--scope <dir>` 覆盖（scan 只扫 test-local 子根）；leak-scan R1-R5 + test-isolation DELTA 各自建 scope 子根并传 `--scope`。验证：两文件一起命名空间 20/20（此前 R2/R3/DELTA 红）；sweep 5/5 无回归。
