@@ -1302,6 +1302,13 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
   // not read the marker silently re-promotes it (dispatchable_disjoint stays a false reading).
   // Same principle as retiredMechanism: the marker is the mechanism's signal, not a verdict to waive.
   const superseded = /SUPERSEDED/i.test(task.body);
+  // AC1 (gap-delivery-critical-label-at-promote-not-after-dispatch): the candidate's delivery-critical
+  // status, read from its OWN frontmatter labels (parseTask — the SAME single source the dispatch
+  // sort reads via parseCandidate in concurrent-batch-scheduler.ts). The promote gate determines it
+  // AT PROMOTE so the label can be written together with ready ("标签与 ready 同现") — see
+  // setTaskStatus/applyPromotions. A candidate with no frontmatter / no such label ⇒ false
+  // (conservative default, matching the dispatch side).
+  const deliveryCritical = (task.labels || []).includes("delivery-critical");
   // PROSE-PREREQUISITE GAP (gap-prerequisite-gates-prose-invisible-to-mechanisms AC3): a candidate
   // whose body declares a prerequisite in prose WITHOUT a corresponding relation edge must NOT be
   // promoted to ready — it would enter the ready pool with a dependency no mechanism can see.
@@ -1321,6 +1328,10 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
     fourArtifacts: four.complete,
     missingArtifacts: four.missing,
     disjointScore,
+    // AC1 (gap-delivery-critical-label-at-promote-not-after-dispatch): the delivery-critical
+    // determination — consumed by applyPromotions so the label is written AT PROMOTE (标签与 ready
+    // 同现). Same frontmatter-labels source the dispatch sort reads.
+    deliveryCritical,
     // AC1 (gap-value-prioritization-has-no-mechanism): every candidate carries the relevance signal —
     // strategic traceability (grep) + blocking (parent/children fields) + cost (touches parsed scale).
     relevance: computeRelevance(id, task, childrenByTask, parentRefCount),
@@ -1775,14 +1786,61 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
 // invocation — no volition (AC1). The negative control (AC3) is structural: `promotions` is only
 // computed when deficit > 0, so pool ≥ floor OR an empty promotions array ⇒ zero writes.
 
+/** Ensure the frontmatter carries the `delivery-critical` label. Mirrors parseTask's label reading
+ *  (task-schema.ts — block list OR flow list OR absent), then ADDS the label when missing. This is
+ *  the "标签与 ready 同现" write: the promote gate determines delivery-critical at promote time, and
+ *  this helper makes the label physically present in the frontmatter AT ready-entry — so the
+ *  dispatch-time sort key (slot-refill's deliveryCritical axis, which reads the same labels via
+ *  parseTask/parseCandidate) can act on it in the NEXT selection.
+ *  @param {string} fm  the frontmatter text between the `---` fences
+ *  @returns {{ fm: string, added: boolean, deliveryCritical: boolean }}  `deliveryCritical` is true
+ *      when the label is present after the operation (already there, or newly added). */
+export function ensureDeliveryCriticalLabel(fm) {
+  // flow list: `labels: [a, b]`
+  const flow = /^(labels:\s*\[)([^\]]*)(\]\s*)$/m.exec(fm);
+  if (flow) {
+    const list = flow[2];
+    const items = list.split(",").map((s) => s.trim().replace(/^["']|["']$/g, "")).filter(Boolean);
+    if (items.includes("delivery-critical")) return { fm, added: false, deliveryCritical: true };
+    const sep = list.trim() ? ", " : "";
+    return {
+      fm: fm.replace(/^(labels:\s*\[)([^\]]*)(\]\s*)$/m, `$1${list}${sep}delivery-critical$3`),
+      added: true,
+      deliveryCritical: true,
+    };
+  }
+  // block list: `labels:\n  - a\n  - b`
+  if (/^labels:\s*$/m.test(fm)) {
+    const lines = fm.split(/\r?\n/);
+    const idx = lines.findIndex((l) => /^labels:\s*$/.test(l));
+    const hasDc = lines.slice(idx + 1).some((l) => /^\s+-\s+["']?delivery-critical["']?\s*$/.test(l));
+    if (hasDc) return { fm, added: false, deliveryCritical: true };
+    // Insert a new `  - delivery-critical` item at the end of the labels block (before the next
+    // top-level key, or at the frontmatter end when labels is the last field).
+    let insertAt = lines.length;
+    for (let i = idx + 1; i < lines.length; i++) {
+      if (/^\S/.test(lines[i])) { insertAt = i; break; }
+    }
+    lines.splice(insertAt, 0, "  - delivery-critical");
+    return { fm: lines.join("\n"), added: true, deliveryCritical: true };
+  }
+  // No labels field at all — append a block list at the end of the frontmatter (before the closing
+  // fence, which the caller owns).
+  return { fm: `${fm.replace(/\n*$/, "")}\nlabels:\n  - delivery-critical\n`, added: true, deliveryCritical: true };
+}
+
 /** Patch ONE task file's frontmatter `status` line. Only rewrites when the current status is `todo`
  *  (a concurrently-flipped task is left alone — no clobbering a `ready`/`done` written by another
- *  writer). Returns { id, ok, from, to, reason }.
+ *  writer). Returns { id, ok, from, to, reason, deliveryCritical }.
  *  @param {string} root  repo root (tasks/<id>.md lives here)
  *  @param {string} id    task id
  *  @param {string} newStatus  target status (ready)
+ *  @param {object} [opts]  { ensureDeliveryCritical: boolean } — AC1 (gap-delivery-critical-label-at-
+ *      promote-not-after-dispatch): when the promote gate has DETERMINED this candidate is
+ *      delivery-critical, the label is written into the frontmatter AT PROMOTE TIME (标签与 ready
+ *      同现) so the dispatch sort key can act on it in the NEXT selection.
  */
-export function setTaskStatus(root, id, newStatus) {
+export function setTaskStatus(root, id, newStatus, opts = {}) {
   const file = path.join(root, "tasks", `${id}.md`);
   if (!fs.existsSync(file)) return { id, ok: false, reason: "missing" };
   const raw = fs.readFileSync(file, "utf8");
@@ -1791,23 +1849,41 @@ export function setTaskStatus(root, id, newStatus) {
   const [, open, fm, close] = m;
   const statusLine = /^status:\s*todo\s*$/m.exec(fm);
   if (!statusLine) return { id, ok: false, reason: "not-todo" };
-  const newFm = fm.replace(/^status:\s*todo\s*$/m, `status: ${newStatus}`);
+  let newFm = fm.replace(/^status:\s*todo\s*$/m, `status: ${newStatus}`);
+  let deliveryCritical = opts.ensureDeliveryCritical === true;
+  if (deliveryCritical) {
+    const ensured = ensureDeliveryCriticalLabel(newFm);
+    newFm = ensured.fm;
+    deliveryCritical = ensured.deliveryCritical;
+  }
   fs.writeFileSync(file, `${open}${newFm}${close}${raw.slice(m[0].length)}`);
-  return { id, ok: true, from: "todo", to: newStatus };
+  return { id, ok: true, from: "todo", to: newStatus, deliveryCritical };
 }
 
 /** HEARTBEAT MODE entry: run the same analysis as `analyzeTasks` (all options pass through) and —
  *  when pool < floor AND promotions non-empty — land the recommended promotions on disk. Returns the
  *  full analyzeTasks result plus `should_apply` (the AC1 condition) and `applied_promotions` (the
  *  per-candidate setTaskStatus outcome). Purely additive: the default (non-`--apply`) output is
- *  byte-unchanged for existing consumers. */
+ *  byte-unchanged for existing consumers.
+ *
+ *  AC1 (gap-delivery-critical-label-at-promote-not-after-dispatch): the delivery-critical label is
+ *  DETERMINED AT PROMOTE — each promoted candidate's deliveryCritical status comes from its own
+ *  frontmatter labels (the SAME single source the dispatch sort reads via parseCandidate), and the
+ *  label is written together with the ready status ("标签与 ready 同现"). Each applied record carries
+ *  the determination (`deliveryCritical: true`) so "a delivery-critical task entered the ready pool
+ *  with its label in place" is mechanically checkable — the dispatch-time axis is guaranteed in place
+ *  for the NEXT selection, instead of being applied (too late) after dispatch. */
 export function applyPromotions(opts) {
   const result = analyzeTasks(opts);
   const shouldApply = result.deficit > 0 && result.promotions.length > 0;
   const applied = [];
   if (shouldApply) {
+    const candidateById = new Map(result.candidates.map((c) => [c.id, c]));
     for (const p of result.promotions) {
-      applied.push(setTaskStatus(opts.root, p.id, "ready"));
+      const cand = candidateById.get(p.id);
+      const deliveryCritical = !!(cand && cand.deliveryCritical);
+      const out = setTaskStatus(opts.root, p.id, "ready", { ensureDeliveryCritical: deliveryCritical });
+      applied.push({ ...out, deliveryCritical });
     }
   }
   return { ...result, should_apply: shouldApply, applied_promotions: applied };
