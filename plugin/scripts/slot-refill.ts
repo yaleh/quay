@@ -63,11 +63,12 @@
 // Run:
 //   node --experimental-strip-types plugin/scripts/slot-refill.ts [--root <repo>]
 //       [--cap <n>] [--in-flight <id1,id2>] [--floor-mult <n>] [--integration-backlog <n>]
-//       [--red-backlog-threshold <n>] [--red-backlog-cap <n>] [--json]
+//       [--red-backlog-cap <n>] [--json]
 //   --integration-backlog <n>   override the git-read integration backlog (test/Contract seam; the
 //                               production default reads `git rev-list --count develop..integration`).
-//   --red-backlog-threshold <n> backlog above which a red suite narrows the cap (default 50).
-//   --red-backlog-cap <n>       the narrowed cap under red suite + backlog > threshold (default 2).
+//                               Reported as a diagnostic; NO LONGER the cap-narrowing trigger.
+//   --red-backlog-cap <n>       the narrowed cap when the consecutive-red WINDOW is active (default 2;
+//                               rationale in tasks/gap-red-window-cap-trigger-backlog-not-suite-red.md).
 //
 // The pure functions are exported and unit-tested; main() is a thin CLI over them.
 
@@ -116,19 +117,20 @@ import { isDirectEntry } from "./gate-script-base.ts";
  *  an explicit `--cap`; the DEFAULT is fixed at 5.) */
 export const FIXED_DISPATCH_CAP = 5;
 
-/** B3 ①/④ ARBITRATION (gap-b3-arbitration-inflight-vs-backlog): B3's five inequalities were written
- *  as five INDEPENDENT mandates, but ④ (integration ahead + suite green ⇒ batch-merge) is a DOWNSTREAM
- *  constraint on ① (in_flight<cap ⇒ dispatch): when the delivery gate is blocked by a red suite, the
- *  commits pile up on integration (measured 01:05 162 → 01:15 169, develop 9.6h frozen) and a full-cap
- *  dispatch adds WIP, not throughput — a newly-finished task joins the 169 and becomes 174. The
- *  arbitration narrows the effective dispatch cap to "just enough to fix red" (RED_BACKLOG_CAP) when
- *  the suite is RED and the integration backlog (integration-ahead-of-develop commits) exceeds
- *  RED_BACKLOG_THRESHOLD; the cap restores to full when the suite is green, and an empty backlog has no
- *  effect. It is a cap ARBITRATION, not a gate — slot-refill still only recommends, but every
- *  dispatch-recommendation path that consumes this helper (event-driven + tick-heartbeat) automatically
- *  reads the arbitrated cap. */
+/** B3 ①/④ ARBITRATION (gap-red-window-cap-trigger-backlog-not-suite-red): B3's five inequalities were
+ *  written as five INDEPENDENT mandates, but ④ (integration ahead + suite green ⇒ batch-merge) is a
+ *  DOWNSTREAM constraint on ① (in_flight<cap ⇒ dispatch): when the delivery gate is blocked by a red
+ *  suite, the commits pile up on integration and a full-cap dispatch adds WIP, not throughput. The
+ *  arbitration narrows the effective dispatch cap to "just enough to fix red" (RED_BACKLOG_CAP). The
+ *  TRIGGER is now the CONSECUTIVE-RED WINDOW ALONE (red_window_active ⇒ cap → red_backlog_cap), per
+ *  human ruling 2026-08-13 — the old `suite_red && backlog > RED_BACKLOG_THRESHOLD` double condition
+ *  required the integration backlog to exceed 50, which left the cap at 5 during a red round when the
+ *  backlog was 10 (measured). The backlog threshold is RETIRED from the trigger (a condition
+ *  relaxation, not a new mechanism); `integration_backlog` is still reported as a diagnostic. This is
+ *  a cap ARBITRATION (a THROTTLE), NOT a dispatch stop — slot-refill still recommends up to the
+ *  narrowed cap, so a red window reduces concurrency without deadlocking (降 cap ≠ 停派; combined with
+ *  "不在主会话修" a stop would be a deadlock). */
 export const RED_BACKLOG_CAP_DEFAULT = 2;
-export const RED_BACKLOG_THRESHOLD_DEFAULT = 50;
 
 /** Free dispatch slots = max(0, cap − in_flight). The one definition; never hardcoded. */
 export function computeSlotsFree(cap, inFlightCount) {
@@ -147,10 +149,14 @@ export function readSuiteRed(root) {
   }
 }
 
-/** The ①/④ arbitration, pure: narrow the dispatch cap to `redBacklogCap` when the suite is red AND the
- *  integration backlog exceeds `redBacklogThreshold`; otherwise the base cap is unchanged. */
-export function computeArbitratedCap({ baseCap, suiteRed, integrationBacklog, redBacklogThreshold = RED_BACKLOG_THRESHOLD_DEFAULT, redBacklogCap = RED_BACKLOG_CAP_DEFAULT }) {
-  if (suiteRed && integrationBacklog > redBacklogThreshold) return redBacklogCap;
+/** The ①/④ arbitration, pure: narrow the dispatch cap to `redBacklogCap` when the consecutive-red
+ *  window is ACTIVE (red_window_active — the red window ALONE triggers the narrowing, per human ruling
+ *  2026-08-13). The old `suite_red && backlog > threshold` double condition required backlog > 50,
+ *  which left the cap at 5 during a red round when the integration backlog was 10. Backlog is NOT part
+ *  of the trigger; an inactive window leaves the base cap unchanged. Throttle, not a stop: the caller
+ *  still recommends up to the narrowed cap. */
+export function computeArbitratedCap({ baseCap, redWindowActive, redBacklogCap = RED_BACKLOG_CAP_DEFAULT }) {
+  if (redWindowActive) return redBacklogCap;
   return baseCap;
 }
 
@@ -295,11 +301,11 @@ export function isNotYetFlippedSkip({ id, body, root, excludedNyfIds }) {
  *      telemetry failure message (never a silent 0). Default null.
  *  @param {number} [o.integrationBacklog] integration-ahead-of-develop commit count; when omitted it
  *      is read from git (`git rev-list --count develop..integration`), fail-safe 0 on a non-git root /
- *      missing ref. Injectable for tests (a temp dir is not a git repo).
- *  @param {number} [o.redBacklogThreshold] backlog above which the red-suite cap narrowing applies
- *      (default RED_BACKLOG_THRESHOLD_DEFAULT = 50).
- *  @param {number} [o.redBacklogCap] the narrowed dispatch cap under red suite + backlog > threshold
- *      (default RED_BACKLOG_CAP_DEFAULT = 2).
+ *      missing ref. Injectable for tests (a temp dir is not a git repo). Reported as a diagnostic;
+ *      NO LONGER part of the cap-narrowing trigger (gap-red-window-cap-trigger-backlog-not-suite-red).
+ *  @param {number} [o.redBacklogCap] the narrowed dispatch cap when the consecutive-red window is
+ *      active (default RED_BACKLOG_CAP_DEFAULT = 2). The `red_backlog_cap=2` literal's rationale is
+ *      recorded in tasks/gap-red-window-cap-trigger-backlog-not-suite-red.md (AC3).
  *  @param {Function} [o.dispatchGate] OPTIONAL injected per-candidate dispatch gate
  *      `(candidate) => ({ ok: boolean, reason?: string })` (or a bare `false` to reject). Applied in
  *      the candidate loop AFTER the built-in step-4 checks. A rejected candidate is skipped and the
@@ -316,21 +322,32 @@ export function isNotYetFlippedSkip({ id, body, root, excludedNyfIds }) {
  *      exposes-sort-key) is the parallel array of {id, deliveryCritical, suiteBlocking, rank} that
  *      exposes each recommended id's sort axes for AC36 判据②'s mechanical check.
  */
-export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, floorMult = POOL_FLOOR_MULT_DEFAULT, inFlight = [], closedButLive = [], subagentsInFlight = 0, measurementSource = null, measurementError = null, integrationBacklog, redBacklogThreshold = RED_BACKLOG_THRESHOLD_DEFAULT, redBacklogCap = RED_BACKLOG_CAP_DEFAULT, dispatchGate = null }) {
+export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, floorMult = POOL_FLOOR_MULT_DEFAULT, inFlight = [], closedButLive = [], subagentsInFlight = 0, measurementSource = null, measurementError = null, integrationBacklog, redBacklogCap = RED_BACKLOG_CAP_DEFAULT, dispatchGate = null }) {
   // PREEMPTIVE HALT (gap-supervisor-preemption AC2): the `.halt` sentinel is a CODE mount point,
   // not a tick-step-0 prose rule. When halted, dispatch is blocked no matter how many slots/candidates
   // exist — the human's stop takes effect at ANY dispatch-recommendation point, mid-flow.
   const halt = checkHaltSentinel(root);
-  // B3 ①/④ ARBITRATION (gap-b3-arbitration-inflight-vs-backlog): ① (in_flight<cap ⇒ dispatch) conflicts
-  // with ④ (integration ahead + suite green ⇒ batch-merge) — ④ is a DOWNSTREAM constraint on ①. When the
-  // delivery gate is blocked by a red suite AND the integration backlog exceeds the threshold, the
-  // effective dispatch cap narrows to "just enough to fix red" so dispatch adds red-fixing work, not WIP.
+  // B3 ①/④ ARBITRATION (gap-red-window-cap-trigger-backlog-not-suite-red): ① (in_flight<cap ⇒ dispatch)
+  // conflicts with ④ (integration ahead + suite green ⇒ batch-merge) — ④ is a DOWNSTREAM constraint on
+  // ①. The TRIGGER for the cap narrowing is now the CONSECUTIVE-RED WINDOW ALONE (red_window_active ⇒
+  // cap → red_backlog_cap), per human ruling 2026-08-13 — the old `suite_red && backlog > threshold`
+  // double condition required backlog > 50 and left the cap at 5 during a red round when the backlog
+  // was 10 (measured). The window reading is cap-INDEPENDENT (computeSuiteBlocking reads
+  // verification-round.jsonl + full-suite-state.json, never the cap), so a FIRST pass at the BASE cap
+  // yields the authoritative `suite_blocking.window_active`; when the window narrows, a SECOND pass at
+  // the arbitrated cap re-derives the cap-dependent pool stats (floor) exactly as the pre-existing
+  // single-pass-at-effective-cap behavior did. Throttle, NOT a stop: should_refill below still
+  // recommends up to the narrowed cap (AC2 — red window reduces concurrency without deadlocking).
   const suiteRed = readSuiteRed(root);
   const backlog = integrationBacklog ?? readGitRevCount(root, "develop..integration") ?? 0;
   const baseCap = cap;
-  const effectiveCap = computeArbitratedCap({ baseCap, suiteRed, integrationBacklog: backlog, redBacklogThreshold, redBacklogCap });
+  let pool = analyzeTasks({ tasksDir, root, cap: baseCap, floorMult, inFlight, closedButLive });
+  const redWindowActive = pool.suite_blocking ? pool.suite_blocking.window_active : false;
+  const effectiveCap = computeArbitratedCap({ baseCap, redWindowActive, redBacklogCap });
   const capNarrowed = effectiveCap !== baseCap;
-  const pool = analyzeTasks({ tasksDir, root, cap: effectiveCap, floorMult, inFlight, closedButLive });
+  if (capNarrowed) {
+    pool = analyzeTasks({ tasksDir, root, cap: effectiveCap, floorMult, inFlight, closedButLive });
+  }
   // A slot is free only when neither a running subagent NOR a closed-bracket-but-live agent NOR a
   // non-task investigation subagent holds it. `subagentsInFlight` carries no task id (no bracket), so
   // it occupies a slot but cannot join the touches-disjointness check below.
@@ -534,18 +551,19 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
     cap: effectiveCap,
     base_cap: baseCap,
     effective_cap: effectiveCap,
-    // B3 ①/④ ARBITRATION (gap-b3-arbitration-inflight-vs-backlog): the arbitration reading — whether
-    // the effective cap was narrowed (red suite + integration backlog > threshold) and why. `cap`
-    // above is the EFFECTIVE (arbitrated) cap every dispatch-recommendation path consumes.
+    // B3 ①/④ ARBITRATION (gap-red-window-cap-trigger-backlog-not-suite-red): the arbitration reading —
+    // whether the effective cap was narrowed by the consecutive-red WINDOW and why. `cap` above is the
+    // EFFECTIVE (arbitrated) cap every dispatch-recommendation path consumes. `red_window_active` is
+    // the TRIGGER (not `suite_red && backlog > threshold`, retired 2026-08-13); `suite_red` and
+    // `integration_backlog` are reported as diagnostics.
     arbitration: {
       suite_red: suiteRed,
-      red_window_active: pool.suite_blocking ? pool.suite_blocking.window_active : false,
+      red_window_active: redWindowActive,
       integration_backlog: backlog,
-      backlog_threshold: redBacklogThreshold,
       red_backlog_cap: redBacklogCap,
       cap_narrowed: capNarrowed,
       reason: capNarrowed
-        ? `red suite (state=red) + integration backlog ${backlog} > threshold ${redBacklogThreshold} ⇒ dispatch cap narrowed ${baseCap}→${effectiveCap}`
+        ? `red window active ⇒ dispatch cap narrowed ${baseCap}→${effectiveCap}`
         : null,
     },
     floor_mult: floorMult,
@@ -659,7 +677,6 @@ function main(argv) {
   let inFlightIds = [];
   let closedButLiveIds = [];
   let integrationBacklog = undefined;
-  let redBacklogThreshold = RED_BACKLOG_THRESHOLD_DEFAULT;
   let redBacklogCap = RED_BACKLOG_CAP_DEFAULT;
   // MEASUREMENT PROVENANCE (gap-slot-refill-inflight-disconnected-from-worktrees): whether the caller
   // EXPLICITLY supplied the in-flight view. When NEITHER --in-flight nor --closed-but-live is passed,
@@ -682,8 +699,6 @@ function main(argv) {
       closedButLiveIds = String(args[++i] || "").split(",").map((s) => s.trim()).filter(Boolean);
     } else if (args[i] === "--integration-backlog") {
       integrationBacklog = Number(args[++i]);
-    } else if (args[i] === "--red-backlog-threshold") {
-      redBacklogThreshold = Number(args[++i]);
     } else if (args[i] === "--red-backlog-cap") {
       redBacklogCap = Number(args[++i]);
     }
@@ -724,7 +739,7 @@ function main(argv) {
       measurementError = measured.error;
     }
   }
-  const result = analyzeSlotRefill({ tasksDir: path.join(rootDir, "tasks"), root: rootDir, cap, floorMult, inFlight, closedButLive, subagentsInFlight, measurementSource, measurementError, integrationBacklog, redBacklogThreshold, redBacklogCap });
+  const result = analyzeSlotRefill({ tasksDir: path.join(rootDir, "tasks"), root: rootDir, cap, floorMult, inFlight, closedButLive, subagentsInFlight, measurementSource, measurementError, integrationBacklog, redBacklogCap });
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   return 0;
 }
