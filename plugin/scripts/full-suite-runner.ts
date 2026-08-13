@@ -110,7 +110,7 @@ import readline from "node:readline";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
-import { runOnce } from "./suite-state-trigger.ts";
+import { runOnce, isRunnerInFlight, type SuiteState as TriggerSuiteState } from "./suite-state-trigger.ts";
 import { getLoad1 } from "./checker-cost.ts";
 import { scanFamily, kindForFile } from "./known-load-sensitive.ts";
 // gap-leak-residue-per-run-namespace-isolation — the runner-level unified cleanup REUSES the
@@ -1395,6 +1395,29 @@ export async function run(argv: string[]): Promise<number> {
   const stateDir = path.resolve(parseArg(argv, "--state-dir") ?? path.join(mainRoot, ".quay"));
   const stateFile = path.resolve(parseArg(argv, "--state-file") ?? path.join(stateDir, "full-suite-state.json"));
   const logFile = path.resolve(parseArg(argv, "--log-file") ?? path.join(stateDir, "full-suite.log"));
+
+  // gap-runner-spawn-single-flight AC1 — SPAWN-LAYER single-flight: refuse to start when a runner is
+  // already in flight (state=running + live pid). The resource gate below checks only LOAD (PSI/
+  // loadavg) — it does not know "another suite is already running". Two concurrent runners both pass
+  // the load gate, both write state=running (last-write-wins clobber), and both spawn — the round
+  // 129/131/132 retrigger storm. This check MUST be before the gate AND before any worktree
+  // provisioning: refusing here costs nothing (no fork, no worktree). Lightweight controls
+  // (--fail-fast-check/--static-check-check/--wait-check) skip it, matching the gate's skip.
+  const skipInFlight =
+    process.env.QUAY_TEST_SKIP_RESOURCE_GATE === "1" ||
+    argv.includes("--fail-fast-check") ||
+    argv.includes("--static-check-check") ||
+    argv.includes("--wait-check");
+  if (!skipInFlight) {
+    let cur: TriggerSuiteState | null = null;
+    try { cur = JSON.parse(fs.readFileSync(stateFile, "utf8")) as TriggerSuiteState; } catch { cur = null; }
+    if (cur && isRunnerInFlight(cur)) {
+      process.stderr.write(
+        `full-suite-runner: another runner is already in flight (state=${cur.state}, pid=${cur.pid}) — refusing to start (single-flight; round 131/132 storm). Re-run after it finishes.\n`
+      );
+      return 1;
+    }
+  }
 
   // AC3 — the resource gate MUST be consulted BEFORE the suite starts (state=running is written
   // AFTER the gate, so a WAIT leaves the previous state — running/green — untouched). --fail-fast-check

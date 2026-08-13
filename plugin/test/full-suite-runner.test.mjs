@@ -788,6 +788,55 @@ test("AC3 — resource gate GO ⇒ the runner starts (state=running then green)"
   }
 });
 
+test("AC1 — runner REFUSES to start when another runner is in flight (state=running + live pid) — round 131/132 storm fix", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-inflight-"));
+  // A live pid: this test process itself (process.kill(pid,0) succeeds for our own pid).
+  const statePathFile = path.join(root, ".quay", "full-suite-state.json");
+  fs.mkdirSync(path.dirname(statePathFile), { recursive: true });
+  fs.writeFileSync(statePathFile, JSON.stringify({ state: "running", pid: process.pid, finishedAt: null, runId: "existing-run" }, null, 2));
+  try {
+    const res = await runCli(RUNNER, ["--root", root, "--state-dir", path.join(root, ".quay")]);
+    assert.notEqual(res.code, 0, "runner must refuse to start when a live runner is in flight");
+    assert.match(res.err, /another runner is already in flight/, `refusal message must name the in-flight runner:\n${res.err}`);
+    assert.ok(!fs.existsSync(path.join(root, ".quay", "fake-test.log")), "must NOT spawn the suite");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC1 — runner STARTS when state is terminal (green) even with a pid — no in-flight false positive", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-inflight-terminal-"));
+  const { argsLog } = fakeTestShRecordingArgs(root);
+  const statePathFile = path.join(root, ".quay", "full-suite-state.json");
+  fs.mkdirSync(path.dirname(statePathFile), { recursive: true });
+  // terminal green: finishedAt set. The pid is stale/dead — but finishedAt != null means the round
+  // is OVER regardless of pid, so isRunnerInFlight returns false.
+  fs.writeFileSync(statePathFile, JSON.stringify({ state: "green", pid: 999999999, finishedAt: Date.now(), runId: "old-run" }, null, 2));
+  try {
+    const child = runRunner({ root });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, "terminal state ⇒ the runner starts normally");
+    assert.ok(fs.existsSync(argsLog), "the suite WAS spawned on a terminal state");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC2 — lightweight controls (--fail-fast-check) skip the in-flight check", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-inflight-skip-"));
+  const statePathFile = path.join(root, ".quay", "full-suite-state.json");
+  fs.mkdirSync(path.dirname(statePathFile), { recursive: true });
+  fs.writeFileSync(statePathFile, JSON.stringify({ state: "running", pid: process.pid, finishedAt: null, runId: "existing-run" }, null, 2));
+  try {
+    const { code } = await runCli(RUNNER, ["--fail-fast-check", "--root", root, "--state-dir", path.join(root, ".quay")]);
+    // --fail-fast-check runs its own hermetic sub-suite and exits 0 when the chain works — it must
+    // NOT be blocked by the in-flight check.
+    assert.equal(code, 0, "--fail-fast-check must skip the in-flight check");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("AC4 — negative control: explicit --lane-count 8 + command already has =8 ⇒ exactly ONE =8 (replace, not two)", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-ac4-"));
   const { argsLog } = fakeTestShRecordingArgs(root);
