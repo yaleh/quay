@@ -11,7 +11,7 @@ checker_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 mkdir -p "${workdir}"
 cat > "${workdir}/tick-log.md" <<'EOF'
-### 15:21Z
+- `15:21Z` `tick` — fixture（2026-08-13 锚点 bullet）
 - 类型: no-action（五条全假）
 - 五条不等式: ①in_flight<cap且recommended非空→派发到cap [当前假:in_flight==cap]; ②pool<floor→晋级补池 [当前假:pool≥floor]; ③nyf>0且work落地→翻done [当前假:nyf=0]; ④integration领先develop且suite绿→批量合 [当前假:develop==integration]; ⑤suite red→分诊 [当前假:green]
 - 动作分类: no-action
@@ -29,7 +29,7 @@ fi
 
 # INJECT: a no-action row with inequality ① TRUE → MUST go RED.
 cat > "${workdir}/tick-log.md" <<'EOF'
-### 15:21Z
+- `15:21Z` `tick` — fixture（2026-08-13 锚点 bullet）
 - 类型: no-action（但 ① 为真）
 - 五条不等式: ①in_flight<cap且recommended非空→派发到cap [当前真:recommended=[gap-x]]; ②pool<floor→晋级补池 [当前假]; ③nyf>0且work落地→翻done [当前假]; ④integration领先develop且suite绿→批量合 [当前假]; ⑤suite red→分诊 [当前假]
 - 动作分类: no-action
@@ -41,7 +41,7 @@ fi
 
 # RESTORE: back to the legal all-five-false no-action → GREEN again.
 cat > "${workdir}/tick-log.md" <<'EOF'
-### 15:21Z
+- `15:21Z` `tick` — fixture（2026-08-13 锚点 bullet）
 - 类型: no-action（五条全假）
 - 五条不等式: ①in_flight<cap且recommended非空→派发到cap [当前假:in_flight==cap]; ②pool<floor→晋级补池 [当前假:pool≥floor]; ③nyf>0且work落地→翻done [当前假:nyf=0]; ④integration领先develop且suite绿→批量合 [当前假:develop==integration]; ⑤suite red→分诊 [当前假:green]
 - 动作分类: no-action

@@ -89,20 +89,21 @@ if [ ! -f "$LOG" ]; then
   exit 1
 fi
 
-# 取最后一个 tick 段（`### HH:MMZ` 起，到文件尾）。
+# 取最后一个 tick 段（`- \`HH:MMZ\`` bullet 起，到文件尾）。真实 tick-log 用 bullet 行
+# （`- \`19:55Z\` \`tick\` — …`），不是 `### HH:MMZ` 标题——2026-08-13 manager 裁定锚点按现实改。
 LAST_SECTION="$(awk '
-  /^### / { section = ""; collecting = 1 }
+  /^\- `[0-9]{2}:[0-9]{2}Z?`/ { section = ""; collecting = 1 }
   collecting { section = section $0 "\n" }
   END { printf "%s", section }
 ' "$LOG")"
 
 if [ -z "$LAST_SECTION" ]; then
   if [ "$JSON" = 1 ]; then printf '{"ok":false,"reason":"no-tick-section"}\n'
-  else echo "outer-tick-log-check: FAIL — no tick section (### HH:MMZ) found in $LOG"; fi
+  else echo "outer-tick-log-check: FAIL — no tick section (- \`HH:MMZ\` bullet) found in $LOG"; fi
   exit 1
 fi
 
-TICK_TIME="$(printf '%s' "$LAST_SECTION" | grep -m1 -oE '^### [0-9]{2}:[0-9]{2}Z?' | sed 's/^### //; s/Z$//')"
+TICK_TIME="$(printf '%s' "$LAST_SECTION" | grep -m1 -oE '^\- `[0-9]{2}:[0-9]{2}Z?`' | sed 's/^\- `//; s/Z`$//; s/`$//')"
 ACTION="$(printf '%s' "$LAST_SECTION" | grep -m1 -oE '^- 动作分类: *[a-z-]+' | sed 's/^- 动作分类: *//')"
 INEQ_LINE="$(printf '%s' "$LAST_SECTION" | grep -m1 '^- 五条不等式:' || true)"
 
@@ -145,7 +146,7 @@ fi
 #      ——校验不晚于 log mtime（防跨日/掩码时间）。
 #   ④ 均不可解析 ⇒ TRACE_START_EPOCH 为空 ⇒ 跳过 L2 trace 判据（不假红，spec 明令）。
 PREV_SECTION="$(awk '
-  /^### / {
+  /^\- `[0-9]{2}:[0-9]{2}Z?`/ {
     if (prev != "") last = prev
     prev = ""
     collecting = 1
@@ -173,7 +174,7 @@ if [ -z "$TRACE_START_EPOCH" ]; then
 fi
 # ③ 上一 tick 表头 HH:MM → 当日 epoch - 120s
 if [ -z "$TRACE_START_EPOCH" ]; then
-  PREV_HEADER="$(printf '%s' "$PREV_SECTION" | grep -m1 -oE '^### [0-9]{2}:[0-9]{2}' | sed 's/^### //')"
+  PREV_HEADER="$(printf '%s' "$PREV_SECTION" | grep -m1 -oE '^\- `[0-9]{2}:[0-9]{2}' | sed 's/^\- `//')"
   if [ -n "$PREV_HEADER" ] && [ -n "$LAST_EPOCH" ]; then
     HH="${PREV_HEADER%%:*}"; MM="${PREV_HEADER##*:}"
     if [ "${HH#0}" -ge 0 ] 2>/dev/null && [ "${HH#0}" -le 23 ] && [ "${MM#0}" -ge 0 ] 2>/dev/null && [ "${MM#0}" -le 59 ]; then

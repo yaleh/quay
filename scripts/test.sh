@@ -358,6 +358,15 @@ run_static_checks() {
   # @static-tier change
   # @static-object **/*.sh **/*.bash plugin/loop/*-loop-tick.md orchestration/*-loop-tick.md plugin/scripts/adr016-screen-use-check.ts plugin/test/adr016-screen-use-check.test.mjs
   run_checker "adr016-screen-use-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/adr016-screen-use-check.ts" --root "${repo_root}"
+  echo "== outer tick-log no-action evidence check (gap-no-action-requires-evidence-mechanical-check, manager 2026-08-09) =="
+  # The outer's `no-action` verdict must CARRY the five-inequality evidence (B13), re-measured by the
+  # checker itself (never trusts the line's numbers). Wired per its own 约束② ("必须接 run_static_checks
+  # 不依赖会话意志") — built 2026-08-09, never wired until 2026-08-13. 2026-08-13 manager cut:
+  # step-1 anchor follows the REAL tick-log bullet form (`- \`HH:MMZ\``, not ###); the five-inequality
+  # EVIDENCE fields are structured (step 2, queued after AC47) — so this step-1 wiring finds the recent
+  # tick section and self-checks it, but does NOT yet enforce the structured evidence rows.
+  # @static-tier change
+  run_checker "outer-tick-log-check" bash "${repo_root}/plugin/scripts/outer-tick-log-check.sh" --root "${repo_root}"
   echo "== superseded-capability check (gap-retired-script-still-callable, AC5) =="
   # One capability = ONE implementation. A superseded implementation (the SUPERSEDED table in
   # capability-catalog.sh — currently send-keys-verified.sh, deleted 2026-08-10 under human ruling)

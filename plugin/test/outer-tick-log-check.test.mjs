@@ -56,7 +56,7 @@ function makeGitRepoWithCommit({ epoch }) {
 const FIVE_FALSE = "①in_flight<cap且recommended非空→派发到cap [当前假:in_flight==cap]; ②pool<floor→晋级补池 [当前假:pool≥floor]; ③nyf>0且work落地→翻done [当前假:nyf=0]; ④integration领先develop且suite绿→批量合 [当前假:develop==integration]; ⑤suite red→分诊 [当前假:green]";
 
 function row(verdict, ineq, extra = "") {
-  return `### 15:21Z
+  return `- \`15:21Z\` \`tick\` — fixture（2026-08-13 锚点按现实改 bullet 形态）
 - 类型: ${verdict}（测试）
 ${ineq ? `- 五条不等式: ${ineq}\n` : ""}${extra}- 动作分类: ${verdict}
 `;
