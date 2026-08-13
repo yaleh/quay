@@ -67,6 +67,12 @@ const {
 if (!worktree || !stateDir || !root) {
   return { outcome: 'bad-args', message: 'worktree/stateDir/root are required', args }
 }
+// logFile is OPTIONAL (the runner defaults to <state-dir>/full-suite.log) — but the launch
+// template below ALWAYS passes `--log-file ${resolvedLogFile}`, so an unset logFile would emit the literal
+// `undefined` and the runner's path.resolve("undefined") would write the round log to ./undefined at
+// the checkout root (bug: 2026-08-12 17:15, a 300KB round log landed in ./undefined). Default it here
+// so the template never emits the undefined literal.
+const resolvedLogFile = logFile ?? path.join(stateDir, 'full-suite.log')
 
 const launchEnv = `QUAY_TEST_SUITE_MAX_RUNTIME_MS=${envMaxRuntimeMs} QUAY_TEST_SUITE_SILENCE_MS=${envSilenceMs} QUAY_TEST_RED_GRACE_MS=${envRedGraceMs} QUAY_TEST_SYSTEMD_RUN_LIMITS='${systemdRunLimits}'`
 
@@ -75,7 +81,7 @@ const launchEnv = `QUAY_TEST_SUITE_MAX_RUNTIME_MS=${envMaxRuntimeMs} QUAY_TEST_S
 // onSignal → state=aborted, runner 死于 Fix agent 返回的同一秒）。detach（setsid + & + disown）
 // 让 runner 活在独立 session，subagent 退出不影响它；等待仍由 workflow 脚本轮询 state.json 决定，
 // 不违背「等待由脚本控制流决定」。subagent 侧只做：前台 Bash 跑这条（立即返回）+ 短促确认。
-const launchCmd = `cd ${root} && ${launchEnv} setsid node --no-warnings --experimental-strip-types plugin/scripts/full-suite-runner.ts --root ${worktree} --state-dir ${stateDir} --log-file ${logFile} >/dev/null 2>&1 & disown; sleep 2; echo detached-pid=$!`
+const launchCmd = `cd ${root} && ${launchEnv} setsid node --no-warnings --experimental-strip-types plugin/scripts/full-suite-runner.ts --root ${worktree} --state-dir ${stateDir} --log-file ${resolvedLogFile} >/dev/null 2>&1 & disown; sleep 2; echo detached-pid=$!`
 
 // ── 通用指令片段（发给每个 agent 的执行上下文，固定命令块，不靠探索）─────────────────
 const CONTEXT = `
@@ -88,7 +94,7 @@ state file: ${stateDir}/full-suite-state.json  (script-owned polling reads this)
 verification-round log: ${stateDir}/verification-round.jsonl
 integration-batch-merge: cd ${root} && bash plugin/scripts/integration-batch-merge.sh --deliver  (DIR-123: --deliver launches develop-deliver-tgz.sh DETACHED after land closure — fresh .tgz to B/C + verify; best-effort, never blocks/fails the merge)
 resource gate: cd ${root} && bash plugin/scripts/resource-gate.sh --for full-suite
-FAILURES are ALL recorded in state.json's failures[] (MAX_RECORDED_FAILURES=200) + the archived log ${logFile} — read EVERY failure line, never just the first.
+FAILURES are ALL recorded in state.json's failures[] (MAX_RECORDED_FAILURES=200) + the archived log ${resolvedLogFile} — read EVERY failure line, never just the first.
 `
 
 phase('Fix')
@@ -157,7 +163,7 @@ while (realRedCount <= maxRounds) {
       `你是 A15 ④ suite-fix 链的 Fix 阶段。上一轮是【非验证终态】reason=${s.reason} tests=${s.tests ?? 0} —— 这不是 suite 跑完后的结果，是 suite 没跑完/没跑。
 ${CONTEXT}
 任务：
-1. reason=static-check：读 ${logFile} 的静态检查失败详情（run_static_checks 阶段），修静态检查（不是绕过），然后重跑全量 suite。
+1. reason=static-check：读 ${resolvedLogFile} 的静态检查失败详情（run_static_checks 阶段），修静态检查（不是绕过），然后重跑全量 suite。
 2. reason=aborted 且是 resource-gate WAIT / single-flight lock：检查 "resource-gate.sh --for full-suite"，等它放行，然后重跑全量 suite。
 3. 其它：读日志找阻塞根因，修掉，重跑全量 suite。
 4. 启动全量 suite：${launchCmd} —— 前台 Bash 跑（&+disown 立即返回），然后轮询 state.json 最多 ~20s 直到 state=running（短促确认）再返回。禁止 Bash(run_in_background:true)。
@@ -179,7 +185,7 @@ ${CONTEXT}
     `你是 A15 ④ suite-fix 链的 Fix 阶段。上一轮是真实红轮（reason=failed, tests=${s.tests}）。
 ${CONTEXT}
 任务：
-1. 读 ${stateDir}/full-suite-state.json 的 failures[]（现在记录【全部】失败，最多 200 条）+ 归档日志 ${logFile}，逐条列出失败，诊断每一条的根因。
+1. 读 ${stateDir}/full-suite-state.json 的 failures[]（现在记录【全部】失败，最多 200 条）+ 归档日志 ${resolvedLogFile}，逐条列出失败，诊断每一条的根因。
 2. 修复所有根因，在 worktree 里 commit（一次提交可以含多个修复，但必须是真实的修复，不是删测试/改判据绕过）。
 3. 重跑全量 suite：${launchCmd} —— 前台 Bash 跑（&+disown 立即返回），然后轮询 state.json 最多 ~20s 直到 state=running（短促确认）再返回。禁止 Bash(run_in_background:true)。
 返回 { failureCount, rootCauses: string[], relaunched: bool, worktreeHead, note }。
