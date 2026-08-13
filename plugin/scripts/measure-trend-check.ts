@@ -86,6 +86,23 @@ export interface LandResult {
   reason?: string;
 }
 
+/**
+ * Normalize a `__PERFILE__` path to a stable identity across verify-round worktree roots
+ * (gap-phase-overlap-two-phase-parallel-exploration constraint 6 — `__PERFILE__` 按 basename 归一).
+ * A full suite runs inside a per-task worktree (`<root>/quay-worktrees/gap-<task>-<hash>/...`), so the
+ * SAME physical test file carries a DIFFERENT full path every round. Keying measure-history on the
+ * full path over-counts files (1179 "files" vs ~360 real) and breaks round-to-round comparison
+ * (`compareLastTwoRounds` can't match a file whose path changed between rounds). Stripping the
+ * worktree-root prefix yields a REPO-ROOT-RELATIVE key: it dedups across worktree variants AND keeps
+ * package context — unlike a bare basename, which would collide (measure-suite-reporter.mjs:156
+ * deliberately emits full paths because `cli.test.mjs` exists in multiple packages). Paths already
+ * outside any worktree (dev runs on a shared checkout) are returned unchanged.
+ */
+export function normalizePerFileKey(file: string): string {
+  const m = file.match(/^.*\/quay-worktrees\/[^/]+\/(.+)$/);
+  return m ? m[1] : file;
+}
+
 /** Parse `__PERFILE__ duration_ms=<dur> <full-path> passed=<bool>` lines (measure-suite-reporter). */
 export function parsePerFileLines(text: string): PerFileRecord[] {
   const out: PerFileRecord[] = [];
@@ -94,7 +111,7 @@ export function parsePerFileLines(text: string): PerFileRecord[] {
     if (m) {
       const dur = parseFloat(m[1]);
       if (Number.isFinite(dur) && dur > 0) {
-        out.push({ file: m[2], durationMs: dur, passed: m[3] === "true" });
+        out.push({ file: normalizePerFileKey(m[2]), durationMs: dur, passed: m[3] === "true" });
       }
     }
   }
