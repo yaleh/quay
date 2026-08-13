@@ -81,3 +81,9 @@ AC3 对照（同测试 `order-priority-safety`）：higher-disjoint 的无 prior
 **测试（AC4）**：`plugin/test/ready-pool-check.test.mjs` 新增 4 用例（`priorityLevel` 映射、可行集内 p1>p2>无、priority 不覆盖 disjointness、priority 胜过 kind 的 gap>DIR），单文件 99/99 绿；`--for-task` scoped 门绿见下。真实 store 干跑：pool=14 ≥ floor=12 ⇒ 无晋升压力，输出正常无崩溃。
 
 **全量套件绿：留给 outer（本子代理只跑 scoped 门）。**
+
+## 后续观察（2026-08-13，outer 追加——本任务虽 done，缺口仍在生产）
+
+**活样本（manager 裁定定向晋升时自纠）**：两个同尺寸互斥集——
+`{landing-target, clique, streaming-red}` 与 `{retest, clique, streaming-red}`，
+机制（slot-refill 排序）选了前者，因为 **排序里没有"重要性"维度**（touch-disjointness → gap>DIR → touches-resolvable，无优先级）。而 retest 是**停全局轮链条上唯一承接者**，被 landing-target（同碰 test.sh）挡着延迟了。**两个集等价，机制取哪个都合规；是我们要的那一维它看不见。** `priority:` label 至今零读者——本任务（271c102a）落地后这一维仍未接上。
