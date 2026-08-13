@@ -55,6 +55,11 @@ extractSectionByShape 认不出 `## Acceptance Criteria (runnable — …)` 这�
    段不可读时返回解构后必然不合格的值（如 `total: NaN` 使 `total===0` 与 `checked===total` 都为假），
    **或**把 `:126` 拆成两个函数、旧名保留给「段确定存在」路径。**判据（一行可查）**：
    修完后对 DIR-014 跑全部 5 个消费者，没有任何一个报「完成/landed」。
+   **为什么这个形态能停（manager 通则，2026-08-13）**：枚举依赖修法（逐个消费者改读 sectionFound）的正确性
+   =「我们找全了消费者」⇒ 每多一个消费者 = 一次新失守、未来才写的消费者必不在任何枚举里 ⇒ 追不完；
+   **不依赖枚举的修法**（旧读法结构上得不出合格）对「还没写出来的消费者」同样成立 ⇒ 可以停。
+   负控制（AC2 覆盖 5 站）是**证据**（当下没漏），形态（NaN/拆函数）是**保证**（不复发）——两者不互相替代。
+   同根异象：同一 fail-open 在不同消费者表现不同（landed / 干净积压 / 不跳过）⇒ 按现象找缺陷会漏。
 2. **SHAPE_SECTIONS 登记带后缀标题**（manager 倾向此修法而非前缀匹配——前缀会把
    `## Acceptance Criteria for the OLD design` 也吞进来，给已出问题的匹配器加不确定性）：
    显式枚举 `## Acceptance Criteria (runnable — …)` / `## Definition of Done — REAL LANDING is the bar` 等
