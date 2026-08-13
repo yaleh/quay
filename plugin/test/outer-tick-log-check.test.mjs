@@ -160,6 +160,29 @@ test("NOT-EVALUATED — 行无 `- 动作分类:` 字段 ⇒ 如实报 not-evalua
   assert.doesNotMatch(r.stdout, /"checked":true/, "a checker that cannot parse ACTION must not print the PASS checked:true form");
 });
 
+// ── 时间标签判据（manager 2026-08-13：产物，不靠「下次注意」——行为承诺实测寿命 2 行）────────────
+// ① 标签单调不减；② 标签 ≤ 文件 mtime（标签不可能晚于其被写下的时刻）。防「估的标签」复发。
+test("时间标签 future：标签晚于 mtime ⇒ RED（exit 1）", () => {
+  // label 23:59（今天）> mtime（now，~20:xx）⇒ future。mtime HH≥2 ⇒ 无跨日宽限。
+  const r = runChecker({
+    log: "- `23:59Z` `tick` — future label\n- 动作分类: no-action\n- 五条不等式: ①[当前假] ②[当前假] ③[当前假] ④[当前假] ⑤[当前假]\n",
+    truth: "00000",
+    root: NO_ROOT,
+  });
+  assert.equal(r.status, 1, `expect RED: ${r.stdout}`);
+  assert.match(r.stdout, /future-label/, "a label after the file mtime is a future/estimated label — must RED");
+});
+
+test("时间标签 非单调：上一段标签晚于本段 ⇒ RED（exit 1）", () => {
+  const r = runChecker({
+    log: "- `20:30Z` `tick` — earlier（晚）\n- `20:20Z` `tick` — later（早于上一段）\n- 动作分类: no-action\n- 五条不等式: ①[当前假] ②[当前假] ③[当前假] ④[当前假] ⑤[当前假]\n",
+    truth: "00000",
+    root: NO_ROOT,
+  });
+  assert.equal(r.status, 1, `expect RED: ${r.stdout}`);
+  assert.match(r.stdout, /non-monotonic/, "labels going backwards in an append-only log must RED");
+});
+
 // ── L2 trace 窗口锚定该 tick 起点（gap-outer-tick-log-check-trace-window-anchored-at-log-mtime）
 // 旧代码窗口起点 = log mtime（--since=@<mtime>）：act-then-log 下证据提交严格在 log 前 ⇒ 永远在
 // 窗外 ⇒ 动作行假红。新代码窗口 = [该 tick 起点, log 写入时刻]：证据必然落窗，log 后无关提交被

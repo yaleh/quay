@@ -286,6 +286,34 @@ if [ -n "$L2_FAIL" ]; then
   exit 1
 fi
 
+# ── 时间标签判据（manager 2026-08-13：产物，不靠「下次注意」——行为承诺实测寿命 2 行）────────
+# ① 末两条标签单调不减（PREV_HEADER ≤ TICK_TIME）；② 每条标签 ≤ 文件 mtime（标签不可能晚于
+# 其被写下的时刻）。用 checker 已有变量（TICK_TIME/PREV_HEADER/LAST_EPOCH），不新增数据。
+# 发生率 2 且第二次发生在明确修法之后 ⇒ 行为修法不成立，需机械产物（硬规则 12 豁免）。
+TAG_FAIL=""
+# PREV_HEADER 只在 TRACE_START_EPOCH 解析的 ③ 分支里计算（fixture 带 epoch= 行时跳过）——先给默认值防 set -u
+PREV_HEADER="${PREV_HEADER:-}"
+if [ -n "$TICK_TIME" ] && [ -n "$LAST_EPOCH" ]; then
+  MTIME_HHMM="$(date -r "$LOG" +%H:%M 2>/dev/null || echo "")"
+  # ② future：标签 HH:MM > mtime HH:MM（同天；跨日早晨宽限——mtime 00-01h 且标签 22-23h ⇒ 前一天，跳过）
+  if [ -n "$MTIME_HHMM" ] && [ "$TICK_TIME" \> "$MTIME_HHMM" ]; then
+    MTIME_HH="${MTIME_HHMM%%:*}"
+    TAG_HH="${TICK_TIME%%:*}"
+    if [ "${MTIME_HH#0}" -ge 2 ] || [ "${TAG_HH#0}" -lt 22 ]; then
+      TAG_FAIL="future-label:${TICK_TIME}>mtime:${MTIME_HHMM}"
+    fi
+  fi
+  # ① 单调：上一段标签 > 本段 ⇒ 往回走
+  if [ -z "$TAG_FAIL" ] && [ -n "$PREV_HEADER" ] && [ "$PREV_HEADER" \> "$TICK_TIME" ]; then
+    TAG_FAIL="non-monotonic:${PREV_HEADER}>${TICK_TIME}"
+  fi
+fi
+if [ -n "$TAG_FAIL" ]; then
+  if [ "$JSON" = 1 ]; then printf '{"ok":false,"reason":"%s","tickTime":"%s"}\n' "$TAG_FAIL" "$TICK_TIME"
+  else echo "outer-tick-log-check: FAIL — tick 时间标签 $TAG_FAIL（标签必须单调不减且 ≤ 文件 mtime）"; fi
+  exit 1
+fi
+
 # NOT-EVALUATED: ACTION unparseable（真实 tick-log 在 step 2 前无 `- 动作分类:` 行）。
 # L1/L2 每条检查都以 ACTION 可解析为前提；ACTION 为空 ⇒ 所有分支跳过。此时【不得】输出
 # PASS/self-consistent——一个结构上不可能报红的 checker 的绿与「一切正常」同形（硬规则 4），
