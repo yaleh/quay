@@ -1,7 +1,7 @@
 ---
 id: gap-lanes-nproc-concurrent-suites-accounting
 title: lanes/nproc/并发套件数入账——2 槽锁后并发数是新变量，不记则跨轮不可比
-status: todo
+status: ready
 labels:
   - gap
   - mechanism

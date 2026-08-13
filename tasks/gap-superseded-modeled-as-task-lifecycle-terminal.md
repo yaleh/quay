@@ -1,7 +1,7 @@
 ---
 id: gap-superseded-modeled-as-task-lifecycle-terminal
 title: superseded 建模为 task lifecycle 终态（人裁定 B）+ 迁移 18 条 + 修 VALID_STATUSES 破损
-status: todo
+status: ready
 labels:
   - gap
   - defect
