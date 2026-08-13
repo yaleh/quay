@@ -1129,13 +1129,19 @@ meta-cc 查时间戳；按 C17 给「上次 ScheduleWakeup 时刻」造机械可
 「没货可派」与「有货不派」（判据②）；**结束不变式**（AC2）：一轮 tick 不得在
 `should_refill ∧ slots_free>0 ∧ dispatchable_disjoint>0 ∧ no_refill_reason 为空` 下结束——要么继续派发到
 其中一项为假，要么写出 no_refill_reason；外层 `inner-wakeup-heartbeat-check.ts` 对该形状报
-「结束不变式违例」（AC4 负控制：04:02:52Z 真实心跳回放必须报红）。**写命令（重排后立即跑，用写入方脚本，
-不手搓 python）**：
+「结束不变式违例」（AC4 负控制：04:02:52Z 真实心跳回放必须报红）。**结构性闸
+（`gap-ac53-end-invariant-gate` AC1/AC2）**：写入方在写结束心跳前**用直接量重跑 slot-refill**
+（`--in-flight` = 本会话在飞集合，必填；不读心跳自述）判结束不变式——若直接量说
+`should_refill=true`（有空槽 + 有可派 + 无机制理由不派）⇒ **写入方拒绝心跳、exit 非 0**
+（reason=end-invariant-violated）⇒ **本 tick 不得 `ScheduleWakeup` 睡，回步骤 4 派发——无合法
+退出路径**（第 7 次同形证明记录 reason 拦不住，结构性拒绝才拦得住）。**写命令（重排前先跑，用写入方
+脚本，不手搓 python）**：
 
 ```bash
 node --no-warnings --experimental-strip-types plugin/scripts/inner-wakeup-heartbeat.ts \
   --blocked '[]' --run-ids '["<run-id>"]' \
   --effective-cap 3 --agent-dispatches 1 --budget-hit false \
+  --in-flight '<id1,id2>' \
   --delay-seconds 1500 \
   --slots-free <n> --dispatchable-disjoint <n> --pool <n> \
   --should-refill <true|false> --no-refill-reason '<reason 或 null>' \
