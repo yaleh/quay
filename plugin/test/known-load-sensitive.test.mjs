@@ -104,7 +104,7 @@ test("AC2 — a mid-sentence prose mention of KNOWN-LOAD-SENSITIVE is NOT a head
 });
 
 // ── real repo family manifest (AC1/AC2) ─────────────────────────────────────────────────────────────
-test("AC1 — the real family manifest is non-empty and covers both root-cause kinds", () => {
+test("AC1 — the real family manifest is non-empty and covers ≥2 root-cause kinds (no hardcoded count)", () => {
   const family = scanFamily(REPO_ROOT);
   assert.ok(family.length >= 2, `family must be non-empty; got ${family.length}`);
   const kinds = new Set(family.map((m) => m.kind));
