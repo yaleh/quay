@@ -25,15 +25,17 @@
 // Invariant (Contract): fork_baseline_is_dependency = 1 — the decision is mechanical, never a
 // judgment call.
 //
-// UNIFIED FORK SOURCE (gap-task-file-develop-integration-drift-fan-in-conflicts, AC2): the
-// task-file-drift ruling says the task worktree fork source is the EFFECTIVE LINE — the
-// integration ref (`--integration`), matching the fan-in target — NOT the develop-vs-integration
-// dependency decision. `--force-integration` makes the CLI output the integration ref
-// unconditionally (reason: "fork 源统一 = integration HEAD"). The dependency decision remains the
-// DEFAULT (backward compatible for single-line downstreams and the branch-model tests); the
-// tick docs pass `--force-integration` so quay's own dispatch forks every task worktree from
-// integration HEAD, eliminating the "fork 落后 integration" drift that made task-file evidence
-// segments rebase-conflict. Contract invariant: fork_source_integration = 1.
+// RETIRED UNIFIED FORK SOURCE (gap-worktree-fork-baseline-always-integration): the previous
+// `--force-integration` mode (gap-task-file-develop-integration-drift-fan-in-conflicts, AC2) made
+// the CLI output the integration ref unconditionally — quay's own dispatch forked every task
+// worktree from integration HEAD to match the fan-in target. Under the per-task-suite-verification
+// model (human directive ② + orchestration/SPEC-per-task-suite-verification-2026-08-13.md §14/§15.4)
+// the worktree fork baseline is develop again: 建立基线 = `$FORK_BASELINE`, dependencies are
+// serialized by the dispatch gate (A15② PARENT-DONE-IFF-CHILDREN — B waits for A to land on
+// develop, so B forks develop already containing A), and task-file drift is absorbed by the A6
+// rebase-rerun loop (先 rebase 再 merge, 重跑套件 — 人 2026-08-13 裁定④ bought the rerun cost).
+// The dependency-decision default below is retained for single-line downstreams and the
+// branch-model tests; quay's own dispatch no longer passes --force-integration.
 //
 // REF-AWARE OUTPUT (gap-two-layer-loop-tick-docs-hardcode-master-not-wired-to-existing-branch-model,
 // AC6): the decision LABEL is "develop" (independent line) vs "integration" (dependency line), but
@@ -131,21 +133,21 @@ function usage() {
 Usage:
   node --experimental-strip-types fork-baseline.ts --task <tasks/<id>.md>
        [--root <repo>] [--develop <ref>] [--integration <ref>] [--unverified <id1,id2,...>]
-       [--force-integration]
 
   --task                candidate task file (required)
   --root                repo root (default: auto-detected from the task file)
   --develop             develop ref (default: develop) — independent line's fork baseline
   --integration         integration ref (default: integration) — dependency line's fork baseline
   --unverified          explicit comma-separated unverified task ids on integration (testability override)
-  --force-integration   UNIFIED FORK SOURCE (gap-task-file-develop-integration-drift-fan-in-conflicts
-                        AC2): output the integration ref unconditionally — the task worktree always
-                        forks from integration HEAD (the effective line, matching the fan-in target),
-                        eliminating the "fork 落后 integration" task-file drift.
 
 stdout: one line — the CONFIGURED fork baseline (the --develop ref for independent, the --integration
-ref for dependency; both default develop/integration). With --force-integration, always the
---integration ref. Exit 0 on success.
+ref for dependency; both default develop/integration). Exit 0 on success.
+
+NOTE (gap-worktree-fork-baseline-always-integration): --force-integration is RETIRED (exit 2). Under
+the per-task-suite-verification model quay's own dispatch forks every task worktree from $FORK_BASELINE
+(develop); dependencies are serialized by the dispatch gate (A15②) and task-file drift is absorbed by
+the A6 rebase-rerun loop. The dependency-decision default below remains for single-line downstreams
+and the branch-model tests.
 `);
 }
 
@@ -165,7 +167,17 @@ export function main(argv) {
   const developRef = getArgValue(args, "--develop") ?? "develop";
   const integrationRef = getArgValue(args, "--integration") ?? "integration";
   const unverifiedCsv = getArgValue(args, "--unverified");
-  const forceIntegration = args.includes("--force-integration");
+
+  // RETIRED flag (gap-worktree-fork-baseline-always-integration): fail loud rather than silently
+  // ignore a stale call site that still passes --force-integration.
+  if (args.includes("--force-integration")) {
+    process.stderr.write(
+      "fork-baseline: --force-integration is RETIRED (gap-worktree-fork-baseline-always-integration). " +
+      "quay's dispatch now forks from --develop ($FORK_BASELINE); dependencies are serialized by the " +
+      "dispatch gate A15② and task-file drift is absorbed by the A6 rebase-rerun loop.\n",
+    );
+    return 2;
+  }
 
   if (!taskFile) {
     usage();
@@ -174,15 +186,6 @@ export function main(argv) {
   if (!fs.existsSync(taskFile)) {
     process.stderr.write(`fork-baseline: task file not found: ${taskFile}\n`);
     return 2;
-  }
-
-  // UNIFIED FORK SOURCE (AC2, gap-task-file-develop-integration-drift-fan-in-conflicts): the
-  // task-file-drift ruling — every task worktree forks from integration HEAD (the effective line,
-  // matching the fan-in target). No dependency decision; no unverified-overlap scan needed.
-  if (forceIntegration) {
-    process.stdout.write(`${integrationRef}\n`);
-    process.stderr.write(`fork-baseline: fork 源统一 = integration HEAD (${integrationRef}) — task worktree always forks from the fan-in target\n`);
-    return 0;
   }
 
   const root = rootArg

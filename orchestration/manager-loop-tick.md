@@ -394,15 +394,22 @@ git log integration --merges -5 --format='%h %cI %P %s' \
 # b 窗口：integration 是否领先 develop（判据2 前半）
 echo "integration 领先=$(git rev-list --count develop..integration)  develop 领先=$(git rev-list --count integration..develop)"
 
-# c(i) 每次派发都调用 fork-baseline 判定 —— 用 meta-cc 查派发会话的 tool_use
-#      contains="--fork-baseline"，一次派发应有一条
-# c(ii) 【关键，②i-E 类】实参不得为空：看 --overlaps-unverified 后面是不是 ""
-#      2026-08-08 09:3xZ 实测：五次派发全部传空串 ⇒ 该判定路径被调用而永远不生效
-#      ⇒ 判据2 后半仍未达成，缺口 = 把 integration 上未验证任务的 id 真的传进去
+# c(i) 【新模型，gap-worktree-fork-baseline-always-integration】每次派发的 worktree 是否 fork 自
+#      $FORK_BASELINE（develop）—— 旧「每次派发调 fork-baseline 判定」已退役：分叉基线一律 develop，
+#      依赖由派发闸 A15② 串行化。机械判据 = 每个在飞任务分支的 merge-base 存在于 develop（逐条枚举）：
+for b in $(git worktree list --porcelain | awk '/^branch /{print $2}'); do
+  if git merge-base --is-ancestor "$(git merge-base develop "$b")" develop 2>/dev/null; then
+    echo "$b fork-base-on-develop=yes"
+  else
+    echo "$b fork-base-on-develop=NO"
+  fi
+done
+# c(ii) 【已退役】--overlaps-unverified 实参为空的问题随 --force-integration 一并退役——
+#       新模型依赖串行化在派发闸（A15② PARENT-DONE-IFF-CHILDREN），fork 判定不再携带依赖信息。
 
 # d 判据3：有没有为凑窗口造空转任务 —— 看新任务是否有真实缺陷来源
 ```
-**判读**：c(ii) 一旦变为非空且 c(i) 仍成立 ⇒ **判据2 后半达成**，AC19 只剩判据3 的负向确认。
+**判读**：c(i) 全部 `fork-base-on-develop=yes` ⇒ 阶段零验收①达成（在飞 worktree 无 integration 独有提交）。
 **归属**：修法归 outer。manager 只报实测值与它在 AC 里的位置，**不代排、不写任务体**。
 
 ### §1-AC16（第二组，降级但不作废）：**三条巡检项，每轮实跑，不读文件里的旧数字**：

@@ -366,12 +366,15 @@ node --experimental-strip-types plugin/scripts/slot-refill.ts --root "$(pwd)" --
 
 | 线 | 角色 | 谁分叉/合回 |
 |---|---|---|
-| **`develop`** | **已验证基线**（绿） | 独立任务从它分叉；只接受外层 verification-round 的批量 fast-forward 合并（integration→develop） |
-| **`integration`** | **待验证汇入点** | 声明依赖的任务从它分叉；**所有任务合回它**（红窗期照常接收——结构性消除停派） |
+| **`develop`** | **已验证基线**（绿） | **所有任务从它分叉**（新模型一律 develop，`gap-worktree-fork-baseline-always-integration`）；只接受外层 verification-round 的批量 fast-forward 合并（integration→develop） |
+| **`integration`** | **待验证汇入点** | **不再有任务从它分叉**（依赖由派发闸 A15② 串行化）；**所有任务合回它**（红窗期照常接收——结构性消除停派，过渡期） |
 | `master` | 发布线角色**空置**（quay 无发布流程） | 等真有发布授权时再加，语义才实（裁定①） |
 
-- **分叉基线即依赖声明（AC2）**：独立 → develop；声明依赖 / touches 与 integration 未验证任务相交 →
-  integration。机械判定用 `plugin/scripts/integration-branch-model.ts --fork-baseline`（见步骤 4）。
+- **分叉基线（新模型）**：**一律 → develop**（`$FORK_BASELINE`）——per-task 验证下任务直接 fan-in
+  develop，依赖由派发闸 A15② PARENT-DONE-IFF-CHILDREN 串行化（B 等 A 合入 develop 后再派），任务文件
+  漂移由 A6 rebase-重跑循环吸收。旧「声明依赖 / touches 相交 → integration」的 fork 判据**退役**
+  （`--force-integration` 已删除，`fork-baseline.ts` 传它 exit 2）。机械判定现为恒 `$FORK_BASELINE`
+  （见步骤 4；`fork-baseline.ts` 默认路径仅单线下游用）。
 - **合并机制（AC3）**：任务合回 integration（步骤 2，`git merge --no-ff task/<id>`）；外层
   verification-round 验证绿后批量合回 develop（`orchestrator-loop-tick.md` 步骤 1b，`--ff-only` 硬约束）。
 - **命名 = `integration`（AC6）**：gate（与 quay gate 概念打架）/ staging（暗示部署）/ next（表达不出
@@ -461,12 +464,14 @@ bracket`）——**括号在终止/完成同轮闭合，不停留 inProgress**�
 
 | 线 | 角色 | 从哪分叉 | 合到哪 |
 |---|---|---|---|
-| `$FORK_BASELINE`（quay: develop） | 已验证基线（绿，只含通过 verification-round-N 的工作） | 独立任务 | —（只被外层批量合） |
-| `$MERGE_TARGET`（quay: integration） | 待验证汇入点（含未验证前序工作） | 声明依赖前序的任务 | 所有任务合并目标 |
+| `$FORK_BASELINE`（quay: develop） | 已验证基线（绿，只含通过 verification-round-N 的工作） | **所有任务**（新模型一律 develop） | —（只被外层批量合） |
+| `$MERGE_TARGET`（quay: integration） | 待验证汇入点（含未验证前序工作） | **不再有任务从它分叉**（过渡期） | 所有任务合并目标 |
 
-- **分叉基线即依赖声明**（AC2）：独立任务从 `$FORK_BASELINE` 分叉；声明依赖的从 `$MERGE_TARGET` 分叉——
-  机械判定 `plugin/scripts/fork-baseline.ts`（`--develop "$FORK_BASELINE" --integration "$MERGE_TARGET"`；
-  touches 与 `$MERGE_TARGET` 上未验证任务相交 ⇒ `$MERGE_TARGET`）。
+- **分叉基线（新模型，`gap-worktree-fork-baseline-always-integration`）**：**所有任务一律从
+  `$FORK_BASELINE` 分叉**——依赖由派发闸 A15② PARENT-DONE-IFF-CHILDREN 串行化（B 等 A 合入 develop
+  后再派），任务文件漂移由 A6 rebase-重跑循环吸收。旧「touches 与 `$MERGE_TARGET` 上未验证任务相交 ⇒
+  `$MERGE_TARGET`」的 fork 判据与 `--force-integration` 一并退役（`fork-baseline.ts` 传它 exit 2；
+  其默认路径仅单线下游用，`--develop master --integration master` 恒返回 master）。
 - **合并机制**（AC3）：任务合回 `$MERGE_TARGET`（红窗期照常接收——结构性消除停派）；外层
   verification-round-N 批量合 `$MERGE_TARGET`→`$FORK_BASELINE`（fast-forward 无冲突，
   `plugin/scripts/integration-batch-merge.sh --develop "$FORK_BASELINE" --integration "$MERGE_TARGET" --sync --reconcile`）。
@@ -938,22 +943,22 @@ node --no-warnings --experimental-strip-types plugin/scripts/touches-orthogonali
    命中 `outer-inflight occupancy` ⇒ **拒绝派发**，不把 outer 在飞文件列进任务 Touches 的替代是
    在 Proposal 给 outer 改动建议（见下方「核心/loop 文档 outer 独占」）。
 
-4. **分叉基线判定（统一 fork 源，`gap-task-file-develop-integration-drift-fan-in-conflicts` AC2）**：
-   任务 worktree **fork 源统一 = integration HEAD**（生效线，与 fan-in 目标一致）。旧的两线
-   依赖声明（独立 → develop / 依赖 → integration）**不再是 fork 源判据**——任务文件在
-   develop/integration 间漂移（integration 的 fan-in 持续更新任务文件），从 develop fork 会让
-   fork 点永远落后 integration，写证据段的任务 fan-in 必冲突。**统一从 `$MERGE_TARGET` 分叉**
-   （分支名**从配置代入，不字面写死**）：
+4. **分叉基线（新模型，`gap-worktree-fork-baseline-always-integration`）**：任务 worktree **fork 源
+   统一 = `$FORK_BASELINE`（develop HEAD）**——per-task 验证模型下任务直接 fan-in `develop`。
+   旧的 `--force-integration`（统一 integration HEAD，`gap-task-file-develop-integration-drift-fan-in-conflicts`
+   AC2）**已退役**（`fork-baseline.ts` 现在传它 exit 2）——它当初要解的「fork 落后 integration 的
+   任务文件证据段冲突」由 **A6 rebase-重跑循环**吸收：fan-in 前先 `git -C <wt> rebase $FORK_BASELINE`，
+   任务文件漂移就地合并、套件重跑通过再合并（**代价 = rebase 后要重跑套件**，人 2026-08-13 裁定④已同意）。
+   依赖由派发闸 A15② PARENT-DONE-IFF-CHILDREN 串行化——B 等 A 合入 develop 后再派，B fork develop 时
+   已含 A ⇒ **一律 fork 自 develop，无例外**。分支名**从配置代入，不字面写死**：
 
 ```bash
-node --experimental-strip-types plugin/scripts/fork-baseline.ts --task tasks/<id>.md --root "$(pwd)" --develop "$FORK_BASELINE" --integration "$MERGE_TARGET" --force-integration
-# stdout: $MERGE_TARGET（统一 = integration HEAD；--force-integration 强制，无视依赖声明）
+git -C "$REPO_ROOT" worktree add $WORKTREE_ROOT/<slug> -b task/<id> "$FORK_BASELINE"
 ```
 
-   worktree 建立命令**一律取 `$MERGE_TARGET`**：`git worktree add $WORKTREE_ROOT/<slug> -b task/<id> "$MERGE_TARGET"`。
-   **fork 点 = fan-in 目标** ⇒ 任务文件证据段与 integration 上已更新的任务文件不再 rebase 冲突
-   （`fork_source_integration = 1`；Contract 见任务体）。依赖声明语义（`fork_baseline_is_dependency`）
-   保留在 `fork-baseline.ts` 默认路径（单线下游用），quay 自身派发用 `--force-integration` 统一。
+   **fork 点 = fan-in 目标（新模型下 = develop）** ⇒ 任务文件证据段与 develop 上已更新的任务文件由
+   rebase 吸收，不再靠「fork 自 integration」绕开。依赖声明语义（`fork_baseline_is_dependency`）保留
+   在 `fork-baseline.ts` 默认路径（单线下游用）；quay 自身派发不再调它定分叉点。
 
 5. **自身文件授权（self-touch，`gap-closure-could-not-run-in-task-grant-self-touches-for-ac-and-invoke-evidence`）**：
    每个任务的 `## Touches` 必须含**它自己的任务文件** `tasks/<id>.md`——**不带 `(new)` 标注**（带
@@ -996,21 +1001,18 @@ node --experimental-strip-types plugin/scripts/touches-orthogonality-check.ts --
 见 `orchestration/SPEC-cut-the-waiting.md`。同一条消息里发多个 `Agent` 调用拿到的并发是 harness 并发执行，
 不是后台派发）。
 
-**分叉基线（统一 fork 源 = integration HEAD，`gap-task-file-develop-integration-drift-fan-in-conflicts` AC2；
-旧依赖声明语义见 `orchestration/SPEC-branching-model-integration-branch-2026-08-05.md`）**：
+**分叉基线（新模型 = `$FORK_BASELINE`（develop HEAD），`gap-worktree-fork-baseline-always-integration`；
+旧 `--force-integration` 统一 integration 已退役；依赖声明语义见 `fork-baseline.ts` 默认路径）**：
 subagent 用裸 `git worktree add` 自建 `$WORKTREE_ROOT/<slug>`（磁盘，不在 `/tmp`——tmpfs 是内存，
-`worktree_root` 见上）和 `task/<id>` 分支，**分叉点一律 = `$MERGE_TARGET`（integration HEAD）**——
-与 fan-in 目标一致，消除「fork 落后 integration」：
+`worktree_root` 见上）和 `task/<id>` 分支，**分叉点一律 = `$FORK_BASELINE`（develop HEAD）**——
+per-task 验证模型下 fan-in 直连 develop，依赖由派发闸串行化，漂移由 rebase-重跑循环吸收：
 ```bash
-node --no-warnings --experimental-strip-types plugin/scripts/fork-baseline.ts \
-  --task tasks/<id>.md --root "$(pwd)" --develop "$FORK_BASELINE" --integration "$MERGE_TARGET" --force-integration
-# stdout: $MERGE_TARGET（统一；--force-integration 忽略依赖/重叠判定）
-git -C "$REPO_ROOT" worktree add $WORKTREE_ROOT/<slug> -b task/<id> "$MERGE_TARGET"
+git -C "$REPO_ROOT" worktree add $WORKTREE_ROOT/<slug> -b task/<id> "$FORK_BASELINE"
 ```
-- **每个任务 worktree 都从 `$MERGE_TARGET`（integration HEAD）分叉**——任务文件在两条线间漂移
-  （integration 的 fan-in + 外层 status 翻转持续更新任务文件），从 develop fork 的写证据任务
-  fan-in 必撞（实证 2026-08-10：round5-red c3583844 vs 2c1539d7 同文件不同段）。fork 点 = 汇入点
-  后，fork 落后 integration 的冲突形状被消除。
+- **每个任务 worktree 都从 `$FORK_BASELINE`（develop HEAD）分叉**——旧「fork 源统一 = integration」
+  （`--force-integration`）已退役；它当初要解的任务文件证据段冲突（实证 2026-08-10：round5-red
+  c3583844 vs 2c1539d7 同文件不同段）由 **rebase-重跑循环**吸收：fan-in 前先 rebase 新 develop，
+  冲突就地合并、套件重跑通过再合并（**代价 = rebase 后重跑套件**，人 2026-08-13 裁定④已同意）。
 - **写所有权分离（AC3）**：任务文件的 `status:` frontmatter **由 outer 独占**（状态翻转/记录）；
   inner **只追加正文段**（AC 勾选 / Evidence / 记录），**不写 frontmatter**——两层写同一文件的不同
   段，fan-in 不再 add/add。证据追加用 body-only 语义（`task-schema.ts` 的 `appendBodySection`：
