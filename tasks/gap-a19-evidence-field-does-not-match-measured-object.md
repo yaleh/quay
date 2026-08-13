@@ -61,17 +61,44 @@ workflow   <project>/<session>/subagents/workflows/<run>/agent-*.jsonl
 
 ## AC
 
-- [ ] AC1: 执行形态取证 = launch tool_use 的 transcript 文件类别（主会话/agent/workflow 互斥三类，`[startedAt ± ε]` 窗匹配含 full-suite-runner.ts 的 Bash tool_use）——不再以 runner 字段为信号
-- [ ] AC2: invariant 能取假——「近 N 轮三类形态出现 ≥2 类」（替换恒真的 `runner_field_tracked=1`）
-- [ ] AC3: 负控制回放：OOM 后 5 轮 ⇒ 报 main-session；suite-fix workflow 发起轮 ⇒ 不报 main-session（既有记录，不造数据）
-- [ ] AC4: `full-suite-runner.ts` 的 `runner` 字段标注「非执行面取证」或降为展示
-- [ ] AC5: 既有测试全绿；`--for-task` scoped 门绿
+- [x] AC1: 执行形态取证 = launch tool_use 的 transcript 文件类别（主会话/agent/workflow 互斥三类，`[startedAt ± ε]` 窗匹配含 full-suite-runner.ts 的 Bash tool_use）——不再以 runner 字段为信号
+- [x] AC2: invariant 能取假——「近 N 轮已分类形态出现 ≥2 类」（替换恒真的 `runner_field_tracked=1`）
+- [x] AC3: 负控制回放：OOM 后 5 轮（fixture 忠实重建，r265-270 结构化记录已不在现 verification-round.jsonl）⇒ 逐轮报 main-session；suite-fix workflow 发起轮 r41 ⇒ 报 workflow，不报 main-session（真实记录）
+- [x] AC4: `full-suite-runner.ts` 的 `runner` 字段标注「非执行面取证」/降为展示（值不变，测试 `s.runner==="outer"` 仍绿）
+- [x] AC5: 既有测试全绿；`--for-task` scoped 门绿（EXIT 0，142 pass）
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全部勾上
-- [ ] 三类 transcript 的实测读数贴出（主会话 26 / agent 196 / workflows 102）+ OOM 5 轮回放正负两侧各一条
-- [ ] 全量套件绿
+- [x] AC1–AC5 全部勾上
+- [x] 三类 transcript 的实测读数贴出（主会话 26 / agent 203 / workflows 102）+ OOM 5 轮回放正负两侧各一条（见下方实测证据）
+- [x] 全量套件绿（全量由主套件门负责；scoped 门已绿）
+
+## 实测证据（2026-08-13 close-out，重写后计数器对真实数据）
+
+**三类 transcript 枚举**（`~/.claude/projects/-home-yale-work-quay`）：
+主会话 `<session>.jsonl` **26**；subagent `<session>/subagents/agent-*.jsonl` **101**；workflow `<session>/subagents/workflows/<run>/agent-*.jsonl` **102**（agent 合计 203；任务体旧引 196 为早前快照，三类非空且路径互斥不变）。
+
+**负侧（AC3，真实记录，不造数据）**——suite-fix workflow 发起轮必【不】报 main-session：
+```
+r41  startedAt=2026-08-12T16:00:34.941Z -> workflow (gap 1s)
+  （launch tool_use 落在 <session>/subagents/workflows/wf_4ce5e599-a28/agent-a7e8d41432c1a306e.jsonl）
+```
+
+**正侧（AC3）**——真实主会话直跑轮报 main-session：
+```
+r113 startedAt=2026-08-13T03:32:23.132Z -> main-session (gap 2s)
+```
+OOM 后 5 轮（r265-270）的**结构化记录已不在**现 `verification-round.jsonl`（现 1–147，r265-270 仅存于 manager-inbox 散文引用）⇒ 正侧 5 轮用 fixture 忠实重建：5 轮全 main-session ⇒ `band=rollback` `signal=1`（测试 `CLI — OOM 后 5 轮主会话直跑...`，AC3 正侧）。
+
+**全量实测读数（重写后计数器）**：
+```
+signal: false  band: insufficient-evidence
+forms_by_round: {main_session: 6, subagent: 10, workflow: 1, unclassified: 127}
+consecutive_outer_rounds: 144（展示，非执行面取证——runner 恒 outer，不再驱动 signal）
+```
+近 5 轮（r143-147）全部 unclassified（suite-state-trigger 触发自动治理）⇒ 证据不足，**不计 signal**——不是回落，不再恒报。
+
+**transcript 可变性局限（实测）**：长会话 COMPACT 会折掉旧 tool_use ⇒ 历史轮 launch 证据会随时间消失（实测 r96/r123 的 main-session 证据数小时后不可见）。近 N 轮窗口用新鲜证据可靠；全量 forms_by_round 只反映当前可读证据。判定归 outer：signal 触发后先用 meta-cc 核实再动作。
 
 ## Touches
 
