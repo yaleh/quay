@@ -1105,6 +1105,7 @@ verify_referenced_landed() {
         continue   # fresh read confirms the declaration exists — the snapshot was transiently incomplete
       fi
       echo "  FAIL (referenced-not-landed): $r — referenced by a shipped skill/tick doc but not laid down and not declared in init/SKILL.md" >&2
+      echo "       Fix: add \"<!-- reference-doc: $r -->\" (or \"<!-- self-create: $r -->\" if the loop lays it down) to plugin/skills/init/SKILL.md, or fix the doc's path to a file the loop actually lays down" >&2
       missing=1
     fi
   done

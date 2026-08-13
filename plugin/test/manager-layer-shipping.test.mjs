@@ -108,7 +108,7 @@ test('AC6 — the manager SKILL indexes every on-disk orchestration/SPEC-*.md (i
   assert.ok(specs.length >= 11, `expected ≥11 SPEC files, got ${specs.length}: ${JSON.stringify(specs)}`);
   const src = fs.readFileSync(MANAGER_SKILL, 'utf8');
   for (const spec of specs) {
-    assert.ok(src.includes(spec), `manager SKILL must index ${spec} as a methodology source (AC6)`);
+    assert.ok(src.includes(spec), `manager SKILL must index ${spec} as a methodology source (AC6) — add "${spec}" to the SPEC index section of ${MANAGER_SKILL}`);
   }
   assert.match(src, /不批量|逐个按需/, 'the index must state SPECs are not batch-crystallized (AC6)');
 });
