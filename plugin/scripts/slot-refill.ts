@@ -81,6 +81,11 @@ import {
   analyzeTasks,
   POOL_FLOOR_MULT_DEFAULT,
   readGitRevCount,
+  // SUPERSEDED GUARD (gap-ac46-superseded-keyword-vs-marker): the pool/step-4 superseded filter must
+  // match the **SUPERSEDED** MARKER, not the bare word — a task merely DISCUSSING the superseded
+  // category (e.g. naming the `superseded-capability` checker) is NOT a superseded task and must stay
+  // dispatchable. Reused from ready-pool-check's marker regex (single source, no parallel copy).
+  SUPERSEDED_MARKER_RE,
   // MERGE-WORKTREE SURFACE (tasks/gap-dispatch-gate-blind-to-inflight-merge-worktree): the
   // merge-in-flight detector + its touches-overlap judge. The dispatch gate's touches-overlap
   // judgment must include in-flight MERGE worktrees' conflict surfaces (the vhs-merge accident:
@@ -595,8 +600,12 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
       // whose body carries the SUPERSEDED marker (implementation premise deleted by a human ruling)
       // must never be recommended for dispatch — recommending it keeps `recommended` non-empty while
       // nothing is actually dispatchable (dispatchable_disjoint becomes a false reading). Same
-      // principle as not-yet-flipped: the marker is the mechanism's signal.
-      if (/SUPERSEDED/i.test(text)) { defer(id, "superseded"); continue; }
+      // principle as not-yet-flipped: the marker is the mechanism's signal. Position-based
+      // (gap-ac46-superseded-keyword-vs-marker, 2026-08-13): only the bold **SUPERSEDED** MARKER
+      // matches — a task merely DISCUSSING the superseded category (e.g. the AC5 sample
+      // gap-slot-refill-clique-ignores-landed-touches, whose body names `superseded-capability`) stays
+      // dispatchable.
+      if (SUPERSEDED_MARKER_RE.test(text)) { defer(id, "superseded"); continue; }
       // INJECTED DISPATCH GATE (optional): any additional per-candidate check the caller wants to
       // enforce (default none). A rejected candidate (ok:false) is skipped and the loop continues →
       // BACKFILL from later-in-sort candidates, exactly like the built-in step-4 gates — a rejected

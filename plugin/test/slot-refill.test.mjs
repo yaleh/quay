@@ -561,6 +561,25 @@ test("DEFER — slot-refill exposes deferred candidates with reasons (touches-ov
   for (const d of r.deferred) assert.ok(!r.recommended.includes(d.id), `deferred ${d.id} must not be recommended`);
 });
 
+test("SUPERSEDED FILTER — marker-form only: a ready task CARRYING **SUPERSEDED** is deferred; one DISCUSSING the word is recommended (AC46 marker fix)", (t) => {
+  const root = makeWorkspace("superseded-filter");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // Marker-form: the outer retreat writes `> **SUPERSEDED / 作废** …` — must be deferred.
+  writeTask(root, "gap-marker", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/marker.ts (new)"], "\n> **SUPERSEDED / 作废** premise deleted by a human ruling.\n") });
+  // Discussion-only: the body names the `superseded-capability` checker — before the fix the bare
+  // /SUPERSEDED/i regex matched this and wrongly deferred the task (gap-slot-refill-clique-ignores-
+  // landed-touches real-world sample). Must stay dispatchable.
+  writeTask(root, "gap-discusses", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/discusses.ts (new)"], "\nThe superseded-capability checker runs in the full-suite gate.\n") });
+  writeTask(root, "gap-clean", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/clean.ts (new)"]) });
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 5 });
+  const byId = Object.fromEntries((r.deferred || []).map((d) => [d.id, d.reason]));
+  assert.ok(/superseded/.test(byId["gap-marker"] || ""), `marker-carrying task deferred as superseded, got: ${byId["gap-marker"]}`);
+  assert.ok(!(byId["gap-discusses"] || "").includes("superseded"), "discussion-only task NOT deferred as superseded");
+  assert.ok(r.recommended.includes("gap-discusses"), "discussion-only task is recommended");
+  assert.ok(r.recommended.includes("gap-clean"), "clean task is recommended");
+  assert.ok(!r.recommended.includes("gap-marker"), "marker-carrying task never recommended");
+});
+
 // ── AC7: idempotence — pure, no writes, same inputs ⇒ identical output ─────────────────────────────
 
 test("analyzeSlotRefill is a pure reader: same inputs ⇒ deep-equal output, no store mutation (AC7)", (t) => {

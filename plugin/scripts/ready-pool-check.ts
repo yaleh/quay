@@ -151,6 +151,11 @@ import {
   parseTouches,
   checkTouchesPair,
   walkFiles,
+  // AC1 (gap-ac46-pool-criteria-in-gate): the C8 self-touch judge (the dispatch gate's per-candidate
+  // "own tasks/<id>.md in ## Touches without (new)" check) — now ALSO gates todo→ready promotion, so
+  // a candidate lacking its self-touch is rejected at the gate, not deferred after entering the pool.
+  // Reused from slot-refill's step-4 (single source, no parallel copy).
+  selfTouchCheck,
 } from "./touches-orthogonality-check.ts";
 // The dispatch gate's OWN declared-path expander (single-source — ready-pool-check must not carry a
 // parallel copy of "which files does a Touches declaration intend to touch?").
@@ -222,6 +227,17 @@ export const MIN_SECTION_CHARS = 40;
 /** Task-level PARKED marker: a bold `**PARKED` in the body. Plain-text "PARKED" in AC prose
  *  (e.g. this very task's exclusion-rule description) is NOT a marker — matched only when bolded. */
 export const PARKED_MARKER_RE = /\*\*PARKED\b/i;
+
+/** Task-level SUPERSEDED marker: a LINE-START bold `**SUPERSEDED`, optionally inside a blockquote —
+ *  the outer retreat's `> **SUPERSEDED / 作废（…）**` (verified against the real store: every
+ *  superseded task carries it as the first line of the body, never inline). Plain-text "SUPERSEDED"
+ *  in prose — a task DISCUSSING the superseded category (e.g. naming the `superseded-capability`
+ *  checker, an inline cross-reference to a `**SUPERSEDED by…**` roadmap, or this task body's own
+ *  被取代 column) — is NOT a marker: position-based judgment (hard-rule ②), mirroring
+ *  PARKED_MARKER_RE. The line-start + optional-blockquote anchor distinguishes the actual marker from
+ *  any inline mention (a mid-sentence `**SUPERSEDED**` documenting the regex itself must not mark its
+ *  task superseded — the 2026-08-13 self-flagging of this task's own Evidence text). */
+export const SUPERSEDED_MARKER_RE = /^\s*(?:>\s*)?\*\*SUPERSEDED\b/im;
 
 // ── LANDING-BLOCKED signal (tasks/gap-landing-blocked-invisible-to-dispatch-criteria) ───────────────
 // The dispatch criterion (`dispatchable_disjoint >= cap`) answers ONLY "are there ≥cap mutually-
@@ -1393,6 +1409,16 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
   const depsReady = depsReadyFor(task, allTasks);
   const four = artifactsComplete(task.body);
   const parsed = parseTouches(task.body);
+  // AC1 (gap-ac46-pool-criteria-in-gate): the pool-layer static criteria that slot-refill's step-4
+  // used to check AFTER promotion now gate the todo→ready promotion ITSELF — a task is rejected at
+  // the gate (with the blocking reason on the candidate), not deferred after entering the ready pool.
+  // COMPOUND: a `role: compound` aggregate is never leaf dispatchable work (its children are its
+  // implementation — slot-refill step-4 "compound-not-dispatchable"); promoting it would occupy a
+  // pool slot forever. SELF-TOUCH: the dispatch gate's C8 requires the candidate's OWN tasks/<id>.md
+  // in ## Touches without `(new)` (slot-refill step-4 "self-touch-missing-c8"); a candidate lacking
+  // it is rejected at promotion, not dispatched-then-rejected by the inner's A15 gate ⑤.
+  const compound = isCompoundTask(task);
+  const selfTouch = selfTouchCheck(task.body, id);
   // RETIRED-MECHANISM INTERCEPT (AC1/AC2 — gap-ready-pool-promotion-ignores-retired-mechanism-
   // candidate-check): before a todo candidate is promotion-eligible, judge it with the same
   // pool-candidate stale check the strategic-doc-staleness-check CLI exposes (--pool-candidate <id>,
@@ -1407,7 +1433,11 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
   // promoted to ready — the outer retreats such a task to todo, and a promotion mechanism that does
   // not read the marker silently re-promotes it (dispatchable_disjoint stays a false reading).
   // Same principle as retiredMechanism: the marker is the mechanism's signal, not a verdict to waive.
-  const superseded = /SUPERSEDED/i.test(task.body);
+  // Position-based (hard-rule ②): only the bold MARKER matches — a task merely DISCUSSING the
+  // superseded category (e.g. naming the `superseded-capability` checker) is NOT excluded
+  // (gap-ac46-superseded-keyword-vs-marker, 2026-08-13 — AC5 sample gap-slot-refill-clique-ignores-
+  // landed-touches was wrongly blocked by the bare word).
+  const superseded = SUPERSEDED_MARKER_RE.test(task.body);
   // AC1 (gap-delivery-critical-label-at-promote-not-after-dispatch): the candidate's delivery-critical
   // status, read from its OWN frontmatter labels (parseTask — the SAME single source the dispatch
   // sort reads via parseCandidate in concurrent-batch-scheduler.ts). The promote gate determines it
@@ -1458,6 +1488,12 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
     // SUPERSEDED guard — a task whose body carries the SUPERSEDED marker is never
     // promotion-eligible (outer retreat + mechanism would re-promote it otherwise).
     superseded,
+    // AC1 (gap-ac46-pool-criteria-in-gate): the pool-layer static criteria now gate promotion.
+    // COMPOUND — a `role: compound` aggregate is never leaf dispatchable work; SELF-TOUCH — the
+    // dispatch gate's C8 own-file grant. Carried on the candidate so the blocking reason is visible
+    // in the `candidates` output (AC1: 给出阻碍原因, not a silent skip).
+    compound,
+    selfTouchOk: selfTouch.ok,
     // PROSE-PREREQUISITE GAP (AC3): prose-declared prereqs with no relation edge — never eligible.
     prosePrereqGap: prosePrereqGapIds,
     // AC5: the touchesResolve guard is KEPT — majority-missing candidates are never eligible.
@@ -1467,7 +1503,9 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
     // edge is never eligible (promotion would put an invisible dependency into the ready pool).
     // SUPERSEDED guard (2026-08-11): a candidate carrying the SUPERSEDED marker is never eligible —
     // its implementation premise is deleted by a human ruling (gap-send-keys-verified retreat).
-    eligible: depsReady && four.complete && touchesResolve && !retiredMechanism && !superseded && prosePrereqGapIds.length === 0,
+    // AC1 (2026-08-13): the compound + self-touch guards are ADDED — slot-refill's step-4 defers now
+    // gate promotion, so a task is rejected before ready instead of deferred after (判据1).
+    eligible: depsReady && four.complete && touchesResolve && !retiredMechanism && !superseded && prosePrereqGapIds.length === 0 && !compound && selfTouch.ok,
   };
 }
 
@@ -1504,7 +1542,10 @@ export function buildTargetedPromotion(id, task, root, allTasks) {
   // ruling must not be promoted by an outer stage-goal selection either — a task like
   // gap-split-decision-finality-not-enforced (superseded 2026-08-12) would otherwise become
   // targeted-promotable once its backticked retired-script mentions are correctly read as quotes.
-  if (/SUPERSEDED/i.test(task.body)) {
+  // Position-based (gap-ac46-superseded-keyword-vs-marker, 2026-08-13): only the bold MARKER matches —
+  // a task merely DISCUSSING the superseded category is NOT excluded (the AC5 sample
+  // gap-slot-refill-clique-ignores-landed-touches names `superseded-capability` and must ADMIT).
+  if (SUPERSEDED_MARKER_RE.test(task.body)) {
     return {
       id,
       found: true,
@@ -1513,6 +1554,35 @@ export function buildTargetedPromotion(id, task, root, allTasks) {
       floor_independent: true,
       reason: `superseded: ${id} carries the SUPERSEDED marker (premise deleted by a human ruling) — not promotable`,
       checks: { superseded: true },
+    };
+  }
+  // AC1 (gap-ac46-pool-criteria-in-gate): the pool-layer static criteria gate TARGETED promotion too
+  // (判据1 — 原 pool 层的全部静态判据移入 todo→ready 提升闸; targeted is the floor-independent second
+  // promotion path, so the SAME static gates apply). COMPOUND: a `role: compound` aggregate is never
+  // leaf dispatchable work (slot-refill step-4 "compound-not-dispatchable"). SELF-TOUCH: the dispatch
+  // gate's C8 own-file grant (slot-refill step-4 "self-touch-missing-c8").
+  const compound = isCompoundTask(task);
+  const selfTouch = selfTouchCheck(task.body, id);
+  if (compound) {
+    return {
+      id,
+      found: true,
+      status: task.status,
+      eligible: false,
+      floor_independent: true,
+      reason: `compound: ${id} is a role:compound aggregate — never leaf dispatchable work, not promotable`,
+      checks: { compound: true },
+    };
+  }
+  if (!selfTouch.ok) {
+    return {
+      id,
+      found: true,
+      status: task.status,
+      eligible: false,
+      floor_independent: true,
+      reason: `self-touch: ${id} lacks its own tasks/${id}.md in ## Touches (C8) — not promotable`,
+      checks: { selfTouchOk: false },
     };
   }
   // RETIRED-MECHANISM INTERCEPT (gap-ready-pool-promotion-ignores-retired-mechanism-candidate-check):
@@ -1538,7 +1608,7 @@ export function buildTargetedPromotion(id, task, root, allTasks) {
   // PROSE-PREREQUISITE GAP (AC3): targeted promotion must NOT advance a task whose prose-declared
   // prereqs have no relation edge — same fail-closed as the bulk path.
   const prosePrereqGapIds = prosePrereqGap(task.body, task.frontmatterRaw, path.join(root, "tasks"));
-  const eligible = four.complete && depsReady && touchesResolve && prosePrereqGapIds.length === 0;
+  const eligible = four.complete && depsReady && touchesResolve && prosePrereqGapIds.length === 0 && !compound && selfTouch.ok;
   const checks = {
     fourArtifacts: four.complete,
     missingArtifacts: four.missing,
@@ -1549,6 +1619,8 @@ export function buildTargetedPromotion(id, task, root, allTasks) {
     notParked: true,
     superseded: false,
     retiredMechanism: false,
+    compound,
+    selfTouchOk: selfTouch.ok,
   };
   return {
     id,
@@ -1694,6 +1766,34 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
   ready.sort();
   excluded.sort((a, b) => a.id.localeCompare(b.id));
 
+  // ── REVALUATION (AC46 判据3 / AC2 — gap-ac46-pool-criteria-in-gate-plus-revaluation-executor):
+  // re-run the promotion-gate's static conditions on the DISPATCHABLE ready pool (`ready` — already
+  // excludes fixture/parked/ac-record/not-yet-flipped/prose-prereq, the classes that are NOT retreats).
+  // The static conditions DECAY after promotion (superseded marker lands, ## Touches files get deleted,
+  // self-touch goes missing, a dependency is reopened, a role:compound task was promoted by mistake).
+  // A decayed condition ⇒ `destination: "todo"` — the legal `ready.back="todo"` transition
+  // (lifecycle.ts TRANSITIONS) that the revaluation EXECUTOR applies (`applyRevaluations`). Each entry
+  // carries grep-able `reasons` (判据2's 阻碍原因 + 去向). NOT-yet-flipped / landed-implementation are
+  // DONE-flips (work already landed — the fan-in flips them), never retreats — so they are excluded
+  // here by construction (they are in `excluded`, not `ready`).
+  const revaluation = [];
+  for (const id of ready) {
+    const task = allTasks.get(id);
+    if (!task) continue;
+    const reasons = [];
+    if (SUPERSEDED_MARKER_RE.test(task.body)) reasons.push("superseded");
+    if (isCompoundTask(task)) reasons.push("compound-not-dispatchable");
+    const st = selfTouchCheck(task.body, id);
+    if (!st.ok && !st.compound) reasons.push("self-touch-missing-c8");
+    if (checkTaskTouchesResolve(task.body, root).majorityMissing) reasons.push("touches-majority-missing");
+    if (!depsReadyFor(task, allTasks)) reasons.push("deps-not-ready");
+    const fourR = artifactsComplete(task.body);
+    if (!fourR.complete) reasons.push(`four-artifacts-incomplete (${fourR.missing.join(",")})`);
+    if (reasons.length > 0) {
+      revaluation.push({ id, reasons, destination: "todo" });
+    }
+  }
+
   // ── SUITE-BLOCKING signal (gap-ready-relevance-blind-to-suite-blocking-signal AC2/AC3/AC4).
   // Read the consecutive-red window from verification-round.jsonl (+ the latest full-suite-state.json
   // failures[]) and map it onto task ids via declared ## Touches expansion. The ONE tree walk is
@@ -1814,6 +1914,12 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
       if (c.retiredMechanism) {
         intercepted.push({ id: c.id, reason: "retired-mechanism", refs: c.retiredRefs });
       }
+      // AC1 (gap-ac46-pool-criteria-in-gate): the compound/self-touch gate rejections are recorded in
+      // `intercepted` too (with the blocking reason) so a promotion that does NOT happen is a traceable
+      // decision, not a silent skip — the same discipline as the retired-mechanism intercept.
+      if (c.superseded) intercepted.push({ id: c.id, reason: "superseded" });
+      if (c.compound) intercepted.push({ id: c.id, reason: "compound-not-dispatchable" });
+      if (!c.selfTouchOk) intercepted.push({ id: c.id, reason: "self-touch-missing-c8" });
     }
     for (const c of candidates) {
       if (promotions.length >= deficit) break;
@@ -1829,7 +1935,9 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
           `${c.kind}-* candidate · disjoint ${c.disjointScore}/${poolParsed.length + inFlightParsed.length} · ` +
           `deps ${c.depsReady ? "ready" : "NOT-ready"} · ` +
           `touches ${c.touchesResolve ? "resolve" : "MISSING"} · ` +
-          `four-artifacts ${c.fourArtifacts ? "complete" : `INCOMPLETE (${c.missingArtifacts.join(",")})`}`,
+          `four-artifacts ${c.fourArtifacts ? "complete" : `INCOMPLETE (${c.missingArtifacts.join(",")})`}` +
+          (c.compound ? " · compound-NOT-dispatchable" : "") +
+          (c.selfTouchOk ? "" : " · self-touch-MISSING"),
       });
     }
   }
@@ -1908,6 +2016,13 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
     candidates,
     promotions,
     intercepted,
+    // REVALUATION (AC46 判据3 / AC2 — gap-ac46-pool-criteria-in-gate-plus-revaluation-executor): the
+    // ready tasks whose static conditions have decayed, each with grep-able `reasons` + a
+    // `destination: "todo"` (the legal ready.back="todo" transition). The revaluation EXECUTOR
+    // (`applyRevaluations`) writes the retreats; this detector makes "no silent stay in pool" a
+    // mechanically readable fact (判据2: 产出是「修好后晋级」或「明确的阻碍原因 + 去向」).
+    revaluation,
+    revaluation_count: revaluation.length,
     top_relevance,
     scanned: allTasks.size,
     top_relevance: topRelevance,
@@ -2029,9 +2144,54 @@ export function applyPromotions(opts) {
   return { ...result, should_apply: shouldApply, applied_promotions: applied };
 }
 
+/** REVALUATION WRITE (AC46 判据3 / AC2 — gap-ac46-pool-criteria-in-gate-plus-revaluation-executor):
+ *  write `status: ready → todo` (the legal `ready.back="todo"` transition, lifecycle.ts TRANSITIONS —
+ *  the missing EXECUTOR the task body names) for a ready task whose static conditions have decayed.
+ *  Appends a `## Revaluation` record to the task body — the grep-able 阻碍原因 + 去向 (判据2's
+ *  product: `grep -n "## Revaluation" tasks/<id>.md` + the reason line), so the retreat is an audit
+ *  surface, never a silent status flip. Returns { id, ok, from, to, reasons, record }. A task already
+ *  at/after todo (or missing) fails closed with reason, never overwrites. */
+export function retreatReadyToTodo(root, id, reasons = []) {
+  const file = path.join(root, "tasks", `${id}.md`);
+  if (!fs.existsSync(file)) return { id, ok: false, reason: "missing" };
+  const raw = fs.readFileSync(file, "utf8");
+  const m = /^(---\r?\n)([\s\S]*?)(\r?\n---)/.exec(raw);
+  if (!m) return { id, ok: false, reason: "no-frontmatter" };
+  const [, open, fm, close] = m;
+  if (!/^status:\s*ready\s*$/m.test(fm)) return { id, ok: false, reason: "not-ready" };
+  const newFm = fm.replace(/^status:\s*ready\s*$/m, "status: todo");
+  const body = raw.slice(m[0].length);
+  const record =
+    `\n## Revaluation\n\n**执行 ${new Date().toISOString()} — 静态条件变质，ready.back="todo"**\n\n` +
+    `- 去向：ready → todo\n- 阻碍原因：${reasons.join(", ")}\n`;
+  fs.writeFileSync(file, `${open}${newFm}${close}${body}${record}`);
+  return { id, ok: true, from: "ready", to: "todo", reasons, record };
+}
+
+/** REVALUATION EXECUTOR (AC46 判据3 / AC2 — gap-ac46-pool-criteria-in-gate-plus-revaluation-executor):
+ *  the `ready.back="todo"` automatic caller. Runs the same analysis as `analyzeTasks` (whose output
+ *  now ALWAYS carries the `revaluation` detector — the ready tasks whose static conditions decayed)
+ *  and, when `revaluation` is non-empty, WRITES the retreats (status ready → todo + a `## Revaluation`
+ *  body record per task). Returns the full analyzeTasks result plus `should_revaluate` and
+ *  `applied_revaluations`. Purely additive: the detector output is identical to analyzeTasks; the
+ *  write only happens under this executor. The 署名退出条件 (task body DoD): this is a TRANSITIONAL
+ *  facility — once per-task full-suite verification becomes the default certification (inner flips
+ *  done in its own tree), this executor retires (the revaluation detector stays as a report). */
+export function applyRevaluations(opts) {
+  const result = analyzeTasks(opts);
+  const applied = [];
+  if (result.revaluation.length > 0) {
+    for (const r of result.revaluation) {
+      applied.push(retreatReadyToTodo(opts.root, r.id, r.reasons));
+    }
+  }
+  return { ...result, should_revaluate: result.revaluation.length > 0, applied_revaluations: applied };
+}
+
 function main(argv) {
   let root = null;
   let apply = false;
+  let revaluateApply = false; // REVALUATION EXECUTOR (AC46 判据3/AC2): --revaluate-apply
   let cap = CONCURRENCY_CAP_DEFAULT;
   let floorMult = POOL_FLOOR_MULT_DEFAULT;
   let floorCap = undefined; // gap-ready-pool-floor-tied-to-volatile-cap: when set, floor = max(cap, floorCap)×mult (never drops under load)
@@ -2050,6 +2210,7 @@ function main(argv) {
     if (args[i] === "--root") root = args[++i];
     else if (args[i] === "--json") { /* output is always JSON — accepted for Contract parity */ }
     else if (args[i] === "--apply") { apply = true; } // heartbeat mode: land the promotions on disk
+    else if (args[i] === "--revaluate-apply") { revaluateApply = true; } // REVALUATION EXECUTOR (AC46 判据3/AC2): write ready→todo for decayed ready tasks
     else if (args[i] === "--cap") cap = Number(args[++i]);
     else if (args[i] === "--floor-mult") floorMult = Number(args[++i]);
     else if (args[i] === "--floor-cap") floorCap = Number(args[++i]); // gap-ready-pool-floor-tied-to-volatile-cap: window-max cap for the floor
@@ -2097,7 +2258,15 @@ function main(argv) {
   // HEARTBEAT MODE (gap-ready-pool-promotion-same-class-as-slot-refill): with `--apply`, pool < floor
   // && promotions non-empty ⇒ the recommended promotions are written to disk (status todo → ready) as
   // a side effect of the unconditional tick-heartbeat run. Without it, this stays a pure detector.
-  const result = apply ? applyPromotions(base) : analyzeTasks(base);
+  // REVALUATION EXECUTOR (AC46 判据3/AC2): `--revaluate-apply` runs the SAME analysis (whose output
+  // always carries the `revaluation` detector) and additionally writes the decayed ready tasks back to
+  // todo (status ready → todo + a `## Revaluation` body record per task) — the automatic caller of the
+  // legal `ready.back="todo"` transition the task body names. The detector half is always in the JSON;
+  // this flag is the write half. Precedence: --revaluate-apply over --apply (a single run either
+  // promotes OR revalues, never both mid-flight).
+  let result;
+  if (revaluateApply) result = applyRevaluations(base);
+  else result = apply ? applyPromotions(base) : analyzeTasks(base);
   if (process.env.CHECKER_COST_SKIP !== "1") {
     recordCheckerCost({ root: rootDir, name: "ready-pool-check", ms: Date.now() - t0, n: result.pool, load: getLoad1() });
   }
