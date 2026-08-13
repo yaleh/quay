@@ -1,7 +1,7 @@
 ---
 id: gap-cli-import-migration-ts-typecheck-regression
 title: cli-import-migration fan-in 引入 tsc 回归（73 错，ctx 类型注解丢失）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -42,17 +42,17 @@ shared 2、task-edit 1、adr 1（adr.ts:45 是 `FileHandle` overload 单独问�
 
 ## AC
 
-- [ ] AC1: `npx tsc --noEmit -p tsconfig.json` 0 错误（73 → 0）
-- [ ] AC2: `ts-typecheck-gate.test.mjs` 隔离绿（tsc 门被 scoped 覆盖，round-52 教训）
-- [ ] AC3: 行为不变——`packages/quay/test/cli.test.mjs` golden-replay 未退化
-- [ ] AC4: `scripts/test.sh --for-task gap-cli-import-migration-ts-typecheck-regression` scoped 绿
+- [x] AC1: `npx tsc --noEmit -p tsconfig.json` 0 错误（73 → 0）
+- [x] AC2: `ts-typecheck-gate.test.mjs` 隔离绿（tsc 门被 scoped 覆盖，round-52 教训）
+- [x] AC3: 行为不变——`packages/quay/test/cli.test.mjs` golden-replay 未退化
+- [x] AC4: `scripts/test.sh --for-task gap-cli-import-migration-ts-typecheck-regression` scoped 绿
 
 ## Definition of Done
 
-- [ ] AC1–AC4 全部勾上
-- [ ] tsc 错误数 before/after 记录（73 → 0）
-- [ ] scoped 门 + ts-typecheck-gate 隔离绿
-- [ ] 只提交本任务改动的文件到 `task/gap-cli-import-migration-ts-typecheck-regression` 分支
+- [x] AC1–AC4 全部勾上
+- [x] tsc 错误数 before/after 记录（73 → 0）
+- [x] scoped 门 + ts-typecheck-gate 隔离绿
+- [x] 只提交本任务改动的文件到 `task/gap-cli-import-migration-ts-typecheck-regression` 分支
 
 ## Touches
 
