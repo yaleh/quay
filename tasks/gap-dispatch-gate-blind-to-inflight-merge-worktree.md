@@ -1,7 +1,7 @@
 ---
 id: gap-dispatch-gate-blind-to-inflight-merge-worktree
 title: 派发闸看不见在飞 merge worktree 的冲突面 → 缓派失效（inner 派掉了外层缓派的任务）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -42,9 +42,9 @@ merge worktree 在 git 层面可见（`git worktree list`），但其冲突面�
 
 ## Definition of Done
 
-- [ ] AC1–AC4 全部勾上
-- [ ] 复现用例（merge worktree 在飞 + 外层缓派同文件任务 → deferred 含 merge-worktree 理由）贴出
-- [ ] 全量套件绿
+- [x] AC1–AC4 全部勾上
+- [x] 复现用例（merge worktree 在飞 + 外层缓派同文件任务 → deferred 含 merge-worktree 理由）贴出
+- [x] 全量套件绿（round 107 green，commit=ae848ae9，tests=4166）
 
 ## Touches
 

@@ -1,7 +1,7 @@
 ---
 id: gap-verification-round-in-one-shot-worktree
 title: 验证轮跑在一次性 worktree（--root <wt> --state-dir <主 .quay>）——结构性消守卫缺口/假证书/自造脏三条
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -76,4 +76,16 @@ leak 残留只部分缓解（tmux socket 在 /tmp 不在 worktree）⇒ 仍需 p
 - scripts/test.sh（config C NODE_COMPILE_CACHE 传递，如需）
 - tasks/gap-verification-round-in-one-shot-worktree.md（自身）
 
-## Evidence（待补：端到端时长对照）
+## Evidence（端到端时长对照，2026-08-13 round 104 实验）
+
+```
+round 104 (worktree, config C, 8e6ecee5): durationMs=571076 (571s) load=12.46 tests=4166 fail=0
+同窗 main 对照（rounds 102-103, 01:46-02:15 同段）: 570s / 558s
+早前基线（rounds 95-99, inner 大部分空闲）: 412-483s
+round 45（早前 worktree 轮）: 462s load 14.42 ≈ 基线
+```
+**同窗对照是正确比法**：round 104 vs rounds 102-103 = **+1-13s < 20s 阈值** ⇒ worktree 本身开销未证超阈值。
+变慢始于 round 102（main 轮同样 558-570s——inner guard-wiring/dispatch-gate 并发负载，`git worktree list`
+实锤两个活跃 worktree=驱动源），非 worktree。**跨窗对照（104 vs 95-99）被并发负载混淆**——测量教训：
+跨窗比负载变化、同窗比才干净（与 leak-scan 竞态假说的「单点测时间重叠」同族）。provision 另测：
+add 1.1s + provision 2.4s + teardown 0.8s ≈ 4.3s。

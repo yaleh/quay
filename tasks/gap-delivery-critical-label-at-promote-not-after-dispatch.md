@@ -1,7 +1,7 @@
 ---
 id: gap-delivery-critical-label-at-promote-not-after-dispatch
 title: delivery-critical 标签在派发后才打 ⇒ AC36 排序轴永不被行使（标签应在 todo→ready 晋级时确定 + 判据语义修正）
-status: todo
+status: ready
 labels:
   - gap
   - defect

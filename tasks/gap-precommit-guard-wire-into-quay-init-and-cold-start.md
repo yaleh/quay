@@ -1,7 +1,7 @@
 ---
 id: gap-precommit-guard-wire-into-quay-init-and-cold-start
 title: pre-commit 守卫接进 quay-init --loop 铺设集 + cold-start 步骤（新目标自动带上 + 冷启动自动装，建成≠生效）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -36,9 +36,9 @@ extra:
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全部勾上
-- [ ] 真实拒绝记录贴出（见 Evidence）
-- [ ] 全量套件绿
+- [x] AC1–AC5 全部勾上
+- [x] 真实拒绝记录贴出（见 Evidence）
+- [x] 全量套件绿（round 107 green，commit=ae848ae9，tests=4166）
 
 ## Touches
 
