@@ -152,6 +152,10 @@ export interface ResourceReadings {
   cpuSomeAvg10: string;
   load1: string;
   nodeCount: number;
+  /** comm 字面量精确计数（`node-MainThread`）——双读互校的交叉侧，不是主读数。 */
+  nodeCommLiteral: number;
+  /** 双读互校：comm 字面量恒 0 而 cmdline 见 node 进程 ⇒ 报【仪器故障】（读法坏，非机器空闲）。 */
+  nodeInstrumentFailure: boolean;
   memAvailMb: number;
 }
 
@@ -172,22 +176,12 @@ export function resourceReadings(procRoot = "/proc", selfPid = process.pid): Res
     load1 = "";
   }
 
-  let nodeCount = 0;
-  try {
-    const self = String(selfPid);
-    for (const d of fs.readdirSync(procRoot)) {
-      if (!/^\d+$/.test(d) || d === self) continue;
-      try {
-        // 与 `pgrep -c node` 同语义：comm 是正则匹配（node 进程 comm=node-MainThread），排除自身。
-        const comm = fs.readFileSync(path.join(procRoot, d, "comm"), "utf8").trim();
-        if (/node/.test(comm)) nodeCount++;
-      } catch {
-        /* 进程已退出，跳过 */
-      }
-    }
-  } catch {
-    nodeCount = 0;
-  }
+  // AC1b (gap-manager-tick-readings-constant-zero-instruments)：node 进程数 = cmdline 枚举
+  // （host 无关——comm 字面量读法在本机 Node v24 上恒零，0 vs 真实 50），
+  // 交叉侧 = comm 字面量精确计数（双读互校：comm 恒 0 而 cmdline 见 node ⇒ 报【仪器故障】）。
+  const nodeCount = listNodePids(procRoot, selfPid).length;
+  const nodeCommLiteral = countNodeCommLiteral(procRoot, selfPid);
+  const nodeInstrumentFailure = nodeCommLiteral === 0 && nodeCount > 0;
 
   let memAvailMb = 0;
   try {
@@ -198,7 +192,49 @@ export function resourceReadings(procRoot = "/proc", selfPid = process.pid): Res
     memAvailMb = 0;
   }
 
-  return { cpuSomeAvg10, load1, nodeCount, memAvailMb };
+  return { cpuSomeAvg10, load1, nodeCount, nodeCommLiteral, nodeInstrumentFailure, memAvailMb };
+}
+
+/** 枚举 node 进程 pid：cmdline argv[0] == "node" 或路径以 /node 结尾（host 无关）。
+ *  (gap-manager-tick-readings-constant-zero-instruments) 与 resource-gate.sh 的 list_node_cmdline
+ *  同形态——/proc/<pid>/comm 字面量是宿主/Node 版本相关的（boheidc Node v24 comm=`MainThread`），
+ *  cmdline argv[0] 才是 node 二进制（node / 路径以 /node 结尾），跨宿主稳定。排除自身 pid。 */
+export function listNodePids(procRoot = "/proc", selfPid = process.pid): number[] {
+  const pids: number[] = [];
+  let entries: string[] = [];
+  try {
+    entries = fs.readdirSync(procRoot);
+  } catch {
+    return pids;
+  }
+  for (const d of entries) {
+    if (!/^\d+$/.test(d) || Number(d) === selfPid) continue;
+    const exe = readCmdline(Number(d), procRoot)[0] ?? "";
+    if (exe === "node" || exe.endsWith("/node")) pids.push(Number(d));
+  }
+  return pids;
+}
+
+/** comm 字面量精确计数（`node-MainThread`，旧宿主 Node comm）——仅作双读互校的交叉侧，不是主读数。
+ *  boheidc Node v24 comm=`MainThread` ⇒ 恒 0 而 cmdline 见 node 进程 ⇒ 报【仪器故障】。
+ *  与 resource-gate.sh 的 count_comm_node_mainthread 同形态（读关系，不读硬编码「正确」字面量）。 */
+export function countNodeCommLiteral(procRoot = "/proc", selfPid = process.pid): number {
+  let count = 0;
+  try {
+    const self = String(selfPid);
+    for (const d of fs.readdirSync(procRoot)) {
+      if (!/^\d+$/.test(d) || d === self) continue;
+      try {
+        const comm = fs.readFileSync(path.join(procRoot, d, "comm"), "utf8").trim();
+        if (comm === "node-MainThread") count++;
+      } catch {
+        /* 进程已退出，跳过 */
+      }
+    }
+  } catch {
+    count = 0;
+  }
+  return count;
 }
 
 export interface OuterReading {
@@ -242,11 +278,13 @@ export function truncate(s: string, n: number): string {
 
 /** 各外层最新的那一行 tick 日志（多时代解析，缺陷①修复）。
  *
- *  三个时代/格式：
+ *  四个时代/格式：
  *    1. 旧倒序 dated（quay/meta-cc）：`| 2026-08-09 10:04Z | ...`，最新在最前，386→463 条；
  *    2. 新追加顺序（inner 节 / blockquote）：`## 2026-08-12 03:2xZ tick — ...` / `> **01:3xZ ...**`，
  *       按追加顺序无（或部分有）日期；
- *    3. archguard 式：`| N | HH:MMZ | ...`，最新在最后。
+ *    3. archguard 式：`| N | HH:MMZ | ...`，最新在最后；
+ *    4. quay 当前 dash tick：`- \`04:09Z\` \`unblock\` — …`（追加顺序，无日期，AC2 修复——修复前
+ *       四谓词全不命中 ⇒ 恒 no-tick-row，真文件 348 行/291 tick 行读成零）。
  *  全局最新：dated 行取最大 epoch（跨时代可比）；无日期行按位置（append-only 顺序）取最后，
  *  若其位置晚于最新 dated 行则它是更新的追加内容。无日期且无 mtime 锚定 ⇒ 显式 `stale-unknown`
  *  （不再返回「看似正常」的旧行——调用方无从分辨「外层面多天没 tick」与「读数解析不到」）。 */
@@ -258,10 +296,13 @@ export interface TickLogReading {
   dateEpoch?: number;
 }
 
-const DATED_RE = /^(?:\|\s*|#{1,3}\s*|>\s*\*\*\s*)(\d{4})-(\d{2})-(\d{2})\s+(\d{1,2}):(\d{1,2})/;
+const DATED_RE = /^(?:\|\s*|#{1,3}\s*|>\s*\*\*\s*|-\s*`)(\d{4})-(\d{2})-(\d{2})\s+(\d{1,2}):(\d{1,2})/;
 const UNDATED_QUOTE_RE = /^>\s*\*\*\s*\d{1,2}:\d{1,2}/;
 const UNDATED_HEADER_RE = /^#{1,3}\s*\d{1,2}:\d{1,2}/;
 const UNDATED_TABLE_RE = /^\|\s*\d+\s*\|/;
+// quay 当前 tick-log 行形：`- \`04:09Z\` \`unblock\` — …`（追加顺序，无日期）。
+// (gap-manager-tick-readings-constant-zero-instruments AC2) 修复前四谓词全不命中 ⇒ 恒 no-tick-row。
+const UNDATED_DASH_RE = /^-\s*`\d{1,2}:\d{1,2}/;
 
 function datedEpoch(m: RegExpMatchArray): number {
   // 分钟可能被外层匿名化（`03:2xZ`）——按已给数字解析，同日同小时不影响「哪个最新」的跨日比较。
@@ -293,7 +334,7 @@ export function latestTickLogReading(project: Project, opts?: { mtimeEpoch?: num
       }
       continue;
     }
-    if (UNDATED_QUOTE_RE.test(line) || UNDATED_HEADER_RE.test(line) || UNDATED_TABLE_RE.test(line)) {
+    if (UNDATED_QUOTE_RE.test(line) || UNDATED_HEADER_RE.test(line) || UNDATED_TABLE_RE.test(line) || UNDATED_DASH_RE.test(line)) {
       if (!bestUndated || i > bestUndated.pos) bestUndated = { row: line, pos: i };
     }
   }
@@ -464,6 +505,8 @@ export function render(projects: Project[], opts: RenderOpts): string {
   lines.push(`resource.cpu_some_avg10 ${resources.cpuSomeAvg10 || "unmeasurable"}`);
   lines.push(`resource.load1 ${resources.load1 || "unmeasurable"}`);
   lines.push(`resource.node_count ${resources.nodeCount}`);
+  lines.push(`resource.node_comm_literal ${resources.nodeCommLiteral}`);
+  lines.push(`resource.node_dual_read ${resources.nodeInstrumentFailure ? "INSTRUMENT-FAILURE" : "ok"}`);
   lines.push(`resource.mem_available_mb ${resources.memAvailMb}`);
   for (const o of outer) {
     if (o.exists) {
