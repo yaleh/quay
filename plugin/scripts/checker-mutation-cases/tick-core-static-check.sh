@@ -71,8 +71,45 @@ write orchestration/orchestrator-loop-tick.md \
   '# 外层编排 loop tick 指令' \
   '**外层不直接改代码**——它下指令，内层执行。理由：保持单一写入者。'
 
+# The shipped copies (plugin/loop/<name>-tick-core.md) are byte-identical to the orchestration/
+# cores above — the --check-drift baseline (gap-tick-core-drift-check-not-in-suite AC3).
+write plugin/loop/manager-tick-core.md \
+  '# manager tick — 执行核' \
+  '## A. 读数' \
+  '| A1 | 读 `.quay/manager-inbox/` | 目录非空即进决策 (src:1) |' \
+  '## B. 产出' \
+  '- **B3 tick-log**:本组一律写 `甲乙丙丁戊`,禁用 ①-⑤。`no-action` 需举证——甲`a`;乙`b`;丙`c`;丁`d`;戊`e` (src:1)。' \
+  '## C. 约束' \
+  '| C1 | 约束一 (src:1) |' \
+  '## D. 边界' \
+  '**可以**:写 `orchestration/`。'
+write plugin/loop/orchestrator-tick-core.md \
+  '# outer tick — 执行核' \
+  '## A. 读数' \
+  '| A1 | 读 `.quay/full-suite-state.json` | green⇒suiteGreen (src:1) |' \
+  '## B. 产出' \
+  '- **B1** 收尾 pass (src:1)。' \
+  '## C. 约束' \
+  '| C1 | 约束一 (src:1) |' \
+  '## D. 边界' \
+  '**可以**:写 `orchestration/`。'
+write plugin/loop/fast-mode-tick-core.md \
+  '# inner (fast-mode) tick — 执行核' \
+  '## A. 每轮必跑' \
+  '| A1 | `.halt` 哨兵 | 存在 ⇒ 空转 (src:1) |' \
+  '## B. 每轮必产出' \
+  '- **B1** 写回队列文件 (src:1)。' \
+  '## C. 硬约束' \
+  '| C1 | 派发形态必须 `Agent(run_in_background: true)` (src:1) |' \
+  '## D. 边界' \
+  '一律停下等人。'
+
 checker_cmd() {
   node --no-warnings --experimental-strip-types "${checker_dir}/tick-core-static-check.ts" --root "${root}" >/dev/null 2>&1
+}
+
+drift_cmd() {
+  node --no-warnings --experimental-strip-types "${checker_dir}/tick-core-static-check.ts" --check-drift --root "${root}" >/dev/null 2>&1
 }
 
 # GREEN baseline: the minimal surface passes all four criteria.
@@ -128,6 +165,45 @@ write orchestration/QUAY-OUTER-HANDOFF.md \
   '1. **外层不直接改【共享检出】的代码**——你下指令，内层执行。（**收窄 2026-08-10，理由=单一写入者/共享树**）'
 if checker_cmd; then :; else
   echo "ALWAYS-RED — restored (narrowed) prohibition still reddens the checker" >&2
+  exit 4
+fi
+
+# INJECT #3 (gap-tick-core-drift-check-not-in-suite): the DRIFT mode. The plugin/loop/ shipped
+# copies are byte-identical to orchestration/ → --check-drift GREEN baseline; a single edited
+# shipped copy MUST redden the drift gate.
+if drift_cmd; then :; else
+  echo "baseline RED on matching shipped copies (drift check always-red?)" >&2
+  exit 4
+fi
+# Modify ONE shipped copy (add a line the orchestration/ core lacks) → the pair drifts → RED.
+write plugin/loop/orchestrator-tick-core.md \
+  '# outer tick — 执行核' \
+  '## A. 读数' \
+  '| A1 | 读 `.quay/full-suite-state.json` | green⇒suiteGreen (src:1) |' \
+  '| A2 | 读 `.quay/loop-state.json` | 状态必读 (src:1) |' \
+  '## B. 产出' \
+  '- **B1** 收尾 pass (src:1)。' \
+  '## C. 约束' \
+  '| C1 | 约束一 (src:1) |' \
+  '## D. 边界' \
+  '**可以**:写 `orchestration/`。'
+if drift_cmd; then
+  echo "STAYED-GREEN — a drifted shipped copy did not redden the drift check" >&2
+  exit 3
+fi
+# RESTORE #3 → drift GREEN again.
+write plugin/loop/orchestrator-tick-core.md \
+  '# outer tick — 执行核' \
+  '## A. 读数' \
+  '| A1 | 读 `.quay/full-suite-state.json` | green⇒suiteGreen (src:1) |' \
+  '## B. 产出' \
+  '- **B1** 收尾 pass (src:1)。' \
+  '## C. 约束' \
+  '| C1 | 约束一 (src:1) |' \
+  '## D. 边界' \
+  '**可以**:写 `orchestration/`。'
+if drift_cmd; then :; else
+  echo "ALWAYS-RED — restored (matching) shipped copy still reddens the drift check" >&2
   exit 4
 fi
 

@@ -500,12 +500,106 @@ export function runChecks(root: string, only?: string): CheckResult {
   return { ok: ac3.ok && ac4.ok && ac5.ok && ac6.ok, coverage, ac3, ac4, ac5, ac6 };
 }
 
+// ── Drift check (gap-tick-core-drift-check-not-in-suite) ─────────────────────────────────────────────
+// The three execution cores each ship in TWO copies: orchestration/<name>-tick-core.md (what the
+// three layers ACTUALLY read every tick) and plugin/loop/<name>-tick-core.md (the shipped/laid-down
+// copy that quay-init --loop delivers to installed targets — see quay-init.sh's exec-core tick-doc
+// landing). The quay-init `--check-drift` report already LISTED these as drift but had NO suite
+// consumer (the fifth "instrument exists, consumer doesn't" instance). A12 was actually misled:
+// the same item was :31 in orchestration/ and :45 in plugin/loop/, costing a full round of message
+// alignment. This mode makes the pair-drift a HARD gate: exit 1 when ANY pair differs, printing
+// BOTH sides' line counts + a diff summary (AC2 — not a "drift/consistent" boolean).
+export const DRIFT_PAIRS = CORES.map((rel) => {
+  const base = rel.split("/").pop()!; // e.g. "manager-tick-core.md"
+  return { core: rel, shipped: `plugin/loop/${base}` };
+});
+
+export interface DriftPair {
+  core: string;          // orchestration/<name>-tick-core.md
+  shipped: string;       // plugin/loop/<name>-tick-core.md
+  consistent: boolean;
+  coreLines: number;     // -1 when the file is missing
+  shippedLines: number;  // -1 when the file is missing
+  diffStat: string;      // unified-diff summary: hunks + +N/-M + hunk headers (empty when consistent)
+}
+
+export interface DriftResult {
+  ok: boolean;
+  pairs: DriftPair[];
+}
+
+/** Line count of a file, or -1 when it does not exist. */
+function lineCountOrMinusOne(abs: string): number {
+  if (!fs.existsSync(abs)) return -1;
+  return fs.readFileSync(abs, "utf8").split("\n").length;
+}
+
+/** Summarize a 0-context unified diff: the +N/-M change counts + the hunk location headers. */
+function summarizeDiff(u: string): string {
+  if (!u) return "";
+  const lines = u.split("\n");
+  const hunks = lines.filter((l) => l.startsWith("@@"));
+  const added = lines.filter((l) => /^\+[^+]/.test(l)).length;
+  const removed = lines.filter((l) => /^-[^-]/.test(l)).length;
+  const head = `unified diff: ${hunks.length} hunk${hunks.length === 1 ? "" : "s"}, +${added}/-${removed} lines`;
+  const hunkHead = hunks.slice(0, 5).join(" ; ");
+  return hunkHead ? `${head}\n    ${hunkHead}` : head;
+}
+
+/** A diff SUMMARY between two files (AC2 — a magnitude/character readout, not a boolean). GNU
+ *  `diff --stat` is missing on some builds, so compute the summary from a 0-context unified diff:
+ *  hunk count + added/removed line counts + hunk location headers. diff exits 1 on difference, so
+ *  the stdout is read off the thrown error (the standard execFileSync pattern for a
+ *  non-zero-expected tool); on any failure a fallback "files differ" is returned so the drift gate
+ *  never hangs on diff. */
+function diffStat(a: string, b: string): string {
+  try {
+    return summarizeDiff(execFileSync("diff", ["-U0", a, b], { encoding: "utf8", timeout: 5_000 }).trim());
+  } catch (err) {
+    const stdout = (err as { stdout?: string | Buffer }).stdout;
+    if (typeof stdout === "string" && stdout.trim()) return summarizeDiff(stdout.trim());
+    return "files differ";
+  }
+}
+
+export function runDriftCheck(root: string): DriftResult {
+  const pairs = DRIFT_PAIRS.map(({ core, shipped }) => {
+    const coreAbs = path.join(root, core);
+    const shippedAbs = path.join(root, shipped);
+    const coreLines = lineCountOrMinusOne(coreAbs);
+    const shippedLines = lineCountOrMinusOne(shippedAbs);
+    const bothExist = coreLines >= 0 && shippedLines >= 0;
+    const consistent = bothExist
+      && fs.readFileSync(coreAbs, "utf8") === fs.readFileSync(shippedAbs, "utf8");
+    return {
+      core, shipped, consistent, coreLines, shippedLines,
+      diffStat: consistent ? "" : diffStat(coreAbs, shippedAbs),
+    };
+  });
+  return { ok: pairs.every((p) => p.consistent), pairs };
+}
+
+function printDriftReport(res: DriftResult): string[] {
+  const out: string[] = [];
+  for (const p of res.pairs) {
+    if (p.consistent) {
+      out.push(`  ok: ${p.core} (${p.coreLines} lines) == ${p.shipped} (${p.shippedLines} lines)`);
+      continue;
+    }
+    const coreLines = p.coreLines >= 0 ? `${p.coreLines}` : "MISSING";
+    const shippedLines = p.shippedLines >= 0 ? `${p.shippedLines}` : "MISSING";
+    out.push(`  DRIFT: ${p.core} (${coreLines} lines) vs ${p.shipped} (${shippedLines} lines)`);
+    if (p.diffStat) for (const l of p.diffStat.split("\n")) out.push(`    ${l}`);
+  }
+  return out;
+}
+
 // ── CLI ──────────────────────────────────────────────────────────────────────────────────────────────
 interface CliResult { code: number; json: unknown; }
 
 function usage(): CliResult {
   process.stderr.write(
-    "usage: tick-core-static-check.ts [--root <dir>] [--only <ac3|ac4|ac5|ac6>] [--json]\n",
+    "usage: tick-core-static-check.ts [--root <dir>] [--only <ac3|ac4|ac5|ac6>] [--check-drift] [--json]\n",
   );
   return { code: 2, json: { error: "usage" } };
 }
@@ -514,6 +608,8 @@ export function main(argv: string[]): CliResult {
   let root = process.cwd();
   let only: string | undefined;
   let json = false;
+  let checkDrift = false;
+  let noBlock = false;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--root") {
@@ -524,16 +620,46 @@ export function main(argv: string[]): CliResult {
       if (only === undefined || !/^ac[3456]$/.test(only)) return usage();
     } else if (a === "--json") {
       json = true;
+    } else if (a === "--check-drift") {
+      checkDrift = true;
+    } else if (a === "--no-block") {
+      // Report-only drift check: print the full RED/consistent readout but exit 0. Used by the
+      // pre-commit doc surface (run_doc_checks) so the CURRENT pre-existing drift is VISIBLE at
+      // every commit without halting unrelated commits until a follow-up reconciles the pairs.
+      noBlock = true;
     } else if (a === "--check") {
       // Explicit alias for the default full-surface check (the ## Contract `invoke` form).
     } else if (a === "--help" || a === "-h") {
       process.stdout.write(
-        "tick-core-static-check.ts — are the three execution cores ≤80 lines, with every pointer target existing, the B3 group numbering distinct from the criteria numbering, and the prohibition docs consistent with the cores' run_in_background?\n",
+        "tick-core-static-check.ts — are the three execution cores ≤80 lines, with every pointer target existing, the B3 group numbering distinct from the criteria numbering, the prohibition docs consistent with the cores' run_in_background, and (--check-drift) each orchestration/*-tick-core.md byte-identical to its plugin/loop/ shipped copy?\n",
       );
       return { code: 0, json: { help: true } };
     } else {
       return usage();
     }
+  }
+
+  if (checkDrift) {
+    let driftRes: DriftResult;
+    try {
+      driftRes = runDriftCheck(root);
+    } catch (err) {
+      process.stderr.write(`${(err as Error).message}\n`);
+      return { code: 1, json: { error: (err as Error).message } };
+    }
+    if (json) {
+      process.stdout.write(`${JSON.stringify(driftRes, null, 2)}\n`);
+      return { code: driftRes.ok || noBlock ? 0 : 1, json: driftRes };
+    }
+    process.stdout.write(
+      `tick-core-static-check: drift check — ${DRIFT_PAIRS.length} pairs, ` +
+      `${driftRes.pairs.filter((p) => p.consistent).length} consistent / ${driftRes.pairs.filter((p) => !p.consistent).length} drifted\n`,
+    );
+    for (const l of printDriftReport(driftRes)) process.stdout.write(`${l}\n`);
+    if (!driftRes.ok) process.stdout.write(`tick-core-static-check: RED — execution-core drift gate violated (orchestration/*-tick-core.md vs plugin/loop/*-tick-core.md).\n`);
+    else process.stdout.write(`tick-core-static-check: PASS — every execution core matches its shipped copy.\n`);
+    if (!driftRes.ok && noBlock) process.stdout.write(`tick-core-static-check: --no-block — drift REPORTED, not blocking (gap-tick-core-drift-check-not-in-suite; reconcile the pairs to green).\n`);
+    return { code: driftRes.ok || noBlock ? 0 : 1, json: driftRes };
   }
 
   let res: CheckResult;
