@@ -42,6 +42,15 @@
 # writer's uncommitted state. Until that condition is met, the negative-control leak-catch
 # (catching a test that writes into the verification tree) is TEMPORARILY ABSENT — a known
 # trade-off (AC4); tmux-leak-scan.sh still catches the tmux leak class.
+#
+# NOTE (gap-verifiedcommit-dirty-tree-false-certificate, 2026-08-13): the suite-AFTER assertion
+# STAYS DISABLED, but this script now has a SECOND, live caller in a DIFFERENT role — the
+# round-START dirty DETECTOR in plugin/scripts/full-suite-runner.ts's readTreeState(). It invokes
+# the ABSOLUTE mode (`bash assert-clean-tree.sh <root>`: exit 0 = clean, exit 1 = dirty) at round
+# start to feed the round record's `treeDirty` flag (incl. untracked) + `tree` hash — an
+# ANNOTATION (fail-open: any status other than 1 degrades to no-detection), NEVER a green/red
+# criterion. This re-enables the script's reference count (0 → live caller) WITHOUT reconnecting
+# the suite-after gate that the 17:1x ruling disabled.
 # ════════════════════════════════════════════════════════════════════════════════
 
 # ── 统一 --help（gap-scripts-sprawl：用法在前、退出 0、无业务副作用）────────────────────

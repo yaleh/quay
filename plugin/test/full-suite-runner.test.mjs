@@ -520,9 +520,12 @@ test("AC2 — the worktree state mirror carries the SAME verifiedCommit (SYNC BR
 // writers committed mid-round is a FALSE-POSITIVE CANDIDATE (round-53 class: 4 writers committed
 // mid-round, the SAME quay-init-loop-core test passed green the next clean window). The runner reads
 // HEAD at START (verifiedCommit) AND at TERMINAL; a difference ⇒ treeMutatedMidRound=true on the
-// state + round record (the annotation, not a red/green criterion).
+// state + round record. gap-verifiedcommit-dirty-tree-false-certificate AC5 (2026-08-13) made the
+// annotation CONSEQUENTIAL: a mid-round-mutated tree VOIDS a would-be-green (state=red reason=infra-error
+// void:true — the round-121 false-certificate shape), while a REAL failure red keeps its verdict
+// (reason=failed, the FP-candidate annotation rides along, unchanged).
 
-test("AC1/AC3 — a git-repo round where a CONCURRENT commit lands MID-ROUND is marked treeMutatedMidRound=true (round-53 class detected)", async () => {
+test("AC5 — a git-repo round where a CONCURRENT commit lands MID-ROUND is VOIDED (state≠green, void:true) — the false-certificate consequence (round-121 class)", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-mut-"));
   execSync("git init -q", { cwd: root });
   execSync("git config user.name fsr-test", { cwd: root });
@@ -531,7 +534,10 @@ test("AC1/AC3 — a git-repo round where a CONCURRENT commit lands MID-ROUND is 
   execSync("git add -A && git commit -q -m base", { cwd: root });
   const startHead = execSync("git rev-parse HEAD", { cwd: root, encoding: "utf8" }).trim();
   // The fake suite: after a short delay (the suite is "running"), a CONCURRENT WRITER commits to the
-  // shared tree (round-53 class) — then the suite itself passes. The tree was MUTATED under the run.
+  // shared tree (round-53 class) — then the suite itself PASSES. The tree was MUTATED under the run,
+  // so the would-be green is a FALSE CERTIFICATE: gap-verifiedcommit-dirty-tree-false-certificate
+  // AC5 demotes it to state=red reason=infra-error void:true (the tests passed; the certificate is
+  // void — SUITE-GREEN / SUITE-MERGE-PENDING must not fire for a tree that was never pinned).
   const { f, dir } = fakeSuite(
     'sleep 1\n' +
       'git commit --allow-empty -q -m "concurrent writer mid-round"\n' +
@@ -540,11 +546,13 @@ test("AC1/AC3 — a git-repo round where a CONCURRENT commit lands MID-ROUND is 
   try {
     const child = runRunner({ root, command: `bash ${f}` });
     const { code } = await waitExit(child);
-    assert.equal(code, 0, "runner exits 0 on green");
+    assert.equal(code, 1, "a voided round is NOT a green — the runner exits non-zero");
     const terminalHead = execSync("git rev-parse HEAD", { cwd: root, encoding: "utf8" }).trim();
     assert.notEqual(terminalHead, startHead, "the concurrent commit landed mid-round");
     const s = readState(root);
-    assert.equal(s.state, "green", "the annotation never flips green/red (AC1 — 非红判据)");
+    assert.equal(s.state, "red", "AC5 — state must NOT be green under a mid-round-mutated tree (round-121 shape fixed)");
+    assert.equal(s.reason, "infra-error", "voided green is an ENVIRONMENT problem, not a test failure (NO correctness conclusion)");
+    assert.equal(s.void, true, "the void:true marker distinguishes a voided certificate from a real failure");
     assert.equal(s.verifiedCommit, startHead, "state carries the START head");
     assert.equal(s.terminalCommit, terminalHead, "state carries the TERMINAL head");
     assert.equal(s.treeMutatedMidRound, true, "start HEAD ≠ terminal HEAD ⇒ tree mutated mid-round (round-53 class detected)");
@@ -552,6 +560,9 @@ test("AC1/AC3 — a git-repo round where a CONCURRENT commit lands MID-ROUND is 
     assert.equal(rec.treeMutatedMidRound, true, "round record carries treeMutatedMidRound");
     assert.equal(rec.terminalCommit, terminalHead, "round record carries the terminal commit");
     assert.equal(rec.commit, startHead, "round record still carries the verified (start) commit");
+    assert.equal(rec.state, "red", "round record state is red (not green) for a voided round");
+    assert.equal(rec.void, true, "round record carries the voided-certificate marker");
+    assert.equal(rec.reason, "infra-error", "round record reason is infra-error (voided, not failed)");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(dir, { recursive: true, force: true });
@@ -612,6 +623,113 @@ test("AC3 negative control — a git-repo round with NO mid-round commit is tree
     assert.equal(s.verifiedCommit, head, "start HEAD == terminal HEAD == the same commit");
     const rec = lastRoundRecord(root);
     assert.equal(rec.treeMutatedMidRound, false, "round record carries treeMutatedMidRound=false on a pinned round");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── gap-verifiedcommit-dirty-tree-false-certificate: AC1/AC2/AC3 (round-start dirty flag + tree hash) ──
+// verifiedCommit declares a COMMIT object, but what the round actually reads is the WORKING TREE —
+// the round-90/4a3fc0be shape: vc=1a5da8ee while 工作树 ≠ HEAD 树 ≠ index 树 (staged + unstaged +
+// untracked). The round record gains a dirty flag (INCLUDING untracked — ./undefined 不能漏在外面)
+// and the tested-content tree hash (tracked part, `git stash create`'s tree) so a green under a dirty
+// tree is never a silent false certificate, and "does this later commit reproduce the tested tree" is
+// a `tree` comparison. The dirty flag is an ANNOTATION (AC1 — 脏 ⇒ verifiedCommit 不声明「已验证」),
+// never a green/red criterion on its own (the certificate-voiding consequence is AC5's
+// treeMutatedMidRound, tested above).
+
+test("AC1/AC2/AC3 — a DIRTY tested tree at round start is recorded (treeDirty incl. untracked + tested-content tree hash) — the round-90/4a3fc0be false-certificate shape detected", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-dirty-"));
+  execSync("git init -q", { cwd: root });
+  execSync("git config user.name fsr-test", { cwd: root });
+  execSync("git config user.email fsr@example.com", { cwd: root });
+  fs.writeFileSync(path.join(root, "a.txt"), "a\n", "utf8");
+  execSync("git add -A && git commit -q -m base", { cwd: root });
+  const headTree = execSync("git rev-parse HEAD^{tree}", { cwd: root, encoding: "utf8" }).trim();
+  // Round-90/4a3fc0be shape: working tree ≠ HEAD tree ≠ index tree — a STAGED edit (index ≠ HEAD),
+  // an UNSTAGED edit (working ≠ index), and an UNTRACKED file (must count as dirty).
+  fs.writeFileSync(path.join(root, "tasks.md"), "staged\n", "utf8");
+  execSync("git add tasks.md", { cwd: root });
+  fs.appendFileSync(path.join(root, "tasks.md"), "unstaged\n", "utf8");
+  fs.writeFileSync(path.join(root, "untracked.txt"), "u\n", "utf8");
+  const indexTree = execSync("git write-tree", { cwd: root, encoding: "utf8" }).trim();
+  const stashCreate = execSync("git stash create", { cwd: root, encoding: "utf8" }).trim();
+  assert.ok(stashCreate, "stash create returns a commit on a dirty tree");
+  const workTree = execSync(`git rev-parse ${stashCreate}^{tree}`, { cwd: root, encoding: "utf8" }).trim();
+  assert.notEqual(indexTree, headTree, "index tree ≠ HEAD tree (staged edit)");
+  assert.notEqual(workTree, indexTree, "working-tree tree ≠ index tree (unstaged edit)");
+  assert.notEqual(workTree, headTree, "working-tree tree ≠ HEAD tree (the round-90 shape)");
+  assert.ok(
+    execSync("git status --porcelain", { cwd: root, encoding: "utf8" }).includes("?? untracked.txt"),
+    "porcelain includes the untracked file",
+  );
+  const { f, dir } = fakeSuite(GREEN_SUITE);
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, "runner exits 0 on green — the dirty flag is an ANNOTATION, never a verdict criterion");
+    const s = readState(root);
+    assert.equal(s.treeDirty, true, "AC1 — the dirty flag (incl. untracked) is recorded at round start");
+    assert.equal(s.tree, workTree, "AC2 — the tested-content tree hash is the working-tree tracked tree");
+    assert.notEqual(s.tree, headTree, "dirty round's tested tree ≠ HEAD tree ⇒ verifiedCommit is a FALSE CERTIFICATE");
+    const rec = lastRoundRecord(root);
+    assert.equal(rec.treeDirty, true, "round record carries treeDirty");
+    assert.equal(rec.tree, workTree, "round record carries the tested-content tree hash (≠ HEAD tree)");
+    assert.notEqual(rec.tree, headTree, "round record's tested tree ≠ the certified commit's tree (AC3 — the 4a3fc0be shape is detected/annotated)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC1/AC2 — a CLEAN tested tree at round start records treeDirty:false and the HEAD tree (true certificate)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-clean-"));
+  execSync("git init -q", { cwd: root });
+  execSync("git config user.name fsr-test", { cwd: root });
+  execSync("git config user.email fsr@example.com", { cwd: root });
+  fs.writeFileSync(path.join(root, "a.txt"), "a\n", "utf8");
+  execSync("git add -A && git commit -q -m base", { cwd: root });
+  const headTree = execSync("git rev-parse HEAD^{tree}", { cwd: root, encoding: "utf8" }).trim();
+  const { f, dir } = fakeSuite(GREEN_SUITE);
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, "runner exits 0 on green");
+    const s = readState(root);
+    assert.equal(s.treeDirty, false, "clean tree ⇒ treeDirty:false");
+    assert.equal(s.tree, headTree, "clean tree ⇒ tested-content tree == HEAD tree (a TRUE certificate)");
+    const rec = lastRoundRecord(root);
+    assert.equal(rec.treeDirty, false, "round record treeDirty:false");
+    assert.equal(rec.tree, headTree, "round record tree == HEAD tree");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC1 — an UNTRACKED-ONLY dirty tree is still treeDirty:true (untracked cannot be ignored — the ./undefined class)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-untracked-"));
+  execSync("git init -q", { cwd: root });
+  execSync("git config user.name fsr-test", { cwd: root });
+  execSync("git config user.email fsr@example.com", { cwd: root });
+  fs.writeFileSync(path.join(root, "a.txt"), "a\n", "utf8");
+  execSync("git add -A && git commit -q -m base", { cwd: root });
+  const headTree = execSync("git rev-parse HEAD^{tree}", { cwd: root, encoding: "utf8" }).trim();
+  fs.writeFileSync(path.join(root, "undefined"), "untracked-only\n", "utf8");
+  const { f, dir } = fakeSuite(GREEN_SUITE);
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, "runner exits 0 on green (annotation, not verdict)");
+    const s = readState(root);
+    assert.equal(s.treeDirty, true, "untracked-only dirt is DETECTED (git status --porcelain includes ?? entries)");
+    assert.equal(s.tree, headTree, "untracked-only dirt leaves the tracked tested-content tree == HEAD tree");
+    const rec = lastRoundRecord(root);
+    assert.equal(rec.treeDirty, true, "round record treeDirty:true with only an untracked file");
+    // treeDirty and tree are INDEPENDENT axes: the dirty flag names WHAT is untested (the untracked
+    // file), the tree hash names the tested TRACKED content (which, untracked-only, == HEAD tree).
+    assert.equal(rec.tree, headTree, "tracked tree unchanged — the two fields carry distinct facts");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(dir, { recursive: true, force: true });
