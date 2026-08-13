@@ -1,7 +1,7 @@
 ---
 id: gap-phase-overlap-two-phase-parallel-exploration
 title: 两相重叠探索（serial+lowconc 并行，各 conc=6）——预期 −154s/轮（~−34%）；一键回退 + 前后对照 + basename 归一；等吞吐观察窗口结束再动
-status: todo
+status: ready
 labels:
   - gap
   - exploration

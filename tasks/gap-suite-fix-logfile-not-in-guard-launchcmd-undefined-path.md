@@ -2,7 +2,7 @@
 id: gap-suite-fix-logfile-not-in-guard-launchcmd-undefined-path
 title: execute-suite-fix launchCmd 模板把 logFile 缺值拼成字面量 undefined → 日志落根 + 每轮覆盖 +
   Fix agent 指向坏路径
-status: todo
+status: ready
 labels:
   - gap
   - defect
