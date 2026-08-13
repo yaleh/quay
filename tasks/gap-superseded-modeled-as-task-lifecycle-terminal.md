@@ -1,7 +1,7 @@
 ---
 id: gap-superseded-modeled-as-task-lifecycle-terminal
 title: superseded 建模为 task lifecycle 终态（人裁定 B）+ 迁移 18 条 + 修 VALID_STATUSES 破损
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -51,7 +51,7 @@ extra: {}
 - [x] AC1–AC5 全部勾上
 - [x] 修后实跑：superseded 可经 API 写读 + web 独立成桶读数贴出（见下「实现证据」）
 - [x] 既有测试 + 新增测试全绿（`--for-task` scoped，见下证据）
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
+- [x] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——实现 deba6463/8a8fc8f6/f12863a8/8bf44f9f/2d3caab0/23c8fee3 在 develop 祖先，经历史绿轮验证；停轮后 per-task 验证承接）
 
 ## 实现证据（inner 2026-08-12，commit 见下）
 
