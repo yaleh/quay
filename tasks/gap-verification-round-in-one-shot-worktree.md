@@ -56,11 +56,11 @@ leak 残留只部分缓解（tmux socket 在 /tmp 不在 worktree）⇒ 仍需 p
 
 ## AC
 
-- [ ] AC1: 验证轮跑在一次性 worktree（provision + --root <wt> --state-dir + config C NODE_COMPILE_CACHE）
-- [ ] AC2: 主 checkout 轮运行期间零污染（守卫缺口/自造脏消失的验收——package-lock 不再被改写）
-- [ ] AC3: verifiedCommit 指名的树 == 被测树（假证书消失的验收）
-- [ ] AC4: 端到端时长对照：worktree 轮 durationMs - 基线 < 20s（must answer before close）
-- [ ] AC5: 既有测试全绿；`--for-task` scoped 门绿
+- [x] AC1: 验证轮跑在一次性 worktree（provision + --root <wt> --state-dir + config C NODE_COMPILE_CACHE）
+- [x] AC2: 主 checkout 轮运行期间零污染（守卫缺口/自造脏消失的验收——package-lock 不再被改写）
+- [x] AC3: verifiedCommit 指名的树 == 被测树（假证书消失的验收）
+- [x] AC4: 端到端时长对照：worktree 轮 durationMs - 基线 < 20s（must answer before close）
+- [x] AC5: 既有测试全绿；`--for-task` scoped 门绿
 
 ## Definition of Done
 
@@ -89,3 +89,38 @@ round 45（早前 worktree 轮）: 462s load 14.42 ≈ 基线
 实锤两个活跃 worktree=驱动源），非 worktree。**跨窗对照（104 vs 95-99）被并发负载混淆**——测量教训：
 跨窗比负载变化、同窗比才干净（与 leak-scan 竞态假说的「单点测时间重叠」同族）。provision 另测：
 add 1.1s + provision 2.4s + teardown 0.8s ≈ 4.3s。
+
+### Evidence（实现 2026-08-13，task branch `task/gap-verification-round-in-one-shot-worktree`）
+
+**机制落地（`plugin/scripts/full-suite-runner.ts`，唯一代码改动）**：当被测 checkout 就是主仓
+（`root === REPO_ROOT`——outer 验证轮与 suite-state-trigger 的 retrigger 起跑都解析到它）时，
+runner **自动**起一次性 worktree（`provision-verify-worktree.sh` —— 零调用者接上）+ 在 worktree 里跑
+套件（`--root <wt>`，state/log 落主仓 `<main>/.quay`）+ `NODE_COMPILE_CACHE=<main>/.quay/node-compile-cache`
+（config C）+ 轮末完整 teardown（正常/可捕获崩溃/信号三路径；SIGKILL 漏给 worktree-branch-hygiene-check）。
+`--one-shot-worktree` 可对非主 root 强制；已是指定 worktree 的 root（execute-suite-fix `--root <wt>`）
+或 hermetic 临时 root 永不二次 provision（`!isGitWorktree` 守卫）。
+
+**AC1/AC2/AC3 端到端验收（hermetic throwaway git repo + 显式 `--one-shot-worktree`，fake suite 在 worktree
+里 `pwd` + `touch package-lock.json`）**：
+```
+runner exit code: 0
+full-suite-runner: provisioning one-shot verify worktree (config C NODE_COMPILE_CACHE)...
+full-suite-runner: running suite in one-shot worktree /tmp/oneshot-wtroot-xxx/verify-round-1786596261606-c6e5ab
+full-suite-runner: FINAL state=green durationMs=467 exit=0
+full-suite-runner: one-shot worktree torn down: /tmp/oneshot-wtroot-xxx/verify-round-1786596261606-c6e5ab
+state = {state: green, scope: main, oneShotWorktree: true,
+         verifiedCommit: 52b6a1d4..., terminalCommit: 52b6a1d4..., treeMutatedMidRound: false}
+fake suite cwd      = /tmp/oneshot-wtroot-xxx/verify-round-...   (PASS: 跑在 worktree，非主仓)
+main checkout git status = clean（无 package-lock）                (PASS: AC2 零污染)
+nested worktree torn down（WTROOT 0 条目，git worktree list 只剩主） (PASS: teardown 完整)
+```
+**自动触发（主仓形态）**：`root === REPO_ROOT && !isGitWorktree(root)` 对真主仓实测 = true
+⇒ outer 验证轮与 retrigger 起跑无需改调用方，自动走一次性 worktree（AC1 全自动形态）。
+
+**AC5 scoped 门**：`scripts/test.sh --for-task gap-verification-round-in-one-shot-worktree` 绿
+（full-suite-runner.test.mjs 111 pass、provision-verify-worktree.test.mjs 5 pass、
+suite-state-trigger.test.mjs 166 pass，exit 0；既有测试零回归——改动仅经 `oneShot` 门，临时 root 测试路径不变）。
+
+**AC4**：沿用本任务上方 round-104 同窗对照（worktree +1-13s < 20s）+ provision 开销 4.3s/轮
+（add 1.1s + provision 2.4s + teardown 0.8s）——两项都远小于 20s 阈值；未跑全量对照是因为
+主仓在跑轮 + 全量 ~441s 成本，而 AC4 的量已由任务 Evidence 给出。
