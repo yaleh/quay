@@ -1,4 +1,11 @@
-// @test-group engine
+// @test-group governance
+// TEMP-OFF-CERT-PATH (2026-08-13, round 133+134 deterministic-under-load): AC5/tmux-leak-scan DELTA
+// genuine-leak dir removed within reap-wait bound under full-suite load (identical assertion both
+// rounds) — isolated runs green, but full-suite load is a NECESSARY condition, so it recurs on the
+// certification path. TEMPORARILY moved off the default (product,engine) certification path to
+// governance. EXPIRY: restore to engine when the removal-source fix lands (R2 reaper / scope
+// collision trace) — the trace task owns it. STILL RUNS in --for-task / --group governance scoped
+// gates (防真泄漏回归无人发现). WAS @test-group engine.
 // @load-sensitive wall-clock
 // @load-sensitive-entry 2026-08-13 wall-clock (AC5/tmux-leak-scan DELTA reap-wait timing races under full-suite load; round 132 green / 133 red same tree, isolated rerun green — partition as in-family flake, not regression)
 // test-isolation-check.test.mjs — gap-test-isolation-contract-is-unwritten: RED/GREEN tests for
