@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // tick-core-static-check.ts — execution-core static coverage checker
 // (tasks/gap-tick-core-zero-static-coverage, AC2-AC7)
+// @judges orchestration/*-tick-core.md
 //
 // WHAT IT DETECTS: the three execution cores (orchestration/*-tick-core.md — what the three layers
 // ACTUALLY read every tick, the AC30(a) judgment objects) previously had ZERO static coverage:

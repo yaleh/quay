@@ -48,10 +48,10 @@ cp「安全」判定只核了 A 编号维 → 提交前跑覆盖文件的检查 
 
 ## AC
 
-- [ ] AC1: 判定对象声明机制存在，测试自声明（文件头），quay-init-loop-consumer-doc-refs 声明约束 plugin/loop/* 随包文档
-- [ ] AC2: 改 plugin/loop/manager-tick-core.md 后机械求出的测试集合包含 quay-init-loop-consumer-doc-refs（负控：不含 tick-core-static-check）
-- [ ] AC3: 负控制——重现 12a6b18b 的 cp 错误链，判据在提交前拦住（不靠全量套件兜底）
-- [ ] AC4: 既有测试全绿；`--for-task` scoped 门绿
+- [x] AC1: 判定对象声明机制存在，测试自声明（文件头），quay-init-loop-consumer-doc-refs 声明约束 plugin/loop/* 随包文档
+- [x] AC2: 改 plugin/loop/manager-tick-core.md 后机械求出的测试集合包含 quay-init-loop-consumer-doc-refs（负控：不含 tick-core-static-check）
+- [x] AC3: 负控制——重现 12a6b18b 的 cp 错误链，判据在提交前拦住（不靠全量套件兜底）
+- [x] AC4: 既有测试全绿；`--for-task` scoped 门绿
 - [ ] AC5: manager-tick-core.test.mjs 三条机制名断言对源与副本各断言一次（副本=交付、源=执行；内容允许不同但机制名必须在）
 
 ## Definition of Done
@@ -63,5 +63,29 @@ cp「安全」判定只核了 A 编号维 → 提交前跑覆盖文件的检查 
 ## Touches
 
 - plugin/scripts/check-set-after-change-check.ts (new)
-- plugin/scripts/checker-mutation-cases/check-set-after-change.sh (new)
+- plugin/scripts/checker-mutation-cases/check-set-after-change-check.sh (new)
+- plugin/scripts/capability-catalog.sh（新脚本注册：QUESTION 声明，AC1c）
+- docs/proposals/quay-product-outline.md（新脚本注册：§6 DELIVERY-INVENTORY 快照重生成）
+- scripts/test.sh（新检查器注册进 run_static_checks：@static-tier change + @static-object，进 mutation manifest）
 - tasks/gap-check-set-after-change-diff-nameonly-intersect-judged-objects.md（自身）
+
+## Evidence（负控制样例，AC2/AC3）
+
+`node plugin/scripts/check-set-after-change-check.ts --root . --changed plugin/loop/manager-tick-core.md`：
+
+```
+  plugin/loop/manager-tick-core.md
+    matched tests:   plugin/test/quay-init-loop-consumer-doc-refs.test.mjs
+    matched checkers: (none)
+```
+
+（AC2：机械集合含 quay-init-loop-consumer-doc-refs、不含 tick-core-static-check——后者判定的是
+`orchestration/*-tick-core.md` 源，非随包副本；12a6b18b 的 cp 错误链在提交前被本判据拦住。）
+
+mutation case（`plugin/scripts/checker-mutation-cases/check-set-after-change-check.sh`）exit 0——
+基线 GREEN → 删除 quay-init-loop-consumer-doc-refs 的 `@judges` 声明 → RED（STAYED-GREEN 即 exit 3）
+→ 恢复 → GREEN；把 tick-core-static-check 的判定对象改指 `plugin/loop/*` → RED（AC3 负控）→ 恢复 → GREEN。
+
+scoped 门：`scripts/test.sh --for-task gap-check-set-after-change-diff-nameonly-intersect-judged-objects --allow-thin`
+exit 0（check-set-after-change-check PASS + capability-catalog 16/16 + delivery-inventory drift 0）。
+`checker-mutation-check --check`：29/29 covered，errors=0，RESULT PASS。

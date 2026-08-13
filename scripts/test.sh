@@ -449,6 +449,19 @@ run_static_checks() {
   # must be 0 (AC3), and the mechanism also mutates itself (AC4, --selftest).
   # @static-tier full  (the ~13s meta-check on the checkers THEMSELVES — deferred to the full-suite gate)
   run_checker "checker-mutation-check" bash "${repo_root}/plugin/scripts/checker-mutation-check.sh" --check
+  echo "== check-set-after-change check (gap-check-set-after-change-diff-nameonly-intersect-judged-objects, A0b③) =="
+  # After editing a file, which tests run is computed mechanically as git diff --name-only ∩ the
+  # test/checker's SELF-DECLARED judged objects (`@judges <glob>…` in the file header — no central
+  # table; 判据放在被约束者身上). Regression gate: a change to plugin/loop/manager-tick-core.md
+  # (the shipped copy) MUST select the test that judges the copy (quay-init-loop-consumer-doc-refs,
+  # which declares `@judges plugin/loop/*`) and MUST NOT select tick-core-static-check (which
+  # judges orchestration/*-tick-core.md); a change to orchestration/manager-tick-core.md MUST
+  # select tick-core-static-check. This is the pre-commit gate that would have blocked the manager's
+  # 12a6b18b cp error chain (ran tick-core-static-check on the copy, the real judge never ran) —
+  # the criterion fires on the mechanically computed set, not on the full-suite round.
+  # @static-tier change
+  # @static-object plugin/scripts/check-set-after-change-check.ts plugin/scripts/checker-mutation-cases/check-set-after-change-check.sh plugin/test/quay-init-loop-consumer-doc-refs.test.mjs plugin/scripts/tick-core-static-check.ts
+  run_checker "check-set-after-change-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/check-set-after-change-check.ts" --root "${repo_root}"
   # Wait for all parallelized checkers and fail closed if any failed (see the RUN_CHECKER_PARALLEL
   # note at the top of this function — AC3 failure visibility, AC4 cost-ledger completeness).
   run_checker_parallel_wait
