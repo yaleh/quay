@@ -1,4 +1,6 @@
 // @test-group engine
+// @load-sensitive wall-clock
+// @load-sensitive-entry 2026-08-13 wall-clock (reap-wait R2/R3 timing races under full-suite load; round 132 green / 133 red same tree, isolated rerun green — partition as in-family flake, not regression)
 // tmux-leak-scan.test.mjs — gap-leak-scan-reap-race-false-red: RED/GREEN tests for the suite-tail
 // leak scan's BOUNDED REAP-WAIT. The defect: at suite end `tmux-leak-scan.sh --check` raced with
 // teardown reaping of test-spawned tmux servers — under load a still-exiting server (its process
