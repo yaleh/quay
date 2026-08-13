@@ -2,7 +2,7 @@
 id: gap-slot-refill-landed-detection-implementation-file-classes
 title: phantom-killer 假阳性——hasLandedImplementation 只认实现类文件（排除
   docs/milestones/telemetry 旁路）
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -47,7 +47,8 @@ clique 任务谁负责先确认本任务已 done。本任务 done 后，clique �
 ## Definition of Done
 
 - [ ] AC1–AC4 全部勾上
-- [ ] 正/负控制样本贴出（见 Evidence）
+- [ ] 正/负控制样本贴出（见 Evidence：51699289/1f99e276 判 false、真实 landed 仍判 true）
+- [ ] 白名单覆盖实现类文件（packages/·plugin/scripts/·plugin/test/·scripts/），docs/milestones/telemetry 排除
 
 ## Touches
 
