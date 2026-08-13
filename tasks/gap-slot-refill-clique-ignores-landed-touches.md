@@ -1,7 +1,8 @@
 ---
 id: gap-slot-refill-clique-ignores-landed-touches
-title: slot-refill 互斥团忽略 hasLandedImplementation 任务的 touches——landed-but-not-flipped 不再挤掉真工作
-status: todo
+title: slot-refill 互斥团忽略 hasLandedImplementation 任务的
+  touches——landed-but-not-flipped 不再挤掉真工作
+status: ready
 labels:
   - gap
   - mechanism

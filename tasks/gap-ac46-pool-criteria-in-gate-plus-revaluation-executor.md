@@ -64,6 +64,12 @@ compound×1 retreat / self-touch×1 retreat+补 Touches ⇒ pool 9→4。**但�
 - [ ] AC3 负控制：当前 pool（4）改造后不引入新的条件变质任务；不再出现「静默留池」形态。
 - [ ] AC4 既有 ready-pool-check / slot-refill 测试全绿；`--for-task` scoped 门绿。
 
+- [ ] AC5 生产负控制样本（outer 2026-08-13 定向晋升操作产生，不构造——manager 裁定写进验收）：提升闸扩容后必须**拒**：
+      `gap-quay-has-never-self-hosted-its-own-cold-start`（compound）· `gap-worktree-node-modules-inconsistent-self-verify`（self-touch 待定）；
+      必须**放**：`gap-spec11-stage2-retest-with-concurrency` · `gap-slot-refill-clique-ignores-landed-touches` ·
+      `gap-landing-target-branch-consistency-check`。这 5 条是「提升闸不查 compound/self-touch」缺口（AC46 判据1）的现成验收样本——
+      第三例「负控制不必构造」（前两例：51699289/1f99e276 phantom 假阳性）。
+
 ## Definition of Done
 
 - [ ] 提升闸 + 双向重评执行者落地并有测试覆盖。

@@ -1,7 +1,7 @@
 ---
 id: gap-spec11-stage2-retest-with-concurrency
 title: per-task 全量吞吐重测——2-slot 落地后补上停全局轮的唯一前置（QUAY_MAX_CONCURRENT_SUITES 并发，AC3b 门原样搬）
-status: todo
+status: ready
 labels:
   - gap
   - mechanism

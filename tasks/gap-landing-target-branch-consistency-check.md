@@ -1,7 +1,7 @@
 ---
 id: gap-landing-target-branch-consistency-check
 title: 任务落地目标分支无校验——按位置检查覆盖「落地目标 == 当前前锋分支」（机制家族第 4 次）
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
