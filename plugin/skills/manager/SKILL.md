@@ -178,6 +178,7 @@ rules* but does not re-implement each SPEC. Index (under `orchestration/` in the
 - `orchestration/SPEC-goal-store-2026-08-09.md` — the goal-store spec (phase goals/ACs are a THIRD sibling kind: criterion shell-runnable + status(achieved) + phase derivable + origin required; web `/goal`+`/doc`; gate-staleness self-check)
 - `orchestration/SPEC-suite-speed.md` — suite speed
 - `orchestration/SPEC-typed-axes-and-standing-dynamics.md` — typed axes + standing dynamics
+- `orchestration/SPEC-per-task-suite-verification-2026-08-13.md` — per-task suite verification (人 2026-08-13 裁定：取消 integration，每任务从 develop 开 worktree 跑全量 suite 迭代至绿再 merge；suite 不得有 commit 知识；锁容量 2 + cgroup 读宿主；verification-round 降为任务粒度。**取代** `SPEC-branching-model-integration-branch-2026-08-05.md` 的解法而非其诊断；阶段 AC42-AC49）
 
 Cross-references:
 - `orchestration/REVIEW-cadence.md` — the daily-review cadence mechanism (this skill's cadence hook)
