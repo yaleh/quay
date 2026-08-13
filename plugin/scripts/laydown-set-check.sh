@@ -190,6 +190,9 @@ if [ "$LIST" -eq 0 ] && [ "${#TESTS[@]}" -gt 0 ] && { [ "$JSON" -eq 1 ] || [ "$R
   # `node --test` swallow its own failure exit code (observed rc=0 on a failing file). Unsetting it
   # lets the deep check's exit code be the real verdict. Run from $ROOT so the relative test paths
   # resolve against the target root (a fixture --root different from cwd).
+  # concurrency-default-fallback: hermetic cold-start check runs its 26 serial test files with
+  # --test-concurrency=1 deliberately (a serial-group check, not a concurrency-cap setting — declared
+  # per gap-concurrency-literal-only-at-definition-points).
   ( cd "$ROOT" && env -u NODE_TEST_CONTEXT node --test --test-concurrency=1 "${TESTS[@]}" ) >"$log" 2>&1
   rc=$?
   T_PASS=0; T_FAIL=0; T_CANCEL=0
