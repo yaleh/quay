@@ -1,7 +1,7 @@
 ---
 id: gap-task-store-parse-cost-0-8s-compounds-suite-slowdown
 title: 任务库解析 0.8s/次 CLI（1024 文件）——复利侵蚀套件耗时
-status: todo
+status: ready
 labels:
   - gap
   - defect
