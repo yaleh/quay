@@ -140,6 +140,51 @@ test("AC3: an A/B/C item without a (src:N) back-reference reddens", () => {
   }
 });
 
+test("AC3b: an anchor present ANYWHERE in the archive is green despite line drift (gap-src-n-anchor-coupling AC1/AC4)", () => {
+  const dir = buildBaselineRoot();
+  try {
+    // The manager reason archive: the anchor lives at line 20, but the core claims src:10 — a
+    // +10 drift (> the retired ANCHOR_K=5 window). The anchor is STILL in the document ⇒ GREEN
+    // (the judge is content, the line number is only a hint). This is the round 137/138 +7-shift
+    // shape: every manager-core anchor-miss was exactly N+7 and aborted the whole suite pre-test.
+    const arch = [];
+    for (let i = 1; i < 20; i++) arch.push(`filler ${i}`);
+    arch.push("锚句 target 出现在第 20 行"); // line 20 — the real location
+    write(dir, "orchestration/manager-loop-tick.md", arch.join("\n"));
+    write(dir, "orchestration/manager-tick-core.md",
+      "# manager tick — 执行核\n## A. 读数\n| A1 | 锚定 (src:10 \"锚句 target 出现在第 20 行\") |\n## B. 产出\n- **B1** 收尾 pass (src:1)。\n## C. 约束\n| C1 | 约束一 (src:1) |\n## D. 边界\n**可以**。\n");
+    const res = run(dir, "--only", "ac3", "--json");
+    assert.equal(res.status, 0, `a drifted-but-present anchor reddened AC3: ${res.stdout} ${res.stderr}`);
+    const out = JSON.parse(res.stdout);
+    assert.equal(out.ac3.ok, true);
+    assert.equal(out.ac3.anchorViolations.length, 0);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC3b: a genuinely missing anchor still reddens (anti-false-green, gap-src-n-anchor-coupling AC2)", () => {
+  const dir = buildBaselineRoot();
+  try {
+    // Archive contains no anchor at all ⇒ the (src:N "锚句") pointer reddens (content-anywhere fails).
+    const arch = [];
+    for (let i = 1; i <= 20; i++) arch.push(`filler ${i}`);
+    write(dir, "orchestration/manager-loop-tick.md", arch.join("\n"));
+    write(dir, "orchestration/manager-tick-core.md",
+      "# manager tick — 执行核\n## A. 读数\n| A1 | 锚定 (src:10 \"锚句 target 出现在第 20 行\") |\n## B. 产出\n- **B1** 收尾 pass (src:1)。\n## C. 约束\n| C1 | 约束一 (src:1) |\n## D. 边界\n**可以**。\n");
+    const res = run(dir, "--only", "ac3", "--json");
+    assert.equal(res.status, 1, `a missing anchor did not redden AC3: ${res.stdout} ${res.stderr}`);
+    const out = JSON.parse(res.stdout);
+    assert.equal(out.ac3.ok, false);
+    assert.equal(out.ac3.anchorViolations.length, 1);
+    assert.equal(out.ac3.anchorViolations[0].kind, "anchor-miss");
+    assert.equal(out.ac3.anchorViolations[0].anchor, "锚句 target 出现在第 20 行");
+    assert.deepEqual(out.ac3.anchorViolations[0].actualLines, []);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("AC4: a core referencing a nonexistent pointer target reddens", () => {
   const dir = buildBaselineRoot();
   try {
