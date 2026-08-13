@@ -88,6 +88,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 10. **延迟 MCP 工具必须先 `ToolSearch` 取 schema 再调**（`select:<name>` 或关键词；确认真返回了 schema 才调）。
     未取先调必 `InputValidationError`；`ToolSearch` 对预期存在的名字返回零结果**是真故障信号**（被改名/被删/skill 引用过期），**不要盲目重试**。
     适用本仓库全部 quay/meta-cc/archguard/playwright MCP 工具（exp5-ADR-TOOLSEARCH-DEFERRED-SCHEMA-PATTERN）。〔**无产物，靠自觉**〕
+11. **`git add` 与 `git commit` 之间不许有等待**——三层共用一个检出，**索引是跨层共享的可变状态，不是谁的私有暂存**。
+    提交被 `precommit-guard` 挡住（轮在跑）时，**立刻 `git reset`**（只取消暂存，改动全留工作树），窗口开了再一次性 `add && commit`。
+    〔产物：本轮若 `git diff --cached` 非空而未提交，即违规——一条命令可查〕
+    **2026-08-13 一天内双向各中一次**：①manager 的 52 行 AC53 被守卫挡下、未 reset 去等窗口，**随即被 outer 的 `df1f3965` 一并提交
+    ——内容落地但归属记成 outer，写在提交信息里的判据理由（负控制/为何不设阈值）全部丢失**；②同日 outer 把 3 个 task 文件 staged 等窗口，
+    **若 manager 先提交，三条任务的立案理由会变成一条 manager 提交的附带内容**（已拦下）。
+    **两次都不是"忘了提交"，是"以为索引归自己"。** 不绕过守卫是对的；**错的是在 add 之后去等**。
 
 ## What this repo is
 
