@@ -83,9 +83,9 @@ delta 判据按路径计数，不判「残留是否仍被活测试进程持有�
 
 ## AC
 
-- [ ] AC1: leak-scan 与测试回收次序修复——run 末扫描前等待回收完成 / 测试同步清理
-- [ ] AC2: 负控——round 95 形态（残留活到扫描时刻）不再误报 NEW
-- [ ] AC3: 既有测试全绿；`--for-task` scoped 门绿
+- [x] AC1: leak-scan 与测试回收次序修复——run 末扫描前等待回收完成 / 测试同步清理
+- [x] AC2: 负控——round 95 形态（残留活到扫描时刻）不再误报 NEW
+- [x] AC3: 既有测试全绿；`--for-task` scoped 门绿
 
 ## Definition of Done
 
@@ -99,3 +99,35 @@ delta 判据按路径计数，不判「残留是否仍被活测试进程持有�
 - scripts/test.sh:1217（--check 调用点，如需扫描前等待）
 - plugin/test/tmux-leak-scan.test.mjs（若存在）
 - tasks/gap-leak-scan-reap-race-false-red.md（自身）
+
+## Evidence
+
+**实现**：bounded reap-wait（持有判定）落在 `tmux-leak-scan.sh --check` 内部（2026-08-13）。
+判定前先扫描；发现 NEW 残留时不立即 FAIL，而是以 `$TMUX_LEAK_REAP_WAIT_MS`（默认 10000ms、
+`$TMUX_LEAK_REAP_POLL_MS` 默认 250ms）为界的轮询等待——残留若在界内消失，即收尾回收中的
+瞬态残留（测试自造 tmux server 退出异步：kill-session 后进程退出 + /tmp socket dir 删除是异步的），
+判定 clean 并输出 `note — …cleared during reap-wait`；界满仍残留才是真泄漏，FAIL 并列出。
+**门未削弱**：真泄漏（没人 kill 的 server）永不清零 ⇒ 仍 FAIL；干净 run 首次扫描即过、零额外延迟。
+`scripts/test.sh:1217` 调用点只加注释（等待逻辑在脚本内，`--check` 自带），不另起等待。
+
+**负控（round 95 形态 = 残留活到扫描时刻、随后被回收）**：`plugin/test/tmux-leak-scan.test.mjs`
+R2 精确复现——`--snapshot` 后新建 `/tmp/session-liveness-*` 残留、`--check` 开始时残留仍在、
+0.6s 后被独立 reaper 移除 ⇒ `--check` 判定 **clean + cleared during reap-wait note**，不误报 NEW。
+R3 对照：残留不被移除（真泄漏）⇒ 界满 FAIL 且列出该残留。R1（干净 run 零等待）、R4（快照排除
+既有匹配）、R5（无快照 fail-closed）全绿。
+
+**scoped 门**：`scripts/test.sh --for-task gap-leak-scan-reap-race-false-red` 退出 0——
+scoped 静态检查（dead-code-after-return-check / tick-core-static-check / delivery-inventory-drift-gate）过，
+5/5 测试过。既有受影响测试手验过：`test-isolation-check.test.mjs` AC5/tmux-leak-scan DELTA（真脚本）、
+`session-liveness-sweep.test.mjs`（脚本只读断言：无 pkill/killall）、`full-suite-runner.test.mjs`
+AC5/AC1 leak-scan 失败形态识别。全量套件绿留待 DoD/fan-in（本任务不跑全量）。
+
+```
+$ scripts/test.sh --for-task gap-leak-scan-reap-race-false-red   # EXIT=0
+✔ R1 — a clean delta (no NEW matches) is immediate clean with no reap-wait note
+✔ R2 — TRANSIENT NEW residue (the round-95 shape) clears within the bound → CLEAN + note
+✔ R3 — PERSISTENT NEW residue (a genuine leak) still FAILs after the bound, listing the match
+✔ R4 — a pre-existing match recorded in the before-run snapshot is excluded (DELTA preserved)
+✔ R5 — fail closed: --check with no before-run snapshot exits 1
+ℹ tests 5 · pass 5 · fail 0
+```

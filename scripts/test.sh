@@ -1214,6 +1214,11 @@ run_selected() {
     # residual (the snapshot was deleted by --check's success path or left stale). A leak is a REAL
     # residual, independent of test-failure reporting — merge its verdict into code so the runner's
     # tmux-leak-scan: FAIL line reaches the stream and failures[].
+    # BOUNDED REAP-WAIT (gap-leak-scan-reap-race-false-red): the wait-before-judgment lives INSIDE
+    # --check — when NEW matches appear it polls up to $TMUX_LEAK_REAP_WAIT_MS (default 10000) for
+    # them to clear before declaring a leak, so test-spawned tmux servers still exiting at run end
+    # (round 95 false-red: tests=4150 all pass) are not swept as residue. A genuine leak persists
+    # past the bound and still fails. A clean run adds zero latency (first scan wins immediately).
     if ! bash "${repo_root}/plugin/scripts/tmux-leak-scan.sh" --check "${repo_root}"; then
       code=1
     fi
