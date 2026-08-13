@@ -89,6 +89,27 @@ test("buildHeartbeat — omitting a required field leaves it ABSENT (so the cont
   assert.ok(!("blocked" in hb), "blocked must be absent when not provided");
 });
 
+test("AC53 AC1 — buildHeartbeat carries the five dispatch-state keys when provided", () => {
+  const hb = buildHeartbeat({
+    nowSec: 1,
+    blocked: [],
+    runIds: [],
+    effectiveCap: 3,
+    agentDispatches: 1,
+    budgetHit: false,
+    slotsFree: 5,
+    dispatchableDisjoint: 5,
+    pool: 16,
+    shouldRefill: true,
+    noRefillReason: null,
+  });
+  assert.equal(hb.slots_free, 5);
+  assert.equal(hb.dispatchable_disjoint, 5);
+  assert.equal(hb.pool, 16);
+  assert.equal(hb.should_refill, true);
+  assert.equal(hb.no_refill_reason, null);
+});
+
 // ── pure: parseJsonArg ───────────────────────────────────────────────────────────────────────────────
 
 test("parseJsonArg — parses JSON arrays/numbers/booleans", () => {
@@ -120,17 +141,51 @@ const FULL_ARGS = [
   "--agent-dispatches", "1",
   "--budget-hit", "false",
   "--delay-seconds", "1500",
+  // AC53 AC1: the five dispatch-state keys (should_refill=false ⇒ the round-trip checker verdict is
+  // ALIVE — no AC2 end-invariant violation).
+  "--slots-free", "3",
+  "--dispatchable-disjoint", "2",
+  "--pool", "12",
+  "--should-refill", "false",
+  "--no-refill-reason", "no dispatchable candidate passes step-4 checks",
   "--reason", "tick heartbeat",
 ];
 
-test("AC2 CLI — writer writes a full-shape heartbeat (>= 7 keys) and exits 0", () => {
+test("AC2 CLI — writer writes a full-shape heartbeat (>= 7 keys + AC53 dispatch-state) and exits 0", () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "iwuh-w-"));
   try {
     const r = runWriter(tmp, FULL_ARGS);
     assert.equal(r.status, 0, `writer must exit 0:\n${r.stdout}\n${r.stderr}`);
-    const hb = JSON.parse(fs.readFileSync(path.join(tmp, ".quay", "inner-wakeup-heartbeat.json"), "utf8"));
+    const hb = JSON.parse(fs.readFileSync(path.join(tmp, ".quay", "inner-wakeup-heartbeat.jsonl"), "utf8"));
     assert.ok(Object.keys(hb).length >= 7, `field count ${Object.keys(hb).length} must be >= 7`);
     for (const f of REQUIRED_HEARTBEAT_FIELDS) assert.ok(f in hb, `required field ${f} must be written`);
+    for (const f of ["slots_free", "dispatchable_disjoint", "pool", "should_refill", "no_refill_reason"]) {
+      assert.ok(f in hb, `AC53 dispatch-state field ${f} must be written`);
+    }
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("AC3 CLI — the writer APPENDS: two writes produce two jsonl lines, last line read wins", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "iwuh-app-"));
+  try {
+    const r1 = runWriter(tmp, FULL_ARGS);
+    assert.equal(r1.status, 0, `first write must exit 0:\n${r1.stdout}\n${r1.stderr}`);
+    // Second write with a different delaySeconds — proves append, not overwrite.
+    const idxDelay = FULL_ARGS.indexOf("--delay-seconds");
+    const secondArgs = [...FULL_ARGS];
+    secondArgs[idxDelay + 1] = "1800";
+    const r2 = runWriter(tmp, secondArgs);
+    assert.equal(r2.status, 0, `second write must exit 0:\n${r2.stdout}\n${r2.stderr}`);
+    const lines = fs.readFileSync(path.join(tmp, ".quay", "inner-wakeup-heartbeat.jsonl"), "utf8")
+      .split("\n").filter(Boolean);
+    assert.equal(lines.length, 2, `jsonl must have 2 appended lines, got ${lines.length}`);
+    const last = JSON.parse(lines[lines.length - 1]);
+    assert.equal(last.delaySeconds, 1800, "the last line must be the second write (append, not overwrite)");
+    // Legacy snapshot mirror carries the LAST write too.
+    const legacy = JSON.parse(fs.readFileSync(path.join(tmp, ".quay", "inner-wakeup-heartbeat.json"), "utf8"));
+    assert.equal(legacy.delaySeconds, 1800, "the legacy snapshot mirror must be the last write");
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
@@ -161,7 +216,7 @@ test("AC2 fail-closed — writer REFUSES (exit 1) a heartbeat missing blocked[],
     assert.equal(r.status, 1, `missing blocked must be refused:\n${r.stdout}\n${r.stderr}`);
     assert.match(r.stderr, /心跳字段缺失/, "the refusal must name 心跳字段缺失");
     assert.match(r.stderr, /blocked\(缺失\)/, "blocked must be named as missing");
-    assert.ok(!fs.existsSync(path.join(tmp, ".quay", "inner-wakeup-heartbeat.json")), "nothing must be written on refusal");
+    assert.ok(!fs.existsSync(path.join(tmp, ".quay", "inner-wakeup-heartbeat.jsonl")), "nothing must be written on refusal");
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
@@ -175,7 +230,46 @@ test("AC2 fail-closed — writer REFUSES a wrong-typed blocked (string), writes 
     const r = runWriter(tmp, args);
     assert.equal(r.status, 1, `wrong-typed blocked must be refused:\n${r.stdout}\n${r.stderr}`);
     assert.match(r.stderr, /blocked\(类型错\)/, "blocked must be named as wrong-type");
-    assert.ok(!fs.existsSync(path.join(tmp, ".quay", "inner-wakeup-heartbeat.json")), "nothing must be written on refusal");
+    assert.ok(!fs.existsSync(path.join(tmp, ".quay", "inner-wakeup-heartbeat.jsonl")), "nothing must be written on refusal");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("AC53 AC1 fail-closed — writer REFUSES a heartbeat missing the dispatch-state keys, writes NOTHING", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "iwuh-fc3-"));
+  try {
+    // Drop "--slots-free" and its value (the 5 dispatch-state flags come after --delay-seconds).
+    const idx = FULL_ARGS.indexOf("--slots-free");
+    const args = FULL_ARGS.filter((_, i) => i < idx || i >= idx + 10);
+    const r = runWriter(tmp, args);
+    assert.equal(r.status, 1, `missing dispatch-state must be refused:\n${r.stdout}\n${r.stderr}`);
+    assert.match(r.stderr, /派发状态五键缺失/, "the refusal must name 派发状态五键缺失");
+    assert.match(r.stderr, /slots_free\(缺失\)/, "slots_free must be named as missing");
+    assert.ok(!fs.existsSync(path.join(tmp, ".quay", "inner-wakeup-heartbeat.jsonl")), "nothing must be written on refusal");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("AC53 AC2 — a written violating heartbeat (should_refill=true + empty reason) trips the checker's end-invariant (exit 1)", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "iwuh-viol-"));
+  try {
+    // The 04:02:52Z negative-control shape: should_refill=true, slots_free=5, dispatchable_disjoint=5,
+    // pool=16, no_refill_reason=null — a round that ENDED while dispatchable work remained.
+    const violatingArgs = [...FULL_ARGS];
+    const idxShould = FULL_ARGS.indexOf("--should-refill");
+    violatingArgs[idxShould + 1] = "true";
+    const idxReason = FULL_ARGS.indexOf("--no-refill-reason");
+    violatingArgs[idxReason + 1] = "null";
+    const w = runWriter(tmp, violatingArgs);
+    assert.equal(w.status, 0, `writer must write the violating shape:\n${w.stdout}\n${w.stderr}`);
+    const c = runChecker(tmp);
+    assert.equal(c.status, 1, `checker must RED on the violating heartbeat:\n${c.stdout}\n${c.stderr}`);
+    const out = JSON.parse(c.stdout);
+    assert.equal(out.verdict, "DEAD");
+    assert.equal(out.status, "invariant-violated");
+    assert.equal(out.reason, "inner-round-ended-with-dispatchable-work");
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

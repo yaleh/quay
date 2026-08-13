@@ -318,7 +318,7 @@ exp5 已退役（`.claude/loop.md` 已删除），`.halt` 从「暂停 exp5 循�
 
 **醒来第一件事（AC4，`gap-slot-free-not-an-event-slots-stay-empty-missed-without-trace`——把 13:1x 那次「三条必读零读数、先 fan-in 后回填」的次序纠正过来）**：被 `<task-notification>` 唤起后，**先跑 A11/A12/A13 三条必读 + 回填，再 fan-in/写报告**——顺序是硬约束，不是建议：
 1. **A11 就绪池维护**：`node --experimental-strip-types plugin/scripts/ready-pool-check.ts --cap "${effective_cap:-3}" --apply`（`deficit > 0` ⇒ 补晋；自闸：pool<floor 且 promotions 非空才落盘）
-2. **A12 回填评估**：下面的「槽位回填的机械判定」——`slot-refill.ts --in-flight <本会话在飞集合>` 的 `should_refill=true` 且 `recommended` 非空 ⇒ 立即按步骤 4 派发 1-2 条
+2. **A12 回填评估**：下面的「槽位回填的机械判定」——`slot-refill.ts --in-flight <本会话在飞集合>` 的 `should_refill=true` 且 `recommended` 非空 ⇒ 立即按步骤 4 派发（**不变式驱动，`gap-inner-self-wake-sleep-empty-slots-not-dispatch` AC6/AC7**：派到 `should_refill` 变假或达 `slots_free`，**不设「1-2 条」这类写死字面量**——派一条 → 用更新后的在飞集合重跑 slot-refill 重估不变式 → 仍 `should_refill ∧ 有槽` 则再派，直到不变式变假或槽满）
 3. **A13 slots 遥测**：`fast-mode-telemetry.ts --slots --cap "${effective_cap:-3}"` 读 `real_in_flight` / `slots_free` / `stale_brackets`（`stale_brackets > 0` ⇒ 调 `--reconcile`——inner 核 A13 的强制步，见 `orchestration/fast-mode-tick-core.md`）
 
 **做完这三条必读 + 回填，才轮到 fan-in / 写报告 / 重排程。** 触发器早就存在（完成通知 = harness 原生事件）；
@@ -337,7 +337,7 @@ node --experimental-strip-types plugin/scripts/slot-refill.ts --root "$(pwd)" --
 
 - stdout 是 JSON。**`slots_free` = 空槽数**（`max(0, cap − 在飞数 − closed_but_live 数)`；在飞数由**本会话自己维护的集合**给出，不是遥测——AC6 括号≠subagent，遥测括号会把已完成任务多算在飞）。**`closed_but_live` 是反向维度**（`gap-closed-bracket-leaves-live-agent-consuming-slots`）：括号已关（`--task-end` 已写）但 executor 进程仍存在（worktree 未清 / 进程未退）的任务 id——它们仍占槽，`--slots` 的 `closedButLive` 机械给出，回填时一并传入，**别把它们的槽当空**。
 - **`should_refill` = 事件驱动 go/no-go**：`slots_free > 0` 且 `recommended` 非空（有候选通过步骤 4 的触摸可解析/依赖就绪/并发资格三道检查）。
-- **`recommended` = 建议立即派发的候选**（至多 `slots_free` 个，生产 disjoint 批，与在飞两两不相交）。用它做派发候选，仍需跑步骤 4 自己的逐候选检查（触摸可解析、依赖就绪、并发资格）。
+- **`recommended` = 建议立即派发的候选**（候选集**至多 `slots_free` 个**，生产 disjoint 批，与在飞两两不相交）——**它是候选集上限，不是派发数量**。用它做派发候选，仍需跑步骤 4 自己的逐候选检查（触摸可解析、依赖就绪、并发资格）；**实际派发数量由不变式决定**（`gap-inner-self-wake-sleep-empty-slots-not-dispatch` AC6/AC7）：「派到 `should_refill` 变假或达 `slots_free`」，每派一条重跑 slot-refill 重估不变式，仍 `should_refill ∧ 有槽` 则再派——弃「1-2 条」写死字面量（硬规则 4 推论二形状）。
 - **`no_refill_reason` 非空 = 不派发**：`in-flight ≥ cap`（并发上限语义不变，AC5；**cap 固定 = 5**，人 2026-08-11 裁定，与 manager A2/outer A6 对齐）、`.halt` 存在（**抢占挂载**，`gap-supervisor-preemption` AC2——代码强制点，任意点生效）或无可派发候选（负控制）。
 
 ### 规则
@@ -1112,20 +1112,32 @@ last-run 文件**，任一先触发即写回，另一个在同一窗口内不会
 派发评估（见「事件驱动派发（槽位回填）」）；tick 是兜底必跑心跳（每 tick 无条件跑 slot-refill，见步骤 4），
 不是派发的主节奏也不是新轮询源。
 
-**每次重排写心跳产物** `.quay/inner-wakeup-heartbeat.json`（ts = 重排时刻 epoch 秒；与 suite-chain-heartbeat.json
-同构，外层 A2 先例）——`gap-inner-wakeup-heartbeat-invisible`：兜底心跳只活在 transcript（ScheduleWakeup
-tool_use 时间戳），断了 15.3h 不可见直到人问第三次 + manager 用 meta-cc 查时间戳；按 C17 给「上次
-ScheduleWakeup 时刻」造机械可查产物。**字段最小契约**（`gap-inner-heartbeat-fields-shrunk-no-minimal-contract`）：
-心跳必须含结构化键 `ts`/`runIds`/`blocked`/`budgetHit`/`effectiveCap`/`agentDispatches`/`delaySeconds`
+**每次重排写心跳产物** `.quay/inner-wakeup-heartbeat.jsonl`（**追加式 jsonl，可回看**——每次重排 append
+一行，历史可查；另镜像最后一条到 `.json` 快照供 pre-AC53 读者如 semantic-observer-judge 读；ts = 重排时刻
+epoch 秒；与 suite-chain-heartbeat.json 同构，外层 A2 先例）——`gap-inner-wakeup-heartbeat-invisible`：
+兜底心跳只活在 transcript（ScheduleWakeup tool_use 时间戳），断了 15.3h 不可见直到人问第三次 + manager 用
+meta-cc 查时间戳；按 C17 给「上次 ScheduleWakeup 时刻」造机械可查产物。**字段最小契约**
+（`gap-inner-heartbeat-fields-shrunk-no-minimal-contract`）：心跳必须含结构化键
+`ts`/`runIds`/`blocked`/`budgetHit`/`effectiveCap`/`agentDispatches`/`delaySeconds`
 （Contract `heartbeat_field_count >= 7`）——`blocked[]` + `runIds` 是 manager A3 判「inner 是否卡住」的前提；
 **reason 散文可补充但不可替代结构化字段**（缺键=未查≠无阻塞，硬规则 6）；缺键 ⇒ 外层
-`inner-wakeup-heartbeat-check.ts` 报「心跳字段缺失」。**写命令（重排后立即跑，用写入方脚本，不手搓 python）**：
+`inner-wakeup-heartbeat-check.ts` 报「心跳字段缺失」。**AC53 派发状态五键**
+（`gap-inner-self-wake-sleep-empty-slots-not-dispatch` AC1）：心跳必须同时落盘
+`slots_free`/`dispatchable_disjoint`/`pool`/`should_refill`/`no_refill_reason`——否则记录结构上分不清
+「没货可派」与「有货不派」（判据②）；**结束不变式**（AC2）：一轮 tick 不得在
+`should_refill ∧ slots_free>0 ∧ dispatchable_disjoint>0 ∧ no_refill_reason 为空` 下结束——要么继续派发到
+其中一项为假，要么写出 no_refill_reason；外层 `inner-wakeup-heartbeat-check.ts` 对该形状报
+「结束不变式违例」（AC4 负控制：04:02:52Z 真实心跳回放必须报红）。**写命令（重排后立即跑，用写入方脚本，
+不手搓 python）**：
 
 ```bash
 node --no-warnings --experimental-strip-types plugin/scripts/inner-wakeup-heartbeat.ts \
   --blocked '[]' --run-ids '["<run-id>"]' \
   --effective-cap 3 --agent-dispatches 1 --budget-hit false \
-  --delay-seconds 1500 --reason 'tick heartbeat'
+  --delay-seconds 1500 \
+  --slots-free <n> --dispatchable-disjoint <n> --pool <n> \
+  --should-refill <true|false> --no-refill-reason '<reason 或 null>' \
+  --reason 'tick heartbeat'
 ```
 
 外层每个 tick 读该产物判新鲜（`orchestrator-tick-core.md` A13，`inner-wakeup-heartbeat-check.ts`）；

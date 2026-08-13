@@ -40,12 +40,16 @@ import {
   DEFAULT_MAX_AGE_SECS,
   FIELDS_MISSING_REASON,
   HEARTBEAT_FILE,
+  LEGACY_HEARTBEAT_FILE,
   MALFORMED,
   parseHeartbeat,
   judgeHeartbeat,
   readHeartbeatText,
   checkFieldContract,
   REQUIRED_HEARTBEAT_FIELDS,
+  REQUIRED_DISPATCH_STATE_FIELDS,
+  checkDispatchStateContract,
+  judgeEndInvariant,
 } from "../scripts/inner-wakeup-heartbeat-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -168,6 +172,141 @@ test("AC2 — checkFieldContract on null/missing heartbeat reports ALL required 
   assert.equal(c.fieldCount, 0);
 });
 
+// ── AC53 dispatch-state contract + end-invariant (gap-inner-self-wake-sleep-empty-slots-not-dispatch) ─
+
+test("AC53 AC1 — REQUIRED_DISPATCH_STATE_FIELDS = the five dispatch-state keys", () => {
+  assert.deepEqual(REQUIRED_DISPATCH_STATE_FIELDS, [
+    "slots_free", "dispatchable_disjoint", "pool", "should_refill", "no_refill_reason",
+  ]);
+});
+
+test("AC53 AC1 — checkDispatchStateContract passes a full-shape heartbeat (all five present)", () => {
+  const c = checkDispatchStateContract(fullHeartbeat());
+  assert.equal(c.ok, true, `full shape must satisfy the dispatch-state contract:\n${JSON.stringify(c)}`);
+  assert.deepEqual(c.missing, []);
+  assert.deepEqual(c.wrongType, []);
+});
+
+test("AC53 AC1 — checkDispatchStateContract flags a heartbeat missing slots_free", () => {
+  const { slots_free, ...without } = fullHeartbeat();
+  const c = checkDispatchStateContract(without);
+  assert.equal(c.ok, false);
+  assert.ok(c.missing.includes("slots_free"), `slots_free must be missing:\n${JSON.stringify(c.missing)}`);
+});
+
+test("AC53 AC1 — checkDispatchStateContract flags a wrong-typed should_refill (string instead of boolean)", () => {
+  const c = checkDispatchStateContract(fullHeartbeat({ should_refill: "true" }));
+  assert.equal(c.ok, false);
+  assert.ok(c.wrongType.includes("should_refill"), `should_refill must be wrongType:\n${JSON.stringify(c.wrongType)}`);
+});
+
+test("AC53 AC2 — judgeEndInvariant: the 04:02:52Z negative-control shape MUST violate (AC4 sample 1)", () => {
+  // The real 04:02:52Z reading (task Proposal): should_refill=true, slots_free=5,
+  // dispatchable_disjoint=5, pool=16, in_flight=0, no_refill_reason=null — a round that ended with
+  // dispatchable work remaining (the inner 满池自选长睡). This shape NEVER lit red before; the
+  // record couldn't even express the question. It must now report RED.
+  const v = judgeEndInvariant(fullHeartbeat({
+    slots_free: 5,
+    dispatchable_disjoint: 5,
+    pool: 16,
+    should_refill: true,
+    no_refill_reason: null,
+  }));
+  assert.equal(v.violated, true, `04:02:52Z shape must violate:\n${JSON.stringify(v)}`);
+  assert.equal(v.reason, "inner-round-ended-with-dispatchable-work");
+  assert.equal(v.evidence.slots_free, 5);
+});
+
+test("AC53 AC2 — judgeEndInvariant: the 04:22Z negative-control shape MUST violate (AC4 sample 2)", () => {
+  // The second real sample (inner idle 19min / should_refill=true / slots_free=5 / in-flight=0 /
+  // pool=20=floor). Pairs with sample 1 so "修后不再复现" has a control.
+  const v = judgeEndInvariant(fullHeartbeat({
+    slots_free: 5,
+    dispatchable_disjoint: 5,
+    pool: 20,
+    should_refill: true,
+    no_refill_reason: null,
+  }));
+  assert.equal(v.violated, true, `04:22Z shape must violate:\n${JSON.stringify(v)}`);
+});
+
+test("AC53 AC2 — judgeEndInvariant: the 07:13 fifth negative-control shape MUST violate (AC4 sample 5, outer 裁定 2026-08-13)", () => {
+  // Fifth sample (outer 裁定, 定性=延迟派发): inner heartbeat 07:13:42 fresh, runIds still 1, no new
+  // worktree; re-run with --in-flight: should_refill=True · slots_free=4 · dispatchable=10 ·
+  // recommended=4 · no_refill_reason=None — awake, looking at these numbers, no reason, dispatched 0
+  // at the time (07:21-22 finally dispatched 2 ⇒ delayed dispatch). The first four samples each had a
+  // WRONG reason recorded / the fourth's reason was blocked; THIS one shows even an explicit outer
+  // prompt-drive didn't work — only structural enforcement (dispatch loop) remains.
+  const v = judgeEndInvariant(fullHeartbeat({
+    slots_free: 4,
+    dispatchable_disjoint: 10,
+    pool: 0,
+    should_refill: true,
+    no_refill_reason: null,
+  }));
+  assert.equal(v.violated, true, `07:13 shape must violate:\n${JSON.stringify(v)}`);
+  assert.equal(v.reason, "inner-round-ended-with-dispatchable-work");
+  assert.equal(v.evidence.dispatchable_disjoint, 10);
+});
+
+test("AC53 AC2 — judgeEndInvariant: the 07:13 sixth-sample negative-control shape MUST violate (AC4 sample 6, manager 提供 2026-08-13)", () => {
+  // Sixth sample (manager 提供, fan-in 前加, "刚派完 2 条、仍有 2 空槽 2 推荐、然后睡 1500s"):
+  // should_refill=True · slots_free=2 · in_flight=3 · dispatchable=10 · recommended=2 ·
+  // no_refill_reason=None. Excludes "它不知道有货" (recommended explicitly lists 2) AND excludes "需要
+  // 解释" (just dispatched 2, leaving 2 free slots + work + no reason = invariant binary violation).
+  // 判据① is red AT THIS MOMENT (ending a round still leaving free slots + work + no reason) — the only
+  // sample that needs no explanation to see the violation and excludes unawareness.
+  const v = judgeEndInvariant(fullHeartbeat({
+    slots_free: 2,
+    dispatchable_disjoint: 10,
+    pool: 0,
+    should_refill: true,
+    no_refill_reason: null,
+  }));
+  assert.equal(v.violated, true, `sixth-sample shape must violate:\n${JSON.stringify(v)}`);
+  assert.equal(v.reason, "inner-round-ended-with-dispatchable-work");
+  assert.equal(v.evidence.slots_free, 2);
+  assert.equal(v.evidence.dispatchable_disjoint, 10);
+});
+
+test("AC53 AC2 — judgeEndInvariant: the six-moment acceptance replay (04:25/04:48/06:40/07:05/07:13/sixth) — the numeric shapes available today (04:02:52Z/04:22Z/07:13/sixth) all violate", () => {
+  // 判据① must be RED all six times — any not-red = invariant written too narrow. The coordinator +
+  // manager named the six moments (04:25 / 04:48 / 06:40 / 07:05 / 07:13 / sixth sample); the documented
+  // numeric shapes are 04:02:52Z (task Proposal), 04:22Z (task Proposal), 07:13 (outer 裁定) and the
+  // sixth sample (manager 提供). Each carries the same violating shape: should_refill=true + free slots
+  // + dispatchable disjoint > 0 + empty reason.
+  const shapes = [
+    { slots_free: 5, dispatchable_disjoint: 5, pool: 16, should_refill: true, no_refill_reason: null },   // 04:02:52Z
+    { slots_free: 5, dispatchable_disjoint: 5, pool: 20, should_refill: true, no_refill_reason: null },   // 04:22Z
+    { slots_free: 4, dispatchable_disjoint: 10, pool: 0, should_refill: true, no_refill_reason: null },   // 07:13
+    { slots_free: 2, dispatchable_disjoint: 10, pool: 0, should_refill: true, no_refill_reason: null },   // sixth (manager)
+  ];
+  for (const s of shapes) {
+    const v = judgeEndInvariant(fullHeartbeat(s));
+    assert.equal(v.violated, true, `shape must violate (should_refill=${s.should_refill} slots_free=${s.slots_free} dd=${s.dispatchable_disjoint} reason=${JSON.stringify(s.no_refill_reason)}):\n${JSON.stringify(v)}`);
+  }
+});
+
+test("AC53 AC2 — judgeEndInvariant: should_refill=false is NOT a violation (nothing dispatchable)", () => {
+  const v = judgeEndInvariant(fullHeartbeat({ should_refill: false, slots_free: 5, dispatchable_disjoint: 5, no_refill_reason: null }));
+  assert.equal(v.violated, false, "should_refill=false means no go — not a violation");
+});
+
+test("AC53 AC2 — judgeEndInvariant: should_refill=true WITH a written no_refill_reason is NOT a violation", () => {
+  const v = judgeEndInvariant(fullHeartbeat({
+    should_refill: true,
+    slots_free: 5,
+    dispatchable_disjoint: 5,
+    no_refill_reason: ".halt sentinel present",
+  }));
+  assert.equal(v.violated, false, "a written no_refill_reason satisfies the invariant (either continue OR write a reason)");
+});
+
+test("AC53 AC2 — judgeEndInvariant: should_refill=true but slots_free=0 is NOT a violation", () => {
+  const v = judgeEndInvariant(fullHeartbeat({ should_refill: true, slots_free: 0, dispatchable_disjoint: 5, no_refill_reason: null }));
+  assert.equal(v.violated, false, "no free slot is a legitimate end condition");
+});
+
 // ── CLI integration (spawn the real checker against a temp workspace) ───────────────────────────────
 
 function runCli(root, extra = []) {
@@ -185,7 +324,9 @@ function makeRootWithHeartbeat(heartbeatObjOrText) {
   return tmp;
 }
 
-/** Full contract-compliant heartbeat (the shape the writer must produce since 2026-08-11). */
+/** Full contract-compliant heartbeat (the shape the writer must produce since 2026-08-11 + the AC53
+ *  dispatch-state five keys since 2026-08-13). Defaults to a NON-violating dispatch state
+ *  (should_refill=false + a written reason) so ALIVE fixtures stay ALIVE. */
 function fullHeartbeat(overrides = {}) {
   return {
     ts: Math.floor(Date.now() / 1000),
@@ -196,6 +337,12 @@ function fullHeartbeat(overrides = {}) {
     agentDispatches: 1,
     delaySeconds: 1500,
     reason: "tick heartbeat",
+    // AC53 AC1: the five dispatch-state keys (non-violating default).
+    slots_free: 3,
+    dispatchable_disjoint: 2,
+    pool: 12,
+    should_refill: false,
+    no_refill_reason: "no dispatchable candidate passes step-4 checks",
     ...overrides,
   };
 }
@@ -328,6 +475,86 @@ test("AC2 CLI — stale heartbeat stays the stale verdict (freshness precedes fi
     assert.equal(out.reason, "inner-wakeup-heartbeat-dead");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ── AC53 CLI statuses (gap-inner-self-wake-sleep-empty-slots-not-dispatch) ───────────────────────────
+
+test("AC53 AC1 CLI --json — a fresh heartbeat MISSING the dispatch-state keys exits 1 (dispatch-state-missing)", () => {
+  const { slots_free, dispatchable_disjoint, pool, should_refill, no_refill_reason, ...withoutDs } = fullHeartbeat();
+  const root = makeRootWithHeartbeat(withoutDs);
+  try {
+    const r = runCli(root, ["--json"]);
+    assert.equal(r.status, 1, `missing dispatch-state must exit 1:\n${r.stdout}\n${r.stderr}`);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.verdict, "DEAD");
+    assert.equal(out.status, "dispatch-state-missing");
+    assert.equal(out.reason, "inner-wakeup-heartbeat-dispatch-state-missing");
+    assert.ok(out.dispatchStateContract.missing.includes("slots_free"), "slots_free must be named missing");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC53 AC2 CLI --json — the 04:02:52Z negative-control heartbeat exits 1 (invariant-violated, AC4)", () => {
+  // The real 04:02:52Z reading replayed into the CLI — must light RED (it never could before; the
+  // record didn't carry the dispatch-state keys).
+  const root = makeRootWithHeartbeat(fullHeartbeat({
+    slots_free: 5,
+    dispatchable_disjoint: 5,
+    pool: 16,
+    should_refill: true,
+    no_refill_reason: null,
+  }));
+  try {
+    const r = runCli(root, ["--json"]);
+    assert.equal(r.status, 1, `the 04:02:52Z replay must exit 1:\n${r.stdout}\n${r.stderr}`);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.verdict, "DEAD");
+    assert.equal(out.status, "invariant-violated");
+    assert.equal(out.reason, "inner-round-ended-with-dispatchable-work");
+    assert.equal(out.endInvariant.violated, true);
+    assert.equal(out.endInvariant.evidence.no_refill_reason, null);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC53 AC3 CLI — a legacy `.json` snapshot (pre-AC53 format) is still read via the fallback", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "iwuh-legacy-"));
+  try {
+    const quay = path.join(tmp, ".quay");
+    fs.mkdirSync(quay, { recursive: true });
+    // Write ONLY the legacy .json (no jsonl) — the checker must fall back to it.
+    fs.writeFileSync(path.join(quay, LEGACY_HEARTBEAT_FILE), JSON.stringify(fullHeartbeat(), null, 2), "utf8");
+    const r = runCli(tmp, ["--json"]);
+    assert.equal(r.status, 0, `legacy .json fallback must be ALIVE:\n${r.stdout}\n${r.stderr}`);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.verdict, "ALIVE");
+    assert.equal(out.dispatchStateContract.ok, true);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("AC53 AC3 CLI — when BOTH exist, the jsonl LAST line wins over the legacy snapshot", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "iwuh-both-"));
+  try {
+    const quay = path.join(tmp, ".quay");
+    fs.mkdirSync(quay, { recursive: true });
+    // Legacy snapshot: violating shape (would be RED if read).
+    fs.writeFileSync(path.join(quay, LEGACY_HEARTBEAT_FILE), JSON.stringify(fullHeartbeat({
+      slots_free: 5, dispatchable_disjoint: 5, pool: 16, should_refill: true, no_refill_reason: null,
+    }), null, 2), "utf8");
+    // jsonl with a NON-violating last line — the checker must read THIS, not the legacy.
+    fs.writeFileSync(path.join(quay, HEARTBEAT_FILE), `${JSON.stringify(fullHeartbeat({ slots_free: 2, should_refill: false }))}\n`, "utf8");
+    const r = runCli(tmp, ["--json"]);
+    assert.equal(r.status, 0, `jsonl last line must win:\n${r.stdout}\n${r.stderr}`);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.verdict, "ALIVE");
+    assert.equal(out.endInvariant.violated, false);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
 

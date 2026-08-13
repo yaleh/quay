@@ -17,8 +17,14 @@
 // Fields written:
 //   required (Contract band heartbeat_field_count >= 7): ts / runIds / blocked / budgetHit /
 //     effectiveCap / agentDispatches / delaySeconds
+//   required AC53 dispatch-state (gap-inner-self-wake-sleep-empty-slots-not-dispatch AC1): slots_free /
+//     dispatchable_disjoint / pool / should_refill / no_refill_reason — recorded at the moment
+//     delaySeconds is chosen so the record distinguishes "nothing dispatchable" from "dispatchable
+//     but didn't dispatch" (the AC2 end-invariant judges on these; absent = 未查 ≠ 无货).
 //   supplemental: agentLimit (semantic-observer-judge heuristic), budgetCritical (manager A3),
 //     reason (free-text prose — may SUPPLEMENT but never REPLACE the structured fields, AC3)
+// AC3 (追加式 jsonl): the write APPENDS one JSON record per line to HEARTBEAT_FILE (reviewable
+//   history) and mirrors the last record to LEGACY_HEARTBEAT_FILE (pre-AC53 readers keep working).
 //
 // Usage:
 //   node --no-warnings --experimental-strip-types plugin/scripts/inner-wakeup-heartbeat.ts \
@@ -32,8 +38,16 @@
 import fs from "node:fs";
 import path from "node:path";
 import { isDirectEntry } from "./gate-script-base.ts";
-// Single source of truth for the minimal field contract: the checker defines it, the writer enforces it.
-import { HEARTBEAT_FILE, REQUIRED_HEARTBEAT_FIELDS, checkFieldContract } from "./inner-wakeup-heartbeat-check.ts";
+// Single source of truth for the minimal field contract + the AC53 dispatch-state contract: the
+// checker defines them, the writer enforces both.
+import {
+  HEARTBEAT_FILE,
+  LEGACY_HEARTBEAT_FILE,
+  REQUIRED_HEARTBEAT_FIELDS,
+  REQUIRED_DISPATCH_STATE_FIELDS,
+  checkFieldContract,
+  checkDispatchStateContract,
+} from "./inner-wakeup-heartbeat-check.ts";
 
 /** Serialize a JSON arg (array / number / boolean) — arrays must be JSON-parseable. PURE. */
 export function parseJsonArg(value, flagName) {
@@ -61,6 +75,16 @@ export function buildHeartbeat({
   agentLimit,
   budgetCritical,
   reason = "tick heartbeat",
+  // AC53 (gap-inner-self-wake-sleep-empty-slots-not-dispatch) AC1: the five dispatch-state keys
+  // recorded at the moment delaySeconds is chosen. Optional here so pure construction stays explicit;
+  // the writer's fail-closed gate REFUSES a heartbeat missing them (a record that cannot distinguish
+  // "nothing dispatchable" from "dispatchable but didn't dispatch" is the exact defect this task
+  // fixes).
+  slotsFree,
+  dispatchableDisjoint,
+  pool,
+  shouldRefill,
+  noRefillReason,
 }) {
   const hb = { ts: nowSec };
   if (runIds !== undefined) hb.runIds = runIds;
@@ -72,28 +96,44 @@ export function buildHeartbeat({
   if (agentLimit !== undefined) hb.agentLimit = agentLimit;
   if (budgetCritical !== undefined) hb.budgetCritical = budgetCritical;
   if (reason !== undefined) hb.reason = reason;
+  if (slotsFree !== undefined) hb.slots_free = slotsFree;
+  if (dispatchableDisjoint !== undefined) hb.dispatchable_disjoint = dispatchableDisjoint;
+  if (pool !== undefined) hb.pool = pool;
+  if (shouldRefill !== undefined) hb.should_refill = shouldRefill;
+  if (noRefillReason !== undefined) hb.no_refill_reason = noRefillReason;
   return hb;
 }
 
-/** Atomic write: temp file in the same dir then rename. Returns the final path. */
+/** AC53 AC3: append-only write — one JSON record per line to the jsonl, plus a mirror of the LAST
+ *  record to the legacy `.json` snapshot (kept so pre-AC53 readers — e.g. the semantic-observer
+ *  judge, whose default path is `<root>/.quay/<layer>-wakeup-heartbeat.json` — keep working).
+ *  Returns the jsonl path. */
 export function writeHeartbeat(root, heartbeat) {
   const quayDir = path.join(root || ".", ".quay");
   fs.mkdirSync(quayDir, { recursive: true });
-  const finalPath = path.join(quayDir, HEARTBEAT_FILE);
-  const tmpPath = `${finalPath}.tmp-${process.pid}`;
+  const jsonlPath = path.join(quayDir, HEARTBEAT_FILE);
+  // Append one compact JSON line (append-only history is the reviewable record).
+  fs.appendFileSync(jsonlPath, `${JSON.stringify(heartbeat)}\n`, "utf8");
+  // Mirror the last record to the legacy snapshot (last-write-wins, atomic temp+rename).
+  const legacyPath = path.join(quayDir, LEGACY_HEARTBEAT_FILE);
+  const tmpPath = `${legacyPath}.tmp-${process.pid}`;
   fs.writeFileSync(tmpPath, JSON.stringify(heartbeat, null, 2), "utf8");
-  fs.renameSync(tmpPath, finalPath);
-  return finalPath;
+  fs.renameSync(tmpPath, legacyPath);
+  return jsonlPath;
 }
 
 function usage() {
   console.error(`inner-wakeup-heartbeat.ts — inner 兜底心跳写入方（结构化字段）
 
-Writes <root>/.quay/${HEARTBEAT_FILE} with the FULL structured field set required by the minimal field
-contract (${REQUIRED_HEARTBEAT_FIELDS.join("/")} — Contract band heartbeat_field_count >= 7).
+Appends one record per line to <root>/.quay/${HEARTBEAT_FILE} (AC53 AC3: 追加式 jsonl — 可回看) and
+mirrors the last record to <root>/.quay/${LEGACY_HEARTBEAT_FILE} (kept for pre-AC53 readers, e.g. the
+semantic-observer judge). Writes the FULL structured field set required by the minimal field contract
+(${REQUIRED_HEARTBEAT_FIELDS.join("/")} — Contract band heartbeat_field_count >= 7) PLUS the AC53
+dispatch-state five keys (${REQUIRED_DISPATCH_STATE_FIELDS.join("/")}).
 FAIL-CLOSED: if a required field is missing/wrong-typed, the writer refuses and exits 1 — it can never
-produce the 3-key shrunk heartbeat that broke manager A3. reason prose supplements, never replaces
-(AC3).
+produce the 3-key shrunk heartbeat that broke manager A3, nor a heartbeat that cannot distinguish
+"nothing dispatchable" from "dispatchable but didn't dispatch" (AC53 AC1). reason prose supplements,
+never replaces (AC3).
 
 Usage:
   --blocked '<json array>'       inner 阻塞信号列表（A3 判卡住的前提）— REQUIRED
@@ -102,6 +142,11 @@ Usage:
   --agent-dispatches <n>         本轮派发计数 — REQUIRED
   --budget-hit <true|false>      预算是否触顶 — REQUIRED
   --delay-seconds <n>            ScheduleWakeup 重排间隔秒（default 1500）
+  --slots-free <n>               AC53: 空槽数（slot-refill 输出）— REQUIRED
+  --dispatchable-disjoint <n>    AC53: 池内最大互不冲突子集 — REQUIRED
+  --pool <n>                     AC53: 就绪池数 — REQUIRED
+  --should-refill <true|false>   AC53: 事件驱动 go/no-go（slot-refill 输出）— REQUIRED
+  --no-refill-reason '<text>'    AC53: 不派发理由（null/空 = 有货不派，结束不变式判红）— REQUIRED
   --agent-limit <n>              subagent 上限（semantic-observer-judge 启发式用）
   --budget-critical <true|false> 预算危急（manager A3 读）
   --reason <text>                free-text prose（可补充不可替代）
@@ -135,13 +180,25 @@ export function main(argv) {
       agentLimit: flagVal("--agent-limit") !== undefined ? Number(flagVal("--agent-limit")) : undefined,
       budgetCritical: flagVal("--budget-critical") !== undefined ? flagVal("--budget-critical") === "true" : undefined,
       reason: flagVal("--reason"),
+      // AC53 AC1: the five dispatch-state keys — REQUIRED at write time (fail-closed below).
+      slotsFree: flagVal("--slots-free") !== undefined ? Number(flagVal("--slots-free")) : undefined,
+      dispatchableDisjoint: flagVal("--dispatchable-disjoint") !== undefined ? Number(flagVal("--dispatchable-disjoint")) : undefined,
+      pool: flagVal("--pool") !== undefined ? Number(flagVal("--pool")) : undefined,
+      shouldRefill: flagVal("--should-refill") !== undefined ? flagVal("--should-refill") === "true" : undefined,
+      // AC53: `--no-refill-reason null` / `--no-refill-reason ''` means "no reason written" ⇒ JS null
+      // (the exact 有货不派 shape the AC2 end-invariant flags); any other text is the written reason.
+      noRefillReason: flagVal("--no-refill-reason") !== undefined
+        ? (flagVal("--no-refill-reason") === "null" || flagVal("--no-refill-reason") === "" ? null : flagVal("--no-refill-reason"))
+        : undefined,
     });
   } catch (e) {
     console.error(`inner-wakeup-heartbeat: ${e.message}`);
     return 2;
   }
 
-  // Fail-closed: run the checker's own contract check BEFORE writing. A shrunk heartbeat is refused.
+  // Fail-closed: run the checker's own contract checks BEFORE writing. A shrunk heartbeat (missing
+  // minimal keys) OR a heartbeat that cannot distinguish "nothing dispatchable" from "dispatchable
+  // but didn't dispatch" (missing the AC53 five dispatch-state keys) is refused.
   const contract = checkFieldContract(heartbeat);
   if (!contract.ok) {
     const miss = [...contract.missing.map((f) => `${f}(缺失)`), ...contract.wrongType.map((f) => `${f}(类型错)`)]
@@ -149,12 +206,19 @@ export function main(argv) {
     console.error(`inner-wakeup-heartbeat: REFUSED — 心跳字段缺失，不写入（缺 ${miss}）`);
     return 1;
   }
+  const dsContract = checkDispatchStateContract(heartbeat);
+  if (!dsContract.ok) {
+    const miss = [...dsContract.missing.map((f) => `${f}(缺失)`), ...dsContract.wrongType.map((f) => `${f}(类型错)`)]
+      .join(" / ");
+    console.error(`inner-wakeup-heartbeat: REFUSED — 派发状态五键缺失，不写入（缺 ${miss}）——记录必须能分清「没货可派」与「有货不派」（AC53 AC1）`);
+    return 1;
+  }
 
   const finalPath = writeHeartbeat(root, heartbeat);
   if (jsonOut) {
     console.log(JSON.stringify({ file: finalPath, written: true, fieldCount: contract.fieldCount, heartbeat }, null, 2));
   } else {
-    console.log(`inner-wakeup-heartbeat: written ${finalPath} (${contract.fieldCount} fields)`);
+    console.log(`inner-wakeup-heartbeat: written ${finalPath} (${contract.fieldCount} + ${REQUIRED_DISPATCH_STATE_FIELDS.length} dispatch-state fields)`);
   }
   return 0;
 }

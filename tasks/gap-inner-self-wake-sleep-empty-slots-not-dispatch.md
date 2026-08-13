@@ -87,6 +87,22 @@ one-per-wake 不是 inner 没填满/偷懒，inner 派 1 条是**严格遵守文
    **第三真实样本（06:40Z）**：should_refill=true / slots_free=5 / in_flight=0 / pool=20 / dd=10 /
    reason="verification round ebb9877d running"（机制里不存在的闸）——同一形状第三次复现、理由不同，
    证明不是条款挡住而是缺不变式。
+   **第五样本（07:13，outer 裁定 2026-08-13，定性=延迟派发）**：inner 心跳 07:13:42 新鲜、runIds 仍 1、
+   worktree 无新树，带 `--in-flight` 重跑：
+   `should_refill=True · slots_free=4 · dispatchable=10 · recommended=4 · no_refill_reason=None`
+   —— 醒着、看着这些数、无任何理由，当时派了 0（07:21-22 最终派了 2，故定性「延迟派发」）。
+   价值：前四次各有错理由、第四次理由被堵死，**这次是「提示式指令（外层明确驱动）也不管用」**——
+   证明只剩结构性强制（派发循环进 workflow）。
+   **第六样本（manager 提供 2026-08-13，fan-in 前加，比前五个都好用）**：「刚派完 2 条、仍有 2 空槽
+   2 推荐、然后睡 1500s」——
+   `should_refill=True · slots_free=2 · in_flight=3 · dispatchable=10 · recommended=2 · no_refill_reason=None`
+   —— 排除「它不知道有货」（recommended 明确列 2 条），也排除「需要解释」（刚派完 2、留 2 空槽 + 有货 +
+   无理由 = 不变式二值违反）。**判据①此刻仍红**（结束一轮时仍留空槽 + 有货 + 无理由）。唯一「不需任何解释
+   就能看出违反」且排除不知情的样本。
+   **⭐ 六时刻验收（outer 裁定 2026-08-13 + manager 追加第六样本）**：修完后**重放这六个时刻的读数，
+   判据①必须六次全红**——任一不红 = 不变式写窄了。**六时刻 = 04:25 / 04:48 / 06:40 / 07:05 / 07:13 /
+   第六样本**（已文档化的数值形状：04:02:52Z 与 04:22Z 见上、07:13 见第五样本、第六样本见上；其余
+   04:25/04:48/06:40/07:05 四时刻读数待 round 131 终态后从真实历史收集回放）。
 
 **两点明确纳入**：
 - AC42-52 不修这条——per-task 验证改的是「验证在哪跑」，不是「谁叫醒派发」；自锁在新模型下一模一样。
@@ -97,20 +113,88 @@ one-per-wake 不是 inner 没填满/偷懒，inner 派 1 条是**严格遵守文
 
 ## AC
 
-- [ ] AC1: 心跳在选 delaySeconds 时刻落盘五键（slots_free/dispatchable_disjoint/pool/should_refill/no_refill_reason）
-- [ ] AC2: 结束不变式——有货可派不得结束一轮（除非写出 no_refill_reason）
-- [ ] AC3: 心跳改追加式 jsonl（可回看）
-- [ ] AC4: 负控制——回放 04:02:52Z 真心跳+slot-refill 必须报红
-- [ ] AC5: 既有测试全绿；`--for-task` scoped 门绿
-- [ ] AC6: 派发口径三处同步定一——不变式驱动「派到 should_refill 变假或达 slots_free」，弃「1-2 条」字面量
+- [x] AC1: 心跳在选 delaySeconds 时刻落盘五键（slots_free/dispatchable_disjoint/pool/should_refill/no_refill_reason）
+- [x] AC2: 结束不变式——有货可派不得结束一轮（除非写出 no_refill_reason）
+- [x] AC3: 心跳改追加式 jsonl（可回看）
+- [x] AC4: 负控制——回放 04:02:52Z/04:22Z/07:13/第六样本 四数值样本必报红（判据①）；六时刻
+      （04:25/04:48/06:40/07:05/07:13/第六样本）全红为验收，见 DoD 与 Evidence
+- [x] AC5: 既有测试全绿；`--for-task` scoped 门绿（scoped 门权威复跑 deferred-to-round-131-terminal，见 Evidence）
+- [x] AC6: 派发口径三处同步定一——不变式驱动「派到 should_refill 变假或达 slots_free」，弃「1-2 条」字面量
       （`plugin/loop/fast-mode-loop-tick.md:321/:340` + 执行核 `fast-mode-tick-core.md` A12 三处一致）
-- [ ] AC7: 每次派发后重估不变式（派一条 → 重跑 slot-refill → 仍 `should_refill ∧ 有槽` 则再派）
+- [x] AC7: 每次派发后重估不变式（派一条 → 重跑 slot-refill → 仍 `should_refill ∧ 有槽` 则再派）
 
 ## Definition of Done
 
-- [ ] AC1–AC7 全部勾上
-- [ ] 负控制样例贴出（04:02:52Z + 04:22Z 两样本回放报红）
-- [ ] 全量套件绿
+- [x] AC1–AC7 全部勾上
+- [x] 负控制样例贴出（04:02:52Z + 04:22Z + 07:13 + 第六样本 四样本回放报红）
+- [ ] 六时刻验收（outer 裁定 2026-08-13 + manager 追加第六样本）：重放 04:25 / 04:48 / 06:40 / 07:05 / 07:13 /
+      第六样本 读数，判据①必须六次全红——任一不红 = 不变式写窄了（07:13 + 第六样本已自动化回放报红；
+      04:25/04:48/06:40/07:05 读数待 round 131 终态后从真实历史收集回放）
+- [ ] 全量套件绿（deferred——round 131 终态后由外层/协调者复核，内层零全量自跑）
+
+## Evidence
+
+**测试集全绿**——scoped 门选中集（5 文件）：
+`plugin/test/inner-wakeup-heartbeat-check.test.mjs` / `inner-wakeup-heartbeat.test.mjs` /
+`slot-refill.test.mjs` / `slot-refill-heartbeat.test.mjs` / `semantic-observer-judge.test.mjs`。
+（a）`--for-task ... --allow-thin` 实跑一次（round 130 并发下完成，非权威）：137 pass / 0 fail / 0 cancelled，
+exit 0；（b）追加 AC4 六时刻验收测试后，`inner-wakeup-heartbeat-check.test.mjs` 单文件重跑：
+**47 pass / 0 fail / 0 cancelled**（44→47，新增 07:13 样本 / 第六样本 / 六时刻验收）。权威 scoped 门留 round 131 终态复跑。
+
+```
+ℹ tests 137   (scoped 门并发热身跑，非权威；追加 AC4 测试后 checker 文件 47 pass)
+ℹ pass 137
+ℹ fail 0
+ℹ cancelled 0
+SCOPED GATE EXIT: 0
+```
+
+**scoped 门状态 = deferred-to-round-131-terminal**：上面这次跑是在 round 130 全量套件并发下完成的
+（协调者 2026-08-13 转发指令：与 round 130 并发是 checker-cost wall-clock 红的干扰源，零并发测试违规），
+因此**不作权威确认**；权威 `--for-task` scoped 门留到 round 131 终态后再跑。本次提交由 pre-commit 守卫放行
+（`verdict: allow` / `no-assertion-surface-touched`，轮在跑但本次提交不触及断言面文件）。
+
+**AC4 负控制（四样本回放报红）**——`judgeEndInvariant` 直接回放：
+
+```
+sample1(04:02:52Z) violated = true reason = inner-round-ended-with-dispatchable-work
+sample2(04:22Z)     violated = true reason = inner-round-ended-with-dispatchable-work
+sample5(07:13)     violated = true reason = inner-round-ended-with-dispatchable-work
+sample6(manager)    violated = true reason = inner-round-ended-with-dispatchable-work
+control(no-go)      violated = false
+```
+
+**CLI 回放 04:02:52Z 真实心跳（`inner-wakeup-heartbeat-check.ts --json`）**：
+
+```
+CLI verdict: DEAD | status: invariant-violated | reason: inner-round-ended-with-dispatchable-work
+endInvariant.violated: True
+evidence: {"should_refill": true, "slots_free": 5, "dispatchable_disjoint": 5, "pool": 16, "no_refill_reason": null}
+checker exit: 1
+```
+
+**六时刻验收（outer 裁定 2026-08-13 + manager 追加第六样本）**：判据①须对
+04:25 / 04:48 / 06:40 / 07:05 / 07:13 / 第六样本 六次全红。已文档化且自动化回放报红的数值形状：
+04:02:52Z / 04:22Z（本任务 Proposal）+ 07:13（第五样本）+ 第六样本（manager）。新增 `judgeEndInvariant`
+测试「六时刻验收」逐条断言四数值形状均 violated；04:25 / 04:48 / 06:40 / 07:05 的数值读数待 round 131
+终态后从真实历史收集补入同一条测试（任一不红 = 不变式写窄了）。
+
+**实现落点**：
+- `plugin/scripts/inner-wakeup-heartbeat-check.ts`：新增 `REQUIRED_DISPATCH_STATE_FIELDS`（五键）、
+  `checkDispatchStateContract`、`judgeEndInvariant`（AC2 结束不变式机械形式）、`INVARIANT_VIOLATED_REASON`；
+  `HEARTBEAT_FILE` → `inner-wakeup-heartbeat.jsonl`（追加式 jsonl，`readHeartbeatText` 读最后一行，`.json` 快照兜底）；
+  CLI 新增 `dispatch-state-missing` / `invariant-violated` 两个 RED 状态（exit 1）。
+- `plugin/scripts/inner-wakeup-heartbeat.ts`：写入方新增五键 CLI 参数；`writeHeartbeat` 改为 append 到 jsonl +
+  镜像最后一条到 `.json` 快照（pre-AC53 读者如 semantic-observer-judge 继续可用）；fail-closed 同时跑最小契约 +
+  AC53 派发状态契约。
+- 文档（AC6/AC7 口径同步，四处一致）：`plugin/loop/fast-mode-loop-tick.md:321/:340` +
+  `plugin/loop/fast-mode-tick-core.md` A12 + `orchestration/fast-mode-tick-core.md` A12 +
+  laid-down 副本 `docs/analysis/fast-mode-loop-tick.md`——统一为不变式驱动「派到 `should_refill` 变假或达
+  `slots_free`」，每派一条重估，弃「1-2 条」写死字面量。
+- 本任务 `## Touches` 追加 `## Test-Files`（5 个测试文件），使 scoped 选中集覆盖写入方与 doc-contract 测试。
+- `plugin/test/inner-wakeup-heartbeat-check.test.mjs` 新增三条 AC4 测试：07:13 第五样本（outer 裁定）、
+  第六样本（manager 提供 2026-08-13）、六时刻验收（04:02:52Z/04:22Z/07:13/第六样本 四数值形状逐条断言
+  violated）。
 
 ## Touches
 
@@ -119,3 +203,11 @@ one-per-wake 不是 inner 没填满/偷懒，inner 派 1 条是**严格遵守文
 - plugin/loop/fast-mode-loop-tick.md（:321「1-2 条」→ 不变式驱动 + :340 说明同步）
 - plugin/loop/fast-mode-tick-core.md + orchestration/fast-mode-tick-core.md（执行核 A12 口径同步）
 - tasks/gap-inner-self-wake-sleep-empty-slots-not-dispatch.md（自身）
+
+## Test-Files
+
+- plugin/test/inner-wakeup-heartbeat-check.test.mjs
+- plugin/test/inner-wakeup-heartbeat.test.mjs
+- plugin/test/slot-refill.test.mjs
+- plugin/test/slot-refill-heartbeat.test.mjs
+- plugin/test/semantic-observer-judge.test.mjs

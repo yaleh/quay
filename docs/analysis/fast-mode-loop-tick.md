@@ -282,7 +282,7 @@ node --experimental-strip-types plugin/scripts/slot-refill.ts --root "$(pwd)" --
 
 - stdout 是 JSON。**`slots_free` = 空槽数**（`max(0, cap − 在飞数)`；在飞数由**本会话自己维护的集合**给出，不是遥测——AC6 括号≠subagent，遥测括号会把已完成任务多算在飞）。
 - **`should_refill` = 事件驱动 go/no-go**：`slots_free > 0` 且 `recommended` 非空（有候选通过步骤 4 的触摸可解析/依赖就绪/并发资格三道检查）。
-- **`recommended` = 建议立即派发的候选**（至多 `slots_free` 个，生产 disjoint 批，与在飞两两不相交）。用它做派发候选，仍需跑步骤 4 自己的逐候选检查（触摸可解析、依赖就绪、并发资格）。
+- **`recommended` = 建议立即派发的候选**（候选集**至多 `slots_free` 个**，生产 disjoint 批，与在飞两两不相交）——**它是候选集上限，不是派发数量**。用它做派发候选，仍需跑步骤 4 自己的逐候选检查（触摸可解析、依赖就绪、并发资格）；**实际派发数量由不变式决定**（`gap-inner-self-wake-sleep-empty-slots-not-dispatch` AC6/AC7）：「派到 `should_refill` 变假或达 `slots_free`」，每派一条重跑 slot-refill 重估不变式，仍 `should_refill ∧ 有槽` 则再派——弃「1-2 条」写死字面量（硬规则 4 推论二形状）。
 - **`no_refill_reason` 非空 = 不派发**：`in-flight ≥ cap`（并发上限语义不变，AC5；cap 仍是 `cap-from-gate.sh` 读 avg300 + 滞回 + 档位配置的产物）或无可派发候选（负控制）。
 
 ### 规则
