@@ -37,7 +37,7 @@ import { fileURLToPath } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
 import {
   tmuxAvailable,
-  setProbeTmpPrefix, sweepTmp, reapLiveOwners, dirHasLiveOwner,
+  setProbeTmpPrefix, sweepTmp, reapLiveOwners, dirHasLiveOwner, probeRoot,
   makeHermeticProbe, spawnMonitor, waitForRounds,
 } from "./session-liveness-helpers.mjs";
 
@@ -52,7 +52,10 @@ test("AC4/AC3 — sweepTmp keeps a LIVE probe (owner session alive) and cleans o
   const p = makeHermeticProbe("swp-ac4");
   const liveDir = p.tmp;
   // residue: the SAME prefix, but with NO live tmux owner (no server socket under it).
-  const residue = fs.mkdtempSync(path.join(os.tmpdir(), "session-liveness-swp-"));
+  // Created under probeRoot() (NOT os.tmpdir()) so sweepTmp — which scans probeRoot() — can
+  // see it: under a namespaced round (QUAY_RUN_ID set) the two bases differ, and a residue in
+  // os.tmpdir() would be invisible to the sweeper (round 126 AC4/AC3 wall-clock regression).
+  const residue = fs.mkdtempSync(path.join(probeRoot(), "session-liveness-swp-"));
   fs.mkdirSync(path.join(residue, "sock"), { recursive: true });
   try {
     assert.ok(dirHasLiveOwner(liveDir),

@@ -36,9 +36,17 @@ const REPO_ROOT = path.resolve(__dirname, "..", "..");
 const SCAN_SH = path.join(REPO_ROOT, "plugin", "scripts", "tmux-leak-scan.sh");
 
 // A unique /tmp/session-liveness-* dir under the leak-scan's watched prefix.
+// The fake-leak dir must live under the SAME base the scan covers: the per-run namespace root
+// (/tmp/quay-run-<runId>/) when QUAY_RUN_ID is set (the runner's namespaced mode — the scan only
+// covers that subtree), else os.tmpdir() (legacy prefixes). A residue created in os.tmpdir() while
+// the scan runs namespaced is invisible to it (round 126 R2/R3 failure). Mirrors probeRoot().
 function makeTmpDirPath() {
+  const base = process.env.QUAY_RUN_ID
+    ? path.join(os.tmpdir(), `quay-run-${process.env.QUAY_RUN_ID}`)
+    : os.tmpdir();
+  fs.mkdirSync(base, { recursive: true });
   return path.join(
-    os.tmpdir(),
+    base,
     `session-liveness-reapwait-${process.pid}-${Math.random().toString(36).slice(2, 8)}`,
   );
 }
