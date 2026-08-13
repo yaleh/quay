@@ -89,6 +89,13 @@ import {
   // mergeSurfaceBlock distinguishes a merge-worktree overlap from a peer-task overlap (AC2).
   computeMergeWorktreeSurfaces,
   mergeSurfaceBlock,
+  // LANDED-IMPLEMENTATION (gap-slot-refill-recommends-landed-code-complete-tasks): the SHAPE-AWARE
+  // completion counter + the （待外部） annotation judge — reused, never a parallel copy. The new
+  // landed-implementation gate needs the same "which completion boxes are open and are they declared
+  // external" read the pool's notYetFlipped applies (single source), so an AC-incomplete landed task
+  // (stuck-work) stays dispatchable.
+  countCompletionCheckboxes,
+  isExternalVerificationItem,
 } from "./ready-pool-check.ts";
 // NOT-YET-FLIPPED SKIP (gap-slot-refill-repeats-done-eligible-recommendations): the AC-completeness
 // gate (countAcCheckboxes — the SAME gate ready-pool-check's notYetFlipped applies, so an AC-incomplete
@@ -261,6 +268,63 @@ export function isNotYetFlippedSkip({ id, body, root, excludedNyfIds }) {
   const allAcsChecked = checked === total;
   const acRatio = checked / total;
   return allAcsChecked || acRatio > 0.5;
+}
+
+/** LANDED-IMPLEMENTATION signal (tasks/gap-slot-refill-recommends-landed-code-complete-tasks): whether
+ *  a ready task's IMPLEMENTATION is already in the tree — the "landed-but-not-flipped" shape the
+ *  recommended list kept recommending (a dispatch would only re-verify already-landed work; observed
+ *  4-6 times in one day: ac53-end-invariant / src-n-anchor / precommit-guard / npm-pack / catalog /
+ *  runner-grouping — all "代码已合进 develop、ACs 全勾、只差绿轮验证后的 closure").
+ *
+ *  Mechanical predicate (manager 2026-08-13, validated on 6 real samples + negative control):
+ *    实现已在树(id) := ∃ develop 提交，其 message 含 <task-id>
+ *                    且 git show --name-only -m --first-parent 的文件里有 tasks/ 以外者
+ *  Two pitfalls (both handled):
+ *    1. message-only grep ⇒ FALSE POSITIVE (task-creation/body commits also name the id) — the
+ *       predicate requires a file OUTSIDE tasks/ (the implementation file) before it fires.
+ *    2. missing `-m --first-parent` ⇒ FALSE NEGATIVE — the landing commit is usually a MERGE, and
+ *       `git show --name-only` prints ZERO files for a merge by default (measured 7418c615: 0 files
+ *       without -m, 4-5 with). `-m` diffs against each parent, `--first-parent` keeps the merge's own
+ *       first-parent diff — the merge's changes vs develop.
+ *  ONE git call: `git log --name-only -m --first-parent --grep <id> develop` returns each matching
+ *  commit (marker line `@@COMMIT@@<hash>`) followed by its first-parent file list; a non-marker line
+ *  outside `tasks/` is the landed-implementation evidence. Fail-safe: any git failure / non-git root /
+ *  no develop ref ⇒ false (never a positive from an unavailable source). */
+export function hasLandedImplementation(root, taskId) {
+  try {
+    const out = execFileSync(
+      "git",
+      ["-C", root, "log", "develop", "--format=@@COMMIT@@%H", "--grep", taskId, "--name-only", "-m", "--first-parent"],
+      { encoding: "utf8", timeout: 10_000, maxBuffer: 16 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"] },
+    );
+    let inCommit = false;
+    for (const line of out.split("\n")) {
+      const t = line.trim();
+      if (!t) continue;
+      if (t.startsWith("@@COMMIT@@")) { inCommit = true; continue; }
+      if (inCommit && !t.startsWith("tasks/")) return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+/** LANDED-IMPLEMENTATION completion gate (gap-slot-refill-recommends-landed-code-complete-tasks): the
+ *  new step-4 check is a "已合待翻 done" exclusion — the task is a done-flip candidate (NOT fresh
+ *  dispatchable work) ONLY when its self-declared completion checkboxes (AC + DoD, shape-aware: the
+ *  literal `## Acceptance Criteria` extractSection is exactly why the all-checked phantom tasks under
+ *  `## AC` were NOT caught) are all checked, OR it has none (the landing is its closeout), OR every
+ *  remaining unchecked item is annotated `（待外部）` (awaiting suite/verification — the manager's
+ *  "只差绿轮验证后的 closure" shape). An AC-incomplete landed task carries real remaining
+ *  implementation — STUCK-WORK — and must stay dispatchable (gap-ready-pool-worklanded-traps-stuck-work
+ *  parity: the pure-git signal alone would wrongly trap it). Reuses the pool's single-source
+ *  countCompletionCheckboxes / isExternalVerificationItem, never a parallel copy. */
+export function isLandedCodeComplete(body) {
+  const { total, checked, uncheckedItems } = countCompletionCheckboxes(body);
+  if (total === 0) return true;
+  if (checked === total) return true;
+  return uncheckedItems.length > 0 && uncheckedItems.every(isExternalVerificationItem);
 }
 
 /** The slot-refill decision. Pure: reads the store, never writes, never dispatches.
@@ -456,6 +520,15 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
       // step-4 check 4: not-yet-flipped — work already landed (fan-in merged / master-landed), don't
       // re-dispatch a subagent to re-verify it (gap-slot-refill-repeats-done-eligible-recommendations).
       if (isNotYetFlippedSkip({ id, body: text, root, excludedNyfIds })) { defer(id, "not-yet-flipped"); continue; }
+      // step-4 check 4b: LANDED-IMPLEMENTATION (gap-slot-refill-recommends-landed-code-complete-tasks)
+      // — a ready task whose IMPLEMENTATION is already in the tree (a develop commit whose message
+      // contains the id AND changed files outside tasks/) is "已合待翻 done": re-dispatching a subagent
+      // would only re-verify already-landed work (the observed B9 force-dispatch chain pointing at
+      // code-complete tasks). Stronger than isNotYetFlippedSkip: pure-git evidence that does not depend
+      // on the literal `## Acceptance Criteria` heading (the all-checked phantom tasks under `## AC`
+      // were invisible to extractSection) — AND gated by the shape-aware completion check so an
+      // AC-incomplete landed task (stuck-work with real remaining implementation) stays dispatchable.
+      if (hasLandedImplementation(root, id) && isLandedCodeComplete(text)) { defer(id, "landed-implementation"); continue; }
       // step-4 check 5: C8 SELF-TOUCH (gap-slot-refill-c8-reject-no-backfill) — the dispatch gate
       // (fast-mode-tick-core.md C8) requires the candidate's OWN `tasks/<id>.md` in ## Touches
       // WITHOUT `(new)`. A candidate lacking it is NOT dispatchable — the inner's A15 gate ⑤ would

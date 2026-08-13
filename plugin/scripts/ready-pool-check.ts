@@ -647,8 +647,11 @@ function uncheckedItems(section) {
  *  — UNLESS every unchecked box is annotated `（待外部）` (see isExternalVerificationItem), the
  *  awaiting-verification shape. `uncheckedItems` carries the unchecked item TEXTS so the workLanded arm
  *  can judge their DECLARED nature (all external ⇒ awaiting-verification; any implementation ⇒ NOT
- *  landed, stays dispatchable). */
-function countCompletionCheckboxes(body) {
+ *  landed, stays dispatchable). Exported for slot-refill's LANDED-IMPLEMENTATION completion gate
+ *  (gap-slot-refill-recommends-landed-code-complete-tasks — the same shape-aware counter, single
+ *  source: the literal-heading extractSection is exactly why all-checked phantom tasks under `## AC`
+ *  were NOT caught). */
+export function countCompletionCheckboxes(body) {
   const acSection = extractSectionByShape(body, "ac");
   const dodSection = extractSectionByShape(body, "dod");
   const ac = countAcCheckboxes(acSection);
