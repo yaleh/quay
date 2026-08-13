@@ -112,39 +112,34 @@ export function srcNCoverage(text: string): { covered: number; total: number; mi
   return { covered, total, missing };
 }
 
-// ── AC3b: (src:N "锚句") anchor verification (gap-src-n-pointer-rot-unverifiable-coverage) ────────────
+// ── AC3b: (src:N "锚句") anchor verification (gap-src-n-anchor-coupling) ───────────────────────────────
 // AC30(a) RETIRED the "parenthesis exists" reading of the (src:N) coverage measure: a line-number
 // pointer rots as the reason archive is edited every tick, and the gate reported 100% while a 3/3
 // spot-check of manager-core pointers all pointed at the WRONG content (A15→nyf ladder not inbox,
 // A2→"push already-adjudicated to human" not fixed-cap, A16→a BLANK line). The measure is now
-// "the pointer points at the right content":
-//   - a reference in the new two-element form `(src:N "锚句")` is GREEN only when 锚句 is a substring
-//     of some line within N±ANCHOR_K (default 5). Otherwise RED ("指针腐烂") with the anchor's real
-//     lines (a one-shot correction).
-//   - a reference still in the old `(src:N)` form inside an ANCHOR_PARTICIPATING core is GREEN only
-//     when line N is non-blank — the pre-migration negative control: a blank-line pointer must redden.
+// "the pointer points at the right content", and the JUDGE is the anchor string, not the line number:
+//   - a reference in the two-element form `(src:N "锚句")` is GREEN when 锚句 appears ANYWHERE in the
+//     source document. N is a HINT only — an archive line-shift (e.g. +7 from a doc edit; round
+//     137/138: every manager-core anchor-miss was exactly N+7 and the static check aborted the WHOLE
+//     suite before tests ran, tests=0) does NOT redden a pointer whose anchor is still present
+//     somewhere. RED ("锚句缺失") only when 锚句 appears NOWHERE in the document — a genuinely
+//     missing anchor (anti-false-green).
+//   - a reference still in the old `(src:N)` form (no anchor) is accepted as COVERAGE, not verified:
+//     there is no anchor string to check, and a line-number-only pointer is exactly the drift-prone
+//     shape the content measure replaces. UNIFIED across all three cores — fast-mode's former
+//     "don't verify old-form line numbers" exemption is now the default (AC3).
 //   - comma forms `(src:1570,1623)` count by REFERENCE, not by parenthesis (AC3b) — each N is
-//     verified independently.
+//     verified independently (each carries its own anchor).
 //
 // SCAN CAVEAT: the reason archive must exist at CORE_ARCHIVES[rel]. A missing archive SKIPS
 // verification for that core (fail-open) — the fixture roots in plugin/test build the 3 cores
 // without their archives, and a missing archive must not redden a fixture that is only testing
 // coverage/pointer/numbering/prohibition. The real repo always carries the archives.
-export const ANCHOR_K = 5;
 export const CORE_ARCHIVES: Record<string, string> = {
   "orchestration/manager-tick-core.md": "orchestration/manager-loop-tick.md",
   "orchestration/orchestrator-tick-core.md": "orchestration/orchestrator-loop-tick.md",
   "orchestration/fast-mode-tick-core.md": "plugin/loop/fast-mode-loop-tick.md",
 };
-// fast-mode-tick-core.md is EXEMPT from the old-form blank check: its (src:N) pointers are documented
-// as drift-prone ("源文档删 5 处重复粘贴段 ... src:N 前移 ≈27 行——按内容核对不按行号") and its migration to
-// the anchor form is out of scope for this task's Touches (manager/orchestrator only). Exempt cores
-// keep the OLD behavior: an old-form (src:N) is accepted as coverage; an anchor-form ref, when present,
-// is still verified.
-export const ANCHOR_PARTICIPATING = new Set([
-  "orchestration/manager-tick-core.md",
-  "orchestration/orchestrator-tick-core.md",
-]);
 
 export type SrcRef =
   | { kind: "n"; n: number; anchor?: string }
@@ -184,19 +179,10 @@ export interface AnchorViolation {
   file: string;        // the CORE file
   line: number;        // line in the CORE file
   item: string;        // first 12 chars of the item row
-  srcN: number;        // the line number the pointer claims in the archive
-  kind: "anchor-miss" | "blank" | "out-of-range";
+  srcN: number;        // the line number the pointer claims in the archive (a HINT, not the judge)
+  kind: "anchor-miss"; // content-based anchoring: only a truly-missing anchor reddens
   anchor?: string;
-  actualLines?: number[]; // 1-based lines where the anchor actually appears in the archive
-}
-
-function findAnchorLine(lines: string[], n: number, anchor: string, k: number): number {
-  const start = Math.max(0, n - 1 - k);
-  const end = Math.min(lines.length - 1, n - 1 + k);
-  for (let i = start; i <= end; i++) {
-    if (lines[i].includes(anchor)) return i;
-  }
-  return -1;
+  actualLines?: number[]; // 1-based lines where the anchor actually appears in the archive; [] = nowhere → miss
 }
 
 function findAllAnchorLines(lines: string[], anchor: string): number[] {
@@ -216,25 +202,22 @@ export function runAnchorChecks(root: string, coresText: Map<string, string>): {
     const abs = path.join(root, archive);
     if (!fs.existsSync(abs)) { skipped.push(`${rel} (archive ${archive} not found)`); continue; }
     const archLines = fs.readFileSync(abs, "utf8").split("\n");
-    const participating = ANCHOR_PARTICIPATING.has(rel);
     const text = coresText.get(rel)!;
     text.split("\n").forEach((raw, i) => {
       const s = raw.trim();
       if (!(/^\| A\d+/.test(s) || /^- \*\*B\d+/.test(s) || /^\| C\d+/.test(s))) return;
       for (const r of parseSrcRefs(s)) {
         if (r.kind !== "n" || Number.isNaN(r.n)) continue;
-        if (r.anchor !== undefined) {
-          if (findAnchorLine(archLines, r.n, r.anchor, ANCHOR_K) < 0) {
-            violations.push({
-              file: rel, line: i + 1, item: s.slice(0, 12), srcN: r.n,
-              kind: "anchor-miss", anchor: r.anchor,
-              actualLines: findAllAnchorLines(archLines, r.anchor),
-            });
-          }
-        } else if (participating) {
-          const target = archLines[r.n - 1];
-          if (target === undefined) violations.push({ file: rel, line: i + 1, item: s.slice(0, 12), srcN: r.n, kind: "out-of-range" });
-          else if (target.trim() === "") violations.push({ file: rel, line: i + 1, item: s.slice(0, 12), srcN: r.n, kind: "blank" });
+        // Old-form (src:N) with no anchor: coverage only — no content to check, and line numbers are
+        // drift-prone hints, not verified (unified across all three cores, gap-src-n-anchor-coupling AC3).
+        if (r.anchor === undefined) continue;
+        const actualLines = findAllAnchorLines(archLines, r.anchor);
+        if (actualLines.length === 0) {
+          violations.push({
+            file: rel, line: i + 1, item: s.slice(0, 12), srcN: r.n,
+            kind: "anchor-miss", anchor: r.anchor,
+            actualLines,
+          });
         }
       }
     });
