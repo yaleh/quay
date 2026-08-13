@@ -1563,7 +1563,17 @@ auto_commit_laid_down() {
     return 0
   fi
   n="$(git -C "$WORKSPACE_ROOT" diff --cached --name-only 2>/dev/null | wc -l | tr -d ' ')"
-  if ( cd "$WORKSPACE_ROOT" && git commit -q -m "chore(quay-init): lay down quay plugin mechanism files (v${PLUGIN_VERSION})" ); then
+  # gap-precommit-guard-wire-into-quay-init-and-cold-start (回归修正, 2026-08-13): quay-init's OWN
+  # auto-commit must not be blocked by the pre-commit guard it just provisioned. The guard FAILS-LOUD
+  # on a missing .quay/full-suite-state.json (AC2 of the guard task: 参照系缺失时谓词必须崩) — and a
+  # FRESH project (never had a round) has NO state file. This is the documented override case:
+  # QUAY_ALLOW_DIRTY_ROUND=1 IS the "确认这是刻意维护缺口" escape hatch, and auto-commit is a
+  # PROVISIONING step (lays down quay-init's own paths — the delivery commit), NOT an in-round dirty
+  # write by a round participant. The override is scoped to THIS commit only (env form — the ONLY
+  # channel a pre-commit hook receives; the guard records it as allow-dirty-round-override). It does
+  # NOT weaken the guard for any other commit — a real running-round assertion-surface commit (the
+  # AC4 case, the main checkout's actual round) still rejects.
+  if ( cd "$WORKSPACE_ROOT" && QUAY_ALLOW_DIRTY_ROUND=1 git commit -q -m "chore(quay-init): lay down quay plugin mechanism files (v${PLUGIN_VERSION})" ); then
     echo "  auto-commit: committed ${n} file(s) as chore(quay-init) (plugin v${PLUGIN_VERSION})"
   else
     echo "ERROR: auto-commit failed (git commit returned non-zero). The laydown is complete but the delivery contract's 提交 环节 was not met." >&2

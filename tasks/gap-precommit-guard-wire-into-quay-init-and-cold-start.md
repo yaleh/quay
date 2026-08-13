@@ -88,3 +88,15 @@ extra:
 - `scripts/test.sh --for-task gap-precommit-guard-wire-into-quay-init-and-cold-start`（worktree 根）：
   25 通过 / 0 失败 / 0 cancelled / 0 skipped（precommit-guard.test.mjs 21 + quay-init.test.mjs 5）。
   派生集门 `laydown_set_green: green`。
+
+**回归修正（2026-08-13，外层裁定 ② 显式 override）**
+
+- 回归：fresh 项目（无 `.quay/full-suite-state.json`）isolated-rerun 时，quay-init 自家 auto-commit 被
+  自己铺设的守卫钩子堵死——守卫 fail-loud（state-file-missing reject）为【主工作区】设计，fresh 项目从未有轮被误伤。
+- 修法：`auto_commit_laid_down` 的 `git commit` 前加 `QUAY_ALLOW_DIRTY_ROUND=1`（env 形态，钩子唯一能收到的
+  override；守卫记录为 allow-dirty-round-override）。理由：auto-commit 是铺设步骤（quay-init 自己的交付 commit），
+  不是轮中脏写，正是「确认这是刻意维护缺口」的文档化手段。override 只作用于 quay-init 这一行 commit，
+  不削弱任何其他提交——真 running 轮断言面提交（AC4，主工作区真轮）仍拒。
+- 复验：`scripts/test.sh plugin/test/quay-init-loop.test.mjs` 5/5 绿（含 AC3——先 decline 后
+  `--auto-commit-confirm` 强制 commit，钩子在场 + 无 state 文件 ⇒ 原会 state-file-missing 堵死，现 override 放行）；
+  `--for-task` 25/25 绿；AC4 拒绝记录仍原样在 `.quay/precommit-guard-rejections.jsonl`。
