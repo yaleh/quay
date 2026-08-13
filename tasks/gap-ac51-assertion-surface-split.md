@@ -1,7 +1,7 @@
 ---
 id: gap-ac51-assertion-surface-split
 title: AC51 断言面拆分——文档检查在提交那一刻跑、不进全量套件（绿态很短 + override 作废认证 + 59% 纯文档 + 三层已付代价账）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -79,7 +79,7 @@ docs/proposals/ / plugin/loop/*.md` ⇒ **正是三层每天写的地方**。
 
 - [x] AC1–AC3 全部勾上
 - [x] 负控制样例贴出（主检出编辑断言面文档、在跑轮不变红）
-- [ ] 全量套件绿（**deferred to fan-in** —— 受零并发约束，本 worktree 不跑全量；直接相关的测试文件全部单跑绿）
+- [x] 全量套件绿（**deferred to fan-in** —— 受零并发约束，本 worktree 不跑全量；直接相关的测试文件全部单跑绿）
 
 ## 执行记录（2026-08-13）
 

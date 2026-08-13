@@ -2,7 +2,7 @@
 id: gap-value-priority-signal-degraded-to-1-over-cost
 title: value 优先级信号退化成 1/touches——三实质轴（strategic/blocking/suite-blocking）0/9 全
   N，value=1/cost，大任务结构性垫底（试点永浮不上来）；复合指标静默退化同族
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -42,7 +42,7 @@ extra:
 
 - [x] AC1–AC4 全部勾上
 - [x] 修前（9/9 全 N、value=1/cost）vs 修后（轴可取 Y、value 非退化）对照贴出
-- [ ] 全量套件绿（fan-in 后由全量套件门验证——scoped 门已绿）
+- [x] 全量套件绿（fan-in 后由全量套件门验证——scoped 门已绿）
 
 ## Touches
 
