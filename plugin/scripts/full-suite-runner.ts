@@ -1931,7 +1931,10 @@ export async function run(argv: string[]): Promise<number> {
     // phase timings (`__OVERHEAD__ <phase>_ms=N`, test.sh:909-918). Same stream-accumulation family
     // as tapPass/tapFail above (NOT a post-hoc log re-read — the logStream buffer may not be
     // flushed at append time, and the stream already carries the identical lines the log gets).
-    const overheadM = line.match(/^__OVERHEAD__\s+([A-Za-z0-9_]+)_ms=(\d+)$/);
+    // Allow the optional ` partial=1` suffix (test.sh's _oh_emit_p SIGTERM/EXIT partial fallback
+    // emits `__OVERHEAD__ <segment>_ms=N partial=1` — the old `_ms=(\d+)$` anchor missed it and the
+    // line fell through to failures[] as a false red, round 137 __OVERHEAD__ build_dist_ms=479).
+    const overheadM = line.match(/^__OVERHEAD__\s+([A-Za-z0-9_]+)_ms=(\d+)(?:\s+partial=1)?$/);
     if (overheadM) phaseMs[overheadM[1]] = Number(overheadM[2]);
     // gap-ceiling-floor-ms-not-landed-in-verification-round AC1/AC2 — parse the reporter's
     // `__CEILING__ <path> duration_ms=<dur> floor_ms=<floor> 封顶者/该拆` line (^ anchored — the

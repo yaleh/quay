@@ -252,6 +252,35 @@ test("AC2/AC3 — a complete round records all four *_phase_ms from the __OVERHE
   }
 });
 
+test("AC2 — __OVERHEAD__ lines with `partial=1` suffix are captured as phaseMs, NOT failures (round 137 fix)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-oh-partial-"));
+  // test.sh's _oh_emit_p SIGTERM/EXIT partial fallback emits `__OVERHEAD__ <phase>_ms=N partial=1`.
+  // Before the regex fix (^_ms=(\d+)$), the suffix made the line fall through to failures[] — a
+  // false red (round 137 __OVERHEAD__ build_dist_ms=479 partial=1).
+  const suite = [
+    'echo "__OVERHEAD__ run_static_checks_ms=33000 partial=1" >&2',
+    'echo "# tests 5"',
+    'echo "# pass 5"',
+    'echo "# fail 0"',
+    'echo "# cancelled 0"',
+    "exit 0",
+  ].join("\n");
+  const { f, dir } = fakeSuite(suite);
+  try {
+    const child = runRunner({ root, command: `bash ${f}`, laneCount: 8 });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, `runner exits 0 on green, got ${code}`);
+    const vrf = path.join(root, ".quay", "verification-round.jsonl");
+    const rec = JSON.parse(fs.readFileSync(vrf, "utf8").split("\n").filter((l) => l.trim())[0]);
+    assert.equal(rec.static_phase_ms, 33000, "partial=1 line still captured as phaseMs");
+    assert.ok(!(rec.failures || []).some((x) => String(x.line || x).includes("__OVERHEAD__")),
+      "the partial=1 overhead line must NOT be in failures[]");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("AC2/AC3 — a kill-on-red-TRUNCATED red round is distinguishable: serial/lowconc present, main_phase_ms ABSENT", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-oh-red-"));
   // The pre-main phases completed (their __OVERHEAD__ markers fired) but the run reds DURING main
