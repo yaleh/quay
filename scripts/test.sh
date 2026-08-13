@@ -321,6 +321,21 @@ run_static_checks() {
   # degradation as task-contract-check above — a NEW unowned AC is ledgered (grow-only) but does not
   # stop the verification round (task-file syntax ≠ product-code availability).
   run_checker "task-ac-carryover-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/task-ac-carryover-check.ts" --root "${repo_root}" --no-block
+  echo "== malformed-task check (gap-malformed-task-silent-vanish-no-alert, AC1-AC3) =="
+  # A task file whose frontmatter fails to parse is SILENTLY REMOVED from the whole store — the
+  # only signal is a `quay task list` Warning line that NO checker read (invisible ≡ non-existent,
+  # hard rule ④; live sample 2026-08-13: `title: [封存] …` dropped the file from 1075→1074 listed,
+  # slot-refill hit it 0 times, `task edit` said "task does not exist yet"). This checker consumes
+  # the store's OWN malformed array (store.listWithMalformed(), the same producer the Warning
+  # reads) and turns a non-empty malformed list RED (exit 1, set -euo pipefail abort), printing
+  # each excluded file + parser error. Complements 57c30fdf (gap-serve-task-list-dies-on-one-
+  # malformed-task): that fix stopped the server 500ing on one bad file; this makes the SAME signal
+  # a failing gate on the consumer that actually guards commits. BLOCKS (unlike the --no-block
+  # task-file syntax checkers) because a malformed task is a SILENT REMOVAL, not a syntax nit.
+  # Whole-store scan, cheap at ~1.1k tasks.
+  # @static-tier always
+  # @static-scoped-mode subset-touched
+  run_checker "malformed-task-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/malformed-task-check.ts" --root "${repo_root}"
   echo "== ADR-016 screen-use check (gap-adr-016-carve-out-permits-the-whole-screen-hash, AC3) =="
   # ADR-016 Amendment 2026-08-04 boundary (c): whole-screen equality/hash of capture-pane is
   # forbidden. Code-position detection (a capture-pane result flowing into md5sum/sha1sum/cksum in
