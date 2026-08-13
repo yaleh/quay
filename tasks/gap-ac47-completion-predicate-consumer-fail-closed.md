@@ -36,9 +36,14 @@ extractSectionByShape 认不出 `## Acceptance Criteria (runnable — …)` 这�
 
 ## Plan
 
-1. **fail-closed 修复（装闸前置）**：把「段不存在」与「段存在且零未勾」分开——
+1. **fail-closed 修复（装闸前置，两个入口都覆盖）**：把「段不存在」与「段存在且零未勾」分开——
    `countAcCheckboxes(null)` 不再返回零未勾；返回可区分的态（如 `{sectionFound:false}`）。
    `extractSectionByShape` 返回 null ⇒ **fail closed**（不算完成）。
+   **⚠️ 两个入口**（manager 2026-08-13 补，实测均对 DIR-014 fail-open）：
+   ① `countCompletionCheckboxes` 的 `unchecked` 计算（task-status-drift-check.ts:126 `if (!acSection) return {unchecked:0}`）；
+   ② `isLandedCodeComplete` 的 `total === 0` 捷径（slot-refill.ts:373，实测 DIR-014 → true）。
+   **② 不能一刀切改 false**——它真的没有勾选框的任务（finding shape 无 AC 维度）是正确行为；
+   **必须靠 `sectionFound:false` 区分**：段不可读 ⇒ 不算 landed；段存在且真零勾 ⇒ 仍算。
 2. **SHAPE_SECTIONS 登记带后缀标题**（manager 倾向此修法而非前缀匹配——前缀会把
    `## Acceptance Criteria for the OLD design` 也吞进来，给已出问题的匹配器加不确定性）：
    显式枚举 `## Acceptance Criteria (runnable — …)` / `## Definition of Done — REAL LANDING is the bar` 等
@@ -51,7 +56,7 @@ extractSectionByShape 认不出 `## Acceptance Criteria (runnable — …)` 这�
 ## Acceptance Criteria
 
 - [ ] AC1 fail-closed：`extractSectionByShape` 返回 null（段未识别）⇒ 不计为完成；`sectionFound:false` 可区分于「段存在且零未勾」。
-- [ ] AC2 负控制：DIR-014（带后缀标题+未勾框）不再被判 `{unchecked:0}` 合格。
+- [ ] AC2 负控制：DIR-014（带后缀标题+未勾框）不再被判 `{unchecked:0}` 合格；且 `isLandedCodeComplete` 不再因 `total===0` 捷径判它 landed（两个入口都 fail-closed）。
 - [ ] AC3 SHAPE_SECTIONS 登记带后缀变体；未登记变体走 fail-closed。
 - [ ] AC4 消费者落 inner 翻 done 路径：`sectionFound:false` 时拒绝翻 done 并报「AC/DoD 段未识别」。
 - [ ] AC5 历史 done 不当证据：任务体写明「任何机制不得把历史 done 当作 AC/DoD 已满足的证据」。
