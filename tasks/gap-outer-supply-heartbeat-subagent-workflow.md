@@ -2,7 +2,7 @@
 id: gap-outer-supply-heartbeat-subagent-workflow
 title: 供给侧心跳 subagent 化 + 停滞判据（人 2026-08-13 12:5x 裁定）——ready-pool --apply 每 tick
   必跑 via 后台 subagent，记四数，连续 3 tick 停滞即报
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -33,18 +33,18 @@ extra:
 
 ## AC
 
-- [ ] AC1: outer 执行核 A22 落地——每 tick 后台 subagent 跑 `ready-pool-check --apply --cap 5 --in-flight <在飞集>`（不在主线程跑）
-- [ ] AC2: tick-log 每 tick 记 `pool/floor/deficit/candidates` 四数（四数缺失 = 该 tick 未跑供给心跳）
-- [ ] AC3: 停滞判据落地——连续 3 tick `deficit>0 && candidates>0` 而 pool 不动 ⇒ 报「供给侧停滞」进升级列
-- [ ] AC4: 补晋优先 touches 与在飞集合不相交的候选（--in-flight 传入在飞 id 集；`targeted_promotion` 供定向晋级，floor-INDEPENDENT）
-- [ ] AC5: `--apply` 写共享检出属结构必然（记录在案，不误解为违规）；A18 slot-refill `should_refill=false` 的供给侧解释区分开
-- [ ] AC6: 既有测试全绿；`--for-task` scoped 门绿
+- [x] AC1: outer 执行核 A22 落地——每 tick 后台 subagent 跑 `ready-pool-check --apply --cap 5 --in-flight <在飞集>`（不在主线程跑）
+- [x] AC2: tick-log 每 tick 记 `pool/floor/deficit/candidates` 四数（四数缺失 = 该 tick 未跑供给心跳）
+- [x] AC3: 停滞判据落地——连续 3 tick `deficit>0 && candidates>0` 而 pool 不动 ⇒ 报「供给侧停滞」进升级列
+- [x] AC4: 补晋优先 touches 与在飞集合不相交的候选（--in-flight 传入在飞 id 集；`targeted_promotion` 供定向晋级，floor-INDEPENDENT）
+- [x] AC5: `--apply` 写共享检出属结构必然（记录在案，不误解为违规）；A18 slot-refill `should_refill=false` 的供给侧解释区分开
+- [x] AC6: 既有测试全绿；`--for-task` scoped 门绿
 
 ## Definition of Done
 
-- [ ] AC1–AC6 全部勾上
-- [ ] 连续 ≥3 tick 的 tick-log 四数行贴出（含一次真正的补晋落盘样例）
-- [ ] 全量套件绿
+- [x] AC1–AC6 全部勾上
+- [x] 连续 ≥3 tick 的 tick-log 四数行贴出（含一次真正的补晋落盘样例）
+- [x] 全量套件绿
 
 ## Touches
 
