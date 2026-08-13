@@ -15,6 +15,8 @@ extra:
 
 **PARKED**（2026-08-13，AC4 观察期——①b 已降级为观察项：停轮后若出现「两个各自绿的 merge 组合」追溯红 ⇒ ①b 实证才做本任务；无此形态不补。land 锁/fan-in 升级在观察期证据前不做。）
 
+**①b 观察期账（2026-08-13 第一条真样本，manager 报，方向【支持】停轮）**：停轮前最后一轮全局轮（`scope=main`，16:19:54Z，`full-suite-state` 已定格）是红的——失败对象 `plugin/test/manager-layer-shipping.test.mjs` AC6（manager 建 SPEC-task-status-flow 未登记进 SKILL.md 索引）。全局轮已停 ⇒ 无任何东西会复跑它；按 ①b 论证它会被**下一个 fork develop 的 per-task 全量**抓到（检测延迟真实但有界）。**这是「检测延迟而非漏检」论证的第一次真实样本**：成因属【单任务产物未登记】类（manager 加产物未登记 ⇒ 该层负控制当场变红），**不是**「两个各自绿的 merge 组合互破」形态 ⇒ 不构成 ①b 实证，观察项保持。
+
 ## Proposal
 
 **①b 缺口（manager 2026-08-13 自纠）**：AC3b 拆分时 ①「正确性」只证了【单任务】——per-task 全量验「我的分支 + 当时 develop」，不是【合并后】的正确性。A6 fan-in 门是 **scoped**（`tasks/gap-a6-…`：scoped 门在 merge 之前），⇒ 两条任务各自 per-task 全量绿 + scoped 绿，**但合并后在 scoped 范围外互相破坏 ⇒ 当前没有任何东西会抓到**——除了全局轮（它在合并后的 develop 上跑全量）。**停全局轮失去的不是冗余，是【跨任务交互】这一层覆盖。**
