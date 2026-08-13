@@ -93,7 +93,10 @@ import { isDirectEntry } from "./gate-script-base.ts";
 /** FIXED dispatch cap (gap-fixed-cap-5-dynamic-cap-retired, human ruling 2026-08-09): the dynamic
  *  adaptive cap is retired. effective_cap is this constant — 5 — regardless of cpu pressure, suite
  *  state, or process budget. The band/budget fields returned alongside it are PURE OBSERVATION and
- *  must NOT participate in any decision (dispatch / slot-refill / floor all use this fixed 5). */
+ *  must NOT participate in any decision (dispatch / slot-refill / floor all use this fixed 5).
+ *  concurrency-default-fallback: human-ruled fixed cap (declared per
+ *  gap-concurrency-literal-only-at-definition-points; the single source is QUAY_MAX_TASK_SUBAGENTS
+ *  once gap-single-flight-lock-2-slot-concurrent-suites lands). */
 export const FIXED_EFFECTIVE_CAP = 5;
 
 /** Default GO/WAIT/EXTREME caps when config declares no concurrency_bands. quay's default (5/2/1);

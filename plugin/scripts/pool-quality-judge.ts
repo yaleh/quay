@@ -213,6 +213,8 @@ export function readLastJudgeRound(root: string): number {
 
 /** 池枚举 + 最久未复核年龄。复用 ready-pool-check.analyzeTasks（单源）。 */
 export function readPoolPlan(root: string): { pool: string[]; poolCount: number; oldestUnreviewedAgeMs: number; oldestTaskId: string | null } {
+  // concurrency-default-fallback: fixed cap 5 (declared per gap-concurrency-literal-only-at-definition-points;
+  // the single source is QUAY_MAX_TASK_SUBAGENTS once gap-single-flight-lock-2-slot-concurrent-suites lands).
   const analysis = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 5 });
   const pool = analysis.ready ?? [];
   let oldestUnreviewedAgeMs = 0;

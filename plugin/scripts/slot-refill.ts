@@ -121,7 +121,10 @@ import { isDirectEntry } from "./gate-script-base.ts";
 /** FIXED dispatch cap (gap-fixed-cap-5-dynamic-cap-retired, human ruling 2026-08-09): the dynamic
  *  adaptive cap is retired. `--cap` defaults to this constant — 5 — so slot-refill and its derived
  *  floor (5 × floor_mult = 20) are stable regardless of load/suite state. (The caller may still pass
- *  an explicit `--cap`; the DEFAULT is fixed at 5.) */
+ *  an explicit `--cap`; the DEFAULT is fixed at 5.)
+ *  concurrency-default-fallback: human-ruled fixed cap (declared per
+ *  gap-concurrency-literal-only-at-definition-points; the single source is QUAY_MAX_TASK_SUBAGENTS
+ *  once gap-single-flight-lock-2-slot-concurrent-suites lands). */
 export const FIXED_DISPATCH_CAP = 5;
 
 /** B3 ①/④ ARBITRATION (gap-red-window-cap-trigger-backlog-not-suite-red): B3's five inequalities were
@@ -137,7 +140,7 @@ export const FIXED_DISPATCH_CAP = 5;
  *  a cap ARBITRATION (a THROTTLE), NOT a dispatch stop — slot-refill still recommends up to the
  *  narrowed cap, so a red window reduces concurrency without deadlocking (降 cap ≠ 停派; combined with
  *  "不在主会话修" a stop would be a deadlock). */
-export const RED_BACKLOG_CAP_DEFAULT = 2;
+export const RED_BACKLOG_CAP_DEFAULT = 2; // concurrency-default-fallback: red-window throttle (narrows the dispatch cap, not a slot count — declared per gap-concurrency-literal-only-at-definition-points)
 
 /** Free dispatch slots = max(0, cap − in_flight). The one definition; never hardcoded. */
 export function computeSlotsFree(cap, inFlightCount) {

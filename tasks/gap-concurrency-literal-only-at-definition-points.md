@@ -46,20 +46,29 @@ extra:
 
 ## AC
 
-- [ ] AC1: 并发字面量只允许在唯一定义点（QUAY_MAX_TASK_SUBAGENTS / QUAY_MAX_CONCURRENT_SUITES / QUAY_MAX_OVERSUBSCRIPTION），其余处出现即 fail（按位置，非关键词）
-- [ ] AC2: 显式声明的回退默认允许（如 CONCURRENCY_CAP_DEFAULT=3 + 标记注释）；未声明字面量 = 违规
-- [ ] AC3: 全仓并发代码在声明例外后通过（不误报正当默认）
-- [ ] AC4: 既有测试全绿；`--for-task` scoped 门绿
+- [x] AC1: 并发字面量只允许在唯一定义点（QUAY_MAX_TASK_SUBAGENTS / QUAY_MAX_CONCURRENT_SUITES / QUAY_MAX_OVERSUBSCRIPTION），其余处出现即 fail（按位置，非关键词）
+- [x] AC2: 显式声明的回退默认允许（如 CONCURRENCY_CAP_DEFAULT=3 + 标记注释）；未声明字面量 = 违规
+- [x] AC3: 全仓并发代码在声明例外后通过（不误报正当默认）
+- [x] AC4: 既有测试全绿；`--for-task` scoped 门绿
 
 ## Definition of Done
 
-- [ ] AC1–AC4 全部勾上
-- [ ] 检查器对当前仓库扫描：命中的字面量逐一标注（定义点/已声明例外/违规）+ 0 违规
-- [ ] 全量套件绿
+- [x] AC1–AC4 全部勾上
+- [x] 检查器对当前仓库扫描：命中的字面量逐一标注（定义点/已声明例外/违规）+ 0 违规（7 命中全为已声明例外，0 违规）
+- [ ] 全量套件绿（scoped 门绿；全量套件由 outer fan-in 验证）
 
 ## Touches
 
 - plugin/scripts/concurrency-literal-check.ts（新检查器）
 - plugin/scripts/ready-pool-check.ts（CONCURRENCY_CAP_DEFAULT=3 加声明注释）
+- plugin/scripts/cap-from-gate.ts（FIXED_EFFECTIVE_CAP=5 加声明注释）
+- plugin/scripts/slot-refill.ts（FIXED_DISPATCH_CAP=5 / RED_BACKLOG_CAP_DEFAULT=2 加声明注释）
+- plugin/scripts/fast-mode-telemetry.ts（SLOT_STATUS_CAP_DEFAULT=3 加声明注释）
+- plugin/scripts/pool-quality-judge.ts（cap: 5 加声明注释）
+- plugin/scripts/laydown-set-check.sh（--test-concurrency=1 加声明注释）
 - scripts/test.sh（run_static_checks 接入）
+- plugin/scripts/capability-catalog.sh（新检查器 AC1c QUESTION/MATCHING 等声明）
+- docs/proposals/quay-product-outline.md（§6 DELIVERY-INVENTORY 快照重生成）
+- plugin/test/concurrency-literal-check.test.mjs（新检查器测试）
+- plugin/scripts/checker-mutation-cases/concurrency-literal-check.sh（新检查器 mutation case）
 - tasks/gap-concurrency-literal-only-at-definition-points.md（自身）

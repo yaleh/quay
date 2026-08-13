@@ -1322,7 +1322,10 @@ export function readSubagentsInFlight() {
 // The default mirrors ready-pool-check.ts CONCURRENCY_CAP_DEFAULT=3 and is only a degraded fallback
 // for a caller that does not pass one.
 
-/** Degraded fallback cap for --slot-status when no --cap is passed (mirrors ready-pool-check). */
+/** Degraded fallback cap for --slot-status when no --cap is passed (mirrors ready-pool-check).
+ *  concurrency-default-fallback: degraded fallback (declared per
+ *  gap-concurrency-literal-only-at-definition-points; the single source is QUAY_MAX_TASK_SUBAGENTS
+ *  once gap-single-flight-lock-2-slot-concurrent-suites lands). */
 export const SLOT_STATUS_CAP_DEFAULT = 3;
 
 /**

@@ -184,7 +184,10 @@ import { listWorktrees } from "./fast-mode-telemetry.ts";
 
 /** Default concurrency cap (max in-flight subagents) — CONSERVATIVE FALLBACK for manual runs with
  *  no --cap. The tick's dispatch decision point passes the ADAPTIVE cap from cap-from-gate.sh
- *  (gap-adaptive-concurrency-cap-tied-to-resource-gate); the floor is DERIVED from the cap passed. */
+ *  (gap-adaptive-concurrency-cap-tied-to-resource-gate); the floor is DERIVED from the cap passed.
+ *  concurrency-default-fallback: manual-run conservative fallback (declared per
+ *  gap-concurrency-literal-only-at-definition-points — a justified default, not a silent literal;
+ *  the single source is QUAY_MAX_TASK_SUBAGENTS once gap-single-flight-lock-2-slot-concurrent-suites lands). */
 export const CONCURRENCY_CAP_DEFAULT = 3;
 
 /** Default floor multiplier: floor = cap × this. 4× leaves one notch of headroom, far below the old

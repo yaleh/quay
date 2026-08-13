@@ -347,6 +347,16 @@ run_static_checks() {
   # @static-tier change
   # @static-object **/*.sh **/*.bash
   run_checker "dead-code-after-return-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/dead-code-after-return-check.ts" --root "${repo_root}"
+  echo "== concurrency-literal-only-at-definition-points check (gap-concurrency-literal-only-at-definition-points, AC1-AC3) =="
+  # 并发数值字面量只允许在唯一定义点（QUAY_MAX_TASK_SUBAGENTS / QUAY_MAX_CONCURRENT_SUITES /
+  # QUAY_MAX_OVERSUBSCRIPTION —— 人 2026-08-13 框架的旋钮 ①②③）或显式声明的回退默认
+  # （`concurrency-default-fallback` 标记注释）；未声明的并发字面量 = 违规（禁「悄悄写死」,
+  # 不禁「有理由的默认值」—— CLAUDE.md 硬规则 4 推论二 enforcement）。按位置判定（checker-lib
+  # buildNonCodeMask）—— 注释/字符串/正则里拼写该模式不报。exit 1 违规即红（set -euo pipefail）,
+  # 一个新写死的并发数在提交时刻红,不用等换机器才暴露。
+  # @static-tier change
+  # @static-object plugin/scripts/ scripts/ plugin/scripts/concurrency-literal-check.ts plugin/test/concurrency-literal-check.test.mjs
+  run_checker "concurrency-literal-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/concurrency-literal-check.ts" --gate --root "${repo_root}"
   echo "== commit-message verified-claim check (gap-commit-message-claims-verified-without-verification, AC11) =="
   # Commit messages are an AC11 carrier: merge commit 8e2e49b9's message claimed "all syntax
   # verified" while carrying real merge corruption (trend-check.ts duplicated 2×, 8 task
