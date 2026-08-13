@@ -40,6 +40,8 @@ done-but-not-flipped phantom——实现早已在 develop（deba6463/8a8fc8f6/f1
 2. 候选补法评估：task-body 侧 landed 信号（ACs 全勾 + 未勾项均为外层验证）并入 hasLandedImplementation 或 isLandedCodeComplete。
 3. 负控制：superseded-modeled 形态必须判 landed（不再被推荐）；真新任务（lanes-nproc/two-peer 类，id 只命中创建/框架提交）仍判非 landed。
 
+**⚠️ AC47 触发条件（manager 2026-08-13 写死，一行可查）**：本任务的候选补法（「ACs 全勾 + 未勾项均为外层验证 ⇒ 视同 landed」）字面上与 AC47 的「任何未勾框 ⇒ 不算 landed」相反，但按位置查消费者不冲突——`isLandedCodeComplete`/`hasLandedImplementation` 在 slot-refill.ts 之外**零消费者**，唯一用处 `:589 defer(id,"landed-implementation")` 只用于推荐排除、从不决定翻 done（"还要不要派" vs "能不能翻 done"是两个问题）。**触发条件**：这两个谓词一旦出现**翻 done 路径上的消费者**，AC47 即被静默击穿 ⇒ 届时必须复核本候选补法与 AC47 的相容性。
+
 ## Acceptance Criteria
 
 - [ ] AC1 发生率观察点建立（假阴性计数）。
