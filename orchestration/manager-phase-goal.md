@@ -2626,8 +2626,15 @@ manager 的活是：每 tick 采样 AC20 的五条、维护 AC21-AC24 的取证�
 ## AC42（结构）：验证不再发生在任何共享可变检出上
 
 **判据（三条全须成立，逐条可机械核对）**：
-1. **零共享检出验证**：任一次 suite 运行的 `--root` 指向一个**该次运行专属的 worktree**，
-   取证：round 记录里 `scope` 字段 + 该 worktree 路径存在于 `git worktree list` 且在跑完后被 teardown。
+1. **零共享检出验证**：**测试工作进程跑在该次运行专属的 worktree 里**。
+   取证三条并列：①盘上存在 `verify-round-<epoch>-<hash>` 专属树（`git worktree list`）；
+   ②`node --test` / `scripts/test.sh` 工作进程的 `cwd` 落在该树内（`/proc/<pid>/cwd`）；③跑完后被 teardown。
+   **⚠️ 本判据 2026-08-13 09:5xZ 更正过一次，与判据2 同源**：原文写「`--root` 指向专属 worktree，
+   取证看 round 记录的 `scope` 字段」——**但实现是「runner 以主检出为根 → provision 一次性 worktree
+   → 测试跑在 worktree」**，`full-suite-runner.ts:1445` 的 `scope = isGitWorktree(root) ? "worktree" : "main"`
+   记的是**发起方检出**（其注释自述用途是让等待者区分 worktree-origin 与 main-repo 套件），
+   **不是测试跑在哪** ⇒ **`scope` 恒为 `main` 是正确的，错的是我拿它当取证**。
+   实测 round 132/133/134 全部 `scope=main`，而同期 8 个测试工作进程 cwd 全在 worktree。
 2. **主检出无套件**：**跑测试的工作进程**的 `cwd` 不在主检出。
    取证：遍历 `/proc/<pid>/cwd`，`node --test` / `scripts/test.sh` 工作进程中 cwd 落在 `/home/yale/work/quay`
    的条数连续 N 轮为 0（`/tmp/quay-*` 属测试自造工作区，不计）。
