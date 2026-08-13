@@ -1046,23 +1046,25 @@ test("pool < floor but dispatchable_disjoint ≥ cap ⇒ criterion met, NO false
   assert.doesNotMatch(r.report, /POOL BIG BUT ALL COLLIDING/);
 });
 
-// ── AC4: negative controls (pool ≥ floor ⇒ no recommendation) ─────────────────────────────────────
+// ── AC4 + AC48: the pool<floor gate is RETIRED — pool ≥ floor with a qualified candidate NOW
+//    recommends it (合格即晋, 不看 pool 大小). The only negative control left is "no qualified
+//    candidate ⇒ no promotions" (covered below). ──────────────────────────────────────────────────
 
-test("pool >= floor ⇒ no promotions (even with qualified todo candidates)", (t) => {
-  const root = makeWorkspace("neg-pool-full");
+test("pool >= floor with qualified candidate ⇒ promotes it (AC48 合格即晋 — pool<floor gate retired)", (t) => {
+  const root = makeWorkspace("pos-pool-full");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   for (const id of ["gap-r1", "gap-r2", "gap-r3"]) {
     writeTask(root, id, { status: "ready", labels: ["gap"], body: fourArtifactBody() });
   }
-  // A fully-qualified todo candidate exists, but the pool is healthy.
+  // A fully-qualified todo candidate exists AND the pool is at/above floor — pre-AC48 this was the
+  // "no busy-work" case (promotions []); post-AC48 the pool<floor gate is cancelled so it promotes.
   writeTask(root, "gap-candidate", gapTask("gap-candidate"));
 
   const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 }); // floor 3
   assert.equal(r.pool, 3);
   assert.equal(r.floor, 3);
   assert.equal(r.deficit, 0);
-  assert.deepEqual(r.promotions, [], "pool ≥ floor must never recommend");
-  assert.deepEqual(r.candidates, [], "candidate scan is skipped when the pool is healthy");
+  assert.deepEqual(r.promotions.map((p) => p.id), ["gap-candidate"], "qualified candidate promotes regardless of pool size (AC48)");
 });
 
 // ── AC4: pool < floor + qualified candidate ⇒ recommend ───────────────────────────────────────────
@@ -1721,11 +1723,13 @@ test("relevance blocking works end-to-end — a parent task with a child reports
 
 // ── TARGETED PROMOTION (gap-targeted-promotion-operation-does-not-exist) ───────────────────────────
 // The pool<floor refill is the BULK path (inner mechanical, AC3). A stage-goal task the bulk path
-// leaves in todo (pool ≥ floor blocks refill) needs a SECOND, floor-INDEPENDENT operation: the
-// OUTER picks the target per stage goal and `ready-pool-check --targeted <id>` MECHANICALLY
-// validates it + emits the promote command. AC1 mechanical carrier (not a temporary manual op) ·
-// AC2 floor-independent (pool ≥ floor still eligible) · AC3 bulk path byte-unchanged · the target's
-// identity is the outer's stage-goal choice, never an input the checker reads.
+// used to leave in todo (the pool<floor gate blocked refill when pool ≥ floor) needed a SECOND,
+// floor-INDEPENDENT operation: the OUTER picks the target per stage goal and
+// `ready-pool-check --targeted <id>` MECHANICALLY validates it + emits the promote command.
+// AC48 (2026-08-13) RETIRED the pool<floor bulk gate — the bulk path now ALSO promotes the eligible
+// target at pool ≥ floor (合格即晋), so targeted and bulk agree on the same eligible set; targeted
+// remains the outer's stage-goal pick (selection = outer). AC1 mechanical carrier · AC2 floor-
+// independent (pool ≥ floor still eligible) · the target's identity is the outer's stage-goal choice.
 
 test("--targeted: pool ≥ floor still promotes a mechanically-eligible todo (AC2 floor-independent)", (t) => {
   const root = makeWorkspace("targeted-floor");
@@ -1733,7 +1737,7 @@ test("--targeted: pool ≥ floor still promotes a mechanically-eligible todo (AC
   // Pool ≥ floor: cap 2, floorMult 1 ⇒ floor 2; two ready tasks ⇒ pool 2, deficit 0.
   writeTask(root, "gap-r1", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
   writeTask(root, "gap-r2", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
-  // The stage-goal target sits in todo — the bulk refill (deficit 0) would never recommend it.
+  // The stage-goal target sits in todo — pre-AC48 the bulk refill (deficit 0) would never recommend it.
   writeTask(root, "gap-target", gapTask("gap-target"));
 
   const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 2, floorMult: 1, targetedId: "gap-target" });
@@ -1741,7 +1745,7 @@ test("--targeted: pool ≥ floor still promotes a mechanically-eligible todo (AC
   assert.equal(r.floor, 2);
   assert.ok(r.pool >= r.floor, "pool is at/above the floor");
   assert.equal(r.deficit, 0);
-  assert.deepEqual(r.promotions, [], "bulk refill recommends nothing (pool ≥ floor)");
+  assert.deepEqual(r.promotions.map((p) => p.id), ["gap-target"], "AC48: bulk refill now ALSO recommends the eligible target at pool ≥ floor (合格即晋)");
   assert.equal(r.targeted_promotion.eligible, true, "targeted promotion still eligible at pool ≥ floor (AC2)");
   assert.equal(r.targeted_promotion.floor_independent, true, "targeted path is marked floor-independent");
   assert.equal(r.targeted_promotion.promote_cmd, "quay promote gap-target", "the mechanical promote command (AC1)");
@@ -2176,21 +2180,22 @@ test("--apply heartbeat: pool < floor + eligible todo ⇒ promotion lands on dis
   assert.equal(after.pool, 3, "pool recovered to floor after mechanical promotion (AC4)");
 });
 
-test("--apply heartbeat negative control: pool >= floor ⇒ zero writes (AC3)", (t) => {
-  const root = makeWorkspace("apply-neg-pool");
+test("--apply: pool >= floor with qualified candidate ⇒ apply lands it (AC48 — pool<floor gate retired)", (t) => {
+  const root = makeWorkspace("apply-pos-pool");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   writeTask(root, "gap-r1", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
   writeTask(root, "gap-r2", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
   writeTask(root, "gap-r3", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
-  writeTask(root, "gap-candidate", gapTask("gap-candidate")); // an eligible todo that must NOT be touched
+  writeTask(root, "gap-candidate", gapTask("gap-candidate")); // eligible todo — pre-AC48 this was the no-busy-work case
 
   const opts = { tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 }; // floor 3, pool 3
   const r = applyPromotions(opts);
   assert.equal(r.deficit, 0, "pool at floor");
-  assert.equal(r.should_apply, false, "AC3: pool ≥ floor ⇒ no apply");
-  assert.deepEqual(r.applied_promotions, [], "zero writes");
+  assert.equal(r.should_apply, true, "AC48: qualified candidate promotes even at pool ≥ floor (合格即晋)");
+  assert.equal(r.applied_promotions.length, 1, "one promotion applied");
+  assert.equal(r.applied_promotions[0].id, "gap-candidate");
   const task = parseTask(fs.readFileSync(path.join(root, "tasks", "gap-candidate.md"), "utf8"));
-  assert.match(task.frontmatterRaw, /^status:\s*todo$/m, "candidate must remain todo — no busy-work");
+  assert.match(task.frontmatterRaw, /^status:\s*ready$/m, "candidate promoted to ready — pool size no longer gates");
 });
 
 test("--apply heartbeat negative control: promotions empty ⇒ zero writes (AC3)", (t) => {
