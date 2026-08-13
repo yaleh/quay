@@ -512,19 +512,27 @@ bracket`）——**括号在终止/完成同轮闭合，不停留 inProgress**�
    worktree 建立时对分叉基线（`$FORK_BASELINE` 或 `$MERGE_TARGET`）取了快照，之后并发合并的其它任务它看不到。
    B3-2 就是这样红的——它的 worktree 建于 B3-1 合并前 13 分钟，于是对全局测试文件计数的断言过期。
    **并发窗口是并发模型固有的，不是偶发**，所以 rebase 是必需步骤不是可选优化。
-   rebase 冲突 → 停止该任务的 fan-in，标 needs-human，**同时关括号**（
+   rebase 冲突 → **丢弃该 worktree 的未合状态**（不 merge、不碰共享检出），标 needs-human，**同时关括号**（
    `bash plugin/scripts/closure-lag-check.sh --close-task --taskId <id> --outcome needs-human`），报告；不要 `--skip`、不要 `-X ours`。
-1. `git merge --no-ff task/<taskId> -m "merge: fan-in task/<taskId> (runId: <runId>)"`（合并目标 = 当前检出的
-   `$MERGE_TARGET`——两线模型下内层共享检出立在 `$MERGE_TARGET` 上，不是 `$FORK_BASELINE`；`$FORK_BASELINE`
-   只由外层批量合推进）。**fan-in 提交必须带 runId（`gap-task-telemetry-6-percent-join`：遥测 taskId → git 分支
-   的可回溯桥，6% join 修法）**——`<runId>` 取 `--task-start` 派发时记的 runId，fan-in 时机械回读（无需持有）：
+1. **`cd` 进 worktree 内跑 scoped 门（先验）**——`$TEST_COMMAND --for-task <taskId>`（该任务自己的选中集，秒级；
+   `TEST_COMMAND` 见 `.quay/config.yml` `loop.test_command`）**必须在 worktree 内执行**：
+   ```bash
+   cd $WORKTREE_ROOT/<slug> && $TEST_COMMAND --for-task <taskId>
+   ```
+   测试进程 `cwd` 落 `$WORKTREE_ROOT/<slug>`（非主检出）——AC42 判据2「测试 cwd 不在主检出」+ 人 2026-08-13
+   「主检出只读诊断」裁定（`gap-a6-fan-in-verify-before-merge-in-worktree`）。**选中集非绿 ⇒ 丢弃该 worktree 的
+   未合状态**（共享检出零污染、无需回退操作），标 needs-human，**同时关括号**（`--close-task --taskId <id>
+   --outcome needs-human`），**停止本 tick 的后续合并与派发**，报告。
+2. **绿才 merge（后合）**：`git merge --no-ff task/<taskId> -m "merge: fan-in task/<taskId> (runId: <runId>)"`
+   （合并目标 = 当前检出的 `$MERGE_TARGET`——两线模型下内层共享检出立在 `$MERGE_TARGET` 上，不是 `$FORK_BASELINE`；
+   `$FORK_BASELINE` 只由外层批量合推进）。**fan-in 提交必须带 runId（`gap-task-telemetry-6-percent-join`：遥测 taskId →
+   git 分支的可回溯桥，6% join 修法）**——`<runId>` 取 `--task-start` 派发时记的 runId，fan-in 时机械回读（无需持有）：
    `node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --run-id-for --taskId <taskId> --root "$(pwd)"`；
    回读为空（无在飞括号）则记 `(runId: unknown)` 并在报告里标注（缺 runId 的 fan-in 提交会被
    `fan-in-runid-check.ts` 判 fail-closed）。`--close-task --outcome done` 时 `--task-end` 自动把 fan-in
    commit sha 写进 `candidateCommit`（`--fanInCommit <sha>` 可显式给），报告每条完成任务带 `fanInCommit`。
-2. 冲突 → `git merge --abort`，标 needs-human，**同时关括号**（`--close-task --taskId <id> --outcome needs-human`），**停止本 tick 的后续合并与派发**，报告
-3. 跑 `$TEST_COMMAND --for-task <taskId>`（该任务自己的选中集，秒级；`TEST_COMMAND` 见 `.quay/config.yml` `loop.test_command`）
-4. 选中集非绿 → 回退该 merge，标 needs-human，**同时关括号**（`--close-task --taskId <id> --outcome needs-human`），停止，报告
+   merge 冲突 → `git merge --abort`（merge 未落地、共享检出仍干净；worktree 未合状态同样丢弃），标 needs-human，
+   **同时关括号**（`--close-task --taskId <id> --outcome needs-human`），**停止本 tick 的后续合并与派发**，报告。
 
 合并完成后对每个已合并任务做**合并清理**：`git worktree remove` + `git branch -d`。这是清理
 worktree/分支。**统一括号闭合点（`gap-needs-human-routing-does-not-close-bracket`）**：fan-in 成功
@@ -534,7 +542,7 @@ fan-in**（AC 全勾、工作已落地、无合并需要）时同样调 `--close
 记录仍由外层 1b 异步做（`orchestrator-loop-tick.md` 步骤 1b）。
 
 **A6/A15 对齐（`gap-worktree-leak-after-fan-in-occupies-slot-permanently`）**：inner 的 fan-in 序列
-（本步骤：merge --no-ff → --for-task 复测 → `git worktree remove`）与 **outer A15 ④ 的 fan-in 序列已对齐**
+（本步骤：`cd <wt>` 内 `--for-task` 复测 → 绿才 merge --no-ff → `git worktree remove`）与 **outer A15 ④ 的 fan-in 序列已对齐**
 （`orchestration/orchestrator-tick-core.md` A15 ④ 现含同一 `git worktree remove`）——两层的「合并后清理」是同一条
 纪律，否则在 outer 侧 fan-in 的任务（最近全在 outer 侧执行）会留下 worktree，每合一个任务永久吃一个槽位
 （`worktreeExists` 判存活 = worktree 还在 ⇒ occupied 单调累积 > cap ⇒ 空槽恒 0）。
@@ -548,7 +556,7 @@ fan-in**（AC 全勾、工作已落地、无合并需要）时同样调 `--close
 **全量套件验证为什么不在 inner 跑**：旧的「全部合并后跑一次全量」+「绿 → 写任务状态」就是批次
 同步点——同步期间零新派发，写状态变成调度边界。全量 gate 移给外层后台异步跑（验证 gate，见步骤 3
 的停止条件），inner **只读** `.quay/full-suite-state.json` 的 `state`、只保留逐任务的 `--for-task`
-选中集把关（秒级）——**inner 零全量套件自跑**（DoD grep 证明：本文件无任何全量套件自跑命令字面量，
+选中集把关（秒级，**在 worktree 内跑**——fan-in 步骤 1 的 `cd <wt> &&` 前缀）——**inner 零全量套件自跑**（DoD grep 证明：本文件无任何全量套件自跑命令字面量，
 只读外层 suite-state）。
 
 **阈值决策规则（AC5，门槛机械化，与外层文档同一份规则）**：测全量套件耗时 `suite_duration` =
