@@ -67,6 +67,9 @@ import {
   // gap-concurrent-write-mutable-tree-false-positive-red — the red-attribution check (concurrent
   // writes in the window ⇒ FALSE-POSITIVE candidate)
   isConcurrentWriteFalsePositiveCandidate,
+  // gap-precommit-guard-blocks-commits-not-working-tree-edits — the red-attribution check (a
+  // TESTED-tree assertion-surface file edited mid-round ⇒ MIXED-STATE FALSE-POSITIVE candidate)
+  isAssertionSurfaceEditedFalsePositiveCandidate,
 } from "../scripts/suite-state-trigger.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -322,6 +325,77 @@ test("AC2 negative control — a red WITHOUT treeMutatedMidRound fires SUITE-RED
     const redEv = res.events.find((e) => e.event === "SUITE-RED");
     assert.ok(redEv, "SUITE-RED fires on the red flip");
     assert.equal(redEv.concurrentWrite, undefined, "no concurrentWrite flag on a pinned-tree red (negative control)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ── gap-precommit-guard-blocks-commits-not-working-tree-edits: the assertion-surface mid-round-edit
+// red-attribution annotation (the parallel of the concurrent-write check above). A red carrying
+// `assertionSurfaceEditedMidRound` (a TESTED-tree assertion-surface file edited mid-round ⇒ the
+// running round read mixed state) is a MIXED-STATE FALSE-POSITIVE candidate. The SUITE-RED event
+// projects it as `assertionSurfaceEdited: true`; the dispatch decision is NOT changed.
+
+test("AC2 unit — isAssertionSurfaceEditedFalsePositiveCandidate is pure: red + non-empty assertionSurfaceEditedMidRound ⇒ FP candidate; otherwise not", () => {
+  assert.equal(
+    isAssertionSurfaceEditedFalsePositiveCandidate({
+      state: "red",
+      reason: "failed",
+      assertionSurfaceEditedMidRound: ["tasks/surface.txt"],
+    }),
+    true,
+    "red + a mid-round-edited assertion-surface file ⇒ MIXED-STATE FALSE-POSITIVE candidate",
+  );
+  assert.equal(
+    isAssertionSurfaceEditedFalsePositiveCandidate({ state: "red", reason: "failed", assertionSurfaceEditedMidRound: [] }),
+    false,
+    "red + EMPTY list is NOT an FP candidate (negative control)",
+  );
+  assert.equal(
+    isAssertionSurfaceEditedFalsePositiveCandidate({ state: "red", reason: "failed" }),
+    false,
+    "legacy red (no field) is NOT an FP candidate — existing attribution stands",
+  );
+  assert.equal(
+    isAssertionSurfaceEditedFalsePositiveCandidate({ state: "green", assertionSurfaceEditedMidRound: ["tasks/surface.txt"] }),
+    false,
+    "green is never an FP candidate (the annotation is a red-attribution signal)",
+  );
+  assert.equal(isAssertionSurfaceEditedFalsePositiveCandidate(null), false, "absent state is not an FP candidate");
+});
+
+test("AC2 — a red state carrying assertionSurfaceEditedMidRound fires SUITE-RED with assertionSurfaceEdited=true (mixed-state annotated)", () => {
+  const root = tmpRoot();
+  try {
+    writeSuiteState(
+      root,
+      state({
+        state: "red",
+        reason: "failed",
+        finishedAt: null,
+        assertionSurfaceEditedMidRound: ["tasks/surface.txt"],
+      }),
+    );
+    const res = runOnce(root);
+    const redEv = res.events.find((e) => e.event === "SUITE-RED");
+    assert.ok(redEv, "SUITE-RED fires on the red flip");
+    assert.equal(redEv.assertionSurfaceEdited, true, "the SUITE-RED event carries assertionSurfaceEdited=true (MIXED-STATE FP candidate)");
+    assert.equal(res.stopSignal, true, "the stop-dispatch signal is UNCHANGED (the annotation is a signal, not a discard)");
+    const log = readSuiteEvents(root);
+    assert.equal(log.some((e) => e.event === "SUITE-RED" && e.assertionSurfaceEdited === true), true, "events.jsonl records assertionSurfaceEdited=true");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC2 negative control — a red WITHOUT assertionSurfaceEditedMidRound fires SUITE-RED with NO assertionSurfaceEdited flag (clean tested tree)", () => {
+  const root = tmpRoot();
+  try {
+    writeSuiteState(root, state({ state: "red", reason: "failed", finishedAt: null }));
+    const res = runOnce(root);
+    const redEv = res.events.find((e) => e.event === "SUITE-RED");
+    assert.ok(redEv, "SUITE-RED fires on the red flip");
+    assert.equal(redEv.assertionSurfaceEdited, undefined, "no assertionSurfaceEdited flag on a clean tested-tree red (negative control)");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

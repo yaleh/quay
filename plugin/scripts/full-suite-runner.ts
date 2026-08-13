@@ -107,10 +107,15 @@ import os from "node:os";
 import path from "node:path";
 import { spawn, execFileSync } from "node:child_process";
 import readline from "node:readline";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 import { runOnce, isRunnerInFlight, type SuiteState as TriggerSuiteState } from "./suite-state-trigger.ts";
+// gap-precommit-guard-blocks-commits-not-working-tree-edits — the assertion-surface resolution is the
+// PRE-COMMIT GUARD's (the SAME judged-object registry the guard reads; AC51 doc-class files already
+// excluded). The runner snapshots that surface to DETECT a mid-round edit to a file the running round
+// reads — reuse the single source, never a hand-rolled copy (CLAUDE.md 硬规则 1).
+import { resolveAssertionSurface } from "./precommit-guard.ts";
 import { getLoad1 } from "./checker-cost.ts";
 import { scanFamily, kindForFile } from "./known-load-sensitive.ts";
 // gap-leak-residue-per-run-namespace-isolation — the runner-level unified cleanup REUSES the
@@ -330,6 +335,19 @@ export interface SuiteState {
    * explicit negative control (AC3). Absent on non-git hermetic roots.
    */
   treeMutatedMidRound?: boolean;
+  /**
+   * gap-precommit-guard-blocks-commits-not-working-tree-edits — assertion-surface files in the TESTED
+   * tree EDITED MID-ROUND (round-start content snapshot vs round-end compare). The running round read
+   * such a file at two different states ⇒ its verdict is a MIXED-STATE candidate: a red is a
+   * FALSE-POSITIVE CANDIDATE, a green is a WEAKER GREEN (the same annotation semantics as
+   * treeMutatedMidRound — AC1/AC2 of gap-concurrent-write-mutable-tree-false-positive-red: never a
+   * green/red criterion). The round-84 shape (a MAIN-checkout uncommitted edit) is PREVENTED by the
+   * one-shot worktree isolation — the tested tree is frozen — so this flag catches the residual case:
+   * the suite (or anything) editing the TESTED tree's own assertion-surface files mid-round. Absent
+   * when no assertion-surface file changed (绿轮可无, same absent-field contract as *_phase_ms); a
+   * non-git hermetic root degrades to an empty snapshot ⇒ absent (no detection possible).
+   */
+  assertionSurfaceEditedMidRound?: string[];
 }
 
 // AC2 — failure markers that flip state to red the MOMENT they appear on the suite's
@@ -792,6 +810,13 @@ export interface SuiteRoundRecord {
    */
   commit?: string;
   /**
+   * gap-precommit-guard-blocks-commits-not-working-tree-edits — the same assertion-surface mid-round
+   * EDIT annotation the suite-state carries, on the round record so the historical sequence is
+   * queryable for "was this round's verdict mixed-state" without re-deriving it (the same conditional
+   * as the state write — the edited file list, absent when nothing changed, 绿轮可无).
+   */
+  assertionSurfaceEditedMidRound?: string[];
+  /**
    * gap-suite-round-record-missing-failures-field AC2 — the SuiteFailure array on RED rounds (the
    * SAME array the suite-state write carries), so the red-window attribution can reverse-look-up
    * "failed file → task Touches" from the round sequence across rounds — not only the latest
@@ -1037,6 +1062,78 @@ export function readTreeMutation(
   const treeMutatedMidRound =
     startHead !== undefined && terminalCommit !== undefined && startHead !== terminalCommit;
   return { terminalCommit, treeMutatedMidRound };
+}
+
+// ── assertion-surface mid-round EDIT detection (gap-precommit-guard-blocks-commits-not-working-tree-edits) ──
+// Round-84 shape (manager 2026-08-12): an UNCOMMITTED working-tree EDIT to an assertion-surface file
+// enters the running round's view at SAVE time (the suite reads the tested checkout's working tree),
+// NOT commit time — the pre-commit guard fires at the commit and cannot stop it. The one-shot worktree
+// (5652604f) ISOLATES the main checkout: the main full-suite round runs in a FROZEN detached worktree
+// at the start HEAD, so a main-checkout edit PHYSICALLY cannot reach the tested tree (the round-84
+// pollution is prevented by construction — the negative control proves it). This block supplies the
+// DETECTION half (AC1): snapshot the TESTED tree's assertion-surface files (the ones the round actually
+// reads) at round start, compare at round end — a file changed mid-round is flagged. Semantics mirror
+// `treeMutatedMidRound` (gap-concurrent-write-mutable-tree-false-positive-red AC1/AC2): an ANNOTATION,
+// never a green/red criterion — a red in such a round is a false-positive candidate, a green is a
+// weaker green. The assertion-surface RESOLUTION is reused from precommit-guard.ts (the SAME
+// judged-object registry the guard reads; AC51 doc-class files already excluded).
+
+/** Content identity (SHA-1 hex) for an assertion-surface file's text. */
+export function contentHash(text: string): string {
+  return createHash("sha1").update(text).digest("hex");
+}
+
+export interface AssertionSurfaceSnapshot {
+  /** Repo-relative assertion-surface files, sorted (the files the running round reads). */
+  files: string[];
+  /** file -> content hash at snapshot time ("<unreadable>" when the file could not be read). */
+  hashes: Record<string, string>;
+}
+
+/**
+ * Snapshot the TESTED checkout's assertion-surface files at round start (content hashes). The surface
+ * is `resolveAssertionSurface` (precommit-guard.ts — the SAME judged-object registry the pre-commit
+ * guard reads; AC51 doc-class `.md` files already excluded, so doc edits are NOT assertion-surface
+ * edits). Best-effort: an unreadable file records "<unreadable>"; a resolution failure (non-git
+ * hermetic root / registry error) degrades to an EMPTY snapshot (no detection possible ⇒ no
+ * annotation — the runner must never fail a round because the snapshot could not be taken).
+ */
+export function snapshotAssertionSurface(root: string): AssertionSurfaceSnapshot {
+  let files: string[];
+  try {
+    files = [...resolveAssertionSurface(root).files].sort();
+  } catch {
+    return { files: [], hashes: {} };
+  }
+  const hashes: Record<string, string> = {};
+  for (const f of files) {
+    try {
+      hashes[f] = contentHash(fs.readFileSync(path.join(root, f), "utf8"));
+    } catch {
+      hashes[f] = "<unreadable>";
+    }
+  }
+  return { files, hashes };
+}
+
+/**
+ * Compare the CURRENT content of the snapshot's assertion-surface files against the round-start
+ * snapshot. Returns the repo-relative files whose content changed MID-ROUND (the running round read
+ * them at two different states — a mixed-state verdict candidate). A file deleted mid-round (readable
+ * at start, unreadable at end) IS a change; a file unreadable at BOTH times is NOT a change.
+ */
+export function detectAssertionSurfaceEdits(root: string, snapshot: AssertionSurfaceSnapshot): string[] {
+  const changed: string[] = [];
+  for (const f of snapshot.files) {
+    let cur: string;
+    try {
+      cur = contentHash(fs.readFileSync(path.join(root, f), "utf8"));
+    } catch {
+      cur = "<unreadable>";
+    }
+    if (cur !== snapshot.hashes[f]) changed.push(f);
+  }
+  return changed;
 }
 
 /**
@@ -1533,6 +1630,14 @@ export async function run(argv: string[]): Promise<number> {
       oneShotWorktreePath = null;
     }
   };
+
+  // gap-precommit-guard-blocks-commits-not-working-tree-edits AC1 — ASSERTION-SURFACE SNAPSHOT at round
+  // START, over the TESTED tree (the checkout the running round reads — AFTER one-shot provisioning, so
+  // an isolated round snapshots the frozen worktree, and a non-isolated round snapshots the tree the
+  // round actually reads). Compared at round end to DETECT a mid-round edit to a file the round read.
+  // Best-effort: a resolution/read failure degrades to an empty snapshot (no detection possible, never
+  // fails the round).
+  const assertionSnapshot = snapshotAssertionSurface(root);
 
   // gap-systemd-run-limits-for-suite-and-heavy-ops — wrap the spawned suite in a systemd-run --user
   // --scope cgroup scope. The limit is kernel-enforced for the scope's lifetime and bounds ONE
@@ -2158,6 +2263,16 @@ export async function run(argv: string[]): Promise<number> {
   // CONCURRENT-WRITE FALSE-POSITIVE CANDIDATE (AC2), not a proven code failure on a pinned tree.
   // A non-git hermetic root omits both fields (the annotation never fabricates a commit).
   const { terminalCommit, treeMutatedMidRound } = readTreeMutation(root, verifiedCommit);
+  // gap-precommit-guard-blocks-commits-not-working-tree-edits AC1 — the round-END assertion-surface
+  // COMPARE: did an assertion-surface file in the TESTED tree change MID-ROUND (the running round read
+  // it at two states ⇒ mixed-state verdict candidate)? The one-shot worktree isolation PREVENTS the
+  // round-84 shape (a main-checkout edit physically cannot reach the frozen tested tree — the negative
+  // control proves this flag stays clean under that shape); this annotation catches the residual case
+  // (the suite / anything editing the TESTED tree's own assertion-surface files mid-round). Same
+  // annotation semantics as treeMutatedMidRound: never a green/red criterion, red → FP-candidate,
+  // green → weaker green. Empty when the snapshot is empty (non-git hermetic root / resolution failure)
+  // or nothing changed.
+  const assertionSurfaceEditedMidRound = detectAssertionSurfaceEdits(root, assertionSnapshot);
 
   const finishedAtIso = new Date().toISOString();
   const durationMs = Date.parse(finishedAtIso) - Date.parse(startedAt);
@@ -2300,6 +2415,10 @@ export async function run(argv: string[]): Promise<number> {
         // not run on a pinned checkout), and the explicit field keeps the negative control visible
         // (treeMutatedMidRound: false on a clean window). Git roots only (verifiedCommit defined).
         ...(verifiedCommit && terminalCommit ? { terminalCommit, treeMutatedMidRound } : {}),
+        // gap-precommit-guard-blocks-commits-not-working-tree-edits — carry the assertion-surface
+        // mid-round-EDIT annotation on green too: a green whose tested tree had an assertion-surface
+        // file edited mid-round is a WEAKER green (the round read mixed state). Absent when clean.
+        ...(assertionSurfaceEditedMidRound.length > 0 ? { assertionSurfaceEditedMidRound } : {}),
       }
     : {
         state: "red",
@@ -2314,6 +2433,11 @@ export async function run(argv: string[]): Promise<number> {
         // CANDIDATE (round-53 class) — a signal, NOT a blanket round-discard (the failures are still
         // recorded; the attribution is annotated). Git roots only.
         ...(verifiedCommit && terminalCommit ? { terminalCommit, treeMutatedMidRound } : {}),
+        // gap-precommit-guard-blocks-commits-not-working-tree-edits — carry the assertion-surface
+        // mid-round-EDIT annotation on red: a red whose tested tree had an assertion-surface file
+        // edited mid-round is a FALSE-POSITIVE CANDIDATE (the round read mixed state) — a signal,
+        // not a blanket discard (the failures are still recorded; the attribution is annotated).
+        ...(assertionSurfaceEditedMidRound.length > 0 ? { assertionSurfaceEditedMidRound } : {}),
         ...(staticCheckDetected
           ? {
               staticCheck: {
@@ -2459,6 +2583,10 @@ export async function run(argv: string[]): Promise<number> {
     // re-deriving it — the same conditional as the state write (git roots only; the record never
     // fabricates a commit).
     ...(verifiedCommit && terminalCommit ? { treeMutatedMidRound, terminalCommit } : {}),
+    // gap-precommit-guard-blocks-commits-not-working-tree-edits — the assertion-surface mid-round-EDIT
+    // annotation rides the round record (the same conditional as the state write) so the historical
+    // sequence is queryable for "was this round's verdict mixed-state" without re-deriving it.
+    ...(assertionSurfaceEditedMidRound.length > 0 ? { assertionSurfaceEditedMidRound } : {}),
     // gap-suite-round-record-missing-failures-field AC2 — a RED round carries the SAME SuiteFailure
     // array the suite-state write carries (finalFailures — the redFailures/staticCheckFailures the
     // state already recorded), so verification-round.jsonl becomes a multi-round-queryable sequence
