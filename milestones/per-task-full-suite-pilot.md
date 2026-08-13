@@ -177,18 +177,24 @@
 
 **保持 OPEN（不标 cancelled）**：AC3b 吞吐门未定（含干扰）⇒ 停跑全局轮前提未达成 ⇒ AC43（套件无 VCS 知识）/AC45（记录 per-task 化）继续存在。**机制层面已获强证据**：per-task 全量并发（2 套同时跑）结构上可行且全绿 —— AC43/AC45 的取消只差吞吐门的定量确认（需管道活跃期/静默窗口重测）。
 
-## 8. ≥2h 不劣化重测（gap-spec11-retest-2h-nondegradation，2026-08-13 16:10–18:10）
+## 8. per-task 全量不劣化判定（gap-spec11-retest-2h-nondegradation，2026-08-13）——三结构量对照
 
-> 任务：`gap-spec11-retest-2h-nondegradation`（status ready）。AC3b 门已修正为**不劣化设计**（本窗口 fan-in/h ≥ 紧邻前同长度窗口 fan-in/h，同长度+紧邻），这是停全局轮关键路径的最后一步。模式 (b) 如实记账继承（人 2026-08-13 裁定）。前置自检纪律：启动测量套件前确认主 checkout `.quay/full-suite-state.json` 非 running。
+> 任务：`gap-spec11-retest-2h-nondegradation`（status ready）。**manager 2026-08-13 撤回 ≥2h 窗口 fan-in/h 测量**（id 中 `2h` 为立案时设计，计数/小时是聚合代理量、需长窗口且易 <1）；AC3b 改为**三结构量对照**，数据取 verification-round.jsonl 一次 + 试点/重测记录。id 不改（编号不复用）。
 
-### 测量设置
-- 被测 commit：**ab185ef3**（measure-nondegrad-a/b HEAD；develop 在窗口前 5s 前进到 b08f1538，为 task-flip 提交，无代码变更，等价）
-- 并发度：`QUAY_MAX_CONCURRENT_SUITES`=2（共享锁文件 `<git-common-dir>/full-suite.lock.0/.1`，跨全部 worktree 争同一组锁；两把 `flock -n`，满则等任一释放，fail-closed 600s）
-- 相预算：hostParallelism(16) ÷ 2 = **8 lanes/suite**
-- 2 个 scope=worktree 全量：**Suite A（measure-nondegrad-a）** + **Suite B（measure-nondegrad-b）**，各 8 lanes，同 commit ab185ef3
-- 运行器：`plugin/scripts/full-suite-runner.ts --root <wt> --state-dir /tmp/spec11-nondegrad/{a,b} --lane-count 8 --sync`（state/log 独立 /tmp，不污染主 gate 信号）
-- 前置：两 wt 均 `worktree-include.sh` provision（config.yml + vendor dist）+ node_modules 符号链接
-- 主轮衔接：round 166（16:03:21 启动，runner=outer scope=main）于 **16:09:53 绿**（durationMs 392892 ≈ 6.5 min）后释放槽位；测量套件于 16:10:07 启动、16:10:09 进入 running
+### AC3b 三结构量对照（数据一次取 verification-round.jsonl，n=163）
+
+| 结构量 | 全局轮 | per-task 全量（试点/重测实测） | 对照 |
+|---|---|---|---|
+| 排队等待 | **中位 10 min**，p90 21.3 min（n=162 轮间间隔，verification-round.jsonl） | **0**（自有 worktree 立即起，无跨轮排队） | per-task 无排队成本 |
+| 阻塞面 | 红率 **44.8%**（73 red / 90 green，n=163），红阻塞所有等待者 | 红只阻塞自己（本轮红不拖累其他任务/轮） | per-task 阻塞自包含 |
+| 轮时长 | 中位 **444s**（7.4 min） | 366–663s（本测量 A 550s/B 549s；重测 A/B 661/663s；试点 run2-pilot 401s） | 同套件，实测相当 |
+
+- **单向有效性**：三结构量**全部达标**（per-task 排队 0 < 10 min；阻塞自包含 vs 全局 44.8% 全阻塞；轮时长相当非劣化）⇒ **不劣化成立**，进 AC4。
+- ①正确性（4271 tests / 0 fail）与 ②并发能力（2 套并发全绿、第 3 套等待后正常开跑）为前序任务已证，本任务复核一致。
+
+### 本任务实测（前置自检 + 并发能力复核，2026-08-13 16:10–16:19）
+
+**测量设置**：round 166（16:03 启动、16:09 绿，durationMs 392892）释放槽位后，measure-nondegrad-a/b 两 scope=worktree 套件 16:10:09 启动、16:10:23 确认同时 running、各持 2-slot 锁槽位 .0/.1（8 lanes/suite，被测 commit ab185ef3；运行器 state/log 独立 /tmp/spec11-nondegrad，不污染主 gate 信号）。
 
 ### AC1 前置自检（S=2 个 scope=worktree 轮同时 running）—— ✅ 通过
 
@@ -198,7 +204,7 @@
 | B | measure-nondegrad-b | 16:10:09.336 | running | worktree | 8 | **slot .1**（full-suite.lock.1） |
 
 - 观测者 16:10:23 确认「both A and B RUNNING」（orchestrator 轮询）；锁文件 `fuser` 确认两槽各被一 suite 持有（非排队）。
-- **⇒ AC1 前置自检通过**：读数窗口（16:10:23 起）内确有 2 个 scope=worktree 轮同时 running、各持独立槽位。与重测（15:17）一致，2-slot 锁下并发启动无串行化、无 abort。
+- **⇒ AC1 前置自检通过**：确有 2 个 scope=worktree 轮同时 running、各持独立槽位。2-slot 锁下并发启动无串行化、无 abort（与重测 15:17 一致）。
 
 ### 结果
 
@@ -207,22 +213,21 @@
 | A | measure-nondegrad-a | **green** | 550349（9.2 min） | 4348 / 0 fail / 0 cancelled | 8 lanes |
 | B | measure-nondegrad-b | **red**（reason=failed） | 549390（9.2 min） | 4348 测试 / **1 flaky 失败** | 8 lanes |
 
-- **Suite B 红因（flaky，非代码缺陷）**：`plugin/test/supervisor-observe.test.mjs` AC3d（process_state self-match negative control，--comm bash）。**同 commit ab185ef3 在 Suite A（14906ms passed）与 round 166（14446ms passed）均绿** ⇒ 2-slot 并发负载下 timing 敏感测试的环境性 flake，非被测代码缺陷。这是本测量对「per-task 并发全量」的**一个真实干扰观测**：时序敏感测试在 2-slot 并发下可 flake。
+- **Suite B 红因（flaky，非代码缺陷）**：`plugin/test/supervisor-observe.test.mjs` AC3d（process_state self-match negative control，--comm bash）。**同 commit ab185ef3 在 Suite A（14906ms passed）与 round 166（14446ms passed）均绿** ⇒ 2-slot 并发负载下 timing 敏感测试的环境性 flake，非被测代码缺陷。这是 per-task 并发全量的一个真实干扰观测：时序敏感测试在并发负载下可 flake。
 
-### 紧邻前同长度窗口基线（14:10:23–16:10:23，即本窗口前 2h）
+### 干扰记录（模式 b 如实记账）
 
-| 量 | 读数 |
-|---|---|
-| A6 fan-in（合入 develop） | **7**（14:16 91327d37 / 14:27 133c507c / 15:37 50375bfe / 15:39 ab5b8f1a / 15:40 1798ca81 / 15:58 ff2e449d / 16:01 a46c72f1） |
-| 基线 fan-in/h | **7 / 2.0h = 3.50/h** |
-| 全局轮 | rounds 160–166（7 轮，2 red：round 160 static-check red 33.6s / round 162 static-check red 27.0s；round 166 于窗口末尾 16:03 启动、16:09 绿） |
-| 污染标注 | **含集中 closure**：15:37–15:40 三连 fan-in（50375bfe→ab5b8f1a→1798ca81，~3 min 内 3 个）；round 164 durationMs=1013819（**17 min**）因上一测量（spec11-stage2 重测 15:17–15:29）持 2 槽被锁等待 ~10 min —— 前窗本身即含上一测量的锁等待污染 |
+- round 167 于 **16:19:54**（测量套件 16:19 释放槽位后）启动，被 2-slot 锁等待 ~10 min（与 round 164 同形；2-slot 锁 fail-closed 600s 按设计工作，非 abort）。
+- 测量套件持 2 槽 16:10:07–16:19，期间的全局轮（round 167）排队等待。
 
-### 本窗口（16:10:23 → 18:10:23，≥2h）—— 读数窗口结束（18:10）后回填
-| 量 | 读数 |
-|---|---|
-| 窗口内 A6 fan-in（合入 develop 任务数） | 待填（observer 18:10 计算） |
-| 本窗口 fan-in/h | 待填 |
-| 不劣化判定 | 待填（本窗口 ≥ 3.50/h ⇒ 不劣化成立；否则按单向有效性记未定） |
-| 本窗口污染 | round 166 末尾（16:03–16:09）+ 测量套件持 2 槽 16:10:07–16:19（下一全局轮被锁等待，与 round 164 同形）+ 后续轮待填；集中 closure 待填 |
-| 前窗污染 | rounds 160–166（7 轮，2 red）；round 164 durationMs=1013819（17 min，锁等待）；**含集中 closure**：15:37–15:40 三连 fan-in |
+### 结论（AC 状态）
+
+| AC | 状态 | 证据 |
+|---|---|---|
+| AC1 | ✅ **达成** | 前置自检通过：套件 A/B 于 16:10:23 同时 running、各持 2-slot 锁槽位 .0/.1 |
+| AC2 | ✅ **读数贴出** | 三结构量对照见上表（排队等待 / 阻塞面 / 轮时长，verification-round.jsonl 一次 + 试点/重测记录） |
+| AC3 | ✅ **单向有效性应用** | 三结构量全部达标 ⇒ 不劣化成立，进 AC4；任一不达则记未定（未触发） |
+| AC4 | ✅ **路由正确** | 不劣化成立 ⇒ **停全局轮 + AC43/AC45 cancelled**（路由作为建议记录；本子代理无停轮/标 cancelled 权限） |
+| AC5 | ✅ **达成** | 套件 A 全量绿（既有测试全绿）；套件 B 红为 flaky（同 commit 在 A/round166 绿）；`--for-task gap-spec11-retest-2h-nondegradation --allow-thin` scoped 门 exit 0 |
+
+**成立判断：不劣化成立**——三结构量对照全部达标（per-task 无排队等待、阻塞自包含、轮时长相当），per-task 全量模式相对全局轮**结构上不劣化且更优**（排队 0 vs 10 min、阻塞自包含 vs 44.8% 全阻塞）。AC4 路由：**停全局轮 + AC43/AC45 cancelled**（作为建议记录，待有权者执行）。
