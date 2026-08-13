@@ -727,40 +727,54 @@ resource_gate_check() {
   fi
 }
 
-# ── single-flight lock (gap-resource-gate-no-single-flight-lock-two-suite-overlap) ──────────────────
-# full_suite_lock — an exclusive flock on a SHARED lock file (default <git-common-dir>/full-suite.lock;
-# see the path resolution below), held for the ENTIRE full-suite run. COMPLEMENTARY to the resource
-# gate: the gate prevents "starting into a busy machine" (a load check at startup), the lock prevents
-# "a second suite joining" (mutual exclusion). Together they are complete — two full suites can no
+# ── single-flight lock, 2 slots (gap-resource-gate-no-single-flight-lock-two-suite-overlap →
+#     gap-single-flight-lock-2-slot-concurrent-suites) ───────────────────────────────────────────────
+# full_suite_lock — a 2-slot counting semaphore over TWO SHARED lock files
+# (`<git-common-dir>/full-suite.lock.0` / `.1`), each held for the ENTIRE full-suite run. The slot
+# count IS the QUAY_MAX_CONCURRENT_SUITES knob (人 2026-08-13 裁定: 最多同时 2 组 suite; the outer
+# implementation simplification = two lock files `.0`/`.1`, no new dependency). COMPLEMENTARY to the
+# resource gate: the gate prevents "starting into a busy machine" (a load check at startup), the lock
+# prevents "a THIRD suite joining" (mutual exclusion among the S allowed suites). Together they are
+# complete — up to QUAY_MAX_CONCURRENT_SUITES full suites can now run concurrently (the spec-11 pilot's
+# finding: ≥2 concurrent suites were structurally blocked by the old 1-slot lock), and a THIRD can no
 # longer both see GO in a low-load window and start (the 2026-08-07 incident: two cc8 suites ran
 # simultaneously in DIFFERENT worktrees, 16 workers + subprocesses on 4 cores, PSI cpu avg10 = 86.22).
 #
-# The lock is file-descriptor-based (flock(1) on FD 9): the FD is opened once and held open for the
-# whole run, so the lock releases automatically when this process exits — even on an error abort —
-# with no trap bookkeeping. A second concurrent full-suite startup BLOCKS on flock (WAIT/queue) for
-# up to FULL_SUITE_LOCK_TIMEOUT (default 600s), then FAILS CLOSED with a clear message — never both
-# GO, never an infinite hang.
+# The lock is file-descriptor-based (flock(1) on FD 9 = slot .0, FD 8 = slot .1): the FDs are opened
+# once and held open for the whole run, so the lock releases automatically when this process exits —
+# even on an error abort — with no trap bookkeeping (flock's crash-autorelease is PRESERVED: a dead
+# suite can never leak a slot — the run2-a 600s lock-timeout abort becomes a clean slot release, not a
+# permanent leak). Acquire tries slot .0 then slot .1 NON-BLOCKING (`flock -n`); if BOTH are held it
+# WAITs for EITHER to release (bounded per-attempt flock-wait on .0, re-checking .1 after each), then
+# FAILS CLOSED after FULL_SUITE_LOCK_TIMEOUT (default 600s) with a clear message — never a third-GO,
+# never an infinite hang.
 #
 # Scoped paths (--for-task, --scoped, --group <non-default>, explicit files) never take the lock —
 # they are the verification path that must stay usable while a full suite runs. Nested runners skip
 # via the SAME escape hatch the resource gate uses (QUAY_TEST_SKIP_RESOURCE_GATE=1) plus the
 # same-root QUAY_TEST_NESTED guard (a nested test.sh spawned inside the running suite must not
 # deadlock against the suite's own lock).
-# SHARED lock file: resolve via git's COMMON dir so every worktree of this repo AND the primary
-# checkout contend on the SAME lock — the 2026-08-07 incident was two DIFFERENT worktrees each
+# SHARED lock files: resolve via git's COMMON dir so every worktree of this repo AND the primary
+# checkout contend on the SAME locks — the 2026-08-07 incident was two DIFFERENT worktrees each
 # running a cc8 suite, and a per-checkout `.quay/full-suite.lock` would NOT have serialized them.
 # git-common-dir resolves to the main repo's `.git` from any worktree, so
-# `<git-common-dir>/full-suite.lock` is the same inode everywhere. Fall back to
-# `<repo_root>/.quay/full-suite.lock` when git is unavailable (a non-git copy).
+# `<git-common-dir>/full-suite.lock.0`/`.1` are the same inodes everywhere. Fall back to
+# `<repo_root>/.quay/full-suite.lock.0`/`.1` when git is unavailable (a non-git copy).
+# `FULL_SUITE_LOCK_FILE=<path>` (the pilot's per-worktree escape) still works — the `.0`/`.1` suffix
+# is appended, so a per-worktree override yields a per-worktree 2-slot lock.
 FULL_SUITE_LOCK_DIR="$(git rev-parse --git-common-dir 2>/dev/null || true)"
 if [ -z "${FULL_SUITE_LOCK_DIR}" ]; then
   FULL_SUITE_LOCK_DIR="${repo_root}/.git"
 fi
 FULL_SUITE_LOCK_FILE="${FULL_SUITE_LOCK_FILE:-${FULL_SUITE_LOCK_DIR}/full-suite.lock}"
-FULL_SUITE_LOCK_FD=9
+FULL_SUITE_LOCK_0="${FULL_SUITE_LOCK_FILE}.0"
+FULL_SUITE_LOCK_1="${FULL_SUITE_LOCK_FILE}.1"
+FULL_SUITE_LOCK_FD0=9
+FULL_SUITE_LOCK_FD1=8
 FULL_SUITE_LOCK_TIMEOUT="${FULL_SUITE_LOCK_TIMEOUT:-600}"
 
-# full_suite_lock_acquire — acquire the single-flight lock (blocking wait up to the timeout).
+# full_suite_lock_acquire — acquire one of the two single-flight slots (non-blocking try on each;
+# both busy ⇒ bounded wait for either to release, then fail-closed).
 full_suite_lock_acquire() {
   if [ "${QUAY_TEST_SKIP_RESOURCE_GATE:-}" = "1" ]; then
     echo "scripts/test.sh: QUAY_TEST_SKIP_RESOURCE_GATE=1 — skipping single-flight lock (nested runner)"
@@ -770,21 +784,51 @@ full_suite_lock_acquire() {
     echo "scripts/test.sh: QUAY_TEST_NESTED=1 — skipping single-flight lock (nested invocation of the same suite)"
     return 0
   fi
-  mkdir -p "$(dirname "${FULL_SUITE_LOCK_FILE}")"
-  # Open the lock file on a dedicated FD (append mode: the file exists + is writable even if empty).
-  eval "exec ${FULL_SUITE_LOCK_FD}>${FULL_SUITE_LOCK_FILE}"
-  echo "== single-flight lock (gap-resource-gate-no-single-flight-lock-two-suite-overlap) =="
-  if ! flock -w "${FULL_SUITE_LOCK_TIMEOUT}" "${FULL_SUITE_LOCK_FD}"; then
-    echo "scripts/test.sh: another full suite holds ${FULL_SUITE_LOCK_FILE} — not starting (single-flight lock; waited ${FULL_SUITE_LOCK_TIMEOUT}s). Re-run when it finishes." >&2
-    exit 1
+  mkdir -p "$(dirname "${FULL_SUITE_LOCK_0}")"
+  # Open BOTH lock files on dedicated FDs (append mode: the file exists + is writable even if empty).
+  # FD-based flock auto-releases on process exit — a crash/abort cannot leak a slot.
+  eval "exec ${FULL_SUITE_LOCK_FD0}>${FULL_SUITE_LOCK_0}"
+  eval "exec ${FULL_SUITE_LOCK_FD1}>${FULL_SUITE_LOCK_1}"
+  echo "== single-flight lock (2 slots — gap-single-flight-lock-2-slot-concurrent-suites) =="
+  local held=""
+  # Slot .0, then slot .1: non-blocking try — a free slot is taken immediately (AC1: the 2nd suite
+  # starts instead of being serialized).
+  if flock -n "${FULL_SUITE_LOCK_FD0}"; then
+    held=0
+  elif flock -n "${FULL_SUITE_LOCK_FD1}"; then
+    held=1
+  else
+    # BOTH slots busy — WAIT for EITHER to release (a 2-slot counting semaphore made of two flocks).
+    # Bounded per-attempt flock-wait on slot .0 (re-checking slot .1 after each) so a release on
+    # EITHER slot is picked up; fail-closed after FULL_SUITE_LOCK_TIMEOUT — never a third-GO, never
+    # an infinite hang.
+    local waited=0
+    while [ "${waited}" -lt "${FULL_SUITE_LOCK_TIMEOUT}" ]; do
+      if flock -w 1 "${FULL_SUITE_LOCK_FD0}"; then held=0; break; fi
+      if flock -n "${FULL_SUITE_LOCK_FD1}"; then held=1; break; fi
+      waited=$((waited + 1))
+    done
+    if [ -z "${held}" ]; then
+      echo "scripts/test.sh: another full suite holds both slots (${FULL_SUITE_LOCK_0}, ${FULL_SUITE_LOCK_1}) — not starting (single-flight lock; waited ${FULL_SUITE_LOCK_TIMEOUT}s). Re-run when a slot frees." >&2
+      exit 1
+    fi
   fi
-  echo "scripts/test.sh: acquired full-suite single-flight lock (${FULL_SUITE_LOCK_FILE}) — held for the entire run"
+  FULL_SUITE_LOCK_HELD="${held}"
+  echo "scripts/test.sh: acquired full-suite single-flight slot ${held} (${FULL_SUITE_LOCK_FILE}.${held}) — held for the entire run"
 }
 
-# full_suite_lock_release — release the single-flight lock (idempotent; also auto-released on exit).
+# full_suite_lock_release — release the HELD slot and close both FDs (idempotent; flock also
+# auto-releases on exit — a skipped lock is a clean no-op).
 full_suite_lock_release() {
-  flock -u "${FULL_SUITE_LOCK_FD}" 2>/dev/null || true
-  eval "exec ${FULL_SUITE_LOCK_FD}>&-" 2>/dev/null || true
+  if [ -n "${FULL_SUITE_LOCK_HELD:-}" ]; then
+    if [ "${FULL_SUITE_LOCK_HELD}" = "0" ]; then
+      flock -u "${FULL_SUITE_LOCK_FD0}" 2>/dev/null || true
+    elif [ "${FULL_SUITE_LOCK_HELD}" = "1" ]; then
+      flock -u "${FULL_SUITE_LOCK_FD1}" 2>/dev/null || true
+    fi
+  fi
+  eval "exec ${FULL_SUITE_LOCK_FD0}>&-" 2>/dev/null || true
+  eval "exec ${FULL_SUITE_LOCK_FD1}>&-" 2>/dev/null || true
 }
 
 # ── group resolution helpers (gap-test-suite-has-no-layer-grouping) ──────────────────────────────

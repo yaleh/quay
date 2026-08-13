@@ -1022,6 +1022,20 @@ export function isAbortLine(line: string): boolean {
 // ── AC1/AC2: nproc-derived default laneCount + REPLACE splice ───────────────────────────────────────
 
 /**
+ * QUAY_MAX_CONCURRENT_SUITES — knob ② (旋钮②) of the 人 2026-08-13 框架: the concurrent full-suite
+ * SLOT count S (current 2). The SINGLE definition point for "how many suites may run at once" —
+ * tasks/gap-single-flight-lock-2-slot-concurrent-suites + gap-concurrency-literal-only-at-definition-
+ * points. Every concurrency value derived from it (per-suite lane budget, lock slot count, the
+ * resource-gate per-suite budget) READS this env var — never a literal 2 (the id note: "勿把 2 当设计
+ * 常量"). Clamped to >= 1 — an invalid/zero setting fails open to the single-suite default so a
+ * misconfigured host degrades to the old 1-slot behavior, never to 0 lanes.
+ */
+export function concurrentSuiteSlots(): number {
+  const raw = Number(process.env.QUAY_MAX_CONCURRENT_SUITES ?? "2");
+  return Number.isFinite(raw) && raw >= 1 ? Math.floor(raw) : 2;
+}
+
+/**
  * AC1 — the DEFAULT laneCount is nproc-derived, using the SAME formula as test.sh's AC5
  * derivation: max(1, floor(nproc / AMPLIFICATION)), AMPLIFICATION = 1.0. The 2.1 value (measured
  * process amplification 17/8 ≈ 2.125) was an unproven-conservative guard against oversubscription:
@@ -1042,7 +1056,12 @@ export function defaultLaneCount(): number {
   const ncpu = Number(ncpuRaw);
   const ampRaw = Number(process.env.RESOURCE_GATE_AMPLIFICATION ?? "1.0");
   const amp = Number.isFinite(ampRaw) && ampRaw > 0 ? ampRaw : 1.0;
-  return Math.max(1, Math.floor((Number.isFinite(ncpu) && ncpu >= 1 ? ncpu : 1) / amp));
+  // gap-single-flight-lock-2-slot-concurrent-suites AC2 — the per-suite MAIN lane budget is
+  // hostParallelism ÷ concurrent-suite slots (H=16, S=2 ⇒ 8 — the human's 8 is an INSTANCE of H÷S,
+  // not a literal: 1 suite ⇒ 16, 2 suites ⇒ each 8; a 32-core host with S=2 ⇒ each 16, no code
+  // change). "读宿主 ÷ 读并发度" — the AC44 rule plus one divisor.
+  const slots = concurrentSuiteSlots();
+  return Math.max(1, Math.floor((Number.isFinite(ncpu) && ncpu >= 1 ? ncpu : 1) / amp / slots));
 }
 
 /**
@@ -1073,9 +1092,13 @@ function hostParallelism(): number {
  * overridable via --serial-concurrency / --lowconc-concurrency, which the runner passes to test.sh as
  * QUAY_SERIAL_CONCURRENCY / QUAY_LOWCONC_CONCURRENCY so a FUTURE controlled experiment can re-measure
  * before any further bump.
+ * gap-single-flight-lock-2-slot-concurrent-suites AC2 — BOTH phase budgets now divide by the
+ * concurrent-suite slot count (hostParallelism ÷ QUAY_MAX_CONCURRENT_SUITES; 1 suite ⇒ 16, 2 suites
+ * ⇒ each 8 on a 16-core host), the SAME derivation as defaultLaneCount's main budget — the three
+ * phases share one budget rule ("serial/lowconc/main 三相").
  */
-export const DEFAULT_SERIAL_CONCURRENCY = hostParallelism();
-export const DEFAULT_LOWCONC_CONCURRENCY = hostParallelism();
+export const DEFAULT_SERIAL_CONCURRENCY = Math.max(1, Math.floor(hostParallelism() / concurrentSuiteSlots()));
+export const DEFAULT_LOWCONC_CONCURRENCY = Math.max(1, Math.floor(hostParallelism() / concurrentSuiteSlots()));
 
 /** Parse a positive-integer arg (e.g. --serial-concurrency 2); NaN/<1 → null (caller errors). */
 function parsePositiveIntArg(argv: string[], name: string): number | null {
@@ -1846,12 +1869,13 @@ export async function run(argv: string[]): Promise<number> {
     }, 30);
   }
 
-  // gap-resource-gate-no-single-flight-lock-two-suite-overlap: the SINGLE-FLIGHT mutual exclusion is
-  // enforced inside scripts/test.sh's full-suite default path (`full_suite_lock_acquire` on a flock
-  // over <git-common-dir>/full-suite.lock, held for the whole run) — a second concurrent full suite
-  // WAITs/queues instead of both-GO. The runner does NOT take its own lock: it spawns test.sh, which
-  // serializes the actual node --test workers. This runner's gate check (above) prevents "starting
-  // into a busy machine"; the spawned test.sh's flock prevents "a second suite joining".
+  // gap-resource-gate-no-single-flight-lock-two-suite-overlap → gap-single-flight-lock-2-slot-concurrent-
+  // suites: the SINGLE-FLIGHT mutual exclusion is enforced inside scripts/test.sh's full-suite default
+  // path (`full_suite_lock_acquire` on a 2-slot flock over <git-common-dir>/full-suite.lock.0/.1, held
+  // for the whole run) — up to QUAY_MAX_CONCURRENT_SUITES concurrent full suites run, a further one
+  // WAITs/queues instead of over-running. The runner does NOT take its own lock: it spawns test.sh,
+  // which serializes the actual node --test workers. This runner's gate check (above) prevents "starting
+  // into a busy machine"; the spawned test.sh's 2-slot flock prevents "a third suite joining".
   // gap-systemd-run-limits-for-suite-and-heavy-ops — spawn the suite inside the cgroup scope when
   // available (otherwise the exact same bash -c <command> as before). systemd-run --scope runs the
   // command synchronously in the foreground and propagates its exit code, so the close-event /
