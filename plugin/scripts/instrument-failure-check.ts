@@ -20,9 +20,12 @@
 //   FAMILY-3  管道后读 `$?` (pipe-then-$?): a `$?` read at a position AFTER a pipe `|` (with no
 //             PIPESTATUS) — reads the LAST pipeline stage, not the command. Correct: read `$?`
 //             BEFORE the pipe, or use PIPESTATUS.
-//   FAMILY-4  片段当进程名 (fragment-as-process-name): `comm=<bare-word>` or `grep -cx <bare-word>`
-//             where the bare word (no hyphen) is a fragment of the real comm (e.g. `comm=node`
-//             never matches node-MainThread).
+//   FAMILY-4  片段/宿主相关字面量当进程名 (fragment-or-host-dependent-literal-as-process-name):
+//             `comm=<bare-word>` or `grep -cx <bare-word>` where the bare word (no hyphen) is a
+//             fragment of the real comm (e.g. `comm=node` never matches node-MainThread); EXTENDED
+//             (gap-node-mainthread-comm-literal-host-dependent): even the "full" node comm literal
+//             (`node-MainThread`) is host/Node-version-dependent (boheidc comm=`MainThread` ⇒ 恒 0),
+//             so a bare node comm-literal count WITHOUT a cmdline cross-check fires.
 //   FAMILY-5  读派生视图断言实时 (derived-view-as-real-time): reading a snapshot file
 //             (`full-suite-state.json`, `*.json`) and asserting real-time state from it WITHOUT a
 //             freshness check (stat/mtime/startedAt/finishedAt/新鲜度) on the same line.
@@ -71,12 +74,17 @@ export const DEFAULT_SURFACE = [
 
 /**
  * Shrink-only per-family baselines — the number of real hits each family produces on the
- * CURRENT documented surface (measured 2026-08-08, at the task's land: 2/5/2/7/10 — each family
- * has at least one real, documented instance per AC1). A NEW failure-form instance beyond these
+ * CURRENT documented surface (measured 2026-08-08 at the task's land: 2/5/2/7/10; family 4
+ * REBASELINED to 10 at gap-node-mainthread-comm-literal-host-dependent, 2026-08-12 — the detector
+ * extension for host-dependent node comm literals (`grep -cx node-MainThread` / `pgrep -xc
+ * node-MainThread` / `pgrep -c node` now fire family 4: boheidc Node v24.19.0 comm=`MainThread`
+ * ⇒ the old "full literal" silently reads 0, so a bare node comm-literal count WITHOUT a cmdline
+ * cross-check is the same fragment-as-process-name failure the family already caught). Each family
+ * has at least one real, documented instance per AC1. A NEW failure-form instance beyond these
  * counts red-lights the gate. To rebaseline after an INTENTIONAL doc change, re-run --gate and
  * copy the `detected` numbers here (the audit trail is in the git history of this constant).
  */
-export const FAMILY_BASELINE: Record<number, number> = { 1: 2, 2: 5, 3: 2, 4: 7, 5: 10 };
+export const FAMILY_BASELINE: Record<number, number> = { 1: 2, 2: 5, 3: 2, 4: 10, 5: 10 };
 
 // ── Per-family detectors (PURE: line text → boolean) ──────────────────────────────────────────────────
 // The detectors scan a whole line (fenced code lines, inline backtick code, and prose that names a
@@ -114,12 +122,29 @@ export function detectFamily3(line: string): boolean {
   return pi !== -1 && pi < qi;
 }
 
-/** FAMILY-4 — `comm=` compared against a bare word, or `grep -c<flags> <bare-word>`, where the bare
- *  word (no hyphen) is a fragment of the real comm (comm=node never matches node-MainThread). The
- *  full token is captured so `node-MainThread` (the correct exact form) does NOT fire. */
+/** FAMILY-4 — a node comm literal used as an exact/regex count source, OR `comm=` compared against a
+ *  bare word (a fragment). The ORIGINAL rule: `comm=<bare-word>` / `grep -cx <bare-word>` where the
+ *  bare word (no hyphen) is a fragment of the real comm (comm=node never matches node-MainThread).
+ *
+ *  EXTENSION (gap-node-mainthread-comm-literal-host-dependent): even the "full" node comm literal
+ *  (`node-MainThread`) is HOST/Node-version-DEPENDENT — boheidc Node v24.19.0 reports comm=
+ *  `MainThread`, so `grep -cx node-MainThread` / `pgrep -xc node-MainThread` silently return 0 there.
+ *  A node-process count that hardcodes a node comm literal WITHOUT a cmdline cross-check (the
+ *  dual-read self-check / cmdline enumeration) therefore fires — the old "node-MainThread is the
+ *  correct exact form" endorsement is exactly the always-0 literal this fixes. The check needs NO
+ *  knowledge of the correct comm ⇒ works across machines/Node versions. A line carrying a cmdline
+ *  cross-check (cmdline / is_test_cmdline / 双读 / dual.read) is the safe form and does NOT fire. */
 export function detectFamily4(line: string): boolean {
+  const hasCmdlineCrossCheck = /cmdline|is_test_cmdline|双读|dual.read/.test(line);
+  // EXTENSION — bare node comm literal as an exact/regex count, no cmdline cross-check.
+  // `-[cx]{1,2}` covers both pgrep's `-xc` and grep's `-cx` flag orders.
+  if (!hasCmdlineCrossCheck) {
+    if (/(pgrep|grep)\s+-[cx]{1,2}\s+node(-MainThread)?\b/.test(line)) return true;
+    if (/\bcomm=(node|MainThread)\b/.test(line)) return true;
+  }
+  // Original rule — a fragment of the real comm (no hyphen) never matches.
   if (!line.includes("comm=")) return false;
-  const grepTok = line.match(/grep\s+-c?x?\s+([A-Za-z_][A-Za-z0-9_-]*)/);
+  const grepTok = line.match(/grep\s+-[cx]{1,2}\s+([A-Za-z_][A-Za-z0-9_-]*)/);
   if (grepTok && !grepTok[1].includes("-")) return true;
   const commVal = line.match(/comm=([A-Za-z_][A-Za-z0-9_-]*)/);
   if (commVal && !commVal[1].includes("-")) return true;
