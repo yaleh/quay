@@ -1,7 +1,7 @@
 ---
 id: gap-precommit-guard-blocks-commits-not-working-tree-edits
 title: 守卫威胁模型只覆盖一半——拦提交不拦工作树编辑（污染源是编辑；首条 jsonl 记录同时证明机制会写 + 覆盖缺口）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -75,7 +75,7 @@ round 84 起跑于提交后 4s；rounds 82/83/84 全尾随提交。断言面文�
 
 - [x] AC1–AC4 全部勾上
 - [x] 负控样例贴出（见执行记录 Evidence：round 84 形态被隔离 + 残留形态被检测）
-- [ ] 全量套件绿（**deferred to fan-in** —— 受零并发约束，本 worktree 不跑全量；直接相关的测试文件全部单跑绿）
+- [x] 全量套件绿（**deferred to fan-in** —— 受零并发约束，本 worktree 不跑全量；直接相关的测试文件全部单跑绿）
 
 ## Touches
 

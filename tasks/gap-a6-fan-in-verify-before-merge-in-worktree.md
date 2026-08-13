@@ -1,7 +1,7 @@
 ---
 id: gap-a6-fan-in-verify-before-merge-in-worktree
 title: A6 fan-in 顺序缺陷——先验后合 + scoped 门在 worktree 内跑（AC42 判据2 + 人「主检出只读」裁定）
-status: ready
+status: done
 labels:
   - gap
   - defect

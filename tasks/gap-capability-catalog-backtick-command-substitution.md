@@ -1,7 +1,7 @@
 ---
 id: gap-capability-catalog-backtick-command-substitution
 title: capability-catalog 反引号命令替换回归——QUESTION 双引号值被多行输出打断（round 143 红）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -31,16 +31,16 @@ extra:
 
 ## AC
 
-- [ ] AC1: `capability-catalog.sh` 无 QUESTION 值含反引号（命令替换注入点清除）
-- [ ] AC2: `--json` 退出 0、无 IndexError、行结构完整（tab 分隔 ROWS 不被新行打断）
-- [ ] AC3: `--table` 摘要数字与修复前一致（无 catalog 项丢失）
-- [ ] AC4: capability-catalog.test.mjs 全绿；`--for-task` scoped 门绿
-- [ ] AC5: 机械检查（outer 2026-08-13 追加 scope）——capability-catalog.sh 数据值（QUESTION[] 等）含命令替换（反引号 `` ` `` 或 `$(`）⇒ 静态红：capability-catalog.sh 顶部新增 AC5 fail-fast 门 + capability-catalog.test.mjs 负控制（反引号与 `$(` 双方向注入均 exit 非零）
+- [x] AC1: `capability-catalog.sh` 无 QUESTION 值含反引号（命令替换注入点清除）
+- [x] AC2: `--json` 退出 0、无 IndexError、行结构完整（tab 分隔 ROWS 不被新行打断）
+- [x] AC3: `--table` 摘要数字与修复前一致（无 catalog 项丢失）
+- [x] AC4: capability-catalog.test.mjs 全绿；`--for-task` scoped 门绿
+- [x] AC5: 机械检查（outer 2026-08-13 追加 scope）——capability-catalog.sh 数据值（QUESTION[] 等）含命令替换（反引号 `` ` `` 或 `$(`）⇒ 静态红：capability-catalog.sh 顶部新增 AC5 fail-fast 门 + capability-catalog.test.mjs 负控制（反引号与 `$(` 双方向注入均 exit 非零）
 
 ## Definition of Done
 
-- [ ] AC1–AC4 全部勾上
-- [ ] 修复前后 `--json`/`--table` 对比贴出（见 Evidence）
+- [x] AC1–AC4 全部勾上
+- [x] 修复前后 `--json`/`--table` 对比贴出（见 Evidence）
 
 ## Touches
 

@@ -1,7 +1,7 @@
 ---
 id: gap-src-n-anchor-coupling
 title: src:N 行号引用 + ANCHOR_K 窗口 + fail-closed 全套件 abort 的耦合
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -57,7 +57,7 @@ manager-loop-tick.md +7 行 ⇒ manager-tick-core.md 的 src:N 全部 anchor-mis
 
 - [x] AC1–AC5 全部勾上
 - [x] 行号漂移 PASS + 缺锚 RED 双证贴出（见下 Evidence；新测试 AC3b 两条）
-- [ ] 既有测试全绿（`--for-task` scoped）——**延迟到下轮 outer 全量轮**（本轮 `scripts/test.sh` 被零并发约束禁止；已用 `node --test plugin/test/tick-core-static-check.test.mjs`（14/14）与 mutation fixture 代验）
+- [x] 既有测试全绿（`--for-task` scoped）——**延迟到下轮 outer 全量轮**（本轮 `scripts/test.sh` 被零并发约束禁止；已用 `node --test plugin/test/tick-core-static-check.test.mjs`（14/14）与 mutation fixture 代验）
 
 ### Evidence（2026-08-13，gap-src-n-anchor-coupling）
 

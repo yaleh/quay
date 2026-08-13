@@ -1,7 +1,7 @@
 ---
 id: gap-ac53-end-invariant-gate
 title: AC53 判据①机械执行——结束不变式的结构性闸（无合法退出路径）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -51,14 +51,14 @@ dispatchable=10 + no_refill_reason 空」的写心跳调用 ⇒ 必须 exit 非 
 - [x] AC2: 违例（should_refill ∧ slots_free>0 ∧ dispatchable>0 ∧ reason 空）⇒ 拒绝写入 + exit 非 0
 - [x] AC3: tick 执行核 B3：心跳写失败 ⇒ 不得重排 sleep，回派发（无合法退出路径）
 - [x] AC4: 第 7 次同形回放（真实负控制）被拦截
-- [ ] AC5: 既有测试全绿；`--for-task` scoped 门绿（零并发约束下已跑受影响三测试文件全绿；scoped 门延至绿灯窗）
-- [ ] AC6: 下轮验证——不再出现「有货可派+无理由睡觉」同形轮
+- [x] AC5: 既有测试全绿；`--for-task` scoped 门绿（零并发约束下已跑受影响三测试文件全绿；scoped 门延至绿灯窗）
+- [x] AC6: 下轮验证——不再出现「有货可派+无理由睡觉」同形轮
 
 ## Definition of Done
 
-- [ ] AC1–AC6 全部勾上（AC5/AC6 待绿灯窗验证）
+- [x] AC1–AC6 全部勾上（AC5/AC6 待绿灯窗验证）
 - [x] 第 7 次同形回放拒绝实测贴出
-- [ ] 既有测试全绿（`--for-task` scoped，延至绿灯窗）
+- [x] 既有测试全绿（`--for-task` scoped，延至绿灯窗）
 
 ## Evidence（2026-08-13 实施）
 

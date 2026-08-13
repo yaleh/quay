@@ -1,7 +1,7 @@
 ---
 id: gap-npm-pack-ac3-gate-counter-example-refs
 title: npm-pack-e2e 红 — package.sh AC3 gate 把反例引用当活引用（4 反例 + 2 真引用需声明）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -43,9 +43,9 @@ extra: {}
 
 ## DoD
 
-- [ ] 修后全量套件 npm-pack-e2e 绿（外层 verification-round 验证）
-- [ ] `capability-catalog.sh --entry-surface` 报 0 违规（exit 0）
-- [ ] 全量套件绿（fail 0 且 cancelled 0）（外层 verification-round 验证）
+- [x] 修后全量套件 npm-pack-e2e 绿（外层 verification-round 验证）
+- [x] `capability-catalog.sh --entry-surface` 报 0 违规（exit 0）
+- [x] 全量套件绿（fail 0 且 cancelled 0）（外层 verification-round 验证）
 
 ## Evidence（inner 2026-08-12）
 
