@@ -465,6 +465,23 @@ develop 上的直接提交来源（近 6h）：outer 16 / tasks 13 / merge 8 / i
 5. **验收**：`git worktree list` 中每个 worktree 的 `merge-base(develop, <branch>)` 均存在于 develop
    （逐条枚举打印，不是计数）。
 
+**⚠️ 阶段一→阶段三之间的硬前置（2026-08-13 08:5xZ 人质问后补，原文有顺序但没写代价）**
+
+**`develop..integration = 0`（AC50 判据1）是 `HEAD=develop`（判据3）的【硬前置】，不满足时判据3 不得执行。**
+**原因不是洁癖，是「跳步会丢什么」——实测（08:4xZ，批合前）**：
+```
+develop..integration = 25 提交 / 57 文件
+tasks/：9 个只在 integration（切过去【消失】）· 18 个内容不同（切过去【回退】）· 0 个只在 develop
+SPEC / manager-phase-goal.md / CLAUDE.md：两边都有但内容【异】⇒ 切过去丢当日全部更正
+gap-main-checkout-cutover-to-develop-stage-3：develop 上【根本不存在】
+  ⇒ 【自指陷阱】描述"如何切到 develop"的那个任务，切过去之后自己就消失了
+```
+**而 `integration..develop = 0`（develop 是 integration 的严格祖先，无分叉）⇒ 快进零冲突** ⇒
+**正确形状不是「切换会丢东西」，是「顺序错了才会丢」：先 ff 让 develop 追上，此时两分支同点，
+`checkout develop` 是【零内容变更】。** 反过来（先切再补）= 丢 25 提交 + 9 个任务文件 + 那个自指任务本身。
+**推论**：ff 在先时，「integration-only 的任务文件怎么办」这个问题**自动消失，不需要任何副本**——
+做副本反而在两分支留同名双份，后续 ff/merge 冲突或静默覆盖，而**任务文件是任务系统的数据，覆盖 = 丢状态**。
+
 **阶段三：切主检出**
 6. 主检出 `git checkout develop`；
 7. **验收**：`git rev-parse --abbrev-ref HEAD` = `develop`，且工作树无未提交的产品文件改动。
