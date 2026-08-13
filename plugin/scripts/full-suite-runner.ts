@@ -55,6 +55,15 @@
 //   node --no-warnings --experimental-strip-types plugin/scripts/full-suite-runner.ts \
 //     [--command "<test command>"]   # default: bash scripts/test.sh (canonical full suite)
 //     [--root <path>]                # the TESTED CHECKOUT (spawn cwd + git HEAD anchor; default repo root)
+//                                    # gap-verification-round-in-one-shot-worktree: when --root IS the main
+//                                    #   repo (root === REPO_ROOT — the outer verification round and the
+//                                    #   suite-state-trigger retrigger), the runner AUTO-PROVISIONS a one-shot
+//                                    #   worktree (provision-verify-worktree.sh — its first production caller),
+//                                    #   runs the suite in it with the state/log in <main>/.quay (config C
+//                                    #   NODE_COMPILE_CACHE reuse), and tears it down after. Pass
+//                                    #   --one-shot-worktree to force the same for a non-main root; a root
+//                                    #   that is ALREADY a worktree (execute-suite-fix --root <wt>) is never
+//                                    #   re-provisioned.
 //     [--state-dir <path>]           # the .quay STATE/LOG directory (gate write location);
 //                                    #   default: <root>/.quay (backward compatible single-location)
 //                                    #   gap-suite-state-split-across-worktree-and-gate: when --root is
@@ -227,6 +236,14 @@ export interface SuiteState {
    * priority rule keys on the same distinction. Absent (legacy states) ⇒ treat as main (fail-open).
    */
   scope?: "main" | "worktree";
+  /**
+   * gap-verification-round-in-one-shot-worktree — the round ran in a one-shot verify worktree (the
+   * tested tree is physically the worktree, NOT the mutable main checkout). `scope` stays "main"
+   * (it IS the main verification signal the inner waits for); this field names the ISOLATION the
+   * round actually used so a reader can distinguish a main round that ran in an isolated worktree
+   * from a deferrable worktree-scoped run. Absent on non-one-shot rounds.
+   */
+  oneShotWorktree?: boolean;
   /**
    * gap-systemd-run-limits-for-suite-and-heavy-ops: the suite ran inside a systemd-run --user --scope
    * cgroup scope with these limits (MemoryMax/CPUQuota/TasksMax). Absent on legacy states and on
@@ -732,6 +749,9 @@ export interface SuiteRoundRecord {
   // gap-worktree-scoped-runs-consume-resources-but-produce-no-signal AC1: main|worktree — which
   // checkout produced this round (the same `scope` the state file carries). Absent on legacy rows.
   scope?: "main" | "worktree";
+  // gap-verification-round-in-one-shot-worktree — true when this round ran in a one-shot verify
+  // worktree (the same flag the suite-state carries). Absent on non-one-shot rows.
+  oneShotWorktree?: boolean;
   // trend-criteria extension (gap-quality-criteria-are-point-in-time-no-trend-criteria AC1/AC3b):
   //   tests       = pass + fail + cancelled (the suite's total test count, so per_test_ms is
   //                 comparable across rounds of different sizes)
@@ -1034,6 +1054,63 @@ export function isGitWorktree(root: string): boolean {
   }
 }
 
+// ── gap-verification-round-in-one-shot-worktree — one-shot verify worktree provisioning ─────────────
+// The full suite on the MAIN checkout runs in a freshly-provisioned worktree (the tested tree is
+// PHYSICALLY a different checkout than the mutable main repo), then tears it down. This makes the
+// three structural defects IMPOSSIBLE (the task Proposal): 守卫覆盖缺口 / verifiedCommit 假证书 /
+// 自造脏 — the main checkout is never the tested tree. The provisioning reuses the EXISTING
+// provision-verify-worktree.sh — its FIRST production caller (built + tested, 0 non-test callers).
+
+/** Default parent dir for one-shot verify worktrees (config convention: <main>/../<project>-worktrees).
+ *  Redirect via QUAY_VERIFY_WORKTREES_ROOT for hermetic tests. */
+export function verifyWorktreesRoot(mainRoot: string): string {
+  return process.env.QUAY_VERIFY_WORKTREES_ROOT ?? path.resolve(mainRoot, "..", `${path.basename(mainRoot)}-worktrees`);
+}
+
+/**
+ * Fork + provision a one-shot verify worktree off `mainRoot`'s current HEAD. Returns the worktree
+ * path — a DETACHED checkout (no branch ref is created, so `git worktree remove` leaves no dangling
+ * branch; the tested tree IS `mainRoot`'s HEAD, frozen). The suite runs inside it;
+ * teardownOneShotWorktree() removes it after the round (normal + crash + signal paths).
+ */
+export function provisionOneShotWorktree(mainRoot: string): string {
+  const wtRoot = verifyWorktreesRoot(mainRoot);
+  fs.mkdirSync(wtRoot, { recursive: true });
+  const slug = `verify-round-${Date.now()}-${randomUUID().slice(0, 6)}`;
+  const wtPath = path.join(wtRoot, slug);
+  execFileSync("git", ["worktree", "add", "--detach", wtPath, "HEAD"], {
+    cwd: mainRoot,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  // Provision the gitignored runtime files the fresh worktree lacks: config.yml + vendor dist
+  // (worktree-include.sh) + node_modules symlink + Core CLI dist build (provision-verify-worktree.sh).
+  const provisionScript = path.join(__dirname, "provision-verify-worktree.sh");
+  execFileSync("bash", [provisionScript, "--worktree", wtPath, "--root", mainRoot], {
+    cwd: mainRoot,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  return wtPath;
+}
+
+/** Tear down a one-shot verify worktree COMPLETELY (stop sessions + git worktree remove + rm -rf,
+ *  via provision-verify-worktree.sh --teardown). Best-effort — a teardown failure must never fail
+ *  the suite verdict (the leak is reclaimable by worktree-branch-hygiene-check.sh). */
+export function teardownOneShotWorktree(mainRoot: string, wtPath: string): void {
+  try {
+    const provisionScript = path.join(__dirname, "provision-verify-worktree.sh");
+    execFileSync("bash", [provisionScript, "--worktree", wtPath, "--root", mainRoot, "--teardown"], {
+      cwd: mainRoot,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    process.stderr.write(`full-suite-runner: one-shot worktree torn down: ${wtPath}\n`);
+  } catch (e) {
+    process.stderr.write(`full-suite-runner: one-shot worktree teardown failed (continuing): ${e instanceof Error ? e.message : String(e)}\n`);
+  }
+}
+
 /**
  * AC3 — consult the shared resource gate BEFORE starting the full suite. WAIT (non-zero exit) ⇒
  * the runner must NOT start; the state file is left untouched (still running/green), and the runner
@@ -1241,7 +1318,23 @@ export function recordSystemdRunEvidence(stateDir: string, scopeUnit: string, li
 // ── run ─────────────────────────────────────────────────────────────────────────────────────────────
 
 export async function run(argv: string[]): Promise<number> {
-  const root = path.resolve(parseArg(argv, "--root") ?? REPO_ROOT);
+  // gap-verification-round-in-one-shot-worktree — the full suite on the MAIN checkout runs inside a
+  // ONE-SHOT WORKTREE: provision a fresh detached worktree off the main HEAD, run the suite in it
+  // with the tested checkout = the worktree and the state/log target = <main>/.quay (config C
+  // NODE_COMPILE_CACHE reuse), then tear it down. This makes three structural defects IMPOSSIBLE
+  // (the task Proposal): (a) 守卫覆盖缺口 — main-checkout edits are PHYSICALLY outside the tested
+  // tree; (b) verifiedCommit 假证书 — the tested tree IS the commit and is FROZEN (no concurrent
+  // writer can mutate it mid-round ⇒ treeMutatedMidRound stays false by construction); (c) 自造脏 —
+  // package-lock/install rewrites hit the ephemeral worktree copy, never the main checkout.
+  // Trigger: automatic when the tested checkout IS the main repo (root === REPO_ROOT — the outer
+  // verification round and suite-state-trigger's retrigger spawn both resolve to it), or explicit
+  // via --one-shot-worktree. A caller that already targets a worktree (execute-suite-fix's
+  // --root <wt>) or a hermetic temp root is never re-provisioned (guarded by !isGitWorktree + the
+  // root === REPO_ROOT condition).
+  let root = path.resolve(parseArg(argv, "--root") ?? REPO_ROOT);
+  const mainRoot = root; // the main repo: fork source + state/log write target when one-shot
+  const oneShot = argv.includes("--one-shot-worktree") || path.resolve(root) === REPO_ROOT;
+  let oneShotWorktreePath: string | null = null;
   const explicitCommand = parseArg(argv, "--command");
   const laneCountArg = parseArg(argv, "--lane-count");
   // AC1 — effective laneCount = explicit --lane-count if given, else the nproc-derived default.
@@ -1293,7 +1386,10 @@ export async function run(argv: string[]): Promise<number> {
   // the inner stop conditions + suite-state-trigger (which read only the main repo's relative
   // .quay/full-suite-state.json) see the SAME result the runner produced. Default <root>/.quay is
   // the historical single-location behavior (fully backward compatible).
-  const stateDir = path.resolve(parseArg(argv, "--state-dir") ?? path.join(root, ".quay"));
+  // gap-verification-round-in-one-shot-worktree AC1 — when the round runs in a one-shot worktree,
+  // the state/log default is <main>/.quay (the GATE location — the worktree is torn down at the end,
+  // so writing state into it would throw the signal away). An explicit --state-dir is honored verbatim.
+  const stateDir = path.resolve(parseArg(argv, "--state-dir") ?? path.join(mainRoot, ".quay"));
   const stateFile = path.resolve(parseArg(argv, "--state-file") ?? path.join(stateDir, "full-suite-state.json"));
   const logFile = path.resolve(parseArg(argv, "--log-file") ?? path.join(stateDir, "full-suite.log"));
 
@@ -1365,6 +1461,53 @@ export async function run(argv: string[]): Promise<number> {
     fs.mkdirSync(path.join(os.tmpdir(), `quay-run-${shortRunId}`), { recursive: true });
   } catch { /* best-effort */ }
 
+  // ── gap-verification-round-in-one-shot-worktree: provision the one-shot verify worktree ──────────
+  // The verification round must NOT run on the mutable main checkout (AC2). After the resource gate
+  // passes (a gate-WAIT must not provision a worktree it never runs in), fork a fresh DETACHED
+  // worktree at the main HEAD — the tested tree is physically the worktree, so main-checkout edits
+  // and concurrent writers cannot touch it (守卫覆盖缺口 + verifiedCommit 假证书 both disappear), and
+  // package-lock/install rewrites hit the ephemeral copy (自造脏 disappears). provisioning reuses
+  // provision-verify-worktree.sh — its FIRST production caller (built + tested, 0 non-test callers).
+  // The teardown (teardownOneShotWorktree → provision-verify-worktree.sh --teardown) runs on the
+  // normal, catchable-crash, and signal paths; an uncatchable SIGKILL leaks the worktree for
+  // worktree-branch-hygiene-check.sh to reclaim (the task's ④ 现成地基).
+  if (oneShot && !isGitWorktree(root)) {
+    process.stderr.write("full-suite-runner: provisioning one-shot verify worktree (config C NODE_COMPILE_CACHE)...\n");
+    try {
+      oneShotWorktreePath = provisionOneShotWorktree(root);
+      root = oneShotWorktreePath;
+    } catch (e) {
+      // A provisioning failure is an ENVIRONMENT problem (NO correctness conclusion) — write
+      // state=red reason=aborted and exit non-zero; NEVER fall back to running the suite on the main
+      // checkout (that is exactly the shared-tree class this task removes).
+      const at = new Date().toISOString();
+      writeState(stateFile, {
+        state: "red",
+        reason: "aborted",
+        runner: "outer",
+        startedAt: at,
+        laneCount,
+        scope: "main",
+        runId,
+        finishedAt: toEpochSeconds(at),
+        durationMs: 0,
+      });
+      process.stderr.write(
+        `full-suite-runner: one-shot worktree provisioning FAILED -> state=red reason=aborted (environment problem)\n  ${e instanceof Error ? e.message : String(e)}\n`,
+      );
+      return 1;
+    }
+    process.stderr.write(`full-suite-runner: running suite in one-shot worktree ${oneShotWorktreePath}\n`);
+  }
+  // Teardown — closes the one-shot worktree (complete reclaim: sessions + git worktree remove +
+  // rm -rf). No-op when no worktree was provisioned. Best-effort (never fails the verdict).
+  const teardownOneShot = (): void => {
+    if (oneShotWorktreePath) {
+      teardownOneShotWorktree(mainRoot, oneShotWorktreePath);
+      oneShotWorktreePath = null;
+    }
+  };
+
   // gap-systemd-run-limits-for-suite-and-heavy-ops — wrap the spawned suite in a systemd-run --user
   // --scope cgroup scope. The limit is kernel-enforced for the scope's lifetime and bounds ONE
   // process group, so a PID/memory blowout inside the suite kills the SUITE's scope, never the
@@ -1397,6 +1540,11 @@ export async function run(argv: string[]): Promise<number> {
     scope,
     runId,
     ...(verifiedCommit ? { verifiedCommit } : {}),
+    // gap-verification-round-in-one-shot-worktree — the round ran in a one-shot worktree (the tested
+    // tree physically != the mutable main checkout). scope stays "main" (it IS the main verification
+    // signal the inner waits for); this field names the ISOLATION the round actually used so a reader
+    // can distinguish "main round, physically isolated worktree" from a deferrable worktree-scoped run.
+    ...(oneShotWorktreePath ? { oneShotWorktree: true } : {}),
     // AC6 (gap-full-suite-state-red-no-failure-detail-static-check-invisible): every state write
     // carries the RUNNER's PID so suite-state-trigger's runOnce crash-watchdog can distinguish
     // "genuinely running" (PID alive) from "runner died mid-run" (PID dead — SIGKILL is uncatchable
@@ -1464,6 +1612,9 @@ export async function run(argv: string[]): Promise<number> {
     } catch {
       // best-effort — never mask the original crash with a write failure
     }
+    // gap-verification-round-in-one-shot-worktree — close the one-shot worktree on a catchable crash
+    // (an uncatchable SIGKILL leaks it for worktree-branch-hygiene-check.sh to reclaim).
+    teardownOneShot();
     process.exit(1);
   };
   process.once("uncaughtException", writeCrashTerminal);
@@ -1494,6 +1645,23 @@ export async function run(argv: string[]): Promise<number> {
   // the QUAY_TEST_SCOPE_UNIT hermetic seam when a test injects one.
   let roundScopeUnit: string | null = null;
   let child: import("node:child_process").ChildProcess;
+  // gap-verification-round-in-one-shot-worktree config C — the one-shot worktree REUSES the main
+  // repo's warm NODE_COMPILE_CACHE (test.sh honors a user-supplied NODE_COMPILE_CACHE verbatim —
+  // scripts/test.sh:183). Without this the fresh worktree starts with an EMPTY cache every round
+  // (~30-40% of compile cost — the task's measured compile-cache scaling). Only set on the one-shot
+  // path: a main-checkout run already defaults to <repo_root>/.quay/node-compile-cache itself.
+  const suiteEnv = {
+    ...process.env,
+    ...phaseConcurrencyEnv,
+    ...(oneShotWorktreePath
+      ? { NODE_COMPILE_CACHE: path.join(mainRoot, ".quay", "node-compile-cache") }
+      : {}),
+    // gap-leak-residue-per-run-namespace-isolation: per-run namespace — the suite's probe tmp root
+    // becomes /tmp/quay-run-<runId>/ (delivered via env so WORKTREE runs also get it; attribution
+    // across runs stays separated). Folded into suiteEnv so the one-shot-worktree env decoupling and
+    // the per-run delivery compose rather than conflict.
+    QUAY_RUN_ID: shortRunId,
+  };
   if (useSystemdRun) {
     const sdArgv = buildSystemdRunArgv(command, systemdLimits);
     process.stderr.write(
@@ -1502,7 +1670,7 @@ export async function run(argv: string[]): Promise<number> {
     child = spawn(sdArgv[0], sdArgv.slice(1), {
       cwd: root,
       stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, ...phaseConcurrencyEnv, QUAY_RUN_ID: shortRunId },
+      env: suiteEnv,
       // detached: the suite child becomes a process-group leader so killChildTree() can terminate
       // the WHOLE tree (test.sh + its node --test children) — a hung subprocess can't leak the flock.
       detached: true,
@@ -1522,7 +1690,7 @@ export async function run(argv: string[]): Promise<number> {
     child = spawn("bash", ["-c", command], {
       cwd: root,
       stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, ...phaseConcurrencyEnv, QUAY_RUN_ID: shortRunId },
+      env: suiteEnv,
       // detached: same as the systemd-run spawn — process-group leader for killChildTree().
       detached: true,
     });
@@ -1646,6 +1814,9 @@ export async function run(argv: string[]): Promise<number> {
     process.stderr.write(
       `full-suite-runner: ${sig} received -> state=red reason=aborted (no correctness conclusion)\n`
     );
+    // gap-verification-round-in-one-shot-worktree — close the one-shot worktree before exiting so a
+    // signal-aborted round does not strand it.
+    teardownOneShot();
     process.exit(1);
   };
   process.once("SIGTERM", onSignal);
@@ -2246,6 +2417,10 @@ export async function run(argv: string[]): Promise<number> {
     ...(roundGate ? { gate: roundGate } : {}),
     runner: base.runner,
     scope,
+    // gap-verification-round-in-one-shot-worktree — carry the isolation the round actually used (the
+    // same flag the suite-state base carries) so the verification-round sequence is queryable for
+    // "was this round a one-shot-worktree round" without re-deriving it.
+    ...(oneShotWorktreePath ? { oneShotWorktree: true } : {}),
     // gap-merge-green-snapshot-verified-commit-livelock AC2 — the verified commit this round tested
     // (same value the state carries). Absent on non-git hermetic roots.
     ...(verifiedCommit ? { commit: verifiedCommit } : {}),
@@ -2347,6 +2522,10 @@ export async function run(argv: string[]): Promise<number> {
   process.stderr.write(
     `full-suite-runner: FINAL state=${finalState.state}${finalState.reason ? ` reason=${finalState.reason}` : ""} durationMs=${durationMs} exit=${exitCode}\n`
   );
+  // gap-verification-round-in-one-shot-worktree — close the one-shot worktree now that the verdict is
+  // on disk (the round record + log live in the MAIN repo's stateDir, so tearing the worktree down
+  // loses nothing). The crash/signal handlers above also teardown; this is the normal-completion path.
+  teardownOneShot();
   return green ? 0 : 1;
 }
 
