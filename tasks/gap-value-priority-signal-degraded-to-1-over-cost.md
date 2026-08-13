@@ -33,19 +33,33 @@ extra:
 
 ## AC
 
-- [ ] AC1: value 信号不再是 `1/touches` 退化——三个实质轴（strategic/blocking/suite-blocking）在 todo 群上能取到 Y（非 0/9 全 N）
-- [ ] AC2: 大 touches 任务（如试点）不再结构性垫底——`--top N` 排序中可浮现
-- [ ] AC3: 复合指标可判别（不退化）——输入有判别力，输出非恒序
-- [ ] AC4: 既有测试全绿；`--for-task` scoped 门绿
+- [x] AC1: value 信号不再是 `1/touches` 退化——三个实质轴（strategic/blocking/suite-blocking）在 todo 群上能取到 Y（非 0/9 全 N）
+- [x] AC2: 大 touches 任务（如试点）不再结构性垫底——`--top N` 排序中可浮现
+- [x] AC3: 复合指标可判别（不退化）——输入有判别力，输出非恒序
+- [x] AC4: 既有测试全绿；`--for-task` scoped 门绿
 
 ## Definition of Done
 
-- [ ] AC1–AC4 全部勾上
-- [ ] 修前（9/9 全 N、value=1/cost）vs 修后（轴可取 Y、value 非退化）对照贴出
-- [ ] 全量套件绿
+- [x] AC1–AC4 全部勾上
+- [x] 修前（9/9 全 N、value=1/cost）vs 修后（轴可取 Y、value 非退化）对照贴出
+- [ ] 全量套件绿（fan-in 后由全量套件门验证——scoped 门已绿）
 
 ## Touches
 
 - plugin/scripts/ready-pool-check.ts（value 信号判别力）
 - plugin/test/ready-pool-check.test.mjs（value 退化回归用例）
 - tasks/gap-value-priority-signal-degraded-to-1-over-cost.md（自身）
+
+## Closure（2026-08-13，worktree 实现）
+
+**根因（两个取数 bug + 一个结构性阴性）**：
+1. **strategic 取数 bug**：`STRATEGIC_REF_RE = /FINDING-|SYNTHESIS-|SPEC-|REVIEW-cadence/` 要求 `SPEC` 后紧跟连字符。试点任务实际引用形式是 `SPEC §11 阶段 2`（空格+节号），不匹配 `SPEC-` ⇒ 本阶段唯一战略优先级的试点读 strategic N。修：改为词边界匹配 `/\b(?:SPEC|FINDING|SYNTHESIS)\b|REVIEW-cadence/`，同时命中 `SPEC §11`（空格+节）与 `SPEC-per-task-suite-verification-2026-08-13.md`（连字符文件名）；仍区分大小写。
+2. **blocking 取数 gap**：blocking 轴只读 `parent`/`children`，不读 `depends_on` 反向边——一个被其他任务 `depends_on` 的任务同样「落地即解锁依赖者」。修：`computeRelevance` 新增 `dependedOnCount`（每任务 `depends_on` 的反向索引），>0 即 flip blocking true。
+3. **suite-blocking**：套件绿（0 连续红）时结构性地为 N——这是 AC4 阴性对照的正确行为，非 bug；红窗时已由既有测试证明可取 Y。
+
+**修前 vs 修后对照（同一 worktree 实测，`ready-pool-check --top 100`）**：
+- 试点 `gap-spec-11-stage-2-per-task-full-suite-pilot`：修前 `value 0.333 · strategic N · blocking N`（ready_relevance 第 7 位）→ 修后 `value 4.333 · strategic Y`（ready_relevance 第 2 位，仅次于既有 strategic+blocking 的 cold-start 任务）。大任务不再结构性垫底（AC2）。
+- `gap-ac51-assertion-surface-split`：修前 `value 0.25 · strategic N` → 修后 `value 4.25 · strategic Y`。
+- 三轴回归用例（`plugin/test/ready-pool-check.test.mjs` `value-degradation` 组）：strategic 取 `SPEC §11` 形式取 Y、blocking 经 `depends_on` 反向边取 Y、大 touches 战略任务在 `--top` 排序中浮到 plain 小任务之上（value 序列非单调 1/cost）。
+
+**scoped 门**：`scripts/test.sh --for-task gap-value-priority-signal-degraded-to-1-over-cost --allow-thin` 绿（scoped 静态检查全 PASS；95/95 测试通过，含 3 条新增 value-degradation 回归）。

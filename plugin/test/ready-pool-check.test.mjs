@@ -1448,6 +1448,107 @@ test("value-prioritization does not alter the gap>DIR promotion order (AC4 regre
   assert.deepEqual(withTop.candidates.map((c) => c.id), ["gap-defect", "DIR-new-cap"], "gap>DIR order preserved");
 });
 
+// ── VALUE-DEGRADATION REGRESSION (gap-value-priority-signal-degraded-to-1-over-cost) ────────────────
+// AC1: the value signal must not be a pure `1/touches` — the three substantive axes
+// (strategic/blocking/suite-blocking) must be ABLE to take Y. AC2: a large-touches strategic task (the
+// pilot's shape) must NOT structurally bottom out. AC3: the composite metric is discriminative (non
+// degenerate). These pin the two取数 fixes: (a) the strategic regex now word-boundary matches the
+// strategic-doc reference form `SPEC §11` (the pilot references the SPEC doc by section, not by
+// hyphenated filename — the old `/SPEC-/` missed it); (b) the blocking axis now reads the `depends_on`
+// reverse edge (a task others depend on IS blocking).
+
+test("value-degradation AC1: strategic axis取数 bug — `SPEC §11`-style reference (pilot's form) reads strategic Y", () => {
+  // The pilot references "SPEC §11 阶段 2" — a reference to the strategic SPEC doc by section number,
+  // not the hyphenated filename `SPEC-per-task-suite-verification-2026-08-13.md`. The old
+  // /FINDING-|SYNTHESIS-|SPEC-|REVIEW-cadence/ required a literal hyphen after SPEC, so the pilot —
+  // the stage's single strategic priority — read strategic N. Word-boundary matching catches BOTH.
+  assert.equal(STRATEGIC_REF_RE.test("SPEC §11 阶段 2 (per-task 全量试点)"), true, "SPEC §N (space+section) must match");
+  assert.equal(STRATEGIC_REF_RE.test("SPEC-per-task-suite-verification-2026-08-13.md"), true, "hyphenated doc name still matches");
+  assert.equal(STRATEGIC_REF_RE.test("FINDING-roadmap-predates-ADR-022-retirement"), true);
+  assert.equal(STRATEGIC_REF_RE.test("SYNTHESIS-four-gaps-2026-08-05.md"), true);
+  assert.equal(STRATEGIC_REF_RE.test("REVIEW-cadence mechanism"), true);
+  // negative control: case-sensitivity preserved (a lowercase `spec` in prose is NOT a strategic ref).
+  assert.equal(STRATEGIC_REF_RE.test("lowercase spec- reference"), false, "case-sensitive prefix match");
+  assert.equal(STRATEGIC_REF_RE.test("just a normal task"), false);
+
+  // end-to-end: a todo whose body references the pilot's actual strategic-doc form gets strategic Y
+  // and a value well above its 1/cost — NOT structurally bottomed out.
+  const strategic = computeRelevance("gap-spec-11-pilot", {
+    body: "references SPEC §11 阶段 2 per-task 全量试点\n## Touches\n- code/a.ts\n- code/b.ts\n- code/c.ts",
+  });
+  assert.equal(strategic.strategic, true, "SPEC §11 reference ⇒ strategic traceable");
+  assert.equal(strategic.value, Number((STRATEGIC_WEIGHT + 1 / 3).toFixed(3)), "value = strategic(4) + costBenefit(1/3), NOT 1/3");
+  assert.match(strategic.reason, /strategic Y/);
+});
+
+test("value-degradation AC1: blocking axis取数 gap — a task others `depends_on` is blocking", () => {
+  const childrenByTask = new Map();
+  const parentRefCount = new Map();
+  // two tasks list `gap-prereq` in their depends_on — its landing unblocks both (same semantic as
+  // being named parent, but the edge family is `depends_on`, which the blocking axis never read).
+  const dependedOnCount = new Map([["gap-prereq", 2]]);
+  const r = computeRelevance(
+    "gap-prereq",
+    { body: "plain\n## Touches\n- code/a.ts" },
+    childrenByTask,
+    parentRefCount,
+    null,
+    dependedOnCount,
+  );
+  assert.equal(r.blocking, true, "a task others depends_on is blocking");
+  assert.equal(r.value, BLOCKING_WEIGHT + 1, "value = blocking(2) + costBenefit(1)");
+  assert.match(r.reason, /depends-on 2/);
+  // negative: a task NO ONE depends_on stays non-blocking on this axis.
+  const isolated = computeRelevance("gap-isolated", { body: "plain\n## Touches\n- code/a.ts" }, childrenByTask, parentRefCount, null, dependedOnCount);
+  assert.equal(isolated.blocking, false);
+});
+
+test("value-degradation AC2/AC3: a large-touches strategic task floats above a small plain task; composite not 1/cost (--top ordering)", (t) => {
+  const root = makeWorkspace("val-nondeg");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // The pilot shape: a LARGE touches task (many files) that is strategic — under the old pure-1/cost
+  // signal it bottomed out (value = 1/8 for 8 touches); with the strategic axis restored it outranks a
+  // tiny plain task.
+  writeTask(root, "gap-pilot", gapTask("gap-pilot", {
+    body: fourArtifactBody({
+      touches: Array.from({ length: 8 }, (_, i) => `- code/file${i}.ts`),
+      extra: "\nproposal references SPEC §11 阶段 2 (per-task 全量试点)",
+    }),
+  }));
+  writeTask(root, "gap-plain", gapTask("gap-plain", {
+    body: fourArtifactBody({ touches: ["- code/one.ts"] }),
+  }));
+  // a blocking-via-depends_on todo also ranks above the plain one.
+  writeTask(root, "gap-dep", gapTask("gap-dep", {
+    body: fourArtifactBody({ touches: ["- code/dep.ts"] }),
+  }));
+  writeTask(root, "gap-dependent", gapTask("gap-dependent", {
+    body: fourArtifactBody({ touches: ["- code/other.ts"] }),
+  }));
+
+  // inject a depends_on edge gap-dependent → gap-dep by appending to the frontmatter.
+  const depFile = path.join(root, "tasks", "gap-dependent.md");
+  const depRaw = fs.readFileSync(depFile, "utf8");
+  fs.writeFileSync(depFile, depRaw.replace(/^(extra:)/m, "depends_on:\n  - gap-dep\nextra:"));
+
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1, topN: 4 });
+  assert.equal(r.top_relevance[0].id, "gap-pilot", "large-touches strategic task must rank FIRST (not bottom out)");
+  assert.equal(r.top_relevance[0].strategic, true);
+  assert.equal(r.top_relevance[0].value, Number((STRATEGIC_WEIGHT + 1 / 8).toFixed(3)));
+  // the blocking-via-depends_on task ranks above the plain ones (blocking 2 + costBenefit 1 = 3 > 1).
+  assert.equal(r.top_relevance[1].id, "gap-dep", "depends_on-blocking task ranks above plain");
+  assert.equal(r.top_relevance[1].blocking, true);
+  // both plain 1-touch tasks (gap-dependent, gap-plain) tie at value 1; the alphabetical tie-break
+  // puts gap-dependent before gap-plain — the plain pair ranks LAST, after pilot and gap-dep.
+  const plainIdx = r.top_relevance.map((e) => e.id).filter((id) => id === "gap-dependent" || id === "gap-plain");
+  assert.deepEqual(plainIdx, ["gap-dependent", "gap-plain"], "plain pair last of the four");
+  // AC3: the value sequence is NOT a monotone 1/cost curve — the strategic large task (4.125) tops
+  // the plain tiny task (1), inverting the pure-cost ordering.
+  assert.ok(r.top_relevance[0].value > r.top_relevance[2].value, "strategic large task outranks plain small");
+  const vals = r.top_relevance.map((e) => e.value);
+  assert.deepEqual(vals, [...vals].sort((a, b) => b - a), "top_relevance sorted by value desc");
+});
+
 test("CLI smoke: --top 5 emits top_relevance value-sorted array with reasons (AC2/Contract measure)", (t) => {
   const root = makeWorkspace("cli-top");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
