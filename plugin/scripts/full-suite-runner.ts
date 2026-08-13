@@ -235,6 +235,14 @@ export interface SuiteState {
    * Absent on legacy states (pre-fix) ⇒ a newer run's `running` write overwrites them.
    */
   runId?: string;
+  /**
+   * ⚠️ 非执行面取证（A19 降级标注，tasks/gap-a19-evidence-field-does-not-match-measured-object，
+   * manager 2026-08-13）：`runner` 只记录本进程被调用时的【名义层身份】（outer/inner），
+   * 不知道调用者是主会话回合 / workflow / subagent——本 runner 恒写 "outer"（无 --runner 旗标），
+   * 140/140 零反例 ⇒ 它结构上不可能取假（硬规则 4），不是测量，**绝不驱动**执行形态计数器的 signal。
+   * 执行形态取证面是 launch tool_use 的 transcript 文件类别（主会话/agent/workflow 三类），
+   * 见 plugin/scripts/suite-execution-form-counter.ts。本字段保留仅作展示/历史对照。
+   */
   runner: "outer" | "inner";
   /**
    * gap-worktree-scoped-runs-consume-resources-but-produce-no-signal AC1: which checkout produced this
@@ -1665,6 +1673,8 @@ export async function run(argv: string[]): Promise<number> {
     );
   }
   const base = {
+    // 非执行面取证（A19 降级）：runner 恒 "outer" 是名义层身份标注，不代表执行形态；
+    // 执行形态取证面是 launch tool_use 的 transcript 文件类别（见 suite-execution-form-counter.ts）。
     runner: "outer" as const,
     startedAt,
     laneCount,
