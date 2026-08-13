@@ -359,21 +359,57 @@ export function hasLandedImplementation(root, taskId) {
   }
 }
 
+/** OUTER-VERIFICATION item family (gap-phantom-killer-false-negative-id-not-in-commits): the pool's
+ *  `（待外部）` (isExternalVerificationItem) is ONE declared annotation for "depends on an external
+ *  event"; the outer full-suite verification item is a SECOND structurally-identical declared form
+ *  used across the task store (`全量套件绿（…）——外层 verification-round 验证` / `**外层 verification-
+ *  round 验证**` / `外层全量验证`). This recognizer is slot-refill's ONLY addition over the single
+ *  source isExternalVerificationItem — ready-pool-check's fail-closed semantics (unannotated defaults
+ *  待本任务) are UNCHANGED there; this family recognition is local to slot-refill's landed gate. */
+const OUTER_VERIFICATION_RE = /(?:全量套件绿|外层(?:全量)?验证|外层\s*verification-round)/;
+export function isOuterVerificationItem(text) {
+  return isExternalVerificationItem(text) || OUTER_VERIFICATION_RE.test(text);
+}
+
 /** LANDED-IMPLEMENTATION completion gate (gap-slot-refill-recommends-landed-code-complete-tasks): the
  *  new step-4 check is a "已合待翻 done" exclusion — the task is a done-flip candidate (NOT fresh
  *  dispatchable work) ONLY when its self-declared completion checkboxes (AC + DoD, shape-aware: the
  *  literal `## Acceptance Criteria` extractSection is exactly why the all-checked phantom tasks under
  *  `## AC` were NOT caught) are all checked, OR it has none (the landing is its closeout), OR every
- *  remaining unchecked item is annotated `（待外部）` (awaiting suite/verification — the manager's
- *  "只差绿轮验证后的 closure" shape). An AC-incomplete landed task carries real remaining
- *  implementation — STUCK-WORK — and must stay dispatchable (gap-ready-pool-worklanded-traps-stuck-work
- *  parity: the pure-git signal alone would wrongly trap it). Reuses the pool's single-source
- *  countCompletionCheckboxes / isExternalVerificationItem, never a parallel copy. */
+ *  remaining unchecked item is an EXTERNAL-VERIFICATION item — `（待外部）` via the pool's single-source
+ *  isExternalVerificationItem, or the outer full-suite 「外层全量验证」 family via isOuterVerificationItem
+ *  (awaiting suite/verification — the manager's "只差绿轮验证后的 closure" shape; the outer family
+ *  added 2026-08-13 by gap-phantom-killer-false-negative-id-not-in-commits because the empirical
+ *  false-negative task's outer item was written `——外层 verification-round 验证`, NOT `（待外部）`). An
+ *  AC-incomplete landed task carries real remaining implementation — STUCK-WORK — and must stay
+ *  dispatchable (gap-ready-pool-worklanded-traps-stuck-work parity: the pure-git signal alone would
+ *  wrongly trap it). Reuses the pool's single-source countCompletionCheckboxes / isExternalVerificationItem
+ *  (the outer family is the ONLY addition), never a parallel copy. */
 export function isLandedCodeComplete(body) {
   const { total, checked, uncheckedItems } = countCompletionCheckboxes(body);
   if (total === 0) return true;
   if (checked === total) return true;
-  return uncheckedItems.length > 0 && uncheckedItems.every(isExternalVerificationItem);
+  return uncheckedItems.length > 0 && uncheckedItems.every(isOuterVerificationItem);
+}
+
+/** TASK-BODY-SIDE LANDED signal (gap-phantom-killer-false-negative-id-not-in-commits): the OR-in
+ *  alternative to the git-grep hasLandedImplementation. The FALSE-NEGATIVE direction:
+ *  hasLandedImplementation reads `git log develop --grep <taskId>` — when the implementation commits
+ *  NEVER carry the task id in their message (the empirical case:
+ *  gap-superseded-modeled-as-task-lifecycle-terminal — impl deba6463/8a8fc8f6/f12863a8/8bf44f9f/
+ *  2d3caab0/23c8fee3 all ancestor on develop but the messages say "VALID_STATUSES 加 superseded",
+ *  ACs 8/9 with the ONLY unchecked item the outer full-suite verification) the grep misses and a
+ *  LANDED task is still recommended. The body-side signal: a ready task whose body DECLARES itself
+ *  code-complete-except-outer-verification (all completion boxes checked, OR every remaining unchecked
+ *  item is outer-verification) is "已合待翻 done" even when no commit names its id. total > 0 is
+ *  REQUIRED — a no-checkbox task (a fresh task with no completion boxes) must NOT be judged landed
+ *  from body alone (that would be a phantom-killer FALSE POSITIVE: genuinely-new no-checkbox work
+ *  swallowed). Reuses the single-source countCompletionCheckboxes + isOuterVerificationItem. */
+export function isBodyLanded(body) {
+  const { total, checked, uncheckedItems } = countCompletionCheckboxes(body);
+  if (total === 0) return false;
+  if (checked === total) return true;
+  return uncheckedItems.length > 0 && uncheckedItems.every(isOuterVerificationItem);
 }
 
 /** The slot-refill decision. Pure: reads the store, never writes, never dispatches.
@@ -485,6 +521,13 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
   // in the result so the tick can close deferred candidates' open brackets (--close-task --outcome
   // deferred). slot-refill stays PURE; it only reports.
   let deferred = [];
+  // PHANTOM-KILLER FALSE-NEGATIVE OBSERVATION POINT (gap-phantom-killer-false-negative-id-not-in-
+  // commits AC1): count of ready tasks caught by the BODY-side landed signal (isBodyLanded) that the
+  // git-grep hasLandedImplementation MISSED (bodyLanded && !gitLanded). Each is a phantom-killer false
+  // negative — an already-landed task whose implementation commits never carried its id, so absent the
+  // body-side signal it WOULD have been recommended for dispatch. Declared at function scope so the
+  // result surfaces it even when halted (0 — nothing is evaluated while halted).
+  let phantomKillerFalseNegativeCaught = 0;
   // AC2/AC3 (gap-delivery-critical-label-at-promote-not-after-dispatch): the delivery-critical tasks
   // EXCLUDED from this round's recommendation because they are IN-FLIGHT (deferred with a
   // `touches-overlap-in-flight` reason — the "被自己挤出 ranking" case: a task already dispatched is
@@ -585,7 +628,19 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
       // MUTEX-CLIQUE LANDED-IGNORE (tasks/gap-slot-refill-clique-ignores-landed-touches): the `landed`
       // signal is computed ONCE here and reused below — an AC-incomplete landed task stays a candidate
       // (stuck-work), but its id is recorded so its touches never enter the batch clique.
-      const landed = hasLandedImplementation(root, id);
+      // PHANTOM-KILLER FALSE-NEGATIVE BODY-SIDE OR-IN (gap-phantom-killer-false-negative-id-not-in-
+      // commits AC2): hasLandedImplementation (the git-grep — commit messages naming <task-id>) misses
+      // a landed task whose implementation commits NEVER carry the id (the empirical superseded-modeled
+      // shape — deba6463 etc. on develop but messages say "VALID_STATUSES 加 superseded"). OR-in the
+      // task-body-side signal (isBodyLanded — ACs 全勾 + 未勾项均为外层验证 ⇒ 视同 landed). The AC1 counter
+      // records the false-negative direction (body caught it when the git-grep missed). isLandedCodeComplete
+      // gates the union so an AC-incomplete landed task (stuck-work) stays dispatchable — isBodyLanded
+      // implies isLandedCodeComplete (both require the same code-complete-except-outer-verification
+      // disjunction; isBodyLanded additionally requires total > 0), so the body-side catch always defers.
+      const gitLanded = hasLandedImplementation(root, id);
+      const bodyLanded = isBodyLanded(text);
+      if (bodyLanded && !gitLanded) phantomKillerFalseNegativeCaught++;
+      const landed = gitLanded || bodyLanded;
       if (landed && isLandedCodeComplete(text)) { defer(id, "landed-implementation"); continue; }
       // step-4 check 5: C8 SELF-TOUCH (gap-slot-refill-c8-reject-no-backfill) — the dispatch gate
       // (fast-mode-tick-core.md C8) requires the candidate's OWN `tasks/<id>.md` in ## Touches
@@ -764,6 +819,12 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
     // deferred) so the queue segment never counts toward OVER90. PURE signal — slot-refill never
     // writes brackets; the tick consumes this list to close them.
     deferred,
+    // PHANTOM-KILLER FALSE-NEGATIVE (gap-phantom-killer-false-negative-id-not-in-commits AC1): the
+    // incident-rate observation point — ready tasks the body-side landed signal caught that the
+    // git-grep hasLandedImplementation MISSED (bodyLanded && !gitLanded). 0 here means no
+    // false-negative direction observed this evaluation. The empirical 2026-08-13 reading was 1
+    // (gap-superseded-modeled-as-task-lifecycle-terminal, of 17 landed-but-not-flipped).
+    phantom_killer_false_negative_caught: phantomKillerFalseNegativeCaught,
     // RANKING EXPOSURE (gap-ac36-recommended-exposes-sort-key AC2): per-recommended-id sort axes
     // ({id, deliveryCritical, suiteBlocking, rank}) so AC36 判据②'s "strict forward movement +
     // negative control" is mechanically assertable from the JSON alone.
