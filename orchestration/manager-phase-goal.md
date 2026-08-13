@@ -2612,7 +2612,7 @@ manager 的活是：每 tick 采样 AC20 的五条、维护 AC21-AC24 的取证�
 
 - [ ] **AC42** 验证不发生在共享可变检出上
 - [ ] **AC43** 套件无 VCS 知识（`verifiedCommit` 类逻辑移出套件）
-- [ ] **AC44** 并发上限读宿主，不写死字面量
+- [x] **AC44** 并发上限读宿主，不写死字面量（2026-08-13 15:2xZ 达成，三条判据逐条取证：①两槽锁 `.0`/`.1` + `QUAY_MAX_CONCURRENT_SUITES` 可配，且 `test.sh:1131 full_suite_lock_acquire` 排在 `:1133 gate` / `:1136 build_dist` / `:1138 static_checks` **之前** ⇒ 被挡者不先起进程树；②非注释的 `CPUQuota=` 仅 1 处且是模板 `${limits.cpuQuota}`（`""`=无限制，人 08-11 裁定）；③**判据3 已改**——原文要三个字面量 8/6/6，现为 `:1100/:1101` `Math.floor(hostParallelism()/concurrentSuiteSlots())`，`8` 不出现在任何地方）
 - [ ] **AC45** 记录迁移到 per-task，两类 population 不混
 - [ ] **AC46** ready 自足、静态语义，pool 可取消（含：动态冲突只 defer 不退回）
 - [ ] **AC47** 完成判定覆盖 AC + DoD
@@ -2694,7 +2694,15 @@ npm-pack-e2e [real-install]「tarball bin → dist/quay.js 缺失」：round 123
 1. **锁容量可配置且默认 2**；被挡的第二个请求**不得先起完整进程树再发现该等**（今晚实测的浪费形态）。
 2. **cgroup 限制存在，且其值是宿主派生表达式**（如 `nproc / 锁容量`），
    **不得出现写死的 `CPUQuota=N%` 字面量**——取证：grep 该配置生成处，命中字面量即违规。
-3. **main 相并发 = 8，serial/lowconc 保持 6/6**；取证：round 日志的 `__GROUP__ concurrency=` 行三条分别为 8/6/6。
+3. ~~**main 相并发 = 8，serial/lowconc 保持 6/6**；取证：`__GROUP__ concurrency=` 行三条分别为 8/6/6。~~
+   **⚠️ 判据3 已随人 2026-08-13 的三旋钮裁定退休，原文停留在裁定之前的形态，照它验会验错。**
+   原文要的是三个**字面量**（8/6/6）；人裁定的目标形态是「**我可以根据主机环境指定：inner 并发 task subagent
+   最大量；并发可执行的 suite 数量；最大超订系数。其它值应当可以计算出来**」。
+   **⇒ 判据3 改为**：三相并发**全部由三旋钮派生**，任何一相都不得出现机器相关的字面量。
+   取证：`full-suite-runner.ts:1100/1101` 现为 `Math.max(1, Math.floor(hostParallelism() / concurrentSuiteSlots(...)))`；
+   `8` 不出现在任何地方，它是 `16 ÷ 2` 的一次求值结果。
+   **一般形态（今日第 5 次）**：**判据比它的前提活得更久**——前提被裁定改掉，判据留在原地，
+   而"照判据验"与"验对了"从此不是一回事。
 
 **今晚基线**：① 锁存在但无容量概念（单实例 flock），且**已实测一次"起了又卡住"的浪费**
 （pid 2937119：2 个子孙、CPU 0.1%、卡在 flock）；② 无 cgroup 限制，且**同族事故已发生过一次**
