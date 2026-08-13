@@ -8,8 +8,7 @@ labels:
   - defect
   - mechanism
 parent: null
-children:
-  - gap-slot-refill-clique-ignores-landed-touches
+children: []
 extra:
   schema: execution
 ---
