@@ -122,6 +122,10 @@ one-per-wake 不是 inner 没填满/偷懒，inner 派 1 条是**严格遵守文
 - [x] AC6: 派发口径三处同步定一——不变式驱动「派到 should_refill 变假或达 slots_free」，弃「1-2 条」字面量
       （`plugin/loop/fast-mode-loop-tick.md:321/:340` + 执行核 `fast-mode-tick-core.md` A12 三处一致）
 - [x] AC7: 每次派发后重估不变式（派一条 → 重跑 slot-refill → 仍 `should_refill ∧ 有槽` 则再派）
+- [x] AC8: 判据①闸不可绕过（outer 2026-08-13 裁定补）——结束不变式改读【机件输出】：判据①以
+      现跑 slot-refill 的 `no_refill_reason` 参与判定，心跳里该字段仅作展示不参与（硬规则 4b 自产量
+      不能判其生产者）；负控制必加：机件说无阻塞理由（no_refill_reason=None）∧ 心跳写自述散文 ⇒ 闸
+      仍拒（checker exit 1 / writer 拒写零写入），已入自动化测试（checker 3 纯 + 1 CLI、writer 1 CLI）
 
 ## Definition of Done
 
@@ -195,6 +199,34 @@ checker exit: 1
 - `plugin/test/inner-wakeup-heartbeat-check.test.mjs` 新增三条 AC4 测试：07:13 第五样本（outer 裁定）、
   第六样本（manager 提供 2026-08-13）、六时刻验收（04:02:52Z/04:22Z/07:13/第六样本 四数值形状逐条断言
   violated）。
+
+**AC53 判据①闸绕过修复（outer 2026-08-13 裁定 → 本执行记录）**：
+
+**绕过（复述裁定）**：`inner-wakeup-heartbeat-check.ts` 旧判据读【心跳文件里的 no_refill_reason】
+——那是被判方（inner）自己写的字段。live 心跳实测 `"no_refill_reason":"ac51 subagent in flight..."`
+（自述散文），而机件现读 `no_refill_reason=None` ⇒ 判据①读自产字段 ⇒ 被判方写点什么就能让
+noReason=false ⇒ 闸被绕过（硬规则 4b：自产量不能判其生产者）。接受+回退 ready。
+
+**修法（manager 最小方案，三件全做）**：
+1. **闸改读机件输出**：checker 在判结束不变式前【现跑一次 slot-refill】
+   （`runMachineSlotRefill`，`--in-flight` 由调用方提供、缺省空集=fail-closed 基线），
+   `judgeEndInvariantAgainstMachine(heartbeat, machineRefill)` 用【机件的五个派发键】判定；
+   心跳的 recorded_no_refill_reason / recorded_should_refill 仅作 evidence 展示、不参与 verdict。
+   机件不可得 ⇒ 新增 RED 态 `end-invariant-unverifiable`（exit 1，fail-closed：不能验证就不能放行）。
+   writer 侧原有直接量判据保持不变，`runDirectSlotRefill` 收敛为 checker `runMachineSlotRefill`
+   的别名（单一正本，消除双份 read-tasks+analyzeSlotRefill 漂移源）。
+2. **负控制必加**：机件说无阻塞理由（no_refill_reason=None ∧ should_refill=true ∧ slots_free>0 ∧
+   dispatchable>0）+ 心跳写自述散文 ⇒ 闸仍拒。已入自动化测试——
+   - checker 纯测试 3 条（`judgeEndInvariantAgainstMachine`）：①prose 自述 + 机件无理由 ⇒ violated；
+     ②机件说真实理由 ⇒ 不 violated（双向都以机件为准）；③心跳记录完全合规自述 + 机件违例 ⇒ 仍 violated。
+   - checker CLI 负控制：dispatchable workspace + 心跳自述散文 ⇒ exit 1 `invariant-violated`，
+     evidence.no_refill_reason=机件 null、recorded_no_refill_reason=散文（展示）。
+   - writer CLI 负控制：prose `--no-refill-reason` + 机件无理由 ⇒ 拒写 exit 1、零写入。
+3. **AC53 保持 ready**（判据①要的是不可绕过，不是开过一次火）；新增 AC8 记录本修复+负控制。
+
+**scoped 门**（worktree 内 `scripts/test.sh --for-task ... --allow-thin`）：
+**149 pass / 0 fail / 0 cancelled，exit 0**（checker 文件 51 pass、writer 文件 18 pass；
+checker 44→51 = 新增 3 纯负控制 + 1 CLI 负控制 + 04:02:52Z CLI 改为机件回放）。
 
 ## Touches
 

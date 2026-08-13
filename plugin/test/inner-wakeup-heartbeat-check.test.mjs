@@ -42,6 +42,7 @@ import {
   HEARTBEAT_FILE,
   LEGACY_HEARTBEAT_FILE,
   MALFORMED,
+  MACHINE_UNVERIFIABLE_REASON,
   parseHeartbeat,
   judgeHeartbeat,
   readHeartbeatText,
@@ -50,6 +51,8 @@ import {
   REQUIRED_DISPATCH_STATE_FIELDS,
   checkDispatchStateContract,
   judgeEndInvariant,
+  judgeEndInvariantAgainstMachine,
+  runMachineSlotRefill,
 } from "../scripts/inner-wakeup-heartbeat-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -307,6 +310,52 @@ test("AC53 AC2 — judgeEndInvariant: should_refill=true but slots_free=0 is NOT
   assert.equal(v.violated, false, "no free slot is a legitimate end condition");
 });
 
+// ── AC53 判据① gate (gap-inner-self-wake-sleep-empty-slots-not-dispatch, outer 2026-08-13 ruling) ─────
+// The end-invariant MUST be judged on the MACHINE's fresh slot-refill output, never the heartbeat's
+// recorded no_refill_reason (the judged party's self-report — a prose reason could always be written
+// to make the old gate's noReason=false ⇒ structural bypass, hard rule 4b).
+
+test("AC53 判据① — NEGATIVE CONTROL: machine says no blocking reason (should_refill=true, no_refill_reason=None, slots_free>0, dispatchable>0) + heartbeat carries a prose self-report ⇒ gate MUST refuse (violated)", () => {
+  // Manager 2026-08-13 requirement 2. The AC53 bypass live shape: heartbeat recorded
+  // "no_refill_reason":"ac51 subagent in flight..." (a prose SELF-REPORT) while the machine's
+  // slot-refill said no_refill_reason=None. The OLD checker judged the heartbeat's field ⇒ noReason=
+  // false ⇒ passed. The fixed gate judges the MACHINE ⇒ the prose is display-only and cannot make a
+  // violating machine state pass.
+  const machine = { should_refill: true, slots_free: 5, dispatchable_disjoint: 5, pool: 16, no_refill_reason: null };
+  const heartbeat = fullHeartbeat({
+    no_refill_reason: "ac51 subagent in flight, next dispatch after they land",
+    should_refill: false, // the heartbeat's OWN claim is irrelevant — the MACHINE is the judge
+  });
+  const v = judgeEndInvariantAgainstMachine(heartbeat, machine);
+  assert.equal(v.violated, true, `prose self-report must NOT shield a pass when the machine says no mechanism reason:\n${JSON.stringify(v)}`);
+  assert.equal(v.judgedFrom, "machine-slot-refill");
+  assert.equal(v.evidence.no_refill_reason, null, "evidence.no_refill_reason is the MACHINE's null");
+  assert.equal(v.evidence.recorded_no_refill_reason, "ac51 subagent in flight, next dispatch after they land", "the recorded prose is display-only evidence");
+  assert.equal(v.evidence.recorded_should_refill, false, "the recorded should_refill is display-only");
+});
+
+test("AC53 判据① — judgeEndInvariantAgainstMachine passes when the MACHINE says a legitimate mechanism reason (the heartbeat's recorded field is irrelevant)", () => {
+  // Control: the machine's fresh slot-refill says no free slots (a real mechanism reason) ⇒ NOT a
+  // violation — even though the heartbeat's recorded no_refill_reason is null (which under the OLD
+  // recorded-shape gate would have been RED). The machine is the authority in BOTH directions.
+  const machine = { should_refill: false, slots_free: 0, dispatchable_disjoint: 0, pool: 5, no_refill_reason: "no free slots (in-flight 5 >= cap 5)" };
+  const heartbeat = fullHeartbeat({ no_refill_reason: null });
+  const v = judgeEndInvariantAgainstMachine(heartbeat, machine);
+  assert.equal(v.violated, false, "a machine-stated reason is a legitimate end condition");
+  assert.equal(v.ok, true);
+  assert.equal(v.evidence.no_refill_reason, "no free slots (in-flight 5 >= cap 5)", "the machine's reason is the judged value");
+});
+
+test("AC53 判据① — judgeEndInvariantAgainstMachine REDs a violating MACHINE state even when the heartbeat records a fully compliant self-report", () => {
+  // The strongest bypass shape: the heartbeat RECORD claims "should_refill=false + a written reason"
+  // (a perfectly compliant record under the OLD gate) while the MACHINE says should_refill=true +
+  // no reason. The fixed gate must still refuse — the record's self-consistency proves nothing.
+  const machine = { should_refill: true, slots_free: 4, dispatchable_disjoint: 10, pool: 0, no_refill_reason: null };
+  const heartbeat = fullHeartbeat(); // compliant default: should_refill=false + a written reason
+  const v = judgeEndInvariantAgainstMachine(heartbeat, machine);
+  assert.equal(v.violated, true, "a compliant-looking self-report must NOT shield a violating machine state");
+});
+
 // ── CLI integration (spawn the real checker against a temp workspace) ───────────────────────────────
 
 function runCli(root, extra = []) {
@@ -345,6 +394,79 @@ function fullHeartbeat(overrides = {}) {
     no_refill_reason: "no dispatchable candidate passes step-4 checks",
     ...overrides,
   };
+}
+
+// ── AC53 判据① fixtures (gap-inner-self-wake-sleep-empty-slots-not-dispatch, outer 2026-08-13) ────────
+// The end-invariant gate judges a FRESH machine slot-refill. To make the machine say
+// should_refill=true (the negative-control precondition) the workspace needs a REAL dispatchable ready
+// task — a bare heartbeat-only temp dir would make the machine say "no dispatchable candidate" (nothing
+// to judge). These mirror the writer's fixtures (inner-wakeup-heartbeat.test.mjs).
+
+function makeWorkspace(tag) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), tag));
+  fs.mkdirSync(path.join(dir, "tasks"), { recursive: true });
+  fs.mkdirSync(path.join(dir, "code"), { recursive: true });
+  return dir;
+}
+
+function writeTask(root, id, { status = "todo", body, selfTouch = true } = {}) {
+  const fm = [
+    "---",
+    `id: ${id}`,
+    `title: fixture ${id}`,
+    `status: ${status}`,
+    "labels:",
+    "extra:",
+    "  schema: v1",
+    "---",
+  ].join("\n");
+  if (selfTouch && body.includes("## Touches") && !body.includes(`- tasks/${id}.md`)) {
+    body = body.replace(/(## Touches\n)/, `$1- tasks/${id}.md\n`);
+  }
+  fs.writeFileSync(path.join(root, "tasks", `${id}.md`), `${fm}\n\n${body}`);
+}
+
+/** A C8-clean ready task (self-touch present, `(new)` touches on ABSENT files ⇒ stays dispatchable). */
+function dispatchableBody(touches) {
+  return [
+    "**type:** execution",
+    "## Proposal",
+    "A real proposal paragraph that is definitely more than forty non-whitespace chars.",
+    "## Contract",
+    "measure   slot = slot-refill stdout slots_free",
+    "band      slot = >=0",
+    "invoke    node plugin/scripts/slot-refill.ts",
+    "control   in-flight>=cap => should_refill false",
+    "resume    分步提交",
+    "## Touches",
+    ...touches,
+    "## Acceptance Criteria",
+    "- [ ] an AC item that is long enough",
+    "## Definition of Done",
+    "standard DoD — the five clauses; meta-enforcer fixture-pinned.",
+  ].join("\n");
+}
+
+/** A workspace with ONE dispatchable ready task + an empty in-flight set — the AC53 判据① negative-
+ *  control precondition (the machine says should_refill=true, no_refill_reason=null). */
+function makeDispatchableWorkspace(tag) {
+  const root = makeWorkspace(tag);
+  writeTask(root, "gap-fixture-dispatchable", {
+    status: "ready",
+    body: dispatchableBody([
+      "- tasks/gap-fixture-dispatchable.md",
+      "- code/fixture-a.ts (new)",
+      "- code/fixture-b.ts (new)",
+    ]),
+  });
+  return root;
+}
+
+/** Write a heartbeat record into <root>/.quay/<HEARTBEAT_FILE> (one jsonl line). */
+function writeHeartbeatTo(root, hb) {
+  const quayDir = path.join(root, ".quay");
+  fs.mkdirSync(quayDir, { recursive: true });
+  fs.writeFileSync(path.join(quayDir, HEARTBEAT_FILE), `${JSON.stringify(hb)}\n`, "utf8");
 }
 
 test("AC3 CLI — fresh full-shape heartbeat exits 0 (ALIVE)", () => {
@@ -497,16 +619,22 @@ test("AC53 AC1 CLI --json — a fresh heartbeat MISSING the dispatch-state keys 
 });
 
 test("AC53 AC2 CLI --json — the 04:02:52Z negative-control heartbeat exits 1 (invariant-violated, AC4)", () => {
-  // The real 04:02:52Z reading replayed into the CLI — must light RED (it never could before; the
-  // record didn't carry the dispatch-state keys).
-  const root = makeRootWithHeartbeat(fullHeartbeat({
-    slots_free: 5,
-    dispatchable_disjoint: 5,
-    pool: 16,
-    should_refill: true,
-    no_refill_reason: null,
-  }));
+  // The real 04:02:52Z reading replayed into the CLI — must light RED. The end-invariant is now judged
+  // on the MACHINE's fresh slot-refill, so the workspace must contain a dispatchable task (the machine
+  // must agree with the recorded 04:02:52Z shape: should_refill=true). This is the honest replay — not
+  // the recorded numbers themselves, but the MACHINE state at that moment.
+  const root = makeDispatchableWorkspace("iwuh-0402-");
   try {
+    const machine = runMachineSlotRefill({ root, inFlightIds: [], cap: 5 });
+    assert.equal(machine.ok, true, `machine slot-refill must succeed:\n${machine.error || ""}`);
+    assert.equal(machine.refill.should_refill, true, `fixture must be dispatchable:\n${JSON.stringify(machine.refill)}`);
+    writeHeartbeatTo(root, fullHeartbeat({
+      slots_free: 5,
+      dispatchable_disjoint: 5,
+      pool: 16,
+      should_refill: true,
+      no_refill_reason: null,
+    }));
     const r = runCli(root, ["--json"]);
     assert.equal(r.status, 1, `the 04:02:52Z replay must exit 1:\n${r.stdout}\n${r.stderr}`);
     const out = JSON.parse(r.stdout);
@@ -514,7 +642,46 @@ test("AC53 AC2 CLI --json — the 04:02:52Z negative-control heartbeat exits 1 (
     assert.equal(out.status, "invariant-violated");
     assert.equal(out.reason, "inner-round-ended-with-dispatchable-work");
     assert.equal(out.endInvariant.violated, true);
+    assert.equal(out.endInvariant.judgedFrom, "machine-slot-refill");
     assert.equal(out.endInvariant.evidence.no_refill_reason, null);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC53 判据① CLI --json — NEGATIVE CONTROL: machine says no blocking reason + heartbeat records a prose self-report ⇒ checker exits 1 (invariant-violated)", () => {
+  // The AC53 bypass live shape (outer 2026-08-13 ruling): heartbeat recorded
+  // "no_refill_reason":"ac51 subagent in flight..." (a prose SELF-REPORT) while the machine's fresh
+  // slot-refill says no_refill_reason=None. The OLD checker read the heartbeat's recorded field ⇒
+  // noReason=false ⇒ PASSED (the structural bypass). The fixed checker judges the MACHINE ⇒ must RED
+  // (exit 1), with the recorded prose carried as display-only evidence.
+  const root = makeDispatchableWorkspace("iwuh-bypass-");
+  try {
+    // The negative-control precondition: the machine says should_refill=true + no mechanism reason.
+    const machine = runMachineSlotRefill({ root, inFlightIds: [], cap: 5 });
+    assert.equal(machine.ok, true, `machine slot-refill must succeed:\n${machine.error || ""}`);
+    assert.equal(machine.refill.should_refill, true, `fixture must be dispatchable:\n${JSON.stringify(machine.refill)}`);
+    assert.equal(machine.refill.no_refill_reason, null, "the machine must say no mechanism reason");
+    // A heartbeat whose RECORD claims everything is fine — the exact self-report that used to pass.
+    writeHeartbeatTo(root, fullHeartbeat({
+      no_refill_reason: "ac51 subagent in flight, next dispatch after they land",
+      should_refill: false, // the record's own claim — ignored by the gate (the MACHINE is the judge)
+    }));
+    const r = runCli(root, ["--json"]);
+    assert.equal(r.status, 1, `the bypass shape must exit 1 (the gate refuses):\n${r.stdout}\n${r.stderr}`);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.verdict, "DEAD");
+    assert.equal(out.status, "invariant-violated");
+    assert.equal(out.reason, "inner-round-ended-with-dispatchable-work");
+    assert.equal(out.endInvariant.violated, true);
+    assert.equal(out.endInvariant.judgedFrom, "machine-slot-refill");
+    assert.equal(out.endInvariant.evidence.no_refill_reason, null, "evidence.no_refill_reason is the MACHINE's null");
+    assert.equal(
+      out.endInvariant.evidence.recorded_no_refill_reason,
+      "ac51 subagent in flight, next dispatch after they land",
+      "the recorded prose is display-only evidence, never the judge",
+    );
+    assert.equal(out.machineSlotRefill.should_refill, true, "the machine's fresh slot-refill is surfaced");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

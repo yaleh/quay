@@ -27,6 +27,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { isDirectEntry } from "./gate-script-base.ts";
+// AC53 判据① gate (gap-inner-self-wake-sleep-empty-slots-not-dispatch, outer 2026-08-13 ruling): the
+// end-invariant MUST be judged on the MACHINE's fresh slot-refill output, never the heartbeat's
+// self-reported fields. analyzeSlotRefill is the pure machine decision; FIXED_DISPATCH_CAP is the
+// default cap the tick's dispatch decision uses (A10).
+import { analyzeSlotRefill, FIXED_DISPATCH_CAP } from "./slot-refill.ts";
 
 /** Heartbeat file name under `<root>/.quay/` — append-only jsonl (AC53 AC3: 可回看 — every
  *  reschedule appends a line, so the history is reviewable, not a single-slot snapshot). */
@@ -160,14 +165,25 @@ export function checkDispatchStateContract(heartbeat) {
  *  no_refill_reason=null). */
 export const INVARIANT_VIOLATED_REASON = "inner-round-ended-with-dispatchable-work";
 
+/** Reason string when the MACHINE's fresh slot-refill cannot be produced at all (subprocess/task-store
+ *  failure) — the checker cannot verify the end-invariant ⇒ fail-closed RED (cannot verify ⇒ cannot
+ *  pass; hard rule 6 缺值=未查). */
+export const MACHINE_UNVERIFIABLE_REASON = "end-invariant-unverifiable";
+
 /**
  * The AC2 end-invariant: a tick must NOT end while `should_refill ∧ slots_free>0 ∧
- * dispatchable_disjoint>0 ∧ no_refill_reason empty`. PURE. Only meaningful when the dispatch-state
- * contract is present (a missing key is not a violation — the caller reports dispatch-state-missing
- * separately). This is the mechanical form the AC4 negative control replays: the real 04:02:52Z /
- * 04:22Z heartbeats both carry the violating shape and MUST return violated=true (they never lit red
- * before — the record couldn't even express the question).
- * @param {object} hb a heartbeat carrying the AC53 dispatch-state fields
+ * dispatchable_disjoint>0 ∧ no_refill_reason empty`. PURE — operates on ANY object carrying the AC53
+ * dispatch-state five keys. Only meaningful when the dispatch-state contract is present (a missing key
+ * is not a violation — the caller reports dispatch-state-missing separately). This is the mechanical
+ * form the AC4 negative control replays: the real 04:02:52Z / 04:22Z shapes both carry the violating
+ * shape and MUST return violated=true (they never lit red before — the record couldn't even express
+ * the question).
+ * AC53 判据① (outer 2026-08-13 ruling): the CHECKER now passes the MACHINE's fresh slot-refill output
+ * (judgeEndInvariantAgainstMachine is the wrapper that keeps the heartbeat's recorded fields
+ * display-only), never the heartbeat's self-report — a prose no_refill_reason written by the judged
+ * party must not make noReason=false (hard rule 4b).
+ * @param {object} hb an object carrying the AC53 dispatch-state fields (the caller decides whether
+ *   that is the machine result or a recorded heartbeat)
  * @returns {{ok:boolean, violated:boolean, reason:string|null, evidence:object}}
  */
 export function judgeEndInvariant(hb) {
@@ -186,6 +202,34 @@ export function judgeEndInvariant(hb) {
       dispatchable_disjoint: dd,
       pool: typeof hb.pool === "number" ? hb.pool : null,
       no_refill_reason: hb.no_refill_reason ?? null,
+    },
+  };
+}
+
+/**
+ * The AC53 判据① gate (gap-inner-self-wake-sleep-empty-slots-not-dispatch, outer 2026-08-13 ruling):
+ * judge the end-invariant on the MACHINE's fresh slot-refill output, NEVER on the heartbeat's
+ * self-reported fields. The heartbeat's recorded no_refill_reason is what the judged party (inner)
+ * writes — judging it let a prose reason ("ac51 subagent in flight…") make noReason=false ⇒ the old
+ * checker passed while the machine said no_refill_reason=None and dispatchable work waited (hard rule
+ * 4b: a self-produced quantity cannot judge its producer). The invariant therefore reads the machine's
+ * five dispatch-state keys; the heartbeat's recorded dispatch-state is carried in evidence as
+ * DISPLAY-ONLY (recorded_no_refill_reason / recorded_should_refill), never a factor in the verdict.
+ * @param {object|null} heartbeat the FILE's recorded heartbeat (display-only for the verdict)
+ * @param {object} machineRefill the MACHINE's fresh analyzeSlotRefill result (the judge)
+ * @returns {{ok:boolean, violated:boolean, reason:string|null, judgedFrom:"machine-slot-refill", evidence:object}}
+ */
+export function judgeEndInvariantAgainstMachine(heartbeat, machineRefill) {
+  const inv = judgeEndInvariant(machineRefill);
+  const hb = heartbeat && typeof heartbeat === "object" ? heartbeat : {};
+  return {
+    ...inv,
+    judgedFrom: "machine-slot-refill",
+    evidence: {
+      ...inv.evidence,
+      // Display-only: what the heartbeat RECORDED (the judged party's self-report). Never the judge.
+      recorded_no_refill_reason: hb.no_refill_reason ?? null,
+      recorded_should_refill: hb.should_refill ?? null,
     },
   };
 }
@@ -251,6 +295,48 @@ export function readHeartbeatText(root) {
   return null;
 }
 
+/**
+ * Run a FRESH slot-refill — the AC53 判据① MACHINE measurement (gap-inner-self-wake-sleep-empty-slots-
+ * not-dispatch, outer 2026-08-13 ruling). The checker's end-invariant gate judges THIS result, never
+ * the heartbeat's recorded no_refill_reason (hard rule 4b: the judged party must not judge itself).
+ * @param {object} o
+ * @param {string} o.root workspace root (the <root>/tasks store)
+ * @param {string[]} [o.inFlightIds] the session's in-flight task ids. The checker is run by OUTER, who
+ *   may not know inner's in-flight set: pass `--in-flight` when the caller knows it; DEFAULT EMPTY
+ *   otherwise — the invariant is then computed against the WIDEST free-slot view, which is FAIL-CLOSED
+ *   (any dispatchable work + any free slot ⇒ RED; a false RED escalates, a false PASS hides the
+ *   defect). This is the documented fail-closed trade of a checker that refuses to trust self-report.
+ * @param {number} [o.cap] dispatch cap — the tick's effective cap (heartbeat.effectiveCap), default
+ *   FIXED_DISPATCH_CAP (5).
+ * @returns {{ok:true, refill:object}|{ok:false, error:string}} fail-closed: a slot-refill error ⇒
+ *   {ok:false} — the checker cannot verify ⇒ cannot pass.
+ */
+export function runMachineSlotRefill({ root, inFlightIds = [], cap = FIXED_DISPATCH_CAP }) {
+  const rootDir = root || ".";
+  const tasksDir = path.join(rootDir, "tasks");
+  const readTasks = (ids) => {
+    const out = [];
+    for (const id of ids) {
+      const file = path.join(tasksDir, `${id}.md`);
+      if (!fs.existsSync(file)) continue; // advisory — a vanished id is not a failure
+      out.push({ id, body: fs.readFileSync(file, "utf8") });
+    }
+    return out;
+  };
+  try {
+    const refill = analyzeSlotRefill({
+      tasksDir,
+      root: rootDir,
+      cap,
+      inFlight: readTasks(inFlightIds),
+      measurementSource: "explicit-input",
+    });
+    return { ok: true, refill };
+  } catch (e) {
+    return { ok: false, error: e?.message || String(e) };
+  }
+}
+
 // ── AC3 trigger wiring (tasks/gap-semantic-observer-judge-stopped-awaiting) ────────────────────────
 //
 // The semantic judge must NOT run every round (cost). Trigger when the free text changed (hash) OR when
@@ -302,17 +388,25 @@ ScheduleWakeup via plugin/scripts/inner-wakeup-heartbeat.ts) and judges:
   (c) AC53 dispatch-state contract (AC1) — a FRESH heartbeat must carry the five keys
       ${REQUIRED_DISPATCH_STATE_FIELDS.join("/")} so the record distinguishes "nothing dispatchable"
       from "dispatchable but didn't dispatch". Missing ⇒ "派发状态五键缺失" + exit 1.
-  (d) AC53 end-invariant (AC2) — a fresh heartbeat must NOT end a round while
-      should_refill=true ∧ slots_free>0 ∧ dispatchable_disjoint>0 ∧ no_refill_reason empty. Violation
-      ⇒ "结束不变式违例" + exit 1 (the 04:02:52Z / 04:22Z negative-control shapes light RED, AC4).
+  (d) AC53 end-invariant (AC2, outer 2026-08-13 ruling) — the invariant is judged on the MACHINE's
+      FRESH slot-refill output (a re-run of analyzeSlotRefill against <root>/tasks with the --in-flight
+      set), NEVER on the heartbeat's recorded no_refill_reason (self-report — the judged party must not
+      judge itself, hard rule 4b). Machine says should_refill=true ∧ slots_free>0 ∧
+      dispatchable_disjoint>0 ∧ no_refill_reason empty ⇒ "结束不变式违例" + exit 1 — a prose self-report
+      in the heartbeat can NEVER make this pass (the AC53 bypass: "ac51 subagent in flight…" shielded a
+      null machine reason). Heartbeat's recorded dispatch-state is display-only evidence
+      (recorded_no_refill_reason). Machine unverifiable ⇒ "结束不变式无法验证" + exit 1 (fail-closed).
 
 Usage:
   --root <dir>         workspace root (default: cwd) — reads <root>/.quay/${HEARTBEAT_FILE}
   --max-age-secs <N>   dead threshold in seconds (default ${DEFAULT_MAX_AGE_SECS})
+  --in-flight <id1,id2>  AC53: the session's in-flight task ids for the fresh slot-refill re-run.
+                         Outer may not know inner's set — DEFAULT EMPTY is the fail-closed baseline
+                         (the invariant is judged against the widest free-slot view).
   --json               JSON output (default human-readable)
 
 Exit: 0 ALIVE · 1 DEAD (missing / malformed / stale / fields-missing / dispatch-state-missing /
-invariant-violated) · 2 usage error`);
+end-invariant-unverifiable / invariant-violated) · 2 usage error`);
 }
 
 export function main(argv) {
@@ -325,6 +419,14 @@ export function main(argv) {
   const root = flagVal("--root", ".");
   const maxAge = Number(flagVal("--max-age-secs", String(DEFAULT_MAX_AGE_SECS)));
   const jsonOut = args.includes("--json");
+  // AC53 判据① (gap-inner-self-wake-sleep-empty-slots-not-dispatch): the checker's end-invariant gate
+  // re-runs slot-refill with the session's in-flight set. Outer may not know inner's in-flight set —
+  // `--in-flight` supplies it when known; DEFAULT EMPTY is the fail-closed baseline (the invariant is
+  // then computed against the widest free-slot view ⇒ any dispatchable work + free slot lights RED).
+  const inFlightFlag = flagVal("--in-flight");
+  const inFlightIds = inFlightFlag !== undefined
+    ? String(inFlightFlag).split(",").map((s) => s.trim()).filter(Boolean)
+    : [];
   if (!Number.isFinite(maxAge) || maxAge < 0) {
     console.error("inner-wakeup-heartbeat-check: --max-age-secs must be a non-negative number");
     return 2;
@@ -341,6 +443,7 @@ export function main(argv) {
   let fields = null;
   let dispatchState = null;
   let endInvariant = null;
+  let machineRefill = null;
   if (v.status === "alive") {
     fields = checkFieldContract(heartbeat);
     if (!fields.ok) {
@@ -369,15 +472,39 @@ export function main(argv) {
           wrongType: dispatchState.wrongType,
         };
       } else {
-        endInvariant = judgeEndInvariant(heartbeat);
-        if (endInvariant.violated) {
+        // AC53 判据① gate (gap-inner-self-wake-sleep-empty-slots-not-dispatch, outer 2026-08-13
+        // ruling): the end-invariant MUST be judged on the MACHINE's fresh slot-refill output — the
+        // heartbeat's recorded no_refill_reason is SELF-REPORT (the judged party writes it), and a
+        // prose reason could always be written to make noReason=false ⇒ the old checker passed while
+        // the machine said no_refill_reason=None (hard rule 4b: a self-produced quantity cannot judge
+        // its producer). The gate now re-runs slot-refill (--in-flight from the caller, else the
+        // fail-closed empty set) and judges the invariant on ITS five dispatch-state keys; the
+        // heartbeat's recorded fields are display-only. Machine unavailability ⇒ fail-closed RED.
+        const machine = runMachineSlotRefill({
+          root,
+          inFlightIds,
+          cap: typeof heartbeat.effectiveCap === "number" ? heartbeat.effectiveCap : FIXED_DISPATCH_CAP,
+        });
+        if (!machine.ok) {
           v = {
             alive: false,
-            status: "invariant-violated",
+            status: "end-invariant-unverifiable",
             ageSecs: v.ageSecs,
-            reason: INVARIANT_VIOLATED_REASON,
-            evidence: endInvariant.evidence,
+            reason: MACHINE_UNVERIFIABLE_REASON,
+            machineError: machine.error,
           };
+        } else {
+          machineRefill = machine.refill;
+          endInvariant = judgeEndInvariantAgainstMachine(heartbeat, machine.refill);
+          if (endInvariant.violated) {
+            v = {
+              alive: false,
+              status: "invariant-violated",
+              ageSecs: v.ageSecs,
+              reason: INVARIANT_VIOLATED_REASON,
+              evidence: endInvariant.evidence,
+            };
+          }
         }
       }
     }
@@ -400,8 +527,25 @@ export function main(argv) {
       dispatchStateContract: dispatchState
         ? { ok: dispatchState.ok, required: REQUIRED_DISPATCH_STATE_FIELDS, missing: dispatchState.missing, wrongType: dispatchState.wrongType }
         : null,
+      // AC53 判据① (gap-inner-self-wake-sleep-empty-slots-not-dispatch): the MACHINE's fresh slot-refill
+      // output — the end-invariant is judged on THIS, never the heartbeat's recorded fields.
+      machineSlotRefill: machineRefill
+        ? {
+            measurement_source: machineRefill.measurement_source,
+            should_refill: machineRefill.should_refill,
+            no_refill_reason: machineRefill.no_refill_reason,
+            slots_free: machineRefill.slots_free,
+            dispatchable_disjoint: machineRefill.dispatchable_disjoint,
+            pool: machineRefill.pool,
+          }
+        : null,
+      machineInFlight: {
+        // Outer may not know inner's in-flight set — empty is the fail-closed baseline.
+        inFlightIds,
+        source: inFlightFlag !== undefined ? "--in-flight" : "none (fail-closed empty)",
+      },
       endInvariant: endInvariant
-        ? { ok: endInvariant.ok, violated: endInvariant.violated, reason: endInvariant.reason, evidence: endInvariant.evidence }
+        ? { ok: endInvariant.ok, violated: endInvariant.violated, judgedFrom: endInvariant.judgedFrom ?? null, reason: endInvariant.reason, evidence: endInvariant.evidence }
         : null,
     }, null, 2));
   } else {
@@ -423,7 +567,9 @@ export function main(argv) {
       console.log(`${base} — 派发状态五键缺失 ⇒ 记录分不清「没货可派」与「有货不派」（缺 ${miss}）`);
     } else if (v.status === "invariant-violated") {
       const e = v.evidence || {};
-      console.log(`${base} — 结束不变式违例 ⇒ 有货可派却结束本轮（should_refill=${e.should_refill} slots_free=${e.slots_free} dispatchable_disjoint=${e.dispatchable_disjoint} no_refill_reason=${JSON.stringify(e.no_refill_reason)}）`);
+      console.log(`${base} — 结束不变式违例 ⇒ 机件说「有货可派却结束本轮」（should_refill=${e.should_refill} slots_free=${e.slots_free} dispatchable_disjoint=${e.dispatchable_disjoint} no_refill_reason=${JSON.stringify(e.no_refill_reason)}；心跳自述 recorded_no_refill_reason=${JSON.stringify(e.recorded_no_refill_reason ?? null)} 仅展示不参与判据）`);
+    } else if (v.status === "end-invariant-unverifiable") {
+      console.log(`${base} — 结束不变式无法验证（slot-refill 机件重跑失败：${v.machineError || "unknown"}）⇒ 不能验证就不能放行（fail-closed）`);
     } else {
       console.log(`${base} — ${filePath} MALFORMED (no valid ts) ⇒ inner 兜底心跳断`);
     }

@@ -352,6 +352,33 @@ test("AC53 AC2 (gap-ac53-end-invariant-gate) — the 7th-same-shape replay: WRIT
   }
 });
 
+test("AC53 AC2 (gap-ac53-end-invariant-gate) — NEGATIVE CONTROL: a prose --no-refill-reason self-report CANNOT shield a writer refusal when the machine says no mechanism reason", () => {
+  // Outer 2026-08-13 ruling (AC53 判据① bypass): the heartbeat's recorded no_refill_reason is
+  // SELF-REPORT — the judged party (inner) writes it, so a prose reason could always be written to make
+  // the OLD gate's noReason=false. The writer judges the DIRECT machine slot-refill (runDirectSlotRefill
+  // with --in-flight), NEVER the args' --no-refill-reason prose: a dispatchable workspace + empty
+  // in-flight ⇒ machine says should_refill=true + no_refill_reason=null ⇒ the writer REFUSES regardless
+  // of the prose passed — the direct measurement's five keys overwrite the args and nothing is written.
+  const root = makeDispatchableWorkspace("iwuh-negprose-");
+  try {
+    const direct = runDirectSlotRefill({ root, inFlightIds: [], cap: 5 });
+    assert.equal(direct.ok, true, "direct slot-refill must succeed");
+    assert.equal(direct.refill.should_refill, true, `fixture must be dispatchable:\n${JSON.stringify(direct.refill)}`);
+    assert.equal(direct.refill.no_refill_reason, null, "the machine must say no mechanism reason");
+    const proseArgs = [...FULL_ARGS];
+    const idxReason = FULL_ARGS.indexOf("--no-refill-reason");
+    proseArgs[idxReason + 1] = "ac51 subagent in flight, next dispatch after they land"; // prose SELF-REPORT
+    const idxShould = FULL_ARGS.indexOf("--should-refill");
+    proseArgs[idxShould + 1] = "true";
+    const w = runWriter(root, proseArgs);
+    assert.equal(w.status, 1, `writer must REFUSE despite the prose reason:\n${w.stdout}\n${w.stderr}`);
+    assert.match(w.stderr, /结束不变式违例/, "the refusal must name 结束不变式违例");
+    assert.ok(!fs.existsSync(path.join(root, ".quay", "inner-wakeup-heartbeat.jsonl")), "NOTHING must be written on refusal");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("AC53 AC2 (gap-ac53-end-invariant-gate) — a legitimately-ending tick (full in-flight, no free slots) WRITES exit 0", () => {
   // Negative control: should_refill=false (no free slots — all 5 slots held by in-flight) is a
   // legitimate end condition; the writer must WRITE (exit 0) with the DIRECT measurement's keys.
