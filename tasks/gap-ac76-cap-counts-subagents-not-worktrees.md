@@ -1,7 +1,7 @@
 ---
 id: gap-ac76-cap-counts-subagents-not-worktrees
 title: AC76 在飞的唯一读法 = inner 任务 subagent（人 07:3xZ cap 裁定 + 09:1xZ 推广：在飞不靠任务记录/worktree/遥测括号）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
