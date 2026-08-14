@@ -38,6 +38,8 @@ tick-core-drift-check         已接线但 --no-block（2026-08-14） → 第 4 
   - AC62 的 `fan-in-ff-protocol-check.ts`（零调用者 + 节奏「按需」且无「谁按它」）⇒ 回放必须红。
   - `tick-core-drift-check --no-block`（已接线但无消费方——今天 3 pairs 全漂、无人据此动作）⇒ 回放必须红。
   - **`checked === total` 在翻 done 方向零消费者（manager 2026-08-14 ④ 裁定并入，AC68 实证）**：同一谓词派发方向有 20-34 处消费者（ready-pool-check.ts=34 / slot-refill.ts=20），翻 done 方向零消费者——`loop-complete-task.ts` 只有 `sectionFound` 一处（:109-110 只判 `!sectionFound`），AC47 gate 明说 completion 判定归调用方 ⇒ AC68 0/5 unchecked 仍翻 done。**不是新族，是已判之族第三个实例** ⇒ 回放必须红。
+  - **`fan-in-ff-executor-check.ts`（AC67 交付，零接线；manager 2026-08-14 ③ 裁定并入，第 4 实例）**：develop `scripts/test.sh` 含 `fan-in-ff-executor-check` = 0（谓词干跑已知接线的 check=4，非假零）；catalog 节奏「按需」（capability-catalog.sh:418）无「谁按它」⇒ AC67 判据3「回放主线程 fan-in 必须报红」结构上不可能红。**①④ 是同一族里更窄的一族：随任务落地的【新检查器】默认不接线，因为没有任何判据要求「接进 run_static_checks」** ⇒ 本阶段两条关键 AC（AC62、AC67）都因此勾不了。⇒ 回放必须红。
+  - **优先级（manager 2026-08-14 ③ 裁定）**：AC73 与 AC75 同级——AC75 降重试代价、AC73 解两条 AC 收口阻塞；**两条都不与在飞重叠时同时派；只能派一条时 AC75 先**（重试代价每轮发生、AC 勾选可等）。
   - 判据4：AC67 已补 `plugin/loop/` Touches 行（本轮 647e3182 后）；**AC64 仍只声明 `precommit-guard.ts` 不声明执行核（合法——它不碰核）**；未来凡声明单份执行核副本的任务回放必须红。
 
 **⚠️ AC62 的阶段 AC 保持未勾**（manager 已明确：任务 AC 全满足可 done，阶段判据2 因无接线不能勾）——本任务接线落地后，AC62 判据2 才可能红，manager 才勾。
