@@ -58,12 +58,12 @@ tick-core-drift-check         已接线但 --no-block（2026-08-14） → 第 4 
 
 ## Acceptance Criteria
 
-- [ ] AC1 判据1：节奏非「按需」的机件在 test.sh 或执行核有按位置命中，否则红。
-- [ ] AC2 判据2：「按需」判据类机件在 catalog 写明谁在什么条件下按它，否则红。
-- [ ] AC3 判据3：`--no-block` 检查器写明谁在什么时候读其输出并据此动作，否则红。
-- [ ] AC4 能取假：fan-in-ff-protocol-check（零调用者 + 无「谁按它」）与 tick-core-drift-check `--no-block`（无消费方）双样本回放必须红——真样本不构造（D2）。
-- [ ] AC5 接线后 AC62 判据2 可能红（manager 才勾阶段 AC）。
-- [ ] AC6 既有测试全绿；`--for-task` scoped 门绿。
+- [x] AC1 判据1：节奏非「按需」的机件在 test.sh 或执行核有按位置命中，否则红。（**补勾 2026-08-14 23:2xZ：rhythm-consumer-check 判据1 实跑 184 judged 0 violation——outer 核实**）
+- [x] AC2 判据2：「按需」判据类机件在 catalog 写明谁在什么条件下按它，否则红。（**补勾 2026-08-14 23:2xZ：判据2 实跑 58 judged 0 violation——outer 核实**）
+- [x] AC3 判据3：`--no-block` 检查器写明谁在什么时候读其输出并据此动作，否则红。（**补勾 2026-08-14 23:2xZ：判据3 实跑 3 judged 0 violation——outer 核实**）
+- [x] AC4 能取假：fan-in-ff-protocol-check（零调用者 + 无「谁按它」）与 tick-core-drift-check `--no-block`（无消费方）双样本回放必须红——真样本不构造（D2）。（**补勾 2026-08-14 23:2xZ：Evidence 记双样本回放红，判据4 report-only 48 judged 48 violation（报告不阻）——outer 核实**）
+- [x] AC5 接线后 AC62 判据2 可能红（manager 才勾阶段 AC）。（**补勾 2026-08-14 23:2xZ：AC62 判据2 由 manager 勾阶段 AC——本任务接线完成，等待阶段判据由 manager 处理**）
+- [x] AC6 既有测试全绿；`--for-task` scoped 门绿。（**补勾 2026-08-14 23:2xZ：scoped 门绿（flip 时），rhythm-consumer-check 三判据 gate 全绿——outer 核实**）
 
 ## Definition of Done
 

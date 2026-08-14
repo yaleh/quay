@@ -53,11 +53,11 @@ per-task cert 真结果（/tmp/… 重定向 + laneCount + 失败形态）→ �
 
 ## Acceptance Criteria
 
-- [ ] AC1 判据1：inner 执行核无「为已返回任务在主线程跑 suite」条款（位置判定，主判据）；phase 不再出现 `fan-in-cert-*`（自述量辅助）。
-- [ ] AC2 判据2：per-task 全量 suite 落一条第三方可读记录（taskId/runId/state/laneCount/durationMs/失败文件清单/起止时刻，共享检出非 worktree fork 副本）——与 inner 的 gap-cert-result-no-third-party-readable-landing 合并或互相 depends_on。
-- [ ] AC3 判据3 能取假：AC57 的 7 轮 cert 回放 ⇒ 记录集合应为空 ⇒ 必须报红（真样本不构造）。
-- [ ] AC4 顺序 AC62 → AC67 → AC72 遵守；不改 AC62 协议本体；不引入新 monitor。
-- [ ] AC5 既有测试全绿；`--for-task` scoped 门绿。
+- [x] AC1 判据1：inner 执行核无「为已返回任务在主线程跑 suite」条款（位置判定，主判据）；phase 不再出现 `fan-in-cert-*`（自述量辅助）。（**补勾 2026-08-14 23:2xZ：双核 grep cert=0，A6 主语已改「回到任务 subagent」——outer 按位置核实**）
+- [x] AC2 判据2：per-task 全量 suite 落一条第三方可读记录（taskId/runId/state/laneCount/durationMs/失败文件清单/起止时刻，共享检出非 worktree fork 副本）——与 inner 的 gap-cert-result-no-third-party-readable-landing 合并或互相 depends_on。（**补勾 2026-08-14 23:2xZ：writer 落地，载体 .quay/per-task-suite-records.jsonl 8 条实测，resolveSharedCheckout→主检出——outer 核实**）
+- [x] AC3 判据3 能取假：AC57 的 7 轮 cert 回放 ⇒ 记录集合应为空 ⇒ 必须报红（真样本不构造）。（**补勾 2026-08-14 23:2xZ：checker 回放 7 轮 cert 全红，20 测试绿——outer 核实**）
+- [x] AC4 顺序 AC62 → AC67 → AC72 遵守；不改 AC62 协议本体；不引入新 monitor。（**补勾 2026-08-14 23:2xZ：AC67 执行者搬移落地（fan-in-execute.js:5 subagent 自足），AC72 未改 AC62 协议——outer 核实**）
+- [x] AC5 既有测试全绿；`--for-task` scoped 门绿。（**补勾 2026-08-14 23:2xZ：scoped 36/0 绿（flip 时实测），per-task-suite-record-check 20 测试全绿——outer 核实**）
 
 ## Definition of Done
 

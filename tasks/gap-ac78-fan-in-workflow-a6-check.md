@@ -122,15 +122,15 @@ AC72  subagent 从 AC67 任务体判据4 的【示例串】里取 id ⇒ 示例�
 
 ## Acceptance Criteria
 
-- [ ] AC1 判据1：fan-in 四步正身迁入 workflow 脚本；A6 改为「检查 workflow 是否被执行」+ 本轮判据；A6 旧正身按 AC58 迁 archive + 落点映射（落点=workflow 脚本对应段落）。
-- [ ] AC2 判据2：checker——(a) 每次 fan-in 有对应 Workflow 调用记录（meta-cc tool_name=Workflow，第三方可读）∧ (b) 每次 fan-in 在 lock-events 留 ≥1 条带 agentId ∧ (c) agentId 是真实 subagent 标识（顶层 `<id>.jsonl` 存在 ⇒ 红）；三处带时间边界（只统计 workflow 落地后 fan-in）；差集非空 ⇒ 红 + 列差集任务名。
-- [ ] AC3 判据2 (c) 能取假：AC72（agentId=902b4528 顶层存在）与 AC73（agentId=bc1a438b 顶层存在）回放必须红；AC67（agentId=aab2d14d 仅 subagents/ 文件）回放必须绿。
-- [ ] AC4 判据3：workflow 一律 scriptPath 调用，禁用 name:（M176 陷阱写进 A6/派发路径）。
-- [ ] AC5 判据4：A6 改动双副本同改（orchestration + plugin/loop）；前置 (a) 头部不对称表述保持。
-- [ ] AC6 `fan-in-ff-merge.sh` `--agent-id` 自校验落地（顶层会话 jsonl 存在 ⇒ 报错退出、不写锁事件）；弱判据（改 workflow 提交点名对应 SPEC 节）落地。
-- [ ] AC7 判据5：workflow 所需的一切（模板文本/参数来源/调用方式）落盘且锚可达，逐项问「/clear 之后这一项还在吗」无一项依赖会话记忆。
-- [ ] AC8 判据6：workflow 内 subagent prompt 自足（不引「协调者说/见上文/上一条消息」）；凡需自身标识写成【让它自己去找】（定位 `subagents/agent-<自己>.jsonl`），不得由调用方填值、不得给可误抄示例值——实现要求写进脚本，非口头提醒。
-- [ ] AC9 既有测试全绿；`--for-task` scoped 门绿。
+- [x] AC1 判据1：fan-in 四步正身迁入 workflow 脚本；A6 改为「检查 workflow 是否被执行」+ 本轮判据；A6 旧正身按 AC58 迁 archive + 落点映射（落点=workflow 脚本对应段落）。（**补勾 2026-08-14 23:2xZ：fan-in-execute.js 四步迁入 subagent prompt，A6 改检查 workflow，旧正身迁 archive R30——outer 核实**）
+- [x] AC2 判据2：checker——(a) 每次 fan-in 有对应 Workflow 调用记录（meta-cc tool_name=Workflow，第三方可读）∧ (b) 每次 fan-in 在 lock-events 留 ≥1 条带 agentId ∧ (c) agentId 是真实 subagent 标识（顶层 `<id>.jsonl` 存在 ⇒ 红）；三处带时间边界（只统计 workflow 落地后 fan-in）；差集非空 ⇒ 红 + 列差集任务名。（**补勾 2026-08-14 23:2xZ：fan-in-workflow-check.ts 落地（42KB）+ 25 测试全绿，三判据 (a)(b)(c) 带时间边界——outer 核实**）
+- [x] AC3 判据2 (c) 能取假：AC72（agentId=902b4528 顶层存在）与 AC73（agentId=bc1a438b 顶层存在）回放必须红；AC67（agentId=aab2d14d 仅 subagents/ 文件）回放必须绿。（**补勾 2026-08-14 23:2xZ：AC72/AC73 顶层回放红、AC67 subagent 回放绿——Evidence 实测，outer 核实**）
+- [x] AC4 判据3：workflow 一律 scriptPath 调用，禁用 name:（M176 陷阱写进 A6/派发路径）。（**补勾 2026-08-14 23:2xZ：A6 写 scriptPath-only 判据——outer 核实**）
+- [x] AC5 判据4：A6 改动双副本同改（orchestration + plugin/loop）；前置 (a) 头部不对称表述保持。（**补勾 2026-08-14 23:2xZ：双副本同步，字节镜像——outer 核实**）
+- [x] AC6 `fan-in-ff-merge.sh` `--agent-id` 自校验落地（顶层会话 jsonl 存在 ⇒ 报错退出、不写锁事件）；弱判据（改 workflow 提交点名对应 SPEC 节）落地。（**补勾 2026-08-14 23:2xZ：--agent-id 902b4528 顶层 ⇒ exit 2 实测，fan-in-ff-merge.test.mjs 12/12——outer 核实**）
+- [x] AC7 判据5：workflow 所需的一切（模板文本/参数来源/调用方式）落盘且锚可达，逐项问「/clear 之后这一项还在吗」无一项依赖会话记忆。（**补勾 2026-08-14 23:2xZ：prompt 自足逐字内联，渲染自检 3201 长度含自找段——outer 核实**）
+- [x] AC8 判据6：workflow 内 subagent prompt 自足（不引「协调者说/见上文/上一条消息」）；凡需自身标识写成【让它自己去找】（定位 `subagents/agent-<自己>.jsonl`），不得由调用方填值、不得给可误抄示例值——实现要求写进脚本，非口头提醒。（**补勾 2026-08-14 23:2xZ：--agent-id 写成【自己找 subagents/agent-<自己>.jsonl】指令，无示例值混入——outer 核实**）
+- [x] AC9 既有测试全绿；`--for-task` scoped 门绿。（**补勾 2026-08-14 23:2xZ：58/58 scoped 绿 + 静态检查全 PASS——outer 核实**）
 
 ## Definition of Done
 
