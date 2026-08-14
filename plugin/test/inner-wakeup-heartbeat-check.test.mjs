@@ -53,6 +53,11 @@ import {
   judgeEndInvariant,
   judgeEndInvariantAgainstMachine,
   runMachineSlotRefill,
+  spawnLimitDetected,
+  SPAWN_LIMIT_SIGNAL,
+  semanticTriggerHeuristic,
+  evaluateTrigger,
+  freeTextHash,
 } from "../scripts/inner-wakeup-heartbeat-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -723,6 +728,82 @@ test("AC53 AC3 CLI — when BOTH exist, the jsonl LAST line wins over the legacy
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+// ── AC77 spawn-limit detection (gap-ac77-spawn-limit-detect-harness-error-only) ─────────────────────
+// AC77 判据1: detect the harness's OWN spawn-limit error string in the free text (transcript grep per
+// CLAUDE.md:21), NOT a self-maintained agentDispatches/agentLimit count. AC77 判据2: the old count
+// criterion is RETIRED (R29). AC77 判据3: report-only — no /clear, no cap-lowering, no restart.
+// AC77 判据4 (3b): the real harness string below is the true-sample replay (verbatim from
+// tasks/gap-inner-subagent-budget-invisible.md:21, the 2026-08-10T05:13:13 tool_result).
+
+/** The real harness spawn-limit error string (verbatim from gap-inner-subagent-budget-invisible.md:21). */
+const SPAWN_LIMIT_SAMPLE =
+  "Subagent spawn limit reached (200 of 200 agents spawned). Complete the remaining work directly with your tools instead of spawning more agents.";
+
+test("AC77 判据1 — SPAWN_LIMIT_SIGNAL is the harness's own error string", () => {
+  assert.equal(SPAWN_LIMIT_SIGNAL, "Subagent spawn limit reached");
+});
+
+test("AC77 判据1 — spawnLimitDetected fires on the real harness spawn-limit string (true-sample replay)", () => {
+  assert.equal(spawnLimitDetected(SPAWN_LIMIT_SAMPLE), true, "the real harness string must be detected");
+  assert.equal(spawnLimitDetected(SPAWN_LIMIT_SIGNAL), true, "the bare signal string itself must be detected");
+  assert.equal(spawnLimitDetected("tick heartbeat — suite running"), false, "a normal tick must not fire");
+});
+
+test("AC77 判据1 — spawnLimitDetected is case-insensitive (lowercase transcript grep still matches)", () => {
+  assert.equal(spawnLimitDetected("inner transcript: subagent spawn limit reached (200 of 200)"), true);
+});
+
+test("AC77 判据2 — the old count criterion is RETIRED: semanticTriggerHeuristic no longer fires on a self-counted agentDispatches>=agentLimit (hard rule 4b)", () => {
+  // The old shape that used to trigger (blocked=[] + agentDispatches>=agentLimit) must NOT trigger now —
+  // a self-maintained counter cannot judge a harness-managed budget (it stops exactly when the failure
+  // occurs ⇒ indistinguishable from "normal"). This is also the negative-control fixture for 判据2.
+  assert.equal(
+    semanticTriggerHeuristic({ blocked: [], agentDispatches: 201, agentLimit: 200 }),
+    false,
+    "the retired count criterion must not fire",
+  );
+  // The permanently-false live shape (agentLimit=undefined — the AC77 现状 red sample):
+  assert.equal(
+    semanticTriggerHeuristic({ blocked: [], agentDispatches: 15, agentLimit: undefined }),
+    false,
+    "agentLimit=undefined 恒假判据已退役（现成红样本）",
+  );
+  assert.equal(semanticTriggerHeuristic({ blocked: ["merge-conflict"], agentDispatches: 201, agentLimit: 200 }), false);
+  assert.equal(semanticTriggerHeuristic(null), false);
+});
+
+test("AC77 判据1 — semanticTriggerHeuristic fires on the free-text harness string, and reads a heartbeat's reason", () => {
+  assert.equal(semanticTriggerHeuristic(SPAWN_LIMIT_SAMPLE), true, "the real harness string in free text must trigger");
+  // Heartbeat-object call-site compat: its `reason` is read.
+  assert.equal(semanticTriggerHeuristic({ reason: SPAWN_LIMIT_SAMPLE }), true);
+  assert.equal(semanticTriggerHeuristic({ reason: "tick heartbeat — suite running" }), false);
+});
+
+test("AC77 判据3 — report-only: the trigger is a pure boolean; it never /clears, lowers cap, or restarts", () => {
+  // The trigger surface is a PURE function — no side effects, no state mutation, no process control.
+  // The post-trip action (handling) is the human's (人 2026-08-14 07:4xZ).
+  const before = { blocked: [], agentDispatches: 15, agentLimit: undefined, reason: "tick heartbeat" };
+  const r = semanticTriggerHeuristic({ ...before, reason: SPAWN_LIMIT_SAMPLE });
+  assert.equal(r, true);
+  assert.deepEqual(before, { blocked: [], agentDispatches: 15, agentLimit: undefined, reason: "tick heartbeat" }, "the input is untouched — no action taken");
+});
+
+test("AC77 判据1 — evaluateTrigger fires on the spawn-limit string without any hash baseline (trigger is not 'every round')", () => {
+  const t = evaluateTrigger({ blocked: [] }, SPAWN_LIMIT_SAMPLE, null);
+  assert.equal(t.fired, true);
+  assert.equal(t.heuristic, true);
+  assert.equal(t.hashChanged, false, "no prev-hash ⇒ hashChanged must be false");
+});
+
+test("AC77 判据1 — evaluateTrigger: unchanged hash + no spawn-limit string ⇒ NOT triggered (not every round)", () => {
+  const text = "tick heartbeat — suite running";
+  const h = freeTextHash(text);
+  const t = evaluateTrigger({ blocked: [] }, text, h);
+  assert.equal(t.fired, false, "same hash + no spawn-limit ⇒ no trigger");
+  assert.equal(t.hashChanged, false);
+  assert.equal(t.heuristic, false);
 });
 
 // ── doc-contract wiring (AC4: inner B3 + outer A 段必读) ───────────────────────────────────────────

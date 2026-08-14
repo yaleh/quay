@@ -14,7 +14,9 @@
 // This file pins AC1-AC5:
 //   AC1: reproduction — tonight's heartbeat contradiction is the FIRST negative-control sample
 //   AC2: judge implementation — reads free text (reason + tick report), not just structured fields
-//   AC3: trigger — free-text hash change OR blocked==[] && agentDispatches>=agentLimit (not every round)
+//   AC3: trigger — free-text hash change OR the free text carries the harness's own spawn-limit error
+//       string `Subagent spawn limit reached` (AC77 判据1, gap-ac77-spawn-limit-detect-harness-error-only).
+//       The old blocked==[] && agentDispatches>=agentLimit self-count criterion is RETIRED (AC77 判据2 → R29).
 //   AC4: red-on-omission (AC41③) — stopped:true but no escalation in tick-log ⇒ RED
 //   AC5: three-layer symmetric — --layer inner|outer both usable
 //
@@ -42,11 +44,17 @@ import {
   freeTextHash,
   evaluateTrigger,
   parseHeartbeat,
+  spawnLimitDetected,
+  SPAWN_LIMIT_SIGNAL,
 } from "../scripts/inner-wakeup-heartbeat-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..", "..");
 const CLI = path.join(repoRoot, "plugin", "scripts", "semantic-observer-judge.ts");
+
+/** The real harness spawn-limit error string (verbatim from gap-inner-subagent-budget-invisible.md:21). */
+const SPAWN_LIMIT_SAMPLE =
+  "Subagent spawn limit reached (200 of 200 agents spawned). Complete the remaining work directly with your tools instead of spawning more agents.";
 
 // ── Tonight's heartbeat (2026-08-10, 11:28 版 — the motivating evidence) ───────────────────────────
 
@@ -138,22 +146,34 @@ test("AC2 — extractAwaiting / extractNeeds / computeConfidence are pure and he
 
 // ── AC3: trigger — hash change OR heuristic, NOT every round ──────────────────────────────────────
 
-test("AC3 — semanticTriggerHeuristic: blocked==[] && agentDispatches>=agentLimit (tonight's exact shape)", () => {
-  assert.equal(semanticTriggerHeuristic(TONIGHT_HEARTBEAT), true, "blocked=[] + 201/200 must trigger");
+test("AC3 — semanticTriggerHeuristic (AC77 判据1): fires on the harness's spawn-limit error string, NOT a self-counted agentDispatches/agentLimit (判据2 retired → R29)", () => {
+  assert.equal(semanticTriggerHeuristic(SPAWN_LIMIT_SAMPLE), true, "the real harness spawn-limit string must trigger");
+  assert.equal(semanticTriggerHeuristic(SPAWN_LIMIT_SIGNAL), true, "the bare signal string must trigger");
+  assert.equal(semanticTriggerHeuristic("tick heartbeat — suite running"), false, "a normal tick must not trigger");
+  // 判据2 (AC77): the old count criterion is RETIRED — a self-counted agentDispatches>=agentLimit no
+  // longer fires (hard rule 4b: a self-produced quantity cannot judge its producer).
+  assert.equal(semanticTriggerHeuristic(TONIGHT_HEARTBEAT), false, "the retired count criterion must not fire");
   assert.equal(semanticTriggerHeuristic({ blocked: [], agentDispatches: 10, agentLimit: 200 }), false);
   assert.equal(semanticTriggerHeuristic({ blocked: ["merge-conflict"], agentDispatches: 201, agentLimit: 200 }), false);
   assert.equal(semanticTriggerHeuristic(null), false);
 });
 
-test("AC3 — evaluateTrigger: heuristic fires without any hash baseline (trigger is not 'every round')", () => {
-  const t = evaluateTrigger(TONIGHT_HEARTBEAT, TONIGHT_HEARTBEAT.reason, null);
+test("AC77 判据1 — judge reads the harness spawn-limit string as stopped (→ red-on-omission → tick-log 升级列)", () => {
+  const j = judge(SPAWN_LIMIT_SAMPLE, { blocked: [] });
+  assert.equal(j.stopped, true, "the spawn-limit error must read as stopped so the escalation-column requirement applies");
+  assert.ok(j.confidence > 0, `confidence must be non-trivial, got ${j.confidence}`);
+  assert.equal(j.readFreeText, true);
+});
+
+test("AC3 — evaluateTrigger: spawn-limit heuristic fires without any hash baseline (trigger is not 'every round')", () => {
+  const t = evaluateTrigger(TONIGHT_HEARTBEAT, SPAWN_LIMIT_SAMPLE, null);
   assert.equal(t.fired, true);
   assert.equal(t.heuristic, true);
   assert.equal(t.hashChanged, false, "no prev-hash ⇒ hashChanged must be false");
 });
 
 test("AC3 — evaluateTrigger: free-text hash change fires even when heuristic is false", () => {
-  const heartbeat = { blocked: ["merge-conflict"], agentDispatches: 10, agentLimit: 200 };
+  const heartbeat = { blocked: ["merge-conflict"] };
   const text = "BUDGET HIT (200/200, dispatch stopped, awaiting outer /clear)";
   const h1 = freeTextHash(text);
   const t = evaluateTrigger(heartbeat, text, "0000000000000000");
@@ -163,8 +183,8 @@ test("AC3 — evaluateTrigger: free-text hash change fires even when heuristic i
   assert.equal(t.hash, h1);
 });
 
-test("AC3 — evaluateTrigger: unchanged hash + no heuristic ⇒ NOT triggered (not every round)", () => {
-  const heartbeat = { blocked: ["merge-conflict"], agentDispatches: 10, agentLimit: 200 };
+test("AC3 — evaluateTrigger: unchanged hash + no spawn-limit string ⇒ NOT triggered (not every round)", () => {
+  const heartbeat = { blocked: ["merge-conflict"] };
   const text = "tick heartbeat — suite running";
   const h = freeTextHash(text);
   const t = evaluateTrigger(heartbeat, text, h);

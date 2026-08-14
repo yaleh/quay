@@ -19,8 +19,9 @@
 //   1. 源 = 自由文本: 心跳 `reason` + 该层 tick 报告全文（transcript）。不用 pane（今晚三次不可靠）。
 //   2. 判断 = schema'd judge: 输出 {stopped, awaiting:{who,what}, needs:[{what,owner,blocking,evidence}],
 //      contradictsStructured, confidence}。contradictsStructured 是关键字段。
-//   3. 触发 = 不是每轮（成本）: 自由文本内容 hash 变化 或 机械字段与自由文本可能不一致的启发式
-//      （如 blocked==[] && agentDispatches>=agentLimit——正是本次形态）。
+//   3. 触发 = 不是每轮（成本）: 自由文本内容 hash 变化 或 自由文本携带 harness 自己的 spawn-limit
+//      报错串（`Subagent spawn limit reached`——AC77 判据1, gap-ac77-spawn-limit-detect-harness-error-only）。
+//      旧的 blocked==[] && agentDispatches>=agentLimit 自维护计数判据已退役（AC77 判据2 → R29）。
 //   4. 产物须满足 AC41③: judge 输出 stopped:true 而本轮 tick-log 无对应升级记录 ⇒ RED（变红）。
 //
 // 形态: subagent + schema 即可，不必 workflow（nyf-semantic-judge 一步判断成功先例）。
@@ -55,6 +56,10 @@ const STOP_SIGNALS = [
   /waiting\s+for\s+(?:the\s+)?outer/i,
   /no\s+further\s+dispatch/i,
   /waiting[^;]{0,40}\/clear/i,
+  // AC77 判据1 (gap-ac77-spawn-limit-detect-harness-error-only): harness 自己的 spawn-limit 报错串 ——
+  // 触顶后 harness 静默降级为主线程串行（表现与「inner 主线程在跑 fan-in」一模一样）。识别即报
+  // （进 tick-log 升级列）；只报不动（判据3：不 /clear、不降 cap、不重启——处理归人）。
+  /subagent\s+spawn\s+limit\s+reached/i,
 ];
 
 // 提取 awaiting 的 who/what。返回 {who, what} 或 null。

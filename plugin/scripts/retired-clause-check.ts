@@ -139,6 +139,11 @@ export const REGISTRY: Entry[] = [
       "参与方不完整且名单无人维护",
       "③结构上不可能靠小心解决",
     ] },
+  // inner-wakeup-heartbeat-check agentLimit 判据 (AC77 判据2, gap-ac77-spawn-limit-detect-harness-error-only)
+  { id: "R29", source: "plugin/scripts/inner-wakeup-heartbeat-check.ts", markers: [
+      "typeof heartbeat?.agentDispatches === \"number\"",
+      "heartbeat.agentDispatches >= heartbeat.agentLimit",
+    ] },
 ];
 
 // ── normalization: strip backticks + line-comment prefixes (# / //), collapse whitespace ──
