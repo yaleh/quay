@@ -691,6 +691,63 @@ test("gap-merge-bypass AC3 — --merge flag: running + assertion-surface staged 
   }
 });
 
+// ── AC63 (gap-ac63-ff-explicit-doc-check-before-merge): ff-only fires ZERO hooks ─────────────────────
+// The fan-in convention is now ff-only (AC62). The AC63 load-bearing premise: `git merge --ff-only`
+// creates no merge commit, so git fires NEITHER pre-commit (git-commit-only) NOR pre-merge-commit
+// (--no-ff-only) — the DOC check has NO hook trigger on the ff path. A doc check that relies on hooks
+// therefore NEVER runs for an ff fan-in: the A6 无锁段 step 3 must EXPLICITLY run
+// `bash scripts/test.sh --static-checks-doc` (twice total — commit-time + pre-ff — deliberately NOT
+// deduplicated: the first covers the author's own changes, the second covers post-merge-develop content).
+// This NEGATIVE CONTROL pins that premise: with BOTH guard hooks installed, an ff-only merge must fire
+// ZERO hooks (and a control commit must fire pre-commit — proving the counter would catch a fire).
+
+test("AC63 — ff-only merge fires ZERO guard hooks (no pre-commit, no pre-merge-commit): the doc check has no hook trigger on the ff fan-in path ⇒ step 3's explicit run is required", () => {
+  const root = makeGitRepo();
+  try {
+    // task branch adds a doc-file change (the AC63 fan-in shape).
+    run("git", ["checkout", "-q", "-b", "task/feature"], root);
+    stage(root, "docs/proposal.md", "new doc\n");
+    const commit = run("git", ["commit", "-q", "-m", "add doc"], root);
+    assert.equal(commit.status, 0, `task commit: ${commit.stderr}`);
+    const back = run("git", ["checkout", "-q", "main"], root);
+    assert.equal(back.status, 0, "back to main");
+
+    // Counting shims for BOTH guard hooks (the --install-hook shim cannot resolve the real guard in a
+    // scratch repo — a counting shim isolates the question "does git fire the hook at all?").
+    const hooksDir = path.join(root, ".git", "hooks");
+    fs.mkdirSync(hooksDir, { recursive: true });
+    const counter = path.join(root, ".quay", "hook-fires.log");
+    for (const name of ["pre-commit", "pre-merge-commit"]) {
+      fs.writeFileSync(
+        path.join(hooksDir, name),
+        `#!/usr/bin/env bash\necho "${name}" >> "${counter}"\n`,
+        { mode: 0o755 },
+      );
+    }
+
+    // ff-only merge — the AC62 fan-in convention. git fires NO pre-merge-commit (no merge commit is
+    // created) and NO pre-commit (merge is not git-commit) ⇒ the counter file must NOT be created.
+    const merge = run("git", ["merge", "--ff-only", "task/feature"], root);
+    assert.equal(merge.status, 0, `ff must succeed, got ${merge.status}: ${merge.stdout} ${merge.stderr}`);
+    assert.ok(
+      !fs.existsSync(counter),
+      "ff-only merge fires ZERO guard hooks — the doc check never runs via a hook on the ff path",
+    );
+
+    // Control: a normal git commit DOES fire pre-commit (and only pre-commit) — proves the counter
+    // would catch a fire, so the zero above is a real zero, not a broken counter.
+    stage(root, "docs/control.md", "control\n");
+    const commit2 = run("git", ["commit", "-q", "-m", "control"], root);
+    assert.equal(commit2.status, 0, `control commit: ${commit2.stderr}`);
+    assert.ok(fs.existsSync(counter), "control commit fired a hook (counter created)");
+    const fires = fs.readFileSync(counter, "utf8").trim().split("\n");
+    assert.ok(fires.includes("pre-commit"), "control commit fires pre-commit");
+    assert.ok(!fires.includes("pre-merge-commit"), "control commit does NOT fire pre-merge-commit");
+  } finally {
+    cleanup(root);
+  }
+});
+
 // ── Real-repo smoke: the guard runs against THIS repo without crashing ───────────────────────────────
 
 test("real-repo smoke — guard runs against the real repo (no crash, readable verdict)", () => {
