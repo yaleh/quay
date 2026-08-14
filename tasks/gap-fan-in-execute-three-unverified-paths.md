@@ -58,22 +58,50 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1 判据1：三条承重点（code_delta 分类 / --agent-id 自找确定性 / flip sed 失败路径）各补真实路径测试。
-- [ ] AC2 判据2 能取假：①代码面 delta 判成 doc ⇒ 红；②多 agent 文件 head -1 取错 ⇒ 红；③sed 静默不替换 ⇒ 红。
-- [ ] AC3 判据3：测试走真实调用路径，非 fixture-only mock。
-- [ ] AC4 既有测试全绿；`--for-task` scoped 门绿。
+- [x] AC1 判据1：三条承重点（code_delta 分类 / --agent-id 自找确定性 / flip sed 失败路径）各补真实路径测试。
+- [x] AC2 判据2 能取假：①代码面 delta 判成 doc ⇒ 红；②多 agent 文件 head -1 取错 ⇒ 红；③sed 静默不替换 ⇒ 红。
+- [x] AC3 判据3：测试走真实调用路径，非 fixture-only mock。
+- [x] AC4 既有测试全绿；`--for-task` scoped 门绿。
 
 ## Definition of Done
 
-- [ ] fan-in-execute.js 三条承重点被真实路径测试覆盖（能取假）+ 全绿。
+- [x] fan-in-execute.js 三条承重点被真实路径测试覆盖（能取假）+ 全绿。
 
 ## Touches
 
-- .claude/workflows/fan-in-execute.js（三条承重点——若测试暴露缺陷则修；承重点②：自定位限定 run 目录）
+- .claude/workflows/fan-in-execute.js（三条承重点；承重点②：自定位限定 `subagents/workflows/<run>/` 落点 + fail-closed；③ flip sed 加前/后自检 fail-closed；另修 ① `printf '%s\n'`→`'%s\\n'` 模板字面量 `\n` 陷阱）
 - plugin/test/fan-in-execute-paths.test.mjs (new)
 - tasks/gap-fan-in-execute-three-unverified-paths.md（自身）
 - （checker 半边 subagentStems 递归为独立小修，inner 已派——不重复）
 
+## Test-Files
+
+- plugin/test/fan-in-execute-paths.test.mjs
+
 ## Evidence
 
-（落地后回填）
+**实现（三条承重点，全部真实执行）**：
+
+- **① code_delta 正则**：保留原正则；测试经【vm 实执行 fan-in-execute.js → 从真实 prompt 提取 step-2 bash → 在真实 temp git repo 跑 fork/merge-base/diff/code_delta 流水线】断言 doc/代码/测试三面分类。**暴露并修了一个真实缺陷**：模板串里 `printf '%s\n'` 的 `\n` 被 JS 展开成真换行，发出的 prompt 里 bash 行断裂（`printf '%s` + 换行 + `' ...`）——改 `'%s\\n'`。node --check 与静态读都捕不到，只有实调捕到（AC78 判据3 再次证实）。
+- **② --agent-id 自找**：原平铺 `ls -t ~/.claude/projects/*/subagents/agent-*.jsonl` 启发式在并发下误选。改为只查 workflow-run 真实落点 `~/.claude/projects/*/*/subagents/workflows/*/agent-*.jsonl`（两段通配），候选计数 + 零候选 fail-closed exit 2 + 多个候选取最近修改（当前 run 正在写入 ⇒ 必然最新，确定性）。
+- **③ flip sed**：原 `sed -i 's/^status: ready/status: done/'` 行形不匹配静默改 0 行且 exit 0。改为锚定 `$` 只翻 frontmatter 精确行 + 前自检（恰 1 行 `^status: ready$`）+ 后自检（`^status: done$` 存在），任一不符 exit 2（FATAL），body 的 `status: ready——注解` 不误翻。
+
+**测试结果（`bash scripts/test.sh --for-task gap-fan-in-execute-three-unverified-paths --allow-thin`，exit 0）**：
+
+```
+✔ ① REAL code delta — .claude/workflows/fan-in-execute.js must classify as code (rerun full suite)
+✔ ① REAL test delta — plugin/test/*.test.mjs must classify as code (test assertion face reruns)
+✔ ① REAL doc delta — tasks/ + docs/ + .md only must classify as doc (skip full suite)
+✔ ① REAL decision — code delta ⇒ rerun decision, doc delta ⇒ skip decision (AC75 semantics)
+✔ REAL-INVOCATION — the workflow file vm-executes and emits the full subagent prompt (AC78)
+✔ ② DIR-127/DIR-128 replay — the workflows/-scoped self-location picks the workflow-run subagent, NOT the flat trap
+✔ ② regression canary — the OLD flat-glob heuristic WOULD mis-pick the trap (判据2 ② 能取假)
+✔ ② zero candidates ⇒ fail-closed exit 2 (refuses to guess an agent id)
+✔ ② determinism — multiple workflow-run candidates for the SAME task pick the newest (current run)
+✔ ③ normal flip — 'status: ready' → 'status: done', body 'status: ready——注解' preserved
+✔ ③ line-shape mismatch (status:Ready) ⇒ exit 2 + FATAL, file NOT flipped (no silent green)
+✔ ③ multiple exact 'status: ready' matches ⇒ exit 2 + FATAL (refuses to multi-flip)
+ℹ tests 12  ℹ pass 12  ℹ fail 0
+```
+
+**ts-typecheck**：`fan-in-ts-typecheck-gate.ts --task ... --merge-target develop` → exit 0（Touches 无新增/移动 .ts，`ADMITTED`）。
