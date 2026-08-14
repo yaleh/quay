@@ -1,7 +1,7 @@
 ---
 id: gap-ac63-judgment2-no-carrier
 title: AC63 判据2 无载体——lock-events 无 doc 检查字段，结构上无法判「有 ff 而无 doc 检查」（manager 11:1xZ 报）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
