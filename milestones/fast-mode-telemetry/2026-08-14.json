@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-14T01:31:01.546Z",
+  "generatedAt": "2026-08-14T01:45:29.210Z",
   "since": null,
   "tasks": [
     {
@@ -99,6 +99,13 @@
       "minutes": 2.71195,
       "outcome": "done",
       "fanInCommit": "a3776add61f69185487b0b2e04594b14914adab3"
+    },
+    {
+      "taskId": "gap-ac54-dispatch-preference-file",
+      "runId": "fm-gap-ac54-dispatch-preference-file-1786668541989-u6m7ju",
+      "minutes": 48.10463333333333,
+      "outcome": "done",
+      "fanInCommit": null
     },
     {
       "taskId": "gap-capability-catalog-backtick-command-substitution",
@@ -629,9 +636,15 @@
   "orphaned": [],
   "inProgress": [
     {
-      "taskId": "gap-ac54-dispatch-preference-file",
-      "runId": "fm-gap-ac54-dispatch-preference-file-1786668541989-u6m7ju",
-      "startedAtMs": 1786668542000,
+      "taskId": "gap-ac55-dispatch-record-fingerprint-reason",
+      "runId": "fm-gap-ac55-dispatch-record-fingerprint-reason-1786671751756-cp5lax",
+      "startedAtMs": 1786671751768,
+      "startedAtMsUnreliable": true
+    },
+    {
+      "taskId": "gap-ac57-preference-change-notification",
+      "runId": "fm-gap-ac57-preference-change-notification-1786671753101-ng2njh",
+      "startedAtMs": 1786671753110,
       "startedAtMsUnreliable": true
     },
     {
@@ -654,13 +667,13 @@
     }
   ],
   "deferred": [],
-  "meanMinutes": 28.139090449438218,
-  "medianMinutes": 22.67755,
-  "tasksPerHour": 2.081450889244673,
-  "serialEquivalentPerHour": 2.132265081837351,
+  "meanMinutes": 28.36092981481483,
+  "medianMinutes": 23.034950000000002,
+  "tasksPerHour": 2.0931336861938963,
+  "serialEquivalentPerHour": 2.1155864914082594,
   "windowStart": "2026-08-12T06:45:12.994Z",
-  "windowEnd": "2026-08-14T01:30:44.082Z",
-  "windowHours": 42.75863555555556,
+  "windowEnd": "2026-08-14T01:45:04.827Z",
+  "windowHours": 42.99773138888889,
   "haltedHours": 0,
   "halted": [],
   "blocked": [
@@ -751,7 +764,7 @@
     }
   ],
   "reconcilable": [],
-  "realInFlight": 4,
+  "realInFlight": 5,
   "closedButLive": [],
-  "occupiedSlots": 4
+  "occupiedSlots": 5
 }
