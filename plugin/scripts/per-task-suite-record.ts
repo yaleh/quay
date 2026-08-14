@@ -35,8 +35,8 @@
 //       --task-id <taskId> --run-id <runId> --state <state> --lane-count <n>
 //       --duration-ms <ms> --started-at <iso> --finished-at <iso>
 //       [--failed-files <csv>] [--doc-checked true|false] [--doc-check-exit <0..255>]
-//       [--full-suite-ran true|false] [--skip-reason <text>] [--cpu-time-s <n>] [--load <n>]
-//       [--phases <json>]
+//       [--full-suite-ran true|false] [--skip-reason <text>] [--cpu-time-s <n|null>]
+//       [--cpu-source <name>] [--load <n>] [--phases <json>]
 //       [--state-file <full-suite-state.json>] [--root <dir>]
 //       [--record-file <file>] [--json] [--help]
 //
@@ -176,11 +176,41 @@ export function buildRecord(o) {
     skipReason = sr;
   }
   // cpu_time_s / load — non-negative numbers (判据3). load is the /proc/loadavg 1min at suite end.
+  // AC6 (gap-phase-boundary-differential-accounting, manager 19:1xZ, 硬规则 3b 第三次同形): a data
+  // source that was CONSIDERED and found UNAVAILABLE writes cpu_time_s as EXPLICIT null + a
+  // `cpu_source` provenance (default 'not-wired'), NEVER 0 — 0 conflates "instrument not wired" with
+  // "truly ~0 consumption". A real number carries `cpu_source` too (default 'gnu-time') so the record
+  // always says WHERE the cpu_time_s came from.
   let cpuTimeS;
+  let cpuSource;
+  if (o.cpuSource != null) {
+    cpuSource = String(o.cpuSource).trim();
+    if (!cpuSource) return { error: "--cpu-source must be a non-empty string (got empty)" };
+  }
   if (o.cpuTimeS != null) {
-    const v = Number(o.cpuTimeS);
-    if (!Number.isFinite(v) || v < 0) return { error: `--cpu-time-s must be a non-negative number (got ${JSON.stringify(o.cpuTimeS)})` };
-    cpuTimeS = v;
+    const raw = String(o.cpuTimeS).trim();
+    if (raw === "null" || raw === "") {
+      // The source was considered and is unavailable → explicit null + not-wired (AC6).
+      cpuTimeS = null;
+      if (cpuSource == null) cpuSource = "not-wired";
+    } else {
+      const v = Number(raw);
+      if (!Number.isFinite(v) || v < 0) return { error: `--cpu-time-s must be a non-negative number, 0, or null (got ${JSON.stringify(o.cpuTimeS)})` };
+      if (v === 0) {
+        // 0 is treated as null (AC6) — a real suite cannot consume exactly 0 CPU; 0 means the
+        // instrument wasn't wired. The record says null + not-wired instead of a misleading 0.
+        cpuTimeS = null;
+        if (cpuSource == null) cpuSource = "not-wired";
+      } else {
+        cpuTimeS = v;
+        if (cpuSource == null) cpuSource = "gnu-time";
+      }
+    }
+  }
+  // A SKIPPED full suite has no CPU measurement at all — a non-zero cpu_time_s with fullSuiteRan
+  // false is a semantic contradiction (nothing ran), so it is fail-closed (硬规则 3b: 读不懂 ≠ 合格).
+  if (fullSuiteRan === false && cpuTimeS != null) {
+    return { error: "--cpu-time-s must be null (or omitted) when --full-suite-ran false — a skipped suite consumed no CPU (AC6, never 0)" };
   }
   let load;
   if (o.load != null) {
@@ -242,7 +272,14 @@ export function buildRecord(o) {
   // indistinguishable from a run" gap; a present-but-malformed value never writes, 硬规则 3b).
   if (fullSuiteRan != null) record.fullSuiteRan = fullSuiteRan;
   if (skipReason != null) record.skipReason = skipReason;
-  if (cpuTimeS != null) record.cpu_time_s = cpuTimeS;
+  // cpu_time_s is written whenever the caller explicitly considered the CPU source (a number, 0, or
+  // the literal null) — the value is a real number or EXPLICIT null (AC6), never a silent 0. A caller
+  // that never passed --cpu-time-s leaves it absent (the pre-wiring legacy shape). cpu_source rides
+  // alongside whenever cpu_time_s is present, naming WHERE the value (or null) came from.
+  if (o.cpuTimeS != null || cpuSource != null) {
+    record.cpu_time_s = cpuTimeS;
+    record.cpu_source = cpuSource ?? "not-wired";
+  }
   if (load != null) record.load = load;
   if (phases != null) record.phases = phases;
   return { record };
@@ -284,8 +321,13 @@ Usage:
                     inference). Optional; omitted when absent (pre-wiring record)
   --skip-reason     WHY the full suite was skipped (e.g. doc-only-delta); REQUIRES
                     --full-suite-ran false (a reason without a "skipped" flag is ambiguous)
-  --cpu-time-s      the suite's CPU time in seconds (non-negative; GNU-time User+System on a full
-                    run, 0 when the full suite was skipped). Optional
+  --cpu-time-s      the suite's CPU time in seconds (GNU-time User+System on a full run) — a real
+                    number, or the literal null when the source was considered and is UNAVAILABLE
+                    (GNU time absent / full suite skipped). 0 is normalized to null (AC6 — 0
+                    conflates "instrument not wired" with "truly ~0 consumption"). Optional
+  --cpu-source      WHERE the cpu_time_s value came from: 'gnu-time' for a real measurement, or
+                    'not-wired' for an unavailable source (defaults: gnu-time for a real number,
+                    not-wired for null/0/skip). Optional; rides the record when cpu_time_s is present
   --load            the /proc/loadavg 1min load at suite end (non-negative). Optional
   --phases          the per-phase DIFFERENTIAL breakdown as a JSON array of
                     {phase, wall_ms, cpu_usec?, psi_cpu_total?, psi_io_total?, lanes?}
@@ -342,6 +384,7 @@ export function main(argv) {
     fullSuiteRan: getArgValue(args, "--full-suite-ran"),
     skipReason: getArgValue(args, "--skip-reason"),
     cpuTimeS: getArgValue(args, "--cpu-time-s"),
+    cpuSource: getArgValue(args, "--cpu-source"),
     load: getArgValue(args, "--load"),
     phases: getArgValue(args, "--phases"),
     stateFile: stateFileValues,

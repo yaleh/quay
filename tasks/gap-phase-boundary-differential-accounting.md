@@ -73,10 +73,11 @@ abort／早退／红轮都有账。
 
 ## Touches
 
-- plugin/scripts/full-suite-runner.ts（相边界差分记账 + trap/finally 写入）
-- plugin/test/full-suite-runner.test.mjs（差分/覆盖/负控制用例）
+- plugin/scripts/full-suite-runner.ts（相边界差分记账 + trap/finally 写入 + 真实 cgroup 路径 + finalize 回填）
+- plugin/test/full-suite-runner.test.mjs（差分/覆盖/负控制用例 + 真实 cgroup 路径用例）
 - plugin/scripts/per-task-suite-record.ts（AC6：cpu_time_s 数据源未接 ⇒ null + cpu_source，不写 0）
 - .claude/workflows/fan-in-execute.js（AC6：GNU time 不可用/跳过全量 ⇒ cpu_time_s 写 null 而非 0）
+- plugin/workflows/fan-in-execute.js（AC6 镜像副本——workflows-dual-copy-drift-check 要求双副本同改；与 .claude 版逐字一致）
 - tasks/gap-phase-boundary-differential-accounting.md（自身）
 
 ## Evidence
@@ -88,4 +89,14 @@ abort／早退／红轮都有账。
 - **全退出路径写入**：正常路径 `finalize()`（绿/红/abort/timeout/hung 都到）+ crash trap（`writeCrashTerminal` 写 state 的 `phases` 并 append 一条 phase-only round 行）。红轮/截断轮/无标记轮都有 ≥1 条相记录。
 - **负控制**：fake suite 中途 SIGTERM 自杀 → 相记录完整（static+serial+lowconc，in-flight 相在 round 末关闭）。
 - **测试**：`plugin/test/full-suite-runner.test.mjs` +9 用例（AC1 六相差分、AC2 派生量可算、AC3 abort 负控制、AC4 红/无标记/crash 覆盖、3 个单元）。既有 132 用例全绿；`--for-task` scoped 门绿。
+- **派生量**：相利用率=cpu_usec/(wall×lanes)、相饱和度=cpu_usec/(wall×nproc)、等待占比=psi_cpu_total/wall——记录 + round `nproc` 直接可算，不再靠相墙钟+代码常量推算。
+
+（2026-08-14 重派——退 AC1-4 后实现【真实生产路径】+ AC6 null 语义，worktree `gap-phase-boundary-differential-accounting`）
+
+- **真实 cgroup 路径已实测（硬规则4 推论三：能产出≠已产出，本次给了「已产出」证据）**：在本机跑 full-suite-runner，**不设** `QUAY_TEST_CGROUP_SCRIPT` 缝，读出 `/sys/fs/cgroup` 真值：
+  - plain-bash 路径（子进程在 runner 的稳定 cgroup）→ **全部相**都有真实非零 `cpu_usec`（如 static 25706µs / serial 223128µs / lowconc 378911µs）+ 真实 `psi_cpu_total`；`phase_counter_error` 缺省。
+  - systemd-run scope 路径（生产路径）→ 已完成相（static/serial/gap/lowconc）真实非零；**出口跨越相为 null**（transient scope 在 exit 时被销毁，cpu.stat ENOENT——这是系统行为，不是漏读），其不可读原因记在独立字段 `phase_final_read_error`（与 `phase_counter_error` 分离：后者=「计数器从未可读」，前者=「出口相读失败（scope 销毁）」）。
+- **finalize 时序修复**：`finalize()` 移到 journal poll（≤5s）**之前**跑——否则出口相 wall_ms 被 poll 尾部污染（实测 main 相 wall 从 ~300ms 虚涨到 ~5.3s）。poll 后 `backfillFinalCpu(totalCpuUsec)` 用 systemd `Consumed` 总 CPU（`total − Σ(已完成相)`，clamped ≥0）回填出口相，回填相标 `reconstructed:true`（provenance 诚实标记）。本机 journal 不产 Consumed 行 ⇒ 回填通常不触发，出口相留 null（fail-open，绝不造 0）。
+- **AC6 null 语义**：`per-task-suite-record.ts` 新增 `--cpu-source`；`--cpu-time-s` 接受 `null`，`0` 归一化为 `null` + `cpu_source:'not-wired'`（0 无法区分「仪器没接」与「真的 ~0 消耗」）；实数带 `cpu_source:'gnu-time'`。`fullSuiteRan=false` 且 cpu_time_s 非零 ⇒ fail-closed（语义矛盾）。`fan-in-execute.js` 双副本（`.claude/` + `plugin/workflows/`）同改：GNU time 不可用/跳过全量 ⇒ `cpu_s=null` + `cpu_source=not-wired` 入账。**⊢判据**：`.quay/per-task-suite-records.jsonl` 现 `cpu_time_s==0` 记录 **0** 条（原 2 条——ff-livelock + not-yet-flipped——已迁移为 `null` + `cpu_source:'not-wired'`）。
+- **测试增量（2026-08-14）**：`full-suite-runner.test.mjs` +4（REAL `/sys/fs/cgroup` 无缝路径、REAL abort 负控制、backfillFinalCpu 单测×2）；`per-task-suite-record-check.test.mjs` 改/增 AC6 用例。`--for-task` scoped 门绿。
 - **派生量**：相利用率=cpu_usec/(wall×lanes)、相饱和度=cpu_usec/(wall×nproc)、等待占比=psi_cpu_total/wall——记录 + round `nproc` 直接可算，不再靠相墙钟+代码常量推算。

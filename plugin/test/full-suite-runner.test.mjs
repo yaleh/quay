@@ -641,6 +641,160 @@ test("unit — PhaseDifferentialAccounting computes exact differentials from the
   }
 });
 
+// ── gap-phase-boundary-differential-accounting: REAL /sys/fs/cgroup path (硬规则4 推论三) ───────────
+// The hermetic seam (QUAY_TEST_CGROUP_SCRIPT) above proves the DIFFERENTIAL LOGIC; these tests prove
+// the REAL production source — reading the actual monotonic cumulative counters from /sys/fs/cgroup
+// (NO seam, NO injected values). A criterion satisfiable only by fixtures is not a measurement
+// (推论三): a round that runs WITHOUT the seam and carries REAL non-zero cpu_usec/psi is the evidence
+// that the phase-boundary accounting reads the live kernel counters, not a fabricated map.
+
+// A fake suite that burns REAL CPU between phase markers (bash busy-loop) so the differentials are
+// reliably non-zero on the real cgroup path.
+const REAL_BURN_SUITE = [
+  'echo "selected 3 files (groups=serial)"',
+  "for i in $(seq 1 60000); do :; done",
+  'echo "__GROUP__ concurrency=2 files=3 sum_ms=100 floor_ms=60 capped=0"',
+  'echo "selected 5 files (groups=lowconc)"',
+  "for i in $(seq 1 60000); do :; done",
+  'echo "__GROUP__ concurrency=3 files=5 sum_ms=200 floor_ms=90 capped=1"',
+  'echo "# tests 8"',
+  'echo "# pass 8"',
+  'echo "# fail 0"',
+  'echo "# cancelled 0"',
+  "exit 0",
+].join("\n");
+
+test("REAL /sys/fs/cgroup — a round WITHOUT the seam records REAL non-zero cpu_usec/psi on the completed phases (硬规则4 推论三)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-realcg-"));
+  const { f, dir } = fakeSuite(REAL_BURN_SUITE);
+  try {
+    // NO QUAY_TEST_CGROUP_SCRIPT / QUAY_TEST_CGROUP_DIR — the real cgroup read path only. The
+    // plain-bash spawn (QUAY_TEST_SKIP_SYSTEMD_RUN=1, the runRunner default) keeps the suite child
+    // in the runner's STABLE cgroup, so every boundary read (incl. finalize) succeeds.
+    const child = runRunner({ root, command: `bash ${f}`, laneCount: 8, serialConcurrency: 2, lowconcConcurrency: 3 });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, `runner exits 0 on green, got ${code}`);
+    const rec = lastRoundRecord(root);
+    assert.ok(rec, "round record written");
+    const phases = rec.phases || [];
+    assert.ok(phases.length >= 3, `phase records present (got ${phases.length})`);
+    const names = phases.map((p) => p.phase);
+    assert.ok(names.includes("serial") && names.includes("lowconc"), `serial+lowconc present (got ${names.join(",")})`);
+    // The completed phases carry REAL values from /sys/fs/cgroup — non-zero (the suite burned CPU),
+    // and NOT the seam's injected numbers.
+    const serial = phases.find((p) => p.phase === "serial");
+    const lowconc = phases.find((p) => p.phase === "lowconc");
+    assert.ok(serial.cpu_usec != null && serial.cpu_usec > 0, `serial cpu_usec is REAL and > 0 (got ${serial.cpu_usec})`);
+    assert.ok(lowconc.cpu_usec != null && lowconc.cpu_usec > 0, `lowconc cpu_usec is REAL and > 0 (got ${lowconc.cpu_usec})`);
+    assert.equal(typeof rec.phase_counter_error, "undefined", "no counter error — the real cgroup path read successfully");
+    assert.equal(typeof rec.phase_final_read_error, "undefined", "plain-bash path keeps the final phase readable too");
+    assert.ok(rec.nproc > 0, "round carries nproc for the derived quantities");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("REAL abort negative control — a fake suite that kills itself mid-run (REAL cgroup path) keeps the completed phase records with REAL cpu", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-realcg-abort-"));
+  const suite = [
+    'echo "selected 3 files (groups=serial)"',
+    "for i in $(seq 1 60000); do :; done",
+    'echo "__GROUP__ concurrency=2 files=3 sum_ms=100 floor_ms=60 capped=0"',
+    'echo "selected 5 files (groups=lowconc)"',
+    "for i in $(seq 1 60000); do :; done",
+    "kill -TERM $$",
+  ].join("\n");
+  const { f, dir } = fakeSuite(suite);
+  try {
+    const child = runRunner({ root, command: `bash ${f}`, laneCount: 8 });
+    const { code } = await waitExit(child);
+    assert.notEqual(code, 0, "aborted round exits non-zero");
+    const rec = lastRoundRecord(root);
+    assert.ok(rec, "round record written on the abort path");
+    const phases = rec.phases || [];
+    assert.ok(phases.length >= 3, `the phases that ran are recorded (got ${phases.length})`);
+    const names = phases.map((p) => p.phase);
+    assert.ok(names.includes("static") && names.includes("serial"), `static+serial recorded on abort (got ${names.join(",")})`);
+    const serial = phases.find((p) => p.phase === "serial");
+    assert.ok(serial.cpu_usec != null && serial.cpu_usec > 0, `abort-path serial cpu_usec is REAL and > 0 (got ${serial.cpu_usec})`);
+    assert.equal(typeof rec.phase_counter_error, "undefined", "real cgroup path read successfully before the abort");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("unit — backfillFinalCpu derives the exit-spanning phase's cpu from the total MINUS the completed phases (reconstructed marker)", () => {
+  const before = process.env.QUAY_TEST_CGROUP_SCRIPT;
+  // The seam has static/serial/main snapshots but NO round_end — the finalize read FAILS (the scope
+  // is destroyed in production), so the final phase is recorded null. readFor snapshots the seam at
+  // construction, so this one script drives the whole sequence.
+  process.env.QUAY_TEST_CGROUP_SCRIPT = JSON.stringify({
+    static: { cpu_usec: 1000, psi_cpu_total: 100, psi_io_total: 10 },
+    serial: { cpu_usec: 5000, psi_cpu_total: 200, psi_io_total: 20 },
+    main: { cpu_usec: 7000, psi_cpu_total: 300, psi_io_total: 30 },
+    // no round_end key → finalize read returns null + read_error
+  });
+  try {
+    const acc = new PhaseDifferentialAccounting(999999, (p) => 1);
+    acc.init("static");
+    acc.boundary("serial");
+    acc.boundary("main");
+    acc.finalize();
+    const last = acc.records[acc.records.length - 1];
+    assert.equal(last.cpu_usec, null, "final phase is null when the finalize read failed (fail-open, never a fabricated 0)");
+    assert.equal(acc.finalReadError, "phase script has no snapshot for 'round_end'", "the EXPECTED finalize failure rides finalReadError, NOT read_error");
+    assert.equal(acc.read_error, null, "read_error stays null — the baseline/boundary reads succeeded");
+    // Now the Consumed total becomes available: total = completed(static 4k + serial 2k) + final(unknown).
+    // completed sum = 4000 + 2000 = 6000; total 8000 → final = 2000.
+    acc.backfillFinalCpu(8000);
+    assert.equal(last.cpu_usec, 2000, "backfillFinalCpu derives final cpu = total − completed sum");
+    assert.equal(last.reconstructed, true, "the backfilled phase is marked reconstructed (provenance, not fabricated silently)");
+    assert.equal(last.psi_cpu_total, null, "PSI has no journal counterpart — stays null");
+  } finally {
+    if (before === undefined) delete process.env.QUAY_TEST_CGROUP_SCRIPT;
+    else process.env.QUAY_TEST_CGROUP_SCRIPT = before;
+  }
+});
+
+test("unit — backfillFinalCpu is a NO-OP when the final phase already has a real reading, the total is absent, or nothing was finalized", () => {
+  const before = process.env.QUAY_TEST_CGROUP_SCRIPT;
+  process.env.QUAY_TEST_CGROUP_SCRIPT = JSON.stringify({
+    static: { cpu_usec: 1000, psi_cpu_total: 100, psi_io_total: 10 },
+    serial: { cpu_usec: 5000, psi_cpu_total: 200, psi_io_total: 20 },
+    round_end: { cpu_usec: 6000, psi_cpu_total: 250, psi_io_total: 25 },
+  });
+  try {
+    // Case 1 — the finalize read SUCCEEDED (real reading): backfill must not overwrite it.
+    const acc = new PhaseDifferentialAccounting(999999, (p) => 1);
+    acc.init("static");
+    acc.boundary("serial");
+    acc.finalize();
+    const last = acc.records[acc.records.length - 1];
+    assert.equal(last.cpu_usec, 1000, "final phase has a real reading (6000−5000)");
+    acc.backfillFinalCpu(1_000_000);
+    assert.equal(last.cpu_usec, 1000, "backfill is a NO-OP when the final phase already has a real reading");
+    assert.equal(last.reconstructed, undefined, "no reconstructed marker on a real reading");
+    // Case 2 — no total: stays null. The seam is set to a no-round_end script BEFORE constructing
+    // the accumulator (readFor snapshots the seam at construction).
+    process.env.QUAY_TEST_CGROUP_SCRIPT = JSON.stringify({
+      static: { cpu_usec: 1000, psi_cpu_total: 100, psi_io_total: 10 },
+      serial: { cpu_usec: 5000, psi_cpu_total: 200, psi_io_total: 20 },
+      // no round_end → finalize read fails
+    });
+    const acc2 = new PhaseDifferentialAccounting(999999, (p) => 1);
+    acc2.init("static");
+    acc2.boundary("serial");
+    acc2.finalize();
+    acc2.backfillFinalCpu(null);
+    assert.equal(acc2.records[acc2.records.length - 1].cpu_usec, null, "no total ⇒ final phase stays null (fail-open)");
+  } finally {
+    if (before === undefined) delete process.env.QUAY_TEST_CGROUP_SCRIPT;
+    else process.env.QUAY_TEST_CGROUP_SCRIPT = before;
+  }
+});
+
 // ── gap-ceiling-floor-ms-not-landed-in-verification-round: AC1/AC2/AC3 (floor_ms / ceiling) ────────
 // measure-suite-reporter.mjs emits `__CEILING__ <path> duration_ms=<dur> floor_ms=<floor> 封顶者/该拆`
 // per capped file (cc>1 phases only) — the "which file is the ceiling / should be split" reading.

@@ -104,22 +104,38 @@ cd ${worktree} && bash scripts/test.sh --for-task ${task} --allow-thin
 suite_capture="/tmp/fan-in-suite-${task}.env"
 suite_start_iso=$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)
 suite_start_ms=$(date +%s%3N)
-suite_cpu_s=0
+# AC6 (gap-phase-boundary-differential-accounting)：数据源未接 ⇒ cpu_s=null + cpu_source=not-wired，
+# ⛔ 不写 0（0 无法区分「仪器没接」与「真的 ~0 消耗」）。GNU time 跑出实数才置 gnu-time。
+suite_cpu_s=null
+suite_cpu_source=not-wired
 if [ step 2 判定 code_delta 非空 ]; then
   # 全量 suite，只在 delta 触及断言面时跑（或判不出时 fail-closed 跑）。GNU time 捕获 CPU 秒数
-  # （User+System，判据3 的 cpu_time_s）；GNU time 不可用 ⇒ suite_cpu_s 保持 0（wall/load 仍入账）。
+  # （User+System，判据3 的 cpu_time_s）；GNU time 不可用 ⇒ cpu_s 保持 null + not-wired（AC6）。
   if command -v /usr/bin/time >/dev/null 2>&1; then
     /usr/bin/time -o /tmp/fan-in-suite-${task}.time -f '%U %S' bash scripts/test.sh
     suite_cpu_s=$(awk '{printf "%.3f", $1+$2}' /tmp/fan-in-suite-${task}.time 2>/dev/null || true)
     rm -f /tmp/fan-in-suite-${task}.time
+    if [ -z "$suite_cpu_s" ] || [ "$suite_cpu_s" = "0.000" ]; then
+      # GNU time 跑了但没产出可用读数 ⇒ 显式 null + not-wired（AC6：绝不写 0）。
+      suite_cpu_s=null
+      suite_cpu_source=not-wired
+    else
+      suite_cpu_source=gnu-time
+    fi
   else
     bash scripts/test.sh
+    # GNU time 不可用 ⇒ 显式 null + not-wired（AC6：绝不写 0）。
+    suite_cpu_s=null
+    suite_cpu_source=not-wired
   fi
   full_suite_ran=true
   skip_reason=
 else
   full_suite_ran=false
   skip_reason=doc-only-delta
+  # 跳过全量 ⇒ 没有任何 CPU 测量 ⇒ 显式 null + not-wired（AC6）。
+  suite_cpu_s=null
+  suite_cpu_source=not-wired
 fi
 suite_end_iso=$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)
 suite_end_ms=$(date +%s%3N)
@@ -127,8 +143,8 @@ suite_wall_ms=$(( suite_end_ms - suite_start_ms ))
 suite_load=$(cut -d' ' -f1 /proc/loadavg 2>/dev/null || echo 0)
 suite_lane_count=1
 if [ "$full_suite_ran" = true ]; then suite_lane_count=$(nproc 2>/dev/null || echo 1); fi
-printf 'full_suite_ran=%s\\nskip_reason=%s\\ncpu_s=%s\\nstart_iso=%s\\nend_iso=%s\\nwall_ms=%s\\nload=%s\\nlane_count=%s\\n' \
-  "$full_suite_ran" "$skip_reason" "$suite_cpu_s" "$suite_start_iso" "$suite_end_iso" "$suite_wall_ms" "$suite_load" "$suite_lane_count" \
+printf 'full_suite_ran=%s\\nskip_reason=%s\\ncpu_s=%s\\ncpu_source=%s\\nstart_iso=%s\\nend_iso=%s\\nwall_ms=%s\\nload=%s\\nlane_count=%s\\n' \
+  "$full_suite_ran" "$skip_reason" "$suite_cpu_s" "$suite_cpu_source" "$suite_start_iso" "$suite_end_iso" "$suite_wall_ms" "$suite_load" "$suite_lane_count" \
   > "$suite_capture"
 # suite-capture-block-end
 cd ${worktree} && bash scripts/test.sh --static-checks-doc
@@ -153,7 +169,7 @@ if [ -n "$skip_reason" ]; then
     --duration-ms "$wall_ms" --started-at "$start_iso" --finished-at "$end_iso" \
     --doc-checked true --doc-check-exit 0 \
     --full-suite-ran "$full_suite_ran" --skip-reason "$skip_reason" \
-    --cpu-time-s "$cpu_s" --load "$load"; then
+    --cpu-time-s "$cpu_s" --cpu-source "$cpu_source" --load "$load"; then
     echo "FATAL: per-task-suite-record 入账失败（AC1 判据1 义务）⇒ 不翻 done、不 ff" >&2
     exit 2
   fi
@@ -163,7 +179,7 @@ else
     --duration-ms "$wall_ms" --started-at "$start_iso" --finished-at "$end_iso" \
     --doc-checked true --doc-check-exit 0 \
     --full-suite-ran "$full_suite_ran" \
-    --cpu-time-s "$cpu_s" --load "$load"; then
+    --cpu-time-s "$cpu_s" --cpu-source "$cpu_source" --load "$load"; then
     echo "FATAL: per-task-suite-record 入账失败（AC1 判据1 义务）⇒ 不翻 done、不 ff" >&2
     exit 2
   fi

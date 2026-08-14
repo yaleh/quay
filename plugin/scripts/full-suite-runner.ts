@@ -818,6 +818,11 @@ export interface PhaseDiffRecord {
   psi_cpu_total: number | null;
   psi_io_total: number | null;
   lanes: number;
+  /** TRUE only on the FINAL phase when its cpu_usec was backfilled from the systemd `Consumed`
+   *  total (the transient scope is destroyed before the round-end read — cpu.stat is ENOENT). The
+   *  derived value is `consumed_total − Σ(completed phases)` — exact, kernel-accumulated, but
+   *  DERIVED (never a fabricated 0). PSI stays null on that phase (no PSI in the Consumed line). */
+  reconstructed?: boolean;
 }
 
 /** Resolve the cgroup v2 directory of a process (its CPU/PSI counters), or the QUAY_TEST_CGROUP_DIR seam. */
@@ -905,6 +910,13 @@ interface PhaseCgroupScript {
 export class PhaseDifferentialAccounting {
   records: PhaseDiffRecord[] = [];
   read_error: string | null = null;
+  /** The ROUND-END (finalize) read failure, kept SEPARATE from `read_error`: the transient
+   *  systemd-run scope is destroyed before the finalize read (cpu.stat → ENOENT) in EVERY real
+   *  production round — an EXPECTED gap that must not be confused with "the counters were never
+   *  readable" (which `read_error` carries, from the baseline/boundary reads). A reader can
+   *  distinguish "completed phases real, final read failed (scope destroyed)" from "no counters at
+   *  all" by checking `phase_final_read_error` vs `phase_counter_error`. */
+  finalReadError: string | null = null;
 
   private readonly childPid: number;
   private readonly lanesFor: (phase: string) => number;
@@ -1004,7 +1016,13 @@ export class PhaseDifferentialAccounting {
     this.currentPhase = newPhase;
   }
 
-  /** Close the final phase at round end (the "end"/tail record). */
+  /**
+   * Close the final phase at round end (the "end"/tail record). Runs at SUITE EXIT — before the
+   * post-suite journal poll — so the final phase's wall_ms is the real exit-spanning wall, not the
+   * poll's ≤5s tail. The transient systemd-run scope is DESTROYED before this read (cpu.stat →
+   * ENOENT), so the final phase's own cpu.stat read fails fail-open (null); `backfillFinalCpu` is
+   * called later with the systemd `Consumed` total (when available) to derive the exit-spanning CPU.
+   */
   finalize(): void {
     if (!this.currentPhase) return;
     const lastPhase = this.currentPhase;
@@ -1030,8 +1048,32 @@ export class PhaseDifferentialAccounting {
       psi_io_total,
       lanes: this.lanesFor(lastPhase),
     });
-    if (r.read_error) this.read_error = r.read_error;
+    // The finalize read failure is EXPECTED when the transient scope was destroyed at exit — record
+    // it as `finalReadError` (distinct from `read_error`, which stays the "counters never readable"
+    // signal from the baseline/boundary reads). A round whose completed phases carry real data but
+    // whose exit-spanning phase read failed is NORMAL in production, not a counter failure.
+    if (r.read_error) this.finalReadError = r.read_error;
     this.currentPhase = "";
+  }
+
+  /**
+   * Backfill the FINAL (exit-spanning) phase's cpu_usec from the round's TOTAL CPU — the systemd
+   * `Consumed` journal line (authoritative kernel-accumulated User+System µs for the transient
+   * scope). Called AFTER the journal poll (the line appears ~2s after the scope ends). The value is
+   * `total − Σ(completed phases)` — exact, clamped ≥ 0 (a read-timing overage must not go negative).
+   * PSI has no journal counterpart — it stays null (honest; not fabricatable). No-op when the final
+   * phase already has a real reading, when totalCpuUsec is absent, or when nothing was finalized.
+   */
+  backfillFinalCpu(totalCpuUsec: number | null): void {
+    const last = this.records[this.records.length - 1];
+    if (!last || last.cpu_usec != null) return; // real read already closed it (plain-bash path)
+    if (totalCpuUsec == null || !Number.isFinite(totalCpuUsec) || totalCpuUsec <= 0) return;
+    const completedSum = this.records.reduce((s, rec) => s + (rec.cpu_usec ?? 0), 0);
+    const remaining = totalCpuUsec - completedSum;
+    if (remaining > 0) {
+      last.cpu_usec = Math.round(remaining);
+      last.reconstructed = true;
+    }
   }
 }
 
@@ -3387,6 +3429,13 @@ export async function run(argv: string[]): Promise<number> {
   // here reverts to the default crash behavior — the state is already terminal.
   process.removeListener("uncaughtException", writeCrashTerminal);
   process.removeListener("unhandledRejection", writeCrashTerminal);
+  // gap-phase-boundary-differential-accounting — CLOSE the final phase at suite exit, BEFORE the
+  // journal poll below (the poll adds a ≤5s tail that would otherwise inflate the final phase's
+  // wall_ms). Runs on EVERY normal-exit path (green, red, abort, timeout, hung, static-check) so the
+  // round record always carries the completed phase sequence. A child that never emitted a phase
+  // marker still records its whole wall as one `static` phase — coverage is 100% for every spawned
+  // round. The exit-spanning phase's cpu is backfilled from the Consumed total AFTER the poll.
+  phaseAccount?.finalize();
   // gap-verification-round-load-fields-from-systemd — read THIS round's scope `Consumed` journal line
   // (bounded poll ≤5s / 200ms — the line appears ~2s AFTER the scope ends, trap 2; the runner lives
   // OUTSIDE the scope so it survives the child's exit and is eligible to poll). Best-effort: a read
@@ -3407,6 +3456,12 @@ export async function run(argv: string[]): Promise<number> {
       };
     }
   }
+  // gap-phase-boundary-differential-accounting — the exit-spanning phase's cpu.usec backfill: the
+  // transient scope is destroyed (finalize's read → ENOENT), so the final phase's CPU is DERIVED
+  // from the authoritative Consumed total MINUS the CPU already attributed to the completed phases.
+  // Only fires when the Consumed total was readable (systemd accounting on); otherwise the final
+  // phase stays null (fail-open — never a fabricated 0).
+  phaseAccount?.backfillFinalCpu(scopeConsumedLoad?.cpu_time_s != null ? scopeConsumedLoad.cpu_time_s * 1_000_000 : null);
   // gap-leak-residue-per-run-namespace-isolation AC2/AC3 — POST-SUITE cleanup of THIS run's own
   // namespace (/tmp/quay-run-<shortRunId>/): remove owner-dead residue under it so the NEXT run's
   // pre-suite sweeper never sees it (accumulation guard). The suite-tail leak-scan ALREADY scanned
@@ -3461,11 +3516,11 @@ export async function run(argv: string[]): Promise<number> {
         : (finalState.reason ?? null);
   const roundGate: string | null =
     roundReason === "gate-failed" ? (staticCheckDetected ? "static-check" : redGateCause ?? "unknown") : null;
-  // gap-phase-boundary-differential-accounting — CLOSE the final phase at round end. This runs on
-  // EVERY normal-exit path (green, red, abort, timeout, hung, static-check) so the round record
-  // below always carries the completed phase sequence. A child that never emitted a phase marker
-  // still records its whole wall as one `static` phase — coverage is 100% for every spawned round.
-  phaseAccount?.finalize();
+  // gap-phase-boundary-differential-accounting — the final phase was CLOSED at suite exit (before
+  // the journal poll) and its cpu backfilled from the Consumed total right after the poll (see the
+  // `finalize()` / `backfillFinalCpu()` calls above). `phaseAccount.records` below is the finished
+  // phase sequence — real differentials for the completed phases, the exit-spanning phase derived
+  // from the authoritative total when available (or null fail-open).
   appendVerificationRound(stateDir, {
     round: 0, // computed from prior line count inside appendVerificationRound
     startedAt,
@@ -3573,9 +3628,12 @@ export async function run(argv: string[]): Promise<number> {
     // gap-phase-boundary-differential-accounting AC1/AC2 — the per-phase differential records
     // (static→serial→gap_serial_to_lowconc→lowconc→main→end). Present on EVERY round the suite
     // child spawned (finalize above guarantees ≥1 record; the crash trap writes its own row). The
-    // counter-read failure reason rides `phase_counter_error` (缺键, never a fabricated 0).
+    // counter-read failure reason rides `phase_counter_error` (缺键, never a fabricated 0); the
+    // EXPECTED exit-spanning finalize read failure (transient scope destroyed) rides the distinct
+    // `phase_final_read_error` so it is not confused with "counters never readable".
     ...(phaseAccount ? { phases: phaseAccount.records } : {}),
     ...(phaseAccount?.read_error ? { phase_counter_error: phaseAccount.read_error } : {}),
+    ...(phaseAccount?.finalReadError ? { phase_final_read_error: phaseAccount.finalReadError } : {}),
   });
   // NOTE: appendVerificationRound above is the ONE suite-duration append per run (the
   // checker-cost.test.mjs AC6 contract: two runs ⇒ exactly two verification-round.jsonl lines).

@@ -329,14 +329,17 @@ const SUITE_RECORD_BASE = {
 };
 
 test("判据2 — a SKIP is recorded: buildRecord emits fullSuiteRan:false + skipReason (falsifiable — a skip is no longer indistinguishable from a run)", () => {
+  // AC6 (gap-phase-boundary-differential-accounting): a skipped suite has NO CPU measurement — a
+  // legacy 0 is normalized to EXPLICIT null + cpu_source:'not-wired', NEVER 0.
   const built = buildRecord({ ...SUITE_RECORD_BASE, fullSuiteRan: "false", skipReason: "doc-only-delta", cpuTimeS: "0" });
   assert.equal(built.error, undefined, `skip build must succeed: ${built.error}`);
   assert.equal(built.record.fullSuiteRan, false);
   assert.equal(built.record.skipReason, "doc-only-delta");
-  assert.equal(built.record.cpu_time_s, 0);
+  assert.equal(built.record.cpu_time_s, null, "a skip's cpu_time_s is EXPLICIT null, never 0 (AC6)");
+  assert.equal(built.record.cpu_source, "not-wired", "the null carries cpu_source:'not-wired' (the source was unavailable)");
 });
 
-test("判据2/3 — a RUN is recorded: buildRecord emits fullSuiteRan:true + cpu_time_s + load + phases (分相)", () => {
+test("判据2/3 — a RUN is recorded: buildRecord emits fullSuiteRan:true + cpu_time_s + cpu_source + load + phases (分相)", () => {
   const built = buildRecord({
     ...SUITE_RECORD_BASE,
     fullSuiteRan: "true",
@@ -350,6 +353,7 @@ test("判据2/3 — a RUN is recorded: buildRecord emits fullSuiteRan:true + cpu
   assert.equal(built.error, undefined, `run build must succeed: ${built.error}`);
   assert.equal(built.record.fullSuiteRan, true);
   assert.equal(built.record.cpu_time_s, 123.456);
+  assert.equal(built.record.cpu_source, "gnu-time", "a real measurement carries cpu_source:'gnu-time' (default for a real number)");
   assert.equal(built.record.load, 4.5);
   assert.equal(built.record.phases.length, 2);
   assert.equal(built.record.phases[0].phase, "static");
@@ -358,7 +362,7 @@ test("判据2/3 — a RUN is recorded: buildRecord emits fullSuiteRan:true + cpu
   assert.equal(validateRecord(built.record).ok, true);
 });
 
-test("判据2 — the writer CLI records a SKIP (--full-suite-ran false --skip-reason doc-only-delta)", () => {
+test("判据2 — the writer CLI records a SKIP (--full-suite-ran false --skip-reason doc-only-delta --cpu-time-s null --cpu-source not-wired)", () => {
   const file = tmpFile("ptsr-skip-");
   const r = spawnSync("node", ["--experimental-strip-types", WRITER,
     "--task-id", "gap-fan-in-suite-data-not-accounted",
@@ -372,7 +376,8 @@ test("判据2 — the writer CLI records a SKIP (--full-suite-ran false --skip-r
     "--doc-check-exit", "0",
     "--full-suite-ran", "false",
     "--skip-reason", "doc-only-delta",
-    "--cpu-time-s", "0",
+    "--cpu-time-s", "null",
+    "--cpu-source", "not-wired",
     "--load", "1.2",
     "--record-file", file,
   ], { encoding: "utf8" });
@@ -380,8 +385,21 @@ test("判据2 — the writer CLI records a SKIP (--full-suite-ran false --skip-r
   const rec = JSON.parse(fs.readFileSync(file, "utf8").trim());
   assert.equal(rec.fullSuiteRan, false, "a skip is RECORDED as a decision (判据1 — 跳过也入账), not inferred from duration");
   assert.equal(rec.skipReason, "doc-only-delta");
-  assert.equal(rec.cpu_time_s, 0);
+  assert.equal(rec.cpu_time_s, null, "a skip's cpu_time_s is EXPLICIT null, never 0 (AC6)");
+  assert.equal(rec.cpu_source, "not-wired");
   assert.equal(validateRecord(rec).ok, true, "the skip record is judged GREEN by the checker's 判据2");
+});
+
+test("AC6 — a legacy `--cpu-time-s 0` is normalized to explicit null + not-wired (never a silent 0)", () => {
+  const built = buildRecord({ ...SUITE_RECORD_BASE, fullSuiteRan: "true", cpuTimeS: "0" });
+  assert.equal(built.error, undefined, `0 cpu build must succeed: ${built.error}`);
+  assert.equal(built.record.cpu_time_s, null, "0 is normalized to EXPLICIT null (0 conflates not-wired with ~0 consumption)");
+  assert.equal(built.record.cpu_source, "not-wired");
+});
+
+test("AC6 — buildRecord fail-closed: a non-zero cpu_time_s with --full-suite-ran false is a semantic contradiction (nothing ran)", () => {
+  const built = buildRecord({ ...SUITE_RECORD_BASE, fullSuiteRan: "false", skipReason: "doc-only-delta", cpuTimeS: "5.0" });
+  assert.match(built.error ?? "", /cpu-time-s/, "a skip with non-zero cpu_time_s is ambiguous ⇒ fail-closed");
 });
 
 test("判据3 — the writer CLI records a RUN (--full-suite-ran true --cpu-time-s <n> --load <n> --phases <json>)", () => {
