@@ -179,6 +179,28 @@ export function killProbeServers() {
   }
 }
 
+// teardownProbe(tmp) — deterministic fixture teardown (判据1/AC1 of
+// gap-session-liveness-fixture-tmux-not-killed): kill the SERVER (kill-server on the private
+// socket — works regardless of session/window state), wait for the server to actually exit, remove
+// the dir, THEN unregister. The OLD cleanup unregistered FIRST and killed only the SESSION; under
+// load a kill-session/rmSync race could leave the server alive AND already-unregistered, so neither
+// the probe's own cleanup nor after()'s reapLiveOwners could reclaim it (the leak-with-no-exit
+// class — 2026-08-14 full-suite tmux-leak-scan red on a /tmp/session-liveness-scd-* server).
+// Keeping the probe registered until the server is confirmed dead means after()'s reapLiveOwners
+// retries this teardown if anything interrupts it. Same kill-server-on-private-socket principle as
+// killProbeServer; never pkill by name; sweepTmp's owner-liveness guard (AC3) is untouched.
+export function teardownProbe(tmp) {
+  killProbeServer(tmp);
+  // The server exits once killed; wait briefly so the socket is released before the dir is removed
+  // (a sync wait via Atomics — no process spawn in the cleanup path).
+  const deadline = Date.now() + 2000;
+  while (Date.now() < deadline && dirHasLiveOwner(tmp)) {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+  }
+  try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* best-effort */ }
+  __unregisterProbeTmp(tmp);
+}
+
 export function reapLiveOwners() {
   for (const abs of [...__liveProbeTmpDirs]) {
     if (!dirHasLiveOwner(abs)) { // owner already gone (e.g. a sibling sweep reaped the socket) — nothing to kill
@@ -327,11 +349,7 @@ export function makeHermeticProbe(session) {
     tmp,
     env,
     session,
-    cleanup() {
-      __unregisterProbeTmp(tmp);
-      tmux(["kill-session", "-t", session], env);
-      try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* best-effort */ }
-    },
+    cleanup() { teardownProbe(tmp); },
   };
 }
 
@@ -350,11 +368,7 @@ export function makePlainPane(session) {
     tmp,
     env,
     session,
-    cleanup() {
-      __unregisterProbeTmp(tmp);
-      tmux(["kill-session", "-t", session], env);
-      try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* best-effort */ }
-    },
+    cleanup() { teardownProbe(tmp); },
   };
 }
 
@@ -377,11 +391,7 @@ export function makeClaudePaneProcess(session) {
     tmp,
     env,
     session,
-    cleanup() {
-      __unregisterProbeTmp(tmp);
-      tmux(["kill-session", "-t", session], env);
-      try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* best-effort */ }
-    },
+    cleanup() { teardownProbe(tmp); },
   };
 }
 
@@ -403,11 +413,7 @@ export function makeTwoWindowSession(session) {
     tmp,
     env,
     session,
-    cleanup() {
-      __unregisterProbeTmp(tmp);
-      tmux(["kill-session", "-t", session], env);
-      try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* best-effort */ }
-    },
+    cleanup() { teardownProbe(tmp); },
   };
 }
 

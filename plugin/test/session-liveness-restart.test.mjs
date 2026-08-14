@@ -50,7 +50,7 @@ import {
   SCRIPT, tmuxAvailable,
   setProbeTmpPrefix, sweepTmp, reapLiveOwners, tmux, isolateTmuxEnv, isClaudePid,
   waitForAlive, spawnMonitor, waitForOutput, waitForRounds, countRounds,
-  __registerProbeTmp, __unregisterProbeTmp,
+  __registerProbeTmp, teardownProbe,
 } from "./session-liveness-helpers.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -85,11 +85,7 @@ function makeEnvProbe(session, claudeProjectDir, sid) {
   tmux(["send-keys", "-t", session, "Enter"], env);
   return {
     tmp, env, session,
-    cleanup() {
-      __unregisterProbeTmp(tmp);
-      tmux(["kill-session", "-t", session], env);
-      try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* best-effort */ }
-    },
+    cleanup() { teardownProbe(tmp); },
   };
 }
 
@@ -110,11 +106,7 @@ function makeNoEnvProbe(session) {
   tmux(["send-keys", "-t", session, "Enter"], env);
   return {
     tmp, env, session,
-    cleanup() {
-      __unregisterProbeTmp(tmp);
-      tmux(["kill-session", "-t", session], env);
-      try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* best-effort */ }
-    },
+    cleanup() { teardownProbe(tmp); },
   };
 }
 
