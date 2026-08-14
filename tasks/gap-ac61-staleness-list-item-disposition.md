@@ -1,7 +1,7 @@
 ---
 id: gap-ac61-staleness-list-item-disposition
 title: AC61 清单逐条处置——A-1…A-7/B-1…B-4 迁出或核实有效 + integration 命中逐条分类
-status: todo
+status: ready
 labels:
   - gap
   - mechanism

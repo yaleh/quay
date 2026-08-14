@@ -1,7 +1,7 @@
 ---
 id: gap-ac56-recommended-deordered
 title: AC56 去锚——机制输出不再携带有意义的序（recommended 无序可行集或字典序+标注）
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
