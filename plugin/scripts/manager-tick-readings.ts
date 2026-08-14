@@ -497,7 +497,6 @@ export function render(projects: Project[], opts: RenderOpts): string {
   const outer = outerReadings(projects, resolvePanes(projects, opts.socket, env));
   const entryCommit = entryLastCommitEpoch(opts.repoRoot, env);
   const monitors = monitorInstances(entryCommit, procRoot);
-  const goal = goalReading(opts.repoRoot);
 
   const lines: string[] = [];
   lines.push(`manager-tick-readings ts=${Date.now()}`);
@@ -517,7 +516,6 @@ export function render(projects: Project[], opts: RenderOpts): string {
     }
   }
   for (const p of projects) lines.push(`outer.ticklog ${p.name} ${latestTickLog(p)}`);
-  lines.push(`goal.phase_ac_checked ${goal.checked}/${goal.total} ${goal.file}`);
   lines.push(`monitor.mounted ${monitors.length > 0}`);
   lines.push(`monitor.instances ${monitors.length}`);
   lines.push(`monitor.entry_last_commit ${entryCommit || "unknown"}`);
