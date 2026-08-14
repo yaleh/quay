@@ -2655,7 +2655,7 @@ manager 的活是：每 tick 采样 AC20 的五条、维护 AC21-AC24 的取证�
       **理由（SPEC §5）**：**inner 拿到有序列表会被锚定**，即使它有语义倾向也很难无视"机制推荐的第一个"
       ⇒ **不去序，新划分就只是名义上的**。
 
-- [ ] **AC57（通知面）**：**SendMessage 只通知不承载内容**
+- [x] **AC57（通知面）**：**SendMessage 只通知不承载内容**
       **判据**：倾向变更的通知**不得包含倾向内容本身**，只说「倾向变了，去重读」+ 指纹。
       **理由（SPEC §4.1）**：消息**compact 后不可重读**、**无单一正本**、**无法验证用的是哪一版**
       ——三条失败模式已在当日实证（最有价值的 A19 规格幸存是因为 outer 抄进了任务体，不是因为消息还在）。
@@ -2888,6 +2888,29 @@ manager 的活是：每 tick 采样 AC20 的五条、维护 AC21-AC24 的取证�
       **subagent 在 ff 成功之后才返回**；inner 主线程的 A6 上**不再有任何 merge 动作**
       ⇒ A6 的主语从「Fan-in 已返回任务」改掉，`git -C <wt>` 形态消失（subagent 在自己树里直接 `git merge`）。
 
+      **判据1b（防改名·2026-08-14 06:1xZ 补，人逐字「不应当是取消 cert monitor 这个提法后换个名字继续在主会话跑」）**：
+      **判据1 原文查的是【核文本】（A6 主语、`git -C <wt>` 形态），一个只改措辞的实现就能通过** ⇒ 补一条读【实际执行命令行】的：
+      ```
+      inner 主会话 <session-id>.jsonl 里【不再出现】
+        (a) 不带 --for-task 的 test.sh 调用      ← 全量 suite
+        (b) 对 tasks/*.md 的 status 翻转提交      ← flip（人 06:1xZ 追加裁定：flip→merge 也须在 subagent 内）
+        (c) 向 develop 的 merge                  ← merge
+      这三类只出现在 <session-id>/subagents/agent-*.jsonl 中
+      读法：ls -t <session>/subagents/agent-*.jsonl 定位后直接读；主会话读 <session-id>.jsonl
+            （meta-cc query_session_content 不递归 subagents——负控制验过：一条确在 subagent
+             transcript 里的 Bash 命令，include_subagents=true 仍返回零）
+      ```
+      **它读的是实际命令行，不是标签/措辞/条款文本 ⇒ 改名改不掉。**
+      **⚠️ 这条判据 2026-08-14 已被真正使用一次**（人问「最近的 suite 跑在哪」时我用它答的）：
+      inner 5 个 subagent transcript 共 40 次 `test.sh` **全带 `--for-task`**；
+      主 jsonl `05:17:15Z` 逐字 `cd …/gap-ac63-… && (bash scripts/test.sh > /tmp/ac63-fullsuite…`（**无 `--for-task`**）
+      ⇒ **当前读数就是这条判据的【红】；落地后翻绿才是"淘汰"的证据。**
+
+      **⚠️ 判定时点（写死为读法 B）**：**判据1b 判在 AC67 落地【之后】的第一次 fan-in，不判 AC67 自身那次。**
+      **理由**：AC67 落地前 inner 主线程仍按旧 A6 执行 ⇒ 自身那次全量 suite 必然跑主会话
+      ⇒ **判自身那次结构性恒红（硬规则 4：一个此刻不可能取另一个值的量不是测量）** ⇒ AC67 将永不可满足。
+      只有落地后（新 A6 在 develop、执行者已搬进 subagent）的下一次，transcript 落点才可红可绿。
+
       **判据2（能取假·产物是本来就要写的东西）**：`fan-in-ff-merge.sh` 已被 AC62 判据3 要求写记录
       （任务 id/第几次/develop 头/时刻/runId）⇒ **该记录加一个调用方 agent 标识字段**，
       **判据 = 该标识 ≠ inner 主会话**。**不是新增打卡动作**，是给一条已经必写的记录加一列
@@ -2984,7 +3007,12 @@ manager 的活是：每 tick 采样 AC20 的五条、维护 AC21-AC24 的取证�
 
       **判据1（退役是可判定的事件，不是自然消失）**：inner 执行核里**不再有「为已返回任务在主线程跑 suite」的条款**；
       `.quay/inner-tick-log.jsonl` 的 `phase` **不再出现 `fan-in-cert-*` 族取值**。
-      **⚠️ 后半条是自述量（4b），只作辅助**；**主判据是执行核的条款，那是位置判定。**
+      **⚠️ 2026-08-14 06:1xZ 修正（人逐字：「不应当是取消 cert monitor 这个提法后换个名字继续在主会话跑」）**：
+      **上面两条都防不住改名**——`phase` 是自述标签（改名即变），执行核条款是文本（改措辞即变）
+      ⇒ **`phase 不再出现 fan-in-cert-*` 降为【纯参考，不作判据】**，主判据换成读【实际执行命令行】的那条：
+      **与 AC67 判据1b 同一条**（inner 主会话 jsonl 里不再出现 (a) 不带 `--for-task` 的 `test.sh`、
+      (b) `tasks/*.md` 的 status 翻转提交、(c) 向 develop 的 merge；三类只出现在 `subagents/agent-*.jsonl`）。
+      **执行核条款仍查，但降为【必要不充分】**：条款改了而命令行没变 ⇒ 仍判红。
 
       **判据2（成功路径也要留痕，且第三方可读）**：每次 per-task 全量 suite 落**一条**记录，
       含 `taskId / runId / state / laneCount / durationMs / 失败文件清单 / 起止时刻`，
@@ -3035,8 +3063,18 @@ manager 的活是：每 tick 采样 AC20 的五条、维护 AC21-AC24 的取证�
       「按需」等于「从不」**——它的价值全在连续性，没有人会在违规发生的那一刻想起来手跑它。
       **⇒ 不约束「按需」，判据1 就只是把问题挪到那一栏里。**
 
-      **判据3（能取假·用真样本，不构造）**：**`fan-in-ff-protocol-check.ts` 是现成的真实缺席样本**
-      ——回放它必须报红。合 D2；亦满足 AC49 判据1。
+      **判据3（能取假·用真样本，不构造）**：**三个现成的真实缺席样本，回放必须报红**（合 D2；亦满足 AC49 判据1）：
+      ```
+      ① fan-in-ff-protocol-check.ts   零调用者（test.sh 与三层执行核命中全 0，catalog 节奏="按需"）
+      ② tick-core-drift-check         有消费者但被 --no-block 静音（今日逐字报 3 pairs / 0 consistent / 3 drifted，
+                                       报了不挡 ⇒「报了」与「没报」在下游不可区分）
+      ③ checked === total 谓词         【方向性零消费者，2026-08-14 06:1xZ 补】——同一谓词
+                                       派发方向有 20–34 处消费者（ready-pool-check.ts=34 / slot-refill.ts=20），
+                                       翻 done 方向零（loop-complete-task.ts 只在 :109-110 判 !sectionFound）
+                                       ⇒ 实证：gap-ac68 以 status=done 落地而 AC/DoD 全文 [x]=0 / [ ]=5
+      ```
+      **③ 的价值在于它是【方向性】的**：一个谓词可以在一个方向被消费得很好、在另一个方向零消费者，
+      **而「它有消费者」这句话按整体看是真的** ⇒ **判据面必须按方向枚举，不能按"有没有人用"整体问。**
 
       **⚠️ 不覆盖**：不要求任何机件改变自己的节奏（那是各机件自己的事）；
       不引入「每轮检查有没有零调用者」这类无产物的提醒；不改 catalog 的格式。
