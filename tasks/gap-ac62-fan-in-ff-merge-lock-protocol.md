@@ -6,7 +6,9 @@ labels:
   - gap
   - mechanism
 parent: null
-children: []
+children:
+  - gap-ac63-ff-explicit-doc-check-before-merge
+  - gap-ac64-precommit-guard-clause2-retire
 extra:
   schema: execution
 depends_on: []
