@@ -1,7 +1,7 @@
 ---
 id: gap-ac72-cert-mechanism-retire
 title: AC72「cert」机制退役 + per-task suite 结果第三方可读落盘（人：「cert 是一个应尽快退役的机制」）
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
