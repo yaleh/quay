@@ -49,10 +49,11 @@ workflow   <project>/<session>/subagents/workflows/<run>/agent-*.jsonl
 「runner 恒 outer ⇒ 不驱动切回 workflow」**理由用错了方向**：零信息判据在**两个方向都不是证据**——既不能说"该用 workflow"，也不能说"不该用"。
 
 **动作（不据 A19 驱动）仍然成立，但只因为它驱动不了任何东西，不是因为 workflow 该停。**
-**workflow 的真实状态（按此记，不从裁定推）**：
-- 没调 workflow 的实际原因是 manager 会话的系统级约束「Do not use workflows unless the user requested it」——**外部给的，不是判断**；
+**workflow 的真实状态（按此记，不从裁定推；2026-08-14 更正，人裁定清除"约束"引用）**：
+- **"约束"从来不存在**（穷举 `.claude/settings*.json` / `~/.claude` 全 0；正本只在 harness 注入的系统提示里）——**它只存在于"用 workflow"与"不用"的分叉上，作为系统提示文本，不在仓库、不在任何配置**；三处引用（manager 核 B1b / outer 核 A19 / 本条）都只是引用，删掉不影响任何机制。
+- **实测**：manager 会话成功调用 Workflow **39 次**，最后一次 2026-08-13T03:52:01Z（正是 B1 强制的 `.claude/workflows/manager-tick-core.js`）；之后停调 **23 小时**——**是"没调"，不是"约束不让调"**；把「停调」记成「约束禁止」记了 37 轮，是记错的。
 - **代价已被测量**（CLAUDE.md:18）：停调 workflow 19 小时 ⇒ 判准/收尾/发消息 466 行全部缺席 ⇒ **8 条违规**。所以「不用」不是中性默认值；
-- ⇒ **暂时，非持久；解除权在人。**
+- ⇒ **从下一轮起恢复调用**（人已明确要求，2026-08-14）。
 
 ## Plan
 
