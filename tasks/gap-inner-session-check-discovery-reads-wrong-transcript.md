@@ -80,7 +80,8 @@ inner 仍在它上面验证。本缺陷可并入其 scope 修复（同脚本）�
 ## Touches
 
 - plugin/scripts/inner-session-check.sh（discovery 逻辑，行 136-148）
-- plugin/loop/orchestrator-loop-tick.md / cold-start SKILL.md（若引用 discovery 语义）
+- plugin/loop/orchestrator-loop-tick.md（若引用 discovery 语义）
+- plugin/skills/cold-start/SKILL.md（若引用 discovery 语义）
 - tasks/gap-outer-self-checks-and-creates-inner-session.md（AC5 交叉标注）
 
 ## Contract

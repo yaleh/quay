@@ -90,9 +90,13 @@ orchestration/orchestrator-loop-tick.md:35:> **切分声明（AC38，2026-08-10�
 ## Touches
 
 - plugin/skills/cold-start/SKILL.md（AC2：理由段搬走，Steps 留下）
-- orchestration/manager-tick-core.md / orchestrator-tick-core.md / fast-mode-tick-core.md（AC3：引用同一批行为文件）
+- orchestration/manager-tick-core.md（AC3：引用同一批行为文件）
+- orchestration/orchestrator-tick-core.md（AC3：引用同一批行为文件）
+- orchestration/fast-mode-tick-core.md（AC3：引用同一批行为文件）
 - orchestration/orchestrator-loop-tick.md（AC4：与 plugin/loop/orchestrator-loop-tick.md 切分）
-- plugin/loop/manager-loop-tick.md / orchestrator-loop-tick.md / fast-mode-loop-tick.md（AC4：产品行为正本）
+- plugin/loop/manager-loop-tick.md（AC4：产品行为正本）
+- plugin/loop/orchestrator-loop-tick.md（AC4：产品行为正本）
+- plugin/loop/fast-mode-loop-tick.md（AC4：产品行为正本）
 - orchestration/manager-phase-goal.md（AC41 判据 2 正本——本任务 Proposal 已引用）
 - tasks/gap-ac41-actionize-state-worded-clauses.md（交叉标注——同 AC41 判据 1）
 - tasks/gap-ac41-red-on-omission-artifact.md（交叉标注——同 AC41 判据 3）

@@ -96,8 +96,11 @@ resume 若中断，先跑 measure 读出厂模板三判准命中 + 在跑副本�
 - [x] 纯测量定位——不引入回流机制（机制形态留后续裁）——未改动任何 plugin/loop/*.md / .ts/.js（只读测量）
 
 ## Touches
-- plugin/loop/manager-loop-tick.md / orchestrator-loop-tick.md / fast-mode-loop-tick.md（只读测量，不改）
-- plugin/scripts/manager-tick-readings.ts / .claude/workflows/manager-tick-readings.js（只读测量）
+- plugin/loop/manager-loop-tick.md（只读测量，不改）
+- plugin/loop/orchestrator-loop-tick.md（只读测量，不改）
+- plugin/loop/fast-mode-loop-tick.md（只读测量，不改）
+- plugin/scripts/manager-tick-readings.ts（只读测量）
+- .claude/workflows/manager-tick-readings.js（只读测量）
 - tasks/gap-the-manager-layer-does-not-propagate-quay-init-lays-no-manager-driver.md（AC5 交叉标注）
 
 ## Dispatch review

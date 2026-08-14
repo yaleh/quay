@@ -125,7 +125,9 @@ Contract measure `node --test plugin/test/full-suite-runner.test.mjs 2>&1 | grep
 
 - plugin/scripts/full-suite-runner.ts（FAILURE_PATTERNS 改结构化匹配）
 - plugin/test/full-suite-runner.test.mjs（AC1-AC2 测试）
-- plugin/loop/orchestrator-loop-tick.md / plugin/loop/fast-mode-loop-tick.md / docs（vitest --maxWorkers 分叉）
+- plugin/loop/orchestrator-loop-tick.md（vitest --maxWorkers 分叉）
+- plugin/loop/fast-mode-loop-tick.md（vitest --maxWorkers 分叉）
+- docs（vitest --maxWorkers 分叉）
 - tasks/gap-no-resource-awareness-heavy-ops-run-blind.md（AC3 交叉标注）
 
 ## Contract

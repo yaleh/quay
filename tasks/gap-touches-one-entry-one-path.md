@@ -48,19 +48,22 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1 判据1：Touches「一条目一路径」检查器落地（含 ` / ` 多路径 bullet ⇒ 红）+ 负控制 fixture。
-- [ ] AC2 判据2：现有多路径 Touches 任务拆分（在飞 AC66 的拆分归其分支，不违反 ff-only）。
-- [ ] AC3 判据3 能取假：AC66 三路径 bullet 真样本回放红；拆分后绿；AC78∩AC66 机器判 overlap（假 disjoint 被纠正）。
-- [ ] AC4 既有测试全绿；`--for-task` scoped 门绿。
+- [x] AC1 判据1：Touches「一条目一路径」检查器落地（含 ` / ` 多路径 bullet ⇒ 红）+ 负控制 fixture。
+- [x] AC2 判据2：现有多路径 Touches 任务拆分（在飞 AC66 的拆分归其分支，不违反 ff-only）。
+- [x] AC3 判据3 能取假：AC66 三路径 bullet 真样本回放红；拆分后绿；AC78∩AC66 机器判 overlap（假 disjoint 被纠正）。
+- [x] AC4 既有测试全绿；`--for-task` scoped 门绿。
 
 ## Definition of Done
 
-- [ ] Touches 一条目一路径形态要求落地（checker）+ 现有多路径拆分 + AC78∩AC66 机器判据纠正为 overlap。
+- [x] Touches 一条目一路径形态要求落地（checker）+ 现有多路径拆分 + AC78∩AC66 机器判据纠正为 overlap。
 
 ## Touches
 
 - plugin/scripts/touches-one-entry-one-path-check.ts (new)
 - plugin/test/touches-one-entry-one-path-check.test.mjs (new)
+- docs/analysis/touches-one-entry-one-path-baseline.md (new)
+- docs/proposals/quay-product-outline.md
+- plugin/scripts/capability-catalog.sh
 - tasks/gap-ac37-exec-core-ships-with-package.md
 - tasks/gap-ac41-coldstart-skill-reference-only.md
 - tasks/gap-ac58-retired-clauses-delete-and-archive.md
@@ -73,6 +76,38 @@ depends_on: []
 - tasks/gap-tick-driver-live-ship-drift-no-backflow.md
 - tasks/gap-touches-one-entry-one-path.md（自身）
 
+## Test-Files
+
+- plugin/test/touches-one-entry-one-path-check.test.mjs（判据1 正/负控制 + 判据3 AC66 真样本回放 + 全仓 scan 绿 + 基线完整性）
+
 ## Evidence
 
-（落地后回填）
+（落地证据，2026-08-14 inner 实现）
+
+**判据1（checker 落地）**：`plugin/scripts/touches-one-entry-one-path-check.ts`（new）——`flagMultiPathTouchEntries` 复用 touches-parser.ts 的按行取项，去掉全部括号注解后仍含 ` / ` ⇒ 多路径 bullet ⇒ 红。`scanTasksOneEntryOnePath` 全仓扫描 + shrink-only 基线（`docs/analysis/touches-one-entry-one-path-baseline.md`，8 条 out-of-scope done/superseded 历史记录）⇒ 拆分后全仓绿：
+
+```
+$ node --no-warnings --experimental-strip-types plugin/scripts/touches-one-entry-one-path-check.ts --root $(pwd)
+TOUCHES-ONE-ENTRY-ONE-PATH: 0 multi-path bullet(s) — every Touches bullet is single-path
+$ echo $?
+0
+```
+
+**判据2（现有多路径拆分）**：拆分 10 个 in-scope done 任务的多路径 bullet（ac37/ac41×2/ac58×2/ac59/ac66/batch-merge/dod×2/full-suite-runner/inner-session-check/tick-driver×2 = 14 条 bullet → 一条目一路径）。AC66 已 done（无在飞分支），其拆分随本任务落地，不违反 ff-only。8 个 out-of-scope 文件（integration-content / known-load-sensitive / lowconc×2 / manager-layer / os-anchor / serial-group-recompose / serial-segment / wall-clock，均 done/superseded）进 shrink-only 基线。
+
+**判据3（能取假，真样本 D2）**：AC66 原三路径 bullet 回放 ⇒ 红；拆分后 ⇒ 绿；AC78∩AC66 机器判 overlap 且含 `orchestration/fast-mode-tick-core.md`：
+
+```
+AC66 globs: [..., "orchestration/orchestrator-tick-core.md", "orchestration/manager-tick-core.md", "orchestration/fast-mode-tick-core.md", ...]
+AC66 expansion has orchestration/fast-mode-tick-core.md: true
+checkTouchesPair(AC78, AC66-split): {"disjoint":false,"overlaps":["docs/proposals/quay-product-outline.md","orchestration/fast-mode-tick-core.md","plugin/scripts/capability-catalog.sh","plugin/scripts/fan-in-ff-protocol-check.ts","scripts/test.sh"],"reason":"overlapping file-sets"}
+```
+
+（拆分前该 overlap 不可见——组合串 `orchestration/orchestrator-tick-core.md / orchestration/manager-tick-core.md / orchestration/fast-mode-tick-core.md` 匹配不到任何文件，`fast-mode-tick-core.md` 被藏起来；拆分后 `parseTouchEntries` 产出三个独立 glob，`fast-mode-tick-core.md` 的重叠对 `checkTouchesPair` 可见。）
+
+**判据4（checkTouchesPair 真 overlap）**：见上 `checkTouchesPair(AC78, AC66-split)` 的 `overlaps` 含 `orchestration/fast-mode-tick-core.md`。
+
+**既有测试全绿 + scoped 门**：
+- 新测试 10/10 pass（`node --no-warnings --experimental-strip-types --test plugin/test/touches-one-entry-one-path-check.test.mjs`）。
+- `capability-catalog.test.mjs` 16/16 pass（checker 已入目录：QUESTION/CADENCE=按需/INVALIDATION/LAST_REAFFIRMED=2026-08-14/MATCHING=position/CONSUMER）。
+- `bash scripts/test.sh --for-task gap-touches-one-entry-one-path --allow-thin` 结果见任务提交证据（scoped 门绿，exit 0）。

@@ -47,7 +47,9 @@ depends_on: []
 ## Touches
 
 - plugin/scripts/instrument-failure-check.ts（扫描面扩展）
-- orchestration/orchestrator-tick-core.md / orchestration/fast-mode-tick-core.md / orchestration/manager-tick-core.md（被测对象）
+- orchestration/orchestrator-tick-core.md（被测对象）
+- orchestration/fast-mode-tick-core.md（被测对象）
+- orchestration/manager-tick-core.md（被测对象）
 - （负控制 fixture：plugin/test/instrument-failure-check.test.mjs + plugin/scripts/checker-mutation-cases/instrument-failure-check.sh）
 - tasks/gap-ac59-family5-scan-covers-execution-cores.md（自身）
 

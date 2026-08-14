@@ -176,8 +176,10 @@ resume 若中断，先跑 measure 读当前并发默认与套件墙钟，再读 
 ## Touches
 - scripts/test.sh（AMPLIFICATION 2.1→1.0，默认并发不再 pin 1；REVERT HISTORY 注释更新）
 - plugin/scripts/full-suite-runner.ts（defaultLaneCount AMPLIFICATION 2.1→1.0，AC1 文档更新）
-- plugin/test/resource-gate.test.mjs / plugin/test/full-suite-runner.test.mjs（派生断言随新默认更新）
-- docs/analysis/fast-mode-loop-tick.md / plugin/loop/fast-mode-loop-tick.md（并发/预算判据段）
+- plugin/test/resource-gate.test.mjs（派生断言随新默认更新）
+- plugin/test/full-suite-runner.test.mjs（派生断言随新默认更新）
+- docs/analysis/fast-mode-loop-tick.md（并发/预算判据段）
+- plugin/loop/fast-mode-loop-tick.md（并发/预算判据段）
 - CLAUDE.md（并发推导引用段）
 - tasks/gap-dod-two-green-runs-and-over90-budget-are-mathematically-incompatible.md（自身文件）
 - tasks/gap-test-concurrency-cap-does-not-scope-nested-spawns.md（交叉标注）

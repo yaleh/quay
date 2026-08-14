@@ -61,7 +61,9 @@ A16 派发记录  「每次派发写 workflow-events/fm-<id>*」     ← 行为�
 
 ## Touches
 
-- orchestration/orchestrator-tick-core.md / orchestration/manager-tick-core.md / orchestration/fast-mode-tick-core.md（C17：outer 专属，本任务只给改法建议、不编辑——建议文本见 Evidence）
+- orchestration/orchestrator-tick-core.md（C17：outer 专属，本任务只给改法建议、不编辑——建议文本见 Evidence）
+- orchestration/manager-tick-core.md（C17：outer 专属，本任务只给改法建议、不编辑——建议文本见 Evidence）
+- orchestration/fast-mode-tick-core.md（C17：outer 专属，本任务只给改法建议、不编辑——建议文本见 Evidence）
 - plugin/scripts/ac66-a22-agent-id-check.ts (new)
 - plugin/scripts/fan-in-ff-protocol-check.ts（新增 判据1 `lock-hold-only-ff` 持锁时长检查 + `--max-hold-seconds`）
 - plugin/test/ac66-a22-agent-id-check.test.mjs (new)（负控制 fixture，A22 真样本回放）

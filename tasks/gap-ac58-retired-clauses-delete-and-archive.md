@@ -53,10 +53,13 @@ depends_on: []
 
 ## Touches
 
-- orchestration/orchestrator-tick-core.md / orchestration/orchestrator-loop-tick.md（退役条款删除 + 指针）
+- orchestration/orchestrator-tick-core.md（退役条款删除 + 指针）
+- orchestration/orchestrator-loop-tick.md（退役条款删除 + 指针）
 - plugin/loop/fast-mode-loop-tick.md（inner loop 12 处退役标注迁出）
 - CLAUDE.md（4 处退役提及迁出）
-- plugin/scripts/integration-branch-model.ts / integration-batch-merge.sh / orchestration/SPEC-branching-model-…（AC48 退役标注迁出到 archive）
+- plugin/scripts/integration-branch-model.ts（AC48 退役标注迁出到 archive）
+- plugin/scripts/integration-batch-merge.sh（AC48 退役标注迁出到 archive）
+- orchestration/SPEC-branching-model-…（AC48 退役标注迁出到 archive）
 - （archive 文件 + 检查器 + 负控制 fixture）
 - tasks/gap-ac58-retired-clauses-delete-and-archive.md（自身）
 

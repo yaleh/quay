@@ -97,7 +97,8 @@ integration 版（`git show integration:…` 覆盖），其余 develop-authorit
 
 - plugin/scripts/integration-batch-merge.sh（归边逻辑：resolve_as_ours → 支持 per-file 反向）
 - plugin/test/integration-batch-merge.test.mjs（新断言 + 既有断言适配）
-- plugin/loop/fast-mode-loop-tick.md / orchestrator-loop-tick.md（若提及归边默认）
+- plugin/loop/fast-mode-loop-tick.md（若提及归边默认）
+- plugin/loop/orchestrator-loop-tick.md（若提及归边默认）
 - tasks/gap-batch-merge-authoritative-direction-hardcoded-develop.md（自身：勾 AC + 贴证据）
 
 ## 实跑证据（2026-08-08 14:1xZ — 缺陷实证，外层手动绕过工具）
