@@ -19,6 +19,12 @@
 //         AC78 (dispatch 1786697920 < boundary 1786699207) and AC76 (dispatch 1786697811) BOTH exempt
 //   NOT-EVALUATED — no fan-in after the time boundary (the ⚠️ 时间边界 guard: pre-workflow fan-in
 //         must NOT be swept into the difference)
+//   DEBT  checkWorkflowCoverage — a fan-in dispatched AFTER the workflow boundary but BEFORE the
+//         enforcement baseline with no Workflow call ⇒ knownPreBaselineDebt, ok:true (non-blocking —
+//         the gap-idle-watch-intent-anchor-restore shape, outer 2026-08-14 ruling)
+//   RED   checkWorkflowCoverage — 负控制: a fan-in DISPATCHED AFTER the enforcement baseline with no
+//         Workflow call ⇒ RED (post-baseline violation — enforcement, the adoption→enforcement
+//         precedent's negative control)
 //   PURE  fanInTasksSince — pre-boundary acquire events are excluded
 //   PURE  extractWorkflowCalls / workflowTaskIds — a real Workflow tool_use block with
 //         scriptPath .../fan-in-execute.js + args JSON { task } is parsed to its task id
@@ -56,6 +62,7 @@ import {
   projectSlug,
   defaultProjectDir,
   WORKFLOW_BASENAME,
+  ENFORCEMENT_BASELINE_EPOCH,
 } from "../scripts/fan-in-workflow-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -343,6 +350,90 @@ test("PURE checkWorkflowCoverage — a dispatch >= boundary with no Workflow cal
   assert.deepEqual(v.preBoundaryDispatch, ["gap-ac78-fan-in-workflow-a6-check"]);
 });
 
+// ── PURE enforcement baseline (outer 2026-08-14 — adoption→enforcement, knownPreBaselineDebt) ────────
+// idle-watch: dispatch 1786700361 (09:39:21Z) AFTER the workflow boundary (1786699207) but BEFORE the
+// enforcement baseline; no Workflow call ⇒ knownPreBaselineDebt (non-blocking). Post-baseline dispatch
+// + no Workflow call ⇒ RED (负控制).
+
+test("PURE checkWorkflowCoverage — idle-watch replay: dispatch after boundary but BEFORE enforcement baseline, no Workflow call ⇒ knownPreBaselineDebt, ok:true", (t) => {
+  // The exact case the baseline exists for: gap-idle-watch-intent-anchor-restore was dispatched at
+  // 09:39:21Z (after the workflow landed 09:20:07Z) but its dispatch brief was pre-workflow-form.
+  // The enforcement baseline (1786701510 = this fix's commit) is AFTER its dispatch ⇒ recorded as
+  // known pre-baseline debt, NOT red (ruling: not exempt, not re-run — debt that doesn't block).
+  const v = checkWorkflowCoverage(
+    ["gap-idle-watch-intent-anchor-restore"],
+    [],
+    new Map([["gap-idle-watch-intent-anchor-restore", 1786700361]]),
+    BOUNDARY_EPOCH,
+    ENFORCEMENT_BASELINE_EPOCH
+  );
+  assert.equal(v.ok, true);
+  assert.equal(v.evaluated, true);
+  assert.deepEqual(v.missing, []);
+  assert.deepEqual(v.knownPreBaselineDebt, ["gap-idle-watch-intent-anchor-restore"]);
+});
+
+test("PURE checkWorkflowCoverage — 负控制: a fan-in dispatched AFTER the enforcement baseline with no Workflow call ⇒ RED (post-baseline violation)", (t) => {
+  // Enforcement begins at the baseline. A dispatch AT/after the baseline that fails to call the
+  // workflow is a fresh violation — it MUST go red (the checker 能取假, adoption→enforcement).
+  const v = checkWorkflowCoverage(
+    ["gap-post-baseline"],
+    [],
+    new Map([["gap-post-baseline", ENFORCEMENT_BASELINE_EPOCH + 100]]),
+    BOUNDARY_EPOCH,
+    ENFORCEMENT_BASELINE_EPOCH
+  );
+  assert.equal(v.ok, false);
+  assert.equal(v.evaluated, true);
+  assert.deepEqual(v.missing, ["gap-post-baseline"]);
+  assert.deepEqual(v.knownPreBaselineDebt, []);
+  assert.deepEqual(v.preBoundaryDispatch, []);
+});
+
+test("PURE checkWorkflowCoverage — debt and post-baseline violation coexist: debt is recorded non-blocking, the violation still REDs", (t) => {
+  // The debt band is per-task; a post-baseline dispatch in the same fan-in set must still be caught.
+  const v = checkWorkflowCoverage(
+    ["gap-idle-watch-intent-anchor-restore", "gap-post-baseline"],
+    [],
+    new Map([
+      ["gap-idle-watch-intent-anchor-restore", 1786700361],
+      ["gap-post-baseline", ENFORCEMENT_BASELINE_EPOCH + 100],
+    ]),
+    BOUNDARY_EPOCH,
+    ENFORCEMENT_BASELINE_EPOCH
+  );
+  assert.equal(v.ok, false);
+  assert.deepEqual(v.missing, ["gap-post-baseline"]);
+  assert.deepEqual(v.knownPreBaselineDebt, ["gap-idle-watch-intent-anchor-restore"]);
+});
+
+test("PURE checkWorkflowCoverage — a task dispatched before the baseline WITH a Workflow call is not debt (has call)", (t) => {
+  const v = checkWorkflowCoverage(
+    ["gap-idle-watch-intent-anchor-restore"],
+    ["gap-idle-watch-intent-anchor-restore"],
+    new Map([["gap-idle-watch-intent-anchor-restore", 1786700361]]),
+    BOUNDARY_EPOCH,
+    ENFORCEMENT_BASELINE_EPOCH
+  );
+  assert.equal(v.ok, true);
+  assert.deepEqual(v.missing, []);
+  assert.deepEqual(v.knownPreBaselineDebt, []);
+});
+
+test("PURE checkWorkflowCoverage — default baseline == boundary ⇒ empty debt band (pure pre-baseline behavior)", (t) => {
+  // Callers that do NOT pass the baseline (the pre-baseline call shape) keep the old semantics:
+  // dispatch >= boundary with no Workflow call is RED (no debt band).
+  const v = checkWorkflowCoverage(
+    ["gap-post-boundary"],
+    [],
+    new Map([["gap-post-boundary", BOUNDARY_EPOCH + 100]]),
+    BOUNDARY_EPOCH
+  );
+  assert.equal(v.ok, false);
+  assert.deepEqual(v.missing, ["gap-post-boundary"]);
+  assert.deepEqual(v.knownPreBaselineDebt, []);
+});
+
 // ── PURE 判据2(c): classifyAgentId ──────────────────────────────────────────────────────────────────
 
 test("PURE classifyAgentId — AC72/AC73 (top-level session ids) ⇒ top-level-session (RED)", (t) => {
@@ -550,5 +641,50 @@ test("CLI — RED when a fan-in task was dispatched AFTER the boundary with no W
   const a = out.checks.find((c) => c.check === "a-workflow-call-coverage");
   assert.equal(a.ok, false);
   assert.deepEqual(a.missing, ["gap-post-boundary"]);
+  assert.deepEqual(a.preBoundaryDispatch, []);
+});
+
+test("CLI — idle-watch replay: dispatch before the enforcement baseline with no Workflow call ⇒ exit 0, knownPreBaselineDebt recorded", (t) => {
+  const fx = makeFixture();
+  t.after(() => cleanup(fx.dir));
+  const lockFile = path.join(fx.dir, "lock.jsonl");
+  // The real idle-watch fan-in: acquire 2026-08-14T09:53:41Z (epoch 1786701221), runId carries the
+  // dispatch instant. agentId a03a00dc0b3e4768c → we create its subagent file so 判据2(c) is green
+  // (this test targets (a) debt classification).
+  const ev = { event: "acquire", taskId: "gap-idle-watch-intent-anchor-restore", epoch: 1786701221, runId: "fm-gap-idle-watch-intent-anchor-restore-1786700361087-baco2m", agentId: "a03a00dc0b3e4768c" };
+  fs.writeFileSync(lockFile, JSON.stringify(ev) + "\n");
+  // Dispatch 2026-08-14T09:39:21Z (epoch 1786700361) — AFTER the workflow landed (09:20:07Z) but
+  // BEFORE the enforcement baseline (--enforcement-baseline-ts 09:55:00Z) ⇒ known pre-baseline debt.
+  fs.writeFileSync(path.join(fx.wfEvents, ev.runId + ".jsonl"), JSON.stringify({ eventKind: "start", recordedAtMs: 1786700361087, timing: { startedAtMs: 1786700361087 } }) + "\n");
+  fs.mkdirSync(path.join(fx.dir, "subagents"), { recursive: true });
+  fs.writeFileSync(path.join(fx.dir, "subagents", "agent-" + ev.agentId + ".jsonl"), "{}");
+  const res = spawnSync("node", ["--experimental-strip-types", CHECKER, "--root", REPO_ROOT, "--lock-events", lockFile, "--project-dir", fx.dir, "--workflow-events-dir", fx.wfEvents, "--dispatch-record", fx.dispatchRecord, "--workflow-landed-ts", "2026-08-14T09:20:07Z", "--enforcement-baseline-ts", "2026-08-14T09:55:00Z", "--json"], { encoding: "utf8" });
+  assert.equal(res.status, 0);
+  const out = JSON.parse(res.stdout);
+  assert.equal(out.ok, true);
+  assert.equal(out.evaluated, true);
+  const a = out.checks.find((c) => c.check === "a-workflow-call-coverage");
+  assert.equal(a.ok, true);
+  assert.deepEqual(a.knownPreBaselineDebt, ["gap-idle-watch-intent-anchor-restore"]);
+  assert.deepEqual(a.missing, []);
+});
+
+test("CLI — 负控制: a fan-in dispatched AFTER the enforcement baseline with no Workflow call ⇒ exit 1 (RED)", (t) => {
+  const fx = makeFixture();
+  t.after(() => cleanup(fx.dir));
+  const lockFile = path.join(fx.dir, "lock.jsonl");
+  const ev = { event: "acquire", taskId: "gap-post-baseline", epoch: 2000000000, runId: "fm-gap-post-baseline-2000000000-r1", agentId: "aab2d14d10a762ff4" };
+  fs.writeFileSync(lockFile, JSON.stringify(ev) + "\n");
+  // Dispatch AFTER the enforcement baseline (09:55:00Z) — enforcement is live, the workflow EXISTS,
+  // it could have been dispatched ⇒ no Workflow call is a fresh violation (RED), NOT debt.
+  fs.writeFileSync(path.join(fx.wfEvents, ev.runId + ".jsonl"), JSON.stringify({ eventKind: "start", recordedAtMs: 2000000000000 }) + "\n");
+  const res = spawnSync("node", ["--experimental-strip-types", CHECKER, "--root", REPO_ROOT, "--lock-events", lockFile, "--project-dir", fx.dir, "--workflow-events-dir", fx.wfEvents, "--dispatch-record", fx.dispatchRecord, "--workflow-landed-ts", "2026-08-14T09:20:07Z", "--enforcement-baseline-ts", "2026-08-14T09:55:00Z", "--json"], { encoding: "utf8" });
+  assert.equal(res.status, 1);
+  const out = JSON.parse(res.stdout);
+  assert.equal(out.ok, false);
+  const a = out.checks.find((c) => c.check === "a-workflow-call-coverage");
+  assert.equal(a.ok, false);
+  assert.deepEqual(a.missing, ["gap-post-baseline"]);
+  assert.deepEqual(a.knownPreBaselineDebt, []);
   assert.deepEqual(a.preBoundaryDispatch, []);
 });
