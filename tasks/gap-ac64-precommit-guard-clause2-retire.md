@@ -76,4 +76,4 @@ AC42 之后    per-task suite 跑在各自 worktree，读的是 worktree 的文�
 - 负控制 fixture：`plugin/test/precommit-guard-retire-negative-control.test.mjs` —— 曾拒的 running-round + tasks/** 提交现在放行（verdict allow）、缺失 state 放行（fail-loud 退役）、不再写拒绝台账、① 文档检查失败仍拒。
 - 既有测试全绿 + scoped 门绿：`scripts/test.sh --for-task gap-ac64-precommit-guard-clause2-retire --allow-thin` exit 0，15 tests pass（precommit-guard.test.mjs 10 + 负控制 5），static checks（retired-clause-check / ac61-staleness-disposition / concurrency-literal / landing-target / delivery-inventory / capability-catalog / test-framework-policy / test-isolation 等）全 PASS。
 - ts-typecheck gate：`fan-in-ts-typecheck-gate.ts` ADMITTED（无 new/moved .ts）。
-- 落地 commit SHA：`__COMMIT_SHA__`
+- 落地 commit SHA：`4e115aa1`（本 worktree 分支 task/gap-ac64-precommit-guard-clause2-retire）
