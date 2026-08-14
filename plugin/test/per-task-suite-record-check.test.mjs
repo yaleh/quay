@@ -33,6 +33,8 @@ import {
   checkRecordFile,
   checkExpectedSuiteRuns,
   checkDocChecked,
+  checkEmptyCarrierAgainstBoundary,
+  resolveBoundaryEpoch,
   REAL_AC57_CERT_ROUNDS,
   REAL_FF_NO_DOC_CHECK,
 } from "../scripts/per-task-suite-record-check.ts";
@@ -178,6 +180,56 @@ test("AC63 判据2 — no ffs given ⇒ NOT-EVALUATED (never conflated with gree
   assert.equal(v.ok, true);
   assert.equal(v.evaluated, false);
   assert.match(v.reason, /NOT-EVALUATED/);
+});
+
+// ── AC72 判据3 conditional: the empty carrier must be 能取假 (硬规则 4 — 空载体 ≠ 合格) ───────────────
+
+test("AC72 判据3 conditional — an EMPTY carrier with per-task suite(s) after the enforcement boundary ⇒ RED (查过且空, 判据3 real-absence)", () => {
+  const v = checkEmptyCarrierAgainstBoundary(
+    [{ taskId: "DIR-127", runId: "fm-DIR-127-x", epoch: 1786700000, ts: "2026-08-14T10:00:00Z" }],
+    [], // present-but-empty carrier
+  );
+  assert.equal(v.ok, false);
+  assert.equal(v.evaluated, true);
+  assert.match(v.reason, /empty-carrier-with-fan-in-after-enforcement-boundary/);
+  assert.equal(v.missing[0].taskId, "DIR-127");
+});
+
+test("AC72 判据3 conditional — an ABSENT carrier (null) with per-task suite(s) after the boundary ⇒ RED too", () => {
+  const v = checkEmptyCarrierAgainstBoundary(
+    [{ taskId: "DIR-127", runId: "fm-DIR-127-x", epoch: 1786700000 }],
+    null, // absent file
+  );
+  assert.equal(v.ok, false);
+  assert.equal(v.evaluated, true);
+});
+
+test("AC72 判据3 conditional — no per-task suite after the enforcement boundary ⇒ NOT-EVALUATED (没查成, 不误红)", () => {
+  const v = checkEmptyCarrierAgainstBoundary([], []);
+  assert.equal(v.ok, true);
+  assert.equal(v.evaluated, false);
+  assert.match(v.reason, /no-per-task-suite-after-enforcement-boundary/);
+});
+
+test("AC72 判据3 conditional — a NON-empty carrier (even with a malformed null line) is the shape checks' job (conditional inert)", () => {
+  const v = checkEmptyCarrierAgainstBoundary(
+    [{ taskId: "DIR-127", runId: "fm-DIR-127-x", epoch: 1786700000 }],
+    [null], // a present-but-malformed carrier line
+  );
+  assert.equal(v.ok, true);
+  assert.equal(v.evaluated, true);
+  assert.match(v.reason, /carrier-not-empty/);
+});
+
+test("resolveBoundaryEpoch — git-resolves the commit that ADDED the record writer (mechanism-landed boundary)", () => {
+  const epoch = resolveBoundaryEpoch(REPO_ROOT);
+  assert.ok(epoch != null && Number.isFinite(epoch), `resolved a mechanism-landed epoch (got ${epoch})`);
+  // The AC72 commit that added per-task-suite-record.ts is 2026-08-14T08:22:10Z = 1786695730.
+  assert.equal(epoch, 1786695730);
+});
+
+test("resolveBoundaryEpoch — --boundary-ts override wins", () => {
+  assert.equal(resolveBoundaryEpoch(REPO_ROOT, "2026-08-14T09:00:00Z"), Math.floor(Date.parse("2026-08-14T09:00:00Z") / 1000));
 });
 
 // ── 判据2: record shape (硬规则 3b — 读不懂 ≠ 合格) ──────────────────────────────────────────────────
@@ -450,10 +502,10 @@ test("checker CLI — --lock-events feeds the AC63 ff-no-doc-check judgment (RED
   const lockEvents = path.join(dir, "lock-events.jsonl");
   // Two real ffs (acquire+release pairs).
   fs.writeFileSync(lockEvents, [
-    '{"event":"acquire","ts":"2026-08-14T00:00:00Z","epoch":1,"taskId":"DIR-127","pid":1,"runId":"fm-DIR-127-x","agentId":"a"}',
-    '{"event":"release","ts":"2026-08-14T00:00:00Z","epoch":1,"taskId":"DIR-127","pid":1,"runId":"fm-DIR-127-x","agentId":"a"}',
-    '{"event":"acquire","ts":"2026-08-14T00:01:00Z","epoch":2,"taskId":"DIR-128","pid":1,"runId":"fm-DIR-128-x","agentId":"a"}',
-    '{"event":"release","ts":"2026-08-14T00:01:00Z","epoch":2,"taskId":"DIR-128","pid":1,"runId":"fm-DIR-128-x","agentId":"a"}',
+    '{"event":"acquire","ts":"2026-08-14T10:00:00Z","epoch":1786700000,"taskId":"DIR-127","pid":1,"runId":"fm-DIR-127-x","agentId":"a"}',
+    '{"event":"release","ts":"2026-08-14T10:00:00Z","epoch":1786700000,"taskId":"DIR-127","pid":1,"runId":"fm-DIR-127-x","agentId":"a"}',
+    '{"event":"acquire","ts":"2026-08-14T10:01:00Z","epoch":1786700060,"taskId":"DIR-128","pid":1,"runId":"fm-DIR-128-x","agentId":"a"}',
+    '{"event":"release","ts":"2026-08-14T10:01:00Z","epoch":1786700060,"taskId":"DIR-128","pid":1,"runId":"fm-DIR-128-x","agentId":"a"}',
   ].join("\n"));
   // RED: records exist for both tasks but carry no doc-check trace.
   for (const t of ["DIR-127", "DIR-128"]) {
@@ -474,6 +526,46 @@ test("checker CLI — --lock-events feeds the AC63 ff-no-doc-check judgment (RED
   assert.equal(green.status, 0, `ffs with a doc-check trace ⇒ PASS: ${green.stdout}`);
   const greenOut = JSON.parse(green.stdout);
   assert.equal(greenOut.checks.find((c) => c.check === "ff-no-doc-check").ok, true);
+});
+
+test("checker CLI — AC72 判据3 conditional: EMPTY carrier + ffs after a PAST enforcement baseline ⇒ RED (查过且空, exit 1)", () => {
+  const dir = tmpDir("ptsr-j3red-");
+  const records = path.join(dir, "records.jsonl");
+  const lockEvents = path.join(dir, "lock-events.jsonl");
+  fs.writeFileSync(records, ""); // present-but-empty carrier
+  fs.writeFileSync(lockEvents, [
+    '{"event":"acquire","ts":"2026-08-14T10:00:00Z","epoch":1786700000,"taskId":"DIR-127","pid":1,"runId":"fm-DIR-127-x","agentId":"a"}',
+    '{"event":"release","ts":"2026-08-14T10:00:00Z","epoch":1786700000,"taskId":"DIR-127","pid":1,"runId":"fm-DIR-127-x","agentId":"a"}',
+  ].join("\n"));
+  const r = spawnSync("node", ["--experimental-strip-types", CHECKER, "--record-file", records, "--lock-events", lockEvents, "--enforcement-baseline-ts", "2026-08-14T09:00:00Z", "--json"], { encoding: "utf8" });
+  assert.equal(r.status, 1, `empty carrier + ff after enforcement ⇒ RED: ${r.stdout}`);
+  const out = JSON.parse(r.stdout);
+  const c = out.checks.find((x) => x.check === "empty-carrier-boundary");
+  assert.ok(c, "the AC72 判据3 conditional check ran");
+  assert.equal(c.ok, false);
+  assert.match(c.reason, /empty-carrier-with-fan-in-after-enforcement-boundary/);
+});
+
+test("checker CLI — AC72 判据3 conditional: EMPTY carrier + ffs BEFORE a FUTURE enforcement baseline ⇒ NOT-EVALUATED (没查成, 不误红)", () => {
+  const dir = tmpDir("ptsr-j3ne-");
+  const records = path.join(dir, "records.jsonl");
+  const lockEvents = path.join(dir, "lock-events.jsonl");
+  fs.writeFileSync(records, "");
+  fs.writeFileSync(lockEvents, [
+    '{"event":"acquire","ts":"2026-08-14T10:00:00Z","epoch":1786700000,"taskId":"DIR-127","pid":1,"runId":"fm-DIR-127-x","agentId":"a"}',
+    '{"event":"release","ts":"2026-08-14T10:00:00Z","epoch":1786700000,"taskId":"DIR-127","pid":1,"runId":"fm-DIR-127-x","agentId":"a"}',
+  ].join("\n"));
+  // Note: no --lock-events is NOT passed here — instead the conditional reads the default lock-events
+  // ONLY when the record file is resolved from the shared checkout (not overridden). With --record-file
+  // overridden, shared is null ⇒ the conditional has no lock-events source ⇒ no ffs ⇒ NOT-EVALUATED.
+  // This is the hermetic default: --record-file without --lock-events ⇒ conditional NOT-EVALUATED.
+  const r = spawnSync("node", ["--experimental-strip-types", CHECKER, "--record-file", records, "--lock-events", lockEvents, "--enforcement-baseline-ts", "2026-08-14T20:00:00Z", "--json"], { encoding: "utf8" });
+  const out = JSON.parse(r.stdout);
+  const c = out.checks.find((x) => x.check === "empty-carrier-boundary");
+  assert.ok(c, "the AC72 判据3 conditional check ran");
+  assert.equal(c.ok, true);
+  assert.equal(c.evaluated, false);
+  assert.match(c.reason, /no-per-task-suite-after-enforcement-boundary/);
 });
 
 // ── resolveSharedCheckout / toIsoTimestamp (pure helpers) ───────────────────────────────────────────

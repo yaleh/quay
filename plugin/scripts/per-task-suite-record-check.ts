@@ -39,6 +39,17 @@
 //           SUITE run's id — two different namespaces that do not correspond. The judge is
 //           checkDocChecked (pure, exported).
 //
+//   AC72 判据3 conditional (fold-into-ac63-retry) — the EMPTY record carrier must be 能取假 (硬规则 4):
+//           an empty carrier previously returned NOT-EVALUATED (exit 0) — a structurally-unfalse
+//           quantity conflated with 合格. The conditional (checkEmptyCarrierAgainstBoundary, pure,
+//           exported) splits the empty-carrier case: empty carrier AND a per-task suite (fan-in ff)
+//           at/after the ENFORCEMENT baseline (ENFORCEMENT_BASELINE_EPOCH / --enforcement-baseline-ts)
+//           ⇒ RED (判据3's "7 轮 cert 回放必须红" condition satisfied — real absence finds zero records);
+//           no suite after the boundary ⇒ NOT-EVALUATED (不误红). The suite evidence is the fan-in
+//           lock-events (each ff implies a per-task suite in the fan-in 无锁段), read by default from
+//           the shared checkout's .quay/fan-in-merge-lock-events.jsonl. The mechanism-landed boundary
+//           (resolveBoundaryEpoch — the commit that ADDED the writer) is reported for context.
+//
 // Exit codes: 0 = PASS (or NOT-EVALUATED — read `evaluated`), 1 = RED, 2 = usage/environment error.
 //
 // Usage:
@@ -48,6 +59,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { isDirectEntry } from "./gate-script-base.ts";
 import { resolveSharedCheckout } from "./per-task-suite-record.ts";
 
@@ -61,6 +73,19 @@ export const REQUIRED_FIELDS = [
   "startedAt",
   "finishedAt",
 ];
+
+// ── AC72 判据3 conditional boundaries (fold-into-ac63-retry) ────────────────────────────────────────
+// The record writer's basename (for resolving the mechanism-landed boundary via git — the commit
+// that ADDED plugin/scripts/per-task-suite-record.ts, the "workflow-landed" analog).
+export const RECORD_WRITER_BASENAME = "per-task-suite-record.ts";
+
+// The ENFORCEMENT baseline epoch: when the per-task-suite-record empty-carrier enforcement begins
+// (the AC72 判据3 conditional). Per-task suite runs (fan-in lock-events) BEFORE this epoch are known
+// debt (the C17 writer wiring had not landed — NOT-EVALUATED, 不误红); a run AFTER this epoch with an
+// EMPTY record carrier ⇒ RED (判据3's "7 轮 cert 回放必须红" condition is satisfied — real absence
+// samples find zero records). Overridable via --enforcement-baseline-ts (tests/hermetic CLI).
+// 1786710672 = 2026-08-14T12:31:12Z — the moment this conditional was implemented.
+export const ENFORCEMENT_BASELINE_EPOCH = 1786710672;
 
 const VALID_STATES = new Set(["green", "red", "running", "aborted"]);
 
@@ -233,6 +258,74 @@ export function checkDocChecked(ffs, records) {
   return { ok: true, evaluated: true, reason: `all-ff-doc-checked (${list.length} ff'd task(s) carry a doc-check trace)`, missing: [] };
 }
 
+// ── AC72 判据3 conditional — the empty carrier must be 能取假 (硬规则 4) ───────────────────────────────
+// Before this conditional, an empty/absent per-task-suite-record carrier returned NOT-EVALUATED
+// (exit 0) — a structurally-unfalse quantity (硬规则 4: a measurement that can never be false is not
+// a measurement). The empty carrier was conflated with 合格. The conditional splits the empty-carrier
+// case into two distinguishable outputs:
+//   查过且空（应红） — the carrier is present-but-empty AND a per-task suite (fan-in ff) ran after the
+//       enforcement boundary ⇒ RED. The AC72 判据3 "7 轮 cert 回放必须红" condition is satisfied: the
+//       real absence samples find ZERO records. The mechanism is required-but-silent.
+//   没查成（NOT-EVALUATED）— no per-task suite ran after the enforcement boundary ⇒ the mechanism
+//       legitimately has nothing to record yet ⇒ NOT-EVALUATED (不误红). A non-empty carrier is the
+//       shape checks' job (conditional inert).
+// The boundary is the ENFORCEMENT baseline (ENFORCEMENT_BASELINE_EPOCH / --enforcement-baseline-ts):
+// fan-ins BEFORE it are known debt (C17 writer not wired), NOT-EVALUATED; fan-ins AT/AFTER it are
+// enforced. The "workflow-landed" mechanism boundary is resolved separately for reporting
+// (resolveBoundaryEpoch — the commit that ADDED the writer).
+/** Judge AC72 判据3 — the empty-carrier conditional. PURE. RED when the carrier has no lines at all
+ *  AND per-task suite(s) ran after the enforcement boundary (a required-but-silent record mechanism —
+ *  the 判据3 real-absence condition); NOT-EVALUATED when no per-task suite ran after the boundary
+ *  (nothing to judge — 不误红); INERT (ok, evaluated) when the carrier has any content (the 判据2
+ *  shape checks judge it instead).
+ *  @param {Array<{taskId:string, runId?:string, epoch?:number, ts?:string}>} ffsAfterBoundary
+ *  @param {Array<Record<string, any>|null>|null} records — the RAW jsonl parse (null = absent file;
+ *          entries include null for unparseable lines)
+ *  @returns {{ok:boolean, evaluated:boolean, reason:string, missing:{taskId:string, runId?:string}[]}} */
+export function checkEmptyCarrierAgainstBoundary(ffsAfterBoundary, records) {
+  const raw = records ?? [];
+  if (raw.length > 0) {
+    return { ok: true, evaluated: true, reason: "carrier-not-empty (record shape checks judge)", missing: [] };
+  }
+  const list = (ffsAfterBoundary ?? []).filter((s) => s && s.taskId);
+  if (list.length === 0) {
+    return { ok: true, evaluated: false, reason: "no-per-task-suite-after-enforcement-boundary (NOT-EVALUATED)", missing: [] };
+  }
+  return {
+    ok: false,
+    evaluated: true,
+    reason: `empty-carrier-with-fan-in-after-enforcement-boundary (${list.length} per-task suite(s) ran after the enforcement boundary; the record carrier is empty — AC72 判据3 real-absence is RED)`,
+    missing: list,
+  };
+}
+
+/** Resolve the mechanism-landed boundary epoch — the commit time of the commit that ADDED
+ *  plugin/scripts/per-task-suite-record.ts (the "workflow-landed" analog). Overridable via
+ *  `--boundary-ts` (ISO/epoch) or `--boundary-ref` (git ref). Mirrors fan-in-workflow-check's
+ *  resolveBoundaryEpoch. Returns null when unresolvable.
+ *  @param {string} root
+ *  @param {string} [boundaryTs]
+ *  @param {string} [boundaryRef] */
+export function resolveBoundaryEpoch(root, boundaryTs, boundaryRef) {
+  if (boundaryTs) {
+    const ms = Date.parse(boundaryTs);
+    return Number.isFinite(ms) ? Math.floor(ms / 1000) : null;
+  }
+  const ref = boundaryRef ?? "HEAD";
+  const file = "plugin/scripts/" + RECORD_WRITER_BASENAME;
+  try {
+    const iso = execFileSync("git", ["-C", root, "log", "--diff-filter=A", "-1", "--format=%cI", ref, "--", file], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    if (!iso) return null;
+    const ms = Date.parse(iso);
+    return Number.isFinite(ms) ? Math.floor(ms / 1000) : null;
+  } catch {
+    return null;
+  }
+}
+
 // ── fs helper ────────────────────────────────────────────────────────────────────────────────────────
 function readJsonl(file) {
   if (!file || !fs.existsSync(file)) return null;
@@ -264,7 +357,8 @@ function readLockEventFfs(file) {
       if (!taskId) continue;
       const runId = String(e.runId ?? "");
       const key = `${taskId}::${runId}`;
-      if (!seen.has(key)) seen.set(key, { taskId, runId, ts: e.ts ?? "" });
+      const ep = Number(e.epoch);
+      seen.set(key, { taskId, runId, epoch: Number.isFinite(ep) ? ep : 0, ts: e.ts ?? "" });
     } catch {
       /* skip unparseable lines */
     }
@@ -285,6 +379,9 @@ const usage = `per-task-suite-record-check.ts — AC72 判据2/判据3 + AC63 �
       doc-check trace (docChecked/docCheckExit) must also be well-formed.
     判据3 replay — given a set of expected per-task suite runs (taskId+runId), every one must have a
       record; a missing record ⇒ RED. The AC57 7 real cert rounds are the real absence samples.
+    AC72 判据3 conditional — an EMPTY record carrier is 能取假: empty carrier AND a per-task suite
+      (fan-in ff) at/after the ENFORCEMENT boundary ⇒ RED (判据3's "7 轮 cert 回放必须红" satisfied —
+      real absence finds zero records); no suite after the boundary ⇒ NOT-EVALUATED (不误红).
     AC63 判据2 has-ff-but-no-doc-check — given the real fan-in ffs (lock-events acquire events), every
       ff'd task must have ≥1 per-task-suite record with docChecked === true; otherwise RED. The 11
       real lock-event ffs are the real absence samples (no doc-check trace exists).
@@ -292,13 +389,19 @@ const usage = `per-task-suite-record-check.ts — AC72 判据2/判据3 + AC63 �
 Usage:
   node --experimental-strip-types plugin/scripts/per-task-suite-record-check.ts
       [--root <dir>] [--record-file <file>] [--samples-json <file>]
-      [--lock-events <file>] [--replay-real-samples] [--json] [--help]
+      [--lock-events <file>] [--enforcement-baseline-ts <ISO>] [--boundary-ts <ISO>]
+      [--boundary-ref <ref>] [--replay-real-samples] [--json] [--help]
 
   --root               repo root (default: cwd) — resolves the shared checkout via git common-dir
   --record-file        override the record path (default <shared>/.quay/per-task-suite-records.jsonl)
   --samples-json       a JSON file: array of {taskId, runId, startedAt?} — replay them (判据3)
-  --lock-events        a fan-in-merge-lock-events.jsonl — its acquire events are the real ffs (AC63
-                       判据2: every ff'd task must have a doc-checked record ⇒ RED on the live ffs)
+  --lock-events        a fan-in-merge-lock-events.jsonl — its acquire events are the real ffs. Feeds
+                       BOTH the AC72 判据3 empty-carrier conditional (default: the shared checkout's
+                       lock-events) AND the AC63 ff-no-doc-check judgment (when given explicitly)
+  --enforcement-baseline-ts  the AC72 判据3 enforcement boundary (default ENFORCEMENT_BASELINE_EPOCH —
+                       fan-ins at/after it with an empty carrier ⇒ RED; before it = known debt ⇒ NOT-EVALUATED)
+  --boundary-ts / --boundary-ref  the mechanism-landed boundary (default: git commit that ADDED
+                       per-task-suite-record.ts) — reported for context, not the enforcement gate
   --replay-real-samples  replay the embedded REAL_AC57_CERT_ROUNDS (判据3) AND REAL_FF_NO_DOC_CHECK
                        (AC63 判据2) — the real absence samples; the answer is no ⇒ RED
   --json               machine-readable output {ok, evaluated, reason, checks}
@@ -306,8 +409,9 @@ Usage:
 
 Exit codes:
   0  PASS or NOT-EVALUATED (read \`evaluated\` — false = could not judge, never conflated with green)
-  1  RED — a malformed record / an expected per-task suite run with no record / an ff with no
-     doc-check trace (判据2 / 判据3 / AC63 判据2)
+  1  RED — a malformed record / an expected per-task suite run with no record / an empty carrier with
+     per-task suite(s) after the enforcement boundary / an ff with no doc-check trace
+     (判据2 / 判据3 / AC72 判据3 conditional / AC63 判据2)
   2  usage / environment error`;
 
 export function main(argv) {
@@ -320,12 +424,16 @@ export function main(argv) {
   const recordFileOverride = getArgValue(args, "--record-file");
   const samplesJson = getArgValue(args, "--samples-json");
   const lockEventsFile = getArgValue(args, "--lock-events");
+  const enforcementBaselineTs = getArgValue(args, "--enforcement-baseline-ts");
+  const boundaryTs = getArgValue(args, "--boundary-ts");
+  const boundaryRef = getArgValue(args, "--boundary-ref");
   const replayReal = args.includes("--replay-real-samples");
   const asJson = args.includes("--json");
 
+  let shared = null;
   let recordFile = recordFileOverride;
   if (!recordFile) {
-    const shared = resolveSharedCheckout(root);
+    shared = resolveSharedCheckout(root);
     if (!shared) {
       const msg = `cannot resolve the shared checkout from ${root} (git common-dir failed)`;
       if (asJson) console.log(JSON.stringify({ ok: false, error: msg }));
@@ -351,6 +459,33 @@ export function main(argv) {
   } else {
     checks.push({ check: "record-shape", ok: true, evaluated: false, reason: "record-file-absent (NOT-EVALUATED)", violations: [], source: recordFile });
   }
+
+  // ── AC72 判据3 conditional — the empty carrier must be 能取假 (硬规则 4) ───────────────────────────
+  // An empty carrier must NOT be conflated with 合格: it splits into "查过且空（应红）" (empty carrier +
+  // a per-task suite ran at/after the ENFORCEMENT boundary ⇒ RED — the 判据3 real-absence condition is
+  // satisfied) and "没查成（NOT-EVALUATED）" (no per-task suite ran after the boundary — 不误红). The
+  // suite evidence is the fan-in lock-events (each ff implies a per-task suite in the fan-in 无锁段).
+  // Lock-events source: explicit --lock-events, else the shared checkout's .quay/fan-in-merge-lock-events.jsonl
+  // (the DEFAULT run_static_checks invocation reads the live lock-events; hermetic tests pass --record-file
+  // without --root-resolved shared ⇒ no default lock-events ⇒ the conditional reads none).
+  const enforcementBaselineEpoch = enforcementBaselineTs ? (Number.isFinite(Date.parse(enforcementBaselineTs)) ? Math.floor(Date.parse(enforcementBaselineTs) / 1000) : ENFORCEMENT_BASELINE_EPOCH) : ENFORCEMENT_BASELINE_EPOCH;
+  const mechanismLandedEpoch = resolveBoundaryEpoch(root, boundaryTs, boundaryRef);
+  let lockEventsSource = lockEventsFile;
+  if (!lockEventsSource && shared) {
+    lockEventsSource = path.join(shared, ".quay", "fan-in-merge-lock-events.jsonl");
+  }
+  const allLockFfs = lockEventsSource ? readLockEventFfs(path.resolve(lockEventsSource)) : [];
+  const ffsAfterBoundary = allLockFfs.filter((s) => s.epoch >= enforcementBaselineEpoch);
+  const ev = checkEmptyCarrierAgainstBoundary(ffsAfterBoundary, records);
+  if (ev.evaluated) {
+    anyEvaluated = true;
+    if (!ev.ok) anyRed = true;
+  }
+  checks.push({
+    check: "empty-carrier-boundary",
+    ...ev,
+    source: `enforcement-baseline-epoch=${enforcementBaselineEpoch}${mechanismLandedEpoch != null ? ` mechanism-landed-epoch=${mechanismLandedEpoch}` : ""}`,
+  });
 
   // ── 判据3 — replay the expected per-task suite runs ───────────────────────────────────────────────
   let expected = [];

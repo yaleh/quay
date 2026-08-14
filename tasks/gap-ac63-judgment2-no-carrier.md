@@ -1,7 +1,7 @@
 ---
 id: gap-ac63-judgment2-no-carrier
 title: AC63 判据2 无载体——lock-events 无 doc 检查字段，结构上无法判「有 ff 而无 doc 检查」（manager 11:1xZ 报）
-status: done
+status: ready
 labels:
   - gap
   - mechanism
@@ -56,13 +56,13 @@ depends_on: []
 ## Touches
 
 - plugin/scripts/per-task-suite-record.ts（doc 检查痕迹载体——与 AC72 合并，不另起文件：可选字段 `docChecked`/`docCheckExit`、flag `--doc-checked`/`--doc-check-exit`、present 时 fail-closed 校验）
-- plugin/scripts/per-task-suite-record-check.ts（判据2 更新：doc-check 痕迹形状校验（present 时）+ AC63 判据2 `checkDocChecked`（has-ff-but-no-doc-check，能取假，taskId 为 join key）+ `REAL_FF_NO_DOC_CHECK` 真实样本 + `--lock-events`/`--replay-real-samples`）
-- plugin/test/per-task-suite-record-check.test.mjs（补测 15 条：AC63 判据1/判据2 + writer fail-closed + CLI replay）
+- plugin/scripts/per-task-suite-record-check.ts（判据2 更新：doc-check 痕迹形状校验（present 时）+ AC63 判据2 `checkDocChecked`（has-ff-but-no-doc-check，能取假，taskId 为 join key）+ `REAL_FF_NO_DOC_CHECK` 真实样本 + `--lock-events`/`--replay-real-samples` + **AC72 判据3 条件式** `checkEmptyCarrierAgainstBoundary`（空载体 ≠ 合格：空载体 + enforcement boundary 后发生过 per-task suite ⇒ RED；没跑过 ⇒ NOT-EVALUATED，`ENFORCEMENT_BASELINE_EPOCH`/`--enforcement-baseline-ts` + `resolveBoundaryEpoch`/`--boundary-ts`））
+- plugin/test/per-task-suite-record-check.test.mjs（补测 23 条：AC63 判据1/判据2 + AC72 判据3 条件式 + writer fail-closed + CLI replay/boundary）
 - tasks/gap-ac63-judgment2-no-carrier.md（自身）
 
 ## Test-Files
 
-- plugin/test/per-task-suite-record-check.test.mjs（AC63 判据1/判据2 负控制 + writer doc-check 痕迹 fail-closed + CLI `--replay-real-samples`/`--lock-events` replay；连同既有 fan-in-ff-merge.test.mjs 由 scoped 门选中）
+- plugin/test/per-task-suite-record-check.test.mjs（AC63 判据1/判据2 + AC72 判据3 条件式负控制 + writer doc-check 痕迹 fail-closed + CLI `--replay-real-samples`/`--lock-events`/`--enforcement-baseline-ts` replay；43 条全绿）
 
 ## Evidence
 
@@ -90,12 +90,31 @@ per-task-suite-record-check: FAIL — per-task-suite-record-violation
 exit=1
 $ node … --lock-events /home/yale/work/quay/.quay/fan-in-merge-lock-events.jsonl   # 同一真值：RED 11/11
 ```
-现状（per-task-suite-records.jsonl 不存在、任何记录都无 doc-check 痕迹）即为「有 ff 而无 doc 检查」的**真样本**——在载体落地前该判据结构上恒无法取假（硬规则 4）。**默认每轮 run_static_checks 调用仍 NOT-EVALUATED**（不关联历史——与 AC72 判据3 同款：永久红的默认是噪音不是测量）：
+现状（per-task-suite-records.jsonl 不存在、任何记录都无 doc-check 痕迹）即为「有 ff 而无 doc 检查」的**真样本**——在载体落地前该判据结构上恒无法取假（硬规则 4）。**默认每轮 run_static_checks 调用当前 NOT-EVALUATED**——但不是「没查」：AC72 判据3 条件式（见下）已接进默认路径，当前无红是因为所有现存 ff 都在 enforcement baseline（`ENFORCEMENT_BASELINE_EPOCH=1786710672`，2026-08-14T12:31:12Z，即本条件式落地时刻）**之前**（`没跑过 suite [after boundary]` ⇒ NOT-EVALUATED，不误红）：
 ```
 $ node --no-warnings --experimental-strip-types plugin/scripts/per-task-suite-record-check.ts --root <repo>
 per-task-suite-record-check: OK — nothing-to-judge (NOT-EVALUATED)
   [record-shape] ok (NOT-EVALUATED) — record-file-absent (NOT-EVALUATED)
+  [empty-carrier-boundary] ok (NOT-EVALUATED) — no-per-task-suite-after-enforcement-boundary (NOT-EVALUATED)
 exit=0
+```
+
+**AC72 判据3 条件式（resume：fold-into-ac63-retry——空载体 ≠ 合格，硬规则 4）**：`plugin/scripts/per-task-suite-record-check.ts` 新增纯函数 `checkEmptyCarrierAgainstBoundary(ffsAfterBoundary, records)`，把空载体分成可区分的两态：**查过且空（应红）**——空载体 且 enforcement boundary 后发生过 per-task 全量 suite（fan-in lock-events acquire 事件，每个 ff 隐含无锁段全量 suite）⇒ exit 1，正是 AC72 判据3「7 轮 cert 回放必须红」满足（真实缺席样本找到零记录）；**没查成（NOT-EVALUATED）**——没跑过 suite（不误红）。enforcement boundary = `ENFORCEMENT_BASELINE_EPOCH`（可 `--enforcement-baseline-ts` 覆盖）；mechanism-landed boundary（`resolveBoundaryEpoch`，git 解析加了 writer 的 AC72 commit）作上下文报告。默认路径读共享检出 `.quay/fan-in-merge-lock-events.jsonl`（每轮 run_static_checks 即此路径）。实测：
+```
+# 查过且空 ⇒ RED（空载体 + past baseline 后的 ff）
+$ node … per-task-suite-record-check.ts --record-file /tmp/empty.jsonl \
+    --lock-events /tmp/lock.jsonl --enforcement-baseline-ts 2026-08-14T09:00:00Z
+per-task-suite-record-check: FAIL — per-task-suite-record-violation
+  [record-shape] ok (NOT-EVALUATED) — no-records (NOT-EVALUATED)
+  [empty-carrier-boundary] RED — empty-carrier-with-fan-in-after-enforcement-boundary (1 per-task suite(s)
+    ran after the enforcement boundary; the record carrier is empty — AC72 判据3 real-absence is RED)
+exit=1
+# 没跑过 ⇒ NOT-EVALUATED（future baseline）
+$ node … --record-file /tmp/empty.jsonl --lock-events /tmp/lock.jsonl \
+    --enforcement-baseline-ts 2026-08-14T20:00:00Z
+  [empty-carrier-boundary] ok (NOT-EVALUATED) — no-per-task-suite-after-enforcement-boundary (NOT-EVALUATED)
+# 非空载体 ⇒ 条件式惰性（判据2 形状检查管）
+  [empty-carrier-boundary] ok — carrier-not-empty (record shape checks judge)
 ```
 
 **判据3（与 AC72 合并）**：doc 检查痕迹并入 AC72 的 per-task-suite-record（`docChecked`/`docCheckExit` 字段），**不另起记录文件**；检查逻辑并入 `per-task-suite-record-check.ts`，测试并入 `per-task-suite-record-check.test.mjs`。lock-events 协议本体（`fan-in-ff-merge.sh` / `fan-in-ff-protocol-check.ts`）未动——本任务不覆盖「不改 fan-in 协议本体」。
@@ -103,13 +122,13 @@ exit=0
 **AC4（scoped 门 + ts-typecheck + 既有测试）**：
 ```
 $ bash scripts/test.sh --for-task gap-ac63-judgment2-no-carrier --allow-thin
-→ EXIT=0；47 tests / 47 pass / 0 fail
-  （含 per-task-suite-record-check.test.mjs 35 条——新增 AC63 判据1/判据2 15 条全绿 +
-    fan-in-ff-merge.test.mjs 回归绿；scoped 静态检查全 PASS）
+→ EXIT=0；43 tests / 43 pass / 0 fail
+  （per-task-suite-record-check.test.mjs 43 条——AC63 判据1/判据2 + AC72 判据3 条件式全绿；
+    scoped 静态检查全 PASS，含每轮 per-task-suite-record-check 默认 NOT-EVALUATED）
 $ node --experimental-strip-types plugin/scripts/fan-in-ts-typecheck-gate.ts --task gap-ac63-judgment2-no-carrier --worktree $(pwd) --merge-target develop
 fan-in-ts-typecheck-gate: no new/moved .ts in the declared write surface — no typecheck gate needed
 fan-in-ts-typecheck-gate: ADMITTED (exit 0)
 ```
-（本任务修改的是**既有** .ts——AC72 已落的 `per-task-suite-record.ts`/`per-task-suite-record-check.ts`，非新增/移动，故 ts-typecheck 闸不触发；改动已被 35 条测试运行时覆盖。）
+（本任务修改的是**既有** .ts——AC72 已落的 `per-task-suite-record.ts`/`per-task-suite-record-check.ts`，非新增/移动，故 ts-typecheck 闸不触发；改动已被 43 条测试运行时覆盖。checker-mutation-check --run RESULT: PASS——per-task-suite-record mutation case 不受影响。）
 
-**接线说明（不在本任务范围）**：AC72 的 C17「A6 无锁段加一步调 `per-task-suite-record.ts`」仍是建议、未接线（主检出无 `.quay/per-task-suite-records.jsonl`）；fan-in 流程真正写 doc 检查痕迹（`--doc-checked` 参数）属于该接线落地后的后续。本任务交付载体 + 判据 + 负控制，使该判据**结构性可判**。**落地 commit**：见 git（worktree 内，未 merge；status 保持 ready）。
+**接线说明（不在本任务范围）**：AC72 的 C17「A6 无锁段加一步调 `per-task-suite-record.ts`」仍是建议、未接线（主检出无 `.quay/per-task-suite-records.jsonl`）；fan-in 流程真正写 doc 检查痕迹（`--doc-checked` 参数）属于该接线落地后的后续。本任务交付载体 + 判据 + 负控制，使该判据**结构性可判**。**⚠️ enforcement 生效后果**：`ENFORCEMENT_BASELINE_EPOCH`（本条件式落地时刻）之后，任一 fan-in 在空载体下发生 ⇒ 每轮 checker 红 ⇒ 会挡后续 full suite，直到 C17 接线（写记录）或 `--enforcement-baseline-ts` 调界——这是「空载体 ≠ 合格」的强制力，outer 裁定 fold-into-ac63-retry 的一部分。**落地 commit**：见 git（worktree 内，未 merge；status 保持 ready）。
