@@ -28,9 +28,11 @@ export const meta = {
 //     模板串内 bash 的 printf 格式串要用 \\n（双反斜杠）——写 `\n` 会被 JS 展开成真换行，
 //     发出的 prompt 里 bash 行断裂（2026-08-14 由 fan-in-execute-paths.test.mjs 首次实测捕到：
 //     `printf '%s\n'` 在 prompt 里断成两行）。反引号 + \n 都是「模板字面量陷阱」。
-//  ⚠️ 三条承重点（gap-fan-in-execute-three-unverified-paths）的真实路径测试 =
-//     plugin/test/fan-in-execute-paths.test.mjs：vm 实执行本脚本（捕 prompt）+ 真实执行其发出的
-//     bash（① code_delta 正则 / ② 自找 --agent-id / ③ flip sed fail-closed）。改任一处必须同步那组测试。
+//  ⚠️ 三条承重点（gap-fan-in-execute-three-unverified-paths）+ AC 完成闸（gap-fan-in-flip-no-
+//     ac-completion-check）的真实路径测试 = plugin/test/fan-in-execute-paths.test.mjs：vm 实执行
+//     本脚本（捕 prompt）+ 真实执行其发出的 bash（① code_delta 正则 / ② 自找 --agent-id /
+//     ③ flip sed fail-closed / ④ flip AC 完成闸：未全勾不翻、全勾翻、段缺失 NOT-EVALUATED）。
+//     改任一处必须同步那组测试。
 
 // args 到达时是【字符串】不是对象（实测 wf_6f8cc053-f52）：直接 args.x 会静默 undefined。
 const A = (() => { try { return typeof args === 'string' ? JSON.parse(args) : (args ?? {}) } catch { return {} } })()
@@ -95,6 +97,13 @@ cd ${worktree}
 flip_count=$(grep -c '^status: ready$' tasks/${task}.md || true)
 if [ "$flip_count" != "1" ]; then
   echo "FATAL: flip 失败——tasks/${task}.md 应恰有 1 行精确 '^status: ready$'（frontmatter），实得 '$flip_count'；行形不匹配（前导空格/大小写/非首行/body 也有精确行）⇒ 不静默翻 done" >&2
+  exit 2
+fi
+# AC 完成闸（gap-fan-in-flip-no-ac-completion-check）：翻转前跑 AC47 谓词（countCompletionCheckboxes /
+# isLandedCodeComplete，同源不新造）——AC 未全勾（剩余含非待外部项）或 AC/DoD 段缺失（NOT-EVALUATED，
+# 硬规则 3b：无法评估 ≠ 合格）⇒ 不翻 done。与承重点③ 行形检查并列，两检查都过才翻。
+if ! node --experimental-strip-types plugin/scripts/fan-in-ac-completion-gate.ts --task ${task}; then
+  echo "FATAL: flip 拒绝——tasks/${task}.md AC 完成闸未通过（AC 未全勾或段缺失）⇒ 未翻 done" >&2
   exit 2
 fi
 sed -i 's/^status: ready$/status: done/' tasks/${task}.md

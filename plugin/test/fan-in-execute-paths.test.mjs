@@ -19,6 +19,10 @@
 //   ③ flip sed 失败路径 (承重点③) — run the REAL flip guard against real task files: normal flip,
 //       line-shape mismatch (status:Ready) ⇒ exit 2 + FATAL (no silent green), body annotation
 //       'status: ready——注解' preserved (anchored $, no corruption).
+//   ④ flip AC 完成闸 (gap-fan-in-flip-no-ac-completion-check) — run the REAL flip block against real
+//       task files: AC 未全勾（gap-ac72 形态真样本）⇒ exit 2 + FATAL + 不翻 done; AC/DoD 段缺失 ⇒
+//       exit 2 NOT-EVALUATED + 不翻 done（无法评估 ≠ 合格）; 剩余未勾均为（待外部）⇒ 翻 done; ③ 行形
+//       检查与 AC 闸并列（两检查都过才翻，AC 闸在行形检查之后、sed 之前）。
 //
 // Run:
 //   scripts/test.sh plugin/test/fan-in-execute-paths.test.mjs
@@ -304,16 +308,32 @@ async function flipBlockFor(task, worktree) {
   return extractBlock(prompt, "# flip-block-start", "# flip-block-end");
 }
 
-test("③ normal flip — 'status: ready' → 'status: done', body 'status: ready——注解' preserved", async (t) => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fan-in-flip-"));
-  t.after(() => cleanup(dir));
+// makeFlipDir — a temp "worktree" dir for flip-block tests. Symlinks the REAL `plugin/` tree so the
+// AC completion gate script (plugin/scripts/fan-in-ac-completion-gate.ts) and its import chain
+// (ready-pool-check.ts / slot-refill.ts / …) resolve through the real repo files (判据3 — real
+// invocation, not a fixture stub). The flip block runs with cwd = this dir, so `tasks/<id>.md` is
+// the test's own file while `plugin/scripts/…` comes from the real tree.
+function makeFlipDir(prefix = "fan-in-flip-") {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  fs.symlinkSync(path.join(REPO_ROOT, "plugin"), path.join(dir, "plugin"), "dir");
   fs.mkdirSync(path.join(dir, "tasks"), { recursive: true });
+  return dir;
+}
+
+test("③ normal flip — 'status: ready' → 'status: done', body 'status: ready——注解' preserved", async (t) => {
+  const dir = makeFlipDir("fan-in-flip-");
+  t.after(() => cleanup(dir));
   const taskFile = path.join(dir, "tasks", "gap-test-flip.md");
   fs.writeFileSync(taskFile, [
     "---",
     "id: gap-test-flip",
     "status: ready",
     "---",
+    "## Acceptance Criteria",
+    "- [x] AC1 done",
+    "- [x] AC2 done",
+    "## Definition of Done",
+    "- [x] DoD done",
     "## Plan",
     "status: ready——注解（body 里的历史说明，不得被误翻）",
   ].join("\n") + "\n", "utf8");
@@ -356,4 +376,72 @@ test("③ multiple exact 'status: ready' matches ⇒ exit 2 + FATAL (refuses to 
   assert.equal(r.status, 2, `ambiguous (2 exact matches) must exit 2, got ${r.status}`);
   assert.match(r.stderr, /FATAL/);
   assert.match(r.stderr, /应恰有 1 行/);
+});
+
+// ── ④ flip AC-completion gate (gap-fan-in-flip-no-ac-completion-check, REAL bash) ───────────────
+
+test("④ AC 未全勾（gap-ac72 形态真样本）⇒ exit 2 + FATAL, 不翻 done (workflow no longer bypasses AC47)", async (t) => {
+  const dir = makeFlipDir("fan-in-flipac-");
+  t.after(() => cleanup(dir));
+  const taskFile = path.join(dir, "tasks", "gap-test-acfail.md");
+  fs.writeFileSync(taskFile, [
+    "---",
+    "id: gap-test-acfail",
+    "status: ready",
+    "---",
+    "## Acceptance Criteria",
+    "- [ ] AC1 判据1：未勾",
+    "- [ ] AC2 判据2：未勾",
+    "## Definition of Done",
+    "- [ ] DoD 未勾",
+  ].join("\n") + "\n", "utf8");
+  const r = runBash(await flipBlockFor("gap-test-acfail", dir), { cwd: dir });
+  assert.equal(r.status, 2, `AC 未全勾 must exit 2 (flip refused), got ${r.status}`);
+  assert.match(r.stderr, /FATAL/);
+  assert.match(r.stderr, /AC 完成闸未通过/);
+  const after = fs.readFileSync(taskFile, "utf8");
+  assert.match(after, /^status: ready$/m, "file must NOT be flipped when ACs are unchecked");
+  assert.doesNotMatch(after, /^status: done$/m, "file must NOT be flipped when ACs are unchecked");
+});
+
+test("④ AC/DoD 段缺失 ⇒ exit 2 NOT-EVALUATED, 不翻 done (无法评估 ≠ 合格)", async (t) => {
+  const dir = makeFlipDir("fan-in-flipacnone-");
+  t.after(() => cleanup(dir));
+  const taskFile = path.join(dir, "tasks", "gap-test-nosec.md");
+  fs.writeFileSync(taskFile, "---\nid: gap-test-nosec\nstatus: ready\n---\n## Plan\nonly a plan\n", "utf8");
+  const r = runBash(await flipBlockFor("gap-test-nosec", dir), { cwd: dir });
+  assert.equal(r.status, 2, `missing AC/DoD section must exit 2 (NOT-EVALUATED), got ${r.status}`);
+  assert.match(r.stderr, /FATAL/);
+  assert.match(fs.readFileSync(taskFile, "utf8"), /^status: ready$/m, "file must NOT be flipped when AC/DoD section is absent");
+});
+
+test("④ 剩余未勾均为（待外部）⇒ 翻 done (established awaiting-verification done-flip shape)", async (t) => {
+  const dir = makeFlipDir("fan-in-flipacext-");
+  t.after(() => cleanup(dir));
+  const taskFile = path.join(dir, "tasks", "gap-test-ext.md");
+  fs.writeFileSync(taskFile, [
+    "---",
+    "id: gap-test-ext",
+    "status: ready",
+    "---",
+    "## Acceptance Criteria",
+    "- [x] AC1 impl done",
+    "- [ ] AC2 等全量套件绿（待外部）",
+    "## Definition of Done",
+    "- [ ] 外层验证（待外部）",
+  ].join("\n") + "\n", "utf8");
+  const r = runBash(await flipBlockFor("gap-test-ext", dir), { cwd: dir });
+  assert.equal(r.status, 0, `待外部-only must flip (exit 0), got ${r.status}: ${r.stderr}`);
+  assert.match(fs.readFileSync(taskFile, "utf8"), /^status: done$/m, "frontmatter flipped to done");
+});
+
+test("④ AC 完成闸与承重点③ 行形检查并列 — 两检查都过才翻（AC 闸在行形检查之后、sed 之前）", async (t) => {
+  const { prompt } = await runWorkflow({
+    args: { task: "gap-test-both", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-both", mergeTarget: "develop" },
+  });
+  const flip = extractBlock(prompt, "# flip-block-start", "# flip-block-end");
+  assert.ok(flip.includes("fan-in-ac-completion-gate.ts"), "flip block must run the AC completion gate (判据3 兼容不互斥)");
+  assert.ok(flip.includes("flip_count=$(grep -c '^status: ready$'"), "flip block must still run the ③ line-shape pre-check");
+  assert.ok(flip.indexOf("fan-in-ac-completion-gate.ts") > flip.indexOf("flip_count="), "AC gate must come AFTER the line-shape pre-check");
+  assert.ok(flip.indexOf("fan-in-ac-completion-gate.ts") < flip.indexOf("sed -i"), "AC gate must come BEFORE the sed flip");
 });
