@@ -39,6 +39,7 @@ inner    ❌ 无此机制   ← 本任务 inner 侧
 **判据2**：每轮四判据核实（CronList 恰一条 ∧ id==注册表 ∧ --verify ∧ 锚点校验）。
 **判据3**：⛔ 不因「窗口/暂停」跳过核实——每轮必跑。
 **判据4**：与 AC79（inner CronCreate 锚）/ AC80（prompt 正本）配套。
+**判据5（7 天硬上限剩余寿命——manager 14:2xZ 报）**：CronCreate 文档写明「**Recurring tasks auto-expire after 7 days**——fires one final time, then deleted. This bounds session lifetime.」⇒ **三层锚都会 7 天后静默消失**，注册表收据能查出「CronList 空」但无提前预警。**⊢ 核实步骤须报锚的剩余寿命**（`CronCreate 时刻 + 7 天 − now`），**< 24h 即报**。能取假：现在剩余 ≈7 天判据为 false，到第 6 天翻 true。
 
 **不覆盖**：不改唤醒机制本体；不在窗口内改。
 
@@ -59,11 +60,12 @@ inner    ❌ 无此机制   ← 本任务 inner 侧
 - [ ] AC2 判据2：每轮四判据核实。
 - [ ] AC3 判据3：不因窗口/暂停跳过。
 - [ ] AC4 判据4：与 AC79/AC80 配套。
-- [ ] AC5 既有测试全绿；`--for-task` scoped 门绿。
+- [ ] AC5 判据5：核实步骤报锚剩余寿命（CronCreate 时刻+7 天−now），<24h 即报。
+- [ ] AC6 既有测试全绿；`--for-task` scoped 门绿。
 
 ## Definition of Done
 
-- [ ] 三层各有注册表收据 + 每轮四判据核实（CronList 恰一条 ∧ id==注册表 ∧ --verify ∧ 锚点校验）。
+- [ ] 三层各有注册表收据 + 每轮四判据核实（CronList 恰一条 ∧ id==注册表 ∧ --verify ∧ 锚点校验）+ 7 天剩余寿命判据（<24h 报）。
 
 ## Touches
 
