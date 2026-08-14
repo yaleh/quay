@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-14T01:45:29.210Z",
+  "generatedAt": "2026-08-14T02:05:25.213Z",
   "since": null,
   "tasks": [
     {
@@ -104,6 +104,20 @@
       "taskId": "gap-ac54-dispatch-preference-file",
       "runId": "fm-gap-ac54-dispatch-preference-file-1786668541989-u6m7ju",
       "minutes": 48.10463333333333,
+      "outcome": "done",
+      "fanInCommit": null
+    },
+    {
+      "taskId": "gap-ac59-family5-scan-covers-execution-cores",
+      "runId": "fm-gap-ac59-family5-scan-covers-execution-cores-1786669961106-r88kfz",
+      "minutes": 36.05073333333333,
+      "outcome": "done",
+      "fanInCommit": null
+    },
+    {
+      "taskId": "gap-ac60-coverage-denominator-excludes-dead-prereqs",
+      "runId": "fm-gap-ac60-coverage-denominator-excludes-dead-prereqs-1786669962360-xrmr7d",
+      "minutes": 48.63441666666667,
       "outcome": "done",
       "fanInCommit": null
     },
@@ -652,28 +666,16 @@
       "runId": "fm-gap-ac58-retired-clauses-delete-and-archive-1786669371698-0x6m5j",
       "startedAtMs": 1786669371707,
       "startedAtMsUnreliable": true
-    },
-    {
-      "taskId": "gap-ac59-family5-scan-covers-execution-cores",
-      "runId": "fm-gap-ac59-family5-scan-covers-execution-cores-1786669961106-r88kfz",
-      "startedAtMs": 1786669961113,
-      "startedAtMsUnreliable": true
-    },
-    {
-      "taskId": "gap-ac60-coverage-denominator-excludes-dead-prereqs",
-      "runId": "fm-gap-ac60-coverage-denominator-excludes-dead-prereqs-1786669962360-xrmr7d",
-      "startedAtMs": 1786669962369,
-      "startedAtMsUnreliable": true
     }
   ],
   "deferred": [],
-  "meanMinutes": 28.36092981481483,
-  "medianMinutes": 23.034950000000002,
-  "tasksPerHour": 2.0931336861938963,
-  "serialEquivalentPerHour": 2.1155864914082594,
+  "meanMinutes": 28.664878623188418,
+  "medianMinutes": 23.424558333333334,
+  "tasksPerHour": 2.123138385211203,
+  "serialEquivalentPerHour": 2.093153813372964,
   "windowStart": "2026-08-12T06:45:12.994Z",
-  "windowEnd": "2026-08-14T01:45:04.827Z",
-  "windowHours": 42.99773138888889,
+  "windowEnd": "2026-08-14T02:05:08.478Z",
+  "windowHours": 43.33207888888889,
   "haltedHours": 0,
   "halted": [],
   "blocked": [
@@ -764,7 +766,7 @@
     }
   ],
   "reconcilable": [],
-  "realInFlight": 5,
+  "realInFlight": 3,
   "closedButLive": [],
-  "occupiedSlots": 5
+  "occupiedSlots": 3
 }
