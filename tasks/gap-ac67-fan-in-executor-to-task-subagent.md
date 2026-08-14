@@ -73,6 +73,7 @@ depends_on:
 - [ ] AC3 判据3 能取假：现行 A6 主线程 fan-in（近 6h 4 次）回放任一次必须报红——真样本不构造（D2）。
 - [ ] AC4 不改 AC62 协议本体（无锁段/持锁段/ff-only/两锁不交叉照旧）；不引入队列/让步。
 - [ ] AC5 既有测试全绿；`--for-task` scoped 门绿。
+- [ ] AC6 **全量 suite 在主会话淘汰（人 2026-08-14 06:1xZ 逐字：「不应当是取消 cert monitor 这个提法后换个名字继续在主会话跑」；manager ⑤ 补判据）**：inner 主会话 `<session-id>.jsonl` 里**不再出现不带 `--for-task` 的 `test.sh` 调用**；该调用只出现在 `<session-id>/subagents/agent-*.jsonl` 中。读法：`ls -t <session>/subagents/agent-*.jsonl` 定位 + 直接读；主会话读 `<session-id>.jsonl`（`query_session_content` 不递归 subagents，负控制已验证）。**为什么防改名**：读的是实际执行的命令行（`bash scripts/test.sh` 七个字），不是任何标签/措辞/条款文本——改名改不掉命令、也改不掉它落在哪个 transcript。**当前读数=红**（manager 实测：inner 主 jsonl 05:17:15Z 逐字 `bash scripts/test.sh` 无 `--for-task` = 全量在主线程；5 个 subagent transcript 40 次调用全带 `--for-task`）。**落地后翻绿才是"淘汰"的证据。**
 
 ## Definition of Done
 
