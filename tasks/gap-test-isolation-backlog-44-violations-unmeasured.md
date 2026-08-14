@@ -8,7 +8,7 @@ title: "test-isolation contract check has 44 standing violations
   indistinguishable from old (red-window triage had to diff against a
   rotated-out round1 log by hand); fix: baseline the 44, add a shrink-only
   ratchet or per-category count like the test-framework-policy list"
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -94,6 +94,35 @@ subset），test-isolation 缺同款机制。
 > 「负载下真实红」降为「已消除的嵌套成本」——剩余 spawns-test-sh 实例（select-tests-for-touches /
 > test-coverage-check）不在本任务 Touches 内，仍待基线化。
 
+## Test-Files
+
+- plugin/test/test-isolation-check.test.mjs（R1/R2/R3/R4/R6/R7/R8 判定 + AC5 ratchet——新违规红/既有基线绿）
+- plugin/test/test-isolation-r6-partial-cleanup.test.mjs（R6 partial-cleanup 检测）
+- plugin/test/runner-grouping-{fixture-runs,flags-only,governance,list-groups,serial-anti-stomp}.test.mjs（AC7 夹具保留在 serial 文件 + R3 spawns-test-sh 家族，@test-group serial）
+- plugin/test/test-file-snapshot.test.mjs（AC6 快照排除 zz-* 夹具的负控制）
+
+## Evidence（2026-08-14 复验，worktree `task/gap-test-isolation-backlog-44-violations-unmeasured`）
+
+**复验结论：44 基线已收缩到 26 —— shrink-only 棘轮持续工作，本任务机制在 develop 上有效。**
+
+`bash plugin/scripts/test-isolation-check.ts .` 实测输出（当前 develop glob）：
+
+```
+test-isolation-check — 396 glob file(s), 26 current violation(s) [fixed-path-write=12 shared-build-artifact-write=1 spawns-test-sh=7 process-exit-1=6 mkdtemp-no-cleanup=0 live-data-dir-write=0 shared-root-mkdtemp=0]
+PASS: all 26 violation(s) are baselined in plugin/test-isolation-violations.txt; the list can only get SHORTER (no additions, no growth, no stale entries).
+```
+
+`grep -vc '^#' plugin/test-isolation-violations.txt` = **26**（`# baseline-count: 51` 封顶未动——只降不升）。44 → 26 的收缩来自
+落地任务（`c07b1a78` pair every mkdtemp with cleanup 等）对 mkdtemp-no-cleanup 的批量清理——**mkdtemp-no-cleanup 从 21 降到 0**、
+process-exit-1 7→6；spawns-test-sh 3→7 是 runner-grouping 拆分为 5 个 serial 文件的账内漂移（每个文件各一个嵌套 spawn 实例，
+均在基线内）——正是本任务 AC2 shrink-only 棘轮被设计来容纳的「既有积压逐步收敛 + 账内计数重排」形态。**棘轮复验（真实跑过）：**
+在 glob 内放 `zz-ratchet-rehearsal.test.mjs`（`path.join(__dirname, ".tmp-ratchet-rehearsal.txt")` 固定写）→ **exit 1**，
+报 `FAIL: 1 ratchet violation(s)` + `…zz-ratchet-rehearsal.test.mjs:fixed-path-write is a CURRENT violation with no entry …
+a new violation was introduced`；删除该临时文件 → **exit 0**（既有 26 不阻塞）。
+
+**Scoped gate（DoD「全量套件绿（per-task 验证）」）**：`bash scripts/test.sh --for-task gap-test-isolation-backlog-44-violations-unmeasured --allow-thin`
+→ **23/23 tests pass, 0 fail**（test-isolation R1-R8 + ratchet + runner-grouping serial 家族 + test-file-snapshot 负控制）。
+
 ## Evidence（2026-08-08，worktree `task/gap-test-isolation-backlog-44-violations-unmeasured`）
 
 ### AC1/AC2 —— 44 个违规有机械基线 + shrink-only 棘轮实测
@@ -148,9 +177,9 @@ AC7 夹具保留在共享 `plugin/test/` 维持断言语义，`@test-group seria
 
 ## Definition of Done
 
-- [ ] AC1–AC4 全部勾上
-- [ ] 44 条 backlog 的隔离 violation 读数贴出（-v 或等价证据）
-- [ ] 全量套件绿（per-task 验证）
+- [x] AC1–AC4 全部勾上
+- [x] 44 条 backlog 的隔离 violation 读数贴出（-v 或等价证据）——2026-08-08 的 44 读数 + 2026-08-14 复验的 26 读数均贴出
+- [x] 全量套件绿（per-task 验证）——scoped gate 23/23 pass（2026-08-14）
 
 ## Touches
 
