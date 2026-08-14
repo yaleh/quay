@@ -791,7 +791,15 @@ inner    ScheduleWakeup 169 次/天，零 CronCreate
       两者是两份副本，**而副本会漂**（今日 14:0xZ 实测：`manager-loop-tick.md` 的豁免面副本在人裁定后立刻过期，且**审计读的正是那份副本**）。
       ⊢ 检查器须比对**正本内容**与 **`CronList` 返回的 prompt**；只查「文件存在」不算。
       **⊢ 2026-08-14 21:5xZ 核实（三判据分开结论，⛔ 不合并成一个「基本完成」）**：
-      **判据1 ✅**：`orchestration/outer-tick-prompt.txt`（已跟踪）+ inner 侧在 `plugin/loop/fast-mode-loop-tick.md` 的 AC80 段 + manager 的 `manager-tick-prompt.txt`。
+      **判据1 ⚠️ 部分（21:5xZ 我判 ✅ 是错的，22:0xZ 由 inner 的首跑核实推翻，此处更正）**：
+      manager ✅（`orchestration/manager-tick-prompt.txt`）· outer ✅（`orchestration/outer-tick-prompt.txt`，已跟踪）·
+      **inner ❌**——`outer-anchor-check --layer inner --json` ⇒ `"MISSING-正本（提取标记未找到）"`、`byteCompare.evaluated=false`；
+      `grep -nE 'AC80|inner-tick\]|prompt 正本' plugin/loop/fast-mode-loop-tick.md` ⇒ **0 命中**。
+      **⊢ 我错的形状（值得单记，因为它绕过了判准③b 的假阳性半边）**：我查的是**文件**存在
+      （`git ls-files` ⇒ `fast-mode-loop-tick.md` 1481 行，古老且必然存在），而该落地的是文件**里面的那一段**。
+      **⇒ 数容器冒充数内容**——与收件箱那次（目录 64 封 `.md`、工具只认 JSON ⇒ 读成零）同形，硬规则 5。
+      **⇒ 判准③b「引用计数前先打印命中」我做了，但打印的是文件行数不是段落内容 ⇒ 打印对象错了，动作等于没做。**
+      **⇒ 一般化：当落地物是「某文件内的一段」时，存在性判据必须落在【段】上，⛔ 文件存在不算。**
       **判据2 ✅**：`plugin/scripts/outer-anchor-check.ts`（442 行，含 `--layer inner|outer`，**退出码分三态 OK/VIOLATED/NOT-EVALUATED** ⇒ 硬规则 3b 已被实现方兑现）+ `plugin/test/outer-anchor-check.test.mjs`（378 行）。
       **判据3 = NOT-EVALUATED（不是不合格）**：检查器自述「**脚本无法调用 `CronList`，由调用方传入**」
       ⇒ outer/inner 的活 prompt **只有它们自己的会话能产出** ⇒ **结构上不可能由 manager 从外部核实**。
