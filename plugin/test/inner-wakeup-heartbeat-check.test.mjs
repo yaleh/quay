@@ -698,6 +698,109 @@ test("AC53 判据① CLI --json — NEGATIVE CONTROL: machine says no blocking r
   }
 });
 
+// ── AC53-gate running-set wiring (tasks/gap-ac53-gate-not-wired-to-running-set) ───────────────────────
+// 判据1: runMachineSlotRefill now accepts a `running` param wired to slot-refill's Consumer B
+// (slots_free / should_refill); Consumer A (dispatchable_disjoint) stays on the wide in-flight view.
+// 判据2 (能取假): the true-sample replay — the SAME workspace + cap give OPPOSITE gate verdicts when
+// the gate passes its observed running set vs when it doesn't (传真集放行 / 不传拒写).
+// 判据3 (3b): `running: undefined` (未提供) is DISTINCT from `running: []` (测得真零) — never
+// same-shaped.
+
+test("AC53-gate 判据1 — runMachineSlotRefill wires `running` to Consumer B (running-subagents)", () => {
+  const root = makeDispatchableWorkspace("iwuh-run1-");
+  try {
+    const m = runMachineSlotRefill({ root, running: [], cap: 5 });
+    assert.equal(m.ok, true, `machine slot-refill must succeed:\n${m.error || ""}`);
+    assert.equal(m.refill.slot_denominator_source, "running-subagents", "Consumer B must use the narrow running set");
+    assert.equal(m.refill.running_subagent_count, 0, "empty running array = MEASURED zero");
+    assert.equal(m.refill.slots_free, 5, "cap 5 − 0 running = 5 free");
+    // Consumer A stays wide — the dispatchable fixture task is still in the disjoint set.
+    assert.ok(m.refill.dispatchable_disjoint > 0, "Consumer A keeps the wide set (dispatchable_disjoint unaffected by running)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC53-gate 判据3 (3b) — running undefined (未提供) is DISTINCT from running [] (真零): slot_denominator_source differs", () => {
+  const root = makeDispatchableWorkspace("iwuh-run3-");
+  try {
+    const notProvided = runMachineSlotRefill({ root, cap: 5 });
+    assert.equal(notProvided.ok, true, `machine slot-refill must succeed:\n${notProvided.error || ""}`);
+    assert.equal(notProvided.refill.slot_denominator_source, "in-flight-fallback", "undefined ⇒ Consumer B falls back to the wide in-flight set");
+    assert.equal(notProvided.refill.running_subagent_count, 0, "fallback wide set is empty here ⇒ 0");
+    const measuredZero = runMachineSlotRefill({ root, running: [], cap: 5 });
+    assert.equal(measuredZero.refill.slot_denominator_source, "running-subagents", "[] ⇒ Consumer B uses the narrow running set (true zero)");
+    assert.equal(measuredZero.refill.running_subagent_count, 0, "measured zero running subagents");
+    // The two are distinguishable even when the numeric count is identical — "没提供" is never
+    // same-shaped as "测得为 0" (hard rule 3b).
+    assert.notEqual(notProvided.refill.slot_denominator_source, measuredZero.refill.slot_denominator_source);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC53-gate 判据2 (能取假) — true-sample replay: 传真集放行 / 不传拒写, same workspace + cap, opposite verdicts", () => {
+  const root = makeDispatchableWorkspace("iwuh-run2-");
+  try {
+    // 不传 running: Consumer B falls back to the wide set ⇒ slots_free=5>0 + the dispatchable
+    // fixture task is recommended ⇒ should_refill=true ⇒ the gate REFUSES (violated).
+    const wide = runMachineSlotRefill({ root, cap: 5 });
+    assert.equal(wide.ok, true, `machine slot-refill must succeed:\n${wide.error || ""}`);
+    assert.equal(wide.refill.should_refill, true, `不传 running ⇒ should_refill=true:\n${JSON.stringify(wide.refill)}`);
+    assert.equal(wide.refill.slot_denominator_source, "in-flight-fallback");
+    const wideInv = judgeEndInvariantAgainstMachine(null, wide.refill);
+    assert.equal(wideInv.violated, true, "不传 running ⇒ 闸拒写 (RED)");
+
+    // 传真集: 5 running subagents fill cap 5 ⇒ slots_free=0 ⇒ should_refill=false ⇒ the gate PASSES
+    // (the round legitimately has no free slot).
+    const narrow = runMachineSlotRefill({ root, running: ["r-1", "r-2", "r-3", "r-4", "r-5"], cap: 5 });
+    assert.equal(narrow.ok, true, `machine slot-refill must succeed:\n${narrow.error || ""}`);
+    assert.equal(narrow.refill.running_subagent_count, 5, "running set is the Consumer-B denominator");
+    assert.equal(narrow.refill.slots_free, 0, "cap 5 − 5 running = 0 free");
+    assert.equal(narrow.refill.should_refill, false, "传真集 ⇒ should_refill=false");
+    assert.equal(narrow.refill.slot_denominator_source, "running-subagents");
+    const narrowInv = judgeEndInvariantAgainstMachine(null, narrow.refill);
+    assert.equal(narrowInv.violated, false, "传真集 ⇒ 闸放行");
+
+    // Same second, same machine, two opposite conclusions — the 判据2 replay is RED for the current
+    // refusing state and flips on the wiring.
+    assert.notEqual(wide.refill.should_refill, narrow.refill.should_refill);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC53-gate CLI --json — --running '' surfaces slot_denominator_source running-subagents (vs in-flight-fallback without)", () => {
+  const root = makeDispatchableWorkspace("iwuh-clirun-");
+  try {
+    // The violating end-shape (machine agrees: the fixture task is dispatchable).
+    writeHeartbeatTo(root, fullHeartbeat({
+      slots_free: 5, dispatchable_disjoint: 5, pool: 16, should_refill: true, no_refill_reason: null,
+    }));
+    // Without --running: Consumer B falls back to the wide in-flight set.
+    const r1 = runCli(root, ["--json"]);
+    assert.equal(r1.status, 1, `without --running the violating shape must RED:\n${r1.stdout}\n${r1.stderr}`);
+    const out1 = JSON.parse(r1.stdout);
+    assert.equal(out1.status, "invariant-violated");
+    assert.equal(out1.machineSlotRefill.slot_denominator_source, "in-flight-fallback");
+    assert.equal(out1.machineInFlight.runningSource, "none (wide in-flight fallback)");
+    assert.equal(out1.machineInFlight.runningIds, null);
+    // With --running '' (measured zero): Consumer B uses the narrow running set — the violating
+    // shape is still RED (slots_free=3>0 at the heartbeat's effectiveCap 3), but the JSON proves the
+    // narrow denominator is being used (判据3: --running '' is a TRUE zero, not "not provided").
+    const r2 = runCli(root, ["--json", "--running", ""]);
+    assert.equal(r2.status, 1, `with --running '' the violating shape still RED:\n${r2.stdout}\n${r2.stderr}`);
+    const out2 = JSON.parse(r2.stdout);
+    assert.equal(out2.status, "invariant-violated");
+    assert.equal(out2.machineSlotRefill.slot_denominator_source, "running-subagents");
+    assert.equal(out2.machineSlotRefill.running_subagent_count, 0);
+    assert.equal(out2.machineInFlight.runningSource, "--running");
+    assert.deepEqual(out2.machineInFlight.runningIds, []);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("AC53 AC3 CLI — a legacy `.json` snapshot (pre-AC53 format) is still read via the fallback", () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "iwuh-legacy-"));
   try {
