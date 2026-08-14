@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-13T23:43:15.679Z",
+  "generatedAt": "2026-08-14T01:25:31.686Z",
   "since": null,
   "tasks": [
     {
@@ -627,15 +627,40 @@
     }
   ],
   "orphaned": [],
-  "inProgress": [],
+  "inProgress": [
+    {
+      "taskId": "gap-ac54-dispatch-preference-file",
+      "runId": "fm-gap-ac54-dispatch-preference-file-1786668541989-u6m7ju",
+      "startedAtMs": 1786668542000,
+      "startedAtMsUnreliable": true
+    },
+    {
+      "taskId": "gap-ac58-retired-clauses-delete-and-archive",
+      "runId": "fm-gap-ac58-retired-clauses-delete-and-archive-1786669371698-0x6m5j",
+      "startedAtMs": 1786669371707,
+      "startedAtMsUnreliable": true
+    },
+    {
+      "taskId": "gap-ac59-family5-scan-covers-execution-cores",
+      "runId": "fm-gap-ac59-family5-scan-covers-execution-cores-1786669961106-r88kfz",
+      "startedAtMs": 1786669961113,
+      "startedAtMsUnreliable": true
+    },
+    {
+      "taskId": "gap-ac60-coverage-denominator-excludes-dead-prereqs",
+      "runId": "fm-gap-ac60-coverage-denominator-excludes-dead-prereqs-1786669962360-xrmr7d",
+      "startedAtMs": 1786669962369,
+      "startedAtMsUnreliable": true
+    }
+  ],
   "deferred": [],
   "meanMinutes": 28.139090449438218,
   "medianMinutes": 22.67755,
-  "tasksPerHour": 2.1726698141672243,
+  "tasksPerHour": 2.0859385185246673,
   "serialEquivalentPerHour": 2.132265081837351,
   "windowStart": "2026-08-12T06:45:12.994Z",
-  "windowEnd": "2026-08-13T23:43:01.329Z",
-  "windowHours": 40.96342638888889,
+  "windowEnd": "2026-08-14T01:25:12.919Z",
+  "windowHours": 42.666645833333334,
   "haltedHours": 0,
   "halted": [],
   "blocked": [
@@ -726,7 +751,7 @@
     }
   ],
   "reconcilable": [],
-  "realInFlight": 0,
+  "realInFlight": 4,
   "closedButLive": [],
-  "occupiedSlots": 0
+  "occupiedSlots": 4
 }
