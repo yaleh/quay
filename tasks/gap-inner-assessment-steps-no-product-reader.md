@@ -1,7 +1,7 @@
 ---
 id: gap-inner-assessment-steps-no-product-reader
 title: inner 派发评估三步骤（slot-refill/ready-pool/heartbeat）无读产物判据——07:41 切驱动模式后该步未带过来，4.7h 无层处理（manager 12:2xZ 报）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
