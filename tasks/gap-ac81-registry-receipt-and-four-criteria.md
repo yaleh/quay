@@ -1,7 +1,7 @@
 ---
 id: gap-ac81-registry-receipt-and-four-criteria
 title: 三层各有注册表收据 + 每轮四判据核实（AC81，人 14:2xZ 裁定）——当前 outer/inner 无此机制
-status: ready
+status: done
 labels:
   - gap
   - mechanism
