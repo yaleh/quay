@@ -17,6 +17,8 @@ depends_on:
 
 ## Proposal
 
+> **止损（2026-08-14 04:1xZ，人 提活行为缺陷两义务：修机制+止损）：需要 + 当轮可做。** inner 判断「能，现在做」——无锁段（rebase + ts-typecheck + scoped + 全量 suite + doc 检查，全在任务 worktree 内）挪 subagent，ff 留主线程；不依赖 AC62（无锁段三步全由 develop 现有机件构成：git merge 内置 / fan-in-ts-typecheck-gate 在 develop / scripts/test.sh+--static-checks-doc 在 develop；fan-in-ff-merge.sh 只服务持锁段，止损不动它）。在飞任务保持现有流程不中途换执行者（避免半新半旧），**从 AC62 fan-in 起**改走 subagent 无锁段。基线（manager）：近 40 轮 fan-in 族 68% / 全历史 27%。
+
 **AC67（fan-in 的【执行者】必须落到任务 subagent —— AC62 搬了锁，没搬执行者；人 2026-08-14 03:5xZ 追问「inner 任务 subagent 自行 merge 什么时候才能发生」）判据（phase-goal 逐字）**：
 
 **发现经过**：人问「outer 和 inner 仍然在用 fan-in 这样的描述，我们期望的 subagent 自行 merge 什么时候发生」。manager 原以为答案是「AC62 落地那一刻」，核了才知道不是——**AC62 交付的是协议形态，不是执行者位置**。
