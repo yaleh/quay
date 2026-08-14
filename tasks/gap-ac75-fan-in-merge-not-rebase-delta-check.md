@@ -1,7 +1,7 @@
 ---
 id: gap-ac75-fan-in-merge-not-rebase-delta-check
 title: AC75 fan-in 无锁段第1步 rebase→merge + 新增 delta 断言面判定（人 07:0xZ 裁定）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
