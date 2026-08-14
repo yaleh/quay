@@ -14,7 +14,15 @@
 // clarity. A blocked merge leaves MERGE_HEAD + staged changes (git does NOT auto-abort); the caller
 // (e.g. the A6 fan-in failure path) must `git merge --abort`. Fast-forward merges create no merge
 // commit, so pre-merge-commit does not fire for them — the guard's merge coverage is scoped to the
-// --no-ff family (the fan-in convention, round-123 shape).
+// --no-ff family (round-123 shape).
+// AC62+ (SPEC-fan-in-ff-merge-lock-2026-08-14): the fan-in convention is now **ff-only** —
+// `git merge --ff-only` creates no merge commit, so on the fan-in path NEITHER pre-commit (commit-only)
+// NOR pre-merge-commit (--no-ff-only) fires ⇒ the DOC check has NO hook trigger there. AC63: the A6
+// 无锁段 step 3 EXPLICITLY runs `bash scripts/test.sh --static-checks-doc` BEFORE the ff (not
+// hook-dependent — the subagent must run it by hand). The two doc-check runs are DELIBERATELY not
+// deduplicated: the first (this guard's pre-commit) covers only the author's own changes; the second
+// (step 3) covers content AFTER merging develop — dedup would miss doc conflicts introduced by the
+// merge (human-confirmed 2026-08-14).
 //
 // ② 的实证（2026-08-12，三独立支撑，manager 判定）：「round 期间零提交」约定守不住：
 //   ① 约定无产物（C17）——round 60 约定后 26s 即破（外层 47023142）；
