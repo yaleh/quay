@@ -107,3 +107,17 @@ depends_on:
 - **门（AC5）**：`bash scripts/test.sh --for-task gap-ac67-fan-in-executor-to-task-subagent --allow-thin` = **47 tests / 47 pass / 0 fail**（含 fan-in-ff-merge 10、fan-in-ff-executor-check 21、capability-catalog 全绿、delivery-inventory `inventory_drift=0`）；`fan-in-ts-typecheck-gate.ts`（新增 1 .ts）**GREEN（exit 0）**。capability-catalog `--entry-surface` 顺带修了一个**既有红**：`fan-in-ff-merge.sh` 被 A6 文档引用却未声明 public ⇒ 声明入 `PUBLIC_ENTRYPOINTS`。
 - **重试记录真落盘（manager (a)）**：重试记录字段完整 taskId/attempt/developHead/ts/epoch/runId/**agentId**/mergeTarget/error——落地即有真数据（ff 在当前节奏下几乎必然失败，见重试 note）。
 - **重试范围（manager (b)）**：重试=整轮（回无锁段 step 1），已在 Proposal 写明理由；三角张力（11b/clean-tree/ff-only）已并进任务体。
+
+**⚠️ 已落地 ≠ 已启用（manager 2026-08-14 08:1xZ 记录）**：本任务 status=done（检查器/测试/A6 主语/agentId 全落地），**但 ff-only 协议自 AC67 落地后几乎未被使用**——`fan-in-merge-lock-events.jsonl` 分布：ac67=8（它自己 3 次重试+最终 ff）、**其余任务全部 0**；AC64/AC68/AC74/AC75/B15/AC77 六次 fan-in 全未走 `fan-in-ff-merge.sh`（直接 commit 到 develop 或 `git merge develop` 无锁段后直接落地）。**⇒ 脚本在 develop、A6 主语已改、`git -C <wt>` 归零、测试绿，但协议本体未被后续任务执行**——记录上看起来「已完成」，行为上「未启用」。**判据1b（执行者位置）已红六次**：每次后续任务绕过 ff-only 就是一次红。归因归 inner（实现漏走新流程 vs 判断这类任务不必走完整 fan-in，两种未假设）；**若为后者，绕过的判据必须成为 A6 显式分支，不能是隐式惯例**。判断「某任务走没走 fan-in」用 `fan-in-merge-lock-events.jsonl` 的 taskId 分布（每次 ff 必写、带 agentId、第三方可读），不用 `git log --grep='merge: fan-in'`（ff-only 不产生 merge commit，结构上取不到真）。
+
+**⚠️ 结果判据（manager 2026-08-14 08:2xZ，补「已落地 ≠ 已启用」的机械判据）**：
+```
+判据：凡 fan-in 发生在【AC67 落地（50ac710d，2026-08-14 08:01:32Z）之后】的任务，
+      fan-in-merge-lock-events.jsonl 里必须有 ≥1 条它的记录；差集非空 ⇒ 红（列出差集任务名）
+今天的读数：差集 = AC64 / AC68 / AC74 / AC75 / B15 / AC77 六条
+```
+**为什么能取真**：每次 ff 必写、带 agentId、第三方可读（满足 4b——不是被测对象自产的自述量）。
+
+**⚠️ 时间边界陷阱（manager 自算过计，写进判据防复发）**：第一版算「已 fan-in = status=done 且 worktree 已移除」得 13 条、lock-events 仅 1 条任务 ⇒ 差集 12——**12 是错的、真值 6**，因为 13 条里有 AC56/57/61/62/63 等**在 AC67 落地之前就 fan-in 的任务，它们本来就不该有 ff 锁事件**。**⇒ 判据必须带时间边界（只统计 AC67 落地之后 fan-in 的任务）**——没有边界会稳定过计、天天报红，而一个天天报红的检查等于没有检查（与 --no-block 同族，只是从另一头坏）。
+
+**根因（inner 已答 (a) 实现漏了，结构因）**：**A6 改了，而派发 brief 是它的【派生文本】，副本没跟着改，且没有任何判据读这个一致性**——brief 是运行时生成、不落盘 ⇒ 不能比对文件 ⇒ 只能靠【结果】判。**修 brief 模板可以一次解决，修态度不能**——记录里写结构因，不只写认领。
