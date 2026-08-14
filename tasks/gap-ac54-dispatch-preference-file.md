@@ -1,7 +1,7 @@
 ---
 id: gap-ac54-dispatch-preference-file
 title: AC54 正本——倾向文件存在且三段齐全（默认/覆盖/维护者），git 可见可取假
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -37,22 +37,41 @@ depends_on:
 
 ## Acceptance Criteria
 
-- [ ] AC1 倾向文件 git 可见（不在 .quay/ 下），含默认段/覆盖段/维护者字段三段。
-- [ ] AC2 删任一段 ⇒ 检查变红（负控制三个缺段样本全红，落地方产出）。
-- [ ] AC3 文件形态不预设具体路径/格式（SPEC §7 不覆盖——实现面自定）。
-- [ ] AC4 既有测试全绿；`--for-task` scoped 门绿。
+- [x] AC1 倾向文件 git 可见（不在 .quay/ 下），含默认段/覆盖段/维护者字段三段。
+- [x] AC2 删任一段 ⇒ 检查变红（负控制三个缺段样本全红，落地方产出）。
+- [x] AC3 文件形态不预设具体路径/格式（SPEC §7 不覆盖——实现面自定）。
+- [x] AC4 既有测试全绿；`--for-task` scoped 门绿。
 
 ## Definition of Done
 
-- [ ] 倾向文件落地（git 可见、三段齐全）+ 检查器 + 负控制三个缺段样本全红。
-- [ ] 为 AC55 的内容指纹提供稳定来源。
+- [x] 倾向文件落地（git 可见、三段齐全）+ 检查器 + 负控制三个缺段样本全红。
+- [x] 为 AC55 的内容指纹提供稳定来源。
 
 ## Touches
 
-- （实现面自定路径/格式——倾向文件；SPEC §7 不规定）
-- （检查器 + 负控制 fixture）
+- orchestration/dispatch-preference.md（倾向文件正本——git 可见、三段齐全；实现面自定路径/格式，SPEC §7 不规定）
+- plugin/scripts/dispatch-preference-check.ts（检查器——三段任一缺失/过薄 ⇒ RED）
+- plugin/test/dispatch-preference-check.test.mjs（负控制：三个缺段样本全红 + 真实文件全绿）
+- plugin/scripts/capability-catalog.sh（为新检查器补 QUESTION/CADENCE/INVALIDATION/LAST_REAFFIRMED/MATCHING 五表声明）
+- plugin/scripts/checker-mutation-cases/dispatch-preference-check.sh（mutation case——注入「删掉覆盖段」⇒ 检查器必须红；L_S 仪器）
+- scripts/test.sh（把检查器接入 run_static_checks，`@static-tier change`）
+- docs/proposals/quay-product-outline.md（`--write-inventory` 重新生成 §6 DELIVERY-INVENTORY 快照：scripts 227→228）
 - tasks/gap-ac54-dispatch-preference-file.md（自身）
 
 ## Evidence
 
-（落地后回填）
+**AC1（git 可见 + 三段）**：倾向文件 = `orchestration/dispatch-preference.md`（实现面自定路径/格式，SPEC §7 不规定）。git 可见——`git ls-files orchestration/` 跟踪，不在 gitignored 的 `.quay/` 下；`git check-ignore orchestration/dispatch-preference.md` 返回非零（未被忽略）。三段齐全：`## 默认段`（manager 不在时生效：红窗优先 → gap 优先于 DIR → 其余任选）/ `## 覆盖段`（manager 在时的当前倾向：本阶段 AC54–AC57 优先）/ `## 维护者字段`（维护者：manager）。
+
+**AC2（负控制，AC49 判据1 D2 归属限定——落地方产出）**：检查器 `plugin/scripts/dispatch-preference-check.ts`。三个缺段样本（各删一段）全红（exit 1），由测试 `plugin/test/dispatch-preference-check.test.mjs` 逐条断言：
+```
+delete 默认段 ⇒ exit=1 RED（missing: 默认段）
+delete 覆盖段 ⇒ exit=1 RED（missing: 覆盖段）
+delete 维护者字段 ⇒ exit=1 RED（missing: 维护者字段）
+```
+（另含「内容删空、标题留壳」样本 ⇒ RED，堵 empty-vs-absent 混淆。）
+
+**AC3（不预设路径/格式）**：路径与格式由本实现面自定（`orchestration/dispatch-preference.md` + `## 段标题` 格式）；SPEC §7 不覆盖，未被他处预设。
+
+**AC4（既有测试 + scoped 门）**：`scripts/test.sh --for-task gap-ac54-dispatch-preference-file --allow-thin` 全绿——26 tests / 26 pass / 0 fail（capability-catalog.test.mjs + dispatch-preference-check.test.mjs）；scoped static checks 全过（test-framework-policy / test-isolation / tmp-leak-pairing / dispatch-preference-check / capability-catalog / delivery-inventory-drift-gate 等）。`scripts/test.sh --static-checks-doc` 亦绿（exit 0；tick-core-drift 为既有 `--no-block` 报告，非本改动引入）。
+
+**AC55 指纹来源**：`orchestration/dispatch-preference.md` 的 git blob hash（`git hash-object orchestration/dispatch-preference.md`）——AC55 的派发记录据此指认「用的是哪一版」。

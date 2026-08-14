@@ -482,6 +482,17 @@ run_static_checks() {
   # @static-tier change
   # @static-object plugin/scripts/check-set-after-change-check.ts plugin/scripts/checker-mutation-cases/check-set-after-change-check.sh plugin/test/quay-init-loop-consumer-doc-refs.test.mjs plugin/scripts/tick-core-static-check.ts
   run_checker "check-set-after-change-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/check-set-after-change-check.ts" --root "${repo_root}"
+  echo "== dispatch-preference check (tasks/gap-ac54-dispatch-preference-file, AC54 判据1/判据2) =="
+  # The dispatch-preference file (orchestration/dispatch-preference.md) is the single git-visible
+  # source of "who inner dispatches first" (SPEC-dispatch-ordering-semantic-2026-08-13 §4.4). AC54
+  # 判据1: the file must be git-visible (NOT under the gitignored .quay/) AND carry all three
+  # sections — 默认段 / 覆盖段 / 维护者字段. AC54 判据2 (falsifiable, negative control): deleting ANY
+  # one section ⇒ this checker must go RED — pinned by plugin/test/dispatch-preference-check.test.mjs
+  # (three missing-section samples all exit 1). Blocks (exit 1) on a missing/thin section so a broken
+  # preference file can never silently leave inner dispatching by a mangled tendency.
+  # @static-tier change
+  # @static-object orchestration/dispatch-preference.md plugin/scripts/dispatch-preference-check.ts
+  run_checker "dispatch-preference-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/dispatch-preference-check.ts" --root "${repo_root}"
   # Wait for all parallelized checkers and fail closed if any failed (see the RUN_CHECKER_PARALLEL
   # note at the top of this function — AC3 failure visibility, AC4 cost-ledger completeness).
   run_checker_parallel_wait
