@@ -1,7 +1,7 @@
 ---
 id: gap-ac60-coverage-denominator-excludes-dead-prereqs
 title: AC60 通则③·覆盖率分母统一扣除"前提已死"项（防诚实标注反降覆盖率）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
