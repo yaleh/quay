@@ -226,6 +226,14 @@ export function exclusionEntries(repoRoot, pluginDir) {
         '若两个阶段后仍 hits=0，删除本条目。',
     },
     {
+      rel: 'orchestration/manager-phase-goal-archive.md',
+      target: path.join(repoRoot, 'orchestration', 'manager-phase-goal-archive.md'),
+      reason: "read-only historical archive of the pre-split manager-phase-goal — its old-path reference to orchestration/orchestrator-loop-tick.md documents the pre-move drift analysis (plugin 1309 vs orchestration 1164 lines, 954 shared) verbatim; archives are historical records, never live callers",
+      retainedNote: '2026-08-14 拆分（4025→723 行）后，archive 保留拆分前的正文，其中 :191 的旧路径引用（orchestrator-loop-tick 漂移实测）是历史记录不是活引用；' +
+        'archive 只读（AC58 形态：标注不删），AC1b 扫描不得把它当 live reference。' +
+        '若 archive 被删除（历史归档退役），本条目一并删。',
+    },
+    {
       rel: 'plugin/scripts/instrument-failure-check.ts',
       target: path.join(pluginDir, 'scripts', 'instrument-failure-check.ts'),
       reason: "the instrument's ## Contract scan surface (DEFAULT_SURFACE) intentionally includes the deployed tick-doc copies (orchestration/ + docs/analysis/) alongside the canonical plugin/loop/ copies — it scans the layout consumers actually receive, not a stale source-copy reference",
