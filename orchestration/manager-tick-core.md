@@ -64,7 +64,10 @@
   **甲=假**(in_flight 0<5 但 `promotions`=0,无可派);**丙=假**(`nyf_backlog`=0);
   **乙【前提已死,不计入覆盖率分母】**——`pool<floor` 那道门**已随 AC48 取消**(`ready-pool-check.ts:5` 逐字 CANCELLED),floor 无消费者;
   **丁【前提已死,不计入覆盖率分母】**——`integration` **分支已删**(AC48 判据2),该条恒假且不可能再真;
-  **戊【字面为真且恒真】**——`.quay/full-suite-state.json` 仍是 `state=red scope=main startedAt=2026-08-13T16:19:54Z`,
+  **戊【已修·新鲜度限定内联，2026-08-14 03:4xZ】**——判据 = `.quay/full-suite-state.json` `state=red` **且 `finishedAt` 距今 < 一个 tick 周期(17 min)**；陈旧值一律判假。
+  **（现读：`finishedAt` 距今 667.7 min ⇒ 戊=假。）** **限定必须内联在本行**：原先它写在下方「修法②」里，
+  按行读的 `instrument-failure-check` 只看到本行未限定的原文 ⇒ 恒判 FAMILY-5；**更要紧的是一个只读到本行的人会照未限定的原文执行。**
+  原缺陷记述（保留，勿删）：曾为 **【字面为真且恒真】**——`.quay/full-suite-state.json` 停在 `state=red scope=main startedAt=2026-08-13T16:19:54Z`,
   **AC4 停全局轮后该文件不再更新** ⇒ **戊 每轮都为真 ⇒ "五条全假"永不成立 ⇒ 我每轮写的行按字面都不合规。**
   **⭐ 且戊比 A14 更危险,方向相反**:A14 的输入已死使它**永不触发**(安全方向);
   **戊 恒真使它【永远触发】——而戊的强制动作是「分诊+派发」,即一个恒定的、无对象的动作要求。**
