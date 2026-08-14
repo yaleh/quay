@@ -160,6 +160,11 @@ orchestration/inner-idle-log.jsonl
 # Monitor + tick; never committed — the event IS runtime state, not provenance).
 **/.quay/slot-free-events.jsonl
 **/.quay/slot-free-last.json
+# AC62 fan-in ff-only protocol (gap-ac62-fan-in-ff-merge-lock-protocol): the merge-lock event log
+# and the ff retry-record are runtime state — written by fan-in-ff-merge.sh, read by
+# fan-in-ff-protocol-check.ts; never committed (same family as gate-events.jsonl).
+**/.quay/fan-in-merge-lock-events.jsonl
+**/.quay/fan-in-retries.jsonl
 # gap-runtime-state-files-not-gitignored (2026-08-10): 5 runtime state files fell through the
 # per-file .gitignore (there is NO `**/.quay/*` wildcard) — last-pane.txt (pane-state-classify
 # product), suite-cgroup-evidence.txt / suite-chain-heartbeat.json / suite-health-last-run.json
