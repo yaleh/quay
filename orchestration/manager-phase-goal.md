@@ -3081,6 +3081,64 @@ manager 的活是：每 tick 采样 AC20 的五条、维护 AC21-AC24 的取证�
 
       **关联**：AC73 接线落地后，**AC62 的判据2 才可能红** ⇒ **AC62 阶段 AC 的解锁条件就是本条**。
 
+- [ ] **AC76（cap 的被计量对象 = 并发 subagent；禁用 worktree 代理 —— 人 2026-08-14 07:3xZ 更正我）**
+      **人的原话**：「**cap=5 就是为了保护 subagent —— inner 不能并发无限多 subagent。worktree 只是你找的又一个间接的表征量。**」
+
+      **① 正本本来就写着，是我没读**：`slot-refill.ts:15-16` 逐字——
+      「`slots_free = max(0, effective_cap - in_flight_count)`。调用方**显式传入 CURRENTLY-RUNNING subagent set**
+      （`--in-flight`）—— the INNER tick's own maintained set」。
+      **⇒ cap 的量在正本里就是「当前在跑的 subagent 集合」。** 而我一整天用 `git worktree list | grep -c`
+      ——**它既不是正本，也不是 `:22-29` 写的 fallback（telemetry `--slot-status`），是我自己发明的第三个读法。**
+
+      **② worktree 的偏差是【双向】的，两个方向今天都实测到了**（所以它不是"保守地错"，是单纯地错）：
+      ```
+      07:2xZ   worktree 4 · 活跃 subagent 回合 2   ⇒ 高估 2（任务占树但在等 cert 槽/等 merge/红等）
+      07:4xZ   worktree 1 · 活跃 subagent 回合 2   ⇒ 低估 1（A22 晋级/诊断类 subagent 不占树）
+      ```
+      **⇒ 高估时会在 subagent 预算实际空着的时候挡住派发**——这正是我今天几次「有空槽、有 ready 的 disjoint 任务、却没派」
+      之后跑去查别处的原因：**我拿一个错的量做了判断，然后去查判断之外的东西。**
+
+      **判据1（正本点名被计量对象）**：cap 的被计量对象在正本里**写死为「inner 会话内并发运行的 subagent 数」**，
+      并**明写禁用 worktree 计数**作为它的代理。
+      **判据2（第三方可核读法）**：manager/outer 读不到 inner 的 `--in-flight` 集合 ⇒ 给出**外部可核的直接量**：
+      `<session>/subagents/agent-*.jsonl` 中**近 N 分钟有写入**的文件数。
+      **这个读法今天已被真正使用并证明可用**——它就是 AC67 判据2 那个直接量（`agentId=aab2d14d…` 对应 subagent transcript）。
+      **判据3（能取假·用真样本，不构造）**：**上面 ① 的两条实测即现成真样本**——
+      **回放它们，用 worktree 计数的判定必须与用 subagent 计数的判定不一致**（一条高估、一条低估）⇒ 报红。合 D2。
+      **判据4（报数带计法）**：三层写「在飞」时必须带计法（`在飞 subagent=M` / 若同时给 worktree 须标明是另一个量）。
+
+      **⚠️ 不覆盖**：不改 `cap=5` 这个数值（人 2026-08-09 已裁定固定 5，动态 cap 停用）；
+      不新增任何槽位系统；不改 suite 槽（那保护的是 CPU，与本条不是同一个资源）。
+
+- [ ] **AC77（subagent spawn 触顶：只检测 harness 报错，不自建计数 —— 人 2026-08-14 07:4xZ 逐字裁定）**
+      **人的原话**：「**agentLimit 的处理仅应包括检测 harness 的报错（报错后的处理暂定由人执行），而不要自己重复计数。**」
+
+      **① 现状（读实现）**：`inner-wakeup-heartbeat-check.ts:347/:353` 的判据是
+      `blocked==[] && agentDispatches >= heartbeat.agentLimit`——**一个自建计数判据**；
+      而心跳现读 **`agentLimit = undefined`**（`agentDispatches = 15`）⇒ **该判据结构上恒假，从不报。**
+      **② 但修法不是"把 agentLimit 写进去"**——那正是人禁止的「自己重复计数」，
+      **且它是 4b 的形态：用我们自己维护的计数去判断一个由 harness 掌握的预算。**
+      **③ 正确形态：检测 harness 自己的报错。** `CLAUDE.md:21` 已记识别法逐字：
+      **目标会话 transcript 里搜 `Subagent spawn limit reached`**。
+
+      **判据1（检测面）**：三层任一会话的 transcript 中出现 `Subagent spawn limit reached` ⇒ **报**（写进 tick-log 升级列）。
+      **判据2（退役自建计数）**：`agentDispatches >= agentLimit` 这个判据**退役**，
+      **并按 AC58「退役即迁出」把它的理由与历史迁进 archive**——**不是留着不修**
+      （留着 = 一个恒假的判据，与「一切正常」同形，硬规则 3b）。
+      **判据3（不自动处置）**：**检测到只报不动**——人逐字「报错后的处理暂定由人执行」。
+      **⇒ 明确不做**：不自动 `/clear`、不自动降 cap、不自动重启会话。
+      **判据4（能取假）**：**回放一条含该串的真实 transcript 必须报红**；
+      **若历史中尚无该串，则本判据【记为未验证】而不是勾**（硬规则 3b：「没有真样本」不得与「验证通过」同形）。
+
+      **⚠️ 不覆盖**：不估计上限数值（CLAUDE.md 明写「数值随 Claude Code 版本变，正本在
+      `tasks/gap-inner-subagent-budget-invisible.md`」）；不区分两个易混旋钮（会话累计 vs 并发）——
+      **本条只管累计触顶的检测，并发那一半是 AC76。**
+
+      **⭐ 与 AC76 的关系（必须写明，否则会被合并处理）**：**这是两个不同的稀缺资源**——
+      `AC76 = 并发 subagent 数（cap=5 管它）`；`AC77 = 会话累计 spawn（harness 管它，触顶后静默降级为主线程串行）`。
+      **后者触顶的表现与「inner 主线程在跑 fan-in」在现象上一模一样**，正是今天我几次差点误诊的形状
+      （CLAUDE.md:21 逐字：「三层 + 人共花数小时反复误诊为『outer 不派发』『inner 自锁』『唤醒链断』，全错」）。
+
 **本阶段【不新建】过程纪律型 AC**：负控制/隔离自证沿用**既有的 AC49**，**不另起编号**
 ——同一义务两个编号就是硬规则⑧ 的变体（编号复用把缺席伪装成在场），
 且人已明确担心「搞出无尽的新任务新条件」。
