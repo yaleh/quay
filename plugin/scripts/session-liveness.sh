@@ -277,8 +277,9 @@ SATURATION_TOKENS=${SATURATION_TOKENS:-450000}
 # 非字面量 30（manager 2026-08-13 裁定：「T 用现有配置或读宿主，不写字面量 30」）。语义：目标
 # workspace 的 develop 分支最后一次提交距今 ≥ 此分钟数 = 该层静默。默认 10（> 实测非静默的 1 分钟，
 # < OVERDUE_MIN=30 的「可能已死」），跨机可用按机型调。
-# 复合判据全量（gap-session-disabled-fires-when-busy 起为四元）：饱和 && develop 静默 ≥T && 在飞
-# worktree 集合无变化 && 在飞 worktree 无活进程（忙时必假直接量，见 _sl_worktree_idle）。
+# 复合判据全量（gap-idle-watch-session-disabled-false-positive-long-tasks 起为五元）：饱和 && develop
+# 静默 ≥T && 在飞 worktree 集合无变化 && 在飞 worktree 无活进程（忙时必假直接量，见 _sl_worktree_idle）
+# && 会话自身心跳 ≥T 未动（推进量合取项，长任务时必假——见 _sl_heartbeat_stale）。
 SATURATION_SILENCE_MIN=${SATURATION_SILENCE_MIN:-10}
 # 候选 B（gap-permission-prompt-vs-dismissable-prompt-classifier AC4，2026-08-08）：
 # permission-prompt 持续 ≥PERM_PROMPT_WARN_ROUNDS 轮且 transcript 最近 PERM_PROMPT_TX_WINDOW 秒未写入
@@ -572,12 +573,28 @@ _sl_worktree_idle() {
   echo 1
 }
 
-# _sl_sat_disabled_verdict —— 复合判定（纯函数）：四条件全满足 ⇒ emit，否则 hold。
+# _sl_heartbeat_stale —— 推进量合取项（AC1/判据1，gap-idle-watch-session-disabled-false-positive-long-tasks）。
+# 「失能」与「长任务」的真正区别 = 有没有推进；推进量的最可靠直接量 = 会话自己的心跳最后写入时刻
+# （候选 C：inner 心跳持续自驱）。心跳 = 该目标生效的 transcript + subagents 目录最大 mtime
+# （heartbeat_mtime 已并上——长 suite 由 subagent 驱动时写的是 <会话>/subagents/，仍在推进）。
+# 心跳在 T = SATURATION_SILENCE_MIN 分钟内被写过（age < T）⇒ 会话在推进 ⇒ 返回 0（block，合取项取假）；
+# 心跳 ≥ T 未动 ⇒ 返回 1（stale/pass，失能放行）。无心跳/不可读 ⇒ 无法证明推进 ⇒ 视为陈旧（pass，
+# 不挡发射——与 _sl_develop_silent 的「无法证明在动 ⇒ 静默」同源，不引入新的恒真项）。
+_sl_heartbeat_stale() {
+  local hb=$1 m now
+  m=$(heartbeat_mtime "$hb")
+  if [ "$m" = "0" ] || [ -z "$m" ]; then echo 1; return 0; fi
+  now=$(date +%s)
+  if [ "$(( now - m ))" -ge "$(( SATURATION_SILENCE_MIN * 60 ))" ]; then echo 1; else echo 0; fi
+}
+
+# _sl_sat_disabled_verdict —— 复合判定（纯函数）：五条件全满足 ⇒ emit，否则 hold。
 # $1 = sat（$_sl_tx_sat，分类器 transcriptContextSaturation 输出）；
 # $2 = dev_silent（_sl_develop_silent：0|1）；$3 = wt_unchanged（0|1，在飞集合连续两轮无变化）；
-# $4 = wt_idle（0|1，_sl_worktree_idle：在飞链接 worktree 无活进程=1 / 忙=0，忙时必假直接量）。
+# $4 = wt_idle（0|1，_sl_worktree_idle：在飞链接 worktree 无活进程=1 / 忙=0，忙时必假直接量）；
+# $5 = hb_stale（_sl_heartbeat_stale：会话自身心跳 ≥T 未动=1 / 新鲜=0——推进量合取项，长任务时必假）。
 _sl_sat_disabled_verdict() {
-  if [ "$1" = "saturated" ] && [ "$2" = "1" ] && [ "$3" = "1" ] && [ "$4" = "1" ]; then
+  if [ "$1" = "saturated" ] && [ "$2" = "1" ] && [ "$3" = "1" ] && [ "$4" = "1" ] && [ "$5" = "1" ]; then
     echo emit
   else
     echo hold
@@ -860,7 +877,7 @@ case "${1:-}" in
     echo "SESSION-IDLE-CANT-SEND — 空闲且发不出请求"
     echo "REPO-STALL — 仓库信号（非会话面）"
     echo "SESSION-STATUS — --once 接缝状态行"
-    echo "SESSION-DISABLED — 会话已失能（disabled：饱和(saturated)&& develop 静默 ≥SATURATION_SILENCE_MIN && 在飞 worktree 集合无变化 && 在飞 worktree 无活进程）"
+    echo "SESSION-DISABLED — 会话已失能（disabled：饱和(saturated)&& develop 静默 ≥SATURATION_SILENCE_MIN && 在飞 worktree 集合无变化 && 在飞 worktree 无活进程 && 会话心跳 ≥SATURATION_SILENCE_MIN 未动（推进量））"
     echo "SESSION-INTERVENTION-REQUIRED — 需要人/上层介入（permission-prompt 卡权限框，非 busy，单列可检测）"
     exit 0 ;;
   --saturation)
@@ -1678,19 +1695,26 @@ while true; do
 
       # 事件 6：SESSION-DISABLED（阶段四，gap-session-saturated-composite-condition-emitter，2026-08-13）——
       # 复合条件发射端（选 A，manager 2026-08-13）：把 manager 的「三条件逐条判」搬进发射端，事件名
-      # 与实际断言一致（「失能」而非仅「饱和」）。四条件全满足才发（gap-session-disabled-fires-when-busy
+      # 与实际断言一致（「失能」而非仅「饱和」）。五条件全满足才发（gap-session-disabled-fires-when-busy
       # 2026-08-14 起加第④条忙时必假直接量——原三合取的最忙时误报：develop 静默与集合无变化在多任务
-      # 实现中同时翻真，只有第④条把「忙」与「失能」分开）：
+      # 实现中同时翻真，只有第④条把「忙」与「失能」分开；gap-idle-watch-session-disabled-false-positive-
+      # long-tasks 2026-08-14 起加第⑤条推进量——原四元在【任何长任务】期间同真：cache_read 单调恒真、
+      # develop 必然静默、worktree 集合必然不变、活进程也不总能被 /proc/cwd 看到（主 checkout 恒排除），
+      # 四项无一项测「有没有推进」，只有第⑤条把「长任务在推进」与「失能没推进」分开）：
       #   ① 饱和（现有：最近 assistant 消息 usage.cache_read_input_tokens ≥ SATURATION_TOKENS
       #      且最后一条是未获回应的 user 输入——结构化源，非屏幕百分比，AC3；分类器判定来自本轮
       #      _sl_transcript_batch 的 _sl_tx_sat）；
       #   ② 该层 develop 提交静默 ≥ SATURATION_SILENCE_MIN（T 可配，非字面量 30）；
       #   ③ 在飞 worktree 集合无变化（集合差手法，不用时间戳；首轮无基线 ⇒ 判「有变化」，不误发）；
       #   ④ 在飞【链接】worktree 无活进程（_sl_worktree_idle：/proc/<pid>/cwd 解析，忙时必假——有活
-      #      进程在 worktree 内 = 多任务实现中 = 该条取假，不报 DISABLED）。
-      # 饱和不是故障（auto-compact 是正常机制）；只有「饱和且静默且冻结且无活进程」的失能形态才报（AC4
-      # 不关事件，真饱和到失能仍报）。区别于普通「忙」（AC2）：busy 会话若还在应答（最后一条是
-      # assistant）不报 saturated；busy 会话若在飞 worktree 里有活进程，第④条直接取假。
+      #      进程在 worktree 内 = 多任务实现中 = 该条取假，不报 DISABLED）；
+      #   ⑤ 会话自身心跳 ≥ T 未动（_sl_heartbeat_stale：推进量合取项——心跳在 T 内被写过 = 会话在推进
+      #      = 该条取假，长任务不误报；心跳 ≥T 未动 = 真停摆 = 放行。心跳源 = transcript + subagents，
+      #      长 suite 由 subagent 驱动时写的是 <会话>/subagents/，仍在推进）。
+      # 饱和不是故障（auto-compact 是正常机制）；只有「饱和且静默且冻结且无活进程且无推进」的失能形态
+      # 才报（AC4 不关事件，真饱和到失能仍报）。区别于普通「忙」（AC2）：busy 会话若还在应答（最后一条
+      # 是 assistant）不报 saturated；busy 会话若在飞 worktree 里有活进程，第④条直接取假；长任务若还在
+      # 自驱写心跳，第⑤条直接取假。
       # 仅配置了 transcript（SESSION_TRANSCRIPTS）的目标适用——tick 日志不是会话证据。
       # 边沿触发（PREV_SATURATED 承担；按【复合判定】置位，非按裸饱和——复合首次为真才发一次）。
       if [ -n "$tr_path" ] && [ -r "$tr_path" ]; then
@@ -1706,10 +1730,11 @@ while true; do
           PREV_WT_SET[$name]=$wt_set
           PREV_WT_KNOWN[$name]=1
           wt_idle=$(_sl_worktree_idle "$root")   # 忙时必假直接量（AC1/判据1，gap-session-disabled-fires-when-busy）
-          verdict=$(_sl_sat_disabled_verdict "$sat" "$dev_silent" "$wt_unchanged" "$wt_idle")
+          hb_stale=$(_sl_heartbeat_stale "$tr_path")   # 推进量合取项（AC1/判据1，长任务时必假——心跳在 T 内被写过）
+          verdict=$(_sl_sat_disabled_verdict "$sat" "$dev_silent" "$wt_unchanged" "$wt_idle" "$hb_stale")
           if [ "$verdict" = "emit" ]; then
             if [ "${PREV_SATURATED[$name]:-0}" = "0" ]; then
-              sl_emit "SESSION-DISABLED $name 的会话已失能（disabled：cache_read_input_tokens ≥ ${SATURATION_TOKENS} && develop 静默 ≥ ${SATURATION_SILENCE_MIN}min && 在飞 worktree 集合无变化 && 在飞 worktree 无活进程（忙时必假））——活着但收不进新指令且无推进；区别于普通「忙」（AC2）"
+              sl_emit "SESSION-DISABLED $name 的会话已失能（disabled：cache_read_input_tokens ≥ ${SATURATION_TOKENS} && develop 静默 ≥ ${SATURATION_SILENCE_MIN}min && 在飞 worktree 集合无变化 && 在飞 worktree 无活进程 && 会话心跳 ≥ ${SATURATION_SILENCE_MIN}min 未动（推进量，长任务时必假））——活着但收不进新指令且无推进；区别于普通「忙」（AC2）"
             fi
             PREV_SATURATED[$name]=1
           else

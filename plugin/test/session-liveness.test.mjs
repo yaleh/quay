@@ -14,6 +14,11 @@
 //   && ④ 在飞【链接】worktree 无活进程（忙时必假直接量，gap-session-disabled-fires-when-busy
 //        2026-08-14：原三合取在最忙时误报——develop 静默与集合无变化在多任务实现中同时翻真，
 //        第④条用 /proc/<pid>/cwd 把「忙」（worktree 有活进程 ⇒ 取假）与「失能」（无活进程）分开）
+//   && ⑤ 会话自身心跳 ≥ T 未动（推进量合取项，gap-idle-watch-session-disabled-false-positive-
+//        long-tasks 2026-08-14：原四元在【任何长任务】期间同真——cache_read 单调恒真、develop
+//        必然静默、worktree 集合必然不变、活进程也不总能被 /proc/cwd 看到，无一项测「有没有推进」；
+//        第⑤条用心跳最后写入时刻把「长任务在推进」（心跳在 T 内被写过 ⇒ 取假）与「失能没推进」
+//        （心跳 ≥T 未动）分开）
 //
 // Coverage map (task ACs):
 //   AC1 — emit only when all four hold (all-four fires; unsaturated doesn't)
@@ -28,6 +33,8 @@
 //   AC5 — existing tests stay green (the rename ripple in session-liveness-signals-kinds.test.mjs
 //         tracks the spec-mandated SESSION-SATURATED → SESSION-DISABLED); scoped gate green
 //   新④ — 忙时必假合取项能取假（AC1/判据2）：worktree 有活进程 ⇒ 不报；活进程消失（真失能）⇒ 报
+//   新⑤ — 推进量合取项能取假（AC1/判据2/判据3，gap-idle-watch-session-disabled-false-positive-long-tasks）：
+//         心跳新鲜（长任务推进中）⇒ 不报 DISABLED；心跳变陈旧（真失能）⇒ 仍报
 //
 // SPLIT CONCURRENCY SAFETY: this file runs as its OWN node process at cc=3. It owns the /tmp prefix
 // "session-liveness-scd-" (setProbeTmpPrefix) and the after() sweeps ONLY it (+ ol-prod-), so this
@@ -91,11 +98,15 @@ function removeWorktrees(repoDir, wtDirs) {
 }
 
 // A transcript fixture that the classifier reads as `saturated` (high cache_read + unanswered user
-// input), same shape as the existing stage-4 fixtures. backdate 1 min so FRESH_SECS' MARKER-STALE
-// cross-positive-control does not fire (that is an unrelated existing event).
+// input), same shape as the existing stage-4 fixtures. backdate ≥ SATURATION_SILENCE_MIN minutes so
+// the SESSION-DISABLED composite's ⑤ 推进量合取项 (gap-idle-watch-session-disabled-false-positive-
+// long-tasks: 会话心跳 ≥T 未动) is TRUE — this fixture models a session that has STOPPED writing its
+// heartbeat (genuinely disabled), not a long task still self-driving. 20 > default T=10, and the
+// classifier reads record CONTENT (isoAgo timestamps), not file mtime, so saturation is unaffected;
+// FRESH_SECS' MARKER-STALE cross-positive-control (mtime > 15s) stays suppressed.
 function saturatedTranscript(p, name) {
   const f = path.join(p.tmp, `${name}.jsonl`);
-  writeTranscript(f, [assistantUsageRecord(isoAgo(0.1), 600000), userInputRecord(isoAgo(0.05))], 1);
+  writeTranscript(f, [assistantUsageRecord(isoAgo(0.1), 600000), userInputRecord(isoAgo(0.05))], 20);
   return f;
 }
 
@@ -324,6 +335,45 @@ test("AC3 负控制 — 多任务实现中不报 (manager 12:16Z: 5 worktrees �
       live.kill("SIGKILL");
       mon.child.kill("SIGKILL"); mon.cleanup();
       removeWorktrees(repo, wts);
+    }
+  } finally {
+    p.cleanup();
+  }
+});
+
+// ── 新⑤ 推进量合取项（gap-idle-watch-session-disabled-false-positive-long-tasks，AC1/判据2/判据3）────
+// 失能与长任务的真正区别 = 有没有推进。⑤ 直接量 = 会话自身心跳（transcript+subagents）最后写入时刻：
+// 心跳在 T 分钟内被写过 ⇒ 会话在推进 ⇒ ⑤ 取假 ⇒ 不报 DISABLED（长任务不误报，判据2）；心跳 ≥ T 未动
+// ⇒ 真停摆 ⇒ ⑤ 取真 ⇒ 仍报（真失能保留，判据3）。本测试证明 ⑤【能取假】：同一稳定场景（饱和 + develop
+// 静默 + 在飞集合无变化 + 无 worktree 活进程）下，心跳新鲜（长 suite 期间会话持续自驱写心跳）⇒ 不报；
+// 心跳变陈旧（会话真停摆）⇒ 报。没有该合取项时这个场景本来就该报（旧四元 ①-④ 全真）——「不报」只能
+// 归因于 ⑤ 取假（硬规则 4：恒真合取项贡献零；manager 21:2xZ 现场：phase-boundary 全量 suite 在跑而
+// SESSION-DISABLED 误报——三合取/四元无一项测「有没有推进」）。
+
+test("新⑤ 能取假 — 心跳新鲜（长任务推进中）⇒ 不报 DISABLED；心跳变陈旧（真失能）⇒ 仍报 (progress conjunct can take false)", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  const p = makeHermeticProbe("ol-scd-h");
+  const repo = path.join(p.tmp, "repo");
+  try {
+    makeRepoWithDevelop(repo, { backdateMin: 60 });   // develop silent ≥ T=5
+    const satX = path.join(p.tmp, "sat.jsonl");
+    // 饱和 fixture，但文件 mtime 只回拨 1 分钟（< T=5）⇒ 心跳【新鲜】= 会话在推进（长任务形态）。
+    // 分类器读记录内容（isoAgo 时间戳），不读文件 mtime，所以饱和判定不受回拨影响。
+    writeTranscript(satX, [assistantUsageRecord(isoAgo(0.1), 600000), userInputRecord(isoAgo(0.05))], 1);
+    assert.ok(await waitForAlive(p.env, p.session), "probe must be alive");
+    const mon = spawnMonitor({ ...p.env, SATURATION_SILENCE_MIN: "5" },
+      `scd-h ${repo} ${p.session}`, { transcripts: `scd-h ${satX}` });
+    try {
+      // 长任务阶段：旧四元（①-④）全真，只有 ⑤ 因心跳新鲜而取假 ⇒ 不报 DISABLED。
+      assert.ok(await waitForRounds(mon, 4, HANG_GUARD_MS),
+        `monitor must complete long-task rounds:\n${mon.output()}`);
+      assert.ok(!/SESSION-DISABLED scd-h/.test(mon.output()),
+        `long task with FRESH heartbeat (session self-driving) MUST NOT emit SESSION-DISABLED — ⑤ is false:\n${mon.output()}`);
+      // 真失能阶段：心跳变陈旧 ≥ T ⇒ ⑤ 翻真 ⇒ 复合判据发射（判据3：真失能仍报）。
+      spawnSync("touch", ["-d", "10 minutes ago", satX], { encoding: "utf8" });
+      assert.ok(await waitForOutput(mon, /SESSION-DISABLED scd-h/, 10000),
+        `after the heartbeat goes stale (session genuinely stopped writing) the disabled composite MUST emit — ⑤ can take true:\n${mon.output()}`);
+    } finally {
+      mon.child.kill("SIGKILL"); mon.cleanup();
     }
   } finally {
     p.cleanup();

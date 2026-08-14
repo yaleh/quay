@@ -65,21 +65,25 @@ C：inner 心跳的最后写入时刻（持续自驱，可靠推进信号）
 
 ## Acceptance Criteria
 
-- [ ] AC1 判据1：SESSION-DISABLED 判据加【推进量】合取项（能取假——长任务期间有进程/心跳/提交推进）。
-- [ ] AC2 判据2 能取假：长任务（phase-boundary suite 在跑）不误报 DISABLED（现误报）。
-- [ ] AC3 判据3：真失能仍报 SESSION-DISABLED（不吞真阳性）。
-- [ ] AC4 既有测试全绿；`--for-task` scoped 门绿。
+- [x] AC1 判据1：SESSION-DISABLED 判据加【推进量】合取项（能取假——长任务期间有进程/心跳/提交推进）。
+- [x] AC2 判据2 能取假：长任务（phase-boundary suite 在跑）不误报 DISABLED（现误报）。
+- [x] AC3 判据3：真失能仍报 SESSION-DISABLED（不吞真阳性）。
+- [x] AC4 既有测试全绿；`--for-task` scoped 门绿。
 
 ## Definition of Done
 
-- [ ] idle-watch SESSION-DISABLED 加推进量判据（长任务不误报）+ 真失能仍报 + 测试绿。
+- [x] idle-watch SESSION-DISABLED 加推进量判据（长任务不误报）+ 真失能仍报 + 测试绿。
 
 ## Touches
 
-- plugin/scripts/（idle-watch 的 SESSION-DISABLED 判据实现——加推进量合取项）
-- plugin/test/（补测：长任务不误报 DISABLED / 真失能仍报）
+- plugin/scripts/session-liveness.sh（SESSION-DISABLED 判据实现——加第⑤条推进量合取项 `_sl_heartbeat_stale`，复合判定 `_sl_sat_disabled_verdict` 五元化）
+- plugin/test/session-liveness.test.mjs（补测 scd-h：长任务心跳新鲜不误报 DISABLED / 真失能心跳陈旧仍报；既有 scd-* 的 saturatedTranscript 心跳回拨 ≥T 建模真失能形态）
+- plugin/test/session-liveness-signals-kinds.test.mjs（承重条饱和 fixture 心跳回拨 ≥T，配合 ⑤）
 - tasks/gap-idle-watch-session-disabled-false-positive-long-tasks.md（自身）
 
 ## Evidence
 
-（落地后回填——manager 2026-08-14 21:2xZ：SESSION-DISABLED 假阳性，三合取无推进量；cache_read 单调恒真退化判别力；真样本=phase-boundary 长 suite 在跑）
+- **判据1（推进量合取项，选候选 C）**：`_sl_heartbeat_stale`（`plugin/scripts/session-liveness.sh`）——会话自身心跳（生效 transcript + `<会话>/subagents/` 最大 mtime，`heartbeat_mtime` 已并上）最后写入时刻 ≥ T = `SATURATION_SILENCE_MIN` 未动才放行（返回 1）；心跳在 T 内被写过 ⇒ 会话在推进 ⇒ 返回 0（合取项取假，长任务不误报）。**不设新 N 阈值**：复用既有 `SATURATION_SILENCE_MIN`（同一「该层已静默 ≥ T」语义），与候选 B（git mtime，长 suite 合法无提交 ⇒ 弱）不同——心跳由 inner 持续自驱（候选 C 的直接量），长 suite 由 subagent 驱动时写的是 `<会话>/subagents/`，仍在推进。`_sl_sat_disabled_verdict` 四元 → 五元。
+- **判据2（长任务不误报，能取假）**：新测试 scd-h（`plugin/test/session-liveness.test.mjs`）——饱和 + develop 静默 + 在飞集合无变化 + 无 worktree 活进程下，心跳新鲜（长 suite 推进中）⇒ **不报** SESSION-DISABLED；旧四元（①-④）此场景全真，故「不报」只能归因于 ⑤ 取假（硬规则 4：恒真合取项贡献零）。回放 manager 21:2xZ 现场形态：phase-boundary 全量 suite 在跑而 DISABLED 误报，根因 = 原判据无一项测「有没有推进」（cache_read 单调恒真、develop 长任务必然静默、worktree 集合必然不变、活进程也不总能被 /proc/cwd 看到——主 checkout 恒排除）。
+- **判据3（真失能仍报，不吞真阳性）**：scd-h 后半 + 既有 scd-a/scd-e1/scd-g——心跳变陈旧（会话真停摆，≥ T 未写）⇒ ⑤ 翻真 ⇒ **仍报** SESSION-DISABLED。既有 `saturatedTranscript`（`session-liveness.test.mjs`）与 signals-kinds 承重条饱和 fixture（`plugin/test/session-liveness-signals-kinds.test.mjs`）心跳回拨 ≥T（20min）建模「已停摆」的饱和会话——分类器读记录内容不读文件 mtime，饱和判定不受回拨影响。
+- **判据4（测试绿）**：`bash scripts/test.sh --for-task gap-idle-watch-session-disabled-false-positive-long-tasks --allow-thin` **exit 0**；22/22 测试 pass（session-liveness-signals-kinds 14 + session-liveness 8，含新 scd-h）；静态检查全部 PASS。

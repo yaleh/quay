@@ -351,9 +351,11 @@ test("阶段四 AC2（承重条）— 饱和会话与普通忙会话产出不同
   const satX = path.join(p.tmp, "saturated.jsonl");
   const busyX = path.join(p.tmp, "busy.jsonl");
   try {
-    // 饱和 fixture：高上下文 + 最后一条未应答 user 输入。回拨 1 分钟 mtime 使 FRESH_SECS 的
-    // MARKER-STALE 交叉正控制不触发（那是一个既有事件，与本测试无关）。
-    writeTranscript(satX, [assistantUsageRecord(isoAgo(0.1), 600000), userInputRecord(isoAgo(0.05))], 1);
+    // 饱和 fixture：高上下文 + 最后一条未应答 user 输入。回拨 ≥SATURATION_SILENCE_MIN 分钟 mtime
+    // 使 SESSION-DISABLED 复合判据的 ⑤ 推进量合取项（会话心跳 ≥T 未动，gap-idle-watch-session-disabled-
+    // false-positive-long-tasks）为真——本 fixture 模拟「已停摆」的饱和会话；同时 FRESH_SECS 的
+    // MARKER-STALE 交叉正控制不触发（那是一个既有事件，与本测试无关）。分类器读记录内容不读文件 mtime。
+    writeTranscript(satX, [assistantUsageRecord(isoAgo(0.1), 600000), userInputRecord(isoAgo(0.05))], 20);
     // 普通忙 fixture：低上下文 + 挂起 tool_use（回合进行中=忙），与饱和会话在「忙」维度同形。
     writeTranscript(busyX, [assistantToolUseRecord(isoAgo(0.1))], 1);
     assert.ok(await waitForAlive(p.env, p.session), "probe must be alive");
