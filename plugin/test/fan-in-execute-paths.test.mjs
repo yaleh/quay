@@ -23,6 +23,11 @@
 //       task files: AC 未全勾（gap-ac72 形态真样本）⇒ exit 2 + FATAL + 不翻 done; AC/DoD 段缺失 ⇒
 //       exit 2 NOT-EVALUATED + 不翻 done（无法评估 ≠ 合格）; 剩余未勾均为（待外部）⇒ 翻 done; ③ 行形
 //       检查与 AC 闸并列（两检查都过才翻，AC 闸在行形检查之后、sed 之前）。
+//   ⑤ anti-drift-touches 守卫 (gap-anti-drift-touches-zero-coverage-fast-mode) — run the REAL step-1
+//       anti-drift block from the emitted prompt against a real temp git repo (task worktree after the
+//       step-1 merge): a task whose ACTUAL diff touches a file OUTSIDE its declared ## Touches ⇒ the
+//       block HARD-FAILs (exit 2 + FATAL + ANTI-DRIFT HARD FAIL — the AC2 负控制: 现真值=不会, 修复后应红);
+//       a task whose actual diff is fully within its declared Touches ⇒ the block stays green (AC3).
 //
 // Run:
 //   scripts/test.sh plugin/test/fan-in-execute-paths.test.mjs
@@ -37,6 +42,7 @@ import path from "node:path";
 import vm from "node:vm";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import { buildTaskManifest, checkTaskAntiDrift } from "../scripts/anti-drift-touches-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
@@ -444,4 +450,105 @@ test("④ AC 完成闸与承重点③ 行形检查并列 — 两检查都过才�
   assert.ok(flip.includes("flip_count=$(grep -c '^status: ready$'"), "flip block must still run the ③ line-shape pre-check");
   assert.ok(flip.indexOf("fan-in-ac-completion-gate.ts") > flip.indexOf("flip_count="), "AC gate must come AFTER the line-shape pre-check");
   assert.ok(flip.indexOf("fan-in-ac-completion-gate.ts") < flip.indexOf("sed -i"), "AC gate must come BEFORE the sed flip");
+});
+
+// ── ⑤ anti-drift-touches 守卫（gap-anti-drift-touches-zero-coverage-fast-mode, REAL git + REAL prompt）──
+
+/** A real temp git repo replaying the fan-in workflow's step-1 post-merge state: develop holds a
+ *  doc-only commit, the task worktree (`main`) holds the task file + the task's changed files, and
+ *  develop has been MERGED in (so `git diff --name-only develop...HEAD` = exactly the files the
+ *  fan-in would land — develop's own doc change excluded). The REAL `plugin/` tree is symlinked in
+ *  AFTER the final commit/merge so it is never part of the git diff. */
+function makeAntiDriftRepo({ taskId, body, files }) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fan-in-antidrift-"));
+  const run = (args) => {
+    const r = spawnSync("git", args, { cwd: dir, encoding: "utf8" });
+    if (r.status !== 0) throw new Error(`git ${args.join(" ")} failed (${r.status}): ${r.stderr}`);
+  };
+  run(["init", "-q", "-b", "main"]);
+  run(["config", "user.email", "test@test"]);
+  run(["config", "user.name", "test"]);
+  fs.writeFileSync(path.join(dir, "README.md"), "base\n");
+  run(["add", "README.md"]);
+  run(["commit", "-qm", "base"]);
+  run(["checkout", "-q", "-b", "develop"]);
+  fs.mkdirSync(path.join(dir, "docs"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "docs", "note.md"), "dev\n");
+  run(["add", "docs/note.md"]);
+  run(["commit", "-qm", "develop-doc"]);
+  run(["checkout", "-q", "main"]);
+  fs.mkdirSync(path.join(dir, "tasks"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "tasks", `${taskId}.md`), body, "utf8");
+  for (const [p, content] of Object.entries(files)) {
+    const full = path.join(dir, p);
+    fs.mkdirSync(path.dirname(full), { recursive: true });
+    fs.writeFileSync(full, content, "utf8");
+  }
+  run(["add", "-A"]);
+  run(["commit", "-qm", "task-changes"]);
+  run(["merge", "-q", "develop", "-m", "merge-develop"]);
+  return dir;
+}
+
+async function antiDriftBlockFor(task, worktree) {
+  const { prompt } = await runWorkflow({
+    args: { task, worktree, root: REPO_ROOT, runId: "fm-ad", mergeTarget: "develop" },
+  });
+  return extractBlock(prompt, "# anti-drift-block-start", "# anti-drift-block-end");
+}
+
+test("⑤ wiring — step 1 runs anti-drift-touches-check with the actual diff after the merge", async (t) => {
+  const { prompt } = await runWorkflow({
+    args: { task: "gap-test-ad-wire", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-ad-wire", mergeTarget: "develop" },
+  });
+  const step1 = extractBlock(prompt, "【无锁段 step 1", "【无锁段 step 2");
+  assert.ok(step1.includes("# anti-drift-block-start"), "anti-drift check must run inside step 1 (after the merge)");
+  assert.ok(step1.includes("anti-drift-touches-check.ts --task"), "prompt must invoke the anti-drift driver");
+  assert.ok(step1.includes("--merge-target develop"), "driver must receive the merge target");
+});
+
+test("⑤ driver unit — buildTaskManifest extracts declared Touches as globs (ONE touches-parser)", () => {
+  const body = "---\nid: x\n---\n## Touches\n- tasks/x.md\n- plugin/test/**\n";
+  const builds = buildTaskManifest(body, ["tasks/x.md", "plugin/test/a.test.mjs"]);
+  assert.equal(builds.length, 1);
+  assert.deepEqual(builds[0].declaredGlobs, ["tasks/x.md", "plugin/test/**"]);
+  assert.deepEqual(builds[0].actualFiles, ["tasks/x.md", "plugin/test/a.test.mjs"]);
+});
+
+test("⑤ driver unit — a legitimately scoped task build is OK; a stray write is HARD-FAIL (judgment unchanged)", () => {
+  const ok = checkTaskAntiDrift("## Touches\n- pkg/a/**\n", ["pkg/a/x.js", "pkg/a/y.js"]);
+  assert.equal(ok.ok, true, "actual ⊆ declared must be clean");
+  const stray = checkTaskAntiDrift("## Touches\n- pkg/a/**\n", ["pkg/a/x.js", "pkg/OTHER/stray.js"]);
+  assert.equal(stray.ok, false, "out-of-declared write must be a violation");
+  assert.ok(stray.violations.find((v) => v.type === "out-of-declared" && v.file === "pkg/OTHER/stray.js"));
+});
+
+test("⑤ REAL negative control — a task whose ACTUAL diff touches a file OUTSIDE its declared Touches ⇒ HARD-FAIL (AC2)", async (t) => {
+  const repo = makeAntiDriftRepo({
+    taskId: "gap-test-ad",
+    body: "---\nid: gap-test-ad\nstatus: ready\n---\n## Touches\n- tasks/gap-test-ad.md\n- pkg/a/**\n",
+    files: { "pkg/a/x.js": "x\n", "pkg/OTHER/stray.js": "stray\n" },
+  });
+  t.after(() => cleanup(repo));
+  fs.symlinkSync(path.join(REPO_ROOT, "plugin"), path.join(repo, "plugin"), "dir");
+  const block = await antiDriftBlockFor("gap-test-ad", repo);
+  const r = runBash(block, { cwd: repo });
+  assert.notEqual(r.status, 0, `out-of-scope touch must HARD-FAIL (exit non-zero), got ${r.status}`);
+  assert.match(r.stdout, /ANTI-DRIFT HARD FAIL/, "driver must print ANTI-DRIFT HARD FAIL");
+  assert.match(r.stdout, /pkg\/OTHER\/stray\.js/, "the out-of-declared file must be named");
+  assert.match(r.stderr, /FATAL/, "the block must FATAL on the guardrail bite");
+});
+
+test("⑤ REAL positive — a task whose ACTUAL diff is fully within its declared Touches ⇒ stays green (AC3)", async (t) => {
+  const repo = makeAntiDriftRepo({
+    taskId: "gap-test-ad-ok",
+    body: "---\nid: gap-test-ad-ok\nstatus: ready\n---\n## Touches\n- tasks/gap-test-ad-ok.md\n- pkg/a/**\n",
+    files: { "pkg/a/x.js": "x\n", "pkg/a/y.js": "y\n" },
+  });
+  t.after(() => cleanup(repo));
+  fs.symlinkSync(path.join(REPO_ROOT, "plugin"), path.join(repo, "plugin"), "dir");
+  const block = await antiDriftBlockFor("gap-test-ad-ok", repo);
+  const r = runBash(block, { cwd: repo });
+  assert.equal(r.status, 0, `legitimate scoped change must stay green, got ${r.status}: ${r.stderr}`);
+  assert.match(r.stdout, /ANTI-DRIFT OK/, "driver must print ANTI-DRIFT OK");
 });

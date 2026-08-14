@@ -61,6 +61,16 @@ const result = await agent(
 【无锁段 step 1 — merge develop】
 cd ${worktree} && git merge ${mergeTarget}
 —— 冲突【只可能在这】出现：慢慢解，不占任何人（AC75：必须 merge 不得 rebase）。解完 git add + git commit。
+# anti-drift-block-start
+# anti-drift-touches 守卫（gap-anti-drift-touches-zero-coverage-fast-mode）：merge 后立即用【实际 diff】
+# （git diff --name-only ${mergeTarget}...HEAD = fan-in 将要 land 的文件）对照声明 Touches 做事后核对。
+# 越界触碰 / 声明过宽 ⇒ HARD FAIL（非建议）；判定逻辑在 anti-drift-touches-check.ts（本步即其 driver
+# 输入面：--task --worktree --merge-target），不改判定逻辑，只喂实际 diff + 声明 Touches。
+if ! node --experimental-strip-types plugin/scripts/anti-drift-touches-check.ts --task ${task} --worktree ${worktree} --merge-target ${mergeTarget}; then
+  echo "FATAL: anti-drift-touches HARD FAIL——实际触碰超出声明 Touches（或声明过宽）⇒ 不翻 done、不 ff；不得改 Touches 绕过守卫" >&2
+  exit 2
+fi
+# anti-drift-block-end
 
 【无锁段 step 2 — delta 断言面判定（AC75）】
 fork=$(git -C ${worktree} merge-base ${mergeTarget} HEAD)

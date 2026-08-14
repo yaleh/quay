@@ -54,22 +54,39 @@ fan-in-execute.js 唯一的 actual-diff 读数是 :65 `git diff --name-only`（�
 
 ## Acceptance Criteria
 
-- [ ] AC1 判据1：fan-in 路径存在一处 anti-drift-touches-check 调用（实际触碰 vs 声明 Touches）。
-- [ ] AC2 判据2 能取假：故意写到 Touches 之外 ⇒ fan-in HARD-FAIL（现真值=不会）。
-- [ ] AC3 判据3：合法收窄（实际 ⊆ 声明）不红。
-- [ ] AC4 既有测试全绿；`--for-task` scoped 门绿。
+- [x] AC1 判据1：fan-in 路径存在一处 anti-drift-touches-check 调用（实际触碰 vs 声明 Touches）。
+- [x] AC2 判据2 能取假：故意写到 Touches 之外 ⇒ fan-in HARD-FAIL（现真值=不会）。
+- [x] AC3 判据3：合法收窄（实际 ⊆ 声明）不红。
+- [x] AC4 既有测试全绿；`--for-task` scoped 门绿。
 
 ## Definition of Done
 
-- [ ] anti-drift-touches 守卫接入 fan-in 路径（越界触碰 HARD-FAIL）+ 合法收窄不红 + 测试绿。
+- [x] anti-drift-touches 守卫接入 fan-in 路径（越界触碰 HARD-FAIL）+ 合法收窄不红 + 测试绿。
 
 ## Touches
 
 - .claude/workflows/fan-in-execute.js（merge/land 后调 anti-drift-touches-check，输入实际 diff）
+- plugin/workflows/fan-in-execute.js（.claude 版双副本镜像——workflows-dual-copy-drift-check 要求双副本同改）
 - plugin/scripts/anti-drift-touches-check.ts（若需暴露 driver 输入面；判定逻辑不动）
 - plugin/test/（补测：越界触碰 HARD-FAIL 负控制 + 合法收窄绿）
 - tasks/gap-anti-drift-touches-zero-coverage-fast-mode.md（自身）
 
+## Test-Files
+
+- plugin/test/fan-in-execute-paths.test.mjs
+
 ## Evidence
 
-（落地后回填——outer 2026-08-14 16:2xZ：谓词 `grep -c anti-drift-touches fan-in-execute.js`=0，干跑 touch 命中 :77 ⇒ 零为真；suite-budget 收窄在有守卫前无安全网，见 suite-budget 任务体）
+（回填 2026-08-14，impl 落地后）：
+- 判据1（实际触碰 vs 声明 Touches）：fan-in-execute.js step 1 merge 后接 driver 调用
+  `anti-drift-touches-check.ts --task <id> --worktree <dir> --merge-target <ref>`；driver 输入面新加
+  （读任务体 `## Touches` + `git diff --name-only <merge-target>...HEAD` = fan-in 将 land 的文件），判定逻辑（checkAntiDrift）未动。
+- 判据2 负控制（能取假·现真值=不会）：`plugin/test/fan-in-execute-paths.test.mjs` ⑤ REAL negative control ——
+  真实 temp git repo（step-1 merge 后状态）中任务实际 diff 含 `pkg/OTHER/stray.js`（声明 Touches 之外）⇒
+  anti-drift 块 HARD-FAIL（exit 2 + FATAL + `ANTI-DRIFT HARD FAIL: task wrote pkg/OTHER/stray.js`）。实测红。
+- 判据3：⑤ REAL positive —— 实际 diff ⊆ 声明 Touches ⇒ `ANTI-DRIFT OK`（exit 0）。实测绿。
+- 判据4：`scripts/test.sh --for-task gap-anti-drift-touches-zero-coverage-fast-mode --allow-thin` 绿；
+  `fan-in-execute-paths.test.mjs` 21 测试全绿（16 既有 + 5 新增 ⑤）；ts-typecheck 闸 admitted（本任务无新增/移动 .ts）。
+- 双副本：`plugin/workflows/fan-in-execute.js` 与 `.claude/workflows/fan-in-execute.js` 同步（workflows-dual-copy-drift-check 绿）。
+- 背景核实（outer 2026-08-14 16:2xZ）：谓词 `grep -c anti-drift-touches fan-in-execute.js`=0，干跑 touch 命中 :77 ⇒ 零为真；
+  suite-budget 收窄在有守卫前无安全网，见 suite-budget 任务体。
