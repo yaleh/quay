@@ -16,11 +16,16 @@ checker_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 repo_root="$(cd "${checker_dir}/../.." && pwd)"
 
 # The ## Contract scan surface (must match instrument-failure-check.ts DEFAULT_SURFACE).
+# AC59 (gap-ac59-family5-scan-covers-execution-cores): now includes the three execution cores —
+# the five known FAMILY-5 instances live in them.
 surface="orchestration/manager-loop-tick.md
 orchestration/orchestrator-loop-tick.md
 plugin/loop/fast-mode-loop-tick.md
 plugin/loop/manager-loop-tick.md
-plugin/loop/orchestrator-loop-tick.md"
+plugin/loop/orchestrator-loop-tick.md
+orchestration/orchestrator-tick-core.md
+orchestration/fast-mode-tick-core.md
+orchestration/manager-tick-core.md"
 
 copy_surface() {
   local dest="$1"

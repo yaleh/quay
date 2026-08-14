@@ -121,12 +121,54 @@ test("AC2 family 4 (fragment-or-host-dependent-literal-as-process-name): correct
 });
 
 test("AC2 family 5 (derived-view-as-real-time): correct form 0 hits, error form MUST report", () => {
-  // Correct: reading the snapshot WITH a freshness check (startedAt/finishedAt/stat/mtime/新鲜度).
+  // Correct: reading the snapshot WITH a freshness check (stat/mtime/新鲜度/距今).
   assert.deepEqual(famsOn("读 .quay/full-suite-state.json 的 startedAt 核对新鲜度"), []);
   assert.deepEqual(famsOn("stat -c %y .quay/full-suite-state.json"), []);
+  assert.deepEqual(famsOn("读 .quay/full-suite-state.json 的 startedAt 距今 < 一个 tick 周期"), []);
   // Error: reading a snapshot's `state` to assert real-time status with NO freshness check.
   assert.deepEqual(famsOn("读 .quay/full-suite-state.json 的 state 断言 green"), [5]);
   assert.deepEqual(famsOn("cat full-suite-state.json | jq -r .state  # 读状态断言 running"), [5]);
+});
+
+test("AC2 family 5 refinement (gap-ac59): startedAt/durationMs are FIELD reads, not freshness checks", () => {
+  // The two known real instances read snapshot FIELDS as data without a freshness check — they MUST
+  // fire. (Old FRESHNESS_TOKENS suppressed them on the bare field names.)
+  // manager B3-戊: quotes `startedAt=…` as snapshot content while asserting state=red.
+  assert.deepEqual(famsOn(".quay/full-suite-state.json 仍是 state=red scope=main startedAt=2026-08-13T16:19:54Z"), [5]);
+  // outer A11: 读 .quay/full-suite-state.json 的 state/reason/durationMs — durationMs is a field read.
+  assert.deepEqual(famsOn("读 .quay/full-suite-state.json 的 state/reason/durationMs"), [5]);
+  // outer B3: gates on `state != running` with --state-dir (mechanism word), no freshness check.
+  assert.deepEqual(famsOn("条件 = 收尾 ≥1 且 `state != running` 且 `--state-dir \"$REPO_ROOT/.quay\"` 放行"), [5]);
+  // Negative control: a genuine freshness check (距今/新鲜度) still suppresses even on the same line.
+  assert.deepEqual(famsOn("state=red 且 finishedAt 距今 < 一个 tick 周期才算真"), []);
+});
+
+test("AC59 true-sample replay: the five known FAMILY-5 instances in the execution cores are detected", () => {
+  // The three execution cores were NEVER on the scan surface — FAMILY-5 was numbered but never
+  // looked at these three files. Each KNOWN real instance (manager B3-戊 / outer A11+B3 / inner A9)
+  // must be detected; missing any ⇒ the scan surface doesn't count as coverage.
+  const cores = [
+    "orchestration/orchestrator-tick-core.md",
+    "orchestration/fast-mode-tick-core.md",
+    "orchestration/manager-tick-core.md",
+  ];
+  const byLine = new Map();
+  for (const rel of cores) {
+    const byFamily = scanText(fs.readFileSync(path.join(repoRoot, rel), "utf8"), rel);
+    for (const h of byFamily[5]) byLine.set(`${rel}:${h.line}`, h.text);
+  }
+  // manager B3-戊 (manager-tick-core.md:82) — 读 full-suite-state.json 断言 state=red,零新鲜度.
+  assert.ok(byLine.has("orchestration/manager-tick-core.md:82"), "manager B3-戊 (line 82) not detected:\n" + JSON.stringify([...byLine.keys()], null, 2));
+  assert.match(byLine.get("orchestration/manager-tick-core.md:82"), /full-suite-state\.json/);
+  // outer A11 (orchestrator-tick-core.md:34) — 读 state/reason/durationMs,无新鲜度.
+  assert.ok(byLine.has("orchestration/orchestrator-tick-core.md:34"), "outer A11 (line 34) not detected:\n" + JSON.stringify([...byLine.keys()], null, 2));
+  assert.match(byLine.get("orchestration/orchestrator-tick-core.md:34"), /durationMs/);
+  // outer B3 (orchestrator-tick-core.md:52) — 条件 state != running + --state-dir,无新鲜度.
+  assert.ok(byLine.has("orchestration/orchestrator-tick-core.md:52"), "outer B3 (line 52) not detected:\n" + JSON.stringify([...byLine.keys()], null, 2));
+  assert.match(byLine.get("orchestration/orchestrator-tick-core.md:52"), /state != running/);
+  // inner A9 (fast-mode-tick-core.md:28) — 读 full-suite-state.json, running/green ⇒ 派发,无新鲜度.
+  assert.ok(byLine.has("orchestration/fast-mode-tick-core.md:28"), "inner A9 (line 28) not detected:\n" + JSON.stringify([...byLine.keys()], null, 2));
+  assert.match(byLine.get("orchestration/fast-mode-tick-core.md:28"), /full-suite-state\.json/);
 });
 
 // ── AC1 + ## Contract band: real hits on the real tick-doc surface ───────────────────────────────────
@@ -156,10 +198,14 @@ test("gate PASS on the real repo: band + shrink-only both hold (counts within ba
   assert.match(res.stdout, /PASS/);
 });
 
-test("AC3: --gate scans plugin/scripts instrument scripts, not just the 5 markdown docs", () => {
+test("AC3: --gate scans plugin/scripts instrument scripts, not just the markdown docs", () => {
   const surface = gateSurface(repoRoot);
-  // DEFAULT_SURFACE is unchanged (the ## Contract measure stays the 5 docs).
-  assert.equal(DEFAULT_SURFACE.length, 5);
+  // AC59: DEFAULT_SURFACE grew from 5 tick docs to 8 — the five driver docs + the three execution
+  // cores (orchestrator/fast-mode/manager tick-core), where the known FAMILY-5 instances live.
+  assert.equal(DEFAULT_SURFACE.length, 8);
+  assert.ok(DEFAULT_SURFACE.includes("orchestration/orchestrator-tick-core.md"), "execution core on surface");
+  assert.ok(DEFAULT_SURFACE.includes("orchestration/fast-mode-tick-core.md"), "execution core on surface");
+  assert.ok(DEFAULT_SURFACE.includes("orchestration/manager-tick-core.md"), "execution core on surface");
   // The gate surface extends it with every plugin/scripts instrument script (*.ts + *.sh).
   assert.ok(surface.length > DEFAULT_SURFACE.length, `expected instruments added, got ${surface.length}`);
   assert.ok(surface.includes("plugin/scripts/manager-tick-readings.ts"), "the constant-zero instrument script must be on the gate surface");
