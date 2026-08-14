@@ -27,6 +27,14 @@ depends_on:
 
 - **判据1（退役是可判定的事件，不是自然消失）**：inner 执行核里**不再有「为已返回任务在主线程跑 suite」的条款**；`.quay/inner-tick-log.jsonl` 的 `phase` **不再出现 `fan-in-cert-*` 族取值**。**⚠️ 后半条是自述量（4b），只作辅助**；**主判据是执行核的条款，那是位置判定。**
 - **判据2（成功路径也要留痕，且第三方可读）**：每次 per-task 全量 suite 落**一条**记录，含 `taskId / runId / state / laneCount / durationMs / 失败文件清单 / 起止时刻`，**写在共享检出可读的位置**——不是 worktree 内那份 fork 继承的副本。**理由是一次实测**：四棵在飞 worktree 的 `.quay/full-suite-state.json` 的 `runId` **全部 = `eac3ee98`**、`startedAt` **全部 = `08-13T16:19:54`**，与主检出逐字相同 ⇒ **它们是 fork 时继承的同一份，不是各自的实测** ⇒ **至今零条 per-task 全量套件的时长实测**，且**第三方无法复核 cert 结果**（代价已实际发生：manager 2026-08-14 因此发出过一条错的失败文件归因，被 inner 用真 cert 输出纠回；inner 已认领 `gap-cert-result-no-third-party-readable-landing`，本 AC 与它是同一件事的两侧——**合并或互相 depends_on**）。
+
+**⭐ 第一次实证（manager 2026-08-14 06:1xZ 实测，AC2 归因触发）——从「预测会挡住」变成「已经挡住了」**：AC68 的 AC2 归因需要判别 inner 06:04:40Z 那条 cert 红的 (a) laneCount/并发槽读数 与 (c) 失败形态，**第三方（manager/outer/人）全部读不到**——
+```
+读 AC67 worktree 的 .quay/full-suite-state.json  → runId=eac3ee98 startedAt=16:19:54（fork 继承的旧记录，非本次 cert）
+读 .quay/fan-in-merge-lock-events.jsonl            → 尚未产生（ff 没跑过）⇒ 无法判「同刻有没有第二条 suite」
+per-task cert 真结果（/tmp/… 重定向 + laneCount + 失败形态）→ 只活在 inner 会话里
+```
+**⇒ AC2 归因只能由 inner 单方给出，第三方无法复核。** **AC72 判据2 不再是「将来会有用」的清理性判据，它现在就是归因的前置——本次归因的不可复核性本身就是它的价值证明，也是下次有人想跳过 AC72 时的负控制。**
 - **判据3（能取假·用真样本，不构造）**：**AC57 的 7 轮 cert 是现成的真实缺席样本**——回放它们，判据2 要求的记录集合**应当为空** ⇒ **必须报红**。合 D2；亦满足 AC49 判据1。
 - **顺序（明确写死，决定别的条能不能落）**：**AC62 → AC67 → AC72**。
 - **⚠️ 不覆盖**：不规定记录的格式与文件名（实现面）；不改 AC62 协议本体；不引入任何新的 monitor（**新机制的要点之一就是不再需要有人盯着**）；不规定 suite 槽数（那是 AC68/AC69 的范围，且人已裁定保持既定 lane 设置）。

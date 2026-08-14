@@ -53,7 +53,7 @@ worktree_node_tests=2  => GO
 ## Acceptance Criteria
 
 - [x] AC1 per_suite_lane_budget 有消费者（test.sh 读它并按槽数除）**或** 被删除（二选一，不留「正确但无人读」的数字）。
-- [ ] AC2 过订阅容忍判据（人 2026-08-14 06:1xZ 逐字「容忍过订阅，直到 OOM 或直接导致 suite 失败」——**推翻原数值阈值**「worker ≤ nproc」）：过订阅本身不算失败，触发条件是 **① OOM 或 ② 直接导致 suite 失败**。**第一个待归因样本**：inner 06:04:40Z「AC67 cert 红=测试 suite 环境脆弱（11 次 spawn node --experimental-strip-types 在 16-lane 下部分返回空）」——判别 (a) 该轮 laneCount/concurrent slots 读数 (b) 同组测试独占重跑是否绿 (c) 失败形态是 spawn 返回空/JS error（资源）而非断言失败（逻辑）。**归因未完成前不勾。**
+- [ ] AC2 过订阅容忍判据（人 2026-08-14 06:1xZ 逐字「容忍过订阅，直到 OOM 或直接导致 suite 失败」——**推翻原数值阈值**「worker ≤ nproc」）：过订阅本身不算失败，触发条件是 **① OOM 或 ② 直接导致 suite 失败**。**第一个待归因样本**：inner 06:04:40Z「AC67 cert 红=测试 suite 环境脆弱（11 次 spawn node --experimental-strip-types 在 16-lane 下部分返回空）」——判别 (a) 该轮 laneCount/concurrent slots 读数 (b) 同组测试独占重跑是否绿 (c) 失败形态是 spawn 返回空/JS error（资源）而非断言失败（逻辑）。**归因未完成前不勾。** **⚠️ 归因 owner=inner（manager 2026-08-14 06:1xZ 裁），排序先 (c) 再 (a) 最后 (b)**：(c) 读已有日志零成本几乎能定案、(b) 占槽+~390s 只在 (c)+(a) 不能定案时才做。**⚠️ 本次归因只能由 inner 单方给出、第三方无法复核**——AC72 判据2 缺口的第一次实证（第三方读不到 cert 证据：worktree 的 full-suite-state 是 fork 继承旧记录、cert 真结果只活在 inner 会话）。
 - [x] AC3 防嵌套 spawn（17-19 procs/load 18.70 那个缺陷）不回退。
 - [x] AC4 既有测试全绿；`--for-task` scoped 门绿。
 
