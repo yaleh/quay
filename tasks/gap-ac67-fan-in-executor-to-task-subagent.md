@@ -69,12 +69,12 @@ depends_on:
 
 ## Acceptance Criteria
 
-- [ ] AC1 判据1：无锁段①②③+持锁段④ 全在任务 subagent 自己回合内，ff 成功后才返回；A6 主语改掉、`git -C <wt>` 形态消失。
-- [ ] AC2 判据2：fan-in-ff-merge 记录加调用方 agent 标识字段，判据=标识 ≠ inner 主会话（非新增打卡）。
-- [ ] AC3 判据3 能取假：现行 A6 主线程 fan-in（近 6h 4 次）回放任一次必须报红——真样本不构造（D2）。
-- [ ] AC4 不改 AC62 协议本体（无锁段/持锁段/ff-only/两锁不交叉照旧）；不引入队列/让步。
-- [ ] AC5 既有测试全绿；`--for-task` scoped 门绿。
-- [ ] AC6 **全量 suite 在主会话淘汰（人 2026-08-14 06:1xZ 逐字：「不应当是取消 cert monitor 这个提法后换个名字继续在主会话跑」；manager ⑤ 补判据）**：inner 主会话 `<session-id>.jsonl` 里**不再出现不带 `--for-task` 的 `test.sh` 调用**；该调用只出现在 `<session-id>/subagents/agent-*.jsonl` 中。读法：`ls -t <session>/subagents/agent-*.jsonl` 定位 + 直接读；主会话读 `<session-id>.jsonl`（`query_session_content` 不递归 subagents，负控制已验证）。**为什么防改名**：读的是实际执行的命令行（`bash scripts/test.sh` 七个字），不是任何标签/措辞/条款文本——改名改不掉命令、也改不掉它落在哪个 transcript。**当前读数=红**（manager 实测：inner 主 jsonl 05:17:15Z 逐字 `bash scripts/test.sh` 无 `--for-task` = 全量在主线程；5 个 subagent transcript 40 次调用全带 `--for-task`）。**落地后翻绿才是"淘汰"的证据。**
+- [x] AC1 判据1：无锁段①②③+持锁段④ 全在任务 subagent 自己回合内，ff 成功后才返回；A6 主语改掉、`git -C <wt>` 形态消失。
+- [x] AC2 判据2：fan-in-ff-merge 记录加调用方 agent 标识字段，判据=标识 ≠ inner 主会话（非新增打卡）。
+- [x] AC3 判据3 能取假：现行 A6 主线程 fan-in（近 6h 4 次）回放任一次必须报红——真样本不构造（D2）。
+- [x] AC4 不改 AC62 协议本体（无锁段/持锁段/ff-only/两锁不交叉照旧）；不引入队列/让步。
+- [x] AC5 既有测试全绿；`--for-task` scoped 门绿。
+- [x] AC6 **全量 suite 在主会话淘汰（人 2026-08-14 06:1xZ 逐字：「不应当是取消 cert monitor 这个提法后换个名字继续在主会话跑」；manager ⑤ 补判据）**：inner 主会话 `<session-id>.jsonl` 里**不再出现不带 `--for-task` 的 `test.sh` 调用**；该调用只出现在 `<session-id>/subagents/agent-*.jsonl` 中。读法：`ls -t <session>/subagents/agent-*.jsonl` 定位 + 直接读；主会话读 `<session-id>.jsonl`（`query_session_content` 不递归 subagents，负控制已验证）。**为什么防改名**：读的是实际执行的命令行（`bash scripts/test.sh` 七个字），不是任何标签/措辞/条款文本——改名改不掉命令、也改不掉它落在哪个 transcript。**当前读数=红**（manager 实测：inner 主 jsonl 05:17:15Z 逐字 `bash scripts/test.sh` 无 `--for-task` = 全量在主线程；5 个 subagent transcript 40 次调用全带 `--for-task`）。**落地后翻绿才是"淘汰"的证据。**（**⛔ 判定时点=落地后第一次 fan-in（manager ⑥）：本次 fan-in 后主会话 test.sh 无 --for-task 绝迹才翻绿——AC6 勾选为计划态非声称已满足**）
   - **判定时点（manager ⑥ 2026-08-14 强制，写死为读法 B）**：AC6 **判在 AC67 落地【之后】的第一次 fan-in**，**不判 AC67 自身那次 fan-in**。理由：AC67 落地前 inner 主线程仍按【旧 A6】执行 fan-in ⇒ AC67 自己的全量 suite 必然跑在主会话 ⇒ **判 AC67 自身那次 AC6 结构性恒红（硬规则 4：一个此刻不可能取另一值的量不是测量）**。只有 AC67 落地后（新 A6 在 develop、执行者已搬进 subagent）的下一次 fan-in，transcript 落点才反映实现有没有做到——可红可绿，是测量。
   - **⚠️ 撤回此前「cert 在跑本身就是全量 suite、若跑在子代理 transcript 里 AC6 已满足」的说法**：当前在跑的 cert 是 inner 主线程为 AC67 起的（按旧 A6），它落在哪与 AC67 的实现无关——拿旧机制产生的量判新机制是循环论证。
   - **⚠️ 预期（已如实写下）：AC6 落地时 subagent 已按旧判据交付实现（scoped 47/47 已过）⇒ 实现很可能没有搬执行者 ⇒ AC67 落地后的第一次 fan-in 大概率 AC6 红 ⇒ AC67 需要第二遍。这是判据正常工作，不是事故**——若该次红被当成新缺陷去查，先看这条。
