@@ -1,7 +1,7 @@
 ---
 id: gap-ac76-cap-counts-subagents-not-worktrees
 title: AC76 cap 的被计量对象 = 并发 subagent，禁 worktree 代理（人 07:3xZ 裁定）
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
