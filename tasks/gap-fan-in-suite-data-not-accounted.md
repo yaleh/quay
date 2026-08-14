@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-suite-data-not-accounted
 title: fan-in 的 suite 数据不入账——fan-in 不在 verification-round 记账路径（0 命中），per-task 载体覆盖率 1/24；人 14:5xZ 令「先保障数据入账」
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
