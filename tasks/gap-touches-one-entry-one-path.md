@@ -1,7 +1,7 @@
 ---
 id: gap-touches-one-entry-one-path
 title: Touches「一条目一路径」形态要求——多路径挤一条 bullet 让 disjoint 判据失真（manager 2026-08-14 报，发生率 12）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
