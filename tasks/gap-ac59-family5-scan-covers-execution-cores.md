@@ -1,7 +1,7 @@
 ---
 id: gap-ac59-family5-scan-covers-execution-cores
 title: AC59 通则②·FAMILY-5 扫描面覆盖三层执行核（真样本回放可取假）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
