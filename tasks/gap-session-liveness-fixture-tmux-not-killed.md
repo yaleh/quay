@@ -1,7 +1,7 @@
 ---
 id: gap-session-liveness-fixture-tmux-not-killed
 title: session-liveness hermetic 夹具创建 tmux server 从不 kill——sweepTmp 因 dirHasLiveOwner 保护活 owner 而跳过，泄漏 6 个 29h tmux（manager 15:2xZ 报）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
