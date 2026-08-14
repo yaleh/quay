@@ -71,6 +71,7 @@ depends_on: []
 - plugin/test/retired-clause-check.test.mjs（补测：inner-agent-budget 命中已退役清单）
 - tasks/gap-prod-data-accounting-audit.md（Evidence 已由外层 15:5xZ 订正 SUSPECT→RETIRED；本任务落地后 audit 重跑为验收判据2）
 - tasks/gap-retire-registration-inner-agent-budget-not-registered.md（自身）
+- orchestration/archive/AC58-retired-clauses.md（R31 归档条目——CHECK-B 机制强制，任务 authoring 侧漏列，外层 16:0xZ 落地后补）
 
 ## Evidence
 
