@@ -1,7 +1,7 @@
 ---
 id: gap-idle-watch-session-disabled-false-positive-long-tasks
 title: idle-watch SESSION-DISABLED 假阳性——三合取（cache_read 单调恒真 + 长任务静默 + worktree 不变）在【任何长任务】期间同真，无一项测「推进」；失能=没推进，判据漏了推进量（manager 21:2xZ 报）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
