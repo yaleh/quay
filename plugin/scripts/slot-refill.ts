@@ -461,6 +461,15 @@ export function isBodyLanded(body) {
  *      investigation-type subagents, gap-telemetry-underreport-nontask-subagents-not-counted-in-slots).
  *      They occupy a concurrency slot (occupied_slots / slots_free arithmetic) but carry no task id, so
  *      they cannot participate in the touches-disjointness check. Default 0.
+ *  @param {number|null} [o.runningSubagentCount] AC5 DUAL-CONSUMER SPLIT
+ *      (tasks/gap-in-flight-resolve-by-task-id-not-worktree-name, 人 2026-08-14 12:5xZ): the
+ *      CURRENTLY-RUNNING task subagent count — the NARROW set Consumer B (occupied_slots / slots_free /
+ *      should_refill) counts. Consumer A (touches-disjointness / dispatchable_disjoint) keeps the WIDE
+ *      un-landed set (inFlight + closedButLive): an awaiting-retry task's worktree still occupies files
+ *      a new task would collide with, but it has no subagent ⇒ does NOT occupy cap. The two denominators
+ *      are ALLOWED to differ (真 slots_free = cap − 真并发 subagent). null (default) ⇒ Consumer B falls
+ *      back to the wide set (backward compat for callers not yet passing --running / the outer A18 +
+ *      manual bare paths).
  *  @param {string|null} [o.measurementSource] where the in-flight view came from — "explicit-input"
  *      (the caller passed --in-flight/--closed-but-live), "telemetry-slot-status" (measured from the
  *      reconcile-aware fast-mode-telemetry --slot-status view), or "degraded-no-telemetry" (the
@@ -493,7 +502,7 @@ export function isBodyLanded(body) {
  *      exposes-sort-key) is the parallel array of {id, deliveryCritical, suiteBlocking, rank} that
  *      exposes each recommended id's sort axes for AC36 判据②'s mechanical check.
  */
-export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, floorMult = POOL_FLOOR_MULT_DEFAULT, inFlight = [], closedButLive = [], subagentsInFlight = 0, measurementSource = null, measurementError = null, integrationBacklog, redBacklogCap = RED_BACKLOG_CAP_DEFAULT, dispatchGate = null }) {
+export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, floorMult = POOL_FLOOR_MULT_DEFAULT, inFlight = [], closedButLive = [], subagentsInFlight = 0, runningSubagentCount = null, measurementSource = null, measurementError = null, integrationBacklog, redBacklogCap = RED_BACKLOG_CAP_DEFAULT, dispatchGate = null }) {
   // PREEMPTIVE HALT (gap-supervisor-preemption AC2): the `.halt` sentinel is a CODE mount point,
   // not a tick-step-0 prose rule. When halted, dispatch is blocked no matter how many slots/candidates
   // exist — the human's stop takes effect at ANY dispatch-recommendation point, mid-flow.
@@ -519,10 +528,21 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
   if (capNarrowed) {
     pool = analyzeTasks({ tasksDir, root, cap: effectiveCap, floorMult, inFlight, closedButLive });
   }
-  // A slot is free only when neither a running subagent NOR a closed-bracket-but-live agent NOR a
-  // non-task investigation subagent holds it. `subagentsInFlight` carries no task id (no bracket), so
-  // it occupies a slot but cannot join the touches-disjointness check below.
-  const occupied = inFlight.length + closedButLive.length + (subagentsInFlight > 0 ? subagentsInFlight : 0);
+  // AC5 DUAL-CONSUMER SPLIT (tasks/gap-in-flight-resolve-by-task-id-not-worktree-name, 人 2026-08-14
+  // 12:5xZ): Consumer A (touches-disjointness / dispatchable_disjoint) counts the WIDE un-landed set
+  // (inFlight + closedButLive — an awaiting-retry task's worktree still occupies files a new task
+  // would collide with); Consumer B (slot counting / slots_free / should_refill) counts the NARROW
+  // currently-RUNNING subagent set (cap=5 protects subagents — an awaiting-retry task has no subagent
+  // ⇒ does NOT occupy cap). The two denominators are ALLOWED to differ (the 2026-08-14 empirical
+  // split: 5 worktrees but 3 live subagents ⇒ true slots_free = 5 − 3 = 2, while the old
+  // shared-denominator read 0 ⇒ "等重跑任务算进在飞⇒在飞多算⇒slots_free 虚低⇒不派"). `runningSubagentCount`
+  // null (not passed) ⇒ Consumer B falls back to the wide set (backward compat). `subagentsInFlight`
+  // (non-task investigation subagents) carries no task id — it always occupies a slot but never joins
+  // the touches-disjointness check.
+  const slotOccupants = runningSubagentCount !== null
+    ? runningSubagentCount
+    : (inFlight.length + closedButLive.length);
+  const occupied = slotOccupants + (subagentsInFlight > 0 ? subagentsInFlight : 0);
   const slotsFree = computeSlotsFree(effectiveCap, occupied);
 
   // recommended — the production disjoint batch over the ready pool, filtered by the SAME step-4
@@ -782,6 +802,16 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
   // dispatchable recommendation is the exact blind-spot the tick now forces). `recommended` is emitted
   // as a separate array below precisely so the consumer can read "recommended 非空" without re-deriving
   // it from the boolean — the semantics are: should_refill = (slots_free > 0) ∧ (recommended ≠ ∅).
+  // AC6 DEGRADED-MEASUREMENT NULL (tasks/gap-in-flight-resolve-by-task-id-not-worktree-name, 判据5
+  // 修法 (a), manager 13:2xZ): when the in-flight view FAILED to measure
+  // (measurement_source='degraded-no-telemetry'), the slot-family fields MUST be null — a downstream
+  // doing arithmetic on them must CRASH (null arithmetic → NaN) instead of silently computing
+  // "5 empty slots" (same-shaped as qualified). The 3b 漏网形态: slot-refill gave an honest
+  // measurement_source='degraded-no-telemetry' BUT also reported in_flight_count=0 (identical to
+  // "genuinely nothing in flight"), and the gate (inner-wakeup-heartbeat.ts) does NOT read
+  // measurement_source (零命中) — it only reads the numbers. Nulling the numbers forces the failure
+  // to propagate to the consumer instead of being swallowed.
+  const degraded = measurementSource === "degraded-no-telemetry";
   let shouldRefill = slotsFree > 0 && recommended.length >= 1;
   let noRefillReason = null;
   if (halt.halted) {
@@ -789,8 +819,15 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
     // highest-priority gate (gap-supervisor-preemption: `.halt` is 任意点生效, not tick-boundary).
     shouldRefill = false;
     noRefillReason = `halted (preemption: .halt present — ${halt.reason}; check with supervisor-preempt.sh halt-check)`;
+  } else if (degraded) {
+    // AC6: a degraded measurement is NOT a valid "0 in-flight" — fail CLOSED (no refill) and say so.
+    // slots_free is null here; a consumer reading it gets null, never a silently-computed "5".
+    shouldRefill = false;
+    noRefillReason = "measurement degraded — in-flight view NOT evaluated (measurement_source='degraded-no-telemetry'); slots_free is null, downstream must not read it";
   } else if (slotsFree <= 0) {
-    noRefillReason = `no free slots (in-flight ${inFlight.length} + closed-but-live ${closedButLive.length}${subagentsInFlight > 0 ? ` + subagents ${subagentsInFlight}` : ""} >= cap ${effectiveCap})`;
+    // AC5 DUAL-CONSUMER SPLIT: the slots consumer's denominator is the NARROW running-subagent count
+    // when the caller passed --running, else the wide in-flight fallback.
+    noRefillReason = `no free slots (${runningSubagentCount !== null ? `running subagents ${runningSubagentCount}` : `in-flight ${inFlight.length} + closed-but-live ${closedButLive.length}`}${subagentsInFlight > 0 ? ` + subagents ${subagentsInFlight}` : ""} >= cap ${effectiveCap})`;
   } else if (recommended.length === 0) {
     noRefillReason = "no dispatchable candidate passes step-4 checks (touches-resolve / deps-ready / disjoint-from-in-flight / self-touch C8)";
   }
@@ -815,12 +852,26 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
         : null,
     },
     floor_mult: floorMult,
-    in_flight_count: inFlight.length,
-    closed_but_live_count: closedButLive.length,
+    // AC6 DEGRADED-MEASUREMENT NULL (tasks/gap-in-flight-resolve-by-task-id-not-worktree-name, 判据5
+    // 修法 (a)): when measurement_source='degraded-no-telemetry', the ENTIRE measured slot family is
+    // null (in_flight_count / closed_but_live_count / running_subagent_count / subagents_in_flight /
+    // occupied_slots / slots_free) — a downstream arithmetic consumer CRASHES on null instead of
+    // silently computing "5 empty slots" (same-shaped as qualified). measurement_source +
+    // measurement_error still name WHY (never a silent 0).
+    in_flight_count: degraded ? null : inFlight.length,
+    closed_but_live_count: degraded ? null : closedButLive.length,
+    // AC5 DUAL-CONSUMER SPLIT (tasks/gap-in-flight-resolve-by-task-id-not-worktree-name, 人 2026-08-14
+    // 12:5xZ): the NARROW Consumer-B denominator — the currently-RUNNING task subagent count used for
+    // occupied_slots / slots_free — plus its provenance. "running-subagents" = the caller passed
+    // --running; "in-flight-fallback" = Consumer B reuses the wide in-flight set (backward compat).
+    // Distinct from `in_flight_count` (the WIDE Consumer-A denominator, unchanged): the two are
+    // ALLOWED to differ (dispatchable_disjoint 分母 ≠ slots_free 分母).
+    running_subagent_count: degraded ? null : slotOccupants,
+    slot_denominator_source: runningSubagentCount !== null ? "running-subagents" : "in-flight-fallback",
     // NON-TASK SUBAGENTS (gap-telemetry-underreport-nontask-subagents-not-counted-in-slots): the
     // investigation-subagent PROCESS count that occupies slots but carries no task id. Included in
     // occupied_slots/slots_free, never in the touches-disjointness check.
-    subagents_in_flight: subagentsInFlight,
+    subagents_in_flight: degraded ? null : subagentsInFlight,
     // MEASUREMENT PROVENANCE (gap-slot-refill-inflight-disconnected-from-worktrees): where the
     // in-flight view came from. "explicit-input" = the caller passed --in-flight/--closed-but-live
     // (the inner tick A12 path); "telemetry-slot-status" = measured from the reconcile-aware
@@ -829,8 +880,8 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
     // names why (never a silent 0).
     measurement_source: measurementSource,
     measurement_error: measurementError,
-    occupied_slots: occupied,
-    slots_free: slotsFree,
+    occupied_slots: degraded ? null : occupied,
+    slots_free: degraded ? null : slotsFree,
     pool: pool.pool,
     floor: pool.floor,
     dispatchable_disjoint: pool.dispatchable_disjoint,
@@ -937,14 +988,67 @@ export function measureInFlightFromTelemetry({ root, cap }) {
   }
 }
 
+/** RESOLVE-BY-TASK-ID (tasks/gap-in-flight-resolve-by-task-id-not-worktree-name): normalize an
+ *  in-flight identifier (worktree DIRECTORY name / BRANCH name / true task id) to the TRUE task id.
+ *  The `--in-flight`/`--closed-but-live` sets are passed by the caller as the identifiers the inner
+ *  tick A12 maintains — which are the WORKTREE SLUGS it created, not necessarily the true task ids.
+ *  The `<slug>` convention (fast-mode-loop-tick.md:976/:1043 `git worktree add $WORKTREE_ROOT/<slug>
+ *  -b task/<id>`) lets the dispatching agent freely abbreviate: 2026-08-14 实测 `git worktree list`
+ *  had `gap-workflows-dual-copy-drift` (true id `…-unchecked` — BOTH dir AND branch truncated) and
+ *  `gap-test-isolation-backlog-44` (true id `…-violations-unmeasured` — dir truncated, branch full).
+ *  A truncated slug never matches `tasks/<slug>.md`, so the old readTasks SILENTLY dropped it →
+ *  in_flight under-counted → slots_free inflated → the AC53 end-invariant gate (should_refill ∧
+ *  slots_free>0 ⇒ 拒写) correctly refused a heartbeat write it should NOT have refused. This resolver
+ *  matches BY TASK ID so a truncated slug still resolves to the true id — 判据1: the three forms must
+ *  agree; 判据3: the AC53 gate is UNCHANGED, only the quantity fed to it is fixed.
+ *
+ *  Resolution order (deterministic, never guesses):
+ *    1. strip a leading `task/` prefix (the branch form).
+ *    2. exact: `tasks/<normalized>.md` exists → the identifier IS a true task id.
+ *    3. truncated-prefix: EXACTLY ONE task id in the store has <normalized> as a strict prefix → that
+ *       longer id is the true task id (the truncated slug resolves to the true id).
+ *    4. ambiguous (2+ tasks extend the prefix) or none → return the input UNCHANGED (method
+ *       "unresolved") — the caller keeps the advisory skip. Never guess wrong: a wrong id would poison
+ *       the touches-disjointness set worse than a missing id (a missing id under-counts, a wrong id
+ *       blocks/defers unrelated work).
+ *
+ *  PURE + read-only. tasksDir is read once per call (readdirSync is one syscall returning names, no
+ *  per-file stat) — negligible at the 5-in-flight scale.
+ */
+export function resolveInFlightId(tasksDir, input) {
+  const norm = String(input).replace(/^task\//, "");
+  if (fs.existsSync(path.join(tasksDir, `${norm}.md`))) {
+    return { id: norm, method: "exact" };
+  }
+  let match = null;
+  let ambiguous = false;
+  if (fs.existsSync(tasksDir)) {
+    for (const f of fs.readdirSync(tasksDir)) {
+      if (!f.endsWith(".md")) continue;
+      const id = f.replace(/\.md$/, "");
+      if (id.length > norm.length && id.startsWith(norm)) {
+        if (match === null) match = id;
+        else if (match !== id) { ambiguous = true; break; }
+      }
+    }
+  }
+  if (match !== null && !ambiguous) return { id: match, method: "truncated-prefix" };
+  return { id: input, method: "unresolved" };
+}
+
 function main(argv) {
   let root = null;
   let cap = FIXED_DISPATCH_CAP;
   let floorMult = POOL_FLOOR_MULT_DEFAULT;
   let inFlightIds = [];
   let closedButLiveIds = [];
+  let runningIds = [];
   let integrationBacklog = undefined;
   let redBacklogCap = RED_BACKLOG_CAP_DEFAULT;
+  // AC5 DUAL-CONSUMER SPLIT (tasks/gap-in-flight-resolve-by-task-id-not-worktree-name): whether the
+  // caller passed the NARROW currently-RUNNING subagent set (--running). Consumer B (slots_free) uses
+  // it when present; otherwise Consumer B falls back to the wide in-flight set (backward compat).
+  let runningExplicit = false;
   // MEASUREMENT PROVENANCE (gap-slot-refill-inflight-disconnected-from-worktrees): whether the caller
   // EXPLICITLY supplied the in-flight view. When NEITHER --in-flight nor --closed-but-live is passed,
   // the in-flight view is MEASURED from the reconcile-aware telemetry --slot-status view — never
@@ -964,6 +1068,10 @@ function main(argv) {
     } else if (args[i] === "--closed-but-live") {
       closedButLiveExplicit = true;
       closedButLiveIds = String(args[++i] || "").split(",").map((s) => s.trim()).filter(Boolean);
+    } else if (args[i] === "--running") {
+      // AC5 DUAL-CONSUMER SPLIT: the NARROW Consumer-B set — the currently-RUNNING task subagent ids.
+      runningExplicit = true;
+      runningIds = String(args[++i] || "").split(",").map((s) => s.trim()).filter(Boolean);
     } else if (args[i] === "--integration-backlog") {
       integrationBacklog = Number(args[++i]);
     } else if (args[i] === "--red-backlog-cap") {
@@ -971,12 +1079,21 @@ function main(argv) {
     }
   }
   const rootDir = root ? path.resolve(root) : findRepoRoot(process.cwd());
+  // RESOLVE-BY-TASK-ID (tasks/gap-in-flight-resolve-by-task-id-not-worktree-name): each identifier is
+  // resolved to the TRUE task id before the file read — a truncated worktree slug (the `<slug>`
+  // convention lets the dispatching agent abbreviate) still resolves to the true id, so the in-flight
+  // count no longer under-reports and the AC53 gate stops refusing heartbeats it shouldn't. The
+  // resolved TRUE id is also what flows into the touches-disjointness set (line 578) — comparing the
+  // truncated slug against peers would miss collisions. Unresolved entries stay advisory-skipped
+  // (a vanished/unresolved id is not a failure), exactly as before.
+  const tasksDir = path.join(rootDir, "tasks");
   const readTasks = (ids) => {
     const out = [];
     for (const id of ids) {
-      const file = path.join(rootDir, "tasks", `${id}.md`);
-      if (!fs.existsSync(file)) continue; // advisory — a vanished id is not a failure
-      out.push({ id, body: fs.readFileSync(file, "utf8") });
+      const resolved = resolveInFlightId(tasksDir, id);
+      const file = path.join(tasksDir, `${resolved.id}.md`);
+      if (!fs.existsSync(file)) continue; // advisory — a vanished/unresolved id is not a failure
+      out.push({ id: resolved.id, body: fs.readFileSync(file, "utf8") });
     }
     return out;
   };
@@ -1006,7 +1123,15 @@ function main(argv) {
       measurementError = measured.error;
     }
   }
-  const result = analyzeSlotRefill({ tasksDir: path.join(rootDir, "tasks"), root: rootDir, cap, floorMult, inFlight, closedButLive, subagentsInFlight, measurementSource, measurementError, integrationBacklog, redBacklogCap });
+  // AC5 DUAL-CONSUMER SPLIT: the NARROW Consumer-B denominator. Each --running id is a LIVE subagent
+  // and occupies a slot even if it does not resolve to a task file (a vanished id still runs); resolve
+  // + dedupe keeps the reported ids truthful (a truncated slug resolves to the true id; duplicates
+  // collapse). When --running is absent, runningSubagentCount stays null ⇒ Consumer B falls back to
+  // the wide in-flight set (backward compat).
+  const runningSubagentCount = runningExplicit
+    ? new Set(runningIds.map((id) => resolveInFlightId(tasksDir, id).id)).size
+    : null;
+  const result = analyzeSlotRefill({ tasksDir, root: rootDir, cap, floorMult, inFlight, closedButLive, subagentsInFlight, runningSubagentCount, measurementSource, measurementError, integrationBacklog, redBacklogCap });
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   return 0;
 }

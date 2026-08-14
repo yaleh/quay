@@ -51,6 +51,7 @@ import { isDirectEntry } from "./gate-script-base.ts";
 import {
   HEARTBEAT_FILE,
   LEGACY_HEARTBEAT_FILE,
+  REFUSAL_FILE,
   REQUIRED_HEARTBEAT_FIELDS,
   REQUIRED_DISPATCH_STATE_FIELDS,
   checkFieldContract,
@@ -137,6 +138,23 @@ export function writeHeartbeat(root, heartbeat) {
   return jsonlPath;
 }
 
+/** AC53-gate 判据4 (tasks/gap-ac53-gate-not-wired-to-running-set AC4): a REFUSED heartbeat write must
+ *  leave a trace. The heartbeat jsonl records ONLY SUCCESSFUL writes — a refused round previously left
+ *  ZERO rows, structurally indistinguishable from "inner didn't run the assessment" (the carrier-level
+ *  cause of the 3-hour misdiagnosis: 13:1xZ '评估步骤停' vs 13:2xZ '降级误拒' vs 13:4xZ '结构无出口' all
+ *  read the same silent jsonl). This appends a `{written:false, ts, refuse_reason}` record to the
+ *  SIDE-CARRIER ${REFUSAL_FILE} (NOT the heartbeat jsonl — which must stay parseable-as-a-heartbeat).
+ *  ⊢ negative control: before this fix the `written:false` row count is 0; a refused round now
+ *  immediately produces one. PURE-ish (file side effect), exported for tests. Returns the refusal file
+ *  path. */
+export function writeRefusal(root, refuseReason, extra = {}) {
+  const quayDir = path.join(root || ".", ".quay");
+  fs.mkdirSync(quayDir, { recursive: true });
+  const file = path.join(quayDir, REFUSAL_FILE);
+  fs.appendFileSync(file, `${JSON.stringify({ written: false, ts: Math.floor(Date.now() / 1000), refuse_reason: refuseReason, ...extra })}\n`, "utf8");
+  return file;
+}
+
 /**
  * AC53 AC1 (gap-ac53-end-invariant-gate): re-run slot-refill with DIRECT measurements before an
  * END-of-tick heartbeat write. `--in-flight` is this session's in-flight set (the tick's own
@@ -187,6 +205,11 @@ Usage:
   --budget-hit <true|false>      预算是否触顶 — REQUIRED
   --in-flight '<id1,id2>'        AC53: 本会话在飞集合（结束心跳直接量判据用）— REQUIRED
   --delay-seconds <n>            ScheduleWakeup 重排间隔秒（default 1500）
+  --running '<id1,id2>'          AC53-gate 判据1: 当前真正在跑的 subagent 集合（Consumer B——slots_free/
+                                 should_refill 的窄分母）。空值 --running '' = 测得为 0（真零）；缺省 ⇒
+                                 Consumer B 回退到宽 --in-flight 集（修前行为——awaiting-retry 任务占槽但无
+                                 subagent）。dispatchable_disjoint（Consumer A）恒用宽 --in-flight 集。
+                                 REFUSE 时写 ${REFUSAL_FILE} 留痕（判据4）。
   --slots-free <n>               AC53: 空槽数（slot-refill 输出）— REQUIRED
   --dispatchable-disjoint <n>    AC53: 池内最大互不冲突子集 — REQUIRED
   --pool <n>                     AC53: 就绪池数 — REQUIRED
@@ -214,6 +237,7 @@ export function main(argv) {
 
   let heartbeat;
   let inFlightIds; // AC53 AC1 (gap-ac53-end-invariant-gate): the session's in-flight set
+  let runningIds; // AC53-gate 判据1: the NARROW currently-RUNNING subagent set (Consumer B)
   try {
     const nowSec = Math.floor(Date.now() / 1000);
     heartbeat = buildHeartbeat({
@@ -244,6 +268,15 @@ export function main(argv) {
     const inFlightFlag = flagVal("--in-flight");
     inFlightIds = inFlightFlag !== undefined
       ? String(inFlightFlag).split(",").map((s) => s.trim()).filter(Boolean)
+      : undefined;
+    // AC53-gate 判据1 (tasks/gap-ac53-gate-not-wired-to-running-set): the NARROW currently-RUNNING
+    // subagent set — the END-invariant gate's Consumer B denominator. `--running ''` is a MEASURED
+    // zero (真零); ABSENT (undefined) keeps Consumer B on the wide in-flight fallback (判据3:
+    // 未提供 ≠ 真零 — and the pre-fix gate read the wide set, letting awaiting-retry tasks occupy
+    // slots they have no subagent to fill).
+    const runningFlag = flagVal("--running");
+    runningIds = runningFlag !== undefined
+      ? String(runningFlag).split(",").map((s) => s.trim()).filter(Boolean)
       : undefined;
   } catch (e) {
     console.error(`inner-wakeup-heartbeat: ${e.message}`);
@@ -277,14 +310,21 @@ export function main(argv) {
   // the 7th same-shape proved only a structural refusal stops the sleep.
   if (inFlightIds === undefined) {
     console.error(`inner-wakeup-heartbeat: REFUSED — --in-flight 必填（结束心跳的直接量判据需要本会话在飞集合），不写入（reason=end-invariant-gate-requires-in-flight）`);
+    // AC53-gate 判据4: a refused round must leave a trace (被拒 ≠ 没跑) — the heartbeat jsonl records
+    // only successful writes, so the refusal is written to the side-carrier.
+    writeRefusal(root, "end-invariant-gate-requires-in-flight");
     return 1;
   }
   // The direct re-run uses the SAME cap the tick recorded (--effective-cap; production default the
   // fixed 5, A10) so slots_free/dispatch verdicts are computed against the same cap the dispatch
-  // decision used — never a second, inconsistent cap.
-  const direct = runDirectSlotRefill({ root, inFlightIds, cap: heartbeat.effectiveCap ?? FIXED_DISPATCH_CAP });
+  // decision used — never a second, inconsistent cap. AC53-gate 判据1: the NARROW --running set is
+  // passed as Consumer B (slots_free / should_refill); dispatchable_disjoint (Consumer A) stays on the
+  // wide --in-flight view — an awaiting-retry task occupies the wide set but no subagent ⇒ does not
+  // occupy cap (the pre-fix gate let it occupy cap ⇒ slots_free 虚低 ⇒ false "该派没派" refusals).
+  const direct = runDirectSlotRefill({ root, inFlightIds, running: runningIds, cap: heartbeat.effectiveCap ?? FIXED_DISPATCH_CAP });
   if (!direct.ok) {
     console.error(`inner-wakeup-heartbeat: REFUSED — slot-refill 直接量重跑失败，无法验证结束不变式，不写入（reason=end-invariant-gate-unverifiable; error=${direct.error}）`);
+    writeRefusal(root, "end-invariant-gate-unverifiable", { error: direct.error });
     return 1;
   }
   const directInv = judgeEndInvariant(direct.refill);
@@ -295,6 +335,9 @@ export function main(argv) {
       `should_refill=${e.should_refill} slots_free=${e.slots_free} dispatchable_disjoint=${e.dispatchable_disjoint} ` +
       `no_refill_reason=${JSON.stringify(e.no_refill_reason)}）——有货可派却要结束本轮，调度层必须回派发（无合法退出路径）`,
     );
+    // AC53-gate 判据4: the refusal is the deliverable — a {written:false, refuse_reason} row so the
+    // round is NOT identical to "inner didn't run the assessment" on the carrier.
+    writeRefusal(root, INVARIANT_VIOLATED_REASON, { evidence: directInv.evidence });
     return 1;
   }
   // The DIRECT measurement is authoritative for the record: write ITS five dispatch-state keys (not

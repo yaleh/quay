@@ -428,7 +428,7 @@ outer 的 `1b` 收尾例程标着「强制/每 tick」却**静默 8.5 小时**�
 | AC29(a) | `for f in manager orchestrator fast-mode; do grep -c 'meta-cc' orchestration/$f-tick-core.md; done` | 三个数均 ≥1 |
 | AC29(b) | `grep -cE '已停用｜已替代｜是缺陷' orchestration/manager-tick-log.md` | ≥1（且三层各自的账本同理） |
 | AC30(a) | `for f in manager orchestrator fast-mode; do wc -l < orchestration/$f-tick-core.md; done` | 三个数均 ≤80 |
-| AC30(b) | `head -8 orchestration/manager-loop-tick.md \| grep -c manager-tick-core`（outer/inner 同形） | 三处均 =1 |
+| AC30(b) | `head -8 orchestration/manager-loop-tick.md \| grep -c manager-tick-core`（outer/inner 同形） | 三处均 =1 | **⚠️ 该判据已于 2026-08-14 12:0xZ 随人裁定【三层改 1 跳】失效**——它测的是「驱动文档头 8 行有转指」（2 跳形态的安全网），**而入口现直指执行核**；新判据见 `SPEC-tick-quality-2026-08-14.md` R1 的 (i)(ii) 两条合取。**按 AC58 形态标注不删**（转指行本身保留为安全网）。
 | AC31 | `git rev-list --count integration..develop` | =0 |
 | AC32(a) | `for f in manager orchestrator fast-mode; do grep -c '\.halt' orchestration/$f-tick-core.md; done` | 三个数均 ≥1 |
 | AC33(c) | `bash plugin/scripts/closure-lag-check.sh --json` | `closure_pass_last_run` 非 null |

@@ -215,8 +215,9 @@
 #     消息是未获回应的 user 输入（收到新指令但尚未应答 = 收不进）。饱和本身不是故障——auto-compact 是
 #     正常机制；只有「饱和且随后指令未被响应」的形态才报 SESSION-DISABLED（区别于普通「忙」）。
 #   * 事件：SESSION-DISABLED（会话面，边沿触发，见下节；gap-session-saturated-composite-condition-
-#     emitter 选 A：事件名与实际断言一致——「失能」而非仅「饱和」，三条件全满足才发：饱和 &&
-#     develop 静默 ≥ SATURATION_SILENCE_MIN && 在飞 worktree 集合无变化）。只在配置了 transcript
+#     emitter 选 A：事件名与实际断言一致——「失能」而非仅「饱和」，四条件全满足才发：饱和 &&
+#     develop 静默 ≥ SATURATION_SILENCE_MIN && 在飞 worktree 集合无变化 && 在飞 worktree 无活进程
+#     （忙时必假直接量，gap-session-disabled-fires-when-busy：最忙时不再误报）。只在配置了 transcript
 #     （SESSION_TRANSCRIPTS）的目标上适用——tick 日志是 loop 写的，不是会话证据（同 AC9 的 CANT-SEND 适用面）。
 #   * 已知盲区：cache_read_input_tokens 只在 assistant API 响应里出现（工具回执/纯元数据记录没有）；
 #     取不到时饱和度判据静默（unknown），不猜。transcript 不携带模型上下文窗口大小，阈值
@@ -237,8 +238,9 @@
 #                             阶段一实测 transcript 最大间隙 20.5min，30min 早报 15min 且留余量
 #   SESSION-IDLE-CANT-SEND    不可自愈（发不出请求不会自愈）→ 宁可误报：见即报（AC9）
 #   SESSION-MARKER-STALE      检测类（标志失效）→ 无阈值、见即报，随事件流观察不一致率
-#   SESSION-DISABLED          检测类（饱和 && develop 静默 ≥T && 在飞集合无变化，复合判据）→ 边沿触发；
-#                             仅配置了 transcript 的目标适用；T=SATURATION_SILENCE_MIN 可配（非字面量 30）
+#   SESSION-DISABLED          检测类（饱和 && develop 静默 ≥T && 在飞集合无变化 && 在飞 worktree
+#                             无活进程，复合判据）→ 边沿触发；仅配置了 transcript 的目标适用；
+#                             T=SATURATION_SILENCE_MIN 可配（非字面量 30）
 #   REPO-STALL                仓库信号（非会话面，AC8 裁定承载）→ STALL_MIN=45 保持
 # 环境：  INTERVAL / STALL_MIN / LOOP_MIN / OVERDUE_MIN / SATURATION_TOKENS / SATURATION_SILENCE_MIN（阈值）
 #         SESSION_TARGETS / SESSION_HEARTBEATS / SESSION_TRANSCRIPTS（多目标覆盖；每行 "<名字> <值>"）
@@ -275,6 +277,8 @@ SATURATION_TOKENS=${SATURATION_TOKENS:-450000}
 # 非字面量 30（manager 2026-08-13 裁定：「T 用现有配置或读宿主，不写字面量 30」）。语义：目标
 # workspace 的 develop 分支最后一次提交距今 ≥ 此分钟数 = 该层静默。默认 10（> 实测非静默的 1 分钟，
 # < OVERDUE_MIN=30 的「可能已死」），跨机可用按机型调。
+# 复合判据全量（gap-session-disabled-fires-when-busy 起为四元）：饱和 && develop 静默 ≥T && 在飞
+# worktree 集合无变化 && 在飞 worktree 无活进程（忙时必假直接量，见 _sl_worktree_idle）。
 SATURATION_SILENCE_MIN=${SATURATION_SILENCE_MIN:-10}
 # 候选 B（gap-permission-prompt-vs-dismissable-prompt-classifier AC4，2026-08-08）：
 # permission-prompt 持续 ≥PERM_PROMPT_WARN_ROUNDS 轮且 transcript 最近 PERM_PROMPT_TX_WINDOW 秒未写入
@@ -542,11 +546,38 @@ _sl_worktree_set() {
     | while read -r p; do basename "$p"; done | sort
 }
 
-# _sl_sat_disabled_verdict —— 复合判定（纯函数）：三条件全满足 ⇒ emit，否则 hold。
+# _sl_worktree_idle —— 直接量：在飞【链接】worktree 内是否有活进程（忙时必假合取项，AC1/判据1，
+# gap-session-disabled-fires-when-busy）。忙 = 任一进程的 cwd 落在某链接 worktree 路径下（外部可核：
+# /proc/<pid>/cwd 解析，非自产：进程是 OS 对象，不是 session-liveness 自写的心跳——硬规则 4b 推荐的
+# 直接量）。忙 ⇒ 该合取项取假（不报 DISABLED）；无活进程 ⇒ 取真（失能放行）。返回 1=无活进程
+# （idle/pass）/ 0=有活进程（busy/block）。
+# 只扫【链接】worktree（排除主 checkout）：主 checkout 是目标会话自己的工作目录，恒有进程落在其中，
+# 扫它会让该合取项永不取假（与硬规则 4 同形态的恒真合取项贡献零）。非 git 仓库 / 无链接 worktree ⇒
+# 无活进程（idle=1，不挡发射——与 _sl_worktree_set 的「非 git ⇒ 空」同源）。
+_sl_worktree_idle() {
+  local root=$1 main pid wt cwd wts
+  main=$(git -C "$root" rev-parse --show-toplevel 2>/dev/null)
+  wts=$(git -C "$root" worktree list --porcelain 2>/dev/null | awk -F' ' '/^worktree /{print $2}' \
+    | while read -r wt; do [ "$wt" = "$main" ] && continue; readlink -f "$wt" 2>/dev/null; done)
+  [ -n "$wts" ] || { echo 1; return 0; }
+  for pid in /proc/[0-9]*; do
+    [ "${pid##*/}" = "$$" ] && continue   # 跳过监视器自身
+    cwd=$(readlink "$pid/cwd" 2>/dev/null) || continue
+    while IFS= read -r wt; do
+      case "$cwd" in
+        "$wt"|"$wt"/*) echo 0; return 0 ;;   # 有活进程 ⇒ busy ⇒ 合取项取假
+      esac
+    done <<< "$wts"
+  done
+  echo 1
+}
+
+# _sl_sat_disabled_verdict —— 复合判定（纯函数）：四条件全满足 ⇒ emit，否则 hold。
 # $1 = sat（$_sl_tx_sat，分类器 transcriptContextSaturation 输出）；
-# $2 = dev_silent（_sl_develop_silent：0|1）；$3 = wt_unchanged（0|1，在飞集合连续两轮无变化）。
+# $2 = dev_silent（_sl_develop_silent：0|1）；$3 = wt_unchanged（0|1，在飞集合连续两轮无变化）；
+# $4 = wt_idle（0|1，_sl_worktree_idle：在飞链接 worktree 无活进程=1 / 忙=0，忙时必假直接量）。
 _sl_sat_disabled_verdict() {
-  if [ "$1" = "saturated" ] && [ "$2" = "1" ] && [ "$3" = "1" ]; then
+  if [ "$1" = "saturated" ] && [ "$2" = "1" ] && [ "$3" = "1" ] && [ "$4" = "1" ]; then
     echo emit
   else
     echo hold
@@ -829,7 +860,7 @@ case "${1:-}" in
     echo "SESSION-IDLE-CANT-SEND — 空闲且发不出请求"
     echo "REPO-STALL — 仓库信号（非会话面）"
     echo "SESSION-STATUS — --once 接缝状态行"
-    echo "SESSION-DISABLED — 会话已失能（disabled：饱和(saturated)&& develop 静默 ≥SATURATION_SILENCE_MIN && 在飞 worktree 集合无变化）"
+    echo "SESSION-DISABLED — 会话已失能（disabled：饱和(saturated)&& develop 静默 ≥SATURATION_SILENCE_MIN && 在飞 worktree 集合无变化 && 在飞 worktree 无活进程）"
     echo "SESSION-INTERVENTION-REQUIRED — 需要人/上层介入（permission-prompt 卡权限框，非 busy，单列可检测）"
     exit 0 ;;
   --saturation)
@@ -1647,15 +1678,20 @@ while true; do
 
       # 事件 6：SESSION-DISABLED（阶段四，gap-session-saturated-composite-condition-emitter，2026-08-13）——
       # 复合条件发射端（选 A，manager 2026-08-13）：把 manager 的「三条件逐条判」搬进发射端，事件名
-      # 与实际断言一致（「失能」而非仅「饱和」）。三条件全满足才发：
+      # 与实际断言一致（「失能」而非仅「饱和」）。四条件全满足才发（gap-session-disabled-fires-when-busy
+      # 2026-08-14 起加第④条忙时必假直接量——原三合取的最忙时误报：develop 静默与集合无变化在多任务
+      # 实现中同时翻真，只有第④条把「忙」与「失能」分开）：
       #   ① 饱和（现有：最近 assistant 消息 usage.cache_read_input_tokens ≥ SATURATION_TOKENS
       #      且最后一条是未获回应的 user 输入——结构化源，非屏幕百分比，AC3；分类器判定来自本轮
       #      _sl_transcript_batch 的 _sl_tx_sat）；
       #   ② 该层 develop 提交静默 ≥ SATURATION_SILENCE_MIN（T 可配，非字面量 30）；
-      #   ③ 在飞 worktree 集合无变化（集合差手法，不用时间戳；首轮无基线 ⇒ 判「有变化」，不误发）。
-      # 饱和不是故障（auto-compact 是正常机制）；只有「饱和且静默且冻结」的失能形态才报（AC4 不关
-      # 事件，真饱和到失能仍报）。区别于普通「忙」（AC2）：busy 会话若还在应答（最后一条是 assistant）
-      # 不报 saturated。仅配置了 transcript（SESSION_TRANSCRIPTS）的目标适用——tick 日志不是会话证据。
+      #   ③ 在飞 worktree 集合无变化（集合差手法，不用时间戳；首轮无基线 ⇒ 判「有变化」，不误发）；
+      #   ④ 在飞【链接】worktree 无活进程（_sl_worktree_idle：/proc/<pid>/cwd 解析，忙时必假——有活
+      #      进程在 worktree 内 = 多任务实现中 = 该条取假，不报 DISABLED）。
+      # 饱和不是故障（auto-compact 是正常机制）；只有「饱和且静默且冻结且无活进程」的失能形态才报（AC4
+      # 不关事件，真饱和到失能仍报）。区别于普通「忙」（AC2）：busy 会话若还在应答（最后一条是
+      # assistant）不报 saturated；busy 会话若在飞 worktree 里有活进程，第④条直接取假。
+      # 仅配置了 transcript（SESSION_TRANSCRIPTS）的目标适用——tick 日志不是会话证据。
       # 边沿触发（PREV_SATURATED 承担；按【复合判定】置位，非按裸饱和——复合首次为真才发一次）。
       if [ -n "$tr_path" ] && [ -r "$tr_path" ]; then
         sat=$_sl_tx_sat
@@ -1669,10 +1705,11 @@ while true; do
           fi
           PREV_WT_SET[$name]=$wt_set
           PREV_WT_KNOWN[$name]=1
-          verdict=$(_sl_sat_disabled_verdict "$sat" "$dev_silent" "$wt_unchanged")
+          wt_idle=$(_sl_worktree_idle "$root")   # 忙时必假直接量（AC1/判据1，gap-session-disabled-fires-when-busy）
+          verdict=$(_sl_sat_disabled_verdict "$sat" "$dev_silent" "$wt_unchanged" "$wt_idle")
           if [ "$verdict" = "emit" ]; then
             if [ "${PREV_SATURATED[$name]:-0}" = "0" ]; then
-              sl_emit "SESSION-DISABLED $name 的会话已失能（disabled：cache_read_input_tokens ≥ ${SATURATION_TOKENS} && develop 静默 ≥ ${SATURATION_SILENCE_MIN}min && 在飞 worktree 集合无变化）——活着但收不进新指令且无推进；区别于普通「忙」（AC2）"
+              sl_emit "SESSION-DISABLED $name 的会话已失能（disabled：cache_read_input_tokens ≥ ${SATURATION_TOKENS} && develop 静默 ≥ ${SATURATION_SILENCE_MIN}min && 在飞 worktree 集合无变化 && 在飞 worktree 无活进程（忙时必假））——活着但收不进新指令且无推进；区别于普通「忙」（AC2）"
             fi
             PREV_SATURATED[$name]=1
           else
