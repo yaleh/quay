@@ -140,7 +140,7 @@ AC72  subagent 从 AC67 任务体判据4 的【示例串】里取 id ⇒ 示例�
 
 - orchestration/fast-mode-tick-core.md（A6 行：步骤清单 → 检查 workflow 是否被执行 + 判据3 scriptPath——双副本之一，正本）
 - plugin/loop/fast-mode-tick-core.md（同一 A6 改动——落地副本随正本逐字落地）
-- .claude/workflows/（fan-in 四步正身 workflow 脚本——具体名实现定，先例 execute-suite-fix.js）
+- .claude/workflows/fan-in-execute.js (new)
 - plugin/scripts/fan-in-workflow-check.ts (new)（判据2 (a)(b)(c) checker：Workflow 记录 ∩ lock-events 时间边界 ∩ agentId 非会话）
 - plugin/test/fan-in-workflow-check.test.mjs (new)
 - plugin/scripts/fan-in-ff-merge.sh（--agent-id 自校验：顶层会话 jsonl 存在 ⇒ 报错退出）
