@@ -784,7 +784,16 @@ inner    ScheduleWakeup 169 次/天，零 CronCreate
       **判据3（防倒退）**：inner 的 CronCreate prompt **不得**要求「读上下文记忆」，须与 manager 锚同形：**只放指针**。
       **负控制归落地方**（D2：manager 不构造）：删掉 cron 后 `CronList` 应变空 ⇒ 核实步骤须报假。
 
-- [ ] **AC80（三层各有 git 跟踪的 prompt 正本 + 不变式检查器）**
+- [x] **AC80（三层各有 git 跟踪的 prompt 正本 + 不变式检查器）** ✅ **2026-08-14 22:1xZ 达成**（inner 侧 `8e833277` 落地后）
+      **判据1 ✅ 三层齐**：manager `orchestration/manager-tick-prompt.txt` · outer `orchestration/outer-tick-prompt.txt` ·
+      **inner `plugin/loop/fast-mode-loop-tick.md:1207/1214/1216` 的 `AC80-INNER-ANCHOR-BEGIN/END` 段**
+      （**按【段】查，不按文件查**——这正是我 21:5xZ 判错的那一点）。
+      **判据3 ✅ 逐字节**：inner 原始记录 `.quay/inner-tick-log.jsonl` `22:03:38Z` ⇒ `byteCompare 815 bytes exact, evaluated=true`，
+      sha256 `9a044b01…` 与注册表一致；outer 侧 `orchestration/tick-log.md:1301` A23 首跑通过。
+      **⚠️ 证据形态说明（结构性上限，写明以免后人误读）**：活 `CronList` 只有该层自己的会话能产出
+      ⇒ manager 的核实止于**读各层自己的 tick-log 载体**（原始记录，非自述——判准②e），⛔ 不是「他们说了」。
+      **⊢ 我自己的一条自纠**：我跑 `outer-anchor-check --layer inner` 得 `evaluated=False`，
+      **那是我没喂活 prompt**（`canonicalBytes=815` 而 `liveBytes=-1`）⇒ **先验检查器的输入，再解释它的结论**。
       **判据1**：三层各有一个 git 跟踪的 prompt 正本文件；**当前真值 manager ✅（`orchestration/manager-tick-prompt.txt`，571 字符）/ outer ❌ / inner ❌**。
       **判据2**：各有一个检查器，能在正本被改坏时报假（manager 现有 `orchestration/manager-anchor-check.py`，实测负控制：删掉指向核的那行 ⇒ 报「缺指向 manager-tick-core.md」）。
       **⚠️ 判据3（本 AC 的真正难点）**：**正本文件与真正投进 CronCreate 的字符串必须一致**——
@@ -805,7 +814,17 @@ inner    ScheduleWakeup 169 次/天，零 CronCreate
       ⇒ outer/inner 的活 prompt **只有它们自己的会话能产出** ⇒ **结构上不可能由 manager 从外部核实**。
       **⛔ 因此本 AC 不勾**，且缺的不是实现而是**接线**（见 AC81 同日发现）。
 
-- [ ] **AC81（三层各有注册表收据 + 每轮四判据核实）**
+- [x] **AC81（三层各有注册表收据 + 每轮四判据核实）** ✅ **2026-08-14 22:1xZ 达成**（三判据分开结论见下，⛔ 不合并成一句）
+      **判据2 ✅（此前唯一落空的一条，22:0xZ–22:1xZ 两层先后接线）**：
+      outer `b0e16183` 把两条命令接进 `orchestrator-tick-core.md` 的 A23；inner `8e833277` 接进 `fast-mode-tick-core.md` 的 A26（src:1218）+ loop 文档步骤。
+      **⊢ 产物是逐判据输出行，不是「已核实」一句**——inner 原始记录 `.quay/inner-tick-log.jsonl`：
+      `21:56:13Z` 首跑 ⇒ ①②③ ok / **④ NOT-EVALUATED（正本缺失）** / `verdict: NOT-EVALUATED (exit 2)`，**三态未压布尔**；
+      `22:03:38Z` ⇒ `ALL OK`（④ byteCompare 815 exact）。**首跑就报了一个假**，说明该判据不是恒真读数。
+      **⇒ 这条 AC 从「造好了但没人用」（AC73 家族）回到被执行，用时约 20 分钟**，链路是：manager 报零接线 → outer 接 → manager 发现 inner 侧仍零 → C17 裁定 → inner 落。
+      **⊢ 遗留（不阻塞本 AC）**：`plugin/loop/manager-*.md` 是我的核的**漂了的副本**（84/331 行，diff 170/2321，停 08-13/08-12，37 个 reader），
+      且 `tick-core-static-check.ts:146` 的配对**只列 tick-CORE ⇒ loop-tick 的 2321 行漂移结构上不可见**。
+      **已裁定并投 outer**：⛔ 不改 C17 枚举（那是为自洽而藏事实）；正解是**指针化**让被争夺的对象消失，落地方 inner，
+      AC 必带**落点映射（37 reader 逐个判读内容/提路径）**与**一个会取假的漂移判据**。**⛔ 我不申请扩大自己的豁免面。**
       **判据（四条全真才算）**：① `CronList` 恰一条 ② 其 id == 注册表记录的 `|cron:<id>|` ③ `--verify` 报 `registry-verified` ④ 锚点正本校验通过。
       **当前真值**：manager 连续 **17 轮**全真；outer/inner **无此机制**。
       **⊢ 能取假的实证**：2026-08-14 09:1xZ 我多传 `--home "$HOME"` 覆盖默认值 ⇒ 读成 `registry-missing` ⇒ 差点误报「88 轮 registry-verified 断了」
