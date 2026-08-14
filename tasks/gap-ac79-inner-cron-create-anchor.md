@@ -1,7 +1,7 @@
 ---
 id: gap-ac79-inner-cron-create-anchor
 title: inner 加 CronCreate 锚（AC79，人 14:2xZ 裁定三层统一应用 CronCreate）——ScheduleWakeup 无外部可核证据，07:41 切模式致自驱死 4.7h
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
