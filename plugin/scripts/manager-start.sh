@@ -26,6 +26,8 @@
 #     --json              JSON 输出（机器消费）；默认人读表格 + 退出码
 #     --home <dir>        覆盖 manager 家目录（默认 $QUAY_GLOBAL_DIR/manager/ → $HOME/.quay-global/manager/）
 #     --check-idle-watch  只核实 idle-watch 是否挂好（monitor-mount-check + --once 接缝），不改动
+#     --ensure-mount-intent  只保证冷启动锚点（checklist + idle-watch.env + idle-watch-mount.txt）
+#                            可靠在位，无 tmux/arm/launch 副作用（cadence 自愈路径，幂等）
 #
 # 冷启动判据（gap-manager-cold-start-no-falsifiable-checklist AC2/AC4）：
 #   本脚本在 manager 家下写两份可证伪产物——
@@ -63,6 +65,7 @@ DRY_RUN=0
 JSON=0
 HOME_DIR="${MANAGER_START_HOME:-}"
 CHECK_IDLE_WATCH=0
+ENSURE_MOUNT_INTENT=0
 
 usage() {
   sed -n '1,46p' "$0" | sed 's/^# \{0,1\}//'
@@ -76,6 +79,7 @@ while [ $# -gt 0 ]; do
     --json) JSON=1; shift ;;
     --home) HOME_DIR="$2"; shift 2 ;;
     --check-idle-watch) CHECK_IDLE_WATCH=1; shift ;;
+    --ensure-mount-intent) ENSURE_MOUNT_INTENT=1; shift ;;
     --help|-h) usage ;;
     *)
       echo "ERROR: manager start accepts NO project args (C5: start 与 adopt 分开). Unknown argument: $1" >&2
@@ -105,6 +109,102 @@ LAUNCH_CMD="${MANAGER_LAUNCH_CMD:-bash $REPO_ROOT/plugin/scripts/quay-launch.sh 
 # ── 武装 loop 命令（AC5：起会话时锚点确定性建立；默认 manager-arm-loop.sh）──────────────────
 # 值 = 一个可执行路径（脚本 / 命令）。manager-start 用 `bash <path> --home …` 调用。
 ARM_CMD="${MANAGER_ARM_CMD:-$REPO_ROOT/plugin/scripts/manager-arm-loop.sh}"
+
+# ── 冷启动工件（AC5；gap-idle-watch-intent-anchor-restore：锚点恢复为可靠在位）─────────────────
+# 主路径与 --ensure-mount-intent 共用同一写入：checklist（缺则建）+ idle-watch.env（缺则建）+
+# 挂载意图 idle-watch-mount.txt（每次运行都重写——判据1 可靠在位）。抽成函数避免两处复制同一
+# heredoc（单份正本，漂移之源防制）。
+_ensure_cold_start_artifacts() {
+  # 家目录必须先建（--ensure-mount-intent 可在 home 未存在时调用，幂等）。
+  mkdir -p "$HOME_DIR"
+
+  # ① <home>/cold-start-checklist.md —— 7 条 observable consequences（对齐 outer 7 条）。
+  #    冷启动完成 = 七键全 true；一条为假 ⇒ 未完成。启动态填三键，首 tick 填其余（B4/A10）。
+  CHECKLIST="$HOME_DIR/cold-start-checklist.md"
+  if [ ! -f "$CHECKLIST" ]; then
+    cat > "$CHECKLIST" <<'MDEOF'
+# manager cold-start — observable consequences（falsifiable checklist）
+
+冷启动完成判据 = 下列 7 条可证伪项**全部为真**（对齐 outer 的 7 条 observable consequences）。
+一条为假 ⇒ manager 冷启动未完成。每键给出可检查判据与证据。
+
+| # | Key | 可检查判据 | 证据 |
+|---|---|---|---|
+| 1 | SESSION-CREATED | `tmux has-session -t <SESSION>` 且 pane 有 claude 进程（非裸 bash） | 启动时已建会话（manager-start.sh） |
+| 2 | HOME-CREATED | `<home>/identity` 存在，含 `role=manager` | 启动时已写（manager-start.sh） |
+| 3 | LOOP-ARMED | `manager-arm-loop.sh --home <home> --validate` 退出 0，且 `<home>/loop-registry.txt` 恰一条 `[manager-tick]` | 启动时已武装（manager-arm-loop.sh；失败时 manager-start 非零退出） |
+| 4 | CRON-EVIDENCED | `manager-arm-loop.sh --home <home> --verify-cron` 退出 0（注册表↔真 CronCreate/CronList 证据一致且新鲜） | 首 tick 填（manager-tick-core.md B4 记 `<home>/cron-evidence.jsonl`） |
+| 5 | IDLE-WATCH-MOUNTED | `monitor-mount-check.sh --json` 报 `mounted=true` + `targetOk=true`（manager 自己的 idle-watch） | 首 tick 填（挂载 `session-liveness-mount.sh`，非独立脚本） |
+| 6 | MONITORS-DELIVERING | `session-liveness.sh --once` 至少一行 `SESSION-STATUS` | 首 tick 填（--once 接缝） |
+| 7 | CHECKLIST-REPORTED | 本文件七键全为 true 且各有证据 | 全部填完后为 true |
+
+启动态预期满足：#1 #2 #3（arm 失败时 manager-start 非零退出）。待首 tick：#4 #5 #6。全 true 才可报 COMPLETE。
+MDEOF
+  fi
+
+  # ② <home>/idle-watch.env —— manager 自己的 idle-watch 观测配置（缺陷 1 修复：确定性建立）。
+  #    真机制 = session-liveness-mount.sh + Monitor 工具任务（非独立脚本）。
+  IDLE_WATCH_ENV="$HOME_DIR/idle-watch.env"
+  if [ ! -f "$IDLE_WATCH_ENV" ]; then
+    cat > "$IDLE_WATCH_ENV" <<'ENVEOF'
+# manager 自己的 idle-watch 观测配置（缺陷 1 修复，gap-manager-cold-start-no-falsifiable-checklist）。
+# 真机制：session-liveness-mount.sh + Monitor 工具任务（非独立脚本 —— 全库无独立 idle-watch 脚本）。
+# 用法：首 tick 按此挂载（manager-tick-core.md A10 判据 → monitor-mount-check.sh --json）。
+IDLE_WATCH_THRESHOLD_MIN=6
+IDLE_WATCH_MOUNT_ENTRY=bash <repo>/plugin/scripts/session-liveness-mount.sh
+IDLE_WATCH_DELIVERY_SEAM=bash <repo>/plugin/scripts/session-liveness.sh --once
+ENVEOF
+  fi
+
+  # ③ 挂载意图锚点（AC5：冷启动后观测锚点必然在位；gap-idle-watch-intent-anchor-restore）。
+  #    bash 不能调 Monitor 工具 ⇒ 写成家目录工件 idle-watch-mount.txt（要执行的 Monitor 命令 +
+  #    两个核实判据），manager 会话照此执行。每次运行都重写（判据1：可靠在位）。
+  _write_mount_intent
+}
+
+_write_mount_intent() {
+  IDLE_WATCH_INTENT="$HOME_DIR/idle-watch-mount.txt"
+  mkdir -p "$HOME_DIR"
+  cat > "$IDLE_WATCH_INTENT" <<EOF
+# manager idle-watch mount intent — 由 manager 会话执行（bash 不能调 Monitor 工具）。
+# 真机制 = session-liveness-mount.sh（exec session-liveness.sh）+ Monitor 事件；非独立进程，
+# pgrep/TaskList 看不到——唯一证据是是否还在发事件。来源：manager-start.sh 冷启动步骤。
+# 生成：$(date -u +%Y-%m-%dT%H:%M:%SZ)
+#
+# 执行（在 manager 会话内，Monitor 工具）：
+#   Monitor({command: "$REPO_ROOT/plugin/scripts/session-liveness-mount.sh",
+#            description: "manager idle-watch: quay outer/inner 转闲 (SESSION-IDLE/OVERDUE/GONE/BACK)",
+#            persistent: true, timeout_ms: 3600000})
+#
+# 核实（两条判据，缺一即未挂好；外部可跑 \`quay manager start --check-idle-watch\`）：
+#   ① bash $REPO_ROOT/plugin/scripts/monitor-mount-check.sh --json   # mounted=true 且 targetOk=true
+#   ② bash $REPO_ROOT/plugin/scripts/session-liveness.sh --once      # 至少一条 SESSION-STATUS
+#
+# 6 分钟阈值、事件 triage 见 plugin/loop/manager-loop-tick.md §1.4/§1.6。
+EOF
+  if [ -f "$IDLE_WATCH_INTENT" ]; then
+    IDLE_WATCH_STATE="intent-written"
+  else
+    IDLE_WATCH_STATE="failed"
+    echo "WARNING: manager-start: could not write idle-watch mount intent to $IDLE_WATCH_INTENT" >&2
+  fi
+}
+
+# ── --ensure-mount-intent：只保证冷启动锚点可靠在位（无 tmux / 无 arm / 无 launch 副作用）──────
+# cadence 自愈路径：manager tick 的 A19① 发现挂载意图缺席时可安全调用，幂等。退出码 = 锚点是否在位。
+if [ "$ENSURE_MOUNT_INTENT" = 1 ]; then
+  _ensure_cold_start_artifacts
+  if [ "$IDLE_WATCH_STATE" = "intent-written" ]; then
+    if [ "$JSON" = 1 ]; then
+      printf '{"idleWatchState":"%s","intent":"%s"}\n' "$IDLE_WATCH_STATE" "$IDLE_WATCH_INTENT"
+    else
+      printf '%-14s %s\n' "idle-watch" "$IDLE_WATCH_STATE ($IDLE_WATCH_INTENT)"
+    fi
+    exit 0
+  fi
+  echo "ERROR: manager-start: --ensure-mount-intent could not write $IDLE_WATCH_INTENT" >&2
+  exit 1
+fi
 
 # ── --check-idle-watch：只核实 idle-watch 是否挂好，不改动（AC3 判据的机械执行面）────────────
 # 真机制 = session-liveness-mount.sh + Monitor 事件（非独立进程）。判据两条：
@@ -161,44 +261,9 @@ if [ ! -f "$IDENTITY" ]; then
   printf 'role=manager\nsession=%s\ncreated=%s\n' "$SESSION" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$IDENTITY"
 fi
 
-# ── 冷启动可证伪产物（AC2/AC4，gap-manager-cold-start-no-falsifiable-checklist）────────────────
-# ① <home>/cold-start-checklist.md —— 7 条 observable consequences（对齐 outer 7 条）。
-#    冷启动完成 = 七键全 true；一条为假 ⇒ 未完成。启动态填三键，首 tick 填其余（B4/A10）。
-CHECKLIST="$HOME_DIR/cold-start-checklist.md"
-if [ ! -f "$CHECKLIST" ]; then
-  cat > "$CHECKLIST" <<'MDEOF'
-# manager cold-start — observable consequences（falsifiable checklist）
-
-冷启动完成判据 = 下列 7 条可证伪项**全部为真**（对齐 outer 的 7 条 observable consequences）。
-一条为假 ⇒ manager 冷启动未完成。每键给出可检查判据与证据。
-
-| # | Key | 可检查判据 | 证据 |
-|---|---|---|---|
-| 1 | SESSION-CREATED | `tmux has-session -t <SESSION>` 且 pane 有 claude 进程（非裸 bash） | 启动时已建会话（manager-start.sh） |
-| 2 | HOME-CREATED | `<home>/identity` 存在，含 `role=manager` | 启动时已写（manager-start.sh） |
-| 3 | LOOP-ARMED | `manager-arm-loop.sh --home <home> --validate` 退出 0，且 `<home>/loop-registry.txt` 恰一条 `[manager-tick]` | 启动时已武装（manager-arm-loop.sh；失败时 manager-start 非零退出） |
-| 4 | CRON-EVIDENCED | `manager-arm-loop.sh --home <home> --verify-cron` 退出 0（注册表↔真 CronCreate/CronList 证据一致且新鲜） | 首 tick 填（manager-tick-core.md B4 记 `<home>/cron-evidence.jsonl`） |
-| 5 | IDLE-WATCH-MOUNTED | `monitor-mount-check.sh --json` 报 `mounted=true` + `targetOk=true`（manager 自己的 idle-watch） | 首 tick 填（挂载 `session-liveness-mount.sh`，非独立脚本） |
-| 6 | MONITORS-DELIVERING | `session-liveness.sh --once` 至少一行 `SESSION-STATUS` | 首 tick 填（--once 接缝） |
-| 7 | CHECKLIST-REPORTED | 本文件七键全为 true 且各有证据 | 全部填完后为 true |
-
-启动态预期满足：#1 #2 #3（arm 失败时 manager-start 非零退出）。待首 tick：#4 #5 #6。全 true 才可报 COMPLETE。
-MDEOF
-fi
-
-# ② <home>/idle-watch.env —— manager 自己的 idle-watch 观测配置（缺陷 1 修复：确定性建立）。
-#    真机制 = session-liveness-mount.sh + Monitor 工具任务（非独立脚本）。
-IDLE_WATCH_ENV="$HOME_DIR/idle-watch.env"
-if [ ! -f "$IDLE_WATCH_ENV" ]; then
-  cat > "$IDLE_WATCH_ENV" <<'ENVEOF'
-# manager 自己的 idle-watch 观测配置（缺陷 1 修复，gap-manager-cold-start-no-falsifiable-checklist）。
-# 真机制：session-liveness-mount.sh + Monitor 工具任务（非独立脚本 —— 全库无独立 idle-watch 脚本）。
-# 用法：首 tick 按此挂载（manager-tick-core.md A10 判据 → monitor-mount-check.sh --json）。
-IDLE_WATCH_THRESHOLD_MIN=6
-IDLE_WATCH_MOUNT_ENTRY=bash <repo>/plugin/scripts/session-liveness-mount.sh
-IDLE_WATCH_DELIVERY_SEAM=bash <repo>/plugin/scripts/session-liveness.sh --once
-ENVEOF
-fi
+# ── 冷启动可证伪产物（AC2/AC4；gap-idle-watch-intent-anchor-restore：抽成共用函数）──────────
+# 写 checklist（缺则建）+ idle-watch.env（缺则建）+ 挂载意图锚点（每次重写）。同一正本见函数定义。
+_ensure_cold_start_artifacts
 
 # ── 建独立会话（幂等：会话已存在且 claude 在位 ⇒ 不动）────────────────────────────────────
 CREATED_SESSION=0
@@ -239,31 +304,8 @@ CHECKLIST_EXISTS=$([ -f "$CHECKLIST" ] && echo true || echo false)
 #    monitor-mount-check.sh --json 的 mounted+targetOk，与 session-liveness.sh --once 的
 #    SESSION-STATUS 行。写成文件而不是只打印，是让「该挂 idle-watch」这个动作有落点——
 #    冷启动后任何一轮 tick / 任何外部核实都能回来对账。──────────────────────────────────────
-IDLE_WATCH_INTENT="$HOME_DIR/idle-watch-mount.txt"
-mkdir -p "$HOME_DIR"
-cat > "$IDLE_WATCH_INTENT" <<EOF
-# manager idle-watch mount intent — 由 manager 会话执行（bash 不能调 Monitor 工具）。
-# 真机制 = session-liveness-mount.sh（exec session-liveness.sh）+ Monitor 事件；非独立进程，
-# pgrep/TaskList 看不到——唯一证据是是否还在发事件。来源：manager-start.sh 冷启动步骤。
-# 生成：$(date -u +%Y-%m-%dT%H:%M:%SZ)
-#
-# 执行（在 manager 会话内，Monitor 工具）：
-#   Monitor({command: "$REPO_ROOT/plugin/scripts/session-liveness-mount.sh",
-#            description: "manager idle-watch: quay outer/inner 转闲 (SESSION-IDLE/OVERDUE/GONE/BACK)",
-#            persistent: true, timeout_ms: 3600000})
-#
-# 核实（两条判据，缺一即未挂好；外部可跑 \`quay manager start --check-idle-watch\`）：
-#   ① bash $REPO_ROOT/plugin/scripts/monitor-mount-check.sh --json   # mounted=true 且 targetOk=true
-#   ② bash $REPO_ROOT/plugin/scripts/session-liveness.sh --once      # 至少一条 SESSION-STATUS
-#
-# 6 分钟阈值、事件 triage 见 plugin/loop/manager-loop-tick.md §1.4/§1.6。
-EOF
-if [ -f "$IDLE_WATCH_INTENT" ]; then
-  IDLE_WATCH_STATE="intent-written"
-else
-  IDLE_WATCH_STATE="failed"
-  echo "WARNING: manager-start: could not write idle-watch mount intent to $IDLE_WATCH_INTENT" >&2
-fi
+#    写入已由 `_ensure_cold_start_artifacts` 在冷启动工件步完成（gap-idle-watch-intent-anchor-restore：
+#    主路径每次运行重写；--ensure-mount-intent 提供无副作用的重写路径）。IDLE_WATCH_STATE 已置位。
 
 if [ "$JSON" = 1 ]; then
   cat <<EOF

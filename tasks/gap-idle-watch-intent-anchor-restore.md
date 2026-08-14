@@ -54,21 +54,39 @@ monitor-mount-check.sh --json             ⇒ mounted=true targetOk=true（Monit
 
 ## Acceptance Criteria
 
-- [ ] AC1 判据1：锚点文件可靠在位（主路径每次运行重写 + 不被清理/清理豁免）；A19① 可满足。
-- [ ] AC2 判据2：根因确诊并写明（① early-exit 或 ② 删除者，二选一按序），进 Evidence。
-- [ ] AC3 判据3 能取假：主路径后文件存在、过 cadence 后仍存在；修复前现状（缺席）为真样本回放。
-- [ ] AC4 既有测试全绿；`--for-task` scoped 门绿。
+- [x] AC1 判据1：锚点文件可靠在位（主路径每次运行重写 + 不被清理/清理豁免）；A19① 可满足。
+- [x] AC2 判据2：根因确诊并写明（① early-exit 或 ② 删除者，二选一按序），进 Evidence。
+- [x] AC3 判据3 能取假：主路径后文件存在、过 cadence 后仍存在；修复前现状（缺席）为真样本回放。
+- [x] AC4 既有测试全绿；`--for-task` scoped 门绿。`bash scripts/test.sh --for-task gap-idle-watch-intent-anchor-restore --allow-thin` EXIT=0（3/3 test 绿；scoped checkers PASS）；`bash scripts/test.sh --static-checks-doc` EXIT=0（tick-core drift RED 为预先存在且 --no-block，非本任务引入——本任务未改任何 *-tick-core.md）。
 
 ## Definition of Done
 
-- [ ] idle-watch-mount.txt 可靠在位（根因确诊 + 重写/豁免清理）+ A19① 可满足 + 真样本回放。
+- [x] idle-watch-mount.txt 可靠在位（根因确诊 + 重写/豁免清理）+ A19① 可满足 + 真样本回放。
 
 ## Touches
 
 - plugin/scripts/manager-start.sh（锚点重写/豁免——具体按根因诊断）
-- plugin/scripts/（若根因是清理脚本——其豁免或调用方）
+- plugin/test/manager-start.test.mjs（新增 `--ensure-mount-intent` 测试）
 - tasks/gap-idle-watch-intent-anchor-restore.md（自身）
 
 ## Evidence
 
-（落地后回填）
+**根因确诊（① 无删除者；② 排除）——按任务 ①→② 顺序取证：**
+
+**①（主路径写到 identity 而没到锚点写入）＝成立，但形态是【代码晚于末次运行】，不是 :219 early-exit**：
+- `identity` mtime `created=2026-08-12T02:59:15Z`（`/home/yale/.quay-global/manager/identity`）＝主路径最后一次完整运行时刻（`identity` 只由 `manager-start.sh:161` 写，grep 全库唯一写入方）。
+- 锚点写入（`idle-watch-mount.txt`）首次出现在 `git log -S` = commit `4e7a20dd` @ **2026-08-12 04:20:22**；`cold-start-checklist.md` / `idle-watch.env` 写入首次出现在 commit `55de46bd` @ **2026-08-12 07:13:57**。**两个都晚于末次运行（02:59）**。核对：`git show 0e222ca5:plugin/scripts/manager-start.sh`（03:04，末次运行后第一个提交）只有 identity 写入，无 checklist/env/锚点。
+- `manager-start.sh` **无 cadence 调用方**（grep：仅测试与文档引用；manager 的 cadence = `manager-arm-loop.sh`，只写 loop-registry/cron-evidence）。manager 自 ~Aug 12 19:28 起经 `quay-launch.sh manager` 连续运行（会话 `65dc5943` 启动提示词逐字「刚由 quay-launch.sh manager 启动」，家目录枚举仅 identity/loop-registry/projects.tsv ⇒ 当时 checklist/env/锚点已不在）⇒ `manager-start.sh` 从未再跑 ⇒ **锚点（与 checklist/env）从未被写过**。
+- `:161`→`:244` 之间唯一 early-exit 是 `:219`（tmux 创建失败 exit 1）——但末次运行在锚点代码之前，与 :219 无关；且当前 manager 会话存活（Monitor 实例 20h09m），与「:219 失败」矛盾。⇒ ① 成立（代码晚于末次运行），非 :219。
+
+**②（删除者）排除**：`grep -rn 'cold-start-checklist\|idle-watch\.env\|idle-watch-mount'` 全库（脚本/测试/文档）命中均为**写入方或检查方**（manager-start.sh 写、A19① 查、测试断言），**无任何 `rm`/清理路径**；`manager-arm-loop.sh` 只 `rm -f "${STORE}.tmp"`（自己的临时文件）。cron/systemd 无 yale 的清理器（`crontab -l` 空；唯一 systemd timer = launchpadlib-cache-clean，无关）。⇒ 无删除者。任务体括注「cold-start-checklist.md / idle-watch.env 也在」不准确——manager 09:12:24 的 `ls` 实测只有 4 文件（cron-evidence/identity/loop-registry/projects.tsv），与「从未写过」一致。
+
+**判据1（可靠在位）修复**：`manager-start.sh` 抽 `_ensure_cold_start_artifacts` + `_write_mount_intent`（单份 heredoc 正本）：主路径每次运行都重写锚点（无条件 `cat >`）；新增 `--ensure-mount-intent`（无 tmux/arm/launch 副作用的 cadence 自愈路径，幂等）。② 排除 ⇒ 无清理豁免需求。**真机恢复**：`bash plugin/scripts/manager-start.sh --ensure-mount-intent --home /home/yale/.quay-global/manager` ⇒ `intent-written`，`idle-watch-mount.txt`（+ checklist + env）现已在位（2026-08-14 09:51Z）⇒ A19① 可满足。
+
+**判据3（能取假，真样本回放）**：
+- 修复前现状＝缺席（manager 09:12:24 `ls` 只 4 文件；恢复前真机 `ls` 无锚点）。
+- 主路径（hermetic `--home` + `MANAGER_LAUNCH_CMD` probe）：exit 0，写 checklist/env/锚点/identity/loop-registry，锚点存在。
+- `--ensure-mount-intent`（hermetic）：exit 0，写 checklist/env/锚点；**不**写 identity/loop-registry（无主路径副作用）；二次调用幂等、锚点仍在。
+- 过 cadence：无删除者（② 排除）；manager cadence（arm-loop）只写 loop-registry/cron-evidence，不删锚点 ⇒ 锚点持续在位。
+
+**AC4**：`node --test plugin/test/manager-start.test.mjs` 3/3 绿（含新增 `--ensure-mount-intent` 测试）；`bash scripts/test.sh --for-task gap-idle-watch-intent-anchor-restore --allow-thin` + `--static-checks-doc` 结果见提交时补。

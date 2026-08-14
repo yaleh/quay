@@ -98,3 +98,42 @@ test("AC2/AC5 — a real manager-start writes cold-start-checklist.md (7 keys) +
     isolatedTmux(["kill-session", "-t", sess], { socket: path.join(socketBase, "default"), env });
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
 });
+
+// ── gap-idle-watch-intent-anchor-restore — --ensure-mount-intent restores the mount-intent anchor ──
+// The idle-watch cold-start anchor (`idle-watch-mount.txt`) was observed absent while another check's
+// green masked it (manager 2026-08-14 09:1xZ, gap-idle-watch-intent-anchor-restore). Root cause ①:
+// the main path last ran before the anchor-write code existed, and manager-start.sh has no cadence
+// caller — the anchor was never written. `--ensure-mount-intent` is the safe cadence path (no
+// tmux/arm/launch side effects) that re-creates the cold-start artifacts idempotently; it must NOT
+// create identity (that is the main path's home marker) nor launch a session.
+
+test("gap-idle-watch-intent-anchor-restore — --ensure-mount-intent writes the mount-intent anchor without tmux/arm/launch side effects", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "quay-mgr-intent-"));
+  try {
+    const home = path.join(tmp, "home");
+    const r = spawnSync("bash", [MANAGER_START, "--ensure-mount-intent", "--home", home], { encoding: "utf8" });
+    assert.equal(r.status, 0, `--ensure-mount-intent must exit 0:\n${r.stdout}\n${r.stderr}`);
+    assert.match(r.stdout, /intent-written/, "must report intent-written");
+
+    // The anchor is written and names the real mechanism + the two verify seams.
+    const intent = path.join(home, "idle-watch-mount.txt");
+    assert.ok(fs.existsSync(intent), "must write <home>/idle-watch-mount.txt");
+    const content = fs.readFileSync(intent, "utf8");
+    assert.match(content, /session-liveness-mount\.sh/, "intent must name the real mount mechanism");
+    assert.match(content, /monitor-mount-check\.sh --json/, "intent must carry verify seam ①");
+    assert.match(content, /session-liveness\.sh --once/, "intent must carry verify seam ②");
+
+    // The same cold-start artifact set the main path writes (checklist + env) is restored too.
+    assert.ok(fs.existsSync(path.join(home, "cold-start-checklist.md")), "must re-create cold-start-checklist.md");
+    assert.ok(fs.existsSync(path.join(home, "idle-watch.env")), "must re-create idle-watch.env");
+
+    // No main-path side effects: identity must NOT be created (no home marker), no loop registry.
+    assert.ok(!fs.existsSync(path.join(home, "identity")), "--ensure-mount-intent must not create identity");
+    assert.ok(!fs.existsSync(path.join(home, "loop-registry.txt")), "--ensure-mount-intent must not arm the loop");
+
+    // Idempotent: a second call still exits 0 and leaves the anchor present.
+    const r2 = spawnSync("bash", [MANAGER_START, "--ensure-mount-intent", "--home", home], { encoding: "utf8" });
+    assert.equal(r2.status, 0, `second --ensure-mount-intent must still exit 0:\n${r2.stdout}\n${r2.stderr}`);
+    assert.ok(fs.existsSync(intent), "anchor still present after second call");
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+});
