@@ -1,7 +1,7 @@
 ---
 id: gap-session-disabled-fires-when-busy
 title: SESSION-DISABLED 在最忙时误报——三合取缺「忙时必假」的直接量，③ cache_read 单调恒真（manager 12:2xZ 报）
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
