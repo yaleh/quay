@@ -11,7 +11,8 @@
 //   AC6 — mem_avail < 2048MB → WAIT + prints RSS top-5
 //   AC10 — orphaned node procs printed on their own line, excluded from the GO/WAIT verdict
 //   AC7 — test.sh consults the gate on the full-suite default path; skips it for scoped runs
-//   AC5 — default concurrency = max(1, floor(nproc / amplification)); explicit --test-concurrency=N wins
+//   AC5 — default concurrency = max(1, floor(nproc × oversub / S)); explicit --test-concurrency=N wins
+//         (gap-suite-budget-oversubscribe pure computation — nproc read-host, oversub 旋钮③, S 旋钮②)
 //
 // The gate's own AC3 (raise cpu pressure with real busy loops, watch WAIT, stop, watch GO) is a
 // live-system control — recorded in the task body, not here (a unit test cannot hold /proc/pressure
@@ -34,10 +35,11 @@ import { spawnSync, execSync } from "node:child_process";
 // CPU_LIMIT default must equal — the drift-invariant test below imports the authority so the
 // two thresholds cannot silently diverge again.
 import { WAIT_THRESHOLD } from "../scripts/cap-from-gate.ts";
-// gap-ac74-serial-lowconc-literal-direct-path 判据4 — the RUNNER-side derivations the direct path
-// must match: defaultLaneCount() (main lane, AC68 rollback ⇒ no slot divisor) + hostParallelism()/
-// concurrentSuiteSlots() (the serial/lowconc H÷S phase budget). Imported as FUNCTIONS (not the
-// module-level DEFAULT_* consts) so the env seams below are read at call time, not import time.
+// gap-suite-budget-oversubscribe 判据4 — the RUNNER-side derivations the direct path
+// must match: defaultLaneCount() (main lane = max(1, floor(nproc × oversub / S))) +
+// hostParallelism()/concurrentSuiteSlots() (the serial/lowconc H÷S phase budget). Imported as
+// FUNCTIONS (not the module-level DEFAULT_* consts) so the env seams below are read at call time,
+// not import time.
 import { defaultLaneCount, hostParallelism, concurrentSuiteSlots } from "../scripts/full-suite-runner.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -81,20 +83,20 @@ function defaultCpuLimit() {
 }
 
 /** Extract the REAL default_concurrency_formula from scripts/test.sh and run it with seams.
- *  `in_use` (default 0) is the RESOURCE_GATE_TEST_NODE_PROCS seam — the budget-aware derivation
- *  subtracts it from nproc (gap-test-concurrency-cap-does-not-scope-nested-spawns AC1).
- *  `slots` is RETAINED as an inert parameter (accepted but ignored) for call-site compatibility:
- *  the MAIN formula no longer divides by the concurrent-suite slot count S (gap-ac74 AC68 /slots
- *  回退 — `in_use` presses dynamically, the static `/ S` was rolled back). The serial/lowconc PHASE
- *  defaults (serial_lowconc_host_default) ARE H÷S — tested separately. */
-function derivedConcurrency(nproc, amplification, in_use = 0, slots = 1) {
+ *  `slots` (default 2 = QUAY_MAX_CONCURRENT_SUITES current value) is the RESOURCE_GATE_CONCURRENT_SUITES
+ *  seam; `oversub` (default 1 = QUAY_MAX_OVERSUBSCRIPTION current value) is the
+ *  RESOURCE_GATE_OVERSUBSCRIPTION seam. The MAIN formula is PURE computation
+ *  (max(1, floor(nproc × oversub / S)) — gap-suite-budget-oversubscribe): no runtime `in_use`
+ *  subtraction, no AMPLIFICATION divisor. The serial/lowconc PHASE defaults
+ *  (serial_lowconc_host_default) ARE H÷S — tested separately. */
+function derivedConcurrency(nproc, slots = 2, oversub = 1) {
   const src = fs.readFileSync(TEST_SH, "utf8");
   // The formula lives in default_concurrency_formula; default_test_concurrency CALLS it (the
   // 2026-08-03 TEMPORARY pin to 8 was reverted by
   // gap-concurrency-derivation-reverted-but-doc-ac-and-tests-all-still-report-derived).
   const fnMatch = src.match(/default_concurrency_formula\(\) \{[^]*?\n\}/);
   assert.ok(fnMatch, "scripts/test.sh must define default_concurrency_formula()");
-  const script = `${fnMatch[0]}\nRESOURCE_GATE_NPROC=${nproc}\nRESOURCE_GATE_AMPLIFICATION=${amplification}\nRESOURCE_GATE_TEST_NODE_PROCS=${in_use}\nRESOURCE_GATE_CONCURRENT_SUITES=${slots}\nprintf '%s' "$(default_concurrency_formula)"\n`;
+  const script = `${fnMatch[0]}\nRESOURCE_GATE_NPROC=${nproc}\nRESOURCE_GATE_CONCURRENT_SUITES=${slots}\nRESOURCE_GATE_OVERSUBSCRIPTION=${oversub}\nprintf '%s' "$(default_concurrency_formula)"\n`;
   const res = spawnSync("bash", ["-c", script], { encoding: "utf8" });
   assert.equal(res.status, 0, `derivedConcurrency subshell failed: ${res.stderr}`);
   return Number(res.stdout.trim());
@@ -103,10 +105,9 @@ function derivedConcurrency(nproc, amplification, in_use = 0, slots = 1) {
 /** Directly EXECUTE default_test_concurrency (the real effective default) and return its value.
  *  This is the AC1/AC3 "test the real value, not the spelling" seam: it runs the actual function
  *  the exec lines call, so a function that returns a constant instead of the derived formula is
- *  caught HERE, not by a call-site-spelling assertion. `in_use` defaults to 0 — the idle-host
- *  default (the budget-aware subtraction is asserted separately via derivedConcurrency's in_use
- *  seam). No slot seam is set — the AC74 rollback removed the `/ S` divisor, so the idle host ⇒
- *  max(1, floor(nproc/1.0)) = nproc (single suite uses the whole host; overlap pressed by in_use). */
+ *  caught HERE, not by a call-site-spelling assertion. Runs on the REAL host (nproc, S=2, oversub=1)
+ *  — the idle-host default ⇒ max(1, floor(nproc × 1 / 2)) = nproc/2 (gap-suite-budget-oversubscribe
+ *  pure computation). */
 function currentDefaultConcurrency() {
   const src = fs.readFileSync(TEST_SH, "utf8");
   const fnMatch = src.match(/default_test_concurrency\(\) \{[^]*?\n\}/);
@@ -115,7 +116,7 @@ function currentDefaultConcurrency() {
   // isolated subshell is self-contained (matches the ## Contract effective_concurrency measure).
   const formulaMatch = src.match(/default_concurrency_formula\(\) \{[^]*?\n\}/);
   assert.ok(formulaMatch, "scripts/test.sh must define default_concurrency_formula()");
-  const script = `${formulaMatch[0]}\n${fnMatch[0]}\nRESOURCE_GATE_TEST_NODE_PROCS=0\nprintf '%s' "$(default_test_concurrency)"\n`;
+  const script = `${formulaMatch[0]}\n${fnMatch[0]}\nprintf '%s' "$(default_test_concurrency)"\n`;
   const res = spawnSync("bash", ["-c", script], { encoding: "utf8" });
   assert.equal(res.status, 0, `currentDefaultConcurrency subshell failed: ${res.stderr}`);
   return Number(res.stdout.trim());
@@ -367,51 +368,48 @@ test("AC10 — orphaned node procs (ppid=1, cwd deleted) are listed on their own
   assert.match(orphanLines[1], /222:\/home\/yale\/work\/quay-worktrees\/b \(deleted\)/);
 });
 
-// ── AC5/AC1/AC3: derived default concurrency = max(1, floor(nproc / amplification)) ────────────────
-test("AC5 — formula derives max(1, floor(nproc/amp)); the DEFAULT executes that formula (not a constant)", () => {
+// ── AC5/AC1/AC3: derived default concurrency = max(1, floor(nproc × oversub / S)) ──────────────────
+// gap-suite-budget-oversubscribe (human 14:4xZ 修正方向 — (b) 认领制/(c) 锁发配额 均被否): the MAIN
+// derivation is PURE computation over config knobs + host env. nproc = host (read-host, never a
+// literal); oversub = 旋钮③ QUAY_MAX_OVERSUBSCRIPTION (default 1); S = 旋钮② QUAY_MAX_CONCURRENT_SUITES
+// (default 2). Σ over S running suites = S × (nproc×oversub/S) = nproc×oversub, structurally bounded.
+test("AC5 — formula derives max(1, floor(nproc × oversub / S)); the DEFAULT executes that formula (not a constant)", () => {
   // The REAL formula from scripts/test.sh (default_concurrency_formula), run with test seams.
-  // AMPLIFICATION = 1.0 since the AC5 cost-side experiment ran
-  // (gap-dod-two-green-runs-and-over90-budget-are-mathematically-incompatible, 2026-08-08):
-  // zero cancelled at concurrency 4 AND 8 on the same selected set; nproc is the wall-clock sweet
-  // spot. The old 2.1 guard is now reachable only via the explicit seam (it remains valid to prove
-  // the formula shape). After the AC74 rollback the formula is floor(nproc/amp) with NO slot
-  // divisor (the AC68 `/ S` was rolled back — `in_use` presses overlap dynamically).
-  assert.equal(derivedConcurrency(4, 1.0), 4, "4 cores / 1.0 → nproc (the formula shape)");
-  assert.equal(derivedConcurrency(16, 1.0), 16, "16 cores / 1.0 → 16");
-  assert.equal(derivedConcurrency(4, 2.1), 1, "4 cores / 2.1 → 1 (the old unproven-conservative guard)");
-  assert.equal(derivedConcurrency(1, 1.0), 1, "floor(nproc/amp) must clamp at 1 (max(1, ...))");
-  assert.equal(derivedConcurrency(8, 1.0), 8, "8 cores / 1.0 → 8");
-  // AC74/判据1 — the `/ S` divisor is GONE: a lone suite on 16 cores derives nproc, not nproc/2.
-  assert.equal(derivedConcurrency(16, 1.0, 0, 2), 16, "16 cores, 2 slots → STILL 16 (AC68 rollback: no slot divisor in the MAIN formula)");
+  // nproc × oversub / S, clamped at 1.
+  assert.equal(derivedConcurrency(4, 1, 1), 4, "4 cores, 1 slot → nproc (single slot = whole host)");
+  assert.equal(derivedConcurrency(16, 1, 1), 16, "16 cores, 1 slot → 16");
+  assert.equal(derivedConcurrency(16, 2, 1), 8, "16 cores, 2 slots → 8 (nproc×oversub/S)");
+  assert.equal(derivedConcurrency(4, 2, 1), 2, "4 cores, 2 slots → 2");
+  assert.equal(derivedConcurrency(1, 2, 1), 1, "floor(1×1/2) clamps at 1 (max(1, ...))");
+  assert.equal(derivedConcurrency(8, 2, 1), 4, "8 cores, 2 slots → 4");
+  // oversub is the express channel for "single suite uses the whole host" (判据4) — never dynamic run-count.
+  assert.equal(derivedConcurrency(16, 2, 2), 16, "16 cores, 2 slots, oversub=2 → 16");
+  assert.equal(derivedConcurrency(16, 2, 0.5), 4, "oversub=0.5 → 4 (fractional oversub reads through)");
   // AC1/AC3 of gap-concurrency-derivation-reverted-but-doc-ac-and-tests-all-still-report-derived:
   // the EFFECTIVE default (default_test_concurrency) must equal the derived formula on the REAL host
   // — the 2026-08-03 TEMPORARY pin to 8 was reverted (that drift: docs/tests said derived while the
   // code returned a constant). This assertion directly executes the real function, so a future
-  // constant-return regression goes RED here (the Contract's control clause). An idle host ⇒
-  // max(1, floor(nproc/1.0)) = nproc — single suite uses the whole host (AC74 rollback).
+  // constant-return regression goes RED here (the Contract's control clause). Idle host ⇒
+  // max(1, floor(nproc × 1 / 2)) = nproc/2 (pure computation known cost).
   const realNproc = Number(execSync("nproc").toString().trim());
   assert.equal(
     currentDefaultConcurrency(),
-    derivedConcurrency(realNproc, 1.0, 0, 2),
-    `default_test_concurrency must return max(1, floor(${realNproc}/1.0)) = ${Math.max(1, Math.floor(realNproc))} on the real host (AC74: no slot divisor — single suite = nproc)`
+    derivedConcurrency(realNproc, 2, 1),
+    `default_test_concurrency must return max(1, floor(${realNproc}×1/2)) = ${Math.max(1, Math.floor(realNproc / 2))} on the real host (gap-suite-budget-oversubscribe pure computation)`
   );
 });
 
-test("AC5b — the derivation is BUDGET-AWARE: in_use node processes subtract from nproc (cross-layer total budget, AC1)", () => {
-  // gap-test-concurrency-cap-does-not-scope-nested-spawns AC1/AC4: the worker derivation reads the
-  // shared total-process budget (process-budget.sh) — total_budget = nproc, and in_use (node-MainThread
-  // procs ALREADY running across all worktrees) is subtracted, so nested spawns can no longer multiply
-  // beyond the cap. The old per-layer derivation ignored in_use entirely (each worker derived nproc,
-  // so N nested runners on 4 cores = N×4 procs = the 17-19 / load 18.70 defect). The assertions below
-  // pin the SINGLE-LANE (slots=1) budget subtraction; the AC68 slot divisor is orthogonal (tested in
-  // the AC68 tests that follow) — the two conservative reductions compose: max(1, floor((b−u)/amp/s)).
-  assert.equal(derivedConcurrency(4, 1.0, 0), 4, "idle (in_use=0) → nproc, the cost-side sweet spot");
-  assert.equal(derivedConcurrency(4, 1.0, 2), 2, "2 node procs already running → 4-2 = 2");
-  assert.equal(derivedConcurrency(4, 1.0, 3), 1, "3 running → 4-3 = 1");
-  assert.equal(derivedConcurrency(4, 1.0, 8), 1, "budget exhausted (in_use ≥ budget) → clamp at 1, never 0/negative");
-  assert.equal(derivedConcurrency(16, 1.0, 12), 4, "16 cores, 12 running → 4");
-  // The shared authority (plugin/scripts/process-budget.sh) reports the same total_budget/in_use/
-  // available that the formula consumes (single source).
+test("AC5b — the MAIN derivation is PURE computation: runtime in_use is NOT subtracted (the pre-fix racy subtraction was the oversubscription source); process-budget.sh still reports the cross-layer budget", () => {
+  // gap-suite-budget-oversubscribe: the pre-fix `nproc − in_use` read the runtime in_use at each
+  // suite's own start (each subtracted only what was already running, never what would come) ⇒ two
+  // suites derived 16 then 8, Σ 24 > 16. The pure formula ignores in_use entirely — S and oversub
+  // are the structural bound. (The rejected (b)/(c) alternatives — claim ledger / lock-carried
+  // quota — also introduced new runtime state; the human chose zero new runtime state.)
+  assert.equal(derivedConcurrency(16, 2, 1), 8, "16 cores / 2 slots → 8 regardless of in_use");
+  assert.equal(derivedConcurrency(4, 2, 1), 2, "4 cores / 2 slots → 2");
+  // The shared authority (plugin/scripts/process-budget.sh) still reports total_budget / in_use /
+  // available — the cross-layer PROCESS-budget observation the gate's report and cap-from-gate
+  // consume (single source for those consumers; not a lane-formula input).
   const budgetScript = path.join(REPO_ROOT, "plugin", "scripts", "process-budget.sh");
   assert.ok(fs.existsSync(budgetScript), "the shared total-budget authority must exist");
   const seam = { ...process.env, RESOURCE_GATE_TEST_NPROC: "4", RESOURCE_GATE_TEST_NODE_PROCS: "3" };
@@ -422,23 +420,71 @@ test("AC5b — the derivation is BUDGET-AWARE: in_use node processes subtract fr
   assert.match(b.stdout, /available=1/, "available = max(0, total_budget - in_use)");
 });
 
-// ── AC74 (gap-ac74-serial-lowconc-literal-direct-path; human 06:4xZ AC68 /slots 回退) ───────────────
-// The human ruling rolled AC68's `/ S` divisor back: the MAIN formula derives hostParallelism −
-// in_use (NO slot divisor — `in_use` presses overlap dynamically; a lone suite must get all nproc,
-// not nproc/2). The serial/lowconc PHASE defaults are host-derived H÷S (AC44 rule) on the DIRECT
-// path too (they were 2/3 literals). These tests are the 判据1/判据2/判据4 checker + AC49 negative
-// control: they assert the rollback (main = nproc), the host-derived phase knobs, and that the
-// three-value reading is IDENTICAL between the direct path and the runner path, AND that the
-// checker CAN go red on the pre-fix state (main 8 / serial 2 / lowconc 3 — the task's "现在红").
-test("AC74/判据1 — MAIN formula has NO slot divisor (AC68 /slots rollback): lone suite derives nproc, overlap pressed by in_use", () => {
-  // The rollback: S no longer divides the main formula — single suite gets all nproc.
-  assert.equal(derivedConcurrency(16, 1.0, 0, 2), 16, "16 cores, 2 slots → STILL 16 (lone suite = nproc, not nproc/2)");
-  assert.equal(derivedConcurrency(16, 1.0, 0, 1), 16, "16 cores, 1 slot → 16 (S=1 and S=2 now agree — no divisor)");
-  assert.equal(derivedConcurrency(4, 1.0, 0, 2), 4, "4 cores, 2 slots → 4 (single suite = nproc)");
-  assert.equal(derivedConcurrency(1, 1.0, 0, 2), 1, "floor(1/1) clamps at 1 (max(1, ...))");
-  // in_use still presses dynamically (the AC1 cross-layer budget subtraction — unchanged by the rollback).
-  assert.equal(derivedConcurrency(16, 1.0, 8), 8, "16 cores, 8 workers already running → 16−8 = 8");
-  assert.equal(derivedConcurrency(16, 1.0, 8, 2), 8, "in_use pressure is INDEPENDENT of S (8, not floor((16−8)/2)=4)");
+// ── gap-suite-budget-oversubscribe: 判据1/判据2/判据3/判据4 ─────────────────────────────────────────
+// The task's three lane derivations (serial_lowconc_host_default, default_concurrency_formula,
+// defaultLaneCount) must ALL read 旋钮② QUAY_MAX_CONCURRENT_SUITES; the MAIN formula is
+// max(1, floor(nproc × oversub / S)); the two-suite real sample (16+8=24 > 16) must replay as NOT
+// exceeding; a single suite gets nproc/S (known cost, not a defect). The AC74-era assertions
+// (main = nproc, no slot divisor) are REVERSED by this task's human ruling.
+test("判据1 — MAIN formula = max(1, floor(nproc × oversub / S)): Σ over S suites ≤ nproc × oversub structurally", () => {
+  assert.equal(derivedConcurrency(16, 2, 1), 8, "16 cores, 2 slots → 8");
+  assert.equal(derivedConcurrency(16, 1, 1), 16, "16 cores, 1 slot → 16");
+  assert.equal(derivedConcurrency(4, 2, 1), 2, "4 cores, 2 slots → 2");
+  assert.equal(derivedConcurrency(1, 2, 1), 1, "floor(1×1/2) clamps at 1");
+  // Σ invariant: S suites × lane = nproc × oversub — structurally cannot exceed.
+  const nproc = 16, oversub = 1, slots = 2;
+  const lane = derivedConcurrency(nproc, slots, oversub);
+  assert.equal(slots * lane, nproc * oversub, `${slots} suites × ${lane} = ${slots * lane} = nproc×oversub (${nproc * oversub})`);
+  assert.ok(slots * lane <= nproc * oversub, "Σ lane ≤ nproc × oversub");
+});
+
+test("AC2 (判据2) — two-suite real sample (16+8>16, load 29.23) replays as NOT exceeding under the pure formula; the pre-fix state red by 8", () => {
+  // The 2026-08-14 14:39Z incident: two concurrent suites derived 16 (first, in_use≈0) + 8 (second,
+  // in_use≈8) = 24 workers > total_budget 16 (load 29.23). Under the pure formula each suite derives
+  // nproc×oversub/S = 8, so the replay Σ = 16 = nproc×oversub — cannot exceed.
+  const nproc = 16, oversub = 1, slots = 2;
+  const lane = derivedConcurrency(nproc, slots, oversub);
+  assert.equal(lane, 8, `each suite derives nproc×oversub/S = ${Math.floor((nproc * oversub) / slots)}`);
+  assert.equal(2 * lane, 16, "two suites × 8 = 16");
+  assert.ok(2 * lane <= nproc * oversub, "Σ lane ≤ nproc × oversub (no longer red)");
+  // The pre-fix state was red by 8 — the negative control (the checker CAN take false).
+  const oldFirst = 16;   // old main formula: first suite, in_use≈0 ⇒ nproc
+  const oldSecond = 8;   // old main formula: second suite, in_use≈8 ⇒ nproc − in_use
+  assert.equal(oldFirst + oldSecond, 24, "pre-fix Σ = 24");
+  assert.equal(oldFirst + oldSecond - nproc * oversub, 8, "pre-fix exceeded nproc×oversub by 8");
+  assert.ok(oldFirst + oldSecond > nproc * oversub, "pre-fix 24 > 16 → red (structurally impossible under the pure formula)");
+});
+
+test("AC3 (判据3) — all three lane derivations read QUAY_MAX_CONCURRENT_SUITES (grep -L on any derivation file ⇒ not landed)", () => {
+  // 判据3: serial_lowconc / default_concurrency_formula / defaultLaneCount 全部读旋钮② — the reverse
+  // half of concurrency-literal-check (definition point exists but a derivation does not read it).
+  const testSh = fs.readFileSync(TEST_SH, "utf8");
+  const runnerTs = fs.readFileSync(path.join(REPO_ROOT, "plugin", "scripts", "full-suite-runner.ts"), "utf8");
+  // serial_lowconc_host_default reads the knob directly.
+  assert.match(testSh, /serial_lowconc_host_default\(\) \{[^]*QUAY_MAX_CONCURRENT_SUITES/, "serial_lowconc_host_default must read QUAY_MAX_CONCURRENT_SUITES");
+  // default_concurrency_formula reads the knob (via the RESOURCE_GATE_CONCURRENT_SUITES seam fallback).
+  assert.match(testSh, /default_concurrency_formula\(\) \{[^]*QUAY_MAX_CONCURRENT_SUITES/, "default_concurrency_formula must read QUAY_MAX_CONCURRENT_SUITES");
+  // defaultLaneCount reads the knob through concurrentSuiteSlots() (the single definition point).
+  assert.match(runnerTs, /defaultLaneCount\(\): number \{[^]*concurrentSuiteSlots\(\)/, "defaultLaneCount must read the slot knob (concurrentSuiteSlots())");
+  // Each derivation also reads the oversub knob ③ (or its seam).
+  assert.match(testSh, /default_concurrency_formula\(\) \{[^]*QUAY_MAX_OVERSUBSCRIPTION/, "default_concurrency_formula must read QUAY_MAX_OVERSUBSCRIPTION");
+  assert.match(runnerTs, /defaultLaneCount\(\): number \{[^]*QUAY_MAX_OVERSUBSCRIPTION/, "defaultLaneCount must read QUAY_MAX_OVERSUBSCRIPTION");
+});
+
+test("AC4 (判据4) — single suite gets nproc/S (pure computation known cost, NOT full nproc); oversub knob is the express channel, no dynamic amplification", () => {
+  // A lone suite under the pure formula gets nproc/S = 8 on a 16-core 2-slot host — the known cost
+  // of the pure-computation approach (no "how many suites are running" runtime read, which was the
+  // rejected dynamic-amplification form). Express "single suite uses the whole host" via oversub=2.
+  assert.equal(derivedConcurrency(16, 2, 1), 8, "single suite = nproc/S = 8 (not 16) — known cost");
+  assert.equal(derivedConcurrency(16, 2, 2), 16, "oversub=2 → single suite = 16 (the trade-off knob)");
+  // The formula does NOT read any runtime "running suite count" — S is a static knob. Strip the
+  // shell comments first (by-position — the historical `nproc − in_use` explanation is prose, not
+  // code) and assert the CODE neither reads in_use nor shells out to process-budget.
+  const src = fs.readFileSync(TEST_SH, "utf8");
+  const fnMatch = src.match(/default_concurrency_formula\(\) \{[^]*?\n\}/);
+  assert.ok(fnMatch, "default_concurrency_formula must exist");
+  const codeLines = fnMatch[0].split("\n").filter((l) => !/^\s*#/.test(l)).join("\n");
+  assert.doesNotMatch(codeLines, /in_use|RESOURCE_GATE_TEST_NODE_PROCS|process-budget\.sh|concurrentSuitesRunning/, "the main formula must NOT read runtime running-suite/in_use counts");
 });
 
 test("AC74/判据2 — serial/lowconc defaults are HOST-derived (H÷S), the 2/3 literals are gone", () => {
@@ -455,12 +501,14 @@ test("AC74/判据2 — serial/lowconc defaults are HOST-derived (H÷S), the 2/3 
   assert.doesNotMatch(src, /LOWCONC_CONCURRENCY="\$\{QUAY_LOWCONC_CONCURRENCY:-3\}"/, "the 3 literal must be gone");
 });
 
-test("AC74/判据4 — direct path and runner path read the SAME three values, equal to the host derivation (main=H, serial=lowconc=H÷S)", () => {
+test("判据4 — direct path and runner path read the SAME three values, equal to the host derivation (main=H×oversub÷S, serial=lowconc=H÷S)", () => {
   // Deterministic seams on BOTH sides so the comparison is host-independent.
   const prevNproc = process.env.RESOURCE_GATE_NPROC;
   const prevSlots = process.env.QUAY_MAX_CONCURRENT_SUITES;
+  const prevOversub = process.env.QUAY_MAX_OVERSUBSCRIPTION;
   process.env.RESOURCE_GATE_NPROC = "16";
   process.env.QUAY_MAX_CONCURRENT_SUITES = "2";
+  process.env.QUAY_MAX_OVERSUBSCRIPTION = "1";
   try {
     // RUNNER path (full-suite-runner.ts): defaultLaneCount() for main; H÷S for the phase knobs.
     const runnerMain = defaultLaneCount();
@@ -468,18 +516,21 @@ test("AC74/判据4 — direct path and runner path read the SAME three values, e
     const runnerLowconc = Math.max(1, Math.floor(hostParallelism() / concurrentSuiteSlots()));
     // DIRECT path (scripts/test.sh): default_concurrency_formula for main; serial_lowconc_host_default
     // for both phases (no env → the fallback fires).
-    const directMain = derivedConcurrency(16, 1.0, 0);
+    const directMain = derivedConcurrency(16, 2, 1);
     const directSerial = phaseConcurrencyDefault(16, 2);
     const directLowconc = phaseConcurrencyDefault(16, 2);
 
     const host = 16;
     const slots = 2;
-    // Each value equals the host derivation (判据4 target table: main=H, serial=lowconc=H÷S).
-    assert.equal(directMain, host, `direct main must be hostParallelism (${host}) — AC68 rollback: no /slots`);
-    assert.equal(directSerial, host / slots, `direct serial must be H÷S (${host / slots}) — AC44 derivation`);
-    assert.equal(directLowconc, host / slots, `direct lowconc must be H÷S`);
-    // Direct == runner (the "与经 runner 起相同" half — this is what forces defaultLaneCount to also
-    // drop /slots: a runner that still divided by S would read main=8 ≠ direct main=16 → red).
+    const oversub = 1;
+    const targetMain = Math.max(1, Math.floor((host * oversub) / slots));
+    const targetPhase = host / slots;
+    // Each value equals the host derivation (判据4 target table: main=H×oversub÷S, serial=lowconc=H÷S).
+    assert.equal(directMain, targetMain, `direct main must be nproc×oversub÷S (${targetMain})`);
+    assert.equal(directSerial, targetPhase, `direct serial must be H÷S (${targetPhase}) — AC44 derivation`);
+    assert.equal(directLowconc, targetPhase, `direct lowconc must be H÷S`);
+    // Direct == runner (the "与经 runner 起相同" half — a runner that still derived nproc (no /S) would
+    // read main=16 ≠ direct main=8 → red).
     assert.equal(runnerMain, directMain, `runner main (${runnerMain}) must equal direct main (${directMain}) — 判据4`);
     assert.equal(runnerSerial, directSerial, `runner serial (${runnerSerial}) must equal direct serial (${directSerial}) — 判据4`);
     assert.equal(runnerLowconc, directLowconc, `runner lowconc (${runnerLowconc}) must equal direct lowconc (${directLowconc}) — 判据4`);
@@ -488,21 +539,24 @@ test("AC74/判据4 — direct path and runner path read the SAME three values, e
     else process.env.RESOURCE_GATE_NPROC = prevNproc;
     if (prevSlots === undefined) delete process.env.QUAY_MAX_CONCURRENT_SUITES;
     else process.env.QUAY_MAX_CONCURRENT_SUITES = prevSlots;
+    if (prevOversub === undefined) delete process.env.QUAY_MAX_OVERSUBSCRIPTION;
+    else process.env.QUAY_MAX_OVERSUBSCRIPTION = prevOversub;
   }
 });
 
-test("AC74/判据4 NEGATIVE CONTROL — the checker CAN take false: the pre-fix state (main 8 / serial 2 / lowconc 3) is RED (AC49 D2 attribution)", () => {
-  // The task's "现在红" state (before this task): direct main = nproc/2 = 8 (the /S divisor),
-  // serial = 2, lowconc = 3 (the literals). Encode those pre-fix values and assert the checker's
-  // equality targets would flag every one of them — the checker is NOT structurally green
-  // (CLAUDE.md hard rule 4).
+test("判据2 NEGATIVE CONTROL — the checker CAN take false: the pre-fix state (two suites 16+8=24 > 16) is RED against nproc×oversub (AC49 D2 attribution)", () => {
+  // The task's "现在红" state (before this task): the old main formula derived nproc per suite (no /S
+  // bound) — first suite read in_use≈0 → 16, second read in_use≈8 → 8, Σ 24 > nproc×oversub 16. The
+  // pure-formula target (8 per suite, Σ 16 ≤ 16) is structurally different — the checker is NOT
+  // structurally green (CLAUDE.md hard rule 4).
   const host = 16;
   const slots = 2;
-  const preFix = { main: 8, serial: 2, lowconc: 3 };
-  const targets = { main: host, serial: host / slots, lowconc: host / slots };
-  assert.notEqual(preFix.main, targets.main, `pre-fix main 8 ≠ ${targets.main} (hostParallelism) → RED on main`);
-  assert.notEqual(preFix.serial, targets.serial, `pre-fix serial 2 ≠ ${targets.serial} (H÷S) → RED on serial`);
-  assert.notEqual(preFix.lowconc, targets.lowconc, `pre-fix lowconc 3 ≠ ${targets.lowconc} (H÷S) → RED on lowconc`);
+  const oversub = 1;
+  const preFixLanes = [16, 8];
+  const targetLane = Math.max(1, Math.floor((host * oversub) / slots));
+  assert.equal(targetLane, 8, "new target lane = 8");
+  assert.notEqual(preFixLanes[0], targetLane, `pre-fix first suite 16 ≠ ${targetLane} (nproc×oversub/S) → RED on main`);
+  assert.ok(preFixLanes[0] + preFixLanes[1] > host * oversub, "pre-fix Σ 24 > nproc×oversub 16 → RED");
 });
 
 // ── COUNTING SCOPE (gap-process-budget-counts-infra-as-test-concurrency-cap-pinned-1, AC2/AC3/AC4) ──

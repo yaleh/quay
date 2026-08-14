@@ -838,45 +838,34 @@ run_scoped_static_checks_touches() { run_scoped_static_checks_sel --touches "$1"
 # last-flag-wins, and the user's flag is passed AFTER the default in the exec line).
 #
 # Test seams (unit test in plugin/test/resource-gate.test.mjs): RESOURCE_GATE_NPROC /
-# RESOURCE_GATE_AMPLIFICATION / RESOURCE_GATE_TEST_NODE_PROCS override the derivation inputs
-# deterministically (the last is the budget `in_use` — the cross-layer total-budget subtraction).
+# RESOURCE_GATE_CONCURRENT_SUITES / RESOURCE_GATE_OVERSUBSCRIPTION override the derivation inputs
+# deterministically (slots = 旋钮② S, oversub = 旋钮③ — both env-read, never literals).
 default_concurrency_formula() {
-  local total_budget in_use amp
-  amp="${RESOURCE_GATE_AMPLIFICATION:-1.0}"
-  # MAIN-PHASE CONCURRENCY (gap-ac74-serial-lowconc-literal-direct-path; human 06:4xZ AC68 /slots
-  # 回退): the derived default is hostParallelism minus the cross-layer in_use count — it does NOT
-  # divide by the concurrent-suite slot count S. AC68's `/ S` divisor was rolled back because it
-  # double-protected what `in_use` already protects dynamically: a single lone suite (u=0) was cut to
-  # nproc/2 (纯损失), and two suites under-used the machine ((16−8)/1/2=4 ⇒ 12<16). Single suite now
-  # ⇒ nproc; overlap is pressed by `in_use` (the cross-layer running node --test count), not by a
-  # static divisor. The per-suite accounting print (resource-gate.sh per_suite_lane_budget) is
-  # deleted — zero consumers after the rollback.
-  # CROSS-LAYER TOTAL BUDGET (gap-test-concurrency-cap-does-not-scope-nested-spawns AC1): the
-  # worker derivation reads the SHARED budget authority (process-budget.sh — the same gate
-  # cap-from-gate.ts and resource-gate.sh read), not a per-layer nproc derivation. The budget is
-  # `nproc` total node --test processes across ALL worktrees; `in_use` = node-MainThread procs
-  # already running. default = max(1, floor((total_budget − in_use) / AMPLIFICATION)) so nested
-  # spawns (quay-init / session family) count against the SAME total instead of each worker
-  # deriving its own cap and multiplying beyond it (the 17-19 procs / load 18.70 defect).
-  # The RESOURCE_GATE_NPROC / RESOURCE_GATE_TEST_NODE_PROCS seams override the reads
-  # deterministically in tests (resource-gate.test.mjs extracts this function body and runs it
-  # standalone, so the shell-out must be skippable when both budget seams are set).
+  local total_budget oversub slots
+  # MAIN-PHASE CONCURRENCY (gap-suite-budget-oversubscribe; human 14:4xZ 修正方向 — (b) 认领制 /
+  # (c) 锁发配额 均被否，纯计算零新增运行时状态): default = max(1, floor(nproc × oversub / S)).
+  #   nproc   ← 宿主（nproc --all，⛔ 不写字面量 — CLAUDE.md 硬规则 4 推论二）
+  #   oversub ← 旋钮③ QUAY_MAX_OVERSUBSCRIPTION（现 1，现状非建议值）
+  #   S       ← 旋钮② QUAY_MAX_CONCURRENT_SUITES（现 2）
+  # 之前 AC74 的 `nproc − in_use`（读运行时 in_use，不读 S）固有超用：每条 lane 只减它启动那一刻
+  # 已在用的 in_use、没人减将来会来的 ⇒ 先起读≈0 拿满 nproc、后起读≈in_use 拿 nproc−in_use，
+  # 两并发 suite 合计 16+8=24 > 16（load 29.23，2026-08-14 14:39Z）。纯计算下 S 个 suite 各拿
+  # nproc×oversub/S ⇒ Σ lane ≤ nproc×oversub 结构上不可能超。单 suite 只拿 nproc/S（本机 8）是
+  # 纯计算方案的已知代价（判据4），非缺陷；要单 suite 拿满由旋钮③ oversub 表达（⛔ 不动态放大）。
   total_budget="${RESOURCE_GATE_NPROC:-}"
-  in_use="${RESOURCE_GATE_TEST_NODE_PROCS:-}"
-  if [ -z "${total_budget}" ] || [ -z "${in_use}" ]; then
-    local budget_out
-    budget_out="$(bash "${repo_root}/plugin/scripts/process-budget.sh" 2>/dev/null || true)"
-    if [ -z "${total_budget}" ]; then
-      total_budget="$(printf '%s\n' "${budget_out}" | sed -n 's/^total_budget=//p')"
-    fi
-    if [ -z "${in_use}" ]; then
-      in_use="$(printf '%s\n' "${budget_out}" | sed -n 's/^in_use=//p')"
-    fi
+  oversub="${RESOURCE_GATE_OVERSUBSCRIPTION:-${QUAY_MAX_OVERSUBSCRIPTION:-1}}"
+  slots="${RESOURCE_GATE_CONCURRENT_SUITES:-${QUAY_MAX_CONCURRENT_SUITES:-2}}"
+  if [ -z "${total_budget}" ]; then
+    total_budget="$(nproc 2>/dev/null || echo 1)"
   fi
-  total_budget="${total_budget:-$(nproc 2>/dev/null || echo 1)}"
-  in_use="${in_use:-0}"
-  awk -v b="${total_budget}" -v u="${in_use}" -v a="${amp}" \
-    'BEGIN { c = int((b - u) / a); if (c < 1) c = 1; print c }'
+  if ! [[ "${slots}" =~ ^[0-9]+$ ]] || [ "${slots}" -lt 1 ]; then
+    slots=2
+  fi
+  if ! awk -v o="${oversub}" 'BEGIN { exit !(o ~ /^[0-9]+(\.[0-9]+)?$/ && o > 0) }'; then
+    oversub=1
+  fi
+  awk -v n="${total_budget}" -v o="${oversub}" -v s="${slots}" \
+    'BEGIN { c = int(n * o / s); if (c < 1) c = 1; print c }'
 }
 
 default_test_concurrency() {

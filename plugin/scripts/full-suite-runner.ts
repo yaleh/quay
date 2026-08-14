@@ -1483,33 +1483,33 @@ export function concurrentSuiteSlots(): number {
 
 /**
  * AC1 — the DEFAULT laneCount is nproc-derived, using the SAME formula as test.sh's AC5
- * derivation: max(1, floor(nproc / AMPLIFICATION)), AMPLIFICATION = 1.0. The 2.1 value (measured
- * process amplification 17/8 ≈ 2.125) was an unproven-conservative guard against oversubscription:
- * the AC5 cost-side experiment (gap-dod-two-green-runs-and-over90-budget-are-mathematically-
- * incompatible, 2026-08-08) ran the same selected set at concurrency 1/4/8 — ZERO cancelled at
- * every level (the CANCELLED dimension that refuted "avoid cancel needs higher concurrency";
- * wall-clock is a SEPARATE axis — see scripts/test.sh header, split per
- * gap-claude-md-nproc-wallclock-claim-scope-correction, NOT "nproc = wall-clock sweet spot").
- * The outer's own full-suite verification rounds at laneCount 8 (13+ runs, all cancelled 0)
- * corroborate that the oversubscription cost side never materialized. RESOURCE_GATE_NPROC /
- * RESOURCE_GATE_AMPLIFICATION are the deterministic test seams (the same env test.sh's
- * default_concurrency_formula reads).
+ * derivation: max(1, floor(nproc × oversub / S)). nproc = host parallelism
+ * (os.availableParallelism() — read-host, never a literal, hard-rule-4 推论二 family); S = the
+ * concurrent-suite slot count (旋钮② QUAY_MAX_CONCURRENT_SUITES, default 2 — the SAME
+ * definition-point read as concurrentSuiteSlots()); oversub = 旋钮③ QUAY_MAX_OVERSUBSCRIPTION
+ * (default 1, current value not a recommendation).
+ *
+ * gap-suite-budget-oversubscribe (human 14:4xZ 修正方向 — (b) 认领制/(c) 锁发配额 均被否，纯计算零新增
+ * 运行时状态): the previous AC74 formula (nproc ÷ AMPLIFICATION on the runner, nproc − in_use on the
+ * direct path) had NO structural bound tying the sum of all running suites' lanes to the host: two
+ * concurrent suites derived nproc each (16+8=24 > 16, load 29.23 on 2026-08-14 14:39Z). The new
+ * formula is PURE computation — S suites each derive nproc×oversub/S ⇒ Σ lane ≤ nproc×oversub
+ * structurally, no claim-ledger / no lock-carried quota. A single suite gets nproc/S (8 on this host)
+ * — the known cost of the pure-computation approach (判据4), not a defect; express "single suite uses
+ * the whole host" via the oversub knob instead (⛔ never dynamic run-count amplification).
+ * RESOURCE_GATE_NPROC / QUAY_MAX_CONCURRENT_SUITES / QUAY_MAX_OVERSUBSCRIPTION are the
+ * deterministic test seams (RESOURCE_GATE_NPROC the same seam test.sh reads; the S/oversub knobs are
+ * read via their production env so tests drive them directly).
  */
 export function defaultLaneCount(): number {
   const ncpuRaw = process.env.RESOURCE_GATE_NPROC ?? String(
     typeof os.availableParallelism === "function" ? os.availableParallelism() : os.cpus().length,
   );
   const ncpu = Number(ncpuRaw);
-  const ampRaw = Number(process.env.RESOURCE_GATE_AMPLIFICATION ?? "1.0");
-  const amp = Number.isFinite(ampRaw) && ampRaw > 0 ? ampRaw : 1.0;
-  // gap-ac74-serial-lowconc-literal-direct-path (human 06:4xZ AC68 /slots 回退) — the MAIN lane
-  // budget is hostParallelism ÷ AMPLIFICATION, NOT divided by the concurrent-suite slot count S.
-  // AC68's `/ S` divisor was rolled back: `in_use` (test.sh's cross-layer running node --test count)
-  // already presses concurrency dynamically on the direct path, and the static `/ S` cut a lone suite
-  // to H/S for protection it did not need (纯损失). Single suite ⇒ nproc (16 on this host). The
-  // serial/lowconc PHASE budgets still divide by S (DEFAULT_SERIAL/LOWCONC_CONCURRENCY = H÷S) — the
-  // 判据4 three-value reading (direct vs runner) requires main = H, serial = lowconc = H÷S on both paths.
-  return Math.max(1, Math.floor((Number.isFinite(ncpu) && ncpu >= 1 ? ncpu : 1) / amp));
+  const slots = concurrentSuiteSlots();
+  const oversubRaw = Number(process.env.QUAY_MAX_OVERSUBSCRIPTION ?? "1");
+  const oversub = Number.isFinite(oversubRaw) && oversubRaw > 0 ? oversubRaw : 1;
+  return Math.max(1, Math.floor((Number.isFinite(ncpu) && ncpu >= 1 ? ncpu : 1) * oversub / slots));
 }
 
 /**
@@ -1603,7 +1603,9 @@ export function countHeldSuiteLocks(root: string): number {
  * PHASE budgets divide by the concurrent-suite slot count (hostParallelism ÷ QUAY_MAX_CONCURRENT_SUITES;
  * 1 suite ⇒ 16, 2 suites ⇒ each 8 on a 16-core host) — the SAME expression test.sh's
  * serial_lowconc_host_default reads so the direct path matches (判据4). This is the AC44 rule; the
- * MAIN lane budget (defaultLaneCount) does NOT divide by S (see the AC68-rollback note there).
+ * MAIN lane budget (defaultLaneCount) ALSO divides by S (max(1, floor(nproc × oversub / S)) —
+ * gap-suite-budget-oversubscribe, human 14:4xZ 修正方向), so the sum over S suites cannot exceed
+ * nproc × oversub.
  */
 export const DEFAULT_SERIAL_CONCURRENCY = Math.max(1, Math.floor(hostParallelism() / concurrentSuiteSlots()));
 export const DEFAULT_LOWCONC_CONCURRENCY = Math.max(1, Math.floor(hostParallelism() / concurrentSuiteSlots()));

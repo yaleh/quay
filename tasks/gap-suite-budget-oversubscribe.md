@@ -84,24 +84,46 @@ main lane = max(1, floor(nproc × oversub / S))
 
 ## Acceptance Criteria
 
-- [ ] AC1 判据1：main lane = max(1, floor(nproc × oversub / S))——Σ lane ≤ nproc × oversub 不变式。
-- [ ] AC2 判据2 能取假：两 suite 真样本（16+8>16）回放不超；现状超 8 红。
-- [ ] AC3 判据3：三条 lane 推导全部读旋钮②（grep -L 命中 ⇒ 未落地）。
-- [ ] AC4 判据4：纯计算（nproc/S，单 suite 欠用是已知代价非缺陷）；不引入动态放大。
-- [ ] AC5 既有测试全绿；`--for-task` scoped 门绿。
+- [x] AC1 判据1：main lane = max(1, floor(nproc × oversub / S))——Σ lane ≤ nproc × oversub 不变式。
+- [x] AC2 判据2 能取假：两 suite 真样本（16+8>16）回放不超；现状超 8 红。
+- [x] AC3 判据3：三条 lane 推导全部读旋钮②（grep -L 命中 ⇒ 未落地）。
+- [x] AC4 判据4：纯计算（nproc/S，单 suite 欠用是已知代价非缺陷）；不引入动态放大。
+- [x] AC5 既有测试全绿；`--for-task` scoped 门绿。
 
 ## Definition of Done
 
-- [ ] suite 预算纯计算（nproc × oversub / S，零新增运行时状态）+ Σ lane ≤ nproc × oversub 不变式 + 三条推导全读旋钮② + 单 suite 欠用为已知代价。
+- [x] suite 预算纯计算（nproc × oversub / S，零新增运行时状态）+ Σ lane ≤ nproc × oversub 不变式 + 三条推导全读旋钮② + 单 suite 欠用为已知代价。
 
 ## Touches
 
-- plugin/scripts/resource-gate.sh（main lane 预算公式：认领制或锁携带配额）
-- plugin/scripts/process-budget.sh 或相关（共享账本 / 配额载体）
-- plugin/scripts/claim-task.sh 或单飞锁（若 (c)：锁携带 lane 配额）
-- plugin/test/（补测：两 suite 真样本 + 单 suite 不退化）
+- scripts/test.sh（`default_concurrency_formula()` main lane 公式 → `max(1, floor(nproc × oversub / S))`，纯计算零新增运行时状态）
+- plugin/scripts/full-suite-runner.ts（`defaultLaneCount()` main lane 公式 → `max(1, floor(nproc × oversub / S))`，经 `concurrentSuiteSlots()` + `QUAY_MAX_OVERSUBSCRIPTION` 读旋钮）
+- plugin/scripts/resource-gate.sh（注释措辞随落地实现更新——main lane 为纯计算，非认领制/锁发配额）
+- plugin/test/resource-gate.test.mjs（补测：判据1 公式 + 判据2 两 suite 真样本 + 判据3 三条推导读旋钮② + 判据4 单 suite 欠用；重写 AC74 反相断言）
+- plugin/test/full-suite-runner.test.mjs（AC1：defaultLaneCount 随 S 除，nproc=4 → 4/2/1 by slot count）
 - tasks/gap-suite-budget-oversubscribe.md（自身）
 
 ## Evidence
 
-（落地后回填）
+**落地后回填（2026-08-14，worktree `gap-suite-budget-oversubscribe` @ develop ca77b2c8）**。
+
+**实现**：main lane 公式改为 `max(1, floor(nproc × oversub / S))`，三处一致落地：
+- `scripts/test.sh default_concurrency_formula()`：`nproc` ← 宿主（`nproc` 命令，⛔ 不写字面量）；`oversub` ← 旋钮③ `QUAY_MAX_OVERSUBSCRIPTION`（seam `RESOURCE_GATE_OVERSUBSCRIPTION`，默认 1）；`S` ← 旋钮② `QUAY_MAX_CONCURRENT_SUITES`（seam `RESOURCE_GATE_CONCURRENT_SUITES`，默认 2）。**移除了旧的 `nproc − in_use` 运行时减法**（正是固有超用源：每条 lane 只减自己启动那一刻的 in_use）。
+- `plugin/scripts/full-suite-runner.ts defaultLaneCount()`：同一公式，`concurrentSuiteSlots()`（单一定义点）读 S，`QUAY_MAX_OVERSUBSCRIPTION` 读 oversub，`hostParallelism()` 语义读 nproc。
+- `serial_lowconc_host_default()` / `DEFAULT_SERIAL|LOWCONC_CONCURRENCY` 本已 H÷S 读旋钮②，未改。
+
+**判据1（Σ lane ≤ nproc × oversub 结构上不可能超）**：S=2、oversub=1、nproc=16 ⇒ 每 suite lane=8，两 suite Σ=16=nproc×oversub。resource-gate.test.mjs「判据1」测试断言 `2×lane ≤ nproc×oversub`。
+
+**判据2（两 suite 真样本回放）**：14:39Z 现场（先起读 in_use≈0 ⇒ 16，后起读 in_use≈8 ⇒ 8，Σ 24 > 16）回放——新公式每 suite 8，Σ 16 ≤ 16；旧态 24−16=8 必须红（负控断言 pre-fix 超 8）。
+
+**判据3（三条推导全读旋钮②）**：AC3 测试按位置断言 `serial_lowconc_host_default` / `default_concurrency_formula` / `defaultLaneCount` 三个函数体都读 `QUAY_MAX_CONCURRENT_SUITES`（或经 `concurrentSuiteSlots()`）。
+
+**判据4（纯计算单 suite 欠用为已知代价）**：单 suite = nproc/S = 8（不拿满 16）；oversub=2 表达「单 suite 拿满」（测试断言）；无动态放大（测试断言 main 公式代码不读 in_use / process-budget / concurrentSuitesRunning）。
+
+**测试结果**：
+- `plugin/test/resource-gate.test.mjs`：49/49 pass（含新增判据1/2/3/4 测试）。
+- `plugin/test/full-suite-runner.test.mjs`：141/141 pass（AC1 改为 slots=1/2/3 ⇒ lane 4/2/1）。
+- `--for-task` scoped 门：`bash scripts/test.sh --for-task gap-suite-budget-oversubscribe --allow-thin` 绿（exit 0）。
+- ts-typecheck 门：新 .ts 变更经 `fan-in-ts-typecheck-gate.ts` ADMITTED。
+
+**不落地的 Touches 说明**：`process-budget.sh` 与 `claim-task.sh`/单飞锁未改——(b) 认领账本/(c) 锁发配额被人 14:4xZ 逐字纠正覆盖，纯计算零新增运行时状态，无需账本/锁携带配额载体；`process-budget.sh` 的 `total_budget/in_use/available` 仍作为跨层进程预算被 gate 报告与 cap-from-gate 消费。

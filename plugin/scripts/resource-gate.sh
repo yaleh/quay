@@ -95,9 +95,10 @@ LOAD_OVER_FACTOR="${RESOURCE_GATE_LOAD_OVER_FACTOR:-2}"
 # suites the single-flight lock allows to run at once. The gate does NOT relax its machine-health
 # thresholds for more slots — CPU/load/mem limits stay ABSOLUTE (a genuinely overloaded machine must
 # WAIT regardless of how many suites are allowed; relaxing them would let an unaccounted THIRD suite
-# in). The gate itself no longer READS S (the per-suite lane-budget accounting line was deleted under
-# AC74 — zero consumers after the /slots rollback); the knob is read live by full-suite-runner.ts's
-# concurrentSuiteSlots() and test.sh's serial_lowconc_host_default.
+# in). The gate itself does NOT RE-READ S for verdict purposes (the per-suite lane budget is a PURE
+# computation in the lane derivations — gap-suite-budget-oversubscribe); the knob is read live by
+# full-suite-runner.ts's concurrentSuiteSlots()/defaultLaneCount() and test.sh's
+# serial_lowconc_host_default / default_concurrency_formula.
 # ── AC2 (gap-worktree-scoped-runs-consume-resources-but-produce-no-signal) ───────────────────────────
 # main-repo vs worktree priority: the main repo's full-suite caller passes --main-repo-priority; the
 # gate then RELAXES the CPU verdict when the blocking load is worktree-sourced (deferrable). A
@@ -446,12 +447,13 @@ budget_in_use="$(printf '%s\n' "${budget_report}" | sed -n 's/^in_use=//p')"
 budget_available="$(printf '%s\n' "${budget_report}" | sed -n 's/^available=//p')"
 printf 'total_budget=%s  budget_in_use=%s  budget_available=%s  [cross-layer budget authority: process-budget.sh]\n' \
   "${budget_total:-unreadable}" "${budget_in_use:-unreadable}" "${budget_available:-unreadable}"
-# AC74 (gap-ac74-serial-lowconc-literal-direct-path; human 06:4xZ AC68 /slots 回退): the
-# per_suite_lane_budget accounting line is DELETED — after the /slots rollback the main phase derives
-# hostParallelism − in_use (no slot divisor) and only the serial/lowconc phases divide by S, so
-# per_suite_lane_budget has zero consumers again. The gate's machine-health thresholds stay ABSOLUTE
-# (a genuinely overloaded machine must WAIT regardless of slot count); the slot knob is read live by
-# full-suite-runner.ts's concurrentSuiteSlots() and test.sh's serial_lowconc_host_default.
+# The per_suite_lane_budget accounting line stays DELETED — the MAIN lane budget is a PURE computation
+# (gap-suite-budget-oversubscribe, human 14:4xZ 修正方向 — (b) 认领制/(c) 锁发配额 均被否, zero new runtime
+# state): defaultLaneCount()/default_concurrency_formula() derive max(1, floor(nproc × oversub / S)),
+# so this gate does not carry per-suite lane accounting either. The gate's machine-health thresholds
+# stay ABSOLUTE (a genuinely overloaded machine must WAIT regardless of slot count); the S/oversub knobs
+# are read live by full-suite-runner.ts's concurrentSuiteSlots()/defaultLaneCount() and test.sh's
+# serial_lowconc_host_default / default_concurrency_formula.
 # AC1 (gap-worktree-scoped-runs-consume-resources-but-produce-no-signal) — the observable worktree
 # signal: how many node --test processes are running from linked worktrees right now + who is asking.
 # Report mode always prints this; waiters read it instead of guessing why the machine is loaded.
