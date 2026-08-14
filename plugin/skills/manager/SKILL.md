@@ -181,6 +181,7 @@ rules* but does not re-implement each SPEC. Index (under `orchestration/` in the
 - `orchestration/SPEC-typed-axes-and-standing-dynamics.md` — typed axes + standing dynamics
 - `orchestration/SPEC-per-task-suite-verification-2026-08-13.md` — per-task suite verification (人 2026-08-13 裁定：取消 integration，每任务从 develop 开 worktree 跑全量 suite 迭代至绿再 merge；suite 不得有 commit 知识；锁容量 2 + cgroup 读宿主；verification-round 降为任务粒度。**取代** `SPEC-branching-model-integration-branch-2026-08-05.md` 的解法而非其诊断；阶段 AC42-AC49）
 - `orchestration/SPEC-task-status-flow-target-vs-actual-2026-08-13.md` — task status 流转目标模式 × 当前实际 × 差异清单（人 2026-08-13 指令；不新增工作项——差异映射到已有 AC / 任务 / 观察项）
+- `orchestration/SPEC-fan-in-ff-merge-lock-2026-08-14.md` — fan-in 改为「无锁段自测 + 锁内 ff-merge」：subagent 在 merge 前把 develop 最新变更 merge 回自己 worktree 并跑 suite，最后 ff merge 回 develop（单独 merge 锁，只包 ff，持锁期间唯一动作是 ff merge，成功/失败即解锁）；AC62–AC64
 
 Cross-references:
 - `orchestration/REVIEW-cadence.md` — the daily-review cadence mechanism (this skill's cadence hook)

@@ -148,6 +148,7 @@ documented reference from a genuine missing file:
 <!-- reference-doc: orchestration/manager-tick-log.md -->
 <!-- reference-doc: orchestration/SYNTHESIS-four-gaps-2026-08-05.md -->
 <!-- reference-doc: orchestration/SPEC-three-layer-unified-architecture-2026-08-09.md -->
+<!-- reference-doc: orchestration/SPEC-fan-in-ff-merge-lock-2026-08-14.md -->
 <!-- reference-doc: orchestration/SPEC-manager-productization-2026-08-05.md -->
 <!-- reference-doc: orchestration/SPEC-cold-start-one-liner.md -->
 <!-- reference-doc: orchestration/SPEC-complete-delivery-surface-2026-08-05.md -->
