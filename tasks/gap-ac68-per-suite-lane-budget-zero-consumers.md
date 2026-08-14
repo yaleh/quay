@@ -53,7 +53,7 @@ worktree_node_tests=2  => GO
 ## Acceptance Criteria
 
 - [x] AC1 per_suite_lane_budget 有消费者（test.sh 读它并按槽数除）**或** 被删除（二选一，不留「正确但无人读」的数字）。
-- [ ] AC2 能取假：两条并发 suite 的 node --test 实际 worker 合计 ≤ nproc（当前 32/16 超即红）。
+- [ ] AC2 过订阅容忍判据（人 2026-08-14 06:1xZ 逐字「容忍过订阅，直到 OOM 或直接导致 suite 失败」——**推翻原数值阈值**「worker ≤ nproc」）：过订阅本身不算失败，触发条件是 **① OOM 或 ② 直接导致 suite 失败**。**第一个待归因样本**：inner 06:04:40Z「AC67 cert 红=测试 suite 环境脆弱（11 次 spawn node --experimental-strip-types 在 16-lane 下部分返回空）」——判别 (a) 该轮 laneCount/concurrent slots 读数 (b) 同组测试独占重跑是否绿 (c) 失败形态是 spawn 返回空/JS error（资源）而非断言失败（逻辑）。**归因未完成前不勾。**
 - [x] AC3 防嵌套 spawn（17-19 procs/load 18.70 那个缺陷）不回退。
 - [x] AC4 既有测试全绿；`--for-task` scoped 门绿。
 
@@ -87,4 +87,4 @@ AC2/AC68  4 核：2 slots → 2×2=4 = nproc（绿）；pre-fix → 2×4=8 > 4�
 
 **AC4（既有测试 + scoped 门）**：`scripts/test.sh --for-task gap-ac68-per-suite-lane-budget-zero-consumers --allow-thin` 全绿——**44 tests / 44 pass / 0 fail / 0 cancelled**（resource-gate.test.mjs 44 测，含新增 2 测 AC68）；scoped static checks 全过（GATE_EXIT=0）。相关性测试 `select-tests-for-touches.test.mjs` + `runner-grouping-flags-only.test.mjs` + `dead-code-after-return-check.test.mjs` = 37/37 pass。ts-typecheck gate：Touches 无 new/moved `.ts`，ADMITTED（exit 0）。
 
-**⚠️ AC2 未验证（outer 2026-08-14 判定，manager 委派）**：AC2「能取假：两条并发 suite 实际 worker 合计 ≤ nproc」**只有 unit test 断言 `derivedConcurrency` 公式，没有 live runtime checker 量测实际并发 worker**。inner 06:04:40Z 的 16-lane spawn 红（「11 次 spawn 部分返回空 ⇒ 环境脆弱」）正是 AC2 该机械判的量，却因无 live checker 被归因为「环境脆弱」。**AC2 未勾 ⇒ 本任务不该 done**（能取假判据未验证）。AC1/AC3/AC4 已核实现落地（test.sh:782/800 除槽、in_use 相减保留、44/44 scoped），勾选。**退回 ready**：待 AC2 live checker 落地（量测并发 worker ≤ nproc）或 AC2 判据修正为「公式断言」（不再宣称量测实际 worker）。
+**⚠️ AC2 判据被推翻重写（outer 2026-08-14 判定 + 人 06:1xZ 裁定）**：原判据「实际 worker ≤ nproc」是**数值阈值**，人 06:1xZ 明确不按它判（「容忍过订阅，直到 OOM 或直接导致 suite 失败」）——**不是「未验证」而是「判据本身不对」**。重写为归因判据（见 AC2）：过订阅不算失败、OOM 或直接导致 suite 失败才触发；inner 06:04:40Z 的 16-lane spawn 红是**第一个待归因样本**（判别 (a) laneCount/slots 读数 (b) 独占重跑 (c) 失败形态资源 vs 逻辑）。**AC1/AC3/AC4 已核实现落地（test.sh:782/800 除槽、in_use 相减保留、44/44 scoped），勾选。退回 ready：AC2 归因完成才可 done。**（原 06:0xZ「止损=现在验 AC2 趁空窗」已被 manager 撤销——要验的量已不是判据。）
