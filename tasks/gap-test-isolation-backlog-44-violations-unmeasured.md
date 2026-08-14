@@ -8,7 +8,7 @@ title: "test-isolation contract check has 44 standing violations
   indistinguishable from old (red-window triage had to diff against a
   rotated-out round1 log by hand); fix: baseline the 44, add a shrink-only
   ratchet or per-category count like the test-framework-policy list"
-status: ready
+status: done
 labels:
   - gap
   - defect
