@@ -262,6 +262,7 @@ declare -A QUESTION=(
   [routine-file-gate.ts]="Is this routine finding novel, high-quality, and within rate limits?"
   [routine-scheduler.ts]="Which routine probes are due to run now?"
   [run-identity.ts]="What is this run's canonical identity (reproducible handle)?"
+  [rhythm-consumer-check.ts]="Is the rhythm column's consumer contract met — a non-按需 mechanism has a call site in test.sh / an execution core (or wired elsewhere, or baselined), a 按需 mechanism declares WHO presses it under WHAT conditions, and a --no-block checker declares WHO reads its output and acts (判据1/2/3, else red)?"
   [runtime-usage-inventory.ts]="What does the two-layer mode actually run, and is any of it unaccounted?"
   [select-static-checks-for-touches.ts]="Which static checks should a scoped run execute for this change's touched files (change-relevant tier)?"
   [select-tests-for-touches.ts]="Which tests should run for this task's ## Touches?"
@@ -414,7 +415,7 @@ declare -A CADENCE=(
   [fan-in-runid-check.ts]="按需"
   [fan-in-ts-typecheck-gate.ts]="按需"
   [fan-in-ff-merge.sh]="按需"
-  [fan-in-ff-protocol-check.ts]="按需"
+  [fan-in-ff-protocol-check.ts]="每轮"
   [fan-in-ff-executor-check.ts]="按需"
   [finding-backpropagate.ts]="每里程碑"
   [fork-baseline.ts]="每里程碑"
@@ -511,6 +512,7 @@ declare -A CADENCE=(
   [routine-file-gate.ts]="每里程碑"
   [routine-scheduler.ts]="每里程碑"
   [run-identity.ts]="每里程碑"
+  [rhythm-consumer-check.ts]="每轮"
   [runtime-usage-inventory.ts]="每轮"
   [select-static-checks-for-touches.ts]="按需"
   [select-tests-for-touches.ts]="按需"
@@ -753,6 +755,7 @@ declare -A INVALIDATION=(
   [routine-file-gate.ts]="无可测前提，靠周期复核"
   [routine-scheduler.ts]="无可测前提，靠周期复核"
   [run-identity.ts]="无可测前提，靠周期复核"
+  [rhythm-consumer-check.ts]="失效前提：catalog 仍以节奏栏声明 cadence/consumer（若节奏字段被移除或改由他处声明，本条判据失去机械读面，退休）"
   [runtime-usage-inventory.ts]="无可测前提，靠周期复核"
   [select-static-checks-for-touches.ts]="无可测前提，靠周期复核"
   [select-tests-for-touches.ts]="无可测前提，靠周期复核"
@@ -995,6 +998,7 @@ declare -A LAST_REAFFIRMED=(
   [routine-file-gate.ts]="2026-08-10"
   [routine-scheduler.ts]="2026-08-10"
   [run-identity.ts]="2026-08-10"
+  [rhythm-consumer-check.ts]="2026-08-14"
   [runtime-usage-inventory.ts]="2026-08-10"
   [select-static-checks-for-touches.ts]="2026-08-10"
   [select-tests-for-touches.ts]="2026-08-10"
@@ -1237,6 +1241,7 @@ declare -A MATCHING=(
   [routine-file-gate.ts]="keyword"
   [routine-scheduler.ts]="keyword"
   [run-identity.ts]="n/a"
+  [rhythm-consumer-check.ts]="position"
   [runtime-usage-inventory.ts]="keyword"
   [select-static-checks-for-touches.ts]="keyword"
   [select-tests-for-touches.ts]="keyword"
@@ -1315,6 +1320,72 @@ declare -A MATCHING=(
   [obligation-ledger.ts]="enumerative"
   [semantic-observer-judge.ts]="keyword"
   [red-on-omission-audit.ts]="keyword"
+)
+# ── CONSUMER (rhythm-column consumer contract, gap-ac73-catalog-rhythm-consumer-check) ──
+# A mechanism's RHYTHM is only a claim until someone presses it. This table makes the consumer
+# contract explicit for the two rhythm classes that otherwise go silent:
+#   • cadence 「按需」 — must declare WHO presses it and under WHAT conditions, else 「按需」=「无人」
+#     (a protocol checker nobody runs at the moment of violation). Enforced by 判据2.
+#   • invoked with --no-block in scripts/test.sh — must declare WHO reads its output and ACTS,
+#     else "reported" and "not reported" are indistinguishable (硬规则 3/9). Enforced by 判据3.
+# Non-按需 mechanisms wired into the suite/execution cores need no CONSUMER row — their wiring IS
+# the consumer. The rhythm-consumer-check.ts reads this table; see its 判据1/2/3.
+declare -A CONSUMER=(
+  [ac36-sortkey-criterion-check.ts]="谁按：manager/outer 在 AC36 判据② 收口复核时手按；条件=delivery-critical 队列排序要作机械判定"
+  [ac61-staleness-disposition-check.ts]="谁按：manager 在 AC61 清单处置表态时按；条件=清单项要做 A-1..B-4 的处置判定"
+  [anti-drift-touches-check.ts]="谁按：任务 subagent 在落地后核验 Touches 一致性时按；条件=任务落地要验证 touches 精确命中"
+  [axis-generator.ts]="谁按：判据作者在定义新判据的测量轴时按；条件=要量化判据的时间/范围轴"
+  [checker-lib.ts]="谁按：新检查器作者在实现按位置/枚举判定时 import；条件=要复用 matchAtCommandPosition / enumerativeExistence"
+  [claim-task.sh]="谁按：派发器/inner 在认领任务分支时按；条件=任务要被某台机器认领（claim 协议）"
+  [claim-task.ts]="谁按：quay-branch 命令族在 fork 候选任务时按；条件=要决定从哪个基分支 fork"
+  [codex-stage1-live-proof-check.ts]="谁按：Codex stage1 实验者在验证 live-proof 时按；条件=要证明 stage1 有内部一致证据"
+  [config-wiring-check.ts]="谁按：配置变更者在加配置字段后按；条件=每个声明字段要恰好一个 wirer"
+  [dispatch-worktree-setup.sh]="谁按：派发器在创建任务 worktree 后按；条件=worktree 要可自验证（node_modules 就绪）"
+  [drivable-workspace-check.sh]="谁按：loop 启动前人工/脚本按；条件=workspace 要交给自动 loop 驱动"
+  [drivable-workspace-check.ts]="谁按：同上（canonical fail-closed 判定面）；条件=workspace 可驱动性判定"
+  [external-dogfooding-check.ts]="谁按：external-dogfooding 例程调度器按；条件=外部 dogfooding 契约要判定"
+  [fan-in-ff-executor-check.ts]="谁按：manager 在 AC67/AC75 收口复核时按（--a6-file/--command/--main-session）；条件=要判定 fan-in 执行者是否落到任务 subagent"
+  [fan-in-ff-merge.sh]="谁按：inner 任务 subagent 在 A6 fan-in 回合按；条件=任务回归完成要 ff 合入 develop（持锁段，锁只包 ff）"
+  [fan-in-runid-check.ts]="谁按：fan-in merge 复核者在核验 merge commit 时按；条件=要判定 commit 是否带 runId 遥测"
+  [fan-in-ts-typecheck-gate.ts]="谁按：派发器在任务 Touches 含新增/移动 .ts 时按；条件=新 .ts 要过 ts-typecheck"
+  [gate-script-base.ts]="谁按：TS gate 脚本作者 import；条件=要共享 gate 框架原语（isDirectEntry 等）"
+  [gate-script-lib.sh]="谁按：bash gate/selfcheck 脚本 source；条件=要共享 gate 框架原语"
+  [git-lens-l-d-code-doc-ratio.ts]="谁按：GIT-lens 用户按；条件=要量 L_D 代码文档比例增量"
+  [git-lens-l-g-structural-drift.ts]="谁按：GIT-lens 用户按；条件=要量结构漂移（generative-alignment）"
+  [git-lens-l-s-behavior-variance.ts]="谁按：GIT-lens 用户按；条件=要量行为稳定性（轻突变下）"
+  [integration-batch-merge.sh]="谁按：integration 合并者按；条件=要批量 ff 合入 develop"
+  [integration-branch-model.ts]="谁按：任务 fork 决策者按；条件=要决定 fork 基分支（develop vs integration）"
+  [it0-impl-row-check.sh]="谁按：it0 设计里程碑复核者按；条件=要核对实现行是否都被交代"
+  [it0-split-or-commit-check.ts]="谁按：it0 任务执行者按；条件=任务要么 split 要么 commit（单源强制）"
+  [judgment-consumer-check.ts]="谁按：manager 在判据注册复核时按；条件=每个机械判据要有消费动作"
+  [known-load-sensitive.ts]="谁按：套件维护者在登记 load-sensitive 测试时按；条件=要标注 known-load-sensitive 家族成员"
+  [laydown-set-check.sh]="谁按：冷启动 laydown 校验者按；条件=要验 laydown 集合完整"
+  [loop-shipping-exclusion-data.mjs]="谁按：loop-shipping 拆分任务执行者按；条件=要读单源 old-path / exclusion 条目"
+  [md-deletion-token-evaporation-check.sh]="谁按：文档删除者在删 .md ≥50 行时按；条件=要验删除 token 是否全仓蒸发"
+  [obligation-discharge-agent.ts]="谁按：obligation 判定调用方按；条件=discharge/defer 结论要判 schema 语义"
+  [observer-registry-check.sh]="谁按：observer 生命周期维护者按；条件=要验已注册 observer 是否仍存活"
+  [pipe-exit-code-check.sh]="谁按：shell 作者在写管道时按；条件=要验管道传播最后命令退出码"
+  [pool-quality-judge.ts]="谁按：pool-quality 语义闸调度器按；条件=机械触发（pool>25 / 最久未复核>48h / 每 10 轮）"
+  [quay-branch.ts]="谁按：quay CLI 分支/claim 命令按；条件=要分支/认领操作"
+  [quay-check.ts]="谁按：quay CLI 校验命令按；条件=要 task/doc 校验"
+  [quay-deliver.ts]="谁按：quay CLI deliver/preempt 命令按；条件=要交付"
+  [quay-dispatch.ts]="谁按：quay CLI dispatch 命令按；条件=要派发"
+  [quay-entry-base.ts]="谁按：quay 六个组合入口 import；条件=共享 dispatcher 框架"
+  [quay-session.ts]="谁按：quay CLI session/topology 命令按；条件=要会话/拓扑操作"
+  [quay-suite.ts]="谁按：quay CLI suite/gate 命令按；条件=要跑套件/闸"
+  [release-task.sh]="谁按：认领机在任务完成后按；条件=要释放任务/分支认领"
+  [select-static-checks-for-touches.ts]="谁按：test.sh scoped tier 按；条件=scoped run 要为变更选静态检查"
+  [select-tests-for-touches.ts]="谁按：test.sh scoped tier 按；条件=scoped run 要为 Touches 选测试"
+  [semantic-observer-judge.ts]="谁按：semantic observer 判定调用方按；条件=要判内/外层是否语义停止"
+  [tmux-isolated.sh]="谁按：测试作者在写需隔离 tmux 的测试时按；条件=要保证 TMUX unset"
+  [tmux-leak-scan.sh]="谁按：套件维护者在查 tmux 泄漏时按；条件=要扫 tmux server / 临时目录泄漏"
+  [tmux-session.ts]="谁按：测试作者按；条件=要建私有 socket tmux 会话"
+  [tmux-test-isolation-check.ts]="谁按：测试作者/复核者按；条件=要查测试是否 spawn 真 tmux 而无隔离机制"
+  [vmeta-lag-check.sh]="谁按：V_meta 复核者按；条件=要量 V_meta 合并滞后"
+  [vmeta-lag-check.ts]="谁按：同上（canonical 算术面）；条件=要量 V_meta 滞后"
+  [task-contract-check.ts]="消费方：manager/outer 每轮读 .quay/task-file-violation-ledger.jsonl（grow-only 账本），新违规进账本绝不静默；--no-block 故不阻产品验证轮（task-file 语法≠产品可用性）"
+  [task-ac-carryover-check.ts]="消费方：manager 在翻 done 前读同一 grow-only 账本，新未继承 AC 进账本并据此决定是否阻止合入；--no-block 不阻轮"
+  [tick-core-static-check.ts]="消费方：quay-init --loop 的 --check-drift 报告每 commit 可见 + 人工在 reconcile 双副本时读它据此动作；hard --check-drift 模式在副本 reconcile 后成为 enforcement（--no-block 只到 reconcile 前）"
 )
 # ── superseded capability table (gap-retired-script-still-callable, human ruling 2026-08-10) ──
 # One capability = ONE implementation. A superseded implementation must NOT exist in the
@@ -1532,13 +1603,14 @@ for b in "${SCRIPTS[@]}"; do
   invalidation="${INVALIDATION[$b]:-}"
   last_reaffirmed="${LAST_REAFFIRMED[$b]:-}"
   matching="${MATCHING[$b]:-}"
+  consumer="${CONSUMER[$b]:-}"
   if [ -n "$q" ]; then
     if [ -z "$cadence" ]; then MISSING_CADENCE=$((MISSING_CADENCE + 1)); fi
     if [ -z "$invalidation" ]; then MISSING_INVALIDATION=$((MISSING_INVALIDATION + 1)); fi
     if [ -z "$last_reaffirmed" ]; then MISSING_LAST_REAFFIRMED=$((MISSING_LAST_REAFFIRMED + 1)); fi
     if [ -z "$matching" ]; then MISSING_MATCHING=$((MISSING_MATCHING + 1)); fi
   fi
-  ROWS+="$b	$q	$ships	$surface	$cadence	$invalidation	$last_reaffirmed	$matching"$'\n'
+  ROWS+="$b	$q	$ships	$surface	$cadence	$invalidation	$last_reaffirmed	$matching	$consumer"$'\n'
 done
 
 # ── delivery-form computation (AC3): which .sh do the consumer-facing docs reference? ──
@@ -1592,6 +1664,7 @@ for line in rows:
     invalidation = parts[5] if len(parts) > 5 else ""
     last_reaffirmed = parts[6] if len(parts) > 6 else ""
     matching = parts[7] if len(parts) > 7 else ""
+    consumer = parts[8] if len(parts) > 8 else ""
     entries.append({
         "file": fname,
         "question": q if q else None,
@@ -1601,6 +1674,7 @@ for line in rows:
         "invalidation": invalidation if invalidation else None,
         "last_reaffirmed": last_reaffirmed if last_reaffirmed else None,
         "matching": matching if matching else None,
+        "consumer": consumer if consumer else None,
     })
 json.dump(entries, sys.stdout, ensure_ascii=False, indent=2)
 print()

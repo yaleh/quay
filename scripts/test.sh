@@ -563,6 +563,29 @@ run_static_checks() {
   # @static-tier change
   # @static-object docs/analysis/ac69-slot-release-vs-dispatch-gap.json plugin/scripts/ac69-slot-queue-gap-check.ts plugin/scripts/checker-mutation-cases/ac69-slot-queue-gap-check.sh plugin/test/ac69-slot-queue-gap-check.test.mjs
   run_checker "ac69-slot-queue-gap-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/ac69-slot-queue-gap-check.ts" --root "${repo_root}"
+  echo "== fan-in-ff-protocol-check (AC62 判据2/判据3 — zero-wiring family, gap-ac73) =="
+  # AC62's protocol checker was delivered with ZERO callers (test.sh=0, tick-cores=0) while the
+  # catalog declared it 「按需」 — for a protocol checker 「按需」==「从不」, nobody runs it at the
+  # moment of violation, so 判据2 (non-ff fan-in merge on develop) was structurally unable to go red
+  # (gap-ac73-catalog-rhythm-consumer-check). Wired here as a code-class 每轮 gate: it scans
+  # <baseline>..<develop> for non-ff fan-in merges, checks the lock-hold intervals never overlap a
+  # suite run, and validates ff-retry-record shape. Baseline = cd4f49b4 — the develop HEAD at the
+  # moment this ENFORCEMENT lands (gap-ac73). The 7 non-ff fan-ins between the protocol's adoption
+  # (46bf61e8) and enforcement are documented pre-existing debt (manager's 5th instance in the task
+  # body: AC64/AC68/AC74/AC75/B15/AC77 bypassed fan-in-ff-merge.sh); enforcement starts here — a NEW
+  # non-ff fan-in merge AFTER cd4f49b4 is RED (AC62 判据2 now mechanically checkable).
+  # @static-tier change
+  # @static-object orchestration/SPEC-fan-in-ff-merge-lock-2026-08-14.md plugin/scripts/fan-in-ff-protocol-check.ts plugin/scripts/fan-in-ff-merge.sh plugin/test/fan-in-ff-protocol-check.test.mjs
+  run_checker "fan-in-ff-protocol-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/fan-in-ff-protocol-check.ts" --root "${repo_root}" --baseline cd4f49b4 --json
+  echo "== rhythm-consumer-check (gap-ac73 判据1/2/3 — cadence consumer contract gate) =="
+  # AC73's own checker — the rhythm column's consumer contract: non-按需 mechanisms must have a
+  # call site in test.sh / an execution core (or wired elsewhere, or baselined), 按需 mechanisms
+  # must declare WHO presses them under WHAT conditions, and --no-block checkers must declare WHO
+  # reads their output and acts. Wired here so it is NOT another zero-caller judge (the disease it
+  # cures). Exit 1 on any 判据1/2/3 violation.
+  # @static-tier change
+  # @static-object plugin/scripts/capability-catalog.sh plugin/scripts/rhythm-consumer-check.ts plugin/test/rhythm-consumer-check.test.mjs scripts/test.sh orchestration/*-tick-core.md plugin/loop/*-tick-core.md
+  run_checker "rhythm-consumer-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/rhythm-consumer-check.ts" --check --root "${repo_root}"
   # Wait for all parallelized checkers and fail closed if any failed (see the RUN_CHECKER_PARALLEL
   # note at the top of this function — AC3 failure visibility, AC4 cost-ledger completeness).
   run_checker_parallel_wait

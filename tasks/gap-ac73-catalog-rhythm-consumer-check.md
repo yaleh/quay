@@ -71,11 +71,45 @@ tick-core-drift-check         已接线但 --no-block（2026-08-14） → 第 4 
 ## Touches
 
 - plugin/scripts/capability-catalog.sh（节奏栏「按需」机件补「谁在什么条件下按」+ `--no-block` 检查器补消费方）
-- 新检查器（节奏消费检测：非按需必有调用点 + 按需/--no-block 必写消费方）：`plugin/scripts/rhythm-consumer-check.ts (new)`
-- 负控制 fixture：`plugin/test/rhythm-consumer-check.test.mjs (new)`
-- scripts/test.sh / 三层执行核（非按需机件的调用点接线——AC62 判据2 的 fan-in-ff-protocol-check 入其中之一；tick-core-drift-check 的 `--no-block` 补消费方）
+- plugin/scripts/rhythm-consumer-check.ts (new)
+- plugin/test/rhythm-consumer-check.test.mjs (new)
+- docs/proposals/quay-product-outline.md（DELIVERY-INVENTORY 快照派生刷新）
+- scripts/test.sh（非按需机件的调用点接线——AC62 判据2 的 fan-in-ff-protocol-check 入其中之一；tick-core-drift-check 的 `--no-block` 补消费方）
 - tasks/gap-ac73-catalog-rhythm-consumer-check.md（自身）
 
 ## Evidence
 
-（落地后回填）
+（2026-08-14 落地，subagent gap-ac73 实测）
+
+**新检查器落地 + 三判据 gate 全绿**（`node --experimental-strip-types plugin/scripts/rhythm-consumer-check.ts --check`，判据4 report-only）：
+```
+rhythm-consumer-check: OK — rhythm-consumer-check-pass
+  [判据1-non-按需-call-site] ok — 179 judged, 0 violation(s)
+  [判据2-按需-consumer] ok — 52 judged, 0 violation(s)
+  [判据3-no-block-consumer] ok — 3 judged, 0 violation(s)
+  [判据4-execution-core-dual-copy] ok (report) — 48 judged, 48 violation(s) (report-only, 不阻)
+```
+
+**负控制回放红**（`node --test plugin/test/rhythm-consumer-check.test.mjs` — 16/16 pass）：
+- 判据1 负控制：fan-in-ff-protocol-check 回放「每轮 cadence + 零调用者 + 未基线」态 → `judgeNonOnDemand(...)` RED（`kind:"unwired"`）。
+- 判据2 负控制：fan-in-ff-executor-check 回放「按需 + 无 CONSUMER row」态 → `judgeOnDemandConsumer(null)` RED（`按需 without a CONSUMER row`）。
+- 判据3 负控制：tick-core-drift-check 回放「--no-block + 无 CONSUMER row」态 → `judgeNoBlockConsumer(null)` RED（`--no-block without a CONSUMER row`）。
+- 判据4 负控制：单副本 execution-core Touches → `judgeDualCopyTouches([...orchestration/fast-mode-tick-core.md])` RED。
+
+**接线落地**：
+- `fan-in-ff-protocol-check` 接入 `run_static_checks`（每轮 code-class，baseline=cd4f49b4 即 enforcement 起点；adoption 46bf61e8 与 enforcement 之间 7 次非 ff fan-in 是已记录 pre-existing debt——manager 第5实例，enforcement 起不再纵容）：
+```
+fan-in-ff-protocol-check: evaluated=true ok=true (pass)
+  OK non-ff-fan-in — no-non-ff-fan-in-merge
+  NOT-EVALUATED suite-in-lock — no-lock-events-file
+  OK retry-record-shape — no-retry-record-file (nothing to validate)
+```
+- `rhythm-consumer-check` 接入 `run_static_checks`（每轮 code-class，自身不再零调用——治愈的是它检测的病）。
+- catalog CONSUMER 表落地：52 条 按需 谁按声明 + 3 条 --no-block 消费方声明（task-contract-check / task-ac-carryover-check / tick-core-static-check）。
+
+**scoped 门 + ts-typecheck + doc 门全绿**：
+```
+fan-in-ts-typecheck-gate: typecheck GREEN — ADMITTED (exit 0)
+bash scripts/test.sh --for-task gap-ac73-catalog-rhythm-consumer-check --allow-thin  → exit 0, ℹ pass 32 fail 0
+bash scripts/test.sh --static-checks-doc  → exit 0 (tick-core-drift-check --no-block 报 3 drifted 不阻)
+```
