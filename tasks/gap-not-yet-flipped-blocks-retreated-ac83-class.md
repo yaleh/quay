@@ -71,7 +71,7 @@ AC83 的整个意思：AC1-4 是被 QUAY_TEST_CGROUP_SCRIPT 注入的假 cgroup 
 ## Touches
 
 - packages/quay/src/gate/lifecycle.ts 或 retreat 实现处（retreat 同时退 AC 勾选 / 标记待重验）
-- plugin/test/retreat-ac-uncheck.test.mjs（**收窄为具体文件**——⛔ 不用目录级 plugin/test/，避免再次重建互锁环；补测：retreat 后 AC 完成度反映实质；真 landed 不受影响）
+- plugin/test/retreat-ac-uncheck.test.mjs (new，**收窄为具体文件**——⛔ 不用目录级 plugin/test/，避免再次重建互锁环；补测：retreat 后 AC 完成度反映实质；真 landed 不受影响)
 - tasks/gap-not-yet-flipped-blocks-retreated-ac83-class.md（自身）
 
 ## Evidence
