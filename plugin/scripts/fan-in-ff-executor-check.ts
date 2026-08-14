@@ -1,12 +1,13 @@
 #!/usr/bin/env node
-// fan-in-ff-executor-check.ts — AC67 fan-in EXECUTOR checker (判据1/判据2/判据3 能取假).
+// fan-in-ff-executor-check.ts — AC67 fan-in EXECUTOR checker (判据1/判据2/判据3/判据4 能取假).
 // (tasks/gap-ac67-fan-in-executor-to-task-subagent, SPEC-fan-in-ff-merge-lock-2026-08-14)
 //
 // AC62 landed the ff-only PROTOCOL (无锁段 + 持锁段 + merge lock) but NOT the executor position —
 // the inner MAIN THREAD still ran every step of the fan-in (`fast-mode-tick-core.md` A6 subject was
 // "Fan-in 已返回任务" and the 无锁段 reached into the worktree with `git -C <wt>`). AC67 moves the
-// executor INTO the task subagent (无锁段①②③ + 持锁段④ all inside the subagent's own turn; the
-// subagent returns AFTER ff succeeds). This checker makes the three 判据 mechanical:
+// executor INTO the task subagent — the COMPLETE fan-in is FOUR items, all inside the subagent's own
+// turn (人 2026-08-14 追加裁定): ① git merge develop ② 全量 suite ③ doc 检查 ④ flip done → ff-only
+// merge; the subagent returns AFTER ff succeeds. This checker makes the 判据 mechanical:
 //
 //   判据1 — the A6 line's SUBJECT and FORM. The old subject "Fan-in 已返回任务" (the main thread
 //           waits for the task to return, THEN fan-ins) and the `git -C <wt>` form (the main thread
@@ -22,6 +23,12 @@
 //           command (both captured from the live repo/session, the "近 6 小时 4 次 merge" samples)
 //           must each replay RED through 判据1/判据2's judges. The test fixture embeds those REAL
 //           samples verbatim; this checker's pure judges are what they exercise.
+//   判据4 — EXECUTOR TRANSCRIPT LOCATION (人 2026-08-14 追加裁定, reads the ACTUAL command lines).
+//           The inner MAIN session <session-id>.jsonl must NO LONGER contain (a) a test.sh call
+//           WITHOUT --for-task (the full suite), (b) a tasks/*.md status-flip commit, or (c) a merge
+//           into develop — these three must appear ONLY in <session-id>/subagents/agent-*.jsonl.
+//           RED when the main session carries any; GREEN when only the subagent transcripts carry
+//           them; NOT-EVALUATED when neither side has any classified fan-in command.
 //
 // Each sub-check runs when its inputs are present; the aggregate verdict is RED if ANY sub-check is
 // RED. `evaluated` is true iff at least one sub-check produced a hard verdict (per sub-check the
@@ -34,7 +41,8 @@
 //   node --experimental-strip-types fan-in-ff-executor-check.ts
 //       [--a6-file <fast-mode-tick-core.md>] [--a6-line <text>]
 //       [--lock-events <file>] [--retry-record <file>] [--main-agent-id <id>]
-//       [--command <text>] [--json] [--help]
+//       [--command <text>] [--main-session <jsonl>] [--subagent-transcripts <a.jsonl,b.jsonl>]
+//       [--json] [--help]
 
 import fs from "node:fs";
 import path from "node:path";
@@ -153,7 +161,87 @@ export function judgeFanInCommand(cmd) {
   return { ok: true, evaluated: true, reason: "not-main-thread-fan-in" };
 }
 
+// ── Pure: 判据4 (executor transcript location) ────────────────────────────────────────────────────────
+
+/** A test.sh invocation that is NOT the scoped form — the FULL suite / doc check. The scoped gate is
+ *  `--for-task <id>` / `--scoped`; anything else (bare `scripts/test.sh`, `--static-checks-doc`) is
+ *  the main-thread-era "run the whole suite in the main session" form (criterion (a)). */
+const SCOPED_TEST_RE = /--for-task|--scoped\b/;
+/** A git commit that flips a task's status — the `tasks: 翻 <id> done` convention. Criterion (b).
+ *  Position: the flip is a COMMIT MESSAGE pattern (翻/…/done, flip/…/done, status→done), NOT any
+ *  commit touching tasks/*.md (the main session legitimately edits task files without flipping). */
+const STATUS_FLIP_COMMIT_RE = /git\s+commit/;
+const STATUS_FLIP_MSG_RE = /翻\s*[^\s]+\s*done|flip.*done|status.*done/;
+/** A merge into develop — `git merge` (ff or no-ff of a task branch / develop) OR the fan-in-ff-merge.sh
+ *  ff command (criterion (c)). `(?!-)` excludes the read-only `git merge-base` / `git merge-tree`
+ *  diagnostics (after "merge" comes "-", not a space+target). */
+const DEVELOP_MERGE_RE = /git\s+merge(?!-)|fan-in-ff-merge\.sh/;
+
+/**
+ * Classify ONE Bash command line into the fan-in-executor categories (判据4): which of the three
+ * main-thread actions it is. PURE. Returns the set of categories present.
+ * @param {string} cmd
+ * @returns {string[]} subset of ["full-suite-test-sh", "status-flip-commit", "develop-merge"]
+ */
+export function classifyBashCommand(cmd) {
+  const text = String(cmd ?? "");
+  const cats = [];
+  if (/test\.sh/.test(text) && !SCOPED_TEST_RE.test(text)) cats.push("full-suite-test-sh");
+  if (STATUS_FLIP_COMMIT_RE.test(text) && STATUS_FLIP_MSG_RE.test(text)) cats.push("status-flip-commit");
+  if (DEVELOP_MERGE_RE.test(text)) cats.push("develop-merge");
+  return cats;
+}
+
+/**
+ * Judge 判据4 — where the fan-in actions EXECUTED. PURE: the caller resolves the command lists from
+ * the main session jsonl and the subagent transcripts. RED when the MAIN session carries any of the
+ * three main-thread actions (the executor is the main thread, not the subagent); GREEN when the main
+ * session has NONE and the subagent transcripts carry at least one; NOT-EVALUATED when neither side
+ * has any classified command (no fan-in activity observed — cannot judge).
+ * @param {string[]} mainCommands — Bash commands from the inner main session jsonl
+ * @param {string[]} subagentCommands — Bash commands from all subagent agent-*.jsonl transcripts
+ * @returns {{ok:boolean, evaluated:boolean, reason:string, mainViolations:{cmd:string,cats:string[]}[]}}
+ */
+export function checkTranscriptLocation(mainCommands, subagentCommands) {
+  const main = (mainCommands ?? []).filter((c) => String(c).trim());
+  const sub = (subagentCommands ?? []).filter((c) => String(c).trim());
+  const mainViolations = main
+    .map((cmd) => ({ cmd, cats: classifyBashCommand(cmd) }))
+    .filter((v) => v.cats.length > 0);
+  const subCats = new Set();
+  for (const cmd of sub) for (const c of classifyBashCommand(cmd)) subCats.add(c);
+
+  if (mainViolations.length > 0) {
+    return { ok: false, evaluated: true, reason: "main-session-executor", mainViolations };
+  }
+  if (subCats.size > 0) {
+    return { ok: true, evaluated: true, reason: `subagent-executor (${[...subCats].join("+")})`, mainViolations: [] };
+  }
+  return { ok: true, evaluated: false, reason: "no-fan-in-activity (NOT-EVALUATED)", mainViolations: [] };
+}
+
 // ── fs helpers ─────────────────────────────────────────────────────────────────────────────────────────
+
+/** Extract every Bash `tool_use` command from a Claude Code session jsonl file (the message.content
+ *  block structure). Returns null when the file is absent/unreadable; [] when present with no Bash. */
+export function extractBashCommands(file) {
+  if (!fs.existsSync(file)) return null;
+  const cmds = [];
+  for (const line of fs.readFileSync(file, "utf8").split("\n")) {
+    if (!line.trim()) continue;
+    let d;
+    try { d = JSON.parse(line); } catch { continue; }
+    const content = d?.message?.content;
+    if (!Array.isArray(content)) continue;
+    for (const block of content) {
+      if (block && typeof block === "object" && block.type === "tool_use" && block.name === "Bash") {
+        const c = block.input?.command;
+        if (typeof c === "string" && c.trim()) cmds.push(c);
+      }
+    }
+  }
+  return cmds;
+}
 
 function readJsonlLines(file) {
   if (!file || !fs.existsSync(file)) return null;
@@ -172,15 +260,17 @@ function getArgValue(args, name) {
   return idx === -1 ? undefined : args[idx + 1];
 }
 
-const usage = `fan-in-ff-executor-check.ts — AC67 fan-in EXECUTOR checker (判据1/判据2/判据3 能取假)
-  A6 subject/form (判据1), fan-in record agentId ≠ inner 主会话 (判据2), real-sample replay (判据3)
-  ⇒ red on the main-thread-executor form (tasks/gap-ac67-fan-in-executor-to-task-subagent)
+const usage = `fan-in-ff-executor-check.ts — AC67 fan-in EXECUTOR checker (判据1/判据2/判据3/判据4 能取假)
+  A6 subject/form (判据1), fan-in record agentId ≠ inner 主会话 (判据2), real-sample replay (判据3),
+  executor transcript location (判据4) ⇒ red on the main-thread-executor form
+  (tasks/gap-ac67-fan-in-executor-to-task-subagent)
 
 Usage:
   node --experimental-strip-types fan-in-ff-executor-check.ts
       [--root <dir>] [--a6-file <fast-mode-tick-core.md>] [--a6-line <text>]
       [--lock-events <file>] [--retry-record <file>] [--main-agent-id <id>]
-      [--command <text>] [--json] [--help]
+      [--command <text>] [--main-session <jsonl>] [--subagent-transcripts <a.jsonl,b.jsonl>]
+      [--json] [--help]
 
   --root <dir>         repo root (default: cwd). Default lock-events/retry-record paths resolve
                        under its .quay/.
@@ -190,12 +280,17 @@ Usage:
   --retry-record <file> 判据2: the ff retry-record log (default <root>/.quay/...)
   --main-agent-id <id>  判据2: the inner MAIN session's agent id — a record EQUAL to it is red
   --command <text>    判据3: judge a single fan-in command (real-sample replay surface)
+  --main-session <file> 判据4: the inner MAIN session jsonl — (a) test.sh w/o --for-task / (b) tasks/*.md
+                       status-flip commit / (c) develop merge here ⇒ RED (主线程执行者)
+  --subagent-transcripts <csv>  判据4: the <session>/subagents/agent-*.jsonl transcripts — the three
+                       actions appearing ONLY here (and NOT in --main-session) ⇒ GREEN
   --json              machine-readable output { evaluated, ok, checks:[...], reason }
   --help              this help
 
 Exit codes:
   0  PASS or NOT-EVALUATED (read \`evaluated\` — false = could not judge, never conflated with green)
-  1  RED — a main-thread-executor form (old A6 subject / \`git -C <wt>\` / missing-or-main agentId)
+  1  RED — a main-thread-executor form (old A6 subject / \`git -C <wt>\` / missing-or-main agentId /
+      main-session carries the full-suite/flip/merge actions)
   2  usage / environment error`;
 
 export function main(argv) {
@@ -211,6 +306,9 @@ export function main(argv) {
   const retryRecordFile = getArgValue(args, "--retry-record") ?? path.join(root, ".quay", "fan-in-retries.jsonl");
   const mainAgentId = getArgValue(args, "--main-agent-id") ?? null;
   const command = getArgValue(args, "--command");
+  const mainSessionFile = getArgValue(args, "--main-session");
+  const subagentTranscripts = (getArgValue(args, "--subagent-transcripts") ?? "")
+    .split(",").map((s) => s.trim()).filter(Boolean);
   const asJson = args.includes("--json");
 
   const checks = [];
@@ -250,6 +348,23 @@ export function main(argv) {
       if (!v3.ok) anyRed = true;
     }
     checks.push({ check: "fan-in-command-replay", ...v3, source: "<command>" });
+  }
+
+  // ── 判据4 — executor transcript location (main session vs subagent transcripts) ──────────────────
+  if (mainSessionFile != null || subagentTranscripts.length > 0) {
+    const mainCmds = mainSessionFile != null ? extractBashCommands(path.resolve(mainSessionFile)) : [];
+    const subCmds = subagentTranscripts
+      .flatMap((f) => extractBashCommands(path.resolve(f)) ?? []);
+    const v4 = checkTranscriptLocation(mainCmds, subCmds);
+    if (v4.evaluated) {
+      anyEvaluated = true;
+      if (!v4.ok) anyRed = true;
+    }
+    checks.push({
+      check: "executor-transcript-location",
+      ...v4,
+      source: `${mainSessionFile ?? "<none>"} vs ${subagentTranscripts.length} subagent transcript(s)`,
+    });
   }
 
   const ok = !anyRed;

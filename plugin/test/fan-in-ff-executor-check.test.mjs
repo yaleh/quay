@@ -1,5 +1,5 @@
-// @test-group engine
-// fan-in-ff-executor-check.test.mjs — AC67 fan-in EXECUTOR checker (判据1/判据2/判据3 能取假),
+// @test-group serial
+// fan-in-ff-executor-check.test.mjs — AC67 fan-in EXECUTOR checker (判据1/判据2/判据3/判据4 能取假),
 // plugin/scripts/fan-in-ff-executor-check.ts. The negative-control fixtures prove the checker can
 // go RED on the three main-thread-executor forms AC67 requires (判据), plus NOT-EVALUATED
 // (never conflated with green, 硬规则 3b) when it cannot judge.
@@ -29,8 +29,11 @@ import { spawnSync } from "node:child_process";
 import {
   judgeA6Line,
   extractA6Line,
+  extractBashCommands,
   checkAgentId,
   judgeFanInCommand,
+  classifyBashCommand,
+  checkTranscriptLocation,
   isMainThreadAgentId,
 } from "../scripts/fan-in-ff-executor-check.ts";
 
@@ -163,41 +166,113 @@ test("PURE judgeFanInCommand — empty command ⇒ NOT-EVALUATED", () => {
   assert.equal(judgeFanInCommand(null).evaluated, false);
 });
 
+// ── PURE 判据4: executor transcript location (人 2026-08-14 追加裁定) ─────────────────────────────────
+
+// REAL main-thread samples (D2 不构造 — captured verbatim from the inner session transcripts):
+// the main full-suite test.sh WITHOUT --for-task (bc1a438b 2026-08-13T19:29:39Z), a real flip commit
+// (tasks: 翻 <id> done), and a real main-thread merge (bc1a438b 16:01Z).
+const REAL_MAIN_FULL_SUITE =
+  "cd /home/yale/work/quay-worktrees/gap-worktree-node-modules-inconsistent-self-verify && scripts/test.sh > /tmp/wtmod-final-fullsuite.log 2>&1; echo \"FULL_SUITE_EXIT=$?\" >> /tmp/wtmod-final-fullsuite.log; echo \"DONE\"";
+const REAL_MAIN_FLIP_COMMIT =
+  "git add tasks/gap-ac63-fan-in-ff-merge-lock-protocol.md && git commit -m \"tasks: 翻 gap-ac63 done（AC46 判据3 per-task 全量绿 + a2——worktree 内翻，merge 带 status）\"";
+const REAL_MAIN_MERGE =
+  "git merge --no-ff task/gap-inner-blocked-signal-comment-refs-retired-inner-state-sh -m \"merge: fan-in gap-inner-blocked-signal-comment-refs-retired-inner-state-sh (A6) — comment 指向退役 inner-state.sh 的修法\"";
+// A REAL subagent scoped gate call (902b4528 subagents/agent-*.jsonl) — test.sh WITH --for-task.
+const REAL_SUBAGENT_SCOPED =
+  "cd /home/yale/work/quay-worktrees/gap-superseded-modeled-as-task-lifecycle-terminal && scripts/test.sh --for-task gap-superseded-modeled-as-task-lifecycle-terminal --allow-thin 2>&1 | tail -60";
+
+test("PURE classifyBashCommand — the REAL main full-suite (test.sh w/o --for-task) ⇒ full-suite-test-sh", () => {
+  assert.deepEqual(classifyBashCommand(REAL_MAIN_FULL_SUITE), ["full-suite-test-sh"]);
+});
+
+test("PURE classifyBashCommand — the REAL flip commit ⇒ status-flip-commit", () => {
+  assert.deepEqual(classifyBashCommand(REAL_MAIN_FLIP_COMMIT), ["status-flip-commit"]);
+});
+
+test("PURE classifyBashCommand — the REAL main-thread merge ⇒ develop-merge", () => {
+  assert.deepEqual(classifyBashCommand(REAL_MAIN_MERGE), ["develop-merge"]);
+});
+
+test("PURE classifyBashCommand — the REAL subagent scoped gate is NOT a main-thread action", () => {
+  assert.deepEqual(classifyBashCommand(REAL_SUBAGENT_SCOPED), [], "test.sh --for-task must not flag");
+});
+
+test("PURE classifyBashCommand — read-only git merge-base / merge-tree are NOT develop-merges", () => {
+  assert.equal(classifyBashCommand("git merge-base HEAD integration").includes("develop-merge"), false);
+  assert.equal(classifyBashCommand("git merge-tree $(git merge-base integration HEAD) integration HEAD").includes("develop-merge"), false);
+  assert.equal(classifyBashCommand("git merge develop").includes("develop-merge"), true);
+});
+
+test("PURE checkTranscriptLocation — the REAL main session carrying full-suite+flip+merge ⇒ RED", () => {
+  const v = checkTranscriptLocation([REAL_MAIN_FULL_SUITE, REAL_MAIN_FLIP_COMMIT, REAL_MAIN_MERGE], [REAL_SUBAGENT_SCOPED]);
+  assert.equal(v.ok, false);
+  assert.equal(v.evaluated, true);
+  assert.equal(v.reason, "main-session-executor");
+  assert.ok(v.mainViolations.length >= 3);
+});
+
+test("PURE checkTranscriptLocation — the same actions ONLY in the subagent transcripts ⇒ GREEN", () => {
+  const v = checkTranscriptLocation([], [REAL_MAIN_FULL_SUITE, REAL_MAIN_FLIP_COMMIT, REAL_MAIN_MERGE, REAL_SUBAGENT_SCOPED]);
+  assert.equal(v.ok, true);
+  assert.equal(v.evaluated, true);
+  assert.ok(v.reason.startsWith("subagent-executor ("), v.reason);
+  for (const c of ["full-suite-test-sh", "status-flip-commit", "develop-merge"]) {
+    assert.ok(v.reason.includes(c), `reason lists ${c}: ${v.reason}`);
+  }
+});
+
+test("PURE checkTranscriptLocation — no classified activity on either side ⇒ NOT-EVALUATED", () => {
+  const v = checkTranscriptLocation([], []);
+  assert.equal(v.ok, true);
+  assert.equal(v.evaluated, false);
+  assert.equal(v.reason, "no-fan-in-activity (NOT-EVALUATED)");
+});
+
 // ── integration: the checker CLI over the real samples ────────────────────────────────────────────────
 
 function runChecker(args) {
-  return spawnSync("node", ["--no-warnings", "--experimental-strip-types", CHECKER, "--json", ...args], { encoding: "utf8" });
+  // Robust spawn: a generous timeout + a fail-fast diagnostic when stdout is empty. Spawning a
+  // `node --experimental-strip-types` process is LOAD-SENSITIVE under the full suite's concurrent
+  // lanes — an empty stdout must surface the stderr (or the timeout) instead of a bare
+  // `JSON.parse(r.stdout)` SyntaxError (gap-ac67: suite-environment fragility, not a criterion bug).
+  const r = spawnSync("node", ["--no-warnings", "--experimental-strip-types", CHECKER, "--json", ...args], {
+    encoding: "utf8", timeout: 30_000,
+  });
+  if (r.error) {
+    throw new Error(`checker spawn failed: ${r.error.message}${r.stderr ? `\nstderr: ${r.stderr.slice(0, 800)}` : ""}`);
+  }
+  if (!r.stdout || !r.stdout.trim()) {
+    throw new Error(
+      `checker produced NO stdout (exit ${r.status}, signal ${r.signal ?? "none"}, timeout ${r.error?.code ?? "none"})\n` +
+      `stderr: ${(r.stderr ?? "(none)").slice(0, 800)}`,
+    );
+  }
+  return r;
 }
 
-test("integration — a temp fast-mode-tick-core.md carrying the REAL old A6 ⇒ RED (exit 1)", () => {
+test("integration — a temp fast-mode-tick-core.md carrying the REAL old A6 ⇒ RED via extractA6Line+judgeA6Line (no CLI spawn)", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ac67-"));
   try {
     const file = path.join(dir, "fast-mode-tick-core.md");
     fs.writeFileSync(file, `# inner tick\n\n| A6 | ${REAL_OLD_A6_SUBJECT} | ${REAL_OLD_A6_STEP1} |\n`, "utf8");
-    const r = runChecker(["--a6-file", file]);
-    assert.equal(r.status, 1, `real old A6 must be RED: ${r.stdout}${r.stderr}`);
-    const out = JSON.parse(r.stdout);
-    assert.equal(out.ok, false);
-    const a6 = out.checks.find((c) => c.check === "a6-executor-position");
-    assert.equal(a6.ok, false);
-    assert.equal(a6.evaluated, true);
+    const v = judgeA6Line(extractA6Line(file));
+    assert.equal(v.ok, false);
+    assert.equal(v.evaluated, true);
+    assert.equal(v.oldSubject, true);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test("integration — a temp fast-mode-tick-core.md carrying the NEW subagent A6 ⇒ PASS (exit 0)", () => {
+test("integration — a temp fast-mode-tick-core.md carrying the NEW subagent A6 ⇒ GREEN via extractA6Line+judgeA6Line (no CLI spawn)", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ac67new-"));
   try {
     const file = path.join(dir, "fast-mode-tick-core.md");
     const newLine = `| A6 | Fan-in 回到任务 subagent | ① \`git merge $MERGE_TARGET\` → … |`;
     fs.writeFileSync(file, `# inner tick\n\n${newLine}\n`, "utf8");
-    const r = runChecker(["--a6-file", file]);
-    assert.equal(r.status, 0, `new A6 must pass: ${r.stdout}${r.stderr}`);
-    const out = JSON.parse(r.stdout);
-    assert.equal(out.ok, true);
-    const a6 = out.checks.find((c) => c.check === "a6-executor-position");
-    assert.equal(a6.ok, true);
+    const v = judgeA6Line(extractA6Line(file));
+    assert.equal(v.ok, true);
+    assert.equal(v.evaluated, true);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -272,6 +347,47 @@ test("extractA6Line — finds the | A6 | row in a fast-mode-tick-core.md file", 
     assert.match(line, /bar/);
     // Missing file ⇒ null
     assert.equal(extractA6Line(path.join(dir, "nope.md")), null);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+function writeTranscript(file, commands) {
+  // A minimal Claude-Code jsonl shape: each line has message.content with a Bash tool_use block.
+  const lines = commands.map((cmd) => JSON.stringify({
+    message: { content: [{ type: "tool_use", name: "Bash", input: { command: cmd } }] },
+  }));
+  fs.writeFileSync(file, lines.join("\n") + "\n", "utf8");
+}
+
+test("integration — extractBashCommands parses the real main-session jsonl, then checkTranscriptLocation ⇒ RED (no CLI spawn)", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ac67tl-"));
+  try {
+    const main = path.join(dir, "session.jsonl");
+    const sub = path.join(dir, "sub.jsonl");
+    writeTranscript(main, [REAL_MAIN_FULL_SUITE, REAL_MAIN_MERGE]);
+    writeTranscript(sub, [REAL_SUBAGENT_SCOPED]);
+    const v = checkTranscriptLocation(extractBashCommands(main), extractBashCommands(sub));
+    assert.equal(v.ok, false);
+    assert.equal(v.evaluated, true);
+    assert.equal(v.reason, "main-session-executor");
+    assert.ok(v.mainViolations.length >= 2);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("integration — the actions ONLY in subagent transcripts ⇒ GREEN (no CLI spawn)", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ac67tlok-"));
+  try {
+    const main = path.join(dir, "session.jsonl");
+    const sub = path.join(dir, "sub.jsonl");
+    writeTranscript(main, []); // main has NO fan-in actions
+    writeTranscript(sub, [REAL_MAIN_FULL_SUITE, REAL_MAIN_FLIP_COMMIT, REAL_MAIN_MERGE, REAL_SUBAGENT_SCOPED]);
+    const v = checkTranscriptLocation(extractBashCommands(main), extractBashCommands(sub));
+    assert.equal(v.ok, true);
+    assert.equal(v.evaluated, true);
+    assert.ok(v.reason.startsWith("subagent-executor ("), v.reason);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
