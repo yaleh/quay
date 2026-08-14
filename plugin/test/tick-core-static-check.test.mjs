@@ -305,6 +305,58 @@ test("the real repo passes all four criteria (src:N 100% + pointers + numbering 
   assert.equal(out.ac6.ok, true);
 });
 
+test("AC8: a dead-annotated item WITHOUT the denominator-exclusion marker reddens (negative control, gap-ac60 AC3)", () => {
+  const dir = buildBaselineRoot();
+  try {
+    // Negative control sample: | A7 | **前提已死** | 不能执行 (src:1) | — a dead/frozen item that
+    // stays in the coverage denominator (no "不计入覆盖率分母" marker) MUST redden AC8. This is the
+    // exact perverse incentive AC60 kills: honest annotation would otherwise drop coverage.
+    write(dir, "orchestration/manager-tick-core.md",
+      "# manager tick — 执行核\n## A. 读数\n| A1 | 读 x (src:1) |\n| A7 | **前提已死** | 不能执行 (src:1) |\n## B. 产出\n- **B1** z (src:1)\n## C. 约束\n| C1 | 约束 (src:1) |\n## D. 边界\n**可以**。\n");
+    const res = run(dir, "--only", "ac8", "--json");
+    assert.equal(res.status, 1, `a dead-annotated item without the exclusion marker did not redden AC8: ${res.stdout} ${res.stderr}`);
+    const out = JSON.parse(res.stdout);
+    assert.equal(out.ac8.ok, false);
+    assert.equal(out.ac8.violations.length, 1);
+    assert.equal(out.ac8.violations[0].file, "orchestration/manager-tick-core.md");
+    assert.equal(out.ac8.violations[0].line, 4);
+    assert.equal(out.ac8.violations[0].marker, "前提已死");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC8 negative control: a dead-annotated item WITH the exclusion marker passes", () => {
+  const dir = buildBaselineRoot();
+  try {
+    write(dir, "orchestration/manager-tick-core.md",
+      "# manager tick — 执行核\n## A. 读数\n| A1 | 读 x (src:1) |\n| A7 | **前提已死,不计入覆盖率分母** | 不能执行 (src:1) |\n## B. 产出\n- **B1** z (src:1)\n## C. 约束\n| C1 | 约束 (src:1) |\n## D. 边界\n**可以**。\n");
+    const res = run(dir, "--only", "ac8", "--json");
+    assert.equal(res.status, 0, `a dead-annotated item with the exclusion marker reddened AC8: ${res.stdout} ${res.stderr}`);
+    const out = JSON.parse(res.stdout);
+    assert.equal(out.ac8.ok, true);
+    assert.equal(out.ac8.violations.length, 0);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC8: the real repo passes, all three layers use the exclusion notation (manager 6 deducts, outer B4, inner C7)", () => {
+  const res = run(REPO_ROOT, "--only", "ac8", "--json");
+  assert.equal(res.status, 0, `the real repo reddened AC8: ${res.stdout} ${res.stderr}`);
+  const out = JSON.parse(res.stdout);
+  assert.equal(out.ac8.ok, true);
+  assert.equal(out.ac8.violations.length, 0);
+  // AC2 — manager 侧 6 条扣除已执行: A7/A12a/A14/B2c/乙/丁 all carry the marker.
+  assert.ok(out.ac8.excluded["orchestration/manager-tick-core.md"] >= 6,
+    `manager excluded-dead count < 6 (6 deducts not all executed): ${JSON.stringify(out.ac8.excluded)}`);
+  // AC1 — 三层记法一致: outer (B4) and inner (C7) each exclude at least one dead item too.
+  assert.ok(out.ac8.excluded["orchestration/orchestrator-tick-core.md"] >= 1,
+    `outer core has no dead-exclusion marker: ${JSON.stringify(out.ac8.excluded)}`);
+  assert.ok(out.ac8.excluded["orchestration/fast-mode-tick-core.md"] >= 1,
+    `inner core has no dead-exclusion marker: ${JSON.stringify(out.ac8.excluded)}`);
+});
+
 test("AC7: the checker is registered in scripts/test.sh run_doc_checks with @static-class doc (AC51 断言面拆分)", () => {
   // AC51 (gap-ac51-assertion-surface-split): the doc-consistency checkers moved OUT of the full
   // suite (run_static_checks) INTO run_doc_checks, whose ONLY caller is the pre-commit guard
