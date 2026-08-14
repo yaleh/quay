@@ -38,6 +38,8 @@ AC83 的整个意思：AC1-4 是被 QUAY_TEST_CGROUP_SCRIPT 注入的假 cgroup 
 ⊢ 修后形态：retreat 后 AC 11%（1/9，AC5 真值保留）⇒ not-yet-flipped 自然放行 ⇒ 无需改 gate
 ```
 
+**⚠️ 写法约束（manager 20:1xZ，第 5 条实例）**：目录级 `plugin/test/` 在【持续产生】——今天刚清 4 条（a6/anti-drift/ff-livelock/suite-budget），本任务原本又带同写法（第 5 条）。**收窄存量不解决它**：只要新任务继续这么写，互锁环就不断重建。**立案时不得用目录级 `plugin/test/`，写具体测试文件**（本任务 Touches 已收窄为 `plugin/test/retreat-ac-uncheck.test.mjs`）。⛔ 不造检查器（发生率已 5 但立案是手工动作，一条约束比一个检查器便宜）。
+
 **判据1**：**retreat（done→ready）操作同时退 AC 勾选**——被 retreat 的任务 AC 完成度应反映实质（fixture 满足的判据不勾），不得带着旧完成度进入下一轮判定。
 **判据2（能取假·真样本现成）**：`phase-boundary` 现 status=ready 而 AC 89% ⇒ 该状态组合不该存在；修后 retreat 即退勾 ⇒ ready + AC 11%。**已被外层 8e502922 手工退勾（本任务的 fallback），机制落地后自动发生**。
 **判据3（不削弱真 landed 防重派）**：真 landed（生产有数据、AC 真实满足）的 done 任务不受影响——retreat 只影响退回的任务。
@@ -69,8 +71,7 @@ AC83 的整个意思：AC1-4 是被 QUAY_TEST_CGROUP_SCRIPT 注入的假 cgroup 
 ## Touches
 
 - packages/quay/src/gate/lifecycle.ts 或 retreat 实现处（retreat 同时退 AC 勾选 / 标记待重验）
-- plugin/test/（补测：retreat 后 AC 完成度反映实质；真 landed 不受影响）
-- tasks/gap-phase-boundary-differential-accounting.md（AC1-4 已由外层 8e502922 手工退勾——本任务机制落地前的 fallback）
+- plugin/test/retreat-ac-uncheck.test.mjs（**收窄为具体文件**——⛔ 不用目录级 plugin/test/，避免再次重建互锁环；补测：retreat 后 AC 完成度反映实质；真 landed 不受影响）
 - tasks/gap-not-yet-flipped-blocks-retreated-ac83-class.md（自身）
 
 ## Evidence
