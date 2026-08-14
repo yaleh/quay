@@ -771,7 +771,13 @@ outer    CronCreate */20  + 无正本、无注册表、无收据
 inner    ScheduleWakeup 169 次/天，零 CronCreate
 ```
 
-- [ ] **AC79（inner 加 CronCreate 锚；ScheduleWakeup 降为间隙加速器）**
+- [x] **AC79（inner 加 CronCreate 锚；ScheduleWakeup 降为间隙加速器）** ✅ **2026-08-14 21:5xZ 达成，逐判据实测如下**
+      **判据1 ✅**：`query_session_content(session_id=bc1a438b…, tool_name=Cron)` ⇒ `CronCreate {"cron":"7,27,47 * * * *"}` @ `2026-08-14T15:14:11.979Z`
+      —— **直接量**（inner 自己的 tool_use 记录），不是注册表自述（后者正是 `gap-the-loop-driver-check-reads-a-self-declared-registry-nobody-writes` 批评的形态）。
+      **立案时真值 0 ⇒ 现 1**，该判据确实能取假。
+      **判据3 ✅**：该 prompt 正文开头 =「不要依赖上下文记忆——本 prompt 只是指针，内容现读：(1) 读 `orchestration/fast-mode-tick-core.md`…」⇒ 与 manager 锚同形。
+      **判据2 ✅（保留）**：`plugin/loop/fast-mode-loop-tick.md:1164/:1171/:1187` 仍在用 ScheduleWakeup 作兜底心跳（1200–1800s）⇒ 未被删。
+      〔**未逐字核**：核里是否有一句明写「不是唯一唤醒源」——保留这一半已实测，措辞那一半归 inner 自查〕
       **判据1（能取假）**：`meta-cc query_session_content role=tool tool_name=CronCreate session_id=<inner>` **返回 ≥1 条**；
       当前真值 **0** ⇒ 该判据此刻为假，不是恒真。
       **判据2**：inner 核里明写「ScheduleWakeup 不是唯一唤醒源」，且**保留**它作事件间隙加速器（⛔ 删除——它对 event-driven 段仍有价值）。
@@ -784,6 +790,12 @@ inner    ScheduleWakeup 169 次/天，零 CronCreate
       **⚠️ 判据3（本 AC 的真正难点）**：**正本文件与真正投进 CronCreate 的字符串必须一致**——
       两者是两份副本，**而副本会漂**（今日 14:0xZ 实测：`manager-loop-tick.md` 的豁免面副本在人裁定后立刻过期，且**审计读的正是那份副本**）。
       ⊢ 检查器须比对**正本内容**与 **`CronList` 返回的 prompt**；只查「文件存在」不算。
+      **⊢ 2026-08-14 21:5xZ 核实（三判据分开结论，⛔ 不合并成一个「基本完成」）**：
+      **判据1 ✅**：`orchestration/outer-tick-prompt.txt`（已跟踪）+ inner 侧在 `plugin/loop/fast-mode-loop-tick.md` 的 AC80 段 + manager 的 `manager-tick-prompt.txt`。
+      **判据2 ✅**：`plugin/scripts/outer-anchor-check.ts`（442 行，含 `--layer inner|outer`，**退出码分三态 OK/VIOLATED/NOT-EVALUATED** ⇒ 硬规则 3b 已被实现方兑现）+ `plugin/test/outer-anchor-check.test.mjs`（378 行）。
+      **判据3 = NOT-EVALUATED（不是不合格）**：检查器自述「**脚本无法调用 `CronList`，由调用方传入**」
+      ⇒ outer/inner 的活 prompt **只有它们自己的会话能产出** ⇒ **结构上不可能由 manager 从外部核实**。
+      **⛔ 因此本 AC 不勾**，且缺的不是实现而是**接线**（见 AC81 同日发现）。
 
 - [ ] **AC81（三层各有注册表收据 + 每轮四判据核实）**
       **判据（四条全真才算）**：① `CronList` 恰一条 ② 其 id == 注册表记录的 `|cron:<id>|` ③ `--verify` 报 `registry-verified` ④ 锚点正本校验通过。
@@ -791,8 +803,22 @@ inner    ScheduleWakeup 169 次/天，零 CronCreate
       **⊢ 能取假的实证**：2026-08-14 09:1xZ 我多传 `--home "$HOME"` 覆盖默认值 ⇒ 读成 `registry-missing` ⇒ 差点误报「88 轮 registry-verified 断了」
       —— **该判据会因为调用方式错误而报假，说明它不是恒真读数**。
       **⛔ 不得只在 tick-log 里写「已核实」**——那是纯自觉；产物是四条判据各自的输出行。
+      **⊢ 2026-08-14 21:5xZ 核实——判据1 已达成，判据2 落空，且落空的形态值得单记**：
+      **判据1 ✅**：`outer-cron-registry.ts --show` ⇒ `inner: cronId=025f4132 cronExpr=7,27,47 promptSha256=9a044b01… verified` /
+      `outer: cronId=4e88cb1b cronExpr=0,20,40 promptSha256=d520ef85… createdAt=2026-08-14T15:21:19Z verified` ⇒ 两层收据齐备。
+      **判据5 ✅**：剩余寿命 ≈ 6.8 天（>24h，不报）。
+      **🔴 判据2 ✗（每轮四判据核实）**：`grep -c 'outer-cron-registry|outer-anchor-check'` 在
+      `orchestration/orchestrator-tick-core.md` = **0**、`plugin/loop/fast-mode-loop-tick.md` = **0**
+      ⇒ **两个检查器 442+502 行、两份测试 378+417 行全部落地，却不在任何一层的每轮步骤里被调用。**
+      **⇒ 这是 AC73「造好了但没人用」家族的又一实例**（发生率 +1；前例：`checkSplitRecommendation` 零非测试调用者、
+      `suite-state-trigger` 设计常驻却 28 小时没被拉起）。
+      **⇒ 且它恰好是硬规则 ⑨ 的教科书形态**：judgement 有了、产物有了，**「守」与「不守」在记录上仍无法区分**，
+      因为没有任何一轮会去跑它。**修法不是把 AC 写得更醒目，是把这两条命令写进两层执行核的每轮步骤**（归 outer/inner，manager 不改他们的核）。
 
-- [ ] **AC82（周期整除 60 且三层相位错开）**
+- [x] **AC82（周期整除 60 且三层相位错开）** ✅ **2026-08-14 21:5xZ 达成，两判据我这里全可查、全真**
+      **判据1 ✅**：manager `13,33,53`（`CronList` 活视图）· inner `7,27,47`（inner 自己的 CronCreate tool_use）· outer `0,20,40`（注册表收据）
+      ⇒ **三层周期均 20 分钟，整除 60**；立案时的 `*/17`（间隔 17,17,17,9）已消除。
+      **判据2 ✅**：minute 集合 {13,33,53} / {7,27,47} / {0,20,40} **两两不交**（模 20 的偏移分别是 13 / 7 / 0，互异）。
       **判据1**：三层 cron 周期均整除 60。**当前真值：manager `*/17` ❌ / outer `*/20` ✅ / inner 无 ❌**。
       **实测代价**：`*/17` ⇒ 0,17,34,51，**间隔 17,17,17,9**（51+17=68>59 折回）；manager 36 次实测 **平均 16.0 / 中位 15.9 / 最短 8.2 / 最长 28.6**。
       **⇒ 这是硬规则 4 推论二的一个实例**：一个看起来「约 17 分钟」的字面量，实际分布跨 8–29 分钟。
