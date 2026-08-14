@@ -1010,6 +1010,19 @@ node --experimental-strip-types plugin/scripts/touches-orthogonality-check.ts --
    后由步骤 2 释放认领（`release-task.sh`）。**单机（未设置 `QUAY_CLAIM_REMOTE`）⇒ 认领步骤为 no-op，
    直接跳过**——现有单机派发零回归（claim-task.sh 无 remote 时 fail-closed 退出 2）。
 
+7. **派发记录（AC55 产物·承重，`tasks/gap-ac55-dispatch-record-fingerprint-reason.md`）——派发前必写，先于
+   `--task-start`**：每派一条，先调 `dispatch-record.ts` 把「选了什么 + 为什么选它」落成可核产物——
+   **这是 SPEC §4.3 的承重部分（C17）**：没有它，「读了没读」在记录上不可区分 ⇒ 只能靠意志 ⇒ 必然失守
+   （§4.2 实证：manager 的 `A0b⑤(b)` 因「产物之后没人再用」连续 4 轮被跳过）。它记录
+   ①倾向文件的**内容指纹**（`git blob hash`，回答"用的是哪一版"）②一句「为什么选它」（回答"按倾向选
+   还是随便选」）。**不要求解释每一次「不选」**（SPEC §7 逐字）——只解释**选了什么**，避免产物变负担被跳过。
+   写入方 **fail-closed**：`--reason` 缺失/过薄（<8 非空白字符）⇒ exit 非 0、不写、不派（AC53 结构性闸形状）；
+   指纹算不出（倾向文件缺失/git 不可用）⇒ 记录仍写但 `preferenceFingerprint:null`，独立检查器报红
+   （派发无有效倾向引用 = 正是产物要抓的形态）。**禁止 `|| true` / 吞退出码。**
+   ```bash
+   node --no-warnings --experimental-strip-types plugin/scripts/dispatch-record.ts --add --task-id <id> --reason "<一句为什么选它>" --root "$(pwd)"
+   ```
+
 派发形态：**后台 `Agent(run_in_background: true, ...)`——`run_in_background` 必须是 `true`**
 （`gap-two-thirds-of-a-task-is-polling-a-suite-log` AC1b：前台派发阻塞内层到全部在飞返回、拿不到先完成者的
 早期反馈、期间什么也做不了，`<task-notification>` 唤醒流永远不会被触发——那是本仓实测等待的另一半来源，
