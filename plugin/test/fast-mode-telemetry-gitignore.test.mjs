@@ -138,6 +138,9 @@ test("AC1/AC3 — a freshly-written snapshot (the B6 per-tick write) does NOT di
   // file must be ignored immediately — porcelain must not list it, and check-ignore must hit it.
   const probe = path.join(REPO_ROOT, "milestones", "fast-mode-telemetry", "zz-gitignore-probe.json");
   const probeRel = "milestones/fast-mode-telemetry/zz-gitignore-probe.json";
+  // git tracks no empty dir and the telemetry files are untracked+ignored, so a fresh checkout
+  // never materializes milestones/fast-mode-telemetry/ — create it before writing the probe.
+  fs.mkdirSync(path.dirname(probe), { recursive: true });
   fs.writeFileSync(probe, '{"probe":true}\n', "utf8");
   try {
     const dirty = gitStatusPorcelainForTelemetry();
