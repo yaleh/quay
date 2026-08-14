@@ -25,7 +25,7 @@
 
 ## R02 — inner-state.sh 退役说明（orchestrator-loop-tick.md 0b 事件式监测）
 
-**来源**：`orchestration/orchestrator-loop-tick.md` 0b 事件式监测
+**来源**：`plugin/loop/orchestrator-loop-tick.md` 0b 事件式监测
 **退役**：2026-08-02 实测后 inner-state.sh 退役（不观测会话）
 **正文**（原文迁出保留）：
 
@@ -38,7 +38,7 @@
 
 ## R03 — AC12 已随 inner-state.sh 退役而收口
 
-**来源**：`orchestration/orchestrator-loop-tick.md` 外层监视器
+**来源**：`plugin/loop/orchestrator-loop-tick.md` 外层监视器
 **退役**：AC12 随 inner-state.sh 退役而收口
 **正文**（原文迁出保留）：
 
@@ -50,7 +50,7 @@
 
 ## R04 — AC48 integration 分支退役（orchestrator-loop-tick.md 实例量）
 
-**来源**：`orchestration/orchestrator-loop-tick.md` 实例量表（工作分支 / 外层工作 checkout）
+**来源**：`plugin/loop/orchestrator-loop-tick.md` 实例量表（工作分支 / 外层工作 checkout）
 **退役**：AC48 2026-08-13 退役 integration 分支（AC50 已切 develop）
 **正文**（原文迁出保留）：
 

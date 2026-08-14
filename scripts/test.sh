@@ -490,7 +490,7 @@ run_static_checks() {
   #   archive (全部有家). A marker in source-but-not-archive = the 判据3 负控 sample ⇒ RED (exit 1,
   #   set -euo pipefail abort). Mutation case + unit tests carry the negative control.
   # @static-tier change
-  # @static-object orchestration/orchestrator-tick-core.md orchestration/orchestrator-loop-tick.md plugin/loop/fast-mode-loop-tick.md CLAUDE.md plugin/scripts/integration-branch-model.ts plugin/scripts/integration-batch-merge.sh orchestration/SPEC-branching-model-integration-branch-2026-08-05.md orchestration/archive/AC58-retired-clauses.md plugin/scripts/retired-clause-check.ts plugin/scripts/checker-mutation-cases/retired-clause-check.sh plugin/test/retired-clause-check.test.mjs
+  # @static-object orchestration/orchestrator-tick-core.md plugin/loop/orchestrator-loop-tick.md plugin/loop/fast-mode-loop-tick.md CLAUDE.md plugin/scripts/integration-branch-model.ts plugin/scripts/integration-batch-merge.sh orchestration/SPEC-branching-model-integration-branch-2026-08-05.md orchestration/archive/AC58-retired-clauses.md plugin/scripts/retired-clause-check.ts plugin/scripts/checker-mutation-cases/retired-clause-check.sh plugin/test/retired-clause-check.test.mjs
   run_checker "retired-clause-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/retired-clause-check.ts" --root "${repo_root}"
   # Wait for all parallelized checkers and fail closed if any failed (see the RUN_CHECKER_PARALLEL
   # note at the top of this function — AC3 failure visibility, AC4 cost-ledger completeness).

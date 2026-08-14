@@ -43,14 +43,14 @@ export const REGISTRY: Entry[] = [
       "integration 删除后该命令无目标",
     ] },
   // orchestrator-loop-tick
-  { id: "R02", source: "orchestration/orchestrator-loop-tick.md", markers: [
+  { id: "R02", source: "plugin/loop/orchestrator-loop-tick.md", markers: [
       "inner-state.sh 已退役——它不观测会话",
       "它的招牌信号 .quay/inner-blocked.json",
     ] },
-  { id: "R03", source: "orchestration/orchestrator-loop-tick.md", markers: [
+  { id: "R03", source: "plugin/loop/orchestrator-loop-tick.md", markers: [
       "AC12 已随 inner-state.sh 退役而收口",
     ] },
-  { id: "R04", source: "orchestration/orchestrator-loop-tick.md", markers: [
+  { id: "R04", source: "plugin/loop/orchestrator-loop-tick.md", markers: [
       "AC48 2026-08-13 退役 integration",
       "AC50 已切，AC48 确认 integration 退役",
     ] },
