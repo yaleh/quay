@@ -22,10 +22,13 @@
 //           catch the proxy error (判据3 真样本回放红).
 //   判据4 — report-with-method: a report line presenting a worktree count AS THE in-flight count
 //           without a subagent label ⇒ RED (报数带计法: 在飞 subagent=M; worktree 另标).
-//   判据5 — 09:1xZ 推广: the C24 in-flight derivations (C24-1 fast-mode-telemetry.ts realInFlight/
-//           reconcile 家族, C24-2 slot-refill.ts in_flight_count 入参, C24-3 inner-wakeup-heartbeat-
-//           check.ts 在飞输入) carry the `RETIRED (AC76 C24-N …)` explicit annotation (AC48 判据2
-//           做法, 不删除). RED when a C24 file is missing the annotation.
+//   判据5 — 09:1xZ 推广: EVERY C24 in-flight derivation (AC76 判据5 list C24-1..7) has an explicit
+//           landing — a `RETIRED (AC76 C24-N …)` annotation on a plugin/scripts code file (C24-1/2/3,
+//           AC48 判据2 做法), an explicit 已并入 disposition into an already-mechanized mechanism
+//           (C24-4→判据6, C24-5→C24-1 标注, C24-7→C24-6), or an explicit 外层独占 C17 disposition
+//           (C24-6). RED when an annotation file is missing its marker (judgeC24Retirement) OR when
+//           the table is missing a landing for any C24 number (judgeC24Coverage) — 退役而不可查 =
+//           记录上像退役、行为上没退役 (AC66 族).
 //   判据6 — 能取假, /live 真样本: a live claim that a DONE task is running must replay RED — the
 //           2026-08-14 09:1xZ 实测 (AC66/AC72/AC73 three done tasks misreported as running by
 //           telemetry; done 与 ready 在遥测里不可区分). judgeLiveVsTaskStatus is the pure judge.
@@ -176,28 +179,57 @@ export function judgeReportLine(line) {
   return { ok: true, evaluated: false, reason: "no-in-flight-count-report (NOT-EVALUATED)", hasSubagentLabel, hasWorktree };
 }
 
-// ── 判据5 (09:1xZ 推广): C24 in-flight derivations retired to explicit annotation ─────────────────────
-/** The C24 in-flight-derivation code files and their required `RETIRED (AC76 C24-N …)` annotation
- *  markers. Only the plugin/scripts code files are mechanically enforced here; the orchestration
- *  items (C24-6 manager A3, orchestrator A18 / fast-mode A12) are C17 OUTER-owned — the task body
- *  Evidence carries the suggestions, not this checker (a checker must not fail on an outer-owned file
- *  it cannot fix). */
+// ── 判据5 (09:1xZ 推广): EVERY C24 in-flight derivation has an explicit landing ────────────────────────
+/** The complete C24 in-flight-derivation list (AC76 判据5 C24-1..6 + manager-phase-goal ⑦ C24-7).
+ *  Every entry MUST have a landing — one of three dispositions:
+ *    "annotation"   — a `RETIRED (AC76 C24-N …)` explicit annotation on the named plugin/scripts code
+ *                     file (AC48 判据2 做法: annotate, don't delete). Mechanically enforced by
+ *                     judgeC24Retirement (marker present in the file).
+ *    "merged"       — explicitly 已并入 an already-mechanized mechanism; `mergedInto` names the
+ *                     landing. No separate file annotation is required.
+ *    "outer-owned"  — an orchestration/ item owned by another layer (C17 — the checker must not fail
+ *                     on a file it cannot fix); `landing` names the owner's 落点. The disposition is
+ *                     recorded so the item is NOT 退役而不可查.
+ *  A retired C24 item with NO landing (missing from this table, or an empty disposition/mergedInto/
+ *  landing) is RED via judgeC24Coverage — 退役而不可查 = 记录上像退役、行为上没退役 (AC66 族). */
+export const C24_EXPECTED = [1, 2, 3, 4, 5, 6, 7];
+
 export const C24_RETIREMENT = [
-  { key: "fast-mode-telemetry", file: "plugin/scripts/fast-mode-telemetry.ts", marker: /RETIRED \(AC76 C24-1/ },
-  { key: "slot-refill", file: "plugin/scripts/slot-refill.ts", marker: /RETIRED \(AC76 C24-2/ },
-  { key: "inner-wakeup-heartbeat-check", file: "plugin/scripts/inner-wakeup-heartbeat-check.ts", marker: /RETIRED \(AC76 C24-3/ },
+  // ── C24-1/2/3 — plugin/scripts code files: RETIRED annotation mechanically enforced ──────────────
+  { key: "fast-mode-telemetry", n: 1, file: "plugin/scripts/fast-mode-telemetry.ts", marker: /RETIRED \(AC76 C24-1/, disposition: "annotation",
+    landing: "plugin/scripts/fast-mode-telemetry.ts:1081 `RETIRED (AC76 C24-1 …)` 显式标注（在飞维度退役；A1a 事件 schema、--task-start/--task-end 派发留痕、throughput/blocked-wait/reconcile-cleanup 保留）" },
+  { key: "slot-refill", n: 2, file: "plugin/scripts/slot-refill.ts", marker: /RETIRED \(AC76 C24-2/, disposition: "annotation",
+    landing: "plugin/scripts/slot-refill.ts:27 RETIRED (AC76 C24-2) 显式标注（MEASURED IN-FLIGHT DEFAULT telemetry fallback 在飞读法退役；显式 --in-flight 路径不变）" },
+  { key: "inner-wakeup-heartbeat-check", n: 3, file: "plugin/scripts/inner-wakeup-heartbeat-check.ts", marker: /RETIRED \(AC76 C24-3/, disposition: "annotation",
+    landing: "plugin/scripts/inner-wakeup-heartbeat-check.ts:85 RETIRED (AC76 C24-3) 显式标注（heartbeat 在飞输入退役；AC53 end-invariant 判据不变）" },
+  // ── C24-4/5 — 已并入 already-mechanized mechanisms (显式并入, 不适用独立文件标注) ────────────────
+  { key: "live-observation", n: 4, disposition: "merged",
+    mergedInto: "本检查器 判据6 judgeLiveVsTaskStatus（/live 把 done 误报在跑 ⇒ RED，2026-08-14 AC66/AC72/AC73 真样本）+ C24-1 对 /live producer（fast-mode-telemetry.ts）的在飞维度标注",
+    landing: "本检查器 判据6（/live done-误报在跑 捕获）+ C24-1 producer 标注" },
+  { key: "task-start-bracket", n: 5, disposition: "merged",
+    mergedInto: "C24-1 fast-mode-telemetry.ts RETIRED (AC76 C24-1) 注释——A16/A16b --task-start 括号的【在飞】用途随 producer 在飞维度一并退役（--task-start/--task-end 派发留痕用途保留）",
+    landing: "plugin/scripts/fast-mode-telemetry.ts:1088-1090 RETIRED (AC76 C24-1) 显式覆盖" },
+  // ── C24-6 — 外层独占 orchestration item (checker 不机械强制 outer-owned 文件) ───────────────────
+  { key: "manager-a3", n: 6, disposition: "outer-owned",
+    landing: "orchestration/manager-tick-core.md A3（在飞一律读 inner 会话 subagents/agent-*.jsonl 近 N 分钟写入数；worktree 计数另标）——C17 外层独占，只给建议不落盘" },
+  // ── C24-7 — 并入 C24-6 (cap 维度与在飞维度合并为同一个读法, manager-phase-goal ⑦) ─────────────
+  { key: "cap-inflight-merge", n: 7, disposition: "merged",
+    mergedInto: "C24-6 manager A3（orchestration/manager-phase-goal.md AC76 ⑦：cap 维度 ①② 与在飞维度 ③ 合并为同一个读法，落点随 C24-6 外层独占）",
+    landing: "并入 C24-6（manager A3 外层落点）" },
 ];
 
 /**
- * Judge 判据5 — every C24 code file carries its `RETIRED (AC76 C24-N …)` explicit annotation (AC48
- * 判据2 做法: annotate, don't delete). PURE over the resolved file texts. RED when a C24 file exists
- * but lacks the annotation; GREEN when all present files carry it; NOT-EVALUATED when no C24 file is
- * present.
+ * Judge 判据5 (annotation half) — every C24 `annotation`-disposition code file carries its
+ * `RETIRED (AC76 C24-N …)` explicit annotation (AC48 判据2 做法: annotate, don't delete). PURE over
+ * the resolved file texts. RED when an annotation entry's file exists but lacks the marker; GREEN when
+ * all present annotation files carry it; NOT-EVALUATED when no annotation file is present. The merged/
+ * outer-owned entries' landings are enforced by judgeC24Coverage, not here.
  * @param {Array<{key:string, file:string, text:string|null}>} files — [{key, file, text}] resolved
  *   by the caller (null text = file absent)
  * @returns {{ok:boolean, evaluated:boolean, reason:string, violations:string[]}}
  */
 export function judgeC24Retirement(files) {
+  const annotationCfgs = C24_RETIREMENT.filter((c) => c.disposition === "annotation");
   const list = (files ?? []).filter(Boolean);
   const present = list.filter((f) => f.text != null);
   if (present.length === 0) {
@@ -205,15 +237,53 @@ export function judgeC24Retirement(files) {
   }
   const violations = [];
   for (const f of present) {
-    const cfg = C24_RETIREMENT.find((c) => c.key === f.key);
+    const cfg = annotationCfgs.find((c) => c.key === f.key);
     if (cfg && !cfg.marker.test(String(f.text))) {
-      violations.push(`${f.key}: missing RETIRED (AC76 ${cfg.marker.source.replace(/RETIRED \\\(AC76 /, "").replace(/\\/, "")} annotation in ${f.file}`);
+      violations.push(`${f.key}: missing RETIRED (AC76 ${cfg.marker.source.replace(/RETIRED \\\(AC76 /, "").replace(/\\/, "")} annotation in ${cfg.file}`);
     }
   }
   if (violations.length > 0) {
     return { ok: false, evaluated: true, reason: "c24-retirement-annotation-missing", violations };
   }
-  return { ok: true, evaluated: true, reason: `c24-in-flight-derivations-retired (${present.length}/${C24_RETIREMENT.length} annotated)`, violations: [] };
+  return { ok: true, evaluated: true, reason: `c24-in-flight-derivations-retired (${present.length}/${annotationCfgs.length} annotated)`, violations: [] };
+}
+
+/**
+ * Judge 判据5 (coverage half / 判据2 能取假) — EVERY C24 in-flight derivation (C24-1..7) has an
+ * explicit landing: present in the table with a valid disposition ("annotation" with file+marker,
+ * "merged" with mergedInto, "outer-owned" with landing). PURE over the table. RED when any expected
+ * C24 number is missing or its landing is empty — 退役而不可查 = 记录上像退役、行为上没退役 (AC66 族).
+ * 能取假: the PRE-FIX table (only C24-1/2/3, no 4/5/7) replays RED (缺落点); the fixed table GREEN.
+ * @param {Array<{n:number, disposition:string, file?:string, marker?:RegExp, mergedInto?:string, landing?:string}>} table
+ * @returns {{ok:boolean, evaluated:boolean, reason:string, missing:string[]}}
+ */
+export function judgeC24Coverage(table) {
+  const list = (table ?? []).filter(Boolean);
+  const byN = new Map(list.map((c) => [Number(c.n), c]));
+  const missing = [];
+  for (const n of C24_EXPECTED) {
+    const entry = byN.get(n);
+    if (!entry) {
+      missing.push(`C24-${n}: no landing entry`);
+      continue;
+    }
+    const d = entry.disposition;
+    if (d === "annotation") {
+      if (!entry.file || !entry.marker) missing.push(`C24-${n}: annotation disposition without file/marker`);
+      if (!String(entry.landing ?? "").trim()) missing.push(`C24-${n}: annotation landing note empty`);
+    } else if (d === "merged") {
+      if (!String(entry.mergedInto ?? "").trim()) missing.push(`C24-${n}: merged disposition without mergedInto`);
+      if (!String(entry.landing ?? "").trim()) missing.push(`C24-${n}: merged landing note empty`);
+    } else if (d === "outer-owned") {
+      if (!String(entry.landing ?? "").trim()) missing.push(`C24-${n}: outer-owned disposition without landing`);
+    } else {
+      missing.push(`C24-${n}: unknown disposition ${JSON.stringify(d)}`);
+    }
+  }
+  if (missing.length > 0) {
+    return { ok: false, evaluated: true, reason: `c24-landing-coverage-missing (${missing.length}): ${missing.join("; ")}`, missing };
+  }
+  return { ok: true, evaluated: true, reason: `c24-landing-coverage-complete (${C24_EXPECTED.length}/${C24_EXPECTED.length})`, missing: [] };
 }
 
 // ── 判据6 (能取假, /live 真样本): a done task claimed running must replay RED ──────────────────────────
@@ -278,7 +348,9 @@ const usage = `cap-counts-subagents-check.ts — AC76 in-flight = CONCURRENT SUB
 判据2 (3rd-party)  <session>/subagents/agent-*.jsonl written in the last N minutes = in-flight subagents
 判据3 (replay)      worktree-count vs subagent-count mismatch ⇒ RED (07:2xZ wt=4/sub=2, 07:4xZ wt=1/sub=2)
 判据4 (method)      a worktree count presented as the in-flight count WITHOUT a subagent label ⇒ RED
-判据5 (09:1xZ)      C24-1/2/3 in-flight derivations carry the RETIRED (AC76 C24-N …) annotation
+判据5 (09:1xZ)      EVERY C24 in-flight derivation (C24-1..7) has a landing: C24-1/2/3 RETIRED
+                    (AC76 C24-N …) annotation enforced on the real files; C24-4/5/7 explicit 已并入
+                    disposition; C24-6 外层独占 — a missing landing replays RED (judgeC24Coverage)
 判据6 (replay)      a live claim that a DONE task is running ⇒ RED (AC66/AC72/AC73 fixture)
 
 Usage:
@@ -309,7 +381,7 @@ Usage:
 Exit codes:
   0  PASS or NOT-EVALUATED (read \`evaluated\` — false = could not judge, never conflated with green)
   1  RED — a worktree/telemetry-bracket in-flight proxy form (判据1/3/4/6) or a missing C24
-     retirement annotation (判据5)
+     retirement annotation / landing (判据5)
   2  usage / environment error`;
 
 export function main(argv) {
@@ -377,6 +449,7 @@ export function main(argv) {
     { key: "inner-wakeup-heartbeat-check", file: heartbeatFile, text: fs.existsSync(heartbeatFile) ? fs.readFileSync(heartbeatFile, "utf8") : null },
   ];
   push("judge5-c24-retirement", judgeC24Retirement(c24Files));
+  push("judge5-c24-landing-coverage", judgeC24Coverage(C24_RETIREMENT));
 
   // ── 判据6 — /live done-misreported-as-running replay ─────────────────────────────────────────────
   if (liveRunning.length > 0) {
