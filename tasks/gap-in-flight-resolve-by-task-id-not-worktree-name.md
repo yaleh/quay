@@ -1,7 +1,7 @@
 ---
 id: gap-in-flight-resolve-by-task-id-not-worktree-name
 title: --in-flight 传 worktree 目录名被截断致在飞少算 1 ⇒ slots_free 虚高 ⇒ AC53 闸误拒心跳（jsonl 56→57 恢复实证）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
