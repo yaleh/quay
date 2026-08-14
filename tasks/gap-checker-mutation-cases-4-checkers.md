@@ -1,7 +1,7 @@
 ---
 id: gap-checker-mutation-cases-4-checkers
 title: checker-mutation-check 4 个 checker 注册但缺 mutation case（cap-counts/fan-in-workflow/per-task-suite-record/rhythm-consumer）——develop 恒红挡 fan-in
-status: ready
+status: done
 labels:
   - gap
   - mechanism
