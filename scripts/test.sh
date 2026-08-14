@@ -539,6 +539,17 @@ run_static_checks() {
   # @static-tier change
   # @static-object plugin/scripts/slot-refill.ts plugin/scripts/ac56-recommended-deordered-check.ts plugin/test/ac56-recommended-deordered-check.test.mjs plugin/scripts/checker-mutation-cases/ac56-recommended-deordered-check.sh
   run_checker "ac56-recommended-deordered-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/ac56-recommended-deordered-check.ts" --root "${repo_root}"
+  echo "== preference-notification check (tasks/gap-ac57-preference-change-notification, AC57 通知面) =="
+  # AC57 义务 (phase-goal 逐字): 倾向变更的通知**不得包含倾向内容本身**，只说「倾向变了，去重读」+ 指纹。
+  # 可核载体 (发送侧留痕, 落地方设计 — SPEC §7 不规定): orchestration/preference-notification-log.md —
+  # git 可见; 发送者 (manager) 每次 SendMessage 倾向变更通知时把通知的确切文本逐字追加进「## 留痕记录」段。
+  # AC57 能取假 (manager 7e7aa61b, AC49 判据1 标准): 拿一条真实的倾向变更通知回放——若它携带了倾向内容本身
+  # ⇒ 必须报红 — pinned by plugin/test/preference-notification-check.test.mjs (模板+指纹全绿; 模板+逐字
+  # 倾向行负控制全红)。Blocks (exit 1) on: 模板段未记录通知语/指纹占位, 或任一留痕记录泄漏倾向内容, 或
+  # 记录指纹不匹配当前倾向文件的 git blob hash — 一条带内容的通知绝不能静默混进 inner 的上下文。
+  # @static-tier change
+  # @static-object orchestration/preference-notification-log.md orchestration/dispatch-preference.md plugin/scripts/preference-notification-check.ts
+  run_checker "preference-notification-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/preference-notification-check.ts" --root "${repo_root}"
   # Wait for all parallelized checkers and fail closed if any failed (see the RUN_CHECKER_PARALLEL
   # note at the top of this function — AC3 failure visibility, AC4 cost-ledger completeness).
   run_checker_parallel_wait
