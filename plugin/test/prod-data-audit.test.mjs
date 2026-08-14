@@ -254,11 +254,12 @@ test("AC1/AC2/AC3/AC5/AC6 REAL-CARRIER — audit against production reproduces m
   assert.equal(heavy.kind, CARRIER_KINDS.RETIRED);
   assert.equal(heavy.disposition, DISPOSITIONS.RETIRED);
 
-  // ③ 重核：inner-agent-budget.json = 真命中（全仓零写入者，含测试）——SUSPECT。
+  // ③ 重核：inner-agent-budget.json = 已退役载体（2026-08-10 人裁定 A16，retired-clause-check.ts R31）——
+  //   「零写入者」是退休预期态，直接出局（gap-retire-registration-inner-agent-budget-not-registered 登记）。
   const budget = byName("inner-agent-budget.json");
   assert.ok(budget, "inner-agent-budget.json is an explicit carrier and must be in the report");
-  assert.equal(budget.disposition, DISPOSITIONS.SUSPECT);
-  assert.equal(budget.writers.nonTest + budget.writers.test, 0, "zero writers repo-wide (incl tests)");
+  assert.equal(budget.kind, CARRIER_KINDS.RETIRED);
+  assert.equal(budget.disposition, DISPOSITIONS.RETIRED);
   assert.equal(budget.threeState, THREE_STATES.NOT_EVALUATED);
 
   // 活载体 sanity：verification-round.jsonl 存在且有数据（①），gate-events.jsonl 亦然。

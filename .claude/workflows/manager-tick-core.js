@@ -77,12 +77,12 @@ const READ_CMD = String.raw`cd /home/yale/work/quay
 #       → 三项目 status / resource.*（cpu_some_avg10, load1, node_count, node_dual_read,
 #         mem_available_mb）/ outer.liveness / outer.ticklog / monitor.*
 #   A1  python3 orchestration/manager-anchor-check.py
-#   五项手跑（正本在 orchestration/manager-tick-core.md 的 A0 行，那里逐条写了陷阱）：
-#       ① PC/commits30m（排除 manager: 前缀）② manifest + plugin_in_files
-#       ③ .quay/manager-write-freeze.txt ④ 收件箱 find 列文件（日期现算，勿硬编码）
-#       ⑤ mon_procs 先取清单再从清单数
-#
-# 【只有下面两项无人覆盖，故留在本块】
+#   五项手跑：**逐条内容【不在此复制】** —— 正本是 orchestration/manager-tick-core.md 的 A0 行。
+#     ⚠️ 2026-08-14 15:4xZ 实证：此处曾复制那五项的简述，而 15:2xZ 我把核里的 ⑤ 从「数进程」
+#     改成「读 monitor-mount-check.sh --json」后，**这份副本没跟着改** ⇒ 审计的指令块每轮
+#     照旧打印「⑤ mon_procs 先取清单再从清单数」，即已被推翻的做法。
+#     ⇒ 同形第三次（前两次：manager-loop-tick 的豁免面副本、核内 A10 与 A0-⑤ 并存）。
+#     ⇒ 修法与前两次一致：**指针不是副本**。要那五项，去读 A0 行。
 lat=$(gh release view --json tagName -q .tagName 2>/dev/null); echo "release=$lat ahead=$(git rev-list --count $lat..develop 2>/dev/null)"
 # ^ AC16② 新鲜度巡检。A0 不给，五项手跑也不给。
 python3 -c "

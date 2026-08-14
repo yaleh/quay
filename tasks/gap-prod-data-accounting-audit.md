@@ -124,7 +124,7 @@ gate-events.jsonl         ① HAS_DATA  accumulator  acRefs=6   disp=OK        �
 events.jsonl              ③ NOT_EVAL  accumulator  acRefs=5   disp=SUSPECT   仓内不存在，引用指向 $QUAY_GLOBAL_DIR 外
 inner-blocked.json        ③ NOT_EVAL  state        acRefs=5   disp=NORMAL_ABSENT（状态文件，无=正常态）
 checker-cost.jsonl        ① HAS_DATA  accumulator  acRefs=3   disp=OK        （8787 条记录）
-inner-agent-budget.json   ③ NOT_EVAL  state        acRefs=3   disp=SUSPECT   全仓零写入者（含测试）
+inner-agent-budget.json   ③ NOT_EVAL  retired      acRefs=3   disp=RETIRED  已退役（gap-retire-inner-agent-budget-report，2026-08-10 人裁定 A16）零写入者=退休预期态
 inner-wakeup-heartbeat.json ① HAS_DATA state       acRefs=3   disp=OK
 closure-pass-last-run.json ① HAS_DATA  state        acRefs=2   disp=OK
 suite-health-last-run.json ① HAS_DATA  state        acRefs=2   disp=OK
@@ -138,7 +138,7 @@ suite-state-events.jsonl  ① HAS_DATA  accumulator  acRefs=1   disp=OK        �
 **manager 三条重核全部由载体复现**：
 - `inner-blocked.json` → **假命中**（state 文件，无=正常态，inner-blocked-signal.ts 等 6 个非测试写入者存在）——disposition=NORMAL_ABSENT，不判 SUSPECT。
 - `heavy-op-token-events.jsonl` → **假命中**（已退役，retired-clause-check.ts:62 / loop-shipping-exclusion-data.mjs）——disposition=RETIRED。
-- `inner-agent-budget.json` → **真命中**（全仓可执行代码含测试零写入者 0+0，被 3 条 done 任务 AC 引用）——disposition=SUSPECT。
+- `inner-agent-budget.json` → **假命中（退休）**——写入机件 inner-agent-budget-report.ts 已于 2026-08-10 人裁定（A16）整体废弃并删除（gap-retire-inner-agent-budget-report），「零写入者」=退休预期态，与 heavy-op-token 同族；**原记 SUSPECT 为误判（退休未登记进 retired-clause-check.ts 故 判据5b 机械上只能报 SUSPECT——外层 2026-08-14 15:5xZ 订正，按 gap-retire-inner-agent-budget-report 归 RETIRED；登记修法另立任务）**。
 
 **本审计第一遍新增/与 manager 初步不同的发现**：
 - `events.jsonl`：边界化后 5 条 AC 真引用，生产载体在仓内不存在、引用指向 `$QUAY_GLOBAL_DIR/session-liveness/events.jsonl`（仓外）——③ NOT_EVALUATED + SUSPECT（需人工决定是否追全局目录）。
