@@ -512,7 +512,7 @@ run_static_checks() {
   # instruction (integration-branch-model.ts --overlaps-unverified) must be GONE from both core copies.
   # Mutation case + unit tests carry the negative control (AC49 判据1 D2 attribution).
   # @static-tier change
-  # @static-object tasks/gap-ac61-staleness-list-item-disposition.md plugin/loop/fast-mode-loop-tick.md plugin/loop/orchestrator-loop-tick.md docs/analysis/fast-mode-loop-tick.md orchestration/orchestrator-loop-tick.md plugin/loop/fast-mode-tick-core.md orchestration/fast-mode-tick-core.md orchestration/archive/AC58-retired-clauses.md plugin/scripts/ac61-staleness-disposition-check.ts plugin/scripts/checker-mutation-cases/ac61-staleness-disposition-check.sh plugin/test/ac61-staleness-disposition-check.test.mjs
+  # @static-object tasks/gap-ac61-staleness-list-item-disposition.md plugin/loop/fast-mode-loop-tick.md plugin/loop/orchestrator-loop-tick.md plugin/loop/fast-mode-tick-core.md orchestration/fast-mode-tick-core.md orchestration/archive/AC58-retired-clauses.md plugin/scripts/ac61-staleness-disposition-check.ts plugin/scripts/checker-mutation-cases/ac61-staleness-disposition-check.sh plugin/test/ac61-staleness-disposition-check.test.mjs
   run_checker "ac61-staleness-disposition-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/ac61-staleness-disposition-check.ts" --root "${repo_root}"
   echo "== dispatch-record fingerprint+reason check (tasks/gap-ac55-dispatch-record-fingerprint-reason, AC55 判据1/判据3) =="
   # AC55 判据1: EVERY dispatch record must carry ① the dispatch-preference file's content fingerprint
