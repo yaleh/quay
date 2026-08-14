@@ -58,9 +58,37 @@ depends_on: []
 
 - .gitignore（`milestones/fast-mode-telemetry/*.json` 条目 + 注释，与 :242 分类一致）
 - milestones/fast-mode-telemetry/（`git rm --cached`，历史保留）
-- （负控制 fixture + 真样本回放）
+- plugin/test/fast-mode-telemetry-gitignore.test.mjs（负控制 fixture + 真样本回放）
 - tasks/gap-b15-telemetry-snapshot-untracked.md（自身）
+
+## Test-Files
+
+- plugin/test/fast-mode-telemetry-gitignore.test.mjs
 
 ## Evidence
 
-（落地后回填）
+（inner 落地，2026-08-14）
+
+**判据1（gitignore 化）**：`.gitignore` 新增 `milestones/fast-mode-telemetry/*.json`（注释与 :242 的
+tick-log / gate-events.jsonl 分类一致）+ `git rm --cached` 12 个 tracked snapshot（2026-08-02 → 2026-08-14，
+历史提交保留不动）。`git check-ignore milestones/fast-mode-telemetry/2026-08-14.json` 命中；
+`git ls-files milestones/fast-mode-telemetry/` 归零；磁盘文件仍在（`ls milestones/fast-mode-telemetry/2026-08-14.json`）。
+
+**判据2（读者无碍）**：写入端 `writeAggregateReport` 走磁盘 `fs.writeFileSync(<root>/milestones/fast-mode-telemetry/<date>.json)`
+（`fast-mode-telemetry.ts:1485-1502`）；`git rm --cached` 只移除索引、磁盘文件仍在 ⇒ 读者读磁盘不受影响。
+读者按位置核过读磁盘：accounting-emit.ts:129/142 `fs.readdirSync`+`fs.readFileSync`（dir mode 取 newest）；
+slot-refill / quay-suite / select-tests-for-touches / supervisor-preempt-candidates / task-ac-carryover-check /
+inner-panel-stale-check / capability-catalog.sh 均通过 `fast-mode-telemetry.ts --report/--slots` 或目录读，不读 git。
+`--report` 照常 exit 0（reader 回放无碍）。
+
+**判据3（porcelain 干净）**：gitignore 后 `git status --porcelain -- milestones/fast-mode-telemetry/` 为空；
+fixture 额外写入一个 fresh snapshot probe，porcelain 仍为空（B6 每 tick 照写磁盘不再脏树，与
+B15-fan-in-clean-tree 闸同族：运行时状态不得出现在 porcelain 里）。
+
+**判据4（能取假·真样本回放）**：`git log 22431170~1..HEAD -- milestones/fast-mode-telemetry/` 回放
+2026-08-14 06h 窗口（01:31 22431170 → 06:03 d6db1483）真实 14 条 telemetry commit = 14（红：gitignore 前
+每条都推进 develop、都可能在 in-flight suite 窗口内打断 ff）；gitignore 化后 `git ls-files` 归零 + fresh write
+不脏 porcelain（绿：同窗口不再有 telemetry 提交）。fixture 由 `plugin/test/fast-mode-telemetry-gitignore.test.mjs`
+逐条断言。
+
+**scoped 门**：`bash scripts/test.sh --for-task gap-b15-telemetry-snapshot-untracked --allow-thin` 绿。
