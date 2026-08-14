@@ -47,7 +47,14 @@ export const meta = {
 
 const MODEL = 'sonnet'
 const ROOT = '/home/yale/work/quay'
-const MGR_SESSION = 'b8dc91a6-64e8-4d70-a715-9ec8e16a4f11'
+// ⚠️ 2026-08-14 14:3xZ：这里【曾经写死】一个 session id `b8dc91a6-…`，而它在 transcript 存储里
+//    【根本不存在】（find ~/.claude/projects -iname '*b8dc91a6*' ⇒ 0 命中）。审计 agent 每轮拿到坏 id，
+//    靠自己比对 SendMessage 前缀与 git 时间戳才找回真会话——**它足够聪明，所以我们一直没发现**。
+//    ⇒ 硬规则 4 推论二（写死的字面量会静默失效）+ C29（坏输入下仍产出「0 条新违规」= 与合格同形）的合体：
+//      一个查不到数据的审计，最可能的输出恰恰是「没发现问题」。
+//    ⇒ 修法是【不写字面量，改成读宿主】——用 2026-08-14 实测通过的官方接口现查：
+//      `claude agents --json`（外部进程可调、不需 TTY、墙钟 1.2–1.4s）取 name=="quay-manager" 的 sessionId。
+const MGR_SESSION_LOOKUP = String.raw`claude agents --json | python3 -c "import json,sys;print(next(x['sessionId'] for x in json.load(sys.stdin) if x['name']=='quay-manager'))"`
 
 // args 到达时是【字符串】不是对象（实测 wf_6f8cc053-f52）：直接 args.x 会静默 undefined。
 const A = (() => { try { return typeof args === 'string' ? JSON.parse(args) : (args ?? {}) } catch { return {} } })()
@@ -128,7 +135,7 @@ const AUDIT_SCHEMA = {
 
 phase('Audit')
 const audit = await agent(
-  `你审计【管理者自己】最近这一轮的行为。用 meta-cc 查会话 \`${MGR_SESSION}\`
+  `你审计【管理者自己】最近这一轮的行为。\n\n**第一步：先查出 manager 的真 session id，⛔ 不要用任何记忆里的 id**（此处曾写死一个不存在的 id，坏了很久没人发现）：\n\`\`\`bash\n${MGR_SESSION_LOOKUP}\n\`\`\`\n**⊢ 若该命令返回空或报错 ⇒ 立即报 NOT-EVALUATED 并停止**；⛔ 不得改用启发式猜测、⛔ 不得因为查不到就报「0 条违规」——一个查不到数据的审计最可能的输出恰恰是「没发现问题」，那与合格同形。\n\n拿到 id 后用 meta-cc 查该会话
 （deferred 工具，先 ToolSearch 取 schema：\`mcp__meta-cc__query_session_content\`）
 加 \`git log --oneline --since='40 minutes ago' -- ${ROOT}\`。
 
