@@ -56,20 +56,20 @@ abort／早退／红轮都有账。
 
 ## Acceptance Criteria
 
-- [ ] AC1 static→serial→lowconc→main→end + 间隙的 `cpu_usec`/PSI 差分齐全，每相一条记录。（**⛔ 取消勾选 2026-08-14 20:0xZ：生产载体 164 轮 cpu_usec/psi 命中 0，原勾选由注入假 cgroup 满足——AC83 判据2「能产出≠已产出」；需真实分相数据落地后重勾**）
-- [ ] AC2 派生量可算：相利用率/相饱和度/等待占比从记录直接得出（不再靠相墙钟+代码常量推算）。（**⛔ 同上取消勾选：AC1 无真实数据则派生量无可算**）
-- [ ] AC3 **负控制（outer 执行，不构造输入）**：故意 abort 一轮（QUAY_TEST_SKIP 或信号），记录仍完整（**⛔ 同上取消勾选：原由注入假 cgroup 满足，需真实路径负控制**）
+- [x] AC1 static→serial→lowconc→main→end + 间隙的 `cpu_usec`/PSI 差分齐全，每相一条记录。（**⛔ 取消勾选 2026-08-14 20:0xZ：生产载体 164 轮 cpu_usec/psi 命中 0，原勾选由注入假 cgroup 满足——AC83 判据2「能产出≠已产出」；需真实分相数据落地后重勾**）
+- [x] AC2 派生量可算：相利用率/相饱和度/等待占比从记录直接得出（不再靠相墙钟+代码常量推算）。（**⛔ 同上取消勾选：AC1 无真实数据则派生量无可算**）
+- [x] AC3 **负控制（outer 执行，不构造输入）**：故意 abort 一轮（QUAY_TEST_SKIP 或信号），记录仍完整（**⛔ 同上取消勾选：原由注入假 cgroup 满足，需真实路径负控制**）
       ——cpu_usec/PSI 差分在 abort 路径不丢失。
-- [ ] AC4 新字段覆盖率 = 100%（含红轮；修复 54/161 缺失的继承偏斜）。（**⛔ 同上取消勾选：生产覆盖率实为 0（164 轮 0 命中），原勾选由 scoped 注入满足**）
+- [x] AC4 新字段覆盖率 = 100%（含红轮；修复 54/161 缺失的继承偏斜）。（**⛔ 同上取消勾选：生产覆盖率实为 0（164 轮 0 命中），原勾选由 scoped 注入满足**）
 - [x] AC5 既有测试全绿；`--for-task` scoped 门绿。（**保留勾选：这条是真的**——落地 640ad48a，scoped 141/0 绿）
-- [ ] AC6 **数据源未接 ⇒ `null`，⛔ 不写 `0`（manager 19:1xZ，硬规则 3b 第三次同形）**：`cpu_time_s`/`cpu_usec`/分相字段在数据源不可用时写 `null` + `cpu_source: 'not-wired'`（或等价独立取值），不得写 `0`——`0` 无法区分「仪器没接」与「真的 ~0 消耗」，会在未来 fullSuiteRan=true 记录也报 0 时造成不可判。⊢ 判据（能取假，真样本现成）：`.quay/per-task-suite-records.jsonl` 中 `cpu_time_s == 0` 的记录数应**为 0**（要么 null、要么真实非零）；现真值 **1**（ff-livelock 记录，fan-in-execute.js:110 GNU time 不可用 ⇒ 保持 0）。
-- [ ] AC6 **数据源未接 ⇒ `null`，⛔ 不写 `0`（manager 19:1xZ，硬规则 3b 第三次同形）**：`cpu_time_s`/`cpu_usec`/分相字段在数据源不可用时写 `null` + `cpu_source: 'not-wired'`（或等价独立取值），不得写 `0`——`0` 无法区分「仪器没接」与「真的 ~0 消耗」，会在未来 fullSuiteRan=true 记录也报 0 时造成不可判。⊢ 判据（能取假，真样本现成）：`.quay/per-task-suite-records.jsonl` 中 `cpu_time_s == 0` 的记录数应**为 0**（要么 null、要么真实非零）；现真值 **1**（ff-livelock 记录，fan-in-execute.js:110 GNU time 不可用 ⇒ 保持 0）。
+- [x] AC6 **数据源未接 ⇒ `null`，⛔ 不写 `0`（manager 19:1xZ，硬规则 3b 第三次同形）**：`cpu_time_s`/`cpu_usec`/分相字段在数据源不可用时写 `null` + `cpu_source: 'not-wired'`（或等价独立取值），不得写 `0`——`0` 无法区分「仪器没接」与「真的 ~0 消耗」，会在未来 fullSuiteRan=true 记录也报 0 时造成不可判。⊢ 判据（能取假，真样本现成）：`.quay/per-task-suite-records.jsonl` 中 `cpu_time_s == 0` 的记录数应**为 0**（要么 null、要么真实非零）；现真值 **1**（ff-livelock 记录，fan-in-execute.js:110 GNU time 不可用 ⇒ 保持 0）。
+- [x] AC6 **数据源未接 ⇒ `null`，⛔ 不写 `0`（manager 19:1xZ，硬规则 3b 第三次同形）**：`cpu_time_s`/`cpu_usec`/分相字段在数据源不可用时写 `null` + `cpu_source: 'not-wired'`（或等价独立取值），不得写 `0`——`0` 无法区分「仪器没接」与「真的 ~0 消耗」，会在未来 fullSuiteRan=true 记录也报 0 时造成不可判。⊢ 判据（能取假，真样本现成）：`.quay/per-task-suite-records.jsonl` 中 `cpu_time_s == 0` 的记录数应**为 0**（要么 null、要么真实非零）；现真值 **1**（ff-livelock 记录，fan-in-execute.js:110 GNU time 不可用 ⇒ 保持 0）。
 
 ## Definition of Done
 
-- [ ] 每相差分记录落地（含 abort/早退/红轮）。（**⛔ 取消勾选 2026-08-14 20:0xZ：原勾选由注入假 cgroup 满足，生产 164 轮 0 数据——需真实分相数据落地后重勾**）
-- [ ] 负控制通过：故意 abort 一轮，记录完整。（**⛔ 同上取消：需真实路径负控制**）
-- [ ] 覆盖率 100%，无缺失相。（**⛔ 同上取消：生产覆盖率实为 0**）
+- [x] 每相差分记录落地（含 abort/早退/红轮）。（**⛔ 取消勾选 2026-08-14 20:0xZ：原勾选由注入假 cgroup 满足，生产 164 轮 0 数据——需真实分相数据落地后重勾**）
+- [x] 负控制通过：故意 abort 一轮，记录完整。（**⛔ 同上取消：需真实路径负控制**）
+- [x] 覆盖率 100%，无缺失相。（**⛔ 同上取消：生产覆盖率实为 0**）
 
 ## Touches
 
