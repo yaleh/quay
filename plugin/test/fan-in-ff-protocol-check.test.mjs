@@ -27,6 +27,7 @@ import {
   checkNonFfFanIn,
   buildLockHoldIntervals,
   checkSuiteInLock,
+  checkLockHoldDuration,
   checkRetryRecordShape,
   FAN_IN_MERGE_SUBJECT_RE,
 } from "../scripts/fan-in-ff-protocol-check.ts";
@@ -260,6 +261,70 @@ test("判据2b — unpaired lock events (release without acquire) ⇒ NOT-EVALUA
   } finally {
     cleanup(dir);
     cleanup(st);
+  }
+});
+
+// ── 判据1 (AC66: AC62 判据1 产物) — lock-hold covers ONLY the ff ─────────────────────────────────────
+
+test("PURE checkLockHoldDuration — a long hold (not-ff) ⇒ red; ms-scale holds ⇒ clean; no intervals ⇒ not-evaluated", () => {
+  const v = checkLockHoldDuration([], 60);
+  assert.equal(v.evaluated, false);
+  assert.equal(v.ok, true);
+  assert.equal(v.reason, "no-lock-hold-intervals");
+  const clean = checkLockHoldDuration([{ start: 100, end: 100 }, { start: 200, end: 201 }], 60);
+  assert.equal(clean.ok, true);
+  assert.equal(clean.evaluated, true);
+  assert.equal(clean.reason, "all-lock-holds-ms-scale");
+  const long = checkLockHoldDuration([{ start: 100, end: 100 }, { start: 200, end: 500 }], 60);
+  assert.equal(long.ok, false);
+  assert.equal(long.evaluated, true);
+  assert.equal(long.reason, "lock-hold-covers-non-ff-action");
+  assert.deepEqual(long.violations, [{ start: 200, end: 500 }]);
+});
+
+test("判据1 — a lock-hold interval LONGER than the ff bound ⇒ RED (exit 1) — the AC62 判据1 artifact", () => {
+  const dir = makeTmp("ac66hold");
+  try {
+    initRepo(dir);
+    const events = path.join(dir, ".quay", "fan-in-merge-lock-events.jsonl");
+    fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
+    // ff-only is milliseconds; a 300s hold means the lock covered something OTHER than the ff.
+    fs.writeFileSync(events, [
+      JSON.stringify({ event: "acquire", ts: "2026-08-14T03:10:00Z", epoch: 100, taskId: "t1", pid: 1 }),
+      JSON.stringify({ event: "release", ts: "2026-08-14T03:15:00Z", epoch: 400, taskId: "t1", pid: 1 }),
+    ].join("\n") + "\n", "utf8");
+    const r = runChecker(["--root", dir, "--lock-events", events, "--max-hold-seconds", "60"]);
+    assert.equal(r.status, 1, `long hold must be RED: ${r.stdout}${r.stderr}`);
+    const hold = jsonOut(r).checks.find((c) => c.check === "lock-hold-only-ff");
+    assert.equal(hold.ok, false);
+    assert.equal(hold.evaluated, true);
+    assert.equal(hold.reason, "lock-hold-covers-non-ff-action");
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("判据1 negative control — every real lock-hold is ms-scale (the live samples) ⇒ PASS", () => {
+  const dir = makeTmp("ac66holdclean");
+  try {
+    initRepo(dir);
+    const events = path.join(dir, ".quay", "fan-in-merge-lock-events.jsonl");
+    fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
+    // Real acquire/release pairs from .quay/fan-in-merge-lock-events.jsonl: all same-second (ms-scale).
+    fs.writeFileSync(events, [
+      JSON.stringify({ event: "acquire", ts: "2026-08-14T06:38:45Z", epoch: 1786689525, taskId: "gap-ac67", pid: 1063198 }),
+      JSON.stringify({ event: "release", ts: "2026-08-14T06:38:45Z", epoch: 1786689525, taskId: "gap-ac67", pid: 1063198 }),
+      JSON.stringify({ event: "acquire", ts: "2026-08-14T08:25:25Z", epoch: 1786695925, taskId: "gap-ac72", pid: 585488 }),
+      JSON.stringify({ event: "release", ts: "2026-08-14T08:25:25Z", epoch: 1786695925, taskId: "gap-ac72", pid: 585488 }),
+    ].join("\n") + "\n", "utf8");
+    const r = runChecker(["--root", dir, "--lock-events", events]);
+    assert.equal(r.status, 0, `ms-scale holds must pass: ${r.stdout}${r.stderr}`);
+    const hold = jsonOut(r).checks.find((c) => c.check === "lock-hold-only-ff");
+    assert.equal(hold.ok, true);
+    assert.equal(hold.evaluated, true);
+    assert.equal(hold.reason, "all-lock-holds-ms-scale");
+  } finally {
+    cleanup(dir);
   }
 });
 

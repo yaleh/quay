@@ -48,23 +48,76 @@ A16 派发记录  「每次派发写 workflow-events/fm-<id>*」     ← 行为�
 
 ## Acceptance Criteria
 
-- [ ] AC1 判据1：AC/任务驱动的行为变更必配产物（前向不追溯）；任务外自主变更明确不覆盖（快路径 :98 不变）。
-- [ ] AC2 判据2：产物能独立于「文本已改」回答「生效了吗」——A22 样板（tick-log 行带 agent 标识）+ AC62 判据1 补产物。
-- [ ] AC3 判据3 能取假：A22 10 次主线程调用（真实缺席样本）回放必须报红——不构造新数据（D2）。
-- [ ] AC4 本阶段自查：13 条 AC 含行为要求的逐条过「生效有没有产物」，缺的补上。
-- [ ] AC5 既有测试全绿；`--for-task` scoped 门绿。
+- [x] AC1 判据1：AC/任务驱动的行为变更必配产物（前向不追溯）；任务外自主变更明确不覆盖（快路径 :98 不变）。判据1 的文字已写进检查器头注释 + C17 建议（只加痕迹不改内容）；前向语义由「只判最新 A22 行」实现。
+- [x] AC2 判据2：产物能独立于「文本已改」回答「生效了吗」——A22 样板（tick-log 行带 agent 标识）+ AC62 判据1 补产物。A22 样板=ac66-a22-agent-id-check.ts（判最新读数行带 agent 标识）；AC62 判据1 产物=fan-in-ff-protocol-check.ts 新增 `lock-hold-only-ff` 判据（持锁时长毫秒级，超 --max-hold-seconds ⇒ 红）。两件都是读「本来就要写的东西」（tick-log / lock-events），零新增打卡动作。
+- [x] AC3 判据3 能取假：A22 10 次主线程调用（真实缺席样本）回放必须报红——不构造新数据（D2）。9 条真实缺席行 + 3 条真实合规行（逐字来自 orchestration/tick-log.md）全部回放正确（缺席 RED / 合规 GREEN），见 Evidence。
+- [x] AC4 本阶段自查：13 条 AC 含行为要求的逐条过「生效有没有产物」，缺的补上。自查结论见 Evidence：AC62 判据1 是唯一「只有要求没有产物」者，本任务补上；AC63/AC65/A16 已自带产物。
+- [x] AC5 既有测试全绿；`--for-task` scoped 门绿。scoped 门 exit 0、doc 检查 exit 0、ts-typecheck GREEN、新增 14 条负控制全绿（见 Evidence）。
 
 ## Definition of Done
 
-- [ ] AC/任务驱动变更可检查确认机制落地 + A22 真样本回放红 + AC62 判据1 产物补齐。
-- [ ] 接线 + 既有测试绿。
+- [x] AC/任务驱动变更可检查确认机制落地 + A22 真样本回放红 + AC62 判据1 产物补齐。
+- [x] 接线 + 既有测试绿。
 
 ## Touches
 
-- orchestration/orchestrator-tick-core.md / orchestration/manager-tick-core.md / orchestration/fast-mode-tick-core.md（AC/任务驱动变更的痕迹要求——只加痕迹不改内容）
-- plugin/scripts/（检查器 + 负控制 fixture，A22 真样本回放）
+- orchestration/orchestrator-tick-core.md / orchestration/manager-tick-core.md / orchestration/fast-mode-tick-core.md（C17：outer 专属，本任务只给改法建议、不编辑——建议文本见 Evidence）
+- plugin/scripts/ac66-a22-agent-id-check.ts (new)
+- plugin/scripts/fan-in-ff-protocol-check.ts（新增 判据1 `lock-hold-only-ff` 持锁时长检查 + `--max-hold-seconds`）
+- plugin/test/ac66-a22-agent-id-check.test.mjs (new)（负控制 fixture，A22 真样本回放）
+- plugin/test/fan-in-ff-protocol-check.test.mjs（新增 判据1 负控制用例）
+- plugin/scripts/checker-mutation-cases/ac66-a22-agent-id-check.sh (new)（mutation case：缺 agent 行 ⇒ 红）
+- plugin/scripts/checker-mutation-cases/fan-in-ff-protocol-check.sh (new)（mutation case：300s 持锁 ⇒ 红；同时补掉 fan-in-ff-protocol-check 长期零 mutation 的既有缺口）
+- scripts/test.sh（ac66-a22-agent-id-check 接线入 run_static_checks）
+- plugin/scripts/capability-catalog.sh（ac66-a22-agent-id-check 入目录 + fan-in-ff-protocol-check 判据1 说明）
+- docs/proposals/quay-product-outline.md（DELIVERY-INVENTORY 快照派生刷新）
 - tasks/gap-ac66-ac-driven-behavior-change-verifiable.md（自身）
 
 ## Evidence
 
-（落地后回填）
+**ts-typecheck（Touches 含新 .ts，必须）**：
+```
+fan-in-ts-typecheck-gate: task gap-ac66-ac-driven-behavior-change-verifiable — Touches cover new/moved .ts files (1); type graph changed
+fan-in-ts-typecheck-gate: typecheck GREEN — ADMITTED (exit 0)
+```
+
+**scoped 门 + doc 检查**：
+```
+scripts/test.sh: --for-task gap-ac66-ac-driven-behavior-change-verifiable — selector selected 0 test files (thin allowed); nothing to run  → SCOPED_EXIT=0
+bash scripts/test.sh --static-checks-doc → DOC_EXIT=0（tick-core-drift-check 报 3 对漂移但 --no-block 不阻塞；该漂移为既有状态，非本任务引入）
+```
+
+**判据3 A22 真样本回放（逐字来自 orchestration/tick-log.md 2026-08-14，D2 不构造）——9 条真实缺席行全部 RED、3 条真实合规行全部 GREEN**：
+```
+ac66-a22-agent-id-check: FAIL — all-a22-reading-lines-lack-agent-id (1 A22 reading line(s), 1 without agent id)   ← 「A22 心跳：promotions=AC76+AC77（todo→ready，fddb20b8）；pool 7/floor 20。」
+ac66-a22-agent-id-check: FAIL — …(1, 1)   ← 「A22 后台心跳已跑（--cap 5 校正后 pool 7/floor 20/deficit 13…）」
+ac66-a22-agent-id-check: FAIL — …(1, 1)   ← 「A22 后台 subagent 心跳：… 晋 AC73 todo→ready（416cd1d2 已提交）」（有 subagent 但 416cd1d2 是 commit SHA，非 agent id）
+ac66-a22-agent-id-check: FAIL — …(1, 1)   ← 「A22 晋 AC56/AC61/AC62 ready（cbb1791e——AC55 done 解封 deps）」
+ac66-a22-agent-id-check: OK — latest-a22-reading-carries-agent-id (1, 0)   ← 「本轮 A22 由后台 subagent（agentId afb5faed96138c7c6）执行，读数 POOL=4…」
+ac66-a22-agent-id-check: OK — latest-a22-reading-carries-agent-id (1, 0)   ← 「A22 后台 subagent（a841b6b1db36f0098）晋 AC66 ready（6f0e6f3a）」
+（单测断言：9 条缺席全 RED exit 1、3 条合规全 GREEN exit 0、`--log` fixture 最新行缺 agent ⇒ RED、最新行带 agent ⇒ PASS、无 A22 行 ⇒ NOT-EVALUATED exit 0）
+```
+
+**AC62 判据1 产物（持锁唯一动作=ff——锁事件持锁时长毫秒级）**：
+```
+真实锁事件（.quay/fan-in-merge-lock-events.jsonl，14 行 acquire/release 全同秒）：[lock-hold-only-ff] ok=true eval=true all-lock-holds-ms-scale
+负控制（300s 持锁区间）：[lock-hold-only-ff] ok=false eval=true lock-hold-covers-non-ff-action  → exit 1
+```
+
+**新增测试**：`plugin/test/ac66-a22-agent-id-check.test.mjs` 11 条全绿；`plugin/test/fan-in-ff-protocol-check.test.mjs` 16 条全绿（原 13 + 新增 3 条判据1）。
+**Mutation cases**：`checker-mutation-cases/ac66-a22-agent-id-check.sh` PASS（缺 agent 行捕获、合规行恢复）；`checker-mutation-cases/fan-in-ff-protocol-check.sh` PASS（300s 持锁捕获、ms-scale 恢复）。mutation gate uncovered 3→2（仅剩 per-task-suite-record-check / rhythm-consumer-check 两个既有缺口，归其 owning 任务）。
+
+**接线**：`scripts/test.sh` run_static_checks 新增 `ac66-a22-agent-id-check`（@static-tier change；对象=orchestration/tick-log.md + checker 自身 + test）。worktree 内无 tick-log ⇒ NOT-EVALUATED（exit 0，硬规则 3b 独立取值）；主检出的真实 tick-log 若最新 A22 行缺 agent ⇒ RED（强制即生效）。
+
+**本阶段自查（判据2 第一批对象——13 条 AC 含行为要求的，逐条过「生效有没有产物」）**：
+```
+AC62 判据1  「持锁期间不得跑 suite、不得做任何其它动作」 ← 本任务补齐：lock-hold-only-ff 判据（持锁时长毫秒级，超界 ⇒ 红）。此前【只有要求没有产物】。
+AC63 判据1  「ff 之前显式跑 doc 检查」                   ← 已自带：ff 落地时有对应 doc 检查记录（AC63 判据2）
+AC65 判据2  「每次直接修必须贴验证输出」                  ← 已自带：提交/投递里的实际输出（已在用）
+A16 派发记录  「每次派发写 workflow-events/fm-<id>*」     ← 已自带：dispatch-record taskId 集合 vs workflow-events 文件名集合取差集非空即红（2026-08-14 三个缺失文件=判据3 第二样本；人已裁不补记）
+```
+
+**C17 建议（orchestration/ 为外层专属，本任务不编辑；三条核心各给改法建议）**：
+1. `orchestration/orchestrator-tick-core.md` A22 行（:46）：在「不在主线程跑」之后加痕迹「tick-log A22 读数行必须带 agent 标识（无标识即视为未执行——ac66-a22-agent-id-check.ts 每轮判最新行）」——只加痕迹，不改 A22 的行为要求本体。
+2. `orchestration/fast-mode-tick-core.md` A6 行（AC62 新协议段）：加痕迹「持锁段锁内唯一动作=ff，锁事件持锁时长毫秒级（fan-in-ff-protocol-check.ts `lock-hold-only-ff` 判据，超 --max-hold-seconds ⇒ 红）」——把 AC62 判据1 的产物位置写进执行核，后续 AC/任务驱动的行为变更照此留产物。
+3. `orchestration/manager-tick-core.md`：加一条通则痕迹「本核内任何 AC/任务驱动的行为变更，必须能独立于文本回答『生效了吗』——给产物（读本来就要写的东西），不留『核里写了』这种无产物要求」——AC66 判据1/2 的执行核落点。

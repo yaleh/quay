@@ -122,6 +122,30 @@ export function checkSuiteInLock(holdIntervals, suiteRun) {
   return { ok: true, overlaps: [], evaluated: true, reason: "no-suite-lock-overlap" };
 }
 
+// ── Pure: 判据1 (lock-hold covers ONLY the ff — AC66 给 AC62 判据1 配的产物) ─────────────────────────
+
+/**
+ * Decide 判据1 (AC62 "持锁期间唯一动作=ff"): every lock-hold interval must be SHORT — `git merge
+ * --ff-only` moves a ref and takes milliseconds, so a hold that is not millisecond-scale means the
+ * lock covered something OTHER than the ff (a suite, an edit, a wait). The merge lock's whole point
+ * (SPEC §2) is millisecond-scale hold so stale-lock recovery is almost never reached; a long hold
+ * violates the protocol's own premise. PURE. NOT-EVALUATED when there are no hold intervals.
+ * @param {{start:number,end:number}[]} holdIntervals — from buildLockHoldIntervals
+ * @param {number} maxSeconds — the hold-length bound (default 60: ff-only is ms; >60s = not-ff)
+ * @returns {{ok:boolean, violations:{start:number,end:number,key?:string}[], evaluated:boolean, reason:string}}
+ */
+export function checkLockHoldDuration(intervals, maxSeconds) {
+  const list = (intervals ?? []).filter(Boolean);
+  if (list.length === 0) {
+    return { ok: true, violations: [], evaluated: false, reason: "no-lock-hold-intervals" };
+  }
+  const violations = list.filter((h) => h.end - h.start > maxSeconds);
+  if (violations.length > 0) {
+    return { ok: false, violations, evaluated: true, reason: "lock-hold-covers-non-ff-action" };
+  }
+  return { ok: true, violations: [], evaluated: true, reason: "all-lock-holds-ms-scale" };
+}
+
 // ── Pure: 判据3 (retry-record shape) ──────────────────────────────────────────────────────────────────
 
 /**
@@ -222,12 +246,15 @@ Usage:
                         merge-lock-events.jsonl)
   --suite-state <file>  判据2b: the suite-state file (default <root>/.quay/full-suite-state.json)
   --retry-record <file> 判据3: the ff retry-record log (default <root>/.quay/fan-in-retries.jsonl)
+  --max-hold-seconds <n> 判据1 (AC62 唯一动作=ff): a lock-hold interval LONGER than this many seconds
+                        ⇒ RED (ff-only is milliseconds; >60s means the lock covered something else).
+                        Default 60. Pass --max-hold-seconds 0 to judge any non-zero hold as red.
   --json                machine-readable output { evaluated, ok, checks:[...], reason }
   --help                this help
 
 Exit codes:
   0  PASS or NOT-EVALUATED (read \`evaluated\` — false = could not judge, never conflated with green)
-  1  RED — a protocol violation (non-ff fan-in / suite-in-lock / malformed retry record)
+  1  RED — a protocol violation (non-ff fan-in / suite-in-lock / non-ff lock-hold / malformed retry record)
   2  usage / environment error`;
 
 export function main(argv) {
@@ -242,6 +269,12 @@ export function main(argv) {
   const lockEventsFile = path.resolve(getArgValue(args, "--lock-events") ?? path.join(root, ".quay", "fan-in-merge-lock-events.jsonl"));
   const suiteStateFile = path.resolve(getArgValue(args, "--suite-state") ?? path.join(root, ".quay", "full-suite-state.json"));
   const retryRecordFile = path.resolve(getArgValue(args, "--retry-record") ?? path.join(root, ".quay", "fan-in-retries.jsonl"));
+  const rawMaxHold = getArgValue(args, "--max-hold-seconds");
+  const maxHoldSeconds = rawMaxHold != null ? Number(rawMaxHold) : 60;
+  if (rawMaxHold != null && (!Number.isFinite(maxHoldSeconds) || maxHoldSeconds < 0)) {
+    process.stderr.write(`fan-in-ff-protocol-check: --max-hold-seconds must be a non-negative number (got '${rawMaxHold}')\n`);
+    return 2;
+  }
   const asJson = args.includes("--json");
 
   const checks = [];
@@ -276,12 +309,19 @@ export function main(argv) {
       const { intervals, malformed } = buildLockHoldIntervals(events);
       if (malformed) {
         checks.push({ check: "suite-in-lock", evaluated: false, ok: true, reason: "unpaired-lock-events (NOT-EVALUATED)" });
+        checks.push({ check: "lock-hold-only-ff", evaluated: false, ok: true, reason: "unpaired-lock-events (NOT-EVALUATED)" });
       } else {
         const suiteRun = suiteRunInterval(root, suiteStateFile);
         const v = checkSuiteInLock(intervals, suiteRun);
         if (v.evaluated) anyEvaluated = true;
         if (!v.ok) anyRed = true;
         checks.push({ check: "suite-in-lock", evaluated: v.evaluated, ok: v.ok, overlaps: v.overlaps, reason: v.reason });
+        // 判据1 (AC66 给 AC62 判据1 配的产物): 持锁期间唯一动作=ff ⇒ every hold must be SHORT
+        // (ff-only is milliseconds; a longer hold means the lock covered something other than the ff).
+        const v1 = checkLockHoldDuration(intervals, maxHoldSeconds);
+        if (v1.evaluated) anyEvaluated = true;
+        if (!v1.ok) anyRed = true;
+        checks.push({ check: "lock-hold-only-ff", evaluated: v1.evaluated, ok: v1.ok, violations: v1.violations, reason: v1.reason });
       }
     }
   }
