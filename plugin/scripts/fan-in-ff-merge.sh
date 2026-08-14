@@ -23,8 +23,12 @@
 # On ff failure — the ONLY reason ff fails after step 1 is "develop advanced concurrently" — this
 # script appends a RETRY RECORD (task id / attempt # / develop head / timestamp / runId) and exits 1:
 # the caller returns to 无锁段 step 1 and re-runs. No needs-human path exists for ff failure (§4:
-# ff 失败原因唯一、处置唯一). Anti-livelock is NOT pre-built; the trigger is written as "同一任务
-# ff 失败 ≥3 次" and only then is anti-livelock discussed (§7) — the retry record is the data for it.
+# ff 失败原因唯一、处置唯一). Anti-livelock (SPEC §7, gap-ff-livelock-trigger-no-action): the retry
+# record IS the anti-livelock data — the trigger is "同一任务 ff 失败 ≥3 次". When THIS failure is
+# the same task's attempt >= 3, the script does NOT return the plain retry (exit 1): it escalates —
+# writes a DISTINCT escalation record (with the SPEC §7 quiet-window request), prints the
+# anti-livelock action, and exits 3. The no-auto-retry guard is the attempt count itself: once a
+# task reaches >= 3, every later invocation escalates (exit 3), never exit 1.
 #
 # Lock events (acquire/release) are appended to .quay/fan-in-merge-lock-events.jsonl so the protocol
 # checker (fan-in-ff-protocol-check.ts) can verify AC4 (the lock covers ONLY ff, never overlaps a
@@ -47,13 +51,19 @@
 # Usage:
 #   fan-in-ff-merge.sh --task <taskId> [--root <repo>] [--merge-target <branch>] [--run-id <runId>]
 #                      [--agent-id <caller-agent-id>] [--suite-state <file>] [--lock-events <file>]
-#                      [--retry-record <file>] [--lock-wait <secs>] [--help]
+#                      [--retry-record <file>] [--escalations <file>] [--lock-wait <secs>] [--help]
 #
 # Exit codes:
 #   0  ff performed (develop/merge-target fast-forwarded to task/<taskId>)
-#   1  ff NOT possible (develop advanced — retry record written; return to 无锁段 step 1)
+#   1  ff NOT possible (develop advanced — retry record written; return to 无锁段 step 1).
+#      Only for attempts 1-2. This is the "develop advanced, retry" path.
 #   2  usage / environment error (missing task branch, suite running, dirty tree, wrong branch,
 #      lock timeout — NOT an ff failure, NO retry record)
+#   3  ANTI-LIVELOCK (gap-ff-livelock-trigger-no-action): this ff failure is the SAME task's
+#      attempt >= 3 (SPEC §7: "同一任务 ff 失败 ≥3 次 才谈防活锁"). Develop keeps advancing faster
+#      than this task can catch up — a livelock. The script escalates (writes a DISTINCT escalation
+#      record + requests a quiet window) and does NOT offer the plain retry (exit 1). DISTINCT from
+#      exit 1 (retry) and exit 2 (usage/env) so a caller can mechanically tell "do not auto-retry".
 # ── 统一 --help（gap-scripts-sprawl：用法在前、退出 0、无业务副作用）────────────────────
 if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
   _gap_help_lib="$(dirname "${BASH_SOURCE[0]}")/gate-script-lib.sh"
@@ -71,6 +81,7 @@ agent_id=""
 suite_state=""
 lock_events=""
 retry_record=""
+escalations=""
 lock_wait=30
 
 while [ "$#" -gt 0 ]; do
@@ -83,6 +94,7 @@ while [ "$#" -gt 0 ]; do
     --suite-state) suite_state="$2"; shift 2 ;;
     --lock-events) lock_events="$2"; shift 2 ;;
     --retry-record) retry_record="$2"; shift 2 ;;
+    --escalations) escalations="$2"; shift 2 ;;
     --lock-wait) lock_wait="$2"; shift 2 ;;
     *) echo "fan-in-ff-merge: unknown arg: $1" >&2; exit 2 ;;
   esac
@@ -113,6 +125,7 @@ lock_file="${git_common_dir}/fan-in-merge.lock"
 if [ -z "${suite_state}" ]; then suite_state="${root}/.quay/full-suite-state.json"; fi
 if [ -z "${lock_events}" ]; then lock_events="${root}/.quay/fan-in-merge-lock-events.jsonl"; fi
 if [ -z "${retry_record}" ]; then retry_record="${root}/.quay/fan-in-retries.jsonl"; fi
+if [ -z "${escalations}" ]; then escalations="${root}/.quay/fan-in-ff-escalations.jsonl"; fi
 
 # ── AC78 判据2(c): --agent-id 自校验 (manager 2026-08-14 裁定并入实现侧, gap-ac78) ────────────────
 # --agent-id is free text — anything passes. Fail-closed: if it resolves to a TOP-LEVEL session id
@@ -187,7 +200,7 @@ attempt=$(( prior_failures + 1 ))
 # flock on an open fd: the lock is released automatically when the fd closes (process exit), so a
 # crash mid-ff cannot leak it — no stale-lock recovery design needed (§2). --lock-wait bounds the
 # wait (default 30s; the hold is milliseconds so a waiter never actually waits this long).
-mkdir -p "$(dirname "${lock_events}")" "$(dirname "${retry_record}")" 2>/dev/null || true
+mkdir -p "$(dirname "${lock_events}")" "$(dirname "${retry_record}")" "$(dirname "${escalations}")" 2>/dev/null || true
 lock_fd=9
 exec {lock_fd}>"${lock_file}"
 if ! flock -x -w "${lock_wait}" "${lock_fd}"; then
@@ -231,6 +244,26 @@ if [ "${merge_rc}" -ne 0 ]; then
   # step-1 re-run merges THIS develop). attempt = prior failures for this task + 1.
   develop_head_now="$(git -C "${root}" rev-parse "${merge_target}" 2>/dev/null || echo "unresolvable")"
   printf '%s\n' "{\"taskId\":\"${task_id}\",\"attempt\":${attempt},\"developHead\":\"${develop_head_now}\",\"ts\":\"${now_iso}\",\"epoch\":${now_epoch},\"runId\":${run_id_json},\"agentId\":${agent_id_json},\"mergeTarget\":\"${merge_target}\",\"error\":\"$(printf '%s' "${merge_err}" | sed 's/"/\\"/g')\"}" >> "${retry_record}"
+  # ── SPEC §7 anti-livelock trigger (gap-ff-livelock-trigger-no-action) ───────────────────────────
+  # The retry record IS the anti-livelock data (§7): "同一任务 ff 失败 ≥3 次 才谈防活锁". When THIS
+  # failure is the same task's attempt >= 3 (develop keeps advancing faster than the fan-in can
+  # catch up — a livelock), the plain "exit 1 → return to step 1" retry is NO LONGER offered:
+  #   1. ESCALATE — write a DISTINCT escalation record (.quay/fan-in-ff-escalations.jsonl) carrying
+  #      task / attempt / develop head / caller identity; exit code 3 is distinct from 1 (retry) and
+  #      2 (usage/env), so a caller can mechanically tell "anti-livelock, do not auto-retry" apart
+  #      from "develop advanced, retry".
+  #   2. REQUEST A QUIET WINDOW — the escalation record carries the SPEC §7 quiet-window request
+  #      (who holds: all layers except the fan-in executor; 判据: `git log <mergeTarget>
+  #      --since=<ts>` empty; ends early on ff success — the AC63 pattern). Other layers read this
+  #      record and hold develop so the retry can land.
+  #   3. STOP AUTOMATIC RETRY — the guard is the attempt count itself: once attempt >= 3, THIS and
+  #      every later invocation escalates (exit 3), never returns the plain retry exit 1.
+  if [ "${attempt}" -ge 3 ]; then
+    printf '%s\n' "{\"event\":\"ff-escalation\",\"taskId\":\"${task_id}\",\"attempt\":${attempt},\"developHead\":\"${develop_head_now}\",\"ts\":\"${now_iso}\",\"epoch\":${now_epoch},\"runId\":${run_id_json},\"agentId\":${agent_id_json},\"mergeTarget\":\"${merge_target}\",\"action\":\"request-quiet-window-and-stop-retry\",\"quietWindow\":{\"requested\":true,\"holder\":\"all-layers-except-fan-in-executor\",\"criterion\":\"git log ${merge_target} --since=${now_iso} empty\",\"windowMinutes\":20,\"endsEarly\":\"ff-success\"}}" >> "${escalations}"
+    echo "fan-in-ff-merge: FF FAILED (attempt ${attempt} >= 3) — ANTI-LIVELOCK (SPEC §7, gap-ff-livelock-trigger-no-action): develop keeps advancing; escalating + requesting a quiet window + STOPPING automatic retry. Escalation record written to ${escalations}. Do NOT auto-retry: coordinate a develop-hold (quiet window), re-merge develop once quiet, then re-run." >&2
+    echo "fan-in-ff-merge: measure ff_only_locked=false" >&2
+    exit 3
+  fi
   echo "fan-in-ff-merge: FF FAILED — ${merge_err:-develop advanced}; not a fast-forward. Retry record written (attempt ${attempt}). Return to 无锁段 step 1 (merge develop again — 必须 merge 不得 rebase, AC75), re-judge the delta (step 2) and re-run." >&2
   echo "fan-in-ff-merge: measure ff_only_locked=false" >&2
   exit 1

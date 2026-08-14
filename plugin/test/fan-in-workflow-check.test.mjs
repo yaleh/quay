@@ -63,6 +63,9 @@ import {
   defaultProjectDir,
   WORKFLOW_BASENAME,
   ENFORCEMENT_BASELINE_EPOCH,
+  parseEscalations,
+  escalatedTaskIds,
+  checkEscalationTraceability,
 } from "../scripts/fan-in-workflow-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -512,6 +515,67 @@ test("PURE checkAgentIds — no events ⇒ NOT-EVALUATED", (t) => {
   assert.equal(v.evaluated, false);
 });
 
+// ── PURE d: escalation traceability (gap-ff-livelock-trigger-no-action, SPEC §7 anti-livelock) ─────
+
+test("PURE parseEscalations — parses ff-escalation records; skips torn tail; empty ⇒ []", (t) => {
+  const text = [
+    JSON.stringify({ event: "ff-escalation", taskId: "gap-ac63-judgment2-no-carrier", attempt: 3, developHead: "04659638f3a7e7cc6cc932dca846a87967db13da", action: "request-quiet-window-and-stop-retry", quietWindow: { requested: true } }),
+    JSON.stringify({ event: "ff-escalation", taskId: "gap-ac80-prompt-canonical-and-invariant-checker", attempt: 3 }),
+    '{ "event": "ff-escalation", "taskId": "gap-x", "attempt": ',
+  ].join("\n");
+  const es = parseEscalations(text);
+  assert.equal(es.length, 2);
+  assert.equal(es[0].taskId, "gap-ac63-judgment2-no-carrier");
+  assert.equal(es[0].quietWindow.requested, true);
+  assert.deepEqual(parseEscalations(""), []);
+  assert.deepEqual(parseEscalations(null), []);
+});
+
+test("PURE escalatedTaskIds — unique sorted task ids from escalation records", (t) => {
+  const es = parseEscalations([
+    JSON.stringify({ event: "ff-escalation", taskId: "gap-b", attempt: 3 }),
+    JSON.stringify({ event: "ff-escalation", taskId: "gap-a", attempt: 4 }),
+    JSON.stringify({ event: "ff-escalation", taskId: "gap-b", attempt: 5 }),
+    JSON.stringify({ event: "ff-escalation" }), // no taskId ⇒ contributes nothing
+  ].join("\n"));
+  assert.deepEqual(escalatedTaskIds(es), ["gap-a", "gap-b"]);
+  assert.deepEqual(escalatedTaskIds([]), []);
+});
+
+test("PURE checkEscalationTraceability — every escalated task has a Workflow call ⇒ GREEN", (t) => {
+  const v = checkEscalationTraceability(
+    ["gap-ac63-judgment2-no-carrier"],
+    ["gap-ac63-judgment2-no-carrier"]
+  );
+  assert.equal(v.ok, true);
+  assert.equal(v.evaluated, true);
+  assert.deepEqual(v.escalatedWithoutWorkflow, []);
+});
+
+test("PURE checkEscalationTraceability — an escalated task with NO Workflow call ⇒ RED (判据2 traceability for the escalation path)", (t) => {
+  // The anti-livelock escalation is a fan-in attempt that did NOT land — it must still have gone
+  // through the fan-in-execute workflow. A direct (non-workflow) escalation is the AC72/AC73
+  // main-thread-executor defect on the escalation path.
+  const v = checkEscalationTraceability(
+    ["gap-ac63-judgment2-no-carrier"],
+    [] // no Workflow(fan-in-execute) call for the escalated task
+  );
+  assert.equal(v.ok, false);
+  assert.equal(v.evaluated, true);
+  assert.deepEqual(v.escalatedWithoutWorkflow, ["gap-ac63-judgment2-no-carrier"]);
+});
+
+test("PURE checkEscalationTraceability — no escalations ⇒ NOT-EVALUATED (never conflated with green)", (t) => {
+  const v = checkEscalationTraceability([], ["gap-ac63-judgment2-no-carrier"]);
+  assert.equal(v.evaluated, false);
+  assert.equal(v.ok, true);
+});
+
+test("PURE checkEscalationTraceability — a task WITH a Workflow call but NO escalation is not debt (escalation set is the input)", (t) => {
+  const v = checkEscalationTraceability([], ["gap-any"]);
+  assert.equal(v.evaluated, false, "no escalation input ⇒ NOT-EVALUATED regardless of workflow calls");
+});
+
 // ── projectSlug / defaultProjectDir ─────────────────────────────────────────────────────────────────
 
 test("PURE projectSlug — /home/yale/work/quay → -home-yale-work-quay (the real Claude slug)", (t) => {
@@ -752,4 +816,74 @@ test("CLI — 负控制: a fan-in dispatched AFTER the enforcement baseline with
   assert.deepEqual(a.missing, ["gap-post-baseline"]);
   assert.deepEqual(a.knownPreBaselineDebt, []);
   assert.deepEqual(a.preBoundaryDispatch, []);
+});
+
+// ── CLI d: escalation traceability (SPEC §7 anti-livelock, gap-ff-livelock-trigger-no-action) ───────
+
+test("CLI — escalation traceability: an escalated task WITH a Workflow call ⇒ exit 0 (GREEN)", (t) => {
+  const fx = makeFixture();
+  t.after(() => cleanup(fx.dir));
+  const lockFile = path.join(fx.dir, "lock.jsonl");
+  const ev = { event: "acquire", taskId: "gap-ac63-judgment2-no-carrier", epoch: 2000000000, agentId: "aab2d14d10a762ff4" };
+  fs.writeFileSync(lockFile, JSON.stringify(ev) + "\n");
+  // The escalated task went through the fan-in-execute workflow (判据2 traceability).
+  const wfFile = path.join(fx.dir, "65dc5943-107a-4ef5-94d2-4ba5d0d3816c.jsonl");
+  fs.writeFileSync(wfFile, JSON.stringify({ message: { content: [{ type: "tool_use", name: "Workflow", input: { scriptPath: "/q/.claude/workflows/fan-in-execute.js", args: '{"task":"gap-ac63-judgment2-no-carrier"}' } }] } }) + "\n");
+  // The escalation record (as written by fan-in-ff-merge.sh on attempt >= 3).
+  const escFile = path.join(fx.dir, "escalations.jsonl");
+  fs.writeFileSync(escFile, JSON.stringify({ event: "ff-escalation", taskId: "gap-ac63-judgment2-no-carrier", attempt: 3, action: "request-quiet-window-and-stop-retry", quietWindow: { requested: true } }) + "\n");
+  // real subagent file so 判据2(c) is green too.
+  fs.mkdirSync(path.join(fx.dir, "subagents"), { recursive: true });
+  fs.writeFileSync(path.join(fx.dir, "subagents", "agent-aab2d14d10a762ff4.jsonl"), "{}");
+  const res = spawnSync("node", ["--experimental-strip-types", CHECKER, "--root", REPO_ROOT, "--lock-events", lockFile, "--project-dir", fx.dir, "--workflow-events-dir", fx.wfEvents, "--dispatch-record", fx.dispatchRecord, "--escalations", escFile, "--workflow-landed-ts", "2026-08-14T09:20:07Z", "--json"], { encoding: "utf8" });
+  assert.equal(res.status, 0);
+  const out = JSON.parse(res.stdout);
+  assert.equal(out.ok, true);
+  assert.equal(out.evaluated, true);
+  const d = out.checks.find((c) => c.check === "d-escalation-traceability");
+  assert.equal(d.ok, true);
+  assert.equal(d.evaluated, true);
+  assert.deepEqual(d.escalatedWithoutWorkflow, []);
+});
+
+test("CLI — escalation traceability: an escalated task with NO Workflow call ⇒ exit 1 (RED)", (t) => {
+  const fx = makeFixture();
+  t.after(() => cleanup(fx.dir));
+  const lockFile = path.join(fx.dir, "lock.jsonl");
+  const ev = { event: "acquire", taskId: "gap-ac63-judgment2-no-carrier", epoch: 2000000000, agentId: "aab2d14d10a762ff4" };
+  fs.writeFileSync(lockFile, JSON.stringify(ev) + "\n");
+  // The escalation record exists, but there is NO Workflow(fan-in-execute) call — the escalation
+  // path did NOT go through the workflow (a main-session-direct escalation would be the AC72/AC73
+  // defect). 判据2 traceability for the escalation path ⇒ RED.
+  const escFile = path.join(fx.dir, "escalations.jsonl");
+  fs.writeFileSync(escFile, JSON.stringify({ event: "ff-escalation", taskId: "gap-ac63-judgment2-no-carrier", attempt: 3, action: "request-quiet-window-and-stop-retry" }) + "\n");
+  fs.mkdirSync(path.join(fx.dir, "subagents"), { recursive: true });
+  fs.writeFileSync(path.join(fx.dir, "subagents", "agent-aab2d14d10a762ff4.jsonl"), "{}");
+  const res = spawnSync("node", ["--experimental-strip-types", CHECKER, "--root", REPO_ROOT, "--lock-events", lockFile, "--project-dir", fx.dir, "--workflow-events-dir", fx.wfEvents, "--dispatch-record", fx.dispatchRecord, "--escalations", escFile, "--workflow-landed-ts", "2026-08-14T09:20:07Z", "--json"], { encoding: "utf8" });
+  assert.equal(res.status, 1);
+  const out = JSON.parse(res.stdout);
+  assert.equal(out.ok, false);
+  const d = out.checks.find((c) => c.check === "d-escalation-traceability");
+  assert.equal(d.ok, false);
+  assert.deepEqual(d.escalatedWithoutWorkflow, ["gap-ac63-judgment2-no-carrier"]);
+});
+
+test("CLI — no escalation records ⇒ the escalation check is NOT-EVALUATED, not green (硬规则 3b)", (t) => {
+  const fx = makeFixture();
+  t.after(() => cleanup(fx.dir));
+  const lockFile = path.join(fx.dir, "lock.jsonl");
+  const ev = { event: "acquire", taskId: "gap-ac67-fan-in-executor-to-task-subagent", epoch: 2000000000, agentId: "aab2d14d10a762ff4" };
+  fs.writeFileSync(lockFile, JSON.stringify(ev) + "\n");
+  const wfFile = path.join(fx.dir, "65dc5943-107a-4ef5-94d2-4ba5d0d3816c.jsonl");
+  fs.writeFileSync(wfFile, JSON.stringify({ message: { content: [{ type: "tool_use", name: "Workflow", input: { scriptPath: "/q/.claude/workflows/fan-in-execute.js", args: '{"task":"gap-ac67-fan-in-executor-to-task-subagent"}' } }] } }) + "\n");
+  fs.mkdirSync(path.join(fx.dir, "subagents"), { recursive: true });
+  fs.writeFileSync(path.join(fx.dir, "subagents", "agent-aab2d14d10a762ff4.jsonl"), "{}");
+  const escFile = path.join(fx.dir, "escalations.jsonl"); // does not exist / empty
+  const res = spawnSync("node", ["--experimental-strip-types", CHECKER, "--root", REPO_ROOT, "--lock-events", lockFile, "--project-dir", fx.dir, "--workflow-events-dir", fx.wfEvents, "--dispatch-record", fx.dispatchRecord, "--escalations", escFile, "--workflow-landed-ts", "2026-08-14T09:20:07Z", "--json"], { encoding: "utf8" });
+  assert.equal(res.status, 0);
+  const out = JSON.parse(res.stdout);
+  const d = out.checks.find((c) => c.check === "d-escalation-traceability");
+  assert.equal(d.ok, true);
+  assert.equal(d.evaluated, false, "no escalation records ⇒ NOT-EVALUATED, never conflated with green");
+  assert.match(d.reason, /NOT-EVALUATED/);
 });

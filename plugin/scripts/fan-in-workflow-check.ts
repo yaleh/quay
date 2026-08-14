@@ -21,6 +21,10 @@
 //       现成真样本 (D2 不构造): AC72 agentId=902b4528-bc95-… (top-level jsonl exists) ⇒ RED;
 //       AC73 agentId=bc1a438b-66f2-… (top-level jsonl exists) ⇒ RED;
 //       AC67 agentId=aab2d14d10a762ff4 (subagents/agent-aab2d14d10a762ff4.jsonl exists) ⇒ GREEN.
+//   (d) escalation traceability (SPEC §7 anti-livelock, gap-ff-livelock-trigger-no-action): a task
+//       whose ff escalated (attempt >= 3 — fan-in-ff-merge.sh exit 3) is a fan-in attempt that did
+//       NOT land. It must STILL have gone through the fan-in-execute workflow — every escalated task
+//       must have a Workflow(fan-in-execute) call (.quay/fan-in-ff-escalations.jsonl, --escalations).
 //
 // ⚠️ 时间边界 (manager 2026-08-14 过计实证: 13−1=12 vs 真值 6): only count fan-in AFTER the workflow
 // landed — otherwise pre-workflow fan-in is swept into the difference and the check reddens daily.
@@ -409,6 +413,75 @@ export function checkAgentIds(
   return { ok: true, evaluated: true, reason: "lock-event-agent-id-is-subagent", violations: [] };
 }
 
+// ── Pure: d — escalation traceability (gap-ff-livelock-trigger-no-action) ───────────────────────────
+
+/** One `.quay/fan-in-ff-escalations.jsonl` line — the anti-livelock escalation record written by
+ *  fan-in-ff-merge.sh when a task's ff fails attempt >= 3 (SPEC §7). The escalation carries the
+ *  SPEC §7 quiet-window request and exit code 3 (distinct from the plain retry exit 1). */
+export interface Escalation {
+  event?: string;
+  taskId?: string;
+  attempt?: number;
+  developHead?: string;
+  ts?: string;
+  epoch?: number;
+  runId?: string | null;
+  agentId?: string | null;
+  mergeTarget?: string;
+  action?: string;
+  quietWindow?: { requested?: boolean; holder?: string; criterion?: string; windowMinutes?: number; endsEarly?: string };
+}
+
+/** Parse the .quay/fan-in-ff-escalations.jsonl text into records. Unparseable lines are skipped (the
+ *  file is append-only; a torn tail line is not a violation). Returns [] for empty input. */
+export function parseEscalations(text: string): Escalation[] {
+  const out: Escalation[] = [];
+  for (const line of String(text ?? "").split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      const d = JSON.parse(line);
+      if (d && typeof d === "object") out.push(d as Escalation);
+    } catch {
+      /* torn/partial line — skip */
+    }
+  }
+  return out;
+}
+
+/** The unique task ids that carry an escalation record (the anti-livelock-triggered fan-ins). */
+export function escalatedTaskIds(escalations: Escalation[]): string[] {
+  return [...new Set((escalations ?? []).map((e) => e.taskId).filter((t): t is string => typeof t === "string" && t.length > 0))].sort();
+}
+
+export interface EscalationTraceabilityResult {
+  ok: boolean;
+  evaluated: boolean;
+  escalatedTasks: string[];
+  escalatedWithoutWorkflow: string[];
+}
+
+/**
+ * 判据2 traceability for the anti-livelock escalation path: an escalated fan-in is a fan-in attempt
+ * that did NOT land — it must STILL have gone through the fan-in-execute workflow. RED when any
+ * escalated task lacks a Workflow(fan-in-execute) call (a direct main-session escalation would be the
+ * AC72/AC73 main-thread-executor defect). NOT-EVALUATED when no escalations exist (nothing to judge).
+ */
+export function checkEscalationTraceability(
+  escalatedTasks: string[],
+  tasksWithWorkflowCalls: string[]
+): EscalationTraceabilityResult {
+  const tasks = (escalatedTasks ?? []).filter(Boolean);
+  if (tasks.length === 0) {
+    return { ok: true, evaluated: false, reason: "no-escalations (NOT-EVALUATED)", escalatedTasks: [], escalatedWithoutWorkflow: [] };
+  }
+  const withCalls = new Set((tasksWithWorkflowCalls ?? []).filter(Boolean));
+  const escalatedWithoutWorkflow = tasks.filter((t) => !withCalls.has(t));
+  if (escalatedWithoutWorkflow.length > 0) {
+    return { ok: false, evaluated: true, reason: "escalated-fan-in-without-workflow-call", escalatedTasks: tasks, escalatedWithoutWorkflow };
+  }
+  return { ok: true, evaluated: true, reason: "all-escalated-fan-ins-have-workflow-call", escalatedTasks: tasks, escalatedWithoutWorkflow: [] };
+}
+
 // ── fs / resolution helpers ──────────────────────────────────────────────────────────────────────────
 
 /** The Claude project dir slug for a repo root: the path with every `/` replaced by `-`.
@@ -542,6 +615,7 @@ Usage:
       [--project-dir <dir>] [--session-root <dir>]
       [--tasks-with-workflow-calls <csv>]
       [--workflow-events-dir <dir>] [--dispatch-record <file>]
+      [--escalations <file>]
       [--json] [--help]
 
   --root <dir>              repo root (default: cwd). Derives the default project dir slug.
@@ -565,14 +639,20 @@ Usage:
                             recordedAtMs / timing.startedAtMs of <runId>.jsonl gives the DISPATCH epoch.
   --dispatch-record <file>  dispatch-record fallback for the dispatch-time anchor
                             (default <root>/orchestration/dispatch-record.jsonl). taskId → ts.
+  --escalations <file>      d: the anti-livelock escalation log (SPEC §7, gap-ff-livelock-trigger-
+                            no-action) — fan-in-ff-merge.sh appends here when a task's ff fails
+                            attempt >= 3 (default <root>/.quay/fan-in-ff-escalations.jsonl). Every
+                            escalated task must ALSO have a Workflow(fan-in-execute) call (判据2
+                            traceability: an escalation is a fan-in attempt that did not land).
   --json                    machine-readable output { ok, evaluated, reason, checks }.
   --help                    this help.
 
 Exit codes:
   0  PASS or NOT-EVALUATED (read \`evaluated\` — false = could not judge, never conflated with green);
      knownPreBaselineDebt is reported as a separate non-blocking field — the checker is OK.
-  1  RED — a fan-in task dispatched at/after the enforcement baseline without a Workflow call, or a
-     lock event whose agentId is not a real subagent id (top-level session / missing / unresolvable)
+  1  RED — a fan-in task dispatched at/after the enforcement baseline without a Workflow call, a
+     lock event whose agentId is not a real subagent id (top-level session / missing / unresolvable),
+     or an escalated fan-in (SPEC §7 anti-livelock) without a Workflow call
   2  usage / environment error`;
 
 export function main(argv: string[]): number {
@@ -591,6 +671,7 @@ export function main(argv: string[]): number {
     .split(",").map((s) => s.trim()).filter(Boolean);
   const wfEventsDir = getArgValue(args, "--workflow-events-dir") ?? workflowEventsDir(root);
   const dispatchRecordFile = getArgValue(args, "--dispatch-record") ?? path.join(root, "orchestration", "dispatch-record.jsonl");
+  const escalationFile = getArgValue(args, "--escalations") ?? path.join(root, ".quay", "fan-in-ff-escalations.jsonl");
   const rawBaselineTs = getArgValue(args, "--enforcement-baseline-ts");
   let enforcementBaselineEpoch = ENFORCEMENT_BASELINE_EPOCH;
   if (rawBaselineTs != null) {
@@ -661,6 +742,25 @@ export function main(argv: string[]): number {
       check: "c-agent-id-real-subagent",
       ...vC,
       source: `${projectDir} (topLevel=${topLevel.length}, subagents=${subAgents.length})`,
+    });
+
+    // ── d — escalation traceability (SPEC §7 anti-livelock, gap-ff-livelock-trigger-no-action) ──
+    // An escalated fan-in (a task whose ff failed attempt >= 3 and triggered the anti-livelock
+    // action) is a fan-in attempt that did NOT land. It must STILL satisfy 判据2 traceability — the
+    // escalation came from the fan-in-execute workflow. Every escalated task must have a
+    // Workflow(fan-in-execute) call; an escalation without one is the AC72/AC73 main-thread-executor
+    // defect on the escalation path.
+    const escalations = parseEscalations(fs.existsSync(escalationFile) ? fs.readFileSync(escalationFile, "utf8") : "");
+    const escalated = escalatedTaskIds(escalations);
+    const vD = checkEscalationTraceability(escalated, tasksWithWorkflow);
+    if (vD.evaluated) {
+      anyEvaluated = true;
+      if (!vD.ok) anyRed = true;
+    }
+    checks.push({
+      check: "d-escalation-traceability",
+      ...vD,
+      source: `${escalationFile} (escalations=${escalations.length})`,
     });
   }
 

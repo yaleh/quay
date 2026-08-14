@@ -233,6 +233,153 @@ test("ff failure attempt increments — second failure writes attempt 2 (anti-li
   }
 });
 
+// ── SPEC §7 anti-livelock trigger (gap-ff-livelock-trigger-no-action, attempt >= 3) ─────────────────
+// The retry record IS the anti-livelock data (§7): "同一任务 ff 失败 ≥3 次 才谈防活锁". Attempts 1-2
+// stay the plain retry (exit 1). Attempt >= 3 escalates (exit 3 — DISTINCT from 1 and 2), writes a
+// DISTINCT escalation record (with the SPEC §7 quiet-window request), and STOPS automatic retry.
+
+test("anti-livelock — attempt 1 and 2 are plain retries (exit 1, NO escalation); attempt 3 escalates (exit 3 + escalation record + quiet-window request)", () => {
+  const dir = makeTmp("llock");
+  const st = stateDir("llock");
+  try {
+    initRepo(dir);
+    makeTaskBranch(dir, "llock-a");
+    fs.writeFileSync(path.join(dir, "adv.txt"), "adv\n", "utf8");
+    gitCmd(dir, "add", "-A");
+    gitCmd(dir, "commit", "-q", "-m", "adv");
+    const suite = writeSuiteState(st, { state: "green", startedAt: "2026-08-14T00:00:00Z", finishedAt: 1786660000, scope: "main" });
+    const events = path.join(st, "events.jsonl");
+    const retries = path.join(st, "retries.jsonl");
+    const esc = path.join(st, "escalations.jsonl");
+    const args = ["--task", "llock-a", "--root", dir, "--suite-state", suite, "--lock-events", events, "--retry-record", retries, "--escalations", esc];
+
+    const r1 = runMerge(args);
+    assert.equal(r1.status, 1, "attempt 1 stays a plain retry (exit 1) — the ≤2-failure path is unchanged");
+    assert.match(r1.stderr, /FF FAILED/);
+    const r2 = runMerge(args);
+    assert.equal(r2.status, 1, "attempt 2 stays a plain retry (exit 1)");
+    assert.ok(!fs.existsSync(esc), "NO escalation record before the >=3 threshold");
+
+    const r3 = runMerge(args);
+    assert.equal(r3.status, 3, "attempt 3 escalates with DISTINCT exit 3 (anti-livelock, not conflated with the retry exit 1)");
+    assert.match(r3.stderr, /ANTI-LIVELOCK/);
+    const retryLines = fs.readFileSync(retries, "utf8").trim().split("\n").filter(Boolean);
+    assert.equal(retryLines.length, 3, "three retry records");
+    assert.equal(JSON.parse(retryLines[2]).attempt, 3, "third retry record is attempt 3");
+    const esRec = JSON.parse(fs.readFileSync(esc, "utf8").trim());
+    assert.equal(esRec.event, "ff-escalation");
+    assert.equal(esRec.taskId, "llock-a");
+    assert.equal(esRec.attempt, 3);
+    assert.equal(esRec.action, "request-quiet-window-and-stop-retry");
+    assert.equal(esRec.quietWindow.requested, true, "the escalation carries the SPEC §7 quiet-window request");
+    assert.match(esRec.developHead, /^[0-9a-f]{40}$/, "escalation records the develop head at failure time");
+    // Lock events are still written on the escalation path (the escalation is a real ff attempt).
+    const lines = fs.readFileSync(events, "utf8").trim().split("\n").filter(Boolean);
+    assert.equal(lines.length, 6, "acquire+release written on all three attempts, including the escalated one");
+  } finally {
+    cleanup(dir);
+    cleanup(st);
+  }
+});
+
+test("anti-livelock — no-auto-retry guard: after escalation, the next failure ALSO escalates (exit 3), never the plain retry exit 1", () => {
+  const dir = makeTmp("llockg");
+  const st = stateDir("llockg");
+  try {
+    initRepo(dir);
+    makeTaskBranch(dir, "llock-b");
+    fs.writeFileSync(path.join(dir, "adv.txt"), "adv\n", "utf8");
+    gitCmd(dir, "add", "-A");
+    gitCmd(dir, "commit", "-q", "-m", "adv");
+    const suite = writeSuiteState(st, { state: "green", startedAt: "2026-08-14T00:00:00Z", finishedAt: 1786660000, scope: "main" });
+    const events = path.join(st, "events.jsonl");
+    const retries = path.join(st, "retries.jsonl");
+    const esc = path.join(st, "escalations.jsonl");
+    const args = ["--task", "llock-b", "--root", dir, "--suite-state", suite, "--lock-events", events, "--retry-record", retries, "--escalations", esc];
+
+    assert.equal(runMerge(args).status, 1, "attempt 1 retry");
+    assert.equal(runMerge(args).status, 1, "attempt 2 retry");
+    assert.equal(runMerge(args).status, 3, "attempt 3 escalates");
+    const r4 = runMerge(args);
+    assert.equal(r4.status, 3, "attempt 4 (a caller looping after the escalation) ALSO escalates — automatic retry is stopped, never returns exit 1");
+    const escLines = fs.readFileSync(esc, "utf8").trim().split("\n").filter(Boolean);
+    assert.equal(escLines.length, 2, "two escalation records (attempt 3 and 4)");
+    assert.equal(JSON.parse(escLines[0]).attempt, 3);
+    assert.equal(JSON.parse(escLines[1]).attempt, 4);
+  } finally {
+    cleanup(dir);
+    cleanup(st);
+  }
+});
+
+test("anti-livelock — ac63 4 real retry samples replay (11:55/12:39/12:42/13:58): a task with 4 prior ff failures escalates (exit 3)", () => {
+  const dir = makeTmp("llock63");
+  const st = stateDir("llock63");
+  try {
+    initRepo(dir);
+    makeTaskBranch(dir, "gap-ac63-judgment2-no-carrier");
+    fs.writeFileSync(path.join(dir, "adv.txt"), "adv\n", "utf8");
+    gitCmd(dir, "add", "-A");
+    gitCmd(dir, "commit", "-q", "-m", "adv");
+    const suite = writeSuiteState(st, { state: "green", startedAt: "2026-08-14T00:00:00Z", finishedAt: 1786660000, scope: "main" });
+    const retries = path.join(st, "retries.jsonl");
+    // The 4 REAL ac63 retry records — captured verbatim from .quay/fan-in-retries.jsonl (D2 不构造).
+    const realSamples = [
+      { taskId: "gap-ac63-judgment2-no-carrier", attempt: 1, developHead: "bd4612e5bc74f8db1a6a5b5cb240f2c587d1a304", ts: "2026-08-14T11:55:47Z", epoch: 1786708547, runId: "fm-gap-ac63-judgment2-no-carrier-1786707748654-tzaml5", agentId: "aac7ae30a0aa05591", mergeTarget: "develop", error: "hint: Diverging branches can't be fast-forwarded, you need to either:" },
+      { taskId: "gap-ac63-judgment2-no-carrier", attempt: 2, developHead: "17d0492ad1f3018f56efc77f9cbd20044357a504", ts: "2026-08-14T12:39:39Z", epoch: 1786711179, runId: "fm-gap-ac63-judgment2-no-carrier-1786707748654-tzaml5", agentId: "a719b89d2086a4e27", mergeTarget: "develop", error: "hint: Diverging branches can't be fast-forwarded, you need to either:" },
+      { taskId: "gap-ac63-judgment2-no-carrier", attempt: 3, developHead: "04659638f3a7e7cc6cc932dca846a87967db13da", ts: "2026-08-14T12:42:50Z", epoch: 1786711370, runId: "fm-gap-ac63-judgment2-no-carrier-1786707748654-tzaml5", agentId: "a719b89d2086a4e27", mergeTarget: "develop", error: "hint: Diverging branches can't be fast-forwarded, you need to either:" },
+      { taskId: "gap-ac63-judgment2-no-carrier", attempt: 4, developHead: "81f72af4907861c6efa3ebf5605c21c4eb7d29d2", ts: "2026-08-14T13:58:15Z", epoch: 1786715895, runId: "fm-gap-ac63-judgment2-no-carrier-1786707748654-tzaml5", agentId: "a285a0091e9605468", mergeTarget: "develop", error: "hint: Diverging branches can't be fast-forwarded, you need to either:" },
+    ];
+    fs.writeFileSync(retries, realSamples.map((r) => JSON.stringify(r)).join("\n") + "\n");
+    const esc = path.join(st, "escalations.jsonl");
+
+    const r = runMerge(["--task", "gap-ac63-judgment2-no-carrier", "--root", dir, "--suite-state", suite, "--retry-record", retries, "--escalations", esc]);
+    assert.equal(r.status, 3, "replaying the 4 real ac63 retry records + one more ff failure (attempt 5) must trigger the anti-livelock action (判据2: 现状只升级无动作 ⇒ 红; 触发后动作机械定义)");
+    assert.match(r.stderr, /ANTI-LIVELOCK/);
+    const esRec = JSON.parse(fs.readFileSync(esc, "utf8").trim());
+    assert.equal(esRec.taskId, "gap-ac63-judgment2-no-carrier");
+    assert.equal(esRec.attempt, 5, "the escalation records attempt 5 (4 prior real failures + 1)");
+    assert.equal(esRec.action, "request-quiet-window-and-stop-retry");
+    assert.equal(esRec.quietWindow.requested, true);
+  } finally {
+    cleanup(dir);
+    cleanup(st);
+  }
+});
+
+test("anti-livelock — ac80 2 real retry samples replay: a 3rd ff failure (the gap AC80 hit — 2 failures + 4 develop-advances) escalates (exit 3)", () => {
+  const dir = makeTmp("llock80");
+  const st = stateDir("llock80");
+  try {
+    initRepo(dir);
+    makeTaskBranch(dir, "gap-ac80-prompt-canonical-and-invariant-checker");
+    fs.writeFileSync(path.join(dir, "adv.txt"), "adv\n", "utf8");
+    gitCmd(dir, "add", "-A");
+    gitCmd(dir, "commit", "-q", "-m", "adv");
+    const suite = writeSuiteState(st, { state: "green", startedAt: "2026-08-14T00:00:00Z", finishedAt: 1786660000, scope: "main" });
+    const retries = path.join(st, "retries.jsonl");
+    // The 2 REAL ac80 retry records — captured verbatim from .quay/fan-in-retries.jsonl.
+    const realSamples = [
+      { taskId: "gap-ac80-prompt-canonical-and-invariant-checker", attempt: 1, developHead: "c5d9e7635c43b368fac41b681522c88b7f28caaf", ts: "2026-08-14T17:08:27Z", epoch: 1786727307, runId: "fm-gap-ac80-prompt-canonical-and-invariant-checker-1786720803526-arirtz", agentId: "a6a49c9fd9ee3ecfe", mergeTarget: "develop", error: "hint: Diverging branches can't be fast-forwarded, you need to either:" },
+      { taskId: "gap-ac80-prompt-canonical-and-invariant-checker", attempt: 2, developHead: "bf23bd1da5b16f822365a56965c11d78a9cdcbda", ts: "2026-08-14T17:10:25Z", epoch: 1786727425, runId: "fm-gap-ac80-prompt-canonical-and-invariant-checker-1786720803526-arirtz", agentId: "a6a49c9fd9ee3ecfe", mergeTarget: "develop", error: "hint: Diverging branches can't be fast-forwarded, you need to either:" },
+    ];
+    fs.writeFileSync(retries, realSamples.map((r) => JSON.stringify(r)).join("\n") + "\n");
+    const esc = path.join(st, "escalations.jsonl");
+
+    // AC80 had 2 ff failures and develop kept advancing (4 advances during the workflow) — the gap
+    // was that nothing would trigger if it hit the 3rd. Replay the 2 real records + one more failure:
+    // the 3rd failure MUST trigger the anti-livelock action (the gap is now closed).
+    const r = runMerge(["--task", "gap-ac80-prompt-canonical-and-invariant-checker", "--root", dir, "--suite-state", suite, "--retry-record", retries, "--escalations", esc]);
+    assert.equal(r.status, 3, "the 3rd ff failure (2 real prior failures + 1) escalates — the AC80 gap is closed");
+    const esRec = JSON.parse(fs.readFileSync(esc, "utf8").trim());
+    assert.equal(esRec.attempt, 3, "escalation records attempt 3 (2 prior + 1)");
+    assert.equal(esRec.quietWindow.requested, true);
+  } finally {
+    cleanup(dir);
+    cleanup(st);
+  }
+});
+
 // ── Fail-closed guards (environment errors, NOT ff failures — no retry record) ────────────────────────
 
 test("suite running guard — exit 2, no lock events, no retry record (AC4: lock must not overlap a suite run)", () => {
