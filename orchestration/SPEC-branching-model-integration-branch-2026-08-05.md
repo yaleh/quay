@@ -1,10 +1,7 @@
 # 规格：引入 integration 分支，把「分叉基线」与「汇入点」拆开
 
-**🚫 退役（2026-08-13，AC48 判据2）**：integration 分支已退役——per-task 验证模型
-（`SPEC-per-task-suite-verification-2026-08-13.md`）取代了它：每个任务从 develop fork、worktree 内跑全量、
-绿后直接 merge 回 develop，**不再使用 integration 分支**。退役证据：`develop..integration = 0`（无独有内容）、
-`integration..develop = 187`（落后）、无生产路径写它（fork 恒 develop / fan-in 恒 develop）。本文件保留为
-**理由档案**（为什么当初要两线、实测如何否定了 FF-only 假设），不删；AC/DoD 与是否立案由外层判断。
+**🚫 退役（2026-08-13，AC48 判据2）→ 退役说明与证据：`orchestration/archive/AC58-retired-clauses.md#R23`。**
+本文件保留为**理由档案**（为什么当初要两线、实测如何否定了 FF-only 假设），不删；AC/DoD 与是否立案由外层判断。
 
 **日期**：2026-08-05（管理者）
 **来源**：人提出参考 git-flow（nvie.com/posts/a-successful-git-branching-model/）并扩展——

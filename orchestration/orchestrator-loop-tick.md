@@ -363,8 +363,8 @@ materialized command contains the flag (the launcher's `--dry-run` output must i
 
 | 实例量 | quay 取值 | 消费处 |
 |---|---|---|
-| 工作分支（**单线**，AC48 2026-08-13 退役 integration） | `fork_baseline: develop` / `merge_target: develop`（`.quay/config.yml` `loop:` 节）——per-task 模型：任务从 develop fork、worktree 内验证、merge 回 develop | 步骤 3b / A6 fan-in |
-| 外层工作 checkout | **develop**（AC50 已切，AC48 确认 integration 退役）——外层一切提交落 develop，无第二线 | 启动方式 / 各提交步 |
+| 工作分支（**单线**，integration 退役说明 → `orchestration/archive/AC58-retired-clauses.md#R04`） | `fork_baseline: develop` / `merge_target: develop`（`.quay/config.yml` `loop:` 节）——per-task 模型：任务从 develop fork、worktree 内验证、merge 回 develop | 步骤 3b / A6 fan-in |
+| 外层工作 checkout | **develop**（AC50 已切；integration 退役说明 → `orchestration/archive/AC58-retired-clauses.md#R04`）——外层一切提交落 develop，无第二线 | 启动方式 / 各提交步 |
 | 目标项目清单 | quay / archguard / meta-cc（`/home/yale/work/<p>`） | 步骤 0d `.halt` 轮询 / 优先级 |
 | tmux 窗口 | outer = `quay-outer`（launch 配置 `quay-launch.sh outer`）、inner = `quay-0:inner`、manager = `quay-0:manager` | 冷启动 / 驱动 / 观察 |
 | 跨项目优先级 | **quay 高于 archguard / meta-cc**（人已裁定） | 步骤 0d |
@@ -462,9 +462,8 @@ bash plugin/scripts/monitor-mount-check.sh --json
 ### 0b. 事件式监测（Monitor）——补 tick 之间的盲区
 
 20 分钟 tick 的盲区是**内层停摆后的等待时间**。观测只有一个工具：`session-liveness.sh`
-（SPEC-one-observer-two-surfaces.md，gap-retire-inner-state-one-observer-targets-by-parameter）。
-`inner-state.sh` 已退役——它不观测会话（`tmux` 命中 0），它的招牌信号 `.quay/inner-blocked.json`
-在三个项目里从未产生，包括我们撞上过的唯一一次真实事故（那 68 分钟也没有它）。挂成
+（SPEC-one-observer-two-surfaces.md，gap-retire-inner-state-one-observer-targets-by-parameter；
+`inner-state.sh` 退役说明 → `orchestration/archive/AC58-retired-clauses.md#R02`）。挂成
 `persistent` Monitor，事件经观察者自己的 stdout 流送达挂载方（2026-08-06 起共享事件文件已移除；
 详细事件表见 0b2）：
 
@@ -581,7 +580,7 @@ trigger-is-dead-code-never-wired-into-any-tick）：步骤 1 的 `--detect-stop 
 | `SESSION-OVERDUE` | 心跳源 mtime ≥`OVERDUE_MIN`（未暂停的项目）——会话可能已死 | 会话面（心跳源=transcript） |
 | `SESSION-IDLE` / `SESSION-RESUMED` | 相邻两轮 pane 哈希相同=空闲；**在转换后一个轮询周期内报出** | 会话面 |
 
-**外层挂一个监视器（AC12 已随 inner-state.sh 退役而收口）——它答「会话还在不在」：**
+**外层挂一个监视器（AC12 收口说明 → `orchestration/archive/AC58-retired-clauses.md#R03`）——它答「会话还在不在」：**
 
 `session-liveness.sh` 看【会话】本身：进程活/死、忙/闲、心跳逾期没有。**内层的心跳是它的会话
 transcript**（AC1/AC16，2026-08-03 实测选定）——`.workflow-events/` 每任务只写 1-2 行、任务
