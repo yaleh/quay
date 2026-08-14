@@ -3110,6 +3110,39 @@ manager 的活是：每 tick 采样 AC20 的五条、维护 AC21-AC24 的取证�
       **⚠️ 不覆盖**：不改 `cap=5` 这个数值（人 2026-08-09 已裁定固定 5，动态 cap 停用）；
       不新增任何槽位系统；不改 suite 槽（那保护的是 CPU，与本条不是同一个资源）。
 
+      **③ 扩张（人 2026-08-14 09:1xZ 逐字裁定，本条从「cap 的计量对象」升为「在飞的唯一读法」）**：
+      「**"在飞"不应当靠任务记录，而应当查 inner 任务 subagent。任务只要使用既定的 status 跟踪状态。**」
+      ⇒ **两个量各干一件事，不再有第三个**：**在飞 = 查 inner 任务 subagent**（直接量）；
+      **任务状态 = `tasks/*.md` frontmatter 的 `status`**（既定跟踪）。
+      **⇒ 判据1 的「禁用 worktree 代理」推广为：禁用【任何任务记录】判在飞**——遥测括号、reconcile 探针、
+      worktree 计数，三者都是代理，全部退出在飞判定。
+
+      **触发本裁定的实测（人 09:0xZ 指出 /live 显示 AC66/AC72/AC73 在跑，实际只有 AC76/AC78）**：
+      `.workflow-events/` 四条逐条打印，**形态完全相同**（`records=1`，仅开括号，`candidateCommit:null`）——
+      `ac66/ac72/ac73` 均 `status=done`、`ac76` `status=ready`，**已 done 的三条与在跑的那一条在遥测里不可区分**。
+      三层表示与可靠度：**①`status:done`（盘上直接量）3/3 正确**；**②`--task-end` 括号闭合 0/3 写过**；
+      **③`reconcileInFlight`+`makeDefaultExecutorGone` 兜底 ② 的缺失**。
+      **①② 结构上不可合并**（`fast-mode-telemetry.ts` `VALID_OUTCOMES` = `done|needs-human|skipped|error|abandoned|deferred`
+      6 值 vs `status` 4 值，且 `--task-end` 全文件 0 处写 `status` ⇒ 多个括号对一次翻 done）——
+      **而人的裁定绕开了这个问题：不是把 ② 改对，是不再用 ② 判在飞。**
+      **③ 为什么也不救场**：`fast-mode-telemetry.ts:1138` 探针 = `processAlive → worktreeExists → isBranchMerged → CLOSE`，
+      **该文件提到 `tasks/` 的行数 = 0 ⇒ 它从不读 `status`**；而三条 done 的 worktree 现读**均已不存在**
+      ⇒ **探针若跑会全部 CLOSE ⇒ `--reconcile` 根本没被调用**；且 `analyzeSlotStatus` 已有
+      `lastReconcileAtMs`/`reconcile_compliant`、任务 `gap-reconcile-step-skipped-no-compliance-product` 早已立案
+      ⇒ **又一个 AC73 族（产物在，缺陷照发）**。
+
+      **判据5（C24 既成事实复判清单，空集须显式；此处非空 7 条，归 outer 落）**：
+      ①`fast-mode-telemetry.ts` 的 `realInFlight`/`reconcileInFlight`/`detectClosedButLive`/`analyzeSlotStatus` 在飞维度；
+      ②`slot-refill.ts` 的 `in_flight_count`→`slots_free`；③`.quay/inner-wakeup-heartbeat.json` 的
+      `slots_free`/`should_refill`/`dispatchable_disjoint` 在飞输入；④`/live` 与 observation 面的 `realInFlight` 消费端；
+      ⑤A16/A16b 的 `--task-start` 遥测半边（**仅其"在飞"用途**；派发留痕用途另议）；
+      ⑥**我自己的 A3**——我一整天用 `git worktree list` 逐条判在飞，**同样被本裁定否掉**；
+      ⑦本条 ①② 原文（cap 维度）与本 ③（在飞维度）合并为同一个读法。
+      **②③ 的退役写显式退役标注，不删**（同 AC48 判据2）。**投递 `e6c5d32c`（→ outer，单一 owner）。**
+      **止损：不需要 —— 错的方向是【多报】不是【漏报】**（3 条已 done 被报成在跑），多报只会让派发偏保守、
+      不会造成并发超限或误派；读数 `in_flight` 真值 2 / `load1=1.98` / `cpu_some_avg10=0.00` / `mem_avail=8841MB`。
+      **（C21④：本结论绑这组读数；若出现「因 /live 多报而不派发」的实例，须重判。）**
+
 - [ ] **AC77（subagent spawn 触顶：只检测 harness 报错，不自建计数 —— 人 2026-08-14 07:4xZ 逐字裁定）**
       **人的原话**：「**agentLimit 的处理仅应包括检测 harness 的报错（报错后的处理暂定由人执行），而不要自己重复计数。**」
 
