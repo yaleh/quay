@@ -1,7 +1,7 @@
 ---
 id: gap-ac68-per-suite-lane-budget-zero-consumers
 title: AC68 per_suite_lane_budget 有产出零消费者——讲好的 lane 安排根本没生效（AC66 病又一实例）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -53,7 +53,7 @@ worktree_node_tests=2  => GO
 ## Acceptance Criteria
 
 - [x] AC1 per_suite_lane_budget **被删除**（人 2026-08-14 06:4xZ 逐字「AC68 的 /slots 应当回退」——**裁掉了「读它」那一半**；剩余处置=删除，否则回退后它重新零消费者、卡在已被裁掉的判据上）。**回退+删除的实现归 AC74**（合并任务：main 去 /slots + serial/lowconc 直调读宿主 + 删 per_suite_lane_budget 产出）。**勾选核验（2026-08-14 inner 执行）**：全仓 grep `per_suite_lane_budget` 仅剩 `resource-gate.sh:450/452` + `test.sh:768` 三行删除说明注释，无活着的数据路径；`default_concurrency_formula` 无 /S 除数、in_use 相减保留、serial/lowconc 直调读宿主（H÷S）。
-- [ ] AC2 过订阅容忍判据（人 2026-08-14 06:1xZ 逐字「容忍过订阅，直到 OOM 或直接导致 suite 失败」——**推翻原数值阈值**「worker ≤ nproc」）：过订阅本身不算失败，触发条件是 **① OOM 或 ② 直接导致 suite 失败**。**第一个待归因样本**：inner 06:04:40Z「AC67 cert 红=测试 suite 环境脆弱（11 次 spawn node --experimental-strip-types 在 16-lane 下部分返回空）」——判别 (a) 该轮 laneCount/concurrent slots 读数 (b) 同组测试独占重跑是否绿 (c) 失败形态是 spawn 返回空/JS error（资源）而非断言失败（逻辑）。**归因未完成前不勾。** **⚠️ 归因 owner=inner（manager 2026-08-14 06:1xZ 裁），排序先 (c) 再 (a) 最后 (b)**：(c) 读已有日志零成本几乎能定案、(b) 占槽+~390s 只在 (c)+(a) 不能定案时才做。**⚠️ 本次归因只能由 inner 单方给出、第三方无法复核**——AC72 判据2 缺口的第一次实证（第三方读不到 cert 证据：worktree 的 full-suite-state 是 fork 继承旧记录、cert 真结果只活在 inner 会话）。
+- [x] AC2 过订阅容忍判据（人 2026-08-14 06:1xZ 逐字「容忍过订阅，直到 OOM 或直接导致 suite 失败」——**推翻原数值阈值**「worker ≤ nproc」）：过订阅本身不算失败，触发条件是 **① OOM 或 ② 直接导致 suite 失败**。**cert2 实证（inner 2026-08-14 08:0xZ 报）：re-cert runId 11ba6f95 state=green，4008+216 tests / 0 fail，16-lane 下无 OOM、无 spawn 空返回、无 suite 失败 ⇒ 按人判据未触发，勾选。****第一个待归因样本**：inner 06:04:40Z「AC67 cert 红=测试 suite 环境脆弱（11 次 spawn node --experimental-strip-types 在 16-lane 下部分返回空）」——判别 (a) 该轮 laneCount/concurrent slots 读数 (b) 同组测试独占重跑是否绿 (c) 失败形态是 spawn 返回空/JS error（资源）而非断言失败（逻辑）。**归因未完成前不勾。** **⚠️ 归因 owner=inner（manager 2026-08-14 06:1xZ 裁），排序先 (c) 再 (a) 最后 (b)**：(c) 读已有日志零成本几乎能定案、(b) 占槽+~390s 只在 (c)+(a) 不能定案时才做。**⚠️ 本次归因只能由 inner 单方给出、第三方无法复核**——AC72 判据2 缺口的第一次实证（第三方读不到 cert 证据：worktree 的 full-suite-state 是 fork 继承旧记录、cert 真结果只活在 inner 会话）。
   - **归因（inner 2026-08-14 06:1xZ 报，owner=inner，样本=AC67 cert1 红 06:04:40Z）**：(c) 失败形态——红 = 5 个 integration 测试全报 `SyntaxError: Unexpected end of JSON input`（JSON.parse 崩），`spawnSync(node --experimental-strip-types CHECKER)` 返回空 stdout；非断言失败（单独跑全绿），是 spawn 子进程在负载下产空输出（资源/隔离面）。(a) 并发——`concurrent_suite_slots=2, per_suite_lane_budget=8` ⇒ 16-lane 当量，AC67 cert1 与 AC64 cert1 并发（各占 .0/.1 槽）；测试自身 11 次 spawn node 解析 TS，并发资源竞争 ⇒ 部分空返回。**非独占可复现**：单独跑 exit 0 全绿 ⇒ 与 over-subscription 同族（并发负载诱发），非逻辑缺陷。**修法（AC67 分支已落）**：spawn 11→4 + `@test-group engine→serial` + runChecker 30s timeout + 空 stdout 打印 stderr——**隔离面修复，不是 over-subscription 机制本身的触发证据**。
   - **前后对照（manager 2026-08-14 ④，防「32/16 超即红」留在记录当现状）**：**pre-fix** 读数 `worktree_node_tests=32 / budget_in_use=36 > total_budget=16 / budget_available=0`（两条 suite 各 16 lane，合计 32 workers / 16 核——过订阅）是 **AC68 修之前**；**post-fix** inner 归因报 `2 槽 × 8 lane = 16-lane 当量`，`2×8 = 16 = nproc` ⇒ **恰在预算上而非超出，AC68 的除槽已生效**。**「32/16 超即红」是历史读数，不是现状**——现状是各 suite 8 lane、合计恰等于 nproc。
   - **判定（manager 2026-08-14 ④ 两句结构，待 inner 报 cert2 后填判定侧）**：**AC2 判定：未触发 —— 依据 cert2 绿 + 归因（红为隔离面 spawn 空，非 over-subscription 机制直接致 suite 失败）**（人 06:1xZ 判据：过订阅不算失败，触发条件为 OOM 或直接致 suite 失败；inner 归因「不算直接 suite 失败但算并发触发」⇒ 按人判据未触发）。**⚠️ 但【归因未答且已不可答】**：inner 的隔离修（spawn 11→4，@test-group serial）改动了被测变量 ⇒ cert2 绿与「过订阅是成因」「过订阅不是成因」两个假设都相容 ⇒ **(b) 在本样本上失去判别力（硬规则 4：不可能取另一值的量不是测量）**。下一个同形红出现时，若要归因，必须在【修之前】先跑独占重跑。**两句必须都在——只写第一句会把「答不了」写成「答了否」（硬规则 3b：不可评估须有独立取值）。**
