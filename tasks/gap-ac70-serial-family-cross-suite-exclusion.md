@@ -20,6 +20,8 @@ depends_on: []
 
 **AC70（已收编 serial 族跨 suite 并发重叠——C15 触发更正后立）**。
 
+> **⚠️ 立案前提事实更正（manager 2026-08-14 04:5xZ 实读，硬规则②）**：本任务标题与背景的「已收编 serial 族」**第一环就错了**——逐文件实读，13 个 session-liveness 文件里**只有 1 个是 `@test-group serial`**（`session-liveness-sweep.test.mjs`），**正在红的那些全是 `@test-group lowconc`**（并发 3，非 serial 并发 2）：signals-thresholds / signals-thresholds-observers / signals-kinds / signals-thresholds-edge / events / heartbeat / restart / signals-integration / target / session-liveness 全 lowconc。**⇒ 「已收编 ⇒ 收编手段已用尽 ⇒ 只剩改并发模型」这条链，第一环就断了**——正是这条错链把我推向了「跨 suite 串行 / 降 1-slot」（那个人已终止的方向），**其立论前提本身可当场证伪**。**第二处更正**：`session-liveness-signals-thresholds-observers.test.mjs:22` 头注释逐字「passes isolated under low load but may fail under concurrent-suite」——**文件自己声明了并发 suite 下可预期**，记成「flake 第 4 例」是把已文档化的确定行为当随机现象；flake 要观察计数等发生率，已知限制要么改测试要么改泳道，现在就能定。**第三条路（不碰并发模型）**：把红的 lowconc 文件移到 serial 泳道（同族 sweep 本来就在那）——泳道标注改动，不是 lane 预算/槽数/QUAY_MAX_CONCURRENT_SUITES，落在人「保持既定 lane 设置」之内；但「serial 泳道能否扛跨 suite 重叠」无量，C15 要求先 isolated-rerun 取证（inner 的串行跑正是取证步骤，不违反裁定）。
+
 **背景（2026-08-14，4 例实证）**：`session-liveness-sweep.test.mjs` 等 load-sensitive serial 族**早已按 C15 收编**（`@test-group serial` + `@load-sensitive wall-clock`，2026-08-08；known-load-sensitive.ts:19 wall-clock kind）。但 **2-slot 并发 cert 下每条 suite 都跑自己的 serial 相 ⇒ 两条并发 worktree 的 serial 相彼此重叠 ⇒ 同族测试跨 suite 并发**：
 ```
 AC55 cert1   session-liveness-sweep 红（tmux-leak FAIL）
