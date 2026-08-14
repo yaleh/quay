@@ -41,6 +41,8 @@ worktree_node_tests=2  => GO
 
 **本任务不新建过程纪律型 AC**：负控制沿用 AC49。
 
+**⚠️ 明确不覆盖（人 2026-08-14 04:4xZ 裁定终止）**：本任务**不改并发模型本身**（不降 1-slot、不做 serial 族跨 suite 串行、不调整 lane 设置）——处置范围只含 `per_suite_lane_budget` 二选一（让 `test.sh` 读它或删掉它）；并发模型改动不在其中、不在 AC69（AC69 是「槽满排队而非 WAIT」，不动模型），AC70 已标人裁定终止。理由：两条止损均已判「不需要」，无新读数支撑更大改动（硬规则 4 推论）。
+
 ## Plan
 
 1. 读 resource-gate.sh:461-464（per_suite_lane_budget 计算）+ test.sh:712-743（default_concurrency_formula）+ :1223/:1259（in_use 快照时序）。
