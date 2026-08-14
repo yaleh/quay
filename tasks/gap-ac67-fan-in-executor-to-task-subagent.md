@@ -1,7 +1,7 @@
 ---
 id: gap-ac67-fan-in-executor-to-task-subagent
 title: AC67 fan-in 的执行者必须落到任务 subagent——AC62 搬了锁没搬执行者（人追问触发）
-status: todo
+status: ready
 labels:
   - gap
   - mechanism

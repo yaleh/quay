@@ -1,7 +1,7 @@
 ---
 id: gap-ac63-ff-explicit-doc-check-before-merge
 title: AC63 ff 前必须显式跑 doc 检查——ff 不触发任何钩子（本设计唯一的真风险）
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
