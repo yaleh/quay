@@ -1,7 +1,7 @@
 ---
 id: gap-ac78-fan-in-workflow-a6-check
 title: AC78 fan-in 走 workflow；A6 从「步骤清单」改为「检查 workflow 是否被执行」（人 08:3xZ 裁定「应当创建和维护模板」）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
