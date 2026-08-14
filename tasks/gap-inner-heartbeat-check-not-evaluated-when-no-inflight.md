@@ -1,7 +1,7 @@
 ---
 id: gap-inner-heartbeat-check-not-evaluated-when-no-inflight
 title: inner-wakeup-heartbeat-check 不传在飞集 ⇒ 恒假 DEAD（runMachineSlotRefill 默认空，END 四合取恒成立）——应报 NOT-EVALUATED 而非 DEAD（inner 17:0xZ 抓到 + outer 按位置核实）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
