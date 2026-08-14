@@ -1,7 +1,7 @@
 ---
 id: gap-ac57-preference-change-notification
 title: AC57 通知面——倾向变更 SendMessage 只通知不承载内容（「变了，去重读」+ 指纹）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
