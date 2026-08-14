@@ -243,6 +243,11 @@ orchestration/manager-tick-log.md
 # 实测：develop 独有 341 条里 328 条（96%）是三层 tick 记账，只有 8 条真内容。
 # 自审/收尾必须读磁盘文件（tail），不读 git（文件可丢失）。
 orchestration/tick-log.md
+# AC55 派发记录（tasks/gap-ac55-dispatch-record-fingerprint-reason）——运行时遥测非代码，同 tick-log
+# 的理由：inner 每派发一条就 append 一行（带倾向文件指纹 + 一句理由），它是运行时状态不是代码，
+# 不进 git（历史可丢弃，检查器读磁盘当前文件）。其指纹指向的倾向文件 orchestration/dispatch-preference.md
+# 是 git 可见的正本；本记录是它被消费的证明，但证明本身是运行时产物。
+orchestration/dispatch-record.jsonl
 docs/analysis/batch2-queue-state.md
 
 # 管理者的待办队列（条件触发项）——运行时状态不是代码，人 2026-08-08 02:3x 裁定：

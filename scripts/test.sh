@@ -503,6 +503,19 @@ run_static_checks() {
   # @static-tier change
   # @static-object orchestration/orchestrator-tick-core.md plugin/loop/orchestrator-loop-tick.md plugin/loop/fast-mode-loop-tick.md CLAUDE.md plugin/scripts/integration-branch-model.ts plugin/scripts/integration-batch-merge.sh orchestration/SPEC-branching-model-integration-branch-2026-08-05.md orchestration/archive/AC58-retired-clauses.md plugin/scripts/retired-clause-check.ts plugin/scripts/checker-mutation-cases/retired-clause-check.sh plugin/test/retired-clause-check.test.mjs
   run_checker "retired-clause-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/retired-clause-check.ts" --root "${repo_root}"
+  echo "== dispatch-record fingerprint+reason check (tasks/gap-ac55-dispatch-record-fingerprint-reason, AC55 判据1/判据3) =="
+  # AC55 判据1: EVERY dispatch record must carry ① the dispatch-preference file's content fingerprint
+  # (git blob hash — "用的是哪一版") AND ② a one-sentence "为什么选它" ("按倾向选还是随便选") — the
+  # SPEC §4.3 产物, the 承重 part (C17): without it "读了没读" is indistinguishable in records and the
+  # design relies on willpower (SPEC §4.2 empirical: manager's `A0b⑤(b)` skipped 4 rounds). AC55
+  # 判据3 (falsifiable): a REAL dispatch record missing fingerprint OR missing reason MUST go RED —
+  # pinned by plugin/test/dispatch-record-fingerprint-reason-check.test.mjs (real-record negative
+  # controls) + the mutation case. The writer (dispatch-record.ts) is fail-closed on a missing/thin
+  # reason; this checker independently judges every record in the runtime log
+  # (orchestration/dispatch-record.jsonl, gitignored). Absent file = nothing dispatched = PASS.
+  # @static-tier change
+  # @static-object orchestration/dispatch-record.jsonl orchestration/dispatch-preference.md plugin/scripts/dispatch-record.ts plugin/scripts/dispatch-record-fingerprint-reason-check.ts plugin/test/dispatch-record-fingerprint-reason-check.test.mjs
+  run_checker "dispatch-record-fingerprint-reason-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/dispatch-record-fingerprint-reason-check.ts" --root "${repo_root}"
   # Wait for all parallelized checkers and fail closed if any failed (see the RUN_CHECKER_PARALLEL
   # note at the top of this function — AC3 failure visibility, AC4 cost-ledger completeness).
   run_checker_parallel_wait

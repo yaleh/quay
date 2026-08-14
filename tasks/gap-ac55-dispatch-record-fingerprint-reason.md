@@ -1,7 +1,7 @@
 ---
 id: gap-ac55-dispatch-record-fingerprint-reason
 title: AC55 产物·承重条款——inner 派发记录带倾向文件指纹 + 一句为什么选它
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -34,10 +34,10 @@ depends_on:
 
 ## Acceptance Criteria
 
-- [ ] AC1 每条派发记录含倾向文件内容指纹 + 一句「为什么选它」。
-- [ ] AC2 负控制（承重）：真实派发记录缺指纹或缺理由 ⇒ 检查变红。
-- [ ] AC3 不要求 inner 解释每一次「不选」（只解释选了什么——SPEC §7）。
-- [ ] AC4 既有测试全绿；`--for-task` scoped 门绿。
+- [x] AC1 每条派发记录含倾向文件内容指纹 + 一句「为什么选它」。
+- [x] AC2 负控制（承重）：真实派发记录缺指纹或缺理由 ⇒ 检查变红。
+- [x] AC3 不要求 inner 解释每一次「不选」（只解释选了什么——SPEC §7）。
+- [x] AC4 既有测试全绿；`--for-task` scoped 门绿。
 
 ## Definition of Done
 
@@ -46,10 +46,37 @@ depends_on:
 
 ## Touches
 
-- （inner 派发流程——派发记录写入点）
-- （检查器 + 负控制 fixture）
+- plugin/loop/fast-mode-loop-tick.md（inner 派发流程——步骤 4 新增第 7 步：派发记录写入点）
+- orchestration/fast-mode-tick-core.md（A16b 行——派发记录 AC55 产物·承重，强制不可跳过）
+- plugin/scripts/dispatch-record.ts（写入方——指纹 `git hash-object` + 一句理由，fail-closed）
+- plugin/scripts/dispatch-record-fingerprint-reason-check.ts（检查器——缺指纹或缺理由 ⇒ 红）
+- plugin/test/dispatch-record-fingerprint-reason-check.test.mjs（负控制：真实记录回放缺任一 ⇒ 红）
+- plugin/scripts/checker-mutation-cases/dispatch-record-fingerprint-reason-check.sh（L_S 变异样例）
+- scripts/test.sh（run_static_checks 接线，`@static-tier change`）
+- plugin/scripts/capability-catalog.sh（五表声明）
+- orchestration/dispatch-preference.md（指纹来源——AC54 正本）
+- .gitignore（orchestration/dispatch-record.jsonl 运行时遥测条目）
+- docs/proposals/quay-product-outline.md（`--write-inventory` 重新生成 §6 DELIVERY-INVENTORY 快照：scripts 228→230）
 - tasks/gap-ac55-dispatch-record-fingerprint-reason.md（自身）
 
 ## Evidence
 
-（落地后回填）
+**AC1（指纹 + 一句理由，SPEC §4.3 产物）**：派发记录写入点 = `plugin/scripts/dispatch-record.ts`（inner 步骤 4 第 7 步 / tick-core A16b，先于 `--task-start`）。每条记录含 `preferenceFingerprint`（`git hash-object orchestration/dispatch-preference.md`，AC54 正本的 git blob hash）＋ `reason`（一句「为什么选它」）。实测一条真实记录：
+```json
+{"ts":"2026-08-14T01:50:22.469Z","taskId":"gap-smoke","preferenceFile":"orchestration/dispatch-preference.md","preferenceFingerprint":"e4881984fd7470da606eda4ba5104610c52bc2b7","reason":"覆盖段本阶段 AC55 优先——与阶段目标直接相关"}
+```
+（`e4881984…` = 真实 `git hash-object` 输出，与 AC54 证据一致。）
+
+**AC2（负控制·承重，判据3，AC49 判据1 D2 归属限定）**：`plugin/scripts/dispatch-record-fingerprint-reason-check.ts` + `plugin/test/dispatch-record-fingerprint-reason-check.test.mjs`。拿**真实**派发记录（写入方产物）回放，三条负控制全红：
+```
+delete fingerprint ⇒ exit 1 RED（fingerprint-missing）
+delete reason      ⇒ exit 1 RED（reason-too-thin）
+reason = "随便"     ⇒ exit 1 RED（reason-too-thin，empty-vs-absent 守卫）
+```
+写入方 **fail-closed**：`--reason` 缺失/过薄 ⇒ exit 1、不写（真实负控制：`writer FAILS CLOSED` 测试断言记录文件不被创建）。变异样例 `checker-mutation-cases/dispatch-record-fingerprint-reason-check.sh` 全绿（基线→删指纹→红→恢复→删理由→红→恢复）。`checker-mutation-check --check` 通过：checkers_total=33（新增 1），checkers_with_mutation=33，mutations_that_stayed_green=0。
+
+**AC3（不解释每一次「不选」，SPEC §7）**：写入方只要求一条 `--reason`（选了什么）；检查器只判「已派记录」的指纹+理由，**不**判任何未选任务。tick-core A16b 与 loop-driver 第 7 步均逐字「不要求解释每一次『不选』」。
+
+**AC4（既有测试 + scoped 门）**：`scripts/test.sh --for-task gap-ac55-dispatch-record-fingerprint-reason --allow-thin` 全绿（exit 0）——33 tests / 33 pass / 0 fail（capability-catalog.test.mjs + dispatch-record-fingerprint-reason-check.test.mjs）；scoped static checks 全过（test-framework-policy / test-isolation / tmp-leak-pairing / test-impl-census / task-contract / malformed-task / adr016-screen-use / superseded-capability / dead-code-after-return / concurrency-literal / landing-target / commit-message-verified / delivery-inventory-drift-gate / dispatch-preference-check / **dispatch-record-fingerprint-reason-check** / capability-catalog / delivery-inventory）。doc-class：`tick-core-static-check` fast-mode=46/46（A16b 带 `(src:1020)`）PASS；`state-worded-clause-check` band 0 PASS。`delivery-inventory --write-inventory` 重新生成：scripts 228→230。
+
+**与 AC56 顺序**：AC55（产物·承重）先落地；AC56（去序）不在本任务范围，SPEC §6 顺序未违反（产物在，去序才有可核依据）。
