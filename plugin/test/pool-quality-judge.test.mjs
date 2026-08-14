@@ -40,6 +40,9 @@ import {
   countKeyFor,
   readCurrentRound,
   readLastJudgeRound,
+  readLastJudgeRoundState,
+  writeLastJudgeRound,
+  recordLastJudgeRound,
 } from "../scripts/pool-quality-judge.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -212,6 +215,126 @@ test("AC3 — readCurrentRound/readLastJudgeRound are 0 when the gitignored file
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+// ── B15 — 写端补齐 + fail-open 三态（gap-b15-pool-quality-judge-state-persist）──────────────────
+
+test("B15 — readLastJudgeRoundState: missing ⇒ status missing (fail-open), ok ⇒ ok, corrupt ⇒ NOT-EVALUATED (硬规则 3b)", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "pqj-b15-"));
+  try {
+    // missing:状态文件不存在 ⇒ fail-open fire 的显式标注,不是静默默认 0。
+    const m = readLastJudgeRoundState(tmp);
+    assert.equal(m.status, "missing");
+    assert.equal(m.lastRound, null);
+    assert.match(m.reason, /state-file-absent/);
+    // ok:写入后读到有效 lastRound。
+    writeLastJudgeRound(tmp, 42);
+    const ok = readLastJudgeRoundState(tmp);
+    assert.equal(ok.status, "ok");
+    assert.equal(ok.lastRound, 42);
+    // corrupt:JSON 解析失败 ⇒ NOT-EVALUATED(独立取值,lastRound=null 不可信)。
+    fs.writeFileSync(path.join(tmp, ".quay", "pool-quality-judge-state.json"), "{not json");
+    const c = readLastJudgeRoundState(tmp);
+    assert.equal(c.status, "corrupt");
+    assert.equal(c.lastRound, null);
+    assert.match(c.reason, /JSON parse failed/);
+    // corrupt:lastRound 非法类型 ⇒ 同样 NOT-EVALUATED,不得当作 lastRound=0。
+    fs.writeFileSync(path.join(tmp, ".quay", "pool-quality-judge-state.json"), JSON.stringify({ lastRound: "167" }));
+    const c2 = readLastJudgeRoundState(tmp);
+    assert.equal(c2.status, "corrupt");
+    assert.match(c2.reason, /lastRound is not a non-negative number/);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("B15 — recordLastJudgeRound persists current round; writeLastJudgeRound persists explicit lastRound", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "pqj-b15-wr-"));
+  try {
+    fs.mkdirSync(path.join(tmp, ".quay"), { recursive: true });
+    fs.writeFileSync(path.join(tmp, ".quay", "verification-round.jsonl"), '{"round":1}\n{"round":2}\n{"round":3}\n');
+    const written = recordLastJudgeRound(tmp);
+    assert.equal(written, 3);
+    const st = readLastJudgeRoundState(tmp);
+    assert.equal(st.status, "ok");
+    assert.equal(st.lastRound, 3);
+    writeLastJudgeRound(tmp, 166);
+    assert.equal(readLastJudgeRound(tmp), 166);
+    assert.equal(readLastJudgeRoundState(tmp).lastRound, 166);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// 判据3 真样本回放（D2 不构造）:05:07 判过一次后,05:22 的 --plan 报 roundsSinceLastJudge=167、fired=true。
+// 写端补齐前回放必须红(lastJudgeRound=0 ⇒ roundsSince=167 ⇒ fire);补齐后同回放必须绿(lastRound 在 ⇒ 10 轮内不 fire)。
+test("B15 — 真样本回放(05:07 判过→05:22 仍 fire):写端缺 ⇒ 红,写端在 ⇒ 绿", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "pqj-b15-replay-"));
+  try {
+    // 05:22 的 verification-round 文件:167 行(round 1..167),正是症状里的 currentRound=167。
+    const q = path.join(tmp, ".quay", "verification-round.jsonl");
+    fs.mkdirSync(path.dirname(q), { recursive: true });
+    const lines = [];
+    for (let i = 1; i <= 167; i++) lines.push(JSON.stringify({ round: i }));
+    fs.writeFileSync(q, lines.join("\n") + "\n");
+    // 负控制(写端前):无 judge 状态文件 ⇒ lastJudgeRound=0 ⇒ roundsSince=167,every-10-rounds fire。
+    const before = JSON.parse(runCli(["--plan"], tmp).stdout);
+    assert.equal(before.currentRound, 167);
+    assert.equal(before.lastJudgeState.status, "missing");
+    assert.equal(before.roundsSinceLastJudge, 167);
+    assert.equal(before.triggers.roundsSinceLastJudge, 167);
+    assert.equal(before.triggers.fired, true);
+    assert.ok(before.triggers.reasons.includes("every-10-rounds"), "写端缺时必须 fire");
+    // 写端(judge 完成持久化):05:07 判的那轮 = 166 ⇒ 距 05:22(167) = 1,10 轮内不 fire。
+    writeLastJudgeRound(tmp, 166);
+    const after = JSON.parse(runCli(["--plan"], tmp).stdout);
+    assert.equal(after.lastJudgeState.status, "ok");
+    assert.equal(after.lastJudgeRound, 166);
+    assert.equal(after.roundsSinceLastJudge, 1);
+    assert.equal(after.triggers.roundsSinceLastJudge, 1);
+    assert.equal(after.triggers.fired, false);
+    assert.ok(!after.triggers.reasons.includes("every-10-rounds"), "写端在时 10 轮内不得 fire");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// 判据2:corrupt(损坏)⇒ NOT-EVALUATED,roundsSinceLastJudge=null,every-10-rounds 不作数——与 fire 不同形。
+test("B15 — corrupt judge state ⇒ --plan lastJudgeState=corrupt, roundsSinceLastJudge=null, every-10-rounds NOT fired (NOT-EVALUATED ≠ fire)", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "pqj-b15-corrupt-"));
+  try {
+    // currentRound=20(>10),但 judge 状态损坏 ⇒ NOT-EVALUATED,不得伪装成 fire。
+    fs.mkdirSync(path.join(tmp, ".quay"), { recursive: true });
+    const lines = [];
+    for (let i = 1; i <= 20; i++) lines.push(JSON.stringify({ round: i }));
+    fs.writeFileSync(path.join(tmp, ".quay", "verification-round.jsonl"), lines.join("\n") + "\n");
+    fs.writeFileSync(path.join(tmp, ".quay", "pool-quality-judge-state.json"), "{broken");
+    const r = runCli(["--plan"], tmp);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.currentRound, 20);
+    assert.equal(out.lastJudgeState.status, "corrupt");
+    assert.equal(out.lastJudgeState.lastRound, null);
+    assert.equal(out.roundsSinceLastJudge, null);
+    // NOT-EVALUATED 不得伪装成 fire:currentRound=20 也不进 every-10-rounds。
+    assert.ok(!out.triggers.reasons.includes("every-10-rounds"));
+    assert.equal(out.triggers.fired, false);
+    // --rounds-since 是显式覆盖:corrupt 时 override 优先(操作者明确指定轮距,不算 NOT-EVALUATED)。
+    const r2 = runCli(["--plan", "--rounds-since", "12"], tmp);
+    const out2 = JSON.parse(r2.stdout);
+    assert.equal(out2.roundsSinceLastJudge, 12);
+    assert.ok(out2.triggers.reasons.includes("every-10-rounds"), "override 显式请求 ⇒ every-10-rounds 作数");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// B15 写端接线（doc-contract）:workflow 完成路径必须调确定性写端,否则 lastRound 永远不落盘。
+test("B15 — the workflow completion path invokes --record-last-round (single writer, write end)", () => {
+  const wf = path.join(REPO_ROOT, ".claude", "workflows", "pool-quality-judge.js");
+  const src = fs.readFileSync(wf, "utf8");
+  assert.ok(src.includes("--record-last-round"), "workflow 完成路径必须调确定性写端 --record-last-round");
+  assert.ok(src.includes("lastJudgeRecorded"), "workflow 返回必须携带 lastJudgeRecorded");
 });
 
 // ── DOC-CONTRACT wiring (AC2/AC3: 执行核有「调用 workflow」的编号步骤,判词含 should-remove) ─────

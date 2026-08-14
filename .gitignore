@@ -283,3 +283,10 @@ orchestration/manager-pending.md
 # routine-last-run / tick-log entries above: it is a cache, not code, and git status must stay
 # clean when the CLI or a test materializes it.
 **/.quay-parse-cache.json
+# gap-b15-pool-quality-judge-state-persist (2026-08-14): pool-quality-judge 完成态持久化
+# (.quay/pool-quality-judge-state.json lastRound) — written by pool-quality-judge.ts
+# --record-last-round at the judge workflow's completion path, read by readLastJudgeRoundState.
+# Same gitignored runtime-state family as gate-events.jsonl / routine-last-run.json: it is
+# machine-local judge state (rebuilt by the next judge), never committed provenance, and must
+# never appear in `git status --porcelain` (the fan-in ff-clean-tree gate depends on that).
+**/.quay/pool-quality-judge-state.json
