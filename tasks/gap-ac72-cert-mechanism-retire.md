@@ -66,8 +66,10 @@ per-task cert 真结果（/tmp/… 重定向 + laneCount + 失败形态）→ �
 ## Touches
 
 - orchestration/fast-mode-tick-core.md（inner 执行核去 cert 条款——C17 外层落盘）
-- plugin/scripts/（per-task suite 记录写入 + 检查器 + 负控制 fixture）
-- .quay/（共享检出可读记录位置——实现面）
+- plugin/scripts/per-task-suite-record.ts (new)（per-task suite 记录写入——判据2）
+- plugin/scripts/per-task-suite-record-check.ts (new)（检查器——判据3 AC57 7 轮回放红）
+- plugin/test/per-task-suite-record-check.test.mjs (new)（负控制 fixture）
+- .quay/per-task-suite-records.jsonl (new)（共享检出可读记录位置——判据2 实现面，运行时状态 gitignored）
 - tasks/gap-ac72-cert-mechanism-retire.md（自身）
 
 ## Evidence
