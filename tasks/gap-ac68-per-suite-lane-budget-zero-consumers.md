@@ -1,7 +1,7 @@
 ---
 id: gap-ac68-per-suite-lane-budget-zero-consumers
 title: AC68 per_suite_lane_budget 有产出零消费者——讲好的 lane 安排根本没生效（AC66 病又一实例）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
