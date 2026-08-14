@@ -2626,7 +2626,10 @@ manager 的活是：每 tick 采样 AC20 的五条、维护 AC21-AC24 的取证�
 
 ---
 
-- [ ] **AC54（正本）**：**倾向文件存在，且三段结构齐全**
+- [x] **AC54（正本）**：**倾向文件存在，且三段结构齐全**（2026-08-14 02:0xZ 达成，独立复核不采信自述：
+      `orchestration/dispatch-preference.md` 存在、`git ls-files` 跟踪、`git check-ignore` rc=1（未被忽略）；
+      三段齐全 `## 默认段`/`## 覆盖段`/`## 维护者字段`；`dispatch-preference-check.ts` 现读 PASS；
+      负控制 `checker-mutation-cases/dispatch-preference-check.sh` 现跑 exit=0）
       **判据1**：单一文件、**git 可见**（不得放在 gitignored 的 `.quay/` 下——抗 compact、跨会话重启存活是它的立身理由），
       且同时含 **默认段 / 覆盖段 / 维护者字段** 三者。
       **判据2（能取假，负控制由落地方产出——manager 不构造，沿用 AC49 判据1 的 D2 归属限定）**：
@@ -2679,7 +2682,11 @@ manager 的活是：每 tick 采样 AC20 的五条、维护 AC21-AC24 的取证�
       **⚠️ 不覆盖**：不规定 archive 的路径与格式（同 SPEC §7 的理由）；**不删除仍在生效的条款**——
       迁出的判定标准是「已标退役/前提已死」，**不是「最近没用」**（A17 退休白名单逐字）。
 
-- [ ] **AC59（通则②·FAMILY-5 扫描面覆盖三层执行核）**
+- [x] **AC59（通则②·FAMILY-5 扫描面覆盖三层执行核）**（2026-08-14 02:0xZ 达成，独立复核不采信自述：
+      `instrument-failure-check.ts:73-83 DEFAULT_SURFACE` 现读含三份执行核
+      （`orchestrator-tick-core.md`/`fast-mode-tick-core.md`/`manager-tick-core.md`）；
+      `:70-72` 注释逐字点名三个真实实例（manager B3-戊／outer A11+B3／inner A9）；
+      `--gate` 现跑 `FAMILY-5: detected=43 baseline=43 ok`）
       **判据1**：`instrument-failure-check` 的 gate 扫描面**包含三层执行核**（当前只扫 tick 文档 + `plugin/scripts/`）。
       **判据2（能取假，且用【真样本回放】不构造新数据 —— 合 D2）**：今天已实测的三个 FAMILY-5 实例必须被它检出——
       manager 的 `B3 戊`（读 `full-suite-state.json` 断言实时、零新鲜度）／outer 核 `:34 A11` 与 `:52 B3`（同形）／
