@@ -22,7 +22,13 @@ rebase + scoped 门 + merge 全部占着主会话；而其中**只有最后一�
 
 ```
 无锁段（全部在自己的 worktree 内，不碰共享检出）
-  1. git merge develop            ← 冲突【只可能在这里】出现，可以慢慢解，不占任何人
+  1. git rebase develop（或 merge）  ← 冲突【只可能在这里】出现，可以慢慢解，不占任何人
+     ⚠️ 2026-08-14 07:0xZ 更正：本 SPEC 原文只写 `git merge develop`，而【实现一直用 rebase】——
+     meta-cc 查 inner 主会话（`bc1a438b`，08-14 00:00Z 起）：`git rebase` **11 次**、`git merge develop` **0 次**。
+     两者对 ff 都成立（rebase 后分支 tip 的祖先即 develop；merge 后 develop 是父之一），
+     **但 rebase 在 ff-only 下更自洽**（develop 保持线性、无 merge commit 带上去）⇒ **以实现为准，SPEC 从之**。
+     **这条不一致本身值得记**：SPEC 与实现分歧了整整一天而无人报——**因为两者都"能工作"，
+     分歧只在历史形态上，而没有任何判据读它**（同 AC73 那一族：没有消费者的差异不会被发现）。
   2. 跑全量 suite                 ← 绿才继续
   3. 跑 doc 检查                  ← 补 ff 不触发任何钩子的缺口（见 §4）
 持锁段
