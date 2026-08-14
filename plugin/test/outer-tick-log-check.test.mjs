@@ -55,11 +55,27 @@ function makeGitRepoWithCommit({ epoch }) {
 
 const FIVE_FALSE = "①in_flight<cap且recommended非空→派发到cap [当前假:in_flight==cap]; ②pool<floor→晋级补池 [当前假:pool≥floor]; ③nyf>0且work落地→翻done [当前假:nyf=0]; ④integration领先develop且suite绿→批量合 [当前假:develop==integration]; ⑤suite red→分诊 [当前假:green]";
 
-function row(verdict, ineq, extra = "") {
-  return `- \`15:21Z\` \`tick\` — fixture（2026-08-13 锚点按现实改 bullet 形态）
+// 时间鲁棒标签（2026-08-14, cc611891 同族第二处）：timestamp 子句（label ≤ mtime）让硬编码标签
+// 跨天后变「未来」⇒ 所有 row() 默认 fixture 全红。默认标签 = fixture 创建时的 date -u HH:MM，
+// 与 runChecker 写入的 mtime 同分钟 ⇒ label ≤ mtime 恒成立。需要历史标签的测试显式传 label。
+function utcHHMM(d) {
+  return `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
+}
+function row(verdict, ineq, extra = "", label = `${utcHHMM(new Date())}Z`) {
+  return `- \`${label}\` \`tick\` — fixture（2026-08-13 锚点按现实改 bullet 形态）
 - 类型: ${verdict}（测试）
 ${ineq ? `- 五条不等式: ${ineq}\n` : ""}${extra}- 动作分类: ${verdict}
 `;
+}
+// 历史标签（分钟前）——ageMinutes 回拨 mtime 的测试要配一个同样在过去的 label，否则
+// label > 回拨后 mtime ⇒ future-label RED（不是测试想要的陈旧行语义）。
+function pastLabel(minutesAgo) {
+  return `${utcHHMM(new Date(Date.now() - minutesAgo * 60000))}Z`;
+}
+// 锚定到指定 epoch 的标签——logMtime 固定的测试用它，保证 label HH:MM == mtime HH:MM
+// （无分钟边界竞态，2026-08-14）。
+function labelAtEpoch(epochSecs) {
+  return `${utcHHMM(new Date(epochSecs * 1000))}Z`;
 }
 
 const NO_ROOT = "/tmp/nonexistent-outer-root";
@@ -122,7 +138,8 @@ test("AC3 — unblock 行不误报", () => {
 
 test("AC4 — 陈旧行（mtime 超上界）+ 实测真值已变 ⇒ 不误报（只判 L1 自洽）", () => {
   // fixture mtime 回拨 20 分钟；fresh-minutes 10 ⇒ 行视为陈旧 ⇒ 跳过 L2 重测。
-  const r = runChecker({ log: row("no-action", FIVE_FALSE), truth: "10000", freshMinutes: 10, root: NO_ROOT, ageMinutes: 20 });
+  // label 必须同在过去（pastLabel(21) ≤ mtime(now-20min)），否则 future-label 抢跑（2026-08-14）。
+  const r = runChecker({ log: row("no-action", FIVE_FALSE, "", pastLabel(21)), truth: "10000", freshMinutes: 10, root: NO_ROOT, ageMinutes: 20 });
   // fresh=0 ⇒ 不重测 ⇒ 即使 truth ①真也不报（自洽即过）。
   assert.equal(r.status, 0, `expect PASS (stale): ${r.stdout}`);
   assert.match(r.stdout, /"fresh":0/);
@@ -149,7 +166,7 @@ test("AC2 — 无 tick 段 fail-closed", () => {
 // （硬规则 4），会把「没检查」伪装成「在检查」。step 2 的验收 = NOT-EVALUATED 从输出消失。──────
 test("NOT-EVALUATED — 行无 `- 动作分类:` 字段 ⇒ 如实报 not-evaluated（exit 0），不是 PASS", () => {
   const r = runChecker({
-    log: "- `15:21Z` `tick` — 无动作分类行的 fixture\n- 类型: no-action（测试）\n",
+    log: `- \`${utcHHMM(new Date())}Z\` \`tick\` — 无动作分类行的 fixture\n- 类型: no-action（测试）\n`,
     truth: "00000",
     root: NO_ROOT,
   });
@@ -163,21 +180,30 @@ test("NOT-EVALUATED — 行无 `- 动作分类:` 字段 ⇒ 如实报 not-evalua
 // ── 时间标签判据（manager 2026-08-13：产物，不靠「下次注意」——行为承诺实测寿命 2 行）────────────
 // ① 标签单调不减；② 标签 ≤ 文件 mtime（标签不可能晚于其被写下的时刻）。防「估的标签」复发。
 test("时间标签 future：标签晚于 mtime ⇒ RED（exit 1）", () => {
-  // label 23:59（今天）> mtime（now，~20:xx）⇒ future。mtime HH≥2 ⇒ 无跨日宽限。
+  // label 23:59 > mtime（固定 12:00，HH≥2 ⇒ 无跨日宽限）⇒ future。mtime 用 logMtime 固定：
+  // 不用「now」——运行时刻 HH<2 时跨日宽限（mtime 00-01h 且标签 22-23h ⇒ 前一天）会吞掉 future
+  // 判据，使本测试在凌晨恒失败（2026-08-14 实测，cc611891 同族）。固定 epoch 12:00 全时可复现。
+  const noonEpoch = Math.floor(Date.UTC(2026, 7, 13, 12, 0, 0) / 1000);
   const r = runChecker({
     log: "- `23:59Z` `tick` — future label\n- 动作分类: no-action\n- 五条不等式: ①[当前假] ②[当前假] ③[当前假] ④[当前假] ⑤[当前假]\n",
     truth: "00000",
     root: NO_ROOT,
+    logMtime: noonEpoch,
   });
   assert.equal(r.status, 1, `expect RED: ${r.stdout}`);
   assert.match(r.stdout, /future-label/, "a label after the file mtime is a future/estimated label — must RED");
 });
 
 test("时间标签 非单调：上一段标签晚于本段 ⇒ RED（exit 1）", () => {
+  // 两条标签 20:30（上一段）/20:20（本段）。mtime 固定到 21:30（晚于两条标签）⇒ future 判据
+  // 不抢跑（运行时刻 01:2x 会让两条标签都 > mtime ⇒ future-label 先触发，测不到 non-monotonic，
+  // 2026-08-14 实测）。固定 epoch 使 20:20 ≤ mtime 全时可复现，剩下 monotonic 判据独占。
+  const lateEpoch = Math.floor(Date.UTC(2026, 7, 13, 21, 30, 0) / 1000);
   const r = runChecker({
     log: "- `20:30Z` `tick` — earlier（晚）\n- `20:20Z` `tick` — later（早于上一段）\n- 动作分类: no-action\n- 五条不等式: ①[当前假] ②[当前假] ③[当前假] ④[当前假] ⑤[当前假]\n",
     truth: "00000",
     root: NO_ROOT,
+    logMtime: lateEpoch,
   });
   assert.equal(r.status, 1, `expect RED: ${r.stdout}`);
   assert.match(r.stdout, /non-monotonic/, "labels going backwards in an append-only log must RED");
@@ -193,7 +219,8 @@ test("AC1/AC4 — 证据提交在 log 写入前 + 无后续提交 ⇒ PASS（不
   const evidenceEpoch = nowEpoch - 300;       // 动作行证据提交（act-then-log 的 act）
   const tickStartEpoch = evidenceEpoch - 60;  // 该 tick 起点（行内 epoch 锚定窗口起点）
   const repo = makeGitRepoWithCommit({ epoch: evidenceEpoch });
-  const log = row("escalate", FIVE_FALSE, `- epoch=${tickStartEpoch}\n- 做了什么: escalate（证据提交在 log 前）\n`);
+  // label 锚定 nowEpoch（与 logMtime 同分钟）⇒ 无分钟边界竞态（2026-08-14）。
+  const log = row("escalate", FIVE_FALSE, `- epoch=${tickStartEpoch}\n- 做了什么: escalate（证据提交在 log 前）\n`, labelAtEpoch(nowEpoch));
   const r = runChecker({ log, truth: "10000", root: repo, logMtime: nowEpoch });
   assert.equal(r.status, 0, `expect PASS (trace found in tick window): ${r.stdout}`);
   rmSync(repo, { recursive: true, force: true });
@@ -217,7 +244,7 @@ test("AC4 — 可复现：log 写入后无关提交落地，动作行结果不�
   };
   const later = spawnSync("git", ["commit", "--allow-empty", "-m", "later-unrelated"], { encoding: "utf8", cwd: repo, env });
   assert.equal(later.status, 0, `later commit failed: ${later.stderr}`);
-  const log = row("escalate", FIVE_FALSE, `- epoch=${tickStartEpoch}\n`);
+  const log = row("escalate", FIVE_FALSE, `- epoch=${tickStartEpoch}\n`, labelAtEpoch(nowEpoch));
   const r = runChecker({ log, truth: "10000", root: repo, logMtime: nowEpoch });
   assert.equal(r.status, 0, `expect PASS (deterministic): ${r.stdout}`);
   rmSync(repo, { recursive: true, force: true });
@@ -228,7 +255,7 @@ test("AC3 — 欺骗输入：仓库有更早提交但本 tick 窗口内无 ⇒ �
   const oldCommitEpoch = nowEpoch - 7200;  // 2h 前提交，落在 tick 窗口外
   const tickStartEpoch = nowEpoch - 300;   // 本 tick 起点
   const repo = makeGitRepoWithCommit({ epoch: oldCommitEpoch });
-  const log = row("escalate", FIVE_FALSE, `- epoch=${tickStartEpoch}\n- 做了什么: escalate（声称已派发但本 tick 无提交）\n`);
+  const log = row("escalate", FIVE_FALSE, `- epoch=${tickStartEpoch}\n- 做了什么: escalate（声称已派发但本 tick 无提交）\n`, labelAtEpoch(nowEpoch));
   const r = runChecker({ log, truth: "10000", root: repo, logMtime: nowEpoch });
   assert.equal(r.status, 1, `expect FAIL (deception caught): ${r.stdout}`);
   assert.match(r.stdout, /action-claimed-but-no-git-trace/);
@@ -244,8 +271,9 @@ test("AC2 — 窗口回退：无 epoch= 时用上一 tick 表头锚定该 tick �
   const prevRow = `### ${hh}:${mm}Z\n- 类型: no-action（五条全假）\n- 五条不等式: ${FIVE_FALSE}\n- 动作分类: no-action\n`;
   const evidenceEpoch = Math.floor(nowMs / 1000) - 30; // 30s 前，必在 (表头-120s, log mtime) 内
   const repo = makeGitRepoWithCommit({ epoch: evidenceEpoch });
-  const log = prevRow + row("escalate", FIVE_FALSE, "- 做了什么: escalate（证据在表头后）\n");
-  const r = runChecker({ log, truth: "10000", root: repo, logMtime: Math.floor(nowMs / 1000) });
+  const nowEpoch = Math.floor(nowMs / 1000);
+  const log = prevRow + row("escalate", FIVE_FALSE, "- 做了什么: escalate（证据在表头后）\n", labelAtEpoch(nowEpoch));
+  const r = runChecker({ log, truth: "10000", root: repo, logMtime: nowEpoch });
   assert.equal(r.status, 0, `expect PASS (prev-header anchored): ${r.stdout}`);
   rmSync(repo, { recursive: true, force: true });
 });
