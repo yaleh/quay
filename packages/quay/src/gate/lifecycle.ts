@@ -21,7 +21,7 @@ import type { Task } from "../abi.ts";
 
 interface ProviderClient {
   taskGet: (id: string) => Promise<Task | null>;
-  taskWrite: (args: { id: string; status: string; expectedStatus: string }) => Promise<unknown>;
+  taskWrite: (args: { id: string; status: string; expectedStatus: string; body?: string }) => Promise<unknown>;
   taskCheck: (id: string) => Promise<{ ok: boolean; reason: string }>;
 }
 
@@ -285,10 +285,55 @@ export async function runPromote({ client, id, logPath, actor = "quay-cli", work
 }
 
 /**
+ * Uncheck every checked box in the task's `## Acceptance Criteria` section
+ * (`- [x]` / `- [X]` → `- [ ]`) — the retreat done→ready semantic
+ * (gap-not-yet-flipped-blocks-retreated-ac83-class). A retreat rolls a task
+ * back from done; its ACs must reflect that its completion claim is void, so
+ * slot-refill's not-yet-flipped guard (merged + AC>50% ⇒ landed ⇒ don't
+ * re-dispatch) doesn't keep re-judging a retreated task as landed on stale
+ * completion checkboxes.
+ *
+ * Recognizes the shape-aware AC heading family (the same forms the author→ready
+ * gate accepts): `## AC`, `## AC（draft）`, `## AC (draft)`,
+ * `## Acceptance Criteria`. A body with an unrecognized AC heading is returned
+ * UNCHANGED (fails open — retreat still flips status; unchecking is best-effort
+ * over recognized shapes, exactly like the gate's own shape dispatch).
+ */
+function uncheckAcBoxes(body: string): string {
+  // Guard: task bodies are always strings on real Tasks, but stub/test clients
+  // may construct a task without a `body` field — fail open (return as-is).
+  if (typeof body !== "string") return body;
+  const lines = body.split("\n");
+  let inAc = false;
+  const out: string[] = new Array(lines.length);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^##\s/.test(line)) {
+      inAc = /^##\s+(?:AC(?:（[^）]*）| \([^)]*\))?|Acceptance Criteria)\s*$/.test(line);
+      out[i] = line;
+      continue;
+    }
+    if (inAc && /^\s*-\s+\[[xX]\]/.test(line)) {
+      out[i] = line.replace(/^(\s*-\s+)\[[xX]\]/, "$1[ ]");
+      continue;
+    }
+    out[i] = line;
+  }
+  return out.join("\n");
+}
+
+/**
  * `quay retreat <task> --reason <r>` — one legal backward step over TRANSITIONS.
  * `--reason` is REQUIRED (it IS the deliverable of a retreat): missing/empty →
  * exit 1, no write. Illegal back edge → throws. No gate runs — retreat rolls
  * back regardless; the reason is recorded in the payload.
+ *
+ * AC83 (gap-not-yet-flipped-blocks-retreated-ac83-class): a done→ready retreat
+ * ALSO unchecks the task's AC checkboxes — the retreat must not leave the body
+ * "claiming" completion (e.g. AC 89% from fixture-injected evidence) when the
+ * task is rolled back for re-verification. Only the done→ready edge touches
+ * ACs; ready→todo / needs-human→todo roll back before completion, so their
+ * (normally unchecked) ACs are left alone.
  */
 export async function runRetreat({ client, id, reason, logPath, actor = "quay-cli" }: RetreatArgs): Promise<RetreatResult> {
   if (typeof reason !== "string" || reason.trim() === "") {
@@ -303,7 +348,13 @@ export async function runRetreat({ client, id, reason, logPath, actor = "quay-cl
   assertTransition(task.status, "back");
   const prev = legalBack(task.status);
 
-  await client.taskWrite({ id, status: prev!, expectedStatus: task.status });
+  const body = task.status === "done" ? uncheckAcBoxes(task.body) : task.body;
+  await client.taskWrite({
+    id,
+    status: prev!,
+    expectedStatus: task.status,
+    ...(body !== task.body ? { body } : {}),
+  });
   appendGateEvent(
     logPath,
     mkLifecycleEvent({ id, gate: "retreat", actor, verdict: "pass", payload: { from: task.status, to: prev, reason } })

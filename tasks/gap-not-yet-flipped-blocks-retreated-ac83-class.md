@@ -77,4 +77,13 @@ AC83 的整个意思：AC1-4 是被 QUAY_TEST_CGROUP_SCRIPT 注入的假 cgroup 
 
 ## Evidence
 
-（落地后回填——outer 2026-08-14 19:3xZ：slot-refill 对 phase-boundary 报 not-yet-flipped；manager 20:0xZ 裁定根因在 retreat 非 gate；8e502922 手工退勾 AC1-4（AC5 保留）后 phase-boundary 可派）
+（落地回填——outer 2026-08-14 19:3xZ：slot-refill 对 phase-boundary 报 not-yet-flipped；manager 20:0xZ 裁定根因在 retreat 非 gate；8e502922 手工退勾 AC1-4（AC5 保留）后 phase-boundary 可派）
+
+### 落地（2026-08-14，runId fm-gap-not-yet-flipped-blocks-retreated-ac83-class-1786737129650-tdpdko）
+
+- **修法**：`packages/quay/src/gate/lifecycle.ts` `runRetreat` 的 done→ready 路径新增 `uncheckAcBoxes()`——把 `## Acceptance Criteria`（含 shape-aware 族：`## AC` / `## AC（draft）` / `## AC (draft)` / `## Acceptance Criteria`）下的 `- [x]` / `- [X]` 全部改写为 `- [ ]`，与 status 翻转在同一次 `taskWrite` 写入（CAS `expectedStatus` 不变）。ready→todo / needs-human→todo 边缘不碰 body；未识别 AC 标题形态 fail-open（body 原样）。
+- **判据1（retreat 同时退 AC）**：新测试 `plugin/test/retreat-ac-uncheck.test.mjs` 断言 8/9 勾（89%）的 done 任务 retreat 后 AC 区 0 勾、DoD 区不动、status done→ready、GateEvent 记录 reason。真实 CLI 直验：`quay retreat` 把 fixture 任务 AC1-4,6-9 全部翻 `[x]`→`[ ]`（AC5 本就不勾、DoD 不动）。
+- **判据2（能取假·真样本）**：phase-boundary 原状态组合「ready + AC 89%」由机制层面消灭——retreat 即退勾，任何 retreat 后的任务不可能带旧完成度进入下一轮判定（外层 8e502922 手工退勾是 fallback，本机制使退勾自动发生）。
+- **判据3（真 landed 不受影响）**：未 retreat 的 done 任务零写入、勾选原样；ready→todo retreat 不写 body patch（退勾仅限 done→ready 边缘）。
+- **判据4**：`--for-task` scoped 门绿（130/130 pass，exit 0）；`fan-in-ts-typecheck-gate` ADMITTED（无新增 .ts）；`tsc -p packages/quay` exit 0。
+- **未改动**：slot-refill.ts 的 `isNotYetFlippedSkip` 判定逻辑未动（89%>50% 判 landed 是对的）；未建任何「AC83 类」例外通道。
