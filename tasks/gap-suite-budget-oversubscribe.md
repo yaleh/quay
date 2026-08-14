@@ -1,7 +1,7 @@
 ---
 id: gap-suite-budget-oversubscribe
 title: nproc−in_use 预算公式固有超用——两并发 suite 各拿满预算（16+8=24>16，load 29.23）；三条 lane 推导两条不读旋钮②
-status: ready
+status: done
 labels:
   - gap
   - mechanism
