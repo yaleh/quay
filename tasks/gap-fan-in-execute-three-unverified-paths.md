@@ -32,6 +32,12 @@ depends_on: []
                               且更新）——自找启发式（ls -t 最近 + grep 任务名）在并发下误选。
                               修法方向：限定 subagents/workflows/<本次 run>/agent-<自己>.jsonl（workflow-run
                               子代理真实落点）或用自身 transcript uuid——精确而非启发式（4b）。
+                              ⭐ 同一位置的两半（2026-08-14 11:2x 实证）：workflow-run 子代理真落点在
+                              subagents/workflows/<run>/——checker 的 subagentStems() 只扫
+                              <session>/subagents/ 平铺 + <project>/subagents/，不递归 workflows/<run>/ ⇒
+                              workflow 协议产生的合法 agentId（DIR-128 的 a8ebef25=自身 workflow agent）
+                              被判 unresolvable（假 RED）。⇒ 修 = 两半同做：workflow 侧从 run 目录生成
+                              agent-id + checker 侧 subagentStems 递归 subagents/workflows/<run>/。
 ③ flip sed 静默不替换（约 :83）  flip done 用 sed 替换 status: ready→done；若行形不匹配（如 status 带
                               前导空格/大小写/非首行），sed 静默不改 ⇒ flip 没发生而记录说 done。未测失败路径。
 ```
@@ -65,7 +71,8 @@ depends_on: []
 
 ## Touches
 
-- .claude/workflows/fan-in-execute.js（三条承重点——若测试暴露缺陷则修）
+- .claude/workflows/fan-in-execute.js（三条承重点——若测试暴露缺陷则修；承重点② 两半：自定位限定 run 目录）
+- plugin/scripts/fan-in-workflow-check.ts（判据2(c) subagentStems 递归 subagents/workflows/<run>/——承重点② 检查器半边）
 - plugin/test/fan-in-execute-paths.test.mjs (new)
 - tasks/gap-fan-in-execute-three-unverified-paths.md（自身）
 
