@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-14T04:44:57.311Z",
+  "generatedAt": "2026-08-14T05:07:07.460Z",
   "since": null,
   "tasks": [
     {
@@ -113,6 +113,13 @@
       "minutes": 60.47925,
       "outcome": "done",
       "fanInCommit": "ac78a96ef7e997e3eb70cf0bc0f32c83ab9a2fc8"
+    },
+    {
+      "taskId": "gap-ac57-preference-change-notification",
+      "runId": "fm-gap-ac57-preference-change-notification-1786671753101-ng2njh",
+      "minutes": 203.34756666666667,
+      "outcome": "done",
+      "fanInCommit": "28330e5b3c2eb8cf61065a141774492050d043e1"
     },
     {
       "taskId": "gap-ac58-retired-clauses-delete-and-archive",
@@ -662,22 +669,15 @@
     }
   ],
   "orphaned": [],
-  "inProgress": [
-    {
-      "taskId": "gap-ac57-preference-change-notification",
-      "runId": "fm-gap-ac57-preference-change-notification-1786671753101-ng2njh",
-      "startedAtMs": 1786671753110,
-      "startedAtMsUnreliable": true
-    }
-  ],
+  "inProgress": [],
   "deferred": [],
-  "meanMinutes": 29.612552304964552,
-  "medianMinutes": 23.610025,
-  "tasksPerHour": 2.0438627193460603,
-  "serialEquivalentPerHour": 2.026167801481299,
+  "meanMinutes": 31.441341929824567,
+  "medianMinutes": 23.763283333333334,
+  "tasksPerHour": 2.049022000600855,
+  "serialEquivalentPerHour": 1.9083154953728396,
   "windowStart": "2026-08-12T06:45:12.994Z",
-  "windowEnd": "2026-08-14T04:44:41.844Z",
-  "windowHours": 45.991347222222224,
+  "windowEnd": "2026-08-14T05:07:01.890Z",
+  "windowHours": 46.36358222222222,
   "haltedHours": 0,
   "halted": [],
   "blocked": [
@@ -768,7 +768,7 @@
     }
   ],
   "reconcilable": [],
-  "realInFlight": 1,
+  "realInFlight": 0,
   "closedButLive": [],
-  "occupiedSlots": 1
+  "occupiedSlots": 0
 }
