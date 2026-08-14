@@ -1,7 +1,7 @@
 ---
 id: gap-ac66-ac-driven-behavior-change-verifiable
 title: AC66 AC/任务驱动的行为变更必须可检查确认（前向、不追溯；产物可独立于文本验证）
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
