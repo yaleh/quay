@@ -6,7 +6,8 @@ labels:
   - gap
   - mechanism
 parent: gap-ac62-fan-in-ff-merge-lock-protocol
-children: []
+children:
+  - gap-ac72-cert-mechanism-retire
 extra:
   schema: execution
 depends_on:
