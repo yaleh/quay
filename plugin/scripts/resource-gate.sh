@@ -458,9 +458,14 @@ printf 'total_budget=%s  budget_in_use=%s  budget_available=%s  [cross-layer bud
 # S concurrent suites allowed and each phase budgeted at hostParallelism() ÷ S, S suites together use
 # ≈ hostParallelism() lanes — the reason this gate's absolute health thresholds are NOT relaxed for
 # more slots. Reported (floor), so the accounting is visible; the gate verdict stays on machine health.
+# AC68 (gap-ac68-per-suite-lane-budget-zero-consumers): per_suite_lane_budget is now a CONSUMER, not
+# print-only — scripts/test.sh's default_concurrency_formula and full-suite-runner.ts's
+# defaultLaneCount() divide by the SAME QUAY_MAX_CONCURRENT_SUITES knob (S), so S concurrent suites
+# each actually run at hostParallelism() ÷ S lanes. This line is the accounting print; the consumer
+# is the formula's slot divisor.
 per_suite_lane_budget=$((nproc_before / CONCURRENT_SUITE_SLOTS))
 [ "${per_suite_lane_budget}" -lt 1 ] && per_suite_lane_budget=1
-printf 'concurrent_suite_slots=%s  per_suite_lane_budget=%s  [gap-single-flight-lock-2-slot-concurrent-suites]\n' \
+printf 'concurrent_suite_slots=%s  per_suite_lane_budget=%s  [gap-single-flight-lock-2-slot-concurrent-suites; AC68 consumer: test.sh default_concurrency_formula]\n' \
   "$CONCURRENT_SUITE_SLOTS" "$per_suite_lane_budget"
 # AC1 (gap-worktree-scoped-runs-consume-resources-but-produce-no-signal) — the observable worktree
 # signal: how many node --test processes are running from linked worktrees right now + who is asking.

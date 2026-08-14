@@ -1,7 +1,7 @@
 ---
 id: gap-ac68-per-suite-lane-budget-zero-consumers
 title: AC68 per_suite_lane_budget 有产出零消费者——讲好的 lane 安排根本没生效（AC66 病又一实例）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -63,11 +63,26 @@ worktree_node_tests=2  => GO
 
 ## Touches
 
-- scripts/test.sh（default_concurrency_formula 读 per_suite_lane_budget 或删其推导）
-- plugin/scripts/resource-gate.sh（per_suite_lane_budget 输出/计算配合）
-- （检查器/负控制 fixture——并发 worker 计数）
+- scripts/test.sh（default_concurrency_formula 读 per_suite_lane_budget——已选二选一①，除槽）
+- plugin/scripts/resource-gate.sh（per_suite_lane_budget 输出/计算配合——注释标明消费者）
+- plugin/test/resource-gate.test.mjs（AC68 checker + 负控制 fixture——并发 worker 计数）
 - tasks/gap-ac68-per-suite-lane-budget-zero-consumers.md（自身）
 
 ## Evidence
 
-（落地后回填）
+**AC1（二选一①——test.sh 读 per_suite_lane_budget，除槽数）**：`scripts/test.sh` `default_concurrency_formula()` 现读 `RESOURCE_GATE_CONCURRENT_SUITES`（test seam）→ `QUAY_MAX_CONCURRENT_SUITES`（旋钮②，默认 2，与 `resource-gate.sh` 的 `CONCURRENT_SUITE_SLOTS` / `full-suite-runner.ts` 的 `concurrentSuiteSlots()`/`defaultLaneCount()` 同一单源）并除槽：`default = max(1, floor((total_budget − in_use) / AMPLIFICATION / S))`。`per_suite_lane_budget`（H÷S）从「只算只打印、零消费者」变为「test.sh 与 full-suite-runner 都读它」——记录上的 lane 安排与实际行为一致。`plugin/scripts/resource-gate.sh:457-466` 注释与打印行已标明消费者。
+
+**AC2（能取假，负控制沿 AC49 判据1 D2——落地方产出）**：checker + 负控制 fixture 落在 `plugin/test/resource-gate.test.mjs` 新增两测：
+```
+AC1/AC68  derivedConcurrency(16,1.0,0,2)=8  ← 16 核 2 槽 → 每 suite 8（32/16 缺陷修复）
+AC1/AC68  derivedConcurrency(4,1.0,0,2)=2 ; (8,1.0,0,2)=4 ; (1,1.0,0,2)=1(clamp)
+AC1/AC68  derivedConcurrency(16,1.0,8,2)=4 ← 与 AC1 in_use 预算相减正交复合
+AC2/AC68  two concurrent suites total = 2×8 = 16 ≤ nproc(16)  ← checker 断言 cap
+AC2/AC68  负控制（去除数 slots=1 → 每 suite=16 → 合计 32 > 16 ⇒ RED）
+AC2/AC68  4 核：2 slots → 2×2=4 = nproc（绿）；pre-fix → 2×4=8 > 4（红）
+```
+即「删掉除数 ⇒ 检查必红」——checker 非结构恒绿（硬规则 4）。
+
+**AC3（防嵌套 spawn 不回退）**：`default_concurrency_formula` 保留 `in_use` 相减（AC1 cross-layer total budget）；`AC5b`（budget-aware：16 核 12 在飞 → 4；预算耗尽 clamp 1）与 `AC5`（exec 行 5 处 derived-default 拼写、无硬编码 8）测试全绿。`concurrency-literal-check` 扫描 7 hits / 0 violations（无新并发字面量违规）。
+
+**AC4（既有测试 + scoped 门）**：`scripts/test.sh --for-task gap-ac68-per-suite-lane-budget-zero-consumers --allow-thin` 全绿——**44 tests / 44 pass / 0 fail / 0 cancelled**（resource-gate.test.mjs 44 测，含新增 2 测 AC68）；scoped static checks 全过（GATE_EXIT=0）。相关性测试 `select-tests-for-touches.test.mjs` + `runner-grouping-flags-only.test.mjs` + `dead-code-after-return-check.test.mjs` = 37/37 pass。ts-typecheck gate：Touches 无 new/moved `.ts`，ADMITTED（exit 0）。
