@@ -46,6 +46,8 @@ agentId aab2d14d 对应 bc1a438b/subagents/agent-aab2d14d10a762ff4.jsonl = 【su
 
 **⚠️ 时点（manager ⑥）**：**AC67 正在飞、其 subagent 正在实现 fan-in 四件**——判据1/2 越早并入越好，晚了又是「已按旧判据交付」（与 AC6 那次同形）。
 
+**⚠️ 派发排序（manager 2026-08-14 ① 逐字「AC75 一落地，排第一个派，优先于 AC74 与其余」，写进任务体防只存在于对话里）**：**AC75 ∩ AC67 = { orchestration/fast-mode-tick-core.md, plugin/scripts/fan-in-ff-merge.sh } ⇒ AC75 不能派直到 AC67 落地**（AC67 正因没有 AC75 才付昂贵重试 ~390s）。**AC67 一落地 ⇒ AC75 排第一个派，优先于 AC74 与其余**。理由：它降的是**所有后续任务**的重试代价（rebase→merge 使单次重试从 ~390s 降到多数秒级），不是单条任务收益。AC74 先行（已派，2026-08-14），AC75 在其后——AC74 落地后再核 AC75∩AC74 disjoint。
+
 **本任务不新建过程纪律型 AC**：负控制沿用 AC49。
 
 ## Plan
