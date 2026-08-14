@@ -1204,6 +1204,28 @@ node --no-warnings --experimental-strip-types plugin/scripts/inner-wakeup-heartb
 外层每个 tick 读该产物判新鲜（`orchestrator-tick-core.md` A13，`inner-wakeup-heartbeat-check.ts`）；
 `ts` 距今 > 3 个 tick 周期（5400s）⇒ 外层报「inner 兜底心跳断」并升级——把「断了不可见」变成「断了 3 周期即报」。
 
+### AC80-INNER-ANCHOR（inner 侧 prompt 正本——AC80 判据1 落地物）
+
+> 本段是 inner CronCreate 锚（job `025f4132`，cron `7,27,47 * * * *`）的 prompt 正本。
+> `outer-anchor-check.ts --layer inner` 读本段并与活 CronList prompt 逐字节比对（AC80 判据3）。
+> ⚠️ 修改本段 prompt 时必须同步更新 CronCreate 锚本身（CronDelete + 重建），否则 byte-compare 报 VIOLATED。
+> ⚠️ 本段提取规则：BEGIN 注释行之后、END 标记行之前的内容，去掉一个尾部换行 ⇒ 逐字节是投进 CronCreate 的完整串。
+
+<!-- AC80-INNER-ANCHOR-BEGIN -->
+[inner-tick] 执行内层 tick。不要依赖上下文记忆——本 prompt 只是指针，内容现读：(1) 读 orchestration/fast-mode-tick-core.md 拿本轮步骤（执行核；理由/实测/代价在 plugin/loop/fast-mode-loop-tick.md，仅需「为什么」时按 src:N 查，不要每轮全读）；(2) `tail -10 .quay/inner-tick-log.jsonl` 拿上一轮状态（只 tail，全读不可行）；(3) 读 orchestration/manager-phase-goal.md 拿当前阶段目标与 AC（当前阶段在文件后段，按节标题定位，勿全读）。执行完必须向 .quay/inner-tick-log.jsonl 追加一行。唤醒锚核实（AC81）：每轮先核实——CronList 恰一条 + 其 id 等于注册表记录 + --verify 报 registry-verified；三条全真则不动，任一为假才清扫重建，绝不靠记住的 ID。
+<!-- AC80-INNER-ANCHOR-END -->
+
+**AC81 判据2 — 每轮锚核实（manager 22:0xZ 裁定归 inner 面，与 outer A23 对称）**：每轮 tick 必跑两条命令
+（活 CronList 只有本会话能产——两个检查器都不能自调 CronList）：
+```bash
+node --no-warnings --experimental-strip-types plugin/scripts/outer-cron-registry.ts --verify --layer inner --cron-list '<本轮 CronList 的 JSON>' --json
+node --no-warnings --experimental-strip-types plugin/scripts/outer-anchor-check.ts --layer inner --stdin --json   # 活 prompt 从 stdin 喂
+```
+**产品 = 四条判据各自的输出行进 tick-log**（① CronList 恰一条 ② id==注册表 ③ --verify registry-verified
+④ 锚点正本逐字节校验），⛔ 不写「已核实」一句话（outer 判据：`git grep '已核实'` 命中即违规）。
+**退出码三态（OK/VIOLATED/NOT-EVALUATED）不得压成布尔**；**每轮兼报锚剩余寿命**（7 天硬过期，
+`025f4132` 建于 15:17:16Z；<24h 即报——锚断则退回纯 ScheduleWakeup 自驱，4.7h 断链教训）。
+
 ---
 
 ## 无人值守期间的判断边界
