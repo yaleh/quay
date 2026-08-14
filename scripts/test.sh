@@ -733,8 +733,18 @@ run_scoped_static_checks_touches() { run_scoped_static_checks_sel --touches "$1"
 # RESOURCE_GATE_AMPLIFICATION / RESOURCE_GATE_TEST_NODE_PROCS override the derivation inputs
 # deterministically (the last is the budget `in_use` — the cross-layer total-budget subtraction).
 default_concurrency_formula() {
-  local total_budget in_use amp
+  local total_budget in_use amp slots
   amp="${RESOURCE_GATE_AMPLIFICATION:-1.0}"
+  # PER-SUITE LANE BUDGET (gap-ac68-per-suite-lane-budget-zero-consumers AC68): per_suite_lane_budget
+  # (hostParallelism ÷ S) used to be an accounting PRINT with zero consumers — the agreed lane
+  # arrangement never reached the exec line. The derived default now DIVIDES by the concurrent-suite
+  # slot count S (QUAY_MAX_CONCURRENT_SUITES — the SAME 旋钮② resource-gate.sh's CONCURRENT_SUITE_SLOTS
+  # and full-suite-runner.ts's concurrentSuiteSlots()/defaultLaneCount() read), so S concurrent suites
+  # together use ≈ nproc lanes instead of S×nproc (the simultaneous-start defect: two suites each
+  # deriving nproc ⇒ 32 workers / 16 cores). default = max(1, floor((total_budget − in_use) /
+  # AMPLIFICATION / S)). RESOURCE_GATE_CONCURRENT_SUITES is the deterministic test seam (mirrors the
+  # RESOURCE_GATE_NPROC seam; a single suite at the default S=2 gets nproc/2, matching
+  # full-suite-runner.ts defaultLaneCount's H÷S).
   # CROSS-LAYER TOTAL BUDGET (gap-test-concurrency-cap-does-not-scope-nested-spawns AC1): the
   # worker derivation reads the SHARED budget authority (process-budget.sh — the same gate
   # cap-from-gate.ts and resource-gate.sh read), not a per-layer nproc derivation. The budget is
@@ -742,9 +752,13 @@ default_concurrency_formula() {
   # already running. default = max(1, floor((total_budget − in_use) / AMPLIFICATION)) so nested
   # spawns (quay-init / session family) count against the SAME total instead of each worker
   # deriving its own cap and multiplying beyond it (the 17-19 procs / load 18.70 defect).
-  # The RESOURCE_GATE_NPROC / RESOURCE_GATE_TEST_NODE_PROCS seams override the read
-  # deterministically in tests (resource-gate.test.mjs extracts this function body and runs it
-  # standalone, so the shell-out must be skippable when both seams are set).
+  # The RESOURCE_GATE_NPROC / RESOURCE_GATE_TEST_NODE_PROCS / RESOURCE_GATE_CONCURRENT_SUITES seams
+  # override the reads deterministically in tests (resource-gate.test.mjs extracts this function
+  # body and runs it standalone, so the shell-out must be skippable when both budget seams are set).
+  slots="${RESOURCE_GATE_CONCURRENT_SUITES:-${QUAY_MAX_CONCURRENT_SUITES:-2}}"
+  if ! [[ "${slots}" =~ ^[0-9]+$ ]] || [ "${slots}" -lt 1 ]; then
+    slots=2
+  fi
   total_budget="${RESOURCE_GATE_NPROC:-}"
   in_use="${RESOURCE_GATE_TEST_NODE_PROCS:-}"
   if [ -z "${total_budget}" ] || [ -z "${in_use}" ]; then
@@ -759,7 +773,8 @@ default_concurrency_formula() {
   fi
   total_budget="${total_budget:-$(nproc 2>/dev/null || echo 1)}"
   in_use="${in_use:-0}"
-  awk -v b="${total_budget}" -v u="${in_use}" -v a="${amp}" 'BEGIN { c = int((b - u) / a); if (c < 1) c = 1; print c }'
+  awk -v b="${total_budget}" -v u="${in_use}" -v a="${amp}" -v s="${slots}" \
+    'BEGIN { c = int((b - u) / a / s); if (c < 1) c = 1; print c }'
 }
 
 default_test_concurrency() {
