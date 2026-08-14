@@ -1,7 +1,7 @@
 ---
 id: gap-idle-watch-intent-anchor-restore
 title: idle-watch 冷启动锚点 idle-watch-mount.txt 缺席而另一条检查的绿掩盖它（manager 09:1xZ 报，判法归 outer）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
