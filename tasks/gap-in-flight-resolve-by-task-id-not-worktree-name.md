@@ -59,15 +59,15 @@ worktree 目录名 → 3      分支名 → 4      真任务 id → 5（真值�
 
 ## Acceptance Criteria
 
-- [ ] AC1 判据1：`--in-flight` 解析按任务 id 匹配，截断 worktree 名归一到真 id；三种写法 in_flight_count 一致。
-- [ ] AC2 判据2 能取假：截断目录名（gap-workflows-dual-copy-drift）回放红（在飞少算）。
-- [ ] AC3 判据3：不改 AC53 闸（只改喂给它的量）。
-- [ ] AC4 判据4：分支名截断是否系统性已查（建树路径），Evidence 记录。
-- [ ] AC5 既有测试全绿；`--for-task` scoped 门绿。
+- [x] AC1 判据1：`--in-flight` 解析按任务 id 匹配，截断 worktree 名归一到真 id；三种写法 in_flight_count 一致。
+- [x] AC2 判据2 能取假：截断目录名（gap-workflows-dual-copy-drift）回放红（在飞少算）。
+- [x] AC3 判据3：不改 AC53 闸（只改喂给它的量）。
+- [x] AC4 判据4：分支名截断是否系统性已查（建树路径），Evidence 记录。
+- [x] AC5 既有测试全绿；`--for-task` scoped 门绿。
 
 ## Definition of Done
 
-- [ ] `--in-flight` 按任务 id 解析（截断 worktree 名归一到真 id），在飞读数不再少算，AC53 闸不再误拒心跳追加；分支名截断系统性已查证。
+- [x] `--in-flight` 按任务 id 解析（截断 worktree 名归一到真 id），在飞读数不再少算，AC53 闸不再误拒心跳追加；分支名截断系统性已查证。
 
 ## Touches
 
@@ -75,6 +75,38 @@ worktree 目录名 → 3      分支名 → 4      真任务 id → 5（真值�
 - plugin/test/slot-refill.test.mjs（补截断名解析测试）
 - tasks/gap-in-flight-resolve-by-task-id-not-worktree-name.md（自身）
 
+## Test-Files
+
+- plugin/test/slot-refill.test.mjs（已有文件，补 4 个测试：resolveInFlightId 纯函数单元（exact/branch/truncated/ambiguous-unresolved）+ CLI 判据1 三形式一致 + CLI 判据2 真实样本截断名解析）
+
 ## Evidence
 
-（落地后回填）
+（落地后回填 — 2026-08-14 12:5xZ inner 实现）
+
+**实现**：`plugin/scripts/slot-refill.ts` 新增纯函数 `resolveInFlightId(tasksDir, input)` —— 把 `--in-flight`/`--closed-but-live` 的每个标识（worktree 目录名 / 分支名 `task/<id>` / 真任务 id）归一到【真任务 id】：①剥 `task/` 前缀；②`tasks/<名>.md` 存在 ⇒ exact；③恰好一个任务 id 以该名为严格前缀 ⇒ truncated-prefix 解析到真 id；④多个/零个 ⇒ 原样返回 `unresolved`（保持原 advisory-skip，**绝不猜**——猜错的 id 污染 touches-disjointness 比缺 id 更糟）。`main()` 的 `readTasks` 先经 `resolveInFlightId` 再读文件，解析出的**真 id** 同时进 touches-disjointness 集合。**AC53 闸零改动**（判据3）。
+
+**判据4 问项：分支名为什么截断？（只此一例 or 系统性）**
+**结论：非机械截断 —— 是 `<slug>` 约定的代理方缩写，风险弱系统性（任何长 id 都处代理方裁量之下），但无确定性长度上限。**
+证据（对真实 `git worktree list` 的 5 棵在飞树逐一量度）：
+```
+29 gap-ac63-judgment2-no-carrier                         （dir=branch=真 id）
+38 gap-fan-in-flip-no-ac-completion-check                （dir=branch=真 id）
+32 gap-in-flight-resolve-by-task-id                      （dir=branch=真 id）
+29 gap-test-isolation-backlog-44                         （dir 截断；branch=task/gap-test-isolation-backlog-44-violations-unmeasured 全名）
+29 gap-workflows-dual-copy-drift                         （dir 与 branch 均截断；真 id …-unchecked，全名 39 字符）
+```
+- **无机械长度上限**：未被截断的树是 38/32 字符（比两个 29 字符的截断树更长），故不是某固定字符截断位。
+- **`git worktree add` 不截断**；grep 全仓建树路径（`fast-mode-loop-tick.md:976/:1043` 的 `git worktree add $WORKTREE_ROOT/<slug> -b task/<id>`）无任何 `slice/substr/length` 截断逻辑 —— `<slug>` 由派发代理自由缩写。
+- **系统性判定**：**弱系统性** —— 约定本身邀请缩写，任何长 id 任务建树时都可能被代理缩写，且截断的缩写是前缀 ⇒ 本次修复（按任务 id 前缀解析）对所有同类生效；但**非确定性机制**（无代码路径强制截断），故不能靠「修建树逻辑」根除，只能靠解析侧容忍截断。
+
+**判据2 能取假回放 + 判据1 三形式一致（对真实 store 实跑，`--root`=本 worktree）**：
+```
+真任务 id 形式（5 个）            → in_flight_count = 5 | slots_free = 0
+截断 worktree 目录名形式（5 个）   → in_flight_count = 5 | slots_free = 0   （修复前=3 ⇒ slots_free 虚高 2）
+分支名形式（task/<id>，混合截断）  → in_flight_count = 5 | slots_free = 0
+```
+（截断目录名形式修复前对 `gap-test-isolation-backlog-44`、`gap-workflows-dual-copy-drift` 两个 `tasks/<名>.md` 不存在 ⇒ 静默跳过 ⇒ 3；与任务体实证「目录名→3」吻合。）
+
+**scoped 门**：`bash scripts/test.sh --for-task gap-in-flight-resolve-by-task-id-not-worktree-name --allow-thin` → **EXIT=0**（slot-refill.test.mjs 全量 79 tests / 0 fail，含新增 4 条）。
+**ts-typecheck**：`fan-in-ts-typecheck-gate.ts` → **ADMITTED (exit 0)**（Touches 无新增/移动 .ts）。
+**既有测试全绿**：slot-refill.test.mjs 79/79；`--for-task` scoped 门绿。

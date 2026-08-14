@@ -937,6 +937,54 @@ export function measureInFlightFromTelemetry({ root, cap }) {
   }
 }
 
+/** RESOLVE-BY-TASK-ID (tasks/gap-in-flight-resolve-by-task-id-not-worktree-name): normalize an
+ *  in-flight identifier (worktree DIRECTORY name / BRANCH name / true task id) to the TRUE task id.
+ *  The `--in-flight`/`--closed-but-live` sets are passed by the caller as the identifiers the inner
+ *  tick A12 maintains — which are the WORKTREE SLUGS it created, not necessarily the true task ids.
+ *  The `<slug>` convention (fast-mode-loop-tick.md:976/:1043 `git worktree add $WORKTREE_ROOT/<slug>
+ *  -b task/<id>`) lets the dispatching agent freely abbreviate: 2026-08-14 实测 `git worktree list`
+ *  had `gap-workflows-dual-copy-drift` (true id `…-unchecked` — BOTH dir AND branch truncated) and
+ *  `gap-test-isolation-backlog-44` (true id `…-violations-unmeasured` — dir truncated, branch full).
+ *  A truncated slug never matches `tasks/<slug>.md`, so the old readTasks SILENTLY dropped it →
+ *  in_flight under-counted → slots_free inflated → the AC53 end-invariant gate (should_refill ∧
+ *  slots_free>0 ⇒ 拒写) correctly refused a heartbeat write it should NOT have refused. This resolver
+ *  matches BY TASK ID so a truncated slug still resolves to the true id — 判据1: the three forms must
+ *  agree; 判据3: the AC53 gate is UNCHANGED, only the quantity fed to it is fixed.
+ *
+ *  Resolution order (deterministic, never guesses):
+ *    1. strip a leading `task/` prefix (the branch form).
+ *    2. exact: `tasks/<normalized>.md` exists → the identifier IS a true task id.
+ *    3. truncated-prefix: EXACTLY ONE task id in the store has <normalized> as a strict prefix → that
+ *       longer id is the true task id (the truncated slug resolves to the true id).
+ *    4. ambiguous (2+ tasks extend the prefix) or none → return the input UNCHANGED (method
+ *       "unresolved") — the caller keeps the advisory skip. Never guess wrong: a wrong id would poison
+ *       the touches-disjointness set worse than a missing id (a missing id under-counts, a wrong id
+ *       blocks/defers unrelated work).
+ *
+ *  PURE + read-only. tasksDir is read once per call (readdirSync is one syscall returning names, no
+ *  per-file stat) — negligible at the 5-in-flight scale.
+ */
+export function resolveInFlightId(tasksDir, input) {
+  const norm = String(input).replace(/^task\//, "");
+  if (fs.existsSync(path.join(tasksDir, `${norm}.md`))) {
+    return { id: norm, method: "exact" };
+  }
+  let match = null;
+  let ambiguous = false;
+  if (fs.existsSync(tasksDir)) {
+    for (const f of fs.readdirSync(tasksDir)) {
+      if (!f.endsWith(".md")) continue;
+      const id = f.replace(/\.md$/, "");
+      if (id.length > norm.length && id.startsWith(norm)) {
+        if (match === null) match = id;
+        else if (match !== id) { ambiguous = true; break; }
+      }
+    }
+  }
+  if (match !== null && !ambiguous) return { id: match, method: "truncated-prefix" };
+  return { id: input, method: "unresolved" };
+}
+
 function main(argv) {
   let root = null;
   let cap = FIXED_DISPATCH_CAP;
@@ -971,12 +1019,21 @@ function main(argv) {
     }
   }
   const rootDir = root ? path.resolve(root) : findRepoRoot(process.cwd());
+  // RESOLVE-BY-TASK-ID (tasks/gap-in-flight-resolve-by-task-id-not-worktree-name): each identifier is
+  // resolved to the TRUE task id before the file read — a truncated worktree slug (the `<slug>`
+  // convention lets the dispatching agent abbreviate) still resolves to the true id, so the in-flight
+  // count no longer under-reports and the AC53 gate stops refusing heartbeats it shouldn't. The
+  // resolved TRUE id is also what flows into the touches-disjointness set (line 578) — comparing the
+  // truncated slug against peers would miss collisions. Unresolved entries stay advisory-skipped
+  // (a vanished/unresolved id is not a failure), exactly as before.
+  const tasksDir = path.join(rootDir, "tasks");
   const readTasks = (ids) => {
     const out = [];
     for (const id of ids) {
-      const file = path.join(rootDir, "tasks", `${id}.md`);
-      if (!fs.existsSync(file)) continue; // advisory — a vanished id is not a failure
-      out.push({ id, body: fs.readFileSync(file, "utf8") });
+      const resolved = resolveInFlightId(tasksDir, id);
+      const file = path.join(tasksDir, `${resolved.id}.md`);
+      if (!fs.existsSync(file)) continue; // advisory — a vanished/unresolved id is not a failure
+      out.push({ id: resolved.id, body: fs.readFileSync(file, "utf8") });
     }
     return out;
   };

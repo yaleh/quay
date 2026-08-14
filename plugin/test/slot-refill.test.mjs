@@ -55,6 +55,10 @@ import {
   // outer-verification family recognizer it reuses.
   isBodyLanded,
   isOuterVerificationItem,
+  // RESOLVE-BY-TASK-ID (tasks/gap-in-flight-resolve-by-task-id-not-worktree-name): normalize an
+  // in-flight identifier (worktree dir / branch / task id) to the TRUE task id so a truncated worktree
+  // slug still resolves and the in-flight count stops under-reporting.
+  resolveInFlightId,
 } from "../scripts/slot-refill.ts";
 // AC2 (gap-delivery-critical-label-at-promote-not-after-dispatch): the promote gate is the fix's
 // label DETERMINATION point — applyPromotions (ready-pool-check --apply heartbeat) flips todo→ready
@@ -632,6 +636,122 @@ test("CLI smoke: --root/--cap/--in-flight produces JSON with the refill fields (
   assert.equal(parsed.should_refill, true);
   assert.ok(Array.isArray(parsed.recommended));
   assert.equal(parsed.recommended.length, 2);
+});
+
+// ── RESOLVE-BY-TASK-ID (tasks/gap-in-flight-resolve-by-task-id-not-worktree-name) ──────────────────
+// AC1 判据1: `--in-flight` parsing matches BY TASK ID — worktree dir name / branch name / task id all
+// normalize to the TRUE task id, so a truncated worktree slug (the `<slug>` convention's agent-chosen
+// abbreviation) still resolves. The three forms' in_flight_count MUST agree (⊢ disagreement ⇒ RED).
+// AC2 判据2 (real sample, 能取假): gap-workflows-dual-copy-drift (truncated dir — true id
+// `…-unchecked`) previously under-counted the in-flight set (readTasks silently skipped the missing
+// `tasks/<slug>.md`); after the fix the truncated name resolves to the true id and the count is not
+// biased. AC3 判据3: the AC53 gate is NOT changed — only the quantity fed to it (the in-flight set).
+
+test("resolveInFlightId — exact id / branch form / truncated dir all resolve to the true task id (判据1)", (t) => {
+  const root = makeWorkspace("resolve");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const tasksDir = path.join(root, "tasks");
+  // The real 2026-08-14 sample pair: the worktree slug is a TRUNCATED prefix of the true task id.
+  writeTask(root, "gap-workflows-dual-copy-drift-unchecked", {
+    status: "ready", labels: ["gap"], body: dispatchableBody(["- code/wcd.ts (new)"]),
+  });
+  // A prefix-collision guard: an id whose prefix is ALSO a distinct exact task — the exact task must
+  // win (never re-resolve an exact id to a longer prefix-match sibling).
+  writeTask(root, "gap-prefix", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/p.ts (new)"]) });
+  writeTask(root, "gap-prefix-extended", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/pe.ts (new)"]) });
+
+  // 1. exact task id → exact, unchanged.
+  assert.deepEqual(resolveInFlightId(tasksDir, "gap-workflows-dual-copy-drift-unchecked"),
+    { id: "gap-workflows-dual-copy-drift-unchecked", method: "exact" });
+  // 2. branch form `task/<id>` → strip the prefix, exact.
+  assert.deepEqual(resolveInFlightId(tasksDir, "task/gap-workflows-dual-copy-drift-unchecked"),
+    { id: "gap-workflows-dual-copy-drift-unchecked", method: "exact" });
+  // 3. TRUNCATED worktree dir name → truncated-prefix resolves to the TRUE id (the real sample).
+  assert.deepEqual(resolveInFlightId(tasksDir, "gap-workflows-dual-copy-drift"),
+    { id: "gap-workflows-dual-copy-drift-unchecked", method: "truncated-prefix" });
+  // 4. TRUNCATED branch name → strip `task/`, then truncated-prefix.
+  assert.deepEqual(resolveInFlightId(tasksDir, "task/gap-workflows-dual-copy-drift"),
+    { id: "gap-workflows-dual-copy-drift-unchecked", method: "truncated-prefix" });
+  // 5. an exact id whose longer sibling also shares the prefix → exact wins, NEVER re-resolved.
+  assert.deepEqual(resolveInFlightId(tasksDir, "gap-prefix"), { id: "gap-prefix", method: "exact" });
+  // 6. unresolved (no task matches) → input unchanged, method "unresolved".
+  assert.deepEqual(resolveInFlightId(tasksDir, "gap-no-such-task"), { id: "gap-no-such-task", method: "unresolved" });
+});
+
+test("resolveInFlightId — ambiguous prefix (2+ tasks extend it) ⇒ unresolved, never guesses", (t) => {
+  const root = makeWorkspace("resolve-amb");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const tasksDir = path.join(root, "tasks");
+  writeTask(root, "gap-amb-one", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/1.ts (new)"]) });
+  writeTask(root, "gap-amb-two", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/2.ts (new)"]) });
+  // `gap-amb` is a strict prefix of BOTH — ambiguous ⇒ unresolved (a wrong id would poison the
+  // touches-disjointness set worse than a missing id).
+  assert.deepEqual(resolveInFlightId(tasksDir, "gap-amb"), { id: "gap-amb", method: "unresolved" });
+});
+
+test("CLI --in-flight: truncated worktree dir name resolves to the true id — in_flight_count not biased (判据2 real sample)", (t) => {
+  const root = makeWorkspace("resolve-cli");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-workflows-dual-copy-drift-unchecked", {
+    status: "ready", labels: ["gap"], body: dispatchableBody(["- code/wcd.ts (new)"]),
+  });
+  const script = path.resolve(__dirname, "..", "scripts", "slot-refill.ts");
+  const run = (inFlight) => JSON.parse(execFileSync(
+    process.execPath,
+    ["--no-warnings", "--experimental-strip-types", script, "--root", root, "--cap", "3", "--json", "--in-flight", inFlight],
+    { encoding: "utf8", env: { ...process.env, QUAY_TELEMETRY_SUBAGENTS: "0" } },
+  ));
+  // TRUE id form.
+  const byTrueId = run("gap-workflows-dual-copy-drift-unchecked");
+  assert.equal(byTrueId.in_flight_count, 1, "true task id form → 1 in-flight");
+  // TRUNCATED worktree dir form (the 2026-08-14 real sample). PRE-FIX this silently skipped
+  // `tasks/gap-workflows-dual-copy-drift.md` (missing) → in_flight_count=0 → slots_free inflated
+  // → AC53 拒写. POST-FIX it resolves to the true id → count agrees with the true-id form.
+  const byTruncDir = run("gap-workflows-dual-copy-drift");
+  assert.equal(byTruncDir.in_flight_count, 1, "truncated worktree dir name resolves → 1 in-flight");
+  // 判据1 ⊢: the truncated dir form and the true-id form AGREE (disagreement ⇒ RED).
+  assert.equal(byTruncDir.in_flight_count, byTrueId.in_flight_count,
+    "判据1: worktree-dir-name form and task-id form MUST give the same in_flight_count");
+  assert.equal(byTruncDir.slots_free, byTrueId.slots_free,
+    "the truncated form must not inflate slots_free (the AC53 gate quantity is fixed, the gate untouched)");
+});
+
+test("CLI --in-flight: the three forms (true id / branch / truncated dir) agree on in_flight_count (判据1)", (t) => {
+  const root = makeWorkspace("resolve-3form");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // The full real 2026-08-14 in-flight set (5 worktrees): two have truncated slugs.
+  const ids = [
+    "gap-ac63-judgment2-no-carrier",
+    "gap-fan-in-flip-no-ac-completion-check",
+    "gap-in-flight-resolve-by-task-id",
+    "gap-test-isolation-backlog-44-violations-unmeasured",
+    "gap-workflows-dual-copy-drift-unchecked",
+  ];
+  for (const id of ids) writeTask(root, id, { status: "ready", labels: ["gap"], body: dispatchableBody([`- code/${id}.ts (new)`]) });
+  const script = path.resolve(__dirname, "..", "scripts", "slot-refill.ts");
+  const run = (inFlight) => JSON.parse(execFileSync(
+    process.execPath,
+    ["--no-warnings", "--experimental-strip-types", script, "--root", root, "--cap", "5", "--json", "--in-flight", inFlight],
+    { encoding: "utf8", env: { ...process.env, QUAY_TELEMETRY_SUBAGENTS: "0" } },
+  ));
+  const trueForm = ids.join(",");
+  const branchForm = ids.map((id) => `task/${id}`).join(",");
+  // The truncated worktree DIR names as they actually exist in `git worktree list` (2026-08-14).
+  const dirForm = [
+    "gap-ac63-judgment2-no-carrier",
+    "gap-fan-in-flip-no-ac-completion-check",
+    "gap-in-flight-resolve-by-task-id",
+    "gap-test-isolation-backlog-44",          // truncated dir — true id …-violations-unmeasured
+    "gap-workflows-dual-copy-drift",          // truncated dir — true id …-unchecked
+  ].join(",");
+  const byTrue = run(trueForm);
+  const byBranch = run(branchForm);
+  const byDir = run(dirForm);
+  assert.equal(byTrue.in_flight_count, 5, "true task id form → 5 in-flight");
+  assert.equal(byBranch.in_flight_count, 5, "branch form (task/<id>) → 5 in-flight");
+  assert.equal(byDir.in_flight_count, 5, "truncated worktree dir form → 5 in-flight (both truncated slugs resolve)");
+  assert.equal(byDir.in_flight_count, byTrue.in_flight_count, "判据1: the three forms MUST agree");
+  assert.equal(byBranch.in_flight_count, byTrue.in_flight_count, "判据1: the three forms MUST agree");
 });
 
 // ── Suite-blocking rank (tasks/gap-ready-relevance-blind-to-suite-blocking-signal AC3) ──────────────
