@@ -1,7 +1,7 @@
 ---
 id: gap-phase-boundary-differential-accounting
 title: 相边界差分记账 + 全退出路径写入——答「这一相是算得多还是等得久」（cpu_usec/PSI 差分）
-status: done
+status: ready
 labels:
   - gap
   - mechanism
