@@ -516,6 +516,18 @@ run_static_checks() {
   # @static-tier change
   # @static-object orchestration/dispatch-record.jsonl orchestration/dispatch-preference.md plugin/scripts/dispatch-record.ts plugin/scripts/dispatch-record-fingerprint-reason-check.ts plugin/test/dispatch-record-fingerprint-reason-check.test.mjs
   run_checker "dispatch-record-fingerprint-reason-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/dispatch-record-fingerprint-reason-check.ts" --root "${repo_root}"
+  echo "== recommended de-order check (tasks/gap-ac56-recommended-deordered, AC56 判据1/判据2/判据3) =="
+  # AC56 去锚: the dispatch-facing `recommended` array must NOT carry a meaningful priority order (an
+  # inner reading "the mechanism's first pick" gets anchored — SPEC §5). 判据1: a length>1 `recommended`
+  # must be lexicographic (dictionary order) AND the output must carry an explicit "order meaningless"
+  # annotation (recommended_order / recommended_unordered). 判据2 (falsifiable): a 1/cost-sorted
+  # (priority) order is NOT lexicographic ⇒ RED. 判据3 (anti-只改文案): the checker reads the OUTPUT
+  # ITSELF — a comment claiming "序无意义" while the array still encodes a priority order fails the
+  # lexicographic check. Pinned by plugin/test/ac56-recommended-deordered-check.test.mjs + the mutation
+  # case (priority-order ⇒ RED, missing-annotation ⇒ RED).
+  # @static-tier change
+  # @static-object plugin/scripts/slot-refill.ts plugin/scripts/ac56-recommended-deordered-check.ts plugin/test/ac56-recommended-deordered-check.test.mjs plugin/scripts/checker-mutation-cases/ac56-recommended-deordered-check.sh
+  run_checker "ac56-recommended-deordered-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/ac56-recommended-deordered-check.ts" --root "${repo_root}"
   # Wait for all parallelized checkers and fail closed if any failed (see the RUN_CHECKER_PARALLEL
   # note at the top of this function — AC3 failure visibility, AC4 cost-ledger completeness).
   run_checker_parallel_wait

@@ -524,6 +524,11 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
   // While halted, no candidate is recommended at all — the human's stop supersedes the pool.
   // (Pool stats are still reported for visibility; the dispatch recommendation is empty.)
   let recommended = [];
+  // AC56 DE-ORDER ANNOTATION (gap-ac56-recommended-deordered): the explicit "order meaningless" mark
+  // the output must carry when it recommends ≥2 ids (判据1 option 2). Assigned inside the candidate
+  // block; while halted nothing is recommended so the value records the null state. Read by
+  // ac56-recommended-deordered-check.ts from the OUTPUT ITSELF (判据3 — never a comment).
+  let recommendedOrder = "none (nothing recommended — halted)";
   // RANKING EXPOSURE (gap-ac36-recommended-exposes-sort-key AC2): the `ranking` array carries each
   // recommended id's sort axes — `deliveryCritical` / `suiteBlocking` (the two axes candidates.sort
   // ranks on) and its `rank` (0-based position WITHIN `recommended`). Empty while halted (nothing is
@@ -730,21 +735,34 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
       ? []
       : candidates.filter((c) => landedCandidateIds.has(c.id)).map((c) => c.id);
     recommended = [...batch, ...landedRecommended].slice(0, slotsFree);
-    // Build the ranking array from the SORTED candidate order, capped at the same slots_free window
-    // as `recommended` (rank = position within recommended). `candidateById` recovers the parsed
-    // candidate so deliveryCritical comes from the SAME parseCandidate source the sort used — never a
-    // second parser (rule: reuse, no parallel copy). suiteBlocking is derived from the same
-    // suiteBlockingIds set the sort's first axis used.
-    const candidateById = new Map(candidates.map((c) => [c.id, c]));
-    ranking = recommended.map((id, rank) => {
-      const c = candidateById.get(id);
-      return {
-        id,
-        deliveryCritical: c ? c.deliveryCritical : false,
-        suiteBlocking: c ? suiteBlockingIds.has(id) : false,
+    // AC56 DE-ORDER (gap-ac56-recommended-deordered): the dispatch-consuming `recommended` array must
+    // NOT carry a meaningful priority order — an inner that reads "the mechanism's first pick" gets
+    // anchored even against its own semantic leanings (SPEC §5; 不去序则新划分只是名义上的). Re-sort
+    // lexicographically by id: a deterministic, obviously-meaningless dictionary order (判据1 option 2).
+    // The priority sort above (candidates.sort: blocking_suite → delivery_critical → id) still happens
+    // and still drives WHICH candidates the greedy disjoint batch admits; it is merely no longer the
+    // order of the OUTPUT array. The priority order remains machine-readable in the `ranking`
+    // diagnostic below (AC36 判据②), which the inner tick does NOT consume for dispatch — de-ordering
+    // `recommended` is the anchor removal; `ranking` stays a verification surface.
+    recommended.sort((a, b) => a.localeCompare(b));
+    recommendedOrder = "lexicographic-by-id (order meaningless — 字典序，不代表优先级)";
+    // Build the ranking array from the PRIORITY-SORTED candidate order (blocking_suite →
+    // delivery_critical → id — the same order candidates.sort produced above), filtered to the
+    // recommended SET and capped at the same slots_free window. `rank` = position WITHIN the
+    // priority-ordered recommendation, NOT the de-ordered `recommended` array's position — this keeps
+    // AC36 判据② mechanically assertable (DC strict forward movement / blocking_suite above DC) while
+    // the dispatch-facing `recommended` array itself stays de-ordered. deliveryCritical comes from the
+    // SAME parseCandidate source the sort used — never a second parser (rule: reuse, no parallel
+    // copy). suiteBlocking is derived from the same suiteBlockingIds set the sort's first axis used.
+    const recommendedSet = new Set(recommended);
+    ranking = candidates
+      .filter((c) => recommendedSet.has(c.id))
+      .map((c, rank) => ({
+        id: c.id,
+        deliveryCritical: c.deliveryCritical,
+        suiteBlocking: suiteBlockingIds.has(c.id),
         rank,
-      };
-    });
+      }));
   }
 
   // should_refill — the event-driven go/no-go. Based on the RECOMMENDED set (candidates that pass
@@ -828,6 +846,11 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
     should_refill: shouldRefill,
     no_refill_reason: noRefillReason,
     recommended,
+    // AC56 DE-ORDER ANNOTATION (gap-ac56-recommended-deordered): the explicit "order meaningless"
+    // marker on the recommended OUTPUT — a dictionary (lexicographic) order that inner must NOT read
+    // as a priority recommendation. Consumed by ac56-recommended-deordered-check.ts (判据3 reads the
+    // output itself, not a comment).
+    recommended_order: recommendedOrder,
     // DEFER ACCOUNTING (gap-over90-clock-measures-queue-time-not-work-time): every candidate in
     // `pool.ready` that failed a step-4 check (touches-resolve / deps / touches-overlap-in-flight /
     // not-yet-flipped / C8 self-touch / dispatch-gate) is listed here with its reason. These are the

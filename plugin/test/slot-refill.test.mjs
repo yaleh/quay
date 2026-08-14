@@ -657,28 +657,33 @@ test("slot-refill recommends the suite-blocking task first; no red window ⇒ un
   writeTask(root, "gap-watchdog", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/wd.ts (new)"]) });
   const opts = { tasksDir: path.join(root, "tasks"), root, cap: 2 };
 
-  // AC4 negative control FIRST: no suite history ⇒ recommended keeps the id tie-break order.
+  // AC4 negative control FIRST: no suite history ⇒ recommended keeps the de-ordered (lexicographic) form.
   const before = analyzeSlotRefill(opts);
   assert.equal(before.suite_blocking.window_active, false);
-  assert.deepEqual(before.recommended, ["gap-plain-ready", "gap-watchdog"], "no red window ⇒ pre-signal ordering");
+  assert.deepEqual(before.recommended, ["gap-plain-ready", "gap-watchdog"], "no red window ⇒ de-ordered (lexicographic)");
+  assert.ok(/order meaningless/.test(before.recommended_order), "the de-ordered output is explicitly annotated");
 
-  // AC3: 3 consecutive red rounds whose failures hit the watchdog task's Touches ⇒ it ranks first.
+  // AC3: 3 consecutive red rounds whose failures hit the watchdog task's Touches ⇒ the suite-blocker
+  // is picked first BY THE PRIORITY SORT (exposed in `ranking`, the AC36 diagnostic) while the
+  // dispatch-facing `recommended` array stays de-ordered (AC56 去锚).
   writeRounds(root, Array.from({ length: 3 }, (_, i) => ({ round: 220 + i, state: "red", reason: "failed", fail: 1, failures: [{ file: "code/wd.ts", line: "x" }] })));
   writeState(root, [{ file: "code/wd.ts", line: "x" }]);
   const after = analyzeSlotRefill(opts);
   assert.equal(after.suite_blocking.window_active, true);
   assert.deepEqual(after.suite_blocking.tasks, ["gap-watchdog"]);
-  assert.equal(after.recommended[0], "gap-watchdog", "the suite-blocker is picked first by the refill");
+  assert.equal(after.recommended[0], "gap-plain-ready", "recommended is de-ordered (lexicographic) — the suite-blocker is NOT first in the dispatch-facing array");
   assert.equal(after.recommended.length, 2, "both dispatchable candidates still recommended (cap 2)");
+  assert.equal(after.ranking[0].id, "gap-watchdog", "the suite-blocker is first in the ranking (the priority-sorted AC36 diagnostic)");
 
-  // negative: last round green clears the window ⇒ recommended back to pre-signal order.
+  // negative: last round green clears the window ⇒ recommended stays de-ordered (lexicographic).
   writeRounds(root, [
     ...Array.from({ length: 3 }, () => ({ state: "red", reason: "failed", fail: 1, failures: [{ file: "code/wd.ts" }] })),
     { round: 223, state: "green", fail: 0 },
   ]);
   const green = analyzeSlotRefill(opts);
   assert.equal(green.suite_blocking.window_active, false);
-  assert.deepEqual(green.recommended, ["gap-plain-ready", "gap-watchdog"], "green round clears the window ⇒ no re-rank");
+  assert.deepEqual(green.recommended, ["gap-plain-ready", "gap-watchdog"], "green round clears the window ⇒ de-ordered (lexicographic)");
+  assert.equal(green.ranking[0].id, "gap-plain-ready", "no suite-blocker ⇒ id-tie-break order in the ranking");
 });
 
 // ── B3 ①/④ ARBITRATION (gap-b3-arbitration-inflight-vs-backlog) ─────────────────────────────────────
@@ -850,26 +855,35 @@ test("ARBITRATION — default (no red window/backlog) is byte-forward-compatible
 // candidates.sort key becomes (blocking_suite, delivery_critical, id): a task labeled
 // `delivery-critical` ranks below a suite-blocker but ABOVE plain id order, so the
 // productization-delivery phase's AC tasks are picked by the refill before ordinary pool work.
-// AC3 positive: labeled task strictly moves forward in recommended. AC3 negative control: an
-// unlabeled same-family task keeps its id-order position. Invariant: blocking_suite stays the top
-// axis. AC4 end-to-end: after labeling, the next refill evaluation picks the labeled task
-// (dispatch evaluation happens strictly after the label is applied — timestamp order).
+// AC3 positive: labeled task strictly moves forward IN THE RANKING (the AC36 diagnostic). AC3
+// negative control: an unlabeled same-family task keeps its id-order position in the ranking.
+// Invariant: blocking_suite stays the top axis. AC4 end-to-end: after labeling, the next refill
+// evaluation picks the labeled task (dispatch evaluation happens strictly after the label is applied
+// — timestamp order). AC56 去锚 (tasks/gap-ac56-recommended-deordered): the DISPATCH-facing
+// `recommended` array is de-ordered (lexicographic + "order meaningless" annotation) so inner is not
+// anchored to "the mechanism's first pick"; the priority axis is verified via `ranking`, which inner
+// does NOT consume for dispatch.
 
-test("DELIVERY-CRITICAL — labeled task strictly moves forward in recommended; unlabeled sibling keeps id order (AC3)", (t) => {
+test("DELIVERY-CRITICAL — the axis moves the labeled task first in ranking while recommended stays de-ordered (AC3 + AC56)", (t) => {
   const root = makeWorkspace("ac36-rank");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   writeTask(root, "ac36-a", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/a.ts (new)"]) });
   writeTask(root, "ac36-b", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/b.ts (new)"]) });
   const opts = { tasksDir: path.join(root, "tasks"), root, cap: 3 };
 
-  // Negative control FIRST: no delivery-critical label ⇒ id tie-break order (a before b).
+  // Negative control FIRST: no delivery-critical label ⇒ recommended is de-ordered (lexicographic: a before b).
   const before = analyzeSlotRefill(opts);
-  assert.deepEqual(before.recommended, ["ac36-a", "ac36-b"], "no label ⇒ id tie-break order");
+  assert.deepEqual(before.recommended, ["ac36-a", "ac36-b"], "no label ⇒ de-ordered (lexicographic)");
+  assert.equal(before.ranking[0].id, "ac36-a", "no label ⇒ id tie-break order in the ranking");
 
-  // Positive: add the label to b ⇒ it strictly moves ahead of a.
+  // Positive: add the label to b ⇒ the DC axis moves it first IN THE RANKING (the AC36 diagnostic),
+  // while the dispatch-facing recommended array stays de-ordered (AC56 去锚 — inner is NOT anchored to
+  // "the mechanism's first pick").
   writeTask(root, "ac36-b", { status: "ready", labels: ["gap", "delivery-critical"], body: dispatchableBody(["- code/b.ts (new)"]) });
   const after = analyzeSlotRefill(opts);
-  assert.deepEqual(after.recommended, ["ac36-b", "ac36-a"], "labeled task ranks first (delivery-critical axis above id order)");
+  assert.deepEqual(after.recommended, ["ac36-a", "ac36-b"], "recommended stays de-ordered (lexicographic) — the label does NOT reorder the dispatch array");
+  assert.equal(after.ranking[0].id, "ac36-b", "the labeled task ranks first in the ranking (delivery-critical axis above id order)");
+  assert.match(after.recommended_order, /order meaningless/, "the de-ordered output is explicitly annotated");
 });
 
 test("DELIVERY-CRITICAL — negative control: unlabeled same-family tasks keep relative id order (AC3)", (t) => {
@@ -881,12 +895,14 @@ test("DELIVERY-CRITICAL — negative control: unlabeled same-family tasks keep r
   const opts = { tasksDir: path.join(root, "tasks"), root, cap: 3 };
 
   const before = analyzeSlotRefill(opts);
-  assert.deepEqual(before.recommended, ["ac36-x", "ac36-y", "ac36-z"], "id order baseline");
+  assert.deepEqual(before.recommended, ["ac36-x", "ac36-y", "ac36-z"], "de-ordered (lexicographic) baseline");
 
-  // Label only the middle task; the unlabeled x and z must keep x-before-z relative order.
+  // Label only the middle task; the unlabeled x and z must keep x-before-z relative order IN THE
+  // RANKING (the AC36 negative control) while recommended stays de-ordered (AC56).
   writeTask(root, "ac36-y", { status: "ready", labels: ["gap", "delivery-critical"], body: dispatchableBody(["- code/y.ts (new)"]) });
   const after = analyzeSlotRefill(opts);
-  assert.deepEqual(after.recommended, ["ac36-y", "ac36-x", "ac36-z"], "y moves up; unlabeled x/z keep id order");
+  assert.deepEqual(after.recommended, ["ac36-x", "ac36-y", "ac36-z"], "recommended stays de-ordered (lexicographic) — the label does NOT reorder the dispatch array");
+  assert.deepEqual(after.ranking.map((e) => e.id), ["ac36-y", "ac36-x", "ac36-z"], "in the ranking y moves up; unlabeled x/z keep id order");
 });
 
 test("DELIVERY-CRITICAL — blocking_suite axis stays ABOVE delivery-critical (invariant)", (t) => {
@@ -901,8 +917,9 @@ test("DELIVERY-CRITICAL — blocking_suite axis stays ABOVE delivery-critical (i
   writeState(root, [{ file: "code/wd.ts", line: "x" }]);
   const r = analyzeSlotRefill(opts);
   assert.equal(r.suite_blocking.window_active, true);
-  assert.equal(r.recommended[0], "ac36-watchdog", "suite-blocker ranks above delivery-critical (blocking_suite > delivery_critical)");
-  assert.equal(r.recommended[1], "ac36-critical", "delivery-critical ranks second (above id order, below blocking_suite)");
+  assert.deepEqual(r.recommended, ["ac36-critical", "ac36-watchdog"], "recommended is de-ordered (lexicographic: critical < watchdog) — the dispatch array does NOT encode blocking_suite/delivery-critical priority");
+  assert.equal(r.ranking[0].id, "ac36-watchdog", "in the ranking the suite-blocker ranks above delivery-critical (blocking_suite > delivery_critical — the AC36 diagnostic)");
+  assert.equal(r.ranking[1].id, "ac36-critical", "delivery-critical ranks second (above id order, below blocking_suite) in the ranking");
 });
 
 test("DELIVERY-CRITICAL — a false-positive dir-glob suite-blocker does NOT demote the DC task (AC4 — gap-suite-blocking-directory-glob-overbroad)", (t) => {
@@ -922,8 +939,9 @@ test("DELIVERY-CRITICAL — a false-positive dir-glob suite-blocker does NOT dem
   const r = analyzeSlotRefill(opts);
   assert.equal(r.suite_blocking.window_active, true);
   assert.ok(!r.suite_blocking.tasks.includes("gap-crystal-dir"), "the dir-glob task is NOT a suite-blocker (AC2 negative control)");
-  assert.equal(r.recommended[0], "ac37-dc", "no suite-blocker ⇒ the delivery-critical task ranks first (DC axis restored)");
-  assert.ok(r.recommended.includes("gap-crystal-dir"), "the dir-glob task is still dispatchable (ranked after the DC task)");
+  assert.equal(r.ranking[0].id, "ac37-dc", "no suite-blocker ⇒ the delivery-critical task ranks first in the ranking (DC axis restored)");
+  assert.ok(r.recommended.includes("gap-crystal-dir"), "the dir-glob task is still dispatchable");
+  assert.deepEqual(r.recommended, ["ac37-dc", "gap-crystal-dir"], "recommended is de-ordered (lexicographic: ac37-dc < gap-crystal-dir) — the dispatch array does NOT encode the DC axis");
 });
 
 test("DELIVERY-CRITICAL — end-to-end: a delivery-critical task promoted (todo→ready) ranks FIRST in the next refill (AC2 promote-time semantics)", (t) => {
@@ -962,11 +980,12 @@ test("DELIVERY-CRITICAL — end-to-end: a delivery-critical task promoted (todo�
   assert.match(raw, /^status:\s*ready$/m, "status landed on disk");
   assert.match(raw, /delivery-critical/, "the label co-occurs with ready in the frontmatter");
 
-  // The next refill picks the delivery-critical task first (moved from OUTSIDE the window INTO rank 0).
+  // The next refill: the promoted delivery-critical task enters the set; recommended stays de-ordered
+  // (AC56) while ranking records the strict forward movement (outside → rank 0, AC36).
   const after = run();
-  assert.deepEqual(after.recommended, ["ac36-e2e", "ac36-aaa"], "the promoted delivery-critical task ranks first");
-  const afterRank = after.recommended.indexOf("ac36-e2e");
-  assert.equal(afterRank, 0, "strict forward movement: outside (before) → rank 0 (after)");
+  assert.deepEqual(after.recommended, ["ac36-aaa", "ac36-e2e"], "recommended is de-ordered (lexicographic) — the promoted DC task is not first in the dispatch array");
+  const afterRank = after.ranking.find((e) => e.id === "ac36-e2e").rank;
+  assert.equal(afterRank, 0, "strict forward movement in the ranking: outside (before) → rank 0 (after)");
 });
 
 test("DELIVERY-CRITICAL — negative control: a post-dispatch label is NOT recorded as AC36 triggered; the in-flight DC task surfaces in delivery_critical_in_flight (AC2/AC3)", (t) => {
@@ -1023,31 +1042,35 @@ test("DELIVERY-CRITICAL — pure: a delivery-critical in-flight task is excluded
   // Negative control: NO in-flight DC task ⇒ the field is empty.
   const r2 = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 3 });
   assert.deepEqual(r2.delivery_critical_in_flight, [], "no in-flight DC task ⇒ empty");
-  assert.deepEqual(r2.recommended, ["ac36-e2e", "ac36-aaa"], "without in-flight exclusion the DC task ranks first (the axis works)");
+  assert.deepEqual(r2.recommended, ["ac36-aaa", "ac36-e2e"], "recommended is de-ordered (lexicographic) — the dispatch array does NOT encode the DC axis");
+  assert.equal(r2.ranking[0].id, "ac36-e2e", "in the ranking the DC task ranks first (the axis works — AC36 diagnostic)");
 });
 
 // ── RANKING EXPOSURE (tasks/gap-ac36-recommended-exposes-sort-key AC2) ───────────────────────────────
-// The `recommended` STRING array is unchanged (backward compat — every consumer above reads ids).
-// The parallel `ranking` array exposes each recommended id's sort axes ({id, deliveryCritical,
-// suiteBlocking, rank}) so AC36 判据②'s "strict forward movement + negative control" is mechanically
-// assertable from the JSON alone — the exact gap this task closes (recommended was a pure string
-// array exposing NO sort field; 判据② could only be eyeballed).
+// The `recommended` STRING array is the dispatch-facing set — since AC56 (去锚) it is de-ordered
+// (lexicographic) + annotated; every consumer above reads ids, never a priority order. The parallel
+// `ranking` array exposes each recommended id's sort axes ({id, deliveryCritical, suiteBlocking,
+// rank}) in PRIORITY order so AC36 判据②'s "strict forward movement + negative control" is
+// mechanically assertable from the JSON alone — the exact gap AC36 closed (recommended was a pure
+// string array exposing NO sort field; 判据② could only be eyeballed). rank = position within the
+// priority-ordered ranking, NOT the de-ordered recommended array's position.
 
-test("RANKING — parallel to recommended, carries {id, deliveryCritical, suiteBlocking, rank} for every recommended id (AC2)", (t) => {
+test("RANKING — the priority-ordered diagnostic carries {id, deliveryCritical, suiteBlocking, rank} for every recommended id (AC2 + AC56)", (t) => {
   const root = makeWorkspace("ranking-expose");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   writeTask(root, "ac36-a", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/a.ts (new)"]) });
   writeTask(root, "ac36-b", { status: "ready", labels: ["gap", "delivery-critical"], body: dispatchableBody(["- code/b.ts (new)"]) });
 
   const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 3 });
-  assert.deepEqual(r.recommended, ["ac36-b", "ac36-a"], "string recommended is unchanged");
+  assert.deepEqual(r.recommended, ["ac36-a", "ac36-b"], "recommended is de-ordered (lexicographic) — the DC task is not first in the dispatch array (AC56)");
+  assert.ok(/order meaningless/.test(r.recommended_order), "the de-ordered output is explicitly annotated");
   assert.ok(Array.isArray(r.ranking), "--json exposes the ranking array");
-  assert.equal(r.ranking.length, r.recommended.length, "ranking is parallel to recommended");
-  assert.deepEqual(r.ranking.map((e) => e.id), r.recommended, "ranking order === recommended order");
+  assert.equal(r.ranking.length, r.recommended.length, "ranking holds one entry per recommended id");
+  assert.deepEqual(r.ranking.map((e) => e.id), ["ac36-b", "ac36-a"], "ranking is PRIORITY-ordered (DC first) — the AC36 diagnostic, distinct from the de-ordered recommended");
   const b = r.ranking.find((e) => e.id === "ac36-b");
   assert.equal(b.deliveryCritical, true, "deliveryCritical axis exposed for the labeled task");
   assert.equal(b.suiteBlocking, false);
-  assert.equal(b.rank, 0, "rank = position within recommended");
+  assert.equal(b.rank, 0, "rank = position within the priority-ordered ranking");
   const a = r.ranking.find((e) => e.id === "ac36-a");
   assert.equal(a.deliveryCritical, false, "unlabeled task exposes deliveryCritical=false");
   assert.equal(a.rank, 1);
@@ -1063,10 +1086,10 @@ test("RANKING — a suite-blocker's ranking entry carries suiteBlocking:true (bl
 
   const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 2 });
   assert.equal(r.suite_blocking.window_active, true);
-  assert.deepEqual(r.recommended, ["ac36-watchdog", "ac36-critical"], "blocking_suite above delivery_critical");
+  assert.deepEqual(r.recommended, ["ac36-critical", "ac36-watchdog"], "recommended is de-ordered (lexicographic) — the dispatch array does NOT encode blocking_suite > delivery_critical (AC56)");
   const wd = r.ranking.find((e) => e.id === "ac36-watchdog");
   assert.equal(wd.suiteBlocking, true, "suiteBlocking axis exposed for the suite-blocker");
-  assert.equal(wd.rank, 0, "suite-blocker ranks first");
+  assert.equal(wd.rank, 0, "suite-blocker ranks first in the ranking (blocking_suite > delivery_critical — the AC36 diagnostic)");
   const crit = r.ranking.find((e) => e.id === "ac36-critical");
   assert.equal(crit.deliveryCritical, true);
   assert.equal(crit.suiteBlocking, false);
@@ -1727,10 +1750,14 @@ test("CLIQUE-LANDED — AC1/AC2: a landed-but-not-flipped task's touches leave t
   // AC1/stuck-work parity: the landed-but-not-code-complete task stays a candidate and is recommended —
   // it is NOT deferred; only its touches leave the clique (gap-ready-pool-worklanded-traps-stuck-work).
   assert.ok(r.recommended.includes("gap-overlap"), "AC1: the landed stuck-work task stays dispatchable (only its touches are clique-exempt)");
-  // The real task ranks BEFORE the landed stuck-work task (landed touches never displace real work).
-  assert.ok(
-    r.recommended.indexOf("gap-p1") < r.recommended.indexOf("gap-overlap"),
-    "the genuinely-dispatchable task is recommended before the landed stuck-work task",
+  // AC56 去序: `recommended` is de-ordered (lexicographic) — the batch's internal "real work first,
+  // landed re-appended after" priority is no longer an OUTPUT property. The AC1/AC2 guarantee (real
+  // work NOT crowded out of the SET — landed touches never displace real work) is the membership
+  // assertion above; the dispatch array itself must not encode a priority order.
+  assert.deepEqual(
+    r.recommended,
+    ["gap-overlap", "gap-p1"],
+    "recommended is de-ordered (lexicographic: overlap < p1) — the dispatch array no longer encodes the landed-vs-real priority (AC56)",
   );
 });
 
