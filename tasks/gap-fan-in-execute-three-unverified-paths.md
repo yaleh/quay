@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-execute-three-unverified-paths
 title: fan-in-execute.js 三条未测承重点——code_delta 正则 / --agent-id 自找 head -1 / flip sed 静默不替换（manager 11:0xZ 报，实调已证「唯一验证=实调」）
-status: todo
+status: ready
 labels:
   - gap
   - mechanism

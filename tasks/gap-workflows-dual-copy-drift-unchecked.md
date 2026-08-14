@@ -1,7 +1,7 @@
 ---
 id: gap-workflows-dual-copy-drift-unchecked
 title: .claude/workflows/ 与 plugin/workflows/ 双副本漂移未检——三文件两处存在无 drift check（manager 11:0xZ 报）
-status: todo
+status: ready
 labels:
   - gap
   - mechanism

@@ -1,7 +1,7 @@
 ---
 id: gap-c24-4-5-7-no-landing
 title: AC76 判据5 的 C24-4/5/7 无落点——在飞维度退役的三条找不到任何载体（manager 11:1xZ 报）
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
