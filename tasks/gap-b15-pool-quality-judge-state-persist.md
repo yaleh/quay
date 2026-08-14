@@ -1,7 +1,7 @@
 ---
 id: gap-b15-pool-quality-judge-state-persist
 title: B15 pool-quality-judge 完成态不持久化——读端在、写端缺，触发器恒 fire
-status: ready
+status: done
 labels:
   - gap
   - mechanism
