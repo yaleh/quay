@@ -1,35 +1,30 @@
 // @test-group engine
-// precommit-guard.test.mjs — the mechanical gate of
-// gap-precommit-guard-running-round-rejects-assertion-surface-commits.
+// precommit-guard.test.mjs — the mechanical gate of precommit-guard.ts (AC51 断言面拆分 ①:
+// DOC-CLASS checks at commit time; AC64 retired ②).
 //
-// The defect (2026-08-12, three independent observations): the "no commits during a
-// round" convention is not held — ① the convention has no artifact (round 60 broken
-// 26s after agreeing, outer 47023142); ② even post-hoc it is hard to distinguish; ③ the
-// participants are incomplete (inner is never in the agreement — round 63 it committed
-// 4 task-body updates at 30-40s intervals inside the round window, nobody told it a
-// round was running). ①② can be mitigated by "being more careful"; ③ is structurally
-// impossible to solve by care. The guard must cover writers OUTSIDE the agreed list —
-// hence a SHARED pre-commit hook (--install-hook wires <git-dir>/hooks/pre-commit),
-// not a commit wrapper each writer must remember to call.
+// The guard has ONE surviving responsibility (AC64, gap-ac64-precommit-guard-clause2-retire):
+//   ① runs the DOC-CLASS checks (AC51 断言面拆分 — doc consistency checks moved OUT of the full
+//      suite into the pre-commit moment: `bash scripts/test.sh --static-checks-doc`, seconds-level
+//      feedback instead of an 8-minute round, and editing docs no longer makes a running round red).
+// ② rejecting "a suite round is running AND the commit touches assertion-surface files" was RETIRED
+//    under AC64: the danger it protected disappeared with AC42 (per-task suites run in their own
+//    worktree reading worktree file copies, so edits to the shared checkout's develop cannot affect
+//    a running worktree suite). Retired body + three 立条教训 → archive#R27; the negative control
+//    (a running round no longer blocks a commit) lives in
+//    plugin/test/precommit-guard-retire-negative-control.test.mjs.
 //
-// Coverage map (task ACs):
-//   AC1 — state=running AND staged files touch the assertion surface ⇒ reject (exit 1) + clear message
-//   AC2 — fail-loud: state file missing / state field null ⇒ reject (never a plausible-looking value)
-//   AC3 — covers ALL writers structurally: --install-hook wires the shared hook; the hook shim
-//         invokes the guard; --uninstall-hook removes it (a shared hook covers outer/manager/inner
-//         and anyone else — the participant list is not maintainable, the hook is)
-//   AC4 — assertion surface aggregates from the A0b③ judged-object registry (NOT a hand-maintained
-//         whitelist); missing/empty registry ⇒ fall back to the NARROWED surface tasks/** +
-//         plugin/loop/** + scripts/test.sh @static-object aggregate (outer ruling B — the all-tracked
-//         fallback was measured unusable at 4113/4316; the @static-object aggregate mechanically
-//         covers the tick-core judgment objects, the 12a6b18b manager-accident class)
-//   AC5 — negative controls: round 63 shape (inner commits a TASK file while running ⇒ blocked) and
-//         round 60 shape (commit 26s after start ⇒ blocked, state=running regardless of elapsed);
-//         terminal state (green/red) ⇒ allowed even when touching the assertion surface
-//   AC6 — --allow-dirty-round (CLI and QUAY_ALLOW_DIRTY_ROUND=1 env) explicitly overrides
+// Coverage map:
+//   AC51/① — a failing doc check rejects the commit at pre-commit (reason=doc-check-failed, output
+//            carried); a passing doc check allows; the rejection is NOT bypassable by any override
+//            (there is no round-window override anymore — the doc gate is unconditional).
+//   Hook mechanics — --install-hook wires the SHARED pre-commit (and pre-merge-commit) hook;
+//            --uninstall-hook removes it; unrelated hooks are never clobbered.
+//   AC63 — ff-only merge fires ZERO guard hooks (the AC62 fan-in convention): the doc check has no
+//            hook trigger on the ff path, so the A6 无锁段 step 3's explicit
+//            `bash scripts/test.sh --static-checks-doc` is required.
 //
 // Run: scripts/test.sh plugin/test/precommit-guard.test.mjs
-// Scoped: scripts/test.sh --for-task gap-precommit-guard-running-round-rejects-assertion-surface-commits
+// Scoped: scripts/test.sh --for-task gap-ac64-precommit-guard-clause2-retire
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -66,15 +61,6 @@ function makeGitRepo() {
   return root;
 }
 
-function writeState(root, state) {
-  fs.writeFileSync(path.join(root, ".quay", "full-suite-state.json"), JSON.stringify(state), "utf8");
-}
-
-function writeRegistry(root, patterns) {
-  const reg = { version: 1, generatedBy: "fixture", patterns };
-  fs.writeFileSync(path.join(root, "plugin", "scripts", "judged-object-registry.json"), JSON.stringify(reg), "utf8");
-}
-
 function stage(root, rel, content = "new\n") {
   const abs = path.join(root, rel);
   fs.mkdirSync(path.dirname(abs), { recursive: true });
@@ -91,136 +77,96 @@ function cleanup(root) {
   try { fs.rmSync(root, { recursive: true, force: true }); } catch (_) { /* best-effort */ }
 }
 
-const RUNNING_STATE = {
-  state: "running",
-  runner: "inner",
-  startedAt: "2026-08-12T21:00:00.000Z",
-  laneCount: 4,
-  scope: "worktree",
-  runId: "fixture-run-63",
-  pid: 12345,
-  finishedAt: null,
-  durationMs: null,
-};
+// ── ① doc checks (AC51 断言面拆分): the doc-class checks run at the pre-commit moment ────────────────
 
-// ── AC1: running + assertion-surface touched ⇒ reject ────────────────────────────────────────────────
-
-test("AC1 — running round + staged task file (assertion surface) ⇒ reject exit 1 with clear message", () => {
+// A quay-shaped fixture: scripts/test.sh with a run_doc_checks() that declares a doc-class checker
+// (`@static-class doc` + `@static-object orchestration/manager-tick-core.md CLAUDE.md`) and shells
+// to plugin/scripts/fake-doc-check.sh (exit 0 = doc checks pass, exit 1 = a doc check fails).
+function makeQuayFixture(docExit = 0) {
   const root = makeGitRepo();
-  try {
-    writeState(root, RUNNING_STATE);
-    writeRegistry(root, ["tasks/**", "packages/**"]);
-    stage(root, "tasks/new.md");
-    const res = runGuard(root);
-    assert.equal(res.status, 1, `expected reject, got ${res.status}: ${res.stderr}`);
-    const out = JSON.parse(res.stdout);
-    assert.equal(out.verdict, "reject");
-    assert.equal(out.reason, "running-round-assertion-surface");
-    assert.ok(out.message.includes("fixture-run-63"), "message names the run");
-    assert.ok(out.message.includes("startedAt"), "message names startedAt");
-    assert.deepEqual(out.touchedAssertion, ["tasks/new.md"]);
-    assert.ok(out.message.includes("预检清单"), "message carries the preflight checklist");
-  } finally {
-    cleanup(root);
-  }
-});
+  const scriptsDir = path.join(root, "scripts");
+  fs.mkdirSync(scriptsDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(scriptsDir, "test.sh"),
+    [
+      "#!/usr/bin/env bash",
+      "set -euo pipefail",
+      'repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"',
+      "run_doc_checks() {",
+      "  echo '== doc-class fixture =='",
+      "  # @static-class doc",
+      "  # @static-object orchestration/manager-tick-core.md CLAUDE.md",
+      '  bash "${repo_root}/plugin/scripts/fake-doc-check.sh" "${repo_root}"',
+      "}",
+      'if [ "${1:-}" = "--static-checks-doc" ]; then',
+      "  run_doc_checks",
+      "  exit 0",
+      "fi",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  const pkgDir = path.join(root, "plugin", "scripts");
+  fs.mkdirSync(pkgDir, { recursive: true });
+  fs.writeFileSync(path.join(pkgDir, "fake-doc-check.sh"), `#!/usr/bin/env bash\nexit ${docExit}\n`, "utf8");
+  return root;
+}
 
-test("AC1b — running round + staged NON-assertion-surface file ⇒ allow (registry narrows)", () => {
-  const root = makeGitRepo();
+test("① — a failing doc check rejects the commit at pre-commit (reason doc-check-failed, output carried)", () => {
+  const root = makeQuayFixture(1); // fake-doc-check exits 1 → doc check fails
   try {
-    writeState(root, RUNNING_STATE);
-    writeRegistry(root, ["tasks/**", "packages/**"]);
     stage(root, "README.md", "changed\n");
     const res = runGuard(root);
-    assert.equal(res.status, 0, `expected allow, got ${res.status}: ${res.stdout}`);
-    const out = JSON.parse(res.stdout);
-    assert.equal(out.verdict, "allow");
-    assert.equal(out.reason, "no-assertion-surface-touched");
-  } finally {
-    cleanup(root);
-  }
-});
-
-// ── AC1-early-red: state=red + finishedAt=null (runner still collecting) ⇒ reject ─────────────────────
-
-test("AC1-early-red — state=red finishedAt=null (early-red, runner still collecting) ⇒ reject assertion-surface commit", () => {
-  const root = makeGitRepo();
-  try {
-    writeState(root, { ...RUNNING_STATE, state: "red", reason: "failed" });
-    writeRegistry(root, ["tasks/**", "packages/**"]);
-    stage(root, "tasks/early-red.md");
-    const res = runGuard(root);
-    assert.equal(res.status, 1, `expected reject (early-red), got ${res.status}: ${res.stderr}`);
+    assert.equal(res.status, 1, `doc-check failure must reject, got ${res.status}: ${res.stdout}`);
     const out = JSON.parse(res.stdout);
     assert.equal(out.verdict, "reject");
-    assert.equal(out.reason, "running-round-assertion-surface");
-    assert.equal(out.isRunning, true, "--json isRunning must be true for early-red");
-    assert.equal(out.finishedAt, null, "--json finishedAt must be null for early-red");
-    // 拒绝记录 append 到 .quay/precommit-guard-rejections.jsonl（runtime-state，观测记录）。
-    const ledgerPath = path.join(root, ".quay", "precommit-guard-rejections.jsonl");
-    assert.ok(fs.existsSync(ledgerPath), "rejection ledger must be written");
-    const line = JSON.parse(fs.readFileSync(ledgerPath, "utf8").trim().split("\n").pop());
-    assert.equal(line.verdict, "reject");
-    assert.deepEqual(line.files, ["tasks/early-red.md"]);
-    assert.equal(line.runId, "fixture-run-63");
-    assert.ok(line.at, "ledger line carries ISO timestamp");
+    assert.equal(out.reason, "doc-check-failed");
+    assert.ok(out.docCheckOutput && out.docCheckOutput.length > 0, "doc-check-failed must carry the checker output");
+    assert.ok(out.message.includes("文档类检查失败"), "message names the doc-check failure");
   } finally {
     cleanup(root);
   }
 });
 
-test("AC1-terminal — state=red finishedAt set (round finished) ⇒ allow", () => {
-  const root = makeGitRepo();
+test("① — a passing doc check allows the commit (verdict allow, reason doc-checks-pass)", () => {
+  const root = makeQuayFixture(0); // doc checks pass
   try {
-    writeState(root, { ...RUNNING_STATE, state: "red", reason: "failed", finishedAt: 1786572515000, durationMs: 500000 });
-    writeRegistry(root, ["tasks/**", "packages/**"]);
-    stage(root, "tasks/terminal.md");
+    stage(root, "tasks/new.md", "body\n");
     const res = runGuard(root);
-    assert.equal(res.status, 0, `expected allow (terminal), got ${res.status}: ${res.stdout}`);
+    assert.equal(res.status, 0, `doc-checks-pass must allow, got ${res.status}: ${res.stdout}`);
     const out = JSON.parse(res.stdout);
     assert.equal(out.verdict, "allow");
-    assert.equal(out.isRunning, false, "--json isRunning must be false for terminal round");
-    assert.ok(out.finishedAt != null, "--json finishedAt must be present for terminal round");
+    assert.equal(out.reason, "doc-checks-pass");
   } finally {
     cleanup(root);
   }
 });
 
-// ── AC2: fail-loud on missing/null state file ─────────────────────────────────────────────────────────
-
-test("AC2 — state file MISSING ⇒ reject (fail-loud, never a plausible-looking value)", () => {
-  const root = makeGitRepo();
+test("① — a doc edit whose checker FAILS is blocked (content error, not a round-risk thing)", () => {
+  const root = makeQuayFixture(1);
   try {
-    writeRegistry(root, ["tasks/**"]);
+    stage(root, "orchestration/manager-tick-core.md", "bad doc\n");
+    const res = runGuard(root);
+    assert.equal(res.status, 1, `a doc edit with a failing doc check must reject, got ${res.status}`);
+    assert.equal(JSON.parse(res.stdout).reason, "doc-check-failed");
+  } finally {
+    cleanup(root);
+  }
+});
+
+test("① — a workspace WITHOUT the doc-check split (plain test.sh) is not rejected (portability)", () => {
+  const root = makeGitRepo(); // no scripts/test.sh at all → runDocChecks returns ok
+  try {
     stage(root, "README.md", "changed\n");
     const res = runGuard(root);
-    assert.equal(res.status, 1, `expected reject on missing state, got ${res.status}`);
-    const out = JSON.parse(res.stdout);
-    assert.equal(out.verdict, "reject");
-    assert.equal(out.reason, "state-file-missing");
-    assert.ok(out.message.includes("fail-loud"), "message says fail-loud");
+    assert.equal(res.status, 0, `non-quay workspace must allow, got ${res.status}: ${res.stdout}`);
+    assert.equal(JSON.parse(res.stdout).reason, "doc-checks-pass");
   } finally {
     cleanup(root);
   }
 });
 
-test("AC2b — state field NULL ⇒ reject (fail-loud)", () => {
-  const root = makeGitRepo();
-  try {
-    writeState(root, { ...RUNNING_STATE, state: null });
-    writeRegistry(root, ["tasks/**"]);
-    stage(root, "tasks/new.md");
-    const res = runGuard(root);
-    assert.equal(res.status, 1, `expected reject on null state, got ${res.status}`);
-    const out = JSON.parse(res.stdout);
-    assert.equal(out.verdict, "reject");
-    assert.equal(out.reason, "state-null");
-  } finally {
-    cleanup(root);
-  }
-});
-
-// ── AC3: shared hook covers ALL writers ───────────────────────────────────────────────────────────────
+// ── Hook mechanics (AC3): the SHARED pre-commit hook covers ALL writers ──────────────────────────────
 
 test("AC3 — --install-hook wires the SHARED pre-commit hook; --uninstall-hook removes it", () => {
   const root = makeGitRepo();
@@ -257,341 +203,11 @@ test("AC3b — install-hook refuses to overwrite an unrelated pre-existing hook"
   }
 });
 
-// ── AC4: assertion surface from A0b③ registry; fallback narrowed (outer ruling B) ────────────────────
-
-test("AC4 — EMPTY/missing registry ⇒ fallback to tasks/** + plugin/loop/** (empirical trouble classes)", () => {
-  const root = makeGitRepo();
-  try {
-    writeState(root, RUNNING_STATE);
-    // no registry file at all → fallback-narrowed (tasks/** + plugin/loop/**; no scripts/test.sh here)
-    stage(root, "tasks/fallback.md"); // round 60/63/67 class — in tasks/**
-    const res = runGuard(root);
-    assert.equal(res.status, 1, `expected reject via narrowed fallback, got ${res.status}`);
-    const out = JSON.parse(res.stdout);
-    assert.equal(out.registryMode, "fallback-narrowed");
-    assert.deepEqual(out.touchedAssertion, ["tasks/fallback.md"]);
-  } finally {
-    cleanup(root);
-  }
-});
-
-test("AC4b — empty patterns array in the registry ⇒ same narrowed fallback (fail-closed)", () => {
-  const root = makeGitRepo();
-  try {
-    writeState(root, RUNNING_STATE);
-    writeRegistry(root, []);
-    stage(root, "tasks/fallback.md");
-    const res = runGuard(root);
-    assert.equal(res.status, 1, `expected reject via empty-registry narrowed fallback, got ${res.status}`);
-    assert.equal(JSON.parse(res.stdout).registryMode, "fallback-narrowed");
-  } finally {
-    cleanup(root);
-  }
-});
-
-test("AC4c — narrowed fallback ALSO covers plugin/loop/** (cp-accident surface)", () => {
-  const root = makeGitRepo();
-  try {
-    writeState(root, RUNNING_STATE);
-    stage(root, "plugin/loop/fast-mode-tick-core.md");
-    const res = runGuard(root);
-    assert.equal(res.status, 1, `plugin/loop/** must be blocked by fallback, got ${res.status}`);
-    assert.equal(JSON.parse(res.stdout).registryMode, "fallback-narrowed");
-    assert.deepEqual(JSON.parse(res.stdout).touchedAssertion, ["plugin/loop/fast-mode-tick-core.md"]);
-  } finally {
-    cleanup(root);
-  }
-});
-
-test("AC4d — narrowed fallback does NOT cover arbitrary tracked files (README.md allowed)", () => {
-  const root = makeGitRepo();
-  try {
-    writeState(root, RUNNING_STATE);
-    stage(root, "README.md", "changed\n"); // outside tasks/** + plugin/loop/** + static-object → allowed
-    const res = runGuard(root);
-    assert.equal(res.status, 0, `README.md must be allowed by narrowed fallback, got ${res.status}`);
-    assert.equal(JSON.parse(res.stdout).registryMode, "fallback-narrowed");
-  } finally {
-    cleanup(root);
-  }
-});
-
-test("AC4e — fallback aggregates scripts/test.sh @static-object annotations (tick-core class)", () => {
-  const root = makeGitRepo();
-  try {
-    writeState(root, RUNNING_STATE);
-    // A scripts/test.sh declaring orchestration/manager-tick-core.md as a checker judgment object —
-    // 12a6b18b (manager cp accident) class. The @static-object aggregation must pull it into the
-    // fallback even with no registry present.
-    const testShDir = path.join(root, "scripts");
-    fs.mkdirSync(testShDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(testShDir, "test.sh"),
-      [
-        "#!/usr/bin/env bash",
-        "run_static_checks() {",
-        '  run_checker "tick-core-static-check" node foo.ts --root "$root"',
-        "  # @static-object orchestration/manager-tick-core.md orchestration/orchestrator-tick-core.md",
-        "}",
-        "",
-      ].join("\n"),
-      "utf8",
-    );
-    stage(root, "orchestration/manager-tick-core.md");
-    const res = runGuard(root);
-    assert.equal(res.status, 1, `@static-object-derived file must be blocked, got ${res.status}`);
-    const out = JSON.parse(res.stdout);
-    assert.equal(out.registryMode, "fallback-narrowed");
-    assert.deepEqual(out.touchedAssertion, ["orchestration/manager-tick-core.md"]);
-  } finally {
-    cleanup(root);
-  }
-});
-
-// ── AC5: negative controls (round 60 / round 63 shapes; terminal states) ─────────────────────────────
-
-test("AC5 — round 63 shape: inner commits a TASK file while running ⇒ blocked", () => {
-  const root = makeGitRepo();
-  try {
-    writeState(root, RUNNING_STATE); // runId fixture-run-63 — inner committing task bodies
-    writeRegistry(root, ["tasks/**"]);
-    stage(root, "tasks/gap-some-body-update.md");
-    const res = runGuard(root);
-    assert.equal(res.status, 1, "round 63 shape must be blocked");
-    assert.equal(JSON.parse(res.stdout).reason, "running-round-assertion-surface");
-  } finally {
-    cleanup(root);
-  }
-});
-
-test("AC5b — round 60 shape: commit 26s after round start ⇒ blocked (state=running is the signal)", () => {
-  const root = makeGitRepo();
-  try {
-    const started = new Date(Date.now() - 26_000).toISOString();
-    writeState(root, { ...RUNNING_STATE, startedAt: started });
-    writeRegistry(root, ["tasks/**"]);
-    stage(root, "tasks/new.md");
-    const res = runGuard(root);
-    assert.equal(res.status, 1, "round 60 shape (26s after start) must be blocked");
-    assert.equal(JSON.parse(res.stdout).reason, "running-round-assertion-surface");
-  } finally {
-    cleanup(root);
-  }
-});
-
-test("AC5c — TERMINAL state (green) ⇒ allowed even when touching the assertion surface", () => {
-  const root = makeGitRepo();
-  try {
-    writeState(root, { ...RUNNING_STATE, state: "green", finishedAt: Date.now() / 1000 });
-    writeRegistry(root, ["tasks/**"]);
-    stage(root, "tasks/new.md");
-    const res = runGuard(root);
-    assert.equal(res.status, 0, `terminal state must allow, got ${res.status}`);
-    assert.equal(JSON.parse(res.stdout).reason, "not-running");
-  } finally {
-    cleanup(root);
-  }
-});
-
-// ── AC6: --allow-dirty-round explicit override ────────────────────────────────────────────────────────
-
-test("AC6 — --allow-dirty-round CLI flag explicitly overrides the rejection", () => {
-  const root = makeGitRepo();
-  try {
-    writeState(root, RUNNING_STATE);
-    writeRegistry(root, ["tasks/**"]);
-    stage(root, "tasks/new.md");
-    const res = runGuard(root, ["--allow-dirty-round"]);
-    assert.equal(res.status, 0, `override must allow, got ${res.status}`);
-    const out = JSON.parse(res.stdout);
-    assert.equal(out.verdict, "allow");
-    assert.equal(out.reason, "allow-dirty-round-override");
-    assert.equal(out.override, true);
-  } finally {
-    cleanup(root);
-  }
-});
-
-test("AC6b — QUAY_ALLOW_DIRTY_ROUND=1 env var overrides (the pre-commit-hook path, which gets no args)", () => {
-  const root = makeGitRepo();
-  try {
-    writeState(root, RUNNING_STATE);
-    writeRegistry(root, ["tasks/**"]);
-    stage(root, "tasks/new.md");
-    const res = runGuard(root, [], { QUAY_ALLOW_DIRTY_ROUND: "1" });
-    assert.equal(res.status, 0, `env override must allow, got ${res.status}`);
-    assert.equal(JSON.parse(res.stdout).reason, "allow-dirty-round-override");
-  } finally {
-    cleanup(root);
-  }
-});
-
-test("AC6c — override also applies to the fail-loud missing-state case (explicit, recorded)", () => {
-  const root = makeGitRepo();
-  try {
-    // no state file at all — fail-loud would reject; the EXPLICIT override records responsibility.
-    writeRegistry(root, ["tasks/**"]);
-    stage(root, "tasks/new.md");
-    const res = runGuard(root, ["--allow-dirty-round"]);
-    assert.equal(res.status, 0, `override must allow even with missing state, got ${res.status}`);
-    assert.equal(JSON.parse(res.stdout).reason, "allow-dirty-round-override");
-  } finally {
-    cleanup(root);
-  }
-});
-
-// ── AC51 断言面拆分 (gap-ac51-assertion-surface-split): doc checks at pre-commit + doc exclusion ──────
-
-// A quay-shaped fixture: scripts/test.sh with a run_doc_checks() that declares a doc-class checker
-// (`@static-class doc` + `@static-object orchestration/manager-tick-core.md CLAUDE.md`) and shells
-// to plugin/scripts/fake-doc-check.sh (exit 0 = doc checks pass, exit 1 = a doc check fails).
-function makeQuayFixture(docExit = 0) {
-  const root = makeGitRepo();
-  const scriptsDir = path.join(root, "scripts");
-  fs.mkdirSync(scriptsDir, { recursive: true });
-  fs.writeFileSync(
-    path.join(scriptsDir, "test.sh"),
-    [
-      "#!/usr/bin/env bash",
-      "set -euo pipefail",
-      'repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"',
-      "run_doc_checks() {",
-      "  echo '== doc-class fixture =='",
-      "  # @static-class doc",
-      "  # @static-object orchestration/manager-tick-core.md CLAUDE.md",
-      '  bash "${repo_root}/plugin/scripts/fake-doc-check.sh" "${repo_root}"',
-      "}",
-      'if [ "${1:-}" = "--static-checks-doc" ]; then',
-      "  run_doc_checks",
-      "  exit 0",
-      "fi",
-      "",
-    ].join("\n"),
-    "utf8",
-  );
-  const pkgDir = path.join(root, "plugin", "scripts");
-  fs.mkdirSync(pkgDir, { recursive: true });
-  fs.writeFileSync(path.join(pkgDir, "fake-doc-check.sh"), `#!/usr/bin/env bash\nexit ${docExit}\n`, "utf8");
-  return root;
-}
-
-test("AC51 — a DOC file (doc-class object) staged during a running round is ALLOWED (doc excluded from assertion surface)", () => {
-  const root = makeQuayFixture(0); // doc checks pass
-  try {
-    writeState(root, RUNNING_STATE);
-    // registry lists the doc file, but docClassFiles() (run_doc_checks @static-class doc) excludes it.
-    writeRegistry(root, ["orchestration/manager-tick-core.md", "tasks/**"]);
-    stage(root, "orchestration/manager-tick-core.md", "changed\n");
-    const res = runGuard(root);
-    assert.equal(res.status, 0, `doc edit must be allowed during running round, got ${res.status}: ${res.stdout}`);
-    const out = JSON.parse(res.stdout);
-    assert.equal(out.verdict, "allow");
-    assert.equal(out.reason, "no-assertion-surface-touched");
-    assert.deepEqual(out.touchedAssertion, []);
-  } finally {
-    cleanup(root);
-  }
-});
-
-test("AC51 — a TASK file staged during a running round is STILL rejected (tasks/** stays in the surface)", () => {
-  const root = makeQuayFixture(0);
-  try {
-    writeState(root, RUNNING_STATE);
-    writeRegistry(root, ["orchestration/manager-tick-core.md", "tasks/**"]);
-    stage(root, "tasks/gap-some-body-update.md");
-    const res = runGuard(root);
-    assert.equal(res.status, 1, `task edit must stay blocked, got ${res.status}`);
-    assert.equal(JSON.parse(res.stdout).reason, "running-round-assertion-surface");
-  } finally {
-    cleanup(root);
-  }
-});
-
-test("AC51 — a failing doc check rejects the commit at pre-commit (reason doc-check-failed, output carried)", () => {
-  const root = makeQuayFixture(1); // fake-doc-check exits 1 → doc check fails
-  try {
-    writeState(root, RUNNING_STATE);
-    writeRegistry(root, ["tasks/**"]);
-    stage(root, "README.md", "changed\n");
-    const res = runGuard(root);
-    assert.equal(res.status, 1, `doc-check failure must reject, got ${res.status}: ${res.stdout}`);
-    const out = JSON.parse(res.stdout);
-    assert.equal(out.verdict, "reject");
-    assert.equal(out.reason, "doc-check-failed");
-    assert.ok(out.docCheckOutput && out.docCheckOutput.length > 0, "doc-check-failed must carry the checker output");
-    assert.ok(out.message.includes("文档类检查失败"), "message names the doc-check failure");
-  } finally {
-    cleanup(root);
-  }
-});
-
-test("AC51 — --allow-dirty-round does NOT override a doc-check failure (content error, not round risk)", () => {
-  const root = makeQuayFixture(1);
-  try {
-    writeState(root, RUNNING_STATE);
-    writeRegistry(root, ["tasks/**"]);
-    stage(root, "README.md", "changed\n");
-    const res = runGuard(root, ["--allow-dirty-round"]);
-    assert.equal(res.status, 1, `override must NOT bypass doc-check failure, got ${res.status}`);
-    assert.equal(JSON.parse(res.stdout).reason, "doc-check-failed");
-  } finally {
-    cleanup(root);
-  }
-});
-
-test("AC51 — a doc file whose checker FAILS is blocked even though it would be excluded from the round surface", () => {
-  // Negative control pairing: the doc is outside the running-round assertion surface (so the round
-  // gate alone would allow it), but the pre-commit doc check itself must still gate the commit.
-  const root = makeQuayFixture(1);
-  try {
-    writeState(root, RUNNING_STATE);
-    writeRegistry(root, ["orchestration/manager-tick-core.md"]);
-    stage(root, "orchestration/manager-tick-core.md", "bad doc\n");
-    const res = runGuard(root);
-    assert.equal(res.status, 1, `a doc edit with a failing doc check must reject, got ${res.status}`);
-    assert.equal(JSON.parse(res.stdout).reason, "doc-check-failed");
-  } finally {
-    cleanup(root);
-  }
-});
-
-// ── gap-precommit-guard-merge-bypass: pre-merge-commit hook (merge-path coverage) ───────────────
-// The defect (inner 2026-08-13): `git merge --no-ff` does NOT fire pre-commit (git runs pre-commit
-// only from git-commit(1)) — assertion-surface files landed via a merge bypassed the guard entirely
-// (empirical: 2 commits → 2 fires / 1 merge → 0 fires; round 123's mid-round idempotency fan-in merge
-// was a live sample). The fix: --install-hook ALSO wires pre-merge-commit, which git-merge runs for a
-// `--no-ff` merge after carrying it out and before creating the merge commit; at that moment the index
-// holds the merged result so the guard's stagedFiles() read IS the merge's incoming file set. A blocked
-// pre-merge-commit leaves MERGE_HEAD + staged changes (git does NOT auto-abort) — the caller must
-// `git merge --abort` (the A6 fan-in merge-failure path already does).
-
-// A custom pre-merge-commit hook in the scratch repo that invokes the REAL guard with --merge
-// (the --install-hook shim cannot be used end-to-end in a scratch repo — it resolves the guard via
-// $ROOT/plugin/scripts/precommit-guard.ts, which does not exist in a scratch repo).
-function writeMergeHook(root, guardPath) {
-  const hooksDir = path.join(root, ".git", "hooks");
-  fs.mkdirSync(hooksDir, { recursive: true });
-  const shim = [
-    "#!/usr/bin/env bash",
-    `exec node --no-warnings --experimental-strip-types "${guardPath}" --root "${root}" --merge`,
-    "",
-  ].join("\n");
-  fs.writeFileSync(path.join(hooksDir, "pre-merge-commit"), shim, { mode: 0o755 });
-}
-
-// A scratch repo with a task branch `task/feature` that ADDS an assertion-surface file
-// (tasks/pollution.md — the round-123 shape: assertion-surface landed via a merge).
-function makeMergeFixture() {
-  const root = makeGitRepo();
-  const task = run("git", ["checkout", "-q", "-b", "task/feature"], root);
-  assert.equal(task.status, 0, "create task branch");
-  stage(root, "tasks/pollution.md", "round 123 pollution\n");
-  const commit = run("git", ["commit", "-q", "-m", "add task pollution"], root);
-  assert.equal(commit.status, 0, `task commit: ${commit.stderr}`);
-  const back = run("git", ["checkout", "-q", "main"], root);
-  assert.equal(back.status, 0, "back to main");
-  return root;
-}
+// ── gap-precommit-guard-merge-bypass: pre-merge-commit hook (merge-path coverage for ①) ──────────
+// `git merge --no-ff` does NOT fire pre-commit (git runs pre-commit only from git-commit(1)); the
+// pre-merge-commit hook (also wired by --install-hook) runs the same doc-check gate on the --no-ff
+// merge write path. (AC64 kept this for ① — the guard is doc-check-only but still needs merge-path
+// coverage so a --no-ff merge cannot bypass the doc gate.)
 
 test("gap-merge-bypass AC1 — --install-hook wires BOTH pre-commit and pre-merge-commit; --uninstall-hook removes both", () => {
   const root = makeGitRepo();
@@ -625,67 +241,6 @@ test("gap-merge-bypass AC1b — install refuses to overwrite an unrelated pre-ex
     const install = run("node", ["--no-warnings", "--experimental-strip-types", GUARD, "--root", root, "--install-hook"], root);
     assert.equal(install.status, 2, "refuses to clobber an unrelated pre-merge-commit hook");
     assert.ok(fs.readFileSync(mergeHook, "utf8").includes("unrelated merge hook"), "original hook untouched");
-  } finally {
-    cleanup(root);
-  }
-});
-
-test("gap-merge-bypass AC2 — round-123 shape: git merge --no-ff landing assertion-surface during a running round is BLOCKED (no merge commit)", () => {
-  const root = makeMergeFixture();
-  try {
-    writeState(root, RUNNING_STATE);
-    writeRegistry(root, ["tasks/**"]);
-    writeMergeHook(root, GUARD);
-    const merge = run("git", ["merge", "--no-ff", "task/feature", "-m", "merge: fan-in task/feature (runId: fm-x)"], root);
-    assert.notEqual(merge.status, 0, `merge must be blocked, got ${merge.status}: ${merge.stdout} ${merge.stderr}`);
-    // Hook stdout/stderr both surface on the merge's stderr — the guard's rejection message is there.
-    assert.ok((merge.stdout + merge.stderr).includes("触及断言面"), "block message names the assertion surface");
-    // git leaves MERGE_HEAD + staged changes (does NOT auto-abort) — the caller must abort.
-    const mergeHead = run("git", ["rev-parse", "-q", "--verify", "MERGE_HEAD"], root);
-    assert.equal(mergeHead.status, 0, "MERGE_HEAD present (merge left in progress for the caller to abort)");
-    const log = run("git", ["log", "--oneline", "-1"], root).stdout.trim();
-    assert.ok(!log.includes("fan-in"), "no merge commit created");
-    // The rejection ledger records kind=merge.
-    const ledgerPath = path.join(root, ".quay", "precommit-guard-rejections.jsonl");
-    assert.ok(fs.existsSync(ledgerPath), "rejection ledger written");
-    const line = JSON.parse(fs.readFileSync(ledgerPath, "utf8").trim().split("\n").pop());
-    assert.equal(line.kind, "merge", "ledger records kind=merge");
-    assert.deepEqual(line.files, ["tasks/pollution.md"]);
-  } finally {
-    cleanup(root);
-  }
-});
-
-test("gap-merge-bypass AC2b — same merge with NO running round (terminal green) is ALLOWED", () => {
-  const root = makeMergeFixture();
-  try {
-    writeState(root, { ...RUNNING_STATE, state: "green", finishedAt: Date.now() / 1000 });
-    writeRegistry(root, ["tasks/**"]);
-    writeMergeHook(root, GUARD);
-    const merge = run("git", ["merge", "--no-ff", "task/feature", "-m", "merge: fan-in task/feature (runId: fm-x)"], root);
-    assert.equal(merge.status, 0, `merge must succeed when no round is running, got ${merge.status}: ${merge.stdout} ${merge.stderr}`);
-    const log = run("git", ["log", "--oneline", "-2"], root).stdout;
-    assert.ok(log.includes("fan-in"), "merge commit created");
-  } finally {
-    cleanup(root);
-  }
-});
-
-test("gap-merge-bypass AC3 — --merge flag: running + assertion-surface staged ⇒ reject with merge-context message and kind=merge ledger", () => {
-  const root = makeGitRepo();
-  try {
-    writeState(root, RUNNING_STATE);
-    writeRegistry(root, ["tasks/**"]);
-    stage(root, "tasks/new.md");
-    const res = runGuard(root, ["--merge"]);
-    assert.equal(res.status, 1, `expected reject, got ${res.status}`);
-    const out = JSON.parse(res.stdout);
-    assert.equal(out.verdict, "reject");
-    assert.equal(out.reason, "running-round-assertion-surface");
-    assert.equal(out.merge, true, "--json carries merge context");
-    assert.ok(out.message.includes("本次merge"), "message says merge (not 提交)");
-    const line = JSON.parse(fs.readFileSync(path.join(root, ".quay", "precommit-guard-rejections.jsonl"), "utf8").trim().split("\n").pop());
-    assert.equal(line.kind, "merge");
   } finally {
     cleanup(root);
   }
@@ -751,8 +306,9 @@ test("AC63 — ff-only merge fires ZERO guard hooks (no pre-commit, no pre-merge
 // ── Real-repo smoke: the guard runs against THIS repo without crashing ───────────────────────────────
 
 test("real-repo smoke — guard runs against the real repo (no crash, readable verdict)", () => {
-  // The real repo's .quay/full-suite-state.json is whatever the live loop wrote; we only assert
-  // the guard executes without an internal error (exit not 2) and reports a JSON verdict.
+  // AC64: ② retired ⇒ no state-file read, no fail-loud. The guard only runs the doc checks (①);
+  // against the real repo the doc checks pass ⇒ verdict allow, exit 0. We assert no internal error
+  // (exit not 2) and a JSON verdict.
   const res = runGuard(REPO_ROOT);
   assert.notEqual(res.status, 2, `guard must not crash on the real repo: ${res.stderr} ${res.stdout}`);
   const out = JSON.parse(res.stdout);

@@ -48,26 +48,32 @@ AC42 之后    per-task suite 跑在各自 worktree，读的是 worktree 的文�
 
 ## Acceptance Criteria
 
-- [ ] AC1 precommit-guard ②（拒绝轮 running 且触及断言面）退役迁出（按 AC58 落点映射形态）。
-- [ ] AC2 ① 保留不动（doc 检查，AC51 断言面拆分 7 个 doc checker）。
-- [ ] AC3 立条教训留档：merge 锁必须是共享机制（钩子/文件锁），不得是「各层记得调的约定」——三条支撑（无产物/难区分/名单不可维护）写进 archive。
-- [ ] AC4 退役理由写准：危险随 AC42 结构性消失（per-task suite 读 worktree 副本），非「参照系失效」。
-- [ ] AC5 既有测试全绿；`--for-task` scoped 门绿。
+- [x] AC1 precommit-guard ②（拒绝轮 running 且触及断言面）退役迁出（按 AC58 落点映射形态）。
+- [x] AC2 ① 保留不动（doc 检查，AC51 断言面拆分 7 个 doc checker）。
+- [x] AC3 立条教训留档：merge 锁必须是共享机制（钩子/文件锁），不得是「各层记得调的约定」——三条支撑（无产物/难区分/名单不可维护）写进 archive。
+- [x] AC4 退役理由写准：危险随 AC42 结构性消失（per-task suite 读 worktree 副本），非「参照系失效」。
+- [x] AC5 既有测试全绿；`--for-task` scoped 门绿。
 
 ## Definition of Done
 
-- [ ] ② 迁出完成：高频文件 0 正文、archive 全有家、落点映射贴删除提交（AC58 形态）。
-- [ ] ① 保留不动（doc 检查仍由 pre-commit 触发 + AC62 第 3 步显式调用）。
-- [ ] 三条立条教训（无产物/难区分/名单不可维护）随迁出留档 archive——merge 锁必须共享机制不得是约定。
-- [ ] 既有测试全绿、`--for-task` scoped 门绿。
+- [x] ② 迁出完成：高频文件 0 正文、archive 全有家、落点映射贴删除提交（AC58 形态）。
+- [x] ① 保留不动（doc 检查仍由 pre-commit 触发 + AC62 第 3 步显式调用）。
+- [x] 三条立条教训（无产物/难区分/名单不可维护）随迁出留档 archive——merge 锁必须共享机制不得是约定。
+- [x] 既有测试全绿、`--for-task` scoped 门绿。
 
 ## Touches
 
 - plugin/scripts/precommit-guard.ts（② 退役 + ① 保留——按 AC58 落点映射形态）
-- orchestration/archive/（退役条款落点，含三条教训）
-- （负控制 fixture）
+- orchestration/archive/AC58-retired-clauses.md（退役条款落点，含三条教训）
+- plugin/test/precommit-guard-retire-negative-control.test.mjs（负控制 fixture——AC64 ② 退役负控制：曾拒的 running-round 写入形状现在放行）
 - tasks/gap-ac64-precommit-guard-clause2-retire.md（自身）
 
 ## Evidence
 
-（落地后回填）
+- ② 退役迁出（AC58 落点映射形态）：precommit-guard.ts 的 ② 正文（三条立条教训实证）删除，高频文件仅留指针；落点 `orchestration/archive/AC58-retired-clauses.md#R27`，注册进 `retired-clause-check.ts` REGISTRY（id R27，source `plugin/scripts/precommit-guard.ts`，markers = 约定无产物（C17）/ 参与方不完整且名单无人维护 / ③结构上不可能靠小心解决）。`retired-clause-check` 全量 GREEN：`OK — 27 entries migrated (41 unique tokens: all gone from source, all present in archive)`。
+- ① 保留：precommit-guard 现为 doc-check-only —— `judge()` 只跑 `runDocChecks()`（`bash scripts/test.sh --static-checks-doc`），失败拒（reason=doc-check-failed）、通过放行；pre-commit + pre-merge-commit 钩子仍由 `--install-hook` 写入（AC63：AC62 协议第 3 步显式跑 doc 检查，ff-only 无钩子触发）。`resolveAssertionSurface` 保留供 full-suite-runner.ts mid-round-edit 检测复用。
+- 三条立条教训 + 退役理由（AC42 结构性消失，非「参照系失效」）写进 archive#R27。
+- 负控制 fixture：`plugin/test/precommit-guard-retire-negative-control.test.mjs` —— 曾拒的 running-round + tasks/** 提交现在放行（verdict allow）、缺失 state 放行（fail-loud 退役）、不再写拒绝台账、① 文档检查失败仍拒。
+- 既有测试全绿 + scoped 门绿：`scripts/test.sh --for-task gap-ac64-precommit-guard-clause2-retire --allow-thin` exit 0，15 tests pass（precommit-guard.test.mjs 10 + 负控制 5），static checks（retired-clause-check / ac61-staleness-disposition / concurrency-literal / landing-target / delivery-inventory / capability-catalog / test-framework-policy / test-isolation 等）全 PASS。
+- ts-typecheck gate：`fan-in-ts-typecheck-gate.ts` ADMITTED（无 new/moved .ts）。
+- 落地 commit SHA：`__COMMIT_SHA__`

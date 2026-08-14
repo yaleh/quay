@@ -133,6 +133,12 @@ export const REGISTRY: Entry[] = [
   { id: "R26", source: "orchestration/fast-mode-tick-core.md", markers: [
       "只用 `integration-batch-merge.sh --reconcile`",
     ] },
+  // precommit-guard ② (AC64, gap-ac64-precommit-guard-clause2-retire)
+  { id: "R27", source: "plugin/scripts/precommit-guard.ts", markers: [
+      "约定无产物（C17）——round 60 约定后 26s 即破",
+      "参与方不完整且名单无人维护",
+      "③结构上不可能靠小心解决",
+    ] },
 ];
 
 // ── normalization: strip backticks + line-comment prefixes (# / //), collapse whitespace ──
