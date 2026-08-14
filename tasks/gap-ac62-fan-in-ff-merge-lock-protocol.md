@@ -41,6 +41,8 @@ A 从 develop@X 建树 → merge develop@X → 跑绿；期间 B 先 ff 上去 d
 
 **本任务不新建过程纪律型 AC**：负控制沿用 AC49。
 
+> **⚠️ parent/children 修正留档（2026-08-14 05:1xZ，PARENT-DONE-IFF-CHILDREN 红后）**：AC63/64/67（及经 AC67 的 AC72）曾误设为 AC62 的 `children`——**它们是独立的 phase-goal AC，顺序关系是 `depends_on` 不是组成**（AC62 是 `schema: execution` 非 `role: compound`；AC62 的 AC1–AC5 全勾、交付物已落 develop、fan-in 完成 ⇒ 若真是它的部分 AC62 不可能 done）。已改为 `parent: null` + `children: []` + 保留 `depends_on`（8725c710）。**判别式（manager，写进任务体）**：**若一个 parent 有可能在某个 child 未完成时就 done，那这个关系就不是 parent/child，是 depends_on。** **CHILD-LINK-SYMMETRY 只查双向对称、不查该不该是 parent/child ⇒ 会加固建错的语义关系而不是报出它**——建 parent/child 前用判别式当 checklist。
+
 ## Plan
 
 1. 读 SPEC §1-§4 + 现有 A6（fast-mode-tick-core.md:25）+ suite 锁（full-suite.lock.0/.1）。
