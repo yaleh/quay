@@ -5,7 +5,7 @@ status: todo
 labels:
   - gap
   - mechanism
-parent: gap-ac67-fan-in-executor-to-task-subagent
+parent: null
 children: []
 extra:
   schema: execution

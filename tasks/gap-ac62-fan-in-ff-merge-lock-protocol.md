@@ -6,10 +6,7 @@ labels:
   - gap
   - mechanism
 parent: null
-children:
-  - gap-ac63-ff-explicit-doc-check-before-merge
-  - gap-ac64-precommit-guard-clause2-retire
-  - gap-ac67-fan-in-executor-to-task-subagent
+children: []
 extra:
   schema: execution
 depends_on: []
