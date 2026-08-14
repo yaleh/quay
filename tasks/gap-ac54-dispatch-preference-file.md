@@ -1,7 +1,7 @@
 ---
 id: gap-ac54-dispatch-preference-file
 title: AC54 正本——倾向文件存在且三段齐全（默认/覆盖/维护者），git 可见可取假
-status: ready
+status: done
 labels:
   - gap
   - mechanism
