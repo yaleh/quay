@@ -27,12 +27,17 @@ depends_on: []
 ② --agent-id 自找 head -1（约 :88）  workflow 生成 prompt 让 subagent 自找 subagents/agent-<自己>.jsonl，
                               代码取 head -1 ⇒ 若目录里多个 agent 文件（并行子代理），head -1 可能取错
                               文件 ⇒ --agent-id 填成别的 subagent 的 id。未测多文件情形。
+                              ⭐ 已实证（2026-08-14 11:18）：DIR-127 与 DIR-128 并行时，DIR-127 的 ff
+                              lock-event agentId=a017ce6b7fab53eb9（DIR-128 的实现子代理，提 DIR-127 41 次
+                              且更新）——自找启发式（ls -t 最近 + grep 任务名）在并发下误选。
+                              修法方向：限定 subagents/workflows/<本次 run>/agent-<自己>.jsonl（workflow-run
+                              子代理真实落点）或用自身 transcript uuid——精确而非启发式（4b）。
 ③ flip sed 静默不替换（约 :83）  flip done 用 sed 替换 status: ready→done；若行形不匹配（如 status 带
                               前导空格/大小写/非首行），sed 静默不改 ⇒ flip 没发生而记录说 done。未测失败路径。
 ```
 
 **判据1**：三条承重点各补一个真实路径测试/验证——① code_delta 正则对 doc/代码/测试三种 delta 的分类断言；② 自找逻辑在【多个 agent-*.jsonl】时的确定性（或显式 fail-closed 拒多义）；③ flip sed 的失败路径（行形不匹配 ⇒ 报错而非静默绿）。
-**判据2（能取假）**：每条用【现状未测】为真样本——① 一个该判「全量」的代码面 delta 现判成「doc」类 ⇒ 红；② 目录含两个 agent 文件时 head -1 取错 ⇒ 红；③ 行形不匹配时 sed 静默改 0 行而 exit 0 ⇒ 红。
+**判据2（能取假）**：每条用【现状未测】为真样本——① 一个该判「全量」的代码面 delta 现判成「doc」类 ⇒ 红；② 目录含两个 agent 文件时 head -1 取错 ⇒ 红（**真样本 = DIR-127/DIR-128 并发实证**：DIR-127 ff agentId=a017ce6b7fab53eb9 取错为 DIR-128 实现者——回放该场景必须红）；③ 行形不匹配时 sed 静默改 0 行而 exit 0 ⇒ 红。
 **判据3**：测试走真实调用路径（不是 fixture-only 的纯函数 mock）——同日实证「fixture-only 假绿」。
 
 **不覆盖**：不改 fan-in 协议本身（AC62/AC75 已定）；不引入新机制。
