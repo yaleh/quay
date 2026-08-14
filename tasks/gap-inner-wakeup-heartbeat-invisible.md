@@ -137,3 +137,11 @@ resume    心跳产物 / 外层检查器 / 接线分步提交，任一步完成�
 reviewer: outer
 at: 2026-08-10
 changed: manager 定位 inner 自锁（ScheduleWakeup 15.3h 未重排 + 0 在飞⇒无 notification⇒不重评估）——outer 复核确认；按 C17 立案：兜底心跳无产物、断了不可见。实现归 inner
+
+## 观察项（硬规则 12，2026-08-14 追加——写-查时差伪影家族，发生率 2/日）
+
+**checker 的「新鲜重算」用检查时刻的 ready-pool，不用写时刻的** ⇒ 任务在心跳写与 checker 查之间被晋升 ⇒ 伪报「有货不派」（`inner-round-ended-with-dispatchable-work` 的 DEAD 实为假违约）。
+
+**实证（inner 2026-08-14 15:5xZ 判定，证据链自洽）**：15:48:19Z 写心跳时 in-flight={AC80, session-liveness, flip-no-ac, monitor-mount}，当时 slot-refill 判 should_refill=false（无可派）；引发 checker 重算「可派」的是 gap-retire-registration（15:55:24Z 才立案晋 ready，晚于轮末 7 分钟）⇒ 15:48 轮末无可派为真，end-invariant 判对了写时状态，checker 用检查时刻池误报。与今早 A13 DEAD 同族（时差伪影）。
+
+**处置**：伪报任务已由 B9 派发消化，无遗留；**不新建机制**（发生率 2/日，够观察项级）。未来若再造检查器，「用写时刻的 ready-pool 快照而非检查时刻」是候选修法——出现第 3 次时按硬规则 12 升级为任务。
