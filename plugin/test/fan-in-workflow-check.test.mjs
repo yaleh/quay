@@ -222,6 +222,37 @@ test("PURE extractWorkflowCalls — parses a real Workflow(fan-in-execute) tool_
   assert.deepEqual(workflowTaskIds(calls), ["gap-ac78-fan-in-workflow-a6-check"]);
 });
 
+test("PURE extractWorkflowCalls — real transcript shape: input.args is an OBJECT, not a JSON string (2026-08-14 bc1a438b)", (t) => {
+  // The Workflow tool_use in the real top-level session transcript serializes args as an object.
+  // Before the object-form handling, the call's taskId was lost ⇒ the fan-in task was falsely RED.
+  const line = JSON.stringify({
+    message: {
+      role: "assistant",
+      content: [
+        {
+          type: "tool_use",
+          id: "call_00_ET_pToCUb6DNqtyaYvQrE642009",
+          name: "Workflow",
+          input: {
+            scriptPath: "/home/yale/work/quay/.claude/workflows/fan-in-execute.js",
+            args: {
+              task: "gap-touches-one-entry-one-path",
+              worktree: "/home/yale/work/quay-worktrees/gap-touches-one-entry-one-path",
+              root: "/home/yale/work/quay",
+              runId: "fm-gap-touches-one-entry-one-path-1786703029102-zih4yp",
+              mergeTarget: "develop",
+            },
+          },
+        },
+      ],
+    },
+  });
+  const calls = extractWorkflowCalls(line);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].taskId, "gap-touches-one-entry-one-path");
+  assert.deepEqual(workflowTaskIds(calls), ["gap-touches-one-entry-one-path"]);
+});
+
 test("PURE extractWorkflowCalls — ignores other workflows (manager-tick-core) and non-Workflow blocks", (t) => {
   const lines = [
     JSON.stringify({ message: { content: [{ type: "tool_use", name: "Workflow", input: { scriptPath: "/quay/.claude/workflows/manager-tick-core.js", args: "{}" } }] } }),
@@ -544,6 +575,17 @@ test("fs scanWorkflowTaskIds — ignores OTHER workflows (manager-tick-core) eve
 test("resolveBoundaryEpoch — explicit ISO ts is honored", (t) => {
   const epoch = resolveBoundaryEpoch(REPO_ROOT, "2026-08-14T00:00:00Z");
   assert.equal(epoch, Math.floor(Date.parse("2026-08-14T00:00:00Z") / 1000));
+});
+
+test("resolveBoundaryEpoch — git path anchors on the ADDITION commit, not the latest edit (diff-filter=A)", (t) => {
+  // Regression (outer 2026-08-14): `git log -1` returned the LATEST commit touching
+  // .claude/workflows/fan-in-execute.js (5e54bb37 @ 10:48:53Z = 1786704533), so the boundary
+  // shifted forward whenever the file was edited, pushing touches-one-entry (ff 10:47:47)
+  // out of scope ⇒ NOT-EVALUATED. --diff-filter=A pins the boundary to the commit that ADDED
+  // the file (d4d225cd @ 09:20:07Z = 1786699207), stable across later edits.
+  const epoch = resolveBoundaryEpoch(REPO_ROOT); // no landedTs, default ref HEAD
+  assert.equal(epoch, BOUNDARY_EPOCH); // 1786699207 = d4d225cd @ 09:20:07Z (the addition)
+  assert.notEqual(epoch, 1786704533); // 5e54bb37 @ 10:48:53Z (a LATER edit, old buggy boundary)
 });
 
 // ── CLI integration (hermetic fixture) ───────────────────────────────────────────────────────────────

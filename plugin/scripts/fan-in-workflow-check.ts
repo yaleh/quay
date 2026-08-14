@@ -236,8 +236,10 @@ export function resolveDispatchEpochs(
 
 /**
  * Extract Workflow tool_use calls from one session jsonl text. Looks for blocks whose
- * `name === "Workflow"` and whose `input.scriptPath` basename === WORKFLOW_BASENAME, then parses the
- * `input.args` JSON string and reads its `task` field. Returns the parsed call objects.
+ * `name === "Workflow"` and whose `input.scriptPath` basename === WORKFLOW_BASENAME, then reads its
+ * `task` field. `input.args` may be a JSON string (older transcripts) OR an already-parsed object
+ * (real top-level session transcripts — verified 2026-08-14: the Workflow tool_use in
+ * bc1a438b-…jsonl carries args as an object); both shapes are honored. Returns the parsed calls.
  */
 export interface WorkflowCall {
   scriptPath: string;
@@ -258,13 +260,17 @@ export function extractWorkflowCalls(jsonlText: string): WorkflowCall[] {
       if (block.type !== "tool_use" || block.name !== "Workflow") continue;
       const scriptPath = String(block.input?.scriptPath ?? "");
       if (path.basename(scriptPath) !== WORKFLOW_BASENAME) continue;
-      const argsJson = typeof block.input?.args === "string" ? block.input.args : null;
+      const rawArgs = block.input?.args;
+      const argsJson = typeof rawArgs === "string" ? rawArgs : null;
       let taskId: string | undefined;
-      if (argsJson) {
+      if (typeof rawArgs === "string") {
         try {
-          const parsed = JSON.parse(argsJson);
+          const parsed = JSON.parse(rawArgs);
           taskId = typeof parsed?.task === "string" ? parsed.task : undefined;
         } catch { /* unparseable args — keep taskId undefined */ }
+      } else if (rawArgs && typeof rawArgs === "object") {
+        // Real transcript shape (2026-08-14): args is already an object, not a JSON string.
+        taskId = typeof rawArgs.task === "string" ? rawArgs.task : undefined;
       }
       calls.push({ scriptPath, argsJson: argsJson ?? undefined, taskId });
     }
@@ -490,7 +496,7 @@ export function resolveBoundaryEpoch(root: string, landedTs?: string, landedRef?
   const ref = landedRef ?? "HEAD";
   const file = ".claude/workflows/" + WORKFLOW_BASENAME;
   try {
-    const iso = execFileSync("git", ["-C", root, "log", "-1", "--format=%cI", ref, "--", file], {
+    const iso = execFileSync("git", ["-C", root, "log", "--diff-filter=A", "-1", "--format=%cI", ref, "--", file], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
     }).trim();
