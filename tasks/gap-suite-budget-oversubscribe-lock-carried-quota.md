@@ -1,7 +1,7 @@
 ---
 id: gap-suite-budget-oversubscribe-lock-carried-quota
 title: nproc−in_use 预算公式固有超用——两并发 suite 各拿满预算（16+8=24>16，load 29.23）；修法=锁携带 lane 配额（认领制）
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
