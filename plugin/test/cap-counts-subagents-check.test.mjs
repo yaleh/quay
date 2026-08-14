@@ -14,8 +14,11 @@
 //   判据4 — 报数带计法: a worktree count presented as THE in-flight count WITHOUT a subagent label
 //           ⇒ RED; a line carrying the subagent label (even with a worktree count) ⇒ GREEN; the real
 //           07:2xZ line (carries both labels) ⇒ GREEN.
-//   判据5 — 09:1xZ 推广: C24-1/2/3 in-flight derivations carry the RETIRED (AC76 C24-N …) explicit
-//           annotation (the REAL committed files must be GREEN; a stripped copy ⇒ RED).
+//   判据5 — 09:1xZ 推广: EVERY C24 in-flight derivation (C24-1..7) has a landing — C24-1/2/3 carry the
+//           RETIRED (AC76 C24-N …) explicit annotation (the REAL committed files must be GREEN; a
+//           stripped copy ⇒ RED); C24-4/5/7 have explicit 已并入 dispositions; C24-6 外层独占 —
+//           judgeC24Coverage replays the PRE-FIX table (only 1/2/3) RED (能取假, 缺落点) and the real
+//           table GREEN (判据3 coverage).
 //   判据6 — /live 真样本: AC66/AC72/AC73 three DONE tasks claimed running by telemetry must replay
 //           RED (done 与 ready 在遥测里不可区分); live claims matching non-done statuses ⇒ GREEN.
 //   判据7 — NOT-EVALUATED (硬规则 3b) is reported distinctly, never folded into green: an absent
@@ -38,8 +41,10 @@ import {
   judgeWorktreeVsSubagent,
   judgeReportLine,
   judgeC24Retirement,
+  judgeC24Coverage,
   judgeLiveVsTaskStatus,
   C24_RETIREMENT,
+  C24_EXPECTED,
   LIVE_MISREPORT_FIXTURE,
 } from "../scripts/cap-counts-subagents-check.ts";
 
@@ -158,20 +163,20 @@ test("判据4: a line with no in-flight count report is NOT-EVALUATED", () => {
 
 // ── 判据5: C24 in-flight derivations retired to explicit annotation ─────────────────────────────────
 
-test("判据5: the REAL committed C24 files carry the RETIRED (AC76 C24-N) annotations", () => {
-  const files = C24_RETIREMENT.map((c) => ({
+test("判据5: the REAL committed C24 annotation files carry the RETIRED (AC76 C24-N) annotations", () => {
+  const files = C24_RETIREMENT.filter((c) => c.disposition === "annotation").map((c) => ({
     key: c.key,
     file: c.file,
     text: fs.readFileSync(path.join(REPO_ROOT, c.file), "utf8"),
   }));
   const v = judgeC24Retirement(files);
   assert.equal(v.evaluated, true);
-  assert.equal(v.ok, true, `all C24 files must be annotated: ${v.reason}`);
+  assert.equal(v.ok, true, `all C24 annotation files must be annotated: ${v.reason}`);
   assert.deepEqual(v.violations, []);
 });
 
-test("判据5: a C24 file stripped of its RETIRED annotation is RED", () => {
-  const files = C24_RETIREMENT.map((c) => ({
+test("判据5: a C24 annotation file stripped of its RETIRED annotation is RED", () => {
+  const files = C24_RETIREMENT.filter((c) => c.disposition === "annotation").map((c) => ({
     key: c.key,
     file: c.file,
     text: c.key === "slot-refill"
@@ -183,9 +188,48 @@ test("判据5: a C24 file stripped of its RETIRED annotation is RED", () => {
   assert.equal(v.ok, false, `must be RED when an annotation is missing: ${v.reason}`);
 });
 
-test("判据5: no C24 file present is NOT-EVALUATED", () => {
+test("判据5: no C24 annotation file present is NOT-EVALUATED", () => {
   const v = judgeC24Retirement([{ key: "slot-refill", file: "x", text: null }]);
   assert.equal(v.evaluated, false);
+});
+
+// ── 判据5 coverage: EVERY C24 item has a landing (判据2 能取假 / 判据3) ──────────────────────────────
+
+test("判据5: judgeC24Coverage — the PRE-FIX table (only C24-1/2/3, no 4/5/7) replays RED (能取假)", () => {
+  const preFix = C24_RETIREMENT.filter((c) => c.disposition === "annotation"); // the AC76 落盘态
+  const v = judgeC24Coverage(preFix);
+  assert.equal(v.evaluated, true);
+  assert.equal(v.ok, false, `must be RED when C24-4/5/7 landings are missing: ${v.reason}`);
+  assert.match(v.reason, /C24-4/);
+  assert.match(v.reason, /C24-5/);
+  assert.match(v.reason, /C24-7/);
+});
+
+test("判据5: judgeC24Coverage — the REAL fixed table covers C24-1..7 with explicit landings (GREEN)", () => {
+  const v = judgeC24Coverage(C24_RETIREMENT);
+  assert.equal(v.evaluated, true);
+  assert.equal(v.ok, true, `every C24 number must have a landing: ${v.reason}`);
+  assert.deepEqual(v.missing, []);
+  const ns = new Set(C24_RETIREMENT.map((c) => Number(c.n)));
+  assert.deepEqual([...C24_EXPECTED].filter((n) => !ns.has(n)), [], "table must cover every expected C24 number");
+});
+
+test("判据5: judgeC24Coverage — a merged entry with an empty mergedInto is RED", () => {
+  const broken = C24_RETIREMENT.map((c) => ({ ...c }));
+  broken[broken.findIndex((c) => c.n === 4)].mergedInto = "";
+  const v = judgeC24Coverage(broken);
+  assert.equal(v.evaluated, true);
+  assert.equal(v.ok, false, `must be RED when a merged landing is empty: ${v.reason}`);
+  assert.match(v.reason, /C24-4/);
+});
+
+test("判据5: judgeC24Coverage — an unknown disposition is RED", () => {
+  const broken = C24_RETIREMENT.map((c) => ({ ...c }));
+  broken[broken.findIndex((c) => c.n === 7)].disposition = "bogus";
+  const v = judgeC24Coverage(broken);
+  assert.equal(v.evaluated, true);
+  assert.equal(v.ok, false, `must be RED on an unknown disposition: ${v.reason}`);
+  assert.match(v.reason, /unknown disposition/);
 });
 
 // ── 判据6: /live done-misreported-as-running replay ─────────────────────────────────────────────────
@@ -252,4 +296,5 @@ test("CLI: --json output carries the 判据4 labeled method + 判据5/判据1 ve
   const checks = new Map(out.checks.map((c) => [c.check, c]));
   assert.equal(checks.get("judge1-slot-refill-canonical").ok, true);
   assert.equal(checks.get("judge5-c24-retirement").ok, true);
+  assert.equal(checks.get("judge5-c24-landing-coverage").ok, true);
 });
