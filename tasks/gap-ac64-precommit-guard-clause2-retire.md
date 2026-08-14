@@ -1,7 +1,7 @@
 ---
 id: gap-ac64-precommit-guard-clause2-retire
 title: AC64 precommit-guard ② 退役（危险随 AC42 消失）+ ① 保留；立条教训留档
-status: ready
+status: done
 labels:
   - gap
   - mechanism
