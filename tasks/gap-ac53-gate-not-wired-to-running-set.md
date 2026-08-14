@@ -1,7 +1,7 @@
 ---
 id: gap-ac53-gate-not-wired-to-running-set
 title: AC53 闸未接 running 集——双消费者拆分只落生产侧，闸读宽集使 awaiting-retry 永久占 dispatchable_disjoint ⇒ 心跳结构上无出口（manager 13:4xZ 报）
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
