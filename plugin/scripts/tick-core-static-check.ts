@@ -31,6 +31,12 @@
 //          prohibition (a prohibition paragraph WITHOUT the 收窄/单一写入者/共享树 narrowing that
 //          scopes it to the shared tree, permitting infrastructure work in one's own worktree)
 //          contradicts the core and reddens. A narrowed prohibition passes.
+//   AC8  — AC60 通则③ three-layer coverage-denominator dead-exclusion: a line in any core carrying
+//          a dead/frozen-prerequisite marker (前提已死/来源已冻结/已冻结/前提已失效/前提已被人的裁定移除)
+//          MUST also carry the canonical exclusion marker "不计入覆盖率分母" on the SAME line. A dead
+//          item still counted in the denominator is the exact perverse incentive AC60 kills (honest
+//          annotation would DROP coverage ⇒ incentivize non-annotation). Manager's 6 deducts (A7/
+//          A12a/A14/B2c/乙/丁), outer's B4, inner's C7 all carry the marker; a regression REDdens.
 //
 // SCAN SURFACE (a ## Contract invariant — the set must stay byte-identical across runs; a missing
 // scan target is an ERROR, never a silent green):
@@ -410,6 +416,46 @@ export function scanProhibition(text: string, rel: string): ProhibitionViolation
   return out;
 }
 
+// ── AC8: three-layer coverage-denominator dead-exclusion (gap-ac60-coverage-denominator-excludes-dead-prereqs) ──
+// AC60 (通则③) 判据: 三层的覆盖率记法一致——"前提已死/来源已冻结"的条目不计入分母。The perverse
+// incentive being killed (C17 家族): an honest dead-annotation would otherwise make coverage DROP
+// (the dead item stays in the denominator and counts uncovered), incentivizing non-annotation.
+// The canonical denominator-exclusion marker is a single string, so "三层记法一致" is enforced by
+// construction — every line in every core that declares a dead/frozen prerequisite MUST carry the
+// SAME exclusion marker on the SAME line. A dead-annotated line WITHOUT the marker is a denominator
+// that still counts a dead item → RED (the negative control; fixtures in tick-core-static-check.test.mjs).
+// The marker itself (not a registry) is the declaration: to exclude a dead item, an author writes
+// "不计入覆盖率分母" on the item's line. Dead markers that do NOT imply item death (a retired
+// sub-flag inside a live composite item, e.g. inner A15 ④ `--force-integration` 已退役) are NOT in
+// DEAD_ANNOT_RE — only the AC60 判据's own family ("前提已死/来源已冻结") triggers the pairing rule.
+export const DEAD_ANNOT_RE = /前提已死|来源已冻结|已冻结|前提已失效|前提已被人的裁定移除/;
+export const DENOM_EXCLUDE_MARKER = "不计入覆盖率分母";
+
+export interface DenomViolation {
+  file: string;
+  line: number;
+  marker: string;   // which dead marker matched (for the report)
+  snippet: string;
+}
+
+/** Scan one core's text: every line carrying a dead-annotation marker must ALSO carry the
+ *  denominator-exclusion marker on the same line. A dead-annotated line without it → violation. */
+export function scanDenomViolations(text: string, rel: string): DenomViolation[] {
+  const out: DenomViolation[] = [];
+  text.split("\n").forEach((raw, i) => {
+    const m = DEAD_ANNOT_RE.exec(raw);
+    if (!m) return;
+    if (raw.includes(DENOM_EXCLUDE_MARKER)) return;
+    out.push({ file: rel, line: i + 1, marker: m[0], snippet: raw.slice(0, 80) });
+  });
+  return out;
+}
+
+/** Number of lines carrying the given substring or RegExp (per-line count, not occurrence count). */
+function countLinesWith(text: string, needle: string | RegExp): number {
+  return text.split("\n").filter((l) => (needle instanceof RegExp ? needle.test(l) : l.includes(needle))).length;
+}
+
 // ── Aggregated result ────────────────────────────────────────────────────────────────────────────────
 export interface CheckResult {
   ok: boolean;
@@ -423,6 +469,12 @@ export interface CheckResult {
   ac4: { ok: boolean; missing: PointerHit[] };
   ac5: { ok: boolean; missingMarkers: string[]; b3Found: boolean };
   ac6: { ok: boolean; precondition: boolean; violations: ProhibitionViolation[] };
+  ac8: {
+    ok: boolean;
+    violations: DenomViolation[];
+    excluded: Record<string, number>;   // per-core lines carrying DENOM_EXCLUDE_MARKER
+    dead: Record<string, number>;        // per-core lines carrying a DEAD_ANNOT_RE marker
+  };
 }
 
 function readText(root: string, rel: string): string {
@@ -498,7 +550,23 @@ export function runChecks(root: string, only?: string): CheckResult {
   }
   const ac6 = { ok: violations.length === 0, precondition, violations };
 
-  return { ok: ac3.ok && ac4.ok && ac5.ok && ac6.ok, coverage, ac3, ac4, ac5, ac6 };
+  // AC8 (gap-ac60-coverage-denominator-excludes-dead-prereqs): three-layer coverage-denominator
+  // dead-exclusion consistency. Computed under `--only ac8` or the full run; under another --only
+  // the violations array stays empty (trivially green), matching the AC4 gating pattern.
+  let denomViolations: DenomViolation[] = [];
+  const denomExcluded: Record<string, number> = {};
+  const denomDead: Record<string, number> = {};
+  if (!only || only === "ac8") {
+    for (const rel of CORES) {
+      const text = coresText.get(rel)!;
+      denomViolations.push(...scanDenomViolations(text, rel));
+      denomExcluded[rel] = countLinesWith(text, DENOM_EXCLUDE_MARKER);
+      denomDead[rel] = countLinesWith(text, DEAD_ANNOT_RE);
+    }
+  }
+  const ac8 = { ok: denomViolations.length === 0, violations: denomViolations, excluded: denomExcluded, dead: denomDead };
+
+  return { ok: ac3.ok && ac4.ok && ac5.ok && ac6.ok && ac8.ok, coverage, ac3, ac4, ac5, ac6, ac8 };
 }
 
 // ── Drift check (gap-tick-core-drift-check-not-in-suite) ─────────────────────────────────────────────
@@ -600,7 +668,7 @@ interface CliResult { code: number; json: unknown; }
 
 function usage(): CliResult {
   process.stderr.write(
-    "usage: tick-core-static-check.ts [--root <dir>] [--only <ac3|ac4|ac5|ac6>] [--check-drift] [--json]\n",
+    "usage: tick-core-static-check.ts [--root <dir>] [--only <ac3|ac4|ac5|ac6|ac8>] [--check-drift] [--json]\n",
   );
   return { code: 2, json: { error: "usage" } };
 }
@@ -618,7 +686,7 @@ export function main(argv: string[]): CliResult {
       if (root === undefined) return usage();
     } else if (a === "--only") {
       only = argv[++i];
-      if (only === undefined || !/^ac[3456]$/.test(only)) return usage();
+      if (only === undefined || !/^ac[345678]$/.test(only)) return usage();
     } else if (a === "--json") {
       json = true;
     } else if (a === "--check-drift") {
@@ -703,6 +771,14 @@ export function main(argv: string[]): CliResult {
     `tick-core-static-check: AC6 prohibition ${res.ac6.ok ? "consistent" : `FAIL (${res.ac6.violations.length} unconditional)`}\n`,
   );
   for (const v of res.ac6.violations) process.stdout.write(`  FAIL: ${v.file}:${v.line} — ${v.phrase}\n    ${v.snippet}\n`);
+  const denomLine = CORES.map((r) => {
+    const b = r.split("/").pop()!;
+    return `${b}=排除${res.ac8.excluded[r] ?? 0}/死${res.ac8.dead[r] ?? 0}`;
+  }).join(" / ");
+  process.stdout.write(
+    `tick-core-static-check: AC8 覆盖率分母排除一致 ${res.ac8.ok ? "OK" : `FAIL (${res.ac8.violations.length} dead-annotated item${res.ac8.violations.length === 1 ? "" : "s"} still in denominator)`} — ${denomLine}\n`,
+  );
+  for (const v of res.ac8.violations) process.stdout.write(`  FAIL: ${v.file}:${v.line} [${v.marker}] 死条目未标「不计入覆盖率分母」: ${v.snippet}\n`);
   if (!res.ok) process.stdout.write(`tick-core-static-check: RED — execution-core static gate violated.\n`);
   else process.stdout.write(`tick-core-static-check: PASS — execution cores are statically covered.\n`);
   return { code: res.ok ? 0 : 1, json: res };

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Mutation case for tick-core-static-check (gap-tick-core-zero-static-coverage, AC2-AC7).
-# The checker's four gates — the 2026-08-10 incidents were ALL hand-found with wc -l / grep, zero
+# The checker's five gates — the 2026-08-10 incidents were ALL hand-found with wc -l / grep, zero
 # mechanical gate:
 #   AC3 — each core's A/B/C items carry (src:N) back-references to the reason archive
 #         (AC30(a) measure = coverage, target 100%; an item without (src:N) reddens —
@@ -9,9 +9,12 @@
 #   AC5 — the B3 group numbering (甲乙丙丁戊) must not collide with the criteria numbering (①-⑤).
 #   AC6 — an UNCONDITIONAL prohibition ("外层不直接改代码", no 收窄/单一写入者/共享树) contradicting
 #         the cores' run_in_background dispatch must redden.
+#   AC8 — AC60 通则③ three-layer coverage-denominator dead-exclusion: a dead/frozen-annotated item
+#         without the "不计入覆盖率分母" marker stays in the denominator and MUST redden.
 # Fixture: a minimal 3-core + 4-prohibition-doc baseline → GREEN.
 # Inject #1: an orchestrator core item WITHOUT (src:N) → RED (AC3 coverage < 100%).
 # Restore → GREEN. Inject #2: an unconditional prohibition doc → RED (AC6). Restore → GREEN.
+# Inject #3: a dead-annotated item WITHOUT the exclusion marker → RED (AC8). Restore → GREEN.
 set -u
 name="tick-core-static-check"
 workdir="${1:?usage: $name.sh <workdir>}"
@@ -168,7 +171,41 @@ if checker_cmd; then :; else
   exit 4
 fi
 
-# INJECT #3 (gap-tick-core-drift-check-not-in-suite): the DRIFT mode. The plugin/loop/ shipped
+# INJECT #3 (AC8, gap-ac60-coverage-denominator-excludes-dead-prereqs): a dead-annotated item
+# WITHOUT the denominator-exclusion marker (前提已死 but no 不计入覆盖率分母 on the same line) → the
+# coverage denominator still counts a dead item → the checker MUST go RED (AC3 negative control).
+write orchestration/manager-tick-core.md \
+  '# manager tick — 执行核' \
+  '## A. 读数' \
+  '| A1 | 读 `.quay/manager-inbox/` | 目录非空即进决策 (src:1) |' \
+  '| A7 | **前提已死** | 不能执行 (src:1) |' \
+  '## B. 产出' \
+  '- **B3 tick-log**:本组一律写 `甲乙丙丁戊`,禁用 ①-⑤。`no-action` 需举证——甲`a`;乙`b`;丙`c`;丁`d`;戊`e` (src:1)。' \
+  '## C. 约束' \
+  '| C1 | 约束一 (src:1) |' \
+  '## D. 边界' \
+  '**可以**:写 `orchestration/`。'
+if checker_cmd; then
+  echo "STAYED-GREEN — a dead-annotated item still counted in the denominator did not redden the checker" >&2
+  exit 3
+fi
+# RESTORE #3 → GREEN.
+write orchestration/manager-tick-core.md \
+  '# manager tick — 执行核' \
+  '## A. 读数' \
+  '| A1 | 读 `.quay/manager-inbox/` | 目录非空即进决策 (src:1) |' \
+  '## B. 产出' \
+  '- **B3 tick-log**:本组一律写 `甲乙丙丁戊`,禁用 ①-⑤。`no-action` 需举证——甲`a`;乙`b`;丙`c`;丁`d`;戊`e` (src:1)。' \
+  '## C. 约束' \
+  '| C1 | 约束一 (src:1) |' \
+  '## D. 边界' \
+  '**可以**:写 `orchestration/`。'
+if checker_cmd; then :; else
+  echo "ALWAYS-RED — restored (no dead item) core still reddens the checker" >&2
+  exit 4
+fi
+
+# INJECT #4 (gap-tick-core-drift-check-not-in-suite): the DRIFT mode. The plugin/loop/ shipped
 # copies are byte-identical to orchestration/ → --check-drift GREEN baseline; a single edited
 # shipped copy MUST redden the drift gate.
 if drift_cmd; then :; else
