@@ -177,6 +177,10 @@ orchestration/inner-idle-log.jsonl
 # fan-in-ff-protocol-check.ts; never committed (same family as gate-events.jsonl).
 **/.quay/fan-in-merge-lock-events.jsonl
 **/.quay/fan-in-retries.jsonl
+# AC72 cert retire (gap-ac72-cert-mechanism-retire): the per-task suite record is runtime state in
+# the SHARED checkout (written by per-task-suite-record.ts from a task worktree, read by
+# per-task-suite-record-check.ts); never committed (same family as full-suite-state.json).
+**/.quay/per-task-suite-records.jsonl
 # gap-runtime-state-files-not-gitignored (2026-08-10): 5 runtime state files fell through the
 # per-file .gitignore (there is NO `**/.quay/*` wildcard) — last-pane.txt (pane-state-classify
 # product), suite-cgroup-evidence.txt / suite-chain-heartbeat.json / suite-health-last-run.json

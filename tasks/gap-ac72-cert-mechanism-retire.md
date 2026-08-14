@@ -65,13 +65,59 @@ per-task cert 真结果（/tmp/… 重定向 + laneCount + 失败形态）→ �
 
 ## Touches
 
-- orchestration/fast-mode-tick-core.md（inner 执行核去 cert 条款——C17 外层落盘）
-- per-task suite 记录写入（判据2）：`plugin/scripts/per-task-suite-record.ts (new)`
-- 检查器（判据3 AC57 7 轮回放红）：`plugin/scripts/per-task-suite-record-check.ts (new)`
-- 负控制 fixture：`plugin/test/per-task-suite-record-check.test.mjs (new)`
-- 共享检出可读记录位置（判据2 实现面，运行时状态 gitignored）：`.quay/per-task-suite-records.jsonl (new)`
+- orchestration/fast-mode-tick-core.md（inner 执行核去 cert 条款——C17 外层落盘；本任务只给改法建议，不编辑）
+- plugin/scripts/per-task-suite-record.ts (new)
+- plugin/scripts/per-task-suite-record-check.ts (new)
+- plugin/test/per-task-suite-record-check.test.mjs (new)
+- .quay/per-task-suite-records.jsonl (new)
+- .gitignore（新增 `.quay/per-task-suite-records.jsonl` 运行时状态 ignore）
+- plugin/scripts/capability-catalog.sh（两个新脚本入目录声明）
+- scripts/test.sh（接入 run_static_checks，@static-tier change）
+- docs/proposals/quay-product-outline.md（DELIVERY-INVENTORY 快照再生）
 - tasks/gap-ac72-cert-mechanism-retire.md（自身）
 
 ## Evidence
 
-（落地后回填）
+**判据1（AC1，退役是可判定的事件）——位置判定**：两份执行核副本（`orchestration/fast-mode-tick-core.md` + `plugin/loop/fast-mode-tick-core.md`）对 `cert` 的 grep 命中均 **0**；A6 主语已是「Fan-in 回到任务 subagent」（AC67 落地——无锁段+持锁段全在 subagent 自回合内，主线程不再为已返回任务跑 suite）；C1「inner 零全量套件自跑——只读外层 suite-state，只跑 `--for-task` 选中集」照旧。**⇒ 执行核【无 cert 条款】由位置判定成立，无需删**；C17 落点只剩一件事：A6 无锁段全量 suite 之后加一步调 `per-task-suite-record.ts` 写第三方可读记录（逐字改法建议见下「C17 建议」段）。
+
+**判据2（AC2，成功路径留痕·第三方可读）——writer 落地**：`plugin/scripts/per-task-suite-record.ts`（新增）为每次 per-task 全量 suite 追加**一条**记录（taskId/runId/state/laneCount/durationMs/failedFiles/startedAt/finishedAt）到**共享检出** `.quay/per-task-suite-records.jsonl`（gitignored 运行时状态，同 full-suite-state.json 家族）。共享检出解析 = `git rev-parse --git-common-dir` 的父目录——实测从 worktree 解析到主检出而非 fork 副本：
+```
+worktree cwd: /home/yale/work/quay-worktrees/gap-ac72-cert-mechanism-retire
+resolveSharedCheckout: /home/yale/work/quay        ← 主检出（.git 存在）
+default record file: /home/yale/work/quay/.quay/per-task-suite-records.jsonl
+```
+fail-closed（硬规则 3b）：缺任何必填字段 ⇒ exit 2、**不写**（无部分记录）；`--state-file` 从 full-suite-state.json 取默认值（显式 flag 优先），`failures[].file` 自动抽取为失败文件清单；`--record-file` 供 hermetic 测试覆盖。
+
+**判据3（AC3，能取假·真样本回放）——checker 落地**：`plugin/scripts/per-task-suite-record-check.ts`（新增）+ `plugin/test/per-task-suite-record-check.test.mjs`（负控制 fixture）。AC57 的 7 轮 cert（`orchestration/manager-loop-tick.md:1796`「跑了 7 轮 cert」；fan-in 提交 `28330e5b` 以「cert9 全量绿」收尾）作为现成真实缺席样本内嵌 `REAL_AC57_CERT_ROUNDS`（runId 取本仓真实 cert-era suite runId，含 `eac3ee98`——判据2 自身点名的「无第三方记录」样本）。回放对空记录集**必须报红**（实测）：
+```
+$ node --no-warnings --experimental-strip-types plugin/scripts/per-task-suite-record-check.ts --replay-real-samples --record-file /tmp/x.jsonl
+per-task-suite-record-check: FAIL — per-task-suite-record-violation
+  [record-shape] ok — well-formed (1 record(s))
+  [expected-suite-runs] RED — missing-record (7/7 expected per-task suite run(s) not recorded) missing=eac3ee98,11ba6f95,bcf3790d-…,1d0bac1d,32265be6,19e5a998,021c5cc0
+exit=1
+```
+全部 7 条在（taskId+runId 匹配）⇒ GREEN；部分在 ⇒ RED 列出缺的；无样本/空文件 ⇒ NOT-EVALUATED（硬规则 3b：无法评估 ≠ 合格）。`plugin/test/per-task-suite-record-check.test.mjs` **20 条全绿**（真样本回放红 + 部分缺红 + 全在绿 + malformed 形状红 + NOT-EVALUATED + writer append/fail-closed/state-file/round-trip + resolveSharedCheckout）。
+
+**判据4（AC4，顺序 + 不覆盖）**：AC62/AC67 均已 `done`（协议与执行者先落，本条才可落）；AC62 协议本体未改（`fan-in-ff-protocol-check.ts` / `fan-in-ff-merge.sh` 未动）；未引入任何新 monitor（新机制的要点就是不再需要有人盯着）。
+
+**判据5（AC5，测试绿 + scoped 门绿）**：
+```
+ts-typecheck 闸（新增 2 个 .ts）：fan-in-ts-typecheck-gate.ts → Touches cover new .ts (2); typecheck GREEN — ADMITTED (exit 0)
+scoped 门：bash scripts/test.sh --for-task gap-ac72-cert-mechanism-retire --allow-thin
+  → scoped 静态检查全绿（test-framework-policy PASS / test-isolation PASS /
+    run_checker "per-task-suite-record-check" … → OK — nothing-to-judge (NOT-EVALUATED)）
+  → 36 tests / 36 pass / 0 fail（含 capability-catalog 全绿 + per-task-suite-record-check 20 条）
+capability-catalog：unclassified=0；两个新脚本五段全声明（question/cadence/invalidation/last/matching）
+DELIVERY-INVENTORY：scripts 238→240，inventory_drift=0（verify-delivery-surface --write-inventory）
+```
+
+**接线（随本任务落地）**：`.gitignore` 新增 `**/.quay/per-task-suite-records.jsonl`；`capability-catalog.sh` 声明两脚本（writer=按需 / checker=每轮）；`scripts/test.sh` 接入 `run_static_checks`（@static-tier change，@static-object 含两个新脚本 + 记录文件）；`docs/proposals/quay-product-outline.md` DELIVERY-INVENTORY 快照再生。
+
+**C17 建议（outer 落 `orchestration/fast-mode-tick-core.md` A6；`plugin/loop/fast-mode-tick-core.md` 按同一行由 inner 落 shipped 副本，AC73 判据4 双副本同改）**：执行核【无 cert 条款】已由位置判定成立，无需删；A6 无锁段 ③（全量 suite）绿后、持锁段 ④ 之前加一步：
+```
+node --no-warnings --experimental-strip-types plugin/scripts/per-task-suite-record.ts \
+  --task-id <id> --state-file <worktree>/.quay/full-suite-state.json
+（state-file 提供 runId/state/laneCount/durationMs/startedAt/finishedAt；红时失败文件清单由 writer
+ 从 failures[].file 自动抽取；writer 经 git common-dir 把记录写到【共享检出】.quay/per-task-suite-records.jsonl，
+ 非 worktree fork 副本——判据2）
+```

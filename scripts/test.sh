@@ -550,6 +550,18 @@ run_static_checks() {
   # @static-tier change
   # @static-object orchestration/preference-notification-log.md orchestration/dispatch-preference.md plugin/scripts/preference-notification-check.ts
   run_checker "preference-notification-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/preference-notification-check.ts" --root "${repo_root}"
+  echo "== per-task-suite-record check (tasks/gap-ac72-cert-mechanism-retire, AC72 判据2/判据3) =="
+  # AC72 判据2: every per-task FULL-suite run must land ONE third-party-readable record
+  # (taskId/runId/state/laneCount/durationMs/failed-files/起止时刻) in the SHARED checkout's
+  # .quay/per-task-suite-records.jsonl — NOT the worktree's fork-inherited full-suite-state copy.
+  # 判据2 shape: a record that EXISTS but is malformed/partial ⇒ RED (硬规则 3b: 读不懂 ≠ 合格); absent
+  # file ⇒ NOT-EVALUATED (nothing recorded yet — never conflated with green). 判据3 能取假: the AC57 7
+  # real cert rounds replayed against the (empty) record set must go RED — pinned by
+  # plugin/test/per-task-suite-record-check.test.mjs (real-sample replay + malformed-shape negative
+  # controls). Default live run = shape check only; --replay-real-samples is the explicit audit.
+  # @static-tier change
+  # @static-object .quay/per-task-suite-records.jsonl plugin/scripts/per-task-suite-record.ts plugin/scripts/per-task-suite-record-check.ts
+  run_checker "per-task-suite-record-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/per-task-suite-record-check.ts" --root "${repo_root}"
   echo "== ac69-slot-queue-gap check (tasks/gap-ac69-suite-slot-full-should-queue-not-wait, AC1 + DoD) =="
   # AC69 先量再改 enforcement: the「槽释放→下次派发差值」measurement record
   # (docs/analysis/ac69-slot-release-vs-dispatch-gap.json) must be LANDED and structurally complete
