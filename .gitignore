@@ -77,6 +77,7 @@ packages/quay/plugin/
 **/.quay/inner-wakeup-heartbeat.jsonl
 **/.quay/manager-pending-send.txt
 **/.quay/manager-next-a20.txt
+**/.quay/manager-unescalated.txt
 **/.quay/task-file-violation-ledger.jsonl
 **/.quay/orphaned-full-suite-runner-*.diff
 # gap-sweeptmp-pkill-kills-live-observers-two-layer-blind (2026-08-08): the observer self-registry
