@@ -138,16 +138,34 @@ AC72  subagent 从 AC67 任务体判据4 的【示例串】里取 id ⇒ 示例�
 
 ## Touches
 
-- orchestration/fast-mode-tick-core.md（A6 行：步骤清单 → 检查 workflow 是否被执行 + 判据3 scriptPath——双副本之一，正本）
+- orchestration/fast-mode-tick-core.md（A6 行：步骤清单 → 检查 workflow 是否被执行 + 判据3 scriptPath——双副本之一，正本；**C17 外层独占写 ⇒ 本任务只落 SUGGESTION 到 Evidence，不编辑**）
 - plugin/loop/fast-mode-tick-core.md（同一 A6 改动——落地副本随正本逐字落地）
-- .claude/workflows/fan-in-execute.js (new)
+- .claude/workflows/fan-in-execute.js (new)（fan-in 四步正身模板，subagent prompt 自足 + 自身标识自己找）
+- plugin/workflows/fan-in-execute.js (new)（delivery-drift-gate 要求的字节镜像）
 - plugin/scripts/fan-in-workflow-check.ts (new)（判据2 (a)(b)(c) checker：Workflow 记录 ∩ lock-events 时间边界 ∩ agentId 非会话）
 - plugin/test/fan-in-workflow-check.test.mjs (new)
 - plugin/scripts/fan-in-ff-merge.sh（--agent-id 自校验：顶层会话 jsonl 存在 ⇒ 报错退出）
+- plugin/scripts/capability-catalog.sh（fan-in-workflow-check.ts 目录声明——AC1c gate 要求）
+- scripts/test.sh（fan-in-workflow-check 接 run_static_checks——AC73 零接线病族的对应治理）
+- docs/proposals/quay-product-outline.md（DELIVERY-INVENTORY 快照派生刷新）
 - orchestration/archive/AC58-retired-clauses.md（A6 旧正身退役落点 + 落点映射，AC58 形态）
-- plugin/scripts/retired-clause-check.ts（REGISTRY 登记新退役条款）
+- plugin/scripts/retired-clause-check.ts（REGISTRY 登记新退役条款 R30）
 - tasks/gap-ac78-fan-in-workflow-a6-check.md（自身）
 
 ## Evidence
 
-（落地后回填）
+**实现落地（inner，2026-08-14）**：
+- `.claude/workflows/fan-in-execute.js`（+ 字节镜像 `plugin/workflows/fan-in-execute.js`）：fan-in 四步正身（merge develop → delta 断言面判定 → ts-typecheck → scoped+全量+doc → flip done + ff-merge）迁入 subagent prompt。prompt 自足（逐字内联所有上下文，无「协调者说/见上文/上一条消息」依赖）；`--agent-id` 写成【自己找 `subagents/agent-<自己>.jsonl`】指令，不填值、给示例。渲染自检通过（prompt 长度 3201，含 `ls -t ~/.claude/projects/*/subagents/agent-*.jsonl` 自找段，无真实会话/示例 id 混入）。
+- `plugin/scripts/fan-in-workflow-check.ts`（判据2 (a)(b)(c) checker）+ `plugin/test/fan-in-workflow-check.test.mjs`（25 tests 全绿）：(a) 从会话 jsonl 提取 Workflow(fan-in-execute) 调用（mtime≥边界过滤），(b) 从 lock-events 派生 fan-in 集（时间边界——manager 13−1=12 vs 真值 6 教训），(c) agentId 顶层 `<id>.jsonl` 存在 ⇒ 红（AC72/AC73 回放红）、`subagents/agent-<id>.jsonl` 存在 ⇒ 绿（AC67/AC66 回放绿）、missing/unresolvable ⇒ 红。
+- `plugin/scripts/fan-in-ff-merge.sh` `--agent-id` 自校验（AC78 判据2(c) 实现侧）：顶层会话 id ⇒ exit 2、不写锁事件。实测：`--agent-id 902b4528-bc95-…`（AC72 顶层）⇒ `resolves to a TOP-LEVEL session id ... exit 2`；`--agent-id aab2d14d10a762ff4`（AC67 subagent）⇒ 放行。测试 `fan-in-ff-merge.test.mjs` 新增 2 条（12/12 全绿）。
+- A6 双副本：`plugin/loop/fast-mode-tick-core.md` A6 改为「fan-in 必须经 fan-in-execute workflow 执行 + 判据3 scriptPath-only + 判据2 (a)(b)(c) + 落点映射」，旧步骤正身迁 `orchestration/archive/AC58-retired-clauses.md#R30`（落点映射→workflow 对应段落），`retired-clause-check.ts` REGISTRY 加 R30（retired-clause-check OK — 29 entries）。
+- `fan-in-workflow-check` 接 `run_static_checks`（scripts/test.sh）+ 目录声明（capability-catalog.sh，AC1c gate 通过，`fan-in-workflow-check.ts` 六栏完整）+ DELIVERY-INVENTORY 快照刷新（scripts 243 / workflows 3，inventory_drift=0）。
+
+**门（AC9）**：
+- ts-typecheck 闸：`node --experimental-strip-types plugin/scripts/fan-in-ts-typecheck-gate.ts --task gap-ac78-fan-in-workflow-a6-check --worktree <wt> --merge-target develop` = **GREEN（exit 0）**（Touches 含新增 .ts=1，typecheck 通过）。
+- scoped 门：`bash scripts/test.sh --for-task gap-ac78-fan-in-workflow-a6-check --allow-thin` = **58 tests / 58 pass / 0 fail**（fan-in-workflow-check 25、fan-in-ff-merge 12、retired-clause-check 5、capability-catalog 等；scoped 静态检查 test-framework-policy/test-isolation/delivery-inventory 全 PASS）。
+- doc 检查：`bash scripts/test.sh --static-checks-doc` = **PASS（exit 0）**（tick-core-static-check PASS；tick-core-drift-check 报 fast-mode 对漂移但 --no-block，非阻塞）。
+- `retired-clause-check`：OK — 29 entries migrated（47 tokens: all gone from source, all present in archive）。
+- `rhythm-consumer-check --check`：PASS（判据1 182 judged 0 violation——fan-in-workflow-check 每轮已接 test.sh）。
+
+**C17 建议（orchestration/fast-mode-tick-core.md，外层独占写，本任务未编辑）**：A6 行需按 plugin/loop 副本逐字落地（正本/落地副本同步），建议文本 = plugin/loop/fast-mode-tick-core.md 现 A6 行（`| A6 | Fan-in 必须经 fan-in-execute workflow 执行(**判据1:fan-in 四步正身迁入 \`.claude/workflows/fan-in-execute.js\`,A6 只留检查;... |`），并保持前置 (a) 头部不对称表述。落地后 tick-core-drift-check 的 fast-mode 对漂移消除。另：orchestration 旧 A6（缺 delta 断言面判定的版本）若从源删除，其独有词条需补 archive R30（或新增 R31）——retired-clause-check REGISTRY 目前只登记了 plugin/loop 源。

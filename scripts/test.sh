@@ -601,6 +601,19 @@ run_static_checks() {
   # @static-tier change
   # @static-object orchestration/SPEC-fan-in-ff-merge-lock-2026-08-14.md plugin/scripts/fan-in-ff-protocol-check.ts plugin/scripts/fan-in-ff-merge.sh plugin/test/fan-in-ff-protocol-check.test.mjs
   run_checker "fan-in-ff-protocol-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/fan-in-ff-protocol-check.ts" --root "${repo_root}" --baseline cd4f49b4 --json
+  echo "== fan-in-workflow-check (AC78 判据2 (a)(b)(c) — fan-in 是否真的走了 fan-in-execute workflow) =="
+  # AC78 moves the fan-in steps INTO a workflow script (.claude/workflows/fan-in-execute.js); A6
+  # stops being a step checklist and becomes a CHECK. Wired here as a code-class 每轮 gate (NOT the
+  # zero-wiring disease fan-in-ff-protocol-check cured): for every fan-in task AFTER the workflow
+  # landed (boundary = git commit time of the commit that added fan-in-execute.js), the checker
+  # verifies (a) a Workflow(fan-in-execute) call record exists in the session transcripts, and (c) the
+  # lock event's agentId is a real subagent id (top-level <id>.jsonl ⇒ RED — the old main-thread
+  # form, AC72/AC73). 差集非空 ⇒ RED. Pre-workflow fan-in is excluded by the time boundary (the
+  # manager 13−1=12 vs 真值 6 over-count lesson). NOT-EVALUATED (never conflated with green) when no
+  # fan-in follows the boundary or the workflow has not landed.
+  # @static-tier change
+  # @static-object .claude/workflows/fan-in-execute.js plugin/scripts/fan-in-workflow-check.ts plugin/scripts/fan-in-ff-merge.sh plugin/loop/fast-mode-tick-core.md plugin/test/fan-in-workflow-check.test.mjs
+  run_checker "fan-in-workflow-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/fan-in-workflow-check.ts" --root "${repo_root}" --json
   echo "== rhythm-consumer-check (gap-ac73 判据1/2/3 — cadence consumer contract gate) =="
   # AC73's own checker — the rhythm column's consumer contract: non-按需 mechanisms must have a
   # call site in test.sh / an execution core (or wired elsewhere, or baselined), 按需 mechanisms

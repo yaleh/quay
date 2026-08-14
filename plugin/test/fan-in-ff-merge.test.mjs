@@ -307,6 +307,64 @@ test("--help exits 0 with usage on stdout (gap-scripts-sprawl convention)", () =
   assert.match(r.stdout, /fan-in-ff-merge/);
 });
 
+// ── AC78 判据2(c): --agent-id self-validation (fail-closed against top-level session ids) ───────────
+
+test("AC78 判据2(c) — --agent-id resolving to a TOP-LEVEL session id ⇒ exit 2, NO lock events written", () => {
+  const dir = makeTmp("ac78");
+  const st = stateDir("ac78");
+  let home = null;
+  try {
+    initRepo(dir);
+    // The script derives the Claude project dir from $HOME + the repo-root slug.
+    home = fs.mkdtempSync(path.join(os.tmpdir(), "faninffhome-"));
+    const slug = dir.split(path.sep).join("-"); // /tmp/... → -tmp-...-...
+    const proj = path.join(home, ".claude", "projects", slug);
+    fs.mkdirSync(proj, { recursive: true });
+    // AC72's real top-level session id (the old main-thread-executor form).
+    const sessId = "902b4528-bc95-4ec6-9e10-5c2a0c47c4bb";
+    fs.writeFileSync(path.join(proj, `${sessId}.jsonl`), "{}");
+    const events = path.join(st, "events.jsonl");
+    const suite = writeSuiteState(st, { state: "green" });
+
+    const r = spawnSync("bash", [MERGE_SCRIPT, "--task", "ac62-ac78", "--root", dir, "--suite-state", suite, "--lock-events", events, "--agent-id", sessId], { encoding: "utf8", env: { ...process.env, HOME: home } });
+    assert.equal(r.status, 2, `top-level session id must be rejected: ${r.stdout}${r.stderr}`);
+    assert.match(r.stderr, /TOP-LEVEL session id/, "the rejection names the top-level-session cause");
+    assert.ok(!fs.existsSync(events), "NO lock events written for a rejected agent-id");
+  } finally {
+    if (home) cleanup(home);
+    cleanup(dir);
+    cleanup(st);
+  }
+});
+
+test("AC78 判据2(c) — --agent-id resolving to a REAL subagent (subagents/agent-<id>.jsonl) is NOT rejected", () => {
+  const dir = makeTmp("ac78b");
+  const st = stateDir("ac78b");
+  let home = null;
+  try {
+    initRepo(dir);
+    home = fs.mkdtempSync(path.join(os.tmpdir(), "faninffhomeb-"));
+    const slug = dir.split(path.sep).join("-");
+    const proj = path.join(home, ".claude", "projects", slug);
+    // AC67's real subagent id lives under a session dir's subagents/.
+    fs.mkdirSync(path.join(proj, "some-session", "subagents"), { recursive: true });
+    const subId = "aab2d14d10a762ff4";
+    fs.writeFileSync(path.join(proj, "some-session", "subagents", `agent-${subId}.jsonl`), "{}");
+    const events = path.join(st, "events.jsonl");
+    const suite = writeSuiteState(st, { state: "green" });
+
+    const r = spawnSync("bash", [MERGE_SCRIPT, "--task", "ac62-ac78b", "--root", dir, "--suite-state", suite, "--lock-events", events, "--agent-id", subId], { encoding: "utf8", env: { ...process.env, HOME: home } });
+    // NOT rejected by the agent-id gate — it proceeds and fails only on the missing task branch.
+    assert.doesNotMatch(r.stderr, /TOP-LEVEL session id/, "a real subagent id must pass the agent-id gate");
+    assert.equal(r.status, 2, "still exit 2 for the missing task branch (no ff attempted)");
+    assert.ok(!fs.existsSync(events), "no lock events (the task-branch gate fired before any ff)");
+  } finally {
+    if (home) cleanup(home);
+    cleanup(dir);
+    cleanup(st);
+  }
+});
+
 test("lock is a SEPARATE file from the suite lock (AC4 — 对象不相干)", () => {
   const dir = makeTmp("locksep");
   const st = stateDir("locksep");

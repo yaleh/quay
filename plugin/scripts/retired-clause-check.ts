@@ -144,6 +144,14 @@ export const REGISTRY: Entry[] = [
       "typeof heartbeat?.agentDispatches === \"number\"",
       "heartbeat.agentDispatches >= heartbeat.agentLimit",
     ] },
+  // inner 核 A6 步骤清单 (AC78 判据1, gap-ac78-fan-in-workflow-a6-check — fan-in 四步正身迁入
+  // .claude/workflows/fan-in-execute.js, A6 只留检查; 落点映射见 archive ## R30)
+  { id: "R30", source: "plugin/loop/fast-mode-tick-core.md", markers: [
+      "持锁段(仍在 subagent 自回合内)",
+      "flip 要动的记录也用 git 跟踪",
+      "锁与 suite 锁(full-suite.lock.0/.1)覆盖范围不交叉",
+      "runId 桥(inner 2026-08-14 判断,已核)",
+    ] },
 ];
 
 // ── normalization: strip backticks + line-comment prefixes (# / //), collapse whitespace ──

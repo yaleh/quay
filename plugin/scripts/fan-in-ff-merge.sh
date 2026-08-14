@@ -38,6 +38,12 @@
 # --agent-id is OPTIONAL for backward compat with pre-AC67 callers; when absent the fields are null
 # (which is exactly the absence the checker flags — the field is only "real" when the subagent sets it).
 #
+# AC78 (gap-ac78-fan-in-workflow-a6-check, 判据2(c)): --agent-id is now FAIL-CLOSED self-validated —
+# if it resolves to a TOP-LEVEL session id (a `<project>/<id>.jsonl` or `<project>/<id>/` exists),
+# the ff is being executed by the MAIN SESSION (AC72/AC73's defect) ⇒ exit 2 before any lock event /
+# retry record is written. The fan-in must be executed by a subagent, whose own id resolves to
+# `subagents/agent-<id>.jsonl` (AC67's correct form).
+#
 # Usage:
 #   fan-in-ff-merge.sh --task <taskId> [--root <repo>] [--merge-target <branch>] [--run-id <runId>]
 #                      [--agent-id <caller-agent-id>] [--suite-state <file>] [--lock-events <file>]
@@ -107,6 +113,22 @@ lock_file="${git_common_dir}/fan-in-merge.lock"
 if [ -z "${suite_state}" ]; then suite_state="${root}/.quay/full-suite-state.json"; fi
 if [ -z "${lock_events}" ]; then lock_events="${root}/.quay/fan-in-merge-lock-events.jsonl"; fi
 if [ -z "${retry_record}" ]; then retry_record="${root}/.quay/fan-in-retries.jsonl"; fi
+
+# ── AC78 判据2(c): --agent-id 自校验 (manager 2026-08-14 裁定并入实现侧, gap-ac78) ────────────────
+# --agent-id is free text — anything passes. Fail-closed: if it resolves to a TOP-LEVEL session id
+# (a `<project>/<id>.jsonl` file or `<project>/<id>/` dir exists, prefix-matched), the ff is being
+# executed by the MAIN SESSION — the old main-thread-executor form (AC67/AC72/AC73) — NOT by a
+# subagent. Exit 2 (usage/environment) BEFORE acquiring the lock or writing any lock event / retry
+# record. A real subagent uuid (subagents/agent-<id>.jsonl) never has a top-level file of its own.
+if [ -n "${agent_id}" ]; then
+  _cc_proj_dir="${HOME}/.claude/projects/$(printf '%s' "${root}" | sed 's|/|-|g')"
+  if [ -d "${_cc_proj_dir}" ]; then
+    if compgen -G "${_cc_proj_dir}/${agent_id}*.jsonl" >/dev/null 2>&1 || compgen -d "${_cc_proj_dir}/${agent_id}*" >/dev/null 2>&1; then
+      echo "fan-in-ff-merge: --agent-id '${agent_id}' resolves to a TOP-LEVEL session id (${_cc_proj_dir}/${agent_id}*.jsonl exists) — a fan-in must be executed by a subagent, not the main session; a top-level session id is the old main-thread-executor form (AC78 判据2(c))" >&2
+      exit 2
+    fi
+  fi
+fi
 
 # ── pre-flight (unlocked; none of these is an ff failure, none writes a retry record) ─────────────────
 if ! git -C "${root}" rev-parse --verify --quiet "refs/heads/task/${task_id}" >/dev/null 2>&1; then
