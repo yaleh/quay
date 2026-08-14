@@ -1,7 +1,7 @@
 ---
 id: gap-monitor-mount-check-stale-pids
 title: monitor-mount-check.sh 报死 pid——扫描后输出前无存活复验，pids 可含已死 pid 而 mounted/targetOk 仍 true（manager 15:2xZ 报）
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
