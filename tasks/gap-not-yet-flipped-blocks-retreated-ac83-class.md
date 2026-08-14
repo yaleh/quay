@@ -59,14 +59,14 @@ AC83 的整个意思：AC1-4 是被 QUAY_TEST_CGROUP_SCRIPT 注入的假 cgroup 
 
 ## Acceptance Criteria
 
-- [ ] AC1 判据1：retreat（done→ready）同时退 AC 勾选（或标记待重验），不带旧完成度进下一轮。
-- [ ] AC2 判据2 能取假：phase-boundary 现 ready + AC 89%（8/9）状态组合不该存在；修后 retreat 即退勾。
-- [ ] AC3 判据3：真 landed（生产有数据）done 任务不受影响（防重派不回归）。
-- [ ] AC4 既有测试全绿；`--for-task` scoped 门绿。
+- [x] AC1 判据1：retreat（done→ready）同时退 AC 勾选（或标记待重验），不带旧完成度进下一轮。
+- [x] AC2 判据2 能取假：phase-boundary 现 ready + AC 89%（8/9）状态组合不该存在；修后 retreat 即退勾。
+- [x] AC3 判据3：真 landed（生产有数据）done 任务不受影响（防重派不回归）。
+- [x] AC4 既有测试全绿；`--for-task` scoped 门绿。
 
 ## Definition of Done
 
-- [ ] retreat 同时退 AC 勾选（fixture 满足的判据不勾）+ 真 landed 不受影响 + 测试绿。
+- [x] retreat 同时退 AC 勾选（fixture 满足的判据不勾）+ 真 landed 不受影响 + 测试绿。
 
 ## Touches
 
