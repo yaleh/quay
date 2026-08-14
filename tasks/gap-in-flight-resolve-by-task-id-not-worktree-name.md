@@ -51,6 +51,26 @@ worktree 目录名 → 3      分支名 → 4      真任务 id → 5（真值�
 ```
 **实证（与已修 bug 方向相反，同一根）**：刚修的「worktree 名截断⇒在飞少算⇒slots_free 虚高⇒闸误拒心跳」；本条「等重跑的任务算进在飞⇒在飞多算⇒slots_free 虚低⇒不派」——**两次的根是同一件事：在飞集合不是按【并发 subagent】这个直接量算的**（4b）。**触发读数**：5 worktree 但 3 个 0 活进程（awaiting retry 无 subagent）；真并发=3（ac63 fan-in + in-flight-resolve impl + wf_d36d4e4f）⇒ 真 slots_free=2 而 inner 看 0。
 **⊢ 判据**：**同一时刻，`dispatchable_disjoint` 的分母（未落地任务集）与 `slots_free` 的分母（在跑 subagent 集）必须【允许不等】；若实现里它们仍取同一个集合 ⇒ 未落地**。今天两次相反方向偏差（少算/多算各一次）就是现成真样本。
+
+**⚡⚡⚡ 第 3 个真样本（manager 13:2xZ 报）：测量降级时 in_flight_count 仍输出 0（与合格同形）**：
+```
+现场读数：measurement_source='degraded-no-telemetry' + measurement_error='spawnSync ... ETIMEDOUT'
+         in_flight_count=0（降级下）· slots_free=5 · should_refill=True ⇒ 闸四合取 True ⇒ 拒写心跳
+直接量：I1 41 活进程 + in-flight-resolve 8 活进程 + load1=18.58 ⇒ 真在飞≥2，机制报 0
+```
+**这是硬规则 3b 的漏网形态，比条文更细**：slot-refill **做对了一半**——给了 `measurement_source='degraded-no-telemetry'` 独立取值（明说「没测成」）；**但同时把 `in_flight_count` 报成 0**（与「真的没有在飞」完全同形），**而闸（inner-wakeup-heartbeat.ts）根本不读 measurement_source（零命中），只读数字** ⇒ 诚实标记白做。
+> **3b 原文管「不得返回与合格同形的值」；这里返回了【两个值】——一个诚实的、一个同形的——下游只看同形那个。**
+
+**判据 5（修法，manager 倾 (a)）**：(a) **降级时 in_flight_count / slots_free / subagents_in_flight = null** ⇒ 下游做算术会炸而非静默算出「5 空槽」；(b) 闸读 measurement_source 非 'telemetry' 即 NOT-EVALUATED 放行（只修一个消费者，下一个还会踩——故 (a) 优先）。
+**⊢ 负控制现成不构造**：load1 压到 ETIMEDOUT 复现；或 mock measurement_error 非空。
+
+**⛔ 今日 3 次同形的共同上游都是【喂给闸的量】，闸本身 3 次都按定义正确执行**：
+```
+① worktree 目录名截断 ⇒ 在飞少算 1 ⇒ slots_free 虚高 ⇒ 闸误拒（4.7h 观测面黑）
+② awaiting-retry 算进在飞 ⇒ 多算 2 ⇒ 虚低 ⇒ 以为槽满不派
+③ 高负载测量超时降级 ⇒ 报 0 ⇒ 虚高到满 ⇒ 闸误拒（此刻）
+```
+**⇒ SPEC-in-flight-semantics §4 建议 5：「任何『闸误报』立案，必须先给【喂给它的量】与【它期望的量】对照，否则不得改闸。」本条已附对照，请勿改闸。**
 **判据2（能取假·真样本不构造）**：现状传 `gap-workflows-dual-copy-drift`（截断目录名）⇒ 在飞少算 ⇒ slots_free 虚高（**真样本=本次实证**，jsonl 56→57 前；回放它判据1 必须红）；修后传截断名也能解析到真 id、in_flight 不偏。
 **判据3 边界**：**不改 AC53 闸**（闸本身是对的，立条实证与实现都核过）；**改的是喂给它的量**（在飞集合）。
 **判据4（问项）**：**分支名为什么会截断？**——若建树路径对任务 id 做长度截断，**每一条长 id 任务都会中**。落地时查「是否只此一例」还是系统性（建树路径的截断逻辑），并在 Evidence 记录。
@@ -76,7 +96,8 @@ worktree 目录名 → 3      分支名 → 4      真任务 id → 5（真值�
 - [ ] AC3 判据3：不改 AC53 闸（只改喂给它的量）。
 - [ ] AC4 判据4：分支名截断是否系统性已查（建树路径），Evidence 记录。
 - [ ] AC5 判据5（人 12:5xZ 裁定）：两个消费者拆分——dispatchable_disjoint 分母=未落地任务集（含 awaiting retry），slots_free 分母=在跑 subagent 集；两者允许不等；真 slots_free=5−真并发 subagent。
-- [ ] AC6 既有测试全绿；`--for-task` scoped 门绿。
+- [ ] AC6 判据6（manager 13:2xZ 报，第 3 真样本）：降级时（measurement_source='degraded-no-telemetry'）in_flight_count/slots_free/subagents_in_flight=null，下游做算术炸而非静默算出「5 空槽」；⊢ 负控制=mock measurement_error 非空。
+- [ ] AC7 既有测试全绿；`--for-task` scoped 门绿。
 
 ## Definition of Done
 
