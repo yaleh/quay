@@ -1,7 +1,7 @@
 ---
 id: gap-retire-registration-inner-agent-budget-not-registered
 title: inner-agent-budget 退休未登记进 retired-clause-check.ts——机械只能报 SUSPECT，与 heavy-op-token（登记了=RETIRED）同族（外层 15:5xZ 报 + manager 15:4xZ 裁定）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
