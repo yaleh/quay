@@ -1,7 +1,7 @@
 ---
 id: gap-ac73-catalog-rhythm-consumer-check
 title: AC73 capability-catalog 节奏栏消费检测——非「按需」机件必须有按位置命中的调用点，否则红
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
