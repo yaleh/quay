@@ -23,8 +23,13 @@ if not ANCHOR.exists():
 s = ANCHOR.read_text()
 bad = []
 
-# ① 必须指向三份文档，否则它不再是指针
-for p in ("manager-loop-tick.md", "manager-tick-log.md", "manager-phase-goal.md"):
+# ① 必须指向四份文档，否则它不再是指针
+#    ⚠️ 2026-08-14 SPEC-tick-read-path-slimming §2-A：第 (1) 条的读取目标由 manager-loop-tick.md
+#    改为 manager-tick-core.md。理由：loop-tick.md 第 3 行【自己就转指 core】并逐字自称
+#    「本文件是理由档案，不是执行清单」——指针指向一个明说"别读我"的 1802 行文件，
+#    每轮为此付一次被 25000 token 上限截断的读（实测 57385 token，只拿到 667/1802 = 37%）。
+#    loop-tick.md 仍必须【被提到】（理由档案的落点，按 src:N 反查），故留在必需列表里。
+for p in ("manager-tick-core.md", "manager-loop-tick.md", "manager-tick-log.md", "manager-phase-goal.md"):
     if p not in s: bad.append(f"缺指向 {p}")
 # ② 必须含哨兵清扫规则（否则重挂会靠记住的 ID）
 if "哨兵清扫" not in s or "CronList" not in s: bad.append("缺哨兵清扫规则")
