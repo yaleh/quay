@@ -148,3 +148,5 @@ fan-in-ts-typecheck-gate: ADMITTED (exit 0)
 「delta 断言面判定（AC75, 复用 AC51 doc/代码分类, 不设阈值）：merge 进来的 develop delta 全落 doc/任务体/telemetry 面
 ⇒ 跳过全量 suite（只跑 doc 检查）；触及代码/测试/脚本面 ⇒ 重跑全量；判不出 ⇒ fail-closed 重跑全量（硬规则 3b）」，
 后续步骤顺延。
+
+**效果实测（manager 2026-08-14 08:4xZ 读数，AC75 落地后第一条重试，留档）**：`fan-in-retries.jsonl` 新增 `ac72 attempt=1`（08:25:25Z，developHead=4790f0ec——AC67 结果判据落 develop 使分支分歧）→ 随后 08:25:32 无锁段 merge develop → 08:26:31 重试 ff 成功（锁事件对）。**重试间隔 = 66 秒**。对照 AC75 之前的 rebase 路径 795s（13.3 min，SPEC §7b 曾记）⇒ **降到约 1/12**。这是人 08:0xZ 裁定「重点是落实 AC75，避免无谓的 suite 测试重试」的效果实证——ff 失败处置=merge develop+复验，不再整段 rebase+全量重跑。**该间隔是外生变量 N（当时 develop 前进距离）的函数，只作同 N 下前后对照，不作指标**（硬规则 4 推论）。
