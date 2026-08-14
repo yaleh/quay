@@ -82,17 +82,6 @@ packages/quay/plugin/
 # files session-liveness.sh writes on resident start (candidate-D death detection). Per-pid
 # runtime state — must never appear in `git status --porcelain` (same family as gate-events.jsonl).
 **/.quay/session-liveness.*.json
-# gap-fan-in-ff-merge-clean-tree-guard-counts-untracked-as-dirty (2026-08-14): fan-in-ff-merge.sh's
-# clean-tree guard runs `git status --porcelain` (a NON-EMPTY porcelain — including untracked —
-# ⇒ exit 2). The three layers' runtime state files (inner tick-log/heartbeat, manager pending-send,
-# task-file violation ledger, orphaned-runner diff) are written by the layers themselves and were
-# NOT gitignored ⇒ the guard would return exit 2 the FIRST time AC67's subagent calls it. Same
-# gitignored runtime-state family as gate-events.jsonl — must never appear in `git status --porcelain`.
-**/.quay/inner-tick-log.jsonl
-**/.quay/inner-wakeup-heartbeat.jsonl
-**/.quay/manager-pending-send.txt
-**/.quay/task-file-violation-ledger.jsonl
-**/.quay/orphaned-full-suite-runner-*.diff
 # gap-node-compile-cache-is-never-enabled-and-every-spawn-reparses (2026-08-04): the Node compile
 # cache (NODE_COMPILE_CACHE) — same gitignored runtime-state family as gate-events.jsonl (DoD:
 # "与 gate-events.jsonl 同形"). On DISK by construction: scripts/test.sh pins it to
