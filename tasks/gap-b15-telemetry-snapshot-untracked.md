@@ -1,7 +1,7 @@
 ---
 id: gap-b15-telemetry-snapshot-untracked
 title: telemetry snapshot 收进 gitignore（运行时遥测非代码，读盘不读 git）——收敛非 fan-in 提交节奏
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
