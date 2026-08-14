@@ -1,7 +1,7 @@
 ---
 id: gap-session-liveness-fixture-tmux-not-killed
 title: session-liveness hermetic 夹具创建 tmux server 从不 kill——sweepTmp 因 dirHasLiveOwner 保护活 owner 而跳过，泄漏 6 个 29h tmux（manager 15:2xZ 报）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -51,23 +51,30 @@ socket 名：sig-k-omDepW / sig-i-P6M8z4 / hb-OxX5o3 / sig-k-3pCXft / hb-ufSPi9 
 
 ## Acceptance Criteria
 
-- [ ] AC1 判据1：夹具 after() kill 自己创建的 tmux server。
-- [ ] AC2 判据2 能取假：无测试运行 /tmp 目录数 0（真样本 6 回放红）。
-- [ ] AC3 判据3：sweepTmp owner-liveness 保护保留。
-- [ ] AC4 既有测试全绿；`--for-task` scoped 门绿。
+- [x] AC1 判据1：夹具 after() kill 自己创建的 tmux server。
+- [x] AC2 判据2 能取假：无测试运行 /tmp 目录数 0（真样本 6 回放红）。
+- [x] AC3 判据3：sweepTmp owner-liveness 保护保留。
+- [x] AC4 既有测试全绿；`--for-task` scoped 门绿。
 
 ## Definition of Done
 
-- [ ] session-liveness 夹具 kill 自己的 tmux + 无测试运行时 /tmp 目录 0 + owner-liveness 保护不削弱。
+- [x] session-liveness 夹具 kill 自己的 tmux + 无测试运行时 /tmp 目录 0 + owner-liveness 保护不削弱。
 
 ## Touches
 
 - plugin/test/session-liveness-signals-kinds.test.mjs（after() 加 kill-server）
 - plugin/test/session-liveness-signals-integration.test.mjs（after() 加 kill-server）
 - plugin/test/session-liveness-heartbeat.test.mjs（after() 加 kill-server）
-- plugin/test/session-liveness-helpers.mjs（若 isolateTmuxEnv 需返回清理句柄）
+- plugin/test/session-liveness-helpers.mjs（若 isolateTmuxEnv 需返回清理句柄；cleanup() 先 kill-server 再注销）
+- plugin/test/session-liveness-restart.test.mjs（makeEnvProbe/makeNoEnvProbe cleanup() 同形泄漏——kill-session 竞态）
 - tasks/gap-session-liveness-fixture-tmux-not-killed.md（自身）
 
 ## Evidence
 
-（落地后回填——outer 2026-08-14 15:2xZ 已清理 6 个泄漏 tmux：kill 后 tmux 计数 10→4、真监视器 2729903 存活 1d2h）
+（inner 2026-08-14 落地回填）
+
+- **修复形态**：`plugin/test/session-liveness-helpers.mjs` 新增 `killProbeServer`/`killProbeServers`（对每个已注册探针的私有 socket `<tmp>/sock/tmux-<uid>/default` 执行 `tmux kill-server`）；`reapLiveOwners()` 由 per-session `kill-session` 循环改为 `killProbeServer`（kill-server）。三个 split 测试文件（signals-kinds / signals-integration / heartbeat）的 `after()` 在 `reapLiveOwners()`/`sweepTmp()` 之前显式调用 `killProbeServers()`（判据1）。kill-server 只作用于结构化隔离的私有 socket，碰不到真 quay-0/archguard-2/meta-cc-4 会话（AC3 保留：sweepTmp 的 owner-liveness 保护未削弱；`session-liveness-sweep.test.mjs` AC4/AC3「活 owner 存活」测试仍绿）。
+- **判据2 负控制**：实跑前 `/tmp/session-liveness-*` 目录数 **6**（manager 已清 tmux server 后残留 owner-dead 目录）；跑完三个受测文件后回 0。`tmux-leak-scan` 绝对模式无残留。
+- **AC4**：三个受测文件直跑 42/42 绿（heartbeat 14 + signals-integration 15 + signals-kinds 13）；`scripts/test.sh --for-task gap-session-liveness-fixture-tmux-not-killed --allow-thin` 门绿（exit 0，42/42，scoped 静态检查全过；`session-liveness-sweep.test.mjs` 的 `reapLiveOwners` 测试直跑 5/5 绿，锁 kill-server 路径）。
+- **node_modules**：worktree 无 node_modules，跑 `dispatch-worktree-setup.sh`（符号链接共享 node_modules，机制正本 `gap-worktree-node-modules-inconsistent-self-verify`）后门绿。
+- **fan-in 补（2026-08-14，全量 suite tmux-leak-scan 红后）**：探针构造器 cleanup() 的【先注销再 kill-session】在负载下与 server 启动竞态——kill-session 失败 + 已注销 ⇒ server 存活且 after() 的 reapLiveOwners 也够不到（泄漏无出口复现）。修复：四个构造器（makeHermeticProbe/makePlainPane/makeClaudePaneProcess/makeTwoWindowSession）与 restart.test.mjs 的 makeEnvProbe/makeNoEnvProbe 的 cleanup() **先 killProbeServer（kill-server 私有 socket，server 死前探针保持注册 ⇒ after() 可重试）再注销 + rmSync**。`session-liveness.test.mjs` 7/7、`session-liveness-restart.test.mjs` 6/6、`session-liveness-sweep.test.mjs` 5/5 直跑绿。注：全量 suite 的 tmux-leak-scan 在无 QUAY_RUN_ID（legacy 模式）下也会把并发 worktree suite 的 /tmp/session-liveness-* 探针误计为本次泄漏（round 2026-08-14 实测并发 suite 正在跑 session-liveness.test.mjs）；生产全量 suite 经 full-suite-runner 设 QUAY_RUN_ID 走 namespaced 扫描，无此交叉归因。
