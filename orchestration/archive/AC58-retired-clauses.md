@@ -393,3 +393,29 @@ suite 读【共享检出】；AC42 之后 per-task suite 跑在各自 worktree�
 ③参与方名单不可维护）在新协议下仍成立 ⇒ **merge 锁必须是共享的机制（钩子/文件锁），不能是
 「各层记得调的约定」**——这正是 ② 当初选择 pre-commit 钩子而非 commit 包装的理由
 （约定参与方名单不可维护，钩子天然覆盖所有提交者）。
+
+## R28 — manager A4「两层忙闲 = capture-pane | pane-state-classify --classify」退役（2026-08-14T07:56:12Z）
+
+**退役理由（人 2026-08-14 07:5xZ 令「清理 pane-state-classify / manager A4 / phase_ac_checked」）**：
+**这条条款 manager 从未执行。** 实测：manager 整天的两层忙闲读数**全部来自 A0 的 `outer.liveness`**
+（`session-liveness.sh` 产出，判据是 pane 进程存在），**不是 A4 写的
+`tmux capture-pane -p -t <窗口名> | node pane-state-classify.ts --classify`**。
+**三层执行核里只有 manager A4 引用该读法，outer/inner 各 0。**
+
+**⚠️ 工具本身【不退役】**——`pane-state-classify.ts` 仍有活消费者：
+`session-liveness.sh`（判定逻辑 import：`classifyPaneVerdict` / `permPromptWarnVerdict` /
+`trailingApiErrorCount` / `transcriptContextSaturation` 等）与 `inner-blocked-signal.ts:151`（outer A7 在跑）。
+**退役的是「把它当 manager 每轮两层忙闲读法」这一个用法，不是工具。**
+（另两处引用 `send-keys-reliable.sh:165` / `supervisor-deliver.sh:277` 的 `--can-receive-wait` 前置，
+随人 2026-08-12「SendMessage 为默认、旧机件保留可用但非默认路径」而事实上不再触发——**保留不动**。）
+
+**落点映射（A4 的独有内容 → 新正本）**：
+| A4 独有词条 | 新正本 |
+|---|---|
+| 「两层忙闲」这一读数本身 | A0 `outer.liveness`（`manager-tick-readings.ts` → `session-liveness.sh`） |
+| 「⛔ 禁止手搓 `tail -N \| grep 'esc to interrupt'`」 | `CLAUDE.md` ADR-016 段（禁整屏哈希/限底部区域）+ `adr016-screen-use-check.ts` 强制 |
+| **2026-08-12 实测发现**：旧写法（`tail -3 \| grep`）在 outer 上报 idle 而真值 busy——**因为有 subagent 在跑时，subagent 状态行渲染在状态栏【下面】，标志被顶出末 3 行**（实测标志在第 55 行、非空行共 49，`● main` / `◯ general-purpose …4m45s` 在其后） | **本条（R28）即该实证的唯一正本**——`pane-state-classify.ts` 的固定深度取法正是为它而设，删 A4 不得丢失这条发现 |
+
+**⇒ 退役后 manager 的两层忙闲仍有读数（A0 `outer.liveness`），但要知道它是【代理量】**：
+pane 进程存在 ≠ 会话在处理消息（2026-08-14 实证：inner 的 pane 一直在，tick 停了 21 分钟）。
+**判层是否活着，正本是直接量**——`git log` 提交时刻 / `worktree` 内活进程（outer A21 / inner A25 已是这条路线）。

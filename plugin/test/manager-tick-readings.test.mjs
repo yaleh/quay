@@ -297,7 +297,6 @@ test("manager-tick-readings: render emits the full fixed labeled structure (AC3 
   assert.ok(lines.some((l) => l.startsWith("resource.mem_available_mb ")), lines.join(";"));
   assert.ok(lines.some((l) => l.startsWith("outer.liveness quay-0:outer ")), lines.join(";"));
   assert.ok(lines.some((l) => l.startsWith("outer.ticklog quay ")), lines.join(";"));
-  assert.ok(lines.some((l) => l.startsWith("goal.phase_ac_checked ")), lines.join(";"));
   assert.ok(lines.some((l) => l.startsWith("monitor.mounted ")), lines.join(";"));
   assert.ok(lines.some((l) => l.startsWith("monitor.instances ")), lines.join(";"));
   assert.ok(lines.some((l) => l.startsWith("monitor.entry_last_commit ")), lines.join(";"));
