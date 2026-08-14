@@ -62,6 +62,7 @@ abort／早退／红轮都有账。
       ——cpu_usec/PSI 差分在 abort 路径不丢失。
 - [x] AC4 新字段覆盖率 = 100%（含红轮；修复 54/161 缺失的继承偏斜）。（落地 640ad48a，scoped 141/0 绿，含 kill-on-red abort 路径测试；AC3 负控制由该测试覆盖）
 - [x] AC5 既有测试全绿；`--for-task` scoped 门绿。（落地 640ad48a，scoped 141/0 绿，含 kill-on-red abort 路径测试；AC3 负控制由该测试覆盖）
+- [ ] AC6 **数据源未接 ⇒ `null`，⛔ 不写 `0`（manager 19:1xZ，硬规则 3b 第三次同形）**：`cpu_time_s`/`cpu_usec`/分相字段在数据源不可用时写 `null` + `cpu_source: 'not-wired'`（或等价独立取值），不得写 `0`——`0` 无法区分「仪器没接」与「真的 ~0 消耗」，会在未来 fullSuiteRan=true 记录也报 0 时造成不可判。⊢ 判据（能取假，真样本现成）：`.quay/per-task-suite-records.jsonl` 中 `cpu_time_s == 0` 的记录数应**为 0**（要么 null、要么真实非零）；现真值 **1**（ff-livelock 记录，fan-in-execute.js:110 GNU time 不可用 ⇒ 保持 0）。
 
 ## Definition of Done
 
@@ -73,6 +74,8 @@ abort／早退／红轮都有账。
 
 - plugin/scripts/full-suite-runner.ts（相边界差分记账 + trap/finally 写入）
 - plugin/test/full-suite-runner.test.mjs（差分/覆盖/负控制用例）
+- plugin/scripts/per-task-suite-record.ts（AC6：cpu_time_s 数据源未接 ⇒ null + cpu_source，不写 0）
+- .claude/workflows/fan-in-execute.js（AC6：GNU time 不可用/跳过全量 ⇒ cpu_time_s 写 null 而非 0）
 - tasks/gap-phase-boundary-differential-accounting.md（自身）
 
 ## Evidence
