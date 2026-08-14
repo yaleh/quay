@@ -125,6 +125,14 @@ export const REGISTRY: Entry[] = [
       "🚫 退役（2026-08-13，AC48 判据2）**：integration 分支已退役——per-task 验证模型",
       "退役证据：develop..integration = 0",
     ] },
+  // inner fast-mode-tick-core (AC61 B-1/B-2, gap-ac61-staleness-list-item-disposition)
+  { id: "R25", source: "orchestration/fast-mode-tick-core.md", markers: [
+      "integration-branch-model.ts --overlaps-unverified",
+      "空串使该判定恒假、机制半死",
+    ] },
+  { id: "R26", source: "orchestration/fast-mode-tick-core.md", markers: [
+      "只用 `integration-batch-merge.sh --reconcile`",
+    ] },
 ];
 
 // ── normalization: strip backticks + line-comment prefixes (# / //), collapse whitespace ──

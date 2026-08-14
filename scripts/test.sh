@@ -503,6 +503,17 @@ run_static_checks() {
   # @static-tier change
   # @static-object orchestration/orchestrator-tick-core.md plugin/loop/orchestrator-loop-tick.md plugin/loop/fast-mode-loop-tick.md CLAUDE.md plugin/scripts/integration-branch-model.ts plugin/scripts/integration-batch-merge.sh orchestration/SPEC-branching-model-integration-branch-2026-08-05.md orchestration/archive/AC58-retired-clauses.md plugin/scripts/retired-clause-check.ts plugin/scripts/checker-mutation-cases/retired-clause-check.sh plugin/test/retired-clause-check.test.mjs
   run_checker "retired-clause-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/retired-clause-check.ts" --root "${repo_root}"
+  echo "== ac61-staleness-disposition check (tasks/gap-ac61-staleness-list-item-disposition, AC61 判据1-3 + DoD 负控制) =="
+  # AC61 清单逐条处置 enforcement: the task file's `## AC61 处置记录` section must carry a record for
+  # EVERY A-1..A-7 / B-1..B-4 item (迁出带落点映射 或 经核实仍有效+读数). CHECK-A (判据1/DoD 负控):
+  # any item missing a record, or a 迁出 record without a landing-point / a 核实 record without a
+  # 读数 ⇒ RED. CHECK-B (判据2): the two enforced loop docs' `integration` hits must ALL be classified
+  # (one row per hit) — not just counted. CHECK-C (判据3): the inner fast-mode-tick-core C7 live
+  # instruction (integration-branch-model.ts --overlaps-unverified) must be GONE from both core copies.
+  # Mutation case + unit tests carry the negative control (AC49 判据1 D2 attribution).
+  # @static-tier change
+  # @static-object tasks/gap-ac61-staleness-list-item-disposition.md plugin/loop/fast-mode-loop-tick.md plugin/loop/orchestrator-loop-tick.md docs/analysis/fast-mode-loop-tick.md orchestration/orchestrator-loop-tick.md plugin/loop/fast-mode-tick-core.md orchestration/fast-mode-tick-core.md orchestration/archive/AC58-retired-clauses.md plugin/scripts/ac61-staleness-disposition-check.ts plugin/scripts/checker-mutation-cases/ac61-staleness-disposition-check.sh plugin/test/ac61-staleness-disposition-check.test.mjs
+  run_checker "ac61-staleness-disposition-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/ac61-staleness-disposition-check.ts" --root "${repo_root}"
   echo "== dispatch-record fingerprint+reason check (tasks/gap-ac55-dispatch-record-fingerprint-reason, AC55 判据1/判据3) =="
   # AC55 判据1: EVERY dispatch record must carry ① the dispatch-preference file's content fingerprint
   # (git blob hash — "用的是哪一版") AND ② a one-sentence "为什么选它" ("按倾向选还是随便选") — the
