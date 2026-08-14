@@ -4,11 +4,15 @@
 #
 # The fan-in protocol is split into a 无锁段 and a 持锁段:
 #   无锁段 (the CALLER, all inside its own task worktree — NOT this script, no lock):
-#     1. git merge develop            ← conflicts can ONLY appear here; resolve slowly, blocks nobody
-#     2. run the full suite           ← continue only when green
-#     3. run the doc check            ← the ff-only gap: ff triggers no pre-merge hook (AC63)
+#     1. git merge develop            ← 【必须 merge，不得 rebase】(人 2026-08-14 07:0xZ 裁定, AC75).
+#                                        conflicts can ONLY appear here; resolve slowly, blocks nobody
+#     2. delta 断言面判定 (AC75)      ← merge 进来的 develop delta 触及代码/测试/脚本断言面 ⇒ 重跑全量;
+#                                        delta 全落 doc/任务体/telemetry 面 ⇒ 不重跑（只跑 doc 检查）;
+#                                        判不出 ⇒ fail-closed 重跑（硬规则 3b: 判不出≠不需要）
+#     3. run the full suite           ← continue only when green (按第 2 步判定)
+#     4. run the doc check            ← the ff-only gap: ff triggers no pre-merge hook (AC63)
 #   持锁段 (THIS script — the ONLY action allowed while holding the lock):
-#     4. acquire merge lock → git merge --ff-only task/<id> → release (success or failure)
+#     5. acquire merge lock → git merge --ff-only task/<id> → release (success or failure)
 #
 # The lock is a SEPARATE flock from the suite lock (full-suite.lock.0/.1): different file, different
 # object, and — because this script REFUSES to run while the suite state says `running` — never held
@@ -205,7 +209,7 @@ if [ "${merge_rc}" -ne 0 ]; then
   # step-1 re-run merges THIS develop). attempt = prior failures for this task + 1.
   develop_head_now="$(git -C "${root}" rev-parse "${merge_target}" 2>/dev/null || echo "unresolvable")"
   printf '%s\n' "{\"taskId\":\"${task_id}\",\"attempt\":${attempt},\"developHead\":\"${develop_head_now}\",\"ts\":\"${now_iso}\",\"epoch\":${now_epoch},\"runId\":${run_id_json},\"agentId\":${agent_id_json},\"mergeTarget\":\"${merge_target}\",\"error\":\"$(printf '%s' "${merge_err}" | sed 's/"/\\"/g')\"}" >> "${retry_record}"
-  echo "fan-in-ff-merge: FF FAILED — ${merge_err:-develop advanced}; not a fast-forward. Retry record written (attempt ${attempt}). Return to 无锁段 step 1 (merge develop again) and re-run." >&2
+  echo "fan-in-ff-merge: FF FAILED — ${merge_err:-develop advanced}; not a fast-forward. Retry record written (attempt ${attempt}). Return to 无锁段 step 1 (merge develop again — 必须 merge 不得 rebase, AC75), re-judge the delta (step 2) and re-run." >&2
   echo "fan-in-ff-merge: measure ff_only_locked=false" >&2
   exit 1
 fi

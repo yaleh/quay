@@ -35,6 +35,12 @@ import {
   classifyBashCommand,
   checkTranscriptLocation,
   isMainThreadAgentId,
+  judgeA6MergeNotRebase,
+  judgeCommandMergeNotRebase,
+  judgeA6DeltaStep,
+  classifyDeltaRerun,
+  judgeDeltaDecision,
+  resolveDeltaCodeSurface,
 } from "../scripts/fan-in-ff-executor-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -228,6 +234,161 @@ test("PURE checkTranscriptLocation — no classified activity on either side ⇒
   assert.equal(v.reason, "no-fan-in-activity (NOT-EVALUATED)");
 });
 
+// ── AC75 判据5: A6 step ① rebase→merge + command rebase 检出 ────────────────────────────────────────
+
+// A REAL rebase-form A6 step ① — the inner implementation's "11 次 rebase" signature captured from
+// the pre-AC75 era (SPEC §1b: 实现用 rebase 11 次). The ① step command form is `git rebase $MERGE_TARGET`.
+const REAL_OLD_A6_REBASE_STEP1 = "① `git rebase $MERGE_TARGET`(冲突【只可能在这】出现,自由解,不占任何人)";
+// A REAL rebase fan-in command (the old executor form — SPEC §1b's "11 次 rebase").
+const REAL_REBASE_FAN_IN_CMD = "git rebase develop && git merge task/gap-x";
+
+test("AC75 judgeA6MergeNotRebase — a REAL rebase step ① ⇒ RED (must be merge)", () => {
+  const line = `| A6 | Fan-in 已返回任务 | **无锁段** ${REAL_OLD_A6_REBASE_STEP1} → … |`;
+  const v = judgeA6MergeNotRebase(line);
+  assert.equal(v.ok, false);
+  assert.equal(v.evaluated, true);
+  assert.equal(v.rebase, true);
+  assert.match(v.reason, /rebase/);
+});
+
+test("AC75 judgeA6MergeNotRebase — the LANDED plugin/loop A6 (git merge, AC67/AC75) ⇒ GREEN", () => {
+  const file = path.join(REPO_ROOT, "plugin", "loop", "fast-mode-tick-core.md");
+  const line = extractA6Line(file);
+  const v = judgeA6MergeNotRebase(line);
+  assert.equal(v.ok, true, `landed A6 must be merge-not-rebase: ${v.reason}`);
+  assert.equal(v.evaluated, true);
+  assert.equal(v.rebase, false);
+});
+
+test("AC75 judgeA6MergeNotRebase — missing/empty line ⇒ NOT-EVALUATED", () => {
+  assert.equal(judgeA6MergeNotRebase(null).evaluated, false);
+  assert.equal(judgeA6MergeNotRebase("   ").evaluated, false);
+});
+
+test("AC75 judgeCommandMergeNotRebase — a REAL rebase fan-in command ⇒ RED", () => {
+  const v = judgeCommandMergeNotRebase(REAL_REBASE_FAN_IN_CMD);
+  assert.equal(v.ok, false);
+  assert.equal(v.evaluated, true);
+  assert.match(v.reason, /rebase/);
+});
+
+test("AC75 judgeCommandMergeNotRebase — a merge fan-in command ⇒ GREEN", () => {
+  assert.equal(judgeCommandMergeNotRebase("git merge develop").ok, true);
+  assert.equal(judgeCommandMergeNotRebase(null).evaluated, false);
+});
+
+// ── AC75 判据6: A6 无锁段第 2 步 delta 断言面判定 (fail-closed) ───────────────────────────────────────
+
+test("AC75 judgeA6DeltaStep — an A6 WITHOUT the delta step (pre-AC75) ⇒ RED", () => {
+  const line = "| A6 | Fan-in 回到任务 subagent | **无锁段** ① `git merge $MERGE_TARGET` → ③ 全量 suite + doc 检查 |";
+  const v = judgeA6DeltaStep(line);
+  assert.equal(v.ok, false);
+  assert.equal(v.evaluated, true);
+  assert.equal(v.hasStep, false);
+});
+
+test("AC75 judgeA6DeltaStep — an A6 WITH the delta step but NOT fail-closed ⇒ RED", () => {
+  const line = "| A6 | Fan-in 回到任务 subagent | ① `git merge $MERGE_TARGET` → ② delta 断言面判定（doc ⇒ 不重跑;代码 ⇒ 重跑） → … |";
+  const v = judgeA6DeltaStep(line);
+  assert.equal(v.ok, false);
+  assert.equal(v.evaluated, true);
+  assert.equal(v.hasStep, true);
+  assert.equal(v.failClosed, false);
+});
+
+test("AC75 judgeA6DeltaStep — the LANDED plugin/loop A6 (delta step + fail-closed) ⇒ GREEN", () => {
+  const file = path.join(REPO_ROOT, "plugin", "loop", "fast-mode-tick-core.md");
+  const line = extractA6Line(file);
+  const v = judgeA6DeltaStep(line);
+  assert.equal(v.ok, true, `landed A6 must carry the fail-closed delta step: ${v.reason}`);
+  assert.equal(v.evaluated, true);
+  assert.equal(v.hasStep, true);
+  assert.equal(v.failClosed, true);
+});
+
+test("AC75 judgeA6DeltaStep — missing/empty line ⇒ NOT-EVALUATED", () => {
+  assert.equal(judgeA6DeltaStep(null).evaluated, false);
+  assert.equal(judgeA6DeltaStep("").evaluated, false);
+});
+
+// ── AC75 判据7: delta 断言面判定 能取假 (real-sample replay, D2 不构造) ───────────────────────────────
+
+// REAL develop deltas captured verbatim from `git show --name-only` on develop commits:
+//   pureDoc = 00cd6408 (tasks/gap-ac72 + tasks/gap-ac73 — task bodies ONLY, the SPEC §1c doc/任务体 face)
+//   code    = 6b0802e7 (plugin/loop + plugin/scripts/.ts + plugin/test/.test.mjs + tasks — touches code)
+const REAL_DELTA_PURE_DOC = [
+  "tasks/gap-ac72-cert-mechanism-retire.md",
+  "tasks/gap-ac73-catalog-rhythm-consumer-check.md",
+];
+const REAL_DELTA_CODE = [
+  "plugin/loop/fast-mode-tick-core.md",
+  "plugin/scripts/fan-in-ff-executor-check.ts",
+  "plugin/test/fan-in-ff-executor-check.test.mjs",
+  "tasks/gap-ac67-fan-in-executor-to-task-subagent.md",
+];
+
+test("AC75 classifyDeltaRerun — the REAL pure-doc develop delta ⇒ no rerun (doc/任务体 face)", () => {
+  const surface = new Set(resolveDeltaCodeSurface(REPO_ROOT));
+  const c = classifyDeltaRerun(REAL_DELTA_PURE_DOC, surface);
+  assert.equal(c.rerun, false);
+  assert.equal(c.evaluated, true);
+  assert.deepEqual(c.codeHits, []);
+});
+
+test("AC75 classifyDeltaRerun — the REAL code develop delta ⇒ rerun (touches code)", () => {
+  const surface = new Set(resolveDeltaCodeSurface(REPO_ROOT));
+  const c = classifyDeltaRerun(REAL_DELTA_CODE, surface);
+  assert.equal(c.rerun, true);
+  assert.equal(c.evaluated, true);
+  assert.ok(c.codeHits.length >= 2, `codeHits: ${c.codeHits.join(", ")}`);
+});
+
+test("AC75 judgeDeltaDecision — pure-doc delta but RERAN the full suite ⇒ RED (纯 doc 却重跑, 判据3 D2)", () => {
+  const surface = new Set(resolveDeltaCodeSurface(REPO_ROOT));
+  const v = judgeDeltaDecision(REAL_DELTA_PURE_DOC, surface, "reran-full-suite");
+  assert.equal(v.ok, false);
+  assert.equal(v.evaluated, true);
+  assert.match(v.reason, /pure-doc-but-reran/);
+});
+
+test("AC75 judgeDeltaDecision — code delta but SKIPPED the full suite ⇒ RED (含代码却跳过, 判据3 D2)", () => {
+  const surface = new Set(resolveDeltaCodeSurface(REPO_ROOT));
+  const v = judgeDeltaDecision(REAL_DELTA_CODE, surface, "skipped-full-suite");
+  assert.equal(v.ok, false);
+  assert.equal(v.evaluated, true);
+  assert.match(v.reason, /code-delta-but-skipped/);
+});
+
+test("AC75 judgeDeltaDecision — pure-doc delta and skipped ⇒ GREEN", () => {
+  const surface = new Set(resolveDeltaCodeSurface(REPO_ROOT));
+  const v = judgeDeltaDecision(REAL_DELTA_PURE_DOC, surface, "skipped-full-suite");
+  assert.equal(v.ok, true);
+  assert.equal(v.evaluated, true);
+});
+
+test("AC75 judgeDeltaDecision — code delta and reran ⇒ GREEN", () => {
+  const surface = new Set(resolveDeltaCodeSurface(REPO_ROOT));
+  const v = judgeDeltaDecision(REAL_DELTA_CODE, surface, "reran-full-suite");
+  assert.equal(v.ok, true);
+  assert.equal(v.evaluated, true);
+});
+
+test("AC75 judgeDeltaDecision — cannot judge (empty delta) but skipped ⇒ RED (fail-closed, 硬规则 3b)", () => {
+  const surface = new Set(resolveDeltaCodeSurface(REPO_ROOT));
+  const v = judgeDeltaDecision([], surface, "skipped-full-suite");
+  assert.equal(v.ok, false);
+  assert.equal(v.evaluated, true);
+  assert.equal(v.canJudge, false);
+  assert.match(v.reason, /fail-closed|cannot-judge/);
+});
+
+test("AC75 judgeDeltaDecision — no decision given ⇒ NOT-EVALUATED", () => {
+  const surface = new Set(resolveDeltaCodeSurface(REPO_ROOT));
+  const v = judgeDeltaDecision(REAL_DELTA_PURE_DOC, surface, null);
+  assert.equal(v.ok, true);
+  assert.equal(v.evaluated, false);
+});
+
 // ── integration: the checker CLI over the real samples ────────────────────────────────────────────────
 
 function runChecker(args) {
@@ -397,4 +558,48 @@ test("--help exits 0 with usage on stdout", () => {
   const r = runChecker(["--help"]);
   assert.equal(r.status, 0);
   assert.match(r.stdout, /fan-in-ff-executor-check/);
+});
+
+test("AC75 integration — CLI --delta-files (REAL pure-doc) --delta-decision reran-full-suite ⇒ RED (exit 1)", () => {
+  const r = runChecker(["--root", REPO_ROOT, "--delta-files", REAL_DELTA_PURE_DOC.join(","), "--delta-decision", "reran-full-suite"]);
+  assert.equal(r.status, 1, `pure-doc-but-reran must be RED: ${r.stdout}${r.stderr}`);
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.ok, false);
+  const delta = out.checks.find((c) => c.check === "delta-assertion-decision");
+  assert.ok(delta, "delta-assertion-decision check present");
+  assert.equal(delta.ok, false);
+  assert.match(delta.reason, /pure-doc-but-reran/);
+});
+
+test("AC75 integration — CLI --delta-files (REAL code) --delta-decision skipped-full-suite ⇒ RED (exit 1)", () => {
+  const r = runChecker(["--root", REPO_ROOT, "--delta-files", REAL_DELTA_CODE.join(","), "--delta-decision", "skipped-full-suite"]);
+  assert.equal(r.status, 1, `code-but-skipped must be RED: ${r.stdout}${r.stderr}`);
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.ok, false);
+  const delta = out.checks.find((c) => c.check === "delta-assertion-decision");
+  assert.equal(delta.ok, false);
+  assert.match(delta.reason, /code-delta-but-skipped/);
+});
+
+test("AC75 integration — CLI --a6-file plugin/loop ⇒ the landed A6 passes merge-not-rebase + delta-step", () => {
+  const file = path.join(REPO_ROOT, "plugin", "loop", "fast-mode-tick-core.md");
+  const r = runChecker(["--a6-file", file]);
+  assert.equal(r.status, 0, `landed plugin/loop A6 must PASS: ${r.stdout}${r.stderr}`);
+  const out = JSON.parse(r.stdout);
+  const merge = out.checks.find((c) => c.check === "a6-step1-merge-not-rebase");
+  assert.ok(merge, "a6-step1-merge-not-rebase check present");
+  assert.equal(merge.ok, true);
+  const delta = out.checks.find((c) => c.check === "a6-delta-assertion-step");
+  assert.ok(delta, "a6-delta-assertion-step check present");
+  assert.equal(delta.ok, true);
+});
+
+test("AC75 integration — CLI --a6-line with a REBASE step ① ⇒ RED (exit 1)", () => {
+  const line = `| A6 | Fan-in 已返回任务 | **无锁段** ${REAL_OLD_A6_REBASE_STEP1} → … |`;
+  const r = runChecker(["--a6-line", line]);
+  assert.equal(r.status, 1, `rebase step ① must be RED: ${r.stdout}${r.stderr}`);
+  const out = JSON.parse(r.stdout);
+  const merge = out.checks.find((c) => c.check === "a6-step1-merge-not-rebase");
+  assert.equal(merge.ok, false);
+  assert.match(merge.reason, /rebase/);
 });

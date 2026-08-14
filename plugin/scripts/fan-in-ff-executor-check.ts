@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// fan-in-ff-executor-check.ts — AC67 fan-in EXECUTOR checker (判据1/判据2/判据3/判据4 能取假).
-// (tasks/gap-ac67-fan-in-executor-to-task-subagent, SPEC-fan-in-ff-merge-lock-2026-08-14)
+// fan-in-ff-executor-check.ts — AC67 fan-in EXECUTOR checker + AC75 delta 断言面判定 (判据1-判据7 能取假).
+// (tasks/gap-ac67-fan-in-executor-to-task-subagent, tasks/gap-ac75-fan-in-merge-not-rebase-delta-check,
+//  SPEC-fan-in-ff-merge-lock-2026-08-14)
 //
 // AC62 landed the ff-only PROTOCOL (无锁段 + 持锁段 + merge lock) but NOT the executor position —
 // the inner MAIN THREAD still ran every step of the fan-in (`fast-mode-tick-core.md` A6 subject was
@@ -48,6 +49,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDirectEntry } from "./gate-script-base.ts";
+import { resolveAssertionSurface } from "./precommit-guard.ts";
 
 // ── Constants ─────────────────────────────────────────────────────────────────────────────────────────
 
@@ -220,6 +222,159 @@ export function checkTranscriptLocation(mainCommands, subagentCommands) {
   return { ok: true, evaluated: false, reason: "no-fan-in-activity (NOT-EVALUATED)", mainViolations: [] };
 }
 
+// ── AC75 判据1: 无锁段第 1 步 rebase→merge (rebase 检出) ──────────────────────────────────────────────
+
+/** The OLD rebase form in A6 step ① — `git rebase $MERGE_TARGET` (or any `git rebase <target>`), the
+ *  inner implementation's "11 次 rebase" signature. The merge form is `git merge $MERGE_TARGET`. */
+export const A6_STEP1_REBASE_RE = /git\s+rebase\s+\$?[A-Za-z_]/;
+/** A fan-in command that rebases (the old executor's `git rebase develop` / `git rebase $MERGE_TARGET`). */
+export const REBASE_CMD_RE = /git\s+rebase\s+\$?[A-Za-z_]/;
+
+/**
+ * Judge ONE A6 row's step ① form: merge-not-rebase (AC75 判据1). PURE. RED when the A6 line contains
+ * a `git rebase <target>` COMMAND (the inner "11 次 rebase" signature); GREEN when it contains
+ * `git merge` and no rebase command; NOT-EVALUATED when the line is missing/empty (cannot judge).
+ * @param {string|null|undefined} a6Line
+ * @returns {{ok:boolean, evaluated:boolean, reason:string, rebase:boolean}}
+ */
+export function judgeA6MergeNotRebase(a6Line) {
+  if (a6Line == null || String(a6Line).trim() === "") {
+    return { ok: true, evaluated: false, reason: "no-a6-line (NOT-EVALUATED)", rebase: false };
+  }
+  const text = String(a6Line);
+  const rebase = A6_STEP1_REBASE_RE.test(text);
+  if (rebase) {
+    return { ok: false, evaluated: true, reason: "a6-step1-rebase (must be merge, AC75)", rebase: true };
+  }
+  return { ok: true, evaluated: true, reason: "a6-step1-merge-not-rebase", rebase: false };
+}
+
+/**
+ * Judge ONE Bash command line: fan-in must merge, never rebase (AC75 判据1 command replay). PURE.
+ * RED when the command contains a `git rebase <target>` (the old rebase-fan-in form); GREEN otherwise.
+ * @param {string|null|undefined} cmd
+ * @returns {{ok:boolean, evaluated:boolean, reason:string}}
+ */
+export function judgeCommandMergeNotRebase(cmd) {
+  if (cmd == null || String(cmd).trim() === "") {
+    return { ok: true, evaluated: false, reason: "no-command (NOT-EVALUATED)" };
+  }
+  if (REBASE_CMD_RE.test(String(cmd))) {
+    return { ok: false, evaluated: true, reason: "rebase-fan-in-command (must be merge, AC75)" };
+  }
+  return { ok: true, evaluated: true, reason: "merge-fan-in-command" };
+}
+
+// ── AC75 判据2: A6 无锁段第 2 步 delta 断言面判定 (fail-closed) ────────────────────────────────────────
+
+/** The A6 line must carry the NEW step ② delta 断言面判定 — the merge-in delta is judged against the
+ *  suite's assertion surface before deciding whether to re-run the full suite. */
+export const A6_DELTA_STEP_RE = /delta\s*断言面判定|断言面判定|要不要重跑.*suite|delta.*断言面/;
+/** fail-closed marker: 判不出 ⇒ 重跑 (判不出 must NOT share a value with 不需要, 硬规则 3b). */
+export const A6_DELTA_FAIL_CLOSED_RE = /判不出.*重跑|fail-closed.*重跑|判不出.*重跑全量/;
+
+/**
+ * Judge that the A6 line carries the delta 断言面判定 step AND it is fail-closed (AC75 判据2). PURE.
+ * GREEN when both the delta-step marker and the fail-closed marker are present; RED when the step is
+ * missing OR present but not fail-closed; NOT-EVALUATED when the line is missing/empty.
+ * @param {string|null|undefined} a6Line
+ * @returns {{ok:boolean, evaluated:boolean, reason:string, hasStep:boolean, failClosed:boolean}}
+ */
+export function judgeA6DeltaStep(a6Line) {
+  if (a6Line == null || String(a6Line).trim() === "") {
+    return { ok: true, evaluated: false, reason: "no-a6-line (NOT-EVALUATED)", hasStep: false, failClosed: false };
+  }
+  const text = String(a6Line);
+  const hasStep = A6_DELTA_STEP_RE.test(text);
+  const failClosed = A6_DELTA_FAIL_CLOSED_RE.test(text);
+  if (!hasStep) {
+    return { ok: false, evaluated: true, reason: "a6-missing-delta-step-2 (AC75)", hasStep: false, failClosed };
+  }
+  if (!failClosed) {
+    return { ok: false, evaluated: true, reason: "a6-delta-step-not-fail-closed (判不出=重跑, 硬规则 3b)", hasStep: true, failClosed: false };
+  }
+  return { ok: true, evaluated: true, reason: "a6-delta-step-fail-closed", hasStep: true, failClosed: true };
+}
+
+// ── AC75 判据3: delta 断言面判定 能取假 (pure delta judge) ─────────────────────────────────────────────
+
+/**
+ * Classify a delta (the files merged in from develop) against the suite's CODE assertion surface.
+ * Reuses AC51's doc/code classification: the code surface is the assertion surface EXCLUDING task
+ * bodies (tasks/**) and doc-class files — per SPEC §1c, a delta that lands entirely on the
+ * doc/任务体/telemetry face does NOT force a full-suite re-run. Pure — the caller resolves the surface.
+ * @param {string[]} deltaFiles — the changed files (rel paths) merged in from develop
+ * @param {Set<string>|string[]} codeSurface — the code/test/script files (assertion surface minus tasks/**)
+ * @returns {{rerun:boolean, evaluated:boolean, reason:string, codeHits:string[]}}
+ */
+export function classifyDeltaRerun(deltaFiles, codeSurface) {
+  const files = (deltaFiles ?? []).filter((f) => typeof f === "string" && f.trim());
+  if (files.length === 0) {
+    return { rerun: true, evaluated: false, reason: "empty-delta (fail-closed: 判不出=重跑)", codeHits: [] };
+  }
+  const surface = codeSurface instanceof Set ? codeSurface : new Set(codeSurface ?? []);
+  if (surface.size === 0) {
+    return { rerun: true, evaluated: false, reason: "no-code-surface (fail-closed: 判不出=重跑)", codeHits: [] };
+  }
+  const codeHits = files.filter((f) => surface.has(f));
+  if (codeHits.length > 0) {
+    return { rerun: true, evaluated: true, reason: `delta-touches-code (${codeHits.join(", ")})`, codeHits };
+  }
+  return { rerun: false, evaluated: true, reason: "delta-pure-doc/task/telemetry", codeHits: [] };
+}
+
+/**
+ * Judge a fan-in delta DECISION against the classification (AC75 判据3 能取假). PURE. The decision is
+ * what the executor actually did after merging develop: "reran-full-suite" or "skipped-full-suite".
+ *   RED  delta touches code but executor SKIPPED the full suite   (含代码却跳过 — 漏重验)
+ *   RED  delta is pure-doc/task/telemetry but executor RERAN      (纯 doc 却重跑 — 浪费 ~390s)
+ *   RED  cannot judge (empty delta / no surface) but executor SKIPPED  (fail-closed violation)
+ *   GREEN otherwise (decision matches the classification).
+ * @param {string[]} deltaFiles
+ * @param {Set<string>|string[]} codeSurface
+ * @param {"reran-full-suite"|"skipped-full-suite"|null|undefined} decision
+ * @returns {{ok:boolean, evaluated:boolean, reason:string, rerun:boolean, canJudge:boolean}}
+ */
+export function judgeDeltaDecision(deltaFiles, codeSurface, decision) {
+  const c = classifyDeltaRerun(deltaFiles, codeSurface);
+  if (!c.evaluated) {
+    // fail-closed: cannot judge ⇒ must rerun. Skipping when we cannot judge is the violation.
+    if (decision === "skipped-full-suite") {
+      return { ok: false, evaluated: true, reason: `cannot-judge-but-skipped (${c.reason})`, rerun: true, canJudge: false };
+    }
+    return { ok: true, evaluated: false, reason: c.reason, rerun: true, canJudge: false };
+  }
+  if (decision == null) {
+    return { ok: true, evaluated: false, reason: "no-decision (NOT-EVALUATED)", rerun: c.rerun, canJudge: true };
+  }
+  if (c.rerun) {
+    if (decision === "skipped-full-suite") {
+      return { ok: false, evaluated: true, reason: `code-delta-but-skipped (${c.reason})`, rerun: true, canJudge: true };
+    }
+    return { ok: true, evaluated: true, reason: `code-delta-reran (${c.reason})`, rerun: true, canJudge: true };
+  }
+  if (decision === "reran-full-suite") {
+    return { ok: false, evaluated: true, reason: `pure-doc-but-reran (${c.reason})`, rerun: false, canJudge: true };
+  }
+  return { ok: true, evaluated: true, reason: `pure-doc-skipped (${c.reason})`, rerun: false, canJudge: true };
+}
+
+/**
+ * Resolve the CODE assertion surface for the delta judgment from a repo root: the AC51 assertion
+ * surface MINUS task bodies (tasks/**) — SPEC §1c treats 任务体 as a non-rerun face. Returns [] when
+ * the root has no resolvable surface (the caller's classifyDeltaRerun then fail-closes).
+ * @param {string} root
+ * @returns {string[]}
+ */
+export function resolveDeltaCodeSurface(root) {
+  try {
+    const s = resolveAssertionSurface(root);
+    return s.files.filter((f) => !f.startsWith("tasks/") && !f.startsWith("plugin/loop/"));
+  } catch {
+    return [];
+  }
+}
+
 // ── fs helpers ─────────────────────────────────────────────────────────────────────────────────────────
 
 /** Extract every Bash `tool_use` command from a Claude Code session jsonl file (the message.content
@@ -260,37 +415,47 @@ function getArgValue(args, name) {
   return idx === -1 ? undefined : args[idx + 1];
 }
 
-const usage = `fan-in-ff-executor-check.ts — AC67 fan-in EXECUTOR checker (判据1/判据2/判据3/判据4 能取假)
+const usage = `fan-in-ff-executor-check.ts — AC67 fan-in EXECUTOR checker + AC75 delta 断言面判定 (判据1-判据7 能取假)
   A6 subject/form (判据1), fan-in record agentId ≠ inner 主会话 (判据2), real-sample replay (判据3),
-  executor transcript location (判据4) ⇒ red on the main-thread-executor form
-  (tasks/gap-ac67-fan-in-executor-to-task-subagent)
+  executor transcript location (判据4) ⇒ red on the main-thread-executor form; AC75 adds 判据5-判据7:
+  无锁段第 1 步 rebase→merge (判据5), A6 delta 断言面判定 fail-closed (判据6), delta decision 能取假 (判据7).
+  (tasks/gap-ac67-fan-in-executor-to-task-subagent, tasks/gap-ac75-fan-in-merge-not-rebase-delta-check)
 
 Usage:
   node --experimental-strip-types fan-in-ff-executor-check.ts
       [--root <dir>] [--a6-file <fast-mode-tick-core.md>] [--a6-line <text>]
       [--lock-events <file>] [--retry-record <file>] [--main-agent-id <id>]
       [--command <text>] [--main-session <jsonl>] [--subagent-transcripts <a.jsonl,b.jsonl>]
+      [--delta-files <csv>] [--delta-decision <reran-full-suite|skipped-full-suite>]
       [--json] [--help]
 
   --root <dir>         repo root (default: cwd). Default lock-events/retry-record paths resolve
-                       under its .quay/.
-  --a6-file <file>    判据1: extract the \`| A6 |\` row from a fast-mode-tick-core.md and judge it
-  --a6-line <text>    判据1: judge a single A6 row line directly (test surface)
+                       under its .quay/. Also resolves the delta code surface (AC51 assertion surface
+                       minus tasks/**) for --delta-files.
+  --a6-file <file>    判据1/5/6: extract the \`| A6 |\` row from a fast-mode-tick-core.md and judge it
+  --a6-line <text>    判据1/5/6: judge a single A6 row line directly (test surface)
   --lock-events <file> 判据2: the fan-in-ff-merge.sh lock-event log (default <root>/.quay/...)
   --retry-record <file> 判据2: the ff retry-record log (default <root>/.quay/...)
   --main-agent-id <id>  判据2: the inner MAIN session's agent id — a record EQUAL to it is red
-  --command <text>    判据3: judge a single fan-in command (real-sample replay surface)
+  --command <text>    判据3/5: judge a single fan-in command (real-sample replay surface; a rebase
+                       command ⇒ RED under AC75 判据5)
   --main-session <file> 判据4: the inner MAIN session jsonl — (a) test.sh w/o --for-task / (b) tasks/*.md
                        status-flip commit / (c) develop merge here ⇒ RED (主线程执行者)
   --subagent-transcripts <csv>  判据4: the <session>/subagents/agent-*.jsonl transcripts — the three
                        actions appearing ONLY here (and NOT in --main-session) ⇒ GREEN
+  --delta-files <csv>  判据7: the delta merged in from develop (rel paths, comma-separated). Classified
+                       against the code surface (--root). Pair with --delta-decision to judge a decision.
+  --delta-decision <reran-full-suite|skipped-full-suite>  判据7: what the executor actually did after
+                       merging develop. RED on code-delta-but-skipped / pure-doc-but-reran /
+                       cannot-judge-but-skipped (fail-closed).
   --json              machine-readable output { evaluated, ok, checks:[...], reason }
   --help              this help
 
 Exit codes:
   0  PASS or NOT-EVALUATED (read \`evaluated\` — false = could not judge, never conflated with green)
   1  RED — a main-thread-executor form (old A6 subject / \`git -C <wt>\` / missing-or-main agentId /
-      main-session carries the full-suite/flip/merge actions)
+      main-session carries the full-suite/flip/merge actions) OR an AC75 delta violation (rebase /
+      missing delta step / code-skip or doc-rerun)
   2  usage / environment error`;
 
 export function main(argv) {
@@ -309,6 +474,9 @@ export function main(argv) {
   const mainSessionFile = getArgValue(args, "--main-session");
   const subagentTranscripts = (getArgValue(args, "--subagent-transcripts") ?? "")
     .split(",").map((s) => s.trim()).filter(Boolean);
+  const deltaFiles = (getArgValue(args, "--delta-files") ?? "")
+    .split(",").map((s) => s.trim()).filter(Boolean);
+  const deltaDecision = getArgValue(args, "--delta-decision") ?? null;
   const asJson = args.includes("--json");
 
   const checks = [];
@@ -323,6 +491,49 @@ export function main(argv) {
     if (!v1.ok) anyRed = true;
   }
   checks.push({ check: "a6-executor-position", ...v1, source: a6File ?? (a6Line != null ? "<a6-line>" : "<none>") });
+
+  // ── AC75 判据5 — A6 step ① rebase→merge + command rebase 检出 ─────────────────────────────────────
+  if (lineToJudge != null) {
+    const v5a = judgeA6MergeNotRebase(lineToJudge);
+    if (v5a.evaluated) {
+      anyEvaluated = true;
+      if (!v5a.ok) anyRed = true;
+    }
+    checks.push({ check: "a6-step1-merge-not-rebase", ...v5a, source: a6File ?? (a6Line != null ? "<a6-line>" : "<none>") });
+  }
+  if (command != null) {
+    const v5b = judgeCommandMergeNotRebase(command);
+    if (v5b.evaluated) {
+      anyEvaluated = true;
+      if (!v5b.ok) anyRed = true;
+    }
+    checks.push({ check: "command-merge-not-rebase", ...v5b, source: "<command>" });
+  }
+
+  // ── AC75 判据6 — A6 无锁段第 2 步 delta 断言面判定 (fail-closed) ────────────────────────────────────
+  if (lineToJudge != null) {
+    const v6 = judgeA6DeltaStep(lineToJudge);
+    if (v6.evaluated) {
+      anyEvaluated = true;
+      if (!v6.ok) anyRed = true;
+    }
+    checks.push({ check: "a6-delta-assertion-step", ...v6, source: a6File ?? (a6Line != null ? "<a6-line>" : "<none>") });
+  }
+
+  // ── AC75 判据7 — delta decision 能取假 ────────────────────────────────────────────────────────────
+  if (deltaFiles.length > 0 || deltaDecision != null) {
+    const codeSurface = resolveDeltaCodeSurface(root);
+    const v7 = judgeDeltaDecision(deltaFiles, codeSurface, deltaDecision);
+    if (v7.evaluated) {
+      anyEvaluated = true;
+      if (!v7.ok) anyRed = true;
+    }
+    checks.push({
+      check: "delta-assertion-decision",
+      ...v7,
+      source: `${deltaFiles.length} delta file(s)${deltaDecision != null ? `, decision=${deltaDecision}` : ""} (code-surface from ${root})`,
+    });
+  }
 
   // ── 判据2 — agentId in lock events + retry records ───────────────────────────────────────────────
   const eventRecords = readJsonlLines(lockEventsFile);
@@ -371,7 +582,7 @@ export function main(argv) {
   const out = {
     ok,
     evaluated: anyEvaluated,
-    reason: ok ? (anyEvaluated ? "executor-check-pass" : "nothing-to-judge (NOT-EVALUATED)") : "main-thread-executor-form",
+    reason: ok ? (anyEvaluated ? "executor-check-pass" : "nothing-to-judge (NOT-EVALUATED)") : "main-thread-executor-or-ac75-delta-violation",
     checks,
   };
 

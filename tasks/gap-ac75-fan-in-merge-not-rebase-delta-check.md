@@ -76,10 +76,40 @@ agentId aab2d14d 对应 bc1a438b/subagents/agent-aab2d14d10a762ff4.jsonl = 【su
 - orchestration/fast-mode-tick-core.md（A6 无锁段第 1 步 rebase→merge + 第 2 步 delta 判定——C17 外层落盘）
 - plugin/loop/fast-mode-tick-core.md（A6 双副本同改——AC73 判据4）
 - plugin/scripts/fan-in-ff-merge.sh（重试路径文案：rebase→merge + delta 判定说明）
-- plugin/scripts/fan-in-ff-executor-check.ts（新检查器/判据——rebase 检出 + delta 判定 fail-closed + 真样本回放）
+- plugin/scripts/fan-in-ff-executor-check.ts（AC75 判据扩展——rebase 检出 + delta 判定 fail-closed + 真样本回放；文件非新增，AC67 已建）
 - plugin/test/fan-in-ff-executor-check.test.mjs（负控制 fixture）
 - tasks/gap-ac75-fan-in-merge-not-rebase-delta-check.md（自身）
 
 ## Evidence
 
-（落地后回填）
+（inner 实现落地 2026-08-14，scoped 门绿 + ts-typecheck 绿，提交 SHA 见提交信息）
+
+**AC1 判据1（rebase→merge）**：`plugin/loop/fast-mode-tick-core.md` A6 无锁段第 1 步已是 `git merge $MERGE_TARGET`
+（AC67 落地时带入「取代旧 rebase」）；`fan-in-ff-merge.sh` 头注释与重试路径文案改为「必须 merge 不得 rebase（人 07:0xZ 裁定, AC75）」
+（第 6-12 行 + 重试信息行）。
+`fan-in-ff-executor-check.ts` 新增判据5：`judgeA6MergeNotRebase` / `judgeCommandMergeNotRebase`——
+rebase 检出（`git rebase $MERGE_TARGET` 或 `git rebase develop` 命令形 ⇒ RED）。
+
+**AC2 判据2（delta 断言面判定 fail-closed）**：`plugin/loop/fast-mode-tick-core.md` A6 无锁段新增第 2 步
+「delta 断言面判定（AC75, 复用 AC51 doc/代码分类, 不设阈值）：merge 进来的 develop delta 全落 doc/任务体/telemetry 面
+⇒ 跳过全量 suite（只跑 doc 检查）；触及代码/测试/脚本面 ⇒ 重跑全量；判不出 ⇒ fail-closed 重跑全量（硬规则 3b）」（原 ②③④ → ③④⑤）。
+`fan-in-ff-executor-check.ts` 判据6（`judgeA6DeltaStep`，step 缺失或非 fail-closed ⇒ RED）+ 判据7（`classifyDeltaRerun` /
+`judgeDeltaDecision`，`resolveDeltaCodeSurface` = AC51 断言面减 tasks/**）。
+
+**AC3 判据3（能取假，D2 真样本）**：真实 develop delta 回放——
+- `00cd6408`（tasks/gap-ac72 + tasks/gap-ac73，纯任务体）→ `rerun=false`；回放「reran-full-suite」⇒ RED（纯 doc 却重跑）
+- `6b0802e7`（plugin/loop + plugin/scripts/*.ts + plugin/test/*.test.mjs + tasks）→ `rerun=true`；回放「skipped-full-suite」⇒ RED（含代码却跳过）
+- 空 delta + skipped ⇒ RED（fail-closed）
+`fan-in-ff-executor-check.test.mjs` 新增 17 个 AC75 用例（共 52 个，全绿）。
+
+**AC4 判据4（AC67 第一条重试记录留档）**：主检出 `.quay/fan-in-retries.jsonl` 首条 =
+`{"taskId":"gap-ac67-fan-in-executor-to-task-subagent","attempt":1,"developHead":"24bcad50…",
+"ts":"2026-08-14T06:38:45Z","runId":"fm-gap-ac67-…-aab2d14d","agentId":"aab2d14d10a762ff4","mergeTarget":"develop",
+"error":"hint: Diverging branches can't be fast-forwarded…"}` —— 五字段 + agentId + mergeTarget + error 齐；
+`agentId aab2d14d` 对应 bc1a438b/subagents/agent-aab2d14d10a762ff4.jsonl = subagent；锁事件 acquire/release 同秒同 pid ⇒ 持锁毫秒级。
+
+**C17**：`orchestration/fast-mode-tick-core.md` A6（outer-exclusive）未直接编辑——给出同形修改建议，由 outer 落盘。
+建议：将 A6 无锁段第 1 步确认 `git merge $MERGE_TARGET`（不得 rebase），并在 ② ts-typecheck 前插入第 2 步
+「delta 断言面判定（AC75, 复用 AC51 doc/代码分类, 不设阈值）：merge 进来的 develop delta 全落 doc/任务体/telemetry 面
+⇒ 跳过全量 suite（只跑 doc 检查）；触及代码/测试/脚本面 ⇒ 重跑全量；判不出 ⇒ fail-closed 重跑全量（硬规则 3b）」，
+后续步骤顺延。
