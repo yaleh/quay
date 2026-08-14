@@ -58,6 +58,12 @@ import {
   semanticTriggerHeuristic,
   evaluateTrigger,
   freeTextHash,
+  CHECKER_COST_FILE,
+  ASSESSMENT_NOT_RUN_REASON,
+  parseRecordedAt,
+  lastCallRecord,
+  judgeAssessmentSteps,
+  readLastCallRecord,
 } from "../scripts/inner-wakeup-heartbeat-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -804,6 +810,242 @@ test("AC77 判据1 — evaluateTrigger: unchanged hash + no spawn-limit string �
   assert.equal(t.fired, false, "same hash + no spawn-limit ⇒ no trigger");
   assert.equal(t.hashChanged, false);
   assert.equal(t.heuristic, false);
+});
+
+// ── I1 read-product criterion (tasks/gap-inner-assessment-steps-no-product-reader) ──────────────────
+// 判据1: three dispatch-evaluation freshness signals (heartbeat jsonl ts + slot-refill call record +
+// ready-pool call record); a STALE ready-pool/slot-refill call record ⇒ "inner 派发评估未跑".
+// 判据2 (能取假): the 07:41–12:2x absence window replays RED (heartbeat 4.7h / ready-pool 4.2h /
+// slot-refill 2.7h stale). Hard rule 3b: a step with no call record in an ABSENT ledger reports
+// NOT-EVALUATED — a distinct value, never a fake pass or a fake fail.
+
+test("I1 — parseRecordedAt parses the checker-cost `at` ISO timestamp into epoch seconds", () => {
+  // 2026-08-14T13:01:28.955Z — one of the real checker-cost.jsonl rows in the main checkout.
+  const epoch = parseRecordedAt("2026-08-14T13:01:28.955Z");
+  assert.equal(typeof epoch, "number", `must parse to epoch seconds, got ${epoch}`);
+  assert.ok(epoch > 1786600000, `must be a 2026 epoch (~17866xxxxxx), got ${epoch}`);
+  // The exact back-conversion round-trips.
+  assert.equal(new Date(epoch * 1000).toISOString().slice(0, 19), "2026-08-14T13:01:28");
+  assert.equal(parseRecordedAt(null), null, "non-string → null");
+  assert.equal(parseRecordedAt("not-a-date"), null, "unparsable → null");
+  assert.equal(parseRecordedAt(""), null, "empty → null");
+});
+
+test("I1 — lastCallRecord returns the LAST (newest) row for a name; null when absent", () => {
+  const rows = [
+    { name: "ready-pool-check", at: "2026-08-14T08:08:35Z", n: 6 },
+    { name: "ready-pool-check", at: "2026-08-14T13:01:28.955Z", n: 6 },
+    { name: "slot-refill", at: "2026-08-14T09:39:12Z" },
+  ];
+  const rp = lastCallRecord(rows, "ready-pool-check");
+  assert.equal(rp.atRaw, "2026-08-14T13:01:28.955Z", "the LAST row wins (append-ordered ledger)");
+  assert.equal(parseRecordedAt(rp.atRaw), parseRecordedAt("2026-08-14T13:01:28.955Z"));
+  const sr = lastCallRecord(rows, "slot-refill");
+  assert.equal(sr.atRaw, "2026-08-14T09:39:12Z");
+  assert.equal(lastCallRecord(rows, "cap-from-gate"), null, "unknown name → null");
+  assert.equal(lastCallRecord([], "ready-pool-check"), null, "empty rows → null");
+  // A row without `at` is skipped (malformed row ≠ a recorded time).
+  const malformed = [{ name: "ready-pool-check" }, { name: "ready-pool-check", at: "2026-08-14T13:01:00Z" }];
+  assert.equal(lastCallRecord(malformed, "ready-pool-check").atRaw, "2026-08-14T13:01:00Z");
+});
+
+test("I1 — judgeAssessmentSteps: fresh ready-pool + fresh slot-refill ⇒ ok (assessment ran)", () => {
+  const now = 1786716000;
+  const a = judgeAssessmentSteps(now, {
+    heartbeat: { ts: now - 60 },
+    readyPool: { atEpoch: now - 120, atRaw: "x" },
+    slotRefill: { atEpoch: now - 90, atRaw: "y" },
+  }, DEFAULT_MAX_AGE_SECS);
+  assert.equal(a.ok, true, `fresh assessment must pass:\n${JSON.stringify(a)}`);
+  assert.deepEqual(a.stale, []);
+  assert.equal(a.status, "assessment-steps-ok");
+  assert.equal(a.reason, null);
+  assert.equal(a.signals.readyPool.status, "fresh");
+  assert.equal(a.signals.slotRefill.status, "fresh");
+  assert.equal(a.signals.heartbeat.status, "fresh");
+});
+
+test("I1 — judgeAssessmentSteps: stale ready-pool call record ⇒ RED (inner 派发评估未跑)", () => {
+  const now = 1786716000;
+  const a = judgeAssessmentSteps(now, {
+    heartbeat: { ts: now - 60 }, // heartbeat FRESH — the case the old checker missed
+    readyPool: { atEpoch: now - 4.2 * 3600, atRaw: "2026-08-14T08:08:35Z" },
+    slotRefill: { atEpoch: now - 90, atRaw: "y" },
+  }, DEFAULT_MAX_AGE_SECS);
+  assert.equal(a.ok, false, `stale ready-pool must RED:\n${JSON.stringify(a)}`);
+  assert.deepEqual(a.stale, ["ready-pool"]);
+  assert.equal(a.status, "assessment-steps-stale");
+  assert.equal(a.reason, ASSESSMENT_NOT_RUN_REASON);
+  assert.equal(a.signals.readyPool.status, "stale");
+  assert.equal(a.signals.slotRefill.status, "fresh");
+});
+
+test("I1 — judgeAssessmentSteps: stale slot-refill call record alone ⇒ RED", () => {
+  const now = 1786716000;
+  const a = judgeAssessmentSteps(now, {
+    heartbeat: { ts: now - 60 },
+    readyPool: { atEpoch: now - 90, atRaw: "y" },
+    slotRefill: { atEpoch: now - 2.7 * 3600, atRaw: "2026-08-14T09:39:12Z" },
+  }, DEFAULT_MAX_AGE_SECS);
+  assert.equal(a.ok, false);
+  assert.deepEqual(a.stale, ["slot-refill"]);
+  assert.equal(a.reason, ASSESSMENT_NOT_RUN_REASON);
+});
+
+test("I1 — judgeAssessmentSteps: no call records (ledger absent) is NOT-EVALUATED, not a fake fail (hard rule 3b)", () => {
+  const now = 1786716000;
+  const a = judgeAssessmentSteps(now, {
+    heartbeat: { ts: now - 60 },
+    readyPool: null,
+    slotRefill: null,
+  }, DEFAULT_MAX_AGE_SECS);
+  assert.equal(a.ok, true, "no ledger to evaluate from must not fake a fail");
+  assert.deepEqual(a.stale, [], "not-recorded ≠ stale");
+  assert.equal(a.signals.readyPool.status, "not-recorded");
+  assert.equal(a.signals.slotRefill.status, "not-recorded");
+  assert.equal(a.signals.heartbeat.status, "fresh");
+});
+
+test("I1 — judgeAssessmentSteps: the 07:41 absence shape (all three stale) is RED (判据2 replay)", () => {
+  // The 07:41–12:2x absence window (I1): heartbeat last 07:41:43 (4.7h), ready-pool last 08:08:35
+  // (4.2h), slot-refill last 09:39:12 (2.7h) — now ≈ 12:25. Replayed with relative offsets so the
+  // test is deterministic regardless of wall-clock.
+  const now = 1786716000;
+  const a = judgeAssessmentSteps(now, {
+    heartbeat: { ts: now - 4.7 * 3600, atRaw: "" },
+    readyPool: { atEpoch: now - 4.2 * 3600, atRaw: "2026-08-14T08:08:35Z" },
+    slotRefill: { atEpoch: now - 2.7 * 3600, atRaw: "2026-08-14T09:39:12Z" },
+  }, DEFAULT_MAX_AGE_SECS);
+  assert.equal(a.ok, false, `07:41 absence shape must RED:\n${JSON.stringify(a)}`);
+  assert.ok(a.stale.includes("ready-pool"), "ready-pool 4.2h stale must be named");
+  assert.ok(a.stale.includes("slot-refill"), "slot-refill 2.7h stale must be named");
+  assert.equal(a.reason, ASSESSMENT_NOT_RUN_REASON);
+});
+
+// ── I1 CLI fixtures + integration ───────────────────────────────────────────────────────────────────
+
+/** Write a checker-cost.jsonl ledger (one jsonl line per record) into <root>/.quay/. */
+function writeCheckerCostTo(root, records) {
+  const quayDir = path.join(root, ".quay");
+  fs.mkdirSync(quayDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(quayDir, CHECKER_COST_FILE),
+    records.map((r) => JSON.stringify(r)).join("\n") + "\n",
+    "utf8",
+  );
+}
+
+/** A root with a heartbeat + a checker-cost ledger at the given relative staleness offsets. */
+function makeRootWithAssessment({ heartbeatAgeSecs, readyPoolAgeSecs, slotRefillAgeSecs }) {
+  const root = makeRootWithHeartbeat(fullHeartbeat({ ts: Math.floor(Date.now() / 1000) - heartbeatAgeSecs }));
+  const now = Date.now();
+  const iso = (ageSecs) => new Date(now - ageSecs * 1000).toISOString();
+  const records = [];
+  if (readyPoolAgeSecs != null) {
+    records.push({ name: "ready-pool-check", ms: 3007, n: 6, load: 9.01, at: iso(readyPoolAgeSecs) });
+  }
+  if (slotRefillAgeSecs != null) {
+    records.push({ name: "slot-refill", ms: 120, n: 1, load: 9.01, at: iso(slotRefillAgeSecs) });
+  }
+  if (records.length > 0) writeCheckerCostTo(root, records);
+  return root;
+}
+
+test("I1 CLI --json — the 07:41 absence replay (all three stale) exits 1 with inner 派发评估未跑 (判据2)", () => {
+  // Replay the 07:41–12:2x absence window: heartbeat 4.7h, ready-pool 4.2h, slot-refill 2.7h stale.
+  const root = makeRootWithAssessment({ heartbeatAgeSecs: 4.7 * 3600, readyPoolAgeSecs: 4.2 * 3600, slotRefillAgeSecs: 2.7 * 3600 });
+  try {
+    const r = runCli(root, ["--json"]);
+    assert.equal(r.status, 1, `07:41 absence replay must exit 1:\n${r.stdout}\n${r.stderr}`);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.verdict, "DEAD");
+    assert.equal(out.status, "assessment-steps-stale");
+    assert.equal(out.reason, ASSESSMENT_NOT_RUN_REASON);
+    assert.ok(out.assessmentSteps.stale.includes("ready-pool"), "ready-pool must be in stale");
+    assert.ok(out.assessmentSteps.stale.includes("slot-refill"), "slot-refill must be in stale");
+    assert.equal(out.assessmentSteps.signals.readyPool.status, "stale");
+    assert.equal(out.assessmentSteps.signals.slotRefill.status, "stale");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("I1 CLI — the 07:41 absence replay names 派发评估未跑 in human output", () => {
+  const root = makeRootWithAssessment({ heartbeatAgeSecs: 4.7 * 3600, readyPoolAgeSecs: 4.2 * 3600, slotRefillAgeSecs: 2.7 * 3600 });
+  try {
+    const r = runCli(root);
+    assert.equal(r.status, 1, `human output must exit 1:\n${r.stdout}\n${r.stderr}`);
+    assert.match(r.stdout, /inner 派发评估未跑/, "the human verdict must name 派发评估未跑");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("I1 CLI --json — fresh all three (heartbeat + ready-pool + slot-refill) exits 0 (GREEN)", () => {
+  const root = makeRootWithAssessment({ heartbeatAgeSecs: 60, readyPoolAgeSecs: 120, slotRefillAgeSecs: 90 });
+  try {
+    const r = runCli(root, ["--json"]);
+    assert.equal(r.status, 0, `fresh assessment must exit 0:\n${r.stdout}\n${r.stderr}`);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.verdict, "ALIVE");
+    assert.equal(out.assessmentSteps.status, "assessment-steps-ok");
+    assert.equal(out.assessmentSteps.signals.readyPool.status, "fresh");
+    assert.equal(out.assessmentSteps.signals.slotRefill.status, "fresh");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("I1 CLI --json — heartbeat FRESH but ready-pool call record STALE exits 1 (the discriminating case the old checker missed)", () => {
+  // The exact shape the existing heartbeat freshness check could NOT see: inner awake (heartbeat
+  // fresh) but the ready-pool assessment stopped 4.2h ago.
+  const root = makeRootWithAssessment({ heartbeatAgeSecs: 60, readyPoolAgeSecs: 4.2 * 3600, slotRefillAgeSecs: 90 });
+  try {
+    const r = runCli(root, ["--json"]);
+    assert.equal(r.status, 1, `fresh-heartbeat-but-stale-ready-pool must exit 1:\n${r.stdout}\n${r.stderr}`);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.verdict, "DEAD");
+    assert.equal(out.status, "assessment-steps-stale");
+    assert.deepEqual(out.assessmentSteps.stale, ["ready-pool"]);
+    assert.equal(out.assessmentSteps.signals.heartbeat.status, "fresh");
+    assert.equal(out.assessmentSteps.signals.readyPool.status, "stale");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("I1 CLI --json — a fresh heartbeat with NO checker-cost ledger is GREEN with NOT-EVALUATED signals (3b)", () => {
+  // A workspace that only writes the heartbeat (e.g. a fresh checkout) must NOT be RED on the
+  // assessment criterion alone — the ledger is absent so the evaluation-steps are NOT-EVALUATED,
+  // a distinct value from both "fresh" and "stale".
+  const root = makeRootWithHeartbeat(fullHeartbeat());
+  try {
+    const r = runCli(root, ["--json"]);
+    assert.equal(r.status, 0, `no ledger must not fake a fail:\n${r.stdout}\n${r.stderr}`);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.verdict, "ALIVE");
+    assert.equal(out.assessmentSteps.status, "assessment-steps-ok");
+    assert.equal(out.assessmentSteps.signals.readyPool.status, "not-recorded");
+    assert.equal(out.assessmentSteps.signals.slotRefill.status, "not-recorded");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("I1 CLI --json — an existing ledger with a stale ready-pool but NO slot-refill rows is RED (ready-pool is the 必跑 step)", () => {
+  // The real world: checker-cost.jsonl exists (737 ready-pool rows), slot-refill has no rows (it does
+  // not self-record yet). ready-pool staleness alone must fire even with slot-refill not-recorded.
+  const root = makeRootWithAssessment({ heartbeatAgeSecs: 60, readyPoolAgeSecs: 4.2 * 3600, slotRefillAgeSecs: null });
+  try {
+    const r = runCli(root, ["--json"]);
+    assert.equal(r.status, 1, `stale ready-pool with absent slot-refill rows must exit 1:\n${r.stdout}\n${r.stderr}`);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.status, "assessment-steps-stale");
+    assert.deepEqual(out.assessmentSteps.stale, ["ready-pool"]);
+    assert.equal(out.assessmentSteps.signals.slotRefill.status, "not-recorded");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 // ── doc-contract wiring (AC4: inner B3 + outer A 段必读) ───────────────────────────────────────────

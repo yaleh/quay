@@ -43,9 +43,14 @@ should_refill           True      True              false   ← 结论相反
 **判据1**：`runMachineSlotRefill` 增加 running 集参数；闸把它**自己那一轮真实观测到的在跑 subagent 集**传下去——`should_refill/slots_free` 用 running 集算（Consumer B），`dispatchable_disjoint` 保持宽集（Consumer A）。
 **判据2（能取假·真样本不构造）**：**此刻状态就是真样本**——传真集 ⇒ should_refill=false ⇒ 放行；不传 ⇒ True ⇒ 拒写。同一秒、同一台机器、两个相反结论，回放必须红（现状=拒写）。
 **判据3（3b 形态，manager 顺带报）**：裸传 `--running`（不给 ids）得到 `running_subagent_count=0 ⇒ slots_free=5`——**「没提供集合」与「真的一个都没在跑」输出完全同形** ⇒ 修时**空集默认不得成 0**，须区分「未提供」（null/未设置）与「测得为 0」（真零）。
-**判据4**：既有测试全绿 + `--for-task` scoped 门绿。
+**判据4（拒写必须留痕——manager 13:5xZ 报，比接线更值钱）**：心跳载体只记录【写成功的轮】，被拒的轮零痕迹（REFUSE 只走 `console.error` stderr，jsonl 无行）⇒ **「inner 没跑评估」(a) 与「inner 跑了但被闸拒写」(b) 在 jsonl 上完全同形**——这就是三轮三个结论（13:1xZ 判 a / 13:2xZ 判降级误拒 / 13:4xZ 才定位结构版）而载体读数一模一样的机制。**修法：闸 REFUSE 时写 `{written:false, refuse_reason:...}` 到同一载体（或旁路载体）。⊢ 负控制现成**：此刻就是 REFUSE 状态 ⇒ 修好后立刻出现一条 `written:false` 行；修之前该行数恒为 0。**与硬规则 3 同族**：「缺席被伪装成在场」的镜像——这里是「被拒」被伪装成「没跑」。
+**判据5**：既有测试全绿 + `--for-task` scoped 门绿。
+
+**⚠️ 观察面黑窗的误诊持续时长（outer 实测读数）**：`invariant-violated` 在我的 tick-log 出现 3 次（10:05Z / 12:4xZ / 13:3xZ）——但那是 A13 的 stdout/逐轮读数，**jsonl 上三轮给一模一样的「无新行」**（10:05Z 我还在报「评估步骤停」、13:4xZ 才定位「闸结构无出口」）。载体不区分「没跑」与「被拒」是误诊持续 3 小时的载体级原因。
 
 **优先级**：**高于当前在飞其它项**——它挡的不是一个任务，是整个 inner 层观测面（心跳停 ⇒ A3/A13 全读不到真值，outer 和 manager 都在盲判）。**但不停在飞轮次**（它只影响「结束一轮时拒写」，不影响正在跑的实现）。
+
+**⚠️ 等 I1 的到期条件（manager 13:5xZ ④——「无到期条件的等待」是硬规则 12 的镜像，凭空不设出口）**：本任务与 I1 同碰 `inner-wakeup-heartbeat-check.ts`（C17 ③ 同文件拒派），默认等 I1 落地。**但若 I1 在 3 个 tick 周期（60 分钟）内未落地**（红窗反复重跑等），**改为先派 AC53-gate、I1 让路**——AC53-gate 挡的是整层观测面，I1 挡的是一条任务。N=60min（本任务为观测面恢复关键，成本结构已知：黑窗每多 20 分钟就是一次 A13 盲判；I1 的红窗重跑通常单轮 <20 分钟）。
 
 **不覆盖**：不改 AC53 闸的判定逻辑本身（闸对宽集诚实是正确行为）；不改生产侧 slot-refill（已落地）；不改 awaiting-retry 语义。
 
@@ -64,11 +69,12 @@ should_refill           True      True              false   ← 结论相反
 - [ ] AC1 判据1：runMachineSlotRefill 接 running 集，闸用真观测在跑集算 should_refill/slots_free。
 - [ ] AC2 判据2 能取假：当前真样本（传真集放行/不传拒写）回放红。
 - [ ] AC3 判据3：空集默认≠测得 0（未提供 vs 真零可区分）。
-- [ ] AC4 既有测试全绿；`--for-task` scoped 门绿。
+- [ ] AC4 判据4：闸 REFUSE 时写 `{written:false, refuse_reason}` 留痕——「被拒」不再伪装成「没跑」；⊢ 修后立刻出现 written:false 行、修前恒 0。
+- [ ] AC5 既有测试全绿；`--for-task` scoped 门绿。
 
 ## Definition of Done
 
-- [ ] AC53 闸接 running 集（心跳不再被 awaiting-retry 占宽集永久拒写）+ 空集/真零可区分 + 能取假。
+- [ ] AC53 闸接 running 集（心跳不再被 awaiting-retry 占宽集永久拒写）+ 空集/真零可区分 + 拒写留痕（written:false 行）+ 能取假。
 
 ## Touches
 

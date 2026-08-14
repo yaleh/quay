@@ -32,6 +32,10 @@ import { isDirectEntry } from "./gate-script-base.ts";
 // self-reported fields. analyzeSlotRefill is the pure machine decision; FIXED_DISPATCH_CAP is the
 // default cap the tick's dispatch decision uses (A10).
 import { analyzeSlotRefill, FIXED_DISPATCH_CAP } from "./slot-refill.ts";
+// readCheckerCost: the fail-open ledger reader for .quay/checker-cost.jsonl (pure-append
+// zero-judgment store where ready-pool-check self-records every run AND — once slot-refill is
+// wrapped the same way — the slot-refill call record lives). I1 read-product criterion consumes it.
+import { readCheckerCost } from "./checker-cost.ts";
 
 /** Heartbeat file name under `<root>/.quay/` — append-only jsonl (AC53 AC3: 可回看 — every
  *  reschedule appends a line, so the history is reviewable, not a single-slot snapshot). */
@@ -44,6 +48,28 @@ export const LEGACY_HEARTBEAT_FILE = "inner-wakeup-heartbeat.json";
 
 /** Default dead threshold: 3 tick periods × 1800s (task Contract band `inner_wakeup_heartbeat_age <= 5400`). */
 export const DEFAULT_MAX_AGE_SECS = 5400;
+
+// ── I1 read-product criterion (tasks/gap-inner-assessment-steps-no-product-reader) ───────────────────
+//
+// Defect family (manager 2026-08-14 12:2xZ, I1 / SPEC-tick-quality R6): during 07:41–12:2x the inner
+// STOPPED running the dispatch-evaluation steps — slot-refill last 09:39:12 (2.7h), ready-pool-check
+// last 08:08:35 (4.2h), heartbeat write last 07:41:43 (4.7h) — while ScheduleWakeup kept firing 62
+// times. No layer detected it because NOTHING read the three steps' products every round (R6:
+// "凡 X 的执行留有产物，必须每轮读该产物"). Root cause: the ScheduleWakeup prompt was switched to the
+// sentinel `<<autonomous-loop-dynamic>>` at 07:41:46 (8 seconds after the heartbeat stopped) — the
+// write-heartbeat/run-assessment step was not carried onto the new drive path.
+//
+// 判据1 (this criterion): three freshness signals — heartbeat jsonl ts, slot-refill call record,
+// ready-pool call record. Any stale ⇒ "inner 派发评估未跑" (the dispatch-evaluation did not run).
+// 判据2 (能取假): the 07:41–12:2x absence window is the replay sample — all three stale ⇒ RED.
+// 判据3 (approach): the FIX is comparing the two drive paths' STEP SETS (concrete-prompt path vs the
+// sentinel path) — NOT grepping logs for missed runs (hundreds of lines, no step-set answer). The
+// read-product criterion is the mechanical guard that makes a future step-set drop VISIBLE.
+export const CHECKER_COST_FILE = "checker-cost.jsonl";
+
+/** Reason string when an assessment-step call record (ready-pool/slot-refill) is stale — the
+ *  dispatch-evaluation steps did not run (I1). Human phrase: "inner 派发评估未跑". */
+export const ASSESSMENT_NOT_RUN_REASON = "inner-assessment-steps-not-run";
 
 /** Sentinel for a file that exists but does not parse / lacks a valid `ts`. */
 export const MALFORMED = Object.freeze({ __malformed__: true });
@@ -304,6 +330,93 @@ export function readHeartbeatText(root) {
   return null;
 }
 
+// ── I1 read-product criterion — the three assessment-step freshness signals ───────────────────────────
+//
+// The dispatch-evaluation steps all leave products: the heartbeat jsonl (ts), the ready-pool call
+// record (checker-cost.jsonl `name:"ready-pool-check"` rows, self-recorded every run) and the
+// slot-refill call record (checker-cost.jsonl `name:"slot-refill"` rows). NOTHING read these every
+// round during 07:41–12:2x — the criterion below is that every-round reader. Fail-closed philosophy
+// is inherited from the heartbeat product: a product whose ABSENCE is the failure reports RED; a
+// product that CANNOT be evaluated (hard rule 3b: 读不懂 ≠ 合格) reports a DISTINCT not-recorded
+// value and never fakes a pass OR a fail.
+
+/** Parse a checker-cost `at` ISO-8601 timestamp (`2026-08-14T13:01:28.955Z`) into epoch seconds.
+ *  PURE. Returns null when the string is absent/unparsable (a malformed row is not a recorded time). */
+export function parseRecordedAt(at) {
+  if (typeof at !== "string" || at.trim() === "") return null;
+  const ms = Date.parse(at);
+  return Number.isFinite(ms) ? Math.floor(ms / 1000) : null;
+}
+
+/**
+ * Find the LAST call record for `name` in a checker-cost.jsonl rows array (rows are append-ordered,
+ * so the last matching row is the newest call). PURE.
+ * @param {Array<{name:string, at?:string}>} rows readCheckerCost output ([] when file absent)
+ * @param {string} name e.g. "ready-pool-check" | "slot-refill"
+ * @returns {{atEpoch:number|null, atRaw:string}|null} null = no row for this name in the ledger
+ */
+export function lastCallRecord(rows, name) {
+  for (let i = (rows || []).length - 1; i >= 0; i--) {
+    const r = rows[i];
+    if (r && r.name === name && typeof r.at === "string") {
+      return { atEpoch: parseRecordedAt(r.at), atRaw: r.at };
+    }
+  }
+  return null;
+}
+
+/**
+ * Read the LAST call record for a step under `<root>/.quay/checker-cost.jsonl`. The file is
+ * pure-append and fail-open (readCheckerCost skips malformed lines). Returns null when the ledger is
+ * absent OR the step has never recorded there — the caller distinguishes "ledger absent" from
+ * "step never recorded" by checking fs.existsSync on the ledger when it needs to.
+ */
+export function readLastCallRecord(root, name) {
+  const file = path.join(root || ".", ".quay", CHECKER_COST_FILE);
+  const rows = readCheckerCost(file);
+  return lastCallRecord(rows, name);
+}
+
+/**
+ * I1 判据1: judge the three dispatch-evaluation freshness signals. PURE.
+ * The RED trigger is the ASSESSMENT STEPS (ready-pool / slot-refill) going stale — the case the
+ * existing heartbeat freshness check MISSES (inner awake — heartbeat fresh — but the evaluation
+ * steps stopped). The heartbeat signal is REPORTED as the third signal but its staleness is the
+ * existing "inner 兜底心跳断" criterion (judgeHeartbeat), so it does not double-fire here.
+ * Per hard rule 3b, a not-recorded step (no call record in the ledger) is a DISTINCT value —
+ * neither "合格" nor a fake fail; it only fires when the record EXISTS and is stale.
+ * @param {number} nowSec epoch-seconds "now"
+ * @param {object} signals
+ * @param {object|null|MALFORMED} signals.heartbeat parseHeartbeat output (reported, not a trigger)
+ * @param {{atEpoch:number|null, atRaw:string}|null} signals.readyPool lastCallRecord output
+ * @param {{atEpoch:number|null, atRaw:string}|null} signals.slotRefill lastCallRecord output
+ * @param {number} [maxAgeSecs] staleness band (default 3 tick periods)
+ * @returns {{ok:boolean, stale:string[], status:string, reason:string|null, signals:object}}
+ */
+export function judgeAssessmentSteps(nowSec, { heartbeat, readyPool, slotRefill }, maxAgeSecs = DEFAULT_MAX_AGE_SECS) {
+  const toSignal = (lastTs, name) => {
+    if (lastTs == null) return { name, status: "not-recorded", ageSecs: null, lastTs: null };
+    const age = Math.max(0, nowSec - lastTs); // future ts (clock skew) clamps to 0 = fresh
+    return { name, status: age > maxAgeSecs ? "stale" : "fresh", ageSecs: age, lastTs };
+  };
+  const heartbeatSignal = heartbeat === MALFORMED
+    ? { name: "heartbeat", status: "malformed", ageSecs: null, lastTs: null }
+    : heartbeat == null
+      ? { name: "heartbeat", status: "missing", ageSecs: null, lastTs: null }
+      : toSignal(heartbeat.ts, "heartbeat");
+  const readyPoolSignal = toSignal(readyPool?.atEpoch ?? null, "ready-pool");
+  const slotRefillSignal = toSignal(slotRefill?.atEpoch ?? null, "slot-refill");
+  const signals = { heartbeat: heartbeatSignal, readyPool: readyPoolSignal, slotRefill: slotRefillSignal };
+  const stale = [readyPoolSignal, slotRefillSignal].filter((s) => s.status === "stale").map((s) => s.name);
+  return {
+    ok: stale.length === 0,
+    stale,
+    status: stale.length > 0 ? "assessment-steps-stale" : "assessment-steps-ok",
+    reason: stale.length > 0 ? ASSESSMENT_NOT_RUN_REASON : null,
+    signals,
+  };
+}
+
 /**
  * Run a FRESH slot-refill — the AC53 判据① MACHINE measurement (gap-inner-self-wake-sleep-empty-slots-
  * not-dispatch, outer 2026-08-13 ruling). The checker's end-invariant gate judges THIS result, never
@@ -425,6 +538,13 @@ ScheduleWakeup via plugin/scripts/inner-wakeup-heartbeat.ts) and judges:
       in the heartbeat can NEVER make this pass (the AC53 bypass: "ac51 subagent in flight…" shielded a
       null machine reason). Heartbeat's recorded dispatch-state is display-only evidence
       (recorded_no_refill_reason). Machine unverifiable ⇒ "结束不变式无法验证" + exit 1 (fail-closed).
+  (e) I1 read-product criterion (tasks/gap-inner-assessment-steps-no-product-reader) — the dispatch-
+      evaluation steps all leave products: heartbeat jsonl ts + slot-refill call record +
+      ready-pool call record (checker-cost.jsonl ${CHECKER_COST_FILE} rows). A STALE ready-pool or
+      slot-refill call record (age > max-age) ⇒ "inner 派发评估未跑" + exit 1 — the case the heartbeat
+      freshness check MISSES (inner awake but the evaluation stopped; the 07:41–12:2x absence window).
+      A step with NO call record in an absent ledger reports NOT-EVALUATED (hard rule 3b: 读不懂 ≠ 合格),
+      never a fake pass or a fake fail.
 
 Usage:
   --root <dir>         workspace root (default: cwd) — reads <root>/.quay/${HEARTBEAT_FILE}
@@ -434,8 +554,8 @@ Usage:
                          (the invariant is judged against the widest free-slot view).
   --json               JSON output (default human-readable)
 
-Exit: 0 ALIVE · 1 DEAD (missing / malformed / stale / fields-missing / dispatch-state-missing /
-end-invariant-unverifiable / invariant-violated) · 2 usage error`);
+Exit: 0 ALIVE · 1 DEAD (missing / malformed / stale / assessment-steps-stale / fields-missing /
+dispatch-state-missing / end-invariant-unverifiable / invariant-violated) · 2 usage error`);
 }
 
 export function main(argv) {
@@ -464,7 +584,26 @@ export function main(argv) {
   const text = readHeartbeatText(root);
   const heartbeat = parseHeartbeat(text);
   const nowSec = Math.floor(Date.now() / 1000);
-  let v = judgeHeartbeat(nowSec, heartbeat, maxAge);
+
+  // I1 read-product criterion (tasks/gap-inner-assessment-steps-no-product-reader): read the three
+  // dispatch-evaluation freshness signals — heartbeat jsonl ts + slot-refill call record +
+  // ready-pool call record. The ASSESSMENT STEPS (ready-pool / slot-refill) going stale is the case
+  // the existing heartbeat check MISSES (inner awake but the evaluation stopped); heartbeat staleness
+  // is reported as the third signal but judged by the existing "inner 兜底心跳断" criterion below.
+  // 判据2: the 07:41–12:2x absence window (all three stale) replays RED here.
+  const readyPoolRec = readLastCallRecord(root, "ready-pool-check");
+  const slotRefillRec = readLastCallRecord(root, "slot-refill");
+  const assessment = judgeAssessmentSteps(nowSec, { heartbeat, readyPool: readyPoolRec, slotRefill: slotRefillRec }, maxAge);
+
+  let v = assessment.stale.length > 0
+    ? {
+        alive: false,
+        status: "assessment-steps-stale",
+        ageSecs: null,
+        reason: ASSESSMENT_NOT_RUN_REASON,
+        assessmentSteps: assessment,
+      }
+    : judgeHeartbeat(nowSec, heartbeat, maxAge);
 
   // AC2/AC3: a FRESH heartbeat must also satisfy the minimal field contract. A fresh-but-shrunk
   // heartbeat (e.g. the 2026-08-11 05:20 3-key {ts, delaySeconds, reason}) is RED — reason prose
@@ -576,11 +715,34 @@ export function main(argv) {
       endInvariant: endInvariant
         ? { ok: endInvariant.ok, violated: endInvariant.violated, judgedFrom: endInvariant.judgedFrom ?? null, reason: endInvariant.reason, evidence: endInvariant.evidence }
         : null,
+      // I1 read-product criterion (tasks/gap-inner-assessment-steps-no-product-reader): the three
+      // dispatch-evaluation freshness signals. status "assessment-steps-stale" + reason
+      // "inner-assessment-steps-not-run" ⇒ "inner 派发评估未跑".
+      assessmentSteps: {
+        status: assessment.status,
+        reason: assessment.reason,
+        stale: assessment.stale,
+        signals: {
+          heartbeat: assessment.signals.heartbeat,
+          readyPool: assessment.signals.readyPool,
+          slotRefill: assessment.signals.slotRefill,
+        },
+      },
     }, null, 2));
   } else {
     const base = `inner-wakeup-heartbeat: ${v.alive ? "ALIVE" : "DEAD"}`;
     if (v.status === "alive") {
       console.log(`${base} — age ${v.ageSecs}s ≤ ${maxAge}s, fields ${fields.fieldCount}/${REQUIRED_HEARTBEAT_FIELDS.length} + dispatch-state ${dispatchState.ok ? "ok" : "missing"} (heartbeat fresh + contracts ok)`);
+    } else if (v.status === "assessment-steps-stale") {
+      const a = v.assessmentSteps || {};
+      const part = (s) => {
+        if (s.status === "stale") return `${s.name} 陈旧 ${s.ageSecs}s`;
+        if (s.status === "not-recorded") return `${s.name} 无记录(NOT-EVALUATED)`;
+        if (s.status === "malformed") return `${s.name} 损坏`;
+        if (s.status === "missing") return `${s.name} 缺失`;
+        return `${s.name} 新鲜`;
+      };
+      console.log(`${base} — inner 派发评估未跑 ⇒ 评估三步骤陈旧（${[a.signals?.heartbeat, a.signals?.readyPool, a.signals?.slotRefill].filter(Boolean).map(part).join(" / ")}）`);
     } else if (v.status === "stale") {
       const last = new Date(nowSec * 1000 - v.ageSecs * 1000).toISOString();
       console.log(`${base} — age ${v.ageSecs}s > ${maxAge}s ⇒ inner 兜底心跳断 (last reschedule ${last})`);
