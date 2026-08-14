@@ -1,7 +1,7 @@
 ---
 id: gap-ac69-suite-slot-full-should-queue-not-wait
 title: AC69 槽满时应排队不白等——第三条 suite 起跑即排队，槽空毫秒级接上（先量再改，量现成）
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
