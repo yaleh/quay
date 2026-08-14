@@ -2225,5 +2225,46 @@ test("MEASURED — telemetry read failure degrades but is never silent (measurem
   assert.equal(r.measurement_source, "degraded-no-telemetry");
   assert.ok(r.measurement_error && /ENOTDIR|not a directory|Command failed/.test(r.measurement_error),
     `measurement_error surfaced, got: ${r.measurement_error}`);
-  assert.equal(r.in_flight_count, 0, "degraded fallback is empty — but the error makes it not-silent");
+  // AC6 (tasks/gap-in-flight-resolve-by-task-id-not-worktree-name, 判据5 修法 (a)): a degraded
+  // measurement is NOT "genuinely 0 in-flight" — the slot-family fields are NULL so a downstream
+  // arithmetic consumer crashes instead of silently computing "5 empty slots".
+  assert.equal(r.in_flight_count, null, "degraded → in_flight_count is null (not same-shaped as 0)");
+  assert.equal(r.slots_free, null, "degraded → slots_free is null (never a silently-computed '5 empty slots')");
+  assert.equal(r.occupied_slots, null, "degraded → occupied_slots is null");
+  assert.equal(r.subagents_in_flight, null, "degraded → subagents_in_flight is null");
+  assert.equal(r.should_refill, false, "degraded → fail-closed: no refill");
+});
+
+// AC6 DUAL-MEASUREMENT NEGATIVE CONTROL (tasks/gap-in-flight-resolve-by-task-id-not-worktree-name,
+// 判据5 修法 (a), manager 13:2xZ): mock measurement_error non-empty ⇒ the measured slot-family fields
+// are null; the SAME call with a healthy measurement_source ⇒ they stay numbers (negative control —
+// the null is keyed to degraded, not to "empty in-flight").
+
+test("AC6 — degraded measurement nulls in_flight_count/slots_free/subagents_in_flight; healthy source keeps numbers (负控制)", (t) => {
+  const root = makeWorkspace("ac6-degraded");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const tasksDir = path.join(root, "tasks");
+  writeTask(root, "gap-a", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/a.ts (new)"]) });
+  const base = { tasksDir, root, cap: 5, inFlight: [inFlightTask("gap-a", ["- code/a.ts (new)"])] };
+
+  // 负控制 mock: measurement_error non-empty + degraded source (the 2026-08-14 13:2xZ 现场 shape:
+  // spawnSync ETIMEDOUT ⇒ measurement_source='degraded-no-telemetry').
+  const degraded = analyzeSlotRefill({ ...base, measurementSource: "degraded-no-telemetry", measurementError: "spawnSync fast-mode-telemetry.ts ETIMEDOUT (load1=18.58)" });
+  assert.equal(degraded.measurement_source, "degraded-no-telemetry");
+  assert.ok(degraded.measurement_error, "measurement_error is non-empty (the mock)");
+  assert.equal(degraded.in_flight_count, null, "degraded → in_flight_count null (never a silent 0)");
+  assert.equal(degraded.slots_free, null, "degraded → slots_free null (never a silently-computed '5 empty slots')");
+  assert.equal(degraded.subagents_in_flight, null, "degraded → subagents_in_flight null");
+  assert.equal(degraded.occupied_slots, null, "degraded → occupied_slots null");
+  assert.equal(degraded.running_subagent_count, null, "degraded → running_subagent_count null");
+  assert.equal(degraded.should_refill, false, "degraded → fail-closed no-refill");
+  assert.ok(degraded.no_refill_reason && /measurement degraded/.test(degraded.no_refill_reason),
+    "no_refill_reason names the degraded state, not a fake 'no free slots'");
+
+  // Negative control: the SAME inputs with a HEALTHY source (explicit-input) ⇒ numbers, not null.
+  const healthy = analyzeSlotRefill({ ...base, measurementSource: "explicit-input" });
+  assert.equal(healthy.in_flight_count, 1, "healthy → in_flight_count stays a number");
+  assert.equal(healthy.slots_free, 4, "healthy → slots_free stays a number");
+  assert.equal(healthy.occupied_slots, 1, "healthy → occupied_slots stays a number");
+  assert.equal(healthy.subagents_in_flight, 0, "healthy → subagents_in_flight stays a number");
 });

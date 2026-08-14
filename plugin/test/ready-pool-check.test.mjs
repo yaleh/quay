@@ -3015,13 +3015,15 @@ test("AC46 marker fix: a candidate DISCUSSING superseded is promotable; a candid
 test("AC5 production negative control: the promotion gate rejects compound/self-touch samples and admits the clean three (real task bodies)", () => {
   const repoRoot = path.resolve(__dirname, "..", "..");
   const tasksDir = path.join(repoRoot, "tasks");
-  // reject self-touch sample = DIR-127: a REAL direction-recording task ("仅记录方向", no concrete
-  // Touches) that structurally lacks its own tasks/DIR-127.md self-touch and is stable — the previous
+  // reject self-touch sample = DIR-001: a REAL direction-recording task ("仅记录方向", no concrete
+  // Touches) that structurally lacks its own tasks/DIR-001.md self-touch and is stable — the previous
   // sample (gap-worktree-node-modules-inconsistent-self-verify) was removed because A22's fix-
-  // unqualified legitimately ADDED its self-touch (86dacd51) → the gate correctly admitted it and the
-  // sample became a false reject. Pick only tasks that can never gain a self-touch (direction records,
-  // not execution candidates); verify with buildTargetedPromotion before swapping.
-  const rejectIds = ["gap-quay-has-never-self-hosted-its-own-cold-start", "DIR-127"];
+  // unqualified legitimately ADDED its self-touch (86dacd51); DIR-127 met the same fate (self-touch
+  // added when prepared for dispatch, 2026-08-14) → both became false rejects. DIR-001 is a done
+  // direction record (A22 never promotes done → can never gain a self-touch). Pick only tasks that
+  // can never gain a self-touch (direction records, not execution candidates); verify with
+  // buildTargetedPromotion before swapping.
+  const rejectIds = ["gap-quay-has-never-self-hosted-its-own-cold-start", "DIR-001"];
   const admitIds = ["gap-spec11-stage2-retest-with-concurrency", "gap-slot-refill-clique-ignores-landed-touches", "gap-landing-target-branch-consistency-check"];
   // Build allTasks from the REAL task files (REAL statuses — a dependency that is done stays done, so
   // the gate's deps check resolves; the negative-control SAMPLES are real, never fabricated).

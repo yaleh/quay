@@ -802,6 +802,16 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
   // dispatchable recommendation is the exact blind-spot the tick now forces). `recommended` is emitted
   // as a separate array below precisely so the consumer can read "recommended 非空" without re-deriving
   // it from the boolean — the semantics are: should_refill = (slots_free > 0) ∧ (recommended ≠ ∅).
+  // AC6 DEGRADED-MEASUREMENT NULL (tasks/gap-in-flight-resolve-by-task-id-not-worktree-name, 判据5
+  // 修法 (a), manager 13:2xZ): when the in-flight view FAILED to measure
+  // (measurement_source='degraded-no-telemetry'), the slot-family fields MUST be null — a downstream
+  // doing arithmetic on them must CRASH (null arithmetic → NaN) instead of silently computing
+  // "5 empty slots" (same-shaped as qualified). The 3b 漏网形态: slot-refill gave an honest
+  // measurement_source='degraded-no-telemetry' BUT also reported in_flight_count=0 (identical to
+  // "genuinely nothing in flight"), and the gate (inner-wakeup-heartbeat.ts) does NOT read
+  // measurement_source (零命中) — it only reads the numbers. Nulling the numbers forces the failure
+  // to propagate to the consumer instead of being swallowed.
+  const degraded = measurementSource === "degraded-no-telemetry";
   let shouldRefill = slotsFree > 0 && recommended.length >= 1;
   let noRefillReason = null;
   if (halt.halted) {
@@ -809,6 +819,11 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
     // highest-priority gate (gap-supervisor-preemption: `.halt` is 任意点生效, not tick-boundary).
     shouldRefill = false;
     noRefillReason = `halted (preemption: .halt present — ${halt.reason}; check with supervisor-preempt.sh halt-check)`;
+  } else if (degraded) {
+    // AC6: a degraded measurement is NOT a valid "0 in-flight" — fail CLOSED (no refill) and say so.
+    // slots_free is null here; a consumer reading it gets null, never a silently-computed "5".
+    shouldRefill = false;
+    noRefillReason = "measurement degraded — in-flight view NOT evaluated (measurement_source='degraded-no-telemetry'); slots_free is null, downstream must not read it";
   } else if (slotsFree <= 0) {
     // AC5 DUAL-CONSUMER SPLIT: the slots consumer's denominator is the NARROW running-subagent count
     // when the caller passed --running, else the wide in-flight fallback.
@@ -837,20 +852,26 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
         : null,
     },
     floor_mult: floorMult,
-    in_flight_count: inFlight.length,
-    closed_but_live_count: closedButLive.length,
+    // AC6 DEGRADED-MEASUREMENT NULL (tasks/gap-in-flight-resolve-by-task-id-not-worktree-name, 判据5
+    // 修法 (a)): when measurement_source='degraded-no-telemetry', the ENTIRE measured slot family is
+    // null (in_flight_count / closed_but_live_count / running_subagent_count / subagents_in_flight /
+    // occupied_slots / slots_free) — a downstream arithmetic consumer CRASHES on null instead of
+    // silently computing "5 empty slots" (same-shaped as qualified). measurement_source +
+    // measurement_error still name WHY (never a silent 0).
+    in_flight_count: degraded ? null : inFlight.length,
+    closed_but_live_count: degraded ? null : closedButLive.length,
     // AC5 DUAL-CONSUMER SPLIT (tasks/gap-in-flight-resolve-by-task-id-not-worktree-name, 人 2026-08-14
     // 12:5xZ): the NARROW Consumer-B denominator — the currently-RUNNING task subagent count used for
     // occupied_slots / slots_free — plus its provenance. "running-subagents" = the caller passed
     // --running; "in-flight-fallback" = Consumer B reuses the wide in-flight set (backward compat).
     // Distinct from `in_flight_count` (the WIDE Consumer-A denominator, unchanged): the two are
     // ALLOWED to differ (dispatchable_disjoint 分母 ≠ slots_free 分母).
-    running_subagent_count: slotOccupants,
+    running_subagent_count: degraded ? null : slotOccupants,
     slot_denominator_source: runningSubagentCount !== null ? "running-subagents" : "in-flight-fallback",
     // NON-TASK SUBAGENTS (gap-telemetry-underreport-nontask-subagents-not-counted-in-slots): the
     // investigation-subagent PROCESS count that occupies slots but carries no task id. Included in
     // occupied_slots/slots_free, never in the touches-disjointness check.
-    subagents_in_flight: subagentsInFlight,
+    subagents_in_flight: degraded ? null : subagentsInFlight,
     // MEASUREMENT PROVENANCE (gap-slot-refill-inflight-disconnected-from-worktrees): where the
     // in-flight view came from. "explicit-input" = the caller passed --in-flight/--closed-but-live
     // (the inner tick A12 path); "telemetry-slot-status" = measured from the reconcile-aware
@@ -859,8 +880,8 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
     // names why (never a silent 0).
     measurement_source: measurementSource,
     measurement_error: measurementError,
-    occupied_slots: occupied,
-    slots_free: slotsFree,
+    occupied_slots: degraded ? null : occupied,
+    slots_free: degraded ? null : slotsFree,
     pool: pool.pool,
     floor: pool.floor,
     dispatchable_disjoint: pool.dispatchable_disjoint,
