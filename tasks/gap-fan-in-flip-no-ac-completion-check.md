@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-flip-no-ac-completion-check
 title: fan-in-execute.js flip 只查行形不查 AC 完成——workflow 翻 done 绕过 AC47 闸（52 条 done 零勾，gap-ac72 为样本）
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
@@ -54,7 +54,7 @@ sed -i 's/^status: ready$/status: done/' tasks/${task}.md
 
 ## Definition of Done
 
-- [ ] fan-in flip 堵住「AC 未全勾仍翻 done」+ 能取假 + 与③ 兼容。
+- [ ] fan-in flip 堵住「AC 未全勾仍翻 done」：翻转前 AC 完成闸复用 AC47 谓词（同源不新造），AC 未全勾即报「未翻」且不写 done；「AC 未全勾走 workflow」回放必须不翻 done（gap-ac72 形态真样本红），AC 全勾必须绿；与承重点③ 行形 fail-closed 并列不互斥（两检查都过才翻）。既有测试全绿 + `--for-task` scoped 门绿。
 
 ## Touches
 
