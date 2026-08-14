@@ -474,3 +474,15 @@ export function semanticTriggerHeuristic(heartbeat) {
 | ④ scoped 门 + 全量 suite + doc 检查 | `fan-in-execute.js` 无锁段 step 4 |
 | ⑤ flip done + `fan-in-ff-merge.sh --agent-id <自找>`（持锁段） | `fan-in-execute.js` 持锁段 step 5 |
 | `fan-in-ff-merge.sh` 锁只包 `git merge --ff-only`、`--agent-id` 写锁事件/重试记录 | `fan-in-ff-merge.sh` 自身 + `fan-in-workflow-check.ts` 判据2(c) 自校验 |
+
+---
+
+## R31 — 自计数载体 inner-agent-budget.json 整体退休（2026-08-10 人裁定 A16；gap-retire-inner-agent-budget-report）
+
+**来源**：`plugin/loop/fast-mode-loop-tick.md` 预算机制引用 + `capability-catalog.sh` 自计数脚本条目（`inner-agent-budget-report.ts` 整体废弃，090a0277 删脚本/测试）
+**退役**：2026-08-10 人裁定 A16「彻底取消所有 subagent 计数机制（`inner-agent-budget-report.ts` 整体废弃；`spawned/limit/budgetCritical` 全删——计数是我方自造的，Claude Code 无查询余量接口，只给设置上限 env）」——落地见 `tasks/gap-retire-inner-agent-budget-report`（done）；载体 `inner-agent-budget.json` 为虚构产物，永不再生产
+**正文**（原文迁出保留）：
+
+```
+（inner-agent-budget.json 已随 2026-08-10 人裁定 A16 退休——全仓零写入者=退休预期态，prod-data-audit 判据5b 直接出局。）
+```

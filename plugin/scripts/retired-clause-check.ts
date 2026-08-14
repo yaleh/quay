@@ -152,6 +152,11 @@ export const REGISTRY: Entry[] = [
       "锁与 suite 锁(full-suite.lock.0/.1)覆盖范围不交叉",
       "runId 桥(inner 2026-08-14 判断,已核)",
     ] },
+  // 自计数载体 inner-agent-budget.json 整体退休 (2026-08-10 人裁定 A16「彻底取消所有 subagent 计数机制」,
+  // 删脚本/测试已落地; 源任务引用见 archive ## R31)
+  { id: "R31", source: "plugin/loop/fast-mode-loop-tick.md", markers: [
+      "inner-agent-budget.json 已随 2026-08-10 人裁定 A16 退休",
+    ] },
 ];
 
 // ── normalization: strip backticks + line-comment prefixes (# / //), collapse whitespace ──

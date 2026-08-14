@@ -1,7 +1,7 @@
 ---
 id: gap-prod-data-accounting-audit
 title: 生产数据入账审计（人 14:5xZ 令 outer 安排）——按载体聚合三态判定，先跑第一遍计数不做修复
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -82,13 +82,13 @@ inner-agent-budget.json  真命中——全仓零写入者（含测试），被 
 
 ## Acceptance Criteria
 
-- [ ] AC1 判据1：按载体聚合三态审计落地（①/②/③ 计数与清单，无修复）。
-- [ ] AC2 判据2：三态不布尔化（③未评估独立取值）。
-- [ ] AC3 判据3：读生产载体 + 关注入 seam 仍可跑。
-- [ ] AC4 判据4：疑点按位置重查。
-- [ ] AC5 判据5：载体类型前置分类（累积/状态文件/已退役）——两命令过滤假命中。
-- [ ] AC6 判据6：NOT-FOUND 同时打印已知存在载体的命中作谓词自检。
-- [ ] AC7 既有测试全绿；`--for-task` scoped 门绿。
+- [x] AC1 判据1：按载体聚合三态审计落地（①/②/③ 计数与清单，无修复）。
+- [x] AC2 判据2：三态不布尔化（③未评估独立取值）。
+- [x] AC3 判据3：读生产载体 + 关注入 seam 仍可跑。
+- [x] AC4 判据4：疑点按位置重查。
+- [x] AC5 判据5：载体类型前置分类（累积/状态文件/已退役）——两命令过滤假命中。
+- [x] AC6 判据6：NOT-FOUND 同时打印已知存在载体的命中作谓词自检。
+- [x] AC7 既有测试全绿；`--for-task` scoped 门绿。
 
 ## Definition of Done
 
@@ -96,10 +96,54 @@ inner-agent-budget.json  真命中——全仓零写入者（含测试），被 
 
 ## Touches
 
-- plugin/scripts/prod-data-audit.ts 或 .mjs (new，按载体聚合三态审计)
+- plugin/scripts/prod-data-audit.ts (new，按载体聚合三态审计)
+- plugin/scripts/capability-catalog.sh（登记 prod-data-audit.ts 的 capability 声明——select-static-checks-for-touches 要求新增 plugin/scripts 文件带注册）
 - plugin/test/prod-data-audit.test.mjs (new)
 - tasks/gap-prod-data-accounting-audit.md（自身）
+- docs/proposals/quay-product-outline.md（§6 DELIVERY-INVENTORY 快照——新增 plugin/scripts 文件的机械同步，delivery-inventory-drift-gate 要求同变更更新）
 
 ## Evidence
 
-（落地后回填——第一遍已跑初步读数进 Proposal）
+（2026-08-14 15:29Z 落地回填——第一遍审计实跑输出，`plugin/scripts/prod-data-audit.ts --json`；对真实生产树 `/home/yale/work/quay`，非 fixture）
+
+**第一遍读数（按载体聚合，边界化引用，无修复）**：
+```
+生产根            /home/yale/work/quay
+done 任务总数      1115
+发现生产载体       163（.quay/ + .workflow-events/ + milestones/fast-mode-telemetry/）
+报告载体数        15（显式命名 8 + 被 done 任务 AC 边界化引用的发现载体）
+三态计数          ① has-data=11 · ② zero-data=0 · ③ not-evaluated=4
+谓词自检（判据6）  verification-round.jsonl@/home/yale/work/quay/.quay/verification-round.jsonl
+```
+
+**逐载体三态 + 处置**（acRefs=AC 段边界化引用数；disp=处置）：
+```
+verification-round.jsonl  ① HAS_DATA  accumulator  acRefs=13  disp=OK        （167 条记录）
+full-suite-state.json     ① HAS_DATA  state        acRefs=11  disp=OK
+gate-events.jsonl         ① HAS_DATA  accumulator  acRefs=6   disp=OK        （38 条记录）
+events.jsonl              ③ NOT_EVAL  accumulator  acRefs=5   disp=SUSPECT   仓内不存在，引用指向 $QUAY_GLOBAL_DIR 外
+inner-blocked.json        ③ NOT_EVAL  state        acRefs=5   disp=NORMAL_ABSENT（状态文件，无=正常态）
+checker-cost.jsonl        ① HAS_DATA  accumulator  acRefs=3   disp=OK        （8787 条记录）
+inner-agent-budget.json   ③ NOT_EVAL  retired      acRefs=3   disp=RETIRED  已退役（gap-retire-inner-agent-budget-report，2026-08-10 人裁定 A16）零写入者=退休预期态
+inner-wakeup-heartbeat.json ① HAS_DATA state       acRefs=3   disp=OK
+closure-pass-last-run.json ① HAS_DATA  state        acRefs=2   disp=OK
+suite-health-last-run.json ① HAS_DATA  state        acRefs=2   disp=OK
+heavy-op-token-events.jsonl ③ NOT_EVAL retired     acRefs=1   disp=RETIRED  已退役（retired-clause-check.ts:62）直接出局
+loop-driver.jsonl         ① HAS_DATA  accumulator  acRefs=1   disp=OK        （单 JSON 对象形态，按状态文件语义）
+pool-quality-judge-state.json ① HAS_DATA state     acRefs=1   disp=OK
+routine-last-run.json     ① HAS_DATA  state        acRefs=1   disp=OK
+suite-state-events.jsonl  ① HAS_DATA  accumulator  acRefs=1   disp=OK        （503 条记录）
+```
+
+**manager 三条重核全部由载体复现**：
+- `inner-blocked.json` → **假命中**（state 文件，无=正常态，inner-blocked-signal.ts 等 6 个非测试写入者存在）——disposition=NORMAL_ABSENT，不判 SUSPECT。
+- `heavy-op-token-events.jsonl` → **假命中**（已退役，retired-clause-check.ts:62 / loop-shipping-exclusion-data.mjs）——disposition=RETIRED。
+- `inner-agent-budget.json` → **假命中（退休）**——写入机件 inner-agent-budget-report.ts 已于 2026-08-10 人裁定（A16）整体废弃并删除（gap-retire-inner-agent-budget-report），「零写入者」=退休预期态，与 heavy-op-token 同族；**原记 SUSPECT 为误判（退休未登记进 retired-clause-check.ts 故 判据5b 机械上只能报 SUSPECT——外层 2026-08-14 15:5xZ 订正，按 gap-retire-inner-agent-budget-report 归 RETIRED；登记修法另立任务）**。
+
+**本审计第一遍新增/与 manager 初步不同的发现**：
+- `events.jsonl`：边界化后 5 条 AC 真引用，生产载体在仓内不存在、引用指向 `$QUAY_GLOBAL_DIR/session-liveness/events.jsonl`（仓外）——③ NOT_EVALUATED + SUSPECT（需人工决定是否追全局目录）。
+- 宽松正则的假阳性被边界化滤掉：`gate-events.jsonl` 不再被计入 `events.jsonl`；`checker-cost.jsonl` 的 AC 引用由宽松 10 落到边界化 3。
+- **载体级② zero-data=0**：当前快照没有任何「载体存在但落地后 0 记录」的载体级命中。今天 incident（gap-phase-boundary-differential-accounting）是【记录级】缺字段（verification-round.jsonl 167 轮中 `cpu_usec`/`psi` 字段为 0），载体级轴按设计看不到它——这正是审计轴（按载体）的边界。
+- **stale-vs-latest-claim 严格判据**（①有数据但最近一条 claim 落地后零记录）：`verification-round.jsonl` 与 `full-suite-state.json` 的最近 claim 落地 2026-08-14T10:44:11Z，之后两载体零记录/零更新——今天 incident 形态在载体级的最近端可见（需人工判「载体是否本应持续被写」）。
+
+**scoped 门**：`scripts/test.sh --for-task gap-prod-data-accounting-audit --allow-thin` exit 0；`node --test plugin/test/prod-data-audit.test.mjs` 10/10 绿（含真实生产载体路径）。
