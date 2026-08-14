@@ -32,7 +32,9 @@ import {
   validateRecord,
   checkRecordFile,
   checkExpectedSuiteRuns,
+  checkDocChecked,
   REAL_AC57_CERT_ROUNDS,
+  REAL_FF_NO_DOC_CHECK,
 } from "../scripts/per-task-suite-record-check.ts";
 import {
   buildRecord,
@@ -122,6 +124,62 @@ test("判据3 — no expected runs ⇒ NOT-EVALUATED (never conflated with green
   assert.match(v.reason, /NOT-EVALUATED/);
 });
 
+// ── AC63 判据2: has-ff-but-no-doc-check (能取假 — the doc-check trace carrier) ──────────────────────
+
+// A record carrying a doc-check trace (the AC63 判据1 carrier).
+const DOC_CHECKED = {
+  ...WELL_FORMED,
+  docChecked: true,
+  docCheckExit: 0,
+};
+
+test("AC63 判据2 — REAL_FF_NO_DOC_CHECK replayed against an EMPTY record set ⇒ RED (all 11 ff'd tasks have no doc-check trace)", () => {
+  const v = checkDocChecked(REAL_FF_NO_DOC_CHECK, []);
+  assert.equal(v.ok, false);
+  assert.equal(v.evaluated, true);
+  assert.equal(v.missing.length, REAL_FF_NO_DOC_CHECK.length, "every real ff is absent");
+  assert.match(v.reason, /has-ff-but-no-doc-check/);
+});
+
+test("AC63 判据2 — a real ff with a matching record that LACKS docChecked ⇒ RED (the pre-AC63 no-field shape is the real sample)", () => {
+  // A record for the ff'd task exists, but it has no doc-check trace (the pre-AC63 shape). The
+  // judgment must go RED — this is exactly "有 ff 而无 doc 检查".
+  const v = checkDocChecked([{ taskId: "DIR-127", runId: "fm-DIR-127-x" }], [WELL_FORMED]);
+  assert.equal(v.ok, false);
+  assert.equal(v.evaluated, true);
+  assert.match(v.reason, /has-ff-but-no-doc-check/);
+  assert.equal(v.missing[0].taskId, "DIR-127");
+});
+
+test("AC63 判据2 — a matching record with docChecked:false ⇒ RED", () => {
+  const v = checkDocChecked([{ taskId: "DIR-127", runId: "fm-DIR-127-x" }], [{ ...WELL_FORMED, docChecked: false }]);
+  assert.equal(v.ok, false);
+  assert.equal(v.evaluated, true);
+  assert.match(v.reason, /has-ff-but-no-doc-check/);
+});
+
+test("AC63 判据2 — a matching record with docChecked:true ⇒ GREEN", () => {
+  const v = checkDocChecked([{ taskId: "DIR-127", runId: "fm-DIR-127-x" }], [{ ...DOC_CHECKED, taskId: "DIR-127" }]);
+  assert.equal(v.ok, true);
+  assert.equal(v.evaluated, true);
+  assert.equal(v.missing.length, 0);
+});
+
+test("AC63 判据2 — ALL real ffs carry a doc-check trace ⇒ GREEN", () => {
+  const records = REAL_FF_NO_DOC_CHECK.map((s) => ({ ...DOC_CHECKED, taskId: s.taskId }));
+  const v = checkDocChecked(REAL_FF_NO_DOC_CHECK, records);
+  assert.equal(v.ok, true);
+  assert.equal(v.evaluated, true);
+  assert.equal(v.missing.length, 0);
+});
+
+test("AC63 判据2 — no ffs given ⇒ NOT-EVALUATED (never conflated with green)", () => {
+  const v = checkDocChecked([], [DOC_CHECKED]);
+  assert.equal(v.ok, true);
+  assert.equal(v.evaluated, false);
+  assert.match(v.reason, /NOT-EVALUATED/);
+});
+
 // ── 判据2: record shape (硬规则 3b — 读不懂 ≠ 合格) ──────────────────────────────────────────────────
 
 test("判据2 — a well-formed record is GREEN", () => {
@@ -172,6 +230,32 @@ test("判据2 — an absent file (null) is handled by the CLI as NOT-EVALUATED, 
   assert.equal(v.evaluated, false);
 });
 
+// ── AC63 判据1: the doc-check trace shape (OPTIONAL field, shape-checked WHEN PRESENT) ───────────────
+
+test("AC63 判据1 — a record with a well-formed doc-check trace (docChecked boolean + exit 0..255) is GREEN", () => {
+  assert.equal(validateRecord(DOC_CHECKED).ok, true);
+  assert.equal(validateRecord({ ...WELL_FORMED, docChecked: false }).ok, true, "docChecked:false is a valid trace");
+});
+
+test("AC63 判据1 — a record with docChecked present but NOT a boolean ⇒ RED (硬规则 3b: 读不懂 ≠ 合格)", () => {
+  const v = validateRecord({ ...WELL_FORMED, docChecked: "yes" });
+  assert.equal(v.ok, false);
+  assert.equal(v.evaluated, true);
+  assert.ok(v.missingFields.includes("docChecked∈boolean"));
+});
+
+test("AC63 判据1 — a record with docCheckExit present but non-integer / out-of-range ⇒ RED", () => {
+  assert.equal(validateRecord({ ...WELL_FORMED, docChecked: true, docCheckExit: 1.5 }).ok, false);
+  assert.equal(validateRecord({ ...WELL_FORMED, docChecked: true, docCheckExit: 999 }).ok, false);
+});
+
+test("AC63 判据1 — a record with docCheckExit but NO docChecked ⇒ RED (an exit code without a 'did it run' flag is ambiguous)", () => {
+  const v = validateRecord({ ...WELL_FORMED, docCheckExit: 0 });
+  assert.equal(v.ok, false);
+  assert.equal(v.evaluated, true);
+  assert.ok(v.missingFields.includes("docCheckExit-without-docChecked"));
+});
+
 // ── writer: append + fail-closed + state-file + shared-checkout resolution ─────────────────────────
 
 test("writer — appends ONE valid JSON line (判据2 fields), second append adds a second line", () => {
@@ -219,6 +303,62 @@ test("writer — fail-closed on a missing required field (exit 2, nothing writte
   ], { encoding: "utf8" });
   assert.equal(r.status, 2, `must fail-closed on missing --task-id: ${r.stdout} ${r.stderr}`);
   assert.equal(fs.existsSync(file), false, "nothing written on a fail-closed field error");
+});
+
+test("writer — --doc-checked true --doc-check-exit 0 writes the AC63 判据1 doc-check trace", () => {
+  const file = tmpFile("ptsr-doc-");
+  const r = spawnSync("node", ["--experimental-strip-types", WRITER,
+    "--task-id", "DIR-127",
+    "--run-id", "fm-DIR-127-x",
+    "--state", "green",
+    "--lane-count", "4",
+    "--duration-ms", "1000",
+    "--started-at", "2026-08-14T00:00:00.000Z",
+    "--finished-at", "2026-08-14T00:01:00.000Z",
+    "--doc-checked", "true",
+    "--doc-check-exit", "0",
+    "--record-file", file,
+  ], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  const rec = JSON.parse(fs.readFileSync(file, "utf8").trim());
+  assert.equal(rec.docChecked, true);
+  assert.equal(rec.docCheckExit, 0);
+  // A record written by the writer with a doc-check trace is judged GREEN by the checker's 判据2.
+  assert.equal(validateRecord(rec).ok, true);
+});
+
+test("writer — --doc-checked must be true|false (a non-boolean value fails closed, nothing written)", () => {
+  const file = tmpFile("ptsr-docbad-");
+  const r = spawnSync("node", ["--experimental-strip-types", WRITER,
+    "--task-id", "DIR-127",
+    "--run-id", "fm-DIR-127-x",
+    "--state", "green",
+    "--lane-count", "4",
+    "--duration-ms", "1000",
+    "--started-at", "2026-08-14T00:00:00.000Z",
+    "--finished-at", "2026-08-14T00:01:00.000Z",
+    "--doc-checked", "yes",
+    "--record-file", file,
+  ], { encoding: "utf8" });
+  assert.equal(r.status, 2, `must fail-closed on a non-boolean --doc-checked: ${r.stdout} ${r.stderr}`);
+  assert.equal(fs.existsSync(file), false, "nothing written on a malformed doc-check trace");
+});
+
+test("writer — --doc-check-exit requires --doc-checked (fail-closed, nothing written)", () => {
+  const file = tmpFile("ptsr-docnoflag-");
+  const r = spawnSync("node", ["--experimental-strip-types", WRITER,
+    "--task-id", "DIR-127",
+    "--run-id", "fm-DIR-127-x",
+    "--state", "green",
+    "--lane-count", "4",
+    "--duration-ms", "1000",
+    "--started-at", "2026-08-14T00:00:00.000Z",
+    "--finished-at", "2026-08-14T00:01:00.000Z",
+    "--doc-check-exit", "0",
+    "--record-file", file,
+  ], { encoding: "utf8" });
+  assert.equal(r.status, 2, `must fail-closed on --doc-check-exit without --doc-checked: ${r.stdout} ${r.stderr}`);
+  assert.equal(fs.existsSync(file), false, "nothing written on an ambiguous doc-check trace");
 });
 
 test("writer — state-file supplies defaults; explicit flags win", () => {
@@ -290,6 +430,50 @@ test("checker CLI — an unparseable record line makes the checker exit 1 (RED, 
   const out = JSON.parse(r.stdout);
   assert.equal(out.ok, false);
   assert.equal(out.checks.find((c) => c.check === "record-shape").ok, false);
+});
+
+test("checker CLI — --replay-real-samples goes RED on the AC63 ff-no-doc-check check (11/11 real ffs have no doc-check trace)", () => {
+  const file = tmpFile("ptsr-replay-");
+  const r = spawnSync("node", ["--experimental-strip-types", CHECKER, "--record-file", file, "--replay-real-samples", "--json"], { encoding: "utf8" });
+  assert.equal(r.status, 1, `replay of real absence samples must be RED: ${r.stdout}`);
+  const out = JSON.parse(r.stdout);
+  const ffCheck = out.checks.find((c) => c.check === "ff-no-doc-check");
+  assert.ok(ffCheck, "the AC63 ff-no-doc-check judgment ran");
+  assert.equal(ffCheck.ok, false);
+  assert.match(ffCheck.reason, /has-ff-but-no-doc-check/);
+  assert.equal(ffCheck.missing.length, REAL_FF_NO_DOC_CHECK.length);
+});
+
+test("checker CLI — --lock-events feeds the AC63 ff-no-doc-check judgment (RED on real ffs, GREEN when every ff'd task has a doc-checked record)", () => {
+  const dir = tmpDir("ptsr-lockev-");
+  const records = path.join(dir, "records.jsonl");
+  const lockEvents = path.join(dir, "lock-events.jsonl");
+  // Two real ffs (acquire+release pairs).
+  fs.writeFileSync(lockEvents, [
+    '{"event":"acquire","ts":"2026-08-14T00:00:00Z","epoch":1,"taskId":"DIR-127","pid":1,"runId":"fm-DIR-127-x","agentId":"a"}',
+    '{"event":"release","ts":"2026-08-14T00:00:00Z","epoch":1,"taskId":"DIR-127","pid":1,"runId":"fm-DIR-127-x","agentId":"a"}',
+    '{"event":"acquire","ts":"2026-08-14T00:01:00Z","epoch":2,"taskId":"DIR-128","pid":1,"runId":"fm-DIR-128-x","agentId":"a"}',
+    '{"event":"release","ts":"2026-08-14T00:01:00Z","epoch":2,"taskId":"DIR-128","pid":1,"runId":"fm-DIR-128-x","agentId":"a"}',
+  ].join("\n"));
+  // RED: records exist for both tasks but carry no doc-check trace.
+  for (const t of ["DIR-127", "DIR-128"]) {
+    fs.appendFileSync(records, JSON.stringify({ ...WELL_FORMED, taskId: t, runId: "suite-" + t }) + "\n");
+  }
+  const red = spawnSync("node", ["--experimental-strip-types", CHECKER, "--record-file", records, "--lock-events", lockEvents, "--json"], { encoding: "utf8" });
+  assert.equal(red.status, 1, `ffs with no doc-check trace ⇒ RED: ${red.stdout}`);
+  const redOut = JSON.parse(red.stdout);
+  const ffCheck = redOut.checks.find((c) => c.check === "ff-no-doc-check");
+  assert.equal(ffCheck.ok, false);
+  assert.equal(ffCheck.missing.length, 2);
+  // GREEN: add docChecked:true to both records and re-run — the same lock-events now pass.
+  fs.writeFileSync(records, "");
+  for (const t of ["DIR-127", "DIR-128"]) {
+    fs.appendFileSync(records, JSON.stringify({ ...WELL_FORMED, taskId: t, runId: "suite-" + t, docChecked: true, docCheckExit: 0 }) + "\n");
+  }
+  const green = spawnSync("node", ["--experimental-strip-types", CHECKER, "--record-file", records, "--lock-events", lockEvents, "--json"], { encoding: "utf8" });
+  assert.equal(green.status, 0, `ffs with a doc-check trace ⇒ PASS: ${green.stdout}`);
+  const greenOut = JSON.parse(green.stdout);
+  assert.equal(greenOut.checks.find((c) => c.check === "ff-no-doc-check").ok, true);
 });
 
 // ── resolveSharedCheckout / toIsoTimestamp (pure helpers) ───────────────────────────────────────────

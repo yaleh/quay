@@ -12,6 +12,9 @@
 //           look like "the mechanism recorded this run" while hiding what actually happened — the
 //           硬规则 3b form where 读不懂 input returns the same value as 合格. An absent/empty record
 //           file ⇒ NOT-EVALUATED (nothing recorded yet — cannot judge, never conflated with green).
+//           AC63 (gap-ac63-judgment2-no-carrier) extends the shape with the OPTIONAL doc-check trace:
+//           a PRESENT docChecked must be a real boolean and docCheckExit (when present) an integer
+//           0..255 — a malformed trace is the 硬规则 3b form again (读不懂的 doc 检查痕迹 ≠ 合格).
 //
 //   判据3 (能取假, real-sample replay, D2 不构造) — the checker must be able to go RED on REAL
 //           absence. AC57's 7 cert rounds are the ready-made real absence samples: 7 per-task
@@ -23,6 +26,18 @@
 //           audit — the answer is no, RED), while the default live run does NOT replay history
 //           (those runs will never have records — a permanently-red default would be noise, not
 //           measurement). The matching judge is checkExpectedSuiteRuns (pure, exported).
+//
+//   AC63 判据2 (has-ff-but-no-doc-check, 能取假) — the fan-in ff carries no doc-check evidence in
+//           lock-events, so "有 ff 而无 doc 检查" was structurally unjudgeable (硬规则 4). The carrier
+//           is now the per-task-suite-record's OPTIONAL docChecked field (判据1), and this judgment
+//           makes it 能取假: given the real ffs (the lock-events acquire events) and the records, every
+//           ff'd task must have ≥1 matching record with docChecked === true — otherwise RED. The REAL
+//           samples are the 11 live lock-event ffs embedded below (REAL_FF_NO_DOC_CHECK): none has a
+//           doc-check trace (the record file does not even exist — AC72's C17 writer wiring is pending),
+//           so replaying them ⇒ RED. The match key is taskId ONLY: the lock-event runId (fm-…) is the
+//           FAN-IN operation's id, the per-task-suite-record runId (from full-suite-state.json) is the
+//           SUITE run's id — two different namespaces that do not correspond. The judge is
+//           checkDocChecked (pure, exported).
 //
 // Exit codes: 0 = PASS (or NOT-EVALUATED — read `evaluated`), 1 = RED, 2 = usage/environment error.
 //
@@ -74,6 +89,17 @@ export function validateRecord(rec) {
     missing.push("durationMs");
   }
   if (rec.failedFiles != null && !Array.isArray(rec.failedFiles)) missing.push("failedFiles∈array");
+  // ── AC63 判据1 doc-check trace — OPTIONAL fields, shape-checked WHEN PRESENT (硬规则 3b) ─────────
+  // A pre-AC63 record legitimately has no doc-check trace; that absence is the real "has ff but no
+  // doc check" sample. When present, docChecked must be a real boolean and docCheckExit (when
+  // present) an integer 0..255 that REQUIRES docChecked — a malformed trace is 读不懂 ≠ 合格.
+  if (rec.docChecked != null && typeof rec.docChecked !== "boolean") missing.push("docChecked∈boolean");
+  if (rec.docCheckExit != null) {
+    if (rec.docChecked == null) missing.push("docCheckExit-without-docChecked");
+    else if (!Number.isInteger(rec.docCheckExit) || rec.docCheckExit < 0 || rec.docCheckExit > 255) {
+      missing.push("docCheckExit∈0..255");
+    }
+  }
   if (missing.length > 0) {
     return { ok: false, evaluated: true, reason: `malformed-record (missing/invalid: ${missing.join(", ")})`, missingFields: missing };
   }
@@ -147,6 +173,66 @@ export function checkExpectedSuiteRuns(expected, records) {
   return { ok: true, evaluated: true, reason: `all-recorded (${list.length} expected run(s) present)`, missing: [] };
 }
 
+// ── AC63 判据2 — the real "has ff but no doc check" samples (D2, 不构造) ─────────────────────────────
+// The 11 REAL fan-in ffs captured verbatim from the live .quay/fan-in-merge-lock-events.jsonl
+// (acquire events; the runId is the FAN-IN runId fm-…, carried for readability — the match key is
+// taskId, see checkDocChecked). NONE of them has a per-task-suite record with a doc-check trace:
+// the record file does not exist in the shared checkout (AC72's C17 writer wiring is a pending
+// follow-up), so replaying them against the record set must find ZERO doc-checked ⇒ RED. This is
+// the 能取假 proof — before the docChecked carrier existed, the judgment could never be false
+// (硬规则 4: a structurally-unfalse quantity is not a measurement).
+export const REAL_FF_NO_DOC_CHECK = [
+  { taskId: "gap-ac67-fan-in-executor-to-task-subagent", runId: "fm-gap-ac67-fan-in-executor-to-task-subagent-1786689502118-aab2d14d", ts: "2026-08-14T06:38:45Z" },
+  { taskId: "gap-ac72-cert-mechanism-retire", runId: "fm-gap-ac72-cert-mechanism-retire-1786694869696-bzehm1", ts: "2026-08-14T08:25:25Z" },
+  { taskId: "gap-ac73-catalog-rhythm-consumer-check", runId: "fm-gap-ac73-catalog-rhythm-consumer-check-1786694870124-a09vl0", ts: "2026-08-14T08:35:38Z" },
+  { taskId: "gap-ac66-ac-driven-behavior-change-verifiable", runId: "fm-gap-ac66-ac-driven-behavior-change-verifiable-1786696622424-p8cy2c", ts: "2026-08-14T08:53:23Z" },
+  { taskId: "gap-ac78-fan-in-workflow-a6-check", runId: "fm-gap-ac78-fan-in-workflow-a6-check-1786697920972-3tzt6u", ts: "2026-08-14T09:21:21Z" },
+  { taskId: "gap-ac76-cap-counts-subagents-not-worktrees", runId: "fm-gap-ac76-cap-counts-subagents-not-worktrees-1786697811832-lonpsr", ts: "2026-08-14T09:35:39Z" },
+  { taskId: "gap-idle-watch-intent-anchor-restore", runId: "fm-gap-idle-watch-intent-anchor-restore-1786700361087-baco2m", ts: "2026-08-14T09:53:41Z" },
+  { taskId: "gap-touches-one-entry-one-path", runId: "fm-gap-touches-one-entry-one-path-1786703029102-zih4yp", ts: "2026-08-14T10:47:47Z" },
+  { taskId: "DIR-127", runId: "fm-DIR-127-1786705856597-5w9rec", ts: "2026-08-14T11:18:04Z" },
+  { taskId: "DIR-128", runId: "fm-DIR-128-1786706053441-p34knf", ts: "2026-08-14T11:19:22Z" },
+  { taskId: "gap-fan-in-execute-three-unverified-paths", runId: "fm-gap-fan-in-execute-three-unverified-paths-1786706648155-zixzo6", ts: "2026-08-14T11:42:26Z" },
+];
+
+/** Judge AC63 判据2 — every ff'd task must have ≥1 matching per-task-suite record carrying a
+ *  doc-check trace (docChecked === true). PURE. A match is taskId ONLY — the lock-event runId
+ *  (fm-…) is the FAN-IN operation's id, the per-task-suite-record runId (from full-suite-state.json)
+ *  is the SUITE run's id, two namespaces that do not correspond (documented in the header). RED when
+ *  an ff'd task has no doc-checked record (a record that exists but lacks docChecked, a record with
+ *  docChecked:false, or no record at all — all mean "has ff but no doc check"). GREEN when every ff'd
+ *  task carries a trace. NOT-EVALUATED when no ffs are given.
+ *  @param {Array<{taskId:string, runId?:string, ts?:string}>} ffs — the fan-in ff evidence
+ *  @param {Array<Record<string, any>|null>} records
+ *  @returns {{ok:boolean, evaluated:boolean, reason:string, missing:{taskId:string, runId?:string}[]}} */
+export function checkDocChecked(ffs, records) {
+  const list = (ffs ?? []).filter((s) => s && s.taskId);
+  if (list.length === 0) {
+    return { ok: true, evaluated: false, reason: "no-ffs (NOT-EVALUATED)", missing: [] };
+  }
+  const recs = (records ?? []).filter(Boolean);
+  const byTask = new Map();
+  for (const r of recs) {
+    const t = String(r.taskId ?? "");
+    if (!t) continue;
+    if (!byTask.has(t)) byTask.set(t, []);
+    byTask.get(t).push(r);
+  }
+  const missing = list.filter((s) => {
+    const taskRecs = byTask.get(String(s.taskId)) ?? [];
+    return !taskRecs.some((r) => r.docChecked === true);
+  });
+  if (missing.length > 0) {
+    return {
+      ok: false,
+      evaluated: true,
+      reason: `has-ff-but-no-doc-check (${missing.length}/${list.length} ff'd task(s) have no doc-check trace)`,
+      missing,
+    };
+  }
+  return { ok: true, evaluated: true, reason: `all-ff-doc-checked (${list.length} ff'd task(s) carry a doc-check trace)`, missing: [] };
+}
+
 // ── fs helper ────────────────────────────────────────────────────────────────────────────────────────
 function readJsonl(file) {
   if (!file || !fs.existsSync(file)) return null;
@@ -162,35 +248,66 @@ function readJsonl(file) {
   return out;
 }
 
+/** Extract the unique fan-in ff evidence (taskId + runId + ts) from a fan-in-merge-lock-events.jsonl
+ *  — the acquire events. Each ff produces one acquire + one release with the same taskId+runId, so
+ *  the unique acquire set IS the ff list. Unparseable lines are skipped (they are the lock protocol's
+ *  problem, not this judgment's input). */
+function readLockEventFfs(file) {
+  if (!file || !fs.existsSync(file)) return [];
+  const seen = new Map();
+  for (const line of fs.readFileSync(file, "utf8").split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      const e = JSON.parse(line);
+      if (e?.event !== "acquire") continue;
+      const taskId = String(e.taskId ?? "");
+      if (!taskId) continue;
+      const runId = String(e.runId ?? "");
+      const key = `${taskId}::${runId}`;
+      if (!seen.has(key)) seen.set(key, { taskId, runId, ts: e.ts ?? "" });
+    } catch {
+      /* skip unparseable lines */
+    }
+  }
+  return [...seen.values()];
+}
+
 // ── CLI ───────────────────────────────────────────────────────────────────────────────────────────────
 function getArgValue(args, name) {
   const idx = args.indexOf(name);
   return idx === -1 ? undefined : args[idx + 1];
 }
 
-const usage = `per-task-suite-record-check.ts — AC72 判据2/判据3 checker for the per-task suite record
-  file (.quay/per-task-suite-records.jsonl in the SHARED checkout).
+const usage = `per-task-suite-record-check.ts — AC72 判据2/判据3 + AC63 判据2 checker for the per-task
+  suite record file (.quay/per-task-suite-records.jsonl in the SHARED checkout).
     判据2 shape — every existing record must carry taskId/runId/state/laneCount/durationMs/startedAt/
-      finishedAt; a malformed or partial record ⇒ RED (硬规则 3b: 读不懂 ≠ 合格).
+      finishedAt; a malformed or partial record ⇒ RED (硬规则 3b: 读不懂 ≠ 合格). AC63: a PRESENT
+      doc-check trace (docChecked/docCheckExit) must also be well-formed.
     判据3 replay — given a set of expected per-task suite runs (taskId+runId), every one must have a
       record; a missing record ⇒ RED. The AC57 7 real cert rounds are the real absence samples.
+    AC63 判据2 has-ff-but-no-doc-check — given the real fan-in ffs (lock-events acquire events), every
+      ff'd task must have ≥1 per-task-suite record with docChecked === true; otherwise RED. The 11
+      real lock-event ffs are the real absence samples (no doc-check trace exists).
 
 Usage:
   node --experimental-strip-types plugin/scripts/per-task-suite-record-check.ts
-      [--root <dir>] [--record-file <file>] [--samples-json <file>] [--replay-real-samples]
-      [--json] [--help]
+      [--root <dir>] [--record-file <file>] [--samples-json <file>]
+      [--lock-events <file>] [--replay-real-samples] [--json] [--help]
 
   --root               repo root (default: cwd) — resolves the shared checkout via git common-dir
   --record-file        override the record path (default <shared>/.quay/per-task-suite-records.jsonl)
   --samples-json       a JSON file: array of {taskId, runId, startedAt?} — replay them (判据3)
-  --replay-real-samples  replay the embedded REAL_AC57_CERT_ROUNDS (the 7 real cert absence samples —
-                       an explicit "did these ever get recorded?" audit; the answer is no ⇒ RED)
+  --lock-events        a fan-in-merge-lock-events.jsonl — its acquire events are the real ffs (AC63
+                       判据2: every ff'd task must have a doc-checked record ⇒ RED on the live ffs)
+  --replay-real-samples  replay the embedded REAL_AC57_CERT_ROUNDS (判据3) AND REAL_FF_NO_DOC_CHECK
+                       (AC63 判据2) — the real absence samples; the answer is no ⇒ RED
   --json               machine-readable output {ok, evaluated, reason, checks}
   --help               this help
 
 Exit codes:
   0  PASS or NOT-EVALUATED (read \`evaluated\` — false = could not judge, never conflated with green)
-  1  RED — a malformed record OR an expected per-task suite run with no record (判据2/判据3)
+  1  RED — a malformed record / an expected per-task suite run with no record / an ff with no
+     doc-check trace (判据2 / 判据3 / AC63 判据2)
   2  usage / environment error`;
 
 export function main(argv) {
@@ -202,6 +319,7 @@ export function main(argv) {
   const root = path.resolve(getArgValue(args, "--root") ?? process.cwd());
   const recordFileOverride = getArgValue(args, "--record-file");
   const samplesJson = getArgValue(args, "--samples-json");
+  const lockEventsFile = getArgValue(args, "--lock-events");
   const replayReal = args.includes("--replay-real-samples");
   const asJson = args.includes("--json");
 
@@ -260,6 +378,37 @@ export function main(argv) {
       check: "expected-suite-runs",
       ...v,
       source: replayReal ? "<REAL_AC57_CERT_ROUNDS>" : samplesJson,
+    });
+  }
+
+  // ── AC63 判据2 — has-ff-but-no-doc-check (real ffs vs the records' doc-check traces) ───────────────
+  // The ff evidence comes from --lock-events (the live lock-events file's acquire events) and/or
+  // --replay-real-samples (the 11 embedded REAL_FF_NO_DOC_CHECK). Like 判据3, this is an EXPLICIT
+  // replay: the default live run does NOT correlate (every past ff lacks a doc-check trace — a
+  // permanently-red default would be noise, not measurement). Every ff'd task must have ≥1 record
+  // with docChecked === true, else RED (判据1's carrier makes "有 ff 而无 doc 检查" 能取假).
+  const ffs = [];
+  if (replayReal) {
+    for (const s of REAL_FF_NO_DOC_CHECK) {
+      if (!ffs.some((x) => x.taskId === s.taskId && x.runId === s.runId)) ffs.push(s);
+    }
+  }
+  if (lockEventsFile) {
+    const live = readLockEventFfs(path.resolve(lockEventsFile));
+    for (const s of live) {
+      if (!ffs.some((x) => x.taskId === s.taskId && x.runId === s.runId)) ffs.push(s);
+    }
+  }
+  if (ffs.length > 0) {
+    const v = checkDocChecked(ffs, records ?? []);
+    if (v.evaluated) {
+      anyEvaluated = true;
+      if (!v.ok) anyRed = true;
+    }
+    checks.push({
+      check: "ff-no-doc-check",
+      ...v,
+      source: lockEventsFile ? `lock-events:${lockEventsFile}` : "<REAL_FF_NO_DOC_CHECK>",
     });
   }
 
