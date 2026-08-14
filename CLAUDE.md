@@ -28,9 +28,36 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
    **为什么单列而不靠上一句涵盖**：上一句是通则，而通则在动手那一刻不会浮现；这条此前只写在管理者自己的核（C15，且窄——只禁 `capture-pane` 回滚）与台账里，
    **不在唯一会被自动注入的本文件中** ⇒ 每次都要靠当场想起来。〔**无产物，靠自觉**〕
    **`meta-cc` 返回空 ≠ 没有数据**（硬规则 5 来源完备性）。**已实测的一个覆盖缺口 + 绕法（2026-08-11 02:2x）**：
-   `query_session_content` 按 `working_dir` **哈希**定位 project，**不递归** `~/.claude/projects/<project>/<session-id>/subagents/workflows/<run>/agent-*.jsonl`
-   ⇒ 查「某个 workflow 内部到底发生了什么」时它恒返回空。**正确做法**：`ls -S <run 目录>/agent-*.jsonl` 定位文件（列文件不是解析），
-   再 **`meta-cc inspect_session_files --files <显式路径>`**——它给显式路径能读，返回 `line_count` / `record_types`（assistant/user 轮次数）/ `time_range`。
+   `query_session_content` 按 `working_dir` **哈希**定位 project，**只读【主会话 jsonl】**。
+   **⚠️ 2026-08-14 12:1xZ 用干净针实测重验，范围比原记述更大，且多出一个陷阱**：
+
+   **transcript 目录结构（实测）**：
+   ```
+   ~/.claude/projects/<project-hash>/
+   ├── <session-id>.jsonl                  ← 主会话（meta-cc 唯一能【搜内容】的对象）
+   └── <session-id>/
+       ├── subagents/agent-<id>.jsonl                      ← 直属 subagent（inner 实测 126 个）
+       ├── subagents/workflows/<run>/agent-<id>.jsonl       ← workflow 内的 agent
+       ├── subagents/workflows/<run>/journal.jsonl          ← 每 agent 一条 result
+       └── tool-results/<id>.txt                            ← 大工具输出的落盘
+   ```
+   **干净针实测（两根针各只存在于一个文件，主会话不含）**：
+   ```
+   针「code_delta output is empty」→ 只在 workflows/<run>/agent-*.jsonl
+   针「in a worktree. Let me first create the worktree…」→ 只在直属 subagents/agent-*.jsonl
+   两针分别用 query_session_content(session_id=<该会话>, include_subagents=true) 查 ⇒ 【都返回 0】
+   ```
+   ⇒ **不是只有 workflows 不递归——【直属 subagents/ 也不递归】**；
+   ⇒ **⚠️ `include_subagents` 参数存在、默认 true，但对上述两类【都不生效】**——
+   **参数名会让人以为它管用，这是比"没有该功能"更贵的形态**（同硬规则 3b：一个看起来覆盖了的选项）。
+   **正确做法（三步，缺一不可）**：
+   ```
+   ① 定位文件  grep -rl '<针>' ~/.claude/projects/<project-hash>/     ← 文件系统，不是 meta-cc
+   ② 取元数据  meta-cc inspect_session_files --files <显式路径>        ← 实测可用：size_bytes/line_count/record_types/time_range
+   ③ 搜内容    grep -r / grep -oh                                     ← meta-cc 无此能力
+   ```
+   **⚠️ ① 的范围必须覆盖【两层】**：**2026-08-14 我只搜了 `workflows/` 下 8 个 run 就断言「lane 无可查对象」，
+   而同一会话有 126 个直属 subagent transcript 没搜** ⇒ 假结论。**硬规则 5 的经典违反，当日第三次同形。**
    **轮次数就是成本的驱动量**：实测一次 suite-fix workflow 42 个 agent 共 705 轮、缓存读占 **98.8%**、真正新 token 仅 92 万
    ⇒ **别用「总 token」判贵贱，要拆出 `cache_read` 再谈**（我 2026-08-11 02:2x 就因未拆而给出过一个误导性的「省 9M token」结论）。
 2. **按位置判定，不按关键词**——注释、字符串、消息正文里提到不算命中。〔产物：复用 `drive-contract-check.ts` / `test-framework-policy-check.ts` 的判定手法〕
@@ -81,6 +108,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
    **而 `instrument-failure-check` 的 fixture 正把该字面量断言为「正确形式」——检查通过恰恰证明用了恒零的读法。**
    **该自检不需要知道正确字面量是什么 ⇒ 换机换版本继续有效**；而「让工具去数它自己所在的那个进程」
    是硬规则 4 的不可取假量，**不算自检**。一般形态：**恒零/恒真的读数携带零信息，且与「一切正常」同形。**
+**推论三（2026-08-14 实证,代价:一个仪器「完成」了 21 小时而真实数据为 0）**:**一个只能被 fixture / 注入数据满足的判据,不是测量——它证明「能产出」,不证明「已产出」。**
+   实例:`gap-phase-boundary-differential-accounting` **status=done、AC 5/5 全勾、scoped 141/0 绿**,而生产载体 `verification-round.jsonl` **167 轮中含 `cpu_usec` 的 = 0、`psi` 字段一个都没有**;根因是实现 `640ad48a` 落地于 `2026-08-13T17:28:26Z`,**而末轮记录是 `16:19:54Z`——落地后一轮都没跑过**,5 条 AC 全部由 `QUAY_TEST_CGROUP_SCRIPT`(`full-suite-runner.ts:795`)**注入的假 cgroup 数据**满足。
+   **同形已在本文件出现过一次而未被抽象**:硬规则 3b 里「`instrument-failure-check` 的 fixture 正把该字面量断言为『正确形式』」。
+   **〔产物〕任何以「产出某读数」为目标的任务,AC 必须至少有一条【读生产载体】**——形如「载体中满足 X 的记录数 ≥ N」,**且 N 只计【实现落地之后】的时间窗**。
+   **⊢ 反例判据(一条命令可查)**:若一条 AC 在把 fixture/注入 seam 关掉后仍能通过,它才是测量;否则它只是回声。
+   **与 C29 的分工**:C29 = 执行了、报了、但没留痕 ⇒ 与【没执行】同形;**本条 = 实现了、测试绿了、但生产没跑过 ⇒ 与【没实现】同形**。两者的修法同源:**把判据挪到产物上**。
+
+**推论四（2026-08-14 实证,发生率 3,当日）**:**一个能【解释】现象的说法,不是一个被【检验】的结论。**
+   三个实例都自洽、都由提出者自己给出、都错:①inner「心跳 57 行是闸合法 hold」(实测 writer 93 分钟零调用,闸从未有机会拒);②outer「A13 的根是闸结构拒写,已由 AC53-gate 修复」(该 gate 落地后心跳 3 小时不长 ⇒ 证否);③inner「A13 DEAD 是写-查时差伪影」(两次;负控制:同一检查器传 `--in-flight` ⇒ ALIVE,不传 ⇒ DEAD ⇒ 与时差无关)。
+   **⇒ 推翻它们的手法三次完全相同:造一个能【区分】的对照**——查动作记录(而非结果载体)/ 让两假设给出【相反】预测 / 改一个参数看结论翻不翻。
+   **⇒ 判据(动作,不是提醒)**:任何「我认为 X 是因为 Y」的结论投递前,**必须附一个若 Y 为假则结果会不同的对照**;给不出这个对照 ⇒ **降为假说,不得作为结论投递**(与硬规则 12「给不出发生率就降观察项」同形,换了一个维度)。
+   **⇒ 代价**:这三条各让一层白走 1–3 小时;而三次的对照成本都是【一条命令】。
+
 4b. **代理量会与实际偏离——优先观测直接量，不要叠加未经测试的过滤/派生**（人 2026-08-13 逐字裁定）。〔**无产物，靠自觉**〕
     **与硬规则 4 的分工**：4 管「结构上不可能取假」的量（恒真/恒零/自证）；**本条管「本来能取假、但因为中间隔了一层未经验证的过滤而不再反映实际」的量**。
     **一天内五个实例（全部真实发生，全部退出码 0、结构完整、数字合理）**：

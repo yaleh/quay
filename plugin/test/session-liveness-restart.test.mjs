@@ -50,7 +50,7 @@ import {
   SCRIPT, tmuxAvailable,
   setProbeTmpPrefix, sweepTmp, reapLiveOwners, tmux, isolateTmuxEnv, isClaudePid,
   waitForAlive, spawnMonitor, waitForOutput, waitForRounds, countRounds,
-  __registerProbeTmp, __unregisterProbeTmp,
+  __registerProbeTmp, __unregisterProbeTmp, killProbeServer,
 } from "./session-liveness-helpers.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -86,8 +86,11 @@ function makeEnvProbe(session, claudeProjectDir, sid) {
   return {
     tmp, env, session,
     cleanup() {
+      // 判据1/AC1: kill the SERVER (kill-server, private socket) FIRST — kill-session alone races
+      // server teardown under load and can leave a live server that is already-unregistered ⇒
+      // unreachable by after()'s reapLiveOwners (leak-with-no-exit, 2026-08-14 full-suite red).
+      killProbeServer(tmp);
       __unregisterProbeTmp(tmp);
-      tmux(["kill-session", "-t", session], env);
       try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* best-effort */ }
     },
   };
@@ -111,8 +114,11 @@ function makeNoEnvProbe(session) {
   return {
     tmp, env, session,
     cleanup() {
+      // 判据1/AC1: kill the SERVER (kill-server, private socket) FIRST — kill-session alone races
+      // server teardown under load and can leave a live server that is already-unregistered ⇒
+      // unreachable by after()'s reapLiveOwners (leak-with-no-exit, 2026-08-14 full-suite red).
+      killProbeServer(tmp);
       __unregisterProbeTmp(tmp);
-      tmux(["kill-session", "-t", session], env);
       try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* best-effort */ }
     },
   };

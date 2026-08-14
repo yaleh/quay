@@ -730,3 +730,117 @@ AC72（cert 宣告退役 + 结果第三方可读落盘）
 
 ---
 
+---
+
+## 交叉标注（机械读者读【本文件】，不读 archive —— 2026-08-14 拆分后补回）
+
+**为什么在这里**：`plugin/test/semantic-observer-judge.test.mjs:345` 与 `red-on-omission-audit.test.mjs`
+**把本文件当承重面读**（`fs.readFileSync(... "manager-phase-goal.md")` + `assert.match`）。
+2026-08-14 10:4xZ 的拆分把正文搬去 archive ⇒ **两条断言从 archive=1 / 现行=0 变红**。
+**⇒ 落点映射漏了【机械读者】这一类，见下方教训。**
+
+- **`gap-semantic-observer-judge-stopped-awaiting`**（AC40 / AC41③ 交叉标注）——
+  语义观测器的 schema 字段只承载预先想到的需求类型，真实需求溢出到自由文本；
+  与本阶段 AC41「红在遗漏上」同源：**没写的东西不产生红**。
+- **`gap-ac41-red-on-omission-artifact`**（AC41 产物）——
+  遗漏必须有产物才可核；与上一条互为对方的交叉标注。
+
+**⚠️ 本次拆分学到的（硬规则 5 的一个未覆盖面）**：
+**落点映射只验了【人类读者】的词条有没有家，没验【机械读者】把哪个文件当输入。**
+**⇒ 删/搬任何文档前的必做动作**：`grep -rl "<该文件名>" --include=*.ts --include=*.mjs --include=*.test.mjs plugin/ scripts/`
+——**谁 `readFileSync` 它、谁 `assert.match` 它，一条命令就能枚举**；
+抽查词条有没有正本**查不出这个**（本次三条红全部来自同一次拆分，而我的映射一条都没提到它们）。
+
+---
+
+## 🆕 AC79–AC82：三层唤醒锚统一为 CronCreate（人 2026-08-14 14:2xZ 逐字裁定「把三层统一应用 CronCreate 加入本阶段的目标和 AC，包括你上面的建议的配套工作。推进。」）
+
+**为什么现在做（三条实测，不是偏好）**：
+```
+① ScheduleWakeup 没有外部可核证据，CronCreate 有（CronList + 注册表收据，manager 已连续 17 轮核实）
+   代价实证：2026-08-14 07:41:46 inner 切驱动模式 ⇒ ScheduleWakeup 链断 ⇒ 自驱死 4.7 小时，三层加人一起误诊整个上午
+② ScheduleWakeup 事实上不是 inner 的驱动源：今日 169 次调用 delaySeconds 全为 1500（25min），
+   而实际唤醒间隔 0.6–11 分钟 ⇒ 真驱动是 task-notification，ScheduleWakeup 是从未真正触发的兜底
+③ CronCreate 也不免费：CronList 文档写明 "scheduled via CronCreate in this session" ⇒ 会话作用域，会话没了它也没了
+   ⇒ 光换机制不补配套 = 把一个不可核的机制换成另一个（outer 现状：有 cron，无正本/无注册表/无收据）
+```
+**当前三层实测（2026-08-14 14:1xZ，meta-cc 动作记录）**：
+```
+manager  CronCreate */17  + prompt 正本(git) + 注册表收据 + 每轮四判据核实
+outer    CronCreate */20  + 无正本、无注册表、无收据
+inner    ScheduleWakeup 169 次/天，零 CronCreate
+```
+
+- [ ] **AC79（inner 加 CronCreate 锚；ScheduleWakeup 降为间隙加速器）**
+      **判据1（能取假）**：`meta-cc query_session_content role=tool tool_name=CronCreate session_id=<inner>` **返回 ≥1 条**；
+      当前真值 **0** ⇒ 该判据此刻为假，不是恒真。
+      **判据2**：inner 核里明写「ScheduleWakeup 不是唯一唤醒源」，且**保留**它作事件间隙加速器（⛔ 删除——它对 event-driven 段仍有价值）。
+      **判据3（防倒退）**：inner 的 CronCreate prompt **不得**要求「读上下文记忆」，须与 manager 锚同形：**只放指针**。
+      **负控制归落地方**（D2：manager 不构造）：删掉 cron 后 `CronList` 应变空 ⇒ 核实步骤须报假。
+
+- [ ] **AC80（三层各有 git 跟踪的 prompt 正本 + 不变式检查器）**
+      **判据1**：三层各有一个 git 跟踪的 prompt 正本文件；**当前真值 manager ✅（`orchestration/manager-tick-prompt.txt`，571 字符）/ outer ❌ / inner ❌**。
+      **判据2**：各有一个检查器，能在正本被改坏时报假（manager 现有 `orchestration/manager-anchor-check.py`，实测负控制：删掉指向核的那行 ⇒ 报「缺指向 manager-tick-core.md」）。
+      **⚠️ 判据3（本 AC 的真正难点）**：**正本文件与真正投进 CronCreate 的字符串必须一致**——
+      两者是两份副本，**而副本会漂**（今日 14:0xZ 实测：`manager-loop-tick.md` 的豁免面副本在人裁定后立刻过期，且**审计读的正是那份副本**）。
+      ⊢ 检查器须比对**正本内容**与 **`CronList` 返回的 prompt**；只查「文件存在」不算。
+
+- [ ] **AC81（三层各有注册表收据 + 每轮四判据核实）**
+      **判据（四条全真才算）**：① `CronList` 恰一条 ② 其 id == 注册表记录的 `|cron:<id>|` ③ `--verify` 报 `registry-verified` ④ 锚点正本校验通过。
+      **当前真值**：manager 连续 **17 轮**全真；outer/inner **无此机制**。
+      **⊢ 能取假的实证**：2026-08-14 09:1xZ 我多传 `--home "$HOME"` 覆盖默认值 ⇒ 读成 `registry-missing` ⇒ 差点误报「88 轮 registry-verified 断了」
+      —— **该判据会因为调用方式错误而报假，说明它不是恒真读数**。
+      **⛔ 不得只在 tick-log 里写「已核实」**——那是纯自觉；产物是四条判据各自的输出行。
+
+- [ ] **AC82（周期整除 60 且三层相位错开）**
+      **判据1**：三层 cron 周期均整除 60。**当前真值：manager `*/17` ❌ / outer `*/20` ✅ / inner 无 ❌**。
+      **实测代价**：`*/17` ⇒ 0,17,34,51，**间隔 17,17,17,9**（51+17=68>59 折回）；manager 36 次实测 **平均 16.0 / 中位 15.9 / 最短 8.2 / 最长 28.6**。
+      **⇒ 这是硬规则 4 推论二的一个实例**：一个看起来「约 17 分钟」的字面量，实际分布跨 8–29 分钟。
+      **判据2**：三层相位错开（如 outer 0/20/40、manager 10/30/50），**⊢ 判据 = 三层 cron 的 minute 集合两两不交**。
+      **理由**：同刻触发会叠加 develop 提交与 suite 负载 —— 今日实测 `load1` 在三层同时活动时冲到 **18.58**。
+      **⚠️ 判据修正（2026-08-14 14:2xZ，读 CronCreate 文档后自我更正——原判据过度归因）**：
+      平台自带 **抖动（recurring 最多迟 10% 周期，上限 15min）** 与 **「Jobs only fire while the REPL is idle」**，
+      ⇒ 换周期只能修掉离散的**一半**：`⊢ 换周期后最短间隔应 ≥18 分钟`（折回消失，可取假）；
+      `⊢ 最长仍可能 >20 分钟（抖动 + REPL 忙），【不】作为失败`。**把 8.2–28.6 整段归给 `*/17` 是我的过度归因。**
+      **manager 侧已落地**：`13,33,53 * * * *` → `95354e09`（⛔ 不用 `10,30,50`——CronCreate 文档明示避开 `:00`/`:30`）；
+      旧 `*/17`/`4cb71b69` 已删，收据已记，`--verify` 报 `registry-matches-cron`。**判据1 现真；判据2 待 inner 落地。**
+      **⚠️ 同时发现的 7 天硬上限已并入 AC81**：`Recurring tasks auto-expire after 7 days` ⇒ 三层锚都会静默消失，
+      **无任何提前预警** ⇒ AC81 判据加：核实须报【锚剩余寿命】，<24h 即报。
+
+**⚠️ 归属与顺序（manager 只能改自己那条）**：
+```
+AC79 · AC80(outer/inner 侧) · AC81(outer/inner 侧)   → 归 outer 立案 / inner 落地
+AC82 判据1 的 manager 部分（*/17 → 整除 60）          → 归 manager，但【必须在 quiet 窗口结束后】动
+```
+**⛔ 窗口内不得改任何唤醒机制**——2026-08-14 14:1xZ 起 quiet 窗口保护 ac63 的 ff，改锚会引入新的不确定性。
+
+---
+
+## 🆕 AC83：仪器的验收判据必须读【生产载体】，不能只读【测试绿】（人 2026-08-14 14:5xZ「也应保障落地可用，拿到真实数据」）
+
+**触发它的实测（本轮查证，全部按位置）**：
+```
+gap-phase-boundary-differential-accounting  status=done  AC 5/5 全勾
+实现 640ad48a  落地 2026-08-13T17:28:26Z
+verification-round.jsonl 末轮记录          2026-08-13T16:19:54Z   ← 早于实现 68 分钟
+167 轮中含 cpu_usec 的 = 0 ｜ psi 字段 = 一个都没有
+⇒ 仪器落地后【一轮都没跑过】⇒ 5/5 全勾为真，而真实数据 = 0
+```
+**为什么没被发现**：那 5 条 AC 是被 **scoped 测试**（141/0 绿）满足的，
+而测试通过 `QUAY_TEST_CGROUP_SCRIPT`（`full-suite-runner.ts:795`）**注入假 cgroup 数据**。
+**⇒ 测试证明的是「能产出」，不是「已产出」。**
+
+- [ ] **AC83（仪器类任务的验收补一条生产读数判据）**
+      **判据1（能取假，现真值为假）**：`verification-round.jsonl` 中**含 `cpu_usec` 的轮次 ≥ 1**。
+      现真值 **0/167** ⇒ 此刻为假。**⛔ 不得用「测试绿」代替本判据。**
+      **判据2（推广，本 AC 的真正内容）**：**任何以「产出某读数」为目标的任务，其 AC 必须至少有一条读【生产载体】**——
+      形如「载体中满足 X 的记录数 ≥ N」，且 **N 必须在【实现落地之后】的时间窗内计**。
+      **⊢ 反例判据**：若一条 AC 只能被 fixture/注入数据满足，它就不能作为该任务的完成依据。
+      **判据3（覆盖面，与 `gap-fan-in-suite-data-not-accounted` 交叉）**：
+      仪器写在 `full-suite-runner.ts` 里，而 **fan-in 走裸 `test.sh` 不经 runner**
+      ⇒ 即使 runner 再跑，**fan-in 的 suite 仍然拿不到分相数据**。
+      **⇒ 两条任务必须一起完成才算「拿到真实数据」；单独完成任一条都不满足人的要求。**
+
+**⇒ 一般形态（与 C29 同族，但更精确）**：
+**C29 说「执行了、报了、但没留痕 ⇒ 与没执行同形」；本条说「实现了、测试绿了、但生产里没跑过 ⇒ 与没实现同形」。**
+**两者的共同修法都是【把判据挪到产物上】** —— 前者要求 REFUSE 也写载体行，后者要求 AC 读生产载体行数。

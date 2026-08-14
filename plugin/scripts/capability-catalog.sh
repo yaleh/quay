@@ -134,6 +134,8 @@ declare -A QUESTION=(
   [obligation-ledger.ts]="What is the DERIVED obligation set for a round, with each obligation's age, the undischarged set sorted by age DESC, the escalation verdict (oldest-undischarged age vs threshold), and whether the round can close (no undischarged undeferred live obligation)?"
   [obligation-ledger-check.ts]="Is the obligation ledger's integrity mechanically sound — derived ids stable (obligation_set_derived=1), age monotonic across live rounds, and no round recorded canClose:true while a live+undischarged obligation exists (强行闭轮)?"
   [obligation-discharge-agent.ts]="Does a discharge/defer verdict conform to the schema'd semantic contract (ADR-033) — discharged:true needs who+why, discharged:false MUST carry defer_reason + unblock_condition (a silent skip is rejected)?"
+  [outer-anchor-check.ts]="Are the outer/inner CronCreate anchor prompt 正本 git-tracked and pointer-form (no state/decisions), and byte-identical to the LIVE CronList prompt (AC80 判据3: 正本 vs 活 prompt 逐字节一致; MISSING-正本/未提供活 prompt ⇒ exit 2 NOT-EVALUATED, 硬规则 3b)?"
+  [outer-cron-registry.ts]="Do the outer/inner CronCreate anchors each carry a git-tracked registry receipt (cron id + cron expr + prompt sha256 + created-at), and does each round's four-criteria verify (①CronList 恰一条 ②id==注册表 ③registry-verified ④prompt sha256==正本) stay falsifiable — while reporting the anchor's remaining lifetime against CronCreate's 7-day auto-expire (判据5: <24h 即报, AC81)?"
   [outer-tick-log-check.sh]="Does the outer's last tick row writing no-action carry the five-inequality evidence with all five false (B13: no-action legal only when every inequality is false)?"
   [quay-branch.ts]="Which branch/claim instrument does the consolidated branch/claim entry point dispatch to (grouped entry, byte-for-byte CLI preservation)?"
   [quay-check.ts]="Which task/document validation instrument does the consolidated check entry point dispatch to (grouped entry, byte-for-byte CLI preservation)?"
@@ -209,6 +211,7 @@ declare -A QUESTION=(
   [inbox-reader.sh]="Does the human channel's manager inbox have a mechanical reader that consumes every delivered message (delivered ≠ read otherwise)?"
   [inner-session-check.sh]="Is the inner session healthy / empty-shell / missing (three-state cold-start self-check)?"
   [instrument-failure-check.ts]="Which of the manager's five documented instrument-failure families does each shell command in the tick docs exhibit (grep self-match, zero-hit-as-absent, pipe-then-exit-status, ...)?"
+  [prod-data-audit.ts]="Which production carrier cited by done-task ACs is in which three-state (① has-data / ② zero-data / ③ not-evaluated), aggregated by carrier with type pre-classification + predicate self-check (gap-prod-data-accounting-audit)?"
 [retired-clause-check.ts]="Has every AC58-registered retired clause been deleted from its source file (正文词条已从源文件删除, 落点映射完整)?"
   [inner-wakeup-heartbeat-check.ts]="Is the inner ScheduleWakeup fallback heartbeat fresh — .quay/inner-wakeup-heartbeat.json ts within 3 tick periods (5400s) — or dead (inner 兜底心跳断)?"
   [inner-wakeup-heartbeat.ts]="Does the inner layer WRITE the structured wakeup heartbeat — .quay/inner-wakeup-heartbeat.json with the minimal field set (ts/runIds/blocked/budgetHit/effectiveCap/agentDispatches/delaySeconds), fail-closed against a shrunk shape (inner 兜底心跳写入方)?"
@@ -356,6 +359,7 @@ declare -A QUESTION=(
   [checker-lib.ts]="Do the shared checker primitives — matchAtCommandPosition (按位置不按关键词) and enumerativeExistence (枚举式存在性) — behave correctly, so a new checker stops re-implementing them?"
   [mechanism-vitality-check.ts]="Which shipped mechanisms are zero-call past 3x their declared cadence (待表态), have a stale last-reaffirmed stamp (待重新确认), or lack a 失效前提 field (entry-gate reject)?"
   [md-deletion-token-evaporation-check.sh]="Did any commit net-deleting ≥50 lines from *.md leave deleted-content unique tokens (identifiers/paths/专名) with ZERO occurrence in the post-delete repo (来源完备性整段蒸发)?"
+  [workflows-dual-copy-drift-check.ts]="Are the three dual-copy workflow files (drain-directives / fan-in-execute / run-routines) byte-identical between .claude/workflows/ (what runs here) and plugin/workflows/ (what quay-init --workflows ships to installed targets) — a one-sided edit (改正本而落地副本不跟, the A6/fan-in-execute.js class) must go RED, the current byte-identical state GREEN (gap-workflows-dual-copy-drift-unchecked)?"
 )
 
 # ── CADENCE (cadence declaration (②a, gap-crystallization-five-directions) — every declared check declares how often it is supposed to run; 零调用 > 3× 声明周期 → 待表态 (not a uniform day count)) ──
@@ -491,11 +495,14 @@ declare -A CADENCE=(
   [observer-registry.sh]="每轮"
   [os-anchor-install.sh]="每轮"
   [os-anchor-watchdog.sh]="每轮"
+  [outer-anchor-check.ts]="按需"
+  [outer-cron-registry.ts]="按需"
   [outer-tick-log-check.sh]="每轮"
   [pane-state-classify.ts]="每轮"
   [periodic-push-backup.sh]="每轮"
   [pipe-exit-code-check.sh]="按需"
   [portfolio-choice.ts]="每里程碑"
+  [prod-data-audit.ts]="按需"
   [precommit-guard.ts]="每轮"
   [prefriction-count.sh]="每轮"
   [preparation-feedback.ts]="每里程碑"
@@ -605,6 +612,7 @@ declare -A CADENCE=(
   [obligation-ledger.ts]="每轮"
   [semantic-observer-judge.ts]="按需"
   [red-on-omission-audit.ts]="每轮"
+  [workflows-dual-copy-drift-check.ts]="每轮"
 
 )
 
@@ -741,11 +749,14 @@ declare -A INVALIDATION=(
   [observer-registry.sh]="失效前提：观测者目标仍登记于单一 observer-registry.conf 且消费者每次读它；若回归各自维护目标列表（不再读单一注册表），本条退休"
   [os-anchor-install.sh]="无可测前提，靠周期复核"
   [os-anchor-watchdog.sh]="无可测前提，靠周期复核"
+  [outer-anchor-check.ts]="失效前提：该层仍以 CronCreate 固定锚 + 正本文件为锚形态；若一层弃用正本文件（改回运行时解析/无锚），该层检查退休"
+  [outer-cron-registry.ts]="失效前提：该层仍以 CronCreate 固定锚 + 注册表收据为锚形态；若一层弃用 CronCreate（改回 ScheduleWakeup/运行时解析/无锚），或 CronCreate 文档取消 7 天自动过期硬上限，本检查的注册表/剩余寿命判据失去机械读面，退休"
   [outer-tick-log-check.sh]="无可测前提，靠周期复核"
   [pane-state-classify.ts]="失效前提：仍用 tmux capture-pane 观测 pane；若观测面迁移出 TUI，本条退休"
   [periodic-push-backup.sh]="无可测前提，靠周期复核"
   [pipe-exit-code-check.sh]="无可测前提，靠周期复核"
   [portfolio-choice.ts]="无可测前提，靠周期复核"
+  [prod-data-audit.ts]="失效前提：done 任务 AC 仍按生产载体引用数据（若任务体不再按载体引用、或生产载体形态被整体迁移/退役，本条失去审计对象，退休）"
   [precommit-guard.ts]="失效前提：提交路径仍经 git commit 与 .git/hooks/pre-commit（git 仍是唯一提交载体）；若提交面改为非 git 传输，或 pre-commit 钩子被全局禁用（core.hooksPath 重定向 / --no-verify 成常规绕过），本条退休"
   [prefriction-count.sh]="无可测前提，靠周期复核"
   [preparation-feedback.ts]="无可测前提，靠周期复核"
@@ -855,6 +866,7 @@ declare -A INVALIDATION=(
   [obligation-ledger.ts]="失效前提：轮次仍产生义务账本；若义务跟踪改为别处，本条退休"
   [semantic-observer-judge.ts]="失效前提：inner/outer 状态仍以自由文本（心跳 reason + tick 报告）承载；若观测面改为纯结构化 schema 且无自由文本，本条退休"
   [red-on-omission-audit.ts]="失效前提：执行核仍以 tick-core 文档固化行为；若行为固化面迁出 tick-core/plugin-scripts 文件系统，本条退休"
+  [workflows-dual-copy-drift-check.ts]="失效前提：workflow 双副本结构仍存在（.claude/workflows/ 与 plugin/workflows/ 各有一份同一文件）；若双副本结构取消（同一文件只在一处），本条退休"
 
 )
 
@@ -991,11 +1003,14 @@ declare -A LAST_REAFFIRMED=(
   [observer-registry.sh]="2026-08-10"
   [os-anchor-install.sh]="2026-08-10"
   [os-anchor-watchdog.sh]="2026-08-10"
+  [outer-anchor-check.ts]="2026-08-14"
+  [outer-cron-registry.ts]="2026-08-14"
   [outer-tick-log-check.sh]="2026-08-10"
   [pane-state-classify.ts]="2026-08-10"
   [periodic-push-backup.sh]="2026-08-10"
   [pipe-exit-code-check.sh]="2026-08-10"
   [portfolio-choice.ts]="2026-08-10"
+  [prod-data-audit.ts]="2026-08-14"
   [precommit-guard.ts]="2026-08-14"
   [prefriction-count.sh]="2026-08-10"
   [preparation-feedback.ts]="2026-08-10"
@@ -1105,6 +1120,7 @@ declare -A LAST_REAFFIRMED=(
   [obligation-ledger.ts]="2026-08-10"
   [semantic-observer-judge.ts]="2026-08-10"
   [red-on-omission-audit.ts]="2026-08-10"
+  [workflows-dual-copy-drift-check.ts]="2026-08-14"
 
 )
 
@@ -1241,11 +1257,14 @@ declare -A MATCHING=(
   [observer-registry.sh]="keyword"
   [os-anchor-install.sh]="keyword"
   [os-anchor-watchdog.sh]="keyword"
+  [outer-anchor-check.ts]="enumerative"
+  [outer-cron-registry.ts]="enumerative"
   [outer-tick-log-check.sh]="keyword"
   [pane-state-classify.ts]="keyword"
   [periodic-push-backup.sh]="keyword"
   [pipe-exit-code-check.sh]="keyword"
   [portfolio-choice.ts]="keyword"
+  [prod-data-audit.ts]="position"
   [precommit-guard.ts]="enumerative"
   [prefriction-count.sh]="keyword"
   [preparation-feedback.ts]="keyword"
@@ -1355,6 +1374,7 @@ declare -A MATCHING=(
   [obligation-ledger.ts]="enumerative"
   [semantic-observer-judge.ts]="keyword"
   [red-on-omission-audit.ts]="keyword"
+  [workflows-dual-copy-drift-check.ts]="enumerative"
 )
 # ── CONSUMER (rhythm-column consumer contract, gap-ac73-catalog-rhythm-consumer-check) ──
 # A mechanism's RHYTHM is only a claim until someone presses it. This table makes the consumer
@@ -1400,9 +1420,12 @@ declare -A CONSUMER=(
   [md-deletion-token-evaporation-check.sh]="谁按：文档删除者在删 .md ≥50 行时按；条件=要验删除 token 是否全仓蒸发"
   [obligation-discharge-agent.ts]="谁按：obligation 判定调用方按；条件=discharge/defer 结论要判 schema 语义"
   [observer-registry-check.sh]="谁按：observer 生命周期维护者按；条件=要验已注册 observer 是否仍存活"
+  [outer-anchor-check.ts]="谁按：AC81 唤醒锚核实 / 锚重建时由 inner/outer 经 --layer 参数 + --cron-prompt（或 stdin）按；条件=要核验 CronCreate 锚 prompt 正本与活 prompt 逐字节一致（重挂 cron / 人裁定后复核）"
+  [outer-cron-registry.ts]="谁按：AC81 唤醒锚核实每轮由 inner/outer 经 --verify --layer + --cron-list 按（CronList 活视图由调用方会话传入；外层把自己的 CronList 视图喂进来）；条件=要核实 CronCreate 锚的注册表收据四判据 + 剩余寿命（每轮必跑，不因窗口/暂停跳过；重挂 cron 后更新注册表并提交）"
   [per-task-suite-record.ts]="谁按：inner 任务 subagent 在自回合跑完 per-task 全量 suite 后按（AC72 判据2 writer）；条件=要写一份第三方可读的 per-task suite 记录到共享 checkout"
   [pipe-exit-code-check.sh]="谁按：shell 作者在写管道时按；条件=要验管道传播最后命令退出码"
   [pool-quality-judge.ts]="谁按：pool-quality 语义闸调度器按；条件=机械触发（pool>25 / 最久未复核>48h / 每 10 轮）"
+  [prod-data-audit.ts]="谁按：outer/人在 gap-prod-data-accounting-audit 复核时按；条件=要判生产数据入账三态（①/②/③）——按载体聚合，只计数不修复"
   [quay-branch.ts]="谁按：quay CLI 分支/claim 命令按；条件=要分支/认领操作"
   [quay-check.ts]="谁按：quay CLI 校验命令按；条件=要 task/doc 校验"
   [quay-deliver.ts]="谁按：quay CLI deliver/preempt 命令按；条件=要交付"

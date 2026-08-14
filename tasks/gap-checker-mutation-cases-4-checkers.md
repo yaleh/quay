@@ -1,7 +1,7 @@
 ---
 id: gap-checker-mutation-cases-4-checkers
 title: checker-mutation-check 4 个 checker 注册但缺 mutation case（cap-counts/fan-in-workflow/per-task-suite-record/rhythm-consumer）——develop 恒红挡 fan-in
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -58,15 +58,65 @@ rhythm-consumer-check            AC73 落   （gap-ac73-catalog-rhythm-consumer-
 
 - [ ] checker-mutation-check 4 个 uncovered checker 补齐 mutation case（每 checker 正确态绿 + 破环红 + 恢复绿），--list 不再报 uncovered，--selftest 仍 PASS，clean develop tip 的 checker-mutation-check 全绿——ac63 / workflows-dual-copy 的 fan-in 不再被它挡。
 
+## Test-Files
+
+- plugin/test/checker-mutation-check.test.mjs（manifest 覆盖 = checkers_total/checkers_with_mutation 一致，AC2）
+- plugin/test/cap-counts-subagents-check.test.mjs（cap-counts mutation case 的正确态/破环判据）
+- plugin/test/fan-in-workflow-check.test.mjs（fan-in-workflow mutation case）
+- plugin/test/per-task-suite-record-check.test.mjs（per-task-suite-record mutation case）
+- plugin/test/rhythm-consumer-check.test.mjs（rhythm-consumer mutation case）
+- plugin/test/select-static-checks-for-touches.test.mjs（AC4b：checker-mutation-cases 夹具不触发注册预检）
+- plugin/test/delivery-inventory-drift-gate.test.mjs（fixture-not-structural 回归）
+
 ## Touches
 
 - plugin/scripts/checker-mutation-cases/cap-counts-subagents-check.sh (new)
 - plugin/scripts/checker-mutation-cases/fan-in-workflow-check.sh (new)
 - plugin/scripts/checker-mutation-cases/per-task-suite-record-check.sh (new)
 - plugin/scripts/checker-mutation-cases/rhythm-consumer-check.sh (new)
-- plugin/scripts/checker-mutation-check.sh（若需要注册表更新）
+- plugin/scripts/select-static-checks-for-touches.ts（checker-mutation-cases 夹具不触发注册预检——新增子目录 fixture 不是 shipped check，catalog 只扫顶层 glob）
+- plugin/scripts/delivery-inventory-drift-gate.sh（checker-mutation-cases 夹具不算结构性 A/D——§6 快照只数顶层条目，--write-inventory 对子目录改动是字节 no-op）
+- plugin/test/select-static-checks-for-touches.test.mjs（AC4b 回归用例）
+- plugin/test/delivery-inventory-drift-gate.test.mjs（fixture-not-structural 回归用例）
 - tasks/gap-checker-mutation-cases-4-checkers.md（自身）
 
 ## Evidence
 
-（落地后回填）
+**判据2（能取假）**：落地前 `checker-mutation-check --list` 报 **uncovered: cap-counts-subagents-check fan-in-workflow-check per-task-suite-record-check rhythm-consumer-check**（4 个，全 `NO`，任务 Proposal 已记录 ac63 捕获 + outer 复跑；clean develop tip bd4612e5 同样红）。补 4 个 mutation case 后：
+
+```
+$ bash plugin/scripts/checker-mutation-check.sh --list
+checkers_total: 44 (parsed from run_static_checks + CI, never hand-written)
+checkers_with_mutation: 44
+uncovered: none
+```
+
+**判据1/判据3（4 个 case 各正确态绿 + 破环红 + 恢复绿；机制自检仍 PASS）**：
+
+```
+$ bash plugin/scripts/checker-mutation-check.sh --run
+checkers_total: 44
+checkers_with_mutation: 44
+mutations_that_stayed_green: 0
+mutations_that_always_red: 0
+uncovered (registered checker with no mutation case): 0
+errors: 0
+RESULT: PASS — every registered checker went RED under its injected defect and GREEN on restore; mutations_that_stayed_green = 0.
+
+$ bash plugin/scripts/checker-mutation-check.sh --selftest
+PASS: empty-manifest injection fails the gate
+PASS: skip-cases injection fails the gate
+PASS: invert-red injection fails the gate
+checker-mutation-check --selftest: ALL PASS
+```
+
+**判据4（--for-task scoped 门绿）**：
+
+```
+$ bash scripts/test.sh --for-task gap-checker-mutation-cases-4-checkers --allow-thin
+# 8 个 scoped static checks 全 PASS（含 delivery-inventory-drift-gate PASS）
+# 121 tests, pass 121, fail 0
+scoped gate exit: 0
+```
+
+**机制配套改动（使 AC4 scoped 门绿所必需的假阳性修复）**：4 个 mutation case 是 `plugin/scripts/checker-mutation-cases/` 下的**夹具**，capability-catalog 的 check-set 只从顶层 `ls plugin/scripts/*.{sh,ts,mjs}` 派生（子目录不扫）、§6 DELIVERY-INVENTORY 快照只数顶层条目（`--write-inventory` 对子目录改动是字节 no-op）。故注册预检（`select-static-checks-for-touches.ts`）与 drift-gate（`delivery-inventory-drift-gate.sh`）对 mutation-case-only 改动是假阳性：注册预检要求补 catalog/outline Touches（子目录不会红 catalog）、drift-gate 要求同改动 touch outline（无法满足——`--write-inventory` 无 diff）。两处各加 `checker-mutation-cases/` 豁免（fixture ≠ shipped check），并各补一条回归测试。

@@ -137,6 +137,20 @@ t("RED — a staged NEW plugin/scripts file (git add) without an outline update 
   } finally { rmrf(root); }
 });
 
+t("GREEN — a NEW file under plugin/scripts/checker-mutation-cases/ does NOT trigger (fixture, not a shipped script; the snapshot counts top-level entries only — gap-checker-mutation-cases-4-checkers)", () => {
+  const root = makeRepo();
+  try {
+    fs.mkdirSync(path.join(root, "plugin", "scripts", "checker-mutation-cases"), { recursive: true });
+    fs.writeFileSync(
+      path.join(root, "plugin", "scripts", "checker-mutation-cases", "cap-counts-subagents-check.sh"),
+      "#!/usr/bin/env bash\necho fixture\n"
+    );
+    const r = runGate(root);
+    assert.equal(r.status, 0, `mutation-case fixture must NOT be structural:\n${r.stderr}`);
+    assert.match(r.stdout, /PASS/);
+  } finally { rmrf(root); }
+});
+
 t("RED — a committed plugin/scripts DELETION without an outline update fails (committed path)", () => {
   const root = makeRepo();
   try {

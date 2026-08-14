@@ -55,6 +55,10 @@ import {
   // outer-verification family recognizer it reuses.
   isBodyLanded,
   isOuterVerificationItem,
+  // RESOLVE-BY-TASK-ID (tasks/gap-in-flight-resolve-by-task-id-not-worktree-name): normalize an
+  // in-flight identifier (worktree dir / branch / task id) to the TRUE task id so a truncated worktree
+  // slug still resolves and the in-flight count stops under-reporting.
+  resolveInFlightId,
 } from "../scripts/slot-refill.ts";
 // AC2 (gap-delivery-critical-label-at-promote-not-after-dispatch): the promote gate is the fix's
 // label DETERMINATION point — applyPromotions (ready-pool-check --apply heartbeat) flips todo→ready
@@ -632,6 +636,230 @@ test("CLI smoke: --root/--cap/--in-flight produces JSON with the refill fields (
   assert.equal(parsed.should_refill, true);
   assert.ok(Array.isArray(parsed.recommended));
   assert.equal(parsed.recommended.length, 2);
+});
+
+// ── RESOLVE-BY-TASK-ID (tasks/gap-in-flight-resolve-by-task-id-not-worktree-name) ──────────────────
+// AC1 判据1: `--in-flight` parsing matches BY TASK ID — worktree dir name / branch name / task id all
+// normalize to the TRUE task id, so a truncated worktree slug (the `<slug>` convention's agent-chosen
+// abbreviation) still resolves. The three forms' in_flight_count MUST agree (⊢ disagreement ⇒ RED).
+// AC2 判据2 (real sample, 能取假): gap-workflows-dual-copy-drift (truncated dir — true id
+// `…-unchecked`) previously under-counted the in-flight set (readTasks silently skipped the missing
+// `tasks/<slug>.md`); after the fix the truncated name resolves to the true id and the count is not
+// biased. AC3 判据3: the AC53 gate is NOT changed — only the quantity fed to it (the in-flight set).
+
+test("resolveInFlightId — exact id / branch form / truncated dir all resolve to the true task id (判据1)", (t) => {
+  const root = makeWorkspace("resolve");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const tasksDir = path.join(root, "tasks");
+  // The real 2026-08-14 sample pair: the worktree slug is a TRUNCATED prefix of the true task id.
+  writeTask(root, "gap-workflows-dual-copy-drift-unchecked", {
+    status: "ready", labels: ["gap"], body: dispatchableBody(["- code/wcd.ts (new)"]),
+  });
+  // A prefix-collision guard: an id whose prefix is ALSO a distinct exact task — the exact task must
+  // win (never re-resolve an exact id to a longer prefix-match sibling).
+  writeTask(root, "gap-prefix", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/p.ts (new)"]) });
+  writeTask(root, "gap-prefix-extended", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/pe.ts (new)"]) });
+
+  // 1. exact task id → exact, unchanged.
+  assert.deepEqual(resolveInFlightId(tasksDir, "gap-workflows-dual-copy-drift-unchecked"),
+    { id: "gap-workflows-dual-copy-drift-unchecked", method: "exact" });
+  // 2. branch form `task/<id>` → strip the prefix, exact.
+  assert.deepEqual(resolveInFlightId(tasksDir, "task/gap-workflows-dual-copy-drift-unchecked"),
+    { id: "gap-workflows-dual-copy-drift-unchecked", method: "exact" });
+  // 3. TRUNCATED worktree dir name → truncated-prefix resolves to the TRUE id (the real sample).
+  assert.deepEqual(resolveInFlightId(tasksDir, "gap-workflows-dual-copy-drift"),
+    { id: "gap-workflows-dual-copy-drift-unchecked", method: "truncated-prefix" });
+  // 4. TRUNCATED branch name → strip `task/`, then truncated-prefix.
+  assert.deepEqual(resolveInFlightId(tasksDir, "task/gap-workflows-dual-copy-drift"),
+    { id: "gap-workflows-dual-copy-drift-unchecked", method: "truncated-prefix" });
+  // 5. an exact id whose longer sibling also shares the prefix → exact wins, NEVER re-resolved.
+  assert.deepEqual(resolveInFlightId(tasksDir, "gap-prefix"), { id: "gap-prefix", method: "exact" });
+  // 6. unresolved (no task matches) → input unchanged, method "unresolved".
+  assert.deepEqual(resolveInFlightId(tasksDir, "gap-no-such-task"), { id: "gap-no-such-task", method: "unresolved" });
+});
+
+test("resolveInFlightId — ambiguous prefix (2+ tasks extend it) ⇒ unresolved, never guesses", (t) => {
+  const root = makeWorkspace("resolve-amb");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const tasksDir = path.join(root, "tasks");
+  writeTask(root, "gap-amb-one", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/1.ts (new)"]) });
+  writeTask(root, "gap-amb-two", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/2.ts (new)"]) });
+  // `gap-amb` is a strict prefix of BOTH — ambiguous ⇒ unresolved (a wrong id would poison the
+  // touches-disjointness set worse than a missing id).
+  assert.deepEqual(resolveInFlightId(tasksDir, "gap-amb"), { id: "gap-amb", method: "unresolved" });
+});
+
+test("CLI --in-flight: truncated worktree dir name resolves to the true id — in_flight_count not biased (判据2 real sample)", (t) => {
+  const root = makeWorkspace("resolve-cli");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-workflows-dual-copy-drift-unchecked", {
+    status: "ready", labels: ["gap"], body: dispatchableBody(["- code/wcd.ts (new)"]),
+  });
+  const script = path.resolve(__dirname, "..", "scripts", "slot-refill.ts");
+  const run = (inFlight) => JSON.parse(execFileSync(
+    process.execPath,
+    ["--no-warnings", "--experimental-strip-types", script, "--root", root, "--cap", "3", "--json", "--in-flight", inFlight],
+    { encoding: "utf8", env: { ...process.env, QUAY_TELEMETRY_SUBAGENTS: "0" } },
+  ));
+  // TRUE id form.
+  const byTrueId = run("gap-workflows-dual-copy-drift-unchecked");
+  assert.equal(byTrueId.in_flight_count, 1, "true task id form → 1 in-flight");
+  // TRUNCATED worktree dir form (the 2026-08-14 real sample). PRE-FIX this silently skipped
+  // `tasks/gap-workflows-dual-copy-drift.md` (missing) → in_flight_count=0 → slots_free inflated
+  // → AC53 拒写. POST-FIX it resolves to the true id → count agrees with the true-id form.
+  const byTruncDir = run("gap-workflows-dual-copy-drift");
+  assert.equal(byTruncDir.in_flight_count, 1, "truncated worktree dir name resolves → 1 in-flight");
+  // 判据1 ⊢: the truncated dir form and the true-id form AGREE (disagreement ⇒ RED).
+  assert.equal(byTruncDir.in_flight_count, byTrueId.in_flight_count,
+    "判据1: worktree-dir-name form and task-id form MUST give the same in_flight_count");
+  assert.equal(byTruncDir.slots_free, byTrueId.slots_free,
+    "the truncated form must not inflate slots_free (the AC53 gate quantity is fixed, the gate untouched)");
+});
+
+test("CLI --in-flight: the three forms (true id / branch / truncated dir) agree on in_flight_count (判据1)", (t) => {
+  const root = makeWorkspace("resolve-3form");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // The full real 2026-08-14 in-flight set (5 worktrees): two have truncated slugs.
+  const ids = [
+    "gap-ac63-judgment2-no-carrier",
+    "gap-fan-in-flip-no-ac-completion-check",
+    "gap-in-flight-resolve-by-task-id",
+    "gap-test-isolation-backlog-44-violations-unmeasured",
+    "gap-workflows-dual-copy-drift-unchecked",
+  ];
+  for (const id of ids) writeTask(root, id, { status: "ready", labels: ["gap"], body: dispatchableBody([`- code/${id}.ts (new)`]) });
+  const script = path.resolve(__dirname, "..", "scripts", "slot-refill.ts");
+  const run = (inFlight) => JSON.parse(execFileSync(
+    process.execPath,
+    ["--no-warnings", "--experimental-strip-types", script, "--root", root, "--cap", "5", "--json", "--in-flight", inFlight],
+    { encoding: "utf8", env: { ...process.env, QUAY_TELEMETRY_SUBAGENTS: "0" } },
+  ));
+  const trueForm = ids.join(",");
+  const branchForm = ids.map((id) => `task/${id}`).join(",");
+  // The truncated worktree DIR names as they actually exist in `git worktree list` (2026-08-14).
+  const dirForm = [
+    "gap-ac63-judgment2-no-carrier",
+    "gap-fan-in-flip-no-ac-completion-check",
+    "gap-in-flight-resolve-by-task-id",
+    "gap-test-isolation-backlog-44",          // truncated dir — true id …-violations-unmeasured
+    "gap-workflows-dual-copy-drift",          // truncated dir — true id …-unchecked
+  ].join(",");
+  const byTrue = run(trueForm);
+  const byBranch = run(branchForm);
+  const byDir = run(dirForm);
+  assert.equal(byTrue.in_flight_count, 5, "true task id form → 5 in-flight");
+  assert.equal(byBranch.in_flight_count, 5, "branch form (task/<id>) → 5 in-flight");
+  assert.equal(byDir.in_flight_count, 5, "truncated worktree dir form → 5 in-flight (both truncated slugs resolve)");
+  assert.equal(byDir.in_flight_count, byTrue.in_flight_count, "判据1: the three forms MUST agree");
+  assert.equal(byBranch.in_flight_count, byTrue.in_flight_count, "判据1: the three forms MUST agree");
+});
+
+// ── AC5 DUAL-CONSUMER SPLIT (tasks/gap-in-flight-resolve-by-task-id-not-worktree-name, 人 12:5xZ) ──
+// 消费者 A · 触碰面不相交（dispatchable_disjoint / checkTouchesPair）⇒ 宽集 = 所有未落地任务（含
+//   awaiting retry——worktree 还在，新任务碰同文件会撞）。
+// 消费者 B · 槽位计数（slots_free / should_refill）⇒ 窄集 = 当前在跑的任务 subagent 数（cap=5 保护
+//   subagent；awaiting retry 无 subagent ⇒ 不占 cap）。
+// ⊢ 判据: 同一时刻两分母【允许不等】；若实现仍取同一集合 ⇒ 未落地。
+
+test("AC5 — runningSubagentCount splits Consumer B (slots) from Consumer A (touches): two denominators may differ (判据 ⊢)", (t) => {
+  const root = makeWorkspace("ac5-split");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const tasksDir = path.join(root, "tasks");
+  // 5 WIDE un-landed tasks (the real 2026-08-14 in-flight set).
+  const wide = [
+    "gap-ac63-judgment2-no-carrier",
+    "gap-fan-in-flip-no-ac-completion-check",
+    "gap-in-flight-resolve-by-task-id",
+    "gap-test-isolation-backlog-44-violations-unmeasured",
+    "gap-workflows-dual-copy-drift-unchecked",
+  ];
+  for (const id of wide) writeTask(root, id, { status: "ready", labels: ["gap"], body: dispatchableBody([`- code/${id}.ts (new)`]) });
+  const inFlight = wide.map((id) => inFlightTask(id, [`- code/${id}.ts (new)`]));
+  const base = { tasksDir, root, cap: 5 };
+
+  // Consumer B narrow: only 3 of the 5 are ACTUALLY-RUNNING subagents (ac63 + in-flight-resolve impl
+  // + workflows-dual-copy — the 2026-08-14 empirical split: 5 worktrees, 3 live subagents).
+  const narrow = analyzeSlotRefill({ ...base, inFlight, runningSubagentCount: 3 });
+  assert.equal(narrow.in_flight_count, 5, "Consumer A denominator stays WIDE (all un-landed tasks)");
+  assert.equal(narrow.running_subagent_count, 3, "Consumer B denominator is the NARROW running-subagent count");
+  assert.equal(narrow.slot_denominator_source, "running-subagents");
+  assert.equal(narrow.slots_free, 2, "true slots_free = cap 5 − 3 running subagents = 2");
+
+  // Backward compat: no runningSubagentCount ⇒ Consumer B falls back to the wide set.
+  const fallback = analyzeSlotRefill({ ...base, inFlight });
+  assert.equal(fallback.running_subagent_count, 5, "fallback Consumer B = wide set");
+  assert.equal(fallback.slot_denominator_source, "in-flight-fallback");
+  assert.equal(fallback.slots_free, 0, "fallback slots_free = cap 5 − 5 wide = 0 (the old shared-denominator shape)");
+
+  // ⊢ 判据: the two denominators are allowed to differ — 5 (wide, Consumer A) vs 3 (narrow, Consumer B).
+  assert.notEqual(narrow.in_flight_count, narrow.running_subagent_count,
+    "判据: dispatchable_disjoint 分母 (5) 与 slots_free 分母 (3) 允许不等");
+  assert.equal(narrow.dispatchable_disjoint, fallback.dispatchable_disjoint,
+    "Consumer A (dispatchable_disjoint) is UNCHANGED by the Consumer-B split");
+});
+
+test("AC5 — CLI --running: 5 wide / 3 running ⇒ slots_free=2; without --running falls back to 0 (real sample)", (t) => {
+  const root = makeWorkspace("ac5-cli");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const ids = [
+    "gap-ac63-judgment2-no-carrier",
+    "gap-fan-in-flip-no-ac-completion-check",
+    "gap-in-flight-resolve-by-task-id",
+    "gap-test-isolation-backlog-44-violations-unmeasured",
+    "gap-workflows-dual-copy-drift-unchecked",
+  ];
+  for (const id of ids) writeTask(root, id, { status: "ready", labels: ["gap"], body: dispatchableBody([`- code/${id}.ts (new)`]) });
+  const script = path.resolve(__dirname, "..", "scripts", "slot-refill.ts");
+  const run = (args) => JSON.parse(execFileSync(
+    process.execPath,
+    ["--no-warnings", "--experimental-strip-types", script, "--root", root, "--cap", "5", "--json", ...args],
+    { encoding: "utf8", env: { ...process.env, QUAY_TELEMETRY_SUBAGENTS: "0" } },
+  ));
+  const wide = ids.join(",");
+  // 3 running subagents: ac63 + in-flight-resolve + workflows-dual-copy (the empirical live set).
+  const narrow3 = ["gap-ac63-judgment2-no-carrier", "gap-in-flight-resolve-by-task-id", "gap-workflows-dual-copy-drift-unchecked"].join(",");
+
+  const withRunning = run(["--in-flight", wide, "--running", narrow3]);
+  assert.equal(withRunning.in_flight_count, 5, "Consumer A wide denominator = 5");
+  assert.equal(withRunning.running_subagent_count, 3, "Consumer B narrow denominator = 3");
+  assert.equal(withRunning.slot_denominator_source, "running-subagents");
+  assert.equal(withRunning.slots_free, 2, "true slots_free = 5 − 3 = 2");
+
+  const withoutRunning = run(["--in-flight", wide]);
+  assert.equal(withoutRunning.slots_free, 0, "without --running ⇒ Consumer B falls back to the wide set ⇒ 0 free slots");
+  assert.equal(withoutRunning.slot_denominator_source, "in-flight-fallback");
+
+  // ⊢ 判据: the SAME moment yields different denominators for the two consumers.
+  assert.equal(withRunning.dispatchable_disjoint, withoutRunning.dispatchable_disjoint,
+    "Consumer A (dispatchable_disjoint) is unchanged by the Consumer-B split");
+});
+
+test("AC5 — Consumer A stays WIDE: a candidate colliding with a wide-but-not-running task is still blocked (awaiting-retry worktree occupies files)", (t) => {
+  const root = makeWorkspace("ac5-wide");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const tasksDir = path.join(root, "tasks");
+  // 3 WIDE in-flight tasks; only 2 (A, B) are running — C is awaiting-retry (no subagent).
+  writeTask(root, "gap-if-a", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/a.ts (new)"]) });
+  writeTask(root, "gap-if-b", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/b.ts (new)"]) });
+  writeTask(root, "gap-if-c", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/c.ts (new)"]) });
+  // A ready candidate X touches the SAME file as awaiting-retry C (wide but NOT running).
+  writeTask(root, "gap-cand-x", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/c.ts (new)", "- code/x.ts (new)"]) });
+  // A disjoint candidate Y touches a fresh file — should be free to recommend.
+  writeTask(root, "gap-cand-y", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/y.ts (new)"]) });
+  const inFlight = [
+    inFlightTask("gap-if-a", ["- code/a.ts (new)"]),
+    inFlightTask("gap-if-b", ["- code/b.ts (new)"]),
+    inFlightTask("gap-if-c", ["- code/c.ts (new)"]),
+  ];
+  const r = analyzeSlotRefill({ tasksDir, root, cap: 5, inFlight, runningSubagentCount: 2 });
+  assert.equal(r.running_subagent_count, 2, "Consumer B narrow = 2 running subagents");
+  assert.equal(r.slots_free, 3, "true slots_free = 5 − 2 = 3");
+  assert.ok(r.recommended.includes("gap-cand-y"), "disjoint candidate Y recommended (slots are free)");
+  assert.ok(!r.recommended.includes("gap-cand-x"),
+    "X collides with awaiting-retry C (wide Consumer-A set) ⇒ blocked even though C is NOT running (its worktree still occupies code/c.ts)");
+  const deferredX = (r.deferred || []).find((d) => d.id === "gap-cand-x");
+  assert.ok(deferredX && /touches-overlap-in-flight/.test(deferredX.reason),
+    "X deferred with touches-overlap-in-flight — the WIDE Consumer-A denominator still applies");
 });
 
 // ── Suite-blocking rank (tasks/gap-ready-relevance-blind-to-suite-blocking-signal AC3) ──────────────
@@ -1997,5 +2225,46 @@ test("MEASURED — telemetry read failure degrades but is never silent (measurem
   assert.equal(r.measurement_source, "degraded-no-telemetry");
   assert.ok(r.measurement_error && /ENOTDIR|not a directory|Command failed/.test(r.measurement_error),
     `measurement_error surfaced, got: ${r.measurement_error}`);
-  assert.equal(r.in_flight_count, 0, "degraded fallback is empty — but the error makes it not-silent");
+  // AC6 (tasks/gap-in-flight-resolve-by-task-id-not-worktree-name, 判据5 修法 (a)): a degraded
+  // measurement is NOT "genuinely 0 in-flight" — the slot-family fields are NULL so a downstream
+  // arithmetic consumer crashes instead of silently computing "5 empty slots".
+  assert.equal(r.in_flight_count, null, "degraded → in_flight_count is null (not same-shaped as 0)");
+  assert.equal(r.slots_free, null, "degraded → slots_free is null (never a silently-computed '5 empty slots')");
+  assert.equal(r.occupied_slots, null, "degraded → occupied_slots is null");
+  assert.equal(r.subagents_in_flight, null, "degraded → subagents_in_flight is null");
+  assert.equal(r.should_refill, false, "degraded → fail-closed: no refill");
+});
+
+// AC6 DUAL-MEASUREMENT NEGATIVE CONTROL (tasks/gap-in-flight-resolve-by-task-id-not-worktree-name,
+// 判据5 修法 (a), manager 13:2xZ): mock measurement_error non-empty ⇒ the measured slot-family fields
+// are null; the SAME call with a healthy measurement_source ⇒ they stay numbers (negative control —
+// the null is keyed to degraded, not to "empty in-flight").
+
+test("AC6 — degraded measurement nulls in_flight_count/slots_free/subagents_in_flight; healthy source keeps numbers (负控制)", (t) => {
+  const root = makeWorkspace("ac6-degraded");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const tasksDir = path.join(root, "tasks");
+  writeTask(root, "gap-a", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/a.ts (new)"]) });
+  const base = { tasksDir, root, cap: 5, inFlight: [inFlightTask("gap-a", ["- code/a.ts (new)"])] };
+
+  // 负控制 mock: measurement_error non-empty + degraded source (the 2026-08-14 13:2xZ 现场 shape:
+  // spawnSync ETIMEDOUT ⇒ measurement_source='degraded-no-telemetry').
+  const degraded = analyzeSlotRefill({ ...base, measurementSource: "degraded-no-telemetry", measurementError: "spawnSync fast-mode-telemetry.ts ETIMEDOUT (load1=18.58)" });
+  assert.equal(degraded.measurement_source, "degraded-no-telemetry");
+  assert.ok(degraded.measurement_error, "measurement_error is non-empty (the mock)");
+  assert.equal(degraded.in_flight_count, null, "degraded → in_flight_count null (never a silent 0)");
+  assert.equal(degraded.slots_free, null, "degraded → slots_free null (never a silently-computed '5 empty slots')");
+  assert.equal(degraded.subagents_in_flight, null, "degraded → subagents_in_flight null");
+  assert.equal(degraded.occupied_slots, null, "degraded → occupied_slots null");
+  assert.equal(degraded.running_subagent_count, null, "degraded → running_subagent_count null");
+  assert.equal(degraded.should_refill, false, "degraded → fail-closed no-refill");
+  assert.ok(degraded.no_refill_reason && /measurement degraded/.test(degraded.no_refill_reason),
+    "no_refill_reason names the degraded state, not a fake 'no free slots'");
+
+  // Negative control: the SAME inputs with a HEALTHY source (explicit-input) ⇒ numbers, not null.
+  const healthy = analyzeSlotRefill({ ...base, measurementSource: "explicit-input" });
+  assert.equal(healthy.in_flight_count, 1, "healthy → in_flight_count stays a number");
+  assert.equal(healthy.slots_free, 4, "healthy → slots_free stays a number");
+  assert.equal(healthy.occupied_slots, 1, "healthy → occupied_slots stays a number");
+  assert.equal(healthy.subagents_in_flight, 0, "healthy → subagents_in_flight stays a number");
 });

@@ -43,6 +43,7 @@ import {
   LEGACY_HEARTBEAT_FILE,
   MALFORMED,
   MACHINE_UNVERIFIABLE_REASON,
+  END_INVARIANT_NOT_EVALUATED_REASON,
   parseHeartbeat,
   judgeHeartbeat,
   readHeartbeatText,
@@ -58,6 +59,12 @@ import {
   semanticTriggerHeuristic,
   evaluateTrigger,
   freeTextHash,
+  CHECKER_COST_FILE,
+  ASSESSMENT_NOT_RUN_REASON,
+  parseRecordedAt,
+  lastCallRecord,
+  judgeAssessmentSteps,
+  readLastCallRecord,
 } from "../scripts/inner-wakeup-heartbeat-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -477,7 +484,9 @@ function writeHeartbeatTo(root, hb) {
 test("AC3 CLI — fresh full-shape heartbeat exits 0 (ALIVE)", () => {
   const root = makeRootWithHeartbeat(fullHeartbeat());
   try {
-    const r = runCli(root);
+    // --in-flight '' (measured zero set) keeps the END invariant judgeable so the fully-evaluated
+    // verdict is ALIVE; WITHOUT it the checker reports NOT-EVALUATED (AC1, exit 0).
+    const r = runCli(root, ["--in-flight", ""]);
     assert.equal(r.status, 0, `fresh full-shape heartbeat must exit 0:\n${r.stdout}\n${r.stderr}`);
     assert.match(r.stdout, /ALIVE/, "stdout must say ALIVE");
   } finally {
@@ -510,7 +519,7 @@ test("AC3 CLI — missing file exits 1 (fail-closed)", () => {
 test("AC3 CLI — custom --max-age-secs makes an old heartbeat ALIVE when under the band", () => {
   const root = makeRootWithHeartbeat(fullHeartbeat({ ts: Math.floor(Date.now() / 1000) - 10000 }));
   try {
-    const r = runCli(root, ["--max-age-secs", "20000", "--json"]);
+    const r = runCli(root, ["--max-age-secs", "20000", "--json", "--in-flight", ""]);
     assert.equal(r.status, 0, `heartbeat under a wider band must exit 0:\n${r.stdout}\n${r.stderr}`);
     const out = JSON.parse(r.stdout);
     assert.equal(out.verdict, "ALIVE");
@@ -575,7 +584,9 @@ test("AC2 CLI --json — fields-missing carries status + missing list", () => {
 test("AC2 CLI --json — a full-shape fresh heartbeat is ALIVE with fieldContract.ok true", () => {
   const root = makeRootWithHeartbeat(fullHeartbeat());
   try {
-    const r = runCli(root, ["--json"]);
+    // --in-flight '' keeps the END invariant judgeable (ALIVE); without it the checker reports
+    // NOT-EVALUATED (AC1) — still exit 0, but the verdict text differs.
+    const r = runCli(root, ["--json", "--in-flight", ""]);
     assert.equal(r.status, 0, `full-shape heartbeat must exit 0:\n${r.stdout}\n${r.stderr}`);
     const out = JSON.parse(r.stdout);
     assert.equal(out.verdict, "ALIVE");
@@ -640,7 +651,10 @@ test("AC53 AC2 CLI --json — the 04:02:52Z negative-control heartbeat exits 1 (
       should_refill: true,
       no_refill_reason: null,
     }));
-    const r = runCli(root, ["--json"]);
+    // The 04:02:52Z shape recorded in_flight=0 — a MEASURED empty set. --in-flight '' (measured zero)
+    // makes the invariant judgeable (the recorded zero is the real set); WITHOUT it the checker reports
+    // NOT-EVALUATED (gap-inner-heartbeat-check-not-evaluated-when-no-inflight, AC1).
+    const r = runCli(root, ["--json", "--in-flight", ""]);
     assert.equal(r.status, 1, `the 04:02:52Z replay must exit 1:\n${r.stdout}\n${r.stderr}`);
     const out = JSON.parse(r.stdout);
     assert.equal(out.verdict, "DEAD");
@@ -672,7 +686,9 @@ test("AC53 判据① CLI --json — NEGATIVE CONTROL: machine says no blocking r
       no_refill_reason: "ac51 subagent in flight, next dispatch after they land",
       should_refill: false, // the record's own claim — ignored by the gate (the MACHINE is the judge)
     }));
-    const r = runCli(root, ["--json"]);
+    // --in-flight '' = a MEASURED zero in-flight set (the shape's own recorded in_flight). Without it
+    // the checker would report NOT-EVALUATED (AC1 — the touches-overlap-in-flight step needs the set).
+    const r = runCli(root, ["--json", "--in-flight", ""]);
     assert.equal(r.status, 1, `the bypass shape must exit 1 (the gate refuses):\n${r.stdout}\n${r.stderr}`);
     const out = JSON.parse(r.stdout);
     assert.equal(out.verdict, "DEAD");
@@ -692,6 +708,183 @@ test("AC53 判据① CLI --json — NEGATIVE CONTROL: machine says no blocking r
   }
 });
 
+// ── NOT-EVALUATED end-invariant (gap-inner-heartbeat-check-not-evaluated-when-no-inflight) ───────────
+// AC1 (hard rule 3b): the checker run WITHOUT --in-flight cannot judge the touches-overlap-in-flight
+// step ⇒ the END invariant is UNEVALUABLE ⇒ it must report NOT-EVALUATED (an INDEPENDENT value carrying
+// evaluated:false, non-escalating exit 0) — NOT the constant false DEAD. DEAD stays reserved for real
+// violations (in-flight set provided AND the four-part invariant holds).
+
+test("AC2 CLI --json — NO --in-flight + healthy inner (dispatchable work visible to an empty in-flight view) ⇒ NOT-EVALUATED, NOT DEAD", () => {
+  // The falsifiable shape (AC2 能取假): a workspace with a REAL dispatchable ready task. Under the old
+  // default-empty in-flight, the machine refill said should_refill=true + no_refill_reason=null ⇒ the
+  // four-part invariant "held" ⇒ the checker reported constant DEAD. Now, without --in-flight, the
+  // touches-overlap-in-flight step cannot be judged ⇒ NOT-EVALUATED (exit 0), never DEAD.
+  const root = makeDispatchableWorkspace("iwuh-ne1-");
+  try {
+    writeHeartbeatTo(root, fullHeartbeat());
+    const r = runCli(root, ["--json"]);
+    assert.equal(r.status, 0, `no-in-flight healthy inner must NOT escalate:\n${r.stdout}\n${r.stderr}`);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.verdict, "NOT-EVALUATED", `verdict must be NOT-EVALUATED, got ${out.verdict}`);
+    assert.equal(out.status, "end-invariant-not-evaluated");
+    assert.equal(out.reason, END_INVARIANT_NOT_EVALUATED_REASON);
+    assert.equal(out.endInvariant.evaluated, false);
+    assert.equal(out.endInvariant.violated, null);
+    assert.equal(out.machineInFlight.source, "none (not provided — end-invariant NOT-EVALUATED)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC2 negative control — WITH --in-flight (a real set) + healthy inner ⇒ ALIVE", () => {
+  // Same workspace + a REAL in-flight set that genuinely blocks dispatch (the dispatchable task itself
+  // is in flight ⇒ its touches overlap its own self-touch ⇒ it is no longer a candidate ⇒
+  // should_refill=false) ⇒ the machine refill is judgeable AND not-violated ⇒ ALIVE.
+  const root = makeDispatchableWorkspace("iwuh-ne2-");
+  try {
+    writeHeartbeatTo(root, fullHeartbeat());
+    const r = runCli(root, ["--json", "--in-flight", "gap-fixture-dispatchable"]);
+    assert.equal(r.status, 0, `with a real in-flight set the healthy inner must be ALIVE:\n${r.stdout}\n${r.stderr}`);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.verdict, "ALIVE");
+    assert.equal(out.status, "alive");
+    assert.equal(out.endInvariant.evaluated, true);
+    assert.equal(out.endInvariant.violated, false);
+    assert.equal(out.machineSlotRefill.should_refill, false, "the real in-flight set blocks the refill");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC3 CLI --json — WITH --in-flight '' (measured zero) + a REAL invariant violation ⇒ DEAD (real positives not weakened)", () => {
+  // --in-flight '' is a MEASURED empty in-flight set (real zero) — the invariant IS judgeable and the
+  // machine says the four-part invariant holds (dispatchable work + free slot + no mechanism reason)
+  // ⇒ the real violation must still be DEAD. AC3: the fix routes ONLY the unevaluable (no-in-flight)
+  // case to NOT-EVALUATED; it never swallows a real positive.
+  const root = makeDispatchableWorkspace("iwuh-ne3-");
+  try {
+    writeHeartbeatTo(root, fullHeartbeat({
+      slots_free: 5, dispatchable_disjoint: 5, pool: 16, should_refill: true, no_refill_reason: null,
+    }));
+    const r = runCli(root, ["--json", "--in-flight", ""]);
+    assert.equal(r.status, 1, `a real invariant violation with a measured in-flight set must still DEAD:\n${r.stdout}\n${r.stderr}`);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.verdict, "DEAD");
+    assert.equal(out.status, "invariant-violated");
+    assert.equal(out.reason, "inner-round-ended-with-dispatchable-work");
+    assert.equal(out.endInvariant.evaluated, true);
+    assert.equal(out.endInvariant.violated, true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ── AC53-gate running-set wiring (tasks/gap-ac53-gate-not-wired-to-running-set) ───────────────────────
+// 判据1: runMachineSlotRefill now accepts a `running` param wired to slot-refill's Consumer B
+// (slots_free / should_refill); Consumer A (dispatchable_disjoint) stays on the wide in-flight view.
+// 判据2 (能取假): the true-sample replay — the SAME workspace + cap give OPPOSITE gate verdicts when
+// the gate passes its observed running set vs when it doesn't (传真集放行 / 不传拒写).
+// 判据3 (3b): `running: undefined` (未提供) is DISTINCT from `running: []` (测得真零) — never
+// same-shaped.
+
+test("AC53-gate 判据1 — runMachineSlotRefill wires `running` to Consumer B (running-subagents)", () => {
+  const root = makeDispatchableWorkspace("iwuh-run1-");
+  try {
+    const m = runMachineSlotRefill({ root, running: [], cap: 5 });
+    assert.equal(m.ok, true, `machine slot-refill must succeed:\n${m.error || ""}`);
+    assert.equal(m.refill.slot_denominator_source, "running-subagents", "Consumer B must use the narrow running set");
+    assert.equal(m.refill.running_subagent_count, 0, "empty running array = MEASURED zero");
+    assert.equal(m.refill.slots_free, 5, "cap 5 − 0 running = 5 free");
+    // Consumer A stays wide — the dispatchable fixture task is still in the disjoint set.
+    assert.ok(m.refill.dispatchable_disjoint > 0, "Consumer A keeps the wide set (dispatchable_disjoint unaffected by running)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC53-gate 判据3 (3b) — running undefined (未提供) is DISTINCT from running [] (真零): slot_denominator_source differs", () => {
+  const root = makeDispatchableWorkspace("iwuh-run3-");
+  try {
+    const notProvided = runMachineSlotRefill({ root, cap: 5 });
+    assert.equal(notProvided.ok, true, `machine slot-refill must succeed:\n${notProvided.error || ""}`);
+    assert.equal(notProvided.refill.slot_denominator_source, "in-flight-fallback", "undefined ⇒ Consumer B falls back to the wide in-flight set");
+    assert.equal(notProvided.refill.running_subagent_count, 0, "fallback wide set is empty here ⇒ 0");
+    const measuredZero = runMachineSlotRefill({ root, running: [], cap: 5 });
+    assert.equal(measuredZero.refill.slot_denominator_source, "running-subagents", "[] ⇒ Consumer B uses the narrow running set (true zero)");
+    assert.equal(measuredZero.refill.running_subagent_count, 0, "measured zero running subagents");
+    // The two are distinguishable even when the numeric count is identical — "没提供" is never
+    // same-shaped as "测得为 0" (hard rule 3b).
+    assert.notEqual(notProvided.refill.slot_denominator_source, measuredZero.refill.slot_denominator_source);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC53-gate 判据2 (能取假) — true-sample replay: 传真集放行 / 不传拒写, same workspace + cap, opposite verdicts", () => {
+  const root = makeDispatchableWorkspace("iwuh-run2-");
+  try {
+    // 不传 running: Consumer B falls back to the wide set ⇒ slots_free=5>0 + the dispatchable
+    // fixture task is recommended ⇒ should_refill=true ⇒ the gate REFUSES (violated).
+    const wide = runMachineSlotRefill({ root, cap: 5 });
+    assert.equal(wide.ok, true, `machine slot-refill must succeed:\n${wide.error || ""}`);
+    assert.equal(wide.refill.should_refill, true, `不传 running ⇒ should_refill=true:\n${JSON.stringify(wide.refill)}`);
+    assert.equal(wide.refill.slot_denominator_source, "in-flight-fallback");
+    const wideInv = judgeEndInvariantAgainstMachine(null, wide.refill);
+    assert.equal(wideInv.violated, true, "不传 running ⇒ 闸拒写 (RED)");
+
+    // 传真集: 5 running subagents fill cap 5 ⇒ slots_free=0 ⇒ should_refill=false ⇒ the gate PASSES
+    // (the round legitimately has no free slot).
+    const narrow = runMachineSlotRefill({ root, running: ["r-1", "r-2", "r-3", "r-4", "r-5"], cap: 5 });
+    assert.equal(narrow.ok, true, `machine slot-refill must succeed:\n${narrow.error || ""}`);
+    assert.equal(narrow.refill.running_subagent_count, 5, "running set is the Consumer-B denominator");
+    assert.equal(narrow.refill.slots_free, 0, "cap 5 − 5 running = 0 free");
+    assert.equal(narrow.refill.should_refill, false, "传真集 ⇒ should_refill=false");
+    assert.equal(narrow.refill.slot_denominator_source, "running-subagents");
+    const narrowInv = judgeEndInvariantAgainstMachine(null, narrow.refill);
+    assert.equal(narrowInv.violated, false, "传真集 ⇒ 闸放行");
+
+    // Same second, same machine, two opposite conclusions — the 判据2 replay is RED for the current
+    // refusing state and flips on the wiring.
+    assert.notEqual(wide.refill.should_refill, narrow.refill.should_refill);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC53-gate CLI --json — --running '' surfaces slot_denominator_source running-subagents (vs in-flight-fallback without)", () => {
+  const root = makeDispatchableWorkspace("iwuh-clirun-");
+  try {
+    // The violating end-shape (machine agrees: the fixture task is dispatchable).
+    writeHeartbeatTo(root, fullHeartbeat({
+      slots_free: 5, dispatchable_disjoint: 5, pool: 16, should_refill: true, no_refill_reason: null,
+    }));
+    // This test is about the --running (Consumer B) wiring, so both runs supply --in-flight '' (a
+    // MEASURED zero in-flight set) to keep the END invariant judgeable — without it the checker would
+    // report NOT-EVALUATED (gap-inner-heartbeat-check-not-evaluated-when-no-inflight, AC1).
+    // Without --running: Consumer B falls back to the wide in-flight set.
+    const r1 = runCli(root, ["--json", "--in-flight", ""]);
+    assert.equal(r1.status, 1, `without --running the violating shape must RED:\n${r1.stdout}\n${r1.stderr}`);
+    const out1 = JSON.parse(r1.stdout);
+    assert.equal(out1.status, "invariant-violated");
+    assert.equal(out1.machineSlotRefill.slot_denominator_source, "in-flight-fallback");
+    assert.equal(out1.machineInFlight.runningSource, "none (wide in-flight fallback)");
+    assert.equal(out1.machineInFlight.runningIds, null);
+    // With --running '' (measured zero): Consumer B uses the narrow running set — the violating
+    // shape is still RED (slots_free=3>0 at the heartbeat's effectiveCap 3), but the JSON proves the
+    // narrow denominator is being used (判据3: --running '' is a TRUE zero, not "not provided").
+    const r2 = runCli(root, ["--json", "--running", "", "--in-flight", ""]);
+    assert.equal(r2.status, 1, `with --running '' the violating shape still RED:\n${r2.stdout}\n${r2.stderr}`);
+    const out2 = JSON.parse(r2.stdout);
+    assert.equal(out2.status, "invariant-violated");
+    assert.equal(out2.machineSlotRefill.slot_denominator_source, "running-subagents");
+    assert.equal(out2.machineSlotRefill.running_subagent_count, 0);
+    assert.equal(out2.machineInFlight.runningSource, "--running");
+    assert.deepEqual(out2.machineInFlight.runningIds, []);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("AC53 AC3 CLI — a legacy `.json` snapshot (pre-AC53 format) is still read via the fallback", () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "iwuh-legacy-"));
   try {
@@ -699,7 +892,9 @@ test("AC53 AC3 CLI — a legacy `.json` snapshot (pre-AC53 format) is still read
     fs.mkdirSync(quay, { recursive: true });
     // Write ONLY the legacy .json (no jsonl) — the checker must fall back to it.
     fs.writeFileSync(path.join(quay, LEGACY_HEARTBEAT_FILE), JSON.stringify(fullHeartbeat(), null, 2), "utf8");
-    const r = runCli(tmp, ["--json"]);
+    // --in-flight '' keeps the END invariant judgeable (ALIVE); without it the checker reports
+    // NOT-EVALUATED (AC1).
+    const r = runCli(tmp, ["--json", "--in-flight", ""]);
     assert.equal(r.status, 0, `legacy .json fallback must be ALIVE:\n${r.stdout}\n${r.stderr}`);
     const out = JSON.parse(r.stdout);
     assert.equal(out.verdict, "ALIVE");
@@ -720,7 +915,9 @@ test("AC53 AC3 CLI — when BOTH exist, the jsonl LAST line wins over the legacy
     }), null, 2), "utf8");
     // jsonl with a NON-violating last line — the checker must read THIS, not the legacy.
     fs.writeFileSync(path.join(quay, HEARTBEAT_FILE), `${JSON.stringify(fullHeartbeat({ slots_free: 2, should_refill: false }))}\n`, "utf8");
-    const r = runCli(tmp, ["--json"]);
+    // --in-flight '' keeps the END invariant judgeable (ALIVE); without it the checker reports
+    // NOT-EVALUATED (AC1).
+    const r = runCli(tmp, ["--json", "--in-flight", ""]);
     assert.equal(r.status, 0, `jsonl last line must win:\n${r.stdout}\n${r.stderr}`);
     const out = JSON.parse(r.stdout);
     assert.equal(out.verdict, "ALIVE");
@@ -804,6 +1001,246 @@ test("AC77 判据1 — evaluateTrigger: unchanged hash + no spawn-limit string �
   assert.equal(t.fired, false, "same hash + no spawn-limit ⇒ no trigger");
   assert.equal(t.hashChanged, false);
   assert.equal(t.heuristic, false);
+});
+
+// ── I1 read-product criterion (tasks/gap-inner-assessment-steps-no-product-reader) ──────────────────
+// 判据1: three dispatch-evaluation freshness signals (heartbeat jsonl ts + slot-refill call record +
+// ready-pool call record); a STALE ready-pool/slot-refill call record ⇒ "inner 派发评估未跑".
+// 判据2 (能取假): the 07:41–12:2x absence window replays RED (heartbeat 4.7h / ready-pool 4.2h /
+// slot-refill 2.7h stale). Hard rule 3b: a step with no call record in an ABSENT ledger reports
+// NOT-EVALUATED — a distinct value, never a fake pass or a fake fail.
+
+test("I1 — parseRecordedAt parses the checker-cost `at` ISO timestamp into epoch seconds", () => {
+  // 2026-08-14T13:01:28.955Z — one of the real checker-cost.jsonl rows in the main checkout.
+  const epoch = parseRecordedAt("2026-08-14T13:01:28.955Z");
+  assert.equal(typeof epoch, "number", `must parse to epoch seconds, got ${epoch}`);
+  assert.ok(epoch > 1786600000, `must be a 2026 epoch (~17866xxxxxx), got ${epoch}`);
+  // The exact back-conversion round-trips.
+  assert.equal(new Date(epoch * 1000).toISOString().slice(0, 19), "2026-08-14T13:01:28");
+  assert.equal(parseRecordedAt(null), null, "non-string → null");
+  assert.equal(parseRecordedAt("not-a-date"), null, "unparsable → null");
+  assert.equal(parseRecordedAt(""), null, "empty → null");
+});
+
+test("I1 — lastCallRecord returns the LAST (newest) row for a name; null when absent", () => {
+  const rows = [
+    { name: "ready-pool-check", at: "2026-08-14T08:08:35Z", n: 6 },
+    { name: "ready-pool-check", at: "2026-08-14T13:01:28.955Z", n: 6 },
+    { name: "slot-refill", at: "2026-08-14T09:39:12Z" },
+  ];
+  const rp = lastCallRecord(rows, "ready-pool-check");
+  assert.equal(rp.atRaw, "2026-08-14T13:01:28.955Z", "the LAST row wins (append-ordered ledger)");
+  assert.equal(parseRecordedAt(rp.atRaw), parseRecordedAt("2026-08-14T13:01:28.955Z"));
+  const sr = lastCallRecord(rows, "slot-refill");
+  assert.equal(sr.atRaw, "2026-08-14T09:39:12Z");
+  assert.equal(lastCallRecord(rows, "cap-from-gate"), null, "unknown name → null");
+  assert.equal(lastCallRecord([], "ready-pool-check"), null, "empty rows → null");
+  // A row without `at` is skipped (malformed row ≠ a recorded time).
+  const malformed = [{ name: "ready-pool-check" }, { name: "ready-pool-check", at: "2026-08-14T13:01:00Z" }];
+  assert.equal(lastCallRecord(malformed, "ready-pool-check").atRaw, "2026-08-14T13:01:00Z");
+});
+
+test("I1 — judgeAssessmentSteps: fresh ready-pool + fresh slot-refill ⇒ ok (assessment ran)", () => {
+  const now = 1786716000;
+  const a = judgeAssessmentSteps(now, {
+    heartbeat: { ts: now - 60 },
+    readyPool: { atEpoch: now - 120, atRaw: "x" },
+    slotRefill: { atEpoch: now - 90, atRaw: "y" },
+  }, DEFAULT_MAX_AGE_SECS);
+  assert.equal(a.ok, true, `fresh assessment must pass:\n${JSON.stringify(a)}`);
+  assert.deepEqual(a.stale, []);
+  assert.equal(a.status, "assessment-steps-ok");
+  assert.equal(a.reason, null);
+  assert.equal(a.signals.readyPool.status, "fresh");
+  assert.equal(a.signals.slotRefill.status, "fresh");
+  assert.equal(a.signals.heartbeat.status, "fresh");
+});
+
+test("I1 — judgeAssessmentSteps: stale ready-pool call record ⇒ RED (inner 派发评估未跑)", () => {
+  const now = 1786716000;
+  const a = judgeAssessmentSteps(now, {
+    heartbeat: { ts: now - 60 }, // heartbeat FRESH — the case the old checker missed
+    readyPool: { atEpoch: now - 4.2 * 3600, atRaw: "2026-08-14T08:08:35Z" },
+    slotRefill: { atEpoch: now - 90, atRaw: "y" },
+  }, DEFAULT_MAX_AGE_SECS);
+  assert.equal(a.ok, false, `stale ready-pool must RED:\n${JSON.stringify(a)}`);
+  assert.deepEqual(a.stale, ["ready-pool"]);
+  assert.equal(a.status, "assessment-steps-stale");
+  assert.equal(a.reason, ASSESSMENT_NOT_RUN_REASON);
+  assert.equal(a.signals.readyPool.status, "stale");
+  assert.equal(a.signals.slotRefill.status, "fresh");
+});
+
+test("I1 — judgeAssessmentSteps: stale slot-refill call record alone ⇒ RED", () => {
+  const now = 1786716000;
+  const a = judgeAssessmentSteps(now, {
+    heartbeat: { ts: now - 60 },
+    readyPool: { atEpoch: now - 90, atRaw: "y" },
+    slotRefill: { atEpoch: now - 2.7 * 3600, atRaw: "2026-08-14T09:39:12Z" },
+  }, DEFAULT_MAX_AGE_SECS);
+  assert.equal(a.ok, false);
+  assert.deepEqual(a.stale, ["slot-refill"]);
+  assert.equal(a.reason, ASSESSMENT_NOT_RUN_REASON);
+});
+
+test("I1 — judgeAssessmentSteps: no call records (ledger absent) is NOT-EVALUATED, not a fake fail (hard rule 3b)", () => {
+  const now = 1786716000;
+  const a = judgeAssessmentSteps(now, {
+    heartbeat: { ts: now - 60 },
+    readyPool: null,
+    slotRefill: null,
+  }, DEFAULT_MAX_AGE_SECS);
+  assert.equal(a.ok, true, "no ledger to evaluate from must not fake a fail");
+  assert.deepEqual(a.stale, [], "not-recorded ≠ stale");
+  assert.equal(a.signals.readyPool.status, "not-recorded");
+  assert.equal(a.signals.slotRefill.status, "not-recorded");
+  assert.equal(a.signals.heartbeat.status, "fresh");
+});
+
+test("I1 — judgeAssessmentSteps: the 07:41 absence shape (all three stale) is RED (判据2 replay)", () => {
+  // The 07:41–12:2x absence window (I1): heartbeat last 07:41:43 (4.7h), ready-pool last 08:08:35
+  // (4.2h), slot-refill last 09:39:12 (2.7h) — now ≈ 12:25. Replayed with relative offsets so the
+  // test is deterministic regardless of wall-clock.
+  const now = 1786716000;
+  const a = judgeAssessmentSteps(now, {
+    heartbeat: { ts: now - 4.7 * 3600, atRaw: "" },
+    readyPool: { atEpoch: now - 4.2 * 3600, atRaw: "2026-08-14T08:08:35Z" },
+    slotRefill: { atEpoch: now - 2.7 * 3600, atRaw: "2026-08-14T09:39:12Z" },
+  }, DEFAULT_MAX_AGE_SECS);
+  assert.equal(a.ok, false, `07:41 absence shape must RED:\n${JSON.stringify(a)}`);
+  assert.ok(a.stale.includes("ready-pool"), "ready-pool 4.2h stale must be named");
+  assert.ok(a.stale.includes("slot-refill"), "slot-refill 2.7h stale must be named");
+  assert.equal(a.reason, ASSESSMENT_NOT_RUN_REASON);
+});
+
+// ── I1 CLI fixtures + integration ───────────────────────────────────────────────────────────────────
+
+/** Write a checker-cost.jsonl ledger (one jsonl line per record) into <root>/.quay/. */
+function writeCheckerCostTo(root, records) {
+  const quayDir = path.join(root, ".quay");
+  fs.mkdirSync(quayDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(quayDir, CHECKER_COST_FILE),
+    records.map((r) => JSON.stringify(r)).join("\n") + "\n",
+    "utf8",
+  );
+}
+
+/** A root with a heartbeat + a checker-cost ledger at the given relative staleness offsets. */
+function makeRootWithAssessment({ heartbeatAgeSecs, readyPoolAgeSecs, slotRefillAgeSecs }) {
+  const root = makeRootWithHeartbeat(fullHeartbeat({ ts: Math.floor(Date.now() / 1000) - heartbeatAgeSecs }));
+  const now = Date.now();
+  const iso = (ageSecs) => new Date(now - ageSecs * 1000).toISOString();
+  const records = [];
+  if (readyPoolAgeSecs != null) {
+    records.push({ name: "ready-pool-check", ms: 3007, n: 6, load: 9.01, at: iso(readyPoolAgeSecs) });
+  }
+  if (slotRefillAgeSecs != null) {
+    records.push({ name: "slot-refill", ms: 120, n: 1, load: 9.01, at: iso(slotRefillAgeSecs) });
+  }
+  if (records.length > 0) writeCheckerCostTo(root, records);
+  return root;
+}
+
+test("I1 CLI --json — the 07:41 absence replay (all three stale) exits 1 with inner 派发评估未跑 (判据2)", () => {
+  // Replay the 07:41–12:2x absence window: heartbeat 4.7h, ready-pool 4.2h, slot-refill 2.7h stale.
+  const root = makeRootWithAssessment({ heartbeatAgeSecs: 4.7 * 3600, readyPoolAgeSecs: 4.2 * 3600, slotRefillAgeSecs: 2.7 * 3600 });
+  try {
+    const r = runCli(root, ["--json"]);
+    assert.equal(r.status, 1, `07:41 absence replay must exit 1:\n${r.stdout}\n${r.stderr}`);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.verdict, "DEAD");
+    assert.equal(out.status, "assessment-steps-stale");
+    assert.equal(out.reason, ASSESSMENT_NOT_RUN_REASON);
+    assert.ok(out.assessmentSteps.stale.includes("ready-pool"), "ready-pool must be in stale");
+    assert.ok(out.assessmentSteps.stale.includes("slot-refill"), "slot-refill must be in stale");
+    assert.equal(out.assessmentSteps.signals.readyPool.status, "stale");
+    assert.equal(out.assessmentSteps.signals.slotRefill.status, "stale");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("I1 CLI — the 07:41 absence replay names 派发评估未跑 in human output", () => {
+  const root = makeRootWithAssessment({ heartbeatAgeSecs: 4.7 * 3600, readyPoolAgeSecs: 4.2 * 3600, slotRefillAgeSecs: 2.7 * 3600 });
+  try {
+    const r = runCli(root);
+    assert.equal(r.status, 1, `human output must exit 1:\n${r.stdout}\n${r.stderr}`);
+    assert.match(r.stdout, /inner 派发评估未跑/, "the human verdict must name 派发评估未跑");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("I1 CLI --json — fresh all three (heartbeat + ready-pool + slot-refill) exits 0 (GREEN)", () => {
+  const root = makeRootWithAssessment({ heartbeatAgeSecs: 60, readyPoolAgeSecs: 120, slotRefillAgeSecs: 90 });
+  try {
+    // --in-flight '' keeps the END invariant judgeable (ALIVE); without it the checker reports
+    // NOT-EVALUATED (AC1).
+    const r = runCli(root, ["--json", "--in-flight", ""]);
+    assert.equal(r.status, 0, `fresh assessment must exit 0:\n${r.stdout}\n${r.stderr}`);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.verdict, "ALIVE");
+    assert.equal(out.assessmentSteps.status, "assessment-steps-ok");
+    assert.equal(out.assessmentSteps.signals.readyPool.status, "fresh");
+    assert.equal(out.assessmentSteps.signals.slotRefill.status, "fresh");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("I1 CLI --json — heartbeat FRESH but ready-pool call record STALE exits 1 (the discriminating case the old checker missed)", () => {
+  // The exact shape the existing heartbeat freshness check could NOT see: inner awake (heartbeat
+  // fresh) but the ready-pool assessment stopped 4.2h ago.
+  const root = makeRootWithAssessment({ heartbeatAgeSecs: 60, readyPoolAgeSecs: 4.2 * 3600, slotRefillAgeSecs: 90 });
+  try {
+    const r = runCli(root, ["--json"]);
+    assert.equal(r.status, 1, `fresh-heartbeat-but-stale-ready-pool must exit 1:\n${r.stdout}\n${r.stderr}`);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.verdict, "DEAD");
+    assert.equal(out.status, "assessment-steps-stale");
+    assert.deepEqual(out.assessmentSteps.stale, ["ready-pool"]);
+    assert.equal(out.assessmentSteps.signals.heartbeat.status, "fresh");
+    assert.equal(out.assessmentSteps.signals.readyPool.status, "stale");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("I1 CLI --json — a fresh heartbeat with NO checker-cost ledger is GREEN with NOT-EVALUATED signals (3b)", () => {
+  // A workspace that only writes the heartbeat (e.g. a fresh checkout) must NOT be RED on the
+  // assessment criterion alone — the ledger is absent so the evaluation-steps are NOT-EVALUATED,
+  // a distinct value from both "fresh" and "stale".
+  const root = makeRootWithHeartbeat(fullHeartbeat());
+  try {
+    // --in-flight '' keeps the END invariant judgeable (ALIVE); without it the checker reports
+    // NOT-EVALUATED (AC1) — the "NOT-EVALUATED" this test asserts is the I1 assessment-step signals.
+    const r = runCli(root, ["--json", "--in-flight", ""]);
+    assert.equal(r.status, 0, `no ledger must not fake a fail:\n${r.stdout}\n${r.stderr}`);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.verdict, "ALIVE");
+    assert.equal(out.assessmentSteps.status, "assessment-steps-ok");
+    assert.equal(out.assessmentSteps.signals.readyPool.status, "not-recorded");
+    assert.equal(out.assessmentSteps.signals.slotRefill.status, "not-recorded");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("I1 CLI --json — an existing ledger with a stale ready-pool but NO slot-refill rows is RED (ready-pool is the 必跑 step)", () => {
+  // The real world: checker-cost.jsonl exists (737 ready-pool rows), slot-refill has no rows (it does
+  // not self-record yet). ready-pool staleness alone must fire even with slot-refill not-recorded.
+  const root = makeRootWithAssessment({ heartbeatAgeSecs: 60, readyPoolAgeSecs: 4.2 * 3600, slotRefillAgeSecs: null });
+  try {
+    const r = runCli(root, ["--json"]);
+    assert.equal(r.status, 1, `stale ready-pool with absent slot-refill rows must exit 1:\n${r.stdout}\n${r.stderr}`);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.status, "assessment-steps-stale");
+    assert.deepEqual(out.assessmentSteps.stale, ["ready-pool"]);
+    assert.equal(out.assessmentSteps.signals.slotRefill.status, "not-recorded");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 // ── doc-contract wiring (AC4: inner B3 + outer A 段必读) ───────────────────────────────────────────

@@ -54,7 +54,14 @@ test("AC3 — the live manager-loop-tick.md no longer pgrep's a non-existent idl
   const archive = path.resolve(repoRoot, "orchestration", "manager-loop-tick.md");
   assert.ok(fs.existsSync(archive), "orchestration/manager-loop-tick.md must exist");
   const text = fs.readFileSync(archive, "utf8");
-  assert.ok(!/pgrep[^\n]*idle-watch/.test(text),
+  // Position-aware: only flag pgrep at a COMMAND position (line start / after shell separator)
+  // targeting idle-watch. The prose that FORBIDS the practice ("别再 pgrep 一个不存在的脚本")
+  // also contains "pgrep"+"idle-watch" on one line — keyword-only matching would false-positive
+  // on it, and deleting that prohibition to make the test pass would erode the rule it protects
+  // (manager 2026-08-14: instrument-failure-check forced 3 prose-weakening edits the same way).
+  // Negative control (:539): `pgrep -af 'plugin/scripts/session-liveness\.sh'` is a REAL live
+  // command — must NOT match (different target, not idle-watch).
+  assert.ok(!/(^|[;&|]\s*)pgrep\b[^\n]*idle-watch/m.test(text),
     "the live archive must not pgrep a non-existent idle-watch script (defect 2)");
   assert.match(text, /monitor-mount-check\.sh --json/, "the archive's idle-watch check must use monitor-mount-check.sh --json");
   assert.match(text, /session-liveness\.sh --once/, "the archive's idle-watch check must use the --once seam");

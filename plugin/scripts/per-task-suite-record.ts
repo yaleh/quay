@@ -10,6 +10,15 @@
 // (unreadable by manager/outer/human). This writer makes every per-task full-suite run land ONE
 // record containing  taskId / runId / state / laneCount / durationMs / failed-files / 起止时刻.
 //
+// AC63 判据1 (tasks/gap-ac63-judgment2-no-carrier): the record ALSO carries an OPTIONAL doc-check
+// trace — `docChecked` (boolean: did `bash scripts/test.sh --static-checks-doc` run before this
+// fan-in's ff) + `docCheckExit` (integer 0..255, the doc check's exit code). The trace is what makes
+// "有 ff 而无 doc 检查" (has ff but no doc check) structurally judgeable — before it, lock-events had
+// no doc-check field and the judgment could never be false (硬规则 4). The fields are OPTIONAL (NOT in
+// REQUIRED_FIELDS) because a pre-AC63 record legitimately has none — and that ABSENCE is the real
+// "has ff but no doc check" sample the checker must go RED on. When PRESENT they are fail-closed
+// validated: a malformed trace is never written (硬规则 3b).
+//
 // The record must land where THIRD PARTIES can read it — the SHARED checkout (the main worktree),
 // NOT the worktree's own `.quay/` (which is the fork-inherited copy of full-suite-state.json —
 // the exact phenomenon AC72 判据2 documents: four in-flight worktrees all showed runId=eac3ee98,
@@ -25,13 +34,18 @@
 //   node --experimental-strip-types plugin/scripts/per-task-suite-record.ts
 //       --task-id <taskId> --run-id <runId> --state <state> --lane-count <n>
 //       --duration-ms <ms> --started-at <iso> --finished-at <iso>
-//       [--failed-files <csv>] [--state-file <full-suite-state.json>] [--root <dir>]
+//       [--failed-files <csv>] [--doc-checked true|false] [--doc-check-exit <0..255>]
+//       [--state-file <full-suite-state.json>] [--root <dir>]
 //       [--record-file <file>] [--json] [--help]
 //
 //   --state-file <file>   read defaults from a full-suite-state.json — runId/state/laneCount/
 //                         durationMs/startedAt/finishedAt are taken from it when not given
 //                         explicitly (explicit flags win). failed-files are extracted from
 //                         `failures[].file` when state=red and --failed-files is absent.
+//   --doc-checked         OPTIONAL AC63 判据1 doc-check trace — true|false: did the fan-in's
+//                         `--static-checks-doc` run before its ff. Omitted when absent (a
+//                         pre-AC63 record has no doc-check trace).
+//   --doc-check-exit      OPTIONAL (REQUIRES --doc-checked): the doc check's exit code 0..255.
 //   --record-file <file>  override the shared-checkout record path (hermetic tests point here).
 //
 // Exit codes:
@@ -107,6 +121,25 @@ export function buildRecord(o) {
   if (startedAt == null) return { error: `startedAt must be an ISO/epoch timestamp (got ${JSON.stringify(o.startedAt ?? sf.startedAt)})` };
   const finishedAt = toIsoTimestamp(o.finishedAt ?? sf.finishedAt);
   if (finishedAt == null) return { error: `finishedAt must be an ISO/epoch timestamp (got ${JSON.stringify(o.finishedAt ?? sf.finishedAt)})` };
+  // ── doc-check trace (AC63 判据1 — OPTIONAL, fail-closed when present) ────────────────────────────
+  // The trace is OPTIONAL (a pre-AC63 record legitimately has none — the "has ff but no doc check"
+  // real sample). When given, `--doc-checked` must be a boolean; `--doc-check-exit` must be an
+  // integer 0..255 AND REQUIRES `--doc-checked` (an exit code without a "did it run" flag is
+  // ambiguous and must not be recorded — 硬规则 3b).
+  let docChecked;
+  if (o.docChecked != null) {
+    const dc = String(o.docChecked).trim().toLowerCase();
+    if (dc === "true") docChecked = true;
+    else if (dc === "false") docChecked = false;
+    else return { error: `--doc-checked must be true|false (got ${JSON.stringify(o.docChecked)})` };
+  }
+  let docCheckExit;
+  if (o.docCheckExit != null) {
+    if (docChecked == null) return { error: "--doc-check-exit requires --doc-checked (an exit code without a 'did it run' flag is ambiguous)" };
+    const x = Number(o.docCheckExit);
+    if (!Number.isInteger(x) || x < 0 || x > 255) return { error: `--doc-check-exit must be an integer 0..255 (got ${JSON.stringify(o.docCheckExit)})` };
+    docCheckExit = x;
+  }
   let failedFiles = [];
   if (o.failedFiles) {
     failedFiles = String(o.failedFiles).split(",").map((s) => s.trim()).filter(Boolean);
@@ -124,6 +157,8 @@ export function buildRecord(o) {
     startedAt,
     finishedAt,
   };
+  if (docChecked != null) record.docChecked = docChecked;
+  if (docCheckExit != null) record.docCheckExit = docCheckExit;
   return { record };
 }
 
@@ -140,23 +175,27 @@ Usage:
   node --experimental-strip-types plugin/scripts/per-task-suite-record.ts
       --task-id <taskId> --run-id <runId> --state <state> --lane-count <n>
       --duration-ms <ms> --started-at <iso> --finished-at <iso>
-      [--failed-files <csv>] [--state-file <full-suite-state.json>] [--root <dir>]
+      [--failed-files <csv>] [--doc-checked true|false] [--doc-check-exit <0..255>]
+      [--state-file <full-suite-state.json>] [--root <dir>]
       [--record-file <file>] [--json] [--help]
 
-  --task-id       the task whose per-task suite ran (required)
-  --run-id        the suite runId (required)
-  --state         green|red|running|aborted (required)
-  --lane-count    suite lane count (required, non-negative)
-  --duration-ms   suite wall-clock duration in ms (required, non-negative)
-  --started-at    suite start, ISO-8601 or epoch-seconds (required)
-  --finished-at   suite end, ISO-8601 or epoch-seconds (required)
-  --failed-files  comma-separated failing file paths (optional; auto-extracted from
-                  --state-file failures[].file when absent)
-  --state-file    a full-suite-state.json to draw defaults from (explicit flags win)
-  --root          repo root (default: cwd) — resolves the shared checkout via git common-dir
-  --record-file   override the shared-checkout record path (hermetic tests)
-  --json          machine-readable output {ok, record, file}
-  --help          this help
+  --task-id         the task whose per-task suite ran (required)
+  --run-id          the suite runId (required)
+  --state           green|red|running|aborted (required)
+  --lane-count      suite lane count (required, non-negative)
+  --duration-ms     suite wall-clock duration in ms (required, non-negative)
+  --started-at      suite start, ISO-8601 or epoch-seconds (required)
+  --finished-at     suite end, ISO-8601 or epoch-seconds (required)
+  --failed-files    comma-separated failing file paths (optional; auto-extracted from
+                    --state-file failures[].file when absent)
+  --doc-checked     AC63 判据1 doc-check trace: true|false — did the fan-in's --static-checks-doc
+                    run before its ff (optional; omitted when absent)
+  --doc-check-exit  the doc check's exit code 0..255 (optional; REQUIRES --doc-checked)
+  --state-file      a full-suite-state.json to draw defaults from (explicit flags win)
+  --root            repo root (default: cwd) — resolves the shared checkout via git common-dir
+  --record-file     override the shared-checkout record path (hermetic tests)
+  --json            machine-readable output {ok, record, file}
+  --help            this help
 
 Exit codes:
   0  one record appended
@@ -199,6 +238,8 @@ export function main(argv) {
     failedFiles: getArgValue(args, "--failed-files"),
     startedAt: getArgValue(args, "--started-at"),
     finishedAt: getArgValue(args, "--finished-at"),
+    docChecked: getArgValue(args, "--doc-checked"),
+    docCheckExit: getArgValue(args, "--doc-check-exit"),
     stateFile: stateFileValues,
   });
   if (built.error) return fail(built.error);

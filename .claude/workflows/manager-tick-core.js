@@ -47,7 +47,14 @@ export const meta = {
 
 const MODEL = 'sonnet'
 const ROOT = '/home/yale/work/quay'
-const MGR_SESSION = 'b8dc91a6-64e8-4d70-a715-9ec8e16a4f11'
+// ⚠️ 2026-08-14 14:3xZ：这里【曾经写死】一个 session id `b8dc91a6-…`，而它在 transcript 存储里
+//    【根本不存在】（find ~/.claude/projects -iname '*b8dc91a6*' ⇒ 0 命中）。审计 agent 每轮拿到坏 id，
+//    靠自己比对 SendMessage 前缀与 git 时间戳才找回真会话——**它足够聪明，所以我们一直没发现**。
+//    ⇒ 硬规则 4 推论二（写死的字面量会静默失效）+ C29（坏输入下仍产出「0 条新违规」= 与合格同形）的合体：
+//      一个查不到数据的审计，最可能的输出恰恰是「没发现问题」。
+//    ⇒ 修法是【不写字面量，改成读宿主】——用 2026-08-14 实测通过的官方接口现查：
+//      `claude agents --json`（外部进程可调、不需 TTY、墙钟 1.2–1.4s）取 name=="quay-manager" 的 sessionId。
+const MGR_SESSION_LOOKUP = String.raw`claude agents --json | python3 -c "import json,sys;print(next(x['sessionId'] for x in json.load(sys.stdin) if x['name']=='quay-manager'))"`
 
 // args 到达时是【字符串】不是对象（实测 wf_6f8cc053-f52）：直接 args.x 会静默 undefined。
 const A = (() => { try { return typeof args === 'string' ? JSON.parse(args) : (args ?? {}) } catch { return {} } })()
@@ -70,12 +77,12 @@ const READ_CMD = String.raw`cd /home/yale/work/quay
 #       → 三项目 status / resource.*（cpu_some_avg10, load1, node_count, node_dual_read,
 #         mem_available_mb）/ outer.liveness / outer.ticklog / monitor.*
 #   A1  python3 orchestration/manager-anchor-check.py
-#   五项手跑（正本在 orchestration/manager-tick-core.md 的 A0 行，那里逐条写了陷阱）：
-#       ① PC/commits30m（排除 manager: 前缀）② manifest + plugin_in_files
-#       ③ .quay/manager-write-freeze.txt ④ 收件箱 find 列文件（日期现算，勿硬编码）
-#       ⑤ mon_procs 先取清单再从清单数
-#
-# 【只有下面两项无人覆盖，故留在本块】
+#   五项手跑：**逐条内容【不在此复制】** —— 正本是 orchestration/manager-tick-core.md 的 A0 行。
+#     ⚠️ 2026-08-14 15:4xZ 实证：此处曾复制那五项的简述，而 15:2xZ 我把核里的 ⑤ 从「数进程」
+#     改成「读 monitor-mount-check.sh --json」后，**这份副本没跟着改** ⇒ 审计的指令块每轮
+#     照旧打印「⑤ mon_procs 先取清单再从清单数」，即已被推翻的做法。
+#     ⇒ 同形第三次（前两次：manager-loop-tick 的豁免面副本、核内 A10 与 A0-⑤ 并存）。
+#     ⇒ 修法与前两次一致：**指针不是副本**。要那五项，去读 A0 行。
 lat=$(gh release view --json tagName -q .tagName 2>/dev/null); echo "release=$lat ahead=$(git rev-list --count $lat..develop 2>/dev/null)"
 # ^ AC16② 新鲜度巡检。A0 不给，五项手跑也不给。
 python3 -c "
@@ -128,7 +135,7 @@ const AUDIT_SCHEMA = {
 
 phase('Audit')
 const audit = await agent(
-  `你审计【管理者自己】最近这一轮的行为。用 meta-cc 查会话 \`${MGR_SESSION}\`
+  `你审计【管理者自己】最近这一轮的行为。\n\n**第一步：先查出 manager 的真 session id，⛔ 不要用任何记忆里的 id**（此处曾写死一个不存在的 id，坏了很久没人发现）：\n\`\`\`bash\n${MGR_SESSION_LOOKUP}\n\`\`\`\n**⊢ 若该命令返回空或报错 ⇒ 立即报 NOT-EVALUATED 并停止**；⛔ 不得改用启发式猜测、⛔ 不得因为查不到就报「0 条违规」——一个查不到数据的审计最可能的输出恰恰是「没发现问题」，那与合格同形。\n\n拿到 id 后用 meta-cc 查该会话
 （deferred 工具，先 ToolSearch 取 schema：\`mcp__meta-cc__query_session_content\`）
 加 \`git log --oneline --since='40 minutes ago' -- ${ROOT}\`。
 

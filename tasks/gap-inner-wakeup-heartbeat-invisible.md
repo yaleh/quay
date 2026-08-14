@@ -137,3 +137,20 @@ resume    心跳产物 / 外层检查器 / 接线分步提交，任一步完成�
 reviewer: outer
 at: 2026-08-10
 changed: manager 定位 inner 自锁（ScheduleWakeup 15.3h 未重排 + 0 在飞⇒无 notification⇒不重评估）——outer 复核确认；按 C17 立案：兜底心跳无产物、断了不可见。实现归 inner
+
+## 观察项（2026-08-14 追加，后经 inner 17:0xZ 更正为真根因——原「写-查时差伪影」结论错误）
+
+**真根因（inner 2026-08-14 17:0xZ 抓到，已复现确认）**：`inner-wakeup-heartbeat-check.ts` 重算 slot-refill 时**不传在飞集**——`runMachineSlotRefill({inFlightIds=[]})` 默认空（:436-437 注释明写「run by OUTER, who may not know inner's in-flight set: pass --in-flight when the caller knows it; DEFAULT EMPTY」）⇒ step-4 的 touches-overlap-in-flight 判不出 ⇒ `no_refill_reason` 恒 null ⇒ END 四合取恒成立 ⇒ **恒假 DEAD**（inner 健康自驱时也报 DEAD）。
+
+**A/B 复现（outer 2026-08-14 17:0xZ 核实）**：
+```
+checker 不传 --in-flight ⇒ DEAD（reason=inner-round-ended-with-dispatchable-work）
+checker 传 --in-flight "ac80,flip-no-ac" ⇒ ALIVE（heartbeat-fresh）
+同一条 checker、唯一差别=在飞集 ⇒ verdict 翻转 ⇒ 根因确证
+```
+
+**⚠️ 更正**：本任务体早前 15:5xZ 记为「写-查时差伪影家族（checker 用检查时刻池误报）」——**错**。两次 A13 DEAD（今早+下午）都是「不传在飞集 ⇒ 恒假 DEAD」，不是时差。
+
+**最贵的部分**：恒假 DEAD 被归档成「已知家族不重升级」⇒ 真 DEAD 时没人看（恒红=零信息，与恒绿同害，硬规则 3b）。与 `gap-ac53-gate-not-wired-to-running-set`（done）同源不同支——那条修了 `slots_free` 走 running 集，`no_refill_reason` 这支没修。
+
+**处置**：立案 `gap-inner-heartbeat-check-not-evaluated-when-no-inflight`（checker 不传在飞集 ⇒ 报 NOT-EVALUATED 而非 DEAD，硬规则 3b）——已另立案。

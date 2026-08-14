@@ -32,7 +32,7 @@ import { fileURLToPath } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
 import {
   SCRIPT, tmuxAvailable,
-  setProbeTmpPrefix, sweepTmp, reapLiveOwners, tmux, isolateTmuxEnv, isClaudePid,
+  setProbeTmpPrefix, sweepTmp, reapLiveOwners, killProbeServers, tmux, isolateTmuxEnv, isClaudePid,
   paneHasClaudeChild, waitForAlive, makeHermeticProbe,
   spawnMonitor, waitForOutput, waitForRounds, waitForMoreRounds, countRounds,
   makePaneBusy, makePaneIdle, makePanePermissionPrompt, startTouchLoop, cleanup,
@@ -53,7 +53,10 @@ setProbeTmpPrefix("session-liveness-sig-i-");
 // sweepTmp removes owner-dead residue. Sweep ONLY this file's own prefixes (see SPLIT CONCURRENCY
 // SAFETY above — never a sibling's).
 after(() => {
-  reapLiveOwners();
+  // 判据1 (gap-session-liveness-fixture-tmux-not-killed): kill-server 本进程创建的 tmux server —
+  // sweepTmp 的 owner-liveness 保护（AC3）只跳过活 owner 目录，夹具不 kill ⇒ 泄漏无出口。
+  killProbeServers();
+  reapLiveOwners(); // 移除 owner 已死的残留（kill-server 后 dirHasLiveOwner 恒假）
   sweepTmp("session-liveness-sig-i-", "sl-lmt-", "sl-sat-");
 });
 

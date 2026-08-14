@@ -25,6 +25,12 @@ export const meta = {
 //  ⚠️ 改本文件后的验证：必须实际调用一次 Workflow（scriptPath），不要拿 node --check 当通过
 //     （2026-08-07 21:5x 实测：未转义反引号让 node --check 通过而 Workflow 解析器报错）。
 //     模板串内【不要用反引号】（统一用 $(...)），避免提前终止模板串。
+//     模板串内 bash 的 printf 格式串要用 \\n（双反斜杠）——写 `\n` 会被 JS 展开成真换行，
+//     发出的 prompt 里 bash 行断裂（2026-08-14 由 fan-in-execute-paths.test.mjs 首次实测捕到：
+//     `printf '%s\n'` 在 prompt 里断成两行）。反引号 + \n 都是「模板字面量陷阱」。
+//  ⚠️ 三条承重点（gap-fan-in-execute-three-unverified-paths）的真实路径测试 =
+//     plugin/test/fan-in-execute-paths.test.mjs：vm 实执行本脚本（捕 prompt）+ 真实执行其发出的
+//     bash（① code_delta 正则 / ② 自找 --agent-id / ③ flip sed fail-closed）。改任一处必须同步那组测试。
 
 // args 到达时是【字符串】不是对象（实测 wf_6f8cc053-f52）：直接 args.x 会静默 undefined。
 const A = (() => { try { return typeof args === 'string' ? JSON.parse(args) : (args ?? {}) } catch { return {} } })()
@@ -57,7 +63,9 @@ cd ${worktree} && git merge ${mergeTarget}
 【无锁段 step 2 — delta 断言面判定（AC75）】
 fork=$(git -C ${worktree} merge-base ${mergeTarget} HEAD)
 delta=$(git -C ${worktree} diff --name-only "$fork" ${mergeTarget} 2>/dev/null || true)
-code_delta=$(printf '%s\n' "$delta" | grep -vE '^tasks/|^docs/|^[.]quay/|^plugin/loop/|^measurements/|^milestones/|^orchestration/archive/|[.]md$' | grep -v '^$' || true)
+# 承重点①（gap-fan-in-execute-three-unverified-paths）：code_delta 正则分类 doc/代码/测试断言面——
+# 判错 ⇒ 该跑全量却跳过（漏检）或该跳却重跑（浪费）。改此行必须同步 plugin/test/fan-in-execute-paths.test.mjs。
+code_delta=$(printf '%s\\n' "$delta" | grep -vE '^tasks/|^docs/|^[.]quay/|^plugin/loop/|^measurements/|^milestones/|^orchestration/archive/|[.]md$' | grep -v '^$' || true)
 判定：
   - code_delta 非空 ⇒ develop 的 delta 触及代码/脚本/测试断言面 ⇒ 本回合【要】重跑全量 suite。
   - code_delta 为空且 delta 非空 ⇒ delta 全落 doc/任务体/telemetry 面 ⇒ 跳过全量 suite（只跑 doc 检查）。
@@ -80,14 +88,45 @@ cd ${worktree} && bash scripts/test.sh --static-checks-doc
 
 【持锁段 step 5 — flip done + ff-merge】
 cd ${worktree}
-sed -i 's/^status: ready/status: done/' tasks/${task}.md
+# flip-block-start
+# flip done（承重点③，gap-fan-in-execute-three-unverified-paths）：行形不匹配 ⇒ 报错而非静默绿——
+# sed 对不匹配行静默改 0 行且 exit 0；锚定 $ 只翻 frontmatter 的精确 'status: ready'，
+# body 里 'status: ready——注解' 不误翻。前自检：恰 1 行精确匹配；后自检：'status: done' 存在。
+flip_count=$(grep -c '^status: ready$' tasks/${task}.md || true)
+if [ "$flip_count" != "1" ]; then
+  echo "FATAL: flip 失败——tasks/${task}.md 应恰有 1 行精确 '^status: ready$'（frontmatter），实得 '$flip_count'；行形不匹配（前导空格/大小写/非首行/body 也有精确行）⇒ 不静默翻 done" >&2
+  exit 2
+fi
+sed -i 's/^status: ready$/status: done/' tasks/${task}.md
+if ! grep -q '^status: done$' tasks/${task}.md; then
+  echo "FATAL: flip 后校验失败——tasks/${task}.md 无精确 '^status: done$' 行" >&2
+  exit 2
+fi
+# flip-block-end
 git add tasks/${task}.md && git commit -m "tasks: 翻 ${task} done（AC78 fan-in-execute workflow）"
 —— 先 flip 后 merge（人 2026-08-14 裁定：flip 要动的记录也用 git 跟踪；flip 在后则 merge 后还要再修改+merge）。
 # 自找你的 agent 标识（判据6：不由调用方填值、不给示例值）——定位你自己的 transcript：
-#   此刻正在被写入的 subagents/agent-<自己>.jsonl = 最近修改 + 内容提到本任务的那个。
-self=$(ls -t ~/.claude/projects/*/subagents/agent-*.jsonl 2>/dev/null | while read f; do grep -l '${task}' "$f" 2>/dev/null; done | head -1)
+#   你的 transcript 此刻正在被写入的落点 = ~/.claude/projects/<project>/<session>/subagents/workflows/<本次 run>/agent-<自己>.jsonl
+#   （workflow-run 子代理真实落点——本 workflow 由 agent() 派发你 ⇒ 你的文件必在这里）。
+#   承重点②（gap-fan-in-execute-three-unverified-paths）：只查 workflows/<run>/ 落点，不扫平铺 subagents/——
+#   平铺里有别的（实现/核查）子代理，并发下 ls -t + grep 任务名会误选（DIR-127/DIR-128 实证：
+#   DIR-127 ff 取到 DIR-128 实现者 a017ce6b）。当前 run 正在被写入 ⇒ 在提到本任务的所有 workflow-run
+#   子代理中它必然最近修改 ⇒ 确定性取最新；候选为零 ⇒ fail-closed（不猜）。
+# selfloc-block-start
+candidates=$(grep -l '${task}' ~/.claude/projects/*/*/subagents/workflows/*/agent-*.jsonl 2>/dev/null)
+count=$(printf '%s\\n' "$candidates" | grep -c . || true)
+if [ "$count" -eq 0 ]; then
+  echo "FATAL: 未能定位自身 subagents/workflows/<run>/agent-<自己>.jsonl（--agent-id 不能由调用方填）" >&2
+  exit 2
+fi
+self=$(printf '%s\\n' "$candidates" | xargs ls -t 2>/dev/null | head -1)
+if [ -z "$self" ]; then
+  echo "FATAL: 无法确定自身 transcript 文件（候选：$candidates）" >&2
+  exit 2
+fi
 agent_id=$(basename "$self" .jsonl 2>/dev/null | sed 's/^agent-//')
-if [ -z "$agent_id" ]; then echo "FATAL: 未能定位自身 subagents/agent-<自己>.jsonl（--agent-id 不能由调用方填）" >&2; exit 2; fi
+if [ -z "$agent_id" ]; then echo "FATAL: 未能从 $self 提取 agent id（--agent-id 不能由调用方填）" >&2; exit 2; fi
+# selfloc-block-end
 bash ${root}/plugin/scripts/fan-in-ff-merge.sh --task ${task} --run-id ${runId} --agent-id "$agent_id" --root ${root} --merge-target ${mergeTarget}
   —— 锁只包 git merge --ff-only，毫秒级，成/败都解锁。ff 失败（develop 前进了）⇒ 回 step 1 重跑
      （重 merge develop、重判 delta、重跑 suite、重 ff），同一任务 ff 失败 ≥3 次才谈防活锁。
@@ -118,6 +157,6 @@ return {
   ffOk: result.ffOk,
   task,
   message: result.ffOk
-    ? `fan-in landed for ${task} (via ${meta.name} workflow)`
+    ? `fan-in landed for ${task} (via 'fan-in-execute' workflow)`
     : `fan-in did not land for ${task}: ${result.note ?? 'unknown'}`,
 }

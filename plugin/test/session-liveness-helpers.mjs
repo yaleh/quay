@@ -147,12 +147,37 @@ export function sweepTmp(...prefixes) {
 // dir paths). `reapLiveOwners()` — called from each session-liveness file's after() BEFORE
 // sweepTmp — kills still-alive servers for THIS process's OWN registered probes (never a sibling
 // process's: the registry is per-process, so the SPLIT CONCURRENCY SAFETY and the cross-actor
-// safety both hold by construction), via the SAFE named kill-session on the structurally isolated
-// private socket (never kill-server — the 2026-08-06 crash rule; never pkill by name). The dir is
-// removed once its owner server is gone.
+// safety both hold by construction). The kill is `kill-server` on the STRUCTURALLY ISOLATED
+// private socket (<dir>/sock/tmux-<uid>/default — TMUX_TMPDIR=<dir>/sock): a per-probe mkdtemp,
+// so it can only kill THIS probe's server, never the real quay-0/archguard-2/meta-cc-4 sessions.
+// (The repo-wide "never kill-server" rule is about a SHARED/UNKNOWN socket, whose kill-server
+// blast radius is every session on that server; the private socket is the isolation that makes it
+// safe — the same principle tmux-isolated.sh states for the "most dangerous command". Never pkill
+// by name.) The dir is removed once its owner server is gone.
 const __liveProbeTmpDirs = new Set();
 export function __registerProbeTmp(tmp) { __liveProbeTmpDirs.add(tmp); }
 export function __unregisterProbeTmp(tmp) { __liveProbeTmpDirs.delete(tmp); }
+
+// killProbeServer(abs) — kill ONE registered probe's tmux SERVER (kill-server) on its private
+// socket. The definitive cleanup: the server exits regardless of its session/window state, so a
+// fixture can never leave a live server behind (a live server pins the dir as owner-live, and
+// sweepTmp would skip it forever — the leak-with-no-exit class this task closes).
+export function killProbeServer(abs) {
+  const sockDir = path.join(abs, "sock");
+  const env = isolateTmuxEnv(sockDir);
+  tmux(["kill-server"], env);
+}
+
+// killProbeServers() — after()-callable 判据1 (gap-session-liveness-fixture-tmux-not-killed):
+// kill-server every still-alive private tmux server THIS process created. The session-liveness
+// test files' after() calls this BEFORE reapLiveOwners/sweepTmp, so the hermetic fixture never
+// leaks a tmux server (sweepTmp's owner-liveness guard — AC3 — is kept; it is not the fixture's
+// cleanup). Does NOT remove dirs — reapLiveOwners removes them once the owners are dead.
+export function killProbeServers() {
+  for (const abs of [...__liveProbeTmpDirs]) {
+    if (dirHasLiveOwner(abs)) killProbeServer(abs);
+  }
+}
 
 export function reapLiveOwners() {
   for (const abs of [...__liveProbeTmpDirs]) {
@@ -161,16 +186,9 @@ export function reapLiveOwners() {
       try { fs.rmSync(abs, { recursive: true, force: true }); } catch { /* best-effort */ }
       continue;
     }
-    const sockDir = path.join(abs, "sock");
-    const env = isolateTmuxEnv(sockDir);
-    const sessions = tmux(["list-sessions", "-F", "#{session_name}"], env);
-    if (sessions.status === 0 && sessions.stdout.trim()) {
-      for (const s of sessions.stdout.trim().split("\n").filter(Boolean)) {
-        tmux(["kill-session", "-t", s], env); // safe named kill on the private socket
-      }
-    }
-    // The server exits once its last session is killed; wait briefly so the socket is released
-    // before the dir is removed (a sync wait via Atomics — no process spawn in the cleanup path).
+    killProbeServer(abs);
+    // The server exits once killed; wait briefly so the socket is released before the dir is
+    // removed (a sync wait via Atomics — no process spawn in the cleanup path).
     const deadline = Date.now() + 2000;
     while (Date.now() < deadline && dirHasLiveOwner(abs)) {
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
@@ -310,8 +328,12 @@ export function makeHermeticProbe(session) {
     env,
     session,
     cleanup() {
+      // 判据1/AC1: kill the SERVER (kill-server, private socket) FIRST — kill-session alone races
+      // server teardown under load and can leave a live server that is already-unregistered ⇒
+      // unreachable by after()'s reapLiveOwners (leak-with-no-exit, 2026-08-14 full-suite red).
+      // The probe stays registered until the server is dead, so after() retries if interrupted.
+      killProbeServer(tmp);
       __unregisterProbeTmp(tmp);
-      tmux(["kill-session", "-t", session], env);
       try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* best-effort */ }
     },
   };
@@ -333,8 +355,12 @@ export function makePlainPane(session) {
     env,
     session,
     cleanup() {
+      // 判据1/AC1: kill the SERVER (kill-server, private socket) FIRST — kill-session alone races
+      // server teardown under load and can leave a live server that is already-unregistered ⇒
+      // unreachable by after()'s reapLiveOwners (leak-with-no-exit, 2026-08-14 full-suite red).
+      // The probe stays registered until the server is dead, so after() retries if interrupted.
+      killProbeServer(tmp);
       __unregisterProbeTmp(tmp);
-      tmux(["kill-session", "-t", session], env);
       try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* best-effort */ }
     },
   };
@@ -360,8 +386,12 @@ export function makeClaudePaneProcess(session) {
     env,
     session,
     cleanup() {
+      // 判据1/AC1: kill the SERVER (kill-server, private socket) FIRST — kill-session alone races
+      // server teardown under load and can leave a live server that is already-unregistered ⇒
+      // unreachable by after()'s reapLiveOwners (leak-with-no-exit, 2026-08-14 full-suite red).
+      // The probe stays registered until the server is dead, so after() retries if interrupted.
+      killProbeServer(tmp);
       __unregisterProbeTmp(tmp);
-      tmux(["kill-session", "-t", session], env);
       try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* best-effort */ }
     },
   };
@@ -386,8 +416,12 @@ export function makeTwoWindowSession(session) {
     env,
     session,
     cleanup() {
+      // 判据1/AC1: kill the SERVER (kill-server, private socket) FIRST — kill-session alone races
+      // server teardown under load and can leave a live server that is already-unregistered ⇒
+      // unreachable by after()'s reapLiveOwners (leak-with-no-exit, 2026-08-14 full-suite red).
+      // The probe stays registered until the server is dead, so after() retries if interrupted.
+      killProbeServer(tmp);
       __unregisterProbeTmp(tmp);
-      tmux(["kill-session", "-t", session], env);
       try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* best-effort */ }
     },
   };
