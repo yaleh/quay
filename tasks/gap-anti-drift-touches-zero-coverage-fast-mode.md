@@ -1,7 +1,7 @@
 ---
 id: gap-anti-drift-touches-zero-coverage-fast-mode
 title: anti-drift-touches 守卫在 fast-mode 零覆盖——自称 NON-WAIVABLE 但全部调用者在退役 classic-loop 侧，收窄 Touches 无安全网（manager 16:3xZ 报 + outer 按位置核实）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
