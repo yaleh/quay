@@ -77,7 +77,7 @@ main lane = max(1, floor(nproc × oversub / S))
 ## Plan
 
 1. 读 resource-gate.sh 的 main lane 公式（:451 只 serial/lowconc 除 S）+ process-budget.sh（total_budget=nproc）+ 单飞锁（RESOURCE_GATE_CONCURRENT_SUITES）。
-2. 判据1：修法落地（(b) 认领制或 (c) 锁携带配额）——Σ lane ≤ budget 不变式。
+2. 判据1：修法落地——main lane 公式改 `max(1, floor(nproc × oversub / S))`，Σ lane ≤ nproc × oversub 不变式成立（**⛔ (b) 认领制/(c) 锁携带配额已被人 14:4xZ 逐字纠正覆盖，勿按旧方案实现**——见 Proposal 修正方向段）。
 3. 判据2 能取假：两 suite 真样本（16+8>16）回放不超；现状红。
 4. 判据3：单 suite 仍拿满（欠用不回归）。
 5. 既有测试全绿 + `--for-task` scoped 门绿。
