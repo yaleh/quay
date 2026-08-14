@@ -71,8 +71,8 @@ tick-core-drift-check         已接线但 --no-block（2026-08-14） → 第 4 
 ## Touches
 
 - plugin/scripts/capability-catalog.sh（节奏栏「按需」机件补「谁在什么条件下按」+ `--no-block` 检查器补消费方）
-- plugin/scripts/rhythm-consumer-check.ts (new)（新检查器——节奏消费检测：非按需必有调用点 + 按需/--no-block 必写消费方）
-- plugin/test/rhythm-consumer-check.test.mjs (new)（负控制 fixture）
+- 新检查器（节奏消费检测：非按需必有调用点 + 按需/--no-block 必写消费方）：`plugin/scripts/rhythm-consumer-check.ts (new)`
+- 负控制 fixture：`plugin/test/rhythm-consumer-check.test.mjs (new)`
 - scripts/test.sh / 三层执行核（非按需机件的调用点接线——AC62 判据2 的 fan-in-ff-protocol-check 入其中之一；tick-core-drift-check 的 `--no-block` 补消费方）
 - tasks/gap-ac73-catalog-rhythm-consumer-check.md（自身）
 
