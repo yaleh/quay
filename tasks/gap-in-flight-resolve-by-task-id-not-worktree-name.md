@@ -75,23 +75,23 @@ worktree 目录名 → 3      分支名 → 4      真任务 id → 5（真值�
 - [x] AC2 判据2 能取假：截断目录名（gap-workflows-dual-copy-drift）回放红（在飞少算）。
 - [x] AC3 判据3：不改 AC53 闸（只改喂给它的量）。
 - [x] AC4 判据4：分支名截断是否系统性已查（建树路径），Evidence 记录。
-- [ ] AC5 判据5（人 12:5xZ 裁定）：两个消费者拆分——dispatchable_disjoint 分母=未落地任务集（含 awaiting retry），slots_free 分母=在跑 subagent 集；两者允许不等；真 slots_free=5−真并发 subagent。
+- [x] AC5 判据5（人 12:5xZ 裁定）：两个消费者拆分——dispatchable_disjoint 分母=未落地任务集（含 awaiting retry），slots_free 分母=在跑 subagent 集；两者允许不等；真 slots_free=5−真并发 subagent。
 - [x] AC6 既有测试全绿；`--for-task` scoped 门绿。
 
 ## Definition of Done
 
 - [x] `--in-flight` 按任务 id 解析（截断 worktree 名归一到真 id），在飞读数不再少算，AC53 闸不再误拒心跳追加；分支名截断系统性已查证。
-- [ ] **两个消费者拆分**——触碰面判定用未落地任务集、槽位计数用真并发 subagent 集，两者允许不等。
+- [x] **两个消费者拆分**——触碰面判定用未落地任务集、槽位计数用真并发 subagent 集，两者允许不等。
 
 ## Touches
 
-- plugin/scripts/slot-refill.ts（--in-flight 解析按任务 id 匹配）
-- plugin/test/slot-refill.test.mjs（补截断名解析测试）
+- plugin/scripts/slot-refill.ts（--in-flight 解析按任务 id 匹配 + AC5 双消费者拆分）
+- plugin/test/slot-refill.test.mjs（补截断名解析测试 + AC5 拆分测试）
 - tasks/gap-in-flight-resolve-by-task-id-not-worktree-name.md（自身）
 
 ## Test-Files
 
-- plugin/test/slot-refill.test.mjs（已有文件，补 4 个测试：resolveInFlightId 纯函数单元（exact/branch/truncated/ambiguous-unresolved）+ CLI 判据1 三形式一致 + CLI 判据2 真实样本截断名解析）
+- plugin/test/slot-refill.test.mjs（已有文件，补 7 个测试：resolveInFlightId 纯函数单元（exact/branch/truncated/ambiguous-unresolved）+ CLI 判据1 三形式一致 + CLI 判据2 真实样本截断名解析 + AC5 三个：纯函数双分母拆分 / CLI --running 真样本 / 宽集触碰面保持）
 
 ## Evidence
 
@@ -124,3 +124,26 @@ worktree 目录名 → 3      分支名 → 4      真任务 id → 5（真值�
 **scoped 门**：`bash scripts/test.sh --for-task gap-in-flight-resolve-by-task-id-not-worktree-name --allow-thin` → **EXIT=0**（slot-refill.test.mjs 全量 79 tests / 0 fail，含新增 4 条）。
 **ts-typecheck**：`fan-in-ts-typecheck-gate.ts` → **ADMITTED (exit 0)**（Touches 无新增/移动 .ts）。
 **既有测试全绿**：slot-refill.test.mjs 79/79；`--for-task` scoped 门绿。
+
+---
+
+**AC5 双消费者拆分（人 2026-08-14 12:5xZ 裁定，2026-08-14 13:0xZ inner 实现，runId mn4vw8）**：
+
+**实现**：`plugin/scripts/slot-refill.ts` 的 `analyzeSlotRefill` 新增 `runningSubagentCount` 参数（null=回退）；`main()` 新增 `--running <ids>` CLI。**两个消费者分母分离**：
+- **消费者 A（触碰面不相交，`dispatchable_disjoint` / `checkTouchesPair`）**：继续用【宽集】= `inFlight` + `closedButLive`（所有未落地任务，含 awaiting retry）——等待中任务的 worktree 还在，新任务碰同文件会撞，这里必须宽。**零改动**。
+- **消费者 B（槽位计数，`occupied_slots` / `slots_free` / `should_refill`）**：改用【窄集】= 调用方 `--running` 传入的当前在跑任务 subagent 数（cap=5 保护 subagent；awaiting retry 无 subagent ⇒ 不占 cap）。`runningSubagentCount` 为 null（未传 `--running`）⇒ 回退宽集（向后兼容 outer A18 / 手动 bare 路径）。
+- 报告新增 `running_subagent_count`（窄集 Consumer-B 分母）+ `slot_denominator_source`（`"running-subagents"` | `"in-flight-fallback"`，硬规则 3b 不给「未评估」与「合格」同形）。`in_flight_count` 保持宽集（向后兼容）。
+- `--running` 的每个 id 都代表一个【活 subagent】，即使解析不到任务文件也占槽（消失的 id 仍在跑）；经 `resolveInFlightId` 解析 + 去重保证报告 id 诚实。
+
+**真样本回放（对真实 store，`--root`=本 worktree，cap=5）**：
+```
+--in-flight <5 宽集> --running <3 窄集> → in_flight_count=5 | running_subagent_count=3 | slots_free=2 | denom_source=running-subagents
+--in-flight <5 宽集>（无 --running）     → in_flight_count=5 | slots_free=0            | denom_source=in-flight-fallback
+```
+与任务体实证「5 worktree 但 3 个 0 活进程；真并发=3 ⇒ 真 slots_free=2 而 inner 看 0」逐字吻合——**修后 inner 传窄集 ⇒ 真 slots_free=2，不再 0 ⇒ 不再「等重跑任务多算在飞⇒不派」**。
+
+**判据 ⊢（同一时刻两分母允许不等）**：`in_flight_count=5`（宽，Consumer A）≠ `running_subagent_count=3`（窄，Consumer B）同时成立；`dispatchable_disjoint` 不受 Consumer-B 拆分影响（两测试均断言拆分前后相等）。**能取假**：Consumer-A 宽触碰面测试证明——候选 X 撞上宽集但**不在窄集**的 awaiting-retry 任务 C（worktree 仍在占 `code/c.ts`）⇒ 仍被 `touches-overlap-in-flight` 挡住（即使 slots_free=3 有槽）；不相交候选 Y 正常推荐。
+
+**AC5 测试**：slot-refill.test.mjs 新增 3 条（82 全绿）：①纯函数双分母拆分（5/3 ⇒ slots_free=2，无 running ⇒ 回退 0）；②CLI `--running` 真样本（`--running 3` ⇒ slots_free=2，无 ⇒ 0）；③宽集触碰面保持（撞 awaiting-retry 仍挡）。
+**scoped 门**：`--for-task ... --allow-thin` → **EXIT=0**（82 tests / 0 fail）。
+**ts-typecheck**：`fan-in-ts-typecheck-gate.ts` → **ADMITTED (exit 0)**。

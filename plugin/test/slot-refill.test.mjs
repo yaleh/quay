@@ -754,6 +754,114 @@ test("CLI --in-flight: the three forms (true id / branch / truncated dir) agree 
   assert.equal(byBranch.in_flight_count, byTrue.in_flight_count, "判据1: the three forms MUST agree");
 });
 
+// ── AC5 DUAL-CONSUMER SPLIT (tasks/gap-in-flight-resolve-by-task-id-not-worktree-name, 人 12:5xZ) ──
+// 消费者 A · 触碰面不相交（dispatchable_disjoint / checkTouchesPair）⇒ 宽集 = 所有未落地任务（含
+//   awaiting retry——worktree 还在，新任务碰同文件会撞）。
+// 消费者 B · 槽位计数（slots_free / should_refill）⇒ 窄集 = 当前在跑的任务 subagent 数（cap=5 保护
+//   subagent；awaiting retry 无 subagent ⇒ 不占 cap）。
+// ⊢ 判据: 同一时刻两分母【允许不等】；若实现仍取同一集合 ⇒ 未落地。
+
+test("AC5 — runningSubagentCount splits Consumer B (slots) from Consumer A (touches): two denominators may differ (判据 ⊢)", (t) => {
+  const root = makeWorkspace("ac5-split");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const tasksDir = path.join(root, "tasks");
+  // 5 WIDE un-landed tasks (the real 2026-08-14 in-flight set).
+  const wide = [
+    "gap-ac63-judgment2-no-carrier",
+    "gap-fan-in-flip-no-ac-completion-check",
+    "gap-in-flight-resolve-by-task-id",
+    "gap-test-isolation-backlog-44-violations-unmeasured",
+    "gap-workflows-dual-copy-drift-unchecked",
+  ];
+  for (const id of wide) writeTask(root, id, { status: "ready", labels: ["gap"], body: dispatchableBody([`- code/${id}.ts (new)`]) });
+  const inFlight = wide.map((id) => inFlightTask(id, [`- code/${id}.ts (new)`]));
+  const base = { tasksDir, root, cap: 5 };
+
+  // Consumer B narrow: only 3 of the 5 are ACTUALLY-RUNNING subagents (ac63 + in-flight-resolve impl
+  // + workflows-dual-copy — the 2026-08-14 empirical split: 5 worktrees, 3 live subagents).
+  const narrow = analyzeSlotRefill({ ...base, inFlight, runningSubagentCount: 3 });
+  assert.equal(narrow.in_flight_count, 5, "Consumer A denominator stays WIDE (all un-landed tasks)");
+  assert.equal(narrow.running_subagent_count, 3, "Consumer B denominator is the NARROW running-subagent count");
+  assert.equal(narrow.slot_denominator_source, "running-subagents");
+  assert.equal(narrow.slots_free, 2, "true slots_free = cap 5 − 3 running subagents = 2");
+
+  // Backward compat: no runningSubagentCount ⇒ Consumer B falls back to the wide set.
+  const fallback = analyzeSlotRefill({ ...base, inFlight });
+  assert.equal(fallback.running_subagent_count, 5, "fallback Consumer B = wide set");
+  assert.equal(fallback.slot_denominator_source, "in-flight-fallback");
+  assert.equal(fallback.slots_free, 0, "fallback slots_free = cap 5 − 5 wide = 0 (the old shared-denominator shape)");
+
+  // ⊢ 判据: the two denominators are allowed to differ — 5 (wide, Consumer A) vs 3 (narrow, Consumer B).
+  assert.notEqual(narrow.in_flight_count, narrow.running_subagent_count,
+    "判据: dispatchable_disjoint 分母 (5) 与 slots_free 分母 (3) 允许不等");
+  assert.equal(narrow.dispatchable_disjoint, fallback.dispatchable_disjoint,
+    "Consumer A (dispatchable_disjoint) is UNCHANGED by the Consumer-B split");
+});
+
+test("AC5 — CLI --running: 5 wide / 3 running ⇒ slots_free=2; without --running falls back to 0 (real sample)", (t) => {
+  const root = makeWorkspace("ac5-cli");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const ids = [
+    "gap-ac63-judgment2-no-carrier",
+    "gap-fan-in-flip-no-ac-completion-check",
+    "gap-in-flight-resolve-by-task-id",
+    "gap-test-isolation-backlog-44-violations-unmeasured",
+    "gap-workflows-dual-copy-drift-unchecked",
+  ];
+  for (const id of ids) writeTask(root, id, { status: "ready", labels: ["gap"], body: dispatchableBody([`- code/${id}.ts (new)`]) });
+  const script = path.resolve(__dirname, "..", "scripts", "slot-refill.ts");
+  const run = (args) => JSON.parse(execFileSync(
+    process.execPath,
+    ["--no-warnings", "--experimental-strip-types", script, "--root", root, "--cap", "5", "--json", ...args],
+    { encoding: "utf8", env: { ...process.env, QUAY_TELEMETRY_SUBAGENTS: "0" } },
+  ));
+  const wide = ids.join(",");
+  // 3 running subagents: ac63 + in-flight-resolve + workflows-dual-copy (the empirical live set).
+  const narrow3 = ["gap-ac63-judgment2-no-carrier", "gap-in-flight-resolve-by-task-id", "gap-workflows-dual-copy-drift-unchecked"].join(",");
+
+  const withRunning = run(["--in-flight", wide, "--running", narrow3]);
+  assert.equal(withRunning.in_flight_count, 5, "Consumer A wide denominator = 5");
+  assert.equal(withRunning.running_subagent_count, 3, "Consumer B narrow denominator = 3");
+  assert.equal(withRunning.slot_denominator_source, "running-subagents");
+  assert.equal(withRunning.slots_free, 2, "true slots_free = 5 − 3 = 2");
+
+  const withoutRunning = run(["--in-flight", wide]);
+  assert.equal(withoutRunning.slots_free, 0, "without --running ⇒ Consumer B falls back to the wide set ⇒ 0 free slots");
+  assert.equal(withoutRunning.slot_denominator_source, "in-flight-fallback");
+
+  // ⊢ 判据: the SAME moment yields different denominators for the two consumers.
+  assert.equal(withRunning.dispatchable_disjoint, withoutRunning.dispatchable_disjoint,
+    "Consumer A (dispatchable_disjoint) is unchanged by the Consumer-B split");
+});
+
+test("AC5 — Consumer A stays WIDE: a candidate colliding with a wide-but-not-running task is still blocked (awaiting-retry worktree occupies files)", (t) => {
+  const root = makeWorkspace("ac5-wide");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const tasksDir = path.join(root, "tasks");
+  // 3 WIDE in-flight tasks; only 2 (A, B) are running — C is awaiting-retry (no subagent).
+  writeTask(root, "gap-if-a", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/a.ts (new)"]) });
+  writeTask(root, "gap-if-b", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/b.ts (new)"]) });
+  writeTask(root, "gap-if-c", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/c.ts (new)"]) });
+  // A ready candidate X touches the SAME file as awaiting-retry C (wide but NOT running).
+  writeTask(root, "gap-cand-x", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/c.ts (new)", "- code/x.ts (new)"]) });
+  // A disjoint candidate Y touches a fresh file — should be free to recommend.
+  writeTask(root, "gap-cand-y", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/y.ts (new)"]) });
+  const inFlight = [
+    inFlightTask("gap-if-a", ["- code/a.ts (new)"]),
+    inFlightTask("gap-if-b", ["- code/b.ts (new)"]),
+    inFlightTask("gap-if-c", ["- code/c.ts (new)"]),
+  ];
+  const r = analyzeSlotRefill({ tasksDir, root, cap: 5, inFlight, runningSubagentCount: 2 });
+  assert.equal(r.running_subagent_count, 2, "Consumer B narrow = 2 running subagents");
+  assert.equal(r.slots_free, 3, "true slots_free = 5 − 2 = 3");
+  assert.ok(r.recommended.includes("gap-cand-y"), "disjoint candidate Y recommended (slots are free)");
+  assert.ok(!r.recommended.includes("gap-cand-x"),
+    "X collides with awaiting-retry C (wide Consumer-A set) ⇒ blocked even though C is NOT running (its worktree still occupies code/c.ts)");
+  const deferredX = (r.deferred || []).find((d) => d.id === "gap-cand-x");
+  assert.ok(deferredX && /touches-overlap-in-flight/.test(deferredX.reason),
+    "X deferred with touches-overlap-in-flight — the WIDE Consumer-A denominator still applies");
+});
+
 // ── Suite-blocking rank (tasks/gap-ready-relevance-blind-to-suite-blocking-signal AC3) ──────────────
 // AC3: a task the consecutive-red-window signal implicates (pool.suite_blocking.tasks, the
 // ready-pool-check blocking_suite axis) is ranked FIRST into `recommended` — the inner's slot-refill

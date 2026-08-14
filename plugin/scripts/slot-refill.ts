@@ -461,6 +461,15 @@ export function isBodyLanded(body) {
  *      investigation-type subagents, gap-telemetry-underreport-nontask-subagents-not-counted-in-slots).
  *      They occupy a concurrency slot (occupied_slots / slots_free arithmetic) but carry no task id, so
  *      they cannot participate in the touches-disjointness check. Default 0.
+ *  @param {number|null} [o.runningSubagentCount] AC5 DUAL-CONSUMER SPLIT
+ *      (tasks/gap-in-flight-resolve-by-task-id-not-worktree-name, 人 2026-08-14 12:5xZ): the
+ *      CURRENTLY-RUNNING task subagent count — the NARROW set Consumer B (occupied_slots / slots_free /
+ *      should_refill) counts. Consumer A (touches-disjointness / dispatchable_disjoint) keeps the WIDE
+ *      un-landed set (inFlight + closedButLive): an awaiting-retry task's worktree still occupies files
+ *      a new task would collide with, but it has no subagent ⇒ does NOT occupy cap. The two denominators
+ *      are ALLOWED to differ (真 slots_free = cap − 真并发 subagent). null (default) ⇒ Consumer B falls
+ *      back to the wide set (backward compat for callers not yet passing --running / the outer A18 +
+ *      manual bare paths).
  *  @param {string|null} [o.measurementSource] where the in-flight view came from — "explicit-input"
  *      (the caller passed --in-flight/--closed-but-live), "telemetry-slot-status" (measured from the
  *      reconcile-aware fast-mode-telemetry --slot-status view), or "degraded-no-telemetry" (the
@@ -493,7 +502,7 @@ export function isBodyLanded(body) {
  *      exposes-sort-key) is the parallel array of {id, deliveryCritical, suiteBlocking, rank} that
  *      exposes each recommended id's sort axes for AC36 判据②'s mechanical check.
  */
-export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, floorMult = POOL_FLOOR_MULT_DEFAULT, inFlight = [], closedButLive = [], subagentsInFlight = 0, measurementSource = null, measurementError = null, integrationBacklog, redBacklogCap = RED_BACKLOG_CAP_DEFAULT, dispatchGate = null }) {
+export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, floorMult = POOL_FLOOR_MULT_DEFAULT, inFlight = [], closedButLive = [], subagentsInFlight = 0, runningSubagentCount = null, measurementSource = null, measurementError = null, integrationBacklog, redBacklogCap = RED_BACKLOG_CAP_DEFAULT, dispatchGate = null }) {
   // PREEMPTIVE HALT (gap-supervisor-preemption AC2): the `.halt` sentinel is a CODE mount point,
   // not a tick-step-0 prose rule. When halted, dispatch is blocked no matter how many slots/candidates
   // exist — the human's stop takes effect at ANY dispatch-recommendation point, mid-flow.
@@ -519,10 +528,21 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
   if (capNarrowed) {
     pool = analyzeTasks({ tasksDir, root, cap: effectiveCap, floorMult, inFlight, closedButLive });
   }
-  // A slot is free only when neither a running subagent NOR a closed-bracket-but-live agent NOR a
-  // non-task investigation subagent holds it. `subagentsInFlight` carries no task id (no bracket), so
-  // it occupies a slot but cannot join the touches-disjointness check below.
-  const occupied = inFlight.length + closedButLive.length + (subagentsInFlight > 0 ? subagentsInFlight : 0);
+  // AC5 DUAL-CONSUMER SPLIT (tasks/gap-in-flight-resolve-by-task-id-not-worktree-name, 人 2026-08-14
+  // 12:5xZ): Consumer A (touches-disjointness / dispatchable_disjoint) counts the WIDE un-landed set
+  // (inFlight + closedButLive — an awaiting-retry task's worktree still occupies files a new task
+  // would collide with); Consumer B (slot counting / slots_free / should_refill) counts the NARROW
+  // currently-RUNNING subagent set (cap=5 protects subagents — an awaiting-retry task has no subagent
+  // ⇒ does NOT occupy cap). The two denominators are ALLOWED to differ (the 2026-08-14 empirical
+  // split: 5 worktrees but 3 live subagents ⇒ true slots_free = 5 − 3 = 2, while the old
+  // shared-denominator read 0 ⇒ "等重跑任务算进在飞⇒在飞多算⇒slots_free 虚低⇒不派"). `runningSubagentCount`
+  // null (not passed) ⇒ Consumer B falls back to the wide set (backward compat). `subagentsInFlight`
+  // (non-task investigation subagents) carries no task id — it always occupies a slot but never joins
+  // the touches-disjointness check.
+  const slotOccupants = runningSubagentCount !== null
+    ? runningSubagentCount
+    : (inFlight.length + closedButLive.length);
+  const occupied = slotOccupants + (subagentsInFlight > 0 ? subagentsInFlight : 0);
   const slotsFree = computeSlotsFree(effectiveCap, occupied);
 
   // recommended — the production disjoint batch over the ready pool, filtered by the SAME step-4
@@ -790,7 +810,9 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
     shouldRefill = false;
     noRefillReason = `halted (preemption: .halt present — ${halt.reason}; check with supervisor-preempt.sh halt-check)`;
   } else if (slotsFree <= 0) {
-    noRefillReason = `no free slots (in-flight ${inFlight.length} + closed-but-live ${closedButLive.length}${subagentsInFlight > 0 ? ` + subagents ${subagentsInFlight}` : ""} >= cap ${effectiveCap})`;
+    // AC5 DUAL-CONSUMER SPLIT: the slots consumer's denominator is the NARROW running-subagent count
+    // when the caller passed --running, else the wide in-flight fallback.
+    noRefillReason = `no free slots (${runningSubagentCount !== null ? `running subagents ${runningSubagentCount}` : `in-flight ${inFlight.length} + closed-but-live ${closedButLive.length}`}${subagentsInFlight > 0 ? ` + subagents ${subagentsInFlight}` : ""} >= cap ${effectiveCap})`;
   } else if (recommended.length === 0) {
     noRefillReason = "no dispatchable candidate passes step-4 checks (touches-resolve / deps-ready / disjoint-from-in-flight / self-touch C8)";
   }
@@ -817,6 +839,14 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
     floor_mult: floorMult,
     in_flight_count: inFlight.length,
     closed_but_live_count: closedButLive.length,
+    // AC5 DUAL-CONSUMER SPLIT (tasks/gap-in-flight-resolve-by-task-id-not-worktree-name, 人 2026-08-14
+    // 12:5xZ): the NARROW Consumer-B denominator — the currently-RUNNING task subagent count used for
+    // occupied_slots / slots_free — plus its provenance. "running-subagents" = the caller passed
+    // --running; "in-flight-fallback" = Consumer B reuses the wide in-flight set (backward compat).
+    // Distinct from `in_flight_count` (the WIDE Consumer-A denominator, unchanged): the two are
+    // ALLOWED to differ (dispatchable_disjoint 分母 ≠ slots_free 分母).
+    running_subagent_count: slotOccupants,
+    slot_denominator_source: runningSubagentCount !== null ? "running-subagents" : "in-flight-fallback",
     // NON-TASK SUBAGENTS (gap-telemetry-underreport-nontask-subagents-not-counted-in-slots): the
     // investigation-subagent PROCESS count that occupies slots but carries no task id. Included in
     // occupied_slots/slots_free, never in the touches-disjointness check.
@@ -991,8 +1021,13 @@ function main(argv) {
   let floorMult = POOL_FLOOR_MULT_DEFAULT;
   let inFlightIds = [];
   let closedButLiveIds = [];
+  let runningIds = [];
   let integrationBacklog = undefined;
   let redBacklogCap = RED_BACKLOG_CAP_DEFAULT;
+  // AC5 DUAL-CONSUMER SPLIT (tasks/gap-in-flight-resolve-by-task-id-not-worktree-name): whether the
+  // caller passed the NARROW currently-RUNNING subagent set (--running). Consumer B (slots_free) uses
+  // it when present; otherwise Consumer B falls back to the wide in-flight set (backward compat).
+  let runningExplicit = false;
   // MEASUREMENT PROVENANCE (gap-slot-refill-inflight-disconnected-from-worktrees): whether the caller
   // EXPLICITLY supplied the in-flight view. When NEITHER --in-flight nor --closed-but-live is passed,
   // the in-flight view is MEASURED from the reconcile-aware telemetry --slot-status view — never
@@ -1012,6 +1047,10 @@ function main(argv) {
     } else if (args[i] === "--closed-but-live") {
       closedButLiveExplicit = true;
       closedButLiveIds = String(args[++i] || "").split(",").map((s) => s.trim()).filter(Boolean);
+    } else if (args[i] === "--running") {
+      // AC5 DUAL-CONSUMER SPLIT: the NARROW Consumer-B set — the currently-RUNNING task subagent ids.
+      runningExplicit = true;
+      runningIds = String(args[++i] || "").split(",").map((s) => s.trim()).filter(Boolean);
     } else if (args[i] === "--integration-backlog") {
       integrationBacklog = Number(args[++i]);
     } else if (args[i] === "--red-backlog-cap") {
@@ -1063,7 +1102,15 @@ function main(argv) {
       measurementError = measured.error;
     }
   }
-  const result = analyzeSlotRefill({ tasksDir: path.join(rootDir, "tasks"), root: rootDir, cap, floorMult, inFlight, closedButLive, subagentsInFlight, measurementSource, measurementError, integrationBacklog, redBacklogCap });
+  // AC5 DUAL-CONSUMER SPLIT: the NARROW Consumer-B denominator. Each --running id is a LIVE subagent
+  // and occupies a slot even if it does not resolve to a task file (a vanished id still runs); resolve
+  // + dedupe keeps the reported ids truthful (a truncated slug resolves to the true id; duplicates
+  // collapse). When --running is absent, runningSubagentCount stays null ⇒ Consumer B falls back to
+  // the wide in-flight set (backward compat).
+  const runningSubagentCount = runningExplicit
+    ? new Set(runningIds.map((id) => resolveInFlightId(tasksDir, id).id)).size
+    : null;
+  const result = analyzeSlotRefill({ tasksDir, root: rootDir, cap, floorMult, inFlight, closedButLive, subagentsInFlight, runningSubagentCount, measurementSource, measurementError, integrationBacklog, redBacklogCap });
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   return 0;
 }
