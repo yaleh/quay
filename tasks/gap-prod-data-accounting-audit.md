@@ -1,7 +1,7 @@
 ---
 id: gap-prod-data-accounting-audit
 title: 生产数据入账审计（人 14:5xZ 令 outer 安排）——按载体聚合三态判定，先跑第一遍计数不做修复
-status: ready
+status: done
 labels:
   - gap
   - mechanism
