@@ -27,8 +27,20 @@
 // The boundary = the commit timestamp of the commit that added .claude/workflows/fan-in-execute.js
 // (resolved from git; overridable via --workflow-landed-ts).
 //
+// ⚠️ 差集豁免 — 落地锚点 = 派发时间 < 边界 (outer 2026-08-14 裁定, authoritative):
+// 「该任务能不能派发 workflow」由【派发时间】决定, 不是 ff 时间. 一个在 workflow 落地【之前】派发的任务,
+// 无论它的 ff 何时落地, 都不可能在派发时调用还不存在的 workflow ⇒ 它不进判据2(a) 差集.
+// 这一条规则同时吸收:
+//   AC78 (派发 08:58 < 边界 09:20:07) — 落地豁免 (被吸收)
+//   AC76 (派发 08:56:51 < 边界)      — 边界前派发豁免 (被吸收)
+// 有界: 边界前的历史任务集是【固定】的, 不随新任务增长 (彻底解决「可变 Touches 扫描」担忧 —
+// 无 Touches 扫描, 无硬编码单任务). 读法: 每任务 A16 --task-start epoch
+// ( `.workflow-events/<runId>.jsonl` 的 start 事件 recordedAtMs / timing.startedAtMs ),
+// 回退 orchestration/dispatch-record.jsonl (taskId → ts). 均第三方可读, 非自述量.
+//
 // 差集非空 ⇒ RED + 列差集任务名. 无 fan-in 在边界后 ⇒ NOT-EVALUATED (evaluated=false, 硬规则 3b:
-// 无法评估 ≠ 合格).
+// 无法评估 ≠ 合格). 派发时间【不可解析】且无 Workflow 调用 ⇒ RED (fail-closed: 无法证明边界前派发,
+// 不能豁免).
 //
 // Exit codes: 0 = PASS or NOT-EVALUATED (read `evaluated`), 1 = RED (a fan-in without a Workflow
 //             call, or a lock event whose agentId is not a real subagent), 2 = usage/environment.
@@ -37,6 +49,7 @@
 //   node --experimental-strip-types fan-in-workflow-check.ts
 //       [--root <dir>] [--lock-events <file>] [--workflow-landed-ts <ISO>] [--workflow-landed-ref <ref>]
 //       [--project-dir <dir>] [--session-root <dir>] [--tasks-with-workflow-calls <csv>]
+//       [--workflow-events-dir <dir>] [--dispatch-record <file>]
 //       [--json] [--help]
 
 import fs from "node:fs";
@@ -45,29 +58,12 @@ import os from "node:os";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { isDirectEntry } from "./gate-script-base.ts";
-import { extractTouchesSection, parseTouchEntriesWithTags } from "./touches-parser.ts";
 
 // ── Constants ─────────────────────────────────────────────────────────────────────────────────────────
 
 /** The workflow basename that must carry every fan-in (判据2a). The A6 line says fan-in MUST go
  *  through this workflow via scriptPath. */
 export const WORKFLOW_BASENAME = "fan-in-execute.js";
-
-/** The single historical task that LANDED `.claude/workflows/fan-in-execute.js`. 判据2(a)'s landing
- *  exemption is THIS bounded constant — NOT a scan of the task store's Touches. A mutable Touches
- *  scan grows monotonically: every future task that declares the workflow file in its ## Touches
- *  would auto-exempt itself from 判据2(a), yet such a task CAN and SHOULD dispatch the workflow in
- *  its own fan-in (the exemption reason — "the workflow didn't exist yet" — holds only for the
- *  landing event itself). Historical event; there is no second one. */
-export const LANDING_TASK_ID = "gap-ac78-fan-in-workflow-a6-check";
-
-/** A Touches path lands the workflow if its basename is the workflow file (the `.claude/workflows`
- *  dir or the `plugin/workflows` byte-mirror). */
-const LANDING_TOUCH_RE = /(^|\/)fan-in-execute\.js$/;
-
-export function isLandingTouch(touch: string): boolean {
-  return LANDING_TOUCH_RE.test(touch);
-}
 
 // ── Pure: parse lock events ──────────────────────────────────────────────────────────────────────────
 
@@ -110,6 +106,100 @@ export function fanInTasksSince(records: LockEvent[], boundaryEpoch: number): { 
     if (r.taskId) seen.add(r.taskId);
   }
   return { taskIds: [...seen].sort(), events };
+}
+
+// ── Pure: dispatch-time resolution (A16 --task-start epoch / dispatch-record) ─────────────────────────
+
+/** The A16 telemetry dir: `<root>/.workflow-events` (gitignored; appended by fast-mode-telemetry). */
+export function workflowEventsDir(root: string): string {
+  return path.join(root, ".workflow-events");
+}
+
+/**
+ * A16 `--task-start` dispatch epoch (seconds) from `.workflow-events/<runId>.jsonl`, or null.
+ * The start event carries the dispatch instant in `recordedAtMs` (== `timing.startedAtMs`); the runId
+ * is used verbatim as the filename. Third-party readable — the file is written by fast-mode-telemetry
+ * at dispatch time, not by the task under judgment.
+ */
+export function readStartEpoch(wfDir: string, runId: string | null | undefined): number | null {
+  if (!runId) return null;
+  const file = path.join(wfDir, runId + ".jsonl");
+  if (!fs.existsSync(file)) return null;
+  try {
+    const text = fs.readFileSync(file, "utf8");
+    for (const line of text.split("\n")) {
+      if (!line.trim()) continue;
+      let d: any;
+      try { d = JSON.parse(line); } catch { continue; }
+      if (d?.eventKind !== "start") continue;
+      const ms = typeof d.recordedAtMs === "number" ? d.recordedAtMs
+        : (typeof d.timing?.startedAtMs === "number" ? d.timing.startedAtMs : null);
+      if (ms == null || !Number.isFinite(ms)) continue;
+      return Math.floor(ms / 1000);
+    }
+  } catch {
+    /* unreadable — null */
+  }
+  return null;
+}
+
+/** One `orchestration/dispatch-record.jsonl` line (A16 dispatch-record; schema { ts, taskId, ... }). */
+export interface DispatchRecord {
+  ts?: string;
+  taskId?: string;
+}
+
+/** Parse the dispatch-record jsonl text into records. Unparseable lines are skipped. */
+export function parseDispatchRecords(text: string): DispatchRecord[] {
+  const out: DispatchRecord[] = [];
+  for (const line of String(text ?? "").split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      const d = JSON.parse(line);
+      if (d && typeof d === "object") out.push(d as DispatchRecord);
+    } catch { /* skip */ }
+  }
+  return out;
+}
+
+/** Dispatch epoch (seconds) for a taskId from the dispatch-record, or null. */
+export function dispatchRecordEpoch(records: DispatchRecord[], taskId: string): number | null {
+  for (const r of records) {
+    if (r.taskId !== taskId || !r.ts) continue;
+    const ms = Date.parse(r.ts);
+    if (Number.isFinite(ms)) return Math.floor(ms / 1000);
+  }
+  return null;
+}
+
+/**
+ * Resolve the dispatch epoch (seconds) for every task in the fan-in set. Precedence per task:
+ *   1. `.workflow-events/<runId>.jsonl` start event (runId taken from the task's lock events);
+ *   2. `orchestration/dispatch-record.jsonl` (taskId → ts).
+ * Unresolvable tasks get null — they stay in the 判据2(a) difference (fail-closed).
+ */
+export function resolveDispatchEpochs(
+  fanInTasks: string[],
+  events: LockEvent[],
+  wfDir: string,
+  dispatchRecords: DispatchRecord[]
+): Map<string, number | null> {
+  const runIdByTask = new Map<string, string>();
+  for (const r of events) {
+    if (!r.taskId) continue;
+    if (r.runId && !runIdByTask.has(r.taskId)) runIdByTask.set(r.taskId, r.runId);
+  }
+  const out = new Map<string, number | null>();
+  for (const t of fanInTasks) {
+    if (!t) continue;
+    const runId = runIdByTask.get(t);
+    let epoch = readStartEpoch(wfDir, runId);
+    if (epoch == null) {
+      epoch = dispatchRecordEpoch(dispatchRecords, t);
+    }
+    out.set(t, epoch);
+  }
+  return out;
 }
 
 // ── Pure: 判据2(a) — Workflow call coverage ─────────────────────────────────────────────────────────
@@ -160,59 +250,57 @@ export function workflowTaskIds(calls: WorkflowCall[]): string[] {
   return [...new Set(calls.map((c) => c.taskId).filter((t): t is string => typeof t === "string" && t.length > 0))].sort();
 }
 
+export interface CoverageResult {
+  ok: boolean;
+  evaluated: boolean;
+  missing: string[];
+  preBoundaryDispatch: string[];
+  unresolvableDispatch: string[];
+}
+
 /**
- * 判据2(a): 差集 = fan-in'd tasks WITHOUT a Workflow call. 差集非空 ⇒ RED.
+ * 判据2(a): 差集 = fan-in'd tasks WITHOUT a Workflow call, once the pre-boundary-dispatch set is
+ * removed. 差集非空 ⇒ RED.
  *
- * ⚠️ 落地任务豁免 (AC67「不判自身」先例): the task that LANDED the workflow (its ## Touches carry
- * `.claude/workflows/fan-in-execute.js`) could not have dispatched the workflow during its own fan-in
- * (the workflow only became available to dispatch AT that fan-in) — judging it against 判据2(a) is
- * structurally red, exactly the AC67 "判据判在落地之后的第一次 fan-in，不判自身" shape. Its agentId is
- * STILL checked by 判据2(c) (a landing ff must still be executed by a subagent). `exemptTaskIds` are
- * excluded from the (a) difference but reported separately as `landingExempt`.
- * @returns { ok, evaluated, missing, landingExempt }
+ * ⚠️ 落地豁免 (outer 2026-08-14 裁定, authoritative): 「该任务能不能派发 workflow」由【派发时间】决定,
+ * 不是 ff 时间. A task whose DISPATCH time < boundaryEpoch could not have dispatched the workflow
+ * (it did not exist yet) regardless of when its ff landed ⇒ it is NOT in the (a) difference, reported
+ * separately as `preBoundaryDispatch`. This ONE rule subsumes BOTH the AC78 landing exemption and the
+ * AC76 pre-boundary dispatch exemption; it is BOUNDED (the pre-boundary historical set is fixed) and
+ * needs no Touches scan and no hardcoded task id. A task whose dispatch epoch is unresolvable and
+ * that has no Workflow call stays in the difference (fail-closed — cannot prove pre-boundary). Its
+ * agentId is STILL checked by 判据2(c).
+ * @returns { ok, evaluated, missing, preBoundaryDispatch, unresolvableDispatch }
  */
 export function checkWorkflowCoverage(
   fanInTasks: string[],
   tasksWithWorkflowCalls: string[],
-  exemptTaskIds: string[] = []
-): { ok: boolean; evaluated: boolean; missing: string[]; landingExempt: string[] } {
+  dispatchEpochs: Map<string, number | null>,
+  boundaryEpoch: number
+): CoverageResult {
   const tasks = (fanInTasks ?? []).filter(Boolean);
   if (tasks.length === 0) {
-    return { ok: true, evaluated: false, reason: "no-fan-in-after-boundary (NOT-EVALUATED)", missing: [], landingExempt: [] };
+    return { ok: true, evaluated: false, reason: "no-fan-in-after-boundary (NOT-EVALUATED)", missing: [], preBoundaryDispatch: [], unresolvableDispatch: [] };
   }
   const withCalls = new Set((tasksWithWorkflowCalls ?? []).filter(Boolean));
-  const exempt = new Set((exemptTaskIds ?? []).filter(Boolean));
-  const missing = tasks.filter((t) => !withCalls.has(t) && !exempt.has(t));
-  const landingExempt = tasks.filter((t) => !withCalls.has(t) && exempt.has(t));
-  if (missing.length > 0) {
-    return { ok: false, evaluated: true, reason: "fan-in-without-workflow-call", missing, landingExempt };
+  const preBoundaryDispatch: string[] = [];
+  const unresolvableDispatch: string[] = [];
+  const missing: string[] = [];
+  for (const t of tasks) {
+    if (withCalls.has(t)) continue;
+    const de = dispatchEpochs ? dispatchEpochs.get(t) : undefined;
+    if (de != null && de < boundaryEpoch) {
+      // Dispatched before the workflow existed — could not have dispatched it; not in the difference.
+      preBoundaryDispatch.push(t);
+    } else {
+      if (de == null) unresolvableDispatch.push(t);
+      missing.push(t);
+    }
   }
-  return { ok: true, evaluated: true, reason: "all-fan-in-have-workflow-call", missing: [], landingExempt };
-}
-
-/**
- * 判据2(a) landing exemption — GUARDED and BOUNDED. The exempt set is the fixed LANDING_TASK_ID
- * constant (the task that landed the workflow); it is NOT a scan of current Touches. A task whose
- * Touches match the landing path but whose id is NOT the landing constant is NOT exempted — it can
- * and should dispatch the workflow in its own fan-in, so it stays in the (a) difference.
- *
- * `touchesMatch` reports every id that currently claims the landing path (observability only — it
- * never widens the exemption; a non-landing Touches-match is precisely the case that must NOT open
- * the exemption). Pure: the caller supplies parsed { id, touches[] } entries.
- */
-export function landingExemption(taskEntries: { id: string; touches: string[] }[]): { exempt: string[]; touchesMatch: string[] } {
-  const touchesMatch = (taskEntries ?? [])
-    .filter((e) => (e.touches ?? []).some(isLandingTouch))
-    .map((e) => e.id)
-    .sort();
-  return { exempt: [LANDING_TASK_ID], touchesMatch };
-}
-
-/** The exempt task set for 判据2(a): the bounded landing constant. (The previous Touches-scan
- *  implementation was the defect — a mutable exemption that grows with every future task that
- *  declares the workflow file in its ## Touches.) */
-export function landingTaskIds(taskEntries: { id: string; touches: string[] }[]): string[] {
-  return landingExemption(taskEntries).exempt;
+  if (missing.length > 0) {
+    return { ok: false, evaluated: true, reason: "fan-in-without-workflow-call", missing, preBoundaryDispatch, unresolvableDispatch };
+  }
+  return { ok: true, evaluated: true, reason: "all-fan-in-have-workflow-call", missing: [], preBoundaryDispatch, unresolvableDispatch };
 }
 
 // ── Pure: 判据2(c) — agentId is a real subagent ─────────────────────────────────────────────────────
@@ -363,29 +451,6 @@ export function resolveBoundaryEpoch(root: string, landedTs?: string, landedRef?
   }
 }
 
-// ── 落地任务豁免 (AC67「不判自身」): the task whose Touches land the workflow ─────────────────────────
-
-/** Read `<root>/tasks/*.md` into { id, touches[] } entries (frontmatter id + ## Touches paths).
- *  Used to auto-detect the landing task(s) so the checker does not redden on the landing fan-in
- *  (the workflow was not dispatchable during its own landing — AC67 precedent). */
-export function loadTaskEntries(root: string): { id: string; touches: string[] }[] {
-  const tasksDir = path.join(root, "tasks");
-  if (!fs.existsSync(tasksDir)) return [];
-  const out: { id: string; touches: string[] }[] = [];
-  for (const name of fs.readdirSync(tasksDir)) {
-    if (!name.endsWith(".md")) continue;
-    const full = path.join(tasksDir, name);
-    let text: string;
-    try { text = fs.readFileSync(full, "utf8"); } catch { continue; }
-    const idMatch = text.match(/^id:\s*(.+)$/m);
-    const id = idMatch ? idMatch[1].trim() : name.replace(/\.md$/, "");
-    const { section } = extractTouchesSection(text);
-    const touches = parseTouchEntriesWithTags(section).map((e) => e.path).filter(Boolean);
-    out.push({ id, touches });
-  }
-  return out;
-}
-
 // ── CLI ───────────────────────────────────────────────────────────────────────────────────────────────
 
 function getArgValue(args: string[], name: string): string | undefined {
@@ -396,6 +461,8 @@ function getArgValue(args: string[], name: string): string | undefined {
 const usage = `fan-in-workflow-check.ts — AC78 判据2 (a)(b)(c): fan-in 是否真的走了 fan-in-execute workflow
   (a) Workflow 调用记录 ∩ (b) lock-events 带 agentId ∩ (c) agentId 是真实 subagent 标识;
   三处带时间边界（只统计该 workflow 落地后 fan-in）; 差集非空 ⇒ 红 + 列差集任务名.
+  差集豁免 = 派发时间 < 边界 (outer 2026-08-14 裁定): 一个在 workflow 落地【之前】派发的任务不可能
+  调用不存在的 workflow, 不进判据2(a) 差集 (AC78 落地豁免 与 AC76 边界前派发豁免 同一规则吸收).
 
 Usage:
   node --experimental-strip-types fan-in-workflow-check.ts
@@ -403,6 +470,7 @@ Usage:
       [--workflow-landed-ts <ISO>] [--workflow-landed-ref <ref>]
       [--project-dir <dir>] [--session-root <dir>]
       [--tasks-with-workflow-calls <csv>]
+      [--workflow-events-dir <dir>] [--dispatch-record <file>]
       [--json] [--help]
 
   --root <dir>              repo root (default: cwd). Derives the default project dir slug.
@@ -417,14 +485,11 @@ Usage:
                             (default: --project-dir).
   --tasks-with-workflow-calls <csv>  explicit (a) input — task ids that have a Workflow call record.
                             When given, the session scan is skipped (test surface / meta-cc read).
-  --landing-task <id>       exempt ONE task id from the (a) coverage check (AC67「不判自身」: the task
-                            that landed the workflow could not dispatch it during its own fan-in).
-                            Default: the BOUNDED landing constant gap-ac78-fan-in-workflow-a6-check
-                            (the single historical task that landed fan-in-execute.js). A task whose
-                            Touches carry fan-in-execute.js but whose id is NOT that constant is NOT
-                            exempted — it can and should dispatch the workflow in its own fan-in
-                            (reported via a guard warning when detected). Its agentId is still checked
-                            by 判据2(c).
+  --workflow-events-dir <dir>  A16 telemetry dir for the dispatch-time anchor
+                            (default <root>/.workflow-events). Per task, the start event's
+                            recordedAtMs / timing.startedAtMs of <runId>.jsonl gives the DISPATCH epoch.
+  --dispatch-record <file>  dispatch-record fallback for the dispatch-time anchor
+                            (default <root>/orchestration/dispatch-record.jsonl). taskId → ts.
   --json                    machine-readable output { ok, evaluated, reason, checks }.
   --help                    this help.
 
@@ -448,7 +513,8 @@ export function main(argv: string[]): number {
   const sessionRoot = getArgValue(args, "--session-root") ?? projectDir;
   const explicitTasks = (getArgValue(args, "--tasks-with-workflow-calls") ?? "")
     .split(",").map((s) => s.trim()).filter(Boolean);
-  const landingOverride = getArgValue(args, "--landing-task");
+  const wfEventsDir = getArgValue(args, "--workflow-events-dir") ?? workflowEventsDir(root);
+  const dispatchRecordFile = getArgValue(args, "--dispatch-record") ?? path.join(root, "orchestration", "dispatch-record.jsonl");
   const asJson = args.includes("--json");
 
   const boundaryEpoch = resolveBoundaryEpoch(root, landedTs, landedRef);
@@ -470,20 +536,9 @@ export function main(argv: string[]): number {
     const tasksWithWorkflow = explicitTasks.length > 0
       ? explicitTasks
       : scanWorkflowTaskIds(sessionRoot, boundaryEpoch);
-    const landingExempt = landingOverride != null && landingOverride !== ""
-      ? [landingOverride]
-      : (() => {
-          // The exemption is the bounded landing constant. A Touches-match that is NOT the landing
-          // constant must NOT be exempted (it can dispatch the workflow in its own fan-in) — report
-          // it for observability so a future Touches-match cannot silently open the exemption.
-          const { exempt, touchesMatch } = landingExemption(loadTaskEntries(root));
-          const rogue = touchesMatch.filter((id) => id !== exempt[0]);
-          if (rogue.length > 0) {
-            console.warn(`fan-in-workflow-check: guard — Touches-match(es) ${rogue.join(", ")} NOT exempted (only ${exempt[0]} is the landing constant; a non-landing task CAN dispatch the workflow in its own fan-in)`);
-          }
-          return exempt;
-        })();
-    const vA = checkWorkflowCoverage(taskIds, tasksWithWorkflow, landingExempt);
+    const dispatchRecords = parseDispatchRecords(fs.existsSync(dispatchRecordFile) ? fs.readFileSync(dispatchRecordFile, "utf8") : "");
+    const dispatchEpochs = resolveDispatchEpochs(taskIds, events, wfEventsDir, dispatchRecords);
+    const vA = checkWorkflowCoverage(taskIds, tasksWithWorkflow, dispatchEpochs, boundaryEpoch);
     if (vA.evaluated) {
       anyEvaluated = true;
       if (!vA.ok) anyRed = true;
@@ -494,7 +549,7 @@ export function main(argv: string[]): number {
       source: explicitTasks.length > 0 ? `--tasks-with-workflow-calls (${explicitTasks.length})` : `scan ${sessionRoot} >= epoch ${boundaryEpoch}`,
       fanInTasks: taskIds,
       tasksWithWorkflowCalls: tasksWithWorkflow,
-      landingExemptSource: landingOverride != null ? "--landing-task" : `auto-detect from ${path.join(root, "tasks")}`,
+      dispatchAnchor: { boundaryEpoch, dir: wfEventsDir, fallback: dispatchRecordFile, perTask: [...dispatchEpochs.entries()].map(([taskId, epoch]) => ({ taskId, dispatchEpoch: epoch })) },
     });
 
     // ── 判据2(c) — agentId is a real subagent ──────────────────────────────────────────────────
@@ -527,6 +582,8 @@ export function main(argv: string[]): number {
     for (const c of out.checks) {
       console.log(`  [${c.check}] ${c.ok ? "ok" : "RED"}${c.evaluated ? "" : " (NOT-EVALUATED)"} — ${c.reason}`);
       if (c.missing?.length) console.log(`    missing (fan-in without Workflow call): ${c.missing.join(", ")}`);
+      if (c.preBoundaryDispatch?.length) console.log(`    pre-boundary-dispatch exempt (dispatched before workflow landed): ${c.preBoundaryDispatch.join(", ")}`);
+      if (c.unresolvableDispatch?.length) console.log(`    unresolvable dispatch (in difference, fail-closed): ${c.unresolvableDispatch.join(", ")}`);
       if (c.violations?.length) for (const v of c.violations) console.log(`    ${v.taskId ?? "?"}: agentId ${v.agentId ?? "<null>"} → ${v.kind}`);
     }
   }
