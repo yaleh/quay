@@ -65,16 +65,24 @@ export const FAMILIES = [
   { id: 5, key: "derived-view-as-real-time", name: "读派生视图断言实时 (derived-view-as-real-time)", row: "读 full-suite-state.json 的 state" },
 ] as const;
 
-/** The ## Contract scan surface (also the --gate default object set). */
+/** The ## Contract scan surface (also the --gate default object set).
+ *  AC59 (gap-ac59-family5-scan-covers-execution-cores): the three execution cores ARE tick docs —
+ *  the known FAMILY-5 instances (manager B3-戊 / outer A11+B3 / inner A9) live in them, and the
+ *  gate previously never scanned them (FAMILY-5 was numbered but never looked at these three —
+ *  the same bug in three copies, so the fix is the scan surface, not the consumers). */
 export const DEFAULT_SURFACE = [
   "orchestration/manager-loop-tick.md",
   "orchestration/orchestrator-loop-tick.md",
   "plugin/loop/fast-mode-loop-tick.md",
   "plugin/loop/manager-loop-tick.md",
   "plugin/loop/orchestrator-loop-tick.md",
+  "orchestration/orchestrator-tick-core.md",
+  "orchestration/fast-mode-tick-core.md",
+  "orchestration/manager-tick-core.md",
 ];
 
-/** --gate 扫描面 = DEFAULT_SURFACE（5 份驱动 markdown）∪ plugin/scripts/ 仪器脚本（*.ts + *.sh）。
+/** --gate 扫描面 = DEFAULT_SURFACE（5 份驱动 markdown + 3 份执行核，AC59）∪ plugin/scripts/ 仪器
+ *  脚本（*.ts + *.sh）。
  *  (gap-manager-tick-readings-constant-zero-instruments AC3) 恒值仪器全部住在 plugin/scripts/*.{ts,sh}
  *  ——两个恒值读数（manager-tick-readings.ts 的 node_count comm 正则 / outer.ticklog 行形谓词）是
  *  手工发现的，--gate 若只看 markdown 就永远看不见缺陷所在处。root 下无 plugin/scripts 目录
@@ -106,8 +114,13 @@ export function gateSurface(root: string): string[] {
  * at least one real, documented instance per AC1. A NEW failure-form instance beyond these counts
  * red-lights the gate. To rebaseline after an INTENTIONAL doc change, re-run --gate and copy the
  * `detected` numbers here (the audit trail is in the git history of this constant).
+ *  REBASELINED at gap-ac59-family5-scan-covers-execution-cores (2026-08-14): the --gate surface now
+ *  ALSO scans the three execution cores (orchestrator/fast-mode/manager tick-core — the five known
+ *  FAMILY-5 instances live there and were never scanned), and FAMILY-5's freshness suppression was
+ *  narrowed (startedAt/durationMs are FIELD reads, not freshness checks — the manager B3-戊 and outer
+ *  A11 instances must fire). New measured counts 2/13/15/21/43.
  */
-export const FAMILY_BASELINE: Record<number, number> = { 1: 2, 2: 11, 3: 15, 4: 20, 5: 26 };
+export const FAMILY_BASELINE: Record<number, number> = { 1: 2, 2: 13, 3: 15, 4: 21, 5: 43 };
 
 // ── Per-family detectors (PURE: line text → boolean) ──────────────────────────────────────────────────
 // The detectors scan a whole line (fenced code lines, inline backtick code, and prose that names a
@@ -181,21 +194,51 @@ export function detectFamily4(line: string): boolean {
   return false;
 }
 
-/** Freshness tokens for FAMILY-5 — a line carrying one is a freshness-CHECKED snapshot read (the
- *  correct form), so it does NOT fire. `新鲜度` is included: a line that names freshness is
- *  acknowledging the concern even when it says 无新鲜度检查. */
+/** Freshness-CHECK markers for FAMILY-5 — a line carrying one is a freshness-CHECKED snapshot read
+ *  (the correct form), so it does NOT fire. `新鲜度` is included: a line that names freshness is
+ *  acknowledging the concern even when it says 无新鲜度检查.
+ *
+ *  AC59 (gap-ac59-family5-scan-covers-execution-cores) refinement: `startedAt` and `durationMs` are
+ *  NOT freshness markers — they are snapshot FIELD reads. A line that quotes `startedAt=…` as data
+ *  (manager B3-戊: `.quay/full-suite-state.json` 仍是 `state=red scope=main startedAt=…`) or reads
+ *  `durationMs` as a field (outer A11: 读 … 的 `state`/`reason`/`durationMs`) is reading the derived
+ *  view, NOT checking how fresh it is — those two known instances must FIRE. `finishedAt` is kept: a
+ *  finishedAt mention in these docs is a termination/freshness signal (runner tests assert
+ *  `state=running with finishedAt null while the suite runs`). `距今` is added — the execution-core
+ *  freshness fixes phrase the check as `… 距今 < 一个 tick 周期`. */
+// ASCII tokens keep `\b`; the CJK tokens (陈旧/滞后/新鲜度/距今) must NOT — `\b` is ASCII-only in JS
+// regex, so `\b新鲜度` never matches after a space (pre-existing latent bug, surfaced by removing
+// startedAt/durationMs from the markers in gap-ac59).
 export const FRESHNESS_TOKENS =
-  /\b(stat\b|mtime|mmin|-nt\b|find\b|age\b|startedAt|finishedAt|durationMs|freshen|newer|陈旧|滞后|新鲜度|freshness)\b/;
+  /\b(stat\b|mtime|mmin|-nt\b|find\b|age\b|finishedAt|freshen|newer|freshness)\b|陈旧|滞后|新鲜度|距今/;
+
+/** Suite-state VALUE assertion — `state != running` / `state == green` / `state: red` / `state=red`.
+ *  The execution-core tick rows GATE on these values (outer B3: `state != running`; manager B3-戊:
+ *  `state=red`) — reading the derived view's state to decide real-time action WITHOUT a freshness
+ *  check, even when the line doesn't name the file (outer B3 line 52: `state != running` 且
+ *  `--state-dir "$REPO_ROOT/.quay"`). */
+const SUITE_STATE_ASSERTION =
+  /\bstate\s*(?:!==|===|==|!=|=|:)\s*(?:['"]?)(running|green|red)(?:['"]?)/;
+
+/** Suite-state MECHANISM word — ties a bare `state=…` value assertion to the derived-view snapshot,
+ *  so the SUITE_STATE_ASSERTION path can't fire on arbitrary `state` comparisons in unrelated code.
+ *  (bare `full-suite` is deliberately NOT here: it matches `full-suite-runner` log lines that WRITE
+ *  state, a false-positive source.) */
+const SUITE_MECHANISM = /full-suite-state|suite-state|--state-dir|state-dir|state-file|derived-view|聚合快照/;
 
 /** FAMILY-5 — reading a snapshot/derived-view file (`full-suite-state`, `state.json`, `*.json` —
  *  NOT `.jsonl` event streams) to assert real-time state, WITHOUT a freshness check on the same
- *  line. Writing (runner 写 …) is not a read-assertion and does NOT fire. */
+ *  line. Writing (runner 写 …) is not a read-assertion and does NOT fire. AC59 extension: a
+ *  suite-state VALUE assertion combined with a suite-state mechanism word (`full-suite-state` /
+ *  `--state-dir` / `suite-state`) also counts as the derived-view read — the execution-core tick
+ *  rows gate on `state` without naming the file (outer B3). */
 export function detectFamily5(line: string): boolean {
-  const hasSnapshot =
+  const fileRef =
     /(full-suite-state|state\.json|state-file|derived-view|聚合快照)/.test(line) ||
     (/\.json\b/.test(line) && !/\.jsonl/.test(line));
-  if (!hasSnapshot) return false;
-  if (!/(读|read|assert|断言|判断|判定)/.test(line)) return false;
+  const valueAssert = SUITE_STATE_ASSERTION.test(line) && SUITE_MECHANISM.test(line);
+  if (!fileRef && !valueAssert) return false;
+  if (!/(读|read|assert|断言|判断|判定)/.test(line) && !valueAssert) return false;
   if (/(写|write|append|>>)/.test(line)) return false;
   if (!/(state|状态|在跑|正在跑|green|red|当前|实时)/.test(line)) return false;
   if (FRESHNESS_TOKENS.test(line)) return false;
