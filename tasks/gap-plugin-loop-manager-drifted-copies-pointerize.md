@@ -67,6 +67,10 @@ drift-check 配对（tick-core-static-check.ts:146）只列 tick-CORE，loop-tic
 - plugin/loop/manager-loop-tick.md（指针化：删空留一行指向 orchestration/manager-loop-tick.md）
 - plugin/scripts/tick-core-static-check.ts（AC2：配对覆盖两份 或 行数阈值）
 - plugin/test/tick-core-static-check.test.mjs（补测 AC2）
+- plugin/scripts/checker-mutation-cases/tick-core-static-check.sh（AC2 突变夹具同步——Evidence 第 5 行）
+- plugin/test/manager-cold-start.test.mjs（manager-*.md 指针化配套——改读正本/archive）
+- plugin/test/manager-productization.test.mjs（同上）
+- plugin/test/manager-tick-core.test.mjs（同上）
 - tasks/gap-plugin-loop-manager-drifted-copies-pointerize.md（自身）
 
 ## Evidence
