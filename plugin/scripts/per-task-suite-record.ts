@@ -35,6 +35,8 @@
 //       --task-id <taskId> --run-id <runId> --state <state> --lane-count <n>
 //       --duration-ms <ms> --started-at <iso> --finished-at <iso>
 //       [--failed-files <csv>] [--doc-checked true|false] [--doc-check-exit <0..255>]
+//       [--full-suite-ran true|false] [--skip-reason <text>] [--cpu-time-s <n>] [--load <n>]
+//       [--phases <json>]
 //       [--state-file <full-suite-state.json>] [--root <dir>]
 //       [--record-file <file>] [--json] [--help]
 //
@@ -46,6 +48,19 @@
 //                         `--static-checks-doc` run before its ff. Omitted when absent (a
 //                         pre-AC63 record has no doc-check trace).
 //   --doc-check-exit      OPTIONAL (REQUIRES --doc-checked): the doc check's exit code 0..255.
+//   --full-suite-ran      OPTIONAL gap-fan-in-suite-data-not-accounted 判据2 — true|false: did the
+//                         fan-in run the FULL suite (vs. skipped it — doc-only delta)? A skip is a
+//                         RECORDED DECISION, not a duration-inference. Omitted when absent (a
+//                         pre-wiring record legitimately has none).
+//   --skip-reason         OPTIONAL (REQUIRES --full-suite-ran false): WHY the full suite was
+//                         skipped (e.g. doc-only-delta). A reason without a "full suite skipped"
+//                         flag — or with fullSuiteRan true — is ambiguous (硬规则 3b).
+//   --cpu-time-s          OPTIONAL — the suite's CPU time in seconds (non-negative; GNU-time
+//                         User+System on a full run, 0 when the full suite was skipped).
+//   --load                OPTIONAL — the /proc/loadavg 1min load at the suite's end (non-negative).
+//   --phases              OPTIONAL — the per-phase DIFFERENTIAL breakdown as a JSON array of
+//                         {phase, wall_ms, cpu_usec?, psi_cpu_total?, psi_io_total?, lanes?}
+//                         (the gap-phase-boundary-differential-accounting PhaseDiffRecord shape).
 //   --record-file <file>  override the shared-checkout record path (hermetic tests point here).
 //
 // Exit codes:
@@ -140,6 +155,69 @@ export function buildRecord(o) {
     if (!Number.isInteger(x) || x < 0 || x > 255) return { error: `--doc-check-exit must be an integer 0..255 (got ${JSON.stringify(o.docCheckExit)})` };
     docCheckExit = x;
   }
+  // ── full-suite ran/skip trace (gap-fan-in-suite-data-not-accounted — OPTIONAL, fail-closed when
+  //    present) ───────────────────────────────────────────────────────────────────────────────
+  // The run-vs-skip distinction (判据2). A pre-wiring record legitimately has none — that absence is
+  // the exact "skip indistinguishable from a run" gap this task closes (硬规则 4). When present,
+  // `--full-suite-ran` must be a real boolean; `--skip-reason` REQUIRES `--full-suite-ran false` (a
+  // skip reason without a "full suite was skipped" flag — or with it true — is ambiguous, 硬规则 3b).
+  let fullSuiteRan;
+  if (o.fullSuiteRan != null) {
+    const fr = String(o.fullSuiteRan).trim().toLowerCase();
+    if (fr === "true") fullSuiteRan = true;
+    else if (fr === "false") fullSuiteRan = false;
+    else return { error: `--full-suite-ran must be true|false (got ${JSON.stringify(o.fullSuiteRan)})` };
+  }
+  let skipReason;
+  if (o.skipReason != null) {
+    if (fullSuiteRan !== false) return { error: "--skip-reason requires --full-suite-ran false (a skip reason without a 'full suite was skipped' flag is ambiguous)" };
+    const sr = String(o.skipReason).trim();
+    if (!sr) return { error: "--skip-reason must be a non-empty string (got empty)" };
+    skipReason = sr;
+  }
+  // cpu_time_s / load — non-negative numbers (判据3). load is the /proc/loadavg 1min at suite end.
+  let cpuTimeS;
+  if (o.cpuTimeS != null) {
+    const v = Number(o.cpuTimeS);
+    if (!Number.isFinite(v) || v < 0) return { error: `--cpu-time-s must be a non-negative number (got ${JSON.stringify(o.cpuTimeS)})` };
+    cpuTimeS = v;
+  }
+  let load;
+  if (o.load != null) {
+    const v = Number(o.load);
+    if (!Number.isFinite(v) || v < 0) return { error: `--load must be a non-negative number (got ${JSON.stringify(o.load)})` };
+    load = v;
+  }
+  // phases — the per-phase DIFFERENTIAL breakdown (判据3, the AC83 PhaseDiffRecord shape):
+  // [{phase, wall_ms, cpu_usec?, psi_cpu_total?, psi_io_total?, lanes?}]. Shape-checked when present.
+  let phases;
+  if (o.phases != null) {
+    let parsed;
+    try {
+      parsed = JSON.parse(String(o.phases));
+    } catch {
+      return { error: `--phases must be a valid JSON array of phase records (got ${JSON.stringify(o.phases)})` };
+    }
+    if (!Array.isArray(parsed)) return { error: "--phases must be a JSON array" };
+    const seen = new Set();
+    for (const p of parsed) {
+      if (p == null || typeof p !== "object") return { error: "--phases entries must be objects" };
+      const ph = p.phase;
+      if (typeof ph !== "string" || !ph.trim() || seen.has(ph)) {
+        return { error: `--phases entries need a unique non-empty phase name (got ${JSON.stringify(ph)})` };
+      }
+      seen.add(ph);
+      if (p.wall_ms == null || !Number.isFinite(Number(p.wall_ms)) || Number(p.wall_ms) < 0) {
+        return { error: `--phases entry ${ph} needs a non-negative wall_ms` };
+      }
+      for (const k of ["cpu_usec", "psi_cpu_total", "psi_io_total", "lanes"]) {
+        if (p[k] != null && (!Number.isFinite(Number(p[k])) || Number(p[k]) < 0)) {
+          return { error: `--phases entry ${ph}.${k} must be a non-negative number or null (got ${JSON.stringify(p[k])})` };
+        }
+      }
+    }
+    phases = parsed;
+  }
   let failedFiles = [];
   if (o.failedFiles) {
     failedFiles = String(o.failedFiles).split(",").map((s) => s.trim()).filter(Boolean);
@@ -159,6 +237,14 @@ export function buildRecord(o) {
   };
   if (docChecked != null) record.docChecked = docChecked;
   if (docCheckExit != null) record.docCheckExit = docCheckExit;
+  // ── full-suite ran/skip + cpu/load/phases trace (gap-fan-in-suite-data-not-accounted) ────────
+  // OPTIONAL fields — a pre-wiring record legitimately has none (their absence is the "skip was
+  // indistinguishable from a run" gap; a present-but-malformed value never writes, 硬规则 3b).
+  if (fullSuiteRan != null) record.fullSuiteRan = fullSuiteRan;
+  if (skipReason != null) record.skipReason = skipReason;
+  if (cpuTimeS != null) record.cpu_time_s = cpuTimeS;
+  if (load != null) record.load = load;
+  if (phases != null) record.phases = phases;
   return { record };
 }
 
@@ -176,6 +262,8 @@ Usage:
       --task-id <taskId> --run-id <runId> --state <state> --lane-count <n>
       --duration-ms <ms> --started-at <iso> --finished-at <iso>
       [--failed-files <csv>] [--doc-checked true|false] [--doc-check-exit <0..255>]
+      [--full-suite-ran true|false] [--skip-reason <text>] [--cpu-time-s <n>] [--load <n>]
+      [--phases <json>]
       [--state-file <full-suite-state.json>] [--root <dir>]
       [--record-file <file>] [--json] [--help]
 
@@ -191,6 +279,17 @@ Usage:
   --doc-checked     AC63 判据1 doc-check trace: true|false — did the fan-in's --static-checks-doc
                     run before its ff (optional; omitted when absent)
   --doc-check-exit  the doc check's exit code 0..255 (optional; REQUIRES --doc-checked)
+  --full-suite-ran  gap-fan-in-suite-data-not-accounted 判据2: true|false — did the fan-in run the
+                    FULL suite vs. skipped it (a skip is a RECORDED DECISION, not a duration-
+                    inference). Optional; omitted when absent (pre-wiring record)
+  --skip-reason     WHY the full suite was skipped (e.g. doc-only-delta); REQUIRES
+                    --full-suite-ran false (a reason without a "skipped" flag is ambiguous)
+  --cpu-time-s      the suite's CPU time in seconds (non-negative; GNU-time User+System on a full
+                    run, 0 when the full suite was skipped). Optional
+  --load            the /proc/loadavg 1min load at suite end (non-negative). Optional
+  --phases          the per-phase DIFFERENTIAL breakdown as a JSON array of
+                    {phase, wall_ms, cpu_usec?, psi_cpu_total?, psi_io_total?, lanes?}
+                    (AC83 PhaseDiffRecord shape). Optional; shape-checked when present
   --state-file      a full-suite-state.json to draw defaults from (explicit flags win)
   --root            repo root (default: cwd) — resolves the shared checkout via git common-dir
   --record-file     override the shared-checkout record path (hermetic tests)
@@ -240,6 +339,11 @@ export function main(argv) {
     finishedAt: getArgValue(args, "--finished-at"),
     docChecked: getArgValue(args, "--doc-checked"),
     docCheckExit: getArgValue(args, "--doc-check-exit"),
+    fullSuiteRan: getArgValue(args, "--full-suite-ran"),
+    skipReason: getArgValue(args, "--skip-reason"),
+    cpuTimeS: getArgValue(args, "--cpu-time-s"),
+    load: getArgValue(args, "--load"),
+    phases: getArgValue(args, "--phases"),
     stateFile: stateFileValues,
   });
   if (built.error) return fail(built.error);

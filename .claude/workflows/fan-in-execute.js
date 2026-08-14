@@ -33,6 +33,10 @@ export const meta = {
 //     本脚本（捕 prompt）+ 真实执行其发出的 bash（① code_delta 正则 / ② 自找 --agent-id /
 //     ③ flip sed fail-closed / ④ flip AC 完成闸：未全勾不翻、全勾翻、段缺失 NOT-EVALUATED）。
 //     改任一处必须同步那组测试。
+//  ⚠️ per-task-suite 入账（gap-fan-in-suite-data-not-accounted）：step 4 的 # suite-capture-block
+//     捕获 suite 起止/CPU（GNU time）/判定到 /tmp 临时 env；step 4.5 全绿后 # suite-record-block 写
+//     per-task-suite-record（plugin/scripts/per-task-suite-record.ts）——含跳过全量（fullSuiteRan=
+//     false + skipReason=doc-only-delta，判据2 能取假），写失败 HARD FAIL（AC1 判据1 义务）。
 
 // args 到达时是【字符串】不是对象（实测 wf_6f8cc053-f52）：直接 args.x 会静默 undefined。
 const A = (() => { try { return typeof args === 'string' ? JSON.parse(args) : (args ?? {}) } catch { return {} } })()
@@ -89,14 +93,83 @@ cd ${worktree} && node --experimental-strip-types plugin/scripts/fan-in-ts-typec
   —— 闸自己判定 Touches 是否含新增/移动 .ts（无则直接 exit 0）。exit 非 0 ⇒ 丢弃 worktree 内未合状态、
      标 needs-human、停止本 tick 合并与派发——不要继续 ff。
 
-【无锁段 step 4 — scoped 门 + （按 step 2 判定）全量 suite + doc 检查】
+【无锁段 step 4 — scoped 门 + （按 step 2 判定）全量 suite + doc 检查 + per-task-suite 捕获】
 cd ${worktree} && bash scripts/test.sh --for-task ${task} --allow-thin
   —— scoped 门，必须绿；非绿 ⇒ 修到绿再继续。
-if [ step 2 判定要重跑全量 ]; then cd ${worktree} && bash scripts/test.sh; fi
-  —— 全量 suite，只在 delta 触及断言面时跑（或判不出时 fail-closed 跑）。
+# suite-capture-block-start
+# per-task-suite 捕获（gap-fan-in-suite-data-not-accounted）：suite 起止/CPU/判定写入 /tmp 临时 env
+# 文件，供【全绿后】的 step 4.5 入账块读取——bash 变量不跨调用持久，用文件跨调用传值。
+# ⚠️ 跳过全量也要捕获（full_suite_ran=false + skip_reason=doc-only-delta）——跳过=被记录的决定，
+# 判据2 能取假（不能靠时长反推「为什么 CPU 低」）。判定依据 step 2 已记下的 code_delta。
+suite_capture="/tmp/fan-in-suite-${task}.env"
+suite_start_iso=$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)
+suite_start_ms=$(date +%s%3N)
+suite_cpu_s=0
+if [ step 2 判定 code_delta 非空 ]; then
+  # 全量 suite，只在 delta 触及断言面时跑（或判不出时 fail-closed 跑）。GNU time 捕获 CPU 秒数
+  # （User+System，判据3 的 cpu_time_s）；GNU time 不可用 ⇒ suite_cpu_s 保持 0（wall/load 仍入账）。
+  if command -v /usr/bin/time >/dev/null 2>&1; then
+    /usr/bin/time -o /tmp/fan-in-suite-${task}.time -f '%U %S' bash scripts/test.sh
+    suite_cpu_s=$(awk '{printf "%.3f", $1+$2}' /tmp/fan-in-suite-${task}.time 2>/dev/null || true)
+    rm -f /tmp/fan-in-suite-${task}.time
+  else
+    bash scripts/test.sh
+  fi
+  full_suite_ran=true
+  skip_reason=
+else
+  full_suite_ran=false
+  skip_reason=doc-only-delta
+fi
+suite_end_iso=$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)
+suite_end_ms=$(date +%s%3N)
+suite_wall_ms=$(( suite_end_ms - suite_start_ms ))
+suite_load=$(cut -d' ' -f1 /proc/loadavg 2>/dev/null || echo 0)
+suite_lane_count=1
+if [ "$full_suite_ran" = true ]; then suite_lane_count=$(nproc 2>/dev/null || echo 1); fi
+printf 'full_suite_ran=%s\\nskip_reason=%s\\ncpu_s=%s\\nstart_iso=%s\\nend_iso=%s\\nwall_ms=%s\\nload=%s\\nlane_count=%s\\n' \
+  "$full_suite_ran" "$skip_reason" "$suite_cpu_s" "$suite_start_iso" "$suite_end_iso" "$suite_wall_ms" "$suite_load" "$suite_lane_count" \
+  > "$suite_capture"
+# suite-capture-block-end
 cd ${worktree} && bash scripts/test.sh --static-checks-doc
   —— doc 检查（ff 不触发任何钩子，AC63）；必须绿。
 —— scoped 门 / 全量 / doc 任一非绿 ⇒ 修复并重跑对应项；全绿才进持锁段。
+
+【无锁段 step 4.5 — per-task-suite 入账（全绿后；跳过也写）】
+# suite-record-block-start
+# per-task-suite 入账（gap-fan-in-suite-data-not-accounted）：每次 fan-in 写一条——含跳过全量。
+# 读 step 4 捕获值；追加到【共享检出】.quay/per-task-suite-records.jsonl（本 writer 经 git common-dir
+# 从 worktree 解析主检出，不写 worktree 的 fork 副本——AC72 判据2 eac3ee98 现象）。
+# 写失败/读失败 ⇒ HARD FAIL：入账是 AC1 判据1 义务，不是可跳过的最佳努力。
+suite_capture="/tmp/fan-in-suite-${task}.env"
+if [ ! -f "$suite_capture" ]; then
+  echo "FATAL: per-task-suite 捕获文件缺失（step 4 未跑 suite？）⇒ 不翻 done、不 ff" >&2
+  exit 2
+fi
+. "$suite_capture"
+if [ -n "$skip_reason" ]; then
+  if ! node --experimental-strip-types plugin/scripts/per-task-suite-record.ts \
+    --task-id ${task} --run-id ${runId} --state green --lane-count "$lane_count" \
+    --duration-ms "$wall_ms" --started-at "$start_iso" --finished-at "$end_iso" \
+    --doc-checked true --doc-check-exit 0 \
+    --full-suite-ran "$full_suite_ran" --skip-reason "$skip_reason" \
+    --cpu-time-s "$cpu_s" --load "$load"; then
+    echo "FATAL: per-task-suite-record 入账失败（AC1 判据1 义务）⇒ 不翻 done、不 ff" >&2
+    exit 2
+  fi
+else
+  if ! node --experimental-strip-types plugin/scripts/per-task-suite-record.ts \
+    --task-id ${task} --run-id ${runId} --state green --lane-count "$lane_count" \
+    --duration-ms "$wall_ms" --started-at "$start_iso" --finished-at "$end_iso" \
+    --doc-checked true --doc-check-exit 0 \
+    --full-suite-ran "$full_suite_ran" \
+    --cpu-time-s "$cpu_s" --load "$load"; then
+    echo "FATAL: per-task-suite-record 入账失败（AC1 判据1 义务）⇒ 不翻 done、不 ff" >&2
+    exit 2
+  fi
+fi
+rm -f "$suite_capture"
+# suite-record-block-end
 
 【持锁段 step 5 — flip done + ff-merge】
 cd ${worktree}

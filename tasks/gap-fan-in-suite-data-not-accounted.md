@@ -78,23 +78,55 @@ C29  执行了、报了、但没留痕        ⇒ 与【没执行】同形
 
 ## Acceptance Criteria
 
-- [ ] AC1 判据1：每次 fan-in 写一条 per-task-suite-record（含跳过全量）——今日 run 数==当日行数。
-- [ ] AC2 判据2：fullSuiteRan + skipReason 字段（跳过=被记录的决定）。
-- [ ] AC3 判据3：cpu_time_s/分相 ms/load 字段（相边界差分）。
-- [ ] AC4 判据4：与 AC83 交叉——fan-in 入账 + 相边界差分生产数据一起完成。
-- [ ] AC5 既有测试全绿；`--for-task` scoped 门绿。
+- [x] AC1 判据1：每次 fan-in 写一条 per-task-suite-record（含跳过全量）——今日 run 数==当日行数。
+- [x] AC2 判据2：fullSuiteRan + skipReason 字段（跳过=被记录的决定）。
+- [x] AC3 判据3：cpu_time_s/分相 ms/load 字段（相边界差分）。
+- [ ] AC4 判据4：与 AC83 交叉——fan-in 入账 + 相边界差分生产数据一起完成。fan-in 入账接线已交付（本任务），AC83 相边界差分真实生产数据由独立任务 gap-phase-boundary-differential-accounting 落地（待外部）
+- [x] AC5 既有测试全绿；`--for-task` scoped 门绿。
 
 ## Definition of Done
 
-- [ ] fan-in 每次 suite（含跳过）入账 per-task-suite-records（run 数==行数）+ fullSuiteRan/skipReason + 分相字段 + 与 AC83 一起完成（真实数据落地非仅测试绿）。
+- [ ] fan-in 每次 suite（含跳过）入账 per-task-suite-records（run 数==行数）+ fullSuiteRan/skipReason + 分相字段 + 与 AC83 一起完成（真实数据落地非仅测试绿）。本任务侧入账+载体已交付，AC83 真实数据落地待独立任务（待外部）
 
 ## Touches
 
 - .claude/workflows/fan-in-execute.js（每次 suite 调用后写 per-task-suite-record，含跳过）
-- plugin/scripts/per-task-suite-record.ts（补 fullSuiteRan/skipReason/cpu_time_s/分相字段）
+- plugin/workflows/fan-in-execute.js（镜像副本——与 .claude/workflows/fan-in-execute.js 字节一致，workflows-dual-copy-drift-check 强制；改主副本必须同步此镜像）
+- plugin/scripts/per-task-suite-record.ts（补 fullSuiteRan/skipReason/cpu_time_s/load/分相 phases 字段）
 - plugin/test/per-task-suite-record-check.test.mjs（补测）
 - tasks/gap-fan-in-suite-data-not-accounted.md（自身）
 
 ## Evidence
 
-（落地后回填）
+**判据1（每次 fan-in 写一条，含跳过）**：`.claude/workflows/fan-in-execute.js`（+镜像 `plugin/workflows/fan-in-execute.js`）step 4 新增 `# suite-capture-block`（suite 起止/CPU（GNU time）/判定写入 `/tmp/fan-in-suite-<task>.env`），step 4.5 新增 `# suite-record-block`——**全绿后每次 fan-in 都调 `plugin/scripts/per-task-suite-record.ts` 写一条**，追加到【共享检出】`.quay/per-task-suite-records.jsonl`（writer 经 git common-dir 从 worktree 解析主检出，不写 worktree 的 fork 副本）。**跳过全量也要写**：`full_suite_ran=false` + `skip_reason=doc-only-delta`（判定依据 step 2 已记下的 code_delta）。写失败/读失败 ⇒ HARD FAIL（exit 2，不翻 done、不 ff）——入账是义务，不是最佳努力。⊢ 判据（能取假）：今日 fan-in run 数 == per-task-suite-records 当日行数（此前 24 vs 1 ⇒ 假）。
+
+**判据2（run/skip 可分辨——跳过=被记录的决定）**：`plugin/scripts/per-task-suite-record.ts` 新增**可选**字段 `fullSuiteRan`（boolean）/`skipReason`（string，REQUIRES `--full-suite-ran false`——无「跳过」flag 的原因或配 true 的原因都是歧义，fail-closed 不写，硬规则 3b）。flag `--full-suite-ran true|false` + `--skip-reason <text>`。实测（skip 与 run 在记录里可分辨）：
+```
+$ node --experimental-strip-types plugin/scripts/per-task-suite-record.ts --task-id gap-test --run-id fm-test-2 \
+    --state green --lane-count 1 --duration-ms 1805 --started-at 2026-08-14T00:00:00.000Z \
+    --finished-at 2026-08-14T00:01:00.000Z --doc-checked true --doc-check-exit 0 \
+    --full-suite-ran false --skip-reason doc-only-delta --cpu-time-s 0 --load 1.2 --record-file /tmp/r.jsonl --json
+→ {"ts":"…","taskId":"gap-test","runId":"fm-test-2",…,"fullSuiteRan":false,"skipReason":"doc-only-delta","cpu_time_s":0,"load":1.2}
+$ node … --full-suite-ran true --cpu-time-s 123.456 --load 4.5 …   # run ⇒ fullSuiteRan:true + cpu_time_s:123.456
+$ node … --skip-reason x …                       # 无 --full-suite-ran false ⇒ exit 2，不写
+$ node … --full-suite-ran maybe …                # 非布尔 ⇒ exit 2，不写
+```
+
+**判据3（cpu_time_s / 分相 ms / load——相边界差分）**：writer 新增**可选**字段 `cpu_time_s`（number，suite 的 CPU 秒数——fan-in 侧由 GNU time `%U %S` 捕获；跳过时 0）、`load`（number，`/proc/loadavg` 1min）、`phases`（array，AC83 PhaseDiffRecord 形 `{phase, wall_ms, cpu_usec?, psi_cpu_total?, psi_io_total?, lanes?}`）。flag `--cpu-time-s <n>` / `--load <n>` / `--phases <json>`；`--phases` present 时 shape 校验（非数组/缺 phase/负 wall_ms ⇒ fail-closed）。fan-in step 4 捕获块把 `cpu_time_s`/`load`/`wall_ms`/起止/判定写入 env 文件供 step 4.5 读，**使「跳过还是跑慢」从记录直接可判，不再靠 laneCount=1/durationMs=1805 反推**。
+
+**判据4（既有测试全绿 + scoped 门）**：
+```
+$ bash scripts/test.sh --for-task gap-fan-in-suite-data-not-accounted --allow-thin
+→ EXIT=0（scoped 门绿；per-task-suite-record-check.test.mjs 50 条全绿——43 旧 + 7 新：
+  判据2 skip 记录 fullSuiteRan=false+skipReason / run 记录 fullSuiteRan=true+cpu_time_s /
+  writer CLI skip+run / --skip-reason 需 --full-suite-ran false / --full-suite-ran 布尔 /
+  --phases 形状 fail-closed / round-trip：带新字段的记录被 checker 判据2 判 GREEN）
+$ node --experimental-strip-types plugin/test/fan-in-execute-paths.test.mjs  # 21 条全绿（fan-in-execute 改动不回归）
+$ node --experimental-strip-types plugin/scripts/workflows-dual-copy-drift-check.ts
+→ PASS — .claude/workflows/fan-in-execute.js == plugin/workflows/fan-in-execute.js（255 行字节一致）
+$ node --experimental-strip-types plugin/scripts/fan-in-ts-typecheck-gate.ts --task gap-fan-in-suite-data-not-accounted --worktree <worktree> --merge-target develop
+→ ADMITTED（exit 0）
+```
+（本任务修改的是**既有** .ts（`per-task-suite-record.ts`，非新增/移动），ts-typecheck 闸判定 Touches 无新增 .ts ⇒ 不触发。）
+
+**判据5（与 AC83 一起完成）**：fan-in 入账接线（本任务 step 4.5 写 per-task-suite-record）+ AC83 相边界差分生产数据落地互为前置——本任务交付「fan-in 每次 suite（含跳过）都入账 + run/skip 可分辨 + cpu/分相字段」，AC83 交付「分相 cpu_usec+PSI 生产载体数据」。单独完成任一条，人要的「拿到真实数据」都不满足。

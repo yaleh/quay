@@ -308,6 +308,128 @@ test("AC63 判据1 — a record with docCheckExit but NO docChecked ⇒ RED (an 
   assert.ok(v.missingFields.includes("docCheckExit-without-docChecked"));
 });
 
+// ── gap-fan-in-suite-data-not-accounted: fullSuiteRan / skipReason / cpu_time_s / load / phases ──────
+// 判据1 — every fan-in writes a per-task-suite-record INCLUDING the skip case; 判据2 — the record can
+// distinguish a run from a skip (a skip is a RECORDED DECISION, not a duration-inference — falsifiable,
+// before this a skip was indistinguishable from a run); 判据3 — cpu_time_s / 分相 phases / load fields.
+// The new fields are OPTIONAL (a pre-wiring record legitimately has none — the "skip indistinguishable
+// from a run" gap IS the pre-wiring shape), and fail-closed when PRESENT (硬规则 3b — the writer refuses
+// to record an ambiguous trace). The checker's validateRecord accepts them (unknown optional fields are
+// ignored), so a record written by the writer stays GREEN on the every-round 判据2 shape check.
+
+// A valid required-field base for buildRecord (the writer's pure record builder).
+const SUITE_RECORD_BASE = {
+  taskId: "gap-fan-in-suite-data-not-accounted",
+  runId: "fm-suite-1",
+  state: "green",
+  laneCount: 16,
+  durationMs: 250000,
+  startedAt: "2026-08-14T00:00:00.000Z",
+  finishedAt: "2026-08-14T00:05:00.000Z",
+};
+
+test("判据2 — a SKIP is recorded: buildRecord emits fullSuiteRan:false + skipReason (falsifiable — a skip is no longer indistinguishable from a run)", () => {
+  const built = buildRecord({ ...SUITE_RECORD_BASE, fullSuiteRan: "false", skipReason: "doc-only-delta", cpuTimeS: "0" });
+  assert.equal(built.error, undefined, `skip build must succeed: ${built.error}`);
+  assert.equal(built.record.fullSuiteRan, false);
+  assert.equal(built.record.skipReason, "doc-only-delta");
+  assert.equal(built.record.cpu_time_s, 0);
+});
+
+test("判据2/3 — a RUN is recorded: buildRecord emits fullSuiteRan:true + cpu_time_s + load + phases (分相)", () => {
+  const built = buildRecord({
+    ...SUITE_RECORD_BASE,
+    fullSuiteRan: "true",
+    cpuTimeS: "123.456",
+    load: "4.5",
+    phases: JSON.stringify([
+      { phase: "static", wall_ms: 1000, cpu_usec: 500000, psi_cpu_total: 100, psi_io_total: 50, lanes: 1 },
+      { phase: "main", wall_ms: 2000, cpu_usec: 900000, psi_cpu_total: 200, psi_io_total: 80, lanes: 16 },
+    ]),
+  });
+  assert.equal(built.error, undefined, `run build must succeed: ${built.error}`);
+  assert.equal(built.record.fullSuiteRan, true);
+  assert.equal(built.record.cpu_time_s, 123.456);
+  assert.equal(built.record.load, 4.5);
+  assert.equal(built.record.phases.length, 2);
+  assert.equal(built.record.phases[0].phase, "static");
+  assert.equal(built.record.phases[1].cpu_usec, 900000);
+  // The checker's 判据2 accepts the new OPTIONAL fields — a record the writer writes stays GREEN.
+  assert.equal(validateRecord(built.record).ok, true);
+});
+
+test("判据2 — the writer CLI records a SKIP (--full-suite-ran false --skip-reason doc-only-delta)", () => {
+  const file = tmpFile("ptsr-skip-");
+  const r = spawnSync("node", ["--experimental-strip-types", WRITER,
+    "--task-id", "gap-fan-in-suite-data-not-accounted",
+    "--run-id", "fm-skip-1",
+    "--state", "green",
+    "--lane-count", "1",
+    "--duration-ms", "1805",
+    "--started-at", "2026-08-14T00:00:00.000Z",
+    "--finished-at", "2026-08-14T00:01:00.000Z",
+    "--doc-checked", "true",
+    "--doc-check-exit", "0",
+    "--full-suite-ran", "false",
+    "--skip-reason", "doc-only-delta",
+    "--cpu-time-s", "0",
+    "--load", "1.2",
+    "--record-file", file,
+  ], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  const rec = JSON.parse(fs.readFileSync(file, "utf8").trim());
+  assert.equal(rec.fullSuiteRan, false, "a skip is RECORDED as a decision (判据1 — 跳过也入账), not inferred from duration");
+  assert.equal(rec.skipReason, "doc-only-delta");
+  assert.equal(rec.cpu_time_s, 0);
+  assert.equal(validateRecord(rec).ok, true, "the skip record is judged GREEN by the checker's 判据2");
+});
+
+test("判据3 — the writer CLI records a RUN (--full-suite-ran true --cpu-time-s <n> --load <n> --phases <json>)", () => {
+  const file = tmpFile("ptsr-run-");
+  const r = spawnSync("node", ["--experimental-strip-types", WRITER,
+    "--task-id", "gap-fan-in-suite-data-not-accounted",
+    "--run-id", "fm-run-1",
+    "--state", "green",
+    "--lane-count", "16",
+    "--duration-ms", "250000",
+    "--started-at", "2026-08-14T00:00:00.000Z",
+    "--finished-at", "2026-08-14T00:05:00.000Z",
+    "--doc-checked", "true",
+    "--doc-check-exit", "0",
+    "--full-suite-ran", "true",
+    "--cpu-time-s", "123.456",
+    "--load", "4.5",
+    "--phases", JSON.stringify([
+      { phase: "static", wall_ms: 1000, cpu_usec: 500000, psi_cpu_total: 100, psi_io_total: 50, lanes: 1 },
+      { phase: "main", wall_ms: 2000, cpu_usec: 900000, psi_cpu_total: 200, psi_io_total: 80, lanes: 16 },
+    ]),
+    "--record-file", file,
+  ], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  const rec = JSON.parse(fs.readFileSync(file, "utf8").trim());
+  assert.equal(rec.fullSuiteRan, true);
+  assert.equal(rec.cpu_time_s, 123.456);
+  assert.equal(rec.load, 4.5);
+  assert.equal(rec.phases.length, 2);
+  assert.equal(rec.phases[1].cpu_usec, 900000);
+  assert.equal(validateRecord(rec).ok, true, "a run record with cpu/phases is judged GREEN by the checker's 判据2");
+});
+
+test("判据2 — buildRecord fail-closed: --skip-reason REQUIRES --full-suite-ran false (ambiguous trace never writes)", () => {
+  assert.match(buildRecord({ ...SUITE_RECORD_BASE, skipReason: "doc-only-delta" }).error ?? "", /skip-reason/);
+  assert.match(buildRecord({ ...SUITE_RECORD_BASE, fullSuiteRan: "true", skipReason: "doc-only-delta" }).error ?? "", /skip-reason/);
+});
+
+test("判据2 — buildRecord fail-closed: --full-suite-ran must be true|false", () => {
+  assert.match(buildRecord({ ...SUITE_RECORD_BASE, fullSuiteRan: "maybe" }).error ?? "", /full-suite-ran/);
+});
+
+test("判据3 — buildRecord fail-closed: malformed --phases / negative cpu / negative load", () => {
+  assert.match(buildRecord({ ...SUITE_RECORD_BASE, phases: "not-json" }).error ?? "", /phases/);
+  assert.match(buildRecord({ ...SUITE_RECORD_BASE, cpuTimeS: "-1" }).error ?? "", /cpu-time-s/);
+  assert.match(buildRecord({ ...SUITE_RECORD_BASE, load: "-0.5" }).error ?? "", /load/);
+});
+
 // ── writer: append + fail-closed + state-file + shared-checkout resolution ─────────────────────────
 
 test("writer — appends ONE valid JSON line (判据2 fields), second append adds a second line", () => {
