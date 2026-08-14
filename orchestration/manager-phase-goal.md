@@ -3139,6 +3139,68 @@ manager 的活是：每 tick 采样 AC20 的五条、维护 AC21-AC24 的取证�
       **后者触顶的表现与「inner 主线程在跑 fan-in」在现象上一模一样**，正是今天我几次差点误诊的形状
       （CLAUDE.md:21 逐字：「三层 + 人共花数小时反复误诊为『outer 不派发』『inner 自锁』『唤醒链断』，全错」）。
 
+- [ ] **AC78（fan-in 走 workflow；A6 从「步骤清单」改为「检查 workflow 是否被执行」—— 人 2026-08-14 08:3xZ 裁定）**
+      **人的两句**：「**应当创建和维护模板**」「**如果用 workflow，A6 就应该改为检查是否执行了 workflow。按这一方案执行。**」
+
+      **① 为什么是这个方案（今天查实的三条事实）**：
+      ```
+      任务 subagent 的 prompt 无模板   四条特征串（"You are implementing task" / "DO NOT flip status" /
+                                       "worktree-isolated background subagent" / "Report back"）仓库【零命中】
+                                       谓词已干跑（fan-in-ts-typecheck-gate 同法命中 12 文件）⇒ 真零
+      inner 执行核 A15 不规定其内容     只规定「派不派」（Touches 正交/依赖/disjoint/fork 基线/self-touch）
+      inner 会话 Workflow 调用 = 0     它从未走过这条路
+      ⇒ prompt 靠【复制上一次】生成 ⇒ A6 改了三次（AC62/AC67/AC75），prompt 一次没跟着改
+      ⇒ 六次 fan-in 全带 pre-AC67 的「DO NOT flip status. DO NOT merge.」（08:08:00Z 那条逐字可查）
+      ```
+      **⇒ 根因是【模板在记忆路径上】。人的方案是把它搬到执行路径上。**
+
+      **判据1（步骤迁入 workflow，A6 只留检查）**：fan-in 的四步（`git merge develop` → delta 判定/全量 suite →
+      doc 检查 → flip done + `fan-in-ff-merge.sh`）**正身迁入一个 workflow 脚本**；
+      **A6 改为「fan-in 必须经该 workflow 执行」+ 本轮判据**。
+      **按 AC58「退役即迁出」**：A6 旧正身（步骤清单）**不得直接删**，迁进 `orchestration/archive/` 并给**落点映射**
+      （落点 = 该 workflow 脚本的对应段落）。
+
+      **判据2（能取假·两层，缺一不可）**：
+      ```
+      (a) 每次 fan-in 必须有一次对应的 Workflow 调用记录
+          读法：meta-cc query_session_content role=tool tool_name=Workflow（第三方可读，非自述量）
+      (b) 每次 fan-in 必须在 fan-in-merge-lock-events.jsonl 留 ≥1 条（带 agentId）
+          ⚠️ 必须带时间边界：只统计【该 workflow 落地之后】fan-in 的任务
+             —— 否则会把之前的 fan-in 一并算进差集、稳定过计、天天报红
+             （我 2026-08-14 算这条时就过计过：13−1=12，真值 6）
+      差集非空 ⇒ 红，并列出差集任务名
+      ```
+      **(a) 管「有没有走 workflow」，(b) 管「走了有没有真的 ff」——只有 (b) 会漏掉"绕过 workflow 但手工 ff"的情形。**
+
+      **判据3（M176 陷阱写进 A6）**：**workflow 一律以 `scriptPath` 调用，禁用 `name:`**。
+      `CLAUDE.md` 逐字记着：同一会话内第二次 `name:` 派发**可能取到旧脚本体**，即使文件已改并提交。
+      **⇒ 不写死这条，我们会在「模板已更新」与「实际用的是旧模板」之间再造一个同形的洞。**
+
+      **判据4（双副本同改）**：A6 的改动**必须同时落两份**
+      （`orchestration/fast-mode-tick-core.md` 与 `plugin/loop/fast-mode-tick-core.md`）——**同 AC73 判据4**。
+
+      **⚠️ 一个必须一并记的位移（不阻塞，但不能不写）**：
+      步骤正身迁入 workflow 之后，**协议的设计正本 `SPEC-fan-in-ff-merge-lock-2026-08-14.md` 与 workflow 脚本
+      之间又成了一对「规格 vs 实现」**。**但它与今天这个洞【不同级】**：
+      ```
+      今天的洞   prompt 是 A6 步骤的【副本】，两者都在执行路径上 ⇒ 副本漂移 = 执行漂移（六次实证）
+      迁入之后   workflow 脚本是【唯一实现】，没有第二份可漂 ⇒ SPEC 与它的分歧只是文档漂移
+      ```
+      **⇒ 前者是执行缺陷，后者是文档缺陷。不要用同一条判据管**（同我裁 B15 不并 AC73 的那把尺）。
+      **但仍须留一条弱判据**：改 workflow 的提交必须在提交信息里点名它对应 SPEC 的哪一节，**否则下一个人无从对照。**
+
+      **⚠️ 一个必须先定的前置（否则模板绑错一份）**：**A6 现有两份副本，且两份都逐字写着「本文件不接锚」**
+      ⇒ **该声明因被复制到两边而失去识别力**（硬规则 4：靠复制而恒真的声明携带零信息）。
+      **⇒ 建 workflow 前必须先定「哪一份是正本」，并把另一份的头部改成不对称的表述**
+      （一份写「本文件是正本」，另一份写「本文件是 `<路径>` 的落地副本，勿单边编辑」）。
+      **不定这一条，下一次单边编辑会把今天这个洞在更深的位置重造一次。**
+
+      **⚠️ 不覆盖**：不规定 workflow 的脚本名与内部结构（实现面，同本仓 SPEC 惯例）；
+      不改 fan-in 协议本身（AC62/AC75 已定）；不引入新的 subagent 计数（人 08-10 与 08-14 两次裁定禁止）。
+
+      **归属**：`plugin/loop/` 与 `.claude/workflows/` 均**不在 manager 编辑边界内** ⇒ **实现归 inner，任务体归 outer**；
+      manager 只出本 AC 与判据。
+
 **本阶段【不新建】过程纪律型 AC**：负控制/隔离自证沿用**既有的 AC49**，**不另起编号**
 ——同一义务两个编号就是硬规则⑧ 的变体（编号复用把缺席伪装成在场），
 且人已明确担心「搞出无尽的新任务新条件」。
