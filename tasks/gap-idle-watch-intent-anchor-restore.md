@@ -26,7 +26,7 @@ monitor-mount-check.sh --json             ⇒ mounted=true targetOk=true（Monit
 ```
 **危害在方向**：A19① 测的是冷启动锚点（下一次 `/clear` 后靠它知道该挂什么）。它缺席与「冷启动根本没做」在输出上完全同形；同时 A10② 报绿（真挂载在位）⇒ **每轮读到一个绿，而那个绿不覆盖 A19① 要测的东西**——硬规则 3b 的镜像形态（缺席被另一条检查的绿掩盖）。
 
-**⚠️ 根因线索（outer 09:1xZ 查 + manager 09:2xZ 更正，实现须先确诊再改）**：`manager-start.sh:244` 的 `cat > "$IDLE_WATCH_INTENT"` 在主路径里**无条件**（非 dry-run/非 check 路径都执行；:205 会话 in-place 不提前退出）。**⚠️ 更正的前提**：`loop-registry.txt` 是**共享容器**（`manager-arm-loop.sh` 每轮都写它，:96/:218）——它的 mtime 对「manager-start.sh 跑没跑过」**零信息**（硬规则 5：同一容器两类 population，只覆盖其一的读法判不了另一类；09:12 那次是 manager 自己跑 arm-loop 写的）。**真正的主路径证据 = `identity`**（manager-start 独有，:161 写，mtime 08-12T02:59）。**诊断拆两问，先问 ① 再问 ②**：
+**⚠️ 根因线索（outer 09:1xZ 查 + manager 09:2xZ 更正 ×2，实现须先确诊再改）**：`manager-start.sh:244` 的 `cat > "$IDLE_WATCH_INTENT"` 在主路径里**无条件**（非 dry-run/非 check 路径都执行；:205 会话 in-place 不提前退出）。**更正 ①**：`loop-registry.txt` 是**共享容器**（`manager-arm-loop.sh` 每轮都写它，:96/:218）——mtime 对「manager-start 跑没跑过」**零信息**（硬规则 5；09:12 是 manager 跑 arm-loop 写的）。**更正 ②**：`identity`(:161) 也是**创建一次**（:160 `if [ ! -f "$IDENTITY" ]`）⇒ 其 mtime 结构上不可能取到「又跑了一次」（硬规则 4）——不是 last-run 读数。**⇒ 主路径最后运行时刻 = 未知**（该 home 下四文件无一可作 last-run 读数：loop-registry 共用容器 / identity 创建一次 / cron-evidence 他脚本产物 / projects.tsv 写入方待定；硬规则 6：缺值=未查，不是没跑过）。**① 的取证方式限定为【读 :161→:244 实际路径】或【实跑一次看文件出不出来】，禁止用 mtime 推断。诊断拆两问，先问 ① 再问 ②**：
 ```
 ① identity(:161) 写在 :244 之前 ⇒ 「写到 identity 而没到 :244」= early-exit，无删除者
    —— 最省的解释；查 :161 到 :244 之间有没有提前退出路径（如 :219 tmux 创建失败 exit 1）
