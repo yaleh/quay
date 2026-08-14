@@ -51,14 +51,14 @@ socket 名：sig-k-omDepW / sig-i-P6M8z4 / hb-OxX5o3 / sig-k-3pCXft / hb-ufSPi9 
 
 ## Acceptance Criteria
 
-- [ ] AC1 判据1：夹具 after() kill 自己创建的 tmux server。
-- [ ] AC2 判据2 能取假：无测试运行 /tmp 目录数 0（真样本 6 回放红）。
-- [ ] AC3 判据3：sweepTmp owner-liveness 保护保留。
-- [ ] AC4 既有测试全绿；`--for-task` scoped 门绿。
+- [x] AC1 判据1：夹具 after() kill 自己创建的 tmux server。
+- [x] AC2 判据2 能取假：无测试运行 /tmp 目录数 0（真样本 6 回放红）。
+- [x] AC3 判据3：sweepTmp owner-liveness 保护保留。
+- [x] AC4 既有测试全绿；`--for-task` scoped 门绿。
 
 ## Definition of Done
 
-- [ ] session-liveness 夹具 kill 自己的 tmux + 无测试运行时 /tmp 目录 0 + owner-liveness 保护不削弱。
+- [x] session-liveness 夹具 kill 自己的 tmux + 无测试运行时 /tmp 目录 0 + owner-liveness 保护不削弱。
 
 ## Touches
 
@@ -70,4 +70,9 @@ socket 名：sig-k-omDepW / sig-i-P6M8z4 / hb-OxX5o3 / sig-k-3pCXft / hb-ufSPi9 
 
 ## Evidence
 
-（落地后回填——outer 2026-08-14 15:2xZ 已清理 6 个泄漏 tmux：kill 后 tmux 计数 10→4、真监视器 2729903 存活 1d2h）
+（inner 2026-08-14 落地回填）
+
+- **修复形态**：`plugin/test/session-liveness-helpers.mjs` 新增 `killProbeServer`/`killProbeServers`（对每个已注册探针的私有 socket `<tmp>/sock/tmux-<uid>/default` 执行 `tmux kill-server`）；`reapLiveOwners()` 由 per-session `kill-session` 循环改为 `killProbeServer`（kill-server）。三个 split 测试文件（signals-kinds / signals-integration / heartbeat）的 `after()` 在 `reapLiveOwners()`/`sweepTmp()` 之前显式调用 `killProbeServers()`（判据1）。kill-server 只作用于结构化隔离的私有 socket，碰不到真 quay-0/archguard-2/meta-cc-4 会话（AC3 保留：sweepTmp 的 owner-liveness 保护未削弱；`session-liveness-sweep.test.mjs` AC4/AC3「活 owner 存活」测试仍绿）。
+- **判据2 负控制**：实跑前 `/tmp/session-liveness-*` 目录数 **6**（manager 已清 tmux server 后残留 owner-dead 目录）；跑完三个受测文件后回 0。`tmux-leak-scan` 绝对模式无残留。
+- **AC4**：三个受测文件直跑 42/42 绿（heartbeat 14 + signals-integration 15 + signals-kinds 13）；`scripts/test.sh --for-task gap-session-liveness-fixture-tmux-not-killed --allow-thin` 门绿（exit 0，42/42，scoped 静态检查全过；`session-liveness-sweep.test.mjs` 的 `reapLiveOwners` 测试直跑 5/5 绿，锁 kill-server 路径）。
+- **node_modules**：worktree 无 node_modules，跑 `dispatch-worktree-setup.sh`（符号链接共享 node_modules，机制正本 `gap-worktree-node-modules-inconsistent-self-verify`）后门绿。
