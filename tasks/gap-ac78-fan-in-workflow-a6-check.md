@@ -150,6 +150,7 @@ AC72  subagent 从 AC67 任务体判据4 的【示例串】里取 id ⇒ 示例�
 - docs/proposals/quay-product-outline.md（DELIVERY-INVENTORY 快照派生刷新）
 - orchestration/archive/AC58-retired-clauses.md（A6 旧正身退役落点 + 落点映射，AC58 形态）
 - plugin/scripts/retired-clause-check.ts（REGISTRY 登记新退役条款 R30）
+- plugin/scripts/fan-in-ff-protocol-check.ts（**落地后修复**：FAN_IN_MERGE_SUBJECT_RE 收紧——裸 `fan-in` 误匹配 step-1 merge commit 主体里的任务 id「fan-in」）
 - tasks/gap-ac78-fan-in-workflow-a6-check.md（自身）
 
 ## Evidence
@@ -167,5 +168,9 @@ AC72  subagent 从 AC67 任务体判据4 的【示例串】里取 id ⇒ 示例�
 - doc 检查：`bash scripts/test.sh --static-checks-doc` = **PASS（exit 0）**（tick-core-static-check PASS；tick-core-drift-check 报 fast-mode 对漂移但 --no-block，非阻塞）。
 - `retired-clause-check`：OK — 29 entries migrated（47 tokens: all gone from source, all present in archive）。
 - `rhythm-consumer-check --check`：PASS（判据1 182 judged 0 violation——fan-in-workflow-check 每轮已接 test.sh）。
+
+**落地后修复（2026-08-14，随本任务二段 fan-in 落地）**：
+- **fan-in-workflow-check 判据2(a) 落地任务豁免（AC67「不判自身」）**：落地任务（Touches 携带 fan-in-execute.js）的自身 fan-in 无法派发 workflow（workflow 在其 fan-in 时才可用）⇒ 结构恒红；checker 自动检测落地任务并从 (a) 差集豁免（其 agentId 仍受判据2(c) 检查）。实测：`fan-in-workflow-check --root /home/yale/work/quay` = **ok:true evaluated:true**（landingExempt=[gap-ac78-fan-in-workflow-a6-check]，c-agent-id 绿）。测试 +4（28/28 全绿）。
+- **fan-in-ff-protocol-check FAN_IN_MERGE_SUBJECT_RE 收紧**：裸 `fan-in` 备选误匹配 step-1 `git merge develop` 的 commit subject `Merge branch 'develop' into task/<id>`（任务 id 含「fan-in」）⇒ 把协议自身设计流（SPEC §3 step 1）判红；收紧为 `\bmerge: fan-in |Merge (remote-tracking )?branch 'task/`（旧非 ff fan-in 两种 subject），step-1 merge 不再误判。实测：`fan-in-ff-protocol-check --root /home/yale/work/quay --baseline cd4f49b4` = **ok:true**（修复前 2 violations）。测试 16/16 全绿。
 
 **C17 建议（orchestration/fast-mode-tick-core.md，外层独占写，本任务未编辑）**：A6 行需按 plugin/loop 副本逐字落地（正本/落地副本同步），建议文本 = plugin/loop/fast-mode-tick-core.md 现 A6 行（`| A6 | Fan-in 必须经 fan-in-execute workflow 执行(**判据1:fan-in 四步正身迁入 \`.claude/workflows/fan-in-execute.js\`,A6 只留检查;... |`），并保持前置 (a) 头部不对称表述。落地后 tick-core-drift-check 的 fast-mode 对漂移消除。另：orchestration 旧 A6（缺 delta 断言面判定的版本）若从源删除，其独有词条需补 archive R30（或新增 R31）——retired-clause-check REGISTRY 目前只登记了 plugin/loop 源。

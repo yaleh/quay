@@ -45,6 +45,7 @@ import os from "node:os";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { isDirectEntry } from "./gate-script-base.ts";
+import { extractTouchesSection, parseTouchEntriesWithTags } from "./touches-parser.ts";
 
 // ── Constants ─────────────────────────────────────────────────────────────────────────────────────────
 
@@ -145,19 +146,45 @@ export function workflowTaskIds(calls: WorkflowCall[]): string[] {
 
 /**
  * 判据2(a): 差集 = fan-in'd tasks WITHOUT a Workflow call. 差集非空 ⇒ RED.
- * @returns { ok, evaluated, missing } — evaluated=false when fanInTasks is empty (nothing to judge).
+ *
+ * ⚠️ 落地任务豁免 (AC67「不判自身」先例): the task that LANDED the workflow (its ## Touches carry
+ * `.claude/workflows/fan-in-execute.js`) could not have dispatched the workflow during its own fan-in
+ * (the workflow only became available to dispatch AT that fan-in) — judging it against 判据2(a) is
+ * structurally red, exactly the AC67 "判据判在落地之后的第一次 fan-in，不判自身" shape. Its agentId is
+ * STILL checked by 判据2(c) (a landing ff must still be executed by a subagent). `exemptTaskIds` are
+ * excluded from the (a) difference but reported separately as `landingExempt`.
+ * @returns { ok, evaluated, missing, landingExempt }
  */
-export function checkWorkflowCoverage(fanInTasks: string[], tasksWithWorkflowCalls: string[]): { ok: boolean; evaluated: boolean; missing: string[] } {
+export function checkWorkflowCoverage(
+  fanInTasks: string[],
+  tasksWithWorkflowCalls: string[],
+  exemptTaskIds: string[] = []
+): { ok: boolean; evaluated: boolean; missing: string[]; landingExempt: string[] } {
   const tasks = (fanInTasks ?? []).filter(Boolean);
   if (tasks.length === 0) {
-    return { ok: true, evaluated: false, reason: "no-fan-in-after-boundary (NOT-EVALUATED)", missing: [] };
+    return { ok: true, evaluated: false, reason: "no-fan-in-after-boundary (NOT-EVALUATED)", missing: [], landingExempt: [] };
   }
   const withCalls = new Set((tasksWithWorkflowCalls ?? []).filter(Boolean));
-  const missing = tasks.filter((t) => !withCalls.has(t));
+  const exempt = new Set((exemptTaskIds ?? []).filter(Boolean));
+  const missing = tasks.filter((t) => !withCalls.has(t) && !exempt.has(t));
+  const landingExempt = tasks.filter((t) => !withCalls.has(t) && exempt.has(t));
   if (missing.length > 0) {
-    return { ok: false, evaluated: true, reason: "fan-in-without-workflow-call", missing };
+    return { ok: false, evaluated: true, reason: "fan-in-without-workflow-call", missing, landingExempt };
   }
-  return { ok: true, evaluated: true, reason: "all-fan-in-have-workflow-call", missing: [] };
+  return { ok: true, evaluated: true, reason: "all-fan-in-have-workflow-call", missing: [], landingExempt };
+}
+
+/**
+ * The tasks that LANDED the workflow — their ## Touches carry `.claude/workflows/fan-in-execute.js`
+ * (or the plugin/workflows mirror). Auto-detected from the task store so the checker does not redden
+ * on the landing task's own fan-in (AC67「不判自身」). Pure: the caller supplies parsed
+ * { id, touches[] } entries.
+ */
+export function landingTaskIds(taskEntries: { id: string; touches: string[] }[]): string[] {
+  return (taskEntries ?? [])
+    .filter((e) => (e.touches ?? []).some((t) => /(^|\/)fan-in-execute\.js$/.test(t)))
+    .map((e) => e.id)
+    .sort();
 }
 
 // ── Pure: 判据2(c) — agentId is a real subagent ─────────────────────────────────────────────────────
@@ -308,6 +335,29 @@ export function resolveBoundaryEpoch(root: string, landedTs?: string, landedRef?
   }
 }
 
+// ── 落地任务豁免 (AC67「不判自身」): the task whose Touches land the workflow ─────────────────────────
+
+/** Read `<root>/tasks/*.md` into { id, touches[] } entries (frontmatter id + ## Touches paths).
+ *  Used to auto-detect the landing task(s) so the checker does not redden on the landing fan-in
+ *  (the workflow was not dispatchable during its own landing — AC67 precedent). */
+export function loadTaskEntries(root: string): { id: string; touches: string[] }[] {
+  const tasksDir = path.join(root, "tasks");
+  if (!fs.existsSync(tasksDir)) return [];
+  const out: { id: string; touches: string[] }[] = [];
+  for (const name of fs.readdirSync(tasksDir)) {
+    if (!name.endsWith(".md")) continue;
+    const full = path.join(tasksDir, name);
+    let text: string;
+    try { text = fs.readFileSync(full, "utf8"); } catch { continue; }
+    const idMatch = text.match(/^id:\s*(.+)$/m);
+    const id = idMatch ? idMatch[1].trim() : name.replace(/\.md$/, "");
+    const { section } = extractTouchesSection(text);
+    const touches = parseTouchEntriesWithTags(section).map((e) => e.path).filter(Boolean);
+    out.push({ id, touches });
+  }
+  return out;
+}
+
 // ── CLI ───────────────────────────────────────────────────────────────────────────────────────────────
 
 function getArgValue(args: string[], name: string): string | undefined {
@@ -339,6 +389,10 @@ Usage:
                             (default: --project-dir).
   --tasks-with-workflow-calls <csv>  explicit (a) input — task ids that have a Workflow call record.
                             When given, the session scan is skipped (test surface / meta-cc read).
+  --landing-task <id>       exempt ONE task id from the (a) coverage check (AC67「不判自身」: the task
+                            that landed the workflow could not dispatch it during its own fan-in).
+                            Default: auto-detect from <root>/tasks/*.md Touches (a task whose Touches
+                            carry fan-in-execute.js). Its agentId is still checked by 判据2(c).
   --json                    machine-readable output { ok, evaluated, reason, checks }.
   --help                    this help.
 
@@ -362,6 +416,7 @@ export function main(argv: string[]): number {
   const sessionRoot = getArgValue(args, "--session-root") ?? projectDir;
   const explicitTasks = (getArgValue(args, "--tasks-with-workflow-calls") ?? "")
     .split(",").map((s) => s.trim()).filter(Boolean);
+  const landingOverride = getArgValue(args, "--landing-task");
   const asJson = args.includes("--json");
 
   const boundaryEpoch = resolveBoundaryEpoch(root, landedTs, landedRef);
@@ -383,7 +438,10 @@ export function main(argv: string[]): number {
     const tasksWithWorkflow = explicitTasks.length > 0
       ? explicitTasks
       : scanWorkflowTaskIds(sessionRoot, boundaryEpoch);
-    const vA = checkWorkflowCoverage(taskIds, tasksWithWorkflow);
+    const landingExempt = landingOverride != null && landingOverride !== ""
+      ? [landingOverride]
+      : landingTaskIds(loadTaskEntries(root));
+    const vA = checkWorkflowCoverage(taskIds, tasksWithWorkflow, landingExempt);
     if (vA.evaluated) {
       anyEvaluated = true;
       if (!vA.ok) anyRed = true;
@@ -394,6 +452,7 @@ export function main(argv: string[]): number {
       source: explicitTasks.length > 0 ? `--tasks-with-workflow-calls (${explicitTasks.length})` : `scan ${sessionRoot} >= epoch ${boundaryEpoch}`,
       fanInTasks: taskIds,
       tasksWithWorkflowCalls: tasksWithWorkflow,
+      landingExemptSource: landingOverride != null ? "--landing-task" : `auto-detect from ${path.join(root, "tasks")}`,
     });
 
     // ── 判据2(c) — agentId is a real subagent ──────────────────────────────────────────────────

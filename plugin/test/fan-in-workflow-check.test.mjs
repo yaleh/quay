@@ -34,6 +34,7 @@ import {
   extractWorkflowCalls,
   workflowTaskIds,
   checkWorkflowCoverage,
+  landingTaskIds,
   classifyAgentId,
   checkAgentIds,
   topLevelSessionStems,
@@ -171,6 +172,31 @@ test("PURE checkWorkflowCoverage — no fan-in after boundary ⇒ NOT-EVALUATED 
   const v = checkWorkflowCoverage([], ["gap-ac67-fan-in-executor-to-task-subagent"]);
   assert.equal(v.evaluated, false);
   assert.equal(v.ok, true);
+});
+
+test("PURE checkWorkflowCoverage — the LANDING task (exempt) is not in the difference (AC67 不判自身), its id is reported separately", (t) => {
+  // The landing task fan-in'd WITHOUT a Workflow call (it could not dispatch the workflow during
+  // its own landing). Exempting it must NOT redden (a); it is reported as landingExempt.
+  const v = checkWorkflowCoverage(["gap-ac78-fan-in-workflow-a6-check"], [], ["gap-ac78-fan-in-workflow-a6-check"]);
+  assert.equal(v.ok, true);
+  assert.equal(v.evaluated, true);
+  assert.deepEqual(v.missing, []);
+  assert.deepEqual(v.landingExempt, ["gap-ac78-fan-in-workflow-a6-check"]);
+});
+
+test("PURE landingTaskIds — a task whose Touches carry fan-in-execute.js is detected as the landing task", (t) => {
+  const entries = [
+    { id: "gap-ac78-fan-in-workflow-a6-check", touches: [".claude/workflows/fan-in-execute.js", "plugin/loop/fast-mode-tick-core.md"] },
+    { id: "gap-other", touches: ["plugin/scripts/fan-in-ff-merge.sh"] },
+  ];
+  assert.deepEqual(landingTaskIds(entries), ["gap-ac78-fan-in-workflow-a6-check"]);
+});
+
+test("PURE landingTaskIds — the plugin/workflows mirror also counts as landing the workflow", (t) => {
+  const entries = [
+    { id: "gap-ac78-fan-in-workflow-a6-check", touches: ["plugin/workflows/fan-in-execute.js"] },
+  ];
+  assert.deepEqual(landingTaskIds(entries), ["gap-ac78-fan-in-workflow-a6-check"]);
 });
 
 // ── PURE 判据2(c): classifyAgentId ──────────────────────────────────────────────────────────────────
