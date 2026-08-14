@@ -1,7 +1,7 @@
 ---
 id: gap-b15-pool-quality-judge-state-persist
 title: B15 pool-quality-judge 完成态不持久化——读端在、写端缺，触发器恒 fire
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -31,6 +31,18 @@ depends_on: []
 **止损（C21，outer 已判）**：**本 tick 不重调**——13 分钟前刚跑完、pool 几乎相同、判词不变，重调代价 60 万 token。**⚠️ 绑此读数**：若 pool 实质变化（新任务入池 / deficit 明显移动）而写入端未补，「不重调」失效，需重判。
 
 **本任务不新建过程纪律型 AC**：负控制沿用 AC49。
+
+## 三态语义（判据2 落定，硬规则 3b——写进任务体，不留未注意默认值）
+
+`readLastJudgeRoundState(root)` 返回三态判别联合（代码即此表的正本），`--plan` JSON 输出携带 `lastJudgeState` + `roundsSinceLastJudge`：
+
+| 状态 | 判定 | roundsSinceLastJudge | 语义 |
+|---|---|---|---|
+| **missing**（`.quay/pool-quality-judge-state.json` 不存在） | **fire（fail-open）** | `currentRound`（≠ 0） | 「从没判过」第一次本来也该跑——显式标注 `status:"missing"`，**不是静默默认 0**；下次 `--plan` 距上次=currentRound ⇒ every-10-rounds 正常 fire |
+| **ok**（文件存在且 lastRound 有效非负） | 正常 | `currentRound - lastRound` | 10 轮内不 fire（判据1 的目标态） |
+| **corrupt**（文件存在但 JSON 解析失败 / lastRound 非法） | **NOT-EVALUATED** | `null`（JSON 不输出） | 读不懂 ≠ 该跑：独立取值 `status:"corrupt"`，every-10-rounds **不作数**（从 reasons 剥除），与 fire **不同形**；pool/age 真实触发不受影响 |
+
+**NOT-EVALUATED 不得与 fire 同形**：corrupt 时 `roundsSinceLastJudge:null`（不是数字）、`lastJudgeState.status:"corrupt"`、reasons 不含 every-10-rounds——三个可判据的区分点。`--rounds-since <N>` 显式覆盖优先（操作者明确指定轮距，不算 NOT-EVALUATED）。
 
 ## Plan
 
@@ -62,4 +74,10 @@ depends_on: []
 
 ## Evidence
 
-（落地后回填）
+（B15 落地方 2026-08-14，worktree gap-b15-pool-quality-judge-state-persist）：
+
+- **写端**：`plugin/scripts/pool-quality-judge.ts` 新增 `writeLastJudgeRound` / `recordLastJudgeRound` + `--record-last-round` CLI 模式（单写者）；`.claude/workflows/pool-quality-judge.js` 完成路径（Aggregate 后）新增 Record 阶段调用它，返回 `lastJudgeRecorded`。
+- **三态读**：`readLastJudgeRoundState`（ok / missing / corrupt）取代裸 `readLastJudgeRound`（后者保留为兼容薄壳）；`--plan` 输出 `lastJudgeState` + 可空 `roundsSinceLastJudge`（corrupt ⇒ null）。
+- **真样本回放（判据3）**：05:22 的 verification-round=167 行样本——写端缺（负控制）⇒ `roundsSinceLastJudge=167`、`fired=true`（every-10-rounds）；写端在（lastRound=166=05:07 判的那轮）⇒ `roundsSinceLastJudge=1`、不 fire。红→绿。见 `plugin/test/pool-quality-judge.test.mjs` B15 块。
+- **负控制 fixture**：`plugin/test/pool-quality-judge.test.mjs` 新增 5 测（三态读 ×1、写端 ×1、真样本回放 ×1、corrupt NOT-EVALUATED+override ×1、workflow 写端接线 ×1），全部真实取假（缺写端 ⇒ 断言红）。
+- `.gitignore`：`**/.quay/pool-quality-judge-state.json`（运行时状态族）。

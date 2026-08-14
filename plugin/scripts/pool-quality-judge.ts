@@ -24,6 +24,9 @@
 //        # 合成一组判词（含 should-remove 案例）跑聚合——演示机制，invoke 证据。
 //   node --no-warnings --experimental-strip-types pool-quality-judge.ts --root <repo> --rounds-since <N>
 //        # 覆盖"每 10 轮"读数（供测试/手动评估用）。
+//   node --no-warnings --experimental-strip-types pool-quality-judge.ts --root <repo> --record-last-round
+//        # 写端（B15）:把当前 verification-round 持久化为 lastRound——judge 完成路径的单写者,
+//        # 由 .claude/workflows/pool-quality-judge.js 完成路径调用。
 //
 // Exit: 0 = judged/planned · 2 = usage error.
 
@@ -199,16 +202,71 @@ export function readCurrentRound(root: string): number {
   return lines.length;
 }
 
-/** 读上次运行记录（.quay/pool-quality-judge-state.json 的 lastRound）。缺 ⇒ 0。 */
-export function readLastJudgeRound(root: string): number {
-  const p = path.join(root, ".quay", "pool-quality-judge-state.json");
-  if (!fs.existsSync(p)) return 0;
-  try {
-    const j = JSON.parse(fs.readFileSync(p, "utf8"));
-    return typeof j.lastRound === "number" ? j.lastRound : 0;
-  } catch {
-    return 0;
+// ── judge 完成态持久化（B15:写端补齐 + fail-open 三态,硬规则 3b）─────────────────────────────────
+
+export const JUDGE_STATE_REL = path.join(".quay", "pool-quality-judge-state.json");
+
+/** judge 状态文件路径。运行时状态,gitignored（与 gate-events.jsonl 同族,见 .gitignore）。 */
+export function judgeStatePath(root: string): string {
+  return path.join(root, JUDGE_STATE_REL);
+}
+
+/**
+ * 三态读 judge 状态（硬规则 3b:「无法评估」必须独立取值,不得与「合格/该跑」同形）:
+ *   - missing  文件不存在 ⇒ fail-open fire（「从没判过」第一次本来也该跑）——显式标注,不是静默默认 0;
+ *   - ok       文件存在且 lastRound 有效 ⇒ 正常算 roundsSinceLastJudge;
+ *   - corrupt  文件存在但解析失败/lastRound 非法 ⇒ NOT-EVALUATED——不得当作 lastRound=0
+ *              （否则与 missing 的 fail-open fire 同形,「永远响」退化成更隐蔽的「读不懂当没判过」）。
+ */
+export type LastJudgeStatus = "ok" | "missing" | "corrupt";
+
+export interface LastJudgeState {
+  status: LastJudgeStatus;
+  lastRound: number | null; // ok 时为非负 round;missing/corrupt 为 null（不可信）
+  reason?: string;          // missing/corrupt 给显式原因
+}
+
+export function readLastJudgeRoundState(root: string): LastJudgeState {
+  const p = judgeStatePath(root);
+  if (!fs.existsSync(p)) {
+    return { status: "missing", lastRound: null, reason: "state-file-absent (fail-open: never judged ⇒ 该跑)" };
   }
+  let j: unknown;
+  try {
+    j = JSON.parse(fs.readFileSync(p, "utf8"));
+  } catch (e) {
+    return { status: "corrupt", lastRound: null, reason: `JSON parse failed: ${(e as Error).message}` };
+  }
+  const lastRound = (j as { lastRound?: unknown })?.lastRound;
+  if (typeof lastRound !== "number" || !Number.isFinite(lastRound) || lastRound < 0) {
+    return {
+      status: "corrupt",
+      lastRound: null,
+      reason: `lastRound is not a non-negative number: ${JSON.stringify(lastRound)}`,
+    };
+  }
+  return { status: "ok", lastRound };
+}
+
+/** 兼容旧签名（缺/损坏 ⇒ 0）。新代码判三态请用 readLastJudgeRoundState。 */
+export function readLastJudgeRound(root: string): number {
+  const s = readLastJudgeRoundState(root);
+  return s.status === "ok" ? (s.lastRound as number) : 0;
+}
+
+/** 写端:把 lastRound 持久化到 judge 状态文件（单写者——workflow 完成路径经 --record-last-round 调）。 */
+export function writeLastJudgeRound(root: string, lastRound: number): LastJudgeState {
+  const p = judgeStatePath(root);
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  fs.writeFileSync(p, JSON.stringify({ lastRound, judgedAt: new Date().toISOString() }, null, 2));
+  return { status: "ok", lastRound };
+}
+
+/** 读当前 verification-round 数并把 lastRound 持久化。返回写入的 round。 */
+export function recordLastJudgeRound(root: string): number {
+  const currentRound = readCurrentRound(root);
+  writeLastJudgeRound(root, currentRound);
+  return currentRound;
 }
 
 /** 池枚举 + 最久未复核年龄。复用 ready-pool-check.analyzeTasks（单源）。 */
@@ -248,6 +306,7 @@ Usage:
   --root <dir>          workspace root（default cwd）
   --rounds-since <N>    覆盖「每 10 轮」读数（测试/手动评估用）
   --json                同 --plan（显式）
+  --record-last-round   写端（B15）:把当前 verification-round 持久化为 lastRound（judge 完成路径单写者）
 
 Exit: 0 = planned/judged · 2 = usage error`);
 }
@@ -255,9 +314,29 @@ Exit: 0 = planned/judged · 2 = usage error`);
 function planJson(root: string, roundsSinceOverride?: number): string {
   const { pool, poolCount, oldestUnreviewedAgeMs, oldestTaskId } = readPoolPlan(root);
   const currentRound = readCurrentRound(root);
-  const lastJudgeRound = readLastJudgeRound(root);
-  const roundsSinceLastJudge = roundsSinceOverride ?? Math.max(0, currentRound - lastJudgeRound);
-  const triggers = computeTriggers({ poolCount, oldestUnreviewedAgeMs, roundsSinceLastJudge });
+  const judgeState = readLastJudgeRoundState(root);
+  // roundsSinceLastJudge: null ⇒ NOT-EVALUATED（corrupt 文件）,不得与 fire 同形（硬规则 3b）。
+  let roundsSinceLastJudge: number | null;
+  if (roundsSinceOverride !== undefined) {
+    roundsSinceLastJudge = Number.isFinite(roundsSinceOverride) ? roundsSinceOverride : null;
+  } else if (judgeState.status === "ok") {
+    roundsSinceLastJudge = Math.max(0, currentRound - (judgeState.lastRound as number));
+  } else if (judgeState.status === "missing") {
+    // fail-open:从没判过 ⇒ 距上次=currentRound ⇒ 该跑（显式标注,不是静默默认 0）。
+    roundsSinceLastJudge = currentRound;
+  } else {
+    roundsSinceLastJudge = null; // corrupt ⇒ NOT-EVALUATED
+  }
+  const triggers = computeTriggers({
+    poolCount,
+    oldestUnreviewedAgeMs,
+    roundsSinceLastJudge: roundsSinceLastJudge ?? 0,
+  });
+  if (judgeState.status === "corrupt" && roundsSinceLastJudge === null) {
+    // NOT-EVALUATED:every-10-rounds 不作数（不得与 fire 同形）,只留 pool/age 的真实触发。
+    triggers.reasons = triggers.reasons.filter((r) => r !== "every-10-rounds");
+    triggers.fired = triggers.reasons.length > 0;
+  }
   const tasks = pool.map((id) => {
     const f = path.join(root, "tasks", `${id}.md`);
     const body = fs.existsSync(f) ? fs.readFileSync(f, "utf8") : "";
@@ -274,7 +353,9 @@ function planJson(root: string, roundsSinceOverride?: number): string {
         roundsSinceLastJudge: ROUNDS_SINCE_LAST_JUDGE_TRIGGER,
       },
       currentRound,
-      lastJudgeRound,
+      lastJudgeRound: judgeState.status === "ok" ? (judgeState.lastRound as number) : null,
+      lastJudgeState: judgeState, // 三态:ok / missing（fail-open fire）/ corrupt（NOT-EVALUATED）
+      roundsSinceLastJudge,
       oldestTaskId,
       poolCount,
       pool,
@@ -296,6 +377,11 @@ export function main(argv: string[]): number {
     return i !== -1 ? args[i + 1] : def;
   };
   const root = path.resolve(flagVal("--root", ".") ?? ".");
+  if (args.includes("--record-last-round")) {
+    const lastRound = recordLastJudgeRound(root);
+    console.log(JSON.stringify({ recorded: true, lastRound, path: judgeStatePath(root) }, null, 2));
+    return 0;
+  }
   const mode = args.includes("--demo") ? "demo" : args.includes("--aggregate") ? "aggregate" : "plan";
   if (mode === "aggregate") {
     const file = flagVal("--aggregate");

@@ -129,6 +129,32 @@ for (const r of results) {
 }
 const shouldRemoveIds = actions.filter((a) => a.verdict === 'should-remove').map((a) => a.id)
 
+// ── Phase: Record (write end — B15: 完成态持久化,单写者) ────────────────────────────────
+// The judge COMPLETED (verdicts aggregated). Persist lastRound so the every-10-rounds trigger
+// resets — this is the missing write half of readLastJudgeRound (B3-戊族「永远响」). Single
+// writer = the deterministic script's --record-last-round; the workflow only invokes it here at
+// the completion path. NOT a new mechanism — the read end already existed; this completes it.
+phase('Record')
+
+const recorded = await agent(
+  `Persist the completed judge's lastRound (B15 — the every-10-rounds trigger must reset after a judge).
+
+Run: \`node --no-warnings --experimental-strip-types plugin/scripts/pool-quality-judge.ts --root ${root} --record-last-round\`
+Return the parsed JSON verbatim: { recorded, lastRound, path }.`,
+  {
+    phase: 'Record',
+    schema: {
+      type: 'object',
+      required: ['recorded', 'lastRound'],
+      properties: {
+        recorded: { type: 'boolean' },
+        lastRound: { type: 'number' },
+        path: { type: 'string' },
+      },
+    },
+  },
+)
+
 log(`pool=${POOL.length} ready=${counted.ready} needs-work=${counted.needsWork} should-remove=${counted.shouldRemove} uncertain=${counted.uncertain}`)
 return {
   outcome: 'judged',
@@ -137,4 +163,5 @@ return {
   actions,
   results,
   triggers: plan.triggers,
+  lastJudgeRecorded: (recorded && recorded.recorded) ? recorded.lastRound : null,
 }
