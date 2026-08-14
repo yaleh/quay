@@ -43,6 +43,7 @@ import {
   LEGACY_HEARTBEAT_FILE,
   MALFORMED,
   MACHINE_UNVERIFIABLE_REASON,
+  END_INVARIANT_NOT_EVALUATED_REASON,
   parseHeartbeat,
   judgeHeartbeat,
   readHeartbeatText,
@@ -483,7 +484,9 @@ function writeHeartbeatTo(root, hb) {
 test("AC3 CLI — fresh full-shape heartbeat exits 0 (ALIVE)", () => {
   const root = makeRootWithHeartbeat(fullHeartbeat());
   try {
-    const r = runCli(root);
+    // --in-flight '' (measured zero set) keeps the END invariant judgeable so the fully-evaluated
+    // verdict is ALIVE; WITHOUT it the checker reports NOT-EVALUATED (AC1, exit 0).
+    const r = runCli(root, ["--in-flight", ""]);
     assert.equal(r.status, 0, `fresh full-shape heartbeat must exit 0:\n${r.stdout}\n${r.stderr}`);
     assert.match(r.stdout, /ALIVE/, "stdout must say ALIVE");
   } finally {
@@ -516,7 +519,7 @@ test("AC3 CLI — missing file exits 1 (fail-closed)", () => {
 test("AC3 CLI — custom --max-age-secs makes an old heartbeat ALIVE when under the band", () => {
   const root = makeRootWithHeartbeat(fullHeartbeat({ ts: Math.floor(Date.now() / 1000) - 10000 }));
   try {
-    const r = runCli(root, ["--max-age-secs", "20000", "--json"]);
+    const r = runCli(root, ["--max-age-secs", "20000", "--json", "--in-flight", ""]);
     assert.equal(r.status, 0, `heartbeat under a wider band must exit 0:\n${r.stdout}\n${r.stderr}`);
     const out = JSON.parse(r.stdout);
     assert.equal(out.verdict, "ALIVE");
@@ -581,7 +584,9 @@ test("AC2 CLI --json — fields-missing carries status + missing list", () => {
 test("AC2 CLI --json — a full-shape fresh heartbeat is ALIVE with fieldContract.ok true", () => {
   const root = makeRootWithHeartbeat(fullHeartbeat());
   try {
-    const r = runCli(root, ["--json"]);
+    // --in-flight '' keeps the END invariant judgeable (ALIVE); without it the checker reports
+    // NOT-EVALUATED (AC1) — still exit 0, but the verdict text differs.
+    const r = runCli(root, ["--json", "--in-flight", ""]);
     assert.equal(r.status, 0, `full-shape heartbeat must exit 0:\n${r.stdout}\n${r.stderr}`);
     const out = JSON.parse(r.stdout);
     assert.equal(out.verdict, "ALIVE");
@@ -646,7 +651,10 @@ test("AC53 AC2 CLI --json — the 04:02:52Z negative-control heartbeat exits 1 (
       should_refill: true,
       no_refill_reason: null,
     }));
-    const r = runCli(root, ["--json"]);
+    // The 04:02:52Z shape recorded in_flight=0 — a MEASURED empty set. --in-flight '' (measured zero)
+    // makes the invariant judgeable (the recorded zero is the real set); WITHOUT it the checker reports
+    // NOT-EVALUATED (gap-inner-heartbeat-check-not-evaluated-when-no-inflight, AC1).
+    const r = runCli(root, ["--json", "--in-flight", ""]);
     assert.equal(r.status, 1, `the 04:02:52Z replay must exit 1:\n${r.stdout}\n${r.stderr}`);
     const out = JSON.parse(r.stdout);
     assert.equal(out.verdict, "DEAD");
@@ -678,7 +686,9 @@ test("AC53 判据① CLI --json — NEGATIVE CONTROL: machine says no blocking r
       no_refill_reason: "ac51 subagent in flight, next dispatch after they land",
       should_refill: false, // the record's own claim — ignored by the gate (the MACHINE is the judge)
     }));
-    const r = runCli(root, ["--json"]);
+    // --in-flight '' = a MEASURED zero in-flight set (the shape's own recorded in_flight). Without it
+    // the checker would report NOT-EVALUATED (AC1 — the touches-overlap-in-flight step needs the set).
+    const r = runCli(root, ["--json", "--in-flight", ""]);
     assert.equal(r.status, 1, `the bypass shape must exit 1 (the gate refuses):\n${r.stdout}\n${r.stderr}`);
     const out = JSON.parse(r.stdout);
     assert.equal(out.verdict, "DEAD");
@@ -693,6 +703,77 @@ test("AC53 判据① CLI --json — NEGATIVE CONTROL: machine says no blocking r
       "the recorded prose is display-only evidence, never the judge",
     );
     assert.equal(out.machineSlotRefill.should_refill, true, "the machine's fresh slot-refill is surfaced");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ── NOT-EVALUATED end-invariant (gap-inner-heartbeat-check-not-evaluated-when-no-inflight) ───────────
+// AC1 (hard rule 3b): the checker run WITHOUT --in-flight cannot judge the touches-overlap-in-flight
+// step ⇒ the END invariant is UNEVALUABLE ⇒ it must report NOT-EVALUATED (an INDEPENDENT value carrying
+// evaluated:false, non-escalating exit 0) — NOT the constant false DEAD. DEAD stays reserved for real
+// violations (in-flight set provided AND the four-part invariant holds).
+
+test("AC2 CLI --json — NO --in-flight + healthy inner (dispatchable work visible to an empty in-flight view) ⇒ NOT-EVALUATED, NOT DEAD", () => {
+  // The falsifiable shape (AC2 能取假): a workspace with a REAL dispatchable ready task. Under the old
+  // default-empty in-flight, the machine refill said should_refill=true + no_refill_reason=null ⇒ the
+  // four-part invariant "held" ⇒ the checker reported constant DEAD. Now, without --in-flight, the
+  // touches-overlap-in-flight step cannot be judged ⇒ NOT-EVALUATED (exit 0), never DEAD.
+  const root = makeDispatchableWorkspace("iwuh-ne1-");
+  try {
+    writeHeartbeatTo(root, fullHeartbeat());
+    const r = runCli(root, ["--json"]);
+    assert.equal(r.status, 0, `no-in-flight healthy inner must NOT escalate:\n${r.stdout}\n${r.stderr}`);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.verdict, "NOT-EVALUATED", `verdict must be NOT-EVALUATED, got ${out.verdict}`);
+    assert.equal(out.status, "end-invariant-not-evaluated");
+    assert.equal(out.reason, END_INVARIANT_NOT_EVALUATED_REASON);
+    assert.equal(out.endInvariant.evaluated, false);
+    assert.equal(out.endInvariant.violated, null);
+    assert.equal(out.machineInFlight.source, "none (not provided — end-invariant NOT-EVALUATED)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC2 negative control — WITH --in-flight (a real set) + healthy inner ⇒ ALIVE", () => {
+  // Same workspace + a REAL in-flight set that genuinely blocks dispatch (the dispatchable task itself
+  // is in flight ⇒ its touches overlap its own self-touch ⇒ it is no longer a candidate ⇒
+  // should_refill=false) ⇒ the machine refill is judgeable AND not-violated ⇒ ALIVE.
+  const root = makeDispatchableWorkspace("iwuh-ne2-");
+  try {
+    writeHeartbeatTo(root, fullHeartbeat());
+    const r = runCli(root, ["--json", "--in-flight", "gap-fixture-dispatchable"]);
+    assert.equal(r.status, 0, `with a real in-flight set the healthy inner must be ALIVE:\n${r.stdout}\n${r.stderr}`);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.verdict, "ALIVE");
+    assert.equal(out.status, "alive");
+    assert.equal(out.endInvariant.evaluated, true);
+    assert.equal(out.endInvariant.violated, false);
+    assert.equal(out.machineSlotRefill.should_refill, false, "the real in-flight set blocks the refill");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC3 CLI --json — WITH --in-flight '' (measured zero) + a REAL invariant violation ⇒ DEAD (real positives not weakened)", () => {
+  // --in-flight '' is a MEASURED empty in-flight set (real zero) — the invariant IS judgeable and the
+  // machine says the four-part invariant holds (dispatchable work + free slot + no mechanism reason)
+  // ⇒ the real violation must still be DEAD. AC3: the fix routes ONLY the unevaluable (no-in-flight)
+  // case to NOT-EVALUATED; it never swallows a real positive.
+  const root = makeDispatchableWorkspace("iwuh-ne3-");
+  try {
+    writeHeartbeatTo(root, fullHeartbeat({
+      slots_free: 5, dispatchable_disjoint: 5, pool: 16, should_refill: true, no_refill_reason: null,
+    }));
+    const r = runCli(root, ["--json", "--in-flight", ""]);
+    assert.equal(r.status, 1, `a real invariant violation with a measured in-flight set must still DEAD:\n${r.stdout}\n${r.stderr}`);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.verdict, "DEAD");
+    assert.equal(out.status, "invariant-violated");
+    assert.equal(out.reason, "inner-round-ended-with-dispatchable-work");
+    assert.equal(out.endInvariant.evaluated, true);
+    assert.equal(out.endInvariant.violated, true);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -777,8 +858,11 @@ test("AC53-gate CLI --json — --running '' surfaces slot_denominator_source run
     writeHeartbeatTo(root, fullHeartbeat({
       slots_free: 5, dispatchable_disjoint: 5, pool: 16, should_refill: true, no_refill_reason: null,
     }));
+    // This test is about the --running (Consumer B) wiring, so both runs supply --in-flight '' (a
+    // MEASURED zero in-flight set) to keep the END invariant judgeable — without it the checker would
+    // report NOT-EVALUATED (gap-inner-heartbeat-check-not-evaluated-when-no-inflight, AC1).
     // Without --running: Consumer B falls back to the wide in-flight set.
-    const r1 = runCli(root, ["--json"]);
+    const r1 = runCli(root, ["--json", "--in-flight", ""]);
     assert.equal(r1.status, 1, `without --running the violating shape must RED:\n${r1.stdout}\n${r1.stderr}`);
     const out1 = JSON.parse(r1.stdout);
     assert.equal(out1.status, "invariant-violated");
@@ -788,7 +872,7 @@ test("AC53-gate CLI --json — --running '' surfaces slot_denominator_source run
     // With --running '' (measured zero): Consumer B uses the narrow running set — the violating
     // shape is still RED (slots_free=3>0 at the heartbeat's effectiveCap 3), but the JSON proves the
     // narrow denominator is being used (判据3: --running '' is a TRUE zero, not "not provided").
-    const r2 = runCli(root, ["--json", "--running", ""]);
+    const r2 = runCli(root, ["--json", "--running", "", "--in-flight", ""]);
     assert.equal(r2.status, 1, `with --running '' the violating shape still RED:\n${r2.stdout}\n${r2.stderr}`);
     const out2 = JSON.parse(r2.stdout);
     assert.equal(out2.status, "invariant-violated");
@@ -808,7 +892,9 @@ test("AC53 AC3 CLI — a legacy `.json` snapshot (pre-AC53 format) is still read
     fs.mkdirSync(quay, { recursive: true });
     // Write ONLY the legacy .json (no jsonl) — the checker must fall back to it.
     fs.writeFileSync(path.join(quay, LEGACY_HEARTBEAT_FILE), JSON.stringify(fullHeartbeat(), null, 2), "utf8");
-    const r = runCli(tmp, ["--json"]);
+    // --in-flight '' keeps the END invariant judgeable (ALIVE); without it the checker reports
+    // NOT-EVALUATED (AC1).
+    const r = runCli(tmp, ["--json", "--in-flight", ""]);
     assert.equal(r.status, 0, `legacy .json fallback must be ALIVE:\n${r.stdout}\n${r.stderr}`);
     const out = JSON.parse(r.stdout);
     assert.equal(out.verdict, "ALIVE");
@@ -829,7 +915,9 @@ test("AC53 AC3 CLI — when BOTH exist, the jsonl LAST line wins over the legacy
     }), null, 2), "utf8");
     // jsonl with a NON-violating last line — the checker must read THIS, not the legacy.
     fs.writeFileSync(path.join(quay, HEARTBEAT_FILE), `${JSON.stringify(fullHeartbeat({ slots_free: 2, should_refill: false }))}\n`, "utf8");
-    const r = runCli(tmp, ["--json"]);
+    // --in-flight '' keeps the END invariant judgeable (ALIVE); without it the checker reports
+    // NOT-EVALUATED (AC1).
+    const r = runCli(tmp, ["--json", "--in-flight", ""]);
     assert.equal(r.status, 0, `jsonl last line must win:\n${r.stdout}\n${r.stderr}`);
     const out = JSON.parse(r.stdout);
     assert.equal(out.verdict, "ALIVE");
@@ -1087,7 +1175,9 @@ test("I1 CLI — the 07:41 absence replay names 派发评估未跑 in human outp
 test("I1 CLI --json — fresh all three (heartbeat + ready-pool + slot-refill) exits 0 (GREEN)", () => {
   const root = makeRootWithAssessment({ heartbeatAgeSecs: 60, readyPoolAgeSecs: 120, slotRefillAgeSecs: 90 });
   try {
-    const r = runCli(root, ["--json"]);
+    // --in-flight '' keeps the END invariant judgeable (ALIVE); without it the checker reports
+    // NOT-EVALUATED (AC1).
+    const r = runCli(root, ["--json", "--in-flight", ""]);
     assert.equal(r.status, 0, `fresh assessment must exit 0:\n${r.stdout}\n${r.stderr}`);
     const out = JSON.parse(r.stdout);
     assert.equal(out.verdict, "ALIVE");
@@ -1123,7 +1213,9 @@ test("I1 CLI --json — a fresh heartbeat with NO checker-cost ledger is GREEN w
   // a distinct value from both "fresh" and "stale".
   const root = makeRootWithHeartbeat(fullHeartbeat());
   try {
-    const r = runCli(root, ["--json"]);
+    // --in-flight '' keeps the END invariant judgeable (ALIVE); without it the checker reports
+    // NOT-EVALUATED (AC1) — the "NOT-EVALUATED" this test asserts is the I1 assessment-step signals.
+    const r = runCli(root, ["--json", "--in-flight", ""]);
     assert.equal(r.status, 0, `no ledger must not fake a fail:\n${r.stdout}\n${r.stderr}`);
     const out = JSON.parse(r.stdout);
     assert.equal(out.verdict, "ALIVE");

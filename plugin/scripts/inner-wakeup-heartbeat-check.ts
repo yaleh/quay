@@ -19,9 +19,10 @@
 //
 // Usage:
 //   node --experimental-strip-types inner-wakeup-heartbeat-check.ts [--root <dir>] \
-//        [--max-age-secs <N>] [--json]
+//        [--max-age-secs <N>] [--in-flight <id1,id2>] [--json]
 //
-// Exit: 0 = ALIVE (heartbeat fresh) · 1 = DEAD (missing / malformed / stale) · 2 = usage error.
+// Exit: 0 = ALIVE (heartbeat fresh) / NOT-EVALUATED (end-invariant unevaluable without --in-flight) ·
+//       1 = DEAD (missing / malformed / stale / contracts / invariant-violated) · 2 = usage error.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -214,6 +215,13 @@ export const INVARIANT_VIOLATED_REASON = "inner-round-ended-with-dispatchable-wo
  *  failure) — the checker cannot verify the end-invariant ⇒ fail-closed RED (cannot verify ⇒ cannot
  *  pass; hard rule 6 缺值=未查). */
 export const MACHINE_UNVERIFIABLE_REASON = "end-invariant-unverifiable";
+
+/** Reason string when the checker is run WITHOUT --in-flight (no in-flight set provided) — the
+ *  touches-overlap-in-flight step cannot be judged ⇒ the END invariant is UNEVALUABLE (hard rule 3b:
+ *  读不懂 ≠ 合格, ≠ 不合格). The verdict is NOT-EVALUATED — an INDEPENDENT value carrying
+ *  `evaluated:false` and a NON-escalating exit 0 — NEVER the DEAD verdict. DEAD stays reserved for
+ *  real violations (in-flight set provided AND the four-part invariant actually holds). */
+export const END_INVARIANT_NOT_EVALUATED_REASON = "end-invariant-not-evaluated-no-inflight";
 
 /**
  * The AC2 end-invariant: a tick must NOT end while `should_refill ∧ slots_free>0 ∧
@@ -434,10 +442,13 @@ export function judgeAssessmentSteps(nowSec, { heartbeat, readyPool, slotRefill 
  * @param {object} o
  * @param {string} o.root workspace root (the <root>/tasks store)
  * @param {string[]} [o.inFlightIds] the session's in-flight task ids. The checker is run by OUTER, who
- *   may not know inner's in-flight set: pass `--in-flight` when the caller knows it; DEFAULT EMPTY
- *   otherwise — the invariant is then computed against the WIDEST free-slot view, which is FAIL-CLOSED
- *   (any dispatchable work + any free slot ⇒ RED; a false RED escalates, a false PASS hides the
- *   defect). This is the documented fail-closed trade of a checker that refuses to trust self-report.
+ *   may not know inner's in-flight set: pass `--in-flight` when the caller knows it.
+ *   gap-inner-heartbeat-check-not-evaluated-when-no-inflight (AC1, hard rule 3b): ABSENT (undefined)
+ *   ⇒ the checker's main() routes the END invariant to NOT-EVALUATED (the touches-overlap-in-flight
+ *   step cannot be judged — the empty-in-flight view is exactly what produced the constant false DEAD),
+ *   so runMachineSlotRefill is NOT invoked from that branch. When provided (even an EMPTY array `[]` =
+ *   a MEASURED zero — `--in-flight ''`), the invariant is judged against that set. This helper itself
+ *   defaults `inFlightIds` to `[]` for direct-library/test callers, whose contracts are unchanged.
  * @param {string[]} [o.running] AC53-gate (tasks/gap-ac53-gate-not-wired-to-running-set, 判据1): the
  *   NARROW currently-RUNNING task-subagent set the gate observed THIS round. Passed to slot-refill's
  *   Consumer B (slots_free / should_refill); Consumer A (dispatchable_disjoint) stays on the WIDE set
@@ -564,6 +575,9 @@ ScheduleWakeup via plugin/scripts/inner-wakeup-heartbeat.ts) and judges:
       in the heartbeat can NEVER make this pass (the AC53 bypass: "ac51 subagent in flight…" shielded a
       null machine reason). Heartbeat's recorded dispatch-state is display-only evidence
       (recorded_no_refill_reason). Machine unverifiable ⇒ "结束不变式无法验证" + exit 1 (fail-closed).
+      WITHOUT --in-flight the touches-overlap-in-flight step cannot be judged ⇒ the invariant is
+      UNEVALUABLE ⇒ the checker reports NOT-EVALUATED (verdict "NOT-EVALUATED", evaluated:false,
+      exit 0) — NEVER a constant false DEAD (hard rule 3b: 读不懂 ≠ 合格, ≠ 不合格).
   (e) I1 read-product criterion (tasks/gap-inner-assessment-steps-no-product-reader) — the dispatch-
       evaluation steps all leave products: heartbeat jsonl ts + slot-refill call record +
       ready-pool call record (checker-cost.jsonl ${CHECKER_COST_FILE} rows). A STALE ready-pool or
@@ -576,8 +590,10 @@ Usage:
   --root <dir>         workspace root (default: cwd) — reads <root>/.quay/${HEARTBEAT_FILE}
   --max-age-secs <N>   dead threshold in seconds (default ${DEFAULT_MAX_AGE_SECS})
   --in-flight <id1,id2>  AC53: the session's in-flight task ids for the fresh slot-refill re-run.
-                         Outer may not know inner's set — DEFAULT EMPTY is the fail-closed baseline
-                         (the invariant is judged against the widest free-slot view).
+                         Outer may not know inner's set — ABSENT means the touches-overlap-in-flight
+                         step cannot be judged ⇒ the END invariant is NOT-EVALUATED (verdict
+                         "NOT-EVALUATED", evaluated:false, exit 0 — never a constant false DEAD).
+                         Provide it (even --in-flight '' = a MEASURED zero) to judge DEAD/ALIVE.
   --running <id1,id2>  AC53-gate 判据1: the NARROW currently-RUNNING task-subagent set the gate observed
                          this round. Consumer B (slots_free / should_refill) counts THIS; an empty value
                          (--running '') is a MEASURED zero (判据3: 真零 ≠ 未提供); ABSENT keeps Consumer B
@@ -586,8 +602,9 @@ Usage:
                          always stays on the wide in-flight view.
   --json               JSON output (default human-readable)
 
-Exit: 0 ALIVE · 1 DEAD (missing / malformed / stale / assessment-steps-stale / fields-missing /
-dispatch-state-missing / end-invariant-unverifiable / invariant-violated) · 2 usage error`);
+Exit: 0 ALIVE / NOT-EVALUATED (end-invariant unevaluable without --in-flight) · 1 DEAD (missing /
+malformed / stale / assessment-steps-stale / fields-missing / dispatch-state-missing /
+end-invariant-unverifiable / invariant-violated) · 2 usage error`);
 }
 
 export function main(argv) {
@@ -602,12 +619,16 @@ export function main(argv) {
   const jsonOut = args.includes("--json");
   // AC53 判据① (gap-inner-self-wake-sleep-empty-slots-not-dispatch): the checker's end-invariant gate
   // re-runs slot-refill with the session's in-flight set. Outer may not know inner's in-flight set —
-  // `--in-flight` supplies it when known; DEFAULT EMPTY is the fail-closed baseline (the invariant is
-  // then computed against the widest free-slot view ⇒ any dispatchable work + free slot lights RED).
+  // `--in-flight` supplies it when known.
+  // gap-inner-heartbeat-check-not-evaluated-when-no-inflight (AC1, hard rule 3b): `inFlightProvided`
+  // distinguishes "NOT provided" (unevaluable ⇒ NOT-EVALUATED) from "provided" (a MEASURED set — even
+  // `--in-flight ''` is a real measured zero, so the invariant IS judgeable). `inFlightIds` is
+  // `undefined` when absent (the end-invariant branch is NOT entered) and a real array when provided.
   const inFlightFlag = flagVal("--in-flight");
-  const inFlightIds = inFlightFlag !== undefined
+  const inFlightProvided = inFlightFlag !== undefined;
+  const inFlightIds = inFlightProvided
     ? String(inFlightFlag).split(",").map((s) => s.trim()).filter(Boolean)
-    : [];
+    : undefined;
   // AC53-gate 判据1 (tasks/gap-ac53-gate-not-wired-to-running-set): the NARROW currently-RUNNING
   // task-subagent set — the gate passes what IT observed this round. `--running ''` is a MEASURED zero
   // (true zero — Consumer B sees 0 running subagents); ABSENT (undefined) keeps Consumer B on the wide
@@ -685,36 +706,62 @@ export function main(argv) {
         // heartbeat's recorded no_refill_reason is SELF-REPORT (the judged party writes it), and a
         // prose reason could always be written to make noReason=false ⇒ the old checker passed while
         // the machine said no_refill_reason=None (hard rule 4b: a self-produced quantity cannot judge
-        // its producer). The gate now re-runs slot-refill (--in-flight from the caller, else the
-        // fail-closed empty set) and judges the invariant on ITS five dispatch-state keys; the
-        // heartbeat's recorded fields are display-only. Machine unavailability ⇒ fail-closed RED.
-        const machine = runMachineSlotRefill({
-          root,
-          inFlightIds,
-          // AC53-gate 判据1: the gate passes the running set it observed this round (Consumer B);
-          // dispatchable_disjoint (Consumer A) stays on the wide in-flight view.
-          running: runningIds,
-          cap: typeof heartbeat.effectiveCap === "number" ? heartbeat.effectiveCap : FIXED_DISPATCH_CAP,
-        });
-        if (!machine.ok) {
+        // its producer). The gate re-runs slot-refill with the --in-flight set the caller provided and
+        // judges the invariant on ITS five dispatch-state keys; the heartbeat's recorded fields are
+        // display-only. Machine unavailability ⇒ fail-closed RED.
+        // gap-inner-heartbeat-check-not-evaluated-when-no-inflight (AC1, hard rule 3b): WITHOUT
+        // --in-flight the touches-overlap-in-flight step cannot be judged — the empty-in-flight
+        // machine view is exactly the computation that produced the constant false DEAD. The invariant
+        // is then UNEVALUABLE ⇒ the checker reports NOT-EVALUATED (independent value, evaluated:false,
+        // exit 0), NEVER the DEAD verdict. DEAD stays reserved for real violations (in-flight set
+        // provided AND the four-part invariant holds). runMachineSlotRefill is NOT invoked in the
+        // unevaluable branch — re-running it against an empty in-flight set is precisely the misleading
+        // shape we refuse to judge.
+        if (!inFlightProvided) {
+          endInvariant = {
+            evaluated: false,
+            status: "not-evaluated",
+            reason: END_INVARIANT_NOT_EVALUATED_REASON,
+            why: "no --in-flight provided — touches-overlap-in-flight cannot be judged",
+          };
           v = {
-            alive: false,
-            status: "end-invariant-unverifiable",
+            alive: true,
+            verdict: "NOT-EVALUATED",
+            status: "end-invariant-not-evaluated",
             ageSecs: v.ageSecs,
-            reason: MACHINE_UNVERIFIABLE_REASON,
-            machineError: machine.error,
+            evaluated: false,
+            reason: END_INVARIANT_NOT_EVALUATED_REASON,
+            endInvariant,
           };
         } else {
-          machineRefill = machine.refill;
-          endInvariant = judgeEndInvariantAgainstMachine(heartbeat, machine.refill);
-          if (endInvariant.violated) {
+          const machine = runMachineSlotRefill({
+            root,
+            inFlightIds,
+            // AC53-gate 判据1: the gate passes the running set it observed this round (Consumer B);
+            // dispatchable_disjoint (Consumer A) stays on the wide in-flight view.
+            running: runningIds,
+            cap: typeof heartbeat.effectiveCap === "number" ? heartbeat.effectiveCap : FIXED_DISPATCH_CAP,
+          });
+          if (!machine.ok) {
             v = {
               alive: false,
-              status: "invariant-violated",
+              status: "end-invariant-unverifiable",
               ageSecs: v.ageSecs,
-              reason: INVARIANT_VIOLATED_REASON,
-              evidence: endInvariant.evidence,
+              reason: MACHINE_UNVERIFIABLE_REASON,
+              machineError: machine.error,
             };
+          } else {
+            machineRefill = machine.refill;
+            endInvariant = { ...judgeEndInvariantAgainstMachine(heartbeat, machine.refill), evaluated: true };
+            if (endInvariant.violated) {
+              v = {
+                alive: false,
+                status: "invariant-violated",
+                ageSecs: v.ageSecs,
+                reason: INVARIANT_VIOLATED_REASON,
+                evidence: endInvariant.evidence,
+              };
+            }
           }
         }
       }
@@ -727,7 +774,7 @@ export function main(argv) {
       file: filePath,
       generatedAt: new Date().toISOString(),
       nowSec,
-      verdict: v.alive ? "ALIVE" : "DEAD",
+      verdict: v.verdict || (v.alive ? "ALIVE" : "DEAD"),
       status: v.status,
       ageSecs: v.ageSecs,
       maxAgeSecs: maxAge,
@@ -756,16 +803,27 @@ export function main(argv) {
           }
         : null,
       machineInFlight: {
-        // Outer may not know inner's in-flight set — empty is the fail-closed baseline.
+        // Outer may not know inner's in-flight set — ABSENT (undefined) ⇒ the end-invariant is
+        // NOT-EVALUATED (never a false DEAD); provided (even `--in-flight ''` = measured zero) ⇒ the
+        // invariant is judgeable.
         inFlightIds,
-        source: inFlightFlag !== undefined ? "--in-flight" : "none (fail-closed empty)",
+        source: inFlightProvided ? "--in-flight" : "none (not provided — end-invariant NOT-EVALUATED)",
         // AC53-gate 判据3 (3b): `runningIds` null = NOT provided (Consumer B falls back to the wide
         // set) vs `[]` = measured zero (true zero running subagents). Never same-shaped.
         runningIds: runningIds ?? null,
         runningSource: runningFlag !== undefined ? "--running" : "none (wide in-flight fallback)",
       },
       endInvariant: endInvariant
-        ? { ok: endInvariant.ok, violated: endInvariant.violated, judgedFrom: endInvariant.judgedFrom ?? null, reason: endInvariant.reason, evidence: endInvariant.evidence }
+        ? {
+            evaluated: endInvariant.evaluated === true,
+            status: endInvariant.status ?? (endInvariant.violated ? "violated" : "ok"),
+            ok: endInvariant.ok ?? null,
+            violated: endInvariant.violated ?? null,
+            judgedFrom: endInvariant.judgedFrom ?? null,
+            reason: endInvariant.reason ?? null,
+            why: endInvariant.why ?? null,
+            evidence: endInvariant.evidence ?? null,
+          }
         : null,
       // I1 read-product criterion (tasks/gap-inner-assessment-steps-no-product-reader): the three
       // dispatch-evaluation freshness signals. status "assessment-steps-stale" + reason
@@ -782,7 +840,7 @@ export function main(argv) {
       },
     }, null, 2));
   } else {
-    const base = `inner-wakeup-heartbeat: ${v.alive ? "ALIVE" : "DEAD"}`;
+    const base = `inner-wakeup-heartbeat: ${v.verdict || (v.alive ? "ALIVE" : "DEAD")}`;
     if (v.status === "alive") {
       console.log(`${base} — age ${v.ageSecs}s ≤ ${maxAge}s, fields ${fields.fieldCount}/${REQUIRED_HEARTBEAT_FIELDS.length} + dispatch-state ${dispatchState.ok ? "ok" : "missing"} (heartbeat fresh + contracts ok)`);
     } else if (v.status === "assessment-steps-stale") {
@@ -813,6 +871,8 @@ export function main(argv) {
       console.log(`${base} — 结束不变式违例 ⇒ 机件说「有货可派却结束本轮」（should_refill=${e.should_refill} slots_free=${e.slots_free} dispatchable_disjoint=${e.dispatchable_disjoint} no_refill_reason=${JSON.stringify(e.no_refill_reason)}；心跳自述 recorded_no_refill_reason=${JSON.stringify(e.recorded_no_refill_reason ?? null)} 仅展示不参与判据）`);
     } else if (v.status === "end-invariant-unverifiable") {
       console.log(`${base} — 结束不变式无法验证（slot-refill 机件重跑失败：${v.machineError || "unknown"}）⇒ 不能验证就不能放行（fail-closed）`);
+    } else if (v.status === "end-invariant-not-evaluated") {
+      console.log(`${base} — 结束不变式未评估（未传 --in-flight 在飞集 ⇒ touches-overlap-in-flight 判不出）⇒ 不判 DEAD、也不假报 ALIVE（硬规则 3b：无法评估=独立取值，exit 0 不升级）`);
     } else {
       console.log(`${base} — ${filePath} MALFORMED (no valid ts) ⇒ inner 兜底心跳断`);
     }

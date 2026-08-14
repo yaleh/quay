@@ -69,4 +69,21 @@ checker 传 --in-flight "gap-ac80-prompt-canonical-and-invariant-checker,gap-fan
 
 ## Evidence
 
-（落地后回填——outer 2026-08-14 17:0xZ A/B 复现：不传 --in-flight ⇒ DEAD；传 "ac80,flip-no-ac" ⇒ ALIVE heartbeat-fresh。checker :436-437 注释自证 DEFAULT EMPTY。原 455a2011「写-查时差」归档已更正）
+**实现前 A/B 复现（outer 2026-08-14 17:0xZ，唯一差别=在飞集）**：
+```
+checker 不传 --in-flight ⇒ DEAD（reason=inner-round-ended-with-dispatchable-work）
+checker 传 --in-flight "ac80,flip-no-ac" ⇒ ALIVE（heartbeat-fresh, ageSecs 1250）
+```
+checker `runMachineSlotRefill({ inFlightIds = [] })` 默认空（:436-437 注释自证「DEFAULT EMPTY」）⇒ step-4 touches-overlap-in-flight 判不出 ⇒ `no_refill_reason` 恒 null ⇒ END 四合取恒成立 ⇒ 恒假 DEAD。原 455a2011「写-查时差」归档已由 outer 更正。
+
+**实现后（本任务，worktree fixture：一可派 ready 任务 + 健康心跳）**：
+```
+checker 不传 --in-flight                      ⇒ NOT-EVALUATED（status=end-invariant-not-evaluated,
+                                               evaluated:false, verdict=NOT-EVALUATED, exit 0）
+checker 传 --in-flight "gap-fixture-dispatchable" ⇒ ALIVE（should_refill=false, exit 0）
+checker 传 --in-flight ''（测得真零）            ⇒ DEAD（invariant-violated, exit 1）——真违约不削弱（AC3）
+```
+
+**表示**：NOT-EVALUATED = 独立取值（`verdict:"NOT-EVALUATED"` + `status:"end-invariant-not-evaluated"` + `endInvariant.evaluated:false`）+ **exit 0（不升级）**。DEAD 保留给真违约（在飞集已传 + 四合取真）。
+
+**`--for-task` scoped 门**：`bash scripts/test.sh --for-task gap-inner-heartbeat-check-not-evaluated-when-no-inflight --allow-thin` → **exit 0，79/79 绿**（含 3 条新增 AC2/AC3 测试 + 10 条既有测试按新语义补 `--in-flight ''` 使 END 不变式可判）。
