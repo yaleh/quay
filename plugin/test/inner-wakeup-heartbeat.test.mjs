@@ -29,6 +29,7 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
 import {
+  REFUSAL_FILE,
   REQUIRED_HEARTBEAT_FIELDS,
   judgeEndInvariant,
 } from "../scripts/inner-wakeup-heartbeat-check.ts";
@@ -479,6 +480,90 @@ test("AC53 AC1 (gap-ac53-end-invariant-gate) — runDirectSlotRefill returns the
     assert.equal(inv.violated, true, "the direct result must violate the end-invariant");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ── AC53-gate running-set wiring (tasks/gap-ac53-gate-not-wired-to-running-set) ───────────────────────
+// 判据1: the END-invariant gate now reads the NARROW --running set (Consumer B) — an awaiting-retry
+// task occupies the wide set (Consumer A, dispatchable_disjoint) but no subagent ⇒ does not occupy cap.
+// 判据4: a REFUSED round leaves a {written:false, refuse_reason} trace on the side-carrier — "被拒"
+// is no longer same-shaped as "没跑" on the jsonl (the 3-hour misdiagnosis carrier cause).
+
+test("AC53-gate 判据1 — passing --running makes the gate PASS when the real running subagents fill the cap (awaiting-retry no longer occupies slots)", () => {
+  const root = makeDispatchableWorkspace("iwuh-fix-");
+  try {
+    // The direct re-run at the writer's effective cap (3, from FULL_ARGS) must be dispatchable.
+    const direct = runDirectSlotRefill({ root, inFlightIds: [], cap: 3 });
+    assert.equal(direct.ok, true, "direct slot-refill must succeed");
+    assert.equal(direct.refill.should_refill, true, `fixture must be dispatchable at cap 3:\n${JSON.stringify(direct.refill)}`);
+    // The violating end-shape: dispatchable work waits + no mechanism reason.
+    const violatingArgs = [...FULL_ARGS];
+    const idxShould = FULL_ARGS.indexOf("--should-refill");
+    violatingArgs[idxShould + 1] = "true";
+    const idxReason = FULL_ARGS.indexOf("--no-refill-reason");
+    violatingArgs[idxReason + 1] = "null";
+    // WITHOUT --running the gate REFUSES (the pre-fix state — Consumer B reads the wide set).
+    const w1 = runWriter(root, violatingArgs);
+    assert.equal(w1.status, 1, `without --running the gate must REFUSE:\n${w1.stdout}\n${w1.stderr}`);
+    assert.match(w1.stderr, /结束不变式违例/, "the refusal must name 结束不变式违例");
+    assert.ok(!fs.existsSync(path.join(root, ".quay", "inner-wakeup-heartbeat.jsonl")), "nothing written on refusal");
+    // WITH --running (3 real running subagents fill the effective cap 3 ⇒ slots_free=0 ⇒
+    // should_refill=false) the gate PASSES — the heartbeat is written (判据2: 传真集放行).
+    const passingArgs = [...violatingArgs, "--running", "r-1,r-2,r-3"];
+    const w2 = runWriter(root, passingArgs);
+    assert.equal(w2.status, 0, `with --running the gate must PASS:\n${w2.stdout}\n${w2.stderr}`);
+    const hb = JSON.parse(fs.readFileSync(path.join(root, ".quay", "inner-wakeup-heartbeat.jsonl"), "utf8"));
+    assert.equal(hb.should_refill, false, "the written heartbeat carries the DIRECT measurement's should_refill=false");
+    assert.equal(hb.slots_free, 0, "the written heartbeat carries slots_free=0 (cap 3 − 3 running)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC53-gate 判据4 — a refused write leaves a {written:false, refuse_reason} trace on the side-carrier", () => {
+  const root = makeDispatchableWorkspace("iwuh-ac4-");
+  try {
+    const direct = runDirectSlotRefill({ root, inFlightIds: [], cap: 3 });
+    assert.equal(direct.ok, true, "direct slot-refill must succeed");
+    assert.equal(direct.refill.should_refill, true, `fixture must be dispatchable:\n${JSON.stringify(direct.refill)}`);
+    const violatingArgs = [...FULL_ARGS];
+    const idxShould = FULL_ARGS.indexOf("--should-refill");
+    violatingArgs[idxShould + 1] = "true";
+    const idxReason = FULL_ARGS.indexOf("--no-refill-reason");
+    violatingArgs[idxReason + 1] = "null";
+    // Negative control (判据4 ⊢): BEFORE the refused write the side-carrier has ZERO rows.
+    const refusalPath = path.join(root, ".quay", REFUSAL_FILE);
+    assert.ok(!fs.existsSync(refusalPath), "pre-fix: zero written:false rows");
+    const w = runWriter(root, violatingArgs);
+    assert.equal(w.status, 1, `writer must REFUSE:\n${w.stdout}\n${w.stderr}`);
+    assert.match(w.stderr, /结束不变式违例/, "the refusal must name 结束不变式违例");
+    // Post-refusal: the side-carrier has exactly ONE {written:false, refuse_reason} row.
+    assert.ok(fs.existsSync(refusalPath), "the refusal must leave a trace on the side-carrier");
+    const rows = fs.readFileSync(refusalPath, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+    assert.equal(rows.length, 1, "exactly one refusal row");
+    assert.equal(rows[0].written, false, "the refusal row must carry written:false");
+    assert.equal(rows[0].refuse_reason, "inner-round-ended-with-dispatchable-work", "the refusal reason must be recorded");
+    assert.ok(!fs.existsSync(path.join(root, ".quay", "inner-wakeup-heartbeat.jsonl")), "the heartbeat jsonl still has NO write (refusal ≠ heartbeat)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC53-gate 判据4 — the --in-flight-omitted refusal ALSO leaves a written:false trace (end-invariant-gate-requires-in-flight)", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "iwuh-ac4b-"));
+  try {
+    const idx = FULL_ARGS.indexOf("--in-flight");
+    const args = FULL_ARGS.filter((_, i) => i < idx || i >= idx + 2);
+    const r = runWriter(tmp, args);
+    assert.equal(r.status, 1, `missing --in-flight must be refused:\n${r.stdout}\n${r.stderr}`);
+    const refusalPath = path.join(tmp, ".quay", REFUSAL_FILE);
+    assert.ok(fs.existsSync(refusalPath), "the --in-flight-omitted refusal must also leave a trace");
+    const rows = fs.readFileSync(refusalPath, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+    assert.equal(rows.length, 1, "exactly one refusal row");
+    assert.equal(rows[0].written, false, "the refusal row must carry written:false");
+    assert.equal(rows[0].refuse_reason, "end-invariant-gate-requires-in-flight", "the refusal reason must be recorded");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
 

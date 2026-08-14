@@ -1,7 +1,7 @@
 ---
 id: gap-ac53-gate-not-wired-to-running-set
 title: AC53 闸未接 running 集——双消费者拆分只落生产侧，闸读宽集使 awaiting-retry 永久占 dispatchable_disjoint ⇒ 心跳结构上无出口（manager 13:4xZ 报）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -66,23 +66,45 @@ should_refill           True      True              false   ← 结论相反
 
 ## Acceptance Criteria
 
-- [ ] AC1 判据1：runMachineSlotRefill 接 running 集，闸用真观测在跑集算 should_refill/slots_free。
-- [ ] AC2 判据2 能取假：当前真样本（传真集放行/不传拒写）回放红。
-- [ ] AC3 判据3：空集默认≠测得 0（未提供 vs 真零可区分）。
-- [ ] AC4 判据4：闸 REFUSE 时写 `{written:false, refuse_reason}` 留痕——「被拒」不再伪装成「没跑」；⊢ 修后立刻出现 written:false 行、修前恒 0。
-- [ ] AC5 既有测试全绿；`--for-task` scoped 门绿。
+- [x] AC1 判据1：runMachineSlotRefill 接 running 集，闸用真观测在跑集算 should_refill/slots_free。
+- [x] AC2 判据2 能取假：当前真样本（传真集放行/不传拒写）回放红。
+- [x] AC3 判据3：空集默认≠测得 0（未提供 vs 真零可区分）。
+- [x] AC4 判据4：闸 REFUSE 时写 `{written:false, refuse_reason}` 留痕——「被拒」不再伪装成「没跑」；⊢ 修后立刻出现 written:false 行、修前恒 0。
+- [x] AC5 既有测试全绿；`--for-task` scoped 门绿。
 
 ## Definition of Done
 
-- [ ] AC53 闸接 running 集（心跳不再被 awaiting-retry 占宽集永久拒写）+ 空集/真零可区分 + 拒写留痕（written:false 行）+ 能取假。
+- [x] AC53 闸接 running 集（心跳不再被 awaiting-retry 占宽集永久拒写）+ 空集/真零可区分 + 拒写留痕（written:false 行）+ 能取假。
 
 ## Touches
 
-- plugin/scripts/inner-wakeup-heartbeat-check.ts（runMachineSlotRefill 加 running 参数 + 闸传真观测在跑集）
-- plugin/scripts/inner-wakeup-heartbeat.ts（END 写入路径传 running 集）
-- plugin/test/inner-wakeup-heartbeat-check.test.mjs（补 running 集测试 + 空集/真零区分）
+- plugin/scripts/inner-wakeup-heartbeat-check.ts（runMachineSlotRefill 加 running 参数 + 闸传真观测在跑集 + CLI `--running` + 判据3 空集/真零区分）
+- plugin/scripts/inner-wakeup-heartbeat.ts（END 写入路径传 running 集 + REFUSE 写 REFUSAL_FILE 留痕）
+- plugin/test/inner-wakeup-heartbeat-check.test.mjs（补 running 集测试 + 空集/真零区分 + CLI `--running`）
+- plugin/test/inner-wakeup-heartbeat.test.mjs（补判据1 传真集放行 + 判据4 拒写留痕）
 - tasks/gap-ac53-gate-not-wired-to-running-set.md（自身）
+
+## Test-Files
+
+- plugin/test/inner-wakeup-heartbeat-check.test.mjs（98 项中含 5 项新增：判据1/判据3/判据2/CLI --running）
+- plugin/test/inner-wakeup-heartbeat.test.mjs（22 项中含 3 项新增：判据1 传真集放行 + 判据4 两条）
 
 ## Evidence
 
-（落地后回填）
+**Scoped gate（`bash scripts/test.sh --for-task gap-ac53-gate-not-wired-to-running-set --allow-thin`）**：exit 0，98/98 pass（checker 76 + writer 22）。静态检查 tier 全 PASS。
+
+**ts-typecheck gate**：`fan-in-ts-typecheck-gate.ts` exit 0 ——「Touches 无新增 .ts，无需 typecheck」；本任务只改已有 .ts，无新 .ts 文件。
+
+**判据1 + 判据3（同一 workspace，checker CLI，真实 slot-refill 输出）**：
+```
+--running 缺省：       slot_denominator_source=in-flight-fallback  running_subagent_count=0  runningIds=null        should_refill=true  slots_free=5  → invariant-violated
+--running ''（真零）： slot_denominator_source=running-subagents    running_subagent_count=0  runningIds=[]          should_refill=true  slots_free=5  → invariant-violated
+--running r-1..r-5：   slot_denominator_source=running-subagents    running_subagent_count=5  runningIds=['r-1',...] should_refill=false slots_free=0  → ALIVE
+```
+判据3：缺省（null/未设置）与 `''`（测得真零）经 `slot_denominator_source` + `runningIds` null/[] 可区分；判据2：同一 workspace + 同 cap，`--running` 传真集 ⇒ should_refill=false ⇒ 闸放行，不传 ⇒ should_refill=true ⇒ 闸拒写——两个相反结论（能取假）。
+
+**判据4（writer 端，真实拒绝）**：构造 dispatchable 空 in-flight 结束心跳（不传 --running），writer 拒绝：
+```
+inner-wakeup-heartbeat: REFUSED — 结束不变式违例，不写入（reason=inner-round-ended-with-dispatchable-work; should_refill=true slots_free=3 dispatchable_disjoint=1 no_refill_reason=null）
+```
+拒绝后 side-carrier `inner-wakeup-heartbeat-refusals.jsonl` 出现 `{"written":false,"ts":...,"refuse_reason":"inner-round-ended-with-dispatchable-work","evidence":{...}}`；修前该文件不存在（恒 0 行）；心跳 jsonl 仍无写（拒写 ≠ 心跳）。同 workspace 传 `--running r-1,r-2,r-3`（填满 effective-cap 3）⇒ slots_free=0 ⇒ should_refill=false ⇒ 闸放行，心跳写入成功（`slots_free:0, should_refill:false, no_refill_reason:"no free slots (running subagents 3 >= cap 3)"`）。

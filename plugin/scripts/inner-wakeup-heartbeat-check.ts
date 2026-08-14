@@ -46,6 +46,16 @@ export const HEARTBEAT_FILE = "inner-wakeup-heartbeat.jsonl";
  *  judge, whose default heartbeat path is `<root>/.quay/<layer>-wakeup-heartbeat.json`). */
 export const LEGACY_HEARTBEAT_FILE = "inner-wakeup-heartbeat.json";
 
+/** AC53-gate 判据4 side-carrier (tasks/gap-ac53-gate-not-wired-to-running-set AC4): when the writer's
+ *  END-invariant gate REFUSES a heartbeat write, it appends a `{written:false, refuse_reason}` record
+ *  HERE — NOT into the heartbeat jsonl (which must stay append-only for SUCCESSFUL writes so the reader
+ *  keeps parsing a valid last line). The refusal trace makes a REFUSED round distinguishable from
+ *  "inner didn't run the assessment" (a refused write previously left ZERO rows on the carrier —
+ *  structurally identical to the assessment never running — the carrier-level cause of the 3-hour
+ *  misdiagnosis). 判据4 negative control: before the fix the `written:false` row count is 0; after, a
+ *  refused round immediately produces one. */
+export const REFUSAL_FILE = "inner-wakeup-heartbeat-refusals.jsonl";
+
 /** Default dead threshold: 3 tick periods × 1800s (task Contract band `inner_wakeup_heartbeat_age <= 5400`). */
 export const DEFAULT_MAX_AGE_SECS = 5400;
 
@@ -428,12 +438,21 @@ export function judgeAssessmentSteps(nowSec, { heartbeat, readyPool, slotRefill 
  *   otherwise — the invariant is then computed against the WIDEST free-slot view, which is FAIL-CLOSED
  *   (any dispatchable work + any free slot ⇒ RED; a false RED escalates, a false PASS hides the
  *   defect). This is the documented fail-closed trade of a checker that refuses to trust self-report.
+ * @param {string[]} [o.running] AC53-gate (tasks/gap-ac53-gate-not-wired-to-running-set, 判据1): the
+ *   NARROW currently-RUNNING task-subagent set the gate observed THIS round. Passed to slot-refill's
+ *   Consumer B (slots_free / should_refill); Consumer A (dispatchable_disjoint) stays on the WIDE set
+ *   (inFlight + closedButLive) — an awaiting-retry task's worktree still occupies files a new task
+ *   would collide with, but it has NO subagent ⇒ does NOT occupy a concurrency cap slot. `undefined`
+ *   (not passed) keeps Consumer B on the wide in-flight fallback (backward compat). 判据3 (3b): an
+ *   EMPTY array `[]` is a MEASURED zero (running_subagent_count=0, slot_denominator_source=
+ *   "running-subagents") — DISTINCT from `undefined` (未提供, falls back to the wide set) so "没有
+ *   在跑" is never same-shaped as "没提供集合".
  * @param {number} [o.cap] dispatch cap — the tick's effective cap (heartbeat.effectiveCap), default
  *   FIXED_DISPATCH_CAP (5).
  * @returns {{ok:true, refill:object}|{ok:false, error:string}} fail-closed: a slot-refill error ⇒
  *   {ok:false} — the checker cannot verify ⇒ cannot pass.
  */
-export function runMachineSlotRefill({ root, inFlightIds = [], cap = FIXED_DISPATCH_CAP }) {
+export function runMachineSlotRefill({ root, inFlightIds = [], running, cap = FIXED_DISPATCH_CAP }) {
   const rootDir = root || ".";
   const tasksDir = path.join(rootDir, "tasks");
   const readTasks = (ids) => {
@@ -451,6 +470,12 @@ export function runMachineSlotRefill({ root, inFlightIds = [], cap = FIXED_DISPA
       root: rootDir,
       cap,
       inFlight: readTasks(inFlightIds),
+      // AC53-gate (tasks/gap-ac53-gate-not-wired-to-running-set, 判据1): the NARROW Consumer-B
+      // denominator. `running !== undefined` ⇒ slot-refill's Consumer B counts the truly-running
+      // subagent set (an EMPTY array is a MEASURED 0 — 判据3); `undefined` ⇒ Consumer B falls back to
+      // the wide in-flight set (backward compat — the pre-fix gate read the wide set and let
+      // awaiting-retry tasks occupy slots they have no subagent to fill).
+      runningSubagentCount: running !== undefined ? new Set(running).size : null,
       measurementSource: "explicit-input",
     });
     return { ok: true, refill };
@@ -532,8 +557,9 @@ ScheduleWakeup via plugin/scripts/inner-wakeup-heartbeat.ts) and judges:
       from "dispatchable but didn't dispatch". Missing ⇒ "派发状态五键缺失" + exit 1.
   (d) AC53 end-invariant (AC2, outer 2026-08-13 ruling) — the invariant is judged on the MACHINE's
       FRESH slot-refill output (a re-run of analyzeSlotRefill against <root>/tasks with the --in-flight
-      set), NEVER on the heartbeat's recorded no_refill_reason (self-report — the judged party must not
-      judge itself, hard rule 4b). Machine says should_refill=true ∧ slots_free>0 ∧
+      set AND — when the gate observed it — the --running set as Consumer B), NEVER on the heartbeat's
+      recorded no_refill_reason (self-report — the judged party must not judge itself, hard rule 4b).
+      Machine says should_refill=true ∧ slots_free>0 ∧
       dispatchable_disjoint>0 ∧ no_refill_reason empty ⇒ "结束不变式违例" + exit 1 — a prose self-report
       in the heartbeat can NEVER make this pass (the AC53 bypass: "ac51 subagent in flight…" shielded a
       null machine reason). Heartbeat's recorded dispatch-state is display-only evidence
@@ -552,6 +578,12 @@ Usage:
   --in-flight <id1,id2>  AC53: the session's in-flight task ids for the fresh slot-refill re-run.
                          Outer may not know inner's set — DEFAULT EMPTY is the fail-closed baseline
                          (the invariant is judged against the widest free-slot view).
+  --running <id1,id2>  AC53-gate 判据1: the NARROW currently-RUNNING task-subagent set the gate observed
+                         this round. Consumer B (slots_free / should_refill) counts THIS; an empty value
+                         (--running '') is a MEASURED zero (判据3: 真零 ≠ 未提供); ABSENT keeps Consumer B
+                         on the wide in-flight fallback (the pre-fix behavior — awaiting-retry tasks
+                         occupied slots they have no subagent to fill). dispatchable_disjoint (Consumer A)
+                         always stays on the wide in-flight view.
   --json               JSON output (default human-readable)
 
 Exit: 0 ALIVE · 1 DEAD (missing / malformed / stale / assessment-steps-stale / fields-missing /
@@ -576,6 +608,14 @@ export function main(argv) {
   const inFlightIds = inFlightFlag !== undefined
     ? String(inFlightFlag).split(",").map((s) => s.trim()).filter(Boolean)
     : [];
+  // AC53-gate 判据1 (tasks/gap-ac53-gate-not-wired-to-running-set): the NARROW currently-RUNNING
+  // task-subagent set — the gate passes what IT observed this round. `--running ''` is a MEASURED zero
+  // (true zero — Consumer B sees 0 running subagents); ABSENT (undefined) keeps Consumer B on the wide
+  // in-flight fallback (backward compat + 判据3: 未提供 ≠ 真零).
+  const runningFlag = flagVal("--running");
+  const runningIds = runningFlag !== undefined
+    ? String(runningFlag).split(",").map((s) => s.trim()).filter(Boolean)
+    : undefined;
   if (!Number.isFinite(maxAge) || maxAge < 0) {
     console.error("inner-wakeup-heartbeat-check: --max-age-secs must be a non-negative number");
     return 2;
@@ -651,6 +691,9 @@ export function main(argv) {
         const machine = runMachineSlotRefill({
           root,
           inFlightIds,
+          // AC53-gate 判据1: the gate passes the running set it observed this round (Consumer B);
+          // dispatchable_disjoint (Consumer A) stays on the wide in-flight view.
+          running: runningIds,
           cap: typeof heartbeat.effectiveCap === "number" ? heartbeat.effectiveCap : FIXED_DISPATCH_CAP,
         });
         if (!machine.ok) {
@@ -705,12 +748,21 @@ export function main(argv) {
             slots_free: machineRefill.slots_free,
             dispatchable_disjoint: machineRefill.dispatchable_disjoint,
             pool: machineRefill.pool,
+            // AC53-gate (tasks/gap-ac53-gate-not-wired-to-running-set, 判据1): the NARROW Consumer-B
+            // denominator + its provenance — "running-subagents" (the caller passed --running) vs
+            // "in-flight-fallback" (Consumer B reused the wide set; the pre-fix gate read this).
+            running_subagent_count: machineRefill.running_subagent_count,
+            slot_denominator_source: machineRefill.slot_denominator_source,
           }
         : null,
       machineInFlight: {
         // Outer may not know inner's in-flight set — empty is the fail-closed baseline.
         inFlightIds,
         source: inFlightFlag !== undefined ? "--in-flight" : "none (fail-closed empty)",
+        // AC53-gate 判据3 (3b): `runningIds` null = NOT provided (Consumer B falls back to the wide
+        // set) vs `[]` = measured zero (true zero running subagents). Never same-shaped.
+        runningIds: runningIds ?? null,
+        runningSource: runningFlag !== undefined ? "--running" : "none (wide in-flight fallback)",
       },
       endInvariant: endInvariant
         ? { ok: endInvariant.ok, violated: endInvariant.violated, judgedFrom: endInvariant.judgedFrom ?? null, reason: endInvariant.reason, evidence: endInvariant.evidence }
