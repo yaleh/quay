@@ -1,7 +1,7 @@
 ---
 id: QENG-5-DEMO-FAIL
 title: exp5 DoD via quay gate — demo FAIL
-status: todo
+status: superseded
 labels:
   - initiative:epicd-engine-port
   - fixture

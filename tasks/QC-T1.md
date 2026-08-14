@@ -1,7 +1,7 @@
 ---
 id: QC-T1
 title: healthcheck fixture — native task store liveness probe
-status: todo
+status: superseded
 labels:
   - fixture
   - healthcheck
