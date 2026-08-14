@@ -27,6 +27,16 @@ depends_on: []
 **缺口**：SPEC §7 触发器（≥3 ff 失败 ⇒ 升级防活锁）**真数据 fire 了，但「触发后该做什么」未定义**——inner 升级上来，外层没有可执行的下一步（除手工协调 quiet 窗口外）。
 
 **判据1**：**≥3 ff 失败 ⇒ 升级请求 quiet 窗口 + 停止竞速**——触发后动作机械定义（如：触发即请求 owner 层 hold develop N 分钟 / 标记该任务「等待 quiet 窗口」不再自动重试）。
+
+**⭐ 解法样本（2026-08-14 首次实证，全有今天实测支撑非设计）**——ac63 的 quiet 窗口就是「触发后该做什么」的答案雏形：
+```
+SPEC §7 触发（≥3 ff 失败）⇒ 请求一个 quiet 窗口
+  · 谁 hold：除 fan-in 执行者外的所有层
+  · 判据：git log develop --since=<窗口起点> 为空（开窗即跑，非事后补——14:15 事后补的教训）
+  · 结束条件：ff 成功即提前结束，不空耗（ac63 窗口 ~6min < 预定 20min）
+  · 破窗处置：当场点名 + 告知 fan-in 执行者当前 head，由它决定 re-merge 还是等
+    （ac63 实证：窗口被破一次，靠「外部观测 + 及时告知」救回来——inner 重新 re-merge f1795d2d→c8a9f9cc 后 ff 成功）
+```
 **判据2（能取假·真样本不构造）**：**ac63 的 4 条 retry（11:55/12:39/12:42/13:58）就是现成真样本**——回放它，判据1 必须触发「请求 quiet 窗口」动作；现状（只升级无动作）⇒ 红。
 **判据3**：与既有 `gap-merge-green-snapshot-verified-commit-livelock`（integration 批量合时代）**区分**——本任务是 develop fan-in（AC78 workflow）面，不是旧 integration 面；若机制可复用绿快照思路（「ff 到绿快照验证过的 commit」）则引用，不重复造。
 **判据4**：既有测试全绿 + `--for-task` scoped 门绿。
