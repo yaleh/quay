@@ -1,0 +1,1 @@
+执行 /home/yale/work/quay/orchestration/orchestrator-tick-core.md 中的 tick 指令（入口直指执行核，1 跳；理由档案按需查 src:N，不要全读）
