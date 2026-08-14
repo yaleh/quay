@@ -26,10 +26,18 @@
 # checker (fan-in-ff-protocol-check.ts) can verify AC4 (the lock covers ONLY ff, never overlaps a
 # suite run) and 判据2b (a suite call inside the locked section ⇒ red).
 #
+# AC67 (gap-ac67-fan-in-executor-to-task-subagent): the caller's AGENT IDENTITY is recorded in BOTH
+# the lock events and the retry record — `--agent-id <id>` (the calling subagent's own identifier).
+# The executor check (fan-in-ff-executor-check.ts) judges 判据2 = agentId ≠ inner 主会话: a record
+# with a missing/`null` agentId (the script called without --agent-id, i.e. the inner MAIN THREAD
+# doing the fan-in) or agentId == the main-session id is the old main-thread-executor form ⇒ red.
+# --agent-id is OPTIONAL for backward compat with pre-AC67 callers; when absent the fields are null
+# (which is exactly the absence the checker flags — the field is only "real" when the subagent sets it).
+#
 # Usage:
 #   fan-in-ff-merge.sh --task <taskId> [--root <repo>] [--merge-target <branch>] [--run-id <runId>]
-#                      [--suite-state <file>] [--lock-events <file>] [--retry-record <file>]
-#                      [--lock-wait <secs>] [--help]
+#                      [--agent-id <caller-agent-id>] [--suite-state <file>] [--lock-events <file>]
+#                      [--retry-record <file>] [--lock-wait <secs>] [--help]
 #
 # Exit codes:
 #   0  ff performed (develop/merge-target fast-forwarded to task/<taskId>)
@@ -49,6 +57,7 @@ task_id=""
 root=""
 merge_target=""
 run_id=""
+agent_id=""
 suite_state=""
 lock_events=""
 retry_record=""
@@ -60,6 +69,7 @@ while [ "$#" -gt 0 ]; do
     --root) root="$2"; shift 2 ;;
     --merge-target) merge_target="$2"; shift 2 ;;
     --run-id) run_id="$2"; shift 2 ;;
+    --agent-id) agent_id="$2"; shift 2 ;;
     --suite-state) suite_state="$2"; shift 2 ;;
     --lock-events) lock_events="$2"; shift 2 ;;
     --retry-record) retry_record="$2"; shift 2 ;;
@@ -161,8 +171,14 @@ fi
 
 now_iso="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 now_epoch="$(date +%s)"
+# JSON-string-or-null encoding for runId/agentId. The `:+\"...\"${x:-null}` compound is WRONG (it fires
+# BOTH branches when the value is non-empty ⇒ the value is emitted twice, corrupting the JSON — a real
+# bug caught while wiring --agent-id). Precompute with an explicit if/else so a SET value is ONE quoted
+# string and an ABSENT value is `null` (the absence the executor check flags as the main-thread form).
+if [ -n "${run_id}" ]; then run_id_json="\"${run_id}\""; else run_id_json="null"; fi
+if [ -n "${agent_id}" ]; then agent_id_json="\"${agent_id}\""; else agent_id_json="null"; fi
 # Lock-hold event (acquire) — the checker reads these to verify the lock covers ONLY the ff.
-printf '%s\n' "{\"event\":\"acquire\",\"ts\":\"${now_iso}\",\"epoch\":${now_epoch},\"taskId\":\"${task_id}\",\"pid\":$$,\"runId\":${run_id:+\"${run_id}\"}${run_id:-null}}" >> "${lock_events}"
+printf '%s\n' "{\"event\":\"acquire\",\"ts\":\"${now_iso}\",\"epoch\":${now_epoch},\"taskId\":\"${task_id}\",\"pid\":$$,\"runId\":${run_id_json},\"agentId\":${agent_id_json}}" >> "${lock_events}"
 
 merge_rc=0
 merge_err=""
@@ -176,7 +192,7 @@ fi
 
 now_iso="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 now_epoch="$(date +%s)"
-printf '%s\n' "{\"event\":\"release\",\"ts\":\"${now_iso}\",\"epoch\":${now_epoch},\"taskId\":\"${task_id}\",\"pid\":$$,\"runId\":${run_id:+\"${run_id}\"}${run_id:-null}}" >> "${lock_events}"
+printf '%s\n' "{\"event\":\"release\",\"ts\":\"${now_iso}\",\"epoch\":${now_epoch},\"taskId\":\"${task_id}\",\"pid\":$$,\"runId\":${run_id_json},\"agentId\":${agent_id_json}}" >> "${lock_events}"
 
 # Release the lock explicitly. NOTE: do NOT `exec {lock_fd}>&-` here — bash mis-handles `{var}>&-`
 # (an fd-ALLOCATING close) after a prior `$(...)` command substitution re-used fd numbers and would
@@ -188,7 +204,7 @@ if [ "${merge_rc}" -ne 0 ]; then
   # 判据3: ff failure writes the retry record. develop_head = the head at failure time (the caller's
   # step-1 re-run merges THIS develop). attempt = prior failures for this task + 1.
   develop_head_now="$(git -C "${root}" rev-parse "${merge_target}" 2>/dev/null || echo "unresolvable")"
-  printf '%s\n' "{\"taskId\":\"${task_id}\",\"attempt\":${attempt},\"developHead\":\"${develop_head_now}\",\"ts\":\"${now_iso}\",\"epoch\":${now_epoch},\"runId\":${run_id:+\"${run_id}\"}${run_id:-null},\"mergeTarget\":\"${merge_target}\",\"error\":\"$(printf '%s' "${merge_err}" | sed 's/"/\\"/g')\"}" >> "${retry_record}"
+  printf '%s\n' "{\"taskId\":\"${task_id}\",\"attempt\":${attempt},\"developHead\":\"${develop_head_now}\",\"ts\":\"${now_iso}\",\"epoch\":${now_epoch},\"runId\":${run_id_json},\"agentId\":${agent_id_json},\"mergeTarget\":\"${merge_target}\",\"error\":\"$(printf '%s' "${merge_err}" | sed 's/"/\\"/g')\"}" >> "${retry_record}"
   echo "fan-in-ff-merge: FF FAILED — ${merge_err:-develop advanced}; not a fast-forward. Retry record written (attempt ${attempt}). Return to 无锁段 step 1 (merge develop again) and re-run." >&2
   echo "fan-in-ff-merge: measure ff_only_locked=false" >&2
   exit 1

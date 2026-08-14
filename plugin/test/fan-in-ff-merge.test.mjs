@@ -163,6 +163,46 @@ test("ff failure (develop advanced) — exit 1, retry record with taskId/attempt
   }
 });
 
+// ── AC67 判据2: the caller agent identity lands in the records ────────────────────────────────────────
+
+test("AC67 判据2 — --agent-id is written into the retry record AND lock events; absent ⇒ null (the main-thread form)", () => {
+  const dir = makeTmp("agid");
+  const st = stateDir("agid");
+  try {
+    initRepo(dir);
+    makeTaskBranch(dir, "ac67-ag");
+    fs.writeFileSync(path.join(dir, "adv.txt"), "adv\n", "utf8");
+    gitCmd(dir, "add", "-A");
+    gitCmd(dir, "commit", "-q", "-m", "adv");
+    const suite = writeSuiteState(st, { state: "green", startedAt: "2026-08-14T00:00:00Z", finishedAt: 1786660000, scope: "main" });
+
+    // With --agent-id: the value is the quoted JSON string.
+    const events = path.join(st, "events.jsonl");
+    const retries = path.join(st, "retries.jsonl");
+    const r = runMerge(["--task", "ac67-ag", "--root", dir, "--suite-state", suite, "--lock-events", events, "--retry-record", retries, "--agent-id", "subagent-uuid-abc", "--run-id", "fm-gap-x-17866"]);
+    assert.equal(r.status, 1, `ff must fail: ${r.stdout}${r.stderr}`);
+    const rec = JSON.parse(fs.readFileSync(retries, "utf8").trim());
+    assert.equal(rec.agentId, "subagent-uuid-abc", "retry record carries the caller agent id");
+    assert.equal(rec.runId, "fm-gap-x-17866", "runId stays a single well-formed string");
+    const lines = fs.readFileSync(events, "utf8").trim().split("\n").filter(Boolean);
+    for (const l of lines) {
+      const e = JSON.parse(l);
+      assert.equal(e.agentId, "subagent-uuid-abc", "lock events carry the caller agent id");
+    }
+
+    // Without --agent-id: agentId is null — the absence the executor check flags as main-thread.
+    const events2 = path.join(st, "events2.jsonl");
+    const retries2 = path.join(st, "retries2.jsonl");
+    const r2 = runMerge(["--task", "ac67-ag", "--root", dir, "--suite-state", suite, "--lock-events", events2, "--retry-record", retries2]);
+    assert.equal(r2.status, 1, "still fails (diverged)");
+    const rec2 = JSON.parse(fs.readFileSync(retries2, "utf8").trim());
+    assert.equal(rec2.agentId, null, "absent --agent-id ⇒ agentId null (the main-thread form)");
+  } finally {
+    cleanup(dir);
+    cleanup(st);
+  }
+});
+
 // ── Attempt counting (第几次) ─────────────────────────────────────────────────────────────────────────
 
 test("ff failure attempt increments — second failure writes attempt 2 (anti-livelock data)", () => {
