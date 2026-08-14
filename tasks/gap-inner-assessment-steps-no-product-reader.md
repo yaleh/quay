@@ -58,14 +58,14 @@ ready-pool-check   末次 08:08:35  ⇒ 停 4.2h
 
 ## Acceptance Criteria
 
-- [ ] AC1 判据1：评估三步骤读产物判据落地（心跳/slot-refill/ready-pool 新鲜度，陈旧即报）。
-- [ ] AC2 判据2 能取假：07:41–12:2x 缺席样本回放红。
-- [ ] AC3 判据3：修法=比对两条驱动路径步骤集合，非查日志。
-- [ ] AC4 既有测试全绿；`--for-task` scoped 门绿。
+- [x] AC1 判据1：评估三步骤读产物判据落地（心跳/slot-refill/ready-pool 新鲜度，陈旧即报）。
+- [x] AC2 判据2 能取假：07:41–12:2x 缺席样本回放红。
+- [x] AC3 判据3：修法=比对两条驱动路径步骤集合，非查日志。
+- [x] AC4 既有测试全绿；`--for-task` scoped 门绿。
 
 ## Definition of Done
 
-- [ ] inner 派发评估三步骤有读产物判据（心跳/slot-refill/ready-pool 陈旧即报，不静默）+ 07:41 缺席样本回放红 + 驱动路径步骤集合比对落地。
+- [x] inner 派发评估三步骤有读产物判据（心跳/slot-refill/ready-pool 陈旧即报，不静默）+ 07:41 缺席样本回放红 + 驱动路径步骤集合比对落地。
 
 ## Touches
 
@@ -73,6 +73,35 @@ ready-pool-check   末次 08:08:35  ⇒ 停 4.2h
 - plugin/test/inner-wakeup-heartbeat-check.test.mjs（补测：07:41 缺席样本回放红 + 新鲜绿）
 - tasks/gap-inner-assessment-steps-no-product-reader.md（自身）
 
+## Test-Files
+
+- plugin/test/inner-wakeup-heartbeat-check.test.mjs（新增 13 条 I1 测试：判据1 纯函数 + 07:41 回放红 + 新鲜绿 + 3b 无台账例 + 判别性新例）
+
 ## Evidence
 
-（落地后回填）
+**落地（实现面）**：`inner-wakeup-heartbeat-check.ts` 新增 I1 read-product criterion —— `judgeAssessmentSteps()` 读三个新鲜度信号（心跳 jsonl ts + `checker-cost.jsonl` 的 `ready-pool-check`/`slot-refill` 调用记录 `at`）；ready-pool/slot-refill 任一新度信号陈旧 ⇒ exit 1「inner 派发评估未跑」（`assessment-steps-stale` / `inner-assessment-steps-not-run`）。心跳信号照旧由既有「兜底心跳断」判据管（不双报）。无调用记录的步骤报 `not-recorded`（硬规则 3b：读不懂 ≠ 合格，独立取值，不假过不假红）。判据3（修法=比对两条驱动路径步骤集合）写入 checker 头注释。
+
+**判据2 07:41 缺席样本回放红（AC2 测试，`makeRootWithAssessment`：heartbeat 4.7h / ready-pool 4.2h / slot-refill 2.7h 陈旧）**：
+```
+✔ I1 CLI --json — the 07:41 absence replay (all three stale) exits 1 with inner 派发评估未跑 (判据2)
+  → verdict DEAD · status assessment-steps-stale · reason inner-assessment-steps-not-run
+✔ I1 CLI — the 07:41 absence replay names 派发评估未跑 in human output
+```
+
+**判别性新例（旧心跳判据看不见：inner 醒着但评估停了）**：
+```
+✔ I1 CLI --json — heartbeat FRESH but ready-pool call record STALE exits 1 (the discriminating case the old checker missed)
+  → heartbeat fresh · ready-pool stale(4.2h) ⇒ DEAD assessment-steps-stale
+```
+
+**新鲜绿 + 无台账 3b 例**：
+```
+✔ I1 CLI --json — fresh all three ... exits 0 (GREEN)
+✔ I1 CLI --json — a fresh heartbeat with NO checker-cost ledger is GREEN with NOT-EVALUATED signals (3b)
+```
+
+**scoped 门**：`bash scripts/test.sh --for-task gap-inner-assessment-steps-no-product-reader --allow-thin` → `ℹ tests 72 / pass 72 / fail 0`，exit 0（含全部 13 条新 I1 测试 + 既有 59 条全绿）。
+
+**ts-typecheck**：`fan-in-ts-typecheck-gate.ts` → `no new/moved .ts in the declared write surface — no typecheck gate needed` · ADMITTED (exit 0)。补跑 `npx tsc --noEmit` → 0 errors（修改的是既有 .ts，非新增）。
+
+**真机读数（main checkout，2026-08-14 13:09Z）**：`--json` 输出 `assessmentSteps.status = assessment-steps-ok`（heartbeat fresh 1963s / readyPool fresh 120s / slotRefill not-recorded）；同次输出的 DEAD 来自既有 AC53 结束不变式（machine slot-refill 说 should_refill=true 有可派未派），与本次读产物判据无关。
