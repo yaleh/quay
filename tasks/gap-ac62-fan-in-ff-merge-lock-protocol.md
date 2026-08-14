@@ -1,7 +1,7 @@
 ---
 id: gap-ac62-fan-in-ff-merge-lock-protocol
 title: AC62 协议本体——fan-in 改 ff-only + 独立 merge 锁（锁只包 ff、持锁期间唯一动作是 ff）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
