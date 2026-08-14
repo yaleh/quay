@@ -2,8 +2,11 @@
 // manager-tick-core.test.mjs — gap-manager-cold-start-no-falsifiable-checklist (AC3/AC4).
 //
 // Pins the execution-core idle-watch criterion to the REAL mechanism:
-//   no_false_instrument = 1 — plugin/loop/manager-tick-core.md never targets the non-existent
-//       idle-watch.sh as a check instrument (defect 2: a repo-wide find for it returns zero).
+//   no_false_instrument = 1 — the LIVE execution core orchestration/manager-tick-core.md never
+//       targets the non-existent idle-watch.sh as a check instrument (defect 2: a repo-wide find
+//       for it returns zero). The shipped plugin/loop/manager-tick-core.md is now a one-line POINTER
+//       to this 正本 (gap-plugin-loop-manager-drifted-copies-pointerize — "该路径无内容可维护"),
+//       so the content assertions target the 正本, not the pointer.
 //   A10 — the idle-watch check uses monitor-mount-check.sh --json (mounted+targetOk) and
 //       session-liveness.sh --once (SESSION-STATUS) + Monitor event stream, i.e. the real
 //       session-liveness-mount.sh + Monitor-tool mechanism.
@@ -22,7 +25,7 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pluginDir = path.resolve(__dirname, "..");
 const repoRoot = path.resolve(pluginDir, "..");
-const CORE = path.join(pluginDir, "loop", "manager-tick-core.md");
+const CORE = path.join(repoRoot, "orchestration", "manager-tick-core.md");
 const src = fs.readFileSync(CORE, "utf8");
 
 // ── AC3 — no_false_instrument: the core never points at the non-existent idle-watch.sh ──────────────
@@ -40,12 +43,15 @@ test("AC3 — the idle-watch criterion (A10) points at the real mechanism", () =
   assert.match(src, /Monitor 工具任务/, "A10 must describe the Monitor-tool-task mechanism");
 });
 
-// ── AC4 — B4 records cron evidence so registry↔real cron is externally verifiable ──────────────────
+// ── AC4 — the anchor A19 records cron receipts so registry↔real cron is externally verifiable ──────
+// (The 正本's A19 carries the arm/verify/record-cron contract — the B4 wording the shipped copy
+// used (`cron-evidence.jsonl`/`cronListCount`/`--verify-cron`) drifted with the copy and is gone;
+// the live contract is `--record-cron` write-back + external `--verify`.)
 
-test("AC4 — B4 records cron evidence so the registry↔real-cron link is externally verifiable", () => {
-  assert.match(src, /cron-evidence\.jsonl/, "B4 must append the cron-evidence record");
-  assert.match(src, /cronListCount/, "the evidence line must carry cronListCount");
-  assert.match(src, /manager-arm-loop\.sh --verify-cron/, "B4 must reference the external verifier");
+test("AC4 — the anchor A19 records cron receipts so the registry↔real-cron link is externally verifiable", () => {
+  assert.match(src, /--record-cron/, "A19 must carry the record-cron write-back step (the receipt after CronList)");
+  assert.match(src, /registry-verified/, "A19 must distinguish registry-verified from registry-only");
+  assert.match(src, /manager-arm-loop\.sh --verify/, "A19 must reference the external verifier");
 });
 
 // ── AC3 — the live reason archive's idle-watch criterion points at the real mechanism ───────────────

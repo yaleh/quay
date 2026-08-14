@@ -45,6 +45,15 @@ function run(root, ...args) {
   );
 }
 
+/** Run the drift mode against a root. */
+function runDrift(root, ...args) {
+  return run(root, "--check-drift", ...args);
+}
+
+/** The pointerized manager shipped copies (gap-plugin-loop-manager-drifted-copies-pointerize AC3). */
+const MGR_CORE_POINTER = "> 正本: orchestration/manager-tick-core.md — 本文件只应存在这一行指针；执行核内容一律读正本。\n";
+const MGR_LOOP_POINTER = "> 正本: orchestration/manager-loop-tick.md — 本文件只应存在这一行指针；内容一律读正本。\n";
+
 /** Write a file (creating parent dirs) inside `root`. */
 function write(root, rel, content) {
   const abs = path.join(root, rel);
@@ -103,6 +112,18 @@ function buildBaselineRoot() {
   write(dir, "orchestration/orchestrator-tick-core.md", ORCH_CORE);
   write(dir, "orchestration/fast-mode-tick-core.md", FAST_CORE);
   for (const [rel, content] of Object.entries(PROHIBITION_DOCS)) write(dir, rel, content);
+  return dir;
+}
+
+/** Build a drift-GREEN root: byte-identical orchestrator/fast-mode copies + pointerized manager
+ *  shipped docs (the state after gap-plugin-loop-manager-drifted-copies-pointerize). */
+function buildDriftRoot() {
+  const dir = buildBaselineRoot();
+  write(dir, "orchestration/manager-loop-tick.md", "# manager loop tick 正本\n| A1 | 读 `.quay/manager-inbox/` | (src:1) |\n");
+  write(dir, "plugin/loop/manager-tick-core.md", MGR_CORE_POINTER);
+  write(dir, "plugin/loop/orchestrator-tick-core.md", ORCH_CORE);
+  write(dir, "plugin/loop/fast-mode-tick-core.md", FAST_CORE);
+  write(dir, "plugin/loop/manager-loop-tick.md", MGR_LOOP_POINTER);
   return dir;
 }
 
@@ -355,6 +376,77 @@ test("AC8: the real repo passes, all three layers use the exclusion notation (ma
     `outer core has no dead-exclusion marker: ${JSON.stringify(out.ac8.excluded)}`);
   assert.ok(out.ac8.excluded["orchestration/fast-mode-tick-core.md"] >= 1,
     `inner core has no dead-exclusion marker: ${JSON.stringify(out.ac8.excluded)}`);
+});
+
+// ── AC2 — the drift/pointer criterion (gap-plugin-loop-manager-drifted-copies-pointerize) ───────────
+
+test("AC2 drift baseline: byte-identical orchestrator/fast-mode copies + pointerized manager docs are green", () => {
+  const dir = buildDriftRoot();
+  try {
+    const res = runDrift(dir, "--json");
+    assert.equal(res.status, 0, `drift baseline reddened: ${res.stdout} ${res.stderr}`);
+    const out = JSON.parse(res.stdout);
+    assert.equal(out.ok, true);
+    // All four pairs present, and the two manager pairs are POINTER-mode consistent.
+    const modes = Object.fromEntries(out.pairs.map((p) => [p.shipped, p.mode]));
+    assert.equal(modes["plugin/loop/manager-tick-core.md"], "pointer");
+    assert.equal(modes["plugin/loop/manager-loop-tick.md"], "pointer");
+    assert.equal(modes["plugin/loop/orchestrator-tick-core.md"], "byte-identical");
+    assert.equal(modes["plugin/loop/fast-mode-tick-core.md"], "byte-identical");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC2: a reintroduced large manager copy reddens the drift gate (falsifiable — the manager-loop-tick 2321-line drift was structurally invisible under the old tick-CORE-only pairing)", () => {
+  const dir = buildDriftRoot();
+  try {
+    // Re-copy a stale large manager doc into the shipped pointer location → the pointer criterion
+    // must flag it (even though it "is a copy" in the byte-identity sense, the manager path must
+    // hold NO content — "该路径无内容可维护").
+    write(dir, "plugin/loop/manager-loop-tick.md",
+      "# manager loop tick 指令（旧副本）\n## A. 读数\n| A1 | 读 `.quay/manager-inbox/` | (src:1) |\n## B. 产出\n- **B1** 收尾 pass。\n");
+    const res = runDrift(dir, "--json");
+    assert.equal(res.status, 1, `a reintroduced manager copy did not redden the drift gate: ${res.stdout} ${res.stderr}`);
+    const out = JSON.parse(res.stdout);
+    assert.equal(out.ok, false);
+    const mgrLoop = out.pairs.find((p) => p.shipped === "plugin/loop/manager-loop-tick.md");
+    assert.ok(mgrLoop && !mgrLoop.consistent, "the manager-loop-tick pointer pair must be inconsistent");
+    assert.match(mgrLoop.diffStat, /POINTER VIOLATION/, "the report must name the pointer violation");
+    // The manager-tick-core pair is still a consistent pointer.
+    const mgrCore = out.pairs.find((p) => p.shipped === "plugin/loop/manager-tick-core.md");
+    assert.ok(mgrCore && mgrCore.consistent, "manager-tick-core pointer must stay consistent");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC2 negative control: a 1-line shipped manager file that does NOT reference its 正本 reddens", () => {
+  const dir = buildDriftRoot();
+  try {
+    write(dir, "plugin/loop/manager-tick-core.md", "some non-pointer content\n");
+    const res = runDrift(dir, "--json");
+    assert.equal(res.status, 1, `a non-referencing shipped manager file did not redden: ${res.stdout} ${res.stderr}`);
+    const out = JSON.parse(res.stdout);
+    const mgrCore = out.pairs.find((p) => p.shipped === "plugin/loop/manager-tick-core.md");
+    assert.ok(mgrCore && !mgrCore.consistent, "a shipped manager file must reference its 正本");
+    assert.match(mgrCore.diffStat, /does not reference/, "the report must name the missing reference");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC2: the real repo's manager shipped copies are pointers (drift-check reports them consistent)", () => {
+  // The full --check-drift exits 1 on the REAL repo because the orchestrator/fast-mode tick-core
+  // copies still pre-date reconciliation (test.sh wires --no-block for that reason). The manager
+  // pointer pairs MUST be consistent regardless.
+  const res = runDrift(REPO_ROOT, "--json");
+  const out = JSON.parse(res.stdout);
+  assert.equal(out.ok, false, "pre-existing orchestrator/fast-mode drift is expected on the real repo");
+  for (const p of out.pairs) {
+    if (p.mode !== "pointer") continue;
+    assert.equal(p.consistent, true, `${p.shipped} must be a consistent pointer: ${JSON.stringify(p)}`);
+  }
 });
 
 test("AC7: the checker is registered in scripts/test.sh run_doc_checks with @static-class doc (AC51 断言面拆分)", () => {

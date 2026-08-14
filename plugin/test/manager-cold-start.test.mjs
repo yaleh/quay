@@ -37,7 +37,11 @@ const MANAGER_ARM = path.join(pluginDir, "scripts", "manager-arm-loop.sh");
 const MONITOR_MOUNT_CHECK = path.join(pluginDir, "scripts", "monitor-mount-check.sh");
 const SESSION_LIVENESS = path.join(pluginDir, "scripts", "session-liveness.sh");
 const MANAGER_SKILL = path.join(pluginDir, "skills", "manager", "SKILL.md");
-const TICK_CORE = path.join(pluginDir, "loop", "manager-tick-core.md");
+// The live execution core is the 正本 orchestration/manager-tick-core.md — the shipped
+// plugin/loop/manager-tick-core.md is now a one-line pointer to it (gap-plugin-loop-manager-
+// drifted-copies-pointerize). TICK_DOC stays the shipped plugin/loop pointer (it carries the
+// arm-contract markers the --validate path reads).
+const TICK_CORE = path.join(repoRoot, "orchestration", "manager-tick-core.md");
 const TICK_DOC = path.join(pluginDir, "loop", "manager-loop-tick.md");
 
 function makeTmp(prefix = "quay-mgr-cold-") {

@@ -74,18 +74,16 @@ write orchestration/orchestrator-loop-tick.md \
   '# 外层编排 loop tick 指令' \
   '**外层不直接改代码**——它下指令，内层执行。理由：保持单一写入者。'
 
-# The shipped copies (plugin/loop/<name>-tick-core.md) are byte-identical to the orchestration/
-# cores above — the --check-drift baseline (gap-tick-core-drift-check-not-in-suite AC3).
+# The shipped tick-doc surface for the --check-drift baseline:
+#   - orchestrator/fast-mode tick-core copies are byte-identical to the orchestration cores above
+#     (gap-tick-core-drift-check-not-in-suite AC3 — a REAL copy must match its source);
+#   - the manager tick docs are POINTERS (one line → orchestration/ 正本) — NOT copies
+#     (gap-plugin-loop-manager-drifted-copies-pointerize AC2/AC3 — "该路径无内容可维护").
+# The manager 正本s are the orchestration/ files written above (manager-tick-core) plus the
+# manager-loop-tick 正本 written below; the shipped manager files are small pointers that
+# reference them.
 write plugin/loop/manager-tick-core.md \
-  '# manager tick — 执行核' \
-  '## A. 读数' \
-  '| A1 | 读 `.quay/manager-inbox/` | 目录非空即进决策 (src:1) |' \
-  '## B. 产出' \
-  '- **B3 tick-log**:本组一律写 `甲乙丙丁戊`,禁用 ①-⑤。`no-action` 需举证——甲`a`;乙`b`;丙`c`;丁`d`;戊`e` (src:1)。' \
-  '## C. 约束' \
-  '| C1 | 约束一 (src:1) |' \
-  '## D. 边界' \
-  '**可以**:写 `orchestration/`。'
+  '> 正本: orchestration/manager-tick-core.md — 本文件只应存在这一行指针；执行核内容一律读正本。'
 write plugin/loop/orchestrator-tick-core.md \
   '# outer tick — 执行核' \
   '## A. 读数' \
@@ -106,6 +104,14 @@ write plugin/loop/fast-mode-tick-core.md \
   '| C1 | 派发形态必须 `Agent(run_in_background: true)` (src:1) |' \
   '## D. 边界' \
   '一律停下等人。'
+# manager-loop-tick 正本 + shipped pointer (the pair that was structurally invisible under the old
+# tick-CORE-only pairing — AC2 makes it a falsifiable pointer check).
+write orchestration/manager-loop-tick.md \
+  '# manager loop tick 正本' \
+  '## A. 读数' \
+  '| A1 | 读 `.quay/manager-inbox/` | 目录非空即进决策 (src:1) |'
+write plugin/loop/manager-loop-tick.md \
+  '> 正本: orchestration/manager-loop-tick.md — 本文件只应存在这一行指针；内容一律读正本。'
 
 checker_cmd() {
   node --no-warnings --experimental-strip-types "${checker_dir}/tick-core-static-check.ts" --root "${root}" >/dev/null 2>&1
@@ -241,6 +247,33 @@ write plugin/loop/orchestrator-tick-core.md \
   '**可以**:写 `orchestration/`。'
 if drift_cmd; then :; else
   echo "ALWAYS-RED — restored (matching) shipped copy still reddens the drift check" >&2
+  exit 4
+fi
+
+# INJECT #5 (gap-plugin-loop-manager-drifted-copies-pointerize AC2): a REINTRODUCED manager copy —
+# a large shipped manager file that is not a small pointer — MUST redden the drift gate (the
+# manager-loop-tick 2321-line drift was structurally invisible under the old tick-CORE-only
+# pairing; the pointer criterion makes it falsifiable). A byte-perfect copy would ALSO redden
+# (the criterion is "must be a pointer", not "must match the source").
+write plugin/loop/manager-loop-tick.md \
+  '# manager loop tick 指令（重新复制的旧副本）' \
+  '## A. 读数' \
+  '| A1 | 读 `.quay/manager-inbox/` | 目录非空即进决策 |' \
+  '## B. 产出' \
+  '- **B1** 收尾 pass。' \
+  '## C. 约束' \
+  '| C1 | 约束一 |' \
+  '## D. 边界' \
+  '一律停下等人。'
+if drift_cmd; then
+  echo "STAYED-GREEN — a reintroduced manager copy did not redden the pointer drift check" >&2
+  exit 3
+fi
+# RESTORE #5 → drift GREEN again (the pointer).
+write plugin/loop/manager-loop-tick.md \
+  '> 正本: orchestration/manager-loop-tick.md — 本文件只应存在这一行指针；内容一律读正本。'
+if drift_cmd; then :; else
+  echo "ALWAYS-RED — restored manager pointer still reddens the drift check" >&2
   exit 4
 fi
 

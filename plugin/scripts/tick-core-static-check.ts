@@ -570,26 +570,53 @@ export function runChecks(root: string, only?: string): CheckResult {
 }
 
 // ── Drift check (gap-tick-core-drift-check-not-in-suite) ─────────────────────────────────────────────
-// The three execution cores each ship in TWO copies: orchestration/<name>-tick-core.md (what the
-// three layers ACTUALLY read every tick) and plugin/loop/<name>-tick-core.md (the shipped/laid-down
-// copy that quay-init --loop delivers to installed targets — see quay-init.sh's exec-core tick-doc
-// landing). The quay-init `--check-drift` report already LISTED these as drift but had NO suite
-// consumer (the fifth "instrument exists, consumer doesn't" instance). A12 was actually misled:
-// the same item was :31 in orchestration/ and :45 in plugin/loop/, costing a full round of message
-// alignment. This mode makes the pair-drift a HARD gate: exit 1 when ANY pair differs, printing
-// BOTH sides' line counts + a diff summary (AC2 — not a "drift/consistent" boolean).
-export const DRIFT_PAIRS = CORES.map((rel) => {
-  const base = rel.split("/").pop()!; // e.g. "manager-tick-core.md"
-  return { core: rel, shipped: `plugin/loop/${base}` };
-});
+// The execution cores ship in TWO forms: orchestration/<name>.md (what the three layers ACTUALLY
+// read every tick) and plugin/loop/<name>.md (the shipped/laid-down copy that quay-init --loop
+// delivers to installed targets — see quay-init.sh's exec-core tick-doc landing). The quay-init
+// `--check-drift` report already LISTED these as drift but had NO suite consumer (the fifth
+// "instrument exists, consumer doesn't" instance). A12 was actually misled: the same item was :31
+// in orchestration/ and :45 in plugin/loop/, costing a full round of message alignment. This mode
+// makes the pair-drift a HARD gate: exit 1 when ANY pair differs, printing BOTH sides' line counts
+// + a diff summary (AC2 — not a "drift/consistent" boolean).
+//
+// TWO criteria (gap-plugin-loop-manager-drifted-copies-pointerize AC2, manager 22:1xZ 裁定):
+//   - `byte-identical` — the orchestrator/fast-mode tick-core copies are REAL copies (quay-init
+//     lays them down byte-for-byte); a copy that differs from its orchestration source reddens.
+//   - `pointer` — the manager tick docs' shipped copies are POINTERS (one line → orchestration/
+//     正本), NOT copies ("该路径无内容可维护"). A shipped manager file must be a SMALL pointer
+//     referencing its orchestration 正本; a reintroduced large copy reddens regardless of
+//     byte-identity. The old pair-drift paired only the tick-CORE copies, so manager-loop-tick's
+//     2321-line drift was structurally invisible; the pointer criterion inverts both failure
+//     directions: a pointer can never be byte-identical to its 2198-line 正本 (would always flag),
+//     and a reintroduced copy silently byte-matching is exactly the state that must flag.
+export const MANAGER_POINTER_PAIRS = [
+  { core: "orchestration/manager-tick-core.md", shipped: "plugin/loop/manager-tick-core.md" },
+  { core: "orchestration/manager-loop-tick.md", shipped: "plugin/loop/manager-loop-tick.md" },
+] as const;
+
+/** A shipped manager tick doc is a POINTER iff it is ≤ this many lines (the 正本 path + a short
+ *  contract note) AND references its orchestration 正本 path. Any larger file is a reintroduced
+ *  copy — the falsifiable AC2 criterion. */
+export const POINTER_MAX_LINES = 3;
+
+export const DRIFT_PAIRS: { core: string; shipped: string; mode: "byte-identical" | "pointer" }[] = [
+  ...CORES
+    .filter((rel) => rel !== "orchestration/manager-tick-core.md")
+    .map((rel) => {
+      const base = rel.split("/").pop()!; // e.g. "orchestrator-tick-core.md"
+      return { core: rel, shipped: `plugin/loop/${base}`, mode: "byte-identical" as const };
+    }),
+  ...MANAGER_POINTER_PAIRS.map((p) => ({ ...p, mode: "pointer" as const })),
+];
 
 export interface DriftPair {
-  core: string;          // orchestration/<name>-tick-core.md
-  shipped: string;       // plugin/loop/<name>-tick-core.md
+  core: string;          // orchestration/<name>.md (正本)
+  shipped: string;       // plugin/loop/<name>.md (shipped copy or pointer)
+  mode: "byte-identical" | "pointer";
   consistent: boolean;
   coreLines: number;     // -1 when the file is missing
   shippedLines: number;  // -1 when the file is missing
-  diffStat: string;      // unified-diff summary: hunks + +N/-M + hunk headers (empty when consistent)
+  diffStat: string;      // unified-diff summary OR the pointer-violation reason (empty when consistent)
 }
 
 export interface DriftResult {
@@ -632,18 +659,36 @@ function diffStat(a: string, b: string): string {
 }
 
 export function runDriftCheck(root: string): DriftResult {
-  const pairs = DRIFT_PAIRS.map(({ core, shipped }) => {
+  const pairs = DRIFT_PAIRS.map(({ core, shipped, mode }) => {
     const coreAbs = path.join(root, core);
     const shippedAbs = path.join(root, shipped);
     const coreLines = lineCountOrMinusOne(coreAbs);
     const shippedLines = lineCountOrMinusOne(shippedAbs);
-    const bothExist = coreLines >= 0 && shippedLines >= 0;
-    const consistent = bothExist
-      && fs.readFileSync(coreAbs, "utf8") === fs.readFileSync(shippedAbs, "utf8");
-    return {
-      core, shipped, consistent, coreLines, shippedLines,
-      diffStat: consistent ? "" : diffStat(coreAbs, shippedAbs),
-    };
+    let consistent: boolean;
+    let stat = "";
+    if (mode === "pointer") {
+      // Pointer criterion (AC2): the shipped manager doc must be a SMALL pointer referencing its
+      // orchestration 正本. A reintroduced large copy reddens — this is the falsifiable form that
+      // makes the manager-loop-tick drift (2321 lines, structurally invisible under the old
+      // tick-CORE-only pairing) fail loudly on re-copy.
+      const referencesCore = shippedLines >= 0
+        && (() => {
+          try { return fs.readFileSync(shippedAbs, "utf8").includes(core); } catch { return false; }
+        })();
+      consistent = shippedLines >= 0 && shippedLines <= POINTER_MAX_LINES && referencesCore;
+      if (!consistent) {
+        if (shippedLines < 0) stat = `pointer target missing (shipped copy absent)`;
+        else if (shippedLines > POINTER_MAX_LINES)
+          stat = `POINTER VIOLATION: ${shippedLines} lines (> ${POINTER_MAX_LINES}) — a reintroduced COPY; must be a ≤${POINTER_MAX_LINES}-line pointer to ${core}`;
+        else if (!referencesCore)
+          stat = `POINTER VIOLATION: does not reference the 正本 ${core}`;
+      }
+    } else {
+      consistent = coreLines >= 0 && shippedLines >= 0
+        && fs.readFileSync(coreAbs, "utf8") === fs.readFileSync(shippedAbs, "utf8");
+      if (!consistent) stat = diffStat(coreAbs, shippedAbs);
+    }
+    return { core, shipped, mode, consistent, coreLines, shippedLines, diffStat: stat };
   });
   return { ok: pairs.every((p) => p.consistent), pairs };
 }
@@ -652,12 +697,13 @@ function printDriftReport(res: DriftResult): string[] {
   const out: string[] = [];
   for (const p of res.pairs) {
     if (p.consistent) {
-      out.push(`  ok: ${p.core} (${p.coreLines} lines) == ${p.shipped} (${p.shippedLines} lines)`);
+      const link = p.mode === "pointer" ? "→ pointer" : "==";
+      out.push(`  ok: ${p.core} (${p.coreLines} lines) ${link} ${p.shipped} (${p.shippedLines} lines)`);
       continue;
     }
     const coreLines = p.coreLines >= 0 ? `${p.coreLines}` : "MISSING";
     const shippedLines = p.shippedLines >= 0 ? `${p.shippedLines}` : "MISSING";
-    out.push(`  DRIFT: ${p.core} (${coreLines} lines) vs ${p.shipped} (${shippedLines} lines)`);
+    out.push(`  DRIFT (${p.mode}): ${p.core} (${coreLines} lines) vs ${p.shipped} (${shippedLines} lines)`);
     if (p.diffStat) for (const l of p.diffStat.split("\n")) out.push(`    ${l}`);
   }
   return out;
@@ -700,7 +746,7 @@ export function main(argv: string[]): CliResult {
       // Explicit alias for the default full-surface check (the ## Contract `invoke` form).
     } else if (a === "--help" || a === "-h") {
       process.stdout.write(
-        "tick-core-static-check.ts — are the three execution cores ≤80 lines, with every pointer target existing, the B3 group numbering distinct from the criteria numbering, the prohibition docs consistent with the cores' run_in_background, and (--check-drift) each orchestration/*-tick-core.md byte-identical to its plugin/loop/ shipped copy?\n",
+        "tick-core-static-check.ts — are the three execution cores statically covered (AC3/AC4/AC5/AC6/AC8), and (--check-drift) each plugin/loop/ copy either byte-identical to its orchestration source (orchestrator/fast-mode) or a small pointer to it (manager tick docs)?\n",
       );
       return { code: 0, json: { help: true } };
     } else {
@@ -725,8 +771,8 @@ export function main(argv: string[]): CliResult {
       `${driftRes.pairs.filter((p) => p.consistent).length} consistent / ${driftRes.pairs.filter((p) => !p.consistent).length} drifted\n`,
     );
     for (const l of printDriftReport(driftRes)) process.stdout.write(`${l}\n`);
-    if (!driftRes.ok) process.stdout.write(`tick-core-static-check: RED — execution-core drift gate violated (orchestration/*-tick-core.md vs plugin/loop/*-tick-core.md).\n`);
-    else process.stdout.write(`tick-core-static-check: PASS — every execution core matches its shipped copy.\n`);
+    if (!driftRes.ok) process.stdout.write(`tick-core-static-check: RED — drift gate violated (shipped copy drifts from its orchestration source, or a manager pointer was re-copied).\n`);
+    else process.stdout.write(`tick-core-static-check: PASS — every shipped copy matches its source, and every manager pointer is a pointer.\n`);
     if (!driftRes.ok && noBlock) process.stdout.write(`tick-core-static-check: --no-block — drift REPORTED, not blocking (gap-tick-core-drift-check-not-in-suite; reconcile the pairs to green).\n`);
     return { code: driftRes.ok || noBlock ? 0 : 1, json: driftRes };
   }

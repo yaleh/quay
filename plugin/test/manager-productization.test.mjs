@@ -116,18 +116,26 @@ test("AC5b — tick-log check: fresh row PASS; skipped round (stale mtime) FAIL;
   } finally { cleanup(tmp); }
 });
 
-// ── AC9 — product-side manager behavior lives in the plugin tick doc ──────────────────────────────
+// ── AC9 — product-side manager behavior: shipped driver is a pointer; behavior preserved ───────────
+// (gap-plugin-loop-manager-drifted-copies-pointerize, manager 22:1xZ 裁定: plugin/loop/manager-*.md
+// are POINTERS — "该路径无内容可维护". The §6 product-behavior section the copy carried is deleted
+// from the shipped doc; the AC10/AC11 content is preserved in the phase-goal archive (the moved-out
+// historical record) and the boundary discipline in the shipped skill.)
 
-test("AC9 — plugin/loop/manager-loop-tick.md carries the product-side manager behavior (AC10 axis-open, AC11 verification-first, boundary)", () => {
+test("AC9 — the shipped manager driver is a pointer to the live 正本; product-side behavior is preserved", () => {
   assert.ok(fs.existsSync(TICK_DOC), "plugin/loop/manager-loop-tick.md must exist (the shipped manager driver)");
   const src = fs.readFileSync(TICK_DOC, "utf8");
-  // AC10 axis-open (开轴 pre-friction criterion)
-  assert.match(src, /AC10|开轴/, "the manager tick doc must carry the AC10 axis-open product behavior");
-  assert.match(src, /pre-friction|没被硌到|轴/, "the AC10 criterion must be present");
-  // AC11 verification-first (验证先被验证)
-  assert.match(src, /AC11|验证先被验证|verification-first/, "the manager tick doc must carry the AC11 verification-first product behavior");
-  // role-boundary discipline (manager must not write .sh/.ts implementations)
-  assert.match(src, /越界|自写|实现/, "the boundary-discipline rule must be present");
+  // The shipped manager driver is a POINTER to the live 正本 — no content lives here anymore.
+  assert.match(src, /orchestration\/manager-loop-tick\.md/, "the shipped driver must point at the live orchestration 正本");
+  // AC10 axis-open (开轴 pre-friction criterion) — preserved in the phase-goal archive.
+  const archive = fs.readFileSync(path.join(repoRoot, "orchestration", "manager-phase-goal-archive.md"), "utf8");
+  assert.match(archive, /AC10|开轴/, "the AC10 axis-open product behavior must be preserved");
+  assert.match(archive, /pre-friction|没被硌到|轴/, "the AC10 criterion must be present");
+  // AC11 verification-first (验证先被验证) — preserved in the phase-goal archive.
+  assert.match(archive, /AC11|验证先被验证|verification-first/, "the AC11 verification-first product behavior must be preserved");
+  // role-boundary discipline (manager must not write .sh/.ts implementations) — in the shipped skill.
+  const skill = fs.readFileSync(path.join(pluginDir, "skills", "manager", "SKILL.md"), "utf8");
+  assert.match(skill, /越界/, "the boundary-discipline rule must be in the shipped manager skill");
 });
 
 // ── AC1/AC2/AC7 — manager start (no project args) + adopt (three-state) ────────────────────────────
