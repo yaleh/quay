@@ -37,11 +37,11 @@ ready-pool-check   末次 08:08:35  ⇒ 停 4.2h
 
 **判据1**：给「本轮有没有跑评估步骤」一条**读产物**的判据——那三步**都有产物**（心跳 mtime / `slot-refill` 调用记录 / `ready-pool-check` 调用记录），**没有任何一层每轮读它**（= SPEC-tick-quality R6，inner 侧编号 I1）。实现面：某层每轮读这三个产物的新鲜度，陈旧即报「inner 派发评估未跑」。
 **判据2（能取假·真样本不构造）**：**07:41–12:2x 这 4.7h 是现成缺席样本**——回放它，判据1 必须报红；当前任何一层读这三个产物（现在读的读数=陈旧）即为真样本。
-**⚠️ 心跳读数的两类写入（manager 12:3xZ 裁，防把真缺陷洗成非缺陷）**：
-> **① 每次 reschedule 的追加行（AC53 AC3）—— 不受 END 闸约束，07:41 后 0 行 = 真缺陷**；
-> **② END-of-tick 写入 —— 受 AC53 闸约束，`should_refill ∧ slots_free>0` 时拒写是【闸在正确工作】。**
-> **⊢ 判「评估是否恢复」用 ① 的追加行 + `dispatch-record` 的自驱 reason；⛔ 用 ② 的缺席（它可能只是闸在工作）。**
-**（inner 曾以「AC53 闸拒写」解释 07:41 后心跳停——manager 核实现否决：闸只挡 END 写入，jsonl 是每次 reschedule 追加，40 次 reschedule 后 0 行追加 = 追加路径本身没跑，与甲同根。判定据2 用 ① 的追加行。）**
+**⚠️ 心跳写入只有一条路径、无条件过 AC53 END 闸（manager 12:4xZ C27 更正，核实现）**：
+> **心跳只有一条写入路径，且无条件过 AC53 END 闸**（`inner-wakeup-heartbeat.ts` Usage 无 `--end` 开关，`:309` 写入在闸之后；「每次 reschedule 追加」与「END-of-tick 写入」是同一个动作的两个名字）。
+> **⇒ 07:41–12:3x 的 0 行追加，由「在飞少算 ⇒ `slots_free` 虚高 ⇒ 闸误拒」完整解释**，不需要「追加路径没跑」这一支。
+> **⊢ 判「评估是否恢复」仍用 `dispatch-record` 的自驱 reason（不受闸影响）；判「闸是否误拒」用 jsonl 行数 + 同刻三写法的 `in_flight_count` 一致性。**
+**（演化记录：inner 先报「闸拒写」→ outer 转发 → manager 12:3xZ 先否决「闸拒」（误以为有两条路径）→ 12:4xZ C27 自我更正：只有一条路径、闸无条件，原「闸拒」解释成立——否决的【依据】错了，方向对了。教训：核任何「闸为什么拒」前先确认喂给它的量；本族有两个方向——把不同的当成同一个（前六次）/ 把同一个当成不同的（本次）。）**
 **判据3 边界**：修法是**比对两条驱动路径的步骤集合**（具体 prompt 路径 vs 哨兵路径），不是查日志找漏跑（后者翻几百条找不到）。
 
 **不覆盖**：不改唤醒机制（唤醒是好的）；不重建 inner 会话；不设心跳写入频率（那是 inner 侧机制）。
@@ -69,8 +69,8 @@ ready-pool-check   末次 08:08:35  ⇒ 停 4.2h
 
 ## Touches
 
-- plugin/scripts/（读产物判据落地——具体文件按实现面，如 inner-assessment-steps-check.ts 或并入既有心跳检查）
-- plugin/test/（补测）
+- plugin/scripts/inner-wakeup-heartbeat-check.ts（读产物判据落地：心跳 mtime + slot-refill 调用记录 + ready-pool 调用记录三者新鲜度，陈旧即报「inner 派发评估未跑」；与既有 A13 心跳检查同面）
+- plugin/test/inner-wakeup-heartbeat-check.test.mjs（补测：07:41 缺席样本回放红 + 新鲜绿）
 - tasks/gap-inner-assessment-steps-no-product-reader.md（自身）
 
 ## Evidence
