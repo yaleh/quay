@@ -1,13 +1,8 @@
 // integration-branch-model.ts — the two-line branch model core.
 //
-// RETIRED (AC48 判据2, 2026-08-13 — tasks/gap-ac48-code-retirement-pool-filter-and-scripts; catalog
-// note per AC52): the two-line integration-branch model is retired. The branch itself was deleted and
-// config merge_target → develop by the outer (d41feba6/fc39e997); under the new model every task forks
-// from develop (`$FORK_BASELINE`, all tasks from develop) — `forkBaseline()` has ZERO production
-// callers (confirmed 2026-08-13). This file is KEPT AS THE REASON ARCHIVE (not deleted): it and
-// integration-batch-merge.sh + SPEC-branching-model-integration-branch-2026-08-05.md document the
-// two-line model's design, its empirical negation, and the reverse-edge ruling. No production path
-// should call it; the exported functions remain unit-tested for the archive only.
+// RETIRED (AC48 2026-08-13) — 退役说明 → orchestration/archive/AC58-retired-clauses.md#R21.
+// This file is KEPT AS THE REASON ARCHIVE (not deleted); no production path should call it;
+// the exported functions remain unit-tested for the archive only.
 //
 // SPEC-branching-model-integration-branch-2026-08-05 (引用:
 // orchestration/SPEC-branching-model-integration-branch-2026-08-05.md): split the "fork baseline"

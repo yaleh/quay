@@ -3,13 +3,8 @@
 # model (gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point, AC3; real-merge
 # mode per gap-integration-batch-merge-ff-only-contradicts-real-merge-ruling).
 #
-# RETIRED (AC48 判据2, 2026-08-13 — tasks/gap-ac48-code-retirement-pool-filter-and-scripts; catalog
-# note per AC52): the two-line integration-branch model is retired — the branch was deleted and config
-# merge_target → develop by the outer (d41feba6/fc39e997); every task now forks from develop and the
-# verification-round merges directly to develop. This script is KEPT AS THE REASON ARCHIVE (not
-# deleted): it + integration-branch-model.ts + SPEC-branching-model-integration-branch-2026-08-05.md
-# document the two-line model's design, its empirical negation (2026-08-06), and the reverse-edge
-# ruling. No production path should invoke it.
+# RETIRED (AC48 2026-08-13) — 退役说明 → orchestration/archive/AC58-retired-clauses.md#R22.
+# This script is KEPT AS THE REASON ARCHIVE (not deleted); no production path should invoke it.
 #
 # Under the two-line model the outer verification-round batch-merges `integration` → `develop`.
 # The ORIGINAL design assumed this is ALWAYS a fast-forward (integration is always a descendant of

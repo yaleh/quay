@@ -52,7 +52,7 @@
 **这份文件必须能在 `/clear` 后的空上下文里独立启动。** 若你刚被清空上下文，按「冷启动」一节先建立
 状态，再进入 tick 步骤。
 
-**调用方式**（`.claude/loop.md` 已删除——exp5 退役；`/loop` 带显式 prompt 时不读该文件）：
+**调用方式**（`/loop` 带显式 prompt 时不读 `.claude/loop.md`；exp5/loop.md 退役说明 → `orchestration/archive/AC58-retired-clauses.md#R05`）：
 
 ```
 /loop 25m 执行 fast-mode-loop-tick.md 中的 tick 指令
@@ -196,9 +196,8 @@ governance,serial-anti-stomp}.test.mjs）——它们用**真实进程 + tmux �
 `nested-spawn` = 嵌套 runner）。
 
 **判读规则（强制）**：
-1. **这一族的 fail 在并发/高负载下不算真回归**。放宽实验（第三步：把重活令牌从单飞放宽到两个
-   并发套件，= 负载翻倍——`heavy-op-token.sh` 已随 2026-08-06 人裁定整体退休，「一次只跑一个
-   重测试」约束退役，此放宽实验前提不再存在）的判据**明确排除**这族的 fail——判定时先看 fail 是否落在这族
+1. **这一族的 fail 在并发/高负载下不算真回归**。放宽实验（把重活令牌从单飞放宽到两个
+   并发套件 = 负载翻倍；heavy-op-token.sh 实验退役说明 → `orchestration/archive/AC58-retired-clauses.md#R06`）的判据**明确排除**这族的 fail——判定时先看 fail 是否落在这族
    （机械判定：`red-window-triage.ts --partition` 把失败分区为 in-family / not-in-family），
    落在 ⇒ 单独重跑该族（隔离、低负载），绿 ⇒ 是「已知时序敏感被放大」，不是「并发放宽暴露了真问题」。
 2. **这族永远单独跑全量或低负载判读**。判绿三条件（上面）里的 `fail 0` 判据对这族不适用；
@@ -243,7 +242,7 @@ quay-init-tmux-detection 等原 lowconc 成员——家族按 round 轮换 flake
 ## 会话存活监视（`session-liveness.sh`）——看自己还在不在（AC13）
 
 **内层同样要挂 `session-liveness.sh`**（泛化后的会话存活监视，原 `outer-liveness.sh`）。
-理由（2026-08-03 实测）：只看**工作产出**的工具（旧的 `inner-state.sh`，现已退役）在会话死后
+理由（2026-08-03 实测）：只看**工作产出**的工具（`inner-state.sh` 退役说明 → `orchestration/archive/AC58-retired-clauses.md#R07`）在会话死后
 只会看到「没有新遥测」，与「内层在思考一个难题」完全同形——这是本仓当天两次栽过的那一族失效换了个
 位置。内层跑重活，会话死掉代价更大，**更需要**进程存活这一层。
 
@@ -253,7 +252,7 @@ quay-init-tmux-detection 等原 lowconc 成员——家族按 round 轮换 flake
 pane 的代价只是每周期多一次 capture-pane；不再有共享 events.jsonl（那是把 N 条独立流合并成一条
 再让每个消费者过滤回自己要的——严格劣于 N 条独立流）。**谁挂的谁拥有自己的 stdout 事件流**：
 挂载方（Monitor 工具）直接消费该流，谁先启动无关，观察者之间互不知情、不共享任何写点。
-（旧的「单飞挂载 + 共享事件」设计及 `heavy-op-token.sh` 已随人裁定整体退休。）
+（旧「单飞挂载 + 共享事件」设计退役说明 → `orchestration/archive/AC58-retired-clauses.md#R24`。）
 
 挂法与心跳（AC11/AC16）：内层的心跳不是外层那种 tick 日志，而是它的**会话 transcript**
 （AC1/AC16，2026-08-03 实测选定：`.workflow-events/` 每任务只写 1-2 行、任务进行中完全冻结，
@@ -261,8 +260,7 @@ pane 的代价只是每周期多一次 capture-pane；不再有共享 events.jso
 `SESSION_TRANSCRIPTS="<名字> <会话id|绝对路径>"`（推荐，会话 id 是配置不去推断）或
 `SESSION_HEARTBEATS="<名字> <路径>"` 配置。事件 `SESSION-GONE/BACK/OVERDUE/IDLE/RESUMED` 报的是
 「会话本身还在不在、忙不忙」，`REPO-STALL` 报的是仓库信号（AC8，原 `SESSION-STALL`）。
-**观测只有一个工具**（SPEC-one-observer-two-surfaces.md）——旧 `inner-state.sh` 的「在做什么」
-事件集随其退役而撤下；工作产出信号由外层直接读 `fast-mode-telemetry --report`（外层 cwd 就是本
+**观测只有一个工具**（SPEC-one-observer-two-surfaces.md；`inner-state.sh` 事件集退役说明 → `orchestration/archive/AC58-retired-clauses.md#R08`）；工作产出信号由外层直接读 `fast-mode-telemetry --report`（外层 cwd 就是本
 仓库），仓库告警同理直接看 `git log`。**解除停机（删 `.halt`）那一刻重置陈旧度基线**，停泊期间
 的陈旧不计入解除停机后的 OVERDUE/REPO-STALL。
 
@@ -276,7 +274,7 @@ pane 的代价只是每周期多一次 capture-pane；不再有共享 events.jso
 
 `.halt`（仓库根）
 
-exp5 已退役（`.claude/loop.md` 已删除），`.halt` 从「暂停 exp5 循环」改为**快速模式的唯一停止开关**。
+`.halt` = **快速模式的唯一停止开关**（exp5/loop.md 退役说明 → `orchestration/archive/AC58-retired-clauses.md#R09`）。
 存在即暂停；移除即放行。
 
 移除前跑 `experiments/quay-perpetual-stream/scripts/restart-readiness-check.sh`——
@@ -372,8 +370,7 @@ node --experimental-strip-types plugin/scripts/slot-refill.ts --root "$(pwd)" --
 
 - **分叉基线（新模型）**：**一律 → develop**（`$FORK_BASELINE`）——per-task 验证下任务直接 fan-in
   develop，依赖由派发闸 A15② PARENT-DONE-IFF-CHILDREN 串行化（B 等 A 合入 develop 后再派），任务文件
-  漂移由 A6 rebase-重跑循环吸收。旧「声明依赖 / touches 相交 → integration」的 fork 判据**退役**
-  （`--force-integration` 已删除，`fork-baseline.ts` 传它 exit 2）。机械判定现为恒 `$FORK_BASELINE`
+  漂移由 A6 rebase-重跑循环吸收。旧 integration fork 判据退役说明 → `orchestration/archive/AC58-retired-clauses.md#R10`。机械判定现为恒 `$FORK_BASELINE`
   （见步骤 4；`fork-baseline.ts` 默认路径仅单线下游用）。
 - **合并机制（AC3）**：任务合回 integration（步骤 2，`git merge --no-ff task/<id>`）；外层
   verification-round 验证绿后批量合回 develop（`orchestrator-loop-tick.md` 步骤 1b，`--ff-only` 硬约束）。
@@ -413,8 +410,7 @@ halt 后仍派发 5 个 subagent 的根因就是「连续流程绕过步骤 0」
 >24h 无产出）⇒ 未标记的停摆，本 tick 必须升级报出，不静默空转。
 
 **Monitor 挂载自检**（`gap-nothing-checks-whether-the-monitor-is-mounted-or-aimed-right`）：外层靠
-`plugin/scripts/session-liveness.sh` 的 Monitor 消费本层停止条件（观测只有一个工具；`inner-state.sh`
-已退役）——它没挂上/挂错目标/属于上个会话，本层停摆就没人发现。每个 tick 用一条命令核实，不靠人判断：
+`plugin/scripts/session-liveness.sh` 的 Monitor 消费本层停止条件（观测只有一个工具；`inner-state.sh` 退役说明 → `orchestration/archive/AC58-retired-clauses.md#R11`）——它没挂上/挂错目标/属于上个会话，本层停摆就没人发现。每个 tick 用一条命令核实，不靠人判断：
 
 ```bash
 bash plugin/scripts/monitor-mount-check.sh --json
@@ -470,9 +466,7 @@ inner 在**自有 per-task 绿证后翻 done**（2026-08-13 移交：per-task �
 
 - **分叉基线（新模型，`gap-worktree-fork-baseline-always-integration`）**：**所有任务一律从
   `$FORK_BASELINE` 分叉**——依赖由派发闸 A15② PARENT-DONE-IFF-CHILDREN 串行化（B 等 A 合入 develop
-  后再派），任务文件漂移由 A6 rebase-重跑循环吸收。旧「touches 与 `$MERGE_TARGET` 上未验证任务相交 ⇒
-  `$MERGE_TARGET`」的 fork 判据与 `--force-integration` 一并退役（`fork-baseline.ts` 传它 exit 2；
-  其默认路径仅单线下游用，`--develop master --integration master` 恒返回 master）。
+  后再派），任务文件漂移由 A6 rebase-重跑循环吸收。旧 fork 判据与 `--force-integration` 退役说明 → `orchestration/archive/AC58-retired-clauses.md#R12`（`fork-baseline.ts` 默认路径仅单线下游用，`--develop master --integration master` 恒返回 master）。
 - **合并机制**（AC3）：任务合回 `$MERGE_TARGET`（红窗期照常接收——结构性消除停派）；外层
   verification-round-N 批量合 `$MERGE_TARGET`→`$FORK_BASELINE`（fast-forward 无冲突，
   `plugin/scripts/integration-batch-merge.sh --develop "$FORK_BASELINE" --integration "$MERGE_TARGET" --sync --reconcile`）。
@@ -967,8 +961,7 @@ node --no-warnings --experimental-strip-types plugin/scripts/touches-orthogonali
 
 4. **分叉基线（新模型，`gap-worktree-fork-baseline-always-integration`）**：任务 worktree **fork 源
    统一 = `$FORK_BASELINE`（develop HEAD）**——per-task 验证模型下任务直接 fan-in `develop`。
-   旧的 `--force-integration`（统一 integration HEAD，`gap-task-file-develop-integration-drift-fan-in-conflicts`
-   AC2）**已退役**（`fork-baseline.ts` 现在传它 exit 2）——它当初要解的「fork 落后 integration 的
+   `--force-integration` 退役说明 → `orchestration/archive/AC58-retired-clauses.md#R13`。它当初要解的「fork 落后 integration 的
    任务文件证据段冲突」由 **A6 rebase-重跑循环**吸收：fan-in 前先 `git -C <wt> rebase $FORK_BASELINE`，
    任务文件漂移就地合并、套件重跑通过再合并（**代价 = rebase 后要重跑套件**，人 2026-08-13 裁定④已同意）。
    依赖由派发闸 A15② PARENT-DONE-IFF-CHILDREN 串行化——B 等 A 合入 develop 后再派，B fork develop 时
@@ -1024,7 +1017,7 @@ node --experimental-strip-types plugin/scripts/touches-orthogonality-check.ts --
 不是后台派发）。
 
 **分叉基线（新模型 = `$FORK_BASELINE`（develop HEAD），`gap-worktree-fork-baseline-always-integration`；
-旧 `--force-integration` 统一 integration 已退役；依赖声明语义见 `fork-baseline.ts` 默认路径）**：
+`--force-integration` 退役说明 → `orchestration/archive/AC58-retired-clauses.md#R14`；依赖声明语义见 `fork-baseline.ts` 默认路径）**：
 subagent 用裸 `git worktree add` 自建 `$WORKTREE_ROOT/<slug>`（磁盘，不在 `/tmp`——tmpfs 是内存，
 `worktree_root` 见上）和 `task/<id>` 分支，**分叉点一律 = `$FORK_BASELINE`（develop HEAD）**——
 per-task 验证模型下 fan-in 直连 develop，依赖由派发闸串行化，漂移由 rebase-重跑循环吸收：
@@ -1043,8 +1036,7 @@ git -C "$REPO_ROOT" worktree add $WORKTREE_ROOT/<slug> -b task/<id> "$FORK_BASEL
   污染被扫进 master 的风险越高）。不跑 setup 的 worktree 在套件构建阶段 fail-closed
   （`Cannot find package esbuild`——那个 fail-closed 本身是对的，拒绝在可能陈旧的 bundle 上跑测试），
   且缺 `.quay/config.yml` 无法解析 workspace 根（round-5「Cannot find repo root」崩溃族）。
-- **每个任务 worktree 都从 `$FORK_BASELINE`（develop HEAD）分叉**——旧「fork 源统一 = integration」
-  （`--force-integration`）已退役；它当初要解的任务文件证据段冲突（实证 2026-08-10：round5-red
+- **每个任务 worktree 都从 `$FORK_BASELINE`（develop HEAD）分叉**——`--force-integration` 退役说明 → `orchestration/archive/AC58-retired-clauses.md#R15`。它当初要解的任务文件证据段冲突（实证 2026-08-10：round5-red
   c3583844 vs 2c1539d7 同文件不同段）由 **rebase-重跑循环**吸收：fan-in 前先 rebase 新 develop，
   冲突就地合并、套件重跑通过再合并（**代价 = rebase 后重跑套件**，人 2026-08-13 裁定④已同意）。
 - **写所有权分离（AC3）**：任务文件的 `status:` frontmatter **由 outer 独占**（状态翻转/记录）；
@@ -1249,7 +1241,7 @@ node --no-warnings --experimental-strip-types plugin/scripts/inner-blocked-signa
 - **文件存在 == 内层在等。** `--detect-stop` / `--assert-blocked` 写在停下的那一刻，`--clear` 删在恢复
   的那一刻。这是存在性信号，不是从缺席推断。外层在每个 tick 直接读该路径
   （`plugin/scripts/inner-blocked-signal.ts --read --root <root>`）拿 `reason` + `question`，不必读屏就能
-  开始判断。旧的 `inner-state.sh` 曾用 inotifywait 监视它，现随 inner-state.sh 一起退役——阻塞信道是
+  开始判断。`inner-state.sh` 监视说明 → `orchestration/archive/AC58-retired-clauses.md#R16`——阻塞信道是
   「内层主动写、外层主动读」的显式信道，不需要一个常驻轮询工具转达。
 - **`--detect-stop` 只清自己写的 auto 记录。** 手动（`--assert-blocked`，judgment）的阻塞只有显式
   `--clear` 才清——裁定没下达前文件必须留着（AC3 负控制）。
