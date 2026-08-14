@@ -338,3 +338,27 @@ c3583844 vs 2c1539d7 同文件不同段）由 **rebase-重跑循环**吸收：fa
 ```
 （旧的「单飞挂载 + 共享事件」设计及 `heavy-op-token.sh` 已随人裁定整体退休。）
 ```
+
+---
+
+## R25 — inner 核 C7（integration-branch-model.ts --overlaps-unverified 活指令→退役模块）
+
+**来源**：`orchestration/fast-mode-tick-core.md` C 段 C7（inner 执行核）
+**退役**：AC48 判据2 2026-08-13 模块标 RETIRED、零生产调用者；AC61 判据3 2026-08-14 确认活指令指向退役模块并迁出
+**正文**（原文迁出保留）：
+
+```
+| C7 | **【前提已死,不计入覆盖率分母】**`integration-branch-model.ts --overlaps-unverified` **不得传空串**——空串使该判定恒假、机制半死 (src:898) |
+```
+
+---
+
+## R26 — inner 核 C10（integration-batch-merge.sh --reconcile 对账引用退役）
+
+**来源**：`orchestration/fast-mode-tick-core.md` C 段 C10（inner 执行核）
+**退役**：AC48 判据2 2026-08-13 integration-batch-merge.sh 标 RETIRED；AC61 判据1 B-2 2026-08-14 改指有效模块
+**正文**（原文迁出保留 —— 安全规则「不得自己发明 git reset --hard」保留在核内，未迁出）：
+
+```
+| C10 | 主检出对账**只用 `integration-batch-merge.sh --reconcile`**,调用方不得自己发明 `git reset --hard`(2026-08-08 销毁过 manager 未提交编辑) (src:419) |
+```

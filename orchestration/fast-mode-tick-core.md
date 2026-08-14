@@ -63,10 +63,10 @@
 | C4 | worktree **一律建在 `$WORKTREE_ROOT/<slug>`(磁盘)**,`/tmp` 是 tmpfs、建进去就是重演整机 OOM (src:23,889) |
 | C5 | 派发形态必须 `Agent(run_in_background: true)`——前台派发会阻塞内层、`<task-notification>` 流永不触发 (src:882) |
 | C6 | 至多 `effective_cap` 个在飞:**括号 ≠ subagent**(realConcurrency = realInFlight + subagentsInFlight)且**括号关 ≠ 进程退**(closedButLive 仍占槽) (src:614,622,270) |
-| C7 | **【前提已死,不计入覆盖率分母】**`integration-branch-model.ts --overlaps-unverified` **不得传空串**——空串使该判定恒假、机制半死 (src:898) |
+| C7 | （前提已死，AC48/AC61 退役；不计入覆盖率分母）活指令指向已 RETIRED 的 integration-branch-model.ts —— 正身已归档 → `orchestration/archive/AC58-retired-clauses.md#R25` (src:898) |
 | C8 | 每个任务 `## Touches` 必须含 `tasks/<id>.md` 且**不带 `(new)`**;缺 ⇒ 不派发 (src:847) |
 | C9 | 触摸重叠**不要凭目测**——用 `concurrent-batch-scheduler.ts`;本会话有过目测被实测推翻的先例 (src:826) |
-| C10 | 主检出对账**只用 `integration-batch-merge.sh --reconcile`**,调用方不得自己发明 `git reset --hard`(2026-08-08 销毁过 manager 未提交编辑) (src:419) |
+| C10 | 主检出对账:调用方**不得自己发明 `git reset --hard`**(2026-08-08 销毁过 manager 未提交编辑)——对账统一走 `fast-mode-telemetry.ts --reconcile`(见 A13);旧 `integration-batch-merge.sh --reconcile` 对账已退役 → `orchestration/archive/AC58-retired-clauses.md#R26` (src:419) |
 | C11 | KNOWN-LOAD-SENSITIVE 族的 fail 在高负载下**不算真回归**:用 `red-window-triage.ts --partition` 分区 → 隔离低负载重跑再下结论;**不删/不降级/不改 skip** (src:179-190) |
 | C12 | 全局量(文件数/测试数/组成员数)必须运行时计算,**不得写成 `== 58` 这类快照常量** (src:1077) |
 | C13 | 下结论前先问「如果我错了,哪一条命令会告诉我」并跑它贴输出;改**期望值**而非实现时先找负控制 (src:1095,1098) |

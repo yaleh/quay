@@ -18,6 +18,11 @@
 > `test_command` / `tmux_session`）集中在一个配置文件 `.quay/config.yml` 的 `loop:` 节里，
 > 脚本与本 tick 在**运行时读取**它们，不在落地时烘焙。铺到目标项目时的位置：
 > `docs/analysis/fast-mode-loop-tick.md`（内层）/ `orchestration/orchestrator-loop-tick.md`（外层）。
+
+> **AC61 逐条处置注记（2026-08-14）**：本文件遗留的两线分支 / 批量合相关旧判据命中，已逐条打印并
+> 分类（活指令 / 退役注记 / 历史记述），见任务体 `tasks/gap-ac61-staleness-list-item-disposition.md`
+> 的「命中逐条分类」节（含 checker 强制逐条覆盖）。执行核 `fast-mode-tick-core.md` 的 C7/C10 正身
+> 已按 AC58 迁出 → `orchestration/archive/AC58-retired-clauses.md#R25/#R26`。
 > 模板正文本体不含任何具体仓库路径、测试命令或 tmux 会话字面量。
 >
 > **目标项目值引用约定**：`REPO_ROOT` / `TEST_COMMAND` / `TMUX_SESSION` / `WORKTREE_ROOT` /
