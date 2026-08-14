@@ -52,6 +52,18 @@ taskId=gap-ac63  laneCount=1  durationMs=1805  state=green  docChecked=True
 
 **优先级**：① > ② > ③。没有 ③ 还能上界推算；**没有 ① 连原料都没有**。② 立刻消除「CPU 低是跳过还是跑慢」误判。
 
+**⚠️ 必须与 AC83 一起完成（manager 14:5xZ 报）**：`gap-phase-boundary-differential-accounting`（相边界差分 cpu_usec+PSI）status=done 但**真实数据 0**——5 AC 被 scoped 测试满足（注入假 cgroup 数据，`QUAY_TEST_CGROUP_SCRIPT` 于 full-suite-runner.ts:795），**证明的是「能产出」不是「已产出」**。且仪器在 full-suite-runner.ts 而 fan-in 走裸 bash scripts/test.sh（0 命中）⇒ **即使 runner 再跑 fan-in 仍拿不到**。**⊢ 本任务与 AC83 必须一起完成——单独完成任一条，人要的「拿到真实数据」都不满足。**
+
+**判据5（交叉，AC83 判据3）**：与 `gap-phase-boundary-differential-accounting` 一起完成——fan-in 的 suite 数据入账 + 相边界差分生产数据落地，两者互为前置。
+
+**一般形态（manager 建议吃进核，与 C29 同族更精确）**：
+```
+C29  执行了、报了、但没留痕        ⇒ 与【没执行】同形
+本条 实现了、测试绿了、但生产没跑过 ⇒ 与【没实现】同形
+共同修法：把判据挪到产物上——前者 REFUSE 也写载体行；后者 AC 读生产载体的行数
+```
+**⊢ 前向生效**（manager 建议不立刻回查 42 条 done，成本高且多数非仪器类）：**只对【以产出读数为目标】的任务加「载体中满足 X 的记录数 ≥ N，N 在实现落地后时间窗计」的 AC**；⛔ 不设回查范围/阈值（成本结构未知，归人裁）。
+
 **不覆盖**：不改 fan-in 的 suite 判定逻辑（跳过全量是设计，:70-71）；不新建第三个载体（沿用 per-task-suite-records）。
 
 **本任务不新建过程纪律型 AC**：负控制沿用 AC49。
@@ -69,11 +81,12 @@ taskId=gap-ac63  laneCount=1  durationMs=1805  state=green  docChecked=True
 - [ ] AC1 判据1：每次 fan-in 写一条 per-task-suite-record（含跳过全量）——今日 run 数==当日行数。
 - [ ] AC2 判据2：fullSuiteRan + skipReason 字段（跳过=被记录的决定）。
 - [ ] AC3 判据3：cpu_time_s/分相 ms/load 字段（相边界差分）。
-- [ ] AC4 既有测试全绿；`--for-task` scoped 门绿。
+- [ ] AC4 判据4：与 AC83 交叉——fan-in 入账 + 相边界差分生产数据一起完成。
+- [ ] AC5 既有测试全绿；`--for-task` scoped 门绿。
 
 ## Definition of Done
 
-- [ ] fan-in 每次 suite（含跳过）入账 per-task-suite-records（run 数==行数）+ fullSuiteRan/skipReason + 分相字段。
+- [ ] fan-in 每次 suite（含跳过）入账 per-task-suite-records（run 数==行数）+ fullSuiteRan/skipReason + 分相字段 + 与 AC83 一起完成（真实数据落地非仅测试绿）。
 
 ## Touches
 
