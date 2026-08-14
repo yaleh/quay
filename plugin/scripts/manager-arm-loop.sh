@@ -102,7 +102,8 @@ SENTINEL="[manager-tick]"
 # registry-verified，AC4 核实会当场失效）。RECEIPT_STRIP 用于剥离旧收据尾缀。
 ID_PAT='\|cron:[^|[:space:]]+'
 AT_PAT='\|verified:[0-9]{4}-[0-9]{2}-[0-9]{2}T'
-RECEIPT_STRIP='s/[[:space:]]*\|cron:[^|]*\|verified:[^|[:space:]]*$//'
+ANCHOR_PAT='\|anchor:[0-9a-f]{64}'
+RECEIPT_STRIP='s/[[:space:]]*\|cron:[^|]*\|verified:[^|[:space:]]*(\|anchor:[^|[:space:]]*)?[[:space:]]*$//'
 # prompt = 指针（AC5c 规则 1：只携带指针，不携带指令内容）
 # 指针目标 = 存在的那份（AC4 不铺虚空武装器）：
 #   - dev-tree / quay-init --loop --manager 的消费项目：`orchestration/manager-loop-tick.md`（活文档）
@@ -168,10 +169,21 @@ if [ -n "$RECORD_CRON" ]; then
     exit 1
   fi
   NOW_ISO="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  # 剥离旧收据尾缀（可重复 --record-cron，同一次 arm 周期内换 id/重写不累积两条）
+  # 判据④（人 2026-08-14 10:4xZ 裁定「把锚文件 sha256 写进 registry」）：record-cron 时把锚文件
+  # （orchestration/manager-tick-prompt.txt，manager-anchor-check.py:18 校的同一个）的 sha256 一并
+  # 写进 registry 哨兵行 → 每轮核实能答「活着的 cron 携带的 prompt 文本 == 当前正本」。锚文件缺席时
+  # 不写 anchor 字段（npm-pack 裸机无 orchestration/，--verify 侧同样跳过）。
+  ANCHOR_FILE="${REPO_ROOT}/orchestration/manager-tick-prompt.txt"
+  ANCHOR_HASH=""
+  if [ -f "$ANCHOR_FILE" ]; then
+    ANCHOR_HASH="$(sha256sum "$ANCHOR_FILE" | awk '{print $1}')"
+  fi
+  RECEIPT=" |cron:${RECORD_CRON}|verified:${NOW_ISO}"
+  [ -n "$ANCHOR_HASH" ] && RECEIPT="${RECEIPT}|anchor:${ANCHOR_HASH}"
+  # 剥离旧收据尾缀（可重复 --record-cron，同一次 arm 周期内换 id/重写不累积两条；anchor 字段一并剥离）
   sed -E "${RECEIPT_STRIP}" "$STORE" > "${STORE}.tmp"
   # 在哨兵行行尾附上新收据（只在哨兵行上附，不动其它行）
-  awk -v sent="$SENTINEL" -v rec=" |cron:${RECORD_CRON}|verified:${NOW_ISO}" \
+  awk -v sent="$SENTINEL" -v rec="$RECEIPT" \
     '{ if ($0 ~ sent) print $0 rec; else print $0 }' "${STORE}.tmp" > "${STORE}.tmp2"
   mv "${STORE}.tmp2" "$STORE"
   rm -f "${STORE}.tmp"
@@ -199,6 +211,20 @@ if [ "$VERIFY" = 1 ]; then
     local line; line="$(grep "$SENTINEL" "$STORE" | head -1)"
     if ! printf '%s' "$line" | grep -qE "$ID_PAT"; then echo "registry-only"; return; fi
     if ! printf '%s' "$line" | grep -qE "$AT_PAT"; then echo "registry-only"; return; fi
+    # 判据④（人 2026-08-14 10:4xZ）：cron 携带的 prompt 文本 == 当前正本 —— 注册表记的 anchor sha256
+    # 必须等于当前锚文件的 sha256。不等 ⇒ 正本已变而 cron 未重建 ⇒ 必须清扫重建（anchor-changed）。
+    # 注册表无 anchor 字段（旧 registry）或锚文件缺席（npm-pack 裸机）⇒ 跳过（无法核，不误报）。
+    if printf '%s' "$line" | grep -qE "$ANCHOR_PAT"; then
+      local recorded_anchor current_anchor
+      recorded_anchor="$(printf '%s' "$line" | sed -n 's/.*|anchor:\([0-9a-f]\{64\}\).*/\1/p' | head -1)"
+      current_anchor=""
+      if [ -f "${REPO_ROOT}/orchestration/manager-tick-prompt.txt" ]; then
+        current_anchor="$(sha256sum "${REPO_ROOT}/orchestration/manager-tick-prompt.txt" | awk '{print $1}')"
+      fi
+      if [ -n "$recorded_anchor" ] && [ -n "$current_anchor" ] && [ "$recorded_anchor" != "$current_anchor" ]; then
+        echo "anchor-changed"; return
+      fi
+    fi
     local at; at="$(printf '%s' "$line" | sed -n 's/.*|verified:\([^|[:space:]]*\).*/\1/p' | head -1)"
     local at_epoch now_epoch; now_epoch="$(date -u +%s)"
     at_epoch="$(date -u -d "$at" +%s 2>/dev/null)"
@@ -230,6 +256,7 @@ if [ "$VERIFY" = 1 ]; then
       registry-multiple)  echo "registry-multiple: expected exactly ONE $SENTINEL entry";;
       receipt-stale)      echo "receipt-stale: the cron receipt is older than ${STALE_SECONDS}s";;
       receipt-unparseable) echo "receipt-unparseable: the verified timestamp is not an ISO instant";;
+      anchor-changed)     echo "anchor-changed: manager-tick-prompt.txt changed since the cron was recorded — the cron runs stale text (must clean + rebuild)";;
     esac
   fi
   exit 1
