@@ -348,3 +348,66 @@ test("AC1 (rewrite) — an inner-state.sh process is NOT a pass condition (mount
     }
   } finally { cleanup(tmp); }
 });
+
+// ── gap-monitor-mount-check-stale-pids: dead-pid re-verification ─────────────────────────────────────
+// A pid matched during the /proc scan can die between the scan and the output (TOCTOU). The checker
+// must re-verify each pid before emitting and route dead pids to the independent `stale_pids` field —
+// NOT silently drop them, and NOT let them satisfy mounted/targetOk (which must be judged on the LIVE
+// set). MONITOR_CHECK_STALE_PIDS is the test seam (mirrors MONITOR_CHECK_SESSION_LIVENESS): it
+// simulates "died between scan and output" by forcing the listed pids to be treated as dead — the
+// TOCTOU window is not externally controllable, so a seam is the only deterministic way to exercise
+// the routing logic with a REAL spawned monitor.
+
+test("stale-pids AC1/AC3 — a dead pid goes to stale_pids (not pids) and mounted/targetOk are judged on the LIVE set only", () => {
+  const tmp = makeTmpWorkspace();
+  const livenessPath = path.join(tmp, "plugin", "scripts", "session-liveness.sh");
+  writeStubLiveness(livenessPath);
+  const child = spawnInSessionFake(livenessPath, { SESSION_ROOT: tmp });
+  try {
+    // The ONLY monitor is forced dead at re-verify time (simulates it dying after the scan).
+    const data = runChecker({
+      MONITOR_CHECK_SESSION_LIVENESS: livenessPath,
+      MONITOR_CHECK_STALE_PIDS: String(child.pid),
+    });
+    assert.ok(Array.isArray(data.stale_pids), "stale_pids field must exist");
+    assert.ok(data.stale_pids.includes(child.pid),
+      `dead pid ${child.pid} must be REPORTED in stale_pids (not silently dropped), got ${JSON.stringify(data.stale_pids)}`);
+    assert.ok(!data.pids.includes(child.pid),
+      `dead pid ${child.pid} must NOT be in pids (live set only), got ${JSON.stringify(data.pids)}`);
+    assert.equal(data.mounted, false,
+      "mounted must be judged on the LIVE pid set — the only monitor is dead ⇒ false (AC3)");
+    assert.equal(data.targetOk, false, "no live observer ⇒ targetOk=false (AC3)");
+  } finally {
+    try { child.kill("SIGKILL"); } catch { /* already gone */ }
+    cleanup(tmp);
+  }
+});
+
+test("stale-pids AC1/AC3 (mixed) — a live pid stays in pids, a concurrent dead pid lands in stale_pids, mounted stays true", () => {
+  const tmp = makeTmpWorkspace();
+  const livenessPath = path.join(tmp, "plugin", "scripts", "session-liveness.sh");
+  writeStubLiveness(livenessPath);
+  const env = { SESSION_ROOT: tmp };
+  const live = spawnInSessionFake(livenessPath, env);
+  const doomed = spawnInSessionFake(livenessPath, env);
+  try {
+    const data = runChecker({
+      MONITOR_CHECK_SESSION_LIVENESS: livenessPath,
+      MONITOR_CHECK_STALE_PIDS: String(doomed.pid),
+    });
+    assert.ok(data.pids.includes(live.pid),
+      `live pid ${live.pid} must stay in pids, got ${JSON.stringify(data.pids)}`);
+    assert.ok(!data.pids.includes(doomed.pid),
+      `dead pid ${doomed.pid} must NOT be in pids, got ${JSON.stringify(data.pids)}`);
+    assert.ok(data.stale_pids.includes(doomed.pid),
+      `dead pid ${doomed.pid} must be in stale_pids, got ${JSON.stringify(data.stale_pids)}`);
+    assert.ok(!data.stale_pids.includes(live.pid),
+      `live pid ${live.pid} must NOT be in stale_pids, got ${JSON.stringify(data.stale_pids)}`);
+    assert.equal(data.mounted, true, "at least one LIVE observer ⇒ mounted=true (AC3)");
+    assert.equal(data.targetOk, true, "live observer aimed at this repo ⇒ targetOk=true");
+  } finally {
+    try { live.kill("SIGKILL"); } catch { /* already gone */ }
+    try { doomed.kill("SIGKILL"); } catch { /* already gone */ }
+    cleanup(tmp);
+  }
+});

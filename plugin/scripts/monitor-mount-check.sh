@@ -34,6 +34,11 @@
 # 测试接缝：MONITOR_CHECK_SESSION_LIVENESS 覆盖要匹配的脚本路径（默认本仓
 # plugin/scripts/session-liveness.sh）。生产调用不设 → 行为不变。
 #
+# 输出前存活复验（gap-monitor-mount-check-stale-pids）：扫描到输出之间 pid 可能已死（TOCTOU）——
+# 逐个 /proc/<pid> 存在性复验（等价 ps -p），死 pid 单独报 `stale_pids`（独立取值，不静默剔除，
+# 不与 mounted 判据混为一谈）；mounted/targetOk 基于【存活 pid 集】。测试接缝
+# MONITOR_CHECK_STALE_PIDS 模拟「扫描后已死」（生产不设）。
+#
 # 用法: bash plugin/scripts/monitor-mount-check.sh [--json]
 # ── 统一 --help（gap-scripts-sprawl：用法在前、退出 0、无业务副作用）────────────────────
 if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
@@ -53,6 +58,7 @@ FORMAT=human
 for a in "$@"; do [ "$a" = "--json" ] && FORMAT=json; done
 
 MMC_SESSION_LIVENESS="$SESSION_LIVENESS" MMC_REPO_ROOT="$REPO_ROOT" MMC_FORMAT="$FORMAT" \
+MMC_STALE_PIDS="${MONITOR_CHECK_STALE_PIDS:-}" \
 python3 - <<'PY'
 import json, os, glob
 
@@ -62,6 +68,14 @@ FMT = os.environ["MMC_FORMAT"]
 
 LIVENESS_BASENAME = os.path.basename(SESSION_LIVENESS)
 
+# 测试接缝（gap-monitor-mount-check-stale-pids）：MONITOR_CHECK_STALE_PIDS 列出要当作「扫描后已死」的
+# pid（逗号分隔）。生产调用不设 → 行为不变；只用于把扫描→复验之间的 TOCTOU 死亡窗口做成可测
+# （否则该窗口外部不可控，死 pid 无法确定性注入）。
+_STALE_OVERRIDE = set()
+_mmc_stale = os.environ.get("MMC_STALE_PIDS", "").strip()
+if _mmc_stale:
+    _STALE_OVERRIDE = {int(p) for p in _mmc_stale.split(",") if p.strip().isdigit()}
+
 
 def read_cmdline(pid):
     try:
@@ -69,6 +83,15 @@ def read_cmdline(pid):
             return f.read().split(b"\0")
     except OSError:
         return []
+
+
+def pid_alive(pid):
+    """输出前存活复验（判据1）：扫描到输出之间 pid 可能已死，逐个用 /proc/<pid> 存在性复验
+    （等价 ps -p）。死 pid 单独报 stale_pids，不静默剔除——「曾经挂过但死了」与「从没挂过」不同形
+    （C29 家族）。"""
+    if pid in _STALE_OVERRIDE:
+        return False
+    return os.path.exists(f"/proc/{pid}")
 
 
 def resolve_script_path(pid, argv_script):
@@ -125,9 +148,11 @@ for d in glob.glob("/proc/[0-9]*"):
         })
 
 targets.sort(key=lambda t: t["pid"])
-mounted = bool(targets)
-target_root = targets[0]["targetRoot"] if targets else ""
-target_ok = bool(targets) and all(t["targetRoot"] == REPO_ROOT for t in targets)
+live_targets = [t for t in targets if pid_alive(t["pid"])]
+stale_pids = [t["pid"] for t in targets if not pid_alive(t["pid"])]
+mounted = bool(live_targets)
+target_root = live_targets[0]["targetRoot"] if live_targets else ""
+target_ok = bool(live_targets) and all(t["targetRoot"] == REPO_ROOT for t in live_targets)
 
 if FMT == "json":
     print(json.dumps({
@@ -136,13 +161,16 @@ if FMT == "json":
         "targetOk": target_ok,
         "repoRoot": REPO_ROOT,
         "livenessScript": SESSION_LIVENESS,
-        "pids": [t["pid"] for t in targets],
-        "targets": targets,
+        "pids": [t["pid"] for t in live_targets],
+        "targets": live_targets,
+        "stale_pids": stale_pids,
     }, ensure_ascii=False, indent=2))
 else:
     print(f"mounted={str(mounted).lower()}")
     print(f"targetRoot={target_root}")
     print(f"targetOk={str(target_ok).lower()}")
-    for t in targets:
+    for t in live_targets:
         print(f"  pid {t['pid']}: targetRoot={t['targetRoot']}")
+    if stale_pids:
+        print(f"  stale_pids: {','.join(map(str, stale_pids))}")
 PY
