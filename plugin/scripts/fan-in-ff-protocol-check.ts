@@ -47,8 +47,15 @@ import { isDirectEntry } from "./gate-script-base.ts";
 
 /** A fan-in merge commit subject: the convention `merge: fan-in task/<id> …` OR git's own auto
  *  subject for a task-branch merge `Merge branch 'task/<id>'`. A merge commit (2+ parents) whose
- *  subject matches this on develop after the protocol baseline is a NON-ff fan-in violation. */
-export const FAN_IN_MERGE_SUBJECT_RE = /fan-in|Merge (remote-tracking )?branch 'task\//i;
+ *  subject matches this on develop after the protocol baseline is a NON-ff fan-in violation.
+ *
+ *  ⚠️ 2026-08-14 gap-ac78 fix: the bare `fan-in` alternative was TOO BROAD — it matched the LEGITIMATE
+ *  step-1 `git merge develop` commit subject `Merge branch 'develop' into task/<id>` whenever the task
+ *  id contains "fan-in" (e.g. task/gap-ac78-fan-in-workflow-a6-check), reddening the gate on the
+ *  protocol's OWN designed flow (SPEC §3: step 1 produces a merge commit that ff carries onto develop).
+ *  Tightened to the two actual fan-in conventions: the `merge: fan-in ` prefix (the explicit non-ff
+ *  fan-in subject) and git's `Merge branch 'task/<id>'` (a --no-ff merge of a task branch). */
+export const FAN_IN_MERGE_SUBJECT_RE = /\bmerge: fan-in |Merge (remote-tracking )?branch 'task\//i;
 
 /** A valid retry-record entry: taskId (string), attempt (int ≥ 1), developHead (40-hex), ts (ISO
  *  `YYYY-MM-DDTHH:MM:SSZ`). Missing/extra fields are allowed but these four must be well-formed. */
