@@ -99,6 +99,10 @@ const REAL_TOP_LEVEL_STEMS = [
 const REAL_SUBAGENT_STEMS = [
   "aab2d14d10a762ff4",
   "ab65b5829c1a78501",
+  // DIR-128 (outer 2026-08-14): a REAL workflow-run subagent — its jsonl lives under
+  // <session>/subagents/workflows/wf_7f3eee37-06a/agent-a8ebef25b5253b8cf.jsonl, NOT directly in
+  // subagents/. The old non-recursive subagentStems() misclassified it as unresolvable ⇒ false RED.
+  "a8ebef25b5253b8cf",
 ];
 
 // ── PURE parseLockEvents ────────────────────────────────────────────────────────────────────────────
@@ -531,6 +535,10 @@ function makeProjectDir() {
   fs.mkdirSync(sess, { recursive: true });
   fs.writeFileSync(path.join(sess, "agent-aab2d14d10a762ff4.jsonl"), "{}");
   fs.writeFileSync(path.join(sess, "agent-ab65b5829c1a78501.jsonl"), "{}");
+  // workflow-run subagents land in subagents/workflows/<run>/ (DIR-128 a8ebef25 regression)
+  const wfRun = path.join(sess, "workflows", "wf_7f3eee37-06a");
+  fs.mkdirSync(wfRun, { recursive: true });
+  fs.writeFileSync(path.join(wfRun, "agent-a8ebef25b5253b8cf.jsonl"), "{}");
   return dir;
 }
 
@@ -543,6 +551,21 @@ test("fs topLevelSessionStems + subagentStems — resolves the fixture tree", (t
   assert.ok(top.includes("bc1a438b-66f2-4760-8964-91c641166602"));
   assert.ok(subs.includes("aab2d14d10a762ff4"));
   assert.ok(subs.includes("ab65b5829c1a78501"));
+});
+
+test("fs subagentStems — recurses into subagents/workflows/<run>/ (DIR-128 a8ebef25 regression: workflow-run subagent resolves, not unresolvable)", (t) => {
+  const dir = makeProjectDir();
+  t.after(() => cleanup(dir));
+  const subs = subagentStems(dir);
+  // the workflow-run subagent file agent-a8ebef25b5253b8cf.jsonl lives at
+  // <session>/subagents/workflows/wf_7f3eee37-06a/ — one level BELOW the old scan depth
+  assert.ok(subs.includes("a8ebef25b5253b8cf"), "workflow-run agent stem must be found recursively");
+  // and the full classifyAgentId path resolves it to 'subagent' (GREEN) against the fixture stems
+  assert.equal(
+    classifyAgentId("a8ebef25b5253b8cf", topLevelSessionStems(dir), subs),
+    "subagent",
+    "workflow-run agentId must classify as subagent, not unresolvable"
+  );
 });
 
 test("fs scanWorkflowTaskIds — finds a Workflow(fan-in-execute) call in a session file at/after the boundary", (t) => {

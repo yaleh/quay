@@ -435,21 +435,32 @@ export function topLevelSessionStems(projectDir: string): string[] {
 }
 
 /** Subagent id stems: every `agent-<uuid>.jsonl` under any `<projectDir>/<session>/subagents/`
- *  (and `<projectDir>/subagents/` if present). Recursive one level of session dirs. */
+ *  (and `<projectDir>/subagents/` if present), scanned RECURSIVELY. The recursion is required
+ *  because workflow-run subagents land under `subagents/workflows/<run>/agent-*.jsonl` — the old
+ *  one-level-of-session-dirs scan stopped at `<session>/subagents/` and misclassified those ids as
+ *  unresolvable (outer 2026-08-14: DIR-128's agentId a8ebef25b5253b8cf lives under
+ *  `<session>/subagents/workflows/wf_…/` and was RED until this fix). */
 export function subagentStems(projectDir: string): string[] {
   if (!fs.existsSync(projectDir)) return [];
   const stems: string[] = [];
-  const dirs = [path.join(projectDir, "subagents")];
+  const roots = [path.join(projectDir, "subagents")];
   for (const entry of fs.readdirSync(projectDir, { withFileTypes: true })) {
-    if (entry.isDirectory()) dirs.push(path.join(projectDir, entry.name, "subagents"));
+    if (entry.isDirectory()) roots.push(path.join(projectDir, entry.name, "subagents"));
   }
-  for (const dir of dirs) {
-    if (!fs.existsSync(dir)) continue;
-    for (const name of fs.readdirSync(dir)) {
-      if (!name.startsWith("agent-") || !name.endsWith(".jsonl")) continue;
-      stems.push(name.slice("agent-".length, -".jsonl".length));
+  const walk = (dir: string): void => {
+    if (!fs.existsSync(dir)) return;
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name === "node_modules") continue;
+        walk(full);
+        continue;
+      }
+      if (!entry.name.startsWith("agent-") || !entry.name.endsWith(".jsonl")) continue;
+      stems.push(entry.name.slice("agent-".length, -".jsonl".length));
     }
-  }
+  };
+  for (const root of roots) walk(root);
   return stems;
 }
 
