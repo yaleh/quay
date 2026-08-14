@@ -59,4 +59,5 @@ depends_on:
 - **precommit-guard.ts 注释对齐（本任务 Touch）**：MERGE-PATH COVERAGE 块补 AC62/AC63 段——fan-in 约定已改 ff-only ⇒ `git merge --ff-only` 不产生 merge commit，pre-commit 与 pre-merge-commit 都不触发 ⇒ doc 检查在 ff 路径无钩子触发；A6 无锁段第 3 步**显式**跑 `bash scripts/test.sh --static-checks-doc`（不依赖钩子）；两次 doc 检查刻意不去重（commit 时覆盖自己改动 / 第 3 步覆盖与 develop 合并后内容，去重漏合并引入的文档冲突，人 2026-08-14 确认）。
 - **负控制 fixture（本任务 Touch，`plugin/test/precommit-guard.test.mjs` 新增 AC63 用例）**：安装 pre-commit + pre-merge-commit 两个计数钩子后 `git merge --ff-only` ⇒ 触发 **0** 个钩子（`hook-fires.log` 不存在）；对照：普通 `git commit` 触发 pre-commit 且不触发 pre-merge-commit（证明计数器会抓火，零是真零）。这钉死「ff 路径 doc 检查无钩子触发 ⇒ 第 3 步显式跑必需」这个承重前提。
 - **C17（fast-mode-tick-core.md A6 第 3 步，outer 落地，本任务不改）**：A6 无锁段第 ③ 步已含「全量 suite + doc 检查 `bash scripts/test.sh --static-checks-doc`(ff 不触发任何钩子,AC63;刻意不去重…)」——由 AC62 fan-in 落地（commit `1e65dc26`）接线。本任务验证对齐，无需再改（建议见报告）。
-- **scoped 门 `--for-task gap-ac63-ff-explicit-doc-check-before-merge --allow-thin`**：exit 0，31 tests / 31 pass / 0 fail（含新增 AC63 负控制用例）；ts-typecheck 闸 ADMITTED（exit 0，Touches 无新增/移动 .ts）。
+- **scoped 门 `--for-task gap-ac63-ff-explicit-doc-check-before-merge --allow-thin`**：exit 0，31 tests / 31 pass / 0 fail（含新增 AC63 负控制用例）；ts-typecheck 闸 ADMITTED（exit 0，Touches 无新增/移动 .ts）；`--static-checks-doc` exit 0。
+- **落地 commit**：`40fcccc3`（worktree 内，未 merge；status 保持 ready）。
