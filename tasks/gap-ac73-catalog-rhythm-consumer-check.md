@@ -39,6 +39,7 @@ tick-core-drift-check         已接线但 --no-block（2026-08-14） → 第 4 
   - `tick-core-drift-check --no-block`（已接线但无消费方——今天 3 pairs 全漂、无人据此动作）⇒ 回放必须红。
   - **`checked === total` 在翻 done 方向零消费者（manager 2026-08-14 ④ 裁定并入，AC68 实证）**：同一谓词派发方向有 20-34 处消费者（ready-pool-check.ts=34 / slot-refill.ts=20），翻 done 方向零消费者——`loop-complete-task.ts` 只有 `sectionFound` 一处（:109-110 只判 `!sectionFound`），AC47 gate 明说 completion 判定归调用方 ⇒ AC68 0/5 unchecked 仍翻 done。**不是新族，是已判之族第三个实例** ⇒ 回放必须红。
   - **`fan-in-ff-executor-check.ts`（AC67 交付，零接线；manager 2026-08-14 ③ 裁定并入，第 4 实例）**：develop `scripts/test.sh` 含 `fan-in-ff-executor-check` = 0（谓词干跑已知接线的 check=4，非假零）；catalog 节奏「按需」（capability-catalog.sh:418）无「谁按它」⇒ AC67 判据3「回放主线程 fan-in 必须报红」结构上不可能红。**①④ 是同一族里更窄的一族：随任务落地的【新检查器】默认不接线，因为没有任何判据要求「接进 run_static_checks」** ⇒ 本阶段两条关键 AC（AC62、AC67）都因此勾不了。⇒ 回放必须红。
+  - **ff-only 协议本体被绕过（manager 2026-08-14 08:1xZ，第 5 实例——同一形状、对象升一级）**：`fan-in-merge-lock-events.jsonl` 分布 ac67=8（它自己 3 次重试+最终 ff）、**其余全部 0**——AC64/AC68/AC74/AC75/B15/AC77 六次 fan-in 全未走 `fan-in-ff-merge.sh`（直接 commit 到 develop）。**前四个样本绕过的是【检查器】，这一个绕过的是【协议本体】——同一形状（造好、落地、无人调用），对象升了一级**。AC67 status=done 而协议未启用 ⇒ 记录上「已完成」、行为上「未启用」。⇒ 回放必须红（任何「该走 ff-only 却直接 commit」必须被报）。
   - **优先级（manager 2026-08-14 ③ 裁定）**：AC73 与 AC75 同级——AC75 降重试代价、AC73 解两条 AC 收口阻塞；**两条都不与在飞重叠时同时派；只能派一条时 AC75 先**（重试代价每轮发生、AC 勾选可等）。
   - 判据4：AC67 已补 `plugin/loop/` Touches 行（本轮 647e3182 后）；**AC64 仍只声明 `precommit-guard.ts` 不声明执行核（合法——它不碰核）**；未来凡声明单份执行核副本的任务回放必须红。
 

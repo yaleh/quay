@@ -419,3 +419,34 @@ suite 读【共享检出】；AC42 之后 per-task suite 跑在各自 worktree�
 **⇒ 退役后 manager 的两层忙闲仍有读数（A0 `outer.liveness`），但要知道它是【代理量】**：
 pane 进程存在 ≠ 会话在处理消息（2026-08-14 实证：inner 的 pane 一直在，tick 停了 21 分钟）。
 **判层是否活着，正本是直接量**——`git log` 提交时刻 / `worktree` 内活进程（outer A21 / inner A25 已是这条路线）。
+
+---
+
+## R29 — inner-wakeup-heartbeat-check `blocked==[] && agentDispatches>=agentLimit` 判据退役（AC77）
+
+**来源**：`plugin/scripts/inner-wakeup-heartbeat-check.ts` semanticTriggerHeuristic（AC3 trigger）
+**退役**：AC77 判据2 2026-08-14（gap-ac77-spawn-limit-detect-harness-error-only，人 2026-08-14 07:4xZ 裁定「agentLimit 的处理仅应包括检测 harness 的报错……而不要自己重复计数」）
+**正文**（原文迁出保留）：
+
+```
+/** AC3 heuristic: `blocked==[] && agentDispatches>=agentLimit`. PURE. */
+export function semanticTriggerHeuristic(heartbeat) {
+  const blocked = Array.isArray(heartbeat?.blocked) ? heartbeat.blocked : [];
+  const atLimit =
+    typeof heartbeat?.agentDispatches === "number" &&
+    typeof heartbeat?.agentLimit === "number" &&
+    heartbeat.agentDispatches >= heartbeat.agentLimit;
+  return blocked.length === 0 && atLimit;
+}
+```
+
+**退役理由（AC77 判据2）**：`blocked==[] && agentDispatches>=agentLimit` 是结构上恒假的判据——心跳现读
+`agentLimit = undefined`（`agentDispatches=15`）⇒ 该判据从不报、与「一切正常」同形（硬规则 4）。且它用
+**我们自维护的计数**去判一个由 **harness 掌握**的预算（硬规则 4b：量由被测对象自产，停摆时跟着停，
+与「一切正常」同形——正是 CLAUDE.md:21 记载的那次数小时误诊的根源）。修法不是补写 `agentLimit`（那正是
+人禁止的「自己重复计数」）。
+
+**替代（AC77 判据1）**：检测 harness 自己的报错串 `Subagent spawn limit reached`（CLAUDE.md:21 识别法
+逐字——「目标会话 transcript 里搜 `Subagent spawn limit reached`」）。**只报不动（判据3）**：报错后的
+处理暂定由人执行，不自动 `/clear`、不自动降 cap、不自动重启。**不覆盖**：不估上限数值（正本在
+`tasks/gap-inner-subagent-budget-invisible.md`，随版本变）。
