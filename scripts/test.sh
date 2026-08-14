@@ -550,6 +550,19 @@ run_static_checks() {
   # @static-tier change
   # @static-object orchestration/preference-notification-log.md orchestration/dispatch-preference.md plugin/scripts/preference-notification-check.ts
   run_checker "preference-notification-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/preference-notification-check.ts" --root "${repo_root}"
+  echo "== ac69-slot-queue-gap check (tasks/gap-ac69-suite-slot-full-should-queue-not-wait, AC1 + DoD) =="
+  # AC69 先量再改 enforcement: the「槽释放→下次派发差值」measurement record
+  # (docs/analysis/ac69-slot-release-vs-dispatch-gap.json) must be LANDED and structurally complete
+  # (task/measuredAt/dataSource/method/stats.medianSeconds/conclusion/conclusionReason all present,
+  # conclusion ∈ maintain|change) — a task whose AC says「已测」needs a mechanical product (硬规则 9:
+  # 可见性 ≠ 执行). Absent/corrupt record ⇒ NOT-EVALUATED (exit 2/3), distinct from 合格 (exit 0) —
+  # 硬规则 3b: 读不懂输入不得返回与合格同形的值. The checker validates the COMMITTED record; it does
+  # NOT recompute live .quay/ data (gitignored, worktree 副本) — the measurement itself is the
+  # documented analysis in the record's dataSource/method. Mutation case + unit tests carry the
+  # negative control (delete record / drop conclusion ⇒ RED, restore ⇒ GREEN).
+  # @static-tier change
+  # @static-object docs/analysis/ac69-slot-release-vs-dispatch-gap.json plugin/scripts/ac69-slot-queue-gap-check.ts plugin/scripts/checker-mutation-cases/ac69-slot-queue-gap-check.sh plugin/test/ac69-slot-queue-gap-check.test.mjs
+  run_checker "ac69-slot-queue-gap-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/ac69-slot-queue-gap-check.ts" --root "${repo_root}"
   # Wait for all parallelized checkers and fail closed if any failed (see the RUN_CHECKER_PARALLEL
   # note at the top of this function — AC3 failure visibility, AC4 cost-ledger completeness).
   run_checker_parallel_wait

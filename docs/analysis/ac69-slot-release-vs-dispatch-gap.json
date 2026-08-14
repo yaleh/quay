@@ -1,0 +1,27 @@
+{
+  "task": "gap-ac69-suite-slot-full-should-queue-not-wait",
+  "measuredAt": "2026-08-14T04:56:32Z",
+  "question": "槽释放（suite 终态）→ 下次派发（下一轮 suite 起跑）的差值——先量再改，AC69 AC1。",
+  "dataSource": ".quay/verification-round.jsonl（主检出；164 轮，2026-08-12T03:28:00Z .. 2026-08-13T16:19:54Z）",
+  "method": "suite 终态写入时刻：每轮 N 的终态 = startedAt(N) + durationMs(N)（test.sh 退出时 flock 自动释放 = 该轮 suite 的终态写入）。下次派发时刻 = 下一轮 N+1 的 startedAt(N+1)。差值 = start(N+1) − end(N)。负差 = 两轮重叠（2-slot 并发生效，两套 suite 同时跑）。零新机制：全部读现有 verification-round.jsonl 记录。",
+  "procLocksNote": "/proc/locks 只显示【当前】持有者（临时态），对历史槽释放无记录——本次测量用 suite 终态写入时刻（任务给出的两选项之一）。",
+  "nRounds": 164,
+  "nGaps": 163,
+  "nOverlapNegative": 4,
+  "nSerialPositive": 159,
+  "stats": {
+    "medianSeconds": 123.4,
+    "meanSeconds": 299.8,
+    "minSeconds": 6.7,
+    "maxSeconds": 6300.8,
+    "buckets": { "lt60s": 47, "60to300s": 60, "300to1200s": 49, "gt1200s": 3 }
+  },
+  "autoRetriggerCluster": {
+    "count_580to620s": 33,
+    "note": "300–1200s 桶（49）绝大多数是 suite-state-trigger 自动重触发的 ~600s（10 分钟）节拍——一个【刻意的调度间隔】，不是槽竞争白等。近期轮（153–167）全部 ~600s，即当前稳态 = 自动重触发节拍。"
+  },
+  "tickPeriodSeconds": [1200, 1800],
+  "interpretation": "白等一个 tick 周期（1200–1800s）的假设【不被数据支持】：中位差 ~123s（约 2 分钟），稳态差 ~600s（自动重触发节拍，非白等）。两条都不是完整 tick。第三条 suite 已由 test.sh full_suite_lock_acquire 在进程内 WAIT（flock -w 1 轮询，~1s 粒度），槽空即接上。",
+  "conclusion": "maintain",
+  "conclusionReason": "差值中位 ~2 分钟（~123s），非完整 tick 周期；~600s 簇是刻意自动重触发节拍。与 2026-08-14 04:1xZ 止损裁定一致（实测代价 ~2 分钟，未达造机制量级，硬规则 12）。维持 2-slot 模型：第三条 suite 已排队（进程内 flock WAIT），槽空 ~1s 接上。"
+}

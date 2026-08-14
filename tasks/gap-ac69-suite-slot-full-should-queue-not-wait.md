@@ -58,11 +58,23 @@ depends_on: []
 
 ## Touches
 
-- scripts/test.sh（槽满排队逻辑 + 锁/推导时序）
-- plugin/scripts/resource-gate.sh（放行配合）
-- （测量记录——槽释放时刻 vs 派发时刻）
+- scripts/test.sh（槽满排队逻辑 + 锁/推导时序；本任务只接 ac69 检查器，不动 2-slot 模型）
+- plugin/scripts/resource-gate.sh（放行配合——本任务未改，保留触碰声明）
+- docs/analysis/ac69-slot-release-vs-dispatch-gap.json（测量记录——槽释放时刻 vs 派发时刻）
+- plugin/scripts/ac69-slot-queue-gap-check.ts（测量记录检查器）
+- plugin/scripts/checker-mutation-cases/ac69-slot-queue-gap-check.sh（检查器 mutation case）
+- plugin/test/ac69-slot-queue-gap-check.test.mjs（检查器 fixture 测试）
+- plugin/scripts/capability-catalog.sh（新 plugin/scripts 文件的登记——question + cadence/invalidation/last-reaffirmed/matching）
+- docs/proposals/quay-product-outline.md（§6 DELIVERY-INVENTORY 快照随新脚本重生成）
 - tasks/gap-ac69-suite-slot-full-should-queue-not-wait.md（自身）
 
 ## Evidence
 
-（落地后回填）
+**先量再改测量（2026-08-14 04:56Z，AC1/DoD）**：槽释放→下次派发差值已测，数据源 `.quay/verification-round.jsonl`（164 轮，2026-08-12T03:28Z..2026-08-13T16:19Z）。
+
+- 方法：suite 终态写入时刻——每轮终态 = startedAt+durationMs（test.sh 退出即 flock 释放 = 该轮 suite 终态写入），下次派发 = 下一轮 startedAt；差值 = start(N+1) − end(N)。零新机制，全读现有记录。
+- 结果：163 个差值，4 负（2-slot 重叠并发生效），159 正；中位 **123.4s**（约 2 分钟），均值 299.8s，min 6.7s，max 6300.8s；分布 <60s=47 / 60-300s=60 / 300-1200s=49 / >1200s=3。
+- 稳态簇：300-1200s 桶的 33 个是 ~600s（10 分钟）自动重触发节拍——刻意的调度间隔，非槽竞争白等；近期轮 153-167 全 ~600s。
+- 结论：**维持 2-slot 模型**——差值中位 ~2 分钟、非完整 tick 周期（1200-1800s），「白等一个 tick 周期」假设不被支持；第三条 suite 已由 test.sh `full_suite_lock_acquire` 进程内 flock WAIT（flock -w 1 轮询，~1s 粒度）排队，槽空即接上。与 2026-08-14 04:1xZ 止损裁定（实测代价 ~2 分钟，未达造机制量级，硬规则 12）一致。
+- 机械产物：`docs/analysis/ac69-slot-release-vs-dispatch-gap.json`（结构化记录）+ `plugin/scripts/ac69-slot-queue-gap-check.ts`（检查器：缺席 ⇒ exit 2 / 损坏 ⇒ exit 3，与合格 exit 0 区分——硬规则 3b）+ fixture 测试 + mutation case。
+- `--for-task` scoped 门绿；既有测试全绿。
