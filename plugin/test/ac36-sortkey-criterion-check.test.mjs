@@ -11,7 +11,11 @@
 // AC3 mechanical: checkCriterion2 asserts (a) DC task strictly moved forward, (b) negative control
 //   — same-family non-DC keep relative order, (c) blocking_suite stays above delivery_critical.
 // AC4 no-regress: slot-refill's own existing assertions on the STRING `recommended` array are
-//   untouched (see slot-refill.test.mjs) — this file only adds the ranking surface.
+//   untouched except for the AC56 de-ordering (gap-ac56-recommended-deordered: `recommended` is now
+//   lexicographic + "order meaningless" annotated — the dispatch array no longer encodes the priority
+//   order). The PRIORITY order lives in the `ranking` array (the AC36 diagnostic), which THIS checker
+//   reads — AC36 判据② stays mechanically assertable because `ranking` remains priority-ordered while
+//   `recommended` is de-ordered.
 //
 // Run: scripts/test.sh plugin/test/ac36-sortkey-criterion-check.test.mjs
 
@@ -289,7 +293,8 @@ test("END-TO-END — real slot-refill CLI: ranking carries the axes, checker ver
   writeTask(root, "ac36-e2e", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/e2e.ts (new)"]) });
 
   const before = runSlotRefill(root);
-  assert.deepEqual(before.recommended, ["ac36-aaa", "ac36-e2e"], "string recommended stays backward compatible");
+  assert.deepEqual(before.recommended, ["ac36-aaa", "ac36-e2e"], "recommended is de-ordered (lexicographic)");
+  assert.ok(/order meaningless/.test(before.recommended_order), "the de-ordered output is explicitly annotated (AC56)");
   assert.ok(Array.isArray(before.ranking), "--json exposes the ranking array");
   assert.equal(before.ranking.length, 2);
   for (const e of before.ranking) {
@@ -299,10 +304,13 @@ test("END-TO-END — real slot-refill CLI: ranking carries the axes, checker ver
   }
   assert.deepEqual(before.ranking.map((e) => e.id), ["ac36-aaa", "ac36-e2e"]);
 
-  // Apply the label; the next refill evaluation must move the labeled task strictly forward.
+  // Apply the label; the next refill evaluation must move the labeled task strictly forward IN THE
+  // RANKING (the AC36 diagnostic), while `recommended` stays de-ordered (AC56 去序 — inner is not
+  // anchored to "the mechanism's first pick").
   writeTask(root, "ac36-e2e", { status: "ready", labels: ["gap", "delivery-critical"], body: dispatchableBody(["- code/e2e.ts (new)"]) });
   const after = runSlotRefill(root);
-  assert.deepEqual(after.recommended, ["ac36-e2e", "ac36-aaa"], "labeled task ranks first");
+  assert.deepEqual(after.recommended, ["ac36-aaa", "ac36-e2e"], "recommended stays de-ordered (lexicographic) — the label does NOT reorder the dispatch array (AC56)");
+  assert.deepEqual(after.ranking.map((e) => e.id), ["ac36-e2e", "ac36-aaa"], "the labeled task ranks first in the ranking (priority order — the AC36 surface)");
 
   const r = checkCriterion2({ before, after, familyPrefix: "ac36-" });
   assert.equal(r.ok, true, JSON.stringify(r.reason));
