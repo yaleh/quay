@@ -1,0 +1,301 @@
+{
+  "generatedAt": "2026-08-14T00:04:11.685Z",
+  "since": null,
+  "tasks": [
+    {
+      "taskId": "gap-ac36-recommended-exposes-sort-key",
+      "runId": "fm-gap-ac36-recommended-exposes-sort-key-1786440531920-xh2je8",
+      "minutes": 379.56146666666666,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-apply-promotes-b15-needs-work-tasks",
+      "runId": "fm-gap-apply-promotes-b15-needs-work-tasks-1786474023085-sp95es",
+      "minutes": 54.848166666666664,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-commit-message-claims-verified-without-verification",
+      "runId": "fm-gap-commit-message-claims-verified-without-verification-1786460024973-1xfwwq",
+      "minutes": 54.67515,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-green-verdict-ac1-ac2-mechanisms-not-effective",
+      "runId": "fm-gap-green-verdict-ac1-ac2-mechanisms-not-effective-1786459793718-agupjz",
+      "minutes": 58.525,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-inner-blocked-signal-comment-refs-retired-inner-state-sh",
+      "runId": "fm-gap-inner-blocked-signal-comment-refs-retired-inner-state-sh-1786459793837-sy44jo",
+      "minutes": 58.525133333333336,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-over90-clock-measures-queue-time-not-work-time",
+      "runId": "fm-gap-over90-clock-measures-queue-time-not-work-time-1786479699492-f7vvjz",
+      "minutes": 63.9213,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-resource-gate-psi-does-not-capture-load-flake-driver",
+      "runId": "fm-gap-resource-gate-psi-does-not-capture-load-flake-driver-1786440532328-1cxsyk",
+      "minutes": 55.175783333333335,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-send-keys-verified-leaks-tmux-servers-unincorporated",
+      "runId": "fm-gap-send-keys-verified-leaks-tmux-servers-unincorporated-1786441121377-959amz",
+      "minutes": 45.36235,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-supervisor-deliver-no-wait-for-idle-retry",
+      "runId": "fm-gap-supervisor-deliver-no-wait-for-idle-retry-1786479699315-bwk5g8",
+      "minutes": 63.926433333333335,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-supervisor-preempt-candidates-work-clock",
+      "runId": "fm-gap-supervisor-preempt-candidates-work-clock-1786483830444-wf9eee",
+      "minutes": 33.60276666666667,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-verification-round-missing-phase-ms-breaks-cost-attribution",
+      "runId": "fm-gap-verification-round-missing-phase-ms-breaks-cost-attribution-1786440532052-w2mhce",
+      "minutes": 55.18248333333333,
+      "outcome": "done"
+    }
+  ],
+  "orphaned": [],
+  "inProgress": [
+    {
+      "taskId": "gap-quay-self-hosting-e2e-proof",
+      "runId": "fm-gap-quay-self-hosting-e2e-proof-1786444937426-387z0x",
+      "startedAtMs": 1786444937432,
+      "workStartedAtMs": 1786444937432,
+      "startedAtMsUnreliable": false
+    }
+  ],
+  "meanMinutes": 83.93691212121212,
+  "medianMinutes": 55.18248333333333,
+  "tasksPerHour": 0.17575301701911886,
+  "serialEquivalentPerHour": 0.7148225790502615,
+  "windowStart": "2026-08-11T09:28:51.925Z",
+  "windowEnd": "2026-08-14T00:04:08.114Z",
+  "windowHours": 62.587830277777776,
+  "haltedHours": 0,
+  "halted": [],
+  "blocked": [],
+  "totalBlockedMs": 0,
+  "longestBlockedMs": 0,
+  "reconciled": [
+    {
+      "taskId": "gap-forty-to-six-remerge-needs-tests-updated-first",
+      "runId": "fm-gap-forty-to-six-remerge-needs-tests-updated-first-1786442919172-6bikdq",
+      "minutes": 362.4529333333333,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-full-suite-runner-cgroup-scope-evidence-unfound",
+      "runId": "fm-gap-full-suite-runner-cgroup-scope-evidence-unfound-1786444937161-6duhbm",
+      "minutes": 328.81986666666666,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-install-family-tests-rotate-flakes-under-full-suite",
+      "runId": "fm-gap-install-family-tests-rotate-flakes-under-full-suite-1786446846837-n3gots",
+      "minutes": 296.992,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-judgment-computed-not-wired-to-action",
+      "runId": "fm-gap-judgment-computed-not-wired-to-action-1786446525822-vh5owr",
+      "minutes": 302.3423,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-loop-shipping-scan-does-not-exclude-worktrees",
+      "runId": "fm-gap-loop-shipping-scan-does-not-exclude-worktrees-1786447170267-yamh48",
+      "minutes": 291.6016,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-loop-shipping-threshold-scope-check-old-path-regression",
+      "runId": "fm-gap-loop-shipping-threshold-scope-check-old-path-regression-1786444937558-6kh1jy",
+      "minutes": 328.81346666666667,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-loop-shipping-verify-delivery-surface-consumer-laid-ref",
+      "runId": "fm-gap-loop-shipping-verify-delivery-surface-consumer-laid-ref-1786447580533-vlui2f",
+      "minutes": 284.76393333333334,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-manager-tick-core-exclusion-now-inert-after-c9-fix",
+      "runId": "fm-gap-manager-tick-core-exclusion-now-inert-after-c9-fix-1786447725783-8mbl4h",
+      "minutes": 282.34313333333336,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-measure-trend-large-test-load-noise",
+      "runId": "fm-gap-measure-trend-large-test-load-noise-1786445537612-6eljen",
+      "minutes": 318.8127,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-measure-trend-load-noise-false-positive",
+      "runId": "fm-gap-measure-trend-load-noise-false-positive-1786448086677-t4b00p",
+      "minutes": 276.32835,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-measure-trend-relative-trigger-lacks-hist-variance-exemption",
+      "runId": "fm-gap-measure-trend-relative-trigger-lacks-hist-variance-exemption-1786447170389-ng6h91",
+      "minutes": 291.59985,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-merge-introduced-referenced-not-landed-manager-tick-log",
+      "runId": "fm-gap-merge-introduced-referenced-not-landed-manager-tick-log-1786446525976-wv2395",
+      "minutes": 302.34006666666664,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-quay-init-never-writes-branch-model-config-fork-baseline-merge-target",
+      "runId": "fm-gap-quay-init-never-writes-branch-model-config-fork-baseline-merge-target-1786445142069-lpfr5b",
+      "minutes": 325.40528333333333,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-quay-last-pane-txt-untracked-dirties-tree",
+      "runId": "fm-gap-quay-last-pane-txt-untracked-dirties-tree-1786440532191-8adhy2",
+      "minutes": 402.23665,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-round5-red-killtimeout-sigkill-and-capfromgate-seam-under-load",
+      "runId": "fm-gap-round5-red-killtimeout-sigkill-and-capfromgate-seam-under-load-1786445265596-wufzvv",
+      "minutes": 323.3466,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-runner-grouping-ac7-nested-spawn-load-flake",
+      "runId": "fm-gap-runner-grouping-ac7-nested-spawn-load-flake-1786444937688-s3tmig",
+      "minutes": 328.8118,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-serial-phase-install-test-residue-dependency",
+      "runId": "fm-gap-serial-phase-install-test-residue-dependency-1786447170509-wp3c2y",
+      "minutes": 291.59816666666666,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-slot-refill-c8-reject-no-backfill",
+      "runId": "fm-gap-slot-refill-c8-reject-no-backfill-1786444937300-mg311d",
+      "minutes": 328.8183666666667,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-suite-blocking-directory-glob-overbroad",
+      "runId": "fm-gap-suite-blocking-directory-glob-overbroad-1786448543620-nvqabs",
+      "minutes": 268.7130833333333,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-suite-blocking-directory-glob-overbroad",
+      "runId": "fm-gap-suite-blocking-directory-glob-overbroad-1786452309695-ylwlh2",
+      "minutes": 205.94521666666665,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-suite-fix-scope-worktree-green-merge-gate",
+      "runId": "fm-gap-suite-fix-scope-worktree-green-merge-gate-1786448543361-bdpa48",
+      "minutes": 268.71748333333335,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-suite-red-verdict-carries-empty-failures-payload",
+      "runId": "fm-gap-suite-red-verdict-carries-empty-failures-payload-1786442919295-ofgy19",
+      "minutes": 362.452,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-targeted-promotion-operation-does-not-exist",
+      "runId": "fm-gap-targeted-promotion-operation-does-not-exist-1786445438534-hwstcw",
+      "minutes": 320.4646333333333,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-task-file-develop-integration-drift-fan-in-conflicts",
+      "runId": "fm-gap-task-file-develop-integration-drift-fan-in-conflicts-1786448543489-ezs8z8",
+      "minutes": 268.71551666666664,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": true
+    },
+    {
+      "taskId": "gap-threshold-scope-load-flake-fifth-family-member",
+      "runId": "fm-gap-threshold-scope-load-flake-fifth-family-member-1786447390323-4a3y15",
+      "minutes": 287.935,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    }
+  ],
+  "unreliable": [],
+  "reconcilable": [],
+  "realInFlight": 1,
+  "closedButLive": [],
+  "occupiedSlots": 1
+}
