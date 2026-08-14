@@ -1039,7 +1039,7 @@ git -C "$REPO_ROOT" worktree add $WORKTREE_ROOT/<slug> -b task/<id> "$FORK_BASEL
 - **每个任务 worktree 都从 `$FORK_BASELINE`（develop HEAD）分叉**——`--force-integration` 退役说明 → `orchestration/archive/AC58-retired-clauses.md#R15`。它当初要解的任务文件证据段冲突（实证 2026-08-10：round5-red
   c3583844 vs 2c1539d7 同文件不同段）由 **rebase-重跑循环**吸收：fan-in 前先 rebase 新 develop，
   冲突就地合并、套件重跑通过再合并（**代价 = rebase 后重跑套件**，人 2026-08-13 裁定④已同意）。
-- **写所有权分离（AC3）**：任务文件的 `status:` frontmatter **由 outer 独占**（状态翻转/记录）；
+- **写所有权分离（AC3）**：任务文件的 `status:` frontmatter **由 inner 在 worktree 内翻**（(a2)——fan-in merge 带进 develop，主检出不直写）；
   inner **只追加正文段**（AC 勾选 / Evidence / 记录），**不写 frontmatter**——两层写同一文件的不同
   段，fan-in 不再 add/add。证据追加用 body-only 语义（`task-schema.ts` 的 `appendBodySection`：
   frontmatter 字节不变，只动正文），**不整体覆盖**（`evidence_append_not_overwrite = 1`）。
@@ -1052,12 +1052,12 @@ git -C "$REPO_ROOT" worktree add $WORKTREE_ROOT/<slug> -b task/<id> "$FORK_BASEL
 **任务代理完成时编辑自己的任务文件（AC2 派发词约定，`gap-closure-could-not-run-in-task-grant-self-touches-for-ac-and-invoke-evidence` + AC3 写所有权分离 `gap-task-file-develop-integration-drift-fan-in-conflicts`）**：
 任务代理提交前编辑 `tasks/<id>.md`（它自己的任务文件，Touches 已授权）：**勾 AC 复选框**（它实现了、
 自己跑过 scoped 测试，有全部事实）+ **贴 invoke 实跑证据**（自己 scoped 测试的输出）。**仍 SCOPED ONLY**
-（不跑全量 suite——全量判据归外层 verification-round-N，见步骤 2 词汇规范）；**不翻 status**（翻 done 是外层收尾的活）；
+（不跑全量 suite——全量判据归外层 verification-round-N，见步骤 2 词汇规范）；**翻 done 由 inner 在自有 per-task 绿证后执行**（(a2)——worktree 内改 status，fan-in merge 带进 develop）；
 **不勾 DoD 行**（DoD 全量绿在 SCOPED ONLY 下任务内不可知，是唯一真时序依赖）。
 **写所有权分离（AC3）**：只允许**追加正文段**（AC 勾选 / Evidence / 记录）——**绝不写/改 frontmatter**
-（`status:` 由 outer 独占）。证据追加用 body-only 语义（`task-schema.ts` `appendBodySection`：
+（`status:` 由 inner 在 worktree 内翻，(a2)）。证据追加用 body-only 语义（`task-schema.ts` `appendBodySection`：
 frontmatter 字节不变，只动正文；无 frontmatter 时 fail-closed），**禁止整体覆盖任务文件**
-（`evidence_append_not_overwrite = 1`）。收尾（外层异步）因此每任务只剩「核对 DoD 行 + 翻 done + 关遥测括号」——
+（`evidence_append_not_overwrite = 1`）。收尾因此每任务只剩「核对 DoD 行 + inner 翻 done + 关遥测括号」——（(a2)：inner 在自有 per-task 绿证后翻 done，fan-in 带 status，不再等外层）
 量小到不是同步点（(c) 块落地后，closure-async 机制根的收尾对已自勾 AC/证据的任务是 no-op）。
 
 **驱动文本只携带数据，不复述行为（外层裁定 R2 — gap-drive-text-carries-data-not-behavior-outer-inner-handoff，AC1）**：
