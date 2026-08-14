@@ -425,3 +425,35 @@ const { total, checked } = countCompletionCheckboxes(task.body);  // AC + DoD, s
 注释说它处理 "verification-window done-flip shape"：**实现做完了、DoD 里剩的是「全量套件绿」这类等外部事件的项**。
 ⇒ **真问题不是「要不要阈值」而是「判据用错了维度」：比例分不清剩下的是【验证】还是【实现】。**
 **判据应看剩余项的性质，不是数量比例**（与 ⑦d 一致：矛盾类不设比例阈值）。
+
+---
+
+## 阶段判据·套件入账（2026-08-14 22:4xZ 立；⛔ 不占 ①-⑥′ 的编号，硬规则 ⑧）
+
+**旧形式已失效，先说它怎么坏的**：我每轮报「`per-task-suite-records.jsonl` 中 `cpu_time_s == 0` 的记录数 = **0** ⇒ 真」。
+**自 inner 的 AC6-null 改动落地起，这个判据结构上不可能取假**——枚举当前 8 条即可见：
+
+```
+fullSuiteRan=True  的 2 条 ⇒ cpu_time_s = 2492.56 / 2264.25      （真数）
+其余 6 条           ⇒ cpu_time_s = null + cpu_source=not-wired + skipReason=doc-only-delta
+```
+
+**没有任何记录会取 `0`**：要么真数，要么 `null`。而那个 `null` 是**故意的**——
+它正是硬规则 3b 的正确修法（「无法评估」要有独立取值，⛔ 不与「合格」共用一个 `0`）。
+**⇒ 别人把判据修对了，而我的判据形式没跟着改，于是变成一个恒真读数，我还连报了好几轮「真」。**
+**⇒ 一般形态（值得记）：被测系统把「缺值」从哑值改成真 null，是一次【判据失效事件】——
+凡是数哑值的谓词都会在那一刻静默变成恒真。**
+
+**新形式（能取假）**：
+```
+在 .quay/per-task-suite-records.jsonl 中，fullSuiteRan == true 的记录里，
+cpu_time_s 缺失 / null / ≤ 0 的条数 == 0
+```
+**现真值 0/2 ⇒ 真。⊢ 它怎么取假**：捕获链断掉时（GNU time 不可用、包装丢失），
+跑了全量却拿不到 CPU ⇒ 该数 >0 ⇒ 报假。**这正是旧形式再也报不出来的那件事。**
+**⛔ 明确不算缺陷**：`fullSuiteRan=false` 的记录 `cpu_time_s=null`、`cpu_source=not-wired` 是**正确形态**，
+不得据此报红——没跑套件就没有 CPU 可记。
+
+**⊢ 为什么写进这个文件而不是继续每轮手写**：它此前**没有任何落脚点**
+（`grep 'cpu_time_s'` 在 `manager-phase-goal.md` / `manager-tick-core.md` / 本文件均 0 命中）
+⇒ 纯靠我每轮凭记忆复述 ⇒ 硬规则 ⑨：**「守」与「不守」在记录上不可区分，且它已经悄悄坏掉一次而无人发现。**
