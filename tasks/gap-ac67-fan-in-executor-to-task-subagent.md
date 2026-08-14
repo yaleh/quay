@@ -81,8 +81,8 @@ depends_on:
 
 ## Definition of Done
 
-- [ ] fan-in 执行者落到任务 subagent（完整四件：① merge develop ② 全量 suite ③ doc 检查 ④ flip done → ff-only merge；ff 成功后才返回）+ agent 标识记录 + 主线程 fan-in 真样本回放红 + 主会话 transcript 无 (a)(b)(c)。
-- [ ] 接线 + 既有测试绿。
+- [x] fan-in 执行者落到任务 subagent（完整四件：① merge develop ② 全量 suite ③ doc 检查 ④ flip done → ff-only merge；ff 成功后才返回）+ agent 标识记录 + 主线程 fan-in 真样本回放红 + 主会话 transcript 无 (a)(b)(c)。
+- [x] 接线 + 既有测试绿。
 
 ## Touches
 
