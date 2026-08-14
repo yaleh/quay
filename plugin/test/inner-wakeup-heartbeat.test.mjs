@@ -199,8 +199,8 @@ function runWriter(root, args) {
   return spawnSync("node", ["--no-warnings", "--experimental-strip-types", WRITER, "--root", root, ...args], { encoding: "utf8" });
 }
 
-function runChecker(root) {
-  return spawnSync("node", ["--no-warnings", "--experimental-strip-types", CHECKER, "--root", root, "--json"], { encoding: "utf8" });
+function runChecker(root, extraArgs = []) {
+  return spawnSync("node", ["--no-warnings", "--experimental-strip-types", CHECKER, "--root", root, "--json", ...extraArgs], { encoding: "utf8" });
 }
 
 const FULL_ARGS = [
@@ -269,7 +269,10 @@ test("AC2 round-trip — a heartbeat the WRITER writes passes the CHECKER (exit 
   try {
     const w = runWriter(tmp, FULL_ARGS);
     assert.equal(w.status, 0, `writer must exit 0:\n${w.stdout}\n${w.stderr}`);
-    const c = runChecker(tmp);
+    // Round-trip consistency: the writer recorded an empty in-flight set (FULL_ARGS' --in-flight ""),
+    // so the checker is given that same set to keep the END invariant judgeable (no in-flight ⇒
+    // NOT-EVALUATED per gap-inner-heartbeat-check-not-evaluated-when-no-inflight AC1).
+    const c = runChecker(tmp, ["--in-flight", ""]);
     assert.equal(c.status, 0, `checker must accept the writer's output:\n${c.stdout}\n${c.stderr}`);
     const out = JSON.parse(c.stdout);
     assert.equal(out.verdict, "ALIVE");
@@ -575,7 +578,9 @@ test("AC53 AC2 (gap-ac53-end-invariant-gate) — judgeEndInvariant rejects a hea
   try {
     const w = runWriter(tmp, FULL_ARGS);
     assert.equal(w.status, 0, `writer must write on a bare temp dir (no dispatchable work):\n${w.stdout}\n${w.stderr}`);
-    const c = runChecker(tmp);
+    // Round-trip consistency (AC53 AC2): mirror the writer's empty in-flight set to the checker so the
+    // END invariant is judgeable (no in-flight ⇒ NOT-EVALUATED per gap-inner-heartbeat-check-not-evaluated-when-no-inflight AC1).
+    const c = runChecker(tmp, ["--in-flight", ""]);
     assert.equal(c.status, 0, `checker must accept the writer's DIRECT-measured heartbeat:\n${c.stdout}\n${c.stderr}`);
     const out = JSON.parse(c.stdout);
     assert.equal(out.verdict, "ALIVE");
