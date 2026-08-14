@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-flip-no-ac-completion-check
 title: fan-in-execute.js flip 只查行形不查 AC 完成——workflow 翻 done 绕过 AC47 闸（52 条 done 零勾，gap-ac72 为样本）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
