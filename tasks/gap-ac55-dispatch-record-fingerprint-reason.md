@@ -1,7 +1,7 @@
 ---
 id: gap-ac55-dispatch-record-fingerprint-reason
 title: AC55 产物·承重条款——inner 派发记录带倾向文件指纹 + 一句为什么选它
-status: ready
+status: done
 labels:
   - gap
   - mechanism
