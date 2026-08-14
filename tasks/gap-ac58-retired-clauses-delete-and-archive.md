@@ -1,7 +1,7 @@
 ---
 id: gap-ac58-retired-clauses-delete-and-archive
 title: AC58 通则①·退役即迁出——退役条款从高频文件删除、另存 archive（落点映射强制）
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
