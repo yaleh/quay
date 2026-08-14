@@ -130,3 +130,14 @@ $ node --experimental-strip-types plugin/scripts/fan-in-ts-typecheck-gate.ts --t
 （本任务修改的是**既有** .ts（`per-task-suite-record.ts`，非新增/移动），ts-typecheck 闸判定 Touches 无新增 .ts ⇒ 不触发。）
 
 **判据5（与 AC83 一起完成）**：fan-in 入账接线（本任务 step 4.5 写 per-task-suite-record）+ AC83 相边界差分生产数据落地互为前置——本任务交付「fan-in 每次 suite（含跳过）都入账 + run/skip 可分辨 + cpu/分相字段」，AC83 交付「分相 cpu_usec+PSI 生产载体数据」。单独完成任一条，人要的「拿到真实数据」都不满足。
+
+**bootstrap 例外记录（2026-08-14 19:2xZ，manager 19:3xZ 修正分子口径 + inner 裁决 (a) 结构性 bootstrap）**：
+```
+新判据（候选 A）：有效窗口（writer 57825d11 @ 18:39:42Z 落地后）内，每次 fan-in flip（git log --grep='翻 .* done'）应有对应记录。
+窗口内 2 次 fan-in：fan-in-suite 18:41（无记录）· ff-livelock 18:55（有记录 18:54:58Z）。
+fan-in-suite 无记录 = bootstrap 例外（非缺陷）：
+  - 其 fan-in 派发时 develop（bfb635d6）的 fan-in-execute.js 无 suite-record-block（grep=0）——writer 在它自己的 worktree 分支
+  - 该 fan-in 自己翻转的 d09e730c 才把 writer（57825d11）并入 develop（翻转后 grep=3）
+  - ⇒ 结构上不可能自记录（writer 随本次 fan-in 上船）；ff-livelock 有记录证明 writer 正常
+处置：不据此报红。fan-in-suite 自身那条记为「n/a 结构性不可写」。
+```
