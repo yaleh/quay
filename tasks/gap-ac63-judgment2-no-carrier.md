@@ -49,7 +49,9 @@ depends_on: []
 
 ## Definition of Done
 
-- [ ] AC63 判据2 载体落地（doc 检查痕迹可判）+ 能取假 + 与 AC72 对齐。
+- [ ] AC63 判据2 载体落地：doc 检查痕迹（如 docChecked 字段或并入 per-task-suite-record）使「有 ff 而无 doc 检查」结构上可判
+- [ ] 能取假：「有 ff 而无 doc 检查」的真实记录回放红；现状无字段（结构上不可判）为真样本
+- [ ] 与 AC72 per-task-suite-record 合并或互相 depends_on，不重复造记录文件
 
 ## Touches
 
