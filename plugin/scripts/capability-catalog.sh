@@ -193,6 +193,7 @@ declare -A QUESTION=(
   [inbox-reader.sh]="Does the human channel's manager inbox have a mechanical reader that consumes every delivered message (delivered ≠ read otherwise)?"
   [inner-session-check.sh]="Is the inner session healthy / empty-shell / missing (three-state cold-start self-check)?"
   [instrument-failure-check.ts]="Which of the manager's five documented instrument-failure families does each shell command in the tick docs exhibit (grep self-match, zero-hit-as-absent, pipe-then-exit-status, ...)?"
+[retired-clause-check.ts]="Has every AC58-registered retired clause been deleted from its source file (正文词条已从源文件删除, 落点映射完整)?"
   [inner-wakeup-heartbeat-check.ts]="Is the inner ScheduleWakeup fallback heartbeat fresh — .quay/inner-wakeup-heartbeat.json ts within 3 tick periods (5400s) — or dead (inner 兜底心跳断)?"
   [inner-wakeup-heartbeat.ts]="Does the inner layer WRITE the structured wakeup heartbeat — .quay/inner-wakeup-heartbeat.json with the minimal field set (ts/runIds/blocked/budgetHit/effectiveCap/agentDispatches/delaySeconds), fail-closed against a shrunk shape (inner 兜底心跳写入方)?"
   [integration-batch-merge.sh]="Can integration be batch-merged into develop (fast-forward + CAS, fail-closed)?"
@@ -418,6 +419,7 @@ declare -A CADENCE=(
   [inner-wakeup-heartbeat.ts]="每轮"
 
   [instrument-failure-check.ts]="每轮"
+[retired-clause-check.ts]="每轮"
   [integration-batch-merge.sh]="按需"
   [integration-branch-model.ts]="按需"
   [it0-enforcement-with-design-check.sh]="按需"
@@ -649,6 +651,7 @@ declare -A INVALIDATION=(
   [inner-wakeup-heartbeat.ts]="失效前提：inner 自排程仍以脚本写心跳文件；若改由 harness 直接上报，本条退休"
 
   [instrument-failure-check.ts]="失效前提：tick 文档仍以 shell 命令承载判据；若判据迁出 shell，本条退休"
+[retired-clause-check.ts]="失效前提：AC58 archive 仍是退役条款的落点登记处；若迁出 archive 机制，本条按 ④ 失效"
   [integration-batch-merge.sh]="无可测前提，靠周期复核"
   [integration-branch-model.ts]="无可测前提，靠周期复核"
   [it0-enforcement-with-design-check.sh]="无可测前提，靠周期复核"
@@ -880,6 +883,7 @@ declare -A LAST_REAFFIRMED=(
   [inner-wakeup-heartbeat.ts]="2026-08-11"
 
   [instrument-failure-check.ts]="2026-08-10"
+[retired-clause-check.ts]="2026-08-14"
   [integration-batch-merge.sh]="2026-08-10"
   [integration-branch-model.ts]="2026-08-10"
   [it0-enforcement-with-design-check.sh]="2026-08-10"
@@ -1111,6 +1115,7 @@ declare -A MATCHING=(
   [inner-wakeup-heartbeat.ts]="n/a"
 
   [instrument-failure-check.ts]="position"
+[retired-clause-check.ts]="position"
   [integration-batch-merge.sh]="keyword"
   [integration-branch-model.ts]="keyword"
   [it0-enforcement-with-design-check.sh]="keyword"
