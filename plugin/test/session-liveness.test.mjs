@@ -11,17 +11,23 @@
 //   ① 饱和 —— cache_read_input_tokens ≥ SATURATION_TOKENS && 最后一条未应答 user 输入
 //   && ② 该层 develop 提交静默 ≥ T（T = SATURATION_SILENCE_MIN，env 可配，非字面量 30）
 //   && ③ 在飞 worktree 集合无变化（集合差手法，不用时间戳；首轮无基线 ⇒ 判「有变化」）
+//   && ④ 在飞【链接】worktree 无活进程（忙时必假直接量，gap-session-disabled-fires-when-busy
+//        2026-08-14：原三合取在最忙时误报——develop 静默与集合无变化在多任务实现中同时翻真，
+//        第④条用 /proc/<pid>/cwd 把「忙」（worktree 有活进程 ⇒ 取假）与「失能」（无活进程）分开）
 //
 // Coverage map (task ACs):
-//   AC1 — emit only when all three hold (all-three fires; unsaturated doesn't)
+//   AC1 — emit only when all four hold (all-four fires; unsaturated doesn't)
 //   AC2 — T configurable via SATURATION_SILENCE_MIN env (not a hardcoded literal 30) and actually
 //         gates emission (T=1 with a 2min-old develop emits; T=100 with the same develop does not)
 //   AC3 — event name is the disabled form (SESSION-DISABLED, 失能); negative controls: saturated-
-//         but-develop-active ⇒ no emit; saturated+silent-but-in-flight-changing ⇒ no emit
+//         but-develop-active ⇒ no emit; saturated+silent-but-in-flight-changing ⇒ no emit;
+//         multi-task implementation in progress (5 worktrees + live processes, manager 12:16Z
+//         replay) ⇒ no emit
 //   AC4 — not turned off: true saturation-to-disabled still emits (AC1 positive); not constant-
 //         emitting: exactly ONE emission per disabled spell (edge-trigger over ≥3 further rounds)
 //   AC5 — existing tests stay green (the rename ripple in session-liveness-signals-kinds.test.mjs
 //         tracks the spec-mandated SESSION-SATURATED → SESSION-DISABLED); scoped gate green
+//   新④ — 忙时必假合取项能取假（AC1/判据2）：worktree 有活进程 ⇒ 不报；活进程消失（真失能）⇒ 报
 //
 // SPLIT CONCURRENCY SAFETY: this file runs as its OWN node process at cc=3. It owns the /tmp prefix
 // "session-liveness-scd-" (setProbeTmpPrefix) and the after() sweeps ONLY it (+ ol-prod-), so this
@@ -33,7 +39,7 @@ import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   SCRIPT, tmuxAvailable, setProbeTmpPrefix, sweepTmp, reapLiveOwners,
   makeHermeticProbe, waitForAlive, spawnMonitor, waitForOutput, waitForRounds,
@@ -95,7 +101,7 @@ function saturatedTranscript(p, name) {
 
 // ── AC1/AC4 positive — all three hold ⇒ emit, exactly once per disabled spell ────────────────────
 
-test("AC1/AC4 — SESSION-DISABLED fires when 饱和 && develop 静默 ≥T && 在飞 worktree 集合无变化 (all three hold); exactly one emission per spell (edge-trigger)", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+test("AC1/AC4 — SESSION-DISABLED fires when 饱和 && develop 静默 ≥T && 在飞 worktree 集合无变化 && 无活进程 (all four hold); exactly one emission per spell (edge-trigger)", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
   const p = makeHermeticProbe("ol-scd-a");
   const repo = path.join(p.tmp, "repo");
   try {
@@ -246,6 +252,78 @@ test("AC2 — SATURATION_SILENCE_MIN is env-configurable (default not the forbid
         `T=100 with a 2min-old develop MUST NOT emit (config gates the composite):\n${mon2.output()}`);
     } finally {
       mon2.child.kill("SIGKILL"); mon2.cleanup();
+    }
+  } finally {
+    p.cleanup();
+  }
+});
+
+// ── 新④ 合取项能取假（gap-session-disabled-fires-when-busy，AC1/判据2）─────────────────────────────
+// 忙时必假直接量 = 在飞【链接】worktree 内有活进程（/proc/<pid>/cwd 解析）。本测试证明它【能取假】：
+// 同一稳定场景（饱和 + develop 静默 + 在飞集合无变化）下，worktree 有活进程 ⇒ 不报 DISABLED；活进程
+// 消失（真失能）⇒ 报。没有该合取项时这个场景本来就该报——故「不报」只能归因于新合取项取假（硬规则 4：
+// 恒真合取项贡献零）。
+
+test("新④ 能取假 — 忙时 worktree 有活进程 ⇒ 不报 DISABLED；活进程消失（真失能）⇒ 报 (conjunct can take false)", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  const p = makeHermeticProbe("ol-scd-g");
+  const repo = path.join(p.tmp, "repo");
+  const wt = path.join(p.tmp, "wt1");
+  try {
+    makeRepoWithDevelop(repo, { backdateMin: 60 });   // develop silent
+    addWorktree(repo, wt, "wt-1");                     // stable in-flight linked worktree
+    const satX = saturatedTranscript(p, "sat");
+    assert.ok(await waitForAlive(p.env, p.session), "probe must be alive");
+    const mon = spawnMonitor(p.env, `scd-g ${repo} ${p.session}`, { transcripts: `scd-g ${satX}` });
+    const live = spawn("sleep", ["10000"], { cwd: wt, stdio: "ignore" });
+    try {
+      // busy phase: a live process with cwd inside the linked worktree → ④ takes false → hold.
+      // Round 1 has no worktree baseline (③=0); by round 2 ③=1 && ① && ② all hold — WITHOUT ④ the
+      // old composite would already emit, so "no emit" is attributable to ④ being false (busy).
+      assert.ok(await waitForRounds(mon, 3, HANG_GUARD_MS),
+        `monitor must complete busy-phase rounds:\n${mon.output()}`);
+      assert.ok(!/SESSION-DISABLED scd-g/.test(mon.output()),
+        `busy (live process in linked worktree) MUST NOT emit SESSION-DISABLED — ④ is false:\n${mon.output()}`);
+      // true-disabled phase: the worktree process dies → ④ flips true → the composite emits.
+      live.kill("SIGKILL");
+      assert.ok(await waitForOutput(mon, /SESSION-DISABLED scd-g/, 10000),
+        `after the worktree process dies (no longer busy) the disabled composite MUST emit — ④ can take true:\n${mon.output()}`);
+    } finally {
+      live.kill("SIGKILL");
+      mon.child.kill("SIGKILL"); mon.cleanup();
+      removeWorktrees(repo, [wt]);
+    }
+  } finally {
+    p.cleanup();
+  }
+});
+
+// ── AC3 负控制 — 多任务实现中不报（manager 12:16Z replay，gap-session-disabled-fires-when-busy）─────
+// 真样本：5 个 worktree 在飞、主会话 mtime 0 分钟前（最忙时误报 DISABLED）。回放：5 个稳定链接
+// worktree + 其中挂活进程 = 多任务实现中。饱和 + develop 静默 + 在飞集合稳定 ⇒ 旧三合取会响；
+// 新合取项 ④ 在忙时取假 ⇒ 不响。
+
+test("AC3 负控制 — 多任务实现中不报 (manager 12:16Z: 5 worktrees 在飞 + 忙活进程，replay)", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  const p = makeHermeticProbe("ol-scd-f");
+  const repo = path.join(p.tmp, "repo");
+  const wts = [1, 2, 3, 4, 5].map((i) => path.join(p.tmp, `wt${i}`));
+  try {
+    makeRepoWithDevelop(repo, { backdateMin: 60 });   // develop silent
+    for (const [i, wt] of wts.entries()) addWorktree(repo, wt, `wt-${i + 1}`);  // 5 in-flight, STABLE
+    const satX = saturatedTranscript(p, "sat");
+    assert.ok(await waitForAlive(p.env, p.session), "probe must be alive");
+    const mon = spawnMonitor(p.env, `scd-f ${repo} ${p.session}`, { transcripts: `scd-f ${satX}` });
+    const live = spawn("sleep", ["10000"], { cwd: wts[0], stdio: "ignore" });
+    try {
+      // Round 1 has no baseline (③=0); by round 2 ① && ② && ③ all hold — the OLD composite would
+      // emit here; only ④ (busy, live process in wt1) holds it. Run ≥4 rounds to be load-robust.
+      assert.ok(await waitForRounds(mon, 4, HANG_GUARD_MS),
+        `monitor must run ≥4 rounds for the no-emit check:\n${mon.output()}`);
+      assert.ok(!/SESSION-DISABLED scd-f/.test(mon.output()),
+        `multi-task implementation in progress (5 stable worktrees + live process) MUST NOT emit SESSION-DISABLED:\n${mon.output()}`);
+    } finally {
+      live.kill("SIGKILL");
+      mon.child.kill("SIGKILL"); mon.cleanup();
+      removeWorktrees(repo, wts);
     }
   } finally {
     p.cleanup();
