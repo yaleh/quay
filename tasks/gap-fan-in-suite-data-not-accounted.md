@@ -131,13 +131,14 @@ $ node --experimental-strip-types plugin/scripts/fan-in-ts-typecheck-gate.ts --t
 
 **判据5（与 AC83 一起完成）**：fan-in 入账接线（本任务 step 4.5 写 per-task-suite-record）+ AC83 相边界差分生产数据落地互为前置——本任务交付「fan-in 每次 suite（含跳过）都入账 + run/skip 可分辨 + cpu/分相字段」，AC83 交付「分相 cpu_usec+PSI 生产载体数据」。单独完成任一条，人要的「拿到真实数据」都不满足。
 
-**bootstrap 例外记录（2026-08-14 19:2xZ，manager 19:3xZ 修正分子口径 + inner 裁决 (a) 结构性 bootstrap）**：
+**bootstrap 例外记录（2026-08-14 19:2xZ 初记 bootstrap 例外 → 19:4xZ 按 runId 启动时刻定案为【窗口边界】，非 (a)/(b) 判断）**：
 ```
-新判据（候选 A）：有效窗口（writer 57825d11 @ 18:39:42Z 落地后）内，每次 fan-in flip（git log --grep='翻 .* done'）应有对应记录。
-窗口内 2 次 fan-in：fan-in-suite 18:41（无记录）· ff-livelock 18:55（有记录 18:54:58Z）。
-fan-in-suite 无记录 = bootstrap 例外（非缺陷）：
-  - 其 fan-in 派发时 develop（bfb635d6）的 fan-in-execute.js 无 suite-record-block（grep=0）——writer 在它自己的 worktree 分支
-  - 该 fan-in 自己翻转的 d09e730c 才把 writer（57825d11）并入 develop（翻转后 grep=3）
-  - ⇒ 结构上不可能自记录（writer 随本次 fan-in 上船）；ff-livelock 有记录证明 writer 正常
-处置：不据此报红。fan-in-suite 自身那条记为「n/a 结构性不可写」。
+新判据（候选 A）最终口径：有效窗口 = fan-in【启动时刻】≥ writer 落地（57825d11 @ 18:39:42Z）。
+runId 内嵌启动时刻（fm-<task>-<epoch_ms>-<suffix>）：
+  fan-in-suite: 1786732020131 = 18:27:00Z → 早于 writer 落地 762s → 窗口外（排除）
+  ff-livelock:  1786732967945 = 18:42:47Z → 晚于 writer 落地 → 窗口内 ✓
+锁事件佐证：fan-in-suite 的 acquire/release @ 18:42:01Z（起跑 18:27 → 持锁 18:42，15min）
+⇒ 修正后窗口内 fan-in = 1（ff-livelock）· 记录 = 1 ⇒ 【1:1，判据为真，修法已生效】
+fan-in-suite 自身无记录 = 启动早于 writer ⇒ 结构上不可能写，非缺口（不是 (a) 覆盖漏洞，也不是 (b) 判定）
+处置：不报红。下一条 fan-in（suite-budget 落地）为纯验证点，应 1:1。
 ```
