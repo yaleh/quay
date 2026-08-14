@@ -119,8 +119,13 @@ export function gateSurface(root: string): string[] {
  *  FAMILY-5 instances live there and were never scanned), and FAMILY-5's freshness suppression was
  *  narrowed (startedAt/durationMs are FIELD reads, not freshness checks — the manager B3-戊 and outer
  *  A11 instances must fire). New measured counts 2/13/15/21/43.
+ *  REBASELINED at cross-scan-boundary-doc-migration (2026-08-14): manager 将 `.js` READ_CMD 注释块
+ *  （95→30 行）迁进 orchestration/manager-loop-tick.md §READ_CMD-migrated —— 9 条仪器失效词条本就在
+ *  描述已知失效（pgrep -c node 恒零等），此前在未扫描的 `.js` 里对 ratchet 不可见；迁入 .md 后首次
+ *  进入扫描面。非新增失效，是已记录失效跨扫描边界（同族：integration 删除后 `git rev-list ...develop...integration`
+ *  死命令藏在同一 .js 因只扫 .md 而活到今天）。新计数 2/15/15/24/43。
  */
-export const FAMILY_BASELINE: Record<number, number> = { 1: 2, 2: 13, 3: 15, 4: 21, 5: 43 };
+export const FAMILY_BASELINE: Record<number, number> = { 1: 2, 2: 15, 3: 15, 4: 24, 5: 43 };
 
 // ── Per-family detectors (PURE: line text → boolean) ──────────────────────────────────────────────────
 // The detectors scan a whole line (fenced code lines, inline backtick code, and prose that names a
