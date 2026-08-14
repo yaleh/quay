@@ -2713,6 +2713,24 @@ manager 的活是：每 tick 采样 AC20 的五条、维护 AC21-AC24 的取证�
 
 - [ ] **AC62（协议·fan-in 改为「无锁段自测 + 锁内 ff」）**——人 2026-08-14 裁定，正本
       `orchestration/SPEC-fan-in-ff-merge-lock-2026-08-14.md`
+
+      **⛔ 2026-08-14 05:4xZ 核后【明确不勾】，唯一阻塞项：判据2 的检查器零调用者。**
+      任务 `gap-ac62` 已 done、四个交付物均在 develop（`fan-in-ff-merge.sh` / `fan-in-ff-protocol-check.ts`
+      + 两个测试），协议本体/重试记录/两锁不交叉都已读到。**但**：
+      ```
+      develop:scripts/test.sh                    含 fan-in-ff-protocol-check = 0
+      plugin/loop/fast-mode-tick-core.md                                     = 0
+      orchestration/orchestrator-tick-core.md                                = 0
+      orchestration/manager-tick-core.md                                     = 0
+      其余命中逐条打印过：fan-in-ff-merge.sh:26 是注释；capability-catalog.sh:182 声明、:412 节奏="按需"
+      零计数已干跑验证谓词：同读法下 ac56-…-check=3、touches-orthogonality-check=1
+      ```
+      **⇒ develop 上真出现一个非 ff 的 fan-in merge，没有任何东西会报红。判据2 字面要求「必须红」，
+      而它现在【结构上不可能红】——因为它不运行。对一个协议检查器，「按需」等于「从不」。**
+      **⚠️ 要讲清的区分**：**AC62 的【任务 AC】确实全满足**（任务体从来没有一条要求接线）；
+      **是本【阶段 AC】的判据2 要求「必须红」，那需要它真的跑** ⇒ **任务可以 done，阶段 AC 不能勾。**
+      **这正是阶段 AC 与任务 AC 分开的意义。** 接线落地后再勾。
+
       **判据1（协议形态）**：fan-in 落 develop **必须是 `git merge --ff-only`**；
       **merge 锁只包这一步**，持有时长毫秒级；**持锁期间不得跑 suite、不得做任何其它动作**
       （人逐字：「拿 merge 锁了以后不得再跑 suite，此时唯一可以做的事情就是 ff merge」）。
