@@ -167,6 +167,9 @@ rules* but does not re-implement each SPEC. Index (under `orchestration/` in the
 - `orchestration/SPEC-complete-delivery-surface-2026-08-05.md` — the complete delivery surface (six classes; this skill is the loop-documentation class-2 owner)
 - `orchestration/SPEC-cut-the-waiting.md` — waiting / dispatch-form rationale
 - `orchestration/SPEC-dispatch-ordering-semantic-2026-08-13.md` — dispatch-ordering semantics (structure-vs-semantics cut / inner chooses / preference-passing three-part)
+- `orchestration/SPEC-tick-read-path-slimming-2026-08-14.md` — the tick read path (1-hop entry, pinned `tail -30`, measured E2a/E2b token floors)
+- `orchestration/SPEC-tick-quality-2026-08-14.md` — the cross-layer tick spec (R1–R9, each with a criterion and the failure that bought it; D1–D8 quality dimensions with the three-layer baseline)
+- `orchestration/SPEC-in-flight-semantics-2026-08-14.md` — 「在飞」的完整语义 (A unlanded-tasks vs B running-subagents; the 10 prior fixes of the same quantity; §6 the system-wide proxy-quantity survey and the proxy registry proposal)
 - `orchestration/SPEC-inbox-service-2026-08-08.md` — the inbox service (agent-to-agent communication channel: manager/outer/inner via a per-project background service, tmux demoted to emergency control)
 - `orchestration/SPEC-instruments-behind-one-entry.md` — instrument discovery behind one entry
 - `orchestration/SPEC-isolation-and-resource-governance-2026-08-05.md` — isolation + resource governance

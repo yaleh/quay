@@ -221,6 +221,17 @@ export function exclusionEntries(repoRoot, pluginDir) {
       rel: 'orchestration/manager-phase-goal.md',
       target: path.join(repoRoot, 'orchestration', 'manager-phase-goal.md'),
       reason: "manager's operational doc referencing the quay-local deployed outer tick doc at orchestration/orchestrator-loop-tick.md — a real materialized copy (the C3 no-manager-tick-doc checker's quay-local landing, same target-layout class), not a stale reference to a moved mechanism",
+      retainedNote: '2026-08-14 拆分后命中随正文迁至 manager-phase-goal-archive.md ⇒ 本条目现压制 0 处；' +
+        '保留是因为新 AC 一律写在现行文件（archive 只读），下一个阶段的 AC 会重新产生命中。' +
+        '若两个阶段后仍 hits=0，删除本条目。',
+    },
+    {
+      rel: 'orchestration/manager-phase-goal-archive.md',
+      target: path.join(repoRoot, 'orchestration', 'manager-phase-goal-archive.md'),
+      reason: "read-only historical archive of the pre-split manager-phase-goal — its old-path reference to orchestration/orchestrator-loop-tick.md documents the pre-move drift analysis (plugin 1309 vs orchestration 1164 lines, 954 shared) verbatim; archives are historical records, never live callers",
+      retainedNote: '2026-08-14 拆分（4025→723 行）后，archive 保留拆分前的正文，其中 :191 的旧路径引用（orchestrator-loop-tick 漂移实测）是历史记录不是活引用；' +
+        'archive 只读（AC58 形态：标注不删），AC1b 扫描不得把它当 live reference。' +
+        '若 archive 被删除（历史归档退役），本条目一并删。',
     },
     {
       rel: 'plugin/scripts/instrument-failure-check.ts',

@@ -116,6 +116,13 @@ classify_path() {
     plugin/workflows/*)
       workflows_mirror_touched=1
       ;;
+    plugin/scripts/checker-mutation-cases/*)
+      # mutation-case FIXTURES — not shipped scripts. The §6 DELIVERY-INVENTORY snapshot counts
+      # TOP-LEVEL entries only (verify-delivery-surface.ts countInventoryDir readdirSync), so a
+      # fixture added/deleted in this subdir can never drift the snapshot (--write-inventory is a
+      # byte no-op) — treating it as structural would make the gate unsatisfiable for
+      # mutation-case-only tasks (gap-checker-mutation-cases-4-checkers).
+      : ;;
     plugin/scripts/*)
       local clean
       clean="${st// /}"

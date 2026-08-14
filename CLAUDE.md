@@ -28,9 +28,36 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
    **为什么单列而不靠上一句涵盖**：上一句是通则，而通则在动手那一刻不会浮现；这条此前只写在管理者自己的核（C15，且窄——只禁 `capture-pane` 回滚）与台账里，
    **不在唯一会被自动注入的本文件中** ⇒ 每次都要靠当场想起来。〔**无产物，靠自觉**〕
    **`meta-cc` 返回空 ≠ 没有数据**（硬规则 5 来源完备性）。**已实测的一个覆盖缺口 + 绕法（2026-08-11 02:2x）**：
-   `query_session_content` 按 `working_dir` **哈希**定位 project，**不递归** `~/.claude/projects/<project>/<session-id>/subagents/workflows/<run>/agent-*.jsonl`
-   ⇒ 查「某个 workflow 内部到底发生了什么」时它恒返回空。**正确做法**：`ls -S <run 目录>/agent-*.jsonl` 定位文件（列文件不是解析），
-   再 **`meta-cc inspect_session_files --files <显式路径>`**——它给显式路径能读，返回 `line_count` / `record_types`（assistant/user 轮次数）/ `time_range`。
+   `query_session_content` 按 `working_dir` **哈希**定位 project，**只读【主会话 jsonl】**。
+   **⚠️ 2026-08-14 12:1xZ 用干净针实测重验，范围比原记述更大，且多出一个陷阱**：
+
+   **transcript 目录结构（实测）**：
+   ```
+   ~/.claude/projects/<project-hash>/
+   ├── <session-id>.jsonl                  ← 主会话（meta-cc 唯一能【搜内容】的对象）
+   └── <session-id>/
+       ├── subagents/agent-<id>.jsonl                      ← 直属 subagent（inner 实测 126 个）
+       ├── subagents/workflows/<run>/agent-<id>.jsonl       ← workflow 内的 agent
+       ├── subagents/workflows/<run>/journal.jsonl          ← 每 agent 一条 result
+       └── tool-results/<id>.txt                            ← 大工具输出的落盘
+   ```
+   **干净针实测（两根针各只存在于一个文件，主会话不含）**：
+   ```
+   针「code_delta output is empty」→ 只在 workflows/<run>/agent-*.jsonl
+   针「in a worktree. Let me first create the worktree…」→ 只在直属 subagents/agent-*.jsonl
+   两针分别用 query_session_content(session_id=<该会话>, include_subagents=true) 查 ⇒ 【都返回 0】
+   ```
+   ⇒ **不是只有 workflows 不递归——【直属 subagents/ 也不递归】**；
+   ⇒ **⚠️ `include_subagents` 参数存在、默认 true，但对上述两类【都不生效】**——
+   **参数名会让人以为它管用，这是比"没有该功能"更贵的形态**（同硬规则 3b：一个看起来覆盖了的选项）。
+   **正确做法（三步，缺一不可）**：
+   ```
+   ① 定位文件  grep -rl '<针>' ~/.claude/projects/<project-hash>/     ← 文件系统，不是 meta-cc
+   ② 取元数据  meta-cc inspect_session_files --files <显式路径>        ← 实测可用：size_bytes/line_count/record_types/time_range
+   ③ 搜内容    grep -r / grep -oh                                     ← meta-cc 无此能力
+   ```
+   **⚠️ ① 的范围必须覆盖【两层】**：**2026-08-14 我只搜了 `workflows/` 下 8 个 run 就断言「lane 无可查对象」，
+   而同一会话有 126 个直属 subagent transcript 没搜** ⇒ 假结论。**硬规则 5 的经典违反，当日第三次同形。**
    **轮次数就是成本的驱动量**：实测一次 suite-fix workflow 42 个 agent 共 705 轮、缓存读占 **98.8%**、真正新 token 仅 92 万
    ⇒ **别用「总 token」判贵贱，要拆出 `cache_read` 再谈**（我 2026-08-11 02:2x 就因未拆而给出过一个误导性的「省 9M token」结论）。
 2. **按位置判定，不按关键词**——注释、字符串、消息正文里提到不算命中。〔产物：复用 `drive-contract-check.ts` / `test-framework-policy-check.ts` 的判定手法〕
