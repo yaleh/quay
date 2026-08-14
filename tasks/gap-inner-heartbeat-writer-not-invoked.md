@@ -1,7 +1,7 @@
 ---
 id: gap-inner-heartbeat-writer-not-invoked
 title: inner 心跳 writer 步骤没被调用——93 分钟 30+ 轮零调用，闸从未有机会拒/放（manager 14:1xZ 报，meta-cc 动作记录证实）
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
