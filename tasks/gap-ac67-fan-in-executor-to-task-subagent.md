@@ -17,7 +17,8 @@ depends_on:
 
 ## Proposal
 
-> **止损（2026-08-14 04:1xZ，人 提活行为缺陷两义务：修机制+止损）：需要 + 当轮可做。** inner 判断「能，现在做」——无锁段（rebase + ts-typecheck + scoped + 全量 suite + doc 检查，全在任务 worktree 内）挪 subagent，ff 留主线程；不依赖 AC62（无锁段三步全由 develop 现有机件构成：git merge 内置 / fan-in-ts-typecheck-gate 在 develop / scripts/test.sh+--static-checks-doc 在 develop；fan-in-ff-merge.sh 只服务持锁段，止损不动它）。在飞任务保持现有流程不中途换执行者（避免半新半旧），**从 AC62 fan-in 起**改走 subagent 无锁段。基线（manager）：近 40 轮 fan-in 族 68% / 全历史 27%。
+> **止损（2026-08-14 04:1xZ，人 提活行为缺陷两义务：修机制+止损）：需要 + 当轮可做。** inner 判断「能，现在做」——无锁段（rebase + ts-typecheck + scoped + 全量 suite + doc 检查，全在任务 worktree 内）挪 subagent，ff 留主线程；不依赖 AC62（无锁段三步全由 develop 现有机件构成：git merge 内置 / fan-in-ts-typecheck-gate 在 develop / scripts/test.sh+--static-checks-doc 在 develop；fan-in-ff-merge.sh 只服务持锁段，止损不动它）。在飞任务保持现有流程不中途换执行者（避免半新半旧），**从 AC62 fan-in 起**改走 subagent 无锁段。
+> **止损判据（manager 2026-08-14 04:1xZ，4b 修正——基线 phase 是自述量，换标法即同形）**：**止损生效 ⇔ 无锁段三步（`git merge develop` / 全量 suite / `--static-checks-doc`）的 Bash 调用出现在 inner 的 `subagents/agent-*.jsonl` 里，且【不再】出现在其主 `<session>.jsonl` 里。** 读法：`ls -S <session>/subagents/agent-*.jsonl` 定位 → `meta-cc inspect_session_files --files <显式路径>`（`query_session_content` 不递归 subagents，CLAUDE.md 硬规则① 已记）。**这个量不由 inner 产生，它停摆时不会跟着停止更新 ⇒ 满足 4b**（基线 phase 由 inner 自写，止损做了/只是改标法在此量上同形——循环论证，作废）。**且它是 AC67 判据2 的现成弱化落点**：判据2 要「ff 记录加 agent 标识 ≠ 主会话」，止损版用「无锁段 agent 标识 ≠ 主会话」的同一判据弱化形式，不需要等 `fan-in-ff-merge.sh`（无锁段本就不经过它）。基线（manager）：近 40 轮 fan-in 族 68% / 全历史 27%（此基线仅参考，不作判据——判据是 transcript 落点）。
 
 **AC67（fan-in 的【执行者】必须落到任务 subagent —— AC62 搬了锁，没搬执行者；人 2026-08-14 03:5xZ 追问「inner 任务 subagent 自行 merge 什么时候才能发生」）判据（phase-goal 逐字）**：
 
