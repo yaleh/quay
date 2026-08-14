@@ -1,7 +1,7 @@
 ---
 id: gap-not-yet-flipped-blocks-retreated-ac83-class
 title: retreat 只退 status 不退 AC 勾选——not-yet-flipped 把退回任务判成 landed（phase-boundary AC 89% 声称完成、实质 ≈11%；manager 20:0xZ 裁定根因在 retreat 不在 gate）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
