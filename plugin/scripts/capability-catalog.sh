@@ -355,6 +355,7 @@ declare -A QUESTION=(
   [checker-lib.ts]="Do the shared checker primitives — matchAtCommandPosition (按位置不按关键词) and enumerativeExistence (枚举式存在性) — behave correctly, so a new checker stops re-implementing them?"
   [mechanism-vitality-check.ts]="Which shipped mechanisms are zero-call past 3x their declared cadence (待表态), have a stale last-reaffirmed stamp (待重新确认), or lack a 失效前提 field (entry-gate reject)?"
   [md-deletion-token-evaporation-check.sh]="Did any commit net-deleting ≥50 lines from *.md leave deleted-content unique tokens (identifiers/paths/专名) with ZERO occurrence in the post-delete repo (来源完备性整段蒸发)?"
+  [workflows-dual-copy-drift-check.ts]="Are the three dual-copy workflow files (drain-directives / fan-in-execute / run-routines) byte-identical between .claude/workflows/ (what runs here) and plugin/workflows/ (what quay-init --workflows ships to installed targets) — a one-sided edit (改正本而落地副本不跟, the A6/fan-in-execute.js class) must go RED, the current byte-identical state GREEN (gap-workflows-dual-copy-drift-unchecked)?"
 )
 
 # ── CADENCE (cadence declaration (②a, gap-crystallization-five-directions) — every declared check declares how often it is supposed to run; 零调用 > 3× 声明周期 → 待表态 (not a uniform day count)) ──
@@ -603,6 +604,7 @@ declare -A CADENCE=(
   [obligation-ledger.ts]="每轮"
   [semantic-observer-judge.ts]="按需"
   [red-on-omission-audit.ts]="每轮"
+  [workflows-dual-copy-drift-check.ts]="每轮"
 
 )
 
@@ -852,6 +854,7 @@ declare -A INVALIDATION=(
   [obligation-ledger.ts]="失效前提：轮次仍产生义务账本；若义务跟踪改为别处，本条退休"
   [semantic-observer-judge.ts]="失效前提：inner/outer 状态仍以自由文本（心跳 reason + tick 报告）承载；若观测面改为纯结构化 schema 且无自由文本，本条退休"
   [red-on-omission-audit.ts]="失效前提：执行核仍以 tick-core 文档固化行为；若行为固化面迁出 tick-core/plugin-scripts 文件系统，本条退休"
+  [workflows-dual-copy-drift-check.ts]="失效前提：workflow 双副本结构仍存在（.claude/workflows/ 与 plugin/workflows/ 各有一份同一文件）；若双副本结构取消（同一文件只在一处），本条退休"
 
 )
 
@@ -1101,6 +1104,7 @@ declare -A LAST_REAFFIRMED=(
   [obligation-ledger.ts]="2026-08-10"
   [semantic-observer-judge.ts]="2026-08-10"
   [red-on-omission-audit.ts]="2026-08-10"
+  [workflows-dual-copy-drift-check.ts]="2026-08-14"
 
 )
 
@@ -1350,6 +1354,7 @@ declare -A MATCHING=(
   [obligation-ledger.ts]="enumerative"
   [semantic-observer-judge.ts]="keyword"
   [red-on-omission-audit.ts]="keyword"
+  [workflows-dual-copy-drift-check.ts]="enumerative"
 )
 # ── CONSUMER (rhythm-column consumer contract, gap-ac73-catalog-rhythm-consumer-check) ──
 # A mechanism's RHYTHM is only a claim until someone presses it. This table makes the consumer
