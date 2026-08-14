@@ -65,7 +65,7 @@ socket 名：sig-k-omDepW / sig-i-P6M8z4 / hb-OxX5o3 / sig-k-3pCXft / hb-ufSPi9 
 - plugin/test/session-liveness-signals-kinds.test.mjs（after() 加 kill-server）
 - plugin/test/session-liveness-signals-integration.test.mjs（after() 加 kill-server）
 - plugin/test/session-liveness-heartbeat.test.mjs（after() 加 kill-server）
-- plugin/test/session-liveness-helpers.mjs（若 isolateTmuxEnv 需返回清理句柄；teardownProbe 确定性杀 server）
+- plugin/test/session-liveness-helpers.mjs（若 isolateTmuxEnv 需返回清理句柄；cleanup() 先 kill-server 再注销）
 - plugin/test/session-liveness-restart.test.mjs（makeEnvProbe/makeNoEnvProbe cleanup() 同形泄漏——kill-session 竞态）
 - tasks/gap-session-liveness-fixture-tmux-not-killed.md（自身）
 
@@ -77,4 +77,4 @@ socket 名：sig-k-omDepW / sig-i-P6M8z4 / hb-OxX5o3 / sig-k-3pCXft / hb-ufSPi9 
 - **判据2 负控制**：实跑前 `/tmp/session-liveness-*` 目录数 **6**（manager 已清 tmux server 后残留 owner-dead 目录）；跑完三个受测文件后回 0。`tmux-leak-scan` 绝对模式无残留。
 - **AC4**：三个受测文件直跑 42/42 绿（heartbeat 14 + signals-integration 15 + signals-kinds 13）；`scripts/test.sh --for-task gap-session-liveness-fixture-tmux-not-killed --allow-thin` 门绿（exit 0，42/42，scoped 静态检查全过；`session-liveness-sweep.test.mjs` 的 `reapLiveOwners` 测试直跑 5/5 绿，锁 kill-server 路径）。
 - **node_modules**：worktree 无 node_modules，跑 `dispatch-worktree-setup.sh`（符号链接共享 node_modules，机制正本 `gap-worktree-node-modules-inconsistent-self-verify`）后门绿。
-- **fan-in 补（2026-08-14，全量 suite tmux-leak-scan 红后）**：探针构造器 cleanup() 的【先注销再 kill-session】在负载下与 server 启动竞态——kill-session 失败 + 已注销 ⇒ server 存活且 after() 的 reapLiveOwners 也够不到（泄漏无出口复现）。helpers.mjs 新增 `teardownProbe()`（kill-server 私有 socket + 等 server 退出 + 删目录 + 后注销），四个构造器（makeHermeticProbe/makePlainPane/makeClaudePaneProcess/makeTwoWindowSession）与 restart.test.mjs 的 makeEnvProbe/makeNoEnvProbe 的 cleanup() 全部改用之；探针在 server 确认死前保持注册 ⇒ after() 可重试。`session-liveness.test.mjs` 7/7、`session-liveness-restart.test.mjs` 6/6、`session-liveness-sweep.test.mjs` 5/5 直跑绿。
+- **fan-in 补（2026-08-14，全量 suite tmux-leak-scan 红后）**：探针构造器 cleanup() 的【先注销再 kill-session】在负载下与 server 启动竞态——kill-session 失败 + 已注销 ⇒ server 存活且 after() 的 reapLiveOwners 也够不到（泄漏无出口复现）。修复：四个构造器（makeHermeticProbe/makePlainPane/makeClaudePaneProcess/makeTwoWindowSession）与 restart.test.mjs 的 makeEnvProbe/makeNoEnvProbe 的 cleanup() **先 killProbeServer（kill-server 私有 socket，server 死前探针保持注册 ⇒ after() 可重试）再注销 + rmSync**。`session-liveness.test.mjs` 7/7、`session-liveness-restart.test.mjs` 6/6、`session-liveness-sweep.test.mjs` 5/5 直跑绿。注：全量 suite 的 tmux-leak-scan 在无 QUAY_RUN_ID（legacy 模式）下也会把并发 worktree suite 的 /tmp/session-liveness-* 探针误计为本次泄漏（round 2026-08-14 实测并发 suite 正在跑 session-liveness.test.mjs）；生产全量 suite 经 full-suite-runner 设 QUAY_RUN_ID 走 namespaced 扫描，无此交叉归因。
