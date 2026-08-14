@@ -75,6 +75,7 @@ abort／早退／红轮都有账。
 
 - plugin/scripts/full-suite-runner.ts（相边界差分记账 + trap/finally 写入 + 真实 cgroup 路径 + finalize 回填）
 - plugin/test/full-suite-runner.test.mjs（差分/覆盖/负控制用例 + 真实 cgroup 路径用例）
+- plugin/test/per-task-suite-record-check.test.mjs（AC6 用例：cpu_time_s 0 ⇒ null 迁移 + 覆盖）
 - plugin/scripts/per-task-suite-record.ts（AC6：cpu_time_s 数据源未接 ⇒ null + cpu_source，不写 0）
 - .claude/workflows/fan-in-execute.js（AC6：GNU time 不可用/跳过全量 ⇒ cpu_time_s 写 null 而非 0）
 - plugin/workflows/fan-in-execute.js（AC6 镜像副本——workflows-dual-copy-drift-check 要求双副本同改；与 .claude 版逐字一致）
@@ -89,6 +90,7 @@ abort／早退／红轮都有账。
 - **全退出路径写入**：正常路径 `finalize()`（绿/红/abort/timeout/hung 都到）+ crash trap（`writeCrashTerminal` 写 state 的 `phases` 并 append 一条 phase-only round 行）。红轮/截断轮/无标记轮都有 ≥1 条相记录。
 - **负控制**：fake suite 中途 SIGTERM 自杀 → 相记录完整（static+serial+lowconc，in-flight 相在 round 末关闭）。
 - **测试**：`plugin/test/full-suite-runner.test.mjs` +9 用例（AC1 六相差分、AC2 派生量可算、AC3 abort 负控制、AC4 红/无标记/crash 覆盖、3 个单元）。既有 132 用例全绿；`--for-task` scoped 门绿。
+- plugin/test/per-task-suite-record-check.test.mjs（AC6 用例：cpu_time_s 0 ⇒ null 迁移 + 覆盖）
 - **派生量**：相利用率=cpu_usec/(wall×lanes)、相饱和度=cpu_usec/(wall×nproc)、等待占比=psi_cpu_total/wall——记录 + round `nproc` 直接可算，不再靠相墙钟+代码常量推算。
 
 （2026-08-14 重派——退 AC1-4 后实现【真实生产路径】+ AC6 null 语义，worktree `gap-phase-boundary-differential-accounting`）
