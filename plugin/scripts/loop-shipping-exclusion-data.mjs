@@ -221,6 +221,9 @@ export function exclusionEntries(repoRoot, pluginDir) {
       rel: 'orchestration/manager-phase-goal.md',
       target: path.join(repoRoot, 'orchestration', 'manager-phase-goal.md'),
       reason: "manager's operational doc referencing the quay-local deployed outer tick doc at orchestration/orchestrator-loop-tick.md — a real materialized copy (the C3 no-manager-tick-doc checker's quay-local landing, same target-layout class), not a stale reference to a moved mechanism",
+      retainedNote: '2026-08-14 拆分后命中随正文迁至 manager-phase-goal-archive.md ⇒ 本条目现压制 0 处；' +
+        '保留是因为新 AC 一律写在现行文件（archive 只读），下一个阶段的 AC 会重新产生命中。' +
+        '若两个阶段后仍 hits=0，删除本条目。',
     },
     {
       rel: 'plugin/scripts/instrument-failure-check.ts',

@@ -69,8 +69,8 @@ ready-pool-check   末次 08:08:35  ⇒ 停 4.2h
 
 ## Touches
 
-- plugin/scripts/（读产物判据落地——具体文件按实现面，如 inner-assessment-steps-check.ts 或并入既有心跳检查）
-- plugin/test/（补测）
+- plugin/scripts/inner-wakeup-heartbeat-check.ts（读产物判据落地：心跳 mtime + slot-refill 调用记录 + ready-pool 调用记录三者新鲜度，陈旧即报「inner 派发评估未跑」；与既有 A13 心跳检查同面）
+- plugin/test/inner-wakeup-heartbeat-check.test.mjs（补测：07:41 缺席样本回放红 + 新鲜绿）
 - tasks/gap-inner-assessment-steps-no-product-reader.md（自身）
 
 ## Evidence
