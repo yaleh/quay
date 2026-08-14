@@ -730,3 +730,23 @@ AC72（cert 宣告退役 + 结果第三方可读落盘）
 
 ---
 
+---
+
+## 交叉标注（机械读者读【本文件】，不读 archive —— 2026-08-14 拆分后补回）
+
+**为什么在这里**：`plugin/test/semantic-observer-judge.test.mjs:345` 与 `red-on-omission-audit.test.mjs`
+**把本文件当承重面读**（`fs.readFileSync(... "manager-phase-goal.md")` + `assert.match`）。
+2026-08-14 10:4xZ 的拆分把正文搬去 archive ⇒ **两条断言从 archive=1 / 现行=0 变红**。
+**⇒ 落点映射漏了【机械读者】这一类，见下方教训。**
+
+- **`gap-semantic-observer-judge-stopped-awaiting`**（AC40 / AC41③ 交叉标注）——
+  语义观测器的 schema 字段只承载预先想到的需求类型，真实需求溢出到自由文本；
+  与本阶段 AC41「红在遗漏上」同源：**没写的东西不产生红**。
+- **`gap-ac41-red-on-omission-artifact`**（AC41 产物）——
+  遗漏必须有产物才可核；与上一条互为对方的交叉标注。
+
+**⚠️ 本次拆分学到的（硬规则 5 的一个未覆盖面）**：
+**落点映射只验了【人类读者】的词条有没有家，没验【机械读者】把哪个文件当输入。**
+**⇒ 删/搬任何文档前的必做动作**：`grep -rl "<该文件名>" --include=*.ts --include=*.mjs --include=*.test.mjs plugin/ scripts/`
+——**谁 `readFileSync` 它、谁 `assert.match` 它，一条命令就能枚举**；
+抽查词条有没有正本**查不出这个**（本次三条红全部来自同一次拆分，而我的映射一条都没提到它们）。
