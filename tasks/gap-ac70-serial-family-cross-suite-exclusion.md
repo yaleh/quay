@@ -1,7 +1,7 @@
 ---
 id: gap-ac70-serial-family-cross-suite-exclusion
 title: AC70 已收编 serial 族跨 suite 并发重叠——并发 cert 的 serial 相互斥或降 1-slot【人裁定终止 2026-08-14 04:4xZ，不实施】
-status: todo
+status: superseded
 labels:
   - gap
   - mechanism
