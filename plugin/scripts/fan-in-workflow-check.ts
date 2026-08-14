@@ -53,6 +53,22 @@ import { extractTouchesSection, parseTouchEntriesWithTags } from "./touches-pars
  *  through this workflow via scriptPath. */
 export const WORKFLOW_BASENAME = "fan-in-execute.js";
 
+/** The single historical task that LANDED `.claude/workflows/fan-in-execute.js`. 判据2(a)'s landing
+ *  exemption is THIS bounded constant — NOT a scan of the task store's Touches. A mutable Touches
+ *  scan grows monotonically: every future task that declares the workflow file in its ## Touches
+ *  would auto-exempt itself from 判据2(a), yet such a task CAN and SHOULD dispatch the workflow in
+ *  its own fan-in (the exemption reason — "the workflow didn't exist yet" — holds only for the
+ *  landing event itself). Historical event; there is no second one. */
+export const LANDING_TASK_ID = "gap-ac78-fan-in-workflow-a6-check";
+
+/** A Touches path lands the workflow if its basename is the workflow file (the `.claude/workflows`
+ *  dir or the `plugin/workflows` byte-mirror). */
+const LANDING_TOUCH_RE = /(^|\/)fan-in-execute\.js$/;
+
+export function isLandingTouch(touch: string): boolean {
+  return LANDING_TOUCH_RE.test(touch);
+}
+
 // ── Pure: parse lock events ──────────────────────────────────────────────────────────────────────────
 
 export interface LockEvent {
@@ -175,16 +191,28 @@ export function checkWorkflowCoverage(
 }
 
 /**
- * The tasks that LANDED the workflow — their ## Touches carry `.claude/workflows/fan-in-execute.js`
- * (or the plugin/workflows mirror). Auto-detected from the task store so the checker does not redden
- * on the landing task's own fan-in (AC67「不判自身」). Pure: the caller supplies parsed
- * { id, touches[] } entries.
+ * 判据2(a) landing exemption — GUARDED and BOUNDED. The exempt set is the fixed LANDING_TASK_ID
+ * constant (the task that landed the workflow); it is NOT a scan of current Touches. A task whose
+ * Touches match the landing path but whose id is NOT the landing constant is NOT exempted — it can
+ * and should dispatch the workflow in its own fan-in, so it stays in the (a) difference.
+ *
+ * `touchesMatch` reports every id that currently claims the landing path (observability only — it
+ * never widens the exemption; a non-landing Touches-match is precisely the case that must NOT open
+ * the exemption). Pure: the caller supplies parsed { id, touches[] } entries.
  */
-export function landingTaskIds(taskEntries: { id: string; touches: string[] }[]): string[] {
-  return (taskEntries ?? [])
-    .filter((e) => (e.touches ?? []).some((t) => /(^|\/)fan-in-execute\.js$/.test(t)))
+export function landingExemption(taskEntries: { id: string; touches: string[] }[]): { exempt: string[]; touchesMatch: string[] } {
+  const touchesMatch = (taskEntries ?? [])
+    .filter((e) => (e.touches ?? []).some(isLandingTouch))
     .map((e) => e.id)
     .sort();
+  return { exempt: [LANDING_TASK_ID], touchesMatch };
+}
+
+/** The exempt task set for 判据2(a): the bounded landing constant. (The previous Touches-scan
+ *  implementation was the defect — a mutable exemption that grows with every future task that
+ *  declares the workflow file in its ## Touches.) */
+export function landingTaskIds(taskEntries: { id: string; touches: string[] }[]): string[] {
+  return landingExemption(taskEntries).exempt;
 }
 
 // ── Pure: 判据2(c) — agentId is a real subagent ─────────────────────────────────────────────────────
@@ -391,8 +419,12 @@ Usage:
                             When given, the session scan is skipped (test surface / meta-cc read).
   --landing-task <id>       exempt ONE task id from the (a) coverage check (AC67「不判自身」: the task
                             that landed the workflow could not dispatch it during its own fan-in).
-                            Default: auto-detect from <root>/tasks/*.md Touches (a task whose Touches
-                            carry fan-in-execute.js). Its agentId is still checked by 判据2(c).
+                            Default: the BOUNDED landing constant gap-ac78-fan-in-workflow-a6-check
+                            (the single historical task that landed fan-in-execute.js). A task whose
+                            Touches carry fan-in-execute.js but whose id is NOT that constant is NOT
+                            exempted — it can and should dispatch the workflow in its own fan-in
+                            (reported via a guard warning when detected). Its agentId is still checked
+                            by 判据2(c).
   --json                    machine-readable output { ok, evaluated, reason, checks }.
   --help                    this help.
 
@@ -440,7 +472,17 @@ export function main(argv: string[]): number {
       : scanWorkflowTaskIds(sessionRoot, boundaryEpoch);
     const landingExempt = landingOverride != null && landingOverride !== ""
       ? [landingOverride]
-      : landingTaskIds(loadTaskEntries(root));
+      : (() => {
+          // The exemption is the bounded landing constant. A Touches-match that is NOT the landing
+          // constant must NOT be exempted (it can dispatch the workflow in its own fan-in) — report
+          // it for observability so a future Touches-match cannot silently open the exemption.
+          const { exempt, touchesMatch } = landingExemption(loadTaskEntries(root));
+          const rogue = touchesMatch.filter((id) => id !== exempt[0]);
+          if (rogue.length > 0) {
+            console.warn(`fan-in-workflow-check: guard — Touches-match(es) ${rogue.join(", ")} NOT exempted (only ${exempt[0]} is the landing constant; a non-landing task CAN dispatch the workflow in its own fan-in)`);
+          }
+          return exempt;
+        })();
     const vA = checkWorkflowCoverage(taskIds, tasksWithWorkflow, landingExempt);
     if (vA.evaluated) {
       anyEvaluated = true;

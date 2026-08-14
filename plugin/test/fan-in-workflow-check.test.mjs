@@ -35,6 +35,9 @@ import {
   workflowTaskIds,
   checkWorkflowCoverage,
   landingTaskIds,
+  landingExemption,
+  isLandingTouch,
+  LANDING_TASK_ID,
   classifyAgentId,
   checkAgentIds,
   topLevelSessionStems,
@@ -197,6 +200,39 @@ test("PURE landingTaskIds — the plugin/workflows mirror also counts as landing
     { id: "gap-ac78-fan-in-workflow-a6-check", touches: ["plugin/workflows/fan-in-execute.js"] },
   ];
   assert.deepEqual(landingTaskIds(entries), ["gap-ac78-fan-in-workflow-a6-check"]);
+});
+
+test("PURE landingTaskIds GUARD (negative control) — a Touches-match with NON-landing id is NOT exempted (stays in the difference)", (t) => {
+  // The exemption is the BOUNDED landing constant, NOT a scan of current Touches. A future task
+  // that touches fan-in-execute.js CAN and SHOULD dispatch the workflow in its own fan-in — the
+  // "workflow didn't exist yet" reason holds only for the landing event itself. So a Touches-match
+  // with id != LANDING_TASK_ID must stay in 判据2(a)'s difference.
+  const entries = [{ id: "gap-future-task", touches: [".claude/workflows/fan-in-execute.js"] }];
+  // The exempt set is the constant, not the Touches-matching id:
+  assert.deepEqual(landingTaskIds(entries), [LANDING_TASK_ID]);
+  assert.notEqual(LANDING_TASK_ID, "gap-future-task");
+  // isLandingTouch still classifies the path as the landing path (the guard is about the ID, not
+  // the path):
+  assert.equal(isLandingTouch(".claude/workflows/fan-in-execute.js"), true);
+  // Feeding the guarded exempt set into 判据2(a): the non-landing Touches-match is NOT exempted —
+  // it is in `missing` (the difference) and absent from `landingExempt`.
+  const v = checkWorkflowCoverage(["gap-future-task"], [], landingTaskIds(entries));
+  assert.equal(v.ok, false);                             // RED — not exempted
+  assert.equal(v.evaluated, true);
+  assert.deepEqual(v.missing, ["gap-future-task"]);      // stays in the (a) difference
+  assert.deepEqual(v.landingExempt, []);                 // NOT reported as exempt
+});
+
+test("PURE landingExemption — reports the current Touches-match set for observability WITHOUT widening the exemption", (t) => {
+  const entries = [
+    { id: LANDING_TASK_ID, touches: [".claude/workflows/fan-in-execute.js"] },
+    { id: "gap-future-task", touches: [".claude/workflows/fan-in-execute.js"] },
+  ];
+  const { exempt, touchesMatch } = landingExemption(entries);
+  // exempt is the bounded constant — the future task is NOT added even though its Touches match:
+  assert.deepEqual(exempt, [LANDING_TASK_ID]);
+  // touchesMatch carries BOTH ids for observability (so a run can warn about the rogue match):
+  assert.deepEqual(touchesMatch, ["gap-ac78-fan-in-workflow-a6-check", "gap-future-task"]);
 });
 
 // ── PURE 判据2(c): classifyAgentId ──────────────────────────────────────────────────────────────────
