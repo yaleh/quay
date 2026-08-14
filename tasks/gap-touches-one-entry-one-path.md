@@ -59,9 +59,18 @@ depends_on: []
 
 ## Touches
 
-- plugin/scripts/touches-one-entry-one-path-check.ts (new)（判据1 checker）
+- plugin/scripts/touches-one-entry-one-path-check.ts (new)
 - plugin/test/touches-one-entry-one-path-check.test.mjs (new)
-- tasks/（现有多路径 Touches 拆分——约 10 条；在飞 AC66 拆归其分支）
+- tasks/gap-ac37-exec-core-ships-with-package.md
+- tasks/gap-ac41-coldstart-skill-reference-only.md
+- tasks/gap-ac58-retired-clauses-delete-and-archive.md
+- tasks/gap-ac59-family5-scan-covers-execution-cores.md
+- tasks/gap-ac66-ac-driven-behavior-change-verifiable.md
+- tasks/gap-batch-merge-authoritative-direction-hardcoded-develop.md
+- tasks/gap-dod-two-green-runs-and-over90-budget-are-mathematically-incompatible.md
+- tasks/gap-full-suite-runner-red-pattern-matches-bare-x-vitest-false-red.md
+- tasks/gap-inner-session-check-discovery-reads-wrong-transcript.md
+- tasks/gap-tick-driver-live-ship-drift-no-backflow.md
 - tasks/gap-touches-one-entry-one-path.md（自身）
 
 ## Evidence

@@ -56,94 +56,35 @@ const PRIOR = A.prior ? `\n上一轮读数（只报差异）：\n${A.prior}\n` :
 // ══ 交还给主循环的指令 ①：该跑什么 ══════════════════════════════════════════
 // 判据的单一来源。改判据改这里，主循环照抄——它不需要记住任何一条命令。
 const READ_CMD = String.raw`cd /home/yale/work/quay
-echo "PC=$(git log --oneline --since='1 day ago' | wc -l)"
+# ══ 2026-08-14 SPEC-tick-read-path-slimming §2-D：本块已瘦身 ══════════════════════════
+# 【为什么】原块 95 行，与 A0 + 核里的五项手跑大面积重叠：A0 覆盖 5 项、五项手跑覆盖 7 项、
+# 无人覆盖仅 2 项。两份各自演化的代价已实证——死命令
+# 死命令 git rev-list --left-right --count develop...integration 在此存活至 2026-08-14
+# （integration 已随 AC48 删除，实跑 fatal: ambiguous argument）。它躲过了检查，因为
+# 核的 tick-core-static-check 只扫 *.md，扫不到 *.js。⇒ 与已修的 A6 同族，区别只在扫描面之外。
+# 【原块的 9 条独有词条已全文迁入】orchestration/manager-loop-tick.md §READ_CMD-migrated
+# （落点映射逐条，非抽查——硬规则 5）。要「为什么」去那里读，不要在此复制。
+#
+# 【读数正本，不在此复制】：
+#   A0  node --experimental-strip-types plugin/scripts/quay-session.ts manager-tick-readings
+#       → 三项目 status / resource.*（cpu_some_avg10, load1, node_count, node_dual_read,
+#         mem_available_mb）/ outer.liveness / outer.ticklog / monitor.*
+#   A1  python3 orchestration/manager-anchor-check.py
+#   五项手跑（正本在 orchestration/manager-tick-core.md 的 A0 行，那里逐条写了陷阱）：
+#       ① PC/commits30m（排除 manager: 前缀）② manifest + plugin_in_files
+#       ③ .quay/manager-write-freeze.txt ④ 收件箱 find 列文件（日期现算，勿硬编码）
+#       ⑤ mon_procs 先取清单再从清单数
+#
+# 【只有下面两项无人覆盖，故留在本块】
 lat=$(gh release view --json tagName -q .tagName 2>/dev/null); echo "release=$lat ahead=$(git rev-list --count $lat..develop 2>/dev/null)"
-python3 -c "import json;d=json.load(open('packages/quay/package.json'));print('plugin_in_files='+str('plugin' in d.get('files',[])))"
-python3 -c "import json;print('manifest='+json.load(open('plugin/.claude-plugin/plugin.json'))['version'])"
-grep -o 'avg10=[0-9.]*' /proc/pressure/cpu | head -1; echo "load1=$(cut -d' ' -f1 /proc/loadavg) node=$(pgrep -cf 'bin/node')"
-# ^ 2026-08-12：\`pgrep -c node\`（按 comm 匹配）在本机【恒返回 0】——实测同一时刻 \`pgrep -cf node\`=68、
-#   \`ps -eo args | grep -c '^/home/yale/.nvm.*bin/node'\`=24、load1=14.08。而 \`ps -eo comm | grep -cx node\` 也=0
-#   ⇒ 本机 node 进程的 comm 不是字面 "node"。**一个恒为 0 的读数携带零信息**——与已退休的判准 ⑥、
-#   与 mon_outer 那个「硬编码签名⇒恒 DEAD」的布尔同族。改为 \`-f\` 按完整命令行匹配。
-#   **一般形态：读数与 load1 这类独立量矛盾时，先怀疑读法，别急着当成系统状态突变（⑤）。**
-for p in quay archguard meta-cc; do [ -f /home/yale/work/$p/.halt ] && echo "halt:$p"; done
-tmux list-panes -a -F '#{session_name}:#{window_name}=#{pane_current_command}' 2>/dev/null | grep quay-0 | tr '\n' ' '; echo
-echo "outer_bq=$(tail -40 orchestration/tick-log.md | grep -oE '^> \*\*[0-9]{2}:[0-9]{2}Z' | tail -1)"
-echo "outer_tbl=$(grep -m1 '^| 2026' orchestration/tick-log.md | grep -oE '[0-9]{2}:[0-9]{2}Z')"
-echo "outer_li=$(tail -40 orchestration/tick-log.md | grep -oE '^- \`[0-9]{2}:[0-9]{2}[xZ]*\`' | tail -1)"
-echo "outer_any=$(tail -40 orchestration/tick-log.md | grep -oE '[0-9]{2}:[0-9]{2}[xX]?Z' | tail -1)  # 三种写死格式全空时的兜底"
-# ^ 2026-08-12：outer 的 tick-log 换到【第三种】格式（\`- \`HH:MMZ\` \`verb\` — …\` 列表项），
-#   而上面两条写死格式的读法【都】静默返回空——正是 manager-loop-tick.md:665 钉过的
-#   「日志格式是会变的，而写死格式的读法不会报错，只会安静地返回旧值」，这次连旧值都没有，返回空。
-#   ⇒ 加第三种 + 一个不依赖行首形态的兜底。**判读：\`outer_any\` 有值而前三个全空 ⇒ 格式又变了，当轮补读法。**
+# ^ AC16② 新鲜度巡检。A0 不给，五项手跑也不给。
 python3 -c "
 import json,os,time
 d=json.load(open('.quay/full-suite-state.json'))
 ms=d.get('durationMs')
 print('suite=%s/%s dur=%s age=%smin'%(d['state'],d.get('reason'),('%.1fs'%(ms/1000)) if ms else '跑着呢(无终态时长)',int(time.time()-os.path.getmtime('.quay/full-suite-state.json'))//60))"
-# ^ 2026-08-08 03:1x：durationMs 在 running 态是 null，早前我手打的变体直接 ms/1000 → TypeError，
-#   **整条 suite 读数当轮丢失，而丢失的恰恰是"正在跑"这个最该看的状态**。
-#   两个教训：(a) ⑥′(a) 原型——我执行的命令块与 workflow 交还的不一致，加字段加出了崩溃；
-#   (b) 同族形状——**读数在它最有价值的那个状态下不可用**，与"闸门只在没事时才绿"同构。
-git rev-list --left-right --count develop...integration | awk '{print "diverge="$1"/"$2}'
-echo "commits30m=$(git log --oneline --all --since='30 minutes ago' | grep -vc '^[0-9a-f]* manager:')"
-mon_list=$(ps -eo pid,ppid,etime,args --no-headers | grep -E 'SUITE-TERMINAL|full-suite-state\.json' | grep -vE 'shell-snapshots|ugrep|grep -E')
-echo "mon_procs=$(printf '%s' "$mon_list" | grep -c .) （从下面这份清单数出来的；已排除本命令自身）"
-printf '%s\n' "$mon_list" | sed 's/^\(.\{110\}\).*/\1…/'
-# ^ 2026-08-12 23:5x 修：旧写法 ps -eo args | grep -cE … 把【我自己这条命令行】也数进去
-#   （实测同刻：该计数 4–5，而精确枚举只有 1 个真实监视器 + 我自己的 ugrep；下一 tick 真值为 0 时它仍报非零）
-#   ⇒ 它恒 >=1、永远取不到「零监视器」这个值 ⇒ 硬规则 4「结构上不可能取假的量不是测量」。
-#   与同日修掉的 pgrep -c node 恒 0 是同一族的镜像：一个恒零、一个恒非零，都携带零信息。
-#   新写法：先取清单再从清单数，条数与清单必然一致（③ 要求二者都写进 tick-log），且空清单时计数为 0（可取假）。
-python3 orchestration/manager-anchor-check.py
-if [ -f .quay/manager-write-freeze.txt ]; then
-  fz=$(grep -v '^#' .quay/manager-write-freeze.txt | grep -v '^$')
-  since=$(date -u -d "@$(stat -c %Y .quay/manager-write-freeze.txt)" +%Y-%m-%dT%H:%M:%SZ)
-  echo "freeze_active=1 paths=$(echo "$fz" | wc -l) since=$since"
-  echo "freeze_violations=$(git log --since="$since" --format='' --name-only 2>/dev/null | sort -u | grep -Fx "$fz" | tee /tmp/.mgr-fz-hit | wc -l)"
-  [ -s /tmp/.mgr-fz-hit ] && { echo "  ⚠️ 冻结成立后仍被改的路径（逐条）："; sed 's/^/    /' /tmp/.mgr-fz-hit; }
-  # 负控制：谓词对一个已知在清单内的路径必须命中，否则 0 是谓词坏不是真 0（今天补的「零计数」那一半）
-  echo "freeze_predicate_selftest=$(echo 'plugin/scripts/manager-start.sh' | grep -cFx "$fz")  # 必须=1"
-else
-  echo "freeze_active=0（无冻结清单）"
-fi
-# ^ 2026-08-12：vhs-merge 那棵树持有 10 个未解冲突,其中 7 个是 manager 层文件。outer 请求冻结、我确认。
-#   **不写成承诺而写成读数,是因为 C17**：一条规则若「守」与「不守」在记录上无法区分,它就只能靠意志——
-#   而我今天已实证过一次「守不住」（C8 读了 7 次引用了 7 次仍违反 8 次）。
-#   ⇒ 违反表现为 freeze_violations 非 0 + 逐条列出路径（枚举而非布尔,硬规则③）。
-#   解冻条件写在清单文件头部;删除清单时须在 tick-log 记一行。
-echo "=== inbox（A15：判据是列目录本身，不看计数器；最近 5 封 + 总数）==="
-ls -la --time-style=+%H:%MZ .quay/manager-inbox/ 2>/dev/null | tail -n +2 | sort -k6 -r | head -5
-echo "inbox_total=$(ls -1 .quay/manager-inbox/ 2>/dev/null | wc -l)"
-# ^ 2026-08-12 补进执行点（人问「是你的 tick 操作漏了？」后查实）：A15「收件箱每轮必查」此前只写在
-#   orchestration/manager-tick-core.md 的散文核里，而【本 READ_CMD 从不测它】——我 10:20Z 查过一次后
-#   连续两轮 tick 未查，期间漏读 outer 10:39Z 报的 round-18 infra-error 根因（resource-gate.test.mjs
-#   故意杀子进程、stderr 的 Killed 被 childKilledBySignal 误判）与 10:28Z 点名给 manager 的 inner /clear 裁定。
-#   代价：我 10:54Z 把 outer 已报过的事当作自己的发现讲回给它，且我那版只有症状没有根因。
-#   ⚠️ A15 本身就是 2026-08-09 那次漏读 6 封 archguard 报告之后补的——**上次只补进散文核、没补进执行点，
-#   于是同一个漏读复发**。这正是档案点名的「修正写在复盘小节、执行块不动 = 修了个没人执行的副本」。
-#   ⇒ 判据放进读数块：漏查会表现为读数里缺这一块（可被 ⑥′ 自检抓到），而不是靠我记得。
-# ^ 2026-08-07：我把 suite 监视器从 suite-state-trigger --monitor 换成了自记 prev 的轮询
-#   （原因：suite-state-trigger 用共享的 .quay/suite-state-last.json 做边沿触发，
-#    outer 也挂着一个实例，两者互偷事件——我那个挂了 1h45m 零事件）。
-#   换监视器时【这条检查一度还指着旧签名】，等于换完就失去覆盖而不自知——
-#   §1.4e 同型：换实现要同步换判据，否则"检查通过"检查的是一个已经不存在的东西。
-# ^ 2026-08-08 01:2x：上面那句预言的事真的发生了，而且是在我自己的仪表盘上。
-#   原来两行是【硬编码签名 → 布尔】：mon_outer 的签名 'quay-0:outer.0 -S -3' 已匹配零进程，
-#   于是它每轮恒返回 DEAD——与已退休的 ⑥ 同型：答案恒定的判准携带零信息。
-#   另外我连续三轮把它写成"mon_suite/mon_commit 双 alive"，而本命令块【从不输出 mon_commit】——
-#   这一半成立：该读数在块里没有来源。
-# ^ 2026-08-08 01:5x **当轮自我更正（重要，本身就是一次 ②b 违规）**：
-#   我当时进一步断言"不存在任何 commit 监视器进程"，证据是 ps 无匹配 + TaskList 为空。
-#   **五分钟后 commit 监视器 btat0fqct 发来事件——它一直活着。**
-#   两个来源都对 Monitor 工具的任务【不完备】：ps 看不到（不是独立进程），
-#   TaskList 也不列它（实测同一时刻仍返回 "No tasks found"）。
-#   ⇒ **判 Monitor 死活，ps 和 TaskList 都不是完备来源；唯一可靠证据是它是否还在发事件。**
-#   教训是 ②b 的原样重演，只不过这次发生在【我用来给自己定罪的证据】上：
-#   **给自己定罪同样要过来源完备性这一关，认错不豁免举证责任。**
-#   ⇒ 改为【枚举实际进程】而不是"按名字问在不在"：少了一个监视器会表现为少一行，
-#   而不是一个我可以照抄成 alive 的布尔。一般形态：**布尔化的存在性检查会把"对象没了"伪装成"检查失败"，
-#   而枚举把两者区分开。**`
+# ^ B3 的【戊】用它。durationMs 在 running 态是 null——直接 ms/1000 会 TypeError 而丢掉整条读数，
+#   而丢掉的恰恰是「正在跑」这个最该看的状态（详见 §READ_CMD-migrated 第 4 条）。`
 
 // ══ 交还给主循环的指令 ②③④：判准 / 收尾 / 发消息 —— 全部搬出 .js（2026-08-08 05:5x，人指示）══
 // 三段原是持久散文常量，性质相同：【持久】但【高频编辑】（判准 6h 内改了 15 次）——
