@@ -94,7 +94,7 @@
 ```
 outer 独占：  orchestration/orchestrator-*.md + plugin/loop/orchestrator-loop-tick.md（外层核，inner/manager 不得列进 Touches 或直接改，需改走 Proposal 建议由 outer 落盘）(src:任务体 gap-write-ownership-extend-beyond-tasks-to-outer-core-and-hot-files)
 inner 独占：  orchestration/fast-mode-tick-core.md + plugin/loop/fast-mode-loop-tick.md（inner 核，outer/manager 不直接改）(src:manager 2026-08-14 22:0xZ 裁定)
-manager 独占：orchestration/manager-*.md + plugin/loop/manager-*.md（manager 核，outer/inner 不直接改）(src:manager 2026-08-14 22:0xZ 裁定)
+manager 独占：orchestration/manager-*.md + plugin/loop/manager-*.md（manager 核，outer/inner 不直接改）(src:manager 2026-08-14 22:0xZ 裁定)。**⚠️ plugin/loop/manager-*.md 只应存在指针**：内容正本在 orchestration/manager-*.md；指针化的一次性删除由 inner 执行（plugin/ 实现面），此后该路径无内容可维护（manager 22:1xZ 裁定，src:任务体 gap-plugin-loop-manager-drifted-copies-pointerize）
 ```
 （本层自己的文件自己落盘；跨层需改 → 给改动建议，由该层落盘——与 manager §0「不碰实现只给建议」同构）;②**迁移单方新建**:迁移窗口内(旧路径→新路径)新路径**只允许一方新建**——move 一次提交由一方完成,另一方只 rebase(同路径两个提交各自 ADD ⇒ fan-in 必 add/add);③**热点文件 outer 在飞占用**:outer 主检出的未提交改动算占用,inner 派发前用 `touches-orthogonality-check.ts --check-pair <候选> <在飞> --outer-inflight <outer在飞文件>` 判定——同文件并发 ⇒ **拒绝派发**(fast-mode-loop-tick.md 步骤 4 并发资格后追加该检查)。**任务文件 add/add 的确定性规则(manager 2026-08-11 08:4x 裁定)**:冲突路径**仅**为 `tasks/<本任务 id>.md` 时 inner 取**分支版本**(同一文件+本任务 AC 勾选与证据,超集);其余任何路径仍按 C16 abort+needs-human (src:任务体 gap-write-ownership-extend-beyond-tasks-to-outer-core-and-hot-files Proposal/Contract)  **失效前提：inner 仍以 git 分支+worktree 方式并行改实现；若写面迁出共享 git 工作树，本条退休** |
 
