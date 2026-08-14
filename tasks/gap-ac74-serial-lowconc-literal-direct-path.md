@@ -1,7 +1,7 @@
 ---
 id: gap-ac74-serial-lowconc-literal-direct-path
 title: AC74 suite lane 静态假设三处一次改齐——main 去 /slots + serial/lowconc 直调读宿主 + 删 per_suite_lane_budget 产出（人 06:4xZ 裁定 AC68 回退）
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
