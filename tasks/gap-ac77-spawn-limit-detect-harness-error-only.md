@@ -1,7 +1,7 @@
 ---
 id: gap-ac77-spawn-limit-detect-harness-error-only
 title: AC77 spawn 触顶只检测 harness 报错，不自建计数（人 07:4xZ 裁定）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
