@@ -118,6 +118,6 @@ return {
   ffOk: result.ffOk,
   task,
   message: result.ffOk
-    ? `fan-in landed for ${task} (via ${meta.name} workflow)`
+    ? `fan-in landed for ${task} (via 'fan-in-execute' workflow)`
     : `fan-in did not land for ${task}: ${result.note ?? 'unknown'}`,
 }
