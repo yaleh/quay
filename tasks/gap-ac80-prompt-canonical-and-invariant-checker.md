@@ -1,7 +1,7 @@
 ---
 id: gap-ac80-prompt-canonical-and-invariant-checker
 title: 三层各有 git 跟踪 prompt 正本 + 不变式检查器（AC80，人 14:2xZ 裁定）——当前 outer/inner ❌；正本 vs CronList 副本会漂
-status: ready
+status: done
 labels:
   - gap
   - mechanism
