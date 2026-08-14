@@ -55,11 +55,11 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1 判据1：retired-clause-check.ts 登记 inner-agent-budget 退休（heavy-op-token 同款）。
-- [ ] AC2 判据2 能取假：audit 重跑 inner-agent-budget.json 得 disp=RETIRED（现 SUSPECT）。
-- [ ] AC3 判据3：判据5b 两命令 grep 命中 ≥1。
-- [ ] AC4 判据4：任务体记录「退休登记强制检查」观察项（发生率 1/1，不建机制）。
-- [ ] AC5 既有测试全绿；`--for-task` scoped 门绿。
+- [x] AC1 判据1：retired-clause-check.ts 登记 inner-agent-budget 退休（heavy-op-token 同款）。
+- [x] AC2 判据2 能取假：audit 重跑 inner-agent-budget.json 得 disp=RETIRED（现 SUSPECT）。
+- [x] AC3 判据3：判据5b 两命令 grep 命中 ≥1。
+- [x] AC4 判据4：任务体记录「退休登记强制检查」观察项（发生率 1/1，不建机制）。
+- [x] AC5 既有测试全绿；`--for-task` scoped 门绿。
 
 ## Definition of Done
 
@@ -74,4 +74,52 @@ depends_on: []
 
 ## Evidence
 
-（落地后回填——外层 2026-08-14 15:5xZ：audit Evidence :127/:141 已按 manager 裁定订正 SUSPECT→RETIRED，注名按 gap-retire-inner-agent-budget-report；本任务落地后 audit 重跑应自动得 RETIRED）
+（2026-08-14 落地回填——inner agent 本 worktree 实跑；外层 15:5xZ 已订正 audit Evidence :127/:141 SUSPECT→RETIRED）
+
+**判据1 登记（AC1）**——retired-clause-check.ts REGISTRY 新增 R31（heavy-op-token R06/R24 同款：载体名 + 裁定日期 + 理由），archive 新增 `## R31` 段落（源任务引用落在 archive）：
+```
+{ id: "R31", source: "plugin/loop/fast-mode-loop-tick.md", markers: [
+    "inner-agent-budget.json 已随 2026-08-10 人裁定 A16 退休",
+] },
+```
+retired-clause-check 实跑 GREEN（30 条目 / 48 tokens 全迁出、全有家）：
+```
+$ node --experimental-strip-types plugin/scripts/retired-clause-check.ts --root .
+retired-clause-check: OK — 30 entries migrated (48 unique tokens: all gone from source, all present in archive)
+```
+
+**判据2 能取假（AC2）**——用 audit 自己的判定谓词喂【本 worktree 已登记的 retired-clause-check.ts】（主检出无本改动故 resolveProductionRoot 读不到，直接喂文件内容）：
+```
+$ node -e "isRetiredCarrier('inner-agent-budget.json',[<worktree retired-clause-check.ts>])"
+isRetiredCarrier: true
+kind: retired
+audit disposition => RETIRED   （现 SUSPECT ⇒ 假）
+```
+端到端复现（temp 非 git 根 + 本登记文件，buildAudit 全链路）：
+```
+$ node plugin/scripts/prod-data-audit.ts --root <tmp> --json
+inner-agent-budget.json  kind=retired  disposition=RETIRED  threeState=NOT_EVALUATED
+  reason: retired-carrier: 已退役（retired-clause-check.ts / loop-shipping-exclusion-data.mjs），不存在是预期，直接出局
+```
+对照（主检出 /home/yale/work/quay，未含本改动）→ disposition=NORMAL_ABSENT（零写入者被 prod-data-audit.ts 自引用改写）⇒ 登记即机械翻转。
+
+**判据3（AC3）**——判据5b 两命令命中 ≥1：
+```
+$ grep -n inner-agent-budget plugin/scripts/retired-clause-check.ts plugin/scripts/loop-shipping-exclusion-data.mjs
+plugin/scripts/retired-clause-check.ts:155:  // 自计数载体 inner-agent-budget.json 整体退休 (2026-08-10 人裁定 A16「彻底取消所有 subagent 计数机制」,
+plugin/scripts/retired-clause-check.ts:158:      "inner-agent-budget.json 已随 2026-08-10 人裁定 A16 退休",
+（2 命中；loop-shipping-exclusion-data.mjs 无引用，按任务「不覆盖」保持不动）
+```
+
+**判据4 观察项（AC4）**——「退休登记强制检查」观察项记录于本任务 Proposal（⚠️ 真正的缺口 段）：发生率 1/1（登记 1 / 未登记 1），按硬规则 12 不建机制；下次未登记退休发生时以本任务体为发生率来源。
+
+**判据5（AC5）**——既有测试 + scoped 门全绿（本 worktree 实跑）：
+```
+$ bash scripts/test.sh --for-task gap-retire-registration-inner-agent-budget-not-registered --allow-thin
+retired-clause-check: OK — 30 entries migrated
+PASS: delivery-inventory drift gate
+retired-clause-check.test.mjs  6/6 pass（含新增「GREEN: inner-agent-budget hits the retired list (R31)」）
+ℹ tests 6 · pass 6 · fail 0 · cancelled 0
+(EXIT=0)
+```
+另：`prod-data-audit.test.mjs` 真实载体断言由 SUSPECT 更新为 RETIRED（`kind=RETIRED` / `disposition=RETIRED`）——该测试走主检出，fan-in 后主检出含登记即绿。

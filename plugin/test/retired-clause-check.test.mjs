@@ -87,6 +87,21 @@ test("RED (判据2): registry marker present in archive but re-introduced in sou
   }
 });
 
+// ── GREEN: inner-agent-budget 退休登记（gap-retire-registration-inner-agent-budget-not-registered）───
+test("GREEN: inner-agent-budget hits the retired list (R31 registered in 已退役清单)", () => {
+  const entry = REGISTRY.find((e) => e.id === "R31");
+  assert.ok(entry, "R31 (inner-agent-budget retirement) must be in the REGISTRY");
+  assert.ok(entry.markers.some((m) => m.includes("inner-agent-budget")),
+    `R31 markers must name inner-agent-budget: ${entry.markers.join(" | ")}`);
+  // 登记必须机械有效：marker 在 archive 有家、在 source 已删除（硬规则⑤ 落点映射，runCheck GREEN 同覆盖）。
+  const archive = fs.readFileSync(path.join(REPO_ROOT, ARCHIVE_REL), "utf8");
+  const src = fs.readFileSync(path.join(REPO_ROOT, entry.source), "utf8");
+  for (const m of entry.markers) {
+    assert.ok(hasMarker(archive, m), `archive must carry R31 marker "${m}"`);
+    assert.ok(!hasMarker(src, m), `R31 marker "${m}" must be absent from source ${entry.source}`);
+  }
+});
+
 // ── GREEN: norm() semantics (backticks / whitespace / comment prefixes) ──────────────────────────
 test("GREEN: norm() collapses whitespace, strips backticks and # / // comment prefixes", () => {
   assert.equal(norm("a  b\nc"), "a b c");
