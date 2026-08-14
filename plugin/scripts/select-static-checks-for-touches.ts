@@ -130,10 +130,21 @@ export const NEW_SCRIPT_REGISTRATION_REQUIRED = [
  * rescanned whole). A task that declares a new script AND lists all required registration files is
  * ok:true (AC3 — the fix for the gap is "补 Touches", exactly what the flagged agent is told to do).
  */
+/** True iff a repo-relative path is a SHIPPED top-level plugin/scripts script (as opposed to a
+ *  checker-mutation-case FIXTURE). The capability-catalog's check-set is derived from the TOP-LEVEL
+ *  `ls plugin/scripts/*.{sh,ts,mjs}` glob — files under plugin/scripts/checker-mutation-cases/ are
+ *  test fixtures, NOT shipped checks, so they never need catalog/inventory registration. Without
+ *  this carve-out, every mutation-case-only task (a task that adds mutation fixtures for ALREADY
+ *  registered checkers) would fail the dispatch-preflight registration check — a false positive,
+ *  because the catalog never scans the subdir and the full-suite gate never reddens. */
+function isShippedPluginScript(t) {
+  return matchesObject("plugin/scripts/", t) && !String(t).startsWith("plugin/scripts/checker-mutation-cases/");
+}
+
 export function checkTouchesRegistration(touches, newTouches) {
   const norm = (p) => normalizeRel(String(p));
   const newScripts = [...new Set((newTouches || []).map(norm).filter(Boolean))]
-    .filter((t) => matchesObject("plugin/scripts/", t));
+    .filter((t) => isShippedPluginScript(t));
   if (newScripts.length === 0) return { ok: true };
   const declared = new Set((touches || []).map(norm).filter(Boolean));
   const missing = NEW_SCRIPT_REGISTRATION_REQUIRED.filter((f) => !declared.has(f));
@@ -370,7 +381,7 @@ export function selectStaticChecksForTouches(touches, registry, opts = {}) {
   // without this wiring the drift surfaced only at the full-suite round (5 prior instances).
   const newTouches = opts && opts.newTouches ? opts.newTouches : [];
   const newPluginScript = [...new Set(newTouches.map(normalizeRel))]
-    .some((t) => matchesObject("plugin/scripts/", t));
+    .some((t) => isShippedPluginScript(t));
   if (newPluginScript) {
     selected.push(CAPABILITY_CATALOG_CHECKER);
     selected.push(DELIVERY_INVENTORY_CHECKER);
@@ -486,7 +497,7 @@ export function fullWidthNewScriptPaths(touchesSection) {
     // a full-width-new file OUTSIDE the plugin bundle is not a registration trigger.
     const paths = parseTouchEntriesWithTags(line).map((e) => e.path).filter(Boolean);
     for (const p of paths) {
-      if (matchesObject("plugin/scripts/", p) && !out.includes(p)) out.push(p);
+      if (isShippedPluginScript(p) && !out.includes(p)) out.push(p);
     }
   }
   return out;

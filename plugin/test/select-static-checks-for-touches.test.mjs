@@ -437,6 +437,45 @@ t("AC4 — negative controls: no new script, non-bundle new file, and partial re
   }
 });
 
+t("AC4b — a NEW file under plugin/scripts/checker-mutation-cases/ is a FIXTURE, not a shipped check — no registration required (gap-checker-mutation-cases-4-checkers)", async () => {
+  const mod = await importMod();
+  // A mutation-case-only task (adds mutation fixtures for ALREADY-registered checkers) must NOT be
+  // gated on the catalog/inventory registration files: the capability-catalog derives its check-set
+  // from the TOP-LEVEL `ls plugin/scripts/*.{sh,ts,mjs}` glob, so subdir fixtures are never scanned
+  // and can never redden the full-suite gate — the registration preflight is a false positive here.
+  const fixture = "plugin/scripts/checker-mutation-cases/cap-counts-subagents-check.sh";
+  assert.deepEqual(
+    mod.checkTouchesRegistration(
+      ["tasks/foo.md", fixture],
+      [fixture],
+    ),
+    { ok: true },
+    "a mutation-case fixture must not trigger registration",
+  );
+  // The carve-out is NARROW: a genuinely new TOP-LEVEL shipped script still requires registration.
+  const shipped = "plugin/scripts/ghost-check.ts";
+  const r = mod.checkTouchesRegistration(["tasks/foo.md", shipped], [shipped]);
+  assert.equal(r.ok, false);
+  assert.equal(r.reason, "touches-missing-registration");
+  // End-to-end: a mutation-case-only task passes --check-registration AND --commands.
+  const root = makeWorkspace({});
+  writeTestSh(root);
+  try {
+    writeTask(root, "mut-only",
+      `## Touches\n- ${fixture} (new)\n- tasks/mut-only.md\n`);
+    const rc = runSelCli(root, "--task", "mut-only", "--check-registration");
+    assert.equal(rc.status, 0, rc.stderr);
+    assert.equal(JSON.parse(rc.stdout).registrationCheck.ok, true);
+    const cmd = runSelCli(root, "--task", "mut-only", "--commands");
+    assert.equal(cmd.status, 0, cmd.stderr);
+    // A mutation-case-only change pulls NO capability-catalog/delivery-inventory scoped gate
+    // (those fire on new SHIPPED scripts only) — the fixture itself is not a shipped check.
+    assert.doesNotMatch(cmd.stdout, /capability-catalog\.sh --json/, "no AC1c catalog gate for a fixture-only task");
+  } finally {
+    cleanup(root);
+  }
+});
+
 // ── AC5: this file is node:test + @test-group governance (self-evident) ──────────────────────────────
 
 t("AC5 — this test file is node:test with a governance @test-group", () => {
