@@ -40,8 +40,9 @@ depends_on: []
 
 ## Definition of Done
 
-- [ ] 扫描面覆盖三层核 + 五个真样本全检出。
-- [ ] 接线 + 既有测试绿。
+- [ ] 扫描面覆盖三层执行核（orchestrator-tick-core / fast-mode-tick-core / manager-tick-core）+ `plugin/scripts/`。
+- [ ] 真样本回放：五个已知 FAMILY-5 实例（manager B3-戊 / outer :34 A11 + :52 B3 / inner :28 A9）全部被检出——检不出任一不算覆盖。
+- [ ] 检查器接线进 gate（instrument-failure-check）+ 既有测试全绿、`--for-task` scoped 门绿。
 
 ## Touches
 

@@ -37,7 +37,9 @@ depends_on: []
 
 ## Definition of Done
 
-- [ ] 覆盖率分母统一扣除已死条目 + 三层一致 + 负控制红。
+- [ ] 三层覆盖率分母统一扣除「前提已死/来源已冻结」条目——outer / inner / manager 记法一致。
+- [ ] manager 侧 6 条扣除已执行并被一致性验证覆盖（AC2）。
+- [ ] 负控制接线：任一层的分母把已死条目计入 ⇒ 红；既有测试全绿、`--for-task` scoped 门绿。
 
 ## Touches
 
