@@ -1502,12 +1502,14 @@ export function defaultLaneCount(): number {
   const ncpu = Number(ncpuRaw);
   const ampRaw = Number(process.env.RESOURCE_GATE_AMPLIFICATION ?? "1.0");
   const amp = Number.isFinite(ampRaw) && ampRaw > 0 ? ampRaw : 1.0;
-  // gap-single-flight-lock-2-slot-concurrent-suites AC2 — the per-suite MAIN lane budget is
-  // hostParallelism ÷ concurrent-suite slots (H=16, S=2 ⇒ 8 — the human's 8 is an INSTANCE of H÷S,
-  // not a literal: 1 suite ⇒ 16, 2 suites ⇒ each 8; a 32-core host with S=2 ⇒ each 16, no code
-  // change). "读宿主 ÷ 读并发度" — the AC44 rule plus one divisor.
-  const slots = concurrentSuiteSlots();
-  return Math.max(1, Math.floor((Number.isFinite(ncpu) && ncpu >= 1 ? ncpu : 1) / amp / slots));
+  // gap-ac74-serial-lowconc-literal-direct-path (human 06:4xZ AC68 /slots 回退) — the MAIN lane
+  // budget is hostParallelism ÷ AMPLIFICATION, NOT divided by the concurrent-suite slot count S.
+  // AC68's `/ S` divisor was rolled back: `in_use` (test.sh's cross-layer running node --test count)
+  // already presses concurrency dynamically on the direct path, and the static `/ S` cut a lone suite
+  // to H/S for protection it did not need (纯损失). Single suite ⇒ nproc (16 on this host). The
+  // serial/lowconc PHASE budgets still divide by S (DEFAULT_SERIAL/LOWCONC_CONCURRENCY = H÷S) — the
+  // 判据4 three-value reading (direct vs runner) requires main = H, serial = lowconc = H÷S on both paths.
+  return Math.max(1, Math.floor((Number.isFinite(ncpu) && ncpu >= 1 ? ncpu : 1) / amp));
 }
 
 /**
@@ -1597,10 +1599,11 @@ export function countHeldSuiteLocks(root: string): number {
  * overridable via --serial-concurrency / --lowconc-concurrency, which the runner passes to test.sh as
  * QUAY_SERIAL_CONCURRENCY / QUAY_LOWCONC_CONCURRENCY so a FUTURE controlled experiment can re-measure
  * before any further bump.
- * gap-single-flight-lock-2-slot-concurrent-suites AC2 — BOTH phase budgets now divide by the
- * concurrent-suite slot count (hostParallelism ÷ QUAY_MAX_CONCURRENT_SUITES; 1 suite ⇒ 16, 2 suites
- * ⇒ each 8 on a 16-core host), the SAME derivation as defaultLaneCount's main budget — the three
- * phases share one budget rule ("serial/lowconc/main 三相").
+ * gap-ac74-serial-lowconc-literal-direct-path (human 06:4xZ AC68 /slots 回退) — the serial/lowconc
+ * PHASE budgets divide by the concurrent-suite slot count (hostParallelism ÷ QUAY_MAX_CONCURRENT_SUITES;
+ * 1 suite ⇒ 16, 2 suites ⇒ each 8 on a 16-core host) — the SAME expression test.sh's
+ * serial_lowconc_host_default reads so the direct path matches (判据4). This is the AC44 rule; the
+ * MAIN lane budget (defaultLaneCount) does NOT divide by S (see the AC68-rollback note there).
  */
 export const DEFAULT_SERIAL_CONCURRENCY = Math.max(1, Math.floor(hostParallelism() / concurrentSuiteSlots()));
 export const DEFAULT_LOWCONC_CONCURRENCY = Math.max(1, Math.floor(hostParallelism() / concurrentSuiteSlots()));

@@ -111,8 +111,8 @@ test("serial group mechanism (gap-suite-concurrency-8-green-serial-group-for-non
     "the serial phase must self-report its selection (AC4 self-report invariant)");
   assert.match(src, /node --test --test-concurrency="\$SERIAL_CONCURRENCY"( \$\(suite_reporter_flags\))? "\$\{serial_files\[@\]\}"/,
     "the serial phase must use the env-driven SERIAL_CONCURRENCY (default 1 = isolation invariant); the optional suite_reporter_flags splice is the gap-install-suite-cost-instrument-reporter-not-wired wiring");
-  assert.match(src, /SERIAL_CONCURRENCY="\$\{QUAY_SERIAL_CONCURRENCY:-2\}"/,
-    "the serial concurrency must default to 2 (raised from 1 by the AC2 controlled experiment — 0-cancelled + 36% faster, gap-load-sensitive-serial-phase-unbounded-growth-measure-first AC2/AC3)");
+  assert.match(src, /SERIAL_CONCURRENCY="\$\{QUAY_SERIAL_CONCURRENCY:-\$\(serial_lowconc_host_default\)\}"/,
+    "the serial concurrency must default to the HOST derivation (H÷S — the AC2 experiment raised 1→2, AC44 read the host, AC74 wired the same derivation into the DIRECT path; gap-ac74-serial-lowconc-literal-direct-path)");
   assert.match(src, /in_group "serial" "\$groups"/,
     "the non-default path must detect the serial group");
   assert.match(src, /printf 'serial:\s+%d\\n' "\$\{counts\[serial\]:-0\}"/,

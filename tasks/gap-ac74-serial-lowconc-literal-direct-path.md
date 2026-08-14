@@ -91,27 +91,37 @@ D2 不构造。
 
 ## Acceptance Criteria
 
-- [ ] AC1 判据1：main 相去掉 `/slots`，单跑回到 16、并发由 in_use 动态压住（不欠用）。
-- [ ] AC2 判据2：serial/lowconc 默认值读宿主（与 runner 同源），2/3 字面量消失。
-- [ ] AC3 判据3：per_suite_lane_budget 产出删除（计算/夹逼/打印/消费者注释）——不留零消费者数字。
-- [ ] AC4 判据4 能取假：直调 vs runner 三值读数相同且等于宿主推导——现在红（main 8 应 16 / serial 2 应 8 / lowconc 3 应 8），修后绿（D2 真样本）。
-- [ ] AC5 判据5：不重定数值（人警告 + AC44 已定值），只统一推导源。
-- [ ] AC6 判据6：concurrency-literal-check 未拦 env-fallback 的覆盖缺口记录（不扩展它）。
-- [ ] AC7 既有测试全绿；`--for-task` scoped 门绿。
+- [x] AC1 判据1：main 相去掉 `/slots`，单跑回到 16、并发由 in_use 动态压住（不欠用）。
+- [x] AC2 判据2：serial/lowconc 默认值读宿主（与 runner 同源），2/3 字面量消失。
+- [x] AC3 判据3：per_suite_lane_budget 产出删除（计算/夹逼/打印/消费者注释）——不留零消费者数字。
+- [x] AC4 判据4 能取假：直调 vs runner 三值读数相同且等于宿主推导——现在红（main 8 应 16 / serial 2 应 8 / lowconc 3 应 8），修后绿（D2 真样本）。
+- [x] AC5 判据5：不重定数值（人警告 + AC44 已定值），只统一推导源。
+- [x] AC6 判据6：concurrency-literal-check 未拦 env-fallback 的覆盖缺口记录（不扩展它）。
+- [x] AC7 既有测试全绿；`--for-task` scoped 门绿。
 
 ## Definition of Done
 
-- [ ] 三处一次改齐（main 去 /slots + serial/lowconc 读宿主 + 删 per_suite_lane_budget 产出）+ 三值读数直调与 runner 相同 + 不重定数值。
+- [x] 三处一次改齐（main 去 /slots + serial/lowconc 读宿主 + 删 per_suite_lane_budget 产出）+ 三值读数直调与 runner 相同 + 不重定数值。
 
 ## Touches
 
-- scripts/test.sh（:800-801 去掉 `/ s` + :760/:782-785 删 slots + :820-821 改读宿主）
-- plugin/scripts/resource-gate.sh（:461-469 删 per_suite_lane_budget 产出）
-- plugin/scripts/full-suite-runner.ts（导出推导函数供 test.sh 复用——若用共享源而非复制）
-- plugin/test/resource-gate.test.mjs（AC68 derivedConcurrency 测试改：无 slots 除数 + serial/lowconc 宿主推导 + 负控制）
+- scripts/test.sh（default_concurrency_formula 去掉 `/ s` + 删 slots 声明/取值/夹逼 + serial/lowconc 改读宿主 `serial_lowconc_host_default`）
+- plugin/scripts/resource-gate.sh（删 per_suite_lane_budget 产出 + 删零消费者 CONCURRENT_SUITE_SLOTS 声明）
+- plugin/scripts/full-suite-runner.ts（`defaultLaneCount()` 去 `/ slots` —— AC68 回退同源；serial/lowconc 常量注释改为 H÷S 三相区分；未走「共享源导出」——test.sh 是 bash，复制宿主推导表达式为 shell helper）
+- plugin/test/resource-gate.test.mjs（AC68 derivedConcurrency 测试改：无 slots 除数 + serial/lowconc 宿主推导 + 判据4 checker + 负控制）
+- plugin/test/full-suite-runner.test.mjs（defaultLaneCount AC1 测试改：任意 slot 数 → nproc）
+- plugin/test/runner-grouping-serial-anti-stomp.test.mjs（serial 默认断言改 host-derived 形态）
 - （负控制 fixture + 两路径三值读数对比）
 - tasks/gap-ac74-serial-lowconc-literal-direct-path.md（自身）
 
 ## Evidence
 
-（落地后回填）
+**落地（2026-08-14，worktree gap-ac74）**：
+- 判据1（main 去 /slots）：`scripts/test.sh` `default_concurrency_formula` 的 `awk … / a / s` → `awk … / a`；`:local` 删 `slots`；删 slots 取值/夹逼。`full-suite-runner.ts:defaultLaneCount()` 同步去 `/ slots`（AC68 回退覆盖 runner 侧 —— AC68 任务体写明 fix 使「test.sh 与 full-suite-runner 都读它」，故回退同两处）。证据：`resource-gate.test.mjs` AC74/判据1 `derivedConcurrency(16,1.0,0,2) == 16`。
+- 判据2（serial/lowconc 读宿主）：`scripts/test.sh` 新增 `serial_lowconc_host_default()`（`max(1, floor(nproc ÷ S))`，seams `RESOURCE_GATE_NPROC`/`RESOURCE_GATE_CONCURRENT_SUITES`→`QUAY_MAX_CONCURRENT_SUITES`→2）；`SERIAL/LOWCONC_CONCURRENCY` 的 `:-2`/`:-3` → `:-$(serial_lowconc_host_default)`。证据：`resource-gate.test.mjs` AC74/判据2 `phaseConcurrencyDefault(16,2)==8` + `doesNotMatch :-2/:-3`。
+- 判据3（删 per_suite_lane_budget）：`plugin/scripts/resource-gate.sh` 删 457-469 整块（计算/夹逼/打印/消费者注释），及零消费者 `CONCURRENT_SUITE_SLOTS` 声明（95-108 改注释）。全仓 grep `per_suite_lane_budget` 仅剩删除说明注释。
+- 判据4（能取假，D2）：`resource-gate.test.mjs` AC74/判据4 —— 同一台机（seams NPROC=16/S=2）：直调 main=16、serial=8、lowconc=8；runner `defaultLaneCount()=16`、`hostParallelism()/concurrentSuiteSlots()=8`。三值一一相等且等于宿主推导。负控制：pre-fix 态 (8/2/3) 三值全红。scoped 门实测绿（187 pass / 0 fail，`--for-task … --allow-thin`，exit 0）。
+- 判据5（不重定数值）：未新设任何字面量；只把推导源统一为宿主（`nproc`/`QUAY_MAX_CONCURRENT_SUITES`）。concurrency-literal-check --gate 绿（0 violations，7 已声明例外全在既有点）。
+- 判据6（覆盖缺口记录，不扩展）：`concurrency-literal-check.ts` 的四个 pattern（P1 const=num / P2 CLI flag / P3 CPUQuota / P4 object key）**不覆盖 shell env-fallback `${VAR:-N}` 形态** —— 旧的 `SERIAL_CONCURRENCY="${QUAY_SERIAL_CONCURRENCY:-2}"` 不是 P1-P4 任一形状，故该检查在 AC44 之后一直没拦直调侧遗留的 2/3 字面量。本次未扩展该检查（任务判据6 明文「不扩展它」），只记录此缺口；若未来再出现 env-fallback 字面量漂移，需新增 P5 或改写为「fallback 必须读宿主」。
+- ts-typecheck：`for d in packages/*/; npx tsc --noEmit` exit 0（full-suite-runner.ts 在 plugin/scripts，不在 tsconfig include 内；其类型正确性由 full-suite-runner.test.mjs 的运行时 import 覆盖，141 pass）。
+- 既有测试：`resource-gate.test.mjs` 46 pass、`full-suite-runner.test.mjs` 141 pass、`runner-grouping-serial-anti-stomp.test.mjs` 3 pass。

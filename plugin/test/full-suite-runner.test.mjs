@@ -1256,12 +1256,15 @@ test("AC16 — --lane-count N propagates --test-concurrency=N into the spawned t
 
 // ── gap-full-suite-runner-concurrency-default-and-gate: AC1/AC2/AC3/AC4 ─────────────────────────────
 
-test("AC1 — default laneCount is NPROC-derived ÷ concurrent-suite slots (nproc=4, slots=1 → 4; slots=2 → 2); spawned command carries ONE --test-concurrency", async () => {
-  // gap-single-flight-lock-2-slot-concurrent-suites AC2 — the per-suite MAIN lane budget is
-  // hostParallelism ÷ QUAY_MAX_CONCURRENT_SUITES (1 suite ⇒ 4, 2 suites ⇒ each 2 on nproc=4). The
-  // old single-suite behavior (nproc → 4) is exactly the slots=1 case. RESOURCE_GATE_NPROC /
-  // QUAY_MAX_CONCURRENT_SUITES are the deterministic seams (env on the spawned runner).
-  for (const [slots, expected] of [["1", 4], ["2", 2]]) {
+test("AC1 — default laneCount is NPROC-derived (AC74 rollback: NO concurrent-suite slot divisor; nproc=4 → 4 at any slot count); spawned command carries ONE --test-concurrency", async () => {
+  // gap-ac74-serial-lowconc-literal-direct-path (human 06:4xZ AC68 /slots 回退) — the MAIN lane
+  // budget is hostParallelism ÷ AMPLIFICATION with NO slot divisor: AC68's `/ S` was rolled back
+  // (`in_use` presses overlap dynamically on the direct path; a lone suite must get all nproc).
+  // defaultLaneCount() = nproc regardless of QUAY_MAX_CONCURRENT_SUITES (the phase knobs
+  // DEFAULT_SERIAL/LOWCONC_CONCURRENCY still divide by S). RESOURCE_GATE_NPROC is the deterministic
+  // host seam (env on the spawned runner); QUAY_MAX_CONCURRENT_SUITES is pinned to prove it no
+  // longer divides the main budget.
+  for (const [slots, expected] of [["1", 4], ["2", 4], ["3", 4]]) {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-ac1-"));
     const { argsLog } = fakeTestShRecordingArgs(root);
     try {
@@ -1272,7 +1275,7 @@ test("AC1 — default laneCount is NPROC-derived ÷ concurrent-suite slots (npro
       const { code } = await waitExit(child);
       assert.equal(code, 0, `runner exits 0 on green (slots=${slots}), got ${code}`);
       const s = readState(root);
-      assert.equal(s.laneCount, expected, `derived default laneCount = max(1, floor(4/1.0/${slots})) = ${expected} (slots=${slots}), got ${s.laneCount}`);
+      assert.equal(s.laneCount, expected, `derived default laneCount = max(1, floor(4/1.0)) = ${expected} at any slot count (slots=${slots}), got ${s.laneCount}`);
       await poll(() => fs.existsSync(argsLog));
       const args = fs.readFileSync(argsLog, "utf8").trim();
       assert.equal(args, `--test-concurrency=${expected}`, `exactly ONE --test-concurrency=<derived> spliced (slots=${slots}), got: ${args}`);

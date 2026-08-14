@@ -757,18 +757,16 @@ run_scoped_static_checks_touches() { run_scoped_static_checks_sel --touches "$1"
 # RESOURCE_GATE_AMPLIFICATION / RESOURCE_GATE_TEST_NODE_PROCS override the derivation inputs
 # deterministically (the last is the budget `in_use` — the cross-layer total-budget subtraction).
 default_concurrency_formula() {
-  local total_budget in_use amp slots
+  local total_budget in_use amp
   amp="${RESOURCE_GATE_AMPLIFICATION:-1.0}"
-  # PER-SUITE LANE BUDGET (gap-ac68-per-suite-lane-budget-zero-consumers AC68): per_suite_lane_budget
-  # (hostParallelism ÷ S) used to be an accounting PRINT with zero consumers — the agreed lane
-  # arrangement never reached the exec line. The derived default now DIVIDES by the concurrent-suite
-  # slot count S (QUAY_MAX_CONCURRENT_SUITES — the SAME 旋钮② resource-gate.sh's CONCURRENT_SUITE_SLOTS
-  # and full-suite-runner.ts's concurrentSuiteSlots()/defaultLaneCount() read), so S concurrent suites
-  # together use ≈ nproc lanes instead of S×nproc (the simultaneous-start defect: two suites each
-  # deriving nproc ⇒ 32 workers / 16 cores). default = max(1, floor((total_budget − in_use) /
-  # AMPLIFICATION / S)). RESOURCE_GATE_CONCURRENT_SUITES is the deterministic test seam (mirrors the
-  # RESOURCE_GATE_NPROC seam; a single suite at the default S=2 gets nproc/2, matching
-  # full-suite-runner.ts defaultLaneCount's H÷S).
+  # MAIN-PHASE CONCURRENCY (gap-ac74-serial-lowconc-literal-direct-path; human 06:4xZ AC68 /slots
+  # 回退): the derived default is hostParallelism minus the cross-layer in_use count — it does NOT
+  # divide by the concurrent-suite slot count S. AC68's `/ S` divisor was rolled back because it
+  # double-protected what `in_use` already protects dynamically: a single lone suite (u=0) was cut to
+  # nproc/2 (纯损失), and two suites under-used the machine ((16−8)/1/2=4 ⇒ 12<16). Single suite now
+  # ⇒ nproc; overlap is pressed by `in_use` (the cross-layer running node --test count), not by a
+  # static divisor. The per-suite accounting print (resource-gate.sh per_suite_lane_budget) is
+  # deleted — zero consumers after the rollback.
   # CROSS-LAYER TOTAL BUDGET (gap-test-concurrency-cap-does-not-scope-nested-spawns AC1): the
   # worker derivation reads the SHARED budget authority (process-budget.sh — the same gate
   # cap-from-gate.ts and resource-gate.sh read), not a per-layer nproc derivation. The budget is
@@ -776,13 +774,9 @@ default_concurrency_formula() {
   # already running. default = max(1, floor((total_budget − in_use) / AMPLIFICATION)) so nested
   # spawns (quay-init / session family) count against the SAME total instead of each worker
   # deriving its own cap and multiplying beyond it (the 17-19 procs / load 18.70 defect).
-  # The RESOURCE_GATE_NPROC / RESOURCE_GATE_TEST_NODE_PROCS / RESOURCE_GATE_CONCURRENT_SUITES seams
-  # override the reads deterministically in tests (resource-gate.test.mjs extracts this function
-  # body and runs it standalone, so the shell-out must be skippable when both budget seams are set).
-  slots="${RESOURCE_GATE_CONCURRENT_SUITES:-${QUAY_MAX_CONCURRENT_SUITES:-2}}"
-  if ! [[ "${slots}" =~ ^[0-9]+$ ]] || [ "${slots}" -lt 1 ]; then
-    slots=2
-  fi
+  # The RESOURCE_GATE_NPROC / RESOURCE_GATE_TEST_NODE_PROCS seams override the reads
+  # deterministically in tests (resource-gate.test.mjs extracts this function body and runs it
+  # standalone, so the shell-out must be skippable when both budget seams are set).
   total_budget="${RESOURCE_GATE_NPROC:-}"
   in_use="${RESOURCE_GATE_TEST_NODE_PROCS:-}"
   if [ -z "${total_budget}" ] || [ -z "${in_use}" ]; then
@@ -797,8 +791,8 @@ default_concurrency_formula() {
   fi
   total_budget="${total_budget:-$(nproc 2>/dev/null || echo 1)}"
   in_use="${in_use:-0}"
-  awk -v b="${total_budget}" -v u="${in_use}" -v a="${amp}" -v s="${slots}" \
-    'BEGIN { c = int((b - u) / a / s); if (c < 1) c = 1; print c }'
+  awk -v b="${total_budget}" -v u="${in_use}" -v a="${amp}" \
+    'BEGIN { c = int((b - u) / a); if (c < 1) c = 1; print c }'
 }
 
 default_test_concurrency() {
@@ -806,19 +800,35 @@ default_test_concurrency() {
 }
 
 # ── load-sensitive phase concurrency knobs (gap-load-sensitive-serial-phase-unbounded-growth-
-# measure-first AC2/AC3, measure-first) ─────────────────────────────────────────────────────────────
-# The serial phase (KNOWN-LOAD-SENSITIVE A/B-class + real-install family) runs at concurrency
-# SERIAL_CONCURRENCY (default 2, raised from 1 by the AC2 controlled experiment — see the task body)
-# and the lowconc phase (hermetic-but-load-sensitive session-observation family) at LOWCONC_CONCURRENCY
-# (default 3). Both are env-overridable (QUAY_SERIAL_CONCURRENCY / QUAY_LOWCONC_CONCURRENCY) so a
-# future controlled experiment can re-measure before the next bump — the measure-first rule
+# measure-first AC2/AC3 + gap-ac74-serial-lowconc-literal-direct-path AC44 直调读宿主) ─────────────
+# The serial phase (KNOWN-LOAD-SENSITIVE A/B-class + real-install family) and the lowconc phase
+# (hermetic-but-load-sensitive session-observation family) default to the HOST derivation
+# max(1, floor(hostParallelism ÷ concurrentSuiteSlots)) — the SAME expression as full-suite-runner.ts's
+# DEFAULT_SERIAL_CONCURRENCY / DEFAULT_LOWCONC_CONCURRENCY. AC44 (gap-ac44-concurrent-phases-read-
+# host-parallelism) fixed the runner side; the DIRECT `bash scripts/test.sh` path previously fell back
+# to 2/3 literals, so the two paths read DIFFERENT values (判据4: direct must equal runner = H÷S).
+# Both remain env-overridable (QUAY_SERIAL_CONCURRENCY / QUAY_LOWCONC_CONCURRENCY) so a future
+# controlled experiment can re-measure before the next bump — the measure-first rule
 # (gap-suite-cost-model-is-wrong-optimizations-buy-nothing: 墙钟差异落 17-63s 噪声带).
 # EXPERIMENT (2026-08-10, task body): A/B-class load-sensitive serial 子集 6 文件
 #   cc=1 WALL_MS=455613 (0 cancelled) vs cc=2 WALL_MS=289579 (0 cancelled) — c2 快 36% 且 0-cancelled;
-#   real-install e2e 双文件 c2 实测 0-cancelled (147s)。⇒ 默认上调至 2。
+#   real-install e2e 双文件 c2 实测 0-cancelled (147s)。⇒ 默认上调至 2 (后经 AC44/AC74 改读宿主)。
+# serial_lowconc_host_default — the host-derived fallback shared by BOTH phase knobs: reads
+# RESOURCE_GATE_NPROC (test seam) → nproc, and RESOURCE_GATE_CONCURRENT_SUITES (test seam) →
+# QUAY_MAX_CONCURRENT_SUITES (旋钮②) → 2, clamped at 1. max(1, floor(nproc ÷ S)). This keeps the
+# direct-path default byte-identical to the runner's DEFAULT_SERIAL_CONCURRENCY / DEFAULT_LOWCONC_CONCURRENCY.
+serial_lowconc_host_default() {
+  local ncpu slots
+  ncpu="${RESOURCE_GATE_NPROC:-$(nproc 2>/dev/null || echo 1)}"
+  slots="${RESOURCE_GATE_CONCURRENT_SUITES:-${QUAY_MAX_CONCURRENT_SUITES:-2}}"
+  if ! [[ "${slots}" =~ ^[0-9]+$ ]] || [ "${slots}" -lt 1 ]; then
+    slots=2
+  fi
+  awk -v n="${ncpu}" -v s="${slots}" 'BEGIN { c = int(n / s); if (c < 1) c = 1; print c }'
+}
 # The full-suite-runner sets these env vars when --serial-concurrency / --lowconc-concurrency are passed.
-SERIAL_CONCURRENCY="${QUAY_SERIAL_CONCURRENCY:-2}"
-LOWCONC_CONCURRENCY="${QUAY_LOWCONC_CONCURRENCY:-3}"
+SERIAL_CONCURRENCY="${QUAY_SERIAL_CONCURRENCY:-$(serial_lowconc_host_default)}"
+LOWCONC_CONCURRENCY="${QUAY_LOWCONC_CONCURRENCY:-$(serial_lowconc_host_default)}"
 
 # ── phase-overlap knob (gap-phase-overlap-two-phase-parallel-exploration, AC1) ────────────────────
 # QUAY_PHASE_OVERLAP=1 runs the serial and lowconc phases in PARALLEL on the FULL-SUITE path (each at
@@ -826,8 +836,9 @@ LOWCONC_CONCURRENCY="${QUAY_LOWCONC_CONCURRENCY:-3}"
 # exploration (serial+lowconc 并行, 预期 −154s/轮: the 331s sequential window 177+154 becomes
 # max(177,154)≈177s). This changes phase SCHEDULING only, never a concurrency value (AC4: one
 # variable at a time — $SERIAL_CONCURRENCY / $LOWCONC_CONCURRENCY stay exactly as configured; the
-# "两个 6" in the task title reflects the author's reading, the live defaults here are 2/3 and are
-# NOT part of this exploration's variable). Default 0 = the prior sequential serial→lowconc→main
+# "两个 6" in the task title reflects the author's reading, the live defaults here are host-derived
+# (H÷S, gap-ac74) and are NOT part of this exploration's variable). Default 0 = the prior sequential
+# serial→lowconc→main
 # order; clearing the env var (unset it) is the ONE-KEY ROLLBACK that restores the baseline
 # scheduling — the exploration's definition is that it must be possible to roll back.
 PHASE_OVERLAP="${QUAY_PHASE_OVERLAP:-0}"
