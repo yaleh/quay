@@ -1,7 +1,7 @@
 ---
 id: gap-ff-livelock-trigger-no-action
 title: SPEC §7 ff-livelock 触发器（≥3 ff 失败）首次真数据 fire 但「触发后该做什么」未定义——ac63 4 条 retry 竞速 develop 结构性撞（develop ~100s vs suite ~15min）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
