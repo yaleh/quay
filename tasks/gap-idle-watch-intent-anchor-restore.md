@@ -26,7 +26,14 @@ monitor-mount-check.sh --json             ⇒ mounted=true targetOk=true（Monit
 ```
 **危害在方向**：A19① 测的是冷启动锚点（下一次 `/clear` 后靠它知道该挂什么）。它缺席与「冷启动根本没做」在输出上完全同形；同时 A10② 报绿（真挂载在位）⇒ **每轮读到一个绿，而那个绿不覆盖 A19① 要测的东西**——硬规则 3b 的镜像形态（缺席被另一条检查的绿掩盖）。
 
-**⚠️ 根因线索（outer 2026-08-14 09:1xZ 已查，实现须先确诊再改）**：`manager-start.sh:244` 的 `cat > "$IDLE_WATCH_INTENT"` 在主路径里是**无条件**的（非 dry-run/非 check 路径都执行，:205 会话 in-place 也不提前退出，写发生在 :225 arm 之后）。而 `loop-registry.txt` 今日 09:12 更新过（arm 步骤跑过）⇒ **写应该发生过，但文件不在了**。⇒ 两种可能：① 主路径不是按 cadence 跑（只在真冷启动跑），期间有清理把它删了；② 有进程定期清理 `$HOME_DIR` 的非持久文件。**实现第一步=确诊是哪一种（查谁删了它 / 主路径何时跑），再修。**
+**⚠️ 根因线索（outer 09:1xZ 查 + manager 09:2xZ 更正，实现须先确诊再改）**：`manager-start.sh:244` 的 `cat > "$IDLE_WATCH_INTENT"` 在主路径里**无条件**（非 dry-run/非 check 路径都执行；:205 会话 in-place 不提前退出）。**⚠️ 更正的前提**：`loop-registry.txt` 是**共享容器**（`manager-arm-loop.sh` 每轮都写它，:96/:218）——它的 mtime 对「manager-start.sh 跑没跑过」**零信息**（硬规则 5：同一容器两类 population，只覆盖其一的读法判不了另一类；09:12 那次是 manager 自己跑 arm-loop 写的）。**真正的主路径证据 = `identity`**（manager-start 独有，:161 写，mtime 08-12T02:59）。**诊断拆两问，先问 ① 再问 ②**：
+```
+① identity(:161) 写在 :244 之前 ⇒ 「写到 identity 而没到 :244」= early-exit，无删除者
+   —— 最省的解释；查 :161 到 :244 之间有没有提前退出路径（如 :219 tmux 创建失败 exit 1）
+② 仅当 ① 排除（主路径确实到过 :244 且写了文件）后，才查删除者
+   —— 一次性人工/脚本清理（$HOME_DIR 在家目录下，无系统清理器）
+```
+**实现第一步 = 按①→② 顺序确诊，再修。**
 
 **判据（outer 裁定 (a)——修根，不修读）**：
 - **判据1**：锚点文件可靠在位——`manager-start.sh`（或其 cadence 路径）每次运行都重写 `idle-watch-mount.txt`，且不受后续清理影响（或清理明确豁免它）。**修根（a）**：让锚点恢复可用；(b)（给 A19① 一个「未评估」独立取值）只让 manager 不再误读、不修根——**不用 (b) 掩盖，缺席是真实异常**。
@@ -39,7 +46,7 @@ monitor-mount-check.sh --json             ⇒ mounted=true targetOk=true（Monit
 
 ## Plan
 
-1. 确诊根因：`manager-start.sh` 主路径何时跑（cadence vs 仅冷启动）+ 谁清理 `$HOME_DIR` 的非持久文件（grep 清理脚本/日志）。
+1. 确诊根因（按①→② 顺序）：① `identity`(:161) 到 `:244` 之间的 early-exit 路径；② 仅①排除后查删除者。**不用 `loop-registry.txt` mtime 作证据**（共享容器，manager-arm-loop 每轮写）。
 2. 判据1：锚点可靠在位——每次主路径运行重写 + 不受清理影响（或清理豁免）。
 3. 判据2：根因写明进 Evidence。
 4. 判据3 能取假：主路径后文件存在 + 过 cadence 后仍存在（现状=缺席为真样本）。
@@ -48,7 +55,7 @@ monitor-mount-check.sh --json             ⇒ mounted=true targetOk=true（Monit
 ## Acceptance Criteria
 
 - [ ] AC1 判据1：锚点文件可靠在位（主路径每次运行重写 + 不被清理/清理豁免）；A19① 可满足。
-- [ ] AC2 判据2：根因确诊并写明（主路径 cadence / 谁清理），进 Evidence。
+- [ ] AC2 判据2：根因确诊并写明（① early-exit 或 ② 删除者，二选一按序），进 Evidence。
 - [ ] AC3 判据3 能取假：主路径后文件存在、过 cadence 后仍存在；修复前现状（缺席）为真样本回放。
 - [ ] AC4 既有测试全绿；`--for-task` scoped 门绿。
 
