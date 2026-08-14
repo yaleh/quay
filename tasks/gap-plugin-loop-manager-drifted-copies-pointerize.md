@@ -1,7 +1,7 @@
 ---
 id: gap-plugin-loop-manager-drifted-copies-pointerize
 title: plugin/loop/manager-*.md 漂移副本指针化——副本教已被推翻的做法（manager-tick-core 170 diff 停 08-13 / manager-loop-tick 2321 diff 停 08-12，37 reader 读陈旧），drift-check 机械不可见（manager 22:1xZ 裁定 inner 落）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
