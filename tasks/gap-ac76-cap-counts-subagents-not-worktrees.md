@@ -73,30 +73,59 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1 判据1：正本点名并发 subagent + 禁 worktree 代理。
-- [ ] AC2 判据2：第三方读法 = subagents/agent-*.jsonl 近 N 分钟写入文件数（AC67 判据2 已证可用）。
-- [ ] AC3 判据3 能取假：07:2xZ 高估 2 / 07:4xZ 低估 1 真样本回放必须红（D2）。
-- [ ] AC4 判据4：报数带计法（在飞 subagent=M，worktree 另标）。
-- [ ] AC5 判据（09:1xZ 推广）：在飞的唯一读法 = inner 任务 subagent（直接量）；任务状态只走 tasks/*.md status；C24 清单 1-6 的在飞派生（realInFlight/reconcile 家族、in_flight_count、heartbeat 在飞输入、/live 消费端、--task-start 括号在飞用途、manager A3 worktree 判）退役为显式标注（AC48 判据2 做法，不删除）。
-- [ ] AC6 能取假：/live 三条 done（AC66/AC72/AC73）误报为在跑的真样本回放必须红（manager 09:1xZ 实测：done 与 ready 在遥测里不可区分）。
-- [ ] AC7 既有测试全绿；`--for-task` scoped 门绿。
+- [x] AC1 判据1：正本点名并发 subagent + 禁 worktree 代理。
+- [x] AC2 判据2：第三方读法 = subagents/agent-*.jsonl 近 N 分钟写入文件数（AC67 判据2 已证可用）。
+- [x] AC3 判据3 能取假：07:2xZ 高估 2 / 07:4xZ 低估 1 真样本回放必须红（D2）。
+- [x] AC4 判据4：报数带计法（在飞 subagent=M，worktree 另标）。
+- [x] AC5 判据（09:1xZ 推广）：在飞的唯一读法 = inner 任务 subagent（直接量）；任务状态只走 tasks/*.md status；C24 清单 1-6 的在飞派生（realInFlight/reconcile 家族、in_flight_count、heartbeat 在飞输入、/live 消费端、--task-start 括号在飞用途、manager A3 worktree 判）退役为显式标注（AC48 判据2 做法，不删除）。
+- [x] AC6 能取假：/live 三条 done（AC66/AC72/AC73）误报为在跑的真样本回放必须红（manager 09:1xZ 实测：done 与 ready 在遥测里不可区分）。
+- [x] AC7 既有测试全绿；`--for-task` scoped 门绿。
 
 ## Definition of Done
 
-- [ ] 在飞的唯一读法 = inner 任务 subagent（正本点名 + 禁 worktree/遥测括号代理）+ 第三方读法 + 真样本回放红 + 报数带计法 + C24 在飞派生退役显式标注。
+- [x] 在飞的唯一读法 = inner 任务 subagent（正本点名 + 禁 worktree/遥测括号代理）+ 第三方读法 + 真样本回放红 + 报数带计法 + C24 在飞派生退役显式标注。
 
 ## Touches
 
 - plugin/scripts/slot-refill.ts（:15-29 注释/实现明确被计量对象；C24-2：in_flight 输入改 subagent 读法）
-- plugin/scripts/fast-mode-telemetry.ts（C24-1：realInFlight/reconcile 家族 in-flight 维度退役为显式标注）
+- plugin/scripts/fast-mode-telemetry.ts（C24-1：realInFlight/reconcile 家族 in-flight 维度退役为显式标注；C24-4 /live producer、C24-5 --task-start 括号在飞用途同盖）
 - plugin/scripts/inner-wakeup-heartbeat-check.ts（C24-3：在飞输入读法）
-- plugin/scripts/（/live observation 消费端——C24-4）
-- orchestration/orchestrator-tick-core.md（外层 A 段 in-flight 读法——C17 外层落盘；C24-6）
-- orchestration/fast-mode-tick-core.md（内层 A12 in-flight 读法——C17 外层落盘）
-- orchestration/manager-tick-core.md（manager A3 在飞读法——C24-6）
-- plugin/scripts/（检查器 + 真样本回放 fixture）
+- plugin/scripts/cap-counts-subagents-check.ts（new——AC76 检查器：判据1-判据6 + 真样本回放 fixture）
+- plugin/test/cap-counts-subagents-check.test.mjs（new——测试：真样本回放红 + 负控制）
+- plugin/scripts/capability-catalog.sh（new 脚本声明）
+- scripts/test.sh（检查器注册）
+- docs/proposals/quay-product-outline.md（DELIVERY-INVENTORY snapshot regenerated）
+- orchestration/orchestrator-tick-core.md（外层 A 段 in-flight 读法——C17 外层落盘；C24-6，只建议不落盘）
+- orchestration/fast-mode-tick-core.md（内层 A12 in-flight 读法——C17 外层落盘，只建议不落盘）
+- orchestration/manager-tick-core.md（manager A3 在飞读法——C24-6，只建议不落盘）
 - tasks/gap-ac76-cap-counts-subagents-not-worktrees.md（自身）
 
 ## Evidence
 
-（落地后回填）
+**判据1 —— 正本点名（AC1）**：`plugin/scripts/slot-refill.ts:15-21` 头部注释已改写为「THE MEASURED OBJECT (AC76, 人 2026-08-14 07:3xZ …) cap 的被计量对象 = 并发 subagent」+「⛔ 禁 worktree 代理 — `git worktree list | grep -c` is a FORBIDDEN proxy」+ 双向实测（07:2xZ wt=4/sub=2 高估 2；07:4xZ wt=1/sub=2 低估 1）。检查器判据1 `judgeSlotRefillCanonical` 对真实 slot-refill.ts 实测 GREEN（namesMeasured=true, forbidsWorktree=true）。
+
+**判据2 —— 第三方读法（AC2）**：新检查器 `plugin/scripts/cap-counts-subagents-check.ts` 实现 `countActiveSubagentTranscripts(sessionDir, minutes)`——数 `<session>/subagents/agent-*.jsonl` 近 N 分钟有写入的文件数（AC67 判据2 已证可用，agentId=subagent transcript）。实测（65dc5943 session, --minutes 999999）：`in-flight-subagents=7`。
+
+**判据3 —— 真样本回放红（AC3）**：检查器 `judgeWorktreeVsSubagent` 对两条真样本逐一回放 RED（exit 1）：
+```
+07:2xZ  worktree 4 · subagent 2  ⇒ "worktree-proxy-mismatch (worktree=4 ≠ subagents=2)"
+07:4xZ  worktree 1 · subagent 2  ⇒ "worktree-proxy-mismatch (worktree=1 ≠ subagents=2)"
+```
+测试 `cap-counts-subagents-check.test.mjs` 将两条真样本 verbatim 固化并断言 RED（D2 不构造）。
+
+**判据4 —— 报数带计法（AC4）**：检查器 `judgeReportLine` —— 负控制「在飞=worktree 4」（无 subagent 标）⇒ RED；真实 07:2xZ 行「worktree 4 · 活跃 subagent 回合 2」（两标齐备）⇒ GREEN（问题在用了哪个数，即判据3）。检查器 JSON 输出同时带 `in-flight-subagents=M`（计法）与 worktree 另标。
+
+**判据5 —— 09:1xZ 推广 + C24 在飞派生退役（AC5）**：三处代码机件加 `RETIRED (AC76 C24-N …)` 显式标注（AC48 判据2 做法，不删除）：
+- `plugin/scripts/fast-mode-telemetry.ts`（C24-1）：reconcileInFlight/detectClosedButLive/analyzeSlotStatus 与 realInFlight/closed_but_live/worktree_leaks/brackets_reflect_subagents 输出族 —— 在飞维度退役（A1a 事件 schema、--task-start/--task-end 派发留痕、throughput/blocked-wait/reconcile-cleanup 均保留）。
+- `plugin/scripts/slot-refill.ts`（C24-2）：MEASURED IN-FLIGHT DEFAULT（telemetry --slot-status fallback）在飞读法退役（显式 --in-flight 路径不变）。
+- `plugin/scripts/inner-wakeup-heartbeat-check.ts`（C24-3）：heartbeat 在飞输入退役；AC53 end-invariant 判据（读 slot-refill 新鲜输出）不变。
+检查器判据5 `judgeC24Retirement` 对真实三文件实测 GREEN（`c24-in-flight-derivations-retired (3/3 annotated)`）。C24-4（/live observation 面）由 C24-1 对 producer 的标注覆盖 + 判据6 检查器捕获 done-误报在跑形态；C24-5（--task-start 括号在飞用途）由 C24-1 标注覆盖（派发留痕用途另议保留）。
+
+**判据6 —— /live 真样本回放红（AC6）**：检查器 `judgeLiveVsTaskStatus` 对真实 fixture（AC66/AC72/AC73 三条 done 被 /live 误报在跑）回放 RED（exit 1）：`live-misreports-done-as-running (gap-ac66-ac-driven-behavior-change-verifiable,gap-ac72-cert-mechanism-retire,gap-ac73-catalog-rhythm-consumer-check)`。测试固化 LIVE_MISREPORT_FIXTURE 断言 RED。
+
+**AC7 —— 既有测试全绿 + scoped 门绿**：`bash scripts/test.sh --for-task gap-ac76-cap-counts-subagents-not-worktrees --allow-thin` → **216 tests pass / 0 fail**；scoped static checks 全 PASS（含新 `cap-counts-subagents-check`）；`--static-checks-doc` 全绿（tick-core-drift 为既有 --no-block 非阻塞报告）。ts-typecheck 闸 `fan-in-ts-typecheck-gate.ts` → **typecheck GREEN — ADMITTED**（Touches 覆盖新增 .ts 1 个）。delivery-inventory snapshot 已随新增脚本 regenerated（`verify-delivery-surface.ts --write-inventory`，scripts disk=244）。
+
+**C17 建议（orchestration/ 外层独占，只给建议不落盘）**：
+1. `orchestration/orchestrator-tick-core.md` A18：`slot-refill.ts --root … --cap 5 --json`（bare）现会落到已退役的 telemetry-slot-status fallback。建议改为：把 in-flight 从 inner 任务 subagent 直接读（判据2：`<session>/subagents/agent-*.jsonl` 近 N 分钟写入数，用 cap-counts-subagents-check.ts --session-dir），或显式传 `--in-flight`；报数带计法（`在飞 subagent=M`；worktree 若同时给必标明是另一个量，判据4）。A21 的 `git worktree list` 是【活性】直接量（非在飞），若用于在飞须改读 subagent。
+2. `orchestration/fast-mode-tick-core.md` A12：`--in-flight <本会话在飞集合>` 已是 subagent set（正确方向）。建议：用判据2 第三方读法交叉验证该集合（agent-*.jsonl 近 N 分钟写入数），并在 tick-log 报 `在飞 subagent=M` 带计法；`--closed-but-live`/telemetry 派生仅作派发留痕，不作在飞判据。
+3. `orchestration/manager-tick-core.md` A3：`git worktree list` 逐条判在飞（代理量）退役。建议：在飞一律读 inner 会话 `subagents/agent-*.jsonl` 近 N 分钟写入数（判据2），任务状态只走 `tasks/*.md status`（09:1xZ 裁定）；worktree 计数若给必标为另一个量。

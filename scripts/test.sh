@@ -447,6 +447,19 @@ run_static_checks() {
   # @static-tier change
   # @static-object orchestration/orchestrator-tick-core.md plugin/loop/fast-mode-tick-core.md plugin/scripts/judgment-consumer-check.ts plugin/scripts/ready-pool-check.ts plugin/scripts/slot-refill.ts plugin/scripts/touches-orthogonality-check.ts plugin/scripts/closure-lag-check.sh plugin/scripts/obligation-ledger.ts plugin/test/judgment-consumer-check.test.mjs
   run_checker "judgment-consumer-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/judgment-consumer-check.ts" --root "${repo_root}"
+  echo "== cap-counts-subagents check (gap-ac76-cap-counts-subagents-not-worktrees, AC1-AC6) =="
+  # AC76 (人 2026-08-14 07:3xZ/09:1xZ 裁定): cap 的被计量对象 = 并发 subagent, 禁 worktree 代理.
+  # A full day of in-flight readings used `git worktree list | grep -c` — wrong in both directions
+  # (07:2xZ wt=4/sub=2 ⇒ 高估 2; 07:4xZ wt=1/sub=2 ⇒ 低估 1). This checker makes the criteria
+  # mechanical: 判据1 slot-refill.ts 正本点名被计量对象+禁 worktree 代理; 判据2 第三方读法 =
+  # <session>/subagents/agent-*.jsonl 近 N 分钟写入数; 判据3 真样本回放红 (worktree≠subagent); 判据4
+  # 报数带计法; 判据5 C24-1/2/3 在飞派生退役为显式标注 (RETIRED (AC76 C24-N)); 判据6 /live 三条 done
+  # (AC66/AC72/AC73) 误报在跑真样本回放红. GREEN by construction when none of the criteria's inputs
+  # are violated; RED on any worktree/telemetry-bracket in-flight proxy form or a missing C24
+  # annotation.
+  # @static-tier change
+  # @static-object plugin/scripts/slot-refill.ts plugin/scripts/fast-mode-telemetry.ts plugin/scripts/inner-wakeup-heartbeat-check.ts plugin/scripts/cap-counts-subagents-check.ts plugin/test/cap-counts-subagents-check.test.mjs
+  run_checker "cap-counts-subagents-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/cap-counts-subagents-check.ts" --root "${repo_root}"
   echo "== obligation-ledger check (gap-obligation-ledger-mechanization, AC2-AC5 top-level audit) =="
   # The obligation-ledger integrity audit — the top-level audit the known weakness demands ("台账由
   # 本层写、上层审；顶层审计 = 人 + 接进套件静态检查的机械核对"). Mechanically verifies on the

@@ -12,23 +12,29 @@
 //
 // WHAT IT DOES (a DETECTOR/RECOMMENDER, not a gate — always exits 0, never writes tasks/**, never
 // spawns agents, never advances a counter):
-//   1. slots_free = max(0, effective_cap - in_flight_count). The caller passes the CURRENTLY-RUNNING
-//      subagent set EXPLICITLY (--in-flight) — the INNER tick's own maintained set, which is
-//      authoritative for its dispatch decision. The helper deliberately does NOT read RAW telemetry
-//      brackets for the count (AC6: brackets ≠ subagents — gap-telemetry-brackets-vs-subagents-no-
-//      slot-visibility; a completed-but-not-fanned-in task keeps its telemetry bracket open yet its
-//      slot IS free). Completion frees the slot at the <task-notification>, not at fan-in.
-//   MEASURED IN-FLIGHT DEFAULT (gap-slot-refill-inflight-disconnected-from-worktrees): when
-//      --in-flight/--closed-but-live are NOT passed (the OUTER tick A18 / a manual bare `--json`
-//      reading), the in-flight view is MEASURED from the reconcile-aware telemetry `--slot-status`
-//      view — real-in-flight KEPT records (open brackets whose executor is observably present:
-//      process alive / worktree open) + closed-but-live agents + non-task subagents. This is NOT the
-//      raw bracket count AC6 warned about: `--slot-status` applies the same observable-executor
-//      reconcile probe `--reconcile` writes (branch merged / nothing ⇒ CLOSED), so a completed-but-
-//      not-fanned-in task whose work landed is NOT counted. A bare invocation used to silently read
-//      in_flight_count=0 while worktree + telemetry showed tasks in flight — the fix surfaces
-//      `measurement_source` ("explicit-input" | "telemetry-slot-status" | "degraded-no-telemetry") +
-//      `measurement_error` so a 0 is never silent again.
+//   1. slots_free = max(0, effective_cap - in_flight_count). THE MEASURED OBJECT (AC76, 人
+//      2026-08-14 07:3xZ 逐字「cap=5 就是为了保护 subagent——inner 不能并发无限多 subagent」):
+//      cap 的被计量对象 = 并发 subagent。The caller passes the CURRENTLY-RUNNING subagent set
+//      EXPLICITLY (--in-flight) — the INNER tick's own maintained set, which is authoritative for
+//      its dispatch decision. ⛔ 禁 worktree 代理 — `git worktree list | grep -c` is a FORBIDDEN
+//      proxy (a worktree can have no active subagent turn, and an active subagent can have no
+//      worktree; 双向实测 2026-08-14: 07:2xZ worktree 4 · 活跃 subagent 2 ⇒ 高估 2; 07:4xZ worktree 1 ·
+//      活跃 subagent 2 ⇒ 低估 1 — tasks/gap-ac76-cap-counts-subagents-not-worktrees). The helper
+//      deliberately does NOT read RAW telemetry brackets for the count (AC6: brackets ≠ subagents —
+//      gap-telemetry-brackets-vs-subagents-no-slot-visibility; a completed-but-not-fanned-in task
+//      keeps its telemetry bracket open yet its slot IS free). Completion frees the slot at the
+//      <task-notification>, not at fan-in.
+//   RETIRED (AC76 C24-2, 人 2026-08-14 09:1xZ「在飞不应当靠任务记录,而应当查 inner 任务 subagent」):
+//      the MEASURED IN-FLIGHT DEFAULT below — when --in-flight/--closed-but-live are NOT passed (the
+//      OUTER tick A18 / a manual bare `--json` reading), the in-flight view is MEASURED from the
+//      reconcile-aware telemetry `--slot-status` view (real-in-flight KEPT records / closed-but-live
+//      agents / non-task subagents). This derivation is RETIRED as an in-flight read (telemetry
+//      brackets structurally cannot distinguish done from ready — 2026-08-14 实测 /live 把三条 done
+//      AC66/AC72/AC73 误报在跑). 在飞的唯一读法 = inner 任务 subagent (<session>/subagents/agent-*.jsonl,
+//      cap-counts-subagents-check.ts 判据2); 任务状态只走 tasks/*.md status. Kept as reason archive
+//      (AC48 判据2 做法, 不删除); a bare invocation still surfaces measurement_source
+//      ("explicit-input" | "telemetry-slot-status" | "degraded-no-telemetry") + measurement_error so
+//      a 0 is never silent again.
 //   2. Pool stats from ready-pool-check.analyzeTasks (pool / dispatchable_disjoint / criterion_met).
 //   3. should_refill = slots_free > 0 && dispatchable_disjoint >= 1 — the event-driven go/no-go.
 //   4. recommended = up to slots_free candidate ids from the PRODUCTION disjoint batch
@@ -879,6 +885,14 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
 }
 
 // ── MEASURED IN-FLIGHT (gap-slot-refill-inflight-disconnected-from-worktrees) ───────────────────────
+// RETIRED (AC76 C24-2, 人 2026-08-14 09:1xZ「在飞不应当靠任务记录,而应当查 inner 任务 subagent」):
+// this measured in-flight derivation is RETIRED as an in-flight READ — telemetry brackets / worktree
+// probes cannot structurally distinguish done from ready (2026-08-14 实测 /live 把三条 done
+// AC66/AC72/AC73 误报在跑). 在飞的唯一读法 = inner 任务 subagent (<session>/subagents/agent-*.jsonl,
+// cap-counts-subagents-check.ts 判据2); 任务状态只走 tasks/*.md status. The implementation is kept as
+// reason archive (AC48 判据2 做法, 不删除); a bare invocation still surfaces measurement_source
+// ("explicit-input" | "telemetry-slot-status" | "degraded-no-telemetry") + measurement_error so a 0
+// is never silent again.
 // A bare `slot-refill --json` (no --in-flight) used to read in_flight_count=0 even while worktrees +
 // telemetry showed tasks in flight — a counter disconnected from its source, the same "报零而不是报错"
 // family as gap-inbox-counter-disconnected-from-files. The fix: when the caller does NOT pass

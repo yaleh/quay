@@ -82,6 +82,15 @@ export const HEARTBEAT_FIELD_TYPES = {
 
 // ── AC53 dispatch-state contract (tasks/gap-inner-self-wake-sleep-empty-slots-not-dispatch) ───────────
 //
+// RETIRED (AC76 C24-3, 人 2026-08-14 09:1xZ「在飞不应当靠任务记录,而应当查 inner 任务 subagent」):
+// the IN-FLIGHT INPUT to slots_free / should_refill / dispatchable_disjoint carried by this heartbeat
+// is RETIRED as an in-flight READ (a heartbeat's own in-flight fields stop updating when the inner
+// stops — they cannot distinguish "done" from "ready", 2026-08-14 实测). 在飞的唯一读法 = inner 任务
+// subagent (<session>/subagents/agent-*.jsonl, cap-counts-subagents-check.ts 判据2); 任务状态只走
+// tasks/*.md status. The AC53 END-INVARIANT judgment below (should_refill ∧ slots_free>0 ∧
+// dispatchable_disjoint>0 ∧ no_refill_reason empty) is UNCHANGED — it consumes slot-refill's own
+// fresh output (analyzeSlotRefill), never the heartbeat's stale self-report; the heartbeat fields
+// remain a WRITE-side record of what the inner decided, not the judge's in-flight source.
 // AC1: the heartbeat must record, at the moment delaySeconds is chosen, the five dispatch-state keys —
 // slots_free / dispatchable_disjoint / pool / should_refill / no_refill_reason. Before AC53 these five
 // were ALL absent ⇒ the record structurally could not distinguish "nothing dispatchable" from

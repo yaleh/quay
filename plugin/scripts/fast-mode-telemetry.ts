@@ -1078,6 +1078,16 @@ export function aggregate(events, { sinceMs = null, nowMs = null, haltEvents = n
 
 // ── Reconcile (gap-a-crash-leaves-phantom-in-flight-tasks-and-the-one-signal-that-fires-is-documented-backwards) ──
 //
+// RETIRED (AC76 C24-1, 人 2026-08-14 09:1xZ「在飞不应当靠任务记录,而应当查 inner 任务 subagent」):
+// the IN-FLIGHT DIMENSION of this module — reconcileInFlight / detectClosedButLive /
+// analyzeSlotStatus and the realInFlight / closed_but_live / worktree_leaks / brackets_reflect_subagents
+// output family — is RETIRED as an in-flight READ (telemetry brackets + worktree/process probes
+// structurally cannot distinguish done from ready: 2026-08-14 实测 /live 把三条 done AC66/AC72/AC73
+// 误报在跑). 在飞的唯一读法 = inner 任务 subagent (<session>/subagents/agent-*.jsonl,
+// cap-counts-subagents-check.ts 判据2); 任务状态只走 tasks/*.md status. The implementation is kept as
+// reason archive (AC48 判据2 做法, 不删除) — the A1a event schema, --task-start/--task-end 派发留痕
+// use, throughput, blocked-wait and reconcile-cleanup accounting all remain; only the IN-FLIGHT
+// DERIVATION is retired.
 // `--reconcile` closes in-flight records whose executor is OBSERVABLY gone — a crash left them in
 // `inProgress` forever and the only signal that fired about them (OVER90 after 90 minutes) was
 // documented backwards. The decision is a pure function over observable probes so it is testable
