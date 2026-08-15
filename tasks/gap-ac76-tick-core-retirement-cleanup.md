@@ -49,18 +49,72 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1 判据1：tick core 无已退役文本——C7 收指针、$FORK_BASELINE 单线（A17/C3 改 develop）、A12/A13/A16 旧读法清除。
-- [ ] AC2 判据2 能取假：AC76 判据5 代码文件显式退役标注（不删）；tick-core-static-check AC8「inner C7」新语义（迁出不计数）；既有测试绿。
-- [ ] AC3 判据3：`--for-task` scoped 门绿。
+- [x] AC1 判据1：tick core 无已退役文本——C7 收指针、$FORK_BASELINE 单线（A17/C3 改 develop）、A12/A13/A16 旧读法清除。
+- [x] AC2 判据2 能取假：AC76 判据5 代码文件显式退役标注（不删）；tick-core-static-check AC8「inner C7」新语义（迁出不计数）；既有测试绿。
+- [x] AC3 判据3：`--for-task` scoped 门绿。
 
 ## Definition of Done
 
-- [ ] tick core 退役文本清理（C7/$FORK_BASELINE/旧读法）+ AC76 判据5 代码标注 + AC8 断言新语义——人裁定落地。
+- [x] tick core 退役文本清理（C7/$FORK_BASELINE/旧读法）+ AC76 判据5 代码标注 + AC8 断言新语义——人裁定落地。
 
 ## Touches
 
 - orchestration/fast-mode-tick-core.md（C7 收指针 + $FORK_BASELINE 单线 + 旧读法改新）
-- plugin/scripts/fork-baseline.ts（如需，退役标注）
+- plugin/scripts/fork-baseline.ts（如需，退役标注——已自带 RETIRED 标注，本次未改）
 - plugin/scripts/slot-refill.ts、plugin/scripts/fast-mode-telemetry.ts（AC76 判据5 退役标注）
 - plugin/test/tick-core-static-check.test.mjs（AC8 inner C7 新语义）
 - tasks/gap-ac76-tick-core-retirement-cleanup.md（自身）
+
+## Evidence
+
+**实现范围**：只改 Touches 内文件（fast-mode-tick-core.md / slot-refill.ts / tick-core-static-check.test.mjs / 本任务）。fork-baseline.ts 与 fast-mode-telemetry.ts 已自带完整 RETIRED 标注（见下），本次未改。
+
+**① C7 收指针（fast-mode-tick-core.md:69）** —— R25 锚点已核验存在（`orchestration/archive/AC58-retired-clauses.md` `## R25 — inner 核 C7（integration-branch-model.ts --overlaps-unverified 活指令→退役模块）`），指针可写。before/after：
+
+```
+- | C7 | （前提已死，AC48/AC61 退役；不计入覆盖率分母）活指令指向已 RETIRED 的 integration-branch-model.ts —— 正身已归档 → `orchestration/archive/AC58-retired-clauses.md#R25` (src:898) |
++ | C7 | ~~**C7 正身已迁出**（已退役，2026-08-15 迁出）~~ → `orchestration/archive/AC58-retired-clauses.md#R25` (src:898) |
+```
+
+指针风格对齐 manager A7-migrated（`~~**正身已迁出**（已退役，2026-08-15 迁出）~~ → archive#锚`）；保留 `(src:898)` 维持 AC3 src:N 覆盖率 100%；`已退役` 命中 STALE_ANNOT_RE 使 AC4 跳过该 archive 指针。
+
+**② $FORK_BASELINE 两线语义退役（AC48 残留）** —— 单线 = develop；不删机制（fork-baseline.ts 仍服务单线下游）：
+
+```
+A9: `暂缓 $MERGE_TARGET→$FORK_BASELINE 批量合` → `暂缓 $MERGE_TARGET 合入(fan-in;AC48 退役注:$FORK_BASELINE 两线批量合已退役——单线,合回目标即 develop)`
+A17: `--branch "$FORK_BASELINE"` → `--branch develop` + `**AC48 退役注:$FORK_BASELINE 两线语义已退役(integration 已删),单线 = develop**`
+C3: `$FORK_BASELINE 只由外层批量合推进` → `合回 $MERGE_TARGET(单线 = develop)。**AC48 退役注:$FORK_BASELINE 两线语义已退役(integration 已删)——无外层批量合,合回目标即 develop**`
+```
+
+**③ 旧读法改新读法（A12/A13/A16）** —— 退役后查 subagent：
+
+```
+A12: `--in-flight <本会话在飞集合> --closed-but-live …` 在飞集合由本会话自己维护,不读遥测括号
+  → `--in-flight <在飞 subagent 任务 id 集合>` 在飞集合查 inner 任务 subagent(cap-counts-subagents-check.ts 判据2 / meta-cc 查 <session>/subagents/agent-*.jsonl 近 N 分钟写入数;遥测括号推导已退役——AC76 判据5 C24-2)
+A13: `fast-mode-telemetry.ts --slots` 空槽必须机械可见:realConcurrency/stale_brackets/closedButLive/slots_free
+  → 在飞 subagent 数查 cap-counts-subagents-check.ts 判据2;`fast-mode-telemetry.ts --slots` 在飞维度已退役(C24-1——telemetry 括号分不清 done/ready),仅 --reconcile 清理与 C17 合规产物保留
+A16: 追加 `**AC76 退役注(C24-5→C24-1):--task-start 括号的【在飞】用途已退役——括号不再作在飞读法(在飞读法 = 查 subagent,见 A12/A13);--task-start/--task-end 派发留痕与 defer 闭合用途保留**`
+```
+
+**④ AC76 判据5 code 标注（不删）** —— `cap-counts-subagents-check.ts 判据5` 机械核验 **PASS**（`c24-in-flight-derivations-retired (3/3 annotated)` + `c24-landing-coverage-complete (7/7)`）：
+- C24-1 fast-mode-telemetry.ts `RETIRED (AC76 C24-1 …)`（realInFlight/reconcileInFlight/detectClosedButLive/analyzeSlotStatus）——先前任务已标，本次未改。
+- C24-2 slot-refill.ts `RETIRED (AC76 C24-2 …)`——先前已标；**本次在 `computeSlotsFree`（in_flight_count→slots_free 在飞输入定义点）补内联 `RETIRED-BY-AC76` 标注**，明确 telemetry/括号推导读法退役、调用方显式 `--in-flight`（subagent 源）路径保留。
+- C24-3 inner-wakeup-heartbeat-check.ts `RETIRED (AC76 C24-3 …)`（heartbeat slots_free/should_refill/dispatchable_disjoint 在飞输入）——先前已标，未改。
+- C24-4 /live+observation 消费端 → 已并入本检查器判据6 + C24-1 producer 标注（merged disposition）；C24-5 A16/A16b --task-start 在飞用途 → 并入 C24-1；C24-6 outer-owned；C24-7 并入 C24-6。plugin 观测面 `--slots` 消费端（slot-free-trigger.ts）由 C24-4 merged 覆盖；字面 /live Web 页（packages/quay/src/serve-handlers.ts + observation.ts 读 `--report` inProgress）为产品面、不在本任务 plugin-scoped Touches，未改。
+
+**⑤ AC8 断言新语义（tick-core-static-check.test.mjs）** —— inner C7 迁出后核内 `dead=0 / excluded=0`，旧 `excluded >= 1` 断言改为：① `dead===0`（核内无在核死条目）② inner C7 迁出指针检查（核内含 `#R25` 指针 + 档案含 `## R25` + C7 行无 DEAD_ANNOT_RE 标记，均可取假）。标题同步改「inner C7 迁出」。
+
+**测试输出**：
+```
+$ node --test plugin/test/tick-core-static-check.test.mjs   → ℹ tests 21 · pass 21 · fail 0
+  ✔ AC8: the real repo passes, three-layer exclusion notation (…migrated A7/A12a/B2c/乙/丁 AND inner C7 are archived pointers…; outer B4)
+$ node --test plugin/test/direct-to-develop-bypass-check.test.mjs plugin/test/cap-counts-subagents-check.test.mjs plugin/test/retired-clause-check.test.mjs plugin/test/ac61-staleness-disposition-check.test.mjs → ℹ tests 71 · pass 71 · fail 0
+$ node --test plugin/test/slot-refill.test.mjs plugin/test/inner-wakeup-heartbeat.test.mjs → ℹ tests 105 · pass 105 · fail 0
+$ node --no-warnings --experimental-strip-types plugin/scripts/tick-core-static-check.ts --root . --json → ok=true, ac3/ac4/ac5/ac6/ac8 全绿, fast-mode src:N 47/47
+```
+
+**scoped 门（AC3 判据3）** —— `scripts/test.sh --for-task gap-ac76-tick-core-retirement-cleanup --allow-thin`：**EXIT:0**；静态检查全 PASS（test-framework-policy / test-isolation 26 baselined / tmp-leak-pairing / test-impl-census 404 clean / task-contract 0 violations / malformed-task / superseded-capability / concurrency-literal / landing-target / delivery-inventory-drift / ac61-staleness「C7 gone from 2 core copies」/ rhythm-consumer）；选中套件 **98/98 绿**。
+
+**环境注**：① 本 worktree node_modules 为空（`gap-worktree-node-modules-inconsistent-self-verify` 族），首次 scoped 门 `malformed-task-check` 报 `Cannot find package 'yaml'`，symlink 主检出 node_modules 后重跑 EXIT=0（环境设置，非 git 改动）。② `slot-free-trigger.test.mjs` 的 capability-catalog 入口闸在本基线已红（catalog 报「1 script unclassified」，与本次改动无关，stash 验证 pre-existing）。③ `fast-mode-telemetry.test.mjs` 需 `.quay/config.yml`（gitignored，本 worktree 无）而文件级 crash——环境限制，非本次改动。
+
+**跟进注（不在本任务 Touches）**：`tick-core-static-check.ts` 头注 :42 仍写「inner's C7 carries the marker」（已过时）；`plugin/loop/fast-mode-tick-core.md` 落地副本未随正本更新（pre-existing drift，drift gate --no-block）。两处归 owning layer 跟进。
