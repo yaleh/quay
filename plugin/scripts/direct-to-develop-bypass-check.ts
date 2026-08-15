@@ -23,12 +23,16 @@
 //     · 记账/转向/遥测面：tasks/ docs/ orchestration/ adr/ .quay/ plugin/loop/ measurements/
 //       milestones/（任务体、分析文档、执行核、ADR、遥测都是各层直接写）
 //     · 机件面：.claude/（agent harness 的 workflow/skill——manager 独占）
+//       plugin/skills/manager/**（manager 独占 SKILL.md + 结构上无 fan-in 路——无任务/无 worktree，
+//       fan-in-execute.js 无 task 即 bad-args；同 .claude/ 类。⛔ 粒度到 manager/**，不含 init/——
+//       后者是产品交付面真红，7e64a86b 必须仍红；635ec831（manager/SKILL.md）转绿）
 //     · 指引面：CLAUDE.md（本仓库唯一每会话自动注入的文档，管理者独占直写）
 //     · 基础设施：.gitignore .gitattributes .npmrc .github/（CI/build 配置）
 //     · 热修 fan-in 机件本身：plugin/scripts/fan-in-* plugin/test/fan-in-*（机制坏了无法 self-fan-in，
 //       引导问题——5e54bb37 正是此类）
 //   代码/断言面 = 排除集之外的一切，含 plugin/scripts/*、plugin/test/*、plugin/skills/**/*.md
-//     （SKILL.md 是产品交付面，不是记账面——7e64a86b 因此报红）、packages/**、scripts/test.sh 等。
+//     （SKILL.md 是产品交付面，不是记账面——7e64a86b（init/）因此报红；manager/** 是 manager 独占面、
+//     635ec831 因此转绿）、packages/**、scripts/test.sh 等。
 //
 //   ⚠️ 与 fan-in-execute.js:87 code_delta 谓词的关系（AC1）：复用其「排除记账/遥测面」的精神，
 //   但**不排除全部 .md**（该谓词的 `[.]md$` 是为「develop delta 要不要重跑全量」服务的——.md
@@ -72,7 +76,7 @@ import { buildLockHoldIntervals } from "./fan-in-ff-protocol-check.ts";
  * 遥测面变成产品面），先从任务体改判，再改此处——两处必须同步。
  */
 export const DESIGN_INTERNAL_RE =
-  /^(?:tasks\/|docs\/|orchestration\/|adr\/|[.]quay\/|plugin\/loop\/|measurements\/|milestones\/|[.]claude\/|CLAUDE[.]md$|[.]gitignore$|[.]gitattributes$|[.]npmrc$|[.]github\/|plugin\/scripts\/fan-in-|plugin\/test\/fan-in-)/;
+  /^(?:tasks\/|docs\/|orchestration\/|adr\/|[.]quay\/|plugin\/loop\/|measurements\/|milestones\/|[.]claude\/|plugin\/skills\/manager\/|CLAUDE[.]md$|[.]gitignore$|[.]gitattributes$|[.]npmrc$|[.]github\/|plugin\/scripts\/fan-in-|plugin\/test\/fan-in-)/;
 
 /** 一条 repo-相对路径是否落在设计内排除集（按设计就该直接提交 develop）。PURE。 */
 export function isDesignInternalPath(relPath) {
@@ -363,7 +367,7 @@ export function main(argv) {
       codeSurfaceCommits: verdict.codeSurfaceCommits,
       designInternalCommits: verdict.designInternalCommits,
       inLockWindowCommits: verdict.inLockWindowCommits,
-      predicate: "design-internal exclusion set (see header / task body): tasks/ docs/ orchestration/ adr/ .quay/ plugin/loop/ measurements/ milestones/ .claude/ CLAUDE.md .gitignore .gitattributes .npmrc .github/ plugin/scripts/fan-in-* plugin/test/fan-in-*",
+      predicate: "design-internal exclusion set (see header / task body): tasks/ docs/ orchestration/ adr/ .quay/ plugin/loop/ measurements/ milestones/ .claude/ plugin/skills/manager/ CLAUDE.md .gitignore .gitattributes .npmrc .github/ plugin/scripts/fan-in-* plugin/test/fan-in-*",
     },
     lockWindow: { evaluated: lockSubEvaluated, reason: lockSubReason },
     candidates: codeSurfaceCandidates.map((c) => ({

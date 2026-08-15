@@ -63,7 +63,15 @@ depends_on:
 
 ## Evidence
 
-（待落地后填：排除集改动、7e64a86b 仍红 + 635ec831 绿回放、scoped 门绿）
+**落地（Build 阶段，2026-08-15，worktree `gap-direct-to-develop-exclude-manager-skill-granularity`）**：
+
+- **排除集改动**（`plugin/scripts/direct-to-develop-bypass-check.ts`）：`DESIGN_INTERNAL_RE` 加 `plugin\/skills\/manager\/`（粒度到 manager/ 子树，含递归 `manager/sub/*.md`；`manager-tool/` 等非 manager/ 子树不豁免）。predicate 字符串同步 + 头注释补理由（manager 独占 + 结构上无 fan-in 路，同 `.claude/` 类）。
+- **AC2 能取假（真样本回放，`--commits` 直读真实 git）**：
+  - `7e64a86b`（`plugin/skills/init/SKILL.md`）→ **仍 RED**（exit 1，codeSurfaceFiles=`plugin/skills/init/SKILL.md`）。
+  - `635ec831`（`plugin/skills/manager/SKILL.md`）→ **转 GREEN**（exit 0，denominator design-internal=1 / code-surface=0）。
+- **既有测试**：`direct-to-develop-bypass-check.test.mjs` 14/14 绿（含新增 AC2 粒度真实 git + CLI 两例）；mutation case `checker-mutation-cases/direct-to-develop-bypass-check.sh` PASS。
+- **scoped 门**：`scripts/test.sh --for-task gap-direct-to-develop-exclude-manager-skill-granularity`——scoped 静态层 direct-to-develop-bypass-check（`--baseline 77b291db`）**绿**：`ok:true reason:no-code-surface-direct-commits total=16 code-surface=0 design-internal=16`（真差集 1→0）。测试 29/30 绿；**唯一红 = `capability-catalog.test.mjs` Wiring（referenced-not-landed: `orchestration/SPEC-tick-mechanical-checks-mcp-2026-08-15.md`）——经 stash 对照证实为【基线既有红】，由 635ec831 manager/SKILL.md 引用 SPEC 未在 init/SKILL.md 声明导致，与本任务改动无关**（本任务未触碰 init/SKILL.md / capability-catalog.sh 声明）。
+- **capability-catalog.sh 声明**：描述为通用「manager 独占」，未变化 ⇒ 无需改。
 
 ## 止损
 
