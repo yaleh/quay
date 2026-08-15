@@ -627,6 +627,18 @@ run_static_checks() {
   # @static-tier change
   # @static-object .claude/workflows/fan-in-execute.js plugin/scripts/fan-in-workflow-check.ts plugin/scripts/fan-in-ff-merge.sh plugin/loop/fast-mode-tick-core.md plugin/test/fan-in-workflow-check.test.mjs
   run_checker "fan-in-workflow-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/fan-in-workflow-check.ts" --root "${repo_root}" --json
+  echo "== direct-to-develop-bypass-check (gap-direct-to-develop-bypasses-fan-in-gates — 直接提交 develop 绕过 fan-in 机件) =="
+  # 直接提交 develop（reflog action = commit，区别于 fan-in 的 merge … Fast-forward）∧ 触及代码/断言面
+  # ∧ 不在 ff-lock 时间窗内 ⇒ RED（11b/C17 写所有权/越权直改面）。排除集（denominator 谓词）与
+  # 25 vs 30 的差异记录在任务体 + 检测器头注释：设计内 = 记账/转向/遥测面 + manager 独占（.claude/、
+  # CLAUDE.md）+ 基础设施（.gitignore/.github/）+ 热修 fan-in 机件本身（plugin/scripts|test/fan-in-*）；
+  # 代码面含 plugin/skills/**/*.md（SKILL.md 是产品交付面，7e64a86b 因此报红）。基线 = 77b291db
+  # （enforcement 落点 develop HEAD）——历史欠账（~29 条）已文档化不重扫，只扫基线后的新直接提交
+  # （同 fan-in-ff-protocol-check --baseline cd4f49b4 模式）。锁事件缺失 = 可读空（full-suite worktree
+  # 无 .quay/ 运行时态），malformed/unpaired = NOT-EVALUATED（硬规则 3b）。
+  # @static-tier change
+  # @static-object plugin/scripts/direct-to-develop-bypass-check.ts plugin/test/direct-to-develop-bypass-check.test.mjs
+  run_checker "direct-to-develop-bypass-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/direct-to-develop-bypass-check.ts" --root "${repo_root}" --baseline 77b291db2ee5d3862f86c19f6d0ee0add9e111cf --json
   echo "== workflows-dual-copy-drift-check (gap-workflows-dual-copy-drift-unchecked — .claude/workflows/ vs plugin/workflows/ 双副本漂移) =="
   # The three dual-copy workflow files (drain-directives / fan-in-execute / run-routines) live in
   # BOTH .claude/workflows/ (what runs here) and plugin/workflows/ (what quay-init --workflows ships

@@ -57,16 +57,27 @@ b389a758 13:16 mjs: AC1b 排除表加 manager-phase-goal-archive.md       → pl
 
 ## Touches
 
-- plugin/scripts/（新检测器，如 direct-to-develop-bypass-check.ts）
-- plugin/test/（检测器测试 + 真样本 fixture）
-- scripts/test.sh（接入 run_static_checks）
-- plugin/scripts/capability-catalog.sh（声明）
-- docs/proposals/quay-product-outline.md（DELIVERY-INVENTORY 快照再生，如适用）
+- plugin/scripts/direct-to-develop-bypass-check.ts（新检测器——reflog action=commit 直接提交 ∧ 代码/断言面 ∧ 无 ff-lock 时间窗 ⇒ 红；设计内排除集分类）
+- plugin/scripts/checker-mutation-cases/direct-to-develop-bypass-check.sh（检测器 mutation case——L_S 仪器，checker-mutation-check 要求新 checker 必须配 mutation case）
+- plugin/test/direct-to-develop-bypass-check.test.mjs（检测器测试 + 真样本回放 fixture——12 例）
+- scripts/test.sh（接入 run_static_checks，--baseline 77b291db enforcement 边界）
+- plugin/scripts/capability-catalog.sh（声明 6 表：question/cadence/invalidation/last-reaffirmed/matching/consumer）
+- docs/proposals/quay-product-outline.md（DELIVERY-INVENTORY 快照再生——scripts 251→252）
 - tasks/gap-direct-to-develop-bypasses-fan-in-gates.md（自身）
 
 ## Evidence
 
-（待落地后填：检测器实现、回放红/绿输出、denominator 谓词、scoped 门结果）
+（2026-08-15 inner Build 落地后填）
+
+**检测器**：`plugin/scripts/direct-to-develop-bypass-check.ts` + `plugin/test/direct-to-develop-bypass-check.test.mjs`（12 例全绿，`node --test` 直跑）。
+
+**判定谓词（AC1/AC3 denominator）**：直接提交 = develop reflog action `commit:`（fan-in 落地是 `merge … Fast-forward`——reflog 是唯一区分读面，CLAUDE.md 硬规则 2 按位置判定）；代码/断言面 = 改动文件不落在设计内排除集（tasks/ docs/ orchestration/ adr/ .quay/ plugin/loop/ measurements/ milestones/ .claude/ CLAUDE.md .gitignore/.gitattributes/.npmrc .github/ plugin/scripts|test/fan-in-*）；ff-lock 时间窗 = commit 落在 fan-in-merge-lock-events.jsonl 某 acquire→release 区间内（缺失 = 可读空，malformed/unpaired = NOT-EVALUATED，硬规则 3b）。
+
+**denominator 实测（audit 全史）**：430 直接提交中 29 代码面 / 401 设计内——29 落在任务体「25 vs 30」区间内（差异在排除集精度：本谓词排除 .gitignore/CLAUDE.md/manager 独占，故 29 介于 manager 的 30 与 inner 独立谓词的 25 之间，且把 SKILL.md 计为代码面）。基线 77b291db（enforcement 落点）⇒ 无新直接代码面提交 ⇒ 绿。
+
+**AC3 真样本回放**（`node --experimental-strip-types plugin/scripts/direct-to-develop-bypass-check.ts --root <main> --commits <5 shas> --json`）：7e64a86b/7d1d5d2e/b389a758/18e7a3be/77174684 全红（exit 1，candidates=5，reason=direct-commit-bypasses-fan-in）；5e54bb37（热修 fan-in 机件 .claude/workflows/fan-in-execute.js）绿（exit 0）；fixture 设计内样本（.gitignore / manager-tick-core.js / orchestration/ / CLAUDE.md / fan-in-execute.js / tasks/）全绿。锁窗豁免：直接提交落在 acquire→release 区间内 ⇒ 不报。锁事件不成对 ⇒ NOT-EVALUATED（evaluated:false，不与合格同形）。
+
+**scoped 门**：`scripts/test.sh --for-task gap-direct-to-develop-bypasses-fan-in-gates --allow-thin` —— capability-catalog 16 例全绿 + build_dist 通过；检测器测试因 Touches 已收窄到具体文件（`plugin/test/direct-to-develop-bypass-check.test.mjs`）而随 scoped 选择器命中（见 AC4）。
 
 ## 止损
 
