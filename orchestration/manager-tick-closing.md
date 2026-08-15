@@ -119,3 +119,34 @@ sys.exit(0 if d.get('finishedAt') is not None else 1)" \
 **⊢ 判据（一条命令可查）**：某提交的父轮 `verifiedCommit` 不含它、且提交信息无该行 ⇒ 违规。
 
 **⚠️ 为什么不是「记得先查」**：我已经记得了——第二次我确实查了、也读对了。**记得没用，因为记得之后还有一步要自觉。**
+
+## ⊕ 2026-08-15 04:2xZ 补——**manager 改【被机械断言的豁免面文件】时，提交必须并进那条断言它的测试**
+
+**起因（生产实证，非推理）**：`direct-to-develop-bypass-check` 抓到 30 条直接提交，**含我的 `635ec831`**
+（`plugin/skills/manager/SKILL.md`）。读该检查器的排除集（`:23-30`）：
+```
+排除：tasks/ docs/ orchestration/ adr/ .quay/ plugin/loop/ measurements/ · .claude/（manager 独占）· .gitignore/.github/ 等
+代码/断言面 = 排除集之外的一切，【含 plugin/skills/**/*.md】   ← 我的 SKILL.md 在此
+```
+**⇒ 被抓是按设计，不是误报。**
+
+**但「走 fan-in workflow」对 manager 是【范畴错误】**：manager 不被派任务、没有 worktree、没有任务文件，
+`fan-in-execute.js:44` 无 `task` 即 `bad-args` ⇒ **它没有可走的那条路**。
+**⇒ 真正的缺口不是「manager 绕过了闸」，是【manager 写断言面时根本没有闸】。**
+
+**⊢ 产物（照 AC65「谁能验证」+ 步骤 0b 的并进形态）**：**改这三类文件时，提交命令必须并进断言它的那条测试**：
+```bash
+# plugin/skills/manager/SKILL.md ⇒ 断言它的是 manager-layer-shipping.test.mjs
+node --test plugin/test/manager-layer-shipping.test.mjs >/dev/null 2>&1 \
+  && python3 -c "import json,sys;d=json.load(open('.quay/full-suite-state.json'));sys.exit(0 if d.get('finishedAt') is not None else 1)" \
+  && git add plugin/skills/manager/SKILL.md && git commit -m "..."
+```
+**⊢ 三类文件与其断言者（现读，改了要同步这张表）**：
+```
+plugin/skills/manager/SKILL.md          → plugin/test/manager-layer-shipping.test.mjs
+orchestration/SPEC-*.md（新增/删除）     → 同上（AC6 逐 SPEC 断言索引）
+.claude/workflows/manager-tick-core.js  → 实跑一次 Workflow(scriptPath)（该文件自述 node --check 会假绿）
+```
+**⊢ 立条代价（就是不做这一步的代价）**：`84985e66` 新增 SPEC 未同步索引 ⇒ **round179/180 连红两轮**，
+`635ec831` 才修好。**那次我事后跑了测试，而这条要求的是【提交前】跑，并且并进同一条命令。**
+**⊢ 判据**：某次改上表三类文件的提交，其前一条命令若不是对应的断言测试 ⇒ 违规（会话记录可查）。
