@@ -20,7 +20,10 @@
 //       (d) 剩余寿命 < 24h ⇒ 报 CRITICAL 且 exit 1（判据5 触发）。
 //   (d) NOT-EVALUATED（硬规则 3b：无法评估 ≠ 通过）：
 //       (1) 未提供 --cron-list ⇒ exit 2；
-//       (2) 内层正本缺失（默认路径无 AC80 段）⇒ exit 2（①-③ 全真但 ④ 无法评估）。
+//       (2) 内层正本缺失（--root 指向无 AC80 段的目录）⇒ exit 2（①-③ 全真但 ④ 无法评估）。
+//   (e) worktree 上下文默认路径正本查找（round172 回归）：AC80-INNER-ANCHOR 段在默认
+//       plugin/loop/fast-mode-loop-tick.md ⇒ ④ evaluated（非 NOT-EVALUATED）——round172 的旧测试
+//       误期「本 worktree 无 AC80 段」（2eedf16c 已落地该段），把「段存在且被评估」读成「正本缺失」而失败。
 //
 // Run:
 //   scripts/test.sh plugin/test/outer-cron-registry.test.mjs
@@ -350,16 +353,38 @@ test("NOT-EVALUATED: 未提供 --cron-list ⇒ exit 2，非通过", () => {
   }
 });
 
-test("NOT-EVALUATED: 内层正本缺失（无 canonical，本 worktree 无 AC80 段）⇒ exit 2（①-③ 真但 ④ 无法评估）", () => {
-  // 默认路径：plugin/loop/fast-mode-loop-tick.md 无 AC80-INNER-ANCHOR 段 ⇒ 正本缺失。
+test("worktree 上下文默认路径正本查找（round172 回归）：AC80 段在默认 plugin/loop/fast-mode-loop-tick.md ⇒ ④ evaluated（非 NOT-EVALUATED）", () => {
+  // 默认路径（无 --canonical-file，root=cwd=本 worktree/主检出）：2eedf16c 已落地
+  // plugin/loop/fast-mode-loop-tick.md 的 AC80-INNER-ANCHOR 段 ⇒ 正本可解析，判据④ 被评估
+  // （重建/更新注册表前 sha256 或 mismatch → exit 1，更新后 → exit 0；两者都不是 NOT-EVALUATED exit 2）。
+  // round172 的旧测试误期「本 worktree 无 AC80 段 ⇒ exit 2」，把「段存在且被评估」读成「正本缺失」。
   const r = runReg([
     "--verify", "--layer", "inner",
     "--cron-list", JSON.stringify([{ id: "025f4132" }]),
     "--registry-file", REGISTRY_FILE,
   ]);
-  assert.equal(r.status, EXIT_NOT_EVALUATED, `stdout: ${r.stdout}`);
-  assert.match(r.stdout, /NOT-EVALUATED/);
-  assert.match(r.stdout, /正本缺失/);
+  assert.notEqual(r.status, EXIT_NOT_EVALUATED, `stdout: ${r.stdout}`);
+  assert.match(r.stdout, /判据 anchorMatches/, `stdout: ${r.stdout}`);
+  assert.doesNotMatch(r.stdout, /正本缺失/, `stdout: ${r.stdout}`);
+});
+
+test("NOT-EVALUATED: 内层正本缺失（--root 指向无 AC80 段的目录）⇒ exit 2（①-③ 真但 ④ 无法评估）", () => {
+  // 硬规则 3b 独立取值：正本真正缺失时不得伪装成通过。--root 指向空 tmpdir ⇒
+  // <root>/plugin/loop/fast-mode-loop-tick.md 不存在 ⇒ 正本缺失 ⇒ ①-③ 全真但 ④ 无法评估。
+  const { dir } = tmpFile("md");
+  try {
+    const r = runReg([
+      "--verify", "--layer", "inner",
+      "--cron-list", JSON.stringify([{ id: "025f4132" }]),
+      "--registry-file", REGISTRY_FILE,
+      "--root", dir,
+    ]);
+    assert.equal(r.status, EXIT_NOT_EVALUATED, `stdout: ${r.stdout}`);
+    assert.match(r.stdout, /NOT-EVALUATED/);
+    assert.match(r.stdout, /正本缺失/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("NOT-EVALUATED: 注册表缺失/层缺失 ⇒ exit 2", () => {
