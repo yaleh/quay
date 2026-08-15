@@ -121,6 +121,11 @@ export function exclusionEntries(repoRoot, pluginDir) {
       reason: "pins the AC80 INNER_PROMPT (rationale pointer now the consumer-laid docs/analysis/fast-mode-loop-tick.md) + the LAYERS.inner.requiredPointers assertion — target-layout reference, same class as the checker itself",
     },
     {
+      rel: 'plugin/test/outer-cron-registry.test.mjs',
+      target: path.join(pluginDir, 'test', 'outer-cron-registry.test.mjs'),
+      reason: "pins the AC80 INNER_PROMPT constant (rationale pointer now the consumer-laid docs/analysis/fast-mode-loop-tick.md, same prompt as outer-anchor-check.test.mjs) + the sha256/registry assertions — target-layout reference, same class as outer-anchor-check.test.mjs (added when the AC81 anchor recreation flipped the INNER_PROMPT to the consumer-laid pointer, gap-ac80-anchor-prompt-consumer-path-fix)",
+    },
+    {
       rel: 'plugin/scripts/os-anchor-install.sh',
       target: path.join(pluginDir, 'scripts', 'os-anchor-install.sh'),
       reason: 'drives FOREIGN/legacy workspaces (meta-cc, archguard) that may still run the old orchestration/ layout — the old tick-doc path is a supported target, not a quay-repo reference (live ref surfaced by the AC1b scan 2026-08-05: os-anchor landed 11:05Z, the AC1b table predated it)',
