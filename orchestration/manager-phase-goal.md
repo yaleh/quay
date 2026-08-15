@@ -1220,6 +1220,30 @@ outer 全量轮      full-suite-runner.ts:2309 provisionOneShotWorktree(mainRoot
 
       **⛔ 不接受"退役后再说"** —— 那正是本阶段反复出现的「退役做了一半」（B5 注解、floor 读数、cert）。
 
+      **判据5（人 2026-08-15 10:2xZ 追加，逐字：「基于原 outer 跑 suite 测试衍生的机制也应取消」）**
+      **⇒ 退役面不止 B3 本体，还包括它的衍生物。⛔ 必须【枚举】不得【布尔】**（硬规则③）。
+      **⊢ 我已核实的两类（其余归 outer 枚举，我不替它猜）**：
+      ```
+      纯 outer 衍生、可直接退役：plugin/scripts/red-window-triage.ts
+                                （test.sh 接线 0 处、仅 orchestrator-tick-core.md 引 1 处 ⇒ 纯红窗机制的执行体）
+      ⚠️ 共享面，⛔ 不得误废：.quay/full-suite-state.json（inner 的 fan-in 用它判「轮在跑 ⇒ 拒锁」）
+                              full-suite-runner.ts（inner 的 per-task suite 也走它）
+                              suite 锁 / resource-gate ——三者 inner 都在用
+      ```
+      **🔴 判据5 的真风险不是「少了几个机制」，是【断供后检查器静默变绿】**：
+      自动轮停 ⇒ `.quay/verification-round.jsonl` 不再持续新增 ⇒ **所有以它为数据源的检查器失去输入**。
+      **⇒ 每一个都必须落到「NOT-EVALUATED（可区分）」而不是「ok=true（与合格同形）」** —— 硬规则 3b。
+      **⊢ 这正是本阶段已发生过三次的形态**（carriers 恒 NOT-EVALUATED、A23 恒红、floor 读数残留）
+      ⇒ **判据5 能取假**：退役后逐个跑那些检查器，**输出为 `ok=true` 且 `evaluated=true` 而其实无数据者 ⇒ 红**。
+
+      **判据6（人 2026-08-15 10:2xZ 逐字：「红率分桶 / 负载溯源 / 残留剖面对照，全部改用 `.quay/per-task-suite-records.jsonl`」）**
+      **⊢ 已定位的具体落点（读实现）**：`plugin/scripts/trend-check.ts` `:248` / `:311` 直接
+      `readJsonLines(.quay/verification-round.jsonl)` ⇒ **它是趋势分析的实际载体读点，改这里。**
+      **⊢ 能取假**：改后 `trend-check` 在 `verification-round.jsonl` **停止增长**的情况下仍产出趋势读数；
+      且其读点 `grep -c 'verification-round' trend-check.ts` 应降为 0（或仅存历史注释，按位置核）。
+      **⊢ ⚠️ 迁移时必须处理的语义差**：`per-task-suite-records` 里有 `fullSuiteRan=false`（doc-only delta 跳过全量）的记录，
+      **红率分桶若不按 `skipReason` 分桶，会被跳过项稀释** —— inner 已确认 `skipReason` 从此是承重字段。
+
 **归属**：判据1/2 在 `orchestration/orchestrator-tick-core.md`（outer 独占，C17）；判据3 在 `fast-mode-tick-core.md`（inner 面，manager 只报不改）；
 判据4 的实现面按 AC65「谁能验证」切。**manager 一条都不改，本 AC 的落实动作 = 投递 + 跟踪。**
 
