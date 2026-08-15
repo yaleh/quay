@@ -388,13 +388,22 @@ test("suite running guard — exit 2, no lock events, no retry record (AC4: lock
   try {
     initRepo(dir);
     makeTaskBranch(dir, "ac62-d");
-    const suite = writeSuiteState(st, { state: "running", startedAt: "2026-08-14T00:00:00Z" });
     const events = path.join(st, "events.jsonl");
     const retries = path.join(st, "retries.jsonl");
-
-    const r = runMerge(["--task", "ac62-d", "--root", dir, "--suite-state", suite, "--lock-events", events, "--retry-record", retries]);
-    assert.equal(r.status, 2, "must refuse while suite running");
-    assert.match(r.stderr, /suite state is 'running'/);
+    // AC84 (gap-ac84-suite-source-starvation-reader-disposition AC3): the guard now probes the DIRECT
+    // "a suite is running" signal — test.sh's single-flight lock slots (full-suite.lock.0/.1), the
+    // mechanism that actually serializes full-suite runs — NOT full-suite-state.json (RETIRED: no
+    // writer after AC84, the runner is no longer invoked by the loop). Simulate a running suite by
+    // holding slot .0 with an flock in an outer bash that then runs the merge (flock conflicts are
+    // per-inode across file descriptions — the merge's own probe opens a NEW fd and must fail).
+    const slot0 = path.join(dir, ".git", SUITE_LOCK_0);
+    fs.mkdirSync(path.dirname(slot0), { recursive: true });
+    fs.writeFileSync(slot0, "", "utf8");
+    const mergeArgs = ["--task", "ac62-d", "--root", dir, "--lock-events", events, "--retry-record", retries];
+    const inner = `exec 9>"${slot0}"; flock -n 9 || exit 9; bash ${MERGE_SCRIPT} ${mergeArgs.map((a) => JSON.stringify(a)).join(" ")}`;
+    const r = spawnSync("bash", ["-c", inner], { encoding: "utf8" });
+    assert.equal(r.status, 2, "must refuse while a full suite runs (slot held)");
+    assert.match(r.stderr, /single-flight lock slot held/);
     assert.ok(!fs.existsSync(events), "no lock events — the lock was never acquired");
     assert.ok(!fs.existsSync(retries), "no retry record — this is an environment guard, not an ff failure");
   } finally {

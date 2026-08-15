@@ -15,10 +15,12 @@
 #     5. acquire merge lock → git merge --ff-only task/<id> → release (success or failure)
 #
 # The lock is a SEPARATE flock from the suite lock (full-suite.lock.0/.1): different file, different
-# object, and — because this script REFUSES to run while the suite state says `running` — never held
-# at the same time as a suite run (AC4: 两把锁覆盖范围不得交叉). Hold time is milliseconds (ff-only
-# moves a ref; it cannot conflict), so stale-lock recovery is a branch that is almost never reached —
-# a short lock that needs no elaborate recovery logic is the point (§2).
+# object, and — because this script REFUSES to run while a full suite is RUNNING (AC84 — probed via
+# the single-flight suite-lock slots themselves, the DIRECT "a suite is running" signal; the old
+# full-suite-state.json proxy is RETIRED: it has no writer after AC84, see the in-body note) — never
+# held at the same time as a suite run (AC4: 两把锁覆盖范围不得交叉). Hold time is milliseconds
+# (ff-only moves a ref; it cannot conflict), so stale-lock recovery is a branch that is almost never
+# reached — a short lock that needs no elaborate recovery logic is the point (§2).
 #
 # On ff failure — the ONLY reason ff fails after step 1 is "develop advanced concurrently" — this
 # script appends a RETRY RECORD (task id / attempt # / develop head / timestamp / runId) and exits 1:
@@ -180,12 +182,37 @@ fi
 # running, refuse to acquire the lock — the caller waits for the round to end (A9: 轮在跑 ⇒ 不可以
 # fan-in), it does NOT hold the merge lock while waiting (that would make the lock cover the wait —
 # exactly the lock-order deadlock the SPEC forbids).
-if [ -f "${suite_state}" ]; then
-  suite_state_val="$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('state',''))" "${suite_state}" 2>/dev/null || true)"
-  if [ "${suite_state_val}" = "running" ]; then
-    echo "fan-in-ff-merge: suite state is 'running' (${suite_state}) — fan-in must wait for the round to end; NOT acquiring the merge lock (AC4: lock must not overlap a suite run)" >&2
-    exit 2
+#
+# AC84 (gap-ac84-suite-source-starvation-reader-disposition AC3): full-suite-state.json is RETIRED as
+# a fan-in gate input. Its only loop invoker — the suite-state-trigger Monitor — was killed under AC84
+# (outer no longer runs an auto-suite), and per-task fan-in suites run `bash scripts/test.sh` directly
+# (recording to per-task-suite-records.jsonl), NEVER the runner that wrote the state file. The file is
+# frozen at a stale terminal value (red@<superseded> + phantom failures), so reading it for "is a
+# suite running?" was reading a dead proxy — and if it were ever left `running` by a crash, no watchdog
+# exists to flip it back (the crash-watchdog gap). The DIRECT signal for a suite currently running is
+# test.sh's single-flight lock slots (<git-common-dir>/full-suite.lock.0 / .1 — the SAME mechanism
+# that actually serializes full-suite runs across worktrees): if EITHER slot is HELD, a full suite is
+# running. flock(1) auto-releases on process exit, so a crashed suite cannot leave a permanent
+# "running" — the crash-watchdog gap is closed structurally (no watchdog needed). `--suite-state` and
+# the `suite_state` default are kept ONLY for arg-compat; the retired file is no longer read.
+suite_lock_dir="${git_common_dir}"
+if [ -n "${FULL_SUITE_LOCK_FILE:-}" ]; then
+  suite_lock_base="${FULL_SUITE_LOCK_FILE}"
+else
+  suite_lock_base="${suite_lock_dir}/full-suite.lock"
+fi
+suite_running=0
+for suite_slot in "${suite_lock_base}.0" "${suite_lock_base}.1"; do
+  if [ -e "${suite_slot}" ]; then
+    if ! flock -n "${suite_slot}" true 2>/dev/null; then
+      suite_running=1
+      break
+    fi
   fi
+done
+if [ "${suite_running}" = "1" ]; then
+  echo "fan-in-ff-merge: a full suite is running (single-flight lock slot held — ${suite_lock_base}.0/.1) — fan-in must wait for the suite to end; NOT acquiring the merge lock (AC4: lock must not overlap a suite run)" >&2
+  exit 2
 fi
 
 # ── attempt counting (判据3: 第几次) ──────────────────────────────────────────────────────────────────

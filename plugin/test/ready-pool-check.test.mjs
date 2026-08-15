@@ -62,7 +62,6 @@ import {
   isExperimentRound,
   readJsonLines,
   readVerificationRounds,
-  readStateFailures,
   countUnattributedFailures,
   SUITE_BLOCKING_WEIGHT,
   RED_WINDOW_MIN_DEFAULT,
@@ -75,6 +74,9 @@ import {
   isExternalVerificationItem,
   isPendingImplementationItem,
   priorityLevel,
+  deriveDefaultLane,
+  readPerTaskSuiteRecords,
+  isSuiteRecordSkip,
 } from "../scripts/ready-pool-check.ts";
 import { parseTask } from "../scripts/task-schema.ts";
 import { taskWorkLanded } from "../scripts/task-status-drift-check.ts";
@@ -2402,14 +2404,26 @@ test("applyPromotions: a non-delivery-critical candidate is promoted WITHOUT the
 //   hit ⇒ ordering byte-identical. AC5: the obligation shape is recorded in the obligation ledger in
 //   mechanically-checkable JSONL form.
 
+/** AC84 (gap-ac84-suite-source-starvation-reader-disposition AC2): analyzeTasks's suite-blocking now
+ *  reads per-task-suite-records.jsonl — the ONLY ongoing suite source after AC84 (verification-round
+ *  is NO LONGER a throttling input; full-suite-state.json has no writer). This helper writes the
+ *  per-task-suite-record shape (taskId/runId/state/laneCount/failedFiles/fullSuiteRan), converting the
+ *  round-shaped fixture rows ({round,state,reason,fail,failures}) into it. Every fixture row is a REAL
+ *  full-suite result (fullSuiteRan:true) — a green row breaks the window, a red row counts. */
 function writeRounds(root, rows) {
   fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
-  fs.writeFileSync(path.join(root, ".quay", "verification-round.jsonl"), rows.map((r) => JSON.stringify(r)).join("\n"));
-}
-
-function writeState(root, failures) {
-  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
-  fs.writeFileSync(path.join(root, ".quay", "full-suite-state.json"), JSON.stringify({ state: "red", reason: "failed", failures }));
+  const recs = rows.map((r, i) => ({
+    taskId: `fixture-${i}`,
+    runId: `fixture-run-${i}`,
+    state: r.state,
+    laneCount: r.laneCount ?? 16,
+    durationMs: 1000,
+    failedFiles: Array.isArray(r.failures) ? r.failures.map((f) => f.file).filter(Boolean) : [],
+    fullSuiteRan: true,
+    startedAt: `2026-08-15T00:00:0${i}Z`,
+    finishedAt: `2026-08-15T00:00:0${i}Z`,
+  }));
+  fs.writeFileSync(path.join(root, ".quay", "per-task-suite-records.jsonl"), recs.map((r) => JSON.stringify(r)).join("\n"));
 }
 
 test("consecutiveRedRounds / isRedRound / collectFailureFiles window detection (AC2)", () => {
@@ -2665,6 +2679,118 @@ test("computeSuiteBlocking: controlled-experiment round (laneCount ≠ default) 
   assert.equal(middle.consecutiveRed, 2, "experiment round in the middle is transparent (neither counts nor breaks)");
 });
 
+test("AC1 — deriveDefaultLane: the reference default is the runner's ACTUAL normal lane (mode of recorded laneCounts), not the checker's env (gap-ac84-suite-source-starvation-reader-disposition)", () => {
+  // The defect: the checker's env derived defaultLaneCount()=8 while the runner ACTUALLY recorded
+  // laneCount=16 (QUAY_MAX_OVERSUBSCRIPTION=2 at runner time vs 1 at checker time) ⇒ every normal
+  // round looked like an experiment ⇒ consecutiveRed 恒 0. The fix derives the reference from the
+  // records themselves — the MODE laneCount is what the runner used for its typical rounds.
+  assert.equal(deriveDefaultLane([], 8), 8, "no records ⇒ fallback (the env-derived default)");
+  assert.equal(deriveDefaultLane([{ state: "red", laneCount: 16 }, { state: "red", laneCount: 16 }, { state: "red", laneCount: 8 }], 8), 16,
+    "mode of recorded laneCounts (16 appears twice) ⇒ 16 — the runner's actual normal lane");
+  assert.equal(deriveDefaultLane([{ state: "red", laneCount: 8 }], 8), 8, "single lane ⇒ itself");
+  // A doc-only SKIP (fullSuiteRan === false, laneCount ~1) is NOT a lane observation — no full suite ran.
+  assert.equal(deriveDefaultLane([{ state: "green", laneCount: 16 }, { state: "green", laneCount: 16 }, { state: "green", laneCount: 1, fullSuiteRan: false }], 8), 16,
+    "skip records do not pollute the mode");
+  assert.equal(deriveDefaultLane([{ state: "green", fullSuiteRan: false }, { state: "green", fullSuiteRan: false }], 8), 8,
+    "only skips ⇒ fallback");
+  // A record with NO laneCount (legacy verification-round row) contributes nothing.
+  assert.equal(deriveDefaultLane([{ state: "red" }, { state: "red", laneCount: 16 }], 8), 16, "legacy no-laneCount row contributes nothing");
+});
+
+test("AC1 — computeSuiteBlocking without explicit defaultLane derives the runner's actual lane (16): consecutiveRed is NON-ZERO and the window CAN activate; forced env default (8) keeps it 恒 0 (gap-ac84-suite-source-starvation-reader-disposition)", () => {
+  // The real-repo shape: the runner records laneCount=16 for its normal rounds; the phantom tail is
+  // 5 consecutive red rounds (rounds 208-212). With the checker's env-derived default (8) every normal
+  // round was an experiment ⇒ consecutiveRed 0 / window_active false (structural failure since round
+  // 24). After the fix (no explicit defaultLane ⇒ derive mode=16) the red tail counts.
+  const tasks = new Map([
+    ["gap-wd", { status: "ready", body: "## Touches\n- code/wd.ts" }],
+  ]);
+  const expand = (globs) => new Set(globs);
+  const rounds = Array.from({ length: 5 }, (_, i) => ({ round: 208 + i, state: "red", reason: "failed", laneCount: 16, failures: [{ file: "code/wd.ts" }] }));
+
+  // FIXED: no explicit defaultLane ⇒ derive the runner's actual normal lane (16) from the records.
+  const fixed = computeSuiteBlocking({ rounds, stateFailures: [], tasks, expand, minRedWindow: 3 });
+  assert.equal(fixed.consecutiveRed, 5, "AC1: default aligned to the runner's actual lane ⇒ consecutiveRed non-zero (the red tail counts)");
+  assert.equal(fixed.windowActive, true, "AC1: window_active CAN become true");
+  assert.deepEqual(fixed.ids.has("gap-wd") ? [...fixed.ids] : [], ["gap-wd"], "the red window attributes the failure to the Touches-hitting task");
+
+  // DEFECT CONTROL: the OLD behavior — the checker's env default (8) forced explicitly — still
+  // misclassifies every lane-16 round as an experiment ⇒ consecutiveRed 恒 0 / window inactive.
+  const defect = computeSuiteBlocking({ rounds, stateFailures: [], tasks, expand, minRedWindow: 3, defaultLane: 8 });
+  assert.equal(defect.consecutiveRed, 0, "control: forced env default (8) ⇒ consecutiveRed 0 — the pre-fix 恒 0 shape");
+  assert.equal(defect.windowActive, false, "control: window stays inactive under the wrong default");
+});
+
+test("AC2 — per-task-suite-record red window: failedFiles attribute, green full-suite breaks, doc-only skip is NEUTRAL (gap-ac84-suite-source-starvation-reader-disposition)", () => {
+  const tasks = new Map([
+    ["gap-wd", { status: "ready", body: "## Touches\n- code/wd.ts" }],
+  ]);
+  const expand = (globs) => new Set(globs);
+  // A per-task red record carries failedFiles (array of file strings), NOT the verification-round
+  // `failures` ({file}) shape — collectFailureFiles must normalize BOTH.
+  const red = computeSuiteBlocking({
+    rounds: [
+      { taskId: "t1", runId: "r1", state: "red", laneCount: 16, failedFiles: ["code/wd.ts"], fullSuiteRan: true },
+      { taskId: "t2", runId: "r2", state: "red", laneCount: 16, failedFiles: ["code/wd.ts"], fullSuiteRan: true },
+      { taskId: "t3", runId: "r3", state: "red", laneCount: 16, failedFiles: ["code/wd.ts"], fullSuiteRan: true },
+    ],
+    stateFailures: [],
+    tasks,
+    expand,
+    minRedWindow: 3,
+  });
+  assert.equal(red.consecutiveRed, 3, "per-task red records count (failedFiles normalized)");
+  assert.equal(red.windowActive, true);
+  assert.deepEqual(red.failureFiles, ["code/wd.ts"], "failedFiles feed the failure-file set");
+  assert.deepEqual(red.ids.has("gap-wd") ? [...red.ids] : [], ["gap-wd"], "per-task red window attributes via failedFiles");
+
+  // A doc-only SKIP (fullSuiteRan === false — no full suite ran) is NEUTRAL: it must NOT break a red
+  // window (a green skip says nothing about the suite), and must NOT add a red.
+  const skip = computeSuiteBlocking({
+    rounds: [
+      { taskId: "t1", runId: "r1", state: "red", laneCount: 16, failedFiles: ["code/wd.ts"], fullSuiteRan: true },
+      { taskId: "t2", runId: "r2", state: "red", laneCount: 16, failedFiles: ["code/wd.ts"], fullSuiteRan: true },
+      { taskId: "t3", runId: "r3", state: "green", laneCount: 1, failedFiles: [], fullSuiteRan: false, skipReason: "doc-only-delta" },
+    ],
+    stateFailures: [],
+    tasks,
+    expand,
+    minRedWindow: 3,
+  });
+  assert.equal(skip.consecutiveRed, 2, "a trailing doc-only skip neither counts nor breaks the red window (still 2 red)");
+  assert.equal(skip.windowActive, false, "2 < min 3 ⇒ window stays inactive");
+
+  // A GREEN full-suite record (fullSuiteRan:true) DOES break the window.
+  const green = computeSuiteBlocking({
+    rounds: [
+      { taskId: "t1", runId: "r1", state: "red", laneCount: 16, failedFiles: ["code/wd.ts"], fullSuiteRan: true },
+      { taskId: "t2", runId: "r2", state: "green", laneCount: 16, failedFiles: [], fullSuiteRan: true },
+    ],
+    stateFailures: [],
+    tasks,
+    expand,
+    minRedWindow: 3,
+  });
+  assert.equal(green.consecutiveRed, 0, "a green full-suite record breaks the window");
+  assert.equal(green.windowActive, false);
+});
+
+test("AC2 — readPerTaskSuiteRecords + deriveDefaultLane on the real per-task-suite-records.jsonl: all-green ⇒ consecutiveRed 0 (phantom verification-round reds no longer trigger)", (t) => {
+  // The migration control against the REAL workspace ledger: after AC84 the ONLY ongoing suite source
+  // is per-task-suite-records.jsonl. Its current tail is all-green full-suite records (laneCount=nproc
+  // = 16), so the red window is INACTIVE — the phantom verification-round reds (208-212, a leftover
+  // Monitor verifying an orphaned commit) must NOT trigger throttling under the migrated source.
+  const repoRoot = path.resolve(__dirname, "..", "..");
+  if (!fs.existsSync(path.join(repoRoot, ".quay", "per-task-suite-records.jsonl"))) {
+    t.skip("real per-task-suite-records.jsonl not present in this checkout");
+    return;
+  }
+  const recs = readPerTaskSuiteRecords(repoRoot);
+  const lane = deriveDefaultLane(recs, 8);
+  assert.ok(lane === 16, `real per-task records derive default lane 16 (nproc), got ${lane}`);
+  assert.equal(consecutiveRedRounds(recs), 0, "per-task records are all green ⇒ no red window");
+});
+
 test("isDirectoryGlob: bare dir / dir/** / no-slash dir are directory globs; concrete files + file wildcards are not (AC2 — gap-suite-blocking-directory-glob-overbroad)", () => {
   // The crystallization Touches entry `plugin/test/（各 AC 测试）` is a bare trailing-slash directory.
   assert.equal(isDirectoryGlob("plugin/test/"), true, "trailing-slash bare directory");
@@ -2761,7 +2887,6 @@ test("analyzeTasks: suite-blocking jumps ready_relevance; negative control uncha
 
   // AC2/AC3: a 3-consecutive-red window whose failures hit the watchdog task's Touches.
   writeRounds(root, Array.from({ length: 3 }, (_, i) => ({ round: 210 + i, state: "red", reason: "failed", fail: 1, failures: [{ file: "code/wd.ts", line: "x" }] })));
-  writeState(root, [{ file: "code/wd.ts", line: "x" }]);
   const after = analyzeTasks(opts);
   assert.equal(after.suite_blocking.window_active, true);
   assert.equal(after.suite_blocking.consecutive_red, 3);
@@ -2807,8 +2932,6 @@ test("analyzeTasks: suite red ⇒ suite-fix family dispatchable, unrelated task 
 
   // 3 consecutive red rounds whose failure hits the suite infra file the fix-family touches.
   writeRounds(root, Array.from({ length: 3 }, (_, i) => ({ round: 220 + i, state: "red", reason: "failed", fail: 1, failures: [{ file: "plugin/test/install-family.test.mjs", line: "x" }] })));
-  writeState(root, [{ file: "plugin/test/install-family.test.mjs", line: "x" }]);
-
   const r = analyzeTasks(opts);
   assert.equal(r.suite_blocking.window_active, true);
   assert.equal(r.suite_blocking.consecutive_red, 3);
@@ -2839,7 +2962,6 @@ test("analyzeTasks: dir-glob Touches task is NOT suite-blocking in a red window;
   // 3 consecutive red rounds whose ONLY failing file is under plugin/test/ — the real-repo shape
   // where the crystallization task used to be a false suite-blocker.
   writeRounds(root, Array.from({ length: 3 }, (_, i) => ({ round: 320 + i, state: "red", reason: "failed", fail: 1, failures: [{ file: "plugin/test/checker-cost.test.mjs", line: "x" }] })));
-  writeState(root, [{ file: "plugin/test/checker-cost.test.mjs", line: "x" }]);
   const r = analyzeTasks(opts);
   assert.equal(r.suite_blocking.window_active, true);
   assert.deepEqual(r.suite_blocking.tasks, ["gap-real-blocker"], "only the concrete-file task is suite-blocking — the dir-glob task is NOT (AC4 negative control)");

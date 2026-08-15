@@ -1079,66 +1079,82 @@ export function readVerificationRounds(root) {
   return readJsonLines(path.join(root, ".quay", "verification-round.jsonl"));
 }
 
-/** Parse <root>/.quay/full-suite-state.json once (the shared snapshot read, freshness never asserted
- *  here — the caller (computeSuiteBlocking) gates the use on its consecutive-red window, so a stale
- *  snapshot is discarded before it can drive a verdict). Absent/unparseable ⇒ null. */
-function readStateOnce(root) {
-  try {
-    return JSON.parse(fs.readFileSync(path.join(root, ".quay", "full-suite-state.json"), "utf8"));
-  } catch {
-    return null;
-  }
+/** AC84 (gap-ac84-suite-source-starvation-reader-disposition AC2) — read
+ *  <root>/.quay/per-task-suite-records.jsonl — the ONLY ongoing suite data source after AC84 retired
+ *  the outer's auto-suite (the runner no longer writes verification-round.jsonl; full-suite-state.json
+ *  has no writer). Written by per-task-suite-record.ts (taskId/runId/state/laneCount/durationMs/
+ *  failedFiles/fullSuiteRan/skipReason/startedAt/finishedAt). Absent ⇒ []. */
+export function readPerTaskSuiteRecords(root) {
+  return readJsonLines(path.join(root, ".quay", "per-task-suite-records.jsonl"));
 }
 
-/** Read <root>/.quay/full-suite-state.json's failures[] — the LATEST run's failure detail
- *  ({file,line}[]). Absent/unparseable/no failures ⇒ []. */
-export function readStateFailures(root) {
-  const st = readStateOnce(root);
-  return Array.isArray(st && st.failures) ? st.failures : [];
-}
-
-/** gap-streaming-red-cascade-amplifies-failures-array AC6 — read the state file's SEGMENTED-OUT
- *  failure populations (`unattributed[]` no-file entries + `derived[]` cascade entries). The latest
- *  run's full-suite-state.json carries them (when non-empty); absent/unparseable ⇒ []. Kept OUT of
- *  readStateFailures (the failureFiles source) so the two populations never become task-Touches-
- *  attributable — they are exactly the ones collectFailureFiles structurally drops (AC6 counts them). */
-export function readStateFailureSegments(root) {
-  const st = readStateOnce(root);
-  return {
-    unattributed: Array.isArray(st && st.unattributed) ? st.unattributed : [],
-    derived: Array.isArray(st && st.derived) ? st.derived : [],
-  };
-}
-
-/** Classify one verification-round row as RED (suite not green). Canonical rows carry `state`
+/** Classify one suite-result row as RED (suite not green). Canonical rows carry `state`
  *  ("red"|"green"); legacy rows (the appendSuiteDurationRecord shape) carry only pass/fail. An
- *  aborted round (state:red, reason:aborted) is STILL red — the suite is not green — so it does NOT
- *  break the consecutive window (the manager's own reading counts round-192/193/195/196 as
- *  consecutive red with round-194 aborted in between); it just contributes no failure attribution. */
+ *  aborted round (state:red, reason:aborted — or a per-task record's explicit state:"aborted") is
+ *  STILL red — the suite is not green — so it does NOT break the consecutive window (the manager's
+ *  own reading counts round-192/193/195/196 as consecutive red with round-194 aborted in between);
+ *  it just contributes no failure attribution. */
 export function isRedRound(r) {
   if (!r) return false;
-  if (r.state === "red") return true;
+  if (r.state === "red" || r.state === "aborted") return true;
   if ((r.state === undefined || r.state === null) && Number(r.fail) > 0) return true;
   return false;
 }
 
+/** AC84 (gap-ac84-suite-source-starvation-reader-disposition AC2) — is a suite-result row a DOC-ONLY
+ *  SKIP (per-task-suite-record with fullSuiteRan === false — NO full suite ran)? A skip says NOTHING
+ *  about the suite, so it is NEUTRAL to the red window: it neither counts toward consecutive red nor
+ *  breaks the window (a green skip must not reset a red window — the suite has not gone green; a skip
+ *  must not add a red). Verification-round rows (no fullSuiteRan field) are never skips. */
+export function isSuiteRecordSkip(r) {
+  return Boolean(r) && r.fullSuiteRan === false;
+}
+
 /** Count consecutive RED rounds at the END of the round history (last row backwards). A green round
- *  breaks the window; an aborted round is still red (does not break it). */
+ *  breaks the window; an aborted round is still red (does not break it). AC84: a doc-only skip
+ *  (fullSuiteRan === false) is NEUTRAL — neither counts nor breaks. */
 export function consecutiveRedRounds(rounds) {
   let n = 0;
   for (let i = rounds.length - 1; i >= 0; i--) {
-    if (isRedRound(rounds[i])) n++;
+    const r = rounds[i];
+    if (isSuiteRecordSkip(r)) continue; // doc-only skip — neutral, no suite verdict
+    if (isRedRound(r)) n++;
     else break;
   }
   return n;
 }
 
+/** AC84 (gap-ac84-suite-source-starvation-reader-disposition AC1) — derive the reference DEFAULT lane
+ *  from the records the RUNNER ACTUALLY wrote, instead of the checker's own env (which can diverge:
+ *  the runner recorded laneCount=16 with QUAY_MAX_OVERSUBSCRIPTION=2, while the checker's env reads
+ *  oversub=1 ⇒ defaultLaneCount()=8 ⇒ every normal round looked like an experiment round ⇒
+ *  consecutiveRed 恒 0 / window_active 恒 false since round 24). The runner's normal-lane reference is
+ *  the MODE of the recorded laneCounts — the lane it used for typical (non-experiment) rounds. A
+ *  doc-only skip (fullSuiteRan === false, laneCount ~1) is NOT a lane observation (no full suite ran).
+ *  No laneCount data / empty ⇒ `fallback` (the env-derived defaultLaneCount()). */
+export function deriveDefaultLane(records, fallback) {
+  const lanes = new Map();
+  for (const r of records || []) {
+    if (!r || r.fullSuiteRan === false) continue;
+    const lane = Number(r.laneCount);
+    if (Number.isFinite(lane) && lane >= 1) lanes.set(lane, (lanes.get(lane) || 0) + 1);
+  }
+  let bestLane = null;
+  let bestCount = 0;
+  for (const [lane, count] of lanes) {
+    if (count > bestCount) { bestCount = count; bestLane = lane; }
+  }
+  return bestLane !== null ? bestLane : fallback;
+}
+
 /** gap-suite-blocking-experiment-rounds-count-toward-consecutive-red AC2 — is a verification-round a
  *  one-off CONTROLLED-EXPERIMENT round (excluded from the consecutive-red count)? Mechanically
- *  identifiable by a NON-DEFAULT laneCount: the default lane is nproc-derived (full-suite-runner's
- *  defaultLaneCount — a lane-8 comparison vs the 4-lane default on this box is a probe, not a
- *  regression). A round with NO laneCount field (legacy rows) is NOT an experiment round — only an
- *  EXPLICIT non-default laneCount marks one, so existing/legacy rounds keep counting normally. */
+ *  identifiable by a NON-DEFAULT laneCount: the default lane is the RUNNER's ACTUAL normal lane —
+ *  since AC84 (gap-ac84-suite-source-starvation-reader-disposition AC1) the reference default is
+ *  derived from the records the runner actually wrote (deriveDefaultLane — the MODE laneCount, e.g.
+ *  16 on this box), NOT the checker's own env (which read oversub=1 ⇒ 8 and misclassified every normal
+ *  round as an experiment). A record with NO laneCount field (legacy rows) is NOT an experiment round —
+ *  only an EXPLICIT non-default laneCount marks one, so existing/legacy rounds keep counting normally. */
 export function isExperimentRound(r, defaultLane) {
   if (!r) return false;
   if (r.laneCount === undefined || r.laneCount === null) return false;
@@ -1165,6 +1181,12 @@ export function collectFailureFiles(rounds, stateFailures, windowSize) {
   for (const r of windowRounds) {
     if (Array.isArray(r && r.failures)) {
       for (const f of r.failures) if (f && f.file) out.add(String(f.file));
+    }
+    // AC84 (gap-ac84-suite-source-starvation-reader-disposition AC2): a per-task-suite-record
+    // carries `failedFiles` (array of file strings) instead of the verification-round `failures`
+    // ({file,line}[]). Normalize BOTH shapes so a per-task red record attributes its failed files.
+    if (Array.isArray(r && r.failedFiles)) {
+      for (const f of r.failedFiles) if (f != null) out.add(String(f));
     }
   }
   for (const f of stateFailures || []) if (f && f.file) out.add(String(f.file));
@@ -1334,14 +1356,21 @@ export function exemptFromSuiteBlocking(task, id, failureHit) {
  *  narrows the cap per the 2026-08-13 human ruling), ids stays empty (nothing to attribute), and
  *  `unattributedCount` reports the no-file/derived population that collectFailureFiles structurally
  *  drops (AC6 — the drop is explicit, not silent). */
-export function computeSuiteBlocking({ rounds, stateFailures, stateUnattributed = [], tasks, minRedWindow = RED_WINDOW_MIN_DEFAULT, expand, defaultLane = defaultLaneCount() }) {
+export function computeSuiteBlocking({ rounds, stateFailures, stateUnattributed = [], tasks, minRedWindow = RED_WINDOW_MIN_DEFAULT, expand, defaultLane }) {
   // gap-suite-blocking-experiment-rounds-count-toward-consecutive-red AC2: a one-off CONTROLLED-
-  // EXPERIMENT round (laneCount ≠ nproc-derived default) is an experiment finding, not a regression —
-  // it must not push the consecutive-red window. Skip such rounds ENTIRELY (count AND failure
-  // attribution): their red stays recorded in the round record itself (state/reason preserved), it
-  // just does not drive suite-blocking. `defaultLane` is injectable so tests are hermetic (they pass
-  // an explicit default rather than depending on the host nproc).
-  const realRounds = rounds.filter((r) => !isExperimentRound(r, defaultLane));
+  // EXPERIMENT round (laneCount ≠ default) is an experiment finding, not a regression — it must not
+  // push the consecutive-red window. Skip such rounds ENTIRELY (count AND failure attribution): their
+  // red stays recorded in the round record itself (state/reason preserved), it just does not drive
+  // suite-blocking. `defaultLane` is injectable so tests are hermetic (they pass an explicit default
+  // rather than depending on the host nproc).
+  // AC84 (gap-ac84-suite-source-starvation-reader-disposition AC1): when `defaultLane` is NOT passed,
+  // derive it from the records the RUNNER ACTUALLY wrote (deriveDefaultLane — the MODE laneCount: the
+  // runner's normal lane, e.g. 16 on this box) instead of the checker's OWN env (defaultLaneCount()
+  // = 8 with oversub=1 — the runner recorded laneCount=16 with oversub=2 ⇒ every normal round was
+  // misclassified as an experiment round ⇒ consecutiveRed 恒 0 / window_active 恒 false since round
+  // 24). An EXPLICIT defaultLane (hermetic tests) still wins.
+  const def = defaultLane ?? deriveDefaultLane(rounds, defaultLaneCount());
+  const realRounds = rounds.filter((r) => !isExperimentRound(r, def));
   const consecutiveRed = consecutiveRedRounds(realRounds);
   if (consecutiveRed < minRedWindow) {
     return { ids: new Set(), consecutiveRed, windowActive: false, failureFiles: [], unattributedCount: 0 };
@@ -1849,19 +1878,21 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
   }
 
   // ── SUITE-BLOCKING signal (gap-ready-relevance-blind-to-suite-blocking-signal AC2/AC3/AC4).
-  // Read the consecutive-red window from verification-round.jsonl (+ the latest full-suite-state.json
-  // failures[]) and map it onto task ids via declared ## Touches expansion. The ONE tree walk is
-  // shared with the dispatchable-disjoint scan below (walk-once, gap-select-preflight-json-real-store-
-  // too-slow pattern). Negative control (AC4): no red window / no failure hit ⇒ empty id set ⇒ the
+  // AC84 (gap-ac84-suite-source-starvation-reader-disposition AC2): the red-window THROTTLE reads
+  // per-task-suite-records.jsonl — the ONLY ongoing suite data source after AC84 retired the outer's
+  // auto-suite (the runner no longer writes verification-round.jsonl; full-suite-state.json has no
+  // writer and is frozen at a stale red@<superseded> + phantom failures). verification-round.jsonl is
+  // NO LONGER a throttling input — its phantom tail (rounds 208-212, a leftover Monitor verifying an
+  // orphaned commit) must NOT trigger the red window. Per-task red records carry their own failedFiles
+  // for Touches attribution (collectFailureFiles normalizes both shapes). The ONE tree walk is shared
+  // with the dispatchable-disjoint scan below (walk-once, gap-select-preflight-json-real-store-too-
+  // slow pattern). Negative control (AC4): no red window / no failure hit ⇒ empty id set ⇒ the
   // relevance ranking below is byte-identical to the pre-signal ordering.
   const sharedFiles = walkFiles(root);
   const expand = (globs) => expandDeclaredTouches(globs, root, sharedFiles);
   const suiteBlocking = computeSuiteBlocking({
-    rounds: readVerificationRounds(root),
-    stateFailures: readStateFailures(root),
-    // gap-streaming-red-cascade-amplifies-failures-array AC6 — the state's segmented-out populations
-    // (unattributed + derived) feed the not-attributable count; they never join failureFiles.
-    ...readStateFailureSegments(root),
+    rounds: readPerTaskSuiteRecords(root),
+    stateFailures: [],
     tasks: allTasks,
     minRedWindow: redWindowMin,
     expand,

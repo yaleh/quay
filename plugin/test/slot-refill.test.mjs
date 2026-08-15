@@ -868,11 +868,32 @@ test("AC5 — Consumer A stays WIDE: a candidate colliding with a wide-but-not-r
 // picks the suite-blocker before any other work. Negative control: no red window ⇒ recommended keeps
 // the pre-signal (id) ordering.
 
+/** AC84 (gap-ac84-suite-source-starvation-reader-disposition AC2): slot-refill's suite-blocking
+ *  (via analyzeTasks) now reads per-task-suite-records.jsonl — the ONLY ongoing suite source after
+ *  AC84 (verification-round is NO LONGER a throttling input). This helper writes the per-task-suite-
+ *  record shape, converting the round-shaped fixture rows ({round,state,reason,fail,failures}) into
+ *  it. Every fixture row is a REAL full-suite result (fullSuiteRan:true) — a green row breaks the
+ *  window, a red row counts. */
 function writeRounds(root, rows) {
   fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
-  fs.writeFileSync(path.join(root, ".quay", "verification-round.jsonl"), rows.map((r) => JSON.stringify(r)).join("\n"));
+  const recs = rows.map((r, i) => ({
+    taskId: `fixture-${i}`,
+    runId: `fixture-run-${i}`,
+    state: r.state,
+    laneCount: r.laneCount ?? 16,
+    durationMs: 1000,
+    failedFiles: Array.isArray(r.failures) ? r.failures.map((f) => f.file).filter(Boolean) : [],
+    fullSuiteRan: true,
+    startedAt: `2026-08-15T00:00:0${i}Z`,
+    finishedAt: `2026-08-15T00:00:0${i}Z`,
+  }));
+  fs.writeFileSync(path.join(root, ".quay", "per-task-suite-records.jsonl"), recs.map((r) => JSON.stringify(r)).join("\n"));
 }
 
+// full-suite-state.json is RETIRED as a red-window input under AC84, but slot-refill's `suite_red`
+// DIAGNOSTIC (arbitration.suite_red, readSuiteRed) still reads it — slot-refill.ts is outside this
+// task's Touches, so the diagnostic keeps its (now-stale) source. writeState keeps writing the file so
+// the diagnostic assertions stay live.
 function writeState(root, failures) {
   fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
   fs.writeFileSync(path.join(root, ".quay", "full-suite-state.json"), JSON.stringify({ state: "red", reason: "failed", failures }));
@@ -1030,7 +1051,7 @@ test("ARBITRATION — no red window keeps full cap even with high backlog; red s
   assert.equal(redNoWindow.arbitration.suite_red, true, "suite_red is still reported as a diagnostic");
   // absent state + no rounds ⇒ not red-blocked ⇒ proceed
   fs.rmSync(path.join(root, ".quay", "full-suite-state.json"));
-  fs.rmSync(path.join(root, ".quay", "verification-round.jsonl"));
+  fs.rmSync(path.join(root, ".quay", "per-task-suite-records.jsonl"));
   const noState = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, integrationBacklog: 80 });
   assert.equal(noState.effective_cap, 5, "absent suite state + no window ⇒ no narrowing");
 });
