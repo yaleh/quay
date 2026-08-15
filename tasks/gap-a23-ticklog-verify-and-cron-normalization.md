@@ -1,7 +1,7 @@
 ---
 id: gap-a23-ticklog-verify-and-cron-normalization
 title: 两处 A23/cron 面修复（① outer-tick-log-check 不识 A23 ⇒ B13 行无四判据输出无人可判；② outer-cron-registry cron `*/N`≡显式分钟被判漂移 ⇒ 每轮恒红训练跳过习惯）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
