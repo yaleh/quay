@@ -1,7 +1,7 @@
 ---
 id: gap-refresh-worktree-quay-main-derive
 title: refresh-worktree-quay.sh auto-derive 取 git worktree list 首项当 main——顺序不保证 main 在前 ⇒ verify 轮 AC4 断言失败（ff714bc0 落地新脚本真实逻辑弱点）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -43,13 +43,13 @@ root="$(git -C "${worktree}" worktree list --porcelain 2>/dev/null | awk '/^work
 
 ## Acceptance Criteria
 
-- [ ] AC1 判据1：root auto-derive 在任意 worktree 上下文解析到主检出（非首项假设）。
-- [ ] AC2 判据2 能取假：AC4 在 makeRepo/verify worktree 通过；main 非首项构造样本正确解析。
-- [ ] AC3 判据3：既有测试全绿；`--for-task` scoped 门绿。
+- [x] AC1 判据1：root auto-derive 在任意 worktree 上下文解析到主检出（非首项假设）。
+- [x] AC2 判据2 能取假：AC4 在 makeRepo/verify worktree 通过；main 非首项构造样本正确解析。
+- [x] AC3 判据3：既有测试全绿；`--for-task` scoped 门绿。
 
 ## Definition of Done
 
-- [ ] refresh-worktree-quay.sh root auto-derive 选 main（非首项）+ AC4 在 verify 上下文绿 + 测试绿。
+- [x] refresh-worktree-quay.sh root auto-derive 选 main（非首项）+ AC4 在 verify 上下文绿 + 测试绿。
 
 ## Touches
 
@@ -59,4 +59,12 @@ root="$(git -C "${worktree}" worktree list --porcelain 2>/dev/null | awk '/^work
 
 ## Evidence
 
-（落地后回填——round197 red：refresh-worktree-quay.test.mjs AC4 AssertionError（root 首项假设在 verify worktree 暴露）；隔离 5/5 过；根因 :65 awk 取首项）
+（2026-08-15 inner Build 落地回填）
+
+**round197 真实根因（修正分诊，非首项假设）**：verify 轮是 one-shot（full-suite-state.json `oneShotWorktree:true`），full-suite-runner.ts:2602 给 suite 子进程 env 设 `QUAY_MAIN_CHECKOUT=<real main>`；AC4 的 spawnSync 继承该 env ⇒ 脚本 :48 `root="${QUAY_MAIN_CHECKOUT:-}"` 直接取到真实 main ⇒ 复制的 config 无 fixture gate `zz-refresh-probe-gate` ⇒ 断言失败。实证复现：`QUAY_MAIN_CHECKOUT=/home/yale/work/quay` 下跑脚本复制 35 文件（真实 main 的 .quay），grep fixture gate=0。隔离 5/5 过是因为无 env 时走 derive。**顺序非首项在 git 2.43 上不可构造**：`get_worktrees()` 源码强制 main 在 index 0（已查 v2.43 worktree.c），任何真实 repo 首项恒为 main ⇒ 原「首项假设」分诊不成立。
+
+**修复（两半）**：
+1. 脚本 derive 改为 order-independent：`git rev-parse --path-format=absolute --git-common-dir` 的 dirname（共享 .git 的父目录 = 主检出），带旧 git（无 --path-format）相对路径 fallback。不再读 `git worktree list` 首项。
+2. 测试 AC4 清除子进程 `QUAY_MAIN_CHECKOUT`（使 derive 真正被测），AC4b 用 git shim 反转 `worktree list` 顺序构造「首项非 main」样本（git 2.43 真实 repo 构造不出，shim 是诚实等价物），AC4c 验证 detached verify worktree 上下文 derive 仍得 main。
+
+**测试结果（直接 `node --test plugin/test/refresh-worktree-quay.test.mjs`）**：7/7 pass（AC1-AC5 + AC4b + AC4c），duration ~1379ms。能取假验证：旧首项 derive 在 shim 反转下得 wt==root ⇒ no-op ⇒ config 未复制 ⇒ AC4b 断言失败；新 derive 不受 list 顺序影响 ⇒ 复制成功。derive 实测（task worktree，无 env）→ `/home/yale/work/quay`；main checkout 运行 → no-op。

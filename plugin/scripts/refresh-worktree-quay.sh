@@ -28,8 +28,8 @@
 #   - Idempotent (cp -p overwrites stale copies). No-op on a main-checkout run (the guard below
 #     detects the worktree IS the main).
 #   - Config source = --root, else QUAY_MAIN_CHECKOUT (full-suite-runner's one-shot sets it), else
-#     the git-derived main worktree (fan-in direct path — git worktree list --porcelain lists the
-#     main working tree first).
+#     the git-derived main worktree (fan-in direct path — git rev-parse --git-common-dir: the parent
+#     of the shared .git dir; ORDER-INDEPENDENT, not the first `git worktree list` entry).
 #
 # Usage:
 #   bash plugin/scripts/refresh-worktree-quay.sh <worktree> [--root <main-repo>] [--dry-run]
@@ -60,9 +60,25 @@ done
 [ -n "${worktree}" ] || { echo "refresh-worktree-quay: <worktree> is required" >&2; exit 2; }
 [ -d "${worktree}" ] || { echo "refresh-worktree-quay: worktree dir not found: ${worktree}" >&2; exit 2; }
 
-# Resolve the main checkout: --root / QUAY_MAIN_CHECKOUT / git-derived (main working tree first).
+# Resolve the main checkout: --root / QUAY_MAIN_CHECKOUT / git-derived.
+# The git-derived form is ORDER-INDEPENDENT: the main checkout is the parent of the repo's shared
+# `.git` dir (`git rev-parse --git-common-dir`), NOT the first `git worktree list` entry — the list
+# order is not guaranteed to place the main working tree first (a linked/detached worktree can be
+# listed before it). gap-refresh-worktree-quay-main-derive.
 if [ -z "${root}" ]; then
-  root="$(git -C "${worktree}" worktree list --porcelain 2>/dev/null | awk '/^worktree /{print $2; exit}')"
+  # git >= 2.31: --path-format=absolute gives an absolute common-dir; older git returns a path
+  # relative to ${worktree}, which we resolve against it.
+  _common_dir="$(git -C "${worktree}" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"
+  if [ -z "${_common_dir}" ]; then
+    _common_dir="$(git -C "${worktree}" rev-parse --git-common-dir 2>/dev/null)"
+    case "${_common_dir}" in
+      /*) ;;
+      *) [ -n "${_common_dir}" ] && _common_dir="${worktree}/${_common_dir}" ;;
+    esac
+  fi
+  if [ -n "${_common_dir}" ]; then
+    root="$(cd "$(dirname "${_common_dir}")" 2>/dev/null && pwd -P)"
+  fi
 fi
 [ -n "${root}" ] || { echo "refresh-worktree-quay: cannot resolve main checkout for ${worktree}" >&2; exit 2; }
 
