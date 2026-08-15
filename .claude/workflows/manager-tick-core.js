@@ -88,6 +88,23 @@ const READ_CMD = String.raw`cd /home/yale/work/quay
 #     ⇒ 修法与前两次一致：**指针不是副本**。要那五项，去读 A0 行。
 lat=$(gh release view --json tagName -q .tagName 2>/dev/null); echo "release=$lat ahead=$(git rev-list --count $lat..develop 2>/dev/null)"
 # ^ AC16② 新鲜度巡检。A0 不给，五项手跑也不给。
+# ↓ 2026-08-15 09:0xZ 加：cron 调度存储的【落盘】面（本块自带说明，不借上一条尾注）。
+#   起因：manager 锚在 23:18:50 后静默停跑、8h45m 后才被发现，而我当时断言「cron 纯内存态、不留落盘痕迹」——
+#   官方文档逐字推翻它：「Claude Code stores the scheduled task list in the project's .claude directory」。
+#   实测该目录里【只有 .lock 没有 .json】，且锁由 inner 会话持有、acquiredAt 恰落在死亡窗口内。
+#   ⚠️ 因果未证实（新锚在同一把锁被持有期间正常触发两次 ⇒ 持锁本身不致命）；
+#   本条只为把这个量变成【每轮可比的读数】，让下一次死亡有 n>1 的对照。⛔ 不据单次相关下结论。
+python3 -c "
+import json,os,datetime
+p='.claude/scheduled_tasks.lock'; j='.claude/scheduled_tasks.json'
+if os.path.exists(p):
+    d=json.load(open(p))
+    print('cron_store_lock session=%s pid=%s acquiredAt=%s json_exists=%s'%(
+        d.get('sessionId','?')[:8], d.get('pid'),
+        datetime.datetime.utcfromtimestamp(d['acquiredAt']/1000).strftime('%Y-%m-%dT%H:%M:%SZ') if d.get('acquiredAt') else '?',
+        os.path.exists(j)))
+else:
+    print('cron_store_lock ABSENT json_exists=%s'%os.path.exists(j))" 2>/dev/null
 python3 -c "
 import json,os,time
 d=json.load(open('.quay/full-suite-state.json'))
