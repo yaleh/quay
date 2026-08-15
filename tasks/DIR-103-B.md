@@ -141,6 +141,7 @@ Standard inherited-core DoD clauses apply.
 - `packages/quay/src/gate/engine.ts`
 - `packages/quay/test/mcp-gate-dryrun.test.mjs (new)`
 - `docs/plans/M224-dir-103-b.md`
+- `tasks/DIR-103-B.md`（自身）
 **Grounded facts for Plan authors (2026-08-01, from real PlanCheck rounds):**
 
 1. **`runAcceptance` has SIX production call sites** — registry.ts:100 (the `acceptance`
