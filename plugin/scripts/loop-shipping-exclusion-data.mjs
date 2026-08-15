@@ -111,6 +111,16 @@ export function exclusionEntries(repoRoot, pluginDir) {
     { rel: 'orchestration/manager-pending.md', target: path.join(repoRoot, 'orchestration', 'manager-pending.md'), reason: "the manager's pending-task ledger — a GITIGNORED runtime file (16:1x rule — never committed) whose entries quote deployed tick-doc paths (e.g. 'orchestration/orchestrator-loop-tick.md:640') while tracking contradictions against the tick-doc templates. Same class as tick-log.md / batch2-queue-state.md: the ledger documents the DEPLOYED target layout (orchestration/ + docs/analysis/) as living reference, so the AC1b scan must not flag the ledger itself as a stale source-copy reference. Surfaced by AC1b scan 2026-08-08 (fixed-overhead measurement round): manager-pending.md:21 quotes the deployed outer tick-doc path.", retainedNote: "kept despite currently inert in a FRESH checkout (the target is a GITIGNORED runtime ledger — 16:1x rule, never committed — so it does NOT exist in a fresh clone and the necessity scan sees 0 hits only because the file is absent). The manager appends/edits this ledger during operation (tracking pending tasks + tick-doc contradictions), and its entries quote deployed-target-layout paths verbatim; when the manager next writes a quoted deployed tick-doc line the AC1b scan would flag the ledger as a live reference. The entry must stay to keep the scan from mis-attributing the ledger's own quotes — same oscillation class as tick-log.md." },
     { rel: 'plugin/scripts/quay-init.sh', target: path.join(pluginDir, 'scripts', 'quay-init.sh'), reason: 'target layout (orchestration/ + docs/analysis/)' },
     {
+      rel: 'plugin/scripts/outer-anchor-check.ts',
+      target: path.join(pluginDir, 'scripts', 'outer-anchor-check.ts'),
+      reason: "the AC80 anchor checker's LAYERS.inner.requiredPointers documents the [inner-tick] prompt's required rationale pointer as the CONSUMER-laid docs/analysis/fast-mode-loop-tick.md (gap-ac80-anchor-prompt-consumer-path-fix) — a target-layout reference (quay-init lays the inner tick doc to docs/analysis/), same class as quay-init.sh / cold-start skill",
+    },
+    {
+      rel: 'plugin/test/outer-anchor-check.test.mjs',
+      target: path.join(pluginDir, 'test', 'outer-anchor-check.test.mjs'),
+      reason: "pins the AC80 INNER_PROMPT (rationale pointer now the consumer-laid docs/analysis/fast-mode-loop-tick.md) + the LAYERS.inner.requiredPointers assertion — target-layout reference, same class as the checker itself",
+    },
+    {
       rel: 'plugin/scripts/os-anchor-install.sh',
       target: path.join(pluginDir, 'scripts', 'os-anchor-install.sh'),
       reason: 'drives FOREIGN/legacy workspaces (meta-cc, archguard) that may still run the old orchestration/ layout — the old tick-doc path is a supported target, not a quay-repo reference (live ref surfaced by the AC1b scan 2026-08-05: os-anchor landed 11:05Z, the AC1b table predated it)',
