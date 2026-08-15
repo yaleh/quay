@@ -362,7 +362,7 @@ test("AC8 negative control: a dead-annotated item WITH the exclusion marker pass
   }
 });
 
-test("AC8: the real repo passes, three-layer exclusion notation (manager remaining in-core dead items carry the marker; migrated A7/A12a/B2c/乙/丁 are archived pointers, not in-core dead lines; outer B4, inner C7)", () => {
+test("AC8: the real repo passes, three-layer exclusion notation (manager remaining in-core dead items carry the marker; migrated A7/A12a/B2c/乙/丁 AND inner C7 are archived pointers, not in-core dead lines; outer B4)", () => {
   const res = run(REPO_ROOT, "--only", "ac8", "--json");
   assert.equal(res.status, 0, `the real repo reddened AC8: ${res.stdout} ${res.stderr}`);
   const out = JSON.parse(res.stdout);
@@ -375,11 +375,15 @@ test("AC8: the real repo passes, three-layer exclusion notation (manager remaini
   // carries the exclusion marker", asserted as `>= 1`.
   assert.ok(out.ac8.excluded["orchestration/manager-tick-core.md"] >= 1,
     `manager has no remaining in-core dead item with the exclusion marker: ${JSON.stringify(out.ac8.excluded)}`);
-  // AC1 — 三层记法一致: outer (B4) and inner (C7) each exclude at least one dead item too.
+  // AC1 — 三层记法一致: outer (B4) excludes at least one dead item. inner's C7 was MIGRATED out
+  // (2026-08-15, AC76 tick-core retirement — a single-line pointer to archive R25, not an in-core
+  // dead line), so the inner core carries NO remaining in-core dead-annotated line; the pairing rule
+  // (violations === 0) is vacuous for it, and the migrated-pointer check below keeps the migration
+  // falsifiable.
   assert.ok(out.ac8.excluded["orchestration/orchestrator-tick-core.md"] >= 1,
     `outer core has no dead-exclusion marker: ${JSON.stringify(out.ac8.excluded)}`);
-  assert.ok(out.ac8.excluded["orchestration/fast-mode-tick-core.md"] >= 1,
-    `inner core has no dead-exclusion marker: ${JSON.stringify(out.ac8.excluded)}`);
+  assert.equal(out.ac8.dead["orchestration/fast-mode-tick-core.md"], 0,
+    `inner core still has an in-core dead-annotated line (expected none after C7 migrated): ${JSON.stringify(out.ac8.dead)}`);
   // 迁出检查 (2026-08-15 人裁定清死条目): the migrated entries A7/A12a/B2c/乙/丁 must NOT be
   // in-core dead-annotated lines — their bodies live in manager-phase-goal-archive.md and the core
   // holds only single-line pointers to the archive anchors. A regression that re-introduces any of
@@ -400,6 +404,19 @@ test("AC8: the real repo passes, three-layer exclusion notation (manager remaini
     assert.equal(deadLines.length, 0,
       `migrated entry ${entry} still appears as an in-core dead-annotated line: ${JSON.stringify(deadLines)}`);
   }
+  // 内层 C7 迁出检查 (AC76 tick-core retirement): C7 is a single-line pointer to the
+  // AC58-retired-clauses archive R25, NOT an in-core dead-annotated line. The three sub-assertions
+  // mirror the manager migrated-entries check above and are each falsifiable (pointer loss /
+  // archive-section loss / C7 re-introduced as a dead line all redden).
+  const innerCore = fs.readFileSync(path.join(REPO_ROOT, "orchestration/fast-mode-tick-core.md"), "utf8");
+  const innerArchive = fs.readFileSync(path.join(REPO_ROOT, "orchestration/archive/AC58-retired-clauses.md"), "utf8");
+  assert.ok(innerCore.includes("orchestration/archive/AC58-retired-clauses.md#R25"),
+    `inner migrated C7 lost its archive pointer (not pointerized)`);
+  assert.ok(innerArchive.includes("## R25"),
+    `inner migrated C7 has no R25 section in AC58-retired-clauses.md`);
+  const innerC7Dead = innerCore.split("\n").filter((l) => l.includes("C7") && DEAD_ANNOT_RE.test(l));
+  assert.equal(innerC7Dead.length, 0,
+    `inner migrated C7 still appears as an in-core dead-annotated line: ${JSON.stringify(innerC7Dead)}`);
 });
 
 // ── AC2 — the drift/pointer criterion (gap-plugin-loop-manager-drifted-copies-pointerize) ───────────
