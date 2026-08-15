@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-15T12:27:54.758Z",
+  "generatedAt": "2026-08-15T12:47:54.481Z",
   "since": null,
   "tasks": [
     {
@@ -81,11 +81,11 @@
   ],
   "meanMinutes": 83.93691212121212,
   "medianMinutes": 55.18248333333333,
-  "tasksPerHour": 0.11113007275772858,
+  "tasksPerHour": 0.11075717883912162,
   "serialEquivalentPerHour": 0.7148225790502615,
   "windowStart": "2026-08-11T09:28:51.925Z",
-  "windowEnd": "2026-08-15T12:27:51.114Z",
-  "windowHours": 98.98310805555556,
+  "windowEnd": "2026-08-15T12:47:50.826Z",
+  "windowHours": 99.3163613888889,
   "haltedHours": 0,
   "halted": [],
   "blocked": [],
