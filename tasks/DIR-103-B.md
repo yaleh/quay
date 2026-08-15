@@ -125,10 +125,10 @@ New test `mcp-gate-dryrun.test.mjs` (12 assertions green): `dryRun:true` on PASS
 
 Standard inherited-core DoD clauses apply.
 
-- [ ] Landed on `master` under human-steered discipline.
-- [ ] A real MCP `gate_run` `dryRun:true` dispatch shows execution with zero GateEvents
-  and zero status mutation.
-- [ ] A fresh independent audit finds no refutation.
+- [ ] Landed on `master` under human-steered discipline.（待外部）
+- [x] A real MCP `gate_run` `dryRun:true` dispatch shows execution with zero GateEvents
+  and zero status mutation.（impl Evidence：real `quay mcp` 子进程 dryRun:true → 0 GateEvents + status 不变）
+- [ ] A fresh independent audit finds no refutation.（待外部）
 
 ## Human verification
 
