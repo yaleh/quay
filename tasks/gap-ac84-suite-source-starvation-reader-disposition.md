@@ -1,7 +1,7 @@
 ---
 id: gap-ac84-suite-source-starvation-reader-disposition
 title: AC84 退役外层自动 suite 后我的读取源断供——ready-pool red-window 车道错配 + full-suite-state 无 writer + verification-round 断供，统一处置
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
