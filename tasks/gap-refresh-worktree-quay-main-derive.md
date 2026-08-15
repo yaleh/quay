@@ -43,13 +43,13 @@ root="$(git -C "${worktree}" worktree list --porcelain 2>/dev/null | awk '/^work
 
 ## Acceptance Criteria
 
-- [ ] AC1 判据1：root auto-derive 在任意 worktree 上下文解析到主检出（非首项假设）。
-- [ ] AC2 判据2 能取假：AC4 在 makeRepo/verify worktree 通过；main 非首项构造样本正确解析。
-- [ ] AC3 判据3：既有测试全绿；`--for-task` scoped 门绿。
+- [x] AC1 判据1：root auto-derive 在任意 worktree 上下文解析到主检出（非首项假设）。
+- [x] AC2 判据2 能取假：AC4 在 makeRepo/verify worktree 通过；main 非首项构造样本正确解析。
+- [x] AC3 判据3：既有测试全绿；`--for-task` scoped 门绿。
 
 ## Definition of Done
 
-- [ ] refresh-worktree-quay.sh root auto-derive 选 main（非首项）+ AC4 在 verify 上下文绿 + 测试绿。
+- [x] refresh-worktree-quay.sh root auto-derive 选 main（非首项）+ AC4 在 verify 上下文绿 + 测试绿。
 
 ## Touches
 
