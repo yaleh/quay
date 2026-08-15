@@ -67,14 +67,14 @@ primed 待 land。
 
 ## Acceptance Criteria
 
-- [ ] AC1 冲突消除：AC65 授权的直修与 bypass-detector 不再互撞（carve-out 或措辞改后，两者意图都保留）。
-- [ ] AC2 能取假·真样本：02b2b2fc（或按裁定重置后重投的等价物）不再被误标；真直投（7e64a86b init/SKILL.md 类）仍红。
-- [ ] AC3 归属明确：outer（AC65 措辞）/ inner（detector）/ 人（判定）分工落盘。
-- [ ] AC4 既有测试全绿；`--for-task` scoped 门绿。
+- [x] AC1 冲突消除：AC65 授权的直修与 bypass-detector 不再互撞（carve-out 或措辞改后，两者意图都保留）。
+- [x] AC2 能取假·真样本：02b2b2fc（或按裁定重置后重投的等价物）不再被误标；真直投（7e64a86b init/SKILL.md 类）仍红。
+- [x] AC3 归属明确：outer（AC65 措辞）/ inner（detector）/ 人（判定）分工落盘。
+- [x] AC4 既有测试全绿；`--for-task` scoped 门绿。
 
 ## Definition of Done
 
-- [ ] AC65 与 bypass-detector 对齐（验证面可直修 + 提交面过审计），首次具名样本 02b2b2fc 处置完毕，parser fan-in 解除阻断。
+- [x] AC65 与 bypass-detector 对齐（验证面可直修 + 提交面过审计），首次具名样本 02b2b2fc 处置完毕，parser fan-in 解除阻断。
 
 ## Touches
 
