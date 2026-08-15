@@ -1,7 +1,7 @@
 ---
 id: gap-direct-to-develop-exclude-manager-skill-granularity
 title: direct-to-develop-bypass-check 排除集加 plugin/skills/manager/**（manager 独占 + 走不了 fan-in 路，同 .claude/ 理由）——⛔ 排除粒度到 manager/**，不掩 init/SKILL.md 真红
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
