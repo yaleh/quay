@@ -46,14 +46,14 @@ b389a758 13:16 mjs: AC1b 排除表加 manager-phase-goal-archive.md       → pl
 
 ## Acceptance Criteria
 
-- [ ] AC1 检测器落地：直接提交 develop ∧ 触及代码/断言面（fan-in-execute.js:87 code_delta 谓词）∧ 无 ff-lock 时间窗事件 ⇒ 报「直接提交绕过 fan-in 机件」。
-- [ ] AC2 分类：设计内（.gitignore / manager 独占 / 热修 fan-in 机件本身）与设计外分离——不把设计内误报成违规。
-- [ ] AC3 能取假·真样本：7e64a86b + 核心子集 4 条（7d1d5d2e/b389a758/18e7a3be/77174684）回放必须报红；.gitignore/manager 独占设计内样本回放必须绿。denominator 谓词写明（25 vs 30 差异在排除集，任务体记录）。
-- [ ] AC4 既有测试全绿；`--for-task` scoped 门绿。
+- [x] AC1 检测器落地：直接提交 develop ∧ 触及代码/断言面（fan-in-execute.js:87 code_delta 谓词）∧ 无 ff-lock 时间窗事件 ⇒ 报「直接提交绕过 fan-in 机件」。
+- [x] AC2 分类：设计内（.gitignore / manager 独占 / 热修 fan-in 机件本身）与设计外分离——不把设计内误报成违规。
+- [x] AC3 能取假·真样本：7e64a86b + 核心子集 4 条（7d1d5d2e/b389a758/18e7a3be/77174684）回放必须报红；.gitignore/manager 独占设计内样本回放必须绿。denominator 谓词写明（25 vs 30 差异在排除集，任务体记录）。
+- [x] AC4 既有测试全绿；`--for-task` scoped 门绿。
 
 ## Definition of Done
 
-- [ ] 直接提交 develop 绕过 fan-in 机件的检测器 + 分类（设计内/外）+ 真样本回放（4 红 + 设计内绿）。
+- [x] 直接提交 develop 绕过 fan-in 机件的检测器 + 分类（设计内/外）+ 真样本回放（4 红 + 设计内绿）。
 
 ## Touches
 
