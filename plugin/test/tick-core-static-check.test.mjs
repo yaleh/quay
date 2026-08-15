@@ -362,20 +362,44 @@ test("AC8 negative control: a dead-annotated item WITH the exclusion marker pass
   }
 });
 
-test("AC8: the real repo passes, all three layers use the exclusion notation (manager 6 deducts, outer B4, inner C7)", () => {
+test("AC8: the real repo passes, three-layer exclusion notation (manager remaining in-core dead items carry the marker; migrated A7/A12a/B2c/乙/丁 are archived pointers, not in-core dead lines; outer B4, inner C7)", () => {
   const res = run(REPO_ROOT, "--only", "ac8", "--json");
   assert.equal(res.status, 0, `the real repo reddened AC8: ${res.stdout} ${res.stderr}`);
   const out = JSON.parse(res.stdout);
   assert.equal(out.ac8.ok, true);
   assert.equal(out.ac8.violations.length, 0);
-  // AC2 — manager 侧 6 条扣除已执行: A7/A12a/A14/B2c/乙/丁 all carry the marker.
-  assert.ok(out.ac8.excluded["orchestration/manager-tick-core.md"] >= 6,
-    `manager excluded-dead count < 6 (6 deducts not all executed): ${JSON.stringify(out.ac8.excluded)}`);
+  // AC2 — manager 的【剩余】在核死条目仍带排除记号 (A4/A14). The historical `>= 6` deduct count
+  // (A7/A12a/A14/B2c/乙/丁) is retired: A7/A12a/B2c/乙/丁 were migrated out of the core to the
+  // phase-goal archive (2026-08-15 人裁定清死条目), so they are no longer in the denominator or
+  // the exclusion count. The surviving invariant is "every remaining in-core dead item still
+  // carries the exclusion marker", asserted as `>= 1`.
+  assert.ok(out.ac8.excluded["orchestration/manager-tick-core.md"] >= 1,
+    `manager has no remaining in-core dead item with the exclusion marker: ${JSON.stringify(out.ac8.excluded)}`);
   // AC1 — 三层记法一致: outer (B4) and inner (C7) each exclude at least one dead item too.
   assert.ok(out.ac8.excluded["orchestration/orchestrator-tick-core.md"] >= 1,
     `outer core has no dead-exclusion marker: ${JSON.stringify(out.ac8.excluded)}`);
   assert.ok(out.ac8.excluded["orchestration/fast-mode-tick-core.md"] >= 1,
     `inner core has no dead-exclusion marker: ${JSON.stringify(out.ac8.excluded)}`);
+  // 迁出检查 (2026-08-15 人裁定清死条目): the migrated entries A7/A12a/B2c/乙/丁 must NOT be
+  // in-core dead-annotated lines — their bodies live in manager-phase-goal-archive.md and the core
+  // holds only single-line pointers to the archive anchors. A regression that re-introduces any of
+  // them as an in-core dead line (or loses the pointer/archive section) reddens.
+  const DEAD_ANNOT_RE = /前提已死|来源已冻结|已冻结|前提已失效|前提已被人的裁定移除/;
+  const MIGRATED_ENTRIES = ["A7", "A12a", "B2c", "乙", "丁"];
+  const managerCore = fs.readFileSync(path.join(REPO_ROOT, "orchestration/manager-tick-core.md"), "utf8");
+  const archive = fs.readFileSync(path.join(REPO_ROOT, "orchestration/manager-phase-goal-archive.md"), "utf8");
+  for (const entry of MIGRATED_ENTRIES) {
+    // (a) 核内只有指针: the core references the archive anchor for this entry.
+    assert.ok(managerCore.includes(`orchestration/manager-phase-goal-archive.md#§${entry}-migrated`),
+      `migrated entry ${entry} lost its archive pointer in the manager core (not pointerized)`);
+    // (b) 正身在档案: the archive file carries the entry's §-migrated section.
+    assert.ok(archive.includes(`### §${entry}-migrated`),
+      `migrated entry ${entry} has no §-migrated section in manager-phase-goal-archive.md`);
+    // (c) 不在核内作死标记行: no core line mentioning the entry carries a DEAD_ANNOT_RE marker.
+    const deadLines = managerCore.split("\n").filter((l) => l.includes(entry) && DEAD_ANNOT_RE.test(l));
+    assert.equal(deadLines.length, 0,
+      `migrated entry ${entry} still appears as an in-core dead-annotated line: ${JSON.stringify(deadLines)}`);
+  }
 });
 
 // ── AC2 — the drift/pointer criterion (gap-plugin-loop-manager-drifted-copies-pointerize) ───────────
