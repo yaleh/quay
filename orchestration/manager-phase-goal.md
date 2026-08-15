@@ -614,7 +614,25 @@
       不会造成并发超限或误派；读数 `in_flight` 真值 2 / `load1=1.98` / `cpu_some_avg10=0.00` / `mem_avail=8841MB`。
       **（C21④：本结论绑这组读数；若出现「因 /live 多报而不派发」的实例，须重判。）**
 
-- [ ] **AC77（subagent spawn 触顶：只检测 harness 报错，不自建计数 —— 人 2026-08-14 07:4xZ 逐字裁定）**
+- [x] **AC77（subagent spawn 触顶：只检测 harness 报错，不自建计数 —— 人 2026-08-14 07:4xZ 逐字裁定）** ✅ **2026-08-15 09:3xZ 达成**
+
+      **⊕ 逐判据实测（2026-08-15 04:0xZ 核完实现与测试，09:3xZ 等到绿轮认证才勾）**
+      ```
+      判据1 只检测 harness 报错   SPEC_LIMIT_SIGNAL = "Subagent spawn limit reached"（inner-wakeup-heartbeat-check.ts:512）
+                                  真接线：:518 spawnLimitDetected / :531 消费；大小写不敏感
+      判据2 不自建计数（退役）     旧判据 blocked==[] && agentDispatches>=agentLimit 已退役，
+                                  且按 AC58「退役即迁出」留了落点映射 archive/AC58-retired-clauses.md#R29
+                                  ⚠️ 全文仍有 agentDispatches 5 处命中，逐条打印后确认全是 schema 字段校验（:105/:116 等），
+                                     不是那条判据本身 —— 硬规则② 非零半边：命中的不是我要找的东西
+      判据3 只报不动               测试逐字「report-only: the trigger is a pure boolean; it never /clears, lowers cap, or restarts」
+      测试                        inner-wakeup-heartbeat-check.test.mjs 79/79 绿，含真样本回放
+                                  （"Subagent spawn limit reached (200 of 200 agents spawned)"）+ 判据2 退役负控制
+      ```
+      **⊢ 勾选的门槛为什么拖了两轮**：我 04:0xZ 就核完了实现与测试，但坚持**等一个绿轮认证**——
+      因为同日我刚在 AC62 上栽过「在主检出验绿就勾、而轮里那一半从不评估」。
+      **本轮 round199 GREEN**（`verifiedCommit=47e09bab` · 4920 tests · 516.9s · failures=0 · 终态），
+      且 `git merge-base --is-ancestor` 逐条核实该 commit **含我阶段1 的全部五条提交**
+      （`635ec831`/`135fef12`/`5fe434c6`/`7302a6e2`/`0203c6ca`）⇒ **认证覆盖成立，才勾。**
       **人的原话**：「**agentLimit 的处理仅应包括检测 harness 的报错（报错后的处理暂定由人执行），而不要自己重复计数。**」
 
       **① 现状（读实现）**：`inner-wakeup-heartbeat-check.ts:347/:353` 的判据是
