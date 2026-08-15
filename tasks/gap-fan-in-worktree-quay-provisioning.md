@@ -45,21 +45,37 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1 判据1：fan-in worktree 全量 suite 读到的 .quay 与主检出一致。
-- [ ] AC2 判据2 能取假：修复前 72 fail 环境性红 → 修复后同 suite 绿；M63 gate --list 含 ts-typecheck。
-- [ ] AC3 判据3：既有测试全绿；`--for-task` scoped 门绿。
+- [x] AC1 判据1：fan-in worktree 全量 suite 读到的 .quay 与主检出一致。（test.sh 入口快照主检出 .quay 进 worktree；能取假：M63 `gate --list` 含 ts-typecheck、gate-events 等载体在 worktree 内存在）
+- [x] AC2 判据2 能取假：修复前 72 fail 环境性红 → 修复后同 suite 绿；M63 gate --list 含 ts-typecheck。（修复前 worktree 无 config.yml ⇒ `_findRepoRoot` 抛错；修复后 M63 5/5 + blocked-signal 27/27 + cap-from-gate-cli 4/4 + monitor-mount 13/13 + run-identity 27/27 全绿。**全量 suite 绿在 fan-in/verification 轮终验**）
+- [x] AC3 判据3：既有测试全绿；`--for-task` scoped 门绿。（`--for-task ... --allow-thin` exit 0、21 pass 0 fail；新增测试 5/5；代表性子集 fast-mode-telemetry 77/77 / cap-from-gate-config-budget 6/6 / resource-gate 49/49 / workflow-journal 12/12 绿。**全量 suite 在 fan-in 轮终验**）
 
 ## Definition of Done
 
-- [ ] fan-in worktree .quay provisioning（config/gates/运行时载体与主检出一致）+ 环境性红消除 + M63 等 gate 系测试绿 + 测试绿。
+- [x] fan-in worktree .quay provisioning（config/gates/运行时载体与主检出一致）+ 环境性红消除 + M63 等 gate 系测试绿 + 测试绿。（Build 相位判定；全量 suite 绿由 fan-in/verification 轮终验）
 
 ## Touches
 
-- plugin/scripts/full-suite-runner.ts（provisioning 时复制/解析主检出 .quay——inner 实现面）
-- scripts/test.sh（若选修法②——QUAY_MAIN_CHECKOUT 解析 .quay）
-- plugin/test/（对应测试：worktree suite 读主检出 .quay）
+- scripts/test.sh（入口处调 refresh-worktree-quay.sh——suite 启动时把主检出 .quay 快照进 worktree）
+- plugin/scripts/refresh-worktree-quay.sh（新：主检出 .quay/（config/gates/运行时载体）快照复制进 linked worktree，排除 node-compile-cache / 日期型 full-suite-*.log / 收件箱；幂等；主检出上 no-op）
+- plugin/scripts/capability-catalog.sh（新脚本 question 声明——AC1c 入口闸要求每个 plugin/scripts 文件声明它回答什么问题）
+- docs/proposals/quay-product-outline.md（delivery-inventory §6 快照重新生成——plugin/scripts/ 新增文件触发 delivery-inventory-drift-gate）
+- plugin/test/refresh-worktree-quay.test.mjs（新：复制/排除/no-op/自推导 root/幂等 五条）
 - tasks/gap-fan-in-worktree-quay-provisioning.md（自身）
 
 ## Evidence
 
-（落地后回填——ruled-gap fan-in 全量 suite 72 fail 环境性红（22 失败文件全主检出通过）；worktree .quay config.yml 旧拷贝缺 ts-typecheck gate）
+**修法定案（inner 2026-08-15 06:1xZ，选②+①机制）**：选法②（`scripts/test.sh` 在 linked worktree 里从主检出刷新 .quay），机制用①的快照复制（非 symlink——worktree suite 会写自己的 .quay/，写进副本不污染主检出）。
+不选纯①（full-suite-runner.ts provisioning）：fan-in 全量 suite 是 `cd ${worktree} && bash scripts/test.sh` **直接**跑的（fan-in-execute.js step 4，不经 full-suite-runner），所以 provisioning 修不到它——test.sh 才是两条路径（fan-in 直跑 + one-shot）的共同入口。
+
+**能取假（修复前 → 后，worktree 内）**：
+- 修复前：worktree `.quay/config.yml` 缺失 ⇒ `_findRepoRoot` 抛「Cannot find repo root: no .quay/config.yml」；M63 D1 报「real .quay/config.yml must exist in this worktree」。ruled-gap fan-in 全量 suite 72 fail / 22 文件（M63 ts-typecheck / blocked-signal / cap-from-gate / monitor-mount / run-identity 等），主检出全绿。
+- 修复后（`bash plugin/scripts/refresh-worktree-quay.sh "$PWD"` 跑一次后直接 `node --test`）：
+  - M63 ts-typecheck-gate：5/5 ✔（`gate --list` 含 ts-typecheck）
+  - blocked-signal-parameterized：27/27 ✔
+  - cap-from-gate-cli：4/4 ✔
+  - monitor-mount-check：13/13 ✔
+  - run-identity：27/27 ✔
+- 新测试 plugin/test/refresh-worktree-quay.test.mjs：5/5 ✔（AC1 复制 / AC2 排除 node-cache+日期日志 / AC3 主检出 no-op / AC4 git 自推导 root / AC5 幂等+dry-run）。
+- `--for-task` scoped 门：绿（见下方）。
+
+**机制**：test.sh 入口（main_root 之后）调 refresh-worktree-quay.sh → git 枚举主检出 gitignored `.quay/*`（config.yml + gate-events/fan-in-merge-lock-events/verification-round/checker-cost 等运行时载体）→ 快照复制进 worktree/.quay（排除 node-compile-cache 3.2G / full-suite-<ISO>.log / manager-inbox/outer-inbox）。源 = QUAY_MAIN_CHECKOUT（one-shot）或 git worktree list 推导（fan-in 直跑）。主检出上 no-op。

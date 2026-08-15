@@ -168,6 +168,40 @@ cd "$repo_root"
 # read the SAME data as a main run ⇒ verdicts are identical (AC3).
 main_root="${QUAY_MAIN_CHECKOUT:-$repo_root}"
 
+# gap-fan-in-worktree-quay-provisioning — the fan-in DIRECT path runs test.sh in the linked task
+# worktree WITHOUT QUAY_MAIN_CHECKOUT (only full-suite-runner.ts sets it for the one-shot path).
+# Derive the main checkout from git so the carriers checkers (fan-in-workflow-check etc., which read
+# `main_root/.quay/*`) resolve the MAIN's live runtime carriers AND its session-dir hash — the
+# worktree's gitignored .quay is absent (or a snapshot) and its session-dir hash differs ⇒ agentId
+# resolution fails ⇒ a false "fan-in-without-workflow" RED. On a main-checkout run the git-derived
+# first worktree == repo_root ⇒ main_root is unchanged; on a one-shot QUAY_MAIN_CHECKOUT is set ⇒
+# skipped. (gap-gitignored-carriers-absent-in-verify-worktree wiring is left untouched.)
+if [ -z "${QUAY_MAIN_CHECKOUT:-}" ]; then
+  # `|| _derived_main=""` guards the command substitution under `set -euo pipefail` (a non-git /
+  # non-worktree cwd must NOT abort the suite — it just keeps main_root == repo_root).
+  _derived_main="$(git worktree list --porcelain 2>/dev/null | awk '/^worktree /{print $2; exit}')" || _derived_main=""
+  if [ -n "${_derived_main}" ] && [ "${_derived_main}" != "${repo_root}" ]; then
+    main_root="${_derived_main}"
+  fi
+fi
+
+# ── gap-fan-in-worktree-quay-provisioning — the worktree suite must read the MAIN's .quay ─────────
+# `.quay/` is gitignored ⇒ `git worktree add` copies NONE of it. The fan-in full suite runs DIRECTLY
+# in the task worktree (`cd ${worktree} && bash scripts/test.sh` — no full-suite-runner provisioning),
+# so `<worktree>/.quay/config.yml` was absent or stale ⇒ the suite's repo-root resolution
+# (_findRepoRoot) and config/gates tests (M63 ts-typecheck, blocked-signal, cap-from-gate,
+# monitor-mount, run-identity — ruled-gap fan-in: 72 environmental REDs across 22 files, ALL green
+# on the main checkout) failed environmentally. This is the OTHER half of gap-gitignored-carriers:
+# the carriers fix (QUAY_MAIN_CHECKOUT) pointed CHECKERS at the main; this snapshots the main's
+# .quay/ (config/gates/runtime carriers) into the worktree so the SUITE reads the same data.
+# refresh-worktree-quay.sh is a no-op on a main-checkout run (its linked-worktree guard) and is
+# idempotent; the copy source is QUAY_MAIN_CHECKOUT when set (full-suite-runner one-shot) else the
+# git-derived main worktree (fan-in direct path).
+if [ -f "${repo_root}/plugin/scripts/refresh-worktree-quay.sh" ]; then
+  bash "${repo_root}/plugin/scripts/refresh-worktree-quay.sh" "${repo_root}" \
+    || echo "scripts/test.sh: WARNING — refresh-worktree-quay.sh failed (exit $?); the suite may be environmentally red in this worktree" >&2
+fi
+
 # ── criterion-cost recording (gap-no-criterion-records-its-own-cost-checker-cost-jsonl) ──────────
 # Every checker executed by run_static_checks (and the scoped tier, which evals the SAME wrapped
 # command lines) appends ONE `{name, ms, n, load, at}` line to .quay/checker-cost.jsonl on exit —
