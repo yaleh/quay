@@ -132,6 +132,37 @@ export interface SuiteRoundRow {
   runner?: string;
 }
 
+/** One `.quay/per-task-suite-records.jsonl` row (AC84 判据6: trend data source migrated from
+ *  verification-round.jsonl to per-task-suite-records — outer B3 retired, per-task fan-in suites
+ *  are the ongoing suite records). Schema: taskId/state/laneCount/durationMs/fullSuiteRan/
+ *  skipReason/startedAt/ts (written by per-task-suite-record.ts). `fullSuiteRan=false` + skipReason
+ *  = doc-only delta (skipped full suite) — MUST be bucketed so skipped items don't dilute the
+ *  red-rate/cost series (AC84 判据6 语义差, inner 确认 skipReason 承重). */
+export interface PerTaskSuiteRow {
+  taskId?: string;
+  state?: string;
+  laneCount?: number;
+  durationMs?: number;
+  fullSuiteRan?: boolean;
+  skipReason?: string | null;
+  startedAt?: string;
+  ts?: string;
+}
+
+/** Per-suite cost series from per-task-suite-records: durationMs per record where the full suite
+ *  actually ran (fullSuiteRan !== false — doc-only deltas carry no suite-cost signal). The
+ *  `skipReason` bucketing keeps a doc-only run (durationMs ~0) from diluting the series. */
+export function perTaskSuiteCostSeries(rows: PerTaskSuiteRow[]): number[] {
+  const out: number[] = [];
+  for (const r of rows) {
+    if (r.fullSuiteRan === false) continue; // doc-only delta — no full suite ran
+    const duration = Number(r.durationMs);
+    if (!Number.isFinite(duration) || duration < 0) continue;
+    out.push(duration);
+  }
+  return out;
+}
+
 /**
  * Per-test cost series from verification-round rows (AC1: `tests` = pass+fail+cancelled,
  * `per_test_ms` = durationMs/tests; the recorded per_test_ms field, when present, wins). A row
@@ -245,6 +276,17 @@ function makeFlag(axis: TrendAxis, name: string, values: number[], threshold: nu
 export function analyzeTrends(root: string, window: number, threshold: number): TrendFlag[] {
   const flags: TrendFlag[] = [];
 
+  // AC84 判据6: 趋势数据源从 verification-round.jsonl 迁到 per-task-suite-records.jsonl
+  // (outer B3 退役后 verification-round 不再持续新增；per-task fan-in suite 是 ongoing 记录)。
+  // verification-round 保留作 legacy 读（历史轮次仍在，人要求单次跑时也会写），per-task-suite
+  // 是主源。⛔ 断供语义：任一源空时对应 axis 不出 flag（不恒绿）——costSeries.length < 2 即无结论。
+  const perTaskRows = readJsonLines(path.join(root, ".quay", "per-task-suite-records.jsonl")) as PerTaskSuiteRow[];
+  const perTaskCost = perTaskSuiteCostSeries(perTaskRows);
+  if (perTaskCost.length >= 2) {
+    const values = perTaskCost.slice(-window);
+    if (shouldFlag(values, threshold)) flags.push(makeFlag("suite_per_task_cost", "per-task-suite", values, threshold));
+  }
+
   const rounds = readJsonLines(path.join(root, ".quay", "verification-round.jsonl")) as SuiteRoundRow[];
 
   const costSeries = suitePerTestSeries(rounds);
@@ -309,6 +351,7 @@ export function main(argv: string[]): number {
       window,
       threshold,
       roundsRead: readJsonLines(path.join(rootDir, ".quay", "verification-round.jsonl")).length,
+      perTaskSuiteRead: readJsonLines(path.join(rootDir, ".quay", "per-task-suite-records.jsonl")).length,
       checkerRowsRead: readJsonLines(path.join(rootDir, ".quay", "checker-cost.jsonl")).length,
       trendIsPassive: 1, // invariant trend_is_passive — this checker only reads, never runs
     };

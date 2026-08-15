@@ -35,6 +35,7 @@ import {
   analyzeTrends,
   suitePerTestSeries,
   redLatencySeries,
+  perTaskSuiteCostSeries,
   groupCheckerRows,
   shouldFlag,
   netChange,
@@ -64,6 +65,13 @@ function writeVerificationRounds(root, rows) {
 function writeCheckerCost(root, rows) {
   fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
   fs.writeFileSync(costPath(root), rows.map((r) => JSON.stringify(r)).join("\n") + "\n");
+}
+function perTaskPath(root) {
+  return path.join(root, ".quay", "per-task-suite-records.jsonl");
+}
+function writePerTaskSuites(root, rows) {
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.writeFileSync(perTaskPath(root), rows.map((r) => JSON.stringify(r)).join("\n") + "\n");
 }
 
 /** One green verification-round row. `perTestMs` is the recorded per_test_ms (in whatever unit the
@@ -155,6 +163,29 @@ test("AC2 — the trend rule is threshold-configurable (higher threshold → no 
 
   assert.equal(analyzeTrends(root, 5, 0.10).length, 1, "flagged at +10% threshold");
   assert.equal(analyzeTrends(root, 5, 0.50).length, 0, "NOT flagged at +50% threshold — configurable");
+});
+
+// ── AC84 判据6: per-task-suite-records 数据源 ────────────────────────────────────────────────────────
+
+test("AC84-6 — perTaskSuiteCostSeries drops doc-only deltas (fullSuiteRan=false), keeps real suite costs", () => {
+  const rows = [
+    { taskId: "a", fullSuiteRan: true, durationMs: 500000 },
+    { taskId: "b", fullSuiteRan: false, skipReason: "doc-only-delta", durationMs: 5 },
+    { taskId: "c", fullSuiteRan: true, durationMs: 800000 },
+  ];
+  assert.deepEqual(perTaskSuiteCostSeries(rows), [500000, 800000], "doc-only skipReason rows excluded");
+});
+
+test("AC84-6 — analyzeTrends reads per-task-suite-records as the ongoing suite-cost source (B3 退役后主源)", () => {
+  const root = makeTmpDir("tc-ac846-");
+  writePerTaskSuites(root, [
+    { taskId: "t1", fullSuiteRan: true, durationMs: 100000 },
+    { taskId: "t2", fullSuiteRan: true, durationMs: 200000 },
+    { taskId: "t3", fullSuiteRan: true, durationMs: 400000 },
+  ]);
+  // no verification-round rows — per-task-suite alone must still drive the cost axis
+  const flags = analyzeTrends(root, 5, 0.1);
+  assert.ok(flags.some((f) => f.axis === "suite_per_task_cost"), `expected per-task cost flag, got ${JSON.stringify(flags.map((f) => f.axis))}`);
 });
 
 // ── AC3b: early-RED detection latency trend ───────────────────────────────────────────────────────────
