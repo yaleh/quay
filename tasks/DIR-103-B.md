@@ -79,19 +79,47 @@ un-AC'd — this child makes it real.
 
 ## Acceptance Criteria
 
-- [ ] MCP `gate_run` with `dryRun: true` executes the acceptance command and returns the
+- [x] MCP `gate_run` with `dryRun: true` executes the acceptance command and returns the
   result WITHOUT appending a GateEvent (real gate-event-log before/after).
-- [ ] MCP `gate_run` with `dryRun: true` leaves the task's status unchanged.
-- [ ] MCP `gate_run` with `dryRun: false` or omitted behaves byte-identically to
+- [x] MCP `gate_run` with `dryRun: true` leaves the task's status unchanged.
+- [x] MCP `gate_run` with `dryRun: false` or omitted behaves byte-identically to
   pre-change (GateEvent appended, normal lifecycle).
-- [ ] `dryRun` is a real parameter in the `gate_run` tool schema (grep-confirmable in
+- [x] `dryRun` is a real parameter in the `gate_run` tool schema (grep-confirmable in
   `mcp-handlers.ts`), not prompt-guidance.
-- [ ] The dryRun skip-append lives in exactly ONE place — `runGate`'s engine path, via a
+- [x] The dryRun skip-append lives in exactly ONE place — `runGate`'s engine path, via a
   `dryRun?: boolean` field in `RunGateArgs` that gates the `appendGateEvent` call — and
   the MCP `gate_run` handler is a thin pass-through with no local skip logic
   (grep-confirmed: `appendGateEvent` appears in the engine only, not in the handler).
   The shared `runAcceptance()` runner executes the command (no second implementation).
-- [ ] Tests: driving the real `quay mcp` subprocess, >=80% coverage on the dryRun path.
+- [x] Tests: driving the real `quay mcp` subprocess, >=80% coverage on the dryRun path.
+
+## Evidence (2026-08-15, inner impl on `task/DIR-103-B`)
+
+**before/after gate-event-log 实测** (real `quay mcp` subprocess, `<workspaceRoot>/.quay/gate-events.jsonl`):
+
+```
+=== BEFORE dryRun:true ===   log lines: 0
+=== dryRun:true verdict ===  ok:true, event id 1164aaff-… generated in the return, NOT written
+=== AFTER dryRun:true  ===   log lines: 0   (zero GateEvents appended)
+=== status after dryRun:true ===  ready     (unchanged)
+=== dryRun omitted verdict ===  ok:true
+=== AFTER dryRun omitted ===   log lines: 1   (exactly one GateEvent appended)
+log content: {"id":"7762e599-…","pipeline_id":"EVIDENCE","gate":"acceptance","verdict":"pass",…}
+```
+
+New test `mcp-gate-dryrun.test.mjs` (12 assertions green): `dryRun:true` on PASS (ok:true, 0→0 events) and FAIL (ok:false, 0→0 events) + status `ready` unchanged; `dryRun` omitted (0→1) and `dryRun:false` explicit (0→1) both append exactly one GateEvent. Clean-exit teardown via `transport.close()` (stdin.end → clean child exit; never `child.kill`).
+
+**grep 证据 (AC4/AC5)**:
+- `mcp-handlers.ts:328` `dryRun: z.boolean().optional()…` — real schema param.
+- `mcp-handlers.ts:331` destructured param `…, cwd, dryRun` binds the value (three-edit wiring complete).
+- `mcp-handlers.ts:360` pure forward: `runGate({…, dryRun })` — no local skip logic.
+- `grep -n appendGateEvent mcp-handlers.ts` → **ZERO** matches; `engine.ts` → `:116` the single skip-append site behind `if (!dryRun)` (engine.ts:115).
+- `runAcceptance` still the shared runner: `registry.ts:53` (the `acceptance` gate) calls `runAcceptance` from `acceptance-runner.ts` — one definition, no second implementation.
+
+**Coverage (AC6)** — `node --experimental-test-coverage --test packages/quay/test/mcp-gate-dryrun.test.mjs`:
+`engine.ts` 96.64% lines (only uncovered: unrelated fail-open catch lines 29-30/39-40); `mcp-handlers.ts` 68.83% overall (large file; dryRun-specific lines 328/331/360 are NOT in the uncovered list → 100% on the dryRun path). DryRun guard `if (!dryRun)` engine.ts:115 covered (child coverage merged via clean exit).
+
+**Related suites green**: `gate/gate-ergonomics/lifecycle/gate-config-loader/mcp-config-validate` (106 tests), `mcp-server.test.mjs` (full pass), `tsc --noEmit` clean. `acceptance.test.mjs` untouched (not a touch).
 
 ## Definition of Done
 
