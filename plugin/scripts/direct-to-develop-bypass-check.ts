@@ -165,6 +165,30 @@ export function extractAc65Evidence(message) {
   return null;
 }
 
+// ── Ruled-historical one-off 豁免（tasks/gap-direct-to-develop-ruled-historical-cddc55e2）──────────
+//
+// manager 2026-08-15 裁定：cddc55e2 直接提交 develop（inner 紧急回退自己刚造成的破坏）是 ruled one-off——
+// 形态 = ruled 豁免 + 定案理由，非 AC65 sha 表；⛔ 判据3（声明∧无验证⇒红）不因此松动。先例 =
+// fan-in-workflow-check.ts 的 `RULED_HISTORICAL_GAPS`（86a7c932 同形）。
+//   · 入表提交分类为 `ruledHistorical`（可见 + 可审计，非静默掩盖）——独立分类，非 bypass、非 ac65Authorized
+//     （两类在 detector 输出里可区分：`AC65-AUTHORIZED` vs `RULED-HISTORICAL`）。
+//   · 豁免表【有界】：只覆盖这里列出的 ruled 案例；任一未入表的新直投仍红（能取假——豁免不能被静默扩展）。
+//   · ⛔ 不改 sha 退役表机制（AC65 两谓词保持）；判据3 保持。
+export const RULED_HISTORICAL_COMMITS: { sha: string; reason: string }[] = [
+  {
+    sha: "cddc55e2",
+    reason:
+      "inner 紧急回退自己刚造成的破坏——cddc55e2 回退的 232e4171 是 inner 在双副本漂移上的试错；" +
+      "非偷懒绕过 fan-in，不属于 detector 要抓的那一类。manager 2026-08-15 裁定 ruled one-off（形态=ruled 豁免+定案理由，非 AC65 sha 表）",
+  },
+];
+
+/** 一条 commit sha 是否命中 ruled 豁免表（前缀匹配——git 可能给全量或缩写 sha）。PURE。 */
+export function findRuledHistoricalEntry(sha, table = RULED_HISTORICAL_COMMITS) {
+  if (!sha) return undefined;
+  return (table ?? []).find((e) => e && sha.startsWith(e.sha));
+}
+
 /** 一个直接提交的判定。PURE——测试注入 {sha, files, epoch, subject, message, action}。 */
 export function classifyCommit(commit, lockHoldIntervals) {
   const files = Array.isArray(commit?.files) ? commit.files : [];
@@ -180,6 +204,11 @@ export function classifyCommit(commit, lockHoldIntervals) {
   // 仍红。判定完全由提交消息承担，不依赖手抄 sha 表。
   const ac65Authorized =
     commitHasAc65Declaration(commit?.message) && commitHasAc65Verification(commit?.message);
+  // Ruled-historical 豁免（manager 裁定 one-off，先例 RULED_HISTORICAL_GAPS）：sha 命中 ruled 表 ⇒
+  // ruledHistorical=true（独立分类，非 bypass、非 ac65Authorized——两类在输出里可区分）。豁免表有界，
+  // 非入表新直投仍红（能取假）。
+  const ruledEntry = findRuledHistoricalEntry(commit?.sha);
+  const ruledHistorical = Boolean(ruledEntry);
   return {
     sha: commit?.sha ?? "?",
     subject: commit?.subject ?? "",
@@ -191,7 +220,9 @@ export function classifyCommit(commit, lockHoldIntervals) {
     inLockWindow: Boolean(inLockWindow),
     ac65Authorized,
     ac65Evidence: ac65Authorized ? extractAc65Evidence(commit?.message) : null,
-    bypass: !designInternal && !inLockWindow && !ac65Authorized,
+    ruledHistorical,
+    ruledReason: ruledEntry?.reason ?? null,
+    bypass: !designInternal && !inLockWindow && !ac65Authorized && !ruledHistorical,
   };
 }
 
@@ -207,6 +238,7 @@ export function checkDirectCommits(commits, lockHoldIntervals) {
   const designInternalCommits = classified.filter((c) => c.designInternal);
   const inLockWindowCommits = classified.filter((c) => c.inLockWindow);
   const ac65AuthorizedCommits = classified.filter((c) => c.ac65Authorized);
+  const ruledHistoricalCommits = classified.filter((c) => c.ruledHistorical);
   return {
     violations,
     reason: violations.length > 0 ? "direct-commit-bypasses-fan-in" : "no-direct-bypass",
@@ -215,6 +247,7 @@ export function checkDirectCommits(commits, lockHoldIntervals) {
     designInternalCommits: designInternalCommits.length,
     inLockWindowCommits: inLockWindowCommits.length,
     ac65AuthorizedCommits: ac65AuthorizedCommits.length,
+    ruledHistoricalCommits: ruledHistoricalCommits.length,
     classified,
   };
 }
@@ -343,6 +376,9 @@ const usage = `direct-to-develop-bypass-check.ts — 直接提交 develop 绕过
   · AC65 授权直修 = 提交消息携带 AC65 声明（\`^AC65:\` 行）∧ 验证产物（\`AC65-Verified:\` 行）⇒ 报为
     ac65AuthorizedDirectFix（可见分类，非 bypass）——⛔ 非 plugin/scripts/* 文件名豁免；声明∧无验证产物
     （判据3）或无声明 code-surface 直投仍红；02b2b2fc legacy 形态（AC65 一条命令验证：<输出>）容忍
+  · Ruled-historical 豁免 = sha 前缀命中 RULED_HISTORICAL_COMMITS（manager 裁定 one-off，先例
+    fan-in-workflow-check RULED_HISTORICAL_GAPS）⇒ 报为 ruledHistorical（可见分类，非 bypass、非
+    ac65Authorized——两类输出可区分：AC65-AUTHORIZED vs RULED-HISTORICAL）。豁免表有界，非入表新直投仍红
 
 Usage:
   node --experimental-strip-types direct-to-develop-bypass-check.ts [--root <dir>]
@@ -447,17 +483,21 @@ export function main(argv) {
   // commits 已成功收集（reflog 可读 / --commits 已解析）⇒ 扫描本身是评估，空的扫描范围 = 可读的空
   // 结果（evaluated:true），不是「读不懂」——「读不懂」只发生在 reflog 不可读（早退）或锁窗 malformed。
   const codeSurfaceCandidates = verdict.classified.filter((c) => c.codeSurfaceFiles.length > 0);
-  // 需要锁窗判定的候选 = 代码面 ∧ 非 AC65 授权直修（AC65 授权直修已被证据豁免，不依赖锁窗）。
-  const needLockWindow = codeSurfaceCandidates.some((c) => !c.ac65Authorized);
+  // 需要锁窗判定的候选 = 代码面 ∧ 非 AC65 授权直修 ∧ 非 ruled-historical 豁免（两者都是无条件豁免，
+  // 不依赖锁窗）。
+  const needLockWindow = codeSurfaceCandidates.some((c) => !c.ac65Authorized && !c.ruledHistorical);
   if (codeSurfaceCandidates.length === 0) {
     evaluated = true;
     ok = true;
     reason = verdict.totalCommits === 0 ? "no-direct-commits-in-range" : "no-code-surface-direct-commits";
   } else if (!needLockWindow) {
-    // 所有代码面直接提交都是 AC65 授权直修（可见+可审计 carve-out，证据在提交消息中）——无 bypass 可能。
+    // 所有代码面直接提交都是 AC65 授权直修 或 ruled-historical 豁免（可见+可审计 carve-out）——无 bypass
+    // 可能。全 AC65 时保持既有 reason（既有测试断言 "ac65-authorized-direct-fix-only"）；含 ruled 时给
+    // 可区分的 reason。
+    const allAc65 = codeSurfaceCandidates.every((c) => c.ac65Authorized);
     evaluated = true;
     ok = true;
-    reason = "ac65-authorized-direct-fix-only";
+    reason = allAc65 ? "ac65-authorized-direct-fix-only" : "ac65-authorized-or-ruled-historical-only";
   } else if (!lockSubEvaluated) {
     evaluated = false;
     ok = true;
@@ -480,8 +520,10 @@ export function main(argv) {
       designInternalCommits: verdict.designInternalCommits,
       inLockWindowCommits: verdict.inLockWindowCommits,
       ac65AuthorizedCommits: verdict.ac65AuthorizedCommits,
+      ruledHistoricalCommits: verdict.ruledHistoricalCommits,
       predicate: "design-internal exclusion set (see header / task body): tasks/ docs/ orchestration/ adr/ .quay/ plugin/loop/ measurements/ milestones/ .claude/ plugin/skills/manager/ CLAUDE.md .gitignore .gitattributes .npmrc .github/ plugin/scripts/fan-in-* plugin/test/fan-in-*",
       ac65CarveOut: "AC65-authorized direct-fix (two predicates; sha table retired to display-only): commit message has AC65 declaration (/^AC65:/m) AND verification artifact (/AC65-Verified:/m) ⇒ ac65AuthorizedDirectFix (visible, NOT bypass); declaration with no verification artifact ⇒ RED (criterion-3); no declaration code-surface direct commit ⇒ RED. Legacy 02b2b2fc form (AC65 一条命令验证：<output>) tolerated. NOT a plugin/scripts/* filename exemption.",
+      ruledHistoricalCarveOut: "RULED_HISTORICAL_COMMITS one-off exemption (manager 2026-08-15 ruling, tasks/gap-direct-to-develop-ruled-historical-cddc55e2): sha prefix match on the bounded ruled table ⇒ ruledHistorical (visible, NOT bypass, NOT ac65Authorized); any non-table direct commit still RED (exemption cannot be silently extended). Criterion-3 (declaration without verification ⇒ RED) unchanged.",
     },
     lockWindow: { evaluated: lockSubEvaluated, reason: lockSubReason },
     candidates: codeSurfaceCandidates.map((c) => ({
@@ -492,6 +534,8 @@ export function main(argv) {
       confirmedBypass: c.bypass,
       ac65Authorized: c.ac65Authorized,
       ac65Evidence: c.ac65Evidence,
+      ruledHistorical: c.ruledHistorical,
+      ruledReason: c.ruledReason,
     })),
   };
 
@@ -499,12 +543,13 @@ export function main(argv) {
     process.stdout.write(JSON.stringify(result, null, 2) + "\n");
   } else {
     console.log(`direct-to-develop-bypass-check: evaluated=${evaluated} ok=${ok} (${reason})`);
-    console.log(`  denominator: total=${verdict.totalCommits} code-surface=${verdict.codeSurfaceCommits} design-internal=${verdict.designInternalCommits} in-lock-window=${verdict.inLockWindowCommits} ac65-authorized=${verdict.ac65AuthorizedCommits}`);
+    console.log(`  denominator: total=${verdict.totalCommits} code-surface=${verdict.codeSurfaceCommits} design-internal=${verdict.designInternalCommits} in-lock-window=${verdict.inLockWindowCommits} ac65-authorized=${verdict.ac65AuthorizedCommits} ruled-historical=${verdict.ruledHistoricalCommits}`);
     console.log(`  lock-window: evaluated=${lockSubEvaluated} (${lockSubReason})`);
     for (const c of codeSurfaceCandidates) {
-      const tag = c.bypass ? "RED" : c.ac65Authorized ? "AC65-AUTHORIZED" : c.inLockWindow ? "SKIP(in-lock-window)" : "design-internal";
+      const tag = c.ruledHistorical ? "RULED-HISTORICAL" : c.bypass ? "RED" : c.ac65Authorized ? "AC65-AUTHORIZED" : c.inLockWindow ? "SKIP(in-lock-window)" : "design-internal";
       console.log(`  ${tag} ${c.sha} — ${c.subject}`);
       for (const f of c.codeSurfaceFiles) console.log(`      ${f}`);
+      if (c.ruledHistorical && c.ruledReason) console.log(`      ruled reason: ${c.ruledReason}`);
       if (c.ac65Authorized && c.ac65Evidence) console.log(`      evidence: ${c.ac65Evidence}`);
     }
     if (verdict.totalCommits === 0) console.log("  (no direct commits in scan range)");

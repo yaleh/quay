@@ -14,6 +14,10 @@
 // AC65 授权直修 carve-out（gap-ac65-direct-fix-vs-bypass-detector-conflict）：02b2b2fc（AC65 授权直修，
 // 消息带验证证据）不再被误标；7e64a86b（真直投）仍红——按 sha + 证据豁免，非 plugin/scripts/* 文件名豁免
 // （fail-closed：sha 入表但消息无 AC65 标记 ⇒ 仍红）。
+// Ruled-historical 豁免（gap-direct-to-develop-ruled-historical-cddc55e2，manager 2026-08-15 裁定 one-off）：
+// cddc55e2（inner 紧急回退自己的破坏）→ ruledHistorical=true（独立分类，非 bypass、非 ac65Authorized——
+// 两类输出可区分 AC65-AUTHORIZED vs RULED-HISTORICAL）；真直投（无豁免无 AC65）仍红；⛔ 判据3
+// （声明∧无验证⇒红）不松动。豁免表有界（只覆盖 cddc55e2），非入表 sha 仍红（能取假）。
 //
 // Run:
 //   scripts/test.sh plugin/test/direct-to-develop-bypass-check.test.mjs
@@ -39,6 +43,8 @@ import {
   commitHasAc65Declaration,
   commitHasAc65Verification,
   extractAc65Evidence,
+  RULED_HISTORICAL_COMMITS,
+  findRuledHistoricalEntry,
 } from "../scripts/direct-to-develop-bypass-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -110,6 +116,15 @@ const AC65_AUTHORIZED_SAMPLE = {
     "manager-tick-readings: A0 outer.ticklog 截断缺陷修复（manager ③ 立案，发生率 3）——full:true 完整行，默认 200 截断向后兼容\n\n" +
     "缺陷：latestTickLog 默认 maxLen=200 把 outer tick-log 行截到 A11 前 ⇒ 判准⑥′ 无法判 outer tick 完整性。修法：A0 feed 走 full:true 完整行。" +
     "AC65 一条命令验证：A0 outer.ticklog quay 现含 A11+ 内容（full length 676 > 200）。新增测试（full 完整行 + 默认截断向后兼容），24/24 绿。",
+};
+
+/** Ruled-historical 豁免样本（cddc55e2——manager 2026-08-15 裁定 one-off）。必须分类为 ruledHistorical
+ *  （独立分类，非 bypass、非 ac65Authorized）；非入表真直投仍红。 */
+const RULED_HISTORICAL_SAMPLE = {
+  sha: "cddc55e2",
+  files: ["plugin/loop/fast-mode-tick-core.md", "plugin/skills/init/SKILL.md"],
+  subject: "inner: 回退 drift 同步（232e4171 破坏 quay-init referenced⊆landed）+ SKILL.md:71 改正本/副本关系声明（option ②）",
+  message: "inner: 回退 drift 同步（232e4171 破坏 quay-init referenced⊆landed）+ SKILL.md:71 改正本/副本关系声明（option ②）",
 };
 
 // ── PURE: isDesignInternalPath — 设计内排除集（AC2）──────────────────────────────────────────────
@@ -436,6 +451,135 @@ test("AC3 回放·CLI — 02b2b2fc exit 0（AC65 授权直修）；7e64a86b exit
   assert.equal(bySha["02b2b2fc"].confirmedBypass, false);
   assert.equal(bySha["7e64a86b"].ac65Authorized, false);
   assert.equal(bySha["7e64a86b"].confirmedBypass, true);
+});
+
+// ── Ruled-historical 豁免（gap-direct-to-develop-ruled-historical-cddc55e2）──────────────────────────
+// manager 2026-08-15 裁定 one-off：cddc55e2（inner 紧急回退自己的破坏）→ ruledHistorical（独立分类，
+// 非 bypass、非 ac65Authorized——两类输出可区分）。⛔ 豁免表有界（只覆盖 cddc55e2）；非入表真直投仍红
+// （能取假）；判据3（声明∧无验证⇒红）不松动。
+
+test("PURE RULED — findRuledHistoricalEntry 前缀匹配 + 表有界（非入表 sha 返回 undefined）", () => {
+  assert.equal(findRuledHistoricalEntry("cddc55e2")?.sha, "cddc55e2");
+  assert.equal(findRuledHistoricalEntry("cddc55e24e343708426ecbc0bcd7fea33c28697a")?.sha, "cddc55e2", "全量 sha 前缀匹配");
+  assert.equal(findRuledHistoricalEntry("7e64a86b"), undefined, "真直投不入豁免表");
+  assert.equal(findRuledHistoricalEntry(""), undefined);
+  assert.equal(findRuledHistoricalEntry(null), undefined);
+  assert.equal(RULED_HISTORICAL_COMMITS.length >= 1, true, "豁免表非空（承载 cddc55e2）");
+});
+
+test("PURE classifyCommit — cddc55e2 → ruledHistorical（非 bypass 非 ac65Authorized）；真直投（无豁免无 AC65）仍红", () => {
+  const holds = [];
+  // cddc55e2：代码面（SKILL.md）∧ 无 AC65 声明，但命中 ruled 表 ⇒ ruledHistorical，非 bypass、非 ac65Authorized。
+  const ruled = classifyCommit(RULED_HISTORICAL_SAMPLE, holds);
+  assert.equal(ruled.ruledHistorical, true, "cddc55e2 命中 ruled 表 ⇒ ruledHistorical");
+  assert.equal(ruled.bypass, false, "ruled 豁免 ⇒ 非 bypass");
+  assert.equal(ruled.ac65Authorized, false, "ruled 豁免是独立分类，非 ac65Authorized（两类可区分）");
+  assert.equal(typeof ruled.ruledReason, "string", "ruledReason（定案理由）可见可审计");
+  assert.ok(ruled.ruledReason.includes("manager 2026-08-15 裁定"), "定案理由带 manager 裁定");
+  assert.equal(ruled.codeSurfaceFiles.length, 1, "cddc55e2 仍是代码面（denominator 可见，非静默掩盖）");
+  assert.equal(ruled.codeSurfaceFiles[0], "plugin/skills/init/SKILL.md");
+
+  // 真直投（无 AC65、无 ruled 豁免）⇒ 仍红——表有界，非入表 sha 不被豁免。
+  const real = classifyCommit({ sha: "7e64a86b", files: ["plugin/skills/init/SKILL.md"], epoch: 200, subject: "s", message: "init/SKILL.md: 声明 reference-doc" }, holds);
+  assert.equal(real.ruledHistorical, false, "非入表 sha ⇒ ruledHistorical=false");
+  assert.equal(real.ac65Authorized, false);
+  assert.equal(real.bypass, true, "真直投（无豁免无 AC65）仍红——豁免表有界（能取假）");
+
+  // ⛔ 判据3 不松动：声明∧无验证产物 ⇒ 红（即使非入表 sha 有 AC65 声明字面，也无验证产物）。
+  const declOnly = classifyCommit(
+    { sha: "y", files: ["plugin/scripts/foo.ts"], epoch: 200, subject: "s", message: "AC65: outer 按 AC65 授权直修（一条命令可验）" },
+    holds,
+  );
+  assert.equal(declOnly.ruledHistorical, false, "非入表 sha 不因 AC65 声明字面变 ruled");
+  assert.equal(declOnly.ac65Authorized, false, "声明∧无验证产物 ⇒ 非 authorized（判据3）");
+  assert.equal(declOnly.bypass, true, "声明∧无验证产物 ⇒ 红（判据3 保持）");
+});
+
+test("PURE checkDirectCommits — ruled 豁免不计入 violations；ruledHistoricalCommits 计数正确；混合只红真直投", () => {
+  const ruled = { ...RULED_HISTORICAL_SAMPLE, epoch: 1_700_000_000, action: "commit" };
+  const v = checkDirectCommits([ruled], []);
+  assert.equal(v.violations.length, 0, "ruled 豁免不得报红");
+  assert.equal(v.ruledHistoricalCommits, 1);
+  assert.equal(v.codeSurfaceCommits, 1, "ruled 豁免仍是代码面（denominator 可见）");
+  assert.equal(v.ac65AuthorizedCommits, 0, "ruled 豁免不是 AC65 授权（独立分类）");
+
+  // 混合：ruled 豁免 + 真直投 ⇒ 只红真直投。
+  const mixed = checkDirectCommits([
+    ruled,
+    { sha: "7e64a86b", files: ["plugin/skills/init/SKILL.md"], epoch: 1_700_000_001, subject: "s", message: "init/SKILL.md: 声明", action: "commit" },
+  ], []);
+  assert.equal(mixed.violations.length, 1);
+  assert.equal(mixed.violations[0].sha, "7e64a86b", "非入表真直投仍红（表有界）");
+  assert.equal(mixed.ruledHistoricalCommits, 1);
+  assert.equal(mixed.codeSurfaceCommits, 2, "ruled 与真直投都是代码面（denominator 都可见）");
+});
+
+test("AC3 回放·真实 git — cddc55e2（ruled 豁免）不再被误标；非入表真直投仍红", (t) => {
+  const ruled = realCommitData("cddc55e2");
+  const real = realCommitData("7e64a86b");
+  if (!ruled || !real) {
+    t.skip(`样本 sha 不在本 repo（${[!ruled && "cddc55e2", !real && "7e64a86b"].filter(Boolean).join(",")}）——真实 git 回放跳过，fixture 回放仍覆盖`);
+    return;
+  }
+  assert.ok(ruled.files.includes("plugin/skills/init/SKILL.md"), "cddc55e2 真提交触及代码面 SKILL.md");
+  const vr = checkDirectCommits([{ ...ruled, action: "commit" }], []);
+  assert.equal(vr.violations.length, 0, `cddc55e2（ruled 豁免）必须不再误标: ${JSON.stringify(vr.classified.map((c) => ({ sha: c.sha.slice(0, 8), bypass: c.bypass, ac65: c.ac65Authorized, ruled: c.ruledHistorical })))}`);
+  assert.equal(vr.classified[0].ruledHistorical, true);
+  assert.equal(vr.classified[0].bypass, false);
+  assert.equal(vr.classified[0].ac65Authorized, false);
+
+  const vv = checkDirectCommits([{ ...real, action: "commit" }], []);
+  assert.equal(vv.violations.length, 1, "非入表真直投仍红");
+  assert.equal(vv.violations[0].bypass, true);
+});
+
+test("AC3 回放·CLI — cddc55e2 exit 0（ruledHistorical，非 bypass 非 ac65Authorized）；7e64a86b exit 1（真直投仍红）；混合只红真直投", (t) => {
+  if (!realCommitData("cddc55e2") || !realCommitData("7e64a86b")) {
+    t.skip("样本 sha 不在本 repo——CLI 回放跳过");
+    return;
+  }
+  const rRuled = runChecker(["--root", REPO_ROOT, "--commits", "cddc55e2"]);
+  assert.equal(rRuled.status, 0, `cddc55e2（ruled 豁免）必须 GREEN(exit 0): ${rRuled.stdout}${rRuled.stderr}`);
+  const outRuled = jsonOut(rRuled);
+  assert.equal(outRuled.ok, true);
+  assert.equal(outRuled.candidates[0].ruledHistorical, true);
+  assert.equal(outRuled.candidates[0].confirmedBypass, false);
+  assert.equal(outRuled.candidates[0].ac65Authorized, false);
+  assert.equal(outRuled.denominator.ruledHistoricalCommits, 1);
+  assert.ok(typeof outRuled.candidates[0].ruledReason === "string" && outRuled.candidates[0].ruledReason.length > 0, "ruledReason 可见");
+
+  const rReal = runChecker(["--root", REPO_ROOT, "--commits", "7e64a86b"]);
+  assert.equal(rReal.status, 1, `非入表真直投必须仍 RED(exit 1): ${rReal.stdout}${rReal.stderr}`);
+  assert.equal(jsonOut(rReal).candidates[0].ruledHistorical, false);
+
+  const rMixed = runChecker(["--root", REPO_ROOT, "--commits", "cddc55e2,7e64a86b"]);
+  assert.equal(rMixed.status, 1, `混合含真直投 ⇒ 仍 RED(exit 1): ${rMixed.stdout}${rMixed.stderr}`);
+  const outMixed = jsonOut(rMixed);
+  const bySha = Object.fromEntries(outMixed.candidates.map((c) => [c.sha.slice(0, 8), c]));
+  assert.equal(bySha["cddc55e2"].ruledHistorical, true);
+  assert.equal(bySha["cddc55e2"].confirmedBypass, false);
+  assert.equal(bySha["cddc55e2"].ac65Authorized, false);
+  assert.equal(bySha["7e64a86b"].ruledHistorical, false);
+  assert.equal(bySha["7e64a86b"].confirmedBypass, true);
+});
+
+test("AC3 回放·CLI — 全量扫描（生产基线 b11ce720）ok=true：cddc55e2 ruledHistorical，无真直投红", (t) => {
+  const baseline = "b11ce720";
+  const baseExists = gitCmd(REPO_ROOT, "cat-file", "-e", `${baseline}^{commit}`).status === 0;
+  if (!baseExists) {
+    t.skip("基线 sha 不在本 repo——全量扫描跳过");
+    return;
+  }
+  const r = runChecker(["--root", REPO_ROOT, "--baseline", baseline]);
+  assert.equal(r.status, 0, `全量扫描必须 GREEN(exit 0): ${r.stdout}${r.stderr}`);
+  const out = jsonOut(r);
+  assert.equal(out.evaluated, true);
+  assert.equal(out.ok, true, `基线后无真直投红: ${r.stdout}${r.stderr}`);
+  const ruled = out.candidates.find((c) => c.sha.startsWith("cddc55e2"));
+  assert.ok(ruled, "cddc55e2 在候选（代码面）中");
+  assert.equal(ruled.ruledHistorical, true, "cddc55e2 分类为 ruledHistorical");
+  assert.equal(ruled.confirmedBypass, false);
+  assert.ok(out.candidates.every((c) => !c.confirmedBypass), "无真直投红");
 });
 
 // ── CLI 集成（temp repo）：直接提交代码面 RED / .gitignore GREEN / fan-in ff 不误报 ─────────────

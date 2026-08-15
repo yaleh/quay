@@ -41,13 +41,39 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1 判据1：cddc55e2 分类为 ruledHistorical（非 bypass、非 ac65Authorized，输出可区分）。
-- [ ] AC2 判据2 能取假：真直投（无豁免）仍红；cddc55e2 不再红；判据3（声明∧无验证⇒红）不变。
-- [ ] AC3 判据3：既有测试全绿；`--for-task` scoped 门绿。
+- [x] AC1 判据1：cddc55e2 分类为 ruledHistorical（非 bypass、非 ac65Authorized，输出可区分）。
+- [x] AC2 判据2 能取假：真直投（无豁免）仍红；cddc55e2 不再红；判据3（声明∧无验证⇒红）不变。
+- [x] AC3 判据3：既有测试全绿；`--for-task` scoped 门绿。
 
 ## Definition of Done
 
-- [ ] detector ruled 豁免表（cddc55e2 + 定案理由）落地，ruledHistorical 分类可区分，判据3 不松动，测试绿——detector 红消除。
+- [x] detector ruled 豁免表（cddc55e2 + 定案理由）落地，ruledHistorical 分类可区分，判据3 不松动，测试绿——detector 红消除。
+
+## Evidence
+
+**实现**：`plugin/scripts/direct-to-develop-bypass-check.ts` 加 `RULED_HISTORICAL_COMMITS`（`{sha, reason}`，承载 cddc55e2 + manager 定案理由，先例 fan-in-workflow-check `RULED_HISTORICAL_GAPS`）+ `findRuledHistoricalEntry`（前缀匹配，同 AC65 表）。`classifyCommit` 增加 `ruledHistorical`/`ruledReason` 分类（独立分类，非 bypass、非 ac65Authorized），`bypass = !designInternal && !inLockWindow && !ac65Authorized && !ruledHistorical`。`checkDirectCommits` 加 `ruledHistoricalCommits` 计数。CLI：candidate 报 `ruledHistorical`/`ruledReason`，human 输出 tag `RULED-HISTORICAL`（与 `AC65-AUTHORIZED` 区分），denominator 加 `ruledHistoricalCommits`。⛔ AC65 两谓词机制未动（判据3 不松动）；豁免表有界（只覆盖 cddc55e2，非入表新直投仍红——能取假）。
+
+**CLI 回放 cddc55e2（AC1）**：
+```
+$ node --experimental-strip-types plugin/scripts/direct-to-develop-bypass-check.ts --root . --commits cddc55e2 --json
+evaluated=true ok=true reason="ac65-authorized-or-ruled-historical-only"
+candidates[0]: sha=cddc55e2 ruledHistorical=true confirmedBypass=false ac65Authorized=false
+ruledReason="inner 紧急回退自己刚造成的破坏——cddc55e2 回退的 232e4171 是 inner 在双副本漂移上的试错；非偷懒绕过 fan-in，不属于 detector 要抓的那一类。manager 2026-08-15 裁定 ruled one-off…"
+human 输出: RULED-HISTORICAL cddc55e2 — …（tag 与 AC65-AUTHORIZED 区分）
+```
+**CLI 回放 7e64a86b（AC2 能取假）**：
+```
+$ node --experimental-strip-types plugin/scripts/direct-to-develop-bypass-check.ts --root . --commits 7e64a86b --json
+evaluated=true ok=false reason="direct-commit-bypasses-fan-in"
+candidates[0]: sha=7e64a86b confirmedBypass=true ac65Authorized=false ruledHistorical=false
+exit=1（非入表真直投仍红）
+```
+**全量扫描（生产基线 b11ce720）**：`evaluated=true ok=true reason="ac65-authorized-or-ruled-historical-only"`，candidates 3 条（62853261 ac65 / cddc55e2 ruled / 6620f9c9 ac65）全 `confirmedBypass=false`，denominator ruledHistoricalCommits=1，无真直投红。
+
+**判据3（声明∧无验证⇒红）保持**：既有测试 `PURE classifyCommit — AC65 两谓词`（declOnly 断言）不变；新增 ruled 测试含同形断言——`AC65: 声明`（无 `AC65-Verified:`）∧ 非入表 sha ⇒ `ac65Authorized=false, ruledHistorical=false, bypass=true`（红）。
+
+**测试**：`node --test plugin/test/direct-to-develop-bypass-check.test.mjs` → 26/26 pass（新增 6 条 ruled 用例：findRuledHistoricalEntry 前缀匹配+有界、classifyCommit cddc55e2→ruledHistorical/真直投仍红/判据3、checkDirectCommits 混合只红真直投、真实 git 回放 cddc55e2 不再误标、CLI cddc55e2 exit0 + 7e64a86b exit1 + 混合、CLI 全量扫描基线 ok=true）。
+**scoped 门**：`scripts/test.sh --for-task gap-direct-to-develop-ruled-historical-cddc55e2 --allow-thin` → EXIT=0，静态检查全 PASS（含 malformed-task-check、test-isolation、concurrency、delivery-inventory），26/26 测试绿。
 
 ## Touches
 
