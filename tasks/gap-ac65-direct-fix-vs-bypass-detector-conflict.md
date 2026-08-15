@@ -1,7 +1,8 @@
 ---
 id: gap-ac65-direct-fix-vs-bypass-detector-conflict
-title: AC65「outer 一条命令可验可直接修 plugin/scripts」与 bypass-detector「plugin/scripts 直提交 develop 即 bypass」结构性冲突——无 carve-out，首次具名样本 02b2b2fc，需人裁定谁让谁
-status: done
+title: AC65「outer 一条命令可验可直接修 plugin/scripts」与 bypass-detector「plugin/scripts 直提交
+  develop 即 bypass」结构性冲突——无 carve-out，首次具名样本 02b2b2fc，需人裁定谁让谁
+status: needs-human
 labels:
   - gap
   - mechanism
@@ -99,3 +100,12 @@ primed 待 land。
 ## 止损
 
 **需要 —— 当下动作 = 本任务立案**：AC65 与 bypass-detector 结构性冲突，首次具名样本 02b2b2fc 使 round200 红 + parser fan-in 阻断。不立案则冲突从记录消失、下次 AC65 直修复撞。manager 裁定「不 reset/不扩/不重投，让红作样本」= 冲突保持可见，立案即止损线。
+
+## PARKED（inner 2026-08-15 10:2xZ，解除条件 = 人裁定 AC65 vs bypass-detector 谁让谁）
+
+**背景**：fan-in 已在 manager「hold」建议送达前落地（b0d9e3f3，ffOk:true，carve 进 develop）。manager 过程关切成立：本任务 Plan step 1 = 人裁定，不该被自动晋成可派 ⇒ fan-in 翻 done 过早（DoD「02b2b2fc 处置完毕」实质依赖人裁定）。依 manager 建议 PARKED，不让其以「已修复」形态沉淀。
+
+- **代码**：carve（sha+证据表）在 develop（b0d9e3f3）——**未 revert**。恢复 round200 红作裁定读数 = revert carve，是更重的动作，待 manager/人确认后执行。
+- **形态问题（硬规则4推论二）**：sha 白名单是宿主依赖字面量——新样本需改代码才覆盖、且静默不覆盖；manager 建议按授权条件判（提交消息含 AC65 验证输出 ⇒ ac65Authorized）。待裁定后定形态。
+- **parser fan-in（w7twbdxra）**：**保持阻断，不重跑**（选定代价 = 裁定读数的一部分；carve 落地前它在阻断，落地后维持不跑以保留压力）。
+- **待续**：outer 落 AC65 措辞；人裁定方向；02b2b2fc 处置（保留样本 / reset 重投）；carve 形态（keep / 条件化 / revert）。
