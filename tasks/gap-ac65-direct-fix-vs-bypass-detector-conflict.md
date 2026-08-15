@@ -50,6 +50,21 @@ primed 待 land。
 3. 02b2b2fc 按裁定处置（reset 后 fan-in 重投 / 或保留作合法 AC65 直修样本）。
 4. 既有测试全绿 + `--for-task` scoped 门绿。
 
+## Implementation（inner 2026-08-15 落盘——detector 侧 carve-out）
+
+**人裁定方向待决；本实现保留两种裁定都正确的行为**（若人裁定「提交面仍走 fan-in」，carve-out 仍【承认】
+已经发生的 AC65 直修；若裁定「AC65 直修合法」，carve-out 即正式豁免）。
+
+**机制（`plugin/scripts/direct-to-develop-bypass-check.ts`）**：按 **sha + 证据** 的 AC65 授权直修豁免表
+`AC65_AUTHORIZED_DIRECT_FIXES`（有界、可见、可审计，同 `RULED_HISTORICAL_GAPS` 先例）。
+判定：代码面直接提交 ∧ sha 入表（前缀匹配）∧ 提交消息携带 AC65 验证标记（`commitHasAc65Evidence`，
+`AC65_VERIFICATION_MARKER_RE`）⇒ 报为 `ac65AuthorizedDirectFix`（独立分类，**非 bypass**）；sha 入表但
+消息无标记 ⇒ 表目与提交不一致，**fail-closed 仍红**；sha 不入表 ⇒ 真直投**仍红**（能取假——豁免表有界，
+不能静默扩展）。⛔ **不是 `plugin/scripts/*` 文件名豁免**（掩真直投，manager 已拒）——豁免要证据，不按路径。
+
+**AC3 归属（落盘）**：outer = AC65 措辞（`orchestration/orchestrator-tick-core.md`，outer 独占，本任务 inner
+不动）；inner = detector carve-out（本实现）；人 = 最终裁定（验证面 vs 提交面）。
+
 ## Acceptance Criteria
 
 - [ ] AC1 冲突消除：AC65 授权的直修与 bypass-detector 不再互撞（carve-out 或措辞改后，两者意图都保留）。
@@ -63,14 +78,23 @@ primed 待 land。
 
 ## Touches
 
-- orchestration/orchestrator-tick-core.md（AC65 措辞——outer 独占）
-- plugin/scripts/direct-to-develop-bypass-check.ts（carve-out——inner 实现面）
-- plugin/test/direct-to-develop-bypass-check.test.mjs（对应测试——inner 实现面）
+- orchestration/orchestrator-tick-core.md（AC65 措辞——outer 独占，inner 不动）
+- plugin/scripts/direct-to-develop-bypass-check.ts（carve-out——inner 实现面，已落盘）
+- plugin/test/direct-to-develop-bypass-check.test.mjs（对应测试——inner 实现面，已落盘）
 - tasks/gap-ac65-direct-fix-vs-bypass-detector-conflict.md（自身）
 
-## Evidence
+## Evidence（inner 侧已落地；outer 措辞 / 人裁定待续）
 
-（待落地后填：02b2b2fc 处置结果 + AC65/detector 对齐后 round 绿）
+- **机制**：`AC65_AUTHORIZED_DIRECT_FIXES` 表（02b2b2fc + 证据）+ `AC65_VERIFICATION_MARKER_RE`；
+  `classifyCommit` 增加 `ac65Authorized` / `ac65Evidence`，`bypass = !designInternal && !inLockWindow && !ac65Authorized`。
+- **AC2 能取假（CLI `--commits` 回放，exit 实测）**：
+  - `--commits 02b2b2fc` → **exit 0**，`reason=ac65-authorized-direct-fix-only`，candidate `ac65Authorized=true` / `confirmedBypass=false`。
+  - `--commits 7e64a86b` → **exit 1**（真直投仍红），`ac65Authorized=false` / `confirmedBypass=true`。
+  - `--commits 02b2b2fc,7e64a86b` → exit 1，混合中只 7e64a86b 红。
+  - 全 reflog 扫描（无基线）：denominator `ac65-authorized=1`，02b2b2fc 标 `AC65-AUTHORIZED`，7e64a86b 仍 `RED`（26 → 25 真 bypass）。
+- **AC4**：`plugin/test/direct-to-develop-bypass-check.test.mjs` 19/19 绿（新增 5 条 AC65 carve-out 测试）；
+  `scripts/test.sh --for-task gap-ac65-direct-fix-vs-bypass-detector-conflict` **exit 0**（全部 static PASS + 19/19）。
+- **待续**：outer 落 AC65 措辞；人裁定最终方向；02b2b2fc 处置（保留作合法 AC65 直修样本 / 或按裁定重投）；parser fan-in 解除阻断。
 
 ## 止损
 
