@@ -1,7 +1,7 @@
 ---
 id: gap-touches-parser-strip-annotation-nested-parens
 title: touches-parser stripTouchAnnotation 正则无法处理嵌套全角括号 ⇒ anti-drift 误判 HARD FAIL（2 次复发：a23 + provisioning 任务的 Touches 注解含嵌套（…））
-status: ready
+status: done
 labels:
   - gap
   - mechanism
