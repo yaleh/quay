@@ -153,7 +153,12 @@ export const FIXED_DISPATCH_CAP = 5;
  *  "不在主会话修" a stop would be a deadlock). */
 export const RED_BACKLOG_CAP_DEFAULT = 2; // concurrency-default-fallback: red-window throttle (narrows the dispatch cap, not a slot count — declared per gap-concurrency-literal-only-at-definition-points)
 
-/** Free dispatch slots = max(0, cap − in_flight). The one definition; never hardcoded. */
+/** Free dispatch slots = max(0, cap − in_flight). The one definition; never hardcoded.
+ *  RETIRED-BY-AC76 (C24-2, 人 2026-08-14 09:1xZ「在飞不应当靠任务记录,而应当查 inner 任务 subagent」):
+ *  the in_flight INPUT to slots_free is retired as an in-flight READ when telemetry/bracket-measured
+ *  (the telemetry fallback — see the header RETIRED block). 在飞的唯一读法 = 查 inner 任务 subagent
+ *  (cap-counts-subagents-check 判据2: `<session>/subagents/agent-*.jsonl` 近 N 分钟写入数);
+ *  the caller-supplied `--in-flight` set (subagent-sourced) remains the live path. */
 export function computeSlotsFree(cap, inFlightCount) {
   return Math.max(0, cap - inFlightCount);
 }
