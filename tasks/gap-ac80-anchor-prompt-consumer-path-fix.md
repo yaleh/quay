@@ -1,7 +1,7 @@
 ---
 id: gap-ac80-anchor-prompt-consumer-path-fix
 title: AC80 [inner-tick] prompt 的 plugin/loop 自引用违反 loop-shipping AC1c + outer-cron-registry worktree 上下文正本查找失败（round172 暴露，2eedf16c 引入）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
