@@ -137,7 +137,17 @@ const AUDIT_SCHEMA = {
         type: 'object', required: ['rule', 'evidence', 'status'],
         properties: {
           rule: { type: 'string' },
-          evidence: { type: 'string' },
+          // ⚠️ 2026-08-15 实测根因（wf_6179b247-1ab，99 个 run 里的第 1 次 agent 失败）：
+          // 自审抓到了真违规，却因 evidence 里嵌入【原始命令行】而连续 5 次 StructuredOutput
+          // 全部 InputValidationError（1299→1190→1183→1167→1165 字节，越删越短仍失败）⇒ 整份审计丢失。
+          // ⇒ 与并发化无关（是序列化，不是竞态）；且与我自己当天两次引号/heredoc 事故同族。
+          evidence: {
+            type: 'string',
+            description: '⚠️ 单行纯文本。⛔ 不得含换行、反引号、原始命令行或原始工具输出——'
+              + '本字段曾因嵌入命令行导致 5 次 StructuredOutput 全部 JSON 解析失败、整份审计丢失'
+              + '（2026-08-15 wf_6179b247-1ab）。引证据用「<文件>:<行号>」+ ISO 时刻 + 一句话转述；'
+              + '需要指认某条命令时，写它的机件名与参数名，⛔ 不要粘贴命令本身。',
+          },
           status: {
             type: 'string',
             enum: ['新发生', '已入账', '判准已退休'],
@@ -194,8 +204,18 @@ const READINGS_SCHEMA = {
   },
 }
 
-phase('Readings')
-const readings = await agent(
+// ══ 读数 与 自审 并发（2026-08-15，人提出「放进 tick workflow 与现有步骤并发跑是否更紧凑」）══
+// **前提已核，不是想当然**：自审 agent 的 prompt 里【不引用 readings】⇒ 两者无数据依赖 ⇒ 可并发。
+// 墙钟由 sum 变 max（本轮串行实测 327s）。
+// ⚠️ parallel 内【不得】用全局 phase()——它是跨 stage 的可变状态，会竞态 ⇒ 各自用 opts.phase 显式归组。
+// ⚠️ parallel 的失败语义：thunk 抛错 ⇒ 该位置为 null（调用本身不 reject）
+//    ⇒ 下方 readings===null 的「读数缺席」降级分支【仍是必需的】，且现在同样覆盖 audit===null。
+// ⊢ 代价（如实记，不是零）：自审的证据截止时刻由"读数跑完之后"提前到"与读数同时开始"，
+//   即它看不到 tick 开始后【工作流运行期间】主循环新做的动作。本轮恰好就有一例（10:44 那条越界
+//   是串行才被抓到的）。判断：自审对 git 用 --since='40 minutes ago'，3 分钟的起点前移相对 40 分钟
+//   窗口可忽略；且"工作流跑的同时主循环还在动手"本身是异常态，不是常态。⇒ 并发的收益 > 该代价。
+const [readings, audit] = await parallel([
+  () => agent(
   `你是管理者 tick 的【读数】subagent。你在一个全新的上下文里，这是刻意的：
 主循环的上下文会随轮次累积并使义务静默脱落（实测 A9 覆盖率 15.2%），而你每轮都是新的。
 
@@ -222,11 +242,9 @@ ${READ_CMD}
    "没跑成"与"跑了且正常"必须可区分（硬规则 3b）。
 3. **计数类的量，若你要报一个数，先确认你数的对象就是被问的那个对象**；
    拿不准就把两个候选都报出来并在 name 里区分，⛔ 不要合并成一个数。`,
-  { schema: READINGS_SCHEMA, label: 'readings' },
-)
-
-phase('Audit')
-const audit = await agent(
+    { schema: READINGS_SCHEMA, label: 'readings', phase: 'Readings' },
+  ),
+  () => agent(
   `你审计【管理者自己】最近这一轮的行为。\n\n**第一步：先查出 manager 的真 session id，⛔ 不要用任何记忆里的 id**（此处曾写死一个不存在的 id，坏了很久没人发现）：\n\`\`\`bash\n${MGR_SESSION_LOOKUP}\n\`\`\`\n**⊢ 若该命令返回空或报错 ⇒ 立即报 NOT-EVALUATED 并停止**；⛔ 不得改用启发式猜测、⛔ 不得因为查不到就报「0 条违规」——一个查不到数据的审计最可能的输出恰恰是「没发现问题」，那与合格同形。\n\n拿到 id 后用 meta-cc 查该会话
 （deferred 工具，先 ToolSearch 取 schema：\`mcp__meta-cc__query_session_content\`）
 加 \`git log --oneline --since='40 minutes ago' -- ${ROOT}\`。
@@ -293,8 +311,9 @@ const audit = await agent(
 
 所以：**不要列举主循环做了什么**。只在证据里发现【主循环没声明、但确实发生过】的动作时，
 把它放进 \`undeclaredActions\`（这是漏报检测）。看不到就返回空数组，**不要凑数**。`,
-  { label: 'self-audit', phase: 'Audit', schema: AUDIT_SCHEMA, model: MODEL }
-)
+    { label: 'self-audit', phase: 'Audit', schema: AUDIT_SCHEMA, model: MODEL }
+  ),
+])
 
 // ══ 把指令贴在结果后面交还主循环 ══════════════════════════════════════════════
 // 主循环的 tick 只需要记住一条：调这个 workflow，然后照下面返回的指令做。
@@ -317,12 +336,21 @@ const A9_FIRST = '**先做这一条，再跑读数块**：`meta-cc query_session
 // 阶段1：读数已由 readings agent 在新鲜上下文里取回 ⇒ 主循环拿到的是 facts 不是原始输出。
 // ⚠️ 降级必须可区分（硬规则 3b）：agent 死了/返回空时 readings 为 null ⇒ 明确说出「读数缺席」，
 //    并把 READ_CMD 作为【回退】交还，⛔ 不得静默变回"主线程自己跑"而看起来一切正常。
+// ⚠️ 硬规则 3b（并发化后新增的暴露面）：parallel 里 agent 抛错 ⇒ 该位置 null。
+//    而 `audit: null` 与「审计跑了、零违规」在主循环眼里同形——那正是本文件反复在防的形状
+//    （自审 prompt 自己就写着「一个查不到数据的审计最可能的输出恰恰是『没发现问题』」）。
+//    ⇒ 给"没跑成"一个独立取值，⛔ 不与合格共用。
+const 自审 = audit ?? {
+  evaluated: false,
+  reason: '自审 agent 未返回（null）——本轮【审计缺席】，⛔ 不得读作「零违规」',
+}
+
 const 读数 = readings
   ? { facts: readings.facts ?? [], notEvaluated: readings.notEvaluated ?? [], 来源: 'readings subagent（新鲜上下文）' }
   : { facts: [], notEvaluated: [{ name: '__all__', reason: 'readings subagent 未返回（null）——本轮读数缺席' }], 来源: 'ABSENT' }
 
 return {
-  audit,
+  audit: 自审,
   读数,
   指令: {
     第零步_先判上一轮_B1_是否执行: A9_FIRST,
