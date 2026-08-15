@@ -179,6 +179,21 @@ test("manager-tick-readings: latestTickLog handles quay dated format and archgua
   assert.equal(latestTickLog({ name: "x", dir: "" }), "no-dir");
 });
 
+test("manager-tick-readings: latestTickLog full:true carries the complete row (A0 截断缺陷 fix, manager ③ 2026-08-15)", (t) => {
+  // 缺陷：默认 maxLen=200 把 outer tick-log 行（实测 500-1000+ 字符）截到 A11 前 ⇒ 判准⑥′ 无法判 outer tick 完整性。
+  // 修法：A0 feed 走 full:true（完整行）；显式 maxLen 仍是截断语义（向后兼容）。
+  const quay = { name: "quay", dir: tmpdir(t) };
+  const longLine = "- `2026-08-07 04:39Z` `correct` — " + "A11 suite=green ".repeat(50);
+  write(quay.dir, "orchestration/tick-log.md", "# log\n\n" + longLine + "\n");
+  const full = latestTickLog(quay, 200, { full: true });
+  assert.ok(!full.endsWith("..."), "full:true must not truncate");
+  assert.ok(full.includes("A11 suite=green"), "full:true must carry A11+ content");
+  assert.ok(full.length > 200, "full:true must exceed the 200 default cap");
+  // 向后兼容：显式 maxLen（无 full）仍是截断语义
+  const trunc = latestTickLog(quay, 200);
+  assert.ok(trunc.endsWith("...") && trunc.length === 200, trunc.length);
+});
+
 test("manager-tick-readings: latestTickLog returns the newest dated row across eras, not the stale old-format one (缺陷①/AC2)", (t) => {
   // 真实 quay 形状：旧倒序表 + `> **` inner tick + 新 `## YYYY-MM-DD HH:MMZ tick` 节（追加顺序）。
   // 修复前 `grep '^| 2026'` 稳定返回 08-09 陈旧行；修复后必须取全局最新 = 08-12 节。
