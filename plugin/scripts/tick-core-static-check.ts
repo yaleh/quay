@@ -35,8 +35,11 @@
 //          a dead/frozen-prerequisite marker (前提已死/来源已冻结/已冻结/前提已失效/前提已被人的裁定移除)
 //          MUST also carry the canonical exclusion marker "不计入覆盖率分母" on the SAME line. A dead
 //          item still counted in the denominator is the exact perverse incentive AC60 kills (honest
-//          annotation would DROP coverage ⇒ incentivize non-annotation). Manager's 6 deducts (A7/
-//          A12a/A14/B2c/乙/丁), outer's B4, inner's C7 all carry the marker; a regression REDdens.
+//          annotation would DROP coverage ⇒ incentivize non-annotation). Manager's REMAINING in-core
+//          dead items (A4/A14) carry the marker; the former A7/A12a/B2c/乙/丁 set was migrated out of
+//          the core to manager-phase-goal-archive.md (pointerized, 2026-08-15 人裁定清死条目) so it is
+//          no longer in the denominator or the exclusion count; outer's B4 and inner's C7 carry the
+//          marker; a regression REDdens.
 //
 // SCAN SURFACE (a ## Contract invariant — the set must stay byte-identical across runs; a missing
 // scan target is an ERROR, never a silent green):
