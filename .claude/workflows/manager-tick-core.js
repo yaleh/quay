@@ -2,7 +2,10 @@ export const meta = {
   name: 'manager-tick-core',
   description: '管理者 tick 的持久化核：独立自我审计 + 把"该跑什么/该判什么"作为指令交还主循环',
   whenToUse: '每次 manager tick 的第一步，也是主循环唯一需要记住的一条：调它，然后照它返回的指令做',
-  phases: [{ title: 'Audit', detail: '用 meta-cc 独立审计管理者本轮行为（含"判准有没有真被应用"）' }],
+  phases: [
+    { title: 'Readings', detail: '在新鲜上下文里跑固定读数命令集，只回结构化 facts（SPEC-tick-mechanical-checks-mcp §8.3 阶段1）' },
+    { title: 'Audit', detail: '用 meta-cc 独立审计管理者本轮行为（含"判准有没有真被应用"）' },
+  ],
 }
 
 // ══ 本文件的设计（人 2026-08-07 提出，逐条都是对我前一个错误前提的纠正）══════════════
@@ -133,6 +136,78 @@ const AUDIT_SCHEMA = {
   },
 }
 
+// ══ 阶段1（SPEC-tick-mechanical-checks-mcp-2026-08-15 §8.3，人 2026-08-15 08:2xZ 令执行）══════
+// 【为什么】READ_CMD 此前作为【命令块交还主线程执行】⇒ 命令原始输出全部沉积在主上下文里，
+// 而实测规律是「凡需跨轮存活在主上下文内的义务都衰减」（§1.1 七点：B1 100% vs A9 15.2%）。
+// 改为：本 workflow 内一个 readings agent 在【新鲜上下文】里跑同一批命令，只回结构化 facts。
+// 【schema 是必需的，不是装饰】§8.4-3：不带 schema 则散文从返回值那一侧灌回主上下文，白搬。
+// 【notEvaluated 独立取值】§7-② + 硬规则 3b：命令跑不成必须与"跑了且正常"可区分，⛔ 不得合并。
+// 【args 不喂总结】§8.4-2：本 agent 自己去盘上读正本，⛔ 不由主循环传任何总结文字进来。
+const READINGS_SCHEMA = {
+  type: 'object',
+  required: ['facts', 'notEvaluated'],
+  properties: {
+    facts: {
+      type: 'array',
+      description: '本轮读数，每条一个量。⛔ 不要把命令原始输出塞进来——那正是本次改动要挡在主上下文之外的东西。',
+      items: {
+        type: 'object',
+        required: ['name', 'value', 'source'],
+        properties: {
+          name: { type: 'string', description: '量名，如 anchor_check / load1 / suite_state / worktrees_in_flight' },
+          value: { type: 'string', description: '取值（数字也用字符串），保持原样，不要加解释' },
+          source: { type: 'string', description: '产出它的机件或命令（§2.1-4：规则可声明某量只接受来自机件 X 的值）' },
+          measuredAt: { type: 'string', description: 'UTC ISO 时刻；机械判过期用（§2.1-4）。取不到就省略。' },
+          delta: { type: 'string', description: '与上一轮相比的变化（若本轮无从得知就省略，⛔ 不要猜）' },
+        },
+      },
+    },
+    notEvaluated: {
+      type: 'array',
+      description: '【无法评估】的量——命令失败/文件缺失/输出读不懂。⛔ 绝不能把它们并进 facts，也绝不能省略。',
+      items: {
+        type: 'object',
+        required: ['name', 'reason'],
+        properties: {
+          name: { type: 'string' },
+          reason: { type: 'string', description: '为什么无法评估：命令退出码、缺哪个文件、输出哪里读不懂' },
+        },
+      },
+    },
+  },
+}
+
+phase('Readings')
+const readings = await agent(
+  `你是管理者 tick 的【读数】subagent。你在一个全新的上下文里，这是刻意的：
+主循环的上下文会随轮次累积并使义务静默脱落（实测 A9 覆盖率 15.2%），而你每轮都是新的。
+
+**你的唯一任务**：在 ${ROOT} 跑下面这批固定命令，把结果整理成结构化 facts 返回。
+**⛔ 不要把命令的原始输出返回给我** —— 挡住原始输出正是本次改动的全部目的。
+**⛔ 不要做任何判读、建议、总结** —— 判读是主循环的事，你只负责把量取准。
+
+**第一批：命令块（逐条跑，失败的记进 notEvaluated，⛔ 不要跳过也不要假装成功）**
+${READ_CMD}
+
+**第二批：A0 与 A1（正本命令，逐字照跑）**
+- A0：node --experimental-strip-types plugin/scripts/quay-session.ts manager-tick-readings
+      → 取 三项目 status / resource.（cpu_some_avg10, load1, node_count, node_dual_read, mem_available_mb）
+        / outer.liveness / outer.ticklog / monitor.
+- A1：python3 orchestration/manager-anchor-check.py
+
+**第三批：五项手跑 —— 内容【不在此复制】（本文件的历史教训：此处复制过一次，核改了而副本没跟着改，
+指令块照旧打印已被推翻的做法，同形第三次）。你自己去读正本：orchestration/manager-tick-core.md 的 A0 行，
+照它当前写的跑。⇒ 你读到什么就跑什么，⛔ 不要用你记忆里的版本。**
+
+**取值纪律（三条，违反其一这次读数就没有价值）**
+1. **每条 fact 带 source**（哪个机件/命令产出的）；能取到时刻就带 measuredAt。
+2. **无法评估的进 notEvaluated 并写清 reason**，⛔ 绝不并进 facts、绝不省略——
+   "没跑成"与"跑了且正常"必须可区分（硬规则 3b）。
+3. **计数类的量，若你要报一个数，先确认你数的对象就是被问的那个对象**；
+   拿不准就把两个候选都报出来并在 name 里区分，⛔ 不要合并成一个数。`,
+  { schema: READINGS_SCHEMA, label: 'readings' },
+)
+
 phase('Audit')
 const audit = await agent(
   `你审计【管理者自己】最近这一轮的行为。\n\n**第一步：先查出 manager 的真 session id，⛔ 不要用任何记忆里的 id**（此处曾写死一个不存在的 id，坏了很久没人发现）：\n\`\`\`bash\n${MGR_SESSION_LOOKUP}\n\`\`\`\n**⊢ 若该命令返回空或报错 ⇒ 立即报 NOT-EVALUATED 并停止**；⛔ 不得改用启发式猜测、⛔ 不得因为查不到就报「0 条违规」——一个查不到数据的审计最可能的输出恰恰是「没发现问题」，那与合格同形。\n\n拿到 id 后用 meta-cc 查该会话
@@ -222,11 +297,23 @@ const A9_FIRST = '**先做这一条，再跑读数块**：`meta-cc query_session
   '**⛔ 不得只写「已核实」** —— 产物是那个条数本身。\n' +
   '**通用形式**：任何我声称要用的机制，>3 个 tick 周期未被调用就要记（凡其调用在 transcript 里有 tool_use 记录者，一律用直接量核，不用自述）。'
 
+// 阶段1：读数已由 readings agent 在新鲜上下文里取回 ⇒ 主循环拿到的是 facts 不是原始输出。
+// ⚠️ 降级必须可区分（硬规则 3b）：agent 死了/返回空时 readings 为 null ⇒ 明确说出「读数缺席」，
+//    并把 READ_CMD 作为【回退】交还，⛔ 不得静默变回"主线程自己跑"而看起来一切正常。
+const 读数 = readings
+  ? { facts: readings.facts ?? [], notEvaluated: readings.notEvaluated ?? [], 来源: 'readings subagent（新鲜上下文）' }
+  : { facts: [], notEvaluated: [{ name: '__all__', reason: 'readings subagent 未返回（null）——本轮读数缺席' }], 来源: 'ABSENT' }
+
 return {
   audit,
+  读数,
   指令: {
     第零步_先判上一轮_B1_是否执行: A9_FIRST,
-    第一步_跑这个命令块拿读数: READ_CMD,
+    第一步_读数已在上面的_读数_字段: readings
+      ? '**读数由 readings subagent 在新鲜上下文取回，见本返回的 `读数` 字段。**\n' +
+        '⛔ 不要再自己跑一遍命令块——那会把原始输出重新灌进主上下文，正是本次改动要挡的东西。\n' +
+        '**必看 `读数.notEvaluated`**：那是【无法评估】的量，与"正常"不是一回事（硬规则 3b）；非空即须在 tick-log 写出。'
+      : '🔴 **readings subagent 未返回 ⇒ 本轮读数缺席。** 回退：自己跑下面这个命令块，并在 tick-log 记一条「读数降级」。\n' + READ_CMD,
     第二步_按这些判准逐条判读: JUDGE_CRITERIA,
     第三步_收尾: CLOSING,
     第四步_发消息时照这个: SENDING,
