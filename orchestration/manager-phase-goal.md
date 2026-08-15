@@ -146,10 +146,18 @@
       —— **该模块已于 AC48 标 RETIRED、零生产调用者** ⇒ **活指令指向退役模块**，且它就在 inner 现在要读的那份文件里。
       **⚠️ 但它不阻塞新阶段的 AC54–57**（四条都不碰那条路径），**故排在通则之后，不插队**。
 
-- [ ] **AC62（协议·fan-in 改为「无锁段自测 + 锁内 ff」）**——人 2026-08-14 裁定，正本
+- [x] **AC62（协议·fan-in 改为「无锁段自测 + 锁内 ff」）**——人 2026-08-14 裁定，正本
       `orchestration/SPEC-fan-in-ff-merge-lock-2026-08-14.md`
 
-      **⛔ 2026-08-14 05:4xZ 核后【明确不勾】，唯一阻塞项：判据2 的检查器零调用者。**
+      **⊕ 2026-08-15 01:0xZ 达成：阻塞项已消失，我实跑核实。**
+      `run_checker "fan-in-ff-protocol-check"` 现在 `scripts/test.sh:616` **真接线**（`grep -c` 非零半边打印过：
+      `run_checker ... --baseline cd4f49b4 --json`，不是注释/候选表）。**实跑**：四个子检查 `non-ff-fan-in` /
+      `suite-in-lock` / `lock-hold-only-ff` / `retry-record-shape` 全 `evaluated:true, ok:true`。
+      **能取假验证（负控制，硬规则②零计数半边）**：`FAN_IN_MERGE_SUBJECT_RE` 对 baseline 前的历史真样本命中 **325**
+      条（旧式 `merge: fan-in gap-xxx` 提交），对 baseline 后 develop 主干命中 **0**——**谓词有效，不是恒零**。
+      ⇒ 判据1/2/3 均有生产读数支撑，勾。
+
+      **⛔（历史，已消失）2026-08-14 05:4xZ 核后【明确不勾】，唯一阻塞项：判据2 的检查器零调用者。**
       任务 `gap-ac62` 已 done、四个交付物均在 develop（`fan-in-ff-merge.sh` / `fan-in-ff-protocol-check.ts`
       + 两个测试），协议本体/重试记录/两锁不交叉都已读到。**但**：
       ```
@@ -178,18 +186,39 @@
       **⚠️ 不覆盖**：不规定锁的实现形态与路径；不引入队列/优先级/让步；不动 `fan-in-ts-typecheck-gate.ts`
       与派发侧任何判据。
 
-- [ ] **AC63（补钩子缺口·ff 前必须显式跑 doc 检查）**
-      **判据1**：ff 之前，subagent 在无锁段显式跑 `bash scripts/test.sh --static-checks-doc`。
-      **判据2（能取假）**：**develop 上出现一次 ff 落地，而无对应的 doc 检查记录 ⇒ 必须红。**
-      **理由（本设计唯一的真风险）**：`precommit-guard.ts` 实现注释逐字
-      「**Fast-forward merges create no merge commit, so pre-merge-commit does not fire for them**」
-      ⇒ **改 ff-only 后 doc 检查在 fan-in 路径上一个钩子都不触发**
-      （`pre-commit` 只由 `git commit` 触发，`pre-merge-commit` 只由 `--no-ff` 触发）。
-      **⚠️ doc 检查会跑两次，【刻意不去重】（人 2026-08-14 确认）**：第一次在 subagent 自己 commit 时
-      （只覆盖自己的改动），第二次在第 3 步（覆盖与 develop 合并之后的内容）——
-      **两次的对象不同，去重会漏掉合并引入的文档冲突。**
+- [ ] **AC63（补钩子缺口·ff 前必须显式跑 doc 检查）——⚠️ 2026-08-15 01:1xZ 核：判据1 达成，判据2 揭出 3 个未解释的生产缺口，暂不勾**
+      **判据1（已达成）**：`fan-in-execute.js:150` `bash scripts/test.sh --static-checks-doc` 确在无锁段第 3 步，
+      任务 `gap-ac63-ff-explicit-doc-check-before-merge` done，负控制样板真实（钩子计数器实测 ff 触发 0 个钩子）。
 
-- [ ] **AC64（precommit-guard ② 退役——危险已消失，不是参照系失效）**
+      **判据2（能取假·我实跑核，机制真实但揭出 3 个未解释的实例）**：
+      检查器 `per-task-suite-record-check.ts` 的 `ff-no-doc-check` 子检查**不在默认 `run_checker` 调用里**
+      （`scripts/test.sh:589` 不传 `--lock-events`——**这是设计内的**，代码注释写明「Default live run = shape
+      check only；--lock-events 是显式审计」，同 AC57 replay 样板，不算零调用者）。**我显式带 `--lock-events` 跑**：
+      ```
+      41 条真 ff（lock-events acquire）中 32 条无 docChecked=true 的 per-task-suite 记录
+      过滤到【记录机制本体落地之后】（57825d11, 2026-08-14T18:39:42Z——同 AC78 的落地时点判定法）：32 → 3
+      有记录的 12 条 ⇒ docChecked=true 12/12（100%）——机制一旦被调用，从未漏记
+      ```
+      **⇒ 判据2 的检查器是真的（能取假，负控制干净）；但剩下 3 条 post-boundary 缺口我还没有答案**：
+      ```
+      gap-fan-in-suite-data-not-accounted   Workflow 调用 18:40:40Z（落地后 58s），无记录——很可能自指
+        （该任务本身就是「把 4.5 步接进 fan-in-execute.js」那次落地，worktree/脚本体时序未查清，未定案）
+      gap-phase-boundary-differential-accounting  Workflow 调用 2 次（20:11/20:13Z，落地后 ~1.5h），无记录——
+        真正的 ff 落地在 21:08Z，与这两次调用是否是同一次执行未核实，异常，未定案
+      gap-ac81-inner-verify-wiring          meta-cc 查【零】Workflow(fan-in-execute) 调用记录 ⇒ 走的不是
+        workflow（同 7e64a86b 的「定义域外」嫌疑，但这次是真实两亲 merge + 任务改动，不是单文件 doc 引用，
+        与已结案的 7e64a86b 不同形，未核实是否该按 AC78 判据2 记違规），未定案
+      ```
+      **⇒ 阶段判据2 暂不判定为"达成"**——机制本身干净，但生产读数里有 3 个我还没解释的缺口，
+      在解释清楚前勾选会是硬规则④ 的形态（把"检查器能跑"当成"目标已达成"）。**留给 outer/inner**：
+      三条任务 Touches 均在 inner 执行面，归属同 C17。
+
+- [x] **AC64（precommit-guard ② 退役——危险已消失，不是参照系失效）**
+      **⊕ 2026-08-15 01:1xZ 达成，我核：判据1/2 均在代码中现读到，非自述。**
+      **判据1**：`precommit-guard.ts:4-5` 现读「② 拒绝「轮 running 且触及断言面」的写入…已退役（AC64
+      2026-08-14, gap-ac64-precommit-guard-clause2-retire）：它保护的危险随 AC42 结构性消失」；
+      `:309` 现读「AC64: ② retired ⇒ no state-file read, no fail-loud」；落点映射在
+      `orchestration/archive/AC58-retired-clauses.md#R27`（`:368-392`，含来源/退役理由/三条立条教训留档）。
       **判据1**：`precommit-guard` 的职责②（拒绝「轮 running 且触及断言面」的写入）**退役**，
       按 AC58 的形态迁出（删正文 + 留指针 + 落点映射进 archive）；**职责①（文档类检查）保留不动**。
       **判据2（能取假）**：退役后 `precommit-guard` 仍必须对 doc 检查失败拒绝提交（① 未被误删）。
@@ -226,7 +255,11 @@
       `full-suite-runner.ts`（13 次）+ 其测试（16 次）⇒ **属必须走 inner 那一侧**。
       **⚠️ 不覆盖**：不改 manager 的 §0/D2 边界（manager 仍不改任何实现）；不改 inner 的派发/实现职责。
 
-- [ ] **AC66（AC/任务驱动的行为变更必须可检查确认 —— 人 2026-08-14 03:2xZ 裁定，并【修正了我的切法】）**
+- [x] **AC66（AC/任务驱动的行为变更必须可检查确认 —— 人 2026-08-14 03:2xZ 裁定，并【修正了我的切法】）**
+      **⊕ 2026-08-15 01:1xZ 达成，我实跑核：两个样板均真接线且判据3 通过。**
+      `ac66-a22-agent-id-check.test.mjs` 现跑：11/11 绿，含判据3 两条负控制（真实缺席样本回放 RED，
+      真实合规样本回放 GREEN，均非构造 fixture）。`outer-tick-log-check` 接线：
+      `orchestrator-tick-core.md:105` 现读边界文本含判据2/3 逐字，`grep -c` 于 `scripts/test.sh` = 1（真调用）。
       **人的原则逐字**：「**仍然允许三层在任务外修改自己的行为；但经过 AC 和任务驱动的行为变更应当是可以检查和确认的。**」
 
       **⚠️ 这推翻了我 03:1xZ 写下的范围，且我的切错在哪值得记**：
@@ -603,6 +636,44 @@
       差集非空 ⇒ 红，并列出差集任务名
       ```
       **(a) 管「有没有走 workflow」，(b) 管「走了有没有真的 ff」——只有 (b) 会漏掉"绕过 workflow 但手工 ff"的情形。**
+
+      **⊕ 2026-08-15 00:4xZ 裁定（我提的反例 `7e64a86b` 结案：定义域之外，⛔ 不记入判据2 差集）**
+
+      **来历**：我 2026-08-14 23:1xZ 报「inner 的 AC81 doc-only 落地走的是 `fan-in-ff-merge.sh` 而非本 workflow」，
+      挂起不勾不报违规，待读 `fan-in-execute.js` 的适用条件。outer 00:3xZ 核完判 **(c) 违规**，建议记入差集。
+      **我核完的结论：三点，其中两点推翻 outer，一点推翻我自己。**
+
+      **① outer 的结论对，但它给的证据是【结构上不可能取假】的（硬规则4）**：
+      「`7e64a86b` 不在 `fan-in-merge-lock-events.jsonl`」——**该载体里根本没有 commit sha 字段**。
+      对真样本干跑（硬规则② 零计数半边）：`{event,ts,epoch,taskId,pid,runId,agentId}`，**七个键无一为 sha**
+      ⇒ 拿任何 commit sha 去 grep 它，**恒为 0，包括真的持过锁的那些**。
+      **能取假的读法是【时间窗】不是 sha**：`22:30:18Z → 23:49:07Z` 之间零条锁事件，而该 commit 在 `23:43:28Z`
+      ⇒ **确实没持锁**。结论存活，**证据形式必须换掉**——否则下次同法会把一个持过锁的 commit 也判成没持锁。
+
+      **② 分类不是 (c)，是【不在判据2 的定义域内】——因为它根本不是一次 fan-in**：
+      ```
+      git log -1 --format='%P' 7e64a86b   ⇒ 单亲 4168cf1b（无 merge）
+      git show --stat                     ⇒ plugin/skills/init/SKILL.md | 1 +（一个文件一行）
+      tasks/gap-ac80-anchor-prompt-consumer-path-fix.md ⇒ status: ready，且 git ls-files 为空（未跟踪）
+      ```
+      **⇒ 没有任何任务落地。** 而判据2 的差集**按任务算**（原文：「列出差集任务名」）⇒ 它不进差集。
+      **结构佐证**：`.claude/workflows/fan-in-execute.js:44` `if (!task || !worktree || !root) return {outcome:'bad-args'}`
+      ⇒ **无任务的写入根本走不了这个 workflow**。「该走没走」的前提是它走得了。
+      **⇒ 记入 AC78 差集会是硬规则⑧ 的形态**：把另一类违规塞进一个不覆盖它的判据，
+      **此后 AC78 的差集就不再是「fan-in 有没有走 workflow」的干净读数**——为了记一次违规，毁掉一个判据的可读性。
+
+      **③ outer 关于例外的那半条【成立】，我照读源码确认**：`doc-only-delta` 分支在 **step 4**，
+      位于 step 1（merge+anti-drift）/ step 2（delta 判定）/ step 3（ts-typecheck 闸）**之下游、workflow 之内**
+      ⇒ 它只授权「跳过全量 suite」，**从不授权「跳过 workflow」**。**⇒ 可能性 (a)「doc-only 是合法例外」证否。**
+
+      **④ 推翻我自己的那一点**：我原话说它「走的是 `fan-in-ff-merge.sh`」——**同样没有**（该窗口零锁事件）。
+      那句是我**照抄 inner 的自述**而未核，判准② 的标准形态（陈旧/自述当现状）。**记账。**
+
+      **⇒ 对 AC78 的净效果**：反例消解，**判据2 未被它证否**；但 AC78 仍不勾——判据1/3/4/5/6 尚无我核过的读数。
+      **⇒ 分出一个观察项（⛔ 不加条款，硬规则⑫：我给不出这一类的发生率）**：
+      **「直接提交 develop、不经任何 fan-in 机件」的写入，AC78 判据2 结构上看不见它**——
+      `7e64a86b` 绕过了 ff-lock / anti-drift-touches / AC 完成闸三道，且不进任何差集。
+      **归属不是 AC78，是 11b「盘上状态即生产输入」那条线**（outer 的 C17 / 越权直改面）。
 
       **判据3（M176 陷阱写进 A6）**：**workflow 一律以 `scriptPath` 调用，禁用 `name:`**。
       `CLAUDE.md` 逐字记着：同一会话内第二次 `name:` 派发**可能取到旧脚本体**，即使文件已改并提交。
