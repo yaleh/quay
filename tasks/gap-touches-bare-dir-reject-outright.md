@@ -1,7 +1,7 @@
 ---
 id: gap-touches-bare-dir-reject-outright
 title: 封存：bare-dir 判据判错对象——伤害是裸目录本身，规则却 gate 在 uncertain 标注（人 2026-08-13 裁定暂缓，证据保留）
-status: needs-human
+status: superseded
 labels:
   - gap
   - defect
