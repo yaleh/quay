@@ -1,7 +1,7 @@
 ---
 id: gap-direct-to-develop-ruled-historical-cddc55e2
 title: detector 加 ruled-historical 豁免承载 cddc55e2——manager 裁定 one-off 形态=ruled 豁免+定案理由（非 AC65 sha 表；判据3 不松动）
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
