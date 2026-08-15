@@ -206,9 +206,26 @@ const audit = await agent(
 
 // ══ 把指令贴在结果后面交还主循环 ══════════════════════════════════════════════
 // 主循环的 tick 只需要记住一条：调这个 workflow，然后照下面返回的指令做。
+// A9（判 B1 本轮是否执行）此前【只】写在 orchestration/manager-tick-core.md:24，而该文件不在每轮读取
+// 路径上（2026-08-15 实测：12.3h 窗口内 Read 该文件 0 次），本 .js 里 grep 'A9' 也是 0
+// ⇒ A9 既不在我读的文件里、也不在本 workflow 的返回里 ⇒ 实测每轮覆盖率 ≤5/33 = 15.2%。
+// 它没被发现没在跑，是因为它的检查对象 B1 恒 100% ⇒ 它从来没有东西要报
+// ⇒「不运行的检查」与「运行且输出 OK 的检查」在记录上同形（硬规则 3b 的镜像）。
+// 修法按「跳数」观察项（manager-phase-goal.md 🔭 节）：把它从【独立一条】挪到【返回清单的第一条】。
+// ⚠️ 残留且【不可由本层关闭】：B1 没被调时本返回不存在 ⇒ A9 同样不在场 ⇒ 仍无人发现。
+//    该残留只能由上下文之外的东西关闭（cron 重投的 prompt 正本 / 另一层），已作为待裁项上报人。
+// ⚠️ 指针不是副本：此处只给命令形态与判据，理由/实测在 manager-tick-core.md:24 与 phase-goal 🔭 节。
+const A9_FIRST = '**先做这一条，再跑读数块**：`meta-cc query_session_content role=tool block_type=tool_use ' +
+  'tool_name=Workflow session_id=<我> since=<上一条 [manager-tick] 的实际触发时刻>`（`since` 取自同一条 ' +
+  'meta-cc `role=user pattern=\\[manager-tick\\]` 的末条 timestamp，⛔ 不用假定的周期常数）。\n' +
+  '**判据**：本轮命中 0 ⇒ 上一轮 B1 未执行，当轮记一条并在 tick-log 写出该读数；命中 ≥1 ⇒ 写出条数。\n' +
+  '**⛔ 不得只写「已核实」** —— 产物是那个条数本身。\n' +
+  '**通用形式**：任何我声称要用的机制，>3 个 tick 周期未被调用就要记（凡其调用在 transcript 里有 tool_use 记录者，一律用直接量核，不用自述）。'
+
 return {
   audit,
   指令: {
+    第零步_先判上一轮_B1_是否执行: A9_FIRST,
     第一步_跑这个命令块拿读数: READ_CMD,
     第二步_按这些判准逐条判读: JUDGE_CRITERIA,
     第三步_收尾: CLOSING,

@@ -170,6 +170,7 @@ rules* but does not re-implement each SPEC. Index (under `orchestration/` in the
 - `orchestration/SPEC-tick-read-path-slimming-2026-08-14.md` — the tick read path (1-hop entry, pinned `tail -30`, measured E2a/E2b token floors)
 - `orchestration/SPEC-tick-quality-2026-08-14.md` — the cross-layer tick spec (R1–R9, each with a criterion and the failure that bought it; D1–D8 quality dimensions with the three-layer baseline)
 - `orchestration/SPEC-in-flight-semantics-2026-08-14.md` — 「在飞」的完整语义 (A unlanded-tasks vs B running-subagents; the 10 prior fixes of the same quantity; §6 the system-wide proxy-quantity survey and the proxy registry proposal)
+- `orchestration/SPEC-tick-mechanical-checks-mcp-2026-08-15.md` — tick 的机械检查统一为一个 MCP 工具面 (proposed·未排期, future phase; §1 the seven measured per-round coverage points and why an MCP server is the first thing both mechanical AND outside every layer's context; §3 integration into the existing quay MCP server, reusing observation.ts's degradation contract)
 - `orchestration/SPEC-inbox-service-2026-08-08.md` — the inbox service (agent-to-agent communication channel: manager/outer/inner via a per-project background service, tmux demoted to emergency control)
 - `orchestration/SPEC-instruments-behind-one-entry.md` — instrument discovery behind one entry
 - `orchestration/SPEC-isolation-and-resource-governance-2026-08-05.md` — isolation + resource governance
