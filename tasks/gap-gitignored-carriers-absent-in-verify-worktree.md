@@ -1,7 +1,7 @@
 ---
 id: gap-gitignored-carriers-absent-in-verify-worktree
 title: .quay/ 运行时载体在一次性 verify worktree 结构上不存在——依赖检查器每轮 NOT-EVALUATED 恒绿（AC62 撤勾，5 载体/2 检查器/1 错误勾选/≥1 真差集被掩盖）
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
@@ -54,7 +54,7 @@ fan-in-ff-protocol-check 主检出 ⇒ 四子检查全 evaluated=true
 
 - [ ] AC1 检查器在一次性 worktree 里真评估（不再因载体缺失 NOT-EVALUATED 恒绿）——至少 fan-in-workflow-check 与 fan-in-ff-protocol-check。
 - [ ] AC2 主检出行为不退化：fan-in-workflow-check 主检出仍 ok=false 真抓 gap-ac81；真漂移仍红。
-- [ ] AC3 能取假·真样本：gap-ac81-inner-verify-wiring 在 worktree 验证轮必须被报红（不再被掩盖）；NOT-EVALUATED 有独立取值且不用于合格。
+- [ ] AC3 能取假·真样本（manager 03:3xZ 建议形态，钉【结论】非【是否评估】）：**同一时刻、同一参数，worktree 与主检出的 verdict 必须相同**——修复前两边都必须 ok=false 且差集都含 gap-ac81-inner-verify-wiring；修复后（该差集被处理掉时）两边都必须 ok=true。任一时刻两边结论不同 ⇒ 红。⛔ 把空文件复制进 worktree（evaluated=true 但 0 条记录 ok=true）满足「真评估」却恒绿原封不动——判据钉结论不钉评估。**与 AC2 成对**：只有 AC2 时可把主检出也改成空集全绿；两条都在才闭合。
 - [ ] AC4 ⚠️ verification-round.jsonl 载体缺失对 AC83 生产读数判据的影响——核实是否同病并覆盖。
 - [ ] AC5 既有测试全绿；`--for-task` scoped 门绿；套件验证轮绿。
 
