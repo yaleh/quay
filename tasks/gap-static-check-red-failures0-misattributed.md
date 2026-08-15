@@ -1,7 +1,7 @@
 ---
 id: gap-static-check-red-failures0-misattributed
 title: 静态闸红时 failures[0] 指向非阻断检查器（--no-block）而非真 exit≠0 的 gate——诊断者会先修不该修的地方（round181/182 实证，manager ③ 对照定案）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
