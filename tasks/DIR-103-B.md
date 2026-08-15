@@ -2,7 +2,7 @@
 id: DIR-103-B
 title: "MCP surface: gate_run dryRun: true executes the acceptance command
   without recording a GateEvent"
-status: todo
+status: ready
 labels:
   - directive
   - human-steered
