@@ -1,7 +1,7 @@
 ---
 id: gap-init-skill-md-byte-identical-claim-fix
 title: SKILL.md:71 fast-mode-tick-core byte-identical claim 为假——副本为铺出模板（引用目标 docs/analysis），改正本/副本关系声明
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
