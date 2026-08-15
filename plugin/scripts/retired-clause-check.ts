@@ -170,6 +170,12 @@ export const REGISTRY: Entry[] = [
       "bisect 定位肇事 merge",
       "绝不 blind `--ours/--theirs`",
     ] },
+  // outer B5 轮次记录退役 (AC84 2026-08-15,outer 不跑 suite ⇒ closed 恒空;
+  // 正文迁出见 archive ## R34; 指针行保留标题,markers 用正文独有词)
+  { id: "R34", source: "orchestration/orchestrator-tick-core.md", markers: [
+      "载体由两个 writer 写，B5 只是其一",
+      "appendVerificationRound（:2502/:3544",
+    ] },
 ];
 
 // ── normalization: strip backticks + line-comment prefixes (# / //), collapse whitespace ──

@@ -52,6 +52,11 @@ export interface RunGateArgs {
   logPath: string;
   actor?: string;
   workspaceRoot?: string;
+  /** DIR-103-B: when true, execute the gate's check (incl. the acceptance
+   * command via the shared runAcceptance() runner) WITHOUT appending a
+   * GateEvent and WITHOUT any lifecycle/status mutation. The skip-append
+   * lives HERE — in the engine — as the single place any dry-run traverses. */
+  dryRun?: boolean;
 }
 
 export interface RunGateResult {
@@ -64,6 +69,11 @@ export interface RunGateResult {
  * Run gate `gate` against task `id` via `client`, append one GateEvent to
  * `logPath`, and return the verdict + the appended event.
  *
+ * With `dryRun: true`, the gate check (incl. the acceptance command via the
+ * shared `runAcceptance()` runner) still executes and the verdict is returned,
+ * but NO GateEvent is appended and NO lifecycle/status mutation occurs — the
+ * event field is still returned describing what WOULD have been recorded.
+ *
  * Unknown gate name and missing task both throw (fail loud — the CLI's
  * top-level catch reports them).
  *
@@ -74,7 +84,7 @@ export interface RunGateResult {
  * auto-discovery from `process.cwd()` (unchanged behavior for existing
  * in-process callers/tests that never threaded a workspaceRoot through).
  */
-export async function runGate({ client, id, gate = "dod", logPath, actor = "quay-cli", workspaceRoot }: RunGateArgs): Promise<RunGateResult> {
+export async function runGate({ client, id, gate = "dod", logPath, actor = "quay-cli", workspaceRoot, dryRun }: RunGateArgs): Promise<RunGateResult> {
   const fn = resolveGate(gate, workspaceRoot);
   if (!fn) throw new Error(`unknown gate: ${gate}`);
   const task = await client.taskGet(id);
@@ -99,6 +109,11 @@ export async function runGate({ client, id, gate = "dod", logPath, actor = "quay
     timestamp: new Date().toISOString(),
     payload: { reason },
   };
-  appendGateEvent(logPath, event);
+  // DIR-103-B: the dryRun skip-append lives in the ENGINE (this single site).
+  // Any dry-run surface (MCP gate_run dryRun:true today, CLI --dry-run later)
+  // traverses this exact guard — no second skip-append implementation.
+  if (!dryRun) {
+    appendGateEvent(logPath, event);
+  }
   return { ok, reason, event };
 }

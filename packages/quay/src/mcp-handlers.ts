@@ -315,6 +315,7 @@ export function registerGateHandlers(
         "Run a named gate check against one task on an enabled Provider (defaults to the default-enabled Provider), appending one GateEvent to the gate-events log. " +
         "Defaults to the 'acceptance' gate (runs task.extra.acceptance as a shell command, fail-closed if unset) -- matching `quay gate <task-id>`'s own CLI default. " +
         "Pass `gate` to select a different registered gate (e.g. 'dod'). " +
+        "Pass `dryRun: true` to execute the gate (running the acceptance command via the shared runner) WITHOUT appending a GateEvent or mutating status. " +
         "Returns { ok, reason, event } -- ok:false is a NORMAL result (gate not satisfied), not an error. " +
         "Mirrors `quay gate <task-id> [--gate <name>]`.",
       inputSchema: {
@@ -324,9 +325,10 @@ export function registerGateHandlers(
         timeoutMs: z.number().int().positive().optional().describe("Kill deadline in ms for the acceptance runner (MCP parity with the CLI's --timeout; DIR-049 B1). Highest precedence: overrides the gate's gates.yml timeoutMs and the 60000 default. Needed for long suites (e.g. a ~137s `npx vitest run` via an acceptance gate would otherwise time out at the 60s default)."),
         file: z.string().optional().describe("Override the GateEvent log path (default <workspaceRoot>/.quay/gate-events.jsonl)."),
         cwd: z.string().optional().describe("Override the acceptance runner's working directory (default: workspaceRoot). Mirrors `quay gate --cwd`. Highest precedence over workspaceRoot default."),
+        dryRun: z.boolean().optional().describe("When true, execute the acceptance command via the shared runAcceptance() runner and return the verdict WITHOUT appending a GateEvent and WITHOUT mutating task status (DIR-103-B dry run)."),
       },
     },
-    async ({ provider, id, gate, timeoutMs, file, cwd }) => {
+    async ({ provider, id, gate, timeoutMs, file, cwd, dryRun }) => {
       const prevTimeout = process.env.QUAY_ACCEPTANCE_TIMEOUT_MS;
       const prevCwd = process.env.QUAY_ACCEPTANCE_CWD;
       const prevEnv = process.env.QUAY_ACCEPTANCE_ENV;
@@ -353,7 +355,9 @@ export function registerGateHandlers(
         if (envFile && !process.env.QUAY_ACCEPTANCE_ENV) {
           process.env.QUAY_ACCEPTANCE_ENV = envFile;
         }
-        const result = await runGate({ client: client as Parameters<typeof runGate>[0]['client'], id, gate: gate ?? "acceptance", logPath, workspaceRoot: cfg.workspaceRoot });
+        // DIR-103-B: dryRun is a pure forward — the skip-append lives in the
+        // engine (runGate), never here. The handler performs no local skip logic.
+        const result = await runGate({ client: client as Parameters<typeof runGate>[0]['client'], id, gate: gate ?? "acceptance", logPath, workspaceRoot: cfg.workspaceRoot, dryRun });
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
           structuredContent: result as unknown as Record<string, unknown>,

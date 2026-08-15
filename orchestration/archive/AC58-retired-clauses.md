@@ -497,6 +497,16 @@ export function semanticTriggerHeuristic(heartbeat) {
 - **B3 全量 suite 后台起跑**【freshness（AC61 A-5，2026-08-14；FAMILY-5）：`finishedAt` 距今 ≥ 一个 tick 周期 ⇒ 陈旧不计入，同 A11】:条件 = 本轮收尾 ≥1(或有新 merge 落地)**且** `state != running` **且** `resource-gate.sh --for full-suite` 放行。被测 worktree/integration checkout 时**必须**同传 `--state-dir "$REPO_ROOT/.quay"` (src:869 "停派",871 "资源闸放行")。**事件分支(`gap-b3-tick-coupled-misses-between-tick-merges`,2026-08-11):起跑是事件,不是本 tick 的轮询副作用**——`suite-state-trigger.ts` 的 Monitor 已把同一条件事件化:integration HEAD 前移(merge 落地)且 `state != running` ⇒ `SUITE-MERGE-PENDING`(AC2);`state=green` 且 `develop..integration>0` 且持续 idle ⇒ `SUITE-IDLE-GREEN`(AC3)。两条事件都驱动起跑(不靠 tick),`event_not_tick` 恒 1。本 B3 仍是 tick 内兜底(收尾 ≥1 路径),事件路径在其之前 (src:任务体 gap-b3-tick-coupled-misses-between-tick-merges Proposal/Contract)
 ```
 
+
+## R34 — outer B5 轮次记录退役（AC84 2026-08-15，outer 不跑 suite ⇒ closed 恒空）
+
+**来源**：`orchestration/orchestrator-tick-core.md` B 段 B5
+**退役**：AC84 2026-08-15，outer 不跑 suite（B3 退役）⇒ B5 的 `closed` 门控 tick-append 触发条件死（closed 恒空）；runner 的 `appendVerificationRound` 随之只在人明确要求单次跑时产生记录。趋势分析数据源改 `.quay/per-task-suite-records.jsonl`（判据6）。
+**正文**（原文迁出保留）：
+
+```
+- **B5 轮次记录**:`closed` 非空 ⇒ 追加 `.quay/verification-round.jsonl` 一行,**追加前**断言 `N == last+1`、**追加后**断言尾部 round == `N`;断言失败即本轮 tick 异常,不得静默跳过。`closed` 为空 ⇒ 不写、不报警 (src:904 "写轮次记录",916 "非重开")。**⚠️ 载体由两个 writer 写，B5 只是其一且已不触发（`closed` 恒空）**：原活源是 runner `full-suite-runner.ts:1460 appendVerificationRound`（:2502/:3544 每次 suite 完成时调用）——AC84 后 runner 只在人要求时产生记录，趋势分析数据源改 `per-task-suite-records.jsonl`（判据6） (src:任务体 gap-ac61-staleness-list-item-disposition.md A-3; manager 2026-08-15 ④ 核;AC84 退役)
+```
 ---
 
 ## R33 — outer 红窗分诊外层独占退役（AC84 2026-08-15，输入随 B3 退役）
