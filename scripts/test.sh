@@ -696,17 +696,18 @@ run_static_checks() {
   # ∧ 不在 ff-lock 时间窗内 ⇒ RED（11b/C17 写所有权/越权直改面）。排除集（denominator 谓词）与
   # 25 vs 30 的差异记录在任务体 + 检测器头注释：设计内 = 记账/转向/遥测面 + manager 独占（.claude/、
   # CLAUDE.md）+ 基础设施（.gitignore/.github/）+ 热修 fan-in 机件本身（plugin/scripts|test/fan-in-*）；
-  # 代码面含 plugin/skills/**/*.md（SKILL.md 是产品交付面，7e64a86b 因此报红）。基线 = 77b291db
-  # （enforcement 落点 develop HEAD）——历史欠账（~29 条）已文档化不重扫，只扫基线后的新直接提交
-  # （同 fan-in-ff-protocol-check --baseline cd4f49b4 模式）。锁事件缺失 = 可读空（full-suite worktree
-  # 无 .quay/ 运行时态），malformed/unpaired = NOT-EVALUATED（硬规则 3b）。
+  # 代码面含 plugin/skills/**/*.md（SKILL.md 是产品交付面，7e64a86b 因此报红）。基线 = b11ce720
+  # （AC65 声明形态落地点，enforcement 落点 develop HEAD）——pre-form 历史欠账（含 9f57e336/102cbf31/
+  # 02b2b2fc 的 outer 直提，当时一条命令验证过）已文档化不重扫，只扫基线后的新直接提交；form 后提交
+  # 必须带 `AC65:` + `AC65-Verified:`（同 fan-in-ff-protocol-check --baseline cd4f49b4 模式）。锁事件
+  # 缺失 = 可读空（full-suite worktree 无 .quay/ 运行时态），malformed/unpaired = NOT-EVALUATED（硬规则 3b）。
   # @static-tier change
   # @static-object plugin/scripts/direct-to-develop-bypass-check.ts plugin/test/direct-to-develop-bypass-check.test.mjs
   # --root main_root (gap-gitignored-carriers-absent-in-verify-worktree): develop reflog + lock events
   # are MAIN-checkout state, absent from the one-shot verify worktree. Pointing --root at the main
   # checkout gives the worktree round the SAME reflog + lock-events as a main run ⇒ verdicts identical
   # (AC3); on a main run main_root == repo_root ⇒ unchanged (AC2).
-  run_checker "direct-to-develop-bypass-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/direct-to-develop-bypass-check.ts" --root "${main_root}" --baseline 77b291db2ee5d3862f86c19f6d0ee0add9e111cf --json
+  run_checker "direct-to-develop-bypass-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/direct-to-develop-bypass-check.ts" --root "${main_root}" --baseline b11ce7202b46406d5d5bc82ef7b4c030c4aed05b --json
   echo "== workflows-dual-copy-drift-check (gap-workflows-dual-copy-drift-unchecked — .claude/workflows/ vs plugin/workflows/ 双副本漂移) =="
   # The three dual-copy workflow files (drain-directives / fan-in-execute / run-routines) live in
   # BOTH .claude/workflows/ (what runs here) and plugin/workflows/ (what quay-init --workflows ships
