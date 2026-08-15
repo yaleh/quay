@@ -56,7 +56,7 @@ depends_on: []
 ## Touches
 
 - scripts/test.sh（入口处调 refresh-worktree-quay.sh——suite 启动时把主检出 .quay 快照进 worktree）
-- plugin/scripts/refresh-worktree-quay.sh（新：主检出 .quay/（config/gates/运行时载体）快照复制进 linked worktree，排除 node-compile-cache / 日期型 full-suite-*.log / 收件箱；幂等；主检出上 no-op）
+- plugin/scripts/refresh-worktree-quay.sh（新：主检出 .quay 快照复制进 linked worktree——config/gates/运行时载体，排除 node-compile-cache / 日期型 full-suite-*.log / 收件箱；幂等；主检出上 no-op；注解无嵌套全角括号，避免 touches-parser 剥离失败）
 - plugin/scripts/capability-catalog.sh（新脚本 question 声明——AC1c 入口闸要求每个 plugin/scripts 文件声明它回答什么问题）
 - docs/proposals/quay-product-outline.md（delivery-inventory §6 快照重新生成——plugin/scripts/ 新增文件触发 delivery-inventory-drift-gate）
 - plugin/test/refresh-worktree-quay.test.mjs（新：复制/排除/no-op/自推导 root/幂等 五条）
