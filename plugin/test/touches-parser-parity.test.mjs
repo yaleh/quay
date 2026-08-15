@@ -25,10 +25,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { parseTouchEntries, parseTouchEntriesWithTags } from "../scripts/touches-parser.ts";
-import { parseTouches, checkTouchesPair } from "../scripts/touches-orthogonality-check.ts";
+import { parseTouches, checkTouchesPair, matchGlob } from "../scripts/touches-orthogonality-check.ts";
 import { parseBulletList } from "../scripts/select-tests-for-touches.ts";
 import { extractTouchesGlobs } from "../scripts/prepare-admission-check.ts";
 import { checkTouches } from "../scripts/task-schema.ts";
+import { checkTaskAntiDrift } from "../scripts/anti-drift-touches-check.ts";
 
 // ── AC3 fixture set ───────────────────────────────────────────────────────────────────────────────
 // Each fixture is a `## Touches` bullet line. `bodyOf` wraps it in a minimal execution-type task
@@ -167,6 +168,61 @@ test("AC4: an un-stripped (new) annotation no longer triggers 'matched nothing (
   const r2 = checkTouchesPair(C, B, fakeExpand({ "brand-new.ts": [], "y/b.js": ["y/b.js"] }));
   assert.equal(r2.disjoint, false);
   assert.match(r2.reason, /matched nothing/);
+});
+
+// ── AC1/AC2 (gap-touches-parser-strip-annotation-nested-parens) ─────────────────────────────────────
+// stripTouchAnnotation must strip a trailing （…） annotation that CONTAINS a NESTED full-width pair.
+// The old regex `\s*（[^）]*）\s*$` could not cross a `）`, so a nested pair left the WHOLE annotated
+// string as the glob → anti-drift-touches-check HARD-FAILED on a clean write. Two real occurrences
+// (each was worked around by rewording the annotation — this test pins the parser defect itself):
+//   a23:         annotation contains a backticked nested full-width pair `（新增…）`
+//   provisioning: annotation contains a nested full-width pair （config/gates/运行时载体）
+const NESTED_PAREN_FIXTURES = [
+  "- plugin/scripts/outer-tick-log-check.sh（判定脚本；如注解含 `（新增…）` 嵌套全角括号则旧正则剥离失败）",
+  "- plugin/scripts/refresh-worktree-quay.sh（新：主检出 .quay/（config/gates/运行时载体）快照复制进 linked worktree）",
+];
+const NESTED_PAREN_EXPECTED = [
+  ["plugin/scripts/outer-tick-log-check.sh"],
+  ["plugin/scripts/refresh-worktree-quay.sh"],
+];
+
+test("AC1: nested full-width paren annotations strip to clean globs (a23 + provisioning shapes)", () => {
+  for (let i = 0; i < NESTED_PAREN_FIXTURES.length; i++) {
+    const section = NESTED_PAREN_FIXTURES[i];
+    assert.deepEqual(
+      parseTouchEntries(section),
+      NESTED_PAREN_EXPECTED[i],
+      `nested-paren annotation not stripped to a clean glob for ${JSON.stringify(section)}`,
+    );
+    // single-source parity: every parser must agree on the nested shapes too
+    assertAllAgree(PARSERS, bodyOf(section), section, NESTED_PAREN_EXPECTED[i]);
+  }
+});
+
+test("AC2 能取假: nested-paren annotations → matchGlob HITS the clean path; a REAL out-of-declared write still does NOT hit (HARD FAIL preserved)", () => {
+  // The declared globs are exactly what the anti-drift guard feeds to matchGlob.
+  for (let i = 0; i < NESTED_PAREN_FIXTURES.length; i++) {
+    const [cleanGlob] = NESTED_PAREN_EXPECTED[i];
+    // The clean write the task ACTUALLY made — under the old broken strip the annotation was part
+    // of the glob and matchGlob MISSED this → spurious HARD FAIL. Now it must HIT.
+    assert.equal(matchGlob(cleanGlob, cleanGlob), true, `matchGlob must hit the clean path for ${cleanGlob}`);
+  }
+  // End-to-end anti-drift semantics: declared nested-paren Touches + the task's own clean file → OK
+  // (no false HARD FAIL — the a23 shape as the a23 task's Touches would have been).
+  const a23Body = bodyOf(
+    "- plugin/scripts/outer-tick-log-check.sh（判定脚本；如注解含 `（新增…）` 嵌套全角括号则旧正则剥离失败）",
+  );
+  const ok = checkTaskAntiDrift(a23Body, ["plugin/scripts/outer-tick-log-check.sh"]);
+  assert.equal(ok.ok, true, `nested-paren annotation must NOT cause a false HARD FAIL: ${JSON.stringify(ok.violations)}`);
+  // Real drift: a genuinely out-of-declared file must STILL HARD FAIL (blocking semantics unchanged).
+  const drift = checkTaskAntiDrift(a23Body, ["plugin/scripts/unrelated/not-declared.ts"]);
+  assert.equal(drift.ok, false, "a real out-of-declared write must still HARD FAIL");
+  assert.ok(
+    drift.violations.some(
+      (v) => v.type === "out-of-declared" && v.file === "plugin/scripts/unrelated/not-declared.ts",
+    ),
+    "violation must be the out-of-declared kind naming the drift file",
+  );
 });
 
 // ── parseTouchEntriesWithTags (gap-ready-queue-still-lists-eight-tasks-targeting-retired-pipeline-files) ──

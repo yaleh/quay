@@ -1,7 +1,7 @@
 ---
 id: gap-touches-parser-strip-annotation-nested-parens
 title: touches-parser stripTouchAnnotation 正则无法处理嵌套全角括号 ⇒ anti-drift 误判 HARD FAIL（2 次复发：a23 + provisioning 任务的 Touches 注解含嵌套（…））
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -49,20 +49,23 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1 判据1：stripTouchAnnotation 处理嵌套全角括号注解（glob = 干净路径）。
-- [ ] AC2 判据2 能取假：a23 + provisioning 样本解析正确 + 真实越界仍 HARD FAIL。
-- [ ] AC3 判据3：既有测试全绿；`--for-task` scoped 门绿。
+- [x] AC1 判据1：stripTouchAnnotation 处理嵌套全角括号注解（glob = 干净路径）。
+- [x] AC2 判据2 能取假：a23 + provisioning 样本解析正确 + 真实越界仍 HARD FAIL。
+- [x] AC3 判据3：既有测试全绿；`--for-task` scoped 门绿。
 
 ## Definition of Done
 
-- [ ] stripTouchAnnotation 处理嵌套括号（a23/provisioning 样本干净 glob + 越界仍 FAIL）+ 测试绿。
+- [x] stripTouchAnnotation 处理嵌套括号（a23/provisioning 样本干净 glob + 越界仍 FAIL）+ 测试绿。
 
 ## Touches
 
 - plugin/scripts/touches-parser.ts（stripTouchAnnotation 嵌套括号修复）
-- plugin/test/touches-parser.test.mjs（嵌套括号用例：a23/provisioning 样本 + 越界仍不命中）
+- plugin/test/touches-parser-parity.test.mjs（嵌套括号用例：a23/provisioning 样本 + 越界仍不命中）
 - tasks/gap-touches-parser-strip-annotation-nested-parens.md（自身）
 
 ## Evidence
 
-（落地后回填——两次实证：a23 任务 `（新增…）` 嵌套 + provisioning 任务 `（config/gates/运行时载体）` 嵌套，均触发 stripTouchAnnotation 剥离失败 → anti-drift HARD FAIL 假阳性，靠改写注解绕过）
+**2026-08-15 落地**：`stripTouchAnnotation` 全角剥离由 `\s*（[^）]*）\s*$` 改为平衡括号扫描（只数全角 `（`/`）`，从末位 `）` 回走至配对 `（`，跨嵌套；ASCII `(` 文字不误判，`（…）` 后接 ASCII 注解的顺序双剥保留），随后 ASCII `(…)` pass 不变。
+- 新增 AC1/AC2 用例：a23 形态 `…（…\`（新增…）\`…）` 与 provisioning 形态 `…（新：…（config/gates/运行时载体）…）` → 干净 glob + matchGlob 命中；真实越界样本仍不命中（checkTaskAntiDrift ok:false，out-of-declared 保留）。
+- 向后兼容：对仓库全部 4275 条既有 Touches 行做旧/新剥离对比，4273 条逐字节相同；2 条相异均为旧正则剥离失败的嵌套括号注解（gap-ac63-judgment2-no-carrier、gap-cross-machine-readonly-observation-orchestration-not-a-tool）——即本缺陷的既有潜伏实例，新实现正确修复。
+- 测试：touches-parser-parity 10/10 绿；touches-orthogonality/bare-dir/touches-one-entry/self-touch/task-status-drift/fan-in-ts-typecheck/fan-in-execute-paths 172 过 0 失 1 预置 skip；quay-init-loop-core 过。

@@ -39,11 +39,37 @@ import { isDirectEntry } from "./gate-script-base.ts";
 // check-overhead AC3: the touch-selection mechanism must resolve every annotation spelling the repo
 // actually uses, so a scoped run never silently skips a change-relevant check because of a
 // full-width annotation).
+//
+// NESTED-PAREN handling (gap-touches-parser-strip-annotation-nested-parens — 2 real occurrences:
+// a23 `（…`（新增…）`…）` + provisioning `（新：…（config/gates/运行时载体）…）`, each of which the old
+// `\s*（[^）]*）\s*$` regex could NOT strip because `[^）]*` cannot cross a `）`): the FULL-WIDTH pass is
+// now a BALANCED-PAREN scan, not a regex. We scan from the END for the LAST `）` and walk backward to
+// its MATCHING `（`, counting depth so a NESTED full-width pair inside the annotation does not
+// terminate the scan early. Only FULL-WIDTH parens are counted — an ASCII `(` that is literal text
+// inside the annotation (`$(` command-substitution syntax) is NOT mistaken for the annotation's
+// opener, and an unbalanced trailing `）` (no matching `（`) is left alone (old behavior). The ASCII
+// `(…)` pass then runs on the result, preserving the old sequential double-strip for entries that
+// carry BOTH an ASCII and a full-width annotation (`path/x.ts (new)（…）` → pass 1 leaves
+// `path/x.ts (new)`, pass 2 strips ` (new)`).
 export function stripTouchAnnotation(entry) {
-  return entry
-    .replace(/\s*（[^）]*）\s*$/, "")   // full-width （…） first
-    .replace(/\s*\([^)]*\)\s*$/, "")  // then ASCII (…)
-    .trim();
+  let s = String(entry);
+  const t = s.trimEnd();
+  const i = t.length - 1;
+  if (t[i] === "）") {
+    let depth = 0;
+    let open = -1;
+    for (let j = i; j >= 0; j--) {
+      const c = t[j];
+      if (c === "）") depth++;
+      else if (c === "（" && --depth === 0) { open = j; break; }
+    }
+    if (open !== -1) {
+      let k = open;
+      while (k > 0 && /\s/.test(t[k - 1])) k--; // also drop whitespace before the annotation (old \s*)
+      s = t.slice(0, k);
+    }
+  }
+  return s.replace(/\s*\([^)]*\)\s*$/, "").trim();
 }
 
 // Parse a `## Touches` bullet list into bare path/glob strings (backticks/quotes removed,
