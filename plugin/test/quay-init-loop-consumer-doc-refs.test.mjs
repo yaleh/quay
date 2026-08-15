@@ -59,16 +59,24 @@ function shippedDocs() {
 }
 
 // ── AC3: shipped docs/skills never reference the non-landed plugin/loop/ source path ──────────────
-test("AC3 — the shipped tick docs + skills have ZERO plugin/loop/ path references (the non-landed bundle-source path)", () => {
+// The reference-doc/self-create declaration mechanism is EXEMPT: a `<!-- reference-doc: ... -->` /
+// `<!-- self-create: ... -->` declaration line in init/SKILL.md is the declaration itself, not a
+// content reference (7e64a86b declares plugin/loop/fast-mode-loop-tick.md reference-doc; AC3 must
+// consult the declaredSet like AC2+AC5 do — an internal contradiction, fixed 2026-08-15).
+test("AC3 — the shipped tick docs + skills have ZERO plugin/loop/ path references (the non-landed bundle-source path), except paths declared reference-doc/self-create", () => {
+  const refdoc = declaredSet(pluginDir, "reference-doc");
+  const selfcreate = declaredSet(pluginDir, "self-create");
   const offenders = [];
   for (const f of shippedDocs()) {
     const src = fs.readFileSync(f, "utf8");
     for (const ref of extractPathRefs(src)) {
-      if (ref.startsWith("plugin/loop/")) offenders.push(`${path.relative(pluginDir, f)}: ${ref}`);
+      if (ref.startsWith("plugin/loop/") && !refdoc.has(ref) && !selfcreate.has(ref)) {
+        offenders.push(`${path.relative(pluginDir, f)}: ${ref}`);
+      }
     }
   }
   assert.deepEqual(offenders, [],
-    "no shipped doc/skill may reference plugin/loop/* (quay-init never lays it; the consumer landing is orchestration/ + docs/analysis/)");
+    "no shipped doc/skill may reference plugin/loop/* unless it is declared reference-doc/self-create in init/SKILL.md (quay-init never lays plugin/loop; the consumer landing is orchestration/ + docs/analysis/)");
 });
 
 // ── AC2 + AC5: a real install passes the gate, and the consumer-laid docs/analysis/ copy has zero
@@ -94,8 +102,12 @@ test("AC2+AC5 — a real --loop install: verify-referenced-landed OK, and every 
       if (!f.endsWith(".md")) continue;
       const src = fs.readFileSync(path.join(docsDir, f), "utf8");
       for (const ref of extractPathRefs(src)) {
+        // A declared self-create/reference-doc path is the declaration mechanism itself — exempt
+        // BEFORE the plugin/loop/ scan (a declared plugin/loop/* reference-doc, e.g.
+        // plugin/loop/fast-mode-loop-tick.md, must not be flagged as a never-lands content ref).
+        if (selfcreate.has(ref) || refdoc.has(ref)) continue;
         if (ref.startsWith("plugin/loop/")) missing.push(`${f}: plugin/loop/ ref (never lands) — ${ref}`);
-        else if (!fs.existsSync(path.join(ws, ref)) && !selfcreate.has(ref) && !refdoc.has(ref)) {
+        else if (!fs.existsSync(path.join(ws, ref))) {
           missing.push(`${f}: ${ref} is neither landed nor declared self-create/reference-doc`);
         }
       }

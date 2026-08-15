@@ -916,6 +916,13 @@ derive_loop_scripts() {
   #   the tick docs WITHOUT a `plugin/scripts/` path and are not bare-resolved by the mechanism corpus, so
   #   (a)/(b) derivation misses them — a cold-started project would run the gates and fail on missing
   #   checkers. Deliberate explicit additions (same class as the other checker transitive deps above).
+  #   quay-session.ts (gap-quay-init-real-install-regression-fix ②): the manager tick core's A0 readings
+  #   script (`node --experimental-strip-types plugin/scripts/quay-session.ts manager-tick-readings`).
+  #   The shipped plugin/loop/manager-tick-core.md is a one-line POINTER to the orchestration/ 正本
+  #   (gap-plugin-loop-manager-drifted-copies-pointerize), so the (a) scan of the SHIPPED docs no longer
+  #   sees `plugin/scripts/quay-session.ts` and it stopped shipping — but the REAL core laid down to
+  #   orchestration/ still references it (gate-validated dep). Deliberate explicit addition so a
+  #   cold-started --manager project's core runs its A0 readings instead of failing on a missing script.
   #   precommit-guard.ts (gap-precommit-guard-wire-into-quay-init-and-cold-start): the SHARED pre-commit
   #   guard ships with the loop so a provisioned project has the guard script laid down for its
   #   `--install-hook` step (quay-init --loop installs the hook post-laydown; cold-start re-verifies it).
@@ -930,7 +937,7 @@ derive_loop_scripts() {
     gate-script-base.ts workflow-event-schema.mjs task-schema.ts touches-parser.ts wiring-coverage-check.ts \
     capability-catalog.sh l1-delivery-surface-check.ts dead-loop-check.sh inner-blocked-signal.ts \
     inner-forensics.mjs task-contract-check.ts task-status-drift-check.ts touches-orthogonality-check.ts \
-    verify-delivery-surface.ts precommit-guard.ts >> "$out"
+    verify-delivery-surface.ts precommit-guard.ts quay-session.ts >> "$out"
   # (c3) exec-core tick docs (gap-ac37-exec-core-ships-with-package): the three ≤80-line execution
   #   cores ship with the loop so an installed project can read "每轮该做什么" — the shipped tick
   #   templates (orchestrator-loop-tick.md / fast-mode-loop-tick.md) reference them by the
@@ -971,6 +978,33 @@ derive_loop_scripts() {
   done
   sort -u "$out"
   rm -f "$out"
+}
+
+# ── exec-core pointer resolution (gap-quay-init-real-install-regression-fix ②) ─────────────────────
+# resolve_tick_core_src <basename> — the --loop laydown copies the exec-core tick docs from
+# plugin/loop/<name> to the target's orchestration/<name>. Since gap-plugin-loop-manager-drifted-
+# copies-pointerize, the SHIPPED plugin/loop/manager-tick-core.md is a one-line POINTER
+# (`> 正本: orchestration/<name> — ...`) to the orchestration/ 正本 — laying the pointer line into a
+# cold-started target would deliver a self-referential stub instead of the real core, and the real
+# core's deps (e.g. plugin/scripts/quay-session.ts) would stop shipping (the derive_loop_scripts (a)
+# scan only sees refs in the SHIPPED docs). Resolve the pointer: return the ABSOLUTE path of the
+# 正本 (${PLUGIN_ROOT}/../<pointed-path>) when the shipped file is a pointer, else the shipped path
+# itself (unchanged verbatim laydown). The 正本 lives beside the plugin (the quay repo layout: plugin/
+# and orchestration/ are siblings), so a --loop install lays the REAL core, byte-identical to 正本.
+resolve_tick_core_src() {
+  local name="$1" shipped resolved cand
+  shipped="$PLUGIN_ROOT/loop/$name"
+  if [ -f "$shipped" ]; then
+    resolved="$(sed -n '1s/^> 正本: \([a-zA-Z0-9._\/-]*\).*$/\1/p' "$shipped" 2>/dev/null | head -1)"
+    if [ -n "$resolved" ]; then
+      cand="$PLUGIN_ROOT/../$resolved"
+      if [ -f "$cand" ]; then
+        printf '%s\n' "$cand"
+        return 0
+      fi
+    fi
+  fi
+  printf '%s\n' "$shipped"
 }
 
 # ── drift report (gap-delivery-surface-grows-but-target-freezes-no-upgrade) ─────────────────────────
@@ -1378,8 +1412,10 @@ compute_drift_report() {
       src="$PLUGIN_ROOT/scripts/$s"; tgt="$ws/plugin/scripts/$s"; rel="plugin/scripts/$s"
     elif [ -f "$PLUGIN_ROOT/loop/$s" ]; then
       # exec-core tick doc (gap-ac37-exec-core-ships-with-package): lands at orchestration/ (the
-      # path the shipped tick templates reference), distinct from the scripts landing.
-      src="$PLUGIN_ROOT/loop/$s"; tgt="$ws/orchestration/$s"; rel="orchestration/$s"
+      # path the shipped tick templates reference), distinct from the scripts landing. The source
+      # RESOLVES a pointerized shipped copy to its orchestration/ 正本 (gap-quay-init-real-install-
+      # regression-fix ②) so the drift axis compares the REAL core, not the pointer line.
+      src="$(resolve_tick_core_src "$s")"; tgt="$ws/orchestration/$s"; rel="orchestration/$s"
     else
       echo "  WARN: loop mechanism file missing from plugin: plugin/scripts/$s (or plugin/loop/$s)" >&2
       continue
@@ -1772,7 +1808,10 @@ PYEOF
         echo "  skip (opt-in): orchestration/$s — manager exec core requires --manager"
         continue
       fi
-      copy_one "$PLUGIN_ROOT/loop/$s" "$WORKSPACE_ROOT/orchestration/$s" managed
+      # resolve_tick_core_src: a pointerized shipped core (plugin/loop/manager-tick-core.md is a
+      # one-line pointer to orchestration/ 正本) lays down the REAL core — byte-identical to 正本,
+      # cold-start readable — never the pointer line (gap-quay-init-real-install-regression-fix ②).
+      copy_one "$(resolve_tick_core_src "$s")" "$WORKSPACE_ROOT/orchestration/$s" managed
     else
       echo "  WARN: loop mechanism file missing from plugin: plugin/scripts/$s (or plugin/loop/$s)" >&2
     fi

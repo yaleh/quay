@@ -116,9 +116,13 @@ test("AC3 — manager-tick-core.md is OPT-IN: absent in a default --loop, presen
     assert.ok(fs.existsSync(path.join(wsMgr, "orchestration", "manager-tick-core.md")),
       "--loop --manager must lay manager-tick-core.md");
     const landed = path.join(wsMgr, "orchestration", "manager-tick-core.md");
-    const shipped = path.join(pluginDir, "loop", "manager-tick-core.md");
-    assert.equal(fs.readFileSync(landed, "utf8"), fs.readFileSync(shipped, "utf8"),
-      "laid-down manager-tick-core.md must be byte-identical to the shipped copy");
+    // The shipped plugin/loop/manager-tick-core.md is a one-line POINTER to the 正本
+    // (gap-plugin-loop-manager-drifted-copies-pointerize) — the laid-down file must be the REAL
+    // core, byte-identical to the orchestration/ 正本, not the pointer line (cold-start readable).
+    const canonical = path.join(path.resolve(pluginDir, ".."), "orchestration", "manager-tick-core.md");
+    assert.ok(fs.existsSync(canonical), `the orchestration/ 正本 must exist: ${canonical}`);
+    assert.equal(fs.readFileSync(landed, "utf8"), fs.readFileSync(canonical, "utf8"),
+      "laid-down manager-tick-core.md must be the REAL core, byte-identical to the orchestration/ 正本 (not the plugin/loop pointer)");
   } finally { cleanup(wsMgr); }
 });
 
