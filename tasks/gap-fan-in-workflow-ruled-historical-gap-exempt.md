@@ -46,13 +46,13 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1 判据1：fan-in-workflow-check ruled-historical-gap 豁免表落地；gap-ac81-inner-verify-wiring 入表（reason 引 manager-phase-goal.md:226/:681）。
-- [ ] AC2 判据2 能取假：豁免后主检出 ok=true + worktree 同 verdict（AC3 满足）；非豁免新直投仍红。
-- [ ] AC3 判据3：既有测试全绿；`--for-task` scoped 门绿。
+- [x] AC1 判据1：fan-in-workflow-check ruled-historical-gap 豁免表落地；gap-ac81-inner-verify-wiring 入表（reason 引 manager-phase-goal.md:226/:681）。
+- [x] AC2 判据2 能取假：豁免后主检出 ok=true + worktree 同 verdict（AC3 满足）；非豁免新直投仍红。
+- [x] AC3 判据3：既有测试全绿；`--for-task` scoped 门绿。
 
 ## Definition of Done
 
-- [ ] ruled-historical-gap 豁免表（gap-ac81 入表 + reason）+ 主检出 ok=true + worktree 同 verdict + 非豁免仍红 + 测试绿。
+- [x] ruled-historical-gap 豁免表（gap-ac81 入表 + reason）+ 主检出 ok=true + worktree 同 verdict + 非豁免仍红 + 测试绿。
 
 ## Touches
 
