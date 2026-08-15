@@ -1138,3 +1138,53 @@ fan-in-ff-protocol-check（AC62 判据2）主检出 ⇒ 四子检查全 evaluate
 
 **发生率（硬规则⑫，本条已够立案）**：受影响的 gitignored 载体 **5 个**；实测确认行为分叉的检查器 **2 个**；
 由此导致的**错误勾选 1 次（AC62，我自己，2 小时内）**；**被结构性掩盖的真差集 ≥1 条（AC78 判据2）**。
+
+---
+
+## 🆕 AC84：outer 的全量轮与红窗分诊退役，验证单元完全下放 inner workflow（人 2026-08-15 09:47Z 逐字：「outer 跑 suite 和红窗/绿窗等机制都应该废弃了，应该在 inner 的 workflow 中跑 suite 并合并到 develop，项目主目录应保持为 develop 分支。检查相应任务是否实际落地，当前状态是否符合预期，列出应执行的调整操作，并落实。」）
+
+**⊢ 核查结果（直接量，2026-08-15 09:4xZ）——三项已符合、一项半未符合、一项【不该废】**
+```
+✅ 主目录分支            git rev-parse --abbrev-ref HEAD ⇒ develop
+✅ inner 在 workflow 跑 suite  fan-in-execute.js 中 4 处 bash scripts/test.sh；per-task-suite-records 35 条
+✅ inner 合并到 develop        fan-in-merge-lock-events acquire 83 次（subagent 持锁 ff）
+🔴 outer B3 全量轮仍活          orchestrator-tick-core.md:53「B3 全量 suite 后台起跑」，条件=每次落地后触发
+                               实测近 24h 31 轮 · avg 346s · 2.98h 墙钟 ≈ 12%（runner=outer scope=main）
+🔴 outer 红窗分诊本体仍活        orchestrator-tick-core.md:108「红窗分诊外层独占…修好才重启套件→green 即撤信号」
+                               ——它【预设 outer 跑套件】，与 B3 同生共死
+⛔ 「绿窗」不是一个机制          全仓 grep：outer 核 1 处是 B13 行内附带词，其余全在 escalations/tick-log 的历史记述
+                               ⇒ 无可废之物，⛔ 不要为它造退役动作
+```
+**⚠️ 六条红窗任务全部 `status: done`**（`gap-red-window-cap-trigger-backlog-not-suite-red` 等）
+**而条款仍在核里** ⇒ **又一个「任务 done ≠ 阶段状态达成」**（同 AC62 撤勾那次）。
+
+**判据1（B3 退役，能取假）**：outer 核不再有「全量 suite 后台起跑」条款（按 AC58「退役即迁出」：删正文 + 留指针 + 落点映射进 archive）；
+**且退役时刻之后 `verification-round.jsonl` 新增记录中 `runner=outer && scope=main` 的条数 = 0**（时间窗只计退役后，同 AC78 判据2 的边界写法）。
+
+**判据2（红窗分诊随之迁出）**：`orchestrator-tick-core.md:108` 按同一形态迁出。**理由必须写准**：它退役不是因为"红窗不重要"，
+而是因为**它的输入（outer 自己跑的全量轮）没有了**；红树的归因与回退在新模型下由 fan-in 的 scoped/全量门在**合并前**拦住。
+
+**🔴 判据3（⛔ 不得误废 inner 侧的红窗【约束】——这是最容易做错的一步）**：
+`fast-mode-tick-core.md` 现有两条**必须原样保留**：
+```
+「红窗不再整体豁免——红窗快修恰恰最需要隔离（改的是正在让套件变红的文件）」
+「红窗仅豁免【只读诊断】（跑命令/读日志/看 diff，不写产品文件）」
+```
+**它们是人 2026-08-13 06:07:45 逐字裁定「红窗在主会话修这个规则后续可以取消。红窗时可以减少 subagent 数量，但不要在主会话修」的落地**
+⇒ **废掉它们等于撤回那条裁定。⊢ 能取假：回放删除这两条 ⇒ 必须红。**
+
+**🔴 判据4（退役前必须先补上唯一被它覆盖的环境——本条有今日实测支撑，⛔ 不得跳过）**：
+```
+per-task suite   fan-in-execute.js:97/115/126 全在 cd ${worktree} 之后 ⇒ 跑在【任务 worktree】
+outer 全量轮      full-suite-runner.ts:2309 provisionOneShotWorktree(mainRoot) ⇒ 跑在【主检出新开的一次性 worktree】
+实证：round197 的 AC4 缺陷（root auto-derive 从 git worktree list 解析主检出）
+     只在 verify-worktree 环境暴露，per-task suite 结构上到不了
+```
+**⇒ 直接退役 B3 会盲掉一个环境。判据4 = 退役方案里必须含【谁来覆盖 verify-worktree 环境】的答案**
+（可选形态：fan-in 增加一次一次性 worktree 内的验证 / 保留一个低频的环境专项轮 / 判定该环境风险可接受并写明理由——**三选一，但必须选**）。
+**⛔ 不接受"退役后再说"** —— 那正是本阶段反复出现的「退役做了一半」（B5 注解、floor 读数、cert）。
+
+**归属**：判据1/2 在 `orchestration/orchestrator-tick-core.md`（outer 独占，C17）；判据3 在 `fast-mode-tick-core.md`（inner 面，manager 只报不改）；
+判据4 的实现面按 AC65「谁能验证」切。**manager 一条都不改，本 AC 的落实动作 = 投递 + 跟踪。**
+
+**⚠️ 不覆盖**：不改 inner 的 fan-in 协议（AC62/AC75/AC78 已定）；不动主目录分支（已是 develop）；⛔ 不为「绿窗」造退役动作（它不存在）。
