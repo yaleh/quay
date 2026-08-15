@@ -146,10 +146,29 @@
       —— **该模块已于 AC48 标 RETIRED、零生产调用者** ⇒ **活指令指向退役模块**，且它就在 inner 现在要读的那份文件里。
       **⚠️ 但它不阻塞新阶段的 AC54–57**（四条都不碰那条路径），**故排在通则之后，不插队**。
 
-- [ ] **AC62（协议·fan-in 改为「无锁段自测 + 锁内 ff」）**——人 2026-08-14 裁定，正本
+- [x] **AC62（协议·fan-in 改为「无锁段自测 + 锁内 ff」）**——人 2026-08-14 裁定，正本
       `orchestration/SPEC-fan-in-ff-merge-lock-2026-08-14.md`
 
-      **🔴 2026-08-15 03:2xZ 撤勾（我 01:0xZ 的 ✅ 是错的，环境搞错了）——判据2 只有一半在轮里被评估。**
+      **✅ 2026-08-15 10:1xZ 重新勾选——撤勾理由已由 inner 的 `ed24dd02` 消除，我实测复核。**
+      **三段历史都要保留，因为每一段在它那个时刻都是对的：**
+      ```
+      01:0xZ 勾   —— 错：我在【主检出】验绿就勾（环境搞错）
+      03:2xZ 撤勾 —— 对：实测裸 worktree 里 suite-in-lock evaluated=FALSE、lock-hold-only-ff 整条缺席
+      06:44Z      —— inner 落 ed24dd02（gap-fan-in-worktree-quay-provisioning）：scripts/test.sh 入口调
+                     refresh-worktree-quay.sh，把主检出 .quay/ 快照【复制】进 worktree（cp -p，非 symlink——
+                     载体是追加写的 jsonl，symlink 会让 worktree 的 suite 写回生产载体）
+      10:1xZ 重勾 —— 实测：新开 worktree + 按正确形式跑 refresh（copied 35 files）后
+                     fan-in-workflow-check    evaluated=True（ok=false，真报差集，不是 NOT-EVALUATED）
+                     fan-in-ff-protocol-check 四子检查【全部 evaluated=True】——含此前缺席的
+                                              suite-in-lock 与 lock-hold-only-ff
+      ```
+      **⇒ 判据2 的两半（非 ff merge 必须红 / 持锁段内跑 suite 必须红）在轮的真实环境里都被评估 ⇒ 撤勾理由消失。**
+      **⊢ 我自己的一条记账**：我 10:0xZ 还把 03:2xZ 那个发现当现状复述给 inner（建议改 `.worktreeinclude`），
+      **而缺陷 7 小时前已被修好** —— **判准② 陈旧当现状，我犯的**；是 inner 指出后我重跑对照才发现。
+      **⊢ 并且第一次重跑我把参数写错了**（`--worktree` 不是它的形式，正确是 `<worktree>` 在前），
+      得到一个假的 NOT-EVALUATED，差点据此反驳 inner ——**「先验调用方式」今日第三次。**
+
+      **🔴（历史，理由已消除，保留备查）2026-08-15 03:2xZ 撤勾——判据2 只有一半在轮里被评估。**
       **我 01:0xZ 在【主检出】实跑该检查器全绿就勾了；而验证轮跑在【一次性 worktree】（`full-suite-state.json`
       现读 `oneShotWorktree: true`，`full-suite-runner.ts:2300-2301` `root = provisionOneShotWorktree(root)`）。
       同一检查器、同一参数，两个环境结果不同**（我在临时 worktree 里实跑对照）：
@@ -272,6 +291,27 @@
       `outer-tick-log-check.sh` + 其测试（20 次）⇒ **其 mutation case 秒级可跑 ⇒ 属可直接修那一侧**；
       `full-suite-runner.ts`（13 次）+ 其测试（16 次）⇒ **属必须走 inner 那一侧**。
       **⚠️ 不覆盖**：不改 manager 的 §0/D2 边界（manager 仍不改任何实现）；不改 inner 的派发/实现职责。
+
+      **⊕ 2026-08-15 10:2xZ 人裁定作用域，冲突就此消解（逐字）**：「**AC65 作用在 outer 内，修改进 develop；bypass-detector 作用于 inner。**」
+      **⇒ 不是「谁让谁」，是两者【主体不同】**：AC65 授权的对象是 outer 且其修改**直接进 develop**；
+      bypass-detector 的规训对象是 **inner**（inner 的改动必须走 fan-in）。**⇒ outer 的 AC65 直修不该被 detector 标记。**
+      **⇒ 因此 `AC65_AUTHORIZED_DIRECT_FIXES` 那张 sha 白名单是【错的形态】**：它把一个作用域问题实现成了逐条豁免。
+
+      **🔴 但落地时会撞上一个【AC65 判据2 自身的缺陷】，本轮实测发现，必须一并修**：
+      ```
+      判据2 原文：「必须在同一条【提交信息或投递】里贴出那条验证命令的实际输出」
+      实测 02b2b2fc（首个具名样本）：提交信息【没有】验证输出 —— outer 是把它【投递】给 manager 的
+      ⇒ AC65 判据2 合规（投递那一支满足），但【git 记录里看不到】
+      ⇒ 任何只读 git 的判定者（包括 detector、包括将来的审计者）【无法区分】
+        「outer 的 AC65 授权直修」与「一次没有授权的直接提交」
+      ```
+      **⇒ 人的裁定可落地，但需要一个【机器可读的授权标记】**。可选形态（⛔ 我不替落地方选）：
+      ①**收窄判据2**：验证输出必须在**提交信息**里（去掉「或投递」那一支）——**顺带把产物变成持久、可事后审计的**；
+      ②**加 git trailer**：如 `AC65-Verified: <命令> => <输出>`，detector 按 trailer 判；
+      ③**按会话归属判**：detector 查 meta-cc 定位提交所属层——**我不推荐**（重、且 meta-cc 有覆盖缺口，今日实测过）。
+      **⊢ 我倾向 ①**，因为它同时修掉一个独立缺陷：**当前判据2 允许产物落在一个临时信道里**
+      ——我今天之所以能核实 outer 合规，只因为它恰好投递给了我；**一个月后读 git 的人核不了。**
+      **⛔ 这条不改 AC65 的已勾状态**（判据1/2/3 在 2026-08-14 均已达成并复核），只是记录裁定与随之暴露的实现缺陷。
 
 - [x] **AC66（AC/任务驱动的行为变更必须可检查确认 —— 人 2026-08-14 03:2xZ 裁定，并【修正了我的切法】）**
       **⊕ 2026-08-15 01:1xZ 达成，我实跑核：两个样板均真接线且判据3 通过。**
@@ -614,7 +654,25 @@
       不会造成并发超限或误派；读数 `in_flight` 真值 2 / `load1=1.98` / `cpu_some_avg10=0.00` / `mem_avail=8841MB`。
       **（C21④：本结论绑这组读数；若出现「因 /live 多报而不派发」的实例，须重判。）**
 
-- [ ] **AC77（subagent spawn 触顶：只检测 harness 报错，不自建计数 —— 人 2026-08-14 07:4xZ 逐字裁定）**
+- [x] **AC77（subagent spawn 触顶：只检测 harness 报错，不自建计数 —— 人 2026-08-14 07:4xZ 逐字裁定）** ✅ **2026-08-15 09:3xZ 达成**
+
+      **⊕ 逐判据实测（2026-08-15 04:0xZ 核完实现与测试，09:3xZ 等到绿轮认证才勾）**
+      ```
+      判据1 只检测 harness 报错   SPEC_LIMIT_SIGNAL = "Subagent spawn limit reached"（inner-wakeup-heartbeat-check.ts:512）
+                                  真接线：:518 spawnLimitDetected / :531 消费；大小写不敏感
+      判据2 不自建计数（退役）     旧判据 blocked==[] && agentDispatches>=agentLimit 已退役，
+                                  且按 AC58「退役即迁出」留了落点映射 archive/AC58-retired-clauses.md#R29
+                                  ⚠️ 全文仍有 agentDispatches 5 处命中，逐条打印后确认全是 schema 字段校验（:105/:116 等），
+                                     不是那条判据本身 —— 硬规则② 非零半边：命中的不是我要找的东西
+      判据3 只报不动               测试逐字「report-only: the trigger is a pure boolean; it never /clears, lowers cap, or restarts」
+      测试                        inner-wakeup-heartbeat-check.test.mjs 79/79 绿，含真样本回放
+                                  （"Subagent spawn limit reached (200 of 200 agents spawned)"）+ 判据2 退役负控制
+      ```
+      **⊢ 勾选的门槛为什么拖了两轮**：我 04:0xZ 就核完了实现与测试，但坚持**等一个绿轮认证**——
+      因为同日我刚在 AC62 上栽过「在主检出验绿就勾、而轮里那一半从不评估」。
+      **本轮 round199 GREEN**（`verifiedCommit=47e09bab` · 4920 tests · 516.9s · failures=0 · 终态），
+      且 `git merge-base --is-ancestor` 逐条核实该 commit **含我阶段1 的全部五条提交**
+      （`635ec831`/`135fef12`/`5fe434c6`/`7302a6e2`/`0203c6ca`）⇒ **认证覆盖成立，才勾。**
       **人的原话**：「**agentLimit 的处理仅应包括检测 harness 的报错（报错后的处理暂定由人执行），而不要自己重复计数。**」
 
       **① 现状（读实现）**：`inner-wakeup-heartbeat-check.ts:347/:353` 的判据是
@@ -1120,3 +1178,94 @@ fan-in-ff-protocol-check（AC62 判据2）主检出 ⇒ 四子检查全 evaluate
 
 **发生率（硬规则⑫，本条已够立案）**：受影响的 gitignored 载体 **5 个**；实测确认行为分叉的检查器 **2 个**；
 由此导致的**错误勾选 1 次（AC62，我自己，2 小时内）**；**被结构性掩盖的真差集 ≥1 条（AC78 判据2）**。
+
+---
+
+## 🆕 AC84：outer 的全量轮与红窗分诊退役，验证单元完全下放 inner workflow（人 2026-08-15 09:47Z 逐字：「outer 跑 suite 和红窗/绿窗等机制都应该废弃了，应该在 inner 的 workflow 中跑 suite 并合并到 develop，项目主目录应保持为 develop 分支。检查相应任务是否实际落地，当前状态是否符合预期，列出应执行的调整操作，并落实。」）
+
+**⊢ 核查结果（直接量，2026-08-15 09:4xZ）——三项已符合、一项半未符合、一项【不该废】**
+```
+✅ 主目录分支            git rev-parse --abbrev-ref HEAD ⇒ develop
+✅ inner 在 workflow 跑 suite  fan-in-execute.js 中 4 处 bash scripts/test.sh；per-task-suite-records 35 条
+✅ inner 合并到 develop        fan-in-merge-lock-events acquire 83 次（subagent 持锁 ff）
+🔴 outer B3 全量轮仍活          orchestrator-tick-core.md:53「B3 全量 suite 后台起跑」，条件=每次落地后触发
+                               实测近 24h 31 轮 · avg 346s · 2.98h 墙钟 ≈ 12%（runner=outer scope=main）
+🔴 outer 红窗分诊本体仍活        orchestrator-tick-core.md:108「红窗分诊外层独占…修好才重启套件→green 即撤信号」
+                               ——它【预设 outer 跑套件】，与 B3 同生共死
+⛔ 「绿窗」不是一个机制          全仓 grep：outer 核 1 处是 B13 行内附带词，其余全在 escalations/tick-log 的历史记述
+                               ⇒ 无可废之物，⛔ 不要为它造退役动作
+```
+**⚠️ 六条红窗任务全部 `status: done`**（`gap-red-window-cap-trigger-backlog-not-suite-red` 等）
+**而条款仍在核里** ⇒ **又一个「任务 done ≠ 阶段状态达成」**（同 AC62 撤勾那次）。
+
+**判据1（B3 退役，能取假）**：outer 核不再有「全量 suite 后台起跑」条款（按 AC58「退役即迁出」：删正文 + 留指针 + 落点映射进 archive）；
+**且退役时刻之后 `verification-round.jsonl` 新增记录中 `runner=outer && scope=main` 的条数 = 0**（时间窗只计退役后，同 AC78 判据2 的边界写法）。
+
+**判据2（红窗分诊随之迁出）**：`orchestrator-tick-core.md:108` 按同一形态迁出。**理由必须写准**：它退役不是因为"红窗不重要"，
+而是因为**它的输入（outer 自己跑的全量轮）没有了**；红树的归因与回退在新模型下由 fan-in 的 scoped/全量门在**合并前**拦住。
+
+**🔴 判据3（⛔ 不得误废 inner 侧的红窗【约束】——这是最容易做错的一步）**：
+`fast-mode-tick-core.md` 现有两条**必须原样保留**：
+```
+「红窗不再整体豁免——红窗快修恰恰最需要隔离（改的是正在让套件变红的文件）」
+「红窗仅豁免【只读诊断】（跑命令/读日志/看 diff，不写产品文件）」
+```
+**它们是人 2026-08-13 06:07:45 逐字裁定「红窗在主会话修这个规则后续可以取消。红窗时可以减少 subagent 数量，但不要在主会话修」的落地**
+⇒ **废掉它们等于撤回那条裁定。⊢ 能取假：回放删除这两条 ⇒ 必须红。**
+
+**🔴 判据4（退役前必须先补上唯一被它覆盖的环境——本条有今日实测支撑，⛔ 不得跳过）**：
+```
+per-task suite   fan-in-execute.js:97/115/126 全在 cd ${worktree} 之后 ⇒ 跑在【任务 worktree】
+outer 全量轮      full-suite-runner.ts:2309 provisionOneShotWorktree(mainRoot) ⇒ 跑在【主检出新开的一次性 worktree】
+实证：round197 的 AC4 缺陷（root auto-derive 从 git worktree list 解析主检出）
+     只在 verify-worktree 环境暴露，per-task suite 结构上到不了
+```
+**⇒ 直接退役 B3 会盲掉一个环境。判据4 = 退役方案里必须含【谁来覆盖 verify-worktree 环境】的答案。**
+
+      **✅ 2026-08-15 10:1xZ 人已裁定，逐字：「明确该 verify-worktree 环境 suite 测试【仅在人的明确要求时单次运行】。」**
+      **⇒ 判据4 已有确定答案，⛔ 不再是三选一。** 落地形态：
+      ```
+      verify-worktree 环境的 suite ⇒ 【无任何自动触发】：不按落地触发、不按周期触发、不设低频轮
+                                    ⇒ 只有人明确要求时，单次运行一次
+      ⇒ B3「本轮收尾 ≥1（或有新 merge 落地）⇒ 起全量轮」整条退役，不保留任何缩水版本
+      ⇒ runner 的 appendVerificationRound 随之只在人工单次运行时产生记录
+      ```
+      **⚠️ 人选的是我【没有列出】的第四个选项。** 我给的三个（fan-in 内加验证 / 低频专项轮 / 判定风险可接受）
+      **都预设了某种自动机制**；人的答案是**把自动化整个去掉**。**记这一笔：我的选项集本身带着「必须有自动触发」这个未言明的前提。**
+
+      **⊢ 必须一并写明的代价（人已裁定，我不复议，但要记录以便将来复盘）**：
+      **环境类缺陷（如 round197 的 AC4）从此只在【人下次要求跑】时才会被发现**，检测延迟由「一次落地」变为「不确定」。
+      **这是明示接受的取舍**，与 SPEC §0-6 人的原裁定（「verification-round 应当小；趋势分析基于 inner subagent 的 suite 记录」）方向一致。
+      **⊢ 连带**：红率分桶 / 负载溯源 / 残留剖面对照等趋势分析，**必须全部改用 inner 的 per-task suite 记录**
+      （`.quay/per-task-suite-records.jsonl`），⛔ 不得再依赖 `verification-round.jsonl` 的自动轮次——**它将不再持续产生数据**。
+
+      **⛔ 不接受"退役后再说"** —— 那正是本阶段反复出现的「退役做了一半」（B5 注解、floor 读数、cert）。
+
+      **判据5（人 2026-08-15 10:2xZ 追加，逐字：「基于原 outer 跑 suite 测试衍生的机制也应取消」）**
+      **⇒ 退役面不止 B3 本体，还包括它的衍生物。⛔ 必须【枚举】不得【布尔】**（硬规则③）。
+      **⊢ 我已核实的两类（其余归 outer 枚举，我不替它猜）**：
+      ```
+      纯 outer 衍生、可直接退役：plugin/scripts/red-window-triage.ts
+                                （test.sh 接线 0 处、仅 orchestrator-tick-core.md 引 1 处 ⇒ 纯红窗机制的执行体）
+      ⚠️ 共享面，⛔ 不得误废：.quay/full-suite-state.json（inner 的 fan-in 用它判「轮在跑 ⇒ 拒锁」）
+                              full-suite-runner.ts（inner 的 per-task suite 也走它）
+                              suite 锁 / resource-gate ——三者 inner 都在用
+      ```
+      **🔴 判据5 的真风险不是「少了几个机制」，是【断供后检查器静默变绿】**：
+      自动轮停 ⇒ `.quay/verification-round.jsonl` 不再持续新增 ⇒ **所有以它为数据源的检查器失去输入**。
+      **⇒ 每一个都必须落到「NOT-EVALUATED（可区分）」而不是「ok=true（与合格同形）」** —— 硬规则 3b。
+      **⊢ 这正是本阶段已发生过三次的形态**（carriers 恒 NOT-EVALUATED、A23 恒红、floor 读数残留）
+      ⇒ **判据5 能取假**：退役后逐个跑那些检查器，**输出为 `ok=true` 且 `evaluated=true` 而其实无数据者 ⇒ 红**。
+
+      **判据6（人 2026-08-15 10:2xZ 逐字：「红率分桶 / 负载溯源 / 残留剖面对照，全部改用 `.quay/per-task-suite-records.jsonl`」）**
+      **⊢ 已定位的具体落点（读实现）**：`plugin/scripts/trend-check.ts` `:248` / `:311` 直接
+      `readJsonLines(.quay/verification-round.jsonl)` ⇒ **它是趋势分析的实际载体读点，改这里。**
+      **⊢ 能取假**：改后 `trend-check` 在 `verification-round.jsonl` **停止增长**的情况下仍产出趋势读数；
+      且其读点 `grep -c 'verification-round' trend-check.ts` 应降为 0（或仅存历史注释，按位置核）。
+      **⊢ ⚠️ 迁移时必须处理的语义差**：`per-task-suite-records` 里有 `fullSuiteRan=false`（doc-only delta 跳过全量）的记录，
+      **红率分桶若不按 `skipReason` 分桶，会被跳过项稀释** —— inner 已确认 `skipReason` 从此是承重字段。
+
+**归属**：判据1/2 在 `orchestration/orchestrator-tick-core.md`（outer 独占，C17）；判据3 在 `fast-mode-tick-core.md`（inner 面，manager 只报不改）；
+判据4 的实现面按 AC65「谁能验证」切。**manager 一条都不改，本 AC 的落实动作 = 投递 + 跟踪。**
+
+**⚠️ 不覆盖**：不改 inner 的 fan-in 协议（AC62/AC75/AC78 已定）；不动主目录分支（已是 develop）；⛔ 不为「绿窗」造退役动作（它不存在）。

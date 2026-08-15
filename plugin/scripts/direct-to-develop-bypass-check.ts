@@ -39,6 +39,15 @@
 //   变化不需全量；本检测器问的是「是不是绕过 fan-in」，产品面 .md（SKILL.md）同样是交付物，必须
 //   报红）。差异即 25（inner 独立谓词，排除全部 .md）vs 30（manager 谓词）的来源，写在此处。
 //
+//   AC65 授权直修 carve-out（tasks/gap-ac65-direct-fix-vs-bypass-detector-conflict）：AC65
+//   （orchestrator-tick-core.md:105）授权 outer「一条命令可验 ⇒ 可直接修 plugin/scripts」——与本检测器的
+//   「plugin/scripts 直提交即 bypass」结构性冲突（首次具名样本 02b2b2fc）。修法 = 按 sha + 证据的豁免表
+//   AC65_AUTHORIZED_DIRECT_FIXES（inner 2026-08-15 裁定；人裁定方向待决，本表对「提交仍走 fan-in」与
+//   「AC65 直修合法」两种裁定都正确——它【承认】已经发生的 AC65 直修）。⛔ 不是 plugin/scripts/* 文件名
+//   豁免（掩真直投，manager 已拒）：只有 sha 入表 ∧ 提交消息携带 AC65 验证标记才豁免（可见+可审计，
+//   报为 ac65AuthorizedDirectFix 独立分类）；sha 入表但消息无标记 ⇒ fail-closed 仍红；sha 不入表 ⇒ 真直投
+//   仍红。豁免表有界，不随新任务增长。
+//
 // ff-lock 时间窗（AC1 第三条件）：fan-in-ff-merge.sh 的持锁段在 .quay/fan-in-merge-lock-events.jsonl
 // 写 acquire/release 对（毫秒级）。一个直接提交若落在某个 acquire→release 区间内 ⇒ 可能属 fan-in
 // 落地 ⇒ 不报（保守口径：when in doubt, don't flag）。复用 fan-in-ff-protocol-check.ts 的
@@ -83,8 +92,48 @@ export function isDesignInternalPath(relPath) {
   return DESIGN_INTERNAL_RE.test(String(relPath ?? ""));
 }
 
-/** 一个直接提交的判定。PURE——测试注入 {sha, files, epoch, subject, action}。 */
-export function classifyCommit(commit, lockHoldIntervals) {
+// ── AC65 授权直修 carve-out（tasks/gap-ac65-direct-fix-vs-bypass-detector-conflict）─────────────
+//
+// 冲突（结构性，非发生率）：AC65（orchestrator-tick-core.md:105）授权 outer「一条命令可验 ⇒ 可直接修
+// plugin/scripts 等」，而本检测器把 plugin/scripts/* 判为代码面 ⇒ 每次 AC65 直修都被标 bypass（首次
+// 具名样本 02b2b2fc，round200 红 + parser fan-in 阻断）。两条规则的意图都保留：
+//   · AC65：小改动（一条命令可验）不该为走全量 fan-in 而付出整轮验证代价——验证面允许快速直修。
+//   · bypass-detector：代码面提交必须过审计链——不许静默直投 develop。
+// 修法 = 【按 sha + 证据 的 AC65 授权直修豁免表】（inner 2026-08-15 裁定；人裁定方向待决，本表对两种
+// 裁定都正确：若人裁定「验证面 AC65 + 提交面仍走 fan-in」，本表仍【承认】已经发生的 AC65 直修；若裁定
+// 「AC65 直修合法」，本表即正式豁免）。⛔ 不是 plugin/scripts/* 文件名豁免（掩真直投，manager 已拒）——
+// 只有【sha 入表 ∧ 提交消息携带 AC65 验证证据】才豁免，有界、可见、可审计（同 RULED_HISTORICAL_GAPS
+// 先例：入表从违规集移出，报为独立分类，绝不静默掩盖）。
+/**
+ * AC65 授权直修豁免表。每条目 = 一个 AC65 授权的直接提交（sha）+ 验证证据（一条命令 + 输出引用，
+ * 取自该提交消息原文）。判定：代码面直接提交 ∧ sha 入表（前缀匹配）∧ 提交消息含 AC65 验证标记
+ * （`commitHasAc65Evidence`）⇒ ac65AuthorizedDirectFix（可见分类，非 bypass）；sha 入表但消息无标记
+ * ⇒ 表目与提交不一致，fail-closed 仍红；sha 不入表 ⇒ 真直投仍红（能取假——豁免表有界，不能静默扩展）。
+ */
+export const AC65_AUTHORIZED_DIRECT_FIXES: { sha: string; evidence: string }[] = [
+  {
+    sha: "02b2b2fc",
+    evidence:
+      "AC65 一条命令验证：A0 outer.ticklog quay 现含 A11+ 内容（full length 676 > 200）；新增测试（full 完整行 + 默认截断向后兼容），24/24 绿。",
+  },
+];
+
+/** AC65 验证证据标记——提交消息中携带的「一条命令可验 + 输出贴出」引用。次级闸（表为权威，标记防表目漂移）。 */
+export const AC65_VERIFICATION_MARKER_RE = /AC65/;
+
+/** 一条 commit sha 是否命中 AC65 豁免表（前缀匹配——git 可能给全量或缩写 sha）。PURE。 */
+export function findAc65Entry(sha, table = AC65_AUTHORIZED_DIRECT_FIXES) {
+  if (!sha) return undefined;
+  return (table ?? []).find((e) => e && sha.startsWith(e.sha));
+}
+
+/** 提交消息是否携带 AC65 验证证据（一条命令可验的引用）。PURE。 */
+export function commitHasAc65Evidence(message) {
+  return AC65_VERIFICATION_MARKER_RE.test(String(message ?? ""));
+}
+
+/** 一个直接提交的判定。PURE——测试注入 {sha, files, epoch, subject, message, action}。 */
+export function classifyCommit(commit, lockHoldIntervals, ac65Table = AC65_AUTHORIZED_DIRECT_FIXES) {
   const files = Array.isArray(commit?.files) ? commit.files : [];
   const codeSurfaceFiles = files.filter((f) => !isDesignInternalPath(f));
   const inLockWindow =
@@ -92,6 +141,10 @@ export function classifyCommit(commit, lockHoldIntervals) {
     typeof commit.epoch === "number" &&
     lockHoldIntervals.some((iv) => iv && iv.start <= commit.epoch && commit.epoch <= iv.end);
   const designInternal = codeSurfaceFiles.length === 0;
+  // AC65 授权直修：sha 入表 ∧ 提交消息实际携带 AC65 验证证据。表里有 sha 但消息无标记 ⇒ 表目与提交
+  // 不一致（维护错 / 编辑过消息）⇒ fail-closed 仍红，不豁免（证据要求，非静默文件名豁免）。
+  const ac65Entry = findAc65Entry(commit?.sha, ac65Table);
+  const ac65Authorized = ac65Entry != null && commitHasAc65Evidence(commit?.message);
   return {
     sha: commit?.sha ?? "?",
     subject: commit?.subject ?? "",
@@ -101,7 +154,9 @@ export function classifyCommit(commit, lockHoldIntervals) {
     codeSurfaceFiles,
     designInternal,
     inLockWindow: Boolean(inLockWindow),
-    bypass: !designInternal && !inLockWindow,
+    ac65Authorized,
+    ac65Evidence: ac65Entry?.evidence ?? null,
+    bypass: !designInternal && !inLockWindow && !ac65Authorized,
   };
 }
 
@@ -116,6 +171,7 @@ export function checkDirectCommits(commits, lockHoldIntervals) {
   const codeSurfaceCommits = classified.filter((c) => c.codeSurfaceFiles.length > 0);
   const designInternalCommits = classified.filter((c) => c.designInternal);
   const inLockWindowCommits = classified.filter((c) => c.inLockWindow);
+  const ac65AuthorizedCommits = classified.filter((c) => c.ac65Authorized);
   return {
     violations,
     reason: violations.length > 0 ? "direct-commit-bypasses-fan-in" : "no-direct-bypass",
@@ -123,6 +179,7 @@ export function checkDirectCommits(commits, lockHoldIntervals) {
     codeSurfaceCommits: codeSurfaceCommits.length,
     designInternalCommits: designInternalCommits.length,
     inLockWindowCommits: inLockWindowCommits.length,
+    ac65AuthorizedCommits: ac65AuthorizedCommits.length,
     classified,
   };
 }
@@ -159,6 +216,15 @@ export function gitCommitEpoch(root, sha) {
 function gitCommitSubject(root, sha) {
   try {
     return git(root, ["log", "-1", "--format=%s", sha]).trim();
+  } catch {
+    return "";
+  }
+}
+
+/** 一条 commit 的完整消息（%B，subject + body）——AC65 验证证据（一条命令可验的引用）读取面。 */
+function gitCommitMessage(root, sha) {
+  try {
+    return git(root, ["log", "-1", "--format=%B", sha]).trim();
   } catch {
     return "";
   }
@@ -208,7 +274,8 @@ export function gitReflogDirectCommits(root, develop, baseline) {
     if (files === null) continue; // root commit / unreadable — skip (can't diff)
     const epoch = gitCommitEpoch(root, sha);
     if (epoch === null) continue;
-    commits.push({ sha, subject, action, epoch, files });
+    const message = gitCommitMessage(root, sha); // AC65 验证证据读取面
+    commits.push({ sha, subject, action, epoch, files, message });
   }
   return commits;
 }
@@ -238,6 +305,8 @@ const usage = `direct-to-develop-bypass-check.ts — 直接提交 develop 绕过
   · 代码/断言面 = 改动文件不落在设计内排除集（记账/转向/遥测面 + manager 独占 + 基础设施 +
     热修 fan-in 机件本身；头注释维护注记 + 任务体记录——denominator 谓词 25 vs 30 差异就在排除集）
   · ff-lock 时间窗 = commit 落在 fan-in-merge-lock-events.jsonl 某 acquire→release 区间内 ⇒ 不报
+  · AC65 授权直修 = sha 入 AC65_AUTHORIZED_DIRECT_FIXES 表 ∧ 提交消息携带 AC65 验证证据 ⇒ 报为
+    ac65AuthorizedDirectFix（可见分类，非 bypass）——⛔ 非 plugin/scripts/* 文件名豁免；不入表仍红
 
 Usage:
   node --experimental-strip-types direct-to-develop-bypass-check.ts [--root <dir>]
@@ -287,7 +356,7 @@ export function main(argv) {
       const files = gitCommitFiles(root, sha);
       const epoch = gitCommitEpoch(root, sha);
       if (files === null || epoch === null) return null;
-      return { sha, subject: gitCommitSubject(root, sha), action: "commit", epoch, files };
+      return { sha, subject: gitCommitSubject(root, sha), action: "commit", epoch, files, message: gitCommitMessage(root, sha) };
     }).filter(Boolean);
     if (commits.length === 0) {
       process.stderr.write(`direct-to-develop-bypass-check: --commits resolved to 0 readable commits (shas: ${commitsArg})\n`);
@@ -342,10 +411,17 @@ export function main(argv) {
   // commits 已成功收集（reflog 可读 / --commits 已解析）⇒ 扫描本身是评估，空的扫描范围 = 可读的空
   // 结果（evaluated:true），不是「读不懂」——「读不懂」只发生在 reflog 不可读（早退）或锁窗 malformed。
   const codeSurfaceCandidates = verdict.classified.filter((c) => c.codeSurfaceFiles.length > 0);
+  // 需要锁窗判定的候选 = 代码面 ∧ 非 AC65 授权直修（AC65 授权直修已被证据豁免，不依赖锁窗）。
+  const needLockWindow = codeSurfaceCandidates.some((c) => !c.ac65Authorized);
   if (codeSurfaceCandidates.length === 0) {
     evaluated = true;
     ok = true;
     reason = verdict.totalCommits === 0 ? "no-direct-commits-in-range" : "no-code-surface-direct-commits";
+  } else if (!needLockWindow) {
+    // 所有代码面直接提交都是 AC65 授权直修（可见+可审计 carve-out，证据在提交消息中）——无 bypass 可能。
+    evaluated = true;
+    ok = true;
+    reason = "ac65-authorized-direct-fix-only";
   } else if (!lockSubEvaluated) {
     evaluated = false;
     ok = true;
@@ -367,7 +443,9 @@ export function main(argv) {
       codeSurfaceCommits: verdict.codeSurfaceCommits,
       designInternalCommits: verdict.designInternalCommits,
       inLockWindowCommits: verdict.inLockWindowCommits,
+      ac65AuthorizedCommits: verdict.ac65AuthorizedCommits,
       predicate: "design-internal exclusion set (see header / task body): tasks/ docs/ orchestration/ adr/ .quay/ plugin/loop/ measurements/ milestones/ .claude/ plugin/skills/manager/ CLAUDE.md .gitignore .gitattributes .npmrc .github/ plugin/scripts/fan-in-* plugin/test/fan-in-*",
+      ac65CarveOut: "AC65-authorized direct-fix table (AC65_AUTHORIZED_DIRECT_FIXES): sha in table AND commit message carries AC65 verification marker ⇒ ac65AuthorizedDirectFix (visible, NOT bypass); sha in table but no marker ⇒ fail-closed still RED; sha not in table ⇒ RED. NOT a plugin/scripts/* filename exemption.",
     },
     lockWindow: { evaluated: lockSubEvaluated, reason: lockSubReason },
     candidates: codeSurfaceCandidates.map((c) => ({
@@ -376,6 +454,8 @@ export function main(argv) {
       codeSurfaceFiles: c.codeSurfaceFiles,
       inLockWindow: c.inLockWindow,
       confirmedBypass: c.bypass,
+      ac65Authorized: c.ac65Authorized,
+      ac65Evidence: c.ac65Evidence,
     })),
   };
 
@@ -383,12 +463,13 @@ export function main(argv) {
     process.stdout.write(JSON.stringify(result, null, 2) + "\n");
   } else {
     console.log(`direct-to-develop-bypass-check: evaluated=${evaluated} ok=${ok} (${reason})`);
-    console.log(`  denominator: total=${verdict.totalCommits} code-surface=${verdict.codeSurfaceCommits} design-internal=${verdict.designInternalCommits} in-lock-window=${verdict.inLockWindowCommits}`);
+    console.log(`  denominator: total=${verdict.totalCommits} code-surface=${verdict.codeSurfaceCommits} design-internal=${verdict.designInternalCommits} in-lock-window=${verdict.inLockWindowCommits} ac65-authorized=${verdict.ac65AuthorizedCommits}`);
     console.log(`  lock-window: evaluated=${lockSubEvaluated} (${lockSubReason})`);
     for (const c of codeSurfaceCandidates) {
-      const tag = c.bypass ? "RED" : c.inLockWindow ? "SKIP(in-lock-window)" : "design-internal";
+      const tag = c.bypass ? "RED" : c.ac65Authorized ? "AC65-AUTHORIZED" : c.inLockWindow ? "SKIP(in-lock-window)" : "design-internal";
       console.log(`  ${tag} ${c.sha} — ${c.subject}`);
       for (const f of c.codeSurfaceFiles) console.log(`      ${f}`);
+      if (c.ac65Authorized && c.ac65Evidence) console.log(`      evidence: ${c.ac65Evidence}`);
     }
     if (verdict.totalCommits === 0) console.log("  (no direct commits in scan range)");
   }

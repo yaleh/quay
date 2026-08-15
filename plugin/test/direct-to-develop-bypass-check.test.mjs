@@ -11,6 +11,9 @@
 //   ② 硬编码 fixture（file 清单 + 时刻，取自真提交）——在无该历史的 hermetic clone 里也跑。
 // 另覆盖：锁时间窗豁免、设计内/外分离（AC2）、NOT-EVALUATED（reflog 无 / 锁事件不成对，硬规则3b）、
 // CLI 集成（temp repo：直接提交代码面 ⇒ RED；直接提交 .gitignore ⇒ GREEN；fan-in ff 不误报）。
+// AC65 授权直修 carve-out（gap-ac65-direct-fix-vs-bypass-detector-conflict）：02b2b2fc（AC65 授权直修，
+// 消息带验证证据）不再被误标；7e64a86b（真直投）仍红——按 sha + 证据豁免，非 plugin/scripts/* 文件名豁免
+// （fail-closed：sha 入表但消息无 AC65 标记 ⇒ 仍红）。
 //
 // Run:
 //   scripts/test.sh plugin/test/direct-to-develop-bypass-check.test.mjs
@@ -28,6 +31,10 @@ import {
   classifyCommit,
   checkDirectCommits,
   DESIGN_INTERNAL_RE,
+  AC65_AUTHORIZED_DIRECT_FIXES,
+  AC65_VERIFICATION_MARKER_RE,
+  findAc65Entry,
+  commitHasAc65Evidence,
 } from "../scripts/direct-to-develop-bypass-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -56,7 +63,7 @@ function jsonOut(r) {
   return JSON.parse(r.stdout);
 }
 
-/** 从 REPO_ROOT 的真实 git 读一条 commit 的 (files, epoch)——回放真样本的「actual git」读面。 */
+/** 从 REPO_ROOT 的真实 git 读一条 commit 的 (files, epoch, message)——回放真样本的「actual git」读面。 */
 function realCommitData(sha) {
   const diff = gitCmd(REPO_ROOT, "diff", "--name-only", `${sha}^`, sha);
   if (diff.status !== 0) return null;
@@ -64,7 +71,8 @@ function realCommitData(sha) {
   const epoch = gitCmd(REPO_ROOT, "log", "-1", "--format=%ct", sha).stdout.trim();
   if (!/^\d+$/.test(epoch)) return null;
   const subject = gitCmd(REPO_ROOT, "log", "-1", "--format=%s", sha).stdout.trim();
-  return { sha, files, epoch: Number(epoch), subject };
+  const message = gitCmd(REPO_ROOT, "log", "-1", "--format=%B", sha).stdout.trim();
+  return { sha, files, epoch: Number(epoch), subject, message };
 }
 
 // ── 真样本 fixture（取自真提交——file 清单与 committer epoch 与 develop 历史一致）──────────────
@@ -88,6 +96,17 @@ const DESIGN_INTERNAL_SAMPLES = [
   { sha: "manager-skill", files: ["plugin/skills/manager/SKILL.md"], subject: "manager: SKILL.md 索引（635ec831 类）" },
   { sha: "task-file", files: ["tasks/gap-xxx.md"], subject: "tasks: 立案" },
 ];
+
+/** AC65 授权直修样本（02b2b2fc——真提交，验证证据在提交消息中）。必须【不再误标】（AC2 能取假）。 */
+const AC65_AUTHORIZED_SAMPLE = {
+  sha: "02b2b2fc",
+  files: ["plugin/scripts/manager-tick-readings.ts", "plugin/test/manager-tick-readings.test.mjs"],
+  subject: "manager-tick-readings: A0 outer.ticklog 截断缺陷修复（manager ③ 立案，发生率 3）——full:true 完整行，默认 200 截断向后兼容",
+  message:
+    "manager-tick-readings: A0 outer.ticklog 截断缺陷修复（manager ③ 立案，发生率 3）——full:true 完整行，默认 200 截断向后兼容\n\n" +
+    "缺陷：latestTickLog 默认 maxLen=200 把 outer tick-log 行截到 A11 前 ⇒ 判准⑥′ 无法判 outer tick 完整性。修法：A0 feed 走 full:true 完整行。" +
+    "AC65 一条命令验证：A0 outer.ticklog quay 现含 A11+ 内容（full length 676 > 200）。新增测试（full 完整行 + 默认截断向后兼容），24/24 绿。",
+};
 
 // ── PURE: isDesignInternalPath — 设计内排除集（AC2）──────────────────────────────────────────────
 
@@ -272,6 +291,106 @@ test("AC2 粒度 · CLI — 7e64a86b exit 1（RED）；635ec831 exit 0（GREEN�
   assert.equal(outMgr.ok, true);
   assert.equal(outMgr.denominator.designInternalCommits, 1);
   assert.equal(outMgr.denominator.codeSurfaceCommits, 0);
+});
+
+// ── AC65 授权直修 carve-out（gap-ac65-direct-fix-vs-bypass-detector-conflict）─────────────────────
+// 能取假·真样本（AC2）：02b2b2fc（AC65 授权直修，消息带验证证据）不再被误标；7e64a86b（真直投，无
+// AC65 证据）仍红。⛔ 非 plugin/scripts/* 文件名豁免——只有 sha 入表 ∧ 消息携带 AC65 验证标记才豁免；
+// 表里有 sha 但消息无标记 ⇒ fail-closed 仍红（证据要求）。
+
+test("PURE AC65 carve-out — findAc65Entry 前缀匹配；commitHasAc65Evidence 判消息携带证据", () => {
+  assert.equal(findAc65Entry("02b2b2fc")?.sha, "02b2b2fc");
+  assert.equal(findAc65Entry("02b2b2fcbc0188bd358d1f723d6a80975378afce")?.sha, "02b2b2fc", "全量 sha 前缀匹配");
+  assert.equal(findAc65Entry("7e64a86b"), undefined, "真直投不入表");
+  assert.equal(findAc65Entry(""), undefined);
+  assert.equal(findAc65Entry(null), undefined);
+  assert.equal(commitHasAc65Evidence("AC65 一条命令验证：..."), true);
+  assert.equal(commitHasAc65Evidence("init/SKILL.md: 声明 reference-doc"), false);
+  assert.equal(commitHasAc65Evidence(""), false);
+  assert.equal(commitHasAc65Evidence(null), false);
+  assert.equal(AC65_VERIFICATION_MARKER_RE.test(AC65_AUTHORIZED_SAMPLE.message), true, "真样本消息携带标记");
+});
+
+test("PURE classifyCommit — AC65 授权直修（sha 入表 ∧ 消息含证据）⇒ 非 bypass；仅 sha 入表无证据 ⇒ fail-closed 仍红", () => {
+  const holds = [];
+  const ac65 = classifyCommit(
+    { sha: "02b2b2fc", files: ["plugin/scripts/manager-tick-readings.ts", "plugin/test/manager-tick-readings.test.mjs"], epoch: 200, subject: "s", message: AC65_AUTHORIZED_SAMPLE.message },
+    holds,
+  );
+  assert.equal(ac65.ac65Authorized, true);
+  assert.equal(ac65.bypass, false);
+  assert.equal(ac65.ac65Evidence.includes("AC65"), true, "证据（命令+输出引用）可见可审计");
+  assert.equal(ac65.codeSurfaceFiles.length, 2, "AC65 授权直修仍是代码面（denominator 可见，非静默掩盖）");
+
+  // 同一 sha 但消息无 AC65 验证证据 ⇒ 表目与提交不一致，fail-closed 仍红。
+  const noEvidence = classifyCommit({ sha: "02b2b2fc", files: ["plugin/scripts/manager-tick-readings.ts"], epoch: 200, subject: "s", message: "fix without one-command verification output" }, holds);
+  assert.equal(noEvidence.ac65Authorized, false);
+  assert.equal(noEvidence.bypass, true);
+
+  // 真直投（不入表）⇒ 仍红。
+  const real = classifyCommit({ sha: "7e64a86b", files: ["plugin/skills/init/SKILL.md"], epoch: 200, subject: "s", message: "init/SKILL.md: 声明 reference-doc" }, holds);
+  assert.equal(real.ac65Authorized, false);
+  assert.equal(real.bypass, true);
+});
+
+test("PURE checkDirectCommits — AC65 授权直修不计入 violations；混合真直投仍红；ac65 计数正确", () => {
+  const ac65 = { ...AC65_AUTHORIZED_SAMPLE, epoch: 1_700_000_000, action: "commit" };
+  const v = checkDirectCommits([ac65], []);
+  assert.equal(v.violations.length, 0, "AC65 授权直修不得报红");
+  assert.equal(v.ac65AuthorizedCommits, 1);
+  assert.equal(v.codeSurfaceCommits, 1);
+
+  // 混合：AC65 授权 + 真直投 ⇒ 只红真直投。
+  const mixed = checkDirectCommits([
+    ac65,
+    { sha: "7e64a86b", files: ["plugin/skills/init/SKILL.md"], epoch: 1_700_000_001, subject: "s", message: "init/SKILL.md: 声明", action: "commit" },
+  ], []);
+  assert.equal(mixed.violations.length, 1);
+  assert.equal(mixed.violations[0].sha, "7e64a86b");
+  assert.equal(mixed.ac65AuthorizedCommits, 1);
+  assert.equal(mixed.codeSurfaceCommits, 2, "AC65 授权与真直投都是代码面（denominator 都可见）");
+});
+
+test("AC3 回放·真实 git — 02b2b2fc（AC65 授权直修，消息带验证证据）不再被误标", (t) => {
+  const d = realCommitData("02b2b2fc");
+  if (!d) {
+    t.skip(`样本 sha 不在本 repo（02b2b2fc）——真实 git 回放跳过，fixture 回放仍覆盖`);
+    return;
+  }
+  assert.equal(/AC65/.test(d.message ?? ""), true, "真提交消息携带 AC65 验证证据");
+  const v = checkDirectCommits([{ ...d, action: "commit" }], []);
+  assert.equal(v.violations.length, 0, `AC65 授权直修必须不再误标: ${JSON.stringify(v.classified.map((c) => ({ sha: c.sha, bypass: c.bypass, ac65: c.ac65Authorized })))}`);
+  assert.equal(v.ac65AuthorizedCommits, 1);
+  assert.equal(v.classified[0].ac65Authorized, true);
+});
+
+test("AC3 回放·CLI — 02b2b2fc exit 0（AC65 授权直修）；7e64a86b exit 1（真直投仍红）；混合只红真直投", (t) => {
+  if (!realCommitData("02b2b2fc") || !realCommitData("7e64a86b")) {
+    t.skip("样本 sha 不在本 repo——CLI 回放跳过");
+    return;
+  }
+  const rAc65 = runChecker(["--root", REPO_ROOT, "--commits", "02b2b2fc"]);
+  assert.equal(rAc65.status, 0, `AC65 授权直修必须 GREEN(exit 0): ${rAc65.stdout}${rAc65.stderr}`);
+  const outAc65 = jsonOut(rAc65);
+  assert.equal(outAc65.ok, true);
+  assert.equal(outAc65.reason, "ac65-authorized-direct-fix-only");
+  assert.equal(outAc65.candidates[0].ac65Authorized, true);
+  assert.equal(outAc65.candidates[0].confirmedBypass, false);
+  assert.equal(outAc65.candidates[0].ac65Evidence.includes("AC65"), true);
+  assert.equal(outAc65.denominator.ac65AuthorizedCommits, 1);
+
+  const rReal = runChecker(["--root", REPO_ROOT, "--commits", "7e64a86b"]);
+  assert.equal(rReal.status, 1, `真直投必须仍 RED(exit 1): ${rReal.stdout}${rReal.stderr}`);
+  assert.equal(jsonOut(rReal).candidates[0].ac65Authorized, false);
+
+  const rMixed = runChecker(["--root", REPO_ROOT, "--commits", "02b2b2fc,7e64a86b"]);
+  assert.equal(rMixed.status, 1, `混合含真直投 ⇒ 仍 RED(exit 1): ${rMixed.stdout}${rMixed.stderr}`);
+  const outMixed = jsonOut(rMixed);
+  const bySha = Object.fromEntries(outMixed.candidates.map((c) => [c.sha.slice(0, 8), c]));
+  assert.equal(bySha["02b2b2fc"].ac65Authorized, true);
+  assert.equal(bySha["02b2b2fc"].confirmedBypass, false);
+  assert.equal(bySha["7e64a86b"].ac65Authorized, false);
+  assert.equal(bySha["7e64a86b"].confirmedBypass, true);
 });
 
 // ── CLI 集成（temp repo）：直接提交代码面 RED / .gitignore GREEN / fan-in ff 不误报 ─────────────
