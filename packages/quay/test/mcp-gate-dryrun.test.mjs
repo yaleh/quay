@@ -32,6 +32,8 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
+import { test } from "node:test";
+import assert from "node:assert/strict";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { QUAY_CLI, QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
@@ -40,16 +42,6 @@ import { createStore } from "../../quay-native/src/store.ts";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const nativeBin = QUAY_NATIVE_CLI;
 const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin");
-
-let failures = 0;
-function assert(cond, msg) {
-  if (!cond) {
-    failures++;
-    console.error(`FAIL: ${msg}`);
-  } else {
-    console.log(`PASS: ${msg}`);
-  }
-}
 
 const VALID_SECTIONS =
   "## Proposal\nThis is a sufficiently long proposal section so the gate's minimum-content check passes cleanly.\n" +
@@ -87,7 +79,7 @@ function eventsForTask(logPath, taskId) {
     .filter((e) => e.pipeline_id === taskId);
 }
 
-async function main() {
+test("DIR-103-B MCP gate_run dryRun: executes the meter without recording a GateEvent", async () => {
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-mcp-dryrun-ws-"));
   const tasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-mcp-dryrun-tasks-"));
   const gateLogPath = path.join(workspaceRoot, ".quay", "gate-events.jsonl");
@@ -124,42 +116,42 @@ async function main() {
   {
     const before = eventsForTask(gateLogPath, "D103-DRY-PASS").length;
     const r = await client.callTool({ name: "gate_run", arguments: { id: "D103-DRY-PASS", dryRun: true } });
-    assert(r.isError !== true, "gate_run dryRun:true on D103-DRY-PASS returns no error");
-    assert(r.structuredContent?.ok === true, `gate_run dryRun:true on D103-DRY-PASS executes the acceptance command and returns ok:true (got: ${JSON.stringify(r.structuredContent)})`);
+    assert.ok(r.isError !== true, "gate_run dryRun:true on D103-DRY-PASS returns no error");
+    assert.ok(r.structuredContent?.ok === true, `gate_run dryRun:true on D103-DRY-PASS executes the acceptance command and returns ok:true (got: ${JSON.stringify(r.structuredContent)})`);
     const after = eventsForTask(gateLogPath, "D103-DRY-PASS").length;
-    assert(before === after, `AC1: dryRun:true appends ZERO GateEvents for D103-DRY-PASS (before=${before}, after=${after})`);
+    assert.ok(before === after, `AC1: dryRun:true appends ZERO GateEvents for D103-DRY-PASS (before=${before}, after=${after})`);
     const t = await client.callTool({ name: "task_get", arguments: { id: "D103-DRY-PASS" } });
-    assert(t.structuredContent?.task?.status === "ready", `AC2: dryRun:true leaves D103-DRY-PASS status unchanged (ready) (got: ${JSON.stringify(t.structuredContent?.task?.status)})`);
+    assert.ok(t.structuredContent?.task?.status === "ready", `AC2: dryRun:true leaves D103-DRY-PASS status unchanged (ready) (got: ${JSON.stringify(t.structuredContent?.task?.status)})`);
   }
 
   // ── AC1 on the fail path: dryRun:true with a failing command, still zero events ──
   {
     const before = eventsForTask(gateLogPath, "D103-DRY-FAIL").length;
     const r = await client.callTool({ name: "gate_run", arguments: { id: "D103-DRY-FAIL", dryRun: true } });
-    assert(r.isError !== true, "gate_run dryRun:true on D103-DRY-FAIL (failing meter) is NOT isError");
-    assert(r.structuredContent?.ok === false, `gate_run dryRun:true on D103-DRY-FAIL returns ok:false (the command still ran) (got: ${JSON.stringify(r.structuredContent)})`);
+    assert.ok(r.isError !== true, "gate_run dryRun:true on D103-DRY-FAIL (failing meter) is NOT isError");
+    assert.ok(r.structuredContent?.ok === false, `gate_run dryRun:true on D103-DRY-FAIL returns ok:false (the command still ran) (got: ${JSON.stringify(r.structuredContent)})`);
     const after = eventsForTask(gateLogPath, "D103-DRY-FAIL").length;
-    assert(before === after, `AC1 (fail path): dryRun:true appends ZERO GateEvents for D103-DRY-FAIL (before=${before}, after=${after})`);
+    assert.ok(before === after, `AC1 (fail path): dryRun:true appends ZERO GateEvents for D103-DRY-FAIL (before=${before}, after=${after})`);
   }
 
   // ── AC3: dryRun omitted behaves byte-identically to today (GateEvent appended) ──
   {
     const before = eventsForTask(gateLogPath, "D103-NORM-PASS").length;
     const r = await client.callTool({ name: "gate_run", arguments: { id: "D103-NORM-PASS" } });
-    assert(r.isError !== true, "gate_run (dryRun omitted) on D103-NORM-PASS returns no error");
-    assert(r.structuredContent?.ok === true, "gate_run (dryRun omitted) on D103-NORM-PASS returns ok:true");
+    assert.ok(r.isError !== true, "gate_run (dryRun omitted) on D103-NORM-PASS returns no error");
+    assert.ok(r.structuredContent?.ok === true, "gate_run (dryRun omitted) on D103-NORM-PASS returns ok:true");
     const after = eventsForTask(gateLogPath, "D103-NORM-PASS").length;
-    assert(after === before + 1, `AC3 (omitted): a GateEvent IS appended for D103-NORM-PASS (before=${before}, after=${after})`);
+    assert.ok(after === before + 1, `AC3 (omitted): a GateEvent IS appended for D103-NORM-PASS (before=${before}, after=${after})`);
   }
 
   // ── AC3: dryRun:false explicit behaves byte-identically to today ──
   {
     const before = eventsForTask(gateLogPath, "D103-FALSE-PASS").length;
     const r = await client.callTool({ name: "gate_run", arguments: { id: "D103-FALSE-PASS", dryRun: false } });
-    assert(r.isError !== true, "gate_run dryRun:false on D103-FALSE-PASS returns no error");
-    assert(r.structuredContent?.ok === true, "gate_run dryRun:false on D103-FALSE-PASS returns ok:true");
+    assert.ok(r.isError !== true, "gate_run dryRun:false on D103-FALSE-PASS returns no error");
+    assert.ok(r.structuredContent?.ok === true, "gate_run dryRun:false on D103-FALSE-PASS returns ok:true");
     const after = eventsForTask(gateLogPath, "D103-FALSE-PASS").length;
-    assert(after === before + 1, `AC3 (explicit false): a GateEvent IS appended for D103-FALSE-PASS (before=${before}, after=${after})`);
+    assert.ok(after === before + 1, `AC3 (explicit false): a GateEvent IS appended for D103-FALSE-PASS (before=${before}, after=${after})`);
   }
 
   // Clean-exit teardown (Grounded fact #3): stdin.end() → quay mcp exits cleanly
@@ -167,16 +159,4 @@ async function main() {
   await transport.close();
   fs.rmSync(tasksDir, { recursive: true, force: true });
   fs.rmSync(workspaceRoot, { recursive: true, force: true });
-
-  if (failures > 0) {
-    console.error(`\n${failures} FAILURE(S)`);
-    process.exitCode = 1;
-  } else {
-    console.log("\nAll DIR-103-B MCP gate_run dryRun tests passed.");
-  }
-}
-
-main().catch((err) => {
-  console.error(err.stack || String(err));
-  process.exitCode = 1;
 });
