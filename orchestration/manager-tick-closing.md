@@ -144,7 +144,14 @@ node --test plugin/test/manager-layer-shipping.test.mjs >/dev/null 2>&1 \
 **⊢ 三类文件与其断言者（现读，改了要同步这张表）**：
 ```
 plugin/skills/manager/SKILL.md          → plugin/test/manager-layer-shipping.test.mjs
-orchestration/SPEC-*.md（新增/删除）     → 同上（AC6 逐 SPEC 断言索引）
+orchestration/SPEC-*.md（新增/删除）     → **两个断言者，缺一即红**：
+                                          ① plugin/test/manager-layer-shipping.test.mjs（AC6 逐 SPEC 断言 manager SKILL 索引）
+                                          ② plugin/test/capability-catalog.test.mjs（referenced-not-landed：被 manager SKILL
+                                             引用的 SPEC 必须在 plugin/skills/init/SKILL.md 声明 reference-doc）
+                                          ⚠️ ② 的落点 `plugin/skills/init/SKILL.md` **不在 manager 豁免面**
+                                          ⇒ 新增 SPEC 必然产生一条【跨面债】：我改 ①，② 必须投给 inner/outer 落
+                                          （先例 7e64a86b 即 inner 落的同类一行声明；init/SKILL.md:130 逐字写着这条契约）
+                                          ⇒ **新增 SPEC 时必须同轮投出 ②，⛔ 不得只做 ① 就当完成**
 .claude/workflows/manager-tick-core.js  → 实跑一次 Workflow(scriptPath)（该文件自述 node --check 会假绿）
 ```
 **⊢ 立条代价（就是不做这一步的代价）**：`84985e66` 新增 SPEC 未同步索引 ⇒ **round179/180 连红两轮**，
