@@ -353,10 +353,14 @@ export function latestTickLogReading(project: Project, opts?: { mtimeEpoch?: num
   return { row: "stale-unknown", freshness: "unknown" };
 }
 
-/** 字符串形态（向后兼容）：返回最新行（截断）或显式哨兵。`opts.mtimeEpoch` 供测试注入 mtime。 */
-export function latestTickLog(project: Project, maxLen = 200, opts?: { mtimeEpoch?: number }): string {
+/** 字符串形态（向后兼容）：返回最新行（截断）或显式哨兵。`opts.mtimeEpoch` 供测试注入 mtime。
+ * ⚠️ 2026-08-15 A0 截断缺陷（manager ③ 立案）：默认 maxLen=200 会把 outer tick-log 行（实测 500-1000+ 字符）
+ * 截断到 A11 之前，判准⑥′ 无法判 outer tick 完整性。A0 feed 走 `full:true`（完整行）；显式传 maxLen
+ * 仍是截断语义（测试/其它消费者向后兼容）。 */
+export function latestTickLog(project: Project, maxLen = 200, opts?: { mtimeEpoch?: number; full?: boolean }): string {
   const r = latestTickLogReading(project, opts);
   if (r.freshness === "none" || r.freshness === "unknown") return r.row;
+  if (opts?.full) return r.row;
   return truncate(r.row, maxLen);
 }
 
@@ -515,7 +519,7 @@ export function render(projects: Project[], opts: RenderOpts): string {
       lines.push(`outer.liveness ${o.target} window-missing`);
     }
   }
-  for (const p of projects) lines.push(`outer.ticklog ${p.name} ${latestTickLog(p)}`);
+  for (const p of projects) lines.push(`outer.ticklog ${p.name} ${latestTickLog(p, 200, { full: true })}`);
   lines.push(`monitor.mounted ${monitors.length > 0}`);
   lines.push(`monitor.instances ${monitors.length}`);
   lines.push(`monitor.entry_last_commit ${entryCommit || "unknown"}`);
@@ -536,7 +540,7 @@ export function renderSelected(cmd: string, args: string[], projects: Project[],
     const names = args.length > 0 ? new Set(args) : null;
     for (const p of projects) {
       if (names && !names.has(p.name)) continue;
-      lines.push(`outer.ticklog ${p.name} ${latestTickLog(p)}`);
+      lines.push(`outer.ticklog ${p.name} ${latestTickLog(p, 200, { full: true })}`);
     }
   } else if (cmd === "outer.liveness") {
     const target = args[0] ?? "";
