@@ -45,14 +45,14 @@ depends_on:
 
 ## Acceptance Criteria
 
-- [ ] AC1 排除集加 `plugin/skills/manager/**`（理由：manager 独占 + 走不了 fan-in 路，同 .claude/ CLAUDE.md 两条既有理由）。
-- [ ] AC2 粒度到 manager/**：`plugin/skills/init/SKILL.md` 直改必须仍红（7e64a86b 真样本回放），manager/** 转绿（635ec831）。
-- [ ] AC3 ⛔ 不改阻断语义（真差集 1 不需存量豁免）；断言面风险由 manager 527269a9 门承担。
-- [ ] AC4 既有测试全绿；`--for-task` scoped 门绿。
+- [x] AC1 排除集加 `plugin/skills/manager/**`（理由：manager 独占 + 走不了 fan-in 路，同 .claude/ CLAUDE.md 两条既有理由）。
+- [x] AC2 粒度到 manager/**：`plugin/skills/init/SKILL.md` 直改必须仍红（7e64a86b 真样本回放），manager/** 转绿（635ec831）。
+- [x] AC3 ⛔ 不改阻断语义（真差集 1 不需存量豁免）；断言面风险由 manager 527269a9 门承担。
+- [x] AC4 既有测试全绿；`--for-task` scoped 门绿。
 
 ## Definition of Done
 
-- [ ] `plugin/skills/manager/**` 进 design-internal 排除集（init/SKILL.md 仍红、manager/** 绿）+ 测试绿。
+- [x] `plugin/skills/manager/**` 进 design-internal 排除集（init/SKILL.md 仍红、manager/** 绿）+ 测试绿。
 
 ## Touches
 
