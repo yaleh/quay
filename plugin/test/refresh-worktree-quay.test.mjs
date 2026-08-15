@@ -15,7 +15,13 @@
 //   AC2 — heavy/wasteful excluded: node-compile-cache/ and dated full-suite-<ISO>.log are NOT
 //         copied (3.2G / ~1.2M each would be wasted on a one-suite snapshot).
 //   AC3 — no-op on the main checkout: the linked-worktree guard skips a main run (nothing to copy).
-//   AC4 — root auto-derived: without --root, the main checkout is resolved from `git worktree list`.
+//   AC4  — root auto-derived: without --root, the main checkout is resolved from the repo's shared
+//          .git dir (git rev-parse --git-common-dir). Clears the leaked QUAY_MAIN_CHECKOUT so the
+//          derive is genuinely exercised in ANY ambient env (one-shot verify round sets it).
+//   AC4b — root auto-derive is ORDER-INDEPENDENT: a git whose `worktree list` lists a NON-main entry
+//          first (constructed via a git shim) still resolves the MAIN checkout, not the first entry.
+//   AC4c — root auto-derive resolves the main checkout from a DETACHED linked worktree (the one-shot
+//          verify-worktree shape), whose path may sort before the main.
 //   AC5 — idempotent + dry-run: re-running overwrites (no error); --dry-run changes nothing.
 //
 // Run:
@@ -112,13 +118,77 @@ test("AC3 — no-op on the main checkout: the linked-worktree guard skips a main
   }
 });
 
-test("AC4 — root auto-derived: without --root, the main checkout is resolved from git worktree list", () => {
+test("AC4 — root auto-derived: without --root, the main checkout is resolved from the repo's shared .git dir", () => {
   const { main, wt } = makeRepo();
   try {
-    const r = bash([SCRIPT, wt]); // no --root, no QUAY_MAIN_CHECKOUT
+    // gap-refresh-worktree-quay-main-derive (round197): the one-shot verify round runs the suite with
+    // QUAY_MAIN_CHECKOUT set (full-suite-runner.ts) and this spawn INHERITS it ⇒ root was overridden to
+    // the REAL quay main ⇒ the copied config lacked the fixture gate ⇒ AC4 failed. Clear it so this
+    // test genuinely exercises the git-derived path — the derive must win in ANY ambient env.
+    const env = { ...process.env };
+    delete env.QUAY_MAIN_CHECKOUT;
+    const r = bash([SCRIPT, wt], { env }); // no --root, no QUAY_MAIN_CHECKOUT
     assert.equal(r.status, 0, `script exited ${r.status}: ${r.stdout} ${r.stderr}`);
     assert.ok(fs.existsSync(path.join(wt, ".quay", "config.yml")), "config copied with git-derived root");
     assert.ok(fs.readFileSync(path.join(wt, ".quay", "config.yml"), "utf8").includes("zz-refresh-probe-gate"));
+  } finally {
+    rmrf(main);
+  }
+});
+
+test("AC4b — root auto-derive is ORDER-INDEPENDENT: a git whose `worktree list` lists a non-main entry first still resolves the MAIN", () => {
+  const { main, wt } = makeRepo();
+  const shimDir = fs.mkdtempSync(path.join(os.tmpdir(), "refresh-quay-shim-"));
+  // Resolve the real git BEFORE prepending the shim dir to PATH (else command -v finds the shim).
+  const realGit = spawnSync("bash", ["-c", "PATH=/usr/bin:/bin command -v git"], { encoding: "utf8" }).stdout.trim();
+  assert.ok(realGit, "real git binary must resolve");
+  try {
+    // git 2.43's get_worktrees() always forces the main working tree first, so a REAL repo cannot
+    // naturally exhibit a non-main first entry on this git — construct it honestly with a git shim
+    // that reverses the `git worktree list --porcelain` entry order (everything else passes through).
+    // The OLD first-entry derive resolves the linked wt as "root" ⇒ the wt==root guard no-ops ⇒ the
+    // fixture config is NOT copied ⇒ AC4's assertion fails. The NEW git-common-dir derive is unaffected
+    // by list order ⇒ the MAIN's .quay/ is copied. This is the "首项非 main 构造样本" for AC2.
+    const shim = `#!/usr/bin/env bash\n` +
+      `real_git="\${REAL_GIT:?}"\n` +
+      `reorder=0\n` +
+      `for a in "$@"; do\n` +
+      `  [ "$a" = "worktree" ] && reorder=1\n` +
+      `  if [ "$reorder" = "1" ] && [ "$a" = "list" ]; then\n` +
+      `    tmp="$(mktemp)"\n` +
+      `    "$real_git" "$@" > "$tmp"\n` +
+      `    awk -v RS='' '{ e[NR]=$0 } END { for (i=NR; i>=1; i--) printf "%s\\n\\n", e[i] }' "$tmp"\n` +
+      `    rc=$?\n` +
+      `    rm -f "$tmp"\n` +
+      `    exit $rc\n` +
+      `  fi\n` +
+      `done\n` +
+      `exec "$real_git" "$@"\n`;
+    fs.writeFileSync(path.join(shimDir, "git"), shim, { mode: 0o755 });
+
+    const env = { ...process.env, PATH: `${shimDir}${path.delimiter}${process.env.PATH ?? ""}`, REAL_GIT: realGit };
+    delete env.QUAY_MAIN_CHECKOUT;
+    const r = bash([SCRIPT, wt], { env }); // no --root: derive, with `worktree list` reversed
+    assert.equal(r.status, 0, `script exited ${r.status}: ${r.stdout} ${r.stderr}`);
+    assert.ok(fs.existsSync(path.join(wt, ".quay", "config.yml")), "config copied from the MAIN checkout even though `git worktree list` lists the linked wt first");
+    assert.ok(fs.readFileSync(path.join(wt, ".quay", "config.yml"), "utf8").includes("zz-refresh-probe-gate"));
+  } finally {
+    rmrf(main);
+    rmrf(shimDir);
+  }
+});
+
+test("AC4c — root auto-derive resolves the MAIN checkout from a DETACHED linked worktree (one-shot verify shape)", () => {
+  const { main, wt, git } = makeRepo();
+  const detach = path.join(main, "detached-verify");
+  try {
+    git("worktree", "add", "-q", "--detach", detach, "HEAD");
+    const env = { ...process.env };
+    delete env.QUAY_MAIN_CHECKOUT;
+    const r = bash([SCRIPT, detach], { env }); // derive from a detached verify worktree
+    assert.equal(r.status, 0, `script exited ${r.status}: ${r.stdout} ${r.stderr}`);
+    assert.ok(fs.existsSync(path.join(detach, ".quay", "config.yml")), "config copied into the detached verify worktree from the MAIN checkout");
+    assert.ok(fs.readFileSync(path.join(detach, ".quay", "config.yml"), "utf8").includes("zz-refresh-probe-gate"));
   } finally {
     rmrf(main);
   }
