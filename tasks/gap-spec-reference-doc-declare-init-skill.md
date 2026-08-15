@@ -62,4 +62,10 @@ depends_on: []
 
 ## Evidence
 
-（落地后回填——capability-catalog:370 referenced-not-landed（manager/SKILL.md 引 SPEC 未声明）阻断排除集 + carriers fan-in）
+（Build 落地 2026-08-15，worktree `gap-spec-reference-doc-declare-init-skill`）：
+- 修复前：`capability-catalog.test.mjs:370` Wiring 测试 `referenced-not-landed` 红——manager/SKILL.md:173 引用 `orchestration/SPEC-tick-mechanical-checks-mcp-2026-08-15.md`，init/SKILL.md reference-doc 声明块无此行，quay-init.sh `verify-referenced-landed`（`grep -oE '<!-- reference-doc: … -->'` 逐字比对）判缺失。
+- 修复：init/SKILL.md reference-doc 块末（`SPEC-in-flight-semantics-2026-08-14.md` 之后、`## Behavior` 之前）加 1 行 `<!-- reference-doc: orchestration/SPEC-tick-mechanical-checks-mcp-2026-08-15.md -->`（同 7e64a86b 形态，非新机制）。
+- 判据1（capability-catalog）：`node --test plugin/test/capability-catalog.test.mjs` → 16/16 绿（含 :370 Wiring 测试，referenced-not-landed 消失）。
+- 判据2（能取假，AC6 不回归）：`node --test plugin/test/manager-layer-shipping.test.mjs` → 7/7 绿，AC6「indexes every on-disk orchestration/SPEC-*.md」仍绿（引用保留只补声明）。
+- 判据3（既有测试 + scoped 门）：`quay-init.test.mjs` + `quay-init-loop-consumer-doc-refs.test.mjs` → 9/9 绿；`quay-init-loop-driver.test.mjs` → 15/15 绿（AC7「every orchestration/* ref is landed or declared」验证新声明正确分类）；`scripts/test.sh --for-task gap-spec-reference-doc-declare-init-skill --allow-thin` → exit 0（task-contract-check / malformed-task-check / superseded-capability-check / landing-target-check 全 PASS；selector 0/2 薄选择为既有态——init/SKILL.md 无 touch→test 映射，非本次改动引入）。
+- 未跑全量（Build 阶段 scoped/direct only）；排除集 + carriers 的 scoped 门不再被此红阻断。

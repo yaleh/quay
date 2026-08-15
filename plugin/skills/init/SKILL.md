@@ -181,6 +181,7 @@ documented reference from a genuine missing file:
 <!-- reference-doc: orchestration/SPEC-tick-read-path-slimming-2026-08-14.md -->
 <!-- reference-doc: orchestration/SPEC-tick-quality-2026-08-14.md -->
 <!-- reference-doc: orchestration/SPEC-in-flight-semantics-2026-08-14.md -->
+<!-- reference-doc: orchestration/SPEC-tick-mechanical-checks-mcp-2026-08-15.md -->
 
 ## Behavior
 
