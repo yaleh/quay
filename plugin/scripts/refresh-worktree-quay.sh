@@ -82,6 +82,14 @@ fi
 mkdir -p "${worktree}/.quay"
 copied=0
 skipped=0
+# Exclude node-compile-cache at the PATHS PEC level, not just in the per-path case below: a bash
+# loop over 346K+ enumerated ignored files (node-compile-cache is 3.2G) cost ~23s per invocation —
+# and scripts/test.sh runs this on EVERY invocation, so the serial-phase grouping tests' nested
+# --list-files/--list-groups probes each paid 23s, widening a transient zz-unknown-group fixture
+# window into a near-certain false red (gap-fan-in-worktree-quay-provisioning fan-in, 2026-08-15).
+# The pathspec exclude drops the enumeration to ~269 paths (~0.3s) while the per-path case below
+# stays as defense-in-depth for anything that slips through (a new heavy dir, or git without
+# pathspec-magic support — then node-compile-cache is still case-skipped, just slower).
 while IFS= read -r rel; do
   # Skip the heavy/wasteful parts (see header). Pattern matched per-path so a new carrier under
   # .quay/ is copied automatically; only these are deliberately excluded.
@@ -91,7 +99,7 @@ while IFS= read -r rel; do
   esac
   mkdir -p "${worktree}/$(dirname "${rel}")"
   cp -p "${root}/${rel}" "${worktree}/${rel}" && copied=$((copied + 1)) || true
-done < <(git -C "${root}" ls-files --others --ignored --exclude-standard -- .quay/ 2>/dev/null)
+done < <(git -C "${root}" ls-files --others --ignored --exclude-standard -- .quay/ ':(exclude).quay/node-compile-cache/**' 2>/dev/null)
 
 echo "refresh-worktree-quay: copied ${copied} file(s) (${skipped} heavy/wasteful skipped) from ${root}/.quay into ${worktree}/.quay" >&2
 exit 0

@@ -197,10 +197,21 @@ fi
 # refresh-worktree-quay.sh is a no-op on a main-checkout run (its linked-worktree guard) and is
 # idempotent; the copy source is QUAY_MAIN_CHECKOUT when set (full-suite-runner one-shot) else the
 # git-derived main worktree (fan-in direct path).
-if [ -f "${repo_root}/plugin/scripts/refresh-worktree-quay.sh" ]; then
-  bash "${repo_root}/plugin/scripts/refresh-worktree-quay.sh" "${repo_root}" \
-    || echo "scripts/test.sh: WARNING — refresh-worktree-quay.sh failed (exit $?); the suite may be environmentally red in this worktree" >&2
-fi
+# Metadata probes (--list-files / --list-groups, incl. `--group X --list-files`) only LIST files —
+# they run NO tests, so no .quay refresh is needed. Skipping them keeps the runner-grouping family's
+# nested probes cheap: each probe previously paid a ~23s refresh (the enumeration iterated
+# node-compile-cache's 346K+ ignored files), and the widened per-probe window turned the transient
+# zz-unknown-group fixture (runner-grouping-serial-anti-stomp) into a near-certain AC6 false red.
+# Real runs (plain / --group X without --list-files / --for-task) still refresh.
+case " $* " in
+  *"--list-files"*|*"--list-groups"*) ;;
+  *)
+    if [ -f "${repo_root}/plugin/scripts/refresh-worktree-quay.sh" ]; then
+      bash "${repo_root}/plugin/scripts/refresh-worktree-quay.sh" "${repo_root}" \
+        || echo "scripts/test.sh: WARNING — refresh-worktree-quay.sh failed (exit $?); the suite may be environmentally red in this worktree" >&2
+    fi
+    ;;
+esac
 
 # ── criterion-cost recording (gap-no-criterion-records-its-own-cost-checker-cost-jsonl) ──────────
 # Every checker executed by run_static_checks (and the scoped tier, which evals the SAME wrapped
