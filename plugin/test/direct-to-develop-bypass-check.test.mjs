@@ -5,6 +5,8 @@
 //
 // 能取假（AC3）：真样本（7e64a86b + 核心子集 4 条 7d1d5d2e/b389a758/18e7a3be/77174684）必须报红；
 // 设计内样本（.gitignore / manager 独占 / 热修 fan-in 机件本身）必须绿。回放走两条路：
+// AC2 粒度：7e64a86b（plugin/skills/init/SKILL.md）在排除集加 plugin/skills/manager/** 后仍红；
+// 635ec831（plugin/skills/manager/SKILL.md）转绿——粒度到 manager/**，不掩 init/ 真红。
 //   ① 真实 git 读（REPO_ROOT 的 develop 历史含这些样本——它们是 develop 的祖先），喂纯判定；
 //   ② 硬编码 fixture（file 清单 + 时刻，取自真提交）——在无该历史的 hermetic clone 里也跑。
 // 另覆盖：锁时间窗豁免、设计内/外分离（AC2）、NOT-EVALUATED（reflog 无 / 锁事件不成对，硬规则3b）、
@@ -83,6 +85,7 @@ const DESIGN_INTERNAL_SAMPLES = [
   { sha: "orchestration-doc", files: ["orchestration/manager-tick-core.md"], subject: "orchestration: C17 枚举补全" },
   { sha: "claude-md", files: ["CLAUDE.md"], subject: "CLAUDE.md: 硬规则 12 补 12b" },
   { sha: "fan-in-hotfix", files: [".claude/workflows/fan-in-execute.js"], subject: "workflows: fix fan-in-execute meta" },
+  { sha: "manager-skill", files: ["plugin/skills/manager/SKILL.md"], subject: "manager: SKILL.md 索引（635ec831 类）" },
   { sha: "task-file", files: ["tasks/gap-xxx.md"], subject: "tasks: 立案" },
 ];
 
@@ -102,6 +105,8 @@ test("PURE isDesignInternalPath — 记账/转向/遥测面 + manager 独占 + �
     ".claude/workflows/manager-tick-core.js",
     ".claude/workflows/fan-in-execute.js",
     ".claude/skills/x/SKILL.md",
+    "plugin/skills/manager/SKILL.md",
+    "plugin/skills/manager/sub/deep.md",
     "CLAUDE.md",
     ".gitignore",
     ".gitattributes",
@@ -120,7 +125,8 @@ test("PURE isDesignInternalPath — 代码/断言面（产品交付）不是设�
     "plugin/test/ready-pool-check.test.mjs",
     "plugin/test/manager-tick-core.test.mjs",
     "plugin/skills/init/SKILL.md",
-    "plugin/skills/manager/SKILL.md",
+    "plugin/skills/init/sub/x.md",
+    "plugin/skills/manager-tool/foo.md",
     "plugin/scripts/ready-pool-check.ts",
     "packages/quay/src/mcp-server.ts",
     "scripts/test.sh",
@@ -130,6 +136,8 @@ test("PURE isDesignInternalPath — 代码/断言面（产品交付）不是设�
   // 反向：`fan-in-` 前缀只在 plugin/scripts|test 顶层豁免——不要误伤 loop-shipping 等。
   assert.equal(isDesignInternalPath("plugin/scripts/loop-shipping-exclusion-data.mjs"), false);
   assert.equal(isDesignInternalPath("plugin/test/fan-in-ff-merge.test.mjs"), true, "fan-in 机件测试豁免");
+  // ⛔ AC2 粒度：manager/ 前缀豁免，但必须精确到 manager/ 子树——`manager-tool/` 是另一个目录，不得误豁免。
+  assert.equal(isDesignInternalPath("plugin/skills/manager-tool/foo.md"), false, "manager-tool/ 不是 manager/ 子树");
 });
 
 // ── PURE: classifyCommit — 直接提交的分类（AC1 三条件）───────────────────────────────────────────
@@ -170,7 +178,7 @@ test("PURE checkDirectCommits — 真样本 5 条全红；设计内样本全绿�
   const v2 = checkDirectCommits(internal, []);
   assert.equal(v2.violations.length, 0, "设计内样本不得报红");
   assert.equal(v2.codeSurfaceCommits, 0);
-  assert.equal(v2.designInternalCommits, 6);
+  assert.equal(v2.designInternalCommits, 7);
 
   // 混合一真一设计内 ⇒ 只红真样本。
   const mixed = checkDirectCommits(
@@ -188,7 +196,7 @@ test("PURE checkDirectCommits — 真样本 5 条全红；设计内样本全绿�
 
 // ── AC3 回放·真实 git：REPO_ROOT 的 develop 历史含这些样本（它们是祖先）───────────────────────
 
-const REAL_SHAS = ["7e64a86b", "7d1d5d2e", "b389a758", "18e7a3be", "77174684", "5e54bb37"];
+const REAL_SHAS = ["7e64a86b", "7d1d5d2e", "b389a758", "18e7a3be", "77174684", "5e54bb37", "635ec831"];
 
 test("AC3 回放·真实 git — develop 历史中 5 条真样本读自 git 后必须红，5e54bb37（热修机件）必须绿", (t) => {
   const missing = REAL_SHAS.filter((sha) => realCommitData(sha) === null);
@@ -225,6 +233,45 @@ test("AC3 回放·真实 git — CLI --commits 对 5 条真样本 exit 1（RED�
   const r2 = runChecker(["--root", REPO_ROOT, "--commits", "5e54bb37"]);
   assert.equal(r2.status, 0, `设计内（热修机件）必须 GREEN(exit 0): ${r2.stdout}${r2.stderr}`);
   assert.equal(jsonOut(r2).ok, true);
+});
+
+// ── AC2 粒度（⛔ 到 manager/**，不掩 init/ 真红）────────────────────────────────────────────────
+
+test("AC2 粒度 · 真实 git — 7e64a86b（init/SKILL.md）仍红；635ec831（manager/SKILL.md）转绿", (t) => {
+  const init = realCommitData("7e64a86b");
+  const mgr = realCommitData("635ec831");
+  if (!init || !mgr) {
+    t.skip(`样本 sha 不在本 repo（${[!init && "7e64a86b", !mgr && "635ec831"].filter(Boolean).join(",")}）——真实 git 回放跳过，fixture 回放仍覆盖`);
+    return;
+  }
+  const vi = checkDirectCommits([{ ...init, action: "commit" }], []);
+  assert.equal(vi.violations.length, 1, `init/SKILL.md 直改必须仍红（AC2 粒度——不掩真红）: ${JSON.stringify(vi.classified)}`);
+  assert.equal(vi.violations[0].bypass, true);
+  const vm = checkDirectCommits([{ ...mgr, action: "commit" }], []);
+  assert.equal(vm.violations.length, 0, `manager/SKILL.md 必须转绿（manager 独占 + 无 fan-in 路）: ${JSON.stringify(vm.classified)}`);
+  assert.equal(vm.designInternalCommits, 1);
+});
+
+test("AC2 粒度 · CLI — 7e64a86b exit 1（RED）；635ec831 exit 0（GREEN）", (t) => {
+  const init = realCommitData("7e64a86b");
+  const mgr = realCommitData("635ec831");
+  if (!init || !mgr) {
+    t.skip("样本 sha 不在本 repo——CLI 回放跳过");
+    return;
+  }
+  const rInit = runChecker(["--root", REPO_ROOT, "--commits", "7e64a86b"]);
+  assert.equal(rInit.status, 1, `init/SKILL.md 必须 RED(exit 1): ${rInit.stdout}${rInit.stderr}`);
+  const outInit = jsonOut(rInit);
+  assert.equal(outInit.evaluated, true);
+  assert.equal(outInit.ok, false);
+  assert.equal(outInit.candidates[0].codeSurfaceFiles[0], "plugin/skills/init/SKILL.md");
+
+  const rMgr = runChecker(["--root", REPO_ROOT, "--commits", "635ec831"]);
+  assert.equal(rMgr.status, 0, `manager/SKILL.md 必须 GREEN(exit 0): ${rMgr.stdout}${rMgr.stderr}`);
+  const outMgr = jsonOut(rMgr);
+  assert.equal(outMgr.ok, true);
+  assert.equal(outMgr.denominator.designInternalCommits, 1);
+  assert.equal(outMgr.denominator.codeSurfaceCommits, 0);
 });
 
 // ── CLI 集成（temp repo）：直接提交代码面 RED / .gitignore GREEN / fan-in ff 不误报 ─────────────

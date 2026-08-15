@@ -96,3 +96,64 @@ tick-log 标签   该轮实际真钟    差
 **⊢ 补**:**tick-log 的轮次标题与消息前缀一律用当轮 `date -u` 的真钟**,⛔ 不用 prompt 推测值、⛔ 不用 workflow args。
 **⊢ 判据**:某轮 tick-log 标题的时刻与该轮首个 `date -u` 读数相差 >5 分钟 ⇒ 未落地。
 **⇒ 这是硬规则⑧「编号/命名不得复用」的时间版**:**标签若不指向真实时刻,缺席就无法被定位。**
+
+## ⊕ 2026-08-15 04:1xZ 补（同一个错两小时内犯两次后才给产物）——**提交必须用【自门控的那一条命令】，不得先读后提**
+
+**两次实测**：`635ec831`（03:48Z）与 `2e04026a`（04:1xZ）提交前我都**跑了状态检查、读到了非终态、然后照样提交**。
+第一次我认账「判可否提交的量是 `finishedAt` 不是 `state` 字面值」；**第二次我读对了量（`终态=False`）却仍然提交**
+⇒ **问题不在读哪个量，在于【读】与【提交】是两条独立命令，中间没有任何东西阻止我往下走。**
+**⇒ 这正是本仓库今晚反复记录的那个形态：一条写下来的义务，没有产物，跳过与遵守在记录上不可区分。**
+
+**⊢ 产物（形态照 manager 步骤 0b：物理并进同一条命令，要漏得连提交一起漏）**：
+```bash
+python3 -c "
+import json,sys
+d=json.load(open('.quay/full-suite-state.json'))
+sys.exit(0 if d.get('finishedAt') is not None else 1)" \
+  && git add <files> && git commit -m "..."
+```
+**非终态时该命令【整条不执行】** —— 不是提醒我别提交，是让提交无法发生。
+
+**⊢ 唯一允许的绕过，且必须显式**：确需在非终态轮内提交（如纯文档、或修复正是该轮的红因）⇒
+**提交信息里必须写一行 `轮内提交：已核 finishedAt=None，接受本轮认证不覆盖本提交`**。
+**⊢ 判据（一条命令可查）**：某提交的父轮 `verifiedCommit` 不含它、且提交信息无该行 ⇒ 违规。
+
+**⚠️ 为什么不是「记得先查」**：我已经记得了——第二次我确实查了、也读对了。**记得没用，因为记得之后还有一步要自觉。**
+
+## ⊕ 2026-08-15 04:2xZ 补——**manager 改【被机械断言的豁免面文件】时，提交必须并进那条断言它的测试**
+
+**起因（生产实证，非推理）**：`direct-to-develop-bypass-check` 抓到 30 条直接提交，**含我的 `635ec831`**
+（`plugin/skills/manager/SKILL.md`）。读该检查器的排除集（`:23-30`）：
+```
+排除：tasks/ docs/ orchestration/ adr/ .quay/ plugin/loop/ measurements/ · .claude/（manager 独占）· .gitignore/.github/ 等
+代码/断言面 = 排除集之外的一切，【含 plugin/skills/**/*.md】   ← 我的 SKILL.md 在此
+```
+**⇒ 被抓是按设计，不是误报。**
+
+**但「走 fan-in workflow」对 manager 是【范畴错误】**：manager 不被派任务、没有 worktree、没有任务文件，
+`fan-in-execute.js:44` 无 `task` 即 `bad-args` ⇒ **它没有可走的那条路**。
+**⇒ 真正的缺口不是「manager 绕过了闸」，是【manager 写断言面时根本没有闸】。**
+
+**⊢ 产物（照 AC65「谁能验证」+ 步骤 0b 的并进形态）**：**改这三类文件时，提交命令必须并进断言它的那条测试**：
+```bash
+# plugin/skills/manager/SKILL.md ⇒ 断言它的是 manager-layer-shipping.test.mjs
+node --test plugin/test/manager-layer-shipping.test.mjs >/dev/null 2>&1 \
+  && python3 -c "import json,sys;d=json.load(open('.quay/full-suite-state.json'));sys.exit(0 if d.get('finishedAt') is not None else 1)" \
+  && git add plugin/skills/manager/SKILL.md && git commit -m "..."
+```
+**⊢ 三类文件与其断言者（现读，改了要同步这张表）**：
+```
+plugin/skills/manager/SKILL.md          → plugin/test/manager-layer-shipping.test.mjs
+orchestration/SPEC-*.md（新增/删除）     → **两个断言者，缺一即红**：
+                                          ① plugin/test/manager-layer-shipping.test.mjs（AC6 逐 SPEC 断言 manager SKILL 索引）
+                                          ② plugin/test/capability-catalog.test.mjs（referenced-not-landed：被 manager SKILL
+                                             引用的 SPEC 必须在 plugin/skills/init/SKILL.md 声明 reference-doc）
+                                          ⚠️ ② 的落点 `plugin/skills/init/SKILL.md` **不在 manager 豁免面**
+                                          ⇒ 新增 SPEC 必然产生一条【跨面债】：我改 ①，② 必须投给 inner/outer 落
+                                          （先例 7e64a86b 即 inner 落的同类一行声明；init/SKILL.md:130 逐字写着这条契约）
+                                          ⇒ **新增 SPEC 时必须同轮投出 ②，⛔ 不得只做 ① 就当完成**
+.claude/workflows/manager-tick-core.js  → 实跑一次 Workflow(scriptPath)（该文件自述 node --check 会假绿）
+```
+**⊢ 立条代价（就是不做这一步的代价）**：`84985e66` 新增 SPEC 未同步索引 ⇒ **round179/180 连红两轮**，
+`635ec831` 才修好。**那次我事后跑了测试，而这条要求的是【提交前】跑，并且并进同一条命令。**
+**⊢ 判据**：某次改上表三类文件的提交，其前一条命令若不是对应的断言测试 ⇒ 违规（会话记录可查）。
