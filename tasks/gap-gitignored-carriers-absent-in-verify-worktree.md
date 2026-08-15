@@ -1,7 +1,7 @@
 ---
 id: gap-gitignored-carriers-absent-in-verify-worktree
 title: .quay/ 运行时载体在一次性 verify worktree 结构上不存在——依赖检查器每轮 NOT-EVALUATED 恒绿（AC62 撤勾，5 载体/2 检查器/1 错误勾选/≥1 真差集被掩盖）
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
