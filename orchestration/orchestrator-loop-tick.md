@@ -856,7 +856,7 @@ tick 做一次收尾 pass。
      tick-log + 本轮报告），不静默；退出 0 ⇒ 静默。信号是**报告不是门控**——不阻塞派发、不阻塞
      tick。「强制步骤静默停跑 8.5h 无机械信号」正是它要消灭的缺陷类（AC23 只验 tick 心跳、不验 tick
      内步骤）。
-3. **全量 suite = 外层后台异步验证 gate（非 inner 同步点、非本 tick 阻塞点）**：
+3. **全量 suite = 外层后台异步验证 gate（非 inner 同步点、非本 tick 阻塞点）**【AC84 2026-08-15 退役：outer 不跑 suite，正文保留作理由档案，执行核已迁出 → `orchestration/archive/AC58-retired-clauses.md#R32`】：
    - **后台跑**：全量 suite 由本层起 `plugin/scripts/full-suite-runner.ts`（后台 subagent /
      `run_in_background:true`，不阻塞本 tick、不堵 inner），runner 写 `.quay/full-suite-state.json`
      （`{state: running|green|red, reason?, runner: outer|inner, startedAt, finishedAt, durationMs,
@@ -948,7 +948,7 @@ tick 做一次收尾 pass。
 `node --no-warnings --experimental-strip-types plugin/scripts/full-suite-runner.ts --fail-fast-check`
 （构造失败 suite ⇒ state=red ⇒ SUITE-RED 事件 ⇒ stopSignal 在位，退出 0 = 链完好）。
 
-**红窗分诊（外层独占，AC4——只停派发不停在飞合并会让红树继续累积，故 RED 失败时 fan-in 一并暂缓）**：
+**红窗分诊（外层独占，AC4——只停派发不停在飞合并会让红树继续累积，故 RED 失败时 fan-in 一并暂缓）**【AC84 2026-08-15 退役：outer 不跑 suite、输入消失，正文保留作理由档案，执行核已迁出 → `orchestration/archive/AC58-retired-clauses.md#R33`】：
 `.quay/full-suite-state.json` 的 `state: red` + `reason: failed`（或缺失）即 **stop-dispatch 信号**
 （runner 一检测失败即写 `reason: failed`，AC2/AC5；套件触发者发 `SUITE-RED` 时确认它在位）。`reason:
 aborted`（套件未完成、无正确性结论）**不触发停派**——记录 + 按起跑条件重跑，不挡 inner。state 为 red 时：
