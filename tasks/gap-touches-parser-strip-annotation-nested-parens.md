@@ -49,13 +49,13 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1 判据1：stripTouchAnnotation 处理嵌套全角括号注解（glob = 干净路径）。
-- [ ] AC2 判据2 能取假：a23 + provisioning 样本解析正确 + 真实越界仍 HARD FAIL。
-- [ ] AC3 判据3：既有测试全绿；`--for-task` scoped 门绿。
+- [x] AC1 判据1：stripTouchAnnotation 处理嵌套全角括号注解（glob = 干净路径）。
+- [x] AC2 判据2 能取假：a23 + provisioning 样本解析正确 + 真实越界仍 HARD FAIL。
+- [x] AC3 判据3：既有测试全绿；`--for-task` scoped 门绿。
 
 ## Definition of Done
 
-- [ ] stripTouchAnnotation 处理嵌套括号（a23/provisioning 样本干净 glob + 越界仍 FAIL）+ 测试绿。
+- [x] stripTouchAnnotation 处理嵌套括号（a23/provisioning 样本干净 glob + 越界仍 FAIL）+ 测试绿。
 
 ## Touches
 
