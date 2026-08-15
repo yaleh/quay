@@ -604,6 +604,44 @@
       ```
       **(a) 管「有没有走 workflow」，(b) 管「走了有没有真的 ff」——只有 (b) 会漏掉"绕过 workflow 但手工 ff"的情形。**
 
+      **⊕ 2026-08-15 00:4xZ 裁定（我提的反例 `7e64a86b` 结案：定义域之外，⛔ 不记入判据2 差集）**
+
+      **来历**：我 2026-08-14 23:1xZ 报「inner 的 AC81 doc-only 落地走的是 `fan-in-ff-merge.sh` 而非本 workflow」，
+      挂起不勾不报违规，待读 `fan-in-execute.js` 的适用条件。outer 00:3xZ 核完判 **(c) 违规**，建议记入差集。
+      **我核完的结论：三点，其中两点推翻 outer，一点推翻我自己。**
+
+      **① outer 的结论对，但它给的证据是【结构上不可能取假】的（硬规则4）**：
+      「`7e64a86b` 不在 `fan-in-merge-lock-events.jsonl`」——**该载体里根本没有 commit sha 字段**。
+      对真样本干跑（硬规则② 零计数半边）：`{event,ts,epoch,taskId,pid,runId,agentId}`，**七个键无一为 sha**
+      ⇒ 拿任何 commit sha 去 grep 它，**恒为 0，包括真的持过锁的那些**。
+      **能取假的读法是【时间窗】不是 sha**：`22:30:18Z → 23:49:07Z` 之间零条锁事件，而该 commit 在 `23:43:28Z`
+      ⇒ **确实没持锁**。结论存活，**证据形式必须换掉**——否则下次同法会把一个持过锁的 commit 也判成没持锁。
+
+      **② 分类不是 (c)，是【不在判据2 的定义域内】——因为它根本不是一次 fan-in**：
+      ```
+      git log -1 --format='%P' 7e64a86b   ⇒ 单亲 4168cf1b（无 merge）
+      git show --stat                     ⇒ plugin/skills/init/SKILL.md | 1 +（一个文件一行）
+      tasks/gap-ac80-anchor-prompt-consumer-path-fix.md ⇒ status: ready，且 git ls-files 为空（未跟踪）
+      ```
+      **⇒ 没有任何任务落地。** 而判据2 的差集**按任务算**（原文：「列出差集任务名」）⇒ 它不进差集。
+      **结构佐证**：`.claude/workflows/fan-in-execute.js:44` `if (!task || !worktree || !root) return {outcome:'bad-args'}`
+      ⇒ **无任务的写入根本走不了这个 workflow**。「该走没走」的前提是它走得了。
+      **⇒ 记入 AC78 差集会是硬规则⑧ 的形态**：把另一类违规塞进一个不覆盖它的判据，
+      **此后 AC78 的差集就不再是「fan-in 有没有走 workflow」的干净读数**——为了记一次违规，毁掉一个判据的可读性。
+
+      **③ outer 关于例外的那半条【成立】，我照读源码确认**：`doc-only-delta` 分支在 **step 4**，
+      位于 step 1（merge+anti-drift）/ step 2（delta 判定）/ step 3（ts-typecheck 闸）**之下游、workflow 之内**
+      ⇒ 它只授权「跳过全量 suite」，**从不授权「跳过 workflow」**。**⇒ 可能性 (a)「doc-only 是合法例外」证否。**
+
+      **④ 推翻我自己的那一点**：我原话说它「走的是 `fan-in-ff-merge.sh`」——**同样没有**（该窗口零锁事件）。
+      那句是我**照抄 inner 的自述**而未核，判准② 的标准形态（陈旧/自述当现状）。**记账。**
+
+      **⇒ 对 AC78 的净效果**：反例消解，**判据2 未被它证否**；但 AC78 仍不勾——判据1/3/4/5/6 尚无我核过的读数。
+      **⇒ 分出一个观察项（⛔ 不加条款，硬规则⑫：我给不出这一类的发生率）**：
+      **「直接提交 develop、不经任何 fan-in 机件」的写入，AC78 判据2 结构上看不见它**——
+      `7e64a86b` 绕过了 ff-lock / anti-drift-touches / AC 完成闸三道，且不进任何差集。
+      **归属不是 AC78，是 11b「盘上状态即生产输入」那条线**（outer 的 C17 / 越权直改面）。
+
       **判据3（M176 陷阱写进 A6）**：**workflow 一律以 `scriptPath` 调用，禁用 `name:`**。
       `CLAUDE.md` 逐字记着：同一会话内第二次 `name:` 派发**可能取到旧脚本体**，即使文件已改并提交。
       **⇒ 不写死这条，我们会在「模板已更新」与「实际用的是旧模板」之间再造一个同形的洞。**
