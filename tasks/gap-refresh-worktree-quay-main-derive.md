@@ -1,7 +1,7 @@
 ---
 id: gap-refresh-worktree-quay-main-derive
 title: refresh-worktree-quay.sh auto-derive 取 git worktree list 首项当 main——顺序不保证 main 在前 ⇒ verify 轮 AC4 断言失败（ff714bc0 落地新脚本真实逻辑弱点）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
