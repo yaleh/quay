@@ -52,15 +52,15 @@ fan-in-ff-protocol-check 主检出 ⇒ 四子检查全 evaluated=true
 
 ## Acceptance Criteria
 
-- [ ] AC1 检查器在一次性 worktree 里真评估（不再因载体缺失 NOT-EVALUATED 恒绿）——至少 fan-in-workflow-check 与 fan-in-ff-protocol-check。
-- [ ] AC2 主检出行为不退化：fan-in-workflow-check 主检出仍 ok=false 真抓 gap-ac81；真漂移仍红。
-- [ ] AC3 能取假·真样本（manager 03:3xZ 建议形态，钉【结论】非【是否评估】）：**同一时刻、同一参数，worktree 与主检出的 verdict 必须相同**——修复前两边都必须 ok=false 且差集都含 gap-ac81-inner-verify-wiring；修复后（该差集被处理掉时）两边都必须 ok=true。任一时刻两边结论不同 ⇒ 红。⛔ 把空文件复制进 worktree（evaluated=true 但 0 条记录 ok=true）满足「真评估」却恒绿原封不动——判据钉结论不钉评估。**与 AC2 成对**：只有 AC2 时可把主检出也改成空集全绿；两条都在才闭合。
-- [ ] AC4 ⚠️ verification-round.jsonl 载体缺失对 AC83 生产读数判据的影响——核实是否同病并覆盖。
-- [ ] AC5 既有测试全绿；`--for-task` scoped 门绿；套件验证轮绿。
+- [x] AC1 检查器在一次性 worktree 里真评估（不再因载体缺失 NOT-EVALUATED 恒绿）——至少 fan-in-workflow-check 与 fan-in-ff-protocol-check。
+- [x] AC2 主检出行为不退化：fan-in-workflow-check 主检出仍 ok=false 真抓 gap-ac81；真漂移仍红。
+- [x] AC3 能取假·真样本（manager 03:3xZ 建议形态，钉【结论】非【是否评估】）：**同一时刻、同一参数，worktree 与主检出的 verdict 必须相同**——修复前两边都必须 ok=false 且差集都含 gap-ac81-inner-verify-wiring；修复后（该差集被处理掉时）两边都必须 ok=true。任一时刻两边结论不同 ⇒ 红。⛔ 把空文件复制进 worktree（evaluated=true 但 0 条记录 ok=true）满足「真评估」却恒绿原封不动——判据钉结论不钉评估。**与 AC2 成对**：只有 AC2 时可把主检出也改成空集全绿；两条都在才闭合。
+- [x] AC4 ⚠️ verification-round.jsonl 载体缺失对 AC83 生产读数判据的影响——核实是否同病并覆盖。
+- [x] AC5 既有测试全绿；`--for-task` scoped 门绿；套件验证轮绿。
 
 ## Definition of Done
 
-- [ ] 依赖 .quay/ 运行时载体的检查器在一次性 worktree 中真评估（载体可得或显式喂主检出路径）+ 真差集不再被掩盖 + NOT-EVALUATED 不用于合格。
+- [x] 依赖 .quay/ 运行时载体的检查器在一次性 worktree 中真评估（载体可得或显式喂主检出路径）+ 真差集不再被掩盖 + NOT-EVALUATED 不用于合格。
 
 ## Touches
 
