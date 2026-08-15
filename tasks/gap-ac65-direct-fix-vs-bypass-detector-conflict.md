@@ -101,11 +101,15 @@ primed 待 land。
 
 **需要 —— 当下动作 = 本任务立案**：AC65 与 bypass-detector 结构性冲突，首次具名样本 02b2b2fc 使 round200 红 + parser fan-in 阻断。不立案则冲突从记录消失、下次 AC65 直修复撞。manager 裁定「不 reset/不扩/不重投，让红作样本」= 冲突保持可见，立案即止损线。
 
-## PARKED（inner 2026-08-15 10:2xZ，解除条件 = 人裁定 AC65 vs bypass-detector 谁让谁）
+## PARKED（inner 2026-08-15 10:3xZ 更新——人裁定已到，冲突消解于【主体不同】）
 
-**背景**：fan-in 已在 manager「hold」建议送达前落地（b0d9e3f3，ffOk:true，carve 进 develop）。manager 过程关切成立：本任务 Plan step 1 = 人裁定，不该被自动晋成可派 ⇒ fan-in 翻 done 过早（DoD「02b2b2fc 处置完毕」实质依赖人裁定）。依 manager 建议 PARKED，不让其以「已修复」形态沉淀。
+**人裁定（2026-08-15 10:2xZ）逐字**：「AC65 作用在 outer 内，修改进 develop；bypass-detector 作用于 inner。」
+⇒ AC65 对象=outer（直进 develop 是被授权形态，非绕过）；detector 对象=inner（必须走 fan-in）。
+⇒ **outer 的 AC65 直修本就不该被 detector 标记**——原理层冲突消解，不是「谁让谁」。
 
-- **代码**：carve（sha+证据表）在 develop（b0d9e3f3）——**未 revert**。恢复 round200 红作裁定读数 = revert carve，是更重的动作，待 manager/人确认后执行。
-- **形态问题（硬规则4推论二）**：sha 白名单是宿主依赖字面量——新样本需改代码才覆盖、且静默不覆盖；manager 建议按授权条件判（提交消息含 AC65 验证输出 ⇒ ac65Authorized）。待裁定后定形态。
-- **parser fan-in（w7twbdxra）**：**保持阻断，不重跑**（选定代价 = 裁定读数的一部分；carve 落地前它在阻断，落地后维持不跑以保留压力）。
-- **待续**：outer 落 AC65 措辞；人裁定方向；02b2b2fc 处置（保留样本 / reset 重投）；carve 形态（keep / 条件化 / revert）。
+**实现层仍待（sha 表 = stopgap，停留止损，不让其以「已修复」沉淀）**：
+- **sha 白名单（b0d9e3f3）是错误形态**：它把作用域问题实现成逐条豁免（硬规则4推论二——宿主依赖字面量）。裁定后方向明确：**按作用域判，不按 sha 枚举**。
+- **落地「detector 作用于 inner」需要机器可读标记**：AC65 判据2 允许验证输出在【提交信息或投递】——02b2b2fc 的验证输出投递给 manager、git 记录里看不到 ⇒ 只读 git 的 detector 无法区分「outer 授权直修」与「无授权直投」。三种候选（manager 不代选，①② 动 AC65 措辞=outer 的核，⛔ inner 不单方改）：① 收窄判据2（验证输出必须在提交信息）② git trailer（`AC65-Verified: …`）③ 按会话归属（不推荐）。
+- **处置**：sha 表保留为临时 stopgap 至 outer 定标记形态（①/②）；**outer 措辞落地后，inner 重写 detector 为按作用域判**。
+- **parser fan-in（w7twbdxra）**：裁定已给方向，阻断理由消失 ⇒ **解除 hold，轮终绿后 fan-in land**（卡它的红已是绿的，round201 green）。
+- **待续**：outer 落 AC65 措辞（标记形态 ①/②）；inner detector 按作用域重写；02b2b2fc 保留作具名样本（裁定方向下它是被授权形态，非绕过）。
