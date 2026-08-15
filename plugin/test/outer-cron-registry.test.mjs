@@ -61,7 +61,7 @@ const CHECKER = path.join(REPO_ROOT, "plugin", "scripts", "outer-cron-registry.t
 // 内层 CronCreate（job 025f4132）prompt 原文 —— AC80 任务体给定的权威字符串（与
 // outer-anchor-check.test.mjs 的 INNER_PROMPT 逐字一致）。**字面原样，勿改字符。**
 const INNER_PROMPT =
-  "[inner-tick] 执行内层 tick。不要依赖上下文记忆——本 prompt 只是指针，内容现读：(1) 读 orchestration/fast-mode-tick-core.md 拿本轮步骤（执行核；理由/实测/代价在 plugin/loop/fast-mode-loop-tick.md，仅需「为什么」时按 src:N 查，不要每轮全读）；(2) `tail -10 .quay/inner-tick-log.jsonl` 拿上一轮状态（只 tail，全读不可行）；(3) 读 orchestration/manager-phase-goal.md 拿当前阶段目标与 AC（当前阶段在文件后段，按节标题定位，勿全读）。执行完必须向 .quay/inner-tick-log.jsonl 追加一行。唤醒锚核实（AC81）：每轮先核实——CronList 恰一条 + 其 id 等于注册表记录 + --verify 报 registry-verified；三条全真则不动，任一为假才清扫重建，绝不靠记住的 ID。";
+  "[inner-tick] 执行内层 tick。不要依赖上下文记忆——本 prompt 只是指针，内容现读：(1) 读 orchestration/fast-mode-tick-core.md 拿本轮步骤（执行核；理由/实测/代价在 $REPO_ROOT/docs/analysis/fast-mode-loop-tick.md，仅需「为什么」时按 src:N 查，不要每轮全读）；(2) `tail -10 .quay/inner-tick-log.jsonl` 拿上一轮状态（只 tail，全读不可行）；(3) 读 orchestration/manager-phase-goal.md 拿当前阶段目标与 AC（当前阶段在文件后段，按节标题定位，勿全读）。执行完必须向 .quay/inner-tick-log.jsonl 追加一行。唤醒锚核实（AC81）：每轮先核实——CronList 恰一条 + 其 id 等于注册表记录 + --verify 报 registry-verified；三条全真则不动，任一为假才清扫重建，绝不靠记住的 ID。";
 
 // 外层 CronCreate（job 4e88cb1b）prompt 原文 —— orchestration/outer-tick-prompt.txt 内容去尾部换行
 // （develop commit 72b99cda）。**字面原样，勿改字符。**
@@ -107,9 +107,9 @@ function runReg(args) {
 
 // ── 纯函数 ───────────────────────────────────────────────────────────────────────────────────────────
 
-test("sha256Hex: real inner prompt hashes to the registry value (9a044b…)", () => {
+test("sha256Hex: real inner prompt hashes to the registry value (336ab9…)", () => {
   const h = sha256Hex(INNER_PROMPT);
-  assert.equal(h, "9a044b019e52054834e6b9a3b67cc471467d981670d73ecd28b9d851dfd6bab5");
+  assert.equal(h, "336ab98718d1234bde8cd3dcae64230b8f204cfcd9ab5592ad080c3ec3715b61");
 });
 
 test("sha256Hex: real outer prompt hashes to the registry value (d520ef…)", () => {
