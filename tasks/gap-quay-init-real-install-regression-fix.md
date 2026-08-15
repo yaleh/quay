@@ -1,7 +1,7 @@
 ---
 id: gap-quay-init-real-install-regression-fix
 title: quay-init real-install 回归修复——AC80-INNER-ANCHOR reference-doc + 指针化两落地破坏 2 个 real-install 测试（round170 红，outer 分诊，归属 inner）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
