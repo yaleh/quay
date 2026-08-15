@@ -1,7 +1,7 @@
 ---
 id: gap-ac8-migration-semantic-test-update
 title: tick-core-static-check AC8 断言过时——manager 侧死条目已迁出（5→0 标记行），`>= 6` 断言应改为新语义（剩余死条目带记号 + 迁出条目不在核内）
-status: ready
+status: done
 labels:
   - gap
   - defect
