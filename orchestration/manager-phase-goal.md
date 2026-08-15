@@ -146,10 +146,29 @@
       —— **该模块已于 AC48 标 RETIRED、零生产调用者** ⇒ **活指令指向退役模块**，且它就在 inner 现在要读的那份文件里。
       **⚠️ 但它不阻塞新阶段的 AC54–57**（四条都不碰那条路径），**故排在通则之后，不插队**。
 
-- [ ] **AC62（协议·fan-in 改为「无锁段自测 + 锁内 ff」）**——人 2026-08-14 裁定，正本
+- [x] **AC62（协议·fan-in 改为「无锁段自测 + 锁内 ff」）**——人 2026-08-14 裁定，正本
       `orchestration/SPEC-fan-in-ff-merge-lock-2026-08-14.md`
 
-      **🔴 2026-08-15 03:2xZ 撤勾（我 01:0xZ 的 ✅ 是错的，环境搞错了）——判据2 只有一半在轮里被评估。**
+      **✅ 2026-08-15 10:1xZ 重新勾选——撤勾理由已由 inner 的 `ed24dd02` 消除，我实测复核。**
+      **三段历史都要保留，因为每一段在它那个时刻都是对的：**
+      ```
+      01:0xZ 勾   —— 错：我在【主检出】验绿就勾（环境搞错）
+      03:2xZ 撤勾 —— 对：实测裸 worktree 里 suite-in-lock evaluated=FALSE、lock-hold-only-ff 整条缺席
+      06:44Z      —— inner 落 ed24dd02（gap-fan-in-worktree-quay-provisioning）：scripts/test.sh 入口调
+                     refresh-worktree-quay.sh，把主检出 .quay/ 快照【复制】进 worktree（cp -p，非 symlink——
+                     载体是追加写的 jsonl，symlink 会让 worktree 的 suite 写回生产载体）
+      10:1xZ 重勾 —— 实测：新开 worktree + 按正确形式跑 refresh（copied 35 files）后
+                     fan-in-workflow-check    evaluated=True（ok=false，真报差集，不是 NOT-EVALUATED）
+                     fan-in-ff-protocol-check 四子检查【全部 evaluated=True】——含此前缺席的
+                                              suite-in-lock 与 lock-hold-only-ff
+      ```
+      **⇒ 判据2 的两半（非 ff merge 必须红 / 持锁段内跑 suite 必须红）在轮的真实环境里都被评估 ⇒ 撤勾理由消失。**
+      **⊢ 我自己的一条记账**：我 10:0xZ 还把 03:2xZ 那个发现当现状复述给 inner（建议改 `.worktreeinclude`），
+      **而缺陷 7 小时前已被修好** —— **判准② 陈旧当现状，我犯的**；是 inner 指出后我重跑对照才发现。
+      **⊢ 并且第一次重跑我把参数写错了**（`--worktree` 不是它的形式，正确是 `<worktree>` 在前），
+      得到一个假的 NOT-EVALUATED，差点据此反驳 inner ——**「先验调用方式」今日第三次。**
+
+      **🔴（历史，理由已消除，保留备查）2026-08-15 03:2xZ 撤勾——判据2 只有一半在轮里被评估。**
       **我 01:0xZ 在【主检出】实跑该检查器全绿就勾了；而验证轮跑在【一次性 worktree】（`full-suite-state.json`
       现读 `oneShotWorktree: true`，`full-suite-runner.ts:2300-2301` `root = provisionOneShotWorktree(root)`）。
       同一检查器、同一参数，两个环境结果不同**（我在临时 worktree 里实跑对照）：
