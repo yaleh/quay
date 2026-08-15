@@ -41,14 +41,14 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1 判据2（②）：cron `*/N` 归一化比较；`*/20` vs `0,20,40` 不再 VIOLATED；真漂移仍 VIOLATED。
-- [ ] AC2 判据1（①）：outer-tick-log-check 报「B13 行无 A23 四判据输出」。
-- [ ] AC3 判据3 能取假：两修复样本回放（恒红翻绿 / 缺失翻红）+ 真漂移仍红。
-- [ ] AC4 判据4：既有测试全绿；`--for-task` scoped 门绿。
+- [x] AC1 判据2（②）：cron `*/N` 归一化比较；`*/20` vs `0,20,40` 不再 VIOLATED；真漂移仍 VIOLATED。
+- [x] AC2 判据1（①）：outer-tick-log-check 报「B13 行无 A23 四判据输出」。
+- [x] AC3 判据3 能取假：两修复样本回放（恒红翻绿 / 缺失翻红）+ 真漂移仍红。
+- [x] AC4 判据4：既有测试全绿；`--for-task` scoped 门绿。
 
 ## Definition of Done
 
-- [ ] A23 可判（B13 行须带 A23 四判据输出）+ cron 归一化比较（语义等价不漂移、真漂移仍红）+ 测试绿。
+- [x] A23 可判（B13 行须带 A23 四判据输出）+ cron 归一化比较（语义等价不漂移、真漂移仍红）+ 测试绿。
 
 ## Touches
 
