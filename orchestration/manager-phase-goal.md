@@ -1199,9 +1199,26 @@ outer 全量轮      full-suite-runner.ts:2309 provisionOneShotWorktree(mainRoot
 实证：round197 的 AC4 缺陷（root auto-derive 从 git worktree list 解析主检出）
      只在 verify-worktree 环境暴露，per-task suite 结构上到不了
 ```
-**⇒ 直接退役 B3 会盲掉一个环境。判据4 = 退役方案里必须含【谁来覆盖 verify-worktree 环境】的答案**
-（可选形态：fan-in 增加一次一次性 worktree 内的验证 / 保留一个低频的环境专项轮 / 判定该环境风险可接受并写明理由——**三选一，但必须选**）。
-**⛔ 不接受"退役后再说"** —— 那正是本阶段反复出现的「退役做了一半」（B5 注解、floor 读数、cert）。
+**⇒ 直接退役 B3 会盲掉一个环境。判据4 = 退役方案里必须含【谁来覆盖 verify-worktree 环境】的答案。**
+
+      **✅ 2026-08-15 10:1xZ 人已裁定，逐字：「明确该 verify-worktree 环境 suite 测试【仅在人的明确要求时单次运行】。」**
+      **⇒ 判据4 已有确定答案，⛔ 不再是三选一。** 落地形态：
+      ```
+      verify-worktree 环境的 suite ⇒ 【无任何自动触发】：不按落地触发、不按周期触发、不设低频轮
+                                    ⇒ 只有人明确要求时，单次运行一次
+      ⇒ B3「本轮收尾 ≥1（或有新 merge 落地）⇒ 起全量轮」整条退役，不保留任何缩水版本
+      ⇒ runner 的 appendVerificationRound 随之只在人工单次运行时产生记录
+      ```
+      **⚠️ 人选的是我【没有列出】的第四个选项。** 我给的三个（fan-in 内加验证 / 低频专项轮 / 判定风险可接受）
+      **都预设了某种自动机制**；人的答案是**把自动化整个去掉**。**记这一笔：我的选项集本身带着「必须有自动触发」这个未言明的前提。**
+
+      **⊢ 必须一并写明的代价（人已裁定，我不复议，但要记录以便将来复盘）**：
+      **环境类缺陷（如 round197 的 AC4）从此只在【人下次要求跑】时才会被发现**，检测延迟由「一次落地」变为「不确定」。
+      **这是明示接受的取舍**，与 SPEC §0-6 人的原裁定（「verification-round 应当小；趋势分析基于 inner subagent 的 suite 记录」）方向一致。
+      **⊢ 连带**：红率分桶 / 负载溯源 / 残留剖面对照等趋势分析，**必须全部改用 inner 的 per-task suite 记录**
+      （`.quay/per-task-suite-records.jsonl`），⛔ 不得再依赖 `verification-round.jsonl` 的自动轮次——**它将不再持续产生数据**。
+
+      **⛔ 不接受"退役后再说"** —— 那正是本阶段反复出现的「退役做了一半」（B5 注解、floor 读数、cert）。
 
 **归属**：判据1/2 在 `orchestration/orchestrator-tick-core.md`（outer 独占，C17）；判据3 在 `fast-mode-tick-core.md`（inner 面，manager 只报不改）；
 判据4 的实现面按 AC65「谁能验证」切。**manager 一条都不改，本 AC 的落实动作 = 投递 + 跟踪。**
