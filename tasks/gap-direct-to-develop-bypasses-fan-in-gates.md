@@ -30,6 +30,8 @@ b389a758 13:16 mjs: AC1b 排除表加 manager-phase-goal-archive.md       → pl
 ```
 **这些绕过三道闸且不进任何差集**——AC78 判据2（fan-in 走 workflow）和 11b 的「盘上状态即生产输入」都看不见它们。
 
+**追加样本（2026-08-15 01:1xZ，manager AC63 缺口 #3 复核）**：`gap-ac81-inner-verify-wiring`（orchestrator-tick-core.md +7/-1，8e833277 step-1 中间 merge + 22:04 ff）——**任务文件从未 git 跟踪**（磁盘不存在），真实内容改动无任务文件直接落地；meta-cc 21:55-22:10 窗口**零 fan-in-execute Workflow 调用**（唯一调用是 manager 自己的 manager-tick-core.js 21:59:30）⇒ AC78 判据2 (a) 疑违规。**注意**：`fm-` runId 前缀不可作 workflow 证据（fan-in-execute.js:46 `runId = A.runId ?? ''` 调用方传入、可伪造）——判据须查执行记录（meta-cc Workflow 调用 / ff-lock 时间窗）而非字段形状。
+
 **归属（manager 00:5xZ 明确）**：**11b/C17 线**（写所有权 / 越权直改面），**⛔ 不要挂在 AC78 下**——把这类违规塞进 AC78 差集会毁掉那个判据「fan-in 有没有走 workflow」的干净读数（硬规则⑧）。
 
 **机制方向（供判）**：一个检测器，扫描直接提交 develop 且触及代码/断言面的 commit（复用 fan-in-execute.js:87 的 code_delta 谓词 + ff-lock 事件时间窗），报「直接提交绕过 fan-in 机件」。**30 是上界不是全部违规**——混着按设计就该直接提交的（.gitignore、manager 独占 .claude/workflows/manager-tick-core.js）⇒ 需按「是否设计上该直接提交」分类，不能一刀切。
