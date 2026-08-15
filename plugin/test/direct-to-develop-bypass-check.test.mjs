@@ -32,9 +32,13 @@ import {
   checkDirectCommits,
   DESIGN_INTERNAL_RE,
   AC65_AUTHORIZED_DIRECT_FIXES,
-  AC65_VERIFICATION_MARKER_RE,
+  AC65_DECLARATION_RE,
+  AC65_VERIFICATION_RE,
+  AC65_LEGACY_RE,
   findAc65Entry,
-  commitHasAc65Evidence,
+  commitHasAc65Declaration,
+  commitHasAc65Verification,
+  extractAc65Evidence,
 } from "../scripts/direct-to-develop-bypass-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -294,40 +298,81 @@ test("AC2 粒度 · CLI — 7e64a86b exit 1（RED）；635ec831 exit 0（GREEN�
 });
 
 // ── AC65 授权直修 carve-out（gap-ac65-direct-fix-vs-bypass-detector-conflict）─────────────────────
-// 能取假·真样本（AC2）：02b2b2fc（AC65 授权直修，消息带验证证据）不再被误标；7e64a86b（真直投，无
-// AC65 证据）仍红。⛔ 非 plugin/scripts/* 文件名豁免——只有 sha 入表 ∧ 消息携带 AC65 验证标记才豁免；
-// 表里有 sha 但消息无标记 ⇒ fail-closed 仍红（证据要求）。
+// 两谓词（替换 sha 表——硬规则4：手抄表是回显，不参与判定）：
+//   ① 声明谓词 `/^AC65:/m`（outer 声明/范围标记）
+//   ② 验证产物谓词 `/AC65-Verified:/m`（`AC65-Verified: <命令> => <输出摘要>`）
+// ac65Authorized = ① ∧ ②（两谓词独立——⛔ 声明行含 "AC65" 但不含 "AC65-Verified:"，旧 /AC65/ 会按构造
+// 使声明=免检，已弃）。声明 ∧ 无验证产物 ⇒ 红（判据3 执行体）；无声明 code-surface 直投 ⇒ 红。
+// ⛔ 02b2b2fc legacy 形态（`AC65 一条命令验证：<实际输出>`——旧声明+验证合一短语）容忍重判 authorized。
+// ⛔ 非 plugin/scripts/* 文件名豁免（掩真直投，manager 已拒）。
 
-test("PURE AC65 carve-out — findAc65Entry 前缀匹配；commitHasAc65Evidence 判消息携带证据", () => {
+test("PURE AC65 — findAc65Entry 前缀匹配（纯展示，不参与判定）", () => {
   assert.equal(findAc65Entry("02b2b2fc")?.sha, "02b2b2fc");
   assert.equal(findAc65Entry("02b2b2fcbc0188bd358d1f723d6a80975378afce")?.sha, "02b2b2fc", "全量 sha 前缀匹配");
-  assert.equal(findAc65Entry("7e64a86b"), undefined, "真直投不入表");
+  assert.equal(findAc65Entry("7e64a86b"), undefined, "真直投不入展示表");
   assert.equal(findAc65Entry(""), undefined);
   assert.equal(findAc65Entry(null), undefined);
-  assert.equal(commitHasAc65Evidence("AC65 一条命令验证：..."), true);
-  assert.equal(commitHasAc65Evidence("init/SKILL.md: 声明 reference-doc"), false);
-  assert.equal(commitHasAc65Evidence(""), false);
-  assert.equal(commitHasAc65Evidence(null), false);
-  assert.equal(AC65_VERIFICATION_MARKER_RE.test(AC65_AUTHORIZED_SAMPLE.message), true, "真样本消息携带标记");
 });
 
-test("PURE classifyCommit — AC65 授权直修（sha 入表 ∧ 消息含证据）⇒ 非 bypass；仅 sha 入表无证据 ⇒ fail-closed 仍红", () => {
+test("PURE AC65 — 两谓词独立：声明（^AC65:）∧ 验证产物（AC65-Verified:）⇒ authorized；声明字面不满足验证谓词", () => {
+  // ⛔ 两谓词独立（旧 /AC65/ 缺陷）：声明行含 "AC65" 但不含 "AC65-Verified:"，不得被验证谓词字面满足。
+  assert.equal(AC65_DECLARATION_RE.test("AC65: outer 按 AC65 授权直修（一条命令可验）"), true, "声明谓词匹配 ^AC65: 行");
+  assert.equal(AC65_VERIFICATION_RE.test("AC65: outer 按 AC65 授权直修（一条命令可验）"), false, "⛔ 声明行不得满足验证谓词");
+  assert.equal(AC65_VERIFICATION_RE.test("AC65-Verified: node test => 24/24 绿"), true, "验证谓词匹配 AC65-Verified: 行");
+  assert.equal(AC65_DECLARATION_RE.test("AC65-Verified: node test => 24/24 绿"), false, "验证产物行不是声明（^AC65: 要求行首 AC65:）");
+
+  assert.equal(commitHasAc65Declaration("AC65: outer 按 AC65 授权直修（一条命令可验）"), true);
+  assert.equal(commitHasAc65Verification("AC65: outer 按 AC65 授权直修（一条命令可验）"), false);
+  assert.equal(commitHasAc65Declaration("init/SKILL.md: 声明 reference-doc"), false);
+  assert.equal(commitHasAc65Verification("init/SKILL.md: 声明 reference-doc"), false);
+  assert.equal(commitHasAc65Declaration(""), false);
+  assert.equal(commitHasAc65Verification(""), false);
+  assert.equal(commitHasAc65Declaration(null), false);
+  assert.equal(commitHasAc65Verification(null), false);
+
+  // 02b2b2fc legacy 形态（AC65 一条命令验证：<实际输出>）——声明/验证两谓词都容忍（不补写历史、不改历史消息）。
+  assert.equal(AC65_LEGACY_RE.test(AC65_AUTHORIZED_SAMPLE.message), true, "legacy 合一短语命中容忍正则");
+  assert.equal(commitHasAc65Declaration(AC65_AUTHORIZED_SAMPLE.message), true, "legacy 合一短语满足声明谓词");
+  assert.equal(commitHasAc65Verification(AC65_AUTHORIZED_SAMPLE.message), true, "legacy 合一短语满足验证谓词");
+
+  // ac65Evidence 展示面：验证产物行提取。
+  assert.equal(extractAc65Evidence(AC65_AUTHORIZED_SAMPLE.message).includes("AC65"), true, "legacy 证据行含 AC65 前缀");
+  assert.equal(extractAc65Evidence("AC65-Verified: node test => 24/24 绿").includes("AC65-Verified:"), true, "新形态证据行含 AC65-Verified:");
+  assert.equal(extractAc65Evidence("AC65: outer 按 AC65 授权直修（一条命令可验）"), null, "无验证产物 ⇒ 无证据行");
+  assert.equal(extractAc65Evidence(""), null);
+});
+
+test("PURE classifyCommit — AC65 两谓词：声明∧验证 ⇒ 非 bypass；声明∧无验证 ⇒ 红；无声明直投 ⇒ 红", () => {
   const holds = [];
+  // 02b2b2fc legacy 形态（声明+验证合一短语）⇒ authorized。
   const ac65 = classifyCommit(
     { sha: "02b2b2fc", files: ["plugin/scripts/manager-tick-readings.ts", "plugin/test/manager-tick-readings.test.mjs"], epoch: 200, subject: "s", message: AC65_AUTHORIZED_SAMPLE.message },
     holds,
   );
-  assert.equal(ac65.ac65Authorized, true);
+  assert.equal(ac65.ac65Authorized, true, "02b2b2fc legacy 形态重判为 authorized");
   assert.equal(ac65.bypass, false);
   assert.equal(ac65.ac65Evidence.includes("AC65"), true, "证据（命令+输出引用）可见可审计");
   assert.equal(ac65.codeSurfaceFiles.length, 2, "AC65 授权直修仍是代码面（denominator 可见，非静默掩盖）");
 
-  // 同一 sha 但消息无 AC65 验证证据 ⇒ 表目与提交不一致，fail-closed 仍红。
-  const noEvidence = classifyCommit({ sha: "02b2b2fc", files: ["plugin/scripts/manager-tick-readings.ts"], epoch: 200, subject: "s", message: "fix without one-command verification output" }, holds);
-  assert.equal(noEvidence.ac65Authorized, false);
-  assert.equal(noEvidence.bypass, true);
+  // 新形态：声明（^AC65:）∧ 验证产物（AC65-Verified:）⇒ authorized。
+  const newForm = classifyCommit(
+    { sha: "x", files: ["plugin/scripts/foo.ts"], epoch: 200, subject: "s",
+      message: "AC65: outer 按 AC65 授权直修（一条命令可验）\nAC65-Verified: node --test => 24/24 绿" },
+    holds,
+  );
+  assert.equal(newForm.ac65Authorized, true, "新形态声明∧验证 ⇒ authorized");
+  assert.equal(newForm.bypass, false);
+  assert.equal(newForm.ac65Evidence.includes("AC65-Verified:"), true);
 
-  // 真直投（不入表）⇒ 仍红。
+  // ⛔ 声明 ∧ 无验证产物 ⇒ 红（判据3 执行体——旧 /AC65/ 会按构造免检，已弃）。
+  const declOnly = classifyCommit(
+    { sha: "y", files: ["plugin/scripts/foo.ts"], epoch: 200, subject: "s", message: "AC65: outer 按 AC65 授权直修（一条命令可验）" },
+    holds,
+  );
+  assert.equal(declOnly.ac65Authorized, false, "声明∧无验证产物 ⇒ 非 authorized");
+  assert.equal(declOnly.bypass, true, "声明∧无验证产物 ⇒ 红");
+
+  // 无声明 code-surface 直投 ⇒ 仍红。
   const real = classifyCommit({ sha: "7e64a86b", files: ["plugin/skills/init/SKILL.md"], epoch: 200, subject: "s", message: "init/SKILL.md: 声明 reference-doc" }, holds);
   assert.equal(real.ac65Authorized, false);
   assert.equal(real.bypass, true);

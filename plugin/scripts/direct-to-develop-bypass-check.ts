@@ -41,12 +41,16 @@
 //
 //   AC65 授权直修 carve-out（tasks/gap-ac65-direct-fix-vs-bypass-detector-conflict）：AC65
 //   （orchestrator-tick-core.md:105）授权 outer「一条命令可验 ⇒ 可直接修 plugin/scripts」——与本检测器的
-//   「plugin/scripts 直提交即 bypass」结构性冲突（首次具名样本 02b2b2fc）。修法 = 按 sha + 证据的豁免表
-//   AC65_AUTHORIZED_DIRECT_FIXES（inner 2026-08-15 裁定；人裁定方向待决，本表对「提交仍走 fan-in」与
-//   「AC65 直修合法」两种裁定都正确——它【承认】已经发生的 AC65 直修）。⛔ 不是 plugin/scripts/* 文件名
-//   豁免（掩真直投，manager 已拒）：只有 sha 入表 ∧ 提交消息携带 AC65 验证标记才豁免（可见+可审计，
-//   报为 ac65AuthorizedDirectFix 独立分类）；sha 入表但消息无标记 ⇒ fail-closed 仍红；sha 不入表 ⇒ 真直投
-//   仍红。豁免表有界，不随新任务增长。
+//   「plugin/scripts 直提交即 bypass」结构性冲突（首次具名样本 02b2b2fc）。修法 = 两谓词（inner 2026-08-15
+//   重写，替换 sha 表——硬规则4：手抄表是回显，不参与判定）：
+//     ① 声明谓词 `/^AC65:/m`——提交信息中 `AC65:` 开头的行（outer 声明/范围标记）。
+//     ② 验证产物谓词 `/AC65-Verified:/m`——提交信息含 `AC65-Verified: <命令> => <输出摘要>` 行。
+//     ac65Authorized = ① ∧ ②（两谓词独立，⛔ 声明行含 "AC65" 但不含 "AC65-Verified:"，旧 `/AC65/` 会按构造
+//     使声明=免检，已弃）。声明 ∧ 无验证产物 ⇒ RED（判据3「验证输出必须贴出」首次有执行体）；无声明
+//     code-surface 直投 ⇒ RED（现状保留）。⛔ 不是 plugin/scripts/* 文件名豁免（掩真直投，manager 已拒）。
+//   ⛔ 02b2b2fc legacy 形态容忍：其消息正文含 `AC65 一条命令验证：<实际输出>`（旧声明+验证合一短语，无
+//   `AC65-Verified:` 前缀但有实际验证输出）⇒ 声明/验证两谓词都容忍该 legacy 形态，02b2b2fc 重判为
+//   ac65Authorized。不补写历史提交、不改历史消息。
 //
 // ff-lock 时间窗（AC1 第三条件）：fan-in-ff-merge.sh 的持锁段在 .quay/fan-in-merge-lock-events.jsonl
 // 写 acquire/release 对（毫秒级）。一个直接提交若落在某个 acquire→release 区间内 ⇒ 可能属 fan-in
@@ -99,16 +103,19 @@ export function isDesignInternalPath(relPath) {
 // 具名样本 02b2b2fc，round200 红 + parser fan-in 阻断）。两条规则的意图都保留：
 //   · AC65：小改动（一条命令可验）不该为走全量 fan-in 而付出整轮验证代价——验证面允许快速直修。
 //   · bypass-detector：代码面提交必须过审计链——不许静默直投 develop。
-// 修法 = 【按 sha + 证据 的 AC65 授权直修豁免表】（inner 2026-08-15 裁定；人裁定方向待决，本表对两种
-// 裁定都正确：若人裁定「验证面 AC65 + 提交面仍走 fan-in」，本表仍【承认】已经发生的 AC65 直修；若裁定
-// 「AC65 直修合法」，本表即正式豁免）。⛔ 不是 plugin/scripts/* 文件名豁免（掩真直投，manager 已拒）——
-// 只有【sha 入表 ∧ 提交消息携带 AC65 验证证据】才豁免，有界、可见、可审计（同 RULED_HISTORICAL_GAPS
-// 先例：入表从违规集移出，报为独立分类，绝不静默掩盖）。
+// 修法 = 【两谓词】（inner 2026-08-15 重写，替换 sha 表——硬规则4：手抄表是回显，不参与判定）：
+//   · 声明谓词 `/^AC65:/m`（`AC65:` 开头的行——outer 声明/范围标记）。
+//   · 验证产物谓词 `/AC65-Verified:/m`（`AC65-Verified: <命令> => <输出摘要>`）。
+//   · ac65Authorized = 声明 ∧ 验证产物（两谓词独立——⛔ 声明行含 "AC65" 但不含 "AC65-Verified:"，
+//     旧 `/AC65/` 会按构造使声明=免检，已弃）。声明 ∧ 无验证产物 ⇒ RED（判据3「验证输出必须贴出」执行体）；
+//     无声明 code-surface 直投 ⇒ RED。⛔ 不是 plugin/scripts/* 文件名豁免（掩真直投，manager 已拒）。
+//   · 02b2b2fc legacy 形态（`AC65 一条命令验证：<实际输出>`——旧声明+验证合一短语）由声明/验证两谓词
+//     共同容忍，重判为 ac65Authorized（不补写历史、不改历史消息）。判定完全由提交消息承担，不依赖
+//     `AC65_AUTHORIZED_DIRECT_FIXES`（该表降级为纯展示）。
 /**
- * AC65 授权直修豁免表。每条目 = 一个 AC65 授权的直接提交（sha）+ 验证证据（一条命令 + 输出引用，
- * 取自该提交消息原文）。判定：代码面直接提交 ∧ sha 入表（前缀匹配）∧ 提交消息含 AC65 验证标记
- * （`commitHasAc65Evidence`）⇒ ac65AuthorizedDirectFix（可见分类，非 bypass）；sha 入表但消息无标记
- * ⇒ 表目与提交不一致，fail-closed 仍红；sha 不入表 ⇒ 真直投仍红（能取假——豁免表有界，不能静默扩展）。
+ * AC65 授权直修样本展示表——【已退役：纯展示，不参与判定】（inner 2026-08-15 两谓词重写后，判定完全由
+ * 提交消息承担——`commitHasAc65Declaration` ∧ `commitHasAc65Verification`；硬规则4：手抄 sha 表是回显，
+ * 不能当判定依据）。保留作历史样本 02b2b2fc 的可见记录。
  */
 export const AC65_AUTHORIZED_DIRECT_FIXES: { sha: string; evidence: string }[] = [
   {
@@ -118,22 +125,48 @@ export const AC65_AUTHORIZED_DIRECT_FIXES: { sha: string; evidence: string }[] =
   },
 ];
 
-/** AC65 验证证据标记——提交消息中携带的「一条命令可验 + 输出贴出」引用。次级闸（表为权威，标记防表目漂移）。 */
-export const AC65_VERIFICATION_MARKER_RE = /AC65/;
+/** AC65 声明谓词——提交信息中 `AC65:` 开头的行（outer 按 AC65 授权直修的声明/范围标记）。PURE。 */
+export const AC65_DECLARATION_RE = /^AC65:/m;
 
-/** 一条 commit sha 是否命中 AC65 豁免表（前缀匹配——git 可能给全量或缩写 sha）。PURE。 */
+/** AC65 验证产物谓词——提交信息含 `AC65-Verified: <命令> => <输出摘要>` 行。⛔ 独立于声明谓词：只匹配
+ *  `AC65-Verified:` 这个具体前缀，声明行（含 "AC65"）不会被它字面满足。PURE。 */
+export const AC65_VERIFICATION_RE = /AC65-Verified:/m;
+
+/** 02b2b2fc legacy 形态：`AC65 一条命令验证：<实际输出>`——旧声明+验证合一短语，无 `AC65-Verified:` 前缀
+ *  但有实际验证输出。声明/验证两谓词都容忍它，使 02b2b2fc 重判为 ac65Authorized（不补写历史）。PURE。 */
+export const AC65_LEGACY_RE = /AC65 一条命令验证/;
+
+/** 一条 commit sha 是否命中 AC65 展示表（前缀匹配——git 可能给全量或缩写 sha）。纯展示，不参与判定。PURE。 */
 export function findAc65Entry(sha, table = AC65_AUTHORIZED_DIRECT_FIXES) {
   if (!sha) return undefined;
   return (table ?? []).find((e) => e && sha.startsWith(e.sha));
 }
 
-/** 提交消息是否携带 AC65 验证证据（一条命令可验的引用）。PURE。 */
-export function commitHasAc65Evidence(message) {
-  return AC65_VERIFICATION_MARKER_RE.test(String(message ?? ""));
+/** 提交消息是否携带 AC65 声明（`^AC65:` 行，或 legacy `AC65 一条命令验证` 合一短语）。PURE。 */
+export function commitHasAc65Declaration(message) {
+  const s = String(message ?? "");
+  return AC65_DECLARATION_RE.test(s) || AC65_LEGACY_RE.test(s);
+}
+
+/** 提交消息是否携带 AC65 验证产物（`AC65-Verified:` 行，或 legacy `AC65 一条命令验证` 合一短语）。PURE。 */
+export function commitHasAc65Verification(message) {
+  const s = String(message ?? "");
+  return AC65_VERIFICATION_RE.test(s) || AC65_LEGACY_RE.test(s);
+}
+
+/** 提取验证产物行（ac65Evidence 展示面）——新形态自 `AC65-Verified:` 到行尾，或 legacy 自 `AC65 一条命令验证`
+ *  到行尾。无匹配返回 null。PURE。 */
+export function extractAc65Evidence(message) {
+  const s = String(message ?? "");
+  const m = s.match(/AC65-Verified:.*$/m);
+  if (m) return m[0].trim();
+  const lm = s.match(/AC65 一条命令验证.*$/m);
+  if (lm) return lm[0].trim();
+  return null;
 }
 
 /** 一个直接提交的判定。PURE——测试注入 {sha, files, epoch, subject, message, action}。 */
-export function classifyCommit(commit, lockHoldIntervals, ac65Table = AC65_AUTHORIZED_DIRECT_FIXES) {
+export function classifyCommit(commit, lockHoldIntervals) {
   const files = Array.isArray(commit?.files) ? commit.files : [];
   const codeSurfaceFiles = files.filter((f) => !isDesignInternalPath(f));
   const inLockWindow =
@@ -141,10 +174,12 @@ export function classifyCommit(commit, lockHoldIntervals, ac65Table = AC65_AUTHO
     typeof commit.epoch === "number" &&
     lockHoldIntervals.some((iv) => iv && iv.start <= commit.epoch && commit.epoch <= iv.end);
   const designInternal = codeSurfaceFiles.length === 0;
-  // AC65 授权直修：sha 入表 ∧ 提交消息实际携带 AC65 验证证据。表里有 sha 但消息无标记 ⇒ 表目与提交
-  // 不一致（维护错 / 编辑过消息）⇒ fail-closed 仍红，不豁免（证据要求，非静默文件名豁免）。
-  const ac65Entry = findAc65Entry(commit?.sha, ac65Table);
-  const ac65Authorized = ac65Entry != null && commitHasAc65Evidence(commit?.message);
+  // AC65 授权直修（两谓词，替换 sha 表——硬规则4）：声明（`^AC65:` 行或 legacy `AC65 一条命令验证`）
+  // ∧ 验证产物（`AC65-Verified:` 行或 legacy）⇒ ac65Authorized（可见分类，非 bypass）。声明 ∧ 无验证产物
+  // ⇒ 不豁免（判据3「验证输出必须贴出」执行体——旧 `/AC65/` 会按构造使声明=免检，已弃）；无声明 ⇒ 真直投
+  // 仍红。判定完全由提交消息承担，不依赖手抄 sha 表。
+  const ac65Authorized =
+    commitHasAc65Declaration(commit?.message) && commitHasAc65Verification(commit?.message);
   return {
     sha: commit?.sha ?? "?",
     subject: commit?.subject ?? "",
@@ -155,7 +190,7 @@ export function classifyCommit(commit, lockHoldIntervals, ac65Table = AC65_AUTHO
     designInternal,
     inLockWindow: Boolean(inLockWindow),
     ac65Authorized,
-    ac65Evidence: ac65Entry?.evidence ?? null,
+    ac65Evidence: ac65Authorized ? extractAc65Evidence(commit?.message) : null,
     bypass: !designInternal && !inLockWindow && !ac65Authorized,
   };
 }
@@ -305,8 +340,9 @@ const usage = `direct-to-develop-bypass-check.ts — 直接提交 develop 绕过
   · 代码/断言面 = 改动文件不落在设计内排除集（记账/转向/遥测面 + manager 独占 + 基础设施 +
     热修 fan-in 机件本身；头注释维护注记 + 任务体记录——denominator 谓词 25 vs 30 差异就在排除集）
   · ff-lock 时间窗 = commit 落在 fan-in-merge-lock-events.jsonl 某 acquire→release 区间内 ⇒ 不报
-  · AC65 授权直修 = sha 入 AC65_AUTHORIZED_DIRECT_FIXES 表 ∧ 提交消息携带 AC65 验证证据 ⇒ 报为
-    ac65AuthorizedDirectFix（可见分类，非 bypass）——⛔ 非 plugin/scripts/* 文件名豁免；不入表仍红
+  · AC65 授权直修 = 提交消息携带 AC65 声明（\`^AC65:\` 行）∧ 验证产物（\`AC65-Verified:\` 行）⇒ 报为
+    ac65AuthorizedDirectFix（可见分类，非 bypass）——⛔ 非 plugin/scripts/* 文件名豁免；声明∧无验证产物
+    （判据3）或无声明 code-surface 直投仍红；02b2b2fc legacy 形态（AC65 一条命令验证：<输出>）容忍
 
 Usage:
   node --experimental-strip-types direct-to-develop-bypass-check.ts [--root <dir>]
@@ -445,7 +481,7 @@ export function main(argv) {
       inLockWindowCommits: verdict.inLockWindowCommits,
       ac65AuthorizedCommits: verdict.ac65AuthorizedCommits,
       predicate: "design-internal exclusion set (see header / task body): tasks/ docs/ orchestration/ adr/ .quay/ plugin/loop/ measurements/ milestones/ .claude/ plugin/skills/manager/ CLAUDE.md .gitignore .gitattributes .npmrc .github/ plugin/scripts/fan-in-* plugin/test/fan-in-*",
-      ac65CarveOut: "AC65-authorized direct-fix table (AC65_AUTHORIZED_DIRECT_FIXES): sha in table AND commit message carries AC65 verification marker ⇒ ac65AuthorizedDirectFix (visible, NOT bypass); sha in table but no marker ⇒ fail-closed still RED; sha not in table ⇒ RED. NOT a plugin/scripts/* filename exemption.",
+      ac65CarveOut: "AC65-authorized direct-fix (two predicates; sha table retired to display-only): commit message has AC65 declaration (/^AC65:/m) AND verification artifact (/AC65-Verified:/m) ⇒ ac65AuthorizedDirectFix (visible, NOT bypass); declaration with no verification artifact ⇒ RED (criterion-3); no declaration code-surface direct commit ⇒ RED. Legacy 02b2b2fc form (AC65 一条命令验证：<output>) tolerated. NOT a plugin/scripts/* filename exemption.",
     },
     lockWindow: { evaluated: lockSubEvaluated, reason: lockSubReason },
     candidates: codeSurfaceCandidates.map((c) => ({
