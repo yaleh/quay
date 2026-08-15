@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-workflow-ruled-historical-gap-exempt
 title: fan-in-workflow-check 加 ruled-historical-gap 豁免表——gap-ac81-inner-verify-wiring 分类定案（AC81 doc-only 直投，manager-phase-goal.md:226/:681 已记已知例外；⛔ 不补正式 dispatch 掩盖记录）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
