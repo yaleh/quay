@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-worktree-quay-provisioning
 title: fan-in 全量 suite 在 worktree 跑时读 worktree 陈旧/缺失 .quay（config/gates/运行时载体）⇒ 环境性红——provisioning 时复制主检出现行 .quay（gap-gitignored-carriers 同族病的另一半）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
