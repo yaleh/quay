@@ -53,6 +53,12 @@
 // 已知基线前债务 (本基线存在的原因): gap-idle-watch-intent-anchor-restore — 派发 09:39:21Z, fan-in
 // 09:53:41Z, 均早于基线 ⇒ knownPreBaselineDebt. 与 差集豁免(派发<边界) 正交 — 债务带 = [边界, 基线).
 //
+// ⚠️ 豁免表 (inner 2026-08-15 裁定, outer approved — classification, NOT retrospective dispatch):
+// ruled-historical-gap 豁免表 (RULED_HISTORICAL_GAPS) 承载已定案的历史直投缺口 (gap-ac81-inner-verify-
+// wiring: 从未立案, 真实双亲 merge 8e833277 走 fan-in-ff-merge.sh 非 workflow, manager-phase-goal.md
+// :226/:681 已记已知例外). 入表任务从差集移出, 报为 ruledHistoricalGaps (可见+可审计, 非静默掩盖 —
+// 同 bypass-check design-internal 排除集先例); 非入表新直投仍红 (能取假, 豁免表有界不随新任务增长).
+//
 // Exit codes: 0 = PASS or NOT-EVALUATED (read `evaluated`), 1 = RED (a fan-in dispatched at/after the
 //             enforcement baseline without a Workflow call, or a lock event whose agentId is not a
 //             real subagent), 2 = usage/environment.
@@ -98,6 +104,35 @@ export const WORKFLOW_BASENAME = "fan-in-execute.js";
  *   2026-08-14T09:53:41Z (1786701221) — BOTH BEFORE this baseline ⇒ knownPreBaselineDebt.
  */
 export const ENFORCEMENT_BASELINE_EPOCH = 1786701510;
+
+/**
+ * ⚠️ Ruled-historical-gap exemption table (inner 2026-08-15 ruling, outer approved; tasks/
+ * gap-fan-in-workflow-ruled-historical-gap-exempt). A checked-in, auditable list of historical
+ * fan-in direct-landings that were ALREADY RULED as known exceptions — NOT a retrospective dispatch,
+ * NOT a silent skip. Re-dispatching a fake Workflow call would retroactively alter the record to look
+ * compliant (masking, the AC66-rejected bypass); carrying the ruled case HERE makes the exemption
+ * VISIBLE + auditable (same design as the bypass-check's design-internal exclusion set): every entry
+ * carries its task id + the ruling evidence, and the checker REPORTS the exempted set in its output.
+ *
+ * Keyed by TASK ID — the same key the 判据2(a) difference uses (the fan-in lock-event taskId). A task
+ * in this table is removed from the difference and reported as `ruledHistoricalGaps` (distinct from
+ * missing/unresolvableDispatch — never conflated with "all-fan-in-have-workflow-call"). BOUNDED: it
+ * only covers the RULED cases already listed here; any NEW direct-landing NOT in this table stays in
+ * the difference and goes RED (能取假 — the exemption cannot be extended silently).
+ */
+export const RULED_HISTORICAL_GAPS: { taskId: string; reason: string }[] = [
+  {
+    taskId: "gap-ac81-inner-verify-wiring",
+    reason:
+      "post-boundary historical direct-landing — never 立案 (no tasks/ file); lock event " +
+      "2026-08-14T22:04:00Z (post-boundary, boundary=09:20:07Z) runId fm-gap-ac81-inner-verify-wiring-doc " +
+      "(acquire+release same second); real two-parent merge 8e833277 (develop→task/gap-ac81-inner-verify-wiring, " +
+      "changed orchestrator-tick-core.md 7 lines); meta-cc: ZERO Workflow(fan-in-execute) calls ⇒ went through " +
+      "fan-in-ff-merge.sh, NOT the workflow. Ruling evidence: manager-phase-goal.md:226 (「未定案，留 outer/inner」) + " +
+      ":681 (「AC81 doc-only 落地走的是 fan-in-ff-merge.sh 而非本 workflow」). Ruling = classification, NOT " +
+      "retrospective dispatch (tasks/gap-fan-in-workflow-ruled-historical-gap-exempt).",
+  },
+];
 
 // ── Pure: parse lock events ──────────────────────────────────────────────────────────────────────────
 
@@ -299,6 +334,10 @@ export interface CoverageResult {
   /** Fan-in'd tasks with NO Workflow call whose dispatch is before the enforcement baseline —
    *  real violations accepted as recorded pre-baseline debt (non-blocking). */
   knownPreBaselineDebt: string[];
+  /** Ruled historical gaps (classification, NOT retrospective dispatch) — fan-in'd tasks present in
+   *  the RULED_HISTORICAL_GAPS exemption table. REMOVED from the difference and reported here (with
+   *  their ruling evidence) so the exemption is visible + auditable, never silent. */
+  ruledHistoricalGaps: { taskId: string; reason: string }[];
 }
 
 /**
@@ -322,26 +361,44 @@ export interface CoverageResult {
  * orthogonal to the pre-boundary dispatch exemption: the debt band is (boundaryEpoch, baselineEpoch),
  * the exemption band is (< boundaryEpoch). `enforcementBaselineEpoch` defaults to `boundaryEpoch`
  * (empty debt band — pure pre-baseline behavior) so callers that do not pass it are unchanged.
- * @returns { ok, evaluated, missing, preBoundaryDispatch, unresolvableDispatch, knownPreBaselineDebt }
+ *
+ * ⚠️ 豁免表 (inner 2026-08-15 裁定, outer approved; tasks/gap-fan-in-workflow-ruled-historical-gap-exempt):
+ * `ruledHistoricalGaps` is a checked-in, auditable exemption table (RULED_HISTORICAL_GAPS) carrying
+ * historical direct-landings that were ALREADY RULED as known exceptions. A task in the table is
+ * REMOVED from the difference BEFORE the dispatch-time logic and reported as `ruledHistoricalGaps`
+ * (with its ruling reason) — distinct from missing/unresolvableDispatch, so the exemption is visible
+ * + auditable, never silent masking. The table is keyed by task id and BOUNDED: any task NOT in it
+ * still follows the dispatch-time logic below (post-baseline direct-landing ⇒ RED, 能取假).
+ * @returns { ok, evaluated, missing, preBoundaryDispatch, unresolvableDispatch, knownPreBaselineDebt, ruledHistoricalGaps }
  */
 export function checkWorkflowCoverage(
   fanInTasks: string[],
   tasksWithWorkflowCalls: string[],
   dispatchEpochs: Map<string, number | null>,
   boundaryEpoch: number,
-  enforcementBaselineEpoch: number = boundaryEpoch
+  enforcementBaselineEpoch: number = boundaryEpoch,
+  ruledHistoricalGaps: { taskId: string; reason: string }[] = []
 ): CoverageResult {
   const tasks = (fanInTasks ?? []).filter(Boolean);
   if (tasks.length === 0) {
-    return { ok: true, evaluated: false, reason: "no-fan-in-after-boundary (NOT-EVALUATED)", missing: [], preBoundaryDispatch: [], unresolvableDispatch: [], knownPreBaselineDebt: [] };
+    return { ok: true, evaluated: false, reason: "no-fan-in-after-boundary (NOT-EVALUATED)", missing: [], preBoundaryDispatch: [], unresolvableDispatch: [], knownPreBaselineDebt: [], ruledHistoricalGaps: [] };
   }
   const withCalls = new Set((tasksWithWorkflowCalls ?? []).filter(Boolean));
+  const exemptByTask = new Map((ruledHistoricalGaps ?? []).map((g) => [g.taskId, g.reason]));
   const preBoundaryDispatch: string[] = [];
   const unresolvableDispatch: string[] = [];
   const knownPreBaselineDebt: string[] = [];
+  const ruledHistoricalGapsHit: { taskId: string; reason: string }[] = [];
   const missing: string[] = [];
   for (const t of tasks) {
     if (withCalls.has(t)) continue;
+    const exemptReason = exemptByTask.get(t);
+    if (exemptReason != null) {
+      // Ruled historical gap — already adjudicated as a known exception (manager-phase-goal.md etc.);
+      // classification, NOT retrospective dispatch. Removed from the difference, reported auditable.
+      ruledHistoricalGapsHit.push({ taskId: t, reason: exemptReason });
+      continue;
+    }
     const de = dispatchEpochs ? dispatchEpochs.get(t) : undefined;
     if (de != null && de < boundaryEpoch) {
       // Dispatched before the workflow existed — could not have dispatched it; not in the difference.
@@ -356,12 +413,15 @@ export function checkWorkflowCoverage(
     }
   }
   if (missing.length > 0) {
-    return { ok: false, evaluated: true, reason: "fan-in-without-workflow-call", missing, preBoundaryDispatch, unresolvableDispatch, knownPreBaselineDebt };
+    return { ok: false, evaluated: true, reason: "fan-in-without-workflow-call", missing, preBoundaryDispatch, unresolvableDispatch, knownPreBaselineDebt, ruledHistoricalGaps: ruledHistoricalGapsHit };
+  }
+  if (ruledHistoricalGapsHit.length > 0 && knownPreBaselineDebt.length === 0) {
+    return { ok: true, evaluated: true, reason: "fan-in-without-workflow-call-but-ruled-historical-gap-exempt", missing: [], preBoundaryDispatch, unresolvableDispatch, knownPreBaselineDebt, ruledHistoricalGaps: ruledHistoricalGapsHit };
   }
   if (knownPreBaselineDebt.length > 0) {
-    return { ok: true, evaluated: true, reason: "fan-in-workflow-call-ok-with-known-pre-baseline-debt", missing: [], preBoundaryDispatch, unresolvableDispatch, knownPreBaselineDebt };
+    return { ok: true, evaluated: true, reason: "fan-in-workflow-call-ok-with-known-pre-baseline-debt", missing: [], preBoundaryDispatch, unresolvableDispatch, knownPreBaselineDebt, ruledHistoricalGaps: ruledHistoricalGapsHit };
   }
-  return { ok: true, evaluated: true, reason: "all-fan-in-have-workflow-call", missing: [], preBoundaryDispatch, unresolvableDispatch, knownPreBaselineDebt };
+  return { ok: true, evaluated: true, reason: "all-fan-in-have-workflow-call", missing: [], preBoundaryDispatch, unresolvableDispatch, knownPreBaselineDebt, ruledHistoricalGaps: ruledHistoricalGapsHit };
 }
 
 // ── Pure: 判据2(c) — agentId is a real subagent ─────────────────────────────────────────────────────
@@ -606,6 +666,9 @@ const usage = `fan-in-workflow-check.ts — AC78 判据2 (a)(b)(c): fan-in 是�
   调用不存在的 workflow, 不进判据2(a) 差集 (AC78 落地豁免 与 AC76 边界前派发豁免 同一规则吸收).
   强制基线 (outer 2026-08-14 裁定, adoption→enforcement): 派发时间在 [边界, 基线) 的无 Workflow 调用
   fan-in ⇒ knownPreBaselineDebt (记录, 不阻塞); 派发时间 >= 基线 的无 Workflow 调用 ⇒ 红 (负控制).
+  豁免表 (inner 2026-08-15 裁定, classification): RULED_HISTORICAL_GAPS 承载已定案历史直投缺口
+  (gap-ac81-inner-verify-wiring 等) — 入表 ⇒ 移出差集报 ruledHistoricalGaps (可见+可审计, 非静默掩盖);
+  非入表新直投仍红 (能取假, 豁免表有界).
 
 Usage:
   node --experimental-strip-types fan-in-workflow-check.ts
@@ -714,7 +777,7 @@ export function main(argv: string[]): number {
       : scanWorkflowTaskIds(sessionRoot, boundaryEpoch);
     const dispatchRecords = parseDispatchRecords(fs.existsSync(dispatchRecordFile) ? fs.readFileSync(dispatchRecordFile, "utf8") : "");
     const dispatchEpochs = resolveDispatchEpochs(taskIds, events, wfEventsDir, dispatchRecords);
-    const vA = checkWorkflowCoverage(taskIds, tasksWithWorkflow, dispatchEpochs, boundaryEpoch, enforcementBaselineEpoch);
+    const vA = checkWorkflowCoverage(taskIds, tasksWithWorkflow, dispatchEpochs, boundaryEpoch, enforcementBaselineEpoch, RULED_HISTORICAL_GAPS);
     if (vA.evaluated) {
       anyEvaluated = true;
       if (!vA.ok) anyRed = true;
@@ -782,6 +845,7 @@ export function main(argv: string[]): number {
       if (c.preBoundaryDispatch?.length) console.log(`    pre-boundary-dispatch exempt (dispatched before workflow landed): ${c.preBoundaryDispatch.join(", ")}`);
       if (c.knownPreBaselineDebt?.length) console.log(`    known pre-baseline debt (dispatch before enforcement baseline, recorded non-blocking): ${c.knownPreBaselineDebt.join(", ")}`);
       if (c.unresolvableDispatch?.length) console.log(`    unresolvable dispatch (in difference, fail-closed): ${c.unresolvableDispatch.join(", ")}`);
+      if (c.ruledHistoricalGaps?.length) for (const g of c.ruledHistoricalGaps) console.log(`    ruled-historical-gap exempt (classification, visible+auditable): ${g.taskId} — ${g.reason}`);
       if (c.violations?.length) for (const v of c.violations) console.log(`    ${v.taskId ?? "?"}: agentId ${v.agentId ?? "<null>"} → ${v.kind}`);
     }
   }

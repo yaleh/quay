@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-workflow-ruled-historical-gap-exempt
 title: fan-in-workflow-check 加 ruled-historical-gap 豁免表——gap-ac81-inner-verify-wiring 分类定案（AC81 doc-only 直投，manager-phase-goal.md:226/:681 已记已知例外；⛔ 不补正式 dispatch 掩盖记录）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -46,13 +46,13 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1 判据1：fan-in-workflow-check ruled-historical-gap 豁免表落地；gap-ac81-inner-verify-wiring 入表（reason 引 manager-phase-goal.md:226/:681）。
-- [ ] AC2 判据2 能取假：豁免后主检出 ok=true + worktree 同 verdict（AC3 满足）；非豁免新直投仍红。
-- [ ] AC3 判据3：既有测试全绿；`--for-task` scoped 门绿。
+- [x] AC1 判据1：fan-in-workflow-check ruled-historical-gap 豁免表落地；gap-ac81-inner-verify-wiring 入表（reason 引 manager-phase-goal.md:226/:681）。
+- [x] AC2 判据2 能取假：豁免后主检出 ok=true + worktree 同 verdict（AC3 满足）；非豁免新直投仍红。
+- [x] AC3 判据3：既有测试全绿；`--for-task` scoped 门绿。
 
 ## Definition of Done
 
-- [ ] ruled-historical-gap 豁免表（gap-ac81 入表 + reason）+ 主检出 ok=true + worktree 同 verdict + 非豁免仍红 + 测试绿。
+- [x] ruled-historical-gap 豁免表（gap-ac81 入表 + reason）+ 主检出 ok=true + worktree 同 verdict + 非豁免仍红 + 测试绿。
 
 ## Touches
 
@@ -62,4 +62,25 @@ depends_on: []
 
 ## Evidence
 
-（落地后回填——round188 red: fan-in-workflow-check exit=1 missing=[gap-ac81-inner-verify-wiring]；证据链见 Proposal）
+（2026-08-15 落地回填——Build 阶段实现 + 测试，见下；证据链见 Proposal）
+
+**实现**：`plugin/scripts/fan-in-workflow-check.ts` 加 `RULED_HISTORICAL_GAPS` ruled-historical-gap 豁免表
+（checked-in 数组 `{taskId, reason}`），`gap-ac81-inner-verify-wiring` 入表（reason 引
+manager-phase-goal.md:226/:681 + 证据链：lock event 2026-08-14T22:04:00Z runId
+`fm-gap-ac81-inner-verify-wiring-doc`、真实双亲 merge 8e833277、meta-cc 零 Workflow(fan-in-execute) 调用）。
+`checkWorkflowCoverage` 增第 6 参 `ruledHistoricalGaps`（默认 `[]` 向后兼容），入表任务在差集逻辑【之前】
+短路 → 移出 `missing`/`unresolvableDispatch`，报为新字段 `ruledHistoricalGaps`（可见 + 可审计，非静默掩盖）。
+
+**判据2（能取假）实测**（worktree 内直跑，读主检出数据）：
+- 主检出 fan-in-workflow-check → `ok=true` `evaluated=true`，`missing=[]`、`unresolvableDispatch=[]`、
+  `ruledHistoricalGaps=[gap-ac81-inner-verify-wiring]`（reason 完整）。
+- worktree（carriers 接线）读主检出同数据 → 同 verdict `ok=true`（AC3 判据满足）。
+- 非豁免新直投（`gap-post-baseline`）同 fixture 追加 → `ok=false` `missing=[gap-post-baseline]`，
+  `ruledHistoricalGaps` 仍只含 gap-ac81（豁免有界，能取假）。
+
+**判据3 实测**：`plugin/test/fan-in-workflow-check.test.mjs` 61/61 绿（含新增豁免用例）；
+`scripts/test.sh --for-task gap-fan-in-workflow-ruled-historical-gap-exempt` scoped 门绿
+（scoped 静态检查含 fan-in-workflow-check `--root ${main_root}` exit 0）。
+
+**round188 red 定位**：carriers fbd69edd 接线后 worktree 轮真评估 ⇒ 每轮 RED
+`missing=[gap-ac81-inner-verify-wiring]`；本任务按 inner 裁定选② 分类定案（豁免表承载），不补正式 dispatch。

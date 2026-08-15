@@ -66,6 +66,7 @@ import {
   parseEscalations,
   escalatedTaskIds,
   checkEscalationTraceability,
+  RULED_HISTORICAL_GAPS,
 } from "../scripts/fan-in-workflow-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -472,6 +473,91 @@ test("PURE checkWorkflowCoverage — default baseline == boundary ⇒ empty debt
   assert.deepEqual(v.knownPreBaselineDebt, []);
 });
 
+// ── PURE ruled-historical-gap exemption table (inner 2026-08-15 — classification, NOT retrospective
+//    dispatch; tasks/gap-fan-in-workflow-ruled-historical-gap-exempt) ────────────────────────────────
+// gap-ac81-inner-verify-wiring: post-boundary direct-landing, never 立案, no Workflow call, dispatch
+// unresolvable — WITHOUT the exemption it is missing + unresolvableDispatch ⇒ RED; WITH it ⇒ moved to
+// ruledHistoricalGaps (visible + auditable), never silent.
+
+test("PURE checkWorkflowCoverage — the ruled gap (gap-ac81 shape: no Workflow call, unresolvable dispatch) is exempted ⇒ ok:true, in ruledHistoricalGaps, NOT missing/unresolvable", (t) => {
+  const v = checkWorkflowCoverage(
+    ["gap-ac81-inner-verify-wiring"],
+    [],
+    new Map(), // dispatch unresolvable — would otherwise be fail-closed unresolvable+missing
+    BOUNDARY_EPOCH,
+    ENFORCEMENT_BASELINE_EPOCH,
+    RULED_HISTORICAL_GAPS
+  );
+  assert.equal(v.ok, true);
+  assert.equal(v.evaluated, true);
+  assert.deepEqual(v.missing, []);
+  assert.deepEqual(v.unresolvableDispatch, []);
+  assert.equal(v.ruledHistoricalGaps.length, 1);
+  assert.equal(v.ruledHistoricalGaps[0].taskId, "gap-ac81-inner-verify-wiring");
+  assert.match(v.ruledHistoricalGaps[0].reason, /manager-phase-goal\.md:226/);
+  assert.match(v.ruledHistoricalGaps[0].reason, /:681/);
+});
+
+test("PURE checkWorkflowCoverage — exemption is bounded: a ruled gap + a NON-exempt post-baseline fan-in ⇒ RED with only the non-exempt missing (能取假)", (t) => {
+  // The exemption must NOT cover arbitrary tasks. A non-exempt post-baseline direct-landing sitting
+  // NEXT TO the ruled gap still goes RED — the exempted one is reported, not masked.
+  const v = checkWorkflowCoverage(
+    ["gap-ac81-inner-verify-wiring", "gap-post-baseline"],
+    [],
+    new Map([["gap-post-baseline", ENFORCEMENT_BASELINE_EPOCH + 100]]),
+    BOUNDARY_EPOCH,
+    ENFORCEMENT_BASELINE_EPOCH,
+    RULED_HISTORICAL_GAPS
+  );
+  assert.equal(v.ok, false);
+  assert.equal(v.evaluated, true);
+  assert.deepEqual(v.missing, ["gap-post-baseline"]);
+  assert.deepEqual(v.ruledHistoricalGaps.map((g) => g.taskId), ["gap-ac81-inner-verify-wiring"]);
+});
+
+test("PURE checkWorkflowCoverage — the exemption is a distinct value, never conflated with green (reason carried)", (t) => {
+  // The ruled gap is reported separately from the all-green reason — a reader can tell "exempted"
+  // from "every fan-in called the workflow".
+  const v = checkWorkflowCoverage(
+    ["gap-ac81-inner-verify-wiring"],
+    [],
+    new Map(),
+    BOUNDARY_EPOCH,
+    ENFORCEMENT_BASELINE_EPOCH,
+    RULED_HISTORICAL_GAPS
+  );
+  assert.equal(v.ok, true);
+  assert.equal(v.reason, "fan-in-without-workflow-call-but-ruled-historical-gap-exempt");
+  assert.equal(v.ruledHistoricalGaps.length, 1);
+  // The task in the table WITH a Workflow call is not debt and not exempted (has call — green).
+  const withCall = checkWorkflowCoverage(
+    ["gap-ac81-inner-verify-wiring"],
+    ["gap-ac81-inner-verify-wiring"],
+    new Map(),
+    BOUNDARY_EPOCH,
+    ENFORCEMENT_BASELINE_EPOCH,
+    RULED_HISTORICAL_GAPS
+  );
+  assert.equal(withCall.ok, true);
+  assert.equal(withCall.reason, "all-fan-in-have-workflow-call");
+  assert.deepEqual(withCall.ruledHistoricalGaps, []);
+});
+
+test("PURE checkWorkflowCoverage — callers that do NOT pass a table are unchanged (default empty table)", (t) => {
+  // Backward compat: the pre-exemption call shape (no 6th arg) keeps the old fail-closed semantics —
+  // a no-Workflow-call unresolvable-dispatch task is still RED (the exemption table is opt-in).
+  const v = checkWorkflowCoverage(
+    ["gap-ac81-inner-verify-wiring"],
+    [],
+    new Map(),
+    BOUNDARY_EPOCH
+  );
+  assert.equal(v.ok, false);
+  assert.deepEqual(v.missing, ["gap-ac81-inner-verify-wiring"]);
+  assert.deepEqual(v.unresolvableDispatch, ["gap-ac81-inner-verify-wiring"]);
+  assert.deepEqual(v.ruledHistoricalGaps, []);
+});
+
 // ── PURE 判据2(c): classifyAgentId ──────────────────────────────────────────────────────────────────
 
 test("PURE classifyAgentId — AC72/AC73 (top-level session ids) ⇒ top-level-session (RED)", (t) => {
@@ -818,13 +904,17 @@ test("CLI — 负控制: a fan-in dispatched AFTER the enforcement baseline with
   assert.deepEqual(a.preBoundaryDispatch, []);
 });
 
-test("AC3 (gap-gitignored-carriers-absent-in-verify-worktree) — feeding the round the MAIN root makes the checker evaluate (not nothing-to-judge) and catches the REAL difference (gap-ac81), verdict-identical to a main run", (t) => {
+test("AC3 (gap-gitignored-carriers-absent-in-verify-worktree) — feeding the round the MAIN root makes the checker evaluate (not nothing-to-judge); the REAL difference gap-ac81 is now RULED-EXEMPT (classification) ⇒ ok=true, verdict-identical to a main run", (t) => {
   // The one-shot verify worktree lacks the gitignored carriers (fan-in-merge-lock-events.jsonl etc.),
-  // so pre-fix the round's invocation (`--root <worktree>`) was constant-green nothing-to-judge while
-  // the input did not exist. The fix (method ②) makes the round feed `--root main_root` (QUAY_MAIN_CHECKOUT)
-  // ⇒ the default carrier path <main>/.quay/fan-in-merge-lock-events.jsonl resolves ⇒ evaluated, and a REAL
-  // post-baseline fan-in with no Workflow call (gap-ac81-inner-verify-wiring — the sample AC3 names) is RED
-  // with it in the difference — the SAME verdict a main-checkout run gives.
+  // so the round's invocation (`--root <worktree>`) would be constant-green nothing-to-judge while the
+  // input did not exist. The carriers fix (method ②) makes the round feed `--root main_root`
+  // (QUAY_MAIN_CHECKOUT) ⇒ the default carrier path <main>/.quay/fan-in-merge-lock-events.jsonl resolves
+  // ⇒ evaluated, and the REAL post-baseline direct-landing gap-ac81-inner-verify-wiring (never 立案, no
+  // Workflow call, dispatch unresolvable) surfaces in the difference — which the ruled-historical-gap
+  // exemption table (tasks/gap-fan-in-workflow-ruled-historical-gap-exempt) then classifies: ok=true with
+  // gap-ac81 reported in ruledHistoricalGaps (visible + auditable), NOT masked. The SAME verdict a main
+  // run gives — AC3 verdict-consistency holds; a NON-exempt post-baseline fan-in in the same fixture
+  // still goes RED (能取假).
   const mainRoot = fs.mkdtempSync(path.join(os.tmpdir(), "fan-in-wf-main-"));
   const worktreeRoot = fs.mkdtempSync(path.join(os.tmpdir(), "fan-in-wf-worktree-"));
   t.after(() => {
@@ -832,21 +922,19 @@ test("AC3 (gap-gitignored-carriers-absent-in-verify-worktree) — feeding the ro
     fs.rmSync(worktreeRoot, { recursive: true, force: true });
   });
   // The MAIN checkout has the gitignored carrier with a real post-baseline fan-in (gap-ac81-inner-verify-
-  // wiring, epoch 2000000000) that did NOT go through the fan-in-execute workflow.
+  // wiring, epoch 2000000000) that did NOT go through the fan-in-execute workflow. Its dispatch epoch is
+  // resolvable (2000000000) — post-baseline — but the task is in the checked-in RULED_HISTORICAL_GAPS table.
   const mainQuay = path.join(mainRoot, ".quay");
   fs.mkdirSync(mainQuay, { recursive: true });
   const ev = { event: "acquire", taskId: "gap-ac81-inner-verify-wiring", epoch: 2000000000, runId: "fm-gap-ac81-inner-verify-wiring-2000000000-r1", agentId: "aab2d14d10a762ff4" };
   fs.writeFileSync(path.join(mainQuay, "fan-in-merge-lock-events.jsonl"), JSON.stringify(ev) + "\n");
-  // Dispatch AFTER the enforcement baseline (the workflow exists ⇒ it could have been dispatched) — no
-  // Workflow call in the transcripts ⇒ RED. Its agentId is a real subagent (file present) so the red is
-  // driven by the workflow-call-coverage difference only (the gap-ac81 shape).
   const wfEvents = path.join(mainRoot, ".workflow-events");
   fs.mkdirSync(wfEvents, { recursive: true });
   fs.writeFileSync(path.join(wfEvents, ev.runId + ".jsonl"), JSON.stringify({ eventKind: "start", recordedAtMs: 2000000000000 }) + "\n");
   fs.mkdirSync(path.join(mainRoot, "subagents"), { recursive: true });
   fs.writeFileSync(path.join(mainRoot, "subagents", "agent-" + ev.agentId + ".jsonl"), "{}");
 
-  // (1) PRE-FIX worktree round: --root <worktree> (carrier absent ⇒ default path <worktree>/.quay/… missing)
+  // (1) Worktree round: --root <worktree> (carrier absent ⇒ default path <worktree>/.quay/… missing)
   //     ⇒ constant-green nothing-to-judge — the exact disease AC3 rules out.
   const beforeRes = spawnSync("node", ["--experimental-strip-types", CHECKER, "--root", worktreeRoot, "--project-dir", mainRoot, "--workflow-events-dir", wfEvents, "--workflow-landed-ts", "2026-08-14T09:20:07Z", "--enforcement-baseline-ts", "2026-08-14T09:55:00Z", "--json"], { encoding: "utf8" });
   assert.equal(beforeRes.status, 0);
@@ -855,24 +943,42 @@ test("AC3 (gap-gitignored-carriers-absent-in-verify-worktree) — feeding the ro
   assert.equal(before.evaluated, false);
   assert.match(before.reason, /NOT-EVALUATED/);
 
-  // (2) POST-FIX worktree round: the fix feeds --root main_root (the MAIN checkout) ⇒ the DEFAULT carrier
-  //     path <main>/.quay/fan-in-merge-lock-events.jsonl resolves ⇒ evaluated and RED with gap-ac81 missing.
+  // (2) POST-FIX worktree round: the round feeds --root main_root (the MAIN checkout) ⇒ the DEFAULT
+  //     carrier path <main>/.quay/fan-in-merge-lock-events.jsonl resolves ⇒ evaluated, and gap-ac81 is
+  //     EXEMPTED by the checked-in table ⇒ ok=true with it reported in ruledHistoricalGaps (NOT missing).
   const afterRes = spawnSync("node", ["--experimental-strip-types", CHECKER, "--root", mainRoot, "--project-dir", mainRoot, "--workflow-events-dir", wfEvents, "--workflow-landed-ts", "2026-08-14T09:20:07Z", "--enforcement-baseline-ts", "2026-08-14T09:55:00Z", "--json"], { encoding: "utf8" });
-  assert.equal(afterRes.status, 1);
+  assert.equal(afterRes.status, 0);
   const after = JSON.parse(afterRes.stdout);
-  assert.equal(after.ok, false);
+  assert.equal(after.ok, true);
   assert.equal(after.evaluated, true);
   const a = after.checks.find((c) => c.check === "a-workflow-call-coverage");
-  assert.equal(a.ok, false);
-  assert.deepEqual(a.missing, ["gap-ac81-inner-verify-wiring"]);
+  assert.equal(a.ok, true);
+  assert.deepEqual(a.missing, []);
   assert.deepEqual(a.preBoundaryDispatch, []);
   assert.deepEqual(a.knownPreBaselineDebt, []);
+  assert.deepEqual(a.ruledHistoricalGaps.map((g) => g.taskId), ["gap-ac81-inner-verify-wiring"]);
+  assert.match(a.ruledHistoricalGaps[0].reason, /manager-phase-goal\.md:226/);
 
   // (3) AC3 identity — the post-fix worktree-round invocation (--root mainRoot) IS a main-checkout run's
-  //     invocation, so the two verdicts are identical by construction: evaluated=true ok=false with the
-  //     real difference surfaced, and NOT-EVALUATED stays a DISTINCT value (shown in (1)) never used for pass.
-  assert.equal(after.ok, false);
+  //     invocation, so the two verdicts are identical by construction: evaluated=true ok=true with the
+  //     real difference CLASSIFIED (exemption visible + auditable), and NOT-EVALUATED stays a DISTINCT
+  //     value (shown in (1)) never used for pass.
+  assert.equal(after.ok, true);
   assert.equal(after.evaluated, true);
+
+  // (4) 能取假 — the exemption is BOUNDED: append a NON-exempt post-baseline fan-in to the same carrier
+  //     ⇒ the checker goes RED (missing the non-exempt) while gap-ac81 stays reported as exempted.
+  const nonExempt = { event: "acquire", taskId: "gap-post-baseline", epoch: 2000000000, runId: "fm-gap-post-baseline-2000000000-r1", agentId: "aab2d14d10a762ff4" };
+  fs.writeFileSync(path.join(mainQuay, "fan-in-merge-lock-events.jsonl"), JSON.stringify(ev) + "\n" + JSON.stringify(nonExempt) + "\n");
+  fs.writeFileSync(path.join(wfEvents, nonExempt.runId + ".jsonl"), JSON.stringify({ eventKind: "start", recordedAtMs: 2000000000000 }) + "\n");
+  const redRes = spawnSync("node", ["--experimental-strip-types", CHECKER, "--root", mainRoot, "--project-dir", mainRoot, "--workflow-events-dir", wfEvents, "--workflow-landed-ts", "2026-08-14T09:20:07Z", "--enforcement-baseline-ts", "2026-08-14T09:55:00Z", "--json"], { encoding: "utf8" });
+  assert.equal(redRes.status, 1);
+  const red = JSON.parse(redRes.stdout);
+  assert.equal(red.ok, false);
+  const aRed = red.checks.find((c) => c.check === "a-workflow-call-coverage");
+  assert.equal(aRed.ok, false);
+  assert.deepEqual(aRed.missing, ["gap-post-baseline"]);
+  assert.deepEqual(aRed.ruledHistoricalGaps.map((g) => g.taskId), ["gap-ac81-inner-verify-wiring"]);
 });
 
 // ── CLI d: escalation traceability (SPEC §7 anti-livelock, gap-ff-livelock-trigger-no-action) ───────
