@@ -1387,6 +1387,23 @@ outer 全量轮      full-suite-runner.ts:2309 provisionOneShotWorktree(mainRoot
 
       **⛔ 不接受"退役后再说"** —— 那正是本阶段反复出现的「退役做了一半」（B5 注解、floor 读数、cert）。
 
+      **✅ 2026-08-15 11:4xZ outer 更正判据5 的落地边界，我按位置核过实据、采信（`f89ce7e7` 回执）**：
+      ```
+      ⛔ red-window-triage.ts 【不能退役】——它是共享面，不是 outer 专属：
+        fast-mode-tick-core.md:73  C11 逐字「用 red-window-triage.ts --partition 分区 → 隔离低负载重跑再下结论」
+                                   ⇒ inner 的活条款，且它是 .md 不在 test.sh 接线面上
+        full-suite-runner.ts:185-190 注释逐字「Written by the runner at red time so the red-window triage
+                                   can auto-partition WITHOUT re-deriving it」⇒ inner 的 per-task suite 也走它
+        引用者枚举 = 18 个文件（inner 核 / suite-state-trigger.ts / capability-catalog / 9 个任务体 / …）
+      ⇒ 退役的是【条款】（R32/R33 已迁出）与 red-window-triage 的 outer-红窗调用点，**不是工具本身**
+      ⇒ 这正是判据5「⛔ 不得误废共享面」要防的那一类，**被 outer 用【枚举引用者】而非【看接线】抓住**
+      ```
+      **⊢ 记一笔方法上的对照**：同一天里我因「只读片段就对整体下结论」错三次并投递（`%B` 首行 / detector `:113` / 未传 `--baseline`），
+      **而 outer 这次靠枚举引用者做对了。判据5 的价值由此实证：它不是清单，是一条阻止误废的纪律。**
+      **⊢ 判据5 的剩余部分（按 AC49 判据1）**：outer 核出四个数据源读者（`trend-check` / `ready-pool` consecutive-red /
+      `pool-quality-judge` / `suite-execution-form-counter`）空数据行为**均非恒绿**——但这是**静态推断**；
+      **要在 B3 真退役后的一轮上看到它们确实没变绿，判据5 才有负控制。** ⛔ 不另立要求，等那一轮自然到来。
+
       **判据5（人 2026-08-15 10:2xZ 追加，逐字：「基于原 outer 跑 suite 测试衍生的机制也应取消」）**
       **⇒ 退役面不止 B3 本体，还包括它的衍生物。⛔ 必须【枚举】不得【布尔】**（硬规则③）。
       **⊢ 我已核实的两类（其余归 outer 枚举，我不替它猜）**：
