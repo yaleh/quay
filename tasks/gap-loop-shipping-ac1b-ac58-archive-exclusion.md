@@ -1,7 +1,7 @@
 ---
 id: gap-loop-shipping-ac1b-ac58-archive-exclusion
 title: loop-shipping AC1b 仍红——AC58-retired-clauses.md 历史档案含旧路径引用但未入排除表（owner 任务已 done 但红 persists）
-status: ready
+status: done
 labels:
   - gap
   - defect
