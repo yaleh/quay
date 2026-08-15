@@ -365,7 +365,36 @@
       ```
       **⇒ 声明形态真正要修的就是这个**：让 detector **去读提交信息**，而不是读一张手抄 sha 表。**这个修法本身是轻的。**
 
-      **✅ 占比读数（人说「占比应该较低」，机件自己的分母行，⛔ 非手搓）**：
+      **🔻 10:46Z 口径更正：下面这组数【用错了调用参数】，作废，正确的一组在其后。**
+      我裸跑 detector **没传 `--baseline`** ⇒ 扫了全历史；**生产调用点 `scripts/test.sh:709` 传了**
+      `--root "${main_root}" --baseline 77b291db… --json`，且 `:700` 注释逐字写着「基线 = 77b291db
+      （enforcement 落点）——历史欠账（~29 条）已文档化**不重扫**，只扫基线后的新直接提交」。
+      **⊢ 这是今日第二次同形（第一次是 `refresh-worktree-quay.sh` 传错位置参数）**：
+      **memory `checker-verdict-verify-invocation-before-explaining-away` 与执行核 criteria F(`:268`)
+      「查生产调用点参数」——后者我自己的 B1b 覆盖点名里已连续两轮列为【未覆盖】，这轮就付了代价。**
+      **✅ 按生产参数重跑（正确口径）**：
+      ```
+      totalDirectCommits=45  codeSurfaceCommits=1  designInternal=44  inLockWindow=0
+      ac65AuthorizedCommits=1  违规=0  ok=true
+      ⇒ 【执行面上代码面直提共 1 条，且就是那条 AC65】⇒ 通道用了 1 次、违规 0 条
+      ⇒ 占比确实低（人的预期成立），且结论方向比错口径那版【更强】
+      ```
+      **🔴 同一次阅读挖出【真缺陷】，且它会让人的裁定按构造翻向（已投递 inner c02ba76a / outer fdd32d79）**：
+      ```
+      :121-122  /** AC65 验证证据标记——「一条命令可验 + 输出贴出」引用 */
+                export const AC65_VERIFICATION_MARKER_RE = /AC65/;
+      :147      ac65Authorized = findAc65Entry(sha) != null ∧ commitHasAc65Evidence(message)
+      ⇒ 函数名是「有没有【验证证据】」，实际行为是「消息里有没有 AC65 这四个字符」（硬规则②：提到即算命中）
+      ⇒ 叠加人的裁定后按构造翻向：声明的字面必然含「AC65」
+        ⇒ sha 表换成声明、正则不变 ⇒ 【声明本身满足"有验证证据"】⇒ 声明 = 免检
+        ⇒ 正是我和 inner 都同意要避免的翻向，且不需要任何人写错
+      ⇒ 修法：声明标记与验证输出必须是【两个不同的谓词、两处不同的内容】，不可互相顶替
+      ```
+      **⊢ 并更正我对 inner 的一个错判（已投递）**：我说过「detector 的 evidence 不是解析来的、它什么都没在验证」——
+      **判定确实读提交信息（`:147` 双闸）**，我只读了 `:113/:472` 就下判断。**手抄常量只用于 `:472` 打印、不参与判定**
+      ⇒ 是展示层瑕疵，不是"什么都没验"。**今日第三次「读得不够就下判断」，三次都投递出去了。**
+
+      **⊗ 以下为作废口径，保留备查（全历史、无 baseline）**：
       ```
       direct-to-develop-bypass-check: denominator: total=474 code-surface=26 design-internal=448
                                                    in-lock-window=0 ac65-authorized=1
