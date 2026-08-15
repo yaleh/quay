@@ -1,7 +1,7 @@
 ---
 id: gap-ac65-direct-fix-vs-bypass-detector-conflict
 title: AC65「outer 一条命令可验可直接修 plugin/scripts」与 bypass-detector「plugin/scripts 直提交 develop 即 bypass」结构性冲突——无 carve-out，首次具名样本 02b2b2fc，需人裁定谁让谁
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
