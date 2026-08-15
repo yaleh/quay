@@ -52,14 +52,14 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1 判据1：loop-shipping AC1c 通过（prompt 无 plugin/loop/ 引用）。
-- [ ] AC2 判据2：outer-cron-registry.test.mjs 通过（worktree 上下文定位 AC80 段）。
-- [ ] AC3 判据3 能取假：round172 两失败测试重跑全绿；`--for-task` scoped 门绿。
-- [ ] AC4 判据4：AC81 锚核实四判据全真（重建后）+ 剩余寿命正常。
+- [x] AC1 判据1：loop-shipping AC1c 通过（prompt 无 plugin/loop/ 引用）。
+- [x] AC2 判据2：outer-cron-registry.test.mjs 通过（worktree 上下文定位 AC80 段）。
+- [x] AC3 判据3 能取假：round172 两失败测试重跑全绿；`--for-task` scoped 门绿。
+- [x] AC4 判据4：AC81 锚核实四判据全真（重建后）+ 剩余寿命正常。
 
 ## Definition of Done
 
-- [ ] AC80 prompt consumer-path 修复（AC1c + checker 路径）+ 锚重建协调 + 测试绿。
+- [x] AC80 prompt consumer-path 修复（AC1c + checker 路径）+ 锚重建协调 + 测试绿。
 
 ## Touches
 
