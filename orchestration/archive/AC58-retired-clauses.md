@@ -486,3 +486,25 @@ export function semanticTriggerHeuristic(heartbeat) {
 ```
 （inner-agent-budget.json 已随 2026-08-10 人裁定 A16 退休——全仓零写入者=退休预期态，prod-data-audit 判据5b 直接出局。）
 ```
+
+## R32 — outer B3 全量 suite 后台起跑退役（AC84 2026-08-15，人裁定 outer 不跑 suite）
+
+**来源**：`orchestration/orchestrator-tick-core.md` B 段 B3 + `orchestration/orchestrator-loop-tick.md` + `plugin/loop/orchestrator-tick-core.md` + `plugin/loop/orchestrator-loop-tick.md`
+**退役**：AC84 2026-08-15，人 09:47Z「outer 跑 suite 和红窗/绿窗等机制都应该废弃了，应该在 inner 的 workflow 中跑 suite 并合并到 develop」；人 10:1xZ 判据4「verify-worktree 环境 suite 测试仅在人的明确要求时单次运行」——无任何自动触发，B3 整条退役不留缩水版。近 24h 31 轮 · 2.98h 墙钟 ≈ 12% 释放。**明示代价**：环境类缺陷（如 round197 的 AC4——verify-worktree 环境唯一暴露）从此只在人下次要求跑时被发现，检测延迟由「一次落地」变「不确定」。**趋势分析数据源**改 `.quay/per-task-suite-records.jsonl`（判据6），不再依赖 verification-round.jsonl。
+**正文**（原文迁出保留）：
+
+```
+- **B3 全量 suite 后台起跑**【freshness（AC61 A-5，2026-08-14；FAMILY-5）：`finishedAt` 距今 ≥ 一个 tick 周期 ⇒ 陈旧不计入，同 A11】:条件 = 本轮收尾 ≥1(或有新 merge 落地)**且** `state != running` **且** `resource-gate.sh --for full-suite` 放行。被测 worktree/integration checkout 时**必须**同传 `--state-dir "$REPO_ROOT/.quay"` (src:869 "停派",871 "资源闸放行")。**事件分支(`gap-b3-tick-coupled-misses-between-tick-merges`,2026-08-11):起跑是事件,不是本 tick 的轮询副作用**——`suite-state-trigger.ts` 的 Monitor 已把同一条件事件化:integration HEAD 前移(merge 落地)且 `state != running` ⇒ `SUITE-MERGE-PENDING`(AC2);`state=green` 且 `develop..integration>0` 且持续 idle ⇒ `SUITE-IDLE-GREEN`(AC3)。两条事件都驱动起跑(不靠 tick),`event_not_tick` 恒 1。本 B3 仍是 tick 内兜底(收尾 ≥1 路径),事件路径在其之前 (src:任务体 gap-b3-tick-coupled-misses-between-tick-merges Proposal/Contract)
+```
+
+---
+
+## R33 — outer 红窗分诊外层独占退役（AC84 2026-08-15，输入随 B3 退役）
+
+**来源**：`orchestration/orchestrator-tick-core.md` D 边界段 + `orchestration/orchestrator-loop-tick.md` + `plugin/loop/orchestrator-tick-core.md` + `plugin/loop/orchestrator-loop-tick.md`
+**退役**：AC84 2026-08-15，人裁定 outer 不跑 suite。**理由写准**：红窗退役不是因为「红窗不重要」，而是因为**它的输入（outer 自己跑的全量轮）没有了**——红树的归因与回退在新模型下由 fan-in 的 scoped/全量门在合并前拦住。⛔ inner 侧的红窗**约束**（fast-mode-tick-core.md A24「红窗不再整体豁免」/「红窗仅豁免只读诊断」）原样保留，不在本退役范围。
+**正文**（原文迁出保留）：
+
+```
+**红窗分诊外层独占**,不把红树丢给 inner:bisect 定位肇事 merge → 回退该 merge → 回退对应的翻 done 由【inner】执行（翻 done 已移交 inner，(a2)；外层只做归因与回退决策）→ 修好才重启套件 → green 即撤信号;**绝不 blind `--ours/--theirs`** (src:1052 "全量 suite 红")
+```

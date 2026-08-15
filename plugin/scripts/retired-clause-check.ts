@@ -157,6 +157,19 @@ export const REGISTRY: Entry[] = [
   { id: "R31", source: "plugin/loop/fast-mode-loop-tick.md", markers: [
       "inner-agent-budget.json 已随 2026-08-10 人裁定 A16 退休",
     ] },
+  // outer B3 全量 suite 后台起跑退役 (AC84 2026-08-15 人裁定 outer 不跑 suite;
+  // 正文迁出见 archive ## R32; 标题保留在指针行,故 markers 用正文独有词)
+  { id: "R32", source: "orchestration/orchestrator-tick-core.md", markers: [
+      "event_not_tick 恒 1",
+      "suite-state-trigger.ts 的 Monitor 已把同一条件事件化",
+      "gap-b3-tick-coupled-misses-between-tick-merges,2026-08-11",
+    ] },
+  // outer 红窗分诊外层独占退役 (AC84 2026-08-15,输入随 B3 退役;
+  // 正文迁出见 archive ## R33; 标题保留在指针行,故 markers 用正文独有词)
+  { id: "R33", source: "orchestration/orchestrator-tick-core.md", markers: [
+      "bisect 定位肇事 merge",
+      "绝不 blind `--ours/--theirs`",
+    ] },
 ];
 
 // ── normalization: strip backticks + line-comment prefixes (# / //), collapse whitespace ──
