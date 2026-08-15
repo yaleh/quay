@@ -158,6 +158,16 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
+# gap-gitignored-carriers-absent-in-verify-worktree — the MAIN CHECKOUT path, for checkers that audit
+# the main repo's gitignored .quay/ runtime carriers (fan-in-workflow-check / fan-in-ff-protocol-check
+# / direct-to-develop-bypass-check). full-suite-runner.ts sets QUAY_MAIN_CHECKOUT to the main checkout
+# (the one-shot verify worktree lacks the gitignored carriers — .quay/fan-in-merge-lock-events.jsonl
+# etc. — so those checkers were constant-green NOT-EVALUATED every round while their input did not
+# exist). On a main-checkout run QUAY_MAIN_CHECKOUT is unset ⇒ main_root == repo_root and behavior is
+# unchanged; on a one-shot round main_root = the real main checkout ⇒ the worktree round's checkers
+# read the SAME data as a main run ⇒ verdicts are identical (AC3).
+main_root="${QUAY_MAIN_CHECKOUT:-$repo_root}"
+
 # ── criterion-cost recording (gap-no-criterion-records-its-own-cost-checker-cost-jsonl) ──────────
 # Every checker executed by run_static_checks (and the scoped tier, which evals the SAME wrapped
 # command lines) appends ONE `{name, ms, n, load, at}` line to .quay/checker-cost.jsonl on exit —
@@ -613,7 +623,11 @@ run_static_checks() {
   # non-ff fan-in merge AFTER cd4f49b4 is RED (AC62 判据2 now mechanically checkable).
   # @static-tier change
   # @static-object orchestration/SPEC-fan-in-ff-merge-lock-2026-08-14.md plugin/scripts/fan-in-ff-protocol-check.ts plugin/scripts/fan-in-ff-merge.sh plugin/test/fan-in-ff-protocol-check.test.mjs
-  run_checker "fan-in-ff-protocol-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/fan-in-ff-protocol-check.ts" --root "${repo_root}" --baseline cd4f49b4 --json
+  # --root main_root (gap-gitignored-carriers-absent-in-verify-worktree): the lock-events/suite-state/
+  # retry-record carriers it reads are MAIN-checkout gitignored runtime state, absent from the one-shot
+  # verify worktree. Pointing --root at the main checkout makes the worktree round read the SAME data
+  # as a main run ⇒ verdicts identical (AC3); on a main run main_root == repo_root ⇒ unchanged (AC2).
+  run_checker "fan-in-ff-protocol-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/fan-in-ff-protocol-check.ts" --root "${main_root}" --baseline cd4f49b4 --json
   echo "== fan-in-workflow-check (AC78 判据2 (a)(b)(c) — fan-in 是否真的走了 fan-in-execute workflow) =="
   # AC78 moves the fan-in steps INTO a workflow script (.claude/workflows/fan-in-execute.js); A6
   # stops being a step checklist and becomes a CHECK. Wired here as a code-class 每轮 gate (NOT the
@@ -626,7 +640,12 @@ run_static_checks() {
   # fan-in follows the boundary or the workflow has not landed.
   # @static-tier change
   # @static-object .claude/workflows/fan-in-execute.js plugin/scripts/fan-in-workflow-check.ts plugin/scripts/fan-in-ff-merge.sh plugin/loop/fast-mode-tick-core.md plugin/test/fan-in-workflow-check.test.mjs
-  run_checker "fan-in-workflow-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/fan-in-workflow-check.ts" --root "${repo_root}" --json
+  # --root main_root (gap-gitignored-carriers-absent-in-verify-worktree): the lock-events + dispatch
+  # records + session transcripts this checker audits are MAIN-checkout state, absent from the one-shot
+  # verify worktree. Pointing --root at the main checkout makes the worktree round read the SAME data
+  # as a main run ⇒ verdicts identical (AC3: gap-ac81 caught red in the round, never masked); on a main
+  # run main_root == repo_root ⇒ unchanged (AC2: real drift stays red).
+  run_checker "fan-in-workflow-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/fan-in-workflow-check.ts" --root "${main_root}" --json
   echo "== direct-to-develop-bypass-check (gap-direct-to-develop-bypasses-fan-in-gates — 直接提交 develop 绕过 fan-in 机件) =="
   # 直接提交 develop（reflog action = commit，区别于 fan-in 的 merge … Fast-forward）∧ 触及代码/断言面
   # ∧ 不在 ff-lock 时间窗内 ⇒ RED（11b/C17 写所有权/越权直改面）。排除集（denominator 谓词）与
@@ -638,7 +657,11 @@ run_static_checks() {
   # 无 .quay/ 运行时态），malformed/unpaired = NOT-EVALUATED（硬规则 3b）。
   # @static-tier change
   # @static-object plugin/scripts/direct-to-develop-bypass-check.ts plugin/test/direct-to-develop-bypass-check.test.mjs
-  run_checker "direct-to-develop-bypass-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/direct-to-develop-bypass-check.ts" --root "${repo_root}" --baseline 77b291db2ee5d3862f86c19f6d0ee0add9e111cf --json
+  # --root main_root (gap-gitignored-carriers-absent-in-verify-worktree): develop reflog + lock events
+  # are MAIN-checkout state, absent from the one-shot verify worktree. Pointing --root at the main
+  # checkout gives the worktree round the SAME reflog + lock-events as a main run ⇒ verdicts identical
+  # (AC3); on a main run main_root == repo_root ⇒ unchanged (AC2).
+  run_checker "direct-to-develop-bypass-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/direct-to-develop-bypass-check.ts" --root "${main_root}" --baseline 77b291db2ee5d3862f86c19f6d0ee0add9e111cf --json
   echo "== workflows-dual-copy-drift-check (gap-workflows-dual-copy-drift-unchecked — .claude/workflows/ vs plugin/workflows/ 双副本漂移) =="
   # The three dual-copy workflow files (drain-directives / fan-in-execute / run-routines) live in
   # BOTH .claude/workflows/ (what runs here) and plugin/workflows/ (what quay-init --workflows ships

@@ -54,7 +54,7 @@ fan-in-ff-protocol-check 主检出 ⇒ 四子检查全 evaluated=true
 
 - [ ] AC1 检查器在一次性 worktree 里真评估（不再因载体缺失 NOT-EVALUATED 恒绿）——至少 fan-in-workflow-check 与 fan-in-ff-protocol-check。
 - [ ] AC2 主检出行为不退化：fan-in-workflow-check 主检出仍 ok=false 真抓 gap-ac81；真漂移仍红。
-- [ ] AC3 能取假·真样本：gap-ac81-inner-verify-wiring 在 worktree 验证轮必须被报红（不再被掩盖）；NOT-EVALUATED 有独立取值且不用于合格。
+- [ ] AC3 能取假·真样本（manager 03:3xZ 建议形态，钉【结论】非【是否评估】）：**同一时刻、同一参数，worktree 与主检出的 verdict 必须相同**——修复前两边都必须 ok=false 且差集都含 gap-ac81-inner-verify-wiring；修复后（该差集被处理掉时）两边都必须 ok=true。任一时刻两边结论不同 ⇒ 红。⛔ 把空文件复制进 worktree（evaluated=true 但 0 条记录 ok=true）满足「真评估」却恒绿原封不动——判据钉结论不钉评估。**与 AC2 成对**：只有 AC2 时可把主检出也改成空集全绿；两条都在才闭合。
 - [ ] AC4 ⚠️ verification-round.jsonl 载体缺失对 AC83 生产读数判据的影响——核实是否同病并覆盖。
 - [ ] AC5 既有测试全绿；`--for-task` scoped 门绿；套件验证轮绿。
 
@@ -64,15 +64,25 @@ fan-in-ff-protocol-check 主检出 ⇒ 四子检查全 evaluated=true
 
 ## Touches
 
-- plugin/scripts/full-suite-runner.ts（轮启动时载体只读复制/挂载，或显式喂主检出路径——inner 实现面）
-- plugin/scripts/fan-in-workflow-check.ts / fan-in-ff-protocol-check.ts（若选修法② 加参数）
-- scripts/test.sh（接线对齐，若载体声明变化）
-- plugin/test/（对应测试：worktree 真评估 + 主检出不退化）
+- plugin/scripts/full-suite-runner.ts（轮启动时经 `suiteEnv` 喂 `QUAY_MAIN_CHECKOUT=<mainRoot>`——选修法②「显式喂主检出路径」，检查器零改动）
+- scripts/test.sh（`main_root=${QUAY_MAIN_CHECKOUT:-$repo_root}`；fan-in 族三检查器改 `--root "${main_root}"`）
+- plugin/test/fan-in-workflow-check.test.mjs（AC3 测试：喂主检出路径 ⇒ 评估 + 抓 gap-ac81，NOT-EVALUATED 独立取值）
+- plugin/test/full-suite-runner.test.mjs（runner 喂 QUAY_MAIN_CHECKOUT env 的测试）
 - tasks/gap-gitignored-carriers-absent-in-verify-worktree.md（自身）
 
 ## Evidence
 
-（待落地后填：worktree 真评估输出、主检出不退化、gap-ac81 回放红、verification-round 同病核实、套件验证轮绿）
+**修法**：选 **② 显式喂主检出路径**（检查器零改动——复用已有 `--root`）。full-suite-runner.ts 在 `suiteEnv` 喂 `QUAY_MAIN_CHECKOUT=<mainRoot>`（mainRoot = one-shot 前 root，恒为主检出）；test.sh `main_root=${QUAY_MAIN_CHECKOUT:-$repo_root}`，fan-in 族三检查器（fan-in-workflow-check / fan-in-ff-protocol-check / direct-to-develop-bypass-check）改 `--root "${main_root}"`。主检出跑时 main_root==repo_root ⇒ 行为不变（AC2）；one-shot 轮 main_root=真主检出 ⇒ 轮内检查器与主检出读同一数据 ⇒ verdict 恒同（AC3）。未选①（只读复制）：fan-in-workflow-check 还读 dispatch-record/.workflow-events/session transcripts，全在主检出，复制 5 载体不够且会 over-red；未选③：判据本义就是审计主运行时，改由 worktree 内量承载是错位。
+
+**AC1 实跑（worktree 轮 now 喂主检出路径 ⇒ 真评估）**：
+```
+fan-in-workflow-check    --root main  ⇒ ok=false evaluated=true missing=[gap-ac81-inner-verify-wiring]
+fan-in-ff-protocol-check --root main  ⇒ 四子检查全 evaluated=true（suite-in-lock / lock-hold-only-ff 都在）
+```
+**AC2 主检出不退化**：主检出 `fan-in-workflow-check --root /home/yale/work/quay` ⇒ ok=false evaluated=true 真抓 gap-ac81（修前修后同一条命令，检查器零改动）。
+**AC3 能取假·真样本**（新判据，钉结论）：修前 worktree `--root <worktree>` ⇒ ok=true evaluated=false "nothing-to-judge"（恒绿）；修后轮内 `--root main_root` ⇒ 与主检出**同 verdict**（ok=false evaluated=true、差集含 gap-ac81）。NOT-EVALUATED 保持独立取值（空数据仍 evaluated=false，绝不用于合格）。测试：`fan-in-workflow-check.test.mjs` 新增 AC3 CLI 测试（worktree-vs-main 分裂回放）57/57 绿。
+**AC4 核实（非同病）**：verification-round.jsonl 由 runner 经 `appendVerificationRound(stateDir)` 写**主检出** `.quay/`（stateDir 默认 `<mainRoot>/.quay`，:2192/:1451/:3524；实测主检出 179 轮、本轮 03:27 刚写）⇒ AC83 的生产载体在**主检出**，不在 worktree；AC83 是 manager 侧 phase-goal 判据（orchestration/manager-phase-goal.md:961），读主检出；`prod-data-audit.ts` 的 `resolveProductionRoot` 已沿 `git rev-parse --git-common-dir` 从 worktree 追到主检出（:87-103）。⇒ verification-round.jsonl 在 worktree 缺失**不影响** AC83。
+**AC5 测试**：`fan-in-workflow-check.test.mjs` 57/57、`fan-in-ff-protocol-check.test.mjs` 16/16、`full-suite-runner.test.mjs` 146/146（含新增 QUAY_MAIN_CHECKOUT env 测试）；`--for-task` scoped 门（含两测试文件，203 tests 全绿 + scoped 静态检查）——套件验证轮在 fan-in 后由 inner 触发。
 
 ## 止损
 

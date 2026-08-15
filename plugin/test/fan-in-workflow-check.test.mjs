@@ -818,6 +818,63 @@ test("CLI — 负控制: a fan-in dispatched AFTER the enforcement baseline with
   assert.deepEqual(a.preBoundaryDispatch, []);
 });
 
+test("AC3 (gap-gitignored-carriers-absent-in-verify-worktree) — feeding the round the MAIN root makes the checker evaluate (not nothing-to-judge) and catches the REAL difference (gap-ac81), verdict-identical to a main run", (t) => {
+  // The one-shot verify worktree lacks the gitignored carriers (fan-in-merge-lock-events.jsonl etc.),
+  // so pre-fix the round's invocation (`--root <worktree>`) was constant-green nothing-to-judge while
+  // the input did not exist. The fix (method ②) makes the round feed `--root main_root` (QUAY_MAIN_CHECKOUT)
+  // ⇒ the default carrier path <main>/.quay/fan-in-merge-lock-events.jsonl resolves ⇒ evaluated, and a REAL
+  // post-baseline fan-in with no Workflow call (gap-ac81-inner-verify-wiring — the sample AC3 names) is RED
+  // with it in the difference — the SAME verdict a main-checkout run gives.
+  const mainRoot = fs.mkdtempSync(path.join(os.tmpdir(), "fan-in-wf-main-"));
+  const worktreeRoot = fs.mkdtempSync(path.join(os.tmpdir(), "fan-in-wf-worktree-"));
+  t.after(() => {
+    fs.rmSync(mainRoot, { recursive: true, force: true });
+    fs.rmSync(worktreeRoot, { recursive: true, force: true });
+  });
+  // The MAIN checkout has the gitignored carrier with a real post-baseline fan-in (gap-ac81-inner-verify-
+  // wiring, epoch 2000000000) that did NOT go through the fan-in-execute workflow.
+  const mainQuay = path.join(mainRoot, ".quay");
+  fs.mkdirSync(mainQuay, { recursive: true });
+  const ev = { event: "acquire", taskId: "gap-ac81-inner-verify-wiring", epoch: 2000000000, runId: "fm-gap-ac81-inner-verify-wiring-2000000000-r1", agentId: "aab2d14d10a762ff4" };
+  fs.writeFileSync(path.join(mainQuay, "fan-in-merge-lock-events.jsonl"), JSON.stringify(ev) + "\n");
+  // Dispatch AFTER the enforcement baseline (the workflow exists ⇒ it could have been dispatched) — no
+  // Workflow call in the transcripts ⇒ RED. Its agentId is a real subagent (file present) so the red is
+  // driven by the workflow-call-coverage difference only (the gap-ac81 shape).
+  const wfEvents = path.join(mainRoot, ".workflow-events");
+  fs.mkdirSync(wfEvents, { recursive: true });
+  fs.writeFileSync(path.join(wfEvents, ev.runId + ".jsonl"), JSON.stringify({ eventKind: "start", recordedAtMs: 2000000000000 }) + "\n");
+  fs.mkdirSync(path.join(mainRoot, "subagents"), { recursive: true });
+  fs.writeFileSync(path.join(mainRoot, "subagents", "agent-" + ev.agentId + ".jsonl"), "{}");
+
+  // (1) PRE-FIX worktree round: --root <worktree> (carrier absent ⇒ default path <worktree>/.quay/… missing)
+  //     ⇒ constant-green nothing-to-judge — the exact disease AC3 rules out.
+  const beforeRes = spawnSync("node", ["--experimental-strip-types", CHECKER, "--root", worktreeRoot, "--project-dir", mainRoot, "--workflow-events-dir", wfEvents, "--workflow-landed-ts", "2026-08-14T09:20:07Z", "--enforcement-baseline-ts", "2026-08-14T09:55:00Z", "--json"], { encoding: "utf8" });
+  assert.equal(beforeRes.status, 0);
+  const before = JSON.parse(beforeRes.stdout);
+  assert.equal(before.ok, true);
+  assert.equal(before.evaluated, false);
+  assert.match(before.reason, /NOT-EVALUATED/);
+
+  // (2) POST-FIX worktree round: the fix feeds --root main_root (the MAIN checkout) ⇒ the DEFAULT carrier
+  //     path <main>/.quay/fan-in-merge-lock-events.jsonl resolves ⇒ evaluated and RED with gap-ac81 missing.
+  const afterRes = spawnSync("node", ["--experimental-strip-types", CHECKER, "--root", mainRoot, "--project-dir", mainRoot, "--workflow-events-dir", wfEvents, "--workflow-landed-ts", "2026-08-14T09:20:07Z", "--enforcement-baseline-ts", "2026-08-14T09:55:00Z", "--json"], { encoding: "utf8" });
+  assert.equal(afterRes.status, 1);
+  const after = JSON.parse(afterRes.stdout);
+  assert.equal(after.ok, false);
+  assert.equal(after.evaluated, true);
+  const a = after.checks.find((c) => c.check === "a-workflow-call-coverage");
+  assert.equal(a.ok, false);
+  assert.deepEqual(a.missing, ["gap-ac81-inner-verify-wiring"]);
+  assert.deepEqual(a.preBoundaryDispatch, []);
+  assert.deepEqual(a.knownPreBaselineDebt, []);
+
+  // (3) AC3 identity — the post-fix worktree-round invocation (--root mainRoot) IS a main-checkout run's
+  //     invocation, so the two verdicts are identical by construction: evaluated=true ok=false with the
+  //     real difference surfaced, and NOT-EVALUATED stays a DISTINCT value (shown in (1)) never used for pass.
+  assert.equal(after.ok, false);
+  assert.equal(after.evaluated, true);
+});
+
 // ── CLI d: escalation traceability (SPEC §7 anti-livelock, gap-ff-livelock-trigger-no-action) ───────
 
 test("CLI — escalation traceability: an escalated task WITH a Workflow call ⇒ exit 0 (GREEN)", (t) => {

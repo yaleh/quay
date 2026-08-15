@@ -4026,6 +4026,33 @@ test("AC1/AC3 — the default run passes HOST-READ phase concurrency (os.availab
   }
 });
 
+test("AC1/AC3 (gap-gitignored-carriers-absent-in-verify-worktree) — the runner feeds the suite child QUAY_MAIN_CHECKOUT=<mainRoot> so test.sh can point carrier-dependent discipline checkers at the MAIN checkout", async () => {
+  // In a one-shot verify worktree the .quay/ gitignored runtime carriers (fan-in-merge-lock-events.jsonl
+  // etc.) are structurally ABSENT, so the fan-in-family checkers were constant-green NOT-EVALUATED every
+  // round while their input did not exist. The runner passes mainRoot (= root before one-shot reassignment)
+  // as QUAY_MAIN_CHECKOUT; test.sh's main_root=${QUAY_MAIN_CHECKOUT:-$repo_root} then feeds the checkers the
+  // MAIN path ⇒ the worktree round reads the SAME data as a main run ⇒ verdicts identical (AC3). On a main
+  // run mainRoot == root, so the env equals repo_root and behavior is unchanged (AC2).
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-mainco-"));
+  const envLog = path.join(root, "main-checkout.txt");
+  fs.mkdirSync(path.join(root, "scripts"), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, "scripts", "test.sh"),
+    `#!/usr/bin/env bash\necho "MAIN=$QUAY_MAIN_CHECKOUT" > '${envLog}'\necho "# tests 1"\necho "# pass 1"\necho "# fail 0"\necho "# cancelled 0"\nexit 0\n`,
+    { mode: 0o755 },
+  );
+  try {
+    const child = runRunner({ root });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, `runner exits 0 on green, got ${code}`);
+    await poll(() => fs.existsSync(envLog));
+    const line = fs.readFileSync(envLog, "utf8").trim();
+    assert.equal(line, `MAIN=${path.resolve(root)}`, `QUAY_MAIN_CHECKOUT == mainRoot (${path.resolve(root)}), got: ${line}`);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("AC2 — --serial-concurrency 2 / --lowconc-concurrency 5 WIN over the host-read default (controlled experiment)", async () => {
   // The AC2 controlled experiment: run the serial phase at concurrency 2, measure wall-clock +
   // cancelled, and only bump the default if 0-cancelled holds (measure-first, not blind tuning).

@@ -2580,6 +2580,17 @@ export async function run(argv: string[]): Promise<number> {
     // across runs stays separated). Folded into suiteEnv so the one-shot-worktree env decoupling and
     // the per-run delivery compose rather than conflict.
     QUAY_RUN_ID: shortRunId,
+    // gap-gitignored-carriers-absent-in-verify-worktree — the MAIN CHECKOUT path, fed to the suite so
+    // test.sh can point the .quay/-carrier-dependent discipline checkers (fan-in-workflow-check,
+    // fan-in-ff-protocol-check, direct-to-develop-bypass-check) at the MAIN repo's gitignored runtime
+    // carriers (fan-in-merge-lock-events.jsonl etc.). In a one-shot verify worktree the carriers are
+    // structurally ABSENT from the worktree (gitignored ⇒ not copied by git worktree add), so the
+    // checkers were constant-green NOT-EVALUATED every round while their input did not exist. mainRoot
+    // is the fork source (root before one-shot provisioning reassigns root to the worktree), so on a
+    // main-checkout run QUAY_MAIN_CHECKOUT == repo_root and the checkers behave exactly as before
+    // (no main regression, AC2); on a one-shot round it is the real main checkout and the worktree
+    // round's checkers read the SAME data as a main run ⇒ verdicts are identical (AC3).
+    QUAY_MAIN_CHECKOUT: mainRoot,
   };
   if (useSystemdRun) {
     const sdArgv = buildSystemdRunArgv(command, systemdLimits);
