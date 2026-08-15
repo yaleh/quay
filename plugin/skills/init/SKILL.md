@@ -68,7 +68,7 @@ mechanically by quay-init's `verify-referenced-landed` (see below).
 | `loop/orchestrator-loop-tick.md` | `orchestration/orchestrator-loop-tick.md` (byte-identical, no substitution) |
 | `loop/fast-mode-loop-tick.md` | `docs/analysis/fast-mode-loop-tick.md` (byte-identical, no substitution) |
 | `loop/orchestrator-tick-core.md` | `orchestration/orchestrator-tick-core.md` (byte-identical, no substitution; the ≤80-line outer exec core — `gap-ac37-exec-core-ships-with-package`) |
-| `loop/fast-mode-tick-core.md` | `orchestration/fast-mode-tick-core.md` (以 orchestration/ 本为正本；plugin/loop/ 为 quay-init --loop 铺出模板——引用目标 docs/analysis 源，非 byte-identical，两副本承担不同角色；正本改动后由 inner 按正本语义落地副本) |
+| `loop/fast-mode-tick-core.md` | `orchestration/fast-mode-tick-core.md` (byte-identical, no substitution; the ≤80-line inner exec core) |
 | `loop/manager-tick-core.md` | `orchestration/manager-tick-core.md` — **opt-in**: laid only with `--manager` (human ruling 2026-08-10: the typical path is two-layer, outer + inner), NOT in the default `--loop` set |
 | `scripts/*` referenced by a shipped skill/tick doc (e.g. `fast-mode-telemetry.ts`, `monitor-mount-check.sh`, `send-keys-reliable.sh`, `session-liveness-mount.sh`, `ready-pool-check.ts`, `read-probe-spec.ts`, `task-schema-check.ts`, `quay-launch.sh`, `quay-topology.sh`, `topology-check.sh`, …) | `plugin/scripts/` |
 | `scripts/` bare-name mechanism files the docs call without a `plugin/scripts/` prefix (`inner-idle-log.ts`, `it0-split-or-commit-check.ts`, `pipe-exit-code-check.sh`; `heavy-op-token.sh` was retired 2026-08-06) | `plugin/scripts/` |
