@@ -51,14 +51,14 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1 判据1：quay-init-loop-consumer-doc-refs.test.mjs AC3 通过（consult declaredSet）。
-- [ ] AC2 判据2：quay-init.test.mjs AC5 通过（--loop --manager 铺真核）。
-- [ ] AC3 判据3 能取假：round170 两失败测试重跑全绿；`--for-task` scoped 门绿。
-- [ ] AC4 判据4：既有测试全绿；reference-doc 声明机制保留。
+- [x] AC1 判据1：quay-init-loop-consumer-doc-refs.test.mjs AC3 通过（consult declaredSet）。
+- [x] AC2 判据2：quay-init.test.mjs AC5 通过（--loop --manager 铺真核）。
+- [x] AC3 判据3 能取假：round170 两失败测试重跑全绿；`--for-task` scoped 门绿。
+- [x] AC4 判据4：既有测试全绿；reference-doc 声明机制保留。
 
 ## Definition of Done
 
-- [ ] 两个 real-install 回归测试全绿 + reference-doc 机制保留 + scoped 门绿。
+- [x] 两个 real-install 回归测试全绿 + reference-doc 机制保留 + scoped 门绿。
 
 ## Touches
 
