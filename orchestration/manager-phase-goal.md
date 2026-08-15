@@ -619,6 +619,19 @@
       (b) `tasks/*.md` 的 status 翻转提交、(c) 向 develop 的 merge；三类只出现在 `subagents/agent-*.jsonl`）。
       **执行核条款仍查，但降为【必要不充分】**：条款改了而命令行没变 ⇒ 仍判红。
 
+      **✅ 2026-08-15 11:3xZ 现读：判据2 的载体【已在产出】**（推论三：只数实现落地后的真记录）
+      ```
+      .quay/per-task-suite-records.jsonl  38 条 · 20 个不同 taskId · mtime 11:16Z（刚写）
+      字段：taskId runId ts startedAt finishedAt state durationMs fullSuiteRan
+            docChecked docCheckExit failedFiles laneCount load cpu_time_s cpu_source
+      fullSuiteRan 分桶 = {True: 9, False: 28, None: 1}  ⇒ 9 次真全量，均有记录 ⇒ 成功路径有留痕
+      ```
+      **🔴 但同一读数里有一个必须记的 3b 形状**：`state` 分桶 = **{green: 38}**，**38/38 全绿、一条红都没有**。
+      ⇒ **从该载体无法区分「per-task suite 从不红」与「红的没被记」** —— 今天 develop 上明明有过红轮。
+      **⛔ 这不否定判据2**（判据2 只要求成功路径留痕，字面已达成），**但它意味着该载体不能被当作红率来源**
+      ——而 AC84 判据6 恰好要求「红率分桶改读这个文件」。**两条 AC 在这里对撞，落地前必须先解决。**
+      **⊢ 已随 AC84 投递给 outer（`0dd66d04`）。**
+
       **判据2（成功路径也要留痕，且第三方可读）**：每次 per-task 全量 suite 落**一条**记录，
       含 `taskId / runId / state / laneCount / durationMs / 失败文件清单 / 起止时刻`，
       **写在共享检出可读的位置**——不是 worktree 内那份 fork 继承的副本。
@@ -1149,7 +1162,20 @@ verification-round.jsonl 末轮记录          2026-08-13T16:19:54Z   ← 早于
       **判据1（能取假）✅ 2026-08-15 03:4xZ 已翻真**：`verification-round.jsonl` 中**含 `cpu_usec` 的轮次 ≥ 1**。
       **立案时 0/167 ⇒ 假；现读 12/179（`psi` 同为 12），最近三轮 `02:31:12Z` / `02:49:11Z` / `03:17:58Z` 全含**
       ⇒ **判据1 真**。**⛔ 不得用「测试绿」代替本判据** —— 这条判据从假翻真本身就是它能取假的证明。
-      **⚠️ AC83 仍不勾**：判据3（覆盖面）现读仍为假 —— `fan-in-execute.js:115` 是裸 `bash scripts/test.sh`，
+      **✅ 2026-08-15 11:3xZ 现读更正：判据3 点名的那个缺口【已被生产追上】，AC 文本此前是陈旧的（判准②，方向对我有利）。**
+      ```
+      现读 fan-in-execute.js:115 区段：
+        if command -v /usr/bin/time >/dev/null 2>&1; then
+          /usr/bin/time -o /tmp/fan-in-suite-${task}.time -f '%U %S' bash scripts/test.sh
+        …（不可用分支）suite_cpu_s=null + suite_cpu_source=not-wired   ← AC6「绝不写 0」的降级取值
+      ⇒ 不再是裸 bash；:126 那个裸调用是【/usr/bin/time 不可用时的 fallback 分支】，按设计
+      ⇒ :97 是 --for-task --allow-thin（scoped）、:150 是 --static-checks-doc，两者非全量，不该计 cpu
+      生产载体实读（推论三：只数实现落地后的真读数，⛔ 不数 fixture）：
+        .quay/per-task-suite-records.jsonl  38 条 / 20 个不同 taskId / mtime 11:16Z
+        cpu_source 分桶 = {gnu-time: 7, not-wired: 28, None: 3}   ⇒ 真 cpu 读数 7 条
+        cpu_time_s 非空非零 = 9 条，最早 2026-08-14T19:24:48Z，最晚 2026-08-15T11:16:09Z
+      ```
+      **⇒ 判据3 的点名缺口已消。** **⚠️ 但 AC83 本轮仍不勾**，剩余未验的是那个 worktree 可见性子问题：
       不经 `full-suite-runner` ⇒ **fan-in 的 suite 仍拿不到分相数据**；AC83 原文写死「两条任务必须一起完成」。
       **⚠️ 另有一条未验**：`verification-round.jsonl` 本身在 🔴 观察项的 gitignored 载体清单里
       ⇒ **它在一次性 worktree 里不存在**，读它的判据在轮内是否同样 NOT-EVALUATED，我尚未验
@@ -1276,6 +1302,32 @@ fan-in-ff-protocol-check（AC62 判据2）主检出 ⇒ 四子检查全 evaluate
 ---
 
 ## 🆕 AC84：outer 的全量轮与红窗分诊退役，验证单元完全下放 inner workflow（人 2026-08-15 09:47Z 逐字：「outer 跑 suite 和红窗/绿窗等机制都应该废弃了，应该在 inner 的 workflow 中跑 suite 并合并到 develop，项目主目录应保持为 develop 分支。检查相应任务是否实际落地，当前状态是否符合预期，列出应执行的调整操作，并落实。」）
+
+- [ ] **AC84（outer 全量轮与红窗分诊退役，验证单元完全下放 inner workflow）**
+      **🔴 2026-08-15 11:3xZ 补上这一行——本 AC 此前【只有 `##` 标题、没有复选框】。**
+      AC83 的形态是「`##` 标题 + `- [ ]` 复选框」两件套（`:1134` + `:1148`），**AC84 只有前一半**
+      ⇒ **我每轮的勾选表谓词 `^- \[[ x]\] \*\*AC\d+` 结构上看不见它** ⇒ 「已勾 16 / 未勾 9 = 25」**漏计**，
+      而放宽谓词命中 31。**⊢ 后果不是数字难看：这条 AC 是人 09:47Z 逐字裁定的退役，
+      却是本阶段唯一一条【没有任何东西在跟踪】的 AC。**
+      **⊢ 这是 CLAUDE.md 硬规则 4b 里已经记过的同一个坑**（「`goal.phase_ac_checked` 的复选框正则：
+      本阶段 12 条 AC 一个复选框都没有 ⇒ 贡献恒零」）——**同一个谓词、同一个失效方向，我又踩了一次。**
+      **⇒ 零计数的配套动作（把谓词对已知为真的样本干跑）我做了，但只对 AC83 做，没对 AC84 做**
+      ——因为我没想到「AC84 可能不在表里」，而这正是该动作要防的那种盲点。
+
+      **🔴 判据1/2 现读 = 假（2026-08-15 11:3xZ 按位置实读 outer 核，非全文关键词）**：
+      ```
+      orchestrator-tick-core.md:53   - **B3 全量 suite 后台起跑**        ← 条款逐字仍在
+      orchestrator-tick-core.md:108  **红窗分诊外层独占**，不把红树丢给 inner  ← 条款逐字仍在
+      读法：只取行首为 - / * / 数字. / 大写字母+数字 的【条款行】，命中 9；干跑对照 fan-in 条款行 = 3
+      （全文提及 14，⛔ 不作判据——注释/说明不算命中）
+      ```
+      **⇒ 人 09:47Z 裁定至 11:3xZ 已 108 分钟，两条条款一字未动。**
+
+      **🔴 我自己的连带错（人 2026-08-15 11:3xZ 当场指出）**：我用「outer 在等绿窗、轮内不能写 develop」
+      解释 outer 96 分钟无 tick-log。**人逐字：「你还在说 outer 跑 suite 和绿窗。已经多次说明，这些应停用。
+      outer 内的 tick 不应跑 suite 测试也不应等任何 suite 测试的输出。」**
+      ⇒ **我用一个【本该已退役的机制】去解释沉默，等于替它开脱**；且该解释无区分对照（硬规则4推论四）。
+      ⇒ **撤回该解释：outer 的 96 分钟无 tick 目前【无解释】，这是诚实状态，也是一个待查信号。**
 
 **⊢ 核查结果（直接量，2026-08-15 09:4xZ）——三项已符合、一项半未符合、一项【不该废】**
 ```
