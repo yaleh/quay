@@ -146,10 +146,28 @@
       —— **该模块已于 AC48 标 RETIRED、零生产调用者** ⇒ **活指令指向退役模块**，且它就在 inner 现在要读的那份文件里。
       **⚠️ 但它不阻塞新阶段的 AC54–57**（四条都不碰那条路径），**故排在通则之后，不插队**。
 
-- [x] **AC62（协议·fan-in 改为「无锁段自测 + 锁内 ff」）**——人 2026-08-14 裁定，正本
+- [ ] **AC62（协议·fan-in 改为「无锁段自测 + 锁内 ff」）**——人 2026-08-14 裁定，正本
       `orchestration/SPEC-fan-in-ff-merge-lock-2026-08-14.md`
 
-      **⊕ 2026-08-15 01:0xZ 达成：阻塞项已消失，我实跑核实。**
+      **🔴 2026-08-15 03:2xZ 撤勾（我 01:0xZ 的 ✅ 是错的，环境搞错了）——判据2 只有一半在轮里被评估。**
+      **我 01:0xZ 在【主检出】实跑该检查器全绿就勾了；而验证轮跑在【一次性 worktree】（`full-suite-state.json`
+      现读 `oneShotWorktree: true`，`full-suite-runner.ts:2300-2301` `root = provisionOneShotWorktree(root)`）。
+      同一检查器、同一参数，两个环境结果不同**（我在临时 worktree 里实跑对照）：
+      ```
+      子检查              主检出           一次性 worktree（= 轮的真实环境）
+      non-ff-fan-in       evaluated=true   evaluated=true    ← 读 git log，worktree 里有
+      suite-in-lock       evaluated=true   evaluated=FALSE   ← no-lock-events-file
+      lock-hold-only-ff   evaluated=true   【输出里整条缺席】
+      retry-record-shape  evaluated=true   evaluated=true 但 nothing to validate
+      ```
+      **根因**：`.quay/fan-in-merge-lock-events.jsonl` 是 **gitignored**（`.gitignore:180`，已 `git check-ignore -v` 核）
+      ⇒ **一次性 worktree 里结构上不存在** ⇒ 依赖它的判据每轮 NOT-EVALUATED、退出 0、套件绿。
+      **⇒ 判据2 的两半**：「非 ff 的 fan-in merge ⇒ 必须红」**每轮真评估 ✅**；
+      「持锁段内出现 suite 调用 ⇒ 必须红」**在轮里从未被评估 ❌** ⇒ **半覆盖，不勾。**
+      **⊢ 解锁条件**：该检查器在**轮的环境里**能拿到 lock-events（见下方 🔴 观察项的三条候选修法），
+      或判据2 后半改由一个输入在 worktree 内可得的量承载。
+
+      **⊕（历史，环境错，保留备查）2026-08-15 01:0xZ 我在主检出实跑核实。**
       `run_checker "fan-in-ff-protocol-check"` 现在 `scripts/test.sh:616` **真接线**（`grep -c` 非零半边打印过：
       `run_checker ... --baseline cd4f49b4 --json`，不是注释/候选表）。**实跑**：四个子检查 `non-ff-fan-in` /
       `suite-in-lock` / `lock-hold-only-ff` / `retry-record-shape` 全 `evaluated:true, ok:true`。
@@ -1037,3 +1055,41 @@ B1（0 跳）100% 与 A9（1 跳、无绑定）15% **同在 workflow 的保护�
       + 正本更新 + `--record-cron`（AC80 判据3 要求正本与活 prompt 逐字节一致）⇒ **挑安静窗口做**。
 - [ ] **把 A9 从「独立一条」改成 B1 返回后的第一个动作**（`.claude/workflows/manager-tick-core.js`，我的豁免面）。
 - [x] 本观察项记录（本节）。
+
+---
+
+## 🔴 观察项（2026-08-15 03:2xZ，**已达立案门槛**，归 outer 立案 / inner 落）：**接了线、每轮跑、但输入在轮的环境里结构上不存在的检查器**
+
+**这比 AC73「造好了但没人用」更贵**：零调用是**已知的空白**；**本形态每轮都跑、每轮 exit 0、套件绿**
+——**记录上看起来它正在守护，而它连输入都没有。**（同 CLAUDE.md 硬规则 3b③ `outer-tick-log-check` 恒绿那条，换了成因。）
+
+**⊢ 根因（读实现 + 实跑对照，非推理）**：
+```
+验证轮跑在一次性 worktree      full-suite-state.json 现读 oneShotWorktree: true
+                              full-suite-runner.ts:2300-2301  root = provisionOneShotWorktree(root)
+而多个检查器的输入是 gitignored 运行时载体 ⇒ 该 worktree 里【不存在】
+```
+**⊢ 逐个查证（`git check-ignore -v`，谓词已双向干跑）——`scripts/test.sh` 里被 @static-object 声明的 `.quay/` 载体**：
+```
+GITIGNORED（worktree 里不存在）：fan-in-merge-lock-events.jsonl · per-task-suite-records.jsonl ·
+                                verification-round.jsonl · task-file-violation-ledger.jsonl · checker-cost.jsonl
+tracked：full-suite.lock.0 · full-suite.log.
+```
+**⊢ 两个实测实例（同一命令、同一参数，只换 --root）**：
+```
+fan-in-workflow-check（AC78 判据2）  主检出 ⇒ ok=false 差集=[gap-ac81-inner-verify-wiring]
+                                    worktree ⇒ ok=true evaluated=false "nothing-to-judge"
+fan-in-ff-protocol-check（AC62 判据2）主检出 ⇒ 四子检查全 evaluated=true
+                                    worktree ⇒ suite-in-lock evaluated=FALSE；lock-hold-only-ff 整条缺席
+```
+**⇒ 直接后果**：AC62 已因此撤勾（判据2 半覆盖）；**AC78 判据2 的差集（含今晚那条 `gap-ac81-inner-verify-wiring`）
+在轮里从未被报出来过** —— 它只在有人手跑主检出时才可见，而没有任何一轮会那样跑。
+
+**⊢ 三条候选修法（⛔ 不指定实现，归落地方选）**：
+① 轮启动时把这些运行时载体**只读挂载/复制**进一次性 worktree（保持 gitignore 不变）；
+② 检查器加 `--<carrier>` 参数，由轮的启动方显式喂**主检出的路径**（`per-task-suite-record-check --lock-events` 已有先例）；
+③ 判据改由「输入在 worktree 内可得」的量承载（如把必要事实随提交落进 tracked 文件）。
+**⚠️ ⛔ 不可接受的第四条**：把 NOT-EVALUATED 当合格。**它现在就是这么表现的，而这正是要修的东西。**
+
+**发生率（硬规则⑫，本条已够立案）**：受影响的 gitignored 载体 **5 个**；实测确认行为分叉的检查器 **2 个**；
+由此导致的**错误勾选 1 次（AC62，我自己，2 小时内）**；**被结构性掩盖的真差集 ≥1 条（AC78 判据2）**。
