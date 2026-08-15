@@ -171,3 +171,78 @@ quay_next(who, cursor, facts[], evidence[]) → { instructions, refused, notEval
 ① tick-log 行加日期/epoch（已生效）② B13 脚本化使 A23 成为构造而非约定 ③ prompt 给一个 0 跳入口动作。
 **⛔ 同时明确不建议 outer 上 tick workflow**：subagent 预算是会话级累计硬上限、触顶后静默退回主线程串行
 （正本 `tasks/gap-inner-subagent-budget-invisible.md`）——**入口 shell 能拿到 0 跳的全部收益，不碰预算、不碰 M176。**
+
+---
+
+## §8 执行层：主循环退化为路由器（人 2026-08-15 08:2xZ 裁定「执行阶段 1」）
+
+**⚠️ 为什么写在本 SPEC 里而不是新建文件**：新增一个 `orchestration/SPEC-*.md` 会同时触发**两个**断言者
+（`manager-layer-shipping` AC6 索引 + `capability-catalog` referenced-not-landed），而**后者的落点
+`plugin/skills/init/SKILL.md` 不在 manager 豁免面** ⇒ 每新建一个 SPEC 就产生一条跨面债
+（`orchestration/manager-tick-closing.md` 本日补的条款）。**本 SPEC 自己那条债尚在飞**
+（`gap-spec-reference-doc-declare-init-skill`）⇒ 不叠加第二条。**这是成本理由，不是内容理由**：
+§1–§7 是判断层（机械检查 → MCP），§8 是执行层（谁在什么上下文里跑），**两层可组合、也可各自单独落地**。
+
+### §8.1 问题的重新表述（比「跳数」更准）
+
+人 2026-08-15 08:1xZ 逐字：「**我们担心的不是偶尔的抖动，而是长期的漂移**」
+「**subagent call limit 不重要，其比发生漂移需要的次数高一个量级，而且可以用工程手段处理**」。
+
+**⊢ 量化核实（我此前的反对因此撤回）**：
+```
+预算：CLAUDE_CODE_MAX_SUBAGENTS_PER_SESSION 默认 200（会话累计）
+     tasks/gap-inner-subagent-budget-invisible.md:49 逐字「/clear 立刻解封（重置预算至 200）」
+     env var 可设 2000（同文件 :45）
+漂移：A23 衰减到零 = 13 轮 ≈ 4.3 小时；A9 覆盖率 15.2% = 33 轮窗口
+⇒ 漂移在 ~10 轮显形；200 预算按每 tick 3 subagent = 66 轮、5 个 = 40 轮，仍是漂移时标 4 倍以上
+⇒ **不是悬崖，是可调参数**；我 04:1xZ「拿已知漂移换未知悬崖」的说法【尺度算错，撤回】。
+```
+
+**⊢ §1.1 七个覆盖率点指向的真正规律**：
+> **凡每轮从上下文【外部】重新物化的，都是 100%；凡需要在上下文【内部】跨轮存活的，都衰减。**
+> B1（cron 每轮重投）33/33 · A1/arm-loop（绑必做动作）33/33、32/33 ｜ A23、A9（靠记得）61.5%→0、15.2%
+
+**⇒ 设计目标不是「少犯错」，是【让需要跨轮存活在主上下文里的东西趋近于零】。**
+
+### §8.2 两类错需要两种解法（⛔ 不可混谈）
+
+**这是 2026-08-15 一夜实证才分清的**：
+```
+判断类错 ⇒ 新鲜上下文（subagent/workflow）—— 它们本来就只需要「facts + 一条判准」，不需要任何历史
+   实例（全部当夜、全部长上下文内）：AC62 在错误环境验绿就勾 · 手搓资格谓词漏 PARKED_MARKER_RE/isCompound
+                                    · 18 vs 5 混违规类型 · 30 vs 1 把全史审计数当 enforcement 差集
+路由类错 ⇒ 自门控命令形态 —— 换多新鲜的上下文都不会好
+   实例：改完不提交（阻断 inner fan-in 1.5h）· 读到非终态仍提交（两次）
+   已落产物：manager-tick-closing.md「提交必须用自门控的那一条命令」+「改被机械断言的豁免面文件时并进断言测试」
+```
+
+### §8.3 三阶段
+
+**阶段 1（本次执行）——【读数】搬进 subagent。**
+现状：`manager-tick-core.js` 把 `READ_CMD` 作为**命令块交还主线程执行** ⇒ 命令输出全部沉积在主上下文。
+改为：**workflow 内一个 readings agent 跑固定命令集，只回结构化 facts**；主循环再也看不到原始输出。
+**落点全在 manager 豁免面**：`.claude/workflows/manager-tick-core.js` + `orchestration/manager-tick-prompt.txt`。
+
+**阶段 2 —— 【判断】搬进 workflow。** 每条判准 + 它需要的 facts，交给一个新鲜 agent 单独评。
+直接对着 §8.2 的判断类错——它们不需要当夜积累的任何上下文，**却被那些上下文污染了**。
+
+**阶段 3 —— 路由器的残余。** 留在主循环的只有投递/裁定/提交（要权限与连续性），由自门控命令形态兜住。
+
+### §8.4 四条工程细节（不做会前功尽弃）
+
+1. **`/clear` 安全性是硬前提，且已有人的裁定**（08-14 08:4xZ「保障 `/clear` 后的行为稳定性；subagent/workflow
+   的独立上下文是优势」）⇒ `/clear` 之后还需要的一切必须在盘上：prompt 正本 + workflow 脚本 + 账本。
+   **这同时是「预算可随时 `/clear` 重置」的前提——两件事是同一个设计。**
+2. **args 是漂移的回流口**：今天 B1 传的 `prior:<本轮读数差异>` 是主上下文的总结文字
+   ⇒ **执行搬走了、输入还在漂**。args 必须机器可算（runId/路径/任务 id/facts JSON），⛔ 不是总结。
+3. **subagent 返回必须带 schema**，否则散文从返回值那一侧灌回来，白搬。
+4. **每多一层隔离，就多一个「输入没跟着过去」的机会** —— 实证即本日 carriers bug
+   （gitignored 载体在一次性 worktree 里不存在 ⇒ 检查器恒 NOT-EVALUATED）
+   ⇒ **输入必须显式传，不能靠「它在那儿」。**
+
+### §8.5 验收：不造新指标，重测同一组基线
+
+**仪器与基线 2026-08-15 已建**（`manager-phase-goal.md` 🔭 观察项）：用会话动作记录（第三方可读的直接量）
+逐轮对齐 cron 触发时刻算每轮覆盖率。**改后重测同样七个点。**
+**⊢ 能取假的预测**：A23/A9 这类「独立一条」的义务覆盖率应从 15–61% 升至接近 B1 的 100%；
+**若不升，结论是「搬家没解决问题」，⛔ 不是「还需要再搬一点」。**
