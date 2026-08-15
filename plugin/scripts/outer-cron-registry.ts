@@ -60,7 +60,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { extractCanonical } from "./outer-anchor-check.ts";
+import { extractCanonical, LAYERS } from "./outer-anchor-check.ts";
 
 export const EXIT_OK = 0;
 export const EXIT_VIOLATED = 1;
@@ -352,21 +352,20 @@ export function checkVerify(opts: VerifyOptions): VerifyResult {
 }
 
 // ── 正本 prompt 来源（默认路径）────────────────────────────────────────────────────────────────────────
-// outer：orchestration/outer-tick-prompt.txt（整个文件去一个尾部换行）；inner：plugin/loop/
-// fast-mode-loop-tick.md 的 AC80-INNER-ANCHOR 段（extractCanonical；段未落地 ⇒ null = 正本缺失）。
+// 正本相对路径来自 outer-anchor-check.ts 的 LAYERS 配置（单一来源，防漂移）：outer=
+// orchestration/outer-tick-prompt.txt（整个文件去一个尾部换行）；inner=plugin/loop/fast-mode-loop-tick.md
+// 的 AC80-INNER-ANCHOR 段（extractCanonical；段未落地 ⇒ null = 正本缺失）。root 在 verify worktree
+// 上下文中是工作树根（与主检出同布局，path.resolve 归一化后路径一致），故查找在两种上下文都成立。
 function readCanonicalPrompt(root: string, layer: string, override?: string): string | null {
   if (override) {
     if (!fs.existsSync(override)) return null;
     return extractCanonical(fs.readFileSync(override, "utf8"), layer);
   }
-  if (layer === "outer") {
-    const p = path.join(root, "orchestration", "outer-tick-prompt.txt");
-    if (!fs.existsSync(p)) return null;
-    return extractCanonical(fs.readFileSync(p, "utf8"), "outer");
-  }
-  const p = path.join(root, "plugin", "loop", "fast-mode-loop-tick.md");
+  const cfg = LAYERS[layer];
+  if (!cfg) return null;
+  const p = path.resolve(root, cfg.canonicalRel);
   if (!fs.existsSync(p)) return null;
-  return extractCanonical(fs.readFileSync(p, "utf8"), "inner");
+  return extractCanonical(fs.readFileSync(p, "utf8"), layer);
 }
 
 // ── CLI ────────────────────────────────────────────────────────────────────────────────────────────────

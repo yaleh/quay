@@ -67,7 +67,7 @@ export const LAYERS: Record<string, LayerConfig> = {
     canonicalRel: "plugin/loop/fast-mode-loop-tick.md",
     requiredPointers: [
       "orchestration/fast-mode-tick-core.md",
-      "plugin/loop/fast-mode-loop-tick.md",
+      "docs/analysis/fast-mode-loop-tick.md",
       "inner-tick-log.jsonl",
       "orchestration/manager-phase-goal.md",
     ],

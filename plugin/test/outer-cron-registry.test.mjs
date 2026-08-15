@@ -10,7 +10,7 @@
 //   (a) pure logic — sha256Hex / parseCronList / cronListExactlyOne / remainingLifetimeMs /
 //       loadRegistry / checkVerify (四判据 + 判据5)。
 //   (b) REAL-DATA tests（硬规则 4 推论三 —— 判据4 必须比对真实 prompt，不只 fixture 形）：
-//       实际内层 prompt（job 025f4132 的指针 prompt，815B）与 实际外层 prompt
+//       实际内层 prompt（job ff96ad7e 的指针 prompt，815B）与 实际外层 prompt
 //       （job 4e88cb1b 的正本 orchestration/outer-tick-prompt.txt，166B）同时作 正本 与注册表 sha256
 //       的对照物，断言四判据全真（exit 0）且剩余寿命 ≈7 天（判据5 不触发）。
 //   (c) NEGATIVE CONTROLS（四判据能取假）：
@@ -20,7 +20,10 @@
 //       (d) 剩余寿命 < 24h ⇒ 报 CRITICAL 且 exit 1（判据5 触发）。
 //   (d) NOT-EVALUATED（硬规则 3b：无法评估 ≠ 通过）：
 //       (1) 未提供 --cron-list ⇒ exit 2；
-//       (2) 内层正本缺失（默认路径无 AC80 段）⇒ exit 2（①-③ 全真但 ④ 无法评估）。
+//       (2) 内层正本缺失（--root 指向无 AC80 段的目录）⇒ exit 2（①-③ 全真但 ④ 无法评估）。
+//   (e) worktree 上下文默认路径正本查找（round172 回归）：AC80-INNER-ANCHOR 段在默认
+//       plugin/loop/fast-mode-loop-tick.md ⇒ ④ evaluated（非 NOT-EVALUATED）——round172 的旧测试
+//       误期「本 worktree 无 AC80 段」（2eedf16c 已落地该段），把「段存在且被评估」读成「正本缺失」而失败。
 //
 // Run:
 //   scripts/test.sh plugin/test/outer-cron-registry.test.mjs
@@ -55,10 +58,10 @@ const CHECKER = path.join(REPO_ROOT, "plugin", "scripts", "outer-cron-registry.t
 
 // ── 真实数据（判据4 的 canonical 输入）──────────────────────────────────────────────────────────────
 
-// 内层 CronCreate（job 025f4132）prompt 原文 —— AC80 任务体给定的权威字符串（与
+// 内层 CronCreate（job ff96ad7e）prompt 原文 —— AC80 任务体给定的权威字符串（与
 // outer-anchor-check.test.mjs 的 INNER_PROMPT 逐字一致）。**字面原样，勿改字符。**
 const INNER_PROMPT =
-  "[inner-tick] 执行内层 tick。不要依赖上下文记忆——本 prompt 只是指针，内容现读：(1) 读 orchestration/fast-mode-tick-core.md 拿本轮步骤（执行核；理由/实测/代价在 plugin/loop/fast-mode-loop-tick.md，仅需「为什么」时按 src:N 查，不要每轮全读）；(2) `tail -10 .quay/inner-tick-log.jsonl` 拿上一轮状态（只 tail，全读不可行）；(3) 读 orchestration/manager-phase-goal.md 拿当前阶段目标与 AC（当前阶段在文件后段，按节标题定位，勿全读）。执行完必须向 .quay/inner-tick-log.jsonl 追加一行。唤醒锚核实（AC81）：每轮先核实——CronList 恰一条 + 其 id 等于注册表记录 + --verify 报 registry-verified；三条全真则不动，任一为假才清扫重建，绝不靠记住的 ID。";
+  "[inner-tick] 执行内层 tick。不要依赖上下文记忆——本 prompt 只是指针，内容现读：(1) 读 orchestration/fast-mode-tick-core.md 拿本轮步骤（执行核；理由/实测/代价在 $REPO_ROOT/docs/analysis/fast-mode-loop-tick.md，仅需「为什么」时按 src:N 查，不要每轮全读）；(2) `tail -10 .quay/inner-tick-log.jsonl` 拿上一轮状态（只 tail，全读不可行）；(3) 读 orchestration/manager-phase-goal.md 拿当前阶段目标与 AC（当前阶段在文件后段，按节标题定位，勿全读）。执行完必须向 .quay/inner-tick-log.jsonl 追加一行。唤醒锚核实（AC81）：每轮先核实——CronList 恰一条 + 其 id 等于注册表记录 + --verify 报 registry-verified；三条全真则不动，任一为假才清扫重建，绝不靠记住的 ID。";
 
 // 外层 CronCreate（job 4e88cb1b）prompt 原文 —— orchestration/outer-tick-prompt.txt 内容去尾部换行
 // （develop commit 72b99cda）。**字面原样，勿改字符。**
@@ -104,9 +107,9 @@ function runReg(args) {
 
 // ── 纯函数 ───────────────────────────────────────────────────────────────────────────────────────────
 
-test("sha256Hex: real inner prompt hashes to the registry value (9a044b…)", () => {
+test("sha256Hex: real inner prompt hashes to the registry value (336ab9…)", () => {
   const h = sha256Hex(INNER_PROMPT);
-  assert.equal(h, "9a044b019e52054834e6b9a3b67cc471467d981670d73ecd28b9d851dfd6bab5");
+  assert.equal(h, "336ab98718d1234bde8cd3dcae64230b8f204cfcd9ab5592ad080c3ec3715b61");
 });
 
 test("sha256Hex: real outer prompt hashes to the registry value (d520ef…)", () => {
@@ -115,9 +118,9 @@ test("sha256Hex: real outer prompt hashes to the registry value (d520ef…)", ()
 });
 
 test("parseCronList: array / single-object / id-alias tolerance", () => {
-  assert.deepEqual(parseCronList('[{"id":"025f4132"}]'), [{ id: "025f4132" }]);
-  assert.deepEqual(parseCronList('{"id":"025f4132"}'), [{ id: "025f4132" }]);
-  assert.deepEqual(parseCronList('[{"name":"025f4132"}]'), [{ id: "025f4132" }]);
+  assert.deepEqual(parseCronList('[{"id":"ff96ad7e"}]'), [{ id: "ff96ad7e" }]);
+  assert.deepEqual(parseCronList('{"id":"ff96ad7e"}'), [{ id: "ff96ad7e" }]);
+  assert.deepEqual(parseCronList('[{"name":"ff96ad7e"}]'), [{ id: "ff96ad7e" }]);
   assert.deepEqual(parseCronList('[{"cronId":"4e88cb1b"}]'), [{ id: "4e88cb1b" }]);
   assert.deepEqual(parseCronList("[]"), []);
   assert.equal(parseCronList("not-json"), null);
@@ -144,7 +147,7 @@ test("remainingLifetimeMs: 7-day window from createdAt; unparseable → null", (
 test("loadRegistry: real git-tracked registry file parses with both layers", () => {
   const reg = loadRegistry(REPO_ROOT);
   assert.ok(reg);
-  assert.equal(reg.layers.inner.cronId, "025f4132");
+  assert.equal(reg.layers.inner.cronId, "ff96ad7e");
   assert.equal(reg.layers.inner.cronExpr, "7,27,47 * * * *");
   assert.equal(reg.layers.outer.cronId, "4e88cb1b");
   assert.equal(reg.layers.outer.cronExpr, "0,20,40 * * * *");
@@ -161,7 +164,7 @@ test("REAL inner anchor: 四判据全真 + 剩余寿命≈7天 ⇒ PASS (exit 0)
     writeInnerSection(p, INNER_PROMPT);
     const r = runReg([
       "--verify", "--layer", "inner",
-      "--cron-list", JSON.stringify([{ id: "025f4132", schedule: "7,27,47 * * * *" }]),
+      "--cron-list", JSON.stringify([{ id: "ff96ad7e", schedule: "7,27,47 * * * *" }]),
       "--canonical-file", p,
       "--registry-file", REGISTRY_FILE,
     ]);
@@ -172,7 +175,7 @@ test("REAL inner anchor: 四判据全真 + 剩余寿命≈7天 ⇒ PASS (exit 0)
     const res = checkVerify({
       layer: "inner",
       registry: reg,
-      cronListRaw: JSON.stringify([{ id: "025f4132" }]),
+      cronListRaw: JSON.stringify([{ id: "ff96ad7e" }]),
       canonicalPrompt: INNER_PROMPT,
       nowMs: Date.parse("2026-08-14T16:00:00Z"),
     });
@@ -226,7 +229,7 @@ test("(b) 判据④ 能取假: 正本一字符漂移 ⇒ 注册表 sha256 ≠ �
     writeInnerSection(p, drifted);
     const r = runReg([
       "--verify", "--layer", "inner",
-      "--cron-list", JSON.stringify([{ id: "025f4132" }]),
+      "--cron-list", JSON.stringify([{ id: "ff96ad7e" }]),
       "--canonical-file", p,
       "--registry-file", REGISTRY_FILE,
     ]);
@@ -260,7 +263,7 @@ test("(c) 判据① 能取假: CronList 2 条 ⇒ VIOLATED (exit 1)", () => {
     writeInnerSection(p, INNER_PROMPT);
     const r = runReg([
       "--verify", "--layer", "inner",
-      "--cron-list", JSON.stringify([{ id: "025f4132" }, { id: "AAAA" }]),
+      "--cron-list", JSON.stringify([{ id: "ff96ad7e" }, { id: "AAAA" }]),
       "--canonical-file", p,
       "--registry-file", REGISTRY_FILE,
     ]);
@@ -281,7 +284,7 @@ test("(d) 判据5 能取假: 剩余寿命 < 24h ⇒ CRITICAL 且 VIOLATED (exit 
     writeInnerSection(p, INNER_PROMPT);
     const r = runReg([
       "--verify", "--layer", "inner",
-      "--cron-list", JSON.stringify([{ id: "025f4132" }]),
+      "--cron-list", JSON.stringify([{ id: "ff96ad7e" }]),
       "--canonical-file", p,
       "--registry-file", regTmp.p,
     ]);
@@ -302,7 +305,7 @@ test("判据③ 能取假: verifiedAt 过期（>stale）⇒ registry-not-verifie
     writeInnerSection(p, INNER_PROMPT);
     const r = runReg([
       "--verify", "--layer", "inner",
-      "--cron-list", JSON.stringify([{ id: "025f4132" }]),
+      "--cron-list", JSON.stringify([{ id: "ff96ad7e" }]),
       "--canonical-file", p,
       "--registry-file", regTmp.p,
     ]);
@@ -320,7 +323,7 @@ test("cron-expr-mismatch: CronList schedule ≠ 注册表 cronExpr ⇒ VIOLATED 
     writeInnerSection(p, INNER_PROMPT);
     const r = runReg([
       "--verify", "--layer", "inner",
-      "--cron-list", JSON.stringify([{ id: "025f4132", schedule: "*/20 * * * *" }]),
+      "--cron-list", JSON.stringify([{ id: "ff96ad7e", schedule: "*/20 * * * *" }]),
       "--canonical-file", p,
       "--registry-file", REGISTRY_FILE,
     ]);
@@ -350,16 +353,38 @@ test("NOT-EVALUATED: 未提供 --cron-list ⇒ exit 2，非通过", () => {
   }
 });
 
-test("NOT-EVALUATED: 内层正本缺失（无 canonical，本 worktree 无 AC80 段）⇒ exit 2（①-③ 真但 ④ 无法评估）", () => {
-  // 默认路径：plugin/loop/fast-mode-loop-tick.md 无 AC80-INNER-ANCHOR 段 ⇒ 正本缺失。
+test("worktree 上下文默认路径正本查找（round172 回归）：AC80 段在默认 plugin/loop/fast-mode-loop-tick.md ⇒ ④ evaluated（非 NOT-EVALUATED）", () => {
+  // 默认路径（无 --canonical-file，root=cwd=本 worktree/主检出）：2eedf16c 已落地
+  // plugin/loop/fast-mode-loop-tick.md 的 AC80-INNER-ANCHOR 段 ⇒ 正本可解析，判据④ 被评估
+  // （重建/更新注册表前 sha256 或 mismatch → exit 1，更新后 → exit 0；两者都不是 NOT-EVALUATED exit 2）。
+  // round172 的旧测试误期「本 worktree 无 AC80 段 ⇒ exit 2」，把「段存在且被评估」读成「正本缺失」。
   const r = runReg([
     "--verify", "--layer", "inner",
-    "--cron-list", JSON.stringify([{ id: "025f4132" }]),
+    "--cron-list", JSON.stringify([{ id: "ff96ad7e" }]),
     "--registry-file", REGISTRY_FILE,
   ]);
-  assert.equal(r.status, EXIT_NOT_EVALUATED, `stdout: ${r.stdout}`);
-  assert.match(r.stdout, /NOT-EVALUATED/);
-  assert.match(r.stdout, /正本缺失/);
+  assert.notEqual(r.status, EXIT_NOT_EVALUATED, `stdout: ${r.stdout}`);
+  assert.match(r.stdout, /判据 anchorMatches/, `stdout: ${r.stdout}`);
+  assert.doesNotMatch(r.stdout, /正本缺失/, `stdout: ${r.stdout}`);
+});
+
+test("NOT-EVALUATED: 内层正本缺失（--root 指向无 AC80 段的目录）⇒ exit 2（①-③ 真但 ④ 无法评估）", () => {
+  // 硬规则 3b 独立取值：正本真正缺失时不得伪装成通过。--root 指向空 tmpdir ⇒
+  // <root>/plugin/loop/fast-mode-loop-tick.md 不存在 ⇒ 正本缺失 ⇒ ①-③ 全真但 ④ 无法评估。
+  const { dir } = tmpFile("md");
+  try {
+    const r = runReg([
+      "--verify", "--layer", "inner",
+      "--cron-list", JSON.stringify([{ id: "ff96ad7e" }]),
+      "--registry-file", REGISTRY_FILE,
+      "--root", dir,
+    ]);
+    assert.equal(r.status, EXIT_NOT_EVALUATED, `stdout: ${r.stdout}`);
+    assert.match(r.stdout, /NOT-EVALUATED/);
+    assert.match(r.stdout, /正本缺失/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("NOT-EVALUATED: 注册表缺失/层缺失 ⇒ exit 2", () => {
@@ -369,7 +394,7 @@ test("NOT-EVALUATED: 注册表缺失/层缺失 ⇒ exit 2", () => {
     writeInnerSection(p, INNER_PROMPT);
     const r = runReg([
       "--verify", "--layer", "inner",
-      "--cron-list", JSON.stringify([{ id: "025f4132" }]),
+      "--cron-list", JSON.stringify([{ id: "ff96ad7e" }]),
       "--canonical-file", p,
       "--registry-file", regTmp.p,
     ]);
@@ -385,11 +410,11 @@ test("NOT-EVALUATED: 注册表缺失/层缺失 ⇒ exit 2", () => {
 
 test("checkVerify: 四判据全真 + 剩余正常 ⇒ ok:true (exit 0)", () => {
   const reg = loadRegistry(REPO_ROOT);
-  const nowMs = Date.parse("2026-08-14T16:00:00Z");
+  const nowMs = Date.parse("2026-08-15T02:00:00Z");
   const res = checkVerify({
     layer: "inner",
     registry: reg,
-    cronListRaw: JSON.stringify([{ id: "025f4132" }]),
+    cronListRaw: JSON.stringify([{ id: "ff96ad7e" }]),
     canonicalPrompt: INNER_PROMPT,
     nowMs,
   });
