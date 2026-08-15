@@ -22,7 +22,7 @@ phase('Plan')
 const plan = await agent(
   `Run the deterministic mechanical planner (no LLM judgment — it is pure arithmetic):
 
-1. Run: \`node --no-warnings --experimental-strip-types plugin/scripts/pool-quality-judge.ts --root ${root} --plan\`
+1. Run: \`/home/yale/.nvm/versions/node/v25.2.0/bin/node --no-warnings --experimental-strip-types plugin/scripts/pool-quality-judge.ts --root ${root} --plan\`
 2. Parse its JSON output. It contains:
    - \`triggers\`: { poolCount, oldestUnreviewedAgeMs, roundsSinceLastJudge, fired, reasons }
    - \`pool\`: the list of pool task ids (status:ready minus not-yet-flipped/fixture/parked)
