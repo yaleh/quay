@@ -1,7 +1,7 @@
 ---
 id: gap-spec-reference-doc-declare-init-skill
 title: capability-catalog referenced-not-landed 红——manager/SKILL.md 引 SPEC-tick-mechanical-checks-mcp 未在 init/SKILL.md 声明 reference-doc（7e64a86b 先例同操作）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
