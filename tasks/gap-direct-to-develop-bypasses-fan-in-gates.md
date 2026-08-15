@@ -1,7 +1,7 @@
 ---
 id: gap-direct-to-develop-bypasses-fan-in-gates
 title: 直接提交 develop 绕过全部 fan-in 机件（ff-lock/anti-drift/AC 完成闸）且不进任何差集——AC78 判据2 结构上看不见（发生率 25-30，硬规则12b）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
