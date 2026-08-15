@@ -717,7 +717,7 @@ tick-log 与 commit message 沿用同一词汇：派发写「滚动派发」，�
      ```
      退出非 0（not-yet-flipped 超阈值 **或** closure-pass 超时未跑）⇒ 本 tick **报 WARN/事件**，不静默；
      退出 0 ⇒ 静默。信号是**报告不是门控**——不阻塞派发、不阻塞 tick。
-3. **全量 suite = 外层后台异步验证 gate（非 inner 同步点、非本 tick 阻塞点）**：
+3. **全量 suite = 外层后台异步验证 gate（非 inner 同步点、非本 tick 阻塞点）**【AC84 2026-08-15 退役：outer 不跑 suite，正文保留作理由档案，执行核已迁出 → `orchestration/archive/AC58-retired-clauses.md#R32`】：
    - **后台跑**：全量 suite 由本层起 `plugin/scripts/full-suite-runner.ts`（后台 subagent /
      `run_in_background:true`，不阻塞本 tick、不堵 inner），runner 写 `.quay/full-suite-state.json`
      （`{state: running|green|red, reason?, runner: outer|inner, startedAt, finishedAt, durationMs,
@@ -883,7 +883,7 @@ cron）。**触发链自检**：
 `node --no-warnings --experimental-strip-types plugin/scripts/full-suite-runner.ts --fail-fast-check`
 （构造失败 suite ⇒ state=red ⇒ SUITE-RED 事件 ⇒ stopSignal 在位 + failureLocation 携带，退出 0 = 链完好）。
 
-**红窗分诊（外层独占，AC4——只停派发不停在飞合并会让红树继续累积，故 RED 失败时 fan-in 一律暂缓）**：
+**红窗分诊（外层独占，AC4——只停派发不停在飞合并会让红树继续累积，故 RED 失败时 fan-in 一律暂缓）**【AC84 2026-08-15 退役：outer 不跑 suite、输入消失，正文保留作理由档案，执行核已迁出 → `orchestration/archive/AC58-retired-clauses.md#R33`】：
 `.quay/full-suite-state.json` 的 `state: red` + `reason: failed`（或缺失）即 **stop-dispatch 信号在位**。
 **派发停/续按失败位置条件化**（与 `fast-mode-loop-tick.md` 步骤 3 同一份规则，不是两份）：
 - 失败落在**共享闸门（`run_static_checks`——每次 scoped 运行都跑的静态检查）** ⇒ **停新派发**；
