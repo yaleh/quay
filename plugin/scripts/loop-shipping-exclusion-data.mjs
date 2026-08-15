@@ -249,6 +249,11 @@ export function exclusionEntries(repoRoot, pluginDir) {
         '若 archive 被删除（历史归档退役），本条目一并删。',
     },
     {
+      rel: 'orchestration/archive/AC58-retired-clauses.md',
+      target: path.join(repoRoot, 'orchestration', 'archive', 'AC58-retired-clauses.md'),
+      reason: "read-only historical archive of retired orchestration clauses — its old-path references to orchestration/orchestrator-loop-tick.md (lines 492/514: the retired B3/B4 batch-merge + D-boundary clause 来源记录) document the retired clauses' source verbatim; archives are historical records, never live callers (same class as manager-phase-goal-archive.md)",
+    },
+    {
       rel: 'plugin/scripts/instrument-failure-check.ts',
       target: path.join(pluginDir, 'scripts', 'instrument-failure-check.ts'),
       reason: "the instrument's ## Contract scan surface (DEFAULT_SURFACE) intentionally includes the deployed tick-doc copies (orchestration/ + docs/analysis/) alongside the canonical plugin/loop/ copies — it scans the layout consumers actually receive, not a stale source-copy reference",

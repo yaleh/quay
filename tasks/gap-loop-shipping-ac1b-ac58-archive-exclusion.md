@@ -40,13 +40,43 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1 判据1：AC1b 对 AC58-retired-clauses.md 旧路径引用不再报红（隔离 + 全量）。
-- [ ] AC2 判据2 能取假：AC1b 绿；真活引用（活跃文件引用已移动路径）仍红。
-- [ ] AC3 判据3：既有测试全绿；`--for-task` scoped 门绿。
+- [x] AC1 判据1：AC1b 对 AC58-retired-clauses.md 旧路径引用不再报红（隔离 + 全量）。
+- [x] AC2 判据2 能取假：AC1b 绿；真活引用（活跃文件引用已移动路径）仍红。
+- [x] AC3 判据3：既有测试全绿；`--for-task` scoped 门绿。
 
 ## Definition of Done
 
-- [ ] AC58-retired-clauses.md 入排除表（历史档案）+ AC1b 绿 + 真活引用仍红 + 测试绿——parser fan-in 解除阻断。
+- [x] AC58-retired-clauses.md 入排除表（历史档案）+ AC1b 绿 + 真活引用仍红 + 测试绿——parser fan-in 解除阻断。
+
+## Evidence
+
+**修前（develop a058deaa，主检出）** — `node --test plugin/test/loop-shipping.test.mjs`：
+```
+✖ AC1b — after the move, no live reference to the 5 old paths remains (comments/history excluded)
+  AssertionError [ERR_ASSERTION]: no live reference to the moved files' old paths may remain ...
+  + actual - expected
+  + [
+  +   'orchestration/archive/AC58-retired-clauses.md: contains "/orchestration\\/orchestrator-loop-tick\\.md/"'
+  + ]
+  - []
+ℹ tests 15  ℹ pass 14  ℹ fail 1
+```
+（AC58-retired-clauses.md 实际含 2 处 `orchestration/orchestrator-loop-tick.md`，lines 492/514——退役条款的「来源」记录，历史档案非活引用；AC1b 扫描每文件每 pattern 报 1 hit。）
+
+**修法**：`plugin/scripts/loop-shipping-exclusion-data.mjs` 加排除条目 `orchestration/archive/AC58-retired-clauses.md`（同 `manager-phase-goal-archive.md` 先例：只读历史档案，旧路径引用是退役记录非活引用）。⛔ 未改 AC1b 扫描本身。
+
+**修后（worktree task/ 分支）** — `node --test plugin/test/loop-shipping.test.mjs`：
+```
+✔ AC1b — after the move, no live reference to the 5 old paths remains (comments/history excluded)
+ℹ tests 15  ℹ pass 15  ℹ fail 0
+```
+`node --test plugin/test/loop-shipping-necessity-check.test.mjs`：pass 3 / fail 0（新条目非惰性——抑制 2 处命中，无需 retainedNote）。
+
+**判据2 能取假（真样本）** — 在主仓库（worktree 根）写探针 `.loop-shipping-falsify-probe.md`（含活引用 `orchestration/orchestrator-loop-tick.md`），AC1b 立即变红：`✖ AC1b ...  ℹ pass 14  ℹ fail 1`，删探针后恢复全绿。⇒ 扫描保留解析力，排除仅覆盖该档案文件，真活引用仍被捕获（loop-shipping.test.mjs 自带 AC3 负控制同证）。
+
+**scoped 门** — `scripts/test.sh --for-task gap-loop-shipping-ac1b-ac58-archive-exclusion --allow-thin`：EXIT=0。全部静态检查绿：test-framework-policy PASS、test-isolation PASS（26 已基线化无新增）、tmp-leak-pairing PASS、test-impl-census clean 404、task-contract-check no violations、delivery-inventory drift gate PASS；并跑全 loop-shipping 15 用例全绿。
+
+> 注：worktree 首次无 `node_modules`（gitignored 不随 checkout），按既有约定 `ln -s /home/yale/work/quay/node_modules node_modules` 后 scoped 门绿。
 
 ## Touches
 
