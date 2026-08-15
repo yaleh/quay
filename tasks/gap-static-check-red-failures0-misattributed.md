@@ -40,23 +40,32 @@ round182 红 failures[0]=gap-ac37 dispatch-review（eb7b04f5 消 contract-line �
 
 ## Acceptance Criteria
 
-- [ ] AC1 `reason=static-check` 时 failures[0] 来自真 exit≠0 的 checker（非流里第一条 VIOLATION 样式行）——manager 判据。
-- [ ] AC2 能取假·真样本：round181/182 回放——failures[0] 必须 = direct-to-develop-bypass-check（真 gate），非 contract-line VIOLATION。
-- [ ] AC3 既有测试全绿；`--for-task` scoped 门绿。
+- [x] AC1 `reason=static-check` 时 failures[0] 来自真 exit≠0 的 checker（非流里第一条 VIOLATION 样式行）——manager 判据。
+- [x] AC2 能取假·真样本：round181/182 回放——failures[0] 必须 = direct-to-develop-bypass-check（真 gate），非 contract-line VIOLATION。
+- [x] AC3 既有测试全绿；`--for-task` scoped 门绿。
 
 ## Definition of Done
 
-- [ ] failures[0] 在 static-check 红时指向真 gate（exit≠0 的 checker），诊断者不再被误导去修非阻断检查器的 VIOLATION。
+- [x] failures[0] 在 static-check 红时指向真 gate（exit≠0 的 checker），诊断者不再被误导去修非阻断检查器的 VIOLATION。
 
 ## Touches
 
 - plugin/scripts/full-suite-runner.ts（failures[] 排序/构建——inner 实现面）
-- plugin/test/（对应测试：真 gate 排在 failures[0]）
+- plugin/test/full-suite-runner.test.mjs（对应测试：真 gate 排在 failures[0]；round181/182 回放 fixture）
 - tasks/gap-static-check-red-failures0-misattributed.md（自身）
 
 ## Evidence
 
-（待落地后填：round181/182 回放 failures[0]=真 gate、测试绿、scoped 门绿）
+**实现（`plugin/scripts/full-suite-runner.ts` `buildStaticCheckFailures`）**：fail-closed checkers（真 gate，exit≠0）排到 VIOLATION 行之前——`failures[0]` = 真 gate 的 identity。两处调用点（early-red 写 `:3096` 与 terminal 写 `:3322`）共用同一函数，一致生效。`classifyFailure` 按 `staticCheck` marker 路由（顺序无关），下游无依赖旧 VIOLATION-first 排序的消费者。
+
+**AC2 能取假·真样本（round181/182 回放 fixture，`full-suite-runner.test.mjs`）**：fake suite 先打 `VIOLATION: tasks/gap-ac37.md — contract-line: …`（task-contract --no-block exit 0，非阻断），再打 `STATIC_CHECK_FAILED: direct-to-develop-bypass-check exit=1`（真 gate）。实测 `failures[0].line === "STATIC_CHECK_FAILED: direct-to-develop-bypass-check exit=1"`，且 round record 的 failures[0] 同样为真 gate（非 contract-line VIOLATION）。
+
+**测试**：
+- `node --test plugin/test/full-suite-runner.test.mjs` → 147 pass / 0 fail（含新 unit + round181/182 回放）。
+- `node --test plugin/test/direct-to-develop-bypass-check.test.mjs` → 14 pass / 0 fail（真 gate checker 不受影响）。
+- `bash scripts/test.sh --for-task gap-static-check-red-failures0-misattributed` → **exit 0**；scoped static checks 全 PASS（test-framework-policy / test-isolation / tmp-leak-pairing / test-impl-census / task-contract --no-block / malformed-task / superseded-capability / concurrency-literal / landing-target / delivery-inventory-drift）；selector 解析 Touches 只选中 `plugin/test/full-suite-runner.test.mjs`；build_dist_once 正常完成（未触发 worktree 约束）。
+
+**主 checkout 实况佐证**（2026-08-15 05:15Z static-check 红轮，修前形态）：`failures[0]` 是 `VIOLATION: tasks/gap-ac37-exec-core-ships-with-package.md — dispatch-review-missing`（非阻断），而真 gate `STATIC_CHECK_FAILED: fan-in-workflow-check exit=1` 排在最末——正是本任务修的形状；修后该形态下 failures[0] 会指向 `fan-in-workflow-check`。
 
 ## 止损
 

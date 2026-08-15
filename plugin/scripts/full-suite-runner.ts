@@ -624,14 +624,23 @@ export function extractFailClosedChecker(line: string): FailClosedChecker | null
  * lines appeared — are SEPARATE in the record (AC2): the machine-readable separation lives in
  * staticCheck.failedCheckers (fail-closed) vs staticCheck.details (violation lines); failures[] carries
  * both for the shared-gate dispatch decision.
+ *
+ * ORDERING (gap-static-check-red-failures0-misattributed, round181/182): the FAIL-CLOSED checkers (the
+ * real gate — each exited ≠0) MUST come BEFORE the VIOLATION detail lines. A static-check red usually
+ * pairs a NON-blocking checker (e.g. task-contract-check --no-block, exit 0 — prints VIOLATION lines but
+ * does NOT gate the round) with the true gate (e.g. direct-to-develop-bypass-check, exit 1). With the
+ * VIOLATION lines first, `failures[0]` pointed at the non-blocking checker's line and every diagnostician
+ * (manager/outer/inner) triaged the wrong thing (round181/182 both misled on gap-ac37). Putting the
+ * fail-closed checkers first makes `failures[0]` the real gate's identity — the checker that actually
+ * exited non-zero — so red-window triage reads the blocking cause first.
  */
 export function buildStaticCheckFailures(
   details: StaticCheckViolation[],
   failClosed: FailClosedChecker[],
 ): SuiteFailure[] {
   return [
-    ...details.map((d) => ({ line: d.line, file: d.file, staticCheck: true })),
     ...failClosed.map((c) => ({ line: c.line, staticCheck: true })),
+    ...details.map((d) => ({ line: d.line, file: d.file, staticCheck: true })),
   ];
 }
 

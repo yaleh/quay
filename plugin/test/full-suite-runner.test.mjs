@@ -2112,15 +2112,65 @@ test("AC2 unit — extractFailClosedChecker parses checker-cost-lib's fail-close
   assert.equal(extractFailClosedChecker("STATIC_CHECK_FAILED: no-exit-code"), null, "missing exit=<rc> is not a parseable fail-closed checker");
 });
 
-test("AC1/AC2 — buildStaticCheckFailures carries BOTH the VIOLATION details AND the fail-closed checkers, all staticCheck:true", () => {
+test("AC1/AC2 — buildStaticCheckFailures carries BOTH the VIOLATION details AND the fail-closed checkers, all staticCheck:true; the fail-closed checker (real gate, exit≠0) sorts FIRST so failures[0] is the gate's identity (gap-static-check-red-failures0-misattributed, round181/182)", () => {
   const suite = buildStaticCheckFailures(
     [{ file: "tasks/gap-foo.md", code: "V1", what: "x", line: "VIOLATION: tasks/gap-foo.md — V1: x" }],
     [{ name: "threshold-scope-check", exitCode: 1, line: "STATIC_CHECK_FAILED: threshold-scope-check exit=1" }],
   );
   assert.equal(suite.length, 2, "both the violation detail and the fail-closed checker are recorded");
-  assert.equal(suite[0].file, "tasks/gap-foo.md", "the VIOLATION entry carries the violated file");
-  assert.equal(suite[1].line.includes("threshold-scope-check"), true, "the fail-closed entry carries the checker name");
+  // gap-static-check-red-failures0-misattributed — the REAL GATE (exit≠0) must be failures[0], NOT
+  // the first VIOLATION line from a non-blocking checker (round181/182 both misled diagnosticians).
+  assert.equal(suite[0].line.includes("threshold-scope-check"), true, "the fail-closed checker (real gate) sorts first → failures[0] is the gate's identity");
+  assert.equal(suite[0].staticCheck, true, "failures[0] (the real gate) is marked staticCheck:true");
+  assert.equal(suite[1].file, "tasks/gap-foo.md", "the VIOLATION entry still carries the violated file, after the real gate");
   assert.ok(suite.every((f) => f.staticCheck === true), "every static-check entry is marked staticCheck:true (shared-gate routing)");
+});
+
+test("AC2 能取假·真样本 — round181/182 replay: reason=static-check with a --no-block task-contract VIOLATION line BEFORE the real gate's STATIC_CHECK_FAILED line ⇒ failures[0] = the real gate (direct-to-develop-bypass-check), NOT the contract-line VIOLATION", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-r181-"));
+  // The round181/182 shape (gap-static-check-red-failures0-misattributed): task-contract-check runs
+  // with --no-block (exit 0 — prints VIOLATION/summary lines, does NOT gate the round) while
+  // direct-to-develop-bypass-check is the REAL gate (exit 1, emits checker-cost-lib's
+  // STATIC_CHECK_FAILED: <name> exit=<rc> machine line on stderr). The VIOLATION lines appear FIRST
+  // in the stream — before the fail-closed line — so the old ordering made failures[0] the
+  // non-blocking contract-line and the real gate drowned in failures[] (round181/182 both misled).
+  const { f, dir } = fakeSuite(
+    'echo "VIOLATION: tasks/gap-ac37.md — contract-line: Contract block missing invariant line"\n' +
+      'echo "violations: 11 unique across 9 task(s)"\n' +
+      'echo "recorded (non-blocking, grow-only ledger): 1 new task-file violation(s)"\n' +
+      'echo "STATIC_CHECK_FAILED: direct-to-develop-bypass-check exit=1" >&2\n' +
+      'echo "checker-cost-lib: run_checker_parallel_wait — static checks FAILED (fail-closed): direct-to-develop-bypass-check(exit=1)" >&2\n' +
+      "exit 1",
+  );
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    assert.equal(code, 1, "runner exits 1 on the round181/182 static-check red");
+    const s = readState(root);
+    assert.equal(s.state, "red");
+    assert.equal(s.reason, "static-check", "reason=static-check (the pre-test static-check gate aborted the round)");
+    assert.ok(Array.isArray(s.failures) && s.failures.length >= 2, `failures[] carries both the real gate and the violation: ${JSON.stringify(s.failures)}`);
+    // AC1/AC2 — failures[0] MUST be the checker that actually exited ≠0 (the real gate), NOT the
+    // first VIOLATION-style line from the non-blocking checker. This is the manager's criterion:
+    // a diagnostician reading failures[0] must be sent at the real cause first.
+    assert.equal(s.failures[0].line, "STATIC_CHECK_FAILED: direct-to-develop-bypass-check exit=1", "failures[0] = the real gate's identity (direct-to-develop-bypass-check), not a contract-line VIOLATION");
+    assert.equal(s.failures[0].staticCheck, true, "failures[0] (the real gate) is marked staticCheck:true (shared-gate routing)");
+    assert.equal(s.failures[0].file, undefined, "the real gate entry carries the checker identity in its line, no file (it is a fail-closed checker, not a violated task file)");
+    // The machine-readable separation is intact (AC2 of the capture task): failedCheckers names the
+    // real gate; details carries the VIOLATION lines.
+    assert.equal(s.staticCheck.failedCheckers[0].name, "direct-to-develop-bypass-check", "staticCheck.failedCheckers names the real gate");
+    assert.equal(s.staticCheck.details[0].file, "tasks/gap-ac37.md", "staticCheck.details still carries the contract-line VIOLATION (separate from the gate)");
+    // Consumers route failures[0] (the real gate) to the shared gate — dispatch stops.
+    assert.equal(classifyFailure(s.failures[0]).kind, "shared-gate", "failures[0] (the real gate) classifies shared-gate");
+    assert.equal(shouldStopDispatch(s), true, "static-check red stops dispatch (shared-gate failure)");
+    // The verification-round record carries the SAME ordering — failures[0] is the real gate there too.
+    const round = lastRoundRecord(root);
+    assert.ok(round, "verification-round record present");
+    assert.equal(round.failures[0].line, "STATIC_CHECK_FAILED: direct-to-develop-bypass-check exit=1", "round-record failures[0] = the real gate (round181/182 replay, AC2)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("gap-static-check-red-failures-capture-only-task-contract-shape — a FAIL-CLOSED checker (round-84 真因) is captured in failures[] + staticCheck.failedCheckers, separated from the violation details", async () => {
