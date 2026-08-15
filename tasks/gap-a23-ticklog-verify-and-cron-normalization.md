@@ -54,9 +54,9 @@ depends_on: []
 
 - plugin/scripts/outer-cron-registry.ts（cron 比较归一化 `*/N` → 分钟集合）
 - plugin/test/outer-cron-registry.test.mjs（cron-expr-mismatch 测试对齐：语义等价绿 + 真漂移红）
-- plugin/scripts/outer-tick-log-check.sh（新增 A23 四判据输出检查）
-- plugin/test/outer-tick-log-check.test.mjs（若存在——A23 检查用例；无则补具体测试文件）
-- plugin/scripts/checker-mutation-cases/（对应 mutation case，若该面有）
+- plugin/scripts/outer-tick-log-check.sh（A23 四判据输出检查——既有文件加检查，非新建；`（新增…）` 注解会被 select-static-checks-for-touches 的全角「新」标记识别成新建文件 ⇒ 误触发 registration 检查）
+- plugin/test/outer-tick-log-check.test.mjs（A23 检查用例 + 既有 B13 用例补 A23 行对齐）
+- plugin/scripts/checker-mutation-cases/outer-tick-log-check.sh（mutation case 对齐 + A23 缺失 mutation）
 - tasks/gap-a23-ticklog-verify-and-cron-normalization.md（自身）
 
 ## Evidence

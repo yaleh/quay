@@ -61,10 +61,16 @@ const FIVE_FALSE = "①in_flight<cap且recommended非空→派发到cap [当前�
 function utcHHMM(d) {
   return `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
 }
-function row(verdict, ineq, extra = "", label = `${utcHHMM(new Date())}Z`) {
+// A23 融合防漏（orchestrator-tick-core.md:47）：A23（AC81 四判据核实）是写 B13 行的前置——B13 行
+// 存在则同段必须带 A23 四判据输出行（含 A23 + 状态词），否则 tick-log 行不合法。默认 fixture 在
+// 带 B13 时补一条 A23 输出行；要测「A23 缺失」的测试传 a23="" 显式移除。
+const A23_OUTPUT_LINE = "A23 ① code=0 OK（四判据全真）+ ② code=0 OK";
+function row(verdict, ineq, extra = "", label = `${utcHHMM(new Date())}Z`, a23 = A23_OUTPUT_LINE) {
+  const ineqBlock = ineq ? `- 五条不等式: ${ineq}\n` : "";
+  const a23Block = ineq && a23 ? `- ${a23}\n` : "";
   return `- \`${label}\` \`tick\` — fixture（2026-08-13 锚点按现实改 bullet 形态）
 - 类型: ${verdict}（测试）
-${ineq ? `- 五条不等式: ${ineq}\n` : ""}${extra}- 动作分类: ${verdict}
+${ineqBlock}${a23Block}${extra}- 动作分类: ${verdict}
 `;
 }
 // 历史标签（分钟前）——ageMinutes 回拨 mtime 的测试要配一个同样在过去的 label，否则
@@ -134,6 +140,31 @@ test("AC3 — unblock 行不误报", () => {
   assert.equal(r.status, 0);
 });
 
+// ── A23 融合防漏（gap-a23-ticklog-verify-and-cron-normalization 判据1）────────────────────────────
+// A23（AC81 四判据核实）是写 B13 行的前置：B13 行存在而同段无 A23 四判据输出 ⇒ tick-log 行不合法
+// （manager 01:5xZ 报 A23 连续 5 轮缺席无人可判）。输出行判定 = 含 A23 + 状态词（code=N/VIOLATED/
+// OK/NOT-EVALUATED/CRITICAL），散文讨论 A23 而无产物不计。
+
+test("AC2 — B13 行存在但同段无 A23 四判据输出 ⇒ RED (b13-without-a23-output)", () => {
+  // 合法 all-five-false no-action + B13，但 a23="" 显式移除 A23 输出 ⇒ A23 缺失 ⇒ RED（缺失翻红样本）。
+  const r = runChecker({ log: row("no-action", FIVE_FALSE, "", `${utcHHMM(new Date())}Z`, ""), truth: "00000", root: NO_ROOT });
+  assert.equal(r.status, 1, `expect RED: ${r.stdout}`);
+  assert.match(r.stdout, /b13-without-a23-output/);
+});
+
+test("AC3 — B13 行存在且同段带 A23 四判据输出 ⇒ green（A23 前置满足）", () => {
+  // 控制：B13 带 A23 输出（row 默认补）⇒ 不触发 A23 缺失 ⇒ 其余合法 ⇒ PASS。
+  const r = runChecker({ log: row("no-action", FIVE_FALSE), truth: "00000", root: NO_ROOT });
+  assert.equal(r.status, 0, `expect PASS: ${r.stdout}`);
+  assert.doesNotMatch(r.stdout, /b13-without-a23-output/);
+});
+
+test("AC3 — 无 B13 行 + 无 A23 行 ⇒ green（A23 检查只当 B13 存在时触发）", () => {
+  // 无 B13（correct 行）⇒ A23 检查不触发；行其余合法 ⇒ PASS。
+  const r = runChecker({ log: row("correct", "", "- 做了什么: 已派发 gap-install-config\n"), truth: "00000", root: NO_ROOT });
+  assert.equal(r.status, 0, `expect PASS: ${r.stdout}`);
+});
+
 // ── AC4 新鲜度上界 ───────────────────────────────────────────────────────────────────
 
 test("AC4 — 陈旧行（mtime 超上界）+ 实测真值已变 ⇒ 不误报（只判 L1 自洽）", () => {
@@ -185,7 +216,7 @@ test("时间标签 future：标签晚于 mtime ⇒ RED（exit 1）", () => {
   // 判据，使本测试在凌晨恒失败（2026-08-14 实测，cc611891 同族）。固定 epoch 12:00 全时可复现。
   const noonEpoch = Math.floor(Date.UTC(2026, 7, 13, 12, 0, 0) / 1000);
   const r = runChecker({
-    log: "- `23:59Z` `tick` — future label\n- 动作分类: no-action\n- 五条不等式: ①[当前假] ②[当前假] ③[当前假] ④[当前假] ⑤[当前假]\n",
+    log: "- `23:59Z` `tick` — future label\n- 动作分类: no-action\n- 五条不等式: ①[当前假] ②[当前假] ③[当前假] ④[当前假] ⑤[当前假]\n- A23 ① code=0 OK（四判据全真）+ ② code=0 OK\n",
     truth: "00000",
     root: NO_ROOT,
     logMtime: noonEpoch,
@@ -200,7 +231,7 @@ test("时间标签 非单调：上一段标签晚于本段 ⇒ RED（exit 1）",
   // 2026-08-14 实测）。固定 epoch 使 20:20 ≤ mtime 全时可复现，剩下 monotonic 判据独占。
   const lateEpoch = Math.floor(Date.UTC(2026, 7, 13, 21, 30, 0) / 1000);
   const r = runChecker({
-    log: "- `20:30Z` `tick` — earlier（晚）\n- `20:20Z` `tick` — later（早于上一段）\n- 动作分类: no-action\n- 五条不等式: ①[当前假] ②[当前假] ③[当前假] ④[当前假] ⑤[当前假]\n",
+    log: "- `20:30Z` `tick` — earlier（晚）\n- `20:20Z` `tick` — later（早于上一段）\n- 动作分类: no-action\n- 五条不等式: ①[当前假] ②[当前假] ③[当前假] ④[当前假] ⑤[当前假]\n- A23 ① code=0 OK（四判据全真）+ ② code=0 OK\n",
     truth: "00000",
     root: NO_ROOT,
     logMtime: lateEpoch,

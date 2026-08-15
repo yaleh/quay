@@ -110,6 +110,12 @@ fi
 TICK_TIME="$(printf '%s' "$LAST_SECTION" | grep -m1 -oE '^\- `[0-9]{2}:[0-9]{2}Z?`' | sed 's/^\- `//; s/Z`$//; s/`$//')"
 ACTION="$(printf '%s' "$LAST_SECTION" | grep -m1 -oE '^- 动作分类: *[a-z-]+' | sed 's/^- 动作分类: *//')"
 INEQ_LINE="$(printf '%s' "$LAST_SECTION" | grep -m1 '^- 五条不等式:' || true)"
+# A23 融合防漏（orchestrator-tick-core.md:47）：A23（AC81 四判据核实）是写 B13 行的前置——B13 行
+# 存在而同段无 A23 四判据输出 ⇒ tick-log 行不合法（manager 01:5xZ 报 A23 连续 5 轮缺席无人可判）。
+# A23 输出行判定 = 本段含 `A23` 且带状态词（code=N / VIOLATED / OK / NOT-EVALUATED / CRITICAL）——
+# 区分「真跑了 A23 并留输出」与「散文讨论 A23 而无产物」（硬规则⑨：缺失则判 RED）。旧 inner 的
+# A23 执行模式两数行（`main_thread_edits=…/agent_dispatches=…`）无状态词 ⇒ 不算 AC81 A23 输出。
+A23_LINE="$(printf '%s' "$LAST_SECTION" | grep -m1 -E 'A23.*(code=[0-9]|VIOLATED|NOT-EVALUATED|CRITICAL|\bOK\b)' || true)"
 
 # ── L1 行内自洽（始终跑）──────────────────────────────────────────────────────────────
 # no-action 必须带五条读数且全假。
@@ -328,6 +334,16 @@ if [ -z "$ACTION" ]; then
     echo "outer-tick-log-check: NOT-EVALUATED — 本行无 \`- 动作分类:\` 字段，B13 举证未被检验（step 2 前的预期状态）"
   fi
   exit 0
+fi
+
+# ── A23 融合防漏（orchestrator-tick-core.md:47）────────────────────────────────────────────
+# A23（AC81 四判据核实）是写 B13 行的前置：本段含 `- 五条不等式:`（B13）却无 A23 四判据输出行
+# ⇒ tick-log 行不合法 ⇒ RED（manager 01:5xZ 报 A23 连续 5 轮缺席 00:23-01:43 无人可判——硬规则⑨
+# 「缺失则 tick-log 行不合法」必须可机械判）。输出行判定见 A23_LINE（含 A23 + 状态词）。
+if [ -n "$INEQ_LINE" ] && [ -z "$A23_LINE" ]; then
+  if [ "$JSON" = 1 ]; then printf '{"ok":false,"reason":"b13-without-a23-output","tickTime":"%s","action":"%s","a23Absent":true}\n' "$TICK_TIME" "$ACTION"
+  else echo "outer-tick-log-check: FAIL — B13 行存在但同段无 A23 四判据输出（A23 是 B13 前置，缺失则 tick-log 行不合法）"; fi
+  exit 1
 fi
 
 # PASS

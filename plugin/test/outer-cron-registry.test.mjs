@@ -43,6 +43,8 @@ import {
   remainingLifetimeMs,
   loadRegistry,
   checkVerify,
+  cronMinuteSet,
+  cronExprsEquivalent,
   EXIT_OK,
   EXIT_VIOLATED,
   EXIT_NOT_EVALUATED,
@@ -142,6 +144,29 @@ test("remainingLifetimeMs: 7-day window from createdAt; unparseable → null", (
   // 判据5 能取假：现在（created 当天）剩余 ≈7 天 ⇒ 非 critical；第 6 天（remaining < 24h）⇒ critical。
   assert.equal(SEVEN_DAYS_MS - 1000 > CRITICAL_REMAINING_MS, true);
   assert.equal(remainingLifetimeMs("2026-08-14T15:17:16Z", nowMs) < CRITICAL_REMAINING_MS, false);
+});
+
+test("cronMinuteSet: `*/N` 展开成显式分钟集合；`0,20,40`/`7,27,47`/`*` 解析", () => {
+  assert.deepEqual(cronMinuteSet("*/20 * * * *"), [0, 20, 40]);
+  assert.deepEqual(cronMinuteSet("0,20,40 * * * *"), [0, 20, 40]);
+  assert.deepEqual(cronMinuteSet("7,27,47 * * * *"), [7, 27, 47]);
+  assert.deepEqual(cronMinuteSet("*/30 * * * *"), [0, 30]);
+  assert.deepEqual(cronMinuteSet("* * * * *"), [...Array(60).keys()]);
+  assert.deepEqual(cronMinuteSet("10-15 * * * *"), [10, 11, 12, 13, 14, 15]);
+  assert.deepEqual(cronMinuteSet("5/20 * * * *"), [5, 25, 45]);
+  // 无法归一化 ⇒ null（字段数不足 / 非标准分钟子字段）
+  assert.equal(cronMinuteSet("*/20 * * *"), null);
+  assert.equal(cronMinuteSet("? * * * *"), null);
+});
+
+test("cronExprsEquivalent: 语义等价 `*/20`≡`0,20,40`；真漂移不≡", () => {
+  assert.equal(cronExprsEquivalent("*/20 * * * *", "0,20,40 * * * *"), true);
+  assert.equal(cronExprsEquivalent("0,20,40 * * * *", "*/20 * * * *"), true);
+  assert.equal(cronExprsEquivalent("*/20 * * * *", "*/30 * * * *"), false); // 真漂移（分钟集合不同）
+  assert.equal(cronExprsEquivalent("*/20 * * * *", "7,27,47 * * * *"), false); // 真漂移
+  assert.equal(cronExprsEquivalent("7,27,47 * * * *", "7,27,47 * * * *"), true); // 字符串等短路
+  assert.equal(cronExprsEquivalent("*/20 0 * * *", "0,20,40 * * * *"), false); // 非分钟字段漂移
+  assert.equal(cronExprsEquivalent("*/20 * * *", "0,20,40 * * * *"), false); // 字段数不符且字符串不等
 });
 
 test("loadRegistry: real git-tracked registry file parses with both layers", () => {
@@ -317,7 +342,8 @@ test("判据③ 能取假: verifiedAt 过期（>stale）⇒ registry-not-verifie
   }
 });
 
-test("cron-expr-mismatch: CronList schedule ≠ 注册表 cronExpr ⇒ VIOLATED (exit 1)", () => {
+test("cron-expr-mismatch: 真漂移（`*/20`={0,20,40} vs 注册表 inner `7,27,47`）⇒ 仍 VIOLATED (exit 1)", () => {
+  // 回归钉（gap-a23-ticklog-verify-and-cron-normalization 判据1）：真漂移（不同分钟集合）必须仍红。
   const { dir, p } = tmpFile("md");
   try {
     writeInnerSection(p, INNER_PROMPT);
@@ -329,6 +355,26 @@ test("cron-expr-mismatch: CronList schedule ≠ 注册表 cronExpr ⇒ VIOLATED 
     ]);
     assert.equal(r.status, EXIT_VIOLATED, `stdout: ${r.stdout}`);
     assert.match(r.stdout, /cron-expr-mismatch/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("cron-expr-mismatch: 语义等价 `*/20` ≡ 注册表 outer `0,20,40` ⇒ 不再 VIOLATED (PASS, 无 cron-expr-mismatch)", () => {
+  // 恒红翻绿样本（gap-a23-ticklog-verify-and-cron-normalization 判据3）：`*/20` 与 `0,20,40`
+  // 都第 0/20/40 分钟——归一化后等价 ⇒ cron-expr-mismatch 不出现 ⇒ 四判据全真 + 剩余正常 ⇒ exit 0。
+  const { dir, p } = tmpFile("txt");
+  try {
+    fs.writeFileSync(p, OUTER_PROMPT + "\n"); // 正本文件带尾部换行；extractCanonical 剥一个
+    const r = runReg([
+      "--verify", "--layer", "outer",
+      "--cron-list", JSON.stringify([{ id: "4e88cb1b", schedule: "*/20 * * * *" }]),
+      "--canonical-file", p,
+      "--registry-file", REGISTRY_FILE,
+    ]);
+    assert.equal(r.status, EXIT_OK, `stdout: ${r.stdout}`);
+    assert.match(r.stdout, /PASS/);
+    assert.doesNotMatch(r.stdout, /cron-expr-mismatch/);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

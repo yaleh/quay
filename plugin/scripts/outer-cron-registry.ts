@@ -146,6 +146,78 @@ export function remainingLifetimeMs(createdAt: string, nowMs: number): number | 
   return createdMs + SEVEN_DAYS_MS - nowMs;
 }
 
+/**
+ * 解析 cron 表达式分钟字段为排序去重的分钟集合。支持 `*`、步进「星号斜杠 N」、`N/M`、`N-M`、`N`
+ * 及逗号组合。解析失败（非标准分钟字段 / 字段数 < 5）⇒ null（无法归一化）。
+ * 归一化目标（gap-a23-ticklog-verify-and-cron-normalization）：`* / 20` ≡ `0,20,40`（都第 0/20/40
+ * 分钟），严格字符串比较会把语义等价判成漂移 ⇒ 每轮恒红。分钟字段展开成集合后比集合，消除格式差异。
+ */
+export function cronMinuteSet(expr: string): number[] | null {
+  const fields = expr.trim().split(/\s+/);
+  if (fields.length < 5) return null;
+  // 5 字段标准 cron 取第 0 字段为分钟；6 字段（秒级）取第 1 字段——取倒数第 5 字段对两者都成立。
+  const minuteField = fields[fields.length - 5];
+  const out = new Set<number>();
+  for (const part of minuteField.split(",")) {
+    const p = part.trim();
+    if (p === "") return null;
+    let lo: number;
+    let hi: number;
+    let step = 1;
+    if (p === "*") {
+      lo = 0;
+      hi = 59;
+    } else if (/^\*\/(\d+)$/.test(p)) {
+      // */N → 0..59 每 N（含 0——*/20 = 0,20,40）
+      lo = 0;
+      hi = 59;
+      step = Number(p.slice(2));
+    } else if (/^(\d+)\/(\d+)$/.test(p)) {
+      // N/M → N..59 每 M
+      const m = /^(\d+)\/(\d+)$/.exec(p)!;
+      lo = Number(m[1]);
+      hi = 59;
+      step = Number(m[2]);
+    } else if (/^(\d+)-(\d+)$/.test(p)) {
+      // N-M → N..M 每 1
+      const m = /^(\d+)-(\d+)$/.exec(p)!;
+      lo = Number(m[1]);
+      hi = Number(m[2]);
+    } else if (/^\d+$/.test(p)) {
+      lo = Number(p);
+      hi = Number(p);
+    } else {
+      return null; // 无法识别的分钟子字段（含 `?` 等）——无法归一化
+    }
+    if (!Number.isInteger(step) || step < 1 || lo < 0 || hi > 59 || lo > hi) return null;
+    for (let v = lo; v <= hi; v += step) out.add(v);
+  }
+  return [...out].sort((a, b) => a - b);
+}
+
+/**
+ * 两个 cron 表达式语义等价？
+ * 分钟字段归一化成集合比集合（`* / 20` ≡ `0,20,40`）；其余字段（hour/dom/month/dow）按字符串等。
+ * 任一侧无法归一化（分钟字段解析失败）且字符串不等 ⇒ 判不等（保守——不因无法归一化而静默通过）。
+ * 真漂移（不同分钟集合，如 `* / 20` vs `* / 30`；或非分钟字段漂移）⇒ false。
+ */
+export function cronExprsEquivalent(a: string, b: string): boolean {
+  if (a === b) return true;
+  const fa = a.trim().split(/\s+/);
+  const fb = b.trim().split(/\s+/);
+  if (fa.length !== fb.length || fa.length < 5) return false;
+  const ma = cronMinuteSet(a);
+  const mb = cronMinuteSet(b);
+  if (ma === null || mb === null) return false; // 无法归一化且字符串不等 ⇒ 不等
+  if (ma.length !== mb.length) return false;
+  for (let i = 0; i < ma.length; i++) if (ma[i] !== mb[i]) return false;
+  for (let i = 0; i < fa.length; i++) {
+    if (i === fa.length - 5) continue; // 分钟字段已归一化比
+    if (fa[i] !== fb[i]) return false;
+  }
+  return true;
+}
+
 export interface VerifyResult {
   ok: boolean;
   code: number;
@@ -320,8 +392,10 @@ export function checkVerify(opts: VerifyOptions): VerifyResult {
           : typeof entry?.expr === "string" ? entry.expr
             : typeof entry?.interval === "string" ? entry.interval
               : null;
-    cronExprMatch = expr === null ? null : expr === rec.cronExpr;
-    if (expr !== null && expr !== rec.cronExpr) {
+    // 归一化比较（gap-a23-ticklog-verify-and-cron-normalization）：分钟字段展开成集合比集合，
+    // 语义等价（`*/20` ≡ `0,20,40`）不再判漂移；真漂移（不同分钟集合/非分钟字段）仍 VIOLATED。
+    cronExprMatch = expr === null ? null : cronExprsEquivalent(expr, rec.cronExpr);
+    if (expr !== null && !cronExprsEquivalent(expr, rec.cronExpr)) {
       findings.push(`cron-expr-mismatch: CronList（${expr}）≠ 注册表（${rec.cronExpr}）`);
     }
   }
