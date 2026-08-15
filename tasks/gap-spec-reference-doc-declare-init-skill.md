@@ -47,13 +47,13 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1 判据1：capability-catalog.test.mjs 绿（referenced-not-landed 消失）。
-- [ ] AC2 判据2 能取假：manager-layer-shipping AC6 仍绿（引用保留只补声明）；排除集/carriers scoped 门不再被此 red 阻断。
-- [ ] AC3 判据3：既有测试全绿；`--for-task` scoped 门绿。
+- [x] AC1 判据1：capability-catalog.test.mjs 绿（referenced-not-landed 消失）。
+- [x] AC2 判据2 能取假：manager-layer-shipping AC6 仍绿（引用保留只补声明）；排除集/carriers scoped 门不再被此 red 阻断。
+- [x] AC3 判据3：既有测试全绿；`--for-task` scoped 门绿。
 
 ## Definition of Done
 
-- [ ] init/SKILL.md reference-doc 补 SPEC-tick-mechanical-checks-mcp 声明（1 行）+ capability-catalog 绿 + AC6 不回归。
+- [x] init/SKILL.md reference-doc 补 SPEC-tick-mechanical-checks-mcp 声明（1 行）+ capability-catalog 绿 + AC6 不回归。
 
 ## Touches
 
