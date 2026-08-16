@@ -131,5 +131,5 @@ shared-checkout 解析）全绿。
 - plugin/test/productization-verification-record-check.test.mjs（AC89 fixture，新增）
 - docs/proposals/quay-product-outline.md（DELIVERY-INVENTORY 快照 scripts 256→258）
 - .gitignore（补 `.quay/productization-verification.jsonl` 运行时状态忽略）
-- .quay/（记录文件：`productization-verification.jsonl`，SHARED checkout 运行时状态）
+- .quay/productization-verification.jsonl（记录文件，SHARED checkout 运行时状态——`.quay/**` 过度宽泛，收窄到具体文件）
 - tasks/gap-ac89-productization-verification-record.md（自身）
