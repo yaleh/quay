@@ -47,7 +47,8 @@
 #   1) stdout 可解析字段（STEP1_OK / STEP2_OK / L1_* / L2_* / COLDSTART_LIVE / AC5_OK / AC88_VERIFY）
 #   2) 证据 JSON（--evidence <path>，默认 <cwd>/.quay/verify-deliver-evidence.json，含 ts）
 #   3) AC89 记录（--ac89 <path>，默认 <cwd>/.quay/productization-verification.jsonl）追加一行
-#      {"ts","ac":"AC88","ok","artifact","evidence","detail"}（同 per-task-suite-records 形态）
+#      {"ts","ac":"AC88","ok","artifact","evidence","detail","host"?,stepInstall,stepInit,stepColdstart}
+#      （同 per-task-suite-records 形态；--host <B|C> 把跨主机机器名写进 host 字段——AC89 AC4 B/C 两机）
 #
 # 用法：
 #   bash plugin/scripts/verify-deliver-coldstart.sh \
@@ -57,7 +58,7 @@
 #       [--test-command <cmd>] [--tmux-session <sess>] \
 #       [--wait <s>] [--liveness-window <min>] \
 #       [--skip-cold-start-drive] [--cold-start-drive] [--verify-only] [--require-live] \
-#       [--evidence <path>] [--ac89 <path>] [--selfcheck] [--help]
+#       [--evidence <path>] [--ac89 <path>] [--host <B|C>] [--selfcheck] [--help]
 #
 #   --build-root <repo> 该次验证【自己】从 <repo> 的 develop-tip 现 build quay+quay-native tgz
 #                       （AC5 主路径：build_sha/日期/产物 sha256 全由本脚本取，不引用外部产物），
@@ -97,6 +98,7 @@ VERIFY_ONLY=0
 DO_SELFCHECK=0
 EVIDENCE=""
 AC89=""
+HOST=""                      # AC89 记录的主机字段（B|C，跨主机验证时由驱动方传入）
 CWD="$(pwd)"
 
 # ── AC5 锚（人 2026-08-16 裁定：达成 = 该 build 的 commit sha 新于本次阶段切换 2026-08-16）──
@@ -131,6 +133,7 @@ while [ $# -gt 0 ]; do
     --require-live) REQUIRE_LIVE=1; shift ;;
     --evidence) EVIDENCE="$2"; shift 2 ;;
     --ac89) AC89="$2"; shift 2 ;;
+    --host) HOST="$2"; shift 2 ;;
     --selfcheck) DO_SELFCHECK=1; shift ;;
     *) echo "ERROR: unknown argument: $1" >&2; exit 2 ;;
   esac
@@ -649,12 +652,17 @@ cat > "$EVIDENCE" <<EOF
 EOF
 echo "evidence written → $EVIDENCE"
 
-# ── AC89 记录（同 per-task-suite-records 形态，JSON 行）──────────────────────────────────
+# ── AC89 记录（同 per-task-suite-records 形态，JSON 行；AC89 AC4: B/C 两机 + 安装/初始化/冷启动三项）──
 mkdir -p "$(dirname "$AC89")"
 detail="steps: install(1)=$STEP1_OK init(2)=$STEP2_OK coldstart(3) live=$COLDSTART_LIVE git_age=${L2_GIT_COMMIT_AGE_MIN}min quayinit_commit=$L2_GIT_IS_QUAYINIT_COMMIT worktree=$L2_INNER_WORKTREE_COUNT proc_cwd=$L2_LAYER_PROCESS_CWD dead_loop=$L2_DEAD_LOOP_STATE build_sha=${BUILD_SHA:-} build_date=${BUILD_DATE:-} sha256_quay=${SHA256_QUAY:-0} sha256_qn=${SHA256_QN:-0} ac5_ok=$AC5_OK"
 okflag=false; [ "$AC88_VERIFY" = "ok" ] && okflag=true
-printf '{"ts":"%s","ac":"AC88","ok":%s,"artifact":"%s","evidence":"%s","detail":"%s"}\n' \
-  "$TS" "$okflag" "$(basename "$QUAY_TGZ")" "$EVIDENCE" "$detail" >> "$AC89"
+step3=0; [ "$COLDSTART_LIVE" = "yes" ] && step3=1
+bool() { [ "$1" = "1" ] && printf true || printf false; }
+host_json=""
+[ -n "$HOST" ] && host_json=",\"host\":\"$HOST\""
+printf '{"ts":"%s","ac":"AC88","ok":%s,"artifact":"%s","evidence":"%s","detail":"%s"%s,"stepInstall":%s,"stepInit":%s,"stepColdstart":%s}\n' \
+  "$TS" "$okflag" "$(basename "$QUAY_TGZ")" "$EVIDENCE" "$detail" "$host_json" \
+  "$(bool "$STEP1_OK")" "$(bool "$STEP2_OK")" "$(bool "$step3")" >> "$AC89"
 echo "ac89 record appended → $AC89"
 
 if [ "$REQUIRE_LIVE" = 1 ] && [ "$COLDSTART_LIVE" != "yes" ]; then
