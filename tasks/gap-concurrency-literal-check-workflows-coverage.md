@@ -1,7 +1,7 @@
 ---
 id: gap-concurrency-literal-check-workflows-coverage
 title: "concurrency-literal-check 扫描面不含 .claude/workflows/——CPUQuota=400% 活 4 天经由 QUAY_TEST_SYSTEMD_RUN_LIMITS seam 塞回源头默认（已发生的漏检）"
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
