@@ -1,7 +1,7 @@
 ---
 id: gap-ready-pool-canary-test-isolation
 title: "ready-pool-check.test.mjs:2778 读真实共享账本恒红——canary 死锁，block 整个 fan-in 队列（test-isolation）"
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
