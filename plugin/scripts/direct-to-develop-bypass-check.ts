@@ -195,6 +195,19 @@ export const RULED_HISTORICAL_COMMITS: { sha: string; reason: string }[] = [
       "release 0.5.0 版本 bump——人 2026-08-16 16:2xZ 逐字裁定的发布操作（bump→push→release），非 outer 自发起代码直改；" +
       "AC65 管自查直修不管执行人指令，outer 2026-08-16 16:3xZ 裁定 ruled one-off（先例 cddc55e2/f9577da1）。",
   },
+  {
+    sha: "f70507b6",
+    reason:
+      "inner 为 unblock AC1b develop 基线轮直提 develop——数据基线机制修正（dispatch-record-fingerprint-reason-check 加 DIR-103-B 豁免，gap-ac84 backfill 是 runtime 数据 gitignored 不需提交）。" +
+      "⚠️ inner 直提 develop 是错的（应走 fan-in），教训已记；manager 2026-08-16 18:5xZ 裁定 ruled one-off 放行不 revert。" +
+      "⛔ 豁免实现待收紧：LEGACY_NO_FINGERPRINT_TASK_IDS 按 taskId 判不带时间边界，注释自称「前向不追溯」代码给不出——收紧为 taskId ∧ ts<2026-08-16 + 补负控制（DIR-103-B 今天之后缺 fingerprint 必须红）。",
+  },
+  {
+    sha: "8dfd2967",
+    reason:
+      "ruling-add 提交自身豁免——8dfd2967 把 f70507b6 加入 ruled 表，本身是 inner 直接提交（改 checker）⇒ bypass 自指死锁（给 8dfd2967 加 ruled = 又一个直接提交）。" +
+      "解：8dfd2967 入表经 fan-in 正规 land（lock-window 豁免本任务提交）。inner 直提 develop 是错的（应走 fan-in），教训已记；outer 2026-08-16 19:0xZ 裁定 ruled one-off（先例 f70507b6）。",
+  },
 ];
 
 /** 一条 commit sha 是否命中 ruled 豁免表（前缀匹配——git 可能给全量或缩写 sha）。PURE。 */
@@ -276,10 +289,15 @@ function git(root, args, opts = {}) {
   });
 }
 
-/** 一条 commit 的相对改动文件（vs 第一父）。父不存在（root commit）返回 null。 */
+/** 一条 commit 的相对改动文件（vs 第一父）。父不存在（root commit）返回 null。
+ *  ⚠️ `-c core.quotepath=false`：git 默认对含非 ASCII 的文件名输出 C-quoted 形态
+ *  （`"docs/.../Quay\346\224\271\350\277\233\347\211\210WebUI.dc.html"`），前导引号使 `^docs/`
+ *  等排除正则失效 ⇒ design-internal 文件被误判为 code-surface（2fdb6e32 false-positive）。
+ *  关闭 quotepath 让 `--name-only` 输出原始路径字节，`^docs/` 等排除恢复对非 ASCII 路径生效。
+ *  （tasks/gap-direct-bypass-check-quoted-path-false-positive） */
 export function gitCommitFiles(root, sha) {
   try {
-    const out = git(root, ["diff", "--name-only", `${sha}^`, sha]);
+    const out = git(root, ["-c", "core.quotepath=false", "diff", "--name-only", `${sha}^`, sha]);
     return out.split("\n").map((s) => s.trim()).filter(Boolean);
   } catch {
     return null;
