@@ -1,7 +1,7 @@
 ---
 id: gap-bypass-ruled-table-self-entry
 title: "bypass-ruled 表自条目：8dfd2967 入 RULED_HISTORICAL_COMMITS——ruling-add 提交自身豁免（自指死锁解）"
-status: ready
+status: done
 labels:
   - gap
   - mechanism
