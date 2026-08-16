@@ -47,12 +47,14 @@ depends_on: []
 4. AC8 断言按新语义改（inner C7 迁出不计数）。
 5. 既有测试全绿 + `--for-task` scoped 门绿。
 6. item ⑦ c3 审计条目跟随退役条款：`red-on-omission-audit.ts` c3_resource_gate invariant 接受 direct 或 migrated 形态（核 C3 指针 ∧ 档案 R32 短语）；`red-on-omission-audit.test.mjs` 加 migrated-form 正/负控制（absent-everywhere red）。
+7. item ⑧ catalog 分类补齐：`capability-catalog.sh` 六表（QUESTION/CADENCE/INVALIDATION/LAST_REAFFIRMED/MATCHING/CONSUMER）加 send-to-session.ts；unclassified 1→0；五个连带检查器绿；derivatives 核验。
 
 ## Acceptance Criteria
 
 - [x] AC1 判据1：tick core 无已退役文本——C7 收指针、$FORK_BASELINE 单线（A17/C3 改 develop）、A12/A13/A16 旧读法清除。
 - [x] AC2 判据2 能取假：AC76 判据5 代码文件显式退役标注（不删）；tick-core-static-check AC8「inner C7」新语义（迁出不计数）；c3 审计条目跟随退役条款（red-on-omission-audit migrated 形态 covered、absent-everywhere red）；既有测试绿。
 - [x] AC3 判据3：`--for-task` scoped 门绿。
+- [x] AC4 判据4（item ⑧）：catalog 分类补齐——send-to-session.ts 在 capability-catalog.sh 六表（QUESTION/CADENCE/INVALIDATION/LAST_REAFFIRMED/MATCHING/CONSUMER）声明，unclassified 1→0（250/250 declared），五个连带检查器绿（capability-catalog / mechanism-vitality-check / slot-free-trigger / verify-delivery-surface / npm-pack-e2e doc-gate），derivatives 核验。
 
 ## Definition of Done
 
@@ -68,6 +70,7 @@ depends_on: []
 - plugin/test/tick-core-static-check.test.mjs（AC8 inner C7 新语义）
 - plugin/scripts/red-on-omission-audit.ts（item ⑦：c3_resource_gate invariant 跟随 C3→R32 退役条款迁移——direct/migrated 两形态）
 - plugin/test/red-on-omission-audit.test.mjs（item ⑦：migrated 形态负控制测试）
+- plugin/scripts/capability-catalog.sh（item ⑧：send-to-session.ts 分类补齐——六表声明（含 CONSUMER） + unclassified 1→0 + 五个连带检查器绿）
 - tasks/gap-ac76-tick-core-retirement-cleanup.md（自身）
 
 ## Evidence
@@ -127,6 +130,16 @@ const migrated = has(t, "C3 正身已迁出") && has(archive, "resource-gate.sh 
 const ok = script && (direct || migrated);
 ```
 `detail` 区分 direct/migrated 形态。可取假：短语同时从核与档案消失 ⇒ ok=false ⇒ uncov ⇒ 红。测试加 migrated-form 正控制（核指针+档案短语 ⇒ GREEN）与负控制（核无 direct 短语/无指针 + 档案无短语 ⇒ c3 uncov 红）；既有 ruling5 负控制保留。
+
+**⑧ catalog 分类补齐（capability-catalog.sh，item 8）** —— item 8 = send-to-session.ts 补 capability-catalog 分类（人 2026-08-16 裁定 a，因 main 闸死锁折进本任务）。
+
+send-to-session.ts（基于 Claude Code 跨会话 socket 协议、从非 Claude 进程给会话发消息）此前未入 catalog 索引 ⇒ capability-catalog AC1c 门报「1 unclassified / exit 1」，连带 npm-pack-e2e / mechanism-vitality-check / slot-free-trigger / verify-delivery-surface 五个检查器红。补六表条目（catalog entry-gate 要求 declared 脚本必须有 cadence/invalidation/last-reaffirmed/matching；rhythm-consumer-check 判据2 另要求按需脚本有 CONSUMER）：
+- QUESTION：`Can a non-Claude process deliver a message to a Claude Code session via the cross-session socket protocol — auth frame (peerToken/childToken) + user frame, fire-and-forget, peer-token hold vs childToken (own-child) direct delivery, from-mode self-assertion boundary (owner's own sessions only, not a SendMessage replacement; landed 62853261)?`
+- CADENCE=按需；INVALIDATION=失效前提（socket 协议废除则退休）；LAST_REAFFIRMED=2026-08-16；MATCHING=n/a（投递工具，非 pass/fail 检查）
+
+**核验**：`bash capability-catalog.sh` → `250 scripts | 250 declared | 0 unclassified | 245 ship` exit 0；`mechanism-vitality-check --check` → invalidation_gate.ok=true exit 0；`slot-free-trigger.test.mjs` → 15/15（catalog-entry 闸绿）；`verify-delivery-surface` → PASS exit 0；`scripts/test.sh --static-checks-doc` → exit 0（npm-pack-e2e 依赖面解除）。
+
+**derivatives 核验**：PUBLIC_ENTRYPOINTS 只约束 .sh（send-to-session.ts 非 .sh，无需）；NOT_SHIPPED/SUPERSEDED 不适用（在飞、非退役）；**CONSUMER 由 rhythm-consumer-check 判据2 要求**——首跑 scoped 门报「send-to-session.ts: 按需 without a CONSUMER row」（按需=无人按），故补 `谁按：owner/外层在需要从非 Claude 进程给目标会话投递消息时按`（五表之外第六表）。referenced-not-landed：全仓 grep 无 skills/loop/orchestration/docs/CLAUDE.md 引用 send-to-session.ts（文件本身已落地，无 dangling「应存在」引用）。
 
 **测试输出**：
 ```
