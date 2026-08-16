@@ -24,10 +24,13 @@ depends_on: []
 plugin/.claude-plugin/plugin.json version = 0.4.0
 plugin/VERSION                            0.4.0
 packages/quay/package.json        version = 0.4.0
-publish-plugin-dist.yml 唯一触发 = `v*` tag 推送；最后一个 v* tag = v0.4.0，打于 2026-08-06（10 天前）
+publish-plugin-dist.yml 唯一触发 = `v*` tag 推送；最后一个 v* tag = v0.4.0，打于 2026-08-06
+release_ahead_commits = **3828**（2026-08-16 outer 实测 `git rev-list --count v0.4.0..develop`，
+manager 原报 3824 已更新为实测值）
 ```
 **⇒ 与 AC86 同形的结构性缺口**：dist-plugin 链的触发条件（`v*` tag）在当前 develop 三层流程里
-**从不发生**，所以 `/plugin install` 拿到的永远是 10 天前的树，而 marketplace 还声明着一个更老的版本号。
+**从不发生**，所以 `/plugin install` 拿到的树落后 develop **3828 个提交**，而 marketplace 还声明着
+一个更老的版本号。
 
 ## Plan
 
