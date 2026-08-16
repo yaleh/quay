@@ -12,6 +12,7 @@ extra:
   schema: execution
 depends_on:
   - gap-ac85-local-build-current-artifact
+  - gap-ac88-verification-mechanism-extend-deliver
 ---
 
 **type:** execution
@@ -29,13 +30,21 @@ depends_on:
 **判据（能取假）**：验证时刻**新于 AC85 产出的当前产物**；⛔ **不得引用 08-06/08-11 的历史验证记录**
 作为本 AC 的达成证据（那些针对旧版本或单个 scoped fix，不是当前完整版本的全流程）。
 
-**依赖**：AC85 先产出当前版本 `.tgz`，本任务才能开始。
+**依赖**：AC85 先产出当前版本 `.tgz`；**`gap-ac88-verification-mechanism-extend-deliver` 先落地
+机制**（安装→初始化→冷启动 的可重复脚本）——否则驱动 B/C 只有「装 tgz + 端口探活」的旧脚本，
+退化成手工一次性形态（manager 2026-08-16 实测指出，`71677c8f`）。
+
+**机器形态决策（outer 2026-08-16）**：
+- **B=orangevps**：当前 `~/work/quay` 是 sync.sh 同步的 **git 开发树**（有 .git）⇒ 是 AC88
+  「⛔ 非 git clone」排除的形态。**判定：git 开发树不满足判据**——验证在干净目录从 `.tgz` 全新安装。
+- **C=ad-arm1**：`~/work/` 下无 quay 主 checkout ⇒ **从零全新安装**。
 
 ## Plan
 
-1. 等 AC85（本机 build）产出当前版本 `.tgz`。
-2. outer 驱动 B=orangevps 会话：安装 `.tgz` → 项目内 `quay-init` → 冷启动（outer+inner）。
-3. outer 驱动 C=ad-arm1 会话：同上三项。
+1. 等 `gap-ac88-verification-mechanism-extend-deliver`（机制脚本）与 AC85（`.tgz`）就绪。
+2. outer 驱动 B=orangevps 会话：**干净目录**从当前版本 `.tgz` 全新安装 → 项目内 `quay-init` → 冷启动
+   （outer+inner）——用扩展后的机制脚本，非手工。
+3. outer 驱动 C=ad-arm1 会话：从零全新安装 → `quay-init` → 冷启动，同机制。
 4. 结果（成功/失败 + 证据）写回 AC89 的记录（.quay/productization-verification.jsonl）。
 5. 判据：验证时间新于 AC85 产物时间。
 
