@@ -40,6 +40,9 @@ depends_on: []
 ## Touches
 
 - plugin/scripts/slot-refill.ts（若补 `--json` 稳定输出）
-- plugin/scripts/loop-driver-check.sh / session-liveness.sh / resource-gate.sh / process-budget.sh（若补 JSON 面）
+- plugin/scripts/loop-driver-check.sh（若补 JSON 面）
+- plugin/scripts/session-liveness.sh（若补 JSON 面）
+- plugin/scripts/resource-gate.sh（若补 JSON 面）
+- plugin/scripts/process-budget.sh（若补 JSON 面）
 - packages/quay/src/serve-handlers.ts（Manager/System 路由消费 JSON）
 - tasks/gap-ac99-webui-machine-readable-json.md（自身）
