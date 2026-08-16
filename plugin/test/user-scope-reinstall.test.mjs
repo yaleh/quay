@@ -198,12 +198,12 @@ test("AC3 — a batch containing ANY immediate class is REINSTALL-IMMEDIATE (not
 test("version comparison — behind/equal/ahead map to the right staleness verdicts", () => {
   const dest = tmpdir();
   try {
-    writeVersion(dest, "0.3.9");
-    assert.equal(runSync("--check-user-scope", dest).status, 1, "0.3.9 behind 0.4.0 ⇒ stale");
-    writeVersion(dest, "0.4.0");
-    assert.equal(runSync("--check-user-scope", dest).status, 0, "0.4.0 == current ⇒ fresh");
-    writeVersion(dest, "1.0.0");
-    assert.equal(runSync("--check-user-scope", dest).status, 0, "1.0.0 ahead ⇒ not stale");
+    writeVersion(dest, "0.0.1");
+    assert.equal(runSync("--check-user-scope", dest).status, 1, "0.0.1 behind current ⇒ stale");
+    writeVersion(dest, currentVersion());
+    assert.equal(runSync("--check-user-scope", dest).status, 0, "current version ⇒ fresh");
+    writeVersion(dest, "99.99.99");
+    assert.equal(runSync("--check-user-scope", dest).status, 0, "99.99.99 ahead ⇒ not stale");
   } finally {
     fs.rmSync(dest, { recursive: true, force: true });
   }
