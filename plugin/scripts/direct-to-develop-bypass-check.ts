@@ -189,6 +189,12 @@ export const RULED_HISTORICAL_COMMITS: { sha: string; reason: string }[] = [
       "manager 2026-08-16 06:46Z tick-log 已识其为「历史直提」候选（round 214 分诊：bypass-check 候选含 f9577da1 inner AC81 重建 / 34ecfaa9）；" +
       "裁定 ruled one-off（形态=ruled 豁免+定案理由，非 AC65 sha 表，先例 cddc55e2）。",
   },
+  {
+    sha: "08e8ec55",
+    reason:
+      "release 0.5.0 版本 bump——人 2026-08-16 16:2xZ 逐字裁定的发布操作（bump→push→release），非 outer 自发起代码直改；" +
+      "AC65 管自查直修不管执行人指令，outer 2026-08-16 16:3xZ 裁定 ruled one-off（先例 cddc55e2/f9577da1）。",
+  },
 ];
 
 /** 一条 commit sha 是否命中 ruled 豁免表（前缀匹配——git 可能给全量或缩写 sha）。PURE。 */
