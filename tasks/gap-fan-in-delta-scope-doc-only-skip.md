@@ -51,7 +51,8 @@ doc-only-delta 跳过 + Touches 声明非 doc 路径   32 个（我数）/ 16 �
 - [ ] AC1: **枚举存量（修法之前先数清）**——对 `per-task-suite-records.jsonl` 里所有「fullSuiteRan=false ∧ skipReason=doc-only-delta ∧ 从未 fullSuiteRan=true」的任务，逐任务 `git diff` 核对其实际改动的文件，**用「无套件检查器读该路径 = doc」的可计算定义**（枚举套件检查器读的路径集合，delta ∩ 该集合 = ∅ 才算 doc-only）判定，产出**确数清单**（任务 id + 实际改动的非 doc 路径）。AC1 以这份清单为准，⛔ 不以 Touches 声明数代替（那是 32 那个估计值），⛔ 不用手写路径正则表。
 - [ ] AC2: **修法**——fan-in delta 判定改看**分支整体相对 develop 的变更**（含更早进入分支历史的代码），不是单轮 fan-in 合并的 diff；且 doc-only 判定改用「无套件检查器读该路径」的可计算定义（枚举检查器读路径集合，非手写正则表）。取假一：代码在更早分支提交、fan-in 单轮 delta 只见 doc ⇒ 必须仍判需跑全量。取假二：`orchestration/manager-tick-core.md` 塞违反 (src:N) 的改动 ⇒ 不得判 doc-only。
 - [ ] AC3: 修法后**新的** code 型 fan-in 不再出现「代码进 develop 但全量轮未覆盖」（判据：per-task-suite-records 新增记录中，Touches/实际 diff 声明非 doc 而 fullSuiteRan=false 的任务数为 0）。
-- [ ] AC4: **存量处置**——AC1 枚举出的已 done 但未验证任务，逐个标注「落地未经全量轮验证」（如 manager 给 AC97 的 2df28ee4 样式），并判定是否需补跑全量轮。
+- [ ] AC4: **存量处置（拆为后继任务 `gap-fan-in-delta-scope-inventory-annotate`）**——AC1 枚举出的已 done 但未验证任务，逐个标注「落地未经全量轮验证」（如 manager 给 AC97 的 2df28ee4 样式）。**⛔ AC4 不在本任务做**：它写 `tasks/*.md`（目录级），与「本任务可派发」冲突（见 Touches 自锁说明）——拆到后继任务，等空窗跑。
+  **⊢ 拆分原因（manager 2026-08-16 22:3xZ）**：本任务 Touches 曾含目录级 `tasks/*.md`，使本任务与任何在飞任务 self-touch 冲突 ⇒ 结构上永不可派（delta-scope 自身也是一把全局锁形状）。AC1-AC3 对 tasks/ 是**只读**（枚举/diff/判据），不需声明 `tasks/*.md`；仅 AC4 写 tasks/。AC4 拆出后本任务可派。
 
 ## Definition of Done
 
@@ -62,6 +63,10 @@ doc-only-delta 跳过 + Touches 声明非 doc 路径   32 个（我数）/ 16 �
 - plugin/workflows/fan-in-execute.js（step2 delta 判定范围）
 - plugin/scripts/per-task-suite-record.ts（若需记录「未验证」标记）
 - plugin/test/fan-in-execute-paths.test.mjs（取假对照）
-- tasks/*.md（AC1 枚举出的存量任务加「未验证」标注）
-  **⚠️ 目录级 Touches 自锁（2026-08-16 22:1xZ 实证）**：`tasks/*.md` 是目录级条目 ⇒ 展开+不对称自锁语义 ⇒ 与任何触碰 tasks/ 的在飞任务不 disjoint。派发时 4 个在飞任务（ac100/concurrency/delivery/doc-lint）全有各自 `tasks/<id>.md` ⇒ **本任务结构上无法在有在飞任务时派发**（slot-refill deferred: touches-overlap-in-flight）。**解除条件**：队列清完（0 在飞）后自锁解除；或 AC1 枚举完成后把 `tasks/*.md` 收窄成具体文件清单（实现层改动，派发层无法解决）。优先级裁定（manager 最高优先）在派发层无轴 + 此 Touches 冲突 ⇒ **本轮按 option 2 如实记录「未生效」**，队列清完即派。
 - tasks/gap-fan-in-delta-scope-doc-only-skip.md（自身）
+
+**⚠️ 拆分说明（manager 2026-08-16 22:3xZ，唯一可行路径）**：本任务 Touches **已去掉目录级 `tasks/*.md`**（AC4 拆到后继任务 `gap-fan-in-delta-scope-inventory-annotate`，见 AC4）。**拆分原因**：
+1. **永久饥饿实证**：任何任务在飞 ⇒ `tasks/*.md` 目录级撞 self-touch ⇒ deferred；0 在飞 ⇒ assembleBatch 含它的团只能 {它自己}（大小 1），不含它的团大小 4 ⇒ 永远输。**不是等窗口，是永久轮不到。**
+2. **AC1-AC3 对 tasks/ 只读**（枚举/diff/判据），不需声明 `tasks/*.md`；仅 AC4 写 tasks/。
+3. **第二把锁（剩余）**：本任务 touches `plugin/test/fan-in-execute-paths.test.mjs`，而 `gap-concurrency-literal`（在飞）声明目录级 `plugin/test/*` ⇒ **concurrency land 前本任务仍被挡**。拆完 ≠ 立刻可派，但 concurrency land 后即可派（不再有 tasks/ 自锁）。
+4. **被 assembleBatch 静默丢弃的候选不进 deferred 不留理由（3b，manager 发现，发生率 1）**——0 在飞那轮 deferred=[] 而 delta-scope 被丢弃，正常读输出看不出来。
