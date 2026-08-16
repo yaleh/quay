@@ -195,6 +195,13 @@ export const RULED_HISTORICAL_COMMITS: { sha: string; reason: string }[] = [
       "release 0.5.0 版本 bump——人 2026-08-16 16:2xZ 逐字裁定的发布操作（bump→push→release），非 outer 自发起代码直改；" +
       "AC65 管自查直修不管执行人指令，outer 2026-08-16 16:3xZ 裁定 ruled one-off（先例 cddc55e2/f9577da1）。",
   },
+  {
+    sha: "f70507b6",
+    reason:
+      "inner 为 unblock AC1b develop 基线轮直提 develop——数据基线机制修正（dispatch-record-fingerprint-reason-check 加 DIR-103-B 豁免，gap-ac84 backfill 是 runtime 数据 gitignored 不需提交）。" +
+      "⚠️ inner 直提 develop 是错的（应走 fan-in），教训已记；manager 2026-08-16 18:5xZ 裁定 ruled one-off 放行不 revert。" +
+      "⛔ 豁免实现待收紧：LEGACY_NO_FINGERPRINT_TASK_IDS 按 taskId 判不带时间边界，注释自称「前向不追溯」代码给不出——收紧为 taskId ∧ ts<2026-08-16 + 补负控制（DIR-103-B 今天之后缺 fingerprint 必须红）。",
+  },
 ];
 
 /** 一条 commit sha 是否命中 ruled 豁免表（前缀匹配——git 可能给全量或缩写 sha）。PURE。 */
