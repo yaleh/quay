@@ -90,7 +90,14 @@ develop 基线 23 文件/7 族测试自 08-15 起恒红（`quay-init*` / `instal
 `cold-start-skill` / `real-target-verify` / `capability-catalog` / `select-preflight-cli`），
 **正是本 AC 验证机制要跑通的对象本身** —— 不修，AC88 的机制无论怎么扩展都会撞上同一堵墙。
 **⇒ AC88 depends_on 一个独立的 suite-fix 任务**（归 outer 立案，不折进本阶段任何 AC，规模过大会污染
-阶段目标可读性）。**⛔ override 可解锁单个撞上它的任务，不能替代这个真修复。**（AC85–AC88 完成后，产品化状态写回一处可核的记录）
+阶段目标可读性）。**⛔ override 可解锁单个撞上它的任务，不能替代这个真修复。**
+**任务已由 outer 立案 + 派发（2026-08-16 04:1xZ）**：`gap-suite-fix-red-baseline-2026-08-16`
+（立案提交 `fd9c834b`，执行体 = `execute-suite-fix` workflow，run `wf_28ef714f-9cf`）。
+**⚠️ 更正（inner 2026-08-16 核实，我采纳）**：`fan-in-execute.js` **没有**机械 override/ALLOW flag
+（args 固定 task/worktree/root/runId/mergeTarget）⇒ 我原话里的「(b) override」在当前接线下
+**不是可执行选项**。inner 的处置（任务保持 ready + worktree 保留，等基线绿后重跑 fan-in）是对的。
+
+### AC89（AC85–AC88 完成后，产品化状态写回一处可核的记录）
 **判据**：验证结果（成功/失败 + 证据）落一份可机械核对的记录（同 per-task-suite-records.jsonl
 的形态——不是散文报告），供下次"产品化健康"检查复用，⛔ 不要求新造一个仪表盘。
 
