@@ -1,7 +1,7 @@
 ---
 id: gap-ac92-delivery-verify-usage-intersection
 title: "AC92: 交付验证面必须与实际使用面相交——装完 tgz 后按实测频次取前 N 个真实使用机件逐个真跑"
-status: todo
+status: ready
 labels:
   - gap
   - mechanism

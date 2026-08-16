@@ -1,7 +1,7 @@
 ---
 id: gap-ac91-delivery-core-refs-undelivered-files
 title: "AC91: 交付的执行核不得指向【未交付】的文件——全量枚举引用解析（非只修两条抽样）"
-status: todo
+status: ready
 labels:
   - gap
   - mechanism

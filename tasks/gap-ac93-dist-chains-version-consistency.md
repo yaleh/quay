@@ -1,7 +1,7 @@
 ---
 id: gap-ac93-dist-chains-version-consistency
 title: "AC93: 两条分发链版本一致（3:1 不一致），且 /plugin install 链在 develop 流程上可触发或显式退役"
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
