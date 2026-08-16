@@ -1,7 +1,7 @@
 ---
 id: gap-ac88-cross-host-verify-current-version
 title: "AC88: 跨主机（B=orangevps, C=ad-arm1）验证当前版本 `.tgz` 的安装/初始化/冷启动（外驱，非 inner）"
-status: todo
+status: ready
 labels:
   - gap
   - mechanism

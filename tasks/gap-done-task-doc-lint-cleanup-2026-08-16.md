@@ -1,7 +1,7 @@
 ---
 id: gap-done-task-doc-lint-cleanup-2026-08-16
 title: "清理：15 个 done 任务的文件文档 lint×18（invoke-evidence×10 / contract-line×4 / dispatch-review×2 / measure-no-field×1 / contract-measure-no-name×1）——独立于 suite-fix，非红成因"
-status: todo
+status: ready
 labels:
   - gap
   - cleanup

@@ -1,7 +1,7 @@
 ---
 id: gap-select-preflight-retirement-decision
 title: "select-preflight 退役决策：唯一非测试消费者 = ADR-022 退役经典循环入口——退役是产品决策，单独裁定"
-status: todo
+status: ready
 labels:
   - gap
   - mechanism

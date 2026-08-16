@@ -1,7 +1,7 @@
 ---
 id: gap-meta-cc-include-subagents-content-search-ineffective
 title: "meta-cc `include_subagents=true` 对内容搜索无效——只搜主会话自身（实证三针测），参数名误导（硬规则 3b 形态）"
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
