@@ -51,8 +51,9 @@ depends_on: []
 
 ## Touches
 
-- .git/hooks/pre-commit（或撰写侧等价落盘时机——接线点）
-- plugin/scripts/touches-one-entry-one-path-check.ts（若需导出供撰写面调用）
+- plugin/scripts/precommit-guard.ts（接线本体——judge() 新增 ② Touches「一条目一路径」detector + resolveHooksDir worktree 修）
+- .git/hooks/pre-commit（安装产物——precommit-guard.ts --install-hook 写出；worktree 下是 common dir 的 hooks）
+- plugin/scripts/touches-one-entry-one-path-check.ts（复用导出 checkTaskOneEntryOnePath/readOneEntryBaseline——未改，若需导出供撰写面调用）
 - tasks/gap-touches-one-entry-detector-not-enforcer.md（自身）
 
 ## Evidence（2026-08-16，scoped 门绿）
@@ -84,12 +85,13 @@ reason=touches-multi-path-bullet。
 
 **scoped 门**（worktree 根，`scripts/test.sh` 退出 0）：
 ```
-plugin/test/precommit-guard.test.mjs                                → tests 17, pass 17, fail 0
-plugin/test/touches-one-entry-one-path-check.test.mjs
-  + plugin/test/precommit-guard-retire-negative-control.test.mjs    → tests 24, pass 24, fail 0
-scripts/test.sh --static-checks                                     → 47/47 mutation PASS, RESULT: PASS
-scripts/test.sh --static-checks-doc                                 → DOC-CHECK EXIT 0
+scripts/test.sh --for-task gap-touches-one-entry-detector-not-enforcer
+    → tests 36, pass 36, fail 0, exit 0   (precommit-guard 17 + touches-one-entry-one-path 19)
+scripts/test.sh --static-checks           → 47/47 mutation PASS, RESULT: PASS
+scripts/test.sh --static-checks-doc       → DOC-CHECK EXIT 0
 ```
+（`--for-task` 选择器按 Touches 解析：precommit-guard.ts → precommit-guard.test.mjs、
+touches-one-entry-one-path-check.ts → touches-one-entry-one-path-check.test.mjs，coverageRatio 0.5 非 thin。）
 
 **负控制（硬规则②④ 能取假）**：
 - 单路径 Touches ⇒ 放行（AC1 negative）。
