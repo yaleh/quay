@@ -63,6 +63,8 @@ workflow 文件路径的接线检查——按位置判定，没有一个是调�
 
 **观察（超出本任务 Touches，不处理）**：`deliverable-governor.ts` 与 `human-steered-classify.ts`、`explore-exploit-cadence.ts` 等失去唯一消费者（workflow），其自身存废是后续独立决策。
 
+**fan-in 修正（delivery-inventory-drift-gate false-positive，2026-08-16）**：scoped 门 `delivery-inventory-drift-gate` 对 `.claude/workflows/select-preflight.js` 的退役删除报 FAIL——该 gate 假设每个被删 workflow 都有 `plugin/workflows/` mirror，但 select-preflight.js 是 mirror 约定建立前的 legacy workflow（`git cat-file -e <fork>:plugin/workflows/select-preflight.js` 不存在、`git log --all -- plugin/workflows/select-preflight.js` 空——从未有 mirror），退役删除不留 stale mirror，无需 mirror co-touch。修正 gate：D 删除仅在 mirror 于 base 存在时才 structural（需 co-touch）；A 新增恒 structural（new_workflow_requires_mirror 保持 fail-closed）。gate 测试 18/18（新增 1 条 GREEN：legacy 未镜像 workflow 删除通过；既有 RED 用例保持 fail-closed 不回归）。
+
 ## Touches
 
 - experiments/quay-perpetual-stream/scripts/select-preflight.ts（退役删除——真实路径，非 packages/quay/src/）
@@ -73,5 +75,7 @@ workflow 文件路径的接线检查——按位置判定，没有一个是调�
 - experiments/quay-perpetual-stream/scripts/workflow-metadata-conformance.mjs（C6 文件集 5→4）
 - plugin/scripts/workflow-metadata-conformance.mjs（双副本，与 experiments/ 逐字一致）
 - plugin/scripts/config-wiring-check.ts（移除 select-preflight 引用）
+- plugin/scripts/delivery-inventory-drift-gate.sh（false-positive 修正：legacy 未镜像 workflow 删除不再误报）
+- plugin/test/delivery-inventory-drift-gate.test.mjs（新增 GREEN 用例：legacy 未镜像删除通过）
 - plugin/test/workflow-metadata-conformance.test.mjs（C6 断言更新）
 - tasks/gap-select-preflight-retirement-decision.md（自身）
