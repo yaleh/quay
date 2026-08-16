@@ -7,7 +7,15 @@
 
 ---
 
-## 🆕 当前阶段（2026-08-16 起）：产品化 build 与实际验证 —— 基于当前版本
+## ⏸ 前一阶段（2026-08-16 – 2026-08-16 16:2xZ，**已达成 9/9 并已发布 v0.5.0**，内容原样保留）：产品化 build 与实际验证 —— 基于当前版本
+
+> **收口记录（2026-08-16 16:2xZ）**：AC85–AC93 **全部 done**（逐条核实的是真凭据：AC86 的 CI run
+> `31925993366` conclusion=success；AC88 的 `.quay/productization-verification.jsonl` 记录了 B/C 两机
+> **10:37Z 真实 false → 15:36Z 真实 true** 的翻转，不是 fixture 灌值；AC93 的 `version-consistency-check.ts`
+> 实跑 OK）。**随后按人裁定完成发布**：`develop-archived-20260816` 保留旧 origin 分叉历史（37615c7d），
+> `origin/develop` = `08e8ec55`（与本地 0/0 分歧），tag `v0.5.0` → 同一提交，release 建于 16:23:52Z，
+> 8 处版本文件统一 0.5.0。**遗留（非本阶段判据要求，不阻塞收口）**：
+> `gap-delivery-laydown-dist-closure-gap`（tgz 只装 dist/*.js，`.ts` 源码层缺失）status=ready，未实现。
 
 **来源**：人 2026-08-16 裁定「检查最近一周的其它阶段目标和 AC，找出其中关于产品化 build/release
 和在其它主机/设备验证本项目产品化 build/release 的内容，以及相应的任务。然后，创建一个新的阶段目标
@@ -243,13 +251,23 @@ C17 写所有权）。AC88（跨主机验证）需要人工触发或 outer 驱�
 
 ---
 
-## 🔜 下一阶段（**已立案，2026-08-16 16:0xZ；⛔ 尚未切换为当前阶段——人明令「暂不切换阶段，先保障当前阶段的目标和 AC 的实现」**）：Web UI 改进版落地
+## 🆕 当前阶段（**2026-08-16 16:2xZ 起，人明令切换并"实际推进"**）：Web UI 改进版落地
 
-**来源**：人 2026-08-16 16:0xZ 逐字裁定「下载和保存上述设计相关材料；创建一个新的阶段目标和 AC，以实现上述设计；
-提交这些变更；暂不切换阶段，先保障当前阶段的目标和 AC 的实现。」
+**来源（两条裁定，后者扩大了范围，以后者为准）**：
+① 2026-08-16 16:0xZ「下载和保存上述设计相关材料；创建一个新的阶段目标和 AC，以实现上述设计；
+   提交这些变更；暂不切换阶段，先保障当前阶段的目标和 AC 的实现。」
+② 2026-08-16 16:2xZ **逐字**：「在发布完成后，将当前阶段切换为 `Web UI 改进版落地 阶段`，并实际推进。
+   * 修改该阶段目标和 AC，要求：**实现设计中的所有页面**；**应用一致的风格，改进设计中没有但当前实现已有的页面**
+   * 实际持续推进，实现该阶段目标和 AC
+   * 同步持续优化 suite 测试，使其在 main 相 lane=8 的设置下总耗时不超过 600s」
 
-**切换条件（写在这里，免得将来靠回忆）**：当前阶段（AC85–AC93）达成后由**人**决定切换；
-⛔ manager 不得自行把本节改成「当前阶段」——本节存在的意义正是"立好但不抢跑"。
+**切换前置已核（直接量，非转述）**：`origin/develop`=`08e8ec55`=本地 develop（0/0 分歧）；
+旧 origin 分叉保留为 `develop-archived-20260816`（37615c7d）；tag `v0.5.0`→同一提交；
+`gh release` v0.5.0 建于 2026-08-16T16:23:52Z；`version-consistency-check.ts` → OK，8 文件全 0.5.0。
+**⇒ "发布完成"这个前置为真，切换成立。**
+
+**⚠️ 裁定②推翻了原 AC95 的"只做首批三屏"**——那是设计原型自己的交付切法，
+**人明令改为"实现设计中的所有页面"**，已按此重写（见下）。旧措辞不再有效，⛔ 不要按它派发。
 
 **设计正本（已下载落盘，本次提交内）**：`docs/design/quay-webui-improved-2026-08-16/`
 ```
@@ -297,19 +315,54 @@ JSON API 端点                        0 个       （grep -c 'application/json'
 **⊢ 取假方式**：删掉任一文件或改一个字节 ⇒ sha256 不符 ⇒ 该 AC 立即变假。
 **状态**：本次提交即达成（manager 自己做的，属"保存材料"不属"实现设计"）。
 
-### AC95（**只做首批三屏**：Dashboard / Tasks / Task Detail 真上线，⛔ 不许一次铺 15 屏）
-**为什么这样切**：原型自己就把交付分成了「首批三屏 + 路线图占位」，**这是设计方给出的切法，不是我发明的**；
-且现状 9 条路由已在跑，一次重写全部 = 把一个能用的 UI 换成一个大爆炸。
+### AC95（**实现设计中的所有页面** —— 15 个视图全部真上线，人 16:2xZ 明令，⛔ 不再是"首批三屏"）
+
+**目标态清单（从 `.dc.html` 的 `navGroupDefs` 实读，不是转述）**：
+```
+核心  dashboard · tasks
+观测  live · board · system · manager
+记录  journal · git · tests · sessions
+知识  adr · goal · doc · architecture
+＋ 任务详情（isDetail）      ⇒ 合计 15 个视图
+```
+**与现状的差集（实读 `serve-handlers.ts` 路由表，可复算）**：
+```
+已实现 8 条 pathname === 精确路由：/  /adr  /board  /doc  /git-history  /goal  /journal  /live
+   ＋ 前缀详情路由：/task/:id  /adr/:id  /goal/:id  /doc/:id
+⇒ 设计有而【尚未实现】的 6 个：dashboard · system · manager · tests · sessions · architecture
+⇒ 已实现且设计已覆盖的 9 个：tasks(/) · detail · live · board · journal · git · adr · goal · doc
+```
+**判据（能取假，逐项可查）**：
+① **15 个视图各有一条真实返回 200 的路由**——一条命令可查（对每个路由 `curl -o /dev/null -w '%{http_code}'`）；
+   ⛔ 6 个新页面不得以"路线图占位"形态交付（原型里那种"未实现。"占位页**不算实现**）。
+② **数字必须取自产生它的机件本身**：`observation.ts readLive` / `client.taskList` / `git log` /
+   `resource-gate.sh` / `process-budget.sh` / `loop-driver-check.sh` / `session-liveness.sh` 等；
+   ⛔ **不得解析 `manager-tick-log.md` / `manager-phase-goal.md` 这类叙事文档取数**
+   （审计 §2.4.2 已列为反模式，与 CLAUDE.md 硬规则①同源）。
+   **取假方式**：`grep -rn 'manager-tick-log\|manager-phase-goal' packages/quay/src/` 命中 >0 即判假。
+③ **空态诚实**：任一页面/卡片数据源为空或不可用时渲染「未接入/无数据」，⛔ 不得留白、⛔ 不得显示 `0`
+   —— 复用 `observation.ts` 已有三态（`ok`/`empty`/`error`），⛔ 不得发明新的空值语义。
+   **取假方式**：把 `.workflow-events/` 改名后请求 dashboard/live ⇒ 必须出现「未接入」字样，出现 `0` 即判假。
+④ `packages/quay/test/` 下 **13 个既有 web 测试全绿**（天然能取假锚：改坏就红）。
+**⊢ 允许分批交付，但 AC95 只在 15 个视图【全部】满足 ①-④ 时才算达成**——
+⛔ 不得因为"首批三屏做完了"就勾选本条。
+
+### AC100（**风格一致性必须覆盖到设计里没画的既有页面** —— 人 16:2xZ 明令的第二条）
+**差集实读（这正是"设计中没有但当前实现已有"的那部分）**：
+```
+设计的 sc-if 视图里【没有】ADR 详情 / Goal 详情 / Doc 详情——它只画了这三者的列表页；
+而当前实现里这三个详情路由都存在且在用：/adr/:id（含 supersedes/supersededBy 双向渲染）
+                                        /goal/:id（含 kind/status 过滤、evidence 最近 verdict）
+                                        /doc/:id
+```
 **判据（能取假）**：
-① `/dashboard`（或人裁定的路由名）真实返回 200，且页面含**至少 3 张卡片**，每张卡片的数字来自
-   **产生该数字的机件本身**（`observation.ts readLive` / `client.taskList` / `git log`），
-   ⛔ 不得解析 `manager-tick-log.md` / `manager-phase-goal.md` 这类叙事文档取数
-   （审计文件 §2.4.2 已把这条列为反模式，与 CLAUDE.md 硬规则①同源）；
-② Tasks / Task Detail 两屏改版后，`packages/quay/test/` 下 13 个既有 web 测试**全绿**
-   （这是天然的能取假锚：改坏了就红）；
-③ **空态诚实**：任一卡片数据源为空/不可用时渲染「未接入/无数据」，⛔ 不得留白或显示 0
-   —— 复用 `observation.ts` 已有的三态（`ok`/`empty`/`error`），⛔ 不得发明新的空值语义。
-   **取假方式**：把 `.workflow-events/` 改名后请求该页 ⇒ 必须出现「未接入」字样，出现 `0` 即判假。
+① 这三个详情页与 15 个设计视图**共用同一套样式来源**——即 Modernist 的 token
+   （`docs/design/.../_ds/modernist-*/styles.css` 里的 `--color-*` / `--font-*` / `--space-*` / `--radius-*`）；
+   **取假方式**：`grep -cE '#[0-9a-fA-F]{6}' <渲染这三个详情页的代码段>` 若命中写死十六进制色值 >0 ⇒ 判假
+   （现状全站颜色写死十六进制，见审计 §1.1，这是本条要消灭的东西）。
+② 三个详情页在 375×812 视口下**可读**（与 AC96 同一套截图流程，同一判据形态）。
+**⇒ 本条与 AC95 的分工**：AC95 管"设计画了的都要有"，**AC100 管"设计没画但已经在跑的不能被落下"**
+——否则改版结果是一个风格分裂的 UI：15 个新页面一套样式、3 个详情页停在旧样式。
 
 ### AC96（响应式从 1 个断点到真·双形态，且判据是截图不是 CSS 行数）
 **判据（能取假）**：桌面 1440×900 与移动 375×812 两个视口各截一次图（chrome-devtools MCP，
@@ -337,22 +390,74 @@ JSON API 端点                        0 个       （grep -c 'application/json'
 grep 不到 ⇒ 判假。**⛔ 本 AC 不要求推进 goal-store 迁移**——那是一个独立的、需要人裁定的方向，
 **⛔ 不得把它塞进本阶段当前置**（硬规则⑫：不许凭空设前置）。
 
-### AC99（**Manager/System 两屏排在最后，且前置是机读接口而不是 UI**）
-**为什么单列**：审计 §2.4.2 已实测——`pool`/`floor`/`deficit` 这类字段**目前没有稳定的 `--json` 输出接口**，
+### AC99（**Manager/System 两屏的前置是机读接口，不是 UI** —— 顺序约束保留，"排在最后"取消）
+**⚠️ 裁定②的影响**：人明令"实现设计中的所有页面"，所以 Manager/System **必须做**，
+**"排在最后"这个措辞作废**；但**前置约束不变且更要紧**。
+**为什么前置不能省**：审计 §2.4.2 已实测——`pool`/`floor`/`deficit` 这类字段**目前没有稳定的 `--json` 输出接口**，
 **这块工作的大头在后端补机读输出，不在 Web UI**。若先做 UI，唯一能拿到数的办法就是去解析 manager 的叙事日志
-——那正是被明令禁止的反模式。
-**判据（能取假）**：本 AC 达成 = **先有机读接口**（`resource-gate.sh` / `process-budget.sh` /
-`slot-refill` 至少其一产出稳定 JSON，且有一条 AC 级判据读它的**生产载体**而非 fixture
-——硬规则④推论三），UI 页面才允许开工。
+——那正是 AC95②明令禁止的反模式。**⇒ 顺序不是偏好，是"不这么做就必然违反 AC95②"。**
+**判据（能取假）**：Manager/System 两屏所消费的每一个字段，都能追到一个**产出稳定 JSON 的机件**
+（`resource-gate.sh` / `process-budget.sh` / `slot-refill` / `loop-driver-check.sh` / `session-liveness.sh`），
+且至少有一条 AC 级判据读它的**生产载体**而非 fixture（硬规则④推论三）。
 **⊢ 取假方式**：把 fixture/注入 seam 关掉后该判据仍能通过，才算测量；否则是回声。
+**⊢ 附加（审计 §2.4.2 的具体警示，落成判据）**：`loadavg` 阈值必须读 `nproc` 计算，
+⛔ 不得写死一个在本机算出来的数字（硬规则④推论二：依赖宿主容量的字面值不是常量）。
+
+### AC101（**suite 在 main 相 lane=8 下总耗时 ≤ 600s** —— 人 16:2xZ 明令，与 UI 工作同步持续推进）
+
+**目标值来源**：**人逐字设定 600s**。⛔ 我不改这个数、也不把它当我自己推导的阈值
+（硬规则④："成本结构未知前不设阈值"约束的是**我**凭空设阈值；人设定的目标是输入，不是我的推断）。
+**但硬规则④要求的成本分解仍然必须做**，否则无法知道该优化哪里——分解已有实测基线：
+
+**基线（round215，`.quay/verification-round.jsonl` 实读，lane=8，`nproc=16`）**：
+```
+static   83s (lanes=1)   serial 304s (lanes=8)   lowconc 276s (lanes=8)   main 349s (lanes=8)
+总计 1015s   ⇒ 距 600s 目标需砍 ≈415s（41%）
+```
+**关键结构事实（同一份 jsonl，历史 14 轮绿样本对照）**：
+```
+serial / lowconc 两相【历史上一直是 lane=8】——它们的耗时与 laneCount 16→8 无关
+   历史典型：serial 110–170s、lowconc 107–181s
+   round215：serial 304s、lowconc 276s  ⇒ 【翻了约一倍，原因未定】
+main 相历史 lane=16 时 154–239s；round215 lane=8 时 349s ⇒ 这一相的增长可由 lane 减半解释
+```
+**⇒ 优化的首要对象是 serial + lowconc 那多出来的 ≈290s，不是 main 相**——
+若这两相回到历史典型（各约 140s），总计 ≈ 83+140+140+349 = **712s**，仍超 600s，
+**⇒ main 相还需再砍 ≈112s**。**这两步是本 AC 的两个可独立验证的子目标。**
+
+**⚠️ 未证实项（标注为假说，⛔ 不得当成因去改）**：我 15:4xZ 查到 round215 起止**紧邻**两段
+高频 systemd-run scope 突发（08:10–08:13Z 约 112 次、08:28–08:31Z 约 114 次，特征串定位到
+`full-suite-runner.test.mjs` / `trend-check.test.mjs` / `checker-cost.test.mjs` 的资源闸自测 fixture），
+时间上高度吻合 serial/lowconc 的翻倍，**但没有反事实对照轮，因果未证**（硬规则④推论四）。
+**⊢ 本 AC 的第一步动作就是给它造对照**：在无并发 scope churn 的窗口跑一轮同提交的 lane=8 全量，
+两轮 phase 级耗时对比 ⇒ 才能判定该假说真假。⛔ 不得跳过对照直接按假说去优化。
+
+**判据（能取假，三条全真才算达成）**：
+① `.quay/verification-round.jsonl` 中存在 **≥3 轮**记录，满足 `laneCount==8` ∧ `state=="green"`
+   ∧ `durationMs <= 600000`，且这 3 轮的 `startedAt` **晚于本 AC 立条时刻（2026-08-16T16:2xZ）**；
+   **⇒ 读的是生产载体、不是 fixture，且只计立条之后的窗口（硬规则④推论三的标准形态）。**
+② 这 3 轮**不得**通过缩减测试覆盖达成——`tests` 字段（round215 基线 = **4951**）不得低于基线；
+   **取假方式**：某轮 `durationMs<600000` 但 `tests<4951` ⇒ 该轮不计入，且判为"用砍覆盖换速度"。
+③ 优化手段落成**代码/配置**（可 `git log` 追溯的提交），⛔ 不接受"挑一个负载低的时段跑一轮"充数
+   ——那是环境波动，不是优化。
+**⊢ 与 UI 工作的关系**：人明令"同步持续优化"，**⇒ 本 AC 与 AC95–AC100 并行，不互为前置**；
+但两者共用 suite 这一个瓶颈资源，⛔ 不得为了跑 UI 的验证而暂停本 AC 的对照测量。
 
 ---
 
-**⛔ 本阶段落笔归属（与当前阶段同规）**：AC95–AC99 全部落在 `packages/quay/src/`（产品代码）
-+ `packages/quay/test/`，**归 inner（实现）+ outer（立案/派发）**。
+**⛔ 本阶段落笔归属**：AC95–AC101 全部落在 `packages/quay/src/`（产品代码）+ `packages/quay/test/`
++ `plugin/scripts/`（AC99 的机读接口、AC101 的 suite 优化），**归 inner（实现）+ outer（立案/派发）**。
 **manager 一条不改产品代码**；AC94 是唯一由 manager 自己完成的（保存设计材料，人明令）。
-**⛔ 优先级**：本阶段整体**排在当前阶段（AC85–AC93）之后**；
-⛔ 在人明令切换之前，不得因为"这里写着 AC"就派发 AC95–AC99 —— **立案 ≠ 开工**。
+**⛔ 本阶段已是当前阶段（人 16:2xZ 切换并明令"实际持续推进"）** —— 可以且应当派发。
+**⊢ 建议的开工顺序（不是硬前置，除 AC99 那条外）**：
+```
+AC97（三条零成本缺口，改一行/加一个链接/重启进程）  ← 最先，风险最低
+AC101 的对照测量（造反事实轮，判定 serial/lowconc 翻倍的真因）  ← 与 UI 并行，越早越好
+AC95 的 9 个已实现视图改版 + AC96 响应式 + AC100 三个详情页  ← 主体工作量
+AC99 前置的机读 JSON 接口 → 然后 system/manager 两屏
+AC95 剩余新页面（dashboard/tests/sessions/architecture）
+AC98 /goal 空态（小，可随手做）
+```
 
 ---
 
