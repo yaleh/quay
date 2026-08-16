@@ -1,7 +1,7 @@
 ---
 id: gap-ac101-suite-under-600s
 title: "AC101: suite 在 main 相 lane=8 下总耗时 ≤600s（人设定 600s；先造反事实对照轮再优化）"
-status: ready
+status: done
 labels:
   - gap
   - mechanism
