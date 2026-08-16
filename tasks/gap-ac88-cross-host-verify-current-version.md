@@ -65,3 +65,8 @@ depends_on:
 - （无代码改动的实现面——本任务为 outer 跨主机驱动执行）
 - .quay/（AC89 记录文件）
 - tasks/gap-ac88-cross-host-verify-current-version.md（自身）
+
+## Evidence（2026-08-16 进展）
+
+- **①② 已验（B/C 双机）**：build 25f76ad7 .tgz（quay-0.4.0 + quay-native-0.4.0，sha256 双机一致）→ scp → verify-deliver-coldstart.sh：STEP1_OK=1（install）+ STEP2_OK=1（quay-init）+ AC5_OK=1（build_sha 40-hex + build_date 2026-08-16T10:37 ≥ 切换日 + sha256 在）。B/C 均 0.4.0 可用。发现 B/C 默认 node v18.19.1 无 --experimental-strip-types（用 nvm v22/current v24 PATH 修复）。
+- **③ 冷启动 live：人裁定路径钉死**（2026-08-16 14:0xZ 逐字：「是的 tmux 和交互式 Claude Code 会话是必要的。claude -p 不在本次交付范围内」）——**唯一路径 = 在 B 或 C 开真 tmux + 交互式 Claude Code 会话照 SKILL.md 走完整流程**（Monitor 挂载 + CronCreate + send-keys 驱动 inner）；⛔ claude -p headless 排除（只服务于未启动的 SPEC-worker-driven-inner）。实证：脚本 --cold-start-drive best-effort 不足（L2 无活层）。**③ 是否现在开、谁来开 = 待决（控制面操作）**。
