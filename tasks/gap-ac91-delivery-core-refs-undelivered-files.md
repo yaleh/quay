@@ -54,7 +54,17 @@ depends_on: []
 
 ## Touches
 
-- plugin/loop/*（交付副本的引用修复）
-- plugin/scripts/*（引用解析检查器）
-- packages/quay/scripts/quay-init.sh（如豁免逻辑需修正）
+- plugin/workflows/execute-suite-fix.js（新镜像：交付被引用而此前未交付的 workflow）
+- plugin/workflows/pool-quality-judge.js（新镜像：交付被引用而此前未交付的 workflow）
+- plugin/scripts/quay-init.sh（引用集 alternation 扩到 `.claude/workflows|.claude/agents`；引用源加 `plugin/workflows/*.js`；`--loop` 隐含 `--workflows`；derive_loop_scripts 扫 workflow 文件）
+- plugin/sync.sh（workflow 同步集 2→5）
+- plugin/skills/init/SKILL.md（`orchestration/session-liveness.env` 声明 self-create）
+- plugin/test/quay-init-loop-consumer-doc-refs.test.mjs（3 条 AC91 测试：正+负+真实安装）
+- plugin/test/plugin-packaging.test.mjs（M143 workflow 镜像集 2→5 + byte-identity）
+- plugin/scripts/workflows-dual-copy-drift-check.ts（双副本漂移闸 pinned 对集 3→5）
+- plugin/test/workflows-dual-copy-drift-check.test.mjs（双副本漂移闸 pinned 对集 3→5）
+- plugin/scripts/checker-mutation-cases/workflows-dual-copy-drift-check.sh（双副本漂移闸 pinned 对集 3→5）
+- plugin/scripts/capability-catalog.sh（双副本漂移闸 pinned 对集 3→5）
+- scripts/test.sh（双副本漂移闸 pinned 对集 3→5）
+- docs/proposals/quay-product-outline.md（§6 DELIVERY-INVENTORY workflows=3→5，`--write-inventory` 刷新）
 - tasks/gap-ac91-delivery-core-refs-undelivered-files.md（自身）
