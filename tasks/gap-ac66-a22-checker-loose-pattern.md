@@ -40,7 +40,7 @@ A22_READING_RE = /心跳|读数|晋|无晋|心跳已跑|POOL|deficit|promotions|
 
 ## Definition of Done
 
-- [ ] checker 只匹配真 A22 读数行，状态注记不再误触发；发生率 3 的结构性根因消除。（待外部——fan-in 后 develop 全量 suite 验证）
+- [ ] checker 只匹配真 A22 读数行，状态注记不再误触发；发生率 3 的结构性根因消除（fan-in 后 develop 全量 suite 验证）。（待外部）
 
 ## Touches
 
