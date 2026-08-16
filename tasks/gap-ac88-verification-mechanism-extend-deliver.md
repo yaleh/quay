@@ -65,6 +65,7 @@ depends_on: []
 ## Touches
 
 - plugin/scripts/verify-deliver-coldstart.sh（新增——AC88 三步交付验证机制，等价验证脚本）
+- plugin/scripts/loop-shipping-exclusion-data.mjs（排除表——verify-deliver-coldstart.sh 条目所在，target-layout 类同 quay-init.sh）
 - plugin/scripts/capability-catalog.sh（登记 verify-deliver-coldstart.sh 机件声明）
 - plugin/test/verify-deliver-coldstart.test.mjs（新增——机制 hermetic 自检）
 - docs/proposals/quay-product-outline.md（DELIVERY-INVENTORY 快照 scripts 254→255）
