@@ -190,6 +190,61 @@ test("AC4 CLI — an empty root (no tick core) exits 1 (missing red readings ⇒
   }
 });
 
+// ── AC4 (C3 migrated-form controls, gap-ac76 item 7): the c3_resource_gate invariant follows the
+//    C3→R32 clause migration — accepts the direct form OR (core pointer ∧ archive phrase), and
+//    reddens when neither is present ──────────────────────────────────────────────────────────────
+
+test("AC4 (C3 migrated) — the migrated form (core C3 正身已迁出 pointer + archive R32 phrase) verifies GREEN", () => {
+  const entry = REGISTRY.find((r) => r.id === "c3_resource_gate");
+  assert.ok(entry);
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "roa-c3mig-"));
+  try {
+    const orch = path.join(tmp, "orchestration");
+    const scripts = path.join(tmp, "plugin", "scripts");
+    fs.mkdirSync(orch, { recursive: true });
+    fs.mkdirSync(scripts, { recursive: true });
+    // resource-gate.sh exists (the script gate is live; only the outer C3 clause was migrated).
+    fs.writeFileSync(path.join(scripts, "resource-gate.sh"), "#!/bin/sh\nexit 0\n");
+    // The C3 clause in the core is now ONLY the migration pointer (the body lives in the archive).
+    fs.writeFileSync(path.join(orch, "orchestrator-tick-core.md"),
+      "| C3 | ~~**C3 正身已迁出**~~ → `orchestration/archive/AC58-retired-clauses.md#R32` (src:436) |\n");
+    const archiveDir = path.join(tmp, "orchestration", "archive");
+    fs.mkdirSync(archiveDir, { recursive: true });
+    fs.writeFileSync(path.join(archiveDir, "AC58-retired-clauses.md"),
+      "## R32 — outer B3 全量 suite 后台起跑退役\n... `resource-gate.sh --for full-suite` 放行 ...\n");
+    const res = entry.verify(tmp);
+    assert.equal(res.ok, true, `migrated form must verify:\n${res.detail}`);
+    assert.match(res.detail, /migrated/, "detail must name the migrated form");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("AC4 (C3 migrated) NEGATIVE CONTROL — neither the direct phrase NOR the C3 pointer (and no archive phrase) ⇒ c3 uncov", () => {
+  const entry = REGISTRY.find((r) => r.id === "c3_resource_gate");
+  assert.ok(entry);
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "roa-c3neg-"));
+  try {
+    const orch = path.join(tmp, "orchestration");
+    const scripts = path.join(tmp, "plugin", "scripts");
+    fs.mkdirSync(orch, { recursive: true });
+    fs.mkdirSync(scripts, { recursive: true });
+    // resource-gate.sh exists — isolates the clause check (a missing script would fail for the wrong reason).
+    fs.writeFileSync(path.join(scripts, "resource-gate.sh"), "#!/bin/sh\nexit 0\n");
+    // The C3 line carries NEITHER the direct phrase NOR the migrated pointer.
+    fs.writeFileSync(path.join(orch, "orchestrator-tick-core.md"),
+      "# outer tick — 执行核\n| C3 | 资源闸约束（正文已迁出且无指针引用） (src:1) |\n");
+    // The archive exists but does NOT carry the phrase.
+    const archiveDir = path.join(tmp, "orchestration", "archive");
+    fs.mkdirSync(archiveDir, { recursive: true });
+    fs.writeFileSync(path.join(archiveDir, "AC58-retired-clauses.md"), "## R32\n（无 resource-gate 短语）\n");
+    const res = entry.verify(tmp);
+    assert.equal(res.ok, false, `neither form present must fail the c3 invariant:\n${res.detail}`);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 // ── AC5: 接线 + 既有不回归 ────────────────────────────────────────────────────────────────────────
 
 test("AC5 wiring — outer tick core carries the red-on-omission audit invocation + the ruling5_status declaration", () => {

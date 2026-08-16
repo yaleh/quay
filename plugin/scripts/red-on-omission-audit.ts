@@ -338,13 +338,22 @@ export const REGISTRY: RedReadingEntry[] = [
     redReading: "`resource-gate.sh --for full-suite` 退出非 0 = WAIT ⇒ 全量不跑（门拒，不做就等不到 suite 结果）",
     verify: (root) => {
       const t = tickCore(root);
+      const archive = readUnder(root, "orchestration/archive/AC58-retired-clauses.md");
       const script = fileExists(root, "plugin/scripts/resource-gate.sh");
-      const ok = has(t, "resource-gate.sh --for full-suite") && script;
+      // AC84/AC76 C3→R32 迁移 (orchestrator-tick-core.md C3 body moved to the archive): accept the
+      // direct (unmigrated) form OR the migrated form — core holds the `C3 正身已迁出` pointer AND
+      // the archive holds the phrase. Falsifiable: if the clause vanishes from BOTH core and archive,
+      // ok=false → uncov → band red.
+      const direct = has(t, "resource-gate.sh --for full-suite");
+      const migrated = has(t, "C3 正身已迁出") && has(archive, "resource-gate.sh --for full-suite");
+      const ok = script && (direct || migrated);
       return {
         ok,
         detail: ok
-          ? "执行核 C3 声明 resource-gate + 脚本存在"
-          : `执行核 C3 声明=${has(t, "resource-gate.sh --for full-suite")}；脚本存在=${script}`,
+          ? (direct
+              ? "执行核 C3 声明 resource-gate（direct 形态）+ 脚本存在"
+              : "执行核 C3 已迁出 → archive#R32 声明 resource-gate（migrated 形态）+ 脚本存在")
+          : `执行核 C3 direct 声明=${direct}；migrated(指针∧档案短语)=${has(t, "C3 正身已迁出") && has(archive, "resource-gate.sh --for full-suite")}；脚本存在=${script}`,
       };
     },
   },

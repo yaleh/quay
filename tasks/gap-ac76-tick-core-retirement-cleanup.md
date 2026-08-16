@@ -46,11 +46,12 @@ depends_on: []
 3. AC76 判据5：代码文件（slot-refill/telemetry/heartbeat/live/A16 在飞用途）写显式退役标注（不删）。
 4. AC8 断言按新语义改（inner C7 迁出不计数）。
 5. 既有测试全绿 + `--for-task` scoped 门绿。
+6. item ⑦ c3 审计条目跟随退役条款：`red-on-omission-audit.ts` c3_resource_gate invariant 接受 direct 或 migrated 形态（核 C3 指针 ∧ 档案 R32 短语）；`red-on-omission-audit.test.mjs` 加 migrated-form 正/负控制（absent-everywhere red）。
 
 ## Acceptance Criteria
 
 - [x] AC1 判据1：tick core 无已退役文本——C7 收指针、$FORK_BASELINE 单线（A17/C3 改 develop）、A12/A13/A16 旧读法清除。
-- [x] AC2 判据2 能取假：AC76 判据5 代码文件显式退役标注（不删）；tick-core-static-check AC8「inner C7」新语义（迁出不计数）；既有测试绿。
+- [x] AC2 判据2 能取假：AC76 判据5 代码文件显式退役标注（不删）；tick-core-static-check AC8「inner C7」新语义（迁出不计数）；c3 审计条目跟随退役条款（red-on-omission-audit migrated 形态 covered、absent-everywhere red）；既有测试绿。
 - [x] AC3 判据3：`--for-task` scoped 门绿。
 
 ## Definition of Done
@@ -64,6 +65,7 @@ depends_on: []
 - plugin/scripts/fork-baseline.ts（如需，退役标注——已自带 RETIRED 标注，本次未改）
 - plugin/scripts/slot-refill.ts、plugin/scripts/fast-mode-telemetry.ts（AC76 判据5 退役标注）
 - plugin/test/tick-core-static-check.test.mjs（AC8 inner C7 新语义）
+- plugin/scripts/red-on-omission-audit.ts、plugin/test/red-on-omission-audit.test.mjs（item ⑦：c3_resource_gate invariant 跟随 C3→R32 退役条款迁移——direct/migrated 两形态 + 负控制）
 - tasks/gap-ac76-tick-core-retirement-cleanup.md（自身）
 
 ## Evidence
@@ -116,12 +118,23 @@ A16: 追加 `**AC76 退役注(C24-5→C24-1):--task-start 括号的【在飞】�
 对比核验：A9/A12/A17/C3/C7 五条与正本逐字一致；A13/A16 语义同（副本帧更短）。
 - **头注「逐字落地」陈旧声明修正**（判据1「tick core 不留已退役文本」）：正本 :14 与副本 :28 均曾写「正本改动后由 inner 按正本**逐字落地**」——与 SKILL.md:71 已落地事实矛盾（两副本非 byte-identical）。两处改为「按正本**语义**落地副本（副本为 quay-init --loop 铺出模板、引用目标 `docs/analysis/fast-mode-loop-tick.md` 源，非 byte-identical）」，对齐 gap-init-skill-md-byte-identical-claim-fix（50725186）表述。
 
+**⑦ c3 审计条目跟随退役条款（red-on-omission-audit.ts + test，item 7，outer AC76 迁移阻塞）** —— outer 把 orchestrator C3 正文迁出到 archive#R32（核内只剩 `~~**C3 正身已迁出**~~` 指针；`resource-gate.sh --for full-suite` 短语只在档案）。原 c3_resource_gate invariant（`has(t, "resource-gate.sh --for full-suite") && script`）只认 direct 形态 ⇒ 迁移后 uncov=1 ⇒ pre-commit doc 门挡全部提交。修法（red-on-omission-audit.ts c3 verify）：
+```
+const direct = has(t, "resource-gate.sh --for full-suite");
+const migrated = has(t, "C3 正身已迁出") && has(archive, "resource-gate.sh --for full-suite");
+const ok = script && (direct || migrated);
+```
+`detail` 区分 direct/migrated 形态。可取假：短语同时从核与档案消失 ⇒ ok=false ⇒ uncov ⇒ 红。测试加 migrated-form 正控制（核指针+档案短语 ⇒ GREEN）与负控制（核无 direct 短语/无指针 + 档案无短语 ⇒ c3 uncov 红）；既有 ruling5 负控制保留。
+
 **测试输出**：
 ```
 $ node --test plugin/test/tick-core-static-check.test.mjs   → ℹ tests 21 · pass 21 · fail 0
   ✔ AC8: the real repo passes, three-layer exclusion notation (…migrated A7/A12a/B2c/乙/丁 AND inner C7 are archived pointers…; outer B4)
 $ node --test plugin/test/direct-to-develop-bypass-check.test.mjs plugin/test/cap-counts-subagents-check.test.mjs plugin/test/retired-clause-check.test.mjs plugin/test/ac61-staleness-disposition-check.test.mjs → ℹ tests 71 · pass 71 · fail 0
 $ node --test plugin/test/slot-refill.test.mjs plugin/test/inner-wakeup-heartbeat.test.mjs → ℹ tests 105 · pass 105 · fail 0
+$ node --test plugin/test/red-on-omission-audit.test.mjs → ℹ tests 18 · pass 18 · fail 0
+  ✔ AC4 (C3 migrated) — migrated form verifies GREEN
+  ✔ AC4 (C3 migrated) NEGATIVE CONTROL — neither direct phrase NOR C3 pointer (no archive phrase) ⇒ c3 uncov
 $ node --no-warnings --experimental-strip-types plugin/scripts/tick-core-static-check.ts --root . --json → ok=true, ac3/ac4/ac5/ac6/ac8 全绿, fast-mode src:N 47/47
 ```
 
