@@ -171,6 +171,7 @@ rules* but does not re-implement each SPEC. Index (under `orchestration/` in the
 - `orchestration/SPEC-tick-quality-2026-08-14.md` — the cross-layer tick spec (R1–R9, each with a criterion and the failure that bought it; D1–D8 quality dimensions with the three-layer baseline)
 - `orchestration/SPEC-in-flight-semantics-2026-08-14.md` — 「在飞」的完整语义 (A unlanded-tasks vs B running-subagents; the 10 prior fixes of the same quantity; §6 the system-wide proxy-quantity survey and the proxy registry proposal)
 - `orchestration/SPEC-tick-mechanical-checks-mcp-2026-08-15.md` — tick 的机械检查统一为一个 MCP 工具面 (proposed·未排期, future phase; §1 the seven measured per-round coverage points and why an MCP server is the first thing both mechanical AND outside every layer's context; §3 integration into the existing quay MCP server, reusing observation.ts's degradation contract)
+- `orchestration/SPEC-worker-driven-inner-2026-08-16.md` — inner 改造为「机械驱动进程 + per-task `claude -p` worker 会话」（人 2026-08-16 裁定六个设计点；并发由驱动数子进程控制而非模型自数 subagent；主检出纯为驱动镜像、checkout 前 stash 不 discard；三阶段判据含【检查机制净减少】的贯穿判据）
 - `orchestration/SPEC-inbox-service-2026-08-08.md` — the inbox service (agent-to-agent communication channel: manager/outer/inner via a per-project background service, tmux demoted to emergency control)
 - `orchestration/SPEC-instruments-behind-one-entry.md` — instrument discovery behind one entry
 - `orchestration/SPEC-isolation-and-resource-governance-2026-08-05.md` — isolation + resource governance
