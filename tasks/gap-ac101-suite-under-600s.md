@@ -45,6 +45,15 @@ round215 cpu_time 多 1799s 也与「CPU 饥饿拖慢」方向相反。**替代�
 
 - [ ] AC1: `.quay/verification-round.jsonl` 存在 ≥3 轮记录，满足 `laneCount==8` ∧ `state=="green"`
       ∧ `durationMs <= 600000`，且 `startedAt` 晚于立条时刻（2026-08-16T16:2xZ）——读生产载体非 fixture。
+      **⊢ round219（17:11:46，green/556s/tests=5003/commit=17e91e38）计入 AC1**（manager 2026-08-16 17:4xZ
+      裁定：AC3 防的是「挑有利环境」，round219 在 concurrentSuitesRunning=2、load 9.26 的【更不利】环境跑出
+      556s ⇒ 证据强度高于干净窗口；且覆盖没砍，防作弊判据起作用）。**⛔ 但 AC1 另有前置，见 AC1b。**
+- [ ] AC1b: **⛔ AC101 不得在 `17e91e38` 进 develop 之前判达成**（manager 2026-08-16 17:4xZ 裁定，硬规则④推论三
+      原形——「实现了、测试绿了、但生产没跑过」与「没实现」同形）。让 556s 成立的 PHASE_OVERLAP 开关在
+      develop 上默认仍是关（`scripts/test.sh:1023 PHASE_OVERLAP="${QUAY_PHASE_OVERLAP:-0}"`，develop 工作树
+      现读）。**判据**：AC1 的 3 轮里至少 1 轮跑在【`17e91e38` 已进 develop 之后】的 develop 基线上；
+      或等价地，AC101 判达成时 `grep PHASE_OVERLAP scripts/test.sh` 在 develop 上默认显示为 1。
+      **取假（一条命令）**：`git merge-base --is-ancestor 17e91e38 develop` 为假 ⇒ AC101 不得勾。
 - [ ] AC2: 这 3 轮 `tests` 字段不得低于基线 **4951**（禁止砍覆盖换速度；低于基线即不计入且判作弊）。
 - [ ] AC3: 优化手段落成代码/配置（可 `git log` 追溯的提交），⛔ 不接受"挑低负载时段跑一轮"充数。
 
