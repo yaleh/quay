@@ -17,6 +17,11 @@ export const meta = {
 //     （定位 subagents/agent-<自己>.jsonl），不由调用方填值、不给可误抄的示例值。
 //  ④ 弱判据（SPEC-fan-in-ff-merge-lock-2026-08-14 §1-§7 实现）：本脚本即 SPEC 的实现；改本脚本的
 //     提交必须在提交信息点名对应 SPEC 节。
+//  ⑤ bracket-close（gap-fan-in-auto-close-telemetry-bracket）：step 5.5 在 ff 成功后、清理前关闭本任务的
+//     telemetry bracket（closure-lag-check.sh --close-task，A16 统一闭合点，写 --task-end done）。只按
+//     --taskId 关【本任务】的 bracket（inProgress[] 按 taskId 定位 runId），绝不 --reconcile 全局扫——判据2
+//     能取假：在飞任务/未 land 任务的 bracket 必须保留。ff 失败 ⇒ 不执行 5.5。改本块必须同步
+//     plugin/test/fan-in-execute-paths.test.mjs 的 bracket-close 组测试（真实 bash 闭 bracket + 在飞保留）。
 //
 //  脚本层能力边界（同 manager-tick-core.js 实测）：globalThis 仅 log/phase/budget/setTimeout/
 //  clearTimeout/agent/parallel/pipeline/workflow/args；无 require/process/fetch；import() 语法
@@ -238,10 +243,33 @@ if [ -z "$agent_id" ]; then echo "FATAL: 未能从 $self 提取 agent id（--age
 bash ${root}/plugin/scripts/fan-in-ff-merge.sh --task ${task} --run-id ${runId} --agent-id "$agent_id" --root ${root} --merge-target ${mergeTarget}
   —— 锁只包 git merge --ff-only，毫秒级，成/败都解锁。ff 失败（develop 前进了）⇒ 回 step 1 重跑
      （重 merge develop、重判 delta、重跑 suite、重 ff），同一任务 ff 失败 ≥3 次才谈防活锁。
+     ff 成功（exit 0）后才执行 step 5.5；ff 失败（exit 1/3）⇒ 回 step 1，绝不执行 step 5.5。
+
+【持锁段 step 5.5 — 关闭本任务的 telemetry bracket（仅 ff 成功后）】
+# bracket-close-block-start
+# gap-fan-in-auto-close-telemetry-bracket (occurrence 3: ac76/ac81+touches/ac85 land 后留 stale bracket):
+# dispatch 的 --task-start 从不在 land 时闭合 ⇒ 每次 land 留一个 stale bracket（reconcile_compliant=false）
+# 直到下一次手动/外层 --reconcile。ff 已成功（${mergeTarget} 已 ff 到 task/${task} tip）⇒ 本任务 executor
+# observably done ⇒ 经 closure-lag-check.sh --close-task（A16 统一闭合点）写 --task-end done。
+# 只关【本任务】的 bracket（--taskId ${task} 在 telemetry report 的 inProgress[] 按 taskId 定位 runId）——
+# 绝不 --reconcile 全局扫（判据2 能取假：在飞任务/未 land 任务的 bracket 必须保留）。
+# 幂等：无 open bracket（已闭合/从未 --task-start）⇒ --close-task exit 0，无写入。
+if ! bash ${root}/plugin/scripts/closure-lag-check.sh --close-task --taskId ${task} --outcome done --root ${root}; then
+  echo "FATAL: telemetry bracket 闭合失败（${task} ff 已成功但 --close-task 非 0）——landing 完成但 bracket 未闭合（stale bracket 将留到下一轮 reconcile）" >&2
+  exit 1
+fi
+# bracket-close-block-end
+
+—— step 5.5 结果：exit 0 ⇒ bracket 已闭合（返回 note 标注 bracketClose=OK）。
+    exit 1 ⇒ bracket 闭合失败（FATAL 已打印）——ff 已成功、task 已 done、landing 完成；
+    【不得】重试 ff、【不得】把 outcome 判为失败/needs-human、【不得】跳过清理；
+    照常执行下方清理，返回时 note 必须标注 bracketClose=FAILED（让外层可见闭合失败）。
+
 ff 成功后清理：cd ${root} && git worktree remove ${worktree} --force && git branch -d task/${task}
 
-返回 { outcome: 'green' | 'needs-human' | 'red', ffOk, developHead, worktreeHead, agentIdUsed, codeDelta, note }。
-outcome=green 仅当 ff 成功（develop fast-forward 到 task tip）。needs-human 仅当冲突解不了/选中集非绿/ts-typecheck 阻断。red = 其它失败。`,
+返回 { outcome: 'green' | 'needs-human' | 'red', ffOk, developHead, worktreeHead, agentIdUsed, codeDelta, note, bracketClosed }。
+outcome=green 仅当 ff 成功（develop fast-forward 到 task tip）。needs-human 仅当冲突解不了/选中集非绿/ts-typecheck 阻断。red = 其它失败。
+bracketClosed = step 5.5 的闭合结果（true=已闭合 / false=闭合失败 / null=ff 未成功未执行 5.5）。note 必须标注 bracketClose=OK 或 bracketClose=FAILED。`,
   {
     schema: {
       type: 'object',
@@ -253,6 +281,7 @@ outcome=green 仅当 ff 成功（develop fast-forward 到 task tip）。needs-hu
         agentIdUsed: { type: 'string' },
         codeDelta: { type: 'string' },
         note: { type: 'string' },
+        bracketClosed: { type: 'boolean' },
       },
       required: ['outcome', 'ffOk'],
     },
@@ -264,6 +293,7 @@ return {
   outcome: result.outcome === 'green' ? 'green' : result.outcome === 'needs-human' ? 'needs-human' : 'red',
   ffOk: result.ffOk,
   task,
+  bracketClosed: typeof result.bracketClosed === 'boolean' ? result.bracketClosed : null,
   message: result.ffOk
     ? `fan-in landed for ${task} (via 'fan-in-execute' workflow)`
     : `fan-in did not land for ${task}: ${result.note ?? 'unknown'}`,

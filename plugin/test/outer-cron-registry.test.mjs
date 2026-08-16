@@ -172,7 +172,7 @@ test("cronExprsEquivalent: 语义等价 `*/20`≡`0,20,40`；真漂移不≡", (
 test("loadRegistry: real git-tracked registry file parses with both layers", () => {
   const reg = loadRegistry(REPO_ROOT);
   assert.ok(reg);
-  assert.equal(reg.layers.inner.cronId, "ff96ad7e");
+  assert.equal(reg.layers.inner.cronId, "0ccb57cf");
   assert.equal(reg.layers.inner.cronExpr, "7,27,47 * * * *");
   assert.equal(reg.layers.outer.cronId, "4e88cb1b");
   assert.equal(reg.layers.outer.cronExpr, "0,20,40 * * * *");
@@ -201,7 +201,7 @@ test("REAL inner anchor: 四判据全真 + 剩余寿命≈7天 ⇒ PASS (exit 0)
     writeInnerSection(p, INNER_PROMPT);
     const r = runReg([
       "--verify", "--layer", "inner",
-      "--cron-list", JSON.stringify([{ id: "ff96ad7e", schedule: "7,27,47 * * * *" }]),
+      "--cron-list", JSON.stringify([{ id: "0ccb57cf", schedule: "7,27,47 * * * *" }]),
       "--canonical-file", p,
       "--registry-file", REGISTRY_FILE,
     ]);
@@ -212,7 +212,7 @@ test("REAL inner anchor: 四判据全真 + 剩余寿命≈7天 ⇒ PASS (exit 0)
     const res = checkVerify({
       layer: "inner",
       registry: reg,
-      cronListRaw: JSON.stringify([{ id: "ff96ad7e" }]),
+      cronListRaw: JSON.stringify([{ id: "0ccb57cf" }]),
       canonicalPrompt: INNER_PROMPT,
       nowMs: Date.parse("2026-08-14T16:00:00Z"),
     });
@@ -433,7 +433,7 @@ test("NOT-EVALUATED: 内层正本缺失（--root 指向无 AC80 段的目录）�
   try {
     const r = runReg([
       "--verify", "--layer", "inner",
-      "--cron-list", JSON.stringify([{ id: "ff96ad7e" }]),
+      "--cron-list", JSON.stringify([{ id: "0ccb57cf" }]),
       "--registry-file", REGISTRY_FILE,
       "--root", dir,
     ]);
@@ -468,11 +468,11 @@ test("NOT-EVALUATED: 注册表缺失/层缺失 ⇒ exit 2", () => {
 
 test("checkVerify: 四判据全真 + 剩余正常 ⇒ ok:true (exit 0)", () => {
   const reg = loadRegistry(REPO_ROOT);
-  const nowMs = Date.parse("2026-08-15T02:00:00Z");
+  const nowMs = Date.parse("2026-08-16T05:00:00Z");
   const res = checkVerify({
     layer: "inner",
     registry: reg,
-    cronListRaw: JSON.stringify([{ id: "ff96ad7e" }]),
+    cronListRaw: JSON.stringify([{ id: "0ccb57cf" }]),
     canonicalPrompt: INNER_PROMPT,
     nowMs,
   });

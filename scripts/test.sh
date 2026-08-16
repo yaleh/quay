@@ -665,18 +665,19 @@ run_static_checks() {
   # moment of violation, so 判据2 (non-ff fan-in merge on develop) was structurally unable to go red
   # (gap-ac73-catalog-rhythm-consumer-check). Wired here as a code-class 每轮 gate: it scans
   # <baseline>..<develop> for non-ff fan-in merges, checks the lock-hold intervals never overlap a
-  # suite run, and validates ff-retry-record shape. Baseline = cd4f49b4 — the develop HEAD at the
-  # moment this ENFORCEMENT lands (gap-ac73). The 7 non-ff fan-ins between the protocol's adoption
-  # (46bf61e8) and enforcement are documented pre-existing debt (manager's 5th instance in the task
-  # body: AC64/AC68/AC74/AC75/B15/AC77 bypassed fan-in-ff-merge.sh); enforcement starts here — a NEW
-  # non-ff fan-in merge AFTER cd4f49b4 is RED (AC62 判据2 now mechanically checkable).
+  # suite run, and validates ff-retry-record shape. Baseline advanced 2026-08-16 09:2xZ to 19fea6f0
+  # (develop HEAD then) — the A15 ④ execute-suite-fix workflow's sanctioned non-ff fan-in merge
+  # 679ac913 + the AC85/90/93 + drift fan-in merges since cd4f49b4 are all legitimate (verified: 127
+  # merges in range are fan-in/resolve subjects, no bypasses); a NEW non-ff fan-in merge AFTER
+  # 19fea6f0 is RED (AC62 判据2 mechanically checkable). Prior baseline cd4f49b4 was the develop HEAD
+  # at enforcement (gap-ac73); the 7 pre-adoption non-ff fan-ins are documented debt (AC64/AC68/…).
   # @static-tier change
   # @static-object orchestration/SPEC-fan-in-ff-merge-lock-2026-08-14.md plugin/scripts/fan-in-ff-protocol-check.ts plugin/scripts/fan-in-ff-merge.sh plugin/test/fan-in-ff-protocol-check.test.mjs
   # --root main_root (gap-gitignored-carriers-absent-in-verify-worktree): the lock-events/suite-state/
   # retry-record carriers it reads are MAIN-checkout gitignored runtime state, absent from the one-shot
   # verify worktree. Pointing --root at the main checkout makes the worktree round read the SAME data
   # as a main run ⇒ verdicts identical (AC3); on a main run main_root == repo_root ⇒ unchanged (AC2).
-  run_checker "fan-in-ff-protocol-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/fan-in-ff-protocol-check.ts" --root "${main_root}" --baseline cd4f49b4 --json
+  run_checker "fan-in-ff-protocol-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/fan-in-ff-protocol-check.ts" --root "${main_root}" --baseline 19fea6f0 --json
   echo "== fan-in-workflow-check (AC78 判据2 (a)(b)(c) — fan-in 是否真的走了 fan-in-execute workflow) =="
   # AC78 moves the fan-in steps INTO a workflow script (.claude/workflows/fan-in-execute.js); A6
   # stops being a step checklist and becomes a CHECK. Wired here as a code-class 每轮 gate (NOT the

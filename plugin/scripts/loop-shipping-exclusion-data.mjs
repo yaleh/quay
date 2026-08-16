@@ -294,6 +294,11 @@ export function exclusionEntries(repoRoot, pluginDir) {
       reason: "consumer-laid target layout reference — verify-delivery-surface.ts's LAID_MANIFEST deliverables intentionally reference the consumer's laid tick-doc paths (orchestration/orchestrator-loop-tick.md + docs/analysis/fast-mode-loop-tick.md, added by gap-verify-delivery-surface-checks-source-layout-not-consumer-laid; --layout laid verifies a quay-init --loop consumer's orchestration/ + docs/analysis/ copies) — same class as adr016-screen-use-check / no-manager-tick-doc-check / instrument-failure-check",
       retainedNote: "kept despite possibly inert in a SOURCE-only checkout (develop pre-fan-in): the LAID_MANIFEST consumer-laid deliverables only exist when the consumer-laid manifest is present — the main-checkout state the AC1b scan flags. In that state the deliverables carry the old tick-doc paths VERBATIM and AC1b would flag the checker as a live reference; the reference is INTENTIONAL (the laid-layout completeness check validates the consumer's deployed copies, not a stale source-copy). The entry oscillates between inert (source-only checkout) and live (consumer-laid manifest present) — same oscillation class as the batch2-queue-state / tick-log / manager-pending entries",
     },
+    {
+      rel: 'plugin/scripts/verify-deliver-coldstart.sh',
+      target: path.join(pluginDir, 'scripts', 'verify-deliver-coldstart.sh'),
+      reason: "AC88's delivery-verification script — its step2_init (L1 laid-down check) and step3_coldstart probes verify the consumer's TARGET layout (orchestration/orchestrator-loop-tick.md + docs/analysis/fast-mode-loop-tick.md, the paths quay-init --loop lays in a consumer project), so the old-path strings are the verification OBJECT, not stale source-copy references — same class as quay-init.sh / cold-start SKILL / verify-delivery-surface.ts",
+    },
     // NOTE: plugin/loop/ is fully excluded: the tick-doc templates legitimately spell the TARGET
     // layout (orchestration/ + docs/analysis/ for a cold-started project). Their own old-path
     // strings are therefore only policed by AC1c's three assertions, and AC1c's liveLines filter
