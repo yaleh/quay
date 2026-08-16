@@ -6,7 +6,8 @@ labels:
   - gap
   - mechanism
 parent: null
-children: []
+children:
+  - gap-fan-in-delta-scope-inventory-annotate
 extra:
   schema: execution
 depends_on: []
@@ -36,6 +37,7 @@ fullSuiteRan=false      64 条（doc-only-delta 57 / no-develop-delta 6 / empty-
 从未跑过全量轮          34 个
 doc-only-delta 跳过 + Touches 声明非 doc 路径   32 个（我数）/ 16 个（manager 数）
 ```
+**⚠️ 发生率是【增长的】，不是历史存量（manager 2026-08-16 22:4xZ）**：立案（22:01:40Z）后 10 分钟，`gap-touches-one-entry-detector-not-enforcer` 又以 doc-only-delta（22:11:53Z）放走 precommit-guard.ts:65 的 import 改动；27 分钟后 concurrency-literal 的全量 suite 抓红（4 fails，单一根因 = 该 import）。**⇒ 闸门在持续放水，每轮 fan-in 都可能新增一条。优先级理由 = "持续放水" 而非 "存量 32"。**
 **⚠️ 方法限度（⛔ 写入，别当确数）**：32 按任务体声明的 `## Touches` 数，非实际 diff——可能高估（声明了没真改）也可能低估（改了没声明）。**真值要逐任务 diff = 本任务第一条 AC**。16 vs 32 方法差已解：manager 把 `orchestration/` 当 doc，**我核实它是错的**——`tick-core-static-check.ts:69-76` 硬编码 5 个 `orchestration/*.md` 为输入，且该检查器测试在套件里跑 11 次 ⇒ **改 orchestration/*.md 能把套件弄红，它不是 doc**。⇒ **32 更接近真值**。
 
 **⊢ 「doc」的判据定义（manager 22:0xZ 建议，本任务采用）**：**doc ≠ "文件名以 .md 结尾"或任何手写路径表**——doc 应该定义为「**没有任何套件检查器读这个路径**」。理由：手写正则表都会漂（manager 漏 orchestration/，下次可能漏 .claude/workflows/ 或 docs/references/），两个人各拍一张表不会比一个人拍得准。**可机械化形式**：套件检查器各自声明（或被枚举出）它读哪些路径 ⇒ **doc-only 的定义 = delta ∩ (所有检查器读的路径集合) = ∅**——这个集合可从代码算出，不用人维护。**取假**：往 `orchestration/manager-tick-core.md` 塞违反 (src:N) 的改动，若闸门仍判 doc-only ⇒ 判据假。
@@ -48,10 +50,11 @@ doc-only-delta 跳过 + Touches 声明非 doc 路径   32 个（我数）/ 16 �
 
 ## Acceptance Criteria
 
-- [ ] AC1: **枚举存量（修法之前先数清）**——对 `per-task-suite-records.jsonl` 里所有「fullSuiteRan=false ∧ skipReason=doc-only-delta ∧ 从未 fullSuiteRan=true」的任务，逐任务 `git diff` 核对其实际改动的文件，**用「无套件检查器读该路径 = doc」的可计算定义**（枚举套件检查器读的路径集合，delta ∩ 该集合 = ∅ 才算 doc-only）判定，产出**确数清单**（任务 id + 实际改动的非 doc 路径）。AC1 以这份清单为准，⛔ 不以 Touches 声明数代替（那是 32 那个估计值），⛔ 不用手写路径正则表。
+- [ ] AC1: **枚举存量（修法之前先数清）**——对 `per-task-suite-records.jsonl` 里所有「fullSuiteRan=false ∧ skipReason=doc-only-delta ∧ 从未 fullSuiteRan=true」的任务，逐任务 `git diff` 核对其实际改动的文件，**用「无套件检查器读该路径 = doc」的可计算定义**（枚举套件检查器读的路径集合，delta ∩ 该集合 = ∅ 才算 doc-only）判定，产出**确数清单**（任务 id + 实际改动的非 doc 路径）。AC1 以这份清单为准，⛔ 不以 Touches 声明数代替（那是 32 那个估计值），⛔ 不用手写路径正则表。**⚠️ 清单必须【带时间戳且可增量】——闸门还开着，今天数完明天就少一条（立案后已新增 12510d87/touches）⇒ ⛔ 别产出一个静态数字当结论。**
 - [ ] AC2: **修法**——fan-in delta 判定改看**分支整体相对 develop 的变更**（含更早进入分支历史的代码），不是单轮 fan-in 合并的 diff；且 doc-only 判定改用「无套件检查器读该路径」的可计算定义（枚举检查器读路径集合，非手写正则表）。取假一：代码在更早分支提交、fan-in 单轮 delta 只见 doc ⇒ 必须仍判需跑全量。取假二：`orchestration/manager-tick-core.md` 塞违反 (src:N) 的改动 ⇒ 不得判 doc-only。
-- [ ] AC3: 修法后**新的** code 型 fan-in 不再出现「代码进 develop 但全量轮未覆盖」（判据：per-task-suite-records 新增记录中，Touches/实际 diff 声明非 doc 而 fullSuiteRan=false 的任务数为 0）。
-- [ ] AC4: **存量处置**——AC1 枚举出的已 done 但未验证任务，逐个标注「落地未经全量轮验证」（如 manager 给 AC97 的 2df28ee4 样式），并判定是否需补跑全量轮。
+- [ ] AC3: 修法后**新的** code 型 fan-in 不再出现「代码进 develop 但全量轮未覆盖」（判据：per-task-suite-records 新增记录中，Touches/实际 diff 声明非 doc 而 fullSuiteRan=false 的任务数为 0）。**⚠️ 时间窗必须从【修法落地之后】起算，⛔ 不用立案时刻**——已有一个立案后违例样本（`gap-touches-one-entry-detector-not-enforcer` @ 22:11:53Z，doc-only-delta skip 放走 precommit-guard.ts:65 改动），若用立案时刻会把它算进去判假。**⛔ 发生率是增长的（不是历史存量）：立案后 10 分钟又放走一条，闸门在持续放水。**
+- [ ] AC4: **存量处置（拆为后继任务 `gap-fan-in-delta-scope-inventory-annotate`）**——AC1 枚举出的已 done 但未验证任务，逐个标注「落地未经全量轮验证」（如 manager 给 AC97 的 2df28ee4 样式）。**⛔ AC4 不在本任务做**：它写 `tasks/*.md`（目录级），与「本任务可派发」冲突（见 Touches 自锁说明）——拆到后继任务，等空窗跑。
+  **⊢ 拆分原因（manager 2026-08-16 22:3xZ）**：本任务 Touches 曾含目录级 `tasks/*.md`，使本任务与任何在飞任务 self-touch 冲突 ⇒ 结构上永不可派（delta-scope 自身也是一把全局锁形状）。AC1-AC3 对 tasks/ 是**只读**（枚举/diff/判据），不需声明 `tasks/*.md`；仅 AC4 写 tasks/。AC4 拆出后本任务可派。
 
 ## Definition of Done
 
@@ -62,5 +65,10 @@ doc-only-delta 跳过 + Touches 声明非 doc 路径   32 个（我数）/ 16 �
 - plugin/workflows/fan-in-execute.js（step2 delta 判定范围）
 - plugin/scripts/per-task-suite-record.ts（若需记录「未验证」标记）
 - plugin/test/fan-in-execute-paths.test.mjs（取假对照）
-- tasks/*.md（AC1 枚举出的存量任务加「未验证」标注）
 - tasks/gap-fan-in-delta-scope-doc-only-skip.md（自身）
+
+**⚠️ 拆分说明（manager 2026-08-16 22:3xZ，唯一可行路径）**：本任务 Touches **已去掉目录级 `tasks/*.md`**（AC4 拆到后继任务 `gap-fan-in-delta-scope-inventory-annotate`，见 AC4）。**拆分原因**：
+1. **永久饥饿实证**：任何任务在飞 ⇒ `tasks/*.md` 目录级撞 self-touch ⇒ deferred；0 在飞 ⇒ assembleBatch 含它的团只能 {它自己}（大小 1），不含它的团大小 4 ⇒ 永远输。**不是等窗口，是永久轮不到。**
+2. **AC1-AC3 对 tasks/ 只读**（枚举/diff/判据），不需声明 `tasks/*.md`；仅 AC4 写 tasks/。
+3. **第二把锁（剩余，两持有者）**：本任务 touches `plugin/test/fan-in-execute-paths.test.mjs`，而 **`gap-concurrency-literal` 和 `gap-delivery-laydown` 两者**都声明目录级 `plugin/test/*` ⇒ **必须两者都 land 本任务才可派**（manager 逐个隔离验证：仅 ac100 在飞 ⇒ 可派 ✓；ac100+delivery ⇒ 仍 deferred）。**⛔ 别只盯 concurrency 一个**。拆完 ≠ 立刻可派；等 concurrency ∧ delivery 都 land。**⛔ 不再拆第二次**（fan-in-execute-paths.test.mjs 是 AC2 取假对照要真写的测试，声明诚实）。
+4. **被 assembleBatch 静默丢弃的候选不进 deferred 不留理由（3b，manager 发现，发生率 1）**——0 在飞那轮 deferred=[] 而 delta-scope 被丢弃，正常读输出看不出来。

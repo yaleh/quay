@@ -113,6 +113,8 @@ drift-report 文件 84.1s → 46.7s（含本文件内建夹具 ~10s；serial 相
 
 ### AC4 — serial 相 sum（贴 `__GROUP__`，对比 r266 1241s）
 
+Contract invoke：`grep -oE '__GROUP__ concurrency=2 files=[0-9]+ sum_ms=[0-9.]+' <serial相日志>`（serial 相 sum_ms 读数，对比 r266 1241s）——实跑输出见下。
+
 **实测受机器负载污染，不可作为洁净基线**：serial 相实跑期间 load average 8.73（多个 claude 会话 40.8%+28.8%+21.1%
 CPU + 并发 full-suite verification-round），`__GROUP__ concurrency=2 files=22 sum_ms=1867603.9`（≈1868s）。同轮
 `__PERFILE__` 显示**未触碰的文件同幅膨胀**（check-drift 74.6s→186.7s +150%、install-config-driven-e2e

@@ -71,10 +71,14 @@ measure no_heavy_regression = `node --experimental-strip-types plugin/scripts/su
 measure single_file_under_threshold = `for f in plugin/test/quay-init-loop-{core,runtime,vendor,driver}.test.mjs; do grep -cE "^test\(" $f; done` stdout 数字段（各 < 19：12/14/7/15）
 band split_family_green = 1 且 no_heavy_regression = 0 且 每文件 test 数 < 19
 invoke `bash scripts/test.sh --for-task gap-quay-init-laydown-dominant-red-suite-blocker --allow-thin 2>&1 | tail -3`
-control 负控制 = 原 1286 行/54 tests 单文件在满文件运行下自败（`'Promise resolution is still pending'` @167s，cancelled 1）；
-      拆分后同阈值下各文件全绿（见 AC2 证据）。回归守护 = `plugin/test/suite-cutoff-verdict.test.mjs` 断言
-      quay-init-loop 拆分文件不得再进 at-risk 清单（实测该测试 10/10 过）。
+control 负控制 = 原 1286 行/54 tests 单文件在满文件运行下自败（`'Promise resolution is still pending'` @167s，cancelled 1）；拆分后同阈值下各文件全绿（见 AC2 证据）。回归守护 = `plugin/test/suite-cutoff-verdict.test.mjs` 断言 quay-init-loop 拆分文件不得再进 at-risk 清单（实测该测试 10/10 过）。
 resume 若中断，先跑 measure 读 split_family_green / no_heavy_regression / 单文件 test 数，再决定是否需重拆；不要先怀疑测试逻辑
+
+## Dispatch review
+
+reviewer: outer
+at: 2026-08-07
+changed: 立案自 full-suite 红（2026-08-06 15:53，178 fails，quay-init 族 58+）；根因两层（laydown 已修 + 90s timeout=event-loop 耗尽）；处方=拆分 quay-init-loop.test.mjs（54 tests/1286 行）。实现归 inner（见 Evidence 实跑）。
 
 ## Evidence
 

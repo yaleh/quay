@@ -71,7 +71,7 @@ changed: ad-arm1 archguard 真实消费方 Level3 首跑实测 F1/F2——init.t
 
 ### AC3 消费方复测证据（outer 2026-08-11 18:0x，ad-arm1 实机）
 
-安装含修复的 quay-0.4.0.launchfix.tgz（从 launch-settings worktree 打包）到 ad-arm1 后，冷启动 `quay init --root <fresh>` 铺出的 `.claude/launch.settings.json` 实测含：
+安装含修复的 quay-0.4.0.launchfix.tgz（`bash packages/quay/scripts/package.sh` 从 launch-settings worktree 打包）到 ad-arm1 后，冷启动 `quay init --root <fresh>` 铺出的 `.claude/launch.settings.json` 实测含：
 
 ```json
 {
