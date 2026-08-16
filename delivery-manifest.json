@@ -1,14 +1,34 @@
 {
   "$schema": "delivery-manifest-v1",
   "description": "Single source of truth for quay release artifacts. release.yml must produce exactly this set — no more, no less.",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "artifacts": {
     "npm-tarballs": [
-      { "package": "quay", "path": "packages/quay", "artifactPattern": "quay-{version}.tgz" }
+      {
+        "package": "quay",
+        "path": "packages/quay",
+        "artifactPattern": "quay-{version}.tgz"
+      }
     ],
     "sea-binaries": [
-      { "package": "quay", "platforms": ["linux-x64", "macos-arm64", "windows-x64"] },
-      { "package": "quay-native", "platforms": ["linux-x64", "macos-arm64", "windows-x64"], "bundled-with": "quay", "note": "quay-native SEA binary is bundled inside the quay SEA archive (assembled together in the sea-release job). One archive per platform carries both binaries. The release.yml check validates the build steps exist, not archive separation." }
+      {
+        "package": "quay",
+        "platforms": [
+          "linux-x64",
+          "macos-arm64",
+          "windows-x64"
+        ]
+      },
+      {
+        "package": "quay-native",
+        "platforms": [
+          "linux-x64",
+          "macos-arm64",
+          "windows-x64"
+        ],
+        "bundled-with": "quay",
+        "note": "quay-native SEA binary is bundled inside the quay SEA archive (assembled together in the sea-release job). One archive per platform carries both binaries. The release.yml check validates the build steps exist, not archive separation."
+      }
     ],
     "plugin": {
       "id": "quay",
