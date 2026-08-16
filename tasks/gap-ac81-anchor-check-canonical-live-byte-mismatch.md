@@ -1,7 +1,7 @@
 ---
 id: gap-ac81-anchor-check-canonical-live-byte-mismatch
 title: AC81 判据4 outer-anchor-check 恒报 VIOLATED——canonical prompt 829b vs live 578b 字节不符，对账不一致（registry verify 却说 OK）
-status: todo
+status: ready
 labels:
   - gap
   - defect
