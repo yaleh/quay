@@ -463,7 +463,9 @@ test("AC2 drift baseline: byte-identical orchestrator/fast-mode copies + pointer
     assert.equal(modes["plugin/loop/manager-tick-core.md"], "pointer");
     assert.equal(modes["plugin/loop/manager-loop-tick.md"], "pointer");
     assert.equal(modes["plugin/loop/orchestrator-tick-core.md"], "byte-identical");
-    assert.equal(modes["plugin/loop/fast-mode-tick-core.md"], "byte-identical");
+    // The fast-mode shipped copy is a SEMANTIC LANDING, not a byte copy (init/SKILL.md:71 —
+    // "非 byte-identical"): normalized-byte compares the behavioral body from `## A.`.
+    assert.equal(modes["plugin/loop/fast-mode-tick-core.md"], "normalized-byte");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -507,16 +509,37 @@ test("AC2 negative control: a 1-line shipped manager file that does NOT referenc
   }
 });
 
-test("AC2: the real repo's manager shipped copies are pointers (drift-check reports them consistent)", () => {
-  // The full --check-drift exits 1 on the REAL repo because the orchestrator/fast-mode tick-core
-  // copies still pre-date reconciliation (test.sh wires --no-block for that reason). The manager
-  // pointer pairs MUST be consistent regardless.
+test("AC2: the real repo's shipped copies are all consistent (drift-check reports green after AC90 reconciliation)", () => {
+  // AC90 (gap-ac90-delivery-copy-drift-gate): the fast-mode copy was a STALE semantic landing
+  // (byte-identical mode flagged it permanently — the wrong criterion for a 非 byte-identical pair);
+  // after reconciliation (copy body landed to 正本 semantics, fast-mode pair switched to
+  // normalized-byte) the real repo is drift-GREEN, so test.sh can wire the HARD gate.
   const res = runDrift(REPO_ROOT, "--json");
   const out = JSON.parse(res.stdout);
-  assert.equal(out.ok, false, "pre-existing orchestrator/fast-mode drift is expected on the real repo");
+  assert.equal(out.ok, true, `real repo drift-gate must be GREEN after AC90 reconciliation: ${JSON.stringify(out)}`);
   for (const p of out.pairs) {
-    if (p.mode !== "pointer") continue;
-    assert.equal(p.consistent, true, `${p.shipped} must be a consistent pointer: ${JSON.stringify(p)}`);
+    assert.equal(p.consistent, true, `${p.shipped} must be consistent: ${JSON.stringify(p)}`);
+  }
+});
+
+test("AC90 negative control: a one-line edit of the fast-mode 正本 (orchestration/) with the copy untouched must redden the drift gate", () => {
+  const dir = buildDriftRoot();
+  try {
+    const res0 = runDrift(dir, "--json");
+    assert.equal(res0.status, 0, `drift baseline reddened: ${res0.stdout} ${res0.stderr}`);
+    // Edit ONE line of the 正本's behavioral body (A10), leave plugin/loop/fast-mode-tick-core.md
+    // untouched → the normalized-byte pair must go RED (AC90 判据③ 负控制).
+    write(dir, "orchestration/fast-mode-tick-core.md",
+      FAST_CORE.replace("(src:1)", "(src:1) — AC90 NEGATIVE-CONTROL EDIT"));
+    const res = runDrift(dir, "--json");
+    assert.equal(res.status, 1, `a one-line 正本 edit did not redden the drift gate: ${res.stdout} ${res.stderr}`);
+    const out = JSON.parse(res.stdout);
+    const fm = out.pairs.find((p) => p.shipped === "plugin/loop/fast-mode-tick-core.md");
+    assert.ok(fm && !fm.consistent, "the fast-mode normalized-byte pair must be inconsistent");
+    assert.equal(fm.mode, "normalized-byte");
+    assert.match(fm.diffStat, /1 hunk/, "the report must show the normalized-body diff of the edited line");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 

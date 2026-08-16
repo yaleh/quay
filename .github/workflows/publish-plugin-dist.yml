@@ -5,12 +5,21 @@ name: Publish plugin dist
 # OUT of the master branch's git history while still giving external
 # `/plugin install` a real, buildable-nowhere-but-here artifact to fetch.
 #
-# On every release (a `v*` tag push) this job runs plugin/scripts/sync-vendor.sh
-# to produce a fresh build, then force-publishes the built `plugin/` subtree to
-# the orphan `dist-plugin` branch (the gh-pages pattern — that branch's history
-# is NOT meant to be merged/reviewed, only fetched). Also runnable on demand
-# via workflow_dispatch (used to seed/re-seed the branch outside a release, and
-# to prove this job actually works end-to-end without waiting for a version tag).
+# Triggers:
+#   * a `v*` tag push (release) — rebuild + force-publish the dist-plugin branch;
+#   * a push to `develop` that touches plugin-relevant sources — so the develop
+#     three-layer flow keeps `/plugin install` fresh (AC93: the chain must be
+#     actually triggerable in the develop flow, not only on release tags that
+#     the flow never creates). Path-filtered so telemetry/task/orchestration-only
+#     pushes do not rebuild the bundle;
+#   * workflow_dispatch (manual) — used to seed/re-seed the branch outside a
+#     release, and to prove this job actually works end-to-end without waiting
+#     for a version tag.
+#
+# Each run runs plugin/scripts/sync-vendor.sh to produce a fresh build, then
+# force-publishes the built `plugin/` subtree to the orphan `dist-plugin` branch
+# (the gh-pages pattern — that branch's history is NOT meant to be
+# merged/reviewed, only fetched).
 #
 # `.claude-plugin/marketplace.json`'s plugin source points at this branch
 # (`{"source":"github","repo":"yaleh/quay","ref":"dist-plugin"}`), so a real
@@ -19,8 +28,16 @@ name: Publish plugin dist
 
 on:
   push:
+    branches:
+      - develop
     tags:
       - 'v*'
+    paths:
+      - 'plugin/**'
+      - 'packages/**'
+      - '.claude-plugin/**'
+      - 'package.json'
+      - 'package-lock.json'
   workflow_dispatch: {}
 
 jobs:

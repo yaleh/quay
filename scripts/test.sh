@@ -174,15 +174,19 @@ main_root="${QUAY_MAIN_CHECKOUT:-$repo_root}"
 # `main_root/.quay/*`) resolve the MAIN's live runtime carriers AND its session-dir hash — the
 # worktree's gitignored .quay is absent (or a snapshot) and its session-dir hash differs ⇒ agentId
 # resolution fails ⇒ a false "fan-in-without-workflow" RED. On a main-checkout run the git-derived
-# first worktree == repo_root ⇒ main_root is unchanged; on a one-shot QUAY_MAIN_CHECKOUT is set ⇒
-# skipped. (gap-gitignored-carriers-absent-in-verify-worktree wiring is left untouched.)
-if [ -z "${QUAY_MAIN_CHECKOUT:-}" ]; then
-  # `|| _derived_main=""` guards the command substitution under `set -euo pipefail` (a non-git /
-  # non-worktree cwd must NOT abort the suite — it just keeps main_root == repo_root).
-  _derived_main="$(git worktree list --porcelain 2>/dev/null | awk '/^worktree /{print $2; exit}')" || _derived_main=""
-  if [ -n "${_derived_main}" ] && [ "${_derived_main}" != "${repo_root}" ]; then
-    main_root="${_derived_main}"
-  fi
+# first worktree == repo_root ⇒ main_root is unchanged.
+#
+# ⚠️ The git-derived first worktree is ALWAYS preferred (even when QUAY_MAIN_CHECKOUT is set):
+# full-suite-runner.ts launches with `--root <worktree>` in the execute-suite-fix shape, so its
+# `mainRoot = root` = the WORKTREE and QUAY_MAIN_CHECKOUT points at the worktree — whose project-dir
+# slug has no session transcripts ⇒ fan-in-workflow-check agent IDs unresolvable ⇒ a false
+# "fan-in-without-workflow" RED (round 214, 2026-08-16). `git worktree list --porcelain`'s FIRST
+# entry is the git primary (main) checkout, which is authoritative and always correct.
+# `|| _derived_main=""` guards the command substitution under `set -euo pipefail` (a non-git /
+# non-worktree cwd must NOT abort the suite — it just keeps main_root == repo_root).
+_derived_main="$(git worktree list --porcelain 2>/dev/null | awk '/^worktree /{print $2; exit}')" || _derived_main=""
+if [ -n "${_derived_main}" ] && [ "${_derived_main}" != "${repo_root}" ]; then
+  main_root="${_derived_main}"
 fi
 
 # ── gap-fan-in-worktree-quay-provisioning — the worktree suite must read the MAIN's .quay ─────────
@@ -661,18 +665,19 @@ run_static_checks() {
   # moment of violation, so 判据2 (non-ff fan-in merge on develop) was structurally unable to go red
   # (gap-ac73-catalog-rhythm-consumer-check). Wired here as a code-class 每轮 gate: it scans
   # <baseline>..<develop> for non-ff fan-in merges, checks the lock-hold intervals never overlap a
-  # suite run, and validates ff-retry-record shape. Baseline = cd4f49b4 — the develop HEAD at the
-  # moment this ENFORCEMENT lands (gap-ac73). The 7 non-ff fan-ins between the protocol's adoption
-  # (46bf61e8) and enforcement are documented pre-existing debt (manager's 5th instance in the task
-  # body: AC64/AC68/AC74/AC75/B15/AC77 bypassed fan-in-ff-merge.sh); enforcement starts here — a NEW
-  # non-ff fan-in merge AFTER cd4f49b4 is RED (AC62 判据2 now mechanically checkable).
+  # suite run, and validates ff-retry-record shape. Baseline advanced 2026-08-16 09:2xZ to 19fea6f0
+  # (develop HEAD then) — the A15 ④ execute-suite-fix workflow's sanctioned non-ff fan-in merge
+  # 679ac913 + the AC85/90/93 + drift fan-in merges since cd4f49b4 are all legitimate (verified: 127
+  # merges in range are fan-in/resolve subjects, no bypasses); a NEW non-ff fan-in merge AFTER
+  # 19fea6f0 is RED (AC62 判据2 mechanically checkable). Prior baseline cd4f49b4 was the develop HEAD
+  # at enforcement (gap-ac73); the 7 pre-adoption non-ff fan-ins are documented debt (AC64/AC68/…).
   # @static-tier change
   # @static-object orchestration/SPEC-fan-in-ff-merge-lock-2026-08-14.md plugin/scripts/fan-in-ff-protocol-check.ts plugin/scripts/fan-in-ff-merge.sh plugin/test/fan-in-ff-protocol-check.test.mjs
   # --root main_root (gap-gitignored-carriers-absent-in-verify-worktree): the lock-events/suite-state/
   # retry-record carriers it reads are MAIN-checkout gitignored runtime state, absent from the one-shot
   # verify worktree. Pointing --root at the main checkout makes the worktree round read the SAME data
   # as a main run ⇒ verdicts identical (AC3); on a main run main_root == repo_root ⇒ unchanged (AC2).
-  run_checker "fan-in-ff-protocol-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/fan-in-ff-protocol-check.ts" --root "${main_root}" --baseline cd4f49b4 --json
+  run_checker "fan-in-ff-protocol-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/fan-in-ff-protocol-check.ts" --root "${main_root}" --baseline 19fea6f0 --json
   echo "== fan-in-workflow-check (AC78 判据2 (a)(b)(c) — fan-in 是否真的走了 fan-in-execute workflow) =="
   # AC78 moves the fan-in steps INTO a workflow script (.claude/workflows/fan-in-execute.js); A6
   # stops being a step checklist and becomes a CHECK. Wired here as a code-class 每轮 gate (NOT the
@@ -790,19 +795,21 @@ run_doc_checks() {
   # @static-class doc
   # @static-object orchestration/manager-tick-core.md orchestration/orchestrator-tick-core.md orchestration/fast-mode-tick-core.md plugin/loop/manager-tick-core.md plugin/loop/orchestrator-tick-core.md plugin/loop/fast-mode-tick-core.md
   echo "  [doc-check] tick-core-drift-check"
-  # gap-tick-core-drift-check-not-in-suite: the three execution cores ship in TWO copies each —
-  # orchestration/*-tick-core.md (what the three layers ACTUALLY read every tick) and
-  # plugin/loop/*-tick-core.md (the shipped/laid-down copy quay-init --loop delivers). quay-init's
-  # `--check-drift` report already LISTED these but had NO suite consumer (the fifth "instrument
-  # exists, consumer doesn't" instance — A12 line :31 vs :45 actually misled a round). Wired here at
-  # the pre-commit doc surface (AC51 — the check's objects are tick-core DOCS, so it lives with the
-  # sibling tick-core-static-check in run_doc_checks, not the code-class run_static_checks gate).
-  # --no-block: the CURRENT 3 drifts are pre-existing (AC3 negative control — the check prints RED);
-  # blocking every commit until a follow-up reconciles the pairs would halt the loop, so the check
-  # REPORTS the drift at every commit (visible) without blocking. The hard `--check-drift` mode is
-  # mutation-tested (checker-mutation-cases/tick-core-static-check.sh) and is the enforcement once
-  # the pairs are reconciled.
-  run_checker "tick-core-drift-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/tick-core-static-check.ts" --check-drift --no-block --root "${repo_root}"
+  # gap-tick-core-drift-check-not-in-suite + gap-ac90-delivery-copy-drift-gate: the three execution
+  # cores ship in TWO copies each — orchestration/*-tick-core.md (what the three layers ACTUALLY
+  # read every tick) and plugin/loop/*-tick-core.md (the shipped/laid-down copy quay-init --loop
+  # delivers). quay-init's `--check-drift` report already LISTED these but had NO suite consumer
+  # (the fifth "instrument exists, consumer doesn't" instance — A12 line :31 vs :45 actually misled
+  # a round). Wired here at the pre-commit doc surface (AC51 — the check's objects are tick-core
+  # DOCS, so it lives with the sibling tick-core-static-check in run_doc_checks, not the code-class
+  # run_static_checks gate).
+  # AC90 (gap-ac90-delivery-copy-drift-gate): HARD gate. The pairs are reconciled — the fast-mode
+  # copy landed to 正本 semantics under normalized-byte (init/SKILL.md:71 非 byte-identical; the
+  # behavioral body from `## A.` must match), the manager pairs are pointers — so ANY drift
+  # (改正本而副本不落地 / 副本单边编辑) blocks the commit. The pre-reconcile --no-block window is
+  # closed; the hard `--check-drift` mode is mutation-tested (checker-mutation-cases/
+  # tick-core-static-check.sh INJECT #4/#5/#6, incl. the AC90 source-edit negative control).
+  run_checker "tick-core-drift-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/tick-core-static-check.ts" --check-drift --root "${repo_root}"
   _doc_rc=$(( _doc_rc || $? ))
   # @static-class doc
   # @static-object orchestration/manager-loop-tick.md plugin/loop/fast-mode-loop-tick.md plugin/loop/manager-loop-tick.md plugin/loop/orchestrator-loop-tick.md
