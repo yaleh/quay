@@ -1,7 +1,7 @@
 ---
 id: gap-ac85-local-build-current-artifact
 title: "AC85: 本机 `package.sh` 产出当前版本的可用 `.tgz` 产物（版本号一致性核对防陈旧产物顶替）"
-status: ready
+status: done
 labels:
   - gap
   - mechanism
