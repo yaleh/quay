@@ -72,7 +72,7 @@ if (!worktree || !stateDir || !root) {
 // `undefined` and the runner's path.resolve("undefined") would write the round log to ./undefined at
 // the checkout root (bug: 2026-08-12 17:15, a 300KB round log landed in ./undefined). Default it here
 // so the template never emits the undefined literal.
-const resolvedLogFile = logFile ?? path.join(stateDir, 'full-suite.log')
+const resolvedLogFile = logFile ?? `${stateDir}/full-suite.log`
 
 const launchEnv = `QUAY_TEST_SUITE_MAX_RUNTIME_MS=${envMaxRuntimeMs} QUAY_TEST_SUITE_SILENCE_MS=${envSilenceMs} QUAY_TEST_RED_GRACE_MS=${envRedGraceMs} QUAY_TEST_SYSTEMD_RUN_LIMITS='${systemdRunLimits}'`
 
