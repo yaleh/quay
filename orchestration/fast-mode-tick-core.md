@@ -11,7 +11,7 @@
 
 **当前状态:并行对照期。锚仍指向源文档,本文件不接锚/cron/skill;两份并行跑,差异记进 tick-log,零遗漏后 inner/outer 决定改锚。**
 
-**本文件是执行核正本（AC78 前置 (a)，2026-08-14 outer 裁定）**：`plugin/loop/fast-mode-tick-core.md` 是本文件随 `quay-init --loop` 铺到目标项目的**落地副本**——正本改动后由 inner 按正本逐字落地，**副本不得单边编辑**。要改执行核，改正本。
+**本文件是执行核正本（AC78 前置 (a)，2026-08-14 outer 裁定）**：`plugin/loop/fast-mode-tick-core.md` 是本文件随 `quay-init --loop` 铺到目标项目的**落地副本**——正本改动后由 inner 按正本语义落地副本（副本为 quay-init --loop 铺出模板、引用目标 `docs/analysis/fast-mode-loop-tick.md` 源，**非 byte-identical**，两副本承担不同角色；byte-copy 会破坏 quay-init `referenced⊆landed`，见 232e4171），**副本不得单边编辑**。要改执行核，改正本。
 
 ---
 

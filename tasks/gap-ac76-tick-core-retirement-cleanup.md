@@ -60,6 +60,7 @@ depends_on: []
 ## Touches
 
 - orchestration/fast-mode-tick-core.md（C7 收指针 + $FORK_BASELINE 单线 + 旧读法改新）
+- plugin/loop/fast-mode-tick-core.md（副本语义同步：C7 指针 + $FORK_BASELINE 单线 + A12/A13/A16 旧读法改新——不逐字拷贝，保持模板框架 + docs/analysis 引用）
 - plugin/scripts/fork-baseline.ts（如需，退役标注——已自带 RETIRED 标注，本次未改）
 - plugin/scripts/slot-refill.ts、plugin/scripts/fast-mode-telemetry.ts（AC76 判据5 退役标注）
 - plugin/test/tick-core-static-check.test.mjs（AC8 inner C7 新语义）
@@ -103,6 +104,17 @@ A16: 追加 `**AC76 退役注(C24-5→C24-1):--task-start 括号的【在飞】�
 - C24-4 /live+observation 消费端 → 已并入本检查器判据6 + C24-1 producer 标注（merged disposition）；C24-5 A16/A16b --task-start 在飞用途 → 并入 C24-1；C24-6 outer-owned；C24-7 并入 C24-6。plugin 观测面 `--slots` 消费端（slot-free-trigger.ts）由 C24-4 merged 覆盖；字面 /live Web 页（packages/quay/src/serve-handlers.ts + observation.ts 读 `--report` inProgress）为产品面、不在本任务 plugin-scoped Touches，未改。
 
 **⑤ AC8 断言新语义（tick-core-static-check.test.mjs）** —— inner C7 迁出后核内 `dead=0 / excluded=0`，旧 `excluded >= 1` 断言改为：① `dead===0`（核内无在核死条目）② inner C7 迁出指针检查（核内含 `#R25` 指针 + 档案含 `## R25` + C7 行无 DEAD_ANNOT_RE 标记，均可取假）。标题同步改「inner C7 迁出」。
+
+**⑥ 副本语义同步（plugin/loop/fast-mode-tick-core.md）** —— outer 层要求按 SKILL.md「正本改动后由 inner 按正本语义落地副本」同步 quay-init --loop 模板副本。**不逐字拷贝**（副本 src:N 引用指向 laid-down 的 `docs/analysis/fast-mode-loop-tick.md`，正本指向 `plugin/loop/fast-mode-loop-tick.md`；byte-copy 会破坏 quay-init referenced⊆landed，见 232e4171），只更新对应条款语义：
+- C7 (:81) → 与正本同形的 `~~**C7 正身已迁出**（已退役，2026-08-15 迁出）~~ → archive#R25` 指针
+- A9 (:44) `$MERGE_TARGET`→`$FORK_BASELINE` 批量合 → 单线合回 develop + AC48 退役注
+- A12 (:47) `--in-flight <本会话在飞集合>` 遥测推导 → 查 subagent（cap-counts 判据2）
+- A13 (:48) `fast-mode-telemetry.ts --slots` 在飞维度退役（C24-1），仅 `--reconcile` 清理保留（副本保留其较短帧，未引入正本 C17 合规产物子句——pre-existing 差异）
+- A16 (:51) `--task-start` 括号【在飞】用途退役（C24-5→C24-1），派发留痕保留（副本保留「inner 只写 --task-start」帧）
+- A17 (:52) `--branch "$FORK_BASELINE"` → `--branch develop` + AC48 退役注
+- C3 (:77) `$FORK_BASELINE 只由外层批量合推进` → 单线 develop + AC48 退役注
+对比核验：A9/A12/A17/C3/C7 五条与正本逐字一致；A13/A16 语义同（副本帧更短）。
+- **头注「逐字落地」陈旧声明修正**（判据1「tick core 不留已退役文本」）：正本 :14 与副本 :28 均曾写「正本改动后由 inner 按正本**逐字落地**」——与 SKILL.md:71 已落地事实矛盾（两副本非 byte-identical）。两处改为「按正本**语义**落地副本（副本为 quay-init --loop 铺出模板、引用目标 `docs/analysis/fast-mode-loop-tick.md` 源，非 byte-identical）」，对齐 gap-init-skill-md-byte-identical-claim-fix（50725186）表述。
 
 **测试输出**：
 ```
