@@ -63,4 +63,5 @@ doc-only-delta 跳过 + Touches 声明非 doc 路径   32 个（我数）/ 16 �
 - plugin/scripts/per-task-suite-record.ts（若需记录「未验证」标记）
 - plugin/test/fan-in-execute-paths.test.mjs（取假对照）
 - tasks/*.md（AC1 枚举出的存量任务加「未验证」标注）
+  **⚠️ 目录级 Touches 自锁（2026-08-16 22:1xZ 实证）**：`tasks/*.md` 是目录级条目 ⇒ 展开+不对称自锁语义 ⇒ 与任何触碰 tasks/ 的在飞任务不 disjoint。派发时 4 个在飞任务（ac100/concurrency/delivery/doc-lint）全有各自 `tasks/<id>.md` ⇒ **本任务结构上无法在有在飞任务时派发**（slot-refill deferred: touches-overlap-in-flight）。**解除条件**：队列清完（0 在飞）后自锁解除；或 AC1 枚举完成后把 `tasks/*.md` 收窄成具体文件清单（实现层改动，派发层无法解决）。优先级裁定（manager 最高优先）在派发层无轴 + 此 Touches 冲突 ⇒ **本轮按 option 2 如实记录「未生效」**，队列清完即派。
 - tasks/gap-fan-in-delta-scope-doc-only-skip.md（自身）
