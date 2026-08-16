@@ -1,7 +1,7 @@
 ---
 id: gap-ac96-webui-responsive-two-form
 title: "AC96: 响应式从 1 断点到真·双形态——移动 375×812 首屏必须能看到第一条任务（判据=截图非 CSS 行数）"
-status: todo
+status: ready
 labels:
   - gap
   - mechanism

@@ -1,7 +1,7 @@
 ---
 id: gap-ac97-webui-zero-cost-gaps
 title: "AC97: 三条零成本 Web UI 缺口先修（/board 导航链接 + /git-history 重启可见 + white-space 内联覆盖）"
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
