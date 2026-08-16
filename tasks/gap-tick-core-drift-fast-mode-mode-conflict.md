@@ -1,7 +1,7 @@
 ---
 id: gap-tick-core-drift-fast-mode-mode-conflict
 title: fast-mode 对 tick-core drift check 是 byte-identical mode 但两副本非 byte-identical by design（SKILL.md 50725186 + AC76 item6）——恒红误导，改 mode 判定
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -66,6 +66,8 @@ quay-init --loop 铺出布局（`plugin/skills/init/SKILL.md:68-71` 逐条）：
 - 判据1/2：`node --experimental-strip-types plugin/scripts/tick-core-static-check.ts --check-drift --root . --json` → `ok:true`，fast-mode 对 `~ semantic`（87 vs 101 行，条款一致）。负控制三个均 RED 且理由可区分：删 A26 → `semantic sync: missing clauses (正本→副本): A26`；A10 内容改坏 → `content drift: A10`；byte-copy 正本进副本 → `ROLE VIOLATION: 副本 must reference docs/analysis/... and NOT plugin/loop/... — byte-copy breaks referenced⊆landed`。
 - 判据3：`node --test plugin/test/tick-core-static-check.test.mjs` → **24/24 pass**（21 既有 + 3 新）；`scripts/test.sh --for-task gap-tick-core-drift-fast-mode-mode-conflict --allow-thin` → **EXIT:0**。
 - 注：`quay-init-loop-consumer-doc-refs`/loop-shipping 的 4 条 referenced-not-landed 失败经 `git stash` 验证为 **base 既有**（引用来自 orchestrator 文档 `orchestration/orchestrator-tick-core.md`/`plugin/loop/orchestrator-tick-core.md`/`orchestrator-loop-tick.md`，不在本任务 Touches；stash 后 base 同样 fail 2/4，恢复后无残留）。worktree 缺 node_modules，已 symlink 主检出 `/home/yale/work/quay/node_modules`（deps 逐字节一致）。
+
+**fan-in merge 修正（2026-08-16, AC78 fan-in-execute）**：develop 在并行窗口内已由 `gap-ac90-delivery-copy-drift-gate`（b6ff07b7）落地同一根因的修复——fast-mode 对改 **normalized-byte** mode（正本/副本自 `## A.` 起的正文经源路径归一后逐字节比较）并将 `tick-core-drift-check` 由 `--no-block` 转硬闸。merge 冲突依「不回退已落地 develop 工作」裁定：机制取 AC90 的 normalized-byte，本任务的 semantic clause 级实现（`.ts`/test/fixture 角色注）未落地、按 develop 版本解析。判据 1/2/3 由 normalized-byte + 硬闸满足：真实 repo drift 绿（4/4 consistent，fast-mode `≐ body`）、单边改坏仍红（AC90 INJECT #6 mutation 负控制）、`--for-task` scoped 22/22 绿 + doc 绿。本任务落地的实际变更 = 任务体自身。
 
 ## Touches
 
