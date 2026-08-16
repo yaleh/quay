@@ -78,4 +78,6 @@ workflow 文件路径的接线检查——按位置判定，没有一个是调�
 - plugin/scripts/delivery-inventory-drift-gate.sh（false-positive 修正：legacy 未镜像 workflow 删除不再误报）
 - plugin/test/delivery-inventory-drift-gate.test.mjs（新增 GREEN 用例：legacy 未镜像删除通过）
 - plugin/test/workflow-metadata-conformance.test.mjs（C6 断言更新）
+- plugin/invariant-ownership.md（halt-sentinel owner re-point：select-preflight.ts → halt-check.sh + slot-refill.ts:197 checkHaltSentinel——退役后残留引用，AC3 补齐）
+- experiments/quay-perpetual-stream/invariant-ownership.md（同上，双副本与 plugin/ 逐字一致）
 - tasks/gap-select-preflight-retirement-decision.md（自身）
