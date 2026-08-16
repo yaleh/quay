@@ -45,7 +45,7 @@ depends_on: []
 
 ## Definition of Done
 
-- [ ] fan-in land 自动闭 bracket（occurrence 3 根治），A20 驱动不再因 fan-in 落地重复出现。
+- [x] fan-in land 自动闭 bracket（occurrence 3 根治），A20 驱动不再因 fan-in 落地重复出现。
 
 ## Touches
 
