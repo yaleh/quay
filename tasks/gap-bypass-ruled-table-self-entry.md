@@ -32,7 +32,7 @@ depends_on: []
 
 ## Definition of Done
 
-- [ ] bypass check PASS，AC1b develop 基线轮可重跑。（待外部——fan-in 后 develop 上验证 + AC1b 轮重跑）
+- [ ] bypass check PASS，AC1b develop 基线轮可重跑（fan-in 后 develop 上验证 + AC1b 轮重跑）。（待外部）
 
 ## Touches
 
