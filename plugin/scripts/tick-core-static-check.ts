@@ -58,6 +58,7 @@
 // Exit codes: 0 = PASS; 1 = FAIL (any criterion violated, or a scan target missing); 2 = usage.
 
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -582,9 +583,19 @@ export function runChecks(root: string, only?: string): CheckResult {
 // makes the pair-drift a HARD gate: exit 1 when ANY pair differs, printing BOTH sides' line counts
 // + a diff summary (AC2 — not a "drift/consistent" boolean).
 //
-// TWO criteria (gap-plugin-loop-manager-drifted-copies-pointerize AC2, manager 22:1xZ 裁定):
-//   - `byte-identical` — the orchestrator/fast-mode tick-core copies are REAL copies (quay-init
-//     lays them down byte-for-byte); a copy that differs from its orchestration source reddens.
+// THREE criteria (gap-plugin-loop-manager-drifted-copies-pointerize AC2, manager 22:1xZ 裁定;
+// gap-ac90-delivery-copy-drift-gate AC90 — fast-mode 副本语义修正):
+//   - `byte-identical` — the ORCHESTRATOR tick-core copy is a REAL copy (quay-init lays it down
+//     byte-for-byte, init/SKILL.md:70); a copy that differs from its orchestration source reddens.
+//   - `normalized-byte` — the FAST-MODE tick-core copy is a SEMANTIC LANDING, NOT a byte copy
+//     (init/SKILL.md:71 明示「非 byte-identical」: the shipped copy is quay-init --loop's template
+//     referencing the target's docs/analysis/ source, the 正本 references this workspace's
+//     plugin/loop/ source — 232e4171 byte-sync was reverted by cddc55e2 because it broke quay-init
+//     referenced⊆landed). The gate compares the BEHAVIORAL BODY (from the first `## A.` onward —
+//     the A/B/C/D instruction tables) after normalizing the documented loop-doc source-path role
+//     difference; the role-specific HEADER (切分声明/落地副本 annotation + the path refs) is
+//     excluded. A one-sided edit of a behavioral row (改正本而副本不落地, AC90) reddens — the
+//     AC90 负控制 (edit the 正本 one line, leave the copy) is mutation-tested.
 //   - `pointer` — the manager tick docs' shipped copies are POINTERS (one line → orchestration/
 //     正本), NOT copies ("该路径无内容可维护"). A shipped manager file must be a SMALL pointer
 //     referencing its orchestration 正本; a reintroduced large copy reddens regardless of
@@ -602,12 +613,17 @@ export const MANAGER_POINTER_PAIRS = [
  *  copy — the falsifiable AC2 criterion. */
 export const POINTER_MAX_LINES = 3;
 
-export const DRIFT_PAIRS: { core: string; shipped: string; mode: "byte-identical" | "pointer" }[] = [
+export type DriftMode = "byte-identical" | "normalized-byte" | "pointer";
+
+export const DRIFT_PAIRS: { core: string; shipped: string; mode: DriftMode }[] = [
   ...CORES
     .filter((rel) => rel !== "orchestration/manager-tick-core.md")
     .map((rel) => {
       const base = rel.split("/").pop()!; // e.g. "orchestrator-tick-core.md"
-      return { core: rel, shipped: `plugin/loop/${base}`, mode: "byte-identical" as const };
+      // The fast-mode shipped copy is a SEMANTIC LANDING, not a byte copy (init/SKILL.md:71 —
+      // "非 byte-identical"); the orchestrator copy is a real byte copy (init/SKILL.md:70).
+      const mode: DriftMode = base === "fast-mode-tick-core.md" ? "normalized-byte" : "byte-identical";
+      return { core: rel, shipped: `plugin/loop/${base}`, mode };
     }),
   ...MANAGER_POINTER_PAIRS.map((p) => ({ ...p, mode: "pointer" as const })),
 ];
@@ -615,7 +631,7 @@ export const DRIFT_PAIRS: { core: string; shipped: string; mode: "byte-identical
 export interface DriftPair {
   core: string;          // orchestration/<name>.md (正本)
   shipped: string;       // plugin/loop/<name>.md (shipped copy or pointer)
-  mode: "byte-identical" | "pointer";
+  mode: DriftMode;
   consistent: boolean;
   coreLines: number;     // -1 when the file is missing
   shippedLines: number;  // -1 when the file is missing
@@ -661,6 +677,38 @@ function diffStat(a: string, b: string): string {
   }
 }
 
+/** The BEHAVIORAL BODY of an execution-core doc: everything from the first `## A.` section onward
+ *  (the A/B/C/D instruction tables — the executable content). The HEADER before `## A.` is
+ *  role-specific: the 正本 and the shipped plugin/loop copy carry different role annotations and
+ *  reference the loop-doc source under different paths (plugin/loop/ in THIS workspace vs
+ *  docs/analysis/ on installed targets — init/SKILL.md:71 documents the fast-mode copy as a
+ *  non-byte-identical semantic landing), so it is excluded from the behavioral comparison. The
+ *  loop-doc source-path role difference is NORMALIZED (both spellings → one token) so a behavioral
+ *  row referencing the source path stays consistent across the two roles. */
+function behavioralBody(text: string): string {
+  const i = text.indexOf("## A.");
+  const body = i >= 0 ? text.slice(i) : text;
+  return body
+    .replace(/docs\/analysis\/fast-mode-loop-tick\.md/g, "__LOOP_DOC_SRC__")
+    .replace(/plugin\/loop\/fast-mode-loop-tick\.md/g, "__LOOP_DOC_SRC__");
+}
+
+/** Diff the NORMALIZED behavioral bodies of a normalized-byte pair (writes the two bodies to temp
+ *  files so the existing diffStat works; the report shows the BEHAVIORAL drift, not the intended
+ *  role-header noise). Falls back to a line-count readout on any diff failure. */
+function diffBehavioralBodies(coreAbs: string, shippedAbs: string): string {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tick-core-drift-"));
+  try {
+    const a = path.join(tmp, "core-body.md");
+    const b = path.join(tmp, "shipped-body.md");
+    fs.writeFileSync(a, behavioralBody(fs.readFileSync(coreAbs, "utf8")));
+    fs.writeFileSync(b, behavioralBody(fs.readFileSync(shippedAbs, "utf8")));
+    return diffStat(a, b);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
 export function runDriftCheck(root: string): DriftResult {
   const pairs = DRIFT_PAIRS.map(({ core, shipped, mode }) => {
     const coreAbs = path.join(root, core);
@@ -686,6 +734,14 @@ export function runDriftCheck(root: string): DriftResult {
         else if (!referencesCore)
           stat = `POINTER VIOLATION: does not reference the 正本 ${core}`;
       }
+    } else if (mode === "normalized-byte") {
+      // Semantic-landing criterion (AC90, fast-mode): the shipped copy is a non-byte-identical
+      // template (init/SKILL.md:71) — compare the BEHAVIORAL BODY (from `## A.`) after normalizing
+      // the loop-doc source-path role difference. A one-sided edit of a behavioral row (改正本而
+      // 副本不落地) reddens — the AC90 negative control.
+      consistent = coreLines >= 0 && shippedLines >= 0
+        && behavioralBody(fs.readFileSync(coreAbs, "utf8")) === behavioralBody(fs.readFileSync(shippedAbs, "utf8"));
+      if (!consistent) stat = diffBehavioralBodies(coreAbs, shippedAbs);
     } else {
       consistent = coreLines >= 0 && shippedLines >= 0
         && fs.readFileSync(coreAbs, "utf8") === fs.readFileSync(shippedAbs, "utf8");
@@ -700,7 +756,7 @@ function printDriftReport(res: DriftResult): string[] {
   const out: string[] = [];
   for (const p of res.pairs) {
     if (p.consistent) {
-      const link = p.mode === "pointer" ? "→ pointer" : "==";
+      const link = p.mode === "pointer" ? "→ pointer" : p.mode === "normalized-byte" ? "≐ body" : "==";
       out.push(`  ok: ${p.core} (${p.coreLines} lines) ${link} ${p.shipped} (${p.shippedLines} lines)`);
       continue;
     }
@@ -749,7 +805,7 @@ export function main(argv: string[]): CliResult {
       // Explicit alias for the default full-surface check (the ## Contract `invoke` form).
     } else if (a === "--help" || a === "-h") {
       process.stdout.write(
-        "tick-core-static-check.ts — are the three execution cores statically covered (AC3/AC4/AC5/AC6/AC8), and (--check-drift) each plugin/loop/ copy either byte-identical to its orchestration source (orchestrator/fast-mode) or a small pointer to it (manager tick docs)?\n",
+        "tick-core-static-check.ts — are the three execution cores statically covered (AC3/AC4/AC5/AC6/AC8), and (--check-drift) each plugin/loop/ copy consistent with its orchestration source — orchestrator byte-identical, fast-mode normalized-byte (behavioral body, AC90 semantic-landing), manager tick docs a small pointer (AC2)?\n",
       );
       return { code: 0, json: { help: true } };
     } else {

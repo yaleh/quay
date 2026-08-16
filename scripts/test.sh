@@ -174,15 +174,19 @@ main_root="${QUAY_MAIN_CHECKOUT:-$repo_root}"
 # `main_root/.quay/*`) resolve the MAIN's live runtime carriers AND its session-dir hash — the
 # worktree's gitignored .quay is absent (or a snapshot) and its session-dir hash differs ⇒ agentId
 # resolution fails ⇒ a false "fan-in-without-workflow" RED. On a main-checkout run the git-derived
-# first worktree == repo_root ⇒ main_root is unchanged; on a one-shot QUAY_MAIN_CHECKOUT is set ⇒
-# skipped. (gap-gitignored-carriers-absent-in-verify-worktree wiring is left untouched.)
-if [ -z "${QUAY_MAIN_CHECKOUT:-}" ]; then
-  # `|| _derived_main=""` guards the command substitution under `set -euo pipefail` (a non-git /
-  # non-worktree cwd must NOT abort the suite — it just keeps main_root == repo_root).
-  _derived_main="$(git worktree list --porcelain 2>/dev/null | awk '/^worktree /{print $2; exit}')" || _derived_main=""
-  if [ -n "${_derived_main}" ] && [ "${_derived_main}" != "${repo_root}" ]; then
-    main_root="${_derived_main}"
-  fi
+# first worktree == repo_root ⇒ main_root is unchanged.
+#
+# ⚠️ The git-derived first worktree is ALWAYS preferred (even when QUAY_MAIN_CHECKOUT is set):
+# full-suite-runner.ts launches with `--root <worktree>` in the execute-suite-fix shape, so its
+# `mainRoot = root` = the WORKTREE and QUAY_MAIN_CHECKOUT points at the worktree — whose project-dir
+# slug has no session transcripts ⇒ fan-in-workflow-check agent IDs unresolvable ⇒ a false
+# "fan-in-without-workflow" RED (round 214, 2026-08-16). `git worktree list --porcelain`'s FIRST
+# entry is the git primary (main) checkout, which is authoritative and always correct.
+# `|| _derived_main=""` guards the command substitution under `set -euo pipefail` (a non-git /
+# non-worktree cwd must NOT abort the suite — it just keeps main_root == repo_root).
+_derived_main="$(git worktree list --porcelain 2>/dev/null | awk '/^worktree /{print $2; exit}')" || _derived_main=""
+if [ -n "${_derived_main}" ] && [ "${_derived_main}" != "${repo_root}" ]; then
+  main_root="${_derived_main}"
 fi
 
 # ── gap-fan-in-worktree-quay-provisioning — the worktree suite must read the MAIN's .quay ─────────
@@ -790,19 +794,21 @@ run_doc_checks() {
   # @static-class doc
   # @static-object orchestration/manager-tick-core.md orchestration/orchestrator-tick-core.md orchestration/fast-mode-tick-core.md plugin/loop/manager-tick-core.md plugin/loop/orchestrator-tick-core.md plugin/loop/fast-mode-tick-core.md
   echo "  [doc-check] tick-core-drift-check"
-  # gap-tick-core-drift-check-not-in-suite: the three execution cores ship in TWO copies each —
-  # orchestration/*-tick-core.md (what the three layers ACTUALLY read every tick) and
-  # plugin/loop/*-tick-core.md (the shipped/laid-down copy quay-init --loop delivers). quay-init's
-  # `--check-drift` report already LISTED these but had NO suite consumer (the fifth "instrument
-  # exists, consumer doesn't" instance — A12 line :31 vs :45 actually misled a round). Wired here at
-  # the pre-commit doc surface (AC51 — the check's objects are tick-core DOCS, so it lives with the
-  # sibling tick-core-static-check in run_doc_checks, not the code-class run_static_checks gate).
-  # --no-block: the CURRENT 3 drifts are pre-existing (AC3 negative control — the check prints RED);
-  # blocking every commit until a follow-up reconciles the pairs would halt the loop, so the check
-  # REPORTS the drift at every commit (visible) without blocking. The hard `--check-drift` mode is
-  # mutation-tested (checker-mutation-cases/tick-core-static-check.sh) and is the enforcement once
-  # the pairs are reconciled.
-  run_checker "tick-core-drift-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/tick-core-static-check.ts" --check-drift --no-block --root "${repo_root}"
+  # gap-tick-core-drift-check-not-in-suite + gap-ac90-delivery-copy-drift-gate: the three execution
+  # cores ship in TWO copies each — orchestration/*-tick-core.md (what the three layers ACTUALLY
+  # read every tick) and plugin/loop/*-tick-core.md (the shipped/laid-down copy quay-init --loop
+  # delivers). quay-init's `--check-drift` report already LISTED these but had NO suite consumer
+  # (the fifth "instrument exists, consumer doesn't" instance — A12 line :31 vs :45 actually misled
+  # a round). Wired here at the pre-commit doc surface (AC51 — the check's objects are tick-core
+  # DOCS, so it lives with the sibling tick-core-static-check in run_doc_checks, not the code-class
+  # run_static_checks gate).
+  # AC90 (gap-ac90-delivery-copy-drift-gate): HARD gate. The pairs are reconciled — the fast-mode
+  # copy landed to 正本 semantics under normalized-byte (init/SKILL.md:71 非 byte-identical; the
+  # behavioral body from `## A.` must match), the manager pairs are pointers — so ANY drift
+  # (改正本而副本不落地 / 副本单边编辑) blocks the commit. The pre-reconcile --no-block window is
+  # closed; the hard `--check-drift` mode is mutation-tested (checker-mutation-cases/
+  # tick-core-static-check.sh INJECT #4/#5/#6, incl. the AC90 source-edit negative control).
+  run_checker "tick-core-drift-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/tick-core-static-check.ts" --check-drift --root "${repo_root}"
   _doc_rc=$(( _doc_rc || $? ))
   # @static-class doc
   # @static-object orchestration/manager-loop-tick.md plugin/loop/fast-mode-loop-tick.md plugin/loop/manager-loop-tick.md plugin/loop/orchestrator-loop-tick.md
