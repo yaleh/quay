@@ -2,7 +2,7 @@
 id: gap-touches-connector-delimiter-uncaught
 title: Touches 连接符 '+' 未被一条目一路径检查器捕获 + 检查器未接线（AC93/ac86/AC91 三次 anti-drift HARD
   FAIL 根因）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
