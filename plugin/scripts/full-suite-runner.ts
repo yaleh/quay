@@ -3982,7 +3982,7 @@ async function staticCheckCheck(): Promise<number> {
   }
 }
 
-const isDirect = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
+const isDirect = process.argv[1] && path.basename(process.argv[1]).replace(/\.(?:js|ts|mjs)$/, "") === "full-suite-runner";
 if (isDirect) {
   const argv = process.argv.slice(2);
   const exitCode = argv.includes("--fail-fast-check")

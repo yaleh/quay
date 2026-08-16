@@ -1406,7 +1406,7 @@ export function readSuiteEvents(root: string): SuiteStateEvent[] {
   }
 }
 
-const isDirect = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
+const isDirect = process.argv[1] && path.basename(process.argv[1]).replace(/\.(?:js|ts|mjs)$/, "") === "suite-state-trigger";
 if (isDirect) {
   const exitCode = await run(process.argv.slice(2));
   process.exit(exitCode);

@@ -320,7 +320,7 @@ function parseArg(argv: string[], name: string): string | undefined {
   return idx !== -1 && argv[idx + 1] ? argv[idx + 1] : undefined;
 }
 
-const isDirect = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
+const isDirect = process.argv[1] && path.basename(process.argv[1]).replace(/\.(?:js|ts|mjs)$/, "") === "measure-trend-check";
 if (isDirect) {
   const argv = process.argv.slice(2);
   const historyFile = parseArg(argv, "--history") ?? DEFAULT_HISTORY_FILE;

@@ -514,7 +514,11 @@ function isDirectEntry(): boolean {
   const entry = process.argv[1];
   if (!entry) return false;
   try {
-    return fs.realpathSync(path.resolve(entry)) === fileURLToPath(import.meta.url);
+    // Bundling-safe basename check: under esbuild import.meta.url is the BUNDLE path for every
+    // inlined module, so a realpath comparison would fire this module's CLI when it is inlined
+    // into another entry (verified: ready-pool-check.js ran precommit-guard's main). Compare the
+    // invoked file's basename against THIS module's own basename instead.
+    return path.basename(entry).replace(/\.(?:js|ts|mjs)$/, "") === "precommit-guard";
   } catch {
     return false;
   }

@@ -14,7 +14,6 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import {
   parseTouches,
   expandGlobs,
@@ -370,9 +369,19 @@ export async function main(argv) {
 function isDirectInvocation() {
   if (!process.argv[1]) return false;
   try {
-    const invokedReal = fs.realpathSync(path.resolve(process.argv[1]));
-    const moduleReal = fileURLToPath(import.meta.url);
-    return invokedReal === moduleReal;
+    // Bundling-safe direct-invocation check. Under esbuild (package.sh
+    // build-plugin-dist.mjs) `import.meta.url` is the BUNDLE path for every inlined
+    // module, so the historical `realpath(argv[1]) === fileURLToPath(import.meta.url)`
+    // comparison would report TRUE for every guarded module in the bundle — an imported
+    // dependency would hijack the entry's CLI (verified: dist/ready-pool-check.js ran
+    // this module's main instead of ready-pool-check's). Compare the invoked file's
+    // basename against THIS module's own basename instead: in the source tree the
+    // directly-run file is `concurrent-batch-scheduler.ts` (or the mirror symlink of the
+    // same name); in a bundle it is `dist/concurrent-batch-scheduler.js`. Both reduce to
+    // the same base name, and no other entry shares it. The basename survives the mirror
+    // symlink, preserving the original realpathSync intent.
+    const invoked = path.basename(process.argv[1]).replace(/\.(?:js|ts|mjs)$/, "");
+    return invoked === "concurrent-batch-scheduler";
   } catch {
     return false;
   }
