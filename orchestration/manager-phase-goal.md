@@ -243,6 +243,119 @@ C17 写所有权）。AC88（跨主机验证）需要人工触发或 outer 驱�
 
 ---
 
+## 🔜 下一阶段（**已立案，2026-08-16 16:0xZ；⛔ 尚未切换为当前阶段——人明令「暂不切换阶段，先保障当前阶段的目标和 AC 的实现」**）：Web UI 改进版落地
+
+**来源**：人 2026-08-16 16:0xZ 逐字裁定「下载和保存上述设计相关材料；创建一个新的阶段目标和 AC，以实现上述设计；
+提交这些变更；暂不切换阶段，先保障当前阶段的目标和 AC 的实现。」
+
+**切换条件（写在这里，免得将来靠回忆）**：当前阶段（AC85–AC93）达成后由**人**决定切换；
+⛔ manager 不得自行把本节改成「当前阶段」——本节存在的意义正是"立好但不抢跑"。
+
+**设计正本（已下载落盘，本次提交内）**：`docs/design/quay-webui-improved-2026-08-16/`
+```
+Quay改进版WebUI.dc.html    112655 B / 1309 行  ← 唯一交付目标（dc 模板 + React 运行时原型）
+support.js                  69134 B            ← dc-runtime（原型渲染用，非产品代码）
+_ds/modernist-…/styles.css  10225 B            ← Modernist 设计系统 token 表（唯一样式正本）
+_ds/modernist-…/readme.md    7289 B            ← 设计系统用法（token/组件类/Do & Don't）
+_ds/modernist-…/_ds_manifest.json  7234 B
+_ds/modernist-…/_ds_bundle.js       303 B
+uploads/quaywebuiauditandproposal.md 20850 B   ← 该设计所依据的现状审计 + 方案（实测锚在这里）
+```
+**落盘方式已核**：六个文件逐个与 claude.ai 设计项目原始返回**逐字节比对**（`orig == mine`），
+readme/bundle/audit 三个手抄件均验出并修正过差异（audit 曾差 1 个字符：全角`，`vs 半角`,`）。
+**⇒ 这份正本是可信副本，不是转述。**
+
+### 现状基线（实读 develop tip，AC 判据全部锚在这些可复算的量上）
+
+```
+packages/quay/src/serve-handlers.ts  1734 行   ← 全部路由 + 渲染 + 样式，服务端拼字符串
+独立 .html / .css 文件               0 个       （find 实测）
+JSON API 端点                        0 个       （grep -c 'application/json' = 0）
+@media 断点                          1 处       （:154 `@media (max-width: 600px)`，只对任务表生效）
+现有路由                             9 条       `/ /live /journal /git-history /board /adr /goal /doc`（+ /task/:id 等）
+已有 web 测试                        13 个文件  含 web-ui-browser.test.mjs(718) / serve.test.mjs(1809) / serve-browser-render.test.mjs(166)
+```
+
+### 设计要求的目标态（从 `.dc.html` 实读，非转述）
+
+```
+导航信息架构（navGroupDefs 原文）：
+  核心 = Dashboard, Tasks
+  观测 = Live, Board, System, Manager
+  记录 = Journal, Git History, Tests, Sessions
+  知识 = ADRs, Goals, Docs, Architecture
+⇒ 15 个视图（现有 9 + 新增 6：Dashboard/System/Manager/Tests/Sessions/Architecture）
+原型自述的交付分层：「首批交付：Dashboard / Tasks / Task Detail — 其余页面为路线图占位」
+桌面/移动双形态：sc-if isDesktop / isMobile + mobileMenuOpen（汉堡菜单）
+```
+
+### AC94（设计正本落盘且可复核）
+**判据（能取假）**：`docs/design/quay-webui-improved-2026-08-16/` 下**恰 7 个文件**（实测 `find -type f | wc -l` = 7）；
+`Quay改进版WebUI.dc.html` 的 sha256 = `bc339e50162b547aedde56ff803614282bf6d03008bd7ab45caf576e9fef1338`
+（**本次落盘时实算，是事后仍可核的锚**——同 AC88 的教训：判据不得引用一个生命周期短于判据本身的对象）；
+`grep -c 'navGroupDefs' <该文件>` = 3（命中 `:1067` 定义 + `:1195`/`:1196` 两处消费）。
+**⊢ 取假方式**：删掉任一文件或改一个字节 ⇒ sha256 不符 ⇒ 该 AC 立即变假。
+**状态**：本次提交即达成（manager 自己做的，属"保存材料"不属"实现设计"）。
+
+### AC95（**只做首批三屏**：Dashboard / Tasks / Task Detail 真上线，⛔ 不许一次铺 15 屏）
+**为什么这样切**：原型自己就把交付分成了「首批三屏 + 路线图占位」，**这是设计方给出的切法，不是我发明的**；
+且现状 9 条路由已在跑，一次重写全部 = 把一个能用的 UI 换成一个大爆炸。
+**判据（能取假）**：
+① `/dashboard`（或人裁定的路由名）真实返回 200，且页面含**至少 3 张卡片**，每张卡片的数字来自
+   **产生该数字的机件本身**（`observation.ts readLive` / `client.taskList` / `git log`），
+   ⛔ 不得解析 `manager-tick-log.md` / `manager-phase-goal.md` 这类叙事文档取数
+   （审计文件 §2.4.2 已把这条列为反模式，与 CLAUDE.md 硬规则①同源）；
+② Tasks / Task Detail 两屏改版后，`packages/quay/test/` 下 13 个既有 web 测试**全绿**
+   （这是天然的能取假锚：改坏了就红）；
+③ **空态诚实**：任一卡片数据源为空/不可用时渲染「未接入/无数据」，⛔ 不得留白或显示 0
+   —— 复用 `observation.ts` 已有的三态（`ok`/`empty`/`error`），⛔ 不得发明新的空值语义。
+   **取假方式**：把 `.workflow-events/` 改名后请求该页 ⇒ 必须出现「未接入」字样，出现 `0` 即判假。
+
+### AC96（响应式从 1 个断点到真·双形态，且判据是截图不是 CSS 行数）
+**判据（能取假）**：桌面 1440×900 与移动 375×812 两个视口各截一次图（chrome-devtools MCP，
+审计文件 §2.1 已建立该流程），**移动端首屏必须能看到第一条任务**
+——现状实测：187 个标签的导航在 375px 下换行成约 12 行文字墙，把任务列表挤出首屏。
+**⊢ 这是本 AC 唯一的达成判据**：不是"加了几个 `@media`"（那是硬规则④的不可取假量——CSS 加了不等于好用）。
+**附带的一行 bug 必须同批修掉**：`serve-handlers.ts:860` 的内联 `style="white-space:normal"`
+覆盖了 `.label-nav-wrap` 的 `white-space:nowrap`，**设计意图和实现自相矛盾**（审计 §1.4-3 实证）。
+
+### AC97（三条零成本的既有缺口先修——它们不依赖任何设计改版）
+审计文件把这三条列为 P0，**共同点是不需要写新功能**：
+```
+① /board 没有任何页面链接到它（grep 实测：全文件只有路由自身，0 个 <a href="/board">）⇒ 加进导航
+② /git-history 源码已完整实现，只是当前 demo 进程启动早于该功能落地 ⇒ 重启 quay serve 即可见
+③ AC96 里那条 white-space 内联覆盖（与 AC96 同一处，此处只作交叉引用，不重复计数）
+```
+**判据（能取假）**：`curl` 该 demo 实例的 `/git-history` 返回 200（现为 404）；
+任务列表页 HTML 中 `href="/board"` 命中 ≥1（现为 0）。
+**⇒ 这两条是本阶段最高性价比项，且与 AC95/AC96 无依赖，可最先做。**
+
+### AC98（`/goal` 空态必须指向正本，而不是显示 "No goals."）
+**现状（审计 §1.6 + §2.4.4 实证）**：`/goal` 路由/渲染完整，但 `goals/` 目录 0 条记录；
+真正的阶段目标仍在 `orchestration/manager-phase-goal.md`（本文件）与 `orchestration/outer-phase-goal.md` 里。
+**判据（能取假）**：`goals/` 为空时，`/goal` 页面 HTML 必须含指向这两个 prose 正本的路径字符串；
+grep 不到 ⇒ 判假。**⛔ 本 AC 不要求推进 goal-store 迁移**——那是一个独立的、需要人裁定的方向，
+**⛔ 不得把它塞进本阶段当前置**（硬规则⑫：不许凭空设前置）。
+
+### AC99（**Manager/System 两屏排在最后，且前置是机读接口而不是 UI**）
+**为什么单列**：审计 §2.4.2 已实测——`pool`/`floor`/`deficit` 这类字段**目前没有稳定的 `--json` 输出接口**，
+**这块工作的大头在后端补机读输出，不在 Web UI**。若先做 UI，唯一能拿到数的办法就是去解析 manager 的叙事日志
+——那正是被明令禁止的反模式。
+**判据（能取假）**：本 AC 达成 = **先有机读接口**（`resource-gate.sh` / `process-budget.sh` /
+`slot-refill` 至少其一产出稳定 JSON，且有一条 AC 级判据读它的**生产载体**而非 fixture
+——硬规则④推论三），UI 页面才允许开工。
+**⊢ 取假方式**：把 fixture/注入 seam 关掉后该判据仍能通过，才算测量；否则是回声。
+
+---
+
+**⛔ 本阶段落笔归属（与当前阶段同规）**：AC95–AC99 全部落在 `packages/quay/src/`（产品代码）
++ `packages/quay/test/`，**归 inner（实现）+ outer（立案/派发）**。
+**manager 一条不改产品代码**；AC94 是唯一由 manager 自己完成的（保存设计材料，人明令）。
+**⛔ 优先级**：本阶段整体**排在当前阶段（AC85–AC93）之后**；
+⛔ 在人明令切换之前，不得因为"这里写着 AC"就派发 AC95–AC99 —— **立案 ≠ 开工**。
+
+---
+
 ## ⏸ 前一阶段（2026-08-14 00:5xZ – 2026-08-16，已被上方新阶段取代，内容原样保留）：语义派发 —— 实现 `SPEC-dispatch-ordering-semantic-2026-08-13.md`
 
 **来源**：人 2026-08-14 裁定「创建新阶段，目标即实现 `SPEC-dispatch-ordering-semantic-2026-08-13.md`，
