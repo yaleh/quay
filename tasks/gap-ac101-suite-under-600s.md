@@ -74,6 +74,15 @@ round215 cpu_time 多 1799s 也与「CPU 饥饿拖慢」方向相反。**替代�
       **⚠️ 参照口径警告（manager 21:2xZ）**：参照轮 219/220/221 全部 `scope=worktree`，而判据①
       要求 `scope != worktree` ⇒ 600s 阈值由被本判据排除的样本设定，**main 口径 n=1**。
       ⛔ 不得写成「600s 有历史支撑」——该口径下无历史。600s 本身不改（人定目标）。
+      **⊢ 分解（inner 2026-08-16 21:24Z，round222 vs round221 同文件对照）**：Δ+42.3s 全部定位到
+      **serial 相 +87.6s**（234.0→321.6；main 反而 -73.0s（317.5→244.5），static +16.3s）。measure-trend
+      11 个互不相关文件 ~1.5-1.9x 增长（quay-init-loop-runtime +104s / check-drift +90s / loop-driver +83s /
+      vendor +76s / e2e-runtime +69s / e2e-upgrade +67s / session-liveness-events +56s / runtime-landing +51s /
+      consumer-doc-refs +46s / capability-catalog +45s / tmux-detection +44s，文件时间合计 ~731s ÷8 lanes ≈
+      +91s 墙钟 ≈ serial 增量吻合）。round222 serial 相 wall=566s / cpu=277s ⇒ **~49% 空闲（等待型阻塞，
+      非 CPU-bound）**；psi_cpu=11.6s、psi_io=0.09s 可忽略；编译缓存温热（round222 仅新增 2694/379262
+      条目）、node_modules 共享。**假说（非结论，需对照）**：等待型阻塞（IO/网络/调度）而非 develop 内容
+      变慢——能区分的对照 = 同等负载下 worktree 轮 or 空窗 main 轮（outer/manager 21:2xZ 已给同一设计）。
 - [x] AC2: 这 3 轮 `tests` 字段不得低于基线 **4951**（禁止砍覆盖换速度；低于基线即不计入且判作弊）。
 - [x] AC3: 优化手段落成代码/配置（可 `git log` 追溯的提交），⛔ 不接受"挑低负载时段跑一轮"充数。
 
