@@ -66,6 +66,14 @@ round215 cpu_time 多 1799s 也与「CPU 饥饿拖慢」方向相反。**替代�
       正确读法 = `grep -n 'PHASE_OVERLAP="\${QUAY_PHASE_OVERLAP' scripts/test.sh` 在 develop 上显示 `:-1`。
       **⛔ 注意**：AC101 曾因 AC1b 记为「（待外部）」被翻 done，但判据本体（跑 develop 基线轮）从未执行
       （218/219/220/221 全 worktree scope，fan-in 17:53 后无 develop 轮）——**需补跑该轮，done 才名副其实**。
+
+      **⊢ AC1b 实测（2026-08-16 21:22Z，round222 = main 口径第一轮）**：`durationMs=642288`
+      （642.3s，>600000 超 42.3s/7% ✗）∧ `tests=4970`（≥4951 ✓）∧ `lane=8` ✓ ∧ `scope=main`
+      （≠worktree ✓）∧ `state=green` ✓ ∧ `runner=full-suite-runner`（同仪器 ✓）∧ startedAt 21:11:29
+      （>17:53 ✓）。**⇒ AC1b 不满足（唯一不过 = durationMs）**，AC101 维持 ready。
+      **⚠️ 参照口径警告（manager 21:2xZ）**：参照轮 219/220/221 全部 `scope=worktree`，而判据①
+      要求 `scope != worktree` ⇒ 600s 阈值由被本判据排除的样本设定，**main 口径 n=1**。
+      ⛔ 不得写成「600s 有历史支撑」——该口径下无历史。600s 本身不改（人定目标）。
 - [x] AC2: 这 3 轮 `tests` 字段不得低于基线 **4951**（禁止砍覆盖换速度；低于基线即不计入且判作弊）。
 - [x] AC3: 优化手段落成代码/配置（可 `git log` 追溯的提交），⛔ 不接受"挑低负载时段跑一轮"充数。
 
