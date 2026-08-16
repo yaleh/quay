@@ -1,7 +1,7 @@
 ---
 id: gap-ac101-suite-under-600s
 title: "AC101: suite 在 main 相 lane=8 下总耗时 ≤600s（人设定 600s；先造反事实对照轮再优化）"
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -79,6 +79,7 @@ round215 cpu_time 多 1799s 也与「CPU 饥饿拖慢」方向相反。**替代�
       `scope=main` ✓ ∧ `state=green` ✓ ∧ `commit=fe0d951a`（develop HEAD，含 quay-init laydown 修复）∧
       startedAt 23:12:12（>17:53 ✓）。**⇒ AC1b 判据全部满足**（round222 的 642s 为 scope/load 混淆读数，
       非 develop 真值——round224 干净窗 500.8s 为干净基线）。AC101 的 develop 基线轮本体第一次实测达标。
+      **⚠️ 度量限制（manager 2026-08-16 23:2xZ，⛔ 别让达成悄悄变成'问题已解决'）**：round224 的 500.8s 是【相对空闲机器】读数（load1≈1.66，3 在飞全停摆）；round222 的 642.3s 跑在 load1=21.79 + 8 在飞。两轮负载差约一个数量级、时长差 141.5s ⇒ **下次满负载轮若回 600s+，是同一系统不同负载的表现，不是回归，⛔ 别当'AC101 白做了'再开排查**。判据未控制负载（写的是'某轮 ≤600s'），⛔ 不事后加前置（硬规则⑫）。建议（非要求）：等自然发生的满负载 main 轮，把时长记作第二数据点，⛔ 不专门造轮。
       **⊢ 分解（inner 2026-08-16 21:24Z，round222 vs round221 同文件对照）**：Δ+42.3s 全部定位到
       **serial 相 +87.6s**（234.0→321.6；main 反而 -73.0s（317.5→244.5），static +16.3s）。measure-trend
       11 个互不相关文件 ~1.5-1.9x 增长（quay-init-loop-runtime +104s / check-drift +90s / loop-driver +83s /
