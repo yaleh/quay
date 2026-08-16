@@ -1,7 +1,7 @@
 ---
 id: gap-suite-fix-red-baseline-2026-08-16
-title: "suite-fix：develop 基线 23 文件 / 7 族测试恒红（08-15 起）——挡 drift-mode fan-in + AC88 验证机制，必须真修复"
-status: todo
+title: "suite-fix：develop 基线红（静态门 + 测试真失败）已修复——execute-suite-fix workflow 全绿 merge develop（679ac913）"
+status: done
 labels:
   - gap
   - mechanism
@@ -77,12 +77,18 @@ select-preflight 退役前提已成立（唯一非测试消费者 = ADR-022 退�
 
 ## Acceptance Criteria
 
-- [ ] AC1: 以**真跑**确认真实失败集（23 文件/7 族），不是引用 08-15 历史快照当现状。
-- [ ] AC2: 失败族逐族归因 + 修复（quay-init* / install-config-driven-e2e* / cold-start-skill /
-      real-target-verify / capability-catalog / select-preflight-cli 全部转绿）。
-- [ ] AC3: 全量套件 `state=green`（verification-round 或 per-task-suite-records 记录，时间新于
-      2026-08-16 切换），**未用 override 顶替**。
-- [ ] AC4: 修复的证据逐族可核（每个修复族一个记录点）。
+- [x] AC1: 以**真跑**确认真实失败集——execute-suite-fix workflow 跑真实轮（无配额），真失败集 =
+      两个静态门检查器（fan-in-workflow-check 指向 bug / direct-to-develop-bypass-check 历史直提
+      f9577da1 需 ruled 分类）+ referenced-not-landed 声明 + full-suite-runner.test.mjs（283.8s 真失败）
+      + 19 条 doc lint（附带输出非成因）。「23 文件/7 族」已证为历史并集非当前状态（manager 复算作废）。
+- [x] AC2: 失败族逐族归因 + 修复——Fix agent 修：fan-in-workflow-check 指向 bug（mainRoot/QUAY_MAIN_CHECKOUT）、
+      bypass-check 的 f9577da1 ruled-historical 分类、SKILL.md + 核心文档 referenced-not-landed 声明、
+      full-suite-runner.test.mjs 等真失败；最终轮全绿。
+- [x] AC3: 全量套件 `state=green`（workflow 终态 outcome=green，scope=worktree，
+      verifiedCommit=acdd0517，2026-08-16），**未用 override 顶替**；已 fan-in merge 到 develop
+      （679ac913，conflict-free，acdd0517 为 develop 祖先）。
+- [x] AC4: 修复证据逐族可核——workflow journal（68 agents）+ merged commits（acdd0517/4d3a2767）
+      + verification-round green 记录 + 静态门检查器 exit 0。
 
 ## Definition of Done
 
@@ -94,3 +100,17 @@ select-preflight 退役前提已成立（唯一非测试消费者 = ADR-022 退�
 - 对应实现（packages/quay/src/* 等，按归因）
 - .github/workflows/ 或 scripts/test.sh（如属流程/基线问题）
 - tasks/gap-suite-fix-red-baseline-2026-08-16.md（自身）
+
+## Evidence（2026-08-16，workflow 完成）
+
+- execute-suite-fix workflow `wf_7f65d20f-4ad`：**outcome=green**（scope=worktree，verifiedCommit=acdd0517，
+  durationMs=1015041 ~17min 终轮）。68 agents / 590 tool uses / ~2.9h 总时。
+- 真失败集（Fix agent 修复）：fan-in-workflow-check 指向 bug（mainRoot/QUAY_MAIN_CHECKOUT）、
+  direct-to-develop-bypass-check（f9577da1 ruled-historical 分类）、referenced-not-landed 声明
+  （SKILL.md + 核心文档）、full-suite-runner.test.mjs（283.8s）。
+- 合并：fan-in merge develop `679ac913`（conflict-free），acdd0517 为 develop 祖先；
+  direct-to-develop-bypass-check exit 0（merge 记 `merge:` reflog action 被设计跳过）；
+  verify worktree 已 remove（分支 ref 保留）。worktree 内 build 的 tgz 经 develop-deliver-tgz.sh
+  best-effort 投递 B/C（不阻塞 merge）。
+- 前置发现：CPUQuota=400% 制造 CPU 饥饿假红（16 核机 4/16）已随 `da566a50` 修复；
+  concurrency-literal-check 覆盖缺口另立案 `gap-concurrency-literal-check-workflows-coverage`。
