@@ -1,7 +1,7 @@
 ---
 id: gap-ac76-tick-core-retirement-cleanup
 title: AC76 判据5 + C7 收指针 + AC48 残留清理——fast-mode-tick-core 退役文本清理（tick core 不留已退役文本以减少上下文污染）
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
@@ -63,9 +63,11 @@ depends_on: []
 - orchestration/fast-mode-tick-core.md（C7 收指针 + $FORK_BASELINE 单线 + 旧读法改新）
 - plugin/loop/fast-mode-tick-core.md（副本语义同步：C7 指针 + $FORK_BASELINE 单线 + A12/A13/A16 旧读法改新——不逐字拷贝，保持模板框架 + docs/analysis 引用）
 - plugin/scripts/fork-baseline.ts（如需，退役标注——已自带 RETIRED 标注，本次未改）
-- plugin/scripts/slot-refill.ts、plugin/scripts/fast-mode-telemetry.ts（AC76 判据5 退役标注）
+- plugin/scripts/slot-refill.ts（AC76 判据5 退役标注）
+- plugin/scripts/fast-mode-telemetry.ts（AC76 判据5 退役标注——已自带 RETIRED 标注，本次未改）
 - plugin/test/tick-core-static-check.test.mjs（AC8 inner C7 新语义）
-- plugin/scripts/red-on-omission-audit.ts、plugin/test/red-on-omission-audit.test.mjs（item ⑦：c3_resource_gate invariant 跟随 C3→R32 退役条款迁移——direct/migrated 两形态 + 负控制）
+- plugin/scripts/red-on-omission-audit.ts（item ⑦：c3_resource_gate invariant 跟随 C3→R32 退役条款迁移——direct/migrated 两形态）
+- plugin/test/red-on-omission-audit.test.mjs（item ⑦：migrated 形态负控制测试）
 - tasks/gap-ac76-tick-core-retirement-cleanup.md（自身）
 
 ## Evidence
