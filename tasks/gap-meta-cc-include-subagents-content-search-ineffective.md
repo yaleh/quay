@@ -1,7 +1,7 @@
 ---
 id: gap-meta-cc-include-subagents-content-search-ineffective
 title: meta-cc `include_subagents=true` 对内容搜索无效——只搜主会话自身（实证三针测），参数名误导（硬规则 3b 形态）
-status: needs-human
+status: superseded
 labels:
   - gap
   - mechanism
@@ -69,3 +69,8 @@ query_session_content(role=all, contains=<针>, session_id=<主会话>, include_
 实现），quay worktree 内无对应文件可实现（建 worktree 只是空壳）。meta-cc 是 marketplace MCP 服务器
 （owner 维护），无 quay 侧实现路径。**需人决定**：①在 meta-cc 自身项目立案实施，或 ②由 owner 直接改 meta-cc
 （本任务只作需求/复现载体）。⛔ 不在 quay 快模式池内派发。
+
+## Superseded
+
+**人 2026-08-16 15:5xZ 裁定**：本任务取消——不是 quay 项目的任务（Touches 全在 meta-cc 仓库，
+quay 侧无实现面可动）。原分析内容有效，执行体归 owner 另行在 meta-cc 项目处理，不在 quay 任务池挂等。
