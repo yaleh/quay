@@ -51,8 +51,23 @@ import { isDirectEntry } from "./gate-script-base.ts";
  *  Excludes mid-CJK-word mentions (`已跑A22`, `A22` inside a run-on sentence). `\b` after A22 keeps
  *  the match at the literal "A22" (the boundary between a digit and a space/CJK is a JS \b). */
 export const A22_TOPIC_RE = /(?:^|[\s>*-])\**A22\b/;
-/** A ready-pool RESULT token: the reading action/report markers. */
-export const A22_READING_RE = /心跳|读数|晋|无晋|心跳已跑|POOL|deficit|promotions|pool/;
+/** A ready-pool RESULT token — TIGHTENED (gap-ac66-a22-checker-loose-pattern): a line is a genuine
+ *  A22 READING only when A22 is followed (within 40 chars) by a READING VERB (读数/心跳已跑/心跳/晋/无晋),
+ *  AND the line is neither (a) the outer's A-SECTION reading (`**A 读数**：A1…A22 补晋…`, which reports
+ *  the A22 row in the general A1-A23 enumeration WITHOUT the subagent's id — it is the summary, not the
+ *  subagent reading) nor (b) a status note discussing the mechanism (`A22 第 N 次同形…` / `A22_READING_RE…` /
+ *  `A22 违规修复…`). The previous pattern matched "any line with A22 + any of 心跳/读数/晋/pool/promotions…",
+ *  so outer status notes (which necessarily mention A22 + mechanism words) and the A-section summaries
+ *  became the "latest A22 reading line" without an agent id and red every full-suite fan-in
+ *  (occurrence 3, structural). */
+export const A22_READING_RE = /A22[^。；：\n]{0,60}(?:读数|心跳已跑|心跳|晋|无晋)/;
+/** The outer's A-SECTION reading marker (`**A 读数**：A1 mounted…`) — the general A1-A23 enumeration,
+ *  NOT the A22-specific subagent reading. Its A22 row ("A22 补晋"/"A22 无 promotion") carries no agent
+ *  id and must not count as the A22 reading line (the subagent-specific `A22 读数（subagent…）` line does). */
+export const A22_SECTION_MARKER_RE = /\*\*A 读数\*\*：/;
+/** Status-note markers that mention A22 while DISCUSSING the mechanism (not reporting a reading):
+ *  the recurring `A22 第 N 次同形…` fix notes, the checker's own name `A22_READING_RE`, and `A22 违规修复…`. */
+export const A22_DISCUSSION_RE = /A22\s*(?:第\s*\d+\s*次同形|违规修复|_READING_RE)/;
 /** An agent identifier: `agentId …` (with an 8+ hex/uuid value) OR a parenthesized 8+ hex id within
  *  24 chars of "agent"/"subagent". The 24-char proximity is what excludes a trailing COMMIT SHA
  *  (e.g. `A22 后台 subagent 心跳：… 晋 AC73 todo→ready（416cd1d2 已提交）` — the commit SHA sits
@@ -62,10 +77,14 @@ export const AGENT_ID_RE =
 
 // ── Pure: line classification ────────────────────────────────────────────────────────────────────────
 
-/** Is `line` an A22 READING line — A22 as a topic token AND a ready-pool result token? PURE. */
+/** Is `line` an A22 READING line — A22 as a topic token AND a ready-pool result token, excluding
+ *  the A-section summary and status notes? PURE. */
 export function isA22ReadingLine(line) {
   const t = String(line ?? "");
   if (!A22_TOPIC_RE.test(t)) return false;
+  // A-section summaries and mechanism-discussion status notes are NOT A22 reading lines.
+  if (A22_SECTION_MARKER_RE.test(t)) return false;
+  if (A22_DISCUSSION_RE.test(t)) return false;
   return A22_READING_RE.test(t);
 }
 

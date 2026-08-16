@@ -1,7 +1,7 @@
 ---
 id: gap-ac66-a22-checker-loose-pattern
 title: "ac66-a22-agent-id-check 的 extractA22ReadingLines 太松——状态注记被匹配成读数行，缺 agent id 恒 RED（发生率 3，结构性）"
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
@@ -34,14 +34,13 @@ A22_READING_RE = /心跳|读数|晋|无晋|心跳已跑|POOL|deficit|promotions|
 
 ## Acceptance Criteria
 
-- [ ] AC1: `extractA22ReadingLines` 收紧——只匹配「真 A22 读数」形态（如 `**A22 读数**` 开头，或
-      含 pool/floor/deficit/promotions 数字的行），**不匹配状态注记**（提及 A22 但无数读数的行）。
-- [ ] AC2: 判据能取假——构造一条「提及 A22 + 机制词但无数读数」的注记 ⇒ 必须**不**被匹配为读数行。
-- [ ] AC3: 真实 A22 读数行（带 pool/floor/deficit/promotions 数字）仍被正确匹配 + 判 agent id。
+- [x] AC1: `extractA22ReadingLines` 收紧——只匹配「真 A22 读数」形态（A22 + 读数/心跳/晋/无晋，60 字符窗），**不匹配状态注记**（A22_DISCUSSION_RE 排除 `A22 第 N 次同形`/`A22_READING_RE`/`A22 违规修复`）**与 A-section 汇总**（A22_SECTION_MARKER_RE 排除 `**A 读数**：A1…A22 补晋`）。— 实测：真实 tick-log 只匹配 3 条真读数行（18:51/20:27/20:30 带 agent id），A-section + 状态注记全排除
+- [x] AC2: 判据能取假——构造「提及 A22 + 机制词但无数读数」的注记 ⇒ 不匹配。— 实测：20:30 状态注记（`A22 第 3 次同形…A22_READING_RE 太松…读数行`）不匹配；A-section 行（`**A 读数**：A1…A22 补晋`）不匹配
+- [x] AC3: 真实 A22 读数行（带 pool/floor/deficit/promotions 数字）仍正确匹配 + 判 agent id。— 实测：`A22 读数（后台 subagent（a6f00b0cf69bccc31）…）`匹配 + agent id 判定 PASS；ac66-a22-agent-id-check.test.mjs 全绿（exit 0）
 
 ## Definition of Done
 
-- [ ] checker 只匹配真 A22 读数行，状态注记不再误触发；发生率 3 的结构性根因消除。
+- [ ] checker 只匹配真 A22 读数行，状态注记不再误触发；发生率 3 的结构性根因消除。（待外部——fan-in 后 develop 全量 suite 验证）
 
 ## Touches
 
