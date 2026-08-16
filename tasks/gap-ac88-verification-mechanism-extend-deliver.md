@@ -1,7 +1,7 @@
 ---
 id: gap-ac88-verification-mechanism-extend-deliver
 title: "AC88 前置：扩展交付验证机制覆盖 quay-init + 冷启动（outer+inner）——现状只到装 tgz + 端口探活"
-status: ready
+status: done
 labels:
   - gap
   - mechanism
