@@ -52,6 +52,7 @@ depends_on: []
 ## Touches
 
 - plugin/scripts/precommit-guard.ts（接线本体——judge() 新增 ② Touches「一条目一路径」detector + resolveHooksDir worktree 修）
+- plugin/test/precommit-guard.test.mjs（judge() ② detector 新增测试——AC3/AC4/坏好样本 + resolveHooksDir worktree 用例）
 - .git/hooks/pre-commit（安装产物——precommit-guard.ts --install-hook 写出；worktree 下是 common dir 的 hooks）
 - plugin/scripts/touches-one-entry-one-path-check.ts（复用导出 checkTaskOneEntryOnePath/readOneEntryBaseline——未改，若需导出供撰写面调用）
 - tasks/gap-touches-one-entry-detector-not-enforcer.md（自身）
@@ -78,6 +79,7 @@ reason=touches-multi-path-bullet。
 
 **AC3（git log 追溯 + 不破坏既有 guard）**：
 - 接线本体 = `plugin/scripts/precommit-guard.ts`（git tracked）⇒ `git log --oneline -- plugin/scripts/precommit-guard.ts` 可追溯；
+- plugin/test/precommit-guard.test.mjs（judge() ② detector 新增测试——AC3/AC4/坏好样本 + resolveHooksDir worktree 用例）
   实现提交 `12510d87`。
 - `resolveHooksDir` 与 `git rev-parse --git-path hooks` 一致（worktree 下解析到 common dir）——「AC3 — resolveHooksDir
   matches `git rev-parse --git-path hooks`」测试钉住。
