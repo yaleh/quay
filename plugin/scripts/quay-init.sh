@@ -973,7 +973,14 @@ derive_loop_scripts() {
     changed=0; round=$((round + 1))
     for s in $(cat "$out"); do
       [ -f "$PLUGIN_ROOT/scripts/$s" ] || continue
-      for dep in $(grep -oE '\$\{SCRIPT_DIR\}/[a-zA-Z0-9][a-zA-Z0-9._-]*|\$SCRIPT_DIR/[a-zA-Z0-9][a-zA-Z0-9._-]*' "$PLUGIN_ROOT/scripts/$s" 2>/dev/null | sed -E 's#.*/##' | sort -u || true); do
+      # gap-delivery-laydown-dist-closure-gap: the closure regex must tolerate the PACKAGED
+      # two-segment form `${SCRIPT_DIR}/dist/X.js` (package.sh rewrites .ts refs to dist/X.js;
+      # the single-segment `[a-zA-Z0-9._-]*` truncated it to `dist` and the sed basename-strip
+      # then dropped the dist/ prefix — the bundle never entered the laydown set). Allow `/` in
+      # the matched path and strip ONLY the ${SCRIPT_DIR}/ or $SCRIPT_DIR/ prefix (NOT the
+      # basename-strip `s#.*/##`, which truncates `dist/X.js` to `X.js`) so the scripts/-relative
+      # path `dist/X.js` (or the source-tree single-segment `X.ts`) resolves under scripts/.
+      for dep in $(grep -oE '\$\{SCRIPT_DIR\}/[a-zA-Z0-9][a-zA-Z0-9._/-]*|\$SCRIPT_DIR/[a-zA-Z0-9][a-zA-Z0-9._/-]*' "$PLUGIN_ROOT/scripts/$s" 2>/dev/null | sed -E 's#^\$\{SCRIPT_DIR\}/##; s#^\$SCRIPT_DIR/##' | sort -u || true); do
         [ -n "$dep" ] || continue
         case " $NEVER_LAYDOWN " in *" $dep "*) continue ;; esac
         [ -f "$PLUGIN_ROOT/scripts/$dep" ] || continue
@@ -1164,7 +1171,12 @@ verify_referenced_landed() {
   if [ -d "$ws/plugin/scripts" ]; then
     for script in "$ws"/plugin/scripts/*.sh; do
       [ -f "$script" ] || continue
-      for sd in $(grep -oE '\$\{SCRIPT_DIR\}/[a-zA-Z0-9][a-zA-Z0-9._-]*|\$SCRIPT_DIR/[a-zA-Z0-9][a-zA-Z0-9._-]*' "$script" 2>/dev/null | sed -E 's#.*/##' | sort -u || true); do
+      # gap-delivery-laydown-dist-closure-gap: same two-segment tolerance as the derive closure —
+      # a laid-down script's `${SCRIPT_DIR}/dist/X.js` reference must be checked as
+      # $ws/plugin/scripts/dist/X.js, NOT truncated to the dist/ directory (which exists once any
+      # other bundle lands ⇒ the old check passed while the specific .js was missing). Strip only
+      # the ${SCRIPT_DIR}/ or $SCRIPT_DIR/ prefix so the scripts/-relative path is preserved.
+      for sd in $(grep -oE '\$\{SCRIPT_DIR\}/[a-zA-Z0-9][a-zA-Z0-9._/-]*|\$SCRIPT_DIR/[a-zA-Z0-9][a-zA-Z0-9._/-]*' "$script" 2>/dev/null | sed -E 's#^\$\{SCRIPT_DIR\}/##; s#^\$SCRIPT_DIR/##' | sort -u || true); do
         [ -n "$sd" ] || continue
         case " $NEVER_LAYDOWN " in *" $sd "*) continue ;; esac
         if [ ! -e "$ws/plugin/scripts/$sd" ]; then

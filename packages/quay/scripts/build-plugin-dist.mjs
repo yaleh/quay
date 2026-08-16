@@ -237,7 +237,16 @@ export function rewriteInvokers(pluginRoot) {
   let filesTouched = 0;
   for (const dir of mdDirs) {
     for (const f of walk(path.join(pluginRoot, dir))) {
-      if (!f.endsWith(".md")) continue;
+      // gap-delivery-laydown-dist-closure-gap: the shipped workflow FILES (plugin/workflows/*.js)
+      // are invokers too — they reference plugin/scripts/X.ts in their string literals (e.g.
+      // fan-in-execute.js runs `node --experimental-strip-types plugin/scripts/X.ts`). Without this
+      // rewrite the packaged artifact's workflows point at raw .ts that package.sh DELETED, so the
+      // installed `.claude/workflows/*.js` fail AND verify_referenced_landed's refs scan (which
+      // covers workflows/*.js) names them referenced-not-landed. rewriteMarkdown's path/node rules
+      // are safe on .js (only touch `plugin/{scripts,gate-scripts}/X.ts` and the
+      // node --experimental-strip-types invocation forms; dev-repo `experiments/...ts` and bare-name
+      // prose refs are deliberately left untouched).
+      if (!f.endsWith(".md") && !f.endsWith(".js")) continue;
       const text = fs.readFileSync(f, "utf8");
       const out = rewriteMarkdown(text);
       if (out !== text) {
