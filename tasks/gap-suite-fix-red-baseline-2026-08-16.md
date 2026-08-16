@@ -19,11 +19,23 @@ depends_on: []
 
 **来源**：manager 2026-08-16 优先级判断（转发 inner needs-human）+ 人 2026-08-16 新阶段裁定。
 
-**关键事实（manager 判断，方向明确）**：develop 基线 **23 文件 / 7 族测试恒红（08-15 起）**，挡住
-drift-mode follow-up 的 fan-in。失败族含 `quay-init*` / `install-config-driven-e2e*` /
-`cold-start-skill` / `real-target-verify` / `capability-catalog` / `select-preflight-cli`——
-**正是 AC85-89 新阶段验证的对象本身**。AC88 的验证机制要跑通这批测试族才能产出可核记录；
-**不修，AC88 从立案那天起就注定验证不了**。
+**关键事实（manager 判断，方向明确；⛔ 数字已更正 04:5xZ）**：develop 基线**确有红块**挡住
+drift-mode follow-up 的 fan-in。**⚠️ 原「23 文件/7 族」是 08-12~13 历史并集，非当前状态——已作废**
+（manager 复算 212 轮 verification-round 确认，其原转述未复算，记其账上）。**真红分解（两类，分开处置）**：
+- **(a) `reason=gate-failed tests=0 failures=19` —— 套件根本没跑（静态红=A15②「suite 没跑」）**：
+  18 条 = `tasks/*.md` 文档 lint，散在 **15 个已完成任务**（invoke-evidence-missing×10 /
+  contract-line-unknown×4 / dispatch-review-missing×2 / measure-no-field×1 / contract-measure-no-name×1）；
+  1 条 = `STATIC_CHECK_FAILED: direct-to-develop-bypass-check exit=1`（唯一真门）。
+- **(b) `reason=failed tests=4929 failures=7` —— 唯一真跑了测试的一轮（08-15 12:27）**，去重后
+  **3 文件 / 2 断言**：`select-preflight-cli.test.mjs`（单 case 60s 超时，08-13 起间歇，非断言失败）
+  + `loop-shipping.test.mjs`（AC1b「搬迁后不应残留 5 个旧路径引用」）。
+- **已知绿点**：08-15 11:34 全绿（tests=4926 failures=0）——bisect 下界。
+- **两条陷阱**：① 末轮全量 = 08-15 12:55（16h 前），「恒红」是 16h 前读数非持续观测；
+  ② per-task-suite-records 近 6 条绿全 `fullSuiteRan=false doc-only-delta`——**绿但没跑**（硬规则 3b），
+  不作基线绿证据。
+**⇒ 修法分两条腿**：先修 (a) 文档 lint + bypass 门（静态门开全量才跑得起来，A15② 顺序），再修 (b) 2 个测试断言。
+**⛔ 退役任何测试前必须先有消费者枚举**（select-preflight 属 ADR-022 退役经典循环，其非测试消费者待查，
+manager 正在核）——退役不可逆。
 
 **已确认证据**：最近一次真实全量轮（verification-round 08-15 12:55，lane 16）state=red、19 failures
 （任务文件缺口 + 静态检查 + 测试族）。per-task-suite-records 亦见 08-16 00:44 red（5 文件）。
