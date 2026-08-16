@@ -46,7 +46,13 @@ workflow 文件路径的接线检查——按位置判定，没有一个是调�
 
 ## Touches
 
-- packages/quay/src/select-preflight.ts（若退役）
-- .claude/workflows/select-preflight.js（若退役）
-- experiments/quay-perpetual-stream/test/select-preflight-cli.test.mjs（若退役）
+- experiments/quay-perpetual-stream/scripts/select-preflight.ts（退役删除——真实路径，非 packages/quay/src/）
+- .claude/workflows/select-preflight.js（退役删除）
+- experiments/quay-perpetual-stream/test/select-preflight-cli.test.mjs（退役删除）
+- experiments/quay-perpetual-stream/test/select-preflight.test.mjs（退役删除）
+- experiments/quay-perpetual-stream/test/candidate-synthesis.test.mjs（移除 getCandidates legacy 测试）
+- experiments/quay-perpetual-stream/scripts/workflow-metadata-conformance.mjs（C6 文件集 5→4）
+- plugin/scripts/workflow-metadata-conformance.mjs（双副本，与 experiments/ 逐字一致）
+- plugin/scripts/config-wiring-check.ts（移除 select-preflight 引用）
+- plugin/test/workflow-metadata-conformance.test.mjs（C6 断言更新）
 - tasks/gap-select-preflight-retirement-decision.md（自身）
