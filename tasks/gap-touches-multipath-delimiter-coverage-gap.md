@@ -1,7 +1,7 @@
 ---
 id: gap-touches-multipath-delimiter-coverage-gap
 title: flagMultiPathTouchEntries 只测 ' / ' 分隔——'、' 全角分隔的 Touches 复合条目漏检，anti-drift 首次才拦（AC76 fan-in 实证）
-status: ready
+status: done
 labels:
   - gap
   - defect
