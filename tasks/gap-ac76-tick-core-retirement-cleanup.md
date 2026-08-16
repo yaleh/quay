@@ -48,13 +48,14 @@ depends_on: []
 5. 既有测试全绿 + `--for-task` scoped 门绿。
 6. item ⑦ c3 审计条目跟随退役条款：`red-on-omission-audit.ts` c3_resource_gate invariant 接受 direct 或 migrated 形态（核 C3 指针 ∧ 档案 R32 短语）；`red-on-omission-audit.test.mjs` 加 migrated-form 正/负控制（absent-everywhere red）。
 7. item ⑧ catalog 分类补齐：`capability-catalog.sh` 六表（QUESTION/CADENCE/INVALIDATION/LAST_REAFFIRMED/MATCHING/CONSUMER）加 send-to-session.ts；unclassified 1→0；五个连带检查器绿；derivatives 核验。
+8. item ⑧-follow-on 落地索引全枚举 + delivery-inventory 快照修复：枚举全部 plugin/scripts 索引面（catalog 六表 / delivery-inventory 快照 / verify-delivery-surface manifest / test-impl-census / mechanism-vitality / runtime-usage-inventory / referenced-not-landed），唯一漏项 = outline §6 快照（scripts 253→254 重生成）；AC4 承诺改为「补快照后 verify-delivery-surface 绿」。
 
 ## Acceptance Criteria
 
 - [x] AC1 判据1：tick core 无已退役文本——C7 收指针、$FORK_BASELINE 单线（A17/C3 改 develop）、A12/A13/A16 旧读法清除。
 - [x] AC2 判据2 能取假：AC76 判据5 代码文件显式退役标注（不删）；tick-core-static-check AC8「inner C7」新语义（迁出不计数）；c3 审计条目跟随退役条款（red-on-omission-audit migrated 形态 covered、absent-everywhere red）；既有测试绿。
 - [x] AC3 判据3：`--for-task` scoped 门绿。
-- [x] AC4 判据4（item ⑧）：catalog 分类补齐——send-to-session.ts 在 capability-catalog.sh 六表（QUESTION/CADENCE/INVALIDATION/LAST_REAFFIRMED/MATCHING/CONSUMER）声明，unclassified 1→0（250/250 declared），五个连带检查器绿（capability-catalog / mechanism-vitality-check / slot-free-trigger / verify-delivery-surface / npm-pack-e2e doc-gate），derivatives 核验。
+- [x] AC4 判据4（item ⑧ + follow-on）：catalog 分类补齐——send-to-session.ts 在 capability-catalog.sh 六表声明，unclassified 1→0（250/250 declared）；**落地索引全枚举 + 补快照后 verify-delivery-surface 绿**（快照漂移 = send-to-session.ts 落地的既有衍生，非本任务 delta——把前提写进承诺，不是放松；index-table 全表面核验见 Evidence：唯一漏项 = outline §6 DELIVERY-INVENTORY 快照，已重生成 253→254）+ 五个连带检查器绿。
 
 ## Definition of Done
 
@@ -71,6 +72,7 @@ depends_on: []
 - plugin/scripts/red-on-omission-audit.ts（item ⑦：c3_resource_gate invariant 跟随 C3→R32 退役条款迁移——direct/migrated 两形态）
 - plugin/test/red-on-omission-audit.test.mjs（item ⑦：migrated 形态负控制测试）
 - plugin/scripts/capability-catalog.sh（item ⑧：send-to-session.ts 分类补齐——六表声明（含 CONSUMER） + unclassified 1→0 + 五个连带检查器绿）
+- docs/proposals/quay-product-outline.md（item ⑧-follow-on：delivery-inventory 快照 253→254 重生成）
 - tasks/gap-ac76-tick-core-retirement-cleanup.md（自身）
 
 ## Evidence
@@ -140,6 +142,25 @@ send-to-session.ts（基于 Claude Code 跨会话 socket 协议、从非 Claude 
 **核验**：`bash capability-catalog.sh` → `250 scripts | 250 declared | 0 unclassified | 245 ship` exit 0；`mechanism-vitality-check --check` → invalidation_gate.ok=true exit 0；`slot-free-trigger.test.mjs` → 15/15（catalog-entry 闸绿）；`verify-delivery-surface` → PASS exit 0；`scripts/test.sh --static-checks-doc` → exit 0（npm-pack-e2e 依赖面解除）。
 
 **derivatives 核验**：PUBLIC_ENTRYPOINTS 只约束 .sh（send-to-session.ts 非 .sh，无需）；NOT_SHIPPED/SUPERSEDED 不适用（在飞、非退役）；**CONSUMER 由 rhythm-consumer-check 判据2 要求**——首跑 scoped 门报「send-to-session.ts: 按需 without a CONSUMER row」（按需=无人按），故补 `谁按：owner/外层在需要从非 Claude 进程给目标会话投递消息时按`（五表之外第六表）。referenced-not-landed：全仓 grep 无 skills/loop/orchestration/docs/CLAUDE.md 引用 send-to-session.ts（文件本身已落地，无 dangling「应存在」引用）。
+
+**⑧-follow-on 落地索引全枚举 + delivery-inventory 快照修复（item 8-follow-on，manager 批准 option (a) + 加枚举全部索引）** —— 3rd「落地漏索引」（catalog → referenced-not-landed → delivery-inventory 快照）。manager 指令：**不只修这一个快照，枚举所有 landed plugin/scripts 文件必须注册的索引面**。全表面核验表：
+
+| 索引面 | send-to-session.ts 状态 | 证据 |
+|---|---|---|
+| capability-catalog.sh QUESTION/CADENCE/INVALIDATION/LAST_REAFFIRMED/MATCHING/CONSUMER | ✅ item 8 已入六表 | `[send-to-session.ts]` 六行（QUESTION 提问 / 按需 / 失效前提 / 2026-08-16 / n/a / 谁按） |
+| **delivery-inventory 快照（quay-product-outline.md §6）** | ❌ 漏 → **本次补** | `--inventory` 首报 `scripts: disk=254 snapshot=253` drift=1 → `--write-inventory` 重生成 → `scripts=254 · ... · vendor=2` drift=0 |
+| verify-delivery-surface SOURCE manifest（deliverables 六类） | ✅ 无需 | `--surface` PASS（send-to-session.ts 非六类交付物成员，.ts 非 .sh 面） |
+| test-impl-census-check | ✅ 无需 | 只数测试文件（404），非机制脚本索引 |
+| mechanism-vitality-check | ✅ 覆盖 | 读 catalog cadence/invalidation（六表已入） |
+| npm-pack-e2e / package.sh | ✅ 经快照修复 | `--static-checks-doc` exit 0 |
+| runtime-usage-inventory.md | ✅ 无需 | 2026-08-03 历史生成分析文档，非活索引（其 test 断言工具行为非固定计数） |
+| referenced-not-landed | ✅ 零引用 | skills/loop/orchestration/docs/CLAUDE.md grep 无 send-to-session.ts |
+
+**唯一漏项 = delivery-inventory 快照**（`scripts=253` 落后于 disk 254）——send-to-session.ts 落地的既有衍生（先于本任务，非 item 8 delta），manager 方向 = 把前提写进承诺（「补快照后 verify-delivery-surface 绿」），不是放松。修复证据：
+```
+$ node --no-warnings --experimental-strip-types plugin/scripts/verify-delivery-surface.ts --write-inventory --root .   → PASS: outline §6 DELIVERY-INVENTORY snapshot regenerated to match disk; inventory_drift=0
+$ git diff docs/proposals/quay-product-outline.md → -scripts=253 +scripts=254（其余 key 不变）
+```
 
 **测试输出**：
 ```
