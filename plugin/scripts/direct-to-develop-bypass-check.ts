@@ -276,10 +276,15 @@ function git(root, args, opts = {}) {
   });
 }
 
-/** 一条 commit 的相对改动文件（vs 第一父）。父不存在（root commit）返回 null。 */
+/** 一条 commit 的相对改动文件（vs 第一父）。父不存在（root commit）返回 null。
+ *  ⚠️ `-c core.quotepath=false`：git 默认对含非 ASCII 的文件名输出 C-quoted 形态
+ *  （`"docs/.../Quay\346\224\271\350\277\233\347\211\210WebUI.dc.html"`），前导引号使 `^docs/`
+ *  等排除正则失效 ⇒ design-internal 文件被误判为 code-surface（2fdb6e32 false-positive）。
+ *  关闭 quotepath 让 `--name-only` 输出原始路径字节，`^docs/` 等排除恢复对非 ASCII 路径生效。
+ *  （tasks/gap-direct-bypass-check-quoted-path-false-positive） */
 export function gitCommitFiles(root, sha) {
   try {
-    const out = git(root, ["diff", "--name-only", `${sha}^`, sha]);
+    const out = git(root, ["-c", "core.quotepath=false", "diff", "--name-only", `${sha}^`, sha]);
     return out.split("\n").map((s) => s.trim()).filter(Boolean);
   } catch {
     return null;

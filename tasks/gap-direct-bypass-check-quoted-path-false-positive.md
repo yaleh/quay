@@ -52,14 +52,49 @@ fan-in 全量 suite 在静态检查 direct-to-develop-bypass-check 红（fail-cl
 
 ## Acceptance Criteria
 
-- [ ] AC1: 非 ASCII 文件名在 `docs/` 下被排除正则正确豁免（git quoted 路径处理）。
-- [ ] AC2: code-surface 非 ASCII 文件名仍被标记 bypass（不误放）。
-- [ ] AC3: 负控制成立——2fdb6e32 类（docs/ 非 ASCII）不红；真实 code 非 ASCII 红。
-- [ ] AC4: 既有 bypass-check 测试全绿 + 新增 quoted-path 用例。
+- [x] AC1: 非 ASCII 文件名在 `docs/` 下被排除正则正确豁免（git quoted 路径处理）。
+- [x] AC2: code-surface 非 ASCII 文件名仍被标记 bypass（不误放）。
+- [x] AC3: 负控制成立——2fdb6e32 类（docs/ 非 ASCII）不红；真实 code 非 ASCII 红。
+- [x] AC4: 既有 bypass-check 测试全绿 + 新增 quoted-path 用例。
 
 ## Definition of Done
 
-- [ ] bypass-check 对非 ASCII 文件名的排除判定正确（docs/ 豁免、code 标记）；负控制 + 既有测试绿。
+- [x] bypass-check 对非 ASCII 文件名的排除判定正确（docs/ 豁免、code 标记）；负控制 + 既有测试绿。
+
+## Evidence
+
+**修法**：`gitCommitFiles()` 的 `git diff --name-only` 前加 `-c core.quotepath=false`——让 `--name-only`
+输出原始路径字节（默认对含非 ASCII 的路径输出 C-quoted 形态 `"docs/.../Quay\346\224\271\350\277\233\347\211\210WebUI.dc.html"`，
+前导引号使 `^docs/` 排除失效 ⇒ design-internal 被误判 code-surface）。关闭 quotepath 后 `^docs/` 恢复对非 ASCII 路径生效。
+
+**验证 1（2fdb6e32 复核：修复前 exit 1 → 修复后 exit 0）**：
+```
+$ node --experimental-strip-types plugin/scripts/direct-to-develop-bypass-check.ts --root /home/yale/work/quay --commits 2fdb6e32 --json
+evaluated: True ok: True reason: no-code-surface-direct-commits codeSurface: 0 designInternal: 1   exit=0
+```
+修复前同命令：`codeSurface: 1 designInternal: 0 reason: direct-commit-bypasses-fan-in`（exit 1）——2fdb6e32 被误判。
+
+**验证 2（任务指定复核：--root /home/yale/work/quay --baseline b11ce720）**：
+```
+$ node --experimental-strip-types plugin/scripts/direct-to-develop-bypass-check.ts --root /home/yale/work/quay --baseline b11ce720
+direct-to-develop-bypass-check: evaluated=true ok=true (ac65-authorized-or-ruled-historical-only)
+  denominator: total=82 code-surface=7 design-internal=75 in-lock-window=0 ac65-authorized=5 ruled-historical=3   exit=0
+```
+（修复前此命令 exit 1——2fdb6e32 false positive 使全量扫描红。）
+
+**验证 3（测试 30/30 绿，含 4 条新增 quoted-path 用例）**：
+```
+$ node --test plugin/test/direct-to-develop-bypass-check.test.mjs
+ℹ tests 30  ℹ pass 30  ℹ fail 0
+```
+新增用例：
+- `PURE isDesignInternalPath — 非 ASCII 文件名恢复排除（AC1/AC2）`
+- `AC3 负控制·真实 git — 2fdb6e32 CLI --commits 必须 GREEN（AC3）`
+- `CLI — docs/ 下非 ASCII 文件名直接提交 ⇒ GREEN（AC1/AC3 负控制）`
+- `CLI — code-surface 非 ASCII 文件名直接提交 ⇒ RED（AC2 不误放），路径不带引号/转义`
+
+**负控制**：temp repo 构造 `docs/design/Quay改进版WebUI.dc.html` 直投 ⇒ GREEN（design-internal=1）；
+构造 `plugin/test/测试.test.mjs` 直投 ⇒ RED（codeSurfaceFiles[0]=`plugin/test/测试.test.mjs`，原始字节非 C-quoted）。
 
 ## Touches
 
