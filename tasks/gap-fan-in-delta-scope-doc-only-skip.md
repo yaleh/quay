@@ -36,7 +36,11 @@ fullSuiteRan=false      64 条（doc-only-delta 57 / no-develop-delta 6 / empty-
 从未跑过全量轮          34 个
 doc-only-delta 跳过 + Touches 声明非 doc 路径   32 个（我数）/ 16 个（manager 数）
 ```
-**⚠️ 方法限度（⛔ 写入，别当确数）**：32 按任务体声明的 `## Touches` 数，非实际 diff——可能高估（声明了没真改）也可能低估（改了没声明）。**真值要逐任务 diff = 本任务第一条 AC**。16 vs 32 方法差：manager 的 DOC_RE 更窄；我的不含 orchestration/、含 packages/plugin/.claude/.github/scripts。无论真值多少，**与 1 不在一个量级**。
+**⚠️ 方法限度（⛔ 写入，别当确数）**：32 按任务体声明的 `## Touches` 数，非实际 diff——可能高估（声明了没真改）也可能低估（改了没声明）。**真值要逐任务 diff = 本任务第一条 AC**。16 vs 32 方法差已解：manager 把 `orchestration/` 当 doc，**我核实它是错的**——`tick-core-static-check.ts:69-76` 硬编码 5 个 `orchestration/*.md` 为输入，且该检查器测试在套件里跑 11 次 ⇒ **改 orchestration/*.md 能把套件弄红，它不是 doc**。⇒ **32 更接近真值**。
+
+**⊢ 「doc」的判据定义（manager 22:0xZ 建议，本任务采用）**：**doc ≠ "文件名以 .md 结尾"或任何手写路径表**——doc 应该定义为「**没有任何套件检查器读这个路径**」。理由：手写正则表都会漂（manager 漏 orchestration/，下次可能漏 .claude/workflows/ 或 docs/references/），两个人各拍一张表不会比一个人拍得准。**可机械化形式**：套件检查器各自声明（或被枚举出）它读哪些路径 ⇒ **doc-only 的定义 = delta ∩ (所有检查器读的路径集合) = ∅**——这个集合可从代码算出，不用人维护。**取假**：往 `orchestration/manager-tick-core.md` 塞违反 (src:N) 的改动，若闸门仍判 doc-only ⇒ 判据假。
+
+**⊢ 反向核（manager 特意做的，⛔ 别读成安全证据）**：历史上 `orchestration/*.md` 改动弄红套件的计数 = **0**。**这【不是】"所以它安全"的证据**（硬规则④：没发生过 ≠ 结构上不可能）。⛔ 别让这个 0 被读成「orchestration 归 doc 也没问题」。
 
 **⚠️ 名单里两条刺眼（单独写）**：
 - `gap-gitignored-carriers-absent-in-verify-worktree` → 改 `plugin/scripts/full-suite-runner.ts` + `scripts/test.sh`（**套件机器本身，自己没跑过全量轮**）
@@ -44,8 +48,8 @@ doc-only-delta 跳过 + Touches 声明非 doc 路径   32 个（我数）/ 16 �
 
 ## Acceptance Criteria
 
-- [ ] AC1: **枚举存量（修法之前先数清）**——对 `per-task-suite-records.jsonl` 里所有「fullSuiteRan=false ∧ skipReason=doc-only-delta ∧ 从未 fullSuiteRan=true」的任务，逐任务 `git diff` 核对其实际改动的非 doc 文件，产出**确数清单**（任务 id + 实际改动的非 doc 路径）。AC1 以这份清单为准，⛔ 不以 Touches 声明数代替（那是 32 那个估计值）。
-- [ ] AC2: **修法**——fan-in delta 判定改看**分支整体相对 develop 的变更**（含更早进入分支历史的代码），不是单轮 fan-in 合并的 diff。取假：构造一个代码在更早分支提交、fan-in 单轮 delta 只见 doc 的场景 ⇒ 必须仍判需跑全量。
+- [ ] AC1: **枚举存量（修法之前先数清）**——对 `per-task-suite-records.jsonl` 里所有「fullSuiteRan=false ∧ skipReason=doc-only-delta ∧ 从未 fullSuiteRan=true」的任务，逐任务 `git diff` 核对其实际改动的文件，**用「无套件检查器读该路径 = doc」的可计算定义**（枚举套件检查器读的路径集合，delta ∩ 该集合 = ∅ 才算 doc-only）判定，产出**确数清单**（任务 id + 实际改动的非 doc 路径）。AC1 以这份清单为准，⛔ 不以 Touches 声明数代替（那是 32 那个估计值），⛔ 不用手写路径正则表。
+- [ ] AC2: **修法**——fan-in delta 判定改看**分支整体相对 develop 的变更**（含更早进入分支历史的代码），不是单轮 fan-in 合并的 diff；且 doc-only 判定改用「无套件检查器读该路径」的可计算定义（枚举检查器读路径集合，非手写正则表）。取假一：代码在更早分支提交、fan-in 单轮 delta 只见 doc ⇒ 必须仍判需跑全量。取假二：`orchestration/manager-tick-core.md` 塞违反 (src:N) 的改动 ⇒ 不得判 doc-only。
 - [ ] AC3: 修法后**新的** code 型 fan-in 不再出现「代码进 develop 但全量轮未覆盖」（判据：per-task-suite-records 新增记录中，Touches/实际 diff 声明非 doc 而 fullSuiteRan=false 的任务数为 0）。
 - [ ] AC4: **存量处置**——AC1 枚举出的已 done 但未验证任务，逐个标注「落地未经全量轮验证」（如 manager 给 AC97 的 2df28ee4 样式），并判定是否需补跑全量轮。
 
