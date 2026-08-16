@@ -41,3 +41,20 @@ depends_on: []
 - packages/quay/src/serve-handlers.ts（white-space 覆盖 + 导航链接）
 - packages/quay/test/（13 个既有 web 测试保持全绿）
 - tasks/gap-ac97-webui-zero-cost-gaps.md（自身）
+
+## Evidence
+
+（实测 2026-08-16，工作树 gap-ac97-webui-zero-cost-gaps @ 5a33f518）
+
+- **AC1（/git-history 200）**：源码实现 2026-08-12 已落地（7f7b7f3c / 001eb376 / 9ef7ec8e），
+  运行中 demo 进程（pid 1229410，lstart **2026-08-15 13:10:21**，晚于功能落地）⇒
+  `curl -s -o /dev/null -w "%{http_code}" http://100.78.206.100:4173/git-history` → **200**（重启后可见已成立）。
+  另起本地新 serve（本工作树代码）验证同一判据：`curl …/git-history` → **200**（server-rendered SVG 页）。
+- **AC2（任务列表页 href="/board" ≥1）**：`curl http://127.0.0.1:43997/ | grep -c 'href="/board"'` → **1**（改前 0）。
+  导航行：`<p class="meta"><a href="/board">board</a> · <a href="/live">live</a> · …`。
+- **AC3（white-space 内联覆盖移除）**：`curl http://127.0.0.1:43997/ | grep -c 'style="white-space:normal"'` → **0**（改前 1）；
+  `<div class="label-nav-wrap">` 仍在（1），内联覆盖移除后 `.label-nav-wrap { white-space:nowrap }`（overflow-x:auto 滚动条）继承意图生效。
+- **既有 web 测试全绿（exit 0，逐文件）**：serve-adr 4/4、serve-board 4/4、serve-goal-doc 8/8、
+  serve-handlers 7/7、serve-list-realtime 4/4、serve-action-delivery ✔、serve-adversarial-eval ✔、
+  serve-browser-render ✔、serve.test ✔、web-ui-browser 32 pass/1 skip、serve-github 1 skipped（设计上需 live GitHub）。
+  复算：`bash scripts/test.sh --scoped <上述 11 个 test 文件>` 或逐个 `node --test packages/quay/test/<file>.test.mjs`。
