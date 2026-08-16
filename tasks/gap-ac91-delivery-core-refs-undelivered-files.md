@@ -9,8 +9,7 @@ parent: null
 children: []
 extra:
   schema: execution
-depends_on:
-  - gap-ac90-delivery-copy-drift-gate
+depends_on: []
 ---
 
 **type:** execution
@@ -29,6 +28,10 @@ depends_on:
 「在 init/SKILL.md 声明过」这条会豁免掉——**⛔ 需实读确认是哪条豁免的，别猜**，读完判定分支再下结论）。
 
 ## Plan
+
+> **排期建议（非前置，depends_on 已拆，manager 2026-08-16 裁定）**：建议在 AC90 land 之后做
+> （派发顺序，人手执行）；无真前置——AC91 的引用解析不依赖 AC90 的漂移闸产出（AC90 是 diff 闸，
+> 不产出「交付集」机械枚举；交付集来自 package.json files + package.sh，非 AC90 实现）。
 
 1. **实读** `quay-init.sh:1131` 附近三条件 AND 的判定分支，确认哪条豁免了 execute-suite-fix /
    pool-quality-judge 的 referenced-not-landed。

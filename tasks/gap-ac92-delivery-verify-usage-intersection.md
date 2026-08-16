@@ -9,8 +9,7 @@ parent: null
 children: []
 extra:
   schema: execution
-depends_on:
-  - gap-ac93-dist-chains-version-consistency
+depends_on: []
 ---
 
 **type:** execution
@@ -26,6 +25,9 @@ depends_on:
 **⇒ 验证的是「端口活着」，使用的是「几百个脚本能不能跑」——两者几乎不相交。**
 
 ## Plan
+
+> **排期建议（非前置，depends_on 已拆，manager 2026-08-16 裁定）**：建议在 AC93 land 之后做
+> （派发顺序，人手执行——四条里最重，放最后）；无真前置。
 
 1. 按**实测调用频次**取前 N 个真实被使用的机件（**N 由读数②的分布决定，⛔ 不许拍一个数字**——
    硬规则④推论：成本/分布未知前不设阈值）。

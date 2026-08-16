@@ -9,8 +9,7 @@ parent: null
 children: []
 extra:
   schema: execution
-depends_on:
-  - gap-ac91-delivery-core-refs-undelivered-files
+depends_on: []
 ---
 
 **type:** execution
@@ -31,6 +30,9 @@ publish-plugin-dist.yml 唯一触发 = `v*` tag 推送；最后一个 v* tag = v
 **从不发生**，所以 `/plugin install` 拿到的永远是 10 天前的树，而 marketplace 还声明着一个更老的版本号。
 
 ## Plan
+
+> **排期建议（非前置，depends_on 已拆，manager 2026-08-16 裁定）**：建议在 AC91 land 之后做
+> （派发顺序，人手执行）；无真前置——版本号一致是独立的一命令级修，不需要先有漂移闸或引用解析。
 
 1. 核对四处版本号（一条命令可查，现状 3:1 不一致）。
 2. `/plugin install` 链**二选一**：
