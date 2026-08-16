@@ -1,7 +1,7 @@
 ---
 id: gap-ac86-dist-verify-node-floor-equivalent-path
 title: "AC86: `dist-verify-node-floor` 在当前开发流程上有等价的真实执行路径（非只改 on: 触发条件）"
-status: ready
+status: done
 labels:
   - gap
   - mechanism
