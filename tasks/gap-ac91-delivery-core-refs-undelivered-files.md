@@ -110,12 +110,17 @@ manager 的「三条件 AND 里『在 init/SKILL.md 声明过』这条会豁免�
 
 ## Touches
 
-- plugin/workflows/execute-suite-fix.js + pool-quality-judge.js（新镜像：交付被引用而此前未交付的两个 workflow）
+- plugin/workflows/execute-suite-fix.js（新镜像：交付被引用而此前未交付的 workflow）
+- plugin/workflows/pool-quality-judge.js（新镜像：交付被引用而此前未交付的 workflow）
 - plugin/scripts/quay-init.sh（引用集 alternation 扩到 `.claude/workflows|.claude/agents`；引用源加 `plugin/workflows/*.js`；`--loop` 隐含 `--workflows`；derive_loop_scripts 扫 workflow 文件）
 - plugin/sync.sh（workflow 同步集 2→5）
 - plugin/skills/init/SKILL.md（`orchestration/session-liveness.env` 声明 self-create）
 - plugin/test/quay-init-loop-consumer-doc-refs.test.mjs（3 条 AC91 测试：正+负+真实安装）
 - plugin/test/plugin-packaging.test.mjs（M143 workflow 镜像集 2→5 + byte-identity）
-- plugin/scripts/workflows-dual-copy-drift-check.ts + plugin/test/workflows-dual-copy-drift-check.test.mjs + plugin/scripts/checker-mutation-cases/workflows-dual-copy-drift-check.sh + plugin/scripts/capability-catalog.sh + scripts/test.sh（双副本漂移闸 pinned 对集 3→5）
+- plugin/scripts/workflows-dual-copy-drift-check.ts（双副本漂移闸 pinned 对集 3→5）
+- plugin/test/workflows-dual-copy-drift-check.test.mjs（双副本漂移闸 pinned 对集 3→5）
+- plugin/scripts/checker-mutation-cases/workflows-dual-copy-drift-check.sh（双副本漂移闸 pinned 对集 3→5）
+- plugin/scripts/capability-catalog.sh（双副本漂移闸 pinned 对集 3→5）
+- scripts/test.sh（双副本漂移闸 pinned 对集 3→5）
 - docs/proposals/quay-product-outline.md（§6 DELIVERY-INVENTORY workflows=3→5，`--write-inventory` 刷新）
 - tasks/gap-ac91-delivery-core-refs-undelivered-files.md（自身）
