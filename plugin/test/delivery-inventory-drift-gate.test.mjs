@@ -289,6 +289,29 @@ t("GREEN — a DELETION of a workflow WITH its mirror deleted in the same change
   } finally { rmrf(root); }
 });
 
+// gap-select-preflight-retirement-decision (2026-08-16): the gate's workflows trigger assumes every
+// deleted workflow HAD a mirror. A legacy workflow that predates the plugin/workflows/ mirror
+// convention (select-preflight.js) was NEVER mirrored — its deletion leaves no stale mirror, so the
+// deletion must NOT be structural (no mirror touch required). ADDITIONS still always require a
+// mirror (new_workflow_requires_mirror stays FAIL-closed), and a deletion whose mirror exists at
+// base still fails if the mirror is not deleted in the same change (pinned above).
+t("GREEN — DELETION of a legacy .claude/workflows file that NEVER had a plugin/workflows mirror passes (no stale mirror to remove)", () => {
+  const root = makeRepo();
+  try {
+    // Add a legacy unmirrored workflow in its own baseline commit (canonical only, no mirror).
+    fs.writeFileSync(path.join(root, WF_CANONICAL, "legacy-wf.js"), 'export const meta = { name: "legacy-wf" };\n');
+    git(root, "add", "-A");
+    git(root, "commit", "-q", "-m", "add legacy unmirrored workflow baseline");
+    // Delete it WITHOUT touching plugin/workflows/ — there is no mirror to delete.
+    fs.rmSync(path.join(root, WF_CANONICAL, "legacy-wf.js"));
+    git(root, "add", "-A");
+    git(root, "commit", "-q", "-m", "delete legacy unmirrored workflow");
+    const res = spawnSync("bash", [GATE, "--root", root, "--base", "HEAD~1"], { encoding: "utf8" });
+    assert.equal(res.status, 0, `legacy unmirrored workflow deletion must pass (no stale mirror):\n${res.stderr}`);
+    assert.match(res.stdout, /PASS/);
+  } finally { rmrf(root); }
+});
+
 // ── non-git fail-open ──────────────────────────────────────────────────────────────────────────────
 
 t("GREEN — a non-git root is skipped (fail-open: no change set to evaluate)", () => {

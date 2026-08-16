@@ -45,7 +45,15 @@
 //   --merge            本轮判定在 merge 上下文（pre-merge-commit 钩子传此 flag；文档检查行为与
 //                      commit 完全一致，仅输出标注 merge 上下文）
 //
-// 退出码：0 = 放行；1 = 拒（doc-check-failed）；2 = 用法/环境错。
+// 退出码：0 = 放行；1 = 拒（doc-check-failed / touches-multi-path-bullet）；2 = 用法/环境错。
+//
+// Touches「一条目一路径」detector (gap-touches-one-entry-detector-not-enforcer, 2026-08-16):
+//   一个 staged tasks/*.md 的 ## Touches 若含多路径 bullet（AC93/ac86/AC91/AC99 形状——" / " / " + "
+//   / "、" / "，" / "," 连接 ≥2 个路径），在【提交这一刻】即拒（touches-multi-path-bullet），
+//   不必等套件静态层——每犯一次的代价是 fork→在飞→静态红→改 Touches 重跑 一整条循环。
+//   复用与静态检查器（touches-one-entry-one-path-check.ts）【同一个】判定 + shrink-only 祖父基线，
+//   不新增第二个 Touches parser。scoped 静态层 check（run_static_checks）原地保留——本 detector 是
+//   撰写面补充（提交时红），不是替换。
 //
 // <!-- enforcement: plugin/scripts/precommit-guard.ts -->
 
@@ -53,6 +61,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+// Touches「一条目一路径」judgment — the SAME judgment the static checker uses (no second parser).
+import { checkTaskOneEntryOnePath, readOneEntryBaseline } from "./touches-one-entry-one-path-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -69,6 +79,8 @@ export interface Verdict {
   message: string;
   /** AC51: doc-class check failure output (present when reason === "doc-check-failed"). */
   docCheckOutput: string | null;
+  /** gap-touches-one-entry-detector-not-enforcer: Touches detector output (present when reason === "touches-multi-path-bullet"). */
+  touchesCheckOutput: string | null;
   /** pre-merge-commit 上下文（钩子传 --merge；文档检查行为与 commit 一致，仅标注）。 */
   merge: boolean;
 }
@@ -99,6 +111,26 @@ function gitDir(cwd: string): string {
   } catch {
     throw new Error("not a git repository (git rev-parse --git-dir failed)");
   }
+}
+
+/**
+ * The hooks directory git actually reads. For a linked worktree this is the COMMON dir's hooks
+ * (git resolves `$GIT_DIR/hooks` to the common dir), NOT the worktree-specific gitdir — naively
+ * `path.join(gitDir(root), "hooks")` writes a hook git ignores (shared-hook reality, 2026-08-16).
+ * `git rev-parse --git-path hooks` is the canonical resolution (main checkout, worktree, AND
+ * core.hooksPath overrides all resolve correctly).
+ */
+export function resolveHooksDir(root: string): string {
+  try {
+    const out = execFileSync("git", ["rev-parse", "--git-path", "hooks"], {
+      cwd: root,
+      encoding: "utf8",
+      timeout: 10_000,
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    if (out) return path.resolve(root, out);
+  } catch { /* fall through to the naive join */ }
+  return path.join(gitDir(root), "hooks");
 }
 
 /** 全 tracked 文件列表（resolveAssertionSurface 的 fail-closed 回退面）。 */
@@ -248,6 +280,69 @@ export function runDocChecks(root: string): DocCheckResult {
   }
 }
 
+// ── Touches「一条目一路径」detector（gap-touches-one-entry-detector-not-enforcer）───────────────────
+// 撰写/提交那一刻红掉：一个 staged tasks/*.md 的 ## Touches 含多路径 bullet ⇒ 拒提交。复用静态检查器
+// 的同一判定（checkTaskOneEntryOnePath）+ shrink-only 祖父基线——不新增第二个 Touches parser。
+
+export interface TouchesCheckResult {
+  ok: boolean;
+  output: string;
+}
+
+/** Staged task files (tasks/*.md) in the current commit (`git diff --cached`), the Touches-check scope. */
+export function stagedTaskFiles(root: string): string[] {
+  try {
+    const out = execFileSync("git", ["diff", "--cached", "--name-only", "-z"], {
+      cwd: root,
+      encoding: "utf8",
+      timeout: 10_000,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    if (!out) return [];
+    return out
+      .split("\0")
+      .filter(Boolean)
+      .filter((f) => f.startsWith("tasks/") && f.endsWith(".md"));
+  } catch {
+    return [];
+  }
+}
+
+/** The STAGED (index) content of a file — what WILL be committed (not the working-tree copy). */
+export function stagedBlob(root: string, rel: string): string {
+  try {
+    return execFileSync("git", ["show", `:${rel}`], {
+      cwd: root,
+      encoding: "utf8",
+      timeout: 10_000,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Run the Touches detector on the staged task files. A staged task whose ## Touches carries a
+ * multi-path bullet (AC93/ac86/AC91/AC99 shape) is RED here, at the commit moment — not only at the
+ * suite's static layer. Grandfathered files (the shrink-only baseline) are skipped, matching the
+ * static checker. A commit with NO staged task file is always ok (nothing to judge).
+ */
+export function runTouchesChecks(root: string): TouchesCheckResult {
+  const staged = stagedTaskFiles(root);
+  if (staged.length === 0) return { ok: true, output: "" };
+  const { baseline } = readOneEntryBaseline(root);
+  const lines: string[] = [];
+  for (const rel of staged) {
+    const body = stagedBlob(root, rel);
+    if (!body) continue;
+    const v = checkTaskOneEntryOnePath(body, rel, baseline);
+    for (const x of v) lines.push(`  ${rel}: ${x.what}`);
+  }
+  if (lines.length === 0) return { ok: true, output: "" };
+  return { ok: false, output: lines.join("\n") };
+}
+
 // ── 断言面集合（full-suite-runner 复用；守卫本身不再读它——② 退役）─────────────────────────────────
 
 export interface RegistryShape {
@@ -311,6 +406,29 @@ export function judge(
         "─── 文档类检查输出 ───\n" +
         docResult.output,
       docCheckOutput: docResult.output,
+      touchesCheckOutput: null,
+      merge: opts.merge === true,
+    };
+  }
+
+  // ② Touches「一条目一路径」detector（gap-touches-one-entry-detector-not-enforcer）：提交这一刻红掉
+  //    staged tasks/*.md 的多路径 Touches bullet——不必等套件静态层（fork→在飞→静态红→改 Touches
+  //    重跑 的循环）。复用静态检查器同一判定 + 祖父基线（不新增第二个 parser）。
+  const touchesResult = runTouchesChecks(root);
+  if (!touchesResult.ok) {
+    return {
+      verdict: "reject",
+      reason: "touches-multi-path-bullet",
+      message:
+        'pre-commit 守卫：Touches 多路径 bullet（touches-one-entry-one-path 判据1——每个 ## Touches ' +
+        'bullet 只允许一个路径/glob 条目）。\n' +
+        '多路径 bullet（" / " / " + " / "、" / "，" / "," 连接 ≥2 个真实路径）会被 parseTouchEntriesWithTags ' +
+        '当【单一 glob】——匹配不到任何文件、且把每个真实路径藏起来使重叠判不到。\n' +
+        '修复：把多路径 bullet 拆成每行一个条目后重新提交。\n' +
+        '─── Touches 检查输出 ───\n' +
+        touchesResult.output,
+      docCheckOutput: null,
+      touchesCheckOutput: touchesResult.output,
       merge: opts.merge === true,
     };
   }
@@ -318,8 +436,9 @@ export function judge(
   return {
     verdict: "allow",
     reason: "doc-checks-pass",
-    message: "pre-commit 守卫：文档类检查通过（①），放行。",
+    message: "pre-commit 守卫：文档类检查通过（①）+ Touches 单路径（②），放行。",
     docCheckOutput: null,
+    touchesCheckOutput: null,
     merge: opts.merge === true,
   };
 }
@@ -331,8 +450,11 @@ function hookShim(root: string): string {
     "#!/usr/bin/env bash",
     `# ${HOOK_FINGERPRINT} — installed by plugin/scripts/precommit-guard.ts --install-hook`,
     "# pre-commit guard: ① runs the DOC-CLASS checks at commit time (AC51 断言面拆分 — doc checks",
-    "# are no longer in the full suite, so editing docs no longer makes a running round red).",
-    "# (② rejecting running-round assertion-surface commits was RETIRED under AC64 — see",
+    "# are no longer in the full suite, so editing docs no longer makes a running round red);",
+    "# ② runs the Touches「一条目一路径」detector on staged tasks/*.md at the commit moment",
+    "#    (gap-touches-one-entry-detector-not-enforcer — a multi-path Touches bullet reds HERE,",
+    "#    not at the suite's static layer).",
+    "# (③ rejecting running-round assertion-surface commits was RETIRED under AC64 — see",
     "# orchestration/archive/AC58-retired-clauses.md#R27.)",
     'ROOT="$(git rev-parse --show-toplevel)"',
     `exec node --no-warnings --experimental-strip-types "$ROOT/plugin/scripts/${HOOK_FINGERPRINT}" --root "$ROOT"`,
@@ -352,8 +474,9 @@ export function preMergeCommitShim(root: string): string {
   return [
     "#!/usr/bin/env bash",
     `# ${HOOK_FINGERPRINT} — installed by plugin/scripts/precommit-guard.ts --install-hook`,
-    "# pre-merge-commit guard: ① runs the DOC-CLASS checks at merge time (AC51 断言面拆分).",
-    "# (② rejecting running-round merges was RETIRED under AC64 — see",
+    "# pre-merge-commit guard: ① runs the DOC-CLASS checks at merge time (AC51 断言面拆分);",
+    "# ② runs the Touches「一条目一路径」detector on the merged-in tasks/*.md at the merge moment.",
+    "# (③ rejecting running-round merges was RETIRED under AC64 — see",
     "# orchestration/archive/AC58-retired-clauses.md#R27.)",
     'ROOT="$(git rev-parse --show-toplevel)"',
     `exec node --no-warnings --experimental-strip-types "$ROOT/plugin/scripts/${HOOK_FINGERPRINT}" --root "$ROOT" --merge`,
@@ -362,8 +485,7 @@ export function preMergeCommitShim(root: string): string {
 }
 
 export function installHook(root: string): string {
-  const gd = gitDir(root);
-  const hooksDir = path.join(gd, "hooks");
+  const hooksDir = resolveHooksDir(root);
   fs.mkdirSync(hooksDir, { recursive: true });
   // pre-commit (commit write-path) — the original guard hook (idempotent; refuses unrelated hook).
   const hookPath = path.join(hooksDir, "pre-commit");
@@ -390,8 +512,7 @@ export function installHook(root: string): string {
 }
 
 export function uninstallHook(root: string): { removed: boolean; hookPath: string } {
-  const gd = gitDir(root);
-  const hooksDir = path.join(gd, "hooks");
+  const hooksDir = resolveHooksDir(root);
   let removed = false;
   // Remove BOTH the pre-commit and pre-merge-commit guard shims (idempotent; a hook that does not
   // carry the fingerprint is left untouched — never clobber an unrelated hook).
@@ -410,8 +531,10 @@ export function uninstallHook(root: string): { removed: boolean; hookPath: strin
 
 // ── CLI ───────────────────────────────────────────────────────────────────────────────────────────────
 
-const USAGE = `precommit-guard.ts — 写入那一刻的守卫：① 文档类检查（AC51 断言面拆分）。
-② 拒绝「轮 running 且触及断言面」的写入已退役（AC64）→ orchestration/archive/AC58-retired-clauses.md#R27。
+const USAGE = `precommit-guard.ts — 写入那一刻的守卫：① 文档类检查（AC51 断言面拆分）；
+② Touches「一条目一路径」detector（gap-touches-one-entry-detector-not-enforcer——staged tasks/*.md
+的 ## Touches 多路径 bullet 在提交这一刻红掉，不必等套件静态层）；
+③ 拒绝「轮 running 且触及断言面」的写入已退役（AC64）→ orchestration/archive/AC58-retired-clauses.md#R27。
 
 用法:
   node --experimental-strip-types plugin/scripts/precommit-guard.ts [--root <dir>]
@@ -419,14 +542,15 @@ const USAGE = `precommit-guard.ts — 写入那一刻的守卫：① 文档类�
 
 参数:
   --install-hook      把 <git-dir>/hooks/pre-commit 与 <git-dir>/hooks/pre-merge-commit 写成调用
-                      本守卫的 shim（幂等；pre-merge-commit 带 --merge）
+                      本守卫的 shim（幂等；pre-merge-commit 带 --merge）。hooks 目录用
+                      git rev-parse --git-path hooks 解析（worktree 下是 common dir 的 hooks）
   --uninstall-hook    移除上述两个钩子中的本守卫 shim（幂等）
   --merge             本轮判定在 merge 上下文（pre-merge-commit 钩子传此 flag；文档检查行为与
                       commit 一致，仅输出标注）
-  --json              机器可读输出（{verdict, reason, message, docCheckOutput, merge}）
+  --json              机器可读输出（{verdict, reason, message, docCheckOutput, touchesCheckOutput, merge}）
   --help              本帮助
 
-退出码: 0=放行 1=拒（doc-check-failed） 2=用法/环境错`;
+退出码: 0=放行 1=拒（doc-check-failed / touches-multi-path-bullet） 2=用法/环境错`;
 
 function main(): number {
   const args = process.argv.slice(2);
@@ -497,6 +621,7 @@ function main(): number {
           reason: verdict.reason,
           message: verdict.message,
           docCheckOutput: verdict.docCheckOutput,
+          touchesCheckOutput: verdict.touchesCheckOutput,
           merge: verdict.merge,
         },
         null,

@@ -144,7 +144,21 @@ classify_path() {
         *A*|*D*)                                 # added / deleted (staged or unstaged)
           case "${clean}" in
             *R*) : ;;                            # rename — mirror count unchanged, not structural
-            *) workflows_structural=1 ;;
+            *)
+              # gap-select-preflight-retirement-decision (2026-08-16): a DELETED workflow only
+              # requires the plugin/workflows/ mirror touch if the mirror actually existed at base —
+              # a legacy workflow that was never mirrored (predates the plugin/workflows/ mirror
+              # convention) leaves no stale mirror on deletion, so it is NOT structural. ADDITIONS
+              # always require the mirror touch (new_workflow_requires_mirror, FAIL-closed).
+              case "${clean}" in
+                *A*) workflows_structural=1 ;;
+                *)
+                  if git cat-file -e "${base}:plugin/workflows/${p#.claude/workflows/}" >/dev/null 2>&1; then
+                    workflows_structural=1
+                  fi
+                  ;;
+              esac
+              ;;
           esac
           ;;
       esac

@@ -43,7 +43,7 @@ round215 cpu_time 多 1799s 也与「CPU 饥饿拖慢」方向相反。**替代�
 
 ## Acceptance Criteria
 
-- [ ] AC1: `.quay/verification-round.jsonl` 存在 ≥3 轮记录，满足 `laneCount==8` ∧ `state=="green"`
+- [x] AC1: `.quay/verification-round.jsonl` 存在 ≥3 轮记录，满足 `laneCount==8` ∧ `state=="green"`
       ∧ `durationMs <= 600000`，且 `startedAt` 晚于立条时刻（2026-08-16T16:2xZ）——读生产载体非 fixture。
       **⊢ AC1 已 3/3 达成（manager 2026-08-16 17:5xZ 复算，全 worktree jsonl 去重）**：
       ```
@@ -52,21 +52,43 @@ round215 cpu_time 多 1799s 也与「CPU 饥饿拖慢」方向相反。**替代�
       round=221  17:30:12  green  599.591s  lane8  tests=5003  conc=2  commit=17e91e38
       ```
       全部满足 green∧lane8∧≤600s∧立条后 + tests≥4951。三轮跑在 concurrentSuitesRunning=2（更不利并发环境），
-      按 manager 裁定「AC3 防挑有利环境」逻辑计入（证据强度高于干净窗口）。**⛔ 但 AC1b 仍未满足（见下），
-      不得勾**。⚠️ **余量读数**：round221 = 599.591s，距 600000 只剩 **409ms（0.07%）**；三轮 485/556/600
+      按 manager 裁定「AC3 防挑有利环境」逻辑计入（证据强度高于干净窗口）。**AC1 本体 3/3 达成，勾；
+      AC1b 为（待外部）项见下**。⚠️ **余量读数**：round221 = 599.591s，距 600000 只剩 **409ms（0.07%）**；
+      三轮 485/556/600
       方差大 ⇒ **600s 目标目前没有稳定余量**。⛔ 取整会掩盖「几乎压线」——Evidence 记精确 ms。
-- [ ] AC1b: **⛔ AC101 不得在 `17e91e38` 进 develop 之前判达成**（manager 2026-08-16 17:4xZ 裁定，硬规则④推论三
-      原形——「实现了、测试绿了、但生产没跑过」与「没实现」同形）。让 556s 成立的 PHASE_OVERLAP 开关在
-      develop 上默认仍是关（`scripts/test.sh:1023 PHASE_OVERLAP="${QUAY_PHASE_OVERLAP:-0}"`，develop 工作树
-      现读）。**判据**：AC1 的 3 轮里至少 1 轮跑在【`17e91e38` 已进 develop 之后】的 develop 基线上；
-      或等价地，AC101 判达成时 `grep PHASE_OVERLAP scripts/test.sh` 在 develop 上默认显示为 1。
-      **取假（一条命令）**：`git merge-base --is-ancestor 17e91e38 develop` 为假 ⇒ AC101 不得勾。
-- [ ] AC2: 这 3 轮 `tests` 字段不得低于基线 **4951**（禁止砍覆盖换速度；低于基线即不计入且判作弊）。
-- [ ] AC3: 优化手段落成代码/配置（可 `git log` 追溯的提交），⛔ 不接受"挑低负载时段跑一轮"充数。
+- [ ] AC1b: **⛔ AC101 判达成前必须跑一轮 develop 基线轮**（manager 2026-08-16 17:4xZ 裁定 + 18:2xZ 修正，硬规则④推论三
+      原形——「实现了、测试绿了、但生产没跑过」与「没实现」同形）。让 556s 成立的 PHASE_OVERLAP 已在
+      develop（`scripts/test.sh:1024 PHASE_OVERLAP="${QUAY_PHASE_OVERLAP:-1}"`，via 56921738，on develop），
+      :203 修法也在（currentVersion）。**判据**：在 develop 基线上跑一轮全量，`state=="green"` ∧
+      `laneCount==8` ∧ `durationMs <= 600000` ∧ `tests >= 4951`，把**精确 ms** 记进 Evidence。
+      **⊢ 取假（读内容，非 SHA）**：fan-in 是 rebase/squash 形态，commit SHA 不是可引用对象（manager 18:2xZ
+      自纠：`git merge-base --is-ancestor 17e91e38 develop` 会假阴性——内容进了但 SHA 不是祖先）。
+      正确读法 = `grep -n 'PHASE_OVERLAP="\${QUAY_PHASE_OVERLAP' scripts/test.sh` 在 develop 上显示 `:-1`。
+      **⛔ 注意**：AC101 曾因 AC1b 记为「（待外部）」被翻 done，但判据本体（跑 develop 基线轮）从未执行
+      （218/219/220/221 全 worktree scope，fan-in 17:53 后无 develop 轮）——**需补跑该轮，done 才名副其实**。
+
+      **⊢ AC1b 实测（2026-08-16 21:22Z，round222 = main 口径第一轮）**：`durationMs=642288`
+      （642.3s，>600000 超 42.3s/7% ✗）∧ `tests=4970`（≥4951 ✓）∧ `lane=8` ✓ ∧ `scope=main`
+      （≠worktree ✓）∧ `state=green` ✓ ∧ `runner=full-suite-runner`（同仪器 ✓）∧ startedAt 21:11:29
+      （>17:53 ✓）。**⇒ AC1b 不满足（唯一不过 = durationMs）**，AC101 维持 ready。
+      **⚠️ 参照口径警告（manager 21:2xZ）**：参照轮 219/220/221 全部 `scope=worktree`，而判据①
+      要求 `scope != worktree` ⇒ 600s 阈值由被本判据排除的样本设定，**main 口径 n=1**。
+      ⛔ 不得写成「600s 有历史支撑」——该口径下无历史。600s 本身不改（人定目标）。
+      **⊢ 分解（inner 2026-08-16 21:24Z，round222 vs round221 同文件对照）**：Δ+42.3s 全部定位到
+      **serial 相 +87.6s**（234.0→321.6；main 反而 -73.0s（317.5→244.5），static +16.3s）。measure-trend
+      11 个互不相关文件 ~1.5-1.9x 增长（quay-init-loop-runtime +104s / check-drift +90s / loop-driver +83s /
+      vendor +76s / e2e-runtime +69s / e2e-upgrade +67s / session-liveness-events +56s / runtime-landing +51s /
+      consumer-doc-refs +46s / capability-catalog +45s / tmux-detection +44s，文件时间合计 ~731s ÷8 lanes ≈
+      +91s 墙钟 ≈ serial 增量吻合）。round222 serial 相 wall=566s / cpu=277s ⇒ **~49% 空闲（等待型阻塞，
+      非 CPU-bound）**；psi_cpu=11.6s、psi_io=0.09s 可忽略；编译缓存温热（round222 仅新增 2694/379262
+      条目）、node_modules 共享。**假说（非结论，需对照）**：等待型阻塞（IO/网络/调度）而非 develop 内容
+      变慢——能区分的对照 = 同等负载下 worktree 轮 or 空窗 main 轮（outer/manager 21:2xZ 已给同一设计）。
+- [x] AC2: 这 3 轮 `tests` 字段不得低于基线 **4951**（禁止砍覆盖换速度；低于基线即不计入且判作弊）。
+- [x] AC3: 优化手段落成代码/配置（可 `git log` 追溯的提交），⛔ 不接受"挑低负载时段跑一轮"充数。
 
 ## Definition of Done
 
-- [ ] 3 轮 lane=8 全绿且 ≤600s、tests≥4951、优化可追溯；对照轮已跑并记录 serial/lowconc 翻倍真因。
+- [x] 3 轮 lane=8 全绿且 ≤600s、tests≥4951、优化可追溯；对照轮已跑并记录 serial/lowconc 翻倍真因。
 
 ## 对照轮记录（2026-08-16 17:1xZ）
 
@@ -84,12 +106,9 @@ round215 cpu_time 多 1799s 也与「CPU 饥饿拖慢」方向相反。**替代�
 
 **收窄说明（manager 2026-08-16 16:5xZ 裁定）**：⛔ 不使用目录级条目（`plugin/scripts/*` / `packages/quay/src/`）
 ——目录级是展开+不对称自锁语义，会挡住本阶段所有 UI 任务（serve-handlers 单点 + AC99 的 5 个 plugin 文件），
-使「人明令 suite 与 UI 并行」在派发层结构上不可能。**真实改动对象 = 对照测量与优化落点**，对照轮跑完前
-「main 相砍时长对象在 packages/quay/src/」是未证实猜测，⛔ 不得用未证实可能性锁住 src 目录。等对照轮真因
-确定后，按实际落点补具体文件条目。
+使「人明令 suite 与 UI 并行」在派发层结构上不可能。**真实改动对象 = 对照测量与优化落点**。对照轮真因已确定
+（round218 实测 = serial/lowconc 翻倍非资源闸 fixture，真因 = 泳道串行 + version-bump 遗留红），按实际落点收窄：
 
-- scripts/test.sh（suite 分相结构——static/serial/lowconc/main 的 lane 与时长控制）
-- plugin/test/full-suite-runner.test.mjs（资源闸自测 fixture——serial/lowconc 翻倍候选真因，先对照再改）
-- plugin/test/trend-check.test.mjs（同上，资源闸自测 fixture）
-- plugin/test/checker-cost.test.mjs（同上，资源闸自测 fixture）
+- scripts/test.sh（PHASE_OVERLAP 优化落点——serial/lowconc 并行，省 ~183s/轮）
+- plugin/test/user-scope-reinstall.test.mjs（:203 version 对照改读 currentVersion()——0.4.0 硬编码在 0.5.0 bump 后恒红，release 08e8ec55 遗留，AC101 对照轮前置）
 - tasks/gap-ac101-suite-under-600s.md（自身）
