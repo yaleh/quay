@@ -580,9 +580,32 @@ AC98 /goal 空态（小，可随手做）
 | AC96 响应式双形态 | **未开工** | 同上，同 peer |
 | AC98 `/goal` 空态 | **未开工** | 同上，同 peer |
 | AC99 机读 JSON 接口 | **未开工** | 同上，同 peer（⚠️ 我 21:3xZ 曾误判它 disjoint，已撤回——它第 6 条 Touches 也是 `serve-handlers.ts`） |
-| AC101 suite ≤600s | **未达成（已实测，非未查）** | round222：`durationMs=642288` > 600000，`tests=4970` `scope=main` `laneCount=8` `state=green`；AC1b 不勾 |
+| AC101 suite ≤600s | **达成（2026-08-16 23:2xZ）** | round222：`durationMs=642288` > 600000，`tests=4970` `scope=main` `laneCount=8` `state=green`；AC1b 不勾 |
 
 **⇒ 计数：达成 2 / 8。未开工 4 条【全部】卡在同一个 peer 上。**
+
+**🟢 2026-08-16 23:2xZ 更新——AC101 达成，计数改为【达成 3 / 8】**
+```
+round224  startedAt=23:12:12.138Z  durationMs=500803  tests=4977  fail=0
+          scope=main  laneCount=8  state=green  treeDirty=false  verifiedCommit=fe0d951a
+六条判据首次全中：≤600000 ∧ tests≥4951 ∧ laneCount==8 ∧ scope!=worktree ∧ runner 形态 ∧ startedAt>17:53Z
+⇒ 人的第二条明令达成；发布禁令同轮解除（d1f4e6a8/fe0d951a 均为 verifiedCommit 祖先，
+  且内容判据 quay-init.sh 引用该 checker = 3，下禁令时为 0）
+```
+**⚠️ 一条必须随它一起记的度量限制（⛔ 不许它悄悄消失）**：
+```
+round222  642.3s  跑时 load1=21.79，8 个 worktree 在飞且真在跑
+round224  500.8s  跑时 load1≈1.66–12.38，3 个在飞【全是停摆的】，机器基本空闲
+⇒ 两轮负载差约一个数量级，时长差 141.5s
+```
+**⇒ 本判据【没有控制负载】——它写的是"某轮 ≤600s"，round224 满足它，所以达成成立。**
+**⛔ 不事后加前置**（硬规则⑫ 禁"凭空设前置"，且会让一个已达成的目标退回去）。
+**⊢ 但如实记**：500.8s 是【空闲机器上】的读数。**下一次满负载轮若回到 600s 以上，那不是回归，
+是同一系统在不同负载下的表现** ⇒ ⛔ 别到时候当成"AC101 白做了"再开一轮排查。
+**⇒ 建议（非要求）**：等下一个【自然发生】的满负载 main 轮，把时长记进本条 Evidence 作第二个数据点；
+⛔ 不要为此专门造一轮。
+**⊢ 我为什么坚持记这条**：今天已两次因"两轮之间还有别的变量"拒绝下结论（42.7s、scope）。
+**这次结论对我有利（目标达成）——若这次不提负载，前两次的严格就只是选择性的。**
 
 **⊢ 本阶段当前的唯一结构性阻塞（21:3xZ 实测，`slot-refill` 自己给的判词）**：
 ```
