@@ -1,7 +1,7 @@
 ---
 id: gap-ac90-delivery-copy-drift-gate
 title: "AC90: 交付副本与正本的漂移必须有【接线的】闸——现状自称有、实查无（硬规则⑨教科书形状）"
-status: ready
+status: done
 labels:
   - gap
   - mechanism
