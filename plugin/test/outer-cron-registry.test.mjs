@@ -51,7 +51,7 @@ import {
   SEVEN_DAYS_MS,
   CRITICAL_REMAINING_MS,
 } from "../scripts/outer-cron-registry.ts";
-import { INNER_ANCHOR_BEGIN_MARK, INNER_ANCHOR_END_MARK } from "../scripts/outer-anchor-check.ts";
+import { INNER_ANCHOR_BEGIN_MARK, INNER_ANCHOR_END_MARK, extractCanonical } from "../scripts/outer-anchor-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
@@ -178,6 +178,18 @@ test("loadRegistry: real git-tracked registry file parses with both layers", () 
   assert.equal(reg.layers.outer.cronExpr, "0,20,40 * * * *");
   assert.equal(reg.layers.inner.promptSha256, sha256Hex(INNER_PROMPT));
   assert.equal(reg.layers.outer.promptSha256, sha256Hex(OUTER_PROMPT));
+});
+
+test("REAL cross-consistency: live doc AC80 canonical == 注册表 inner promptSha256（两检查器同权威——gap-ac81 对账一致）", () => {
+  // gap-ac81 2026-08-16：outer-anchor-check 判据3 的正本来源（fast-mode-loop-tick.md AC80 段）必须与
+  // outer-cron-registry 判据④ 的注册表 promptSha256 逐字节同权威——任一单边改 canonical 而未改注册表，
+  // 这条就翻红（registry verify 的 anchorMatches 也会翻假）。钉死「两检查器对判据4 一致」。
+  const doc = path.join(REPO_ROOT, "plugin", "loop", "fast-mode-loop-tick.md");
+  const canon = extractCanonical(fs.readFileSync(doc, "utf8"), "inner");
+  assert.ok(canon !== null, "live doc 必须含 AC80-INNER-ANCHOR 段");
+  const reg = loadRegistry(REPO_ROOT);
+  assert.equal(sha256Hex(canon), reg.layers.inner.promptSha256);
+  assert.equal(Buffer.byteLength(canon, "utf8"), reg.layers.inner.promptBytes);
 });
 
 // ── REAL-DATA（真实锚数据走真实比对路径，硬规则 4 推论三）───────────────────────────────────────────
