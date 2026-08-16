@@ -68,5 +68,5 @@ doc-only-delta 跳过 + Touches 声明非 doc 路径   32 个（我数）/ 16 �
 **⚠️ 拆分说明（manager 2026-08-16 22:3xZ，唯一可行路径）**：本任务 Touches **已去掉目录级 `tasks/*.md`**（AC4 拆到后继任务 `gap-fan-in-delta-scope-inventory-annotate`，见 AC4）。**拆分原因**：
 1. **永久饥饿实证**：任何任务在飞 ⇒ `tasks/*.md` 目录级撞 self-touch ⇒ deferred；0 在飞 ⇒ assembleBatch 含它的团只能 {它自己}（大小 1），不含它的团大小 4 ⇒ 永远输。**不是等窗口，是永久轮不到。**
 2. **AC1-AC3 对 tasks/ 只读**（枚举/diff/判据），不需声明 `tasks/*.md`；仅 AC4 写 tasks/。
-3. **第二把锁（剩余）**：本任务 touches `plugin/test/fan-in-execute-paths.test.mjs`，而 `gap-concurrency-literal`（在飞）声明目录级 `plugin/test/*` ⇒ **concurrency land 前本任务仍被挡**。拆完 ≠ 立刻可派，但 concurrency land 后即可派（不再有 tasks/ 自锁）。
+3. **第二把锁（剩余，两持有者）**：本任务 touches `plugin/test/fan-in-execute-paths.test.mjs`，而 **`gap-concurrency-literal` 和 `gap-delivery-laydown` 两者**都声明目录级 `plugin/test/*` ⇒ **必须两者都 land 本任务才可派**（manager 逐个隔离验证：仅 ac100 在飞 ⇒ 可派 ✓；ac100+delivery ⇒ 仍 deferred）。**⛔ 别只盯 concurrency 一个**。拆完 ≠ 立刻可派；等 concurrency ∧ delivery 都 land。**⛔ 不再拆第二次**（fan-in-execute-paths.test.mjs 是 AC2 取假对照要真写的测试，声明诚实）。
 4. **被 assembleBatch 静默丢弃的候选不进 deferred 不留理由（3b，manager 发现，发生率 1）**——0 在飞那轮 deferred=[] 而 delta-scope 被丢弃，正常读输出看不出来。
