@@ -47,6 +47,6 @@ depends_on: []
 
 ## Touches
 
-- plugin/scripts/touches-parser.ts 或 flagMultiPathTouchEntries 所在文件（多路径分隔符扩展）
-- 对应测试文件
+- plugin/scripts/touches-one-entry-one-path-check.ts（flagMultiPathTouchEntries 多路径分隔符扩展——覆盖 '、'/'，'/','）
+- plugin/test/touches-one-entry-one-path-check.test.mjs（对应负控制测试）
 - tasks/gap-touches-multipath-delimiter-coverage-gap.md（自身）
