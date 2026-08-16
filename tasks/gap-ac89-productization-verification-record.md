@@ -49,6 +49,6 @@ depends_on:
 ## Touches
 
 - plugin/scripts/*（记录写入机制）
-- .quay/（记录文件）
+- .quay/productization-verification.jsonl（记录文件——`.quay/**` 过度宽泛，收窄到具体文件）
 - plugin/test/*（对应测试）
 - tasks/gap-ac89-productization-verification-record.md（自身）
