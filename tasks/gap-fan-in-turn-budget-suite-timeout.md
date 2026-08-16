@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-turn-budget-suite-timeout
 title: "fan-in-execute subagent 回合预算等不完 ~10min 全量 suite——step4 起后台后回合耗尽被强制收尾，机械步骤全缺（release-timeout 实证）"
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
