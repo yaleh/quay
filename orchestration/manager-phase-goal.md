@@ -563,6 +563,39 @@ AC95 剩余新页面（dashboard/tests/sessions/architecture）
 AC98 /goal 空态（小，可随手做）
 ```
 
+
+### AC 状态台账（2026-08-16 21:4xZ 立 —— **补一个结构性缺陷：本阶段 8 条 AC 里此前只有 AC94 带 `**状态**` 行**）
+
+**⇐ 为什么立这个台账**：本轮枚举（⛔ 不布尔）发现 8 条 AC 中 **7 条没有任何完成态记录** ⇒
+按硬规则⑥ 那是**未查**，而它在读者眼里与**未达成**同形。我在多轮 tick 里报的「阶段内 2/8」
+**数是对的（AC94+AC97），但来源不是本文件——是我自己的记忆**。按 ②h（跨轮复用的读数必须回头验），
+本轮验了，并把它落到正本上，**使这个数此后可从文件本身复算，⛔ 不再依赖我记得。**
+
+| AC | 状态 | 依据（可复核，⛔ 非自述） |
+|---|---|---|
+| AC94 设计正本落盘 | **达成** | `docs/design/…/` 7 文件 + sha256 锚，见该 AC 判据 |
+| AC97 三条零成本缺口 | **达成** | 任务 `gap-ac97-webui-zero-cost-gaps` status=**done**；落地提交 `0b1049dc`（2026-08-16 20:xxZ 后） |
+| AC100 三详情页 token 化 | **在飞未落地** | worktree `quay-worktrees/gap-ac100-…` 存在；任务 status=ready（fan-in 后才翻 done） |
+| AC95 15 视图全上线 | **未开工** | status=ready；`slot-refill` deferred：`touches-overlap-in-flight (peer gap-ac100)` |
+| AC96 响应式双形态 | **未开工** | 同上，同 peer |
+| AC98 `/goal` 空态 | **未开工** | 同上，同 peer |
+| AC99 机读 JSON 接口 | **未开工** | 同上，同 peer（⚠️ 我 21:3xZ 曾误判它 disjoint，已撤回——它第 6 条 Touches 也是 `serve-handlers.ts`） |
+| AC101 suite ≤600s | **未达成（已实测，非未查）** | round222：`durationMs=642288` > 600000，`tests=4970` `scope=main` `laneCount=8` `state=green`；AC1b 不勾 |
+
+**⇒ 计数：达成 2 / 8。未开工 4 条【全部】卡在同一个 peer 上。**
+
+**⊢ 本阶段当前的唯一结构性阻塞（21:3xZ 实测，`slot-refill` 自己给的判词）**：
+```
+pool=11  deferred=11  —— 全部 touches-overlap-in-flight
+AC95 / AC96 / AC98 / AC99 / AC100 —— 五项 UI 【全部】touches packages/quay/src/serve-handlers.ts
+能区分的对照（同一在飞集合、仅抬 cap，只读推荐未派发）：
+  cap=8 → slots_free=2 → recommended=[]      cap=12 → slots_free=6 → recommended=[]
+⇒ 空槽不是原因；priority / 排序也不是原因（priority 无派发侧读者，且 disjointness 排它之前）
+```
+**⇒ 人的明令「实现设计中的所有页面」在当前 Touches 粒度下 = 一次一个、串到底。**
+**⇒ 必答题（实现方案属 inner，⛔ manager 不给）：收窄 `serve-handlers.ts` 的 Touches 粒度到路由/函数级，
+还是接受 UI 串行交付。在这题答之前，本阶段 4 条未开工 AC 的交付速率结构上等于 AC100 的完成速率。**
+
 ---
 
 ## ⏸ 前一阶段（2026-08-14 00:5xZ – 2026-08-16，已被上方新阶段取代，内容原样保留）：语义派发 —— 实现 `SPEC-dispatch-ordering-semantic-2026-08-13.md`
