@@ -751,13 +751,14 @@ export function main(argv) {
     const repoRoot = args.workspaceRoot ? path.resolve(args.workspaceRoot) : resolveRepoRoot();
     filePaths = [
       // gap-retire-the-prepare-execute-pipeline-cluster: prepare-milestone.js / execute-milestone.js
-      // were retired with the classic milestone loop (ADR-022). The surviving checked-in workflows
-      // are drain-directives, run-routines (with plugin mirrors) and select-preflight (.claude-only).
+      // were retired with the classic milestone loop (ADR-022).
+      // gap-select-preflight-retirement-decision: select-preflight.js retired with the classic
+      // OUTER-LOOP SELECT phase (2026-08-16). The surviving checked-in workflows are
+      // drain-directives and run-routines (with plugin mirrors).
       path.join(repoRoot, ".claude/workflows/drain-directives.js"),
       path.join(repoRoot, "plugin/workflows/drain-directives.js"),
       path.join(repoRoot, ".claude/workflows/run-routines.js"),
       path.join(repoRoot, "plugin/workflows/run-routines.js"),
-      path.join(repoRoot, ".claude/workflows/select-preflight.js"),
     ];
   }
 

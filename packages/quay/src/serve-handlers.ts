@@ -849,7 +849,7 @@ export async function handleTaskList(
       <!-- QX-015 orientation banner removed by DIR-007 (iteration 10): misleading
            needs-human placement + disproportionate layout cost. -->
       <h1>Quay — task list (${escapeHtml(manifest.id)} provider)</h1>
-      <p class="meta"><a href="/live">live</a> · <a href="/journal">journal</a> · <a href="/git-history">git-history →</a> · <a href="/adr">ADRs →</a> · <a href="/goal">goals →</a> · <a href="/doc">docs →</a></p>
+      <p class="meta"><a href="/board">board</a> · <a href="/live">live</a> · <a href="/journal">journal</a> · <a href="/git-history">git-history →</a> · <a href="/adr">ADRs →</a> · <a href="/goal">goals →</a> · <a href="/doc">docs →</a></p>
       ${errorParam ? html`<div class="error-banner" role="alert"><strong>Error:</strong> ${escapeHtml(errorParam)}</div>` : ""}
       ${successParam ? html`<div class="success-banner" role="status"><strong>Done:</strong> ${escapeHtml(successParam)}</div>` : ""}
       ${prefixNav ? html`<p class="meta">Prefix: ${prefixNav}</p>` : ""}
@@ -857,7 +857,7 @@ export async function handleTaskList(
       <p class="meta">Sort: ${sortNav}</p>
       ${searchForm}
       ${searchResultBanner}
-      ${labelNav ? html`<div class="label-nav-wrap"><p class="meta" style="white-space:normal">Label: ${labelNav}</p></div>` : ""}
+      ${labelNav ? html`<div class="label-nav-wrap"><p class="meta">Label: ${labelNav}</p></div>` : ""}
       ${pageSizeNav}
       ${pageNav}
       <table>
