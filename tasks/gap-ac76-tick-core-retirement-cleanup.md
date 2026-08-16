@@ -1,7 +1,7 @@
 ---
 id: gap-ac76-tick-core-retirement-cleanup
 title: AC76 判据5 + C7 收指针 + AC48 残留清理——fast-mode-tick-core 退役文本清理（tick core 不留已退役文本以减少上下文污染）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
