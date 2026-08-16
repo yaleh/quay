@@ -1,7 +1,7 @@
 ---
 id: gap-bypass-check-bootstrap-self-entry
 title: "bypass-check 登记豁免的机件自身触发红——ruled 表每加一条必改 checker 代码面（发生率 4/4=100% 按构造）"
-status: ready
+status: superseded
 labels:
   - gap
   - mechanism
@@ -46,3 +46,5 @@ depends_on: []
 - plugin/scripts/direct-to-develop-bypass-check.ts（引导问题排除 + 窄判据）
 - plugin/test/direct-to-develop-bypass-check.test.mjs（负控制：判定逻辑改动仍红）
 - tasks/gap-bypass-check-bootstrap-self-entry.md（自身）
+
+**superseded（2026-08-16 19:5xZ，inner 判定 + manager 自纠）**：前提「ruled 登记按构造必然触发红」被 fan-in 对照证否——gap-bypass-ruled-table-self-entry 的 8d773bbb 证明登记可经 fan-in 正规 land（worktree 含登记 ⇒ suite 过 ⇒ land，checker 只查直提不查 fan-in 落地）。登记走 fan-in 已是足够解法，窄豁免是 gameability 风险（改 checker 的人自给通行证）且无结构需要。manager 19:1xZ 承认结构论证错（4/4 是相关不是必然，未做「能否走 fan-in」的对照）。
