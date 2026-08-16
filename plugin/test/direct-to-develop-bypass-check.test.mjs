@@ -178,6 +178,25 @@ test("PURE isDesignInternalPath — 代码/断言面（产品交付）不是设�
   assert.equal(isDesignInternalPath("plugin/skills/manager-tool/foo.md"), false, "manager-tool/ 不是 manager/ 子树");
 });
 
+test("PURE isDesignInternalPath — 非 ASCII 文件名（git quoted-path 形态）恢复排除（AC1/AC2）", () => {
+  // 修复前（tasks/gap-direct-bypass-check-quoted-path-false-positive）：git diff --name-only 对含非 ASCII
+  // 的路径输出 C-quoted 形态（`"docs/.../Quay\346\224\271\350\277\233\347\211\210WebUI.dc.html"`），
+  // 前导引号使 `^docs/` 匹配失败 ⇒ design-internal 被误判为 code-surface（2fdb6e32 false-positive）。
+  // 修复后 gitCommitFiles 用 `-c core.quotepath=false` 让谓词收到原始路径字节 ⇒ 非 ASCII docs/ 恢复豁免。
+  const designInternalNonAscii = [
+    "docs/design/quay-webui-improved-2026-08-16/Quay改进版WebUI.dc.html",
+    "docs/设计/方案.md",
+    "tasks/缺陷修复任务.md",
+  ];
+  for (const p of designInternalNonAscii) assert.equal(isDesignInternalPath(p), true, `非 ASCII 设计内应排除: ${p}`);
+  const codeSurfaceNonAscii = [
+    "plugin/test/测试.test.mjs",
+    "plugin/scripts/调度器.ts",
+    "packages/quay/src/中文模块.ts",
+  ];
+  for (const p of codeSurfaceNonAscii) assert.equal(isDesignInternalPath(p), false, `非 ASCII 代码面不应排除: ${p}`);
+});
+
 // ── PURE: classifyCommit — 直接提交的分类（AC1 三条件）───────────────────────────────────────────
 
 test("PURE classifyCommit — 代码面 ∧ 不在锁窗 ⇒ bypass；设计内 ⇒ 非 bypass；在锁窗 ⇒ 非 bypass", () => {
@@ -582,6 +601,21 @@ test("AC3 回放·CLI — 全量扫描（生产基线 b11ce720）ok=true：cddc5
   assert.ok(out.candidates.every((c) => !c.confirmedBypass), "无真直投红");
 });
 
+test("AC3 负控制·真实 git — 2fdb6e32（docs/ 非 ASCII 设计正本）CLI --commits 必须 GREEN（AC3）", (t) => {
+  if (gitCmd(REPO_ROOT, "cat-file", "-e", "2fdb6e32^{commit}").status !== 0) {
+    t.skip("2fdb6e32 不在本 repo——CLI 回放跳过");
+    return;
+  }
+  const r = runChecker(["--root", REPO_ROOT, "--commits", "2fdb6e32"]);
+  assert.equal(r.status, 0, `2fdb6e32（docs/ 非 ASCII）必须 GREEN(exit 0): ${r.stdout}${r.stderr}`);
+  const out = jsonOut(r);
+  assert.equal(out.evaluated, true);
+  assert.equal(out.ok, true);
+  assert.equal(out.reason, "no-code-surface-direct-commits");
+  assert.equal(out.denominator.designInternalCommits, 1, "docs/ 非 ASCII 计入设计内");
+  assert.equal(out.denominator.codeSurfaceCommits, 0, "非 ASCII docs/ 不得被误判为 code-surface");
+});
+
 // ── CLI 集成（temp repo）：直接提交代码面 RED / .gitignore GREEN / fan-in ff 不误报 ─────────────
 
 /** 固定过去时刻（2026-08-01）——使 init 提交的 committer epoch 永不落入「当前时刻」的锁窗豁免测试窗口。 */
@@ -730,6 +764,52 @@ test("CLI — 锁事件不成对（release 无 acquire）⇒ NOT-EVALUATED（exi
   } finally {
     cleanup(dir);
     cleanup(st);
+  }
+});
+
+test("CLI — docs/ 下非 ASCII 文件名直接提交 ⇒ GREEN（quoted-path 豁免，AC1/AC3 负控制）", () => {
+  const dir = makeTmp("cliunicode-doc");
+  try {
+    initRepo(dir);
+    // 2fdb6e32 形态：docs/ 下非 ASCII 文件名（git 默认对 --name-only 输出 C-quoted 形态）。
+    fs.mkdirSync(path.join(dir, "docs", "design"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "docs", "design", "Quay改进版WebUI.dc.html"), "<html>design</html>\n", "utf8");
+    gitCmd(dir, "add", "-A");
+    gitCmd(dir, "commit", "-q", "-m", "docs: 落盘设计正本（非 ASCII 文件名）");
+
+    const r = runChecker(["--root", dir]);
+    assert.equal(r.status, 0, `docs/ 非 ASCII 必须 GREEN(exit 0): ${r.stdout}${r.stderr}`);
+    const out = jsonOut(r);
+    assert.equal(out.evaluated, true);
+    assert.equal(out.ok, true);
+    assert.equal(out.denominator.designInternalCommits >= 1, true, "docs/ 非 ASCII 计入设计内（排除生效）");
+    assert.equal(out.denominator.codeSurfaceCommits, 0, "docs/ 非 ASCII 不得被误判为 code-surface");
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("CLI — code-surface 非 ASCII 文件名直接提交 ⇒ RED（AC2 不误放），路径不带引号/转义", () => {
+  const dir = makeTmp("cliunicode-code");
+  try {
+    initRepo(dir);
+    // code-surface 非 ASCII 文件名（plugin/test/ 下）⇒ 必须仍报红，且路径是原始字节（非 C-quoted）。
+    fs.mkdirSync(path.join(dir, "plugin", "test"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "plugin", "test", "测试.test.mjs"), "export const x = 1;\n", "utf8");
+    gitCmd(dir, "add", "-A");
+    gitCmd(dir, "commit", "-q", "-m", "test: 非 ASCII 代码文件直投");
+
+    const r = runChecker(["--root", dir]);
+    assert.equal(r.status, 1, `code-surface 非 ASCII 必须 RED(exit 1): ${r.stdout}${r.stderr}`);
+    const out = jsonOut(r);
+    assert.equal(out.evaluated, true);
+    assert.equal(out.ok, false);
+    assert.equal(out.reason, "direct-commit-bypasses-fan-in");
+    assert.equal(out.candidates.length, 1, "只有代码面那条是候选");
+    assert.equal(out.candidates[0].confirmedBypass, true, "code-surface 非 ASCII 仍红（AC2 不误放）");
+    assert.equal(out.candidates[0].codeSurfaceFiles[0], "plugin/test/测试.test.mjs", "路径应为原始字节（不带前导引号/八进制转义）");
+  } finally {
+    cleanup(dir);
   }
 });
 
