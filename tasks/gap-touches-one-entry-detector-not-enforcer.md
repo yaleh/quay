@@ -1,7 +1,7 @@
 ---
 id: gap-touches-one-entry-detector-not-enforcer
 title: "touches-one-entry-one-path 是 detector 非 enforcer——撰写面 0 接线，发生率 4（硬规则⑫ 够格提机制）"
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
