@@ -92,7 +92,8 @@ select-preflight 退役前提已成立（唯一非测试消费者 = ADR-022 退�
 
 ## Definition of Done
 
-- [ ] develop 基线全量套件绿（新于本次切换），drift-mode fan-in 不被红挡住，AC88 验证机制可产出可核记录。
+- [x] develop 基线全量套件绿（2026-08-16 workflow 终态 green + merge develop 679ac913），drift-mode fan-in
+      不再被红挡住，AC88 验证机制可产出可核记录。
 
 ## Touches
 
