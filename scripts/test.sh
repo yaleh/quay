@@ -174,15 +174,19 @@ main_root="${QUAY_MAIN_CHECKOUT:-$repo_root}"
 # `main_root/.quay/*`) resolve the MAIN's live runtime carriers AND its session-dir hash — the
 # worktree's gitignored .quay is absent (or a snapshot) and its session-dir hash differs ⇒ agentId
 # resolution fails ⇒ a false "fan-in-without-workflow" RED. On a main-checkout run the git-derived
-# first worktree == repo_root ⇒ main_root is unchanged; on a one-shot QUAY_MAIN_CHECKOUT is set ⇒
-# skipped. (gap-gitignored-carriers-absent-in-verify-worktree wiring is left untouched.)
-if [ -z "${QUAY_MAIN_CHECKOUT:-}" ]; then
-  # `|| _derived_main=""` guards the command substitution under `set -euo pipefail` (a non-git /
-  # non-worktree cwd must NOT abort the suite — it just keeps main_root == repo_root).
-  _derived_main="$(git worktree list --porcelain 2>/dev/null | awk '/^worktree /{print $2; exit}')" || _derived_main=""
-  if [ -n "${_derived_main}" ] && [ "${_derived_main}" != "${repo_root}" ]; then
-    main_root="${_derived_main}"
-  fi
+# first worktree == repo_root ⇒ main_root is unchanged.
+#
+# ⚠️ The git-derived first worktree is ALWAYS preferred (even when QUAY_MAIN_CHECKOUT is set):
+# full-suite-runner.ts launches with `--root <worktree>` in the execute-suite-fix shape, so its
+# `mainRoot = root` = the WORKTREE and QUAY_MAIN_CHECKOUT points at the worktree — whose project-dir
+# slug has no session transcripts ⇒ fan-in-workflow-check agent IDs unresolvable ⇒ a false
+# "fan-in-without-workflow" RED (round 214, 2026-08-16). `git worktree list --porcelain`'s FIRST
+# entry is the git primary (main) checkout, which is authoritative and always correct.
+# `|| _derived_main=""` guards the command substitution under `set -euo pipefail` (a non-git /
+# non-worktree cwd must NOT abort the suite — it just keeps main_root == repo_root).
+_derived_main="$(git worktree list --porcelain 2>/dev/null | awk '/^worktree /{print $2; exit}')" || _derived_main=""
+if [ -n "${_derived_main}" ] && [ "${_derived_main}" != "${repo_root}" ]; then
+  main_root="${_derived_main}"
 fi
 
 # ── gap-fan-in-worktree-quay-provisioning — the worktree suite must read the MAIN's .quay ─────────
