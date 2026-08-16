@@ -1,7 +1,7 @@
 ---
 id: gap-bypass-check-bootstrap-self-entry
 title: "bypass-check 登记豁免的机件自身触发红——ruled 表每加一条必改 checker 代码面（发生率 4/4=100% 按构造）"
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
