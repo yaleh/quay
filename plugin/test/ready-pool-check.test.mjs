@@ -2775,20 +2775,47 @@ test("AC2 — per-task-suite-record red window: failedFiles attribute, green ful
   assert.equal(green.windowActive, false);
 });
 
-test("AC2 — readPerTaskSuiteRecords + deriveDefaultLane on the real per-task-suite-records.jsonl: all-green ⇒ consecutiveRed 0 (phantom verification-round reds no longer trigger)", (t) => {
-  // The migration control against the REAL workspace ledger: after AC84 the ONLY ongoing suite source
-  // is per-task-suite-records.jsonl. Its current tail is all-green full-suite records (laneCount=nproc
-  // = 16), so the red window is INACTIVE — the phantom verification-round reds (208-212, a leftover
-  // Monitor verifying an orphaned commit) must NOT trigger throttling under the migrated source.
-  const repoRoot = path.resolve(__dirname, "..", "..");
-  if (!fs.existsSync(path.join(repoRoot, ".quay", "per-task-suite-records.jsonl"))) {
-    t.skip("real per-task-suite-records.jsonl not present in this checkout");
-    return;
-  }
-  const recs = readPerTaskSuiteRecords(repoRoot);
-  const lane = deriveDefaultLane(recs, 8);
-  assert.ok(lane === 16, `real per-task records derive default lane 16 (nproc), got ${lane}`);
-  assert.equal(consecutiveRedRounds(recs), 0, "per-task records are all green ⇒ no red window");
+test("AC2 — consecutiveRedRounds on CONTROLLED per-task-suite records (fixture, not real ledger): all-green ⇒ 0; doc-only neutral; green breaks (gap-ready-pool-canary-test-isolation)", () => {
+  // gap-ready-pool-canary-test-isolation: the previous version read the REAL shared ledger
+  // (.quay/per-task-suite-records.jsonl) and hard-asserted consecutiveRed === 0 — a production-state
+  // canary that breaks whenever the ledger contains INTERMEDIATE red records (a fan-in's first attempt
+  // red, later green landing). The real ledger legitimately accumulates those, so the assertion was
+  // stale (test-isolation defect — a test reading shared mutable production state). This fixture-based
+  // version verifies the LOGIC with controlled inputs; the logic (AC84 design) keeps doc-only skips
+  // NEUTRAL — an intermediate red stays red until a full-suite green breaks the window.
+  const rec = (o) => ({ fullSuiteRan: true, laneCount: 16, state: "green", failedFiles: [], ...o });
+  // All-green full-suite records ⇒ consecutiveRed 0.
+  assert.equal(
+    consecutiveRedRounds([rec({}), rec({}), rec({})]),
+    0,
+    "all-green full-suite records ⇒ no red window",
+  );
+  // A trailing red full-suite record counts.
+  assert.equal(
+    consecutiveRedRounds([rec({}), rec({ state: "red", failedFiles: ["x.ts"] })]),
+    1,
+    "trailing red full-suite ⇒ consecutiveRed 1",
+  );
+  // doc-only skip (fullSuiteRan:false) is NEUTRAL — neither counts nor breaks (AC84).
+  assert.equal(
+    consecutiveRedRounds([
+      { taskId: "t1", fullSuiteRan: true, state: "red", failedFiles: ["x.ts"] },
+      { taskId: "t2", fullSuiteRan: false, state: "green", failedFiles: [] }, // doc-only green — neutral
+    ]),
+    1,
+    "doc-only green does NOT break the red window (AC84 neutral)",
+  );
+  // A full-suite GREEN DOES break the window.
+  assert.equal(
+    consecutiveRedRounds([
+      rec({ state: "red", failedFiles: ["x.ts"] }),
+      rec({}),
+    ]),
+    0,
+    "full-suite green breaks the red window",
+  );
+  // Empty records ⇒ 0.
+  assert.equal(consecutiveRedRounds([]), 0, "empty records ⇒ 0");
 });
 
 test("isDirectoryGlob: bare dir / dir/** / no-slash dir are directory globs; concrete files + file wildcards are not (AC2 — gap-suite-blocking-directory-glob-overbroad)", () => {

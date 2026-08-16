@@ -136,7 +136,9 @@ function checkGenericDriverConsumes(field: LoopField, repoRoot: string): Evidenc
 function collectBespokeDriverFiles(repoRoot: string): string[] {
   const files: string[] = [
     path.join(repoRoot, "experiments/quay-perpetual-stream/OUTER-LOOP.md"),
-    path.join(repoRoot, ".claude/workflows/select-preflight.js"),
+    // gap-select-preflight-retirement-decision: select-preflight.js retired with the classic
+    // OUTER-LOOP SELECT phase (ADR-022); the surviving bespoke driver workflows are run-routines
+    // and drain-directives.
     path.join(repoRoot, ".claude/workflows/run-routines.js"),
     path.join(repoRoot, ".claude/workflows/drain-directives.js"),
   ];

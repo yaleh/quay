@@ -23,7 +23,9 @@ import { fileURLToPath } from "node:url";
 if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").includes("governance")) {
   test("governance group skipped", { skip: "set QUAY_TEST_GROUPS=governance to run" }, () => {});
 } else {
-const { getCandidates } = await import("../scripts/select-preflight.ts");
+// gap-select-preflight-retirement-decision (2026-08-16): the legacy select-preflight.ts was
+// retired with the classic OUTER-LOOP SELECT phase; the two getCandidates-baseline tests below
+// were removed with it. The new-module assertions (RED/GREEN synthesis) are unaffected.
 const { CONTRACT_VERSION, makeSingletonCandidate, normalizeLegacyCall, selftest: contractsSelftest } = await import("../scripts/candidate-contracts.ts");
 const { buildCouplingGraph, selftest: couplingSelftest } = await import("../scripts/coupling-graph.ts");
 const { synthesizeCandidates, scoreCandidate, selftest: synthesisSelftest } = await import("../scripts/candidate-synthesis.ts");
@@ -42,22 +44,8 @@ function synthesizeAndSelect(fixture, constraints = {}) {
 }
 
 // ── RED: current SELECT representation cannot express a composite ──────────────────────────────────
-test("RED (Stage 1.1): select-preflight.ts's CandidateEntry has no taskIds array — structurally one task per candidate", () => {
-  const rawTasks = FIXTURE_A_WORKFLOW_HARDENING.tasks.map((t) => ({
-    id: t.id,
-    title: t.id,
-    status: "todo",
-    labels: ["milestone-candidate"],
-    extra: {},
-  }));
-  const entries = getCandidates(rawTasks);
-  assert.equal(entries.length, 3, "getCandidates returns one entry PER TASK — it has no grouping concept at all");
-  for (const e of entries) {
-    assert.equal(typeof e.id, "string", "CandidateEntry.id is a single string, never an array");
-    assert.ok(!("taskIds" in e), "CandidateEntry has no taskIds field — RED: cannot represent a 3-task composite no matter how ranking/truncation is tuned");
-  }
-});
-
+// (The pre-retirement getCandidates-baseline RED test was removed with select-preflight.ts —
+// gap-select-preflight-retirement-decision, 2026-08-16.)
 test("RED (Stage 1.1): SELECT's shortlist truncation (rank + concurrency slice) cannot avoid splitting a real coupled group", () => {
   // Reproduce today's SELECT step 24 (OUTER-LOOP.md select ::): N = min(|shortlist|, concurrency);
   // candidates = shortlist[0..N]. With concurrency=2 and a genuinely-coupled 3-task group ranked
@@ -258,15 +246,9 @@ test("Stage 1.5: preparation succeeding on round 2 accepts without exhausting al
   assert.equal(outcome.rounds, 2);
 });
 
-// ── Existing SELECT/preflight legacy behavior remains green (Done-when #6) ──────────────────────────
-test("legacy select-preflight.ts getCandidates/selftest remain green (unaffected by the new modules existing alongside it)", () => {
-  assert.equal(getCandidates([]).length, 0);
-  const legacy = getCandidates([{ id: "X", title: "t", status: "todo", labels: ["milestone-candidate"], extra: {} }]);
-  assert.equal(legacy.length, 1);
-  assert.equal(legacy[0].id, "X");
-});
-
 // ── sibling coverage: each new module's own selftest() suite must pass ──────────────────────────────
+// (The pre-retirement "legacy select-preflight.ts getCandidates/selftest remain green" test was
+// removed with select-preflight.ts — gap-select-preflight-retirement-decision, 2026-08-16.)
 test("candidate-contracts.ts selftest suite passes", () => {
   assert.equal(contractsSelftest(), true);
 });

@@ -414,8 +414,16 @@ grep 不到 ⇒ 判假。**⛔ 本 AC 不要求推进 goal-store 迁移**——�
 > 唯一持有它的是 outer/inner 的队列记忆，而记忆随 compact / 会话轮换丢失。
 > **⊢ 故挂在此处**：把"它有没有被做"变成**我每轮盘点可查的一栏**，不依赖谁记得（硬规则⑨：让缺席可见）。
 > **⊢ 闭合条件（二选一，任一为真即可划掉本块）**：
-> ① `verification-round.jsonl` 出现一条 `scope != worktree`（develop 基线）且 `laneCount==8` 的轮，
->    记录其 **精确 durationMs**；② outer/inner 回报该轮结果（green+精确 ms 或 >600s+精确 ms）。
+> ① `verification-round.jsonl` 出现一条 `scope != worktree`（develop 基线）∧ `laneCount==8`
+>    **∧ `startedAt > 2026-08-16T17:53:00Z`（AC101 fan-in 时刻）** 的轮，记录其 **精确 durationMs**；
+>    **🔴 2026-08-16 18:3xZ 立本块时我【漏了那个时间窗】，18:4xZ 自纠**：不加窗口时该谓词命中 **207**
+>    （全是历史轮，最新一条 `round=216` 16:45Z、再往前是 08-15 的 `scope=main lane=16`）
+>    ⇒ **一读就会把这条挂账错误地判为已闭合**；加上窗口后命中 **0** ⇒ 真值是"未闭合"。
+>    **⇐ 这与我给 AC1 写的"`startedAt` 晚于立条时刻"是同一个限定，我在 AC1 写了、在这里漏了**
+>    ——**同一份文件里，相邻两条判据，一条带窗口一条不带。** 记账：我的错，且是同日第二次
+>    （17:4xZ 那次是把判据锚在 commit SHA 上）。**⊢ 一般形态：任何"载体里出现一条 X 即闭合"的判据，
+>    必须同时限定【时间窗】——载体是累积的，历史记录会替未来的义务把它签收掉。**
+>    ② outer/inner 回报该轮结果（green+精确 ms 或 >600s+精确 ms）。
 > **⛔ 若该轮 >600s，必须如实记录，不得因任务已 done 而略过**——那说明 600s 在产品线上尚未稳住
 > （round221 仅剩 409ms 余量，且 develop 基线与任务分支代码不同）。
 
@@ -472,8 +480,30 @@ round218 该更慢而非更快。**⇒ 该假说降级：并发/负载不是主�
 ① `.quay/verification-round.jsonl` 中存在 **≥3 轮**记录，满足 `laneCount==8` ∧ `state=="green"`
    ∧ `durationMs <= 600000`，且这 3 轮的 `startedAt` **晚于本 AC 立条时刻（2026-08-16T16:2xZ）**；
    **⇒ 读的是生产载体、不是 fixture，且只计立条之后的窗口（硬规则④推论三的标准形态）。**
+   **🔴 2026-08-16 21:1xZ 补（判据级）——那 3 轮（含 AC1b 的 develop 基线轮）必须由
+   `full-suite-runner` 产出，与 219/220/221 【同仪器】。**
+   **⇐ 为什么**：实测 AC1b 的 round6/round7 走的是 plain `bash scripts/test.sh`，
+   而 `verification-round.jsonl` 的写入方是 `full-suite-runner.ts`；
+   **`scripts/test.sh` 不调用 runner**（`grep -c` 得 15 全是注释行，**非注释命中 = 0**）
+   ⇒ **plain test.sh 路径结构上写不进该载体 ⇒ 判据① 永远无法被那种轮满足。**
+   **⊢ 但"要落载体"只是表层理由；硬理由是【可比】**：
+   **本判据是【跨轮比较 `durationMs ≤ 600000`】，而 219/220/221 由 runner 产出。
+   plain test.sh 的 288.7s 与它们【不是同一把尺子】**——不同编排、不同分相记账、可能不同 lane 默认值。
+   **⇒ 混用仪器会让"≤600s"这个比较失去意义。⇒ 走 runner 是为了可比，不只是为了有记录。**
+   **⊢ 推论（已投 outer）**：非 runner 形态的轮，其 `duration` **⛔ 不得用于本判据**；
+   它只能作为「fails 是否复现」的证据（pass/fail 同尺可答，时长不可）。
+   **⊢ 同轮纠正一个数**：round6 的 tests 真值 = **4224**（pass 4111 / fail 0 / cancelled 0，
+   我读 `/tmp/ac101-develop-baseline-round6.log` 实测；outer 一度报 4847，已请其撤回）。
+   **⇒ 无论 4224 还是 4847 都 < 4951 ⇒ AC2 结论不变；但判据引用的数必须是真值。**
 ② 这 3 轮**不得**通过缩减测试覆盖达成——`tests` 字段（round215 基线 = **4951**）不得低于基线；
-   **取假方式**：某轮 `durationMs<600000` 但 `tests<4951` ⇒ 该轮不计入，且判为"用砍覆盖换速度"。
+   **取假方式**：某轮 `tests < 4951` ⇒ **该轮不计入**。
+   **🔴 2026-08-16 21:0xZ 更正——原文写「⇒ 该轮不计入，**且判为"用砍覆盖换速度"**」，后半句删除。**
+   **⇐ 为什么删**：round6（20:52 起）实测 `288.7s / tests=4847 / 3 fails`，而合格轮 round221 是
+   `599.6s / tests=5003 / fail=0` ⇒ **时长几乎减半而用例少 156 ⇒ 那是 abort/skip 的签名，不是"跑得更快"**。
+   **而原措辞给它贴了一个含【意图】的标签**（"换速度" = 有人为了快而砍覆盖），**在本例中是误判**。
+   **⊢ 一般形态（本阶段已多次同形）：一条判据可以正确地【排除】一个样本，同时错误地【解释】它。**
+   **⇒ 排除规则只说排除，成因另判**——砍覆盖 / abort / skip / 环境负载是不同的东西，
+   **⛔ 不该由一条排除规则替它们下结论。**
 ③ 优化手段落成**代码/配置**（可 `git log` 追溯的提交），⛔ 不接受"挑一个负载低的时段跑一轮"充数
    ——那是环境波动，不是优化。
 ④ **🔴 2026-08-16 17:4xZ 补（判据级，不是提醒）：优化必须【已在 develop 上生效】，⛔ 不得只活在任务分支。**
@@ -532,6 +562,39 @@ AC99 前置的机读 JSON 接口 → 然后 system/manager 两屏
 AC95 剩余新页面（dashboard/tests/sessions/architecture）
 AC98 /goal 空态（小，可随手做）
 ```
+
+
+### AC 状态台账（2026-08-16 21:4xZ 立 —— **补一个结构性缺陷：本阶段 8 条 AC 里此前只有 AC94 带 `**状态**` 行**）
+
+**⇐ 为什么立这个台账**：本轮枚举（⛔ 不布尔）发现 8 条 AC 中 **7 条没有任何完成态记录** ⇒
+按硬规则⑥ 那是**未查**，而它在读者眼里与**未达成**同形。我在多轮 tick 里报的「阶段内 2/8」
+**数是对的（AC94+AC97），但来源不是本文件——是我自己的记忆**。按 ②h（跨轮复用的读数必须回头验），
+本轮验了，并把它落到正本上，**使这个数此后可从文件本身复算，⛔ 不再依赖我记得。**
+
+| AC | 状态 | 依据（可复核，⛔ 非自述） |
+|---|---|---|
+| AC94 设计正本落盘 | **达成** | `docs/design/…/` 7 文件 + sha256 锚，见该 AC 判据 |
+| AC97 三条零成本缺口 | **达成（⚠️ 未经全量轮验证）** | 任务 status=**done**，落地提交 `0b1049dc`。**⚠️ 21:5xZ 补核**：其 per-task suite 记录**仅 1 条**且 `fullSuiteRan=false` / `skipReason="doc-only-delta"` / `dur=7ms`，而实现提交 `fae3322f` 改的是 `packages/quay/src/serve-handlers.ts`（生产代码）；合并点 `21a09091`@21:31:06Z **晚于**唯一近期全量轮 round222（21:11:29Z 起）⇒ **全量轮从未覆盖该改动**。已投 outer 立案（两个候选根因未替它选）。 |
+| AC100 三详情页 token 化 | **在飞未落地** | worktree `quay-worktrees/gap-ac100-…` 存在；任务 status=ready（fan-in 后才翻 done） |
+| AC95 15 视图全上线 | **未开工** | status=ready；`slot-refill` deferred：`touches-overlap-in-flight (peer gap-ac100)` |
+| AC96 响应式双形态 | **未开工** | 同上，同 peer |
+| AC98 `/goal` 空态 | **未开工** | 同上，同 peer |
+| AC99 机读 JSON 接口 | **未开工** | 同上，同 peer（⚠️ 我 21:3xZ 曾误判它 disjoint，已撤回——它第 6 条 Touches 也是 `serve-handlers.ts`） |
+| AC101 suite ≤600s | **未达成（已实测，非未查）** | round222：`durationMs=642288` > 600000，`tests=4970` `scope=main` `laneCount=8` `state=green`；AC1b 不勾 |
+
+**⇒ 计数：达成 2 / 8。未开工 4 条【全部】卡在同一个 peer 上。**
+
+**⊢ 本阶段当前的唯一结构性阻塞（21:3xZ 实测，`slot-refill` 自己给的判词）**：
+```
+pool=11  deferred=11  —— 全部 touches-overlap-in-flight
+AC95 / AC96 / AC98 / AC99 / AC100 —— 五项 UI 【全部】touches packages/quay/src/serve-handlers.ts
+能区分的对照（同一在飞集合、仅抬 cap，只读推荐未派发）：
+  cap=8 → slots_free=2 → recommended=[]      cap=12 → slots_free=6 → recommended=[]
+⇒ 空槽不是原因；priority / 排序也不是原因（priority 无派发侧读者，且 disjointness 排它之前）
+```
+**⇒ 人的明令「实现设计中的所有页面」在当前 Touches 粒度下 = 一次一个、串到底。**
+**⇒ 必答题（实现方案属 inner，⛔ manager 不给）：收窄 `serve-handlers.ts` 的 Touches 粒度到路由/函数级，
+还是接受 UI 串行交付。在这题答之前，本阶段 4 条未开工 AC 的交付速率结构上等于 AC100 的完成速率。**
 
 ---
 
