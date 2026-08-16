@@ -1,7 +1,7 @@
 ---
 id: gap-ac88-cross-host-verify-current-version
 title: "AC88: 跨主机（B=orangevps, C=ad-arm1）验证当前版本 `.tgz` 的安装/初始化/冷启动（外驱，非 inner）"
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -9,6 +9,13 @@ labels:
 parent: null
 children: []
 extra:
+  acceptance: "f=.quay/productization-verification.jsonl; [ -f \"$f\" ] || { echo
+    'FAIL: record missing'; exit 1; }; n=$(python3 -c \"import json;
+    rows=[json.loads(l) for l in open('$f') if l.strip()]; ac88=[r for r in rows
+    if r.get('ac')=='AC88' and r.get('ok') is True and r.get('stepColdstart') is
+    True]; print(len(ac88))\"); echo \"coldstart ok rows: $n\"; [ \"$n\" -ge 2 ]
+    && echo 'PASS: AC88 cold-start verified on B and C' || { echo 'FAIL: need
+    >=2 AC88 coldstart ok rows'; exit 1; }"
   schema: execution
 depends_on:
   - gap-ac85-local-build-current-artifact
