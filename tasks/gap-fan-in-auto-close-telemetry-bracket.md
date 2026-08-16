@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-auto-close-telemetry-bracket
 title: fan-in land 后不自动关 telemetry bracket——每次 land 留 stale bracket 到下一轮 reconcile（occurrence 3：ac76/ac81+touches/ac85，outer A20 驱动观察）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
