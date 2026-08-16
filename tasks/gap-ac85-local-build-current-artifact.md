@@ -42,15 +42,66 @@ AC88（跨主机验证）与 AC89（验证记录）都依赖「当前版本的�
 
 ## Acceptance Criteria
 
-- [ ] AC1: `package.sh` 运行产出 `.tgz` 文件（记录产物路径 + 大小 + 时间戳）。
-- [ ] AC2: `tar tzf <产物> | grep 'plugin/'` 非空（不是 0 条 plugin 条目的错误入口）。
-- [ ] AC3: 产物内 `package/plugin/.claude-plugin/plugin.json` 的 `version` 字段 == 仓库当前
+- [x] AC1: `package.sh` 运行产出 `.tgz` 文件（记录产物路径 + 大小 + 时间戳）。
+- [x] AC2: `tar tzf <产物> | grep 'plugin/'` 非空（不是 0 条 plugin 条目的错误入口）。
+- [x] AC3: 产物内 `package/plugin/.claude-plugin/plugin.json` 的 `version` 字段 == 仓库当前
       `plugin/.claude-plugin/plugin.json` 的 `version`（证明是当前版本，非陈旧产物顶替）。
-- [ ] AC4: 产物时间新于本次切换（2026-08-16），Evidence 记录完整可复核。
+- [x] AC4: 产物时间新于本次切换（2026-08-16），Evidence 记录完整可复核。
 
 ## Definition of Done
 
-- [ ] 本机存在当前版本的可用 `.tgz` 产物，版本号与仓库一致，AC88 可直接引用该产物进行跨主机验证。
+- [x] 本机存在当前版本的可用 `.tgz` 产物，版本号与仓库一致，AC88 可直接引用该产物进行跨主机验证。
+
+## Evidence
+
+**构建入口**：`bash packages/quay/scripts/package.sh`（在工作树
+`/home/yale/work/quay-worktrees/gap-ac85-local-build-current-artifact`，HEAD `348b2a85`）。
+**package.sh 无需修改**：其版本同步闸（`package.sh:83-92`）在打包时已强制
+`plugin/.claude-plugin/plugin.json` version == `package.json` version，且将仓库根 `plugin/` 原样
+物化进 `packages/quay/plugin/`（`package.sh:94-96`），故产物内版本 == 仓库当前版本由构造保证。
+
+**前置准备**：工作树无 `node_modules`、缺 vendored runtime bundles —— 已跑根 `npm install`
+（postinstall 触发 `plugin/scripts/sync-vendor.sh`，构建 `plugin/vendor/quay/dist/quay.js` +
+`plugin/vendor/quay-native/dist/quay-native.js`）。
+
+**AC1 — 产物路径/大小/时间戳**：
+```
+路径:    /home/yale/work/quay-worktrees/gap-ac85-local-build-current-artifact/packages/quay/quay-0.4.0.tgz
+大小:    3,214,065 bytes（3.2 MB，npm pack package size；unpacked 13.2 MB）
+时间戳:  2026-08-16 03:58:17.867120084 +0000（UTC）
+sha256:  05ada1eca6111bb5959584e7b6bbaaa3e0ca045ebd7c17a1bd14347b354b4eca
+```
+产物为 gitignored（根 `.gitignore:21` `*.tgz`），**不提交二进制**；上述路径即 AC88/AC89 的消费路径。
+
+**AC2 — tar 内 plugin/ 条目非空**：
+```
+$ tar tzf packages/quay/quay-0.4.0.tgz | grep 'plugin/' | wc -l
+321
+```
+非 0 条（绝非 `npm pack` 空 plugin 的 08-06 错误入口）。样本条目：
+`package/plugin/.claude-plugin/plugin.json`、`package/plugin/scripts/dist/*.js`（esbuild 打包产物）、
+`package/plugin/workflows/fan-in-execute.js`、`package/plugin/gate-scripts/dist/drain-scheduler.js` 等。
+
+**AC3 — 版本一致性（产物内 vs 仓库当前）**：
+```
+产物内 package/plugin/.claude-plugin/plugin.json version = 0.4.0
+仓库   plugin/.claude-plugin/plugin.json        version = 0.4.0
+仓库   packages/quay/package.json               version = 0.4.0
+比对:  MATCH（inner=0.4.0 == repo=0.4.0）⇒ 当前构建，非陈旧产物顶替
+```
+
+**AC4 — 产物时间新于本次切换**：
+```
+产物 mtime:            2026-08-16 03:58:17 UTC
+phase-goal 切换提交:   3d201bd1 2026-08-16 03:51:57 UTC（AC85-89 新阶段）
+任务晋 ready 提交:     348b2a85 2026-08-16 03:56:17 UTC（HEAD）
+产物晚于二者（+6m20s / +2m）⇒ 本次切换后新构建
+```
+
+**作用域闸**：`scripts/test.sh --for-task gap-ac85-local-build-current-artifact --allow-thin`
+EXIT **0**；`task-contract-check` no violations；selector 对 Touches 解析出 0 个测试文件
+（thin-allowed，0/3 < 0.5 阈值——Touches 主要是脚本/产物/任务文件，非测试文件 glob），
+全套仍由 fan-in 阶段跑。
 
 ## Touches
 
