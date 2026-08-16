@@ -44,7 +44,14 @@ lane=8, nproc=16）：static 83s + serial 304s + lowconc 276s + main 349s = **10
 
 ## Touches
 
-- scripts/test.sh（suite 耗时结构——static/serial/lowconc/main 分相）
-- plugin/scripts/*（资源闸自测 fixture 若为串行+lowconc 翻倍真因——先对照再改）
-- packages/quay/src/ + packages/quay/test/（若 main 相砍时长的对象在此）
+**收窄说明（manager 2026-08-16 16:5xZ 裁定）**：⛔ 不使用目录级条目（`plugin/scripts/*` / `packages/quay/src/`）
+——目录级是展开+不对称自锁语义，会挡住本阶段所有 UI 任务（serve-handlers 单点 + AC99 的 5 个 plugin 文件），
+使「人明令 suite 与 UI 并行」在派发层结构上不可能。**真实改动对象 = 对照测量与优化落点**，对照轮跑完前
+「main 相砍时长对象在 packages/quay/src/」是未证实猜测，⛔ 不得用未证实可能性锁住 src 目录。等对照轮真因
+确定后，按实际落点补具体文件条目。
+
+- scripts/test.sh（suite 分相结构——static/serial/lowconc/main 的 lane 与时长控制）
+- plugin/test/full-suite-runner.test.mjs（资源闸自测 fixture——serial/lowconc 翻倍候选真因，先对照再改）
+- plugin/test/trend-check.test.mjs（同上，资源闸自测 fixture）
+- plugin/test/checker-cost.test.mjs（同上，资源闸自测 fixture）
 - tasks/gap-ac101-suite-under-600s.md（自身）

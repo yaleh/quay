@@ -33,7 +33,8 @@ depends_on: []
 
 ## Definition of Done
 
-- [ ] 三条零成本缺口修复落地，AC1-AC3 各自可机械核对。
+- [ ] 三条零成本缺口全部修复并落地（/board 导航入口 + /git-history 重启可见 + white-space 覆盖修正），
+      AC1-AC3 三条判据各自可机械核对（curl / grep），packages/quay/test/ 13 个既有 web 测试保持全绿。
 
 ## Touches
 
