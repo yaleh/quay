@@ -10,7 +10,7 @@
 //   派生; 其余处出现的并发数值字面量即违规。
 //
 // WHAT IT DETECTS (by POSITION, never by keyword — CLAUDE.md 硬规则 2): a 并发数值字面量 is a
-// numeric literal appearing in one of four CONCURRENCY-VALUE POSITIONS, matched at CODE positions
+// numeric literal appearing in one of FIVE CONCURRENCY-VALUE POSITIONS, matched at CODE positions
 // only (buildNonCodeMask — a comment/string/regex that merely spells the pattern never reports):
 //   P1  concurrency-constant definition: (export) const NAME = <num> where NAME carries a
 //       concurrency keyword (cap|slot|lane|concurr|subagent|parallel|quota|oversub|dispatch).
@@ -18,6 +18,21 @@
 //       followed by <num>.
 //   P3  CPU quota literal: CPUQuota=<num>% | cpuQuota: "<num>%".
 //   P4  object-literal concurrency key: (cap|slots|laneCount|concurrency): <num>.
+//   P5  CPU-quota literal inside a systemd-run-limit override STRING — the historical leak shape
+//       (gap-concurrency-literal-check-workflows-coverage): `systemdRunLimits = "MemoryMax=4G
+//       CPUQuota=400% TasksMax=200"` — a REAL runtime value (passed to systemd-run via the
+//       QUAY_TEST_SYSTEMD_RUN_LIMITS seam) that sits inside a double-quoted string, which the
+//       non-code mask blanks (P3 cannot see it). The positional signal that distinguishes a
+//       runtime override from a doc mention: the same string ALSO carries a sibling systemd-run
+//       key (MemoryMax= / TasksMax=).
+//
+// SEAM ENUMERATION (AC3, gap-concurrency-literal-check-workflows-coverage): 源头默认值正确不够——
+// 任何能绕过源头默认值的 seam 必须被覆盖, 否则「源头正确」不构成保证。已枚举并覆盖的 seam:
+//   QUAY_TEST_SYSTEMD_RUN_LIMITS — full-suite-runner.ts 的测试 seam, 经 execute-suite-fix.js
+//     (`systemdRunLimits = "…"` 默认 + launchEnv 注入) 把 systemd-run 限制塞进 suite 启动。
+//     历史: CPUQuota=400% 经此 seam 活 4 天 (拖慢每轮 + 制造假红), 源头默认值 (不传 -p CPUQuota=)
+//     正确但 seam 把字面量塞回。覆盖 = 扫描面含 .claude/workflows/ + plugin/workflows/ (P5 检测
+//     override 字符串内的 CPUQuota=<num>%)。
 //
 // EVERY hit is classified:
 //   definition-point   — the value derives from a QUAY_MAX_* definition point (the line, or the
@@ -43,7 +58,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { buildNonCodeMask } from "./checker-lib.ts";
+import { buildNonCodeMask, isRegexStart } from "./checker-lib.ts";
 import { isDirectEntry } from "./gate-script-base.ts";
 
 /** Concurrency keywords carried by a value's identifier (P1) or key (P4) — the structural signal
@@ -72,6 +87,89 @@ export const CPU_QUOTA_RE =
 export const OBJECT_KEY_RE =
   /(cap|slots?|laneCount|lane|concurrency)\s*:\s*(\d+(?:\.\d+)?)/g;
 
+/** P5 — the systemd-run-limit override-string signature: a sibling resource key (MemoryMax= / TasksMax=)
+ *  present in the same string literal that carries `CPUQuota=<num>%`. This is the positional signal
+ *  that the string is a RUNTIME value passed to systemd-run (the QUAY_TEST_SYSTEMD_RUN_LIMITS seam),
+ *  not a doc mention — a doc string that merely spells `CPUQuota=400%` does not carry `MemoryMax=`/
+ *  `TasksMax=`. */
+export const SYSTEMD_RUN_LIMIT_KEY_RE = /(?:MemoryMax|TasksMax)\s*=/;
+export const SYSTEMD_CPU_QUOTA_IN_STRING_RE = /CPUQuota\s*=\s*(\d+(?:\.\d+)?)\s*%/g;
+
+/** 复用 checker-lib buildNonCodeMask 的线性状态机 (同样的注释/正则消歧), 但额外记录【真实字符串字面量】
+ *  的跨度。buildNonCodeMask 把字符串和注释都标成非代码, 无法单独挑出字符串 —— 而 P5 需要区分
+ *  「代码里的字符串字面量」(值是运行期真值) 与「注释里的拼写」(应忽略)。isShell=true 时额外跳过
+ *  `#` 行注释 (与 buildMask 相同的字首 `#` 判据, 防 shell 注释里的引号开启伪字符串跨度)。 */
+export function stringLiteralSpans(src: string, isShell: boolean): Array<{ start: number; end: number; body: string }> {
+  const spans: Array<{ start: number; end: number; body: string }> = [];
+  let i = 0;
+  const n = src.length;
+  let prevCode = ""; // last CODE character emitted (for regex-literal disambiguation)
+  while (i < n) {
+    const c = src[i];
+    const d = src[i + 1];
+    if (c === "/" && d === "/") {
+      i += 2;
+      while (i < n && src[i] !== "\n") i++;
+      continue;
+    }
+    if (c === "/" && d === "*") {
+      i += 2;
+      while (i < n && !(src[i] === "*" && src[i + 1] === "/")) i++;
+      if (i < n) i += 2;
+      continue;
+    }
+    if (isShell && c === "#") {
+      const prev = i === 0 ? "\n" : src[i - 1];
+      if (/\s/.test(prev)) { while (i < n && src[i] !== "\n") i++; continue; }
+    }
+    if (c === '"' || c === "'" || c === "`") {
+      const q = c;
+      const start = i;
+      i++;
+      while (i < n) {
+        if (src[i] === "\\") { i += 2; continue; }
+        if (src[i] === q) { i++; break; }
+        i++;
+      }
+      spans.push({ start, end: i, body: src.slice(start + 1, i - 1) });
+      prevCode = q; // the closing quote is what a following `/` sees (division)
+      continue;
+    }
+    if (c === "/" && isRegexStart(prevCode, src, i)) {
+      i++;
+      let inClass = false;
+      while (i < n) {
+        const cc = src[i];
+        if (cc === "\\") { i += 2; continue; }
+        if (cc === "[") inClass = true;
+        else if (cc === "]") inClass = false;
+        else if (cc === "/" && !inClass) { i++; break; }
+        else if (cc === "\n") { i++; break; } // unterminated regex — bail out of the literal
+        i++;
+      }
+      continue;
+    }
+    prevCode = c;
+    i++;
+  }
+  return spans;
+}
+
+/** P5 检测: 在 systemd-run-limit override 字符串内找 `CPUQuota=<num>%` 字面量。返回命中在源码里的
+ *  绝对 index 与原文 (供 scanText 逐条分类为 定义点/已声明例外/违规)。 */
+export function scanSystemdRunLimitCpuQuota(src: string, isShell: boolean): Array<{ index: number; raw: string }> {
+  const out: Array<{ index: number; raw: string }> = [];
+  for (const sp of stringLiteralSpans(src, isShell)) {
+    if (!SYSTEMD_RUN_LIMIT_KEY_RE.test(sp.body)) continue; // 非 systemd-run override 串 → 忽略
+    SYSTEMD_CPU_QUOTA_IN_STRING_RE.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = SYSTEMD_CPU_QUOTA_IN_STRING_RE.exec(sp.body)) !== null) {
+      out.push({ index: sp.start + 1 + m.index, raw: m[0] });
+    }
+  }
+  return out.sort((a, b) => a.index - b.index);
+}
+
 /** The single-source definition points (the QUAY_MAX_* env vars — 人 2026-08-13 框架的旋钮 ①②③).
  *  A hit is a definition point iff its line (or attached declaration block) READS one of these env
  *  vars (the value derives from the definition point — not merely names it). */
@@ -97,7 +195,7 @@ export interface ConcurrencyHit {
   line: number;
   text: string;
   kind: HitKind;
-  pattern: "P1" | "P2" | "P3" | "P4";
+  pattern: "P1" | "P2" | "P3" | "P4" | "P5";
 }
 
 /** A code/non-code mask for ONE file. checker-lib's buildNonCodeMask covers JS/TS (line comments,
@@ -138,27 +236,38 @@ function isMasked(mask: Uint8Array, i: number, j: number): boolean {
   return true;
 }
 
-/** The scan surface — the executable layer where concurrency values are DEFINED and PASSED:
- *  plugin/scripts/*.{ts,sh} + scripts/*.{sh,ts}. Docs (orchestration/*.md) are excluded — they
- *  quote old commands as historical evidence (masking non-code does not apply to markdown prose);
- *  test dirs are excluded — tests legitimately inject numeric fixtures. */
+/** The scan surface — the executable layer where concurrency values are DEFINED and PASSED.
+ *  Explicitly enumerated per root (可 grep 的枚举清单, 非一个 glob 糊过去 — AC1):
+ *    plugin/scripts/*.{ts,sh}   — 循环执行核 (ready-pool-check / slot-refill / resource-gate …)
+ *    scripts/*.{ts,sh}          — 测试入口 (test.sh) + 编排
+ *    .claude/workflows/*.js     — workflow 脚本 (execute-suite-fix.js 等 — QUAY_TEST_SYSTEMD_RUN_LIMITS seam)
+ *    plugin/workflows/*.js      — 同一批 workflow 的发行镜像 (plugin/sync.sh 从 .claude/workflows/ 拷贝)
+ *  Docs (orchestration/*.md) are excluded — they quote old commands as historical evidence (masking
+ *  non-code does not apply to markdown prose); test dirs are excluded — tests legitimately inject
+ *  numeric fixtures. */
+const SCAN_ROOTS: Array<{ dir: string; rel: string; ext: RegExp }> = [
+  { dir: "plugin/scripts", rel: "plugin/scripts", ext: /\.(ts|sh)$/ },
+  { dir: "scripts", rel: "scripts", ext: /\.(ts|sh)$/ },
+  { dir: ".claude/workflows", rel: ".claude/workflows", ext: /\.js$/ },
+  { dir: "plugin/workflows", rel: "plugin/workflows", ext: /\.js$/ },
+];
+
 export function scanSurface(root: string): string[] {
   const out: string[] = [];
-  const walk = (dir: string, base: string) => {
+  const walk = (dir: string, base: string, ext: RegExp) => {
     if (!fs.existsSync(dir)) return;
     for (const f of fs.readdirSync(dir)) {
       const abs = path.join(dir, f);
       const s = fs.statSync(abs);
       if (s.isDirectory()) {
         if (f === "node_modules" || f === ".git" || f === "test" || f === "checker-mutation-cases") continue;
-        walk(abs, path.join(base, f));
-      } else if (/\.(ts|sh)$/.test(f)) {
+        walk(abs, path.join(base, f), ext);
+      } else if (ext.test(f)) {
         out.push(path.join(base, f));
       }
     }
   };
-  walk(path.join(root, "plugin", "scripts"), path.join("plugin", "scripts"));
-  walk(path.join(root, "scripts"), "scripts");
+  for (const { dir, rel, ext } of SCAN_ROOTS) walk(path.join(root, dir), rel, ext);
   return out.sort();
 }
 
@@ -196,6 +305,13 @@ export function scanText(rel: string, src: string): ConcurrencyHit[] {
   const mask = buildMask(src, rel.endsWith(".sh"));
   const lines = src.split("\n");
   const hits: ConcurrencyHit[] = [];
+  /** 逐条命中分类: 定义点 (line/attached block READS a QUAY_MAX_* env) / 已声明例外 (marker) / 违规。 */
+  const classify = (lineIdx: number): HitKind => {
+    const block = declarationBlockLines(lines, lineIdx);
+    if (isDefinitionPoint(block)) return "definition-point";
+    if (carriesFallbackMarker(block)) return "declared-exception";
+    return "violation";
+  };
   const patterns: Array<{ id: "P1" | "P2" | "P3" | "P4"; re: RegExp; domainCheck?: (m: RegExpExecArray) => boolean }> = [
     { id: "P1", re: CONST_DEF_RE, domainCheck: (m) => CONCURRENCY_KEYWORD_RE.test(m[1]) },
     { id: "P2", re: CLI_FLAG_RE },
@@ -209,14 +325,14 @@ export function scanText(rel: string, src: string): ConcurrencyHit[] {
       if (isMasked(mask, m.index, m.index + m[0].length)) { if (m[0].length === 0) re.lastIndex++; continue; }
       if (p.domainCheck && !p.domainCheck(m)) { if (m[0].length === 0) re.lastIndex++; continue; }
       const lineIdx = src.slice(0, m.index).split("\n").length - 1;
-      const block = declarationBlockLines(lines, lineIdx);
-      let kind: HitKind;
-      if (isDefinitionPoint(block)) kind = "definition-point";
-      else if (carriesFallbackMarker(block)) kind = "declared-exception";
-      else kind = "violation";
-      hits.push({ file: rel, line: lineIdx + 1, text: (lines[lineIdx] ?? "").trim().slice(0, 120), kind, pattern: p.id });
+      hits.push({ file: rel, line: lineIdx + 1, text: (lines[lineIdx] ?? "").trim().slice(0, 120), kind: classify(lineIdx), pattern: p.id });
       if (m[0].length === 0) re.lastIndex++;
     }
+  }
+  // P5 — systemd-run-limit override 字符串内的 CPU-quota 字面量 (历史漏检形, 见头注释 SEAM ENUMERATION)。
+  for (const m of scanSystemdRunLimitCpuQuota(src, rel.endsWith(".sh"))) {
+    const lineIdx = src.slice(0, m.index).split("\n").length - 1;
+    hits.push({ file: rel, line: lineIdx + 1, text: (lines[lineIdx] ?? "").trim().slice(0, 120), kind: classify(lineIdx), pattern: "P5" });
   }
   return hits.sort((a, b) => a.line - b.line);
 }
@@ -242,9 +358,9 @@ Usage:
       measure mode — print every hit with its classification (definition-point / declared-exception /
       violation). Exit 0 always (measure).
   node --experimental-strip-types concurrency-literal-check.ts --gate [--root <dir>] [--json]
-      gate mode — scan the executable surface (plugin/scripts + scripts); exit 1 iff any concurrency
-      numeric literal is NOT at a QUAY_MAX_* definition point AND NOT marked
-      'concurrency-default-fallback' (an undeclared literal = violation).
+      gate mode — scan the executable surface (plugin/scripts + scripts + .claude/workflows +
+      plugin/workflows); exit 1 iff any concurrency numeric literal is NOT at a QUAY_MAX_* definition
+      point AND NOT marked 'concurrency-default-fallback' (an undeclared literal = violation).
 
 Exit codes: 0 PASS/measure · 1 gate FAIL (>=1 violation) · 2 usage/env error.`;
 
