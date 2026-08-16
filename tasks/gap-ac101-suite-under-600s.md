@@ -56,7 +56,7 @@ round215 cpu_time 多 1799s 也与「CPU 饥饿拖慢」方向相反。**替代�
       AC1b 为（待外部）项见下**。⚠️ **余量读数**：round221 = 599.591s，距 600000 只剩 **409ms（0.07%）**；
       三轮 485/556/600
       方差大 ⇒ **600s 目标目前没有稳定余量**。⛔ 取整会掩盖「几乎压线」——Evidence 记精确 ms。
-- [ ] AC1b: **⛔ AC101 判达成前必须跑一轮 develop 基线轮**（manager 2026-08-16 17:4xZ 裁定 + 18:2xZ 修正，硬规则④推论三
+- [x] AC1b: **⛔ AC101 判达成前必须跑一轮 develop 基线轮**（manager 2026-08-16 17:4xZ 裁定 + 18:2xZ 修正，硬规则④推论三
       原形——「实现了、测试绿了、但生产没跑过」与「没实现」同形）。让 556s 成立的 PHASE_OVERLAP 已在
       develop（`scripts/test.sh:1024 PHASE_OVERLAP="${QUAY_PHASE_OVERLAP:-1}"`，via 56921738，on develop），
       :203 修法也在（currentVersion）。**判据**：在 develop 基线上跑一轮全量，`state=="green"` ∧
@@ -74,6 +74,11 @@ round215 cpu_time 多 1799s 也与「CPU 饥饿拖慢」方向相反。**替代�
       **⚠️ 参照口径警告（manager 21:2xZ）**：参照轮 219/220/221 全部 `scope=worktree`，而判据①
       要求 `scope != worktree` ⇒ 600s 阈值由被本判据排除的样本设定，**main 口径 n=1**。
       ⛔ 不得写成「600s 有历史支撑」——该口径下无历史。600s 本身不改（人定目标）。
+      **⊢ AC1b 达标（2026-08-16 23:22Z，round224 = develop 基线主口径第二轮）**：
+      `durationMs=500803`（500.8s，≤600000 ✓）∧ `tests=4977`（≥4951 ✓）∧ `lane=8` ✓ ∧
+      `scope=main` ✓ ∧ `state=green` ✓ ∧ `commit=fe0d951a`（develop HEAD，含 quay-init laydown 修复）∧
+      startedAt 23:12:12（>17:53 ✓）。**⇒ AC1b 判据全部满足**（round222 的 642s 为 scope/load 混淆读数，
+      非 develop 真值——round224 干净窗 500.8s 为干净基线）。AC101 的 develop 基线轮本体第一次实测达标。
       **⊢ 分解（inner 2026-08-16 21:24Z，round222 vs round221 同文件对照）**：Δ+42.3s 全部定位到
       **serial 相 +87.6s**（234.0→321.6；main 反而 -73.0s（317.5→244.5），static +16.3s）。measure-trend
       11 个互不相关文件 ~1.5-1.9x 增长（quay-init-loop-runtime +104s / check-drift +90s / loop-driver +83s /
