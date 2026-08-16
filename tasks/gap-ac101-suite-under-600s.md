@@ -56,12 +56,16 @@ round215 cpu_time 多 1799s 也与「CPU 饥饿拖慢」方向相反。**替代�
       AC1b 为（待外部）项见下**。⚠️ **余量读数**：round221 = 599.591s，距 600000 只剩 **409ms（0.07%）**；
       三轮 485/556/600
       方差大 ⇒ **600s 目标目前没有稳定余量**。⛔ 取整会掩盖「几乎压线」——Evidence 记精确 ms。
-- [ ] AC1b: **⛔ AC101 不得在 `17e91e38` 进 develop 之前判达成**（manager 2026-08-16 17:4xZ 裁定，硬规则④推论三（待外部）
-      原形——「实现了、测试绿了、但生产没跑过」与「没实现」同形）。让 556s 成立的 PHASE_OVERLAP 开关在
-      develop 上默认仍是关（`scripts/test.sh:1023 PHASE_OVERLAP="${QUAY_PHASE_OVERLAP:-0}"`，develop 工作树
-      现读）。**判据**：AC1 的 3 轮里至少 1 轮跑在【`17e91e38` 已进 develop 之后】的 develop 基线上；
-      或等价地，AC101 判达成时 `grep PHASE_OVERLAP scripts/test.sh` 在 develop 上默认显示为 1。
-      **取假（一条命令）**：`git merge-base --is-ancestor 17e91e38 develop` 为假 ⇒ AC101 不得勾。
+- [ ] AC1b: **⛔ AC101 判达成前必须跑一轮 develop 基线轮**（manager 2026-08-16 17:4xZ 裁定 + 18:2xZ 修正，硬规则④推论三
+      原形——「实现了、测试绿了、但生产没跑过」与「没实现」同形）。让 556s 成立的 PHASE_OVERLAP 已在
+      develop（`scripts/test.sh:1024 PHASE_OVERLAP="${QUAY_PHASE_OVERLAP:-1}"`，via 56921738，on develop），
+      :203 修法也在（currentVersion）。**判据**：在 develop 基线上跑一轮全量，`state=="green"` ∧
+      `laneCount==8` ∧ `durationMs <= 600000` ∧ `tests >= 4951`，把**精确 ms** 记进 Evidence。
+      **⊢ 取假（读内容，非 SHA）**：fan-in 是 rebase/squash 形态，commit SHA 不是可引用对象（manager 18:2xZ
+      自纠：`git merge-base --is-ancestor 17e91e38 develop` 会假阴性——内容进了但 SHA 不是祖先）。
+      正确读法 = `grep -n 'PHASE_OVERLAP="\${QUAY_PHASE_OVERLAP' scripts/test.sh` 在 develop 上显示 `:-1`。
+      **⛔ 注意**：AC101 曾因 AC1b 记为「（待外部）」被翻 done，但判据本体（跑 develop 基线轮）从未执行
+      （218/219/220/221 全 worktree scope，fan-in 17:53 后无 develop 轮）——**需补跑该轮，done 才名副其实**。
 - [x] AC2: 这 3 轮 `tests` 字段不得低于基线 **4951**（禁止砍覆盖换速度；低于基线即不计入且判作弊）。
 - [x] AC3: 优化手段落成代码/配置（可 `git log` 追溯的提交），⛔ 不接受"挑低负载时段跑一轮"充数。
 
