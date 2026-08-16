@@ -138,6 +138,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
    被删内容的**每一个**独有词条 → 它的新正本路径，并把该映射贴进删除提交。
    **验证的是「全部有家」不是「抽查几个有家」**（2026-08-10 实证：我抽查 7 个确认有正本就删了 164 行，
    `ToolSearch` / `makeWorkspace` / `gate-gameability` 三条无家可归，事后才发现）。
+5b. **在某处修好 X ≠ X 只在那一处**（5 的镜像半边，2026-08-16 立，**同日三次、两层、三个互不相关的载体**）。
+   〔**产物**：修完一个实例后，**在同一载体里 grep 该原则的其它适用点，把命中数与前 3 条贴进提交**；
+   写不出这个数 ⇒ 视为只修了被报出来的那一个〕
+   **三次实证（全部是"原则已经想明白，却只落实到它被发现的那一处"）**：
+   ① `direct-to-develop-bypass-check.ts:31` 已为「引导问题」给 `fan-in-*` 开了排除，
+      **而记录豁免的 checker 自己是同一类，漏了** ⇒ ruled 表每登记一条都自触发红，**4/4 = 100% 按构造**；
+   ② 我在 AC88 写下「判据不得引用一个生命周期短于判据本身的对象」，**转头把 AC1b 锚在 commit SHA 上**
+      ⇒ rebase/squash 后假阴性；
+   ③ 我在 AC1 写了「`startedAt` 晚于立条时刻」，**紧邻的 AC1b 闭合条件漏了同一个限定**
+      ⇒ 不加窗被 207 条历史轮误判为已闭合。
+   **⊢ 共同形态**：修的人只盯着被报出来的那一个，**而缺陷是成簇的、且兄弟实例常在同一文件甚至同一行**。
+   **⊢ 与 5 的分工**：5 问「搜不到是不是真没有」，本条问「**修好一个是不是就没有别的**」——
+   两条都在防"局部完备被当成全局完备"，方向相反。
+
 6. **缺值 = 未查**，不是「为假」。〔产物：判定入口校验，缺键即拒出结论〕
 7. **要求记录某动作，就不能把该动作排在记录之后**。〔产物：收尾顺序=先清扫后写日志〕
 8. **编号/命名不得复用**——否则缺席被伪装成在场。〔产物：`甲乙丙丁戊` 与判准 `①-⑤` 分离〕
@@ -224,7 +238,16 @@ Key cross-cutting facts (require reading several files to see):
 
 - **RETIRED (ADR-022, 2026-08-03): classic milestone loop 退役说明 → `orchestration/archive/AC58-retired-clauses.md#R18`.** The **two-layer fast mode is the sole development mode**（fast-mode telemetry under `milestones/fast-mode-telemetry/<date>.json`；`## Contract` 六键 + `task-contract-check.ts` 取代 ProposalReview/PlanCheck，subagent REFUTE 轮取代 Audit phase；`OUTER-LOOP.md` 曾是经典循环驱动文档，见 `experiments/quay-perpetual-stream/`）
 - **`experiments/quay-perpetual-stream/`** is the active BAIME experiment (exp5): an autonomous outer loop that builds quay one milestone at a time. **`OUTER-LOOP.md` was the classic-loop driver document** (retired under ADR-022 — see the notice above); `inherited-core.md` is the pinned methodology; `dashboard.md` is mutable outer state; `scripts/it0-*.{sh,mjs}` are the mechanical gates (notably `it0-dod-check.sh` — the **DoD meta-enforcer**, Clauses 0-9, fixture-pinned by `dod-fixture-selfcheck.sh`).
-- **Two-layer per-task worktree isolation（取代 RETIRED classic-loop 工作树机制，后者历史细节 → `orchestration/archive/AC58-retired-clauses.md#R19`）**: 两层模式用 plain `git worktree add` 按任务直接隔离（无 `milestone-worktree.ts`）。**path 约定 `/home/yale/work/quay-worktrees/<task-id>`，不在 `/tmp`**（`/tmp` 会被系统清理、且本机已实测 积压 3389 个测试遗留目录/1.1G；正本 `orchestration/inner-brief-2026-08-04-restart.md:103`）。**在飞任务数唯一正确读法 = `git worktree list | grep -c quay-worktrees`**（`ls` 任一 `/tmp` 路径恒返回 0，会把工作中的 inner 伪装成空闲）。**默认（无 isolationMode）严格串行**：同一 checkout 上两个默认派发绝不同时跑（Build 阶段直接改共享工作树，未提交状态会撞）；等一个 milestone 的 Land 提交后再派下一个。**可选并发安全路径（DIR-123, 2026-07-31）**: `isolationMode:'worktree'` 走真实 per-milestone worktree；Land 是唯一碰共享 checkout 的阶段，由单飞 Land 锁（`.quay/land-locks/shared-checkout.lock`）对整段 Land 串行化。**混合模式硬前提**: 默认路径不拿 Land 锁、Build 直接提交 master，故默认派发绝不能与并发批重叠；并发批按构造即 worktree 隔离（`OUTER-LOOP.md` step a 恒传 `isolationMode:'worktree'`）。
+- **Two-layer per-task worktree isolation（取代 RETIRED classic-loop 工作树机制，后者历史细节 → `orchestration/archive/AC58-retired-clauses.md#R19`）**: 两层模式用 plain `git worktree add` 按任务直接隔离（无 `milestone-worktree.ts`）。**path 约定 `/home/yale/work/quay-worktrees/<task-id>`，不在 `/tmp`**（`/tmp` 会被系统清理、且本机已实测 积压 3389 个测试遗留目录/1.1G；正本 `orchestration/inner-brief-2026-08-04-restart.md:103`）。**在飞任务数读法 = `git worktree list | grep -c quay-worktrees`**（`ls` 任一 `/tmp` 路径恒返回 0，会把工作中的 inner 伪装成空闲）。
+  **🔴 2026-08-16 23:2xZ 更正：这条原写作「唯一正确读法」，而它在【两个方向上都高估】，实测如下——**
+  **①它把非任务 worktree 也数进去**：验证轮自己的 `verify-round-<ts>-<hash>` 也在该目录下
+  ⇒ 裸 `grep -c` 得 **4** 而真实任务 worktree = **3**；**`slot-refill` 自己是过滤掉它的**（两种传法都报 `in_flight=3`）
+  ⇒ **文档教的读法比机件更粗**。**②它把死任务算成产能**：worktree 存在 ≠ 有人在干活
+  ——实测同一时刻 ac100 停 5.1 小时、delivery 停 4.7 小时、零活进程，而它们照样计入在飞并占着 touches 锁
+  ⇒ **4 个"在飞"里只有 1 个在动**（2026-08-16 三个 impl agent 同窗停摆，详见 `orchestration/manager-tick-log.md`）。
+  **⇒ 它测的是【占着锁的 worktree 数】，这个量本身是对的、且判「该不该再派」时正是要它。**
+  **⛔ 但不要用它回答「有几个任务在干活」——那要配一个活性直接量**（worktree 末次提交时刻 / 该路径下活进程数）。
+  **⊢ 同硬规则 4b：worktree 数是代理量，`git log` 时刻与活进程是直接量。****默认（无 isolationMode）严格串行**：同一 checkout 上两个默认派发绝不同时跑（Build 阶段直接改共享工作树，未提交状态会撞）；等一个 milestone 的 Land 提交后再派下一个。**可选并发安全路径（DIR-123, 2026-07-31）**: `isolationMode:'worktree'` 走真实 per-milestone worktree；Land 是唯一碰共享 checkout 的阶段，由单飞 Land 锁（`.quay/land-locks/shared-checkout.lock`）对整段 Land 串行化。**混合模式硬前提**: 默认路径不拿 Land 锁、Build 直接提交 master，故默认派发绝不能与并发批重叠；并发批按构造即 worktree 隔离（`OUTER-LOOP.md` step a 恒传 `isolationMode:'worktree'`）。
 - **`prepare-milestone.js` worktree-isolation 支持（已随 ADR-022 退役）→ `orchestration/archive/AC58-retired-clauses.md#R20`**（文件已删，机制细节与理由档案见归档）
 - **`.halt` sentinel** — pauses the loop at the next milestone boundary. **Correction (2026-07-27, `gap-halt-sentinel-path-mismatch`):** the real, mechanically-checked location is the **repo root** (`<repo-root>/.halt`, workspace-root-relative — matches `plugin/skills/loop-driver/SKILL.md`'s documented convention and `select-preflight.ts`'s actual `checkHalt()` implementation). A previous version of this file incorrectly documented `experiments/quay-perpetual-stream/.halt`; that path is NOT read by any live code path. **When editing while the loop may run, follow DIR-027 human-steering hygiene: pause via a root-level `.halt`, OR work in a private git worktree off `master` and fast-forward at a clean window** — never race the loop on `master`. Before REMOVING `.halt` to un-pause, run
   `experiments/quay-perpetual-stream/scripts/restart-readiness-check.sh` (fixed to check this same

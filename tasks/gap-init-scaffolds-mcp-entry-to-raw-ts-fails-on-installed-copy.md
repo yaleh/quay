@@ -63,7 +63,7 @@ Error: Stripping types is currently unsupported for files under node_modules,
 
 ## Contract
 
-measure   installed_task_create_ok = `ssh ad-arm1 'cd ~/quay-ac16c3-ws && quay task create PROBE --title probe'` 退出码
+measure   installed_task_create_ok = `ssh ad-arm1 'cd ~/quay-ac16c3-ws && quay task create PROBE --title probe'` 退出码（exit code）
 band      installed_task_create_ok = 0（安装副本 init 后 task create 不崩）
 invariant provider_mcp_serves = 1（provider MCP 在安装形态下可起）
 invoke    `ssh ad-arm1 'cd ~/quay-ac16c3-ws && quay task create PROBE --title probe && quay task list'`（贴 todo→done 证据）

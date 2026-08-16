@@ -102,7 +102,7 @@ changed: manager lane4-vs-lane8 对照收尾——r268 red `__OVERHEAD__`=0 / `_
 
 ### Contract invoke 计数（红轮）
 
-- 真实 SIGTERM 截断 run：`grep -cE '__OVERHEAD__|__PERFILE__' <stderr>` = 4（`__OVERHEAD__` 4 / `__PERFILE__` 0——截断发生在测试相位前，per-file 尚未产生；相位分解已在）
+- 真实 SIGTERM 截断 run：`grep -cE '__OVERHEAD__|__PERFILE__' <红轮日志>` = 4（`__OVERHEAD__` 4 / `__PERFILE__` 0——截断发生在测试相位前，per-file 尚未产生；相位分解已在）
 - runner 级红轮测试：归档日志 `__OVERHEAD__` 3 条（非 0）
 
 ### 提交（三笔，Contract resume 分步）

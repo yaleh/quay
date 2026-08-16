@@ -134,12 +134,14 @@ session-bootstrap step.
 measure   children_done = `grep -l '^status: done' tasks/gap-cold-start-skill-has-no-recovery-branch.md tasks/gap-no-formalized-bare-metal-session-bootstrap.md tasks/gap-quay-self-hosting-e2e-proof.md | wc -l` 输出的计数
 band      children_done = 3（三个 child 全部 done）
 invariant deps_landed = 1（两个 prerequisite：gap-send-keys-verified... 与 gap-retire-inner-state... 已 done）
-invariant capstone_self_certify = 1（SH4 六键表全 true，无 human-in-the-loop）—— **2026-08-12 首跑实测 = 0**
-    （step 0 dead-loop 假阳性需 operator 诊断）→ **重跑（D2 fan-in 2413fe42 后）实测 = 1**：step 0 对
-    fresh cold-start 自证 never-started，零 operator 介入（见 SH4 任务体 Evidence 重跑段 / proof doc §2–§4）
+invariant capstone_self_certify = 1（SH4 六键表全 true，无 human-in-the-loop）—— **2026-08-12 首跑实测 = 0**（step 0 dead-loop 假阳性需 operator 诊断）→ **重跑（D2 fan-in 2413fe42 后）实测 = 1**：step 0 对 fresh cold-start 自证 never-started，零 operator 介入（见 SH4 任务体 Evidence 重跑段 / proof doc §2–§4）
 invoke    `node --no-warnings --experimental-strip-types plugin/scripts/ready-pool-check.ts --root . --json`
 control   ready-pool 该 parent 可晋（fourArtifacts complete + deps ready）；六键表贴任务体
 resume    依赖顺序按 SPEC 落；capstone 最后
+
+## Evidence
+
+- **Contract invoke 的入口路径**：`plugin/scripts/ready-pool-check.ts`（parent 可晋性判定——fourArtifacts complete + deps ready，见 ## Contract）；child 各自 Evidence 见其任务体。
 
 ## Touches
 

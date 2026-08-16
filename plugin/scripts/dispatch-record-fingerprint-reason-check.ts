@@ -47,6 +47,13 @@ import {
   type DispatchRecord,
 } from "./dispatch-record.ts";
 
+// 数据基线（2026-08-16，manager 裁定「writer 漏出 2 条，按 pre-existing 放行，不立案」）：字段 08-14
+// df9ce806 已落地 + writer fail-closed，但 08-15 仍有 2 条记录被写出缺 fingerprint——成因未查（发生率 2，
+// 不在本阶段面）。gap-ac84 已 backfill（preferenceFile 存在，指纹 e4881984... 可复算）；DIR-103-B 无
+// preferenceFile 引用（outer dispatch 路径未记录倾向文件），无法可靠 backfill ⇒ 记数据基线豁免。
+// 前向不追溯（AC66 判据1 同族）：只豁免历史已知记录，不削弱未来任何记录的 fingerprint 要求。
+const LEGACY_NO_FINGERPRINT_TASK_IDS: ReadonlySet<string> = new Set(["DIR-103-B"]);
+
 export interface RecordVerdict {
   line: number;
   taskId: string | undefined;
@@ -67,9 +74,13 @@ export interface DispatchRecordCheckResult {
 export function validateRecord(record: DispatchRecord): { ok: boolean; why: RecordVerdict["why"] } {
   if (!record || typeof record !== "object") return { ok: false, why: "unparseable" };
   if (typeof record.taskId !== "string" || record.taskId.trim() === "") return { ok: false, why: "taskId-missing" };
-  if (record.preferenceFingerprint === null || record.preferenceFingerprint === undefined) return { ok: false, why: "fingerprint-missing" };
-  if (typeof record.preferenceFingerprint !== "string" || !FINGERPRINT_RE.test(record.preferenceFingerprint.trim())) {
-    return { ok: false, why: "fingerprint-invalid" };
+  // 数据基线豁免（LEGACY_NO_FINGERPRINT_TASK_IDS）：历史已知缺 fingerprint 记录前向不追溯。
+  const legacyExempt = LEGACY_NO_FINGERPRINT_TASK_IDS.has(record.taskId);
+  if (!legacyExempt) {
+    if (record.preferenceFingerprint === null || record.preferenceFingerprint === undefined) return { ok: false, why: "fingerprint-missing" };
+    if (typeof record.preferenceFingerprint !== "string" || !FINGERPRINT_RE.test(record.preferenceFingerprint.trim())) {
+      return { ok: false, why: "fingerprint-invalid" };
+    }
   }
   if (!reasonIsSubstantive(record.reason)) return { ok: false, why: "reason-too-thin" };
   return { ok: true, why: "ok" };

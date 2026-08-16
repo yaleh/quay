@@ -1009,18 +1009,19 @@ serial_lowconc_host_default() {
 SERIAL_CONCURRENCY="${QUAY_SERIAL_CONCURRENCY:-$(serial_lowconc_host_default)}"
 LOWCONC_CONCURRENCY="${QUAY_LOWCONC_CONCURRENCY:-$(serial_lowconc_host_default)}"
 
-# ── phase-overlap knob (gap-phase-overlap-two-phase-parallel-exploration, AC1) ────────────────────
+# ── phase-overlap knob (gap-phase-overlap-two-phase-parallel-exploration, AC1 + AC101 default-ON) ──
 # QUAY_PHASE_OVERLAP=1 runs the serial and lowconc phases in PARALLEL on the FULL-SUITE path (each at
 # its OWN $SERIAL_CONCURRENCY / $LOWCONC_CONCURRENCY) instead of sequentially — the two-phase-overlap
 # exploration (serial+lowconc 并行, 预期 −154s/轮: the 331s sequential window 177+154 becomes
 # max(177,154)≈177s). This changes phase SCHEDULING only, never a concurrency value (AC4: one
 # variable at a time — $SERIAL_CONCURRENCY / $LOWCONC_CONCURRENCY stay exactly as configured; the
 # "两个 6" in the task title reflects the author's reading, the live defaults here are host-derived
-# (H÷S, gap-ac74) and are NOT part of this exploration's variable). Default 0 = the prior sequential
-# serial→lowconc→main
-# order; clearing the env var (unset it) is the ONE-KEY ROLLBACK that restores the baseline
-# scheduling — the exploration's definition is that it must be possible to roll back.
-PHASE_OVERLAP="${QUAY_PHASE_OVERLAP:-0}"
+# (H÷S, gap-ac74) and are NOT part of this exploration's variable). AC101 (2026-08-16) flips the
+# DEFAULT to 1 (overlap): the human-approved improvement becomes the default so the suite fits the
+# ≤600s target — the AC101 对照轮 (round 218, no-churn window) measured serial 232s + lowconc 183s
+# sequential (415s) ⇒ overlap max(232,183)=232s, saving ~183s/round. Set QUAY_PHASE_OVERLAP=0 for
+# the sequential serial→lowconc→main baseline (ONE-KEY ROLLBACK).
+PHASE_OVERLAP="${QUAY_PHASE_OVERLAP:-1}"
 
 # has_explicit_concurrency <args...> — whether the args already carry a --test-concurrency flag
 # (either the `=` spelling with a numeric value, or the SPACE spelling with a numeric value). When it
@@ -1548,11 +1549,12 @@ run_selected() {
     # identical between this and the pre-change sequential scheduling.
     local lowconc_files=() lf lowconc_code
     while IFS= read -r lf; do lowconc_files+=("$lf"); done < <(select_files "lowconc")
-    # PHASE OVERLAP (gap-phase-overlap-two-phase-parallel-exploration AC1): when QUAY_PHASE_OVERLAP=1
-    # AND both phases are non-empty, run serial + lowconc in PARALLEL (each at its OWN concurrency,
-    # $SERIAL_CONCURRENCY / $LOWCONC_CONCURRENCY — scheduling-only, never a value change, AC4).
-    # Default OFF = the prior sequential order; clearing the env var is the ONE-KEY ROLLBACK. Expected
-    # saving: the sequential serial+lowconc window (177+154=331s) becomes max(177,154)≈177s.
+    # PHASE OVERLAP (gap-phase-overlap-two-phase-parallel-exploration AC1, default-ON since AC101):
+    # when QUAY_PHASE_OVERLAP=1 (the default) AND both phases are non-empty, run serial + lowconc in
+    # PARALLEL (each at its OWN concurrency, $SERIAL_CONCURRENCY / $LOWCONC_CONCURRENCY — scheduling-
+    # only, never a value change, AC4). Set QUAY_PHASE_OVERLAP=0 for the sequential baseline
+    # (ONE-KEY ROLLBACK). Expected saving: the sequential serial+lowconc window (177+154=331s)
+    # becomes max(177,154)≈177s.
     if [ "$PHASE_OVERLAP" -eq 1 ] && [ "${#serial_files[@]}" -gt 0 ] && [ "${#lowconc_files[@]}" -gt 0 ]; then
       [ "$oh_full" -eq 1 ] && oh_t5=$(_oh_mark)
       echo "overlap: running ${#serial_files[@]} serial + ${#lowconc_files[@]} lowconc files in parallel (serial conc=$SERIAL_CONCURRENCY, lowconc conc=$LOWCONC_CONCURRENCY)"

@@ -56,8 +56,12 @@ const MECHANISM_NAMES = [
   "laydown-set-check",
 ];
 // The loop mechanisms quay-init --loop actually lays down into a consumer workspace.
+// touches-one-entry-one-path-check: precommit-guard.ts's ESM `./` import — the delta-scope
+// unverified-landing defect (gap-quay-init-laydown-missing-touches-checker) — the consumer's
+// guard --install-hook dies with ERR_MODULE_NOT_FOUND when this checker is absent from the laydown.
 const LAID_DOWN_MECHANISMS = [
   "dead-loop-check", "slot-refill", "claim-task", "self-report-vocab", "laydown-set-check",
+  "touches-one-entry-one-path-check",
 ];
 
 let tmpBase;

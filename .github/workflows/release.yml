@@ -15,7 +15,14 @@ on:
 jobs:
   release:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # gap-release-timeout-10min-cancels-npm-tgz (2026-08-16): the "Run tests" step
+    # (96 deterministic test files across packages/quay + packages/quay-native) exceeded
+    # the old `timeout-minutes: 10` on the v0.5.0 run (31958447040) — the job was
+    # cancelled BEFORE "Build release artifact (npm pack)" / "Upload artifact to
+    # GitHub Release" ran, so the npm .tgz was never auto-attached. Widen to 30 to give
+    # cold runners + future test growth a comfortable margin (sea-release, which does
+    # more build work, is already 15).
+    timeout-minutes: 30
     permissions:
       contents: write
       issues: read

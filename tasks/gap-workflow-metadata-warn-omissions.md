@@ -76,3 +76,5 @@ changed: 无（本任务补 ## Contract 六键晋级 Contract，非新派发，�
 ## Superseded (2026-08-12)
 
 引用 ADR-022 已物理删除的工作流（execute-milestone.js / prepare-milestone.js 双镜像）：本任务的 14 条 WARN 全部针对已删机制的元数据遗漏。检查器 workflow-metadata-conformance.mjs 仍在（it0-dod-check.ts clause 14 调用），但其描述对象已删，WARN 已不再存在。前提不存在，作废保留历史——不重开。
+
+Contract invoke 的 `bash scripts/test.sh --for-task gap-workflow-metadata-warn-omissions` 是本任务的 scoped 测试路径；任务作废保留历史（AC1-AC3 未勾，前提删除后未重跑 scoped 门）。

@@ -83,6 +83,16 @@ const READY_POOL_CLOSURE = [
   "plugin/scripts/concurrent-batch-scheduler.ts",   // expandDeclaredTouches
 ];
 
+// precommit-guard.ts's ESM `./` import — the delta-scope unverified-landing defect
+// (gap-quay-init-laydown-missing-touches-checker): the guard is laid down AND its hook installed,
+// but the imported checker was absent from the --loop laydown set until this fix. The
+// ${SCRIPT_DIR} dependency-closure scan cannot see ESM relative imports, so the checker is an
+// EXPLICIT derive_loop_scripts addition — and must be present in the committed consumer tree.
+const PRECOMMIT_GUARD_CLOSURE = [
+  "plugin/scripts/precommit-guard.ts",
+  "plugin/scripts/touches-one-entry-one-path-check.ts",  // imported by precommit-guard.ts:65
+];
+
 // ── AC1: auto-commit with a `chore(quay-init):` prefix ──────────────────────────────────────────────
 test('AC1 — quay-init --loop auto-commits the laid-down mechanisms with a chore(quay-init): prefix', () => {
   const ws = gitWorkspace();
@@ -99,6 +109,12 @@ test('AC1 — quay-init --loop auto-commits the laid-down mechanisms with a chor
     assert.ok(tracked.includes("orchestration/orchestrator-loop-tick.md"), 'outer tick doc must be committed');
     assert.ok(tracked.includes("docs/analysis/fast-mode-loop-tick.md"), 'inner tick doc must be committed');
     assert.ok(tracked.includes(".quay/config.yml"), 'the provider config must be committed');
+    // The pre-commit guard's own ESM import must ship too — the hook install below runs
+    // precommit-guard.ts --install-hook which imports ./touches-one-entry-one-path-check.ts; a
+    // consumer committed state WITHOUT the imported checker is exactly the ERR_MODULE_NOT_FOUND
+    // defect (gap-quay-init-laydown-missing-touches-checker).
+    assert.ok(tracked.includes("plugin/scripts/touches-one-entry-one-path-check.ts"),
+      'precommit-guard.ts\'s imported checker must be committed');
     // The gitignored runtime bundles are NOT committed (AC10) — a committed state without 1.3MB bundles.
     assert.ok(!/quay\/runtime\//.test(tracked), 'runtime bundles must not be committed (gitignored, AC10)');
   } finally { cleanup(ws); }
@@ -116,6 +132,9 @@ test('AC2 — a fresh clone of the committed state carries the FULL mechanism se
       const committed = git(clone, ["ls-files"]);
       for (const f of READY_POOL_CLOSURE) {
         assert.ok(committed.includes(f), `fresh-clone committed tree must carry ${f} (broken-committed-state guard)`);
+      }
+      for (const f of PRECOMMIT_GUARD_CLOSURE) {
+        assert.ok(committed.includes(f), `fresh-clone committed tree must carry ${f} (precommit-guard ESM import closure)`);
       }
       // A fresh clone's worktree is clean at HEAD — nothing is left half-committed.
       assert.equal(git(clone, ["status", "--porcelain"]), "", 'fresh clone working tree must be clean');

@@ -55,6 +55,8 @@ TASK-81 走完 `ready → 建 task/TASK-81 分支 → 提交证据 → fan-in me
 - 文档：`plugin/loop/orchestrator-loop-tick.md` 步骤 1b「翻 done」与 `orchestrator-tick-core.md` B1 改为调 `loop-complete-task.ts`，不再手搓直接写文件。
 - 机件登记：`capability-catalog.sh` 五字段登记 `loop-complete-task.ts`；`verify-delivery-surface.ts --write-inventory` 重生成快照（scripts 205→206）。
 
+**实测对象**：ad-arm1 的 `~/work/archguard`（Contract invoke 的 ssh 目标）——TASK-81 走完 ready→done 全程 gate 事件为零（gate-events.jsonl 不存在），同机 CLI TEST-002 4 条（见 Proposal 实证）。
+
 **AC2 实跑证据（tmp workspace 端到端）**：
 
 ```
