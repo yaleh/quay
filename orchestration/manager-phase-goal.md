@@ -7,7 +7,77 @@
 
 ---
 
-## 🆕 当前阶段（2026-08-14 00:5xZ 起）：语义派发 —— 实现 `SPEC-dispatch-ordering-semantic-2026-08-13.md`
+## 🆕 当前阶段（2026-08-16 起）：产品化 build 与实际验证 —— 基于当前版本
+
+**来源**：人 2026-08-16 裁定「检查最近一周的其它阶段目标和 AC，找出其中关于产品化 build/release
+和在其它主机/设备验证本项目产品化 build/release 的内容，以及相应的任务。然后，创建一个新的阶段目标
+和 AC，以基于当前版本产品化 build 和实际验证为目标，然后切换当前阶段到该新建阶段，驱动落实。」
+
+**前一阶段（语义派发，AC54–AC84）状态**：**17/26 已勾，9 条未勾（含在飞 follow-up，见下方降级区块）**。
+**⛔ 不因本次切换而停止**——AC76/AC84 的后续工作仍在 `tasks/*.md` 独立追踪，阶段切换只改变
+manager 这一层「当前判读焦点」，不影响 outer/inner 的正在跑的工作。旧阶段完整内容原样保留在下方
+（标题已从「当前阶段」降级），回查请读该区块，⛔ 不要因为它不在文件最上方就当它已作废。
+
+**检索方法（本轮，供核实）**：搜 `manager-phase-goal-archive.md`（08-05/06 的"产品化交付"大阶段）+
+当前 `manager-phase-goal.md` + `tasks/*.md`（最近一周新建），命中的关键载体：
+```
+SPEC-quay-self-hosts-its-own-cold-start.md（08-04）—— 已有 AC8c 六键判据，形式化程度比预期高
+gap-quay-has-never-self-hosted-its-own-cold-start（08-04，compound，todo）
+  三个子任务【全部 done】（gap-cold-start-skill-has-no-recovery-branch /
+  gap-no-formalized-bare-metal-session-bootstrap / gap-quay-self-hosting-e2e-proof）
+  ⇒ parent 本身结构性可收口，但从未真正翻 done
+dist-verify-node-floor（.github/workflows/ci.yml:66，真 npm-pack 产物在 Node 20 floor 上跑）
+  —— gh run list 实测：最近一次真实运行 = 2026-08-03，距今 13 天
+  根因（实读 ci.yml:3-9）：触发条件仅 push/PR to master；本项目开发主线是 develop
+  （ADR-022 已退役经典循环，fast-mode 三层只在 develop 上跑，从不合 master）
+  ⇒ 【结构上不可能被现在的开发流程触发】，不是"偶尔没跑"
+origin/develop 落后本地 develop 数千提交（37615c7d vs 现 HEAD）—— 本地循环从不 push
+本机现在【没有】任何当前版本的 .tgz 产物（ls packages/quay/*.tgz 为空，上次 08-06 build 已清理）
+上次跨主机（B=orangevps / C=ad-arm1）验证是 08-11 附近的 scoped 复测（launch-settings 单个 fix），
+  不是「完整安装+初始化+冷启动」的全流程，且早于今天落地的多个改动（AC65/AC76/send-to-session.ts 等）
+```
+
+### AC85（本机 build 产出当前版本的可用产物）
+**判据（能取假）**：`bash packages/quay/scripts/package.sh` 产出 `.tgz`；`tar tzf` 校验其
+`plugin/` 条目非空（08-06 曾错把 `npm pack` 当入口，得 0 条，教训见 archive）；产物的
+`package/plugin/.claude-plugin/plugin.json` 版本号与仓库当前 `plugin/.claude-plugin/plugin.json`
+一致（证明不是陈旧产物）。**⛔ 不得引用 08-06 的旧产物作为达成证据**——那个 `.tgz` 已不存在，
+且早于今天落地的多个改动。
+
+### AC86（`dist-verify-node-floor` 在当前开发流程上有等价的真实执行路径）
+**判据（能取假，这是本阶段的核心发现）**：`dist-verify-node-floor` 现状【不可能被触发】
+（push/PR to master 门禁，主线在 develop）。**不是要求"让它跑起来"这么简单**——
+要么①在 develop 上补一个等价触发（如 `scripts/test.sh` 之外的独立 CI job 挂 push-to-develop），
+要么②在本地/per-task suite 流程里补一个等价的本机 floor 验证步骤，
+**⛔ 不得只改 `on:` 触发条件了事**——判据是"真实运行过至少一次且时间新于本次切换"，
+不是"配置看起来对了"（同 SPEC gap-phase-boundary-differential-accounting 的推论三教训：
+fixture/配置正确 ≠ 已产出）。
+
+### AC87（`gap-quay-has-never-self-hosted-its-own-cold-start` 收口）
+**判据**：三个子任务已全部 done（`gap-cold-start-skill-has-no-recovery-branch` /
+`gap-no-formalized-bare-metal-session-bootstrap` / `gap-quay-self-hosting-e2e-proof`）；
+parent 的阻碍原因（compound depsReadyFor 死锁）已被 `gap-compound-depsreadyfor-structural-deadlock`
+（done）解除。**本 AC 要求实际把 parent 翻 done**（不是重新验证子任务，是核实收口条件已满足并执行）。
+
+### AC88（跨主机验证针对当前版本重新做一次，非历史复测）
+**人 2026-08-06 原始裁定范围（仍适用，未被推翻）**：两台机器（B=orangevps, C=ad-arm1），
+安装源 = 本机 `package.sh` 产出的 `.tgz`（非 git clone、非 GitHub Actions release 资产），
+验证①正确安装 ②正确初始化（项目内 `quay-init`）③正确冷启动（outer 和 inner，不含 manager）。
+**判据（能取假）**：验证时刻新于 AC85 产出的当前产物；⛔ 不得引用 08-06/08-11 的历史验证记录
+作为本 AC 的达成证据（那些针对的是旧版本或单个 scoped fix，不是当前完整版本的全流程）。
+
+### AC89（AC85–AC88 完成后，产品化状态写回一处可核的记录）
+**判据**：验证结果（成功/失败 + 证据）落一份可机械核对的记录（同 per-task-suite-records.jsonl
+的形态——不是散文报告），供下次"产品化健康"检查复用，⛔ 不要求新造一个仪表盘。
+
+**⛔ 本阶段落笔归属**：AC85（本机 build）/AC86（CI 等价路径）/AC87（compound 收口）是
+`plugin/scripts/` + `tasks/*.md` + `.github/workflows/`，落点归 inner（实现）+ outer（跨主机驱动，
+C17 写所有权）。AC88（跨主机验证）需要人工触发或 outer 驱动远端会话（B/C 两台机器的 tmux 会话）。
+**manager 一条不改，本阶段的落实动作 = 投递 + 跟踪。**
+
+---
+
+## ⏸ 前一阶段（2026-08-14 00:5xZ – 2026-08-16，已被上方新阶段取代，内容原样保留）：语义派发 —— 实现 `SPEC-dispatch-ordering-semantic-2026-08-13.md`
 
 **来源**：人 2026-08-14 裁定「创建新阶段，目标即实现 `SPEC-dispatch-ordering-semantic-2026-08-13.md`，
 创建相应 AC，然后将此设为当前阶段，推进」。
