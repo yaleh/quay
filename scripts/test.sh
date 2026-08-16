@@ -406,6 +406,22 @@ run_static_checks() {
   # @static-tier always
   # @static-scoped-mode subset-touched
   run_checker "malformed-task-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/malformed-task-check.ts" --root "${repo_root}"
+  echo "== Touches one-entry-one-path check (gap-touches-connector-delimiter-uncaught, AC1-AC4) =="
+  # A ## Touches bullet must declare EXACTLY ONE path/glob entry; a bullet carrying a path-separating
+  # delimiter (" / " / " + " / "、" / "，" / ",") declares ≥2 REAL paths in one line, which the ONE
+  # parser (parseTouchEntriesWithTags) reads as ONE composite entry — matching no file on disk and
+  # HIDING each real path from checkTouchesPair's overlap judgment (AC66→AC78 判据3; AC93/ac86/AC91
+  # anti-drive HARD FAIL — the " + " connector was NOT in the delimiter set, so all three slipped
+  # author time). Wired here (same site as the other whole-store task-file checkers) because it was
+  # an ORPHAN — present + unit-tested but never executed, so the three + fan-in slips passed author
+  # time (硬规则⑨ 可见性≠执行: the checker existed but no run_static_checks consumer called it).
+  # BLOCKS (exit 1) on any non-grandfathered multi-path bullet (set -euo pipefail abort), so a new
+  # " + "/" / "/"、" / "，" / "," bullet red-lights the commit; the shrink-only baseline
+  # (docs/analysis/touches-one-entry-one-path-baseline.md) absorbs the pre-rule DONE debt (8 " / "
+  # + 13 " + " + 2 "、" = 23). Whole-store scan, cheap at ~1.1k tasks.
+  # @static-tier always
+  # @static-scoped-mode subset-touched
+  run_checker "touches-one-entry-one-path-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/touches-one-entry-one-path-check.ts" --root "${repo_root}"
   echo "== ADR-016 screen-use check (gap-adr-016-carve-out-permits-the-whole-screen-hash, AC3) =="
   # ADR-016 Amendment 2026-08-04 boundary (c): whole-screen equality/hash of capture-pane is
   # forbidden. Code-position detection (a capture-pane result flowing into md5sum/sha1sum/cksum in
