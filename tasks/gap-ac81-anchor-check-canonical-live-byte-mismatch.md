@@ -40,7 +40,7 @@ depends_on: []
 
 - [x] AC1 判据1：AC81 判据4 不再恒 VIOLATED。
 - [x] AC2 判据2 能取假：改坏任一仍 VIOLATED；两检查器判据4 一致。
-- [x] AC3 判据3：既有测试全绿；`--for-task` scoped 门绿。
+- [x] AC3 判据3：既有测试全绿；`--for-task` scoped 门绿（51/51 绿，EXIT 0）。
 
 ## Definition of Done
 
