@@ -181,6 +181,14 @@ export const RULED_HISTORICAL_COMMITS: { sha: string; reason: string }[] = [
       "inner 紧急回退自己刚造成的破坏——cddc55e2 回退的 232e4171 是 inner 在双副本漂移上的试错；" +
       "非偷懒绕过 fan-in，不属于 detector 要抓的那一类。manager 2026-08-15 裁定 ruled one-off（形态=ruled 豁免+定案理由，非 AC65 sha 表）",
   },
+  {
+    sha: "f9577da1",
+    reason:
+      "inner AC81 锚重建（OOM 死会话 ff96ad7e → 0ccb57cf）——CronList 为空判据① 假，按 AC81 清扫重建；" +
+      "prompt sha256 与正本逐字节一致（828B/336ab987）。inner 紧急恢复自己刚发生的 OOM 死会话（同 cddc55e2 类：紧急直投，非偷懒绕过 fan-in）；" +
+      "manager 2026-08-16 06:46Z tick-log 已识其为「历史直提」候选（round 214 分诊：bypass-check 候选含 f9577da1 inner AC81 重建 / 34ecfaa9）；" +
+      "裁定 ruled one-off（形态=ruled 豁免+定案理由，非 AC65 sha 表，先例 cddc55e2）。",
+  },
 ];
 
 /** 一条 commit sha 是否命中 ruled 豁免表（前缀匹配——git 可能给全量或缩写 sha）。PURE。 */
