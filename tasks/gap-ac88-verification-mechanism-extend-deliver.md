@@ -54,7 +54,9 @@ depends_on: []
 - [ ] AC3: B=orangevps 验证在**干净目录全新 .tgz 安装**进行（不复用 sync.sh git 开发树——那是
       AC88「非 git clone」排除的形态）。
 - [ ] AC4: C=ad-arm1 支持从零全新安装（当前无主 checkout）。
-- [ ] AC5: 机制跑完产出可机械核对的证据，时间新于 AC85 产物时间。
+- [ ] AC5: 机制跑完产出可机械核对的证据——验证所用 tgz 由该次验证自己从 develop-tip 现 build，
+      记录该 build 的 `git rev-parse HEAD`（commit sha）+ 产物 sha256；达成 = 该 sha 新于
+      2026-08-16 阶段切换。⛔ 判据不得引用生命周期短于判据本身的对象（AC85 产物随 worktree 已消失）。
 
 ## Definition of Done
 
