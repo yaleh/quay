@@ -184,6 +184,12 @@ orchestration/inner-idle-log.jsonl
 # the SHARED checkout (written by per-task-suite-record.ts from a task worktree, read by
 # per-task-suite-record-check.ts); never committed (same family as full-suite-state.json).
 **/.quay/per-task-suite-records.jsonl
+# AC89 productization verification record (gap-ac89-productization-verification-record): the
+# productization state (AC85 build / AC86 dist-verify equivalent path / AC88 cross-host) is runtime
+# state in the SHARED checkout (written by productization-verification-record.ts from a task worktree,
+# read by productization-verification-record-check.ts); never committed (same family as
+# per-task-suite-records.jsonl / full-suite-state.json).
+**/.quay/productization-verification.jsonl
 # gap-runtime-state-files-not-gitignored (2026-08-10): 5 runtime state files fell through the
 # per-file .gitignore (there is NO `**/.quay/*` wildcard) — last-pane.txt (pane-state-classify
 # product), suite-cgroup-evidence.txt / suite-chain-heartbeat.json / suite-health-last-run.json
