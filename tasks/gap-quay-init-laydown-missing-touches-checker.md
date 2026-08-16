@@ -1,7 +1,7 @@
 ---
 id: gap-quay-init-laydown-missing-touches-checker
 title: "quay-init --loop laydown 缺 touches-one-entry-one-path-check.ts——precommit-guard.ts:65 import 它 ⇒ consumer workspace ERR_MODULE_NOT_FOUND，develop release/init 路径恒红（touches 未验证 landing 的后果）"
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
