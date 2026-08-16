@@ -124,6 +124,10 @@ documented reference from a genuine missing file:
 | `orchestration/manager-tick-log.md` | quay's manager tick log — gitignored runtime telemetry the manager appends each tick (see `gap-manager-tick-mechanical-checks...`); referenced by the shipped manager-loop-tick template but NOT a loop deliverable — declared so referenced ⊆ landed holds |
 | `orchestration/manager-anchor-check.py` | quay's own manager anchor-check tool (referenced by the opt-in manager exec core, `loop/manager-tick-core.md`) — quay-specific, not a generic loop deliverable — declared so referenced ⊆ landed holds |
 | `orchestration/manager-` (glob) | the opt-in manager exec core's `orchestration/manager-*` glob (its own quay-local manager-layer files) — quay-specific development-process docs, not loop deliverables — declared so referenced ⊆ landed holds |
+| `orchestration/orchestrator-` (glob) | the outer exec core's `orchestration/orchestrator-*` glob (its own quay-local outer-layer files) — quay-specific development-process docs, not loop deliverables — declared so referenced ⊆ landed holds |
+| `plugin/loop/manager-` (glob) | the opt-in manager exec core's `plugin/loop/manager-*` glob (its own quay-local manager-layer files, pointer-only) — quay-specific, not loop deliverables — declared so referenced ⊆ landed holds |
+| `orchestration/outer-tick-prompt.txt` | quay's own outer tick live-prompt file (the outer exec core's AC81 判据④ "活 prompt == 正本" points at it) — quay-specific runtime state, not a loop deliverable — declared so referenced ⊆ landed holds |
+| `orchestration/SPEC-worker-driven-inner-2026-08-16.md` | quay's worker-driven-inner SPEC (referenced by the shipped manager skill's SPEC index) — quay-specific, not a generic loop deliverable |
 | `orchestration/SYNTHESIS-four-gaps-2026-08-05.md` | quay's four-gap synthesis that motivated shipping the manager layer — not a generic loop deliverable |
 | `orchestration/SPEC-manager-productization-2026-08-05.md` | quay's manager productization SPEC (C1–C5 constraints, build-vs-run ownership) — not a generic loop deliverable |
 | `orchestration/SPEC-three-layer-unified-architecture-2026-08-09.md` | quay's three-layer (manager/outer/inner) unified-architecture SPEC — referenced by the shipped manager/init skills, not a generic loop deliverable |
@@ -182,6 +186,10 @@ documented reference from a genuine missing file:
 <!-- reference-doc: orchestration/SPEC-tick-quality-2026-08-14.md -->
 <!-- reference-doc: orchestration/SPEC-in-flight-semantics-2026-08-14.md -->
 <!-- reference-doc: orchestration/SPEC-tick-mechanical-checks-mcp-2026-08-15.md -->
+<!-- reference-doc: orchestration/SPEC-worker-driven-inner-2026-08-16.md -->
+<!-- reference-doc: orchestration/orchestrator- -->
+<!-- reference-doc: orchestration/outer-tick-prompt.txt -->
+<!-- reference-doc: plugin/loop/manager- -->
 
 ## Behavior
 

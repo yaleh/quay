@@ -1,7 +1,7 @@
 ---
 id: gap-ac89-productization-verification-record
 title: "AC89: 产品化验证结果落一处可机械核对的记录（per-task-suite-records.jsonl 形态，非散文报告）"
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
