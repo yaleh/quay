@@ -307,6 +307,17 @@ export function checkAnchor(opts: CheckOptions): CheckResult {
   const findings = [...pointerFindings];
   if (byteCompare.evaluated && !byteCompare.ok) {
     findings.push(`判据3: 正本 vs 活 prompt 逐字节不一致（canonical ${byteCompare.canonicalBytes}b vs live ${byteCompare.liveBytes}b）`);
+    // 2026-08-16 gap-ac81 诊断（根因可见化）：字节不符且活输入自身缺 required pointer ⇒ 活值疑似
+    // 手工缩写/旧版（CronList 显示文本被截断以 … 结尾，绝不可作活值）——把「canonical 过时」与
+    // 「live 喂错」分开，避免恒报 VIOLATED 却被误读为「正本过时」（实证：578B 假活值缺 docs/analysis 指针）。
+    if (live !== null) {
+      const liveForm = pointerFormFindings(live, layer);
+      if (liveForm.length > 0) {
+        findings.push(
+          `判据3 诊断: 活 prompt 本身非合格指针（${liveForm.join(" / ")}）——活值疑似手工缩写/旧版，必须逐字等于 cron 完整 prompt（CronList 显示截断，不可作活值）`,
+        );
+      }
+    }
   }
 
   let code = EXIT_OK;

@@ -1206,7 +1206,7 @@ node --no-warnings --experimental-strip-types plugin/scripts/inner-wakeup-heartb
 
 ### AC80-INNER-ANCHOR（inner 侧 prompt 正本——AC80 判据1 落地物）
 
-> 本段是 inner CronCreate 锚（job `025f4132`，cron `7,27,47 * * * *`）的 prompt 正本。
+> 本段是 inner CronCreate 锚（job `ff96ad7e`，cron `7,27,47 * * * *`）的 prompt 正本。
 > `outer-anchor-check.ts --layer inner` 读本段并与活 CronList prompt 逐字节比对（AC80 判据3）。
 > ⚠️ 修改本段 prompt 时必须同步更新 CronCreate 锚本身（CronDelete + 重建），否则 byte-compare 报 VIOLATED。
 > ⚠️ 本段提取规则：BEGIN 注释行之后、END 标记行之前的内容，去掉一个尾部换行 ⇒ 逐字节是投进 CronCreate 的完整串。
@@ -1221,10 +1221,17 @@ node --no-warnings --experimental-strip-types plugin/scripts/inner-wakeup-heartb
 node --no-warnings --experimental-strip-types plugin/scripts/outer-cron-registry.ts --verify --layer inner --cron-list '<本轮 CronList 的 JSON>' --json
 node --no-warnings --experimental-strip-types plugin/scripts/outer-anchor-check.ts --layer inner --stdin --json   # 活 prompt 从 stdin 喂
 ```
+**⚠️ 活 prompt 来源（gap-ac81 2026-08-16 实测教训——578B 假活值恒报 VIOLATED 的根因）**：stdin 喂的活值
+**必须逐字等于 cron 完整 prompt 串**——它就是本段 AC80 canonical（重建时从本段复制进 CronCreate）。三条：
+**① CronList 显示文本被截断（`…` 结尾）绝不能用作活值**（检查器契约明写「绝不解析 CronList 截断显示」）；
+**② 禁止手工缩写/重写 prompt**——删掉 `（执行核；理由/实测/代价在 $REPO_ROOT/docs/...）` 等括号段即缺
+`docs/analysis/fast-mode-loop-tick.md` required pointer，字节不符恒 VIOLATED（578B 假活值即此形，
+`outer-anchor-check` 现会把「活值本身非合格指针」作为判据3 诊断输出）；**③ 取不到完整串时**用
+`outer-cron-registry --verify` 判据④（doc hash vs 注册表）为对账主判据，别拿手写值喂 anchor-check。
 **产品 = 四条判据各自的输出行进 tick-log**（① CronList 恰一条 ② id==注册表 ③ --verify registry-verified
 ④ 锚点正本逐字节校验），⛔ 不写「已核实」一句话（outer 判据：`git grep '已核实'` 命中即违规）。
 **退出码三态（OK/VIOLATED/NOT-EVALUATED）不得压成布尔**；**每轮兼报锚剩余寿命**（7 天硬过期，
-`025f4132` 建于 15:17:16Z；<24h 即报——锚断则退回纯 ScheduleWakeup 自驱，4.7h 断链教训）。
+`ff96ad7e` 建于 01:03:45Z；<24h 即报——锚断则退回纯 ScheduleWakeup 自驱，4.7h 断链教训）。
 
 ---
 

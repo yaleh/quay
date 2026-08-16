@@ -218,6 +218,27 @@ test("CLI real-data negative: whitespace-only drift ⇒ VIOLATED (byte-exact inc
   }
 });
 
+test("CLI 判据3 诊断: 活输入是手工缩写（缺 required pointer）⇒ VIOLATED + 根因诊断（gap-ac81 578B 假活值同形）", () => {
+  // gap-ac81 2026-08-16 实证：把活值手写成删掉括号段的短版（578B），缺 docs/analysis 指针 ⇒
+  // 字节不符恒 VIOLATED。检查器须把「活值本身非合格指针」作为诊断输出，区分「canonical 过时」与「live 喂错」。
+  const { p } = tmpFile("md");
+  try {
+    writeInnerSection(p, INNER_PROMPT);
+    const shortened = INNER_PROMPT.replace(
+      "（执行核；理由/实测/代价在 $REPO_ROOT/docs/analysis/fast-mode-loop-tick.md，仅需「为什么」时按 src:N 查，不要每轮全读）",
+      "",
+    );
+    assert.ok(shortened.length < INNER_PROMPT.length, "短缩版应比正本短");
+    const r = runChecker(["--layer", "inner", "--canonical-file", p, "--cron-prompt", shortened]);
+    assert.equal(r.status, EXIT_VIOLATED, `stdout: ${r.stdout}`);
+    assert.match(r.stdout, /判据3/);
+    assert.match(r.stdout, /诊断/);
+    assert.match(r.stdout, /缺指向 docs\/analysis\/fast-mode-loop-tick\.md/);
+  } finally {
+    fs.rmSync(path.dirname(p), { recursive: true, force: true });
+  }
+});
+
 test("CLI real-data: outer actual prompt (develop 72b99cda) as both 正本 and live ⇒ PASS (exit 0)", () => {
   const { p } = tmpFile("txt");
   try {

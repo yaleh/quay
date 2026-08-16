@@ -1,7 +1,7 @@
 ---
 id: gap-tick-core-drift-fast-mode-mode-conflict
 title: fast-mode 对 tick-core drift check 是 byte-identical mode 但两副本非 byte-identical by design（SKILL.md 50725186 + AC76 item6）——恒红误导，改 mode 判定
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
