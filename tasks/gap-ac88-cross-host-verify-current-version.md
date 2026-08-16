@@ -58,7 +58,7 @@ depends_on:
 
 ## Definition of Done
 
-- [ ] 当前版本 `.tgz` 在 B/C 两机完成安装→初始化→冷启动三项验证，结果写入 AC89 记录。
+- [x] 当前版本 `.tgz` 在 B/C 两机完成安装→初始化→冷启动三项验证，结果写入 AC89 记录（.quay/productization-verification.jsonl row5=B/row6=C，stepColdstart=true，2026-08-16T15:36Z）。
 
 ## Touches
 
