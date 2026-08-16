@@ -1,7 +1,7 @@
 ---
 id: gap-meta-cc-include-subagents-content-search-ineffective
-title: "meta-cc `include_subagents=true` 对内容搜索无效——只搜主会话自身（实证三针测），参数名误导（硬规则 3b 形态）"
-status: ready
+title: meta-cc `include_subagents=true` 对内容搜索无效——只搜主会话自身（实证三针测），参数名误导（硬规则 3b 形态）
+status: needs-human
 labels:
   - gap
   - mechanism
@@ -62,3 +62,10 @@ query_session_content(role=all, contains=<针>, session_id=<主会话>, include_
 
 - meta-cc 侧（query_session_content / inspect_session_files 实现——归 meta-cc 仓库）
 - tasks/gap-meta-cc-include-subagents-content-search-ineffective.md（自身）
+
+## Routing（2026-08-16 15:4xZ）
+
+**状态：needs-human**。inner 判不可派：Touches 全在 meta-cc 仓库（query_session_content / inspect_session_files
+实现），quay worktree 内无对应文件可实现（建 worktree 只是空壳）。meta-cc 是 marketplace MCP 服务器
+（owner 维护），无 quay 侧实现路径。**需人决定**：①在 meta-cc 自身项目立案实施，或 ②由 owner 直接改 meta-cc
+（本任务只作需求/复现载体）。⛔ 不在 quay 快模式池内派发。
