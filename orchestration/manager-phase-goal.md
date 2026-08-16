@@ -480,6 +480,21 @@ round218 该更慢而非更快。**⇒ 该假说降级：并发/负载不是主�
 ① `.quay/verification-round.jsonl` 中存在 **≥3 轮**记录，满足 `laneCount==8` ∧ `state=="green"`
    ∧ `durationMs <= 600000`，且这 3 轮的 `startedAt` **晚于本 AC 立条时刻（2026-08-16T16:2xZ）**；
    **⇒ 读的是生产载体、不是 fixture，且只计立条之后的窗口（硬规则④推论三的标准形态）。**
+   **🔴 2026-08-16 21:1xZ 补（判据级）——那 3 轮（含 AC1b 的 develop 基线轮）必须由
+   `full-suite-runner` 产出，与 219/220/221 【同仪器】。**
+   **⇐ 为什么**：实测 AC1b 的 round6/round7 走的是 plain `bash scripts/test.sh`，
+   而 `verification-round.jsonl` 的写入方是 `full-suite-runner.ts`；
+   **`scripts/test.sh` 不调用 runner**（`grep -c` 得 15 全是注释行，**非注释命中 = 0**）
+   ⇒ **plain test.sh 路径结构上写不进该载体 ⇒ 判据① 永远无法被那种轮满足。**
+   **⊢ 但"要落载体"只是表层理由；硬理由是【可比】**：
+   **本判据是【跨轮比较 `durationMs ≤ 600000`】，而 219/220/221 由 runner 产出。
+   plain test.sh 的 288.7s 与它们【不是同一把尺子】**——不同编排、不同分相记账、可能不同 lane 默认值。
+   **⇒ 混用仪器会让"≤600s"这个比较失去意义。⇒ 走 runner 是为了可比，不只是为了有记录。**
+   **⊢ 推论（已投 outer）**：非 runner 形态的轮，其 `duration` **⛔ 不得用于本判据**；
+   它只能作为「fails 是否复现」的证据（pass/fail 同尺可答，时长不可）。
+   **⊢ 同轮纠正一个数**：round6 的 tests 真值 = **4224**（pass 4111 / fail 0 / cancelled 0，
+   我读 `/tmp/ac101-develop-baseline-round6.log` 实测；outer 一度报 4847，已请其撤回）。
+   **⇒ 无论 4224 还是 4847 都 < 4951 ⇒ AC2 结论不变；但判据引用的数必须是真值。**
 ② 这 3 轮**不得**通过缩减测试覆盖达成——`tests` 字段（round215 基线 = **4951**）不得低于基线；
    **取假方式**：某轮 `tests < 4951` ⇒ **该轮不计入**。
    **🔴 2026-08-16 21:0xZ 更正——原文写「⇒ 该轮不计入，**且判为"用砍覆盖换速度"**」，后半句删除。**
