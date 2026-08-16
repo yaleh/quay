@@ -22,7 +22,10 @@
 # Categories:
 #   --workflows     plugin/workflows/     → <workspace>/.claude/workflows/
 #   --agents        plugin/agents/        → <workspace>/.claude/agents/
-#   --loop          two-layer loop mechanism (tick docs + checkers + gate + token + observation)
+#   --loop          two-layer loop mechanism (tick docs + checkers + gate + token + observation).
+#                   ALSO lays --workflows (the loop execution cores reference .claude/workflows/* —
+#                   fan-in-execute / execute-suite-fix / pool-quality-judge — so a loop without its
+#                   workflows is a broken loop; AC91 gap-ac91-delivery-core-refs-undelivered-files)
 #   --all           all of the above except --loop (matching the skill's historical default)
 # NOTE (2026-08-05 retirement): the old gate-script category that copied the plugin's
 # classic-pipeline era gates (it0-*/audit-*/drain-*/vmeta-lag) into <workspace>/scripts/gates/
@@ -105,7 +108,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --workflows) DO_WORKFLOWS=true; ANY_CATEGORY=true; shift ;;
     --agents) DO_AGENTS=true; ANY_CATEGORY=true; shift ;;
-    --loop) DO_LOOP=true; ANY_CATEGORY=true; shift ;;
+    --loop) DO_LOOP=true; DO_WORKFLOWS=true; ANY_CATEGORY=true; shift ;;
     --manager) DO_MANAGER=true; shift ;;
     --check-drift) DO_CHECK_DRIFT=true; shift ;;
     --check-dependency-closure) DO_CHECK_DEPENDENCY_CLOSURE=true; shift ;;
@@ -878,8 +881,13 @@ derive_loop_scripts() {
   local -a mech_files=()
   out="$(mktemp)"
   while IFS= read -r f; do mech_files+=("$f"); done < <(mechanism_corpus)
-  # (a) prefix-derived over the FULL corpus
-  grep -ohE 'plugin/scripts/[a-zA-Z0-9._-]+' "$PLUGIN_ROOT/skills"/*/SKILL.md "$PLUGIN_ROOT"/loop/*.md 2>/dev/null \
+  # (a) prefix-derived over the FULL corpus — INCLUDING the shipped workflows (AC91
+  # gap-ac91-delivery-core-refs-undelivered-files): a delivered workflow (plugin/workflows/*.js →
+  # .claude/workflows/ on the target) that calls plugin/scripts/<x> makes <x> a required landing —
+  # a workflow referencing a script the loop does not lay down is the same referenced-not-landed
+  # defect the loop docs' refs already guard. fan-in-execute.js pulls in per-task-suite-record.ts /
+  # fan-in-ac-completion-gate.ts / anti-drift-touches-check.ts this way.
+  grep -ohE 'plugin/scripts/[a-zA-Z0-9._-]+' "$PLUGIN_ROOT/skills"/*/SKILL.md "$PLUGIN_ROOT"/loop/*.md "$PLUGIN_ROOT"/workflows/*.js 2>/dev/null \
     | sed 's#^plugin/scripts/##' | sort -u >> "$out" || true
   # (b) bare-resolved over the MECHANISM corpus
   bare_resolved_scripts "${mech_files[@]}" | sed 's#^plugin/scripts/##' >> "$out" || true
@@ -1076,7 +1084,14 @@ verify_referenced_landed() {
     case " $NEVER_LAYDOWN " in *" $member "*) continue ;; esac
     consolidated_refs+="plugin/scripts/$member"$'\n'
   done
-  refs="$( ( grep -ohE '(plugin/scripts|plugin/loop|orchestration|docs/analysis)/[a-zA-Z0-9._-]+' "$PLUGIN_ROOT/skills"/*/SKILL.md "$PLUGIN_ROOT"/loop/*.md 2>/dev/null
+  # AC91 (gap-ac91-delivery-core-refs-undelivered-files): the reference-set scan ALSO covers the
+  # shipped workflows (plugin/workflows/*.js → .claude/workflows/ on the target) and the `.claude/`
+  # delivery class. Previously a shipped tick doc referencing `.claude/workflows/execute-suite-fix.js`
+  # was INVISIBLE to this check (the `.claude/` prefix was not in the alternation), so a delivered
+  # execution core could point at an undelivered workflow and the install would pass — the exact
+  # referenced-not-landed defect this check exists to catch, escaped at the reference-set stage (NOT
+  # the init/SKILL.md declaration clause below — the ref never entered $refs to be exempted).
+  refs="$( ( grep -ohE '(plugin/scripts|plugin/loop|orchestration|docs/analysis|\.claude/workflows|\.claude/agents)/[a-zA-Z0-9._-]+' "$PLUGIN_ROOT/skills"/*/SKILL.md "$PLUGIN_ROOT"/loop/*.md "$PLUGIN_ROOT"/workflows/*.js 2>/dev/null
              # AC2 (gap-quay-init-loop-tick-doc-paths-reference-unlanded-plugin-loop): the gate must
              # ALSO verify the CONSUMER-LAID docs (docs/analysis/) — the reference set of the
              # byte-identical copy a target project actually reads, not just the plugin source. A

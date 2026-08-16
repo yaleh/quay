@@ -146,3 +146,66 @@ test("AC37 regression — a reintroduced plugin/loop/ ref in a shipped tick doc 
     } finally { cleanup(ws); }
   } finally { cleanup(src); }
 });
+
+// ── AC91 (gap-ac91-delivery-core-refs-undelivered-files): the delivered execution core must not
+//    reference undelivered files — the `.claude/workflows/` class ────────────────────────────────
+// The shipped orchestrator-tick-core.md references `.claude/workflows/execute-suite-fix.js` (:39)
+// and `.claude/workflows/pool-quality-judge.js` (:70), but plugin/workflows/ (the distribution
+// mirror quay-init --workflows lays to .claude/workflows/) carried only 3 workflows — so on an
+// installed target those two steps pointed at files that do not exist. The referenced-not-landed
+// gate escaped it because its reference-set alternation did not include the `.claude/` prefix:
+// the refs never entered $refs to be exempted (NOT the init/SKILL.md declaration clause — AC4
+// disposition, quay-init.sh:1131-area 判定分支 实读). These tests pin the fix.
+const WF_REF_RE = /\.claude\/workflows\/[a-zA-Z0-9._-]+/g;
+
+test("AC91 — shipped docs/skills reference `.claude/workflows/<name>` ONLY for workflows mirrored in plugin/workflows/ (delivered exec core never points at an undelivered workflow)", () => {
+  const wfDir = path.join(pluginDir, "workflows");
+  const missing = [];
+  for (const f of shippedDocs()) {
+    const src = fs.readFileSync(f, "utf8");
+    let m;
+    while ((m = WF_REF_RE.exec(src)) !== null) {
+      const ref = m[0];
+      const name = ref.replace(/^\.claude\/workflows\//, "");
+      if (!fs.existsSync(path.join(wfDir, name))) {
+        missing.push(`${path.relative(pluginDir, f)}: ${ref} — no plugin/workflows/${name} mirror`);
+      }
+    }
+  }
+  assert.deepEqual(missing, [],
+    "every .claude/workflows/<name> reference in a shipped doc/skill must have a byte-identical plugin/workflows/<name> mirror (quay-init --workflows lays plugin/workflows/ → .claude/workflows/)");
+});
+
+test("AC91 — a real --loop install lays the referenced workflows AND the fan-in workflow's script deps (referenced ⊆ landed for the workflow class)", () => {
+  const { ws } = laydownWorkspace();
+  try {
+    // The workflows the delivered exec cores reference must land (--loop now implies --workflows).
+    for (const wf of ["execute-suite-fix.js", "pool-quality-judge.js", "fan-in-execute.js"]) {
+      assert.ok(fs.existsSync(path.join(ws, ".claude", "workflows", wf)),
+        `--loop must lay .claude/workflows/${wf} (the shipped exec core references it)`);
+    }
+    // The delivered fan-in-execute workflow calls these scripts; a workflow referencing a script
+    // the loop does not lay down is the same referenced-not-landed defect (AC91). They must land.
+    for (const script of ["per-task-suite-record.ts", "fan-in-ac-completion-gate.ts", "anti-drift-touches-check.ts"]) {
+      assert.ok(fs.existsSync(path.join(ws, "plugin", "scripts", script)),
+        `--loop must lay plugin/scripts/${script} (the delivered fan-in-execute.js workflow references it)`);
+    }
+  } finally { cleanup(ws); }
+});
+
+// ── AC91 negative control: a shipped doc referencing an UNMIRRORED workflow FAILS --loop ─────────
+test("AC91 negative — a shipped tick doc referencing `.claude/workflows/<name>` with no plugin/workflows/ mirror FAILS --loop (referenced-not-landed)", () => {
+  const src = makeTmp();
+  try {
+    fs.cpSync(pluginDir, src, { recursive: true });
+    fs.appendFileSync(path.join(src, "loop", "orchestrator-tick-core.md"),
+      "\nregression probe: the outer suite fix runs via `.claude/workflows/ghost-workflow.js`\n", "utf8");
+    const ws = makeTmp();
+    try {
+      const r = runInit(ws, INIT_ARGS(ws), src);
+      assert.notEqual(r.status, 0, "--loop must FAIL when a shipped doc references a .claude/workflows/ file that has no plugin/workflows/ mirror");
+      assert.match(r.stderr, /referenced-not-landed/, "must use the referenced-not-landed category");
+      assert.match(r.stderr, /ghost-workflow\.js/, "must name the unreferenced-workflow path");
+    } finally { cleanup(ws); }
+  } finally { cleanup(src); }
+});

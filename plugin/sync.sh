@@ -218,10 +218,18 @@ if [ "$REINSTALL_CRITERION" = true ]; then
 fi
 
 echo "=== Syncing workflows ==="
+# AC91 (gap-ac91-delivery-core-refs-undelivered-files): the distribution mirror must carry EVERY
+# workflow the delivered execution cores reference — drain-directives / run-routines (the routine
+# track) plus fan-in-execute / execute-suite-fix / pool-quality-judge (named by the shipped
+# orchestrator-tick-core.md / fast-mode-tick-core.md). A workflow in .claude/workflows/ that is
+# NOT mirrored here ships to no target (quay-init --workflows copies plugin/workflows/ verbatim).
 cp "$REPO_ROOT/.claude/workflows/drain-directives.js"   "$PLUGIN_DIR/workflows/"
 cp "$REPO_ROOT/.claude/workflows/run-routines.js"       "$PLUGIN_DIR/workflows/"
+cp "$REPO_ROOT/.claude/workflows/fan-in-execute.js"     "$PLUGIN_DIR/workflows/"
+cp "$REPO_ROOT/.claude/workflows/execute-suite-fix.js"  "$PLUGIN_DIR/workflows/"
+cp "$REPO_ROOT/.claude/workflows/pool-quality-judge.js" "$PLUGIN_DIR/workflows/"
 # NOTE (gap-retire-the-prepare-execute-pipeline-cluster): execute-milestone.js and
 # prepare-milestone.js were retired with the classic milestone loop (ADR-022).
-echo "  workflows: 2 synced"
+echo "  workflows: 5 synced"
 
 echo "Sync complete."

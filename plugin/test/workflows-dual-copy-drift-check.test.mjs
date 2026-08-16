@@ -8,7 +8,7 @@
 //         dual-copy file must go exit-1 (hard mode); the byte-identical baseline goes exit-0.
 //   AC2/判据2 (能取假) — 单边改回放红；现状逐字同回放绿. Both directions proven on hermetic
 //         fixtures (a temp root built from minimal dual-copy pairs), PLUS the live-repo replay:
-//         after the task's reconciliation, all three real pairs are byte-identical ⇒ GREEN.
+//         after the task's reconciliation, all five real pairs are byte-identical ⇒ GREEN.
 //   AC2/硬规则 3a (枚举不布尔) — a file MISSING from one side is a DRIFT state ⇒ RED
 //         (a dual-copy file deleted from one dir must not silently stop being covered).
 //   AC3/判据3 — the --no-block seam (report-only, exit 0) mirrors the execution-core drift gate's
@@ -33,9 +33,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CHECKER = path.join(__dirname, "..", "scripts", "workflows-dual-copy-drift-check.ts");
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
 
-const DUAL_COPY_FILES = ["drain-directives.js", "fan-in-execute.js", "run-routines.js"];
+const DUAL_COPY_FILES = ["drain-directives.js", "fan-in-execute.js", "run-routines.js", "execute-suite-fix.js", "pool-quality-judge.js"];
 
-/** Build a hermetic fixture root with all three dual-copy pairs byte-identical. Returns {root,
+/** Build a hermetic fixture root with all five dual-copy pairs byte-identical. Returns {root,
  *  landed(file)→abs, shipped(file)→abs} so a test can then mutate ONE side. */
 function buildFixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "wfdcd-"));
@@ -66,7 +66,7 @@ test("AC1/判据1: a byte-identical fixture baseline is GREEN (exit 0)", () => {
   try {
     const res = runChecker(["--root", root]);
     assert.equal(res.status, 0, `byte-identical baseline should be green: ${res.stdout} ${res.stderr}`);
-    assert.match(res.stdout, /3 consistent \/ 0 drifted/);
+    assert.match(res.stdout, /5 consistent \/ 0 drifted/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -80,7 +80,7 @@ test("AC2/判据2 能取假: a one-sided edit of ONE copy goes RED (exit 1)", ()
       fs.readFileSync(abs["fan-in-execute.js"].landed, "utf8") + "// one-sided edit\n");
     const res = runChecker(["--root", root]);
     assert.equal(res.status, 1, `a drifted pair must be red: ${res.stdout} ${res.stderr}`);
-    assert.match(res.stdout, /2 consistent \/ 1 drifted/);
+    assert.match(res.stdout, /4 consistent \/ 1 drifted/);
     assert.match(res.stdout, /DRIFT: \.claude\/workflows\/fan-in-execute\.js/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -111,9 +111,9 @@ test("AC3/判据3: --no-block is report-only — a drifted pair prints RED but e
   }
 });
 
-test("AC2 现状回放绿: the live repo's three real dual-copy pairs are byte-identical ⇒ GREEN", () => {
+test("AC2 现状回放绿: the live repo's five real dual-copy pairs are byte-identical ⇒ GREEN", () => {
   const res = runChecker(["--root", REPO_ROOT]);
   assert.equal(res.status, 0,
     `the reconciled live repo must be green — the task reconciles the pre-existing fan-in-execute.js drift: ${res.stdout} ${res.stderr}`);
-  assert.match(res.stdout, /3 consistent \/ 0 drifted/);
+  assert.match(res.stdout, /5 consistent \/ 0 drifted/);
 });

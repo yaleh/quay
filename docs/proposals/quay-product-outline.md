@@ -207,7 +207,7 @@ post-friction**（被硌了才发现）。而探针**本来就是设计来做 pr
 | 升级通道 | `quay-init` 内有 upgrade 逻辑，但目标项目实测仍会冻结在安装那一刻——**交付面自己在长大，目标没有跟上的路径**（已立案未闭） |
 
 <!-- DELIVERY-INVENTORY-BEGIN -->
-scripts=256 · gate-scripts=14 · skills=13 · probes=5 · loop=6 · workflows=3 · agents=1 · vendor=2
+scripts=256 · gate-scripts=14 · skills=13 · probes=5 · loop=6 · workflows=5 · agents=1 · vendor=2
 <!-- DELIVERY-INVENTORY-END -->
 
 ### 6b. 前置条件（2026-08-08，`gap-delivery-outline-vs-verify-surface-single-source` AC4）

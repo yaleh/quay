@@ -22,6 +22,10 @@ this repo keeps removing. Run the script; do not hand-reimplement its behavior.
 --workflows       Copy workflows only    (plugin/workflows/     → .claude/workflows/)
 --agents          Copy agents only       (plugin/agents/        → .claude/agents/)
 --loop            Copy the two-layer loop mechanism (tick docs + checkers + gate + token + observation)
+                  AND the workflows category — the loop execution cores reference
+                  `.claude/workflows/{fan-in-execute,execute-suite-fix,pool-quality-judge}.js`, so a
+                  loop without its workflows is a broken loop (AC91, gap-ac91-delivery-core-refs-
+                  undelivered-files)
 --all             Copy all of the above except --loop (default if no flag given)
 --force           Overwrite on conflict  (default: skip and report conflict)
 --dry-run         List what would happen, do not copy
@@ -104,6 +108,7 @@ not count them as missing:
 | `orchestration/escalations.md` | `touch orchestration/escalations.md` (outer tick appends) |
 | `docs/analysis/batch2-queue-state.md` | `touch docs/analysis/batch2-queue-state.md` (inner tick writes queue state) |
 | `docs/analysis/contract-violations.md` | `touch docs/analysis/contract-violations.md` (task-contract-check.ts writes) |
+| `orchestration/session-liveness.env` | `write_session_env` in quay-init `--loop` (SESSION_TMUX_SESSION per project; referenced by the laid orchestrator-loop-tick.md + session-liveness.sh — declared self-create so referenced ⊆ landed holds) |
 
 **Quay-specific reference docs — referenced by the tick template but not loop deliverables.**
 The shipped tick template is quay-flavored prose and references quay's own experiment/analysis docs
@@ -138,6 +143,7 @@ documented reference from a genuine missing file:
 <!-- self-create: orchestration/observer-registry.conf -->
 <!-- self-create: docs/analysis/batch2-queue-state.md -->
 <!-- self-create: docs/analysis/contract-violations.md -->
+<!-- self-create: orchestration/session-liveness.env -->
 <!-- reference-doc: orchestration/exp6-phase1-sustained-unattended-operation.md -->
 <!-- reference-doc: orchestration/throughput-decomposition.md -->
 <!-- reference-doc: orchestration/outer-phase-goal.md -->

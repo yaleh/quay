@@ -497,12 +497,17 @@ test('DIR-070-C: Tier-B plugin copies have zero exp5/experiment-path references'
 // quay-init.sh carries ZERO 'gate-scripts' references (contract measure dead_gates_remaining = 0).
 // ---------------------------------------------------------------------------
 
-test('M143: plugin/workflows/ exists with the 2 surviving JS workflow files', () => {
+test('M143: plugin/workflows/ exists with the surviving JS workflow files', () => {
   // gap-retire-the-prepare-execute-pipeline-cluster (ADR-022): execute-milestone.js and
   // prepare-milestone.js were retired with the classic milestone loop.
+  // AC91 (gap-ac91-delivery-core-refs-undelivered-files): execute-suite-fix.js and
+  // pool-quality-judge.js are ADDITIONAL survivors — the shipped orchestrator-tick-core.md
+  // references `.claude/workflows/execute-suite-fix.js` (:39) and `.claude/workflows/
+  // pool-quality-judge.js` (:70), so the distribution mirror must carry them (a delivered exec
+  // core must not point at an undelivered workflow). fan-in-execute.js is likewise mirrored.
   const workflowsDir = path.join(pluginDir, 'workflows');
   assert.ok(existsSync(workflowsDir), 'plugin/workflows/ must exist');
-  const wanted = ['drain-directives.js', 'run-routines.js'];
+  const wanted = ['drain-directives.js', 'run-routines.js', 'fan-in-execute.js', 'execute-suite-fix.js', 'pool-quality-judge.js'];
   for (const f of wanted) {
     const fp = path.join(workflowsDir, f);
     assert.ok(existsSync(fp), `plugin/workflows/${f} must exist`);
@@ -553,8 +558,10 @@ test('M143: init skill has zero research-layer references (VT/value-ledger/check
 
 test('M143: git-tracked workflows in plugin/workflows/ are byte-identical to .claude/workflows/ canonical sources', () => {
   // Only test git-tracked source files that still exist after the prepare/execute retirement
-  // (ADR-022 / gap-retire-the-prepare-execute-pipeline-cluster).
-  const trackedWorkflows = ['drain-directives.js', 'run-routines.js'];
+  // (ADR-022 / gap-retire-the-prepare-execute-pipeline-cluster). AC91: the FULL mirrored set
+  // (drain-directives / run-routines / fan-in-execute / execute-suite-fix / pool-quality-judge) —
+  // every distribution workflow is a byte-identical mirror of its .claude/workflows/ canonical.
+  const trackedWorkflows = ['drain-directives.js', 'run-routines.js', 'fan-in-execute.js', 'execute-suite-fix.js', 'pool-quality-judge.js'];
   for (const name of trackedWorkflows) {
     const canonical = path.join(repoRoot, '.claude', 'workflows', name);
     const bundled = path.join(pluginDir, 'workflows', name);

@@ -1,15 +1,19 @@
 #!/usr/bin/env bash
 # Mutation case for workflows-dual-copy-drift-check (gap-workflows-dual-copy-drift-unchecked,
-# AC1 判据1 + AC2 判据2 能取假). Fixture: a temp root with all three dual-copy workflow pairs
+# AC1 判据1 + AC2 判据2 能取假). Fixture: a temp root with all five dual-copy workflow pairs
 # (.claude/workflows/ vs plugin/workflows/) byte-identical → GREEN. Inject: a ONE-SIDED edit of
 # ONE copy (only .claude/workflows/fan-in-execute.js gets a new line) → the checker MUST go RED
 # (判据2: 单边改回放红). Restore: back to byte-identical → GREEN.
+# AC91 (gap-ac91-delivery-core-refs-undelivered-files): execute-suite-fix.js + pool-quality-judge.js
+# are added to the pinned pair set (the shipped orchestrator-tick-core.md references them, so the
+# plugin/workflows/ mirror must carry them — a delivered exec core must not point at an undelivered
+# workflow).
 set -u
 name="workflows-dual-copy-drift-check"
 workdir="${1:?usage: $name.sh <workdir>}"
 checker_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 root="${workdir}/root"
-files="drain-directives.js fan-in-execute.js run-routines.js"
+files="drain-directives.js fan-in-execute.js run-routines.js execute-suite-fix.js pool-quality-judge.js"
 
 mkdir -p "${root}/.claude/workflows" "${root}/plugin/workflows"
 

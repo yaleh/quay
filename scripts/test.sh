@@ -714,9 +714,11 @@ run_static_checks() {
   # (AC3); on a main run main_root == repo_root ⇒ unchanged (AC2).
   run_checker "direct-to-develop-bypass-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/direct-to-develop-bypass-check.ts" --root "${main_root}" --baseline b11ce7202b46406d5d5bc82ef7b4c030c4aed05b --json
   echo "== workflows-dual-copy-drift-check (gap-workflows-dual-copy-drift-unchecked — .claude/workflows/ vs plugin/workflows/ 双副本漂移) =="
-  # The three dual-copy workflow files (drain-directives / fan-in-execute / run-routines) live in
-  # BOTH .claude/workflows/ (what runs here) and plugin/workflows/ (what quay-init --workflows ships
-  # to installed targets). A one-sided edit (改正本而落地副本不跟 — the A6/fan-in-execute.js class)
+  # The five dual-copy workflow files (drain-directives / fan-in-execute / run-routines /
+  # execute-suite-fix / pool-quality-judge — AC91 added the last two: the shipped
+  # orchestrator-tick-core.md references them, so the plugin/workflows/ mirror must carry them) live
+  # in BOTH .claude/workflows/ (what runs here) and plugin/workflows/ (what quay-init --workflows
+  # ships to installed targets). A one-sided edit (改正本而落地副本不跟 — the A6/fan-in-execute.js class)
   # previously had NO consumer that went red: the shipped workflow script silently went stale. This
   # is the workflows-copy of the execution-core drift gate (orchestration/*-tick-core.md vs
   # plugin/loop/*-tick-core.md, tick-core-static-check --check-drift) — AC73 判据4 boundary extended

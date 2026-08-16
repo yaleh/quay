@@ -36,11 +36,19 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 
-// ── The three dual-copy workflow files (pinned set — see header). ────────────────────────────────
+// ── The dual-copy workflow files (pinned set — see header). ──────────────────────────────────────
+// AC91 (gap-ac91-delivery-core-refs-undelivered-files): execute-suite-fix.js and pool-quality-judge.js
+// are ADDITIONAL dual-copy workflows — the shipped orchestrator-tick-core.md references
+// `.claude/workflows/execute-suite-fix.js` (:39) and `.claude/workflows/pool-quality-judge.js`
+// (:70), so the plugin/workflows/ mirror must carry them (a delivered exec core must not point at
+// an undelivered workflow). They are pinned here so a future drift between the canonical and the
+// shipped mirror stays RED (same class as the original three).
 const DUAL_COPY_FILES = [
   "drain-directives.js",
   "fan-in-execute.js",
   "run-routines.js",
+  "execute-suite-fix.js",
+  "pool-quality-judge.js",
 ];
 
 /** The pairs: landed (.claude/workflows/, what runs HERE) vs shipped (plugin/workflows/, what
@@ -158,7 +166,7 @@ export function main(argv: string[]): CliResult {
       noBlock = true;
     } else if (a === "--help" || a === "-h") {
       process.stdout.write(
-        "workflows-dual-copy-drift-check.ts — are the three dual-copy workflow files (drain-directives / fan-in-execute / run-routines) byte-identical between .claude/workflows/ (what runs here) and plugin/workflows/ (what quay-init ships)? Drift ⇒ exit 1.\n",
+        "workflows-dual-copy-drift-check.ts — are the five dual-copy workflow files (drain-directives / fan-in-execute / run-routines / execute-suite-fix / pool-quality-judge) byte-identical between .claude/workflows/ (what runs here) and plugin/workflows/ (what quay-init ships)? Drift ⇒ exit 1.\n",
       );
       return { code: 0, json: { help: true } };
     } else {
