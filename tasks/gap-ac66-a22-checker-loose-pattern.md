@@ -1,7 +1,7 @@
 ---
 id: gap-ac66-a22-checker-loose-pattern
 title: "ac66-a22-agent-id-check 的 extractA22ReadingLines 太松——状态注记被匹配成读数行，缺 agent id 恒 RED（发生率 3，结构性）"
-status: ready
+status: done
 labels:
   - gap
   - mechanism
