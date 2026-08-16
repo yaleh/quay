@@ -23,7 +23,9 @@
 #      quay-native's `quay:*` dep resolves to the local tgz, not the registry), with PATH prepended
 #      to the host's Node ≥20.
 #   4. verify: quay --help + lay down .quay/config.yml (native provider, mcp_entry quay-native) +
-#      `quay serve --port <p>` + curl http_code == 200.
+#      `quay serve --port <p>` + curl http_code == 200 + AC92 usage-verify
+#      (deliver-verify-usage.sh: run the TOP-N real-use mechanisms — capability-catalog.sh + the
+#      offline-runnable subset of three-layer-core-named scripts — assert exit 0 + non-empty output).
 #   5. write develop-deliver-state.json (lastDelivered commit + per-host http_code + timestamp).
 #
 # USAGE:
@@ -159,16 +161,34 @@ kill \$SERVE_PID 2>/dev/null || true
 wait \$SERVE_PID 2>/dev/null || true
 echo "CODE=\$code"
 [ "\$code" = "200" ] || exit 1
+# AC92 (tasks/gap-ac92-delivery-verify-usage-intersection): the delivery verification surface must
+# INTERSECT the actual usage surface. "端口活着" is necessary but not sufficient — run the TOP-N
+# real-use mechanisms (capability-catalog.sh + the offline-runnable subset of the three-layer-core-
+# named scripts) against the INSTALLED package and assert each really executes (exit 0 + non-empty).
+UV_SCRIPTS="\$(npm root -g)/quay/plugin/scripts"
+if [ -f "\${UV_SCRIPTS}/deliver-verify-usage.sh" ]; then
+  if bash "\${UV_SCRIPTS}/deliver-verify-usage.sh" --plugin-scripts "\${UV_SCRIPTS}" --ws "\$WS" --timeout 30 >"\${WS}/deliver-verify-usage.out" 2>&1; then
+    echo "USAGE-VERIFY-OK"
+  else
+    echo "USAGE-VERIFY-FAIL"
+    tail -25 "\${WS}/deliver-verify-usage.out" >&2
+    exit 1
+  fi
+else
+  # Older installed artifact without the AC92 verification script — report as a skip, not a pass.
+  echo "USAGE-VERIFY-SKIP (deliver-verify-usage.sh not in installed package)"
+fi
 REMOTE
 )
   out="$(ssh "${ssh_opts[@]}" "${target}" "bash -s" <<< "${remote_script}" 2>&1)"
   code="$(printf '%s\n' "${out}" | grep -oE 'CODE=[0-9]+' | tail -1 | cut -d= -f2 || echo "")"
-  if [ -n "${code}" ] && [ "${code}" = "200" ]; then
-    echo "develop-deliver: ${hk} (${target}) OK — quay serve http_code=${code}"
+  uv_ok="$(printf '%s\n' "${out}" | grep -c 'USAGE-VERIFY-OK' || true)"
+  if [ -n "${code}" ] && [ "${code}" = "200" ] && [ "${uv_ok}" -ge 1 ]; then
+    echo "develop-deliver: ${hk} (${target}) OK — quay serve http_code=${code} + usage-verify OK (AC92 top-N real-use mechanisms)"
     http_codes[$hk]="${code}"
   else
     echo "develop-deliver: ${hk} (${target}) VERIFY FAILED:" >&2
-    printf '%s\n' "${out}" | tail -8 >&2
+    printf '%s\n' "${out}" | tail -12 >&2
     http_codes[$hk]="verify-fail"
     deliver_fail=1
   fi
