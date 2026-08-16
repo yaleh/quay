@@ -6,7 +6,8 @@ labels:
   - gap
   - mechanism
 parent: null
-children: []
+children:
+  - gap-fan-in-delta-scope-inventory-annotate
 extra:
   schema: execution
 depends_on: []
