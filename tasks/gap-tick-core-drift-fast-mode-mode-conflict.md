@@ -72,4 +72,5 @@ quay-init --loop 铺出布局（`plugin/skills/init/SKILL.md:68-71` 逐条）：
 - plugin/scripts/tick-core-static-check.ts（drift-check mode 分配 + 比较逻辑）
 - plugin/test/tick-core-static-check.test.mjs（对应断言）
 - plugin/loop/fast-mode-tick-core.md（如需，副本引用与正本一致化）
+- plugin/scripts/checker-mutation-cases/tick-core-static-check.sh（fan-in 全量 suite checker-mutation-check 发现：semantic mode 下 mutation-case fixture 的 fast-mode 副本仍是 byte-identical、无 docs/analysis 角色引用 ⇒ 基线恒红 always-red；补角色引用头注，fixture 与 checker 新语义一致）
 - tasks/gap-tick-core-drift-fast-mode-mode-conflict.md（自身）

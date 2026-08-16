@@ -96,6 +96,7 @@ write plugin/loop/orchestrator-tick-core.md \
   '**可以**:写 `orchestration/`。'
 write plugin/loop/fast-mode-tick-core.md \
   '# inner (fast-mode) tick — 执行核' \
+  '> 落地副本：引用消费方铺出源 `docs/analysis/fast-mode-loop-tick.md`（quay-init --loop 铺出、非 byte-identical）——语义同步。' \
   '## A. 每轮必跑' \
   '| A1 | `.halt` 哨兵 | 存在 ⇒ 空转 (src:1) |' \
   '## B. 每轮必产出' \
