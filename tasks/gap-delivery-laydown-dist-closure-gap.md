@@ -43,6 +43,7 @@ B/C 上 plugin/scripts/send-keys-reliable.sh 运行时报「缺少校验器/缺�
 3. **负控制**：构造 `$SCRIPT_DIR/dist/ghost.js` 引用 ⇒ 必须 fail loud（不进 laydown 集）；`dist/transcript-delivery-check.js` + `dist/pane-state-classify.js` 引用 ⇒ 必须进 laydown 集。
 4. 验证：B/C 同款打包 + quay-init --loop 后，两个 dist 文件落地；send-keys-reliable.sh 不再报缺。
 5. **一体两面（外层 2026-08-16 数据点，须一并判断）**：`plugin/skills/cold-start/SKILL.md:26` 前置条件要求 `<root>/plugin/scripts/fast-mode-telemetry.ts` 存在（裸名 .ts），但 tgz 只装 `dist/fast-mode-telemetry.js`——判断它是①同根 dist 闭包缺陷（前置条件应引用打包后实际存在的 .js，或裸 .ts 引用应被 rewriteMarkdown 处理）还是②SKILL.md 前置条件本身过时。判断结论写入任务体 Evidence。
+6. **范围扩展（外层 2026-08-16 C 机补强证据，判据须覆盖更宽形态）**：C=ad-arm1 上**整个 `.ts` 源码层缺失**——tgz 只装 `dist/*.js`，`plugin/scripts/*.ts` 一个都没有。SKILL.md 前置条件引用 `fast-mode-telemetry.ts`（.ts），node `--experimental-strip-types` 对 `.js` 后缀不生效（SyntaxError）。subagent 补铺 .ts 源码层 + 规范 .sh 包装（引用 .ts）才满足。⇒ 不止 send-keys 的 2 个 dist 文件——**整个「SKILL.md 前置引 .ts、bundle 只装 dist/.js」的形态**在干净安装上必须人工补铺。判据需覆盖：打包后所有 SKILL.md/tick-doc 前置条件引用的 `.ts` 都要在安装后有对应可执行形态（.ts 或可被 strip-types 处理的 .js）。
 
 ## Acceptance Criteria
 
@@ -50,6 +51,7 @@ B/C 上 plugin/scripts/send-keys-reliable.sh 运行时报「缺少校验器/缺�
 - [ ] AC2: `dist/transcript-delivery-check.js` + `dist/pane-state-classify.js` 进 laydown 集（打包 + quay-init 后落地）。
 - [ ] AC3: 负控制成立——`dist/ghost.js` 引用 fail loud；真实两个文件引用进集。
 - [ ] AC4: 既有 laydown/referenced-not-landed 测试全绿 + 新增 dist 路径用例。
+- [ ] AC5: 打包后所有 SKILL.md/tick-doc 前置条件引用的 `.ts` 都有对应可执行形态（.ts 或可被 strip-types 处理的 .js）——C 机「整个 .ts 层缺失」形态归零。
 
 ## Definition of Done
 
