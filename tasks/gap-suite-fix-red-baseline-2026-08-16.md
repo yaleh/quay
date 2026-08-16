@@ -43,8 +43,20 @@ drift-mode follow-up 的 fan-in。**⚠️ 原「23 文件/7 族」是 08-12~13 
 ⛔ **先不动 15 个任务体**（无关文档债，修了不改变门状态）。②18 条 lint **降为独立清理项**，与 suite-fix
 解耦、不进本任务 AC。③(b) 2 断言（select-preflight 60s 超时 / loop-shipping AC1b）不受本更正影响，仍真问题。
 时间线佐证（非证明）：末绿 11:34 → 首红 11:54 间落 9 个提交，若有直接落 develop 的恰触发该门。
-**⛔ 退役任何测试前必须先有消费者枚举**（select-preflight 属 ADR-022 退役经典循环，其非测试消费者待查，
-manager 正在核）——退役不可逆。
+
+**⛔ 消费者枚举 + 诊断完成（manager 逐条复算）——「基线红」真实规模**：
+```
+18 条 lint               → 已证否为成因 ⇒ 独立清理项（另立案 gap-done-task-doc-lint-cleanup）
+direct-to-develop-bypass → 唯一剩静态候选成因，⛔ 仍假说，跑对照定它
+loop-shipping AC1b       → 已修（d46e3e35，落在失败轮后 66min），负控 hits=0 ⇒ 无动作，⛔ 不退役
+                          （它一天内真抓到过 3 处新增引用）
+select-preflight-cli     → 真改动两处，全在测试文件：①首行 `// @test-group engine` → `lowconc`
+                          （既有机制非新前置）②删 :45-48 与 :50 同路径的重复用例（砍 124.9s→~62s）
+                          ⛔ 不单纯上调 timeout（60000 是依赖机器容量的字面值，475→1199 已吃掉一次）
+```
+**⇒ 真正要写的代码：一行泳道标注 + 删一个 test case。** 其余全是「已修/非成因/待定成因」。
+select-preflight 退役前提已成立（唯一非测试消费者 = ADR-022 退役经典循环入口），但**退役是产品决策，
+另立案**，不并本任务。
 
 **已确认证据**：最近一次真实全量轮（verification-round 08-15 12:55，lane 16）state=red、19 failures
 （任务文件缺口 + 静态检查 + 测试族）。per-task-suite-records 亦见 08-16 00:44 red（5 文件）。
