@@ -552,3 +552,96 @@ test("⑤ REAL positive — a task whose ACTUAL diff is fully within its declare
   assert.equal(r.status, 0, `legitimate scoped change must stay green, got ${r.status}: ${r.stderr}`);
   assert.match(r.stdout, /ANTI-DRIFT OK/, "driver must print ANTI-DRIFT OK");
 });
+
+// ── ⑥ bracket-close (gap-fan-in-auto-close-telemetry-bracket, occurrence 3) ─────────────────────────
+// The fan-in flow's step 5.5 closes the fanned-in task's telemetry bracket AFTER the ff succeeds
+// (dispatch's --task-start was never closed on land ⇒ stale bracket until a manual/outer reconcile).
+// The closure goes through closure-lag-check.sh --close-task (the A16 unified closure point) keyed by
+// --taskId — it must target ONLY the task being fanned in, never a global --reconcile scan (判据2:
+// in-flight / not-landed brackets must be preserved).
+
+/** A temp "workspace root" for bracket-close tests: a real `tasks/` dir (closure-lag-check requires
+ *  one) + a symlinked real `plugin/` tree (the closure command resolves `${root}/plugin/scripts/…`).
+ *  The telemetry store lives under `<root>/.workflow-events/` written by the REAL fast-mode-telemetry.ts. */
+function makeTelemetryFakeRoot(prefix = "fan-in-bracket-") {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  fs.mkdirSync(path.join(dir, "tasks"), { recursive: true });
+  fs.symlinkSync(path.join(REPO_ROOT, "plugin"), path.join(dir, "plugin"), "dir");
+  return dir;
+}
+
+/** Open ONE real telemetry bracket via the REAL --task-start. Returns the runId. */
+function startBracket(root, taskId) {
+  const r = runBash(
+    `node --no-warnings --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --task-start --taskId ${taskId} --root "${root}"`,
+    { cwd: REPO_ROOT },
+  );
+  assert.equal(r.status, 0, `--task-start failed for ${taskId}: ${r.stderr}`);
+  const runId = r.stdout.trim();
+  assert.ok(runId, `--task-start must print a runId for ${taskId}`);
+  return runId;
+}
+
+async function bracketCloseBlockFor(task, worktree, root, runId) {
+  const { prompt } = await runWorkflow({
+    args: { task, worktree, root, runId, mergeTarget: "develop" },
+  });
+  return extractBlock(prompt, "# bracket-close-block-start", "# bracket-close-block-end");
+}
+
+test("⑥ wiring — the fan-in prompt carries a bracket-close block targeting ONLY the fanned-in task (no global --reconcile scan)", async (t) => {
+  const { prompt } = await runWorkflow({
+    args: { task: "gap-test-close", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-close", mergeTarget: "develop" },
+  });
+  const block = extractBlock(prompt, "# bracket-close-block-start", "# bracket-close-block-end");
+  assert.ok(block.includes("closure-lag-check.sh --close-task"), "block must call the A16 unified closure point");
+  assert.ok(block.includes("--taskId gap-test-close"), "block must target the fanned-in task by id");
+  assert.ok(block.includes("--outcome done"), "block must close with outcome done");
+  assert.ok(block.includes("--root "), "block must pass the workspace root");
+  // 判据2: the block must not INVOKE a global --reconcile scan (only the comment mentions it to forbid
+  // it). The executable lines (non-#-comment) must be free of a --reconcile invocation.
+  const execLines = block.split("\n").filter((l) => !l.trim().startsWith("#"));
+  assert.ok(!execLines.some((l) => l.includes("--reconcile")), "executable lines must not run a global --reconcile scan (判据2: in-flight brackets preserved)");
+  assert.ok(prompt.includes("bracketClosed"), "the return contract must carry the bracket-closure result");
+  // placement: the block runs AFTER the ff-merge call and BEFORE the worktree cleanup.
+  const ffIdx = prompt.indexOf("fan-in-ff-merge.sh --task");
+  const blockIdx = prompt.indexOf("# bracket-close-block-start");
+  const cleanupIdx = prompt.indexOf("ff 成功后清理");
+  assert.ok(ffIdx !== -1, "ff-merge call present");
+  assert.ok(blockIdx > ffIdx, "bracket-close must come after the ff-merge call");
+  assert.ok(cleanupIdx > blockIdx, "bracket-close must come before the worktree cleanup");
+});
+
+test("⑥ REAL bracket-close — closes the fanned-in task's bracket AND preserves an in-flight task's bracket (判据2)", async (t) => {
+  const root = makeTelemetryFakeRoot();
+  t.after(() => cleanup(root));
+  const runIdA = startBracket(root, "gap-test-close-a");
+  const runIdB = startBracket(root, "gap-test-close-b");
+  const block = await bracketCloseBlockFor("gap-test-close-a", "/tmp/wt", root, runIdA);
+  const r = runBash(block, { cwd: REPO_ROOT });
+  assert.equal(r.status, 0, `bracket-close block must exit 0: ${r.stderr}`);
+  const rep = runBash(`node --no-warnings --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --report --json --root "${root}"`, { cwd: REPO_ROOT });
+  assert.equal(rep.status, 0, `report failed: ${rep.stderr}`);
+  const report = JSON.parse(rep.stdout);
+  const inProgressIds = (report.inProgress || []).map((p) => p.taskId);
+  const completedIds = (report.tasks || []).map((c) => c.taskId);
+  assert.ok(!inProgressIds.includes("gap-test-close-a"), `task A (landed) must leave inProgress after close; inProgress=${JSON.stringify(inProgressIds)}`);
+  assert.ok(completedIds.includes("gap-test-close-a"), `task A must be a completed start+end pair; completed=${JSON.stringify(completedIds)}`);
+  assert.ok(inProgressIds.includes("gap-test-close-b"), `task B (in-flight, not landed) must KEEP its bracket; inProgress=${JSON.stringify(inProgressIds)}`);
+  assert.ok(!completedIds.includes("gap-test-close-b"), `task B must NOT be closed`);
+});
+
+test("⑥ REAL idempotent — a task with NO open bracket is a no-op (exit 0, no write)", async (t) => {
+  const root = makeTelemetryFakeRoot();
+  t.after(() => cleanup(root));
+  const runIdA = startBracket(root, "gap-test-close-a");
+  const block = await bracketCloseBlockFor("gap-test-close-a", "/tmp/wt", root, runIdA);
+  // Close once (writes the end event)…
+  assert.equal(runBash(block, { cwd: REPO_ROOT }).status, 0);
+  // …then close again: no open bracket ⇒ --close-task exits 0, no second end event.
+  assert.equal(runBash(block, { cwd: REPO_ROOT }).status, 0, "second close must be an idempotent no-op");
+  const rep = runBash(`node --no-warnings --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --report --json --root "${root}"`, { cwd: REPO_ROOT });
+  const report = JSON.parse(rep.stdout);
+  assert.ok(!(report.inProgress || []).some((p) => p.taskId === "gap-test-close-a"), "bracket must stay closed");
+  assert.equal((report.tasks || []).filter((c) => c.taskId === "gap-test-close-a").length, 1, "exactly one completed pair");
+});
