@@ -42,6 +42,16 @@ lane=8, nproc=16）：static 83s + serial 304s + lowconc 276s + main 349s = **10
 
 - [ ] 3 轮 lane=8 全绿且 ≤600s、tests≥4951、优化可追溯；对照轮已跑并记录 serial/lowconc 翻倍真因。
 
+## 对照轮记录（2026-08-16 17:0xZ）
+
+**⛔ 第 1 轮（startedAt 16:51:19，lane=8）只能当基线记录，不是反事实对照轮**（inner 直接量确认）：
+- worktree 分支含 quoted-path（968cc1a8）+ AC99（505dd16d）两个**非本任务**提交（全量静态闸前置并入）
+  ⇒ 测的代码 = develop + quoted-path 修复 + AC99 修复，非「同提交干净对照」
+- 同时 5 worktree 并发在飞（并发场景，非「无并发 scope churn 窗口」）
+- **⇒ 对照需重跑**：等其余任务收尾后，在无并发窗口跑一轮同提交 lane=8 全量，两轮 phase 级对比。
+- **任务隔离破坏**：quoted-path + AC99 改动并入 AC101 worktree 是污染源——两修复已在各自任务路径上
+  （quoted-path fan-in 在跑、AC99 Touches 已在主检出修），AC101 worktree 内副本冗余且污染对照。
+
 ## Touches
 
 **收窄说明（manager 2026-08-16 16:5xZ 裁定）**：⛔ 不使用目录级条目（`plugin/scripts/*` / `packages/quay/src/`）
