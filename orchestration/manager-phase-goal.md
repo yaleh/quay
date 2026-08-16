@@ -405,6 +405,20 @@ grep 不到 ⇒ 判假。**⛔ 本 AC 不要求推进 goal-store 迁移**——�
 
 ### AC101（**suite 在 main 相 lane=8 下总耗时 ≤ 600s** —— 人 16:2xZ 明令，与 UI 工作同步持续推进）
 
+> **🔴 未闭合项（2026-08-16 18:3xZ 挂账，⛔ 每轮阶段盘点必须复查这一条）**
+> `tasks/gap-ac101-suite-under-600s.md` 已 **status: done**，AC1/AC2/AC3/DoD 全勾，
+> **唯一未勾 = AC1b（该文件 :59），未勾数 = 1** —— 即「跑一轮 develop 基线轮」**从未执行**
+> （实读 `verification-round.jsonl`：218/219/220/221 全部 `scope=worktree`，fan-in 后零轮）。
+> **⚠️ 风险不是"没做"，是"没有机制持有它"**：`status: done` 的任务不再被派发、不进 ready 池、
+> 不被 A18 空槽逻辑选中 ⇒ **那个未勾的框记录了义务，却不驱动任何东西**；
+> 唯一持有它的是 outer/inner 的队列记忆，而记忆随 compact / 会话轮换丢失。
+> **⊢ 故挂在此处**：把"它有没有被做"变成**我每轮盘点可查的一栏**，不依赖谁记得（硬规则⑨：让缺席可见）。
+> **⊢ 闭合条件（二选一，任一为真即可划掉本块）**：
+> ① `verification-round.jsonl` 出现一条 `scope != worktree`（develop 基线）且 `laneCount==8` 的轮，
+>    记录其 **精确 durationMs**；② outer/inner 回报该轮结果（green+精确 ms 或 >600s+精确 ms）。
+> **⛔ 若该轮 >600s，必须如实记录，不得因任务已 done 而略过**——那说明 600s 在产品线上尚未稳住
+> （round221 仅剩 409ms 余量，且 develop 基线与任务分支代码不同）。
+
 **目标值来源**：**人逐字设定 600s**。⛔ 我不改这个数、也不把它当我自己推导的阈值
 （硬规则④："成本结构未知前不设阈值"约束的是**我**凭空设阈值；人设定的目标是输入，不是我的推断）。
 **但硬规则④要求的成本分解仍然必须做**，否则无法知道该优化哪里——分解已有实测基线：
@@ -463,8 +477,21 @@ round218 该更慢而非更快。**⇒ 该假说降级：并发/负载不是主�
 ③ 优化手段落成**代码/配置**（可 `git log` 追溯的提交），⛔ 不接受"挑一个负载低的时段跑一轮"充数
    ——那是环境波动，不是优化。
 ④ **🔴 2026-08-16 17:4xZ 补（判据级，不是提醒）：优化必须【已在 develop 上生效】，⛔ 不得只活在任务分支。**
-   **取假方式（一条命令）**：`git merge-base --is-ancestor <该优化的提交> develop` 为假 ⇒ **AC101 不得勾**。
-   等价读法：`grep 'PHASE_OVERLAP="\${QUAY_PHASE_OVERLAP' scripts/test.sh` 在 develop 上必须显示默认 **1**。
+   **🔴 2026-08-16 18:2xZ 自我更正——原取假命令【是错的】，已作废，换成读内容的那条：**
+   ```
+   ⛔ 作废：git merge-base --is-ancestor <该优化的提交> develop
+   ✅ 正本：在 develop 上 grep -n 'PHASE_OVERLAP="\${QUAY_PHASE_OVERLAP' scripts/test.sh 必须显示 :-1
+   ```
+   **⇐ 为什么作废**：fan-in 实测是 **rebase/squash 形态——内容进了 develop，而原 SHA 不是 develop 的祖先**。
+   实证：`17e91e38` 用 `--is-ancestor` 判为「不在」，而 `scripts/test.sh:1024` 在 develop 上已是 `:-1`，
+   `git log -S` 定位到内容由 **`56921738`（17:53:05Z）** 带进 develop。⇒ **SHA 判法给出【假阴性】。**
+   **⊢ 这犯的正是我自己写进 AC88 的那条教训**：「**判据不得引用一个生命周期短于判据本身的对象**」——
+   **commit SHA 在 rebase/squash 下就是这类对象，而我转头把 AC1b 锚在了 SHA 上。记账：我的错。**
+   **⊢ 一般形态**：判「某改动是否已生效」要读**内容**（grep 目标文件 / 行为取假），
+   **⛔ 不要读提交身份**（SHA / `--contains` / `--is-ancestor`）——后者只在"从不改写历史"的前提下等价，
+   而 fan-in 恰恰会改写。
+   **⊢ ⚠️ 前置满足 ≠ 判据满足**：本条要求的是「**AC1 的 3 轮里至少 1 轮跑在开关已生效的 develop 基线上**」。
+   开关进了 develop 只是**前置**；**若 3 轮全是 `scope=worktree`，本条仍不满足**（实证见下方 18:2xZ 记录）。
    **⇐ 为什么补**：实读 develop 工作树 `scripts/test.sh:1023` = `${QUAY_PHASE_OVERLAP:-0}`（默认**关**），
    而让 556s 成立的 `17e91e38` **只在 `task/gap-ac101-suite-under-600s` 上**（`--contains` 实测）。
    **⇒ 若 3 轮都在任务分支跑出来就判达成，develop 上的 suite 仍是旧形态**——
