@@ -58,6 +58,7 @@
 // Exit codes: 0 = PASS; 1 = FAIL (any criterion violated, or a scan target missing); 2 = usage.
 
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -582,9 +583,19 @@ export function runChecks(root: string, only?: string): CheckResult {
 // makes the pair-drift a HARD gate: exit 1 when ANY pair differs, printing BOTH sides' line counts
 // + a diff summary (AC2 — not a "drift/consistent" boolean).
 //
-// TWO criteria (gap-plugin-loop-manager-drifted-copies-pointerize AC2, manager 22:1xZ 裁定):
-//   - `byte-identical` — the orchestrator/fast-mode tick-core copies are REAL copies (quay-init
-//     lays them down byte-for-byte); a copy that differs from its orchestration source reddens.
+// THREE criteria (gap-plugin-loop-manager-drifted-copies-pointerize AC2, manager 22:1xZ 裁定;
+// gap-ac90-delivery-copy-drift-gate AC90 — fast-mode 副本语义修正):
+//   - `byte-identical` — the ORCHESTRATOR tick-core copy is a REAL copy (quay-init lays it down
+//     byte-for-byte, init/SKILL.md:70); a copy that differs from its orchestration source reddens.
+//   - `normalized-byte` — the FAST-MODE tick-core copy is a SEMANTIC LANDING, NOT a byte copy
+//     (init/SKILL.md:71 明示「非 byte-identical」: the shipped copy is quay-init --loop's template
+//     referencing the target's docs/analysis/ source, the 正本 references this workspace's
+//     plugin/loop/ source — 232e4171 byte-sync was reverted by cddc55e2 because it broke quay-init
+//     referenced⊆landed). The gate compares the BEHAVIORAL BODY (from the first `## A.` onward —
+//     the A/B/C/D instruction tables) after normalizing the documented loop-doc source-path role
+//     difference; the role-specific HEADER (切分声明/落地副本 annotation + the path refs) is
+//     excluded. A one-sided edit of a behavioral row (改正本而副本不落地, AC90) reddens — the
+//     AC90 负控制 (edit the 正本 one line, leave the copy) is mutation-tested.
 //   - `pointer` — the manager tick docs' shipped copies are POINTERS (one line → orchestration/
 //     正本), NOT copies ("该路径无内容可维护"). A shipped manager file must be a SMALL pointer
 //     referencing its orchestration 正本; a reintroduced large copy reddens regardless of
@@ -602,45 +613,29 @@ export const MANAGER_POINTER_PAIRS = [
  *  copy — the falsifiable AC2 criterion. */
 export const POINTER_MAX_LINES = 3;
 
-// The fast-mode pair is NOT byte-identical by design (SKILL.md:71, the 232e4171 → cddc55e2 revert):
-// the 副本 (plugin/loop/fast-mode-tick-core.md) is the quay-init --loop laid-down TEMPLATE. A consumer
-// project receives orchestration/fast-mode-tick-core.md + docs/analysis/fast-mode-loop-tick.md
-// (plugin/loop/ is never laid down — SKILL.md:68-71), so the 副本 MUST reference the consumer-laid
-// docs/analysis/ source while the 正本 references plugin/loop/ — a byte-copy breaks quay-init
-// referenced⊆landed. The pair is therefore checked in `semantic` mode: the 副本 must carry the SAME
-// execution clauses (A/B/C items, content modulo (src:N) refs) as the 正本, plus keep its template role.
-export const FAST_MODE_SEMANTIC_PAIR = {
-  core: "orchestration/fast-mode-tick-core.md",
-  shipped: "plugin/loop/fast-mode-tick-core.md",
-} as const;
+export type DriftMode = "byte-identical" | "normalized-byte" | "pointer";
 
-/** Semantic-role invariants for the shipped fast-mode template (see FAST_MODE_SEMANTIC_PAIR). A
- *  regression that byte-copies the 正本 over the 副本 makes the 副本 reference plugin/loop/ (which a
- *  consumer project never receives) — the exact 232e4171 breakage. */
-export const FAST_MODE_SEMANTIC_ROLE = {
-  shippedMustReference: "docs/analysis/fast-mode-loop-tick.md",
-  shippedMustNotReference: "plugin/loop/fast-mode-loop-tick.md",
-} as const;
-
-export const DRIFT_PAIRS: { core: string; shipped: string; mode: "byte-identical" | "pointer" | "semantic" }[] = [
+export const DRIFT_PAIRS: { core: string; shipped: string; mode: DriftMode }[] = [
   ...CORES
-    .filter((rel) => rel !== "orchestration/manager-tick-core.md" && rel !== FAST_MODE_SEMANTIC_PAIR.core)
+    .filter((rel) => rel !== "orchestration/manager-tick-core.md")
     .map((rel) => {
       const base = rel.split("/").pop()!; // e.g. "orchestrator-tick-core.md"
-      return { core: rel, shipped: `plugin/loop/${base}`, mode: "byte-identical" as const };
+      // The fast-mode shipped copy is a SEMANTIC LANDING, not a byte copy (init/SKILL.md:71 —
+      // "非 byte-identical"); the orchestrator copy is a real byte copy (init/SKILL.md:70).
+      const mode: DriftMode = base === "fast-mode-tick-core.md" ? "normalized-byte" : "byte-identical";
+      return { core: rel, shipped: `plugin/loop/${base}`, mode };
     }),
-  { ...FAST_MODE_SEMANTIC_PAIR, mode: "semantic" as const },
   ...MANAGER_POINTER_PAIRS.map((p) => ({ ...p, mode: "pointer" as const })),
 ];
 
 export interface DriftPair {
   core: string;          // orchestration/<name>.md (正本)
   shipped: string;       // plugin/loop/<name>.md (shipped copy or pointer)
-  mode: "byte-identical" | "pointer" | "semantic";
+  mode: DriftMode;
   consistent: boolean;
   coreLines: number;     // -1 when the file is missing
   shippedLines: number;  // -1 when the file is missing
-  diffStat: string;      // unified-diff summary OR the pointer/semantic violation reason (empty when consistent)
+  diffStat: string;      // unified-diff summary OR the pointer-violation reason (empty when consistent)
 }
 
 export interface DriftResult {
@@ -682,90 +677,36 @@ function diffStat(a: string, b: string): string {
   }
 }
 
-// ── Semantic-sync mode (gap-tick-core-drift-fast-mode-mode-conflict) ────────────────────────────────
-// The fast-mode 副本 is semantically synced to the 正本 when BOTH hold:
-//   (1) clause-set + clause-content equality — the A/B/C execution items are the same, modulo
-//       `(src:N)` line references (the two files point at different but byte-identical reason
-//       archives: 正本 → plugin/loop/fast-mode-loop-tick.md, 副本 → the consumer-laid
-//       docs/analysis/fast-mode-loop-tick.md) and modulo the framing paragraphs (the 副本's
-//       切分声明/template-role headnotes differ legitimately). A stale 副本 — missing a clause the
-//       正本 gained (A16b/A26), or carrying an old behavioral reading (dynamic cap, "inner 只写
-//       --task-start") — reddens.
-//   (2) role preservation — the 副本 still references its consumer-laid source
-//       (docs/analysis/fast-mode-loop-tick.md) and NOT the template-source path
-//       (plugin/loop/fast-mode-loop-tick.md). A byte-copy regression breaks quay-init
-//       referenced⊆landed (232e4171 → cddc55e2 revert) and reddens.
-export interface SemanticDrift {
-  missing: string[];     // item codes in the 正本 but not the 副本
-  extra: string[];       // item codes in the 副本 but not the 正本
-  contentDiff: string[]; // item codes present in both but with different normalized content
-  roleOk: boolean;
+/** The BEHAVIORAL BODY of an execution-core doc: everything from the first `## A.` section onward
+ *  (the A/B/C/D instruction tables — the executable content). The HEADER before `## A.` is
+ *  role-specific: the 正本 and the shipped plugin/loop copy carry different role annotations and
+ *  reference the loop-doc source under different paths (plugin/loop/ in THIS workspace vs
+ *  docs/analysis/ on installed targets — init/SKILL.md:71 documents the fast-mode copy as a
+ *  non-byte-identical semantic landing), so it is excluded from the behavioral comparison. The
+ *  loop-doc source-path role difference is NORMALIZED (both spellings → one token) so a behavioral
+ *  row referencing the source path stays consistent across the two roles. */
+function behavioralBody(text: string): string {
+  const i = text.indexOf("## A.");
+  const body = i >= 0 ? text.slice(i) : text;
+  return body
+    .replace(/docs\/analysis\/fast-mode-loop-tick\.md/g, "__LOOP_DOC_SRC__")
+    .replace(/plugin\/loop\/fast-mode-loop-tick\.md/g, "__LOOP_DOC_SRC__");
 }
 
-/** Normalize a clause: drop (src:N…) references and collapse whitespace. The two files' item rows
- *  differ ONLY in their src:N pointers and in stale content; this normalization isolates the
- *  executable instruction from the pointer bookkeeping. */
-function normalizeClause(s: string): string {
-  return s.replace(/\(src:[^)]*\)/g, " ").replace(/\s+/g, " ").trim();
-}
-
-/** Extract the execution clauses (A/B/C items) from a core/template file into a code→content map.
- *  Framing paragraphs, section headers, and the D-边界 prose are not items and are ignored. A
- *  multi-line item (B3's command block) is captured as one clause. */
-export function extractClauses(text: string): Map<string, string> {
-  const clauses = new Map<string, string>();
-  const lines = text.split("\n");
-  let curCode: string | null = null;
-  let parts: string[] = [];
-  const flush = () => {
-    if (curCode !== null) clauses.set(curCode, normalizeClause(parts.join(" ")));
-    curCode = null;
-    parts = [];
-  };
-  for (const raw of lines) {
-    const s = raw.trim();
-    if (/^#{1,3} /.test(s)) { flush(); continue; }
-    let m: RegExpExecArray | null;
-    if ((m = /^\| (A\d+b?) \|/.exec(s)) !== null) {
-      flush();
-      curCode = m[1];
-      parts.push(s.slice(m[0].length).replace(/\|\s*$/, ""));
-      continue;
-    }
-    if ((m = /^- \*\*(B\d+)\b/.exec(s)) !== null) {
-      flush();
-      curCode = m[1];
-      parts.push(s.slice(m[0].length));
-      continue;
-    }
-    if ((m = /^\| (C\d+) \|/.exec(s)) !== null) {
-      flush();
-      curCode = m[1];
-      parts.push(s.slice(m[0].length).replace(/\|\s*$/, ""));
-      continue;
-    }
-    if (curCode !== null && s) parts.push(s);
+/** Diff the NORMALIZED behavioral bodies of a normalized-byte pair (writes the two bodies to temp
+ *  files so the existing diffStat works; the report shows the BEHAVIORAL drift, not the intended
+ *  role-header noise). Falls back to a line-count readout on any diff failure. */
+function diffBehavioralBodies(coreAbs: string, shippedAbs: string): string {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tick-core-drift-"));
+  try {
+    const a = path.join(tmp, "core-body.md");
+    const b = path.join(tmp, "shipped-body.md");
+    fs.writeFileSync(a, behavioralBody(fs.readFileSync(coreAbs, "utf8")));
+    fs.writeFileSync(b, behavioralBody(fs.readFileSync(shippedAbs, "utf8")));
+    return diffStat(a, b);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
   }
-  flush();
-  return clauses;
-}
-
-export function compareSemanticClauses(coreText: string, shippedText: string): SemanticDrift {
-  const coreClauses = extractClauses(coreText);
-  const shippedClauses = extractClauses(shippedText);
-  const missing: string[] = [];
-  const extra: string[] = [];
-  const contentDiff: string[] = [];
-  for (const [code, content] of coreClauses) {
-    if (!shippedClauses.has(code)) { missing.push(code); continue; }
-    if (shippedClauses.get(code) !== content) contentDiff.push(code);
-  }
-  for (const code of shippedClauses.keys()) {
-    if (!coreClauses.has(code)) extra.push(code);
-  }
-  const roleOk = shippedText.includes(FAST_MODE_SEMANTIC_ROLE.shippedMustReference)
-    && !shippedText.includes(FAST_MODE_SEMANTIC_ROLE.shippedMustNotReference);
-  return { missing, extra, contentDiff, roleOk };
 }
 
 export function runDriftCheck(root: string): DriftResult {
@@ -793,32 +734,14 @@ export function runDriftCheck(root: string): DriftResult {
         else if (!referencesCore)
           stat = `POINTER VIOLATION: does not reference the 正本 ${core}`;
       }
-    } else if (mode === "semantic") {
-      // Semantic-sync criterion (fast-mode pair): the shipped template must carry the SAME A/B/C
-      // clauses as the 正本 (content modulo (src:N) refs — the two files' reason archives are
-      // byte-identical in the laid-down relationship, only the headnote path differs) AND stay in
-      // its template role (reference the consumer-laid docs/analysis source, not plugin/loop/).
-      if (coreLines < 0 || shippedLines < 0) {
-        consistent = false;
-        stat = `semantic-sync pair missing a side (core=${coreLines >= 0 ? "ok" : "MISSING"}, shipped=${shippedLines >= 0 ? "ok" : "MISSING"})`;
-      } else {
-        const drift = compareSemanticClauses(
-          fs.readFileSync(coreAbs, "utf8"),
-          fs.readFileSync(shippedAbs, "utf8"),
-        );
-        consistent = drift.missing.length === 0 && drift.extra.length === 0
-          && drift.contentDiff.length === 0 && drift.roleOk;
-        if (!consistent) {
-          const reasons: string[] = [];
-          if (drift.missing.length) reasons.push(`missing clauses (正本→副本): ${drift.missing.join(",")}`);
-          if (drift.extra.length) reasons.push(`extra clauses (副本-only): ${drift.extra.join(",")}`);
-          if (drift.contentDiff.length) reasons.push(`content drift: ${drift.contentDiff.join(",")}`);
-          if (!drift.roleOk) reasons.push(
-            `ROLE VIOLATION: 副本 must reference ${FAST_MODE_SEMANTIC_ROLE.shippedMustReference} (consumer-laid) and NOT ${FAST_MODE_SEMANTIC_ROLE.shippedMustNotReference} (template source) — byte-copy breaks referenced⊆landed`,
-          );
-          stat = `semantic sync: ${reasons.join("; ")}`;
-        }
-      }
+    } else if (mode === "normalized-byte") {
+      // Semantic-landing criterion (AC90, fast-mode): the shipped copy is a non-byte-identical
+      // template (init/SKILL.md:71) — compare the BEHAVIORAL BODY (from `## A.`) after normalizing
+      // the loop-doc source-path role difference. A one-sided edit of a behavioral row (改正本而
+      // 副本不落地) reddens — the AC90 negative control.
+      consistent = coreLines >= 0 && shippedLines >= 0
+        && behavioralBody(fs.readFileSync(coreAbs, "utf8")) === behavioralBody(fs.readFileSync(shippedAbs, "utf8"));
+      if (!consistent) stat = diffBehavioralBodies(coreAbs, shippedAbs);
     } else {
       consistent = coreLines >= 0 && shippedLines >= 0
         && fs.readFileSync(coreAbs, "utf8") === fs.readFileSync(shippedAbs, "utf8");
@@ -833,7 +756,7 @@ function printDriftReport(res: DriftResult): string[] {
   const out: string[] = [];
   for (const p of res.pairs) {
     if (p.consistent) {
-      const link = p.mode === "pointer" ? "→ pointer" : p.mode === "semantic" ? "~ semantic" : "==";
+      const link = p.mode === "pointer" ? "→ pointer" : p.mode === "normalized-byte" ? "≐ body" : "==";
       out.push(`  ok: ${p.core} (${p.coreLines} lines) ${link} ${p.shipped} (${p.shippedLines} lines)`);
       continue;
     }
@@ -882,7 +805,7 @@ export function main(argv: string[]): CliResult {
       // Explicit alias for the default full-surface check (the ## Contract `invoke` form).
     } else if (a === "--help" || a === "-h") {
       process.stdout.write(
-        "tick-core-static-check.ts — are the three execution cores statically covered (AC3/AC4/AC5/AC6/AC8), and (--check-drift) each plugin/loop/ copy byte-identical to its orchestration source (orchestrator), semantically synced (fast-mode template — the laid-down 副本 references the consumer docs/analysis source, not plugin/loop/), or a small pointer to it (manager tick docs)?\n",
+        "tick-core-static-check.ts — are the three execution cores statically covered (AC3/AC4/AC5/AC6/AC8), and (--check-drift) each plugin/loop/ copy consistent with its orchestration source — orchestrator byte-identical, fast-mode normalized-byte (behavioral body, AC90 semantic-landing), manager tick docs a small pointer (AC2)?\n",
       );
       return { code: 0, json: { help: true } };
     } else {
@@ -907,8 +830,8 @@ export function main(argv: string[]): CliResult {
       `${driftRes.pairs.filter((p) => p.consistent).length} consistent / ${driftRes.pairs.filter((p) => !p.consistent).length} drifted\n`,
     );
     for (const l of printDriftReport(driftRes)) process.stdout.write(`${l}\n`);
-    if (!driftRes.ok) process.stdout.write(`tick-core-static-check: RED — drift gate violated (shipped copy drifts from its orchestration source, the fast-mode template's clauses are out of sync, or a manager pointer was re-copied).\n`);
-    else process.stdout.write(`tick-core-static-check: PASS — every shipped copy matches its source (byte-identical or semantic), and every manager pointer is a pointer.\n`);
+    if (!driftRes.ok) process.stdout.write(`tick-core-static-check: RED — drift gate violated (shipped copy drifts from its orchestration source, or a manager pointer was re-copied).\n`);
+    else process.stdout.write(`tick-core-static-check: PASS — every shipped copy matches its source, and every manager pointer is a pointer.\n`);
     if (!driftRes.ok && noBlock) process.stdout.write(`tick-core-static-check: --no-block — drift REPORTED, not blocking (gap-tick-core-drift-check-not-in-suite; reconcile the pairs to green).\n`);
     return { code: driftRes.ok || noBlock ? 0 : 1, json: driftRes };
   }

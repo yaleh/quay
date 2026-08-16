@@ -61,7 +61,7 @@ const {
   envMaxRuntimeMs = 7_200_000, // 120 min（manager 建议 ≥7200000；默认 45min 会截断最坏 77min 的轮次）
   envSilenceMs = 3_600_000,     // 60 min（默认 15min）
   envRedGraceMs = 180_000,      // 3 min（默认 30s；给红 suite 时间收集完整失败汇总）
-  systemdRunLimits = "MemoryMax=4G CPUQuota=400% TasksMax=200", // 人 2026-08-11 06:4x 裁定：取消 CPU 配额（400%=用满 4 物理核）、保持内存 4G（01:07 OOM 护栏）、TasksMax 200；gap-systemd-run-cancel-cpuquota-keep-memory-guardrail AC3
+  systemdRunLimits = "MemoryMax=4G TasksMax=200", // 人 2026-08-11 06:4x 裁定：取消 CPU 配额 + 保持内存 4G（01:07 OOM 护栏）+ TasksMax 200；gap-systemd-run-cancel-cpuquota-keep-memory-guardrail AC3。⛔ CPUQuota 已于 2026-08-16 移除——400% 是当年 4 核机的「等价不限制」字面值，换 16 核机后静默变成 4/16 核（硬规则④推论二），实测制造 CPU 饥饿假红（e2e/install 族 ~4-5x 慢 + 5 条超时失败，execute-suite-fix 69.6min vs 历史全 None 配额最坏 22.2min）。要表达「不限制」就在机制上不传该参数，不换成另一个字面值。
 } = args ?? {}
 
 if (!worktree || !stateDir || !root) {
@@ -72,7 +72,7 @@ if (!worktree || !stateDir || !root) {
 // `undefined` and the runner's path.resolve("undefined") would write the round log to ./undefined at
 // the checkout root (bug: 2026-08-12 17:15, a 300KB round log landed in ./undefined). Default it here
 // so the template never emits the undefined literal.
-const resolvedLogFile = logFile ?? path.join(stateDir, 'full-suite.log')
+const resolvedLogFile = logFile ?? `${stateDir}/full-suite.log`
 
 const launchEnv = `QUAY_TEST_SUITE_MAX_RUNTIME_MS=${envMaxRuntimeMs} QUAY_TEST_SUITE_SILENCE_MS=${envSilenceMs} QUAY_TEST_RED_GRACE_MS=${envRedGraceMs} QUAY_TEST_SYSTEMD_RUN_LIMITS='${systemdRunLimits}'`
 

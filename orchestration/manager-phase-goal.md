@@ -7,7 +7,243 @@
 
 ---
 
-## 🆕 当前阶段（2026-08-14 00:5xZ 起）：语义派发 —— 实现 `SPEC-dispatch-ordering-semantic-2026-08-13.md`
+## 🆕 当前阶段（2026-08-16 起）：产品化 build 与实际验证 —— 基于当前版本
+
+**来源**：人 2026-08-16 裁定「检查最近一周的其它阶段目标和 AC，找出其中关于产品化 build/release
+和在其它主机/设备验证本项目产品化 build/release 的内容，以及相应的任务。然后，创建一个新的阶段目标
+和 AC，以基于当前版本产品化 build 和实际验证为目标，然后切换当前阶段到该新建阶段，驱动落实。」
+
+**前一阶段（语义派发，AC54–AC84）状态**：**17/26 已勾，9 条未勾（含在飞 follow-up，见下方降级区块）**。
+**⛔ 不因本次切换而停止**——AC76/AC84 的后续工作仍在 `tasks/*.md` 独立追踪，阶段切换只改变
+manager 这一层「当前判读焦点」，不影响 outer/inner 的正在跑的工作。旧阶段完整内容原样保留在下方
+（标题已从「当前阶段」降级），回查请读该区块，⛔ 不要因为它不在文件最上方就当它已作废。
+
+**检索方法（本轮，供核实）**：搜 `manager-phase-goal-archive.md`（08-05/06 的"产品化交付"大阶段）+
+当前 `manager-phase-goal.md` + `tasks/*.md`（最近一周新建），命中的关键载体：
+```
+SPEC-quay-self-hosts-its-own-cold-start.md（08-04）—— 已有 AC8c 六键判据，形式化程度比预期高
+gap-quay-has-never-self-hosted-its-own-cold-start（08-04，compound，todo）
+  三个子任务【全部 done】（gap-cold-start-skill-has-no-recovery-branch /
+  gap-no-formalized-bare-metal-session-bootstrap / gap-quay-self-hosting-e2e-proof）
+  ⇒ parent 本身结构性可收口，但从未真正翻 done
+dist-verify-node-floor（.github/workflows/ci.yml:66，真 npm-pack 产物在 Node 20 floor 上跑）
+  —— gh run list 实测：最近一次真实运行 = 2026-08-03，距今 13 天
+  根因（实读 ci.yml:3-9）：触发条件仅 push/PR to master；本项目开发主线是 develop
+  （ADR-022 已退役经典循环，fast-mode 三层只在 develop 上跑，从不合 master）
+  ⇒ 【结构上不可能被现在的开发流程触发】，不是"偶尔没跑"
+origin/develop 落后本地 develop 数千提交（37615c7d vs 现 HEAD）—— 本地循环从不 push
+本机现在【没有】任何当前版本的 .tgz 产物（ls packages/quay/*.tgz 为空，上次 08-06 build 已清理）
+上次跨主机（B=orangevps / C=ad-arm1）验证是 08-11 附近的 scoped 复测（launch-settings 单个 fix），
+  不是「完整安装+初始化+冷启动」的全流程，且早于今天落地的多个改动（AC65/AC76/send-to-session.ts 等）
+```
+
+### AC85（本机 build 产出当前版本的可用产物）
+**判据（能取假）**：`bash packages/quay/scripts/package.sh` 产出 `.tgz`；`tar tzf` 校验其
+`plugin/` 条目非空（08-06 曾错把 `npm pack` 当入口，得 0 条，教训见 archive）；产物的
+`package/plugin/.claude-plugin/plugin.json` 版本号与仓库当前 `plugin/.claude-plugin/plugin.json`
+一致（证明不是陈旧产物）。**⛔ 不得引用 08-06 的旧产物作为达成证据**——那个 `.tgz` 已不存在，
+且早于今天落地的多个改动。
+
+**🔴 2026-08-16 04:2xZ 判据补强（人裁定「关键是产出可实际部署和实际应用的 build」）**：
+上面这条是**必要不充分**——它只证明「打进去了」。**充分条件在 AC90–AC93**（见下方新区块）：
+交付副本不得漂离正本（AC90）、交付面不得引用未交付的文件（AC91）、
+交付验证面必须与实际使用面相交（AC92）、两条分发链版本一致（AC93）。
+**⇒ AC85 单独勾选不构成「产品化 build 可用」**，本阶段的达成读 AC85 ∧ AC90–AC93。
+
+### AC86（`dist-verify-node-floor` 在当前开发流程上有等价的真实执行路径）
+**判据（能取假，这是本阶段的核心发现）**：`dist-verify-node-floor` 现状【不可能被触发】
+（push/PR to master 门禁，主线在 develop）。**不是要求"让它跑起来"这么简单**——
+要么①在 develop 上补一个等价触发（如 `scripts/test.sh` 之外的独立 CI job 挂 push-to-develop），
+要么②在本地/per-task suite 流程里补一个等价的本机 floor 验证步骤，
+**⛔ 不得只改 `on:` 触发条件了事**——判据是"真实运行过至少一次且时间新于本次切换"，
+不是"配置看起来对了"（同 SPEC gap-phase-boundary-differential-accounting 的推论三教训：
+fixture/配置正确 ≠ 已产出）。
+
+### AC87（`gap-quay-has-never-self-hosted-its-own-cold-start` 收口）
+**判据**：三个子任务已全部 done（`gap-cold-start-skill-has-no-recovery-branch` /
+`gap-no-formalized-bare-metal-session-bootstrap` / `gap-quay-self-hosting-e2e-proof`）；
+parent 的阻碍原因（compound depsReadyFor 死锁）已被 `gap-compound-depsreadyfor-structural-deadlock`
+（done）解除。**本 AC 要求实际把 parent 翻 done**（不是重新验证子任务，是核实收口条件已满足并执行）。
+
+### AC88（跨主机验证针对当前版本重新做一次，非历史复测）
+**人 2026-08-06 原始裁定范围（仍适用，未被推翻）**：两台机器（B=orangevps, C=ad-arm1），
+安装源 = 本机 `package.sh` 产出的 `.tgz`（非 git clone、非 GitHub Actions release 资产），
+验证①正确安装 ②正确初始化（项目内 `quay-init`）③正确冷启动（outer 和 inner，不含 manager）。
+**判据（能取假）**：验证时刻新于 AC85 产出的当前产物；⛔ 不得引用 08-06/08-11 的历史验证记录
+作为本 AC 的达成证据（那些针对的是旧版本或单个 scoped fix，不是当前完整版本的全流程）。
+
+**🔴 2026-08-16 04:2xZ 判据改写（本轮实查 AC85 生产载体后，我自己发现的判据缺陷）**：
+上面这句「新于 **AC85 产出的当前产物**」**指向一个已经不存在的对象**——实查：
+```
+主检出 packages/quay/*.tgz = 【无任何产物】
+全盘 find 命中的 3 个 tgz 全在【别的任务的 worktree 里】（gap-ac86-* / gap-ac88-* 自己 build 的）
+.gitignore:21  `*.tgz`  ⇒ 产物结构上不进 git
+⇒ AC85 的产物随其 worktree 在 fan-in 时被删除；AC85 的 AC1-AC4 全勾且 Evidence 记了路径/大小/时间戳，
+   但那个路径今天已不可解析 ⇒ 【达成证据事后不可复核】
+```
+**⛔ 这不是说 AC85 该退回**（它的判据当时确实被满足了，是判据本身写错了对象）。
+**⇒ 判据改为**：AC88 的验证**所用 tgz 必须由该次验证自己从 develop-tip 现 build**，
+并记录**该 build 的 `git rev-parse HEAD`（commit sha）+ 产物 sha256**；
+达成条件 = 该 commit sha 是 develop 上**新于本次阶段切换（2026-08-16）**的提交。
+**⇐ 为什么这样改**：commit sha 与 sha256 是**事后仍可核**的对象，`.tgz` 文件路径不是。
+**同一个教训的一般形态（记在这里，不另立条）**：**判据不得引用一个生命周期短于判据本身的对象。**
+worktree 内的产物、临时目录、进程 pid 都属此类；commit sha / 内容哈希 / 已提交的记录文件才是合格的锚。
+
+**🔴 2026-08-16 复核：本 AC 原文只是范围转述，不具体可执行——三点缺口，实测钉死**：
+```
+① develop-deliver-tgz.sh（DIR-123，人 08-11 裁定，已注册 catalog）只覆盖判据①（装 tgz + curl 探活），
+   grep quay-init 该脚本 = 0 命中 ⇒ 判据②（初始化）无任何自动化
+   ③冷启动 outer/inner 也没有——脚本只做 `quay serve` 端口 HTTP 探活，不是「outer/inner 冷启动」
+② orangevps（B）现状：~/work/quay 是 sync.sh 同步的开发树（有 .git、非 tgz 安装）
+   ⇒ AC88 明写"⛔ 非 git clone"，这台机现在的东西正是被排除的形态，不能当验证对象
+③ ad-arm1（C）现状：~/work/ 下【没有】quay 主 checkout（只有 quay-worktrees 历史任务遗留）
+   ⇒ 这台机上不存在可供"冷启动验证"的已安装 quay，要从零装
+```
+**⇒ 不补齐这三点，"验证时刻新于 AC85"这条判据会退化成又一次人工操作**——跟 08-06 那次同形，
+验证的是"这一次做到了"，不是"机制可重复"。**⊢ 补齐路径（供落笔方参考，manager 不代做）**：
+```
+① 扩展 develop-deliver-tgz.sh（或新增一步）覆盖 quay-init + outer/inner 冷启动的机械验证
+② B 机先清理/重装为真正的 tgz 安装（当前 sync 树不满足"非 git clone"）
+③ C 机走完整流程从零装一次
+```
+**判据不变（能取假 + 验证时刻新于 AC85），但达成前必须先解决上述三点，⛔ 不得跳过直接手工验证一次充数。**
+
+**🔴 2026-08-16 04:0xZ 新增依赖（inner needs-human 转裁，我按优先级判断路由）**：
+develop 基线 23 文件/7 族测试自 08-15 起恒红（`quay-init*` / `install-config-driven-e2e*` /
+`cold-start-skill` / `real-target-verify` / `capability-catalog` / `select-preflight-cli`），
+**正是本 AC 验证机制要跑通的对象本身** —— 不修，AC88 的机制无论怎么扩展都会撞上同一堵墙。
+**⇒ AC88 depends_on 一个独立的 suite-fix 任务**（归 outer 立案，不折进本阶段任何 AC，规模过大会污染
+阶段目标可读性）。**⛔ override 可解锁单个撞上它的任务，不能替代这个真修复。**
+**任务已由 outer 立案 + 派发（2026-08-16 04:1xZ）**：`gap-suite-fix-red-baseline-2026-08-16`
+（立案提交 `fd9c834b`，执行体 = `execute-suite-fix` workflow，run `wf_28ef714f-9cf`）。
+**⚠️ 更正（inner 2026-08-16 核实，我采纳）**：`fan-in-execute.js` **没有**机械 override/ALLOW flag
+（args 固定 task/worktree/root/runId/mergeTarget）⇒ 我原话里的「(b) override」在当前接线下
+**不是可执行选项**。inner 的处置（任务保持 ready + worktree 保留，等基线绿后重跑 fan-in）是对的。
+
+### AC89（AC85–AC88 完成后，产品化状态写回一处可核的记录）
+**判据**：验证结果（成功/失败 + 证据）落一份可机械核对的记录（同 per-task-suite-records.jsonl
+的形态——不是散文报告），供下次"产品化健康"检查复用，⛔ 不要求新造一个仪表盘。
+
+---
+
+## 🆕 AC90–AC93：交付物的**能力面**必须与**实际开发过程**一致（人 2026-08-16 04:2xZ 逐字裁定）
+
+**人原话**：「进一步检查和更新该 phase goal，保障其可操作性。* 可参考本项目历史材料
+* **关键是产出可实际部署和实际应用的 build** * **应对照本项目 Claude Code 会话历史
+（即本项目的实际开发过程），检查交付物交付的能力是否一致**」
+
+**⇒ 这条推翻了 AC85 判据的充分性**。AC85 原判据只查「tgz 里 `plugin/` 条目非空 + `plugin.json`
+版本一致」——**那只证明"打进去了"，不证明"装完能用"**（硬规则④推论三同形：fixture/配置正确 ≠ 已产出）。
+真问题是：**三层循环每天实际在调的能力面，在目标机 tgz 装完之后是不是都还在、都能跑。**
+
+### 本轮实测读数（两组只读枚举，全部可复算，⛔ 无一条是推测）
+
+**读数①——tgz 实际交付什么**（`packages/*/package.json` 的 `files` 白名单 + `package.sh` 的暂存重写）：
+```
+交付（仅 quay 包，files:21-30 = README/CHANGELOG/LICENSE/bin/src/dist/plugin/scripts/register-plugin.mjs）
+  plugin/ 全树快照（package.sh:93-96 `cp -R`），减去 plugin/test（:115），
+  且 plugin/scripts/*.ts + gate-scripts/*.ts 被删除、换成 dist/*.js 打包（:156-159），
+  并【重写调用方】（tick 文档 / skills / .sh / quay-init）指向 dist/*.js
+⛔ 不交付（四个包的 files 全部不含）
+  .claude/            ← 现役 7 个 workflow 的正本所在
+  orchestration/      ← 三层执行核 + 判准/收尾/发消息正本（466 行）
+  tasks/ · experiments/ · 仓库根 scripts/（只有 register-plugin.mjs 单文件例外）
+另：quay-native/quay-github/quay-backlog 三包 private:true 且 files 不含 plugin
+分发有【两条独立链】：npm tgz（npm install -g）与 /plugin install（marketplace ref=dist-plugin 分支，
+  由 .github/workflows/publish-plugin-dist.yml 在 `v*` tag 推送时 force-publish）
+```
+
+**读数②——开发过程实际吃重在哪**（`get_work_patterns` 全历史 tool_frequency，非自述）：
+```
+Bash 16428 次  ← 三层做事的绝对主力通道：plugin/scripts/ 的 245 个 ship 脚本经 Bash 起进程
+SendMessage 2163 · ScheduleWakeup 396 · CronList 326 · Agent 271 · Workflow 221 · CronCreate 216
+mcp__quay__* 合计仅 70 次（task_write 37 / lifecycle_retreat 11 / promote 9 / task_get 8 / list 4 / adr_list 1）
+  ⇒ 18 个 MCP 工具里【12 个实测零调用】（task_check/gate_run/gate_log/gate_list/lifecycle_complete/
+     adjudicate/adr_get/adr_write/config_validate/action_list/action_run/instrument）
+三层执行核直接点名的 plugin/scripts 脚本 ≈ 60 个；点名的 workflow = execute-suite-fix / fan-in-execute /
+  manager-tick-core / pool-quality-judge
+```
+
+**⇒ 对照结论（四个缺口，每个都能取假）**：
+
+### AC90（交付副本与正本的漂移必须有【接线的】闸——现状是自称有、实查无）
+**实测（本轮，一条命令可复算）**：
+```
+diff orchestration/ vs plugin/loop/（交付的执行核副本）
+  manager-tick-core.md    114 行差异
+  fast-mode-tick-core.md   46 行差异
+  manager-loop-tick.md   2198 行差异
+  orchestrator-tick-core.md  相同
+orchestration/manager-tick-{criteria,closing,sending}.md（466 行判准正本）
+  → find plugin/ -name 同名 = 【plugin/ 内无对应文件】⇒ 交付面根本没有这三件
+plugin/sync.sh:15 头注释自称「CI: sync.sh && git diff --exit-code plugin/ — fails if plugin is stale」
+  → grep .github/workflows/ = 零命中；grep scripts/ = 零命中；
+    plugin/test/ 只断言「文件存在且可执行」（plugin-packaging.test.mjs:536-538）
+  ⇒ 【这个防漂闸从来没有执行者】；且 sync.sh:5-6 只同步 .claude/workflows/ → plugin/workflows/，
+    结构上就不覆盖 orchestration/ → plugin/loop/
+```
+**⇒ 硬规则⑨的教科书形状**：守与不守在记录上无法区分 ⇒ 只能靠意志 ⇒ 已实际漂了。
+**判据（能取假）**：①存在一个**每轮/每次提交会被执行**的检查（接进 `scripts/test.sh` 静态层或 pre-commit，
+不是只写在注释里），它对上述**任一**副本-正本对出现差异时**报红**；②该检查的覆盖面**显式枚举**并包含
+`orchestration/*-tick-core.md → plugin/loop/`（现有 `workflows-dual-copy-drift-check.ts` 只守 3 个 workflow，
+不覆盖 loop 文档）；③**负控制**：故意改正本一行不改副本 ⇒ 该检查必须红；不红则本 AC 不成立。
+⛔ 不接受「把 plugin/ 副本手工同步一次」当达成——那修的是这一次的值，不是闸。
+
+### AC91（交付的执行核不得指向【未交付】的文件）
+**实测**：交付的 `plugin/loop/orchestrator-tick-core.md` 在 `:39` 引用 `.claude/workflows/execute-suite-fix.js`、
+在 `:70` 引用 `.claude/workflows/pool-quality-judge.js`；而 `plugin/workflows/` 只有 3 个双拷贝
+（drain-directives / fan-in-execute / run-routines），`quay-init --workflows` 也只从 `plugin/workflows/` 铺
+（`quay-init.sh:23`）⇒ **装完 tgz 的目标机上，这两步指向不存在的文件**。
+**⇒ 这正是 `referenced-not-landed` 类，但它逃过了那个 guard**（`quay-init.sh:1131` 的三条件 AND 里
+「在 init/SKILL.md 声明过」这条会豁免掉，需实读确认是哪条豁免的）。
+**判据（能取假）**：对**交付面全体**（`plugin/` 内所有 .md/.sh/.ts→dist）做一次引用解析，
+枚举出「引用了一个不在交付集里的路径」的全部条目（**枚举，不是布尔**，硬规则③），
+条数降到 0 或每条有显式豁免记录；且有一个会被执行的检查守住它。
+⛔ 不得只修这两条了事——**必须先给出全量条数**，否则修的是抽样。
+
+### AC92（交付验证面必须与实际使用面相交，现状几乎不相交）
+**实测**：`develop-deliver-tgz.sh` 在远端装完后跑的全部验证 = `quay --help`（`:140`）+ 铺临时 workspace
+跑 `quay serve --port 18091` 并 `curl` 校验 `http_code==200`（`:141-161`）。
+而开发过程真正吃重的是 **Bash 16428 次**打向 `plugin/scripts/` 的 245 个 ship 脚本 + 4 个被点名的 workflow
++ 14 个 skill；**MCP 面 18 个工具里 12 个实测零调用**。
+**⇒ 验证的是「端口活着」，使用的是「几百个脚本能不能跑」——两者几乎不相交。**
+**判据（能取假）**：装完 tgz 的目标机上，**按实测调用频次取前 N 个真实被使用的机件**
+（N 由读数②的分布决定，⛔ 不许拍一个数字——硬规则④推论：成本/分布未知前不设阈值），
+逐个**真实执行一次**并断言退出码与非空输出；至少必须含 `capability-catalog.sh`（目录自身）
++ 三层执行核点名的那 ≈60 个脚本里可离线跑的子集。**负控制**：删掉目标机上任一被验证的脚本 ⇒ 验证必须失败。
+**⇐ 本 AC 与 AC88 的分工**：AC88 管「跑没跑过」，本 AC 管「跑的是不是该跑的东西」。
+
+### AC93（两条分发链的版本必须一致，且 `/plugin install` 链在 develop 流程上可触发）
+**实测**：
+```
+.claude-plugin/marketplace.json   version = 0.3.13   ← /plugin install 实际拉的版本号
+plugin/.claude-plugin/plugin.json version = 0.4.0
+plugin/VERSION                            0.4.0
+packages/quay/package.json        version = 0.4.0
+publish-plugin-dist.yml 唯一触发 = `v*` tag 推送；最后一个 v* tag = v0.4.0，打于 2026-08-06（10 天前）
+```
+**⇒ 与 AC86 同形的结构性缺口**：dist-plugin 链的触发条件（`v*` tag）在当前 develop 三层流程里
+**从不发生**，所以 `/plugin install` 拿到的永远是 10 天前的树，而 marketplace 还声明着一个更老的版本号。
+**判据（能取假）**：①四处版本号一致（一条命令可查，现状 3:1 不一致）；
+②`/plugin install` 链要么**在 develop 流程上有真实可触发的路径且真跑过一次**（时间新于本次切换），
+要么**显式记为退役**并从 `.claude-plugin/marketplace.json` 移除误导性的 source 声明——
+⛔ 二选一，不接受「保留一个从不触发的链」（那是硬规则③的布尔化：留着看起来有，实际没有）。
+
+**⛔ AC90–AC93 的落笔归属**：全部是 `plugin/` + `.github/workflows/` + `packages/quay/scripts/`，
+归 inner（实现）+ outer（立案/派发，C17）。**manager 一条不改。**
+**⛔ 优先级**：`gap-suite-fix-red-baseline-2026-08-16` 仍是最高优先级（AC88 depends_on 它）；
+AC90–AC93 排在 AC85/AC86 在飞 impl 之后立案，⛔ 不许因为条数多就并行开四个任务把 pool 冲垮。
+
+---
+
+**⛔ 本阶段落笔归属**：AC85（本机 build）/AC86（CI 等价路径）/AC87（compound 收口）是
+`plugin/scripts/` + `tasks/*.md` + `.github/workflows/`，落点归 inner（实现）+ outer（跨主机驱动，
+C17 写所有权）。AC88（跨主机验证）需要人工触发或 outer 驱动远端会话（B/C 两台机器的 tmux 会话）。
+**manager 一条不改，本阶段的落实动作 = 投递 + 跟踪。**
+
+---
+
+## ⏸ 前一阶段（2026-08-14 00:5xZ – 2026-08-16，已被上方新阶段取代，内容原样保留）：语义派发 —— 实现 `SPEC-dispatch-ordering-semantic-2026-08-13.md`
 
 **来源**：人 2026-08-14 裁定「创建新阶段，目标即实现 `SPEC-dispatch-ordering-semantic-2026-08-13.md`，
 创建相应 AC，然后将此设为当前阶段，推进」。

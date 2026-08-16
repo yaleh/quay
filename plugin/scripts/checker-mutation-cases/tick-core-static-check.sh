@@ -96,7 +96,6 @@ write plugin/loop/orchestrator-tick-core.md \
   '**可以**:写 `orchestration/`。'
 write plugin/loop/fast-mode-tick-core.md \
   '# inner (fast-mode) tick — 执行核' \
-  '> 落地副本：引用消费方铺出源 `docs/analysis/fast-mode-loop-tick.md`（quay-init --loop 铺出、非 byte-identical）——语义同步。' \
   '## A. 每轮必跑' \
   '| A1 | `.halt` 哨兵 | 存在 ⇒ 空转 (src:1) |' \
   '## B. 每轮必产出' \
@@ -275,6 +274,42 @@ write plugin/loop/manager-loop-tick.md \
   '> 正本: orchestration/manager-loop-tick.md — 本文件只应存在这一行指针；内容一律读正本。'
 if drift_cmd; then :; else
   echo "ALWAYS-RED — restored manager pointer still reddens the drift check" >&2
+  exit 4
+fi
+
+# INJECT #6 (gap-ac90-delivery-copy-drift-gate AC3 负控制): the fast-mode pair is a SEMANTIC
+# LANDING, not a byte copy (init/SKILL.md:71 — 非 byte-identical) — the normalized-byte mode
+# compares the behavioral body from `## A.`. A ONE-LINE EDIT OF THE 正本 (orchestration/, the copy
+# untouched — the AC90 negative control) MUST redden the drift gate; restoring the line → GREEN.
+# The fixture's fast-mode copies are byte-identical (FAST_CORE written to both sides), so the
+# normalized-byte baseline is GREEN; editing only the 正本's A-row content drifts the pair.
+write orchestration/fast-mode-tick-core.md \
+  '# inner (fast-mode) tick — 执行核' \
+  '## A. 每轮必跑' \
+  '| A1 | `.halt` 哨兵 | 存在 ⇒ 空转 (src:1) — AC90 NEGATIVE-CONTROL EDIT |' \
+  '## B. 每轮必产出' \
+  '- **B1** 写回队列文件 (src:1)。' \
+  '## C. 硬约束' \
+  '| C1 | 派发形态必须 `Agent(run_in_background: true)` (src:1) |' \
+  '## D. 边界' \
+  '一律停下等人。'
+if drift_cmd; then
+  echo "STAYED-GREEN — a one-line 正本 edit (copy untouched) did not redden the fast-mode normalized-byte drift check" >&2
+  exit 3
+fi
+# RESTORE #6 → drift GREEN again.
+write orchestration/fast-mode-tick-core.md \
+  '# inner (fast-mode) tick — 执行核' \
+  '## A. 每轮必跑' \
+  '| A1 | `.halt` 哨兵 | 存在 ⇒ 空转 (src:1) |' \
+  '## B. 每轮必产出' \
+  '- **B1** 写回队列文件 (src:1)。' \
+  '## C. 硬约束' \
+  '| C1 | 派发形态必须 `Agent(run_in_background: true)` (src:1) |' \
+  '## D. 边界' \
+  '一律停下等人。'
+if drift_cmd; then :; else
+  echo "ALWAYS-RED — restored fast-mode 正本 still reddens the drift check" >&2
   exit 4
 fi
 

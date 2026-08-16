@@ -119,14 +119,17 @@ test("判据3 — --no-block with a CONSUMER row is ok", () => {
   assert.equal(v.ok, true);
 });
 
-test("判据3 — extractNoBlockCheckers finds the 3 --no-block run_checker invocations in the live test.sh", () => {
+test("判据3 — extractNoBlockCheckers finds the 2 --no-block run_checker invocations in the live test.sh", () => {
   const src = fs.readFileSync(path.join(REPO_ROOT, "scripts", "test.sh"), "utf8");
   const nbs = extractNoBlockCheckers(src);
   const byName = new Map(nbs.map((n) => [n.name, n.script]));
   assert.equal(byName.get("task-contract-check"), "task-contract-check.ts");
   assert.equal(byName.get("task-ac-carryover-check"), "task-ac-carryover-check.ts");
-  assert.equal(byName.get("tick-core-drift-check"), "tick-core-static-check.ts");
-  assert.equal(nbs.length, 3, `expected exactly 3 --no-block checkers, got ${JSON.stringify(nbs)}`);
+  // gap-ac90-delivery-copy-drift-gate: tick-core-drift-check is now a HARD gate (--check-drift
+  // without --no-block) — the pre-reconcile --no-block window is closed, so it is NOT in the
+  // --no-block set anymore (a one-sided edit 改正本而副本不落地 blocks the commit).
+  assert.equal(byName.has("tick-core-drift-check"), false, "tick-core-drift-check must be a hard gate now");
+  assert.equal(nbs.length, 2, `expected exactly 2 --no-block checkers, got ${JSON.stringify(nbs)}`);
 });
 
 // ── 判据4: execution-core Touches must declare BOTH copies ──────────────────────────────────────────

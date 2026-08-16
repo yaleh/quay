@@ -94,22 +94,6 @@ const FAST_CORE = `# inner (fast-mode) tick — 执行核
 一律停下等人。
 `;
 
-/** The fast-mode pair is checked in `semantic` mode (gap-tick-core-drift-fast-mode-mode-conflict): the
- *  shipped template carries the SAME A/B/C clauses as the 正本 but legitimately different framing +
- *  a consumer-laid source reference (docs/analysis/ — plugin/loop/ is never laid into a consumer,
- *  SKILL.md:68-71). A byte-copy of the 正本 over the 副本 would reference plugin/loop/ and redden. */
-const FAST_CORE_SHIPPED = `# inner (fast-mode) tick — 执行核（落地副本）
-**切分声明**:本副本为 quay-init --loop 铺出模板、引用目标 \`docs/analysis/fast-mode-loop-tick.md\` 源，非 byte-identical。
-## A. 每轮必跑
-| A1 | \`.halt\` 哨兵 | 存在 ⇒ 空转 (src:1) |
-## B. 每轮必产出
-- **B1** 写回队列文件 (src:1)。
-## C. 硬约束
-| C1 | 派发形态必须 \`Agent(run_in_background: true)\` (src:1) |
-## D. 边界
-一律停下等人。
-`;
-
 const PROHIBITION_DOCS = {
   "orchestration/outer-brief-2026-08-04-third-restart.md":
     "# outer 简报\n## 边界\n你是**外层**——不要自己用 `Agent` 派发实现工作到共享树。**收窄（2026-08-10，理由=单一写入者/共享树）**：外层可在自己的 worktree 里执行基础设施动作。\n",
@@ -138,7 +122,7 @@ function buildDriftRoot() {
   write(dir, "orchestration/manager-loop-tick.md", "# manager loop tick 正本\n| A1 | 读 `.quay/manager-inbox/` | (src:1) |\n");
   write(dir, "plugin/loop/manager-tick-core.md", MGR_CORE_POINTER);
   write(dir, "plugin/loop/orchestrator-tick-core.md", ORCH_CORE);
-  write(dir, "plugin/loop/fast-mode-tick-core.md", FAST_CORE_SHIPPED);
+  write(dir, "plugin/loop/fast-mode-tick-core.md", FAST_CORE);
   write(dir, "plugin/loop/manager-loop-tick.md", MGR_LOOP_POINTER);
   return dir;
 }
@@ -467,21 +451,21 @@ test("AC8: the real repo passes, three-layer exclusion notation (manager remaini
 
 // ── AC2 — the drift/pointer criterion (gap-plugin-loop-manager-drifted-copies-pointerize) ───────────
 
-test("AC2 drift baseline: byte-identical orchestrator copy + semantic fast-mode copy + pointerized manager docs are green", () => {
+test("AC2 drift baseline: byte-identical orchestrator/fast-mode copies + pointerized manager docs are green", () => {
   const dir = buildDriftRoot();
   try {
     const res = runDrift(dir, "--json");
     assert.equal(res.status, 0, `drift baseline reddened: ${res.stdout} ${res.stderr}`);
     const out = JSON.parse(res.stdout);
     assert.equal(out.ok, true);
-    // All four pairs present; the two manager pairs are POINTER-mode, orchestrator is
-    // byte-identical, and the fast-mode pair is SEMANTIC (the 副本 is a laid-down template that
-    // references the consumer docs/analysis source, not a byte copy of the 正本).
+    // All four pairs present, and the two manager pairs are POINTER-mode consistent.
     const modes = Object.fromEntries(out.pairs.map((p) => [p.shipped, p.mode]));
     assert.equal(modes["plugin/loop/manager-tick-core.md"], "pointer");
     assert.equal(modes["plugin/loop/manager-loop-tick.md"], "pointer");
     assert.equal(modes["plugin/loop/orchestrator-tick-core.md"], "byte-identical");
-    assert.equal(modes["plugin/loop/fast-mode-tick-core.md"], "semantic");
+    // The fast-mode shipped copy is a SEMANTIC LANDING, not a byte copy (init/SKILL.md:71 —
+    // "非 byte-identical"): normalized-byte compares the behavioral body from `## A.`.
+    assert.equal(modes["plugin/loop/fast-mode-tick-core.md"], "normalized-byte");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -525,72 +509,37 @@ test("AC2 negative control: a 1-line shipped manager file that does NOT referenc
   }
 });
 
-test("AC2 fast-mode semantic: a stale 副本 missing a 正本 clause reddens (falsifiable)", () => {
-  const dir = buildDriftRoot();
-  try {
-    // Remove C1 from the shipped template → the semantic gate must flag the missing clause
-    // (the exact shape of the pre-fix staleness: 副本 was missing A16b/A26 the 正本 had gained).
-    write(dir, "plugin/loop/fast-mode-tick-core.md",
-      FAST_CORE_SHIPPED.replace("| C1 | 派发形态必须 `Agent(run_in_background: true)` (src:1) |\n", ""));
-    const res = runDrift(dir, "--json");
-    assert.equal(res.status, 1, `a stale 副本 missing a clause did not redden: ${res.stdout} ${res.stderr}`);
-    const out = JSON.parse(res.stdout);
-    const fm = out.pairs.find((p) => p.shipped === "plugin/loop/fast-mode-tick-core.md");
-    assert.ok(fm && !fm.consistent, "fast-mode semantic pair must be inconsistent when a clause is missing");
-    assert.match(fm.diffStat, /missing clauses/, "the report must name the missing clause");
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("AC2 fast-mode semantic negative control: a content edit to the 副本 reddens", () => {
-  const dir = buildDriftRoot();
-  try {
-    write(dir, "plugin/loop/fast-mode-tick-core.md", FAST_CORE_SHIPPED.replace("存在 ⇒ 空转", "存在 ⇒ 空转(改坏)"));
-    const res = runDrift(dir, "--json");
-    assert.equal(res.status, 1, `an edited 副本 clause did not redden: ${res.stdout} ${res.stderr}`);
-    const out = JSON.parse(res.stdout);
-    const fm = out.pairs.find((p) => p.shipped === "plugin/loop/fast-mode-tick-core.md");
-    assert.ok(fm && !fm.consistent, "fast-mode semantic pair must be inconsistent on content drift");
-    assert.match(fm.diffStat, /content drift/, "the report must name the drifted clause");
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("AC2 fast-mode semantic role guard: a byte-copied 副本 (referencing plugin/loop) reddens", () => {
-  const dir = buildDriftRoot();
-  try {
-    // The 232e4171 regression: the 副本 is rewritten to reference plugin/loop/ (its template-source
-    // path) instead of the consumer-laid docs/analysis/ — breaking referenced⊆landed for consumers.
-    // The clauses still match, so ONLY the role guard catches it.
-    write(dir, "plugin/loop/fast-mode-tick-core.md",
-      FAST_CORE_SHIPPED.replace("docs/analysis/fast-mode-loop-tick.md", "plugin/loop/fast-mode-loop-tick.md"));
-    const res = runDrift(dir, "--json");
-    assert.equal(res.status, 1, `a byte-copied 副本 did not redden the role guard: ${res.stdout} ${res.stderr}`);
-    const out = JSON.parse(res.stdout);
-    const fm = out.pairs.find((p) => p.shipped === "plugin/loop/fast-mode-tick-core.md");
-    assert.ok(fm && !fm.consistent, "byte-copied 副本 must violate the semantic role");
-    assert.match(fm.diffStat, /ROLE VIOLATION/, "the report must name the role violation");
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("AC2: the real repo's drift gate is green (orchestrator byte-identical, fast-mode semantic, manager pointers)", () => {
-  // gap-tick-core-drift-fast-mode-mode-conflict: the fast-mode pair is now `semantic` — the real
-  // 副本's clauses match the 正本's (content modulo (src:N)), so the drift gate is GREEN, not 恒红.
+test("AC2: the real repo's shipped copies are all consistent (drift-check reports green after AC90 reconciliation)", () => {
+  // AC90 (gap-ac90-delivery-copy-drift-gate): the fast-mode copy was a STALE semantic landing
+  // (byte-identical mode flagged it permanently — the wrong criterion for a 非 byte-identical pair);
+  // after reconciliation (copy body landed to 正本 semantics, fast-mode pair switched to
+  // normalized-byte) the real repo is drift-GREEN, so test.sh can wire the HARD gate.
   const res = runDrift(REPO_ROOT, "--json");
-  assert.equal(res.status, 0, `real-repo drift reddened: ${res.stdout} ${res.stderr}`);
   const out = JSON.parse(res.stdout);
-  assert.equal(out.ok, true, "real-repo drift must be green after the fast-mode semantic fix");
-  const fm = out.pairs.find((p) => p.shipped === "plugin/loop/fast-mode-tick-core.md");
-  assert.ok(fm, "fast-mode semantic pair present");
-  assert.equal(fm.mode, "semantic");
-  assert.equal(fm.consistent, true, `fast-mode 副本 must be semantically synced: ${JSON.stringify(fm)}`);
+  assert.equal(out.ok, true, `real repo drift-gate must be GREEN after AC90 reconciliation: ${JSON.stringify(out)}`);
   for (const p of out.pairs) {
-    if (p.mode !== "pointer") continue;
-    assert.equal(p.consistent, true, `${p.shipped} must be a consistent pointer: ${JSON.stringify(p)}`);
+    assert.equal(p.consistent, true, `${p.shipped} must be consistent: ${JSON.stringify(p)}`);
+  }
+});
+
+test("AC90 negative control: a one-line edit of the fast-mode 正本 (orchestration/) with the copy untouched must redden the drift gate", () => {
+  const dir = buildDriftRoot();
+  try {
+    const res0 = runDrift(dir, "--json");
+    assert.equal(res0.status, 0, `drift baseline reddened: ${res0.stdout} ${res0.stderr}`);
+    // Edit ONE line of the 正本's behavioral body (A10), leave plugin/loop/fast-mode-tick-core.md
+    // untouched → the normalized-byte pair must go RED (AC90 判据③ 负控制).
+    write(dir, "orchestration/fast-mode-tick-core.md",
+      FAST_CORE.replace("(src:1)", "(src:1) — AC90 NEGATIVE-CONTROL EDIT"));
+    const res = runDrift(dir, "--json");
+    assert.equal(res.status, 1, `a one-line 正本 edit did not redden the drift gate: ${res.stdout} ${res.stderr}`);
+    const out = JSON.parse(res.stdout);
+    const fm = out.pairs.find((p) => p.shipped === "plugin/loop/fast-mode-tick-core.md");
+    assert.ok(fm && !fm.consistent, "the fast-mode normalized-byte pair must be inconsistent");
+    assert.equal(fm.mode, "normalized-byte");
+    assert.match(fm.diffStat, /1 hunk/, "the report must show the normalized-body diff of the edited line");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 
