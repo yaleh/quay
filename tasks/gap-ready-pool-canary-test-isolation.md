@@ -1,7 +1,7 @@
 ---
 id: gap-ready-pool-canary-test-isolation
 title: "ready-pool canary test-isolation：:2778 改读受控 fixture 而非真实共享账本——中间红不再恒红全量 suite"
-status: ready
+status: done
 labels:
   - gap
   - mechanism
