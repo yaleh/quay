@@ -1,7 +1,7 @@
 ---
 id: gap-quay-has-never-self-hosted-its-own-cold-start
 title: "quay should be able to start itself with its own shipped quay:cold-start skill, at the same formal-AC rigor as the skill promises other projects"
-status: todo
+status: done
 role: compound
 depends_on:
   - gap-send-keys-verified-hash-check-cannot-tell-typed-from-submitted
@@ -105,8 +105,9 @@ session-bootstrap step.
 
 ## Acceptance Criteria
 
-- [ ] AC1: the 3 children + the 2 linked prerequisites all reach `done`, each with its own
+- [x] AC1: the 3 children + the 2 linked prerequisites all reach `done`, each with its own
       real-run evidence per its own task body — this parent does not restate their evidence
+      （AC87 核实 2026-08-16：3 children 全 done 5/5·5/5·7/7 + 2 depends_on 全 done）
 - [x] AC2: `gap-quay-self-hosting-e2e-proof`'s six-key checklist, run for real on quay's own repo,
       is `true` on all six keys without any human-in-the-loop verification step —— **已满足
       （重跑 2026-08-12，D2 修复后）**：六键**全部 `true`**（真实运行，见
@@ -114,8 +115,10 @@ session-bootstrap step.
       human-in-the-loop」成立**——step 0 `dead-loop-check.sh` 对 fresh cold-start 自证
       `never-started`（live + 确定性三类对照），**零 operator 诊断**，冷启动自动走 fresh-start
       分支 ⇒ `self_certify = 1`。capstone 重跑证据见其任务体 Evidence 重跑段 + proof doc §2–§4
-- [ ] AC3: dispatched in dependency order — the 2 prerequisites land before the SH4 capstone
+- [x] AC3: dispatched in dependency order — the 2 prerequisites land before the SH4 capstone
       attempts to rely on them — verified by merge-commit ordering in `git log`, not asserted
+      （AC87 核实 2026-08-16：capstone f49ae2fe/631803ab land 于 08-12 09:38；depends_on 边 22d1bbaa
+      08-11 修正，全 done）
 
 ## Definition of Done
 
