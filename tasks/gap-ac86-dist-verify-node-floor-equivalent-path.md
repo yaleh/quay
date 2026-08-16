@@ -52,6 +52,7 @@ fixture/配置正确 ≠ 已产出）。
 ## Touches
 
 - .github/workflows/ci.yml（若选路径①）
-- scripts/test.sh + plugin/scripts/*（若选路径②，本机 floor 验证步）
+- scripts/test.sh（若选路径②，本机 floor 验证步）
+- plugin/scripts/*（若选路径②，本机 floor 验证步；含 capability-catalog.sh——0a4e5c1f 转义 $TMUX 修 CI 下 package.sh 构建失败）
 - plugin/test/*（对应测试）
 - tasks/gap-ac86-dist-verify-node-floor-equivalent-path.md（自身）
