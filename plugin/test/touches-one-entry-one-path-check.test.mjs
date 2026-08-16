@@ -1,11 +1,13 @@
 // @test-group governance
 // touches-one-entry-one-path-check.test.mjs — the Touches「一条目一路径」shape rule
 // (tasks/gap-touches-one-entry-one-path, 判据1/判据3). A Touches bullet must declare EXACTLY ONE
-// path/glob entry; a bullet containing " / " (multi-path, e.g. AC66's `orchestration/A.md /
-// orchestration/B.md / orchestration/C.md`（说明）) is RED because the ONE Touches parser
-// (parseTouchEntriesWithTags) turns the whole line into ONE composite entry that (a) matches NO file
-// on disk and (b) HIDES each real path inside it from checkTouchesPair's overlap judgment — AC66's
-// 3-path bullet hid `orchestration/fast-mode-tick-core.md` from AC78 (判据3).
+// path/glob entry; a bullet containing a path-separating delimiter — " / " (multi-path, e.g. AC66's
+// `orchestration/A.md / orchestration/B.md / orchestration/C.md`（说明）), or "、" / "，" / "," (the
+// AC76 fan-in case `plugin/scripts/slot-refill.ts、plugin/scripts/fast-mode-telemetry.ts`) — is RED
+// because the ONE Touches parser (parseTouchEntriesWithTags) turns the whole line into ONE composite
+// entry that (a) matches NO file on disk and (b) HIDES each real path inside it from
+// checkTouchesPair's overlap judgment — AC66's 3-path bullet hid
+// `orchestration/fast-mode-tick-core.md` from AC78 (判据3).
 //
 // This file pins:
 //   * the MECHANICAL flag — flagMultiPathTouchEntries in
@@ -85,6 +87,52 @@ test("判据1 negative control — ' / ' inside a （…） annotation is not a 
   assert.deepEqual(flagMultiPathTouchEntries(section), []);
 });
 
+// ── 判据2 (gap-touches-multipath-delimiter-coverage-gap): the AC76 full-width-delimiter gap ───────
+
+test("判据2 positive — the AC76 fan-in case: '、'-separated 2-path bullet is flagged (RED)", () => {
+  // AC76's historical `、`-composite Touches bullets (before they were split). flagMultiPathTouchEntries
+  // missed these at author time (only " / " was tested) and anti-drift was the first mechanism to catch
+  // them (out-of-declared HARD-FAIL). Now the author-time checker must redden them.
+  const section = [
+    "- plugin/scripts/slot-refill.ts、plugin/scripts/fast-mode-telemetry.ts（AC76 判据5 退役标注）",
+    "- plugin/test/red-on-omission-audit.test.mjs (new)",
+  ].join("\n");
+  const flagged = flagMultiPathTouchEntries(section);
+  assert.equal(flagged.length, 1, "the '、'-composite bullet must be the only flagged entry");
+  assert.match(flagged[0].path, /fast-mode-telemetry\.ts/, "flagged composite must include the second path");
+  assert.match(flagged[0].path, /slot-refill\.ts/, "flagged composite must include the first path");
+});
+
+test("判据2 positive — '，'-separated 2-path bullet is flagged (RED)", () => {
+  const section = "- plugin/scripts/a.ts，plugin/scripts/b.ts";
+  const flagged = flagMultiPathTouchEntries(section);
+  assert.equal(flagged.length, 1, "the '，'-composite bullet must be flagged");
+  assert.match(flagged[0].path, /plugin\/scripts\/b\.ts/);
+});
+
+test("判据2 positive — ','-separated 2-path bullet is flagged (RED)", () => {
+  const section = "- plugin/scripts/a.ts, plugin/scripts/b.ts";
+  const flagged = flagMultiPathTouchEntries(section);
+  assert.equal(flagged.length, 1, "the ','-composite bullet must be flagged");
+  assert.match(flagged[0].path, /plugin\/scripts\/b\.ts/);
+});
+
+test("判据2 positive — a 3-path bullet mixing ' / ' and '、' is flagged once (RED)", () => {
+  const section = "- orchestration/a.md / orchestration/b.md、orchestration/c.md";
+  const flagged = flagMultiPathTouchEntries(section);
+  assert.equal(flagged.length, 1, "one multi-path bullet ⇒ exactly one flag");
+  assert.match(flagged[0].path, /orchestration\/c\.md/);
+});
+
+test("判据2 negative — single-path bullets are not flagged for any new delimiter (能取假)", () => {
+  // A real repo path never contains 、/，/, — verified no tracked file carries them in its name. A
+  // delimiter that lives inside a （…） annotation is annotation, not a path separator (stripped first).
+  assert.deepEqual(flagMultiPathTouchEntries("- plugin/scripts/a.ts"), []);
+  assert.deepEqual(flagMultiPathTouchEntries("- plugin/scripts/a.ts（含顿号、的说明）"), []);
+  assert.deepEqual(flagMultiPathTouchEntries("- plugin/scripts/a.ts（含全角逗号，的说明）"), []);
+  assert.deepEqual(flagMultiPathTouchEntries("- plugin/scripts/a.ts（含半角逗号,的说明）"), []);
+});
+
 // ── 判据1 consumer: per-body check with the grandfather baseline ───────────────────────────────────
 
 test("判据1 consumer — a multi-path bullet in a non-grandfathered body is a violation; grandfathered is not", () => {
@@ -121,12 +169,23 @@ test("baseline — every entry is a real task file and baseline-count matches", 
   }
 });
 
-test("scan — the whole-repo scan is GREEN (10 in-scope split, 8 out-of-scope grandfathered) and the CLI exits 0", () => {
+test("scan — the whole-repo scan finds EXACTLY the 2 pre-existing '、'-bullets the old ' / '-only check missed (能取假), and the CLI exits 1 naming them", () => {
+  // gap-touches-multipath-delimiter-coverage-gap: expanding the delimiter set to '、'/'，'/',' means
+  // two DONE (historical) task files whose Touches declare ≥2 REAL paths in ONE bullet are now caught —
+  // they were invisible to the old ' / '-only test (the same gap class as the AC76 fan-in case). They
+  // are NOT grandfathered and are OUT of this task's Touches scope to split, so the scan reports them
+  // for a follow-up to split into one entry per line. Grandfathered files are still skipped (baseline
+  // mechanism unchanged), and no prose/brace/timestamp bullet is a false positive (判据2 能取假).
   const violations = scanTasksOneEntryOnePath(TASKS_DIR, REPO_ROOT);
-  assert.deepEqual(violations, [], "no non-grandfathered multi-path bullets remain in the whole repo");
+  const files = violations.map((v) => v.file).sort();
+  assert.deepEqual(files, [
+    "tasks/gap-serve-pid-derived-port-collision-family.md",
+    "tasks/gap-tmp-dir-leak-unpaired-mkdtemp-cleanup.md",
+  ], "exactly the 2 pre-existing '、'-multi-path bullets are flagged (nothing else)");
+  assert.ok(violations.every((v) => v.code === "touches-multi-path-bullet"), "every flagged task carries the multi-path bullet code");
   const r = spawnSync("node", ["--no-warnings", "--experimental-strip-types", CHECKER, "--root", REPO_ROOT], { encoding: "utf8" });
-  assert.equal(r.status, 0, `CLI must exit 0 on the clean repo:\n${r.stdout}\n${r.stderr}`);
-  assert.match(r.stdout, /0 multi-path bullet/, "CLI reports zero multi-path bullets");
+  assert.equal(r.status, 1, `CLI must exit 1 naming the 2 violations:\n${r.stdout}\n${r.stderr}`);
+  assert.match(r.stdout, /2 multi-path bullet/, "CLI reports two multi-path bullets");
 });
 
 // ── 判据3: 能取假 — AC66 real sample replay RED → GREEN; AC78∩AC66 overlap corrected ──────────────

@@ -1,11 +1,13 @@
 // touches-one-entry-one-path-check.ts — Touches「一条目一路径」形态检查器
 // (tasks/gap-touches-one-entry-one-path, 判据1/判据3).
 //
-// THE DEFECT (from the task title): a `## Touches` bullet may declare TWO OR MORE paths joined by
-// " / " (e.g. `orchestration/A.md / orchestration/B.md / orchestration/C.md（说明）`). The ONE Touches
-// parser (touches-parser.ts, ADR-004) is deliberately line-oriented: `parseTouchEntriesWithTags`
-// takes the WHOLE line as ONE entry (`^[-*]\s+(.+)$`), so a multi-path bullet parses to a single
-// COMPOSITE entry — the string "A / B / C". That composite:
+// THE DEFECT (from the task title): a `## Touches` bullet may declare TWO OR MORE paths joined by a
+// path-separating delimiter — " / " (e.g. `orchestration/A.md / orchestration/B.md / C.md（说明）`),
+// or the full-width "、" (顿号) / "，" (comma), or half-width "," (the AC76 fan-in case:
+// `plugin/scripts/slot-refill.ts、plugin/scripts/fast-mode-telemetry.ts`). The ONE Touches parser
+// (touches-parser.ts, ADR-004) is deliberately line-oriented: `parseTouchEntriesWithTags` takes the
+// WHOLE line as ONE entry (`^[-*]\s+(.+)$`), so a multi-path bullet parses to a single
+// COMPOSITE entry — the string "A / B / C" (or "A、B"). That composite:
 //   (a) matches NO file on disk (touches-resolve treats it as a missing path), and
 //   (b) HIDES every real path inside it from `checkTouchesPair`'s file-set expansion — the
 //       dispatch pre-flight never sees that the task touches `orchestration/C.md`, so a sibling
@@ -17,9 +19,9 @@
 //   on that exact file was invisible to the machine (判据3).
 //
 // THIS checker makes 判据1 mechanical: a Touches bullet that, after removing parenthetical
-// annotations (which repo paths never contain — the ONE parser's own invariant), still contains
-// " / " declared ≥2 paths in one bullet ⇒ RED. 判据3 (能取假): the AC66 real 3-path bullet replays
-// RED; after splitting it replays GREEN.
+// annotations (which repo paths never contain — the ONE parser's own invariant), still contains a
+// path-separating delimiter (" / " / "、" / "，" / ",") has declared ≥2 paths in one bullet ⇒ RED.
+// 判据3 (能取假): the AC66 real 3-path bullet replays RED; after splitting it replays GREEN.
 //
 // SINGLE-SOURCE: the per-line bullet extraction is the SAME idiom the ONE parser uses
 // (`^[-*]\s+(.+)$`, exactly as flagBareDirUncertainTouches in touches-parser.ts does it) — this
@@ -64,12 +66,40 @@ export function stripAllTouchAnnotations(entry) {
 }
 
 /**
+ * Path-separating delimiters that make a single Touches bullet multi-path. A bullet is multi-path
+ * when it declares ≥2 REAL paths in ONE line — the delimiters between them are:
+ *   " / "  — space-slash-space (the separator the original multi-path bullets used, e.g. AC66);
+ *   "、"    — full-width 顿号 (dunhao / enumeration comma), the AC76 fan-in case
+ *             (`plugin/scripts/slot-refill.ts、plugin/scripts/fast-mode-telemetry.ts`);
+ *   "，"    — full-width comma;
+ *   ","    — half-width comma.
+ * Presence of a delimiter is NOT enough on its own (prose bullets carry ，/、/,-separated text); we
+ * also require that ≥2 of the resulting tokens are path-like (see PATH_TOKEN_RE below), so a
+ * single-path bullet with prose, timestamps, or a glob brace-expansion group is never a false
+ * positive. Delimiters inside a （…） annotation or a {a,b,c} brace group are stripped first.
+ */
+export const MULTI_PATH_SEPARATOR_RE = / \/ |、|，|,/;
+
+/** Glob brace-expansion groups ({a,b} — ONE glob entry; the commas inside are NOT path separators). */
+export const BRACE_GROUP_RE = /\{[^}]*\}/g;
+
+/**
+ * A token counts toward the ≥2-paths judgment when it is a REAL repo path:
+ *   * dir/file.ext          — contains a path separator AND a dotted filename (e.g. a.ts, a.md);
+ *   * barefilename.ext      — no separator, but a known repo extension (e.g. slot-refill.ts).
+ * Prose tokens (Chinese text, `12:22:04/07/10` timestamps, `2026-07-28` dates, `{a,b}` brace items
+ * that survived stripping, prose like `加排除项修复`) are NOT path-like and never count.
+ */
+export const PATH_TOKEN_RE = /(?:[\/\\][^\/\\]*\.[^\/\\]+)|(?:^[\w@.+()-]+\.(?:ts|js|mjs|md|sh|json|ya?ml|tsx|jsx|css|html|svg|png|txt|toml|go|py|rb|c|h|cc|cpp)$)/;
+
+/**
  * Flag multi-path Touches bullets. Returns [{ raw, path }]:
  *   raw  — the bullet text after the `- ` marker (with its annotation, for reporting);
  *   path — the annotation-stripped content (the composite, when multi-path).
- * A bullet is multi-path when, after stripAllTouchAnnotations, it still contains " / " (space-slash-
- * space — the separator the multi-path bullets in this repo actually use). Single-path bullets,
- * annotation-only bullets, and bullets whose " / " lives inside a （…） annotation are NOT flagged.
+ * A bullet is multi-path when, after stripAllTouchAnnotations + brace-strip, splitting on
+ * MULTI_PATH_SEPARATOR_RE yields ≥2 path-like tokens (PATH_TOKEN_RE). Single-path bullets, prose-only
+ * bullets, glob brace-expansion entries, and bullets whose separator lives inside a （…） annotation
+ * are NOT flagged.
  */
 export function flagMultiPathTouchEntries(touchesSection) {
   if (!touchesSection) return [];
@@ -79,8 +109,12 @@ export function flagMultiPathTouchEntries(touchesSection) {
     const m = line.match(/^[-*]\s+(.+)$/); // the ONE parser's per-line extraction idiom
     if (!m) continue;
     const entry = m[1].trim();
-    const cleaned = stripAllTouchAnnotations(entry);
-    if (/ \/ /.test(cleaned)) out.push({ raw: entry, path: cleaned });
+    const cleaned = stripAllTouchAnnotations(entry).replace(BRACE_GROUP_RE, "");
+    const pathTokens = cleaned
+      .split(MULTI_PATH_SEPARATOR_RE)
+      .map((t) => t.trim())
+      .filter((t) => PATH_TOKEN_RE.test(t));
+    if (pathTokens.length >= 2) out.push({ raw: entry, path: cleaned });
   }
   return out;
 }
@@ -116,7 +150,7 @@ export function checkTaskOneEntryOnePath(body, taskFileRel, grandfathered) {
     code: "touches-multi-path-bullet",
     what:
       `## Touches 含多路径 bullet（tasks/gap-touches-one-entry-one-path 判据1：Touches bullet 只允许一个` +
-      `路径/glob 条目，含 " / " 的多路径 bullet ⇒ 红——parseTouchEntriesWithTags 把整行当一个 entry，` +
+      `路径/glob 条目，含多路径分隔（" / " / "、" / "，" / ","）的多路径 bullet ⇒ 红——parseTouchEntriesWithTags 把整行当一个 entry，` +
       `组合串匹配不到任何文件、且把每个真实路径藏起来使 checkTouchesPair 判不到重叠）：${entries}`,
   }];
 }
