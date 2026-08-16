@@ -496,6 +496,13 @@ export function semanticTriggerHeuristic(heartbeat) {
 ```
 - **B3 全量 suite 后台起跑**【freshness（AC61 A-5，2026-08-14；FAMILY-5）：`finishedAt` 距今 ≥ 一个 tick 周期 ⇒ 陈旧不计入，同 A11】:条件 = 本轮收尾 ≥1(或有新 merge 落地)**且** `state != running` **且** `resource-gate.sh --for full-suite` 放行。被测 worktree/integration checkout 时**必须**同传 `--state-dir "$REPO_ROOT/.quay"` (src:869 "停派",871 "资源闸放行")。**事件分支(`gap-b3-tick-coupled-misses-between-tick-merges`,2026-08-11):起跑是事件,不是本 tick 的轮询副作用**——`suite-state-trigger.ts` 的 Monitor 已把同一条件事件化:integration HEAD 前移(merge 落地)且 `state != running` ⇒ `SUITE-MERGE-PENDING`(AC2);`state=green` 且 `develop..integration>0` 且持续 idle ⇒ `SUITE-IDLE-GREEN`(AC3)。两条事件都驱动起跑(不靠 tick),`event_not_tick` 恒 1。本 B3 仍是 tick 内兜底(收尾 ≥1 路径),事件路径在其之前 (src:任务体 gap-b3-tick-coupled-misses-between-tick-merges Proposal/Contract)
 ```
+**同段迁入（AC76 2026-08-15 人裁定「tick core 不留已退役文本」，正文从核内迁出归此）——A2/A11/C3 三条 AC84 套件读取/闸门行**（原在 orchestrator-tick-core.md A/C 段，随 B3 退役）：
+
+```
+| A2 | ~~`pgrep -af 'suite-state-trigger.ts --monitor'`~~ | ⛔ outer tick 不跑 suite、不等任何 suite 测试的输出、不因 `state=running` 停 tick（人 2026-08-15 11:3xZ 重申）(src:211 "suite-state-trigger.ts --monitor";AC84 退役)
+| A11 | ~~读 `.quay/full-suite-state.json` 的 `state`/`reason`/`durationMs`~~ | ⛔ outer tick 不跑 suite 测试、不等任何 suite 测试的输出（人 2026-08-15 09:47Z + 11:3xZ）(src:887 "本轮的 suiteGreen";AC84 退役)
+| C3 | ~~`resource-gate.sh --for full-suite` 的 outer 侧前置~~ | ⛔ outer tick 不跑 suite 测试、不等 suite 输出（人 11:3xZ）(src:436 "跑全量套件前调用资源闸";AC84 退役)
+```
 
 
 ## R34 — outer B5 轮次记录退役（AC84 2026-08-15，outer 不跑 suite ⇒ closed 恒空）

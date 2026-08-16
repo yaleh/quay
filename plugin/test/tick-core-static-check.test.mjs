@@ -375,15 +375,45 @@ test("AC8: the real repo passes, three-layer exclusion notation (manager remaini
   // carries the exclusion marker", asserted as `>= 1`.
   assert.ok(out.ac8.excluded["orchestration/manager-tick-core.md"] >= 1,
     `manager has no remaining in-core dead item with the exclusion marker: ${JSON.stringify(out.ac8.excluded)}`);
-  // AC1 — 三层记法一致: outer (B4) excludes at least one dead item. inner's C7 was MIGRATED out
-  // (2026-08-15, AC76 tick-core retirement — a single-line pointer to archive R25, not an in-core
-  // dead line), so the inner core carries NO remaining in-core dead-annotated line; the pairing rule
-  // (violations === 0) is vacuous for it, and the migrated-pointer check below keeps the migration
-  // falsifiable.
-  assert.ok(out.ac8.excluded["orchestration/orchestrator-tick-core.md"] >= 1,
-    `outer core has no dead-exclusion marker: ${JSON.stringify(out.ac8.excluded)}`);
+  // AC1 — 三层记法一致 (AC76 2026-08-15 人裁定「tick core 不留已退役文本」): outer (A2/A11/B3/B4/
+  // B5/C3/红窗分诊) AND inner (C7) were ALL migrated out of their cores to archive pointers
+  // (AC58-retired-clauses.md R32/R33/R34), so BOTH outer and inner cores now carry ZERO in-core
+  // dead-annotated lines (excluded == 0, dead == 0 — verified empirically against the real repo on
+  // 2026-08-16; a prior inner-side assertion of outer excluded >= 1 and a prior outer-side assertion
+  // of fast-mode excluded >= 1 both postdate the migrations and redden). The surviving invariants:
+  // (a) manager still carries in-core dead items with the exclusion marker (asserted above as `>= 1`);
+  // (b) the 迁出检查 loops below — a regression that re-introduces any migrated entry as an in-core
+  // dead line (or loses the pointer/archive section) reddens.
+  assert.equal(out.ac8.excluded["orchestration/orchestrator-tick-core.md"], 0,
+    `outer core re-gained an in-core dead-exclusion marker (expected 0 after AC76 migration): ${JSON.stringify(out.ac8.excluded)}`);
+  assert.equal(out.ac8.excluded["orchestration/fast-mode-tick-core.md"], 0,
+    `inner core re-gained an in-core dead-exclusion marker (expected 0 after AC76 C7 migration): ${JSON.stringify(out.ac8.excluded)}`);
+  assert.equal(out.ac8.dead["orchestration/orchestrator-tick-core.md"], 0,
+    `outer core has an in-core dead-annotated line (expected none after AC76 migration): ${JSON.stringify(out.ac8.dead)}`);
   assert.equal(out.ac8.dead["orchestration/fast-mode-tick-core.md"], 0,
-    `inner core still has an in-core dead-annotated line (expected none after C7 migrated): ${JSON.stringify(out.ac8.dead)}`);
+    `inner core has an in-core dead-annotated line (expected none after AC76 C7 migration): ${JSON.stringify(out.ac8.dead)}`);
+  // 迁出检查 (AC76): outer's migrated entries (A2/A11/B3/B4/B5/C3/红窗分诊) must NOT be in-core
+  // dead-annotated lines — their bodies live in AC58-retired-clauses.md and the core holds only
+  // single-line pointers to the archive anchors. A regression that re-introduces any of them as an
+  // in-core dead line (or loses the pointer/archive section) reddens.
+  const OUTER_DEAD_ANNOT_RE = /前提已死|来源已冻结|已冻结|前提已失效|前提已被人的裁定移除/;
+  const OUTER_MIGRATED = ["A2", "A11", "B3", "B4", "B5", "C3", "红窗分诊"];
+  const outerCore = fs.readFileSync(path.join(REPO_ROOT, "orchestration/orchestrator-tick-core.md"), "utf8");
+  const ac58Archive = fs.readFileSync(path.join(REPO_ROOT, "orchestration/archive/AC58-retired-clauses.md"), "utf8");
+  for (const entry of OUTER_MIGRATED) {
+    // (a) 核内只有指针: the core references the archive anchor for this entry.
+    assert.ok(outerCore.includes("正身已迁出") && outerCore.includes(entry),
+      `migrated outer entry ${entry} lost its single-line archive pointer (not pointerized)`);
+    // (b) 不在核内作死标记行: no core line mentioning the entry carries a DEAD_ANNOT_RE marker.
+    const deadLines = outerCore.split("\n").filter((l) => l.includes(entry) && OUTER_DEAD_ANNOT_RE.test(l));
+    assert.equal(deadLines.length, 0,
+      `migrated outer entry ${entry} still appears as an in-core dead-annotated line: ${JSON.stringify(deadLines)}`);
+  }
+  // (c) 正身在档案: the AC58 archive carries the R32/R33/R34 sections referenced by the pointers.
+  for (const anchor of ["## R32", "## R33", "## R34"]) {
+    assert.ok(ac58Archive.includes(anchor),
+      `AC58 archive lost required section ${anchor}`);
+  }
   // 迁出检查 (2026-08-15 人裁定清死条目): the migrated entries A7/A12a/B2c/乙/丁 must NOT be
   // in-core dead-annotated lines — their bodies live in manager-phase-goal-archive.md and the core
   // holds only single-line pointers to the archive anchors. A regression that re-introduces any of

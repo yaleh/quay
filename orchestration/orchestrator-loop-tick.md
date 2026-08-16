@@ -1130,17 +1130,16 @@ touches/cap/停止条件）= **内层**）：
 
 ### 4b. 「在飞」词汇拆分 + 输入框纪律（AC7/AC8 — gap-drive-text-carries-data-not-behavior-outer-inner-handoff）
 
-**「在飞」拆为两种含义，报告/队列状态里分别标注**（AC7，2026-08-04 第三次实锤后加）——混用会让并发
-指令看起来已满足：
+**在飞判读统一为【subagent】单一读法**（AC76 ⑦，manager-phase-goal.md:758——cap 维度与在飞维度合并为同一读法；2026-08-15 人裁定「检查退役文本衍生的相关操作和文本并清理」，本节为 AC76 前旧文本清理）：
 
 | 词 | 含义 | 用什么核实 |
 |---|---|---|
-| **遥测括号在飞** | `--task-start` 已写、`--task-end` 未写 | 遥测 `inProgress[]` / START 事件——START **只证括号在飞，不证 subagent 在飞** |
-| **subagent 在飞** | 内层真的起了后台 `Agent(run_in_background)` | **读原始 Agent 工具调用的 `input.run_in_background` 字段**（meta-cc transcript 查询）——唯一可靠判据 |
+| **subagent 在飞** | 内层真的起了后台 `Agent(run_in_background)` | **读原始 Agent 工具调用的 `input.run_in_background` 字段**（meta-cc transcript 查询）——唯一在飞读数 |
+| **括号（--task-start/--task-end）** | 派发留痕 | 保留**派发留痕**用途；⛔ **不再作为在飞读数**（遥测括号/reconcile 探针/worktree 计数三者都是代理，全部退出在飞判定） |
 
 **外层核实并发必须读原始字段，不得用 START 事件或 pane UI 文字。** 实例（本 tick）：内层唯一 Agent 调用
 `run_in_background` 缺失，而 START 事件显示 A|D 双在飞——用错仪器导致静默满足，正是本条目要消灭的形态。
-报告/队列状态里分别写「括号在飞 N」「subagent 在飞 M」，不合并成一个「在飞」。
+报告/队列状态里只写「subagent 在飞 M」（唯一在飞读数）；括号不合并进在飞读数，保留派发留痕用途。
 
 **输入框是待提交缓冲区，不是笔记本（AC8）**：
 
