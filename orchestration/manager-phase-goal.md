@@ -66,6 +66,25 @@ parent 的阻碍原因（compound depsReadyFor 死锁）已被 `gap-compound-dep
 **判据（能取假）**：验证时刻新于 AC85 产出的当前产物；⛔ 不得引用 08-06/08-11 的历史验证记录
 作为本 AC 的达成证据（那些针对的是旧版本或单个 scoped fix，不是当前完整版本的全流程）。
 
+**🔴 2026-08-16 复核：本 AC 原文只是范围转述，不具体可执行——三点缺口，实测钉死**：
+```
+① develop-deliver-tgz.sh（DIR-123，人 08-11 裁定，已注册 catalog）只覆盖判据①（装 tgz + curl 探活），
+   grep quay-init 该脚本 = 0 命中 ⇒ 判据②（初始化）无任何自动化
+   ③冷启动 outer/inner 也没有——脚本只做 `quay serve` 端口 HTTP 探活，不是「outer/inner 冷启动」
+② orangevps（B）现状：~/work/quay 是 sync.sh 同步的开发树（有 .git、非 tgz 安装）
+   ⇒ AC88 明写"⛔ 非 git clone"，这台机现在的东西正是被排除的形态，不能当验证对象
+③ ad-arm1（C）现状：~/work/ 下【没有】quay 主 checkout（只有 quay-worktrees 历史任务遗留）
+   ⇒ 这台机上不存在可供"冷启动验证"的已安装 quay，要从零装
+```
+**⇒ 不补齐这三点，"验证时刻新于 AC85"这条判据会退化成又一次人工操作**——跟 08-06 那次同形，
+验证的是"这一次做到了"，不是"机制可重复"。**⊢ 补齐路径（供落笔方参考，manager 不代做）**：
+```
+① 扩展 develop-deliver-tgz.sh（或新增一步）覆盖 quay-init + outer/inner 冷启动的机械验证
+② B 机先清理/重装为真正的 tgz 安装（当前 sync 树不满足"非 git clone"）
+③ C 机走完整流程从零装一次
+```
+**判据不变（能取假 + 验证时刻新于 AC85），但达成前必须先解决上述三点，⛔ 不得跳过直接手工验证一次充数。**
+
 ### AC89（AC85–AC88 完成后，产品化状态写回一处可核的记录）
 **判据**：验证结果（成功/失败 + 证据）落一份可机械核对的记录（同 per-task-suite-records.jsonl
 的形态——不是散文报告），供下次"产品化健康"检查复用，⛔ 不要求新造一个仪表盘。
