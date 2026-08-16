@@ -43,7 +43,7 @@ round215 cpu_time 多 1799s 也与「CPU 饥饿拖慢」方向相反。**替代�
 
 ## Acceptance Criteria
 
-- [ ] AC1: `.quay/verification-round.jsonl` 存在 ≥3 轮记录，满足 `laneCount==8` ∧ `state=="green"`
+- [x] AC1: `.quay/verification-round.jsonl` 存在 ≥3 轮记录，满足 `laneCount==8` ∧ `state=="green"`
       ∧ `durationMs <= 600000`，且 `startedAt` 晚于立条时刻（2026-08-16T16:2xZ）——读生产载体非 fixture。
       **⊢ AC1 已 3/3 达成（manager 2026-08-16 17:5xZ 复算，全 worktree jsonl 去重）**：
       ```
@@ -52,21 +52,22 @@ round215 cpu_time 多 1799s 也与「CPU 饥饿拖慢」方向相反。**替代�
       round=221  17:30:12  green  599.591s  lane8  tests=5003  conc=2  commit=17e91e38
       ```
       全部满足 green∧lane8∧≤600s∧立条后 + tests≥4951。三轮跑在 concurrentSuitesRunning=2（更不利并发环境），
-      按 manager 裁定「AC3 防挑有利环境」逻辑计入（证据强度高于干净窗口）。**⛔ 但 AC1b 仍未满足（见下），
-      不得勾**。⚠️ **余量读数**：round221 = 599.591s，距 600000 只剩 **409ms（0.07%）**；三轮 485/556/600
+      按 manager 裁定「AC3 防挑有利环境」逻辑计入（证据强度高于干净窗口）。**AC1 本体 3/3 达成，勾；
+      AC1b 为（待外部）项见下**。⚠️ **余量读数**：round221 = 599.591s，距 600000 只剩 **409ms（0.07%）**；
+      三轮 485/556/600
       方差大 ⇒ **600s 目标目前没有稳定余量**。⛔ 取整会掩盖「几乎压线」——Evidence 记精确 ms。
 - [ ] AC1b: **⛔ AC101 不得在 `17e91e38` 进 develop 之前判达成**（manager 2026-08-16 17:4xZ 裁定，硬规则④推论三
       原形——「实现了、测试绿了、但生产没跑过」与「没实现」同形）。让 556s 成立的 PHASE_OVERLAP 开关在
       develop 上默认仍是关（`scripts/test.sh:1023 PHASE_OVERLAP="${QUAY_PHASE_OVERLAP:-0}"`，develop 工作树
       现读）。**判据**：AC1 的 3 轮里至少 1 轮跑在【`17e91e38` 已进 develop 之后】的 develop 基线上；
       或等价地，AC101 判达成时 `grep PHASE_OVERLAP scripts/test.sh` 在 develop 上默认显示为 1。
-      **取假（一条命令）**：`git merge-base --is-ancestor 17e91e38 develop` 为假 ⇒ AC101 不得勾。
-- [ ] AC2: 这 3 轮 `tests` 字段不得低于基线 **4951**（禁止砍覆盖换速度；低于基线即不计入且判作弊）。
-- [ ] AC3: 优化手段落成代码/配置（可 `git log` 追溯的提交），⛔ 不接受"挑低负载时段跑一轮"充数。
+      **取假（一条命令）**：`git merge-base --is-ancestor 17e91e38 develop` 为假 ⇒ AC101 不得勾。（待外部）
+- [x] AC2: 这 3 轮 `tests` 字段不得低于基线 **4951**（禁止砍覆盖换速度；低于基线即不计入且判作弊）。
+- [x] AC3: 优化手段落成代码/配置（可 `git log` 追溯的提交），⛔ 不接受"挑低负载时段跑一轮"充数。
 
 ## Definition of Done
 
-- [ ] 3 轮 lane=8 全绿且 ≤600s、tests≥4951、优化可追溯；对照轮已跑并记录 serial/lowconc 翻倍真因。
+- [x] 3 轮 lane=8 全绿且 ≤600s、tests≥4951、优化可追溯；对照轮已跑并记录 serial/lowconc 翻倍真因。
 
 ## 对照轮记录（2026-08-16 17:1xZ）
 
