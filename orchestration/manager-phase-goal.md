@@ -85,7 +85,12 @@ parent 的阻碍原因（compound depsReadyFor 死锁）已被 `gap-compound-dep
 ```
 **判据不变（能取假 + 验证时刻新于 AC85），但达成前必须先解决上述三点，⛔ 不得跳过直接手工验证一次充数。**
 
-### AC89（AC85–AC88 完成后，产品化状态写回一处可核的记录）
+**🔴 2026-08-16 04:0xZ 新增依赖（inner needs-human 转裁，我按优先级判断路由）**：
+develop 基线 23 文件/7 族测试自 08-15 起恒红（`quay-init*` / `install-config-driven-e2e*` /
+`cold-start-skill` / `real-target-verify` / `capability-catalog` / `select-preflight-cli`），
+**正是本 AC 验证机制要跑通的对象本身** —— 不修，AC88 的机制无论怎么扩展都会撞上同一堵墙。
+**⇒ AC88 depends_on 一个独立的 suite-fix 任务**（归 outer 立案，不折进本阶段任何 AC，规模过大会污染
+阶段目标可读性）。**⛔ override 可解锁单个撞上它的任务，不能替代这个真修复。**（AC85–AC88 完成后，产品化状态写回一处可核的记录）
 **判据**：验证结果（成功/失败 + 证据）落一份可机械核对的记录（同 per-task-suite-records.jsonl
 的形态——不是散文报告），供下次"产品化健康"检查复用，⛔ 不要求新造一个仪表盘。
 
