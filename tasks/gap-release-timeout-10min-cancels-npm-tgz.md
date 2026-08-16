@@ -1,7 +1,7 @@
 ---
 id: gap-release-timeout-10min-cancels-npm-tgz
 title: "release.yml release job timeout-minutes:10 撞测试时长被 cancel——npm .tgz 不自动附（v0.5.0 实测）"
-status: ready
+status: done
 labels:
   - gap
   - mechanism
