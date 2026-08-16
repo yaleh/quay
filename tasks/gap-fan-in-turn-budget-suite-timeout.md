@@ -26,7 +26,7 @@ depends_on: []
 
 **影响面**：剩余 code 型 fan-in（touches/concurrency-literal/delivery-laydown/AC100）全需要全量 suite ⇒ **逐个都会撞同一堵墙**。结构问题非概率问题。
 
-**⊢ 与 AC101 同源**：全量轮 485-747s 骑在 600s 上。AC101（suite ≤600s）若达成，本缺陷紧迫度大幅下降。⇒ **本任务优先级低于 AC101**（AC101 是人明令，本条是自加条件，硬规则⑫）。
+**⊢ 与 AC101 同源（⛔ 假说已证否，2026-08-16 23:5xZ manager 裁定）**：曾以为「AC101（suite ≤600s）若达成，本缺陷紧迫度大幅下降」——**AC101 已达成（round224=500.8s），而 concurrency 的 fan-in 仍然卡在 turn-enforcement**（靠 inner 杀孤儿 suite + 手动补 ff/bracket 才完成）⇒ **「同一堵墙」假说被证否。** ⇒ **优先级不再压在最低位**（具体位次看与 delta-scope/UI 链的相对紧迫度，⛔ 不在此定）。
 
 **inner 当下恢复**（已执行，不等本任务）：本会话直接跑合并态 suite（能等 10min）→ 绿后补机械步骤（capture env → per-task-suite-record → flip → fan-in-ff-merge.sh --agent-id 原 subagent id → bracket close）。
 
