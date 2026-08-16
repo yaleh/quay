@@ -57,6 +57,6 @@ manager 原报 3824 已更新为实测值）
 ## Touches
 
 - .claude-plugin/marketplace.json
-- plugin/.claude-plugin/plugin.json / plugin/VERSION / packages/quay/package.json（版本统一）
+- plugin/.claude-plugin/plugin.json / plugin/VERSION / packages/quay/package.json / packages/quay-native/package.json / packages/quay-github/package.json / packages/quay-backlog/package.json / package-lock.json（版本统一——version-consistency-check.ts 覆盖 8 个版本文件，含三个 provider 包）
 - .github/workflows/publish-plugin-dist.yml（触发路径或退役）
 - tasks/gap-ac93-dist-chains-version-consistency.md（自身）
