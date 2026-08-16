@@ -99,6 +99,8 @@ integration 55.3s / kinds 72.5s / thresholds 100.2s —— 全部 < 152s（AC2�
 
 **AC4 lowconc 相 __GROUP__（实跑 `bash scripts/test.sh --group lowconc`）**：
 
+Contract invoke：`grep -oE '__GROUP__ concurrency=3 files=[0-9]+ sum_ms=[0-9.]+ floor_ms=[0-9.]+ capped=[0-9]+' <lowconc相日志>`（lowconc 相 capped 读数）——实跑输出见下。
+
 ```
 __GROUP__ concurrency=3 files=16 sum_ms=509920.877 floor_ms=169973.626 capped=0
 ```

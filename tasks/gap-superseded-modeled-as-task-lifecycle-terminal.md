@@ -61,7 +61,7 @@ extra: {}
 
 **migration_done（Contract invariant）**：12 条 todo+SUPERSEDED 全部经 store API 迁为 `status: superseded`（人裁定 B 023435 清单：DIR-119/D/-D2/-D3/-D4、gap-plancheck-blocking-only-convergence、gap-plancheck-no-diminishing-returns-exit、gap-prepare-milestone-no-size-aware-routing、gap-prepare-milestone-no-worktree-isolation、gap-send-keys-verified-leaks-tmux-servers-unincorporated、gap-split-decision-finality-not-enforced、gap-suite-floor-two-longest-files-bound）；6 条既有 superseded（exp5-M-QENG-DOD-DEMO-ONLY + 5 条 gap-os-anchor-watchdog-*）验证可写读。`grep -B3 "SUPERSEDED" tasks/*.md | grep "^status: todo"` 为空。
 
-**invoke（Contract）**：`task list --status superseded` 列出全部 18 条。
+**invoke（Contract）**：`node --experimental-strip-types packages/quay-native/bin/quay-native.ts task_list --status superseded` 列出全部 18 条。
 
 **测试**：`packages/quay/test/lifecycle.test.mjs` 加 superseded 硬终态用例（A1 TRANSITIONS/legal*/assertTransition + A5 runPromote/runRetreat/runComplete + C 级 CLI promote/retreat/writable），49 pass；`serve.test.mjs` 加 superseded 独立桶断言；`mcp-server.test.mjs` 加 superseded 可写读回断言。`scripts/test.sh --for-task gap-superseded-modeled-as-task-lifecycle-terminal`（Touches 选择集 17 文件）**169 测试，168 pass / 0 fail / 0 cancelled（1 自跳过 live），exit 0**。全量套件绿由外层 verification-round 验证（DoD 未勾）。
 

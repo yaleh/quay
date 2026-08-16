@@ -135,6 +135,8 @@ resume    派生集 / opt-in / 冷启动分步提交，任一步完成即写盘
 
 **处置**：AC37 的 AC1-3/5 仍成立（派生集含核、opt-in、冷启动可读）；**AC4 作用域需随 `gap-quay-init-loop-tick-doc-paths-reference-unlanded-plugin-loop`（F3 立案）修正**——门需覆盖消费方铺下文档的路径引用。此为 manager 自我更正的落点记录，AC37 状态暂留 done（缺陷已另案追踪）。
 
+## Dispatch review
+
 reviewer: outer
 at: 2026-08-10
 changed: 本阶段（产品化交付）第二优先（人指定顺序 AC36→AC37）。执行核零交付实证（三份 MISSING + quay-init 0 命中）。处方=进 derive_loop_scripts ⇒ referenced⊆landed 自动生效。manager 份 --manager opt-in（人裁定两层典型路径）。实现归 inner。AC37 完成后将作 AC36 ③ 的活体样本（打 delivery-critical label → 观察下一次派发取走）

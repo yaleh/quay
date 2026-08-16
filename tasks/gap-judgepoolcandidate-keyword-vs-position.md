@@ -77,8 +77,8 @@ retired-mechanism；plain-text 提及仍拦（不放松）。配套：`ready-poo
 **Contract 读数**（worktree 实跑）：
 
 1. `judgePoolCandidate(DIR-103)` → `flagged: false, refs: []`（修复前 3 条：line 25 + line 59×2）
-2. `ready-pool-check --targeted DIR-103 --json` → `reason: status-needs-human`（不再是 retired-mechanism）
-3. `ready-pool-check --targeted gap-judgepoolcandidate-keyword-vs-position --json` → `eligible: true`
+2. `node --no-warnings --experimental-strip-types plugin/scripts/ready-pool-check.ts --targeted DIR-103 --json` → `reason: status-needs-human`（不再是 retired-mechanism）
+3. `node --no-warnings --experimental-strip-types plugin/scripts/ready-pool-check.ts --targeted gap-judgepoolcandidate-keyword-vs-position --json` → `eligible: true`
 4. AC8 回归控制 `judgePoolCandidate(gap-prepare-milestone-no-size-aware-routing)` → `flagged: true`，
    hits `['execute-milestone.js']`（line 31 plain-text 真引用仍拦；line 28 backtick 出处注不再算）
 5. `ready-pool-check --targeted gap-split-decision-finality-not-enforced --json` → `reason: 作废标记`
