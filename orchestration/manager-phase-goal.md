@@ -574,7 +574,7 @@ AC98 /goal 空态（小，可随手做）
 | AC | 状态 | 依据（可复核，⛔ 非自述） |
 |---|---|---|
 | AC94 设计正本落盘 | **达成** | `docs/design/…/` 7 文件 + sha256 锚，见该 AC 判据 |
-| AC97 三条零成本缺口 | **达成** | 任务 `gap-ac97-webui-zero-cost-gaps` status=**done**；落地提交 `0b1049dc`（2026-08-16 20:xxZ 后） |
+| AC97 三条零成本缺口 | **达成（⚠️ 未经全量轮验证）** | 任务 status=**done**，落地提交 `0b1049dc`。**⚠️ 21:5xZ 补核**：其 per-task suite 记录**仅 1 条**且 `fullSuiteRan=false` / `skipReason="doc-only-delta"` / `dur=7ms`，而实现提交 `fae3322f` 改的是 `packages/quay/src/serve-handlers.ts`（生产代码）；合并点 `21a09091`@21:31:06Z **晚于**唯一近期全量轮 round222（21:11:29Z 起）⇒ **全量轮从未覆盖该改动**。已投 outer 立案（两个候选根因未替它选）。 |
 | AC100 三详情页 token 化 | **在飞未落地** | worktree `quay-worktrees/gap-ac100-…` 存在；任务 status=ready（fan-in 后才翻 done） |
 | AC95 15 视图全上线 | **未开工** | status=ready；`slot-refill` deferred：`touches-overlap-in-flight (peer gap-ac100)` |
 | AC96 响应式双形态 | **未开工** | 同上，同 peer |
