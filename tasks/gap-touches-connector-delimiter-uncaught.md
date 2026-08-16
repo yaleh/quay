@@ -53,20 +53,30 @@ AC91：Touches 两处 " + " 连接（2 文件 + 5 文件）⇒ 同上
 3. （可选）评估 `parseTouchEntries` 是否拆连接符——拆则加测试 + 负控制；不拆则记录理由。
 4. **负控制**：构造一个 Touches bullet 用 ` + ` 连接两路径 ⇒ 检查器必须红；`+` 连接的 AC93/ac86/AC91 样式 bullet 回放必须红。
 
+## Plan 执行记录（2026-08-16 实现者）
+
+- **②护栏（已做）**：`MULTI_PATH_SEPARATOR_RE` 补 ` \+ `；`PATH_TOKEN_RE` 补第三分支（`[\/\\][^\/\\]*[*?][^\/\\]*`——glob 通配也算 path-like，否则 AC86 形状 `scripts/test.sh + plugin/scripts/*` 的 `plugin/scripts/*` 不算路径、只数出一个 token 而不红）；检查器接进 `scripts/test.sh` run_static_checks（`@static-tier always` + `@static-scoped-mode subset-touched`，与 malformed-task-check 同形）；`main()` 补 `--strict-subset` 消费-忽略（同 malformed-task-check：全仓扫描不被收窄）。
+- **①根治（不做，记录理由）**：`parseTouchEntries` **不拆**连接符。理由：① 它是 ADR-004 的 ONE parser，多个消费者（dispatch/touches-resolve/orthogonality/`(new)`-tag）依赖其「一条目=一行」契约，拆 ` + `/` / ` 是语义契约变更，需连带改 tag 提取与所有依赖测试；② 拆了反而**掩盖形态违规**——多路径 bullet 会被 parser「正确」解析成多个真实路径，checkTouchesPair 判不到藏匿路径的问题缓解了，但作者写坏形态的动机也消失，与检查器「一条目一路径」的强制目标相抵触；③ ②已把作者时违规变成硬 gate（接线即红），正确修法就是作者把 bullet 拆成一行一条，parser 无须容忍坏形态。
+- **baseline 吸收（2026-08-16 一次性）**：接线 + ` + ` + glob-path 三改动使 DONE 历史任务的既有多路径 bullet 全部「新可见/会阻塞」。全部吸收进 shrink-only baseline（`docs/analysis/touches-one-entry-one-path-baseline.md`，8 ` / ` + 13 ` + ` + 2 `、` = 23）——它们是 done 任务、不在派发池、且超出本任务 Touches 授权去拆。从今起清单只缩不增；后续把任一任务拆成一条一 bullet 时删其条目并减 baseline-count。
+- **测试**：`plugin/test/touches-one-entry-one-path-check.test.mjs` 新增判据2b（` + ` 正/负控制，含 AC86 glob 形状）；scan 测试改写为「全仓 0（历史全 baseline）+ 合成 ` + ` bullet 必红」；既有 15 条 + 新增 = 19 条全绿。
+- **mutation case**：新增 `plugin/scripts/checker-mutation-cases/touches-one-entry-one-path-check.sh`（GREEN→注入 ` + ` bullet→RED→恢复→GREEN），`checker-mutation-check` uncovered=0。
+
 ## Acceptance Criteria
 
-- [ ] AC1: `MULTI_PATH_SEPARATOR_RE` 覆盖 ` + ` 分隔符，`+` 连接的多路径 bullet 被判 RED。
-- [ ] AC2: `touches-one-entry-one-path-check` 接进 run_static_checks（每轮执行，非孤儿）。
-- [ ] AC3: 负控制成立——`+` 连接的 bullet 回放必红；不红则本 AC 不成立。
-- [ ] AC4: 既有 touches-one-entry-one-path-check.test.mjs 测试全绿 + 新增 ` + ` 用例。
+- [x] AC1: `MULTI_PATH_SEPARATOR_RE` 覆盖 ` + ` 分隔符，`+` 连接的多路径 bullet 被判 RED。
+- [x] AC2: `touches-one-entry-one-path-check` 接进 run_static_checks（每轮执行，非孤儿）。
+- [x] AC3: 负控制成立——`+` 连接的 bullet 回放必红；不红则本 AC 不成立。
+- [x] AC4: 既有 touches-one-entry-one-path-check.test.mjs 测试全绿 + 新增 ` + ` 用例。
 
 ## Definition of Done
 
-- [ ] ` + ` 连接符被一条目一路径检查器捕获且检查器实际执行（run_static_checks 接线）；AC93/ac86/AC91 样式 bullet 回放 RED；既有测试绿。
+- [x] ` + ` 连接符被一条目一路径检查器捕获且检查器实际执行（run_static_checks 接线）；AC93/ac86/AC91 样式 bullet 回放 RED；既有测试绿。
 
 ## Touches
 
-- plugin/scripts/touches-one-entry-one-path-check.ts（`MULTI_PATH_SEPARATOR_RE` 补 ` + `）
+- plugin/scripts/touches-one-entry-one-path-check.ts（`MULTI_PATH_SEPARATOR_RE` 补 ` + `、`PATH_TOKEN_RE` 补 glob 分支、`main()` 补 `--strict-subset`）
 - scripts/test.sh（接线 run_static_checks）
 - plugin/test/touches-one-entry-one-path-check.test.mjs（新增 ` + ` 用例）
+- plugin/scripts/checker-mutation-cases/touches-one-entry-one-path-check.sh（新增 mutation case——checker-mutation-check 要求每注册检查器有 case）
+- docs/analysis/touches-one-entry-one-path-baseline.md（接线后历史 DONE 任务的多路径 bullet 一次性吸收：8+13+2=23）
 - tasks/gap-touches-connector-delimiter-uncaught.md（自身）
