@@ -27,13 +27,13 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1: `curl` demo 实例 `/git-history` 返回 200（现为 404）——重启 serve 进程后。
-- [ ] AC2: 任务列表页 HTML 中 `href="/board"` 命中 ≥1（现为 0）。
-- [ ] AC3: serve-handlers.ts:860 的 white-space 内联覆盖移除/修正，`.label-nav-wrap` nowrap 意图生效。
+- [x] AC1: `curl` demo 实例 `/git-history` 返回 200（现为 404）——重启 serve 进程后。
+- [x] AC2: 任务列表页 HTML 中 `href="/board"` 命中 ≥1（现为 0）。
+- [x] AC3: serve-handlers.ts:860 的 white-space 内联覆盖移除/修正，`.label-nav-wrap` nowrap 意图生效。
 
 ## Definition of Done
 
-- [ ] 三条零成本缺口全部修复并落地（/board 导航入口 + /git-history 重启可见 + white-space 覆盖修正），
+- [x] 三条零成本缺口全部修复并落地（/board 导航入口 + /git-history 重启可见 + white-space 覆盖修正），
       AC1-AC3 三条判据各自可机械核对（curl / grep），packages/quay/test/ 13 个既有 web 测试保持全绿。
 
 ## Touches
