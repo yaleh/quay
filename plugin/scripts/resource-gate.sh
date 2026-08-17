@@ -109,38 +109,35 @@ WORKTREE_LOAD_MIN="${RESOURCE_GATE_WORKTREE_LOAD_MIN:-4}"              # min wor
 WORKTREE_PRIORITY_CEILING="${RESOURCE_GATE_WORKTREE_PRIORITY_CEILING:-85}"  # cpu avg10 above which even priority refuses (machine too loaded)
 
 # ── argument parsing ───────────────────────────────────────────────────────────────────────────────
-case "${1:-}" in
-  --for)
-    if [ "${2:-}" = "full-suite" ]; then
-      MODE="full-suite"
-      # AC2 (gap-worktree-scoped-runs-consume-resources-but-produce-no-signal): the main repo's
-      # full-suite caller MAY pass --main-repo-priority. Unknown extra args fail-closed (usage).
-      shift 2
-      for extra in "$@"; do
-        if [ "${extra}" = "--main-repo-priority" ]; then
-          PRIORITY=1
-        else
-          echo "usage: plugin/scripts/resource-gate.sh [--for full-suite [--main-repo-priority]]" >&2
-          exit 2
-        fi
-      done
-    else
-      echo "usage: plugin/scripts/resource-gate.sh [--for full-suite [--main-repo-priority]]" >&2
-      exit 2
-    fi
-    ;;
-  ""|-h|--help)
-    # No args = report mode (print numbers + verdict, always exit 0). -h/--help prints the header.
-    if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+# AC99 — machine-readable interface: `--json` emits ONE JSON document on stdout (the System view
+# consumes it). Exit code semantics are unchanged; report-mode TEXT output is byte-identical when
+# `--json` is absent (cap-from-gate.ts / resource-gate.test.mjs parse the text).
+JSON=0
+# AC2 (gap-worktree-scoped-runs-consume-resources-but-produce-no-signal): the main repo's
+# full-suite caller MAY pass --main-repo-priority. Unknown args fail-closed (usage). AC99 adds
+# `--json` in ANY position (bare, before/after `--for full-suite`).
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --json) JSON=1; shift ;;
+    --for)
+      shift
+      if [ "${1:-}" = "full-suite" ]; then MODE="full-suite"; shift
+      else
+        echo "usage: plugin/scripts/resource-gate.sh [--json] [--for full-suite [--main-repo-priority]]" >&2
+        exit 2
+      fi
+      ;;
+    --main-repo-priority) PRIORITY=1; shift ;;
+    -h|--help)
       sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
-    fi
-    ;;
-  *)
-    echo "usage: plugin/scripts/resource-gate.sh [--for full-suite [--main-repo-priority]]" >&2
-    exit 2
-    ;;
-esac
+      ;;
+    *)
+      echo "usage: plugin/scripts/resource-gate.sh [--json] [--for full-suite [--main-repo-priority]]" >&2
+      exit 2
+      ;;
+  esac
+done
 
 # ── readings (structural signals) ──────────────────────────────────────────────────────────────────
 
@@ -406,7 +403,147 @@ if [ "${swap_kb:-0}" != "0" ]; then
   swap_label="swap=$((swap_kb / 1024))MB"
 fi
 
-# ── output: numbers + limits, then the verdict line ────────────────────────────────────────────────
+# ── AC2 priority override (main-repo full suite vs worktree scoped load) ────────────────────────────
+# When the MAIN repo's full suite asks the gate (--main-repo-priority) and the machine's load is
+# dominated by WORKTREE-sourced node --test processes (deferrable — a worktree scoped run whose
+# completion updates nothing anyone waits on), the main-repo suite is ALLOWED to proceed despite a
+# CPU-WAIT (and a load-WAIT — worktree-sourced load is exactly what pushes load average high):
+# blocking it re-creates the deadlock this task exists to kill (machine full, no signal). Three
+# guards keep the override safe:
+#   1. PRIORITY=1 — the caller must OPT IN (the full-suite-runner passes it for the main repo only);
+#   2. caller_scope = main — a worktree full-suite caller is itself deferrable (no override);
+#   3. cpu_stall < WORKTREE_PRIORITY_CEILING — above it the machine is too loaded to run ANY heavy
+#      op regardless of provenance (the main suite would tear itself apart / hit cancelled).
+# mem_wait is NEVER overridden — running out of RAM is an OOM cliff, not a deferrable load.
+# NB the flake-driver scenario (load high from the loop's OWN claude sessions, round-230/231/232)
+# is NOT overridden: there worktree_node_tests is typically < WORKTREE_LOAD_MIN, so the override
+# does not fire and the overload-window WAIT stands.
+priority_override=0
+if [ "${PRIORITY}" = "1" ] && [ "${caller_scope}" = "main" ] && [ "${MODE}" = "full-suite" ] && \
+   [ "${mem_wait}" = "0" ] && \
+   awk -v v="${worktree_node_tests}" -v m="${WORKTREE_LOAD_MIN}" 'BEGIN{exit !(v ~ /^[0-9]+$/ && v >= m)}' && \
+   awk -v v="${cpu_stall}" -v c="${WORKTREE_PRIORITY_CEILING}" 'BEGIN{exit !(v ~ /^[0-9]+(\.[0-9]+)?$/ && v < c)}'; then
+  priority_override=1
+fi
+
+# ── verdict determination (shared by text + JSON output) ──────────────────────────────────────────
+# VERDICT/REASON are computed ONCE; the text branch prints REASON, the JSON branch carries both as
+# structured fields. Format strings are byte-identical to the pre-refactor text output.
+# load_threshold (nproc × LOAD_OVER_FACTOR — AC3: computed from nproc, never a host literal) is
+# needed by BOTH the load-wait REASON and the loadavg output line, so it is computed up front.
+load_threshold="$(awk -v n="$nproc_before" -v f="$LOAD_OVER_FACTOR" 'BEGIN{printf "%.0f", n*f}')"
+VERDICT=""
+REASON=""
+if [ "$priority_override" = "1" ]; then
+  VERDICT="GO"
+  printf -v REASON '=> GO: 主仓 full-suite 优先——阻塞负载来自 worktree scoped（可延后，%s node --test），主仓套件是等在等的信号；CPU 未超 ceiling %s（AC2）' \
+    "$worktree_node_tests" "$WORKTREE_PRIORITY_CEILING"
+elif [ "$cpu_wait" = 1 ] && [ "$mem_wait" = 1 ]; then
+  VERDICT="WAIT"
+  if [ "$cpu_stall" = "UNMEASURABLE" ]; then
+    REASON='=> WAIT: 无法读取 /proc/pressure/cpu（内核无 PSI?）且内存不足——结构信号缺失时 fail-closed'
+  else
+    REASON='=> WAIT: CPU 饥饿 且 内存不足。重型测试在此负载下会超时（实测 48.8s vs 隔离 2.0s），OOM 无降级段'
+  fi
+elif [ "$cpu_wait" = 1 ]; then
+  VERDICT="WAIT"
+  if [ "$cpu_stall" = "UNMEASURABLE" ]; then
+    REASON='=> WAIT: 无法读取 /proc/pressure/cpu（内核无 PSI?）——结构信号缺失时必须 fail-closed'
+  else
+    printf -v REASON '=> WAIT: CPU 饥饿（some avg10 >= %s）。重型测试在此负载下会超时（实测 48.8s vs 隔离 2.0s）' "$CPU_LIMIT"
+  fi
+elif [ "$mem_wait" = 1 ]; then
+  VERDICT="WAIT"
+  if [ "${swap_kb:-0}" = "0" ]; then
+    printf -v REASON '=> WAIT: 内存不足（mem_avail < %sMB）。swap=0，OOM 是悬崖不是斜坡；RSS 最大的进程正是 claude 会话本身' "$MEM_LIMIT_MB"
+  else
+    printf -v REASON '=> WAIT: 内存不足（mem_avail < %sMB，swap 有限）。OOM 时最先被杀的仍是 RSS 最大的 claude 会话' "$MEM_LIMIT_MB"
+  fi
+elif [ "$load_wait" = 1 ]; then
+  VERDICT="WAIT"
+  if [ "$load_avg" = "UNMEASURABLE" ]; then
+    REASON='=> WAIT: 无法读取 /proc/loadavg（load 信号缺失）——过载窗口判据 fail-closed'
+  else
+    printf -v REASON '=> WAIT: 过载窗口（load %.2f >= nproc×%s≈%s）。实测 load 11.76/nproc=4 时 PSI 仅 8.27<60 ⇒ 红轮在过载窗口起跑（loop-shipping flake 反复）' \
+      "$load_avg" "$LOAD_OVER_FACTOR" "$load_threshold"
+  fi
+else
+  VERDICT="GO"
+  REASON='=> GO: 资源充足，可以跑'
+fi
+
+# AC1 (gap-test-concurrency-cap-does-not-scope-nested-spawns) — the CROSS-LAYER total budget read
+# from the shared authority (process-budget.sh, same script test.sh/cap-from-gate read). A worktree
+# caller sees total_budget / budget_in_use / budget_available — the numbers that bound EVERY layer's
+# concurrency — instead of this gate's single-machine node_procs read alone. Shared by text + JSON.
+budget_report="$(bash "${SCRIPT_DIR}/process-budget.sh" 2>/dev/null || true)"
+budget_total="$(printf '%s\n' "${budget_report}" | sed -n 's/^total_budget=//p')"
+budget_in_use="$(printf '%s\n' "${budget_report}" | sed -n 's/^in_use=//p')"
+budget_available="$(printf '%s\n' "${budget_report}" | sed -n 's/^available=//p')"
+
+# ── --json: ONE structured JSON document on stdout (AC99 — the System view's machine-readable
+#    interface). load_threshold is nproc × LOAD_OVER_FACTOR computed INSIDE the mechanism — AC3:
+#    never a literal host-derived number. Report mode's text output is suppressed in this branch. ──
+if [ "$JSON" = "1" ]; then
+  RG_CPU_STALL="$cpu_stall" RG_CPU_STALL_AVG300="${cpu_stall_avg300:-}" RG_CPU_LIMIT="$CPU_LIMIT" \
+  RG_MEM_AVAIL_MB="$mem_avail_mb" RG_MEM_LIMIT_MB="$MEM_LIMIT_MB" \
+  RG_LOAD_AVG="$load_avg" RG_LOAD_THRESHOLD="$load_threshold" RG_LOAD_OVER_FACTOR="$LOAD_OVER_FACTOR" \
+  RG_NPROC="$nproc_before" RG_NODE_PROCS="$node_procs" RG_SWAP_KB="${swap_kb:-0}" \
+  RG_NPROC_INVARIANT="$nproc_invariant" RG_COMM_COUNT="$comm_count" RG_CMDLINE_COUNT="$cmdline_count" \
+  RG_INSTRUMENT_FAILURE="${instrument_failure:-0}" RG_BUDGET_TOTAL="${budget_total:-}" \
+  RG_BUDGET_IN_USE="${budget_in_use:-}" RG_BUDGET_AVAILABLE="${budget_available:-}" \
+  RG_WORKTREE_NODE_TESTS="$worktree_node_tests" RG_CALLER_SCOPE="$caller_scope" \
+  RG_ORPHANS="${orphan_list:-}" RG_PRIORITY_OVERRIDE="${priority_override:-0}" \
+  RG_CPU_WAIT="${cpu_wait:-0}" RG_MEM_WAIT="${mem_wait:-0}" RG_LOAD_WAIT="${load_wait:-0}" \
+  RG_VERDICT="$VERDICT" RG_REASON="$REASON" python3 - <<'PYEOF'
+import json, os
+def num(v):
+    if v is None or v == "" or v == "UNMEASURABLE": return None
+    try: return float(v)
+    except ValueError: return None
+def num_int(v):
+    if v is None or v == "" or v == "unreadable": return None
+    try: return int(v)
+    except ValueError: return None
+note = None
+if os.environ.get("RG_INSTRUMENT_FAILURE") == "1":
+    note = ("comm 字面量 node-MainThread 恒 0 但 cmdline 见 %s 个 node 进程 —— comm 是宿主/Node 版本相关的（本机 comm 为 MainThread）; 读数以 cmdline 为准，勿按 comm 判空" % os.environ.get("RG_CMDLINE_COUNT", "?"))
+orphans = [o for o in os.environ.get("RG_ORPHANS", "").replace(";", "\n").split("\n") if o.strip()]
+print(json.dumps({
+    "cpu_stall_avg10": num(os.environ.get("RG_CPU_STALL")),
+    "cpu_stall_avg300": num(os.environ.get("RG_CPU_STALL_AVG300")),
+    "cpu_limit": num(os.environ.get("RG_CPU_LIMIT")),
+    "mem_avail_mb": num(os.environ.get("RG_MEM_AVAIL_MB")),
+    "mem_limit_mb": num(os.environ.get("RG_MEM_LIMIT_MB")),
+    "loadavg": num(os.environ.get("RG_LOAD_AVG")),
+    "load_threshold": num_int(os.environ.get("RG_LOAD_THRESHOLD")),
+    "load_over_factor": num(os.environ.get("RG_LOAD_OVER_FACTOR")),
+    "nproc": num_int(os.environ.get("RG_NPROC")),
+    "node_procs": num_int(os.environ.get("RG_NODE_PROCS")),
+    "swap_kb": num_int(os.environ.get("RG_SWAP_KB")),
+    "nproc_invariant": os.environ.get("RG_NPROC_INVARIANT"),
+    "node_comm_mainthread": num_int(os.environ.get("RG_COMM_COUNT")),
+    "node_cmdline_procs": num_int(os.environ.get("RG_CMDLINE_COUNT")),
+    "instrument_failure": num_int(os.environ.get("RG_INSTRUMENT_FAILURE")),
+    "instrument_failure_note": note,
+    "total_budget": num_int(os.environ.get("RG_BUDGET_TOTAL")),
+    "budget_in_use": num_int(os.environ.get("RG_BUDGET_IN_USE")),
+    "budget_available": num_int(os.environ.get("RG_BUDGET_AVAILABLE")),
+    "worktree_node_tests": num_int(os.environ.get("RG_WORKTREE_NODE_TESTS")),
+    "caller_scope": os.environ.get("RG_CALLER_SCOPE"),
+    "orphans": orphans,
+    "priority_override": num_int(os.environ.get("RG_PRIORITY_OVERRIDE")),
+    "cpu_wait": num_int(os.environ.get("RG_CPU_WAIT")),
+    "mem_wait": num_int(os.environ.get("RG_MEM_WAIT")),
+    "load_wait": num_int(os.environ.get("RG_LOAD_WAIT")),
+    "verdict": os.environ.get("RG_VERDICT"),
+    "reason": os.environ.get("RG_REASON"),
+}, ensure_ascii=False))
+PYEOF
+  # text mode is skipped in --json; fall through to the shared exit-code logic below
+  # (report mode 0; full-suite mode 0=GO / 1=WAIT).
+else
+  # ── output: numbers + limits, then the verdict line (text mode — byte-identical to pre-AC99) ──────
 if [ "$cpu_stall" = "UNMEASURABLE" ]; then
   printf 'cpu_stall(some avg10)=%s  [limit %s]   %s\n' "$cpu_stall" "$CPU_LIMIT" "WAIT"
 else
@@ -437,16 +574,6 @@ printf 'node_comm_mainthread=%s  node_cmdline_procs=%s  [dual-read self-check: %
 if [ "${instrument_failure}" = "1" ]; then
   printf 'instrument_failure: comm 字面量 node-MainThread 恒 0 但 cmdline 见 %s 个 node 进程 —— comm 是宿主/Node 版本相关的（本机 comm=MainThread）; 读数以 cmdline 为准，勿按 comm 判空\n' "$cmdline_count"
 fi
-# AC1 (gap-test-concurrency-cap-does-not-scope-nested-spawns) — the CROSS-LAYER total budget line
-# from the shared authority (process-budget.sh, same script test.sh/cap-from-gate read). A worktree
-# caller sees total_budget / budget_in_use / budget_available — the numbers that bound EVERY layer's
-# concurrency — instead of this gate's single-machine node_procs read alone.
-budget_report="$(bash "${SCRIPT_DIR}/process-budget.sh" 2>/dev/null || true)"
-budget_total="$(printf '%s\n' "${budget_report}" | sed -n 's/^total_budget=//p')"
-budget_in_use="$(printf '%s\n' "${budget_report}" | sed -n 's/^in_use=//p')"
-budget_available="$(printf '%s\n' "${budget_report}" | sed -n 's/^available=//p')"
-printf 'total_budget=%s  budget_in_use=%s  budget_available=%s  [cross-layer budget authority: process-budget.sh]\n' \
-  "${budget_total:-unreadable}" "${budget_in_use:-unreadable}" "${budget_available:-unreadable}"
 # The per_suite_lane_budget accounting line stays DELETED — the MAIN lane budget is a PURE computation
 # (gap-suite-budget-oversubscribe, human 14:4xZ 修正方向 — (b) 认领制/(c) 锁发配额 均被否, zero new runtime
 # state): defaultLaneCount()/default_concurrency_formula() derive max(1, floor(nproc × oversub / S)),
@@ -454,6 +581,8 @@ printf 'total_budget=%s  budget_in_use=%s  budget_available=%s  [cross-layer bud
 # stay ABSOLUTE (a genuinely overloaded machine must WAIT regardless of slot count); the S/oversub knobs
 # are read live by full-suite-runner.ts's concurrentSuiteSlots()/defaultLaneCount() and test.sh's
 # serial_lowconc_host_default / default_concurrency_formula.
+printf 'total_budget=%s  budget_in_use=%s  budget_available=%s  [cross-layer budget authority: process-budget.sh]\n' \
+  "${budget_total:-unreadable}" "${budget_in_use:-unreadable}" "${budget_available:-unreadable}"
 # AC1 (gap-worktree-scoped-runs-consume-resources-but-produce-no-signal) — the observable worktree
 # signal: how many node --test processes are running from linked worktrees right now + who is asking.
 # Report mode always prints this; waiters read it instead of guessing why the machine is loaded.
@@ -467,63 +596,13 @@ if [ -n "${orphan_list}" ]; then
   done
 fi
 
-# ── AC2 priority override (main-repo full suite vs worktree scoped load) ────────────────────────────
-# When the MAIN repo's full suite asks the gate (--main-repo-priority) and the machine's load is
-# dominated by WORKTREE-sourced node --test processes (deferrable — a worktree scoped run whose
-# completion updates nothing anyone waits on), the main-repo suite is ALLOWED to proceed despite a
-# CPU-WAIT (and a load-WAIT — worktree-sourced load is exactly what pushes load average high):
-# blocking it re-creates the deadlock this task exists to kill (machine full, no signal). Three
-# guards keep the override safe:
-#   1. PRIORITY=1 — the caller must OPT IN (the full-suite-runner passes it for the main repo only);
-#   2. caller_scope = main — a worktree full-suite caller is itself deferrable (no override);
-#   3. cpu_stall < WORKTREE_PRIORITY_CEILING — above it the machine is too loaded to run ANY heavy
-#      op regardless of provenance (the main suite would tear itself apart / hit cancelled).
-# mem_wait is NEVER overridden — running out of RAM is an OOM cliff, not a deferrable load.
-# NB the flake-driver scenario (load high from the loop's OWN claude sessions, round-230/231/232)
-# is NOT overridden: there worktree_node_tests is typically < WORKTREE_LOAD_MIN, so the override
-# does not fire and the overload-window WAIT stands.
-priority_override=0
-if [ "${PRIORITY}" = "1" ] && [ "${caller_scope}" = "main" ] && [ "${MODE}" = "full-suite" ] && \
-   [ "${mem_wait}" = "0" ] && \
-   awk -v v="${worktree_node_tests}" -v m="${WORKTREE_LOAD_MIN}" 'BEGIN{exit !(v ~ /^[0-9]+$/ && v >= m)}' && \
-   awk -v v="${cpu_stall}" -v c="${WORKTREE_PRIORITY_CEILING}" 'BEGIN{exit !(v ~ /^[0-9]+(\.[0-9]+)?$/ && v < c)}'; then
-  priority_override=1
+if [ "$priority_override" = "1" ]; then
   printf 'worktree_priority: ON (main-repo full suite — worktree scoped load %s node --test deferrable; CPU ceiling %s)\n' \
     "$worktree_node_tests" "$WORKTREE_PRIORITY_CEILING"
 fi
 
 # ── verdict line ───────────────────────────────────────────────────────────────────────────────────
-if [ "$priority_override" = "1" ]; then
-  printf '=> GO: 主仓 full-suite 优先——阻塞负载来自 worktree scoped（可延后，%s node --test），主仓套件是等在等的信号；CPU 未超 ceiling %s（AC2）\n' \
-    "$worktree_node_tests" "$WORKTREE_PRIORITY_CEILING"
-elif [ "$cpu_wait" = 1 ] && [ "$mem_wait" = 1 ]; then
-  if [ "$cpu_stall" = "UNMEASURABLE" ]; then
-    printf '=> WAIT: 无法读取 /proc/pressure/cpu（内核无 PSI?）且内存不足——结构信号缺失时 fail-closed\n'
-  else
-    printf '=> WAIT: CPU 饥饿 且 内存不足。重型测试在此负载下会超时（实测 48.8s vs 隔离 2.0s），OOM 无降级段\n'
-  fi
-elif [ "$cpu_wait" = 1 ]; then
-  if [ "$cpu_stall" = "UNMEASURABLE" ]; then
-    printf '=> WAIT: 无法读取 /proc/pressure/cpu（内核无 PSI?）——结构信号缺失时必须 fail-closed\n'
-  else
-    printf '=> WAIT: CPU 饥饿（some avg10 >= %s）。重型测试在此负载下会超时（实测 48.8s vs 隔离 2.0s）\n' "$CPU_LIMIT"
-  fi
-elif [ "$mem_wait" = 1 ]; then
-  if [ "${swap_kb:-0}" = "0" ]; then
-    printf '=> WAIT: 内存不足（mem_avail < %sMB）。swap=0，OOM 是悬崖不是斜坡；RSS 最大的进程正是 claude 会话本身\n' "$MEM_LIMIT_MB"
-  else
-    printf '=> WAIT: 内存不足（mem_avail < %sMB，swap 有限）。OOM 时最先被杀的仍是 RSS 最大的 claude 会话\n' "$MEM_LIMIT_MB"
-  fi
-elif [ "$load_wait" = 1 ]; then
-  if [ "$load_avg" = "UNMEASURABLE" ]; then
-    printf '=> WAIT: 无法读取 /proc/loadavg（load 信号缺失）——过载窗口判据 fail-closed\n'
-  else
-    printf '=> WAIT: 过载窗口（load %.2f >= nproc×%s≈%s）。实测 load 11.76/nproc=4 时 PSI 仅 8.27<60 ⇒ 红轮在过载窗口起跑（loop-shipping flake 反复）\n' \
-      "$load_avg" "$LOAD_OVER_FACTOR" "$load_threshold"
-  fi
-else
-  printf '=> GO: 资源充足，可以跑\n'
-fi
+printf '%s\n' "$REASON"
 
 if [ "$mem_wait" = 1 ] && [ "$MODE" = "full-suite" ]; then
   # AC6: when memory is short, refuse the full suite AND print the current top-5 RSS processes —
@@ -531,6 +610,7 @@ if [ "$mem_wait" = 1 ] && [ "$MODE" = "full-suite" ]; then
   echo "== RSS top-5 (AC6: OOM killer 的目标 — claude 会话 RSS 424-793MB) =="
   ps -eo pid,ppid,rss,comm --sort=-rss 2>/dev/null | head -6
 fi
+fi  # end else (text mode); --json branch emitted above
 
 # ── exit code: report mode always 0; gate mode 0=GO / 1=WAIT ───────────────────────────────────────
 if [ "$MODE" = "full-suite" ]; then

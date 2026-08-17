@@ -288,6 +288,57 @@ export function isDocPath(pathStr, registry) {
   return false; // product code / unknown path ⇒ code (fail-closed)
 }
 
+// ── Fan-in orchestration bootstrap detection (gap-fan-in-orchestration-bootstrap-self-fix) ────────────
+//
+// THE DEFECT (from the task title): fan-in orchestration files
+// (`.claude/workflows/fan-in-execute.js`, `select-static-checks-for-touches.ts`, `fan-in-ff-merge.sh`,
+// `per-task-suite-record.ts`, `full-suite-runner.ts`, …) are dispatched/resolved from the MAIN
+// checkout, so a task that MODIFIES one of these files has its own fan-in run by the OLD main-checkout
+// version — its own fix is never exercised (bootstrap/self-reference). Structural exposure = 8
+// (commits touching .claude/workflows/fan-in-execute.js), observable misjudgment = 1 (delta-scope:
+// the old step-2 `git diff fork develop` judged doc-only while the branch's own code slipped through).
+//
+// THE FIX (two halves, both keyed to THIS file set so it cannot drift from the code that runs):
+//   ① DISPATCH (workflow file): the inner A6 dispatcher checks `--bootstrap-orchestration` on the
+//     branch's delta; a HIT ⇒ the fan-in is dispatched with scriptPath = the WORKTREE's
+//     `.claude/workflows/fan-in-execute.js` (the branch's own version), so step-2 logic + the whole
+//     generated prompt come from the task's own fix. Miss ⇒ main checkout (status quo).
+//   ② WORKTREE RESOLUTION (inside fan-in-execute.js's prompt): every fan-in orchestration script call
+//     (classify / ff-merge / per-task-suite-record / full-suite-runner / …) is invoked with an explicit
+//     `${worktree}`-rooted path — NOT cwd-dependent, NOT `${root}` — so a task's modifications to those
+//     scripts are what actually runs, regardless of the fan-in subagent's working directory.
+//
+// This file set is the SINGLE source for both halves (the workflow's step-0 bash calls this same CLI,
+// and the A6 dispatch rule references the same command). Falsification (pinned by
+// plugin/test/fan-in-execute-paths.test.mjs):
+//   取假一: a branch that modifies `.claude/workflows/fan-in-execute.js` ⇒ `--bootstrap-orchestration`
+//   returns that path (the dispatcher MUST use the worktree scriptPath).
+//   取假二: a branch that modifies ONLY `tasks/*.md` ⇒ empty output (miss — main-checkout scriptPath is
+//   correct); the two paths are distinguishable (negative control).
+
+/** The fan-in orchestration pipeline's OWN file set — the files a task can modify whose modification
+ *  must be exercised by that task's own fan-in. Enumerated per AC1 of
+ *  gap-fan-in-orchestration-bootstrap-self-fix; extend here (and ONLY here) when the pipeline grows. */
+export const FAN_IN_ORCHESTRATION_FILES = [
+  ".claude/workflows/fan-in-execute.js",
+  "plugin/workflows/fan-in-execute.js", // dual-copy mirror (workflows-dual-copy-drift-check)
+  "plugin/scripts/select-static-checks-for-touches.ts",
+  "plugin/scripts/fan-in-ff-merge.sh",
+  "plugin/scripts/per-task-suite-record.ts",
+  "plugin/scripts/full-suite-runner.ts",
+];
+
+/** PURE: given a branch's repo-relative delta paths (from `git diff --name-only <merge-base> HEAD`),
+ *  return the subset that are fan-in orchestration files (empty = miss ⇒ the branch does not modify
+ *  the pipeline itself ⇒ the main-checkout scriptPath is fine). Used by BOTH the A6 dispatch rule and
+ *  the workflow's step-0 bootstrap block (same command, one source). */
+export function fanInOrchestrationBootstrapHit(deltaPaths) {
+  return (deltaPaths || [])
+    .map(normalizeRel)
+    .filter(Boolean)
+    .filter((p) => FAN_IN_ORCHESTRATION_FILES.some((o) => matchesObject(o, p)));
+}
+
 /**
  * True iff `relPath` is a NEW file at selection time: it exists on disk under `root` AND git does
  * not track it (the task created it but has not yet committed it — the AC4 "not-yet-tracked"
@@ -511,6 +562,12 @@ Output modes:
       "no change/full-tier checker's @static-object glob matches it" (computed from scripts/test.sh)
       AND it is under a task-board/doc/telemetry surface (tasks/, docs/, adr/, .quay/, measurements/,
       milestones/, orchestration/archive/, plugin/loop/); everything else is code (fail-closed).
+  --bootstrap-orchestration <path>… — fan-in orchestration bootstrap detection
+      (gap-fan-in-orchestration-bootstrap-self-fix): print the given repo-relative delta paths that are
+      fan-in orchestration files themselves (fan-in-execute.js / select-static-checks-for-touches.ts /
+      fan-in-ff-merge.sh / per-task-suite-record.ts / full-suite-runner.ts + mirrors), one per line.
+      Empty = miss (the branch does not modify the pipeline ⇒ main-checkout scriptPath is fine);
+      non-empty = HIT ⇒ the fan-in must run the WORKTREE's own version of the pipeline.
 
 Exit codes: 0 ok; 2 usage/task-not-found.`;
 
@@ -518,6 +575,19 @@ function getArgValue(args, name) {
   const idx = args.indexOf(name);
   if (idx === -1) return undefined;
   return args[idx + 1];
+}
+
+/** The positional (non-flag) args — for the fan-in CLI modes (--classify-delta / --bootstrap-
+ *  orchestration) where the delta paths are positional and `--root <dir>` is a flag+value pair. A
+ *  value immediately following a `--flag` is that flag's value (e.g. the `--root` directory), never a
+ *  delta path — without this carve-out the root directory leaks into the path list and every absolute
+ *  path classifies as code (fail-closed false positive). */
+function positionalArgs(args) {
+  return args.filter((a, i) => {
+    if (String(a).startsWith("--")) return false;
+    if (i > 0 && args[i - 1] && String(args[i - 1]).startsWith("--")) return false;
+    return String(a).trim() !== "";
+  });
 }
 
 /**
@@ -605,6 +675,7 @@ export function main(argv) {
   const namesOnly = args.includes("--names");
   const listMode = args.includes("--list");
   const classifyDelta = args.includes("--classify-delta");
+  const bootstrapOrchestration = args.includes("--bootstrap-orchestration");
   const commandsMode = args.includes("--commands");
   const checkRegOnly = args.includes("--check-registration");
 
@@ -637,10 +708,24 @@ export function main(argv) {
   // everything else (a checker reads it, product code, unknown) is code ⇒ the fan-in re-runs the full
   // suite. Exit 0 always on well-formed input (empty input ⇒ empty output = doc-only).
   if (classifyDelta) {
-    const paths = args.filter((a) => !a.startsWith("--") && a.trim() !== "");
+    const paths = positionalArgs(args);
     for (const p of paths) {
       if (!isDocPath(p, registry)) console.log(p);
     }
+    return 0;
+  }
+
+  // --bootstrap-orchestration <path>… — fan-in orchestration bootstrap detection
+  // (gap-fan-in-orchestration-bootstrap-self-fix). Each argv path is a branch's repo-relative delta
+  // file; print the ones that are fan-in orchestration files themselves (one per line). Empty output
+  // = miss (the branch does not modify the pipeline ⇒ the main-checkout scriptPath / root resolution
+  // is fine). HIT ⇒ the fan-in MUST be dispatched with the WORKTREE's fan-in-execute.js and its inner
+  // orchestration scripts MUST resolve from the worktree — the branch's own fix must be exercised by
+  // its own fan-in. Same command is referenced by the A6 dispatch rule (fast-mode-tick-core.md) and by
+  // the workflow's step-0 bootstrap block — ONE source for the file set.
+  if (bootstrapOrchestration) {
+    const paths = positionalArgs(args);
+    for (const p of fanInOrchestrationBootstrapHit(paths)) console.log(p);
     return 0;
   }
 

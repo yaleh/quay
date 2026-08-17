@@ -1890,14 +1890,14 @@ function renderSystemPage(sys: SystemResult): string {
     <body><main>
       <p class="meta">${renderSiteNav("system")}</p>
       <h1>System — 系统状态</h1>
-      <p class="meta">数据源：<code>resource-gate.sh</code> · <code>process-budget.sh</code>（文本输出解析）</p>
+      <p class="meta">数据源：<code>resource-gate.sh --json</code> · <code>process-budget.sh --json</code>（稳定机读 JSON 输出）</p>
       ${banner}
       ${obsNote(rg.status, rg.reason)}
       <h2>resource-gate.sh</h2>
       ${rg.status === "ok" ? html`<div style="display:flex;flex-direction:column;gap:0.75rem;max-width:640px">
         ${bar("cpu_stall (avg10)", rg.cpuStallAvg10, "60")}
         ${bar("cpu_stall (avg300)", rg.cpuStallAvg300, "60")}
-        ${bar("loadavg (1m)", rg.loadAvg, rg.nproc != null ? `nproc×2≈${rg.nproc * 2}` : "nproc×2")}
+        ${bar("loadavg (1m)", rg.loadAvg, rg.loadThreshold != null ? `nproc×${rg.loadOverFactor ?? "?"}≈${rg.loadThreshold}` : "nproc×factor")}
         <div style="display:flex;justify-content:space-between;font-size:0.9rem"><span>mem_avail</span><span>${rg.memAvailMb != null ? `${escapeHtml(String(rg.memAvailMb))} MB` : "—"}</span></div>
         <div style="display:flex;justify-content:space-between;font-size:0.9rem"><span>nproc / node_procs</span><span>${rg.nproc != null ? escapeHtml(String(rg.nproc)) : "—"} / ${rg.nodeProcs != null ? escapeHtml(String(rg.nodeProcs)) : "—"}</span></div>
         <div style="display:flex;justify-content:space-between;font-size:0.9rem"><span>verdict</span><span>${escapeHtml(rg.verdict ?? "—")}</span></div>
@@ -1926,7 +1926,7 @@ export async function handleSystem(
     sys = {
       status: "error",
       reason: `internal: ${err instanceof Error ? err.message : String(err)}`,
-      resourceGate: { status: "error", reason: null, cpuStallAvg10: null, cpuStallAvg300: null, memAvailMb: null, loadAvg: null, nproc: null, nodeProcs: null, verdict: null },
+      resourceGate: { status: "error", reason: null, cpuStallAvg10: null, cpuStallAvg300: null, memAvailMb: null, loadAvg: null, nproc: null, nodeProcs: null, verdict: null, loadThreshold: null, loadOverFactor: null },
       processBudget: { status: "error", reason: null, totalBudget: null, inUse: null, available: null, verdict: null },
     };
   }
@@ -1991,6 +1991,7 @@ function renderManagerPage(mgr: ManagerResult): string {
       <p class="meta">读 <code>observer-registry.conf</code> 单一登记表。</p>
       <h2>主要观测指标</h2>
       ${poolNote}
+      <p class="meta">pool/floor/deficit/cap 读 <code>slot-refill.ts --json</code>（派发机件，cap 默认 5）</p>
       <p class="meta">release=${escapeHtml(mgr.version ?? "—")} · develop 领先 ${mgr.developLead != null ? escapeHtml(String(mgr.developLead)) : "—"} 提交</p>
     </main></body></html>`;
 }
@@ -2334,7 +2335,7 @@ export async function handleDashboard(
     live = { status: "error", reason: "internal", inFlight: [], concurrency: 0, cpuPressure: null, liveState: null, liveExplanation: null, activity: null };
   }
   const sys = await readSystem(cfg.workspaceRoot).catch(() => ({
-    status: "error" as const, reason: "internal", resourceGate: { status: "error" as const, reason: null, cpuStallAvg10: null, cpuStallAvg300: null, memAvailMb: null, loadAvg: null, nproc: null, nodeProcs: null, verdict: null }, processBudget: { status: "error" as const, reason: null, totalBudget: null, inUse: null, available: null, verdict: null },
+    status: "error" as const, reason: "internal", resourceGate: { status: "error" as const, reason: null, cpuStallAvg10: null, cpuStallAvg300: null, memAvailMb: null, loadAvg: null, nproc: null, nodeProcs: null, verdict: null, loadThreshold: null, loadOverFactor: null }, processBudget: { status: "error" as const, reason: null, totalBudget: null, inUse: null, available: null, verdict: null },
   }));
   const mgr = await readManager(cfg.workspaceRoot).catch(() => ({
     status: "error" as const, reason: "internal", loopDriver: { status: "error" as const, reason: null, verdict: null, exitCode: null, detail: null }, liveness: { status: "error" as const, reason: null, sessions: [] }, observers: { status: "error" as const, reason: null, rows: [] }, pool: { status: "error" as const, reason: null, pool: null, floor: null, deficit: null, cap: null }, version: null, developLead: null,

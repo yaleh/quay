@@ -35,12 +35,18 @@
 #
 # Usage:
 #   plugin/scripts/process-budget.sh          # report mode: print numbers, exit 0
+#   plugin/scripts/process-budget.sh --json   # same readings, ONE JSON document on stdout (AC99:
+#                                             #   the System view's machine-readable interface)
 #
-# Output (stdout, one per line):
+# Output (stdout, one per line, report mode):
 #   total_budget=N   # the nproc-derived upper limit (single authority)
 #   in_use=N         # TEST (throttle-able) node --test processes currently running (all worktrees)
 #   available=N      # max(0, total_budget − in_use)
 #   verdict=GO|WAIT  # GO iff available ≥ 1
+#
+# `--json` emits { total_budget, in_use, available, verdict, node_comm_mainthread,
+#   node_cmdline_procs, instrument_failure, instrument_failure_note } as one JSON object.
+# Report-mode text output is byte-identical when `--json` is absent (cap-from-gate.ts parses it).
 #
 # Test seams (env overrides; for the unit test in plugin/test/resource-gate.test.mjs):
 #   RESOURCE_GATE_TEST_NPROC         — override nproc (integer)
@@ -57,6 +63,16 @@ if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
   exit 0
 fi
 set -euo pipefail
+
+# AC99 — machine-readable interface: `--json` switches report mode to emit ONE JSON document on
+# stdout (the System view consumes it). Report-mode TEXT output is unchanged when absent.
+JSON=0
+if [ "${1:-}" = "--json" ]; then
+  JSON=1
+elif [ -n "${1:-}" ]; then
+  echo "usage: plugin/scripts/process-budget.sh [--json]" >&2
+  exit 2
+fi
 
 # ── classification ──────────────────────────────────────────────────────────────────────────────────
 # is_test_cmdline <cmdline> — classify one node-MainThread cmdline as a throttle-able TEST process.
@@ -181,14 +197,37 @@ fi
 available=$(( total_budget - in_use ))
 if [ "${available}" -lt 0 ]; then available=0; fi
 
+verdict="WAIT"
+if [ "${available}" -ge 1 ]; then verdict="GO"; fi
+
+if [ "${JSON}" = "1" ]; then
+  # AC99 — ONE JSON document (the System view's machine-readable source). Values are the SAME
+  # measurements as report mode; only the transport changes. instrument_failure_note is null when
+  # no instrument failure was detected (硬规则③b: "未检测到" is a distinct value, never a blank).
+  python3 - "${total_budget}" "${in_use}" "${available}" "${verdict}" "${comm_count}" "${cmdline_count}" "${instrument_failure}" <<'PYEOF'
+import json, sys
+total, in_use, avail, verdict, comm, cmdline, instr = (sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5], sys.argv[6], sys.argv[7])
+note = None
+if instr == "1":
+    note = f"comm 字面量 node-MainThread 恒 0 但 cmdline 见 {cmdline} 个 node 进程 —— comm 是宿主/Node 版本相关的（本机 comm 为 MainThread）; 读数以 cmdline 为准，勿按 comm 判空"
+print(json.dumps({
+    "total_budget": int(total),
+    "in_use": int(in_use),
+    "available": int(avail),
+    "verdict": verdict,
+    "node_comm_mainthread": int(comm),
+    "node_cmdline_procs": int(cmdline),
+    "instrument_failure": int(instr),
+    "instrument_failure_note": note,
+}, ensure_ascii=False))
+PYEOF
+  exit 0
+fi
+
 printf 'total_budget=%s\n' "${total_budget}"
 printf 'in_use=%s\n' "${in_use}"
 printf 'available=%s\n' "${available}"
-if [ "${available}" -ge 1 ]; then
-  printf 'verdict=GO\n'
-else
-  printf 'verdict=WAIT\n'
-fi
+printf 'verdict=%s\n' "${verdict}"
 printf 'node_comm_mainthread=%s\n' "${comm_count}"
 printf 'node_cmdline_procs=%s\n' "${cmdline_count}"
 printf 'instrument_failure=%s\n' "${instrument_failure}"
