@@ -1,7 +1,7 @@
 ---
 id: gap-shell-concat-injection-survey
 title: "枚举所有『模型写的/文件读的文本拼进 shell 命令串』的拼接点——一次能关机的洞值得普查（halt 险情）"
-status: ready
+status: done
 labels:
   - gap
   - mechanism
