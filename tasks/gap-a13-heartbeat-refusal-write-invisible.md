@@ -105,6 +105,7 @@ legacy `.json` 含 `written:false` + `refuse_reason:"inner-round-ended-with-disp
 ## Touches
 
 - plugin/scripts/inner-wakeup-heartbeat-check.ts（judge 判新鲜取 max(主 json, refusals)）
+- plugin/scripts/red-on-omission-audit.ts（A13 redReading 描述同步——freshnessSource/heartbeat|refusal 可区分）
 - plugin/scripts/inner-wakeup-heartbeat.ts（拒写也更新主 .json 快照，带 written:false）
 - plugin/test/inner-wakeup-heartbeat-check.test.mjs（judge 新判据单测，负控制）
 - plugin/test/inner-wakeup-heartbeat.test.mjs（writer 拒写留痕单测）
