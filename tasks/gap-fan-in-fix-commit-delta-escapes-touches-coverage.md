@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-fix-commit-delta-escapes-touches-coverage
 title: fan-in fix-agent 提交在 anti-drift-touches 检查之后——fix commit 触碰的越界文件不被 Touches 覆盖（实测 c2917261 漏 1 文件）
-status: ready
+status: done
 labels:
   - gap
   - defect
