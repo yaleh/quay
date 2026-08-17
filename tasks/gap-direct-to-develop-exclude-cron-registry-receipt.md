@@ -36,14 +36,22 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: `DESIGN_INTERNAL_RE` 含 `plugin/scripts/outer-cron-registry.json`（精确路径）。
-- [ ] AC2: 回放——167b7052 / f882ad76 的 bypass-check 判定转 design-internal（GREEN）；`--baseline b11ce720` enforcement 报 `ok: true`。
-- [ ] AC3: ⛔ 粒度——`plugin/scripts/outer-cron-registry.ts`（verifier 机件）仍判 code-surface（RED），`plugin/scripts/**` 未排除。
-- [ ] AC4: 测试全绿 + `--for-task` scoped 门绿。
+- [x] AC1: `DESIGN_INTERNAL_RE` 含 `plugin/scripts/outer-cron-registry.json`（精确路径）。
+- [x] AC2: 回放——167b7052 / f882ad76 的 bypass-check 判定转 design-internal（GREEN）；`--baseline b11ce720` enforcement 报 `ok: true`。
+- [x] AC3: ⛔ 粒度——`plugin/scripts/outer-cron-registry.ts`（verifier 机件）仍判 code-surface（RED），`plugin/scripts/**` 未排除。
+- [x] AC4: 测试全绿 + `--for-task` scoped 门绿。
 
 ## Definition of Done
 
-- [ ] `plugin/scripts/outer-cron-registry.json` 进 design-internal 排除集（json 收据转绿、verifier .ts 仍红）+ 测试绿 + enforcement `ok:true`。
+- [x] `plugin/scripts/outer-cron-registry.json` 进 design-internal 排除集（json 收据转绿、verifier .ts 仍红）+ 测试绿 + enforcement `ok:true`。
+
+## Evidence
+
+**实现**：`DESIGN_INTERNAL_RE` 加 `plugin\/scripts\/outer-cron-registry[.]json$`（精确路径，`[.]` 转义点号；只豁免 json 收据）。
+
+**取假**：① 正例——`isDesignInternalPath("plugin/scripts/outer-cron-registry.json")` = true；② 负例——`plugin/scripts/outer-cron-registry.ts`（verifier 机件）仍 false（RED）；③ 回放——`--baseline b11ce720` enforcement 实跑：`ok: true`（`ac65-authorized-or-ruled-historical-only`），confirmed bypass=0（167b7052/f882ad76 均转 design-internal）。
+
+**验证**：`node --test plugin/test/direct-to-develop-bypass-check.test.mjs` → 30/30 pass；`bash scripts/test.sh --for-task gap-direct-to-develop-exclude-cron-registry-receipt --allow-thin` → EXIT 0，tests 30 / pass 30 / fail 0。
 
 ## Touches
 
