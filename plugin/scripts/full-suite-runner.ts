@@ -2301,10 +2301,20 @@ export async function run(argv: string[]): Promise<number> {
   // no_pkill_by_name_on_live invariant holds: a live observer / legit running suite has a LIVE cwd).
   // The suite starts with a clean process slate (its own claude-process-count measurements aren't
   // polluted by residue). Best-effort — a reap failure must never fail the run.
-  try {
-    execFileSync("node", ["--no-warnings", "--experimental-strip-types", path.join(__dirname, "worktree-process-reaper.ts"), "--orphans", "--root", root, "--json"], { stdio: "ignore" });
-  } catch (e) {
-    process.stderr.write(`full-suite-runner: pre-suite orphan-probe reap failed (continuing): ${e instanceof Error ? e.message : String(e)}\n`);
+  // Hermetic seam (QUAY_TEST_SKIP_PRE_SUITE_REAPER=1): skip the GLOBAL orphan-probe sweep under
+  // hermetic tests (fake-suite runner tests, same pattern as QUAY_TEST_SKIP_RESOURCE_GATE /
+  // QUAY_TEST_SKIP_SYSTEMD_RUN). The sweep is a system-wide side effect — it kills ANY claude-probe
+  // with a deleted cwd — which races with a CONCURRENT test that relies on its own live orphan probe
+  // (2026-08-17, fan-in scoped gate: full-suite-runner.test.mjs + worktree-process-reaper.test.mjs
+  // run in parallel and the sweep killed the reaper test's probe mid-assertion → found:0 flake).
+  // Fake-suite hermetic tests measure no claude-process-count, so the sweep is pure hazard there;
+  // the production path (no env) is unchanged.
+  if (process.env.QUAY_TEST_SKIP_PRE_SUITE_REAPER !== "1") {
+    try {
+      execFileSync("node", ["--no-warnings", "--experimental-strip-types", path.join(__dirname, "worktree-process-reaper.ts"), "--orphans", "--root", root, "--json"], { stdio: "ignore" });
+    } catch (e) {
+      process.stderr.write(`full-suite-runner: pre-suite orphan-probe reap failed (continuing): ${e instanceof Error ? e.message : String(e)}\n`);
+    }
   }
   // Ensure this run's namespace exists so the suite-tail leak-scan's before-run snapshot has a
   // stable subtree to scan (empty at start; the session-liveness probes create under it).

@@ -223,12 +223,17 @@ if [ "${suite_running}" = "1" ]; then
   # whose worktree still exists). NEVER a name-based batch kill of live processes (the 2026-08-08
   # two-layer-blind invariant). The reaper only runs when a slot is held — the normal fast path is
   # untouched.
+  # The stale-slot reclaim targets ONLY this root's stale LOCK HOLDERS (--stale-lock-holders-only):
+  # it exists to unblock the ff from a held slot, and the global claude-probe orphan sweep (bare
+  # --orphans) would kill unrelated concurrent tests' live orphan probes mid-assertion (cross-test
+  # race, 2026-08-17, fan-in scoped gate). The global probe sweep stays on full-suite-runner's
+  # pre-suite path and the standalone reaper, where nothing depends on an orphan probe surviving.
   _reaper="${BASH_SOURCE[0]%/*}/worktree-process-reaper.ts"
   if [ -f "${_reaper}" ]; then
     if [ -n "${worktree}" ]; then
       node --no-warnings --experimental-strip-types "${_reaper}" --worktree "${worktree}" --root "${root}" --json >/dev/null 2>&1 || true
     fi
-    node --no-warnings --experimental-strip-types "${_reaper}" --orphans --root "${root}" --json >/dev/null 2>&1 || true
+    node --no-warnings --experimental-strip-types "${_reaper}" --orphans --stale-lock-holders-only --root "${root}" --json >/dev/null 2>&1 || true
   fi
   suite_running=0
   for suite_slot in "${suite_lock_base}.0" "${suite_lock_base}.1"; do

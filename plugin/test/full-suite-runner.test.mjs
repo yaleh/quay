@@ -77,6 +77,15 @@ const REPO_ROOT = path.resolve(__dirname, "../..");
 const RUNNER = path.join(REPO_ROOT, "plugin/scripts/full-suite-runner.ts");
 const OUTER_TICK = path.join(REPO_ROOT, "plugin/loop/orchestrator-loop-tick.md");
 const INNER_TICK = path.join(REPO_ROOT, "plugin/loop/fast-mode-loop-tick.md");
+
+// Hermetic seam (QUAY_TEST_SKIP_PRE_SUITE_REAPER=1): this file's fake-suite runner runs must NOT
+// trigger full-suite-runner.ts's pre-suite GLOBAL orphan-probe sweep. That sweep kills ANY
+// claude-probe with a deleted cwd on the machine — including a CONCURRENT test's live orphan probe
+// (2026-08-17, fan-in scoped gate: running full-suite-runner.test.mjs in parallel with
+// worktree-process-reaper.test.mjs killed the reaper test's probe mid-assertion → found:0 flake).
+// These hermetic tests measure no claude-process-count, so the sweep is pure cross-test hazard here;
+// the production path (no env) is unchanged. Same pattern as QUAY_TEST_SKIP_RESOURCE_GATE.
+process.env.QUAY_TEST_SKIP_PRE_SUITE_REAPER = "1";
 const CLOSURE_TASK = path.join(
   REPO_ROOT,
   "tasks/gap-closure-sync-is-the-true-batch-boundary-move-bookkeeping-to-outer-async.md",

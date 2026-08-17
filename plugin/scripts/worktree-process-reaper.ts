@@ -35,7 +35,17 @@
 // Modes:
 //   worktree-process-reaper.ts --worktree <path> [--root <repo>] [--list|--dry-run] [--json]
 //   worktree-process-reaper.ts --orphans [--root <repo>] [--list|--dry-run] [--json]
+//   worktree-process-reaper.ts --orphans --stale-lock-holders-only [--root <repo>] [--json]
 //   worktree-process-reaper.ts --help
+//
+// --stale-lock-holders-only (with --orphans): reclaim ONLY stale full-suite.lock holders for the
+// given --root (cwd deleted + holding one of <root>'s lock files open), skipping the global
+// claude-probe orphan sweep. The probe sweep is global by design (orphaned probes live in DELETED
+// worktrees which are siblings of the repo, never under it), so fan-in-ff-merge's stale-lock
+// reclaim — whose PURPOSE is unblocking the ff from a held slot — must NOT run it: an unrelated
+// concurrent test's live orphan probe would be killed mid-assertion (cross-test race, 2026-08-17).
+// The global probe sweep stays on the standalone --orphans and full-suite-runner's pre-suite path,
+// where nothing else depends on an orphan probe staying alive.
 //
 // Exit: 0 always (best-effort reaper — a reap failure must never fail a removal/ff); 2 = usage.
 //
@@ -322,10 +332,19 @@ export function main(argv: string[]): number {
   const listOnly = argv.includes("--list") || argv.includes("--dry-run");
   const json = argv.includes("--json");
   const orphanMode = argv.includes("--orphans");
+  // --orphans scope: when set, reclaim ONLY stale full-suite.lock holders for --root, skipping the
+  // global claude-probe orphan sweep. fan-in-ff-merge's stale-lock reclaim uses this — its purpose
+  // is unblocking the ff from a held slot, and the global probe sweep would race with unrelated
+  // concurrent tests that rely on a live orphan probe (see header comment). Requires --orphans.
+  const staleLockOnly = argv.includes("--stale-lock-holders-only");
 
   const wtIdx = argv.indexOf("--worktree");
   const rootIdx = argv.indexOf("--root");
 
+  if (staleLockOnly && !orphanMode) {
+    process.stderr.write("worktree-process-reaper: --stale-lock-holders-only requires --orphans\n");
+    return 2;
+  }
   if (orphanMode && wtIdx !== -1) {
     process.stderr.write("worktree-process-reaper: --orphans and --worktree are mutually exclusive\n");
     return 2;
@@ -353,7 +372,7 @@ export function main(argv: string[]): number {
   if (orphanMode) {
     lockFiles = fullSuiteLockFiles(root);
     const cls = classifyOrphans(procs, lockFiles, exclude);
-    probes = cls.probes;
+    probes = staleLockOnly ? [] : cls.probes;
     staleLockHolders = cls.staleLockHolders;
     targets = [...probes, ...staleLockHolders];
   } else {

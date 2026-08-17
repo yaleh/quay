@@ -214,6 +214,36 @@ test("CLI --orphans --list — dry-run reports orphan probes + stale lock holder
   }
 });
 
+test("CLI --orphans --stale-lock-holders-only — reclaims ONLY this root's stale lock holders, skips the global claude-probe sweep (fan-in-ff-merge scope, 2026-08-17)", () => {
+  const dir = tmp("staleonly");
+  try {
+    const gitDir = join(dir, "repo");
+    mkdirSync(join(gitDir, ".git"), { recursive: true });
+    const lock0 = join(gitDir, ".git", "full-suite.lock.0");
+    const seam = writeSeam(dir, [
+      seamLine(920001, "/deleted-wt (deleted)", "claude-probe"),   // orphan probe → SKIPPED
+      seamLine(920002, "/deleted-wt (deleted)", "bash", "S", 1, lock0), // stale lock holder → reclaimed
+      seamLine(920003, "/deleted-wt (deleted)", "claude", "S", 1, lock0), // real claude → excluded
+    ]);
+    const r = run(["--orphans", "--stale-lock-holders-only", "--root", gitDir, "--json"], { WORKTREE_PROCESS_REAPER_PS_SOURCE: seam });
+    assert.equal(r.status, 0, r.stderr);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.mode, "orphans");
+    assert.equal(out.dryRun, false);
+    assert.deepEqual(out.pids, [920002], "only the stale lock holder is targeted, never an unrelated orphan probe");
+    assert.deepEqual(out.probes.map((p) => p.pid), []);
+    assert.deepEqual(out.staleLockHolders.map((p) => p.pid), [920002]);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("CLI — --stale-lock-holders-only without --orphans exits 2 (usage)", () => {
+  const r = run(["--stale-lock-holders-only", "--root", "/x"]);
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /requires --orphans/);
+});
+
 // ── CLI --worktree 真实 kill（端到端：claude-probe 杀、真实 claude 不杀 = AC2）──────────
 
 test("CLI --worktree — real reaps a claude-probe fixture under the worktree, keeps a real claude session (AC2)", async () => {
