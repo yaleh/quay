@@ -34,7 +34,7 @@
       },
       "inner": {
         "name": "quay-inner",
-        "launcher": "claude-deepseek",
+        "launcher": "claude-fjdac",
         "model": "deepseek-v4-flash",
         "env": {}
       }

@@ -3,20 +3,20 @@
   "note": "AC81 注册表收据（outer + inner 双层 CronCreate 锚）。每层记录 cron id、cron 表达式、prompt sha256（投进 CronCreate 的完整 prompt 串的 sha256）、创建时刻。createdAt 取 git 可见的锚确认时刻（会话内 CronCreate 秒级时刻不可恢复；7 天自动过期倒计时从实际创建起算，二者同小时，剩余寿命读数不受影响）：inner=AC79 Evidence 回填提交 46d1b4c7（2026-08-14T15:17:16Z），outer=outer-tick-prompt.txt 正本提交 72b99cda（2026-08-14T15:21:19Z）。verifiedAt=初始锚确认时刻（registry-verified 判据③ 的收据新鲜度源；每轮核实不写回，重挂 cron 时更新并提交）。promptSha256 判据④ 与当前正本 sha256 比对（outer 正本=orchestration/outer-tick-prompt.txt；inner 正本=plugin/loop/fast-mode-loop-tick.md 的 AC80-INNER-ANCHOR 段，outer 侧落地）。",
   "layers": {
     "inner": {
-      "cronId": "0ccb57cf",
+      "cronId": "09fabf33",
       "cronExpr": "7,27,47 * * * *",
       "promptSha256": "336ab98718d1234bde8cd3dcae64230b8f204cfcd9ab5592ad080c3ec3715b61",
       "promptBytes": 828,
-      "createdAt": "2026-08-16T04:36:00Z",
-      "verifiedAt": "2026-08-16T04:36:00Z"
+      "createdAt": "2026-08-17T06:55:00Z",
+      "verifiedAt": "2026-08-17T06:56:40Z"
     },
     "outer": {
-      "cronId": "4e88cb1b",
-      "cronExpr": "0,20,40 * * * *",
+      "cronId": "a2360e1d",
+      "cronExpr": "*/20 * * * *",
       "promptSha256": "d520ef85537a4a32bdf5c93688e945da091bff846388d80da12a6780b8036ac9",
       "promptBytes": 166,
       "createdAt": "2026-08-14T15:21:19Z",
-      "verifiedAt": "2026-08-14T15:21:19Z"
+      "verifiedAt": "2026-08-17T06:39:00Z"
     }
   }
 }
