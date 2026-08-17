@@ -36,6 +36,10 @@ round 224 overlap: static 49.5 | serial 444.2 | 总 500.8s
 
 **⊢ 为什么先修这个（manager ② 的前置）**：manager 的 suite 并发分析（QUAY_MAX_OVERSUBSCRIPTION 分相 lane 试探）需要分相仪器判定效果——**仪器现在是瞎的，任何 lane 改动的效果无法判定**。本任务先修仪器，② 再谈。
 
+**⊢ 复发证据（manager 2026-08-17 03:1xZ 追补，发生率 = 每一轮）**：round 226（green, 621.6s, tests=5004, lanes=8, susp=1, load=8.43）phases = `[('static',52.6), ('serial',566.8), ('end',0.7)]`——**serial 桶 566.8s 仍装着 serial+lowconc+main**。发生率从「立案时的推断」坐实为「每一轮」。止损结论不变（仍无机件读端 ⇒ 不产生错误绿/红）。
+
+**⊢ 121s 缺口护栏（⛔ 修复前别查）**：round224（500.8s, 机器基本空闲）vs round226（621.6s, load=8.43）差 **120.8s 无已知成因**——manager 原预留解释（「满负载才回 600s+」）已被 round226 证否（同量级负载）。**⛔ 仪器修好前不要去查这 121s**：round226 的 566.8s 桶里 serial/lowconc/main 各占多少结构上不可知 ⇒ 121s 当前无法归因到任何一相——查了会得到一个自洽的错答案（硬规则 4 推论四）。本任务修好仪器后，121s 归因才有依据。
+
 ## Acceptance Criteria
 
 - [ ] AC1: `PHASE_OVERLAP` 激活时 `phases[]` 仍区分 serial/lowconc/main 三相（各报各的子时，或显式报 overlap-window 且带三相分解）——⛔ 不得再合成一桶。
