@@ -23,10 +23,12 @@
 // so the AC4 negative control renames `.workflow-events/`.
 
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
-import { execFileSync, execFile } from "node:child_process";
+import { execFileSync, execFile, spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { QUAY_VERSION } from "./version.ts";
 
 const execFileP = promisify(execFile);
 
@@ -659,4 +661,644 @@ export function readGitHistory(root: string, { limit = GIT_HISTORY_LIMIT }: { li
       commits: [],
     };
   }
+}
+
+// ── AC95: six new views (dashboard · system · manager · tests · sessions · architecture) ───────────
+// Each new view reads the MECHANISM that produces its numbers (AC2):
+//   system       → resource-gate.sh + process-budget.sh (text output)
+//   manager      → loop-driver-check.sh + session-liveness.sh + observer-registry.conf + ready-pool-check.ts
+//   tests        → .quay/verification-round.jsonl + .quay/full-suite-state.json (the suite-state writer)
+//   sessions     → session-liveness.sh --once + resolved session transcripts
+//   architecture → git log per packages/* path + git worktree list (filesystem/git facts)
+//   dashboard    → the same sources via the specific views above, plus client.taskList (in the handler)
+// Everything degrades per the header contract: absent → 「未接入/无数据」, unreadable → 「读失败」,
+// never a 500. AC2's hard rule: NONE of this parses the manager's narrative tick/phase-goal prose
+// docs — the AC2 mechanical grep (the two narrative doc names over packages/quay/src) must hit 0.
+// Those are prose, not the producing mechanism.
+
+/** Resolve a plugin script relative to THIS module, mirroring readBoardLanding's dev/dist fallback. */
+function resolvePluginScript(rel: string): string | null {
+  try {
+    const p = fileURLToPath(new URL(rel, import.meta.url));
+    if (fs.existsSync(p)) return p;
+    if (rel.endsWith(".ts")) {
+      const bundled = fileURLToPath(new URL(rel.replace(/\.ts$/, ".js"), import.meta.url));
+      if (fs.existsSync(bundled)) return bundled;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Run a plugin script with a HARD deadline and a process-group kill — the robust path for bash
+ * scripts that may fork background children (session-liveness.sh spawns `sleep` children and defers
+ * SIGTERM while they run; a plain execFileSync timeout would block the serve event loop for the
+ * child's whole sleep). Spawns detached (own process group), redirects stdout to a temp file so a
+ * grandchild inheriting the stdout fd can never hold 'close' open, and on timeout SIGKILLs the
+ * whole group. Never throws: returns { stdout, exitCode } — the caller decides ok/empty/error.
+ */
+async function runScriptBounded(
+  cmd: string[],
+  opts: { cwd: string; timeoutMs: number },
+): Promise<{ stdout: string; exitCode: number | null }> {
+  const outPath = path.join(os.tmpdir(), `ac95-script-${process.pid}-${Math.random().toString(36).slice(2)}.out`);
+  let outFd: number;
+  try {
+    outFd = fs.openSync(outPath, "w");
+  } catch {
+    return { stdout: "", exitCode: null };
+  }
+  return await new Promise<{ stdout: string; exitCode: number | null }>((resolve) => {
+    let child;
+    try {
+      child = spawn(cmd[0], cmd.slice(1), {
+        cwd: opts.cwd,
+        detached: true,
+        stdio: ["ignore", outFd, "pipe"],
+      });
+    } catch {
+      try { fs.closeSync(outFd); } catch { /* noop */ }
+      try { fs.unlinkSync(outPath); } catch { /* noop */ }
+      resolve({ stdout: "", exitCode: null });
+      return;
+    }
+    let stderr = "";
+    child.stderr.on("data", (d: Buffer) => { stderr += String(d); });
+    const timer = setTimeout(() => {
+      try { process.kill(-child.pid, "SIGKILL"); } catch { try { child.kill("SIGKILL"); } catch { /* noop */ } }
+    }, opts.timeoutMs);
+    child.on("error", () => {
+      clearTimeout(timer);
+      try { fs.closeSync(outFd); } catch { /* noop */ }
+      try { fs.unlinkSync(outPath); } catch { /* noop */ }
+      resolve({ stdout: "", exitCode: null });
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      try { fs.closeSync(outFd); } catch { /* noop */ }
+      let stdout = "";
+      try { stdout = fs.readFileSync(outPath, "utf8"); } catch { /* noop */ }
+      try { fs.unlinkSync(outPath); } catch { /* noop */ }
+      resolve({ stdout, exitCode: code });
+    });
+  });
+}
+
+/** Resolve a plugin script and run it via runScriptBounded; returns stdout or a missing-reason. */
+async function runPluginScript(root: string, rel: string, args: string[], timeoutMs = 15_000): Promise<{ stdout: string | null; reason: string | null }> {
+  const p = resolvePluginScript(rel);
+  if (!p) return { stdout: null, reason: `${rel} 缺失（产品安装无 methodology 层 → 未接入）` };
+  const { stdout, exitCode } = await runScriptBounded(["bash", p, ...args], { cwd: root, timeoutMs });
+  if (exitCode === null) return { stdout: null, reason: `${rel} 未能运行（spawn 失败或超时被杀）` };
+  return { stdout, reason: null };
+}
+
+// ── System view ────────────────────────────────────────────────────────────────────────────────────
+
+export interface ResourceGateReading {
+  status: ObservationStatus;
+  reason: string | null;
+  cpuStallAvg10: number | null;
+  cpuStallAvg300: number | null;
+  memAvailMb: number | null;
+  loadAvg: number | null;
+  nproc: number | null;
+  nodeProcs: number | null;
+  verdict: "GO" | "WAIT" | null;
+}
+
+export interface ProcessBudgetReading {
+  status: ObservationStatus;
+  reason: string | null;
+  totalBudget: number | null;
+  inUse: number | null;
+  available: number | null;
+  verdict: "GO" | "WAIT" | null;
+}
+
+export interface SystemResult {
+  status: ObservationStatus;
+  reason: string | null;
+  resourceGate: ResourceGateReading;
+  processBudget: ProcessBudgetReading;
+}
+
+export const RESOURCE_GATE_REL = "../../../plugin/scripts/resource-gate.sh";
+export const PROCESS_BUDGET_REL = "../../../plugin/scripts/process-budget.sh";
+
+/** Parse resource-gate.sh's human report lines into structured fields. Pure (unit-testable). */
+export function parseResourceGateOutput(text: string): Omit<ResourceGateReading, "status" | "reason"> {
+  const num = (re: RegExp): number | null => {
+    const m = re.exec(text);
+    return m ? Number.parseFloat(m[1]) : null;
+  };
+  return {
+    cpuStallAvg10: num(/^cpu_stall\(some avg10\)=([0-9.]+)/m),
+    cpuStallAvg300: num(/^cpu_stall\(some avg300\)=([0-9.]+)/m),
+    memAvailMb: num(/^mem_avail=(\d+)MB/m),
+    loadAvg: num(/^loadavg=([0-9.]+)/m),
+    nproc: num(/^nproc=(\d+)\s+node_procs=/m),
+    nodeProcs: num(/^nproc=\d+\s+node_procs=(\d+)/m),
+    verdict: /^=>\s+(GO|WAIT)/m.exec(text)?.[1] as "GO" | "WAIT" | null ?? null,
+  };
+}
+
+/** Parse process-budget.sh's key=value lines into structured fields. Pure (unit-testable). */
+export function parseProcessBudgetOutput(text: string): Omit<ProcessBudgetReading, "status" | "reason"> {
+  const kv = (k: string): number | null => {
+    const m = new RegExp(`^${k}=(\\d+)`, "m").exec(text);
+    return m ? Number.parseInt(m[1], 10) : null;
+  };
+  return {
+    totalBudget: kv("total_budget"),
+    inUse: kv("in_use"),
+    available: kv("available"),
+    verdict: /^verdict=(GO|WAIT)/m.exec(text)?.[1] as "GO" | "WAIT" | null ?? null,
+  };
+}
+
+/** System view: resource-gate.sh + process-budget.sh text outputs parsed to structured fields. */
+export async function readSystem(root: string): Promise<SystemResult> {
+  const rg = await runPluginScript(root, RESOURCE_GATE_REL, []);
+  const rgReading: ResourceGateReading = rg.stdout == null
+    ? { status: "empty", reason: rg.reason, cpuStallAvg10: null, cpuStallAvg300: null, memAvailMb: null, loadAvg: null, nproc: null, nodeProcs: null, verdict: null }
+    : { status: "ok", reason: null, ...parseResourceGateOutput(rg.stdout) };
+
+  const pb = await runPluginScript(root, PROCESS_BUDGET_REL, []);
+  const pbReading: ProcessBudgetReading = pb.stdout == null
+    ? { status: "empty", reason: pb.reason, totalBudget: null, inUse: null, available: null, verdict: null }
+    : { status: "ok", reason: null, ...parseProcessBudgetOutput(pb.stdout) };
+
+  const degraded = rg.stdout == null && pb.stdout == null;
+  return {
+    status: degraded ? "empty" : "ok",
+    reason: degraded ? "system 机制脚本缺失" : null,
+    resourceGate: rgReading,
+    processBudget: pbReading,
+  };
+}
+
+// ── Manager view (Manager / Outer / Inner 三层自适应探测) ───────────────────────────────────────────
+
+export interface LoopDriverReading {
+  status: ObservationStatus;
+  reason: string | null;
+  verdict: "LIVE" | "STALLED" | "DOUBLE-TRIGGER" | "BANNED-MECHANISM" | "DEAD" | null;
+  exitCode: number | null;
+  detail: string | null;
+}
+
+export interface SessionLivenessReading {
+  status: ObservationStatus;
+  reason: string | null;
+  sessions: Array<{ name: string; alive: boolean; pid: number | null; halted: boolean }>;
+}
+
+export interface ObserverRow {
+  name: string;
+  status: string;
+  root: string;
+  note: string;
+}
+
+export interface ManagerResult {
+  status: ObservationStatus;
+  reason: string | null;
+  loopDriver: LoopDriverReading;
+  liveness: SessionLivenessReading;
+  observers: { status: ObservationStatus; reason: string | null; rows: ObserverRow[] };
+  pool: { status: ObservationStatus; reason: string | null; pool: number | null; floor: number | null; deficit: number | null; cap: number | null };
+  version: string | null;
+  developLead: number | null;
+}
+
+export const LOOP_DRIVER_CHECK_REL = "../../../plugin/scripts/loop-driver-check.sh";
+export const SESSION_LIVENESS_REL = "../../../plugin/scripts/session-liveness.sh";
+export const READY_POOL_CHECK_REL = "../../../plugin/scripts/ready-pool-check.ts";
+export const OBSERVER_REGISTRY_CONF = "../../../orchestration/observer-registry.conf";
+
+/** Parse loop-driver-check.sh's first line: `loop-driver: STALLED (0) — …`. Pure. */
+export function parseLoopDriverOutput(text: string, exitCode: number): Omit<LoopDriverReading, "status" | "reason"> {
+  const m = /^loop-driver:\s+(LIVE|STALLED|DOUBLE-TRIGGER|BANNED-MECHANISM|DEAD)\s+\((\d+)\)(.*)$/m.exec(text);
+  if (!m) {
+    return { verdict: null, exitCode, detail: text.trim().split("\n")[0] ?? null };
+  }
+  return { verdict: m[1] as LoopDriverReading["verdict"], exitCode: Number.parseInt(m[2], 10), detail: m[3].trim() };
+}
+
+/** Parse session-liveness.sh --once's `SESSION-STATUS <name> alive=… pid=… halted=…` rows. Pure. */
+export function parseSessionLivenessOutput(text: string): Array<{ name: string; alive: boolean; pid: number | null; halted: boolean }> {
+  const out: Array<{ name: string; alive: boolean; pid: number | null; halted: boolean }> = [];
+  for (const line of text.split(/\r?\n/)) {
+    const m = /^SESSION-STATUS\s+(\S+)\s+alive=(\d+)\s+pid=(\d+)\s+halted=(\d+)/.exec(line);
+    if (m) {
+      out.push({
+        name: m[1],
+        alive: m[2] === "1",
+        pid: m[3] === "0" ? null : Number.parseInt(m[3], 10),
+        halted: m[4] === "1",
+      });
+    }
+  }
+  return out;
+}
+
+/** Parse observer-registry.conf (`name|status|root|tmux|note` lines, # comments skipped). Pure. */
+export function parseObserverRegistry(text: string): ObserverRow[] {
+  const rows: ObserverRow[] = [];
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const parts = trimmed.split("|");
+    if (parts.length < 2) continue;
+    rows.push({
+      name: parts[0].trim(),
+      status: parts[1].trim(),
+      root: (parts[2] ?? "").trim(),
+      note: (parts[4] ?? "").trim(),
+    });
+  }
+  return rows;
+}
+
+/** Manager view: loop-driver + session-liveness + observer registry + ready-pool pool metrics. */
+export async function readManager(root: string): Promise<ManagerResult> {
+  // loop-driver-check.sh: exit code carries the verdict (0 LIVE / 3 STALLED / 4 DOUBLE / 5 BANNED / 6 DEAD).
+  let loopDriver: LoopDriverReading;
+  {
+    const r = await runPluginScript(root, LOOP_DRIVER_CHECK_REL, ["--check", root], 15_000);
+    if (r.stdout == null) {
+      loopDriver = { status: "empty", reason: r.reason, verdict: null, exitCode: null, detail: null };
+    } else {
+      loopDriver = { status: "ok", reason: null, ...parseLoopDriverOutput(r.stdout, 0) };
+    }
+  }
+
+  // session-liveness.sh --once → per-target liveness rows (--once is REQUIRED: without it the
+  // script MOUNTS and polls forever — the serve path must never block the event loop on it).
+  let liveness: SessionLivenessReading;
+  {
+    const r = await runPluginScript(root, SESSION_LIVENESS_REL, ["--once"], 20_000);
+    const rows = r.stdout == null ? [] : parseSessionLivenessOutput(r.stdout);
+    if (r.stdout == null) liveness = { status: "empty", reason: r.reason, sessions: [] };
+    else if (rows.length === 0) liveness = { status: "empty", reason: "session-liveness 无 SESSION-STATUS 行（无观测目标）", sessions: [] };
+    else liveness = { status: "ok", reason: null, sessions: rows };
+  }
+
+  // observer-registry.conf — the single registration surface (mechanism input, not prose).
+  let observers: ManagerResult["observers"];
+  {
+    const conf = fileURLToPath(new URL(OBSERVER_REGISTRY_CONF, import.meta.url));
+    let rows: ObserverRow[] = [];
+    try {
+      if (!fs.existsSync(conf)) throw new Error("missing");
+      rows = parseObserverRegistry(fs.readFileSync(conf, "utf8"));
+    } catch (err) {
+      observers = { status: "empty", reason: `observer-registry.conf 不可读（${err instanceof Error ? err.message : String(err)} → 未接入）`, rows: [] };
+    }
+    observers = rows.length > 0
+      ? { status: "ok", reason: null, rows }
+      : { status: "empty", reason: "observer-registry.conf 为空", rows };
+  }
+
+  // ready-pool-check.ts --json → pool/floor/deficit/cap (the mechanism that PRODUCES these fields).
+  let pool: ManagerResult["pool"];
+  {
+    const p = resolvePluginScript(READY_POOL_CHECK_REL);
+    if (!p) {
+      pool = { status: "empty", reason: `${READY_POOL_CHECK_REL} 缺失（未接入）`, pool: null, floor: null, deficit: null, cap: null };
+    } else {
+      try {
+        const argv = p.endsWith(".ts")
+          ? ["--experimental-strip-types", p, "--json"]
+          : [p, "--json"];
+        const { stdout } = await execFileP("node", argv, { cwd: root, timeout: 60_000, maxBuffer: 32 * 1024 * 1024, encoding: "utf8" });
+        const j = JSON.parse(stdout);
+        pool = {
+          status: "ok",
+          reason: null,
+          pool: typeof j.pool === "number" ? j.pool : null,
+          floor: typeof j.floor === "number" ? j.floor : null,
+          deficit: typeof j.deficit === "number" ? j.deficit : null,
+          cap: typeof j.cap === "number" ? j.cap : null,
+        };
+      } catch (err) {
+        pool = { status: "error", reason: `ready-pool-check 读失败：${err instanceof Error ? err.message : String(err)}`, pool: null, floor: null, deficit: null, cap: null };
+      }
+    }
+  }
+
+  // version + develop lead — small git/product facts. version comes from the build-time-embedded
+  // QUAY_VERSION (version.ts) — NEVER a runtime read of package.json, which would break the
+  // self-contained-dist invariant (build-dist.test.mjs asserts the bundle carries no '../package.json').
+  const version: string | null = QUAY_VERSION || null;
+  let developLead: number | null = null;
+  try {
+    const out = execFileSync("git", ["-C", root, "rev-list", "--count", "develop..HEAD"], { encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "pipe"] });
+    developLead = Number.parseInt(out.trim(), 10);
+    if (!Number.isFinite(developLead)) developLead = null;
+  } catch { developLead = null; }
+
+  const degraded = loopDriver.status === "empty" && liveness.status === "empty" && pool.status === "empty";
+  return {
+    status: degraded ? "empty" : "ok",
+    reason: degraded ? "manager 观测机制脚本缺失" : null,
+    loopDriver,
+    liveness,
+    observers,
+    pool,
+    version,
+    developLead,
+  };
+}
+
+// ── Tests view (verification-round.jsonl + full-suite-state.json) ──────────────────────────────────
+
+export interface TestRunRecord {
+  round: number | null;
+  startedAt: string | null;
+  durationMs: number | null;
+  state: string | null;
+  pass: number | null;
+  fail: number | null;
+  cancelled: number | null;
+  tests: number | null;
+  reason: string | null;
+  commit: string | null;
+  scope: string | null;
+  runner: string | null;
+  gate: string | null;
+  failures: string[] | null;
+}
+
+export interface TestsResult {
+  status: ObservationStatus;
+  reason: string | null;
+  runs: TestRunRecord[];
+  /** Current `.quay/full-suite-state.json` `state` (running|green|red|absent), null when absent. */
+  currentState: string | null;
+}
+
+export const VERIFICATION_ROUND_REL = "../../../.quay/verification-round.jsonl";
+export const FULL_SUITE_STATE_REL = "../../../.quay/full-suite-state.json";
+
+/** Parse one verification-round.jsonl line into a TestRunRecord. Malformed → null (never throw). */
+export function parseVerificationRound(line: string): TestRunRecord | null {
+  try {
+    const o = JSON.parse(line);
+    if (!o || typeof o !== "object" || Array.isArray(o)) return null;
+    const num = (v: unknown): number | null => (typeof v === "number" ? v : null);
+    const str = (v: unknown): string | null => (typeof v === "string" ? v : null);
+    let failures: string[] | null = null;
+    if (Array.isArray(o.failures)) {
+      failures = o.failures.map((f: unknown) => {
+        if (typeof f === "string") return f;
+        if (f && typeof f === "object") {
+          const p = (f as { file?: unknown; name?: unknown; test?: unknown }).file ?? (f as { file?: unknown; name?: unknown; test?: unknown }).name ?? (f as { file?: unknown; name?: unknown; test?: unknown }).test;
+          return typeof p === "string" ? p : JSON.stringify(f);
+        }
+        return JSON.stringify(f);
+      });
+    }
+    return {
+      round: num(o.round),
+      startedAt: str(o.startedAt) ?? str(o.started_at),
+      durationMs: num(o.durationMs),
+      state: str(o.state),
+      pass: num(o.pass),
+      fail: num(o.fail),
+      cancelled: num(o.cancelled),
+      tests: num(o.tests),
+      reason: str(o.reason),
+      commit: str(o.commit),
+      scope: str(o.scope),
+      runner: str(o.runner),
+      gate: str(o.gate),
+      failures,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Tests view: the suite-state writer's own round sequence + current state. */
+export function readTests(root: string): TestsResult {
+  const roundsPath = path.join(root, ".quay", "verification-round.jsonl");
+  const runs: TestRunRecord[] = [];
+  let statePathStatus: ObservationStatus = "ok";
+  let reason: string | null = null;
+  try {
+    if (!fs.existsSync(roundsPath)) {
+      statePathStatus = "empty";
+      reason = ".quay/verification-round.jsonl 不存在（尚未跑过验证轮 → 未接入）";
+    } else {
+      const text = fs.readFileSync(roundsPath, "utf8");
+      for (const line of text.split(/\r?\n/)) {
+        if (!line.trim()) continue;
+        const rec = parseVerificationRound(line);
+        if (rec) runs.push(rec);
+      }
+      if (runs.length === 0) {
+        statePathStatus = "empty";
+        reason = "verification-round.jsonl 存在但无有效记录";
+      } else {
+        // The suite writer appends oldest→newest; the page shows 最新在前, so present newest-first.
+        runs.reverse();
+      }
+    }
+  } catch (err) {
+    statePathStatus = "error";
+    reason = `verification-round.jsonl 读失败：${err instanceof Error ? err.message : String(err)}`;
+  }
+
+  let currentState: string | null = null;
+  try {
+    const statePath = path.join(root, ".quay", "full-suite-state.json");
+    if (fs.existsSync(statePath)) {
+      const j = JSON.parse(fs.readFileSync(statePath, "utf8"));
+      currentState = typeof j.state === "string" ? j.state : null;
+    }
+  } catch { currentState = null; }
+
+  return { status: statePathStatus, reason, runs, currentState };
+}
+
+// ── Sessions view (session-liveness + resolved transcript tails) ───────────────────────────────────
+
+export interface SessionMessage {
+  time: string;
+  role: string;
+  text: string;
+}
+
+export interface SessionDetail {
+  name: string;
+  alive: boolean;
+  pid: number | null;
+  halted: boolean;
+  transcriptStatus: ObservationStatus;
+  transcriptReason: string | null;
+  messages: SessionMessage[] | null;
+}
+
+export interface SessionsResult {
+  status: ObservationStatus;
+  reason: string | null;
+  sessions: SessionDetail[];
+}
+
+export const SESSIONS_TRANSCRIPT_MAX_MSGS = 3;
+export const SESSIONS_TRANSCRIPT_TAIL_BYTES = 200_000;
+
+/**
+ * Best-effort read of the last few user/assistant text messages from a Claude Code transcript
+ * JSONL. Bounded to the file tail so a multi-GB transcript never loads fully. Returns null when
+ * the path is missing/unreadable (the page then shows 未接入 for that layer).
+ */
+export function readTranscriptTail(transcriptPath: string, maxMsgs = SESSIONS_TRANSCRIPT_MAX_MSGS): { status: ObservationStatus; reason: string | null; messages: SessionMessage[] | null } {
+  try {
+    if (!fs.existsSync(transcriptPath)) return { status: "empty", reason: "transcript 缺失", messages: null };
+    const stat = fs.statSync(transcriptPath);
+    const fd = fs.openSync(transcriptPath, "r");
+    const tailStart = Math.max(0, stat.size - SESSIONS_TRANSCRIPT_TAIL_BYTES);
+    const buf = Buffer.alloc(stat.size - tailStart);
+    fs.readSync(fd, buf, 0, buf.length, tailStart);
+    fs.closeSync(fd);
+    const text = buf.toString("utf8").split(/\r?\n/);
+    const messages: SessionMessage[] = [];
+    for (const line of text) {
+      if (!line.trim()) continue;
+      let o: unknown;
+      try { o = JSON.parse(line); } catch { continue; }
+      if (!o || typeof o !== "object" || Array.isArray(o)) continue;
+      const rec = o as { type?: unknown; timestamp?: unknown; message?: unknown };
+      const msg = rec.message as { role?: unknown; content?: unknown } | undefined;
+      if (!msg || !msg.content) continue;
+      const role = typeof msg.role === "string" ? msg.role : "";
+      let textContent: string | null = null;
+      if (typeof msg.content === "string") textContent = msg.content;
+      else if (Array.isArray(msg.content)) {
+        for (const blk of msg.content) {
+          if (blk && typeof blk === "object" && (blk as { type?: unknown }).type === "text") {
+            const t = (blk as { text?: unknown }).text;
+            if (typeof t === "string" && t.trim()) { textContent = t; break; }
+          }
+        }
+      }
+      if (!textContent || !textContent.trim()) continue;
+      messages.push({
+        time: typeof rec.timestamp === "string" ? rec.timestamp : "",
+        role,
+        text: textContent.trim().slice(0, 500),
+      });
+    }
+    if (messages.length === 0) return { status: "empty", reason: "transcript 尾部无 user/assistant 文本消息", messages: null };
+    return { status: "ok", reason: null, messages: messages.slice(-maxMsgs) };
+  } catch (err) {
+    return { status: "error", reason: `transcript 读失败：${err instanceof Error ? err.message : String(err)}`, messages: null };
+  }
+}
+
+/** Sessions view: session-liveness rows + best-effort transcript tails per live session. */
+export async function readSessions(root: string): Promise<SessionsResult> {
+  const p = resolvePluginScript(SESSION_LIVENESS_REL);
+  if (!p) {
+    return { status: "empty", reason: `${SESSION_LIVENESS_REL} 缺失（未接入）`, sessions: [] };
+  }
+  const r = await runPluginScript(root, SESSION_LIVENESS_REL, ["--once"], 20_000);
+  if (r.stdout == null) {
+    return { status: "empty", reason: r.reason, sessions: [] };
+  }
+  const rows = parseSessionLivenessOutput(r.stdout);
+  if (rows.length === 0) {
+    return { status: "empty", reason: "session-liveness 无 SESSION-STATUS 行（无观测目标）", sessions: [] };
+  }
+
+  const sessions: SessionDetail[] = [];
+  for (const row of rows) {
+    let transcript: { status: ObservationStatus; reason: string | null; messages: SessionMessage[] | null } =
+      { status: "empty", reason: "未解析 transcript 路径（无 pid）", messages: null };
+    if (row.alive && row.pid != null) {
+      const t = await runScriptBounded(["bash", p, "--resolve-transcript", row.name, root, String(row.pid)], { cwd: root, timeoutMs: 10_000 });
+      const tp = t.stdout.trim().split(/\r?\n/).pop() ?? "";
+      if (tp && fs.existsSync(tp)) transcript = readTranscriptTail(tp);
+      else transcript = { status: "empty", reason: "transcript 路径不可解析", messages: null };
+    }
+    sessions.push({
+      name: row.name,
+      alive: row.alive,
+      pid: row.pid,
+      halted: row.halted,
+      transcriptStatus: transcript.status,
+      transcriptReason: transcript.reason,
+      messages: transcript.messages,
+    });
+  }
+
+  return { status: "ok", reason: null, sessions };
+}
+
+// ── Architecture view (git/facts per packages/* path) ──────────────────────────────────────────────
+
+export interface ArchComponent {
+  name: string;
+  path: string;
+  /** Commits landing in the window (git log --since). */
+  recentCommits: number;
+  /** Last commit unix-time, or null when no commits at all. */
+  lastCommitAt: number | null;
+}
+
+export interface ArchitectureResult {
+  status: ObservationStatus;
+  reason: string | null;
+  components: ArchComponent[];
+  /** True when >1 git worktree exists (a task worktree → something in development). */
+  inDevelopment: boolean;
+}
+
+export const ARCH_RECENT_WINDOW_DAYS = 7;
+
+/** Architecture view: per-package commit activity + worktree count from git/filesystem facts. */
+export function readArchitecture(root: string, { windowDays = ARCH_RECENT_WINDOW_DAYS } = {}): ArchitectureResult {
+  const packagesDir = path.join(root, "packages");
+  const components: ArchComponent[] = [];
+  let readError: string | null = null;
+  try {
+    if (!fs.existsSync(packagesDir)) {
+      return { status: "empty", reason: "packages/ 目录不存在", components: [], inDevelopment: false };
+    }
+    const dirs = fs.readdirSync(packagesDir, { withFileTypes: true })
+      .filter((d) => d.isDirectory())
+      .filter((d) => fs.existsSync(path.join(packagesDir, d.name, "package.json")));
+    for (const d of dirs) {
+      const rel = `packages/${d.name}`;
+      let recentCommits = 0;
+      let lastCommitAt: number | null = null;
+      try {
+        const log = execFileSync("git", ["-C", root, "log", "--oneline", `--since=${windowDays} days ago`, "--", rel], { encoding: "utf8", timeout: 8_000, stdio: ["ignore", "pipe", "pipe"] });
+        recentCommits = log.split(/\r?\n/).filter(Boolean).length;
+        const last = execFileSync("git", ["-C", root, "log", "-1", "--format=%ct", "--", rel], { encoding: "utf8", timeout: 8_000, stdio: ["ignore", "pipe", "pipe"] }).trim();
+        if (last) lastCommitAt = Number.parseInt(last, 10) || null;
+      } catch {
+        recentCommits = 0;
+        lastCommitAt = null;
+      }
+      components.push({ name: d.name, path: rel, recentCommits, lastCommitAt });
+    }
+  } catch (err) {
+    readError = err instanceof Error ? err.message : String(err);
+  }
+
+  let inDevelopment = false;
+  try {
+    const wt = execFileSync("git", ["-C", root, "worktree", "list", "--porcelain"], { encoding: "utf8", timeout: 8_000, stdio: ["ignore", "pipe", "pipe"] });
+    inDevelopment = wt.split(/\r?\n/).filter((l) => l.startsWith("worktree ")).length > 1;
+  } catch { inDevelopment = false; }
+
+  if (readError) return { status: "error", reason: `packages/ 读失败：${readError}`, components, inDevelopment };
+  if (components.length === 0) return { status: "empty", reason: "packages/ 下无带 package.json 的组件", components, inDevelopment };
+  return { status: "ok", reason: null, components, inDevelopment };
 }

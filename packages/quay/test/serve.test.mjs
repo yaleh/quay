@@ -1264,12 +1264,12 @@ async function main() {
 
       const singleResp = await get(qx46Port, "/?q=xyzzy-qx46-unique-singleton");
       assert(singleResp.status === 200, "GET /?q=xyzzy-qx46-unique-singleton returns 200 (QX-046 single-page)");
-      // Extract the search result banner (the blue p.meta element with color:#0066cc)
+      // Extract the search result banner (the accent p.meta element with color:var(--color-accent))
       // to verify it does NOT contain the "· Page X of Y" suffix when totalPages=1.
       // NOTE: pageNav separately renders "Page 1 of 1 (N tasks)" on the page — that is
       // expected and is not the element being tested here. We test that the BANNER itself
       // (the "Showing N results for…" paragraph) has no page indicator when 1 page.
-      const singleBannerMatch = singleResp.body.match(/<p[^>]*color:#0066cc[^>]*>([^<]*)<\/p>/);
+      const singleBannerMatch = singleResp.body.match(/<p[^>]*color:var\(--color-accent\)[^>]*>([^<]*)<\/p>/);
       const singleBannerText = singleBannerMatch ? singleBannerMatch[0] : "";
       assert(
         singleBannerText.includes("Showing 1 results") || singleBannerText.includes("Showing 1 result"),

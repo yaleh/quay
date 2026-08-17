@@ -111,8 +111,11 @@ test("the task list (/) nav links to goals and docs", async () => {
   assert.match(r.body, /\/doc/);
 });
 
-test("empty goals/ and docs-managed/ render an empty page (no crash)", async () => {
+test("AC98 — a filter with no matching goals renders the prose-source pointer, not 'No goals.'", async () => {
   const r = await get(port, "/goal?status=superseded"); // no superseded records
   assert.equal(r.status, 200);
-  assert.match(r.body, /No goals/);
+  // AC98: the zero-record view must point at the two prose sources and never say "No goals."
+  assert.match(r.body, /orchestration\/manager-phase-goal\.md/);
+  assert.match(r.body, /orchestration\/outer-phase-goal\.md/);
+  assert.doesNotMatch(r.body, /No goals/);
 });
