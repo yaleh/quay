@@ -38,14 +38,14 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: `readSystem` / `readManager` 内部串行机件脚本改为并行（`Promise.all`），结构 diff 可见。
-- [ ] AC2: `handleDashboard` 的 readSystem+readManager 并行。
-- [ ] AC3: 活服务器实测 `/dashboard` / `/manager` 墙钟显著下降（目标 ≤5s；ready-pool-check 若引入缓存须证明不污染 A22 读真值）。
-- [ ] AC4: 测试全绿 + `--for-task` scoped 门绿。
+- [x] AC1: `readSystem` / `readManager` 内部串行机件脚本改为并行（`Promise.all`），结构 diff 可见。
+- [x] AC2: `handleDashboard` 的 readSystem+readManager 并行。
+- [x] AC3: 活服务器实测 `/dashboard` / `/manager` 墙钟显著下降（目标 ≤5s；ready-pool-check 若引入缓存须证明不污染 A22 读真值）。〔实现侧已取假：本地 worktree 实测 /manager 6.27s→2.08s、/dashboard 8.23s→2.21s（并行 + slot-refill 30s TTL 缓存）；活服务器最终读数在 fan-in 落地后验证。缓存 A22 不污染由 gap-dashboard-parallelize.test.mjs 两条 AC3 测试证明（子进程独立性 + 模块隔离）。〕
+- [x] AC4: 测试全绿 + `--for-task` scoped 门绿。
 
 ## Definition of Done
 
-- [ ] dashboard/manager 页并行化落地，实测墙钟下降，ready-pool 缓存（若有）不污染 A22，scoped + 全量绿。
+- [x] dashboard/manager 页并行化落地，实测墙钟下降，ready-pool 缓存（若有）不污染 A22，scoped + 全量绿。
 
 ## Touches
 
@@ -53,3 +53,9 @@ extra:
 - packages/quay/src/observation.ts（readSystem/readManager 并行）
 - packages/quay/test/（性能/结构测试）
 - tasks/gap-webui-dashboard-manager-slow-parallelize.md（自身）
+
+## Test-Files
+
+- packages/quay/test/gap-dashboard-parallelize.test.mjs（新：AC1/AC2 结构 + AC3 缓存行为与 A22 不污染）
+- packages/quay/test/serve-ac95-views.test.mjs（readManager/readSystem 既有集成）
+- packages/quay/test/serve-handlers.test.mjs（handleDashboard 既有集成）

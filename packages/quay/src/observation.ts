@@ -830,12 +830,17 @@ export function parseProcessBudgetJson(text: string): Omit<ProcessBudgetReading,
 
 /** System view: resource-gate.sh --json + process-budget.sh --json parsed to structured fields. */
 export async function readSystem(root: string): Promise<SystemResult> {
-  const rg = await runPluginScript(root, RESOURCE_GATE_REL, ["--json"]);
+  // AC1 (gap-webui-dashboard-manager-slow-parallelize): the two mechanism scripts are independent —
+  // run them CONCURRENTLY. Serial was resource-gate(1.65s)→process-budget(0.35s) ≈ 2.0s; parallel is
+  // bounded by the slower of the two (~1.65s).
+  const [rg, pb] = await Promise.all([
+    runPluginScript(root, RESOURCE_GATE_REL, ["--json"]),
+    runPluginScript(root, PROCESS_BUDGET_REL, ["--json"]),
+  ]);
   const rgReading: ResourceGateReading = rg.stdout == null
     ? { status: "empty", reason: rg.reason, cpuStallAvg10: null, cpuStallAvg300: null, memAvailMb: null, loadAvg: null, nproc: null, nodeProcs: null, verdict: null, loadThreshold: null, loadOverFactor: null }
     : { status: "ok", reason: null, ...parseResourceGateJson(rg.stdout) };
 
-  const pb = await runPluginScript(root, PROCESS_BUDGET_REL, ["--json"]);
   const pbReading: ProcessBudgetReading = pb.stdout == null
     ? { status: "empty", reason: pb.reason, totalBudget: null, inUse: null, available: null, verdict: null }
     : { status: "ok", reason: null, ...parseProcessBudgetJson(pb.stdout) };
@@ -991,37 +996,117 @@ export function buildManagerSessionTargets(root: string): string | null {
   return null;
 }
 
-/** Manager view: loop-driver + session-liveness + observer registry + slot-refill pool metrics. */
-export async function readManager(root: string): Promise<ManagerResult> {
-  // loop-driver-check.sh --json → verdict/exit_code/detail. AC99: the JSON interface replaces the
-  // first-line text parse; exit code is carried in the JSON (0 LIVE / 3 STALLED / 4 DOUBLE /
-  // 5 BANNED / 6 DEAD).
-  let loopDriver: LoopDriverReading;
-  {
-    const r = await runPluginScript(root, LOOP_DRIVER_CHECK_REL, ["--check", "--json", root], 15_000);
-    if (r.stdout == null) {
-      loopDriver = { status: "empty", reason: r.reason, verdict: null, exitCode: null, detail: null };
-    } else {
-      loopDriver = { status: "ok", reason: null, ...parseLoopDriverJson(r.stdout) };
-    }
+/** loop-driver-check.sh --json → verdict/exit_code/detail. AC99: the JSON interface replaces the
+ *  first-line text parse; exit code is carried in the JSON (0 LIVE / 3 STALLED / 4 DOUBLE /
+ *  5 BANNED / 6 DEAD). One of readManager's four CONCURRENT probes. */
+async function runLoopDriverProbe(root: string): Promise<LoopDriverReading> {
+  const r = await runPluginScript(root, LOOP_DRIVER_CHECK_REL, ["--check", "--json", root], 15_000);
+  if (r.stdout == null) {
+    return { status: "empty", reason: r.reason, verdict: null, exitCode: null, detail: null };
+  }
+  return { status: "ok", reason: null, ...parseLoopDriverJson(r.stdout) };
+}
+
+/** session-liveness.sh --once --json → per-target liveness rows (--once is REQUIRED: without it
+ *  the script MOUNTS and polls forever — the serve path must never block the event loop on it).
+ *  The manager page is three-layer (Outer / Inner); the shared orchestration/session-liveness.env
+ *  only carries the OUTER's single inner target (管理者多目标配置已外移到 ~/.quay-global), so we
+ *  pass an explicit SESSION_TARGETS override registering outer + inner — scoped to this probe,
+ *  never mutating the env file the outer/inner mounts source (AC3). AC99: the --json output is
+ *  requested (the Manager view's machine-readable interface). One of readManager's four CONCURRENT
+ *  probes. */
+async function runLivenessProbe(root: string, targets: string | null): Promise<SessionLivenessReading> {
+  const r = await runPluginScript(root, SESSION_LIVENESS_REL, ["--once", "--json"], 20_000, targets ? { SESSION_TARGETS: targets } : undefined);
+  const rows = r.stdout == null ? [] : parseSessionLivenessJson(r.stdout);
+  if (r.stdout == null) return { status: "empty", reason: r.reason, sessions: [] };
+  if (rows.length === 0) return { status: "empty", reason: "session-liveness 无 SESSION-STATUS 行（无观测目标）", sessions: [] };
+  return { status: "ok", reason: null, sessions: rows };
+}
+
+// ── Short-TTL cache for the slot-refill sub-probe (WebUI display surface only) ───────────────────
+// The pool metrics (pool/floor/deficit/cap) are the DISPATCH mechanism's truth for the inner tick:
+// A22 / slot-refill reads them EVERY tick by executing plugin/scripts/slot-refill.ts as a SEPARATE
+// process (its own execFile — never through this module). This cache lives ONLY in the serve-side
+// observation layer and serves the dashboard/manager display. Because A22's read never imports
+// observation.ts, caching here cannot pollute A22's read of truth (AC3 — 缓存不污染 A22). A 30s TTL
+// bounds staleness on the display surface: the page shows a snapshot, and the dispatch mechanism
+// always reads the fresh value. Keyed by workspace root so two served workspaces never share a
+// cached pool.
+export const SLOT_REFILL_CACHE_TTL_MS = 30_000;
+const slotRefillCache = new Map<string, { at: number; pool: ManagerResult["pool"] }>();
+
+/** Test-hygiene handle: drop all cached slot-refill readings. */
+export function clearSlotRefillCache(): void {
+  slotRefillCache.clear();
+}
+
+/** slot-refill.ts --json → pool/floor/deficit/cap (AC99: the DISPATCH mechanism that produces the
+ *  pool metrics — ready-pool-check's analyzeTasks is the same single source, and slot-refill
+ *  defaults to the FIXED dispatch cap 5 so the reported floor is the production truth, cap=5×4=20).
+ *  Cold-calling slot-refill is the single most expensive probe in readManager (~9s on the live box
+ *  — `node --experimental-strip-types` re-strips the whole import graph each run), so a successful
+ *  reading is short-TTL-cached. A failed/transient read is NOT cached — the next page load retries
+ *  instead of pinning the error for the whole TTL. One of readManager's four CONCURRENT probes. */
+async function readPoolMetrics(root: string): Promise<ManagerResult["pool"]> {
+  const hit = slotRefillCache.get(root);
+  if (hit && Date.now() - hit.at < SLOT_REFILL_CACHE_TTL_MS) return hit.pool;
+
+  const p = resolvePluginScript(SLOT_REFILL_REL);
+  if (!p) {
+    return { status: "empty", reason: `${SLOT_REFILL_REL} 缺失（未接入）`, pool: null, floor: null, deficit: null, cap: null };
   }
 
-  // session-liveness.sh --once --json → per-target liveness rows (--once is REQUIRED: without it
-  // the script MOUNTS and polls forever — the serve path must never block the event loop on it).
-  // The manager page is three-layer (Outer / Inner); the shared orchestration/session-liveness.env
-  // only carries the OUTER's single inner target (管理者多目标配置已外移到 ~/.quay-global), so we
-  // pass an explicit SESSION_TARGETS override registering outer + inner — scoped to this probe,
-  // never mutating the env file the outer/inner mounts source (AC3). AC99: the --json output is
-  // requested (the Manager view's machine-readable interface).
-  let liveness: SessionLivenessReading;
-  {
-    const targets = buildManagerSessionTargets(root);
-    const r = await runPluginScript(root, SESSION_LIVENESS_REL, ["--once", "--json"], 20_000, targets ? { SESSION_TARGETS: targets } : undefined);
-    const rows = r.stdout == null ? [] : parseSessionLivenessJson(r.stdout);
-    if (r.stdout == null) liveness = { status: "empty", reason: r.reason, sessions: [] };
-    else if (rows.length === 0) liveness = { status: "empty", reason: "session-liveness 无 SESSION-STATUS 行（无观测目标）", sessions: [] };
-    else liveness = { status: "ok", reason: null, sessions: rows };
+  let j: Record<string, unknown>;
+  try {
+    const argv = p.endsWith(".ts")
+      ? ["--experimental-strip-types", p, "--json"]
+      : [p, "--json"];
+    const { stdout } = await execFileP("node", argv, { cwd: root, timeout: 60_000, maxBuffer: 32 * 1024 * 1024, encoding: "utf8" });
+    j = JSON.parse(stdout);
+  } catch (err) {
+    return { status: "error", reason: `slot-refill 读失败：${err instanceof Error ? err.message : String(err)}`, pool: null, floor: null, deficit: null, cap: null };
   }
+
+  const pool: ManagerResult["pool"] = {
+    status: "ok",
+    reason: null,
+    pool: typeof j.pool === "number" ? j.pool : null,
+    floor: typeof j.floor === "number" ? j.floor : null,
+    deficit: typeof j.deficit === "number" ? j.deficit : null,
+    cap: typeof j.cap === "number" ? j.cap : null,
+  };
+  slotRefillCache.set(root, { at: Date.now(), pool });
+  return pool;
+}
+
+/** git rev-list --count develop..HEAD → commits ahead of develop (~0.01s; async so it never blocks
+ *  the serve event loop while the heavier probes run). One of readManager's four CONCURRENT probes. */
+async function readDevelopLead(root: string): Promise<number | null> {
+  try {
+    const { stdout } = await execFileP("git", ["-C", root, "rev-list", "--count", "develop..HEAD"], { cwd: root, timeout: 5_000, maxBuffer: 1024 * 1024, encoding: "utf8" });
+    const n = Number.parseInt(stdout.trim(), 10);
+    return Number.isFinite(n) ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Manager view: loop-driver + session-liveness + observer registry + slot-refill pool metrics. */
+export async function readManager(root: string): Promise<ManagerResult> {
+  // AC1 (gap-webui-dashboard-manager-slow-parallelize): the four async probes are independent — run
+  // them CONCURRENTLY. Serial was loop-driver(1.26s)→session-liveness(2.31s)→slot-refill(9.10s)→
+  // git(0.01s) ≈ 12.7s; parallel is bounded by the slowest probe (slot-refill, short-TTL-cached).
+  // buildManagerSessionTargets is a tiny synchronous file read needed for the liveness probe's
+  // SESSION_TARGETS override, so it runs first; observers registry + version are small sync reads
+  // kept inline.
+  const targets = buildManagerSessionTargets(root);
+
+  const [loopDriver, liveness, pool, developLead] = await Promise.all([
+    runLoopDriverProbe(root),
+    runLivenessProbe(root, targets),
+    readPoolMetrics(root),
+    readDevelopLead(root),
+  ]);
 
   // observer-registry.conf — the single registration surface (mechanism input, not prose).
   let observers: ManagerResult["observers"];
@@ -1039,45 +1124,10 @@ export async function readManager(root: string): Promise<ManagerResult> {
       : { status: "empty", reason: "observer-registry.conf 为空", rows };
   }
 
-  // slot-refill.ts --json → pool/floor/deficit/cap (AC99: the DISPATCH mechanism that produces the
-  // pool metrics — ready-pool-check's analyzeTasks is the same single source, and slot-refill
-  // defaults to the FIXED dispatch cap 5 so the reported floor is the production truth, cap=5×4=20).
-  let pool: ManagerResult["pool"];
-  {
-    const p = resolvePluginScript(SLOT_REFILL_REL);
-    if (!p) {
-      pool = { status: "empty", reason: `${SLOT_REFILL_REL} 缺失（未接入）`, pool: null, floor: null, deficit: null, cap: null };
-    } else {
-      try {
-        const argv = p.endsWith(".ts")
-          ? ["--experimental-strip-types", p, "--json"]
-          : [p, "--json"];
-        const { stdout } = await execFileP("node", argv, { cwd: root, timeout: 60_000, maxBuffer: 32 * 1024 * 1024, encoding: "utf8" });
-        const j = JSON.parse(stdout);
-        pool = {
-          status: "ok",
-          reason: null,
-          pool: typeof j.pool === "number" ? j.pool : null,
-          floor: typeof j.floor === "number" ? j.floor : null,
-          deficit: typeof j.deficit === "number" ? j.deficit : null,
-          cap: typeof j.cap === "number" ? j.cap : null,
-        };
-      } catch (err) {
-        pool = { status: "error", reason: `slot-refill 读失败：${err instanceof Error ? err.message : String(err)}`, pool: null, floor: null, deficit: null, cap: null };
-      }
-    }
-  }
-
-  // version + develop lead — small git/product facts. version comes from the build-time-embedded
-  // QUAY_VERSION (version.ts) — NEVER a runtime read of package.json, which would break the
-  // self-contained-dist invariant (build-dist.test.mjs asserts the bundle carries no '../package.json').
+  // version — build-time-embedded QUAY_VERSION (version.ts) — NEVER a runtime read of package.json,
+  // which would break the self-contained-dist invariant (build-dist.test.mjs asserts the bundle
+  // carries no '../package.json').
   const version: string | null = QUAY_VERSION || null;
-  let developLead: number | null = null;
-  try {
-    const out = execFileSync("git", ["-C", root, "rev-list", "--count", "develop..HEAD"], { encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "pipe"] });
-    developLead = Number.parseInt(out.trim(), 10);
-    if (!Number.isFinite(developLead)) developLead = null;
-  } catch { developLead = null; }
 
   const degraded = loopDriver.status === "empty" && liveness.status === "empty" && pool.status === "empty";
   return {
