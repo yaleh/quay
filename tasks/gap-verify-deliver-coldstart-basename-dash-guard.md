@@ -1,7 +1,7 @@
 ---
 id: gap-verify-deliver-coldstart-basename-dash-guard
 title: "verify-deliver-coldstart.sh:178 basename 缺 -- guard——/proc argv0 遇 -bash 等 dash-leading 进程名即报 'invalid option -- b'，全量 suite 环境依赖 flaky red（阻断所有 fan-in）"
-status: ready
+status: done
 labels:
   - gap
   - mechanism
