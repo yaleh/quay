@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-delta-scope-doc-only-skip
 title: "fan-in delta-scope 缺口：闸门只看单轮 fan-in delta，代码经更早分支历史静默进 develop，从未跑全量轮（发生率 16-32）"
-status: ready
+status: done
 labels:
   - gap
   - mechanism
