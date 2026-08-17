@@ -1177,10 +1177,17 @@ export async function handleGoalList(
       ${readError ? html`<div class="error-banner" role="alert"><strong>读失败:</strong> ${escapeHtml(readError)}</div>` : ""}
       <p class="meta">Kind: ${kindNav}</p>
       <p class="meta">Status: ${statusNav}</p>
-      ${goals.length === 0 ? html`<p class="meta">No goals.</p>` : html`<table>
-        <tr><th>id</th><th>kind</th><th>status</th><th>phase</th><th>title</th><th>criterion</th><th>recent verdict</th><th>origin</th></tr>
-        ${rows}
-      </table>`}
+      ${goals.length === 0
+        ? (readError
+            ? "" /* 读失败：上方 error-banner 已传达，空态不得再叠加误导性的「目录为空」（live 空态同纪律） */
+            : html`<div class="info-banner" role="status">
+                <p><strong>${statusFilter || kindFilter ? "当前筛选下无记录" : "goals/ 目录为空"}</strong> — 本页是 goal-store 的机读视图；阶段目标正本在 prose 文件：</p>
+                <p><code>orchestration/manager-phase-goal.md</code> · <code>orchestration/outer-phase-goal.md</code></p>
+              </div>`)
+        : html`<table>
+          <tr><th>id</th><th>kind</th><th>status</th><th>phase</th><th>title</th><th>criterion</th><th>recent verdict</th><th>origin</th></tr>
+          ${rows}
+        </table>`}
     </main></body></html>`);
 }
 

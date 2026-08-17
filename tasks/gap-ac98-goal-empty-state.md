@@ -26,12 +26,23 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1: `goals/` 为空时，`/goal` 页面 HTML 必须含指向两个 prose 正本（manager-phase-goal /
+- [x] AC1: `goals/` 为空时，`/goal` 页面 HTML 必须含指向两个 prose 正本（manager-phase-goal /
       outer-phase-goal）的路径字符串；grep 不到即假。
 
 ## Definition of Done
 
-- [ ] `/goal` 空态指向正本路径（AC1），不显示误导性 "No goals."。
+- [x] `/goal` 空态指向正本路径（AC1），不显示误导性 "No goals."。
+
+## Evidence
+
+**实现（serve-handlers.ts handleGoalList 空态分支）**：`goals.length === 0` 且无读错误时，渲染
+`info-banner` 指向两个 prose 正本路径字符串，不再输出 `No goals.`。有筛选条件时显示「当前筛选下无记录」，
+无筛选时显示「goals/ 目录为空」，二者都附正本路径。读失败时留空（上方 error-banner 已传达，不叠加误导）。
+
+**取假**：`/goal?status=superseded`（无记录）HTML 断言含 `orchestration/manager-phase-goal.md` 与
+`orchestration/outer-phase-goal.md` 且 `doesNotMatch /No goals/` —— 原行为打印 `No goals.`，此断言必然翻转。
+
+**验证**：`bash scripts/test.sh --for-task gap-ac98-goal-empty-state --allow-thin` → tests 85 / pass 85 / fail 0。
 
 ## Touches
 
