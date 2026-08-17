@@ -1,7 +1,7 @@
 ---
 id: gap-outer-tick-log-cross-midnight-monotonic
 title: "outer-tick-log-check 单调判据无跨日宽限——23:5x→00:0x 标签判 non-monotonic 假红（future-label 有宽限，单调没有）"
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
