@@ -67,20 +67,59 @@ COMPARE_PROMPT = (
 )
 
 
-def load_api_key():
-    if not os.path.isfile(KEY_FILE):
-        print(f"Error: Aliyun API key file not found: {KEY_FILE}", file=sys.stderr)
-        print("This tool needs the operator's personal Aliyun Token Plan key (not a project credential).", file=sys.stderr)
-        sys.exit(1)
-    text = open(KEY_FILE, "r", encoding="utf-8").read()
+def _extract_key_from_file(path):
+    """文件既可以是纯 key 值一行，也可以是 shell 风格 `export ALIYUN_API_KEY=...`（兼容旧格式）。"""
+    text = open(path, "r", encoding="utf-8").read()
     m = re.search(r'ALIYUN_API_KEY=["\']?([^"\'\n]+)', text)
-    if not m or not m.group(1).strip():
-        print(f"Error: ALIYUN_API_KEY not found/empty in {KEY_FILE}", file=sys.stderr)
-        sys.exit(1)
-    key = m.group(1).strip()
-    if not key.startswith("sk-sp-"):
-        print(f"Warning: key does not start with 'sk-sp-' (Token Plan format per docs) — proceeding anyway", file=sys.stderr)
-    return key
+    if m and m.group(1).strip():
+        return m.group(1).strip()
+    # 没有 shell 变量形态 ⇒ 把首个非空、非注释行当作裸 key
+    for line in text.splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            return line
+    return None
+
+
+def load_api_key(cli_key, cli_key_file):
+    """key 来源优先级（先到先得，覆盖后面的）：
+    1. --api-key（显式参数——⚠️ 会出现在 shell 历史/进程列表，仅本地临时用途建议）
+    2. 环境变量 ALIYUN_API_KEY
+    3. --key-file（显式指定的文件路径）
+    4. 环境变量 ALIYUN_API_KEY_FILE（指向一个文件）
+    5. 默认回退 ~/.local/etc/aliyun-api-key（本工具最初实现时的写死路径，保留作兜底）
+    任何一步找到非空值即返回；全部找不到才报错退出。
+    """
+    if cli_key:
+        return cli_key.strip()
+
+    env_key = os.environ.get("ALIYUN_API_KEY")
+    if env_key and env_key.strip():
+        return env_key.strip()
+
+    candidates = []
+    if cli_key_file:
+        candidates.append(cli_key_file)
+    env_key_file = os.environ.get("ALIYUN_API_KEY_FILE")
+    if env_key_file:
+        candidates.append(env_key_file)
+    candidates.append(KEY_FILE)  # 最后兜底，向后兼容
+
+    for path in candidates:
+        if os.path.isfile(path):
+            key = _extract_key_from_file(path)
+            if key:
+                return key
+
+    print("Error: no Aliyun Token Plan API key found. Tried, in order:", file=sys.stderr)
+    print("  1. --api-key", file=sys.stderr)
+    print("  2. $ALIYUN_API_KEY", file=sys.stderr)
+    if cli_key_file:
+        print(f"  3. --key-file {cli_key_file}", file=sys.stderr)
+    print("  4. $ALIYUN_API_KEY_FILE", file=sys.stderr)
+    print(f"  5. {KEY_FILE}", file=sys.stderr)
+    print("This tool needs the operator's personal Aliyun Token Plan key (not a project credential).", file=sys.stderr)
+    sys.exit(1)
 
 
 def image_to_data_url(path):
@@ -101,9 +140,15 @@ def main():
     ap.add_argument("--question", default=None, help="覆盖默认 prompt")
     ap.add_argument("--model", default=DEFAULT_MODEL)
     ap.add_argument("--max-tokens", type=int, default=800)
+    ap.add_argument("--api-key", default=None,
+                     help="直接传 key（优先级最高；⚠️ 会留在 shell 历史/进程列表，建议用 env var 或 --key-file）")
+    ap.add_argument("--key-file", default=None,
+                     help="key 所在文件路径（每行一个 key，或兼容旧的 export ALIYUN_API_KEY=... 格式）")
     args = ap.parse_args()
 
-    api_key = load_api_key()
+    api_key = load_api_key(args.api_key, args.key_file)
+    if not api_key.startswith("sk-sp-"):
+        print("Warning: key does not start with 'sk-sp-' (Token Plan format per docs) — proceeding anyway", file=sys.stderr)
     content = []
     if args.question:
         prompt = args.question

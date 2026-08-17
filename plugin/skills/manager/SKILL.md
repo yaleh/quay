@@ -434,6 +434,16 @@ python3 orchestration/manager-visual-check.py <截图> [参照图] [--question "
 （成本可见，同硬规则「别用总 token 判贵贱」）。退出码：0=调用成功（无论视觉判断内容），1=传输/鉴权/
 解析失败（fail loud，⛔ 不返回一个看起来合格的空值）。
 
+**key 来源（2026-08-17 通用化，人指示——⛔ 不写死单一路径）**，按优先级先到先得：
+```
+1. --api-key <值>          （最高优先；⚠️ 会留在 shell 历史/进程列表，仅建议本地临时用）
+2. $ALIYUN_API_KEY          （环境变量直传值）
+3. --key-file <路径>        （显式指定文件——每行一个 key，或兼容旧 export ALIYUN_API_KEY=... 格式）
+4. $ALIYUN_API_KEY_FILE     （环境变量指向一个文件）
+5. ~/.local/etc/aliyun-api-key（默认兜底，本工具最初实现时的写死路径，保留向后兼容）
+```
+五条路径均已实测跑通（含默认兜底回归 + 断绝所有来源触发 `exit 1` 的 fail-loud 校验）。
+
 **背后的服务**：阿里云百炼 Token Plan Personal（`https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1`，
 OpenAI 兼容格式），当前用 `qwen3.6-flash`（实测含视觉理解，2026-08-17 核实；`qwen3.7-flash` 不存在，
 `⛔` 别猜成存在——docs 页面列的是 `qwen3.6-flash`）。
