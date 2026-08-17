@@ -446,6 +446,131 @@ test("AC1 — phase-boundary differential records land for static→serial→gap
   }
 });
 
+test("AC2 — PHASE_OVERLAP round: the overlap window closes at the second done-marker and MAIN is NOT swallowed into serial (gap-verification-round-phases-overlap-merged)", async () => {
+  // Mimics test.sh's PHASE_OVERLAP stream: `overlap: running`, then the two parallel phases' own
+  // __GROUP__ + per-phase done-markers, then MAIN's __GROUP__, then the fixed-overhead __OVERHEAD__
+  // decomposition. The __GROUP__ lines interleave and must NOT be treated as boundaries during the
+  // window — only the two `overlap_<phase>_done=1` markers close it.
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-ovl-"));
+  const suite = [
+    'echo "selected 30 files (groups=product,engine,governance,serial,lowconc)"',
+    'echo "overlap: running 5 serial + 8 lowconc files in parallel (serial conc=2, lowconc conc=3)"',
+    // serial finishes first (its __GROUP__ + sub-time + done-marker)
+    'echo "__GROUP__ concurrency=2 files=5 sum_ms=1000 floor_ms=700 capped=0"',
+    'echo "__OVERHEAD__ overlap_serial_ms=2000"',
+    'echo "__OVERHEAD__ overlap_serial_done=1"',
+    // lowconc finishes second
+    'echo "__GROUP__ concurrency=3 files=8 sum_ms=1600 floor_ms=800 capped=0"',
+    'echo "__OVERHEAD__ overlap_lowconc_ms=1500"',
+    'echo "__OVERHEAD__ overlap_lowconc_done=1"',
+    // main runs — no start marker on the overlap path; its own __GROUP__ closes main→end
+    'echo "__GROUP__ concurrency=8 files=17 sum_ms=3000 floor_ms=1200 capped=0"',
+    // fixed-overhead decomposition (test.sh emits AFTER main — must not disturb the phases)
+    'echo "__OVERHEAD__ serial_phase_ms=2500"',
+    'echo "__OVERHEAD__ lowconc_phase_ms=0"',
+    'echo "__OVERHEAD__ main_phase_ms=3000"',
+    'echo "# tests 5"',
+    'echo "# pass 5"',
+    'echo "# fail 0"',
+    'echo "# cancelled 0"',
+    "exit 0",
+  ].join("\n");
+  const { f, dir } = fakeSuite(suite);
+  try {
+    const child = runRunner({
+      root,
+      command: `bash ${f}`,
+      laneCount: 8,
+      serialConcurrency: 2,
+      lowconcConcurrency: 3,
+      env: { QUAY_TEST_CGROUP_SCRIPT: PHASE_SCRIPT, QUAY_PHASE_OVERLAP: "1" },
+    });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, `runner exits 0 on green, got ${code}`);
+    const rec = lastRoundRecord(root);
+    assert.ok(rec, "round record written");
+    assert.equal(rec.phase_overlap, true, "round flags phase_overlap");
+    const phases = rec.phases || [];
+    assert.deepEqual(
+      phases.map((p) => p.phase),
+      ["static", "serial", "main", "end"],
+      "overlap round: the window is ONE serial record, main is SEPARATE (not swallowed), end closes",
+    );
+    const serial = phases.find((p) => p.phase === "serial");
+    assert.ok(serial, "serial (overlap-window) record present");
+    assert.ok(serial.overlap_sub_ms, "serial record carries the per-process breakdown (AC1/AC2)");
+    assert.equal(serial.overlap_sub_ms.serial_ms, 2000, "serial sub-time from the stream marker");
+    assert.equal(serial.overlap_sub_ms.lowconc_ms, 1500, "lowconc sub-time from the stream marker");
+    const main = phases.find((p) => p.phase === "main");
+    assert.ok(main, "main is its own record");
+    assert.equal(main.lanes, 8, "main lanes = the round laneCount");
+    // AC3 — the phase partition sums to ≈ durationMs (the overlap window is ONE wall segment, so
+    // serial+main+end+static still partition the run wall).
+    const sumWall = phases.reduce((s, p) => s + p.wall_ms, 0);
+    assert.ok(
+      Math.abs(sumWall - rec.durationMs) < 3000,
+      `phases wall sum ≈ durationMs (sum=${sumWall}, durationMs=${rec.durationMs})`,
+    );
+    // AC4 — scheduling untouched: the overlap round carries the same serial_phase_ms (window) and
+    // main_phase_ms the sequential baseline would, and the round record still reads the fixed-
+    // overhead decomposition (not a phase-boundary artifact).
+    assert.equal(rec.serial_phase_ms, 2500, "fixed-overhead serial_phase_ms = the combined window");
+    assert.equal(rec.main_phase_ms, 3000, "fixed-overhead main_phase_ms = main's own window");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("negative control — a marker-less overlap round (done-markers missed) still records via the __OVERHEAD__ burst fallback and never crashes (gap-verification-round-phases-overlap-merged)", async () => {
+  // Same stream WITHOUT the `overlap_<phase>_done=1` markers (e.g. a truncated/kill-on-red round, or a
+  // future test.sh that omits them). The window must close at the __OVERHEAD__ burst (the pre-fix
+  // fallback) — degraded (main subsumed) but the round still records and the new no-op branches must
+  // not disturb that path.
+  const suite = [
+    'echo "overlap: running 5 serial + 8 lowconc files in parallel (serial conc=2, lowconc conc=3)"',
+    'echo "__GROUP__ concurrency=2 files=5 sum_ms=1000 floor_ms=700 capped=0"',
+    'echo "__OVERHEAD__ overlap_serial_ms=2000"',
+    'echo "__GROUP__ concurrency=3 files=8 sum_ms=1600 floor_ms=800 capped=0"',
+    'echo "__OVERHEAD__ overlap_lowconc_ms=1500"',
+    'echo "__GROUP__ concurrency=8 files=17 sum_ms=3000 floor_ms=1200 capped=0"',
+    'echo "__OVERHEAD__ serial_phase_ms=2500"',
+    'echo "__OVERHEAD__ lowconc_phase_ms=0"',
+    'echo "__OVERHEAD__ main_phase_ms=3000"',
+    'echo "# tests 5"',
+    'echo "# pass 5"',
+    'echo "# fail 0"',
+    'echo "# cancelled 0"',
+    "exit 0",
+  ].join("\n");
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-ovl-fb-"));
+  const { f, dir } = fakeSuite(suite);
+  try {
+    const child = runRunner({
+      root,
+      command: `bash ${f}`,
+      laneCount: 8,
+      serialConcurrency: 2,
+      lowconcConcurrency: 3,
+      env: { QUAY_TEST_CGROUP_SCRIPT: PHASE_SCRIPT, QUAY_PHASE_OVERLAP: "1" },
+    });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, `runner exits 0 on green, got ${code}`);
+    const rec = lastRoundRecord(root);
+    assert.ok(rec, "round record written");
+    const names = (rec.phases || []).map((p) => p.phase);
+    assert.ok(
+      names[0] === "static" && names[1] === "serial",
+      `fallback still opens static→serial (got ${names.join(",")})`,
+    );
+    assert.ok(names.includes("end"), `fallback closes at the burst (got ${names.join(",")})`);
+    assert.ok(rec.phases.every((p) => typeof p.cpu_usec === "number"), "cpu differentials present on the fallback path");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("AC2 — the derived quantities (相利用率/相饱和度/等待占比) are directly computable from the records + the round's nproc", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-phd2-"));
   const { f, dir } = fakeSuite(PHASE_SUITE);

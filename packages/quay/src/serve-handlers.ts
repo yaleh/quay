@@ -2334,12 +2334,17 @@ export async function handleDashboard(
   try { live = readLive(cfg.workspaceRoot); } catch {
     live = { status: "error", reason: "internal", inFlight: [], concurrency: 0, cpuPressure: null, liveState: null, liveExplanation: null, activity: null };
   }
-  const sys = await readSystem(cfg.workspaceRoot).catch(() => ({
-    status: "error" as const, reason: "internal", resourceGate: { status: "error" as const, reason: null, cpuStallAvg10: null, cpuStallAvg300: null, memAvailMb: null, loadAvg: null, nproc: null, nodeProcs: null, verdict: null, loadThreshold: null, loadOverFactor: null }, processBudget: { status: "error" as const, reason: null, totalBudget: null, inUse: null, available: null, verdict: null },
-  }));
-  const mgr = await readManager(cfg.workspaceRoot).catch(() => ({
-    status: "error" as const, reason: "internal", loopDriver: { status: "error" as const, reason: null, verdict: null, exitCode: null, detail: null }, liveness: { status: "error" as const, reason: null, sessions: [] }, observers: { status: "error" as const, reason: null, rows: [] }, pool: { status: "error" as const, reason: null, pool: null, floor: null, deficit: null, cap: null }, version: null, developLead: null,
-  }));
+  // AC2 (gap-webui-dashboard-manager-slow-parallelize): readSystem + readManager are the two slow
+  // observation reads (each internally parallelized in observation.ts) — run them CONCURRENTLY.
+  // Serial was readSystem(≈2s)→readManager(≈12.7s) ≈ 14.7s; parallel is bounded by readManager.
+  const [sys, mgr] = await Promise.all([
+    readSystem(cfg.workspaceRoot).catch(() => ({
+      status: "error" as const, reason: "internal", resourceGate: { status: "error" as const, reason: null, cpuStallAvg10: null, cpuStallAvg300: null, memAvailMb: null, loadAvg: null, nproc: null, nodeProcs: null, verdict: null, loadThreshold: null, loadOverFactor: null }, processBudget: { status: "error" as const, reason: null, totalBudget: null, inUse: null, available: null, verdict: null },
+    })),
+    readManager(cfg.workspaceRoot).catch(() => ({
+      status: "error" as const, reason: "internal", loopDriver: { status: "error" as const, reason: null, verdict: null, exitCode: null, detail: null }, liveness: { status: "error" as const, reason: null, sessions: [] }, observers: { status: "error" as const, reason: null, rows: [] }, pool: { status: "error" as const, reason: null, pool: null, floor: null, deficit: null, cap: null }, version: null, developLead: null,
+    })),
+  ]);
   let tests: TestsResult;
   try { tests = readTests(cfg.workspaceRoot); } catch {
     tests = { status: "error", reason: "internal", runs: [], currentState: null };

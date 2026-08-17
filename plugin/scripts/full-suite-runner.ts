@@ -832,6 +832,12 @@ export interface PhaseDiffRecord {
    *  derived value is `consumed_total − Σ(completed phases)` — exact, kernel-accumulated, but
    *  DERIVED (never a fabricated 0). PSI stays null on that phase (no PSI in the Consumed line). */
   reconstructed?: boolean;
+  /** PHASE_OVERLAP only — the combined serial+lowconc window's per-process sub-times (test.sh's
+   *  `__OVERHEAD__ overlap_<phase>_ms=N` markers, attached to the window record when BOTH parallel
+   *  phases have finished). Lets a reader split the window back into the serial and lowconc
+   *  contributions (gap-verification-round-phases-overlap-merged AC1/AC2 — 不得再合成一桶). Absent
+   *  on sequential rounds and when the markers were missed (a truncated/red window has no breakdown). */
+  overlap_sub_ms?: { serial_ms?: number; lowconc_ms?: number };
 }
 
 /** Resolve the cgroup v2 directory of a process (its CPU/PSI counters), or the QUAY_TEST_CGROUP_DIR seam. */
@@ -2843,17 +2849,32 @@ export async function run(argv: string[]): Promise<number> {
   //   - measure-suite-reporter `__GROUP__ …` (ONE per node --test run, AT ITS END) ⇒ that phase's
   //     node --test finished: serial→gap_serial_to_lowconc, lowconc→main, main→end
   //   - `__OVERHEAD__` burst (right after main) ⇒ main→end FALLBACK (a no-__GROUP__ reporter variant)
+  //   - PHASE_OVERLAP (gap-verification-round-phases-overlap-merged): serial+lowconc run in
+  //     PARALLEL, so their __GROUP__ lines interleave and cannot be attributed to one or the other.
+  //     test.sh emits `__OVERHEAD__ overlap_<phase>_done=1` right after EACH `wait`; the combined
+  //     window closes (→main) only when BOTH have fired, and `overlap_<phase>_ms=N` sub-times ride
+  //     the window record as overlap_sub_ms. Sequence: static → serial(window) → main → end.
   // The record sequence is static → serial → gap_serial_to_lowconc → lowconc → main → end. A child
   // that never emits any marker stays "static" and finalize() records the WHOLE round as one static
   // phase ⇒ every spawned round gets ≥1 phase record (AC4 coverage 100%, incl. red/abort rounds).
   let phaseNodeActive = false; // a phase's node --test is the current stream producer (its __GROUP__ closes it)
   let overlapPhaseActive = false; // the QUAY_PHASE_OVERLAP combined serial+lowconc window is active
   let mainClosed = false; // the main→end boundary already fired
+  // gap-verification-round-phases-overlap-merged — on the overlap path test.sh emits
+  // `__OVERHEAD__ overlap_<phase>_done=1` right after EACH parallel phase's `wait`. The window
+  // closes only when BOTH have fired (then main starts); per-process sub-times (`overlap_<phase>_ms`)
+  // ride the window record as overlap_sub_ms so serial/lowconc stay distinguishable.
+  let overlapSerialDone = false;
+  let overlapLowconcDone = false;
   const phaseMarkerSerialStart = /^selected \d+ files?\s+\(groups=serial\)/;
   const phaseMarkerLowconcStart = /^selected \d+ files?\s+\(groups=lowconc\)/;
   const phaseMarkerOverlap = /^overlap:\s+running/;
   const phaseGroupEnd = /^__GROUP__\s+/;
   const phaseOverheadBurst = /^__OVERHEAD__\s+/;
+  const phaseOverlapSubMs = /^__OVERHEAD__\s+overlap_(?:serial|lowconc)_ms=\d+/;
+  const phaseOverlapSerialDone = /^__OVERHEAD__\s+overlap_serial_done=1/;
+  const phaseOverlapLowconcDone = /^__OVERHEAD__\s+overlap_lowconc_done=1/;
+  const phaseOverlapDone = /^__OVERHEAD__\s+overlap_(?:serial|lowconc)_done=1/;
 
   const onLine = (line: string) => {
     logStream.write(line + "\n");
@@ -2871,8 +2892,10 @@ export async function run(argv: string[]): Promise<number> {
         overlapPhaseActive = false;
       } else if (phaseMarkerOverlap.test(line)) {
         // static→ the combined serial+lowconc window (QUAY_PHASE_OVERLAP). The window's per-process
-        // __GROUP__ lines are NOT boundaries (the other process is still running); it closes at the
-        // __OVERHEAD__ burst. test.sh itself reports lowconc_phase_ms=0 on overlap (subsumed).
+        // __GROUP__ lines are NOT boundaries (the other process is still running); it closes when
+        // BOTH of test.sh's `overlap_<phase>_done=1` markers have fired (gap-verification-round-
+        // phases-overlap-merged), falling back to the __OVERHEAD__ burst on a marker-less truncation.
+        // test.sh itself reports lowconc_phase_ms=0 on overlap (subsumed).
         phaseAccount.boundary("serial");
         phaseNodeActive = false;
         overlapPhaseActive = true;
@@ -2880,6 +2903,48 @@ export async function run(argv: string[]): Promise<number> {
         // (serial or gap_serial_to_lowconc)→lowconc.
         phaseAccount.boundary("lowconc");
         phaseNodeActive = true;
+      } else if (phaseOverlapSubMs.test(line)) {
+        // gap-verification-round-phases-overlap-merged — the overlap sub-time markers
+        // (`__OVERHEAD__ overlap_serial_ms=N` / `overlap_lowconc_ms=N`, emitted by test.sh right
+        // after each parallel phase's `wait`) arrive WHILE the window is still open. They are NOT
+        // the end-of-round __OVERHEAD__ burst — consume them here so the burst branch below cannot
+        // fire mid-window. They are accumulated into phaseMs by the overheadM parse and attached to
+        // the window record when both done-markers fire.
+      } else if (phaseOverlapDone.test(line)) {
+        // gap-verification-round-phases-overlap-merged — test.sh's explicit per-phase completion
+        // markers on the overlap path. serial+lowconc run in PARALLEL, so the stream's __GROUP__
+        // lines cannot be attributed to one or the other (they interleave); test.sh therefore emits
+        // `__OVERHEAD__ overlap_<phase>_done=1` right after EACH `wait`. The combined window closes
+        // only when BOTH have fired — only then does main start (the window's own __GROUP__ lines
+        // remain ignored: overlapPhaseActive is still true when they arrive).
+        if (overlapPhaseActive) {
+          if (phaseOverlapSerialDone.test(line)) overlapSerialDone = true;
+          if (phaseOverlapLowconcDone.test(line)) overlapLowconcDone = true;
+          if (overlapSerialDone && overlapLowconcDone) {
+            // Both parallel phases finished — close the overlap window (recorded as "serial", the
+            // test.sh serial_phase_ms semantics: lowconc subsumed into the window) and open main.
+            // The per-process sub-times ride overlap_sub_ms on the window record so the serial and
+            // lowconc contributions stay recoverable (AC1/AC2 — 不得再合成一桶; AC3 — the partition
+            // still sums to ≈ durationMs because the window is ONE wall segment).
+            phaseAccount.boundary("main");
+            const windowRec = phaseAccount.records[phaseAccount.records.length - 1];
+            if (windowRec && windowRec.phase === "serial") {
+              // The overheadM parse strips the trailing `_ms` (the greedy label backtracks to let
+              // `_ms=` match), so `overlap_serial_ms=N` lands in phaseMs as `overlap_serial`.
+              const sMs = phaseMs.overlap_serial;
+              const lMs = phaseMs.overlap_lowconc;
+              if (typeof sMs === "number" || typeof lMs === "number") {
+                windowRec.overlap_sub_ms = {
+                  ...(typeof sMs === "number" ? { serial_ms: sMs } : {}),
+                  ...(typeof lMs === "number" ? { lowconc_ms: lMs } : {}),
+                };
+              }
+            }
+            overlapPhaseActive = false;
+            overlapSerialDone = false;
+            overlapLowconcDone = false;
+          }
+        }
       } else if (phaseGroupEnd.test(line)) {
         if (overlapPhaseActive) {
           // serial+lowconc run in parallel — each emits its own __GROUP__; do NOT close the combined

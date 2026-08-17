@@ -1,7 +1,7 @@
 ---
 id: gap-verification-round-phases-overlap-merged
 title: "full-suite-runner 分相可见性在 PHASE_OVERLAP 下归零——serial+lowconc+main 合成一桶（硬规则 3b：结构完整、数字合理、语义错误）"
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -42,14 +42,14 @@ round 224 overlap: static 49.5 | serial 444.2 | 总 500.8s
 
 ## Acceptance Criteria
 
-- [ ] AC1: `PHASE_OVERLAP` 激活时 `phases[]` 仍区分 serial/lowconc/main 三相（各报各的子时，或显式报 overlap-window 且带三相分解）——⛔ 不得再合成一桶。
-- [ ] AC2: 取假——构造 overlap 轮，`phases[]` 的 serial 桶不得吞 main（读 phases 能区分三相；round 224 那类 444s 桶必须能拆回 serial≈157-230 / lowconc / main 三段）。
-- [ ] AC3: 修复后 overlap 轮的 `phases[]` 分相求和 ≈ `durationMs`（round 224 类记录：49.5+serial+lowconc+main+end ≈ 500.8，可机械核对）。
-- [ ] AC4: 修复不改变 `PHASE_OVERLAP` 的排程行为（只修仪器，不修排程——② 的 lane 试探是另一个任务）。
+- [x] AC1: `PHASE_OVERLAP` 激活时 `phases[]` 仍区分 serial/lowconc/main 三相（各报各的子时，或显式报 overlap-window 且带三相分解）——⛔ 不得再合成一桶。
+- [x] AC2: 取假——构造 overlap 轮，`phases[]` 的 serial 桶不得吞 main（读 phases 能区分三相；round 224 那类 444s 桶必须能拆回 serial≈157-230 / lowconc / main 三段）。
+- [x] AC3: 修复后 overlap 轮的 `phases[]` 分相求和 ≈ `durationMs`（round 224 类记录：49.5+serial+lowconc+main+end ≈ 500.8，可机械核对）。
+- [x] AC4: 修复不改变 `PHASE_OVERLAP` 的排程行为（只修仪器，不修排程——② 的 lane 试探是另一个任务）。
 
 ## Definition of Done
 
-- [ ] overlap 轮的 `phases[]` 分相可见性恢复（serial/lowconc/main 可区分，求和 ≈ durationMs）；仪器修复不碰排程。
+- [x] overlap 轮的 `phases[]` 分相可见性恢复（serial/lowconc/main 可区分，求和 ≈ durationMs）；仪器修复不碰排程。
 
 ## Touches
 
