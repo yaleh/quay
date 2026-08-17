@@ -57,18 +57,31 @@ async function runWorkflow(opts) {
   const src = fs.readFileSync(WORKFLOW, "utf8");
   const body = src.replace(/^export\s+const\s+meta/m, "const meta");
   const wrapped = "(async () => {\n" + body + "\n})()";
-  const captured = { prompt: null, schema: null, phases: [], logs: [] };
+  const captured = { prompts: [], schemas: [], phases: [], logs: [] };
+  // Default agent sequence: drive the GREEN path (phase1 suite-started → poll done exit0 → phase2 green),
+  // so tests that only extract blocks from the emitted prompts still exercise the full multi-agent flow.
+  const defaultResults = [
+    { outcome: "suite-started", suitePid: 4242, codeDelta: "mock-code", worktreeHead: "mockhead", note: "mock-prep" },
+    { done: true, suiteExit: 0 },
+    { outcome: "green", ffOk: true, developHead: "dhead", worktreeHead: "whead", agentIdUsed: "mockagent", codeDelta: "mock-code", note: "bracketClose=OK", bracketClosed: true },
+  ];
   const sandbox = {
     console,
-    setTimeout,
+    // Fast-forward the script-owned suite waits (the workflow's setTimeout IS the poll interval;
+    // the turn-budget fix moves the wait out of subagent turns into script control flow).
+    setTimeout: (fn, _ms) => setTimeout(fn, 0),
     clearTimeout,
     args: JSON.stringify(opts.args),
     phase: (...a) => captured.phases.push(...a),
     log: (...a) => captured.logs.push(...a),
     agent: async (prompt, schema) => {
-      captured.prompt = prompt;
-      captured.schema = schema;
-      return opts.agentResult ?? { outcome: "red", ffOk: false };
+      const i = captured.prompts.length;
+      captured.prompts.push(prompt);
+      captured.schemas.push(schema);
+      if (typeof opts.agentResult === "function") return opts.agentResult(prompt, schema, i);
+      if (opts.agentResults && i < opts.agentResults.length) return opts.agentResults[i];
+      if (opts.agentResult !== undefined) return opts.agentResult;
+      return i < defaultResults.length ? defaultResults[i] : { outcome: "red", ffOk: false };
     },
   };
   const ctx = vm.createContext(sandbox);
@@ -78,7 +91,7 @@ async function runWorkflow(opts) {
     throw new Error(`vm execution of ${WORKFLOW} did not return a promise (got ${typeof promise})`);
   }
   const result = await promise;
-  return { ...captured, result };
+  return { ...captured, result, prompt: captured.prompts[0] ?? null };
 }
 
 function extractBlock(text, start, end) {
@@ -88,6 +101,27 @@ function extractBlock(text, start, end) {
     throw new Error(`block markers not found in emitted prompt: start=${start} end=${end}`);
   }
   return text.slice(s, e);
+}
+
+/** Search ALL emitted prompts for the block between `start` and `end` markers (the split fan-in emits
+ *  multiple agent prompts: phase 1 = prep/launch, poll = suite wait, phase 2 = record/flip/ff/bracket).
+ *  Returns the FIRST prompt that contains the start marker and slices to the end marker. */
+function extractBlockFromPrompts(prompts, start, end) {
+  for (const p of prompts) {
+    const s = p.indexOf(start);
+    if (s === -1) continue;
+    const e = p.indexOf(end, s);
+    if (e === -1) throw new Error(`block end marker not found in the same prompt: start=${start} end=${end}`);
+    return p.slice(s, e);
+  }
+  throw new Error(`block markers not found in any emitted prompt: start=${start} end=${end}`);
+}
+
+/** The single prompt containing `marker` (e.g. "# flip-block-start"). Fails if none. */
+function promptContaining(prompts, marker) {
+  const p = prompts.find((x) => x.includes(marker));
+  if (!p) throw new Error(`no emitted prompt contains marker: ${marker}`);
+  return p;
 }
 
 function runBash(cmd, opts = {}) {
@@ -195,10 +229,10 @@ async function classifyRealDelta(files, opts) {
   const repo = makeRepoWithDelta(files, opts);
   try {
     symlinkRuntimeTrees(repo, files); // worktree-resolved classify needs a runtime tree in the temp repo
-    const { prompt } = await runWorkflow({
+    const { prompts } = await runWorkflow({
       args: { task: "gap-test-delta", worktree: repo, root: REPO_ROOT, runId: "fm-test-1", mergeTarget: "develop" },
     });
-    const step2 = extractBlock(prompt, "【无锁段 step 2", "【无锁段 step 3");
+    const step2 = extractBlockFromPrompts(prompts, "【无锁段 step 2", "【无锁段 step 3");
     const bashLines = step2
       .split("\n")
       .filter((l) => /^(fork=|delta=|code_delta=)/.test(l));
@@ -311,10 +345,10 @@ test("① AC2 取假一 — code committed EARLIER in branch history must still 
 test("① AC2 取假一 structural — the step-2 delta line diffs fork→HEAD (branch overall), NOT fork→develop (develop-side)", async (t) => {
   // The exact fix: `git diff --name-only "$fork" HEAD`. A regression back to `${mergeTarget}` (the
   // develop-side delta the AC97 bug exploited) must fail this.
-  const { prompt } = await runWorkflow({
+  const { prompts } = await runWorkflow({
     args: { task: "gap-test-dir", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-dir", mergeTarget: "develop" },
   });
-  const step2 = extractBlock(prompt, "【无锁段 step 2", "【无锁段 step 3");
+  const step2 = extractBlockFromPrompts(prompts, "【无锁段 step 2", "【无锁段 step 3");
   const deltaLine = step2.split("\n").find((l) => /^delta=/.test(l));
   assert.ok(deltaLine, "delta assignment line present");
   assert.match(deltaLine, /diff --name-only "\$fork" HEAD/, `delta must diff fork→HEAD (branch overall), got: ${deltaLine}`);
@@ -345,16 +379,22 @@ test("① AC2 — orchestration/fast-mode-tick-core.md and other checker-read .m
 
 // ── REAL-INVOCATION smoke (判据3 / AC78 实调 protection) ──────────────────────────────────────────
 
-test("REAL-INVOCATION — the workflow file vm-executes and emits the full subagent prompt (AC78)", async (t) => {
-  const { prompt, phases, result } = await runWorkflow({
+test("REAL-INVOCATION — the workflow file vm-executes and emits the multi-agent prompt set (AC78 + turn-budget split)", async (t) => {
+  const { prompts, phases, result } = await runWorkflow({
     args: { task: "gap-test-smoke", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-test-1", mergeTarget: "develop" },
   });
-  assert.ok(prompt.includes("【无锁段 step 1"), "prompt must carry step 1");
-  assert.ok(prompt.includes("【持锁段 step 5"), "prompt must carry step 5");
-  assert.ok(prompt.includes("# flip-block-start"), "flip block marker present");
-  assert.ok(prompt.includes("# selfloc-block-start"), "selfloc block marker present");
+  assert.ok(prompts.length >= 3, `split fan-in emits phase1 + poll + phase2 prompts, got ${prompts.length}`);
+  // Phase 1 (prep): steps 0-4 incl. merge develop.
+  assert.ok(prompts[0].includes("【无锁段 step 1"), "phase-1 prompt must carry step 1 (merge develop)");
+  assert.ok(prompts[0].includes("【无锁段 step 4"), "phase-1 prompt must carry step 4");
+  // Phase 2 (mechanical): flip/selfloc/bracket live in the LAST agent prompt.
+  const p2 = promptContaining(prompts, "# flip-block-start");
+  assert.ok(p2.includes("【持锁段 step 5"), "phase-2 prompt must carry step 5");
+  assert.ok(p2.includes("# selfloc-block-start"), "selfloc block marker present");
   assert.deepEqual(phases, ["FanIn"]);
-  assert.equal(result.outcome, "red"); // mock agent returns red; workflow maps it through
+  // Default mock sequence drives the GREEN path through the script-owned wait ⇒ outcome green.
+  assert.equal(result.outcome, "green");
+  assert.equal(result.ffOk, true);
 });
 
 // ── ② --agent-id self-location determinism (REAL bash over a fake ~/.claude tree) ────────────────
@@ -362,10 +402,10 @@ test("REAL-INVOCATION — the workflow file vm-executes and emits the full subag
 test("② DIR-127/DIR-128 replay — the workflows/-scoped self-location picks the workflow-run subagent, NOT the flat trap", async (t) => {
   const { home } = makeDir127ReplayHome();
   t.after(() => cleanup(home));
-  const { prompt } = await runWorkflow({
+  const { prompts } = await runWorkflow({
     args: { task: "gap-dir-127", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-dir127", mergeTarget: "develop" },
   });
-  const selfloc = extractBlock(prompt, "# selfloc-block-start", "# selfloc-block-end");
+  const selfloc = extractBlockFromPrompts(prompts, "# selfloc-block-start", "# selfloc-block-end");
   const r = runBash(selfloc + '\necho "RESULT_AGENT_ID=$agent_id"', { cwd: "/tmp", env: { ...process.env, HOME: home } });
   assert.equal(r.status, 0, `selfloc bash failed (${r.status}): ${r.stderr}`);
   const m = r.stdout.match(/RESULT_AGENT_ID=([^\n]*)/);
@@ -389,10 +429,10 @@ test("② regression canary — the OLD flat-glob heuristic WOULD mis-pick the t
 test("② zero candidates ⇒ fail-closed exit 2 (refuses to guess an agent id)", async (t) => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "fan-in-emptyhome-"));
   t.after(() => cleanup(home));
-  const { prompt } = await runWorkflow({
+  const { prompts } = await runWorkflow({
     args: { task: "gap-no-such-task", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-none", mergeTarget: "develop" },
   });
-  const selfloc = extractBlock(prompt, "# selfloc-block-start", "# selfloc-block-end");
+  const selfloc = extractBlockFromPrompts(prompts, "# selfloc-block-start", "# selfloc-block-end");
   const r = runBash(selfloc, { cwd: "/tmp", env: { ...process.env, HOME: home } });
   assert.equal(r.status, 2, `fail-closed must exit 2, got ${r.status}`);
   assert.match(r.stderr, /FATAL/);
@@ -406,10 +446,10 @@ test("② determinism — multiple workflow-run candidates for the SAME task pic
   // A prior (stale) run of the SAME task + the current run — both mention the task.
   writeAgentFile(path.join(base, "wf_oldrun-000", `agent-${F127_ID}.jsonl`), ["fan-in gap-dir-127 (stale)"], now - 60_000);
   writeAgentFile(path.join(base, "wf_newrun-111", `agent-${F128_ID}.jsonl`), ["fan-in gap-dir-127 (current)"], now);
-  const { prompt } = await runWorkflow({
+  const { prompts } = await runWorkflow({
     args: { task: "gap-dir-127", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-retry", mergeTarget: "develop" },
   });
-  const selfloc = extractBlock(prompt, "# selfloc-block-start", "# selfloc-block-end");
+  const selfloc = extractBlockFromPrompts(prompts, "# selfloc-block-start", "# selfloc-block-end");
   const r = runBash(selfloc + '\necho "RESULT_AGENT_ID=$agent_id"', { cwd: "/tmp", env: { ...process.env, HOME: home } });
   assert.equal(r.status, 0, r.stderr);
   const m = r.stdout.match(/RESULT_AGENT_ID=([^\n]*)/);
@@ -419,10 +459,10 @@ test("② determinism — multiple workflow-run candidates for the SAME task pic
 // ── ③ flip sed fail-closed (REAL bash over real task files) ──────────────────────────────────────
 
 async function flipBlockFor(task, worktree) {
-  const { prompt } = await runWorkflow({
+  const { prompts } = await runWorkflow({
     args: { task, worktree, root: REPO_ROOT, runId: "fm-flip", mergeTarget: "develop" },
   });
-  return extractBlock(prompt, "# flip-block-start", "# flip-block-end");
+  return extractBlockFromPrompts(prompts, "# flip-block-start", "# flip-block-end");
 }
 
 // makeFlipDir — a temp "worktree" dir for flip-block tests. Symlinks the REAL `plugin/` tree so the
@@ -553,10 +593,10 @@ test("④ 剩余未勾均为（待外部）⇒ 翻 done (established awaiting-ve
 });
 
 test("④ AC 完成闸与承重点③ 行形检查并列 — 两检查都过才翻（AC 闸在行形检查之后、sed 之前）", async (t) => {
-  const { prompt } = await runWorkflow({
+  const { prompts } = await runWorkflow({
     args: { task: "gap-test-both", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-both", mergeTarget: "develop" },
   });
-  const flip = extractBlock(prompt, "# flip-block-start", "# flip-block-end");
+  const flip = extractBlockFromPrompts(prompts, "# flip-block-start", "# flip-block-end");
   assert.ok(flip.includes("fan-in-ac-completion-gate.ts"), "flip block must run the AC completion gate (判据3 兼容不互斥)");
   assert.ok(flip.includes("flip_count=$(grep -c '^status: ready$'"), "flip block must still run the ③ line-shape pre-check");
   assert.ok(flip.indexOf("fan-in-ac-completion-gate.ts") > flip.indexOf("flip_count="), "AC gate must come AFTER the line-shape pre-check");
@@ -602,17 +642,17 @@ function makeAntiDriftRepo({ taskId, body, files }) {
 }
 
 async function antiDriftBlockFor(task, worktree) {
-  const { prompt } = await runWorkflow({
+  const { prompts } = await runWorkflow({
     args: { task, worktree, root: REPO_ROOT, runId: "fm-ad", mergeTarget: "develop" },
   });
-  return extractBlock(prompt, "# anti-drift-block-start", "# anti-drift-block-end");
+  return extractBlockFromPrompts(prompts, "# anti-drift-block-start", "# anti-drift-block-end");
 }
 
 test("⑤ wiring — step 1 runs anti-drift-touches-check with the actual diff after the merge", async (t) => {
-  const { prompt } = await runWorkflow({
+  const { prompts } = await runWorkflow({
     args: { task: "gap-test-ad-wire", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-ad-wire", mergeTarget: "develop" },
   });
-  const step1 = extractBlock(prompt, "【无锁段 step 1", "【无锁段 step 2");
+  const step1 = extractBlockFromPrompts(prompts, "【无锁段 step 1", "【无锁段 step 2");
   assert.ok(step1.includes("# anti-drift-block-start"), "anti-drift check must run inside step 1 (after the merge)");
   assert.ok(step1.includes("anti-drift-touches-check.ts --task"), "prompt must invoke the anti-drift driver");
   assert.ok(step1.includes("--merge-target develop"), "driver must receive the merge target");
@@ -694,17 +734,17 @@ function startBracket(root, taskId) {
 }
 
 async function bracketCloseBlockFor(task, worktree, root, runId) {
-  const { prompt } = await runWorkflow({
+  const { prompts } = await runWorkflow({
     args: { task, worktree, root, runId, mergeTarget: "develop" },
   });
-  return extractBlock(prompt, "# bracket-close-block-start", "# bracket-close-block-end");
+  return extractBlockFromPrompts(prompts, "# bracket-close-block-start", "# bracket-close-block-end");
 }
 
 test("⑥ wiring — the fan-in prompt carries a bracket-close block targeting ONLY the fanned-in task (no global --reconcile scan)", async (t) => {
-  const { prompt } = await runWorkflow({
+  const { prompts } = await runWorkflow({
     args: { task: "gap-test-close", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-close", mergeTarget: "develop" },
   });
-  const block = extractBlock(prompt, "# bracket-close-block-start", "# bracket-close-block-end");
+  const block = extractBlockFromPrompts(prompts, "# bracket-close-block-start", "# bracket-close-block-end");
   assert.ok(block.includes("closure-lag-check.sh --close-task"), "block must call the A16 unified closure point");
   assert.ok(block.includes("--taskId gap-test-close"), "block must target the fanned-in task by id");
   assert.ok(block.includes("--outcome done"), "block must close with outcome done");
@@ -713,11 +753,13 @@ test("⑥ wiring — the fan-in prompt carries a bracket-close block targeting O
   // it). The executable lines (non-#-comment) must be free of a --reconcile invocation.
   const execLines = block.split("\n").filter((l) => !l.trim().startsWith("#"));
   assert.ok(!execLines.some((l) => l.includes("--reconcile")), "executable lines must not run a global --reconcile scan (判据2: in-flight brackets preserved)");
-  assert.ok(prompt.includes("bracketClosed"), "the return contract must carry the bracket-closure result");
+  // The return contract (bracketClosed) and placement checks live in the PHASE-2 prompt (the block's own prompt).
+  const p2 = promptContaining(prompts, "# bracket-close-block-start");
+  assert.ok(p2.includes("bracketClosed"), "the return contract must carry the bracket-closure result");
   // placement: the block runs AFTER the ff-merge call and BEFORE the worktree cleanup.
-  const ffIdx = prompt.indexOf("fan-in-ff-merge.sh --task");
-  const blockIdx = prompt.indexOf("# bracket-close-block-start");
-  const cleanupIdx = prompt.indexOf("ff 成功后清理");
+  const ffIdx = p2.indexOf("fan-in-ff-merge.sh --task");
+  const blockIdx = p2.indexOf("# bracket-close-block-start");
+  const cleanupIdx = p2.indexOf("ff 成功后清理");
   assert.ok(ffIdx !== -1, "ff-merge call present");
   assert.ok(blockIdx > ffIdx, "bracket-close must come after the ff-merge call");
   assert.ok(cleanupIdx > blockIdx, "bracket-close must come before the worktree cleanup");
@@ -787,25 +829,26 @@ function makePreVerifiedWorktree(prefix = "fan-in-pvr-") {
 }
 
 async function preVerifiedBlockFor(task, worktree, root) {
-  const { prompt } = await runWorkflow({
+  const { prompts } = await runWorkflow({
     args: { task, worktree, root, runId: "fm-pvr-1", mergeTarget: "develop" },
   });
-  return extractBlock(prompt, "# preverified-round-block-start", "# preverified-round-block-end");
+  return extractBlockFromPrompts(prompts, "# preverified-round-block-start", "# preverified-round-block-end");
 }
 
 test("⑦ wiring — the fan-in prompt carries a verification-round write block guarded by suite_preverified=1", async (t) => {
-  const { prompt } = await runWorkflow({
+  const { prompts } = await runWorkflow({
     args: { task: "gap-test-pvr", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-pvr", mergeTarget: "develop" },
   });
-  const block = extractBlock(prompt, "# preverified-round-block-start", "# preverified-round-block-end");
+  const block = extractBlockFromPrompts(prompts, "# preverified-round-block-start", "# preverified-round-block-end");
   assert.ok(block.includes("pre-verified-round-record.ts"), "block must invoke the verification-round writer");
   assert.ok(block.includes('"${suite_preverified:-0}" = "1"'), "block must be guarded by the pre-verified marker");
   assert.ok(block.includes("--commit \"$suite_head\""), "block must pin the verified suite_head as commit");
   assert.ok(block.includes("--duration-ms \"$wall_ms\""), "block must reuse the capture's wall-clock (AC2)");
-  // Placement: the write runs in step 4.5 (suite-record-block), BEFORE the capture is removed.
-  const blockIdx = prompt.indexOf("# preverified-round-block-start");
-  const recordIdx = prompt.indexOf("# suite-record-block-start");
-  const rmIdx = prompt.indexOf('rm -f "$suite_capture"');
+  // Placement: the write runs in step 4.5 (suite-record-block), BEFORE the capture is removed — all in the phase-2 prompt.
+  const p2 = promptContaining(prompts, "# preverified-round-block-start");
+  const blockIdx = p2.indexOf("# preverified-round-block-start");
+  const recordIdx = p2.indexOf("# suite-record-block-start");
+  const rmIdx = p2.indexOf('rm -f "$suite_capture"');
   assert.ok(blockIdx > recordIdx, "verification-round write runs inside step 4.5's suite-record-block");
   assert.ok(blockIdx < rmIdx, "verification-round write runs BEFORE the capture file is removed");
 });
@@ -889,42 +932,44 @@ test("⑦ REAL skip — a NON-pre-verified capture (no suite_preverified marker)
 // orchestration script call in the prompt resolves from ${worktree} (not cwd, not ${root}).
 
 async function bootstrapBlockFor(task, worktree, root) {
-  const { prompt } = await runWorkflow({
+  const { prompts } = await runWorkflow({
     args: { task, worktree, root, runId: "fm-bootstrap", mergeTarget: "develop" },
   });
-  return extractBlock(prompt, "【无锁段 step 0", "【无锁段 step 1");
+  return extractBlockFromPrompts(prompts, "【无锁段 step 0", "【无锁段 step 1");
 }
 
 test("⑦ worktree-resolution — every fan-in orchestration script call is ${worktree}-rooted (not cwd, not ${root})", async (t) => {
-  const WT = "/tmp/wt"; // the interpolated worktree value in the emitted prompt
-  const { prompt } = await runWorkflow({
+  const WT = "/tmp/wt"; // the interpolated worktree value in the emitted prompts
+  const { prompts } = await runWorkflow({
     args: { task: "gap-test-bs", worktree: WT, root: REPO_ROOT, runId: "fm-bs", mergeTarget: "develop" },
   });
+  const all = prompts.join("\n\n----PROMPT----\n\n");
   // The orchestration scripts a task can modify MUST resolve from the worktree — the branch's own fix
-  // must be what the fan-in runs (gap-fan-in-orchestration-bootstrap-self-fix).
+  // must be what the fan-in runs (gap-fan-in-orchestration-bootstrap-self-fix). Across the split fan-in,
+  // some live in phase 1 (classify/anti-drift/ts-typecheck) and some in phase 2 (record/flip/ff/bracket).
   const mustBeWorktreeRooted = [
-    "select-static-checks-for-touches.ts --classify-delta", // step 2
-    "per-task-suite-record.ts",                             // step 4.5
-    "fan-in-ac-completion-gate.ts",                         // step 5
-    "fan-in-ff-merge.sh",                                   // step 5
-    "closure-lag-check.sh",                                 // step 5.5
-    "anti-drift-touches-check.ts",                          // step 1
-    "fan-in-ts-typecheck-gate.ts",                          // step 3
+    "select-static-checks-for-touches.ts --classify-delta", // step 2 (phase 1)
+    "per-task-suite-record.ts",                             // step 4.5 (phase 2)
+    "fan-in-ac-completion-gate.ts",                         // step 5 (phase 2)
+    "fan-in-ff-merge.sh",                                   // step 5 (phase 2)
+    "closure-lag-check.sh",                                 // step 5.5 (phase 2)
+    "anti-drift-touches-check.ts",                          // step 1 (phase 1)
+    "fan-in-ts-typecheck-gate.ts",                          // step 3 (phase 1)
   ];
   for (const frag of mustBeWorktreeRooted) {
     // Match the EXECUTABLE line (not a comment that merely mentions the frag): the line must carry
     // both the frag and the worktree-rooted path.
-    const line = prompt.split("\n").find((l) => l.includes(frag) && l.includes(`${WT}/plugin/scripts/`));
-    assert.ok(line, `prompt must carry a ${WT}-rooted call to ${frag}`);
+    const line = all.split("\n").find((l) => l.includes(frag) && l.includes(`${WT}/plugin/scripts/`));
+    assert.ok(line, `a prompt must carry a ${WT}-rooted call to ${frag}`);
     assert.doesNotMatch(line, /bash \$\{?root\}?\/plugin\/scripts/, `call must NOT be root-rooted: ${line}`);
   }
   // full-suite-runner.ts is reached via `cd ${worktree} && bash scripts/test.sh` (step 4) — already
-  // worktree-rooted; assert the explicit cd survives.
-  assert.ok(prompt.includes(`cd ${WT} && bash scripts/test.sh --for-task`), "step-4 scoped run must cd into the worktree");
+  // worktree-rooted; assert the explicit cd survives in the phase-1 prompt.
+  assert.ok(all.includes(`cd ${WT} && bash scripts/test.sh --for-task`), "step-4 scoped run must cd into the worktree");
   // step-2 classify carries the worktree-rooted registry (--root <worktree>) so a branch-modified
   // scripts/test.sh @static-object annotation is what the classification reads.
-  const classifyLine = prompt.split("\n").find((l) => l.includes("--classify-delta") && l.includes(`--root ${WT}`));
-  assert.ok(classifyLine, `classify must carry the worktree-rooted --root, got none among:\n${prompt.split("\n").filter((l) => l.includes("--classify-delta")).join("\n")}`);
+  const classifyLine = all.split("\n").find((l) => l.includes("--classify-delta") && l.includes(`--root ${WT}`));
+  assert.ok(classifyLine, `classify must carry the worktree-rooted --root, got none among:\n${all.split("\n").filter((l) => l.includes("--classify-delta")).join("\n")}`);
   assert.ok(classifyLine.includes(`${WT}/plugin/scripts/`), `classify must be ${WT}-rooted, got: ${classifyLine}`);
 });
 
@@ -973,10 +1018,10 @@ test("⑦ 取假二 — a branch modifying an orchestration script AND carrying 
   assert.match(r0.stdout, /FAN-IN-BOOTSTRAP=hit/, `orchestration-script modification must be a hit, got stdout:\n${r0.stdout}`);
   assert.match(r0.stdout, /fan-in-ff-merge\.sh/, "the hit must name the modified orchestration file");
   // step 2: the worktree-resolved classify (--root ${worktree}) must classify the checker-read .md as CODE.
-  const { prompt } = await runWorkflow({
+  const { prompts } = await runWorkflow({
     args: { task: "gap-test-bs-two", worktree: repo, root: REPO_ROOT, runId: "fm-bs-two", mergeTarget: "develop" },
   });
-  const step2 = extractBlock(prompt, "【无锁段 step 2", "【无锁段 step 3");
+  const step2 = extractBlockFromPrompts(prompts, "【无锁段 step 2", "【无锁段 step 3");
   const bashLines = step2.split("\n").filter((l) => /^(fork=|delta=|code_delta=)/.test(l));
   const r2 = runBash(bashLines.join("\n") + '\necho "RESULT_CODE_DELTA=[$code_delta]"', { cwd: REPO_ROOT });
   assert.equal(r2.status, 0, `step-2 bash failed: ${r2.stderr}`);
@@ -984,4 +1029,217 @@ test("⑦ 取假二 — a branch modifying an orchestration script AND carrying 
   assert.ok(m, `code_delta echo missing:\n${r2.stdout}`);
   assert.match(m[1], /orchestration\/manager-tick-core\.md/, `checker-read .md must classify as code (取假二), got: ${m[1]}`);
   assert.match(m[1], /plugin\/scripts\/fan-in-ff-merge\.sh/, `the modified orchestration script must also be code, got: ${m[1]}`);
+});
+
+// ── ⑧ 回合预算承载 (gap-fan-in-turn-budget-suite-timeout) ────────────────────────────────────────
+// AC1 取假: 构造 step2 code_delta 非空 ⇒ 全量 suite 必跑且机械步骤必完成（flip/ff/bracket 全执行）。
+// 旧设计: step4 把全量 suite 启动为后台后, subagent 等 suite 时【回合预算耗尽被强制收尾】——
+// suite 未完成/capture 未写/flip/ff/bracket 全缺 (release-timeout 实证 + AC95 复发)。
+// 修复: suite 交给【长生命周期载体】(detached setsid 进程)，【等待】从 subagent 回合搬到脚本控制流
+// (setTimeout + 轮询 agent 读 exit marker, ab380c5e/execute-suite-fix.js 同源)。这些测试用脚本化的
+// agent 序列驱动 vm 实执行的工作流, 断言控制流 (绿/红→修/轮询上限/ff-retry) 与 phase 1/2 的 prompt 结构。
+
+test("⑧ turn-budget 取假 — phase-1 suite-launch DETACHES (setsid + & + disown), NOT foreground, NOT Bash(run_in_background:true)", async (t) => {
+  const { prompts } = await runWorkflow({
+    args: { task: "gap-test-tb-detach", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-tb-detach", mergeTarget: "develop" },
+  });
+  const launch = extractBlockFromPrompts(prompts, "# suite-launch-block-start", "# suite-launch-block-end");
+  assert.ok(launch.includes("setsid"), "suite-launch must use setsid (detached session — survives subagent exit)");
+  assert.ok(launch.includes("& disown"), "suite-launch must background + disown (long-lived carrier)");
+  assert.ok(launch.includes("suite_exit_marker"), "suite-launch must define the exit marker (the script-owned wait signal)");
+  assert.ok(launch.includes('echo "exit=$?"'), "the detached wrapper must write the exit code to the marker");
+  // ⛔ NOT the two forbidden forms (f6b824b5 实证: Bash(run_in_background:true) 死于 subagent 退出; 前台 bash 超 10min 上限).
+  // Only the EXECUTABLE lines matter — the comments legitimately name the forbidden form to forbid it.
+  const execLines = launch.split("\n").filter((l) => !l.trim().startsWith("#"));
+  assert.ok(!execLines.some((l) => l.includes("run_in_background")), "suite-launch executable lines must NOT use Bash(run_in_background:true)");
+  // Phase 1 must instruct immediate return (no suite wait in the subagent turn).
+  const phase1 = prompts[0];
+  assert.ok(phase1.includes("不等待 suite") || phase1.includes("立即返回"), "phase-1 must instruct the agent NOT to wait for the suite (立即返回)");
+  assert.ok(phase1.includes("bash scripts/test.sh --for-task"), "scoped gate stays in phase 1");
+  assert.ok(phase1.includes("bash scripts/test.sh --static-checks-doc"), "doc check stays in phase 1");
+});
+
+test("⑧ turn-budget 取假 — suite-launch block decides by code_delta: non-empty ⇒ full suite starts; empty ⇒ doc-only skip", async (t) => {
+  const { prompts } = await runWorkflow({
+    args: { task: "gap-test-tb-delta", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-tb-delta", mergeTarget: "develop" },
+  });
+  const launch = extractBlockFromPrompts(prompts, "# suite-launch-block-start", "# suite-launch-block-end");
+  // step 2 hands code_delta to step 4 via a file (bash vars don't persist across Bash calls).
+  assert.ok(launch.includes("/tmp/fan-in-code-delta-"), "launch must read the code_delta handoff written by step 2");
+  assert.ok(launch.includes('[ "$code_delta" != "" ]'), "launch must branch on code_delta non-empty ⇒ start the full suite");
+  assert.ok(launch.includes("full_suite_ran=true"), "the full-suite branch must write full_suite_ran=true");
+  assert.ok(launch.includes("skip_reason=doc-only-delta"), "the doc-only branch must write skip_reason=doc-only-delta");
+  assert.ok(launch.includes("PRE-VERIFIED-SUITE"), "the pre-verified reuse branch must be present (suite_head-pinned)");
+});
+
+test("⑧ turn-budget — the poll agent completes the capture post-fields (cpu/end/wall/load/lane/suite_exit) on exit-marker hit", async (t) => {
+  const { prompts } = await runWorkflow({
+    args: { task: "gap-test-tb-poll", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-tb-poll", mergeTarget: "develop" },
+  });
+  const poll = promptContaining(prompts, "POLL=not-done");
+  assert.ok(poll.includes("suite_exit_marker"), "poll must read the exit marker");
+  assert.ok(poll.includes("POLL=done SUITE_EXIT"), "poll must emit the done + exit result");
+  assert.ok(poll.includes("cpu_source"), "poll must compute cpu_source (gnu-time or not-wired)");
+  assert.ok(poll.includes("wall_ms"), "poll must compute wall_ms from the pre-suite start_ms");
+  assert.ok(poll.includes("lane_count"), "poll must compute lane_count");
+  assert.ok(poll.includes("suite_exit"), "poll must record suite_exit into the capture");
+  assert.ok(poll.includes("不要做任何等待决策"), "poll must not make any waiting decision (script-owned)");
+});
+
+test("⑧ turn-budget — script-owned wait drives the GREEN path: suite-started → poll(done exit0) → phase-2 mechanical steps (flip/ff/bracket)", async (t) => {
+  const { prompts, result } = await runWorkflow({
+    args: { task: "gap-test-tb-green", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-tb-green", mergeTarget: "develop", pollIntervalMs: 0, maxSuitePolls: 5 },
+    agentResults: [
+      { outcome: "suite-started", suitePid: 111, codeDelta: "code", worktreeHead: "h1", note: "" }, // phase 1
+      { done: false, suiteExit: null },                                                             // poll: still running
+      { done: true, suiteExit: 0 },                                                                 // poll: suite green
+      { outcome: "green", ffOk: true, developHead: "d1", worktreeHead: "h1", agentIdUsed: "a1", codeDelta: "code", note: "bracketClose=OK", bracketClosed: true }, // phase 2
+    ],
+  });
+  assert.equal(result.outcome, "green", "script-owned wait must land a green suite through phase 2");
+  assert.equal(result.ffOk, true);
+  // Phase-2 prompt must carry ALL mechanical steps (AC1: flip/ff/bracket all execute).
+  const p2 = promptContaining(prompts, "# flip-block-start");
+  assert.ok(p2.includes("per-task-suite-record.ts"), "phase-2 must write the per-task-suite record (step 4.5)");
+  assert.ok(p2.includes("fan-in-ff-merge.sh --task"), "phase-2 must run the ff-merge (step 5)");
+  assert.ok(p2.includes("# bracket-close-block-start"), "phase-2 must close the telemetry bracket (step 5.5)");
+  assert.ok(p2.includes("git worktree remove"), "phase-2 must clean up the worktree after ff");
+});
+
+test("⑧ turn-budget — RED suite ⇒ Fix agent relaunches detached ⇒ script re-waits ⇒ phase-2 lands", async (t) => {
+  const { prompts, result } = await runWorkflow({
+    args: { task: "gap-test-tb-red", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-tb-red", mergeTarget: "develop", pollIntervalMs: 0, maxSuitePolls: 5, maxFixRounds: 2 },
+    agentResults: [
+      { outcome: "suite-started", suitePid: 111, codeDelta: "code", worktreeHead: "h1", note: "" }, // phase 1
+      { done: true, suiteExit: 1 },                                                                 // poll: suite RED
+      { relaunched: true, worktreeHead: "h2", failuresFixed: ["fix-x"], note: "" },                 // Fix agent
+      { done: true, suiteExit: 0 },                                                                 // poll: suite green after fix
+      { outcome: "green", ffOk: true, developHead: "d2", worktreeHead: "h2", agentIdUsed: "a2", codeDelta: "code", note: "bracketClose=OK", bracketClosed: true }, // phase 2
+    ],
+  });
+  assert.equal(result.outcome, "green", "a red suite must be fixed + re-verified before landing");
+  assert.ok(prompts.some((p) => p.includes("suite-fix 阶段")), "a Fix-agent prompt must be emitted for a red suite");
+  assert.ok(prompts.some((p) => p.includes("你读失败日志")), "the Fix prompt must read the suite log failures");
+});
+
+test("⑧ turn-budget — suite never completes within the poll cap ⇒ red (bounded wait, no infinite hang)", async (t) => {
+  const { result } = await runWorkflow({
+    args: { task: "gap-test-tb-cap", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-tb-cap", mergeTarget: "develop", pollIntervalMs: 0, maxSuitePolls: 2 },
+    agentResults: [
+      { outcome: "suite-started", suitePid: 111, codeDelta: "code", worktreeHead: "h1", note: "" }, // phase 1
+      { done: false, suiteExit: null },                                                             // poll 1
+      { done: false, suiteExit: null },                                                             // poll 2
+      { done: false, suiteExit: null },                                                             // poll 3 (breaks the cap)
+    ],
+  });
+  assert.equal(result.outcome, "red", "a suite that never completes must fail closed");
+  assert.equal(result.ffOk, false);
+  assert.ok(result.message.includes("poll cap"), `message must cite the poll cap: ${result.message}`);
+});
+
+test("⑧ turn-budget — ff failure (develop advanced during suite) ⇒ script re-runs phase 1 (bounded) and lands on the retry", async (t) => {
+  const { prompts, result, logs } = await runWorkflow({
+    args: { task: "gap-test-tb-ff", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-tb-ff", mergeTarget: "develop", pollIntervalMs: 0, maxSuitePolls: 5, maxFfRetries: 2 },
+    agentResults: [
+      // attempt 1
+      { outcome: "suite-started", suitePid: 111, codeDelta: "code", worktreeHead: "h1", note: "" }, // phase 1
+      { done: true, suiteExit: 0 },                                                                 // poll
+      { outcome: "ff-retry", ffOk: false, note: "develop advanced" },                               // phase 2 ff FAILED
+      // attempt 2 (script re-runs phase 1)
+      { outcome: "suite-started", suitePid: 222, codeDelta: "code", worktreeHead: "h2", note: "" }, // phase 1 (retry)
+      { done: true, suiteExit: 0 },                                                                 // poll
+      { outcome: "green", ffOk: true, developHead: "d2", worktreeHead: "h2", agentIdUsed: "a2", codeDelta: "code", note: "bracketClose=OK", bracketClosed: true }, // phase 2
+    ],
+  });
+  assert.equal(result.outcome, "green", "a develop-advanced ff failure must retry from phase 1 and land");
+  assert.equal(prompts.length, 6, "2× (phase1 + poll + phase2)");
+  assert.ok(logs.some((l) => l.includes("ff-retry")), "log must record the ff-retry re-run");
+  // The phase-1 prompt (retry) must carry the stale-flip revert preamble.
+  assert.ok(prompts[3].includes("重试遗留翻转处理"), "the retry phase-1 prompt must carry the stale-flip revert");
+});
+
+test("⑧ turn-budget — ff-retry exhausted (maxFfRetries) ⇒ red + anti-livelock message (SPEC §7 bound)", async (t) => {
+  const { result } = await runWorkflow({
+    args: { task: "gap-test-tb-ffx", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-tb-ffx", mergeTarget: "develop", pollIntervalMs: 0, maxSuitePolls: 5, maxFfRetries: 2 },
+    agentResults: [
+      // attempt 1
+      { outcome: "suite-started", suitePid: 111, codeDelta: "code", worktreeHead: "h1", note: "" },
+      { done: true, suiteExit: 0 },
+      { outcome: "ff-retry", ffOk: false, note: "develop advanced" },
+      // attempt 2 — ffAttempts becomes 2, 2 >= maxFfRetries(2) ⇒ red
+      { outcome: "suite-started", suitePid: 222, codeDelta: "code", worktreeHead: "h2", note: "" },
+      { done: true, suiteExit: 0 },
+      { outcome: "ff-retry", ffOk: false, note: "develop advanced again" },
+    ],
+  });
+  assert.equal(result.outcome, "red", "exhausted ff retries must fail closed");
+  assert.equal(result.ffOk, false);
+  assert.ok(result.message.includes("anti-livelock"), `message must cite anti-livelock: ${result.message}`);
+});
+
+test("⑧ turn-budget REAL — a real detached suite (setsid) + the real poll block complete the capture (code_delta 非空 ⇒ suite 跑 + 机械步骤的输入齐备)", async (t) => {
+  // AC1 取假 REAL invocation: 构造 step2 code_delta 非空 ⇒ 阶段 1 的 suite-launch 块把 suite 以 detached
+  // 方式跑起来（长生命周期载体），轮询块补全 capture post 字段（suite_exit=0）——阶段 2 据此能执行
+  // flip/ff/bracket。整条链用【真实 bash】驱动（判据3，不是 fixture mock）。
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fan-in-reallaunch-"));
+  t.after(() => cleanup(dir));
+  const task = "gap-test-tb-real-launch";
+  const git = (args) => {
+    const r = spawnSync("git", args, { cwd: dir, encoding: "utf8" });
+    if (r.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${r.stderr}`);
+  };
+  git(["init", "-q", "-b", "main"]);
+  git(["config", "user.email", "test@test"]);
+  git(["config", "user.name", "test"]);
+  fs.writeFileSync(path.join(dir, "README.md"), "base\n");
+  git(["add", "-A"]); git(["commit", "-qm", "base"]);
+  fs.mkdirSync(path.join(dir, "scripts"), { recursive: true });
+  // A fake suite that exits 0 (sleeps 1s so the detached launch + marker both have time to work).
+  fs.writeFileSync(path.join(dir, "scripts", "test.sh"), "#!/usr/bin/env bash\nsleep 1\nexit 0\n");
+  fs.chmodSync(path.join(dir, "scripts", "test.sh"), 0o755);
+  git(["add", "-A"]); git(["commit", "-qm", "add test.sh"]);
+
+  const codeDeltaFile = `/tmp/fan-in-code-delta-${task}.txt`;
+  fs.writeFileSync(codeDeltaFile, "plugin/workflows/fan-in-execute.js\n");
+  t.after(() => { for (const f of [`/tmp/fan-in-suite-${task}.env`, `/tmp/fan-in-suite-${task}.exit`, `/tmp/fan-in-suite-${task}.time`, `/tmp/fan-in-suite-${task}.log`, codeDeltaFile]) { try { fs.rmSync(f, { force: true }); } catch (_) { /* best-effort */ } } });
+
+  const { prompts } = await runWorkflow({
+    args: { task, worktree: dir, root: REPO_ROOT, runId: "fm-tb-real", mergeTarget: "develop" },
+  });
+  const launchBlock = extractBlockFromPrompts(prompts, "# suite-launch-block-start", "# suite-launch-block-end");
+
+  // Run the REAL launch block (cwd = the worktree). code_delta 非空 ⇒ the full-suite branch must fire.
+  const launchRun = runBash(launchBlock, { cwd: dir, timeout: 30_000 });
+  assert.equal(launchRun.status, 0, `launch block failed: ${launchRun.stderr}`);
+  assert.match(launchRun.stdout, /SUITE_OUTCOME=started/, `code_delta non-empty must start the full suite, got: ${launchRun.stdout}`);
+
+  // Real poll: wait for the exit marker (the suite is detached; ~1s fake + the launch's ~3s confirm).
+  const marker = `/tmp/fan-in-suite-${task}.exit`;
+  let seen = false;
+  for (let i = 0; i < 50 && !seen; i++) { if (fs.existsSync(marker)) seen = true; else await new Promise((r) => setTimeout(r, 100)); }
+  assert.ok(seen, "the detached suite must write its exit marker");
+
+  // Run the REAL poll block (completes the capture post-fields).
+  const pollPrompt = promptContaining(prompts, "POLL=not-done");
+  const pollBlock = pollPrompt.slice(pollPrompt.indexOf("suite_capture="), pollPrompt.indexOf("返回 { done: bool"));
+  const pollRun = runBash(pollBlock, { cwd: dir, timeout: 15_000 });
+  assert.equal(pollRun.status, 0, `poll block failed: ${pollRun.stderr}`);
+  assert.match(pollRun.stdout, /POLL=done SUITE_EXIT=0/, `poll must report done exit 0, got: ${pollRun.stdout}`);
+
+  // Source the completed capture and verify every field the phase-2 record needs.
+  const capture = fs.readFileSync(`/tmp/fan-in-suite-${task}.env`, "utf8");
+  for (const [re, name] of [
+    [/^full_suite_ran=true$/m, "full_suite_ran"],
+    [/^suite_exit=0$/m, "suite_exit"],
+    [/^start_iso=/m, "start_iso"],
+    [/^end_iso=/m, "end_iso"],
+    [/^wall_ms=\d+$/m, "wall_ms"],
+    [/^cpu_s=/m, "cpu_s"],
+    [/^cpu_source=/m, "cpu_source"],
+    [/^load=/m, "load"],
+    [/^lane_count=\d+$/m, "lane_count"],
+    [/^suite_head=/m, "suite_head"],
+  ]) {
+    assert.match(capture, re, `capture must carry ${name} (phase-2 入账输入)`);
+  }
 });

@@ -1,8 +1,8 @@
 export const meta = {
   name: 'fan-in-execute',
-  description: 'AC78 fan-in 执行 workflow — 无锁段（merge develop → delta 断言面判定 → ts-typecheck → scoped 门+全量+doc）与持锁段（flip done → fan-in-ff-merge.sh）由本脚本生成的自足 subagent prompt 全权执行；subagent 在 ff 成功后才返回。A6 只检查「是否走了本 workflow」（判据2 (a)(b)(c)）。',
+  description: 'AC78 fan-in 执行 workflow — 无锁段（merge develop → delta 断言面判定 → ts-typecheck → scoped 门+全量+doc）与持锁段（flip done → fan-in-ff-merge.sh）由本脚本生成的 subagent prompt 全权执行；全量 suite 的【等待】由脚本控制流承担（setTimeout + 轮询 agent，gap-fan-in-turn-budget-suite-timeout），不占任何 subagent 回合预算；subagent 在 ff 成功后才返回。A6 只检查「是否走了本 workflow」（判据2 (a)(b)(c)）。',
   whenToUse: 'inner 对某任务执行 fan-in 时（A6）：以 scriptPath 调用本 workflow，args={task, worktree, root, runId, mergeTarget}。禁止 name:（M176 陷阱：同会话第二次 name: 派发可能取旧脚本体）。',
-  phases: [{ title: 'FanIn', detail: 'subagent 自足执行无锁段 + 持锁段，ff 成功后才返回' }],
+  phases: [{ title: 'FanIn', detail: '阶段1（预备+启动 detached suite，立即返回）→ 脚本控制流等 suite（回合预算承载）→ 阶段2（入账+flip+ff+bracket），ff 成功后才返回' }],
 }
 
 // ══ 本文件的设计（AC78 判据1/判据5/判据6，tasks/gap-ac78-fan-in-workflow-a6-check）══════════
@@ -30,6 +30,25 @@ export const meta = {
 //     root 与 worktree 的 fan-in-execute.js 不一致（本次派发没用 worktree 版 scriptPath）echo WARN——
 //     结构性缺口仍在。改本文件必须同步 plugin/workflows/fan-in-execute.js（双拷贝，workflows-dual-copy-
 //     drift-check）与 A6 派发规则（fast-mode-tick-core.md：命中 ⇒ scriptPath 用 worktree 版）。
+//  ⑦ 回合预算承载（gap-fan-in-turn-budget-suite-timeout）：step4 全量 suite ~14-25min > subagent
+//     回合预算 ⇒ 旧设计中 subagent 等 suite 时回合耗尽被强制收尾（capture 未写/flip/ff/bracket 全缺，
+//     release-timeout 实证 + AC95 第 2 次复发；AC101 达成不缓解——fan-in 的 suite 因 CPU 争用仍超预算）。
+//     修复 = 把 suite 交给【长生命周期载体】（detached setsid 进程，subagent 退出不影响它），把
+//     【等待】从 subagent 回合搬到【脚本控制流】——setTimeout + 轮询 agent 读 exit marker
+//     （ab380c5e 同源：等待由脚本控制流决定，不存在需要做等待决策的 agent；execute-suite-fix.js 前例）。
+//     阶段划分：
+//       阶段 1（agent #1）：step 0-4 预备（merge/delta/typecheck/scoped/doc）+ 启动 detached suite +
+//           写 pre-suite capture → 立即返回（outcome=suite-started / skipped / preverified）。
+//       脚本控制流：setTimeout + 轮询 agent（短促只读 exit marker；命中则补全 capture post 字段）。
+//       红 suite ⇒ Fix agent（读日志 → 修 → 重新启动 detached）→ 脚本再等（有界 maxFixRounds）。
+//       ff 失败（develop 前进，窗口 = merge 到 ff 之间的整个 suite 时长）⇒ 回阶段 1 重跑
+//       （有界 maxFfRetries，同 SPEC §7 防活锁阈值；阶段 1 首步 revert 上次 ff 失败遗留的 done 翻转）。
+//       阶段 2（agent #2）：step 4.5 入账 + step 5 flip+ff + step 5.5 bracket → 返回。
+//     ⛔ 禁止 Bash(run_in_background:true)（subagent 退出被 harness 连带杀，execute-suite-fix.js
+//        实证 runId f6b824b5）；⛔ 禁止前台 bash scripts/test.sh（>10min 前台 Bash 上限 + 回合窗）。
+//     取假（plugin/test/fan-in-execute-paths.test.mjs）：构造 step2 code_delta 非空 ⇒ 阶段 1 启动
+//     detached suite（setsid+&+disown）且立即返回；脚本轮询到 suite 绿 ⇒ 阶段 2 机械步骤（flip/ff/
+//     bracket）全执行。等待由脚本控制流决定，不占任何 subagent 回合。
 //
 //  脚本层能力边界（同 manager-tick-core.js 实测）：globalThis 仅 log/phase/budget/setTimeout/
 //  clearTimeout/agent/parallel/pipeline/workflow/args；无 require/process/fetch；import() 语法
@@ -65,14 +84,107 @@ const worktree = A.worktree
 const root = A.root
 const runId = A.runId ?? ''
 const mergeTarget = A.mergeTarget ?? 'develop'
+// 回合预算承载的脚本控制流可调参数（生产用默认；测试经 args 覆盖，如 pollIntervalMs=0）。
+const pollIntervalMs = A.pollIntervalMs ?? 60_000   // 脚本 setTimeout 的轮询间隔
+const maxSuitePolls = A.maxSuitePolls ?? 60         // 单次 suite 等待的有界轮询数（60×60s=60min 上限）
+const maxFixRounds = A.maxFixRounds ?? 4            // 红 suite 的最大修复迭代
+const maxFfRetries = A.maxFfRetries ?? 3            // ff 失败（develop 前进）的最大重试（同 SPEC §7 阈值）
 
 if (!task || !worktree || !root) {
   return { outcome: 'bad-args', message: 'task / worktree / root are required', args }
 }
 
+// ── 共享的 detached suite 启动核心（阶段 1 与 Fix agent 复用，字节一致）─────────────────────────
+// setsid + & + disown 让 suite 活在独立 session，subagent 退出不影响它；exit marker 是完成信号，
+// 由 workflow 脚本控制流轮询（等待不占任何 subagent 回合，gap-fan-in-turn-budget-suite-timeout）。
+const SUITE_LAUNCH = `
+suite_capture="/tmp/fan-in-suite-${task}.env"
+suite_exit_marker="/tmp/fan-in-suite-${task}.exit"
+suite_time_file="/tmp/fan-in-suite-${task}.time"
+suite_log_file="/tmp/fan-in-suite-${task}.log"
+rm -f "$suite_exit_marker" "$suite_time_file"
+suite_start_iso=$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)
+suite_start_ms=$(date +%s%3N)
+suite_head_now=$(git rev-parse HEAD 2>/dev/null || echo unknown)
+printf 'full_suite_ran=true\\nskip_reason=\\nstart_iso=%s\\nstart_ms=%s\\nsuite_head=%s\\n' \\
+  "$suite_start_iso" "$suite_start_ms" "$suite_head_now" > "$suite_capture"
+# GNU time 捕获 CPU（判据3 的 cpu_time_s）；GNU time 不可用 ⇒ 保持 null + not-wired（AC6，绝不写 0）。
+setsid bash -c 'cd "$1" && { if command -v /usr/bin/time >/dev/null 2>&1; then /usr/bin/time -o "$2" -f "%U %S" bash scripts/test.sh; else bash scripts/test.sh; fi; } > "$3" 2>&1; echo "exit=$?" > "$4"' _ "${worktree}" "$suite_time_file" "$suite_log_file" "$suite_exit_marker" & disown
+suite_pid=$!
+printf 'suite_pid=%s\\n' "$suite_pid" >> "$suite_capture"`
+
+// ── 脚本控制流的 suite 等待：不把等待决策交给任何 agent（ab380c5e / execute-suite-fix.js）──────
+// 轮询 agent 只读 exit marker；命中则补全 capture 的 post 字段。等待间隔由脚本 setTimeout 决定。
+async function pollSuite() {
+  return agent(
+    `你是 fan-in suite 等待轮询（workflow 脚本控制流调用，短促只读，一回合内返回）。任务 ${task} 的 suite 以 detached 方式运行。运行下面命令并返回结果——不要做任何等待决策（等待由 workflow 脚本控制）。
+suite_capture="/tmp/fan-in-suite-${task}.env"
+suite_exit_marker="/tmp/fan-in-suite-${task}.exit"
+suite_time_file="/tmp/fan-in-suite-${task}.time"
+if [ ! -f "$suite_exit_marker" ]; then
+  echo 'POLL=not-done'
+  exit 0
+fi
+. "$suite_capture"
+suite_exit=$(sed -n 's/^exit=//p' "$suite_exit_marker" | tail -1)
+[ -n "$suite_exit" ] || suite_exit=1
+end_iso=$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)
+end_ms=$(date +%s%3N)
+wall_ms=$(( end_ms - \${start_ms:-0} ))
+load=$(cut -d' ' -f1 /proc/loadavg 2>/dev/null || echo 0)
+lane_count=1
+if [ "$full_suite_ran" = "true" ]; then lane_count=$(nproc 2>/dev/null || echo 1); fi
+cpu_s=null
+cpu_source=not-wired
+if [ -f "$suite_time_file" ]; then
+  cpu=$(tail -1 "$suite_time_file" 2>/dev/null | awk '{printf "%.3f", $1+$2}' || true)
+  if [ -n "$cpu" ] && [ "$cpu" != "0.000" ]; then cpu_s=$cpu; cpu_source=gnu-time; fi
+fi
+printf 'cpu_s=%s\\ncpu_source=%s\\nend_iso=%s\\nend_ms=%s\\nwall_ms=%s\\nload=%s\\nlane_count=%s\\nsuite_exit=%s\\n' \\
+  "$cpu_s" "$cpu_source" "$end_iso" "$end_ms" "$wall_ms" "$load" "$lane_count" "$suite_exit" >> "$suite_capture"
+echo "POLL=done SUITE_EXIT=$suite_exit"
+返回 { done: bool（POLL=done ⇒ true）, suiteExit: int|null }。marker 存在但读不出 suite_exit ⇒ done=true, suiteExit=null（fail-closed，脚本按非绿处理）。`,
+    {
+      schema: {
+        type: 'object',
+        properties: {
+          done: { type: 'boolean' },
+          suiteExit: { type: 'number' },
+        },
+        required: ['done'],
+      },
+    }
+  )
+}
+
+async function waitForSuite() {
+  let done = false
+  let exit = null
+  let polls = 0
+  while (!done) {
+    await new Promise((r) => setTimeout(r, pollIntervalMs))
+    const p = await pollSuite()
+    done = !!p.done
+    exit = p.suiteExit ?? null
+    if (++polls > maxSuitePolls) {
+      log(`WARN: suite poll cap reached (${maxSuitePolls} polls) — advancing on last poll state (done=${done}, exit=${exit})`)
+      break
+    }
+  }
+  return { done, exit }
+}
+
+// ── 重试循环：阶段 1（预备+启动 suite）→ 脚本等 suite（红则 Fix）→ 阶段 2（入账+flip+ff+bracket）──
+// ff 失败（develop 前进）⇒ 回阶段 1 重跑（有界 maxFfRetries）。整个循环由脚本控制流驱动。
 phase('FanIn')
-const result = await agent(
-  `你是 fan-in 执行 subagent。任务 ${task} 的 fan-in 由你在自己的回合内完整执行（无锁段+持锁段全在自回合内，ff 成功后才返回）。以下所有上下文已逐字内联，不需要询问任何人，也不要引用「上一条消息」。
+let finalResult = null
+let ffAttempts = 0
+while (finalResult == null) {
+  const prep = await agent(
+    `你是 fan-in 执行 subagent（阶段 1/2：无锁段预备 + 启动 suite）。任务 ${task} 的 fan-in 分两阶段完成：
+- 阶段 1（你，本轮）：无锁段 step 0-4 —— merge develop → delta 断言面判定 → ts-typecheck → scoped 门 + doc 检查 → 启动全量 suite（detached，立即返回，【不等它】）。
+- 阶段 2（后续 agent，suite 绿后）：step 4.5 per-task-suite 入账 + 持锁段（flip done → fan-in-ff-merge.sh → bracket close）。
+⛔ 你在本回合【不等待 suite】——全量 suite ~14-25min 超过 subagent 回合预算（release-timeout 实证 + AC95 复发）；等待由 workflow 脚本控制流承担（setTimeout 轮询 exit marker，ab380c5e 同源）。suite 以 detached 方式启动（setsid + & + disown = 长生命周期载体），你启动 + 短促确认后立即返回。
 
 执行上下文（你直接使用，无需探查）：
 - 任务 worktree（你的工作目录，所有代码操作都在这里）：${worktree}
@@ -81,6 +193,15 @@ const result = await agent(
 - runId：${runId ? runId : '（无，ff 时省略 --run-id）'}
 
 步骤（严格按序；每步都先 cd ${worktree} 或显式用 -C）：
+
+【重试遗留翻转处理（gap-fan-in-turn-budget-suite-timeout，在 step 0 自举检查之前）】
+# 若上一次 ff 失败重试，tasks/${task}.md 可能已被阶段 2 翻成 done。先精确 revert 回 ready
+# （仅当存在精确 'status: done' 行；正常首轮为 ready ⇒ 本步 no-op）：
+if grep -q '^status: done$' tasks/${task}.md; then
+  sed -i 's/^status: done$/status: ready/' tasks/${task}.md
+  git add tasks/${task}.md && git commit -- tasks/${task}.md -m "tasks: revert ${task} done→ready（ff 失败重试，fan-in 重跑）"
+  echo "STALE_FLIP_REVERTED=1"
+fi
 
 【无锁段 step 0 — fan-in 编排自举检查（gap-fan-in-orchestration-bootstrap-self-fix）】
 # 自举判定：本分支是否修改了 fan-in 编排文件自身（fan-in-execute.js / select-static-checks-for-
@@ -140,6 +261,9 @@ delta=$(git -C ${worktree} diff --name-only "$fork" HEAD 2>/dev/null || true)
 # 解析（非 cwd、非 ${root}）——本任务若修改了 select-static-checks-for-touches.ts / scripts/test.sh 的
 # @static-object 注解，其 fan-in 必须用自己的版本判定（取假二：旧正则判 doc、worktree 版判 code）。
 code_delta=$(node --experimental-strip-types ${worktree}/plugin/scripts/select-static-checks-for-touches.ts --classify-delta --root ${worktree} $delta) || code_delta="__CLASSIFY_FAILED__"
+# 回合预算承载（gap-fan-in-turn-budget-suite-timeout）：把 code_delta 落盘，step 4 的 suite 启动块
+# 据此判定（bash 变量不跨 Bash 调用持久）。
+printf '%s' "$code_delta" > /tmp/fan-in-code-delta-${task}.txt
 判定：
   - code_delta 非空 ⇒ 分支整体变更触及代码/脚本/测试断言面（或被检查器读取的路径）⇒ 本回合【要】重跑全量 suite。
   - code_delta 为空且 delta 非空 ⇒ delta 全落 doc/任务体/telemetry 面 ⇒ 跳过全量 suite（只跑 doc 检查）。
@@ -149,89 +273,150 @@ code_delta=$(node --experimental-strip-types ${worktree}/plugin/scripts/select-s
 【无锁段 step 3 — ts-typecheck 闸】
 cd ${worktree} && node --experimental-strip-types ${worktree}/plugin/scripts/fan-in-ts-typecheck-gate.ts --task ${task} --worktree ${worktree} --merge-target ${mergeTarget}
   —— 闸自己判定 Touches 是否含新增/移动 .ts（无则直接 exit 0）。exit 非 0 ⇒ 丢弃 worktree 内未合状态、
-     标 needs-human、停止本 tick 合并与派发——不要继续 ff。
+     标 needs-human、停止本 tick 合并与派发——不要继续启动 suite、不要 ff。
 
-【无锁段 step 4 — scoped 门 + （按 step 2 判定）全量 suite + doc 检查 + per-task-suite 捕获】
+【无锁段 step 4 — scoped 门 + doc 检查 + 全量 suite 启动（detached，不等待）】
 cd ${worktree} && bash scripts/test.sh --for-task ${task} --allow-thin
   —— scoped 门，必须绿；非绿 ⇒ 修到绿再继续。
-# suite-capture-block-start
-# per-task-suite 捕获（gap-fan-in-suite-data-not-accounted）：suite 起止/CPU/判定写入 /tmp 临时 env
-# 文件，供【全绿后】的 step 4.5 入账块读取——bash 变量不跨调用持久，用文件跨调用传值。
-# ⚠️ 跳过全量也要捕获（full_suite_ran=false + skip_reason=doc-only-delta）——跳过=被记录的决定，
-# 判据2 能取假（不能靠时长反推「为什么 CPU 低」）。判定依据 step 2 已记下的 code_delta。
-# 🔁 PRE-VERIFIED-SUITE（gap-direct-to-develop-exclude-cron-registry-receipt 实测：本机全量 suite ~14min
-# 超过 subagent 单次前台 Bash 10min 上限 + harness 回合窗）。调用方（inner）可在【自己的回合外】先跑
-# 完整全量 suite 并留下 capture（含 suite_head=跑时 worktree HEAD、suite_exit=0）。本块若发现已有 capture
-# 且 full_suite_ran=true 且 suite_exit=0 且 suite_head==当前 worktree HEAD ⇒ 复用该 capture，跳过重跑；
-# 后续 step 4.5 照常入账。⛔ 反作弊：capture 用 suite_head 钉死在【将被 land 的精确 HEAD】上——换 HEAD
-# 的陈旧/伪造 capture 不跳过。scoped 门（step 4 首行）与 doc 检查（step 4 末行）每轮仍跑，独立于 suite。
-# 若本块打印 PRE-VERIFIED-SUITE ⇒ 视为 suite 已验证绿（suite_exit=0），直接进 step 4.5/5。
+cd ${worktree} && bash scripts/test.sh --static-checks-doc
+  —— doc 检查（ff 不触发任何钩子，AC63）；必须绿。
+# suite-launch-block-start
+# 全量 suite 启动（gap-fan-in-turn-budget-suite-timeout）：把 suite 交给长生命周期载体（detached
+# setsid 进程，subagent 退出不影响它），不在本回合等待。⛔ 禁止 Bash(run_in_background:true)
+# （subagent 退出时被 harness 连带杀掉，execute-suite-fix.js 实证 runId f6b824b5）；⛔ 禁止前台
+# bash scripts/test.sh（~14-25min 超过单次前台 Bash 10min 上限 + 回合窗）。等待由 workflow 脚本
+# 控制流决定（setTimeout 轮询 exit marker）。本块判定依据 /tmp/fan-in-code-delta-${task}.txt
+# （step 2 落盘）：非空 ⇒ 启动全量 suite；空 ⇒ 跳过（doc-only）；已有 pre-verified capture ⇒ 复用。
 suite_capture="/tmp/fan-in-suite-${task}.env"
+suite_exit_marker="/tmp/fan-in-suite-${task}.exit"
+suite_time_file="/tmp/fan-in-suite-${task}.time"
 suite_head_now=$(git rev-parse HEAD 2>/dev/null || echo unknown)
+code_delta=$(cat /tmp/fan-in-code-delta-${task}.txt 2>/dev/null || true)
 suite_preverified=0
 if [ -f "$suite_capture" ] && grep -q '^full_suite_ran=true$' "$suite_capture" && grep -q '^suite_exit=0$' "$suite_capture" && grep -q "^suite_head=$suite_head_now$" "$suite_capture"; then
   echo "PRE-VERIFIED-SUITE: capture 已存在且 suite_head=$suite_head_now 与当前 worktree HEAD 一致（full_suite_ran=true, suite_exit=0）⇒ 跳过全量重跑"
+  printf 'suite_preverified=1\\n' >> "$suite_capture"
   suite_preverified=1
 fi
 if [ "$suite_preverified" = "1" ]; then
-  full_suite_ran=true
-  skip_reason=
-  # 保留既有 capture 文件（不覆盖）——step 4.5 读它入账。追加 suite_preverified=1 标记，step 4.5 据此
-  # 写 verification-round（pre-verified 复用路径的专属入账，gap-preverified-suite-bypasses-verification-round-ledger）。
-  printf 'suite_preverified=1\\n' >> "$suite_capture"
+  echo "SUITE_OUTCOME=preverified"
+elif [ "$code_delta" != "" ]; then
+${SUITE_LAUNCH}
+  echo "SUITE_OUTCOME=started"
+  # 短促确认（~3s）：suite 应已在跑（exit marker 未出现）；若 marker 立刻出现 ⇒ 瞬间崩，脚本轮询会读到。
+  sleep 3
+  if [ -f "$suite_exit_marker" ]; then echo "SUITE_NOTE=exit-marker-already-present(instant-crash)"; fi
 else
-suite_start_iso=$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)
-suite_start_ms=$(date +%s%3N)
-# AC6 (gap-phase-boundary-differential-accounting)：数据源未接 ⇒ cpu_s=null + cpu_source=not-wired，
-# ⛔ 不写 0（0 无法区分「仪器没接」与「真的 ~0 消耗」）。GNU time 跑出实数才置 gnu-time。
-suite_cpu_s=null
-suite_cpu_source=not-wired
-suite_exit=0
-if [ step 2 判定 code_delta 非空 ]; then
-  # 全量 suite，只在 delta 触及断言面时跑（或判不出时 fail-closed 跑）。GNU time 捕获 CPU 秒数
-  # （User+System，判据3 的 cpu_time_s）；GNU time 不可用 ⇒ cpu_s 保持 null + not-wired（AC6）。
-  if command -v /usr/bin/time >/dev/null 2>&1; then
-    /usr/bin/time -o /tmp/fan-in-suite-${task}.time -f '%U %S' bash scripts/test.sh
-    suite_exit=$?
-    suite_cpu_s=$(tail -1 /tmp/fan-in-suite-${task}.time 2>/dev/null | awk '{printf "%.3f", $1+$2}' || true)
-    rm -f /tmp/fan-in-suite-${task}.time
-    if [ -z "$suite_cpu_s" ] || [ "$suite_cpu_s" = "0.000" ]; then
-      # GNU time 跑了但没产出可用读数 ⇒ 显式 null + not-wired（AC6：绝不写 0）。
-      suite_cpu_s=null
-      suite_cpu_source=not-wired
-    else
-      suite_cpu_source=gnu-time
-    fi
-  else
-    bash scripts/test.sh
-    suite_exit=$?
-    # GNU time 不可用 ⇒ 显式 null + not-wired（AC6：绝不写 0）。
-    suite_cpu_s=null
-    suite_cpu_source=not-wired
-  fi
-  full_suite_ran=true
-  skip_reason=
-else
-  full_suite_ran=false
-  skip_reason=doc-only-delta
-  # 跳过全量 ⇒ 没有任何 CPU 测量 ⇒ 显式 null + not-wired（AC6）。
-  suite_cpu_s=null
-  suite_cpu_source=not-wired
+  suite_start_iso=$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)
+  suite_load=$(cut -d' ' -f1 /proc/loadavg 2>/dev/null || echo 0)
+  printf 'full_suite_ran=false\\nskip_reason=doc-only-delta\\ncpu_s=null\\ncpu_source=not-wired\\nstart_iso=%s\\nend_iso=%s\\nwall_ms=0\\nload=%s\\nlane_count=1\\nsuite_exit=0\\nsuite_head=%s\\n' \\
+    "$suite_start_iso" "$suite_start_iso" "$suite_load" "$suite_head_now" > "$suite_capture"
+  echo "SUITE_OUTCOME=skipped"
 fi
-suite_end_iso=$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)
-suite_end_ms=$(date +%s%3N)
-suite_wall_ms=$(( suite_end_ms - suite_start_ms ))
-suite_load=$(cut -d' ' -f1 /proc/loadavg 2>/dev/null || echo 0)
-suite_lane_count=1
-if [ "$full_suite_ran" = true ]; then suite_lane_count=$(nproc 2>/dev/null || echo 1); fi
-printf 'full_suite_ran=%s\\nskip_reason=%s\\ncpu_s=%s\\ncpu_source=%s\\nstart_iso=%s\\nend_iso=%s\\nwall_ms=%s\\nload=%s\\nlane_count=%s\\nsuite_exit=%s\\nsuite_head=%s\\n' \
-  "$full_suite_ran" "$skip_reason" "$suite_cpu_s" "$suite_cpu_source" "$suite_start_iso" "$suite_end_iso" "$suite_wall_ms" "$suite_load" "$suite_lane_count" "$suite_exit" "$suite_head_now" \
-  > "$suite_capture"
-fi
-# suite-capture-block-end
-cd ${worktree} && bash scripts/test.sh --static-checks-doc
-  —— doc 检查（ff 不触发任何钩子，AC63）；必须绿。
-—— scoped 门 / 全量 / doc 任一非绿 ⇒ 修复并重跑对应项；全绿才进持锁段。
+# suite-launch-block-end
+—— scoped 门 / doc / suite 启动任一失败 ⇒ 修复并重跑对应项（suite 启动失败指 detached 进程未起）；
+   全绿（或已 detached 启动）才返回阶段 1。
+
+返回 { outcome: 'suite-started' | 'suite-skipped' | 'suite-preverified' | 'needs-human' | 'red', suitePid, codeDelta, worktreeHead, note }。
+outcome=needs-human 仅当冲突解不了 / ts-typecheck 阻断 / scoped 门或 doc 修不到绿（返回前已尽力）。outcome=red = 其它失败。
+suite-started ⇒ 全量 suite 已 detached 启动（脚本控制流将轮询等它，你已返回，不等）。
+suite-skipped ⇒ code_delta 空（doc-only），capture 已写 skip_reason=doc-only-delta。
+suite-preverified ⇒ 复用了调用方回合外已跑绿的 capture（已追加 suite_preverified=1）。
+codeDelta = step 2 记下的 code_delta。worktreeHead = 当前 worktree HEAD（git rev-parse HEAD）。`,
+    {
+      schema: {
+        type: 'object',
+        properties: {
+          outcome: { type: 'string' },
+          suitePid: { type: 'number' },
+          codeDelta: { type: 'string' },
+          worktreeHead: { type: 'string' },
+          note: { type: 'string' },
+        },
+        required: ['outcome'],
+      },
+    }
+  )
+  log(`FanIn prep: outcome=${prep.outcome} suitePid=${prep.suitePid ?? '?'} codeDelta=${(prep.codeDelta ?? '').slice(0, 40) || '(empty)'} note=${prep.note ?? ''}`)
+
+  if (prep.outcome === 'needs-human' || prep.outcome === 'red') {
+    return { outcome: prep.outcome, ffOk: false, task, message: `fan-in prep failed for ${task}: ${prep.note ?? prep.outcome}` }
+  }
+  if (!['suite-started', 'suite-skipped', 'suite-preverified'].includes(prep.outcome)) {
+    return { outcome: 'red', ffOk: false, task, message: `fan-in prep returned unexpected outcome: ${prep.outcome}` }
+  }
+
+  // ── 脚本控制流的 suite 等待（回合预算承载的核心）────────────────────────────────────────────
+  let suiteDone = prep.outcome !== 'suite-started'
+  let suiteExit = null
+  if (prep.outcome === 'suite-started') {
+    const waited = await waitForSuite()
+    suiteDone = waited.done
+    suiteExit = waited.exit
+  }
+
+  // ── 红 suite：Fix agent（读日志 → 修 → 重新启动 detached）→ 脚本再等（有界 maxFixRounds）────
+  let fixRounds = 0
+  while (suiteDone && suiteExit !== 0) {
+    if (fixRounds >= maxFixRounds) {
+      return { outcome: 'red', ffOk: false, task, message: `fan-in suite red after ${fixRounds} fix rounds (last exit ${suiteExit}) — not landing` }
+    }
+    fixRounds++
+    const fix = await agent(
+      `你是 fan-in 执行 subagent（suite-fix 阶段）。任务 ${task} 的全量 suite 上一轮退出码 ${suiteExit}（RED）——你读失败日志、修根因、以 detached 方式重新启动 suite，然后【立即返回】（等待由 workflow 脚本控制流承担，不在你本回合内等）。
+执行上下文：
+- 任务 worktree（你的工作目录）：${worktree}
+- suite 日志：/tmp/fan-in-suite-${task}.log
+- 上一轮 exit：${suiteExit}
+任务：
+1. 读 /tmp/fan-in-suite-${task}.log 的【全部】失败行，诊断每条根因（不要只看第一条）。
+2. 在 ${worktree} 修复所有根因并 git add + git commit（真实修复，不是删测试/改判据绕过）。
+3. 重新启动全量 suite（detached）：${SUITE_LAUNCH}
+   ⛔ 禁止 Bash(run_in_background:true)（subagent 退出被连带杀）；⛔ 禁止前台 bash scripts/test.sh。
+   启动后短促确认（~3s）exit marker 未立刻出现，然后返回。
+4. 返回 { relaunched: bool, worktreeHead, failuresFixed: string[], note }。
+不要做任何等待决策——等待由 workflow 脚本控制。`,
+      {
+        schema: {
+          type: 'object',
+          properties: {
+            relaunched: { type: 'boolean' },
+            worktreeHead: { type: 'string' },
+            failuresFixed: { type: 'array', items: { type: 'string' } },
+            note: { type: 'string' },
+          },
+          required: ['relaunched'],
+        },
+      }
+    )
+    log(`FanIn fix round ${fixRounds}/${maxFixRounds}: relaunched=${fix.relaunched} fixed=${(fix.failuresFixed ?? []).length} note=${fix.note ?? ''}`)
+    if (!fix.relaunched) {
+      return { outcome: 'red', ffOk: false, task, message: `fan-in fix agent did not relaunch: ${fix.note ?? 'unknown'}` }
+    }
+    const waited = await waitForSuite()
+    suiteDone = waited.done
+    suiteExit = waited.exit
+  }
+
+  if (!suiteDone) {
+    return { outcome: 'red', ffOk: false, task, message: `fan-in suite did not finish within poll cap for ${task}` }
+  }
+  if (suiteExit !== 0) {
+    return { outcome: 'red', ffOk: false, task, message: `fan-in suite red (exit ${suiteExit}) for ${task} — not landing` }
+  }
+
+  // ── 阶段 2（机械步骤）：入账 + flip + ff + bracket（ff 失败 ⇒ ff-retry，脚本回阶段 1）────────
+  const result = await agent(
+    `你是 fan-in 执行 subagent（阶段 2/2：入账 + 持锁段）。任务 ${task} 的 suite 已绿（或 suite-skipped / suite-preverified），由 workflow 脚本控制流等完；现在你执行机械步骤（全部快操作，你的回合内完成）。以下所有上下文已逐字内联，不需要询问任何人，也不要引用「上一条消息」。
+
+执行上下文（你直接使用，无需探查）：
+- 任务 worktree（你的工作目录，所有代码操作都在这里）：${worktree}
+- 主检出（develop / merge target 所在的 checkout，fan-in-ff-merge.sh 的 --root）：${root}
+- merge target（ff 目标分支）：${mergeTarget}
+- runId：${runId ? runId : '（无，ff 时省略 --run-id）'}
+- codeDelta（step 2 上报，最终返回时带上）：${prep.codeDelta ?? ''}
+
+步骤（严格按序；每步都先 cd ${worktree} 或显式用 -C）：
 
 【无锁段 step 4.5 — per-task-suite 入账（全绿后；跳过也写）】
 # suite-record-block-start
@@ -334,9 +519,10 @@ agent_id=$(basename "$self" .jsonl 2>/dev/null | sed 's/^agent-//')
 if [ -z "$agent_id" ]; then echo "FATAL: 未能从 $self 提取 agent id（--agent-id 不能由调用方填）" >&2; exit 2; fi
 # selfloc-block-end
 bash ${worktree}/plugin/scripts/fan-in-ff-merge.sh --task ${task} --run-id ${runId} --agent-id "$agent_id" --root ${root} --merge-target ${mergeTarget}
-  —— 锁只包 git merge --ff-only，毫秒级，成/败都解锁。ff 失败（develop 前进了）⇒ 回 step 1 重跑
-     （重 merge develop、重判 delta、重跑 suite、重 ff），同一任务 ff 失败 ≥3 次才谈防活锁。
-     ff 成功（exit 0）后才执行 step 5.5；ff 失败（exit 1/3）⇒ 回 step 1，绝不执行 step 5.5。
+  —— 锁只包 git merge --ff-only，毫秒级，成/败都解锁。ff 失败（develop 前进了，窗口 = merge 到 ff 之间
+     的整个 suite 时长）⇒ 返回 { outcome: 'ff-retry' }（脚本将回阶段 1 重跑：重 merge develop、重判 delta、
+     重跑 suite、重 ff），同一任务 ff 失败 ≥3 次才谈防活锁（脚本侧 maxFfRetries 兜底）。ff 成功（exit 0）
+     后才执行 step 5.5；ff 失败（exit 1/3）⇒ 不执行 step 5.5。exit 2（usage/env）⇒ outcome='red'。
 
 【持锁段 step 5.5 — 关闭本任务的 telemetry bracket（仅 ff 成功后）】
 # bracket-close-block-start
@@ -360,34 +546,53 @@ fi
 
 ff 成功后清理：cd ${root} && git worktree remove ${worktree} --force && git branch -d task/${task}
 
-返回 { outcome: 'green' | 'needs-human' | 'red', ffOk, developHead, worktreeHead, agentIdUsed, codeDelta, note, bracketClosed }。
-outcome=green 仅当 ff 成功（develop fast-forward 到 task tip）。needs-human 仅当冲突解不了/选中集非绿/ts-typecheck 阻断。red = 其它失败。
-bracketClosed = step 5.5 的闭合结果（true=已闭合 / false=闭合失败 / null=ff 未成功未执行 5.5）。note 必须标注 bracketClose=OK 或 bracketClose=FAILED。`,
-  {
-    schema: {
-      type: 'object',
-      properties: {
-        outcome: { type: 'string' },
-        ffOk: { type: 'boolean' },
-        developHead: { type: 'string' },
-        worktreeHead: { type: 'string' },
-        agentIdUsed: { type: 'string' },
-        codeDelta: { type: 'string' },
-        note: { type: 'string' },
-        bracketClosed: { type: 'boolean' },
+返回 { outcome: 'green' | 'needs-human' | 'red' | 'ff-retry', ffOk, developHead, worktreeHead, agentIdUsed, codeDelta, note, bracketClosed }。
+outcome=green 仅当 ff 成功（develop fast-forward 到 task tip）。outcome=ff-retry 仅当 ff 失败（develop 前进，
+exit 1/3）——脚本将回阶段 1 重跑，你【不得】重试 ff、【不得】执行 step 5.5。outcome=needs-human 仅当
+flip/入账等持锁段前置失败（如 AC 闸拒绝/入账 HARD FAIL）。red = 其它失败。
+bracketClosed = step 5.5 的闭合结果（true=已闭合 / false=闭合失败 / null=ff 未成功未执行 5.5）。
+note 必须标注 bracketClose=OK 或 bracketClose=FAILED。`,
+    {
+      schema: {
+        type: 'object',
+        properties: {
+          outcome: { type: 'string' },
+          ffOk: { type: 'boolean' },
+          developHead: { type: 'string' },
+          worktreeHead: { type: 'string' },
+          agentIdUsed: { type: 'string' },
+          codeDelta: { type: 'string' },
+          note: { type: 'string' },
+          bracketClosed: { type: 'boolean' },
+        },
+        required: ['outcome', 'ffOk'],
       },
-      required: ['outcome', 'ffOk'],
-    },
+    }
+  )
+  log(`FanIn final: outcome=${result.outcome} ffOk=${result.ffOk} agent=${result.agentIdUsed ?? '?'} develop=${result.developHead ?? '?'}`)
+
+  if (result.ffOk) {
+    finalResult = result
+    break
   }
-)
-log(`FanIn done: outcome=${result.outcome} ffOk=${result.ffOk} agent=${result.agentIdUsed ?? '?'} develop=${result.developHead ?? '?'}`)
+  if (result.outcome !== 'ff-retry') {
+    finalResult = result
+    break
+  }
+  // ff 失败（develop 前进）⇒ 回阶段 1 重跑。有界（maxFfRetries，同 SPEC §7 防活锁阈值）。
+  ffAttempts++
+  if (ffAttempts >= maxFfRetries) {
+    return { outcome: 'red', ffOk: false, task, message: `fan-in ff failed after ${ffAttempts} attempts (develop kept advancing) — anti-livelock; not landing` }
+  }
+  log(`FanIn ff-retry ${ffAttempts}/${maxFfRetries}: develop advanced during suite — re-running phase 1 (re-merge develop)`)
+}
 
 return {
-  outcome: result.outcome === 'green' ? 'green' : result.outcome === 'needs-human' ? 'needs-human' : 'red',
-  ffOk: result.ffOk,
+  outcome: finalResult.outcome === 'green' ? 'green' : finalResult.outcome === 'needs-human' ? 'needs-human' : 'red',
+  ffOk: finalResult.ffOk,
   task,
-  bracketClosed: typeof result.bracketClosed === 'boolean' ? result.bracketClosed : null,
-  message: result.ffOk
+  bracketClosed: typeof finalResult.bracketClosed === 'boolean' ? finalResult.bracketClosed : null,
+  message: finalResult.ffOk
     ? `fan-in landed for ${task} (via 'fan-in-execute' workflow)`
-    : `fan-in did not land for ${task}: ${result.note ?? 'unknown'}`,
+    : `fan-in did not land for ${task}: ${finalResult.note ?? 'unknown'}`,
 }
