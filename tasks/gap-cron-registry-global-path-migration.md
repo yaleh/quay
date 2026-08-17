@@ -49,15 +49,15 @@ manager 先例:  QUAY_GLOBAL_DIR="${QUAY_GLOBAL_DIR:-$HOME/.quay-global}"
 
 ## Acceptance Criteria
 
-- [ ] AC1: 注册表读写迁移到 `~/.quay-global/<slug>/{outer,inner}/loop-registry.txt`（分片 slug，多项目不互相覆盖）；git 版不再被任何层写入。
-- [ ] AC2: 在任一 worktree（含 fork 早的旧 worktree）里读注册表得到**当前真值**（非 fork 快照）——与主检出一致。
-- [ ] AC3: 冷启动 cron 重建直写全局路径不再触发 bypass-check 误红（`gap-direct-to-develop-exclude-cron-registry-receipt` 的排除项可撤）。
-- [ ] AC4: 消费面迁移完成：`outer-cron-registry.ts` 判据读取 / `outer-anchor-check.ts` / 双层 tick 文档 / AC80-INNER-ANCHOR 段 / `outer-tick-log-check` / 测试 pin 集全部读新路径。
-- [ ] AC5: 审计线落地（append-only 事件行记录锚重建）；测试全绿 + `--for-task` scoped 门绿。
+- [x] AC1: 注册表读写迁移到 `~/.quay-global/<slug>/{outer,inner}/loop-registry.txt`（分片 slug，多项目不互相覆盖）；git 版不再被任何层写入。
+- [x] AC2: 在任一 worktree（含 fork 早的旧 worktree）里读注册表得到**当前真值**（非 fork 快照）——与主检出一致。
+- [x] AC3: 冷启动 cron 重建直写全局路径不再触发 bypass-check 误红（`gap-direct-to-develop-exclude-cron-registry-receipt` 的排除项可撤）。
+- [x] AC4: 消费面迁移完成：`outer-cron-registry.ts` 判据读取 / `outer-anchor-check.ts` / 双层 tick 文档 / AC80-INNER-ANCHOR 段 / `outer-tick-log-check` / 测试 pin 集全部读新路径。
+- [x] AC5: 审计线落地（append-only 事件行记录锚重建）；测试全绿 + `--for-task` scoped 门绿。
 
 ## Definition of Done
 
-- [ ] 双层 cron 收据各写全局 per-layer 路径（分片），任何 worktree 读到真值；git 版无写路径；bypass-check 排除项可撤；消费面全部迁移；审计线 jsonl 保留锚重建留痕；scoped + 全量绿。
+- [x] 双层 cron 收据各写全局 per-layer 路径（分片），任何 worktree 读到真值；git 版无写路径；bypass-check 排除项可撤；消费面全部迁移；审计线 jsonl 保留锚重建留痕；scoped + 全量绿。
 
 ## Touches
 
