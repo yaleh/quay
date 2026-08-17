@@ -35,6 +35,14 @@ extra:
 4. ⚠️ 注意 `orchestration/session-liveness.env` 的消费面：session-liveness.sh 默认 source 它，改它会影响默认观测目标——需确认不破坏内层/外层既有 liveness 挂载（manager 挂载显式传 env，不受影响）。
 5. scoped 门 + 全量验证，fan-in。
 
+**实现选型（2026-08-17，本任务落地）**：采用「显式 env override」而非扩展 env 文件——实测生产外层 liveness 挂载
+（`session-liveness-mount.sh` exec 的 `session-liveness.sh`，pid 3110973 等）**不带显式 env**，直接 source
+`orchestration/session-liveness.env`；若把该文件的 `SESSION_TARGETS` 扩成 outer+inner，外层挂载会开始自盯 outer（自身）+ inner，
+改变既有观测语义 ⇒ 违反 AC3。故 `readManager` 经 `buildManagerSessionTargets()`（读 `<root>/orchestration/session-liveness.env`
+的 `SESSION_TMUX_SESSION`）构造 `SESSION_TARGETS="outer <root> <session>:outer\ninner <root> <session>:inner"`，
+仅对本探测传 env，**不写 env 文件**。另修 `parseSessionLivenessOutput`：会话消失时 `--once` 吐 `alive=0 halted=0`
+（无 `pid=` 字段），旧正则丢弃该行 ⇒ 死层不显示；改为 pid 可选，死层以 GONE 卡呈现。
+
 ## Acceptance Criteria
 
 - [ ] AC1: readManager 的 session-liveness 调用注册 outer+inner 两个具名目标（显式 env 或扩展 env 文件），`--once` 出 ≥2 行。
@@ -52,3 +60,7 @@ extra:
 - orchestration/session-liveness.env（目标注册；⚠️ 若改此文件，外层/内层 liveness 挂载消费它——先核消费面）
 - packages/quay/test/（页面渲染测试）
 - tasks/gap-webui-manager-page-session-targets.md（自身）
+
+## Test-Files
+
+- packages/quay/test/serve-ac95-views.test.mjs（readManager 目标显式化 + /manager 层卡片渲染 + SESSION-STATUS 解析回归；observation.ts 的 basename-pair 解析不到本文件，故在此声明）
