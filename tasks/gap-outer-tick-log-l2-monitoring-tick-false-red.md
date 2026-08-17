@@ -40,7 +40,7 @@ depends_on: []
 
 ## Definition of Done
 
-- [ ] 纯监控 tick 不再被 L2 trace 判据误红（监控 tick 有合法分类路径）；L2 防欺骗语义保留。
+- [x] 纯监控 tick 不再被 L2 trace 判据误红（监控 tick 有合法分类路径）；L2 防欺骗语义保留。
 
 ## Touches
 
