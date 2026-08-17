@@ -2,12 +2,13 @@
 id: gap-cron-registry-shared-file-design-revisit
 title: AC81 注册表双层共享文件设计复审——人裁定「inner cron 写该文件不合适」；outer-cron-registry.json
   名不符实（双层共享，非 outer 专属）；双写碰撞治标 vs 拆分/改名
-status: ready
+status: done
 labels:
   - gap
   - mechanism
 parent: null
-children: []
+children:
+  - gap-cron-registry-global-path-migration
 extra:
   schema: plan
   depends_on:
@@ -63,11 +64,11 @@ slug=$(printf '%s' "$root" | tr '/' '-')   # 与 ~/.claude/projects/<slug>/ 同�
 
 **已核实的支撑事实（前几轮举证，此处不重复）**：判据入口 `checkVerify():295` 只读自己层，拆分/挪 git 不影响现有判据读取形状；git 版随 fork 携带陈旧快照（5 worktree 实测），全局路径消除；`outer-tick-log-check` / `AC80-INNER-ANCHOR` 等消费面切换后需同步改读新路径——**消费者迁移清单进另立的实现任务**（DoD 原文已写这条）。
 
-**⊢ 后续**：按 DoD「若选换机制 ⇒ 另立实现任务（含消费者迁移清单）」——本任务只做裁定记录（已完成），实现任务另立。
+**⊢ 后续**：按 DoD「若选换机制 ⇒ 另立实现任务（含消费者迁移清单）」——实现任务已另立：`gap-cron-registry-global-path-migration`（798c2566，含消费者迁移清单 + 审计线 jsonl + 分片 slug 约束）。本任务裁定记录已完成。
 
 ## Definition of Done
 
-- [ ] 设计复审完成，方向裁定落盘；若选拆分/换机制 ⇒ 另立实现任务（含消费者迁移清单）。
+- [x] 设计复审完成，方向裁定落盘；若选拆分/换机制 ⇒ 另立实现任务（含消费者迁移清单）。（实现任务已立：gap-cron-registry-global-path-migration，798c2566）
 
 ## 裁定材料（outer 2026-08-17 08:1xZ 汇总，均经 outer 实读验证；供人/manager 裁定）
 
