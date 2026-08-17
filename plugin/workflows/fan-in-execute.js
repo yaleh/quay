@@ -114,19 +114,39 @@ cd ${worktree} && bash scripts/test.sh --for-task ${task} --allow-thin
 # 文件，供【全绿后】的 step 4.5 入账块读取——bash 变量不跨调用持久，用文件跨调用传值。
 # ⚠️ 跳过全量也要捕获（full_suite_ran=false + skip_reason=doc-only-delta）——跳过=被记录的决定，
 # 判据2 能取假（不能靠时长反推「为什么 CPU 低」）。判定依据 step 2 已记下的 code_delta。
+# 🔁 PRE-VERIFIED-SUITE（gap-direct-to-develop-exclude-cron-registry-receipt 实测：本机全量 suite ~14min
+# 超过 subagent 单次前台 Bash 10min 上限 + harness 回合窗）。调用方（inner）可在【自己的回合外】先跑
+# 完整全量 suite 并留下 capture（含 suite_head=跑时 worktree HEAD、suite_exit=0）。本块若发现已有 capture
+# 且 full_suite_ran=true 且 suite_exit=0 且 suite_head==当前 worktree HEAD ⇒ 复用该 capture，跳过重跑；
+# 后续 step 4.5 照常入账。⛔ 反作弊：capture 用 suite_head 钉死在【将被 land 的精确 HEAD】上——换 HEAD
+# 的陈旧/伪造 capture 不跳过。scoped 门（step 4 首行）与 doc 检查（step 4 末行）每轮仍跑，独立于 suite。
+# 若本块打印 PRE-VERIFIED-SUITE ⇒ 视为 suite 已验证绿（suite_exit=0），直接进 step 4.5/5。
 suite_capture="/tmp/fan-in-suite-${task}.env"
+suite_head_now=$(git rev-parse HEAD 2>/dev/null || echo unknown)
+suite_preverified=0
+if [ -f "$suite_capture" ] && grep -q '^full_suite_ran=true$' "$suite_capture" && grep -q '^suite_exit=0$' "$suite_capture" && grep -q "^suite_head=$suite_head_now$" "$suite_capture"; then
+  echo "PRE-VERIFIED-SUITE: capture 已存在且 suite_head=$suite_head_now 与当前 worktree HEAD 一致（full_suite_ran=true, suite_exit=0）⇒ 跳过全量重跑"
+  suite_preverified=1
+fi
+if [ "$suite_preverified" = "1" ]; then
+  full_suite_ran=true
+  skip_reason=
+  # 保留既有 capture 文件（不覆盖）——step 4.5 读它入账。
+else
 suite_start_iso=$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)
 suite_start_ms=$(date +%s%3N)
 # AC6 (gap-phase-boundary-differential-accounting)：数据源未接 ⇒ cpu_s=null + cpu_source=not-wired，
 # ⛔ 不写 0（0 无法区分「仪器没接」与「真的 ~0 消耗」）。GNU time 跑出实数才置 gnu-time。
 suite_cpu_s=null
 suite_cpu_source=not-wired
+suite_exit=0
 if [ step 2 判定 code_delta 非空 ]; then
   # 全量 suite，只在 delta 触及断言面时跑（或判不出时 fail-closed 跑）。GNU time 捕获 CPU 秒数
   # （User+System，判据3 的 cpu_time_s）；GNU time 不可用 ⇒ cpu_s 保持 null + not-wired（AC6）。
   if command -v /usr/bin/time >/dev/null 2>&1; then
     /usr/bin/time -o /tmp/fan-in-suite-${task}.time -f '%U %S' bash scripts/test.sh
-    suite_cpu_s=$(awk '{printf "%.3f", $1+$2}' /tmp/fan-in-suite-${task}.time 2>/dev/null || true)
+    suite_exit=$?
+    suite_cpu_s=$(tail -1 /tmp/fan-in-suite-${task}.time 2>/dev/null | awk '{printf "%.3f", $1+$2}' || true)
     rm -f /tmp/fan-in-suite-${task}.time
     if [ -z "$suite_cpu_s" ] || [ "$suite_cpu_s" = "0.000" ]; then
       # GNU time 跑了但没产出可用读数 ⇒ 显式 null + not-wired（AC6：绝不写 0）。
@@ -137,6 +157,7 @@ if [ step 2 判定 code_delta 非空 ]; then
     fi
   else
     bash scripts/test.sh
+    suite_exit=$?
     # GNU time 不可用 ⇒ 显式 null + not-wired（AC6：绝不写 0）。
     suite_cpu_s=null
     suite_cpu_source=not-wired
@@ -156,9 +177,10 @@ suite_wall_ms=$(( suite_end_ms - suite_start_ms ))
 suite_load=$(cut -d' ' -f1 /proc/loadavg 2>/dev/null || echo 0)
 suite_lane_count=1
 if [ "$full_suite_ran" = true ]; then suite_lane_count=$(nproc 2>/dev/null || echo 1); fi
-printf 'full_suite_ran=%s\\nskip_reason=%s\\ncpu_s=%s\\ncpu_source=%s\\nstart_iso=%s\\nend_iso=%s\\nwall_ms=%s\\nload=%s\\nlane_count=%s\\n' \
-  "$full_suite_ran" "$skip_reason" "$suite_cpu_s" "$suite_cpu_source" "$suite_start_iso" "$suite_end_iso" "$suite_wall_ms" "$suite_load" "$suite_lane_count" \
+printf 'full_suite_ran=%s\\nskip_reason=%s\\ncpu_s=%s\\ncpu_source=%s\\nstart_iso=%s\\nend_iso=%s\\nwall_ms=%s\\nload=%s\\nlane_count=%s\\nsuite_exit=%s\\nsuite_head=%s\\n' \
+  "$full_suite_ran" "$skip_reason" "$suite_cpu_s" "$suite_cpu_source" "$suite_start_iso" "$suite_end_iso" "$suite_wall_ms" "$suite_load" "$suite_lane_count" "$suite_exit" "$suite_head_now" \
   > "$suite_capture"
+fi
 # suite-capture-block-end
 cd ${worktree} && bash scripts/test.sh --static-checks-doc
   —— doc 检查（ff 不触发任何钩子，AC63）；必须绿。

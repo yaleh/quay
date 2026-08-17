@@ -14,7 +14,7 @@
 //             gap-cold-start-ac8c-key4-teaches-superseded-send-keys-hash; this pins the remaining
 //             dead-key cleanup + the AC-SH1–4 no-longer-blocked mechanical proof.)
 //   AC4     — the launch-config trio ships in the checked-in `.claude/launch.settings.json`
-//             (`claude-deepseek` launcher + `--model deepseek-v4-flash` + env
+//             (`claude-fjdac` launcher + `--model deepseek-v4-flash` + env
 //             `CLAUDE_CODE_MAX_CONTEXT_TOKENS=917000`) and is referenced by the cold-start skill
 //             (never a hand-typed shell one-liner).
 //   AC5     — the manager planning function hangs a LIVE fast-mode strategic reference
@@ -81,10 +81,10 @@ test('AC3 — cold-start/SKILL.md AC8c has no dead-key references (inner-state.s
 });
 
 // ── AC4: the launch-config trio ships in the checked-in settings file ───────────────────────────────
-test('AC4 — the launch-config trio is checked-in (.claude/launch.settings.json): claude-deepseek + deepseek-v4-flash + CLAUDE_CODE_MAX_CONTEXT_TOKENS=917000', () => {
+test('AC4 — the launch-config trio is checked-in (.claude/launch.settings.json): claude-fjdac + deepseek-v4-flash + CLAUDE_CODE_MAX_CONTEXT_TOKENS=917000', () => {
   assert.ok(fs.existsSync(LAUNCH_SETTINGS), '.claude/launch.settings.json must exist (checked-in launch config)');
   const src = fs.readFileSync(LAUNCH_SETTINGS, 'utf8');
-  assert.match(src, /claude-deepseek/, 'launch config must use the claude-deepseek launcher');
+  assert.match(src, /claude-fjdac/, 'launch config must use the claude-fjdac launcher');
   assert.match(src, /deepseek-v4-flash/, 'launch config must set --model deepseek-v4-flash');
   assert.match(src, /CLAUDE_CODE_MAX_CONTEXT_TOKENS/, 'launch config must set CLAUDE_CODE_MAX_CONTEXT_TOKENS');
   assert.match(src, /917000/, 'CLAUDE_CODE_MAX_CONTEXT_TOKENS must be 917000');

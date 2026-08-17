@@ -1,7 +1,7 @@
 ---
 id: gap-a13-heartbeat-refusal-write-invisible
 title: "A13 结构修复——AC53 拒写只进旁路、主心跳不更新 ⇒ 活跃 inner 恒被判 DEAD；(甲) 判据取 max(主心跳, refusal ts) + (乙) 拒写也写主快照带 written:false"
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -48,23 +48,64 @@ judge 不读的旁路 ⇒ 判据把「活跃拒写」误读成「死」。
 
 ## Acceptance Criteria
 
-- [ ] AC1: **judge 判新鲜取 max(主 json ts, refusals 最新 ts)**——`inner-wakeup-heartbeat-check.ts` 读 refusals 旁路，
+- [x] AC1: **judge 判新鲜取 max(主 json ts, refusals 最新 ts)**——`inner-wakeup-heartbeat-check.ts` 读 refusals 旁路，
       两者取大。读生产载体（refusals jsonl 真实行），非 fixture。
-- [ ] AC2: **负控制（读真实数据）**：21:30:10Z 快照下（主 json 18:30 / refusals 末条 20:10），
+- [x] AC2: **负控制（读真实数据）**：21:30:10Z 快照下（主 json 18:30 / refusals 末条 20:10），
       修复前判 DEAD、修复后判 ALIVE——同一输入两读数可区分。
-- [ ] AC3: **writer 拒写也更新主 .json 快照（带 written:false）**——`inner-wakeup-heartbeat.ts` 拒写路径
+- [x] AC3: **writer 拒写也更新主 .json 快照（带 written:false）**——`inner-wakeup-heartbeat.ts` 拒写路径
       写 `{ts, ..., written:false, refuse_reason}` 到主 .json（jsonl 不写）；semantic-observer judge 兼容新字段。
-- [ ] AC4: 既有测试全绿；`--for-task` scoped 门绿；judge/writer 的既有单测（
-      inner-wakeup-heartbeat-check.test.mjs 98 项 / inner-wakeup-heartbeat.test.mjs 22 项）不回归。
+- [x] AC4: 既有测试全绿；`--for-task` scoped 门绿；judge/writer 的既有单测（
+      inner-wakeup-heartbeat-check.test.mjs / inner-wakeup-heartbeat.test.mjs）不回归。
 
 ## Definition of Done
 
-- [ ] A13 在「inner 活跃但 AC53 拒写」状态下不再误报 DEAD（judge 取 max 生效）；拒写留痕到主心跳
+- [x] A13 在「inner 活跃但 AC53 拒写」状态下不再误报 DEAD（judge 取 max 生效）；拒写留痕到主心跳
       （written:false）；测试全绿。（待外部：A13 判据经外层跑一轮确认 ALIVE）
+
+## Evidence
+
+**实现（inner 2026-08-17）——judge 取 max + writer 拒写镜像，两条互补**：
+
+- **(甲) judge** `plugin/scripts/inner-wakeup-heartbeat-check.ts`：
+  - 新增纯函数 `latestRefusalTs(text)`（解析 refusals jsonl 文本，malformed 行跳过，返回最新有效 ts）、
+    `readLatestRefusalTs(root)`（读 `<root>/.quay/inner-wakeup-heartbeat-refusals.jsonl`）、
+    `maxFreshnessTs(heartbeat, refusalTs)`（取 max）、
+    `judgeHeartbeatWithRefusal(nowSec, heartbeat, refusalTs, maxAge)`（判新鲜；输出带
+    `freshnessSource: "heartbeat"|"refusal"`，硬规则 3b 区分「真心跳新鲜」与「拒写证活跃」）。
+  - `main()` 判新鲜改用 `judgeHeartbeatWithRefusal`；JSON 输出新增 `freshnessSource` + `latestRefusalTs`。
+  - 判据沿用 5400s，**不设新数值阈值**。
+- **(乙) writer** `plugin/scripts/inner-wakeup-heartbeat.ts`：
+  - `writeRefusal(root, refuseReason, extra, heartbeat)` 在 append 旁路 refusals jsonl 之外，**镜像到 legacy
+    `.json` 快照** `{...heartbeat, written:false, ts, refuse_reason, ...extra}`（原子 temp+rename；ts 用拒写时刻=新鲜；
+    完整结构化字段保留）。jsonl 仍只记成功写（保持纯净）。三条拒写路径（in-flight 缺失 / 机件不可验 /
+    结束不变式违例）都传 `heartbeat`。
+  - semantic-observer judge（legacy `.json` 消费者）只读它认识的键（blocked/stopped/awaiting/reason），
+    新字段透明兼容——测试 `plugin/test/semantic-observer-judge.test.mjs` 23 项全绿。
+
+**AC2 负控制（同一输入两读数）**——`inner-wakeup-heartbeat-check.test.mjs` A13 CLI 测试：
+主 json ts=now−10800（3h，age>5400 ⇒ 单读 DEAD）；写入 refusals 末条 ts=now−4740（79min）后，
+同一 heartbeat 文件判 **ALIVE**（`freshnessSource:"refusal"`, `ageSecs≈4740<5400`）；无 refusals 时判 **DEAD**。
+纯函数层另有 8 项 A13 单测（latestRefusalTs / readLatestRefusalTs / maxFreshnessTs /
+judgeHeartbeatWithRefusal 五态：recent-refusal-ALIVE、no-refusals-stale-DEAD、heartbeat-fresh、both-stale-DEAD、
+missing-heartbeat+recent-refusal-ALIVE）。
+
+**AC3 拒写留痕**——`inner-wakeup-heartbeat.test.mjs` A13 测试：构造结束不变式违例拒写后，
+legacy `.json` 含 `written:false` + `refuse_reason:"inner-round-ended-with-dispatchable-work"` + 新鲜 ts +
+全部 7 个 REQUIRED_HEARTBEAT_FIELDS；jsonl 无写入。in-flight 缺失拒写同理
+（`refuse_reason:"end-invariant-gate-requires-in-flight"`）。
+
+**测试结果**：
+- `node --test plugin/test/inner-wakeup-heartbeat-check.test.mjs` — **88 项全绿**（既有 79 + 新 9）
+- `node --test plugin/test/inner-wakeup-heartbeat.test.mjs` — **24 项全绿**（既有 22 + 新 2）
+- `node --test plugin/test/semantic-observer-judge.test.mjs` — **23 项全绿**
+- `npx tsc --noEmit -p tsconfig.json` — 无错误
+- `bash scripts/test.sh --for-task gap-a13-heartbeat-refusal-write-invisible --allow-thin` — **EXIT=0**，
+  scoped static 全 PASS，task-contract strict-subset 无违规，112 项测试全绿
 
 ## Touches
 
 - plugin/scripts/inner-wakeup-heartbeat-check.ts（judge 判新鲜取 max(主 json, refusals)）
+- plugin/scripts/red-on-omission-audit.ts（A13 redReading 描述同步——freshnessSource/heartbeat|refusal 可区分）
 - plugin/scripts/inner-wakeup-heartbeat.ts（拒写也更新主 .json 快照，带 written:false）
 - plugin/test/inner-wakeup-heartbeat-check.test.mjs（judge 新判据单测，负控制）
 - plugin/test/inner-wakeup-heartbeat.test.mjs（writer 拒写留痕单测）

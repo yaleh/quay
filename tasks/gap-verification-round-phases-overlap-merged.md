@@ -1,7 +1,7 @@
 ---
 id: gap-verification-round-phases-overlap-merged
 title: "full-suite-runner 分相可见性在 PHASE_OVERLAP 下归零——serial+lowconc+main 合成一桶（硬规则 3b：结构完整、数字合理、语义错误）"
-status: todo
+status: ready
 labels:
   - gap
   - mechanism

@@ -41,6 +41,7 @@ import {
   FIELDS_MISSING_REASON,
   HEARTBEAT_FILE,
   LEGACY_HEARTBEAT_FILE,
+  REFUSAL_FILE,
   MALFORMED,
   MACHINE_UNVERIFIABLE_REASON,
   END_INVARIANT_NOT_EVALUATED_REASON,
@@ -65,6 +66,10 @@ import {
   lastCallRecord,
   judgeAssessmentSteps,
   readLastCallRecord,
+  latestRefusalTs,
+  readLatestRefusalTs,
+  maxFreshnessTs,
+  judgeHeartbeatWithRefusal,
 } from "../scripts/inner-wakeup-heartbeat-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -128,6 +133,88 @@ test("parseHeartbeat — parses the documented {ts, delaySeconds, reason} shape 
 
 test("DEFAULT_MAX_AGE_SECS = 3 tick periods × 1800s (Contract band `<= 5400`)", () => {
   assert.equal(DEFAULT_MAX_AGE_SECS, 3 * 1800);
+});
+
+// ── A13 (gap-a13-heartbeat-refusal-write-invisible, 甲) — judge 判新鲜取 max(主 json ts, refusals) ─
+// The AC53 END-INVARIANT gate refuses a write when dispatchable work waits — a refusal is liveness
+// evidence (inner tried to END the round and the gate pushed it back to dispatch). The judge reads the
+// refusals side-carrier and takes the max ts so an active-but-refused inner is never misread as DEAD.
+
+test("A13 (甲) — latestRefusalTs parses the refusals jsonl text and returns the LATEST valid ts", () => {
+  const text = [
+    JSON.stringify({ written: false, ts: 1000, refuse_reason: "x" }),
+    "not json", // malformed line skipped (hard rule 6: not a recorded time)
+    JSON.stringify({ written: false, ts: 2000, refuse_reason: "y" }),
+  ].join("\n");
+  assert.equal(latestRefusalTs(text), 2000, "the latest valid ts must win");
+  assert.equal(latestRefusalTs(null), null);
+  assert.equal(latestRefusalTs(""), null);
+  assert.equal(latestRefusalTs('{"written":true}'), null, "no ts ⇒ null");
+  assert.equal(latestRefusalTs("not json"), null, "all-malformed ⇒ null");
+});
+
+test("A13 (甲) — readLatestRefusalTs reads the side-carrier file (null when absent)", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "iwuh-rts-"));
+  try {
+    assert.equal(readLatestRefusalTs(tmp), null, "no carrier ⇒ null");
+    const quay = path.join(tmp, ".quay");
+    fs.mkdirSync(quay, { recursive: true });
+    fs.writeFileSync(path.join(quay, REFUSAL_FILE), `${JSON.stringify({ written: false, ts: 500, refuse_reason: "x" })}\n`, "utf8");
+    assert.equal(readLatestRefusalTs(tmp), 500);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("A13 (甲) — maxFreshnessTs = max(heartbeat ts, latest refusal ts)", () => {
+  assert.equal(maxFreshnessTs({ ts: 100 }, 200), 200, "refusal newer ⇒ refusal ts wins");
+  assert.equal(maxFreshnessTs({ ts: 300 }, 200), 300, "heartbeat newer ⇒ heartbeat ts wins");
+  assert.equal(maxFreshnessTs({ ts: 100 }, null), 100, "no refusals ⇒ heartbeat ts");
+  assert.equal(maxFreshnessTs(null, 200), 200, "no heartbeat ⇒ refusal ts");
+  assert.equal(maxFreshnessTs(null, null), null, "neither ⇒ null");
+  assert.equal(maxFreshnessTs(MALFORMED, 200), 200, "malformed heartbeat ⇒ refusal ts still counts");
+  assert.equal(maxFreshnessTs({}, null), null, "heartbeat without ts + no refusals ⇒ null");
+});
+
+test("A13 (甲) — judgeHeartbeatWithRefusal: a recent refusal keeps a stale main heartbeat ALIVE (freshnessSource=refusal)", () => {
+  // The A13 negative-control ratio (task Proposal 实证 2026-08-16 21:30:10Z): main heartbeat 3h old
+  // (age 10800 > 5400 ⇒ DEAD alone), latest refusal 79min ago (age 4740 < 5400 ⇒ ALIVE with refusal).
+  const now = 10000;
+  const v = judgeHeartbeatWithRefusal(now, { ts: now - 10800 }, now - 4740, 5400);
+  assert.equal(v.alive, true, `recent refusal must keep it ALIVE:\n${JSON.stringify(v)}`);
+  assert.equal(v.status, "alive");
+  assert.equal(v.ageSecs, 4740);
+  assert.equal(v.freshnessSource, "refusal", "the freshness must be attributed to the refusal");
+});
+
+test("A13 (甲) — judgeHeartbeatWithRefusal: no refusals + stale heartbeat ⇒ DEAD (unchanged)", () => {
+  const v = judgeHeartbeatWithRefusal(10000, { ts: 0 }, null, 5400);
+  assert.equal(v.alive, false);
+  assert.equal(v.status, "stale");
+  assert.equal(v.reason, "inner-wakeup-heartbeat-dead");
+});
+
+test("A13 (甲) — judgeHeartbeatWithRefusal: fresh heartbeat + older refusal ⇒ ALIVE (freshnessSource=heartbeat)", () => {
+  const now = 10000;
+  const v = judgeHeartbeatWithRefusal(now, { ts: now - 60 }, now - 5000, 5400);
+  assert.equal(v.alive, true);
+  assert.equal(v.status, "alive");
+  assert.equal(v.freshnessSource, "heartbeat");
+});
+
+test("A13 (甲) — judgeHeartbeatWithRefusal: BOTH stale ⇒ DEAD (a stale refusal is not liveness)", () => {
+  const now = 10000;
+  const v = judgeHeartbeatWithRefusal(now, { ts: 0 }, 100, 5400);
+  assert.equal(v.alive, false);
+  assert.equal(v.status, "stale");
+});
+
+test("A13 (甲) — judgeHeartbeatWithRefusal: missing heartbeat + recent refusal ⇒ ALIVE (a refused write IS a write attempt)", () => {
+  const now = 10000;
+  const v = judgeHeartbeatWithRefusal(now, null, now - 60, 5400);
+  assert.equal(v.alive, true, `a fresh refusal alone proves liveness:\n${JSON.stringify(v)}`);
+  assert.equal(v.status, "alive");
+  assert.equal(v.freshnessSource, "refusal");
 });
 
 // ── minimal field contract (AC2/AC3 — tasks/gap-inner-heartbeat-fields-shrunk-no-minimal-contract) ─
@@ -611,6 +698,43 @@ test("AC2 CLI — stale heartbeat stays the stale verdict (freshness precedes fi
     const out = JSON.parse(r.stdout);
     assert.equal(out.status, "stale");
     assert.equal(out.reason, "inner-wakeup-heartbeat-dead");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("A13 (甲) CLI --json — the 21:30:10Z negative control: same heartbeat is DEAD without refusals, ALIVE with a recent refusal (AC2 两读数可区分)", () => {
+  // The A13 negative-control replay (task Proposal 实证 2026-08-16 21:30:10Z): main heartbeat 3h old
+  // (age 10800 > 5400 ⇒ would be DEAD alone), latest refusal 79min ago (age 4740 < 5400 ⇒ ALIVE with
+  // the refusal). Relative timestamps keep the test deterministic; the same input (same heartbeat file)
+  // gives two distinguishable readings — pre-fix DEAD, post-fix ALIVE.
+  const now = Math.floor(Date.now() / 1000);
+  const root = makeRootWithHeartbeat(fullHeartbeat({ ts: now - 10800 }));
+  try {
+    // (1) Without the refusals side-carrier — the pre-fix reading — the stale heartbeat is DEAD.
+    const r1 = runCli(root, ["--json", "--in-flight", ""]);
+    assert.equal(r1.status, 1, `pre-fix (no refusals) must be DEAD:\n${r1.stdout}\n${r1.stderr}`);
+    const out1 = JSON.parse(r1.stdout);
+    assert.equal(out1.verdict, "DEAD");
+    assert.equal(out1.status, "stale");
+    assert.equal(out1.latestRefusalTs, null, "no refusals carrier ⇒ latestRefusalTs null");
+
+    // (2) Now write the refusals side-carrier with a RECENT refusal (79min ago) — the post-fix
+    // reading — the same heartbeat is ALIVE via the refusal.
+    const quay = path.join(root, ".quay");
+    fs.writeFileSync(
+      path.join(quay, REFUSAL_FILE),
+      `${JSON.stringify({ written: false, ts: now - 4740, refuse_reason: "inner-round-ended-with-dispatchable-work" })}\n`,
+      "utf8",
+    );
+    const r2 = runCli(root, ["--json", "--in-flight", ""]);
+    assert.equal(r2.status, 0, `with a recent refusal the same heartbeat must be ALIVE:\n${r2.stdout}\n${r2.stderr}`);
+    const out2 = JSON.parse(r2.stdout);
+    assert.equal(out2.verdict, "ALIVE");
+    assert.equal(out2.status, "alive");
+    assert.equal(out2.freshnessSource, "refusal", "freshness must be attributed to the refusal");
+    assert.equal(out2.latestRefusalTs, now - 4740, "latestRefusalTs must be the refusal row's ts");
+    assert.ok(out2.ageSecs >= 4740 && out2.ageSecs < 4800, `age must be ~4740s (got ${out2.ageSecs})`);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
