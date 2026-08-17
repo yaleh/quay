@@ -23,6 +23,8 @@ extra:
 
 **影响**：不会无限累积（天然到期），但任何「数 claude 进程/session 数量」的读数（monitor.instances、进程预算、session-liveness）都可能被这批孤儿污染——正是 hard rule 4b 的代理量污染形态。
 
+**同族扩展（2026-08-17，inner 同意并入）**：挂死 suite/runner 进程持 `full-suite.lock` 挡 fan-in ff 也属本族——turn-budget land 时（37b8afcf）ff 被挂死进程（PID 2595342，82min ~1s CPU 僵尸）持锁阻断，kill+release+retreat+重派才过。**同根**：测试/runner 子进程没人收、占着资源挡后续。AC 覆盖范围同步扩到「持锁挂死进程」。
+
 **能取假（⊢ 对照）**：修复后，`git worktree remove <worktree>` 前（或套件收尾时）扫该 worktree 路径下的活子进程（含 claude-probe）并清理；或 reaper 覆盖「孤儿探针（cwd 指向已删 worktree）」的回收路径。实测孤儿率从 100% 显著下降（如 <10%）。
 
 ## Plan
