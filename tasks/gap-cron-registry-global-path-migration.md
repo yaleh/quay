@@ -61,10 +61,15 @@ manager 先例:  QUAY_GLOBAL_DIR="${QUAY_GLOBAL_DIR:-$HOME/.quay-global}"
 
 ## Touches
 
-- plugin/scripts/outer-cron-registry.ts（判据读取路径迁移）
-- plugin/scripts/outer-anchor-check.ts（消费面迁移）
-- plugin/test/outer-cron-registry.test.mjs（测试 pin 集迁移）
-- orchestration/orchestrator-loop-tick.md（外层注册表收据引用）
-- orchestration/fast-mode-tick-core.md（内层注册表收据引用）
-- plugin/loop/fast-mode-loop-tick.md（AC80-INNER-ANCHOR 段）
+- plugin/scripts/outer-cron-registry.ts（判据读取路径迁移到全局 per-layer + --record/审计线；git 版 plugin/scripts/outer-cron-registry.json 已删除）
+- plugin/scripts/outer-anchor-check.ts（消费面评估——不读注册表文件，仅被 outer-cron-registry.ts import extractCanonical/LAYERS，无需改动）
+- plugin/test/outer-cron-registry.test.mjs（测试 pin 集迁移到全局 per-layer 载体 + AC1/AC2/AC5 新增测试）
+- plugin/scripts/direct-to-develop-bypass-check.ts（AC3：撤 outer-cron-registry.json 排除项 + 167b7052/f882ad76 入 ruled 表）
+- plugin/test/direct-to-develop-bypass-check.test.mjs（AC3 正/负例同步）
+- orchestration/orchestrator-tick-core.md（外层 A23 注册表收据引用 → 全局 per-layer 路径；镜像对）
+- plugin/loop/orchestrator-tick-core.md（外层 A23 镜像，byte-identical 同步）
+- orchestration/fast-mode-tick-core.md（内层 A26 注册表收据引用 → 全局 per-layer 路径；镜像对）
+- plugin/loop/fast-mode-tick-core.md（内层 A26 镜像，normalized-byte 同步）
+- plugin/loop/fast-mode-loop-tick.md（AC80-INNER-ANCHOR 段：注册表位置注记 + --record 更新指令）
+- docs/proposals/quay-product-outline.md（delivery-inventory 快照再生成——plugin/scripts/ 删了 outer-cron-registry.json）
 - tasks/gap-cron-registry-global-path-migration.md（自身）

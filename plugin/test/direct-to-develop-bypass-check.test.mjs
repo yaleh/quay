@@ -153,7 +153,6 @@ test("PURE isDesignInternalPath — 记账/转向/遥测面 + manager 独占 + �
     "plugin/scripts/fan-in-ff-merge.sh",
     "plugin/scripts/fan-in-ff-protocol-check.ts",
     "plugin/test/fan-in-ff-protocol-check.test.mjs",
-    "plugin/scripts/outer-cron-registry.json",
   ];
   for (const p of designInternal) assert.equal(isDesignInternalPath(p), true, `设计内应排除: ${p}`);
 });
@@ -176,7 +175,10 @@ test("PURE isDesignInternalPath — 代码/断言面（产品交付）不是设�
   // 反向：`fan-in-` 前缀只在 plugin/scripts|test 顶层豁免——不要误伤 loop-shipping 等。
   assert.equal(isDesignInternalPath("plugin/scripts/loop-shipping-exclusion-data.mjs"), false);
   assert.equal(isDesignInternalPath("plugin/test/fan-in-ff-merge.test.mjs"), true, "fan-in 机件测试豁免");
-  // ⛔ AC3 粒度：只豁免 json 收据，不豁免 .ts verifier 机件——outer-cron-registry.ts 直改必须仍红。
+  // ⛔ AC3 粒度（gap-cron-registry-global-path-migration）：AC81 注册表收据迁全局 per-layer 路径后，
+  // git 版 outer-cron-registry.json 已删除——`outer-cron-registry.json` 不再是设计内（若有人重建 git 版
+  // 即代码面，红）；verifier 机件 .ts 仍不是设计内（直改仍红）。
+  assert.equal(isDesignInternalPath("plugin/scripts/outer-cron-registry.json"), false, "git 版收据已退役，不再是设计内（重建即代码面，仍红）");
   assert.equal(isDesignInternalPath("plugin/scripts/outer-cron-registry.ts"), false, "verifier 机件 .ts 不是设计内（仍红）");
   // ⛔ AC2 粒度：manager/ 前缀豁免，但必须精确到 manager/ 子树——`manager-tool/` 是另一个目录，不得误豁免。
   assert.equal(isDesignInternalPath("plugin/skills/manager-tool/foo.md"), false, "manager-tool/ 不是 manager/ 子树");

@@ -1206,7 +1206,9 @@ node --no-warnings --experimental-strip-types plugin/scripts/inner-wakeup-heartb
 
 ### AC80-INNER-ANCHOR（inner 侧 prompt 正本——AC80 判据1 落地物）
 
-> 本段是 inner CronCreate 锚（job `ff96ad7e`，cron `7,27,47 * * * *`）的 prompt 正本。
+> 本段是 inner CronCreate 锚的 prompt 正本。当前 cronId/cron 表达式勿在此烘烤——注册表现全局 per-layer
+> `~/.quay-global/<slug>/inner/loop-registry.txt`（任何 worktree 读当前真值，非 fork 快照；重挂 cron 用
+> `outer-cron-registry.ts --record --layer inner --cron-id <id> --cron-expr '<expr>'` 更新收据）。
 > `outer-anchor-check.ts --layer inner` 读本段并与活 CronList prompt 逐字节比对（AC80 判据3）。
 > ⚠️ 修改本段 prompt 时必须同步更新 CronCreate 锚本身（CronDelete + 重建），否则 byte-compare 报 VIOLATED。
 > ⚠️ 本段提取规则：BEGIN 注释行之后、END 标记行之前的内容，去掉一个尾部换行 ⇒ 逐字节是投进 CronCreate 的完整串。
