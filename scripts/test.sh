@@ -1558,11 +1558,27 @@ run_selected() {
     if [ "$PHASE_OVERLAP" -eq 1 ] && [ "${#serial_files[@]}" -gt 0 ] && [ "${#lowconc_files[@]}" -gt 0 ]; then
       [ "$oh_full" -eq 1 ] && oh_t5=$(_oh_mark)
       echo "overlap: running ${#serial_files[@]} serial + ${#lowconc_files[@]} lowconc files in parallel (serial conc=$SERIAL_CONCURRENCY, lowconc conc=$LOWCONC_CONCURRENCY)"
-      local serial_pid lowconc_pid
+      local serial_pid lowconc_pid overlap_s_start overlap_l_start overlap_s_end overlap_l_end
+      # Per-process sub-times + per-phase completion markers for the runner's phase accounting
+      # (gap-verification-round-phases-overlap-merged AC1/AC2): the two phases run in PARALLEL, so
+      # the stream's __GROUP__ lines cannot be attributed to one or the other. Emitting
+      # `__OVERHEAD__ overlap_<phase>_done=1` right after each `wait` gives the runner an explicit
+      # "this parallel phase finished" signal — the combined window closes only when BOTH have fired,
+      # and `overlap_<phase>_ms=N` carries each phase's OWN wall sub-time so the serial/lowconc
+      # contributions stay distinguishable (the fixed-overhead serial_phase_ms stays the combined
+      # window — the analyst's serial+lowconc sum == the window, unchanged for the before/after metric).
+      overlap_s_start=$(_oh_mark)
       node --test --test-concurrency="$SERIAL_CONCURRENCY" $(suite_reporter_flags) "${serial_files[@]}" & serial_pid=$!
+      overlap_l_start=$(_oh_mark)
       node --test --test-concurrency="$LOWCONC_CONCURRENCY" $(suite_reporter_flags) "${lowconc_files[@]}" & lowconc_pid=$!
       wait "$serial_pid"; serial_code=$?
+      overlap_s_end=$(_oh_mark)
+      echo "__OVERHEAD__ overlap_serial_ms=$((overlap_s_end - overlap_s_start))" >&2
+      echo "__OVERHEAD__ overlap_serial_done=1" >&2
       wait "$lowconc_pid"; lowconc_code=$?
+      overlap_l_end=$(_oh_mark)
+      echo "__OVERHEAD__ overlap_lowconc_ms=$((overlap_l_end - overlap_l_start))" >&2
+      echo "__OVERHEAD__ overlap_lowconc_done=1" >&2
       [ "$serial_code" -eq 0 ] || code="$serial_code"
       [ "$lowconc_code" -eq 0 ] || code="$lowconc_code"
       # Overlap timing: the two phases share ONE window. serial_phase_ms = the combined window and
