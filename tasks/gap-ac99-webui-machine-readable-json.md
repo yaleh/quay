@@ -1,7 +1,7 @@
 ---
 id: gap-ac99-webui-machine-readable-json
 title: "AC99: Manager/System 两屏的前置是机读接口不是 UI——每字段追到稳定 JSON 机件（顺序约束保留）"
-status: ready
+status: done
 labels:
   - gap
   - mechanism
