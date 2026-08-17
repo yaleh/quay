@@ -228,6 +228,66 @@ export function matchesObject(object, touch) {
   return t === o || t.startsWith(`${o}/`);
 }
 
+// ── Fan-in delta doc/code classification (gap-fan-in-delta-scope-doc-only-skip, AC2) ─────────────────
+//
+// The fan-in step-2 "is this delta doc-only (skip the full suite) or code (must re-run it)?" judgment
+// used to be a HAND-WRITTEN regex (`grep -vE '^tasks/|^docs/|…|[.]md$'`) in fan-in-execute.js. That
+// table drifted (it classified orchestration/manager-tick-core.md as doc — but tick-core-static-check
+// READS orchestration/*.md, so a (src:N) violation there reddens the suite; the hand table missed it,
+// and would next miss .claude/workflows/ or docs/references/). The task's ruling (manager 2026-08-16
+// 22:0xZ, adopted by gap-fan-in-delta-scope-doc-only-skip):
+//   doc ≠ "filename ends in .md" or any hand-written path table — doc = "NO suite checker reads this
+//   path". Mechanizable: each checker self-declares (or is enumerated to declare) which paths it
+//   reads ⇒ doc-only = delta ∩ (union of all checker-read paths) = ∅. That union is COMPUTED here
+//   from scripts/test.sh's `@static-object` annotations (the SAME single source
+//   parseStaticCheckRegistry parses — never a hand-maintained list).
+//
+// Operational carve-out (documented, deliberate): `tasks/` is still doc even though landing-target-
+// check's `@static-object tasks/` glob technically matches it. Reason: every fan-in's OWN task file is
+// ALWAYS in the scoped run's always-tier task-file checker set (select-static-checks-for-touches
+// appends `tasks/<id>.md` to the touched set), so a task-file-only change is already fully verified
+// by the scoped + doc phases the fan-in always runs — making it "code" would force a full suite for
+// every task-file-only fan-in with zero correctness gain. The carve-out is one line (below), isolated
+// from the registry computation.
+//
+// A path is CODE (needs the full suite) iff:
+//   ① any change/full-tier static checker's self-declared `@static-object` glob matches it
+//      (computed from scripts/test.sh — the "suite-read path" set), OR
+//   ② it is NOT under a known task-board/doc/telemetry surface (docs/, adr/, .quay/, measurements/,
+//      milestones/, orchestration/archive/, plugin/loop/) — product code / unknown paths fail-closed
+//      to code (hard rule 3b: 判不出 ≠ 不需要; an unrecognized path may break the suite).
+// A path is DOC only when neither holds AND it is a task file or under a doc surface.
+//
+// Falsification (pinned by plugin/test/fan-in-execute-paths.test.mjs):
+//   取假二: orchestration/manager-tick-core.md (read by tick-core-static-check / rhythm-consumer's
+//   `orchestration/*-tick-core.md`) must classify as CODE — never doc-only skip.
+
+/** Known task-board / documentation / telemetry surfaces — a delta that ONLY touches these is already
+ *  verified by the scoped + doc phases the fan-in always runs. Registry overrides fire first (a
+ *  checker-read path under docs/, e.g. docs/analysis/ac69-*.json, is code). */
+export const DOC_SURFACES = [
+  "tasks/", "docs/", "adr/", ".quay/", "measurements/", "milestones/",
+  "orchestration/archive/", "plugin/loop/",
+];
+
+/** True iff a repo-relative delta path is DOC (safe to skip the full suite). false = code (the full
+ *  suite must re-run). `registry` is the parsed static-check registry (parseStaticCheckRegistry) —
+ *  required, so the classification is always computed from scripts/test.sh's current annotations. */
+export function isDocPath(pathStr, registry) {
+  const p = String(pathStr).replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/+$/, "");
+  if (!p) return true;
+  // The task-file carve-out (see the block comment above): task files are the doc surface the
+  // doc-only skip exists FOR. Must precede the registry check so landing-target's `tasks/` glob does
+  // not flip them to code.
+  if (p === "tasks" || p.startsWith("tasks/")) return true;
+  const codeObjects = (registry ?? [])
+    .filter((c) => c.tier === "change" || c.tier === "full")
+    .flatMap((c) => c.objects);
+  if (codeObjects.some((o) => matchesObject(o, p))) return false; // a checker reads it ⇒ code
+  if (DOC_SURFACES.some((s) => p.startsWith(s))) return true; // known task-board/doc/telemetry surface
+  return false; // product code / unknown path ⇒ code (fail-closed)
+}
+
 /**
  * True iff `relPath` is a NEW file at selection time: it exists on disk under `root` AND git does
  * not track it (the task created it but has not yet committed it — the AC4 "not-yet-tracked"
@@ -446,6 +506,11 @@ Output modes:
   --names              — checker names only (one per line)
   --list               — the full registry (tier / objects / scoped-mode per checker)
   --json               — machine-readable selection {selected, deferred, always, change}
+  --classify-delta <path>… — fan-in doc/code classification (gap-fan-in-delta-scope-doc-only-skip):
+      print the CODE (non-doc) paths among the given repo-relative delta files (one per line). doc =
+      "no change/full-tier checker's @static-object glob matches it" (computed from scripts/test.sh)
+      AND it is under a task-board/doc/telemetry surface (tasks/, docs/, adr/, .quay/, measurements/,
+      milestones/, orchestration/archive/, plugin/loop/); everything else is code (fail-closed).
 
 Exit codes: 0 ok; 2 usage/task-not-found.`;
 
@@ -539,6 +604,7 @@ export function main(argv) {
   const asJson = args.includes("--json");
   const namesOnly = args.includes("--names");
   const listMode = args.includes("--list");
+  const classifyDelta = args.includes("--classify-delta");
   const commandsMode = args.includes("--commands");
   const checkRegOnly = args.includes("--check-registration");
 
@@ -561,6 +627,19 @@ export function main(argv) {
       const obj = c.objects.length ? ` [${c.objects.join(", ")}]` : "";
       const mode = c.scopedMode ? ` (${c.scopedMode})` : "";
       console.log(`${c.tier}\t${c.name}${mode}${obj}`);
+    }
+    return 0;
+  }
+
+  // --classify-delta <path>… — fan-in step-2 doc/code classification (gap-fan-in-delta-scope-doc-only-
+  // skip, AC2). Each argv path is a repo-relative delta file (from `git diff --name-only`); print the
+  // CODE (non-doc) ones, one per line. A path no suite checker reads AND under a doc surface is doc;
+  // everything else (a checker reads it, product code, unknown) is code ⇒ the fan-in re-runs the full
+  // suite. Exit 0 always on well-formed input (empty input ⇒ empty output = doc-only).
+  if (classifyDelta) {
+    const paths = args.filter((a) => !a.startsWith("--") && a.trim() !== "");
+    for (const p of paths) {
+      if (!isDocPath(p, registry)) console.log(p);
     }
     return 0;
   }
