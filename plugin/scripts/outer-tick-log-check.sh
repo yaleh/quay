@@ -309,9 +309,16 @@ if [ -n "$TICK_TIME" ] && [ -n "$LAST_EPOCH" ]; then
       TAG_FAIL="future-label:${TICK_TIME}>mtime:${MTIME_HHMM}"
     fi
   fi
-  # ① 单调：上一段标签 > 本段 ⇒ 往回走
+  # ① 单调：上一段标签 > 本段 ⇒ 往回走（跨日宽限——PREV 22-23h 且 TICK 00-01h ⇒ 新一天，跳过；
+  # 对称 future-label 的 :304 逻辑，gap-outer-tick-log-cross-midnight-monotonic。HH 剥前导零后取整
+  # （00 ⇒ 0，避免空串进整数比较），使同一天早间 00:xx→00:yy 反向仍判 non-monotonic。）
   if [ -z "$TAG_FAIL" ] && [ -n "$PREV_HEADER" ] && [ "$PREV_HEADER" \> "$TICK_TIME" ]; then
-    TAG_FAIL="non-monotonic:${PREV_HEADER}>${TICK_TIME}"
+    PREV_HH="${PREV_HEADER%%:*}"; TICK_HH="${TICK_TIME%%:*}"
+    PREV_HH_INT="${PREV_HH#0}"; PREV_HH_INT="${PREV_HH_INT:-0}"
+    TICK_HH_INT="${TICK_HH#0}"; TICK_HH_INT="${TICK_HH_INT:-0}"
+    if [ "$PREV_HH_INT" -lt 22 ] || [ "$TICK_HH_INT" -ge 2 ]; then
+      TAG_FAIL="non-monotonic:${PREV_HEADER}>${TICK_TIME}"
+    fi
   fi
 fi
 if [ -n "$TAG_FAIL" ]; then

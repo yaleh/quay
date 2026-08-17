@@ -240,6 +240,54 @@ test("时间标签 非单调：上一段标签晚于本段 ⇒ RED（exit 1）",
   assert.match(r.stdout, /non-monotonic/, "labels going backwards in an append-only log must RED");
 });
 
+// ── 跨日宽限（gap-outer-tick-log-cross-midnight-monotonic）──────────────────────────────────
+// 单调判据用裸 HH:MM 字符串比较：跨午夜（23:5x → 00:0x）时 23:57 > 00:04 ⇒ 假红。修复 = 对称
+// future-label 的 :304 逻辑：PREV 22-23h 且 TICK 00-01h ⇒ 日期翻转（新一天），跳过 non-monotonic。
+// future-label 已有跨日宽限而单调没有（硬规则 5b 形态：只修了被报的那一处）。以下 fixture 的
+// mtime 均固定到 ≥ TICK 的时点（且 HH≥2 或同分钟），使 future 判据不抢跑、monotonic 判据独占。
+test("时间标签 跨日：PREV 23:5x → TICK 00:0x ⇒ PASS（跨日宽限，不判 non-monotonic）", () => {
+  // 跨午夜实证形状（2026-08-17 00:04Z）：上一段 23:57（前一天末条），本段 00:04（新一天首条）。
+  // HH:MM 字符串 23:57 > 00:04，但这是日期翻转不是往回走 ⇒ 单调判据需跨日宽限。mtime 固定到
+  // 00:30（≥ TICK 00:04）⇒ future 判据不抢跑；epoch 固定使运行时刻无关（2026-08-14 cc611891 同族）。
+  const midnightEpoch = Math.floor(Date.UTC(2026, 7, 17, 0, 30, 0) / 1000);
+  const r = runChecker({
+    log: "- `23:57Z` `tick` — 前一天末条\n- `00:04Z` `tick` — 新一天首条\n- 动作分类: no-action\n- 五条不等式: ①[当前假] ②[当前假] ③[当前假] ④[当前假] ⑤[当前假]\n- A23 ① code=0 OK（四判据全真）+ ② code=0 OK\n",
+    truth: "00000",
+    root: NO_ROOT,
+    logMtime: midnightEpoch,
+  });
+  assert.equal(r.status, 0, `expect PASS (cross-midnight tolerance): ${r.stdout}`);
+  assert.doesNotMatch(r.stdout, /non-monotonic/, "23:5x → 00:0x is a date rollover, not a backwards step");
+});
+
+test("时间标签 跨日宽限取假：同一天深夜 23:58 → 23:57 反向 ⇒ 仍 RED（non-monotonic）", () => {
+  // 两条标签都在 22-23h（同一天深夜）：PREV 23:58 > TICK 23:57 是同一天内往回走，跨日宽限
+  // （要求 PREV 22-23h 且 TICK 00-01h）不得吞掉它——TICK 23:57 不在 00-01h ⇒ 判 non-monotonic。
+  const lateEpoch = Math.floor(Date.UTC(2026, 7, 16, 23, 59, 0) / 1000);
+  const r = runChecker({
+    log: "- `23:58Z` `tick` — earlier（晚）\n- `23:57Z` `tick` — later（早于上一段）\n- 动作分类: no-action\n- 五条不等式: ①[当前假] ②[当前假] ③[当前假] ④[当前假] ⑤[当前假]\n- A23 ① code=0 OK（四判据全真）+ ② code=0 OK\n",
+    truth: "00000",
+    root: NO_ROOT,
+    logMtime: lateEpoch,
+  });
+  assert.equal(r.status, 1, `expect RED: ${r.stdout}`);
+  assert.match(r.stdout, /non-monotonic/, "same-day 23:58 → 23:57 backward must still RED");
+});
+
+test("时间标签 跨日宽限取假：同一天凌晨 00:57 → 00:04 反向 ⇒ 仍 RED（non-monotonic，HH=00 剥零取整）", () => {
+  // 两条标签都在 00h（同一天凌晨）：PREV 00:57 > TICK 00:04 是同一天内往回走，跨日宽限（要求
+  // PREV 22-23h）不得吞掉它——HH 剥前导零后取整（00 ⇒ 0），PREV_HH_INT=0 < 22 ⇒ 判 non-monotonic。
+  const earlyEpoch = Math.floor(Date.UTC(2026, 7, 17, 1, 0, 0) / 1000);
+  const r = runChecker({
+    log: "- `00:57Z` `tick` — earlier（晚）\n- `00:04Z` `tick` — later（早于上一段）\n- 动作分类: no-action\n- 五条不等式: ①[当前假] ②[当前假] ③[当前假] ④[当前假] ⑤[当前假]\n- A23 ① code=0 OK（四判据全真）+ ② code=0 OK\n",
+    truth: "00000",
+    root: NO_ROOT,
+    logMtime: earlyEpoch,
+  });
+  assert.equal(r.status, 1, `expect RED: ${r.stdout}`);
+  assert.match(r.stdout, /non-monotonic/, "same-day 00:57 → 00:04 backward must still RED");
+});
+
 // ── L2 trace 窗口锚定该 tick 起点（gap-outer-tick-log-check-trace-window-anchored-at-log-mtime）
 // 旧代码窗口起点 = log mtime（--since=@<mtime>）：act-then-log 下证据提交严格在 log 前 ⇒ 永远在
 // 窗外 ⇒ 动作行假红。新代码窗口 = [该 tick 起点, log 写入时刻]：证据必然落窗，log 后无关提交被

@@ -30,6 +30,7 @@ import { spawnSync } from "node:child_process";
 
 import {
   REFUSAL_FILE,
+  LEGACY_HEARTBEAT_FILE,
   REQUIRED_HEARTBEAT_FIELDS,
   judgeEndInvariant,
 } from "../scripts/inner-wakeup-heartbeat-check.ts";
@@ -585,6 +586,64 @@ test("AC53 AC2 (gap-ac53-end-invariant-gate) — judgeEndInvariant rejects a hea
     const out = JSON.parse(c.stdout);
     assert.equal(out.verdict, "ALIVE");
     assert.equal(out.endInvariant.violated, false);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ── A13 (gap-a13-heartbeat-refusal-write-invisible, 乙) — 拒写也更新主 .json 快照（带 written:false） ─
+// The refusal must be visible on the MAIN heartbeat product too, not only in the side-carrier: the
+// legacy .json snapshot is mirrored with {written:false, refuse_reason, fresh ts} (jsonl stays pure —
+// append-only for SUCCESSFUL writes). Legacy readers (e.g. the semantic-observer judge) keep seeing a
+// complete structured heartbeat and tolerate the new fields.
+
+test("A13 (乙) — a refused END-invariant write ALSO updates the legacy .json snapshot (written:false + refuse_reason), jsonl stays pure", () => {
+  const root = makeDispatchableWorkspace("iwuh-a13w-");
+  try {
+    const direct = runDirectSlotRefill({ root, inFlightIds: [], cap: 3 });
+    assert.equal(direct.ok, true, "direct slot-refill must succeed");
+    assert.equal(direct.refill.should_refill, true, `fixture must be dispatchable:\n${JSON.stringify(direct.refill)}`);
+    const violatingArgs = [...FULL_ARGS];
+    const idxShould = FULL_ARGS.indexOf("--should-refill");
+    violatingArgs[idxShould + 1] = "true";
+    const idxReason = FULL_ARGS.indexOf("--no-refill-reason");
+    violatingArgs[idxReason + 1] = "null";
+    const w = runWriter(root, violatingArgs);
+    assert.equal(w.status, 1, `writer must REFUSE:\n${w.stdout}\n${w.stderr}`);
+    assert.match(w.stderr, /结束不变式违例/, "the refusal must name 结束不变式违例");
+    // The legacy .json snapshot now carries the refusal — the main product shows "active but refused".
+    const legacyPath = path.join(root, ".quay", LEGACY_HEARTBEAT_FILE);
+    assert.ok(fs.existsSync(legacyPath), `the legacy .json must be updated on refusal (${legacyPath})`);
+    const snap = JSON.parse(fs.readFileSync(legacyPath, "utf8"));
+    assert.equal(snap.written, false, "the snapshot must carry written:false");
+    assert.equal(snap.refuse_reason, "inner-round-ended-with-dispatchable-work", "the snapshot must carry refuse_reason");
+    assert.ok(typeof snap.ts === "number", "the snapshot must carry a ts");
+    assert.ok(Math.abs(snap.ts - Math.floor(Date.now() / 1000)) < 60, `the snapshot ts must be the refusal time (fresh), got ${snap.ts}`);
+    // The full structured heartbeat fields are preserved so legacy readers see a complete record.
+    for (const f of REQUIRED_HEARTBEAT_FIELDS) {
+      assert.ok(f in snap, `structured field ${f} must be present in the refusal snapshot`);
+    }
+    // The jsonl stays pure: NO write on refusal (only the side-carrier + legacy snapshot).
+    assert.ok(!fs.existsSync(path.join(root, ".quay", "inner-wakeup-heartbeat.jsonl")), "the heartbeat jsonl must have NO write on refusal");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("A13 (乙) — the --in-flight-omitted refusal ALSO updates the legacy .json snapshot", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "iwuh-a13w2-"));
+  try {
+    const idx = FULL_ARGS.indexOf("--in-flight");
+    const args = FULL_ARGS.filter((_, i) => i < idx || i >= idx + 2);
+    const r = runWriter(tmp, args);
+    assert.equal(r.status, 1, `missing --in-flight must be refused:\n${r.stdout}\n${r.stderr}`);
+    assert.match(r.stderr, /--in-flight 必填/, "the refusal must name --in-flight 必填");
+    const legacyPath = path.join(tmp, ".quay", LEGACY_HEARTBEAT_FILE);
+    assert.ok(fs.existsSync(legacyPath), "the legacy .json must be updated on refusal");
+    const snap = JSON.parse(fs.readFileSync(legacyPath, "utf8"));
+    assert.equal(snap.written, false, "the snapshot must carry written:false");
+    assert.equal(snap.refuse_reason, "end-invariant-gate-requires-in-flight", "the refusal reason must be recorded");
+    assert.ok(typeof snap.ts === "number", "the snapshot must carry a fresh ts");
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
