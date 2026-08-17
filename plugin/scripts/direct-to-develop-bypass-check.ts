@@ -89,7 +89,7 @@ import { buildLockHoldIntervals } from "./fan-in-ff-protocol-check.ts";
  * 遥测面变成产品面），先从任务体改判，再改此处——两处必须同步。
  */
 export const DESIGN_INTERNAL_RE =
-  /^(?:tasks\/|docs\/|orchestration\/|adr\/|[.]quay\/|plugin\/loop\/|measurements\/|milestones\/|[.]claude\/|plugin\/skills\/manager\/|CLAUDE[.]md$|[.]gitignore$|[.]gitattributes$|[.]npmrc$|[.]github\/|plugin\/scripts\/fan-in-|plugin\/test\/fan-in-)/;
+  /^(?:tasks\/|docs\/|orchestration\/|adr\/|[.]quay\/|plugin\/loop\/|measurements\/|milestones\/|[.]claude\/|plugin\/skills\/manager\/|CLAUDE[.]md$|[.]gitignore$|[.]gitattributes$|[.]npmrc$|[.]github\/|plugin\/scripts\/fan-in-|plugin\/test\/fan-in-|plugin\/scripts\/outer-cron-registry[.]json$)/;
 
 /** 一条 repo-相对路径是否落在设计内排除集（按设计就该直接提交 develop）。PURE。 */
 export function isDesignInternalPath(relPath) {
