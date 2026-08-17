@@ -155,21 +155,6 @@ hr { border: none; border-top: 1px solid var(--color-divider); margin: 1rem 0; }
   white-space: nowrap;
   border: 0;
 }
-/* QW-006: mobile-responsive layout (DIR-003) — narrow viewport adaptations */
-@media (max-width: 600px) {
-  main { padding: 1rem 0.75rem; }
-  table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
-  th, td { padding: 0.45rem 0.6rem; font-size: 0.85rem; }
-  /* QX-012 (experiment 4, iteration 3): hide role/labels columns on mobile so
-     id, status, title fit in the visible viewport at 375px.
-     Closes UQ-012 (role/labels columns crowd out title). */
-  .col-role, .col-labels { display: none; }
-  /* QX-017 (experiment 4, iteration 4): hide the updated column at mobile to
-     reduce clutter. (The sticky .col-actions rule that once lived here was
-     removed with the web action-buttons route — gap-web-action-buttons-unused-
-     route-and-open-redirect-delete.) */
-  .col-updated { display: none; }
-}
 /* QX-015 (experiment 4, iteration 3): project orientation banner — REMOVED by
    DIR-007 (iteration 10). Banner had two problems: (1) depicted needs-human as
    sequential step in todo→ready→needs-human→done chain rather than as a
@@ -210,15 +195,40 @@ hr { border: none; border-top: 1px solid var(--color-divider); margin: 1rem 0; }
   border-radius: 0 4px 4px 0;
 }
 /* QX-043 (experiment 4, iteration 11): label nav scrollable strip on mobile (UQ-006).
-   On narrow viewports the label nav wraps into a multi-line wall; convert to a
-   single scrollable horizontal strip so the vertical space cost is bounded. */
+   AC96: upgraded from a nowrap text line to the design's chip/pill form — each label is a
+   pill (flex: none, nowrap) and the container wraps on desktop (flex-wrap: wrap) but is a
+   single-row horizontal scroll on mobile (the ≤600px media query sets flex-wrap: nowrap +
+   overflow-x: auto). This ALSO fixes the AC96-audit bug where a <details> inside the old
+   <p class="meta"> was invalid HTML — the HTML parser broke the <p> open, stacking the
+   expandable onto its own line (2-block label nav) and wasting vertical budget. */
 .label-nav-wrap {
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-  white-space: nowrap;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.4rem;
+  align-items: center;
   padding-bottom: 0.2rem;
   margin-bottom: 0.25rem;
 }
+.label-chip {
+  flex: none;
+  white-space: nowrap;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  padding: 0.08rem 0.55rem;
+  border: 1px solid var(--color-divider);
+  border-radius: 999px;
+  background: var(--color-surface);
+}
+.label-chip a { color: var(--color-accent); }
+.label-chip strong { color: var(--color-text); }
+.label-chip-label { flex: none; font-size: 0.85rem; color: var(--color-neutral-700); }
+.label-chip-more summary { cursor: pointer; color: var(--color-neutral-700); }
+.label-chip-more > div { white-space: normal; padding-top: 0.2rem; }
+/* AC96: the desktop site-nav meta line (hidden on mobile — its links live in the hamburger).
+   .mobile-chrome (header + menu) is the MOBILE-ONLY chrome: display:none on desktop, and the
+   ≤600px media query (at the end of this sheet) flips it to display:block. */
+.site-nav { display: block; }
+.mobile-chrome { display: none; }
 /* AC100/AC102: verdict colouring is token-defined on BOTH the list pages (this sheet)
    and the detail pages (detailStyles()) — the two sheets agree on the accent family. */
 .verdict-pass { color: var(--color-accent-700); }
@@ -231,6 +241,62 @@ hr { border: none; border-top: 1px solid var(--color-divider); margin: 1rem 0; }
 .git-svg-merge { fill: var(--color-accent-2-500); }
 .git-svg-ink { fill: var(--color-text); }
 .git-svg-muted { fill: var(--color-neutral-600); }
+/* QW-006: mobile-responsive layout (DIR-003) — narrow viewport adaptations.
+   Kept at the END of the sheet so its rules win the cascade over every base rule above
+   (media queries add no specificity — a later base rule would otherwise beat them). */
+@media (max-width: 600px) {
+  main { padding: 1rem 0.75rem; }
+  table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  th, td { padding: 0.45rem 0.6rem; font-size: 0.85rem; }
+  /* QX-012 (experiment 4, iteration 3): hide role/labels columns on mobile so
+     id, status, title fit in the visible viewport at 375px.
+     Closes UQ-012 (role/labels columns crowd out title). */
+  .col-role, .col-labels { display: none; }
+  /* QX-017 (experiment 4, iteration 4): hide the updated column at mobile to
+     reduce clutter. (The sticky .col-actions rule that once lived here was
+     removed with the web action-buttons route — gap-web-action-buttons-unused-
+     route-and-open-redirect-delete.) */
+  .col-updated { display: none; }
+  /* AC96: true two-form responsive (sc-if isMobile). Mobile gets a hamburger
+     header + full-screen nav menu (checkbox-toggled, zero client JS — the AC4
+     invariant) and the label/filter/sort navs collapse to single-row horizontal
+     scrolls, so the 375×812 first screen shows the task table's first row. */
+  .mobile-chrome { display: block; }
+  .mobile-header {
+    display: flex; position: sticky; top: 0; z-index: 20;
+    align-items: center; gap: 0.75rem;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--color-divider);
+    background: var(--color-bg);
+  }
+  .mobile-header-title { font-weight: 800; font-size: 1.05rem; }
+  .mobile-header-page { margin-left: auto; font-size: 0.8rem; color: var(--color-neutral-700); }
+  .mobile-menu-burger {
+    display: inline-flex; flex-direction: column; justify-content: center; gap: 4px;
+    width: 40px; height: 40px; padding: 8px 9px; cursor: pointer;
+  }
+  .mobile-menu-burger span {
+    display: block; width: 22px; height: 2px; background: var(--color-text);
+    transition: transform 0.15s ease, opacity 0.15s ease;
+  }
+  .mobile-menu-toggle-input { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
+  .mobile-menu {
+    display: none; position: fixed; inset: 0; z-index: 15;
+    background: var(--color-bg);
+    padding: 3.5rem 0.75rem 1rem;
+    overflow-y: auto;
+  }
+  .mobile-menu-toggle-input:checked ~ .mobile-menu { display: block; }
+  .mobile-menu-toggle-input:checked ~ .mobile-header .mobile-menu-burger span:nth-child(1) { transform: translateY(6px) rotate(45deg); }
+  .mobile-menu-toggle-input:checked ~ .mobile-header .mobile-menu-burger span:nth-child(2) { opacity: 0; }
+  .mobile-menu-toggle-input:checked ~ .mobile-header .mobile-menu-burger span:nth-child(3) { transform: translateY(-6px) rotate(-45deg); }
+  /* The desktop site-nav meta line's links live in the hamburger menu on mobile. */
+  .site-nav { display: none; }
+  h1 { font-size: 1.2rem; margin: 0.4rem 0 0.6rem; }
+  /* Filter/sort navs become single-row horizontal scrolls (design's isMobile chips). */
+  .list-nav { display: flex; align-items: baseline; gap: 0.35rem; overflow-x: auto; -webkit-overflow-scrolling: touch; white-space: nowrap; }
+  .label-nav-wrap { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+}
 </style>`;
 }
 
@@ -841,10 +907,17 @@ export async function handleTaskList(
   const hiddenLabelCount = allLabels.filter((l) => !visibleLabels.includes(l)).length;
   // QX-034 (experiment 4, iteration 9): UQ-032 — show task count per label;
   // UQ-033 — convert "N more labels" plain text to a details/summary expandable.
-  const labelNav = allLabels.length > 0 ? [
-    labelFilters.length > 0
-      ? html`<a href="${bh(statusFilter, sortKey, null, null, prefixFilter, qFilter)}">All</a>`
-      : html`<strong>All</strong>`,
+  // AC96: the label nav is rendered as pill/chip items (the design's isMobile chips). Each
+  // item is a <span class="label-chip">; the container (.label-nav-wrap) is flex and wraps on
+  // desktop but scrolls on one row on mobile. The <details> expandable is a flex CHILD (not
+  // inside a <p>, which was invalid HTML — the parser broke the <p> open and stacked it on a
+  // second line). Keeps the .label-nav-wrap opening tag for QX-043's UQ-006 test.
+  const labelChips = allLabels.length > 0 ? [
+    html`<span class="label-chip">${
+      labelFilters.length > 0
+        ? html`<a href="${bh(statusFilter, sortKey, null, null, prefixFilter, qFilter)}">All</a>`
+        : html`<strong>All</strong>`
+    }</span>`,
     ...visibleLabels.map((l) => {
       const isActive = labelFilters.includes(l);
       // Toggle: if active, remove l from filters; if inactive, add l to filters.
@@ -853,14 +926,16 @@ export async function handleTaskList(
         : [...labelFilters, l];
       // UQ-032: append (N) count after label name so users can see relative label usage.
       const countBadge = ` (${labelCounts.get(l) || 0})`;
-      return isActive
-        ? html`<strong>${escapeHtml(l)}${countBadge}</strong> (<a href="${bh(statusFilter, sortKey, toggledLabels, null, prefixFilter, qFilter)}">remove</a>)`
-        : html`<a href="${bh(statusFilter, sortKey, toggledLabels, null, prefixFilter, qFilter)}">${escapeHtml(l)}${countBadge}</a>`;
+      return html`<span class="label-chip">${
+        isActive
+          ? html`<strong>${escapeHtml(l)}${countBadge}</strong> (<a href="${bh(statusFilter, sortKey, toggledLabels, null, prefixFilter, qFilter)}">remove</a>)`
+          : html`<a href="${bh(statusFilter, sortKey, toggledLabels, null, prefixFilter, qFilter)}">${escapeHtml(l)}${countBadge}</a>`
+      }</span>`;
     }),
     // UQ-033: hidden labels rendered inside a <details> expand element so users can
     // see all labels without editing the URL. Previously was non-interactive plain text.
     ...(hiddenLabelCount > 0 ? [
-      html`<details style="display:inline"><summary>… ${hiddenLabelCount} more labels</summary><div style="margin:0.25rem 0">${
+      html`<details class="label-chip label-chip-more"><summary>… ${hiddenLabelCount} more labels</summary><div>${
         allLabels.filter((l) => !visibleLabels.includes(l)).map((l) => {
           const toggledLabels = labelFilters.includes(l)
             ? labelFilters.filter((x) => x !== l)
@@ -870,7 +945,7 @@ export async function handleTaskList(
         }).join(" · ")
       }</div></details>`,
     ] : []),
-  ].join(" · ") : null;
+  ] : [];
   // QW-007: page navigation — Previous / Next links with page info.
   // Filter/sort nav links reset to page 1 (no pg param) when clicked, which is correct:
   // changing a filter changes which tasks are in view.
@@ -940,19 +1015,19 @@ export async function handleTaskList(
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay task list — ${escapeHtml(manifest.name)}">${modernistStyles()}${pageStyles()}<title>Quay — ${escapeHtml(manifest.name)}</title></head>
-    <body><main>
+    <body>${renderMobileChrome("tasks", "task list")}<main>
       <!-- QX-015 orientation banner removed by DIR-007 (iteration 10): misleading
            needs-human placement + disproportionate layout cost. -->
       <h1>Quay — task list (${escapeHtml(manifest.id)} provider)</h1>
-      <p class="meta"><a href="/board">board</a> · <a href="/live">live</a> · <a href="/journal">journal</a> · <a href="/git-history">git-history →</a> · <a href="/adr">ADRs →</a> · <a href="/goal">goals →</a> · <a href="/doc">docs →</a></p>
+      <p class="meta site-nav"><a href="/board">board</a> · <a href="/live">live</a> · <a href="/journal">journal</a> · <a href="/git-history">git-history →</a> · <a href="/adr">ADRs →</a> · <a href="/goal">goals →</a> · <a href="/doc">docs →</a></p>
       ${errorParam ? html`<div class="error-banner" role="alert"><strong>Error:</strong> ${escapeHtml(errorParam)}</div>` : ""}
       ${successParam ? html`<div class="success-banner" role="status"><strong>Done:</strong> ${escapeHtml(successParam)}</div>` : ""}
-      ${prefixNav ? html`<p class="meta">Prefix: ${prefixNav}</p>` : ""}
-      <p class="meta">Filter: ${filterNav}</p>
-      <p class="meta">Sort: ${sortNav}</p>
+      ${prefixNav ? html`<p class="meta list-nav">Prefix: ${prefixNav}</p>` : ""}
+      <p class="meta list-nav">Filter: ${filterNav}</p>
+      <p class="meta list-nav">Sort: ${sortNav}</p>
       ${searchForm}
       ${searchResultBanner}
-      ${labelNav ? html`<div class="label-nav-wrap"><p class="meta">Label: ${labelNav}</p></div>` : ""}
+      ${labelChips.length > 0 ? html`<div class="label-nav-wrap"><span class="label-chip-label">Label:</span>${labelChips.join("")}</div>` : ""}
       ${pageSizeNav}
       ${pageNav}
       <table>
@@ -1755,6 +1830,30 @@ export function renderSiteNav(current: string): string {
         : html`<a href="${href}">${escapeHtml(label)}</a>`;
     }).join(" · ")}`
   ).join("<br>");
+}
+
+/**
+ * AC96: mobile-only chrome — a hamburger header + a checkbox-toggled full-screen nav menu.
+ * This is the server-rendered equivalent of the sc-if design's isMobile form's `mobileMenuOpen`
+ * state: the hidden checkbox's `:checked` state shows the menu (pure CSS, zero client JS — the
+ * AC4 invariant). The wrapper is `display: none` on desktop (>600px), so it has zero desktop
+ * cost; on mobile the header is sticky and the menu carries the FULL 15-view site nav so the
+ * hamburger is the "go anywhere" affordance the design provides. Page label shown at right.
+ */
+export function renderMobileChrome(current: string, pageLabel: string): string {
+  return html`<div class="mobile-chrome">
+    <input type="checkbox" id="mobile-menu-toggle" class="mobile-menu-toggle-input" aria-hidden="true">
+    <header class="mobile-header">
+      <label for="mobile-menu-toggle" class="mobile-menu-burger" aria-label="Toggle navigation">
+        <span></span><span></span><span></span>
+      </label>
+      <span class="mobile-header-title">Quay</span>
+      <span class="mobile-header-page">${escapeHtml(pageLabel)}</span>
+    </header>
+    <nav class="mobile-menu" aria-label="Site navigation">
+      <p class="meta">${renderSiteNav(current)}</p>
+    </nav>
+  </div>`;
 }
 
 function obsNote(status: string, reason: string | null): string {
