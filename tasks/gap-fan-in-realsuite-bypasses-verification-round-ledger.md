@@ -26,6 +26,8 @@ extra:
 
 **与既有任务的关系**：`gap-preverified-suite-bypasses-verification-round-ledger`（done）的根因是「pre-verified 路径跳过 full-suite-runner ⇒ 从不触发 verification-round 写入」，修的是**预验证分支**；本条是**同一根因的真跑分支**（hard rule 5b：在某处修好 X ≠ X 只在那一处）。它当初诊断的「04:13 起 7h+ 空档」就是真跑+pre-verified 双分支都空的结果——pre-verified 修好了，真跑分支**依然**空着。
 
+**引入点（inner 独立核实，2026-08-17 21:0xZ 确认）**：`turn-budget` detached 模型（9327056a）把 fan-in-execute step 4 改成 detached 直跑 `bash scripts/test.sh`（setsid + /usr/bin/time），使真跑 suite 不再经过 full-suite-runner.ts；00664f9b 只给 pre-verified 分支补了写入点，**真跑分支的结构性写入点不存在**。实测佐证：verification-round.jsonl 最后写入 17:11Z，19:00–20:52 窗口零条目。
+
 **影响**：趋势账本对「最新最常用的落地路径」仍然结构性变瞎。真跑 fan-in 是 25 条落地的主体（pre-verified 只是 call 方回合外跑 suite 的特殊情况）；`/tests` 页与 suite 成本分析（AC101 600s 天花板、trend）读不到真跑分支的耗时/成本数据 ⇒ suite 变慢的问题继续兼职由「suite 能否在回合内跑完」担任唯一判据（这正是 pre-verified 任务 AC4 想消除的盲点，真跑分支没接上）。
 
 **能取假（⊢ 对照）**：修复后，一次真跑 suite 的 fan-in 落地（无 pre-verified capture，`full_suite_ran=true`）在 verification-round.jsonl 产生一条新记录（`preverified` 缺省/`false` + durationMs=真跑墙钟 + scope=worktree），且 `/tests` 能读到它；不再需要手动 grep /tmp 日志现拼。
@@ -33,7 +35,7 @@ extra:
 ## Plan
 
 1. 读 fan-in-execute.js step 4.5（`# preverified-round-block`，ec434eb8 + 00664f9b 后）与 `pre-verified-round-record.ts`，确认真跑分支的等价写入缺失。
-2. 决定写入点：真跑分支在 suite 绿、per-task-suite-record 入账后（同一 step 4.5 段），追加与 pre-verified-round-record 结构等价的写入——`preverified:false`（或缺省）+ 复用 capture 的 `wall_ms`（真跑墙钟）+ `suite_head` 钉死 + scope=worktree；或复用 `pre-verified-round-record.ts` 加一个 `--preverified 0` 形态（明确不伪造 pass/fail/tests 计数，capture 无测试计数）。
+2. 决定写入点（inner 提示，非阻塞）：真跑分支的写入点应落在**持锁段 suite 完成之后**（step 4.5 或 ff 前）——suite 绿、per-task-suite-record 入账后，追加与 pre-verified-round-record 结构等价的写入——`preverified:false`（或缺省）+ 复用 capture 的 `wall_ms`（真跑墙钟）+ `suite_head` 钉死 + scope=worktree；**记录字段须与 full-suite-runner 写入的 verification-round 同构**（startedAt/cpu_usec/psi 等）——AC4 时长检查对 pre-verified 记录有判据，真跑记录别比它薄。倾向路径：复用 `pre-verified-round-record.ts` 加 `--preverified 0` 形态；或「detached 启动也走 full-suite-runner（而非裸 test.sh）」——后者能复用现有 writer，但须核实 full-suite-runner 的 cgroup 捕获 seam 在 detached 下是否生效（QUAY_TEST_CGROUP_SCRIPT 注入点是它）。
 3. **两个分支共用同一 writer/判定**（不复制逻辑）：pre-verified 与真跑统一走一个 verification-round 入账函数，`preverified` 布尔由 `suite_preverified` 标记决定——避免再出现「修了一个分支、另一个还是空的」。
 4. 对照实测：一次真跑 fan-in（不删 fixtures、无 capture）→ verification-round 产生记录；`/tests` 可读。
 5. scoped 门（`--for-task`）+ 全量验证，fan-in。
