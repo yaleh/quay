@@ -16,7 +16,7 @@
 // Run (scoped): node --test packages/quay/test/serve-ac95-views.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
@@ -25,10 +25,10 @@ import net from "node:net";
 import http from "node:http";
 import { startServer } from "../src/serve.ts";
 import {
-  parseResourceGateOutput,
-  parseProcessBudgetOutput,
-  parseLoopDriverOutput,
-  parseSessionLivenessOutput,
+  parseResourceGateJson,
+  parseProcessBudgetJson,
+  parseLoopDriverJson,
+  parseSessionLivenessJson,
   parseObserverRegistry,
   parseVerificationRound,
   readTranscriptTail,
@@ -78,16 +78,24 @@ function makeWorkspace(prefix) {
   return ws;
 }
 
-// ── Pure parse-function unit tests (AC2: numbers from the producing mechanism's text) ───────────────
+// ── Pure parse-function unit tests (AC2/AC99: numbers from the producing mechanism's --json) ────────
 
-test("AC2: parseResourceGateOutput extracts the mechanism's report fields", () => {
-  const text = `cpu_stall(some avg10)=55.21  [limit 60]   ok
-cpu_stall(some avg300)=15.12
-mem_avail=8380MB             [limit 2048] ok
-loadavg=23.90             [limit nproc×2≈32] ok
-nproc=16  node_procs=74  swap=0  [nproc-invariant ok]
-=> GO: 资源充足，可以跑`;
-  const r = parseResourceGateOutput(text);
+test("AC2: parseResourceGateJson extracts the mechanism's --json fields", () => {
+  const json = JSON.stringify({
+    cpu_stall_avg10: 55.21,
+    cpu_stall_avg300: 15.12,
+    cpu_limit: 60,
+    mem_avail_mb: 8380,
+    mem_limit_mb: 2048,
+    loadavg: 23.9,
+    load_threshold: 32,
+    load_over_factor: 2,
+    nproc: 16,
+    node_procs: 74,
+    verdict: "GO",
+    reason: "=> GO: 资源充足，可以跑",
+  });
+  const r = parseResourceGateJson(json);
   assert.equal(r.cpuStallAvg10, 55.21);
   assert.equal(r.cpuStallAvg300, 15.12);
   assert.equal(r.memAvailMb, 8380);
@@ -95,35 +103,46 @@ nproc=16  node_procs=74  swap=0  [nproc-invariant ok]
   assert.equal(r.nproc, 16);
   assert.equal(r.nodeProcs, 74);
   assert.equal(r.verdict, "GO");
+  // AC99/AC3 — the loadavg threshold is carried from the mechanism (computed from nproc), never
+  // recomputed with a host literal in the UI.
+  assert.equal(r.loadThreshold, 32);
+  assert.equal(r.loadOverFactor, 2);
 });
 
-test("AC2: parseProcessBudgetOutput extracts the budget key=value fields", () => {
-  const text = `total_budget=16
-in_use=18
-available=0
-verdict=WAIT`;
-  const r = parseProcessBudgetOutput(text);
+test("AC2: parseResourceGateJson tolerates unmeasurable signals as null (硬规则③b)", () => {
+  const json = JSON.stringify({ cpu_stall_avg10: null, cpu_stall_avg300: null, mem_avail_mb: null, loadavg: null, nproc: 16, node_procs: 74, verdict: "WAIT", load_threshold: 32, load_over_factor: 2 });
+  const r = parseResourceGateJson(json);
+  assert.equal(r.cpuStallAvg10, null);
+  assert.equal(r.loadAvg, null);
+  assert.equal(r.verdict, "WAIT");
+  assert.equal(r.loadThreshold, 32);
+});
+
+test("AC2: parseProcessBudgetJson extracts the budget --json fields", () => {
+  const json = JSON.stringify({ total_budget: 16, in_use: 18, available: 0, verdict: "WAIT", node_comm_mainthread: 0, node_cmdline_procs: 25, instrument_failure: 0 });
+  const r = parseProcessBudgetJson(json);
   assert.equal(r.totalBudget, 16);
   assert.equal(r.inUse, 18);
   assert.equal(r.available, 0);
   assert.equal(r.verdict, "WAIT");
 });
 
-test("AC2: parseLoopDriverOutput extracts verdict + exit code + detail", () => {
-  const r = parseLoopDriverOutput("loop-driver: STALLED (3) — no loop driver registered; the loop will never tick", 3);
+test("AC2: parseLoopDriverJson extracts verdict + exit code + detail", () => {
+  const r = parseLoopDriverJson(JSON.stringify({ verdict: "STALLED", exit_code: 3, detail: "loop-driver: STALLED (3) — no loop driver registered; the loop will never tick", driver_count: 0, mechanism: null, last_alive_min: null, liveness_min: 60 }));
   assert.equal(r.verdict, "STALLED");
   assert.equal(r.exitCode, 3);
   assert.match(r.detail, /no loop driver/);
-  const live = parseLoopDriverOutput("loop-driver: LIVE (0) — 1 cron driver, fresh last-alive", 0);
+  const live = parseLoopDriverJson(JSON.stringify({ verdict: "LIVE", exit_code: 0, detail: "loop-driver: LIVE (0) — 1 cron driver, fresh last-alive", driver_count: 1, mechanism: "cron", last_alive_min: 0, liveness_min: 60 }));
   assert.equal(live.verdict, "LIVE");
   assert.equal(live.exitCode, 0);
 });
 
-test("AC2: parseSessionLivenessOutput extracts SESSION-STATUS rows", () => {
-  const text = `session-liveness: starting pid=1 file=session-liveness.sh md5=x
-SESSION-STATUS quay alive=1 pid=2138879 halted=0
-SESSION-STATUS outer alive=0 pid=0 halted=0`;
-  const rows = parseSessionLivenessOutput(text);
+test("AC2: parseSessionLivenessJson extracts the --once --json sessions array", () => {
+  const json = JSON.stringify({ sessions: [
+    { name: "quay", alive: true, pid: 2138879, halted: false },
+    { name: "outer", alive: false, pid: null, halted: false },
+  ] });
+  const rows = parseSessionLivenessJson(json);
   assert.equal(rows.length, 2);
   assert.equal(rows[0].name, "quay");
   assert.equal(rows[0].alive, true);
@@ -299,6 +318,50 @@ test("AC3: empty workspace still returns 200 with honest 未接入 states, never
     process.chdir(cwd0);
     server.close();
     (server.client).close?.();
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+// ── AC99 (gap-ac99-webui-machine-readable-json): every Manager/System field traces to a stable-JSON
+// mechanism, and at least one AC-level check reads the PRODUCTION carrier (the real script's --json
+// stdout) — 硬规则④推论三: 关掉 fixture/注入 seam 后判据仍能通过才算测量，否则是回声.
+
+const REPO_ROOT_AC99 = path.resolve(__dirname, "..", "..", "..");
+const RES_GATE = path.join(REPO_ROOT_AC99, "plugin", "scripts", "resource-gate.sh");
+const PROC_BUDGET = path.join(REPO_ROOT_AC99, "plugin", "scripts", "process-budget.sh");
+const LOOP_DRV = path.join(REPO_ROOT_AC99, "plugin", "scripts", "loop-driver-check.sh");
+
+function spawnJson(cmd, args, opts = {}) {
+  const r = execFileSync(cmd, args, { encoding: "utf8", timeout: 30_000, ...opts });
+  return JSON.parse(r.trim());
+}
+
+test("AC99 — resource-gate.sh/process-budget.sh --json are valid production JSON (nproc-derived load_threshold, AC3)", () => {
+  const rg = spawnJson("bash", [RES_GATE, "--json"]);
+  assert.ok(rg.verdict === "GO" || rg.verdict === "WAIT", `verdict must be GO or WAIT, got ${rg.verdict}`);
+  assert.equal(typeof rg.nproc, "number");
+  // AC3 — load_threshold is nproc × load_over_factor computed INSIDE the mechanism, never a host literal.
+  assert.equal(rg.load_threshold, Math.round(rg.nproc * rg.load_over_factor));
+  assert.equal(typeof rg.reason, "string");
+
+  const pb = spawnJson("bash", [PROC_BUDGET, "--json"]);
+  assert.ok(pb.verdict === "GO" || pb.verdict === "WAIT", `verdict must be GO or WAIT, got ${pb.verdict}`);
+  assert.equal(typeof pb.total_budget, "number");
+  assert.equal(pb.available, Math.max(0, pb.total_budget - pb.in_use));
+});
+
+test("AC99 — loop-driver-check.sh --json is valid production JSON with a recognizable verdict", () => {
+  const ws = makeWorkspace("ac99-loop-");
+  try {
+    // A fresh workspace has no driver registry → STALLED (exit 3) — the exit code is the verdict
+    // carrier; the JSON document is still emitted on stdout, so spawnSync (not execFileSync).
+    const r = spawnSync("bash", [LOOP_DRV, "--json", ws], { encoding: "utf8", timeout: 30_000 });
+    assert.equal(r.status, 3, "fresh workspace must be STALLED (exit 3)");
+    const j = JSON.parse(r.stdout.trim());
+    assert.equal(j.verdict, "STALLED");
+    assert.equal(j.exit_code, 3);
+    assert.equal(j.driver_count, 0);
+  } finally {
     fs.rmSync(ws, { recursive: true, force: true });
   }
 });

@@ -498,8 +498,9 @@ export function isBodyLanded(body) {
  *      gate rejection must pull a later-in-sort candidate, never recommend a rejected one with no
  *      replacement). Default: none (the built-in C8 self-touch gate is always on).
  *  @returns {object} { cap, base_cap, effective_cap, arbitration, in_flight_count,
- *      closed_but_live_count, occupied_slots, slots_free, pool, floor, dispatchable_disjoint,
- *      criterion_met, should_refill, no_refill_reason, recommended, deferred, ranking, scanned } —
+ *      closed_but_live_count, occupied_slots, slots_free, pool, floor, deficit,
+ *      dispatchable_disjoint, criterion_met, should_refill, no_refill_reason, recommended,
+ *      deferred, ranking, scanned } —
  *      `recommended` is the backward-compatible string-id array; `deferred`
  *      (gap-over90-clock-measures-queue-time-not-work-time) is the array of {id, reason} step-4
  *      skips — the candidates whose open bracket must be closed on defer (--close-task --outcome
@@ -889,6 +890,9 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
     slots_free: degraded ? null : slotsFree,
     pool: pool.pool,
     floor: pool.floor,
+    // AC99 — surface the ready-pool `deficit` (max(0, floor − pool)) so the Manager view's
+    // pool/floor/deficit/cap fields all trace to ONE stable-JSON dispatch mechanism (slot-refill).
+    deficit: pool.deficit,
     dispatchable_disjoint: pool.dispatchable_disjoint,
     criterion_met: pool.criterion_met,
     // LANDING-BLOCKED (gap-landing-blocked-invisible-to-dispatch-criteria): surfaced so the event-

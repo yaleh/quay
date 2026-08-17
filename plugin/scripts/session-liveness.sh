@@ -861,8 +861,19 @@ intervention_selfcheck() {
 }
 
 ONE_SHOT=false
+# AC99 — `--once --json` emits ONE JSON document ({ "sessions": [ {name, alive, pid, halted, …} ] })
+# instead of SESSION-STATUS text rows (the Manager view's machine-readable interface). Text output
+# is unchanged when `--json` is absent.
+JSON_ONCE=false
+# AC99 --once --json accumulation buffer: tab-separated rows, one per target, emitted as one JSON
+# document after the one-shot loop breaks. Rows: `STATUS\t<name>\t<alive>\t<pid>\t<halted>` or
+# `DECOMMISSIONED\t<name>` (offline per observer-registry — criteria invalid for that target).
+JSON_ONCE_ROWS=""
 case "${1:-}" in
-  --once) ONE_SHOT=true ;;
+  --once)
+    ONE_SHOT=true
+    if [ "${2:-}" = "--json" ]; then JSON_ONCE=true; fi
+    ;;
   --selfcheck)
     # Contract measure `--selfcheck --json 2>&1 | grep -c 'saturated'`（阶段四）：--json 变体只打一行
     # JSON（含 saturation 字段）；无 --json = 原人类可读自检。
@@ -1387,7 +1398,11 @@ while true; do
     _sl_reg="${_sl_pane_dir}/observer-registry.sh"
     if [ -x "$_sl_reg" ] && "$_sl_reg" --is-offline "$name" >/dev/null 2>&1; then
       if [ "$ONE_SHOT" = true ]; then
-        echo "SESSION-STATUS $name decommissioned (offline per observer-registry)"
+        if [ "$JSON_ONCE" = true ]; then
+          JSON_ONCE_ROWS+="DECOMMISSIONED\t${name}\n"
+        else
+          echo "SESSION-STATUS $name decommissioned (offline per observer-registry)"
+        fi
       fi
       continue
     fi
@@ -1422,9 +1437,14 @@ while true; do
     fi
     base_ts=${UNHALT_TS[$name]:-0}   # 解除停机时刻；0 = 本监视器运行期间未经历过停机
 
-    # --once 接缝：每轮每个目标报一行状态（冷启动/安装后自检用，AC7）。
+    # --once 接缝：每轮每个目标报一行状态（冷启动/安装后自检用，AC7）。--once --json 变体
+    # 累积结构化行，循环结束后一次性输出 ONE JSON document（AC99 — Manager 视图的机读接口）。
     if [ "$ONE_SHOT" = true ]; then
-      echo "SESSION-STATUS $name alive=$alive${pid:+ pid=$pid}${halted:+ halted=$halted}"
+      if [ "$JSON_ONCE" = true ]; then
+        JSON_ONCE_ROWS+="STATUS\t${name}\t${alive}\t${pid:-0}\t${halted:-0}\n"
+      else
+        echo "SESSION-STATUS $name alive=$alive${pid:+ pid=$pid}${halted:+ halted=$halted}"
+      fi
     fi
 
     # 事件 1/2：消失与恢复
@@ -1798,3 +1818,27 @@ while true; do
   [ "${SL_ROUND_MARKER:-0}" = "1" ] && echo "# ROUND"
   sleep "$INTERVAL"
 done
+
+# AC99 — --once --json: emit ONE JSON document with every target's status row collected above.
+if [ "$JSON_ONCE" = true ]; then
+  printf '%b' "$JSON_ONCE_ROWS" | python3 -c '
+import json, sys
+sessions = []
+for line in sys.stdin:
+    line = line.rstrip("\n")
+    if not line:
+        continue
+    parts = line.split("\t")
+    if parts[0] == "DECOMMISSIONED":
+        sessions.append({"name": parts[1], "alive": False, "pid": None, "halted": False, "decommissioned": True})
+    elif parts[0] == "STATUS" and len(parts) >= 5:
+        sessions.append({
+            "name": parts[1],
+            "alive": parts[2] == "1",
+            "pid": None if parts[3] in ("0", "") else int(parts[3]),
+            "halted": parts[4] == "1",
+        })
+print(json.dumps({"sessions": sessions}, ensure_ascii=False))
+'
+  exit 0
+fi

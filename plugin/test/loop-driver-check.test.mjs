@@ -255,3 +255,39 @@ test('AC3 (layer-2) — the DOC-level stale-clear remedy is retained alongside t
   assert.match(skill, /rm -f <root>\/\.quay\/loop-driver\.jsonl/, 'cold-start skill must clear the stale registry');
   assert.match(tick, /rm -f <root>\/\.quay\/loop-driver\.jsonl/, 'tick doc must clear the stale registry before rebuild');
 });
+
+// ── AC99 (gap-ac99-webui-machine-readable-json): --json machine-readable interface ────────────────
+// The Manager view reads loop-driver-check.sh --json. The JSON document must agree with the text
+// verdict and exit code (production carrier, not a fixture — 硬规则④推论三).
+
+test('AC99 — --json emits ONE valid JSON document agreeing with the text verdict/exit code', () => {
+  const ws = makeTmp();
+  try {
+    // Fresh install → LIVE (exit 0), same as the text path.
+    writeRegistryPerDoc(ws);
+    const jr = spawnSync('bash', [CHECKER, '--json', ws], { encoding: 'utf8' });
+    assert.equal(jr.status, 0, `live --json must exit 0; got ${jr.status}: ${jr.stdout}${jr.stderr}`);
+    let j = JSON.parse(jr.stdout.trim());
+    assert.equal(j.verdict, 'LIVE');
+    assert.equal(j.exit_code, 0);
+    assert.equal(j.driver_count, 1);
+    assert.equal(j.mechanism, 'cron');
+    assert.match(j.detail, /loop-driver: LIVE \(1\)/);
+
+    // Zero-driver → STALLED (exit 3), JSON agrees.
+    const ws2 = makeTmp();
+    try {
+      const sr = spawnSync('bash', [CHECKER, '--check', '--json', ws2], { encoding: 'utf8' });
+      assert.equal(sr.status, 3, `stalled --json must exit 3; got ${sr.status}: ${sr.stdout}`);
+      j = JSON.parse(sr.stdout.trim());
+      assert.equal(j.verdict, 'STALLED');
+      assert.equal(j.exit_code, 3);
+      assert.equal(j.driver_count, 0);
+      assert.equal(j.mechanism, null);
+    } finally { cleanup(ws2); }
+
+    // Text path (no --json) stays byte-identical for the existing consumers.
+    const tr = runCheck(ws);
+    assert.match(tr.stdout, /loop-driver: LIVE \(1\)/, 'text path unchanged');
+  } finally { cleanup(ws); }
+});

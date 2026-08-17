@@ -767,6 +767,10 @@ export interface ResourceGateReading {
   nproc: number | null;
   nodeProcs: number | null;
   verdict: "GO" | "WAIT" | null;
+  /** AC99/AC3 — the overload-window loadavg threshold (nproc × load_over_factor), computed INSIDE
+   *  resource-gate.sh from nproc — never a host-derived literal. The UI displays this value. */
+  loadThreshold: number | null;
+  loadOverFactor: number | null;
 }
 
 export interface ProcessBudgetReading {
@@ -788,48 +792,52 @@ export interface SystemResult {
 export const RESOURCE_GATE_REL = "../../../plugin/scripts/resource-gate.sh";
 export const PROCESS_BUDGET_REL = "../../../plugin/scripts/process-budget.sh";
 
-/** Parse resource-gate.sh's human report lines into structured fields. Pure (unit-testable). */
-export function parseResourceGateOutput(text: string): Omit<ResourceGateReading, "status" | "reason"> {
-  const num = (re: RegExp): number | null => {
-    const m = re.exec(text);
-    return m ? Number.parseFloat(m[1]) : null;
-  };
+/** Parse a JSON object's numeric field, guarding the type. Pure (unit-testable). */
+function jsonNum(j: Record<string, unknown>, key: string): number | null {
+  const v = j[key];
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+
+/** Parse resource-gate.sh --json's single JSON document into structured fields. Pure. */
+export function parseResourceGateJson(text: string): Omit<ResourceGateReading, "status" | "reason"> {
+  let j: Record<string, unknown> = {};
+  try { j = JSON.parse(text) as Record<string, unknown>; } catch { /* invalid JSON → all null */ }
   return {
-    cpuStallAvg10: num(/^cpu_stall\(some avg10\)=([0-9.]+)/m),
-    cpuStallAvg300: num(/^cpu_stall\(some avg300\)=([0-9.]+)/m),
-    memAvailMb: num(/^mem_avail=(\d+)MB/m),
-    loadAvg: num(/^loadavg=([0-9.]+)/m),
-    nproc: num(/^nproc=(\d+)\s+node_procs=/m),
-    nodeProcs: num(/^nproc=\d+\s+node_procs=(\d+)/m),
-    verdict: /^=>\s+(GO|WAIT)/m.exec(text)?.[1] as "GO" | "WAIT" | null ?? null,
+    cpuStallAvg10: jsonNum(j, "cpu_stall_avg10"),
+    cpuStallAvg300: jsonNum(j, "cpu_stall_avg300"),
+    memAvailMb: jsonNum(j, "mem_avail_mb"),
+    loadAvg: jsonNum(j, "loadavg"),
+    nproc: jsonNum(j, "nproc"),
+    nodeProcs: jsonNum(j, "node_procs"),
+    verdict: j.verdict === "GO" || j.verdict === "WAIT" ? j.verdict : null,
+    loadThreshold: jsonNum(j, "load_threshold"),
+    loadOverFactor: jsonNum(j, "load_over_factor"),
   };
 }
 
-/** Parse process-budget.sh's key=value lines into structured fields. Pure (unit-testable). */
-export function parseProcessBudgetOutput(text: string): Omit<ProcessBudgetReading, "status" | "reason"> {
-  const kv = (k: string): number | null => {
-    const m = new RegExp(`^${k}=(\\d+)`, "m").exec(text);
-    return m ? Number.parseInt(m[1], 10) : null;
-  };
+/** Parse process-budget.sh --json's single JSON document into structured fields. Pure. */
+export function parseProcessBudgetJson(text: string): Omit<ProcessBudgetReading, "status" | "reason"> {
+  let j: Record<string, unknown> = {};
+  try { j = JSON.parse(text) as Record<string, unknown>; } catch { /* invalid JSON → all null */ }
   return {
-    totalBudget: kv("total_budget"),
-    inUse: kv("in_use"),
-    available: kv("available"),
-    verdict: /^verdict=(GO|WAIT)/m.exec(text)?.[1] as "GO" | "WAIT" | null ?? null,
+    totalBudget: jsonNum(j, "total_budget"),
+    inUse: jsonNum(j, "in_use"),
+    available: jsonNum(j, "available"),
+    verdict: j.verdict === "GO" || j.verdict === "WAIT" ? j.verdict : null,
   };
 }
 
-/** System view: resource-gate.sh + process-budget.sh text outputs parsed to structured fields. */
+/** System view: resource-gate.sh --json + process-budget.sh --json parsed to structured fields. */
 export async function readSystem(root: string): Promise<SystemResult> {
-  const rg = await runPluginScript(root, RESOURCE_GATE_REL, []);
+  const rg = await runPluginScript(root, RESOURCE_GATE_REL, ["--json"]);
   const rgReading: ResourceGateReading = rg.stdout == null
-    ? { status: "empty", reason: rg.reason, cpuStallAvg10: null, cpuStallAvg300: null, memAvailMb: null, loadAvg: null, nproc: null, nodeProcs: null, verdict: null }
-    : { status: "ok", reason: null, ...parseResourceGateOutput(rg.stdout) };
+    ? { status: "empty", reason: rg.reason, cpuStallAvg10: null, cpuStallAvg300: null, memAvailMb: null, loadAvg: null, nproc: null, nodeProcs: null, verdict: null, loadThreshold: null, loadOverFactor: null }
+    : { status: "ok", reason: null, ...parseResourceGateJson(rg.stdout) };
 
-  const pb = await runPluginScript(root, PROCESS_BUDGET_REL, []);
+  const pb = await runPluginScript(root, PROCESS_BUDGET_REL, ["--json"]);
   const pbReading: ProcessBudgetReading = pb.stdout == null
     ? { status: "empty", reason: pb.reason, totalBudget: null, inUse: null, available: null, verdict: null }
-    : { status: "ok", reason: null, ...parseProcessBudgetOutput(pb.stdout) };
+    : { status: "ok", reason: null, ...parseProcessBudgetJson(pb.stdout) };
 
   const degraded = rg.stdout == null && pb.stdout == null;
   return {
@@ -876,31 +884,35 @@ export interface ManagerResult {
 
 export const LOOP_DRIVER_CHECK_REL = "../../../plugin/scripts/loop-driver-check.sh";
 export const SESSION_LIVENESS_REL = "../../../plugin/scripts/session-liveness.sh";
-export const READY_POOL_CHECK_REL = "../../../plugin/scripts/ready-pool-check.ts";
+export const SLOT_REFILL_REL = "../../../plugin/scripts/slot-refill.ts";
 export const OBSERVER_REGISTRY_CONF = "../../../orchestration/observer-registry.conf";
 
-/** Parse loop-driver-check.sh's first line: `loop-driver: STALLED (0) — …`. Pure. */
-export function parseLoopDriverOutput(text: string, exitCode: number): Omit<LoopDriverReading, "status" | "reason"> {
-  const m = /^loop-driver:\s+(LIVE|STALLED|DOUBLE-TRIGGER|BANNED-MECHANISM|DEAD)\s+\((\d+)\)(.*)$/m.exec(text);
-  if (!m) {
-    return { verdict: null, exitCode, detail: text.trim().split("\n")[0] ?? null };
-  }
-  return { verdict: m[1] as LoopDriverReading["verdict"], exitCode: Number.parseInt(m[2], 10), detail: m[3].trim() };
+/** Parse loop-driver-check.sh --json's single JSON document into structured fields. Pure. */
+export function parseLoopDriverJson(text: string): Omit<LoopDriverReading, "status" | "reason"> {
+  let j: Record<string, unknown> = {};
+  try { j = JSON.parse(text) as Record<string, unknown>; } catch { /* invalid JSON → all null */ }
+  const verdicts = ["LIVE", "STALLED", "DOUBLE-TRIGGER", "BANNED-MECHANISM", "DEAD"];
+  return {
+    verdict: verdicts.includes(String(j.verdict)) ? j.verdict as LoopDriverReading["verdict"] : null,
+    exitCode: jsonNum(j, "exit_code"),
+    detail: typeof j.detail === "string" && j.detail.length > 0 ? j.detail : null,
+  };
 }
 
-/** Parse session-liveness.sh --once's `SESSION-STATUS <name> alive=… pid=… halted=…` rows. Pure. */
-export function parseSessionLivenessOutput(text: string): Array<{ name: string; alive: boolean; pid: number | null; halted: boolean }> {
+/** Parse session-liveness.sh --once --json's { sessions: [...] } document into rows. Pure. */
+export function parseSessionLivenessJson(text: string): Array<{ name: string; alive: boolean; pid: number | null; halted: boolean }> {
   const out: Array<{ name: string; alive: boolean; pid: number | null; halted: boolean }> = [];
-  for (const line of text.split(/\r?\n/)) {
-    const m = /^SESSION-STATUS\s+(\S+)\s+alive=(\d+)\s+pid=(\d+)\s+halted=(\d+)/.exec(line);
-    if (m) {
-      out.push({
-        name: m[1],
-        alive: m[2] === "1",
-        pid: m[3] === "0" ? null : Number.parseInt(m[3], 10),
-        halted: m[4] === "1",
-      });
-    }
+  let j: { sessions?: Array<{ name?: unknown; alive?: unknown; pid?: unknown; halted?: unknown }> } = {};
+  try { j = JSON.parse(text) as typeof j; } catch { /* invalid JSON → no rows */ }
+  for (const s of j.sessions ?? []) {
+    const name = typeof s?.name === "string" ? s.name : "";
+    if (!name) continue;
+    out.push({
+      name,
+      alive: s.alive === true,
+      pid: typeof s.pid === "number" && Number.isFinite(s.pid) ? s.pid : null,
+      halted: s.halted === true,
+    });
   }
   return out;
 }
@@ -923,25 +935,27 @@ export function parseObserverRegistry(text: string): ObserverRow[] {
   return rows;
 }
 
-/** Manager view: loop-driver + session-liveness + observer registry + ready-pool pool metrics. */
+/** Manager view: loop-driver + session-liveness + observer registry + slot-refill pool metrics. */
 export async function readManager(root: string): Promise<ManagerResult> {
-  // loop-driver-check.sh: exit code carries the verdict (0 LIVE / 3 STALLED / 4 DOUBLE / 5 BANNED / 6 DEAD).
+  // loop-driver-check.sh --json → verdict/exit_code/detail. AC99: the JSON interface replaces the
+  // first-line text parse; exit code is carried in the JSON (0 LIVE / 3 STALLED / 4 DOUBLE /
+  // 5 BANNED / 6 DEAD).
   let loopDriver: LoopDriverReading;
   {
-    const r = await runPluginScript(root, LOOP_DRIVER_CHECK_REL, ["--check", root], 15_000);
+    const r = await runPluginScript(root, LOOP_DRIVER_CHECK_REL, ["--check", "--json", root], 15_000);
     if (r.stdout == null) {
       loopDriver = { status: "empty", reason: r.reason, verdict: null, exitCode: null, detail: null };
     } else {
-      loopDriver = { status: "ok", reason: null, ...parseLoopDriverOutput(r.stdout, 0) };
+      loopDriver = { status: "ok", reason: null, ...parseLoopDriverJson(r.stdout) };
     }
   }
 
-  // session-liveness.sh --once → per-target liveness rows (--once is REQUIRED: without it the
-  // script MOUNTS and polls forever — the serve path must never block the event loop on it).
+  // session-liveness.sh --once --json → per-target liveness rows (--once is REQUIRED: without it
+  // the script MOUNTS and polls forever — the serve path must never block the event loop on it).
   let liveness: SessionLivenessReading;
   {
-    const r = await runPluginScript(root, SESSION_LIVENESS_REL, ["--once"], 20_000);
-    const rows = r.stdout == null ? [] : parseSessionLivenessOutput(r.stdout);
+    const r = await runPluginScript(root, SESSION_LIVENESS_REL, ["--once", "--json"], 20_000);
+    const rows = r.stdout == null ? [] : parseSessionLivenessJson(r.stdout);
     if (r.stdout == null) liveness = { status: "empty", reason: r.reason, sessions: [] };
     else if (rows.length === 0) liveness = { status: "empty", reason: "session-liveness 无 SESSION-STATUS 行（无观测目标）", sessions: [] };
     else liveness = { status: "ok", reason: null, sessions: rows };
@@ -963,12 +977,14 @@ export async function readManager(root: string): Promise<ManagerResult> {
       : { status: "empty", reason: "observer-registry.conf 为空", rows };
   }
 
-  // ready-pool-check.ts --json → pool/floor/deficit/cap (the mechanism that PRODUCES these fields).
+  // slot-refill.ts --json → pool/floor/deficit/cap (AC99: the DISPATCH mechanism that produces the
+  // pool metrics — ready-pool-check's analyzeTasks is the same single source, and slot-refill
+  // defaults to the FIXED dispatch cap 5 so the reported floor is the production truth, cap=5×4=20).
   let pool: ManagerResult["pool"];
   {
-    const p = resolvePluginScript(READY_POOL_CHECK_REL);
+    const p = resolvePluginScript(SLOT_REFILL_REL);
     if (!p) {
-      pool = { status: "empty", reason: `${READY_POOL_CHECK_REL} 缺失（未接入）`, pool: null, floor: null, deficit: null, cap: null };
+      pool = { status: "empty", reason: `${SLOT_REFILL_REL} 缺失（未接入）`, pool: null, floor: null, deficit: null, cap: null };
     } else {
       try {
         const argv = p.endsWith(".ts")
@@ -985,7 +1001,7 @@ export async function readManager(root: string): Promise<ManagerResult> {
           cap: typeof j.cap === "number" ? j.cap : null,
         };
       } catch (err) {
-        pool = { status: "error", reason: `ready-pool-check 读失败：${err instanceof Error ? err.message : String(err)}`, pool: null, floor: null, deficit: null, cap: null };
+        pool = { status: "error", reason: `slot-refill 读失败：${err instanceof Error ? err.message : String(err)}`, pool: null, floor: null, deficit: null, cap: null };
       }
     }
   }
@@ -1207,11 +1223,11 @@ export async function readSessions(root: string): Promise<SessionsResult> {
   if (!p) {
     return { status: "empty", reason: `${SESSION_LIVENESS_REL} 缺失（未接入）`, sessions: [] };
   }
-  const r = await runPluginScript(root, SESSION_LIVENESS_REL, ["--once"], 20_000);
+  const r = await runPluginScript(root, SESSION_LIVENESS_REL, ["--once", "--json"], 20_000);
   if (r.stdout == null) {
     return { status: "empty", reason: r.reason, sessions: [] };
   }
-  const rows = parseSessionLivenessOutput(r.stdout);
+  const rows = parseSessionLivenessJson(r.stdout);
   if (rows.length === 0) {
     return { status: "empty", reason: "session-liveness 无 SESSION-STATUS 行（无观测目标）", sessions: [] };
   }
