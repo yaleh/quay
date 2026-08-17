@@ -4,7 +4,7 @@ title: cold-start 变更未同步测试/排除集：bypass-check 排除集加
   plugin/scripts/outer-cron-registry.json（AC81 git 跟踪遥测收据，冷启动 cron 重建必直写且无
   fan-in 路——发生率 3：f9577da1/167b7052/f882ad76）+ 三处测试 pin 同步（outer-cron-registry 测试
   旧 cron id + AC4 launcher 测试旧 launcher）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
