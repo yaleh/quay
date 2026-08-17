@@ -7,8 +7,7 @@ labels:
   - gap
   - mechanism
 parent: null
-children:
-  - gap-cron-registry-global-path-migration
+children: []
 extra:
   schema: plan
   depends_on:

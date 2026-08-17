@@ -7,7 +7,7 @@ status: ready
 labels:
   - gap
   - mechanism
-parent: gap-cron-registry-shared-file-design-revisit
+parent: null
 children: []
 extra:
   schema: execution
