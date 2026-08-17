@@ -80,6 +80,14 @@ export const meta = {
 //     （plugin/scripts/pre-verified-round-record.ts --preverified <0|1>），写失败 HARD FAIL（AC1 判据1
 //     义务）。doc-only 跳过（full_suite_ran=false）无 suite 可记账，不写。正常全量路径由
 //     full-suite-runner 写 verification-round，fan-in 不重复写。
+//  ⑧ land 前 anti-drift 重跑（gap-fan-in-fix-commit-delta-escapes-touches-coverage）：step 1 的
+//     anti-drift 检查在 merge 后立即跑，fix-agent 的修复提交（suite-fix 重跑路径）在其后引入——其触碰
+//     文件从未被 Touches 复核（实证 c2917261 改 full-suite-runner.test.mjs 不在 Touches，已 land 才
+//     发现）。持锁段 step 5（flip done 前、ff 前）增补同一驱动重跑：git diff --name-only
+//     ${mergeTarget}...HEAD 此刻已含 fix commits ⇒ 覆盖分支整体 delta。判定逻辑不变（AC3），只增调用点；
+//     正常 fan-in（无 fix commit 或 fix 全在 Touches 内）重跑幂等（AC2）。改本块必须同步
+//     plugin/test/fan-in-execute-paths.test.mjs 的 land-anti-drift 组测试（fix commit 越界触碰 HARD FAIL
+//     幂等回归 + 真实 bash）。
 
 // args 到达时是【字符串】不是对象（实测 wf_6f8cc053-f52）：直接 args.x 会静默 undefined。
 const A = (() => { try { return typeof args === 'string' ? JSON.parse(args) : (args ?? {}) } catch { return {} } })()
@@ -480,6 +488,20 @@ rm -f "$suite_capture"
 
 【持锁段 step 5 — flip done + ff-merge】
 cd ${worktree}
+# anti-drift-land-block-start
+# anti-drift land 前重跑（gap-fan-in-fix-commit-delta-escapes-touches-coverage）：step 1 的 anti-drift
+# 检查在 merge 后立即跑，而 fix-agent 的修复提交（suite 红 → suite-fix 补丁 commit → 重跑）发生在其后
+# ——其触碰文件从未被 Touches 复核（实证：gap-worktree-remove-orphans-probes 的 fix commit c2917261 改了
+# plugin/test/full-suite-runner.test.mjs 不在 Touches，已 land 才被发现）。此处【land 前】（持锁段、flip
+# done 之前、ff 之前）重跑同一驱动——git diff --name-only ${mergeTarget}...HEAD 此刻已含 fix commits，
+# 覆盖分支整体 delta（merge + fix）。判定逻辑与 step 1 同一驱动（anti-drift-touches-check.ts），只增
+# 调用点不改判定（AC3）；正常 fan-in（无 fix commit 或 fix 全在 Touches 内）重跑幂等（AC2）。
+if ! node --experimental-strip-types ${worktree}/plugin/scripts/anti-drift-touches-check.ts --task ${task} --worktree ${worktree} --merge-target ${mergeTarget}; then
+  echo "FATAL: anti-drift land 前重跑 HARD FAIL——实际触碰超出声明 Touches（含 fix-agent 提交引入的文件）⇒ 不翻 done、不 ff；不得改 Touches 绕过守卫" >&2
+  exit 2
+fi
+# anti-drift-land-block-end
+
 # flip-block-start
 # flip done（承重点③，gap-fan-in-execute-three-unverified-paths）：行形不匹配 ⇒ 报错而非静默绿——
 # sed 对不匹配行静默改 0 行且 exit 0；锚定 $ 只翻 frontmatter 的精确 'status: ready'，

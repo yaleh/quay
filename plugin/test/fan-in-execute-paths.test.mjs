@@ -704,6 +704,129 @@ test("⑤ REAL positive — a task whose ACTUAL diff is fully within its declare
   assert.match(r.stdout, /ANTI-DRIFT OK/, "driver must print ANTI-DRIFT OK");
 });
 
+// ── ⑨ land 前 anti-drift 重跑（gap-fan-in-fix-commit-delta-escapes-touches-coverage）────────────────
+// THE DEFECT: step-1's anti-drift check runs right after the merge; fix-agent commits (suite red → fix
+// patch → re-run) land AFTER it, so their touched files are never re-checked against ## Touches (real:
+// gap-worktree-remove-orphans-probes's fix commit c2917261 modified full-suite-runner.test.mjs — outside
+// Touches — and landed unnoticed). FIX: re-run the SAME driver at land time (持锁段 step 5, before flip
+// done / ff), where `git diff --name-only ${mergeTarget}...HEAD` now includes the fix commits. Judgment
+// logic UNCHANGED (AC3); only a call site is added. Normal fan-in (no fix, or fix within Touches) must
+// not false-positive (AC2).
+
+async function antiDriftLandBlockFor(task, worktree) {
+  const { prompts } = await runWorkflow({
+    args: { task, worktree, root: REPO_ROOT, runId: "fm-adland", mergeTarget: "develop" },
+  });
+  return extractBlockFromPrompts(prompts, "# anti-drift-land-block-start", "# anti-drift-land-block-end");
+}
+
+/** Symlink the REAL plugin/ tree into a temp repo as a RUNTIME-ONLY tree, and keep it OUT of git.
+ *  The real fan-in worktree has plugin/ as a TRACKED real dir; here it is only a runtime-resolution
+ *  symlink (the driver resolves ${worktree}/plugin/scripts/…). Without the .git/info/exclude entry a
+ *  later `git add -A` (a fix-agent commit) would stage the symlink and pollute `git diff`.
+ *  ⛔ HAZARD: because this symlink points at the REAL repo's plugin/, any test that WRITES a file under
+ *  <temp>/plugin/… writes through the symlink into the real worktree (the recorded
+ *  full-suite-runner.test.mjs truncation, 2026-08-17). Fix-agent commit fixtures in this file must use
+ *  a NON-plugin path (e.g. packages/quay/test/…) to model the out-of-scope file. */
+function symlinkPluginForGit(dir) {
+  fs.symlinkSync(path.join(REPO_ROOT, "plugin"), path.join(dir, "plugin"), "dir");
+  fs.appendFileSync(path.join(dir, ".git", "info", "exclude"), "\nplugin\n");
+}
+
+function commitFiles(dir, files, msg) {
+  const run = (args) => {
+    const r = spawnSync("git", args, { cwd: dir, encoding: "utf8" });
+    if (r.status !== 0) throw new Error(`git ${args.join(" ")} failed (${r.status}): ${r.stderr}`);
+  };
+  for (const [p, content] of Object.entries(files)) {
+    const full = path.join(dir, p);
+    fs.mkdirSync(path.dirname(full), { recursive: true });
+    fs.writeFileSync(full, content, "utf8");
+  }
+  run(["add", "-A"]);
+  run(["commit", "-qm", msg]);
+}
+
+test("⑨ wiring — the phase-2 prompt carries a land-time anti-drift block BEFORE flip done / ff (持锁段 step 5)", async (t) => {
+  const { prompts } = await runWorkflow({
+    args: { task: "gap-test-adland-wire", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-adland-wire", mergeTarget: "develop" },
+  });
+  const block = extractBlockFromPrompts(prompts, "# anti-drift-land-block-start", "# anti-drift-land-block-end");
+  assert.ok(block.includes("anti-drift-touches-check.ts --task"), "land block must invoke the anti-drift driver");
+  assert.ok(block.includes("--merge-target develop"), "land block must pass the merge target");
+  assert.ok(block.includes("exit 2"), "land block must fail closed (exit 2) on violation");
+  // Placement: the block runs in the phase-2 prompt, in the持锁段 step 5, BEFORE the flip done and the ff.
+  const p2 = promptContaining(prompts, "# anti-drift-land-block-start");
+  const step5Idx = p2.indexOf("【持锁段 step 5");
+  const landIdx = p2.indexOf("# anti-drift-land-block-start");
+  const flipIdx = p2.indexOf("# flip-block-start");
+  const ffIdx = p2.indexOf("fan-in-ff-merge.sh --task");
+  assert.ok(step5Idx !== -1, "phase-2 prompt must carry 持锁段 step 5");
+  assert.ok(landIdx > step5Idx, "land block must be inside step 5 (持锁段)");
+  assert.ok(flipIdx > landIdx, "land block must come BEFORE the flip block (flip done)");
+  assert.ok(ffIdx > landIdx, "land block must come BEFORE the ff-merge");
+});
+
+test("⑨ REAL fix commit out-of-bounds ⇒ HARD FAIL — step-1 passes, the land re-check bites (AC1 取假)", async (t) => {
+  // The falsifiable case: step-1's anti-drift (the ONLY check in the pre-fix flow) passes on the pre-fix
+  // state; the fix agent then commits a file OUTSIDE Touches (the c2917261 shape: a test file not
+  // declared); the land-time re-check must HARD-FAIL (no flip done, no ff).
+  const repo = makeAntiDriftRepo({
+    taskId: "gap-test-adland",
+    body: "---\nid: gap-test-adland\nstatus: ready\n---\n## Touches\n- tasks/gap-test-adland.md\n- pkg/a/**\n",
+    files: { "pkg/a/x.js": "x\n", "pkg/a/y.js": "y\n" },
+  });
+  t.after(() => cleanup(repo));
+  symlinkPluginForGit(repo);
+  // 1. The step-1 anti-drift check (the pre-fix flow's only guard) passes on the in-scope state.
+  const step1 = await antiDriftBlockFor("gap-test-adland", repo);
+  const r1 = runBash(step1, { cwd: repo });
+  assert.equal(r1.status, 0, `step-1 anti-drift must pass pre-fix, got ${r1.status}: ${r1.stderr}`);
+  assert.match(r1.stdout, /ANTI-DRIFT OK/, "step-1 must print ANTI-DRIFT OK pre-fix");
+  // 2. The fix agent commits a file OUTSIDE Touches (the recorded defect shape: a test file not
+  // declared). NOTE: NOT under plugin/ — the temp repo's plugin/ is a runtime-only symlink excluded
+  // from git; the out-of-declared falsifiability is path-independent (the c2917261 shape = a test file
+  // outside the declared Touches).
+  commitFiles(repo, { "packages/quay/test/full-suite-runner.test.mjs": "import { test } from 'node:test'\n" }, "fix: hermetic seam");
+  // 3. The land-time re-check must now HARD-FAIL (the fix commit's file is out-of-declared).
+  const land = await antiDriftLandBlockFor("gap-test-adland", repo);
+  const r2 = runBash(land, { cwd: repo });
+  assert.notEqual(r2.status, 0, `land re-check must HARD-FAIL on the fix commit's out-of-scope file, got ${r2.status}`);
+  assert.match(r2.stdout, /ANTI-DRIFT HARD FAIL/, "driver must print ANTI-DRIFT HARD FAIL");
+  assert.match(r2.stdout, /packages\/quay\/test\/full-suite-runner\.test\.mjs/, "the fix commit's out-of-declared file must be named");
+  assert.match(r2.stderr, /FATAL/, "the block must FATAL (no flip done, no ff)");
+});
+
+test("⑨ AC2 idempotent — a fix commit fully WITHIN Touches does not false-positive (land re-check passes)", async (t) => {
+  const repo = makeAntiDriftRepo({
+    taskId: "gap-test-adland-ok",
+    body: "---\nid: gap-test-adland-ok\nstatus: ready\n---\n## Touches\n- tasks/gap-test-adland-ok.md\n- pkg/a/**\n",
+    files: { "pkg/a/x.js": "x\n", "pkg/a/y.js": "y\n" },
+  });
+  t.after(() => cleanup(repo));
+  symlinkPluginForGit(repo);
+  // The fix agent commits a file WITHIN Touches (a legit in-scope fix — must NOT false-positive).
+  commitFiles(repo, { "pkg/a/z.js": "z\n" }, "fix: in-scope");
+  const land = await antiDriftLandBlockFor("gap-test-adland-ok", repo);
+  const r = runBash(land, { cwd: repo });
+  assert.equal(r.status, 0, `legitimate in-scope fix must stay green, got ${r.status}: ${r.stderr}`);
+  assert.match(r.stdout, /ANTI-DRIFT OK/, "driver must print ANTI-DRIFT OK");
+});
+
+test("⑨ AC2 idempotent — a normal fan-in with NO fix commit passes the land re-check (repeat of step 1)", async (t) => {
+  const repo = makeAntiDriftRepo({
+    taskId: "gap-test-adland-none",
+    body: "---\nid: gap-test-adland-none\nstatus: ready\n---\n## Touches\n- tasks/gap-test-adland-none.md\n- pkg/a/**\n",
+    files: { "pkg/a/x.js": "x\n", "pkg/a/y.js": "y\n" },
+  });
+  t.after(() => cleanup(repo));
+  symlinkPluginForGit(repo);
+  const land = await antiDriftLandBlockFor("gap-test-adland-none", repo);
+  const r = runBash(land, { cwd: repo });
+  assert.equal(r.status, 0, `no-fix normal fan-in must pass the land re-check, got ${r.status}: ${r.stderr}`);
+  assert.match(r.stdout, /ANTI-DRIFT OK/, "driver must print ANTI-DRIFT OK");
+});
+
 // ── ⑥ bracket-close (gap-fan-in-auto-close-telemetry-bracket, occurrence 3) ─────────────────────────
 // The fan-in flow's step 5.5 closes the fanned-in task's telemetry bracket AFTER the ff succeeds
 // (dispatch's --task-start was never closed on land ⇒ stale bracket until a manual/outer reconcile).

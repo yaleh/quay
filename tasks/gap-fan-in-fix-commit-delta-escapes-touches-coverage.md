@@ -37,21 +37,21 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: fix-agent 提交（anti-drift 首次检查之后引入）触碰未声明文件 ⇒ land 前重跑 anti-drift HARD FAIL（不翻 done、不 ff），或被显式标出。
-- [ ] AC2: 正常 fan-in（无 fix commit 或 fix 全在 Touches 内）不误伤——重跑幂等。
-- [ ] AC3: 判定逻辑（anti-drift-touches-check.ts）不变或最小变，只挪/增调用点。
-- [ ] AC4: 测试全绿 + `--for-task` scoped 门绿。
+- [x] AC1: fix-agent 提交（anti-drift 首次检查之后引入）触碰未声明文件 ⇒ land 前重跑 anti-drift HARD FAIL（不翻 done、不 ff），或被显式标出。
+- [x] AC2: 正常 fan-in（无 fix commit 或 fix 全在 Touches 内）不误伤——重跑幂等。
+- [x] AC3: 判定逻辑（anti-drift-touches-check.ts）不变或最小变，只挪/增调用点。
+- [x] AC4: 测试全绿 + `--for-task` scoped 门绿。
 
 ## Definition of Done
 
-- [ ] land 前（或 fix commit 后）anti-drift 覆盖全 delta（含 fix commit），越界触碰 HARD FAIL，正常 fan-in 幂等，scoped + 全量绿。
+- [x] land 前（或 fix commit 后）anti-drift 覆盖全 delta（含 fix commit），越界触碰 HARD FAIL，正常 fan-in 幂等，scoped + 全量绿。
 
 ## Touches
 
-- plugin/workflows/fan-in-execute.js（anti-drift 调用点增补——land 前重跑或 fix commit 后 re-check；双拷贝）
+- plugin/workflows/fan-in-execute.js（anti-drift land 前重跑调用点增补——持锁段 step 5 flip done 前；双拷贝）
 - .claude/workflows/fan-in-execute.js（同 dual-copy 的 landed 副本，与 plugin/workflows 逐字节一致）
-- plugin/scripts/anti-drift-touches-check.ts（如需支持「fix commit 后增量」的输入形态；否则不动）
-- plugin/test/fan-in-execute-paths.test.mjs（fix commit 越界触碰 HARD FAIL 路径测试 + 幂等回归）
-- plugin/test/anti-drift-touches-check.test.mjs（判定逻辑回归）
-- capability-catalog.sh（变更脚本的能力声明，如需）
-- tasks/gap-fan-in-fix-commit-delta-escapes-touches-coverage.md（自身）
+- plugin/test/fan-in-execute-paths.test.mjs（⑨ 组：fix commit 越界触碰 HARD FAIL 路径测试 + 幂等回归，4 条）
+- tasks/gap-fan-in-fix-commit-delta-escapes-touches-coverage.md（自身：AC/DoD/Touches 更新）
+- plugin/scripts/anti-drift-touches-check.ts（未变——AC3 判定逻辑不动，只增调用点；已在 step 1 与 land 前共用同一驱动）
+- experiments/quay-perpetual-stream/test/anti-drift-touches-check.test.mjs（未变——AC3 判定逻辑不变，回归已在 scoped 跑绿）
+- plugin/scripts/capability-catalog.sh（未变——`anti-drift-touches-check.ts` 能力声明已覆盖「landed change vs Touches」，两个调用点同语义）
