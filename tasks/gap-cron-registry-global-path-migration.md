@@ -61,7 +61,8 @@ manager 先例:  QUAY_GLOBAL_DIR="${QUAY_GLOBAL_DIR:-$HOME/.quay-global}"
 
 ## Touches
 
-- plugin/scripts/outer-cron-registry.ts（判据读取路径迁移到全局 per-layer + --record/审计线；git 版 plugin/scripts/outer-cron-registry.json 已删除）
+- plugin/scripts/outer-cron-registry.ts（判据读取路径迁移到全局 per-layer + --record/审计线）
+- plugin/scripts/outer-cron-registry.json（AC1：git 版收据删除——退出 git，读写迁全局 per-layer 路径；touches-parser 剥尾部注解故单独 bullet 机械声明）
 - plugin/scripts/outer-anchor-check.ts（消费面评估——不读注册表文件，仅被 outer-cron-registry.ts import extractCanonical/LAYERS，无需改动）
 - plugin/test/outer-cron-registry.test.mjs（测试 pin 集迁移到全局 per-layer 载体 + AC1/AC2/AC5 新增测试）
 - plugin/scripts/direct-to-develop-bypass-check.ts（AC3：撤 outer-cron-registry.json 排除项 + 167b7052/f882ad76 入 ruled 表）
