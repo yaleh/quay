@@ -1,7 +1,7 @@
 ---
 id: gap-outer-tick-log-l2-monitoring-tick-false-red
 title: "outer-tick-log-check L2 trace 判据对纯监控 tick 必然触发（correct 需 git 证据，而监控 tick 无 git 动作；no-action 又因 pool<floor 非法）——发生率 2/日"
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
