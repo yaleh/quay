@@ -1,7 +1,7 @@
 ---
 id: gap-worktree-remove-orphans-probes
 title: worktree 提前拆除使 claude-probe 测试探针孤儿化——reaper 只收「测试自清路径」，收不到「worktree 先删」
-status: ready
+status: done
 labels:
   - gap
   - defect
