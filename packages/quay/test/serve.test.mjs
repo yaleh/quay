@@ -153,15 +153,15 @@ async function main() {
     server = await startServer({ port: 0 });
     const port = server.address().port;
 
-    // --- GET / (list) ---
-    const list = await get(port, "/");
-    assert(list.status === 200, `GET / returns 200 (got ${list.status})`);
+    // --- GET /tasks (list) — `/` is now the dashboard landing page (gap-webui-root-should-show-dashboard) ---
+    const list = await get(port, "/tasks");
+    assert(list.status === 200, `GET /tasks returns 200 (got ${list.status})`);
     assert(list.body.includes("SRV-1") && list.body.includes("SRV-2"),
-      "GET / body contains both seeded task ids");
+      "GET /tasks body contains both seeded task ids");
     assert(list.body.includes("todo") && list.body.includes("done"),
-      "GET / body contains both seeded tasks' statuses");
+      "GET /tasks body contains both seeded tasks' statuses");
     assert(list.body.includes("Servable task one"),
-      "GET / body contains the seeded task's title");
+      "GET /tasks body contains the seeded task's title");
 
     // --- GET /task/<id> (detail) ---
     // The web action-buttons POST route and its form renders were removed
@@ -213,31 +213,31 @@ async function main() {
       const pfxPort = pfxServer.address().port;
 
       // ?prefix=PFXA — should return only PFXA-1, not PFXB-1
-      const filteredA = await get(pfxPort, "/?prefix=PFXA");
-      assert(filteredA.status === 200, "GET /?prefix=PFXA returns 200");
-      assert(filteredA.body.includes("PFXA-1"), "GET /?prefix=PFXA body includes PFXA-1");
-      assert(!filteredA.body.includes("PFXB-1"), "GET /?prefix=PFXA body excludes PFXB-1 (different prefix)");
+      const filteredA = await get(pfxPort, "/tasks?prefix=PFXA");
+      assert(filteredA.status === 200, "GET /tasks?prefix=PFXA returns 200");
+      assert(filteredA.body.includes("PFXA-1"), "GET /tasks?prefix=PFXA body includes PFXA-1");
+      assert(!filteredA.body.includes("PFXB-1"), "GET /tasks?prefix=PFXA body excludes PFXB-1 (different prefix)");
 
       // ?prefix=PFXB — should return only PFXB-1
-      const filteredB = await get(pfxPort, "/?prefix=PFXB");
-      assert(filteredB.status === 200, "GET /?prefix=PFXB returns 200");
-      assert(filteredB.body.includes("PFXB-1"), "GET /?prefix=PFXB body includes PFXB-1");
-      assert(!filteredB.body.includes("PFXA-1"), "GET /?prefix=PFXB body excludes PFXA-1");
+      const filteredB = await get(pfxPort, "/tasks?prefix=PFXB");
+      assert(filteredB.status === 200, "GET /tasks?prefix=PFXB returns 200");
+      assert(filteredB.body.includes("PFXB-1"), "GET /tasks?prefix=PFXB body includes PFXB-1");
+      assert(!filteredB.body.includes("PFXA-1"), "GET /tasks?prefix=PFXB body excludes PFXA-1");
 
       // No prefix — all tasks returned (no regression)
-      const noFilter = await get(pfxPort, "/");
-      assert(noFilter.status === 200, "GET / (no prefix) returns 200 for prefix-test workspace");
+      const noFilter = await get(pfxPort, "/tasks");
+      assert(noFilter.status === 200, "GET /tasks (no prefix) returns 200 for prefix-test workspace");
       assert(noFilter.body.includes("PFXA-1") && noFilter.body.includes("PFXB-1"),
-        "GET / (no prefix) includes both PFXA-1 and PFXB-1 — no regression");
+        "GET /tasks (no prefix) includes both PFXA-1 and PFXB-1 — no regression");
 
       // Prefix nav appears since 2 distinct prefixes exist (PFXA, PFXB)
-      assert(noFilter.body.includes("Prefix:"), "GET / body includes 'Prefix:' nav row when 2+ distinct prefixes exist");
+      assert(noFilter.body.includes("Prefix:"), "GET /tasks body includes 'Prefix:' nav row when 2+ distinct prefixes exist");
 
       // case-insensitive: ?prefix=pfxa should match PFXA-1
-      const filteredLower = await get(pfxPort, "/?prefix=pfxa");
-      assert(filteredLower.status === 200, "GET /?prefix=pfxa (lowercase) returns 200");
-      assert(filteredLower.body.includes("PFXA-1"), "GET /?prefix=pfxa (lowercase) includes PFXA-1 (case-insensitive)");
-      assert(!filteredLower.body.includes("PFXB-1"), "GET /?prefix=pfxa (lowercase) excludes PFXB-1");
+      const filteredLower = await get(pfxPort, "/tasks?prefix=pfxa");
+      assert(filteredLower.status === 200, "GET /tasks?prefix=pfxa (lowercase) returns 200");
+      assert(filteredLower.body.includes("PFXA-1"), "GET /tasks?prefix=pfxa (lowercase) includes PFXA-1 (case-insensitive)");
+      assert(!filteredLower.body.includes("PFXB-1"), "GET /tasks?prefix=pfxa (lowercase) excludes PFXB-1");
     } finally {
       if (pfxServer) {
         pfxServer.close();
@@ -279,31 +279,31 @@ async function main() {
 
       // ?sort=updated: SRT-C (most recent) should appear before SRT-A (oldest).
       // Default (?sort=id) alphabetical order would be SRT-A, SRT-B, SRT-C.
-      const sortedByUpdated = await get(sortPort, "/?sort=updated");
-      assert(sortedByUpdated.status === 200, "GET /?sort=updated returns 200");
+      const sortedByUpdated = await get(sortPort, "/tasks?sort=updated");
+      assert(sortedByUpdated.status === 200, "GET /tasks?sort=updated returns 200");
       assert(
         sortedByUpdated.body.includes("SRT-C") && sortedByUpdated.body.includes("SRT-A"),
-        "GET /?sort=updated body includes both SRT-C and SRT-A"
+        "GET /tasks?sort=updated body includes both SRT-C and SRT-A"
       );
       // Verify SRT-C appears before SRT-A in the rendered HTML body.
       const posC = sortedByUpdated.body.indexOf("SRT-C");
       const posA = sortedByUpdated.body.indexOf("SRT-A");
       assert(
         posC < posA,
-        `GET /?sort=updated: SRT-C (most recent) appears before SRT-A (oldest) in the HTML (posC=${posC}, posA=${posA})`
+        `GET /tasks?sort=updated: SRT-C (most recent) appears before SRT-A (oldest) in the HTML (posC=${posC}, posA=${posA})`
       );
 
       // Sort nav should include "Updated" link.
       assert(
         sortedByUpdated.body.includes("Updated"),
-        "GET /?sort=updated body includes 'Updated' in the sort nav"
+        "GET /tasks?sort=updated body includes 'Updated' in the sort nav"
       );
 
       // No regression: default order (no sort param) still returns 200.
-      const noSort = await get(sortPort, "/");
-      assert(noSort.status === 200, "GET / (no sort param) returns 200 after adding sort-by-updated");
+      const noSort = await get(sortPort, "/tasks");
+      assert(noSort.status === 200, "GET /tasks (no sort param) returns 200 after adding sort-by-updated");
       assert(noSort.body.includes("SRT-A") && noSort.body.includes("SRT-C"),
-        "GET / (no sort param) includes both seeded tasks — no regression");
+        "GET /tasks (no sort param) includes both seeded tasks — no regression");
     } finally {
       if (sortServer) {
         sortServer.close();
@@ -379,100 +379,100 @@ async function main() {
       // --- QX-015 (UQ-003): orientation banner removed by DIR-007 (iteration 10) ---
       // Banner was misleading (depicted needs-human as sequential step, not side-branch)
       // and had disproportionate layout cost. Assertions updated to reflect removal.
-      const listForBanner = await get(ux3Port, "/");
-      assert(listForBanner.status === 200, "GET / (UX3 server) returns 200");
+      const listForBanner = await get(ux3Port, "/tasks");
+      assert(listForBanner.status === 200, "GET /tasks (UX3 server) returns 200");
       assert(
         !listForBanner.body.includes("AI-assisted task management"),
-        "GET / list page no longer contains orientation banner text (DIR-007, QX-015 removed)"
+        "GET /tasks list page no longer contains orientation banner text (DIR-007, QX-015 removed)"
       );
       assert(
         listForBanner.body.includes("todo"),
-        "GET / list page HTML still contains 'todo' status (filter nav present) (DIR-007)"
+        "GET /tasks list page HTML still contains 'todo' status (filter nav present) (DIR-007)"
       );
 
       // --- QX-012 (UQ-011, UQ-012): col-role, col-labels classes in list HTML + CSS rule ---
       assert(
         listForBanner.body.includes('class="col-role"'),
-        'GET / list page table header includes class="col-role" (QX-012, UQ-012)'
+        'GET /tasks list page table header includes class="col-role" (QX-012, UQ-012)'
       );
       assert(
         listForBanner.body.includes('class="col-labels"'),
-        'GET / list page table header includes class="col-labels" (QX-012, UQ-011/012)'
+        'GET /tasks list page table header includes class="col-labels" (QX-012, UQ-011/012)'
       );
       assert(
         listForBanner.body.includes(".col-role, .col-labels { display: none; }") ||
         listForBanner.body.includes(".col-role,.col-labels{display:none}") ||
         (listForBanner.body.includes(".col-role") && listForBanner.body.includes("display: none")),
-        "GET / page styles include media-query rule hiding .col-role and .col-labels (QX-012)"
+        "GET /tasks page styles include media-query rule hiding .col-role and .col-labels (QX-012)"
       );
 
       // --- QX-011 (UQ-009): task title links include ?from= on list page ---
       assert(
         listForBanner.body.includes("?from="),
-        "GET / list page task title links include ?from= query param (QX-011, UQ-009)"
+        "GET /tasks list page task title links include ?from= query param (QX-011, UQ-009)"
       );
 
       // --- QX-011 (UQ-009): detail page back link uses ?from= param ---
-      // Access detail page with ?from=%2F%3Fprefix%3DQX (encodes /?prefix=QX)
-      const fromValue = encodeURIComponent("/?prefix=QX");
+      // Access detail page with ?from=%2Ftasks%3Fprefix%3DQX (encodes /tasks?prefix=QX)
+      const fromValue = encodeURIComponent("/tasks?prefix=QX");
       const detailWithFrom = await get(ux3Port, `/task/UX3-1?from=${fromValue}`);
-      assert(detailWithFrom.status === 200, `GET /task/UX3-1?from=/?prefix=QX returns 200`);
+      assert(detailWithFrom.status === 200, `GET /task/UX3-1?from=/tasks?prefix=QX returns 200`);
       assert(
-        detailWithFrom.body.includes('href="/?prefix=QX"'),
-        `GET /task/UX3-1?from=/?prefix=QX: back link href is "/?prefix=QX" (QX-011, UQ-009)`
+        detailWithFrom.body.includes('href="/tasks?prefix=QX"'),
+        `GET /task/UX3-1?from=/tasks?prefix=QX: back link href is "/tasks?prefix=QX" (QX-011, UQ-009)`
       );
 
-      // --- QX-011 (UQ-009): detail page back link defaults to "/" when no from= ---
+      // --- QX-011 (UQ-009): detail page back link defaults to "/tasks" when no from= ---
       const detailNoFrom = await get(ux3Port, `/task/UX3-1`);
       assert(detailNoFrom.status === 200, "GET /task/UX3-1 (no from=) returns 200");
       assert(
-        detailNoFrom.body.includes('href="/"') && detailNoFrom.body.includes("back to list"),
-        'GET /task/UX3-1 (no from=): back link defaults to href="/" (QX-011)'
+        detailNoFrom.body.includes('href="/tasks') && detailNoFrom.body.includes("back to list"),
+        'GET /task/UX3-1 (no from=): back link defaults to href="/tasks" (QX-011)'
       );
 
       // --- QX-011 (UQ-009): open-redirect guard — from= with external URL rejected ---
       const externalFrom = encodeURIComponent("https://evil.com");
       const detailExternal = await get(ux3Port, `/task/UX3-1?from=${externalFrom}`);
       assert(
-        detailExternal.body.includes('href="/"') && !detailExternal.body.includes("evil.com"),
-        "GET /task/UX3-1?from=https://evil.com: open-redirect guard rejects external URL, defaults to / (QX-011)"
+        detailExternal.body.includes('href="/tasks') && !detailExternal.body.includes("evil.com"),
+        "GET /task/UX3-1?from=https://evil.com: open-redirect guard rejects external URL, defaults to /tasks (QX-011)"
       );
 
       // --- SH-002: open-redirect guard — protocol-relative URL //evil.com rejected ---
       const protoRelFrom = encodeURIComponent("//evil.com");
       const detailProtoRel = await get(ux3Port, `/task/UX3-1?from=${protoRelFrom}`);
       assert(
-        detailProtoRel.body.includes('href="/"') && !detailProtoRel.body.includes("evil.com"),
-        "GET /task/UX3-1?from=//evil.com: open-redirect guard rejects protocol-relative URL, defaults to / (SH-002)"
+        detailProtoRel.body.includes('href="/tasks') && !detailProtoRel.body.includes("evil.com"),
+        "GET /task/UX3-1?from=//evil.com: open-redirect guard rejects protocol-relative URL, defaults to /tasks (SH-002)"
       );
 
       // --- CR-010 / UQ-016: orientation banner removed (DIR-007); verify no 'in_progress' status leaks ---
       // The banner text was the only known location using 'in_progress'; verify it's gone.
       assert(
         !listForBanner.body.includes("in_progress"),
-        "GET / page does NOT contain 'in_progress' (non-existent status) anywhere (CR-010, UQ-016, DIR-007)"
+        "GET /tasks page does NOT contain 'in_progress' (non-existent status) anywhere (CR-010, UQ-016, DIR-007)"
       );
       assert(
         listForBanner.body.includes("ready"),
-        "GET / page still contains 'ready' status (filter nav) (CR-010, UQ-016)"
+        "GET /tasks page still contains 'ready' status (filter nav) (CR-010, UQ-016)"
       );
       // --- gap-superseded-modeled-as-task-lifecycle-terminal: superseded is a modeled
       // terminal and renders as an independent filter-nav bucket (AC3) ---
       assert(
         listForBanner.body.includes("superseded"),
-        "GET / page contains 'superseded' status as an independent filter-nav bucket (AC3, superseded terminal)"
+        "GET /tasks page contains 'superseded' status as an independent filter-nav bucket (AC3, superseded terminal)"
       );
 
       // --- QX-013 (UQ-013): error banner rendered on list page when ?error= is in URL ---
-      const errorInURL = await get(ux3Port, "/?error=Gate+check+failed");
-      assert(errorInURL.status === 200, "GET /?error=Gate+check+failed returns 200");
+      const errorInURL = await get(ux3Port, "/tasks?error=Gate+check+failed");
+      assert(errorInURL.status === 200, "GET /tasks?error=Gate+check+failed returns 200");
       assert(
         errorInURL.body.includes("error-banner"),
-        'GET /?error=...: list page renders .error-banner element (QX-013, UQ-013)'
+        'GET /tasks?error=...: list page renders .error-banner element (QX-013, UQ-013)'
       );
       assert(
         errorInURL.body.includes("Gate check failed"),
-        'GET /?error=Gate+check+failed: list page error banner shows the error message (QX-013)'
+        'GET /tasks?error=Gate+check+failed: list page error banner shows the error message (QX-013)'
       );
 
       // --- QX-013 (UQ-013): error banner on detail page ---
@@ -483,10 +483,10 @@ async function main() {
       );
 
       // --- QX-013 (UQ-013): success banner rendered on list page when ?success= is in URL ---
-      const successInURL = await get(ux3Port, "/?success=Task+advanced");
+      const successInURL = await get(ux3Port, "/tasks?success=Task+advanced");
       assert(
         successInURL.body.includes("success-banner"),
-        'GET /?success=...: list page renders .success-banner element (QX-013)'
+        'GET /tasks?success=...: list page renders .success-banner element (QX-013)'
       );
 
     } finally {
@@ -531,34 +531,34 @@ async function main() {
 
       // --- QX-016 (CB-013): Web UI multi-label AND-filter ---
       // ?label=bug&label=cli should return only BOTH-1 (has both), not BUGONLY-1 (only bug)
-      const multiLabel = await get(qx16Port, "/?label=bug&label=cli");
-      assert(multiLabel.status === 200, "GET /?label=bug&label=cli returns 200 (multi-label AND-filter)");
-      assert(multiLabel.body.includes("BOTH-1"), "GET /?label=bug&label=cli includes BOTH-1 (has both labels) (QX-016, CB-013)");
-      assert(!multiLabel.body.includes("BUGONLY-1"), "GET /?label=bug&label=cli excludes BUGONLY-1 (has only bug, not cli) (QX-016, CB-013)");
-      assert(!multiLabel.body.includes("NOLAB-1"), "GET /?label=bug&label=cli excludes NOLAB-1 (has no labels) (QX-016, CB-013)");
+      const multiLabel = await get(qx16Port, "/tasks?label=bug&label=cli");
+      assert(multiLabel.status === 200, "GET /tasks?label=bug&label=cli returns 200 (multi-label AND-filter)");
+      assert(multiLabel.body.includes("BOTH-1"), "GET /tasks?label=bug&label=cli includes BOTH-1 (has both labels) (QX-016, CB-013)");
+      assert(!multiLabel.body.includes("BUGONLY-1"), "GET /tasks?label=bug&label=cli excludes BUGONLY-1 (has only bug, not cli) (QX-016, CB-013)");
+      assert(!multiLabel.body.includes("NOLAB-1"), "GET /tasks?label=bug&label=cli excludes NOLAB-1 (has no labels) (QX-016, CB-013)");
 
       // Single-label still works (no regression from QW-005).
-      const singleLabel = await get(qx16Port, "/?label=bug");
-      assert(singleLabel.status === 200, "GET /?label=bug returns 200 (single-label, no regression) (QX-016)");
-      assert(singleLabel.body.includes("BOTH-1"), "GET /?label=bug includes BOTH-1 (has bug label) (QX-016)");
-      assert(singleLabel.body.includes("BUGONLY-1"), "GET /?label=bug includes BUGONLY-1 (has bug label) (QX-016)");
-      assert(!singleLabel.body.includes("NOLAB-1"), "GET /?label=bug excludes NOLAB-1 (no labels) (QX-016)");
+      const singleLabel = await get(qx16Port, "/tasks?label=bug");
+      assert(singleLabel.status === 200, "GET /tasks?label=bug returns 200 (single-label, no regression) (QX-016)");
+      assert(singleLabel.body.includes("BOTH-1"), "GET /tasks?label=bug includes BOTH-1 (has bug label) (QX-016)");
+      assert(singleLabel.body.includes("BUGONLY-1"), "GET /tasks?label=bug includes BUGONLY-1 (has bug label) (QX-016)");
+      assert(!singleLabel.body.includes("NOLAB-1"), "GET /tasks?label=bug excludes NOLAB-1 (no labels) (QX-016)");
 
       // No label filter — all tasks returned.
-      const noLabel = await get(qx16Port, "/");
-      assert(noLabel.status === 200, "GET / (no label filter) returns 200 — no regression (QX-016)");
+      const noLabel = await get(qx16Port, "/tasks");
+      assert(noLabel.status === 200, "GET /tasks (no label filter) returns 200 — no regression (QX-016)");
       assert(noLabel.body.includes("BOTH-1") && noLabel.body.includes("BUGONLY-1") && noLabel.body.includes("NOLAB-1"),
-        "GET / (no label filter) returns all tasks — no regression (QX-016)");
+        "GET /tasks (no label filter) returns all tasks — no regression (QX-016)");
 
       // --- QX-018 (UQ-017): updatedAt displayed on list page as "updated" column ---
       assert(
         noLabel.body.includes(">updated<") || noLabel.body.includes(">updated</th>"),
-        'GET / list page table includes "updated" column header (QX-018, UQ-017)'
+        'GET /tasks list page table includes "updated" column header (QX-018, UQ-017)'
       );
       // Tasks with updatedAt (from quay-native store.js) render a relative time.
       assert(
         noLabel.body.includes(" ago") || noLabel.body.includes("col-updated"),
-        "GET / list page rows include relative-time ago display or col-updated class (QX-018, UQ-017)"
+        "GET /tasks list page rows include relative-time ago display or col-updated class (QX-018, UQ-017)"
       );
 
       // --- QX-018 (UQ-017): "last updated" on detail page ---
@@ -606,77 +606,77 @@ async function main() {
 
       // --- QX-020 (UQ-019): label-nav toggle semantics ---
       // With ?label=alpha&label=beta active, the label nav should offer toggle links.
-      const twolabel = await get(qx20Port, "/?label=alpha&label=beta");
-      assert(twolabel.status === 200, "GET /?label=alpha&label=beta returns 200 (QX-020, UQ-019)");
+      const twolabel = await get(qx20Port, "/tasks?label=alpha&label=beta");
+      assert(twolabel.status === 200, "GET /tasks?label=alpha&label=beta returns 200 (QX-020, UQ-019)");
       // The page should include TOGGLE-1 (has both) but not TOGGLE-2 (only alpha)
-      assert(twolabel.body.includes("TOGGLE-1"), "GET /?label=alpha&label=beta includes TOGGLE-1 (has both) (QX-020)");
-      assert(!twolabel.body.includes("TOGGLE-2"), "GET /?label=alpha&label=beta excludes TOGGLE-2 (only alpha) (QX-020)");
+      assert(twolabel.body.includes("TOGGLE-1"), "GET /tasks?label=alpha&label=beta includes TOGGLE-1 (has both) (QX-020)");
+      assert(!twolabel.body.includes("TOGGLE-2"), "GET /tasks?label=alpha&label=beta excludes TOGGLE-2 (only alpha) (QX-020)");
 
       // Toggle-off: the link for "alpha" (already active) should produce a URL to remove alpha.
       // With alpha and beta both active, clicking "alpha remove" should leave only ?label=beta.
-      // The "(remove)" link pattern is: <a href="/?label=beta">remove</a> somewhere on page.
-      // We check the page includes the pattern href="/?label=beta" (or with other params) as a remove link.
+      // The "(remove)" link pattern is: <a href="/tasks?label=beta">remove</a> somewhere on page.
+      // We check the page includes the pattern href="/tasks?label=beta" (or with other params) as a remove link.
       assert(
         twolabel.body.includes(">remove<") || twolabel.body.includes("remove</a>"),
-        "GET /?label=alpha&label=beta label nav contains (remove) link for active labels (QX-020, UQ-019)"
+        "GET /tasks?label=alpha&label=beta label nav contains (remove) link for active labels (QX-020, UQ-019)"
       );
 
       // Active label "alpha" should be shown as bold (strong tag).
       // QX-034 (UQ-032): label now renders with count badge: <strong>alpha (N)</strong>
       assert(
         twolabel.body.includes("<strong>alpha") && twolabel.body.includes("</strong>"),
-        "GET /?label=alpha&label=beta shows active label 'alpha' in bold (QX-020, UQ-019)"
+        "GET /tasks?label=alpha&label=beta shows active label 'alpha' in bold (QX-020, UQ-019)"
       );
 
       // Active label "beta" should also be shown as bold.
       assert(
         twolabel.body.includes("<strong>beta") && twolabel.body.includes("</strong>"),
-        "GET /?label=alpha&label=beta shows active label 'beta' in bold (QX-020, UQ-019)"
+        "GET /tasks?label=alpha&label=beta shows active label 'beta' in bold (QX-020, UQ-019)"
       );
 
       // A clear-all link ("All") should be present when 2+ labels are active.
       assert(
         twolabel.body.includes(">All<") || twolabel.body.includes("Label: <a"),
-        "GET /?label=alpha&label=beta label nav includes an All/clear link (QX-020, UQ-019)"
+        "GET /tasks?label=alpha&label=beta label nav includes an All/clear link (QX-020, UQ-019)"
       );
 
       // Toggle-on: with no labels active, clicking "alpha" should produce ?label=alpha.
-      const noLabelPage = await get(qx20Port, "/");
-      assert(noLabelPage.status === 200, "GET / (no label filter) returns 200 for toggle-on test (QX-020)");
+      const noLabelPage = await get(qx20Port, "/tasks");
+      assert(noLabelPage.status === 200, "GET /tasks (no label filter) returns 200 for toggle-on test (QX-020)");
       // The unfiltered page's label nav should link to ?label=alpha for the alpha label.
       assert(
         noLabelPage.body.includes("label=alpha"),
-        "GET / (no labels) label nav includes link with label=alpha (toggle-on semantics) (QX-020, UQ-019)"
+        "GET /tasks (no labels) label nav includes link with label=alpha (toggle-on semantics) (QX-020, UQ-019)"
       );
 
       // --- QX-021 (CB-007): Web UI title search via ?q= ---
       // ?q=gamma should return only TOGGLE-3 (title: "Gamma search task")
-      const searchGamma = await get(qx20Port, "/?q=gamma");
-      assert(searchGamma.status === 200, "GET /?q=gamma returns 200 (QX-021, CB-007)");
-      assert(searchGamma.body.includes("TOGGLE-3"), "GET /?q=gamma includes TOGGLE-3 (title contains Gamma) (QX-021)");
-      assert(!searchGamma.body.includes("TOGGLE-1"), "GET /?q=gamma excludes TOGGLE-1 (title: Alpha beta task) (QX-021, CB-007)");
-      assert(!searchGamma.body.includes("TOGGLE-2"), "GET /?q=gamma excludes TOGGLE-2 (title: Alpha only task) (QX-021)");
+      const searchGamma = await get(qx20Port, "/tasks?q=gamma");
+      assert(searchGamma.status === 200, "GET /tasks?q=gamma returns 200 (QX-021, CB-007)");
+      assert(searchGamma.body.includes("TOGGLE-3"), "GET /tasks?q=gamma includes TOGGLE-3 (title contains Gamma) (QX-021)");
+      assert(!searchGamma.body.includes("TOGGLE-1"), "GET /tasks?q=gamma excludes TOGGLE-1 (title: Alpha beta task) (QX-021, CB-007)");
+      assert(!searchGamma.body.includes("TOGGLE-2"), "GET /tasks?q=gamma excludes TOGGLE-2 (title: Alpha only task) (QX-021)");
 
       // ?q= (empty) should return all tasks (no filter applied)
-      const searchEmpty = await get(qx20Port, "/?q=");
-      assert(searchEmpty.status === 200, "GET /?q= (empty) returns 200 — no filter applied (QX-021)");
+      const searchEmpty = await get(qx20Port, "/tasks?q=");
+      assert(searchEmpty.status === 200, "GET /tasks?q= (empty) returns 200 — no filter applied (QX-021)");
       assert(
         searchEmpty.body.includes("TOGGLE-1") && searchEmpty.body.includes("TOGGLE-2") && searchEmpty.body.includes("TOGGLE-3"),
-        "GET /?q= (empty) returns all tasks — no regression (QX-021)"
+        "GET /tasks?q= (empty) returns all tasks — no regression (QX-021)"
       );
 
       // The search form must be present: <input name="q"
       assert(
         noLabelPage.body.includes('name="q"') || noLabelPage.body.includes("name='q'"),
-        'GET / page includes search form with input name="q" (QX-021, CB-007)'
+        'GET /tasks page includes search form with input name="q" (QX-021, CB-007)'
       );
 
       // Case-insensitive search: ?q=ALPHA should match "Alpha beta task" and "Alpha only task"
-      const searchUpper = await get(qx20Port, "/?q=ALPHA");
-      assert(searchUpper.status === 200, "GET /?q=ALPHA returns 200 (case-insensitive search, QX-021)");
-      assert(searchUpper.body.includes("TOGGLE-1"), "GET /?q=ALPHA includes TOGGLE-1 (case-insensitive) (QX-021)");
-      assert(searchUpper.body.includes("TOGGLE-2"), "GET /?q=ALPHA includes TOGGLE-2 (case-insensitive) (QX-021)");
-      assert(!searchUpper.body.includes("TOGGLE-3"), "GET /?q=ALPHA excludes TOGGLE-3 (Gamma title) (QX-021)");
+      const searchUpper = await get(qx20Port, "/tasks?q=ALPHA");
+      assert(searchUpper.status === 200, "GET /tasks?q=ALPHA returns 200 (case-insensitive search, QX-021)");
+      assert(searchUpper.body.includes("TOGGLE-1"), "GET /tasks?q=ALPHA includes TOGGLE-1 (case-insensitive) (QX-021)");
+      assert(searchUpper.body.includes("TOGGLE-2"), "GET /tasks?q=ALPHA includes TOGGLE-2 (case-insensitive) (QX-021)");
+      assert(!searchUpper.body.includes("TOGGLE-3"), "GET /tasks?q=ALPHA excludes TOGGLE-3 (Gamma title) (QX-021)");
 
     } finally {
       if (qx20Server) {
@@ -723,48 +723,48 @@ async function main() {
 
       // --- QX-023 (CB-016): body search ---
       // ?q=xyzzy-unique-body-term must return BSRCH-1 (body match) but not BSRCH-2 (no match)
-      const bodySearch = await get(qx23Port, "/?q=xyzzy-unique-body-term");
-      assert(bodySearch.status === 200, "GET /?q=body-term returns 200 (QX-023, CB-016)");
+      const bodySearch = await get(qx23Port, "/tasks?q=xyzzy-unique-body-term");
+      assert(bodySearch.status === 200, "GET /tasks?q=body-term returns 200 (QX-023, CB-016)");
       assert(bodySearch.body.includes("BSRCH-1"),
-        "GET /?q=body-term includes BSRCH-1 (body match, not title) (QX-023, CB-016)");
+        "GET /tasks?q=body-term includes BSRCH-1 (body match, not title) (QX-023, CB-016)");
       assert(!bodySearch.body.includes("BSRCH-2"),
-        "GET /?q=body-term excludes BSRCH-2 (no match) (QX-023, CB-016)");
+        "GET /tasks?q=body-term excludes BSRCH-2 (no match) (QX-023, CB-016)");
 
       // Case-insensitive body search
-      const bodySearchUpper = await get(qx23Port, "/?q=XYZZY-UNIQUE-BODY-TERM");
-      assert(bodySearchUpper.status === 200, "GET /?q=BODY-TERM (uppercase) returns 200 (QX-023, CB-016)");
+      const bodySearchUpper = await get(qx23Port, "/tasks?q=XYZZY-UNIQUE-BODY-TERM");
+      assert(bodySearchUpper.status === 200, "GET /tasks?q=BODY-TERM (uppercase) returns 200 (QX-023, CB-016)");
       assert(bodySearchUpper.body.includes("BSRCH-1"),
-        "GET /?q=BODY-TERM (uppercase) finds body match case-insensitively (QX-023, CB-016)");
+        "GET /tasks?q=BODY-TERM (uppercase) finds body match case-insensitively (QX-023, CB-016)");
 
       // --- QX-024 (UQ-025): label nav truncation ---
       // With 30 labels in the workspace, the label nav should be truncated at 25
       // and show a "more labels" indicator.
-      const manyLabels = await get(qx23Port, "/");
-      assert(manyLabels.status === 200, "GET / with 30 labels returns 200 (QX-024, UQ-025)");
+      const manyLabels = await get(qx23Port, "/tasks");
+      assert(manyLabels.status === 200, "GET /tasks with 30 labels returns 200 (QX-024, UQ-025)");
       assert(manyLabels.body.includes("more labels"),
-        "GET / with 30 labels: label nav shows 'more labels' truncation indicator (QX-024, UQ-025)");
+        "GET /tasks with 30 labels: label nav shows 'more labels' truncation indicator (QX-024, UQ-025)");
       // Confirm the truncation count is correct: 30 - 25 = 5 more labels
       assert(manyLabels.body.includes("5 more labels"),
-        "GET / with 30 labels: label nav shows '5 more labels' (QX-024, UQ-025)");
+        "GET /tasks with 30 labels: label nav shows '5 more labels' (QX-024, UQ-025)");
 
       // --- QX-025 (UQ-026): clear link preserves other filters ---
       // When status and label are active, the search clear link must preserve them
       // and only clear ?q=. The clear link href should include status= and label= but NOT q=.
-      const filteredSearch = await get(qx23Port, "/?status=todo&label=label-01&q=something");
+      const filteredSearch = await get(qx23Port, "/tasks?status=todo&label=label-01&q=something");
       assert(filteredSearch.status === 200,
-        "GET /?status=todo&label=label-01&q=something returns 200 (QX-025, UQ-026)");
+        "GET /tasks?status=todo&label=label-01&q=something returns 200 (QX-025, UQ-026)");
       // The clear link for search should include status and label, but not q
       // buildHref(statusFilter, sortKey, labelFilters, null, prefixFilter, null) produces
       // /?status=todo&label=label-01 (no q param).
       assert(
         filteredSearch.body.includes("status=todo") && filteredSearch.body.includes("label=label-01"),
-        "GET /?status=todo&label=label-01&q=something page contains filter params in nav (QX-025, UQ-026)"
+        "GET /tasks?status=todo&label=label-01&q=something page contains filter params in nav (QX-025, UQ-026)"
       );
-      // The clear link href must contain status=todo&label=label-01 and must NOT be bare "/"
+      // The clear link href must contain status=todo&label=label-01 and must NOT be bare "/tasks"
       // (which would reset all filters). Verify the clear link includes the preserved params.
       assert(
         filteredSearch.body.includes(">clear</a>"),
-        "GET /?status=todo&label=label-01&q=something page contains a clear link for search (QX-025, UQ-026)"
+        "GET /tasks?status=todo&label=label-01&q=something page contains a clear link for search (QX-025, UQ-026)"
       );
       // Verify clear link preserves status filter (href includes status=todo)
       const clearWithStatus = filteredSearch.body.match(/href="([^"]*)"[^>]*>clear<\/a>/);
@@ -826,28 +826,28 @@ async function main() {
       const qx26Port = qx26Server.address().port;
 
       // --- QX-026a (UQ-028): frequency sort puts most-used label first ---
-      const freqPage = await get(qx26Port, "/");
-      assert(freqPage.status === 200, "GET / with freq-labeled tasks returns 200 (QX-026, UQ-028)");
+      const freqPage = await get(qx26Port, "/tasks");
+      assert(freqPage.status === 200, "GET /tasks with freq-labeled tasks returns 200 (QX-026, UQ-028)");
       // The label nav should contain "freq-common" and it should appear before the rare labels.
       // Check it's in the HTML at all first.
       assert(freqPage.body.includes("freq-common"),
-        "GET / label nav includes freq-common (most-used label with 30 tasks) (QX-026, UQ-028)");
+        "GET /tasks label nav includes freq-common (most-used label with 30 tasks) (QX-026, UQ-028)");
       // Frequency sort: freq-common (30 tasks) must appear before any zzz-rare-* (1 task each).
       const freqPos = freqPage.body.indexOf("freq-common");
       const rarePos = freqPage.body.indexOf("zzz-rare-");
       assert(freqPos !== -1 && rarePos !== -1 && freqPos < rarePos,
-        `GET / freq-common appears before zzz-rare-* labels in nav (QX-026, UQ-028): freqPos=${freqPos}, rarePos=${rarePos}`);
+        `GET /tasks freq-common appears before zzz-rare-* labels in nav (QX-026, UQ-028): freqPos=${freqPos}, rarePos=${rarePos}`);
 
       // --- QX-026b (UQ-027): active label pinned to front if it would be hidden ---
       // Filter by zzz-rare-z — this label is alphabetically last among 27 total labels,
       // so without pinning it would be hidden (position >25). With pinning it must be visible.
-      const pinnedPage = await get(qx26Port, "/?label=zzz-rare-z");
-      assert(pinnedPage.status === 200, "GET /?label=zzz-rare-z returns 200 (QX-026, UQ-027)");
+      const pinnedPage = await get(qx26Port, "/tasks?label=zzz-rare-z");
+      assert(pinnedPage.status === 200, "GET /tasks?label=zzz-rare-z returns 200 (QX-026, UQ-027)");
       // The active label must appear in the nav with a remove link (bold + "remove").
       assert(pinnedPage.body.includes("zzz-rare-z"),
-        "GET /?label=zzz-rare-z shows active label zzz-rare-z in nav (QX-026, UQ-027)");
+        "GET /tasks?label=zzz-rare-z shows active label zzz-rare-z in nav (QX-026, UQ-027)");
       assert(pinnedPage.body.includes("remove"),
-        "GET /?label=zzz-rare-z shows remove link for active label (QX-026, UQ-027)");
+        "GET /tasks?label=zzz-rare-z shows remove link for active label (QX-026, UQ-027)");
 
       // --- QX-026c: hidden count reflects correct number of non-visible labels ---
       // Total distinct labels: 1 (freq-common) + 26 (zzz-rare-a..z) = 27.
@@ -855,13 +855,13 @@ async function main() {
       // hidden = 27 - 25 = 2 (zzz-rare-y and zzz-rare-z).
       // Check "more labels" appears (not exact count check since pinning may shift it).
       assert(freqPage.body.includes("more labels"),
-        "GET / with 27 labels shows 'more labels' truncation note (QX-026)");
+        "GET /tasks with 27 labels shows 'more labels' truncation note (QX-026)");
 
       // --- QX-027 (UQ-029): search placeholder updated ---
       assert(freqPage.body.includes("Search titles and descriptions"),
-        "GET / search input placeholder says 'Search titles and descriptions' not 'Search titles' (QX-027, UQ-029)");
+        "GET /tasks search input placeholder says 'Search titles and descriptions' not 'Search titles' (QX-027, UQ-029)");
       assert(!freqPage.body.includes('placeholder="Search titles…"'),
-        "GET / old placeholder 'Search titles…' no longer present (QX-027, UQ-029)");
+        "GET /tasks old placeholder 'Search titles…' no longer present (QX-027, UQ-029)");
 
       // --- QX-028 (CB-017): heading-excluded body search (dedicated minimal workspace) ---
       // Use a separate server with only 2 tasks to avoid pagination interfering with results.
@@ -903,20 +903,20 @@ async function main() {
       // Search for "Proposal" — HDNG-1 must NOT match (headings stripped, no prose),
       // HDNG-2 must NOT match either (its prose is "xyzzy-prose-only-42z" — does not contain "Proposal").
       // Neither task should appear when searching for the heading term "Proposal".
-      const headingSearch = await get(qx28Port, "/?q=Proposal");
-      assert(headingSearch.status === 200, "GET /?q=Proposal returns 200 (QX-028, CB-017)");
+      const headingSearch = await get(qx28Port, "/tasks?q=Proposal");
+      assert(headingSearch.status === 200, "GET /tasks?q=Proposal returns 200 (QX-028, CB-017)");
       assert(!headingSearch.body.includes("HDNG-1"),
-        "GET /?q=Proposal excludes HDNG-1 (heading-only body, headings stripped) (QX-028, CB-017)");
+        "GET /tasks?q=Proposal excludes HDNG-1 (heading-only body, headings stripped) (QX-028, CB-017)");
       assert(!headingSearch.body.includes("HDNG-2"),
-        "GET /?q=Proposal excludes HDNG-2 (prose lacks 'Proposal'; heading stripped) (QX-028, CB-017)");
+        "GET /tasks?q=Proposal excludes HDNG-2 (prose lacks 'Proposal'; heading stripped) (QX-028, CB-017)");
 
       // Search for the unique prose token — must match HDNG-2, not HDNG-1.
-      const proseSearch = await get(qx28Port, "/?q=xyzzy-prose-only-42z");
-      assert(proseSearch.status === 200, "GET /?q=unique-prose-token returns 200 (QX-028, CB-017)");
+      const proseSearch = await get(qx28Port, "/tasks?q=xyzzy-prose-only-42z");
+      assert(proseSearch.status === 200, "GET /tasks?q=unique-prose-token returns 200 (QX-028, CB-017)");
       assert(proseSearch.body.includes("HDNG-2"),
-        "GET /?q=unique-prose-token includes HDNG-2 (prose under heading is searchable) (QX-028, CB-017)");
+        "GET /tasks?q=unique-prose-token includes HDNG-2 (prose under heading is searchable) (QX-028, CB-017)");
       assert(!proseSearch.body.includes("HDNG-1"),
-        "GET /?q=unique-prose-token excludes HDNG-1 (heading-only, no prose match) (QX-028, CB-017)");
+        "GET /tasks?q=unique-prose-token excludes HDNG-1 (heading-only, no prose match) (QX-028, CB-017)");
 
     } finally {
       if (qx28Server) {
@@ -975,8 +975,8 @@ async function main() {
       const qx34Port = qx34Server.address().port;
 
       // Test 1 (UQ-032): label count display — nav should show "common-label (3)"
-      const homeResp = await get(qx34Port, "/");
-      assert(homeResp.status === 200, "GET / returns 200 (QX-034 setup)");
+      const homeResp = await get(qx34Port, "/tasks");
+      assert(homeResp.status === 200, "GET /tasks returns 200 (QX-034 setup)");
       assert(homeResp.body.includes(`common-label (3)`),
         `Label nav shows count: "common-label (3)" should appear in HTML (UQ-032, QX-034)`);
       assert(homeResp.body.match(/A-label-0[123] \(\d+\)/),
@@ -991,9 +991,9 @@ async function main() {
       assert(homeResp.body.includes("more labels"),
         "Label nav overflow summary contains 'more labels' text (UQ-033, QX-034)");
 
-      // Test 3 (UQ-031): search result count banner — GET /?q=<term> shows count line
-      const searchResp = await get(qx34Port, `/?q=${encodeURIComponent(SEARCH_TERM)}`);
-      assert(searchResp.status === 200, "GET /?q=<term> returns 200 (QX-034 search banner)");
+      // Test 3 (UQ-031): search result count banner — GET /tasks?q=<term> shows count line
+      const searchResp = await get(qx34Port, `/tasks?q=${encodeURIComponent(SEARCH_TERM)}`);
+      assert(searchResp.status === 200, "GET /tasks?q=<term> returns 200 (QX-034 search banner)");
       assert(searchResp.body.includes("results for"),
         `Search result banner contains "results for" when ?q= is active (UQ-031, QX-034)`);
       assert(searchResp.body.includes(SEARCH_TERM),
@@ -1043,16 +1043,16 @@ async function main() {
       const qx37Port = qx37Server.address().port;
 
       // Unfiltered page: mixed-status-label should show count 5 (global total)
-      const unfilteredResp = await get(qx37Port, "/");
-      assert(unfilteredResp.status === 200, "GET / returns 200 (QX-037 setup)");
+      const unfilteredResp = await get(qx37Port, "/tasks");
+      assert(unfilteredResp.status === 200, "GET /tasks returns 200 (QX-037 setup)");
       assert(
         unfilteredResp.body.includes(`${MIXED_LABEL} (5)`),
         `Unfiltered page shows global count 5 for ${MIXED_LABEL} (UQ-034, QX-037)`
       );
 
       // Status=todo filter: mixed-status-label should show filter-scoped count 2
-      const todoResp = await get(qx37Port, "/?status=todo");
-      assert(todoResp.status === 200, "GET /?status=todo returns 200 (QX-037)");
+      const todoResp = await get(qx37Port, "/tasks?status=todo");
+      assert(todoResp.status === 200, "GET /tasks?status=todo returns 200 (QX-037)");
       assert(
         todoResp.body.includes(`${MIXED_LABEL} (2)`),
         `?status=todo page shows filter-scoped count 2 for ${MIXED_LABEL} (UQ-034, QX-037)`
@@ -1126,16 +1126,16 @@ async function main() {
       const qx41Port = qx41Server.address().port;
 
       // Search for the fenced code block content — should be found (SH-003 fix)
-      const foundResp = await get(qx41Port, "/?q=bash-comment-token");
-      assert(foundResp.status === 200, "GET /?q=bash-comment-token returns 200 (QX-041 setup)");
+      const foundResp = await get(qx41Port, "/tasks?q=bash-comment-token");
+      assert(foundResp.status === 200, "GET /tasks?q=bash-comment-token returns 200 (QX-041 setup)");
       assert(
         foundResp.body.includes("SH03-1"),
         "Task with # comment in fenced code block IS found by search (SH-003, QX-041)"
       );
 
       // Search for heading text outside fence — should NOT be found (still stripped)
-      const notFoundResp = await get(qx41Port, "/?q=Proposal-outside-fence");
-      assert(notFoundResp.status === 200, "GET /?q=Proposal-outside-fence returns 200 (QX-041 negative)");
+      const notFoundResp = await get(qx41Port, "/tasks?q=Proposal-outside-fence");
+      assert(notFoundResp.status === 200, "GET /tasks?q=Proposal-outside-fence returns 200 (QX-041 negative)");
       assert(
         !notFoundResp.body.includes("SH03-1"),
         "Task heading outside fence is still stripped from search index (QX-041 negative control)"
@@ -1176,8 +1176,8 @@ async function main() {
       qx43Server = await startServer({ port: 0 });
       const qx43Port = qx43Server.address().port;
 
-      const homeResp = await get(qx43Port, "/");
-      assert(homeResp.status === 200, "GET / returns 200 (QX-043 setup)");
+      const homeResp = await get(qx43Port, "/tasks");
+      assert(homeResp.status === 200, "GET /tasks returns 200 (QX-043 setup)");
 
       // Search form should appear BEFORE label nav (UQ-030).
       // Use the <div class="label-nav-wrap"> opening tag in the HTML body (not the CSS class
@@ -1238,8 +1238,8 @@ async function main() {
       const qx46Port = qx46Server.address().port;
 
       // Page 1: search returns 25 results across 2 pages → banner shows "Page 1 of 2"
-      const page1Resp = await get(qx46Port, "/?q=xyzzy-qx46&page=1");
-      assert(page1Resp.status === 200, "GET /?q=xyzzy-qx46&page=1 returns 200 (QX-046 setup)");
+      const page1Resp = await get(qx46Port, "/tasks?q=xyzzy-qx46&page=1");
+      assert(page1Resp.status === 200, "GET /tasks?q=xyzzy-qx46&page=1 returns 200 (QX-046 setup)");
       assert(
         page1Resp.body.includes("Showing 25 results"),
         `Page 1 search banner shows total count (QX-046, UQ-035). body snippet: ${page1Resp.body.slice(0, 500)}`
@@ -1250,8 +1250,8 @@ async function main() {
       );
 
       // Page 2: banner shows "Page 2 of 2"
-      const page2Resp = await get(qx46Port, "/?q=xyzzy-qx46&page=2");
-      assert(page2Resp.status === 200, "GET /?q=xyzzy-qx46&page=2 returns 200 (QX-046)");
+      const page2Resp = await get(qx46Port, "/tasks?q=xyzzy-qx46&page=2");
+      assert(page2Resp.status === 200, "GET /tasks?q=xyzzy-qx46&page=2 returns 200 (QX-046)");
       assert(
         page2Resp.body.includes("Page 2 of 2"),
         `Page 2 search banner shows '· Page 2 of 2' indicator (QX-046, UQ-035). body snippet: ${page2Resp.body.slice(0, 500)}`
@@ -1262,8 +1262,8 @@ async function main() {
       // Pure-data fixture → store write.
       seedTask(qx46TasksDir, "PGSRCH-SINGLE", { title: "xyzzy-qx46-unique-singleton task", status: "todo" });
 
-      const singleResp = await get(qx46Port, "/?q=xyzzy-qx46-unique-singleton");
-      assert(singleResp.status === 200, "GET /?q=xyzzy-qx46-unique-singleton returns 200 (QX-046 single-page)");
+      const singleResp = await get(qx46Port, "/tasks?q=xyzzy-qx46-unique-singleton");
+      assert(singleResp.status === 200, "GET /tasks?q=xyzzy-qx46-unique-singleton returns 200 (QX-046 single-page)");
       // Extract the search result banner (the accent p.meta element with color:var(--color-accent))
       // to verify it does NOT contain the "· Page X of Y" suffix when totalPages=1.
       // NOTE: pageNav separately renders "Page 1 of 1 (N tasks)" on the page — that is
@@ -1317,16 +1317,16 @@ async function main() {
       const pgszPort = pgszServer.address().port;
 
       // Default page size (20): all 5 tasks on page 1, "Page 1 of 1".
-      const defaultResp = await get(pgszPort, "/");
-      assert(defaultResp.status === 200, "GET / returns 200 (pageSize default)");
+      const defaultResp = await get(pgszPort, "/tasks");
+      assert(defaultResp.status === 200, "GET /tasks returns 200 (pageSize default)");
       assert(
         defaultResp.body.includes("Page 1 of 1 (5 tasks)"),
         `default page size shows all 5 tasks on 1 page. body snippet: ${defaultResp.body.slice(0, 300)}`
       );
 
       // ?pageSize=2: 5 tasks / 2 per page = 3 pages.
-      const pgsz2Resp = await get(pgszPort, "/?pageSize=2");
-      assert(pgsz2Resp.status === 200, "GET /?pageSize=2 returns 200");
+      const pgsz2Resp = await get(pgszPort, "/tasks?pageSize=2");
+      assert(pgsz2Resp.status === 200, "GET /tasks?pageSize=2 returns 200");
       assert(
         pgsz2Resp.body.includes("Page 1 of 3"),
         `?pageSize=2 with 5 tasks shows 3 pages. body snippet: ${pgsz2Resp.body.slice(0, 300)}`
@@ -1338,8 +1338,8 @@ async function main() {
       );
 
       // Page 2 of the pageSize=2 view carries the pageSize param through page nav.
-      const pgsz2Page2Resp = await get(pgszPort, "/?pageSize=2&page=2");
-      assert(pgsz2Page2Resp.status === 200, "GET /?pageSize=2&page=2 returns 200");
+      const pgsz2Page2Resp = await get(pgszPort, "/tasks?pageSize=2&page=2");
+      assert(pgsz2Page2Resp.status === 200, "GET /tasks?pageSize=2&page=2 returns 200");
       assert(
         pgsz2Page2Resp.body.includes("Page 2 of 3"),
         `?pageSize=2&page=2 shows 'Page 2 of 3'. body snippet: ${pgsz2Page2Resp.body.slice(0, 300)}`
@@ -1348,8 +1348,8 @@ async function main() {
       // The page-size selector reflects a standard option (10/20/50/100) as active;
       // ?pageSize=2 is a custom (non-menu) value so none of the menu options are
       // highlighted for it — verify instead with a standard option, ?pageSize=10.
-      const pgsz10Resp = await get(pgszPort, "/?pageSize=10");
-      assert(pgsz10Resp.status === 200, "GET /?pageSize=10 returns 200");
+      const pgsz10Resp = await get(pgszPort, "/tasks?pageSize=10");
+      assert(pgsz10Resp.status === 200, "GET /tasks?pageSize=10 returns 200");
       assert(
         /Page size:[\s\S]*?<strong>10<\/strong>/.test(pgsz10Resp.body),
         `?pageSize=10 page-size selector highlights 10 as active. body snippet: ${pgsz10Resp.body.slice(0, 500)}`
@@ -1362,8 +1362,8 @@ async function main() {
       // Invalid ?pageSize= value: falls back to default (20), with a warning banner —
       // NOT a silent full-list dump with no indication anything was wrong (UQ-048's
       // Web-UI-side analog).
-      const pgszBadResp = await get(pgszPort, "/?pageSize=abc");
-      assert(pgszBadResp.status === 200, "GET /?pageSize=abc returns 200 (falls back, does not error the page)");
+      const pgszBadResp = await get(pgszPort, "/tasks?pageSize=abc");
+      assert(pgszBadResp.status === 200, "GET /tasks?pageSize=abc returns 200 (falls back, does not error the page)");
       assert(
         pgszBadResp.body.includes("Page 1 of 1 (5 tasks)"),
         `?pageSize=abc falls back to the default page size (20 > 5 tasks -> 1 page). body snippet: ${pgszBadResp.body.slice(0, 300)}`
@@ -1373,7 +1373,7 @@ async function main() {
         `?pageSize=abc renders a visible warning banner rather than silently falling back. body snippet: ${pgszBadResp.body.slice(0, 500)}`
       );
 
-      const pgszZeroResp = await get(pgszPort, "/?pageSize=0");
+      const pgszZeroResp = await get(pgszPort, "/tasks?pageSize=0");
       assert(
         pgszZeroResp.body.includes("Invalid pageSize value ignored"),
         "?pageSize=0 is also treated as invalid (warning banner shown)"
@@ -1391,7 +1391,7 @@ async function main() {
 
   // --- M26-F4 (M26-adversarial-eval, Phase B hardening): a single malformed
   // task file (missing YAML frontmatter delimiters) among an otherwise-good
-  // task store must not crash `quay serve`'s list route (GET /) — it should
+  // task store must not crash `quay serve`'s list route (GET /tasks) — it should
   // degrade safely (clean 500, error logged, process stays up), not hang or
   // corrupt the good tasks already on disk. Found during the Phase A audit:
   // quay-native/src/store.js's parse() throws "malformed task file: missing
@@ -1440,18 +1440,18 @@ async function main() {
       // renders 200 with a VISIBLE `.malformed-row` for the bad file and the
       // good tasks listed normally. 500 is reserved for genuine call failures
       // (AC5 — see unparseable-frontmatter.test.mjs's AC5 web test).
-      const badResp = await get(badPort, "/");
+      const badResp = await get(badPort, "/tasks");
       assert(
         badResp.status === 200,
-        `GET / with one unparseable task file returns 200, not a 500 — the bad task must poison only its own row (M26-F4 / gap-one-unparseable-task-takes-down-the-whole-board) (got ${badResp.status})`
+        `GET /tasks with one unparseable task file returns 200, not a 500 — the bad task must poison only its own row (M26-F4 / gap-one-unparseable-task-takes-down-the-whole-board) (got ${badResp.status})`
       );
       assert(
         badResp.body.includes('class="malformed-row"') && badResp.body.includes("BADFM-BAD.md"),
-        `GET / renders a visible .malformed-row naming the unparseable file (M26-F4 / gap-one-unparseable-task-takes-down-the-whole-board)`
+        `GET /tasks renders a visible .malformed-row naming the unparseable file (M26-F4 / gap-one-unparseable-task-takes-down-the-whole-board)`
       );
       assert(
         badResp.body.includes("BADFM-GOOD"),
-        `GET / still lists the good task BADFM-GOOD alongside the malformed row (M26-F4 / gap-one-unparseable-task-takes-down-the-whole-board)`
+        `GET /tasks still lists the good task BADFM-GOOD alongside the malformed row (M26-F4 / gap-one-unparseable-task-takes-down-the-whole-board)`
       );
 
       // The server process itself must survive — a second, unrelated request
@@ -1461,10 +1461,10 @@ async function main() {
       // and still readable once the bad file is removed (simulating a human
       // fixing the one bad task) — same server process, same port, no restart.
       fs.rmSync(path.join(badTasksDir, "BADFM-BAD.md"));
-      const recovered = await get(badPort, "/");
+      const recovered = await get(badPort, "/tasks");
       assert(
         recovered.status === 200 && recovered.body.includes("BADFM-GOOD") && !recovered.body.includes('class="malformed-row"'),
-        `GET / recovers to a clean 200 with no malformed row once the bad file is removed — good task's on-disk content was never corrupted, and the server process survived (M26-F4 / gap-one-unparseable-task-takes-down-the-whole-board) (got status ${recovered.status})`
+        `GET /tasks recovers to a clean 200 with no malformed row once the bad file is removed — good task's on-disk content was never corrupted, and the server process survived (M26-F4 / gap-one-unparseable-task-takes-down-the-whole-board) (got status ${recovered.status})`
       );
     } finally {
       if (badServer) {
@@ -1597,8 +1597,8 @@ async function main() {
       mServer = await startServer({ port: 0 });
       const mPort = mServer.address().port;
 
-      const list = await get(mPort, "/");
-      assert(list.status === 200, "AC1: GET / returns 200 with a missing-id task present (not 500)");
+      const list = await get(mPort, "/tasks");
+      assert(list.status === 200, "AC1: GET /tasks returns 200 with a missing-id task present (not 500)");
       assert(list.body.includes("缺少 id"), "AC2: page visibly marks the malformed task '缺少 id'");
       assert(list.body.includes("MAL-1"), "AC2: page shows the malformed task's filename fallback");
       assert(list.body.includes('class="malformed-row"'),
@@ -1615,8 +1615,8 @@ async function main() {
       // the placeholder row — proving AC2's placeholder came from it, i.e. the
       // task was surfaced, not silently swallowed.
       fs.rmSync(path.join(mTasksDir, "MAL-1.md"));
-      const list2 = await get(mPort, "/");
-      assert(list2.status === 200, "AC3: GET / still returns 200 after removing the malformed fixture");
+      const list2 = await get(mPort, "/tasks");
+      assert(list2.status === 200, "AC3: GET /tasks still returns 200 after removing the malformed fixture");
       assert(!list2.body.includes("缺少 id"), "AC3: '缺少 id' marker is gone after removing the fixture");
       const trCount2 = (list2.body.match(/<\/tr>/g) || []).length;
       assert(trCount2 === 3, `AC3: rendered rows drop by exactly 1 after removing the fixture (expected 3 rows, got ${trCount2})`);
@@ -1724,7 +1724,7 @@ async function main() {
         assert(live.body.includes("CPU 压力"), "AC2: /live shows the CPU-pressure row when /proc/pressure/cpu is readable");
       }
       // Nav links present on the task list page (the observation surface is reachable).
-      const obsList = await get(obsPort, "/");
+      const obsList = await get(obsPort, "/tasks");
       assert(obsList.status === 200 && obsList.body.includes('href="/live"') && obsList.body.includes('href="/journal"'),
         "nav: task list page links to /live and /journal");
 

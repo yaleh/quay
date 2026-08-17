@@ -695,7 +695,7 @@ async function main() {
         await new Promise((r) => setTimeout(r, 100));
         try {
           const res = await new Promise((resolve, reject) => {
-            http.get({ host: "127.0.0.1", port, path: "/" }, resolve).on("error", reject);
+            http.get({ host: "127.0.0.1", port, path: "/tasks" }, resolve).on("error", reject);
           });
           if (res.statusCode === 200) up = true;
         } catch {
@@ -705,13 +705,13 @@ async function main() {
       assert(up, `quay serve --port <n>, spawned as a real subprocess, becomes reachable on the exact port passed on the command line (proves the argv.slice(3) re-parse works, not the 4173 default)${up ? "" : ` -- stdout: ${JSON.stringify(stdout.slice(0, 500))}, stderr: ${JSON.stringify(stderr.slice(0, 500))}, exitCode: ${child.exitCode}`}`);
       if (up) {
         const body = await new Promise((resolve, reject) => {
-          http.get({ host: "127.0.0.1", port, path: "/" }, (res) => {
+          http.get({ host: "127.0.0.1", port, path: "/tasks" }, (res) => {
             let b = "";
             res.on("data", (c) => (b += c));
             res.on("end", () => resolve(b));
           }).on("error", reject);
         });
-        assert(body.includes("CLI-1"), "quay serve (spawned as a subprocess) renders the seeded task in its GET / body, proving the cmd === 'serve' dispatch branch genuinely ran startServer()");
+        assert(body.includes("CLI-1"), "quay serve (spawned as a subprocess) renders the seeded task in its GET /tasks body, proving the cmd === 'serve' dispatch branch genuinely ran startServer()");
       }
     } finally {
       child.kill();

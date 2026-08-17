@@ -99,25 +99,25 @@ test("AC5: a task written to the store appears on the very next request (mtime c
   const fx = await startFixture({ seed: [{ id: "LR-1", title: "initial", status: "todo", body: VALID_SECTIONS }] });
   try {
     // Baseline: LR-1 visible, LR-NEW absent.
-    let page = await get(fx.port, "/");
+    let page = await get(fx.port, "/tasks");
     assert.equal(page.status, 200);
     assert.ok(page.body.includes("LR-1"), "baseline list shows the seeded task");
 
     // NEW task: write via the validated store path (bumps file mtime).
     fx.store.write("LR-NEW", { title: "brand new", status: "todo", body: VALID_SECTIONS });
-    page = await get(fx.port, "/");
-    assert.ok(page.body.includes("LR-NEW"), "a NEW task file is visible on the very next GET / (AC5)");
+    page = await get(fx.port, "/tasks");
+    assert.ok(page.body.includes("LR-NEW"), "a NEW task file is visible on the very next GET /tasks (AC5)");
 
     // EDIT: change the title in place; the next request must show the new title.
     fx.store.write("LR-NEW", { title: "edited title", status: "done" });
-    page = await get(fx.port, "/");
-    assert.ok(page.body.includes("edited title"), "an EDITED task reflects its new title on the next GET / (AC5)");
+    page = await get(fx.port, "/tasks");
+    assert.ok(page.body.includes("edited title"), "an EDITED task reflects its new title on the next GET /tasks (AC5)");
     assert.ok(!page.body.includes("brand new"), "the edited task no longer shows its old title (AC5)");
 
     // DELETE: removing the file must hide it on the next request.
     fs.rmSync(path.join(fx.tasksDir, "LR-NEW.md"));
-    page = await get(fx.port, "/");
-    assert.ok(!page.body.includes("edited title"), "a DELETED task disappears on the next GET / (AC5)");
+    page = await get(fx.port, "/tasks");
+    assert.ok(!page.body.includes("edited title"), "a DELETED task disappears on the next GET /tasks (AC5)");
   } finally {
     await closeFixture(fx);
   }
@@ -133,7 +133,7 @@ test("AC5: body search (?q=) still matches task bodies when includeBody=false is
     ],
   });
   try {
-    const page = await get(fx.port, "/?q=unique-body-token-lr-42");
+    const page = await get(fx.port, "/tasks?q=unique-body-token-lr-42");
     assert.equal(page.status, 200);
     assert.ok(page.body.includes("SRCH-1"), "?q= finds a task by a body-only token (body search preserved)");
     assert.ok(!page.body.includes("SRCH-2"), "?q= excludes the non-matching task (body search is precise)");
@@ -189,7 +189,7 @@ test("list route still renders correctly and /adr + /live stay healthy with the 
     ],
   });
   try {
-    const page = await get(fx.port, "/");
+    const page = await get(fx.port, "/tasks");
     assert.equal(page.status, 200);
     assert.ok(page.body.includes("OK-1") && page.body.includes("OK-2"), "list renders both tasks");
     assert.ok(page.body.includes("todo") && page.body.includes("done"), "list renders task statuses");

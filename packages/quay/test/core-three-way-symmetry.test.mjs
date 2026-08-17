@@ -160,8 +160,8 @@ async function main() {
     const port = webServer.address().port;
     process.chdir(originalCwd);
 
-    const listPage = await get(port, "/");
-    assert(listPage.status === 200, `Web UI leg: GET / returns 200 (got ${listPage.status})`);
+    const listPage = await get(port, "/tasks");
+    assert(listPage.status === 200, `Web UI leg: GET /tasks returns 200 (got ${listPage.status})`);
     assert(listPage.body.includes("SYM-1"), "Web UI leg: task-list page renders the fixture task's id");
     assert(listPage.body.includes("Three-way symmetry fixture"), "Web UI leg: task-list page renders the fixture task's title");
     assert(listPage.body.includes("todo"), "Web UI leg: task-list page renders the fixture task's status");

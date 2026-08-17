@@ -118,24 +118,24 @@ async function testMalformedTaskFileDegradesSafely() {
     // gap-one-unparseable-task-takes-down-the-whole-board: the malformed-file
     // behavior CHANGED from ADV-001/002's original "clean 500". The provider's
     // task_list now returns PARTIAL SUCCESS for one bad frontmatter (parseable
-    // tasks + a machine-readable malformed list) instead of isError, so GET /
-    // renders 200 with a VISIBLE .malformed-row naming the bad file, and the
-    // good task lists normally. The 500 path (AC5) is still exercised for a
+    // tasks + a machine-readable malformed list) instead of isError, so GET
+    // /tasks renders 200 with a VISIBLE .malformed-row naming the bad file, and
+    // the good task lists normally. The 500 path (AC5) is still exercised for a
     // genuine call-level failure — see serve.test.mjs's unparseable block.
     // ADV-001's core assertion (taskList() throws on isError, never a silent
     // empty list) is preserved at the provider-client level.
-    const withBadFile = await get(port, "/");
+    const withBadFile = await get(port, "/tasks");
     assert(
       withBadFile.status === 200,
-      `GET / with an unparseable task file present returns 200, not a 500 — one bad task must poison only its own row (gap-one-unparseable-task-takes-down-the-whole-board, superseding ADV-001/002) (got ${withBadFile.status})`
+      `GET /tasks with an unparseable task file present returns 200, not a 500 — one bad task must poison only its own row (gap-one-unparseable-task-takes-down-the-whole-board, superseding ADV-001/002) (got ${withBadFile.status})`
     );
     assert(
       withBadFile.body.includes('class="malformed-row"') && withBadFile.body.includes("BAD-1.md"),
-      `GET / renders a visible .malformed-row naming the unparseable file BAD-1.md (gap-one-unparseable-task-takes-down-the-whole-board)`
+      `GET /tasks renders a visible .malformed-row naming the unparseable file BAD-1.md (gap-one-unparseable-task-takes-down-the-whole-board)`
     );
     assert(
       withBadFile.body.includes("ADV-1"),
-      `GET / still lists the good task ADV-1 alongside the malformed row (gap-one-unparseable-task-takes-down-the-whole-board)`
+      `GET /tasks still lists the good task ADV-1 alongside the malformed row (gap-one-unparseable-task-takes-down-the-whole-board)`
     );
 
     // The server process must still be alive and healthy for a DIFFERENT
@@ -150,9 +150,9 @@ async function testMalformedTaskFileDegradesSafely() {
     // Remove the bad file and confirm the list route self-heals with NO
     // restart -- proving no corrupted state was left behind by the failure.
     fs.rmSync(path.join(tasksDir, "BAD-1.md"));
-    const afterFix = await get(port, "/");
-    assert(afterFix.status === 200, `GET / after removing the malformed file returns 200 (self-healed, got ${afterFix.status})`);
-    assert(afterFix.body.includes("ADV-1"), "GET / after removing the malformed file lists the good task correctly");
+    const afterFix = await get(port, "/tasks");
+    assert(afterFix.status === 200, `GET /tasks after removing the malformed file returns 200 (self-healed, got ${afterFix.status})`);
+    assert(afterFix.body.includes("ADV-1"), "GET /tasks after removing the malformed file lists the good task correctly");
   } finally {
     process.chdir(originalCwd);
     if (server) {
@@ -189,8 +189,8 @@ async function testDetailRouteOpenRedirectBackslashBypass() {
     const resp = await get(port, `/task/RDR-2?from=${backslashTarget}`);
     assert(resp.status === 200, `GET /task/RDR-2?from=/\\evil.com returns 200 (got ${resp.status})`);
     assert(
-      resp.body.includes('href="/"') && !resp.body.includes("evil.com"),
-      "GET /task/RDR-2?from=/\\evil.com: back link defaults to / (backslash-normalization bypass rejected), no evil.com in body"
+      resp.body.includes('href="/tasks') && !resp.body.includes("evil.com"),
+      "GET /task/RDR-2?from=/\\evil.com: back link defaults to /tasks (backslash-normalization bypass rejected), no evil.com in body"
     );
   } finally {
     process.chdir(originalCwd);
