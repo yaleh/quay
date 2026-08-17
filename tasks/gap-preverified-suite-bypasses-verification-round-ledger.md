@@ -1,7 +1,7 @@
 ---
 id: gap-preverified-suite-bypasses-verification-round-ledger
 title: pre-verified-suite 路径绕开 verification-round.jsonl 写入——趋势账本对最新落地路径变瞎
-status: todo
+status: ready
 labels:
   - gap
   - instrumentation
