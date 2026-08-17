@@ -175,7 +175,7 @@ probe_direct_measures() {
     pid="${proc#/proc/}"
     [ -r "$proc/cmdline" ] || continue
     bin="$(tr '\0' ' ' < "$proc/cmdline" 2>/dev/null | awk '{print $1}')"
-    case "$(basename "$bin")" in
+    case "$(basename -- "$bin")" in
       claude|node)
         cwd="$(readlink "$proc/cwd" 2>/dev/null || true)"
         [ "$cwd" = "$root" ] && L2_LAYER_PROCESS_CWD=$((L2_LAYER_PROCESS_CWD + 1))

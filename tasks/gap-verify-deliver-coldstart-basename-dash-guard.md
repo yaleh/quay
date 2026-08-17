@@ -43,9 +43,9 @@ $ basename -- "-bash"             # 正确返回 -bash
 ## Acceptance Criteria
 
 - [x] AC1: `verify-deliver-coldstart.sh:178` 改 `basename -- "$bin"`（`git diff` 单行可查）。
-- [ ] AC2: `plugin/test/verify-deliver-coldstart.test.mjs` 全量 suite 绿（含 --selfcheck 两测试）——在有 `-bash` login shell 进程的机器上跑也绿（`ls /proc/*/cmdline | grep -c '^-'` 非零时）。
-- [ ] AC3: `--for-task` scoped 门绿；既有测试不回归。
-- [ ] AC4: 复现验证：`basename -- "-bash"` 返回 `-bash` 无错误（与 `basename "-bash"` 报错对照）。
+- [x] AC2: `plugin/test/verify-deliver-coldstart.test.mjs` 全量 suite 绿（含 --selfcheck 两测试）——在有 `-bash` login shell 进程的机器上跑也绿（`ls /proc/*/cmdline | grep -c '^-'` 非零时）。
+- [x] AC3: `--for-task` scoped 门绿；既有测试不回归。
+- [x] AC4: 复现验证：`basename -- "-bash"` 返回 `-bash` 无错误（与 `basename "-bash"` 报错对照）。
 
 ## Definition of Done
 
@@ -59,3 +59,34 @@ $ basename -- "-bash"             # 正确返回 -bash
 ## Test-Files
 
 - plugin/test/verify-deliver-coldstart.test.mjs（既有 --selfcheck 测试，修复后全量绿）
+
+## Evidence（内层 impl 2026-08-17）
+
+**AC1（单行 diff）**：
+```
+-    case "$(basename "$bin")" in
++    case "$(basename -- "$bin")" in
+```
+
+**5b 纪律（同文件 basename 调用命中盘点）**：`grep -n 'basename' plugin/scripts/verify-deliver-coldstart.sh` = 8 处。除 :178 外全部是文件路径，不可能 dash-leading：
+- :77 `basename "$0"`（脚本自身路径）
+- :247/:564 `basename "$QUAY_TGZ"` / `basename "$QN_TGZ"`（tgz 产物路径）
+- :631/:632 `basename "$QUAY_TGZ"` / `basename "$QN_TGZ"`（evidence JSON 字段）
+- :664 `basename "$QUAY_TGZ"`（一行摘要）
+唯一可能收到 dash-leading 输入的是 :178 —— `/proc/<pid>/cmdline` 首元素（实测本机有 4 个 `-bash` login shell）。**只改 :178 一处。**
+
+**AC4（复现对照）**：
+```
+$ basename "-bash"
+basename: invalid option -- 'b'   # exit 1（修复前）
+$ basename -- "-bash"
+-bash                             # exit 0（修复后）
+```
+
+**AC2（--selfcheck 两测试，dash-leading argv0 存在时绿）**：`bash scripts/test.sh plugin/test/verify-deliver-coldstart.test.mjs` → 7/7 pass（fail 0）。跑时机器上 `ls /proc/*/cmdline` 实测 4 个 dash-leading argv0 进程（`grep -c '^-'` = 4），AC2+AC5 --selfcheck 与 AC1 --selfcheck 两测试均 ✔。全量 suite 绿由 fan-in 复核（本任务禁止跑全量）。
+
+**AC3（scoped 门）**：`bash scripts/test.sh --for-task gap-verify-deliver-coldstart-basename-dash-guard --allow-thin` → exit 0，verify-deliver 测试 7/7 pass（fail 0/cancelled 0），scoped 静态检查全 PASS（task-contract-check strict-subset 本任务无 violation、touches-one-entry-one-path-check、adr016-screen-use-check、superseded-capability-check、dead-code-after-return-check、concurrency-literal-check、landing-target-check、delivery-inventory-drift-gate）。既有测试不回归。
+
+**观察（非本任务回归）**：一次 scoped 门运行中 `--verify-only re-probes L1 from disk` 间歇失败（另两次 scoped/standalone 均 7/7、该测试隔离重跑 3/3 绿）。该测试断言 L1_OK 来自盘上 `-f` 文件检查（`probe_l1()` 纯 `-f`，本任务改动未触及 L1 路径；:178 只影响 L2 进程计数，且 dash-leading argv0 从不匹配 `claude|node` ⇒ L2 计数不变）。判定为既有负载敏感 flake，与本任务改动无因果。
+
+**worktree node_modules**：本 worktree 无 node_modules，按既有约定 `ln -s /home/yale/work/quay/node_modules node_modules`（gitignored，不入提交）。`worktree-node-modules-check.sh` 现报 `OK symlink -> /home/yale/work/quay/node_modules`。
