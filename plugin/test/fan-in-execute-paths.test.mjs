@@ -720,3 +720,124 @@ test("⑥ REAL idempotent — a task with NO open bracket is a no-op (exit 0, no
   assert.ok(!(report.inProgress || []).some((p) => p.taskId === "gap-test-close-a"), "bracket must stay closed");
   assert.equal((report.tasks || []).filter((c) => c.taskId === "gap-test-close-a").length, 1, "exactly one completed pair");
 });
+
+// ── ⑦ verification-round 入账 (gap-preverified-suite-bypasses-verification-round-ledger) ────────────
+// The pre-verified path (step 4 reuses a caller-produced capture) must ALSO write verification-round.jsonl
+// (含 preverified 标记) — the trend ledger (the /tests page + suite-cost analysis data source) was blind
+// to the most-used landing path. The write lives in step 4.5 as # preverified-round-block, guarded by
+// suite_preverified=1 (the marker step 4 appends to the reused capture). These tests run the REAL block
+// from the emitted prompt against a real temp git repo + a real pre-verified capture file.
+
+/** A temp git repo acting as the task "worktree": the real plugin/ tree is symlinked so the writer's
+ *  `node plugin/scripts/pre-verified-round-record.ts` resolves through the real files. The writer
+ *  resolves the shared checkout from git common-dir — for a plain repo the shared checkout IS the repo,
+ *  so the record lands in <repo>/.quay/verification-round.jsonl. */
+function makePreVerifiedWorktree(prefix = "fan-in-pvr-") {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  const run = (args) => {
+    const r = spawnSync("git", args, { cwd: dir, encoding: "utf8" });
+    if (r.status !== 0) throw new Error(`git ${args.join(" ")} failed (${r.status}): ${r.stderr}`);
+  };
+  run(["init", "-q", "-b", "main"]);
+  run(["config", "user.email", "test@test"]);
+  run(["config", "user.name", "test"]);
+  fs.writeFileSync(path.join(dir, "README.md"), "base\n");
+  run(["add", "README.md"]);
+  run(["commit", "-qm", "base"]);
+  fs.symlinkSync(path.join(REPO_ROOT, "plugin"), path.join(dir, "plugin"), "dir");
+  return dir;
+}
+
+async function preVerifiedBlockFor(task, worktree, root) {
+  const { prompt } = await runWorkflow({
+    args: { task, worktree, root, runId: "fm-pvr-1", mergeTarget: "develop" },
+  });
+  return extractBlock(prompt, "# preverified-round-block-start", "# preverified-round-block-end");
+}
+
+test("⑦ wiring — the fan-in prompt carries a verification-round write block guarded by suite_preverified=1", async (t) => {
+  const { prompt } = await runWorkflow({
+    args: { task: "gap-test-pvr", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-pvr", mergeTarget: "develop" },
+  });
+  const block = extractBlock(prompt, "# preverified-round-block-start", "# preverified-round-block-end");
+  assert.ok(block.includes("pre-verified-round-record.ts"), "block must invoke the verification-round writer");
+  assert.ok(block.includes('"${suite_preverified:-0}" = "1"'), "block must be guarded by the pre-verified marker");
+  assert.ok(block.includes("--commit \"$suite_head\""), "block must pin the verified suite_head as commit");
+  assert.ok(block.includes("--duration-ms \"$wall_ms\""), "block must reuse the capture's wall-clock (AC2)");
+  // Placement: the write runs in step 4.5 (suite-record-block), BEFORE the capture is removed.
+  const blockIdx = prompt.indexOf("# preverified-round-block-start");
+  const recordIdx = prompt.indexOf("# suite-record-block-start");
+  const rmIdx = prompt.indexOf('rm -f "$suite_capture"');
+  assert.ok(blockIdx > recordIdx, "verification-round write runs inside step 4.5's suite-record-block");
+  assert.ok(blockIdx < rmIdx, "verification-round write runs BEFORE the capture file is removed");
+});
+
+test("⑦ REAL pre-verified round — a reused capture (suite_preverified=1) writes ONE verification-round record (preverified:true) to the shared checkout's ledger", async (t) => {
+  const dir = makePreVerifiedWorktree();
+  t.after(() => cleanup(dir));
+  const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: dir, encoding: "utf8" }).stdout.trim();
+  const task = "gap-test-pvr-real";
+  const capture = `/tmp/fan-in-suite-${task}.env`;
+  fs.writeFileSync(capture, [
+    "full_suite_ran=true",
+    "skip_reason=",
+    "cpu_s=null",
+    "cpu_source=not-wired",
+    "start_iso=2026-08-17T04:30:00.000Z",
+    "end_iso=2026-08-17T04:45:36.519Z",
+    "wall_ms=936519",
+    "load=8.03",
+    "lane_count=8",
+    "suite_exit=0",
+    `suite_head=${head}`,
+    "suite_preverified=1",
+  ].join("\n") + "\n", "utf8");
+  t.after(() => { try { fs.rmSync(capture, { force: true }); } catch (_) { /* best-effort */ } });
+
+  const block = await preVerifiedBlockFor(task, dir, REPO_ROOT);
+  const r = runBash(`suite_capture="${capture}"; . "$suite_capture"; ${block}`, { cwd: dir });
+  assert.equal(r.status, 0, `pre-verified write must exit 0: ${r.stderr}`);
+  const ledger = path.join(dir, ".quay", "verification-round.jsonl");
+  assert.ok(fs.existsSync(ledger), "verification-round.jsonl was written");
+  const lines = fs.readFileSync(ledger, "utf8").trim().split("\n").filter(Boolean);
+  assert.equal(lines.length, 1, "exactly one record");
+  const rec = JSON.parse(lines[0]);
+  assert.equal(rec.preverified, true, "the record carries the pre-verified marker (AC1)");
+  assert.equal(rec.state, "green");
+  assert.equal(rec.durationMs, 936519, "durationMs = the reused capture's wall-clock");
+  assert.equal(rec.startedAt, "2026-08-17T04:30:00.000Z");
+  assert.equal(rec.laneCount, 8);
+  assert.equal(rec.load, 8.03);
+  assert.equal(rec.commit, head, "commit = the pinned suite_head");
+  assert.equal(rec.scope, "worktree");
+  assert.equal(rec.taskId, task);
+  assert.equal(rec.round, 1, "round = prior line count + 1");
+});
+
+test("⑦ REAL skip — a NON-pre-verified capture (no suite_preverified marker) writes NO verification-round record (normal full-suite path is full-suite-runner's job)", async (t) => {
+  const dir = makePreVerifiedWorktree();
+  t.after(() => cleanup(dir));
+  const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: dir, encoding: "utf8" }).stdout.trim();
+  const task = "gap-test-pvr-skip";
+  const capture = `/tmp/fan-in-suite-${task}.env`;
+  // A capture WITHOUT the suite_preverified marker — a fresh full-suite run in this fan-in (no reuse).
+  fs.writeFileSync(capture, [
+    "full_suite_ran=true",
+    "skip_reason=",
+    "cpu_s=null",
+    "cpu_source=not-wired",
+    "start_iso=2026-08-17T05:00:00.000Z",
+    "end_iso=2026-08-17T05:08:00.000Z",
+    "wall_ms=480000",
+    "load=4.5",
+    "lane_count=8",
+    "suite_exit=0",
+    `suite_head=${head}`,
+  ].join("\n") + "\n", "utf8");
+  t.after(() => { try { fs.rmSync(capture, { force: true }); } catch (_) { /* best-effort */ } });
+
+  const block = await preVerifiedBlockFor(task, dir, REPO_ROOT);
+  const r = runBash(`suite_capture="${capture}"; . "$suite_capture"; ${block}`, { cwd: dir });
+  assert.equal(r.status, 0, `non-pre-verified must exit 0 (no write): ${r.stderr}`);
+  assert.equal(fs.existsSync(path.join(dir, ".quay", "verification-round.jsonl")), false, "no verification-round record for a non-pre-verified round (the normal path writes it via full-suite-runner)");
+});

@@ -161,6 +161,31 @@ test("AC2: parseVerificationRound reads a round record and skips malformed lines
   assert.equal(parseVerificationRound("not json"), null);
 });
 
+test("AC2: parseVerificationRound reads a PRE-VERIFIED round record (gap-preverified-suite-bypasses-verification-round-ledger) — unknown fields (preverified/taskId/runId) tolerated, absent pass/fail/cancelled parse as null", () => {
+  // The shape plugin/scripts/pre-verified-round-record.ts writes: a SuiteRoundRecord-compatible row
+  // WITHOUT pass/fail/cancelled/tests (the pre-verified capture carries no test counts) and WITH the
+  // preverified:true marker + taskId/runId for traceability. The /tests reader must render it
+  // (absent counts → null, never a fabricated 0) and tolerate the unknown fields.
+  const line = JSON.stringify({
+    round: 228, startedAt: "2026-08-17T04:30:00.000Z", durationMs: 936519, laneCount: 8, load: 8.03,
+    state: "green", runner: "outer", scope: "worktree",
+    commit: "426b21ceaabbe7502334d92d79ce4a4a8d935fe9",
+    preverified: true, taskId: "gap-x", runId: "fm-x-1",
+  });
+  const r = parseVerificationRound(line);
+  assert.equal(r.round, 228);
+  assert.equal(r.startedAt, "2026-08-17T04:30:00.000Z");
+  assert.equal(r.durationMs, 936519);
+  assert.equal(r.state, "green");
+  assert.equal(r.scope, "worktree");
+  assert.equal(r.commit, "426b21ceaabbe7502334d92d79ce4a4a8d935fe9");
+  assert.equal(r.pass, null, "an absent pass count renders as null, never a fabricated 0");
+  assert.equal(r.fail, null);
+  assert.equal(r.cancelled, null);
+  assert.equal(r.tests, null);
+  assert.equal(r.runner, "outer");
+});
+
 test("AC3: readTests reports empty when verification-round.jsonl is absent", () => {
   const ws = makeWorkspace("ac95-empty-");
   try {

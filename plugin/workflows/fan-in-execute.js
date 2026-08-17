@@ -42,6 +42,13 @@ export const meta = {
 //     捕获 suite 起止/CPU（GNU time）/判定到 /tmp 临时 env；step 4.5 全绿后 # suite-record-block 写
 //     per-task-suite-record（plugin/scripts/per-task-suite-record.ts）——含跳过全量（fullSuiteRan=
 //     false + skipReason=doc-only-delta，判据2 能取假），写失败 HARD FAIL（AC1 判据1 义务）。
+//  ⚠️ verification-round 入账（gap-preverified-suite-bypasses-verification-round-ledger）：pre-verified
+//     路径复用 capture（suite 在回合外已跑绿）从不触发 full-suite-runner 的 verification-round 写入，
+//     趋势账本（/tests + 成本分析数据源）对最新落地路径变盲。step 4 在复用 capture 时追加
+//     suite_preverified=1 标记；step 4.5 # preverified-round-block 在标记为 1 时写 verification-round
+//     （plugin/scripts/pre-verified-round-record.ts，含 preverified:true + 复用 capture 的 wall_ms），
+//     写失败 HARD FAIL（AC1 判据1 义务）。正常全量路径由 full-suite-runner 写 verification-round，
+//     fan-in 不重复写。
 
 // args 到达时是【字符串】不是对象（实测 wf_6f8cc053-f52）：直接 args.x 会静默 undefined。
 const A = (() => { try { return typeof args === 'string' ? JSON.parse(args) : (args ?? {}) } catch { return {} } })()
@@ -131,7 +138,9 @@ fi
 if [ "$suite_preverified" = "1" ]; then
   full_suite_ran=true
   skip_reason=
-  # 保留既有 capture 文件（不覆盖）——step 4.5 读它入账。
+  # 保留既有 capture 文件（不覆盖）——step 4.5 读它入账。追加 suite_preverified=1 标记，step 4.5 据此
+  # 写 verification-round（pre-verified 复用路径的专属入账，gap-preverified-suite-bypasses-verification-round-ledger）。
+  printf 'suite_preverified=1\\n' >> "$suite_capture"
 else
 suite_start_iso=$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)
 suite_start_ms=$(date +%s%3N)
@@ -219,6 +228,22 @@ else
     exit 2
   fi
 fi
+# verification-round 入账（gap-preverified-suite-bypasses-verification-round-ledger AC1/AC2）：
+# pre-verified 路径复用 capture（suite 在回合外已跑绿）写 verification-round.jsonl（含 preverified 标记），
+# 不再让趋势账本（/tests + 成本分析数据源）对最新落地路径变盲。正常全量路径由 full-suite-runner 写
+# verification-round，fan-in 不重复写；本写入只在 suite_preverified=1（pre-verified 复用）时发生。
+# 写失败 ⇒ HARD FAIL（AC1 判据1 义务）。
+# preverified-round-block-start
+if [ "\${suite_preverified:-0}" = "1" ]; then
+  if ! node --experimental-strip-types plugin/scripts/pre-verified-round-record.ts \
+    --task-id ${task} --run-id ${runId} --started-at "$start_iso" --duration-ms "$wall_ms" \
+    --lane-count "$lane_count" --load "$load" --commit "$suite_head" \
+    --cpu-time-s "$cpu_s" --cpu-source "$cpu_source"; then
+    echo "FATAL: pre-verified-round-record 入账失败（AC1 判据1 义务）⇒ 不翻 done、不 ff" >&2
+    exit 2
+  fi
+fi
+# preverified-round-block-end
 rm -f "$suite_capture"
 # suite-record-block-end
 
