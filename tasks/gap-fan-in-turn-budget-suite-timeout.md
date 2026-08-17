@@ -32,6 +32,8 @@ depends_on: []
 
 **复发证据（2026-08-17 03:5x-04:0xZ，outer 观测）**：**AC95 重派 fan-in（whg27obzj）第 2 次撞同一堵墙**——develop 已稳定（03:25 后 37min 未动，re-merge 循环可收口），但 fan-in 仍连续跑了 **3 次全量 suite 尝试**（`fan-in-suite-gap-ac95-webui-15-views-v{1,2,3}.time`，每轮 11-15min，pid 1252818→1771195→2295375），均未落 per-task-suite-records（fullSuiteRan=true 记录缺）。⇒ 与 concurrency 那次同形（suite >回合预算 ⇒ turn-enforcement 强制收尾 ⇒ 重跑），**AC101 达成不缓解此缺陷**（round224=500.8s 单轮，但 fan-in 的 suite 因 CPU 争用 11-15min 仍超预算）。**发生率：第 2 个 code 型 fan-in 复发**（concurrency → AC95）。
 
+**复发证据 2（2026-08-17 05:2x-05:43Z，outer 观测）**：**outer-tick-log fan-in 第 3 例同形**——fan-in suite（pid 467419，13:41min+）结束但**未 land**（status ready、无 per-task-suite 记录、无 flip），随后 fan-in 重启 suite（pid 1050611，12:10min+ 仍在跑）。同形：suite >回合预算 ⇒ 强制收尾 ⇒ 重跑。**发生率：第 3 个 code 型 fan-in 复发**（concurrency → AC95 → outer-tick-log）。⛔ 根因是否确为 turn-enforcement 以 inner 报告为准（也可能 suite 红），本条只记「未 land + 重跑」的事实。
+
 ## Acceptance Criteria
 
 - [ ] AC1: fan-in-execute 的 step4 全量 suite 能在超回合预算下完成机械步骤（subagent 把 suite 交给长生命周期载体 / workflow 自身等待 / 其他——实现方选）。取假：构造 step2 code_delta 非空 ⇒ 全量 suite 必跑且机械步骤必完成（flip/ff/bracket 全执行）。
