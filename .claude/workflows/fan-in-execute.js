@@ -518,7 +518,7 @@ fi
 agent_id=$(basename "$self" .jsonl 2>/dev/null | sed 's/^agent-//')
 if [ -z "$agent_id" ]; then echo "FATAL: 未能从 $self 提取 agent id（--agent-id 不能由调用方填）" >&2; exit 2; fi
 # selfloc-block-end
-bash ${worktree}/plugin/scripts/fan-in-ff-merge.sh --task ${task} --run-id ${runId} --agent-id "$agent_id" --root ${root} --merge-target ${mergeTarget}
+bash ${worktree}/plugin/scripts/fan-in-ff-merge.sh --task ${task} --run-id ${runId} --agent-id "$agent_id" --root ${root} --merge-target ${mergeTarget} --worktree ${worktree}
   —— 锁只包 git merge --ff-only，毫秒级，成/败都解锁。ff 失败（develop 前进了，窗口 = merge 到 ff 之间
      的整个 suite 时长）⇒ 返回 { outcome: 'ff-retry' }（脚本将回阶段 1 重跑：重 merge develop、重判 delta、
      重跑 suite、重 ff），同一任务 ff 失败 ≥3 次才谈防活锁（脚本侧 maxFfRetries 兜底）。ff 成功（exit 0）
@@ -544,7 +544,12 @@ fi
     【不得】重试 ff、【不得】把 outcome 判为失败/needs-human、【不得】跳过清理；
     照常执行下方清理，返回时 note 必须标注 bracketClose=FAILED（让外层可见闭合失败）。
 
-ff 成功后清理：cd ${root} && git worktree remove ${worktree} --force && git branch -d task/${task}
+ff 成功后清理（gap-worktree-remove-orphans-probes：拆除前先扫 worktree 路径下的活 claude-probe 探针 / 挂死 runner 并清理，防止 worktree 先删而子进程孤儿化）：
+cd ${root}
+reaper="${worktree}/plugin/scripts/worktree-process-reaper.ts"
+[ -f "$reaper" ] || reaper="${root}/plugin/scripts/worktree-process-reaper.ts"
+node --no-warnings --experimental-strip-types "$reaper" --worktree ${worktree} --root ${root} --json >/dev/null 2>&1 || true
+git worktree remove ${worktree} --force && git branch -d task/${task}
 
 返回 { outcome: 'green' | 'needs-human' | 'red' | 'ff-retry', ffOk, developHead, worktreeHead, agentIdUsed, codeDelta, note, bracketClosed }。
 outcome=green 仅当 ff 成功（develop fast-forward 到 task tip）。outcome=ff-retry 仅当 ff 失败（develop 前进，

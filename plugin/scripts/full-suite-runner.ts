@@ -2293,6 +2293,19 @@ export async function run(argv: string[]): Promise<number> {
   } catch (e) {
     process.stderr.write(`full-suite-runner: pre-suite cleanup failed (continuing): ${e instanceof Error ? e.message : String(e)}\n`);
   }
+  // gap-worktree-remove-orphans-probes (option ② reaper): reap ALREADY-orphaned process residue —
+  // claude-probe test fixtures whose cwd points at a DELETED worktree (a previous `git worktree
+  // remove` ran before the test's own cleanup), and stale full-suite.lock holders (a detached suite
+  // whose worktree was removed without stopping it). A cwd pointing at a DELETED directory is the
+  // orphan signature — no owner — so this is NOT a name-based batch kill of live processes (the
+  // no_pkill_by_name_on_live invariant holds: a live observer / legit running suite has a LIVE cwd).
+  // The suite starts with a clean process slate (its own claude-process-count measurements aren't
+  // polluted by residue). Best-effort — a reap failure must never fail the run.
+  try {
+    execFileSync("node", ["--no-warnings", "--experimental-strip-types", path.join(__dirname, "worktree-process-reaper.ts"), "--orphans", "--root", root, "--json"], { stdio: "ignore" });
+  } catch (e) {
+    process.stderr.write(`full-suite-runner: pre-suite orphan-probe reap failed (continuing): ${e instanceof Error ? e.message : String(e)}\n`);
+  }
   // Ensure this run's namespace exists so the suite-tail leak-scan's before-run snapshot has a
   // stable subtree to scan (empty at start; the session-liveness probes create under it).
   try {

@@ -53,7 +53,8 @@
 # Usage:
 #   fan-in-ff-merge.sh --task <taskId> [--root <repo>] [--merge-target <branch>] [--run-id <runId>]
 #                      [--agent-id <caller-agent-id>] [--suite-state <file>] [--lock-events <file>]
-#                      [--retry-record <file>] [--escalations <file>] [--lock-wait <secs>] [--help]
+#                      [--retry-record <file>] [--escalations <file>] [--lock-wait <secs>]
+#                      [--worktree <path>] [--help]
 #
 # Exit codes:
 #   0  ff performed (develop/merge-target fast-forwarded to task/<taskId>)
@@ -85,6 +86,7 @@ lock_events=""
 retry_record=""
 escalations=""
 lock_wait=30
+worktree=""
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -98,6 +100,7 @@ while [ "$#" -gt 0 ]; do
     --retry-record) retry_record="$2"; shift 2 ;;
     --escalations) escalations="$2"; shift 2 ;;
     --lock-wait) lock_wait="$2"; shift 2 ;;
+    --worktree) worktree="$2"; shift 2 ;;
     *) echo "fan-in-ff-merge: unknown arg: $1" >&2; exit 2 ;;
   esac
 done
@@ -210,6 +213,33 @@ for suite_slot in "${suite_lock_base}.0" "${suite_lock_base}.1"; do
     fi
   fi
 done
+if [ "${suite_running}" = "1" ]; then
+  # gap-worktree-remove-orphans-probes (同族扩展 2026-08-17): a held slot whose holder's cwd points
+  # at a DELETED worktree is STALE residue — a suite whose worktree was removed without first
+  # stopping it (the claude-probe orphan family). Its flock auto-releases when the process dies, so
+  # reclaim it (best-effort) and re-check the slot before refusing. A legitimately-running suite has
+  # a LIVE cwd (never reaped); the --worktree scope additionally reaps THIS task worktree's own
+  # leftovers (excluding the caller's own process tree — a hung suite from a prior fan-in attempt
+  # whose worktree still exists). NEVER a name-based batch kill of live processes (the 2026-08-08
+  # two-layer-blind invariant). The reaper only runs when a slot is held — the normal fast path is
+  # untouched.
+  _reaper="${BASH_SOURCE[0]%/*}/worktree-process-reaper.ts"
+  if [ -f "${_reaper}" ]; then
+    if [ -n "${worktree}" ]; then
+      node --no-warnings --experimental-strip-types "${_reaper}" --worktree "${worktree}" --root "${root}" --json >/dev/null 2>&1 || true
+    fi
+    node --no-warnings --experimental-strip-types "${_reaper}" --orphans --root "${root}" --json >/dev/null 2>&1 || true
+  fi
+  suite_running=0
+  for suite_slot in "${suite_lock_base}.0" "${suite_lock_base}.1"; do
+    if [ -e "${suite_slot}" ]; then
+      if ! flock -n "${suite_slot}" true 2>/dev/null; then
+        suite_running=1
+        break
+      fi
+    fi
+  done
+fi
 if [ "${suite_running}" = "1" ]; then
   echo "fan-in-ff-merge: a full suite is running (single-flight lock slot held — ${suite_lock_base}.0/.1) — fan-in must wait for the suite to end; NOT acquiring the merge lock (AC4: lock must not overlap a suite run)" >&2
   exit 2

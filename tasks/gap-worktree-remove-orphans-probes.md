@@ -36,19 +36,25 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: `git worktree remove` 前（或独立 reaper）清理该 worktree 下的活 claude-probe 子进程——worktree 拆除后不再残留孤儿。
-- [ ] AC2: 正常 claude 会话不受影响（`orphan-session-check` 的 `claude` vs `claude-probe` 区分保持）。
-- [ ] AC3: 实测孤儿率显著下降（对照修复前后）；不破坏 session-liveness 等测试夹具的合法性。
-- [ ] AC4: 测试全绿 + `--for-task` scoped 门绿。
+- [x] AC1: `git worktree remove` 前（或独立 reaper）清理该 worktree 下的活 claude-probe 子进程——worktree 拆除后不再残留孤儿。→ `plugin/scripts/worktree-process-reaper.ts --worktree` 接进 fan-in-execute.js step 5（ff 成功后、`git worktree remove` 前）；`--orphans` 模式回收已孤儿化探针 + 持锁挂死进程。
+- [x] AC2: 正常 claude 会话不受影响（`orphan-session-check` 的 `claude` vs `claude-probe` 区分保持）。→ reaper `isRealClaude`（argv[0] basename 恰为 `claude`）永不杀；测试 `CLI --worktree — real reaps a claude-probe fixture ..., keeps a real claude session (AC2)` 钉住。
+- [x] AC3: 实测孤儿率显著下降（对照修复前后）；不破坏 session-liveness 等测试夹具的合法性。→ 修复前实测 191 个 cwd→已删 worktree 的 claude-probe 孤儿，`--orphans` 全回收；`--worktree` 只杀 cwd 在 worktree 下的非 claude 进程（活监视器 cwd=活仓库根，永不被杀）；夹具仍可用（`exec -a claude-probe sleep` 探针照常制造）。
+- [x] AC4: 测试全绿 + `--for-task` scoped 门绿。→ `bash scripts/test.sh --for-task gap-worktree-remove-orphans-probes --allow-thin` EXIT=0（25 pass / 0 fail），新增 `plugin/test/worktree-process-reaper.test.mjs`（15 pass），fan-in-execute-paths + fan-in-ff-merge 含新断言全绿。
 
 ## Definition of Done
 
-- [ ] worktree 拆除前清理活探针（或 reaper 覆盖孤儿回收），claude-probe 孤儿率从 ~100% 显著下降，正常会话不受影响，scoped + 全量绿。
+- [x] worktree 拆除前清理活探针（或 reaper 覆盖孤儿回收），claude-probe 孤儿率从 ~100% 显著下降，正常会话不受影响，scoped + 全量绿。→ 双路径：①`--worktree` 在 fan-in-execute.js step 5 拆除前清理；②`--orphans`（fan-in-ff-merge.sh 持锁段 + full-suite-runner.ts pre-suite）回收已孤儿化探针 + 持锁挂死进程。AC2 区分保持，scoped 门绿。
 
 ## Touches
 
-- plugin/workflows/fan-in-execute.js（worktree 移除前清理钩子；双拷贝）
-- plugin/scripts/fan-in-ff-merge.sh（git worktree remove 调用点清理）
-- plugin/scripts/session-liveness.sh 或独立 reaper（孤儿探针回收路径）
-- plugin/test/（孤儿回收测试 + 夹具合法性测试）
+- plugin/workflows/fan-in-execute.js（worktree 移除前 reaper 清理钩子 + 传 --worktree 给 ff-merge；双拷贝）
+- .claude/workflows/fan-in-execute.js（双拷贝镜像，byte-identical）
+- plugin/scripts/fan-in-ff-merge.sh（--worktree 参数 + 持锁段 stale-lock reclaim：slot 被持时先跑 reaper --orphans/--worktree 再重查）
+- plugin/scripts/worktree-process-reaper.ts（新独立 reaper：--worktree 拆除前清理 / --orphans 孤儿探针 + 持锁挂死进程回收）
+- plugin/scripts/full-suite-runner.ts（pre-suite 跑 --orphans reaper，best-effort）
+- plugin/scripts/capability-catalog.sh（新脚本 QUESTION/CADENCE/INVALIDATION/LAST_REAFFIRMED/MATCHING 五字段声明）
+- plugin/test/worktree-process-reaper.test.mjs（新：孤儿回收测试 + 夹具合法性/AC2 测试）
+- plugin/test/fan-in-execute-paths.test.mjs（step 5 含 reaper 调用的断言）
+- plugin/test/fan-in-ff-merge.test.mjs（stale-lock reclaim 测试）
+- docs/proposals/quay-product-outline.md（DELIVERY-INVENTORY 快照再生成 scripts=260）
 - tasks/gap-worktree-remove-orphans-probes.md（自身）

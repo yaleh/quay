@@ -1102,7 +1102,10 @@ test("⑧ turn-budget — script-owned wait drives the GREEN path: suite-started
   const p2 = promptContaining(prompts, "# flip-block-start");
   assert.ok(p2.includes("per-task-suite-record.ts"), "phase-2 must write the per-task-suite record (step 4.5)");
   assert.ok(p2.includes("fan-in-ff-merge.sh --task"), "phase-2 must run the ff-merge (step 5)");
+  assert.ok(p2.includes("--worktree /tmp/wt"), "phase-2 must pass --worktree to the ff-merge (stale-lock reclaim scope, gap-worktree-remove-orphans-probes)");
   assert.ok(p2.includes("# bracket-close-block-start"), "phase-2 must close the telemetry bracket (step 5.5)");
+  assert.ok(p2.includes("worktree-process-reaper.ts"), "phase-2 must reap live processes under the worktree before removal (gap-worktree-remove-orphans-probes)");
+  assert.ok(p2.includes('"$reaper" --worktree /tmp/wt'), "phase-2 must scope the reaper to the worktree being removed");
   assert.ok(p2.includes("git worktree remove"), "phase-2 must clean up the worktree after ff");
 });
 

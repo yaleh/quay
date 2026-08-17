@@ -412,6 +412,44 @@ test("suite running guard — exit 2, no lock events, no retry record (AC4: lock
   }
 });
 
+test("stale suite-lock reclaim — a holder whose cwd is a DELETED dir is reaped (worktree-process-reaper --orphans), then the ff proceeds (gap-worktree-remove-orphans-probes)", () => {
+  // The 同族扩展 (2026-08-17): a detached suite whose worktree was removed without stopping it holds
+  // a full-suite.lock slot open; its cwd is "<worktree> (deleted)". fan-in-ff-merge must NOT hard-refuse
+  // forever — it reclaims the stale holder (the reaper's --orphans kills it by ORPHAN STATE: cwd points
+  // at a deleted dir + holds the lock file open; flock auto-releases) and then proceeds with the ff.
+  // A legitimately-running suite (LIVE cwd) is never reaped — the "suite running guard" test above.
+  const dir = makeTmp("stalereclaim");
+  const st = stateDir("stalereclaim");
+  try {
+    initRepo(dir);
+    makeTaskBranch(dir, "ac62-stale");
+    const events = path.join(st, "events.jsonl");
+    const retries = path.join(st, "retries.jsonl");
+    const slot0 = path.join(dir, ".git", SUITE_LOCK_0);
+    fs.mkdirSync(path.dirname(slot0), { recursive: true });
+    fs.writeFileSync(slot0, "", "utf8");
+    // A stale holder: a background subshell whose cwd is a dir we then DELETE, holding slot .0 open
+    // (the detached hung suite shape). The reaper's --orphans must find it (cwdDeleted + holds the
+    // lock file open), kill it → flock auto-releases → the re-check sees the slot free → the ff lands.
+    const holderDir = path.join(dir, "holder-wt");
+    fs.mkdirSync(holderDir, { recursive: true });
+    const mergeArgs = ["--task", "ac62-stale", "--root", dir, "--lock-events", events, "--retry-record", retries];
+    const inner =
+      `(cd "${holderDir}" && exec 9>"${slot0}" && flock -n 9 && sleep 30) & holder=$!; ` +
+      `sleep 0.3; rm -rf "${holderDir}"; ` +
+      `bash ${MERGE_SCRIPT} ${mergeArgs.map((a) => JSON.stringify(a)).join(" ")}; rc=$?; ` +
+      `kill "$holder" 2>/dev/null; wait "$holder" 2>/dev/null; exit $rc`;
+    const r = spawnSync("bash", ["-c", inner], { encoding: "utf8" });
+    assert.equal(r.status, 0, `stale holder must be reaped and the ff must proceed:\nstdout=${r.stdout}\nstderr=${r.stderr}`);
+    assert.match(r.stdout, /OK — master fast-forwarded/, `the ff must complete after the stale holder is reaped:\n${r.stdout}`);
+    const postHead = gitCmd(dir, "rev-parse", "master").stdout.trim();
+    assert.notEqual(postHead, "", "master must have moved");
+  } finally {
+    cleanup(dir);
+    cleanup(st);
+  }
+});
+
 test("missing task branch — exit 2, nothing merged", () => {
   const dir = makeTmp("nobr");
   try {
