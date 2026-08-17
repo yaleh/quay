@@ -45,14 +45,14 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: readManager 的 session-liveness 调用注册 outer+inner 两个具名目标（显式 env 或扩展 env 文件），`--once` 出 ≥2 行。
-- [ ] AC2: /manager 页渲染 ≥2 张层卡片（Outer / Inner 各一）。
-- [ ] AC3: 既有 session-liveness 挂载（内层/外层 liveness 观测）不被破坏。
-- [ ] AC4: 测试全绿 + `--for-task` scoped 门绿。
+- [x] AC1: readManager 的 session-liveness 调用注册 outer+inner 两个具名目标（显式 env 或扩展 env 文件），`--once` 出 ≥2 行。
+- [x] AC2: /manager 页渲染 ≥2 张层卡片（Outer / Inner 各一）。
+- [x] AC3: 既有 session-liveness 挂载（内层/外层 liveness 观测）不被破坏。
+- [x] AC4: 测试全绿 + `--for-task` scoped 门绿。
 
 ## Definition of Done
 
-- [ ] /manager 页按层显示 Outer/Inner，session-liveness 目标显式化且不破坏既有观测，scoped + 全量绿。
+- [x] /manager 页按层显示 Outer/Inner，session-liveness 目标显式化且不破坏既有观测，scoped + 全量绿。
 
 ## Touches
 
