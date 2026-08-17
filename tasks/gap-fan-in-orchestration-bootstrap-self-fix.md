@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-orchestration-bootstrap-self-fix
 title: "fan-in 编排自举缺口：改 fan-in 编排文件的任务，其 fan-in 必用主检出旧版脚本，自己的修复永远不被自己验证（结构性暴露 8 次 / 可观察错判 1 次）"
-status: ready
+status: done
 labels:
   - gap
   - mechanism
