@@ -29,8 +29,11 @@ import {
   parseProcessBudgetJson,
   parseLoopDriverJson,
   parseSessionLivenessJson,
+  parseSessionLivenessOutput,
   parseObserverRegistry,
   parseVerificationRound,
+  buildManagerSessionTargets,
+  readManager,
   readTranscriptTail,
   readTests,
 } from "../src/observation.ts";
@@ -150,6 +153,75 @@ test("AC2: parseSessionLivenessJson extracts the --once --json sessions array", 
   assert.equal(rows[0].halted, false);
   assert.equal(rows[1].alive, false);
   assert.equal(rows[1].pid, null);
+});
+
+test("AC2: parseSessionLivenessOutput keeps dead layers (no pid field) as GONE rows", () => {
+  // session-liveness.sh emits `alive=0 halted=0` WITHOUT a pid= field when the target's session
+  // is gone — a dead layer must still surface as a GONE card, never be silently dropped.
+  const rows = parseSessionLivenessOutput(
+    "SESSION-STATUS outer alive=0 halted=0\nSESSION-STATUS inner alive=1 pid=3266379 halted=0",
+  );
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].name, "outer");
+  assert.equal(rows[0].alive, false);
+  assert.equal(rows[0].pid, null);
+  assert.equal(rows[1].name, "inner");
+  assert.equal(rows[1].alive, true);
+  assert.equal(rows[1].pid, 3266379);
+});
+
+test("AC1: buildManagerSessionTargets builds outer+inner SESSION_TARGETS from the workspace env file", () => {
+  const ws = makeWorkspace("ac95-mgr-targets-");
+  try {
+    fs.mkdirSync(path.join(ws, "orchestration"), { recursive: true });
+    fs.writeFileSync(path.join(ws, "orchestration", "session-liveness.env"), [
+      "# comment",
+      "SESSION_TMUX_SESSION=quay-0",
+      'SESSION_TARGETS="quay /home/yale/work/quay quay-0:inner"',
+    ].join("\n"));
+    assert.equal(buildManagerSessionTargets(ws), `outer ${ws} quay-0:outer\ninner ${ws} quay-0:inner`);
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("AC1: buildManagerSessionTargets strips quotes and window suffixes", () => {
+  const ws = makeWorkspace("ac95-mgr-targets2-");
+  try {
+    fs.mkdirSync(path.join(ws, "orchestration"), { recursive: true });
+    fs.writeFileSync(path.join(ws, "orchestration", "session-liveness.env"), 'SESSION_TMUX_SESSION="quay-0:inner"\n');
+    assert.equal(buildManagerSessionTargets(ws), `outer ${ws} quay-0:outer\ninner ${ws} quay-0:inner`);
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("AC1: buildManagerSessionTargets returns null without a session name (fail-closed, no invented target)", () => {
+  const ws = makeWorkspace("ac95-mgr-targets3-");
+  try {
+    assert.equal(buildManagerSessionTargets(ws), null); // no orchestration/session-liveness.env
+    fs.mkdirSync(path.join(ws, "orchestration"), { recursive: true });
+    fs.writeFileSync(path.join(ws, "orchestration", "session-liveness.env"), 'SESSION_TARGETS="quay /home/yale/work/quay quay-0:inner"\n');
+    assert.equal(buildManagerSessionTargets(ws), null); // SESSION_TMUX_SESSION absent
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("AC1: readManager registers outer+inner targets (≥2 SESSION-STATUS rows) when the workspace has a session-liveness.env", async () => {
+  const ws = makeWorkspace("ac95-mgr-read-");
+  try {
+    fs.mkdirSync(path.join(ws, "orchestration"), { recursive: true });
+    fs.writeFileSync(path.join(ws, "orchestration", "session-liveness.env"), "SESSION_TMUX_SESSION=quay-0\n");
+    const mgr = await readManager(ws);
+    assert.equal(mgr.liveness.status, "ok");
+    assert(mgr.liveness.sessions.length >= 2, `≥2 SESSION-STATUS rows (got ${mgr.liveness.sessions.length})`);
+    const names = mgr.liveness.sessions.map((s) => s.name);
+    assert(names.includes("outer"), `sessions include outer (got ${names.join(",")})`);
+    assert(names.includes("inner"), `sessions include inner (got ${names.join(",")})`);
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
 });
 
 test("AC2: parseObserverRegistry reads the | separated registration rows", () => {
@@ -362,6 +434,42 @@ test("AC99 — loop-driver-check.sh --json is valid production JSON with a recog
     assert.equal(j.exit_code, 3);
     assert.equal(j.driver_count, 0);
   } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("AC2: /manager renders ≥2 layer cards (Outer + Inner) when the workspace registers both targets", async () => {
+  const ws = makeWorkspace("ac95-mgr-page-");
+  fs.mkdirSync(path.join(ws, "orchestration"), { recursive: true });
+  fs.writeFileSync(path.join(ws, "orchestration", "session-liveness.env"), "SESSION_TMUX_SESSION=quay-0\n");
+  fs.mkdirSync(path.join(ws, "packages", "quay"), { recursive: true });
+  fs.mkdirSync(path.join(ws, "packages", "quay-native"), { recursive: true });
+  fs.mkdirSync(path.join(ws, "packages", "quay-github"), { recursive: true });
+  for (const name of ["quay", "quay-native", "quay-github"]) {
+    fs.writeFileSync(path.join(ws, "packages", name, "package.json"), JSON.stringify({ name, version: "1.0.0" }));
+  }
+  execFileSync("git", ["-c", "user.email=test@test", "-c", "user.name=test", "add", "."], { cwd: ws });
+  execFileSync("git", ["-c", "user.email=test@test", "-c", "user.name=test", "commit", "-qm", "fixture data"], { cwd: ws });
+
+  const cwd0 = process.cwd();
+  process.chdir(ws);
+  const port = await freePort();
+  const server = await startServer({ port, host: "127.0.0.1" });
+  try {
+    const r = await get(port, "/manager");
+    assert.equal(r.status, 200, "GET /manager returns 200");
+    // readManager passes an explicit SESSION_TARGETS override (outer + inner), so the page must
+    // render at least two layer cards — never the single-target collapse this task fixes.
+    assert(r.body.includes("outer"), "/manager renders an Outer card (got single-target collapse otherwise)");
+    assert(r.body.includes("inner"), "/manager renders an Inner card");
+    const outerHits = (r.body.match(/<div style="font-size:0.85rem[^>]*>outer<\/div>/g) ?? []).length;
+    const innerHits = (r.body.match(/<div style="font-size:0.85rem[^>]*>inner<\/div>/g) ?? []).length;
+    assert(outerHits >= 1, "Outer appears as a card label");
+    assert(innerHits >= 1, "Inner appears as a card label");
+  } finally {
+    process.chdir(cwd0);
+    server.close();
+    (server.client).close?.();
     fs.rmSync(ws, { recursive: true, force: true });
   }
 });

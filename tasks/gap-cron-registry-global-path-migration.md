@@ -3,7 +3,7 @@ id: gap-cron-registry-global-path-migration
 title: cron-registry 双层收据迁移到全局 per-layer 路径（人裁定方案②）——outer/inner 各写
   ~/.quay-global/<slug>/{outer,inner}/loop-registry.txt，退出 git，消除双写碰撞/bypass
   误红/add/add/陈旧快照
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -49,22 +49,29 @@ manager 先例:  QUAY_GLOBAL_DIR="${QUAY_GLOBAL_DIR:-$HOME/.quay-global}"
 
 ## Acceptance Criteria
 
-- [ ] AC1: 注册表读写迁移到 `~/.quay-global/<slug>/{outer,inner}/loop-registry.txt`（分片 slug，多项目不互相覆盖）；git 版不再被任何层写入。
-- [ ] AC2: 在任一 worktree（含 fork 早的旧 worktree）里读注册表得到**当前真值**（非 fork 快照）——与主检出一致。
-- [ ] AC3: 冷启动 cron 重建直写全局路径不再触发 bypass-check 误红（`gap-direct-to-develop-exclude-cron-registry-receipt` 的排除项可撤）。
-- [ ] AC4: 消费面迁移完成：`outer-cron-registry.ts` 判据读取 / `outer-anchor-check.ts` / 双层 tick 文档 / AC80-INNER-ANCHOR 段 / `outer-tick-log-check` / 测试 pin 集全部读新路径。
-- [ ] AC5: 审计线落地（append-only 事件行记录锚重建）；测试全绿 + `--for-task` scoped 门绿。
+- [x] AC1: 注册表读写迁移到 `~/.quay-global/<slug>/{outer,inner}/loop-registry.txt`（分片 slug，多项目不互相覆盖）；git 版不再被任何层写入。
+- [x] AC2: 在任一 worktree（含 fork 早的旧 worktree）里读注册表得到**当前真值**（非 fork 快照）——与主检出一致。
+- [x] AC3: 冷启动 cron 重建直写全局路径不再触发 bypass-check 误红（`gap-direct-to-develop-exclude-cron-registry-receipt` 的排除项可撤）。
+- [x] AC4: 消费面迁移完成：`outer-cron-registry.ts` 判据读取 / `outer-anchor-check.ts` / 双层 tick 文档 / AC80-INNER-ANCHOR 段 / `outer-tick-log-check` / 测试 pin 集全部读新路径。
+- [x] AC5: 审计线落地（append-only 事件行记录锚重建）；测试全绿 + `--for-task` scoped 门绿。
 
 ## Definition of Done
 
-- [ ] 双层 cron 收据各写全局 per-layer 路径（分片），任何 worktree 读到真值；git 版无写路径；bypass-check 排除项可撤；消费面全部迁移；审计线 jsonl 保留锚重建留痕；scoped + 全量绿。
+- [x] 双层 cron 收据各写全局 per-layer 路径（分片），任何 worktree 读到真值；git 版无写路径；bypass-check 排除项可撤；消费面全部迁移；审计线 jsonl 保留锚重建留痕；scoped + 全量绿。
 
 ## Touches
 
-- plugin/scripts/outer-cron-registry.ts（判据读取路径迁移）
-- plugin/scripts/outer-anchor-check.ts（消费面迁移）
-- plugin/test/outer-cron-registry.test.mjs（测试 pin 集迁移）
-- orchestration/orchestrator-loop-tick.md（外层注册表收据引用）
-- orchestration/fast-mode-tick-core.md（内层注册表收据引用）
-- plugin/loop/fast-mode-loop-tick.md（AC80-INNER-ANCHOR 段）
+- plugin/scripts/outer-cron-registry.ts（判据读取路径迁移到全局 per-layer + --record/审计线）
+- plugin/scripts/outer-cron-registry.json（AC1：git 版收据删除——退出 git，读写迁全局 per-layer 路径；touches-parser 剥尾部注解故单独 bullet 机械声明）
+- plugin/scripts/outer-anchor-check.ts（消费面评估——不读注册表文件，仅被 outer-cron-registry.ts import extractCanonical/LAYERS，无需改动）
+- plugin/test/outer-cron-registry.test.mjs（测试 pin 集迁移到全局 per-layer 载体 + AC1/AC2/AC5 新增测试）
+- plugin/scripts/direct-to-develop-bypass-check.ts（AC3：撤 outer-cron-registry.json 排除项 + 167b7052/f882ad76 入 ruled 表）
+- plugin/test/direct-to-develop-bypass-check.test.mjs（AC3 正/负例同步）
+- orchestration/orchestrator-tick-core.md（外层 A23 注册表收据引用 → 全局 per-layer 路径；镜像对）
+- plugin/loop/orchestrator-tick-core.md（外层 A23 镜像，byte-identical 同步）
+- orchestration/fast-mode-tick-core.md（内层 A26 注册表收据引用 → 全局 per-layer 路径；镜像对）
+- plugin/loop/fast-mode-tick-core.md（内层 A26 镜像，normalized-byte 同步）
+- plugin/loop/fast-mode-loop-tick.md（AC80-INNER-ANCHOR 段：注册表位置注记 + --record 更新指令）
+- plugin/scripts/capability-catalog.sh（outer-cron-registry.ts 描述同步：git-tracked → 全局 per-layer；重挂 cron 更新指令 → --record）
+- docs/proposals/quay-product-outline.md（delivery-inventory 快照再生成——plugin/scripts/ 删了 outer-cron-registry.json）
 - tasks/gap-cron-registry-global-path-migration.md（自身）

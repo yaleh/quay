@@ -701,7 +701,7 @@ function resolvePluginScript(rel: string): string | null {
  */
 async function runScriptBounded(
   cmd: string[],
-  opts: { cwd: string; timeoutMs: number },
+  opts: { cwd: string; timeoutMs: number; env?: Record<string, string> },
 ): Promise<{ stdout: string; exitCode: number | null }> {
   const outPath = path.join(os.tmpdir(), `ac95-script-${process.pid}-${Math.random().toString(36).slice(2)}.out`);
   let outFd: number;
@@ -717,6 +717,7 @@ async function runScriptBounded(
         cwd: opts.cwd,
         detached: true,
         stdio: ["ignore", outFd, "pipe"],
+        env: opts.env ? { ...process.env, ...opts.env } : process.env,
       });
     } catch {
       try { fs.closeSync(outFd); } catch { /* noop */ }
@@ -747,10 +748,10 @@ async function runScriptBounded(
 }
 
 /** Resolve a plugin script and run it via runScriptBounded; returns stdout or a missing-reason. */
-async function runPluginScript(root: string, rel: string, args: string[], timeoutMs = 15_000): Promise<{ stdout: string | null; reason: string | null }> {
+async function runPluginScript(root: string, rel: string, args: string[], timeoutMs = 15_000, env?: Record<string, string>): Promise<{ stdout: string | null; reason: string | null }> {
   const p = resolvePluginScript(rel);
   if (!p) return { stdout: null, reason: `${rel} 缺失（产品安装无 methodology 层 → 未接入）` };
-  const { stdout, exitCode } = await runScriptBounded(["bash", p, ...args], { cwd: root, timeoutMs });
+  const { stdout, exitCode } = await runScriptBounded(["bash", p, ...args], { cwd: root, timeoutMs, env });
   if (exitCode === null) return { stdout: null, reason: `${rel} 未能运行（spawn 失败或超时被杀）` };
   return { stdout, reason: null };
 }
@@ -899,7 +900,8 @@ export function parseLoopDriverJson(text: string): Omit<LoopDriverReading, "stat
   };
 }
 
-/** Parse session-liveness.sh --once --json's { sessions: [...] } document into rows. Pure. */
+/** Parse session-liveness.sh --once --json's { sessions: [...] } document into rows. Pure.
+ *  (AC99 — the Manager view's machine-readable interface.) */
 export function parseSessionLivenessJson(text: string): Array<{ name: string; alive: boolean; pid: number | null; halted: boolean }> {
   const out: Array<{ name: string; alive: boolean; pid: number | null; halted: boolean }> = [];
   let j: { sessions?: Array<{ name?: unknown; alive?: unknown; pid?: unknown; halted?: unknown }> } = {};
@@ -913,6 +915,28 @@ export function parseSessionLivenessJson(text: string): Array<{ name: string; al
       pid: typeof s.pid === "number" && Number.isFinite(s.pid) ? s.pid : null,
       halted: s.halted === true,
     });
+  }
+  return out;
+}
+
+/**
+ * Parse session-liveness.sh --once's `SESSION-STATUS <name> alive=… [pid=…] halted=…` rows. Pure.
+ *
+ * pid is OPTIONAL: the seam emits `alive=0 halted=0` (no `pid=` field) when the target's session
+ * is gone — a dead layer must still surface as a GONE card, never be silently dropped.
+ */
+export function parseSessionLivenessOutput(text: string): Array<{ name: string; alive: boolean; pid: number | null; halted: boolean }> {
+  const out: Array<{ name: string; alive: boolean; pid: number | null; halted: boolean }> = [];
+  for (const line of text.split(/\r?\n/)) {
+    const m = /^SESSION-STATUS\s+(\S+)\s+alive=(\d+)(?:\s+pid=(\d+))?\s+halted=(\d+)/.exec(line);
+    if (m) {
+      out.push({
+        name: m[1],
+        alive: m[2] === "1",
+        pid: m[3] == null || m[3] === "0" ? null : Number.parseInt(m[3], 10),
+        halted: m[4] === "1",
+      });
+    }
   }
   return out;
 }
@@ -935,6 +959,38 @@ export function parseObserverRegistry(text: string): ObserverRow[] {
   return rows;
 }
 
+/**
+ * Build explicit SESSION_TARGETS for the manager page's session-liveness probe: two named targets
+ * (`outer → <session>:outer`, `inner → <session>:inner`) derived from the workspace's
+ * orchestration/session-liveness.env SESSION_TMUX_SESSION.
+ *
+ * The env override is scoped to THIS probe (readManager) — it never mutates the shared
+ * orchestration/session-liveness.env, so the outer/inner liveness mounts that source that file
+ * keep their existing single target (AC3: existing mounts must not be disturbed).
+ *
+ * Returns null when the session name is unavailable (no env file / no SESSION_TMUX_SESSION) — the
+ * caller then falls back to the script's own resolution (its env-file SESSION_TARGETS), preserving
+ * the pre-existing display rather than inventing targets. An invented target would be a fake
+ * reading (hard rule ④ — it can never be false), so we fail-closed to "no override".
+ */
+export function buildManagerSessionTargets(root: string): string | null {
+  let text: string;
+  try {
+    text = fs.readFileSync(path.join(root, "orchestration", "session-liveness.env"), "utf8");
+  } catch {
+    return null;
+  }
+  for (const rawLine of text.split(/\r?\n/)) {
+    const m = /^SESSION_TMUX_SESSION=(.*)$/.exec(rawLine.trim());
+    if (!m) continue;
+    let session = m[1].trim().replace(/^["']|["']$/g, "");
+    session = session.split(":")[0]; // strip any window/pane suffix → base session name
+    if (!session) continue;
+    return `outer ${root} ${session}:outer\ninner ${root} ${session}:inner`;
+  }
+  return null;
+}
+
 /** Manager view: loop-driver + session-liveness + observer registry + slot-refill pool metrics. */
 export async function readManager(root: string): Promise<ManagerResult> {
   // loop-driver-check.sh --json → verdict/exit_code/detail. AC99: the JSON interface replaces the
@@ -952,9 +1008,15 @@ export async function readManager(root: string): Promise<ManagerResult> {
 
   // session-liveness.sh --once --json → per-target liveness rows (--once is REQUIRED: without it
   // the script MOUNTS and polls forever — the serve path must never block the event loop on it).
+  // The manager page is three-layer (Outer / Inner); the shared orchestration/session-liveness.env
+  // only carries the OUTER's single inner target (管理者多目标配置已外移到 ~/.quay-global), so we
+  // pass an explicit SESSION_TARGETS override registering outer + inner — scoped to this probe,
+  // never mutating the env file the outer/inner mounts source (AC3). AC99: the --json output is
+  // requested (the Manager view's machine-readable interface).
   let liveness: SessionLivenessReading;
   {
-    const r = await runPluginScript(root, SESSION_LIVENESS_REL, ["--once", "--json"], 20_000);
+    const targets = buildManagerSessionTargets(root);
+    const r = await runPluginScript(root, SESSION_LIVENESS_REL, ["--once", "--json"], 20_000, targets ? { SESSION_TARGETS: targets } : undefined);
     const rows = r.stdout == null ? [] : parseSessionLivenessJson(r.stdout);
     if (r.stdout == null) liveness = { status: "empty", reason: r.reason, sessions: [] };
     else if (rows.length === 0) liveness = { status: "empty", reason: "session-liveness 无 SESSION-STATUS 行（无观测目标）", sessions: [] };
