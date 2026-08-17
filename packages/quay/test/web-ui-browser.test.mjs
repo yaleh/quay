@@ -247,41 +247,41 @@ async function main() {
     server = await startServer({ port: 0 });
     const port = server.address().port;
 
-    // ── GET / (task list page) ───────────────────────────────────────────
+    // ── GET /tasks (task list page) — `/` is now the dashboard landing page ──
     // Browser-rendered observation (playwright MCP, iteration 1):
     //   Page title: "Quay — quay-native"
     //   Heading h1: "Quay — task list (native provider)"
     //   Table rows: WUI-1 (todo) and WUI-2 (done) as linked cells
-    const list = await get(port, "/");
-    assert(list.status === 200, `GET / returns 200 (got ${list.status})`);
+    const list = await get(port, "/tasks");
+    assert(list.status === 200, `GET /tasks returns 200 (got ${list.status})`);
 
     // Page title: the <title> tag contains "Quay — " prefix and the
     // provider's manifest.name — confirms browser-rendered title matches.
     assert(/<title>Quay\s*[—–-]\s*[^<]+<\/title>/i.test(list.body),
-      "GET / <title> tag contains Quay em-dash prefix and provider name");
+      "GET /tasks <title> tag contains Quay em-dash prefix and provider name");
 
     // Heading: the <h1> tag confirms the "task list" label and provider id.
     assert(/<h1>[^<]*task list[^<]*<\/h1>/i.test(list.body),
-      'GET / <h1> heading contains "task list" text (browser-observed: "Quay — task list (native provider)")');
+      'GET /tasks <h1> heading contains "task list" text (browser-observed: "Quay — task list (native provider)")');
 
     // Table structure: both tasks appear as linked rows.
     assert(list.body.includes("WUI-1") && list.body.includes("WUI-2"),
-      "GET / body contains both seeded task ids (WUI-1, WUI-2)");
+      "GET /tasks body contains both seeded task ids (WUI-1, WUI-2)");
     assert(list.body.includes("todo") && list.body.includes("done"),
-      "GET / body contains both seeded tasks' statuses (todo, done)");
+      "GET /tasks body contains both seeded tasks' statuses (todo, done)");
     assert(list.body.includes("Web UI browser test task one"),
-      "GET / body contains seeded WUI-1 title");
+      "GET /tasks body contains seeded WUI-1 title");
     assert(list.body.includes("Web UI browser test task two"),
-      "GET / body contains seeded WUI-2 title");
+      "GET /tasks body contains seeded WUI-2 title");
 
     // Links: task ids are clickable links to detail pages (browser-observed:
     // link "WUI-1" -> /task/WUI-1, link "WUI-2" -> /task/WUI-2).
     // QX-011 (iteration 3): links now include ?from= for back-link context preservation.
     // Check that /task/WUI-1 appears somewhere in the href (may have ?from= appended).
     assert(list.body.includes('href="/task/WUI-1'),
-      'GET / body contains link href starting with "/task/WUI-1" (task id is a clickable link, QX-011 may add ?from=)');
+      'GET /tasks body contains link href starting with "/task/WUI-1" (task id is a clickable link, QX-011 may add ?from=)');
     assert(list.body.includes('href="/task/WUI-2'),
-      'GET / body contains link href starting with "/task/WUI-2" (task id is a clickable link, QX-011 may add ?from=)');
+      'GET /tasks body contains link href starting with "/task/WUI-2" (task id is a clickable link, QX-011 may add ?from=)');
 
     // ── GET /task/:id (detail page — todo) ────────────────────────────────
     // Browser-rendered observation (playwright MCP, iteration 1):
@@ -307,9 +307,9 @@ async function main() {
     assert(detail1.body.includes("Web UI browser test task one"),
       "GET /task/WUI-1 heading includes the task's title");
 
-    // Back link to list (browser-observed: "← back to list" -> /).
-    assert(detail1.body.includes('href="/"'),
-      'GET /task/WUI-1 body contains href="/" back-to-list link');
+    // Back link to list (browser-observed: "← back to list" -> /tasks).
+    assert(detail1.body.includes('href="/tasks'),
+      'GET /task/WUI-1 body contains href="/tasks" back-to-list link');
 
     // Role/labels paragraph (browser-observed: "role: primitive · labels:").
     assert(detail1.body.includes("role:") && detail1.body.includes("primitive"),
@@ -327,8 +327,8 @@ async function main() {
       "GET /task/WUI-2 <title> tag is the task id (WUI-2)");
     assert(detail2.body.includes("[done]"),
       "GET /task/WUI-2 heading includes [done] status bracket");
-    assert(detail2.body.includes('href="/"'),
-      'GET /task/WUI-2 body contains href="/" back-to-list link');
+    assert(detail2.body.includes('href="/tasks'),
+      'GET /task/WUI-2 body contains href="/tasks" back-to-list link');
 
     // ── GET /task/:id (nonexistent id — 404) ──────────────────────────────
     // Browser-observed (playwright MCP, iteration 1): HTTP 404 Not Found.
@@ -418,19 +418,19 @@ async function main() {
 
     // ── QW-003: filter-by-status assertions ─────────────────────────────
     // QW-003 (experiment 3, iteration 2): verify the ?status=<value> filter
-    // query param in GET /. Three tasks are seeded: WUI-1 (todo), WUI-2 (done),
-    // WUI-ACT (todo). Filter navigation links must be present in GET /.
+    // query param in GET /tasks. Three tasks are seeded: WUI-1 (todo), WUI-2 (done),
+    // WUI-ACT (todo). Filter navigation links must be present in GET /tasks.
 
-    // GET / (no param) — all tasks visible (baseline, re-verified)
+    // GET /tasks (no param) — all tasks visible (baseline, re-verified)
     assert(list.body.includes("WUI-1") && list.body.includes("WUI-2") && list.body.includes("WUI-ACT"),
-      "GET / (no param) shows all three seeded tasks (QW-003: unfiltered baseline)");
+      "GET /tasks (no param) shows all three seeded tasks (QW-003: unfiltered baseline)");
 
     // Filter nav is present in the list page
-    assert(list.body.includes("/?status=todo") || list.body.includes("/?status=done"),
-      "GET / body includes filter navigation links for status values (QW-003: filter nav)");
+    assert(list.body.includes("/tasks?status=todo") || list.body.includes("/tasks?status=done"),
+      "GET /tasks body includes filter navigation links for status values (QW-003: filter nav)");
 
     // GET /?status=todo — only todo tasks (WUI-1, WUI-ACT); done task (WUI-2) excluded
-    const listTodo = await get(port, "/?status=todo");
+    const listTodo = await get(port, "/tasks?status=todo");
     assert(listTodo.status === 200, `GET /?status=todo returns 200 (got ${listTodo.status})`);
     assert(listTodo.body.includes("WUI-1"),
       "GET /?status=todo includes WUI-1 (todo task) (QW-003: filter includes matching)");
@@ -440,7 +440,7 @@ async function main() {
       "GET /?status=todo excludes WUI-2 (done task) (QW-003: filter excludes non-matching)");
 
     // GET /?status=done — only done tasks (WUI-2); todo tasks (WUI-1, WUI-ACT) excluded
-    const listDone = await get(port, "/?status=done");
+    const listDone = await get(port, "/tasks?status=done");
     assert(listDone.status === 200, `GET /?status=done returns 200 (got ${listDone.status})`);
     assert(listDone.body.includes("WUI-2"),
       "GET /?status=done includes WUI-2 (done task) (QW-003: filter includes matching)");
@@ -450,7 +450,7 @@ async function main() {
       "GET /?status=done excludes WUI-ACT (todo task) (QW-003: filter excludes non-matching)");
 
     // GET /?status=ready — returns only SORT-C (the one ready task in fixture)
-    const listReady = await get(port, "/?status=ready");
+    const listReady = await get(port, "/tasks?status=ready");
     assert(listReady.status === 200, `GET /?status=ready returns 200 (got ${listReady.status})`);
     assert(!listReady.body.includes("WUI-1") && !listReady.body.includes("WUI-2"),
       "GET /?status=ready excludes WUI-1/WUI-2 (todo/done) (QW-003: filter excludes non-matching)");
@@ -464,13 +464,13 @@ async function main() {
     //   SORT-A (todo), SORT-B (done), SORT-C (ready) — inserted as C, A, B.
 
     // Sort nav is present in the list page (check for sort links)
-    assert(list.body.includes("/?sort=id") || list.body.includes("sort=id"),
+    assert(list.body.includes("/tasks?sort=id") || list.body.includes("sort=id"),
       "GET / body includes sort navigation link for sort=id (QW-004: sort nav)");
-    assert(list.body.includes("/?sort=status") || list.body.includes("sort=status"),
+    assert(list.body.includes("/tasks?sort=status") || list.body.includes("sort=status"),
       "GET / body includes sort navigation link for sort=status (QW-004: sort nav)");
 
     // GET /?sort=id — tasks sorted alphabetically by id (SORT-A before SORT-B before SORT-C)
-    const listSortId = await get(port, "/?sort=id");
+    const listSortId = await get(port, "/tasks?sort=id");
     assert(listSortId.status === 200, `GET /?sort=id returns 200 (got ${listSortId.status})`);
     assert(listSortId.body.includes("SORT-A") && listSortId.body.includes("SORT-B") && listSortId.body.includes("SORT-C"),
       "GET /?sort=id includes all three SORT-* tasks (QW-004: sort=id returns all tasks)");
@@ -482,7 +482,7 @@ async function main() {
 
     // GET /?sort=status — tasks sorted alphabetically by status (done, ready, todo)
     // then by id as tiebreaker. Expected order: SORT-B(done), SORT-C(ready), SORT-A(todo).
-    const listSortStatus = await get(port, "/?sort=status");
+    const listSortStatus = await get(port, "/tasks?sort=status");
     assert(listSortStatus.status === 200, `GET /?sort=status returns 200 (got ${listSortStatus.status})`);
     assert(listSortStatus.body.includes("SORT-A") && listSortStatus.body.includes("SORT-B") && listSortStatus.body.includes("SORT-C"),
       "GET /?sort=status includes all three SORT-* tasks (QW-004: sort=status returns all tasks)");
@@ -494,7 +494,7 @@ async function main() {
 
     // GET /?status=todo&sort=id — filter first (only todo tasks), then sort by id.
     // Fixture todo tasks: WUI-1, WUI-ACT, SORT-A. Sorted: SORT-A, WUI-1, WUI-ACT.
-    const listStatusTodoSortId = await get(port, "/?status=todo&sort=id");
+    const listStatusTodoSortId = await get(port, "/tasks?status=todo&sort=id");
     assert(listStatusTodoSortId.status === 200, `GET /?status=todo&sort=id returns 200 (got ${listStatusTodoSortId.status})`);
     assert(!listStatusTodoSortId.body.includes("SORT-B") && !listStatusTodoSortId.body.includes("SORT-C"),
       "GET /?status=todo&sort=id excludes done/ready tasks (QW-004: combined filter+sort)");
@@ -506,7 +506,7 @@ async function main() {
 
     // Sort nav links preserve the active status filter in their href
     // When ?status=todo is active, sort links should include status=todo in href
-    const listTodoForSortNav = await get(port, "/?status=todo");
+    const listTodoForSortNav = await get(port, "/tasks?status=todo");
     assert(listTodoForSortNav.body.includes("status=todo") && listTodoForSortNav.body.includes("sort=id"),
       "GET /?status=todo sort nav links preserve status=todo filter in sort hrefs (QW-004: sortNav href)");
 
@@ -520,7 +520,7 @@ async function main() {
       "GET / body includes label navigation (QW-005: label nav present when tasks have labels)");
 
     // GET /?label=alpha — includes LBL-1 (alpha) and LBL-3 (alpha+beta); excludes LBL-2 (beta only)
-    const listLabelAlpha = await get(port, "/?label=alpha");
+    const listLabelAlpha = await get(port, "/tasks?label=alpha");
     assert(listLabelAlpha.status === 200, `GET /?label=alpha returns 200 (got ${listLabelAlpha.status})`);
     assert(listLabelAlpha.body.includes("LBL-1"),
       "GET /?label=alpha includes LBL-1 (has label alpha) (QW-005: label filter includes matching)");
@@ -530,7 +530,7 @@ async function main() {
       "GET /?label=alpha excludes LBL-2 (has label beta only) (QW-005: label filter excludes non-matching)");
 
     // GET /?label=beta — includes LBL-2 (beta) and LBL-3 (alpha+beta); excludes LBL-1 (alpha only)
-    const listLabelBeta = await get(port, "/?label=beta");
+    const listLabelBeta = await get(port, "/tasks?label=beta");
     assert(listLabelBeta.status === 200, `GET /?label=beta returns 200 (got ${listLabelBeta.status})`);
     assert(listLabelBeta.body.includes("LBL-2"),
       "GET /?label=beta includes LBL-2 (has label beta) (QW-005: label filter includes matching)");
@@ -540,7 +540,7 @@ async function main() {
       "GET /?label=beta excludes LBL-1 (has label alpha only) (QW-005: label filter excludes non-matching)");
 
     // GET /?label=gamma — no task has label 'gamma': returns empty for label tasks
-    const listLabelGamma = await get(port, "/?label=gamma");
+    const listLabelGamma = await get(port, "/tasks?label=gamma");
     assert(listLabelGamma.status === 200, `GET /?label=gamma returns 200 (got ${listLabelGamma.status})`);
     assert(!listLabelGamma.body.includes("LBL-1") && !listLabelGamma.body.includes("LBL-2") && !listLabelGamma.body.includes("LBL-3"),
       "GET /?label=gamma returns no LBL-* tasks (unknown label → empty result) (QW-005: unknown label not an error)");
@@ -548,7 +548,7 @@ async function main() {
     // GET /?status=todo&label=alpha — filter by both status and label.
     // LBL-1 (todo, alpha) → included; LBL-3 (todo, alpha+beta) → included;
     // LBL-2 (done, beta) → excluded by status filter; WUI-1/WUI-ACT (todo, no labels) → excluded by label filter.
-    const listStatusTodoLabelAlpha = await get(port, "/?status=todo&label=alpha");
+    const listStatusTodoLabelAlpha = await get(port, "/tasks?status=todo&label=alpha");
     assert(listStatusTodoLabelAlpha.status === 200, `GET /?status=todo&label=alpha returns 200 (got ${listStatusTodoLabelAlpha.status})`);
     assert(listStatusTodoLabelAlpha.body.includes("LBL-1"),
       "GET /?status=todo&label=alpha includes LBL-1 (todo, alpha) (QW-005: combined status+label filter)");
@@ -592,7 +592,7 @@ async function main() {
 
     // LBL-1 (label 'alpha') appears on page 1 of default GET /.
     // Verify it appears in the table body (within td element) with its label value.
-    const listAlphaPage = await get(port, "/?label=alpha");
+    const listAlphaPage = await get(port, "/tasks?label=alpha");
     // QX-012 (iteration 3): labels <td> now has class="col-labels". Check for label value within a td.
     assert(
       listAlphaPage.body.includes(">alpha<") || listAlphaPage.body.includes("col-labels"),
@@ -601,7 +601,7 @@ async function main() {
 
     // WUI-1 has no labels — its row should have an empty labels td (column present)
     // GET /?status=todo&sort=id shows WUI-1 on page 1 (before ZPG-* tasks)
-    const listTodoForLabels = await get(port, "/?status=todo&sort=id");
+    const listTodoForLabels = await get(port, "/tasks?status=todo&sort=id");
     // WUI-1 appears with empty labels td (between title and </tr>)
     assert(listTodoForLabels.body.includes("WUI-1"),
       "GET /?status=todo&sort=id includes WUI-1 (QW-009: labelscolumn fixture sanity)");
@@ -646,7 +646,7 @@ async function main() {
 
     // GET /?sort=id — page 1 (default): includes ZPG-01 (first ZPG), includes ZPG-09 (last on p1),
     // excludes ZPG-10 (first on page 2), excludes ZPG-25 (last task overall).
-    const listPage1SortId = await get(port, "/?sort=id");
+    const listPage1SortId = await get(port, "/tasks?sort=id");
     assert(listPage1SortId.status === 200, `GET /?sort=id returns 200 for pagination test (got ${listPage1SortId.status})`);
     assert(listPage1SortId.body.includes("ZPG-01"),
       "GET /?sort=id page 1 includes ZPG-01 (first ZPG task on page 1) (QW-007: pagination first page)");
@@ -658,7 +658,7 @@ async function main() {
       "GET /?sort=id page 1 excludes ZPG-25 (last task on page 2) (QW-007: pagination excludes page 2 tasks)");
 
     // GET /?sort=id&page=2 — page 2: shows ZPG-10..ZPG-25, NOT ZPG-01..ZPG-09
-    const listPage2SortId = await get(port, "/?sort=id&page=2");
+    const listPage2SortId = await get(port, "/tasks?sort=id&page=2");
     assert(listPage2SortId.status === 200, `GET /?sort=id&page=2 returns 200 (got ${listPage2SortId.status})`);
     assert(listPage2SortId.body.includes("ZPG-10"),
       "GET /?sort=id&page=2 includes ZPG-10 (first task on page 2) (QW-007: pagination second page)");
@@ -680,14 +680,14 @@ async function main() {
       "GET /?sort=id page 1 contains 'Page 1' info text (QW-007: page info rendered)");
 
     // GET /?sort=id&page=1 and GET /?sort=id are equivalent (page=1 is the default)
-    const listPage1Explicit = await get(port, "/?sort=id&page=1");
+    const listPage1Explicit = await get(port, "/tasks?sort=id&page=1");
     assert(listPage1Explicit.body.includes("ZPG-01") && !listPage1Explicit.body.includes("ZPG-10"),
       "GET /?sort=id&page=1 is equivalent to page 1 default (ZPG-01 in, ZPG-10 out) (QW-007: explicit page=1 matches default)");
 
     // Pagination interacts with filters: GET /?sort=id&status=todo&page=2 paginates filtered tasks
     // All ZPG-* tasks are todo. With ?status=todo&sort=id: todo tasks = LBL-1,LBL-3,SORT-A,
     // WUI-1,WUI-ACT,ZPG-01..ZPG-25 (total 30). Page 2 (tasks 21-30) = ZPG-16..ZPG-25.
-    const listFilteredPage2 = await get(port, "/?sort=id&status=todo&page=2");
+    const listFilteredPage2 = await get(port, "/tasks?sort=id&status=todo&page=2");
     assert(listFilteredPage2.status === 200, `GET /?sort=id&status=todo&page=2 returns 200 (got ${listFilteredPage2.status})`);
     // ZPG-16 is the 21st todo task (alphabetically: LBL-1, LBL-3, SORT-A, WUI-1, WUI-ACT, ZPG-01..ZPG-25
     // = 5 non-ZPG + 25 ZPG = 30 todo tasks; page 2 starts at task 21 = ZPG-16)

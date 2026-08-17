@@ -578,9 +578,10 @@ export function isSafeRelativeRedirect(v: string | null): boolean {
 export const DEFAULT_PAGE_SIZE = 20;
 
 // Build query param helper: merges prefix, status, sort, label, page, and q params.
-// Previously a closure inside GET / handler that closed over PAGE_SIZE and
+// Previously a closure inside the GET / handler that closed over PAGE_SIZE and
 // DEFAULT_PAGE_SIZE; now module-level with explicit pageSizeOverride and
-// defaultPageSize args.
+// defaultPageSize args. The list route it builds links for lives at /tasks
+// (gap-webui-root-should-show-dashboard: `/` is the dashboard landing page).
 export function buildHref(
   status: string | null,
   sort: string | null,
@@ -601,7 +602,9 @@ export function buildHref(
   if (pg && pg > 1) params.set("page", String(pg));
   if (pageSizeOverride !== defaultPageSize) params.set("pageSize", String(pageSizeOverride));
   const qs = params.toString();
-  return qs ? `/?${qs}` : "/";
+  // gap-webui-root-should-show-dashboard: `/` is now the dashboard landing page, so the task-list
+  // route (and every filter/sort/page link built here) lives at `/tasks`.
+  return qs ? `/tasks?${qs}` : "/tasks";
 }
 
 // ── Route handlers ────────────────────────────────────────────────────────────
@@ -1057,7 +1060,7 @@ export async function handleAdrList(
   res.end(html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${modernistStyles()}${pageStyles()}<title>ADRs</title></head>
     <body><main>
-      <p class="meta"><a href="/">← tasks</a> · <a href="/live">live</a> · <a href="/journal">journal</a></p>
+      <p class="meta"><a href="/tasks">← tasks</a> · <a href="/live">live</a> · <a href="/journal">journal</a></p>
       <h1>ADRs (${adrs.length})</h1>
       ${adrs.length === 0 ? html`<p class="meta">No ADRs.</p>` : html`<table>
         <tr><th>id</th><th>status</th><th>date</th><th>title</th></tr>
@@ -1172,7 +1175,7 @@ export async function handleGoalList(
   res.end(html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${modernistStyles()}${pageStyles()}<title>Goals</title></head>
     <body><main>
-      <p class="meta"><a href="/">← tasks</a> · <a href="/live">live</a> · <a href="/journal">journal</a> · <a href="/adr">ADRs →</a> · <a href="/doc">docs →</a></p>
+      <p class="meta"><a href="/tasks">← tasks</a> · <a href="/live">live</a> · <a href="/journal">journal</a> · <a href="/adr">ADRs →</a> · <a href="/doc">docs →</a></p>
       <h1>Goals — 阶段目标与 AC (${goals.length})</h1>
       ${readError ? html`<div class="error-banner" role="alert"><strong>读失败:</strong> ${escapeHtml(readError)}</div>` : ""}
       <p class="meta">Kind: ${kindNav}</p>
@@ -1252,7 +1255,7 @@ export async function handleDocList(
   res.end(html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${modernistStyles()}${pageStyles()}<title>Docs</title></head>
     <body><main>
-      <p class="meta"><a href="/">← tasks</a> · <a href="/live">live</a> · <a href="/journal">journal</a> · <a href="/adr">ADRs →</a> · <a href="/goal">goals →</a></p>
+      <p class="meta"><a href="/tasks">← tasks</a> · <a href="/live">live</a> · <a href="/journal">journal</a> · <a href="/adr">ADRs →</a> · <a href="/goal">goals →</a></p>
       <h1>Managed documents (${docs.length})</h1>
       ${readError ? html`<div class="error-banner" role="alert"><strong>读失败:</strong> ${escapeHtml(readError)}</div>` : ""}
       ${docs.length === 0 ? html`<p class="meta">No documents.</p>` : html`<table>
@@ -1306,7 +1309,7 @@ export async function handleTaskDetail(
   // not // or \ or a control-char-prefixed variant -- see
   // isSafeRelativeRedirect()'s own doc comment, ADV-003).
   const fromParam = url.searchParams.get("from");
-  const backHref = isSafeRelativeRedirect(fromParam) ? fromParam as string : "/";
+  const backHref = isSafeRelativeRedirect(fromParam) ? fromParam as string : "/tasks";
   // QX-013 (iteration 3): read ?error= and ?success= for read-only display of
   // gate/action feedback query params. (The web action-buttons POST route that
   // originally produced these params was removed — gap-web-action-buttons-unused-
@@ -1408,7 +1411,7 @@ function renderLivePage(live: LiveResult): string {
   return html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay live — what the loop is doing right now">${modernistStyles()}${pageStyles()}<title>Live — loop activity</title></head>
     <body><main>
-      <p class="meta"><a href="/">← tasks</a> · <a href="/live">live</a> · <a href="/journal">journal</a> · <a href="/adr">ADRs →</a></p>
+      <p class="meta"><a href="/tasks">← tasks</a> · <a href="/live">live</a> · <a href="/journal">journal</a> · <a href="/adr">ADRs →</a></p>
       <h1>Live — 循环此刻在做什么</h1>
       ${statusNote}
       ${summary}
@@ -1420,7 +1423,7 @@ function renderJournalPage(journal: JournalResult): string {
   return html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay journal — recent loop record">${modernistStyles()}${pageStyles()}<title>Journal — recent loop record</title></head>
     <body><main>
-      <p class="meta"><a href="/">← tasks</a> · <a href="/live">live</a> · <a href="/journal">journal</a> · <a href="/adr">ADRs →</a></p>
+      <p class="meta"><a href="/tasks">← tasks</a> · <a href="/live">live</a> · <a href="/journal">journal</a> · <a href="/adr">ADRs →</a></p>
       <h1>Journal — 循环最近记录</h1>
       ${renderSectionBlock(journal.escalations, "升级项 (escalations.md)")}
       ${renderSectionBlock(journal.tickLog, "Tick 记录 (tick-log.md)")}
@@ -1531,7 +1534,7 @@ function renderBoardPage(board: {
   return html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay board — 三源 join 看板">${modernistStyles()}${pageStyles()}<title>Board — 三源 join 看板</title></head>
     <body><main>
-      <p class="meta"><a href="/">← tasks</a> · <a href="/live">live</a> · <a href="/journal">journal</a> · <a href="/adr">ADRs →</a></p>
+      <p class="meta"><a href="/tasks">← tasks</a> · <a href="/live">live</a> · <a href="/journal">journal</a> · <a href="/adr">ADRs →</a></p>
       <h1>Board — 意图 / 执行 / 落地</h1>
       <p class="meta">${intentNote} · ${execNote} · ${landingNote}</p>
       <table>
@@ -1785,7 +1788,7 @@ function renderGitHistoryPage(history: GitHistoryResult): string {
   return html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay git history — commit landing timeline (server-rendered SVG, zero client JS)">${modernistStyles()}${pageStyles()}<title>Git history — commit landing timeline</title></head>
     <body><main>
-      <p class="meta"><a href="/">← tasks</a> · <a href="/live">live</a> · <a href="/journal">journal</a> · <a href="/git-history">git-history</a> · <a href="/adr">ADRs →</a></p>
+      <p class="meta"><a href="/tasks">← tasks</a> · <a href="/live">live</a> · <a href="/journal">journal</a> · <a href="/git-history">git-history</a> · <a href="/adr">ADRs →</a></p>
       <h1>Git History — 提交落地时间轴</h1>
       <p class="meta"><strong>横轴 = 提交落地时刻（git commit time），不是工时/持续时间。</strong> git 分支存活区间 ≠ 任务工时（实测 149/164 fan-in 分支寿命 &lt;1h——任务在首提交落地前就干完了）。真工时不在此图中：它在遥测里（#55，join 率仅 ~6%）。菱形 = 合并提交（fan-in 落地事件）。当前窗口：最近 ${nCommits} 条提交、${mergeCount} 个合并（跨所有本地分支）。</p>
       ${statusNote}
@@ -1822,7 +1825,7 @@ const SITE_NAV_GROUPS: Array<{ label: string; items: Array<[string, string]> }> 
 ];
 
 const SITE_NAV_ROUTES: Record<string, string> = {
-  dashboard: "/dashboard", tasks: "/", live: "/live", board: "/board", system: "/system",
+  dashboard: "/dashboard", tasks: "/tasks", live: "/live", board: "/board", system: "/system",
   manager: "/manager", journal: "/journal", git: "/git-history", tests: "/tests",
   sessions: "/sessions", adr: "/adr", goal: "/goal", doc: "/doc", architecture: "/architecture",
 };
@@ -2302,7 +2305,7 @@ function renderDashboardPage(d: {
         <span style="flex:none">${escapeHtml(String(t.status ?? ""))}</span>
       </a>`).join("")}
     </div>` : ""}
-    <a href="/" style="font-size:0.8rem;color:var(--color-accent);text-decoration:none;margin-top:auto">查看任务列表 →</a>
+    <a href="/tasks" style="font-size:0.8rem;color:var(--color-accent);text-decoration:none;margin-top:auto">查看任务列表 →</a>
   </div>`;
 
   return html`<!doctype html>
@@ -2373,7 +2376,17 @@ export async function handleAllRoutes(
 ): Promise<void> {
   const url = new URL(req.url as string, `http://${req.headers.host}`);
 
+  // gap-webui-root-should-show-dashboard: `/` is the design's landing page → dashboard.
+  // AC95 had kept `/` wired to the legacy task list; the design (state.page: 'dashboard' default,
+  // navGroupDefs 核心 order [dashboard, tasks]) says dashboard lands first. `/` now 302s to the
+  // canonical /dashboard, and the task list moves to its own /tasks route (still nav-reachable).
   if (url.pathname === "/") {
+    res.writeHead(302, { Location: "/dashboard" });
+    res.end();
+    return;
+  }
+
+  if (url.pathname === "/tasks") {
     await handleTaskList(req, res, url, client, manifest);
     return;
   }

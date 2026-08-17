@@ -67,8 +67,8 @@ test("GET /adr/nope → 404", async () => {
   assert.equal((await get(port, "/adr/ADR-999")).status, 404);
 });
 
-test("the task list (/) does not list ADRs", async () => {
-  const r = await get(port, "/");
+test("the task list (/tasks) does not list ADRs", async () => {
+  const r = await get(port, "/tasks");
   assert.equal(r.status, 200);
   assert.ok(!r.body.includes("ADR-001"), "ADR must not appear on the task list page");
 });

@@ -15,7 +15,7 @@
 // end-to-end, against a real GitHub-backed task before this test existed.
 //
 // Read packages/quay/src/serve.js and provider-client.js in full before
-// writing this test: the Web UI's GET routes (`/` list, `/task/:id`
+// writing this test: the Web UI's GET routes (`/tasks` list, `/task/:id`
 // detail) call only read-only Provider functions (client.taskList(),
 // client.taskGet(), client.manifest()) — no write path. The POST
 // `/task/:id/action/:actionId` route only composes+delivers a trigger
@@ -116,13 +116,13 @@ async function main() {
     server = await startServer({ port: 0 });
     const port = server.address().port;
 
-    // --- GET / (list) — real GitHub-backed task gh-3 must appear ---
-    const list = await get(port, "/");
-    assert(list.status === 200, `GET / returns 200 (got ${list.status})`);
-    assert(list.body.includes("gh-3"), "GET / body contains the real GitHub-backed task id gh-3");
+    // --- GET /tasks (list) — real GitHub-backed task gh-3 must appear ---
+    const list = await get(port, "/tasks");
+    assert(list.status === 200, `GET /tasks returns 200 (got ${list.status})`);
+    assert(list.body.includes("gh-3"), "GET /tasks body contains the real GitHub-backed task id gh-3");
     assert(
       list.body.includes("Fix MCP task_write silently dropping the extra field"),
-      "GET / body contains gh-3's real live title"
+      "GET /tasks body contains gh-3's real live title"
     );
 
     // --- GET /task/gh-3 (detail) — real live status ---

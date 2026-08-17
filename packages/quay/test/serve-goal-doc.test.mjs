@@ -104,8 +104,8 @@ test("AC5 — GET /doc/DOC-001 renders the document body", async () => {
   assert.match(r.body, /the directive skill/);
 });
 
-test("the task list (/) nav links to goals and docs", async () => {
-  const r = await get(port, "/");
+test("the task list (/tasks) nav links to goals and docs", async () => {
+  const r = await get(port, "/tasks");
   assert.equal(r.status, 200);
   assert.match(r.body, /\/goal/);
   assert.match(r.body, /\/doc/);

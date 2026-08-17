@@ -103,11 +103,11 @@ async function main() {
     // port back directly.
     const port = server.address().port;
 
-    const res = await get(port, "/");
-    assert(res.status === 200, "GET / returns 200 (got " + res.status + ")");
+    const res = await get(port, "/tasks");
+    assert(res.status === 200, "GET /tasks returns 200 (got " + res.status + ")");
     assert(
       res.body.includes("PEV-1"),
-      "GET / body includes PEV-1 -- proves startServer() resolved env.QUAY_NATIVE_TASKS_DIR (the seeded, 'real' dir), NOT tasks_dir (the empty 'decoy' dir), closing DESIGN.md §4.4's asymmetry"
+      "GET /tasks body includes PEV-1 -- proves startServer() resolved env.QUAY_NATIVE_TASKS_DIR (the seeded, 'real' dir), NOT tasks_dir (the empty 'decoy' dir), closing DESIGN.md §4.4's asymmetry"
     );
 
     // Cross-check: the CLI leg (bin/quay.js, via withProvider()/resolveProviderEnv())

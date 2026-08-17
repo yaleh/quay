@@ -113,16 +113,16 @@ async function main() {
     // body's UTF-8 bytes correctly instead of falling back to a legacy
     // encoding and mangling non-ASCII glyphs (the live browser-observed bug
     // this task fixes).
-    const list = await getRaw(port, "/");
-    assert(list.status === 200, `GET / returns 200 (got ${list.status})`);
+    const list = await getRaw(port, "/tasks");
+    assert(list.status === 200, `GET /tasks returns 200 (got ${list.status})`);
     assert(/charset=utf-8/i.test(list.headers["content-type"] || ""),
-      `GET / Content-Type header declares charset=utf-8 (got "${list.headers["content-type"]}")`);
+      `GET /tasks Content-Type header declares charset=utf-8 (got "${list.headers["content-type"]}")`);
     // The em-dash in "Quay — task list" is U+2014, UTF-8 bytes E2 80 94.
     const emDashBytes = Buffer.from([0xe2, 0x80, 0x94]);
     assert(list.raw.includes(emDashBytes),
-      "GET / body's raw bytes contain the correctly UTF-8-encoded em-dash (E2 80 94)");
+      "GET /tasks body's raw bytes contain the correctly UTF-8-encoded em-dash (E2 80 94)");
     assert(list.raw.toString("utf-8").includes("<meta charset=\"utf-8\">"),
-      "GET / body includes an explicit <meta charset=\"utf-8\"> tag (belt-and-braces alongside the HTTP header)");
+      "GET /tasks body includes an explicit <meta charset=\"utf-8\"> tag (belt-and-braces alongside the HTTP header)");
 
     const detail = await getRaw(port, "/task/RND-1");
     assert(detail.status === 200, `GET /task/RND-1 returns 200 (got ${detail.status})`);

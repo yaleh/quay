@@ -136,9 +136,9 @@ test("(b) serve --port + HTTP GET returns 200", async () => {
     // A genuinely broken serve still fails here, just after a load-tolerant wait.
     for (let i = 0; i < 100; i++) {
       await sleep(150);
-      try { code = await httpGet(port, "/"); break; } catch { /* not up yet */ }
+      try { code = await httpGet(port, "/tasks"); break; } catch { /* not up yet */ }
     }
-    assert.equal(code, 200, "GET / on the standalone-bundle server must return 200");
+    assert.equal(code, 200, "GET /tasks on the standalone-bundle server must return 200");
   } finally {
     child.kill("SIGKILL");
   }

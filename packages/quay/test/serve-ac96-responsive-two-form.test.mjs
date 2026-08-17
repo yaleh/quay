@@ -87,7 +87,7 @@ after(async () => {
 });
 
 test("AC1 structural — the list page emits the mobile chrome (hamburger header + toggle + menu)", async () => {
-  const r = await get(port, "/");
+  const r = await get(port, "/tasks");
   assert.equal(r.status, 200);
   // The mobile-only chrome is emitted before <main>.
   assert.ok(r.body.includes('class="mobile-chrome"'), "list page renders the mobile chrome wrapper");
@@ -102,7 +102,7 @@ test("AC1 structural — the list page emits the mobile chrome (hamburger header
 });
 
 test("AC1/AC2 — desktop site-nav line is marked .site-nav; filter/sort are .list-nav; label nav is chips", async () => {
-  const r = await get(port, "/");
+  const r = await get(port, "/tasks");
   assert.ok(r.body.includes('class="meta site-nav"'), "desktop nav line is tagged .site-nav (hidden on mobile)");
   assert.ok(r.body.includes('class="meta list-nav"'), "filter line is tagged .list-nav");
   assert.ok(r.body.includes('class="meta list-nav"') && r.body.indexOf("Sort:") > -1, "sort line is tagged .list-nav");
@@ -112,7 +112,7 @@ test("AC1/AC2 — desktop site-nav line is marked .site-nav; filter/sort are .li
 });
 
 test("AC3 — the inline white-space:normal override is gone (audit §1.4-3)", async () => {
-  const r = await get(port, "/");
+  const r = await get(port, "/tasks");
   // The audit bug was an INLINE style attribute fighting .label-nav-wrap's nowrap:
   // <p class="meta" style="white-space:normal">. AC3 removes that inline override.
   // (A `white-space: normal` value inside the CSS sheet is legitimate and unrelated.)
@@ -122,7 +122,7 @@ test("AC3 — the inline white-space:normal override is gone (audit §1.4-3)", a
 });
 
 test("invalid-HTML fix — the … more-labels <details> is a flex child of .label-nav-wrap, not nested in a <p>", async () => {
-  const r = await get(port, "/");
+  const r = await get(port, "/tasks");
   // The old buggy form wrapped the labelNav (including the <details>) inside
   // <p class="meta">Label: …</p>, which the HTML parser breaks open — stacking the
   // <details> onto its own line. AC96 renders each chip as a flex item directly in
@@ -160,7 +160,7 @@ test("renderMobileChrome — emits the zero-JS checkbox toggle + full 15-view na
 });
 
 test("AC102 preserved — list response inlines the Modernist token sheet and serve-handlers.ts stays zero-hex", async () => {
-  const r = await get(port, "/");
+  const r = await get(port, "/tasks");
   assert.ok(r.body.includes("--color-bg"), "list page still inlines the Modernist token sheet (AC102 ①)");
   assert.ok(r.body.includes("var(--color-"), "list page uses var(--color-*) tokens");
   const src = fs.readFileSync(SERVE_HANDLERS, "utf8");

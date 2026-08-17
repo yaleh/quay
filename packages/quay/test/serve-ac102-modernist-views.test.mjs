@@ -66,7 +66,7 @@ after(async () => {
 // The 15 design views (AC95's list — 8 exact routes + 6 new + task detail).
 const FIFTEEN_VIEWS = [
   ["/dashboard", "Dashboard"],
-  ["/", "task list"],
+  ["/tasks", "task list"],
   ["/live", "Live"],
   ["/board", "Board"],
   ["/system", "System"],
