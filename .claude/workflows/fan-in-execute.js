@@ -22,6 +22,14 @@ export const meta = {
 //     --taskId 关【本任务】的 bracket（inProgress[] 按 taskId 定位 runId），绝不 --reconcile 全局扫——判据2
 //     能取假：在飞任务/未 land 任务的 bracket 必须保留。ff 失败 ⇒ 不执行 5.5。改本块必须同步
 //     plugin/test/fan-in-execute-paths.test.mjs 的 bracket-close 组测试（真实 bash 闭 bracket + 在飞保留）。
+//  ⑥ 自举（gap-fan-in-orchestration-bootstrap-self-fix）：fan-in 编排文件的调用一律从【任务 worktree】
+//     解析（step 0 自举判定 + 各步 ${worktree} 前缀），不再 cwd 依赖、不再 ${root}——本任务若修改了
+//     编排文件本身（fan-in-execute.js / select-static-checks-for-touches.ts / fan-in-ff-merge.sh /
+//     per-task-suite-record.ts / full-suite-runner.ts），其 fan-in 必须用自己的修复被验证（取假一/取假二
+//     钉在 plugin/test/fan-in-execute-paths.test.mjs）。step 0 命中时 echo FAN-IN-BOOTSTRAP=hit，且若
+//     root 与 worktree 的 fan-in-execute.js 不一致（本次派发没用 worktree 版 scriptPath）echo WARN——
+//     结构性缺口仍在。改本文件必须同步 plugin/workflows/fan-in-execute.js（双拷贝，workflows-dual-copy-
+//     drift-check）与 A6 派发规则（fast-mode-tick-core.md：命中 ⇒ scriptPath 用 worktree 版）。
 //
 //  脚本层能力边界（同 manager-tick-core.js 实测）：globalThis 仅 log/phase/budget/setTimeout/
 //  clearTimeout/agent/parallel/pipeline/workflow/args；无 require/process/fetch；import() 语法
@@ -67,6 +75,33 @@ const result = await agent(
 
 步骤（严格按序；每步都先 cd ${worktree} 或显式用 -C）：
 
+【无锁段 step 0 — fan-in 编排自举检查（gap-fan-in-orchestration-bootstrap-self-fix）】
+# 自举判定：本分支是否修改了 fan-in 编排文件自身（fan-in-execute.js / select-static-checks-for-
+# touches.ts / fan-in-ff-merge.sh / per-task-suite-record.ts / full-suite-runner.ts）？命中 ⇒ 本任务的
+# fan-in 必须用自己的修复被验证 ⇒ 后续每个编排脚本调用一律显式从 ${worktree} 解析（不依赖 cwd、
+# 不用 ${root}）。检测机件 = select-static-checks-for-touches.ts --bootstrap-orchestration（同一文件
+# 集合，单一来源，不在本 prompt 复制清单）。
+bootstrap_fork=$(git -C ${worktree} merge-base ${mergeTarget} HEAD 2>/dev/null || true)
+bootstrap_delta=$(git -C ${worktree} diff --name-only "$bootstrap_fork" HEAD 2>/dev/null || true)
+bootstrap_hit=""
+if [ -n "$bootstrap_delta" ]; then
+  bootstrap_hit=$(node --experimental-strip-types ${worktree}/plugin/scripts/select-static-checks-for-touches.ts --bootstrap-orchestration --root ${worktree} $bootstrap_delta 2>/dev/null || echo "__BOOTSTRAP_CLASSIFY_FAILED__")
+fi
+if [ -n "$bootstrap_hit" ]; then
+  echo "FAN-IN-BOOTSTRAP=hit（本分支修改 fan-in 编排文件：）"
+  echo "$bootstrap_hit"
+  echo "⇒ 编排脚本一律从 worktree 解析"
+  # 自举警示（取假一能取假）：命中而 root 与 worktree 的 fan-in-execute.js 不一致 ⇒ 本次派发没用
+  # worktree 版 scriptPath ⇒ 本任务运行的 workflow 是主检出版（未含本分支修改）⇒ 修复未被自己验证。
+  if [ -f "${worktree}/.claude/workflows/fan-in-execute.js" ]; then
+    if ! cmp -s "${worktree}/.claude/workflows/fan-in-execute.js" "${root}/.claude/workflows/fan-in-execute.js" 2>/dev/null; then
+      echo "FAN-IN-BOOTSTRAP-WARN: 本分支修改了 fan-in-execute.js 但本次 fan-in 运行的 workflow 是主检出版（A6 自举规则要求以 worktree 版 scriptPath 派发）——本任务的修复未被自己验证" >&2
+    fi
+  fi
+else
+  echo "FAN-IN-BOOTSTRAP=miss（本分支未修改 fan-in 编排文件，编排脚本从主检出解析）"
+fi
+
 【无锁段 step 1 — merge develop】
 cd ${worktree} && git merge ${mergeTarget}
 —— 冲突【只可能在这】出现：慢慢解，不占任何人（AC75：必须 merge 不得 rebase）。解完 git add + git commit。
@@ -75,7 +110,7 @@ cd ${worktree} && git merge ${mergeTarget}
 # （git diff --name-only ${mergeTarget}...HEAD = fan-in 将要 land 的文件）对照声明 Touches 做事后核对。
 # 越界触碰 / 声明过宽 ⇒ HARD FAIL（非建议）；判定逻辑在 anti-drift-touches-check.ts（本步即其 driver
 # 输入面：--task --worktree --merge-target），不改判定逻辑，只喂实际 diff + 声明 Touches。
-if ! node --experimental-strip-types plugin/scripts/anti-drift-touches-check.ts --task ${task} --worktree ${worktree} --merge-target ${mergeTarget}; then
+if ! node --experimental-strip-types ${worktree}/plugin/scripts/anti-drift-touches-check.ts --task ${task} --worktree ${worktree} --merge-target ${mergeTarget}; then
   echo "FATAL: anti-drift-touches HARD FAIL——实际触碰超出声明 Touches（或声明过宽）⇒ 不翻 done、不 ff；不得改 Touches 绕过守卫" >&2
   exit 2
 fi
@@ -94,7 +129,10 @@ delta=$(git -C ${worktree} diff --name-only "$fork" HEAD 2>/dev/null || true)
 # 任务体/doc/telemetry 面才 doc，非手写正则表；orchestration/*-tick-core.md 被 tick-core-static-check
 # 等读取 ⇒ 非 doc）。判错 ⇒ 该跑全量却跳过（漏检）或该跳却重跑（浪费）。改此行必须同步
 # plugin/test/fan-in-execute-paths.test.mjs。分类脚本失败 ⇒ fail-closed（判不出 ≠ 不需要）。
-code_delta=$(node --experimental-strip-types plugin/scripts/select-static-checks-for-touches.ts --classify-delta $delta) || code_delta="__CLASSIFY_FAILED__"
+# 自举（gap-fan-in-orchestration-bootstrap-self-fix）：classify 脚本与 registry（--root）都从 worktree
+# 解析（非 cwd、非 ${root}）——本任务若修改了 select-static-checks-for-touches.ts / scripts/test.sh 的
+# @static-object 注解，其 fan-in 必须用自己的版本判定（取假二：旧正则判 doc、worktree 版判 code）。
+code_delta=$(node --experimental-strip-types ${worktree}/plugin/scripts/select-static-checks-for-touches.ts --classify-delta --root ${worktree} $delta) || code_delta="__CLASSIFY_FAILED__"
 判定：
   - code_delta 非空 ⇒ 分支整体变更触及代码/脚本/测试断言面（或被检查器读取的路径）⇒ 本回合【要】重跑全量 suite。
   - code_delta 为空且 delta 非空 ⇒ delta 全落 doc/任务体/telemetry 面 ⇒ 跳过全量 suite（只跑 doc 检查）。
@@ -102,7 +140,7 @@ code_delta=$(node --experimental-strip-types plugin/scripts/select-static-checks
 把 code_delta 记下来（返回时上报）。
 
 【无锁段 step 3 — ts-typecheck 闸】
-cd ${worktree} && node --experimental-strip-types plugin/scripts/fan-in-ts-typecheck-gate.ts --task ${task} --worktree ${worktree} --merge-target ${mergeTarget}
+cd ${worktree} && node --experimental-strip-types ${worktree}/plugin/scripts/fan-in-ts-typecheck-gate.ts --task ${task} --worktree ${worktree} --merge-target ${mergeTarget}
   —— 闸自己判定 Touches 是否含新增/移动 .ts（无则直接 exit 0）。exit 非 0 ⇒ 丢弃 worktree 内未合状态、
      标 needs-human、停止本 tick 合并与派发——不要继续 ff。
 
@@ -177,7 +215,7 @@ if [ ! -f "$suite_capture" ]; then
 fi
 . "$suite_capture"
 if [ -n "$skip_reason" ]; then
-  if ! node --experimental-strip-types plugin/scripts/per-task-suite-record.ts \
+  if ! node --experimental-strip-types ${worktree}/plugin/scripts/per-task-suite-record.ts \
     --task-id ${task} --run-id ${runId} --state green --lane-count "$lane_count" \
     --duration-ms "$wall_ms" --started-at "$start_iso" --finished-at "$end_iso" \
     --doc-checked true --doc-check-exit 0 \
@@ -187,7 +225,7 @@ if [ -n "$skip_reason" ]; then
     exit 2
   fi
 else
-  if ! node --experimental-strip-types plugin/scripts/per-task-suite-record.ts \
+  if ! node --experimental-strip-types ${worktree}/plugin/scripts/per-task-suite-record.ts \
     --task-id ${task} --run-id ${runId} --state green --lane-count "$lane_count" \
     --duration-ms "$wall_ms" --started-at "$start_iso" --finished-at "$end_iso" \
     --doc-checked true --doc-check-exit 0 \
@@ -214,7 +252,7 @@ fi
 # AC 完成闸（gap-fan-in-flip-no-ac-completion-check）：翻转前跑 AC47 谓词（countCompletionCheckboxes /
 # isLandedCodeComplete，同源不新造）——AC 未全勾（剩余含非待外部项）或 AC/DoD 段缺失（NOT-EVALUATED，
 # 硬规则 3b：无法评估 ≠ 合格）⇒ 不翻 done。与承重点③ 行形检查并列，两检查都过才翻。
-if ! node --experimental-strip-types plugin/scripts/fan-in-ac-completion-gate.ts --task ${task}; then
+if ! node --experimental-strip-types ${worktree}/plugin/scripts/fan-in-ac-completion-gate.ts --task ${task} --worktree ${worktree}; then
   echo "FATAL: flip 拒绝——tasks/${task}.md AC 完成闸未通过（AC 未全勾或段缺失）⇒ 未翻 done" >&2
   exit 2
 fi
@@ -248,7 +286,7 @@ fi
 agent_id=$(basename "$self" .jsonl 2>/dev/null | sed 's/^agent-//')
 if [ -z "$agent_id" ]; then echo "FATAL: 未能从 $self 提取 agent id（--agent-id 不能由调用方填）" >&2; exit 2; fi
 # selfloc-block-end
-bash ${root}/plugin/scripts/fan-in-ff-merge.sh --task ${task} --run-id ${runId} --agent-id "$agent_id" --root ${root} --merge-target ${mergeTarget}
+bash ${worktree}/plugin/scripts/fan-in-ff-merge.sh --task ${task} --run-id ${runId} --agent-id "$agent_id" --root ${root} --merge-target ${mergeTarget}
   —— 锁只包 git merge --ff-only，毫秒级，成/败都解锁。ff 失败（develop 前进了）⇒ 回 step 1 重跑
      （重 merge develop、重判 delta、重跑 suite、重 ff），同一任务 ff 失败 ≥3 次才谈防活锁。
      ff 成功（exit 0）后才执行 step 5.5；ff 失败（exit 1/3）⇒ 回 step 1，绝不执行 step 5.5。
@@ -262,7 +300,7 @@ bash ${root}/plugin/scripts/fan-in-ff-merge.sh --task ${task} --run-id ${runId} 
 # 只关【本任务】的 bracket（--taskId ${task} 在 telemetry report 的 inProgress[] 按 taskId 定位 runId）——
 # 绝不 --reconcile 全局扫（判据2 能取假：在飞任务/未 land 任务的 bracket 必须保留）。
 # 幂等：无 open bracket（已闭合/从未 --task-start）⇒ --close-task exit 0，无写入。
-if ! bash ${root}/plugin/scripts/closure-lag-check.sh --close-task --taskId ${task} --outcome done --root ${root}; then
+if ! bash ${worktree}/plugin/scripts/closure-lag-check.sh --close-task --taskId ${task} --outcome done --root ${root}; then
   echo "FATAL: telemetry bracket 闭合失败（${task} ff 已成功但 --close-task 非 0）——landing 完成但 bracket 未闭合（stale bracket 将留到下一轮 reconcile）" >&2
   exit 1
 fi

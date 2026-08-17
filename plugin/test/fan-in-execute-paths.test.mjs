@@ -114,6 +114,41 @@ function cleanup(dir) {
 // the doc commit ⇒ the old gate judged doc-only and skipped the full suite while the branch's code
 // slipped through. The real `plugin/` tree is symlinked in (AFTER the commits) so the classify script
 // resolves; the symlink is untracked and never appears in the git diff.
+
+// ── ⑦ runtime-tree symlink helper (gap-fan-in-orchestration-bootstrap-self-fix) ─────────────────────
+// The workflow's step-0 bootstrap block and every fan-in orchestration script call now resolve through
+// ${worktree} (explicit worktree-rooted paths, NOT cwd / ${root}). Tests that EXECUTE those blocks
+// against a temp worktree must give the temp worktree a resolvable runtime tree — symlink the REAL
+// plugin/ + scripts/ AFTER the git commits (untracked ⇒ never in `git diff --name-only`), subdir-by-
+// subdir when the delta itself carries a plugin/ path (a whole-dir symlink would EEXIST on the
+// committed delta file's dir).
+
+/** Symlink the REAL repo's runtime trees into a temp worktree so worktree-resolved orchestration
+ *  scripts (${worktree}/plugin/scripts/…) execute against the real implementation. plugin/ is symlinked
+ *  whole UNLESS the delta carries a plugin/ path (then the classify import chain is symlinked
+ *  file-by-file into the existing plugin/scripts/); scripts/ (scripts/test.sh — the classify's
+ *  --root registry) is always symlinked. */
+function symlinkRuntimeTrees(dir, files) {
+  const delta = new Set(Object.keys(files || {}).map((p) => String(p).replace(/\\/g, "/")));
+  const hasPluginDelta = [...delta].some((p) => p === "plugin" || p.startsWith("plugin/"));
+  if (!hasPluginDelta) {
+    if (!fs.existsSync(path.join(dir, "plugin"))) {
+      fs.symlinkSync(path.join(REPO_ROOT, "plugin"), path.join(dir, "plugin"), "dir");
+    }
+  } else {
+    fs.mkdirSync(path.join(dir, "plugin", "scripts"), { recursive: true });
+    for (const f of ["select-static-checks-for-touches.ts", "task-schema.ts", "touches-parser.ts",
+                     "gate-script-base.ts", "wiring-coverage-check.ts", "touches-orthogonality-check.ts"]) {
+      const dest = path.join(dir, "plugin", "scripts", f);
+      if (!fs.existsSync(dest) && !delta.has(`plugin/scripts/${f}`)) {
+        fs.symlinkSync(path.join(REPO_ROOT, "plugin", "scripts", f), dest, "file");
+      }
+    }
+  }
+  if (!fs.existsSync(path.join(dir, "scripts"))) {
+    fs.symlinkSync(path.join(REPO_ROOT, "scripts"), path.join(dir, "scripts"), "dir");
+  }
+}
 function makeRepoWithDelta(files, opts = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fan-in-delta-"));
   const run = (args) => {
@@ -159,6 +194,7 @@ function makeRepoWithDelta(files, opts = {}) {
 async function classifyRealDelta(files, opts) {
   const repo = makeRepoWithDelta(files, opts);
   try {
+    symlinkRuntimeTrees(repo, files); // worktree-resolved classify needs a runtime tree in the temp repo
     const { prompt } = await runWorkflow({
       args: { task: "gap-test-delta", worktree: repo, root: REPO_ROOT, runId: "fm-test-1", mergeTarget: "develop" },
     });
@@ -692,7 +728,9 @@ test("⑥ REAL bracket-close — closes the fanned-in task's bracket AND preserv
   t.after(() => cleanup(root));
   const runIdA = startBracket(root, "gap-test-close-a");
   const runIdB = startBracket(root, "gap-test-close-b");
-  const block = await bracketCloseBlockFor("gap-test-close-a", "/tmp/wt", root, runIdA);
+  // worktree arg = the telemetry fake root (has plugin/ symlinked) — the block now resolves the
+  // closure-lag-check.sh SCRIPT from ${worktree} (gap-fan-in-orchestration-bootstrap-self-fix).
+  const block = await bracketCloseBlockFor("gap-test-close-a", root, root, runIdA);
   const r = runBash(block, { cwd: REPO_ROOT });
   assert.equal(r.status, 0, `bracket-close block must exit 0: ${r.stderr}`);
   const rep = runBash(`node --no-warnings --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --report --json --root "${root}"`, { cwd: REPO_ROOT });
@@ -710,7 +748,7 @@ test("⑥ REAL idempotent — a task with NO open bracket is a no-op (exit 0, no
   const root = makeTelemetryFakeRoot();
   t.after(() => cleanup(root));
   const runIdA = startBracket(root, "gap-test-close-a");
-  const block = await bracketCloseBlockFor("gap-test-close-a", "/tmp/wt", root, runIdA);
+  const block = await bracketCloseBlockFor("gap-test-close-a", root, root, runIdA);
   // Close once (writes the end event)…
   assert.equal(runBash(block, { cwd: REPO_ROOT }).status, 0);
   // …then close again: no open bracket ⇒ --close-task exits 0, no second end event.
@@ -719,4 +757,110 @@ test("⑥ REAL idempotent — a task with NO open bracket is a no-op (exit 0, no
   const report = JSON.parse(rep.stdout);
   assert.ok(!(report.inProgress || []).some((p) => p.taskId === "gap-test-close-a"), "bracket must stay closed");
   assert.equal((report.tasks || []).filter((c) => c.taskId === "gap-test-close-a").length, 1, "exactly one completed pair");
+});
+
+// ── ⑦ fan-in orchestration bootstrap (gap-fan-in-orchestration-bootstrap-self-fix) ───────────────────
+// THE DEFECT: fan-in orchestration files resolve from the MAIN checkout, so a task that modifies one of
+// them (fan-in-execute.js / select-static-checks-for-touches.ts / fan-in-ff-merge.sh / per-task-suite-
+// record.ts / full-suite-runner.ts) has its own fan-in run by the OLD main version — its fix is never
+// exercised (self-reference). FIX: (a) the A6 dispatch rule uses the WORKTREE scriptPath when the branch
+// modifies an orchestration file (driven by --bootstrap-orchestration, tested below); (b) every fan-in
+// orchestration script call in the prompt resolves from ${worktree} (not cwd, not ${root}).
+
+async function bootstrapBlockFor(task, worktree, root) {
+  const { prompt } = await runWorkflow({
+    args: { task, worktree, root, runId: "fm-bootstrap", mergeTarget: "develop" },
+  });
+  return extractBlock(prompt, "【无锁段 step 0", "【无锁段 step 1");
+}
+
+test("⑦ worktree-resolution — every fan-in orchestration script call is ${worktree}-rooted (not cwd, not ${root})", async (t) => {
+  const WT = "/tmp/wt"; // the interpolated worktree value in the emitted prompt
+  const { prompt } = await runWorkflow({
+    args: { task: "gap-test-bs", worktree: WT, root: REPO_ROOT, runId: "fm-bs", mergeTarget: "develop" },
+  });
+  // The orchestration scripts a task can modify MUST resolve from the worktree — the branch's own fix
+  // must be what the fan-in runs (gap-fan-in-orchestration-bootstrap-self-fix).
+  const mustBeWorktreeRooted = [
+    "select-static-checks-for-touches.ts --classify-delta", // step 2
+    "per-task-suite-record.ts",                             // step 4.5
+    "fan-in-ac-completion-gate.ts",                         // step 5
+    "fan-in-ff-merge.sh",                                   // step 5
+    "closure-lag-check.sh",                                 // step 5.5
+    "anti-drift-touches-check.ts",                          // step 1
+    "fan-in-ts-typecheck-gate.ts",                          // step 3
+  ];
+  for (const frag of mustBeWorktreeRooted) {
+    // Match the EXECUTABLE line (not a comment that merely mentions the frag): the line must carry
+    // both the frag and the worktree-rooted path.
+    const line = prompt.split("\n").find((l) => l.includes(frag) && l.includes(`${WT}/plugin/scripts/`));
+    assert.ok(line, `prompt must carry a ${WT}-rooted call to ${frag}`);
+    assert.doesNotMatch(line, /bash \$\{?root\}?\/plugin\/scripts/, `call must NOT be root-rooted: ${line}`);
+  }
+  // full-suite-runner.ts is reached via `cd ${worktree} && bash scripts/test.sh` (step 4) — already
+  // worktree-rooted; assert the explicit cd survives.
+  assert.ok(prompt.includes(`cd ${WT} && bash scripts/test.sh --for-task`), "step-4 scoped run must cd into the worktree");
+  // step-2 classify carries the worktree-rooted registry (--root <worktree>) so a branch-modified
+  // scripts/test.sh @static-object annotation is what the classification reads.
+  const classifyLine = prompt.split("\n").find((l) => l.includes("--classify-delta") && l.includes(`--root ${WT}`));
+  assert.ok(classifyLine, `classify must carry the worktree-rooted --root, got none among:\n${prompt.split("\n").filter((l) => l.includes("--classify-delta")).join("\n")}`);
+  assert.ok(classifyLine.includes(`${WT}/plugin/scripts/`), `classify must be ${WT}-rooted, got: ${classifyLine}`);
+});
+
+test("⑦ 取假一 — a branch modifying .claude/workflows/fan-in-execute.js ⇒ step-0 verdict HIT + WARN (dispatch must use the worktree scriptPath)", async (t) => {
+  const repo = makeRepoWithDelta({ ".claude/workflows/fan-in-execute.js": "export const meta = { name: 'fan-in-execute-branch-version' }\n" });
+  t.after(() => cleanup(repo));
+  symlinkRuntimeTrees(repo, { ".claude/workflows/fan-in-execute.js": "" });
+  const block = await bootstrapBlockFor("gap-test-bs-hit", repo, REPO_ROOT);
+  const r = runBash(block, { cwd: repo });
+  assert.equal(r.status, 0, `step-0 bash failed: ${r.stderr}`);
+  assert.match(r.stdout, /FAN-IN-BOOTSTRAP=hit/, `branch modifying fan-in-execute.js must be detected as a hit, got stdout:\n${r.stdout}`);
+  assert.match(r.stdout, /\.claude\/workflows\/fan-in-execute\.js/, "the hit must name the modified orchestration file");
+  // 取假一 WARN (falsifiable): the running workflow is the ROOT version (REPO_ROOT), which differs from
+  // the branch's committed fan-in-execute.js ⇒ the self-bootstrap gap is detected at runtime (if the A6
+  // dispatcher followed the hit and used the worktree scriptPath, this WARN would NOT fire).
+  assert.match(r.stderr, /FAN-IN-BOOTSTRAP-WARN/, `root workflow running against a modified branch copy must warn, got stderr:\n${r.stderr}`);
+});
+
+test("⑦ 取假一 negative — a branch modifying only tasks/*.md ⇒ step-0 verdict MISS (main-checkout scriptPath is correct)", async (t) => {
+  const repo = makeRepoWithDelta({ "tasks/gap-test-bs-miss.md": "status: ready\n" });
+  t.after(() => cleanup(repo));
+  symlinkRuntimeTrees(repo, { "tasks/gap-test-bs-miss.md": "" });
+  const block = await bootstrapBlockFor("gap-test-bs-miss", repo, REPO_ROOT);
+  const r = runBash(block, { cwd: repo });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /FAN-IN-BOOTSTRAP=miss/, `doc-only branch must be a miss, got stdout:\n${r.stdout}`);
+  assert.doesNotMatch(r.stdout, /FAN-IN-BOOTSTRAP=hit/, "a doc-only branch must NOT be a hit");
+  assert.doesNotMatch(r.stderr, /FAN-IN-BOOTSTRAP-WARN/, "a doc-only branch must not warn");
+});
+
+test("⑦ 取假二 — a branch modifying an orchestration script AND carrying a checker-read .md ⇒ HIT + the .md classifies as CODE (old regex called it doc)", async (t) => {
+  // The branch modifies plugin/scripts/fan-in-ff-merge.sh (an orchestration file, not the classify
+  // script — so the symlinked REAL classify runs) AND carries orchestration/manager-tick-core.md in
+  // its delta. 取假二: the OLD hand-written `[.]md$` regex called that .md doc ⇒ the fan-in skipped the
+  // full suite; the worktree-resolved registry classify must call it CODE.
+  const repo = makeRepoWithDelta({
+    "plugin/scripts/fan-in-ff-merge.sh": "export const x = 1\n",
+    "orchestration/manager-tick-core.md": "## (src:N) violation\n",
+  });
+  t.after(() => cleanup(repo));
+  symlinkRuntimeTrees(repo, { "plugin/scripts/fan-in-ff-merge.sh": "", "orchestration/manager-tick-core.md": "" });
+  // step 0: the branch modifies an orchestration file ⇒ HIT (dispatcher must use the worktree scriptPath).
+  const block = await bootstrapBlockFor("gap-test-bs-two", repo, REPO_ROOT);
+  const r0 = runBash(block, { cwd: repo });
+  assert.equal(r0.status, 0, r0.stderr);
+  assert.match(r0.stdout, /FAN-IN-BOOTSTRAP=hit/, `orchestration-script modification must be a hit, got stdout:\n${r0.stdout}`);
+  assert.match(r0.stdout, /fan-in-ff-merge\.sh/, "the hit must name the modified orchestration file");
+  // step 2: the worktree-resolved classify (--root ${worktree}) must classify the checker-read .md as CODE.
+  const { prompt } = await runWorkflow({
+    args: { task: "gap-test-bs-two", worktree: repo, root: REPO_ROOT, runId: "fm-bs-two", mergeTarget: "develop" },
+  });
+  const step2 = extractBlock(prompt, "【无锁段 step 2", "【无锁段 step 3");
+  const bashLines = step2.split("\n").filter((l) => /^(fork=|delta=|code_delta=)/.test(l));
+  const r2 = runBash(bashLines.join("\n") + '\necho "RESULT_CODE_DELTA=[$code_delta]"', { cwd: REPO_ROOT });
+  assert.equal(r2.status, 0, `step-2 bash failed: ${r2.stderr}`);
+  const m = r2.stdout.match(/RESULT_CODE_DELTA=\[([\s\S]*)\]/);
+  assert.ok(m, `code_delta echo missing:\n${r2.stdout}`);
+  assert.match(m[1], /orchestration\/manager-tick-core\.md/, `checker-read .md must classify as code (取假二), got: ${m[1]}`);
+  assert.match(m[1], /plugin\/scripts\/fan-in-ff-merge\.sh/, `the modified orchestration script must also be code, got: ${m[1]}`);
 });
