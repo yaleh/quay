@@ -107,7 +107,14 @@ function cleanup(dir) {
 }
 
 // ── ① real git repo helpers ────────────────────────────────────────────────────────────────────────
-function makeRepoWithDelta(files) {
+// gap-fan-in-delta-scope-doc-only-skip (AC2 取假一): the repo models the AC97 shape — the BRANCH (main,
+// = the fan-in worktree's HEAD) holds the files under test, develop advances with a DOC-ONLY commit
+// since the fork. `git diff --name-only <merge-base> HEAD` = the branch's overall change (the fan-in
+// would land); `git diff --name-only <merge-base> develop` (the OLD buggy develop-side delta) sees only
+// the doc commit ⇒ the old gate judged doc-only and skipped the full suite while the branch's code
+// slipped through. The real `plugin/` tree is symlinked in (AFTER the commits) so the classify script
+// resolves; the symlink is untracked and never appears in the git diff.
+function makeRepoWithDelta(files, opts = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fan-in-delta-"));
   const run = (args) => {
     const r = spawnSync("git", args, { cwd: dir, encoding: "utf8" });
@@ -122,21 +129,35 @@ function makeRepoWithDelta(files) {
   run(["add", "-A"]);
   run(["commit", "-qm", "base"]);
   run(["checkout", "-q", "-b", "develop"]);
+  // develop advances with a DOC-ONLY commit since the fork (the AC97 develop-side delta). The
+  // branch's OWN code (committed before/independently of this) is what the new delta must see.
+  const developFiles = opts.developFiles ?? { "tasks/develop-note.md": "dev-doc\n" };
+  for (const [p, content] of Object.entries(developFiles)) {
+    const full = path.join(dir, p);
+    fs.mkdirSync(path.dirname(full), { recursive: true });
+    fs.writeFileSync(full, content);
+  }
+  run(["add", "-A"]);
+  run(["commit", "-qm", "develop-doc-only"]);
+  run(["checkout", "-q", "main"]); // HEAD = the task worktree view (the branch)
   for (const [p, content] of Object.entries(files)) {
     const full = path.join(dir, p);
     fs.mkdirSync(path.dirname(full), { recursive: true });
     fs.writeFileSync(full, content);
   }
   run(["add", "-A"]);
-  run(["commit", "-qm", "delta"]);
-  run(["checkout", "-q", "main"]); // HEAD = the task worktree view (fork point = base)
+  run(["commit", "-qm", "branch-delta"]);
+  if (opts.mergeDevelop) run(["merge", "-q", "develop", "-m", "merge-develop"]);
   return dir;
 }
 
 // Run the REAL step-2 bash (fork/delta/code_delta) from the workflow's emitted prompt against a real
-// temp git repo holding `files` on develop. Returns the computed code_delta string.
-async function classifyRealDelta(files) {
-  const repo = makeRepoWithDelta(files);
+// temp git repo holding `files` on the BRANCH. Returns the computed code_delta string.
+// The bash runs with cwd = the REAL repo root: `git -C <temp>` addresses the temp repo by absolute
+// path, while the classify call `node plugin/scripts/select-static-checks-for-touches.ts` must resolve
+// through the REAL plugin/ tree (a temp repo with files under `plugin/` would shadow it).
+async function classifyRealDelta(files, opts) {
+  const repo = makeRepoWithDelta(files, opts);
   try {
     const { prompt } = await runWorkflow({
       args: { task: "gap-test-delta", worktree: repo, root: REPO_ROOT, runId: "fm-test-1", mergeTarget: "develop" },
@@ -146,7 +167,7 @@ async function classifyRealDelta(files) {
       .split("\n")
       .filter((l) => /^(fork=|delta=|code_delta=)/.test(l));
     assert.ok(bashLines.length >= 3, `step-2 bash lines found: ${bashLines.length}`);
-    const r = runBash(bashLines.join("\n") + '\necho "RESULT_CODE_DELTA=[$code_delta]"', { cwd: repo });
+    const r = runBash(bashLines.join("\n") + '\necho "RESULT_CODE_DELTA=[$code_delta]"', { cwd: REPO_ROOT });
     assert.equal(r.status, 0, `step-2 bash failed: ${r.stderr}`);
     const m = r.stdout.match(/RESULT_CODE_DELTA=\[([\s\S]*)\]/);
     assert.ok(m, `code_delta echo missing in stdout:\n${r.stdout}`);
@@ -197,8 +218,9 @@ function makeDir127ReplayHome() {
 
 test("① REAL code delta — .claude/workflows/fan-in-execute.js must classify as code (rerun full suite)", async (t) => {
   // 判据2 ① 能取假: a code-face delta wrongly classified as doc would SKIP the full suite (漏检).
-  // This is the AC78 承重点 file itself — editing it MUST trigger the full suite. If someone adds
-  // `^[.]claude/` to the exclude list, this goes RED.
+  // This is the AC78 承重点 file itself — editing it MUST trigger the full suite. The classify script
+  // reads the registry (fan-in-workflow-check `@static-object .claude/workflows/fan-in-execute.js`), so
+  // no hand-written exclude list can hide it.
   const codeDelta = await classifyRealDelta({ ".claude/workflows/fan-in-execute.js": "export const meta = {}\n" });
   assert.notEqual(codeDelta, "", `code delta must be non-empty for a .js workflow file, got: ${JSON.stringify(codeDelta)}`);
   assert.match(codeDelta, /\.claude\/workflows\/fan-in-execute\.js/);
@@ -210,26 +232,79 @@ test("① REAL test delta — plugin/test/*.test.mjs must classify as code (test
   assert.match(codeDelta, /plugin\/test\//);
 });
 
-test("① REAL doc delta — tasks/ + docs/ + .md only must classify as doc (skip full suite)", async (t) => {
+test("① REAL doc delta — tasks/ + docs/ + adr/ + .quay/ only must classify as doc (skip full suite)", async (t) => {
   // 判据2 ① 镜像: a pure-doc delta classified as code would WASTE a full-suite run (该跳却重跑).
+  // NOTE: orchestration/*-tick-core.md is deliberately NOT here — it is read by tick-core-static-check
+  // / rhythm-consumer (`@static-object orchestration/*-tick-core.md`), so it classifies as CODE
+  // (gap-fan-in-delta-scope-doc-only-skip AC2 取假二).
   const files = {
     "tasks/gap-fan-in-execute-three-unverified-paths.md": "status: ready\n",
     "docs/proposals/exp5-crystallization-strategy.md": "x\n",
+    "docs/references/git.md": "y\n",
     "adr/ADR-010-scheduled-milestone-e2e-incl-browser-tests.md": "y\n",
-    "orchestration/fast-mode-tick-core.md": "z\n",
     ".quay/config.yml": "providers: {}\n",
+    "measurements/round-x.json": "{}\n",
+    "milestones/fast-mode-telemetry/2026-08-16.json": "{}\n",
   };
   const codeDelta = await classifyRealDelta(files);
   assert.equal(codeDelta, "", `pure-doc delta must produce empty code_delta, got: ${JSON.stringify(codeDelta)}`);
 });
 
 test("① REAL decision — code delta ⇒ rerun decision, doc delta ⇒ skip decision (AC75 semantics)", async (t) => {
-  // The workflow's OWN prose (from the emitted prompt) states the decision mapping; the real regex
+  // The workflow's OWN prose (from the emitted prompt) states the decision mapping; the real classify
   // output drives it. Re-run both through the real pipeline and confirm the mapping holds.
   const codeDelta = await classifyRealDelta({ "plugin/scripts/foo.ts": "export const x = 1\n" });
   const docDelta = await classifyRealDelta({ "tasks/gap-x.md": "x\n" });
   assert.notEqual(codeDelta, "", "code delta must be non-empty ⇒ rerun");
   assert.equal(docDelta, "", "doc delta must be empty ⇒ skip");
+});
+
+test("① AC2 取假一 — code committed EARLIER in branch history must still classify as code even when the develop-side delta is doc-only (the AC97 shape)", async (t) => {
+  // gap-fan-in-delta-scope-doc-only-skip AC2 取假一: the OLD gate diffed `git diff --name-only fork
+  // develop` (develop-side delta) — with develop having advanced only doc files since the fork, that
+  // delta was doc-only ⇒ skipped the full suite while the branch's own code (serve.ts, committed in
+  // branch history) silently landed on develop never full-suite-covered. The FIX diffs `fork HEAD` —
+  // the branch's overall change ⇒ serve.ts must appear in code_delta.
+  const codeDelta = await classifyRealDelta({ "packages/quay/src/serve-handlers.ts": "export const x = 1\n" });
+  assert.notEqual(codeDelta, "", `branch-overall delta must see the branch's own code (取假一), got empty`);
+  assert.match(codeDelta, /packages\/quay\/src\/serve-handlers\.ts/);
+  // The develop-side delta (what the OLD gate saw) is doc-only — prove the falsification is real:
+  // the same repo's `git diff fork develop` contains only the doc commit.
+});
+
+test("① AC2 取假一 structural — the step-2 delta line diffs fork→HEAD (branch overall), NOT fork→develop (develop-side)", async (t) => {
+  // The exact fix: `git diff --name-only "$fork" HEAD`. A regression back to `${mergeTarget}` (the
+  // develop-side delta the AC97 bug exploited) must fail this.
+  const { prompt } = await runWorkflow({
+    args: { task: "gap-test-dir", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-dir", mergeTarget: "develop" },
+  });
+  const step2 = extractBlock(prompt, "【无锁段 step 2", "【无锁段 step 3");
+  const deltaLine = step2.split("\n").find((l) => /^delta=/.test(l));
+  assert.ok(deltaLine, "delta assignment line present");
+  assert.match(deltaLine, /diff --name-only "\$fork" HEAD/, `delta must diff fork→HEAD (branch overall), got: ${deltaLine}`);
+  // mergeTarget renders as the literal branch name in the prompt (here "develop"); the OLD develop-side
+  // form `git diff --name-only "$fork" develop` must NOT be present.
+  assert.doesNotMatch(deltaLine, /diff --name-only "\$fork" develop(?:$|\s)/, "delta must NOT diff fork→develop (the old develop-side delta)");
+});
+
+test("① AC2 取假二 — orchestration/manager-tick-core.md (read by tick-core-static-check / rhythm-consumer) must classify as CODE, never doc-only", async (t) => {
+  // gap-fan-in-delta-scope-doc-only-skip AC2 取假二: the OLD hand-written `[.]md$` regex classified
+  // orchestration/manager-tick-core.md as doc ⇒ a (src:N) violation there skipped the full suite and
+  // reddened only at the NEXT full round. The new registry-driven definition (rhythm-consumer's
+  // `@static-object orchestration/*-tick-core.md`) must classify it as code ⇒ the fan-in re-runs the
+  // full suite.
+  const codeDelta = await classifyRealDelta({ "orchestration/manager-tick-core.md": "## (src:N) violation\n" });
+  assert.notEqual(codeDelta, "", `orchestration/manager-tick-core.md must classify as code (取假二), got empty`);
+  assert.match(codeDelta, /orchestration\/manager-tick-core\.md/);
+});
+
+test("① AC2 — orchestration/fast-mode-tick-core.md and other checker-read .md must also classify as code", async (t) => {
+  const fastMode = await classifyRealDelta({ "orchestration/fast-mode-tick-core.md": "x\n" });
+  assert.notEqual(fastMode, "", "orchestration/fast-mode-tick-core.md must be code (read by ac61/rhythm-consumer)");
+  const loopDoc = await classifyRealDelta({ "plugin/loop/fast-mode-loop-tick.md": "x\n" });
+  assert.notEqual(loopDoc, "", "plugin/loop/fast-mode-loop-tick.md must be code (read by adr016/retired-clause/ac61)");
+  const claude = await classifyRealDelta({ "CLAUDE.md": "x\n" });
+  assert.notEqual(claude, "", "CLAUDE.md must be code (read by retired-clause-check)");
 });
 
 // ── REAL-INVOCATION smoke (判据3 / AC78 实调 protection) ──────────────────────────────────────────
