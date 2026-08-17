@@ -1,7 +1,8 @@
 // outer-cron-registry.ts — AC81 注册表收据 + 每轮四判据核实（outer + inner 两层的 CronCreate 锚）。
-// (tasks/gap-ac81-registry-receipt-and-four-criteria, AC1-AC6 + DoD).
+// (tasks/gap-ac81-registry-receipt-and-four-criteria, AC1-AC6 + DoD;
+//  tasks/gap-cron-registry-global-path-migration, AC1-AC5).
 //
-// 回答的问题（@instrument）：「outer/inner 的 CronCreate 锚是否有一个 git 跟踪注册表收据（cron id +
+// 回答的问题（@instrument）：「outer/inner 的 CronCreate 锚是否有一个注册表收据（cron id +
 //   cron 表达式 + prompt sha256 + 创建时刻），且每轮四判据核实（① CronList 恰一条 ∧ ② id==注册表 ∧
 //   ③ 收据未过期 registry-verified ∧ ④ prompt sha256==正本）能取假——并在 CronCreate 文档的
 //   7 天自动过期硬上限（「Recurring tasks auto-expire after 7 days — they fire one final time,
@@ -9,8 +10,19 @@
 //
 // 背景（人 2026-08-14 14:2xZ 裁定「把三层统一应用 CronCreate 加入本阶段目标和 AC，包括配套工作」）：
 //   manager 已有注册表收据 + 每轮四判据核实（manager-arm-loop.sh --verify，连续 17 轮全真）。
-//   AC81 把同一形态扩到 outer + inner。本模块 = 注册表收据（plugin/scripts/outer-cron-registry.json，
-//   git 跟踪、可查——判据1 的载体）+ 四判据核实器（本 .ts——判据2 的载体）。
+//   AC81 把同一形态扩到 outer + inner。本模块 = 注册表收据 + 四判据核实器（本 .ts——判据2 的载体）。
+//
+// 注册表位置（2026-08-17 人裁定方案②——全局 per-layer 路径、不进 git）：
+//   ~/.quay-global/<repo-root-slug>/{outer,inner}/loop-registry.txt
+//   <repo-root-slug> = repo 根绝对路径把 '/' 全替换成 '-'（现成算法抄 session-liveness.sh:1162：
+//   slug=$(printf '%s' "$root" | tr '/' '-')；本项目 root=/home/yale/work/quay ⇒ -home-yale-work-quay）。
+//   覆盖：QUAY_GLOBAL_DIR 环境变量改全局目录（镜像 manager 的 QUAY_GLOBAL_DIR，默认 $HOME/.quay-global）。
+//   为何全局而非 git：git 版随 worktree fork 携带 fork 那刻的陈旧快照（死 cronId，JSON 合法但与合格同形，
+//   硬规则 3b）；两层冷启动 cron 重建直写同一 git 收据 ⇒ bypass-check 误红（发生率 3）+ fan-in add/add。
+//   全局路径 = 任何 worktree 读到同一个文件 = 当前真值，无快照、不被 bypass-check 看见、不可能 add/add
+//   （对照 manager 的 ~/.quay-global/manager/loop-registry.txt）。
+//   审计线：锚变更（重建）由 --record 追加 append-only jsonl（<base>/cron-registry-events.jsonl），
+//   保留 git 版唯一真实价值（收据变更留痕），但不为审计线把当前值绑回 git。
 //
 // 判据能取假（对 manager 形态逐条保留，硬规则 3/4）：
 //   ① CronList 恰一条 —— 由 `--cron-list` 传入的会话内 CronList 视图判定；0 条或 ≥2 条即假。
@@ -43,22 +55,31 @@
 // Run:
 //   node --no-warnings --experimental-strip-types plugin/scripts/outer-cron-registry.ts \
 //       --verify --layer inner|outer [--cron-list '<json>'] [--canonical-file <path>] \
-//       [--registry-file <path>] [--root <dir>] [--stale-seconds <n>] [--json]
+//       [--registry-base <dir>] [--root <dir>] [--stale-seconds <n>] [--json]
 //   node --no-warnings --experimental-strip-types plugin/scripts/outer-cron-registry.ts \
 //       --show [--root <dir>] [--json]          # 打印两层注册表收据（判据1 直接可查）
+//   node --no-warnings --experimental-strip-types plugin/scripts/outer-cron-registry.ts \
+//       --record --layer inner|outer --cron-id <id> --cron-expr '<expr>' \
+//       [--canonical-file <path>] [--registry-base <dir>] [--json]
+//       # 锚重建后把收据写进全局 per-layer 注册表 + 追加审计线（AC5；替代旧的「手改 git JSON 并提交」）
 //   --verify              必选核实模式（与 --layer 配对）。
+//   --record              记录模式：写/更新该层全局注册表收据 + 追加审计 jsonl（锚重建后调用）。
 //   --layer <inner|outer> 选定层：注册表记录 + 正本来源。
+//   --cron-id <id>        --record 的新 cron id（CronCreate 返回值；零记忆清扫重建后取 CronList 活值）。
+//   --cron-expr <expr>    --record 的 cron 表达式（投进 CronCreate 的表达式）。
 //   --cron-list <json>    CronList 活视图：JSON 数组或单对象，每条含 id（id|name|cronId）。
 //   --canonical-file <p>  覆盖正本来源（fixture 接缝，测试用）。
-//   --registry-file <p>   覆盖注册表收据文件（fixture 接缝，测试用）。
-//   --root <dir>          仓库根（默认 cwd）。
+//   --registry-base <dir> 覆盖注册表基目录（fixture 接缝，测试用；默认 ~/.quay-global/<repo-root-slug>）。
+//   --root <dir>          仓库根（默认 cwd；决定 slug）。
 //   --stale-seconds <n>   判据③ 收据新鲜度窗口（默认 604800 = 7 天）。
 //   --json                机器可读输出。
 //   --show                打印两层注册表收据并退出（无核实逻辑）。
 
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import crypto from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { extractCanonical, LAYERS } from "./outer-anchor-check.ts";
 
@@ -66,8 +87,53 @@ export const EXIT_OK = 0;
 export const EXIT_VIOLATED = 1;
 export const EXIT_NOT_EVALUATED = 2;
 
-/** 注册表收据文件（git 跟踪、可查；相对仓库根）。 */
-export const REGISTRY_DEFAULT_REL = "plugin/scripts/outer-cron-registry.json";
+/** 全局目录覆盖（镜像 manager 的 QUAY_GLOBAL_DIR；默认 $HOME/.quay-global）。 */
+export function globalDir(env?: string): string {
+  return env ?? process.env.QUAY_GLOBAL_DIR ?? path.join(os.homedir(), ".quay-global");
+}
+
+/** repo 根 → 分片 slug（把绝对路径的 '/' 全替换成 '-'；抄 session-liveness.sh:1162 的分片算法）。 */
+export function repoSlug(root: string): string {
+  return String(root).replace(/\//g, "-");
+}
+
+/**
+ * 从任意工作目录/工作树解析【项目主检出根】（非 worktree 路径）。git 的 --git-common-dir 在 worktree
+ * 里返回主检出的 .git 路径——AC2「任一 worktree（含 fork 早的旧 worktree）读注册表得到当前真值」要求
+ * slug 必须按【项目】分片而非按 cwd/worktree 分片（否则每个 worktree 各自一个空注册表，读不到真值）。
+ * 非 git 目录（tmp fixture）⇒ 回退 path.resolve(root)。
+ */
+export function canonicalRepoRoot(root: string): string {
+  try {
+    const out = execFileSync(
+      "git",
+      ["-C", root, "rev-parse", "--path-format=absolute", "--git-common-dir"],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 10_000 },
+    );
+    const commonDir = out.trim();
+    if (commonDir) return path.dirname(commonDir);
+  } catch {
+    // 非 git 目录 ⇒ 回退传入 root。
+  }
+  return path.resolve(root);
+}
+
+/** 注册表基目录 = <globalDir>/<project-slug>（按项目分片——outer/inner 是按项目的，多项目不互相覆盖）。
+ *  ⚠️ root 是任意调用上下文（主检出 / worktree / verify worktree），slug 用 canonicalRepoRoot 归一化，
+ *  任何 worktree 与主检出都解析到同一基目录 ⇒ 读到同一个全局注册表 = 当前真值（AC2）。 */
+export function registryBaseFor(root: string, env?: string): string {
+  return path.join(globalDir(env), repoSlug(canonicalRepoRoot(root)));
+}
+
+/** 该层注册表收据文件 = <base>/<layer>/loop-registry.txt。 */
+export function registryFileFor(root: string, layer: string, base?: string): string {
+  return path.join(base ?? registryBaseFor(root), layer, "loop-registry.txt");
+}
+
+/** 审计线文件 = <base>/cron-registry-events.jsonl（append-only；锚重建即追加）。 */
+export function auditFileFor(root: string, base?: string): string {
+  return path.join(base ?? registryBaseFor(root), "cron-registry-events.jsonl");
+}
 
 /** CronCreate 文档的 7 天自动过期硬上限。 */
 export const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
@@ -94,16 +160,113 @@ export function sha256Hex(s: string): string {
   return crypto.createHash("sha256").update(Buffer.from(s, "utf8")).digest("hex");
 }
 
-/** 从注册表 JSON 文件读入 registry；override 为测试接缝。解析失败 ⇒ null（NOT-EVALUATED）。 */
-export function loadRegistry(root: string, override?: string): Registry | null {
-  const p = override ? override : path.join(root, REGISTRY_DEFAULT_REL);
-  try {
-    const raw = JSON.parse(fs.readFileSync(p, "utf8")) as Registry;
-    if (!raw || typeof raw !== "object" || !raw.layers) return null;
-    return raw;
-  } catch {
-    return null;
+/** 解析一层 loop-registry.txt（key=value 行）为 RegistryRecord。缺 cronId ⇒ null。 */
+export function parseRegistryText(text: string): RegistryRecord | null {
+  const kv: Record<string, string> = {};
+  for (const line of String(text).split("\n")) {
+    const m = line.match(/^([A-Za-z][A-Za-z0-9]*)=(.*)$/);
+    if (m) kv[m[1]] = m[2].trim();
   }
+  if (!kv.cronId) return null;
+  return {
+    cronId: kv.cronId,
+    cronExpr: kv.cronExpr ?? "",
+    promptSha256: kv.promptSha256 ?? "",
+    promptBytes: kv.promptBytes ? Number(kv.promptBytes) : undefined,
+    createdAt: kv.createdAt ?? "",
+    verifiedAt: kv.verifiedAt ?? "",
+  };
+}
+
+/** 序列化一层 RegistryRecord 为 loop-registry.txt（key=value 行，尾部换行）。 */
+export function serializeRegistryText(rec: RegistryRecord): string {
+  return [
+    `cronId=${rec.cronId}`,
+    `cronExpr=${rec.cronExpr}`,
+    `promptSha256=${rec.promptSha256}`,
+    `promptBytes=${rec.promptBytes ?? ""}`,
+    `createdAt=${rec.createdAt}`,
+    `verifiedAt=${rec.verifiedAt}`,
+  ].join("\n") + "\n";
+}
+
+/**
+ * 从全局 per-layer 注册表读入 registry（两层都读；base 覆盖为测试接缝）。
+ * 任一层文件缺失 ⇒ 该层缺席；两层都缺失 ⇒ null（NOT-EVALUATED，硬规则 3b 独立取值）。
+ */
+export function loadRegistry(root: string, base?: string): Registry | null {
+  const layers: Record<string, RegistryRecord> = {};
+  for (const layer of Object.keys(LAYERS)) {
+    try {
+      const rec = parseRegistryText(fs.readFileSync(registryFileFor(root, layer, base), "utf8"));
+      if (rec) layers[layer] = rec;
+    } catch {
+      // 该层文件缺失/不可解析 ⇒ 层缺席（调用方按 layer 判 NOT-EVALUATED）。
+    }
+  }
+  if (Object.keys(layers).length === 0) return null;
+  return {
+    version: 1,
+    note: "AC81 注册表收据（全局 per-layer：~/.quay-global/<repo-root-slug>/{outer,inner}/loop-registry.txt；任何 worktree 读当前真值，非 fork 快照）",
+    layers,
+  };
+}
+
+/**
+ * 写/更新一层全局注册表收据（--record 的写入面）。返回写出的文件路径。
+ * 独立可测：任何 worktree 读同一全局路径 ⇒ 当前真值（AC2）。
+ */
+export function writeRegistryRecord(root: string, layer: string, rec: RegistryRecord, base?: string): string {
+  const p = registryFileFor(root, layer, base);
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  fs.writeFileSync(p, serializeRegistryText(rec), "utf8");
+  return p;
+}
+
+/**
+ * 追加一条审计线（append-only jsonl；锚重建即追加，保留收据变更留痕——git 版唯一真实价值的替代）。
+ * 返回写出的审计文件路径。
+ */
+export function appendAuditLine(root: string, layer: string, event: Record<string, unknown>, base?: string): string {
+  const p = auditFileFor(root, base);
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  const line = JSON.stringify({ ts: new Date().toISOString(), layer, ...event }) + "\n";
+  fs.appendFileSync(p, line, "utf8");
+  return p;
+}
+
+/**
+ * --record 主逻辑：锚重建后把新收据写入该层全局注册表 + 追加审计线。
+ * canonicalPrompt 由调用方传入（CLI 从正本文件提取；null = 正本缺失 ⇒ 拒绝写入——收据必须可被判据④核实）。
+ */
+export function recordLayer(root: string, layer: string, rec: Omit<RegistryRecord, "promptSha256" | "promptBytes" | "createdAt" | "verifiedAt"> & { canonicalPrompt: string | null; nowMs?: number }, base?: string): { ok: boolean; reason: string; file?: string; auditFile?: string } {
+  if (!rec.cronId || !rec.cronExpr) {
+    return { ok: false, reason: "record 缺 cron-id/cron-expr" };
+  }
+  if (rec.canonicalPrompt === null) {
+    return { ok: false, reason: "record 拒绝：该层正本缺失，无法计算 promptSha256（收据必须可被判据④核实）" };
+  }
+  const nowMs = rec.nowMs ?? Date.now();
+  const nowIso = new Date(nowMs).toISOString();
+  const full: RegistryRecord = {
+    cronId: rec.cronId,
+    cronExpr: rec.cronExpr,
+    promptSha256: sha256Hex(rec.canonicalPrompt),
+    promptBytes: Buffer.byteLength(rec.canonicalPrompt, "utf8"),
+    createdAt: nowIso,
+    verifiedAt: nowIso,
+  };
+  const file = writeRegistryRecord(root, layer, full, base);
+  const auditFile = appendAuditLine(root, layer, {
+    event: "anchor-rebuild",
+    cronId: full.cronId,
+    cronExpr: full.cronExpr,
+    promptSha256: full.promptSha256,
+    promptBytes: full.promptBytes,
+    createdAt: full.createdAt,
+    verifiedAt: full.verifiedAt,
+  }, base);
+  return { ok: true, reason: `recorded ${layer} cronId=${full.cronId}（sha256=${full.promptSha256.slice(0, 12)}…）`, file, auditFile };
 }
 
 /**
@@ -288,7 +451,7 @@ export function checkVerify(opts: VerifyOptions): VerifyResult {
 
   // 注册表缺失 / 层缺失 ⇒ NOT-EVALUATED（独立取值）。
   if (registry === null) {
-    result.reason = `NOT-EVALUATED: 注册表缺失/不可解析（${REGISTRY_DEFAULT_REL}）`;
+    result.reason = "NOT-EVALUATED: 注册表缺失/不可解析（全局 per-layer ~/.quay-global/<repo-root-slug>/{outer,inner}/loop-registry.txt）";
     result.findings.push("registry-missing");
     return result;
   }
@@ -445,18 +608,25 @@ function readCanonicalPrompt(root: string, layer: string, override?: string): st
 // ── CLI ────────────────────────────────────────────────────────────────────────────────────────────────
 
 const USAGE = `outer-cron-registry.ts — AC81 注册表收据 + 每轮四判据核实（outer/inner 的 CronCreate 锚）
+注册表位置（全局 per-layer，2026-08-17 人裁定方案②）：~/.quay-global/<repo-root-slug>/{outer,inner}/loop-registry.txt
 
   node --no-warnings --experimental-strip-types plugin/scripts/outer-cron-registry.ts --verify \\
-      --layer inner|outer [--cron-list '<json>'] [--canonical-file <path>] [--registry-file <path>] \\
+      --layer inner|outer [--cron-list '<json>'] [--canonical-file <path>] [--registry-base <dir>] \\
       [--root <dir>] [--stale-seconds <n>] [--json]
   node --no-warnings --experimental-strip-types plugin/scripts/outer-cron-registry.ts --show [--root <dir>] [--json]
+  node --no-warnings --experimental-strip-types plugin/scripts/outer-cron-registry.ts --record \\
+      --layer inner|outer --cron-id <id> --cron-expr '<expr>' [--canonical-file <path>] \\
+      [--registry-base <dir>] [--root <dir>] [--json]
 
   --verify              核实模式：四判据（①CronList 恰一条 ②id==注册表 ③registry-verified ④prompt sha256==正本）+ 判据5（剩余寿命<24h 即报）。
+  --record              记录模式：锚重建后把新收据写进该层全局注册表 + 追加审计 jsonl（AC5；替代手改 git JSON 并提交）。
   --layer <inner|outer> 选定层。
+  --cron-id <id>        --record 的新 cron id（CronCreate 返回值 / CronList 活值）。
+  --cron-expr <expr>    --record 的 cron 表达式（投进 CronCreate 的表达式）。
   --cron-list <json>    CronList 活视图（脚本无法调用 CronList，由调用方传入）：JSON 数组或单对象，每条含 id（id|name|cronId）。
   --canonical-file <p>  覆盖正本来源（测试接缝）。
-  --registry-file <p>   覆盖注册表收据文件（测试接缝）。
-  --root <dir>          仓库根（默认 cwd）。
+  --registry-base <dir> 覆盖注册表基目录（测试接缝；默认 ~/.quay-global/<repo-root-slug>）。
+  --root <dir>          仓库根（默认 cwd；决定 slug）。
   --stale-seconds <n>   判据③ 收据新鲜度窗口（默认 604800 = 7 天）。
   --show                打印两层注册表收据（判据1 直接可查）。
   --json                机器可读输出。
@@ -466,10 +636,13 @@ const USAGE = `outer-cron-registry.ts — AC81 注册表收据 + 每轮四判据
 interface CliArgs {
   verify: boolean;
   show: boolean;
+  record: boolean;
   layer: string;
+  cronId: string | null;
+  cronExpr: string | null;
   cronList: string | null;
   canonicalFile: string | null;
-  registryFile: string | null;
+  registryBase: string | null;
   root: string;
   staleSeconds: number;
   json: boolean;
@@ -480,10 +653,13 @@ export function parseArgs(argv: string[]): CliArgs {
   const out: CliArgs = {
     verify: false,
     show: false,
+    record: false,
     layer: "",
+    cronId: null,
+    cronExpr: null,
     cronList: null,
     canonicalFile: null,
-    registryFile: null,
+    registryBase: null,
     root: process.cwd(),
     staleSeconds: 7 * 24 * 60 * 60,
     json: false,
@@ -493,10 +669,13 @@ export function parseArgs(argv: string[]): CliArgs {
     const a = argv[i];
     if (a === "--verify") out.verify = true;
     else if (a === "--show") out.show = true;
+    else if (a === "--record") out.record = true;
     else if (a === "--layer") out.layer = argv[++i] ?? "";
+    else if (a === "--cron-id") out.cronId = argv[++i] ?? null;
+    else if (a === "--cron-expr") out.cronExpr = argv[++i] ?? null;
     else if (a === "--cron-list") out.cronList = argv[++i] ?? null;
     else if (a === "--canonical-file") out.canonicalFile = argv[++i] ?? null;
-    else if (a === "--registry-file") out.registryFile = argv[++i] ?? null;
+    else if (a === "--registry-base") out.registryBase = argv[++i] ?? null;
     else if (a === "--root") out.root = argv[++i] ?? out.root;
     else if (a === "--stale-seconds") out.staleSeconds = Number(argv[++i] ?? 604800);
     else if (a === "--json") out.json = true;
@@ -528,7 +707,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     process.stdout.write(USAGE + "\n");
     process.exit(0);
   }
-  const registry = loadRegistry(args.root, args.registryFile ?? undefined);
+  const registry = loadRegistry(args.root, args.registryBase ?? undefined);
 
   // --show：打印两层注册表收据（判据1 直接可查）。
   if (args.show) {
@@ -540,9 +719,29 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     process.exit(registry === null ? 1 : 0);
   }
 
+  // --record：锚重建后写/更新该层全局注册表收据 + 追加审计线（AC5）。
+  if (args.record) {
+    if (args.layer !== "inner" && args.layer !== "outer") {
+      process.stderr.write("outer-cron-registry: --record 需 --layer inner|outer\n" + USAGE + "\n");
+      process.exit(2);
+    }
+    const canonicalPrompt = readCanonicalPrompt(args.root, args.layer, args.canonicalFile ?? undefined);
+    const rec = recordLayer(args.root, args.layer, {
+      cronId: args.cronId ?? "",
+      cronExpr: args.cronExpr ?? "",
+      canonicalPrompt,
+    }, args.registryBase ?? undefined);
+    if (args.json) {
+      process.stdout.write(JSON.stringify(rec, null, 2) + "\n");
+    } else {
+      process.stdout.write(rec.ok ? `outer-cron-registry: ${rec.reason}\n` : `outer-cron-registry: ERROR — ${rec.reason}\n`);
+    }
+    process.exit(rec.ok ? 0 : 2);
+  }
+
   // --verify。
   if (!args.verify) {
-    process.stderr.write("outer-cron-registry: 需 --verify 或 --show\n" + USAGE + "\n");
+    process.stderr.write("outer-cron-registry: 需 --verify / --show / --record\n" + USAGE + "\n");
     process.exit(2);
   }
   if (args.layer !== "inner" && args.layer !== "outer") {
