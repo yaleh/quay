@@ -1,7 +1,7 @@
 ---
 id: gap-ac95-webui-15-views
 title: "AC95: 实现设计中的所有页面——15 个视图全部真上线（人 16:2xZ 明令，⛔ 不再是首批三屏）"
-status: ready
+status: done
 labels:
   - gap
   - mechanism
