@@ -32,6 +32,10 @@ depends_on: []
 
 **复发证据（2026-08-17 03:5x-04:0xZ，outer 观测）**：**AC95 重派 fan-in（whg27obzj）第 2 次撞同一堵墙**——develop 已稳定（03:25 后 37min 未动，re-merge 循环可收口），但 fan-in 仍连续跑了 **3 次全量 suite 尝试**（`fan-in-suite-gap-ac95-webui-15-views-v{1,2,3}.time`，每轮 11-15min，pid 1252818→1771195→2295375），均未落 per-task-suite-records（fullSuiteRan=true 记录缺）。⇒ 与 concurrency 那次同形（suite >回合预算 ⇒ turn-enforcement 强制收尾 ⇒ 重跑），**AC101 达成不缓解此缺陷**（round224=500.8s 单轮，但 fan-in 的 suite 因 CPU 争用 11-15min 仍超预算）。**发生率：第 2 个 code 型 fan-in 复发**（concurrency → AC95）。
 
+**⚠️ 复核更正（2026-08-17 05:45Z）**：上一段「outer-tick-log 第 3 例同形」**已证否**——outer-tick-log 的未 land suite 实为**内容红**（`verify-deliver-coldstart.test.mjs` basename `--` guard 缺陷，05:23Z suite RED），已立案 `gap-verify-deliver-coldstart-basename-dash-guard` 并派发。**⛔ 不是 turn-budget 复发**；turn-budget 发生率保持 **2**（concurrency → AC95），外层当时按「未 land + 重跑」记了同形，但未等 inner 报告就猜了根因（硬规则 4 推论四：能解释 ≠ 被检验）——外层自查记账。
+
+**⊢ flaky 补充（2026-08-17 06:03Z outer 观测）**：outer-tick-log 05:31 suite 实为**通过**（fullSuiteRan=true, 872s, flip 已 done e5b3ef6f，at ff）——同一 basename bug 在**无 dash-leading argv0 进程时 flaky 不触发** ⇒ 与 `gap-verify-deliver-coldstart-basename-dash-guard` 任务体的「环境依赖 flaky red（阻断所有 fan-in）」一致；verify-deliver 修的是**确定性**（让该测试不再依赖环境）。⛔ outer-tick-log 不是被 verify-deliver「硬挡」，是 flaky 依赖——verify-deliver land 后该 flake 根除。
+
 ## Acceptance Criteria
 
 - [ ] AC1: fan-in-execute 的 step4 全量 suite 能在超回合预算下完成机械步骤（subagent 把 suite 交给长生命周期载体 / workflow 自身等待 / 其他——实现方选）。取假：构造 step2 code_delta 非空 ⇒ 全量 suite 必跑且机械步骤必完成（flip/ff/bracket 全执行）。
