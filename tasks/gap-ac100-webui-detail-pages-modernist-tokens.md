@@ -1,7 +1,7 @@
 ---
 id: gap-ac100-webui-detail-pages-modernist-tokens
 title: "AC100: 风格一致性覆盖设计没画的既有详情页——/adr/:id /goal/:id /doc/:id 共用 Modernist token"
-status: ready
+status: done
 labels:
   - gap
   - mechanism
