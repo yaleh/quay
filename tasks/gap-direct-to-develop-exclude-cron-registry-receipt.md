@@ -74,4 +74,5 @@ extra:
 - plugin/test/manager-layer-skill.test.mjs（AC4 launcher pin）
 - plugin/test/manager-layer-shipping.test.mjs（AC4 launcher pin）
 - plugin/workflows/fan-in-execute.js（mirror sync——pre-verified-suite 模式；.claude 侧由 ec434eb8 直提 develop，本 fan-in 同步 mirror 保 dual-copy 一致）
+- plugin/test/monitor-mount-check.test.mjs（killTmpdirMonitors 的 /proc readdirSync 竞态守卫——pid 扫描中退出会 ENOENT，同 readFileSync 已有守卫，补 readdirSync 自身；flaky 实测 1 次）
 - tasks/gap-direct-to-develop-exclude-cron-registry-receipt.md（自身）
