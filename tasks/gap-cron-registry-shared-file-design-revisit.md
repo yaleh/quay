@@ -49,6 +49,37 @@ extra:
 
 - [ ] 设计复审完成，方向裁定落盘；若选拆分/换机制 ⇒ 另立实现任务（含消费者迁移清单）。
 
+## 裁定材料（outer 2026-08-17 08:1xZ 汇总，均经 outer 实读验证；供人/manager 裁定）
+
+**A. 共享文件功能价值 = 0（manager 指出，outer 实读代码确认）**：`outer-cron-registry.ts` 判据入口 `checkVerify()` 只取 `registry.layers?.[layer]`（自己那一层）；全文件唯一遍历所有层的是 `formatShow()`（:508-513）——纯 CLI 展示函数，不参与任何判据。⇒ 两层从不读对方记录，共享一个文件的收益为零，代价是并发写碰撞 + bypass-check 误红 + fan-in add/add 冲突（今天全部实发）。
+
+**B. 工作树陈旧快照（manager 指出，outer 实测 5 个 worktree 确认）**：git 跟踪的收据随 fork 携带的是 fork 那一刻的【陈旧快照】，cron 重建后 worktree 里的 cronId 全是死值——结构完整、JSON 合法，与「合格」同形（硬规则 3b）。实测：
+```
+worktree bootstrap / shell-concat（fork 早）:  inner=0ccb57cf✗ outer=4e88cb1b✗（全死）
+worktree ac98:                                 inner=0ccb57cf✗ outer=a2360e1d✓
+worktree l2 / direct-to-develop（近期 merge）: inner=09fabf33✓ outer=a2360e1d✓
+主检出真值:                                    inner=09fabf33 outer=a2360e1d
+```
+⇒ 任何在旧 worktree 里跑 AC81 四判据的检查器，`idMatches` 判据输入是死 id。这正是硬规则 4b 形态：被测对象自己携带的量，在过期时恰好停止更新、与一切正常同形。
+
+**C. 对照组（manager 指出，活着的负控制）**：manager 自己的 cron 注册表 `~/.quay-global/manager/loop-registry.txt`（全局绝对路径/单层/纯文本/不在 git）——任何 worktree 读到的是同一个文件 = 当前真值，不存在快照；不被 bypass-check 看见、不可能双写碰撞、不可能 add/add。今天三个症状在 manager 侧结构上不可能发生。
+
+**D. 为何当初进 git（outer 查 AC81 历史）**：`gap-ac81-registry-receipt-and-four-criteria` 任务体只写「new，git 跟踪注册表收据」，**没有给理由**（f50db309 首次落地）——进 git 是默认选择不是论证结果。git 历史的实际功能：
+1. 跨 worktree 可读——但如上 B，携带的是陈旧快照，**是缺陷不是优势**（满足「文件存在」不满足「值正确」）。
+2. **收据变更留痕/审计线**——历史 6 笔全是「cron 随进程消失 → 重建 → 收据更新」提交（f882ad76/167b7052 提交信息即「为什么重建」），锚变更可 diff 可回溯。这是 git 版唯一真实的独有价值。
+
+**E. 修正后的三方案对照（把「worktree 里读到的值」列补上——原对照漏了它）**：
+```
+                        双写碰撞  bypass误红  add/add  worktree里读到的值  审计线
+① 仓库内拆两文件          消除     仍在        消除      ❌ 仍是陈旧快照      有
+② 全局路径 per-layer      消除     消除        消除      ✅ 当前真值          需另配 jsonl
+③ 保持共享+排除集(现状)   仍在     消除        仍在      ❌ 仍是陈旧快照      有
+```
+① 和 ③ 都没解决「worktree 读到死 cronId」——这个问题今天已在产生错误输入（尚未撞上红）。
+**审计线可与全局路径共存**：全局文件存当前真值（判据读它），锚变更另写 append-only jsonl（审计读它）——`.quay/*.jsonl` 遍地都是该形态，不为审计线把当前值绑进 git。
+
+**F. 范围纪律**：本任务仍只做设计复审与裁定记录，不做实现（沿用 ⛔ 范围）。
+
 ## Touches
 
 - plugin/scripts/outer-cron-registry.json（设计对象，只读评估）
