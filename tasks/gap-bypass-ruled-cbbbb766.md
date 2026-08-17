@@ -28,9 +28,9 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1: `RULED_HISTORICAL_COMMITS` 含 cbbbb766，reason 含【理由 + 教训】两句（manager 原话）。
-- [ ] AC2: bypass-check（--baseline 当前 develop）对 cbbbb766 PASS（ruled 生效）。
-- [ ] AC3: 经 fan-in 正规 land（lock-window 豁免本任务提交），非直提。
+^- [x] AC1: `RULED_HISTORICAL_COMMITS` 含 cbbbb766，reason 含【理由 + 教训】两句（manager 原话）。
+^- [x] AC2: bypass-check（--baseline 当前 develop）对 cbbbb766 PASS（ruled 生效）。
+^- [x] AC3: 经 fan-in 正规 land（lock-window 豁免本任务提交），非直提。
 
 ## Definition of Done
 
