@@ -87,9 +87,13 @@ import { buildLockHoldIntervals } from "./fan-in-ff-protocol-check.ts";
  * ⚠️ 维护注记：加新的排除项 = 收窄代码/断言面（少报红）。这里每一条都有任务体/CLAUDE.md 里的
  * 归属（记账面 / manager 独占 / 热修机件 / 基础设施）。若一条未来不再成立（例如 plugin/loop/ 从
  * 遥测面变成产品面），先从任务体改判，再改此处——两处必须同步。
+ * ⚠️ 2026-08-17 已移除 `plugin/scripts/outer-cron-registry.json` 排除项（gap-cron-registry-global-
+ * path-migration，AC3）：AC81 注册表收据迁到全局 per-layer 路径（~/.quay-global/<slug>/{outer,inner}/
+ * loop-registry.txt，不进 git），冷启动 cron 重建改经 `outer-cron-registry.ts --record` 写全局文件——
+ * 不再直写 git 收据 ⇒ 该排除项（曾为消除 bypass 误红而加）不再需要。git 版 json 已删除。
  */
 export const DESIGN_INTERNAL_RE =
-  /^(?:tasks\/|docs\/|orchestration\/|adr\/|[.]quay\/|plugin\/loop\/|measurements\/|milestones\/|[.]claude\/|plugin\/skills\/manager\/|CLAUDE[.]md$|[.]gitignore$|[.]gitattributes$|[.]npmrc$|[.]github\/|plugin\/scripts\/fan-in-|plugin\/test\/fan-in-|plugin\/scripts\/outer-cron-registry[.]json$)/;
+  /^(?:tasks\/|docs\/|orchestration\/|adr\/|[.]quay\/|plugin\/loop\/|measurements\/|milestones\/|[.]claude\/|plugin\/skills\/manager\/|CLAUDE[.]md$|[.]gitignore$|[.]gitattributes$|[.]npmrc$|[.]github\/|plugin\/scripts\/fan-in-|plugin\/test\/fan-in-)/;
 
 /** 一条 repo-相对路径是否落在设计内排除集（按设计就该直接提交 develop）。PURE。 */
 export function isDesignInternalPath(relPath) {
@@ -188,6 +192,22 @@ export const RULED_HISTORICAL_COMMITS: { sha: string; reason: string }[] = [
       "prompt sha256 与正本逐字节一致（828B/336ab987）。inner 紧急恢复自己刚发生的 OOM 死会话（同 cddc55e2 类：紧急直投，非偷懒绕过 fan-in）；" +
       "manager 2026-08-16 06:46Z tick-log 已识其为「历史直提」候选（round 214 分诊：bypass-check 候选含 f9577da1 inner AC81 重建 / 34ecfaa9）；" +
       "裁定 ruled one-off（形态=ruled 豁免+定案理由，非 AC65 sha 表，先例 cddc55e2）。",
+  },
+  {
+    sha: "167b7052",
+    reason:
+      "inner AC81 锚重建直写 git 注册表收据（0ccb57cf → 09fabf33，冷启动重建 inner cron）——AC81 收据同步，进程被杀 cron 随会话消失，重挂后四判据核实全真。" +
+      "该文件是 gap-direct-to-develop-exclude-cron-registry-receipt 排除项对应的历史直写（发生率 3 之一：f9577da1/167b7052/f882ad76）。" +
+      "2026-08-17 gap-cron-registry-global-path-migration 迁移注册表到全局 per-layer 路径（~/.quay-global/<slug>/{outer,inner}/loop-registry.txt，不进 git）并删除 git 版 json，" +
+      "排除项已撤（AC3）⇒ 该历史直写现归代码面。裁定 ruled one-off（同 f9577da1 类：AC81 锚重建直写收据，非偷懒绕过 fan-in；迁移后此类写不再发生）。",
+  },
+  {
+    sha: "f882ad76",
+    reason:
+      "outer AC81 锚重建直写 git 注册表收据（4e88cb1b → a2360e1d + verifiedAt，冷启动重建 cron）——AC81 收据更新，进程被杀 cron 随会话消失，重挂后注册表收据同步。" +
+      "同 167b7052 类：gap-direct-to-develop-exclude-cron-registry-receipt 排除项对应的历史直写（发生率 3 之一）。" +
+      "2026-08-17 gap-cron-registry-global-path-migration 迁移注册表到全局 per-layer 路径并删除 git 版 json，排除项已撤（AC3）⇒ 该历史直写现归代码面。" +
+      "裁定 ruled one-off（同 f9577da1/167b7052 类：AC81 锚重建直写收据，非偷懒绕过 fan-in；迁移后此类写不再发生）。",
   },
   {
     sha: "08e8ec55",
