@@ -127,6 +127,76 @@ export function flagMultiPathTouchEntries(touchesSection) {
   return out;
 }
 
+// ── AC3 DIRECTORY-LEVEL tasks glob HINT (tasks/gap-directory-level-tasks-touch-global-lock) ─────────
+// A `## Touches` entry that declares a DIRECTORY-LEVEL tasks glob — `tasks/*.md`, `tasks/*`,
+// `tasks/**`, `tasks/**/*.md`, `tasks/` — expands (in the dispatch disjointness check) to EVERY task
+// file. Because C8 forces every task to self-touch its OWN `tasks/<id>.md`, such a glob overlaps every
+// OTHER task's MANDATORY self-file while its declarer is in flight ⇒ a GLOBAL dispatch lock (measured:
+// doc-lint held it 3h40m; occurrence rate 45). This is the WRITING-SIDE 防复发 prompt (AC3): NOT a
+// hard ban (⛔ 目录级不禁止 — the author may legitimately need to touch many task files, and the
+// dispatch-side semantics of slot-refill's checkTouchesPairInFlight already make the intersection
+// non-blocking). The checker flags a directory-level tasks glob UNLESS the bullet carries an explicit
+// acknowledgment — 「要么枚举具体文件，要么明确『我知道这是全局锁』」. Single-path entries (`tasks/foo.md`)
+// and targeted file-name globs (`tasks/gap-*-cleanup.md`) are NOT directory-level and are never
+// flagged (别误伤正常单路径条目).
+
+/** A directory-level tasks glob: after stripping annotations, the path is `tasks/*`, `tasks/**`,
+ *  a `tasks/**`-with-subpath glob (e.g. `tasks/**` + `/*.md`), or `tasks/` (trailing-slash dir glob).
+ *  The leading `*`/`?` (or `**`) directly after `tasks/` is what makes it DIRECTORY-level — it covers
+ *  every entry under tasks/ rather than one concrete task file. A targeted file-name glob
+ *  (`tasks/gap-*-cleanup.md` — a concrete prefix before the wildcard) is NOT directory-level and is
+ *  not flagged. */
+export const DIRECTORY_LEVEL_TASKS_GLOB_RE = /^tasks\/[*?]|^tasks\/\*\*|^tasks\/$/;
+
+/** The explicit acknowledgment that suppresses the directory-level-tasks-glob hint: the author states
+ *  they KNOW the entry is a global lock (task AC3 — 「要么枚举要么明确『我知道这是全局锁』」). A bullet
+ *  whose RAW text carries 全局锁 / global lock is acknowledged and left alone (the hint is a prompt,
+ *  not a ban — an acknowledged directory glob is a deliberate choice). */
+export const DIRECTORY_GLOB_ACK_RE = /全局锁|global\s*lock/i;
+
+/** Flag Touches entries that declare a DIRECTORY-LEVEL tasks glob WITHOUT an explicit acknowledgment.
+ *  Returns [{raw, path}]: raw is the bullet text after the `- ` marker (with its annotation, for
+ *  reporting); path is the annotation-stripped entry. A bullet whose raw text acknowledges the global
+ *  lock (DIRECTORY_GLOB_ACK_RE) is skipped. Single-path and targeted-file-glob entries never flag. */
+export function flagDirectoryLevelTasksGlobs(touchesSection) {
+  if (!touchesSection) return [];
+  const out = [];
+  for (const raw of String(touchesSection).split(/\r?\n/)) {
+    const line = raw.trim();
+    const m = line.match(/^[-*]\s+(.+)$/); // the ONE parser's per-line extraction idiom
+    if (!m) continue;
+    const entry = m[1].trim();
+    if (DIRECTORY_GLOB_ACK_RE.test(entry)) continue; // explicitly acknowledged → tolerated
+    const cleaned = stripAllTouchAnnotations(entry);
+    if (DIRECTORY_LEVEL_TASKS_GLOB_RE.test(cleaned)) out.push({ raw: entry, path: cleaned });
+  }
+  return out;
+}
+
+/** AC3 whole-store HINT scan: task files whose `## Touches` carries a directory-level tasks glob
+ *  without an explicit acknowledgment. Returns [{file, what}] sorted by file. HINTS ONLY — never a
+ *  violation, never affects the exit code (⛔ 目录级不禁止; the multi-path shape rule above is the hard
+ *  gate, this is the 防复发 prompt). A task with no `## Touches` section is NOT-EVALUATED (硬规则 3b). */
+export function scanTasksDirectoryGlobHints(tasksDir) {
+  const hints = [];
+  if (!fs.existsSync(tasksDir)) return hints;
+  for (const f of fs.readdirSync(tasksDir).filter((f) => f.endsWith(".md"))) {
+    const body = fs.readFileSync(path.join(tasksDir, f), "utf8");
+    const { hasSection, section } = extractTouchesSection(body);
+    if (!hasSection) continue;
+    const flagged = flagDirectoryLevelTasksGlobs(section);
+    if (flagged.length === 0) continue;
+    for (const fl of flagged) {
+      hints.push({
+        file: path.join("tasks", f),
+        what: `## Touches 含目录级 tasks glob（gap-directory-level-tasks-touch-global-lock AC3 提示）：${fl.path} —— 目录级条目在在飞期间与任何任务的 self-touch（C8 强制 tasks/<id>.md）相交 ⇒ 全局派发锁（实证 doc-lint 3h40m，发生率 45）。请枚举具体文件清单，或显式标注（已知全局锁）确认知晓。`,
+      });
+    }
+  }
+  hints.sort((a, b) => a.file.localeCompare(b.file));
+  return hints;
+}
+
 /** Read the shrink-only grandfather list. Absent file ⇒ empty set (nothing grandfathered). */
 export function readOneEntryBaseline(root) {
   const p = path.join(root, ONE_ENTRY_BASELINE_REL);
@@ -214,6 +284,19 @@ export function main(argv) {
   process.stdout.write(
     `TOUCHES-ONE-ENTRY-ONE-PATH: ${violations.length} multi-path bullet(s) — ` +
     (violations.length === 0 ? "every Touches bullet is single-path" : "multi-path bullets present (split each into one entry per line)") + "\n",
+  );
+  // AC3 (tasks/gap-directory-level-tasks-touch-global-lock): the directory-level tasks glob HINT.
+  // HINTS ONLY — never a violation, never affects the exit code (⛔ 目录级不禁止). Printed for the
+  // author / gate reviewer as a 防复发 prompt: either enumerate concrete files or add（已知全局锁）.
+  const dirGlobHints = scanTasksDirectoryGlobHints(tasksDir);
+  for (const h of dirGlobHints) {
+    process.stdout.write(`  [HINT] ${h.file}: ${h.what}\n`);
+  }
+  process.stdout.write(
+    `TOUCHES-DIR-GLOB-HINT: ${dirGlobHints.length} directory-level tasks/*.md glob(s) — ` +
+    (dirGlobHints.length === 0
+      ? "none (every Touches entry enumerates concrete paths or acknowledges)"
+      : "enumerate concrete files or add（已知全局锁）(hint only, not a violation)") + "\n",
   );
   return violations.length === 0 ? 0 : 1;
 }
