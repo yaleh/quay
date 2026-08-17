@@ -11,12 +11,12 @@
       "verifiedAt": "2026-08-16T04:36:00Z"
     },
     "outer": {
-      "cronId": "4e88cb1b",
-      "cronExpr": "0,20,40 * * * *",
+      "cronId": "a2360e1d",
+      "cronExpr": "*/20 * * * *",
       "promptSha256": "d520ef85537a4a32bdf5c93688e945da091bff846388d80da12a6780b8036ac9",
       "promptBytes": 166,
       "createdAt": "2026-08-14T15:21:19Z",
-      "verifiedAt": "2026-08-14T15:21:19Z"
+      "verifiedAt": "2026-08-17T06:39:00Z"
     }
   }
 }
