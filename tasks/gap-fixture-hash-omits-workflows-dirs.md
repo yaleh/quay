@@ -1,7 +1,7 @@
 ---
 id: gap-fixture-hash-omits-workflows-dirs
 title: quay-init-loop-helpers._fixtureHash() 漏 .claude/workflows/ + plugin/workflows/——workflow-only 变更复用陈旧 install fixture → real-target-verify 假冲突（发生率 2/日）
-status: todo
+status: ready
 labels:
   - gap
   - defect
