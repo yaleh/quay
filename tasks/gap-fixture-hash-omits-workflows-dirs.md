@@ -34,18 +34,22 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: `_fixtureHash()`（或等价机制）覆盖 `.claude/workflows/` + `plugin/workflows/`——仅改 workflow 文件的变更使 install fixture hash 变化。
-- [ ] AC2: `real-target-verify` 不再对 workflow-only 变更报假冲突（不需要手动删 /var/tmp fixtures）。
-- [ ] AC3: 对照实测：改 `fan-in-execute.js`（不删 fixtures）→ verify 通过；既有 install 流程不受影响。
-- [ ] AC4: 测试全绿 + `--for-task` scoped 门绿。
+- [x] AC1: `_fixtureHash()`（或等价机制）覆盖 `.claude/workflows/` + `plugin/workflows/`——仅改 workflow 文件的变更使 install fixture hash 变化。
+- [x] AC2: `real-target-verify` 不再对 workflow-only 变更报假冲突（不需要手动删 /var/tmp fixtures）。
+- [x] AC3: 对照实测：改 `fan-in-execute.js`（不删 fixtures）→ verify 通过；既有 install 流程不受影响。
+- [x] AC4: 测试全绿 + `--for-task` scoped 门绿。
 
 ## Definition of Done
 
-- [ ] workflow 目录进 fixture hash（或等价机制），workflow-only 变更不再触发 real-target-verify 假冲突，手动删 /var/tmp fixtures 的权宜不再需要，scoped + 全量绿。
+- [x] workflow 目录进 fixture hash（或等价机制），workflow-only 变更不再触发 real-target-verify 假冲突，手动删 /var/tmp fixtures 的权宜不再需要，scoped + 全量绿。
 
 ## Touches
 
-- plugin/test/quay-init-loop-helpers.mjs（**已定位正本**：_fixtureHash 的目录 walk——hash 安装面 = `plugin/scripts + loop/ + ...`，漏 `.claude/workflows/` + `plugin/workflows/`）
-- plugin/scripts/（real-target-verify / quay-init install 消费面）
-- plugin/test/quay-init-loop.test.mjs 等（fixture-hash 覆盖测试）
+- plugin/test/quay-init-loop-helpers.mjs（`_fixtureHash()` 的 walk 加进 `.claude/workflows/` + `plugin/workflows/` 两个根；抽出并导出 `_hashOfRoots(roots, base)` 供对照测试直接驱动；`_fixtureHash` 一并导出）
+- plugin/test/quay-init-loop-fixture-hash.test.mjs（新增 fixture-hash 覆盖测试——临时 plugin 形状 fixture 上仅改 workflow 文件内容 → hash 必变；负控制：`.claude/skills` 之类非 workflow 文件不进 hash）
 - tasks/gap-fixture-hash-omits-workflows-dirs.md（自身）
+
+## Test-Files
+
+- plugin/test/quay-init-loop-fixture-hash.test.mjs
+- plugin/test/quay-init-loop.test.mjs（既有 install 流程测试，必须保持绿）

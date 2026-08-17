@@ -133,7 +133,12 @@ function _sleepSync(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
-function _fixtureHash() {
+// _hashOfRoots(roots, base): content-addressed sha1 over a sorted list of root dirs/files — the
+// same walk the install fixture hash uses. Exported separately from _fixtureHash() so the
+// workflow-dir coverage is directly testable with temp fixture inputs (gap-fixture-hash-omits-
+// workflows-dirs, AC1/AC2). `base` is the anchor for the hashed relative paths (defaults to the
+// plugin root, so the REAL fixture hash is stable across machine locations of the plugin).
+export function _hashOfRoots(roots, base = pluginDir) {
   const h = createHash("sha1");
   const files = [];
   const walk = (d) => {
@@ -145,23 +150,48 @@ function _fixtureHash() {
       else files.push(p);
     }
   };
-  walk(path.join(pluginDir, "scripts"));
-  walk(path.join(pluginDir, "loop"));
-  walk(path.join(pluginDir, "skills", "init"));
+  for (const r of roots) {
+    const p = path.resolve(r);
+    let st;
+    try { st = fs.statSync(p); } catch { continue; }
+    if (st.isDirectory()) walk(p);
+    else files.push(p);
+  }
+  files.sort();
+  for (const f of files) {
+    h.update(path.relative(base, f));
+    h.update(fs.readFileSync(f));
+  }
+  return h.digest("hex").slice(0, 16);
+}
+
+// Export (not just the private name) so quay-init-loop-fixture-hash.test.mjs can assert the real
+// production hash covers the workflow roots directly.
+export function _fixtureHash() {
+  // Every installed-plugin surface the fixture content-addresses. Adding a root here means a change
+  // to any file under it yields a FRESH fixture (never a stale reuse) — and the fixture is what
+  // real-target-verify compares against, so a workflow-only change must be visible.
+  const roots = [
+    path.join(pluginDir, "scripts"),
+    path.join(pluginDir, "loop"),
+    path.join(pluginDir, "skills", "init"),
+    // Shipped workflows (plugin/workflows/* → <workspace>/.claude/workflows/ on install) AND the
+    // live repo-root copy (.claude/workflows/* — the dual-copy source of the shipped bundle,
+    // gap-fixture-hash-omits-workflows-dirs). A fan-in-execute.js edit changes BOTH; either alone
+    // must invalidate the fixture. Without these roots a workflow-only change reused a stale
+    // fixture and real-target-verify reported a false would-conflict (occurrence 2/日 2026-08-17).
+    path.join(pluginDir, "workflows"),
+    path.join(pluginDir, "..", ".claude", "workflows"),
+  ];
   // The vendored dist bundles are gitignored generated artifacts the install lays verbatim into the
   // target's .quay/runtime/ — include them when present so a rebuilt bundle yields a fresh fixture.
   for (const b of ["vendor/quay/dist/quay.js", "vendor/quay-native/dist/quay-native.js"]) {
     const p = path.join(pluginDir, b);
-    if (fs.existsSync(p)) files.push(p);
+    if (fs.existsSync(p)) roots.push(p);
   }
   const pkg = path.join(pluginDir, "package.json");
-  if (fs.existsSync(pkg)) files.push(pkg);
-  files.sort();
-  for (const f of files) {
-    h.update(path.relative(pluginDir, f));
-    h.update(fs.readFileSync(f));
-  }
-  return h.digest("hex").slice(0, 16);
+  if (fs.existsSync(pkg)) roots.push(pkg);
+  return _hashOfRoots(roots, pluginDir);
 }
 
 function _fixturePath() {
