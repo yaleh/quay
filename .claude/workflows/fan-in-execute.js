@@ -81,16 +81,24 @@ if ! node --experimental-strip-types plugin/scripts/anti-drift-touches-check.ts 
 fi
 # anti-drift-block-end
 
-【无锁段 step 2 — delta 断言面判定（AC75）】
+【无锁段 step 2 — delta 断言面判定（AC75 + gap-fan-in-delta-scope-doc-only-skip）】
+# delta 看【分支整体相对 develop 的变更】，不是单轮 develop-side delta——代码经更早分支历史静默进
+# develop（AC97：fae3322f 改 serve-handlers.ts 在分支，fan-in 最终合并时单轮 develop-side delta 只见
+# 5 个 tasks/*.md ⇒ 旧闸门判 doc-only 跳过全量）必须被判为需全量。语义：merge-base 之后 HEAD（分支）
+# 相对 develop 引入的全部文件 = fan-in 将 land 的全部文件（与 anti-drift Touches 核对同源）。
 fork=$(git -C ${worktree} merge-base ${mergeTarget} HEAD)
-delta=$(git -C ${worktree} diff --name-only "$fork" ${mergeTarget} 2>/dev/null || true)
-# 承重点①（gap-fan-in-execute-three-unverified-paths）：code_delta 正则分类 doc/代码/测试断言面——
-# 判错 ⇒ 该跑全量却跳过（漏检）或该跳却重跑（浪费）。改此行必须同步 plugin/test/fan-in-execute-paths.test.mjs。
-code_delta=$(printf '%s\\n' "$delta" | grep -vE '^tasks/|^docs/|^[.]quay/|^plugin/loop/|^measurements/|^milestones/|^orchestration/archive/|[.]md$' | grep -v '^$' || true)
+delta=$(git -C ${worktree} diff --name-only "$fork" HEAD 2>/dev/null || true)
+# 承重点①（gap-fan-in-execute-three-unverified-paths + gap-fan-in-delta-scope-doc-only-skip）：
+# doc 判定用【可计算定义】（select-static-checks-for-touches.ts --classify-delta：解析 scripts/test.sh
+# 里每个 change/full 层检查器的 @static-object 声明 = 检查器读的路径集合；delta ∩ 该集合 = ∅ 且落在
+# 任务体/doc/telemetry 面才 doc，非手写正则表；orchestration/*-tick-core.md 被 tick-core-static-check
+# 等读取 ⇒ 非 doc）。判错 ⇒ 该跑全量却跳过（漏检）或该跳却重跑（浪费）。改此行必须同步
+# plugin/test/fan-in-execute-paths.test.mjs。分类脚本失败 ⇒ fail-closed（判不出 ≠ 不需要）。
+code_delta=$(node --experimental-strip-types plugin/scripts/select-static-checks-for-touches.ts --classify-delta $delta) || code_delta="__CLASSIFY_FAILED__"
 判定：
-  - code_delta 非空 ⇒ develop 的 delta 触及代码/脚本/测试断言面 ⇒ 本回合【要】重跑全量 suite。
+  - code_delta 非空 ⇒ 分支整体变更触及代码/脚本/测试断言面（或被检查器读取的路径）⇒ 本回合【要】重跑全量 suite。
   - code_delta 为空且 delta 非空 ⇒ delta 全落 doc/任务体/telemetry 面 ⇒ 跳过全量 suite（只跑 doc 检查）。
-  - 无法判定（git merge-base 失败 / delta 取不到）⇒ fail-closed：重跑全量 suite（硬规则 3b：判不出≠不需要）。
+  - 无法判定（分类脚本失败 / git merge-base 失败）⇒ fail-closed：重跑全量 suite（硬规则 3b：判不出≠不需要）。
 把 code_delta 记下来（返回时上报）。
 
 【无锁段 step 3 — ts-typecheck 闸】
