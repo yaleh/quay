@@ -51,6 +51,9 @@ impl 已完（68faf3ab 收口）但 fan-in 没跑 ⇒ 卡住持锁
 
 - plugin/scripts/slot-refill.ts（目录级 Touches 展开/相交语义）
 - plugin/scripts/touches-one-entry-one-path-check.ts（撰写面检测）
-- tasks/gap-done-task-doc-lint-cleanup-2026-08-16.md（当前持锁者，AC4 处置）
-- tasks/*.md（AC2 存量检查标注）
 - tasks/gap-directory-level-tasks-touch-global-lock.md（自身）
+
+**Touches 收窄说明（2026-08-17 23:3xZ）**：原 `tasks/*.md` 目录级声明已移除——
+①AC2 是**读核**（逐一核 45 个任务，确认其声明是否构成活跃全局锁），核读的**结论写在本任务 Evidence**，不是写那 45 个文件 ⇒ 不构成写面，声明目录级即 overbroad；
+②`tasks/gap-done-task-doc-lint-cleanup-2026-08-16.md` 已 done（AC4 锁已解除），无需再触碰；
+③本任务自身就是「目录级 `tasks/*.md` = 全局派发锁」的修复者，自己声明目录级 glob 会被**自身要修的缺陷**自锁（slot-refill step-4 self-touch 相交），且 land 前 anti-drift（gap-fan-in-fix-commit-delta-escapes-touches-coverage）会对 overbroad 声明 HARD FAIL ⇒ 收窄到具体文件既是诚实声明也是可派/可 land 的前提。
