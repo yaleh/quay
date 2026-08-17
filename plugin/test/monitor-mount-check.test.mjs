@@ -104,7 +104,12 @@ function readPpid(pid) {
 
 // Kill any lingering fake monitors under os.tmpdir() (defensive cleanup for orphaned fakes).
 function killTmpdirMonitors() {
-  for (const d of fs.readdirSync("/proc", { withFileTypes: true })) {
+  let entries;
+  // readdirSync(withFileTypes) lstat's each /proc pid — a pid that exits mid-scan throws ENOENT
+  // (same class as the readFileSync guard below). On a churning /proc (concurrent layers), this
+  // flaked: `ENOENT: lstat '/proc/<pid>'`. Guard the scan itself.
+  try { entries = fs.readdirSync("/proc", { withFileTypes: true }); } catch { return; }
+  for (const d of entries) {
     if (!/^\d+$/.test(d.name)) continue;
     let cmd;
     try { cmd = fs.readFileSync(`/proc/${d.name}/cmdline`, "utf8"); } catch { continue; } // vanished mid-scan

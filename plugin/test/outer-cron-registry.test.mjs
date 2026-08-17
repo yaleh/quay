@@ -172,10 +172,10 @@ test("cronExprsEquivalent: 语义等价 `*/20`≡`0,20,40`；真漂移不≡", (
 test("loadRegistry: real git-tracked registry file parses with both layers", () => {
   const reg = loadRegistry(REPO_ROOT);
   assert.ok(reg);
-  assert.equal(reg.layers.inner.cronId, "0ccb57cf");
+  assert.equal(reg.layers.inner.cronId, "09fabf33");
   assert.equal(reg.layers.inner.cronExpr, "7,27,47 * * * *");
-  assert.equal(reg.layers.outer.cronId, "4e88cb1b");
-  assert.equal(reg.layers.outer.cronExpr, "0,20,40 * * * *");
+  assert.equal(reg.layers.outer.cronId, "a2360e1d");
+  assert.equal(reg.layers.outer.cronExpr, "*/20 * * * *");
   assert.equal(reg.layers.inner.promptSha256, sha256Hex(INNER_PROMPT));
   assert.equal(reg.layers.outer.promptSha256, sha256Hex(OUTER_PROMPT));
 });
@@ -201,7 +201,7 @@ test("REAL inner anchor: 四判据全真 + 剩余寿命≈7天 ⇒ PASS (exit 0)
     writeInnerSection(p, INNER_PROMPT);
     const r = runReg([
       "--verify", "--layer", "inner",
-      "--cron-list", JSON.stringify([{ id: "0ccb57cf", schedule: "7,27,47 * * * *" }]),
+      "--cron-list", JSON.stringify([{ id: "09fabf33", schedule: "7,27,47 * * * *" }]),
       "--canonical-file", p,
       "--registry-file", REGISTRY_FILE,
     ]);
@@ -212,7 +212,7 @@ test("REAL inner anchor: 四判据全真 + 剩余寿命≈7天 ⇒ PASS (exit 0)
     const res = checkVerify({
       layer: "inner",
       registry: reg,
-      cronListRaw: JSON.stringify([{ id: "0ccb57cf" }]),
+      cronListRaw: JSON.stringify([{ id: "09fabf33" }]),
       canonicalPrompt: INNER_PROMPT,
       nowMs: Date.parse("2026-08-14T16:00:00Z"),
     });
@@ -229,7 +229,7 @@ test("REAL outer anchor: 四判据全真 ⇒ PASS (exit 0)", () => {
     fs.writeFileSync(p, OUTER_PROMPT + "\n"); // 正本文件带尾部换行；extractCanonical 剥一个
     const r = runReg([
       "--verify", "--layer", "outer",
-      "--cron-list", JSON.stringify([{ id: "4e88cb1b", schedule: "0,20,40 * * * *" }]),
+      "--cron-list", JSON.stringify([{ id: "a2360e1d", schedule: "*/20 * * * *" }]),
       "--canonical-file", p,
       "--registry-file", REGISTRY_FILE,
     ]);
@@ -380,7 +380,7 @@ test("cron-expr-mismatch: 语义等价 `*/20` ≡ 注册表 outer `0,20,40` ⇒ 
     fs.writeFileSync(p, OUTER_PROMPT + "\n"); // 正本文件带尾部换行；extractCanonical 剥一个
     const r = runReg([
       "--verify", "--layer", "outer",
-      "--cron-list", JSON.stringify([{ id: "4e88cb1b", schedule: "*/20 * * * *" }]),
+      "--cron-list", JSON.stringify([{ id: "a2360e1d", schedule: "*/20 * * * *" }]),
       "--canonical-file", p,
       "--registry-file", REGISTRY_FILE,
     ]);
@@ -433,7 +433,7 @@ test("NOT-EVALUATED: 内层正本缺失（--root 指向无 AC80 段的目录）�
   try {
     const r = runReg([
       "--verify", "--layer", "inner",
-      "--cron-list", JSON.stringify([{ id: "0ccb57cf" }]),
+      "--cron-list", JSON.stringify([{ id: "09fabf33" }]),
       "--registry-file", REGISTRY_FILE,
       "--root", dir,
     ]);
@@ -468,11 +468,11 @@ test("NOT-EVALUATED: 注册表缺失/层缺失 ⇒ exit 2", () => {
 
 test("checkVerify: 四判据全真 + 剩余正常 ⇒ ok:true (exit 0)", () => {
   const reg = loadRegistry(REPO_ROOT);
-  const nowMs = Date.parse("2026-08-16T05:00:00Z");
+  const nowMs = Date.parse("2026-08-18T05:00:00Z");
   const res = checkVerify({
     layer: "inner",
     registry: reg,
-    cronListRaw: JSON.stringify([{ id: "0ccb57cf" }]),
+    cronListRaw: JSON.stringify([{ id: "09fabf33" }]),
     canonicalPrompt: INNER_PROMPT,
     nowMs,
   });
