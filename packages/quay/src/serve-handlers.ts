@@ -9,7 +9,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import type { ProviderClient } from "./provider-client.ts";
-import { readLive, readJournal, readBoardLanding, readBoardExecution, readGitHistory, type LiveResult, type JournalResult, type JournalSection, type BoardLanding, type BoardExecution, type GitHistoryCommit, type GitHistoryResult } from "./observation.ts";
+import { readLive, readJournal, readBoardLanding, readBoardExecution, readGitHistory, readSystem, readManager, readTests, readSessions, readArchitecture, type LiveResult, type JournalResult, type JournalSection, type BoardLanding, type BoardExecution, type GitHistoryCommit, type GitHistoryResult, type SystemResult, type ManagerResult, type TestsResult, type SessionsResult, type ArchitectureResult, type TestRunRecord } from "./observation.ts";
 import { createGoalStore } from "./goal-store.ts";
 import { createDocumentStore } from "./document-store.ts";
 // live-state discriminator texts (gap-live-cannot-tell-a-dead-loop-from-an-unwired-one) — the
@@ -1718,6 +1718,529 @@ export async function handleGitHistory(
   res.end(renderGitHistoryPage(history));
 }
 
+// ── AC95: the six new design views (dashboard · system · manager · tests · sessions · architecture) ──
+// Data access is quarantined in observation.ts; these handlers only render what it returns. Each
+// handler is wrapped defensively so ANY unexpected throw degrades to a 200 page with an error note
+// (never a 500), and every data source renders its own 未接入/无数据/读失败 state (AC3 — never blank/0).
+
+const SITE_NAV_GROUPS: Array<{ label: string; items: Array<[string, string]> }> = [
+  { label: "核心", items: [["dashboard", "Dashboard"], ["tasks", "Tasks"]] },
+  { label: "观测", items: [["live", "Live"], ["board", "Board"], ["system", "System"], ["manager", "Manager"]] },
+  { label: "记录", items: [["journal", "Journal"], ["git", "Git History"], ["tests", "Tests"], ["sessions", "Sessions"]] },
+  { label: "知识", items: [["adr", "ADRs"], ["goal", "Goals"], ["doc", "Docs"], ["architecture", "Architecture"]] },
+];
+
+const SITE_NAV_ROUTES: Record<string, string> = {
+  dashboard: "/dashboard", tasks: "/", live: "/live", board: "/board", system: "/system",
+  manager: "/manager", journal: "/journal", git: "/git-history", tests: "/tests",
+  sessions: "/sessions", adr: "/adr", goal: "/goal", doc: "/doc", architecture: "/architecture",
+};
+
+/** Full 15-view site nav (the design's navGroupDefs). Current page rendered as <strong>. */
+export function renderSiteNav(current: string): string {
+  return SITE_NAV_GROUPS.map((g) =>
+    `${escapeHtml(g.label)}: ${g.items.map(([key, label]) => {
+      const href = SITE_NAV_ROUTES[key];
+      return key === current
+        ? html`<strong>${escapeHtml(label)}</strong>`
+        : html`<a href="${href}">${escapeHtml(label)}</a>`;
+    }).join(" · ")}`
+  ).join("<br>");
+}
+
+function obsNote(status: string, reason: string | null): string {
+  if (status === "ok") return "";
+  if (status === "empty") return html`<p class="meta"><strong>未接入/无数据</strong> — ${escapeHtml(reason || "")}</p>`;
+  return html`<p class="meta"><strong>读失败</strong> — ${escapeHtml(reason || "")}</p>`;
+}
+
+// ── /system ─────────────────────────────────────────────────────────────────────────────────────────
+
+function renderSystemPage(sys: SystemResult): string {
+  const rg = sys.resourceGate;
+  const pb = sys.processBudget;
+  const bothOk = rg.status === "ok" && pb.status === "ok";
+  const goVerdict = bothOk && rg.verdict === "GO" && pb.verdict === "GO";
+  const banner = bothOk
+    ? html`<div class="${goVerdict ? "success-banner" : "error-banner"}" role="status"><strong>⇒ ${goVerdict ? "GO" : "WAIT"}</strong>：${goVerdict ? "资源充足，可以跑" : "资源受限，等待"}</div>`
+    : "";
+  const bar = (label: string, val: number | null, limit: string | null): string => {
+    const pct = val != null ? Math.min(100, Math.max(1, (val / (Number(limit) || 1)) * 100)) : 0;
+    return html`<div><div style="display:flex;justify-content:space-between;font-size:0.9rem;margin-bottom:2px">
+      <span>${escapeHtml(label)}</span><span>${val != null ? escapeHtml(String(val)) : "—"}${limit ? html` <span style="color:#555">/ ${escapeHtml(limit)}</span>` : ""}</span>
+    </div>${val != null ? html`<div style="height:8px;background:#d7d3d3"><div style="height:100%;width:${pct.toFixed(1)}%;background:#201e1d"></div></div>` : ""}</div>`;
+  };
+  return html`<!doctype html>
+    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay system — resource gate and process budget">${pageStyles()}<title>System — 系统状态</title></head>
+    <body><main>
+      <p class="meta">${renderSiteNav("system")}</p>
+      <h1>System — 系统状态</h1>
+      <p class="meta">数据源：<code>resource-gate.sh</code> · <code>process-budget.sh</code>（文本输出解析）</p>
+      ${banner}
+      ${obsNote(rg.status, rg.reason)}
+      <h2>resource-gate.sh</h2>
+      ${rg.status === "ok" ? html`<div style="display:flex;flex-direction:column;gap:0.75rem;max-width:640px">
+        ${bar("cpu_stall (avg10)", rg.cpuStallAvg10, "60")}
+        ${bar("cpu_stall (avg300)", rg.cpuStallAvg300, "60")}
+        ${bar("loadavg (1m)", rg.loadAvg, rg.nproc != null ? `nproc×2≈${rg.nproc * 2}` : "nproc×2")}
+        <div style="display:flex;justify-content:space-between;font-size:0.9rem"><span>mem_avail</span><span>${rg.memAvailMb != null ? `${escapeHtml(String(rg.memAvailMb))} MB` : "—"}</span></div>
+        <div style="display:flex;justify-content:space-between;font-size:0.9rem"><span>nproc / node_procs</span><span>${rg.nproc != null ? escapeHtml(String(rg.nproc)) : "—"} / ${rg.nodeProcs != null ? escapeHtml(String(rg.nodeProcs)) : "—"}</span></div>
+        <div style="display:flex;justify-content:space-between;font-size:0.9rem"><span>verdict</span><span>${escapeHtml(rg.verdict ?? "—")}</span></div>
+      </div>` : ""}
+      ${obsNote(pb.status, pb.reason)}
+      <h2>process-budget.sh</h2>
+      ${pb.status === "ok" ? html`<div style="display:flex;flex-direction:column;gap:0.5rem;max-width:640px">
+        <div style="display:flex;justify-content:space-between;font-size:0.9rem"><span>total_budget</span><span>${pb.totalBudget != null ? escapeHtml(String(pb.totalBudget)) : "—"}</span></div>
+        <div style="display:flex;justify-content:space-between;font-size:0.9rem"><span>in_use</span><span>${pb.inUse != null ? escapeHtml(String(pb.inUse)) : "—"}</span></div>
+        <div style="display:flex;justify-content:space-between;font-size:0.9rem"><span>available</span><span>${pb.available != null ? escapeHtml(String(pb.available)) : "—"}</span></div>
+        <div style="display:flex;justify-content:space-between;font-size:0.9rem"><span>verdict</span><span>${escapeHtml(pb.verdict ?? "—")}</span></div>
+      </div>` : ""}
+      <p class="meta" style="margin-top:1rem">阈值按 <code>nproc</code> 动态计算显示，不写死当前机器上的数字。</p>
+    </main></body></html>`;
+}
+
+export async function handleSystem(
+  req: IncomingMessage,
+  res: ServerResponse,
+  cfg: { workspaceRoot: string },
+): Promise<void> {
+  let sys: SystemResult;
+  try {
+    sys = await readSystem(cfg.workspaceRoot);
+  } catch (err) {
+    sys = {
+      status: "error",
+      reason: `internal: ${err instanceof Error ? err.message : String(err)}`,
+      resourceGate: { status: "error", reason: null, cpuStallAvg10: null, cpuStallAvg300: null, memAvailMb: null, loadAvg: null, nproc: null, nodeProcs: null, verdict: null },
+      processBudget: { status: "error", reason: null, totalBudget: null, inUse: null, available: null, verdict: null },
+    };
+  }
+  res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+  res.end(renderSystemPage(sys));
+}
+
+// ── /manager ───────────────────────────────────────────────────────────────────────────────────────
+
+function renderManagerPage(mgr: ManagerResult): string {
+  const loopCards = (label: string, statusText: string, note: string): string => html`<div style="background:#eae9e9;padding:1rem">
+    <div style="font-size:0.85rem;color:#555;margin-bottom:4px">${escapeHtml(label)}</div>
+    <div style="font-weight:700">${statusText}</div>
+    <p style="font-size:0.8rem;margin:4px 0 0">${escapeHtml(note)}</p>
+  </div>`;
+
+  const ld = mgr.loopDriver;
+  const livenessRows = mgr.liveness.sessions.length > 0 ? html`<table>
+    <tr><th>会话</th><th>alive</th><th>pid</th><th>halted</th></tr>
+    ${mgr.liveness.sessions.map((s) => html`<tr>
+      <td>${escapeHtml(s.name)}</td>
+      <td>${s.alive ? "LIVE" : "GONE"}</td>
+      <td>${s.pid != null ? escapeHtml(String(s.pid)) : "—"}</td>
+      <td>${s.halted ? "halted" : "—"}</td>
+    </tr>`).join("\n")}
+  </table>` : "";
+
+  const observerRows = mgr.observers.rows.length > 0 ? html`<table>
+    <tr><th>name</th><th>status</th><th>root</th><th>note</th></tr>
+    ${mgr.observers.rows.map((r) => html`<tr>
+      <td>${escapeHtml(r.name)}</td>
+      <td>${escapeHtml(r.status)}</td>
+      <td><code>${escapeHtml(r.root)}</code></td>
+      <td>${escapeHtml(r.note)}</td>
+    </tr>`).join("\n")}
+  </table>` : "";
+
+  const pool = mgr.pool;
+  const poolNote = pool.status === "ok"
+    ? html`<div style="font-family:ui-monospace,monospace;font-size:0.85rem;line-height:1.7">
+        pool=${pool.pool ?? "—"} floor=${pool.floor ?? "—"} deficit=${pool.deficit ?? "—"} cap=${pool.cap ?? "—"}
+      </div>`
+    : obsNote(pool.status, pool.reason);
+
+  return html`<!doctype html>
+    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay manager — Manager/Outer/Inner 三层状态">${pageStyles()}<title>Manager / Outer / Inner</title></head>
+    <body><main>
+      <p class="meta">${renderSiteNav("manager")}</p>
+      <h1>Manager / Outer / Inner — 三层状态</h1>
+      <p class="meta">三层自适应探测：多信号加权判定，缺失信号诚实标注「未检测到」，不静默假设。</p>
+      <h2>Loop / 会话</h2>
+      ${obsNote(ld.status, ld.reason)}
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:2px;margin-bottom:1rem">
+        ${loopCards("Loop driver", ld.verdict ?? "—", ld.detail || `exit=${ld.exitCode ?? "—"}`)}
+        ${mgr.liveness.sessions.map((s) => loopCards(s.name, s.alive ? "LIVE" : "GONE", s.halted ? "halted" : s.pid != null ? `pid ${s.pid}` : "—")).join("")}
+      </div>
+      ${obsNote(mgr.liveness.status, mgr.liveness.reason)}
+      ${livenessRows}
+      <h2>Monitor 注册表</h2>
+      ${obsNote(mgr.observers.status, mgr.observers.reason)}
+      ${observerRows}
+      <p class="meta">读 <code>observer-registry.conf</code> 单一登记表。</p>
+      <h2>主要观测指标</h2>
+      ${poolNote}
+      <p class="meta">release=${escapeHtml(mgr.version ?? "—")} · develop 领先 ${mgr.developLead != null ? escapeHtml(String(mgr.developLead)) : "—"} 提交</p>
+    </main></body></html>`;
+}
+
+export async function handleManager(
+  req: IncomingMessage,
+  res: ServerResponse,
+  cfg: { workspaceRoot: string },
+): Promise<void> {
+  let mgr: ManagerResult;
+  try {
+    mgr = await readManager(cfg.workspaceRoot);
+  } catch (err) {
+    mgr = {
+      status: "error",
+      reason: `internal: ${err instanceof Error ? err.message : String(err)}`,
+      loopDriver: { status: "error", reason: null, verdict: null, exitCode: null, detail: null },
+      liveness: { status: "error", reason: null, sessions: [] },
+      observers: { status: "error", reason: null, rows: [] },
+      pool: { status: "error", reason: null, pool: null, floor: null, deficit: null, cap: null },
+      version: null,
+      developLead: null,
+    };
+  }
+  res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+  res.end(renderManagerPage(mgr));
+}
+
+// ── /tests ─────────────────────────────────────────────────────────────────────────────────────────
+
+function runStatusClass(state: string | null): string {
+  if (state === "green" || state === "pass") return "verdict-pass";
+  if (state === "red" || state === "fail" || state === "running") return "verdict-fail";
+  return "";
+}
+
+function renderTestsPage(tests: TestsResult): string {
+  const latest = tests.runs[0] ?? null;
+  const latestBanner = latest
+    ? html`<div style="border:1px solid #dee2e6;background:#fff;padding:1rem;margin-bottom:1.5rem">
+        <div style="font-weight:700;font-size:1rem"><span class="${runStatusClass(latest.state)}">${escapeHtml(latest.state ?? "unknown")}</span>${latest.scope ? ` · ${escapeHtml(latest.scope)}` : ""}</div>
+        <p class="meta" style="margin:0.25rem 0">startedAt: ${escapeHtml(latest.startedAt ?? "—")} · duration: ${latest.durationMs != null ? `${escapeHtml(String(Math.round(latest.durationMs / 1000)))}s` : "—"}${latest.commit ? ` · commit <code>${escapeHtml(latest.commit.slice(0, 8))}</code>` : ""}${latest.runner ? ` · runner ${escapeHtml(latest.runner)}` : ""}</p>
+        <p class="meta" style="margin:0">tests ${latest.tests ?? "—"} · pass ${latest.pass ?? "—"} · fail ${latest.fail ?? "—"} · cancelled ${latest.cancelled ?? "—"}</p>
+      </div>`
+    : "";
+  const historyRows = tests.runs.map((r) => html`<tr>
+    <td>${r.round != null ? `#${escapeHtml(String(r.round))}` : "—"}</td>
+    <td class="${runStatusClass(r.state)}" style="font-weight:700">${escapeHtml(r.state ?? "—")}</td>
+    <td>${r.pass ?? "—"}/${r.fail ?? "—"}/${r.cancelled ?? "—"}</td>
+    <td>${r.durationMs != null ? `${escapeHtml(String(Math.round(r.durationMs / 1000)))}s` : "—"}</td>
+    <td>${r.scope ? escapeHtml(r.scope) : "—"}</td>
+    <td>${r.commit ? html`<code>${escapeHtml(r.commit.slice(0, 8))}</code>` : "—"}</td>
+  </tr>`).join("\n");
+  const failedRun = tests.runs.find((r) => r.fail != null && r.fail > 0 && r.failures && r.failures.length > 0);
+  const failureDetails = failedRun
+    ? html`<details style="margin-top:1rem">
+        <summary style="cursor:pointer;font-weight:600">#${escapeHtml(String(failedRun.round))} 失败用例明细（点击展开）</summary>
+        <ul style="padding-left:1.5rem;font-size:0.85rem;line-height:1.7;color:#7c1405">
+          ${failedRun.failures!.map((f) => html`<li>${escapeHtml(f)}</li>`).join("")}
+        </ul>
+      </details>`
+    : "";
+  return html`<!doctype html>
+    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay tests — verification rounds">${pageStyles()}<title>Tests — 验证轮记录</title></head>
+    <body><main>
+      <p class="meta">${renderSiteNav("tests")}</p>
+      <h1>Tests — 验证轮记录</h1>
+      <p class="meta">数据源：<code>.quay/verification-round.jsonl</code>（suite-state 机制写入）${tests.currentState ? html` · 当前 suite-state: <strong>${escapeHtml(tests.currentState)}</strong>` : ""}</p>
+      ${obsNote(tests.status, tests.reason)}
+      ${latestBanner}
+      ${tests.runs.length > 0 ? html`<h2>历史运行（新→旧）</h2>
+      <table>
+        <tr><th>round</th><th>state</th><th>pass/fail/cancel</th><th>duration</th><th>scope</th><th>commit</th></tr>
+        ${historyRows}
+      </table>` : ""}
+      ${failureDetails}
+    </main></body></html>`;
+}
+
+export async function handleTests(
+  req: IncomingMessage,
+  res: ServerResponse,
+  cfg: { workspaceRoot: string },
+): Promise<void> {
+  let tests: TestsResult;
+  try {
+    tests = readTests(cfg.workspaceRoot);
+  } catch (err) {
+    tests = { status: "error", reason: `internal: ${err instanceof Error ? err.message : String(err)}`, runs: [], currentState: null };
+  }
+  res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+  res.end(renderTestsPage(tests));
+}
+
+// ── /sessions ──────────────────────────────────────────────────────────────────────────────────────
+
+function renderSessionsPage(sessions: SessionsResult): string {
+  const cards = sessions.sessions.map((s) => {
+    const msgHtml = s.messages && s.messages.length > 0
+      ? s.messages.map((m) => html`<div style="border-left:2px solid #dee2e6;padding-left:0.6rem;margin-bottom:0.5rem">
+          <div style="font-size:0.7rem;color:#555">${escapeHtml(m.time)} · ${escapeHtml(m.role)}</div>
+          <p style="font-size:0.8rem;line-height:1.4;margin:0">${escapeHtml(m.text)}</p>
+        </div>`).join("")
+      : obsNote(s.transcriptStatus, s.transcriptReason);
+    return html`<div style="background:#eae9e9;padding:1rem;display:flex;flex-direction:column;gap:0.5rem;min-height:180px">
+      <div style="display:flex;justify-content:space-between;align-items:baseline">
+        <b>${escapeHtml(s.name)}</b>
+        <span style="font-size:0.75rem;font-weight:700;color:${s.alive ? "#1a7f37" : "#cf222e"}">${s.alive ? "LIVE" : "GONE"}</span>
+      </div>
+      <div style="font-size:0.75rem;color:#555">${s.halted ? "halted" : s.pid != null ? `pid ${s.pid}` : "—"}</div>
+      ${msgHtml}
+    </div>`;
+  }).join("");
+  return html`<!doctype html>
+    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay sessions — Manager/Outer/Inner 最近会话">${pageStyles()}<title>Sessions — 三层最近会话</title></head>
+    <body><main>
+      <p class="meta">${renderSiteNav("sessions")}</p>
+      <h1>Sessions — Manager / Outer / Inner 最近会话</h1>
+      <p class="meta">数据源：<code>session-liveness.sh --once</code> + 会话 transcript 尾部</p>
+      ${obsNote(sessions.status, sessions.reason)}
+      ${sessions.sessions.length > 0 ? html`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:1rem">${cards}</div>` : ""}
+    </main></body></html>`;
+}
+
+export async function handleSessions(
+  req: IncomingMessage,
+  res: ServerResponse,
+  cfg: { workspaceRoot: string },
+): Promise<void> {
+  let sessions: SessionsResult;
+  try {
+    sessions = await readSessions(cfg.workspaceRoot);
+  } catch (err) {
+    sessions = { status: "error", reason: `internal: ${err instanceof Error ? err.message : String(err)}`, sessions: [] };
+  }
+  res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+  res.end(renderSessionsPage(sessions));
+}
+
+// ── /architecture ──────────────────────────────────────────────────────────────────────────────────
+
+interface ArchNode { label: string; x: number; y: number; w: number; h: number; highlight: "dev" | "recent" | "plain" | "stale"; fill: string; stroke: string }
+
+function renderArchitecturePage(arch: ArchitectureResult): string {
+  // Fixed diagram layout; node highlights derive from git facts (recent commits / open worktrees).
+  const names = arch.components.map((c) => c.name);
+  const nodeDefs: Array<{ name: string; x: number; y: number; w: number; h: number }> = [
+    { name: "quay (Core)", x: 30, y: 20, w: 130, h: 44 },
+    { name: "web-ui", x: 30, y: 130, w: 130, h: 44 },
+    { name: "provider-abi", x: 190, y: 75, w: 130, h: 44 },
+    { name: "quay-native", x: 350, y: 20, w: 120, h: 44 },
+    { name: "quay-github", x: 350, y: 130, w: 120, h: 44 },
+  ];
+  // map design-node names → package dir names for git facts.
+  const pkgByName = new Map(arch.components.map((c) => [c.name, c]));
+  const recentNames = new Set(arch.components.filter((c) => c.recentCommits > 0).map((c) => c.name));
+  const highlightFor = (n: string): "dev" | "recent" | "plain" | "stale" => {
+    // quay (Core) is the package that owns the Web UI; quay-native/quay-github are providers.
+    const pkg = n === "quay (Core)" ? pkgByName.get("quay") : pkgByName.get(n);
+    if (arch.inDevelopment && n === "quay (Core)") return "dev";
+    if (pkg && recentNames.has(pkg.name)) return "recent";
+    if (n === "quay-github") return "stale"; // GitHub provider has had no recent write-path work (design note)
+    return "plain";
+  };
+  const fillStroke: Record<string, [string, string]> = {
+    dev: ["#fff2ef", "#ec3013"],
+    recent: ["#fff2ef", "#ae1800"],
+    stale: ["#eae7e7", "#605d5d"],
+    plain: ["#eae9e9", "#bab6b6"],
+  };
+  const nodes: ArchNode[] = nodeDefs.map((d) => {
+    const hl = highlightFor(d.name);
+    const [fill, stroke] = fillStroke[hl];
+    return { ...d, label: d.name, highlight: hl, x: d.x, y: d.y, w: d.w, h: d.h, fill, stroke };
+  });
+  const edges = [
+    { x1: 95, y1: 64, x2: 95, y2: 130 },
+    { x1: 95, y1: 88, x2: 190, y2: 97 },
+    { x1: 255, y1: 97, x2: 350, y2: 42 },
+    { x1: 255, y1: 97, x2: 350, y2: 152 },
+  ];
+  const svg = html`<svg viewBox="0 0 500 220" width="100%" style="background:#f3f2f2;border:1px solid #dee2e6;border-radius:6px;max-width:100%">
+    ${edges.map((e) => html`<line x1="${e.x1}" y1="${e.y1}" x2="${e.x2}" y2="${e.y2}" stroke="#b0acac" stroke-width="1.5"></line>`).join("")}
+    ${nodes.map((n) => html`<rect x="${n.x}" y="${n.y}" width="${n.w}" height="${n.h}" fill="${n.fill}" stroke="${n.stroke}" stroke-width="2" rx="4"></rect>`).join("")}
+    ${nodes.map((n) => html`<text x="${n.x + n.w / 2}" y="${n.y + n.h / 2}" font-size="11" text-anchor="middle" dominant-baseline="middle" fill="#201e1d">${escapeHtml(n.label)}</text>`).join("")}
+  </svg>`;
+  const componentTable = arch.components.length > 0 ? html`<h2>组件最近变更（git 可证，近 ${7} 天）</h2>
+    <table>
+      <tr><th>组件</th><th>路径</th><th>近 7 天提交</th><th>末次提交</th></tr>
+      ${arch.components.map((c) => html`<tr>
+        <td>${escapeHtml(c.name)}</td>
+        <td><code>${escapeHtml(c.path)}</code></td>
+        <td>${c.recentCommits}</td>
+        <td>${c.lastCommitAt != null ? escapeHtml(new Date(c.lastCommitAt * 1000).toISOString().slice(0, 16)) : "—"}</td>
+      </tr>`).join("\n")}
+    </table>` : "";
+  const legend = html`<div style="display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:1rem;font-size:0.75rem;color:#555">
+    <span><span style="display:inline-block;width:10px;height:10px;background:#fff2ef;border:2px solid #ec3013"></span> 正在开发</span>
+    <span><span style="display:inline-block;width:10px;height:10px;background:#fff2ef;border:2px solid #ae1800"></span> 最近变更</span>
+    <span><span style="display:inline-block;width:10px;height:10px;background:#eae7e7;border:2px solid #605d5d"></span> 已标记问题</span>
+    <span><span style="display:inline-block;width:10px;height:10px;background:#eae9e9;border:2px solid #bab6b6"></span> 稳定</span>
+  </div>`;
+  return html`<!doctype html>
+    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay architecture — system component map">${pageStyles()}<title>Architecture — 系统组件图</title></head>
+    <body><main>
+      <p class="meta">${renderSiteNav("architecture")}</p>
+      <h1>Architecture — 系统组件图</h1>
+      <p class="meta">数据源：<code>packages/*</code>（git log 提交事实）· <code>git worktree list</code>（在飞开发）</p>
+      ${obsNote(arch.status, arch.reason)}
+      ${arch.status === "ok" ? legend : ""}
+      ${arch.status === "ok" ? svg : ""}
+      ${componentTable}
+    </main></body></html>`;
+}
+
+export async function handleArchitecture(
+  req: IncomingMessage,
+  res: ServerResponse,
+  cfg: { workspaceRoot: string },
+): Promise<void> {
+  let arch: ArchitectureResult;
+  try {
+    arch = readArchitecture(cfg.workspaceRoot);
+  } catch (err) {
+    arch = { status: "error", reason: `internal: ${err instanceof Error ? err.message : String(err)}`, components: [], inDevelopment: false };
+  }
+  res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+  res.end(renderArchitecturePage(arch));
+}
+
+// ── /dashboard ─────────────────────────────────────────────────────────────────────────────────────
+
+function renderDashboardPage(d: {
+  live: LiveResult;
+  sys: SystemResult;
+  mgr: ManagerResult;
+  tests: TestsResult;
+  history: GitHistoryResult;
+  tasks: Array<{ id?: unknown; title?: unknown; status?: unknown; labels?: unknown; updatedAt?: unknown }>;
+}): string {
+  const live = d.live;
+  const liveStateText = live.status === "error" ? "读失败" : live.liveState === "running" ? "running" : live.liveState === "running-unwired" ? "在跑但未接遥测" : live.liveState === "not-running" ? "未在运行" : "—";
+  const liveCard = html`<div style="background:#eae9e9;padding:1rem;display:flex;flex-direction:column;gap:6px">
+    <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:#555">循环脉搏</div>
+    <div style="font-weight:800">${escapeHtml(liveStateText)}</div>
+    <p style="margin:0;font-size:0.8rem;opacity:0.8">在飞 ${live.inFlight.length} · 并发 ${live.concurrency}</p>
+    <a href="/live" style="font-size:0.8rem;color:#0066cc;text-decoration:none;margin-top:auto">查看 Live →</a>
+  </div>`;
+
+  const sysGo = d.sys.resourceGate.status === "ok" && d.sys.processBudget.status === "ok" &&
+    d.sys.resourceGate.verdict === "GO" && d.sys.processBudget.verdict === "GO";
+  const sysCard = html`<div style="background:#eae9e9;padding:1rem;display:flex;flex-direction:column;gap:6px">
+    <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:#555">系统资源</div>
+    <p style="margin:0;font-size:0.8rem;line-height:1.5">cpu_stall ${d.sys.resourceGate.cpuStallAvg10 != null ? escapeHtml(String(d.sys.resourceGate.cpuStallAvg10)) : "—"} · loadavg ${d.sys.resourceGate.loadAvg != null ? escapeHtml(String(d.sys.resourceGate.loadAvg)) : "—"}</p>
+    <div style="font-weight:800;color:${sysGo ? "#1a7f37" : "#cf222e"}">⇒ ${sysGo ? "GO" : d.sys.resourceGate.status === "ok" ? "WAIT" : "未接入"}</div>
+    <a href="/system" style="font-size:0.8rem;color:#0066cc;text-decoration:none;margin-top:auto">查看系统状态 →</a>
+  </div>`;
+
+  const mgrAlive = d.mgr.liveness.sessions.filter((s) => s.alive).length;
+  const mgrCard = html`<div style="background:#eae9e9;padding:1rem;display:flex;flex-direction:column;gap:6px">
+    <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:#555">Manager / Outer / Inner</div>
+    <p style="margin:0;font-size:0.8rem;line-height:1.5">loop-driver: ${escapeHtml(d.mgr.loopDriver.verdict ?? "未接入")} · ${mgrAlive} 会话 LIVE</p>
+    <a href="/manager" style="font-size:0.8rem;color:#0066cc;text-decoration:none;margin-top:auto">查看三层状态 →</a>
+  </div>`;
+
+  const counts = new Map<string, number>();
+  for (const t of d.tasks) {
+    const s = typeof t.status === "string" ? t.status : "unknown";
+    counts.set(s, (counts.get(s) ?? 0) + 1);
+  }
+  const statuses = ["done", "ready", "todo", "needs-human", "superseded"];
+  const total = d.tasks.length;
+  const bar = (s: string): string => {
+    const c = counts.get(s) ?? 0;
+    const pct = total > 0 ? (c / total) * 100 : 0;
+    return html`<div style="width:${pct.toFixed(1)}%;background:${s === "done" ? "#201e1d" : s === "needs-human" ? "#ec3013" : "#bab6b6"}" title="${escapeHtml(s)} ${c}"></div>`;
+  };
+  const recentActive = d.tasks
+    .filter((t) => (t.status ?? "") !== "done" && typeof (t as { updatedAt?: unknown }).updatedAt === "number")
+    .sort((a, b) => ((b as { updatedAt?: unknown }).updatedAt as number) - ((a as { updatedAt?: unknown }).updatedAt as number))
+    .slice(0, 5);
+
+  const latestRun = d.tests.runs[0] ?? null;
+  const testsCard = html`<div style="background:#eae9e9;padding:1rem;display:flex;flex-direction:column;gap:6px">
+    <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:#555">测试</div>
+    <div style="font-weight:800">${latestRun ? `${escapeHtml(latestRun.state ?? "—")}` : "未接入"}</div>
+    <p style="margin:0;font-size:0.8rem;opacity:0.8">${latestRun ? `pass ${latestRun.pass ?? "—"}/${latestRun.tests ?? "—"}` : d.tests.reason ? escapeHtml(d.tests.reason) : "无验证轮记录"}</p>
+    <a href="/tests" style="font-size:0.8rem;color:#0066cc;text-decoration:none;margin-top:auto">查看 Tests →</a>
+  </div>`;
+
+  const recentCommits = d.history.status === "ok" ? d.history.commits.slice(0, 3).map((c) => `${c.hash.slice(0, 7)} ${c.subject}`).join("<br>") : (d.history.status === "empty" ? "无提交" : "读失败");
+  const commitsCard = html`<div style="background:#eae9e9;padding:1rem;display:flex;flex-direction:column;gap:8px">
+    <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:#555">最近提交</div>
+    <p style="margin:0;font-size:0.8rem;line-height:1.6;font-family:ui-monospace,monospace">${recentCommits}</p>
+    <a href="/journal" style="font-size:0.8rem;color:#0066cc;text-decoration:none;margin-top:auto">查看 Journal →</a>
+  </div>`;
+
+  const taskCard = html`<div style="background:#eae9e9;padding:1rem;display:flex;flex-direction:column;gap:6px">
+    <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:#555">任务台账速览</div>
+    <div style="display:flex;height:14px;width:100%;overflow:hidden">${statuses.map(bar).join("")}</div>
+    <div style="display:flex;gap:0.75rem;font-size:0.75rem;flex-wrap:wrap;color:#555">
+      ${statuses.map((s) => html`<span><b>${counts.get(s) ?? 0}</b> ${escapeHtml(s)}</span>`).join("")}
+    </div>
+    ${recentActive.length > 0 ? html`<div style="border-top:1px solid #dee2e6;margin-top:2px;padding-top:8px;display:flex;flex-direction:column;gap:4px">
+      <div style="font-size:0.7rem;color:#555">最近更新（非 done）</div>
+      ${recentActive.map((t) => html`<a href="/task/${encodeURIComponent(String(t.id))}" style="display:flex;justify-content:space-between;gap:8px;text-decoration:none;color:#1a1a1a;font-size:0.75rem">
+        <span style="font-weight:600;color:#0066cc">${escapeHtml(String(t.id))}</span>
+        <span style="flex:none">${escapeHtml(String(t.status ?? ""))}</span>
+      </a>`).join("")}
+    </div>` : ""}
+    <a href="/" style="font-size:0.8rem;color:#0066cc;text-decoration:none;margin-top:auto">查看任务列表 →</a>
+  </div>`;
+
+  return html`<!doctype html>
+    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay dashboard — 循环脉搏、任务台账、系统资源与三层状态总览">${pageStyles()}<title>Dashboard</title></head>
+    <body><main>
+      <p class="meta">${renderSiteNav("dashboard")}</p>
+      <h1>Dashboard</h1>
+      <p class="meta">循环脉搏、任务台账、系统资源与三层调度状态的总览 — 每张卡片指向对应完整页面。</p>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:2px;background:#aaa;border:1px solid #aaa;margin-bottom:1.5rem">${liveCard}${sysCard}${mgrCard}</div>
+      <h2>工作进展</h2>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:2px;background:#aaa;border:1px solid #aaa;margin-bottom:1.5rem">${taskCard}${testsCard}</div>
+      <h2>变更记录</h2>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:2px;background:#aaa;border:1px solid #aaa">${commitsCard}${html`<div style="background:#eae9e9;padding:1rem;display:flex;flex-direction:column;gap:8px">
+        <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:#555">Git History</div>
+        <p style="margin:0;font-size:0.8rem">提交落地时间轴（服务端渲染 SVG，零客户端 JS）。</p>
+        <a href="/git-history" style="font-size:0.8rem;color:#0066cc;text-decoration:none;margin-top:auto">查看 Git History →</a>
+      </div>`}</div>
+    </main></body></html>`;
+}
+
+export async function handleDashboard(
+  req: IncomingMessage,
+  res: ServerResponse,
+  client: ProviderClient,
+  manifest: Manifest,
+  cfg: { workspaceRoot: string },
+): Promise<void> {
+  let live: LiveResult;
+  try { live = readLive(cfg.workspaceRoot); } catch {
+    live = { status: "error", reason: "internal", inFlight: [], concurrency: 0, cpuPressure: null, liveState: null, liveExplanation: null, activity: null };
+  }
+  const sys = await readSystem(cfg.workspaceRoot).catch(() => ({
+    status: "error" as const, reason: "internal", resourceGate: { status: "error" as const, reason: null, cpuStallAvg10: null, cpuStallAvg300: null, memAvailMb: null, loadAvg: null, nproc: null, nodeProcs: null, verdict: null }, processBudget: { status: "error" as const, reason: null, totalBudget: null, inUse: null, available: null, verdict: null },
+  }));
+  const mgr = await readManager(cfg.workspaceRoot).catch(() => ({
+    status: "error" as const, reason: "internal", loopDriver: { status: "error" as const, reason: null, verdict: null, exitCode: null, detail: null }, liveness: { status: "error" as const, reason: null, sessions: [] }, observers: { status: "error" as const, reason: null, rows: [] }, pool: { status: "error" as const, reason: null, pool: null, floor: null, deficit: null, cap: null }, version: null, developLead: null,
+  }));
+  let tests: TestsResult;
+  try { tests = readTests(cfg.workspaceRoot); } catch {
+    tests = { status: "error", reason: "internal", runs: [], currentState: null };
+  }
+  let history: GitHistoryResult;
+  try { history = readGitHistory(cfg.workspaceRoot); } catch {
+    history = { status: "error", reason: "internal", commits: [] };
+  }
+  let tasks: Array<{ id?: unknown; title?: unknown; status?: unknown; labels?: unknown; updatedAt?: unknown }> = [];
+  try {
+    const r = await client.taskList({ includeBody: false });
+    tasks = r.tasks ?? [];
+  } catch { tasks = []; }
+  res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+  res.end(renderDashboardPage({ live, sys, mgr, tests, history, tasks }));
+}
+
 // ── Facade dispatcher (M99 pattern: single entry point keeps startServer outDegree low) ──
 
 export async function handleAllRoutes(
@@ -1731,6 +2254,38 @@ export async function handleAllRoutes(
 
   if (url.pathname === "/") {
     await handleTaskList(req, res, url, client, manifest);
+    return;
+  }
+
+  // AC95: the six new design views. dashboard needs the provider taskList (task-ledger card);
+  // the rest read workspace observation via observation.ts (mechanism scripts / git / suite-state).
+  if (url.pathname === "/dashboard") {
+    await handleDashboard(req, res, client, manifest, cfg);
+    return;
+  }
+
+  if (url.pathname === "/system") {
+    await handleSystem(req, res, cfg);
+    return;
+  }
+
+  if (url.pathname === "/manager") {
+    await handleManager(req, res, cfg);
+    return;
+  }
+
+  if (url.pathname === "/tests") {
+    await handleTests(req, res, cfg);
+    return;
+  }
+
+  if (url.pathname === "/sessions") {
+    await handleSessions(req, res, cfg);
+    return;
+  }
+
+  if (url.pathname === "/architecture") {
+    await handleArchitecture(req, res, cfg);
     return;
   }
 

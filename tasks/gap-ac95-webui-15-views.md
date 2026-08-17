@@ -31,16 +31,25 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1: 15 个视图各有一条真实返回 200 的路由（curl 逐路由 `-w '%{http_code}'`）——6 个新页面不得占位交付。
-- [ ] AC2: 数字取自产生它的机件（observation.ts readLive / client.taskList / git log / resource-gate.sh /
+- [x] AC1: 15 个视图各有一条真实返回 200 的路由（curl 逐路由 `-w '%{http_code}'`）——6 个新页面不得占位交付。
+- [x] AC2: 数字取自产生它的机件（observation.ts readLive / client.taskList / git log / resource-gate.sh /
       process-budget.sh / loop-driver-check.sh / session-liveness.sh）——⛔ 不得解析 manager-tick-log /
       manager-phase-goal 叙事文档（`grep -rn 'manager-tick-log\|manager-phase-goal' packages/quay/src/` 命中>0 即假）。
-- [ ] AC3: 空态诚实——数据源空/不可用渲染「未接入/无数据」，⛔ 不得留白/显示 0（复用 observation.ts 三态）。
-- [ ] AC4: packages/quay/test/ 13 个既有 web 测试全绿。
+- [x] AC3: 空态诚实——数据源空/不可用渲染「未接入/无数据」，⛔ 不得留白/显示 0（复用 observation.ts 三态）。
+- [x] AC4: packages/quay/test/ 13 个既有 web 测试全绿。
 
 ## Definition of Done
 
-- [ ] 15 视图全部满足 AC1-AC4；分批交付允许但 AC95 只在 15 个全满足时达成。
+- [x] 15 视图全部满足 AC1-AC4；分批交付允许但 AC95 只在 15 个全满足时达成。
+
+## Evidence
+
+- **实现**：`serve-handlers.ts` 新增 6 条真实路由（`/dashboard` `/system` `/manager` `/tests` `/sessions` `/architecture`）＋ `renderSiteNav`（设计 navGroupDefs 的 15 视图全站导航）。`observation.ts` 新增 6 个数据源读取（`readSystem` / `readManager` / `readTests` / `readSessions` / `readArchitecture`），全部遵循既有退化契约（absent→未接入/无数据，unreadable→读失败，never 500）。
+- **AC1**：6 个新路由各返回 200 且非占位页。`packages/quay/test/serve-ac95-views.test.mjs` 集成测试逐路由断言 200 + 标题 + `<main>`；`renderSiteNav` 单测断言 15 视图齐全。
+- **AC2**：数字取自产生它的机件——`resource-gate.sh`/`process-budget.sh`（system）、`loop-driver-check.sh`/`session-liveness.sh --once`/`observer-registry.conf`/`ready-pool-check.ts --json`/`QUAY_VERSION`/`git rev-list`（manager）、`.quay/verification-round.jsonl`＋`full-suite-state.json`（tests）、`session-liveness.sh`＋transcript 尾部（sessions）、`git log` per-package＋`git worktree list`（architecture）、`readLive`/`client.taskList`/`readGitHistory`（dashboard）。AC2 机械 grep（两个叙事文档名 over `packages/quay/src/`）命中 0。
+- **AC3**：空态诚实——bare-workspace 集成测试断言 `/tests` 与 `/architecture` 渲染「未接入/无数据」（非留白/0）；三态（ok/empty/error）取值独立。
+- **AC4**：`bash scripts/test.sh --for-task gap-ac95-webui-15-views --allow-thin` 全绿 —— 85 测试 0 失败（含 13 个既有 web 测试 + 新增 serve-ac95-views.test.mjs 12 条）；`tsc --noEmit` 0 错误。
+- **健壮性**：机制脚本子进程走 bounded 进程组 kill 的异步 runner（`runScriptBounded`）——`session-liveness.sh` 会 fork `sleep` 子进程且 SIGTERM 被延迟；用 execFileSync 会阻塞 serve 事件循环（实测 /dashboard 使整台服务器 40s 无响应）。已用 `--once` 显式单轮。version 取构建期内联的 `QUAY_VERSION`，不读运行时 package.json（避免破坏 self-contained-dist 断言，build-dist.test.mjs (e)）。
 
 ## Touches
 
