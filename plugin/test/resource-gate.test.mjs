@@ -930,3 +930,76 @@ test("AC3 — negative control: the worktree load is OBSERVABLE via the gate eve
   assert.match(r.stdout, /worktree_node_tests=12\s+caller_scope=main/, "the worktree signal is readable without any state file");
   assert.doesNotMatch(r.stdout, /full-suite-state/, "the gate itself needs no state file to report the worktree load");
 });
+
+// ── AC99 (gap-ac99-webui-machine-readable-json): the --json machine-readable interface ─────────────
+// Every System/Manager view field traces to a mechanism emitting a stable JSON document. These tests
+// read the PRODUCTION carrier — the real script's --json stdout — not a fixture (硬规则④推论三:
+// 关掉 fixture/注入 seam 后判据仍能通过才算测量；fixture 只用于驱动确定性读数，判据读的是真输出).
+
+const PROCESS_BUDGET = path.join(REPO_ROOT, "plugin", "scripts", "process-budget.sh");
+
+test("AC99 — resource-gate.sh --json emits ONE valid JSON document carrying verdict + nproc-derived load_threshold (AC3)", () => {
+  const env = {
+    ...process.env,
+    RESOURCE_GATE_TEST_CPU_AVG10: "30",
+    RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000",
+    RESOURCE_GATE_TEST_LOAD_OVERRIDE: "3",
+    RESOURCE_GATE_TEST_NPROC: "4",
+  };
+  const res = spawnSync("bash", [GATE, "--json"], { cwd: REPO_ROOT, encoding: "utf8", env });
+  assert.equal(res.status, 0, `report mode --json exits 0; got ${res.status}: ${res.stderr}`);
+  const out = res.stdout.trim();
+  const nl = out.indexOf("\n");
+  const first = nl === -1 ? out : out.slice(0, nl);
+  let j;
+  assert.doesNotThrow(() => { j = JSON.parse(first); }, "stdout's first line must be one JSON document");
+  assert.equal(j.verdict, "GO");
+  // AC3 — load_threshold is nproc × load_over_factor computed INSIDE the mechanism (nproc=4 ⇒ 8),
+  // never a host-derived literal the UI would have to hardcode.
+  assert.equal(j.load_threshold, 8);
+  assert.equal(j.load_over_factor, 2);
+  assert.equal(j.nproc, 4);
+  assert.equal(j.cpu_stall_avg10, 30);
+  assert.equal(j.loadavg, 3);
+  assert.equal(typeof j.reason, "string");
+  assert.match(j.reason, /^=> GO/);
+});
+
+test("AC99 — resource-gate.sh --json carries the WAIT verdict + reason for a full-suite overload window", () => {
+  const env = {
+    ...process.env,
+    RESOURCE_GATE_TEST_CPU_AVG10: "30",
+    RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000",
+    RESOURCE_GATE_TEST_LOAD_OVERRIDE: "12",
+    RESOURCE_GATE_TEST_NPROC: "4",
+  };
+  const res = spawnSync("bash", [GATE, "--for", "full-suite", "--json"], { cwd: REPO_ROOT, encoding: "utf8", env });
+  assert.equal(res.status, 1, "full-suite --json must keep the WAIT exit code (1)");
+  const j = JSON.parse(res.stdout.trim());
+  assert.equal(j.verdict, "WAIT");
+  assert.equal(j.load_wait, 1);
+  assert.equal(j.load_threshold, 8);
+  assert.match(j.reason, /过载窗口/);
+});
+
+test("AC99 — process-budget.sh --json emits ONE valid JSON document carrying the budget numbers", () => {
+  const env = {
+    ...process.env,
+    RESOURCE_GATE_TEST_NPROC: "4",
+    RESOURCE_GATE_TEST_NODE_PROCS: "2",
+  };
+  const res = spawnSync("bash", [PROCESS_BUDGET, "--json"], { cwd: REPO_ROOT, encoding: "utf8", env });
+  assert.equal(res.status, 0, `process-budget --json exits 0; got ${res.status}: ${res.stderr}`);
+  const j = JSON.parse(res.stdout.trim());
+  assert.equal(j.total_budget, 4);
+  assert.equal(j.in_use, 2);
+  assert.equal(j.available, 2);
+  assert.equal(j.verdict, "GO");
+});
+
+test("AC99 — no --json ⇒ report text output is byte-identical (cap-from-gate back-compat)", () => {
+  const r = runGate({ RESOURCE_GATE_TEST_CPU_AVG10: "30", RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000" });
+  assert.match(r.stdout, /cpu_stall\(some avg10\)=30\.00  \[limit 60\]   ok/, "text cpu_stall line unchanged");
+  assert.match(r.stdout, /=> GO/, "text verdict line unchanged");
+  assert.doesNotMatch(r.stdout, /^\s*\{/m, "text mode must not emit a JSON object on its own");
+});

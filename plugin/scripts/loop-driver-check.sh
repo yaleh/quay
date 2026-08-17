@@ -35,6 +35,11 @@
 #   bash plugin/scripts/loop-driver-check.sh [<root>]         # <root> 缺省为 $(pwd)
 #   bash plugin/scripts/loop-driver-check.sh --check [<root>] # --check = 显式第二层（可观测）
 #                                                             # 模式；判据与无 --check 时相同
+#   bash plugin/scripts/loop-driver-check.sh --json [<root>]  # AC99 — ONE JSON document on stdout:
+#                                                             #   { verdict, exit_code, detail,
+#                                                             #     driver_count, mechanism,
+#                                                             #     last_alive_min, liveness_min }
+#                                                             # 退出码不变；文本输出在无 --json 时不变。
 # ── 统一 --help（gap-scripts-sprawl：用法在前、退出 0、无业务副作用）────────────────────
 if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
   _gap_help_lib="$(dirname "${BASH_SOURCE[0]}")/gate-script-lib.sh"
@@ -43,11 +48,15 @@ if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
 fi
 set -uo pipefail
 
+JSON=0
 ROOT="$(pwd)"
-case "${1:-}" in
-  --check) ROOT="${2:-$(pwd)}" ;;
-  *) ROOT="${1:-$(pwd)}" ;;
-esac
+for _arg in "$@"; do
+  case "$_arg" in
+    --json) JSON=1 ;;
+    --check) : ;;  # explicit second-layer (observable) mode; criterion identical to positional form
+    *) ROOT="$_arg" ;;
+  esac
+done
 REG="$ROOT/.quay/loop-driver.jsonl"
 # 可观测 last-alive 窗口（分钟）：驱动每 20 分钟 tick 一次，3× 间隔留余量。测试可经环境覆盖。
 LIVENESS_MIN="${LOOP_DRIVER_LIVENESS_MIN:-60}"
@@ -88,9 +97,9 @@ NOW="$(date +%s)"
 REG_MTIME=0
 [ -f "$REG" ] && REG_MTIME="$(stat -c %Y "$REG" 2>/dev/null || echo 0)"
 
-python3 - "$REG" "$HB_MAX" "$REG_MTIME" "$NOW" "$LIVENESS_MIN" <<'PYEOF'
+python3 - "$REG" "$HB_MAX" "$REG_MTIME" "$NOW" "$LIVENESS_MIN" "$JSON" <<'PYEOF'
 import json, os, sys
-reg, hb_max, reg_mtime, now, liveness_min = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4]), int(sys.argv[5])
+reg, hb_max, reg_mtime, now, liveness_min, want_json = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4]), int(sys.argv[5]), sys.argv[6] == "1"
 liveness_secs = liveness_min * 60
 
 drivers = []
@@ -111,17 +120,32 @@ if os.path.isfile(reg):
         if isinstance(d, dict) and "mechanism" in d:
             drivers.append(d)
 n = len(drivers)
+
+# AC99 — one emit point for BOTH transports: the text line (verbatim pre-AC99 format) and the
+# structured JSON document. exit_code is identical in both modes (report consumers rely on it).
+def emit(verdict, exit_code, detail, driver_count=None, mechanism=None, age_min=None):
+    if want_json:
+        print(json.dumps({
+            "verdict": verdict,
+            "exit_code": exit_code,
+            "detail": detail,
+            "driver_count": driver_count,
+            "mechanism": mechanism,
+            "last_alive_min": age_min,
+            "liveness_min": liveness_min,
+        }, ensure_ascii=False))
+    else:
+        print(detail)
+    sys.exit(exit_code)
+
 if n == 0:
-    print("loop-driver: STALLED (0) — no loop driver registered; the loop will never tick")
-    sys.exit(3)
+    emit("STALLED", 3, "loop-driver: STALLED (0) — no loop driver registered; the loop will never tick", driver_count=0, mechanism=None, age_min=None)
 if n >= 2:
-    print(f"loop-driver: DOUBLE-TRIGGER ({n}) — {n} loop drivers registered; a literal reader double-installed")
-    sys.exit(4)
+    emit("DOUBLE-TRIGGER", 4, f"loop-driver: DOUBLE-TRIGGER ({n}) — {n} loop drivers registered; a literal reader double-installed", driver_count=n, mechanism=None, age_min=None)
 # n == 1
 mech = drivers[0].get("mechanism")
 if mech != "cron":
-    print(f"loop-driver: BANNED-MECHANISM (1) — the only registered driver is '{mech}', not 'cron' (the single sanctioned driver)")
-    sys.exit(5)
+    emit("BANNED-MECHANISM", 5, f"loop-driver: BANNED-MECHANISM (1) — the only registered driver is '{mech}', not 'cron' (the single sanctioned driver)", driver_count=1, mechanism=mech, age_min=None)
 
 # 第二层可观测判据（AC3）：注册表恰一行 cron。驱动活不活看可观测 last-alive 证据。
 #   last_alive = max(可观测心跳, 注册表 mtime)。注册表 mtime = 最近一次安装时刻——
@@ -132,8 +156,6 @@ age_secs = now - last_alive if last_alive else liveness_secs + 1
 age_min = max(0, age_secs // 60)
 fresh = bool(last_alive) and age_secs <= liveness_secs
 if fresh:
-    print(f"loop-driver: LIVE (1) — exactly one loop driver (cron {drivers[0].get('interval','?')}); observable activity {age_min}min old (window {liveness_min}min)")
-    sys.exit(0)
-print(f"loop-driver: DEAD (1) — registered cron has no fresh observable activity (last observable activity {age_min}min old, window {liveness_min}min); the driver died with its session")
-sys.exit(6)
+    emit("LIVE", 0, f"loop-driver: LIVE (1) — exactly one loop driver (cron {drivers[0].get('interval','?')}); observable activity {age_min}min old (window {liveness_min}min)", driver_count=1, mechanism="cron", age_min=age_min)
+emit("DEAD", 6, f"loop-driver: DEAD (1) — registered cron has no fresh observable activity (last observable activity {age_min}min old, window {liveness_min}min); the driver died with its session", driver_count=1, mechanism="cron", age_min=age_min)
 PYEOF
