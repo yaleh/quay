@@ -1,7 +1,7 @@
 ---
 id: gap-webui-root-should-show-dashboard
 title: WebUI `/` 应显示 dashboard，实际显示 task 列表（AC95 落地时 `/` 原样保留 tasks 路由，未接到新 dashboard）
-status: todo
+status: ready
 labels:
   - gap
   - webui

@@ -1,7 +1,7 @@
 ---
 id: gap-webui-manager-page-session-targets
 title: WebUI /manager「三层状态」只显示一层——readManager 的 session-liveness --once 未传 env override，源的是单目标 SESSION_TARGETS
-status: todo
+status: ready
 labels:
   - gap
   - webui
