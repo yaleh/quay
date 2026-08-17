@@ -3,7 +3,7 @@ id: gap-cron-registry-global-path-migration
 title: cron-registry 双层收据迁移到全局 per-layer 路径（人裁定方案②）——outer/inner 各写
   ~/.quay-global/<slug>/{outer,inner}/loop-registry.txt，退出 git，消除双写碰撞/bypass
   误红/add/add/陈旧快照
-status: ready
+status: done
 labels:
   - gap
   - mechanism
