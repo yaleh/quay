@@ -1,7 +1,7 @@
 ---
 id: gap-ac98-goal-empty-state
 title: "AC98: /goal 空态必须指向正本（manager/outer-phase-goal），不得显示 'No goals.'"
-status: ready
+status: done
 labels:
   - gap
   - mechanism
