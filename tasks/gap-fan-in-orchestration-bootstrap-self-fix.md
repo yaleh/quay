@@ -31,6 +31,8 @@ depends_on: []
 
 **⊢ 自愈半边（manager 认但要求写清）**：delta-scope 落地后新逻辑对后续 fan-in 生效 ⇒ **自愈的是「delta-scope 这次的具体 bug」**；**不自愈的是「下一个改 fan-in 编排文件的任务仍然用不到自己的修复」这个结构本身**。⛔ 别让「自愈一半」被读成「问题解决了大半」。
 
+**⊢ 同族形态参考区（manager 2026-08-17 认，不另立案）**：**拆分出「推迟的后继」时用 sibling + depends_on，不用 parent-child**——parent-child 的 done-iff-children 语义与「推迟的后继」天然冲突（父不能 done ⇒ 恒在飞 ⇒ 子若 Touches 目录级自锁则恒被锁 ⇒ 死锁）。实例：gap-fan-in-delta-scope-inventory-annotate 对 delta-scope 只有 depends_on 无 parent（有意的，见其任务体「为什么是 sibling 不是 child」）。
+
 ## Acceptance Criteria
 
 - [ ] AC1: **枚举 fan-in 编排管线自身文件的完整集合**（从主检出路径调用、非 worktree 解析）——至少含 fan-in-execute.js、select-static-checks-for-touches.ts、fan-in-ff-merge.sh、per-task-suite-record.ts、full-suite-runner.ts，逐一确认调用路径来源，产出清单（文件:行 + 调用来源）。

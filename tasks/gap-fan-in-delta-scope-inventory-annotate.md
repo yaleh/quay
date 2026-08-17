@@ -5,7 +5,7 @@ status: todo
 labels:
   - gap
   - mechanism
-parent: gap-fan-in-delta-scope-doc-only-skip
+parent: null
 children: []
 extra:
   schema: execution
@@ -24,6 +24,8 @@ depends_on:
 **为什么拆出**：本任务写 `tasks/*.md`（目录级）⇒ 与任何在飞任务 self-touch 冲突 ⇒ 若并入父任务会使父任务永久不可派（见父任务 Touches 拆分说明）。拆出后父任务可派，本任务等真正 0 在飞窗口。
 
 **⛔ 前置**：本任务 `depends_on` 父任务（先有 AC1 确数清单，才有存量标注对象）。
+
+**⚠️ 为什么是 sibling 不是 child（manager 2026-08-17 裁定，⛔ 别把它加回 parent）**：本任务对 `gap-fan-in-delta-scope-doc-only-skip` **只有 `depends_on`（排序），没有 parent-child（完成依赖）**。原因是 parent-child 的 done-iff-children 语义与本任务「推迟的后继」身份冲突：本任务写目录级 `tasks/*.md`（global lock），只能在 0 在飞窗口派——若做 child，父任务不能 done ⇒ 恒在飞 ⇒ 本任务恒被锁，死锁。**拆分出「推迟的后继」时用 sibling + depends_on，不用 parent-child**（形态已归入 gap-fan-in-orchestration-bootstrap-self-fix 参考区）。若哪天看到本任务 parent=null 以为漏挂了 parent——这是有意的，别加回去。
 
 ## Acceptance Criteria
 
