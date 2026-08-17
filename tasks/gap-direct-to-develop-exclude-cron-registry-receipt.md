@@ -64,6 +64,8 @@ extra:
 
 **验证**：`node --test plugin/test/direct-to-develop-bypass-check.test.mjs` → 30/30；`node --test plugin/test/outer-cron-registry.test.mjs` → 25/25；`node --test plugin/test/manager-layer-skill.test.mjs` → 10/10；`bash scripts/test.sh --for-task <本任务> --allow-thin` → EXIT 0。
 
+**实现（C，landing 依赖机制）**：pre-verified-suite——`.claude/workflows/fan-in-execute.js` step 4 加 caller-pre-verified-suite（capture 含 `suite_head` 钉死待 land 的精确 worktree HEAD + `suite_exit=0` 判定绿；capture 匹配当前 HEAD ⇒ 跳过全量重跑，step 4.5 照常入账；scoped 门与 doc 检查每轮仍跑）。`.claude` 侧由 ec434eb8 直提 develop（design-internal，bypass-check 允许）；本 fan-in 同步 mirror `plugin/workflows/fan-in-execute.js`（workflows-dual-copy-drift-check PASS）。成因：本机全量 suite ~14min（serial 6.9min + main 5.6min + static 40s）> workflow subagent 回合上限（10min 前台 Bash cap + ~13min harness 强制收敛，wf_c6f4d0ef-c6a 与 wf_1072dc43-893 两次实测），workflow 无法在单回合内完成全量验证；调用方（inner）先在回合外跑完整 suite 留 capture，workflow 复用。
+
 ## Touches
 
 - plugin/scripts/direct-to-develop-bypass-check.ts（DESIGN_INTERNAL_RE 加该 json 路径）
@@ -71,4 +73,5 @@ extra:
 - plugin/test/outer-cron-registry.test.mjs（注册表断言处旧 cron id → 新 id）
 - plugin/test/manager-layer-skill.test.mjs（AC4 launcher pin）
 - plugin/test/manager-layer-shipping.test.mjs（AC4 launcher pin）
+- plugin/workflows/fan-in-execute.js（mirror sync——pre-verified-suite 模式；.claude 侧由 ec434eb8 直提 develop，本 fan-in 同步 mirror 保 dual-copy 一致）
 - tasks/gap-direct-to-develop-exclude-cron-registry-receipt.md（自身）
