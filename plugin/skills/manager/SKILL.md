@@ -407,3 +407,48 @@ SPEC-*.md 的索引**唯一正本**见上文 "Methodology sources" bullet list�
 | 手写 `git rev-list --left-right` 判断落后/领先 | `sync-lag-check.sh` |
 | 裸 `tmux send-keys` 三步 | `send-keys-reliable.sh` |
 | 用 `send-keys-reliable.sh` 而非窄接口 | `supervisor-deliver.sh` |
+| 肉眼判断截图像不像设计稿 / 有没有硬编码色值 | `orchestration/manager-visual-check.py`（见 §10——写它之前已跑过本表要求的 `capability-catalog.sh` 检查，命中 0） |
+
+---
+
+## 10. 视觉核查工具 `orchestration/manager-visual-check.py`（§9 边界的结构性例外，人 2026-08-17 指示建）
+
+**为什么这不是 §9「manager 手里出现 `.sh`/`.ts` 即越界」的又一次违规**：本工具必须调用操作者
+**个人的**阿里云 Token Plan 订阅（`~/.local/etc/aliyun-api-key`，只存在于本机，绑定个人付费额度）。
+产品代码（`packages/quay/src/` 或接进 `scripts/test.sh` 的 `plugin/scripts/`）必须对任何跑 quay 的人
+都能用，**不能依赖某一个人的私人付费 key**——这个能力在结构上不可能被 inner/outer 收进产品交付面。
+**⇒ 与 §4「唯一例外：没有别的主人的机件」同一逻辑，只是这次"没有别的主人"的原因是个人凭证依赖，
+不是跨项目共享。** 写入前已按 §9 Step-0 跑过 `capability-catalog.sh | grep -i visual|screenshot|...`，
+命中 0——确认是真空白才写。
+
+**⛔ 若这个能力有一天要变成产品级机械化视觉回归检查**（例如接进某条 AC 的判据、或 `scripts/test.sh`），
+**必须走正常路径**：manager 把需求转给 outer，由 inner 实现、走测试与 anti-drift，
+用一把不依赖个人订阅的 key（项目自己的服务账号）——**不是把这份个人工具原样搬过去当产品代码**。
+
+**用法**：
+```
+python3 orchestration/manager-visual-check.py <截图> [参照图] [--question "..."] [--model qwen3.6-flash]
+```
+单图 = 视觉审计（配色/布局/是否有刺眼硬编码色值）；双图 = 参照 vs 候选的差异比对。
+`stdout` 是模型给出的 JSON（自动剥掉 ` ```json ` 围栏，可直接 `json.load`）；`stderr` 是 token 用量
+（成本可见，同硬规则「别用总 token 判贵贱」）。退出码：0=调用成功（无论视觉判断内容），1=传输/鉴权/
+解析失败（fail loud，⛔ 不返回一个看起来合格的空值）。
+
+**key 来源（2026-08-17 通用化，人指示——⛔ 不写死单一路径）**，按优先级先到先得：
+```
+1. --api-key <值>          （最高优先；⚠️ 会留在 shell 历史/进程列表，仅建议本地临时用）
+2. $ALIYUN_API_KEY          （环境变量直传值）
+3. --key-file <路径>        （显式指定文件——每行一个 key，或兼容旧 export ALIYUN_API_KEY=... 格式）
+4. $ALIYUN_API_KEY_FILE     （环境变量指向一个文件）
+5. ~/.local/etc/aliyun-api-key（默认兜底，本工具最初实现时的写死路径，保留向后兼容）
+```
+五条路径均已实测跑通（含默认兜底回归 + 断绝所有来源触发 `exit 1` 的 fail-loud 校验）。
+
+**背后的服务**：阿里云百炼 Token Plan Personal（`https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1`，
+OpenAI 兼容格式），当前用 `qwen3.6-flash`（实测含视觉理解，2026-08-17 核实；`qwen3.7-flash` 不存在，
+`⛔` 别猜成存在——docs 页面列的是 `qwen3.6-flash`）。
+
+**持续维护承诺**：manager 负责这个工具，不是写完就扔。若阿里云的 endpoint / 模型清单 / key 格式变化
+（Token Plan 到期后重新订阅会换发新 key，见其官方文档），下次使用前先用 `curl .../v1/models` 核实一遍
+——不要凭记忆里硬编码的模型名继续用。这正是当晚建它之前做的三次验证（错端点→找到正确端点→端到端
+真调用）的同一套纪律，⛔ 别把"建过一次"当成"永远有效"。
