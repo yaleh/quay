@@ -208,6 +208,12 @@ export const RULED_HISTORICAL_COMMITS: { sha: string; reason: string }[] = [
       "ruling-add 提交自身豁免——8dfd2967 把 f70507b6 加入 ruled 表，本身是 inner 直接提交（改 checker）⇒ bypass 自指死锁（给 8dfd2967 加 ruled = 又一个直接提交）。" +
       "解：8dfd2967 入表经 fan-in 正规 land（lock-window 豁免本任务提交）。inner 直提 develop 是错的（应走 fan-in），教训已记；outer 2026-08-16 19:0xZ 裁定 ruled one-off（先例 f70507b6）。",
   },
+  {
+    sha: "cbbbb766",
+    reason:
+      "四条在飞任务被同一个 closure 缺陷挡住，修复本身很小（一行标记），走完整 fan-in 要再等一轮全量 suite（500-700s）才能解锁，止损优先于流程完整性。" +
+      "教训：manager 直提 develop 同样是不对的行为模式，应当走 fan-in——这次是应急例外，不该成为常态。",
+  },
 ];
 
 /** 一条 commit sha 是否命中 ruled 豁免表（前缀匹配——git 可能给全量或缩写 sha）。PURE。 */

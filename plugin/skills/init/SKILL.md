@@ -128,6 +128,7 @@ documented reference from a genuine missing file:
 | `orchestration/manager-loop-tick.md` | quay's manager operational tick doc (the shipped manager skill's §1.5/§1.6 rules are extracted from it; its consumer landing is the same `orchestration/` path the arm-loop pointer resolves to — the pack's factory template is a runtime detail of `manager-arm-loop.sh`, not a shipped-doc reference) — not a generic loop deliverable |
 | `orchestration/manager-tick-log.md` | quay's manager tick log — gitignored runtime telemetry the manager appends each tick (see `gap-manager-tick-mechanical-checks...`); referenced by the shipped manager-loop-tick template but NOT a loop deliverable — declared so referenced ⊆ landed holds |
 | `orchestration/manager-anchor-check.py` | quay's own manager anchor-check tool (referenced by the opt-in manager exec core, `loop/manager-tick-core.md`) — quay-specific, not a generic loop deliverable — declared so referenced ⊆ landed holds |
+| `orchestration/manager-visual-check.py` | manager's own visual-conformance tool (referenced by the shipped manager skill §10, 2026-08-17) — personal-credential-dependent (operator's Aliyun Token Plan key), structurally cannot ship as product code; quay-specific, not a generic loop deliverable — declared so referenced ⊆ landed holds. **Note (2026-08-17): the `orchestration/manager-` glob below did NOT cover this reference in practice** (`quay-init-laydown-closure.test.mjs` AC3 failed until this exact-name marker was added) — the checker's glob prefix-matching has a gap; this exact entry is the working fix, not a duplicate. |
 | `orchestration/manager-` (glob) | the opt-in manager exec core's `orchestration/manager-*` glob (its own quay-local manager-layer files) — quay-specific development-process docs, not loop deliverables — declared so referenced ⊆ landed holds |
 | `orchestration/orchestrator-` (glob) | the outer exec core's `orchestration/orchestrator-*` glob (its own quay-local outer-layer files) — quay-specific development-process docs, not loop deliverables — declared so referenced ⊆ landed holds |
 | `plugin/loop/manager-` (glob) | the opt-in manager exec core's `plugin/loop/manager-*` glob (its own quay-local manager-layer files, pointer-only) — quay-specific, not loop deliverables — declared so referenced ⊆ landed holds |
@@ -186,6 +187,7 @@ documented reference from a genuine missing file:
 <!-- reference-doc: orchestration/SPEC-task-status-flow-target-vs-actual-2026-08-13.md -->
 <!-- reference-doc: orchestration/SPEC-per-task-suite-verification-2026-08-13.md -->
 <!-- reference-doc: orchestration/manager-anchor-check.py -->
+<!-- reference-doc: orchestration/manager-visual-check.py -->
 <!-- reference-doc: orchestration/manager- -->
 <!-- reference-doc: orchestration/manager-tick-core.md -->
 <!-- reference-doc: orchestration/SPEC-tick-read-path-slimming-2026-08-14.md -->

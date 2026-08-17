@@ -77,8 +77,9 @@ test("AC3: renderGitHistorySvg maps x monotonically to commit landing time (not 
   assert.ok(svg.includes("</svg>"), "SVG is well-formed (closes </svg>)");
 
   // Lane circles (ignore the legend circle at a fixed x) — the three commits' cx must increase
-  // strictly with time, pinning the x-axis semantic = commit landing time.
-  const cxs = [...svg.matchAll(/<circle cx="([0-9.]+)"/g)].map((m) => Number(m[1]));
+  // strictly with time, pinning the x-axis semantic = commit landing time. (The circles carry the
+  // AC102 token class attribute before cx, so match any <circle> tag.)
+  const cxs = [...svg.matchAll(/<circle[^>]*cx="([0-9.]+)"/g)].map((m) => Number(m[1]));
   assert.ok(cxs.length >= 4, `legend + 3 commit points present (got ${cxs.length})`);
   const lane = cxs.slice(1); // drop the legend marker
   assert.equal(lane.length, 3);
@@ -111,8 +112,11 @@ test("AC3: merge commits are marked distinctly (orange diamond), regular commits
     ],
   };
   const svg = renderGitHistorySvg(history);
-  assert.ok(svg.includes('fill="#2a78d6"'), "regular commit uses the validated blue");
-  assert.ok(svg.includes('fill="#eb6834"'), "merge commit uses the validated orange");
+  // AC102: the chart's marks are token-derived CSS classes (git-svg-*), NOT hardcoded hex —
+  // the commit/merge marks carry the token classes and the svg must contain zero color literals.
+  assert.ok(svg.includes('class="git-svg-commit"'), "regular commit uses the token commit class");
+  assert.ok(svg.includes('class="git-svg-merge"'), "merge commit uses the token merge class");
+  assert.ok(!/#[0-9a-fA-F]{6}/.test(svg), "SVG carries no hardcoded hex (AC102②)");
   assert.ok(svg.includes('rotate(45'), "merge commit is a diamond (rotated square)");
   assert.ok(svg.includes("合并提交（fan-in 落地）"), "legend labels the merge kind");
 });

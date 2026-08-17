@@ -222,8 +222,8 @@ export const REGISTRY: RedReadingEntry[] = [
     id: "a13_inner_heartbeat",
     kind: "a-reading",
     behavior:
-      "A13 inner 兜底心跳 — `inner-wakeup-heartbeat-check.ts` 读 `.quay/inner-wakeup-heartbeat.json`(ts/delaySeconds/reason) 判新鲜",
-    redReading: "`ts` 距今 >5400s 或 exit 1 / 文件缺失（从未写过）/ malformed ⇒ 报「inner 兜底心跳断」并升级（fail-closed）",
+      "A13 inner 兜底心跳 — `inner-wakeup-heartbeat-check.ts` 读 `.quay/inner-wakeup-heartbeat.json`(ts/delaySeconds/reason) 判新鲜，取 max(主心跳 ts, refusals 最新 ts)（A13 修复：拒写证活跃）",
+    redReading: "max(主心跳 ts, refusals 最新 ts) 距今 >5400s 或 exit 1 / 文件缺失（从未写过）/ malformed ⇒ 报「inner 兜底心跳断」并升级（fail-closed）",
     verify: (root) => {
       const t = tickCore(root);
       const ok = has(t, "inner-wakeup-heartbeat-check");
@@ -456,7 +456,7 @@ const A_AUDIT: { id: string; behavior: string; redReading: string | null }[] = [
   { id: "A10", behavior: "closure-lag-check.sh（退出非 0 ⇒ 报 WARN）", redReading: "退出非 0 ⇒ 报 WARN 进 tick-log" },
   { id: "A11", behavior: "读 .quay/full-suite-state.json 的 state/reason/durationMs", redReading: "red ⇒ 停派；缺文件 ⇒ true；aborted 不触发停派" },
   { id: "A12", behavior: "独立核实内层至少一项声称（inner-forensics / self-report-vocab-audit）", redReading: "self-report vocab 连续 3 轮无 batch 自述 = 收敛" },
-  { id: "A13", behavior: "inner 兜底心跳（inner-wakeup-heartbeat-check）", redReading: "ts >5400s 或 exit 1/缺失 ⇒ 报断（fail-closed）" },
+  { id: "A13", behavior: "inner 兜底心跳（inner-wakeup-heartbeat-check，取 max(主心跳, refusals)）", redReading: "max(主心跳 ts, refusals 最新 ts) >5400s 或 exit 1/缺失 ⇒ 报断（fail-closed）" },
   { id: "A14", behavior: "账本·closure-pass 是否被调用（meta-cc query tool_name=closure-lag-check）", redReading: "心跳缺失 >3 tick ⇒ 写三选一" },
   { id: "A15", behavior: "suite-health（workflow+subagent 双侧+执行体）——每 tick 写 suite-health-last-run.json + 裁定5 执行保障", redReading: "suite-health-last-run.json mtime 陈旧 / ruling5_status 缺失 ⇒ 红" },
   { id: "A16", behavior: "上层观察下层失能（宣称 vs 观测矛盾 ⇒ 升级）", redReading: "宣称派发但 in-flight 恒 0 / 宣称合并但 diverge 不降 / 宣称修红但轮次不转绿 ⇒ 报 inner 失能" },

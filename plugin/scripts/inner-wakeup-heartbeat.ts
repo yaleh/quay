@@ -146,12 +146,29 @@ export function writeHeartbeat(root, heartbeat) {
  *  SIDE-CARRIER ${REFUSAL_FILE} (NOT the heartbeat jsonl — which must stay parseable-as-a-heartbeat).
  *  ⊢ negative control: before this fix the `written:false` row count is 0; a refused round now
  *  immediately produces one. PURE-ish (file side effect), exported for tests. Returns the refusal file
- *  path. */
-export function writeRefusal(root, refuseReason, extra = {}) {
+ *  path.
+ *  A13 (gap-a13-heartbeat-refusal-write-invisible) (乙): the refusal is ALSO mirrored onto the LEGACY
+ *  .json snapshot (${LEGACY_HEARTBEAT_FILE}) so the main heartbeat product reflects "active but refused"
+ *  instead of silence — the jsonl stays append-only for SUCCESSFUL writes. When a full heartbeat object
+ *  is passed it is merged in (its structured fields preserved; the refusal's fresh ts / written:false /
+ *  refuse_reason win) so legacy readers (e.g. the semantic-observer judge, whose default heartbeat path
+ *  is <root>/.quay/<layer>-wakeup-heartbeat.json) still see a complete record and tolerate the new
+ *  fields. */
+export function writeRefusal(root, refuseReason, extra = {}, heartbeat = null) {
   const quayDir = path.join(root || ".", ".quay");
   fs.mkdirSync(quayDir, { recursive: true });
+  const ts = Math.floor(Date.now() / 1000);
+  const refusal = { written: false, ts, refuse_reason: refuseReason, ...extra };
   const file = path.join(quayDir, REFUSAL_FILE);
-  fs.appendFileSync(file, `${JSON.stringify({ written: false, ts: Math.floor(Date.now() / 1000), refuse_reason: refuseReason, ...extra })}\n`, "utf8");
+  fs.appendFileSync(file, `${JSON.stringify(refusal)}\n`, "utf8");
+  // A13 (乙): mirror to the legacy .json snapshot (atomic temp+rename, same as writeHeartbeat).
+  const legacyPath = path.join(quayDir, LEGACY_HEARTBEAT_FILE);
+  const snapshot = heartbeat && typeof heartbeat === "object"
+    ? { ...heartbeat, ...refusal }
+    : refusal;
+  const tmpPath = `${legacyPath}.tmp-${process.pid}`;
+  fs.writeFileSync(tmpPath, JSON.stringify(snapshot, null, 2), "utf8");
+  fs.renameSync(tmpPath, legacyPath);
   return file;
 }
 
@@ -209,7 +226,8 @@ Usage:
                                  should_refill 的窄分母）。空值 --running '' = 测得为 0（真零）；缺省 ⇒
                                  Consumer B 回退到宽 --in-flight 集（修前行为——awaiting-retry 任务占槽但无
                                  subagent）。dispatchable_disjoint（Consumer A）恒用宽 --in-flight 集。
-                                 REFUSE 时写 ${REFUSAL_FILE} 留痕（判据4）。
+                                 REFUSE 时写 ${REFUSAL_FILE} 留痕（判据4），A13（乙）并镜像到 legacy
+                                 .json（written:false + refuse_reason，jsonl 保持纯净）。
   --slots-free <n>               AC53: 空槽数（slot-refill 输出）— REQUIRED
   --dispatchable-disjoint <n>    AC53: 池内最大互不冲突子集 — REQUIRED
   --pool <n>                     AC53: 就绪池数 — REQUIRED
@@ -311,8 +329,9 @@ export function main(argv) {
   if (inFlightIds === undefined) {
     console.error(`inner-wakeup-heartbeat: REFUSED — --in-flight 必填（结束心跳的直接量判据需要本会话在飞集合），不写入（reason=end-invariant-gate-requires-in-flight）`);
     // AC53-gate 判据4: a refused round must leave a trace (被拒 ≠ 没跑) — the heartbeat jsonl records
-    // only successful writes, so the refusal is written to the side-carrier.
-    writeRefusal(root, "end-invariant-gate-requires-in-flight");
+    // only successful writes, so the refusal is written to the side-carrier; A13 (乙) also mirrors it
+    // onto the legacy .json so the main heartbeat product shows "active but refused".
+    writeRefusal(root, "end-invariant-gate-requires-in-flight", {}, heartbeat);
     return 1;
   }
   // The direct re-run uses the SAME cap the tick recorded (--effective-cap; production default the
@@ -324,7 +343,7 @@ export function main(argv) {
   const direct = runDirectSlotRefill({ root, inFlightIds, running: runningIds, cap: heartbeat.effectiveCap ?? FIXED_DISPATCH_CAP });
   if (!direct.ok) {
     console.error(`inner-wakeup-heartbeat: REFUSED — slot-refill 直接量重跑失败，无法验证结束不变式，不写入（reason=end-invariant-gate-unverifiable; error=${direct.error}）`);
-    writeRefusal(root, "end-invariant-gate-unverifiable", { error: direct.error });
+    writeRefusal(root, "end-invariant-gate-unverifiable", { error: direct.error }, heartbeat);
     return 1;
   }
   const directInv = judgeEndInvariant(direct.refill);
@@ -336,8 +355,9 @@ export function main(argv) {
       `no_refill_reason=${JSON.stringify(e.no_refill_reason)}）——有货可派却要结束本轮，调度层必须回派发（无合法退出路径）`,
     );
     // AC53-gate 判据4: the refusal is the deliverable — a {written:false, refuse_reason} row so the
-    // round is NOT identical to "inner didn't run the assessment" on the carrier.
-    writeRefusal(root, INVARIANT_VIOLATED_REASON, { evidence: directInv.evidence });
+    // round is NOT identical to "inner didn't run the assessment" on the carrier; A13 (乙) also
+    // mirrors it onto the legacy .json (the full heartbeat object is merged in).
+    writeRefusal(root, INVARIANT_VIOLATED_REASON, { evidence: directInv.evidence }, heartbeat);
     return 1;
   }
   // The DIRECT measurement is authoritative for the record: write ITS five dispatch-state keys (not

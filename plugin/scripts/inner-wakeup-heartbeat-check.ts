@@ -332,6 +332,89 @@ export function judgeHeartbeat(nowSec, heartbeat, maxAgeSecs = DEFAULT_MAX_AGE_S
   return { alive: true, status: "alive", ageSecs, reason: "heartbeat-fresh" };
 }
 
+// ── A13 (gap-a13-heartbeat-refusal-write-invisible, 甲) — the freshness verdict reads the refusals ────
+// Defect: when the writer's AC53 END-INVARIANT gate REFUSES a write (dispatchable work waits), the
+// refusal is recorded ONLY in the side-carrier ${REFUSAL_FILE} — the main heartbeat jsonl/.json stays
+// pure (append-only for SUCCESSFUL writes). The judge read ONLY the main product ⇒ a busy inner that
+// kept being refused (refusal = "wanted to sleep but the gate pushed it back to dispatch" = liveness)
+// showed a stale main heartbeat ⇒ A13 reported DEAD. Fix (甲): the freshness verdict takes
+// max(主 json ts, refusals 最新 ts). (乙) on the writer side mirrors the refusal onto the legacy .json.
+
+/** Parse a refusals jsonl TEXT (one JSON record per line — {written:false, ts, refuse_reason}) and
+ *  return the LATEST valid `ts`. PURE. Malformed lines are skipped (a malformed refusal row is not a
+ *  recorded time — hard rule 6). Returns null when the text is absent or carries no valid ts row. */
+export function latestRefusalTs(text) {
+  if (text == null) return null;
+  let latest = null;
+  for (const line of String(text).split("\n")) {
+    const t = line.trim();
+    if (!t) continue;
+    try {
+      const r = JSON.parse(t);
+      if (r && typeof r === "object" && typeof r.ts === "number" && Number.isFinite(r.ts)) {
+        if (latest == null || r.ts > latest) latest = r.ts;
+      }
+    } catch {
+      // skip a malformed line — it is not a recorded time
+    }
+  }
+  return latest;
+}
+
+/** Read the refusals side-carrier under `<root>/.quay/${REFUSAL_FILE}` and return the latest refusal
+ *  ts (epoch seconds), or null when the carrier is absent or carries no valid ts row. */
+export function readLatestRefusalTs(root) {
+  const file = path.join(root || ".", ".quay", REFUSAL_FILE);
+  if (!fs.existsSync(file)) return null;
+  return latestRefusalTs(fs.readFileSync(file, "utf8"));
+}
+
+/** The effective freshness ts = max(heartbeat ts, latest refusal ts). PURE. A refusal is liveness
+ *  evidence (inner tried to END the round and the AC53 gate refused ⇒ inner was active enough to
+ *  attempt the write). Returns null when NEITHER the heartbeat nor any refusal provides a valid ts. */
+export function maxFreshnessTs(heartbeat, refusalTs) {
+  const hbTs = heartbeat && typeof heartbeat === "object" && typeof heartbeat.ts === "number" && Number.isFinite(heartbeat.ts)
+    ? heartbeat.ts
+    : null;
+  const rTs = typeof refusalTs === "number" && Number.isFinite(refusalTs) ? refusalTs : null;
+  if (hbTs == null && rTs == null) return null;
+  return Math.max(hbTs ?? -Infinity, rTs ?? -Infinity);
+}
+
+/**
+ * Judge heartbeat freshness, A13-aware (gap-a13-heartbeat-refusal-write-invisible): the effective ts
+ * is max(heartbeat ts, latest refusal ts). PURE. Same output vocabulary as judgeHeartbeat plus an added
+ * `freshnessSource` ("heartbeat" | "refusal") naming which ts kept the product fresh — a freshness
+ * proven by a refusal must be distinguishable from a real heartbeat (hard rule 3b: 读不懂 ≠ 合格,
+ * and a refusal-proven liveness is observably different from a fresh heartbeat).
+ */
+export function judgeHeartbeatWithRefusal(nowSec, heartbeat, refusalTs, maxAgeSecs = DEFAULT_MAX_AGE_SECS) {
+  if (heartbeat === MALFORMED) {
+    return { alive: false, status: "malformed", ageSecs: null, reason: "inner-wakeup-heartbeat-malformed" };
+  }
+  const ts = maxFreshnessTs(heartbeat, refusalTs);
+  if (ts == null) {
+    return heartbeat == null
+      ? { alive: false, status: "missing", ageSecs: null, reason: "inner-wakeup-heartbeat-missing" }
+      : { alive: false, status: "malformed", ageSecs: null, reason: "inner-wakeup-heartbeat-malformed" };
+  }
+  const ageSecs = Math.max(0, nowSec - ts); // future ts (clock skew) clamps to 0 = fresh
+  if (ageSecs > maxAgeSecs) {
+    return { alive: false, status: "stale", ageSecs, reason: "inner-wakeup-heartbeat-dead" };
+  }
+  const hbTs = heartbeat && typeof heartbeat === "object" && typeof heartbeat.ts === "number" && Number.isFinite(heartbeat.ts)
+    ? heartbeat.ts
+    : null;
+  const refusalIsMax = refusalTs != null && (hbTs == null || refusalTs > hbTs);
+  return {
+    alive: true,
+    status: "alive",
+    ageSecs,
+    reason: "heartbeat-fresh",
+    freshnessSource: refusalIsMax ? "refusal" : "heartbeat",
+  };
+}
+
 /** Read the heartbeat product under `<root>/.quay/` — the LAST line of the append-only jsonl (AC53
  *  AC3: every reschedule appends a line, so the latest record is the newest and history is reviewable
  *  in the file). Falls back to the legacy single-JSON snapshot when the jsonl is absent (a pre-AC53
@@ -557,8 +640,11 @@ function usage() {
 Reads <root>/.quay/${HEARTBEAT_FILE} (append-only jsonl, last line; falls back to the legacy
 <root>/.quay/${LEGACY_HEARTBEAT_FILE} snapshot) — written by inner each time it reschedules
 ScheduleWakeup via plugin/scripts/inner-wakeup-heartbeat.ts) and judges:
-  (a) freshness — age = now − ts > max-age (default ${DEFAULT_MAX_AGE_SECS}s = 3 tick periods × 1800s)
-      ⇒ "inner 兜底心跳断" + exit 1 (escalate); missing / malformed file = same dead verdict (fail-closed);
+  (a) freshness — age = now − max(heartbeat ts, latest refusals ts) > max-age (default
+      ${DEFAULT_MAX_AGE_SECS}s = 3 tick periods × 1800s) ⇒ "inner 兜底心跳断" + exit 1 (escalate);
+      a RECENT refusal (${REFUSAL_FILE} last ts) keeps the verdict ALIVE — a refused write is liveness
+      evidence (inner tried to END the round and the AC53 gate pushed it back to dispatch);
+      missing / malformed file = same dead verdict (fail-closed);
   (b) minimal field contract — a FRESH heartbeat must carry the ${REQUIRED_HEARTBEAT_FIELDS.length} structured
       keys ${REQUIRED_HEARTBEAT_FIELDS.join("/")} (Contract band heartbeat_field_count >= 7; blocked[] +
       runIds are the A3 "inner 卡住" premise). Missing key / wrong type ⇒ "心跳字段缺失" + exit 1.
@@ -645,6 +731,11 @@ export function main(argv) {
   const text = readHeartbeatText(root);
   const heartbeat = parseHeartbeat(text);
   const nowSec = Math.floor(Date.now() / 1000);
+  // A13 (gap-a13-heartbeat-refusal-write-invisible) (甲): the freshness verdict takes the max of the
+  // main heartbeat ts and the LATEST refusal ts — a recent AC53 refusal proves inner is alive (it tried
+  // to END the round and the gate pushed it back to dispatch), so a stale main heartbeat alone must not
+  // report DEAD while refusals keep landing.
+  const refusalTs = readLatestRefusalTs(root);
 
   // I1 read-product criterion (tasks/gap-inner-assessment-steps-no-product-reader): read the three
   // dispatch-evaluation freshness signals — heartbeat jsonl ts + slot-refill call record +
@@ -664,7 +755,7 @@ export function main(argv) {
         reason: ASSESSMENT_NOT_RUN_REASON,
         assessmentSteps: assessment,
       }
-    : judgeHeartbeat(nowSec, heartbeat, maxAge);
+    : judgeHeartbeatWithRefusal(nowSec, heartbeat, refusalTs, maxAge);
 
   // AC2/AC3: a FRESH heartbeat must also satisfy the minimal field contract. A fresh-but-shrunk
   // heartbeat (e.g. the 2026-08-11 05:20 3-key {ts, delaySeconds, reason}) is RED — reason prose
@@ -779,6 +870,11 @@ export function main(argv) {
       ageSecs: v.ageSecs,
       maxAgeSecs: maxAge,
       reason: v.reason,
+      // A13 (gap-a13-heartbeat-refusal-write-invisible) (甲): which ts kept the product fresh —
+      // "heartbeat" (main json/jsonl) or "refusal" (refusals side-carrier). latestRefusalTs is the
+      // newest refusal row the verdict considered (null when none exists).
+      freshnessSource: v.freshnessSource ?? null,
+      latestRefusalTs: refusalTs,
       fieldContract: fields
         ? { ok: fields.ok, required: REQUIRED_HEARTBEAT_FIELDS, fieldCount: fields.fieldCount, missing: fields.missing, wrongType: fields.wrongType }
         : null,
@@ -842,7 +938,8 @@ export function main(argv) {
   } else {
     const base = `inner-wakeup-heartbeat: ${v.verdict || (v.alive ? "ALIVE" : "DEAD")}`;
     if (v.status === "alive") {
-      console.log(`${base} — age ${v.ageSecs}s ≤ ${maxAge}s, fields ${fields.fieldCount}/${REQUIRED_HEARTBEAT_FIELDS.length} + dispatch-state ${dispatchState.ok ? "ok" : "missing"} (heartbeat fresh + contracts ok)`);
+      const src = v.freshnessSource === "refusal" ? ", freshness via recent refusal" : "";
+      console.log(`${base} — age ${v.ageSecs}s ≤ ${maxAge}s, fields ${fields.fieldCount}/${REQUIRED_HEARTBEAT_FIELDS.length} + dispatch-state ${dispatchState.ok ? "ok" : "missing"} (heartbeat fresh + contracts ok${src})`);
     } else if (v.status === "assessment-steps-stale") {
       const a = v.assessmentSteps || {};
       const part = (s) => {
