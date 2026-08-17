@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-realsuite-bypasses-verification-round-ledger
 title: 真跑 suite 的 fan-in 落地绕开 verification-round.jsonl——pre-verified 修复只补了预验证分支，真跑分支仍零入账（发生率 3+，2026-08-17 实测）
-status: ready
+status: done
 labels:
   - gap
   - defect
