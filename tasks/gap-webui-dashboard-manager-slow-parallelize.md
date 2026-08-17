@@ -1,7 +1,7 @@
 ---
 id: gap-webui-dashboard-manager-slow-parallelize
 title: WebUI dashboard/manager 页 13-14s——readSystem/readManager 串行跑机件脚本，ready-pool-check 单项 9.10s
-status: ready
+status: done
 labels:
   - gap
   - webui
