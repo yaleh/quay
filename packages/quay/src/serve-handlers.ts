@@ -53,14 +53,18 @@ export function stripHeadings(text: string | undefined | null): string {
 // <head>. No external file: inlined as a <style> block so the single-file
 // serve.ts remains self-contained (G5: no framework, no build step).
 export function pageStyles(): string {
+  // AC102: this shared base sheet is TOKEN-DERIVED — every colour comes from the Modernist token
+  // sheet (webui-modernist.css, inlined by modernistStyles()) via var(--color-*). The base sheet is
+  // ALWAYS emitted AFTER modernistStyles() so its component rules win, but carries ZERO hardcoded
+  // hex — the hex values live only in the .css asset (AC102②: grep -cE '#[0-9a-fA-F]{6}' = 0).
   return `<style>
 *, *::before, *::after { box-sizing: border-box; }
 body {
   font-family: system-ui, -apple-system, sans-serif;
   font-size: 1rem;
   line-height: 1.6;
-  color: #1a1a1a;
-  background: #f8f9fa;
+  color: var(--color-text);
+  background: var(--color-bg);
   margin: 0;
   padding: 0;
 }
@@ -69,43 +73,43 @@ main {
   margin: 0 auto;
   padding: 1.5rem 1rem;
 }
-h1 { font-size: 1.5rem; margin: 0.5rem 0 1rem; color: #111; }
-h2 { font-size: 1.2rem; margin: 1.2rem 0 0.4rem; color: #222; }
-h3 { font-size: 1rem; margin: 1rem 0 0.3rem; color: #333; }
-a { color: #0066cc; text-decoration: none; }
+h1 { font-size: 1.5rem; margin: 0.5rem 0 1rem; color: var(--color-text); }
+h2 { font-size: 1.2rem; margin: 1.2rem 0 0.4rem; color: var(--color-neutral-800); }
+h3 { font-size: 1rem; margin: 1rem 0 0.3rem; color: var(--color-neutral-700); }
+a { color: var(--color-accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
 nav { margin-bottom: 1rem; }
-nav a { font-size: 0.95rem; color: #555; }
+nav a { font-size: 0.95rem; color: var(--color-neutral-700); }
 table {
   border-collapse: collapse;
   width: 100%;
   margin-top: 0.5rem;
-  background: #fff;
+  background: var(--color-surface);
   border-radius: 6px;
   overflow: hidden;
-  box-shadow: 0 1px 3px rgba(0,0,0,.08);
+  box-shadow: var(--shadow-sm);
 }
 th {
-  background: #e9ecef;
+  background: var(--color-neutral-200);
   padding: 0.55rem 0.85rem;
   text-align: left;
   font-size: 0.85rem;
   font-weight: 600;
-  color: #444;
-  border-bottom: 2px solid #ced4da;
+  color: var(--color-neutral-700);
+  border-bottom: 2px solid var(--color-divider);
 }
 td {
   padding: 0.5rem 0.85rem;
-  border-bottom: 1px solid #e9ecef;
+  border-bottom: 1px solid var(--color-divider);
   font-size: 0.9rem;
 }
 tr:last-child td { border-bottom: none; }
-tr:hover td { background: #f1f3f5; }
-.malformed-row td { background: #fff8e6; color: #8a6d3b; font-weight: 600; }
-.malformed-row a { color: #8a6d3b; }
+tr:hover td { background: var(--color-neutral-100); }
+.malformed-row td { background: var(--color-accent-100); color: var(--color-accent-800); font-weight: 600; }
+.malformed-row a { color: var(--color-accent-800); }
 button {
-  background: #0066cc;
-  color: #fff;
+  background: var(--color-accent);
+  color: var(--color-bg);
   border: none;
   padding: 0.4rem 1rem;
   border-radius: 4px;
@@ -113,8 +117,8 @@ button {
   cursor: pointer;
   margin: 0 0.25rem 0.25rem 0;
 }
-button:hover { background: #0052a3; }
-.meta { color: #555; font-size: 0.9rem; margin: 0.5rem 0 1rem; }
+button:hover { background: var(--color-accent-600); }
+.meta { color: var(--color-neutral-700); font-size: 0.9rem; margin: 0.5rem 0 1rem; }
 .meta a { text-decoration: underline; }
 .body { margin-top: 1rem; }
 .body h2, .body h3 { margin-top: 1rem; }
@@ -123,22 +127,22 @@ button:hover { background: #0052a3; }
 .body li.task-list-item { list-style: none; margin-left: -1.2rem; }
 .body li.task-list-item input[type="checkbox"] { margin-right: 0.35em; }
 .body pre {
-  background: #f1f3f5;
+  background: var(--color-neutral-100);
   border-radius: 4px;
   padding: 0.75rem 1rem;
   overflow-x: auto;
   font-size: 0.85rem;
 }
 .body code {
-  background: #f1f3f5;
+  background: var(--color-neutral-100);
   border-radius: 3px;
   padding: 0.1em 0.35em;
   font-size: 0.88em;
 }
 .body pre code { background: none; padding: 0; font-size: inherit; }
-hr { border: none; border-top: 1px solid #dee2e6; margin: 1rem 0; }
-/* QW-007: disabled page-nav items — non-clickable; use #666 (5.74:1 on white, AA pass) */
-.page-nav-disabled { color: #666; cursor: default; }
+hr { border: none; border-top: 1px solid var(--color-divider); margin: 1rem 0; }
+/* QW-007: disabled page-nav items — non-clickable; token muted (AA pass) */
+.page-nav-disabled { color: var(--color-neutral-600); cursor: default; }
 /* QW-006: visually-hidden class for semantic headings that should not disrupt layout */
 .sr-only {
   position: absolute;
@@ -174,33 +178,35 @@ hr { border: none; border-top: 1px solid #dee2e6; margin: 1rem 0; }
    in case any test or external reference still matches on it; the HTML element
    was removed from the list-page template. */
 /* QX-013 (experiment 4, iteration 3): error and success banners for
-   gate-fail and post-action feedback. Closes UQ-013. */
+   gate-fail and post-action feedback. Closes UQ-013. Token colors: error uses the
+   accent (red) family; success/info use the muted accent-2 / neutral families (the
+   Modernist palette has no green — AC102 token compliance over legacy hue). */
 .error-banner {
-  background: #fff0f0;
-  border-left: 3px solid #cc0000;
+  background: var(--color-accent-100);
+  border-left: 3px solid var(--color-accent);
   padding: 0.6rem 1rem;
   margin-bottom: 1rem;
   font-size: 0.9rem;
-  color: #8b0000;
+  color: var(--color-accent-800);
   border-radius: 0 4px 4px 0;
 }
 .success-banner {
-  background: #f0fff0;
-  border-left: 3px solid #007700;
+  background: var(--color-accent-2-100);
+  border-left: 3px solid var(--color-accent-2-600);
   padding: 0.6rem 1rem;
   margin-bottom: 1rem;
   font-size: 0.9rem;
-  color: #004400;
+  color: var(--color-accent-2-800);
   border-radius: 0 4px 4px 0;
 }
 /* QX-037 (experiment 4, iteration 10): info banner for needs-human CTA (UQ-022). */
 .info-banner {
-  background: #fffbf0;
-  border-left: 3px solid #cc8800;
+  background: var(--color-neutral-100);
+  border-left: 3px solid var(--color-neutral-500);
   padding: 0.6rem 1rem;
   margin-bottom: 1rem;
   font-size: 0.9rem;
-  color: #664400;
+  color: var(--color-neutral-800);
   border-radius: 0 4px 4px 0;
 }
 /* QX-043 (experiment 4, iteration 11): label nav scrollable strip on mobile (UQ-006).
@@ -213,11 +219,18 @@ hr { border: none; border-top: 1px solid #dee2e6; margin: 1rem 0; }
   padding-bottom: 0.2rem;
   margin-bottom: 0.25rem;
 }
-/* AC100: preserve the goal list's pass/fail verdict colouring on the legacy
-   (non-modernist) list pages. The goal DETAIL page styles these same classes
-   with Modernist tokens via detailStyles() below. */
-.verdict-pass { color: #1a7f37; }
-.verdict-fail { color: #cf222e; }
+/* AC100/AC102: verdict colouring is token-defined on BOTH the list pages (this sheet)
+   and the detail pages (detailStyles()) — the two sheets agree on the accent family. */
+.verdict-pass { color: var(--color-accent-700); }
+.verdict-fail { color: var(--color-accent-800); }
+/* AC102: git-history SVG mark colours — token-derived so the server-rendered chart carries
+   no hardcoded hex. The hex values live only in webui-modernist.css. */
+.git-svg-surface { background: var(--color-neutral-100); }
+.git-svg-grid { stroke: var(--color-neutral-200); }
+.git-svg-commit { fill: var(--color-accent-600); }
+.git-svg-merge { fill: var(--color-accent-2-500); }
+.git-svg-ink { fill: var(--color-text); }
+.git-svg-muted { fill: var(--color-neutral-600); }
 </style>`;
 }
 
@@ -901,14 +914,14 @@ export async function handleTaskList(
   // Carries all other active filters as hidden fields so they are preserved on submit.
   // A visible "active search" badge is rendered when qFilter is set.
   const searchBadge = qFilter
-    ? html` <strong style="color:#0066cc">"${escapeHtml(qFilter)}"</strong> (<a href="${bh(statusFilter, sortKey, labelFilters, null, prefixFilter, null)}">clear</a>)`
+    ? html` <strong style="color:var(--color-accent)">"${escapeHtml(qFilter)}"</strong> (<a href="${bh(statusFilter, sortKey, labelFilters, null, prefixFilter, null)}">clear</a>)`
     : "";
   const searchForm = html`<form method="GET" style="margin:0.5rem 0 0.75rem;display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap">
     ${prefixFilter ? html`<input type="hidden" name="prefix" value="${escapeHtml(prefixFilter)}">` : ""}
     ${statusFilter ? html`<input type="hidden" name="status" value="${escapeHtml(statusFilter)}">` : ""}
     ${labelFilters.map((l) => html`<input type="hidden" name="label" value="${escapeHtml(l)}">`).join("")}
     ${sortKey ? html`<input type="hidden" name="sort" value="${escapeHtml(sortKey)}">` : ""}
-    <input name="q" type="search" value="${escapeHtml(qFilter || "")}" placeholder="Search titles and descriptions…" style="padding:0.4rem 0.6rem;border:1px solid #ced4da;border-radius:4px;font-size:0.9rem;min-width:180px">
+    <input name="q" type="search" value="${escapeHtml(qFilter || "")}" placeholder="Search titles and descriptions…" style="padding:0.4rem 0.6rem;border:1px solid var(--color-divider);border-radius:4px;font-size:0.9rem;min-width:180px">
     <button type="submit" style="padding:0.4rem 0.8rem">Search</button>
     ${searchBadge}
   </form>`;
@@ -922,11 +935,11 @@ export async function handleTaskList(
   // totalPages > 1 so the pagination context is visible in the banner itself,
   // not only in the page navigation links below the table.
   const searchResultBanner = qFilter
-    ? html`<p class="meta" style="color:#0066cc">Showing ${totalTasks} results for &ldquo;${escapeHtml(qFilter)}&rdquo;${totalPages > 1 ? ` · Page ${safePage} of ${totalPages}` : ""}</p>`
+    ? html`<p class="meta" style="color:var(--color-accent)">Showing ${totalTasks} results for &ldquo;${escapeHtml(qFilter)}&rdquo;${totalPages > 1 ? ` · Page ${safePage} of ${totalPages}` : ""}</p>`
     : "";
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(html`<!doctype html>
-    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay task list — ${escapeHtml(manifest.name)}">${pageStyles()}<title>Quay — ${escapeHtml(manifest.name)}</title></head>
+    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay task list — ${escapeHtml(manifest.name)}">${modernistStyles()}${pageStyles()}<title>Quay — ${escapeHtml(manifest.name)}</title></head>
     <body><main>
       <!-- QX-015 orientation banner removed by DIR-007 (iteration 10): misleading
            needs-human placement + disproportionate layout cost. -->
@@ -967,7 +980,7 @@ export async function handleAdrList(
   </tr>`).join("\n");
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(html`<!doctype html>
-    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${pageStyles()}<title>ADRs</title></head>
+    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${modernistStyles()}${pageStyles()}<title>ADRs</title></head>
     <body><main>
       <p class="meta"><a href="/">← tasks</a> · <a href="/live">live</a> · <a href="/journal">journal</a></p>
       <h1>ADRs (${adrs.length})</h1>
@@ -1082,7 +1095,7 @@ export async function handleGoalList(
   ].join(" · ");
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(html`<!doctype html>
-    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${pageStyles()}<title>Goals</title></head>
+    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${modernistStyles()}${pageStyles()}<title>Goals</title></head>
     <body><main>
       <p class="meta"><a href="/">← tasks</a> · <a href="/live">live</a> · <a href="/journal">journal</a> · <a href="/adr">ADRs →</a> · <a href="/doc">docs →</a></p>
       <h1>Goals — 阶段目标与 AC (${goals.length})</h1>
@@ -1155,7 +1168,7 @@ export async function handleDocList(
   }).join("\n");
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(html`<!doctype html>
-    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${pageStyles()}<title>Docs</title></head>
+    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${modernistStyles()}${pageStyles()}<title>Docs</title></head>
     <body><main>
       <p class="meta"><a href="/">← tasks</a> · <a href="/live">live</a> · <a href="/journal">journal</a> · <a href="/adr">ADRs →</a> · <a href="/goal">goals →</a></p>
       <h1>Managed documents (${docs.length})</h1>
@@ -1234,7 +1247,7 @@ export async function handleTaskDetail(
   const tExt = t as unknown as Record<string, unknown>;
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(html`<!doctype html>
-    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="${escapeHtml(t.id)}: ${escapeHtml(t.title)}">${pageStyles()}<title>${escapeHtml(t.id)}</title></head>
+    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="${escapeHtml(t.id)}: ${escapeHtml(t.title)}">${modernistStyles()}${pageStyles()}<title>${escapeHtml(t.id)}</title></head>
     <body><main>
       <!-- QX-011: back link uses ?from= param to restore filter context (UQ-009) -->
       <nav><a href="${escapeHtml(backHref)}">&larr; back to list</a> · <a href="/live">live</a> · <a href="/journal">journal</a></nav>
@@ -1311,7 +1324,7 @@ function renderLivePage(live: LiveResult): string {
     : "";
 
   return html`<!doctype html>
-    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay live — what the loop is doing right now">${pageStyles()}<title>Live — loop activity</title></head>
+    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay live — what the loop is doing right now">${modernistStyles()}${pageStyles()}<title>Live — loop activity</title></head>
     <body><main>
       <p class="meta"><a href="/">← tasks</a> · <a href="/live">live</a> · <a href="/journal">journal</a> · <a href="/adr">ADRs →</a></p>
       <h1>Live — 循环此刻在做什么</h1>
@@ -1323,7 +1336,7 @@ function renderLivePage(live: LiveResult): string {
 
 function renderJournalPage(journal: JournalResult): string {
   return html`<!doctype html>
-    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay journal — recent loop record">${pageStyles()}<title>Journal — recent loop record</title></head>
+    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay journal — recent loop record">${modernistStyles()}${pageStyles()}<title>Journal — recent loop record</title></head>
     <body><main>
       <p class="meta"><a href="/">← tasks</a> · <a href="/live">live</a> · <a href="/journal">journal</a> · <a href="/adr">ADRs →</a></p>
       <h1>Journal — 循环最近记录</h1>
@@ -1434,7 +1447,7 @@ function renderBoardPage(board: {
   }).join("\n");
 
   return html`<!doctype html>
-    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay board — 三源 join 看板">${pageStyles()}<title>Board — 三源 join 看板</title></head>
+    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay board — 三源 join 看板">${modernistStyles()}${pageStyles()}<title>Board — 三源 join 看板</title></head>
     <body><main>
       <p class="meta"><a href="/">← tasks</a> · <a href="/live">live</a> · <a href="/journal">journal</a> · <a href="/adr">ADRs →</a></p>
       <h1>Board — 意图 / 执行 / 落地</h1>
@@ -1527,14 +1540,10 @@ export async function handleBoard(
 // merges are (orange diamonds = the fan-in landing events). The branch interval line is explicitly a
 // 「存活区间」(existence span), never labeled as work time.
 
-// SVG color/ink tokens — the blue/orange pair validated all-pairs in light mode (dataviz skill);
-// branch identity is carried by LANE POSITION + direct label, never by a cycled hue.
-const GIT_SVG_BLUE = "#2a78d6";   // regular commit point
-const GIT_SVG_ORANGE = "#eb6834"; // merge commit point (diamond)
-const GIT_SVG_INK = "#52514e";    // secondary ink (text)
-const GIT_SVG_MUTED = "#898781";  // muted (axis labels)
-const GIT_SVG_GRID = "#e1e0d9";   // hairline gridline
-const GIT_SVG_SURFACE = "#fcfcfb"; // chart surface
+// AC102: the chart's marks are coloured by token-derived CSS classes (git-svg-*, defined in
+// pageStyles()) — ZERO hardcoded hex in the rendering code; the hex values live only in the
+// webui-modernist.css asset. Branch identity is carried by LANE POSITION + direct label, never
+// by a cycled hue (dataviz skill), so the class swap is purely mechanical.
 
 export interface GitHistoryBranch {
   ref: string;
@@ -1625,8 +1634,8 @@ export function renderGitHistorySvg(history: GitHistoryResult): string {
   const ticks = niceTicks(x0, x1);
   const gridlines = ticks.map((tk) => {
     const gx = X(tk.x);
-    return `<line x1="${gx.toFixed(1)}" y1="${M.top}" x2="${gx.toFixed(1)}" y2="${H - M.bottom}" stroke="${GIT_SVG_GRID}" stroke-width="1" />` +
-      `<text x="${gx.toFixed(1)}" y="${H - M.bottom + 16}" font-size="10" fill="${GIT_SVG_MUTED}" text-anchor="middle">${escapeHtml(tk.label)}</text>`;
+    return `<line class="git-svg-grid" x1="${gx.toFixed(1)}" y1="${M.top}" x2="${gx.toFixed(1)}" y2="${H - M.bottom}" stroke-width="1" />` +
+      `<text class="git-svg-muted" x="${gx.toFixed(1)}" y="${H - M.bottom + 16}" font-size="10" text-anchor="middle">${escapeHtml(tk.label)}</text>`;
   }).join("");
 
   const lanes = branches.map((b, i) => {
@@ -1634,28 +1643,28 @@ export function renderGitHistorySvg(history: GitHistoryResult): string {
     const xFirst = X(b.firstT);
     const xLast = X(b.lastT);
     const seg = b.commits.length > 1
-      ? `<line x1="${xFirst.toFixed(1)}" y1="${y.toFixed(1)}" x2="${xLast.toFixed(1)}" y2="${y.toFixed(1)}" stroke="${GIT_SVG_GRID}" stroke-width="2" />`
+      ? `<line class="git-svg-grid" x1="${xFirst.toFixed(1)}" y1="${y.toFixed(1)}" x2="${xLast.toFixed(1)}" y2="${y.toFixed(1)}" stroke-width="2" />`
       : "";
     const points = b.commits.map((c) => {
       const cx = X(c.t);
       const tooltip = `${escapeHtml(c.hash.slice(0, 7))} · ${isoTime(c.t)} · ${escapeHtml(c.subject)}`;
       if (c.parents > 1) {
         const s = 4; // 8px diamond (the mark-spec ≥8px marker)
-        return `<rect x="${(cx - s).toFixed(1)}" y="${(y - s).toFixed(1)}" width="${2 * s}" height="${2 * s}" transform="rotate(45 ${cx} ${y})" fill="${GIT_SVG_ORANGE}"><title>merge ${tooltip}</title></rect>`;
+        return `<rect class="git-svg-merge" x="${(cx - s).toFixed(1)}" y="${(y - s).toFixed(1)}" width="${2 * s}" height="${2 * s}" transform="rotate(45 ${cx} ${y})"><title>merge ${tooltip}</title></rect>`;
       }
-      return `<circle cx="${cx.toFixed(1)}" cy="${y.toFixed(1)}" r="4" fill="${GIT_SVG_BLUE}"><title>${tooltip}</title></circle>`;
+      return `<circle class="git-svg-commit" cx="${cx.toFixed(1)}" cy="${y.toFixed(1)}" r="4"><title>${tooltip}</title></circle>`;
     }).join("");
-    return `<g>${seg}${points}<text x="${(W - M.right + 8).toFixed(1)}" y="${(y + 3).toFixed(1)}" font-size="11" fill="${GIT_SVG_INK}">${escapeHtml(b.ref)}</text></g>`;
+    return `<g>${seg}${points}<text class="git-svg-ink" x="${(W - M.right + 8).toFixed(1)}" y="${(y + 3).toFixed(1)}" font-size="11">${escapeHtml(b.ref)}</text></g>`;
   }).join("");
 
   // In-SVG legend: the two mark kinds (merge vs regular). Identity is never color-alone — the
   // legend pairs each hue with its mark shape + label.
-  const legend = `<g font-size="10" fill="${GIT_SVG_INK}">
-    <circle cx="${M.left + 6}" cy="18" r="4" fill="${GIT_SVG_BLUE}" /><text x="${M.left + 16}" y="22">普通提交</text>
-    <rect x="${M.left + 92}" y="14" width="8" height="8" transform="rotate(45 ${M.left + 96} 18)" fill="${GIT_SVG_ORANGE}" /><text x="${M.left + 106}" y="22">合并提交（fan-in 落地）</text>
+  const legend = `<g class="git-svg-ink" font-size="10">
+    <circle class="git-svg-commit" cx="${M.left + 6}" cy="18" r="4" /><text x="${M.left + 16}" y="22">普通提交</text>
+    <rect class="git-svg-merge" x="${M.left + 92}" y="14" width="8" height="8" transform="rotate(45 ${M.left + 96} 18)" /><text x="${M.left + 106}" y="22">合并提交（fan-in 落地）</text>
   </g>`;
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="Git commit landing timeline; x-axis is commit landing time, not work duration" style="background:${GIT_SVG_SURFACE};max-width:100%;height:auto;border:1px solid ${GIT_SVG_GRID};border-radius:6px;font-family:system-ui,-apple-system,sans-serif;">
+  return `<svg class="git-svg-surface" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="Git commit landing timeline; x-axis is commit landing time, not work duration" style="max-width:100%;height:auto;border:1px solid var(--color-neutral-200);border-radius:6px;font-family:system-ui,-apple-system,sans-serif;">
 ${legend}
 ${gridlines}
 ${lanes}
@@ -1692,7 +1701,7 @@ function renderGitHistoryPage(history: GitHistoryResult): string {
     </table>` : "";
 
   return html`<!doctype html>
-    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay git history — commit landing timeline (server-rendered SVG, zero client JS)">${pageStyles()}<title>Git history — commit landing timeline</title></head>
+    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay git history — commit landing timeline (server-rendered SVG, zero client JS)">${modernistStyles()}${pageStyles()}<title>Git history — commit landing timeline</title></head>
     <body><main>
       <p class="meta"><a href="/">← tasks</a> · <a href="/live">live</a> · <a href="/journal">journal</a> · <a href="/git-history">git-history</a> · <a href="/adr">ADRs →</a></p>
       <h1>Git History — 提交落地时间轴</h1>
@@ -1767,11 +1776,11 @@ function renderSystemPage(sys: SystemResult): string {
   const bar = (label: string, val: number | null, limit: string | null): string => {
     const pct = val != null ? Math.min(100, Math.max(1, (val / (Number(limit) || 1)) * 100)) : 0;
     return html`<div><div style="display:flex;justify-content:space-between;font-size:0.9rem;margin-bottom:2px">
-      <span>${escapeHtml(label)}</span><span>${val != null ? escapeHtml(String(val)) : "—"}${limit ? html` <span style="color:#555">/ ${escapeHtml(limit)}</span>` : ""}</span>
-    </div>${val != null ? html`<div style="height:8px;background:#d7d3d3"><div style="height:100%;width:${pct.toFixed(1)}%;background:#201e1d"></div></div>` : ""}</div>`;
+      <span>${escapeHtml(label)}</span><span>${val != null ? escapeHtml(String(val)) : "—"}${limit ? html` <span style="color:var(--color-neutral-700)">/ ${escapeHtml(limit)}</span>` : ""}</span>
+    </div>${val != null ? html`<div style="height:8px;background:var(--color-neutral-300)"><div style="height:100%;width:${pct.toFixed(1)}%;background:var(--color-text)"></div></div>` : ""}</div>`;
   };
   return html`<!doctype html>
-    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay system — resource gate and process budget">${pageStyles()}<title>System — 系统状态</title></head>
+    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay system — resource gate and process budget">${modernistStyles()}${pageStyles()}<title>System — 系统状态</title></head>
     <body><main>
       <p class="meta">${renderSiteNav("system")}</p>
       <h1>System — 系统状态</h1>
@@ -1822,8 +1831,8 @@ export async function handleSystem(
 // ── /manager ───────────────────────────────────────────────────────────────────────────────────────
 
 function renderManagerPage(mgr: ManagerResult): string {
-  const loopCards = (label: string, statusText: string, note: string): string => html`<div style="background:#eae9e9;padding:1rem">
-    <div style="font-size:0.85rem;color:#555;margin-bottom:4px">${escapeHtml(label)}</div>
+  const loopCards = (label: string, statusText: string, note: string): string => html`<div style="background:var(--color-surface);padding:1rem">
+    <div style="font-size:0.85rem;color:var(--color-neutral-700);margin-bottom:4px">${escapeHtml(label)}</div>
     <div style="font-weight:700">${statusText}</div>
     <p style="font-size:0.8rem;margin:4px 0 0">${escapeHtml(note)}</p>
   </div>`;
@@ -1857,7 +1866,7 @@ function renderManagerPage(mgr: ManagerResult): string {
     : obsNote(pool.status, pool.reason);
 
   return html`<!doctype html>
-    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay manager — Manager/Outer/Inner 三层状态">${pageStyles()}<title>Manager / Outer / Inner</title></head>
+    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay manager — Manager/Outer/Inner 三层状态">${modernistStyles()}${pageStyles()}<title>Manager / Outer / Inner</title></head>
     <body><main>
       <p class="meta">${renderSiteNav("manager")}</p>
       <h1>Manager / Outer / Inner — 三层状态</h1>
@@ -1915,7 +1924,7 @@ function runStatusClass(state: string | null): string {
 function renderTestsPage(tests: TestsResult): string {
   const latest = tests.runs[0] ?? null;
   const latestBanner = latest
-    ? html`<div style="border:1px solid #dee2e6;background:#fff;padding:1rem;margin-bottom:1.5rem">
+    ? html`<div style="border:1px solid var(--color-divider);background:var(--color-surface);padding:1rem;margin-bottom:1.5rem">
         <div style="font-weight:700;font-size:1rem"><span class="${runStatusClass(latest.state)}">${escapeHtml(latest.state ?? "unknown")}</span>${latest.scope ? ` · ${escapeHtml(latest.scope)}` : ""}</div>
         <p class="meta" style="margin:0.25rem 0">startedAt: ${escapeHtml(latest.startedAt ?? "—")} · duration: ${latest.durationMs != null ? `${escapeHtml(String(Math.round(latest.durationMs / 1000)))}s` : "—"}${latest.commit ? ` · commit <code>${escapeHtml(latest.commit.slice(0, 8))}</code>` : ""}${latest.runner ? ` · runner ${escapeHtml(latest.runner)}` : ""}</p>
         <p class="meta" style="margin:0">tests ${latest.tests ?? "—"} · pass ${latest.pass ?? "—"} · fail ${latest.fail ?? "—"} · cancelled ${latest.cancelled ?? "—"}</p>
@@ -1933,13 +1942,13 @@ function renderTestsPage(tests: TestsResult): string {
   const failureDetails = failedRun
     ? html`<details style="margin-top:1rem">
         <summary style="cursor:pointer;font-weight:600">#${escapeHtml(String(failedRun.round))} 失败用例明细（点击展开）</summary>
-        <ul style="padding-left:1.5rem;font-size:0.85rem;line-height:1.7;color:#7c1405">
+        <ul style="padding-left:1.5rem;font-size:0.85rem;line-height:1.7;color:var(--color-accent-800)">
           ${failedRun.failures!.map((f) => html`<li>${escapeHtml(f)}</li>`).join("")}
         </ul>
       </details>`
     : "";
   return html`<!doctype html>
-    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay tests — verification rounds">${pageStyles()}<title>Tests — 验证轮记录</title></head>
+    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay tests — verification rounds">${modernistStyles()}${pageStyles()}<title>Tests — 验证轮记录</title></head>
     <body><main>
       <p class="meta">${renderSiteNav("tests")}</p>
       <h1>Tests — 验证轮记录</h1>
@@ -1975,22 +1984,22 @@ export async function handleTests(
 function renderSessionsPage(sessions: SessionsResult): string {
   const cards = sessions.sessions.map((s) => {
     const msgHtml = s.messages && s.messages.length > 0
-      ? s.messages.map((m) => html`<div style="border-left:2px solid #dee2e6;padding-left:0.6rem;margin-bottom:0.5rem">
-          <div style="font-size:0.7rem;color:#555">${escapeHtml(m.time)} · ${escapeHtml(m.role)}</div>
+      ? s.messages.map((m) => html`<div style="border-left:2px solid var(--color-divider);padding-left:0.6rem;margin-bottom:0.5rem">
+          <div style="font-size:0.7rem;color:var(--color-neutral-700)">${escapeHtml(m.time)} · ${escapeHtml(m.role)}</div>
           <p style="font-size:0.8rem;line-height:1.4;margin:0">${escapeHtml(m.text)}</p>
         </div>`).join("")
       : obsNote(s.transcriptStatus, s.transcriptReason);
-    return html`<div style="background:#eae9e9;padding:1rem;display:flex;flex-direction:column;gap:0.5rem;min-height:180px">
+    return html`<div style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:0.5rem;min-height:180px">
       <div style="display:flex;justify-content:space-between;align-items:baseline">
         <b>${escapeHtml(s.name)}</b>
-        <span style="font-size:0.75rem;font-weight:700;color:${s.alive ? "#1a7f37" : "#cf222e"}">${s.alive ? "LIVE" : "GONE"}</span>
+        <span style="font-size:0.75rem;font-weight:700;color:${s.alive ? "var(--color-accent-700)" : "var(--color-accent-800)"}">${s.alive ? "LIVE" : "GONE"}</span>
       </div>
-      <div style="font-size:0.75rem;color:#555">${s.halted ? "halted" : s.pid != null ? `pid ${s.pid}` : "—"}</div>
+      <div style="font-size:0.75rem;color:var(--color-neutral-700)">${s.halted ? "halted" : s.pid != null ? `pid ${s.pid}` : "—"}</div>
       ${msgHtml}
     </div>`;
   }).join("");
   return html`<!doctype html>
-    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay sessions — Manager/Outer/Inner 最近会话">${pageStyles()}<title>Sessions — 三层最近会话</title></head>
+    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay sessions — Manager/Outer/Inner 最近会话">${modernistStyles()}${pageStyles()}<title>Sessions — 三层最近会话</title></head>
     <body><main>
       <p class="meta">${renderSiteNav("sessions")}</p>
       <h1>Sessions — Manager / Outer / Inner 最近会话</h1>
@@ -2041,10 +2050,10 @@ function renderArchitecturePage(arch: ArchitectureResult): string {
     return "plain";
   };
   const fillStroke: Record<string, [string, string]> = {
-    dev: ["#fff2ef", "#ec3013"],
-    recent: ["#fff2ef", "#ae1800"],
-    stale: ["#eae7e7", "#605d5d"],
-    plain: ["#eae9e9", "#bab6b6"],
+    dev: ["var(--color-accent-100)", "var(--color-accent)"],
+    recent: ["var(--color-accent-100)", "var(--color-accent-700)"],
+    stale: ["var(--color-neutral-200)", "var(--color-neutral-700)"],
+    plain: ["var(--color-surface)", "var(--color-neutral-400)"],
   };
   const nodes: ArchNode[] = nodeDefs.map((d) => {
     const hl = highlightFor(d.name);
@@ -2057,10 +2066,10 @@ function renderArchitecturePage(arch: ArchitectureResult): string {
     { x1: 255, y1: 97, x2: 350, y2: 42 },
     { x1: 255, y1: 97, x2: 350, y2: 152 },
   ];
-  const svg = html`<svg viewBox="0 0 500 220" width="100%" style="background:#f3f2f2;border:1px solid #dee2e6;border-radius:6px;max-width:100%">
-    ${edges.map((e) => html`<line x1="${e.x1}" y1="${e.y1}" x2="${e.x2}" y2="${e.y2}" stroke="#b0acac" stroke-width="1.5"></line>`).join("")}
-    ${nodes.map((n) => html`<rect x="${n.x}" y="${n.y}" width="${n.w}" height="${n.h}" fill="${n.fill}" stroke="${n.stroke}" stroke-width="2" rx="4"></rect>`).join("")}
-    ${nodes.map((n) => html`<text x="${n.x + n.w / 2}" y="${n.y + n.h / 2}" font-size="11" text-anchor="middle" dominant-baseline="middle" fill="#201e1d">${escapeHtml(n.label)}</text>`).join("")}
+  const svg = html`<svg viewBox="0 0 500 220" width="100%" style="background:var(--color-bg);border:1px solid var(--color-divider);border-radius:6px;max-width:100%">
+    ${edges.map((e) => html`<line x1="${e.x1}" y1="${e.y1}" x2="${e.x2}" y2="${e.y2}" style="stroke:var(--color-neutral-400)" stroke-width="1.5"></line>`).join("")}
+    ${nodes.map((n) => html`<rect x="${n.x}" y="${n.y}" width="${n.w}" height="${n.h}" style="fill:${n.fill};stroke:${n.stroke}" stroke-width="2" rx="4"></rect>`).join("")}
+    ${nodes.map((n) => html`<text x="${n.x + n.w / 2}" y="${n.y + n.h / 2}" font-size="11" text-anchor="middle" dominant-baseline="middle" style="fill:var(--color-text)">${escapeHtml(n.label)}</text>`).join("")}
   </svg>`;
   const componentTable = arch.components.length > 0 ? html`<h2>组件最近变更（git 可证，近 ${7} 天）</h2>
     <table>
@@ -2072,14 +2081,14 @@ function renderArchitecturePage(arch: ArchitectureResult): string {
         <td>${c.lastCommitAt != null ? escapeHtml(new Date(c.lastCommitAt * 1000).toISOString().slice(0, 16)) : "—"}</td>
       </tr>`).join("\n")}
     </table>` : "";
-  const legend = html`<div style="display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:1rem;font-size:0.75rem;color:#555">
-    <span><span style="display:inline-block;width:10px;height:10px;background:#fff2ef;border:2px solid #ec3013"></span> 正在开发</span>
-    <span><span style="display:inline-block;width:10px;height:10px;background:#fff2ef;border:2px solid #ae1800"></span> 最近变更</span>
-    <span><span style="display:inline-block;width:10px;height:10px;background:#eae7e7;border:2px solid #605d5d"></span> 已标记问题</span>
-    <span><span style="display:inline-block;width:10px;height:10px;background:#eae9e9;border:2px solid #bab6b6"></span> 稳定</span>
+  const legend = html`<div style="display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:1rem;font-size:0.75rem;color:var(--color-neutral-700)">
+    <span><span style="display:inline-block;width:10px;height:10px;background:var(--color-accent-100);border:2px solid var(--color-accent)"></span> 正在开发</span>
+    <span><span style="display:inline-block;width:10px;height:10px;background:var(--color-accent-100);border:2px solid var(--color-accent-700)"></span> 最近变更</span>
+    <span><span style="display:inline-block;width:10px;height:10px;background:var(--color-neutral-200);border:2px solid var(--color-neutral-700)"></span> 已标记问题</span>
+    <span><span style="display:inline-block;width:10px;height:10px;background:var(--color-surface);border:2px solid var(--color-neutral-400)"></span> 稳定</span>
   </div>`;
   return html`<!doctype html>
-    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay architecture — system component map">${pageStyles()}<title>Architecture — 系统组件图</title></head>
+    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay architecture — system component map">${modernistStyles()}${pageStyles()}<title>Architecture — 系统组件图</title></head>
     <body><main>
       <p class="meta">${renderSiteNav("architecture")}</p>
       <h1>Architecture — 系统组件图</h1>
@@ -2118,27 +2127,27 @@ function renderDashboardPage(d: {
 }): string {
   const live = d.live;
   const liveStateText = live.status === "error" ? "读失败" : live.liveState === "running" ? "running" : live.liveState === "running-unwired" ? "在跑但未接遥测" : live.liveState === "not-running" ? "未在运行" : "—";
-  const liveCard = html`<div style="background:#eae9e9;padding:1rem;display:flex;flex-direction:column;gap:6px">
-    <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:#555">循环脉搏</div>
+  const liveCard = html`<div style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:6px">
+    <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">循环脉搏</div>
     <div style="font-weight:800">${escapeHtml(liveStateText)}</div>
     <p style="margin:0;font-size:0.8rem;opacity:0.8">在飞 ${live.inFlight.length} · 并发 ${live.concurrency}</p>
-    <a href="/live" style="font-size:0.8rem;color:#0066cc;text-decoration:none;margin-top:auto">查看 Live →</a>
+    <a href="/live" style="font-size:0.8rem;color:var(--color-accent);text-decoration:none;margin-top:auto">查看 Live →</a>
   </div>`;
 
   const sysGo = d.sys.resourceGate.status === "ok" && d.sys.processBudget.status === "ok" &&
     d.sys.resourceGate.verdict === "GO" && d.sys.processBudget.verdict === "GO";
-  const sysCard = html`<div style="background:#eae9e9;padding:1rem;display:flex;flex-direction:column;gap:6px">
-    <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:#555">系统资源</div>
+  const sysCard = html`<div style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:6px">
+    <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">系统资源</div>
     <p style="margin:0;font-size:0.8rem;line-height:1.5">cpu_stall ${d.sys.resourceGate.cpuStallAvg10 != null ? escapeHtml(String(d.sys.resourceGate.cpuStallAvg10)) : "—"} · loadavg ${d.sys.resourceGate.loadAvg != null ? escapeHtml(String(d.sys.resourceGate.loadAvg)) : "—"}</p>
-    <div style="font-weight:800;color:${sysGo ? "#1a7f37" : "#cf222e"}">⇒ ${sysGo ? "GO" : d.sys.resourceGate.status === "ok" ? "WAIT" : "未接入"}</div>
-    <a href="/system" style="font-size:0.8rem;color:#0066cc;text-decoration:none;margin-top:auto">查看系统状态 →</a>
+    <div style="font-weight:800;color:${sysGo ? "var(--color-accent-700)" : "var(--color-accent-800)"}">⇒ ${sysGo ? "GO" : d.sys.resourceGate.status === "ok" ? "WAIT" : "未接入"}</div>
+    <a href="/system" style="font-size:0.8rem;color:var(--color-accent);text-decoration:none;margin-top:auto">查看系统状态 →</a>
   </div>`;
 
   const mgrAlive = d.mgr.liveness.sessions.filter((s) => s.alive).length;
-  const mgrCard = html`<div style="background:#eae9e9;padding:1rem;display:flex;flex-direction:column;gap:6px">
-    <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:#555">Manager / Outer / Inner</div>
+  const mgrCard = html`<div style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:6px">
+    <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">Manager / Outer / Inner</div>
     <p style="margin:0;font-size:0.8rem;line-height:1.5">loop-driver: ${escapeHtml(d.mgr.loopDriver.verdict ?? "未接入")} · ${mgrAlive} 会话 LIVE</p>
-    <a href="/manager" style="font-size:0.8rem;color:#0066cc;text-decoration:none;margin-top:auto">查看三层状态 →</a>
+    <a href="/manager" style="font-size:0.8rem;color:var(--color-accent);text-decoration:none;margin-top:auto">查看三层状态 →</a>
   </div>`;
 
   const counts = new Map<string, number>();
@@ -2151,7 +2160,7 @@ function renderDashboardPage(d: {
   const bar = (s: string): string => {
     const c = counts.get(s) ?? 0;
     const pct = total > 0 ? (c / total) * 100 : 0;
-    return html`<div style="width:${pct.toFixed(1)}%;background:${s === "done" ? "#201e1d" : s === "needs-human" ? "#ec3013" : "#bab6b6"}" title="${escapeHtml(s)} ${c}"></div>`;
+    return html`<div style="width:${pct.toFixed(1)}%;background:${s === "done" ? "var(--color-text)" : s === "needs-human" ? "var(--color-accent)" : "var(--color-neutral-400)"}" title="${escapeHtml(s)} ${c}"></div>`;
   };
   const recentActive = d.tasks
     .filter((t) => (t.status ?? "") !== "done" && typeof (t as { updatedAt?: unknown }).updatedAt === "number")
@@ -2159,50 +2168,50 @@ function renderDashboardPage(d: {
     .slice(0, 5);
 
   const latestRun = d.tests.runs[0] ?? null;
-  const testsCard = html`<div style="background:#eae9e9;padding:1rem;display:flex;flex-direction:column;gap:6px">
-    <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:#555">测试</div>
+  const testsCard = html`<div style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:6px">
+    <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">测试</div>
     <div style="font-weight:800">${latestRun ? `${escapeHtml(latestRun.state ?? "—")}` : "未接入"}</div>
     <p style="margin:0;font-size:0.8rem;opacity:0.8">${latestRun ? `pass ${latestRun.pass ?? "—"}/${latestRun.tests ?? "—"}` : d.tests.reason ? escapeHtml(d.tests.reason) : "无验证轮记录"}</p>
-    <a href="/tests" style="font-size:0.8rem;color:#0066cc;text-decoration:none;margin-top:auto">查看 Tests →</a>
+    <a href="/tests" style="font-size:0.8rem;color:var(--color-accent);text-decoration:none;margin-top:auto">查看 Tests →</a>
   </div>`;
 
   const recentCommits = d.history.status === "ok" ? d.history.commits.slice(0, 3).map((c) => `${c.hash.slice(0, 7)} ${c.subject}`).join("<br>") : (d.history.status === "empty" ? "无提交" : "读失败");
-  const commitsCard = html`<div style="background:#eae9e9;padding:1rem;display:flex;flex-direction:column;gap:8px">
-    <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:#555">最近提交</div>
+  const commitsCard = html`<div style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:8px">
+    <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">最近提交</div>
     <p style="margin:0;font-size:0.8rem;line-height:1.6;font-family:ui-monospace,monospace">${recentCommits}</p>
-    <a href="/journal" style="font-size:0.8rem;color:#0066cc;text-decoration:none;margin-top:auto">查看 Journal →</a>
+    <a href="/journal" style="font-size:0.8rem;color:var(--color-accent);text-decoration:none;margin-top:auto">查看 Journal →</a>
   </div>`;
 
-  const taskCard = html`<div style="background:#eae9e9;padding:1rem;display:flex;flex-direction:column;gap:6px">
-    <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:#555">任务台账速览</div>
+  const taskCard = html`<div style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:6px">
+    <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">任务台账速览</div>
     <div style="display:flex;height:14px;width:100%;overflow:hidden">${statuses.map(bar).join("")}</div>
-    <div style="display:flex;gap:0.75rem;font-size:0.75rem;flex-wrap:wrap;color:#555">
+    <div style="display:flex;gap:0.75rem;font-size:0.75rem;flex-wrap:wrap;color:var(--color-neutral-700)">
       ${statuses.map((s) => html`<span><b>${counts.get(s) ?? 0}</b> ${escapeHtml(s)}</span>`).join("")}
     </div>
-    ${recentActive.length > 0 ? html`<div style="border-top:1px solid #dee2e6;margin-top:2px;padding-top:8px;display:flex;flex-direction:column;gap:4px">
-      <div style="font-size:0.7rem;color:#555">最近更新（非 done）</div>
-      ${recentActive.map((t) => html`<a href="/task/${encodeURIComponent(String(t.id))}" style="display:flex;justify-content:space-between;gap:8px;text-decoration:none;color:#1a1a1a;font-size:0.75rem">
-        <span style="font-weight:600;color:#0066cc">${escapeHtml(String(t.id))}</span>
+    ${recentActive.length > 0 ? html`<div style="border-top:1px solid var(--color-divider);margin-top:2px;padding-top:8px;display:flex;flex-direction:column;gap:4px">
+      <div style="font-size:0.7rem;color:var(--color-neutral-700)">最近更新（非 done）</div>
+      ${recentActive.map((t) => html`<a href="/task/${encodeURIComponent(String(t.id))}" style="display:flex;justify-content:space-between;gap:8px;text-decoration:none;color:var(--color-text);font-size:0.75rem">
+        <span style="font-weight:600;color:var(--color-accent)">${escapeHtml(String(t.id))}</span>
         <span style="flex:none">${escapeHtml(String(t.status ?? ""))}</span>
       </a>`).join("")}
     </div>` : ""}
-    <a href="/" style="font-size:0.8rem;color:#0066cc;text-decoration:none;margin-top:auto">查看任务列表 →</a>
+    <a href="/" style="font-size:0.8rem;color:var(--color-accent);text-decoration:none;margin-top:auto">查看任务列表 →</a>
   </div>`;
 
   return html`<!doctype html>
-    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay dashboard — 循环脉搏、任务台账、系统资源与三层状态总览">${pageStyles()}<title>Dashboard</title></head>
+    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay dashboard — 循环脉搏、任务台账、系统资源与三层状态总览">${modernistStyles()}${pageStyles()}<title>Dashboard</title></head>
     <body><main>
       <p class="meta">${renderSiteNav("dashboard")}</p>
       <h1>Dashboard</h1>
       <p class="meta">循环脉搏、任务台账、系统资源与三层调度状态的总览 — 每张卡片指向对应完整页面。</p>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:2px;background:#aaa;border:1px solid #aaa;margin-bottom:1.5rem">${liveCard}${sysCard}${mgrCard}</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:2px;background:var(--color-divider);border:1px solid var(--color-divider);margin-bottom:1.5rem">${liveCard}${sysCard}${mgrCard}</div>
       <h2>工作进展</h2>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:2px;background:#aaa;border:1px solid #aaa;margin-bottom:1.5rem">${taskCard}${testsCard}</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:2px;background:var(--color-divider);border:1px solid var(--color-divider);margin-bottom:1.5rem">${taskCard}${testsCard}</div>
       <h2>变更记录</h2>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:2px;background:#aaa;border:1px solid #aaa">${commitsCard}${html`<div style="background:#eae9e9;padding:1rem;display:flex;flex-direction:column;gap:8px">
-        <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:#555">Git History</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:2px;background:var(--color-divider);border:1px solid var(--color-divider)">${commitsCard}${html`<div style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:8px">
+        <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">Git History</div>
         <p style="margin:0;font-size:0.8rem">提交落地时间轴（服务端渲染 SVG，零客户端 JS）。</p>
-        <a href="/git-history" style="font-size:0.8rem;color:#0066cc;text-decoration:none;margin-top:auto">查看 Git History →</a>
+        <a href="/git-history" style="font-size:0.8rem;color:var(--color-accent);text-decoration:none;margin-top:auto">查看 Git History →</a>
       </div>`}</div>
     </main></body></html>`;
 }

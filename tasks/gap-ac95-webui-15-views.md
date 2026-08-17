@@ -49,12 +49,22 @@ depends_on: []
 - **AC2**：数字取自产生它的机件——`resource-gate.sh`/`process-budget.sh`（system）、`loop-driver-check.sh`/`session-liveness.sh --once`/`observer-registry.conf`/`ready-pool-check.ts --json`/`QUAY_VERSION`/`git rev-list`（manager）、`.quay/verification-round.jsonl`＋`full-suite-state.json`（tests）、`session-liveness.sh`＋transcript 尾部（sessions）、`git log` per-package＋`git worktree list`（architecture）、`readLive`/`client.taskList`/`readGitHistory`（dashboard）。AC2 机械 grep（两个叙事文档名 over `packages/quay/src/`）命中 0。
 - **AC3**：空态诚实——bare-workspace 集成测试断言 `/tests` 与 `/architecture` 渲染「未接入/无数据」（非留白/0）；三态（ok/empty/error）取值独立。
 - **AC4**：`bash scripts/test.sh --for-task gap-ac95-webui-15-views --allow-thin` 全绿 —— 85 测试 0 失败（含 13 个既有 web 测试 + 新增 serve-ac95-views.test.mjs 12 条）；`tsc --noEmit` 0 错误。
+- **AC102（人 2026-08-17 明令的视觉规范补充，正本 `manager-phase-goal.md` AC102）**：
+  - **AC102①**：15 视图逐一 curl，响应体均含 Modernist token 特征串 `--color-bg` —— 15 个视图的 `<head>` 全部改发 `modernistStyles()`（与 3 个详情页【同一份】token 样式表），不再是各自颜色。
+  - **AC102②**：`serve-handlers.ts` 渲染代码 `grep -cE '#[0-9a-fA-F]{6}'` = **0**（整文件零硬编码 hex）——共享基础样式 `pageStyles()`（原 34+ 处）迁移到 `var(--color-*)`，git 图表 SVG 改用 token 类（`.git-svg-commit` 等），6 个新页面内联色全部 token 化；hex 值只存在于 `webui-modernist.css` 资产（AC100(a) byte-identity 已钉）。
+  - **AC102③**：抽样 3 个新页面桌面 1440×900 截图存 Evidence：`packages/quay/test/fixtures/ac102-dashboard-1440x900.png` / `ac102-system-1440x900.png` / `ac102-manager-1440x900.png`（google-chrome headless，valid PNG 1440×900）。
+  - **机械测试**：新增 `packages/quay/test/serve-ac102-modernist-views.test.mjs`（3 条：15 视图 --color-bg / 整文件零 hex / git SVG token 类）；`serve-handlers.test.mjs` 与 `serve.test.mjs` 相应断言更新。
 - **健壮性**：机制脚本子进程走 bounded 进程组 kill 的异步 runner（`runScriptBounded`）——`session-liveness.sh` 会 fork `sleep` 子进程且 SIGTERM 被延迟；用 execFileSync 会阻塞 serve 事件循环（实测 /dashboard 使整台服务器 40s 无响应）。已用 `--once` 显式单轮。version 取构建期内联的 `QUAY_VERSION`，不读运行时 package.json（避免破坏 self-contained-dist 断言，build-dist.test.mjs (e)）。
 
 ## Touches
 
-- packages/quay/src/serve-handlers.ts（新路由 dashboard/system/manager/tests/sessions/architecture）
+- packages/quay/src/serve-handlers.ts（新路由 dashboard/system/manager/tests/sessions/architecture + AC102 token 化：15 视图同源 modernistStyles、零硬编码 hex）
 - packages/quay/src/observation.ts（若空态三态扩展）
 - packages/quay/test/（web 测试）
+- packages/quay/test/serve-ac95-views.test.mjs（新增：6 视图路由/解析/空态测试）
+- packages/quay/test/serve-ac102-modernist-views.test.mjs（新增：15 视图 --color-bg + 零 hex + git SVG token 类）
+- packages/quay/test/serve.test.mjs（搜索横幅断言随 token 化更新）
+- packages/quay/test/serve-handlers.test.mjs（git 图表 token 类断言更新）
+- packages/quay/test/fixtures/（AC102③ 截图证据：ac102-{dashboard,system,manager}-1440x900.png）
 - docs/design/quay-webui-improved-2026-08-16/（设计正本，只读参考）
 - tasks/gap-ac95-webui-15-views.md（自身）
