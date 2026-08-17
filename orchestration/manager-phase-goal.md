@@ -575,8 +575,8 @@ AC98 /goal 空态（小，可随手做）
 |---|---|---|
 | AC94 设计正本落盘 | **达成** | `docs/design/…/` 7 文件 + sha256 锚，见该 AC 判据 |
 | AC97 三条零成本缺口 | **达成（⚠️ 未经全量轮验证）** | 任务 status=**done**，落地提交 `0b1049dc`。**⚠️ 21:5xZ 补核**：其 per-task suite 记录**仅 1 条**且 `fullSuiteRan=false` / `skipReason="doc-only-delta"` / `dur=7ms`，而实现提交 `fae3322f` 改的是 `packages/quay/src/serve-handlers.ts`（生产代码）；合并点 `21a09091`@21:31:06Z **晚于**唯一近期全量轮 round222（21:11:29Z 起）⇒ **全量轮从未覆盖该改动**。已投 outer 立案（两个候选根因未替它选）。 |
-| AC100 三详情页 token 化 | **在飞未落地** | worktree `quay-worktrees/gap-ac100-…` 存在；任务 status=ready（fan-in 后才翻 done） |
-| AC95 15 视图全上线 | **未开工** | status=ready；`slot-refill` deferred：`touches-overlap-in-flight (peer gap-ac100)` |
+| AC100 三详情页 token 化 | **达成（2026-08-17 00:31Z）** | 落地提交 `66e1e039`；worktree 已清。**独立核实两轮真·全量**（00:09:47 起 562.8s、00:20:57 起 512.4s，均 fullSuiteRan=true/green）覆盖了核心代码改动，末次 doc-only 跳过（6ms）经追溯确认无代码泄漏——两段 post-merge diff 均纯 `tasks/*.md`，非 delta-scope 缺陷复发。 |
+| AC95 15 视图全上线 | **在飞（impl 中，2026-08-17 00:4xZ 起）** | worktree 存在；`serve-handlers.ts` 锁随 AC100 落地释放后即被派发（`recommended` 首位） |
 | AC96 响应式双形态 | **未开工** | 同上，同 peer |
 | AC98 `/goal` 空态 | **未开工** | 同上，同 peer |
 | AC99 机读 JSON 接口 | **未开工** | 同上，同 peer（⚠️ 我 21:3xZ 曾误判它 disjoint，已撤回——它第 6 条 Touches 也是 `serve-handlers.ts`） |
@@ -606,6 +606,17 @@ round224  500.8s  跑时 load1≈1.66–12.38，3 个在飞【全是停摆的】
 ⛔ 不要为此专门造一轮。
 **⊢ 我为什么坚持记这条**：今天已两次因"两轮之间还有别的变量"拒绝下结论（42.7s、scope）。
 **这次结论对我有利（目标达成）——若这次不提负载，前两次的严格就只是选择性的。**
+
+**🟢 2026-08-17 00:3xZ 更新——AC100 达成，计数改为【达成 4 / 8】；AC95 已派发在飞**
+```
+落地提交 66e1e039；两轮真·全量已核（562.8s / 512.4s，均 fullSuiteRan=true/green，无 fail）
+末次 doc-only 跳过经追溯确认干净（两段 post-merge diff 均纯 tasks/*.md，无代码泄漏）
+⇒ 与 quay-init fix 那次「吞代码」明确不同；serve-handlers.ts 锁随之释放
+⇒ AC95 已被派发（recommended 首位，00:4xZ 起 impl 中）——人的第一条明令从「1/5 且唯一入口停摆」
+  走到「1/5 已达成 + 1/5 在飞」
+```
+**⊢ 下方"⛔ 结构性阻塞"段落所述的锁本身仍是真实缺陷**（已立案 `gap-directory-level-tasks-touch-global-lock`），
+**但它描述的是【当时】那个瞬间——AC100 land 后 serve-handlers.ts 已解锁，⛔ 不要因为下文仍在而误读为"现在还锁着"。**
 
 **⊢ 本阶段当前的唯一结构性阻塞（21:3xZ 实测，`slot-refill` 自己给的判词）**：
 ```
