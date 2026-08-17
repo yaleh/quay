@@ -835,13 +835,17 @@ async function preVerifiedBlockFor(task, worktree, root) {
   return extractBlockFromPrompts(prompts, "# preverified-round-block-start", "# preverified-round-block-end");
 }
 
-test("⑦ wiring — the fan-in prompt carries a verification-round write block guarded by suite_preverified=1", async (t) => {
+test("⑦ wiring — the fan-in prompt carries a verification-round write block guarded by full_suite_ran=true (both branches, shared writer + --preverified flag)", async (t) => {
   const { prompts } = await runWorkflow({
     args: { task: "gap-test-pvr", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-pvr", mergeTarget: "develop" },
   });
   const block = extractBlockFromPrompts(prompts, "# preverified-round-block-start", "# preverified-round-block-end");
   assert.ok(block.includes("pre-verified-round-record.ts"), "block must invoke the verification-round writer");
-  assert.ok(block.includes('"${suite_preverified:-0}" = "1"'), "block must be guarded by the pre-verified marker");
+  // Shared guard (AC3, gap-fan-in-realsuite-bypasses-verification-round-ledger): full_suite_ran=true ⇒ a
+  // full suite RAN in this fan-in (either this fan-in's detached run OR a pre-verified reuse) ⇒ write.
+  assert.ok(block.includes('[ "$full_suite_ran" = "true" ]'), "block must be guarded by full_suite_ran=true (the shared both-branch guard)");
+  assert.ok(block.includes('preverified_flag="${suite_preverified:-0}"'), "block must derive the preverified flag from the suite_preverified marker");
+  assert.ok(block.includes('--preverified "$preverified_flag"'), "block must pass the preverified flag to the shared writer");
   assert.ok(block.includes("--commit \"$suite_head\""), "block must pin the verified suite_head as commit");
   assert.ok(block.includes("--duration-ms \"$wall_ms\""), "block must reuse the capture's wall-clock (AC2)");
   // Placement: the write runs in step 4.5 (suite-record-block), BEFORE the capture is removed — all in the phase-2 prompt.
@@ -895,23 +899,27 @@ test("⑦ REAL pre-verified round — a reused capture (suite_preverified=1) wri
   assert.equal(rec.round, 1, "round = prior line count + 1");
 });
 
-test("⑦ REAL skip — a NON-pre-verified capture (no suite_preverified marker) writes NO verification-round record (normal full-suite path is full-suite-runner's job)", async (t) => {
+test("⑦ REAL real-suite — a NON-pre-verified capture (full_suite_ran=true, NO suite_preverified marker) writes ONE verification-round record with preverified:false (gap-fan-in-realsuite-bypasses-verification-round-ledger AC1)", async (t) => {
+  // THE DEFECT THIS TASK FIXES: the real-suite branch (a full suite that RAN inside this fan-in via the
+  // detached `setsid bash scripts/test.sh` path) left ZERO verification-round records (three real landings
+  // at 19:45/20:36/20:52, all 0 records — 2026-08-17). The shared guard (full_suite_ran=true) + shared
+  // writer (--preverified 0) must now produce a record for such a capture.
   const dir = makePreVerifiedWorktree();
   t.after(() => cleanup(dir));
   const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: dir, encoding: "utf8" }).stdout.trim();
-  const task = "gap-test-pvr-skip";
+  const task = "gap-test-realsuite";
   const capture = `/tmp/fan-in-suite-${task}.env`;
-  // A capture WITHOUT the suite_preverified marker — a fresh full-suite run in this fan-in (no reuse).
+  // A real detached run's capture: full_suite_ran=true, NO suite_preverified marker (this fan-in's own run).
   fs.writeFileSync(capture, [
     "full_suite_ran=true",
     "skip_reason=",
-    "cpu_s=null",
-    "cpu_source=not-wired",
-    "start_iso=2026-08-17T05:00:00.000Z",
-    "end_iso=2026-08-17T05:08:00.000Z",
-    "wall_ms=480000",
-    "load=4.5",
-    "lane_count=8",
+    "cpu_s=42.5",
+    "cpu_source=gnu-time",
+    "start_iso=2026-08-17T19:45:00.000Z",
+    "end_iso=2026-08-17T20:02:00.000Z",
+    "wall_ms=1020000",
+    "load=12.3",
+    "lane_count=16",
     "suite_exit=0",
     `suite_head=${head}`,
   ].join("\n") + "\n", "utf8");
@@ -919,8 +927,53 @@ test("⑦ REAL skip — a NON-pre-verified capture (no suite_preverified marker)
 
   const block = await preVerifiedBlockFor(task, dir, REPO_ROOT);
   const r = runBash(`suite_capture="${capture}"; . "$suite_capture"; ${block}`, { cwd: dir });
-  assert.equal(r.status, 0, `non-pre-verified must exit 0 (no write): ${r.stderr}`);
-  assert.equal(fs.existsSync(path.join(dir, ".quay", "verification-round.jsonl")), false, "no verification-round record for a non-pre-verified round (the normal path writes it via full-suite-runner)");
+  assert.equal(r.status, 0, `real-suite write must exit 0: ${r.stderr}`);
+  const ledger = path.join(dir, ".quay", "verification-round.jsonl");
+  assert.ok(fs.existsSync(ledger), "verification-round.jsonl was written for the real-suite branch");
+  const lines = fs.readFileSync(ledger, "utf8").trim().split("\n").filter(Boolean);
+  assert.equal(lines.length, 1, "exactly one record");
+  const rec = JSON.parse(lines[0]);
+  assert.equal(rec.preverified, false, "a real-suite round carries preverified:false (distinct from a reused-capture round)");
+  assert.equal(rec.state, "green");
+  assert.equal(rec.durationMs, 1020000, "durationMs = the REAL suite's wall-clock (this fan-in's run)");
+  assert.equal(rec.startedAt, "2026-08-17T19:45:00.000Z");
+  assert.equal(rec.laneCount, 16);
+  assert.equal(rec.load, 12.3);
+  assert.equal(rec.commit, head, "commit = the pinned suite_head");
+  assert.equal(rec.scope, "worktree");
+  assert.equal(rec.taskId, task);
+  assert.equal(rec.cpu_time_s, 42.5);
+  assert.equal(rec.cpu_source, "gnu-time");
+  assert.equal(rec.round, 1, "round = prior line count + 1");
+});
+
+test("⑦ REAL skip — a doc-only capture (full_suite_ran=false) writes NO verification-round record (no suite ran, nothing to account)", async (t) => {
+  const dir = makePreVerifiedWorktree();
+  t.after(() => cleanup(dir));
+  const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: dir, encoding: "utf8" }).stdout.trim();
+  const task = "gap-test-pvr-skip";
+  const capture = `/tmp/fan-in-suite-${task}.env`;
+  // A doc-only skip's capture (step 4 wrote skip_reason=doc-only-delta, full_suite_ran=false) — no suite
+  // ran, so there is NO verification-round record to write (the shared guard reads full_suite_ran=true).
+  fs.writeFileSync(capture, [
+    "full_suite_ran=false",
+    "skip_reason=doc-only-delta",
+    "cpu_s=null",
+    "cpu_source=not-wired",
+    "start_iso=2026-08-17T05:00:00.000Z",
+    "end_iso=2026-08-17T05:00:00.000Z",
+    "wall_ms=0",
+    "load=4.5",
+    "lane_count=1",
+    "suite_exit=0",
+    `suite_head=${head}`,
+  ].join("\n") + "\n", "utf8");
+  t.after(() => { try { fs.rmSync(capture, { force: true }); } catch (_) { /* best-effort */ } });
+
+  const block = await preVerifiedBlockFor(task, dir, REPO_ROOT);
+  const r = runBash(`suite_capture="${capture}"; . "$suite_capture"; ${block}`, { cwd: dir });
+  assert.equal(r.status, 0, `doc-only skip must exit 0 (no write): ${r.stderr}`);
+  assert.equal(fs.existsSync(path.join(dir, ".quay", "verification-round.jsonl")), false, "no verification-round record for a doc-only skip (no suite ran)");
 });
 
 // ── ⑦ fan-in orchestration bootstrap (gap-fan-in-orchestration-bootstrap-self-fix) ───────────────────
@@ -950,6 +1003,7 @@ test("⑦ worktree-resolution — every fan-in orchestration script call is ${wo
   const mustBeWorktreeRooted = [
     "select-static-checks-for-touches.ts --classify-delta", // step 2 (phase 1)
     "per-task-suite-record.ts",                             // step 4.5 (phase 2)
+    "pre-verified-round-record.ts",                         // step 4.5 (phase 2, both fan-in branches)
     "fan-in-ac-completion-gate.ts",                         // step 5 (phase 2)
     "fan-in-ff-merge.sh",                                   // step 5 (phase 2)
     "closure-lag-check.sh",                                 // step 5.5 (phase 2)

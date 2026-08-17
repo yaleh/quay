@@ -62,10 +62,10 @@ const BASE = {
 
 // ── AC1/AC2: the record shape ──────────────────────────────────────────────────────────────────────
 
-test("AC1/AC2 — buildPreVerifiedRoundRecord emits a SuiteRoundRecord-compatible record with preverified:true", () => {
+test("AC1/AC2 — buildPreVerifiedRoundRecord emits a SuiteRoundRecord-compatible record with preverified:true (default)", () => {
   const { record, error } = buildPreVerifiedRoundRecord({ ...BASE, cpuTimeS: "123.456", cpuSource: "gnu-time" });
   assert.equal(error, undefined, `build must succeed: ${error}`);
-  assert.equal(record.preverified, true, "the pre-verified marker is set (AC1)");
+  assert.equal(record.preverified, true, "the pre-verified marker defaults to true (backward compat)");
   assert.equal(record.state, "green", "a pre-verified round is green by construction (suite_exit=0)");
   assert.equal(record.startedAt, "2026-08-17T04:30:00.000Z");
   assert.equal(record.durationMs, 936519, "durationMs = the reused capture's wall-clock (AC2 semantics)");
@@ -78,6 +78,26 @@ test("AC1/AC2 — buildPreVerifiedRoundRecord emits a SuiteRoundRecord-compatibl
   assert.equal(record.runId, "fm-pre-1");
   assert.equal(record.cpu_time_s, 123.456);
   assert.equal(record.cpu_source, "gnu-time");
+});
+
+test("AC1/AC3 — the SHARED writer emits preverified:false for a REAL-suite round (--preverified 0, gap-fan-in-realsuite-bypasses-verification-round-ledger)", () => {
+  // The real-suite branch (a full suite that RAN inside this fan-in via the detached test.sh path) must
+  // produce a record from the SAME writer — the `preverified` boolean flips to false, every other field
+  // stays SuiteRoundRecord-compatible (AC3: 不复制).
+  const { record, error } = buildPreVerifiedRoundRecord({ ...BASE, preverified: "0", cpuTimeS: "42.5", cpuSource: "gnu-time" });
+  assert.equal(error, undefined, `build must succeed: ${error}`);
+  assert.equal(record.preverified, false, "a real-suite round carries preverified:false (distinct from a reused-capture round)");
+  assert.equal(record.state, "green", "a real-suite round is green by construction (the fan-in only writes after suite_exit=0)");
+  assert.equal(record.durationMs, 936519, "durationMs = the REAL suite's wall-clock from this fan-in's capture");
+  assert.equal(record.scope, "worktree");
+  assert.equal(record.commit, BASE.commit, "commit = the pinned suite_head");
+  assert.equal(record.cpu_time_s, 42.5);
+  assert.equal(record.cpu_source, "gnu-time");
+  // boolean + string forms both accepted
+  assert.equal(buildPreVerifiedRoundRecord({ ...BASE, preverified: "false" }).record.preverified, false);
+  assert.equal(buildPreVerifiedRoundRecord({ ...BASE, preverified: "true" }).record.preverified, true);
+  assert.equal(buildPreVerifiedRoundRecord({ ...BASE, preverified: "1" }).record.preverified, true);
+  assert.match(buildPreVerifiedRoundRecord({ ...BASE, preverified: "maybe" }).error ?? "", /preverified/);
 });
 
 test("AC2 — pass/fail/cancelled/tests are OMITTED (no fabricated test counts; a reader must not infer 0)", () => {
@@ -163,6 +183,33 @@ test("CLI — appends ONE valid JSON line with preverified:true; second append a
   const lines2 = fs.readFileSync(file, "utf8").trim().split("\n").filter(Boolean);
   assert.equal(lines2.length, 2, "append-only — second run adds a second line");
   assert.equal(JSON.parse(lines2[1]).round, 2, "round numbering continues");
+});
+
+test("CLI — --preverified 0 writes a REAL-suite record (preverified:false, gap-fan-in-realsuite-bypasses-verification-round-ledger)", () => {
+  const file = tmpFile("pvr-real-");
+  const args = [
+    "--task-id", BASE.taskId,
+    "--run-id", BASE.runId,
+    "--started-at", BASE.startedAt,
+    "--duration-ms", BASE.durationMs,
+    "--lane-count", BASE.laneCount,
+    "--load", BASE.load,
+    "--commit", BASE.commit,
+    "--preverified", "0",
+    "--cpu-time-s", "42.5",
+    "--cpu-source", "gnu-time",
+    "--record-file", file,
+    "--json",
+  ];
+  const r = spawnSync("node", ["--experimental-strip-types", WRITER, ...args], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.ok, true);
+  assert.equal(out.record.preverified, false);
+  assert.equal(out.record.cpu_time_s, 42.5);
+  const lines = fs.readFileSync(file, "utf8").trim().split("\n").filter(Boolean);
+  assert.equal(lines.length, 1);
+  assert.equal(JSON.parse(lines[0]).preverified, false);
 });
 
 test("CLI — fail-closed on a missing required field (exit 2, nothing written)", () => {

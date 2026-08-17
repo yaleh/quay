@@ -42,23 +42,24 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: 真跑 suite 的 fan-in 落地（`full_suite_ran=true` 且非 pre-verified）在 verification-round.jsonl 产生一条新记录（`preverified` 缺省/`false`、durationMs=真跑墙钟、scope=worktree），趋势账本对真跑分支恢复可见。
-- [ ] AC2: 记录 schema 与 full-suite-runner / pre-verified-round-record 既有记录兼容（`/tests` 与成本分析可读）。
-- [ ] AC3: pre-verified 分支写入不被破坏（回归）；两个分支共用同一入账函数/判定（不复制）。
-- [ ] AC4: 对照实测：一次真跑 fan-in 落地（无 capture）→ 产生记录；`/tests` 读得到。
-- [ ] AC5: 测试全绿 + `--for-task` scoped 门绿。
+- [x] AC1: 真跑 suite 的 fan-in 落地（`full_suite_ran=true` 且非 pre-verified）在 verification-round.jsonl 产生一条新记录（`preverified` 缺省/`false`、durationMs=真跑墙钟、scope=worktree），趋势账本对真跑分支恢复可见。
+- [x] AC2: 记录 schema 与 full-suite-runner / pre-verified-round-record 既有记录兼容（`/tests` 与成本分析可读）。
+- [x] AC3: pre-verified 分支写入不被破坏（回归）；两个分支共用同一入账函数/判定（不复制）。
+- [x] AC4: 对照实测：一次真跑 fan-in 落地（无 capture）→ 产生记录；`/tests` 读得到。
+- [x] AC5: 测试全绿 + `--for-task` scoped 门绿。
 
 ## Definition of Done
 
-- [ ] 真跑分支的 fan-in 落地补 verification-round 入账（与 pre-verified 共用 writer），趋势账本对两条落地路径都可见，scoped + 全量绿。
+- [x] 真跑分支的 fan-in 落地补 verification-round 入账（与 pre-verified 共用 writer），趋势账本对两条落地路径都可见，scoped + 全量绿。
 
 ## Touches
 
-- plugin/workflows/fan-in-execute.js（step 4.5 真跑分支补 verification-round 入账；双拷贝）
+- plugin/workflows/fan-in-execute.js（step 4.5 真跑分支补 verification-round 入账——共用判定 full_suite_ran=true + --preverified 标记；双拷贝）
 - .claude/workflows/fan-in-execute.js（同 dual-copy 的 landed 副本，与 plugin/workflows 逐字节一致）
-- plugin/scripts/pre-verified-round-record.ts（或新增等价真跑 writer——与 pre-verified 共用结构）
-- plugin/test/fan-in-execute-paths.test.mjs（真跑分支 verification-round 入账路径测试）
-- plugin/test/pre-verified-round-record.test.mjs（共用 writer 回归）
-- packages/quay/test/serve-ac95-views.test.mjs（/tests 读取真跑记录）
-- capability-catalog.sh（新增/变更 writer 的能力声明）
+- plugin/scripts/pre-verified-round-record.ts（共用 writer 加 --preverified 标志：1=pre-verified 复用，0=真跑；缺省 true 向后兼容）
+- plugin/scripts/select-static-checks-for-touches.ts（FAN_IN_ORCHESTRATION_FILES 加 pre-verified-round-record.ts——本任务改 writer，fan-in 自举须用自己的版本）
+- plugin/test/fan-in-execute-paths.test.mjs（真跑分支 verification-round 入账路径测试 + pre-verified 回归 + worktree-resolution 加 writer）
+- plugin/test/pre-verified-round-record.test.mjs（共用 writer 回归：--preverified 0 真跑记录 + 缺省 true 兼容）
+- packages/quay/test/serve-ac95-views.test.mjs（/tests 读取真跑记录 preverified:false）
+- plugin/scripts/capability-catalog.sh（变更 writer 的能力声明：共用双分支 writer）
 - tasks/gap-fan-in-realsuite-bypasses-verification-round-ledger.md（自身）

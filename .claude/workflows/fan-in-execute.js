@@ -69,13 +69,17 @@ export const meta = {
 //     捕获 suite 起止/CPU（GNU time）/判定到 /tmp 临时 env；step 4.5 全绿后 # suite-record-block 写
 //     per-task-suite-record（plugin/scripts/per-task-suite-record.ts）——含跳过全量（fullSuiteRan=
 //     false + skipReason=doc-only-delta，判据2 能取假），写失败 HARD FAIL（AC1 判据1 义务）。
-//  ⚠️ verification-round 入账（gap-preverified-suite-bypasses-verification-round-ledger）：pre-verified
-//     路径复用 capture（suite 在回合外已跑绿）从不触发 full-suite-runner 的 verification-round 写入，
-//     趋势账本（/tests + 成本分析数据源）对最新落地路径变盲。step 4 在复用 capture 时追加
-//     suite_preverified=1 标记；step 4.5 # preverified-round-block 在标记为 1 时写 verification-round
-//     （plugin/scripts/pre-verified-round-record.ts，含 preverified:true + 复用 capture 的 wall_ms），
-//     写失败 HARD FAIL（AC1 判据1 义务）。正常全量路径由 full-suite-runner 写 verification-round，
-//     fan-in 不重复写。
+//  ⚠️ verification-round 入账（gap-preverified-suite-bypasses-verification-round-ledger +
+//     gap-fan-in-realsuite-bypasses-verification-round-ledger）：本 fan-in 的 suite 走了【本 workflow
+//     内的 detached 直跑】（9327056a 的 setsid `bash scripts/test.sh`，不经 full-suite-runner.ts——后者
+//     是唯一写 verification-round 的 full-suite 入口）或 pre-verified 复用（ec434eb8，capture 在回合外
+//     已跑绿）⇒ 两分支都从不触发 full-suite-runner 的 verification-round 写入，趋势账本（/tests + 成本
+//     分析数据源）对最新落地路径变盲。step 4 在复用 capture 时追加 suite_preverified=1 标记；step 4.5
+//     # preverified-round-block 的【共用判定】是 full_suite_ran=true（有真跑——本 fan-in 直跑或复用），
+//     preverified 布尔由 suite_preverified 标记决定（1=复用，0=本 fan-in 真跑），两分支共用同一 writer
+//     （plugin/scripts/pre-verified-round-record.ts --preverified <0|1>），写失败 HARD FAIL（AC1 判据1
+//     义务）。doc-only 跳过（full_suite_ran=false）无 suite 可记账，不写。正常全量路径由
+//     full-suite-runner 写 verification-round，fan-in 不重复写。
 
 // args 到达时是【字符串】不是对象（实测 wf_6f8cc053-f52）：直接 args.x 会静默 undefined。
 const A = (() => { try { return typeof args === 'string' ? JSON.parse(args) : (args ?? {}) } catch { return {} } })()
@@ -451,18 +455,22 @@ else
     exit 2
   fi
 fi
-# verification-round 入账（gap-preverified-suite-bypasses-verification-round-ledger AC1/AC2）：
-# pre-verified 路径复用 capture（suite 在回合外已跑绿）写 verification-round.jsonl（含 preverified 标记），
-# 不再让趋势账本（/tests + 成本分析数据源）对最新落地路径变盲。正常全量路径由 full-suite-runner 写
-# verification-round，fan-in 不重复写；本写入只在 suite_preverified=1（pre-verified 复用）时发生。
+# verification-round 入账（gap-preverified-suite-bypasses-verification-round-ledger AC1/AC2 +
+#   gap-fan-in-realsuite-bypasses-verification-round-ledger AC1/AC2）：本 fan-in 的 suite 走了【本
+#   workflow 内的 detached 直跑】（不经 full-suite-runner.ts——唯一写 verification-round 的 full-suite
+#   入口）或 pre-verified 复用（capture 在回合外已跑绿）⇒ 写 verification-round.jsonl，不让趋势账本
+#   （/tests + 成本分析数据源）对最新落地路径变盲。共用判定：full_suite_ran=true ⇒ 有真跑（本 fan-in
+#   直跑 或 复用），两分支共用同一 writer；preverified 布尔由 suite_preverified 标记决定（1=复用，
+#   0=本 fan-in 真跑）。doc-only 跳过（full_suite_ran=false）无 suite 可记账，不写。
 # 写失败 ⇒ HARD FAIL（AC1 判据1 义务）。
 # preverified-round-block-start
-if [ "\${suite_preverified:-0}" = "1" ]; then
-  if ! node --experimental-strip-types plugin/scripts/pre-verified-round-record.ts \
+if [ "$full_suite_ran" = "true" ]; then
+  preverified_flag="\${suite_preverified:-0}"
+  if ! node --experimental-strip-types ${worktree}/plugin/scripts/pre-verified-round-record.ts \
     --task-id ${task} --run-id ${runId} --started-at "$start_iso" --duration-ms "$wall_ms" \
-    --lane-count "$lane_count" --load "$load" --commit "$suite_head" \
+    --lane-count "$lane_count" --load "$load" --commit "$suite_head" --preverified "$preverified_flag" \
     --cpu-time-s "$cpu_s" --cpu-source "$cpu_source"; then
-    echo "FATAL: pre-verified-round-record 入账失败（AC1 判据1 义务）⇒ 不翻 done、不 ff" >&2
+    echo "FATAL: verification-round 入账失败（AC1 判据1 义务）⇒ 不翻 done、不 ff" >&2
     exit 2
   fi
 fi

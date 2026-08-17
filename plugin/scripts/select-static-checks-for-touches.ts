@@ -325,6 +325,7 @@ export const FAN_IN_ORCHESTRATION_FILES = [
   "plugin/scripts/select-static-checks-for-touches.ts",
   "plugin/scripts/fan-in-ff-merge.sh",
   "plugin/scripts/per-task-suite-record.ts",
+  "plugin/scripts/pre-verified-round-record.ts", // the shared verification-round writer (both fan-in branches)
   "plugin/scripts/full-suite-runner.ts",
 ];
 

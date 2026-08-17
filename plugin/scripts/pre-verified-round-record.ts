@@ -1,14 +1,48 @@
 #!/usr/bin/env node
-// pre-verified-round-record.ts — gap-preverified-suite-bypasses-verification-round-ledger AC1/AC2
-// writer: append ONE verification-round.jsonl record for a PRE-VERIFIED full-suite round.
+// pre-verified-round-record.ts — the SHARED verification-round writer for the fan-in suite paths.
+// gap-preverified-suite-bypasses-verification-round-ledger AC1/AC2 (the pre-verified branch) +
+// gap-fan-in-realsuite-bypasses-verification-round-ledger AC1/AC2 (the real-suite branch).
+// writer: append ONE verification-round.jsonl record for a full-suite round that ran OUTSIDE
+// full-suite-runner.ts (the only other verification-round writer) — i.e. a fan-in landing whose
+// suite went through fan-in-execute.js's detached `bash scripts/test.sh` path.
 //
 // WHY IT EXISTS: the normal full-suite path writes verification-round.jsonl via full-suite-runner.ts's
-// appendVerificationRound. The fan-in pre-verified-suite path (fan-in-execute.js step 4, ec434eb8)
-// SKIPS the suite re-run and reuses a capture produced by the caller OUTSIDE the fan-in subagent's
-// round (suite_head pinned to the worktree HEAD + suite_exit=0) — so it never calls full-suite-runner
-// and never triggers a verification-round write. The trend ledger (the `/tests` page + suite-cost
-// analysis data source) goes blind to the most-used landing path (the 7h+ gap this task closes:
-// round227 at 04:13:31Z was the last row while 4 real fan-ins landed silently).
+// appendVerificationRound. The fan-in paths (fan-in-execute.js step 4) run the suite EITHER as a
+// pre-verified reuse (a capture produced by the caller OUTSIDE the fan-in subagent's round — suite_head
+// pinned to the worktree HEAD + suite_exit=0, ec434eb8) OR as a real detached run in this fan-in
+// (`setsid bash -c 'bash scripts/test.sh'`, 9327056a) — BOTH never call full-suite-runner and never
+// trigger a verification-round write. The trend ledger (the `/tests` page + suite-cost analysis data
+// source) went blind to the most-used landing path (the 7h+ gap gap-preverified closed; the real-suite
+// branch stayed blind at 19:45/20:36/20:52 — three real landings, zero records, 2026-08-17).
+//
+// THIS WRITER IS SHARED (AC3): both fan-in branches call the same writer + the same guard
+// (`full_suite_ran=true`), and the `preverified` boolean (1 = reused capture, 0 = real run in this
+// fan-in) comes from the suite_preverified marker — no duplicated writer for the real-suite branch
+// (hard rule 5b: 在某处修好 X ≠ X 只在那一处).
+//
+// Record shape: SuiteRoundRecord-compatible (full-suite-runner.ts:1265) so `/tests` (parseVerificationRound
+// in packages/quay/src/observation.ts) and trend-check read it. Fields:
+//   round        = prior line count + 1 (same numbering appendVerificationRound uses)
+//   startedAt    = the suite start (start_iso)
+//   durationMs   = the suite wall-clock (wall_ms) — a real detached run's own wall clock, or the
+//                  reused capture's wall clock on the pre-verified path
+//   laneCount    = the suite's lane_count
+//   load         = the suite's load (the /proc/loadavg 1min at the suite's end)
+//   state        = "green" (both fan-in branches only write after suite_exit=0)
+//   runner       = nominal identity (default "outer", matching every existing verification-round row)
+//   scope        = "worktree" (the fan-in suite ran against the task worktree's HEAD)
+//   commit       = the pinned suite_head (the exact HEAD that was verified)
+//   cpu_time_s / cpu_source = the capture's GNU-time CPU seconds / provenance (AC6: explicit null +
+//                  not-wired when the source was unavailable, NEVER 0)
+//   preverified  = 1 for a reused-capture round, 0 for a real suite run in this fan-in (AC1 marker —
+//                  distinguishes a reused-capture round from a full-suite-runner row AND from a real
+//                  detached run)
+//   taskId/runId = which fan-in produced this round (traceability; tolerated by every reader)
+//
+// pass/fail/cancelled/tests are OMITTED — the fan-in capture carries no test counts (the suite ran
+// outside full-suite-runner). A green round has fail=0/cancelled=0, but the pass count is genuinely
+// unknown; the /tests reader renders null as "—" and trend-check skips per-test cost for a row with
+// no tests — both honest, neither fabricates a count.
 //
 // This writer is the equivalent writer the task mandates (a NEW module — it does NOT modify
 // plugin/scripts/per-task-suite-record.ts, the per-task ledger writer, so the two ledgers stay
@@ -44,16 +78,19 @@
 //   node --experimental-strip-types plugin/scripts/pre-verified-round-record.ts
 //       --task-id <taskId> --run-id <runId> --started-at <iso> --duration-ms <ms>
 //       --lane-count <n> --load <n> --commit <sha>
-//       [--cpu-time-s <n|null>] [--cpu-source <name>] [--runner <name>]
-//       [--root <dir>] [--record-file <file>] [--json] [--help]
+//       [--preverified <0|1|true|false>] [--cpu-time-s <n|null>] [--cpu-source <name>]
+//       [--runner <name>] [--root <dir>] [--record-file <file>] [--json] [--help]
 //
-//   --task-id         the fan-in task whose pre-verified suite landed (required)
+//   --task-id         the fan-in task whose suite landed (required)
 //   --run-id          the fan-in runId (required)
-//   --started-at      the pre-verification suite start, ISO-8601 or epoch-seconds (required)
-//   --duration-ms     the pre-verification suite wall-clock in ms (required, non-negative)
+//   --started-at      the suite start, ISO-8601 or epoch-seconds (required)
+//   --duration-ms     the suite wall-clock in ms (required, non-negative)
 //   --lane-count      suite lane count (required, non-negative)
-//   --load            /proc/loadavg 1min at the pre-verification suite's end (required, non-negative)
+//   --load            /proc/loadavg 1min at the suite's end (required, non-negative)
 //   --commit          the pinned verified HEAD (suite_head), 40-hex (required)
+//   --preverified     the reuse marker: 1/true = this round REUSED a caller-produced capture
+//                     (the pre-verified branch); 0/false = the suite RAN inside this fan-in (the
+//                     real-suite branch). Default 1/true (backward compat).
 //   --cpu-time-s      the suite's CPU seconds — a real number, or the literal null when the source
 //                     was considered and UNAVAILABLE (AC6; 0 normalizes to null)
 //   --cpu-source      WHERE the cpu_time_s came from ('gnu-time' / 'not-wired'; optional)
@@ -126,17 +163,27 @@ export function buildPreVerifiedRoundRecord(o) {
   }
   const runner = o.runner ? String(o.runner).trim() : "outer";
   if (!runner) return { error: "--runner must be a non-empty string" };
+  // preverified — the shared writer's branch marker (AC3): 1/true = reused capture (pre-verified
+  // branch), 0/false = the suite RAN inside this fan-in (real-suite branch). Default true for
+  // backward compat with the pre-verified callers that predate the shared-flag form.
+  let preverified = true;
+  if (o.preverified != null) {
+    const pv = String(o.preverified).trim().toLowerCase();
+    if (pv === "0" || pv === "false") preverified = false;
+    else if (pv === "1" || pv === "true") preverified = true;
+    else return { error: `--preverified must be 0|1|true|false (got ${JSON.stringify(o.preverified)})` };
+  }
   const record = {
     round: 0, // computed from prior line count in the appender
     startedAt,
     durationMs,
     laneCount,
     load,
-    state: "green", // the pre-verified path only reuses a capture whose suite_exit=0
+    state: "green", // both fan-in branches only write after suite_exit=0
     runner,
-    scope: "worktree", // the pre-verified suite ran against the task worktree's HEAD
+    scope: "worktree", // the fan-in suite ran against the task worktree's HEAD
     commit,
-    preverified: true, // AC1 marker — this row is a reused-capture round, not a full-suite-runner run
+    preverified, // AC1 marker — distinguishes a reused-capture round from a real detached run
     taskId: String(taskId).trim(),
     runId: String(runId).trim(),
   };
@@ -163,24 +210,28 @@ function getArgValue(args, name) {
   return idx === -1 ? undefined : args[idx + 1];
 }
 
-const usage = `pre-verified-round-record.ts — AC1/AC2 writer: append ONE verification-round.jsonl record
-  for a PRE-VERIFIED full-suite round (the fan-in pre-verified-suite path, where the suite ran OUTSIDE
-  the fan-in subagent's round and the capture was reused). SuiteRoundRecord-compatible + preverified:true.
+const usage = `pre-verified-round-record.ts — SHARED AC1/AC2 writer: append ONE verification-round.jsonl
+  record for a full-suite round that ran OUTSIDE full-suite-runner.ts (the fan-in detached suite paths):
+  the pre-verified branch (suite ran OUTSIDE the fan-in subagent's round, capture reused — preverified:1)
+  AND the real-suite branch (suite ran detached inside this fan-in — preverified:0). SuiteRoundRecord-
+  compatible; the preverified boolean marks which branch produced the round.
 
 Usage:
   node --experimental-strip-types plugin/scripts/pre-verified-round-record.ts
       --task-id <taskId> --run-id <runId> --started-at <iso> --duration-ms <ms>
       --lane-count <n> --load <n> --commit <sha>
-      [--cpu-time-s <n|null>] [--cpu-source <name>] [--runner <name>]
-      [--root <dir>] [--record-file <file>] [--json] [--help]
+      [--preverified <0|1|true|false>] [--cpu-time-s <n|null>] [--cpu-source <name>]
+      [--runner <name>] [--root <dir>] [--record-file <file>] [--json] [--help]
 
-  --task-id         the fan-in task whose pre-verified suite landed (required)
+  --task-id         the fan-in task whose suite landed (required)
   --run-id          the fan-in runId (required)
-  --started-at      the pre-verification suite start, ISO-8601 or epoch-seconds (required)
-  --duration-ms     the pre-verification suite wall-clock in ms (required, non-negative)
+  --started-at      the suite start, ISO-8601 or epoch-seconds (required)
+  --duration-ms     the suite wall-clock in ms (required, non-negative)
   --lane-count      suite lane count (required, non-negative)
-  --load            /proc/loadavg 1min at the pre-verification suite's end (required, non-negative)
+  --load            /proc/loadavg 1min at the suite's end (required, non-negative)
   --commit          the pinned verified HEAD (suite_head), 40-hex (required)
+  --preverified     1/true = reused a caller-produced capture (pre-verified branch); 0/false = the
+                    suite RAN inside this fan-in (real-suite branch). Default 1/true.
   --cpu-time-s      the suite's CPU seconds — a real number, or the literal null when the source was
                     considered and UNAVAILABLE (AC6; 0 normalizes to null)
   --cpu-source      WHERE the cpu_time_s came from ('gnu-time' / 'not-wired'; optional)
@@ -218,6 +269,7 @@ export function main(argv) {
     laneCount: getArgValue(args, "--lane-count"),
     load: getArgValue(args, "--load"),
     commit: getArgValue(args, "--commit"),
+    preverified: getArgValue(args, "--preverified"),
     cpuTimeS: getArgValue(args, "--cpu-time-s"),
     cpuSource: getArgValue(args, "--cpu-source"),
     runner: getArgValue(args, "--runner"),

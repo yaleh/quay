@@ -277,6 +277,32 @@ test("AC2: parseVerificationRound reads a PRE-VERIFIED round record (gap-preveri
   assert.equal(r.runner, "outer");
 });
 
+test("AC2: parseVerificationRound reads a REAL-SUITE fan-in round record (gap-fan-in-realsuite-bypasses-verification-round-ledger) — preverified:false (distinct from a reused-capture round), absent pass/fail/cancelled parse as null", () => {
+  // The shape plugin/scripts/pre-verified-round-record.ts writes with --preverified 0: the real-suite
+  // branch (a full suite that RAN inside this fan-in via the detached `bash scripts/test.sh` path).
+  // Same SuiteRoundRecord-compatible row as the pre-verified record, but preverified:false marks it as a
+  // REAL run — the /tests reader must render it (absent counts → null) and tolerate the unknown fields.
+  const line = JSON.stringify({
+    round: 229, startedAt: "2026-08-17T19:45:00.000Z", durationMs: 1020000, laneCount: 16, load: 12.3,
+    state: "green", runner: "outer", scope: "worktree",
+    commit: "37b8afcf9d09a5e5f5f5f5f5f5f5f5f5f5f5f5f",
+    cpu_time_s: 2592, cpu_source: "gnu-time",
+    preverified: false, taskId: "gap-fan-in-turn-budget-suite-timeout", runId: "fm-1",
+  });
+  const r = parseVerificationRound(line);
+  assert.equal(r.round, 229);
+  assert.equal(r.startedAt, "2026-08-17T19:45:00.000Z");
+  assert.equal(r.durationMs, 1020000, "durationMs = the real suite's wall-clock");
+  assert.equal(r.state, "green");
+  assert.equal(r.scope, "worktree");
+  assert.equal(r.commit, "37b8afcf9d09a5e5f5f5f5f5f5f5f5f5f5f5f5f");
+  assert.equal(r.pass, null, "an absent pass count renders as null, never a fabricated 0");
+  assert.equal(r.fail, null);
+  assert.equal(r.cancelled, null);
+  assert.equal(r.tests, null);
+  assert.equal(r.runner, "outer");
+});
+
 test("AC3: readTests reports empty when verification-round.jsonl is absent", () => {
   const ws = makeWorkspace("ac95-empty-");
   try {
