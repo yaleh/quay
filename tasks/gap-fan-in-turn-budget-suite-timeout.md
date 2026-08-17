@@ -67,4 +67,4 @@ workflow 已承载 suite（detached + 脚本控制流等待），正常情况下
 - .claude/workflows/fan-in-execute.js（双拷贝，workflows-dual-copy-drift-check 要求 byte-identical）
 - plugin/test/fan-in-execute-paths.test.mjs（取假对照 + ⑧ 回合预算承载组）
 - tasks/gap-fan-in-turn-budget-suite-timeout.md（自身）
-- ~~plugin/scripts/fan-in-ff-merge.sh（若恢复路径脚本化）~~ —— 未脚本化（workflow 自身承载 suite，恢复路径为 fallback 文档，见上）
+（注：plugin/scripts/fan-in-ff-merge.sh 未脚本化——workflow 自身承载 suite，恢复路径为上方 fallback 文档）
