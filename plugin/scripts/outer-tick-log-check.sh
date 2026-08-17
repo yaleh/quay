@@ -26,6 +26,10 @@
 #         该 tick 时刻为空）⇒ FAIL（「说动了却没动」）。trace 窗口锚定该 tick 自己的起点（上一行
 #         写入/行内 epoch/保守回退），不是 log 写入时刻——act-then-log 下动作证据提交在 log 前，
 #         窗口必须含它（gap-outer-tick-log-check-trace-window-anchored-at-log-mtime）。
+#       - ⛔ 监控 tick 豁免（gap-outer-tick-log-l2-monitoring-tick-false-red）：correct 判词 + 窗口无
+#         commit + 行带完整读数举证（B13 五条 + A22 ready-pool + A23 AC81 输出）⇒ 合法监控 tick，不报
+#         （监控 tick 按构造无 develop commit，它的「动作」就是读数本身）。无读数举证仍报——豁免不
+#         压布尔，防欺骗保留（escalate/unblock 声称具体动作，即使带读数也不豁免）。
 #   L3 新鲜度上界：行时间 > 上界 ⇒ 跳过 L2（只跑 L1 自洽）——不拿此刻真值判 20 分钟前的行。
 #
 # 用法：
@@ -116,6 +120,25 @@ INEQ_LINE="$(printf '%s' "$LAST_SECTION" | grep -m1 '^- 五条不等式:' || tru
 # 区分「真跑了 A23 并留输出」与「散文讨论 A23 而无产物」（硬规则⑨：缺失则判 RED）。旧 inner 的
 # A23 执行模式两数行（`main_thread_edits=…/agent_dispatches=…`）无状态词 ⇒ 不算 AC81 A23 输出。
 A23_LINE="$(printf '%s' "$LAST_SECTION" | grep -m1 -E 'A23.*(code=[0-9]|VIOLATED|NOT-EVALUATED|CRITICAL|\bOK\b)' || true)"
+# A22 ready-pool 读数行判定（监控 tick 豁免用，gap-outer-tick-log-l2-monitoring-tick-false-red）：
+# A22 是每轮必跑的 ready-pool-check --apply 测量；真实读数形如 `A22 … pool=N floor=M deficit=K
+# promotions=[…]`（带 pool= 数字或 promotions= 列表）。散文提到 A22 而无读数不计（同 A23 的产物
+# 判定，硬规则⑨）。
+A22_LINE="$(printf '%s' "$LAST_SECTION" | grep -m1 -E 'A22.*(pool=[0-9]+|promotions=)' || true)"
+
+# ── 监控 tick 判定（gap-outer-tick-log-l2-monitoring-tick-false-red）────────────────────────
+# L2 trace 判据要求动作 tick 在 [tick 起点, log 写入] 窗口内有 git 提交（防「判词写了但没做事」）。
+# 但纯监控 tick（在飞=cap、无晋升、无派发、无新立案）每轮只产出读数（B13 五条 + A22 ready-pool +
+# A23 AC81 输出），【按构造没有 develop commit】——它做的「动作」就是这些测量本身。tick-log 行自带
+# 的完整读数举证就是它已执行的证据，只是 gitignore 排除使 L2 看不到。
+# ⇒ 判据：动作分类=correct 且窗口无 commit 时，行带完整读数举证（B13 + A22 + A23）⇒ 合法监控 tick，
+# 不报 action-claimed-but-no-git-trace。⛔ 不压布尔（不是「无 commit 就豁免」）——行无读数举证仍报
+# （AC2 防欺骗保留：correct 判词 + 无读数 + 无 commit ⇒ 仍 FAIL）。⛔ 只豁免 correct——escalate/unblock
+# 声称的是具体动作（派发/升级），即使带读数也必须留 git 痕迹，豁免它们才是削弱防欺骗。
+MONITORING_TICK=0
+if [ "$ACTION" = "correct" ] && [ -n "$INEQ_LINE" ] && [ -n "$A22_LINE" ] && [ -n "$A23_LINE" ]; then
+  MONITORING_TICK=1
+fi
 
 # ── L1 行内自洽（始终跑）──────────────────────────────────────────────────────────────
 # no-action 必须带五条读数且全假。
@@ -200,6 +223,8 @@ fi
 # 实测真值来源：--truth 注入（测试接缝）优先；否则只在真实仓库根下跑命令重测
 # （fixture --root 指向非仓库目录且无 --truth 时命令不可用 ⇒ 跳过 L2，只判 L1）。
 L2_FAIL=""
+# 监控 tick 豁免本次是否实际生效（PASS 时在 JSON 里报出，可区分「普通 PASS」与「监控豁免 PASS」）
+MONITORING_EXEMPT=0
 if [ "$IS_FRESH" = "1" ] && [ -n "$TRUTH" ]; then
   # --truth "10100"：五字符 ①-⑤，1=真。
   INEQ1_TRUE="${TRUTH:0:1}"; INEQ2_TRUE="${TRUTH:1:1}"; INEQ3_TRUE="${TRUTH:2:1}"
@@ -220,8 +245,9 @@ if [ "$IS_FRESH" = "1" ] && [ -n "$TRUTH" ]; then
       TRACE_COUNT="$(git -C "$ROOT" log --since="@$TRACE_START_EPOCH" $TRACE_UNTIL --oneline 2>/dev/null | wc -l | tr -d ' ')"
       [ -n "$TRACE_COUNT" ] && [ "$TRACE_COUNT" -gt 0 ] && TRACE_EMPTY=0
     fi
+    # 窗口无 commit：监控 tick（correct + 完整读数举证）豁免；否则判欺骗（AC2 保留）。
     if [ "$TRACE_EMPTY" = "1" ] && [ -n "$TRACE_START_EPOCH" ]; then
-      L2_FAIL="action-claimed-but-no-git-trace"
+      if [ "$MONITORING_TICK" = "1" ]; then MONITORING_EXEMPT=1; else L2_FAIL="action-claimed-but-no-git-trace"; fi
     fi
   fi
 elif [ "$IS_FRESH" = "1" ] && [ -d "$ROOT/.git" ]; then
@@ -277,8 +303,9 @@ elif [ "$IS_FRESH" = "1" ] && [ -d "$ROOT/.git" ]; then
       TRACE_COUNT="$(git -C "$ROOT" log --since="@$TRACE_START_EPOCH" $TRACE_UNTIL --oneline 2>/dev/null | wc -l | tr -d ' ')"
       [ -n "$TRACE_COUNT" ] && [ "$TRACE_COUNT" -gt 0 ] && TRACE_EMPTY=0
     fi
+    # 同 --truth 接缝：监控 tick（correct + 完整读数举证）豁免无 commit；无举证仍判欺骗。
     if [ "$TRACE_EMPTY" = "1" ] && [ -n "$TRACE_START_EPOCH" ]; then
-      L2_FAIL="action-claimed-but-no-git-trace"
+      if [ "$MONITORING_TICK" = "1" ]; then MONITORING_EXEMPT=1; else L2_FAIL="action-claimed-but-no-git-trace"; fi
     fi
   fi
 fi
@@ -355,8 +382,12 @@ fi
 
 # PASS
 if [ "$JSON" = 1 ]; then
-  printf '{"ok":true,"action":"%s","tickTime":"%s","fresh":%s,"checked":true}\n' "${ACTION:-<none>}" "$TICK_TIME" "$IS_FRESH"
+  printf '{"ok":true,"action":"%s","tickTime":"%s","fresh":%s,"monitoring":%s,"checked":true}\n' "${ACTION:-<none>}" "$TICK_TIME" "$IS_FRESH" "$MONITORING_EXEMPT"
 else
-  echo "outer-tick-log-check: PASS — last tick (${TICK_TIME:-?}, action=${ACTION:-<none>}) is self-consistent (fresh=$IS_FRESH)"
+  if [ "$MONITORING_EXEMPT" = "1" ]; then
+    echo "outer-tick-log-check: PASS — last tick (${TICK_TIME:-?}, action=${ACTION:-<none>}) is a monitoring tick（correct + 完整读数举证，无 git 动作按构造合法，监控豁免） (fresh=$IS_FRESH)"
+  else
+    echo "outer-tick-log-check: PASS — last tick (${TICK_TIME:-?}, action=${ACTION:-<none>}) is self-consistent (fresh=$IS_FRESH)"
+  fi
 fi
 exit 0
