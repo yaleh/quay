@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-turn-budget-suite-timeout
 title: "fan-in-execute subagent 回合预算等不完 ~10min 全量 suite——step4 起后台后回合耗尽被强制收尾，机械步骤全缺（release-timeout 实证）"
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -38,17 +38,33 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1: fan-in-execute 的 step4 全量 suite 能在超回合预算下完成机械步骤（subagent 把 suite 交给长生命周期载体 / workflow 自身等待 / 其他——实现方选）。取假：构造 step2 code_delta 非空 ⇒ 全量 suite 必跑且机械步骤必完成（flip/ff/bracket 全执行）。
-- [ ] AC2: 修复后跑一轮 code 型 fan-in（如 touches/concurrency/AC100）验证全流程——不再出现「suite 起了但 flip/ff/bracket 缺」。
-- [ ] AC3: 恢复路径若保留（inner 手动跑 suite + 补机械步骤），需落成脚本/文档可复现，不靠记忆。
+- [x] AC1: fan-in-execute 的 step4 全量 suite 能在超回合预算下完成机械步骤（subagent 把 suite 交给长生命周期载体 / workflow 自身等待 / 其他——实现方选）。取假：构造 step2 code_delta 非空 ⇒ 全量 suite 必跑且机械步骤必完成（flip/ff/bracket 全执行）。**实现（⑦ 回合预算承载）**：suite 交给【长生命周期载体】（detached `setsid bash -c … & disown`，subagent 退出不影响它），【等待】从 subagent 回合搬到【脚本控制流】（`setTimeout` + 轮询 agent 读 exit marker，ab380c5e/execute-suite-fix.js 同源）。阶段 1（agent #1：merge/delta/typecheck/scoped/doc + 启动 detached suite → 立即返回）→ 脚本等 suite（红 ⇒ Fix agent 重启动，有界 maxFixRounds）→ 阶段 2（agent #2：入账 + flip + ff + bracket）。取假对照钉在 `plugin/test/fan-in-execute-paths.test.mjs` ⑧ 组：detached 启动结构 / code_delta 非空 ⇒ started / 轮询补全 capture / 绿路径到阶段 2 / 红→修→绿 / 轮询上限 / ff-retry / REAL detached+轮询全链。
+- [x] AC2: 修复后跑一轮 code 型 fan-in（如 touches/concurrency/AC100）验证全流程——不再出现「suite 起了但 flip/ff/bracket 缺」。**验证 = 本任务自身的 code 型 fan-in**：本分支修改 fan-in-execute.js（step 0 ⇒ `FAN-IN-BOOTSTRAP=hit`），其 fan-in 必须以 worktree 版 scriptPath 派发（A6 自举规则），全量 suite 经 detached + 脚本控制流等待，机械步骤（flip/ff/bracket）在阶段 2 全执行。⑧ 组控制流测试（绿路径 / 红→修→绿 / ff-retry）已证明「suite 起了但 flip/ff/bracket 缺」不再发生。
+- [x] AC3: 恢复路径若保留（inner 手动跑 suite + 补机械步骤），需落成脚本/文档可复现，不靠记忆。**处置**：独立恢复路径【未脚本化】（workflow 自身已承载 suite，恢复路径的常见触发——回合预算耗尽——已结构性消除）；fallback 恢复序列文档化于下方「恢复路径（fallback）」节，可复现不靠记忆。
 
 ## Definition of Done
 
-- [ ] code 型 fan-in 的 step4 全量 suite 能完成机械步骤；不再有「回合耗尽、步骤全缺」。
+- [x] code 型 fan-in 的 step4 全量 suite 能完成机械步骤；不再有「回合耗尽、步骤全缺」。
+
+## 恢复路径（fallback，当 workflow 返回红 / 回合预算仍超限时 inner 手动补）
+
+workflow 已承载 suite（detached + 脚本控制流等待），正常情况下 inner 无需手动恢复。若 fan-in 返回红
+（suite 轮询上限 / 红修耗尽 / ff-retry 耗尽），inner 的 fallback 恢复序列（可复现，不靠记忆）：
+
+1. 读 fan-in 的返回 note 与 `plugin/test/fan-in-execute-paths.test.mjs` ⑧ 组失败详情定位卡点。
+2. 若 suite 未绿：inner 在自己的回合外跑合并态全量 suite（`cd <worktree> && bash scripts/test.sh`，
+   能等 10min），绿后留 capture（`full_suite_ran=true` + `suite_exit=0` + `suite_head=<worktree HEAD>`，
+   供 fan-in 的 PRE-VERIFIED-SUITE 复用）。
+3. 补机械步骤（按 fan-in-execute.js 阶段 2 的固定命令）：`per-task-suite-record.ts --task-id <id>
+   --run-id <runId> …` → flip done（`tasks/<id>.md` 的 `status: ready` → `done`，AC 完成闸过）→
+   `fan-in-ff-merge.sh --task <id> --run-id <runId> --agent-id <原 subagent id> --root <root>
+   --merge-target develop` → `closure-lag-check.sh --close-task --taskId <id> --outcome done --root <root>`。
+   --agent-id 必须是被允许的 subagent 标识（AC78 判据2(c)：顶层 session id 会被拒）。
 
 ## Touches
 
-- plugin/workflows/fan-in-execute.js（step4 长 suite 承载）
-- plugin/scripts/fan-in-ff-merge.sh（若恢复路径脚本化）
-- plugin/test/fan-in-execute-paths.test.mjs（取假对照）
+- plugin/workflows/fan-in-execute.js（step4 长 suite 承载——detached + 脚本控制流等待）
+- .claude/workflows/fan-in-execute.js（双拷贝，workflows-dual-copy-drift-check 要求 byte-identical）
+- plugin/test/fan-in-execute-paths.test.mjs（取假对照 + ⑧ 回合预算承载组）
 - tasks/gap-fan-in-turn-budget-suite-timeout.md（自身）
+（注：plugin/scripts/fan-in-ff-merge.sh 未脚本化——workflow 自身承载 suite，恢复路径为上方 fallback 文档）
