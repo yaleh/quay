@@ -108,6 +108,8 @@ changed: manager 011128 逐条实测（人指派查）。manager 层无安装向
 （plugin/ + bin/ + src/ + package.json，无 orchestration/ / 包根 .claude/ / packages/），等价 npm 产物布局
 （package.sh 逐字节 stage 同一 plugin/）。`node_modules` 用符号链接模拟 `npm i -g` 的依赖（CLI 派发测试用）。
 
+**Contract invoke 的交付向量**：`plugin/scripts/develop-deliver-tgz.sh --force`（manager 层交付脚本，见 ## Contract）；本任务因无真实第三方裸机，验证改用 `npm pack` staged-pack 模拟（见上），未实际跑 develop-deliver-tgz.sh。
+
 **两个裸机破坏点（修复前实测）**：
 - (a) `quay-launch.sh manager` 在无包根 `.claude/launch.settings.json` 时报
   `ERROR: launch settings file not found`（npm 产物把 settings 放 `plugin/.claude/`）。→ 修复：回退到

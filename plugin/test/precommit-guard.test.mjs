@@ -303,6 +303,136 @@ test("AC63 — ff-only merge fires ZERO guard hooks (no pre-commit, no pre-merge
   }
 });
 
+// ── Touches「一条目一路径」detector at the commit moment (gap-touches-one-entry-detector-not-enforcer) ──
+// The static checker (touches-one-entry-one-path-check.ts) already reds multi-path Touches bullets at
+// the suite's static layer — but that's the LATEST layer (each occurrence costs a fork→in-flight→
+// static-red→re-run cycle). This detector runs the SAME judgment on STAGED tasks/*.md at the commit
+// moment, so a new task's Touches error reds where it is written. Judgment reuses
+// checkTaskOneEntryOnePath + the shrink-only grandfather baseline — no second Touches parser.
+
+/** Copy the guard + its Touches-parser deps into a scratch repo so --install-hook's shim resolves. */
+function copyGuardScripts(root) {
+  for (const f of ["precommit-guard.ts", "touches-one-entry-one-path-check.ts", "touches-parser.ts", "gate-script-base.ts"]) {
+    fs.copyFileSync(path.join(REPO_ROOT, "plugin", "scripts", f), path.join(root, "plugin", "scripts", f));
+  }
+}
+
+test("AC1 — a staged task with a multi-path Touches bullet is rejected (reason touches-multi-path-bullet)", () => {
+  const root = makeGitRepo(); // no scripts/test.sh → doc check passes; only the Touches detector judges
+  try {
+    stage(root, "tasks/new.md", "---\nid: new\ntitle: t\nstatus: todo\n---\n\n## Touches\n\n- plugin/scripts/a.ts + plugin/scripts/b.ts\n");
+    const res = runGuard(root);
+    assert.equal(res.status, 1, `multi-path must reject, got ${res.status}: ${res.stdout} ${res.stderr}`);
+    const out = JSON.parse(res.stdout);
+    assert.equal(out.verdict, "reject");
+    assert.equal(out.reason, "touches-multi-path-bullet");
+    assert.ok(out.touchesCheckOutput && out.touchesCheckOutput.includes("plugin/scripts/a.ts + plugin/scripts/b.ts"), "touchesCheckOutput names the multi-path bullet");
+  } finally {
+    cleanup(root);
+  }
+});
+
+test("AC1 negative — a staged task with single-path Touches is allowed", () => {
+  const root = makeGitRepo();
+  try {
+    stage(root, "tasks/ok.md", "---\nid: ok\ntitle: t\nstatus: todo\n---\n\n## Touches\n\n- plugin/scripts/a.ts\n");
+    const res = runGuard(root);
+    assert.equal(res.status, 0, `single-path must allow, got ${res.status}: ${res.stdout}`);
+    assert.equal(JSON.parse(res.stdout).verdict, "allow");
+  } finally {
+    cleanup(root);
+  }
+});
+
+test("AC1 negative — a staged non-task file is not Touches-rejected (scope = staged tasks/*.md)", () => {
+  const root = makeGitRepo();
+  try {
+    stage(root, "README.md", "changed\n");
+    const res = runGuard(root);
+    assert.equal(res.status, 0, `non-task must allow, got ${res.status}: ${res.stdout}`);
+    assert.equal(JSON.parse(res.stdout).verdict, "allow");
+  } finally {
+    cleanup(root);
+  }
+});
+
+test("AC1 — a grandfathered task's existing multi-path bullet is allowed (shrink-only baseline respected)", () => {
+  const root = makeGitRepo();
+  try {
+    fs.mkdirSync(path.join(root, "docs", "analysis"), { recursive: true });
+    fs.writeFileSync(
+      path.join(root, "docs", "analysis", "touches-one-entry-one-path-baseline.md"),
+      "# baseline-count: 1\ntasks/historical.md\n",
+      "utf8",
+    );
+    stage(root, "tasks/historical.md", "---\nid: h\ntitle: t\nstatus: done\n---\n\n## Touches\n\n- a.md / b.md\n");
+    const res = runGuard(root);
+    assert.equal(res.status, 0, `grandfathered multi-path must allow, got ${res.status}: ${res.stdout}`);
+    assert.equal(JSON.parse(res.stdout).verdict, "allow");
+  } finally {
+    cleanup(root);
+  }
+});
+
+test("AC2 — a NEW task's Touches error reds at the commit moment (the fork→in-flight→static-red loop is cut)", () => {
+  // AC2's criterion is forward-looking (new-task Touches errors red BEFORE the suite). The e2e hook test
+  // below proves a real commit is rejected at the pre-commit step; this test pins the judgment the hook
+  // runs — the same staged fresh-task shape reds in the guard's judgment core.
+  const root = makeGitRepo();
+  try {
+    stage(root, "tasks/gap-fresh.md", "---\nid: gap-fresh\ntitle: t\nstatus: todo\n---\n\n## Touches\n\n- orchestration/a.md / orchestration/b.md\n");
+    const res = runGuard(root);
+    assert.equal(res.status, 1, `new-task multi-path must red at the commit moment, got ${res.status}`);
+    assert.equal(JSON.parse(res.stdout).reason, "touches-multi-path-bullet");
+  } finally {
+    cleanup(root);
+  }
+});
+
+test("AC1 e2e — a real `git commit` of a multi-path Touches task is REJECTED by the installed pre-commit hook; a single-path task commits (AC2/AC3)", () => {
+  const root = makeGitRepo();
+  try {
+    copyGuardScripts(root);
+    const install = run("node", ["--no-warnings", "--experimental-strip-types", GUARD, "--root", root, "--install-hook"], root);
+    assert.equal(install.status, 0, `install-hook: ${install.stderr}`);
+    assert.ok(fs.existsSync(path.join(root, ".git", "hooks", "pre-commit")), "hook installed");
+
+    // AC1/AC2 — bad: a multi-path Touches task must be rejected BEFORE the commit happens.
+    stage(root, "tasks/bad.md", "---\nid: bad\ntitle: t\nstatus: todo\n---\n\n## Touches\n\n- a.ts / b.ts\n");
+    const badCommit = run("git", ["commit", "-m", "bad touches"], root);
+    assert.notEqual(badCommit.status, 0, `multi-path Touches commit must be REJECTED, got ${badCommit.status}`);
+    assert.match(badCommit.stdout + badCommit.stderr, /Touches 多路径|touches-multi-path-bullet/, "rejection output names the Touches violation");
+    assert.equal(run("git", ["log", "--oneline"], root).stdout.trim().split("\n").length, 1, "bad commit was NOT created");
+
+    // control (AC1 negative / AC3 guard still functional): a single-path task commits fine.
+    run("git", ["reset", "-q", "--", "tasks/bad.md"], root); // unstage bad.md (now untracked)
+    stage(root, "tasks/good.md", "---\nid: good\ntitle: t\nstatus: todo\n---\n\n## Touches\n\n- a.ts\n");
+    const goodCommit = run("git", ["commit", "-m", "good touches"], root);
+    assert.equal(goodCommit.status, 0, `single-path commit must succeed, got ${goodCommit.status}: ${goodCommit.stdout} ${goodCommit.stderr}`);
+    assert.match(goodCommit.stdout + goodCommit.stderr, /Touches 单路径/, "control commit passes the Touches check");
+  } finally {
+    cleanup(root);
+  }
+});
+
+test("AC3 — resolveHooksDir matches `git rev-parse --git-path hooks` (worktree-safe install path)", () => {
+  const root = makeGitRepo();
+  try {
+    const gitHooks = run("git", ["rev-parse", "--git-path", "hooks"], root).stdout.trim();
+    assert.ok(gitHooks, "git resolves a hooks path");
+    const resolve = run(
+      "node",
+      ["--no-warnings", "--experimental-strip-types", "-e",
+        `import('${path.join(REPO_ROOT, "plugin", "scripts", "precommit-guard.ts").replace(/'/g, "\\'")}').then(m => console.log(m.resolveHooksDir('${root}')));`],
+      root,
+    );
+    assert.equal(resolve.status, 0, `resolveHooksDir must not crash: ${resolve.stderr}`);
+    assert.equal(resolve.stdout.trim(), path.resolve(root, gitHooks), "resolveHooksDir must match git's own hooks-path resolution (the dir git actually reads — the shared common dir in a worktree)");
+  } finally {
+    cleanup(root);
+  }
+});
+
 // ── Real-repo smoke: the guard runs against THIS repo without crashing ───────────────────────────────
 
 test("real-repo smoke — guard runs against the real repo (no crash, readable verdict)", () => {

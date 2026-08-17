@@ -56,6 +56,10 @@ test('AC3 — --loop --dry-run lists would-copy items for the full loop mechanis
     // (7642849a) briefly had it. Re-instate this assertion when that task lands.
     assert.match(r.stdout, /fast-mode-telemetry\.ts/, 'dry-run must list the telemetry checker');
     assert.match(r.stdout, /resource-gate\.sh/, 'dry-run must list the resource gate');
+    // precommit-guard.ts's imported checker must be in the derived set (AC1 reads the production
+    // derivation via dry-run, not the fixture — gap-quay-init-laydown-missing-touches-checker).
+    assert.match(r.stdout, /touches-one-entry-one-path-check\.ts/,
+      'dry-run must list the one-entry-one-path touches checker (precommit-guard ESM dep)');
     assert.ok(!/heavy-op-token\.sh/.test(r.stdout),
       'dry-run must NOT list heavy-op-token.sh (retired 2026-08-06 — the "one heavy test at a time" token is gone)');
     // Dry-run must NOT write anything.
@@ -95,6 +99,11 @@ test('AC3 — a real --loop run lays down the full two-layer mechanism set', () 
       // transitive deps of the checkers (the laid-down mechanism must be functional)
       'gate-script-base.ts', 'workflow-event-schema.mjs', 'task-schema.ts', 'touches-parser.ts',
       'wiring-coverage-check.ts',
+      // precommit-guard.ts's ESM `./` import — INVISIBLE to the ${SCRIPT_DIR} dependency-closure
+      // scan (gap-quay-init-laydown-missing-touches-checker: without this, a consumer workspace
+      // laid down precommit-guard.ts without its imported checker → ERR_MODULE_NOT_FOUND on the
+      // guard's --install-hook step → quay-init --loop exits 2 → release/init path red).
+      'touches-one-entry-one-path-check.ts',
       // dependency-closure regression (gap-laydown-derivation-is-sensitive-to-reference-spelling-
       // dependency-closure AC1): the bare-name-referenced checker of send-keys-reliable.sh must ship
       'transcript-delivery-check.ts',

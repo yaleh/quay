@@ -59,7 +59,7 @@ extra: {}
 ## Contract
 
 measure   release_ahead = `git rev-list --count v0.4.0..develop` 的 stdout 数字
-band      release_ahead 重切后 < 阈值（当前 2216；阈值待定——measure-first 定）
+band      release_ahead = 重切后 < 阈值（当前 2216；阈值待定——measure-first 定）
 invariant release_drift_gate = 1（release 与 develop 机制集漂移可机械报出）
 invoke    `bash plugin/scripts/release-freshness-check.sh`（贴领先差 + 漂移读数）
 control   release 新鲜度可维护；漂移可查；既有不回归

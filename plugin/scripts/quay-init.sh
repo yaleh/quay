@@ -941,11 +941,19 @@ derive_loop_scripts() {
   #   NOT shipped — it is A0b③ GENERATED per project (empty patterns ⇒ the guard takes its narrowed
   #   fallback tasks/** + plugin/loop/** + scripts/test.sh @static-object aggregate, which is the
   #   intended target behavior).
+  #   touches-one-entry-one-path-check.ts (gap-quay-init-laydown-missing-touches-checker): precommit-
+  #   guard.ts imports it via ESM `./touches-one-entry-one-path-check.ts` (the Touches「一条目一路径」
+  #   check the guard runs on every commit). The dependency-closure step (d) below only scans
+  #   `${SCRIPT_DIR}/<name>` sibling references in shell scripts — an ESM relative `./` import is
+  #   INVISIBLE to it — so without an explicit entry a cold-started consumer workspace lays down
+  #   precommit-guard.ts without its imported checker and the guard's `--install-hook` step dies with
+  #   ERR_MODULE_NOT_FOUND (the delta-scope unverified-landing the touches fan-in's skipped full suite
+  #   let through). Same class as the other checker transitive deps listed above.
   printf '%s\n' inner-idle-log.ts it0-split-or-commit-check.ts pipe-exit-code-check.sh \
     gate-script-base.ts workflow-event-schema.mjs task-schema.ts touches-parser.ts wiring-coverage-check.ts \
     capability-catalog.sh l1-delivery-surface-check.ts dead-loop-check.sh inner-blocked-signal.ts \
     inner-forensics.mjs task-contract-check.ts task-status-drift-check.ts touches-orthogonality-check.ts \
-    verify-delivery-surface.ts precommit-guard.ts quay-session.ts >> "$out"
+    verify-delivery-surface.ts precommit-guard.ts touches-one-entry-one-path-check.ts quay-session.ts >> "$out"
   # (c3) exec-core tick docs (gap-ac37-exec-core-ships-with-package): the three ≤80-line execution
   #   cores ship with the loop so an installed project can read "每轮该做什么" — the shipped tick
   #   templates (orchestrator-loop-tick.md / fast-mode-loop-tick.md) reference them by the

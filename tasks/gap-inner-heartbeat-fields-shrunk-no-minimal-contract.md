@@ -102,8 +102,9 @@ $ node --no-warnings --experimental-strip-types plugin/scripts/inner-wakeup-hear
 ```
 $ node --no-warnings --experimental-strip-types plugin/scripts/inner-wakeup-heartbeat.ts --root <tmp> --blocked '[]' --run-ids '["run-abc123"]' --effective-cap 3 --agent-dispatches 1 --budget-hit false --agent-limit 200 --budget-critical false --delay-seconds 1500 --reason 'tick heartbeat'
 → inner-wakeup-heartbeat: written ... (10 fields)
-$ python3 -c "import json; d=json.load(open('<tmp>/.quay/inner-wakeup-heartbeat.json')); print(sorted(d.keys()))"   # Contract invoke
+$ python3 -c "import json; d=json.load(open('<tmp>/.quay/inner-wakeup-heartbeat.json')); print(sorted(d.keys()))"   # 测试用 <tmp> 镜像
 → ['agentDispatches','agentLimit','blocked','budgetCritical','budgetHit','delaySeconds','effectiveCap','reason','runIds','ts']   # field_count=10 >= 7
+$ python3 -c "import json; d=json.load(open('.quay/inner-wakeup-heartbeat.json')); print(sorted(d.keys()))"   # 生产路径 Contract invoke（对真实心跳文件）
 $ node ... inner-wakeup-heartbeat-check.ts --root <tmp> --json
 → verdict: ALIVE / status: alive / fieldContract.ok: true / exit 0
 ```
