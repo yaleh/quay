@@ -1,7 +1,7 @@
 ---
 id: gap-bypass-ruled-cbbbb766
 title: "bypass-ruled 表加 cbbbb766——closure fix 应急直提豁免（四条在飞任务被同一缺陷挡，止损优先）；教训原样入条目"
-status: ready
+status: done
 labels:
   - gap
   - mechanism
