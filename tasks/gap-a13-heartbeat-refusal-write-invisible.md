@@ -1,7 +1,7 @@
 ---
 id: gap-a13-heartbeat-refusal-write-invisible
 title: "A13 结构修复——AC53 拒写只进旁路、主心跳不更新 ⇒ 活跃 inner 恒被判 DEAD；(甲) 判据取 max(主心跳, refusal ts) + (乙) 拒写也写主快照带 written:false"
-status: ready
+status: done
 labels:
   - gap
   - mechanism
