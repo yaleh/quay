@@ -1,7 +1,7 @@
 ---
 id: gap-delivery-laydown-dist-closure-gap
 title: "quay-init 闭包正则未随 package.sh 的 dist 改写更新——dist/transcript-delivery-check.js + pane-state-classify.js 不进 laydown 集（B/C 双机冷启动 fail loud）"
-status: ready
+status: done
 labels:
   - gap
   - mechanism
