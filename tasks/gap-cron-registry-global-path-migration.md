@@ -71,5 +71,6 @@ manager 先例:  QUAY_GLOBAL_DIR="${QUAY_GLOBAL_DIR:-$HOME/.quay-global}"
 - orchestration/fast-mode-tick-core.md（内层 A26 注册表收据引用 → 全局 per-layer 路径；镜像对）
 - plugin/loop/fast-mode-tick-core.md（内层 A26 镜像，normalized-byte 同步）
 - plugin/loop/fast-mode-loop-tick.md（AC80-INNER-ANCHOR 段：注册表位置注记 + --record 更新指令）
+- plugin/scripts/capability-catalog.sh（outer-cron-registry.ts 描述同步：git-tracked → 全局 per-layer；重挂 cron 更新指令 → --record）
 - docs/proposals/quay-product-outline.md（delivery-inventory 快照再生成——plugin/scripts/ 删了 outer-cron-registry.json）
 - tasks/gap-cron-registry-global-path-migration.md（自身）
