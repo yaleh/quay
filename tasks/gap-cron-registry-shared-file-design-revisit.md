@@ -2,13 +2,13 @@
 id: gap-cron-registry-shared-file-design-revisit
 title: AC81 注册表双层共享文件设计复审——人裁定「inner cron 写该文件不合适」；outer-cron-registry.json
   名不符实（双层共享，非 outer 专属）；双写碰撞治标 vs 拆分/改名
-status: ready
+status: done
 labels:
   - gap
   - mechanism
-  - needs-human
 parent: null
-children: []
+children:
+  - gap-cron-registry-global-path-migration
 extra:
   schema: plan
   depends_on:
@@ -42,12 +42,33 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: 三个方向（拆分/换机制/保持+排除集）的权衡与影响面逐条写出。
-- [ ] AC2: 裁定方向落盘（含理由），不悬空。
+- [x] AC1: 三个方向（拆分/换机制/保持+排除集）的权衡与影响面逐条写出。（已由 outer 裁定材料 A–F 覆盖，022198bd）
+- [x] AC2: 裁定方向落盘（含理由），不悬空。（人 2026-08-17 08:2xZ 裁定，见下「## 人裁定落盘」）
+
+## 人裁定落盘（2026-08-17 08:2xZ，manager 转述原话）
+
+> **「遵循 manager 的实现，应用到 outer 和 inner。」** ⇒ 选**方案②（全局路径、per-layer、不进 git）**，非 inner 倾向的方案①（仓库内拆两文件）。needs-human 项已解决。
+
+**精确规格（manager 实读自身实现推导，供实现任务直接照抄）**：
+```
+manager 实现:  QUAY_GLOBAL_DIR="${QUAY_GLOBAL_DIR:-$HOME/.quay-global}"
+               HOME_DIR="${HOME_DIR:-${QUAY_GLOBAL_DIR}/manager}"
+               STORE="${STORE:-${HOME_DIR}/loop-registry.txt}"
+```
+**⛔ 一处不能照抄、必须补的差异**：manager 是跨项目单例（一台机器一个），路径不需要按项目分片；**outer/inner 是按项目的**（quay/archguard/meta-cc 各有自己的 outer/inner）——照抄 `~/.quay-global/outer/loop-registry.txt` 字面路径会在多项目间互相覆盖（跨项目版的双写碰撞）。
+**已核实本仓库现成路径分片方案**（`plugin/scripts/session-liveness.sh:1162`，非新发明）：
+```bash
+slug=$(printf '%s' "$root" | tr '/' '-')   # 与 ~/.claude/projects/<slug>/ 同一种打法
+```
+建议形态：`~/.quay-global/<repo-root-slug>/outer/loop-registry.txt` 与 `.../inner/loop-registry.txt`（按项目分片；具体命名归实现方定）。
+
+**已核实的支撑事实（前几轮举证，此处不重复）**：判据入口 `checkVerify():295` 只读自己层，拆分/挪 git 不影响现有判据读取形状；git 版随 fork 携带陈旧快照（5 worktree 实测），全局路径消除；`outer-tick-log-check` / `AC80-INNER-ANCHOR` 等消费面切换后需同步改读新路径——**消费者迁移清单进另立的实现任务**（DoD 原文已写这条）。
+
+**⊢ 后续**：按 DoD「若选换机制 ⇒ 另立实现任务（含消费者迁移清单）」——实现任务已另立：`gap-cron-registry-global-path-migration`（798c2566，含消费者迁移清单 + 审计线 jsonl + 分片 slug 约束）。本任务裁定记录已完成。
 
 ## Definition of Done
 
-- [ ] 设计复审完成，方向裁定落盘；若选拆分/换机制 ⇒ 另立实现任务（含消费者迁移清单）。
+- [x] 设计复审完成，方向裁定落盘；若选拆分/换机制 ⇒ 另立实现任务（含消费者迁移清单）。（实现任务已立：gap-cron-registry-global-path-migration，798c2566）
 
 ## 裁定材料（outer 2026-08-17 08:1xZ 汇总，均经 outer 实读验证；供人/manager 裁定）
 
