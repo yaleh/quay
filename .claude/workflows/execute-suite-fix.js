@@ -81,7 +81,16 @@ const launchEnv = `QUAY_TEST_SUITE_MAX_RUNTIME_MS=${envMaxRuntimeMs} QUAY_TEST_S
 // onSignal → state=aborted, runner 死于 Fix agent 返回的同一秒）。detach（setsid + & + disown）
 // 让 runner 活在独立 session，subagent 退出不影响它；等待仍由 workflow 脚本轮询 state.json 决定，
 // 不违背「等待由脚本控制流决定」。subagent 侧只做：前台 Bash 跑这条（立即返回）+ 短促确认。
-const launchCmd = `cd ${root} && ${launchEnv} setsid node --no-warnings --experimental-strip-types plugin/scripts/full-suite-runner.ts --root ${worktree} --state-dir ${stateDir} --log-file ${resolvedLogFile} >/dev/null 2>&1 & disown; sleep 2; echo detached-pid=$!`
+// gap-suite-fix-relaunch-stale-tmux-snapshot：relaunch 前【显式】生成 tmux-leak before-run 快照。
+// 标准 SUITE_LAUNCH（fan-in-execute.js 的 `bash scripts/test.sh`）在 test.sh 的 FULL_SUITE_DEFAULT
+// 分支内生成快照；本 relaunch 走 full-suite-runner.ts --root <worktree>（不 provision one-shot），
+// 快照同样落在 <worktree>/.quay/tmux-leak-scan.snapshot。显式 --snapshot 把该保证搬到 workflow 层
+// （不依赖 test.sh 深层分支），并在 launch 前落一份新鲜快照，覆盖 refresh-worktree-quay.sh 从 main
+// checkout 拷进来的陈旧 .quay/tmux-leak-scan.snapshot（陈旧/缺失快照 ⇒ suite 收尾 --check
+// fail-closed「no before-run snapshot」RED 的成因）。--snapshot 失败不阻断 launch（fail-open；
+// --check 本身 fail-closed 兜底）。worktree 恒为真实 worktree（≠ main checkout）⇒ runner 不触发
+// one-shot provisioning ⇒ <worktree>/.quay 快照路径与 test.sh 的 --check 一致。
+const launchCmd = `cd ${root} && bash plugin/scripts/tmux-leak-scan.sh --snapshot ${worktree}; cd ${root} && ${launchEnv} setsid node --no-warnings --experimental-strip-types plugin/scripts/full-suite-runner.ts --root ${worktree} --state-dir ${stateDir} --log-file ${resolvedLogFile} >/dev/null 2>&1 & disown; sleep 2; echo detached-pid=$!`
 
 // ── 通用指令片段（发给每个 agent 的执行上下文，固定命令块，不靠探索）─────────────────
 const CONTEXT = `
