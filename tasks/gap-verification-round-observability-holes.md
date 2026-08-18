@@ -1,7 +1,7 @@
 ---
 id: gap-verification-round-observability-holes
 title: "verification-round 观测缺口——lock_wait_ms / phase 绝对时刻 / concurrentSuitesRunning 独立读法 / effective_parallelism（今日 slot bug 因无 lock_wait_ms 藏到人 ps 才抓）"
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
