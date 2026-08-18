@@ -1,7 +1,7 @@
 ---
 id: gap-suite-concurrency-ff-gate-and-slot-ssot
 title: suite 并发量三个互不一致定义点 + ff 判据范畴错误——ff 闸收窄到本任务 suite + 槽数由 S 生成 + 记录面真实化 + 行为层不变量（人 2026-08-18 裁定「把系统真正做对」）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
