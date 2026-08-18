@@ -10,6 +10,17 @@
    2026-08-12 实测：我→outer 时它正跑 3 个 subagent + suite，即时送达；outer→我亦即时。
    ⇒ **不再有 can-receive 闸门、不再需要等空闲、不再需要后台投递绕过**（那套曾卡我 4 轮）。
 4. **送达凭据 = 工具返回的 `{"success":true, msg_id:…}`**，不再需要 transcript 内容匹配核验。
+   **⊕ 2026-08-18 人逐字裁定，收窄本条 —— 停用逐轮 meta-cc 复核**：
+   > 「SendMessage 已知是可靠的。不再执行这一检查。」
+   **背景**：本条 `:12` 早已写明工具返回值即送达凭据，但我此后仍每轮额外跑
+   `meta-cc query_session_content(tool_name=SendMessage, since=<上轮>)` 去"核实投递条数"
+   （tick-log 每轮 `③ B2a/B2b` 段的「投递=N条，meta-cc第M次验证有效」），**连续核实 40 次
+   无一次不一致**——这是把 C15/A9 类"不信自报、必须查证"的通则，套到了一个已经有平台级
+   证据（`success:true`）的场景上，过度施用。**人此次直接裁定停用**。
+   **How to apply**：往后 tick-log 的投递计数直接读**本轮会话内实际调用的 `SendMessage` 次数
+   与 `msg_id`**（我自己知道本轮发了几条），⛔ 不再为此单独跑 meta-cc 查询。
+   meta-cc 对 SendMessage 的用途仍保留在**其它场景**（如核实"某轮是否发生过投递"这类跨轮/
+   跨会话追溯，或本条未覆盖的争议排查），只是不再作为**每轮固定复核步骤**。
 
 ### 为什么这条同时修掉了 §0.55 的认证缺口
 到达形态由平台生成：`<cross-session-message from="uds:…" from-name="quay-outer" from-mode="bypass">`

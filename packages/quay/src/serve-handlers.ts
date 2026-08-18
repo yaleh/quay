@@ -229,6 +229,27 @@ hr { border: none; border-top: 1px solid var(--color-divider); margin: 1rem 0; }
    ≤600px media query (at the end of this sheet) flips it to display:block. */
 .site-nav { display: block; }
 .mobile-chrome { display: none; }
+/* gap-webui-nav-inconsistent-routes: unified header-bar site nav. The .nav / .nav-brand
+   classes come from the Modernist token sheet (webui-modernist.css, inlined before this sheet);
+   these rules implement the sc-if design's desktop navGroupDefs rendering (Quay改进版WebUI.dc.html
+   nav block): single-row header bar, brand flush left, a vertical bar separating each of the
+   four groups, current page red+bold (accent-700 — the design's ACCENT700), inactive items
+   ink-weight-600, and the Board NEW badge. */
+.nav { flex-wrap: wrap; row-gap: var(--space-2); }
+.nav-brand { margin-right: var(--space-2); }
+.nav-group {
+  display: inline-flex; align-items: center; flex-wrap: wrap;
+  gap: var(--space-3);
+  padding-left: var(--space-3);
+  border-left: 1px solid color-mix(in srgb, var(--color-text) 20%, transparent);
+}
+.nav .nav-item { color: var(--color-text); font-weight: 600; font-size: 14px; }
+.nav .nav-current { color: var(--color-accent-700); font-weight: 800; font-size: 14px; }
+.nav-badge {
+  font-size: 9px; letter-spacing: 0.06em; line-height: 1;
+  background: var(--color-accent); color: var(--color-bg);
+  padding: 2px 5px;
+}
 /* AC100/AC102: verdict colouring is token-defined on BOTH the list pages (this sheet)
    and the detail pages (detailStyles()) — the two sheets agree on the accent family. */
 .verdict-pass { color: var(--color-accent-700); }
@@ -292,6 +313,21 @@ hr { border: none; border-top: 1px solid var(--color-divider); margin: 1rem 0; }
   .mobile-menu-toggle-input:checked ~ .mobile-header .mobile-menu-burger span:nth-child(3) { transform: translateY(-6px) rotate(-45deg); }
   /* The desktop site-nav meta line's links live in the hamburger menu on mobile. */
   .site-nav { display: none; }
+  /* Mobile full-screen menu content: the design's isMobile form renders the SAME
+     navGroupDefs as block links under per-group section labels. */
+  .mobile-menu-group { margin-bottom: var(--space-3); }
+  .mobile-menu-group-label {
+    font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--color-neutral-700); background: var(--color-surface);
+    padding: 8px 20px 4px;
+  }
+  .mobile-menu .mobile-menu-item {
+    display: flex; align-items: center; min-height: 48px; padding: 0 20px;
+    font-size: 16px; text-decoration: none;
+    color: var(--color-text); font-weight: 600;
+    border-bottom: 1px solid color-mix(in srgb, var(--color-text) 15%, transparent);
+  }
+  .mobile-menu .mobile-menu-item.nav-current { color: var(--color-accent-700); font-weight: 800; }
   h1 { font-size: 1.2rem; margin: 0.4rem 0 0.6rem; }
   /* Filter/sort navs become single-row horizontal scrolls (design's isMobile chips). */
   .list-nav { display: flex; align-items: baseline; gap: 0.35rem; overflow-x: auto; -webkit-overflow-scrolling: touch; white-space: nowrap; }
@@ -1018,11 +1054,10 @@ export async function handleTaskList(
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay task list — ${escapeHtml(manifest.name)}">${modernistStyles()}${pageStyles()}<title>Quay — ${escapeHtml(manifest.name)}</title></head>
-    <body>${renderMobileChrome("tasks", "task list")}<main>
+    <body>${renderMobileChrome("tasks", "task list")}${renderSiteNav("tasks")}<main>
       <!-- QX-015 orientation banner removed by DIR-007 (iteration 10): misleading
            needs-human placement + disproportionate layout cost. -->
       <h1>Quay — task list (${escapeHtml(manifest.id)} provider)</h1>
-      <p class="meta site-nav"><a href="/board">board</a> · <a href="/live">live</a> · <a href="/journal">journal</a> · <a href="/git-history">git-history →</a> · <a href="/adr">ADRs →</a> · <a href="/goal">goals →</a> · <a href="/doc">docs →</a></p>
       ${errorParam ? html`<div class="error-banner" role="alert"><strong>Error:</strong> ${escapeHtml(errorParam)}</div>` : ""}
       ${successParam ? html`<div class="success-banner" role="status"><strong>Done:</strong> ${escapeHtml(successParam)}</div>` : ""}
       ${prefixNav ? html`<p class="meta list-nav">Prefix: ${prefixNav}</p>` : ""}
@@ -1059,8 +1094,7 @@ export async function handleAdrList(
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${modernistStyles()}${pageStyles()}<title>ADRs</title></head>
-    <body><main>
-      <p class="meta"><a href="/tasks">← tasks</a> · <a href="/live">live</a> · <a href="/journal">journal</a></p>
+    <body>${renderMobileChrome("adr", "adrs")}${renderSiteNav("adr")}<main>
       <h1>ADRs (${adrs.length})</h1>
       ${adrs.length === 0 ? html`<p class="meta">No ADRs.</p>` : html`<table>
         <tr><th>id</th><th>status</th><th>date</th><th>title</th></tr>
@@ -1090,8 +1124,7 @@ export async function handleAdrDetail(
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="${escapeHtml(a.id)}: ${escapeHtml(a.title)}">${modernistStyles()}${detailStyles()}<title>${escapeHtml(a.id)}</title></head>
-    <body class="detail-page"><main>
-      <p class="meta"><a href="/adr">← ADRs</a> · <a href="/live">live</a> · <a href="/journal">journal</a></p>
+    <body class="detail-page">${renderMobileChrome("adr", a.id)}${renderSiteNav("adr")}<main>
       <h1>${escapeHtml(a.id)}: ${escapeHtml(a.title)}</h1>
       <p class="meta">status: <strong>${escapeHtml(a.status)}</strong>${adrExt.date ? ` · ${escapeHtml(adrExt.date as string)}` : ""}</p>
       ${supersedesMeta}${supersededByMeta}
@@ -1174,8 +1207,7 @@ export async function handleGoalList(
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${modernistStyles()}${pageStyles()}<title>Goals</title></head>
-    <body><main>
-      <p class="meta"><a href="/tasks">← tasks</a> · <a href="/live">live</a> · <a href="/journal">journal</a> · <a href="/adr">ADRs →</a> · <a href="/doc">docs →</a></p>
+    <body>${renderMobileChrome("goal", "goals")}${renderSiteNav("goal")}<main>
       <h1>Goals — 阶段目标与 AC (${goals.length})</h1>
       ${readError ? html`<div class="error-banner" role="alert"><strong>读失败:</strong> ${escapeHtml(readError)}</div>` : ""}
       <p class="meta">Kind: ${kindNav}</p>
@@ -1213,8 +1245,7 @@ export async function handleGoalDetail(
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="${escapeHtml(String(g.id))}: ${escapeHtml(String(g.title))}">${modernistStyles()}${detailStyles()}<title>${escapeHtml(String(g.id))}</title></head>
-    <body class="detail-page"><main>
-      <p class="meta"><a href="/goal">← goals</a> · <a href="/live">live</a> · <a href="/journal">journal</a></p>
+    <body class="detail-page">${renderMobileChrome("goal", String(g.id))}${renderSiteNav("goal")}<main>
       <h1>${escapeHtml(String(g.id))}: ${escapeHtml(String(g.title))}</h1>
       <p class="meta">kind: <strong>${escapeHtml(String(g.kind ?? ""))}</strong> · status: <strong>${escapeHtml(String(g.status ?? ""))}</strong>${g.phase ? html` · phase: ${escapeHtml(String(g.phase))}` : ""}</p>
       ${evidenceCell !== "—" ? html`<p class="meta">最近 verdict: ${evidenceCell}</p>` : ""}
@@ -1254,8 +1285,7 @@ export async function handleDocList(
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${modernistStyles()}${pageStyles()}<title>Docs</title></head>
-    <body><main>
-      <p class="meta"><a href="/tasks">← tasks</a> · <a href="/live">live</a> · <a href="/journal">journal</a> · <a href="/adr">ADRs →</a> · <a href="/goal">goals →</a></p>
+    <body>${renderMobileChrome("doc", "docs")}${renderSiteNav("doc")}<main>
       <h1>Managed documents (${docs.length})</h1>
       ${readError ? html`<div class="error-banner" role="alert"><strong>读失败:</strong> ${escapeHtml(readError)}</div>` : ""}
       ${docs.length === 0 ? html`<p class="meta">No documents.</p>` : html`<table>
@@ -1283,8 +1313,7 @@ export async function handleDocDetail(
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="${escapeHtml(String(d.id))}: ${escapeHtml(String(d.title))}">${modernistStyles()}${detailStyles()}<title>${escapeHtml(String(d.id))}</title></head>
-    <body class="detail-page"><main>
-      <p class="meta"><a href="/doc">← docs</a> · <a href="/live">live</a> · <a href="/journal">journal</a></p>
+    <body class="detail-page">${renderMobileChrome("doc", String(d.id))}${renderSiteNav("doc")}<main>
       <h1>${escapeHtml(String(d.id))}: ${escapeHtml(String(d.title))}</h1>
       <p class="meta">status: <strong>${escapeHtml(String(d.status ?? ""))}</strong>${ext.kind ? ` · kind: ${escapeHtml(String(ext.kind))}` : ""}</p>
       <article>${renderMarkdown(d.body || "")}</article>
@@ -1333,9 +1362,11 @@ export async function handleTaskDetail(
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="${escapeHtml(t.id)}: ${escapeHtml(t.title)}">${modernistStyles()}${pageStyles()}<title>${escapeHtml(t.id)}</title></head>
-    <body><main>
-      <!-- QX-011: back link uses ?from= param to restore filter context (UQ-009) -->
-      <nav><a href="${escapeHtml(backHref)}">&larr; back to list</a> · <a href="/live">live</a> · <a href="/journal">journal</a></nav>
+    <body>${renderMobileChrome("tasks", t.id)}${renderSiteNav("tasks")}<main>
+      <!-- QX-011: back link uses ?from= param to restore filter context (UQ-009).
+           The site-nav above already carries the full 15-view nav; this contextual
+           link restores the list's filter/sort/page context. -->
+      <nav><a href="${escapeHtml(backHref)}">&larr; back to list</a></nav>
       <h1>${escapeHtml(t.id)}: ${escapeHtml(t.title)} [${escapeHtml(t.status)}]</h1>
       ${detailErrorParam ? html`<div class="error-banner" role="alert"><strong>Error:</strong> ${escapeHtml(detailErrorParam)}</div>` : ""}
       ${detailSuccessParam ? html`<div class="success-banner" role="status"><strong>Done:</strong> ${escapeHtml(detailSuccessParam)}</div>` : ""}
@@ -1410,8 +1441,7 @@ function renderLivePage(live: LiveResult): string {
 
   return html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay live — what the loop is doing right now">${modernistStyles()}${pageStyles()}<title>Live — loop activity</title></head>
-    <body><main>
-      <p class="meta"><a href="/tasks">← tasks</a> · <a href="/live">live</a> · <a href="/journal">journal</a> · <a href="/adr">ADRs →</a></p>
+    <body>${renderMobileChrome("live", "live")}${renderSiteNav("live")}<main>
       <h1>Live — 循环此刻在做什么</h1>
       ${statusNote}
       ${summary}
@@ -1422,8 +1452,7 @@ function renderLivePage(live: LiveResult): string {
 function renderJournalPage(journal: JournalResult): string {
   return html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay journal — recent loop record">${modernistStyles()}${pageStyles()}<title>Journal — recent loop record</title></head>
-    <body><main>
-      <p class="meta"><a href="/tasks">← tasks</a> · <a href="/live">live</a> · <a href="/journal">journal</a> · <a href="/adr">ADRs →</a></p>
+    <body>${renderMobileChrome("journal", "journal")}${renderSiteNav("journal")}<main>
       <h1>Journal — 循环最近记录</h1>
       ${renderSectionBlock(journal.escalations, "升级项 (escalations.md)")}
       ${renderSectionBlock(journal.tickLog, "Tick 记录 (tick-log.md)")}
@@ -1533,8 +1562,7 @@ function renderBoardPage(board: {
 
   return html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay board — 三源 join 看板">${modernistStyles()}${pageStyles()}<title>Board — 三源 join 看板</title></head>
-    <body><main>
-      <p class="meta"><a href="/tasks">← tasks</a> · <a href="/live">live</a> · <a href="/journal">journal</a> · <a href="/adr">ADRs →</a></p>
+    <body>${renderMobileChrome("board", "board")}${renderSiteNav("board")}<main>
       <h1>Board — 意图 / 执行 / 落地</h1>
       <p class="meta">${intentNote} · ${execNote} · ${landingNote}</p>
       <table>
@@ -1787,8 +1815,7 @@ function renderGitHistoryPage(history: GitHistoryResult): string {
 
   return html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay git history — commit landing timeline (server-rendered SVG, zero client JS)">${modernistStyles()}${pageStyles()}<title>Git history — commit landing timeline</title></head>
-    <body><main>
-      <p class="meta"><a href="/tasks">← tasks</a> · <a href="/live">live</a> · <a href="/journal">journal</a> · <a href="/git-history">git-history</a> · <a href="/adr">ADRs →</a></p>
+    <body>${renderMobileChrome("git", "git history")}${renderSiteNav("git")}<main>
       <h1>Git History — 提交落地时间轴</h1>
       <p class="meta"><strong>横轴 = 提交落地时刻（git commit time），不是工时/持续时间。</strong> git 分支存活区间 ≠ 任务工时（实测 149/164 fan-in 分支寿命 &lt;1h——任务在首提交落地前就干完了）。真工时不在此图中：它在遥测里（#55，join 率仅 ~6%）。菱形 = 合并提交（fan-in 落地事件）。当前窗口：最近 ${nCommits} 条提交、${mergeCount} 个合并（跨所有本地分支）。</p>
       ${statusNote}
@@ -1830,16 +1857,41 @@ const SITE_NAV_ROUTES: Record<string, string> = {
   sessions: "/sessions", adr: "/adr", goal: "/goal", doc: "/doc", architecture: "/architecture",
 };
 
-/** Full 15-view site nav (the design's navGroupDefs). Current page rendered as <strong>. */
+/** One nav item: the current page is a non-link span (red+bold via .nav-current), everything
+ *  else an <a> to its route. Board carries the design's NEW badge (sc-if mkItem.badge). */
+function navItem(key: string, label: string, current: string, prefix: "nav-" | "mobile-menu-"): string {
+  const badge = key === "board" ? html`<span class="nav-badge">NEW</span>` : "";
+  if (key === current) {
+    return html`<span class="${prefix}item nav-current" aria-current="page">${escapeHtml(label)}${badge}</span>`;
+  }
+  return html`<a class="${prefix}item" href="${SITE_NAV_ROUTES[key]}">${escapeHtml(label)}${badge}</a>`;
+}
+
+/** Full 15-view site nav (the design's navGroupDefs) as the header bar. Rendered with the
+ *  Modernist `.nav` / `.nav-brand` classes (the design system's "header bar",
+ *  components/navigation.html): brand flush left, a vertical bar separating each of the four
+ *  groups, the current page red+bold (sc-if mkItem: active → accent-700 + weight 800,
+ *  inactive → text + weight 600), and the Board NEW badge. The `.site-nav` strip sits OUTSIDE
+ *  <main> (an independent full-width bar) and is hidden on mobile — its links live in the
+ *  hamburger menu (renderMobileMenu). */
 export function renderSiteNav(current: string): string {
-  return SITE_NAV_GROUPS.map((g) =>
-    `${escapeHtml(g.label)}: ${g.items.map(([key, label]) => {
-      const href = SITE_NAV_ROUTES[key];
-      return key === current
-        ? html`<strong>${escapeHtml(label)}</strong>`
-        : html`<a href="${href}">${escapeHtml(label)}</a>`;
-    }).join(" · ")}`
-  ).join("<br>");
+  return html`<nav class="site-nav" aria-label="Site navigation">
+    <div class="nav">
+      <span class="nav-brand">Quay</span>
+      ${SITE_NAV_GROUPS.map((g) => html`<span class="nav-group">${
+        g.items.map(([key, label]) => navItem(key, label, current, "nav-")).join("")
+      }</span>`).join("")}
+    </div>
+  </nav>`;
+}
+
+/** Mobile full-screen menu content (the sc-if design's isMobile form): the SAME navGroupDefs
+ *  as the desktop bar, but as block links under per-group section labels. */
+function renderMobileMenu(current: string): string {
+  return SITE_NAV_GROUPS.map((g) => html`<div class="mobile-menu-group">
+    <div class="mobile-menu-group-label">${escapeHtml(g.label)}</div>
+    ${g.items.map(([key, label]) => navItem(key, label, current, "mobile-menu-")).join("")}
+  </div>`).join("");
 }
 
 /**
@@ -1861,7 +1913,7 @@ export function renderMobileChrome(current: string, pageLabel: string): string {
       <span class="mobile-header-page">${escapeHtml(pageLabel)}</span>
     </header>
     <nav class="mobile-menu" aria-label="Site navigation">
-      <p class="meta">${renderSiteNav(current)}</p>
+      ${renderMobileMenu(current)}
     </nav>
   </div>`;
 }
@@ -1890,8 +1942,7 @@ function renderSystemPage(sys: SystemResult): string {
   };
   return html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay system — resource gate and process budget">${modernistStyles()}${pageStyles()}<title>System — 系统状态</title></head>
-    <body><main>
-      <p class="meta">${renderSiteNav("system")}</p>
+    <body>${renderMobileChrome("system", "system")}${renderSiteNav("system")}<main>
       <h1>System — 系统状态</h1>
       <p class="meta">数据源：<code>resource-gate.sh --json</code> · <code>process-budget.sh --json</code>（稳定机读 JSON 输出）</p>
       ${banner}
@@ -1976,8 +2027,7 @@ function renderManagerPage(mgr: ManagerResult): string {
 
   return html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay manager — Manager/Outer/Inner 三层状态">${modernistStyles()}${pageStyles()}<title>Manager / Outer / Inner</title></head>
-    <body><main>
-      <p class="meta">${renderSiteNav("manager")}</p>
+    <body>${renderMobileChrome("manager", "manager")}${renderSiteNav("manager")}<main>
       <h1>Manager / Outer / Inner — 三层状态</h1>
       <p class="meta">三层自适应探测：多信号加权判定，缺失信号诚实标注「未检测到」，不静默假设。</p>
       <h2>Loop / 会话</h2>
@@ -2059,8 +2109,7 @@ function renderTestsPage(tests: TestsResult): string {
     : "";
   return html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay tests — verification rounds">${modernistStyles()}${pageStyles()}<title>Tests — 验证轮记录</title></head>
-    <body><main>
-      <p class="meta">${renderSiteNav("tests")}</p>
+    <body>${renderMobileChrome("tests", "tests")}${renderSiteNav("tests")}<main>
       <h1>Tests — 验证轮记录</h1>
       <p class="meta">数据源：<code>.quay/verification-round.jsonl</code>（suite-state 机制写入）${tests.currentState ? html` · 当前 suite-state: <strong>${escapeHtml(tests.currentState)}</strong>` : ""}</p>
       ${obsNote(tests.status, tests.reason)}
@@ -2110,8 +2159,7 @@ function renderSessionsPage(sessions: SessionsResult): string {
   }).join("");
   return html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay sessions — Manager/Outer/Inner 最近会话">${modernistStyles()}${pageStyles()}<title>Sessions — 三层最近会话</title></head>
-    <body><main>
-      <p class="meta">${renderSiteNav("sessions")}</p>
+    <body>${renderMobileChrome("sessions", "sessions")}${renderSiteNav("sessions")}<main>
       <h1>Sessions — Manager / Outer / Inner 最近会话</h1>
       <p class="meta">数据源：<code>session-liveness.sh --once</code> + 会话 transcript 尾部</p>
       ${obsNote(sessions.status, sessions.reason)}
@@ -2199,8 +2247,7 @@ function renderArchitecturePage(arch: ArchitectureResult): string {
   </div>`;
   return html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay architecture — system component map">${modernistStyles()}${pageStyles()}<title>Architecture — 系统组件图</title></head>
-    <body><main>
-      <p class="meta">${renderSiteNav("architecture")}</p>
+    <body>${renderMobileChrome("architecture", "architecture")}${renderSiteNav("architecture")}<main>
       <h1>Architecture — 系统组件图</h1>
       <p class="meta">数据源：<code>packages/*</code>（git log 提交事实）· <code>git worktree list</code>（在飞开发）</p>
       ${obsNote(arch.status, arch.reason)}
@@ -2310,8 +2357,7 @@ function renderDashboardPage(d: {
 
   return html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay dashboard — 循环脉搏、任务台账、系统资源与三层状态总览">${modernistStyles()}${pageStyles()}<title>Dashboard</title></head>
-    <body><main>
-      <p class="meta">${renderSiteNav("dashboard")}</p>
+    <body>${renderMobileChrome("dashboard", "dashboard")}${renderSiteNav("dashboard")}<main>
       <h1>Dashboard</h1>
       <p class="meta">循环脉搏、任务台账、系统资源与三层调度状态的总览 — 每张卡片指向对应完整页面。</p>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:2px;background:var(--color-divider);border:1px solid var(--color-divider);margin-bottom:1.5rem">${liveCard}${sysCard}${mgrCard}</div>

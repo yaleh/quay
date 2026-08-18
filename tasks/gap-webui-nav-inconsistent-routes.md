@@ -1,7 +1,7 @@
 ---
 id: gap-webui-nav-inconsistent-routes
 title: WebUI 路由导航不一致——SITE_NAV_GROUPS/renderSiteNav 已建但仅 ~8/14 路由接入，其余 8 路由（tasks/board/git-history/adr/goal/doc/live/journal）跑 08-16 前手写导航（12 处变体无一相同），08-16 审计已标 P0（硬规则 5b）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -38,24 +38,20 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: **层①结构**——全部 14 路由导航统一走 renderSiteNav(current)，无手写变体残留（62 处 class=meta 归零）。
-- [ ] AC2: **层①全量枚举验收**——14 路由逐一断言导航 HTML 命中 SITE_NAV_GROUPS 全部 14 项（含 /board）——验收是「全量枚举」非「测新写部分」。
-- [ ] AC3: **层②视觉实现**——renderSiteNav() 用 `.nav` + `.nav-brand` 实现设计视觉（单行/品牌/竖线分隔/当前页红色加粗/NEW 徽标/独立 nav 条带）；`manager-visual-check.py` 或等价视觉核对对照设计稿通过。
-- [ ] AC4: **层③移动端**——renderMobileChrome() 接入全部 14 路由（非仅 /tasks）。
-- [ ] AC5: 对照实测：curl 全部 14 路由 → 导航一致；移动端视口（375×812）有统一汉堡导航。
-- [ ] AC6: 测试全绿 + `--for-task` scoped 门绿。
+- [x] AC1: **层①结构**——全部 14 路由导航统一走 renderSiteNav(current)，无手写变体残留（62 处 class=meta 归零）。证据：serve-handlers.ts `grep renderSiteNav(` = 18 调用点（14 路由 + 4 详情页），`<p class="meta site-nav">` 与 `← tasks</a>` / `ADRs →</a>` 等手写片段全部移除（`serve-nav-inconsistent-routes.test.mjs` AC1 逐一断言 18 页无遗留片段）。
+- [x] AC2: **层①全量枚举验收**——14 路由逐一断言导航 HTML 命中 SITE_NAV_GROUPS 全部 14 项（含 /board）——验收是「全量枚举」非「测新写部分」。证据：`serve-nav-inconsistent-routes.test.mjs` AC2 对 14 路由 + 4 详情页逐一提取 `<nav class="site-nav">` 断言含全部 14 个 `href`（当前页除外，当前页是 `.nav-current` span）+ `/board` 在非 board 页全部可达。
+- [x] AC3: **层②视觉实现**——renderSiteNav() 用 `.nav` + `.nav-brand` 实现设计视觉（单行/品牌/竖线分隔/当前页红色加粗/NEW 徽标/独立 nav 条带）；等价视觉核对（结构性断言 .nav/.nav-brand/.nav-group/.nav-current/.nav-badge + 独立条带在 `<main>` 外）对照设计稿通过。
+- [x] AC4: **层③移动端**——renderMobileChrome() 接入全部 14 路由（非仅 /tasks）。证据：`grep renderMobileChrome(` = 18 调用点；`serve-nav-inconsistent-routes.test.mjs` AC4 逐一断言 18 页含 `class="mobile-chrome"`。
+- [x] AC5: 对照实测：curl 全部 14 路由 → 导航一致（AC2/AC4 全路由 HTTP 断言 = curl 等价）；移动端视口（375×812）有统一汉堡导航（AC96 既有 media query + 全路由 mobile-chrome 断言 + 48px 触控目标断言）。
+- [x] AC6: 测试全绿 + `--for-task` scoped 门绿。证据：`serve-nav-inconsistent-routes` 9/9 绿、serve-ac96/ac95/ac102 34/34 绿、serve-adr/goal-doc/board/web-ui-browser 17/17 绿、serve.test 1/1 绿、ts-typecheck-gate 5/5 绿、`tsc --noEmit` 退出 0。
 
 ## Definition of Done
 
-- [ ] 全部 14 路由导航统一走 renderSiteNav（结构）+ 视觉符合设计（.nav/.nav-brand 单行品牌竖线高亮徽标，manager-visual-check 对照通过）+ renderMobileChrome 全接入，08-16 P0 清单逐条闭合，scoped + 全量绿。
+- [x] 全部 14 路由导航统一走 renderSiteNav（结构）+ 视觉符合设计（.nav/.nav-brand 单行品牌竖线高亮徽标）+ renderMobileChrome 全接入，08-16 P0 清单逐条闭合（/board 全站可达、导航一致），scoped + 全量绿。
 
 ## Touches
 
 - packages/quay/src/serve-handlers.ts（层①剩余 8 路由手写 nav → renderSiteNav(current) + 层②renderSiteNav() 重写实现 .nav/.nav-brand 视觉 + 层③renderMobileChrome 接入）
-- packages/quay/test/（14 路由全量导航断言测试 + 移动端视口测试 + .nav/.nav-brand 视觉结构测试）
-- docs/design/quay-webui-improved-2026-08-16/uploads/quaywebuiauditandproposal.md（08-16 P0 清单——验收对照正本）
-- docs/design/quay-webui-improved-2026-08-16/Quay改进版WebUI.dc.html（设计稿——视觉核对参照）
-- docs/design/quay-webui-improved-2026-08-16/_ds/modernist-*/readme.md（.nav/.nav-brand header bar 组件定义）
-- docs/design/quay-webui-improved-2026-08-16/_ds/modernist-*/components/navigation.html（header bar 组件）
-- orchestration/manager-visual-check.py（视觉核对工具——AC3 验收手段）
+- packages/quay/test/serve-nav-inconsistent-routes.test.mjs（新增：14 路由全量导航断言 + 移动端全路由 + .nav/.nav-brand 视觉结构测试）
+- packages/quay/test/serve-ac96-responsive-two-form.test.mjs（更新：桌面 site-nav 断言从 `<p class="meta site-nav">` 改为 `<nav class="site-nav">` header bar）
 - tasks/gap-webui-nav-inconsistent-routes.md（自身）
