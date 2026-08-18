@@ -26,7 +26,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -59,6 +59,28 @@ function runCli(tmpRoot, ...args) {
     encoding: "utf8",
   });
   return { status: res.status, stdout: res.stdout ?? "", stderr: res.stderr ?? "" };
+}
+
+/**
+ * Async variant of `runCli` — NON-BLOCKING spawn, so the TEST's own event loop (and with it any
+ * `setInterval` background writer) keeps running while the CLI child executes. `spawnSync` would
+ * block the event loop for the whole CLI run; a real-time activity test that needs a concurrent
+ * transcript writer during the CLI's (slow-under-load) module load MUST use this form.
+ */
+function runCliAsync(root, env, ...args) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(
+      "node",
+      ["--no-warnings", "--experimental-strip-types", CLI, "--root", root, ...args],
+      { encoding: "utf8", env, stdio: ["ignore", "pipe", "pipe"] },
+    );
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (d) => { stdout += String(d); });
+    child.stderr.on("data", (d) => { stderr += String(d); });
+    child.on("error", reject);
+    child.on("close", (code) => resolve({ status: code ?? -1, stdout, stderr }));
+  });
 }
 
 function runTelemetry(tmpRoot, ...args) {
@@ -554,7 +576,7 @@ test("AC4 — reverse negative control (real shape): a task in-progress 78 real 
   }
 });
 
-test("AC4 — reverse negative control (genuinely real-time, not backdated): continuous transcript activity suppresses the block; activity stopping triggers it", { timeout: 20_000 }, async () => {
+test("AC4 — reverse negative control (genuinely real-time, not backdated): continuous transcript activity suppresses the block; activity stopping triggers it", { timeout: 30_000 }, async () => {
   // Everything else in this file proves the LOGIC with backdated mtimes (same technique the
   // pre-existing task-over-90m tests already use — nobody waits 90 real minutes). This test proves
   // the TEMPORAL CAUSALITY is real: a short-but-real stall threshold (INNER_BLOCKED_RULING_STALL_MS
@@ -565,23 +587,40 @@ test("AC4 — reverse negative control (genuinely real-time, not backdated): con
   const stallMs = 1200;
   const env = { ...process.env, INNER_BLOCKED_RULING_STALL_MS: String(stallMs) };
   let transcript;
+  let keepAlive;
   try {
     await writeBackdatedStartEvent(tmp, "gap-realtime", 5 * 60 * 1000); // in-progress, well under 90m
     transcript = writeTranscriptAt(0);
 
-    // Phase 1 — genuinely active: touch the transcript every 300ms (real timer) for 1.5 real
-    // seconds while polling --detect-stop three times. The condition must never hold: staleness
-    // never crosses stallMs because real activity keeps resetting the mtime.
-    const activeUntil = Date.now() + 1500;
-    let sawBlockDuringActivity = false;
-    while (Date.now() < activeUntil) {
+    // Phase 1 — genuinely active. The transcript is kept fresh by a BACKGROUND writer — a real
+    // interval timer (real wall-clock cadence) running in THIS process, concurrent with the CLI
+    // --detect-stop invocations, exactly as production has a working inner agent writing its
+    // transcript while the outer runs the detector. The CLI spawns are ASYNC (`runCliAsync`) so
+    // this writer keeps firing DURING the CLI child's (slow-under-load) module load and execution.
+    //   Why the old shape was load-fragile (2026-08-18 full-suite red): touching the transcript
+    //   INSIDE the same loop as a BLOCKING `spawnSync` made the inter-touch gap equal to the CLI
+    //   spawn + 300ms. `spawnSync` blocks the event loop, so nothing could refresh the mtime while
+    //   the CLI loaded — under concurrency-8 load the node --experimental-strip-types module load
+    //   alone exceeded the 1200ms stallMs, and the "active" phase falsely tripped the block. With a
+    //   background writer the staleness any CLI invocation can observe is bounded by the touch
+    //   cadence (200ms), never by the CLI's own latency. The real-time causality claim is unchanged:
+    //   a genuinely-running writer keeps the heartbeat fresh; genuinely stopping it triggers the
+    //   block.
+    const touchEveryMs = 200;
+    keepAlive = setInterval(() => {
       const t = new Date();
       fs.utimesSync(transcript, t, t);
-      const r = spawnSync("node", ["--no-warnings", "--experimental-strip-types", CLI, "--root", tmp, "--detect-stop", "--transcript", transcript], { encoding: "utf8", env });
+    }, touchEveryMs);
+
+    let sawBlockDuringActivity = false;
+    for (let i = 0; i < 3; i++) {
+      const r = await runCliAsync(tmp, env, "--detect-stop", "--transcript", transcript);
       assert.equal(r.status, 0, r.stderr);
       if (fs.existsSync(BLOCKED_PATH(tmp))) sawBlockDuringActivity = true;
       await new Promise((res) => setTimeout(res, 300));
     }
+    clearInterval(keepAlive);
+    keepAlive = null;
     assert.equal(sawBlockDuringActivity, false, "continuous real activity must never trigger the block");
     assert.ok(!fs.existsSync(BLOCKED_PATH(tmp)), "no block after the active phase");
 
@@ -593,6 +632,7 @@ test("AC4 — reverse negative control (genuinely real-time, not backdated): con
     const rec = JSON.parse(fs.readFileSync(BLOCKED_PATH(tmp), "utf8"));
     assert.equal(rec.reason, "ruling-required");
   } finally {
+    if (keepAlive) clearInterval(keepAlive);
     cleanup(tmp);
     if (transcript) cleanup(path.dirname(transcript));
   }
