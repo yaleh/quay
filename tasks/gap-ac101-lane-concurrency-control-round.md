@@ -28,13 +28,17 @@ extra:
 
 **能取假（⊢ 对照）**：对照轮跑完，若 `QUAY_MAX_CONCURRENT_SUITES=1` 的 serial+main 两相墙钟 + 前置 ≤ 600s（对照 609s 基线），则结论成立 ⇒ 改默认值（S=2→1）+ 落地；若不成立 ⇒ S 不是主因，回 manager 的候选清单继续（serial 301s 整族/文件级清单）。两种结果都是有效产出。
 
+**补强判据（manager 08-18 更正——单轮墙钟易被「这轮恰好慢」解释掉，吞吐反事实更难）**：同天实测真实独跑 n=11 墙钟中位 **823s** / 4.14 轮/h vs 真实重叠 n=8 墙钟 **1421s** / 3.72 轮/h；那 8 轮按独跑中位串行=110min vs 实际并发=129min（**并发比串行慢 18%**）。对照轮应同时记录两口径**吞吐（rounds/h）**——S=1 若串行吞吐 ≥ 并发吞吐即证成，不单靠单轮墙钟。⚠️ **823s 真值离 600s 差 37%，S=1 单独达不到 600s**——需 lock_wait 消除（`gap-verification-round-observability-holes` AC1）+ serial phase 并发 8→16 一起上；对照轮的「≤600s」判据应据此重述（S=1 的产出=吞吐证成 + 墙钟接近，600s 是组合目标非 S=1 单独目标）。
+
+**稳定性阈值判据（manager 08-18 6h 吞吐分析——比吞吐更强的判据）**：6h 实测 **15 suite → 2 land = 7.5 轮/任务**（正常应 1–2），绝大部分 suite 为重试服务。根因 ff-only 协议 + 千秒级 suite ⇒ `P(ff失败)=1-exp(-λT)`（λ=6.2 提交/h，T=suite 时长）：1065s⇒P=84%（期望 6.2 次尝试）、600s⇒64%（2.8 次）、300s⇒40%（1.7 次）。**正反馈环**：suite 慢→ff 失败率高→同任务多轮 suite→并发争抢→suite 更慢→回起点（活例：suite-fix-relaunch 三次翻 done 两次 revert，一任务烧 3 轮完整 suite）。当前 84% 在曲线悬崖边——再多一个并发（λ↑）即可能进入不收敛态。**⇒ 600s 不是性能优化、是稳定性阈值**：低于它 fan-in 收敛、高于它靠重试空转（「5 槽满却只 2 land」的机制解释）。**对照轮判据**：除墙钟外记录 **ff 成功率 / revert done→ready 次数**——它测「系统收敛」而非单轮墙钟，与吞吐反事实互补（吞吐测产能、ff 成功率测收敛）。
+
 **⚠️ 执行顺序前置（2026-08-18 注记，gap-suite-concurrency-ff-gate-and-slot-ssot 落地后）**：本任务设 S=1 的对照轮**必须先等** `gap-suite-concurrency-ff-gate-and-slot-ssot` 的层 2（槽数由 S 生成）落地——**否则设 S=1 得到的仍是「2 槽 × 16 lane = 32 lane 超订」**（槽文件写死 `.0/.1`、lane 除数按 S 算但槽不联动），对照轮测错对象。层 2 落地后 S=1 才真正单槽单 lane 集（仅 `.0`、lane=nproc×oversub/1）。
 
 ## Plan
 
 1. **对照轮（两侧直调 full-suite-runner，不依赖 fan-in 路径）**：同当前 develop commit，`QUAY_MAX_CONCURRENT_SUITES=1` 直调 `full-suite-runner` 跑一次全量 suite（单 suite，无并发，S=1）；同 commit、`S=2`（默认）直调跑**基线对照**。两侧各自记录 serial/main 两相墙钟 + 总墙钟 + verification-round durationMs（rich-schema）。
 2. **同 commit 同负载**：对照轮与基线必须同 commit、同负载（nproc/load 记录在案）——「同口径」（同一 writer）与「同负载」是两条独立轴，都须满足。
-3. 对比基线（609s 分解：serial 301 + main 255 + 前置 47-68，同口径 S=2 直调复核）：S=1 ⇒ concurrency=16 ⇒ main floor 减半（240→120s 理论）。
+3. 对比基线（609s 分解：serial 301 + main 255 + 前置 47-68，同口径 S=2 直调复核）：S=1 ⇒ concurrency=16 ⇒ main floor 减半（240→120s 理论）。**⚠️ 但须控制 overlap 变量（manager 08-18 指出）**：「concurrency=16 真并行」假设在 QUAY_PHASE_OVERLAP 开启时不成立——serial 与 lowconc 并行各拿 16 时重叠窗口 16+16=32 lane，超订反而比现在更严重。对照轮必须**两侧固定 `QUAY_PHASE_OVERLAP` 同值并记录**（建议 off，隔离出 S 的单一效应），或做 S×overlap 2×2；否则测的是两变量叠加、归因不了（`gap-lane-formula-ignores-phase-overlap-concurrency` 是这条的独立修复，但对照轮不能等它 land 才跑）。
 4. 判定：总墙钟 ≤600s ⇒ 改默认 S=2→1 + 落地；否则回 manager 候选清单（serial 相文件级耗时清单是下一候选）。
 5. scoped 门（`--for-task`）+ 全量验证，fan-in（改默认时）。
 
