@@ -23,10 +23,13 @@ lane 除数说 = S（=2，读 S，正确）  槽数说 = 2（写死，不读 S�
 ```
 
 - **正确读 S（5 处）**：`full-suite-runner.ts:1566 defaultLaneCount()` / `:1667 DEFAULT_SERIAL_CONCURRENCY` / `:1668 DEFAULT_LOWCONC_CONCURRENCY` / `scripts/test.sh:963` 资源闸 / `:1002 serial_lowconc_host_default()`。
-- **不读 S（3 处错误面）**：
+- **不读 S / 写死槽路径（4 处错误面，manager 换谓词重扫补全）**：
   - `scripts/test.sh:1103-1104` `FULL_SUITE_LOCK_0/_1` **写死两个文件**（`:1067` 注释断言「slot count IS the QUAY_MAX_CONCURRENT_SUITES knob」——断言与实现不符，硬规则③b）。
   - `fan-in-ff-merge.sh:208/239/249` 遍历写死 `.0/.1`，**且判据范围错**（全局 vs 本任务）。
   - `fan-in-execute.js:153` `lane_count=$(nproc)` —— **记录面伪造**（实跑 concurrency=8 记成 16）。
+  - **`full-suite-runner.ts:1598-1613 suiteLockPaths()`** 返回定长 `[base.0, base.1]`（**:1632 docstring 逐字「(0..S, S = concurrentSuiteSlots())」——与 test.sh:1067 同形，注释断言 S 联动而实现没有，硬规则③b 第二实例**）；`:1640 countHeldSuiteLocks()` 解构恰两个 ⇒ **`concurrentSuitesRunning` 最多数到 2，S=3 时 AC101 对照轮的自变量记录再次失真**（与 laneCount 伪造同族）。
+  - **`worktree-process-reaper.ts:259-267 fullSuiteLockFiles()`** 返回 `.0/.1` ⇒ S=3 时 `.2` 上的陈旧持锁**永远无人回收**（stale-lock reclaim 路径 `fan-in-ff-merge.sh:231-235` 正依赖它）。
+  - **⚠️ 枚举谓词教训（manager 自认，硬规则⑤ 第四例）**：我最初用「谁读 S」（grep QUAY_MAX_CONCURRENT_SUITES）枚举出 5+3，而缺陷长在「谁写死槽路径」（grep 槽文件名模式）真值 4 处——**两个谓词覆盖同一容器里两类 population，只用一个判「枚举完整」会漏**。验收同理：层 4 不变量若也只按「读 S」写会漏 ③④。
 - **可执行不变量：0 个**。
 
 **范畴错误（根本）**：同一个对象表达了两种语义不同的锁——
@@ -41,13 +44,14 @@ ff 闸拿资源锁去表达正确性约束 ⇒ 收窄不是「缩小范围」而
 ## Plan（四层，人「把系统真正做对」约束——缺任一层都会再漂一次）
 
 1. **拆语义（层 1，核心）**：ff 闸不再读任何全局 suite 锁；改读**本任务** capture——`.exit` marker 存在 ∧ `suite_exit=0` ∧ `suite_head == 待 ff 的 HEAD`。**副产品**：矛盾 B 自动消失（两 suite 并存不再互 REFUSE）、R1（防 suite 并发）自动成立、无需独立加闸。
-2. **单一定义点（层 2）**：槽数由 S **生成**（按 S 循环建 `.0..S-1`、FD 动态分配），不再写死两个；lane 除数已读 S ✓。
-3. **记录面真实化（层 3）**：`fan-in-execute.js:153` `lane_count` 改取 suite 日志 `__GROUP__ concurrency=`；补记实际并发数——**否则不变量不可核**。⚠️ 与 `gap-fan-in-verification-round-thin-schema-phase-gap` 同批（lane_count 真实化已在该任务体，勿分开做）。
+2. **单一定义点（层 2）**：**槽路径解析集中到唯一实现，四处消费者全部改读它**（`scripts/test.sh` 的 `FULL_SUITE_LOCK_*` / `full-suite-runner.ts:1598 suiteLockPaths()` / `worktree-process-reaper.ts:259 fullSuiteLockFiles()` / `fan-in-ff-merge.sh` 遍历）；槽数由 S **生成**（按 S 循环建 `.0..S-1`、FD 动态分配），不再写死两个；lane 除数已读 S ✓。**否则改完 test.sh，另外三处仍各自写死，单一定义点没建成。**
+3. **记录面真实化（层 3）**：`fan-in-execute.js:153` `lane_count` 改取 suite 日志 `__GROUP__ concurrency=`；补记实际并发数——**否则不变量不可核**。⚠️ 与 `gap-fan-in-verification-round-thin-schema-phase-gap` 同批（lane_count 真实化已在该任务体，勿分开做）。**⚠️ `lane_count` 与 `concurrentSuitesRunning` 两个字段同源**（都该取自 suite 日志/唯一槽实现，而非 `nproc`/定长解构）——它们是同一「记录面伪造」缺陷的两半，别只修 lane_count 漏 concurrentSuitesRunning。
 4. **可执行不变量（层 4，行为层）**——「做对」与「再修一遍」的分界：
    - 观测到的槽文件数 == `concurrentSuiteSlots()`（**设 S=1 跑断言只出现 `.0`；设 S=3 断言 `.0/.1/.2`**——能取假）。
    - `lane × S ≤ nproc × oversub`（资源不超订）。
    - **ff 闸不引用任何跨任务 suite 状态**（按位置：`fan-in-ff-merge.sh` 不得出现 `full-suite.lock` 读取）。
-   前两条若早存在，`:1067` 的漂移当天就会红。
+   - **全仓不得存在除唯一槽路径实现外的 `full-suite.lock.<数字>` 字面量**（按位置 grep 槽文件名模式——直接对着表现形式，不依赖谁读 S；能同时抓住 test.sh:1067 与 full-suite-runner.ts:1632 两处注释断言同形）。
+   前两条若早存在，`:1067` 的漂移当天就会红；第三条把 ③④ 也纳入。
 
 **顺带解掉（记进任务体）**：
 - **S=1 现在可真正设出**（层 2 落地后）——②的实施前提随之满足，**但执行顺序**：层 2 必须先落，否则设 S=1 得到的仍是「2 槽 × 16 lane = 32 lane 超订」，对照轮测错对象。
@@ -73,8 +77,10 @@ ff 闸拿资源锁去表达正确性约束 ⇒ 收窄不是「缩小范围」而
 - plugin/workflows/fan-in-execute.js（lane_count 取 `__GROUP__ concurrency=`；若 capture 需补 suite_head 传递则同步）
 - .claude/workflows/fan-in-execute.js（dual-copy 副本，byte-identical）
 - scripts/test.sh（槽数由 S 生成——循环建 `.0..S-1`、FD 动态分配；serial_lowconc_host_default 联动）
-- plugin/scripts/concurrency-literal-check.ts（或新增行为层不变量检查——槽文件数==S / lane×S≤nproc / ff 无全局锁读取）
-- plugin/test/（行为层不变量测试：S=1/S=3 槽文件断言、ff 闸本任务 capture 测试、lane×S 超订断言）
+- plugin/scripts/full-suite-runner.ts（**suiteLockPaths() 改读唯一槽实现 + countHeldSuiteLocks() 支持 S**——`concurrentSuitesRunning` 随 S 正确，:1632 docstring 与实现一致）
+- plugin/scripts/worktree-process-reaper.ts（**fullSuiteLockFiles() 改读唯一槽实现**——S=3 时 `.2` 陈旧持锁可回收）
+- plugin/scripts/concurrency-literal-check.ts（或新增行为层不变量检查——槽文件数==S / lane×S≤nproc / ff 无全局锁读取 / 无 `full-suite.lock.<数字>` 字面量）
+- plugin/test/（行为层不变量测试：S=1/S=3 槽文件断言、ff 闸本任务 capture 测试、lane×S 超订断言、concurrentSuitesRunning 随 S 测试）
 - tasks/gap-ac101-lane-concurrency-control-round.md（执行顺序注记：层 2 先落再设 S=1）
 - tasks/gap-fan-in-verification-round-thin-schema-phase-gap.md（lane_count 真实化同批注记）
 - tasks/gap-suite-concurrency-ff-gate-and-slot-ssot.md（自身）
