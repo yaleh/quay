@@ -79,7 +79,8 @@
 //       --task-id <taskId> --run-id <runId> --started-at <iso> --duration-ms <ms>
 //       --lane-count <n> --load <n> --commit <sha>
 //       [--preverified <0|1|true|false>] [--cpu-time-s <n|null>] [--cpu-source <name>]
-//       [--runner <name>] [--root <dir>] [--record-file <file>] [--json] [--help]
+//       [--suite-log <path>] [--runner <name>] [--root <dir>] [--record-file <file>]
+//       [--json] [--help]
 //
 //   --task-id         the fan-in task whose suite landed (required)
 //   --run-id          the fan-in runId (required)
@@ -94,6 +95,10 @@
 //   --cpu-time-s      the suite's CPU seconds — a real number, or the literal null when the source
 //                     was considered and UNAVAILABLE (AC6; 0 normalizes to null)
 //   --cpu-source      WHERE the cpu_time_s came from ('gnu-time' / 'not-wired'; optional)
+//   --suite-log       the fan-in suite log path — parse its `__OVERHEAD__ <phase>_ms=N` lines into
+//                     static/serial/lowconc/main phase fields + record nproc/concurrentSuiteSlots/
+//                     concurrentSuitesRunning (same 口径 as full-suite-runner). When absent or
+//                     unreadable the row is EXPLICITLY phase-less (no fabricated fields).
 //   --runner          nominal runner identity (default 'outer', matching the existing ledger)
 //   --root            repo root (default: cwd) — resolves the shared checkout via git common-dir
 //   --record-file     override the ledger path (hermetic tests)
@@ -105,11 +110,113 @@
 //   2  usage / environment error (missing/invalid field, unresolvable shared checkout) — nothing written
 
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { isDirectEntry } from "./gate-script-base.ts";
 import { resolveSharedCheckout, toIsoTimestamp } from "./per-task-suite-record.ts";
 
 const COMMIT_RE = /^[0-9a-f]{40}$/i;
+
+// ── phase + concurrency 口径 (gap-fan-in-verification-round-thin-schema-phase-gap) ───────────────────
+// The fan-in verification-round row must carry the SAME phase / concurrency axes full-suite-runner's
+// appendVerificationRound writes (static/serial/lowconc/main phase ms + nproc/concurrentSuiteSlots/
+// concurrentSuitesRunning), so AC101's lane-concurrency control round (S=1) can compare the fan-in
+// baseline against a full-suite-runner control round at the SAME 口径 (round 227 was the last rich row;
+// 228-233 all thin — the defect this module fixes).
+//
+// Phase source: the fan-in suite log (--suite-log) carries test.sh's `__OVERHEAD__ <phase>_ms=N`
+// fixed-overhead instrumentation — the SAME lines full-suite-runner stream-accumulates at
+// plugin/scripts/full-suite-runner.ts:2849-3052. Only a phase that RAN is present (absent-field
+// contract, same as the *_phase_ms spreads at :3696-3699): `static_phase_ms` ← `run_static_checks`,
+// plus serial/lowconc/main. A missing/unreadable log → NO phase fields (never fabricated).
+//
+// Concurrency helpers below are THIN LOCAL REPLICAS of full-suite-runner's single-definition-point
+// expressions (hostParallelism :1580, concurrentSuiteSlots :1536, countHeldSuiteLocks :1638) — kept
+// local so the thin writer never imports the heavy full-suite-runner module; the expressions are
+// byte-identical so the record is 同口径.
+
+const PHASE_OVERHEAD_RE = /^__OVERHEAD__\s+([A-Za-z0-9_]+)_ms=(\d+)(?:\s+partial=1)?$/;
+
+/** Parse test.sh's `__OVERHEAD__ <phase>_ms=N` lines from a suite log. Returns {} when the log is
+ *  absent/unreadable (never fabricates a phase — the absent-field contract). Keyed by the raw label
+ *  (`serial_phase`, `lowconc_phase`, `main_phase`, `run_static_checks`). */
+export function parseSuitePhases(suiteLog) {
+  const phaseMs = {};
+  if (!suiteLog) return phaseMs;
+  let text;
+  try {
+    text = fs.readFileSync(suiteLog, "utf8");
+  } catch {
+    return phaseMs;
+  }
+  for (const line of text.split("\n")) {
+    const m = line.match(PHASE_OVERHEAD_RE);
+    if (m) phaseMs[m[1]] = Number(m[2]);
+  }
+  return phaseMs;
+}
+
+/** Host parallelism (nproc) — the same read-host expression as full-suite-runner.hostParallelism
+ *  (RESOURCE_GATE_NPROC seam → os.availableParallelism() → os.cpus().length, floored at 1). */
+export function hostParallelism() {
+  const ncpuRaw = process.env.RESOURCE_GATE_NPROC ?? String(
+    typeof os.availableParallelism === "function" ? os.availableParallelism() : os.cpus().length,
+  );
+  const ncpu = Number(ncpuRaw);
+  return Number.isFinite(ncpu) && ncpu >= 1 ? ncpu : 1;
+}
+
+/** The configured concurrent-suite slot count (QUAY_MAX_CONCURRENT_SUITES, default 2) — the same
+ *  definition-point read as full-suite-runner.concurrentSuiteSlots (clamped >= 1, fail-open to 2). */
+export function concurrentSuiteSlots() {
+  const raw = Number(process.env.QUAY_MAX_CONCURRENT_SUITES ?? "2");
+  return Number.isFinite(raw) && raw >= 1 ? Math.floor(raw) : 2;
+}
+
+/** Resolve the single-flight 2-slot lock files the SAME way full-suite-runner.suiteLockPaths does:
+ *  `${FULL_SUITE_LOCK_FILE}` env override → `git rev-parse --git-common-dir` from `root` (the SHARED
+ *  lock dir all worktrees contend on) → fall back to `<root>/.git`. */
+function suiteLockPaths(root) {
+  const envOverride = process.env.FULL_SUITE_LOCK_FILE;
+  let base;
+  if (envOverride) {
+    base = envOverride;
+  } else {
+    let commonDir = null;
+    try {
+      commonDir = execFileSync("git", ["rev-parse", "--git-common-dir"], { cwd: root, encoding: "utf8" }).trim();
+    } catch {
+      commonDir = null;
+    }
+    if (!commonDir) commonDir = ".git";
+    base = path.join(path.resolve(root, commonDir), "full-suite.lock");
+  }
+  return [`${base}.0`, `${base}.1`];
+}
+
+/** Non-blocking probe of ONE slot: false = FREE, true = HELD. Missing parent dir reads as FREE (the
+ *  same fail-open as full-suite-runner.probeLockHeld). */
+function probeLockHeld(lockFile) {
+  if (!fs.existsSync(path.dirname(lockFile))) return false;
+  try {
+    execFileSync("flock", ["-n", lockFile, "true"], { stdio: "ignore" });
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+/** Number of single-flight lock slots CURRENTLY held by OTHER suites at probe time (0..S, S =
+ *  concurrentSuiteSlots()). Best-effort: any error degrades to 0 (accounting never blocks a run). */
+export function countHeldSuiteLocks(root) {
+  try {
+    const [l0, l1] = suiteLockPaths(root);
+    return (probeLockHeld(l0) ? 1 : 0) + (probeLockHeld(l1) ? 1 : 0);
+  } catch {
+    return 0;
+  }
+}
 
 /** Build the pre-verified round record. Returns {record} or {error} (fail-closed). */
 export function buildPreVerifiedRoundRecord(o) {
@@ -191,6 +298,29 @@ export function buildPreVerifiedRoundRecord(o) {
     record.cpu_time_s = cpuTimeS;
     record.cpu_source = cpuSource ?? "not-wired";
   }
+  // gap-fan-in-verification-round-thin-schema-phase-gap AC1/AC2 — phase fields + concurrency
+  // variables (same 口径 as full-suite-runner's appendVerificationRound). Phase source: the suite
+  // log (--suite-log). preverified 分支单独定案 (AC2): the writer parses phases from --suite-log
+  // WHENEVER the path is provided AND the file is readable (a real-run capture always carries it; a
+  // pre-verified capture carries it only when the caller recorded its log path) — otherwise the row
+  // is EXPLICITLY phase-less (no fabricated fields). This does not conflate the two branches: a
+  // preverified=1 capture WITHOUT a log path records no phase data, honestly.
+  const suiteLog = o.suiteLog ? String(o.suiteLog).trim() : "";
+  const phaseMs = parseSuitePhases(suiteLog);
+  if (phaseMs.run_static_checks !== undefined) record.static_phase_ms = phaseMs.run_static_checks;
+  if (phaseMs.serial_phase !== undefined) record.serial_phase_ms = phaseMs.serial_phase;
+  if (phaseMs.lowconc_phase !== undefined) record.lowconc_phase_ms = phaseMs.lowconc_phase;
+  if (phaseMs.main_phase !== undefined) record.main_phase_ms = phaseMs.main_phase;
+  // Concurrency variables (AC1): nproc + slots are deterministic reads; concurrentSuitesRunning =
+  // 1 (this round's own slot) + currently-held OTHER-suite slots at WRITE time, capped at the slot
+  // count — the same formula + clamp as full-suite-runner's round-start capture (:2591-2596). The
+  // fan-in suite already exited, so "other suites still running" ≈ the concurrent pressure this
+  // round experienced; a lone round records 1 (matching the full-suite-runner convention).
+  const lockRoot = o.root ? path.resolve(String(o.root)) : process.cwd();
+  const slots = concurrentSuiteSlots();
+  record.nproc = hostParallelism();
+  record.concurrentSuiteSlots = slots;
+  record.concurrentSuitesRunning = Math.min(1 + countHeldSuiteLocks(lockRoot), slots);
   return { record };
 }
 
@@ -221,7 +351,8 @@ Usage:
       --task-id <taskId> --run-id <runId> --started-at <iso> --duration-ms <ms>
       --lane-count <n> --load <n> --commit <sha>
       [--preverified <0|1|true|false>] [--cpu-time-s <n|null>] [--cpu-source <name>]
-      [--runner <name>] [--root <dir>] [--record-file <file>] [--json] [--help]
+      [--suite-log <path>] [--runner <name>] [--root <dir>] [--record-file <file>]
+      [--json] [--help]
 
   --task-id         the fan-in task whose suite landed (required)
   --run-id          the fan-in runId (required)
@@ -235,6 +366,10 @@ Usage:
   --cpu-time-s      the suite's CPU seconds — a real number, or the literal null when the source was
                     considered and UNAVAILABLE (AC6; 0 normalizes to null)
   --cpu-source      WHERE the cpu_time_s came from ('gnu-time' / 'not-wired'; optional)
+  --suite-log       the fan-in suite log path — parse its __OVERHEAD__ <phase>_ms=N lines into
+                    static/serial/lowconc/main phase fields + record nproc/concurrentSuiteSlots/
+                    concurrentSuitesRunning (same 口径 as full-suite-runner). When absent or
+                    unreadable the row is EXPLICITLY phase-less (no fabricated fields).
   --runner          nominal runner identity (default 'outer', matching the existing ledger)
   --root            repo root (default: cwd) — resolves the shared checkout via git common-dir
   --record-file     override the ledger path (hermetic tests)
@@ -273,6 +408,8 @@ export function main(argv) {
     cpuTimeS: getArgValue(args, "--cpu-time-s"),
     cpuSource: getArgValue(args, "--cpu-source"),
     runner: getArgValue(args, "--runner"),
+    suiteLog: getArgValue(args, "--suite-log"),
+    root,
   });
   if (built.error) return fail(built.error);
   const record = built.record;

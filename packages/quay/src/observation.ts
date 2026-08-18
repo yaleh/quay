@@ -1159,6 +1159,16 @@ export interface TestRunRecord {
   runner: string | null;
   gate: string | null;
   failures: string[] | null;
+  // gap-fan-in-verification-round-thin-schema-phase-gap — the fan-in (thin) writer's phase +
+  // concurrency axes, so the /tests page and AC101's lane-concurrency control round read the SAME
+  // 口径 fields full-suite-runner's rich rows carry. Absent on legacy/thin rows → null (never 0).
+  static_phase_ms?: number | null;
+  serial_phase_ms?: number | null;
+  lowconc_phase_ms?: number | null;
+  main_phase_ms?: number | null;
+  nproc?: number | null;
+  concurrentSuiteSlots?: number | null;
+  concurrentSuitesRunning?: number | null;
 }
 
 export interface TestsResult {
@@ -1205,6 +1215,15 @@ export function parseVerificationRound(line: string): TestRunRecord | null {
       runner: str(o.runner),
       gate: str(o.gate),
       failures,
+      // gap-fan-in-verification-round-thin-schema-phase-gap — the phase + concurrency axes (absent on
+      // legacy/thin rows → null, never a fabricated 0). Same 口径 as full-suite-runner's rich rows.
+      ...(o.static_phase_ms !== undefined ? { static_phase_ms: num(o.static_phase_ms) } : {}),
+      ...(o.serial_phase_ms !== undefined ? { serial_phase_ms: num(o.serial_phase_ms) } : {}),
+      ...(o.lowconc_phase_ms !== undefined ? { lowconc_phase_ms: num(o.lowconc_phase_ms) } : {}),
+      ...(o.main_phase_ms !== undefined ? { main_phase_ms: num(o.main_phase_ms) } : {}),
+      ...(o.nproc !== undefined ? { nproc: num(o.nproc) } : {}),
+      ...(o.concurrentSuiteSlots !== undefined ? { concurrentSuiteSlots: num(o.concurrentSuiteSlots) } : {}),
+      ...(o.concurrentSuitesRunning !== undefined ? { concurrentSuitesRunning: num(o.concurrentSuitesRunning) } : {}),
     };
   } catch {
     return null;

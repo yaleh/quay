@@ -28,10 +28,14 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { spawnSync } from "node:child_process";
+import { spawnSync, spawn } from "node:child_process";
 import {
   buildPreVerifiedRoundRecord,
   appendPreVerifiedRound,
+  parseSuitePhases,
+  hostParallelism,
+  concurrentSuiteSlots,
+  countHeldSuiteLocks,
 } from "../scripts/pre-verified-round-record.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -259,4 +263,160 @@ test("AC3 — the record lands in verification-round.jsonl, NOT per-task-suite-r
   appendPreVerifiedRound(roundFile, rec);
   assert.ok(fs.existsSync(roundFile), "verification-round.jsonl was written");
   assert.equal(fs.existsSync(perTaskFile), false, "per-task-suite-records.jsonl was NOT touched (AC3)");
+});
+
+// ── gap-fan-in-verification-round-thin-schema-phase-gap: 相字段 + 并发变量 ──────────────────────────
+
+/** Write a fake fan-in suite log carrying test.sh's `__OVERHEAD__ <phase>_ms=N` lines. */
+function writeSuiteLog(t, phaseLines = []) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pvr-log-"));
+  _tmpDirs.push(dir);
+  const log = path.join(dir, "suite.log");
+  fs.writeFileSync(log, phaseLines.join("\n") + "\n", "utf8");
+  return log;
+}
+
+test("AC1 — parseSuitePhases extracts serial/main/static/lowconc phase ms from the suite log's __OVERHEAD__ lines (partial=1 tolerated)", () => {
+  const log = writeSuiteLog(null, [
+    "__OVERHEAD__ run_static_checks_ms=1234",
+    "__OVERHEAD__ serial_phase_ms=301234",
+    "__OVERHEAD__ lowconc_phase_ms=0",
+    "__OVERHEAD__ main_phase_ms=512345 partial=1",
+    "  not an overhead line",
+    "__OVERHEAD__ build_dist_ms=479", // a non-phase label is kept but not mapped to the record
+  ]);
+  const phases = parseSuitePhases(log);
+  assert.equal(phases.run_static_checks, 1234, "static phase = run_static_checks_ms");
+  assert.equal(phases.serial_phase, 301234, "serial phase = serial_phase_ms");
+  assert.equal(phases.lowconc_phase, 0, "lowconc phase = lowconc_phase_ms (0 is a real value, kept)");
+  assert.equal(phases.main_phase, 512345, "main phase = main_phase_ms, partial=1 suffix tolerated");
+  assert.equal(phases.build_dist, 479, "other __OVERHEAD__ labels are accumulated too (full-suite-runner parity)");
+});
+
+test("AC1 — parseSuitePhases returns {} for a missing or unreadable log (never fabricates a phase)", () => {
+  assert.deepEqual(parseSuitePhases(undefined), {}, "no log path → no phases");
+  assert.deepEqual(parseSuitePhases(""), {}, "empty log path → no phases");
+  assert.deepEqual(parseSuitePhases("/nonexistent/pvr-suite.log"), {}, "unreadable log → no phases");
+});
+
+test("AC1 — a REAL-suite record (preverified:0) with a suite log carries serial/main/static phase ms + nproc/concurrentSuiteSlots/concurrentSuitesRunning (same 口径 as full-suite-runner)", () => {
+  const log = writeSuiteLog(null, [
+    "__OVERHEAD__ run_static_checks_ms=12000",
+    "__OVERHEAD__ serial_phase_ms=301000",
+    "__OVERHEAD__ lowconc_phase_ms=0",
+    "__OVERHEAD__ main_phase_ms=512000",
+  ]);
+  const prevLock = process.env.FULL_SUITE_LOCK_FILE;
+  process.env.FULL_SUITE_LOCK_FILE = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "pvr-lock-")), "full-suite.lock");
+  _tmpDirs.push(path.dirname(process.env.FULL_SUITE_LOCK_FILE));
+  try {
+    const { record, error } = buildPreVerifiedRoundRecord({
+      ...BASE, preverified: "0", suiteLog: log, root: REPO_ROOT,
+    });
+    assert.equal(error, undefined, `build must succeed: ${error}`);
+    assert.equal(record.preverified, false);
+    assert.equal(record.static_phase_ms, 12000, "static_phase_ms ← run_static_checks_ms");
+    assert.equal(record.serial_phase_ms, 301000, "serial_phase_ms ← serial_phase_ms");
+    assert.equal(record.lowconc_phase_ms, 0, "lowconc_phase_ms ← lowconc_phase_ms");
+    assert.equal(record.main_phase_ms, 512000, "main_phase_ms ← main_phase_ms");
+    assert.equal(typeof record.nproc, "number", "nproc is a number (read-host)");
+    assert.equal(record.concurrentSuiteSlots, 2, "concurrentSuiteSlots = QUAY_MAX_CONCURRENT_SUITES default 2");
+    assert.equal(record.concurrentSuitesRunning, 1, "a lone round (no held other-suite slot) records concurrentSuitesRunning=1");
+  } finally {
+    if (prevLock === undefined) delete process.env.FULL_SUITE_LOCK_FILE;
+    else process.env.FULL_SUITE_LOCK_FILE = prevLock;
+  }
+});
+
+test("AC2 — preverified=1 branch 单独定案: a reused capture WITH a recorded suite log carries phase fields; WITHOUT one records NONE (honest, not fabricated)", () => {
+  // (a) the caller recorded its suite log path ⇒ the preverified round parses phases from it.
+  const log = writeSuiteLog(null, ["__OVERHEAD__ serial_phase_ms=301000", "__OVERHEAD__ main_phase_ms=512000"]);
+  const withLog = buildPreVerifiedRoundRecord({ ...BASE, preverified: "1", suiteLog: log, root: REPO_ROOT }).record;
+  assert.equal(withLog.preverified, true);
+  assert.equal(withLog.serial_phase_ms, 301000, "preverified round WITH a caller-recorded log carries phase data");
+  assert.equal(withLog.main_phase_ms, 512000);
+
+  // (b) the reused capture carries NO suite log ⇒ the row is EXPLICITLY phase-less (AC2: 不伪造).
+  const withoutLog = buildPreVerifiedRoundRecord({ ...BASE, preverified: "1", root: REPO_ROOT }).record;
+  assert.equal(withoutLog.preverified, true);
+  assert.equal(withoutLog.static_phase_ms, undefined, "no log → no static phase field");
+  assert.equal(withoutLog.serial_phase_ms, undefined, "no log → no serial phase field");
+  assert.equal(withoutLog.lowconc_phase_ms, undefined, "no log → no lowconc phase field");
+  assert.equal(withoutLog.main_phase_ms, undefined, "no log → no main phase field");
+  // The concurrency variables ARE still present (they do not depend on the log).
+  assert.equal(typeof withoutLog.nproc, "number", "nproc present regardless of log availability");
+});
+
+test("AC1 — a real-suite record with an UNREADABLE suite log records phase-less (absent-field contract, never a fabricated 0)", () => {
+  const { record } = buildPreVerifiedRoundRecord({
+    ...BASE, preverified: "0", suiteLog: "/nonexistent/pvr-missing.log", root: REPO_ROOT,
+  });
+  assert.equal(record.serial_phase_ms, undefined, "unreadable log → no serial phase");
+  assert.equal(record.main_phase_ms, undefined, "unreadable log → no main phase");
+});
+
+test("AC1 — the concurrency helpers read the host + QUAY_MAX_CONCURRENT_SUITES the SAME way full-suite-runner does (seams respected)", () => {
+  const prevNproc = process.env.RESOURCE_GATE_NPROC;
+  const prevSlots = process.env.QUAY_MAX_CONCURRENT_SUITES;
+  try {
+    process.env.RESOURCE_GATE_NPROC = "8";
+    process.env.QUAY_MAX_CONCURRENT_SUITES = "1";
+    assert.equal(hostParallelism(), 8, "RESOURCE_GATE_NPROC is the deterministic nproc seam");
+    assert.equal(concurrentSuiteSlots(), 1, "QUAY_MAX_CONCURRENT_SUITES is the slot definition point");
+    process.env.QUAY_MAX_CONCURRENT_SUITES = "0";
+    assert.equal(concurrentSuiteSlots(), 2, "0 fails open to the single default (never 0 slots)");
+  } finally {
+    if (prevNproc === undefined) delete process.env.RESOURCE_GATE_NPROC;
+    else process.env.RESOURCE_GATE_NPROC = prevNproc;
+    if (prevSlots === undefined) delete process.env.QUAY_MAX_CONCURRENT_SUITES;
+    else process.env.QUAY_MAX_CONCURRENT_SUITES = prevSlots;
+  }
+});
+
+test("AC1 — concurrentSuitesRunning=2 when another suite holds a slot [negative control, FULL_SUITE_LOCK_FILE seam]", async () => {
+  const lockDir = fs.mkdtempSync(path.join(os.tmpdir(), "pvr-held-"));
+  _tmpDirs.push(lockDir);
+  const lockFile = path.join(lockDir, "full-suite.lock");
+  const holder = spawn("flock", [lockFile + ".0", "-c", "sleep 30"], { stdio: "ignore", detached: true });
+  try {
+    await new Promise((r) => setTimeout(r, 250)); // let flock actually take the slot
+    const prevLock = process.env.FULL_SUITE_LOCK_FILE;
+    process.env.FULL_SUITE_LOCK_FILE = lockFile;
+    try {
+      assert.equal(countHeldSuiteLocks(REPO_ROOT), 1, "the held other-suite slot is probed (seam self-check)");
+      const { record } = buildPreVerifiedRoundRecord({ ...BASE, preverified: "0", root: REPO_ROOT });
+      assert.equal(record.concurrentSuitesRunning, 2, "concurrentSuitesRunning=2 when another suite holds a slot");
+    } finally {
+      if (prevLock === undefined) delete process.env.FULL_SUITE_LOCK_FILE;
+      else process.env.FULL_SUITE_LOCK_FILE = prevLock;
+    }
+  } finally {
+    try { process.kill(-holder.pid, "SIGKILL"); } catch { /* already gone */ }
+    try { holder.kill("SIGKILL"); } catch { /* already gone */ }
+  }
+});
+
+test("CLI — --suite-log wires the phase fields through to the appended record (real-suite branch)", () => {
+  const file = tmpFile("pvr-phcli-");
+  const log = writeSuiteLog(null, ["__OVERHEAD__ serial_phase_ms=301000", "__OVERHEAD__ main_phase_ms=512000"]);
+  const args = [
+    "--task-id", BASE.taskId,
+    "--run-id", BASE.runId,
+    "--started-at", BASE.startedAt,
+    "--duration-ms", BASE.durationMs,
+    "--lane-count", BASE.laneCount,
+    "--load", BASE.load,
+    "--commit", BASE.commit,
+    "--preverified", "0",
+    "--suite-log", log,
+    "--record-file", file,
+    "--json",
+  ];
+  const r = spawnSync("node", ["--experimental-strip-types", WRITER, ...args], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.ok, true);
+  assert.equal(out.record.serial_phase_ms, 301000, "CLI --suite-log parses serial_phase_ms");
+  assert.equal(out.record.main_phase_ms, 512000, "CLI --suite-log parses main_phase_ms");
+  assert.equal(typeof out.record.nproc, "number", "CLI record carries nproc");
 });

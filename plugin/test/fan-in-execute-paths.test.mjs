@@ -971,6 +971,10 @@ test("⑦ wiring — the fan-in prompt carries a verification-round write block 
   assert.ok(block.includes('--preverified "$preverified_flag"'), "block must pass the preverified flag to the shared writer");
   assert.ok(block.includes("--commit \"$suite_head\""), "block must pin the verified suite_head as commit");
   assert.ok(block.includes("--duration-ms \"$wall_ms\""), "block must reuse the capture's wall-clock (AC2)");
+  // gap-fan-in-verification-round-thin-schema-phase-gap AC1/AC2 — the block passes the capture's
+  // suite_log_file so the writer can parse the phase fields (real-run capture always carries it; a
+  // pre-verified capture only when the caller recorded its log path — the "单独定案" seam).
+  assert.ok(block.includes('--suite-log "${suite_log_file:-}"'), "block must pass the suite log path to the shared writer");
   // Placement: the write runs in step 4.5 (suite-record-block), BEFORE the capture is removed — all in the phase-2 prompt.
   const p2 = promptContaining(prompts, "# preverified-round-block-start");
   const blockIdx = p2.indexOf("# preverified-round-block-start");
@@ -1097,6 +1101,101 @@ test("⑦ REAL skip — a doc-only capture (full_suite_ran=false) writes NO veri
   const r = runBash(`suite_capture="${capture}"; . "$suite_capture"; ${block}`, { cwd: dir });
   assert.equal(r.status, 0, `doc-only skip must exit 0 (no write): ${r.stderr}`);
   assert.equal(fs.existsSync(path.join(dir, ".quay", "verification-round.jsonl")), false, "no verification-round record for a doc-only skip (no suite ran)");
+});
+
+test("⑦ REAL real-suite WITH a suite log — the fan-in landing row carries the phase fields + concurrency variables (gap-fan-in-verification-round-thin-schema-phase-gap AC1/AC4)", async (t) => {
+  // THE DEFECT THIS TASK FIXES: fan-in landing rows were thin — no serial/main/static phase ms, no
+  // nproc/concurrentSuiteSlots/concurrentSuitesRunning — so AC101's lane-concurrency control round
+  // (S=1) could not compare the fan-in baseline against a full-suite-runner control round at the same
+  // 口径. The real-run capture now records suite_log_file, and the block passes it via --suite-log.
+  const dir = makePreVerifiedWorktree();
+  t.after(() => cleanup(dir));
+  const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: dir, encoding: "utf8" }).stdout.trim();
+  const task = "gap-test-phases";
+  const capture = `/tmp/fan-in-suite-${task}.env`;
+  const suiteLog = `/tmp/fan-in-suite-${task}.log`;
+  fs.writeFileSync(suiteLog, [
+    "__OVERHEAD__ run_static_checks_ms=12345",
+    "__OVERHEAD__ serial_phase_ms=301234",
+    "__OVERHEAD__ lowconc_phase_ms=0",
+    "__OVERHEAD__ main_phase_ms=512345",
+  ].join("\n") + "\n", "utf8");
+  t.after(() => { for (const f of [capture, suiteLog]) { try { fs.rmSync(f, { force: true }); } catch (_) { /* best-effort */ } } });
+  fs.writeFileSync(capture, [
+    "full_suite_ran=true",
+    "skip_reason=",
+    "cpu_s=42.5",
+    "cpu_source=gnu-time",
+    "start_iso=2026-08-17T19:45:00.000Z",
+    "end_iso=2026-08-17T20:02:00.000Z",
+    "wall_ms=1020000",
+    "load=12.3",
+    "lane_count=16",
+    "suite_exit=0",
+    `suite_head=${head}`,
+    `suite_log_file=${suiteLog}`,
+  ].join("\n") + "\n", "utf8");
+
+  const block = await preVerifiedBlockFor(task, dir, REPO_ROOT);
+  const r = runBash(`suite_capture="${capture}"; . "$suite_capture"; ${block}`, { cwd: dir });
+  assert.equal(r.status, 0, `phase-bearing write must exit 0: ${r.stderr}`);
+  const ledger = path.join(dir, ".quay", "verification-round.jsonl");
+  const lines = fs.readFileSync(ledger, "utf8").trim().split("\n").filter(Boolean);
+  assert.equal(lines.length, 1, "exactly one record");
+  const rec = JSON.parse(lines[0]);
+  assert.equal(rec.preverified, false, "real-suite round carries preverified:false");
+  assert.equal(rec.static_phase_ms, 12345, "static_phase_ms ← run_static_checks_ms");
+  assert.equal(rec.serial_phase_ms, 301234, "serial_phase_ms ← serial_phase_ms");
+  assert.equal(rec.lowconc_phase_ms, 0, "lowconc_phase_ms ← lowconc_phase_ms (0 is a real value)");
+  assert.equal(rec.main_phase_ms, 512345, "main_phase_ms ← main_phase_ms");
+  assert.equal(typeof rec.nproc, "number", "nproc present on the fan-in landing row");
+  assert.equal(typeof rec.concurrentSuiteSlots, "number", "concurrentSuiteSlots present");
+  assert.equal(typeof rec.concurrentSuitesRunning, "number", "concurrentSuitesRunning present");
+});
+
+test("⑦ preverified=1 分支单独定案 — a reused capture WITH a recorded suite log carries phases; WITHOUT one records NONE (gap-fan-in-verification-round-thin-schema-phase-gap AC2)", async (t) => {
+  const dir = makePreVerifiedWorktree();
+  t.after(() => cleanup(dir));
+  const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: dir, encoding: "utf8" }).stdout.trim();
+
+  // (a) caller recorded its suite log path ⇒ the preverified landing row carries phase data.
+  const taskA = "gap-test-pvr-ph-a";
+  const captureA = `/tmp/fan-in-suite-${taskA}.env`;
+  const suiteLogA = `/tmp/fan-in-suite-${taskA}.log`;
+  fs.writeFileSync(suiteLogA, ["__OVERHEAD__ serial_phase_ms=301234", "__OVERHEAD__ main_phase_ms=512345"].join("\n") + "\n", "utf8");
+  fs.writeFileSync(captureA, [
+    "full_suite_ran=true", "skip_reason=", "cpu_s=null", "cpu_source=not-wired",
+    "start_iso=2026-08-17T04:30:00.000Z", "end_iso=2026-08-17T04:45:36.519Z",
+    "wall_ms=936519", "load=8.03", "lane_count=8", "suite_exit=0",
+    `suite_head=${head}`, "suite_preverified=1", `suite_log_file=${suiteLogA}`,
+  ].join("\n") + "\n", "utf8");
+  t.after(() => { for (const f of [captureA, suiteLogA]) { try { fs.rmSync(f, { force: true }); } catch (_) { /* best-effort */ } } });
+  const blockA = await preVerifiedBlockFor(taskA, dir, REPO_ROOT);
+  const rA = runBash(`suite_capture="${captureA}"; . "$suite_capture"; ${blockA}`, { cwd: dir });
+  assert.equal(rA.status, 0, `preverified-with-log write must exit 0: ${rA.stderr}`);
+  const recA = JSON.parse(fs.readFileSync(path.join(dir, ".quay", "verification-round.jsonl"), "utf8").trim().split("\n").filter(Boolean)[0]);
+  assert.equal(recA.preverified, true);
+  assert.equal(recA.serial_phase_ms, 301234, "preverified=1 WITH a caller-recorded log carries phase data");
+  assert.equal(recA.main_phase_ms, 512345);
+
+  // (b) reused capture WITHOUT a suite log ⇒ the row is EXPLICITLY phase-less (AC2: 不伪造, 不两分支一概而论).
+  const taskB = "gap-test-pvr-ph-b";
+  const captureB = `/tmp/fan-in-suite-${taskB}.env`;
+  fs.writeFileSync(captureB, [
+    "full_suite_ran=true", "skip_reason=", "cpu_s=null", "cpu_source=not-wired",
+    "start_iso=2026-08-17T04:30:00.000Z", "end_iso=2026-08-17T04:45:36.519Z",
+    "wall_ms=936519", "load=8.03", "lane_count=8", "suite_exit=0",
+    `suite_head=${head}`, "suite_preverified=1",
+  ].join("\n") + "\n", "utf8");
+  t.after(() => { try { fs.rmSync(captureB, { force: true }); } catch (_) { /* best-effort */ } });
+  const blockB = await preVerifiedBlockFor(taskB, dir, REPO_ROOT);
+  const rB = runBash(`suite_capture="${captureB}"; . "$suite_capture"; ${blockB}`, { cwd: dir });
+  assert.equal(rB.status, 0, `preverified-without-log write must exit 0: ${rB.stderr}`);
+  const linesB = fs.readFileSync(path.join(dir, ".quay", "verification-round.jsonl"), "utf8").trim().split("\n").filter(Boolean);
+  const recB = JSON.parse(linesB[linesB.length - 1]);
+  assert.equal(recB.preverified, true);
+  assert.equal(recB.serial_phase_ms, undefined, "preverified=1 WITHOUT a recorded log ⇒ phase-less (honest, not fabricated)");
+  assert.equal(recB.main_phase_ms, undefined, "preverified=1 WITHOUT a recorded log ⇒ phase-less");
 });
 
 // ── ⑦ fan-in orchestration bootstrap (gap-fan-in-orchestration-bootstrap-self-fix) ───────────────────

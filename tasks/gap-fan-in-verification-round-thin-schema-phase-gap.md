@@ -43,21 +43,23 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: 真跑分支（preverified=0）fan-in 落地的 verification-round 行带 serial/main/static 相字段 + nproc/concurrentSuiteSlots/concurrentSuitesRunning（与 full-suite-runner 同构或同口径）。
-- [ ] AC2: preverified=1 分支单独定案（capture 带日志路径或明确无相），不伪造、不两分支一概而论。
-- [ ] AC3: `gap-ac101-lane-concurrency-control-round` 能用修复后的行与基线同口径比较（对照轮判定前提满足）。
-- [ ] AC4: 对照实测：一次 fan-in 落地 → 行带相字段；`/tests` 与 lane 对照轮读得到。
-- [ ] AC5: 测试全绿 + `--for-task` scoped 门绿。
+- [x] AC1: 真跑分支（preverified=0）fan-in 落地的 verification-round 行带 serial/main/static 相字段 + nproc/concurrentSuiteSlots/concurrentSuitesRunning（与 full-suite-runner 同构或同口径）。
+- [x] AC2: preverified=1 分支单独定案（capture 带日志路径或明确无相），不伪造、不两分支一概而论。
+- [x] AC3: `gap-ac101-lane-concurrency-control-round` 能用修复后的行与基线同口径比较（对照轮判定前提满足）。
+- [x] AC4: 对照实测：一次 fan-in 落地 → 行带相字段；`/tests` 与 lane 对照轮读得到。
+- [x] AC5: 测试全绿 + `--for-task` scoped 门绿。
 
 ## Definition of Done
 
-- [ ] fan-in 落地行带相字段与并发变量（真跑分支），preverified 分支单独定案，趋势账本对主落地路径恢复相级可见，lane 对照轮同口径可比，scoped + 全量绿。
+- [x] fan-in 落地行带相字段与并发变量（真跑分支），preverified 分支单独定案，趋势账本对主落地路径恢复相级可见，lane 对照轮同口径可比，scoped + 全量绿。
 
 ## Touches
 
-- plugin/scripts/pre-verified-round-record.ts（瘦 writer 补相字段 + 并发变量——解析 suite 日志 `__OVERHEAD__`/`__GROUP__` 段；preverified=1 分支单独定案）
-- plugin/scripts/pre-verified-round-record.test.mjs（相字段解析测试 + preverified 分支定案回归）
-- plugin/test/fan-in-execute-paths.test.mjs（fan-in 落地行带相字段断言）
+- plugin/scripts/pre-verified-round-record.ts（瘦 writer 补相字段 + 并发变量——解析 suite 日志 `__OVERHEAD__` 段；preverified=1 分支单独定案；本地复刻 full-suite-runner 并发口径）
+- plugin/test/pre-verified-round-record.test.mjs（相字段解析测试 + preverified 分支定案回归 + 并发变量口径；原 Touches 误写 plugin/scripts/ 路径，已修正为 plugin/test/）
+- plugin/workflows/fan-in-execute.js（SUITE_LAUNCH capture 记 suite_log_file；step 4.5 preverified-round-block 传 --suite-log）
+- .claude/workflows/fan-in-execute.js（同上——workflows 双份拷贝同步，workflows-dual-copy-drift-check 要求两拷贝一致）
+- plugin/test/fan-in-execute-paths.test.mjs（fan-in 落地行带相字段断言 + preverified 分支单独定案回归）
+- packages/quay/src/observation.ts（/tests 读取相字段 + 并发变量，TestRunRecord 扩展）
 - packages/quay/test/serve-ac95-views.test.mjs（/tests 读取相字段回归）
-- tasks/gap-ac101-lane-concurrency-control-round.md（依赖关系：本任务是其前置，同口径前提）
 - tasks/gap-fan-in-verification-round-thin-schema-phase-gap.md（自身）

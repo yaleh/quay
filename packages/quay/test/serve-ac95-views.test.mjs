@@ -303,6 +303,41 @@ test("AC2: parseVerificationRound reads a REAL-SUITE fan-in round record (gap-fa
   assert.equal(r.runner, "outer");
 });
 
+test("AC2: parseVerificationRound reads a PHASE-BEARING fan-in round record (gap-fan-in-verification-round-thin-schema-phase-gap) — serial/main/static phase ms + nproc/concurrentSuiteSlots/concurrentSuitesRunning render, absent on legacy rows", () => {
+  // The shape plugin/scripts/pre-verified-round-record.ts writes with --suite-log: a fan-in landing row
+  // carrying the SAME phase + concurrency axes full-suite-runner's rich rows carry. AC101's
+  // lane-concurrency control round reads these via /tests to compare the fan-in baseline against a
+  // control round at the same 口径. Legacy/thin rows (no such fields) must parse as null, never 0.
+  const line = JSON.stringify({
+    round: 234, startedAt: "2026-08-18T00:00:00.000Z", durationMs: 1020000, laneCount: 16, load: 12.3,
+    state: "green", runner: "outer", scope: "worktree",
+    commit: "37b8afcf9d09a5e5f5f5f5f5f5f5f5f5f5f5f5f",
+    static_phase_ms: 12345, serial_phase_ms: 301234, lowconc_phase_ms: 0, main_phase_ms: 512345,
+    nproc: 16, concurrentSuiteSlots: 2, concurrentSuitesRunning: 1,
+    preverified: false, taskId: "gap-x", runId: "fm-x-1",
+  });
+  const r = parseVerificationRound(line);
+  assert.equal(r.round, 234);
+  assert.equal(r.state, "green");
+  assert.equal(r.static_phase_ms, 12345, "static_phase_ms renders");
+  assert.equal(r.serial_phase_ms, 301234, "serial_phase_ms renders");
+  assert.equal(r.lowconc_phase_ms, 0, "lowconc_phase_ms renders 0 (a real value, not null)");
+  assert.equal(r.main_phase_ms, 512345, "main_phase_ms renders");
+  assert.equal(r.nproc, 16, "nproc renders");
+  assert.equal(r.concurrentSuiteSlots, 2, "concurrentSuiteSlots renders");
+  assert.equal(r.concurrentSuitesRunning, 1, "concurrentSuitesRunning renders");
+
+  // Legacy/thin row (the pre-fix fan-in shape — no phase/concurrency fields) ⇒ null, never a fabricated 0.
+  const thin = parseVerificationRound(JSON.stringify({
+    round: 228, startedAt: "2026-08-17T04:30:00.000Z", durationMs: 936519, laneCount: 8, load: 8.03,
+    state: "green", runner: "outer", scope: "worktree",
+    commit: "426b21ceaabbe7502334d92d79ce4a4a8d935fe9",
+    preverified: true, taskId: "gap-x", runId: "fm-x-1",
+  }));
+  assert.equal(thin.serial_phase_ms, undefined, "a thin row has no phase fields (absent-field contract)");
+  assert.equal(thin.nproc, undefined, "a thin row has no concurrency fields");
+});
+
 test("AC3: readTests reports empty when verification-round.jsonl is absent", () => {
   const ws = makeWorkspace("ac95-empty-");
   try {
