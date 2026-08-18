@@ -55,5 +55,5 @@ extra:
 - scripts/test.sh（若 AC2 判定改默认：`QUAY_MAX_CONCURRENT_SUITES` 默认 2→1；serial_lowconc_host_default / RESOURCE_GATE_CONCURRENT_SUITES 语义）
 - plugin/scripts/full-suite-runner.ts（若 AC2 判定改默认：defaultLaneCount 的 S 默认值）
 - plugin/test/full-suite-runner.test.mjs（默认值变化回归）
-- experiments/quay-perpetual-stream/（对照轮记录——实验产出，证据段）
+- experiments/quay-perpetual-stream/lane-concurrency-control-round.md（对照轮记录——实验产出，证据段；具体文件，非 `**`，避免命中 SHARED_STATE_PATHS 被 assembleBatch 序列化）
 - tasks/gap-ac101-lane-concurrency-control-round.md（自身）

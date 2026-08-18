@@ -1,7 +1,7 @@
 ---
 id: gap-outer-quality-heartbeat-missing
 title: "缺「质量心跳」——扫 eligible=false 的已存在 todo 并主动修（补 Touches/DoD），不等外部发现"
-status: todo
+status: ready
 labels:
   - gap
   - process

@@ -1,7 +1,7 @@
 ---
 id: gap-git-history-counts-stale-branches
 title: "git history 图表 lane 被陈旧分支污染——readGitHistory 用 --branches --source 把全部本地分支算进 lane（含已废弃分支）"
-status: todo
+status: ready
 labels:
   - gap
   - defect

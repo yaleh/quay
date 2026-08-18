@@ -1,7 +1,7 @@
 ---
 id: gap-git-history-route-registered-twice
 title: "/git-history 路由注册两次（serve-handlers.ts:2485/:2500），第二处结构上永远走不到（死代码）"
-status: todo
+status: ready
 labels:
   - gap
   - defect

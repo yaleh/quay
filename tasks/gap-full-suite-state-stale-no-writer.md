@@ -1,7 +1,7 @@
 ---
 id: gap-full-suite-state-stale-no-writer
 title: "detached-suite（fan-in-execute.js）不写 full-suite-state.json → 该文件陈旧 → collectFailureFiles 无边界 union 潜伏 bug + /tests 页读陈旧数据"
-status: todo
+status: ready
 labels:
   - gap
   - defect
