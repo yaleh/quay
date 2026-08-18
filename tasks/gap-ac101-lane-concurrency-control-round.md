@@ -36,7 +36,7 @@ extra:
 
 1. **对照轮（两侧直调 full-suite-runner，不依赖 fan-in 路径）**：同当前 develop commit，`QUAY_MAX_CONCURRENT_SUITES=1` 直调 `full-suite-runner` 跑一次全量 suite（单 suite，无并发，S=1）；同 commit、`S=2`（默认）直调跑**基线对照**。两侧各自记录 serial/main 两相墙钟 + 总墙钟 + verification-round durationMs（rich-schema）。
 2. **同 commit 同负载**：对照轮与基线必须同 commit、同负载（nproc/load 记录在案）——「同口径」（同一 writer）与「同负载」是两条独立轴，都须满足。
-3. 对比基线（609s 分解：serial 301 + main 255 + 前置 47-68，同口径 S=2 直调复核）：S=1 ⇒ concurrency=16 ⇒ main floor 减半（240→120s 理论）。
+3. 对比基线（609s 分解：serial 301 + main 255 + 前置 47-68，同口径 S=2 直调复核）：S=1 ⇒ concurrency=16 ⇒ main floor 减半（240→120s 理论）。**⚠️ 但须控制 overlap 变量（manager 08-18 指出）**：「concurrency=16 真并行」假设在 QUAY_PHASE_OVERLAP 开启时不成立——serial 与 lowconc 并行各拿 16 时重叠窗口 16+16=32 lane，超订反而比现在更严重。对照轮必须**两侧固定 `QUAY_PHASE_OVERLAP` 同值并记录**（建议 off，隔离出 S 的单一效应），或做 S×overlap 2×2；否则测的是两变量叠加、归因不了（`gap-lane-formula-ignores-phase-overlap-concurrency` 是这条的独立修复，但对照轮不能等它 land 才跑）。
 4. 判定：总墙钟 ≤600s ⇒ 改默认 S=2→1 + 落地；否则回 manager 候选清单（serial 相文件级耗时清单是下一候选）。
 5. scoped 门（`--for-task`）+ 全量验证，fan-in（改默认时）。
 
