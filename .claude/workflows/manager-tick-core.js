@@ -50,6 +50,9 @@ export const meta = {
 
 const MODEL = 'sonnet'
 const ROOT = '/home/yale/work/quay'
+// args 到达时是【字符串】不是对象（实测 wf_6f8cc053-f52）：直接 args.x 会静默 undefined。
+// 提到 MGR_SESSION_LOOKUP 之前先定义——后者要读 A.managerSessionId（2026-08-18 08:3x 修复引入）。
+const A = (() => { try { return typeof args === 'string' ? JSON.parse(args) : (args ?? {}) } catch { return {} } })()
 // ⚠️ 2026-08-14 14:3xZ：这里【曾经写死】一个 session id `b8dc91a6-…`，而它在 transcript 存储里
 //    【根本不存在】（find ~/.claude/projects -iname '*b8dc91a6*' ⇒ 0 命中）。审计 agent 每轮拿到坏 id，
 //    靠自己比对 SendMessage 前缀与 git 时间戳才找回真会话——**它足够聪明，所以我们一直没发现**。
@@ -57,10 +60,19 @@ const ROOT = '/home/yale/work/quay'
 //      一个查不到数据的审计，最可能的输出恰恰是「没发现问题」。
 //    ⇒ 修法是【不写字面量，改成读宿主】——用 2026-08-14 实测通过的官方接口现查：
 //      `claude agents --json`（外部进程可调、不需 TTY、墙钟 1.2–1.4s）取 name=="quay-manager" 的 sessionId。
-const MGR_SESSION_LOOKUP = String.raw`claude agents --json | python3 -c "import json,sys;print(next(x['sessionId'] for x in json.load(sys.stdin) if x['name']=='quay-manager'))"`
+//
+// ⚠️ 2026-08-18 08:3x：上面那条 name 查找本身也漂移了——本会话在一次被杀+resume 后，
+//    `claude agents --json` 里的注册名从 `quay-manager` 变成了 `quay-a8`（sessionId 不变），
+//    连续 3 轮 NOT-EVALUATED（同一失败类，只是上移了一层：不是"写死的 id 过期"，是"写死的
+//    name 匹配式过期"）。修法同源：**不猜 name，改成由主循环每轮现传**——主循环（我）在
+//    调用本 Workflow 前就已经知道自己当轮的真实 session id（系统提示/scratchpad 路径每轮
+//    现给，不是记忆），经 `args.managerSessionId` 传入即可让 audit subagent 完全跳过查找。
+//    `A.managerSessionId` 未提供时（旧调用方式、或忘传）才回退到 name 查找——向后兼容，
+//    行为与此前完全一致，只是那条路径的脆弱性还在。
+const MGR_SESSION_LOOKUP = A.managerSessionId
+  ? String.raw`echo '${A.managerSessionId}'  # 由主循环本轮通过 args.managerSessionId 现传，非硬编码字面量——跳过易漂移的 name 查找`
+  : String.raw`claude agents --json | python3 -c "import json,sys;print(next(x['sessionId'] for x in json.load(sys.stdin) if x['name']=='quay-manager'))"`
 
-// args 到达时是【字符串】不是对象（实测 wf_6f8cc053-f52）：直接 args.x 会静默 undefined。
-const A = (() => { try { return typeof args === 'string' ? JSON.parse(args) : (args ?? {}) } catch { return {} } })()
 const PRIOR = A.prior ? `\n上一轮读数（只报差异）：\n${A.prior}\n` : ''
 
 // ══ 交还给主循环的指令 ①：该跑什么 ══════════════════════════════════════════

@@ -443,7 +443,7 @@ test("(a) 判据② 能取假: 注册表 id ≠ CronList id ⇒ VIOLATED (exit 1
 
 test("(b) 判据④ 能取假: 正本一字符漂移 ⇒ 注册表 sha256 ≠ 正本 ⇒ VIOLATED (exit 1)", (t) => {
   const real = realRegistry();
-  const base = makeFixtureBase();
+  const base = makeFixtureBase({ inner: { cronId: real ? real.layers.inner.cronId : "x" } });
   const { dir, p } = tmpFile("md");
   try {
     const drifted = INNER_PROMPT.slice(0, -1) + "。x"; // 一字符漂移
@@ -544,7 +544,7 @@ test("判据③ 能取假: verifiedAt 过期（>stale）⇒ registry-not-verifie
 
 test("cron-expr-mismatch: 真漂移（`*/20`={0,20,40} vs 注册表 inner `7,27,47`）⇒ 仍 VIOLATED (exit 1)", (t) => {
   const real = realRegistry();
-  const base = makeFixtureBase();
+  const base = makeFixtureBase({ inner: { cronId: real ? real.layers.inner.cronId : "x" } });
   const { dir, p } = tmpFile("md");
   try {
     writeInnerSection(p, INNER_PROMPT);
@@ -610,7 +610,7 @@ test("worktree 上下文默认路径正本查找（round172 回归）：AC80 段
   // plugin/loop/fast-mode-loop-tick.md 的 AC80-INNER-ANCHOR 段 ⇒ 正本可解析，判据④ 被评估。
   const real = realRegistry();
   if (!real) { t.skip("全局注册表缺失"); return; }
-  const base = makeFixtureBase();
+  const base = makeFixtureBase({ inner: { cronId: real.layers.inner.cronId } });
   try {
     const r = runReg([
       "--verify", "--layer", "inner",
