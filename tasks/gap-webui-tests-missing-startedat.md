@@ -1,7 +1,7 @@
 ---
 id: gap-webui-tests-missing-startedat
 title: "/tests 页历史行缺 startedAt 列——verification-round.jsonl 记录本身带 startedAt 字段，只是没渲染成列"
-status: todo
+status: superseded
 labels:
   - gap
   - webui
@@ -12,6 +12,8 @@ extra:
 ---
 
 **type:** finding
+
+> **superseded by [[gap-full-suite-state-stale-no-writer]]（2026-08-18）**：本任务的「缺 startedAt 列」实为「/tests 页读陈旧 full-suite-state.json」的表层症状；根因任务落地（fan-in mirror-write full-suite-state）后本任务自动解决，不再单独修 startedAt 列。
 
 ## Finding
 
