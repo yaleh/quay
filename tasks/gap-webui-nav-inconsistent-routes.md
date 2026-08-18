@@ -1,7 +1,7 @@
 ---
 id: gap-webui-nav-inconsistent-routes
 title: WebUI 路由导航不一致——SITE_NAV_GROUPS/renderSiteNav 已建但仅 ~8/14 路由接入，其余 8 路由（tasks/board/git-history/adr/goal/doc/live/journal）跑 08-16 前手写导航（12 处变体无一相同），08-16 审计已标 P0（硬规则 5b）
-status: ready
+status: done
 labels:
   - gap
   - defect
