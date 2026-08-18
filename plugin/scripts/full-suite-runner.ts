@@ -2875,6 +2875,13 @@ export async function run(argv: string[]): Promise<number> {
   // phase ⇒ every spawned round gets ≥1 phase record (AC4 coverage 100%, incl. red/abort rounds).
   let phaseNodeActive = false; // a phase's node --test is the current stream producer (its __GROUP__ closes it)
   let overlapPhaseActive = false; // the QUAY_PHASE_OVERLAP combined serial+lowconc window is active
+  // gap-phase-overlap-field-always-false-negative — LATCHED (never reset): the suite ACTUALLY ran
+  // the overlap scheduling. Unlike overlapPhaseActive (a transient window state that resets to false
+  // when the window closes), this latches true the moment test.sh emits `overlap: running` and stays
+  // true through finalize() so the round record's phase_overlap field reflects what REALLY ran — not
+  // the runner's own process.env.QUAY_PHASE_OVERLAP, which the production chain (fan-in-execute.js)
+  // never sets (the env knob defaults to 1 only INSIDE test.sh, invisible to this parent process).
+  let phaseOverlapRan = false;
   let mainClosed = false; // the main→end boundary already fired
   // gap-verification-round-phases-overlap-merged — on the overlap path test.sh emits
   // `__OVERHEAD__ overlap_<phase>_done=1` right after EACH parallel phase's `wait`. The window
@@ -2915,6 +2922,7 @@ export async function run(argv: string[]): Promise<number> {
         phaseAccount.boundary("serial");
         phaseNodeActive = false;
         overlapPhaseActive = true;
+        phaseOverlapRan = true;
       } else if (phaseMarkerLowconcStart.test(line)) {
         // (serial or gap_serial_to_lowconc)→lowconc.
         phaseAccount.boundary("lowconc");
@@ -3695,7 +3703,13 @@ export async function run(argv: string[]): Promise<number> {
     // round (the same absent-field contract as the *_phase_ms spreads): the before/after comparison
     // (task constraint 3: green-round serial_phase_ms + lowconc_phase_ms) can distinguish overlap
     // rounds from baseline rounds in verification-round.jsonl without relying on wall-clock timing.
-    ...(process.env.QUAY_PHASE_OVERLAP === "1" ? { phase_overlap: true } : {}),
+    // gap-phase-overlap-field-always-false-negative — derived from the LATCHED stream state
+    // (phaseOverlapRan), NOT process.env.QUAY_PHASE_OVERLAP: this runner is test.sh's PARENT, and the
+    // production chain (fan-in-execute.js → runner) never sets that env (the default 1 lives only
+    // inside test.sh, as a non-exported shell var), so the env read was a permanent false negative —
+    // 241 records, phase_overlap:true only 3×, all manual exploration rounds. The `overlap: running`
+    // stream marker is test.sh's ground-truth signal that the parallel branch ACTUALLY ran.
+    ...(phaseOverlapRan ? { phase_overlap: true } : {}),
     // gap-ceiling-floor-ms-not-landed-in-verification-round AC1/AC3 — the reporter's per-group
     // floors (各相) + capped-file list. Both appear together (every __CEILING__ line carries a
     // floor_ms, so floorMsSeen non-empty ⟺ ceilingFiles non-empty), and BOTH are omitted on a

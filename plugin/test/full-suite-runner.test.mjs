@@ -492,13 +492,17 @@ test("AC2 — PHASE_OVERLAP round: the overlap window closes at the second done-
       laneCount: 8,
       serialConcurrency: 2,
       lowconcConcurrency: 3,
-      env: { QUAY_TEST_CGROUP_SCRIPT: PHASE_SCRIPT, QUAY_PHASE_OVERLAP: "1" },
+      // gap-phase-overlap-field-always-false-negative — NO QUAY_PHASE_OVERLAP env: the field is now
+      // derived from the `overlap: running` stream marker (what ACTUALLY ran), not the runner's own
+      // env. This is the production shape (fan-in-execute.js never sets the env) that used to be a
+      // permanent false negative.
+      env: { QUAY_TEST_CGROUP_SCRIPT: PHASE_SCRIPT },
     });
     const { code } = await waitExit(child);
     assert.equal(code, 0, `runner exits 0 on green, got ${code}`);
     const rec = lastRoundRecord(root);
     assert.ok(rec, "round record written");
-    assert.equal(rec.phase_overlap, true, "round flags phase_overlap");
+    assert.equal(rec.phase_overlap, true, "round flags phase_overlap from the stream marker, not env");
     const phases = rec.phases || [];
     assert.deepEqual(
       phases.map((p) => p.phase),
@@ -561,7 +565,7 @@ test("negative control — a marker-less overlap round (done-markers missed) sti
       laneCount: 8,
       serialConcurrency: 2,
       lowconcConcurrency: 3,
-      env: { QUAY_TEST_CGROUP_SCRIPT: PHASE_SCRIPT, QUAY_PHASE_OVERLAP: "1" },
+      env: { QUAY_TEST_CGROUP_SCRIPT: PHASE_SCRIPT },
     });
     const { code } = await waitExit(child);
     assert.equal(code, 0, `runner exits 0 on green, got ${code}`);
@@ -574,6 +578,33 @@ test("negative control — a marker-less overlap round (done-markers missed) sti
     );
     assert.ok(names.includes("end"), `fallback closes at the burst (got ${names.join(",")})`);
     assert.ok(rec.phases.every((p) => typeof p.cpu_usec === "number"), "cpu differentials present on the fallback path");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("gap-phase-overlap-field-always-false-negative — a SEQUENTIAL round does NOT flag phase_overlap even when QUAY_PHASE_OVERLAP=1 is in the runner env (field reflects ACTUAL scheduling, not env intent)", async () => {
+  // The pre-fix bug wrote phase_overlap from the runner's own process.env.QUAY_PHASE_OVERLAP === "1".
+  // Here the env IS set to "1" but the stream is SEQUENTIAL (PHASE_SUITE emits `selected N files
+  // (groups=serial)`, never `overlap: running`), so the field MUST be absent — proving the field now
+  // derives from what ACTUALLY ran, not the env knob (the inverse false-positive guard of AC2).
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-ovl-seq-"));
+  const { f, dir } = fakeSuite(PHASE_SUITE);
+  try {
+    const child = runRunner({
+      root,
+      command: `bash ${f}`,
+      laneCount: 8,
+      serialConcurrency: 2,
+      lowconcConcurrency: 3,
+      env: { QUAY_TEST_CGROUP_SCRIPT: PHASE_SCRIPT, QUAY_PHASE_OVERLAP: "1" },
+    });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, `runner exits 0 on green, got ${code}`);
+    const rec = lastRoundRecord(root);
+    assert.ok(rec, "round record written");
+    assert.equal(rec.phase_overlap, undefined, "sequential round omits phase_overlap even with env QUAY_PHASE_OVERLAP=1");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(dir, { recursive: true, force: true });
