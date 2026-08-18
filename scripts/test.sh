@@ -1135,7 +1135,7 @@ full_suite_lock_acquire() {
     return 0
   fi
   mkdir -p "$(dirname "${FULL_SUITE_LOCK_FILE}")"
-  local _s_fd _s_slot _s_idx _s_held="" _s_waited=0
+  local _s_fd _s_slot _s_idx _s_held="" _s_waited=0 _s_wall_start=0
   FULL_SUITE_LOCK_FDS=()
   # Open EVERY slot file on its own dynamically-allocated FD (append mode: the file exists + is
   # writable even if empty). FD-based flock auto-releases on process exit — a crash/abort cannot leak.
@@ -1156,6 +1156,10 @@ full_suite_lock_acquire() {
     # Bounded per-attempt flock-wait (1s per slot, re-checking all after each) so a release on ANY
     # slot is picked up; fail-closed after FULL_SUITE_LOCK_TIMEOUT — never a (S+1)-th GO, never an
     # infinite hang.
+    # Timeout is ELAPSED wall-clock (SECONDS), NOT an outer-iteration counter: each outer iteration
+    # does `flock -w 1` on ALL S slots (= ~S seconds), so counting iterations over-waits S×
+    # (S=2 ⇒ ~1200s instead of the intended 600s). gap-suite-slot-lock-not-enforcing-concurrency.
+    _s_wall_start="${SECONDS}"
     while [ "${_s_waited}" -lt "${FULL_SUITE_LOCK_TIMEOUT}" ]; do
       _s_idx=0
       for _s_fd in "${FULL_SUITE_LOCK_FDS[@]}"; do
@@ -1163,7 +1167,7 @@ full_suite_lock_acquire() {
         _s_idx=$((_s_idx + 1))
       done
       [ -n "${_s_held}" ] && break
-      _s_waited=$((_s_waited + 1))
+      _s_waited=$(( SECONDS - _s_wall_start ))
     done
     if [ -z "${_s_held}" ]; then
       echo "scripts/test.sh: another full suite holds all ${#FULL_SUITE_LOCK_SLOTS[@]} slots (${FULL_SUITE_LOCK_SLOTS[*]}) — not starting (single-flight lock; waited ${FULL_SUITE_LOCK_TIMEOUT}s). Re-run when a slot frees." >&2
