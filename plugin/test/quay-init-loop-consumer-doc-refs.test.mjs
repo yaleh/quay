@@ -28,12 +28,185 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 // AC3 (gap-serial-install-family-shared-prebuilt-fixture): the positive-case install is pure setup —
 // copy it from the shared prebuilt fixture; the negative controls stay REAL installs.
-import { laydownWorkspace, runInit, makeTmp, cleanup, pluginDir, declaredSet } from "./quay-init-loop-helpers.mjs";
+import { laydownWorkspace, laydownTemplate, runInit, makeTmp, cleanup, pluginDir, declaredSet, diskWorktreeRoot } from "./quay-init-loop-helpers.mjs";
 
 const INIT_ARGS = (ws) => ["--loop", "--root", ws, "--project", "proj",
   "--test-command", "node --test", "--tmux-session", "proj-0:0.0"];
+
+// ── torn-read simulation seam (gap-quay-init-verify-referenced-landed-torn-read) ──────────────────────
+// The completeness sentinel in verify_referenced_landed() used to pin only TWO always-present
+// declaration lines (tick-log.md self-create + manager-tick-log.md reference-doc). A torn read of
+// init/SKILL.md (racing a concurrent --loop install) can keep BOTH sentinel lines yet drop a LATER
+// declaration — a declared ref is then false-positived as not-declared and the install fails
+// referenced-not-landed (observed: SPEC-methodology-as-a-deliverable.md @line 173 → worktree-root-
+// fs-check AC4). The fix replaces the sentinel with a STABILITY check: two independent reads of
+// init/SKILL.md must produce IDENTICAL declaration sets, so a torn read (truncating at a
+// nondeterministic point) is retried; only two agreeing reads are accepted as complete. A genuinely
+// undeclared ref is absent from every read, so real drift still fails (negative control unchanged).
+//
+// These tests exercise the REAL quay-init.sh --loop install path with a fake `grep` injected first
+// on PATH. The fake passes through every invocation to the real grep EXCEPT the declaration reads on
+// init/SKILL.md (a pattern arg mentioning self-create/reference-doc AND a file arg ending in
+// skills/init/SKILL.md); those it can truncate deterministically by dropping one declaration line,
+// simulating a torn read that keeps the sentinels but loses a later declaration. The drop schedule
+// forces reads 1..6 (the first two attempts of the stability check, plus the first fresh re-read of
+// the per-reference loop) to differ from each other, then lets reads 7+ return the full set — the
+// stability check retries until two agreeing full reads, while the pre-fix sentinel would accept the
+// first torn snapshot and fail on the dropped declaration.
+const FAKE_GREP_SOURCE = `#!/usr/bin/env bash
+# Torn-read simulation grep (quay-init torn-read regression test only).
+# Passes through to the real grep except for declaration reads on init/SKILL.md, which it can tear.
+set -u
+real_grep="$REAL_GREP"
+policy="$FAKE_GREP_POLICY"
+
+declare_file=""
+kind=""
+for a in "$@"; do
+  case "$a" in
+    *skills/init/SKILL.md) declare_file="$a" ;;
+    *self-create*) kind="self-create" ;;
+    *reference-doc*) kind="reference-doc" ;;
+  esac
+done
+
+if [ -n "$declare_file" ] && [ -n "$kind" ] && [ "$policy" = "torn" ]; then
+  full="$("$real_grep" "$@" 2>/dev/null || true)"
+  rseq=0
+  if [ -f "$FAKE_GREP_COUNTER" ]; then
+    rseq="$(cat "$FAKE_GREP_COUNTER" 2>/dev/null || echo 0)"
+  fi
+  rseq=$((rseq + 1))
+  printf '%s' "$rseq" > "$FAKE_GREP_COUNTER"
+
+  drop=""
+  torn=no
+  if [ "$rseq" -le "$FAKE_GREP_TORN_UNTIL" ]; then
+    torn=yes
+    if [ "$kind" = "self-create" ]; then
+      case $((rseq % 4)) in
+        1) drop="$FAKE_GREP_DROP0" ;;
+        3) drop="$FAKE_GREP_DROP2" ;;
+        *) drop="$FAKE_GREP_DROP0" ;;
+      esac
+    else
+      drop="$FAKE_GREP_DROP1"
+    fi
+  fi
+  printf '%s %s %s %s\n' "$kind" "$rseq" "$torn" "$drop" >> "$FAKE_GREP_LOG"
+
+  if [ "$torn" = "yes" ]; then
+    if [ "$kind" = "self-create" ]; then sentinel="orchestration/tick-log.md"; else sentinel="orchestration/manager-tick-log.md"; fi
+    while IFS= read -r line; do
+      [ -z "$line" ] && continue
+      case "$line" in
+        *"$sentinel"*) printf '%s\n' "$line" ;;
+        *)
+          if [ -n "$drop" ] && printf '%s' "$line" | "$real_grep" -qF -- "$drop"; then
+            : # torn read loses this declaration (the sentinel line above is always kept)
+          else
+            printf '%s\n' "$line"
+          fi
+          ;;
+      esac
+    done <<< "$full"
+  else
+    printf '%s\n' "$full"
+  fi
+  exit 0
+fi
+
+exec "$real_grep" "$@"
+`;
+
+function realGrepPath() {
+  for (const d of (process.env.PATH || "").split(":")) {
+    const p = path.join(d, "grep");
+    if (fs.existsSync(p)) return p;
+  }
+  return "/usr/bin/grep";
+}
+
+// Like the helpers' runInit, but with an extra env layer (the fake-grep PATH + policy) so a real
+// --loop install runs with the torn-read seam in place.
+function runInitEnv(workspace, args, extraEnv, pluginRoot = pluginDir) {
+  const loop = args.includes("--loop");
+  const argv = ["bash", path.join(pluginRoot, "scripts", "quay-init.sh")];
+  if (loop && !args.some((a) => a === "--worktree-root")) {
+    argv.push("--worktree-root", diskWorktreeRoot());
+  }
+  argv.push(...args);
+  return spawnSync(argv[0], argv.slice(1), {
+    cwd: workspace,
+    encoding: "utf8",
+    env: { ...process.env, CLAUDE_PLUGIN_ROOT: pluginRoot, ...extraEnv },
+  });
+}
+
+// Writes the fake grep into binDir and returns the env the install must run with.
+function tornEnv(binDir, opts) {
+  const fakeGrep = path.join(binDir, "grep");
+  fs.writeFileSync(fakeGrep, FAKE_GREP_SOURCE);
+  fs.chmodSync(fakeGrep, 0o755);
+  return {
+    PATH: `${binDir}:${process.env.PATH || ""}`,
+    REAL_GREP: realGrepPath(),
+    FAKE_GREP_POLICY: opts.policy,
+    FAKE_GREP_COUNTER: path.join(binDir, "counter"),
+    FAKE_GREP_LOG: path.join(binDir, "decl-reads.log"),
+    FAKE_GREP_TORN_UNTIL: String(opts.tornUntil ?? 0),
+    FAKE_GREP_DROP0: opts.drop0 || "",
+    FAKE_GREP_DROP1: opts.drop1 || "",
+    FAKE_GREP_DROP2: opts.drop2 || "",
+  };
+}
+
+function readDeclLog(logPath) {
+  if (!fs.existsSync(logPath)) return [];
+  return fs.readFileSync(logPath, "utf8").trim().split("\n").filter(Boolean).map((line) => {
+    const [kind, rseq, torn, ...dropParts] = line.split(" ");
+    return { kind, rseq: Number(rseq), torn, drop: dropParts.join(" ") };
+  });
+}
+
+// Every relative path that a real --loop install lays down (walk of the shared prebuilt fixture).
+function collectLanded(root) {
+  const out = new Set();
+  const walk = (dir, rel) => {
+    let ents;
+    try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of ents) {
+      const relPath = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) walk(path.join(dir, e.name), relPath);
+      else out.add(relPath);
+    }
+  };
+  walk(root, "");
+  return out;
+}
+
+// Pick declaration paths to drop in the torn simulation: DECLARED self-create / reference-doc paths
+// that a real install does NOT lay down. Losing one of these from a torn read is exactly the
+// declared→not-declared false positive the stability check fixes (the file exists only in the
+// declaration, so the per-reference loop's fresh re-read cannot rescue it while reads stay torn).
+// The two self-create drops must differ (so the stability check's two reads disagree); the one
+// reference-doc drop is repeated on every torn reference-doc read (so the pre-fix sentinel path —
+// which accepts the first torn snapshot — cannot be rescued by a later fresh re-read).
+function tornDropCandidates() {
+  const landed = collectLanded(laydownTemplate().ws);
+  const selfcreate = declaredSet(pluginDir, "self-create");
+  const refdoc = declaredSet(pluginDir, "reference-doc");
+  const scCands = [...selfcreate].filter((p) => !landed.has(p) && p !== "orchestration/tick-log.md");
+  const rdCands = [...refdoc].filter((p) => !landed.has(p) && p !== "orchestration/manager-tick-log.md");
+  assert.ok(scCands.length >= 2,
+    `torn-read fixture needs >=2 not-landed self-create declarations to tear, got ${scCands.length}: ${scCands}`);
+  assert.ok(rdCands.length >= 1,
+    `torn-read fixture needs >=1 not-landed reference-doc declaration to tear, got ${rdCands.length}: ${rdCands}`);
+  return { drop0: scCands[0], drop2: scCands[1], drop1: rdCands[0] };
+}
 
 // The REF extraction the Contract measure + the gate share: every path-prefixed reference in a doc.
 const REF_RE = /(plugin\/loop|plugin\/scripts|orchestration|docs\/analysis)\/[a-zA-Z0-9._-]+/g;
@@ -208,4 +381,64 @@ test("AC91 negative — a shipped tick doc referencing `.claude/workflows/<name>
       assert.match(r.stderr, /ghost-workflow\.js/, "must name the unreferenced-workflow path");
     } finally { cleanup(ws); }
   } finally { cleanup(src); }
+});
+
+// ── torn-read regression (gap-quay-init-verify-referenced-landed-torn-read) ──────────────────────────
+// The stability check: two independent reads of init/SKILL.md must agree before a declaration set is
+// accepted. The first test forces the first TWO attempts (reads 1-6) to be mutually inconsistent torn
+// reads (each keeping the sentinels but dropping a declared-not-landed path), then lets reads 7+
+// return the full set — the stability check must retry to a clean attempt and the install must pass.
+// A pre-fix sentinel-only check would accept the first torn snapshot and fail referenced-not-landed.
+test("torn-read stability — torn declaration reads (keeping sentinels, dropping a later declaration) are retried; a real --loop install still passes", () => {
+  const { drop0, drop1, drop2 } = tornDropCandidates();
+  const binDir = makeTmp("torn-grep-");
+  const env = tornEnv(binDir, { policy: "torn", tornUntil: 6, drop0, drop1, drop2 });
+  const ws = makeTmp("torn-ws-");
+  try {
+    const r = runInitEnv(ws, INIT_ARGS(ws), env);
+    assert.equal(r.status, 0, `torn reads must NOT fail the install (stability check retries to a clean read):\n${r.stdout}${r.stderr}`);
+    assert.match(r.stdout + r.stderr, /verify-referenced-landed: OK/,
+      "the referenced⊆landed gate must pass once the declaration reads stabilize");
+
+    // The fake-grep log proves the retry really happened: reads 1-6 were torn (a declaration dropped,
+    // so consecutive reads disagreed), and the check read on past them instead of accepting the first
+    // torn snapshot. A sentinel-only implementation stops after attempt 1 (4 reads) or fails.
+    const log = readDeclLog(env.FAKE_GREP_LOG);
+    assert.ok(log.length >= 9,
+      `stability check must retry past the torn first attempt (>=9 declaration reads; 3 attempts = 12), got ${log.length}`);
+    for (const e of log.slice(0, 6)) {
+      assert.equal(e.torn, "yes", `declaration read ${e.rseq} must be inside the torn window`);
+      assert.ok(e.drop !== "", `torn read ${e.rseq} must name the declaration it dropped`);
+    }
+    const accepted = log.slice(8).filter((e) => e.kind === "self-create");
+    assert.ok(accepted.length >= 1 && accepted.every((e) => e.torn === "no"),
+      `the reads the check finally accepted must be complete (not torn), got ${JSON.stringify(accepted)}`);
+  } finally { cleanup(ws); cleanup(binDir); }
+});
+
+test("torn-read control — the pass-through seam preserves the happy path: consistent reads exit 0", () => {
+  const binDir = makeTmp("torn-grep-");
+  const env = tornEnv(binDir, { policy: "pass" });
+  const ws = makeTmp("torn-ws-");
+  try {
+    const r = runInitEnv(ws, INIT_ARGS(ws), env);
+    assert.equal(r.status, 0, `the pass-through seam must not change a clean install verdict:\n${r.stdout}${r.stderr}`);
+    assert.match(r.stdout + r.stderr, /verify-referenced-landed: OK/,
+      "the referenced⊆landed gate must pass on consistent reads");
+  } finally { cleanup(ws); cleanup(binDir); }
+});
+
+test("torn-read negative control — a genuinely missing ref still FAILS --loop (referenced-not-landed), unchanged under the seam", () => {
+  const binDir = makeTmp("torn-grep-");
+  const env = tornEnv(binDir, { policy: "pass" });
+  const ws = makeTmp("torn-ws-");
+  try {
+    fs.mkdirSync(path.join(ws, "docs", "analysis"), { recursive: true });
+    fs.writeFileSync(path.join(ws, "docs", "analysis", "torn-evil-consumer.md"),
+      "this consumer doc references a path the loop never lays: plugin/scripts/nonexistent-checker.ts\n", "utf8");
+    const r = runInitEnv(ws, INIT_ARGS(ws), env);
+    assert.notEqual(r.status, 0, "--loop must FAIL when a consumer-laid docs/analysis/ doc references a non-landed path");
+    assert.match(r.stderr, /referenced-not-landed/, "must use the referenced-not-landed category");
+    assert.match(r.stderr, /nonexistent-checker\.ts/, "must name the non-landed referenced path");
+  } finally { cleanup(ws); cleanup(binDir); }
 });
