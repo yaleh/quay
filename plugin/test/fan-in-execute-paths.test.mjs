@@ -1224,7 +1224,8 @@ test("⑧ turn-budget 取假 — phase-1 suite-launch DETACHES (setsid + & + dis
   assert.ok(launch.includes("setsid"), "suite-launch must use setsid (detached session — survives subagent exit)");
   assert.ok(launch.includes("& disown"), "suite-launch must background + disown (long-lived carrier)");
   assert.ok(launch.includes("suite_exit_marker"), "suite-launch must define the exit marker (the script-owned wait signal)");
-  assert.ok(launch.includes('echo "exit=$?"'), "the detached wrapper must write the exit code to the marker");
+  assert.ok(launch.includes('rc=$?'), "the detached wrapper must capture the suite exit code");
+  assert.ok(launch.includes('printf "exit=%s'), "the detached wrapper must write the exit code to the marker");
   // ⛔ NOT the two forbidden forms (f6b824b5 实证: Bash(run_in_background:true) 死于 subagent 退出; 前台 bash 超 10min 上限).
   // Only the EXECUTABLE lines matter — the comments legitimately name the forbidden form to forbid it.
   const execLines = launch.split("\n").filter((l) => !l.trim().startsWith("#"));
@@ -1422,4 +1423,101 @@ test("⑧ turn-budget REAL — a real detached suite (setsid) + the real poll bl
   ]) {
     assert.match(capture, re, `capture must carry ${name} (phase-2 入账输入)`);
   }
+});
+
+// ── ⑧ durationMs 真墙钟一致性（gap-fan-in-suite-duration-poll-granularity-inflation）─────────────────
+// THE DEFECT: wall_ms = end_ms − start_ms where end_ms was captured at POLL-DISCOVERY time (when the
+// poll agent first sees the exit marker). Under a 60s poll interval the suite's true end lands between
+// polls ⇒ durationMs systematically inflated 0-60s (round232: marker mtime 23:07:41.89, true 609.1s,
+// ledger recorded 674.2s — +65.1s, straddling the AC101 600s gate). FIX: the detached suite writes its
+// TRUE end (end_ms/end_iso) into the exit marker at the moment it exits; the poll only READS it.
+
+test("⑧ duration-wiring — the poll block reads end_ms/end_iso from the marker (the suite TRUE end), falling back to poll-discovery only for an old-format marker", async (t) => {
+  const { prompts } = await runWorkflow({
+    args: { task: "gap-test-tb-poll", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-tb-poll", mergeTarget: "develop" },
+  });
+  const poll = promptContaining(prompts, "POLL=not-done");
+  // The fix: the poll reads the suite's TRUE end from the exit marker (written by the detached suite).
+  assert.ok(poll.includes("marker_end_ms=$(sed -n 's/^end_ms=//p'"), "poll must read end_ms from the exit marker (the suite's TRUE end, not poll-discovery)");
+  assert.ok(poll.includes("marker_end_iso=$(sed -n 's/^end_iso=//p'"), "poll must read end_iso from the exit marker");
+  // ...and falls back to poll-discovery ONLY when the marker has no end_ms (old-format marker).
+  assert.match(poll, /end_ms=\$\{marker_end_ms:-/, "end_ms must default to marker_end_ms (fallback = poll-discovery)");
+  assert.match(poll, /end_iso=\$\{marker_end_iso:-/, "end_iso must default to marker_end_iso");
+  // The OLD buggy form (end_ms = date +%s%3N unconditionally at poll time) must NOT be the assignment.
+  assert.ok(!/^end_ms=\$\(date \+%s%3N\)$/m.test(poll), "end_ms must NOT be taken unconditionally from poll-discovery time");
+  // The capture write must still record end_ms/end_iso/wall_ms.
+  assert.ok(poll.includes("end_ms=%s"), "poll must still write end_ms into the capture");
+  assert.ok(poll.includes("wall_ms"), "poll must still compute wall_ms");
+});
+
+test("⑧ duration REAL — wall_ms equals the suite TRUE wall clock (marker end_ms − start_ms), NOT inflated by poll-discovery latency (AC1 取假)", async (t) => {
+  // THE FALSIFICATION: a real detached suite (sleep 1s → exit 0); AFTER its marker already exists we
+  // deliberately delay the poll ~5s (a poll interval gap). The OLD code's poll-time `date +%s%3N` would
+  // fold that whole 5s gap into wall_ms (the 0-60s inflation). The FIX must yield wall_ms ≈ the suite's
+  // true duration, not the poll-discovery time.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fan-in-duration-"));
+  t.after(() => cleanup(dir));
+  const task = "gap-test-tb-duration";
+  const git = (args) => {
+    const r = spawnSync("git", args, { cwd: dir, encoding: "utf8" });
+    if (r.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${r.stderr}`);
+  };
+  git(["init", "-q", "-b", "main"]);
+  git(["config", "user.email", "test@test"]);
+  git(["config", "user.name", "test"]);
+  fs.writeFileSync(path.join(dir, "README.md"), "base\n");
+  git(["add", "-A"]); git(["commit", "-qm", "base"]);
+  fs.mkdirSync(path.join(dir, "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "scripts", "test.sh"), "#!/usr/bin/env bash\nsleep 1\nexit 0\n");
+  fs.chmodSync(path.join(dir, "scripts", "test.sh"), 0o755);
+  git(["add", "-A"]); git(["commit", "-qm", "add test.sh"]);
+
+  const codeDeltaFile = `/tmp/fan-in-code-delta-${task}.txt`;
+  fs.writeFileSync(codeDeltaFile, "plugin/workflows/fan-in-execute.js\n");
+  t.after(() => { for (const f of [`/tmp/fan-in-suite-${task}.env`, `/tmp/fan-in-suite-${task}.exit`, `/tmp/fan-in-suite-${task}.time`, `/tmp/fan-in-suite-${task}.log`, codeDeltaFile]) { try { fs.rmSync(f, { force: true }); } catch (_) { /* best-effort */ } } });
+
+  const { prompts } = await runWorkflow({
+    args: { task, worktree: dir, root: REPO_ROOT, runId: "fm-tb-duration", mergeTarget: "develop" },
+  });
+  const launchBlock = extractBlockFromPrompts(prompts, "# suite-launch-block-start", "# suite-launch-block-end");
+  const launchRun = runBash(launchBlock, { cwd: dir, timeout: 30_000 });
+  assert.equal(launchRun.status, 0, `launch block failed: ${launchRun.stderr}`);
+  assert.match(launchRun.stdout, /SUITE_OUTCOME=started/, `code_delta non-empty must start the full suite, got: ${launchRun.stdout}`);
+
+  const marker = `/tmp/fan-in-suite-${task}.exit`;
+  const capture = `/tmp/fan-in-suite-${task}.env`;
+  let seen = false;
+  for (let i = 0; i < 50 && !seen; i++) { if (fs.existsSync(marker)) seen = true; else await new Promise((r) => setTimeout(r, 100)); }
+  assert.ok(seen, "the detached suite must write its exit marker");
+
+  // Read the TRUE end the detached suite recorded in the marker + the start from the capture.
+  const markerText = fs.readFileSync(marker, "utf8");
+  const markerEndMs = Number((markerText.match(/^end_ms=(\d+)/m) || [])[1]);
+  const markerEndIso = (markerText.match(/^end_iso=(.+)$/m) || [])[1];
+  assert.ok(Number.isFinite(markerEndMs), `marker must carry the suite's TRUE end_ms (the fix's source of truth), got:\n${markerText}`);
+  assert.ok(markerEndIso, `marker must carry the suite's TRUE end_iso, got:\n${markerText}`);
+  const captureText = fs.readFileSync(capture, "utf8");
+  const startMs = Number((captureText.match(/^start_ms=(\d+)/m) || [])[1]);
+  assert.ok(Number.isFinite(startMs), "capture must carry start_ms");
+  const trueDurationMs = markerEndMs - startMs;
+  assert.ok(trueDurationMs > 0, `true suite duration must be positive, got ${trueDurationMs}`);
+
+  // ⛔ THE FALSIFICATION: deliberately delay the poll ~5s AFTER the suite already ended. The OLD poll
+  // would add this whole gap to wall_ms (the recorded +65.1s class of inflation).
+  await new Promise((r) => setTimeout(r, 5000));
+
+  const pollPrompt = promptContaining(prompts, "POLL=not-done");
+  const pollBlock = pollPrompt.slice(pollPrompt.indexOf("suite_capture="), pollPrompt.indexOf("返回 { done: bool"));
+  const pollRun = runBash(pollBlock, { cwd: dir, timeout: 15_000 });
+  assert.equal(pollRun.status, 0, `poll block failed: ${pollRun.stderr}`);
+  assert.match(pollRun.stdout, /POLL=done SUITE_EXIT=0/, `poll must report done exit 0, got: ${pollRun.stdout}`);
+
+  const after = fs.readFileSync(capture, "utf8");
+  const wallMs = Number((after.match(/^wall_ms=(\d+)/m) || [])[1]);
+  const recordedEndIso = (after.match(/^end_iso=(.+)$/m) || [])[1];
+  assert.ok(Number.isFinite(wallMs), "capture must carry wall_ms");
+  assert.equal(wallMs, trueDurationMs, `wall_ms must equal the suite's TRUE duration (marker end_ms − start_ms); the ~5s deliberate poll delay must NOT inflate it (old code would record ≈ ${trueDurationMs + 5000})`);
+  assert.equal(recordedEndIso, markerEndIso, `end_iso must be the suite's TRUE end (marker), not the poll time`);
+  // Sanity: the true 1s-sleep suite's wall_ms must sit in the seconds-range, NOT the ~6s inflated range.
+  assert.ok(wallMs < trueDurationMs + 2000, `wall_ms ${wallMs} must not exceed the true duration ${trueDurationMs} by more than a small margin (no poll-latency inflation)`);
 });
