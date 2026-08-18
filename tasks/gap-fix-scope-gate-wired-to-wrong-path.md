@@ -1,7 +1,7 @@
 ---
 id: gap-fix-scope-gate-wired-to-wrong-path
 title: "fix-scope gate 落在 execute-suite-fix.js（standalone 死工作流）零效果——需接线到 fan-in-execute.js 内联 suite-fix prompt"
-status: ready
+status: done
 labels:
   - gap
   - mechanism
