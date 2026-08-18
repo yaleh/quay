@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-execute-poll-cost-firstdelay-agenttype
 title: "fan-in-execute 轮询成本削减——firstDelayMs 起轮延迟 + suite-poller 瘦身 agentType（两条零风险杠杆，无设计变更）"
-status: todo
+status: ready
 labels:
   - gap
   - performance
