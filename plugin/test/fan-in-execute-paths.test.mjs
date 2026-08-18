@@ -1103,6 +1103,114 @@ test("⑦ REAL skip — a doc-only capture (full_suite_ran=false) writes NO veri
   assert.equal(fs.existsSync(path.join(dir, ".quay", "verification-round.jsonl")), false, "no verification-round record for a doc-only skip (no suite ran)");
 });
 
+// ── ⑦b full-suite-state.json mirror-write (gap-full-suite-state-stale-no-writer AC1/AC3) ─────────────
+// The detached suite (setsid bash scripts/test.sh) never goes through full-suite-runner.ts (the ONLY
+// full-suite-state.json writer) ⇒ the state file went stale (the /tests page read a stale currentState;
+// collectFailureFiles carried a latent unbounded-union of a stale state's failures[]). The fix: step 4.5
+// mirror-writes the terminal GREEN state (reusing full-suite-runner's mirrorStateFile pattern) via
+// plugin/scripts/mirror-full-suite-state.ts, guarded by full_suite_ran=true (a doc-only skip never
+// fabricates a green). These tests run the REAL block against a real temp repo + a real capture.
+
+async function mirrorBlockFor(task, worktree, root) {
+  const { prompts } = await runWorkflow({
+    args: { task, worktree, root, runId: "fm-mirror-1", mergeTarget: "develop" },
+  });
+  return extractBlockFromPrompts(prompts, "# mirror-state-block-start", "# mirror-state-block-end");
+}
+
+test("⑦b wiring — the fan-in prompt carries a full-suite-state.json mirror-write block (mirror-full-suite-state.ts, guarded by full_suite_ran=true, inside the preverified-round-block)", async (t) => {
+  const { prompts } = await runWorkflow({
+    args: { task: "gap-test-mirror", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-mirror", mergeTarget: "develop" },
+  });
+  const block = extractBlockFromPrompts(prompts, "# mirror-state-block-start", "# mirror-state-block-end");
+  assert.ok(block.includes("mirror-full-suite-state.ts"), "block must invoke the mirror writer");
+  assert.ok(block.includes("--state green"), "the mirror writes the terminal GREEN state (phase 2 only runs green)");
+  assert.ok(block.includes('--finished-at "$end_iso"'), "block must pass the capture's real end time (end_iso)");
+  assert.ok(block.includes('--commit "$suite_head"'), "block must pin the verified suite_head as commit");
+  assert.ok(block.includes('--duration-ms "$wall_ms"'), "block must reuse the capture's wall-clock");
+  assert.ok(block.includes('--lane-count "$lane_count"'), "block must reuse the capture's lane count");
+  assert.ok(block.includes('--load "$load"'), "block must reuse the capture's load");
+  assert.ok(block.includes("--task-id gap-test-mirror"), "block must carry the fan-in task id (traceability)");
+  assert.ok(block.includes("--run-id fm-mirror"), "block must carry the fan-in runId (traceability)");
+  // The mirror write lives INSIDE the full_suite_ran=true guard (the same shared guard as the
+  // verification-round write) — a doc-only skip must not fabricate a green state.
+  const p2 = promptContaining(prompts, "# mirror-state-block-start");
+  const guardIdx = p2.indexOf('[ "$full_suite_ran" = "true" ]');
+  const blockIdx = p2.indexOf("# mirror-state-block-start");
+  const guardEndIdx = p2.indexOf("# preverified-round-block-end");
+  assert.ok(guardIdx >= 0, "the full_suite_ran=true guard must be present in the phase-2 prompt");
+  assert.ok(blockIdx > guardIdx && blockIdx < guardEndIdx, "the mirror write runs INSIDE the full_suite_ran=true guard");
+});
+
+test("⑦b REAL mirror — a green fan-in capture writes a FRESH full-suite-state.json to the shared checkout (gap-full-suite-state-stale-no-writer AC1/AC3)", async (t) => {
+  const dir = makePreVerifiedWorktree();
+  t.after(() => cleanup(dir));
+  const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: dir, encoding: "utf8" }).stdout.trim();
+  const task = "gap-test-mirror-real";
+  const capture = `/tmp/fan-in-suite-${task}.env`;
+  fs.writeFileSync(capture, [
+    "full_suite_ran=true",
+    "skip_reason=",
+    "cpu_s=42.5",
+    "cpu_source=gnu-time",
+    "start_iso=2026-08-18T04:30:00.000Z",
+    "end_iso=2026-08-18T04:45:36.519Z",
+    "wall_ms=936519",
+    "load=8.03",
+    "lane_count=8",
+    "suite_exit=0",
+    `suite_head=${head}`,
+  ].join("\n") + "\n", "utf8");
+  t.after(() => { try { fs.rmSync(capture, { force: true }); } catch (_) { /* best-effort */ } });
+
+  const block = await mirrorBlockFor(task, dir, REPO_ROOT);
+  const r = runBash(`suite_capture="${capture}"; . "$suite_capture"; ${block}`, { cwd: dir });
+  assert.equal(r.status, 0, `mirror write must exit 0: ${r.stderr}`);
+  const stateFile = path.join(dir, ".quay", "full-suite-state.json");
+  assert.ok(fs.existsSync(stateFile), "full-suite-state.json was written");
+  const st = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  assert.equal(st.state, "green");
+  assert.equal(st.startedAt, "2026-08-18T04:30:00.000Z");
+  assert.equal(st.finishedAt, Math.floor(Date.parse("2026-08-18T04:45:36.519Z") / 1000), "finishedAt is EPOCH SECONDS (full-suite-runner convention)");
+  assert.equal(st.durationMs, 936519);
+  assert.equal(st.laneCount, 8);
+  assert.equal(st.load, 8.03);
+  assert.equal(st.commit, head, "commit = the pinned suite_head");
+  assert.equal(st.runner, "inner", "the fan-in suite is an inner-layer run");
+  assert.equal(st.scope, "worktree");
+  assert.equal(st.taskId, task);
+  assert.equal(st.runId, "fm-mirror-1");
+});
+
+test("⑦b REAL skip — a doc-only capture (full_suite_ran=false) writes NO full-suite-state.json (no suite ran ⇒ no fabricated green)", async (t) => {
+  const dir = makePreVerifiedWorktree();
+  t.after(() => cleanup(dir));
+  const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: dir, encoding: "utf8" }).stdout.trim();
+  const task = "gap-test-mirror-skip";
+  const capture = `/tmp/fan-in-suite-${task}.env`;
+  fs.writeFileSync(capture, [
+    "full_suite_ran=false",
+    "skip_reason=doc-only-delta",
+    "cpu_s=null",
+    "cpu_source=not-wired",
+    "start_iso=2026-08-18T05:00:00.000Z",
+    "end_iso=2026-08-18T05:00:00.000Z",
+    "wall_ms=0",
+    "load=4.5",
+    "lane_count=1",
+    "suite_exit=0",
+    `suite_head=${head}`,
+  ].join("\n") + "\n", "utf8");
+  t.after(() => { try { fs.rmSync(capture, { force: true }); } catch (_) { /* best-effort */ } });
+
+  // Run the FULL preverified-round-block (which wraps the mirror block in the full_suite_ran=true
+  // guard) so the guard is what excludes the write — not a manually-skipped block.
+  const block = await preVerifiedBlockFor(task, dir, REPO_ROOT);
+  const r = runBash(`suite_capture="${capture}"; . "$suite_capture"; ${block}`, { cwd: dir });
+  assert.equal(r.status, 0, `doc-only skip must exit 0 (no write): ${r.stderr}`);
+  assert.equal(fs.existsSync(path.join(dir, ".quay", "full-suite-state.json")), false, "no full-suite-state.json for a doc-only skip (the full_suite_ran=true guard excludes it)");
+});
+
 test("⑦ REAL real-suite WITH a suite log — the fan-in landing row carries the phase fields + concurrency variables (gap-fan-in-verification-round-thin-schema-phase-gap AC1/AC4)", async (t) => {
   // THE DEFECT THIS TASK FIXES: fan-in landing rows were thin — no serial/main/static phase ms, no
   // nproc/concurrentSuiteSlots/concurrentSuitesRunning — so AC101's lane-concurrency control round
@@ -1226,6 +1334,7 @@ test("⑦ worktree-resolution — every fan-in orchestration script call is ${wo
     "select-static-checks-for-touches.ts --classify-delta", // step 2 (phase 1)
     "per-task-suite-record.ts",                             // step 4.5 (phase 2)
     "pre-verified-round-record.ts",                         // step 4.5 (phase 2, both fan-in branches)
+    "mirror-full-suite-state.ts",                           // step 4.5 (phase 2, gap-full-suite-state-stale-no-writer)
     "fan-in-ac-completion-gate.ts",                         // step 5 (phase 2)
     "fan-in-ff-merge.sh",                                   // step 5 (phase 2)
     "closure-lag-check.sh",                                 // step 5.5 (phase 2)

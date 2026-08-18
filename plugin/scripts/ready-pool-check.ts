@@ -1175,7 +1175,44 @@ export function isExperimentRound(r, defaultLane) {
  *  locked pool, each step looking normal). Omit windowSize (or pass 0/null) for the pre-slice
  *  all-history behavior (backward compat). A no-file entry is NOT silently dropped from the COUNT —
  *  see countUnattributedFailures (AC6); it just cannot join the file set (nothing to attribute). */
-export function collectFailureFiles(rounds, stateFailures, windowSize) {
+/** EPOCH-MILLISECONDS from an ISO-8601 or epoch-seconds timestamp (null/""/unparseable ⇒ NaN).
+ *  gap-full-suite-state-stale-no-writer AC2 — the bounded state-union compares the state file's
+ *  startedAt against the current window's oldest round's startedAt on a NUMERIC epoch axis, so the
+ *  comparison never falls for an ISO-vs-epoch shape mismatch. */
+function toEpochMs(v) {
+  if (v == null || v === "") return NaN;
+  if (typeof v === "number") return Number.isFinite(v) ? (v < 1e12 ? v * 1000 : v) : NaN;
+  const n = Number(v);
+  if (Number.isFinite(n)) return n < 1e12 ? n * 1000 : n;
+  const d = Date.parse(String(v));
+  return Number.isNaN(d) ? NaN : d;
+}
+
+/** gap-full-suite-state-stale-no-writer AC2 — is the state file's own round INSIDE the current red
+ *  window (so its failures are attributable, not a stale frozen red's)?
+ *  The state file is a SINGLE-STATE file: when its writer is absent (the detached fan-in suite never
+ *  went through full-suite-runner.ts), it freezes at an old red with old failures[]. The unbounded
+ *  union injected those old failures into every subsequent suite-blocking computation with NO expiry
+ *  ("touched a HISTORICAL failing file", not "touches the current red cause"). The bound: the state's
+ *  round is in-window iff its startedAt is NOT strictly older than the window's oldest round.
+ *  Backward-compat fallbacks (all "cannot bound ⇒ include", NOT fail-closed — an unboundable bound
+ *  must not silently drop a legitimate state failure): no window (0/null/undefined) ⇒ all-history;
+ *  no state timestamp / unparseable ⇒ include; no window round carries a parseable startedAt ⇒ include. */
+function stateFailuresInWindow(windowSize, windowRounds, stateStartedAt) {
+  if (windowSize == null || windowSize <= 0) return true;
+  if (stateStartedAt == null || stateStartedAt === "") return true;
+  const stateMs = toEpochMs(stateStartedAt);
+  if (!Number.isFinite(stateMs)) return true;
+  let windowStart = Infinity;
+  for (const r of windowRounds) {
+    const rMs = toEpochMs(r && r.startedAt);
+    if (Number.isFinite(rMs) && rMs < windowStart) windowStart = rMs;
+  }
+  if (!Number.isFinite(windowStart)) return true;
+  return stateMs >= windowStart;
+}
+
+export function collectFailureFiles(rounds, stateFailures, windowSize, stateStartedAt) {
   const windowRounds = windowSize != null && windowSize > 0 ? rounds.slice(-windowSize) : rounds;
   const out = new Set();
   for (const r of windowRounds) {
@@ -1189,7 +1226,12 @@ export function collectFailureFiles(rounds, stateFailures, windowSize) {
       for (const f of r.failedFiles) if (f != null) out.add(String(f));
     }
   }
-  for (const f of stateFailures || []) if (f && f.file) out.add(String(f.file));
+  // gap-full-suite-state-stale-no-writer AC2 — BOUNDED state union: only union the state file's
+  // failures when the state's own round falls INSIDE the current window (see stateFailuresInWindow).
+  // No window / no state timestamp ⇒ backward-compat unconditional union (all-history).
+  if (stateFailuresInWindow(windowSize, windowRounds, stateStartedAt)) {
+    for (const f of stateFailures || []) if (f && f.file) out.add(String(f.file));
+  }
   return [...out];
 }
 
@@ -1200,7 +1242,7 @@ export function collectFailureFiles(rounds, stateFailures, windowSize) {
  *  segments and the state's `failures` + `unattributed` (derived cascade entries are NOT counted here:
  *  they carry a file and are separately listed in the state's `derived` field — AC1). Same
  *  `windowSize` slicing as collectFailureFiles (AC5). */
-export function countUnattributedFailures(rounds, stateFailures, stateUnattributed, windowSize) {
+export function countUnattributedFailures(rounds, stateFailures, stateUnattributed, windowSize, stateStartedAt) {
   const windowRounds = windowSize != null && windowSize > 0 ? rounds.slice(-windowSize) : rounds;
   let n = 0;
   const bump = (f) => { if (!(f && f.file)) n++; };
@@ -1208,8 +1250,12 @@ export function countUnattributedFailures(rounds, stateFailures, stateUnattribut
     for (const f of (r && r.failures) || []) bump(f);
     for (const f of (r && r.unattributed) || []) bump(f);
   }
-  for (const f of stateFailures || []) bump(f);
-  for (const f of stateUnattributed || []) bump(f);
+  // gap-full-suite-state-stale-no-writer AC2 — the SAME bounded union as collectFailureFiles (a stale
+  // state's no-file entries must not be counted forever either — same defect class, same bound).
+  if (stateFailuresInWindow(windowSize, windowRounds, stateStartedAt)) {
+    for (const f of stateFailures || []) bump(f);
+    for (const f of stateUnattributed || []) bump(f);
+  }
   return n;
 }
 
@@ -1328,6 +1374,11 @@ export function exemptFromSuiteBlocking(task, id, failureHit) {
  *                                          the derived[] cascade entries are NOT counted as
  *                                          unattributed — they carry a file and are listed in the
  *                                          state's `derived` field instead, AC1)
+ *  @param {string} [i.stateStartedAt]   full-suite-state.json startedAt (ISO/epoch) — the state file's
+ *                                          OWN round timestamp. Bounds the state-union
+ *                                          (gap-full-suite-state-stale-no-writer AC2): a stale state's
+ *                                          failures are only merged when its round falls inside the
+ *                                          current window. Omitted ⇒ backward-compat unconditional union.
  *  @param {Map<string,object>} i.tasks     id → task ({body})
  *  @param {number} [i.minRedWindow]        consecutive red rounds required (default RED_WINDOW_MIN_DEFAULT)
  *  @param {(globs:string[])=>Set<string>} i.expand  declared-Touches expander (fs-backed in prod)
@@ -1356,7 +1407,7 @@ export function exemptFromSuiteBlocking(task, id, failureHit) {
  *  narrows the cap per the 2026-08-13 human ruling), ids stays empty (nothing to attribute), and
  *  `unattributedCount` reports the no-file/derived population that collectFailureFiles structurally
  *  drops (AC6 — the drop is explicit, not silent). */
-export function computeSuiteBlocking({ rounds, stateFailures, stateUnattributed = [], tasks, minRedWindow = RED_WINDOW_MIN_DEFAULT, expand, defaultLane }) {
+export function computeSuiteBlocking({ rounds, stateFailures, stateUnattributed = [], stateStartedAt, tasks, minRedWindow = RED_WINDOW_MIN_DEFAULT, expand, defaultLane }) {
   // gap-suite-blocking-experiment-rounds-count-toward-consecutive-red AC2: a one-off CONTROLLED-
   // EXPERIMENT round (laneCount ≠ default) is an experiment finding, not a regression — it must not
   // push the consecutive-red window. Skip such rounds ENTIRELY (count AND failure attribution): their
@@ -1378,8 +1429,8 @@ export function computeSuiteBlocking({ rounds, stateFailures, stateUnattributed 
   // AC5 — slice to the CURRENT red window only (the 239→~12 negative control: pre-slice the Set only
   // grew, so a task touching ANY historical failing file was blocked — "touched any history", not
   // "touches the current red cause").
-  const failureFiles = collectFailureFiles(realRounds, stateFailures, consecutiveRed);
-  const unattributedCount = countUnattributedFailures(realRounds, stateFailures, stateUnattributed, consecutiveRed);
+  const failureFiles = collectFailureFiles(realRounds, stateFailures, consecutiveRed, stateStartedAt);
+  const unattributedCount = countUnattributedFailures(realRounds, stateFailures, stateUnattributed, consecutiveRed, stateStartedAt);
   const ids = new Set();
   for (const [id, task] of tasks) {
     if (task.status !== "ready" && task.status !== "todo") continue;

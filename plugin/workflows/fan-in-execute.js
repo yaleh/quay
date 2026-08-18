@@ -494,6 +494,24 @@ if [ "$full_suite_ran" = "true" ]; then
     echo "FATAL: verification-round 入账失败（AC1 判据1 义务）⇒ 不翻 done、不 ff" >&2
     exit 2
   fi
+  # mirror-state-block-start
+  # full-suite-state.json mirror-write (gap-full-suite-state-stale-no-writer AC1/AC3): the detached
+  # suite (setsid bash scripts/test.sh) never goes through full-suite-runner.ts (the ONLY
+  # full-suite-state.json writer) ⇒ <shared-checkout>/.quay/full-suite-state.json went stale (the
+  # /tests page read a stale currentState; collectFailureFiles carried a latent unbounded-union of a
+  # stale state's failures[]). Mirror-write the terminal GREEN state reflecting THIS round, reusing
+  # full-suite-runner's mirrorStateFile pattern (write <root>/.quay/full-suite-state.json). Guarded by
+  # full_suite_ran=true (a doc-only skip never fabricates a green — the same guard as the
+  # verification-round write). Only green (suite_exit=0) reaches phase 2. 写失败 ⇒ HARD FAIL
+  # (AC1 判据1 义务)。writer 经 git common-dir 从 worktree 解析主检出（同 pre-verified-round-record）。
+  if ! node --experimental-strip-types ${worktree}/plugin/scripts/mirror-full-suite-state.ts \
+    --state green --started-at "$start_iso" --finished-at "$end_iso" --duration-ms "$wall_ms" \
+    --lane-count "$lane_count" --load "$load" --commit "$suite_head" \
+    --task-id ${task} --run-id ${runId}; then
+    echo "FATAL: full-suite-state.json mirror-write 失败（AC1 判据1 义务）⇒ 不翻 done、不 ff" >&2
+    exit 2
+  fi
+  # mirror-state-block-end
 fi
 # preverified-round-block-end
 # ⚠️ 本步【不】rm "$suite_capture"——ff 闸 (fan-in-ff-merge.sh AC1 收窄) 要读本任务 capture 的

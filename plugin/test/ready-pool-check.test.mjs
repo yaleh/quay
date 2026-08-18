@@ -2496,6 +2496,58 @@ test("AC6 — countUnattributedFailures counts no-file entries that collectFailu
   assert.equal(countUnattributedFailures(rounds, [], [], undefined), 3);
 });
 
+test("AC2 — collectFailureFiles BOUNDS the state union to the current window (gap-full-suite-state-stale-no-writer: a stale state's failures are NOT injected forever)", () => {
+  // The state file is a SINGLE-STATE file. When its writer is absent (the detached fan-in suite never
+  // went through full-suite-runner.ts) it FREEZES at an old red's failures[] — the pre-fix unbounded
+  // union injected those into every later suite-blocking computation with no expiry ("touched a
+  // HISTORICAL failing file", not "touches the current red cause"). The fix: merge the state's
+  // failures only when the state's own round falls INSIDE the current window (startedAt ≥ the window's
+  // oldest round's startedAt).
+  const rounds = [
+    // the CURRENT 3-round red window (t200..t202) with the CURRENT failure file
+    { round: 200, state: "red", reason: "failed", startedAt: "2026-08-18T00:00:00.000Z", failures: [{ file: "code/current.ts" }] },
+    { round: 201, state: "red", reason: "failed", startedAt: "2026-08-18T00:05:00.000Z", failures: [{ file: "code/current.ts" }] },
+    { round: 202, state: "red", reason: "failed", startedAt: "2026-08-18T00:10:00.000Z", failures: [{ file: "code/current.ts" }] },
+  ];
+  const staleFailures = [{ file: "code/stale.ts" }];
+
+  // negative control: a STALE state (startedAt older than the whole window) is NOT unioned.
+  assert.deepEqual(
+    collectFailureFiles(rounds, staleFailures, 3, "2026-08-17T23:00:00.000Z"),
+    ["code/current.ts"],
+    "stale state (older than the window) is EXCLUDED — its failures are not injected",
+  );
+  // positive control: a state whose round is INSIDE the window (≥ the oldest round) IS unioned.
+  assert.deepEqual(
+    collectFailureFiles(rounds, staleFailures, 3, "2026-08-18T00:00:00.000Z"),
+    ["code/current.ts", "code/stale.ts"],
+    "in-window state (≥ the window's oldest round) IS unioned",
+  );
+  // backward compat: no stateStartedAt ⇒ unconditional union (the pre-fix behavior for unknown state).
+  assert.deepEqual(
+    collectFailureFiles(rounds, staleFailures, 3),
+    ["code/current.ts", "code/stale.ts"],
+    "no state timestamp ⇒ backward-compat unconditional union",
+  );
+  // no window ⇒ all-history (backward-compat), regardless of stateStartedAt.
+  assert.deepEqual(
+    collectFailureFiles(rounds, staleFailures, undefined, "2026-08-17T23:00:00.000Z"),
+    ["code/current.ts", "code/stale.ts"],
+    "no window ⇒ all-history union (stateStartedAt ignored)",
+  );
+  // the SAME bound on the no-file count (countUnattributedFailures).
+  assert.equal(
+    countUnattributedFailures(rounds, [{ line: "state no-file" }], [], 3, "2026-08-17T23:00:00.000Z"),
+    0,
+    "stale state no-file entries are NOT counted either (same defect class, same bound)",
+  );
+  assert.equal(
+    countUnattributedFailures(rounds, [{ line: "state no-file" }], [], 3, "2026-08-18T00:00:00.000Z"),
+    1,
+    "in-window state no-file entries ARE counted",
+  );
+});
+
 test("computeSuiteBlocking: red window + Touches hit ⇒ task flagged; negative controls (AC2/AC4)", () => {
   const tasks = new Map([
     ["gap-watchdog", { status: "ready", body: "## Touches\n- code/wd.ts" }],
