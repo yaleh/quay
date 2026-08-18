@@ -141,6 +141,12 @@ import { sweepRunNamespaces, sweepRunNamespace } from "./session-liveness-sweep.
 // history + compare against the last round (the trend dimension — per-file durations WATCHED round
 // over round; see integration's version of this file for the original placement).
 import { landMeasureHistory, compareLastTwoRounds } from "./measure-trend-check.ts";
+// gap-suite-concurrency-ff-gate-and-slot-ssot — the CANONICAL suite-slot implementation (single
+// definition point for "the suite lock slots": suiteLockSlotCount = 旋钮② QUAY_MAX_CONCURRENT_SUITES,
+// suiteLockSlotPaths = base.0..S-1, suiteLockBase = env override → git-common-dir). suiteLockPaths /
+// countHeldSuiteLocks read it so concurrentSuitesRunning follows S (S=3 ⇒ .0/.1/.2 probed, never a
+// fixed two-slot destructure).
+import { suiteLockSlotCount, suiteLockSlotPaths, suiteLockBase } from "./suite-lock-slots.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
@@ -1534,8 +1540,7 @@ export function isAbortLine(line: string): boolean {
  * misconfigured host degrades to the old 1-slot behavior, never to 0 lanes.
  */
 export function concurrentSuiteSlots(): number {
-  const raw = Number(process.env.QUAY_MAX_CONCURRENT_SUITES ?? "2");
-  return Number.isFinite(raw) && raw >= 1 ? Math.floor(raw) : 2;
+  return suiteLockSlotCount();
 }
 
 /**
@@ -1588,29 +1593,18 @@ export function hostParallelism(): number {
 // ── gap-lanes-nproc-concurrent-suites-accounting: nproc + concurrent-suite accounting ────────────────
 
 /**
- * Resolve the single-flight 2-slot lock files the SAME way scripts/test.sh's full_suite_lock does:
- * `${FULL_SUITE_LOCK_FILE}` env override → `git rev-parse --git-common-dir` (the SHARED lock dir ALL
- * worktrees of this repo contend on — a per-checkout lock would NOT serialize across worktrees, the
- * 2026-08-07 two-worktree incident) → fall back to `<root>/.git`. Returns the two slot paths [.0, .1].
- * `root` is the tested checkout the probe runs against (git-common-dir is resolved from it, matching
- * test.sh's cwd — a relative git-common-dir is resolved against root, absolute paths pass through).
+ * Resolve the S single-flight lock files from the CANONICAL slot implementation
+ * (plugin/scripts/suite-lock-slots.ts — the SINGLE definition point for "the suite lock slots",
+ * gap-suite-concurrency-ff-gate-and-slot-ssot): `${FULL_SUITE_LOCK_FILE}` env override →
+ * `git rev-parse --git-common-dir` (the SHARED lock dir ALL worktrees of this repo contend on — a
+ * per-checkout lock would NOT serialize across worktrees, the 2026-08-07 two-worktree incident) →
+ * fall back to `<root>/.git`. Returns the S slot paths [base.0 .. base.S-1] where S =
+ * QUAY_MAX_CONCURRENT_SUITES. `root` is the tested checkout the probe runs against (git-common-dir is
+ * resolved from it, matching test.sh's cwd — a relative git-common-dir is resolved against root,
+ * absolute paths pass through).
  */
-function suiteLockPaths(root: string): [string, string] {
-  const envOverride = process.env.FULL_SUITE_LOCK_FILE;
-  let base: string;
-  if (envOverride) {
-    base = envOverride;
-  } else {
-    let commonDir: string | null = null;
-    try {
-      commonDir = execFileSync("git", ["rev-parse", "--git-common-dir"], { cwd: root, encoding: "utf8" }).trim();
-    } catch {
-      commonDir = null;
-    }
-    if (!commonDir) commonDir = ".git";
-    base = path.join(path.resolve(root, commonDir), "full-suite.lock");
-  }
-  return [`${base}.0`, `${base}.1`];
+function suiteLockPaths(root: string): string[] {
+  return suiteLockSlotPaths(suiteLockBase(root));
 }
 
 /** Non-blocking probe of ONE slot: false = FREE, true = HELD (another suite is mid-run). A missing
@@ -1637,8 +1631,7 @@ function probeLockHeld(lockFile: string): boolean {
  */
 export function countHeldSuiteLocks(root: string): number {
   try {
-    const [l0, l1] = suiteLockPaths(root);
-    return (probeLockHeld(l0) ? 1 : 0) + (probeLockHeld(l1) ? 1 : 0);
+    return suiteLockPaths(root).reduce((held, slot) => held + (probeLockHeld(slot) ? 1 : 0), 0);
   } catch {
     return 0;
   }

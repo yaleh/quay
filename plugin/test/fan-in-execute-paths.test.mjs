@@ -1620,3 +1620,43 @@ test("⑧ duration REAL — wall_ms equals the suite TRUE wall clock (marker end
   // Sanity: the true 1s-sleep suite's wall_ms must sit in the seconds-range, NOT the ~6s inflated range.
   assert.ok(wallMs < trueDurationMs + 2000, `wall_ms ${wallMs} must not exceed the true duration ${trueDurationMs} by more than a small margin (no poll-latency inflation)`);
 });
+
+test("⑧ AC3 记录面真实化 REAL — the poll reads lane_count from the suite log's __GROUP__ concurrency= (真实 lane, NOT nproc)", async (t) => {
+  // gap-suite-concurrency-ff-gate-and-slot-ssot AC3: lane_count 取 suite 日志的 __GROUP__ concurrency=
+  // (measure-suite-reporter 每 phase 一行; 主 phase 跑最后 ⇒ 取最后一行 = 套件真实 lane)。旧实现记
+  // nproc（实跑 concurrency=8 记成 16 — 记录面伪造）。This runs the REAL poll block against a capture
+  // + exit marker + a log carrying serial(2) + main(8) __GROUP__ lines ⇒ lane_count must be 8.
+  const task = "gap-test-lane-real";
+  const capture = `/tmp/fan-in-suite-${task}.env`;
+  const exitMarker = `/tmp/fan-in-suite-${task}.exit`;
+  const log = `/tmp/fan-in-suite-${task}.log`;
+  const nowMs = Date.now();
+  fs.writeFileSync(log, [
+    "selected 3 files (groups=serial)",
+    "__GROUP__ concurrency=2 files=3 sum_ms=100 floor_ms=60 capped=0",
+    "selected 17 files (groups=product,engine)",
+    "__GROUP__ concurrency=8 files=17 sum_ms=3000 floor_ms=1200 capped=0",
+  ].join("\n") + "\n");
+  fs.writeFileSync(capture, [
+    "full_suite_ran=true",
+    "skip_reason=",
+    `start_ms=${nowMs}`,
+    `suite_log_file=${log}`,
+    "suite_head=abc123",
+  ].join("\n") + "\n");
+  fs.writeFileSync(exitMarker, `exit=0\nend_ms=${nowMs + 1500}\nend_iso=2026-08-18T00:00:01.500Z\n`);
+  t.after(() => { for (const f of [capture, exitMarker, log]) { try { fs.rmSync(f, { force: true }); } catch (_) { /* best-effort */ } } });
+
+  const { prompts } = await runWorkflow({
+    args: { task, worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-lane-real", mergeTarget: "develop" },
+  });
+  const pollPrompt = promptContaining(prompts, "POLL=not-done");
+  const pollBlock = pollPrompt.slice(pollPrompt.indexOf("suite_capture="), pollPrompt.indexOf("返回 { done: bool"));
+  const pollRun = runBash(pollBlock, { timeout: 15_000 });
+  assert.equal(pollRun.status, 0, `poll block failed: ${pollRun.stderr}`);
+  assert.match(pollRun.stdout, /POLL=done SUITE_EXIT=0/, `poll must report done exit 0, got: ${pollRun.stdout}`);
+
+  const after = fs.readFileSync(capture, "utf8");
+  const lane = (after.match(/^lane_count=(\d+)$/m) || [])[1];
+  assert.equal(lane, "8", `lane_count must be the MAIN phase's real concurrency (the last __GROUP__ line), got: ${after.match(/^lane_count=.*$/m)?.[0]}`);
+});

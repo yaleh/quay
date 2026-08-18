@@ -52,7 +52,7 @@
 #
 # Usage:
 #   fan-in-ff-merge.sh --task <taskId> [--root <repo>] [--merge-target <branch>] [--run-id <runId>]
-#                      [--agent-id <caller-agent-id>] [--suite-state <file>] [--lock-events <file>]
+#                      [--agent-id <caller-agent-id>] [--suite-capture <file>] [--lock-events <file>]
 #                      [--retry-record <file>] [--escalations <file>] [--lock-wait <secs>]
 #                      [--worktree <path>] [--help]
 #
@@ -82,6 +82,7 @@ merge_target=""
 run_id=""
 agent_id=""
 suite_state=""
+suite_capture=""
 lock_events=""
 retry_record=""
 escalations=""
@@ -96,6 +97,7 @@ while [ "$#" -gt 0 ]; do
     --run-id) run_id="$2"; shift 2 ;;
     --agent-id) agent_id="$2"; shift 2 ;;
     --suite-state) suite_state="$2"; shift 2 ;;
+    --suite-capture) suite_capture="$2"; shift 2 ;;
     --lock-events) lock_events="$2"; shift 2 ;;
     --retry-record) retry_record="$2"; shift 2 ;;
     --escalations) escalations="$2"; shift 2 ;;
@@ -128,6 +130,12 @@ lock_file="${git_common_dir}/fan-in-merge.lock"
 # Default artifact paths live under the repo's .quay/ (the same workspace state surface the suite
 # lock and full-suite-state use). Overridable so hermetic tests can point at fixture files.
 if [ -z "${suite_state}" ]; then suite_state="${root}/.quay/full-suite-state.json"; fi
+# The task suite capture (AC1 收窄, gap-suite-concurrency-ff-gate-and-slot-ssot): the ff gate reads THIS
+# task's suite certificate — `/tmp/fan-in-suite-<task>.env` — written by fan-in-execute.js's detached
+# suite (the SAME path its poll/step-4.5 use). The capture carries suite_exit (=0 when green; folded by
+# the poll from the .exit marker) and suite_head (= the worktree HEAD the suite ran on, which IS the
+# commit to be ff'd). Overridable so hermetic tests can point at a fixture capture.
+if [ -z "${suite_capture}" ]; then suite_capture="/tmp/fan-in-suite-${task_id}.env"; fi
 if [ -z "${lock_events}" ]; then lock_events="${root}/.quay/fan-in-merge-lock-events.jsonl"; fi
 if [ -z "${retry_record}" ]; then retry_record="${root}/.quay/fan-in-retries.jsonl"; fi
 if [ -z "${escalations}" ]; then escalations="${root}/.quay/fan-in-ff-escalations.jsonl"; fi
@@ -181,72 +189,37 @@ if [ -n "${porcelain}" ]; then
   exit 2
 fi
 
-# AC4 / A9 guard (still unlocked): the merge lock must never overlap a suite run. If the suite is
-# running, refuse to acquire the lock — the caller waits for the round to end (A9: 轮在跑 ⇒ 不可以
-# fan-in), it does NOT hold the merge lock while waiting (that would make the lock cover the wait —
-# exactly the lock-order deadlock the SPEC forbids).
+# AC1 判据收窄 (gap-suite-concurrency-ff-gate-and-slot-ssot, 人 2026-08-18「把 ff 的判据从『任何 suite
+# 在跑』收窄到『本任务自己的 suite 在跑』」): the ff gate reads THIS TASK's suite certificate, NOT any
+# cross-task suite lock. The old 判据 (AC84) probed the GLOBAL single-flight lock slots
+# (<git-common-dir>/full-suite.lock.0/.1) and refused when ANY slot was held — two fan-ins running
+# suites in PARALLEL each saw the other's slot ⇒ mutual REFUSE (livelock, 2026-08-18 实证). That was a
+# category error: the suite lock is a RESOURCE lock (限流, naturally global); the ff's real requirement
+# is a CORRECTNESS lock (互斥) — "ff must be mutually exclusive with the ONE suite that produced THIS
+# task's green certificate". The correct object already exists: the task's own suite capture
+# (`/tmp/fan-in-suite-<task>.env`, written by fan-in-execute.js's detached suite), carrying suite_exit
+# (=0 when green; folded by the poll from the .exit marker) and suite_head (= the worktree HEAD the
+# suite ran on — which IS the commit to be ff'd). The gate asks "本任务的 suite 是否已终结、且 suite_head
+# == 待 ff 的 HEAD" — a per-task DIRECT quantity, no global lock needed.
 #
-# AC84 (gap-ac84-suite-source-starvation-reader-disposition AC3): full-suite-state.json is RETIRED as
-# a fan-in gate input. Its only loop invoker — the suite-state-trigger Monitor — was killed under AC84
-# (outer no longer runs an auto-suite), and per-task fan-in suites run `bash scripts/test.sh` directly
-# (recording to per-task-suite-records.jsonl), NEVER the runner that wrote the state file. The file is
-# frozen at a stale terminal value (red@<superseded> + phantom failures), so reading it for "is a
-# suite running?" was reading a dead proxy — and if it were ever left `running` by a crash, no watchdog
-# exists to flip it back (the crash-watchdog gap). The DIRECT signal for a suite currently running is
-# test.sh's single-flight lock slots (<git-common-dir>/full-suite.lock.0 / .1 — the SAME mechanism
-# that actually serializes full-suite runs across worktrees): if EITHER slot is HELD, a full suite is
-# running. flock(1) auto-releases on process exit, so a crashed suite cannot leave a permanent
-# "running" — the crash-watchdog gap is closed structurally (no watchdog needed). `--suite-state` and
-# the `suite_state` default are kept ONLY for arg-compat; the retired file is no longer read.
-suite_lock_dir="${git_common_dir}"
-if [ -n "${FULL_SUITE_LOCK_FILE:-}" ]; then
-  suite_lock_base="${FULL_SUITE_LOCK_FILE}"
-else
-  suite_lock_base="${suite_lock_dir}/full-suite.lock"
-fi
-suite_running=0
-for suite_slot in "${suite_lock_base}.0" "${suite_lock_base}.1"; do
-  if [ -e "${suite_slot}" ]; then
-    if ! flock -n "${suite_slot}" true 2>/dev/null; then
-      suite_running=1
-      break
-    fi
+# `--suite-state` and the `suite_state` default are kept ONLY for arg-compat (full-suite-state.json is
+# RETIRED as a gate input since AC84); it is not read here.
+#
+# FAIL-CLOSED: missing capture / non-green suite_exit / suite_head ≠ 待 ff tip ⇒ environment error
+# (exit 2, NO retry record — this is not an ff failure). A doc-only fan-in (full_suite_ran=false) still
+# writes a capture with suite_exit=0 + suite_head, so it passes the gate — the certificate pins the
+# HEAD, not the phase.
+suite_cert_ok=0
+if [ -f "${suite_capture}" ]; then
+  # shellcheck disable=SC1090
+  . "${suite_capture}"
+  suite_tip="$(git -C "${root}" rev-parse "refs/heads/task/${task_id}" 2>/dev/null || true)"
+  if [ "${suite_exit:-}" = "0" ] && [ -n "${suite_head:-}" ] && [ -n "${suite_tip}" ] && [ "${suite_head}" = "${suite_tip}" ]; then
+    suite_cert_ok=1
   fi
-done
-if [ "${suite_running}" = "1" ]; then
-  # gap-worktree-remove-orphans-probes (同族扩展 2026-08-17): a held slot whose holder's cwd points
-  # at a DELETED worktree is STALE residue — a suite whose worktree was removed without first
-  # stopping it (the claude-probe orphan family). Its flock auto-releases when the process dies, so
-  # reclaim it (best-effort) and re-check the slot before refusing. A legitimately-running suite has
-  # a LIVE cwd (never reaped); the --worktree scope additionally reaps THIS task worktree's own
-  # leftovers (excluding the caller's own process tree — a hung suite from a prior fan-in attempt
-  # whose worktree still exists). NEVER a name-based batch kill of live processes (the 2026-08-08
-  # two-layer-blind invariant). The reaper only runs when a slot is held — the normal fast path is
-  # untouched.
-  # The stale-slot reclaim targets ONLY this root's stale LOCK HOLDERS (--stale-lock-holders-only):
-  # it exists to unblock the ff from a held slot, and the global claude-probe orphan sweep (bare
-  # --orphans) would kill unrelated concurrent tests' live orphan probes mid-assertion (cross-test
-  # race, 2026-08-17, fan-in scoped gate). The global probe sweep stays on full-suite-runner's
-  # pre-suite path and the standalone reaper, where nothing depends on an orphan probe surviving.
-  _reaper="${BASH_SOURCE[0]%/*}/worktree-process-reaper.ts"
-  if [ -f "${_reaper}" ]; then
-    if [ -n "${worktree}" ]; then
-      node --no-warnings --experimental-strip-types "${_reaper}" --worktree "${worktree}" --root "${root}" --json >/dev/null 2>&1 || true
-    fi
-    node --no-warnings --experimental-strip-types "${_reaper}" --orphans --stale-lock-holders-only --root "${root}" --json >/dev/null 2>&1 || true
-  fi
-  suite_running=0
-  for suite_slot in "${suite_lock_base}.0" "${suite_lock_base}.1"; do
-    if [ -e "${suite_slot}" ]; then
-      if ! flock -n "${suite_slot}" true 2>/dev/null; then
-        suite_running=1
-        break
-      fi
-    fi
-  done
 fi
-if [ "${suite_running}" = "1" ]; then
-  echo "fan-in-ff-merge: a full suite is running (single-flight lock slot held — ${suite_lock_base}.0/.1) — fan-in must wait for the suite to end; NOT acquiring the merge lock (AC4: lock must not overlap a suite run)" >&2
+if [ "${suite_cert_ok}" != "1" ]; then
+  echo "fan-in-ff-merge: 本任务 ${task_id} 的 suite 证书未满足 — capture=${suite_capture} exists=$([ -f "${suite_capture}" ] && echo yes || echo no) suite_exit=${suite_exit:-<unset>} suite_head=${suite_head:-<unset>} 待 ff tip=${suite_tip:-<unresolvable>}; ff 必须钉住产出本任务绿色证书的那次 suite (AC1 收窄: 读本任务 capture, 不读全局 suite 锁)。NOT acquiring the merge lock" >&2
   exit 2
 fi
 

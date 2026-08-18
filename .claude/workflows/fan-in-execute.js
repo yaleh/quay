@@ -133,6 +133,7 @@ async function pollSuite() {
 suite_capture="/tmp/fan-in-suite-${task}.env"
 suite_exit_marker="/tmp/fan-in-suite-${task}.exit"
 suite_time_file="/tmp/fan-in-suite-${task}.time"
+suite_log_file="/tmp/fan-in-suite-${task}.log"
 if [ ! -f "$suite_exit_marker" ]; then
   echo 'POLL=not-done'
   exit 0
@@ -149,8 +150,15 @@ end_ms=\${marker_end_ms:-$(date +%s%3N)}
 end_iso=\${marker_end_iso:-$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)}
 wall_ms=$(( end_ms - \${start_ms:-0} ))
 load=$(cut -d' ' -f1 /proc/loadavg 2>/dev/null || echo 0)
+# AC3 记录面真实化 (gap-suite-concurrency-ff-gate-and-slot-ssot): lane_count 取 suite 日志的
+# __GROUP__ concurrency= 行（真实 lane, measure-suite-reporter 每 phase 一行; 主 phase 跑最后 ⇒
+# 取最后一行 = 套件真实 lane）。旧实现记 nproc（实跑 concurrency=8 记成 16 — 记录面伪造）。
+# 日志缺失/无 __GROUP__ 行 ⇒ fallback nproc（向后兼容, 不报错）。
 lane_count=1
-if [ "$full_suite_ran" = "true" ]; then lane_count=$(nproc 2>/dev/null || echo 1); fi
+if [ "$full_suite_ran" = "true" ]; then
+  lane_count=$(grep -oE '__GROUP__ concurrency=[0-9]+' "$suite_log_file" 2>/dev/null | tail -1 | grep -oE '[0-9]+$' || true)
+  [ -n "$lane_count" ] || lane_count=$(nproc 2>/dev/null || echo 1)
+fi
 cpu_s=null
 cpu_source=not-wired
 if [ -f "$suite_time_file" ]; then
@@ -488,7 +496,9 @@ if [ "$full_suite_ran" = "true" ]; then
   fi
 fi
 # preverified-round-block-end
-rm -f "$suite_capture"
+# ⚠️ 本步【不】rm "$suite_capture"——ff 闸 (fan-in-ff-merge.sh AC1 收窄) 要读本任务 capture 的
+# suite_exit/suite_head；capture 保留到 ff 之后（step 5 持锁段末）再清理（gap-suite-concurrency-
+# ff-gate-and-slot-ssot）。旧实现在此删除 capture，ff 无证可查。
 # suite-record-block-end
 
 【持锁段 step 5 — flip done + ff-merge】
@@ -554,6 +564,11 @@ agent_id=$(basename "$self" .jsonl 2>/dev/null | sed 's/^agent-//')
 if [ -z "$agent_id" ]; then echo "FATAL: 未能从 $self 提取 agent id（--agent-id 不能由调用方填）" >&2; exit 2; fi
 # selfloc-block-end
 bash ${worktree}/plugin/scripts/fan-in-ff-merge.sh --task ${task} --run-id ${runId} --agent-id "$agent_id" --root ${root} --merge-target ${mergeTarget} --worktree ${worktree}
+ff_rc=$?
+# 本任务 suite capture 的使命已尽（ff 闸已在 fan-in-ff-merge.sh 内读过它）——清理掉；若 ff 失败重试，
+# step 4 会重写新 capture（gap-suite-concurrency-ff-gate-and-slot-ssot）。不在此 exit：step 5.5（仅 ff
+# 成功时执行）与清理仍需按序运行。ff_rc 由你在返回时上报（0=green, 1/3=ff-retry, 2=red）。
+rm -f "$suite_capture" 2>/dev/null || true
   —— 锁只包 git merge --ff-only，毫秒级，成/败都解锁。ff 失败（develop 前进了，窗口 = merge 到 ff 之间
      的整个 suite 时长）⇒ 返回 { outcome: 'ff-retry' }（脚本将回阶段 1 重跑：重 merge develop、重判 delta、
      重跑 suite、重 ff），同一任务 ff 失败 ≥3 次才谈防活锁（脚本侧 maxFfRetries 兜底）。ff 成功（exit 0）

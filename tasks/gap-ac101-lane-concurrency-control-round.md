@@ -28,6 +28,8 @@ extra:
 
 **能取假（⊢ 对照）**：对照轮跑完，若 `QUAY_MAX_CONCURRENT_SUITES=1` 的 serial+main 两相墙钟 + 前置 ≤ 600s（对照 609s 基线），则结论成立 ⇒ 改默认值（S=2→1）+ 落地；若不成立 ⇒ S 不是主因，回 manager 的候选清单继续（serial 301s 整族/文件级清单）。两种结果都是有效产出。
 
+**⚠️ 执行顺序前置（2026-08-18 注记，gap-suite-concurrency-ff-gate-and-slot-ssot 落地后）**：本任务设 S=1 的对照轮**必须先等** `gap-suite-concurrency-ff-gate-and-slot-ssot` 的层 2（槽数由 S 生成）落地——**否则设 S=1 得到的仍是「2 槽 × 16 lane = 32 lane 超订」**（槽文件写死 `.0/.1`、lane 除数按 S 算但槽不联动），对照轮测错对象。层 2 落地后 S=1 才真正单槽单 lane 集（仅 `.0`、lane=nproc×oversub/1）。
+
 ## Plan
 
 1. **对照轮（两侧直调 full-suite-runner，不依赖 fan-in 路径）**：同当前 develop commit，`QUAY_MAX_CONCURRENT_SUITES=1` 直调 `full-suite-runner` 跑一次全量 suite（单 suite，无并发，S=1）；同 commit、`S=2`（默认）直调跑**基线对照**。两侧各自记录 serial/main 两相墙钟 + 总墙钟 + verification-round durationMs（rich-schema）。

@@ -149,6 +149,8 @@ export const REGISTRY: Entry[] = [
   { id: "R30", source: "plugin/loop/fast-mode-tick-core.md", markers: [
       "持锁段(仍在 subagent 自回合内)",
       "flip 要动的记录也用 git 跟踪",
+      // suite-slot-ssot-exception: R30 的历史退役 marker — 引用旧 suite 锁命名 (full-suite.lock.0/.1)
+      // 作退役文本匹配, 非槽路径生成/读取 (不消费套件槽; gap-suite-concurrency-ff-gate-and-slot-ssot I2)
       "锁与 suite 锁(full-suite.lock.0/.1)覆盖范围不交叉",
       "runId 桥(inner 2026-08-14 判断,已核)",
     ] },

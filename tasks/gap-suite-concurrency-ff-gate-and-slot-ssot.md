@@ -59,28 +59,36 @@ ff 闸拿资源锁去表达正确性约束 ⇒ 收窄不是「缩小范围」而
 
 ## Acceptance Criteria
 
-- [ ] AC1: ff 闸判据收窄到本任务 suite（读 `.exit` marker ∧ `suite_exit=0` ∧ `suite_head==待 ff HEAD`）；`fan-in-ff-merge.sh` 不再读取任何跨任务 suite 锁。
-- [ ] AC2: 槽数由 S 生成（S=1 ⇒ 仅 `.0`，S=3 ⇒ `.0/.1/.2`），`scripts/test.sh` 不再写死两个；`:1067` 注释与实现一致。
-- [ ] AC3: `lane_count` 取 suite 日志 `__GROUP__ concurrency=`（真实 lane），与 thin-schema 任务同批落地；记录不再伪造（16 vs 8 问题消失）。
-- [ ] AC4: 行为层不变量落地且能取假——槽文件数 == concurrentSuiteSlots()、lane×S ≤ nproc×oversub、ff 闸无 `full-suite.lock` 读取（按位置断言）。
-- [ ] AC5: 两 fan-in 同时 suite 不再互 REFUSE（矛盾 B 消失，对照：S=2 两 suite 并存各自可 ff）；R1 无需独立闸。
-- [ ] AC6: `gap-ac101-lane-concurrency-control-round` 的 S=1 对照轮前提满足（设 S=1 真正单槽单 lane 集）。
-- [ ] AC7: 测试全绿 + `--for-task` scoped 门绿。
+- [x] AC1: ff 闸判据收窄到本任务 suite（读 `.exit` marker ∧ `suite_exit=0` ∧ `suite_head==待 ff HEAD`）；`fan-in-ff-merge.sh` 不再读取任何跨任务 suite 锁。
+- [x] AC2: 槽数由 S 生成（S=1 ⇒ 仅 `.0`，S=3 ⇒ `.0/.1/.2`），`scripts/test.sh` 不再写死两个；`:1067` 注释与实现一致。
+- [x] AC3: `lane_count` 取 suite 日志 `__GROUP__ concurrency=`（真实 lane），与 thin-schema 任务同批落地；记录不再伪造（16 vs 8 问题消失）。
+- [x] AC4: 行为层不变量落地且能取假——槽文件数 == concurrentSuiteSlots()、lane×S ≤ nproc×oversub、ff 闸无 `full-suite.lock` 读取（按位置断言）。
+- [x] AC5: 两 fan-in 同时 suite 不再互 REFUSE（矛盾 B 消失，对照：S=2 两 suite 并存各自可 ff）；R1 无需独立闸。
+- [x] AC6: `gap-ac101-lane-concurrency-control-round` 的 S=1 对照轮前提满足（设 S=1 真正单槽单 lane 集）。
+- [x] AC7: 测试全绿 + `--for-task` scoped 门绿。
 
 ## Definition of Done
 
-- [ ] 一个量一个定义点：槽数由 S 生成、ff 闸读本任务 capture（不碰全局锁）、lane 记录真实、行为层不变量守着——矛盾 B 消失、S=1 可设、②对照轮测到正确对象，scoped + 全量绿。
+- [x] 一个量一个定义点：槽数由 S 生成、ff 闸读本任务 capture（不碰全局锁）、lane 记录真实、行为层不变量守着——矛盾 B 消失、S=1 可设、②对照轮测到正确对象，scoped + 全量绿。
 
 ## Touches
 
-- plugin/scripts/fan-in-ff-merge.sh（ff 闸改读本任务 capture——`.exit` marker + suite_head；移除 `full-suite.lock` 全局读取；双拷贝）
-- plugin/workflows/fan-in-execute.js（lane_count 取 `__GROUP__ concurrency=`；若 capture 需补 suite_head 传递则同步）
+- plugin/scripts/suite-lock-slots.ts（**新增**——TS 侧 suite 槽路径唯一实现：suiteLockSlotCount / suiteLockSlotPaths / suiteLockBase）
+- plugin/scripts/suite-slot-lib.sh（**新增**——bash 侧 suite 槽路径唯一实现：suite_slot_count / suite_slot_paths，被 test.sh source）
+- plugin/scripts/suite-slot-ssot-check.ts（**新增**——行为层不变量检查器：I1 ff 闸无 full-suite.lock / I2 无硬编码槽字面量 / I3 消费者读唯一实现 / I4 bash==TS 槽数）
+- plugin/scripts/fan-in-ff-merge.sh（ff 闸收窄：移除 full-suite.lock 全局读取 + stale-lock reaper 调用；改读本任务 suite capture——suite_exit=0 ∧ suite_head==待 ff tip；新增 --suite-capture 参数）
+- plugin/workflows/fan-in-execute.js（lane_count 取 suite 日志 `__GROUP__ concurrency=`；capture 保留到 ff 之后清理）
 - .claude/workflows/fan-in-execute.js（dual-copy 副本，byte-identical）
-- scripts/test.sh（槽数由 S 生成——循环建 `.0..S-1`、FD 动态分配；serial_lowconc_host_default 联动）
-- plugin/scripts/full-suite-runner.ts（**suiteLockPaths() 改读唯一槽实现 + countHeldSuiteLocks() 支持 S**——`concurrentSuitesRunning` 随 S 正确，:1632 docstring 与实现一致）
-- plugin/scripts/worktree-process-reaper.ts（**fullSuiteLockFiles() 改读唯一槽实现**——S=3 时 `.2` 陈旧持锁可回收）
-- plugin/scripts/concurrency-literal-check.ts（或新增行为层不变量检查——槽文件数==S / lane×S≤nproc / ff 无全局锁读取 / 无 `full-suite.lock.<数字>` 字面量）
-- plugin/test/（行为层不变量测试：S=1/S=3 槽文件断言、ff 闸本任务 capture 测试、lane×S 超订断言、concurrentSuitesRunning 随 S 测试）
+- scripts/test.sh（槽数由 S 生成——循环建 `.0..S-1`、FD 动态分配；source suite-slot-lib.sh；full_suite_lock_acquire/release 改 S 槽；接线 suite-slot-ssot-check）
+- plugin/scripts/full-suite-runner.ts（suiteLockPaths() 改读 suite-lock-slots.ts 唯一实现；countHeldSuiteLocks() 探测 S 槽；concurrentSuiteSlots() 委托 suiteLockSlotCount()）
+- plugin/scripts/worktree-process-reaper.ts（fullSuiteLockFiles() 改读 suite-lock-slots.ts 唯一实现——S=3 时 `.2` 陈旧持锁可回收）
+- plugin/scripts/retired-clause-check.ts（R30 历史 marker 加 suite-slot-ssot-exception 声明例外——引用旧 suite 锁命名作退役文本匹配，非槽路径）
+- plugin/scripts/capability-catalog.sh（三个新脚本的 capability 声明——QUESTION/CADENCE/INVALIDATION/LAST_REAFFIRMED/MATCHING）
+- docs/proposals/quay-product-outline.md（§6 DELIVERY-INVENTORY 快照重生成——新脚本计数 260→263）
+- plugin/scripts/checker-mutation-cases/suite-slot-ssot-check.sh（**新增**——suite-slot-ssot-check 的 mutation case：GREEN→注入硬编码槽形→RED→恢复）
+- plugin/test/fan-in-ff-merge.test.mjs（ff 闸测试改写：capture 缺失/非绿/HEAD 不符 → exit 2；AC5 两 fan-in 各自可 ff 不再互 REFUSE）
+- plugin/test/fan-in-execute-paths.test.mjs（lane_count 取 `__GROUP__ concurrency=` 真实化 REAL 测试；capture 保留到 ff 的断言）
+- plugin/test/suite-slot-ssot-check.test.mjs（**新增**——行为层不变量测试：槽文件数==concurrentSuiteSlots、lane×S≤nproc×oversub、concurrentSuitesRunning 随 S、检查器每条能取假）
 - tasks/gap-ac101-lane-concurrency-control-round.md（执行顺序注记：层 2 先落再设 S=1）
 - tasks/gap-fan-in-verification-round-thin-schema-phase-gap.md（lane_count 真实化同批注记）
 - tasks/gap-suite-concurrency-ff-gate-and-slot-ssot.md（自身）

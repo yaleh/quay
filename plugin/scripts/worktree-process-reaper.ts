@@ -57,8 +57,11 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+// gap-suite-concurrency-ff-gate-and-slot-ssot — the CANONICAL suite-slot implementation (single
+// definition point). fullSuiteLockFiles() reads it so the stale-lock reclaim covers ALL S slots
+// (S=3 ⇒ `.2` stale holders are reclaimable, never invisible to the fixed `.0`/`.1` list).
+import { suiteLockSlotPaths, suiteLockBase } from "./suite-lock-slots.ts";
 
 export interface ProcInfo {
   pid: number;
@@ -255,16 +258,13 @@ export function classifyOrphans(procs: ProcInfo[], lockFiles: string[], exclude:
   return { probes, staleLockHolders };
 }
 
-/** The repo's full-suite lock files for --orphans: <git-common-dir>/full-suite.lock.0/.1. */
+/** The repo's full-suite lock files for --orphans: the CANONICAL slot implementation
+ *  (plugin/scripts/suite-lock-slots.ts — the SINGLE definition point, gap-suite-concurrency-
+ *  ff-gate-and-slot-ssot): <git-common-dir>/full-suite.lock.0 .. .S-1 where S = QUAY_MAX_CONCURRENT_SUITES.
+ *  Reading the canonical means a S=3 config's `.2` stale holder is ALSO reclaimed (the old fixed
+ *  `.0`/`.1` list could never see it). */
 export function fullSuiteLockFiles(root: string): string[] {
-  let commonDir = "";
-  try {
-    commonDir = execFileSync("git", ["-C", root, "rev-parse", "--git-common-dir"], { encoding: "utf8" }).trim();
-    if (!path.isAbsolute(commonDir)) commonDir = path.join(path.resolve(root), commonDir);
-  } catch {
-    commonDir = path.join(path.resolve(root), ".git");
-  }
-  return [`${commonDir}/full-suite.lock.0`, `${commonDir}/full-suite.lock.1`];
+  return suiteLockSlotPaths(suiteLockBase(root));
 }
 
 /** Stop a set of pids: SIGTERM each, wait a bounded grace for exit, SIGKILL survivors. Fail-open

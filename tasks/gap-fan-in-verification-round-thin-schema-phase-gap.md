@@ -33,6 +33,8 @@ extra:
 
 **能取假（⊢ 对照）**：修复后，一次 fan-in 落地（真跑分支）的 verification-round 行带 serial/main/static 相字段 + nproc/concurrentSuiteSlots/concurrentSuitesRunning（与 full-suite-runner 同构或至少同口径），`/tests` 与 lane 对照轮能读到；不再需要从 /tmp 日志现拼。
 
+**同批注记（2026-08-18，gap-suite-concurrency-ff-gate-and-slot-ssot 落地）**：`lane_count` 字段本身也真实化了——fan-in poll 从「记 nproc（实跑 concurrency=8 记成 16，记录面伪造）」改为取 suite 日志 `__GROUP__ concurrency=`（真实 lane，主 phase 跑最后 ⇒ 取最后一行）。这与本任务的「瘦 writer 补相字段」同属「记录面真实化」家族：`lane_count` 与 `concurrentSuitesRunning` 两个字段同源（都该取自 suite 日志/唯一槽实现，而非 `nproc`/定长解构），一起修，别只修一个漏另一个。
+
 ## Plan
 
 1. 读 pre-verified-round-record.ts 的 record 构建（:176）与 full-suite-runner.ts 的 appendVerificationRound 富字段（:3632）——确认差异清单。

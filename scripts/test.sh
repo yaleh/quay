@@ -479,6 +479,17 @@ run_static_checks() {
   # @static-tier change
   # @static-object plugin/scripts/ scripts/ plugin/scripts/concurrency-literal-check.ts plugin/test/concurrency-literal-check.test.mjs
   run_checker "concurrency-literal-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/concurrency-literal-check.ts" --gate --root "${repo_root}"
+  echo "== suite-slot SSoT check (gap-suite-concurrency-ff-gate-and-slot-ssot, AC4 行为层不变量) =="
+  # suite 并发量「能跑几个 suite」的单一定义点行为层不变量:
+  #   I1 — fan-in-ff-merge.sh 代码不含 'full-suite.lock' 读取 (ff 闸只读本任务 capture, AC1 收窄)
+  #   I2 — 全仓代码无 'full-suite.lock.<数字>' 字面量 / FULL_SUITE_LOCK_<数字> 变量 (槽路径由 canonical
+  #        以循环变量生成; 直接对着表现形式, 不依赖谁读 S — 字面量扫描器看不见结构性编码的缺陷形态)
+  #   I3 — 四处消费者 (test.sh / full-suite-runner.ts / worktree-process-reaper.ts / ff-merge) 读唯一实现
+  #   I4 — bash canonical 与 TS canonical 槽数一致 (跨语言漂移检测)
+  # 每条都能取假 (I2 已实测: 模板字面量/字符串/变量名三形态均红; 注释屏蔽)。exit 1 任一 RED 即红。
+  # @static-tier change
+  # @static-object plugin/scripts/ scripts/ plugin/scripts/suite-slot-ssot-check.ts plugin/scripts/suite-lock-slots.ts plugin/scripts/suite-slot-lib.sh plugin/test/suite-slot-ssot-check.test.mjs
+  run_checker "suite-slot-ssot-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/suite-slot-ssot-check.ts" --gate --root "${repo_root}"
   echo "== landing-target branch-consistency check (gap-landing-target-branch-consistency-check, AC1-AC4) =="
   # 任务落地目标分支必须 == 当前前锋分支（develop..integration=0 不变式；机制家族第 4 次——「落地路径」
   # 字段与当前分支模型的一致性没有消费者）。前锋分支由 git 关系读宿主推出（integration ⊆ develop ⇒
@@ -1060,27 +1071,31 @@ resource_gate_check() {
   fi
 }
 
-# ── single-flight lock, 2 slots (gap-resource-gate-no-single-flight-lock-two-suite-overlap →
-#     gap-single-flight-lock-2-slot-concurrent-suites) ───────────────────────────────────────────────
-# full_suite_lock — a 2-slot counting semaphore over TWO SHARED lock files
-# (`<git-common-dir>/full-suite.lock.0` / `.1`), each held for the ENTIRE full-suite run. The slot
-# count IS the QUAY_MAX_CONCURRENT_SUITES knob (人 2026-08-13 裁定: 最多同时 2 组 suite; the outer
-# implementation simplification = two lock files `.0`/`.1`, no new dependency). COMPLEMENTARY to the
-# resource gate: the gate prevents "starting into a busy machine" (a load check at startup), the lock
-# prevents "a THIRD suite joining" (mutual exclusion among the S allowed suites). Together they are
-# complete — up to QUAY_MAX_CONCURRENT_SUITES full suites can now run concurrently (the spec-11 pilot's
-# finding: ≥2 concurrent suites were structurally blocked by the old 1-slot lock), and a THIRD can no
-# longer both see GO in a low-load window and start (the 2026-08-07 incident: two cc8 suites ran
-# simultaneously in DIFFERENT worktrees, 16 workers + subprocesses on 4 cores, PSI cpu avg10 = 86.22).
+# ── single-flight lock, S slots (gap-resource-gate-no-single-flight-lock-two-suite-overlap →
+#     gap-single-flight-lock-2-slot-concurrent-suites + gap-suite-concurrency-ff-gate-and-slot-ssot) ──
+# full_suite_lock — an S-slot counting semaphore over S SHARED lock files
+# (`<git-common-dir>/full-suite.lock.0` .. `.S-1`), each held for the ENTIRE full-suite run. The slot
+# COUNT IS GENERATED from the QUAY_MAX_CONCURRENT_SUITES knob (旋钮②) by the bash canonical
+# (plugin/scripts/suite-slot-lib.sh, the SAME single definition point as the TS side
+# plugin/scripts/suite-lock-slots.ts): S=1 ⇒ 仅 `.0`, S=3 ⇒ `.0/.1/.2`, S=2 ⇒ `.0`/`.1`. The old
+# implementation wrote TWO lock files (`.0`/`.1`) regardless of S — 注释断言「slot count IS the
+# QUAY_MAX_CONCURRENT_SUITES knob」而实现没有 (硬规则③b), 现在实现与注释一致 (人 2026-08-18「把系统真正做对」).
+# COMPLEMENTARY to the resource gate: the gate prevents "starting into a busy machine" (a load check
+# at startup), the lock prevents "a (S+1)-th suite joining" (mutual exclusion among the S allowed
+# suites). Together they are complete — up to QUAY_MAX_CONCURRENT_SUITES full suites can now run
+# concurrently (the spec-11 pilot's finding: ≥2 concurrent suites were structurally blocked by the old
+# 1-slot lock), and one more can no longer both see GO in a low-load window and start (the 2026-08-07
+# incident: two cc8 suites ran simultaneously in DIFFERENT worktrees, 16 workers + subprocesses on 4
+# cores, PSI cpu avg10 = 86.22).
 #
-# The lock is file-descriptor-based (flock(1) on FD 9 = slot .0, FD 8 = slot .1): the FDs are opened
-# once and held open for the whole run, so the lock releases automatically when this process exits —
-# even on an error abort — with no trap bookkeeping (flock's crash-autorelease is PRESERVED: a dead
-# suite can never leak a slot — the run2-a 600s lock-timeout abort becomes a clean slot release, not a
-# permanent leak). Acquire tries slot .0 then slot .1 NON-BLOCKING (`flock -n`); if BOTH are held it
-# WAITs for EITHER to release (bounded per-attempt flock-wait on .0, re-checking .1 after each), then
-# FAILS CLOSED after FULL_SUITE_LOCK_TIMEOUT (default 600s) with a clear message — never a third-GO,
-# never an infinite hang.
+# The lock is file-descriptor-based (one FD per slot, allocated dynamically via `exec {fd}>file`): the
+# FDs are opened once and held open for the whole run, so the lock releases automatically when this
+# process exits — even on an error abort — with no trap bookkeeping (flock's crash-autorelease is
+# PRESERVED: a dead suite can never leak a slot — the run2-a 600s lock-timeout abort becomes a clean
+# slot release, not a permanent leak). Acquire tries each slot NON-BLOCKING (`flock -n`); if ALL S are
+# held it WAITs for EITHER to release (bounded per-attempt flock-wait, re-checking all after each),
+# then FAILS CLOSED after FULL_SUITE_LOCK_TIMEOUT (default 600s) with a clear message — never a
+# (S+1)-th GO, never an infinite hang.
 #
 # Scoped paths (--for-task, --scoped, --group <non-default>, explicit files) never take the lock —
 # they are the verification path that must stay usable while a full suite runs. Nested runners skip
@@ -1091,23 +1106,25 @@ resource_gate_check() {
 # checkout contend on the SAME locks — the 2026-08-07 incident was two DIFFERENT worktrees each
 # running a cc8 suite, and a per-checkout `.quay/full-suite.lock` would NOT have serialized them.
 # git-common-dir resolves to the main repo's `.git` from any worktree, so
-# `<git-common-dir>/full-suite.lock.0`/`.1` are the same inodes everywhere. Fall back to
-# `<repo_root>/.quay/full-suite.lock.0`/`.1` when git is unavailable (a non-git copy).
-# `FULL_SUITE_LOCK_FILE=<path>` (the pilot's per-worktree escape) still works — the `.0`/`.1` suffix
-# is appended, so a per-worktree override yields a per-worktree 2-slot lock.
+# `<git-common-dir>/full-suite.lock.0`..`.S-1` are the same inodes everywhere. Fall back to
+# `<repo_root>/.git` when git is unavailable (a non-git copy).
+# `FULL_SUITE_LOCK_FILE=<path>` (the pilot's per-worktree escape) still works — the `.0`..`.S-1`
+# suffixes are appended, so a per-worktree override yields a per-worktree S-slot lock.
+source "${repo_root}/plugin/scripts/suite-slot-lib.sh"
 FULL_SUITE_LOCK_DIR="$(git rev-parse --git-common-dir 2>/dev/null || true)"
 if [ -z "${FULL_SUITE_LOCK_DIR}" ]; then
   FULL_SUITE_LOCK_DIR="${repo_root}/.git"
 fi
 FULL_SUITE_LOCK_FILE="${FULL_SUITE_LOCK_FILE:-${FULL_SUITE_LOCK_DIR}/full-suite.lock}"
-FULL_SUITE_LOCK_0="${FULL_SUITE_LOCK_FILE}.0"
-FULL_SUITE_LOCK_1="${FULL_SUITE_LOCK_FILE}.1"
-FULL_SUITE_LOCK_FD0=9
-FULL_SUITE_LOCK_FD1=8
+# S slot paths + dynamically-allocated FDs (the bash canonical suite-slot-lib.sh generates the count
+# from 旋钮②; FDs are allocated at acquire time and kept in FULL_SUITE_LOCK_FDS for the run).
+FULL_SUITE_LOCK_SLOTS=()
+while IFS= read -r _suite_slot; do FULL_SUITE_LOCK_SLOTS+=("${_suite_slot}"); done < <(suite_slot_paths "${FULL_SUITE_LOCK_FILE}")
+FULL_SUITE_LOCK_FDS=()
 FULL_SUITE_LOCK_TIMEOUT="${FULL_SUITE_LOCK_TIMEOUT:-600}"
 
-# full_suite_lock_acquire — acquire one of the two single-flight slots (non-blocking try on each;
-# both busy ⇒ bounded wait for either to release, then fail-closed).
+# full_suite_lock_acquire — acquire one of the S single-flight slots (non-blocking try on each;
+# all busy ⇒ bounded wait for any to release, then fail-closed).
 full_suite_lock_acquire() {
   if [ "${QUAY_TEST_SKIP_RESOURCE_GATE:-}" = "1" ]; then
     echo "scripts/test.sh: QUAY_TEST_SKIP_RESOURCE_GATE=1 — skipping single-flight lock (nested runner)"
@@ -1117,51 +1134,60 @@ full_suite_lock_acquire() {
     echo "scripts/test.sh: QUAY_TEST_NESTED=1 — skipping single-flight lock (nested invocation of the same suite)"
     return 0
   fi
-  mkdir -p "$(dirname "${FULL_SUITE_LOCK_0}")"
-  # Open BOTH lock files on dedicated FDs (append mode: the file exists + is writable even if empty).
-  # FD-based flock auto-releases on process exit — a crash/abort cannot leak a slot.
-  eval "exec ${FULL_SUITE_LOCK_FD0}>${FULL_SUITE_LOCK_0}"
-  eval "exec ${FULL_SUITE_LOCK_FD1}>${FULL_SUITE_LOCK_1}"
-  echo "== single-flight lock (2 slots — gap-single-flight-lock-2-slot-concurrent-suites) =="
-  local held=""
-  # Slot .0, then slot .1: non-blocking try — a free slot is taken immediately (AC1: the 2nd suite
-  # starts instead of being serialized).
-  if flock -n "${FULL_SUITE_LOCK_FD0}"; then
-    held=0
-  elif flock -n "${FULL_SUITE_LOCK_FD1}"; then
-    held=1
-  else
-    # BOTH slots busy — WAIT for EITHER to release (a 2-slot counting semaphore made of two flocks).
-    # Bounded per-attempt flock-wait on slot .0 (re-checking slot .1 after each) so a release on
-    # EITHER slot is picked up; fail-closed after FULL_SUITE_LOCK_TIMEOUT — never a third-GO, never
-    # an infinite hang.
-    local waited=0
-    while [ "${waited}" -lt "${FULL_SUITE_LOCK_TIMEOUT}" ]; do
-      if flock -w 1 "${FULL_SUITE_LOCK_FD0}"; then held=0; break; fi
-      if flock -n "${FULL_SUITE_LOCK_FD1}"; then held=1; break; fi
-      waited=$((waited + 1))
+  mkdir -p "$(dirname "${FULL_SUITE_LOCK_FILE}")"
+  local _s_fd _s_slot _s_idx _s_held="" _s_waited=0
+  FULL_SUITE_LOCK_FDS=()
+  # Open EVERY slot file on its own dynamically-allocated FD (append mode: the file exists + is
+  # writable even if empty). FD-based flock auto-releases on process exit — a crash/abort cannot leak.
+  for _s_slot in "${FULL_SUITE_LOCK_SLOTS[@]}"; do
+    exec {_s_fd}>"${_s_slot}"
+    FULL_SUITE_LOCK_FDS+=("${_s_fd}")
+  done
+  echo "== single-flight lock (${#FULL_SUITE_LOCK_SLOTS[@]} slots — gap-single-flight-lock-2-slot-concurrent-suites + SSoT) =="
+  # Non-blocking try over every slot: a free slot is taken immediately (AC1: the 2nd suite starts
+  # instead of being serialized).
+  _s_idx=0
+  for _s_fd in "${FULL_SUITE_LOCK_FDS[@]}"; do
+    if flock -n "${_s_fd}"; then _s_held="${_s_idx}"; break; fi
+    _s_idx=$((_s_idx + 1))
+  done
+  if [ -z "${_s_held}" ]; then
+    # ALL S slots busy — WAIT for ANY to release (an S-slot counting semaphore made of S flocks).
+    # Bounded per-attempt flock-wait (1s per slot, re-checking all after each) so a release on ANY
+    # slot is picked up; fail-closed after FULL_SUITE_LOCK_TIMEOUT — never a (S+1)-th GO, never an
+    # infinite hang.
+    while [ "${_s_waited}" -lt "${FULL_SUITE_LOCK_TIMEOUT}" ]; do
+      _s_idx=0
+      for _s_fd in "${FULL_SUITE_LOCK_FDS[@]}"; do
+        if flock -w 1 "${_s_fd}"; then _s_held="${_s_idx}"; break; fi
+        _s_idx=$((_s_idx + 1))
+      done
+      [ -n "${_s_held}" ] && break
+      _s_waited=$((_s_waited + 1))
     done
-    if [ -z "${held}" ]; then
-      echo "scripts/test.sh: another full suite holds both slots (${FULL_SUITE_LOCK_0}, ${FULL_SUITE_LOCK_1}) — not starting (single-flight lock; waited ${FULL_SUITE_LOCK_TIMEOUT}s). Re-run when a slot frees." >&2
+    if [ -z "${_s_held}" ]; then
+      echo "scripts/test.sh: another full suite holds all ${#FULL_SUITE_LOCK_SLOTS[@]} slots (${FULL_SUITE_LOCK_SLOTS[*]}) — not starting (single-flight lock; waited ${FULL_SUITE_LOCK_TIMEOUT}s). Re-run when a slot frees." >&2
       exit 1
     fi
   fi
-  FULL_SUITE_LOCK_HELD="${held}"
-  echo "scripts/test.sh: acquired full-suite single-flight slot ${held} (${FULL_SUITE_LOCK_FILE}.${held}) — held for the entire run"
+  FULL_SUITE_LOCK_HELD="${_s_held}"
+  echo "scripts/test.sh: acquired full-suite single-flight slot ${_s_held} (${FULL_SUITE_LOCK_FILE}.${_s_held}) — held for the entire run"
 }
 
-# full_suite_lock_release — release the HELD slot and close both FDs (idempotent; flock also
+# full_suite_lock_release — release the HELD slot and close all FDs (idempotent; flock also
 # auto-releases on exit — a skipped lock is a clean no-op).
 full_suite_lock_release() {
+  local _r_idx=0 _r_fd
   if [ -n "${FULL_SUITE_LOCK_HELD:-}" ]; then
-    if [ "${FULL_SUITE_LOCK_HELD}" = "0" ]; then
-      flock -u "${FULL_SUITE_LOCK_FD0}" 2>/dev/null || true
-    elif [ "${FULL_SUITE_LOCK_HELD}" = "1" ]; then
-      flock -u "${FULL_SUITE_LOCK_FD1}" 2>/dev/null || true
+    _r_idx="${FULL_SUITE_LOCK_HELD}"
+    if [ "${_r_idx}" -lt "${#FULL_SUITE_LOCK_FDS[@]}" ]; then
+      flock -u "${FULL_SUITE_LOCK_FDS[${_r_idx}]}" 2>/dev/null || true
     fi
   fi
-  eval "exec ${FULL_SUITE_LOCK_FD0}>&-" 2>/dev/null || true
-  eval "exec ${FULL_SUITE_LOCK_FD1}>&-" 2>/dev/null || true
+  for _r_fd in "${FULL_SUITE_LOCK_FDS[@]}"; do
+    eval "exec ${_r_fd}>&-" 2>/dev/null || true
+  done
+  FULL_SUITE_LOCK_FDS=()
 }
 
 # ── group resolution helpers (gap-test-suite-has-no-layer-grouping) ──────────────────────────────
