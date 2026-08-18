@@ -28,6 +28,8 @@ extra:
 
 **能取假（⊢ 对照）**：对照轮跑完，若 `QUAY_MAX_CONCURRENT_SUITES=1` 的 serial+main 两相墙钟 + 前置 ≤ 600s（对照 609s 基线），则结论成立 ⇒ 改默认值（S=2→1）+ 落地；若不成立 ⇒ S 不是主因，回 manager 的候选清单继续（serial 301s 整族/文件级清单）。两种结果都是有效产出。
 
+**补强判据（manager 08-18 更正——单轮墙钟易被「这轮恰好慢」解释掉，吞吐反事实更难）**：同天实测真实独跑 n=11 墙钟中位 **823s** / 4.14 轮/h vs 真实重叠 n=8 墙钟 **1421s** / 3.72 轮/h；那 8 轮按独跑中位串行=110min vs 实际并发=129min（**并发比串行慢 18%**）。对照轮应同时记录两口径**吞吐（rounds/h）**——S=1 若串行吞吐 ≥ 并发吞吐即证成，不单靠单轮墙钟。⚠️ **823s 真值离 600s 差 37%，S=1 单独达不到 600s**——需 lock_wait 消除（`gap-verification-round-observability-holes` AC1）+ serial phase 并发 8→16 一起上；对照轮的「≤600s」判据应据此重述（S=1 的产出=吞吐证成 + 墙钟接近，600s 是组合目标非 S=1 单独目标）。
+
 **⚠️ 执行顺序前置（2026-08-18 注记，gap-suite-concurrency-ff-gate-and-slot-ssot 落地后）**：本任务设 S=1 的对照轮**必须先等** `gap-suite-concurrency-ff-gate-and-slot-ssot` 的层 2（槽数由 S 生成）落地——**否则设 S=1 得到的仍是「2 槽 × 16 lane = 32 lane 超订」**（槽文件写死 `.0/.1`、lane 除数按 S 算但槽不联动），对照轮测错对象。层 2 落地后 S=1 才真正单槽单 lane 集（仅 `.0`、lane=nproc×oversub/1）。
 
 ## Plan
