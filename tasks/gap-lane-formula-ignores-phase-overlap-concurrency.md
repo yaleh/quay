@@ -1,7 +1,7 @@
 ---
 id: gap-lane-formula-ignores-phase-overlap-concurrency
 title: "lane 公式分母算漏「阶段间并发」——overlap 开启后 serial+lowconc 并行，单 suite 重叠窗口 16 lane 超公式假设的 8"
-status: todo
+status: ready
 labels:
   - gap
   - performance
