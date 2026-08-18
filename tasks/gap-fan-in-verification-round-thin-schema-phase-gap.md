@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-verification-round-thin-schema-phase-gap
 title: fan-in 落地行（瘦 writer）无相字段——serial/main/static 耗时与 nproc/concurrentSuiteSlots 全缺，趋势账本对主落地路径持续产出无相行（round228-233 全瘦，227 是最后富行）
-status: ready
+status: done
 labels:
   - gap
   - defect
