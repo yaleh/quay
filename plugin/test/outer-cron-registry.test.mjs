@@ -370,7 +370,7 @@ test("CLI --record: 写全局收据 + 审计线，随后 --verify 全真（收�
 test("REAL inner anchor: 四判据全真 + 剩余寿命正常 ⇒ PASS (exit 0)", (t) => {
   const real = realRegistry();
   if (!real) { t.skip("全局注册表缺失"); return; }
-  const base = makeFixtureBase();
+  const base = makeFixtureBase({ inner: { cronId: real.layers.inner.cronId } });
   const { dir, p } = tmpFile("md");
   try {
     writeInnerSection(p, INNER_PROMPT);
@@ -627,7 +627,7 @@ test("worktree 上下文默认路径正本查找（round172 回归）：AC80 段
 
 test("NOT-EVALUATED: 内层正本缺失（--root 指向无 AC80 段的目录）⇒ exit 2（①-③ 真但 ④ 无法评估）", (t) => {
   const real = realRegistry();
-  const base = makeFixtureBase();
+  const base = makeFixtureBase({ inner: { cronId: real ? real.layers.inner.cronId : "x" } });
   const { dir } = tmpFile("md");
   try {
     const r = runReg([
@@ -669,7 +669,9 @@ test("NOT-EVALUATED: 注册表缺失/层缺失 ⇒ exit 2", (t) => {
 test("checkVerify: 四判据全真 + 剩余正常 ⇒ ok:true (exit 0)", (t) => {
   const real = realRegistry();
   if (!real) { t.skip("全局注册表缺失"); return; }
-  const nowMs = Date.parse("2026-08-18T05:00:00Z");
+  // 判据③ fresh 要求 now ≥ verifiedAt：固定墙钟会随真实锚重建（verifiedAt 前移）落到过去 ⇒ 判据③ 恒假。
+  // 从 live 注册表的 verifiedAt 派生 nowMs（+1s），保证 now ∈ [verifiedAt, verifiedAt+7d] 恒成立（重锚不再破）。
+  const nowMs = Date.parse(real.layers.inner.verifiedAt) + 1000;
   const res = checkVerify({
     layer: "inner",
     registry: real,
