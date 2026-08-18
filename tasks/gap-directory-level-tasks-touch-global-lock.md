@@ -1,7 +1,7 @@
 ---
 id: gap-directory-level-tasks-touch-global-lock
 title: "目录级 `tasks/*.md` Touches = 全局派发锁：self-touch C8 强制 ⇒ 与任何任务相交，在飞期间队列全锁（发生率 45，doc-lint 持锁 3h40m 实证）"
-status: ready
+status: done
 labels:
   - gap
   - mechanism
