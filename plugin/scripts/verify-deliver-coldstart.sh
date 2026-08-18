@@ -174,7 +174,7 @@ probe_direct_measures() {
   for proc in /proc/[0-9]*; do
     pid="${proc#/proc/}"
     [ -r "$proc/cmdline" ] || continue
-    bin="$(tr '\0' ' ' < "$proc/cmdline" 2>/dev/null | awk '{print $1}')"
+    bin="$(cat "$proc/cmdline" 2>/dev/null | tr '\0' ' ' | awk '{print $1}')" || continue
     case "$(basename -- "$bin")" in
       claude|node)
         cwd="$(readlink "$proc/cwd" 2>/dev/null || true)"
