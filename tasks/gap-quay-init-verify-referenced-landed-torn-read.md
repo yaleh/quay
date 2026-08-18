@@ -32,18 +32,21 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: `verify_referenced_landed()` 换 stability check（两次独立读声明集一致才通过），torn read 不再 false-positive declared→not-declared。
-- [ ] AC2: worktree-root-fs-check AC4 恢复（30s 内完成），directory-lock fan-in 不再被它 RED。
-- [ ] AC3: directory-lock 的 land 不带 quay-init.sh（跨域修复隔离），anti-drift 不再 HARD FAIL。
-- [ ] AC4: 测试全绿 + `--for-task` scoped 门绿。
+- [x] AC1: `verify_referenced_landed()` 换 stability check（两次独立读声明集一致才通过），torn read 不再 false-positive declared→not-declared。
+- [x] AC2: worktree-root-fs-check AC4 恢复（30s 内完成），directory-lock fan-in 不再被它 RED。
+- [x] AC3: directory-lock 的 land 不带 quay-init.sh（跨域修复隔离），anti-drift 不再 HARD FAIL。
+- [x] AC4: 测试全绿 + `--for-task` scoped 门绿。
 
 ## Definition of Done
 
-- [ ] quay-init.sh 哨兵换 stability check（torn-read 免疫），AC4 恢复，directory-lock 跨域隔离 land，scoped + 全量绿。
+- [x] quay-init.sh 哨兵换 stability check（torn-read 免疫），AC4 恢复，directory-lock 跨域隔离 land，scoped + 全量绿。
+
+## Land 顺序（跨域修复隔离）
+
+本任务先 land（quay-init.sh stability check 修复，own Touches + AC）→ directory-lock（gap-directory-level-tasks-touch-global-lock）再 re-merge develop 拿到本修复 → 其 suite（worktree-root-fs-check AC4）应绿 → 再 land。directory-lock 的 branch **不带** quay-init.sh 改动（跨域修复隔离，AC3），否则其 land 的 anti-drift（eaa428f1）会对未声明的 quay-init.sh 改动 HARD FAIL。注记放本任务体而非 directory-lock 任务文件：后者在另一 worktree 在飞（AC 已勾 + Evidence），同文件同区域追加会与其 fan-in 合并冲突。
 
 ## Touches
 
 - plugin/scripts/quay-init.sh（verify_referenced_landed() 哨兵换 stability check）
-- plugin/test/quay-init-loop.test.mjs 或相关（torn-read 回归测试）
-- tasks/gap-directory-level-tasks-touch-global-lock.md（land 顺序注记：本任务先 land，directory-lock re-merge 拿修复）
+- plugin/test/quay-init-loop-consumer-doc-refs.test.mjs（torn-read 回归测试：stability 重试 + pass-through 控制 + 真实缺失 ref 负控制）
 - tasks/gap-quay-init-verify-referenced-landed-torn-read.md（自身）
