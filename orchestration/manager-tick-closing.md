@@ -10,12 +10,24 @@
    **每轮必做（不可省，这是核实）**：`CronList` + `bash plugin/scripts/manager-arm-loop.sh --verify`。
    **判据三条，全真 ⇒ 不动它**，熔态列记 `哨兵核实OK <id>`：
    ```
-   ① CronList 中 prompt 含 [manager-tick] 的条目【恰好 1 条】
+   ① CronList 中 prompt 含 [manager-tick] 且标记为 (recurring) 的条目【恰好 1 条】
    ② 该条 id == loop-registry.txt 里 |cron:<id>| 的值（现读，不许凭记忆）
    ③ manager-arm-loop.sh --verify 报 registry-verified（它已内含 stale-seconds 604800 的新鲜度判定）
    ```
-   **任一为假 ⇒ 才清扫重建**：删除所有 prompt 含 `[manager-tick]` 者 → 建一个 →
-   `--record-cron <新id>` → 再 `--verify`。熔态列记 `哨兵重建 <旧id>→<新id> 因<失败的那一条>`。
+   **⚠️ 判据①的 `(recurring)` 限定是 2026-08-18 21:1xZ 补的，此前漏写导致连续两轮误判重建**：
+   本轮内等待 workflow 完成时若调用了 `ScheduleWakeup`，其 `prompt` 参数按工具本身的指导
+   （"Pass the same /loop prompt back via prompt each turn"）传的是与 CronCreate 锚同一份
+   `[manager-tick]` 文本 ⇒ `ScheduleWakeup` 在底层创建的**一次性** cron 条目也会命中
+   `prompt 含 [manager-tick]` 的过滤，若该一次性条目尚未触发（workflow 通过 task-notification
+   提前完成，抢在预定唤醒时刻之前），CronList 就会读到 2 条——**这不是锚重复，是本轮自己挂的
+   一次性兜底唤醒还没消耗**。实测两次时刻精确对应（`0f92af10`="Every day at 9:00 PM"
+   ↔ 同轮 `ScheduleWakeup` 返回 "Next wakeup scheduled for 21:00:00"；`103b2ebf`="9:18 PM"
+   ↔ 同轮返回 "21:18:00"）。**CronList 自身的 `(recurring)`/`(one-shot)` 标注就是现成的判别量**
+   （真锚恒 recurring，`ScheduleWakeup` 兜底恒 one-shot），不必靠时刻相关性去猜。
+   **任一为假 ⇒ 才清扫重建**：删除所有 **`(recurring)`** 且 prompt 含 `[manager-tick]` 者 → 建一个 →
+   `--record-cron <新id>` → 再 `--verify`。**一次性 `[manager-tick]` 条目不属于本步骤的清扫范围**
+   ——留着它会在其预定时刻自行触发一次 tick 或自动过期，无害；删不删都不影响判据①。
+   熔态列记 `哨兵重建 <旧id>→<新id> 因<失败的那一条>`。
    **建的时候：绝不靠记住的 ID，内容也不许凭记忆重打——`cat orchestration/manager-tick-prompt.txt` 取正本。**
    （正本确实存在且 git 跟踪，`11891b0e` 2026-08-07 落盘并配了不变式检查器 = **A1 `manager-anchor-check.py:18`**，
    我每轮跑它、输出 `anchor_check=OK (314 字符)`。**2026-08-14 09:4xZ 我曾报「这段 prompt 没有正本文件」——错的**，
