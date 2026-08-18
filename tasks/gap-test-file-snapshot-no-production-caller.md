@@ -29,3 +29,7 @@ extra:
 
 - [ ] 删测试文件被机械挡下（真实输出，非 fixture）。
 - [ ] `grep -rn test-file-snapshot.sh` 显示 ≥1 个执行调用点（非注释/declaration）。
+
+## Touches
+
+- tasks/gap-test-file-snapshot-no-production-caller.md（自身）

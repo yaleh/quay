@@ -25,3 +25,7 @@ inner 派发 brief 写「不勾 DoD（全量绿在 scoped-only 下不可知）�
 ## Definition of Done
 
 - [ ] 一个任务走完派发→fan-in 且 DoD 在正确时机被勾（非 fan-in 被 gate 挡后补勾）。
+
+## Touches
+
+- tasks/gap-dispatch-brief-dod-check-timing.md（自身）

@@ -24,4 +24,8 @@ extra:
 
 ## Definition of Done
 
-- [ ] `/sessions` 页可见三层分节标题（真实渲染）。
+- [ ] `/sessions` 页可见 Manager/Outer/Inner 三层分节标题，各节内容按层归属不混排（真实渲染）。
+
+## Touches
+
+- tasks/gap-webui-sessions-no-layer-labels.md（自身）

@@ -27,3 +27,7 @@ extra:
 
 - [ ] suite 超时被机械报出（真实输出）。
 - [ ] `grep -rn suite-duration-exceed-check` 显示 ≥1 个执行调用点。
+
+## Touches
+
+- tasks/gap-suite-duration-exceed-check-not-wired.md（自身）

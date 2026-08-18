@@ -27,3 +27,7 @@ extra:
 ## Definition of Done
 
 - [ ] 一个 landed 任务的 `--task-end` 真实写入（bracket 闭合，非 fixture）。
+
+## Touches
+
+- tasks/gap-fan-in-closure-skips-task-end.md（自身）

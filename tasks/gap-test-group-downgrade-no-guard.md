@@ -31,3 +31,7 @@ extra:
 
 - [ ] 一条「engine→governance 无理由改标」被机械挡下（真实输出，非 fixture）。
 - [ ] 一条「带 commit message 理由的合法降级」被放行（对照）。
+
+## Touches
+
+- tasks/gap-test-group-downgrade-no-guard.md（自身）
