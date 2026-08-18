@@ -25,4 +25,8 @@ extra:
 
 ## Definition of Done
 
-- [ ] `/board?page=2` 返回第二页（真实输出）。
+- [ ] `/board?page=2` 返回第二页、`?status=<s>` 筛选生效（真实输出，全程不引入客户端 JS）。
+
+## Touches
+
+- tasks/gap-webui-board-no-pagination.md（自身）

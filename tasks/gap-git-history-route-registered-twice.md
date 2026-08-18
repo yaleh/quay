@@ -26,3 +26,7 @@ extra:
 ## Definition of Done
 
 - [ ] `grep serve-handlers.ts 'url.pathname === "/git-history"'` 只剩 1 处命中。
+
+## Touches
+
+- tasks/gap-git-history-route-registered-twice.md（自身）

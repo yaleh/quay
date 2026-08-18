@@ -29,3 +29,7 @@ extra:
 ## Definition of Done
 
 - [ ] 一次 detached-suite fan-in 后 full-suite-state.json 反映该轮结果（真实输出，非 fixture）。
+
+## Touches
+
+- tasks/gap-full-suite-state-stale-no-writer.md（自身）

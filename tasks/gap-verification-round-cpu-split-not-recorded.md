@@ -30,3 +30,7 @@ extra:
 ## Definition of Done
 
 - [ ] 一次真实 suite run 的记录含 user/sys 拆分，且与 `/tmp/*.time` 原始值一致。
+
+## Touches
+
+- tasks/gap-verification-round-cpu-split-not-recorded.md（自身）

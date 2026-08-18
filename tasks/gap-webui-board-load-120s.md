@@ -29,4 +29,8 @@ extra:
 
 ## Definition of Done
 
-- [ ] `/board` 冷加载实测耗时达标（真实输出，非估算）。
+- [ ] `/board` 冷加载实测耗时从 ~120s 降到个位数秒（真实输出，非估算；缓存命中 + 秒级 timeout + fail-open 三者都落地）。
+
+## Touches
+
+- tasks/gap-webui-board-load-120s.md（自身）

@@ -27,3 +27,7 @@ extra:
 ## Definition of Done
 
 - [ ] Journal 页显示 tick-log 最新条目（真实输出，非 fixture）。
+
+## Touches
+
+- tasks/gap-webui-journal-reads-stale-data.md（自身）

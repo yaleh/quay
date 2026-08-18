@@ -28,3 +28,7 @@ extra:
 ## Definition of Done
 
 - [ ] `git log --branches --source` 的 lane 数等于活跃分支数（真实输出）。
+
+## Touches
+
+- tasks/gap-git-history-counts-stale-branches.md（自身）
