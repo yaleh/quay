@@ -5,6 +5,7 @@ status: ready
 labels:
   - gap
   - mechanism
+  - delivery-critical
 parent: null
 children: []
 extra:
