@@ -93,7 +93,7 @@ test("PURE buildLockHoldIntervals — pairs acquire/release; unpaired or unparse
     { event: "release", epoch: 101, taskId: "a", pid: 1 },
   ]);
   assert.equal(ok.malformed, false);
-  assert.deepEqual(ok.intervals, [{ start: 100, end: 101, key: "a|1" }]);
+  assert.deepEqual(ok.intervals, [{ start: 100, end: 101, key: "a|1", taskId: "a" }]);
   // release without acquire
   const bad = buildLockHoldIntervals([{ event: "release", epoch: 100, taskId: "a", pid: 1 }]);
   assert.equal(bad.malformed, true);
@@ -115,6 +115,25 @@ test("PURE checkSuiteInLock — overlap ⇒ red; disjoint ⇒ clean; no suite-ru
   assert.equal(disjoint.reason, "no-suite-lock-overlap");
   const noRun = checkSuiteInLock(hold, null);
   assert.equal(noRun.evaluated, false, "no suite-run interval ⇒ NOT-EVALUATED");
+});
+
+test("PURE checkSuiteInLock — cross-task overlap is NOT a violation; same-task overlap is", () => {
+  // gap-fan-in-ff-protocol-check-cross-task-false-positive: task A's suite and task B's millisecond
+  // ff merge overlap in wall-clock time in a concurrent multi-worktree fan-in — that is a legitimate
+  // cross-task overlap, not a suite call inside task A's own locked section (SPEC §4 "对象不相干").
+  const crossTaskHold = [{ start: 100, end: 101, taskId: "taskB" }];
+  const sameTaskHold = [{ start: 100, end: 101, taskId: "taskA" }];
+  const suiteRun = { start: 90, end: 200, taskId: "taskA" };
+  const cross = checkSuiteInLock(crossTaskHold, suiteRun);
+  assert.equal(cross.ok, true);
+  assert.equal(cross.evaluated, true);
+  assert.equal(cross.reason, "no-suite-lock-overlap");
+  const same = checkSuiteInLock(sameTaskHold, suiteRun);
+  assert.equal(same.ok, false);
+  assert.equal(same.reason, "suite-call-inside-merge-lock");
+  // legacy suite run without a taskId still falls back to the unscoped temporal overlap.
+  const legacy = checkSuiteInLock(crossTaskHold, { start: 90, end: 200 });
+  assert.equal(legacy.ok, false, "legacy suite state (no taskId) keeps unscoped overlap");
 });
 
 test("PURE checkRetryRecordShape — well-formed passes; missing/int-malformed/hex-malformed/ts-malformed red", () => {
@@ -239,6 +258,36 @@ test("判据2b negative control — a lock-hold interval DISJOINT from the suite
     const lock = jsonOut(r).checks.find((c) => c.check === "suite-in-lock");
     assert.equal(lock.ok, true);
     assert.equal(lock.evaluated, true);
+  } finally {
+    cleanup(dir);
+    cleanup(st);
+  }
+});
+
+test("判据2b cross-task negative control — a DIFFERENT task's lock-hold overlapping the suite run ⇒ PASS", () => {
+  // gap-fan-in-ff-protocol-check-cross-task-false-positive: the suite state records task t1's suite
+  // (taskId t1), while the lock-events file carries task t2's millisecond ff merge inside that
+  // window. This is a legitimate concurrent overlap, NOT a suite call inside t1's own locked section.
+  const dir = makeTmp("a2bxtask");
+  const st = makeTmp("a2bxtaskstate");
+  try {
+    initRepo(dir);
+    fs.mkdirSync(path.join(st, ".quay"), { recursive: true });
+    const events = path.join(st, ".quay", "events.jsonl");
+    const suite = path.join(st, ".quay", "state.json");
+    // task t2's hold at 03:10:00–01 sits INSIDE task t1's suite window 03:00:00–04:00:00.
+    fs.writeFileSync(events, [
+      JSON.stringify({ event: "acquire", ts: "2026-08-14T03:10:00Z", epoch: 1786677000, taskId: "t2", pid: 1 }),
+      JSON.stringify({ event: "release", ts: "2026-08-14T03:10:01Z", epoch: 1786677001, taskId: "t2", pid: 1 }),
+    ].join("\n") + "\n", "utf8");
+    fs.writeFileSync(suite, JSON.stringify({ state: "green", startedAt: "2026-08-14T03:00:00Z", finishedAt: 1786680000, scope: "worktree", taskId: "t1" }), "utf8");
+
+    const r = runChecker(["--root", dir, "--lock-events", events, "--suite-state", suite]);
+    assert.equal(r.status, 0, `cross-task overlap must pass: ${r.stdout}${r.stderr}`);
+    const lock = jsonOut(r).checks.find((c) => c.check === "suite-in-lock");
+    assert.equal(lock.ok, true);
+    assert.equal(lock.evaluated, true);
+    assert.equal(lock.reason, "no-suite-lock-overlap");
   } finally {
     cleanup(dir);
     cleanup(st);
