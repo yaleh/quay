@@ -1,0 +1,79 @@
+// @test-group product
+// gap-git-history-counts-stale-branches — readGitHistory must count only ACTIVE local branches as
+// chart lanes. The old `git log --branches --source` counted every local branch, so a merged-but-
+// never-deleted leftover branch (a fan-in source left dangling) kept polluting the lane count long
+// after it was dead. The fix enumerates branch tips + their commit time and traverses only the
+// branches with a commit inside GIT_HISTORY_ACTIVE_WINDOW_SEC; the stale branch's commits are
+// already reachable from the mainline, so they are relabeled (not dropped).
+//
+// /git-history is a user-visible web contract ⇒ `product` group. New file ⇒ node:test.
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import path from "node:path";
+import fs from "node:fs";
+import os from "node:os";
+import { readGitHistory } from "../src/observation.ts";
+
+/** Commit helper with a fixed clock (committer date = author date = `t`), per-branch file. */
+function commitAt(ws, msg, t, file = "log.txt") {
+  const env = {
+    ...process.env,
+    GIT_AUTHOR_DATE: new Date(t * 1000).toISOString(),
+    GIT_COMMITTER_DATE: new Date(t * 1000).toISOString(),
+  };
+  fs.appendFileSync(path.join(ws, file), `${msg}\n`);
+  execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "add", "-A"], { cwd: ws, env });
+  execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", msg], { cwd: ws, env });
+}
+
+test("readGitHistory excludes a merged-but-stale branch from the lanes (negative control)", () => {
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), "obs-gh-"));
+  try {
+    execFileSync("git", ["init", "-q"], { cwd: ws });
+    fs.writeFileSync(path.join(ws, "README.md"), "fixture\n");
+    execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "add", "-A"], { cwd: ws });
+    execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "init"], { cwd: ws });
+
+    const nowSec = Math.floor(Date.now() / 1000);
+    // The exact pollution shape the finding names: a fan-in leftover whose work was merged into the
+    // mainline but whose branch ref was never deleted — tip is 30 days old (stale).
+    execFileSync("git", ["checkout", "-q", "-b", "verify/stale"], { cwd: ws });
+    commitAt(ws, "stale work", nowSec - 30 * 86400, "stale.txt");
+    execFileSync("git", ["checkout", "-q", "master"], { cwd: ws });
+    execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "merge", "-q", "--no-ff", "verify/stale", "-m", "merge verify/stale"], { cwd: ws });
+    commitAt(ws, "main recent", nowSec - 60);
+
+    const hist = readGitHistory(ws);
+    assert.equal(hist.status, "ok");
+    const refs = new Set(hist.commits.map((c) => c.ref));
+    assert.ok(!refs.has("verify/stale"), `stale branch must not be a lane (lanes: ${[...refs].join(", ")})`);
+    assert.ok(refs.has("master"), "the active mainline branch is still a lane");
+    assert.ok(hist.commits.some((c) => c.subject === "stale work"), "the stale branch's merged commit is still shown (relabeled to the mainline, not dropped)");
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("readGitHistory degrades to 「无活跃分支」 when every branch is stale", () => {
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), "obs-gh-old-"));
+  try {
+    execFileSync("git", ["init", "-q"], { cwd: ws });
+    fs.writeFileSync(path.join(ws, "README.md"), "fixture\n");
+    execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "add", "-A"], { cwd: ws });
+    // The ONLY commit is 30 days old → no branch has a commit in the active window.
+    const oldSec = Math.floor(Date.now() / 1000) - 30 * 86400;
+    const env = {
+      ...process.env,
+      GIT_AUTHOR_DATE: new Date(oldSec * 1000).toISOString(),
+      GIT_COMMITTER_DATE: new Date(oldSec * 1000).toISOString(),
+    };
+    execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "old"], { cwd: ws, env });
+
+    const hist = readGitHistory(ws);
+    assert.equal(hist.status, "empty");
+    assert.match(hist.reason || "", /无活跃分支/, "reason says no active branch, not 「无提交记录」");
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
