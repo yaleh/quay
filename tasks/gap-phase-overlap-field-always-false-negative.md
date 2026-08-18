@@ -1,7 +1,7 @@
 ---
 id: gap-phase-overlap-field-always-false-negative
 title: verification-round 的 phase_overlap 字段恒假阴性——full-suite-runner 读 QUAY_PHASE_OVERLAP env 而生产链路从未导出它（3/241 条记录，全部来自 08-16 手工探索轮，从未出现在真实 fan-in 轮）
-status: ready
+status: done
 labels:
   - gap
   - defect
