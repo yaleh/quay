@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-suite-duration-poll-granularity-inflation
 title: fan-in 的 wall_ms 用「轮询发现 exit marker 时刻」而非「suite 真结束时刻」——verification-round durationMs 系统性虚高（最高 +60s），污染 AC101 600s 判定（round232 实证 +65.1s）
-status: ready
+status: done
 labels:
   - gap
   - defect
