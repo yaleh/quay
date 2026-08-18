@@ -101,9 +101,16 @@ test("AC1 structural — the list page emits the mobile chrome (hamburger header
   assert.ok(r.body.includes("Architecture"), "mobile menu links to Architecture");
 });
 
-test("AC1/AC2 — desktop site-nav line is marked .site-nav; filter/sort are .list-nav; label nav is chips", async () => {
+test("AC1/AC2 — desktop site-nav is the .nav header bar tagged .site-nav; filter/sort are .list-nav; label nav is chips", async () => {
   const r = await get(port, "/tasks");
-  assert.ok(r.body.includes('class="meta site-nav"'), "desktop nav line is tagged .site-nav (hidden on mobile)");
+  // gap-webui-nav-inconsistent-routes: the desktop nav is now the unified header bar
+  // (<nav class="site-nav"> wrapping the .nav/.nav-brand strip — hidden on mobile), no longer
+  // a <p class="meta site-nav"> text line.
+  assert.ok(r.body.includes('<nav class="site-nav"'), "desktop nav is a <nav class=\"site-nav\"> header bar (hidden on mobile)");
+  assert.ok(r.body.includes('class="nav-brand"'), "desktop nav carries the Quay .nav-brand");
+  assert.ok(r.body.includes('class="nav-group"'), "desktop nav groups its items in .nav-group bars");
+  assert.ok(r.body.includes('class="nav-badge"'), "desktop nav renders the Board NEW badge");
+  assert.ok(!r.body.includes('class="meta site-nav"'), "the old <p class=\"meta site-nav\"> text nav line is gone");
   assert.ok(r.body.includes('class="meta list-nav"'), "filter line is tagged .list-nav");
   assert.ok(r.body.includes('class="meta list-nav"') && r.body.indexOf("Sort:") > -1, "sort line is tagged .list-nav");
   assert.ok(r.body.includes('<div class="label-nav-wrap"'), "label nav keeps its .label-nav-wrap container (QX-043 UQ-006)");
