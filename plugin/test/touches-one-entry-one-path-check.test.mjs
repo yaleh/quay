@@ -38,6 +38,11 @@ import {
   scanTasksOneEntryOnePath,
   readOneEntryBaseline,
   checkTaskOneEntryOnePath,
+  // AC3 directory-level tasks glob HINT (tasks/gap-directory-level-tasks-touch-global-lock): the
+  // 防复发 prompt that flags a `## Touches` directory-level tasks glob (`tasks/*.md`) unless the
+  // author explicitly acknowledges it — a hint, never a hard violation (⛔ 目录级不禁止).
+  flagDirectoryLevelTasksGlobs,
+  scanTasksDirectoryGlobHints,
 } from "../scripts/touches-one-entry-one-path-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -164,6 +169,95 @@ test("判据2b negative — ' + ' in an annotation or a dangling single path is 
   assert.deepEqual(flagMultiPathTouchEntries("- plugin/scripts/a.ts（a + b 说明）"), []);
   assert.deepEqual(flagMultiPathTouchEntries("- plugin/scripts/a.ts + "), []);
   assert.deepEqual(flagMultiPathTouchEntries("- plugin/scripts/a.ts"), []);
+});
+
+// ── AC3 directory-level tasks glob HINT (tasks/gap-directory-level-tasks-touch-global-lock) ─────────
+// A `## Touches` entry declaring a DIRECTORY-LEVEL tasks glob (`tasks/*.md`, `tasks/**`, `tasks/`)
+// expands to every task file and, because C8 forces every task to self-touch its own `tasks/<id>.md`,
+// overlaps every OTHER task's mandatory self-file while its declarer is in flight ⇒ a global dispatch
+// lock (measured: doc-lint 3h40m, occurrence rate 45). This checker FLAGS it (a HINT — NOT a hard
+// violation, ⛔ 目录级不禁止) unless the bullet explicitly acknowledges the global lock（已知全局锁）.
+// Negative controls: single-path entries and targeted file-name globs are never flagged (别误伤正常
+// 单路径条目).
+
+test("AC3 positive — a directory-level tasks/*.md bullet is flagged as a HINT (no acknowledgment)", () => {
+  const section = [
+    "- tasks/*.md（15 个 done 任务的文件）",
+    "- plugin/scripts/x.ts (new)",
+  ].join("\n");
+  const flagged = flagDirectoryLevelTasksGlobs(section);
+  assert.equal(flagged.length, 1, "the directory-level tasks glob must be flagged");
+  assert.equal(flagged[0].path, "tasks/*.md", "flagged path is the directory glob");
+});
+
+test("AC3 positive — tasks/, tasks/**, tasks/* are all directory-level and flagged", () => {
+  const section = [
+    "- tasks/",
+    "- tasks/**",
+    "- tasks/*",
+    "- tasks/**/*.md",
+  ].join("\n");
+  const flagged = flagDirectoryLevelTasksGlobs(section);
+  assert.equal(flagged.length, 4, "all four directory-level forms flagged");
+  const paths = flagged.map((f) => f.path);
+  assert.ok(paths.includes("tasks/"), "trailing-slash dir glob flagged");
+  assert.ok(paths.includes("tasks/**"), "tasks/** flagged");
+  assert.ok(paths.includes("tasks/*"), "tasks/* flagged");
+});
+
+test("AC3 negative — single-path and targeted file-name globs are NOT flagged (别误伤正常单路径条目)", () => {
+  const section = [
+    "- tasks/foo.md",
+    "- tasks/gap-*-cleanup.md",           // targeted file-name glob, not directory-level
+    "- tasks/gap-directory-level-tasks-touch-global-lock.md（自身）",
+    "- plugin/scripts/slot-refill.ts",
+  ].join("\n");
+  assert.deepEqual(flagDirectoryLevelTasksGlobs(section), []);
+});
+
+test("AC3 negative — an explicitly acknowledged directory glob is tolerated (要么枚举要么明确「我知道这是全局锁」)", () => {
+  const section = [
+    "- tasks/*.md（已知全局锁：需要批量标注存量任务文件）",
+    "- tasks/*.md (known global lock: bulk annotate)",
+  ].join("\n");
+  assert.deepEqual(flagDirectoryLevelTasksGlobs(section), []);
+});
+
+test("AC3 scan — a synthetic tasks/*.md declarer yields exactly one HINT; the CLI still exits 0 (hint, not a violation)", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "touches-dirglob-"));
+  try {
+    fs.mkdirSync(path.join(tmp, "tasks"), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmp, "tasks", "synthetic.md"),
+      "---\nid: synthetic\ntitle: synthetic\nstatus: todo\n---\n\n## Touches\n\n- tasks/*.md\n- tasks/synthetic.md（自身）\n",
+    );
+    const hints = scanTasksDirectoryGlobHints(path.join(tmp, "tasks"));
+    assert.equal(hints.length, 1, "one directory-glob hint");
+    assert.equal(hints[0].file, "tasks/synthetic.md");
+    assert.match(hints[0].what, /目录级/, "hint names the directory-level glob");
+    // The CLI reports the hint but STILL EXITS 0 (the multi-path shape rule is the hard gate; this is
+    // a 防复发 prompt, not a ban).
+    const r = spawnSync("node", ["--no-warnings", "--experimental-strip-types", CHECKER, "--root", tmp], { encoding: "utf8" });
+    assert.equal(r.status, 0, `CLI exits 0 on a directory-glob HINT (not a violation):\n${r.stdout}\n${r.stderr}`);
+    assert.match(r.stdout, /TOUCHES-DIR-GLOB-HINT: 1 directory-level tasks\/\*\.md glob/, "CLI reports the directory-glob hint count");
+    assert.match(r.stdout, /0 multi-path bullet/, "multi-path violations stay 0");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("AC3 scan — a synthetic acknowledged directory glob yields zero HINT", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "touches-dirglob-ack-"));
+  try {
+    fs.mkdirSync(path.join(tmp, "tasks"), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmp, "tasks", "synthetic.md"),
+      "---\nid: synthetic\ntitle: synthetic\nstatus: todo\n---\n\n## Touches\n\n- tasks/*.md（已知全局锁）\n- tasks/synthetic.md（自身）\n",
+    );
+    assert.deepEqual(scanTasksDirectoryGlobHints(path.join(tmp, "tasks")), []);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 // ── 判据1 consumer: per-body check with the grandfather baseline ───────────────────────────────────

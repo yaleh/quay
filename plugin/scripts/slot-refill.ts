@@ -121,6 +121,8 @@ import {
   findRepoRoot,
   walkFiles,
   selfTouchCheck,
+  normalizePath,
+  matchGlob,
 } from "./touches-orthogonality-check.ts";
 import {
   assembleBatch,
@@ -439,6 +441,90 @@ export function isBodyLanded(body) {
   return uncheckedItems.length > 0 && uncheckedItems.every(isOuterVerificationItem);
 }
 
+/** IN-FLIGHT DISJOINTNESS with C8 SELF-FILE EXEMPTION
+ *  (tasks/gap-directory-level-tasks-touch-global-lock AC1 option ② — 「目录级 vs self-touch」的相交
+ *  给出不阻塞的语义): the dispatch-overlap judgment between a CANDIDATE and an IN-FLIGHT task. A
+ *  directory-level `tasks/*.md` Touches declaration from the in-flight task expands to EVERY task file
+ *  on disk, and C8 (self-touch, fast-mode-tick-core.md C8) forces every candidate to declare its OWN
+ *  `tasks/<id>.md` — so the in-flight glob overlaps every candidate's MANDATORY self-file ⇒ a GLOBAL
+ *  dispatch lock while the in-flight task runs (measured: doc-lint 3h40m, `git worktree list` shows a
+ *  created worktree with 3h38m zero commits; occurrence rate 45).
+ *
+ *  THE EXEMPTION (option ②, chosen over ① enumerate-concrete at dispatch): a candidate's OWN self-file
+ *  does NOT count as an overlap with an in-flight task WHEN the in-flight side's coverage of that file
+ *  is GLOB-DRIVEN (a directory glob like `tasks/*.md`), NOT a concrete declaration of the candidate's
+ *  file. Any overlap on OTHER files — the candidate's other touches, or a concrete in-flight entry
+ *  naming the candidate's own file — still blocks. Genuine multi-task-file writers stay serialized:
+ *  a candidate declaring `tasks/*.md` is never exempt (its own glob genuinely claims every task file),
+ *  and two `tasks/*.md` declarers still overlap on many files. This makes the pre-dispatch heuristic
+ *  reflect INTENT (a directory glob is an overbroad intent-declaration whose true conflict surface is
+ *  the declarer's ACTUAL landed files, which anti-drift + the fan-in merge enforce at land) instead of
+ *  the C8-forced self-touch.
+ *
+ *  SINGLE-SOURCE: delegates to checkTouchesPair for the base verdict (imported from
+ *  touches-orthogonality-check.ts — no reimplemented disjointness); this function ONLY adds the
+ *  self-file exemption on top. Fail-closed: conservative (no/empty ## Touches) / empty-expansion /
+ *  ambiguous cases return the base verdict UNCHANGED (blocked) — the exemption requires the ACTUAL
+ *  overlap to be EXACTLY one file, the candidate's own self-file, covered only by a wildcard glob.
+ *
+ *  WHY the ACTUAL overlap is recomputed: checkTouchesPair treats a directory glob like `tasks/*.md`
+ *  as OVERBROAD (isOverbroadDeclaration — <2 concrete segments before the first wildcard) and
+ *  short-circuits to `disjoint:false` with `overlaps:[]` WITHOUT computing the real intersection.
+ *  That conservative short-circuit is correct for the batch (two NEW candidates where an overbroad
+ *  glob could absorb a stray write) but it would hide the self-file-only overlap the exemption needs
+ *  to see. So when the base verdict is NOT disjoint, this function recomputes the actual intersection
+ *  with the SAME expander to distinguish "exactly the candidate's own self-file" from a genuine
+ *  conflict — and only the former is relaxed. The genuine conflict arms (a concrete in-flight entry
+ *  naming the candidate's file, any OTHER overlapping file, an overbroad/empty candidate side) all
+ *  return the base blocked verdict unchanged.
+ *
+ *  @param {object} candidateParsed  parseTouches(candidate body) — side A (the candidate)
+ *  @param {object} inFlightParsed   parseTouches(in-flight body) — side B (the in-flight task)
+ *  @param {(globs: string[]) => Set<string>} expand  the injected declared-touches expander
+ *      (expandDeclaredTouches — concrete paths resolve to themselves, wildcards expand against the tree)
+ *  @param {string} selfFileRel      repo-relative candidate self-file, e.g. `tasks/<candidate-id>.md`
+ *  @returns {object} same shape as checkTouchesPair: {disjoint, overlaps, reason}
+ */
+export function checkTouchesPairInFlight(candidateParsed, inFlightParsed, expand, selfFileRel) {
+  const base = checkTouchesPair(candidateParsed, inFlightParsed, expand);
+  if (base.disjoint) return base;
+  if (!selfFileRel) return base;
+  const selfNorm = normalizePath(selfFileRel);
+  // The exemption needs the ACTUAL overlap — checkTouchesPair's overbroad branch (a directory glob
+  // like `tasks/*.md`) returns overlaps:[] even though a real overlap exists. Compute the real
+  // intersection with the SAME expander so the exemption can tell "only the candidate's own self-file"
+  // apart from a genuine conflict. An empty actual overlap (conservative empty-expansion / typo) stays
+  // blocked (fail-closed: nothing is relaxed).
+  const setC = expand(candidateParsed.globs || []);
+  const setI = expand(inFlightParsed.globs || []);
+  const overlaps = [...setC].filter((f) => setI.has(f)).sort();
+  // The exemption applies ONLY when the overlap is exactly the candidate's own self-file — an overlap
+  // on ANY other file (or multiple files) is a genuine conflict and stays blocking.
+  if (overlaps.length !== 1 || overlaps[0] !== selfNorm) return base;
+  // The exemption is GLOB-DRIVEN only: if the in-flight side CONCRETELY declares the candidate's own
+  // file, that is a genuine intent to write it — never exempt (a concrete entry cannot be an
+  // overbroad intent-declaration).
+  const inFlightGlobs = inFlightParsed.globs || [];
+  const concreteInFlight = inFlightGlobs.filter((g) => !/[*?]/.test(g));
+  if (expand(concreteInFlight).has(selfNorm)) return base;
+  // The candidate side must itself declare the self-file CONCRETELY (C8 — a non-wildcard
+  // `tasks/<id>.md` entry; the self-touch gate upstream already requires this) for the exemption to
+  // apply — the overlap is the MANDATORY self-touch, not some other path the candidate shares.
+  const candidateGlobs = candidateParsed.globs || [];
+  if (!candidateGlobs.some((g) => !/[*?]/.test(g) && normalizePath(g) === selfNorm)) return base;
+  // AND the candidate must NOT itself cover its self-file via a wildcard glob — a candidate declaring
+  // `tasks/*.md` is itself a genuine multi-task-file writer (its overlap with an in-flight tasks/*.md
+  // declarer is NOT "only its own self-file", it claims EVERY task file) and never benefits from the
+  // exemption. A normal candidate whose wildcard globs are non-task (e.g. `plugin/scripts/*`) is
+  // unaffected — only a glob that MATCHES the self-file disqualifies.
+  if (candidateGlobs.some((g) => /[*?]/.test(g) && matchGlob(normalizePath(g), selfNorm))) return base;
+  return {
+    disjoint: true,
+    overlaps: [],
+    reason: `disjoint (C8 self-file ${selfNorm} excluded — in-flight covers it only via a directory glob, not a concrete entry)`,
+  };
+}
+
 /** The slot-refill decision. Pure: reads the store, never writes, never dispatches.
  *
  *  REVERSE-DIRECTION DIMENSION (gap-closed-bracket-leaves-live-agent-consuming-slots): a slot is
@@ -664,7 +750,14 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
       if (mergeBlock.blocked) { deferInFlightDc(task, id, `touches-overlap-in-flight (merge-worktree ${mergeBlock.name})`); continue; }
       let blocked = null;
       for (const inf of inFlightParsed) {
-        if (!checkTouchesPair(parsed, inf.touches, expand).disjoint) { blocked = inf.id; break; }
+        // DIRECTORY-GLOB SELF-FILE EXEMPTION (tasks/gap-directory-level-tasks-touch-global-lock AC1):
+        // the candidate's OWN C8 self-file is excluded from the in-flight overlap when the in-flight
+        // side covers it only via a directory glob (e.g. `tasks/*.md`) — a directory-level declaration
+        // must not lock the whole queue while its holder is in flight. Genuine overlaps (candidate's
+        // other touches / concrete in-flight entries naming the candidate's file) still block
+        // (checkTouchesPairInFlight is fail-closed: it delegates to checkTouchesPair and only relaxes
+        // the exact self-file-only-glob-driven case).
+        if (!checkTouchesPairInFlight(parsed, inf.touches, expand, `tasks/${id}.md`).disjoint) { blocked = inf.id; break; }
       }
       if (blocked) { deferInFlightDc(task, id, `touches-overlap-in-flight (peer ${blocked})`); continue; }
       // step-4 check 4: not-yet-flipped — work already landed (fan-in merged / master-landed), don't

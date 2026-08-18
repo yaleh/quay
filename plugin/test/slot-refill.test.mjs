@@ -39,6 +39,11 @@ import {
   readSuiteRed,
   isNotYetFlippedSkip,
   hasFanInMerge,
+  // DIRECTORY-GLOB SELF-FILE EXEMPTION (tasks/gap-directory-level-tasks-touch-global-lock AC1): the
+  // in-flight disjointness judgment that excludes a candidate's OWN C8 self-file when the in-flight
+  // side covers it only via a directory glob (`tasks/*.md`) — the fix that stops a directory-level
+  // Touches declaration from becoming a global dispatch lock.
+  checkTouchesPairInFlight,
   parseSlotStatusOutput,
   // LANDED-IMPLEMENTATION (tasks/gap-slot-refill-recommends-landed-code-complete-tasks): the pure-git
   // "implementation already in the tree" predicate + its shape-aware completion gate.
@@ -69,6 +74,10 @@ import {
 // directly for the AC2 all-5-consumers negative control on the DIR-014 suffixed-heading shape.
 import { applyPromotions, countCompletionCheckboxes } from "../scripts/ready-pool-check.ts";
 import { countAcCheckboxes } from "../scripts/task-status-drift-check.ts";
+// DIRECTORY-GLOB SELF-FILE EXEMPTION (tasks/gap-directory-level-tasks-touch-global-lock AC1): the
+// pure-function unit test needs parseTouches (candidate/in-flight Touches parsing) + expandGlobs (the
+// test expander) — imported from the single-source orthogonality module, never a parallel copy.
+import { parseTouches, expandGlobs } from "../scripts/touches-orthogonality-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -540,6 +549,88 @@ test("ready candidate colliding with an in-flight task is not recommended (concu
   assert.equal(r.slots_free, 2);
   assert.ok(r.recommended.includes("gap-free"), "disjoint-from-in-flight candidate recommended");
   assert.ok(!r.recommended.includes("gap-blocked"), "candidate colliding with in-flight is not recommended");
+});
+
+// ── DIRECTORY-GLOB SELF-FILE EXEMPTION (tasks/gap-directory-level-tasks-touch-global-lock AC1) ─────
+// A `## Touches` entry declaring a DIRECTORY-LEVEL `tasks/*.md` glob expands to EVERY task file, and
+// C8 forces every candidate to self-touch its own `tasks/<id>.md` — so the in-flight glob overlapped
+// every candidate's MANDATORY self-file ⇒ a GLOBAL dispatch lock while the declarer was in flight
+// (measured: doc-lint 3h40m, occurrence rate 45). Fix option ②: the candidate's OWN self-file is
+// excluded from the in-flight overlap when the in-flight side covers it only via a directory glob.
+// The task's AC1 negative test: an in-flight `tasks/*.md` declarer + any other ready task ⇒ must still
+// be dispatchable. Negative controls: a CONCRETE in-flight entry naming the candidate's file, or a
+// candidate declaring `tasks/*.md` itself, still block (genuine multi-task-file writers serialize).
+
+test("DIR-GLOB LOCK FIX (AC1) — an in-flight tasks/*.md declarer no longer locks the queue: normal ready candidates are still recommended (the task's negative test)", (t) => {
+  const root = makeWorkspace("dirglob-fix");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-cand", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/cand.ts (new)"]) });
+  writeTask(root, "gap-peer", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/peer.ts (new)"]) });
+  // The in-flight task declares the directory-level glob (the pre-fix global-lock shape — doc-lint).
+  const inFlight = [inFlightTask("gap-glob", ["- tasks/*.md"])];
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 3, inFlight });
+  assert.equal(r.slots_free, 2, "cap 3 − 1 in-flight = 2");
+  assert.ok(r.recommended.includes("gap-cand"), "a normal candidate is dispatchable despite an in-flight tasks/*.md declarer (self-file excluded)");
+  assert.ok(r.recommended.includes("gap-peer"), "a second normal candidate is dispatchable too");
+  const candDeferred = (r.deferred || []).filter((d) => d.id === "gap-cand");
+  assert.equal(candDeferred.length, 0, "gap-cand is not deferred by the in-flight tasks/*.md glob (option ② non-blocking self-file intersection)");
+});
+
+test("DIR-GLOB LOCK FIX (AC1) — checkTouchesPairInFlight pure: glob-driven self-file overlap ⇒ disjoint; concrete overlap / no selfFileRel ⇒ blocked (fail-closed)", (t) => {
+  const root = makeWorkspace("dirglob-pure");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-cand", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/cand.ts (new)"]) });
+  const cand = parseTouches(fs.readFileSync(path.join(root, "tasks", "gap-cand.md"), "utf8"));
+  const expand = (globs) => expandGlobs(globs, root);
+
+  // (a) in-flight directory glob `tasks/*.md` + candidate self-file ⇒ exempt → disjoint (option ②).
+  const inflightGlob = parseTouches(dispatchableBody(["- tasks/*.md"]));
+  const r1 = checkTouchesPairInFlight(cand, inflightGlob, expand, "tasks/gap-cand.md");
+  assert.equal(r1.disjoint, true, "glob-driven self-file overlap is non-blocking");
+  assert.match(r1.reason, /C8 self-file/, "reason names the C8 self-file exclusion");
+
+  // (b) in-flight CONCRETE declaration of the candidate's own file ⇒ NOT exempt → blocked.
+  const inflightConcrete = parseTouches(dispatchableBody(["- tasks/gap-cand.md"]));
+  const r2 = checkTouchesPairInFlight(cand, inflightConcrete, expand, "tasks/gap-cand.md");
+  assert.equal(r2.disjoint, false, "a concrete in-flight entry naming the candidate's file still blocks");
+
+  // (c) no selfFileRel ⇒ base verdict unchanged (blocked) — fail-closed, never invented.
+  const r3 = checkTouchesPairInFlight(cand, inflightGlob, expand, null);
+  assert.equal(r3.disjoint, false, "no selfFileRel ⇒ no exemption (fail-closed)");
+
+  // (d) conservative side (in-flight no/empty ## Touches) ⇒ base verdict unchanged (blocked).
+  const inflightEmpty = parseTouches(dispatchableBody([]));
+  const r4 = checkTouchesPairInFlight(cand, inflightEmpty, expand, "tasks/gap-cand.md");
+  assert.equal(r4.disjoint, false, "conservative in-flight (no ## Touches) stays blocked");
+});
+
+test("DIR-GLOB LOCK FIX (AC1) — negative: in-flight CONCRETELY declaring the candidate's own task file still blocks (self-file exemption does not mask a concrete entry)", (t) => {
+  const root = makeWorkspace("dirglob-concrete");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-cand", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/cand.ts (new)"]) });
+  writeTask(root, "gap-other", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/other.ts (new)"]) });
+  // In-flight CONCRETELY declares the candidate's own task file.
+  const inFlight = [inFlightTask("gap-in", ["- tasks/gap-cand.md"])];
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 3, inFlight });
+  assert.ok(!r.recommended.includes("gap-cand"), "a concrete in-flight declaration of the candidate's file still blocks");
+  assert.ok(r.recommended.includes("gap-other"), "a disjoint candidate is still recommended");
+  const deferred = (r.deferred || []).filter((d) => d.id === "gap-cand");
+  assert.ok(deferred.length === 1 && /touches-overlap-in-flight/.test(deferred[0].reason),
+    `gap-cand deferred with touches-overlap-in-flight, got: ${JSON.stringify(deferred)}`);
+});
+
+test("DIR-GLOB LOCK FIX (AC1) — negative: a candidate declaring tasks/*.md collides with an in-flight tasks/*.md declarer (two genuine global writers serialize)", (t) => {
+  const root = makeWorkspace("dirglob-neg");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // The candidate itself declares the directory glob — it genuinely claims ALL task files, so it is
+  // NOT exempt from another tasks/*.md in-flight task (the exemption is self-file-only).
+  writeTask(root, "gap-glob-cand", { status: "ready", labels: ["gap"], body: dispatchableBody(["- tasks/*.md"]) });
+  const inFlight = [inFlightTask("gap-glob-in", ["- tasks/*.md"])];
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 3, inFlight });
+  assert.ok(!r.recommended.includes("gap-glob-cand"), "a tasks/*.md candidate is NOT exempt from another tasks/*.md in-flight task");
+  const deferred = (r.deferred || []).filter((d) => d.id === "gap-glob-cand");
+  assert.ok(deferred.length === 1 && /touches-overlap-in-flight/.test(deferred[0].reason),
+    `deferred with touches-overlap-in-flight, got: ${JSON.stringify(deferred)}`);
 });
 
 // ── DEFER ACCOUNTING (gap-over90-clock-measures-queue-time-not-work-time): slot-refill is a PURE
