@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-ff-protocol-check-cross-task-false-positive
 title: "fan-in-ff-protocol-check 跨任务误报——checker 未按 taskId 作用域，4-way 并发 fan-in 下报别任务 ff 违规"
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
