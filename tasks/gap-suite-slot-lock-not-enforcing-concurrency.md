@@ -39,6 +39,7 @@ SSOT 层 2（`gap-suite-concurrency-ff-gate-and-slot-ssot`，done——槽数由
 - plugin/scripts/suite-slot-lib.sh（bash 侧槽实现）
 - scripts/test.sh（full_suite_lock_acquire/release 排他）
 - plugin/scripts/suite-slot-ssot-check.ts（加「并发 suite 数 ≤ S」不变量）
+- plugin/test/suite-slot-ssot-check.test.mjs（I5 行为层排他性单测）
 
 ## Test-Files
 
