@@ -1,7 +1,8 @@
 ---
 id: gap-fix-scope-gate-release-not-persistent
-title: "fix-scope gate 的 load-sensitive release 是一次性 relaunch 非持久——relaunch 后仍红，第二轮 suite-fix 越界修（第 9+ 例）"
-status: todo
+title: fix-scope gate 的 load-sensitive release 是一次性 relaunch 非持久——relaunch
+  后仍红，第二轮 suite-fix 越界修（第 9+ 例）
+status: ready
 labels:
   - gap
   - mechanism
