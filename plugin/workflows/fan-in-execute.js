@@ -88,6 +88,11 @@ export const meta = {
 //     正常 fan-in（无 fix commit 或 fix 全在 Touches 内）重跑幂等（AC2）。改本块必须同步
 //     plugin/test/fan-in-execute-paths.test.mjs 的 land-anti-drift 组测试（fix commit 越界触碰 HARD FAIL
 //     幂等回归 + 真实 bash）。
+//  ⑨ fix-scope gate（gap-fix-scope-gate-wired-to-wrong-path）：suite-fix 内联 subagent（本文件）的
+//     fix 前判定——红是否本任务 Touches 内回归（inScope 修 / load-sensitive 释放 / 别任务 bug defer）。
+//     上一版 gate 落在 execute-suite-fix.js（standalone 死工作流）零效果。实现见下方 FIX_SCOPE_GATE
+//     常量（判定复用 touches-orthogonality-check.ts + known-load-sensitive.ts）。改本块必须同步
+//     plugin/test/fan-in-execute-paths.test.mjs 的 fix-scope 组测试（内联 prompt 含 gate + 越界红 defer）。
 
 // args 到达时是【字符串】不是对象（实测 wf_6f8cc053-f52）：直接 args.x 会静默 undefined。
 const A = (() => { try { return typeof args === 'string' ? JSON.parse(args) : (args ?? {}) } catch { return {} } })()
@@ -124,6 +129,58 @@ printf 'full_suite_ran=true\\nskip_reason=\\nstart_iso=%s\\nstart_ms=%s\\nsuite_
 setsid bash -c 'cd "$1" && { if command -v /usr/bin/time >/dev/null 2>&1; then /usr/bin/time -o "$2" -f "%U %S" bash scripts/test.sh; else bash scripts/test.sh; fi; } > "$3" 2>&1; rc=$?; printf "exit=%s\\nend_ms=%s\\nend_iso=%s\\n" "$rc" "$(date +%s%3N)" "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)" > "$4"' _ "${worktree}" "$suite_time_file" "$suite_log_file" "$suite_exit_marker" & disown
 suite_pid=$!
 printf 'suite_pid=%s\\n' "$suite_pid" >> "$suite_capture"`
+
+// ── fix-scope gate（fix 前判定红是否本任务 Touches 内回归，gap-fix-scope-gate-wired-to-wrong-path）──
+// 上一版 fix-scope gate（gap-suite-fix-workflow-no-load-sensitive-branch）落在 execute-suite-fix.js
+// （standalone 死工作流）零效果——生产 suite-fix 是本文件内联 subagent（:391 prompt），它直接修根因、
+// 不经 execute-suite-fix.js。越界修已复发第 8+ 例（b0aa31c2 修 quay-init.sh / eb77b17e 修
+// supervisor-observe.test.mjs / 43153e58 修 session-liveness-helpers.mjs——全不在各自任务 Touches）。
+// 本 gate 把判定落到内联 prompt：fix 前把 suite 日志里 __PERFILE__ passed=false 的失败文件机械分诊为
+// inScope（本任务 Touches 内回归，修）vs outOfScope（越界红，defer/release）：load-sensitive
+// （known-load-sensitive.ts 的 in_family）⇒ 释放不修；file ∉ ## Touches ⇒ 别任务 bug defer 不修；
+// 无 file（tmux-leak 环境残留 / 静态检查）⇒ defer 不修。无法评估（task 文件/日志读失败）⇒
+// fail-closed：不修，全部 defer（硬规则 3b）。判定复用 touches-orthogonality-check.ts 的
+// parseTouches/matchGlob/normalizePath（与 execute-suite-fix.js 同源）。改本块必须同步
+// plugin/test/fan-in-execute-paths.test.mjs 的 fix-scope 组测试。
+const FIX_SCOPE_GATE = `【fix-scope gate —— 修任何失败前必须先跑，得到 FIX_SCOPE_VERDICT 再动手修】
+# fix-scope-gate-block-start
+fix_scope_log="/tmp/fan-in-suite-${task}.log"
+fix_scope_touches="${worktree}/tasks/${task}.md"
+fix_scope_out=$(node --no-warnings --experimental-strip-types --input-type=module -e 'import fs from "node:fs";
+import { parseTouches, matchGlob, normalizePath } from "${worktree}/plugin/scripts/touches-orthogonality-check.ts";
+import { scanFamily, kindForFile } from "${worktree}/plugin/scripts/known-load-sensitive.ts";
+const taskFile = process.argv[1]; const wt = process.argv[2]; const logFile = process.argv[3];
+let globs = null;
+try { const tb = fs.readFileSync(taskFile, "utf8"); const p = parseTouches(tb); if (p.hasSection) globs = p.globs; } catch (e) { globs = null; }
+const family = scanFamily(wt);
+let logText = ""; try { logText = fs.readFileSync(logFile, "utf8"); } catch (e) { logText = ""; }
+const inScope = []; const outOfScope = []; const seen = new Set();
+const re = /^__PERFILE__ duration_ms=[0-9.]+ (.+) passed=false$/gm;
+let m;
+while ((m = re.exec(logText)) !== null) {
+  let rel = m[1];
+  if (rel.startsWith(wt + "/")) rel = rel.slice(wt.length + 1);
+  rel = normalizePath(rel);
+  if (seen.has(rel)) continue;
+  seen.add(rel);
+  const kind = kindForFile(family, rel);
+  if (kind !== undefined) { outOfScope.push({ file: rel, reason: "load-sensitive", kind }); continue; }
+  if (globs === null) { inScope.push(rel); continue; }
+  if (globs.some((g) => matchGlob(normalizePath(g), rel))) inScope.push(rel); else outOfScope.push({ file: rel, reason: "other-task" });
+}
+if (/tmux-leak-scan: FAIL/.test(logText)) outOfScope.push({ file: null, reason: "leak-residual" });
+if (inScope.length === 0 && outOfScope.length === 0 && /run_static_checks|static-check/i.test(logText)) outOfScope.push({ file: null, reason: "checker-misreport" });
+process.stdout.write(JSON.stringify({ scoped: globs !== null, inScope, outOfScope }));' "$fix_scope_touches" "${worktree}" "$fix_scope_log" 2>&1) || { echo "FIX_SCOPE_NOT_EVALUATED=1"; fix_scope_out=""; }
+echo "FIX_SCOPE_VERDICT=$fix_scope_out"
+# fix-scope-gate-block-end
+判定（读上面的 FIX_SCOPE_VERDICT JSON）：
+- inScope 里的失败 = 本任务 Touches 内的回归 ⇒ 只修这些文件；禁止触碰 outOfScope 里列出的任何文件。
+- outOfScope 里的失败 = 越界红，一律不修：
+    * reason=load-sensitive（in_family，kind 已标注）⇒ 释放：不修，note 里写「load-sensitive 释放，隔离重跑确认」。
+    * reason=checker-misreport ⇒ defer：不修，note 里要求 defer 独立任务。
+    * reason=other-task / leak-residual ⇒ 别任务 bug / 环境残留：不修，note 里要求 defer 独立任务。
+- FIX_SCOPE_NOT_EVALUATED=1 ⇒ fail-closed：本任务不修任何失败，全部 defer（无法评估 ≠ 合格）。
+修完 inScope 后照常重新启动全量 suite。返回的 failuresFixed 只列 inScope 修复；越界 defer/release 写进 note。`
 
 // ── 脚本控制流的 suite 等待：不把等待决策交给任何 agent（ab380c5e / execute-suite-fix.js）──────
 // 轮询 agent 只读 exit marker；命中则补全 capture 的 post 字段。等待间隔由脚本 setTimeout 决定。
@@ -388,18 +445,19 @@ codeDelta = step 2 记下的 code_delta。worktreeHead = 当前 worktree HEAD（
     }
     fixRounds++
     const fix = await agent(
-      `你是 fan-in 执行 subagent（suite-fix 阶段）。任务 ${task} 的全量 suite 上一轮退出码 ${suiteExit}（RED）——你读失败日志、修根因、以 detached 方式重新启动 suite，然后【立即返回】（等待由 workflow 脚本控制流承担，不在你本回合内等）。
+      `你是 fan-in 执行 subagent（suite-fix 阶段）。任务 ${task} 的全量 suite 上一轮退出码 ${suiteExit}（RED）——你读失败日志、按 fix-scope gate 判红是否本任务 Touches 内回归，修根因、以 detached 方式重新启动 suite，然后【立即返回】（等待由 workflow 脚本控制流承担，不在你本回合内等）。
 执行上下文：
 - 任务 worktree（你的工作目录）：${worktree}
 - suite 日志：/tmp/fan-in-suite-${task}.log
 - 上一轮 exit：${suiteExit}
+${FIX_SCOPE_GATE}
 任务：
-1. 读 /tmp/fan-in-suite-${task}.log 的【全部】失败行，诊断每条根因（不要只看第一条）。
-2. 在 ${worktree} 修复所有根因并 git add + git commit（真实修复，不是删测试/改判据绕过）。
+1. 读 /tmp/fan-in-suite-${task}.log 的【全部】失败行（__PERFILE__ passed=false 行 + spec 失败摘要），先跑上面的 fix-scope gate 得到 FIX_SCOPE_VERDICT。
+2. 按 fix-scope gate verdict：只修 inScope 里的失败（本任务 Touches 内回归），在 ${worktree} 里 git add + git commit（真实修复，不是删测试/改判据绕过）；outOfScope 的越界红一律不修（load-sensitive 释放 / checker 误报与别任务 bug defer 独立任务）。
 3. 重新启动全量 suite（detached）：${SUITE_LAUNCH}
    ⛔ 禁止 Bash(run_in_background:true)（subagent 退出被连带杀）；⛔ 禁止前台 bash scripts/test.sh。
    启动后短促确认（~3s）exit marker 未立刻出现，然后返回。
-4. 返回 { relaunched: bool, worktreeHead, failuresFixed: string[], note }。
+4. 返回 { relaunched: bool, worktreeHead, failuresFixed: string[], note }。failuresFixed 只列 inScope 修复；越界 defer/release 写进 note。
 不要做任何等待决策——等待由 workflow 脚本控制。`,
       {
         schema: {
