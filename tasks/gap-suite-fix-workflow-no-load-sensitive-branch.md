@@ -1,7 +1,7 @@
 ---
 id: gap-suite-fix-workflow-no-load-sensitive-branch
 title: "suite-fix workflow 缺 fix-scope gate——红即「修」不分「本任务 Touches 内回归」vs「越界红」，越界 fix 第 4 次"
-status: ready
+status: done
 labels:
   - gap
   - mechanism
