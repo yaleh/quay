@@ -1071,7 +1071,7 @@ git -C "$REPO_ROOT" worktree add $WORKTREE_ROOT/<slug> -b task/<id> "$FORK_BASEL
 任务代理提交前编辑 `tasks/<id>.md`（它自己的任务文件，Touches 已授权）：**勾 AC 复选框**（它实现了、
 自己跑过 scoped 测试，有全部事实）+ **贴 invoke 实跑证据**（自己 scoped 测试的输出）。**仍 SCOPED ONLY**
 （不跑全量 suite——全量判据归外层 verification-round-N，见步骤 2 词汇规范）；**翻 done 由 inner 在自有 per-task 绿证后执行**（(a2)——worktree 内改 status，fan-in merge 带进 develop）；
-**不勾 DoD 行**（DoD 全量绿在 SCOPED ONLY 下任务内不可知，是唯一真时序依赖）。
+**DoD 勾选按时机分离**（gap-dispatch-brief-dod-check-timing）：**impl 勾 impl-time 可判的 DoD 项**（如 scoped 绿）；**fan-in-time 项**（全量绿 / 行为性后果）**不勾、留 fan-in**，且行尾标注「（待外部）」（fan-in-ac-completion-gate 只认该标注放行）。**不是「全不勾」**——「全不勾」会让 fan-in 的 AC 完成闸把每个任务都拒翻。
 **写所有权分离（AC3）**：只允许**追加正文段**（AC 勾选 / Evidence / 记录）——**绝不写/改 frontmatter**
 （`status:` 由 inner 在 worktree 内翻，(a2)）。证据追加用 body-only 语义（`task-schema.ts` `appendBodySection`：
 frontmatter 字节不变，只动正文；无 frontmatter 时 fail-closed），**禁止整体覆盖任务文件**
