@@ -1,7 +1,7 @@
 ---
 id: gap-quay-init-verify-referenced-landed-torn-read
 title: quay-init.sh verify_referenced_landed() 完整性哨兵 torn read——只钉 2 条 always-present 行，丢后面声明 ⇒ declared ref 被 false-positive 成 not-declared ⇒ worktree-root-fs-check AC4 30s 超时（directory-lock fan-in 实证）
-status: done
+status: ready
 labels:
   - gap
   - defect
