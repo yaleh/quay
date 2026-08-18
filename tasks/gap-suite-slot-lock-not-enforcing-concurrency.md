@@ -1,7 +1,7 @@
 ---
 id: gap-suite-slot-lock-not-enforcing-concurrency
 title: "S=2 槽机制未生效——4 个 suite 并发跑（应限 2），full-suite.lock.0/.1 被同一组进程同时持有（排他性失效）"
-status: done
+status: ready
 labels:
   - gap
   - mechanism
