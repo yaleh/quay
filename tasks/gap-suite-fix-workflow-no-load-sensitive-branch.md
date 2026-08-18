@@ -1,7 +1,7 @@
 ---
 id: gap-suite-fix-workflow-no-load-sensitive-branch
 title: "suite-fix workflow 缺 KNOWN-LOAD-SENSITIVE 分支——机械分诊已做（done）却未接进 fix-vs-release 决策，红即「修」导致越界 fix 第 3 次"
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
