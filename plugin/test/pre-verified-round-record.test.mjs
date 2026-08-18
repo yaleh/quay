@@ -33,6 +33,7 @@ import {
   buildPreVerifiedRoundRecord,
   appendPreVerifiedRound,
   parseSuitePhases,
+  detectPhaseOverlap,
   hostParallelism,
   concurrentSuiteSlots,
   countHeldSuiteLocks,
@@ -297,6 +298,34 @@ test("AC1 — parseSuitePhases returns {} for a missing or unreadable log (never
   assert.deepEqual(parseSuitePhases(undefined), {}, "no log path → no phases");
   assert.deepEqual(parseSuitePhases(""), {}, "empty log path → no phases");
   assert.deepEqual(parseSuitePhases("/nonexistent/pvr-suite.log"), {}, "unreadable log → no phases");
+});
+
+// ── gap-phase-overlap-field-always-false-negative: phase_overlap on the fan-in landing path ────────
+
+test("detectPhaseOverlap — the `overlap: running` marker → true; a readable log WITHOUT it → false; absent/unreadable log → null (n/a, never fabricated)", () => {
+  const overlapLog = writeSuiteLog(null, ["overlap: running 5 serial + 8 lowconc files in parallel (serial conc=2, lowconc conc=3)"]);
+  assert.equal(detectPhaseOverlap(overlapLog), true, "marker present → overlap ran");
+  const seqLog = writeSuiteLog(null, ["selected 3 files (groups=serial)", "__GROUP__ concurrency=2 files=3 sum_ms=100"]);
+  assert.equal(detectPhaseOverlap(seqLog), false, "readable log, no marker → sequential");
+  assert.equal(detectPhaseOverlap(undefined), null, "no log path → n/a (cannot determine)");
+  assert.equal(detectPhaseOverlap(""), null, "empty log path → n/a");
+  assert.equal(detectPhaseOverlap("/nonexistent/pvr-missing.log"), null, "unreadable log → n/a");
+});
+
+test("gap-phase-overlap-field-always-false-negative — the record ALWAYS carries phase_overlap: true (overlap log), false (sequential log), null (no log)", () => {
+  const overlapLog = writeSuiteLog(null, ["overlap: running 5 serial + 8 lowconc files in parallel", "__OVERHEAD__ serial_phase_ms=301000", "__OVERHEAD__ main_phase_ms=512000"]);
+  const overlapRec = buildPreVerifiedRoundRecord({ ...BASE, preverified: "0", suiteLog: overlapLog, root: REPO_ROOT }).record;
+  assert.equal(overlapRec.phase_overlap, true, "overlap marker → phase_overlap:true (the DoD's real fan-in round)");
+
+  const seqLog = writeSuiteLog(null, ["selected 3 files (groups=serial)", "__OVERHEAD__ serial_phase_ms=301000"]);
+  const seqRec = buildPreVerifiedRoundRecord({ ...BASE, preverified: "0", suiteLog: seqLog, root: REPO_ROOT }).record;
+  assert.equal(seqRec.phase_overlap, false, "sequential log → phase_overlap:false (field present, distinguishes baseline)");
+
+  const noLogRec = buildPreVerifiedRoundRecord({ ...BASE, preverified: "1", root: REPO_ROOT }).record;
+  assert.equal(noLogRec.phase_overlap, null, "no log → phase_overlap:null (field present, value n/a)");
+
+  const unreadableRec = buildPreVerifiedRoundRecord({ ...BASE, preverified: "0", suiteLog: "/nonexistent/pvr-missing.log", root: REPO_ROOT }).record;
+  assert.equal(unreadableRec.phase_overlap, null, "unreadable log → phase_overlap:null");
 });
 
 test("AC1 — a REAL-suite record (preverified:0) with a suite log carries serial/main/static phase ms + nproc/concurrentSuiteSlots/concurrentSuitesRunning (same 口径 as full-suite-runner)", () => {

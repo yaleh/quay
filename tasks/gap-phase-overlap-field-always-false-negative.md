@@ -42,13 +42,15 @@ extra:
 
 ## Definition of Done
 
-- [ ] phase_overlap 字段对真实 fan-in 轮正确写入（不再恒假），overlap 轮与 baseline 轮可区分，scoped + 全量绿。
+- [x] phase_overlap 字段对真实 fan-in 轮正确写入（不再恒假），overlap 轮与 baseline 轮可区分，scoped + 全量绿。
 
 ## Touches
 
 - scripts/test.sh（PHASE_OVERLAP 显式 export，runner 子进程可见）
 - plugin/scripts/full-suite-runner.ts（若走修法②则改为自判；否则仅确认读点）
 - plugin/test/full-suite-runner.test.mjs（phase_overlap 写入测试）
+- plugin/scripts/pre-verified-round-record.ts（补 phase_overlap 字段——fan-in 入账路径两分支，pre-verified 复用 + real-suite 直跑）
+- plugin/test/pre-verified-round-record.test.mjs（detectPhaseOverlap + 记录 phase_overlap 字段测试）
 - plugin/test/（fan-in 真实轮 phase_overlap 断言）
 - tasks/gap-phase-overlap-field-always-false-negative.md（自身）
 
@@ -66,24 +68,38 @@ extra:
 「PHASE_OVERLAP=1 且 serial+lowconc 均非空」时才发出的真值标记（`:1584-1587`），反映的是**实际调度**而非 env 意图——
 AC1 的「field 与真实 overlap 状态一致」语义。
 
-**scoped 测试**（`bash scripts/test.sh --for-task gap-phase-overlap-field-always-false-negative --allow-thin`，thin=0.40 因 Touches 含 3 个非测试文件项，属预期）：
+**scoped 测试**（`bash scripts/test.sh --for-task gap-phase-overlap-field-always-false-negative --allow-thin`，补修后 Touches 增到 7 项、4/7 命中测试文件）：
 ```
-ℹ tests 150
-ℹ pass 150
+ℹ tests 172
+ℹ pass 172
 ℹ fail 0
 ℹ skipped 0
-ℹ duration_ms 112581.419334
+ℹ duration_ms 98771.979974
 EXIT=0
 ```
-关键断言（真实 runner 二进制 spawn，写真实 verification-round.jsonl 再读回）：
+关键断言（full-suite-runner.test.mjs，真实 runner 二进制 spawn，写真实 verification-round.jsonl 再读回）：
 ```
 ✔ AC2 — PHASE_OVERLAP round: the overlap window closes at the second done-marker and MAIN is NOT swallowed into serial (932ms)
    — 该测试已去掉 env QUAY_PHASE_OVERLAP，仅凭流标记 `overlap: running` 断言 rec.phase_overlap === true（生产恒假阴性形态）
 ✔ gap-phase-overlap-field-always-false-negative — a SEQUENTIAL round does NOT flag phase_overlap even when QUAY_PHASE_OVERLAP=1 is in the runner env (790ms)
    — 新增反向对照：env=1 但流是顺序路径 ⇒ field 缺省（证明 field 反映实际、不读 env）
 ```
+关键断言（pre-verified-round-record.test.mjs，真实 writer 函数 + CLI spawn）：
+```
+✔ detectPhaseOverlap — the `overlap: running` marker → true; a readable log WITHOUT it → false; absent/unreadable log → null (n/a, never fabricated)
+✔ gap-phase-overlap-field-always-false-negative — the record ALWAYS carries phase_overlap: true (overlap log), false (sequential log), null (no log)
+```
 
 **AC 映射**：AC1 = overlap 轮不带 env 也写 `phase_overlap:true`（改后的 AC2 测试，去掉 env）；AC2 = 顺序轮带 env=1 仍不写（新增对照测试）；
 AC3 = 上述两条构成 overlap-vs-sequential 对照实测（都经真实 runner 二进制 + 真实 round record）。「真实 fan-in 轮」的首个生产
 `phase_overlap:true` 记录由外层全量 suite 在 fan-in 时自然产生（full-suite-runner 是唯一写 verification-round 的入口，fan-in 不重复写）；
-本 inner 任务 scoped-only 无法产出真实 fan-in 轮，该确认属 fan-in 步骤。AC4 = scoped 150/150 绿 + 静态检查全 PASS。
+本 inner 任务 scoped-only 无法产出真实 fan-in 轮，该确认属 fan-in 步骤。AC4 = scoped 172/172 绿 + 静态检查全 PASS。
+
+**外层裁定补修 — pre-verified 路径**（fan-in 入账路径也写 `phase_overlap`，否则 DoD「真实 fan-in 轮正确写入」缺该路径）：
+fan-in-execute.js 的 verification-round 入账走 `plugin/scripts/pre-verified-round-record.ts`（step 4.5 preverified-round-block，共用判定
+`full_suite_ran=true`：pre-verified 复用分支 + real-suite 直跑分支），不经 full-suite-runner.ts。该 writer 原先不写 `phase_overlap`。
+补修：新增 `detectPhaseOverlap(suiteLog)`——从 `--suite-log`（fan-in suite 日志，test.sh stdout+stderr 合并）扫 `overlap: running`
+流标记（与 full-suite-runner 的 `phaseOverlapRan` latch 同一正则 `/^overlap:\s+running/`）；`record.phase_overlap` 恒写入，
+三态：`true` = 标记存在（overlap 真跑了）；`false` = 日志可读但无标记（顺序轮）；`null` = 日志缺失/不可读（n/a，判不出，不伪造布尔）。
+与 full-suite-runner 的 absent-field 契约不同——本 writer 字段**恒存在**（外层裁定「字段必须存在、不得缺失」），
+overlap 轮与 baseline 轮以 `true` vs `false` 区分。

@@ -38,6 +38,10 @@
 //                  distinguishes a reused-capture round from a full-suite-runner row AND from a real
 //                  detached run)
 //   taskId/runId = which fan-in produced this round (traceability; tolerated by every reader)
+//   phase_overlap = whether the two-phase-overlap scheduling ACTUALLY ran, derived from the suite
+//                  log's `overlap: running` marker (gap-phase-overlap-field-always-false-negative).
+//                  ALWAYS present: true = overlap ran; false = log readable + marker absent
+//                  (sequential); null = log absent/unreadable (n/a, never fabricated).
 //
 // pass/fail/cancelled/tests are OMITTED — the fan-in capture carries no test counts (the suite ran
 // outside full-suite-runner). A green round has fail=0/cancelled=0, but the pass count is genuinely
@@ -155,6 +159,31 @@ export function parseSuitePhases(suiteLog) {
     if (m) phaseMs[m[1]] = Number(m[2]);
   }
   return phaseMs;
+}
+
+// gap-phase-overlap-field-always-false-negative — the same `overlap: running` marker full-suite-runner
+// latches as phaseOverlapRan (phaseMarkerOverlap = /^overlap:\s+running/). test.sh emits it ONLY when
+// PHASE_OVERLAP=1 AND both serial+lowconc are non-empty (the parallel branch ACTUALLY ran) — the
+// ground-truth signal, not the env intent.
+const OVERLAP_RUNNING_RE = /^overlap:\s+running/;
+
+/** Whether the suite log records that the two-phase-overlap scheduling ACTUALLY ran. Tri-state (hard
+ *  rule 3b — 判不出 is a distinct value, never conflated with a boolean): true = the log carries the
+ *  `overlap: running` marker (overlap ran); false = the log is readable and does NOT carry it
+ *  (sequential); null = the log is absent/unreadable (n/a — the field is present but the value is
+ *  honestly unknown, never fabricated). Mirrors full-suite-runner's phaseOverlapRan latch. */
+export function detectPhaseOverlap(suiteLog) {
+  if (!suiteLog) return null;
+  let text;
+  try {
+    text = fs.readFileSync(suiteLog, "utf8");
+  } catch {
+    return null;
+  }
+  for (const line of text.split("\n")) {
+    if (OVERLAP_RUNNING_RE.test(line)) return true;
+  }
+  return false;
 }
 
 /** Host parallelism (nproc) — the same read-host expression as full-suite-runner.hostParallelism
@@ -311,6 +340,13 @@ export function buildPreVerifiedRoundRecord(o) {
   if (phaseMs.serial_phase !== undefined) record.serial_phase_ms = phaseMs.serial_phase;
   if (phaseMs.lowconc_phase !== undefined) record.lowconc_phase_ms = phaseMs.lowconc_phase;
   if (phaseMs.main_phase !== undefined) record.main_phase_ms = phaseMs.main_phase;
+  // gap-phase-overlap-field-always-false-negative — the fan-in landing path (this writer) must ALSO
+  // carry phase_overlap (the DoD's "真实 fan-in 轮正确写入"): derive from the suite log's
+  // `overlap: running` marker, mirroring full-suite-runner's phaseOverlapRan latch. Unlike
+  // full-suite-runner (absent-field on a sequential round), this writer makes the field ALWAYS
+  // present so a reader can distinguish the three cases — true = overlap ran; false = log readable +
+  // marker absent (sequential); null = log absent/unreadable (n/a, never a fabricated boolean).
+  record.phase_overlap = detectPhaseOverlap(suiteLog);
   // Concurrency variables (AC1): nproc + slots are deterministic reads; concurrentSuitesRunning =
   // 1 (this round's own slot) + currently-held OTHER-suite slots at WRITE time, capped at the slot
   // count — the same formula + clamp as full-suite-runner's round-start capture (:2591-2596). The
