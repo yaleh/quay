@@ -39,20 +39,20 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: verification-round 的 `durationMs` 不再系统性虚高——真跑 suite 的墙钟（marker mtime − start 或 log birth→mtime）与记录一致（±轮询间隔内），round 232 那种 +65s 消失。
-- [ ] AC2: pre-verified 与真跑两分支的 durationMs 语义一致（都不含轮询发现延迟）。
-- [ ] AC3: 对照实测：一次真跑 fan-in → 记录 durationMs ≈ 真墙钟。
-- [ ] AC4: 测试全绿 + `--for-task` scoped 门绿。
+- [x] AC1: verification-round 的 `durationMs` 不再系统性虚高——真跑 suite 的墙钟（marker mtime − start 或 log birth→mtime）与记录一致（±轮询间隔内），round 232 那种 +65s 消失。
+- [x] AC2: pre-verified 与真跑两分支的 durationMs 语义一致（都不含轮询发现延迟）。
+- [x] AC3: 对照实测：一次真跑 fan-in → 记录 durationMs ≈ 真墙钟。
+- [x] AC4: 测试全绿 + `--for-task` scoped 门绿。
 
 ## Definition of Done
 
-- [ ] wall_ms 取 suite 真结束时刻（marker mtime 或 detached 写入 end_ms），verification-round durationMs 不再被轮询粒度抬高，AC101 判定用真实读数，scoped + 全量绿。
+- [x] wall_ms 取 suite 真结束时刻（marker mtime 或 detached 写入 end_ms），verification-round durationMs 不再被轮询粒度抬高，AC101 判定用真实读数，scoped + 全量绿。
 
 ## Touches
 
-- plugin/workflows/fan-in-execute.js（poll 段 end_ms 取 marker mtime / detached 写入 end_ms；双拷贝）
+- plugin/workflows/fan-in-execute.js（detached 启动段在 suite 退出时刻写 end_ms/end_iso 进 exit marker；poll 段 end_ms 只读 marker 不重算；双拷贝）
 - .claude/workflows/fan-in-execute.js（同 dual-copy 的 landed 副本，与 plugin/workflows 逐字节一致）
-- plugin/scripts/per-task-suite-record.ts（若 durationMs 语义需同步）
-- plugin/scripts/pre-verified-round-record.ts（若 durationMs 语义需同步）
-- plugin/test/fan-in-execute-paths.test.mjs（durationMs 真墙钟一致性测试）
+- plugin/test/fan-in-execute-paths.test.mjs（durationMs 真墙钟一致性测试 ×2 + 旧 marker 断言随启动块改写同步）
 - tasks/gap-fan-in-suite-duration-poll-granularity-inflation.md（自身）
+
+> 说明：`plugin/scripts/per-task-suite-record.ts` / `plugin/scripts/pre-verified-round-record.ts` 经核实**无需改动**——它们只消费 fan-in 传入的 `--duration-ms`/`--started-at`/`--finished-at`（capture 的 `wall_ms`/`end_iso`），不自行计算时长；语义修复全部落在 fan-in-execute.js 的 poll 段，两 writer 收到的 `wall_ms` 即为真墙钟。

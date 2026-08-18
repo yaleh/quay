@@ -121,7 +121,7 @@ suite_head_now=$(git rev-parse HEAD 2>/dev/null || echo unknown)
 printf 'full_suite_ran=true\\nskip_reason=\\nstart_iso=%s\\nstart_ms=%s\\nsuite_head=%s\\n' \\
   "$suite_start_iso" "$suite_start_ms" "$suite_head_now" > "$suite_capture"
 # GNU time 捕获 CPU（判据3 的 cpu_time_s）；GNU time 不可用 ⇒ 保持 null + not-wired（AC6，绝不写 0）。
-setsid bash -c 'cd "$1" && { if command -v /usr/bin/time >/dev/null 2>&1; then /usr/bin/time -o "$2" -f "%U %S" bash scripts/test.sh; else bash scripts/test.sh; fi; } > "$3" 2>&1; echo "exit=$?" > "$4"' _ "${worktree}" "$suite_time_file" "$suite_log_file" "$suite_exit_marker" & disown
+setsid bash -c 'cd "$1" && { if command -v /usr/bin/time >/dev/null 2>&1; then /usr/bin/time -o "$2" -f "%U %S" bash scripts/test.sh; else bash scripts/test.sh; fi; } > "$3" 2>&1; rc=$?; printf "exit=%s\\nend_ms=%s\\nend_iso=%s\\n" "$rc" "$(date +%s%3N)" "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)" > "$4"' _ "${worktree}" "$suite_time_file" "$suite_log_file" "$suite_exit_marker" & disown
 suite_pid=$!
 printf 'suite_pid=%s\\n' "$suite_pid" >> "$suite_capture"`
 
@@ -140,8 +140,13 @@ fi
 . "$suite_capture"
 suite_exit=$(sed -n 's/^exit=//p' "$suite_exit_marker" | tail -1)
 [ -n "$suite_exit" ] || suite_exit=1
-end_iso=$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)
-end_ms=$(date +%s%3N)
+# 真实结束时刻由 detached suite 在退出时刻写入 marker（gap-fan-in-suite-duration-poll-
+# granularity-inflation）：poll 只读不重算 ⇒ wall_ms 不再含轮询发现延迟（round232 +65.1s 虚高）。
+# 旧格式 marker 无 end_ms/end_iso ⇒ fallback 到 poll-discovery 时刻（backward compat，不报错）。
+marker_end_ms=$(sed -n 's/^end_ms=//p' "$suite_exit_marker" | tail -1)
+marker_end_iso=$(sed -n 's/^end_iso=//p' "$suite_exit_marker" | tail -1)
+end_ms=\${marker_end_ms:-$(date +%s%3N)}
+end_iso=\${marker_end_iso:-$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)}
 wall_ms=$(( end_ms - \${start_ms:-0} ))
 load=$(cut -d' ' -f1 /proc/loadavg 2>/dev/null || echo 0)
 lane_count=1
