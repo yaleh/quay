@@ -214,12 +214,20 @@ if [ -f "${suite_capture}" ]; then
   # shellcheck disable=SC1090
   . "${suite_capture}"
   suite_tip="$(git -C "${root}" rev-parse "refs/heads/task/${task_id}" 2>/dev/null || true)"
-  if [ "${suite_exit:-}" = "0" ] && [ -n "${suite_head:-}" ] && [ -n "${suite_tip}" ] && [ "${suite_head}" = "${suite_tip}" ]; then
+  # Certificate semantics (fixed 2026-08-18, gap-suite-concurrency-ff-gate-and-slot-ssot self-test):
+  # the suite runs on the branch tip at suite time (suite_head); the fan-in's 持锁段 flip step THEN
+  # commits the task-file status flip (ready→done) on top, pushing the tip past suite_head. So the
+  # gate must accept suite_head as an ANCESTOR of the tip, with the suite_head..tip diff restricted
+  # to the task file (doc-only flip). Any code change between the certified suite and the ff target
+  # still fails closed — the certificate pins the code, not the branch tip.
+  if [ "${suite_exit:-}" = "0" ] && [ -n "${suite_head:-}" ] && [ -n "${suite_tip}" ] \
+     && git -C "${root}" merge-base --is-ancestor "${suite_head}" "${suite_tip}" 2>/dev/null \
+     && [ -z "$(git -C "${root}" diff --name-only "${suite_head}" "${suite_tip}" 2>/dev/null | grep -v "^tasks/${task_id}\.md$")" ]; then
     suite_cert_ok=1
   fi
 fi
 if [ "${suite_cert_ok}" != "1" ]; then
-  echo "fan-in-ff-merge: 本任务 ${task_id} 的 suite 证书未满足 — capture=${suite_capture} exists=$([ -f "${suite_capture}" ] && echo yes || echo no) suite_exit=${suite_exit:-<unset>} suite_head=${suite_head:-<unset>} 待 ff tip=${suite_tip:-<unresolvable>}; ff 必须钉住产出本任务绿色证书的那次 suite (AC1 收窄: 读本任务 capture, 不读全局 suite 锁)。NOT acquiring the merge lock" >&2
+  echo "fan-in-ff-merge: 本任务 ${task_id} 的 suite 证书未满足 — capture=${suite_capture} exists=$([ -f "${suite_capture}" ] && echo yes || echo no) suite_exit=${suite_exit:-<unset>} suite_head=${suite_head:-<unset>} 待 ff tip=${suite_tip:-<unresolvable>}; 证书要求 suite_head 是待 ff tip 的祖先、且 suite_head..tip 仅含任务文件（flip）改动，否则任何真实 fan-in（code 与 doc-only 皆然）都会撞闸（AC1 收窄: 读本任务 capture, 不读全局 suite 锁）。NOT acquiring the merge lock" >&2
   exit 2
 fi
 
