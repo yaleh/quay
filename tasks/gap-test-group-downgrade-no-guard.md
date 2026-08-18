@@ -1,7 +1,7 @@
 ---
 id: gap-test-group-downgrade-no-guard
 title: "@test-group 降级路径无守卫——合法改标 serial/lowconc/governance 使测试被静默移出默认集/跳过，闸不自知"
-status: todo
+status: ready
 labels:
   - gap
   - finding

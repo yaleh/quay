@@ -1,7 +1,7 @@
 ---
 id: gap-webui-journal-reads-stale-data
 title: "Journal 页读陈旧数据——observation.ts readRecentTableRows 只认 Markdown 表格行，而 tick-log.md 已改 ## 时间戳散文格式"
-status: todo
+status: ready
 labels:
   - gap
   - defect

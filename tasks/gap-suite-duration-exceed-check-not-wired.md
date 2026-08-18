@@ -1,7 +1,7 @@
 ---
 id: gap-suite-duration-exceed-check-not-wired
 title: "suite-duration-exceed-check.ts 未接线 scripts/test.sh/ci.yml——suite 超时不报"
-status: todo
+status: ready
 labels:
   - gap
   - finding

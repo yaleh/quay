@@ -1,7 +1,7 @@
 ---
 id: gap-webui-board-load-120s
 title: "/board 加载 120s——readBoardLanding 无缓存 + 硬超时 120s（超时后渲染错误态），每次请求冷跑子进程"
-status: todo
+status: ready
 labels:
   - gap
   - defect
