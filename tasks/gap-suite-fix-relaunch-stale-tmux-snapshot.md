@@ -1,7 +1,7 @@
 ---
 id: gap-suite-fix-relaunch-stale-tmux-snapshot
 title: suite-fix 重跑（execute-suite-fix.js）走 launch 不生成 tmux-leak before-run 快照——陈旧快照（25h）使 tmux-leak-scan 报「无快照」RED，directory-lock 第 4 轮 suite 实证
-status: ready
+status: done
 labels:
   - gap
   - defect
