@@ -57,6 +57,7 @@ const {
   stateDir,            // main checkout 的 .quay（runner 写 state.json 到这里）
   logFile,             // main checkout 的 .quay/full-suite.log
   root,                // main checkout（plugin/scripts/full-suite-runner.ts + integration-batch-merge.sh 所在）
+  task,                // OPTIONAL: 任务 id —— fix-scope gate 判「红是否本任务 Touches 内回归」用它读 tasks/<id>.md 的 ## Touches。缺省 ⇒ 无 Touches 作用域，只做 machine-partition（in_family/staticCheck）分诊
   maxRounds = 4,       // 真实红轮的最大迭代次数（每次=一轮全量，慢是接受的，不完整不可以）
   envMaxRuntimeMs = 7_200_000, // 120 min（manager 建议 ≥7200000；默认 45min 会截断最坏 77min 的轮次）
   envSilenceMs = 3_600_000,     // 60 min（默认 15min）
@@ -106,13 +107,60 @@ resource gate: cd ${root} && bash plugin/scripts/resource-gate.sh --for full-sui
 FAILURES are ALL recorded in state.json's failures[] (MAX_RECORDED_FAILURES=200) + the archived log ${resolvedLogFile} — read EVERY failure line, never just the first.
 `
 
+// ── fix-scope gate（fix 前判定红是否本任务 Touches 内回归，gap-suite-fix-workflow-no-load-
+//    sensitive-branch）──────────────────────────────────────────────────────────────────────
+// suite-fix 曾是「红 ⇒ fix ALL failures + rerunning」的无分支路径，见啥修啥、越界到非 Touches
+// 文件（4 次：inner-blocked-signal / outer-cron-registry / session-liveness+tmux-leak-scan
+// （load-sensitive 族）/ fan-in-ff-protocol-check（checker 跨任务误报））。本 gate 在 fix 前把
+// failures[] 机械分诊为 inScope（本任务 Touches 内回归，修）vs outOfScope（越界红，defer）：
+//   in_family    ⇒ load-sensitive ⇒ 释放（隔离重跑），不修；
+//   staticCheck  ⇒ checker 误报 ⇒ defer 独立任务，不修；
+//   file ∈ ## Touches ⇒ 本任务回归 ⇒ 修；file ∉ ## Touches（或无 file）⇒ 别任务 bug ⇒ defer，不修。
+// 无 task（无 Touches 作用域）⇒ 只做 machine-partition（in_family/staticCheck），其余照修。
+// gate 无法评估（task 文件/state.json 读失败）⇒ fail-closed：不修，全部 defer（硬规则 3b）。
+const taskId = task ?? null
+const touchesFile = taskId ? `${worktree}/tasks/${taskId}.md` : ''
+const fixScopeGate = `【fix-scope gate —— fix 前必须先跑，得到 FIX_SCOPE_VERDICT 再动手修】
+# fix-scope-gate-block-start
+fix_scope_out=$(node --no-warnings --experimental-strip-types --input-type=module -e 'import fs from "node:fs";
+import { parseTouches, matchGlob, normalizePath } from "${worktree}/plugin/scripts/touches-orthogonality-check.ts";
+const taskFile = process.argv[1];
+const stateFile = process.argv[2];
+let globs = null;
+try { const taskBody = fs.readFileSync(taskFile, "utf8"); const p = parseTouches(taskBody); if (p.hasSection) globs = p.globs; } catch (e) { globs = null; }
+const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+const failures = Array.isArray(state.failures) ? state.failures : [];
+const inScope = [];
+const outOfScope = [];
+for (const f of failures) {
+  const file = f && f.file;
+  if (f && f.in_family) { outOfScope.push({ file: file ?? null, reason: "load-sensitive" }); continue; }
+  if (f && f.staticCheck) { outOfScope.push({ file: file ?? null, reason: "checker-misreport" }); continue; }
+  if (!file) { outOfScope.push({ file: null, reason: "no-file" }); continue; }
+  if (globs === null) { inScope.push(file); continue; }
+  const within = globs.some((g) => matchGlob(normalizePath(g), normalizePath(file)));
+  if (within) { inScope.push(file); } else { outOfScope.push({ file, reason: "other-task" }); }
+}
+process.stdout.write(JSON.stringify({ scoped: globs !== null, inScope, outOfScope }));' "${touchesFile}" "${stateDir}/full-suite-state.json" 2>&1) || { echo "FIX_SCOPE_NOT_EVALUATED=1"; fix_scope_out=""; }
+echo "FIX_SCOPE_VERDICT=$fix_scope_out"
+# fix-scope-gate-block-end
+判定（读上面的 FIX_SCOPE_VERDICT JSON）：
+- inScope 里的失败 = 本任务 Touches 内的回归 ⇒ 只修这些文件；禁止触碰 outOfScope 里列出的任何文件。
+- outOfScope 里的失败 = 越界红，一律不修：
+    * reason=load-sensitive（in_family）⇒ 释放：不修，隔离重跑确认（isolated rerun），结论写进 note。
+    * reason=checker-misreport（staticCheck）⇒ defer：不修，note 里要求 defer 独立任务。
+    * reason=other-task / no-file ⇒ 别任务 bug / 无文件归属：不修，note 里要求 defer 独立任务。
+- FIX_SCOPE_NOT_EVALUATED=1 ⇒ fail-closed：本任务不修任何失败，全部 defer（无法评估 ≠ 合格）。
+修完 inScope 后照常重跑全量 suite。返回的 failuresFixed 只列 inScope 修复；越界 defer 写进 note。`
+
 phase('Fix')
 const fix = await agent(
   `你是 A15 ④ suite-fix 链的 Fix 阶段。
 ${CONTEXT}
 任务：
 1. 读 ${stateDir}/full-suite-state.json 与 ${stateDir}/verification-round.jsonl 末尾：当前是否已有 suite 在跑（state=running）？上一轮红的话 failures[] 是什么？
-2. 若上一轮是真实红轮（reason=failed 且 tests>=2900）：读【全部】failures[] 与归档日志，逐条诊断根因并修复，在 worktree 里 commit。
+${fixScopeGate}
+2. 若上一轮是真实红轮（reason=failed 且 tests>=2900）：读【全部】failures[] 与归档日志，按上面的 fix-scope gate verdict 只修 inScope 里的失败（本任务 Touches 内回归），逐条诊断根因并修复，在 worktree 里 commit；outOfScope 的越界红一律不修（load-sensitive 释放 / checker 误报与别任务 bug defer 独立任务）。
 3. 若上一轮是非验证终态（static-check/aborted/timeout/截断）：修掉阻塞它的东西（静态检查红先修静态检查；resource-gate WAIT/single-flight lock 则等待）。
 4. 若上一轮为绿（state=green）：仍需在 worktree 启动一轮全量 suite，以产出 scope=worktree 的验证记录（batch-merge 闸的唯一数据源）。
 5. 然后【启动】全量 suite：${launchCmd} —— 前台 Bash 跑（&+disown 立即返回），然后轮询 state.json 最多 ~20s 直到 state=running 出现（短促确认），再返回。禁止 Bash(run_in_background:true)。
@@ -195,7 +243,8 @@ ${CONTEXT}
 ${CONTEXT}
 任务：
 1. 读 ${stateDir}/full-suite-state.json 的 failures[]（现在记录【全部】失败，最多 200 条）+ 归档日志 ${resolvedLogFile}，逐条列出失败，诊断每一条的根因。
-2. 修复所有根因，在 worktree 里 commit（一次提交可以含多个修复，但必须是真实的修复，不是删测试/改判据绕过）。
+${fixScopeGate}
+2. 按上面的 fix-scope gate verdict：只修 inScope 里的失败（本任务 Touches 内回归），在 worktree 里 commit（一次提交可以含多个修复，但必须是真实的修复，不是删测试/改判据绕过）；outOfScope 的越界红一律不修（load-sensitive 释放 / checker 误报与别任务 bug defer 独立任务）。
 3. 重跑全量 suite：${launchCmd} —— 前台 Bash 跑（&+disown 立即返回），然后轮询 state.json 最多 ~20s 直到 state=running（短促确认）再返回。禁止 Bash(run_in_background:true)。
 返回 { failureCount, rootCauses: string[], relaunched: bool, worktreeHead, note }。
 不要做任何等待决策——等待由 workflow 脚本控制。`,
