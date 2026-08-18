@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-ff-retry-reruns-suite-on-inert-increment
 title: "ff 失败重试恒跑全量 suite——develop 惰性增量（doc/任务体）应在 fan-in-ff-merge.sh 持锁段内跳过重跑（落点修正版）"
-status: todo
+status: ready
 labels:
   - gap
   - performance
