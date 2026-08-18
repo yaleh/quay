@@ -401,7 +401,7 @@ test("REAL inner anchor: 四判据全真 + 剩余寿命正常 ⇒ PASS (exit 0)"
 test("REAL outer anchor: 四判据全真 ⇒ PASS (exit 0)", (t) => {
   const real = realRegistry();
   if (!real) { t.skip("全局注册表缺失"); return; }
-  const base = makeFixtureBase();
+  const base = makeFixtureBase({ outer: { cronId: real.layers.outer.cronId } });
   const { dir, p } = tmpFile("txt");
   try {
     fs.writeFileSync(p, OUTER_PROMPT + "\n"); // 正本文件带尾部换行；extractCanonical 剥一个
@@ -564,7 +564,7 @@ test("cron-expr-mismatch: 真漂移（`*/20`={0,20,40} vs 注册表 inner `7,27,
 
 test("cron-expr-mismatch: 语义等价 `*/20` ≡ 注册表 outer `0,20,40` ⇒ 不再 VIOLATED (PASS, 无 cron-expr-mismatch)", (t) => {
   const real = realRegistry();
-  const base = makeFixtureBase();
+  const base = makeFixtureBase({ outer: { cronId: real ? real.layers.outer.cronId : "x" } });
   const { dir, p } = tmpFile("txt");
   try {
     fs.writeFileSync(p, OUTER_PROMPT + "\n"); // 正本文件带尾部换行；extractCanonical 剥一个
