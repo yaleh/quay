@@ -21,6 +21,9 @@
 //         fan-in-ff-merge.sh           covered by I1 (不得引用任何 suite 锁).
 //   I4 — bash canonical 与 TS canonical 的槽数一致 (runtime 跨语言对照): suite_slot_count (bash) ==
 //       suiteLockSlotCount() (TS) under the same env — the two canons cannot silently drift.
+//   I5 — 运行时并发 suite 数 ≤ S (行为层): 对隔离锁基并发跑 N=S+2 个槽获取者, 实测持槽数 ≤ S
+//       (gap-suite-slot-lock-not-enforcing-concurrency AC1/AC3)。排他性被【执行】而非【断言】——
+//       flock 一旦非独占, 全部 N 个获取者同时持槽 ⇒ 红 (4-concurrent-suite 的实相)。
 //
 // MODES:
 //   --gate [--root <dir>]   gate mode (wired into scripts/test.sh run_static_checks). Exit 1 iff any
@@ -29,6 +32,7 @@
 //   --json                  machine-readable output.
 // Exit codes: 0 = PASS / measure, 1 = gate FAIL (>=1 RED), 2 = usage/env error.
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { isDirectEntry } from "./gate-script-base.ts";
@@ -241,12 +245,90 @@ export function checkBashTsCountAgree(root: string): SsotVerdict {
   return { id: "I4", ok: false, evaluated: true, detail: `bash canonical suite_slot_count=${bashCount} != TS canonical suiteLockSlotCount=${ts} — the two canons drifted` };
 }
 
+/** I5 — the runtime concurrency cap (behavioral, not asserted): spawn N = S+2 concurrent slot
+ *  acquirers against a HERMETIC temp lock base (never the real git-common-dir lock, so it can never
+ *  contend with a live suite) and count how many hold a slot simultaneously. With an EXCLUSIVE flock
+ *  exactly S acquire (the rest block on `flock -n`); if the flock is made non-exclusive (the
+ *  `flock -s` shared injection, or the slot logic broken) all N acquire ⇒ acquired > S ⇒ RED. The
+ *  exclusivity is EXERCISED, not read off a comment — it can take false (AC3). */
+export interface ConcurrencyProbeResult {
+  acquired: number;
+  status: number;
+  stderr: string;
+}
+
+/** Generate a holder script that acquires one slot via the bash canonical (suite_slot_paths) and
+ *  reports `acquired`/`blocked`, then holds ~400ms so the N concurrent holders overlap. `flockFlag`
+ *  selects the lock MODE: `-n` = exclusive non-blocking (the real mechanism), `-s -n` = shared
+ *  non-blocking (the falsifiability injection — all N acquire, proving the verdict can go RED). */
+export function holderScript(lib: string, flockFlag: string): string {
+  return `#!/usr/bin/env bash
+source "${lib}"
+_base="\$1"; _out="\$2"
+_slots=()
+while IFS= read -r _s; do _slots+=("\$_s"); done < <(suite_slot_paths "\$_base")
+_fds=()
+for _s in "\${_slots[@]}"; do exec {_fd}>"\$_s"; _fds+=("\$_fd"); done
+_held=""
+for _fd in "\${_fds[@]}"; do if flock ${flockFlag} "\$_fd"; then _held=1; break; fi; done
+if [ -n "\$_held" ]; then echo acquired > "\$_out"; else echo blocked > "\$_out"; fi
+sleep 0.4
+`;
+}
+
+/** Run N concurrent acquirers (each `bash <holderScript> <base> <outFile>`) and count `acquired`.
+ *  Pure orchestration — the holder's lock mode is the caller's choice, so the falsifiability test
+ *  can inject a shared-mode holder and observe acquired == N (the RED half of AC3). */
+export function runConcurrencyProbe(script: string, base: string, N: number): ConcurrencyProbeResult {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "suite-slot-i5-"));
+  const hs = path.join(tmp, "holder.sh");
+  fs.writeFileSync(hs, script);
+  const driver = `set -u\nfor i in $(seq 1 ${N}); do bash "${hs}" "${base}" "${tmp}/r\${i}.txt" & done\nwait\n`;
+  const res = spawnSync("bash", ["-c", driver], { encoding: "utf8", timeout: 15000 });
+  let acquired = 0;
+  for (let i = 1; i <= N; i++) {
+    const f = path.join(tmp, `r${i}.txt`);
+    if (fs.existsSync(f) && fs.readFileSync(f, "utf8").trim() === "acquired") acquired++;
+  }
+  fs.rmSync(tmp, { recursive: true, force: true });
+  // A spawn error/timeout (`res.error`, `status === null`) must NOT be conflated with a clean exit
+  // (status 0) — reading a failed probe as GREEN is the 硬规则 3b shape (读不懂 ⇒ 与合格同形). Sentinel
+  // status -1 is never a real exit code, so the caller's `status !== 0` guard routes it to NOT-EVALUATED.
+  if (res.error) return { acquired, status: -1, stderr: res.error.message };
+  return { acquired, status: res.status ?? 0, stderr: res.stderr ?? "" };
+}
+
+/** I5 — S+2 concurrent acquirers, at most S may hold (exclusive flock). RED iff acquired > S. */
+export function checkRuntimeConcurrencyCapped(root: string): SsotVerdict {
+  const lib = path.join(root, "plugin", "scripts", "suite-slot-lib.sh");
+  if (!fs.existsSync(lib)) {
+    return { id: "I5", ok: false, evaluated: false, detail: "suite-slot-lib.sh not found (cannot judge — NOT-EVALUATED, never conflated with green)" };
+  }
+  const S = suiteLockSlotCount();
+  const N = S + 2;
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "suite-slot-i5-base-"));
+  const base = path.join(tmp, "full-suite.lock");
+  const { acquired, status, stderr } = runConcurrencyProbe(holderScript(lib, "-n"), base, N);
+  fs.rmSync(tmp, { recursive: true, force: true });
+  if (status !== 0) {
+    return { id: "I5", ok: false, evaluated: false, detail: `concurrency probe failed (status=${status}, stderr=${stderr.trim() || "<empty>"}) — NOT-EVALUATED` };
+  }
+  const ok = acquired <= S;
+  return {
+    id: "I5", ok, evaluated: true,
+    detail: ok
+      ? `${acquired}/${N} concurrent acquirers held a slot (≤ S=${S}) — slot exclusivity holds`
+      : `${acquired}/${N} concurrent acquirers held a slot (> S=${S}) — slot exclusivity VIOLATED (the 4-concurrent-suite manifestation)`,
+  };
+}
+
 export function runAll(root: string): SsotVerdict[] {
   return [
     checkFfNoGlobalSuiteLock(root),
     checkNoSlotPathLiterals(root),
     checkConsumersReadCanonical(root),
     checkBashTsCountAgree(root),
+    checkRuntimeConcurrencyCapped(root),
   ];
 }
 
@@ -258,6 +340,7 @@ Invariants (each can take false):
   I2 — no 'full-suite.lock.<digit>' literal in code across the executable surface
   I3 — the four consumers read the canonical (suite-slot-lib.sh / suite-lock-slots.ts)
   I4 — bash canonical slot count == TS canonical slot count under the same env
+  I5 — runtime concurrent suites ≤ S (S+2 concurrent acquirers, ≤ S hold — exclusivity exercised)
 
 Usage:
   node --experimental-strip-types suite-slot-ssot-check.ts --gate [--root <dir>] [--json]

@@ -102,7 +102,10 @@ export function buildLockHoldIntervals(events) {
     } else { // release
       const start = open.get(key);
       if (start == null) { malformed = true; continue; } // release without acquire
-      intervals.push({ start, end: e.epoch, key });
+      // Carry taskId on the interval so 判据2b can scope the overlap to the SAME task's lock
+      // (gap-fan-in-ff-protocol-check-cross-task-false-positive): a concurrent other-task ff merge
+      // falling inside this task's suite window is a legitimate cross-task overlap, not a violation.
+      intervals.push({ start, end: e.epoch, key, taskId: e.taskId });
       open.delete(key);
     }
   }
@@ -112,17 +115,32 @@ export function buildLockHoldIntervals(events) {
 
 /**
  * Decide 判据2b: does any lock-hold interval overlap the suite-run interval `[suiteStart, suiteEnd]`?
- * PURE.
- * @param {{start:number,end:number}[]} holdIntervals
- * @param {{start:number,end:number}|null} suiteRun — null when the suite state has no run to compare
- * @returns {{ok:boolean, overlaps:{start:number,end:number}[], evaluated:boolean, reason:string}}
+ * Scoped by taskId when the suite run carries one (cross-task overlap is a legitimate concurrency,
+ * not a suite-call-inside-the-lock violation). PURE.
+ * @param {{start:number,end:number,taskId?:string}[]} holdIntervals
+ * @param {{start:number,end:number,taskId?:string|null}|null} suiteRun — null when the suite state has no run to compare
+ * @returns {{ok:boolean, overlaps:{start:number,end:number,taskId?:string}[], evaluated:boolean, reason:string}}
  */
 export function checkSuiteInLock(holdIntervals, suiteRun) {
   if (suiteRun == null) {
     // No suite-run interval to compare against — the overlap property cannot be evaluated.
     return { ok: true, overlaps: [], evaluated: false, reason: "no-suite-run-interval" };
   }
-  const overlaps = holdIntervals.filter((h) => h.start <= suiteRun.end && h.end >= suiteRun.start);
+  // 判据2b scoping (gap-fan-in-ff-protocol-check-cross-task-false-positive): the protocol violation
+  // is a SUITE call inside the SAME task's locked section (SPEC §4 — the merge lock covers the ff,
+  // the suite covers the 无锁段 self-test; the two locks are "对象不相干"). In a concurrent multi-
+  // worktree fan-in, task A's suite (tens of minutes) and task B's millisecond ff merge legitimately
+  // overlap in wall-clock time — that is NOT a violation, and flagging it is a cross-task false
+  // positive. So when the suite run carries a taskId, only a lock-hold for that SAME task is a
+  // violation. When the suite run lacks a taskId (legacy state), fall back to the unscoped temporal
+  // overlap (backward-compatible).
+  const suiteTaskId = suiteRun.taskId;
+  const overlaps = holdIntervals.filter((h) => {
+    const temporalOverlap = h.start <= suiteRun.end && h.end >= suiteRun.start;
+    if (!temporalOverlap) return false;
+    if (suiteTaskId != null) return h.taskId === suiteTaskId;
+    return true; // legacy suite state: cannot scope by task
+  });
   if (overlaps.length > 0) {
     return { ok: false, overlaps, evaluated: true, reason: "suite-call-inside-merge-lock" };
   }
@@ -202,9 +220,11 @@ function readJsonlLines(file) {
 }
 
 /** Parse the suite-run interval from a full-suite-state file: `{state, startedAt, finishedAt}`.
- *  Returns `{start, end}` in epoch seconds (finishedAt is epoch; startedAt is ISO or epoch), or null
- *  when there is no completed run to compare. A suite that is `running` right now has no end yet —
- *  the lock must never be held during it, so end = now. */
+ *  Returns `{start, end, taskId}` in epoch seconds (finishedAt is epoch; startedAt is ISO or epoch),
+ *  or null when there is no completed run to compare. `taskId` is the suite run's owning task (null
+ *  when the state file does not carry one) — 判据2b scopes the suite-in-lock overlap to it
+ *  (gap-fan-in-ff-protocol-check-cross-task-false-positive). A suite that is `running` right now has
+ *  no end yet — the lock must never be held during it, so end = now. */
 export function suiteRunInterval(root, suiteStateFile) {
   if (!fs.existsSync(suiteStateFile)) return null;
   let d;
@@ -226,7 +246,8 @@ export function suiteRunInterval(root, suiteStateFile) {
   }
   if (end == null) end = Math.floor(Date.now() / 1000); // still running (or finishedAt missing)
   if (end < start) end = start;
-  return { start, end };
+  const taskId = typeof d.taskId === "string" && d.taskId ? d.taskId : null;
+  return { start, end, taskId };
 }
 
 // ── CLI ───────────────────────────────────────────────────────────────────────────────────────────────

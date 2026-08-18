@@ -34,6 +34,7 @@ import {
 } from "../scripts/full-suite-runner.ts";
 import {
   checkNoSlotPathLiterals, checkFfNoGlobalSuiteLock, checkConsumersReadCanonical, checkBashTsCountAgree,
+  checkRuntimeConcurrencyCapped, runConcurrencyProbe, holderScript,
 } from "../scripts/suite-slot-ssot-check.ts";
 
 function withSlots(value, fn) {
@@ -180,6 +181,40 @@ test("checker — all four invariants PASS on the real repo", () => {
   assert.equal(checkNoSlotPathLiterals(REPO_ROOT).ok, true, "I2 — 无硬编码槽字面量");
   assert.equal(checkConsumersReadCanonical(REPO_ROOT).ok, true, "I3 — 消费者读唯一实现");
   assert.equal(checkBashTsCountAgree(REPO_ROOT).ok, true, "I4 — bash canonical == TS canonical");
+});
+
+// ── I5 — 运行时并发 suite 数 ≤ S (行为层排他性, gap-suite-slot-lock-not-enforcing-concurrency AC1/AC3) ─
+
+test("I5 — exclusive flock: S+2 concurrent acquirers ⇒ exactly S hold (the AC2 negative control)", () => {
+  for (const S of [1, 2, 3]) {
+    withSlots(S, () => {
+      const tmp = makeTmp("i5");
+      const base = path.join(tmp, "full-suite.lock");
+      const lib = path.join(REPO_ROOT, "plugin", "scripts", "suite-slot-lib.sh");
+      const { acquired, status } = runConcurrencyProbe(holderScript(lib, "-n"), base, S + 2);
+      assert.equal(status, 0, `S=${S}: probe must run clean`);
+      assert.equal(acquired, S, `S=${S}: exactly ${S} of ${S + 2} acquirers hold a slot (exclusive flock)`);
+      cleanup(tmp);
+    });
+  }
+});
+
+test("I5 — 能取假: shared flock injection ⇒ all S+2 acquire ⇒ RED (the 4-concurrent manifestation)", () => {
+  withSlots(2, () => {
+    const tmp = makeTmp("i5red");
+    const base = path.join(tmp, "full-suite.lock");
+    const lib = path.join(REPO_ROOT, "plugin", "scripts", "suite-slot-lib.sh");
+    const { acquired } = runConcurrencyProbe(holderScript(lib, "-s -n"), base, 4);
+    assert.equal(acquired, 4, "shared flock: all 4 acquirers hold (the injected non-exclusive lock)");
+    assert.ok(acquired > 2, "4 > S=2 ⇒ the concurrency-cap judgment goes RED");
+    cleanup(tmp);
+  });
+});
+
+test("I5 — checker verdict: GREEN on the real repo (exclusive flock, acquired ≤ S)", () => {
+  const v = checkRuntimeConcurrencyCapped(REPO_ROOT);
+  assert.equal(v.evaluated, true, "I5 must be evaluated on the real repo");
+  assert.equal(v.ok, true, `I5 must be GREEN, got: ${v.detail}`);
 });
 
 // ── the static checker: falsifiability (每条都能取假) ───────────────────────────────────────────────
