@@ -12,6 +12,7 @@ extra:
   schema: execution
   depends_on:
     - gap-fan-in-suite-duration-poll-granularity-inflation
+    - gap-fan-in-verification-round-thin-schema-phase-gap
 ---
 **type:** execution
 
@@ -23,7 +24,7 @@ extra:
 
 **⚠️ 不投递结论**（硬规则④推论四）：「S 改 1 就能进 600s」需要**对照轮**验证——同 commit、`QUAY_MAX_CONCURRENT_SUITES=1` 跑一次，对比 serial/main 两相。这正是 `gap-fan-in-turn-budget-suite-timeout` 原本要做的 lane 对照实验，而该任务实际落的是回合预算承载（9327056a），**对照轮从未跑过**。
 
-**依赖**：先落 `gap-fan-in-suite-duration-poll-granularity-inflation`（durationMs 必须真实，对照才可信——否则 609 vs 674 的判定差会被读数污染）。
+**依赖**：先落 `gap-fan-in-suite-duration-poll-granularity-inflation`（durationMs 必须真实，对照才可信——否则 609 vs 674 的判定差会被读数污染）；再落 `gap-fan-in-verification-round-thin-schema-phase-gap`（相字段同口径——否则对照轮 rich-schema 与基线瘦-schema 无法直接比，唯一同口径基线 round227 落噪声带；「同口径」与「同负载」是两条独立轴，都须满足）。
 
 **能取假（⊢ 对照）**：对照轮跑完，若 `QUAY_MAX_CONCURRENT_SUITES=1` 的 serial+main 两相墙钟 + 前置 ≤ 600s（对照 609s 基线），则结论成立 ⇒ 改默认值（S=2→1）+ 落地；若不成立 ⇒ S 不是主因，回 manager 的候选清单继续（serial 301s 整族/文件级清单）。两种结果都是有效产出。
 
@@ -39,8 +40,9 @@ extra:
 
 - [ ] AC1: 对照轮跑完——同 commit、`QUAY_MAX_CONCURRENT_SUITES=1` 的单 suite 全量，serial/main 两相墙钟 + 总墙钟 + verification-round durationMs 记录在案。
 - [ ] AC2: 判定有产出：≤600s ⇒ 改默认 S=2→1 并落地；>600s ⇒ 记录 serial 301s 的候选路径（文件级清单）为下一候选，不空转。
-- [ ] AC3: 对照轮不误伤正常 fan-in（单次实验轮，不并发）。
-- [ ] AC4: 测试全绿 + `--for-task` scoped 门绿（若改默认）。
+- [ ] AC3: **对照轮与基线必须来自同一写入器/同口径**——要么两侧都直调 full-suite-runner（rich-schema），要么先落 `gap-fan-in-verification-round-thin-schema-phase-gap` 使 fan-in 行带相字段（同构/同口径）；不同口径不得直接比（round227 作为基线落噪声带）。
+- [ ] AC4: 对照轮不误伤正常 fan-in（单次实验轮，不并发）。
+- [ ] AC5: 测试全绿 + `--for-task` scoped 门绿（若改默认）。
 
 ## Definition of Done
 
