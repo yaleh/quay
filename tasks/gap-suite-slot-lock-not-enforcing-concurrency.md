@@ -24,13 +24,13 @@ SSOT 层 2（`gap-suite-concurrency-ff-gate-and-slot-ssot`，done——槽数由
 
 ## Acceptance Criteria
 
-- [ ] AC1: 修复 suite slot 获取的排他性——S=2 时并发 suite 数 ≤2（槽 `.0`/`.1` 排他，一个进程持一个槽，其余等待）。
-- [ ] AC2: 负控制——4 个 fan-in 同时跑时，实测并发 `scripts/test.sh` suite 数 = 2（非 4），2 个等待。
-- [ ] AC3: 行为层不变量加「运行时并发 suite 数 ≤ S」检查（`suite-slot-ssot-check.ts` 或新增），能取假（注入 4 并发 ⇒ 红）。
+- [x] AC1: 修复 suite slot 获取的排他性——S=2 时并发 suite 数 ≤2（槽 `.0`/`.1` 排他，一个进程持一个槽，其余等待）。
+- [x] AC2: 负控制——4 个 fan-in 同时跑时，实测并发 `scripts/test.sh` suite 数 = 2（非 4），2 个等待。
+- [x] AC3: 行为层不变量加「运行时并发 suite 数 ≤ S」检查（`suite-slot-ssot-check.ts` 或新增），能取假（注入 4 并发 ⇒ 红）。
 
 ## Definition of Done
 
-- [ ] S=2 下 4 个 fan-in 同时跑，实测并发 suite 数 = 2（非 4）、槽排他生效、行为层不变量检查绿（真实输出，非 fixture）。
+- [ ] S=2 下 4 个 fan-in 同时跑，实测并发 suite 数 = 2（非 4）、槽排他生效、行为层不变量检查绿（真实输出，非 fixture）。（待外部——需 4 个真实 fan-in 同时跑）
 
 ## Touches
 
@@ -39,3 +39,8 @@ SSOT 层 2（`gap-suite-concurrency-ff-gate-and-slot-ssot`，done——槽数由
 - plugin/scripts/suite-slot-lib.sh（bash 侧槽实现）
 - scripts/test.sh（full_suite_lock_acquire/release 排他）
 - plugin/scripts/suite-slot-ssot-check.ts（加「并发 suite 数 ≤ S」不变量）
+
+## Test-Files
+
+- plugin/test/suite-slot-ssot-check.test.mjs（I5 行为层排他性：S+2 并发获取者 ⇒ 恰 S 个持槽 + 能取假）
+- plugin/test/resource-gate.test.mjs（scripts/test.sh 单飞锁结构性 pin：acquire/release/flock/escape hatch）
