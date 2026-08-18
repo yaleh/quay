@@ -30,7 +30,7 @@ SSOT 层 2（`gap-suite-concurrency-ff-gate-and-slot-ssot`，done——槽数由
 
 ## Definition of Done
 
-- [ ] S=2 下 4 个 fan-in 同时跑，实测并发 suite 数 = 2（非 4）、槽排他生效、行为层不变量检查绿（真实输出，非 fixture）。（待外部——需 4 个真实 fan-in 同时跑）
+- [ ] S=2 下 4 个真实 fan-in 同时跑，实测并发 suite 数 = 2（非 4）、槽排他生效、行为层不变量检查绿（真实输出，非 fixture）。（待外部）
 
 ## Touches
 
