@@ -101,6 +101,8 @@ const pollIntervalMs = A.pollIntervalMs ?? 60_000   // 脚本 setTimeout 的轮�
 const maxSuitePolls = A.maxSuitePolls ?? 60         // 单次 suite 等待的有界轮询数（60×60s=60min 上限）
 const maxFixRounds = A.maxFixRounds ?? 4            // 红 suite 的最大修复迭代
 const maxFfRetries = A.maxFfRetries ?? 3            // ff 失败（develop 前进）的最大重试（同 SPEC §7 阈值）
+const pollBlockSeconds = A.pollBlockSeconds ?? 540  // 轮询 agent 内有界阻塞等待的硬边界（< Bash 600s 上限，gap-fan-in-execute-poll-bounded-blocking-wait）
+const pollBlockSleep = A.pollBlockSleep ?? 15        // 阻塞等待的检查粒度（每 N 秒看一眼 exit marker）
 
 if (!task || !worktree || !root) {
   return { outcome: 'bad-args', message: 'task / worktree / root are required', args }
@@ -126,14 +128,24 @@ suite_pid=$!
 printf 'suite_pid=%s\\n' "$suite_pid" >> "$suite_capture"`
 
 // ── 脚本控制流的 suite 等待：不把等待决策交给任何 agent（ab380c5e / execute-suite-fix.js）──────
-// 轮询 agent 只读 exit marker；命中则补全 capture 的 post 字段。等待间隔由脚本 setTimeout 决定。
+// 轮询 agent 内有界阻塞等待（gap-fan-in-execute-poll-bounded-blocking-wait）：timeout 540 + sleep 15
+// 循环，最多 540s 硬边界（< Bash 600s 上限），把 ~21 次空转轮询压到 ~3 次；决策权仍在脚本——
+// timeout 540 是脚本给的硬边界、maxSuitePolls 是脚本循环上限，agent 不自决「等多久」。命中 marker
+// 则补全 capture 的 post 字段。脚本 setTimeout 仍是外层轮询间隔。
 async function pollSuite() {
   return agent(
-    `你是 fan-in suite 等待轮询（workflow 脚本控制流调用，短促只读，一回合内返回）。任务 ${task} 的 suite 以 detached 方式运行。运行下面命令并返回结果——不要做任何等待决策（等待由 workflow 脚本控制）。
+    `你是 fan-in suite 等待轮询（workflow 脚本控制流调用，有界阻塞等待，一回合内返回）。任务 ${task} 的 suite 以 detached 方式运行。用 Bash 工具运行下面命令并返回结果——不要做任何等待决策（等待由 workflow 脚本控制）。命令里的 timeout ${pollBlockSeconds} 是脚本给的硬边界；Bash 工具的执行时限须设大于 ${pollBlockSeconds}s（上限 600s）。
 suite_capture="/tmp/fan-in-suite-${task}.env"
 suite_exit_marker="/tmp/fan-in-suite-${task}.exit"
 suite_time_file="/tmp/fan-in-suite-${task}.time"
 suite_log_file="/tmp/fan-in-suite-${task}.log"
+if [ ! -f "$suite_exit_marker" ]; then
+  # 有界阻塞等待（gap-fan-in-execute-poll-bounded-blocking-wait）：最多 ${pollBlockSeconds}s 硬边界
+  # （< Bash 600s 上限），每 ${pollBlockSleep}s 看一眼 marker。决策权仍在脚本——这个 timeout 是脚本给的
+  # 硬边界、maxSuitePolls 是脚本循环上限，agent 不自决「等多久」（ab380c5e 是 agent 自决等待，这里是
+  # 脚本手里的有界等待）。
+  timeout ${pollBlockSeconds} bash -c 'while [ ! -f "$1" ]; do sleep ${pollBlockSleep}; done' _ "$suite_exit_marker" || true
+fi
 if [ ! -f "$suite_exit_marker" ]; then
   echo 'POLL=not-done'
   exit 0
