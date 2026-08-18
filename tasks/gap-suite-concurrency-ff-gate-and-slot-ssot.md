@@ -90,6 +90,7 @@ ff 闸拿资源锁去表达正确性约束 ⇒ 收窄不是「缩小范围」而
 - plugin/test/fan-in-execute-paths.test.mjs（lane_count 取 `__GROUP__ concurrency=` 真实化 REAL 测试；capture 保留到 ff 的断言）
 - plugin/test/suite-slot-ssot-check.test.mjs（**新增**——行为层不变量测试：槽文件数==concurrentSuiteSlots、lane×S≤nproc×oversub、concurrentSuitesRunning 随 S、检查器每条能取假）
 - plugin/test/inner-blocked-signal.test.mjs（AC4 load-fragile fix 5c51da41——concurrency-8 负载下 spawnSync 阻塞事件循环致 AC4「活跃阶段」误触 block，改 async spawn 解耦 background writer 与 CLI poll；本任务并发变更暴露的负载敏感测试修复）
+- plugin/test/outer-cron-registry.test.mjs（fixture 硬编码陈旧——inner cron 重锚换 id 后 cronId 09fabf33 判据②恒假 + nowMs 05:00Z < live verifiedAt 判据③恒假；bc6b6b08 改动态化 real.layers.inner.cronId + nowMs 取 live verifiedAt，与 outer 7263b1b3 互补）
 - tasks/gap-ac101-lane-concurrency-control-round.md（执行顺序注记：层 2 先落再设 S=1）
 - tasks/gap-fan-in-verification-round-thin-schema-phase-gap.md（lane_count 真实化同批注记）
 - tasks/gap-suite-concurrency-ff-gate-and-slot-ssot.md（自身）
