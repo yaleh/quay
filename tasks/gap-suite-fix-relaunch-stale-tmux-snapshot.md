@@ -46,7 +46,7 @@ extra:
 
 ## Definition of Done
 
-- [ ] suite-fix 重跑生成新鲜 before-run 快照（单一路径），tmux-leak 不再因陈旧快照 RED，重复迭代可收敛，scoped + 全量绿。
+- [x] suite-fix 重跑生成新鲜 before-run 快照（单一路径），tmux-leak 不再因陈旧快照 RED，重复迭代可收敛，scoped + 全量绿。
 
 ## Touches
 
