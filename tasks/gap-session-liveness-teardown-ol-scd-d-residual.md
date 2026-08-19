@@ -1,7 +1,8 @@
 ---
 id: gap-session-liveness-teardown-ol-scd-d-residual
-title: "session-liveness 测试 teardown 泄漏 ol-scd-d 残留——kill 路径不覆盖（7c755610 修了主路径漏了 ol-scd-d，稳定复现）"
-status: todo
+title: session-liveness 测试 teardown 泄漏 ol-scd-d 残留——kill 路径不覆盖（7c755610 修了主路径漏了
+  ol-scd-d，稳定复现）
+status: ready
 labels:
   - gap
   - mechanism
