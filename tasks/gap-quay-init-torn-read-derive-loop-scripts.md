@@ -1,7 +1,7 @@
 ---
 id: gap-quay-init-torn-read-derive-loop-scripts
 title: "quay-init.sh derive_loop_scripts torn-read 稳定性——verify_referenced_landed 假阳性（读与写竞争）"
-status: ready
+status: done
 labels:
   - gap
   - mechanism
