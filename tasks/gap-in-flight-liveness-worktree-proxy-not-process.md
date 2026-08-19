@@ -1,7 +1,7 @@
 ---
 id: gap-in-flight-liveness-worktree-proxy-not-process
 title: "面板/遥测把「worktree 存在 + status=ready + 无活进程」的任务显示成 in-flight——活性判据只有 worktree/事件存在性，缺进程级 liveness 读法"
-status: ready
+status: done
 labels:
   - gap
   - observability
