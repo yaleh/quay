@@ -43,4 +43,7 @@ extra:
 - plugin/scripts/slot-refill.ts（Build 派发数「有 start 无 impl-complete」，删 --slot-status 推导）
 - plugin/scripts/fast-mode-telemetry.ts（--reconcile 删 keepReason: worktree-present 推断）
 - packages/quay/src/observation.ts（pairInFlight 读 impl-complete 两段）
-- plugin/test/（两段计数负控制）
+- plugin/test/slot-refill.test.mjs（Build 派发「有 start 无 impl-complete」负控制）
+- plugin/test/fast-mode-telemetry.test.mjs（--reconcile 删 keepReason 推断负控制）
+- plugin/test/fan-in-execute-paths.test.mjs（impl-complete 事件负控制）
+- packages/quay/test/serve-board.test.mjs（pairInFlight 两段计数负控制）
