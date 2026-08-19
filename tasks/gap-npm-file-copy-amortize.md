@@ -1,7 +1,7 @@
 ---
 id: gap-npm-file-copy-amortize
 title: "npm/文件复制类摊销——smoke-gate 3 test 重复 pack+install + capability-catalog 5 test 复制 261 脚本"
-status: ready
+status: done
 labels:
   - gap
   - performance
