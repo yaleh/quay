@@ -44,7 +44,10 @@ import {
   // side covers it only via a directory glob (`tasks/*.md`) — the fix that stops a directory-level
   // Touches declaration from becoming a global dispatch lock.
   checkTouchesPairInFlight,
-  parseSlotStatusOutput,
+  // IMPL-COMPLETE (gap-inflight-states-missing-impl-complete-event): the bare in-flight view is
+  // MEASURED from the telemetry report's `implementing` segment (start without impl-complete —
+  // 真正在实现), not the retired --slot-status derivation.
+  parseImplementingReport,
   // LANDED-IMPLEMENTATION (tasks/gap-slot-refill-recommends-landed-code-complete-tasks): the pure-git
   // "implementation already in the tree" predicate + its shape-aware completion gate.
   hasLandedImplementation,
@@ -2255,23 +2258,28 @@ test("C8 BACKFILL — injected dispatchGate rejects a mid-rank candidate ⇒ lat
   assert.ok(!r.recommended.includes("gap-gate-b"), "gate-rejected candidate is not recommended (no fabrication)");
 });
 
-// ── MEASURED IN-FLIGHT (tasks/gap-slot-refill-inflight-disconnected-from-worktrees) ───────────────────
+// ── MEASURED IN-FLIGHT (tasks/gap-slot-refill-inflight-disconnected-from-worktrees →
+//    gap-inflight-states-missing-impl-complete-event) ────────────────────────────────────────────────
 // A bare `slot-refill --json` (no --in-flight) used to read in_flight_count=0 even while worktrees +
 // telemetry showed tasks in flight — the manager's 2026-08-12 field reading (2 worktrees + telemetry
 // inProgress, slot-refill 0), same "counter reports 0 instead of erroring" family as
-// gap-inbox-counter-disconnected-from-files. The fix: when --in-flight/--closed-but-live are NOT
-// passed, MEASURE the in-flight view from the authoritative reconcile-aware telemetry `--slot-status`
-// (kept real-in-flight records + closed-but-live agents + non-task subagents). The inner tick's
-// explicit --in-flight path is byte-unchanged. AC1: 有在飞 ⇒ in_flight_count ≥ 实际数; AC2: 无在飞 ⇒ 0
-// (negative control); AC3: occupied_slots/should_refill consistent with in-flight (never 5 free while
-// 2 occupied); AC4: new tests cover (a)(b)(c); AC5: existing tests stay green.
+// gap-inbox-counter-disconnected-from-files. The first fix measured the in-flight view from the
+// reconcile-aware telemetry `--slot-status`; that derivation is RETIRED (its worktree/telemetry/
+// process probes are proxy inferences for a missing state). The Build dispatch count now reads the
+// telemetry report's `implementing` segment (start WITHOUT impl-complete — 真正在实现; the third
+// `impl-complete` event splits start→end into start→impl-complete and impl-complete→end). The inner
+// tick's explicit --in-flight path is byte-unchanged. AC1: 有在飞 ⇒ in_flight_count ≥ 实际数;
+// AC2: 无在飞 ⇒ 0 (negative control); AC3: occupied_slots/should_refill consistent with in-flight
+// (never 5 free while 2 occupied); AC4: new tests cover (a)(b)(c); AC5: existing tests stay green;
+// AC6 (gap-inflight-states-missing-impl-complete-event AC5 负控制): a task with impl-complete but no
+// end is NOT counted by Build dispatch (它待落地, 不在实现) — only start-without-impl-complete counts.
 
 const TELEMETRY_CLI = path.resolve(__dirname, "..", "scripts", "fast-mode-telemetry.ts");
 const SLOT_REFILL_CLI = path.resolve(__dirname, "..", "scripts", "slot-refill.ts");
 
 /** Run the slot-refill CLI with `--root` + `--cap 5` + extra args, parse the JSON. The child telemetry
- *  `--slot-status` scan of live subagent processes is made deterministic via QUAY_TELEMETRY_SUBAGENTS=0
- *  (never depends on whatever else is running on the machine at test time). */
+ *  `--report` implementing-segment read is made deterministic via QUAY_TELEMETRY_SUBAGENTS=0 (never
+ *  depends on whatever else is running on the machine at test time). */
 function runSlotRefillJson(root, extraArgs = []) {
   return JSON.parse(execFileSync(process.execPath, [
     "--no-warnings", "--experimental-strip-types", SLOT_REFILL_CLI, "--root", root, "--cap", "5", ...extraArgs,
@@ -2286,6 +2294,15 @@ function runTelemetryTaskStart(root, taskId) {
   const line = out.trim().split("\n").pop(); // runId is the last stdout line
   assert.ok(/^fm-/.test(line), `--task-start printed a runId, got: ${line}`);
   return line;
+}
+
+/** Write a REAL telemetry impl-complete event via the CLI (validated) — the third lifecycle event
+ *  (gap-inflight-states-missing-impl-complete-event): the impl→awaiting-land boundary. */
+function runTelemetryImplComplete(root, taskId, runId) {
+  const out = execFileSync(process.execPath, [
+    "--no-warnings", "--experimental-strip-types", TELEMETRY_CLI, "--impl-complete", "--taskId", taskId, "--runId", runId, "--root", root,
+  ], { encoding: "utf8", env: { ...process.env, QUAY_TELEMETRY_SUBAGENTS: "0" } });
+  assert.match(out, /impl-complete event written/, `--impl-complete wrote the event, got: ${out}`);
 }
 
 /** Build a REAL git workspace where `task/<inflightId>` is checked out in an OPEN worktree (the
@@ -2312,20 +2329,16 @@ function makeInflightWorkspace(tag, inflightId) {
   return dir;
 }
 
-test("parseSlotStatusOutput — pure parser maps kept/closed-but-live/subagents from --slot-status JSON", () => {
-  const parsed = parseSlotStatusOutput(JSON.stringify({
-    real_in_flight: 2,
-    subagents_in_flight: 1,
-    occupied_slots: 4,
-    kept: [{ taskId: "gap-a", keepReason: "worktree-present" }, { taskId: "gap-b", keepReason: "worktree-present" }],
-    closed_but_live_agents: [{ taskId: "gap-ghost", reason: "worktree-present" }],
+test("parseImplementingReport — pure parser maps the implementing segment from --report JSON", () => {
+  const parsed = parseImplementingReport(JSON.stringify({
+    implementing: [{ taskId: "gap-a", runId: "fm-a", startedAtMs: 1 }, { taskId: "gap-b", runId: "fm-b", startedAtMs: 2 }],
+    awaitingLand: [{ taskId: "gap-landed", runId: "fm-c", startedAtMs: 3, implCompletedAtMs: 4 }],
   }));
-  assert.deepEqual(parsed.keptIds, ["gap-a", "gap-b"]);
-  assert.deepEqual(parsed.closedButLiveIds, ["gap-ghost"]);
-  assert.equal(parsed.realInFlight, 2);
-  assert.equal(parsed.closedButLiveCount, 1);
-  assert.equal(parsed.subagentsInFlight, 1);
-  assert.equal(parsed.occupiedSlots, 4);
+  assert.deepEqual(parsed.implementingIds, ["gap-a", "gap-b"]);
+  assert.equal(parsed.implementingCount, 2);
+  // awaiting-land (impl-complete, no end) is NOT part of the implementing segment — Build dispatch
+  // must not count it (gap-inflight-states-missing-impl-complete-event AC2/AC5).
+  assert.ok(!parsed.implementingIds.includes("gap-landed"), "awaiting-land is not implementing");
 });
 
 test("MEASURED — bare invocation reads real in-flight from telemetry; never re-recommends it (AC1/AC3)", (t) => {
@@ -2336,9 +2349,9 @@ test("MEASURED — bare invocation reads real in-flight from telemetry; never re
 
   // The BARE invocation (no --in-flight) — exactly the manager's field reading that used to report 0.
   const r = runSlotRefillJson(root);
-  assert.equal(r.measurement_source, "telemetry-slot-status", "the in-flight view is measured, not input");
+  assert.equal(r.measurement_source, "event-stream-implementing", "the in-flight view is measured from the implementing segment, not input");
   assert.equal(r.measurement_error, null);
-  assert.equal(r.in_flight_count, 1, "AC1: 有在飞 ⇒ in_flight_count ≥ 实际数 (telemetry kept 1)");
+  assert.equal(r.in_flight_count, 1, "AC1: 有在飞 ⇒ in_flight_count ≥ 实际数 (start, no impl-complete ⇒ implementing 1)");
   assert.equal(r.occupied_slots, 1, "AC3: occupied matches telemetry (1), not 0");
   assert.equal(r.slots_free, 4, "AC3: 5 − 1 occupied = 4 free, never 5 while 1 occupied");
   assert.ok(!r.recommended.includes("gap-inflight"), "an in-flight task is never re-recommended (touches-overlap with itself)");
@@ -2351,10 +2364,31 @@ test("MEASURED — negative control: no events/worktree ⇒ in_flight_count=0, m
   writeTask(root, "gap-a", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/a.ts (new)"]) });
 
   const r = runSlotRefillJson(root);
-  assert.equal(r.measurement_source, "telemetry-slot-status");
+  assert.equal(r.measurement_source, "event-stream-implementing");
   assert.equal(r.in_flight_count, 0, "AC2: 无在飞 ⇒ 0 (negative control)");
   assert.equal(r.occupied_slots, 0);
   assert.equal(r.slots_free, 5);
+});
+
+test("MEASURED — AC5 负控制: impl-complete-without-end is NOT implementing; start-only IS (Build dispatch reads the implementing segment)", (t) => {
+  const root = makeWorkspace("implc");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-landing", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/landing.ts (new)"]) });
+  writeTask(root, "gap-building", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/building.ts (new)"]) });
+
+  // gap-landing: start + impl-complete (no end) ⇒ 实现完待落地 — awaiting-land, NOT implementing.
+  const landingRun = runTelemetryTaskStart(root, "gap-landing");
+  runTelemetryImplComplete(root, "gap-landing", landingRun);
+  // gap-building: start only ⇒ 正在实现 — implementing.
+  runTelemetryTaskStart(root, "gap-building");
+
+  const r = runSlotRefillJson(root);
+  assert.equal(r.measurement_source, "event-stream-implementing");
+  assert.equal(r.in_flight_count, 1, "AC5: Build dispatch counts ONLY start-without-impl-complete (gap-building), not the awaiting-land gap-landing");
+  assert.equal(r.occupied_slots, 1, "the awaiting-land task does not occupy a Build slot (AC2: the two counts are independent)");
+  assert.equal(r.slots_free, 4, "5 − 1 implementing = 4 free Build slots; the awaiting-land task is not double-counted");
+  // The awaiting-land task IS still counted by the LAND single-flight (its own independent count) —
+  // that surface is the telemetry report's `awaitingLand` segment, verified in fast-mode-telemetry.test.mjs.
 });
 
 test("MEASURED — explicit --in-flight (inner tick path) reports explicit-input, byte-compatible arithmetic", (t) => {

@@ -34,7 +34,7 @@ import { fileURLToPath } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
 import {
   SCRIPT, tmuxAvailable,
-  setProbeTmpPrefix, sweepTmp, reapLiveOwners, killProbeServers, tmux, isolateTmuxEnv, isClaudePid,
+  setProbeTmpPrefix, sessionLivenessAfter, tmux, isolateTmuxEnv, isClaudePid,
   paneHasClaudeChild, waitForAlive, makeHermeticProbe,
   spawnMonitor, waitForOutput, waitForRounds, countRounds,
   makeBackdatedGitRepo, makeFreshGitRepo, initGitRepo,
@@ -53,11 +53,7 @@ setProbeTmpPrefix("session-liveness-hb-");
 // sweepTmp removes owner-dead residue. Sweep ONLY this file's own prefixes (see SPLIT CONCURRENCY
 // SAFETY above — never a sibling's).
 after(() => {
-  // 判据1 (gap-session-liveness-fixture-tmux-not-killed): kill-server 本进程创建的 tmux server —
-  // sweepTmp 的 owner-liveness 保护（AC3）只跳过活 owner 目录，夹具不 kill ⇒ 泄漏无出口。
-  killProbeServers();
-  reapLiveOwners(); // 移除 owner 已死的残留（kill-server 后 dirHasLiveOwner 恒假）
-  sweepTmp("session-liveness-hb-");
+  sessionLivenessAfter("session-liveness-hb-");
 });
 
 test("F — a transcript heartbeat that keeps advancing suppresses SESSION-OVERDUE; freezing it fires OVERDUE (the death mechanism)", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
