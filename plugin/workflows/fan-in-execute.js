@@ -142,18 +142,25 @@ printf 'suite_pid=%s\\n' "$suite_pid" >> "$suite_capture"`
 // fail-closed：不修，全部 defer（硬规则 3b）。判定复用 touches-orthogonality-check.ts 的
 // parseTouches/matchGlob/normalizePath（与 execute-suite-fix.js 同源）。改本块必须同步
 // plugin/test/fan-in-execute-paths.test.mjs 的 fix-scope 组测试。
+// release 持久化（gap-fix-scope-gate-release-not-persistent）：load-sensitive release 曾是一次性
+// relaunch——relaunch 后仍红，第二轮 suite-fix 转越界 fix（第 9+ 例 a76959c8）。修法：gate 把每个
+// load-sensitive 红的连续 release 轮数 releasedRounds 持久化到 fix_scope_release ledger（/tmp 文件，
+// 跨 fix-round agent 调用存活），下一轮读到递增；内联 prompt 显式写「releasedRounds ≥ 1 的 load-
+// sensitive 红一律继续 release，⛔ 不得转 fix」。幂等持久 = 机制（ledger）+ 指令（prompt）双保险。
 const FIX_SCOPE_GATE = `【fix-scope gate —— 修任何失败前必须先跑，得到 FIX_SCOPE_VERDICT 再动手修】
 # fix-scope-gate-block-start
 fix_scope_log="/tmp/fan-in-suite-${task}.log"
 fix_scope_touches="${worktree}/tasks/${task}.md"
+fix_scope_release="/tmp/fan-in-scope-release-${task}.json"
 fix_scope_out=$(node --no-warnings --experimental-strip-types --input-type=module -e 'import fs from "node:fs";
 import { parseTouches, matchGlob, normalizePath } from "${worktree}/plugin/scripts/touches-orthogonality-check.ts";
 import { scanFamily, kindForFile } from "${worktree}/plugin/scripts/known-load-sensitive.ts";
-const taskFile = process.argv[1]; const wt = process.argv[2]; const logFile = process.argv[3];
+const taskFile = process.argv[1]; const wt = process.argv[2]; const logFile = process.argv[3]; const releaseLedger = process.argv[4];
 let globs = null;
 try { const tb = fs.readFileSync(taskFile, "utf8"); const p = parseTouches(tb); if (p.hasSection) globs = p.globs; } catch (e) { globs = null; }
 const family = scanFamily(wt);
 let logText = ""; try { logText = fs.readFileSync(logFile, "utf8"); } catch (e) { logText = ""; }
+let prior = {}; try { if (releaseLedger) prior = JSON.parse(fs.readFileSync(releaseLedger, "utf8")); } catch (e) { prior = {}; }
 const inScope = []; const outOfScope = []; const seen = new Set();
 const re = /^__PERFILE__ duration_ms=[0-9.]+ (.+) passed=false$/gm;
 let m;
@@ -164,23 +171,24 @@ while ((m = re.exec(logText)) !== null) {
   if (seen.has(rel)) continue;
   seen.add(rel);
   const kind = kindForFile(family, rel);
-  if (kind !== undefined) { outOfScope.push({ file: rel, reason: "load-sensitive", kind }); continue; }
+  if (kind !== undefined) { const rounds = (typeof prior[rel] === "number" ? prior[rel] : 0) + 1; prior[rel] = rounds; outOfScope.push({ file: rel, reason: "load-sensitive", kind, releasedRounds: rounds }); continue; }
   if (globs === null) { inScope.push(rel); continue; }
   if (globs.some((g) => matchGlob(normalizePath(g), rel))) inScope.push(rel); else outOfScope.push({ file: rel, reason: "other-task" });
 }
 if (/tmux-leak-scan: FAIL/.test(logText)) outOfScope.push({ file: null, reason: "leak-residual" });
 if (inScope.length === 0 && outOfScope.length === 0 && /run_static_checks|static-check/i.test(logText)) outOfScope.push({ file: null, reason: "checker-misreport" });
-process.stdout.write(JSON.stringify({ scoped: globs !== null, inScope, outOfScope }));' "$fix_scope_touches" "${worktree}" "$fix_scope_log" 2>&1) || { echo "FIX_SCOPE_NOT_EVALUATED=1"; fix_scope_out=""; }
+try { if (releaseLedger) fs.writeFileSync(releaseLedger, JSON.stringify(prior)); } catch (e) {}
+process.stdout.write(JSON.stringify({ scoped: globs !== null, inScope, outOfScope }));' "$fix_scope_touches" "${worktree}" "$fix_scope_log" "$fix_scope_release" 2>&1) || { echo "FIX_SCOPE_NOT_EVALUATED=1"; fix_scope_out=""; }
 echo "FIX_SCOPE_VERDICT=$fix_scope_out"
 # fix-scope-gate-block-end
 判定（读上面的 FIX_SCOPE_VERDICT JSON）：
 - inScope 里的失败 = 本任务 Touches 内的回归 ⇒ 只修这些文件；禁止触碰 outOfScope 里列出的任何文件。
 - outOfScope 里的失败 = 越界红，一律不修：
-    * reason=load-sensitive（in_family，kind 已标注）⇒ 释放：不修，note 里写「load-sensitive 释放，隔离重跑确认」。
+    * reason=load-sensitive（in_family，kind 已标注，携带 releasedRounds = 已连续 release 的轮数含本轮）⇒ 释放：不修。⛔ 幂等持久：同一 load-sensitive 红无论 relaunch 几轮都【继续 release】，任何一轮都不得转 fix——relaunch 后仍红 ⇒ 仍 release（不是「重跑确认后改修」）。releasedRounds ≥ 1 的项本轮仍 release，note 里写「load-sensitive 释放（第 N 轮，幂等持久），⛔ 不得转 fix」，N = releasedRounds 的值。release 落账由 gate 自动持久化到 fix_scope_release ledger（跨 relaunch 轮次递增），下一轮 gate 会读到 releasedRounds 递增——这是机制保证，不是靠记性。
     * reason=checker-misreport ⇒ defer：不修，note 里要求 defer 独立任务。
     * reason=other-task / leak-residual ⇒ 别任务 bug / 环境残留：不修，note 里要求 defer 独立任务。
 - FIX_SCOPE_NOT_EVALUATED=1 ⇒ fail-closed：本任务不修任何失败，全部 defer（无法评估 ≠ 合格）。
-修完 inScope 后照常重新启动全量 suite。返回的 failuresFixed 只列 inScope 修复；越界 defer/release 写进 note。`
+修完 inScope 后照常重新启动全量 suite。返回的 failuresFixed 只列 inScope 修复；越界 defer/release 写进 note。relaunch 后 suite 仍红的 load-sensitive 红 ⇒ 仍按本 gate release，⛔ 绝不转 fix。`
 
 // ── 脚本控制流的 suite 等待：不把等待决策交给任何 agent（ab380c5e / execute-suite-fix.js）──────
 // 轮询 agent 只读 exit marker；命中则补全 capture 的 post 字段。等待间隔由脚本 setTimeout 决定。
