@@ -1,7 +1,7 @@
 ---
 id: gap-quay-init-check-drift-merge-into-drift-report
 title: "check-drift.test.mjs 并入 drift-report.test.mjs——同一 gap 重复覆盖，退休 check-drift 省 ~370s/轮"
-status: ready
+status: done
 labels:
   - gap
   - performance
