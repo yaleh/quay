@@ -39,7 +39,9 @@ extra:
 
 - tasks/gap-inflight-states-missing-impl-complete-event.md（自身）
 - plugin/scripts/workflow-event-schema.mjs（impl-complete 事件 schema）
+- experiments/quay-perpetual-stream/scripts/workflow-event-schema.mjs（workflow-event-schema.mjs 的 experiments/ 镜像）
 - plugin/workflows/fan-in-execute.js（impl 完成后写 impl-complete；双拷贝同步 .claude/workflows/fan-in-execute.js）
+- .claude/workflows/fan-in-execute.js（fan-in-execute.js 双拷贝同步）
 - plugin/scripts/slot-refill.ts（Build 派发数「有 start 无 impl-complete」，删 --slot-status 推导）
 - plugin/scripts/fast-mode-telemetry.ts（--reconcile 删 keepReason: worktree-present 推断）
 - packages/quay/src/observation.ts（pairInFlight 读 impl-complete 两段）
