@@ -1,7 +1,7 @@
 ---
 id: gap-ac101-lane-concurrency-control-round
 title: AC101 600s 根因对照轮——QUAY_MAX_CONCURRENT_SUITES=1 的 lane 对照实验（serial+main 556s=93% 预算，S=2 默认砍半并发与裁定方向相反）
-status: ready
+status: done
 labels:
   - gap
   - experiment
@@ -44,15 +44,30 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: 对照轮跑完——同 commit、`QUAY_MAX_CONCURRENT_SUITES=1` 的单 suite 全量，serial/main 两相墙钟 + 总墙钟 + verification-round durationMs 记录在案。
-- [ ] AC2: 判定有产出：≤600s ⇒ 改默认 S=2→1 并落地；>600s ⇒ 记录 serial 301s 的候选路径（文件级清单）为下一候选，不空转。
-- [ ] AC3: **对照轮与基线两侧均经 `full-suite-runner` 直调**（同一 writer/同口径——rich-schema 相字段 + nproc/concurrentSuiteSlots 两侧都有）；**不依赖** `gap-fan-in-suite-duration-poll-granularity-inflation` / `gap-fan-in-verification-round-thin-schema-phase-gap`（两者只影响 fan-in 写入路径，对直调路径不适用）；不用 fan-in 落地行做基线（round227 落噪声带）。
-- [ ] AC4: 对照轮不误伤正常 fan-in（单次实验轮，不并发；与在飞 fan-in suite 不并行）。
-- [ ] AC5: 测试全绿 + `--for-task` scoped 门绿（若改默认）。
+- [x] AC1: 对照轮跑完——同 commit、`QUAY_MAX_CONCURRENT_SUITES=1` 的单 suite 全量，serial/main 两相墙钟 + 总墙钟 + verification-round durationMs 记录在案。
+- [x] AC2: 判定有产出：≤600s ⇒ 改默认 S=2→1 并落地；>600s ⇒ 记录 serial 301s 的候选路径（文件级清单）为下一候选，不空转。
+- [x] AC3: **对照轮与基线两侧均经 `full-suite-runner` 直调**（同一 writer/同口径——rich-schema 相字段 + nproc/concurrentSuiteSlots 两侧都有）；**不依赖** `gap-fan-in-suite-duration-poll-granularity-inflation` / `gap-fan-in-verification-round-thin-schema-phase-gap`（两者只影响 fan-in 写入路径，对直调路径不适用）；不用 fan-in 落地行做基线（round227 落噪声带）。
+- [x] AC4: 对照轮不误伤正常 fan-in（单次实验轮，不并发；与在飞 fan-in suite 不并行）。
+- [x] AC5: 测试全绿 + `--for-task` scoped 门绿（若改默认）。**N/A — 判定 >600s，未改默认，条件「若改默认」不触发。**
 
 ## Definition of Done
 
-- [ ] S=1 对照轮跑完并给出判定（改默认或转 serial 候选），AC101 600s 目标有真实数据支撑的下一步，scoped + 全量绿（若改默认）。
+- [x] S=1 对照轮跑完并给出判定（改默认或转 serial 候选），AC101 600s 目标有真实数据支撑的下一步，scoped + 全量绿（若改默认）。
+
+## Evidence
+
+对照轮两侧均经 `full-suite-runner` 直调（同 commit `d5d4835c`、同 nproc=16、`QUAY_PHASE_OVERLAP=0` 两侧固定同值），verification-round.jsonl rich-schema 记录（`<worktree>/.quay/verification-round.jsonl`）：
+
+| | S=2 基线 | S=1 对照 |
+|---|---|---|
+| durationMs | 1750753 (1750.8s) | **872413 (872.4s)** |
+| laneCount / concurrentSuiteSlots / concurrentSuitesRunning | 8 / 2 / 1 | 16 / 1 / 1 |
+| static / serial / lowconc / main phase_ms | 85617 / 590264 / 427767 / 598388 | 50615 / 281044 / 183617 / 312178 |
+| tests | 5214 (fail 1) | 5214 (fail 5) |
+
+**判定（AC2）**：S=1 总墙钟 872.4s **>600s** ⇒ 不落 S=2→1 默认，记录 serial 候选路径为下一候选（文件级清单在 `experiments/quay-perpetual-stream/lane-concurrency-control-round.md`）。S=1 提供 50.2% 总提速（三相全提速：serial 590→281、main 598→312、lowconc 428→184），证实「S=2 默认砍半并发与裁定方向相反」的根因判断，但单靠 S 不够 600s（manager 08-18 补强判据「S=1 单独达不到 600s」获证）。
+
+**失败均为 environmental 非 develop 代码缺陷**：S=2 基线 fail 1 = `tmux-leak-scan.test.mjs`（环境 tmux 残留）；S=1 对照 fail 5 = 5 个测试 fixture 硬编码 S=2 期望，在 `QUAY_MAX_CONCURRENT_SUITES=1` 下断言 S=2 行为（TS 侧 `suiteLockSlotCount()` 不 honor `RESOURCE_GATE_CONCURRENT_SUITES` seam——改默认前必须先补，见记录文件「附加发现」）。
 
 ## Touches
 

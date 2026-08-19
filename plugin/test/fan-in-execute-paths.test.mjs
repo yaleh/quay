@@ -57,7 +57,7 @@ async function runWorkflow(opts) {
   const src = fs.readFileSync(WORKFLOW, "utf8");
   const body = src.replace(/^export\s+const\s+meta/m, "const meta");
   const wrapped = "(async () => {\n" + body + "\n})()";
-  const captured = { prompts: [], schemas: [], phases: [], logs: [] };
+  const captured = { prompts: [], schemas: [], phases: [], logs: [], delays: [] };
   // Default agent sequence: drive the GREEN path (phase1 suite-started → poll done exit0 → phase2 green),
   // so tests that only extract blocks from the emitted prompts still exercise the full multi-agent flow.
   const defaultResults = [
@@ -69,7 +69,9 @@ async function runWorkflow(opts) {
     console,
     // Fast-forward the script-owned suite waits (the workflow's setTimeout IS the poll interval;
     // the turn-budget fix moves the wait out of subagent turns into script control flow).
-    setTimeout: (fn, _ms) => setTimeout(fn, 0),
+    // Record the DELAY value passed to each setTimeout so firstDelayMs/pollIntervalMs sequencing
+    // is observable (gap-fan-in-execute-poll-cost-firstdelay-agenttype).
+    setTimeout: (fn, _ms) => { captured.delays.push(_ms); setTimeout(fn, 0); },
     clearTimeout,
     args: JSON.stringify(opts.args),
     phase: (...a) => captured.phases.push(...a),
@@ -1817,6 +1819,52 @@ test("⑩ REAL 有界阻塞等待 — marker 中途出现时，轮询在【一�
   assert.equal(r.status, 0, `poll block failed: ${r.stderr}`);
   assert.match(r.stdout, /POLL=done SUITE_EXIT=0/, `poll must find the marker mid-block (bounded wait), got: ${r.stdout}`);
   assert.ok(elapsed >= 800, `the poll must have BLOCKED waiting (elapsed ${elapsed}ms); an instant not-done return is the N-empty-poll shape this fixes`);
+});
+
+// ── ⑩b firstDelayMs 起轮延迟（gap-fan-in-execute-poll-cost-firstdelay-agenttype AC1/AC3）──────────
+// THE DEFECT: suite 已测下界 11min（674-1138s），却从 t=60s 起轮 ⇒ 头 11-15 次结构上必然 not-done
+// 纯空转（~21 次/轮）。FIX: firstDelayMs（默认 660s）让首轮 setTimeout 从 660s 起，后续回到
+// pollIntervalMs。pollIntervalMs=0 测试 seam 照旧可用（firstDelayMs 也可经 args 覆盖）。
+
+test("⑩b firstDelayMs — the FIRST suite-wait uses firstDelayMs (default 660s), subsequent use pollIntervalMs (AC1 取假)", async (t) => {
+  const { result, delays } = await runWorkflow({
+    args: { task: "gap-test-firstdelay", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-firstdelay", mergeTarget: "develop" },
+    agentResults: [
+      { outcome: "suite-started", suitePid: 111, codeDelta: "code", worktreeHead: "h1", note: "" }, // phase 1
+      { done: false, suiteExit: null },                                                             // poll 1 (not done)
+      { done: false, suiteExit: null },                                                             // poll 2 (not done)
+      { done: true, suiteExit: 0 },                                                                 // poll 3 (green)
+      { outcome: "green", ffOk: true, developHead: "d1", worktreeHead: "h1", agentIdUsed: "a1", codeDelta: "code", note: "bracketClose=OK", bracketClosed: true },
+    ],
+  });
+  assert.equal(result.outcome, "green");
+  // 3 polls ⇒ 3 setTimeout delays: [firstDelayMs(660s), pollIntervalMs(60s), pollIntervalMs(60s)].
+  // 取假: 若首轮仍用 pollIntervalMs(60s)，delays[0] 会是 60000 而非 660000 ⇒ 此断言红。
+  assert.deepEqual(delays, [660_000, 60_000, 60_000], `first delay must be firstDelayMs, then pollIntervalMs; got ${JSON.stringify(delays)}`);
+});
+
+test("⑩b firstDelayMs override — firstDelayMs is args-overridable AND pollIntervalMs=0 still zeroes subsequent waits (AC1 seam)", async (t) => {
+  const { result, delays } = await runWorkflow({
+    args: { task: "gap-test-firstdelay0", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-firstdelay0", mergeTarget: "develop", firstDelayMs: 1234, pollIntervalMs: 0, maxSuitePolls: 5 },
+    agentResults: [
+      { outcome: "suite-started", suitePid: 111, codeDelta: "code", worktreeHead: "h1", note: "" },
+      { done: false, suiteExit: null },
+      { done: true, suiteExit: 0 },
+      { outcome: "green", ffOk: true, developHead: "d1", worktreeHead: "h1", agentIdUsed: "a1", codeDelta: "code", note: "bracketClose=OK", bracketClosed: true },
+    ],
+  });
+  assert.equal(result.outcome, "green");
+  assert.deepEqual(delays, [1234, 0], `firstDelayMs overridable (1234) + pollIntervalMs=0 seam (0); got ${JSON.stringify(delays)}`);
+});
+
+// ── ⑩c suite-poller agentType（gap-fan-in-execute-poll-cost-firstdelay-agenttype AC2，暂缓）───────
+// NOTE: agentType='suite-poller' 的 wiring 已 revert（.claude/agents 新目录 watcher 不加载、需 session 重启），
+// 只保留 definition test（定义文件仍在、inert）；wiring 留 session 重启后单独落地。
+
+test("⑩c suite-poller definition — .claude/agents/suite-poller.md declares only the Bash tool (AC2)", () => {
+  const agentDef = fs.readFileSync(path.join(REPO_ROOT, ".claude", "agents", "suite-poller.md"), "utf8");
+  assert.match(agentDef, /^name:\s*suite-poller\s*$/m, "frontmatter name must be suite-poller");
+  assert.match(agentDef, /^tools:\s*Bash\s*$/m, "tools must be restricted to Bash only (the ~64k tool-schema cut)");
 });
 
 // ── fix-scope gate（gap-fix-scope-gate-wired-to-wrong-path）───────────────────────────────────────

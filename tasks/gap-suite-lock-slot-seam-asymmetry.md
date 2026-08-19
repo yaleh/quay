@@ -1,7 +1,7 @@
 ---
 id: gap-suite-lock-slot-seam-asymmetry
 title: "suite 槽数 seam 不对称——suiteLockSlotCount() 读 QUAY_MAX_CONCURRENT_SUITES 不读 RESOURCE_GATE_CONCURRENT_SUITES，QUAY_MAX=1 破 5 fixture 硬编码 S=2"
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
