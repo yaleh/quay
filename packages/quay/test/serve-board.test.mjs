@@ -12,7 +12,7 @@
 // Run (scoped): node --test packages/quay/test/serve-board.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
@@ -20,6 +20,7 @@ import os from "node:os";
 import net from "node:net";
 import http from "node:http";
 import { startServer } from "../src/serve.ts";
+import { readBoardExecution, runProcessAliveSync } from "../src/observation.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 import { createStore } from "../../quay-native/src/store.ts";
 
@@ -92,6 +93,32 @@ const BD_BODY = (symbol, touches) =>
   `## Acceptance Criteria\n- [ ] \`${symbol}\` implemented and verified\n` +
   `## Definition of Done\n- [x] acceptance gate passes\n` +
   `## Touches\n- ${touches}\n`;
+
+/**
+ * gap-in-flight-liveness-worktree-proxy-not-process: spawn a detached keep-alive process whose
+ * cmdline carries the runId's distinctive tail, so the /proc liveness probe sees the run as ALIVE.
+ * Returns the ChildProcess (caller must SIGKILL it in finally). runId must end in a distinctive
+ * `<ts>-<rand>` tail (never a bare "1-1") so the probe's needle cannot match unrelated processes.
+ */
+function spawnLiveRun(runId) {
+  const p = spawn(process.execPath, ["-e", "setInterval(()=>{}, 1000)", runId], { detached: true, stdio: "ignore" });
+  p.unref();
+  return p;
+}
+
+/** Poll runProcessAliveSync until the spawned process shows up in /proc (bounded). */
+async function waitForLiveProcess(runId) {
+  for (let i = 0; i < 50; i++) {
+    if (runProcessAliveSync(runId) === true) return;
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  throw new Error(`test fixture: live process for ${runId} never became visible in /proc`);
+}
+
+/** A distinctive runId tail for fixtures — never a generic "1-1" that could match stray processes. */
+function distinctiveRunId(taskId) {
+  return `fm-${taskId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
 
 test("AC2: /board data-flag agrees with the drift checker per-task (reuse by construction)", async () => {
   const { ws, tasksDir } = makeWorkspace("board-ac2-");
@@ -213,33 +240,55 @@ test("AC5/AC6: three data sources visible; a missing source degrades to 200 (nev
   }
 });
 
-test("AC7/execution column: /board renders the execution (telemetry) column with in-flight + timeout flags", async () => {
+test("AC7/execution column: live run (process present) renders in-flight + timeout; process-dead run renders 孤儿 (not in-flight)", async () => {
   const { ws, tasksDir } = makeWorkspace("board-exec-");
   const cwd0 = process.cwd();
   let server;
+  const procs = [];
   try {
-    seed(tasksDir, "EX-1", { title: "In-flight", status: "todo", body: BD_BODY("exSymbol", "packages/quay/src/board-symbol.ts") });
+    seed(tasksDir, "EX-1", { title: "Orphan", status: "todo", body: BD_BODY("exOrphanSymbol", "packages/quay/src/board-symbol-a.ts") });
+    seed(tasksDir, "EX-2", { title: "In-flight", status: "todo", body: BD_BODY("exLiveSymbol", "packages/quay/src/board-symbol-b.ts") });
     fs.mkdirSync(path.join(ws, "packages/quay/src"), { recursive: true });
-    fs.writeFileSync(path.join(ws, "packages/quay/src/board-symbol.ts"), "export const exSymbol = 1;\n");
-    // Telemetry: EX-1 started 100 minutes ago, no end → in-flight-timeout (90-min threshold).
+    fs.writeFileSync(path.join(ws, "packages/quay/src/board-symbol-a.ts"), "export const exOrphanSymbol = 1;\n");
+    fs.writeFileSync(path.join(ws, "packages/quay/src/board-symbol-b.ts"), "export const exLiveSymbol = 1;\n");
+
+    // EX-2: started 100 minutes ago, no end, WITH a live process carrying the runId → in-flight-timeout.
+    const liveRunId = distinctiveRunId("EX-2");
+    const liveProc = spawnLiveRun(liveRunId);
+    procs.push(liveProc);
+    await waitForLiveProcess(liveRunId);
+    // EX-1: started 100 minutes ago, no end, NO live process → orphan, NOT in-flight-timeout.
+    const orphanRunId = distinctiveRunId("EX-1");
+
     const eventsDir = path.join(ws, ".workflow-events");
     fs.mkdirSync(eventsDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(eventsDir, "fm-EX-1.jsonl"),
-      JSON.stringify({ schemaVersion: "1", runId: "fm-EX-1-1", candidateId: "EX-1", taskId: "EX-1", stage: "Fast", attempt: 0, eventKind: "start", timing: { queuedAtMs: null, startedAtMs: Date.now() - 100 * 60_000, endedAtMs: null }, agentLabel: "fast-mode", commandIdentity: "fast-mode-telemetry:task-start", executionCwd: ws, worktreePath: null, baseCommit: null, candidateCommit: null, outcome: null, waitReason: null, resourceClaim: null, observedWrites: [], isolationMode: null, dispatchMode: "serial", recordedAtMs: Date.now() - 100 * 60_000 }) + "\n"
-    );
+    const startEvent = (runId, taskId, startedAtMs) =>
+      JSON.stringify({ schemaVersion: "1", runId, candidateId: taskId, taskId, stage: "Fast", attempt: 0, eventKind: "start", timing: { queuedAtMs: null, startedAtMs, endedAtMs: null }, agentLabel: "fast-mode", commandIdentity: "fast-mode-telemetry:task-start", executionCwd: ws, worktreePath: null, baseCommit: null, candidateCommit: null, outcome: null, waitReason: null, resourceClaim: null, observedWrites: [], isolationMode: null, dispatchMode: "serial", recordedAtMs: startedAtMs }) + "\n";
+    const startedAt = Date.now() - 100 * 60_000;
+    fs.writeFileSync(path.join(eventsDir, "fm-EX-1.jsonl"), startEvent(orphanRunId, "EX-1", startedAt));
+    fs.writeFileSync(path.join(eventsDir, "fm-EX-2.jsonl"), startEvent(liveRunId, "EX-2", startedAt));
 
     const port = await freePort();
     process.chdir(ws);
     server = await startServer({ port });
     const board = await get(port, "/board");
     assert.equal(board.status, 200, "AC7: /board 200 with telemetry present");
-    assert.ok(board.body.includes("在飞"), "AC7: execution column shows the in-flight marker");
-    assert.ok(board.body.includes("EX-1"), "AC7: execution column renders the in-flight task id");
-    const exRow = board.body.split("</tr>").find((r) => r.includes(">EX-1<"));
-    assert.ok(exRow && /data-exec-flag="[^"]*in-flight-timeout/.test(exRow),
-      "AC7: EX-1 row carries data-exec-flag containing in-flight-timeout");
+    // EX-2 (live process) is in-flight: renders 在飞 minutes + timeout flag.
+    assert.ok(board.body.includes("在飞"), "AC7: execution column shows the in-flight marker for the live run");
+    const ex2Row = board.body.split("</tr>").find((r) => r.includes(">EX-2<"));
+    assert.ok(ex2Row && /data-exec-flag="[^"]*in-flight-timeout/.test(ex2Row),
+      "AC7: EX-2 (live process) row carries data-exec-flag containing in-flight-timeout");
+    assert.ok(ex2Row && ex2Row.includes("在飞 "), "AC7: EX-2 renders as 在飞 minutes");
+    // EX-1 (no live process) is orphan: flagged orphan, NOT in-flight-timeout, NO 在飞 minutes.
+    const ex1Row = board.body.split("</tr>").find((r) => r.includes(">EX-1<"));
+    assert.ok(ex1Row && /data-exec-flag="[^"]*orphan/.test(ex1Row),
+      "AC7: EX-1 (no live process) row carries data-exec-flag containing orphan");
+    assert.ok(!ex1Row.includes("in-flight-timeout"), "AC7: an orphan is NOT flagged in-flight-timeout");
+    assert.ok(!ex1Row.includes("在飞 "), "AC7: an orphan does NOT render as 在飞 minutes");
+    // The exec summary counts ONLY the live in-flight run.
+    assert.ok(board.body.includes("1 实现中"), "AC7: exec summary counts the single live in-flight run");
   } finally {
+    for (const p of procs) { try { process.kill(p.pid, "SIGKILL"); } catch { /* already gone */ } }
     process.chdir(cwd0);
     if (server) { server.close(); if (server.client) await server.client.close(); }
     fs.rmSync(ws, { recursive: true, force: true });
@@ -255,6 +304,7 @@ test("AC8/execution column: /board renders implementing vs awaiting-land as two 
   const { ws, tasksDir } = makeWorkspace("board-impl-");
   const cwd0 = process.cwd();
   let server;
+  const procs = [];
   try {
     seed(tasksDir, "IM-1", { title: "Implementing", status: "todo", body: BD_BODY("imSymbol", "packages/quay/src/board-symbol-a.ts") });
     seed(tasksDir, "AL-1", { title: "Awaiting-land", status: "todo", body: BD_BODY("alSymbol", "packages/quay/src/board-symbol-b.ts") });
@@ -265,13 +315,24 @@ test("AC8/execution column: /board renders implementing vs awaiting-land as two 
     const eventsDir = path.join(ws, ".workflow-events");
     fs.mkdirSync(eventsDir, { recursive: true });
     const now = Date.now();
+    const imRunId = distinctiveRunId("IM-1");
+    const alRunId = distinctiveRunId("AL-1");
+    // Both runs carry a LIVE process (gap-in-flight-liveness-worktree-proxy-not-process: without a
+    // live process they'd be orphans, not in-flight — the impl-complete boundary test needs them
+    // to stay in the in-flight display).
+    procs.push(spawnLiveRun(imRunId));
+    procs.push(spawnLiveRun(alRunId));
+    await waitForLiveProcess(imRunId);
+    await waitForLiveProcess(alRunId);
+    const startEvent = (runId, taskId, startedAtMs) =>
+      JSON.stringify({ schemaVersion: "1", runId, candidateId: taskId, taskId, stage: "Fast", attempt: 0, eventKind: "start", timing: { queuedAtMs: null, startedAtMs, endedAtMs: null }, agentLabel: "fast-mode", commandIdentity: "fast-mode-telemetry:task-start", executionCwd: ws, worktreePath: null, baseCommit: null, candidateCommit: null, outcome: null, waitReason: null, resourceClaim: null, observedWrites: [], isolationMode: null, dispatchMode: "serial", recordedAtMs: startedAtMs }) + "\n";
+    const implCompleteEvent = (runId, taskId, recordedAtMs) =>
+      JSON.stringify({ schemaVersion: "1", runId, candidateId: taskId, taskId, stage: "Fast", attempt: 0, eventKind: "impl-complete", timing: { queuedAtMs: null, startedAtMs: null, endedAtMs: null }, agentLabel: "fast-mode", commandIdentity: "fast-mode-telemetry:impl-complete", executionCwd: ws, worktreePath: null, baseCommit: null, candidateCommit: null, outcome: null, waitReason: null, resourceClaim: null, observedWrites: [], isolationMode: null, dispatchMode: "serial", recordedAtMs }) + "\n";
     // IM-1: start only ⇒ implementing.
-    fs.writeFileSync(path.join(eventsDir, "fm-IM-1.jsonl"),
-      JSON.stringify({ schemaVersion: "1", runId: "fm-IM-1-1", candidateId: "IM-1", taskId: "IM-1", stage: "Fast", attempt: 0, eventKind: "start", timing: { queuedAtMs: null, startedAtMs: now - 10 * 60_000, endedAtMs: null }, agentLabel: "fast-mode", commandIdentity: "fast-mode-telemetry:task-start", executionCwd: ws, worktreePath: null, baseCommit: null, candidateCommit: null, outcome: null, waitReason: null, resourceClaim: null, observedWrites: [], isolationMode: null, dispatchMode: "serial", recordedAtMs: now - 10 * 60_000 }) + "\n");
+    fs.writeFileSync(path.join(eventsDir, "fm-IM-1.jsonl"), startEvent(imRunId, "IM-1", now - 10 * 60_000));
     // AL-1: start + impl-complete (no end) ⇒ awaiting-land.
     fs.writeFileSync(path.join(eventsDir, "fm-AL-1.jsonl"),
-      JSON.stringify({ schemaVersion: "1", runId: "fm-AL-1-1", candidateId: "AL-1", taskId: "AL-1", stage: "Fast", attempt: 0, eventKind: "start", timing: { queuedAtMs: null, startedAtMs: now - 20 * 60_000, endedAtMs: null }, agentLabel: "fast-mode", commandIdentity: "fast-mode-telemetry:task-start", executionCwd: ws, worktreePath: null, baseCommit: null, candidateCommit: null, outcome: null, waitReason: null, resourceClaim: null, observedWrites: [], isolationMode: null, dispatchMode: "serial", recordedAtMs: now - 20 * 60_000 }) + "\n" +
-      JSON.stringify({ schemaVersion: "1", runId: "fm-AL-1-1", candidateId: "AL-1", taskId: "AL-1", stage: "Fast", attempt: 0, eventKind: "impl-complete", timing: { queuedAtMs: null, startedAtMs: null, endedAtMs: null }, agentLabel: "fast-mode", commandIdentity: "fast-mode-telemetry:impl-complete", executionCwd: ws, worktreePath: null, baseCommit: null, candidateCommit: null, outcome: null, waitReason: null, resourceClaim: null, observedWrites: [], isolationMode: null, dispatchMode: "serial", recordedAtMs: now - 5 * 60_000 }) + "\n");
+      startEvent(alRunId, "AL-1", now - 20 * 60_000) + implCompleteEvent(alRunId, "AL-1", now - 5 * 60_000));
 
     const port = await freePort();
     process.chdir(ws);
@@ -288,8 +349,94 @@ test("AC8/execution column: /board renders implementing vs awaiting-land as two 
     assert.ok(imRow && !imRow.includes("待落地"), "AC8: the implementing task row does NOT show 待落地");
     assert.ok(imRow && imRow.includes("在飞"), "AC8: the implementing task still shows the in-flight marker");
   } finally {
+    for (const p of procs) { try { process.kill(p.pid, "SIGKILL"); } catch { /* already gone */ } }
     process.chdir(cwd0);
     if (server) { server.close(); if (server.client) await server.client.close(); }
     fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+// gap-in-flight-liveness-worktree-proxy-not-process AC2/AC3 — negative control on the PRODUCTION
+// carrier. A real task with 「worktree 存在 + status=ready + 无活进程」:
+//   * display granularity (process-level liveness): readBoardExecution / /board classify it as
+//     orphan — NOT in-flight (the worktree's existence is no longer treated as an in-flight signal);
+//   * telemetry/reconcile granularity: --slot-status --json still classifies the bracket via its OWN
+//     existing probe (processAlive / subagent transcript / branch-merged — the reconcile retention
+//     criteria are UNCHANGED, AC3), and the worktree is still present.
+// Two granularities coexist without mixing. NOTE: the task body's a8 snapshot showed --reconcile
+// keeping brackets via `worktree-present`; that probe was RETIRED by
+// gap-inflight-states-missing-impl-complete-event (a927d7e5) — the impl-complete event is now the
+// state record. What survives is the PRINCIPLE AC2/AC3 pin: the display's process liveness is
+// independent of reconcile's retention, and this change does not touch the latter.
+test("AC2/AC3 negative control: worktree exists + status=ready + no live process ⇒ NOT in-flight (display), reconcile retention unchanged", async () => {
+  const { ws, tasksDir } = makeWorkspace("board-neg-");
+  const cwd0 = process.cwd();
+  let server;
+  let wtPath = null;
+  try {
+    seed(tasksDir, "LV-1", { title: "Worktree but no process", status: "ready", body: BD_BODY("lvSymbol", "packages/quay/src/board-symbol.ts") });
+    fs.mkdirSync(path.join(ws, "packages/quay/src"), { recursive: true });
+    fs.writeFileSync(path.join(ws, "packages/quay/src/board-symbol.ts"), "export const lvSymbol = 1;\n");
+
+    // A REAL git worktree on task/LV-1 with an unmerged commit inside it → worktreeExists=true and
+    // isBranchMerged=false (so reconcile's existing probe falls through to executor-gone, the
+    // deterministic unchanged-verdict for a no-process bracket).
+    wtPath = `${ws}-wt`;
+    execFileSync("git", ["-C", ws, "worktree", "add", "-b", "task/LV-1", wtPath], { stdio: "ignore" });
+    fs.writeFileSync(path.join(wtPath, "lv-impl.txt"), "implemented in the worktree\n");
+    execFileSync("git", ["-C", wtPath, "-c", "user.email=test@test", "-c", "user.name=test", "add", "."], { stdio: "ignore" });
+    execFileSync("git", ["-C", wtPath, "-c", "user.email=test@test", "-c", "user.name=test", "commit", "-q", "-m", "impl"], { stdio: "ignore" });
+
+    // Telemetry: LV-1 started, no end, runId with a distinctive tail, NO live process.
+    const runId = distinctiveRunId("LV-1");
+    const eventsDir = path.join(ws, ".workflow-events");
+    fs.mkdirSync(eventsDir, { recursive: true });
+    const startedAt = Date.now() - 10 * 60_000;
+    fs.writeFileSync(
+      path.join(eventsDir, "fm-LV-1.jsonl"),
+      JSON.stringify({ schemaVersion: "1", runId, candidateId: "LV-1", taskId: "LV-1", stage: "Fast", attempt: 0, eventKind: "start", timing: { queuedAtMs: null, startedAtMs: startedAt, endedAtMs: null }, agentLabel: "fast-mode", commandIdentity: "fast-mode-telemetry:task-start", executionCwd: ws, worktreePath: null, baseCommit: null, candidateCommit: null, outcome: null, waitReason: null, resourceClaim: null, observedWrites: [], isolationMode: null, dispatchMode: "serial", recordedAtMs: startedAt }) + "\n"
+    );
+
+    // 1) Display granularity — process-level liveness says NON in-flight (orphan).
+    const exec = await readBoardExecution(ws, { nowMs: Date.now() });
+    assert.ok(!exec.inFlight.some((t) => t.taskId === "LV-1"),
+      "AC2: worktree+ready+no-process task is NOT in the board's in-flight list");
+    const lvFlags = exec.flags.get("LV-1");
+    assert.ok(lvFlags && lvFlags.has("orphan"), "AC2: the task is flagged orphan (process observably gone)");
+    assert.ok(!(lvFlags && lvFlags.has("in-flight-timeout")), "AC2: an orphan is not also in-flight-timeout");
+
+    // 2) The process-liveness reading is effective against the REAL /board output.
+    const port = await freePort();
+    process.chdir(ws);
+    server = await startServer({ port });
+    const board = await get(port, "/board");
+    assert.equal(board.status, 200, "AC2: /board 200");
+    const lvRow = board.body.split("</tr>").find((r) => r.includes(">LV-1<"));
+    assert.ok(lvRow && /data-exec-flag="[^"]*orphan/.test(lvRow), "AC2: /board renders LV-1 as 孤儿");
+    assert.ok(!lvRow.includes("在飞 "), "AC2: /board does NOT render LV-1 as in-flight minutes");
+    assert.ok(board.body.includes("0 实现中"), "AC2: exec summary counts 0 implementing (orphan excluded from in-flight)");
+
+    // 3) Telemetry/reconcile granularity — UNCHANGED (AC3): --slot-status still classifies the
+    //    bracket via the existing executor-gone probe (stale/closed for a no-process, unmerged-branch
+    //    run), exposes per-bracket process liveness, and the worktree is still present.
+    const telemetryBin = path.join(__dirname, "..", "..", "..", "plugin", "scripts", "fast-mode-telemetry.ts");
+    const slotOut = execFileSync("node", ["--experimental-strip-types", telemetryBin, "--slot-status", "--cap", "5", "--json", "--root", ws], { cwd: ws, encoding: "utf8", timeout: 60_000, stdio: ["ignore", "pipe", "ignore"] });
+    const slot = JSON.parse(slotOut);
+    const lvBracket = [...(slot.closed ?? []), ...(slot.kept ?? [])].find((r) => r.taskId === "LV-1");
+    assert.ok(lvBracket, "AC2: --slot-status still classifies the LV-1 bracket (reconcile probe unchanged)");
+    assert.equal(lvBracket.reconcileReason, "no-observable-executor",
+      "AC3: the existing probe's verdict is untouched (no new close condition added by this change)");
+    const livenessRow = (slot.bracket_liveness ?? []).find((r) => r.taskId === "LV-1");
+    assert.ok(livenessRow && livenessRow.process_alive === false,
+      "AC2: --slot-status exposes process_alive=false for LV-1 (the DoD-named real output)");
+    const wtList = execFileSync("git", ["-C", ws, "worktree", "list", "--porcelain"], { encoding: "utf8" });
+    assert.ok(wtList.includes("branch refs/heads/task/LV-1"),
+      "AC2: the task worktree is still present (retention/presence granularity unchanged)");
+  } finally {
+    try { if (wtPath) execFileSync("git", ["-C", ws, "worktree", "remove", "--force", wtPath], { stdio: "ignore" }); } catch { /* already removed */ }
+    process.chdir(cwd0);
+    if (server) { server.close(); if (server.client) await server.client.close(); }
+    fs.rmSync(ws, { recursive: true, force: true });
+    try { if (wtPath) fs.rmSync(wtPath, { recursive: true, force: true }); } catch { /* already gone */ }
   }
 });
