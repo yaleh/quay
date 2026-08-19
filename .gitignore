@@ -180,6 +180,11 @@ orchestration/inner-idle-log.jsonl
 # fan-in-ff-protocol-check.ts; never committed (same family as gate-events.jsonl).
 **/.quay/fan-in-merge-lock-events.jsonl
 **/.quay/fan-in-retries.jsonl
+# fan-in ff escalation record (gap-gitignore-fan-in-ff-escalations): the anti-livelock escalation
+# record is runtime state — written by fan-in-ff-merge.sh (SPEC §7), same family as
+# fan-in-retries.jsonl / gate-events.jsonl; never committed (untracked would dirty `git status
+# --porcelain` and trip fan-in-ff-merge.sh's own clean-tree check at exit 2).
+**/.quay/fan-in-ff-escalations.jsonl
 # AC72 cert retire (gap-ac72-cert-mechanism-retire): the per-task suite record is runtime state in
 # the SHARED checkout (written by per-task-suite-record.ts from a task worktree, read by
 # per-task-suite-record-check.ts); never committed (same family as full-suite-state.json).

@@ -1,7 +1,7 @@
 ---
 id: gap-npm-file-copy-amortize
 title: "npm/文件复制类摊销——smoke-gate 3 test 重复 pack+install + capability-catalog 5 test 复制 261 脚本"
-status: ready
+status: done
 labels:
   - gap
   - performance
@@ -24,16 +24,17 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: smoke-gate 三个 test 摊销一次 npm pack+install（产物状态相同，只验证不同接入面）。
-- [ ] AC2: capability-catalog 摊销成 1 份共享只读基线 + 每 test 单文件 patch（不再 5×261 次全量复制）。
-- [ ] AC3: 机制不变（真跑 npm / 真跑 bash，不 mock），scoped 绿 + 负控制可信度不降（真实输出）。
+- [x] AC1: smoke-gate 三个 test 摊销一次 npm pack+install（产物状态相同，只验证不同接入面）。
+- [x] AC2: capability-catalog 摊销成 1 份共享只读基线 + 每 test 单文件 patch（不再 5×261 次全量复制）。
+- [x] AC3: 机制不变（真跑 npm / 真跑 bash，不 mock），scoped 绿 + 负控制可信度不降（真实输出）。
 
 ## Definition of Done
 
-- [ ] 两处摊销落地，npm/复制耗时显著下降、机制不变，scoped 绿（真实输出）。
+- [x] 两处摊销落地，npm/复制耗时显著下降、机制不变，scoped 绿（真实输出）。
 
 ## Touches
 
 - tasks/gap-npm-file-copy-amortize.md（自身）
 - packages/quay/test/delivery-standalone-smoke-gate.test.mjs（摊销 pack+install）
+- packages/quay/test/delivery-standalone-smoke.sh（smoke-gate 脚本，QUAY_DELIVERY_SMOKE_BASE 落点）
 - plugin/test/capability-catalog.test.mjs（摊销共享基线）
