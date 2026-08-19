@@ -36,4 +36,5 @@ extra:
 
 - tasks/gap-npm-file-copy-amortize.md（自身）
 - packages/quay/test/delivery-standalone-smoke-gate.test.mjs（摊销 pack+install）
+- packages/quay/test/delivery-standalone-smoke.sh（smoke-gate 脚本，QUAY_DELIVERY_SMOKE_BASE 落点）
 - plugin/test/capability-catalog.test.mjs（摊销共享基线）
