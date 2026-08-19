@@ -49,6 +49,73 @@ export function runNamespaceRoot(id = runIdOf()) {
 //   * A name-based batch kill of the session-liveness monitor (process-name `pkill` / `killall`)
 //     is FORBIDDEN in the cleanup path (invariant no_pkill_by_name_on_live = 1).
 //   * The residue-vs-in-use criterion is OWNER LIVENESS (dirHasLiveOwner), NOT name/path prefix.
+
+/** serverPidViaPaneEnv(dir) — the tmux SERVER's pid resolved from the pane CHILDREN's inherited
+ * `TMUX=<socket>,<serverPid>,<sessionId>` environ, or null when no such pane child remains. This is
+ * the FALLBACK that keeps the teardown hard-kill working when the server has CLOSED its listening
+ * socket but is STILL ALIVE: `serverPidOf`'s socket-inode mapping is gone the instant the socket
+ * closes, so a server that closed its socket and then hangs in its graceful-exit path (blocked on a
+ * pty close under suite load) is invisible to it and orphans forever — the leak this task closes
+ * (gap-session-liveness-teardown-ol-scd-d-residual: the teardown killed the pane children but not
+ * the self-built SESSION/server). The orphaned pane children keep the server pid in their inherited
+ * TMUX environ, which SURVIVES the socket close, so the pid stays recoverable. fs-only (reads
+ * /proc/<pid>/environ + /proc/<pid>/cmdline; the KILL is the CALLER's PID-targeted SIGKILL, never a
+ * name-based batch kill — invariant no_pkill_by_name_on_live = 1). The returned pid is verified to
+ * be a LIVE `tmux` server (argv[0] matches /tmux/): a DEAD/zombie server has an EMPTY cmdline, so a
+ * stale pid — or a pid the kernel has since REUSED for a non-tmux process — is rejected, which is
+ * what keeps this from re-introducing the orphan-claude-probe false-live-owner bug (2026-08-18
+ * full-suite red: 21 owner-dead dirs environ-marked by orphaned `claude-probe 10000`). */
+export function serverPidViaPaneEnv(dir) {
+  let abs;
+  try { abs = fs.realpathSync(dir); } catch { return null; }
+  try {
+    for (const p of fs.readdirSync("/proc").filter((n) => /^\d+$/.test(n))) {
+      let environ;
+      try { environ = fs.readFileSync(`/proc/${p}/environ`, "utf8"); } catch { continue; }
+      for (const kv of environ.split("\0")) {
+        if (!kv.startsWith("TMUX=")) continue;
+        const val = kv.slice("TMUX=".length); // <socket>,<serverPid>,<sessionId>
+        if (!val.startsWith(abs + "/")) continue;
+        const parts = val.split(",");
+        if (parts.length < 2 || !/^\d+$/.test(parts[1])) continue;
+        const spid = Number(parts[1]);
+        // Verify the SERVER pid is a LIVE tmux process: a dead/zombie server has an empty cmdline,
+        // and a reused pid would not have a `tmux` argv[0].
+        try {
+          const argv0 = fs.readFileSync(`/proc/${spid}/cmdline`, "utf8").split("\0")[0] ?? "";
+          if (/tmux/.test(argv0)) return spid;
+        } catch { /* server gone — keep scanning */ }
+      }
+    }
+  } catch { /* /proc unreadable */ }
+  return null;
+}
+
+// Module-level server-pid cache: dir (realpath) → server pid, populated by dirHasLiveOwner /
+// serverPidOf while the server's listening socket is STILL open. A server that closes its socket and
+// then hangs in its graceful-exit path (under suite load) is invisible to the socket-table lookup —
+// and its SIGHUP'd pane children may already be gone too — so the pane-env fallback alone cannot
+// always recover its pid. The CACHED pid, captured while the socket was open, is the last-resort
+// that still lets the teardown hard-kill SIGKILL it (gap-session-liveness-teardown-ol-scd-d-residual:
+// the teardown killed the pane children but not the self-built SESSION/server). Keyed by the
+// mkdtemp-unique dir, so a dir is never reused and a cached pid can never be mistaken for another
+// probe's server.
+const __serverPidCache = new Map();
+
+/** __liveCachedServerPid(abs) — the CACHED server pid for `abs` if it is STILL a live `tmux` server
+ * (argv[0] matches /tmux/), else null (a dead/zombie server has an empty cmdline and the entry is
+ * invalidated). fs-only. */
+function __liveCachedServerPid(abs) {
+  const cached = __serverPidCache.get(abs);
+  if (cached === undefined) return null;
+  try {
+    const argv0 = fs.readFileSync(`/proc/${cached}/cmdline`, "utf8").split("\0")[0] ?? "";
+    if (/tmux/.test(argv0)) return cached;
+  } catch { /* server gone */ }
+  __serverPidCache.delete(abs);
+  return null;
+}
+
 export function dirHasLiveOwner(dir) {
   // A live tmux server holds a unix socket under <dir>/sock (a hermetic probe started it with
   // TMUX_TMPDIR=<dir>/sock). /proc/net/unix lists only sockets bound by LIVE processes, so a stale
@@ -61,16 +128,24 @@ export function dirHasLiveOwner(dir) {
       const parts = line.trim().split(/\s+/);
       if (parts.length >= 8) { // num: ref protocol flags type st inode path
         const sock = parts.slice(7).join(" ");
-        if (sock.startsWith(abs + "/")) return true;
+        if (sock.startsWith(abs + "/")) {
+          // Resolve + cache the server pid while the socket is STILL open, so the teardown hard-kill
+          // can reach it even after the server closes its socket (and hangs) later.
+          if (!__serverPidCache.has(abs)) serverPidOf(abs);
+          return true;
+        }
       }
     }
-    // Socket table READ and NO live socket under the dir → owner-dead. The environ fallback below
-    // runs ONLY when this read FAILED (unreadable /proc/net/unix). It must NOT run here: a leaked
-    // pane CHILD (the `exec -a claude-probe sleep 10000` fixture) survives the server's death
-    // carrying the inherited TMUX_TMPDIR environ, and treating that orphan as a live owner left
-    // dead-server dirs unswept (2026-08-18 full-suite red: 21 residual session-liveness-* dirs,
-    // every one owner-dead but environ-marked by an orphaned `claude-probe 10000`).
-    return false;
+    // Socket table READ and NO live socket under the dir → the LISTENING socket is gone. A server
+    // that closed its socket but is STILL ALIVE (hanging in its graceful-exit path under suite load)
+    // is invisible to the socket table yet still leaks — resolve its pid via the CACHE (captured
+    // while the socket was open) or the pane CHILDREN's inherited TMUX environ (which SURVIVES the
+    // socket close), and treat a still-live server as a live owner. Both verify the server pid's
+    // /proc/<pid>/cmdline, so an orphaned pane CHILD whose server is DEAD is NOT a live owner (a
+    // dead/zombie server's cmdline is empty): the 2026-08-18 "21 owner-dead dirs environ-marked by
+    // orphaned claude-probe" bug does NOT recur. The TMUX_TMPDIR environ fallback below runs ONLY
+    // when this read FAILED (unreadable /proc/net/unix) — a last-resort that must never run here.
+    return __liveCachedServerPid(abs) !== null || serverPidViaPaneEnv(abs) !== null;
   } catch { /* /proc/net/unix unreadable — fall through to the environ check */ }
   try {
     const procs = fs.readdirSync("/proc").filter((n) => /^\d+$/.test(n));
@@ -98,6 +173,11 @@ export function dirHasLiveOwner(dir) {
 export function serverPidOf(dir) {
   let abs;
   try { abs = fs.realpathSync(dir); } catch { return null; }
+  // FAST PATH: the CACHED pid (captured while the socket was open) — verified still-live. This is
+  // what keeps the hard-kill able to reach a server that closed its socket (and whose panes may have
+  // already died) after the cache was populated.
+  const cached = __liveCachedServerPid(abs);
+  if (cached !== null) return cached;
   try {
     const netUnix = fs.readFileSync("/proc/net/unix", "utf8");
     const inodes = [];
@@ -108,22 +188,32 @@ export function serverPidOf(dir) {
         if (sock.startsWith(abs + "/")) inodes.push(parts[6]);
       }
     }
-    if (inodes.length === 0) return null;
-    for (const p of fs.readdirSync("/proc").filter((n) => /^\d+$/.test(n))) {
-      try {
-        const fdDir = `/proc/${p}/fd`;
-        for (const fd of fs.readdirSync(fdDir)) {
-          try {
-            const link = fs.readlinkSync(`${fdDir}/${fd}`);
-            for (const ino of inodes) {
-              if (link === `socket:[${ino}]`) return Number(p);
-            }
-          } catch { /* fd vanished mid-scan */ }
-        }
-      } catch { /* pid exited mid-scan */ }
+    if (inodes.length > 0) {
+      for (const p of fs.readdirSync("/proc").filter((n) => /^\d+$/.test(n))) {
+        try {
+          const fdDir = `/proc/${p}/fd`;
+          for (const fd of fs.readdirSync(fdDir)) {
+            try {
+              const link = fs.readlinkSync(`${fdDir}/${fd}`);
+              for (const ino of inodes) {
+                if (link === `socket:[${ino}]`) {
+                  __serverPidCache.set(abs, Number(p));
+                  return Number(p);
+                }
+              }
+            } catch { /* fd vanished mid-scan */ }
+          }
+        } catch { /* pid exited mid-scan */ }
+      }
     }
   } catch { /* /proc unreadable */ }
-  return null;
+  // FALLBACK (gap-session-liveness-teardown-ol-scd-d-residual): the socket inode is gone (the
+  // server closed its listening socket) but the server PROCESS may STILL be alive — hanging in its
+  // graceful-exit path under load. Resolve its pid via the pane children's inherited TMUX environ,
+  // which survives the socket close, so the teardown hard-kill can still SIGKILL it.
+  const viaEnv = serverPidViaPaneEnv(abs);
+  if (viaEnv !== null) __serverPidCache.set(abs, viaEnv);
+  return viaEnv;
 }
 
 /** panePidsOf(dir) — PIDs of the pane CHILDREN a hermetic probe spawned (the
