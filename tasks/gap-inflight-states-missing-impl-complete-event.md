@@ -1,7 +1,7 @@
 ---
 id: gap-inflight-states-missing-impl-complete-event
 title: "状态机缺「impl-complete」态——补第三个事件，解耦 worktree，Build 派发/落地单飞两个独立计数（删四处推断）"
-status: ready
+status: done
 labels:
   - gap
   - mechanism
