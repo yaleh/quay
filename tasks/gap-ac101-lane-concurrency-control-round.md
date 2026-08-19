@@ -48,7 +48,7 @@ extra:
 - [x] AC2: 判定有产出：≤600s ⇒ 改默认 S=2→1 并落地；>600s ⇒ 记录 serial 301s 的候选路径（文件级清单）为下一候选，不空转。
 - [x] AC3: **对照轮与基线两侧均经 `full-suite-runner` 直调**（同一 writer/同口径——rich-schema 相字段 + nproc/concurrentSuiteSlots 两侧都有）；**不依赖** `gap-fan-in-suite-duration-poll-granularity-inflation` / `gap-fan-in-verification-round-thin-schema-phase-gap`（两者只影响 fan-in 写入路径，对直调路径不适用）；不用 fan-in 落地行做基线（round227 落噪声带）。
 - [x] AC4: 对照轮不误伤正常 fan-in（单次实验轮，不并发；与在飞 fan-in suite 不并行）。
-- [ ] AC5: 测试全绿 + `--for-task` scoped 门绿（若改默认）。**N/A — 判定 >600s，未改默认，条件「若改默认」不触发。**
+- [x] AC5: 测试全绿 + `--for-task` scoped 门绿（若改默认）。**N/A — 判定 >600s，未改默认，条件「若改默认」不触发。**
 
 ## Definition of Done
 
