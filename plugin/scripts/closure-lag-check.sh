@@ -170,8 +170,21 @@ if [ "${mode}" = "close-task" ]; then
 
   run_id="${run_id_arg}"
   if [ -z "${run_id}" ]; then
-    run_id="$(node --no-warnings --experimental-strip-types "${SCRIPT_DIR}/fast-mode-telemetry.ts" --report --json --root "${repo_root}" 2>/dev/null \
-      | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{try{const r=JSON.parse(s);const id=process.argv[1];const f=(r.inProgress||[]).find(p=>p.taskId===id);if(f&&f.runId)process.stdout.write(f.runId)}catch(_){}});' "${task_id}")"
+    # gap-fan-in-closure-skips-task-end (under-write): the OLD lookup piped `--report --json`
+    # (a ~68KB payload in a real workspace) through `| node -e '…'` — a SHELL PIPE. The producer
+    # (fast-mode-telemetry.ts) calls process.exit() before its async stdout pipe writes flush, so
+    # the pipe truncates at 64KB (the pipe buffer) and JSON.parse throws ⇒ the lookup silently
+    # returned "" ⇒ --close-task treated "read failed" as "no open bracket" and skipped the write
+    # (start=1 end=0 — the 2 SSOT/phase-overlap brackets). `--run-id-for` prints ONE short line
+    # (the runId or ""), which cannot truncate, and does NOT run the per-task git history the
+    # --report path does (lighter). Fail-closed on lookup failure: a non-zero exit is a distinct
+    # "cannot evaluate" (硬规则 3b), never silently folded into "no open bracket".
+    lookup_rc=0
+    run_id="$(node --no-warnings --experimental-strip-types "${SCRIPT_DIR}/fast-mode-telemetry.ts" --run-id-for --taskId "${task_id}" --root "${repo_root}")" || lookup_rc=$?
+    if [ "${lookup_rc}" -ne 0 ]; then
+      echo "closure-lag-check: --close-task: failed to look up the open bracket's runId (--run-id-for exit ${lookup_rc}) — NOT treating as no-open-bracket" >&2
+      exit 2
+    fi
   fi
 
   if [ -z "${run_id}" ]; then

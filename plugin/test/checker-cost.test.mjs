@@ -1,12 +1,17 @@
 // @test-group serial
 // @load-sensitive child-spawn
 // @load-sensitive-entry 2026-08-10 child-spawn delay-dominates signal broke under lowconc c3 (round-51 silent passed=false @7542ms)
-// KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — AC2 asserts ms
-// MONOTONICITY (400→800→1200ms delay seams) across 3 child-process runs; node-startup jitter under
-// ANY concurrent load can break the delay-dominates signal. Round-51 (2026-08-10, suite-fix round-2)
-// passed=false @7542ms with NO assertion output under lowconc concurrency-3 (solo 8/8 green) — the
-// silent-failure child-spawn signature, same family as relation-sync/create-mcp/proposal-convergence/
-// branch-model/threshold-scope-check. Escalated lowconc→serial (concurrency 1 = no concurrent load).
+// KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — AC2 asserts the
+// DETERMINISTIC LOWER BOUND ms >= delayMs (500→1500→3000ms delay seams), NOT cross-subprocess ms
+// monotonicity. checker-cost.sh re-reads the clock AFTER `sleep delayMs`, so ms = command_time +
+// sleep >= delayMs (command_time >= 0, sleep >= requested) — a physically reliable lower bound.
+// The old MONOTONICITY assertion (ms[2] > ms[1] > ms[0]) broke under load: node --experimental-
+// strip-types startup jitter (~1.6s) exceeds the 1000/1500ms delay gaps across 3 independent
+// child-process spawns, so wall-clock ordering is not an invariant. Round-51 (2026-08-10, suite-fix
+// round-2) passed=false @7542ms with NO assertion output under lowconc concurrency-3 (solo 8/8
+// green) — the silent-failure child-spawn signature, same family as relation-sync/create-mcp/
+// proposal-convergence/branch-model/threshold-scope-check. Escalated lowconc→serial (concurrency 1
+// = no concurrent load) masked the jitter; the lower bound needs no such crutch.
 // GROUP NOTE (gap-serial-group-recompose-nested-runner-criterion, amended 2026-08-10): was routed to
 // `lowconc` (concurrency 3) on "needs LOW LOAD, not serial exclusivity"; round-51 disproved lowconc's
 // sufficiency — the delay-dominates signal broke even at concurrency-3. Serial guarantees no
@@ -210,12 +215,13 @@ test("AC1 — gateCostName extracts the executed script basename (all 14 gate sc
 test("AC2 — ready-pool-check run 3x (35.8→91.2→157.0) yields a readable cost+load sequence; same-n points distinguished by load", () => {
   const POOL = 3;
   const root = makePoolFixture("cc-ac2", POOL);
-  // Delays dominate the ready-pool-check command's own run-to-run jitter. The full suite runs 4
-  // concurrent lanes under a systemd CPUQuota=400% scope, so a machine-loaded run can stretch by
-  // several hundred ms — the previous 400/800/1200 gaps (400ms apart) let load jitter break the
-  // monotonic assertion (r285: "ms is monotonically increasing" failed once under load). Widen the
-  // gaps (1000/1500ms) so the recorded ms sequence stays strictly monotonic even under full-suite
-  // load while preserving the 35.8->91.2->157.0 readable shape, scaled down to test time.
+  // Each run's recorded ms is a DETERMINISTIC LOWER BOUND: checker-cost.sh sleeps delayMs AFTER the
+  // command and then re-reads the clock, so ms = command_time + sleep >= delayMs (command_time >= 0,
+  // sleep >= requested). We assert ms >= delayMs, never cross-subprocess ordering — node
+  // --experimental-strip-types startup jitter (~1.6s under full-suite load) exceeds the 1000/1500ms
+  // delay gaps, so "ms is monotonically increasing" across 3 independent spawns is NOT a physical
+  // invariant (r285 failed once under load). The 500/1500/3000 seams preserve the 35.8->91.2->157.0
+  // readable shape, scaled down to test time.
   const runs = [
     { delayMs: 500, load: "1.0" },
     { delayMs: 1500, load: "5.0" },
@@ -237,20 +243,23 @@ test("AC2 — ready-pool-check run 3x (35.8→91.2→157.0) yields a readable co
   assert.equal(rows.length, 3, "three ready-pool-check rows (one per run, pure append)");
   assert.ok(rows.every((r) => r.n === POOL), "all three rows share the same n (same pool)");
 
-  // The dual-dimension sequence is readable WITHOUT hand-timing: ms grows (the 35.8→91.2→157 shape)
-  // and load is the distinguishing variable across the same-n points.
-  assert.ok(rows[0].ms >= 400, `run1 ms >= 400ms delay (got ${rows[0].ms})`);
-  assert.ok(rows[1].ms >= 800, `run2 ms >= 800ms delay (got ${rows[1].ms})`);
-  assert.ok(rows[2].ms >= 1200, `run3 ms >= 1200ms delay (got ${rows[2].ms})`);
-  assert.ok(rows[2].ms > rows[1].ms && rows[1].ms > rows[0].ms, "ms is monotonically increasing");
+  // The dual-dimension sequence is readable WITHOUT hand-timing: each run's ms meets its delay lower
+  // bound (the 35.8→91.2→157 shape, scaled) and load is the distinguishing variable across same-n
+  // points. No cross-subprocess ms ordering is asserted — that is jitter, not an invariant.
+  assert.ok(rows[0].ms >= 500, `run1 ms >= 500ms delay (got ${rows[0].ms})`);
+  assert.ok(rows[1].ms >= 1500, `run2 ms >= 1500ms delay (got ${rows[1].ms})`);
+  assert.ok(rows[2].ms >= 3000, `run3 ms >= 3000ms delay (got ${rows[2].ms})`);
 
   assert.deepEqual(rows.map((r) => r.load), [1.0, 5.0, 10.0], "load differs across same-n points");
 
   // The attribution-correction lesson (2026-08-05 07:27Z): same-n points with different cost must be
   // distinguishable by LOAD — the dominant variable is machine load, not pool size. The ledger's
-  // load field is exactly what makes that separation possible without a human hand-measuring.
-  const [a, b] = [rows[0], rows[1]]; // same n=POOL, different ms
-  assert.ok(a.ms < b.ms && a.load < b.load, "same-n cost growth is attributable to the load dimension");
+  // load field is exactly what makes that separation possible without a human hand-measuring. The
+  // load comparison is seam-deterministic; the ms comparison is deliberately NOT asserted (the same
+  // cross-subprocess jitter as the monotonic assertion above — run1's 500ms seam vs run2's 1500ms
+  // seam is a 1000ms gap that startup jitter can reverse under load).
+  const [a, b] = [rows[0], rows[1]]; // same n=POOL, different load seams
+  assert.ok(a.load < b.load, "same-n points are distinguishable by the load dimension");
 });
 
 test("AC2 — the ledger is a passive sequence a trend criterion can read (no overwrite across many runs)", () => {

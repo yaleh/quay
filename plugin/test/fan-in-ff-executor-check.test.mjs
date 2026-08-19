@@ -603,3 +603,157 @@ test("AC75 integration — CLI --a6-line with a REBASE step ① ⇒ RED (exit 1)
   assert.equal(merge.ok, false);
   assert.match(merge.reason, /rebase/);
 });
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════════
+// gap-fan-in-ff-retry-reruns-suite-on-inert-increment — fan-in-ff-merge.sh 持锁段 ff-retry 惰性增量跳过
+//   AC1 惰性跳过: ff 失败且 develop 增量惰性（tasks/*.md）⇒ 锁内 merge develop + 立即重试 ff ⇒ exit 0
+//       （不回阶段 1 重跑全量、不写 retry record）。
+//   AC2 代码重跑: ff 失败且 develop 增量含代码 ⇒ 照旧 exit 1（retry record、ref 不动）。
+//   AC3 闸拒绝:  suite_head 是 tip 祖先但 delta(suite_head, tip) 含 @static-object 覆盖路径 ⇒ exit 2
+//       （可取假 — 证明闸真的在判、不是恒过）。
+//   惰性判定全走 --classify-delta（select-static-checks-for-touches.ts，读 scripts/test.sh 的
+//   @static-object 声明），无手写路径表（AC4）。
+// ═════════════════════════════════════════════════════════════════════════════════════════════════════
+
+const FF_MERGE_SCRIPT = path.join(REPO_ROOT, "plugin", "scripts", "fan-in-ff-merge.sh");
+
+function ffGit(cwd, ...args) {
+  return spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8" });
+}
+
+function ffInitRepo(dir) {
+  ffGit(dir, "init", "-q");
+  ffGit(dir, "config", "user.name", "ffretry-test");
+  ffGit(dir, "config", "user.email", "ffretry@example.com");
+  ffGit(dir, "branch", "-M", "master");
+  fs.writeFileSync(path.join(dir, ".gitignore"), ".quay/\n", "utf8");
+  ffGit(dir, "add", "-A");
+  ffGit(dir, "commit", "-q", "-m", "base");
+  fs.writeFileSync(path.join(dir, "base.txt"), "base\n", "utf8");
+  ffGit(dir, "add", "-A");
+  ffGit(dir, "commit", "-q", "-m", "base-file");
+}
+
+/** Create `task/<id>` with a work commit on top of master, then return to master. Returns the tip. */
+function ffMakeTaskBranch(dir, taskId) {
+  ffGit(dir, "checkout", "-q", "-b", `task/${taskId}`);
+  fs.writeFileSync(path.join(dir, "work.txt"), "work\n", "utf8");
+  ffGit(dir, "add", "-A");
+  ffGit(dir, "commit", "-q", "-m", "task work");
+  const tip = ffGit(dir, "rev-parse", "HEAD").stdout.trim();
+  ffGit(dir, "checkout", "-q", "master");
+  return tip;
+}
+
+function ffStateDir() {
+  return fs.mkdtempSync(path.join(os.tmpdir(), "ffretry-state-"));
+}
+
+/** Write the task's suite capture (suite_exit=0, suite_head=<tip>) — the ff gate's certificate. */
+function ffCapture(st, taskId, tip) {
+  const capture = path.join(st, `capture-${taskId}.env`);
+  const lines = ["full_suite_ran=true", "skip_reason=", `suite_head=${tip}`, "suite_exit=0"];
+  fs.writeFileSync(capture, lines.join("\n") + "\n", "utf8");
+  return ["--suite-capture", capture];
+}
+
+/** Add a worktree checked out on `task/<id>` (the ff in-lock merge target). Returns the worktree path. */
+function ffAddWorktree(dir, taskId) {
+  const wt = fs.mkdtempSync(path.join(os.tmpdir(), "ffretry-wt-"));
+  fs.rmSync(wt, { recursive: true, force: true }); // git worktree add requires the path to not exist
+  const r = ffGit(dir, "worktree", "add", "-q", wt, `task/${taskId}`);
+  if (r.status !== 0) throw new Error(`git worktree add failed: ${r.stderr}`);
+  return wt;
+}
+
+test("AC1 inert increment — ff failure with a tasks/*.md develop delta ⇒ in-lock merge + re-ff ⇒ exit 0 (no retry record)", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ffretry-inert-"));
+  const st = ffStateDir();
+  let wt = null;
+  try {
+    ffInitRepo(dir);
+    const tip = ffMakeTaskBranch(dir, "inert-a");
+    wt = ffAddWorktree(dir, "inert-a");
+    // develop advances with an INERT (doc-only) commit AFTER the suite ran on `tip`.
+    fs.mkdirSync(path.join(dir, "tasks"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "tasks", "other-task.md"), "doc\n", "utf8");
+    ffGit(dir, "add", "-A");
+    ffGit(dir, "commit", "-q", "-m", "tasks: inert develop advance");
+    const events = path.join(st, "events.jsonl");
+    const retries = path.join(st, "retries.jsonl");
+    const r = spawnSync("bash", [FF_MERGE_SCRIPT, "--task", "inert-a", "--root", dir, "--worktree", wt, ...ffCapture(st, "inert-a", tip), "--lock-events", events, "--retry-record", retries], { encoding: "utf8" });
+    assert.equal(r.status, 0, `inert increment must be absorbed in-lock (exit 0):\nstdout=${r.stdout}\nstderr=${r.stderr}`);
+    assert.match(r.stdout, /measure ff_only_locked=true/);
+    assert.ok(!fs.existsSync(retries), "no retry record — the inert increment was merged in-lock, not a phase-1 retry");
+    // master advanced to a commit that now contains the inert tasks/other-task.md (the in-lock merge
+    // brought it in) AND the task work — i.e. the ff actually landed.
+    const masterFiles = ffGit(dir, "ls-tree", "-r", "--name-only", "HEAD").stdout;
+    assert.match(masterFiles, /tasks\/other-task\.md/, "master tree must now contain the inert develop file");
+    assert.match(masterFiles, /work\.txt/, "master tree must contain the task work (ff landed)");
+  } finally {
+    if (wt) { try { ffGit(dir, "worktree", "remove", "--force", wt); } catch { /* best-effort */ } }
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(st, { recursive: true, force: true });
+    if (wt) fs.rmSync(wt, { recursive: true, force: true });
+  }
+});
+
+test("AC2 code increment — ff failure with a code develop delta ⇒ exit 1 (照旧重跑, retry record, ref unchanged)", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ffretry-code-"));
+  const st = ffStateDir();
+  let wt = null;
+  try {
+    ffInitRepo(dir);
+    const tip = ffMakeTaskBranch(dir, "code-a");
+    wt = ffAddWorktree(dir, "code-a");
+    // develop advances with a CODE commit (a @static-object-covered plugin/scripts path).
+    fs.mkdirSync(path.join(dir, "plugin", "scripts"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "plugin", "scripts", "foo.ts"), "code\n", "utf8");
+    ffGit(dir, "add", "-A");
+    ffGit(dir, "commit", "-q", "-m", "code develop advance");
+    const head = ffGit(dir, "rev-parse", "master").stdout.trim();
+    const events = path.join(st, "events.jsonl");
+    const retries = path.join(st, "retries.jsonl");
+    const r = spawnSync("bash", [FF_MERGE_SCRIPT, "--task", "code-a", "--root", dir, "--worktree", wt, ...ffCapture(st, "code-a", tip), "--lock-events", events, "--retry-record", retries], { encoding: "utf8" });
+    assert.equal(r.status, 1, `code increment must exit 1 (照旧重跑):\nstdout=${r.stdout}\nstderr=${r.stderr}`);
+    assert.match(r.stderr, /FF FAILED/);
+    assert.equal(ffGit(dir, "rev-parse", "master").stdout.trim(), head, "ref unchanged on a code increment (no in-lock absorb)");
+    const rec = JSON.parse(fs.readFileSync(retries, "utf8").trim());
+    assert.equal(rec.taskId, "code-a");
+    assert.equal(rec.attempt, 1, "code increment writes the plain retry record");
+  } finally {
+    if (wt) { try { ffGit(dir, "worktree", "remove", "--force", wt); } catch { /* best-effort */ } }
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(st, { recursive: true, force: true });
+    if (wt) fs.rmSync(wt, { recursive: true, force: true });
+  }
+});
+
+test("AC3 @static-object reject — suite_head ancestor of tip but delta touches a @static-object path ⇒ exit 2 (gate falsifiable)", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ffretry-gate-"));
+  const st = ffStateDir();
+  try {
+    ffInitRepo(dir);
+    // task branch: suite commit (suite_head) + a code commit on top touching a @static-object path.
+    ffGit(dir, "checkout", "-q", "-b", "task/gate-a");
+    fs.writeFileSync(path.join(dir, "work.txt"), "work\n", "utf8");
+    ffGit(dir, "add", "-A");
+    ffGit(dir, "commit", "-q", "-m", "work (suite ran here)");
+    const suiteHead = ffGit(dir, "rev-parse", "HEAD").stdout.trim();
+    fs.mkdirSync(path.join(dir, "orchestration"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "orchestration", "manager-tick-core.md"), "code\n", "utf8");
+    ffGit(dir, "add", "-A");
+    ffGit(dir, "commit", "-q", "-m", "code touch orchestration (post-suite)");
+    ffGit(dir, "checkout", "-q", "master");
+    const events = path.join(st, "events.jsonl");
+    const retries = path.join(st, "retries.jsonl");
+    const r = spawnSync("bash", [FF_MERGE_SCRIPT, "--task", "gate-a", "--root", dir, ...ffCapture(st, "gate-a", suiteHead), "--lock-events", events, "--retry-record", retries], { encoding: "utf8" });
+    assert.equal(r.status, 2, `a @static-object-covered delta must be refused by the gate (exit 2):\nstdout=${r.stdout}\nstderr=${r.stderr}`);
+    assert.match(r.stderr, /suite 证书未满足/, "the refusal names the suite certificate");
+    assert.ok(!fs.existsSync(events), "no lock events — the gate refused before acquiring the lock");
+    assert.ok(!fs.existsSync(retries), "no retry record — this is a gate refusal, not an ff failure");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(st, { recursive: true, force: true });
+  }
+});
