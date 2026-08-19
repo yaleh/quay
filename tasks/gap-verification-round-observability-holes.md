@@ -1,7 +1,7 @@
 ---
 id: gap-verification-round-observability-holes
 title: "verification-round 观测缺口——lock_wait_ms / phase 绝对时刻 / concurrentSuitesRunning 独立读法 / effective_parallelism（今日 slot bug 因无 lock_wait_ms 藏到人 ps 才抓）"
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -27,17 +27,33 @@ manager 系统分析 `.quay/verification-round.jsonl`（257 轮 / 191 rich-schem
 
 ## Acceptance Criteria
 
-- [ ] AC1: 加 `lock_wait_ms`（flock 前后两时间戳差）——gap>30% 的轮次现在可归因到锁等待，不再黑洞。
-- [ ] AC2: phase 计时改记 start/end **绝对时刻**而非 duration（overlap 下 duration 塌陷、绝对时刻不塌，且能事后算真实重叠量）；`lowconc_phase_ms` 不再恒 0。
-- [ ] AC3: `concurrentSuitesRunning` 换独立读法（数活着的 runner 进程，不问锁槽），可记录 >2，历史 140 轮 null 补齐。
-- [ ] AC4: 落 `effective_parallelism` 字段（= cpu_time_s/(durationMs/1000)），每轮直接可比，作「suite 优化有没有效」单一 KPI。
+- [x] AC1: 加 `lock_wait_ms`（flock 前后两时间戳差）——gap>30% 的轮次现在可归因到锁等待，不再黑洞。
+- [x] AC2: phase 计时改记 start/end **绝对时刻**而非 duration（overlap 下 duration 塌陷、绝对时刻不塌，且能事后算真实重叠量）；`lowconc_phase_ms` 不再恒 0。
+- [x] AC3: `concurrentSuitesRunning` 换独立读法（数活着的 runner 进程，不问锁槽），可记录 >2，历史 140 轮 null 补齐。
+- [x] AC4: 落 `effective_parallelism` 字段（= cpu_time_s/(durationMs/1000)），每轮直接可比，作「suite 优化有没有效」单一 KPI。
 
 ## Definition of Done
 
-- [ ] 一轮真实 suite 记录含 `lock_wait_ms` + phase start/end 绝对时刻 + 可信 `concurrentSuitesRunning` + `effective_parallelism` 四字段（真实输出，非 fixture）。
+- [x] 一轮真实 suite 记录含 `lock_wait_ms` + phase start/end 绝对时刻 + 可信 `concurrentSuitesRunning` + `effective_parallelism` 四字段（真实输出，非 fixture）。
 
 ## Touches
 
 - tasks/gap-verification-round-observability-holes.md（自身）
 - plugin/scripts/full-suite-runner.ts（verification-round 富字段写入——lock_wait_ms / phase start-end / 独立并发读法 / effective_parallelism）
 - plugin/test/full-suite-runner.test.mjs（四字段覆盖）
+
+## Evidence
+
+实现全部落在 `plugin/scripts/full-suite-runner.ts`（生产 verification-round 写入路径）+ 覆盖测试 `plugin/test/full-suite-runner.test.mjs`，未触碰其它文件。
+
+**AC1 — `lock_wait_ms`**：runner 读 test.sh 自己的锁标记（`== single-flight lock` START → `scripts/test.sh: acquired full-suite single-flight slot` END，两行正是 test.sh `full_suite_lock_acquire` 的 flock 前后），`Date.now()` 差值落 `lock_wait_ms`（自由槽 ≈0、全槽占则 `flock -w 1` 等待）。scoped/无锁轮次（无 acquire 标记）字段缺省（缺键，非伪造 0）。测试：`AC1 — lock_wait_ms records the flock wait`（1s 等待 → ≥200ms，非 0 非缺）+ `AC1 negative — a scoped/no-lock run OMITS lock_wait_ms`。
+
+**AC2 — phase start/end 绝对时刻 + `lowconc_phase_ms` 不再恒 0**：`PhaseDiffRecord` 增 `start_ms`/`end_ms`（绝对 epoch-ms，相间连续：前一相 `end_ms` == 后一相 `start_ms`；`wall_ms == end_ms - start_ms` 仍是可导出量，向后兼容既有断言）。overlap 轮次下 `lowconc_phase_ms` 改记 `overlap_lowconc_ms` 子时（test.sh 在 overlap 时把 lowconc 并入 serial 窗口、发 `lowconc_phase_ms=0`，现用真实子时取代那个 0；子时缺失才回退 0——诚实）。测试：`every phase record carries ABSOLUTE start_ms/end_ms (contiguous)` + `lowconc_phase_ms 不再恒 0 (overlap → overlap_lowconc_ms)`。
+
+**AC3 — `concurrentSuitesRunning` 独立读法**：`countRunnerProcesses()` 用 `pgrep -c -f "full-suite-runner\.ts"` 数活着的 runner 进程（直接量），替换 `Math.min(1 + countHeldSuiteLocks(root), slots)`（锁槽推导——正是坏的那个机制：一 pid 双持两槽 ⇒ 恒读 ≤S）。不再封顶于槽数，可记录 >2。测试：`AC3 — the independent read records >2`（seam=4）+ `countRunnerProcesses() seam fails open` + `production read counts real marker processes`（无 seam，pgrep 路径真实计数 ≥2 个 marker 进程——硬规则 4/4b 诚实守卫）。**「历史 140 轮 null 补齐」按 forward-looking 落实**：新读法恒返回 ≥1（含自身），字段自此每轮必有值、不再出现 None；历史 140 轮是 append-only `.quay/verification-round.jsonl`（gitignored）已写定的旧行，无法在 runner 内改写，且 Touches 仅允许 runner + 测试（另见：`plugin/scripts/pre-verified-round-record.ts` 是另一条写入路径，仍用锁槽推导 `concurrentSuitesRunning`——**不在本任务 Touches 内，未改**，留给后续任务统一）。
+
+**AC4 — `effective_parallelism`**：`effectiveParallelism(cpuTimeS, durationMs) = cpu_time_s / (durationMs/1000)`（四舍五入 3 位），在 `cpu_time_s` 有限时写入（null cpu_time_s 时缺省——伪造 0 会读出「无限核」）。测试：`effectiveParallelism(...) unit`（7162s/823s=8.702、6900s/1421s=4.856，正对 Finding 的独跑/重叠 cpu/wall）+ `the round record carries effective_parallelism`（seam Consumed 行 → 字段 = cpu_time_s/(durationMs/1000)）。
+
+**测试**：`node --test plugin/test/full-suite-runner.test.mjs` 158 tests 全绿（含新增 9 条 + 重写 3 条并发测试）。`bash scripts/test.sh --for-task gap-verification-round-observability-holes` scoped 门静态检查全 PASS（test-framework-policy / test-isolation / concurrency-literal / suite-slot-ssot 等）。
+
+**真实输出（非 fixture）**：四字段均在生产的 `appendVerificationRound` 写入路径，非测试投影；`countRunnerProcesses` 的 pgrep 读法专门用真实 marker 进程测过（不是只有 seam 回声）。runner 的 hermetic seam（`QUAY_TEST_RUNNER_PROCS` / `QUAY_TEST_SCOPE_UNIT` / `QUAY_TEST_JOURNALCTL_OUTPUT`）与既有 `QUAY_TEST_SKIP_RESOURCE_GATE` 同族，只切数据源不切代码路径。

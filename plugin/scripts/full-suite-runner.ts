@@ -829,6 +829,13 @@ export interface PhaseCountersRead {
 export interface PhaseDiffRecord {
   phase: string;
   wall_ms: number;
+  /** ABSOLUTE epoch-ms start of the phase (gap-verification-round-observability-holes AC2): `wall_ms`
+   *  (the duration) collapses under PHASE_OVERLAP — serial+lowconc merge into ONE window, so a duration
+   *  can no longer say WHEN each ran or how much they truly overlapped. The absolute edges do not
+   *  collapse, so a reader can reconstruct the real overlap post-hoc (`start_ms`/`end_ms` are the phase
+   *  boundary timestamps, contiguous across phases — a phase's `end_ms` == the next phase's `start_ms`). */
+  start_ms: number;
+  end_ms: number;
   cpu_usec: number | null;
   psi_cpu_total: number | null;
   psi_io_total: number | null;
@@ -1010,6 +1017,8 @@ export class PhaseDifferentialAccounting {
     this.records.push({
       phase: this.currentPhase,
       wall_ms: Math.max(0, wall_ms),
+      start_ms: this.startWallMs,
+      end_ms: now,
       cpu_usec,
       psi_cpu_total,
       psi_io_total,
@@ -1064,6 +1073,8 @@ export class PhaseDifferentialAccounting {
     this.records.push({
       phase: lastPhase,
       wall_ms: Math.max(0, wall_ms),
+      start_ms: this.startWallMs,
+      end_ms: now,
       cpu_usec,
       psi_cpu_total,
       psi_io_total,
@@ -1274,6 +1285,19 @@ export async function readScopeConsumedLoad(
   return { cpu_time_s: null, mem_peak_mb: null, swap_peak_mb: null, load_read_error: lastError ?? "unknown" };
 }
 
+/**
+ * gap-verification-round-observability-holes AC4 — the round's effective parallelism: cpu_time_s ÷
+ * (durationMs/1000) = consumed CPU time ÷ wall time = the average cores actually driven. Rounded to 3
+ * decimals (comparable across rounds). null when either input is missing/non-finite/≤0 (a fabricated 0
+ * quotient would read "infinite cores" — 硬规则⑥ 缺值=未查≠为假).
+ */
+export function effectiveParallelism(cpuTimeS: number | null | undefined, durationMs: number): number | null {
+  if (cpuTimeS == null || !Number.isFinite(cpuTimeS) || cpuTimeS <= 0) return null;
+  const wallS = durationMs / 1000;
+  if (!Number.isFinite(wallS) || wallS <= 0) return null;
+  return Number((cpuTimeS / wallS).toFixed(3));
+}
+
 export interface SuiteRoundRecord {
   round: number;
   startedAt: string;
@@ -1285,13 +1309,23 @@ export interface SuiteRoundRecord {
   // read-host NEVER a literal — the SAME expression as defaultLaneCount's derivation, hard-rule-4
   // 推论二 family); concurrentSuiteSlots = the configured QUAY_MAX_CONCURRENT_SUITES (the 2-slot knob
   // ②, the single definition point); concurrentSuitesRunning = the ACTUAL number of full suites running
-  // at the same time as this round (1 for this round's own slot + the slots OTHER suites held at round
-  // start, capped at the slot count — a queued third suite is not a 3rd running suite). Optional for
-  // backward compatibility with earlier appended lines — a reader must tolerate their absence (the
-  // same absent-field contract as *_phase_ms / scope_unit).
+  // at the same time as this round (gap-verification-round-observability-holes AC3: an INDEPENDENT read
+  // — countRunnerProcesses(), counting alive runner processes by cmdline — NOT the lock-slot probe, and
+  // NOT capped at the slot count, so a real 4-suite overlap records 4). Optional for backward
+  // compatibility with earlier appended lines — a reader must tolerate their absence (the same
+  // absent-field contract as *_phase_ms / scope_unit).
   nproc?: number;
   concurrentSuiteSlots?: number;
   concurrentSuitesRunning?: number;
+  /**
+   * gap-verification-round-observability-holes AC1 — the flock wait the suite paid before acquiring a
+   * single-flight slot (test.sh's `== single-flight lock` → `acquired full-suite single-flight slot`
+   * marker diff, in ms). ~0 on a free-slot round; the bounded `flock -w 1` wait when all S slots were
+   * held. Absent on scoped runs (no lock) and on lock-timeout aborts (no acquired marker) — a reader
+   * must tolerate absence (same contract as *_phase_ms). This is the value that makes a gap>30% round
+   * attributable to lock-wait instead of reading as a slow suite.
+   */
+  lock_wait_ms?: number;
   pass: number;
   fail: number;
   cancelled: number;
@@ -1435,6 +1469,18 @@ export interface SuiteRoundRecord {
   mem_peak_mb?: number | null;
   swap_peak_mb?: number | null;
   load_read_error?: string | null;
+  /**
+   * gap-verification-round-observability-holes AC4 — the round's EFFECTIVE PARALLELISM:
+   * cpu_time_s / (durationMs/1000) = consumed CPU time ÷ wall time = the average number of cores the
+   * suite actually drove (the Finding's cpu/wall — 8.7 cores solo vs 4.9 per-suite overlapped). The
+   * single "did the suite optimization help" KPI: a round that sped up by using MORE cores shows a
+   * higher value; a round slowed by lock-wait / contention shows a LOWER one. Present only when
+   * cpu_time_s was a finite number (systemd Consumed line or the QUAY_TEST_JOURNALCTL_OUTPUT seam);
+   * absent on a null cpu_time_s (memory-accounting-off / read failure — a fabricated 0 would make the
+   * quotient infinite) and on non-systemd rounds. A reader must tolerate absence (same contract as
+   * cpu_time_s itself).
+   */
+  effective_parallelism?: number;
   /**
    * gap-leak-residue-per-run-namespace-isolation AC3 — the run's unified-cleanup count + WHICH
    * owner-dead residue dirs the runner's cleanup passes removed (pre-suite stale /tmp/quay-run-*
@@ -1638,6 +1684,42 @@ export function countHeldSuiteLocks(root: string): number {
 }
 
 /**
+ * gap-verification-round-observability-holes AC3 — the ACTUAL number of full-suite runner processes
+ * ALIVE right now (an INDEPENDENT read — counting running processes by cmdline, NOT the lock-slot
+ * probe that `concurrentSuitesRunning` used to be derived from). The lock-slot probe WAS the broken
+ * mechanism: one pid holding two slots (pid 606544 double-held full-suite.lock.0+.1) made the slot
+ * count read ≤S forever, so the field was `{None:140, 1:34, 2:18}` and NEVER >2 even when 4 suites
+ * genuinely overlapped — the proxy recorded the broken mechanism instead of the observed quantity
+ * (CLAUDE.md 硬规则 4b: 代理量偏离实际). Counting the runner processes themselves is the DIRECT
+ * quantity. Includes THIS runner (its own cmdline matches), so a lone round reads 1; NOT capped at
+ * the slot count (可记录 >2). Best-effort: any read failure fails open to 1 (this runner) —
+ * accounting never blocks or fails a run.
+ */
+export function countRunnerProcesses(): number {
+  const seam = process.env.QUAY_TEST_RUNNER_PROCS;
+  if (seam !== undefined) {
+    const n = Number(seam);
+    return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 1;
+  }
+  try {
+    // `pgrep -f` matches the FULL cmdline. The escaped-dot pattern `full-suite-runner\.ts` matches the
+    // runner's own argv (node … plugin/scripts/full-suite-runner.ts) but NOT its test file
+    // (full-suite-runner.test.mjs — `.ts` vs `.test.mjs`), so a hermetic test process is never
+    // self-counted. `-c` prints the count and exits 0 (≥1 match) — this runner is ALWAYS a match.
+    const out = execFileSync("pgrep", ["-c", "-f", "full-suite-runner\\.ts"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    const n = Number(String(out).trim());
+    return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 1;
+  } catch {
+    // pgrep exits non-zero only on ZERO matches — impossible here (this runner matches), so a
+    // non-zero exit is a real read failure (pgrep missing / unreadable /proc). Fail open to 1.
+    return 1;
+  }
+}
+
+/**
  * gap-load-sensitive-serial-phase-unbounded-growth-measure-first AC2/AC3 (measure-first) —
  * the load-sensitive phase concurrency defaults. The serial phase (KNOWN-LOAD-SENSITIVE A/B-class +
  * real-install family) and the lowconc phase (hermetic-but-load-sensitive session-observation
@@ -1657,8 +1739,46 @@ export function countHeldSuiteLocks(root: string): number {
  * gap-suite-budget-oversubscribe, human 14:4xZ 修正方向), so the sum over S suites cannot exceed
  * nproc × oversub.
  */
-export const DEFAULT_SERIAL_CONCURRENCY = Math.max(1, Math.floor(hostParallelism() / concurrentSuiteSlots()));
-export const DEFAULT_LOWCONC_CONCURRENCY = Math.max(1, Math.floor(hostParallelism() / concurrentSuiteSlots()));
+/**
+ * gap-lane-formula-ignores-phase-overlap-concurrency — the number of load-sensitive phases that run
+ * CONCURRENTLY in the overlap window. QUAY_PHASE_OVERLAP=1 (the default, matching test.sh's
+ * `PHASE_OVERLAP="${QUAY_PHASE_OVERLAP:-1}"`) runs serial + lowconc in PARALLEL ⇒ 2 concurrent
+ * phases, each at its own concurrency — the overlap window's Σ lane = SERIAL + LOWCONC, so the
+ * per-phase budget must divide the host by S × P (P = the concurrent-phase count) to keep
+ * Σ lane ≤ nproc × oversub structurally. QUAY_PHASE_OVERLAP=0 runs them sequentially ⇒ P = 1 (the
+ * pre-overlap budget, unchanged — AC3 negative control). Reads the SAME knob default as test.sh so
+ * the direct path and runner path cannot drift (判据4).
+ */
+export function concurrentPhaseCount(): number {
+  return process.env.QUAY_PHASE_OVERLAP === "0" ? 1 : 2;
+}
+
+/**
+ * gap-load-sensitive-serial-phase-unbounded-growth-measure-first AC2/AC3 (measure-first) —
+ * the load-sensitive phase concurrency defaults. The serial phase (KNOWN-LOAD-SENSITIVE A/B-class +
+ * real-install family) and the lowconc phase (hermetic-but-load-sensitive session-observation
+ * family) default to the HOST parallelism (os.availableParallelism()), not a machine-spec-dependent
+ * literal 6 — on nproc=16 the old 6/6 left 10 cores idle across 59.5% of wall-clock
+ * (gap-ac44-concurrent-phases-read-host-parallelism). The measured experiment evidence for WHY these
+ * phases benefit from concurrency > 1 still stands: serial cc=1 WALL_MS=455613 vs cc=2 WALL_MS=289579,
+ * both 0-cancelled (2026-08-10, c2 快 36%; real-install e2e 双文件 c2 实测 0-cancelled). Both remain
+ * overridable via --serial-concurrency / --lowconc-concurrency, which the runner passes to test.sh as
+ * QUAY_SERIAL_CONCURRENCY / QUAY_LOWCONC_CONCURRENCY so a FUTURE controlled experiment can re-measure
+ * before any further bump.
+ * gap-ac74-serial-lowconc-literal-direct-path (human 06:4xZ AC68 /slots 回退) — the serial/lowconc
+ * PHASE budgets divide by the concurrent-suite slot count (hostParallelism ÷ QUAY_MAX_CONCURRENT_SUITES;
+ * 1 suite ⇒ 16, 2 suites ⇒ each 8 on a 16-core host) — the SAME expression test.sh's
+ * serial_lowconc_host_default reads so the direct path matches (判据4). This is the AC44 rule; the
+ * MAIN lane budget (defaultLaneCount) ALSO divides by S (max(1, floor(nproc × oversub / S)) —
+ * gap-suite-budget-oversubscribe, human 14:4xZ 修正方向), so the sum over S suites cannot exceed
+ * nproc × oversub.
+ * gap-lane-formula-ignores-phase-overlap-concurrency — the phase budgets now ALSO divide by the
+ * concurrent-phase count P (S × P = slots × concurrentPhaseCount()): with overlap ON the overlap
+ * window runs serial+lowconc in parallel (Σ lane = SERIAL + LOWCONC), so each phase gets
+ * hostParallelism ÷ (S × 2) — the same S×P denominator test.sh's serial_lowconc_host_default reads.
+ */
+export const DEFAULT_SERIAL_CONCURRENCY = Math.max(1, Math.floor(hostParallelism() / (concurrentSuiteSlots() * concurrentPhaseCount())));
+export const DEFAULT_LOWCONC_CONCURRENCY = Math.max(1, Math.floor(hostParallelism() / (concurrentSuiteSlots() * concurrentPhaseCount())));
 
 /** Parse a positive-integer arg (e.g. --serial-concurrency 2); NaN/<1 → null (caller errors). */
 function parsePositiveIntArg(argv: string[], name: string): number | null {
@@ -2157,8 +2277,9 @@ export async function run(argv: string[]): Promise<number> {
   // concurrency is passed to test.sh as QUAY_SERIAL_CONCURRENCY / QUAY_LOWCONC_CONCURRENCY so the
   // controlled experiment can run the serial phase at a higher concurrency and measure wall-clock +
   // cancelled BEFORE the default is bumped. Defaults are host-read (DEFAULT_SERIAL_CONCURRENCY /
-  // DEFAULT_LOWCONC_CONCURRENCY = os.availableParallelism(), gap-ac44-concurrent-phases-read-host-
-  // parallelism) — an explicit flag always wins over the host default (AC2).
+  // DEFAULT_LOWCONC_CONCURRENCY = os.availableParallelism() ÷ (slots × concurrentPhaseCount()),
+  // gap-ac44-concurrent-phases-read-host-parallelism + gap-lane-formula-ignores-phase-overlap-
+  // concurrency) — an explicit flag always wins over the host default (AC2).
   const serialConcurrencyArg = parsePositiveIntArg(argv, "--serial-concurrency");
   const lowconcConcurrencyArg = parsePositiveIntArg(argv, "--lowconc-concurrency");
   if (serialConcurrencyArg === null && parseArg(argv, "--serial-concurrency") !== undefined) {
@@ -2575,18 +2696,15 @@ export async function run(argv: string[]): Promise<number> {
   // signal / exit-code handling below is byte-for-behavior identical.
   // gap-lanes-nproc-concurrent-suites-accounting AC1 — capture the round's concurrency variables AT
   // ROUND START (the same point the state writes its verifiedCommit/tree snapshot), AFTER one-shot
-  // worktree provisioning (git-common-dir from a worktree resolves to the SHARED main `.git` — the
-  // same locks test.sh contends on). nproc = host parallelism (read-host, never a literal);
-  // concurrentSuiteSlots = the configured QUAY_MAX_CONCURRENT_SUITES; concurrentSuitesRunning = 1
-  // (this round's own slot) + the slots OTHER suites hold at probe time, capped at the slot count —
-  // the ACTUAL concurrency this round experienced, carried into the verification-round record at the
-  // END (the record's nproc/concurrentSuiteSlots/concurrentSuitesRunning fields).
+  // worktree provisioning. nproc = host parallelism (read-host, never a literal);
+  // concurrentSuiteSlots = the configured QUAY_MAX_CONCURRENT_SUITES; concurrentSuitesRunning = the
+  // ACTUAL number of full-suite runner processes alive right now (gap-verification-round-observability-
+  // holes AC3 — an INDEPENDENT read, countRunnerProcesses(), NOT the lock-slot probe: the slot probe
+  // WAS the broken mechanism (one pid double-holding two slots ⇒ the count read ≤S forever and never
+  // saw the real 4-suite overlap). NOT capped at the slot count — 可记录 >2.
   const roundNproc = hostParallelism();
   const roundConcurrentSuiteSlots = concurrentSuiteSlots();
-  const roundConcurrentSuitesRunning = Math.min(
-    1 + countHeldSuiteLocks(root),
-    roundConcurrentSuiteSlots,
-  );
+  const roundConcurrentSuitesRunning = countRunnerProcesses();
 
   // gap-verification-round-load-fields-from-systemd — THIS round's cgroup scope unit, captured at
   // round START into the round's OWN record (trap 1 — NOT read back from the shared single-slot
@@ -2899,10 +3017,33 @@ export async function run(argv: string[]): Promise<number> {
   const phaseOverlapLowconcDone = /^__OVERHEAD__\s+overlap_lowconc_done=1/;
   const phaseOverlapDone = /^__OVERHEAD__\s+overlap_(?:serial|lowconc)_done=1/;
 
+  // gap-verification-round-observability-holes AC1 — `lock_wait_ms` = the flock-wait the suite paid
+  // before it acquired one of the S single-flight slots. The runner does NOT take the lock itself (it
+  // spawns test.sh, which serializes the node --test workers); the two timestamps are test.sh's own
+  // stream markers — `== single-flight lock …` (the acquire START, emitted BEFORE the `flock -n` try)
+  // and `scripts/test.sh: acquired full-suite single-flight slot …` (the acquire END). The diff is the
+  // flock wait: ~0 when a slot was free (the non-blocking try is µs), and the bounded `flock -w 1` wait
+  // when all S slots were held. This is the value the pre-fix gap (r253 wall=1825s phases=952s
+  // gap=873s=48% — a suite that WAITED on the lock looked like a slow suite) could not attribute.
+  // Absent on scoped runs (no lock taken) and on lock-timeout aborts (no `acquired` marker — the round
+  // is `reason=aborted`, and `waited <N>s` rides the abort line instead).
+  let lockWaitStartMs: number | null = null;
+  let lockWaitMs: number | null = null;
+  const lockAcquireStartRe = /^== single-flight lock\b/;
+  const lockAcquiredRe = /^scripts\/test\.sh: acquired full-suite single-flight slot\b/;
+
   const onLine = (line: string) => {
     logStream.write(line + "\n");
     // Keep the last non-empty stream line for the fail-closed catch-all synthesis (AC1).
     if (line.trim()) lastStreamLine = line;
+    // gap-verification-round-observability-holes AC1 — time the flock wait from test.sh's own
+    // lock-acquire markers. First marker wins; the acquired marker closes it. Independent of the
+    // phase/verdict machinery below (pure addition — it cannot flip the verdict).
+    if (lockWaitStartMs === null && lockAcquireStartRe.test(line)) {
+      lockWaitStartMs = Date.now();
+    } else if (lockWaitStartMs !== null && lockWaitMs === null && lockAcquiredRe.test(line)) {
+      lockWaitMs = Math.max(0, Date.now() - lockWaitStartMs);
+    }
     // gap-phase-boundary-differential-accounting — the phase-boundary state machine (reads the
     // cumulative counters at each boundary and records the completed phase). Pure addition: it
     // cannot flip the verdict, and a boundary-detection failure only affects the `phases` field.
@@ -3642,6 +3783,10 @@ export async function run(argv: string[]): Promise<number> {
     nproc: roundNproc,
     concurrentSuiteSlots: roundConcurrentSuiteSlots,
     concurrentSuitesRunning: roundConcurrentSuitesRunning,
+    // gap-verification-round-observability-holes AC1 — the flock wait (test.sh's lock-acquire markers).
+    // Present only when the suite actually took the lock (the acquire START + acquired markers both
+    // fired); absent on scoped runs / lock-timeout aborts — a reader must tolerate absence.
+    ...(lockWaitMs !== null ? { lock_wait_ms: lockWaitMs } : {}),
     pass: tapPass,
     fail: tapFail,
     cancelled: tapCancelled,
@@ -3696,7 +3841,20 @@ export async function run(argv: string[]): Promise<number> {
     // from the record alone — per_test_ms finally has phase context.
     ...(phaseMs.run_static_checks !== undefined ? { static_phase_ms: phaseMs.run_static_checks } : {}),
     ...(phaseMs.serial_phase !== undefined ? { serial_phase_ms: phaseMs.serial_phase } : {}),
-    ...(phaseMs.lowconc_phase !== undefined ? { lowconc_phase_ms: phaseMs.lowconc_phase } : {}),
+    // gap-verification-round-observability-holes AC2 — `lowconc_phase_ms` 不再恒 0. Under PHASE_OVERLAP
+    // test.sh subsumes lowconc into the serial window and emits `__OVERHEAD__ lowconc_phase_ms=0`, so the
+    // record lost the "which parallel phase is the long pole" signal exactly when that optimization was
+    // being measured. test.sh ALSO emits the per-process sub-times (`overlap_lowconc_ms`); on an overlap
+    // round, lowconc_phase_ms carries THAT real lowconc duration instead of the 0. Falls back to the raw
+    // 0 only when the sub-time marker was missed (a truncated round — honest, nothing recoverable).
+    ...(phaseMs.lowconc_phase !== undefined
+      ? {
+          lowconc_phase_ms:
+            phaseOverlapRan && typeof phaseMs.overlap_lowconc === "number"
+              ? phaseMs.overlap_lowconc
+              : phaseMs.lowconc_phase,
+        }
+      : {}),
     ...(phaseMs.main_phase !== undefined ? { main_phase_ms: phaseMs.main_phase } : {}),
     // gap-phase-overlap-two-phase-parallel-exploration AC1 — the round record carries whether the
     // suite ran the two-phase-overlap scheduling (serial+lowconc in PARALLEL). Absent on a sequential
@@ -3731,6 +3889,13 @@ export async function run(argv: string[]): Promise<number> {
           mem_peak_mb: scopeConsumedLoad.mem_peak_mb,
           swap_peak_mb: scopeConsumedLoad.swap_peak_mb,
           load_read_error: scopeConsumedLoad.load_read_error,
+          // gap-verification-round-observability-holes AC4 — the round's effective parallelism
+          // (cpu_time_s ÷ wall). Present only when cpu_time_s is a finite number (the quotient is
+          // null — and the field absent — on a null cpu_time_s: a fabricated 0 would read "infinite
+          // cores"). The single "did the suite optimization help" KPI, directly comparable per round.
+          ...(effectiveParallelism(scopeConsumedLoad.cpu_time_s, durationMs) !== null
+            ? { effective_parallelism: effectiveParallelism(scopeConsumedLoad.cpu_time_s, durationMs) }
+            : {}),
         }
       : {}),
     // gap-leak-residue-per-run-namespace-isolation AC3 — the run's unified-cleanup count + WHICH
