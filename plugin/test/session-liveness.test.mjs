@@ -1,5 +1,9 @@
 // @test-group lowconc
 // @load-sensitive wall-clock
+// KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — wall-clock
+// (real tmux probe + session-liveness.sh per-round wall-clock stretches under overlap-phase
+// 16-way CPU saturation; the adaptive HANG_GUARD_MS floor absorbs it — gap-session-liveness-
+// hangguard-ms-timeout 2026-08-18, no suite-fix out-of-bounds edit should ever target this family)
 // session-liveness.test.mjs — SESSION-DISABLED 复合条件发射端
 // (gap-session-saturated-composite-condition-emitter, 2026-08-13)
 //
@@ -45,10 +49,11 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import {
-  SCRIPT, tmuxAvailable, setProbeTmpPrefix, sweepTmp, reapLiveOwners,
+  SCRIPT, tmuxAvailable, setProbeTmpPrefix, sessionLivenessAfter,
   makeHermeticProbe, waitForAlive, spawnMonitor, waitForOutput, waitForRounds,
   writeTranscript, assistantUsageRecord, userInputRecord, isoAgo, HANG_GUARD_MS,
 } from "./session-liveness-helpers.mjs";
@@ -56,8 +61,7 @@ import {
 setProbeTmpPrefix("session-liveness-scd-");
 
 after(() => {
-  reapLiveOwners();
-  sweepTmp("session-liveness-scd-", "ol-prod-");
+  sessionLivenessAfter("session-liveness-scd-", "ol-prod-");
 });
 
 // ── fixtures ─────────────────────────────────────────────────────────────────────────────────────
@@ -376,6 +380,42 @@ test("新⑤ 能取假 — 心跳新鲜（长任务推进中）⇒ 不报 DISABL
       mon.child.kill("SIGKILL"); mon.cleanup();
     }
   } finally {
+    p.cleanup();
+  }
+});
+
+// ── AC2 负控制 — CPU 饱和时不误判 hang（gap-session-liveness-hangguard-ms-timeout, 2026-08-18）────
+// 真实输出负控制：用【每个可用核一个忙等进程】把宿主 CPU 压满（复现 commit 43153e58 的 16 并发
+// 压满 16 核场景），证明监视器在自适应 HANG_GUARD_MS 内仍能跑完 4 轮（不因 CPU 饿死误判 hang）。
+// 旧固定 60s floor 下这个场景必假红（≈20s/轮 ⇒ 4 轮 > 60s）；自适应 floor（读 availableParallelism，
+// 16 核 ⇒ 192s）覆盖它。这是修复自身的回归测试：把 HANG_GUARD_MS 退回固定 60s 会让本测试假红。
+
+/** 每个核心一个忙等进程（bounded deadline 自灭），返回句柄数组供 finally 强杀。 */
+function spawnCpuBurners(n, ms = 180_000) {
+  const burners = [];
+  for (let i = 0; i < n; i++) {
+    burners.push(spawn(process.execPath, ["-e", `const e=Date.now()+${ms};while(Date.now()<e){}`], { stdio: "ignore" }));
+  }
+  return burners;
+}
+function killCpuBurners(burners) {
+  for (const b of burners) { try { b.kill("SIGKILL"); } catch { /* already dead */ } }
+}
+
+test("AC2 负控制 — availableParallelism() 并发 CPU 饱和时监视器在自适应 HANG_GUARD_MS 内跑完 4 轮（不误判 hang，真实输出）", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  const p = makeHermeticProbe("ol-hang-a");
+  const burners = spawnCpuBurners(os.availableParallelism());
+  try {
+    assert.ok(await waitForAlive(p.env, p.session), "probe must be alive");
+    const mon = spawnMonitor(p.env, `hang-a /tmp ${p.session}`, { interval: 1 });
+    try {
+      assert.ok(await waitForRounds(mon, 4, HANG_GUARD_MS),
+        `under ${burners.length}-way CPU saturation the monitor MUST reach 4 rounds within the adaptive HANG_GUARD_MS (${HANG_GUARD_MS}ms) — no false hang:\n${mon.output()}`);
+    } finally {
+      mon.child.kill("SIGKILL"); mon.cleanup();
+    }
+  } finally {
+    killCpuBurners(burners);
     p.cleanup();
   }
 });

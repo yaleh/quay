@@ -73,6 +73,13 @@ export interface InFlightTask {
   taskId: string;
   runId: string;
   startedAtMs: number;
+  /**
+   * Impl-complete boundary (gap-inflight-states-missing-impl-complete-event): the third lifecycle
+   * event's `recordedAtMs`, or null when the open run is still implementing. Splits the in-flight
+   * view into two segments — implementing (null) vs awaiting-land (non-null). The board renders
+   * them as two independent counts.
+   */
+  implCompletedAtMs: number | null;
   /** Elapsed minutes from startedAtMs to the observation instant, rounded to 1 decimal. */
   minutes: number;
 }
@@ -116,6 +123,8 @@ interface RawEvent {
   runId?: unknown;
   taskId?: unknown;
   timing?: { startedAtMs?: unknown; endedAtMs?: unknown };
+  /** The impl-complete boundary instant (gap-inflight-states-missing-impl-complete-event). */
+  recordedAtMs?: unknown;
 }
 
 /**
@@ -144,9 +153,15 @@ function isEndLike(e: RawEvent): boolean {
  * not task pairs; pairing key is runId; FIRST start wins, LAST end wins; a run with a start and
  * NO end is in-flight; sorted by taskId then runId. Malformed/untyped records are skipped, never
  * thrown. `nowMs` is the observation instant used for elapsed minutes.
+ *
+ * gap-inflight-states-missing-impl-complete-event: the impl-complete boundary (a third lifecycle
+ * event, `eventKind === "impl-complete"`, timing all-null) splits the in-flight view into two
+ * segments — implementing (implCompletedAtMs null: start, no impl-complete — 真正在实现) vs
+ * awaiting-land (implCompletedAtMs non-null: impl-complete, no end — 排队待落地). FIRST
+ * impl-complete wins (a re-write on ff-retry never flips a run back to implementing).
  */
 export function pairInFlight(events: RawEvent[], nowMs: number): InFlightTask[] {
-  const byRun = new Map<string, { runId: string; taskId: string; start: RawEvent | null; ends: RawEvent[] }>();
+  const byRun = new Map<string, { runId: string; taskId: string; start: RawEvent | null; implComplete: RawEvent | null; ends: RawEvent[] }>();
   for (const e of events) {
     if (!e || e.stage !== "Fast" || e.eventKind === "blocked") continue;
     const runId = typeof e.runId === "string" ? e.runId : "";
@@ -154,10 +169,14 @@ export function pairInFlight(events: RawEvent[], nowMs: number): InFlightTask[] 
     if (!runId) continue;
     let rec = byRun.get(runId);
     if (!rec) {
-      rec = { runId, taskId, start: null, ends: [] };
+      rec = { runId, taskId, start: null, implComplete: null, ends: [] };
       byRun.set(runId, rec);
     }
-    if (isStartLike(e)) {
+    // impl-complete is classified BEFORE start/end: its timing is all-null so it is neither
+    // start-like nor end-like, but the explicit branch keeps the boundary unambiguous.
+    if (e.eventKind === "impl-complete") {
+      if (!rec.implComplete) rec.implComplete = e;
+    } else if (isStartLike(e)) {
       if (!rec.start) rec.start = e;
     } else if (isEndLike(e)) {
       rec.ends.push(e);
@@ -172,6 +191,10 @@ export function pairInFlight(events: RawEvent[], nowMs: number): InFlightTask[] 
         taskId: rec.taskId,
         runId: rec.runId,
         startedAtMs: rec.start.timing.startedAtMs,
+        implCompletedAtMs:
+          rec.implComplete && typeof rec.implComplete.recordedAtMs === "number"
+            ? rec.implComplete.recordedAtMs
+            : null,
         minutes: Math.max(0, (nowMs - rec.start.timing.startedAtMs) / 60_000),
       });
     }

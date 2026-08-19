@@ -1,7 +1,7 @@
 ---
 id: gap-agent-no-timeout-option
 title: "Workflow agent() 无 timeout/bashTimeout 旋钮——poll 的 timeout 540 依赖 prompt 指令非代码保证"
-status: todo
+status: ready
 labels:
   - gap
   - mechanism

@@ -8,6 +8,15 @@
 // into the concurrency-1 serial phase (gap-install-family-tests-rotate-flakes-under-full-suite).
 // quay-init-drift-report.test.mjs — gap-delivery-surface-grows-but-target-freezes-no-upgrade.
 //
+// MERGED (gap-quay-init-check-drift-merge-into-drift-report, 2026-08-19): absorbed the unique
+// assertions from the retired quay-init-check-drift.test.mjs (which duplicated this file on the
+// SAME gap, AC numbered 1:1) so no assertion style is lost:
+//   - the INDEPENDENT before/after --check-drift 对照 (separate process invocations before and
+//     after the upgrade, not just slicing the upgrade's own printed before/after reports),
+//   - the READ-ONLY-on-drifted-script assertion (--check-drift lists, never overwrites the edit),
+//   - the install-does-NOT-lay-down-deleted-script control (send-keys-verified.sh in the target),
+//   - the derived>0 denominator assertion on a clean install.
+//
 // The delivery surface grows (new derived scripts ship with the plugin) while an installed target
 // freezes at install time — there was no upgrade/refresh channel and no drift report. This test pins
 // the mechanism added to plugin/scripts/quay-init.sh:
@@ -140,6 +149,7 @@ test('AC1/AC2 — after a --loop install, --check-drift reports the derived set 
     assert.equal(rep.drift, 0, 'installed target: no drift');
     assert.equal(rep.missing, 0, 'installed target: nothing missing');
     assert.equal(rep.consistent, rep.derived, 'installed target: every derived script is consistent');
+    assert.ok(rep.derived > 0, 'the derived set must be non-empty (a meaningful denominator)');
   } finally { cleanup(ws); }
 });
 
@@ -153,8 +163,18 @@ test('Contract control — a derived script deleted from the target ⇒ --loop u
     assert.ok(fs.existsSync(victim), 'resource-gate.sh must be laid down by the install');
     fs.rmSync(victim, { force: true });
 
+    // check-drift merge (独立 before/after 对照): --check-drift as INDEPENDENT process invocations
+    // before AND after the upgrade — not only slicing the upgrade's own printed before/after reports.
+    const beforeCheck = runInit(ws, ['--check-drift', '--root', ws]);
+    assert.equal(beforeCheck.status, 0, `--check-drift before upgrade must exit 0:\n${beforeCheck.stderr}`);
+    const beforeRep = parseDriftReport(beforeCheck.stdout);
+    assert.equal(beforeRep.missing, 1, `independent pre-check must show 缺失 1:\n${beforeCheck.stdout}`);
+    assert.match(beforeCheck.stdout, /missing: plugin\/scripts\/resource-gate\.sh/,
+      'the independent pre-check must name the missing derived script');
+
     const r2 = runInit(ws, LOOP_ARGS(ws));
     assert.equal(r2.status, 0, `upgrade must exit 0:\n${r2.stderr}`);
+    assert.match(r2.stdout, /copied: .*resource-gate\.sh/, 'the upgrade must report the fill (copied:)');
     // Pre-upgrade report must show exactly this one 缺失 (the deleted script).
     const pre = r2.stdout.indexOf('drift report (before upgrade):');
     const post = r2.stdout.indexOf('drift report (after upgrade):');
@@ -172,6 +192,12 @@ test('Contract control — a derived script deleted from the target ⇒ --loop u
     const postRep = parseDriftReport(r2.stdout.slice(post));
     assert.equal(postRep.missing, 0, 'upgrade post-report must show 缺失 0');
     assert.equal(postRep.drift, 0, 'upgrade post-report must show 漂移 0');
+    // check-drift merge (独立 before/after 对照): the post-upgrade --check-drift run is independent too.
+    const afterCheck = runInit(ws, ['--check-drift', '--root', ws]);
+    assert.equal(afterCheck.status, 0, `--check-drift after upgrade must exit 0:\n${afterCheck.stderr}`);
+    const afterRep = parseDriftReport(afterCheck.stdout);
+    assert.equal(afterRep.missing, 0, 'independent post-check must show 缺失 0');
+    assert.equal(afterRep.drift, 0, 'independent post-check must show 漂移 0');
   } finally { cleanup(ws); }
 });
 
@@ -191,6 +217,9 @@ test('AC3 — a locally-modified derived script is listed as drift and the upgra
     const rep2 = parseDriftReport(r2.stdout);
     assert.equal(rep2.drift, 1, `the local edit must be reported as 漂移 1:\n${r2.stdout}`);
     assert.match(r2.stdout, /drift: plugin\/scripts\/resource-gate\.sh/, 'the drifted script must be named');
+    // check-drift merge (READ-ONLY on a drifted script): --check-drift lists, never overwrites the edit.
+    assert.ok(fs.readFileSync(victim, 'utf8').includes('local customisation by the target project'),
+      '--check-drift must not touch the local edit (read-only)');
 
     // --loop upgrade: pre-report lists drift, the residue cleanup backs up + replaces VISIBLY, post 漂移 0.
     const r3 = runInit(ws, LOOP_ARGS(ws));
@@ -229,6 +258,22 @@ test('L_G — send-keys-verified.sh (deleted — superseded implementation) is N
     assert.ok(!missingLines.some((l) => l.includes('send-keys-verified')),
       'missing list must not contain send-keys-verified.sh (deleted — the upgrade has nothing to lay back down)');
     assert.ok(rep.derived > 0, 'the derived set is non-empty');
+  } finally { cleanup(ws); }
+});
+
+// ── L_G (check-drift merge): a real install does NOT lay down the deleted script in the target ────
+test('L_G — a real --loop install does NOT lay down the deleted send-keys-verified.sh (merged from check-drift)', () => {
+  const { ws, install: r1 } = laydownWorkspace();
+  try {
+    assert.equal(r1.status, 0, `install must exit 0:\n${r1.stderr}`);
+    assert.ok(!fs.existsSync(path.join(ws, 'plugin', 'scripts', 'send-keys-verified.sh')),
+      'the install must NOT lay down the deleted send-keys-verified.sh (it is not in the derived set)');
+    const r2 = runInit(ws, ['--check-drift', '--root', ws]);
+    assert.equal(r2.status, 0, `--check-drift must exit 0:\n${r2.stderr}`);
+    const itemLines = r2.stdout.split('\n').filter((l) => /^\s+(missing|drift):/.test(l));
+    assert.ok(!itemLines.some((l) => l.includes('send-keys-verified')),
+      'the drift report must NOT list send-keys-verified.sh as missing/drift');
+    parseDriftReport(r2.stdout); // the summary stays parseable
   } finally { cleanup(ws); }
 });
 

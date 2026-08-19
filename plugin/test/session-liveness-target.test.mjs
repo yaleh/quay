@@ -33,7 +33,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import {
   SCRIPT, tmuxAvailable,
-  setProbeTmpPrefix, sweepTmp, reapLiveOwners, tmux, isClaudePid,
+  setProbeTmpPrefix, sessionLivenessAfter, tmux, isClaudePid,
   waitForAlive, makeHermeticProbe, makeTwoWindowSession,
   waitForSelfClaude, spawnMonitor, waitForOutput,
 } from "./session-liveness-helpers.mjs";
@@ -44,8 +44,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 setProbeTmpPrefix("session-liveness-tgt-");
 
 after(() => {
-  reapLiveOwners();
-  sweepTmp("session-liveness-tgt-");
+  sessionLivenessAfter("session-liveness-tgt-");
 });
 
 test("T1 — SESSION_TARGETS (three-column) aims at the INNER role window: reports the inner pane_pid, never the outer pane's pid, never the monitor's own pid", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {

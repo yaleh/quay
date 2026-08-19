@@ -203,3 +203,12 @@ test("CLI — --limit-ms override", () => {
   const high = spawnSync("node", ["--experimental-strip-types", CHECKER, "--root", dir, "--limit-ms", "800000"], { encoding: "utf8" });
   assert.equal(high.status, 0, "700s < 800s limit ⇒ OK");
 });
+
+test("CLI — --no-block: a slow round still PRINTS SUITE-DURATION-EXCEEDED but exits 0 (the report-only wired path)", () => {
+  const dir = tmpDir("sdec-noblock-");
+  writeFixtureLedger(dir, ROWS); // round227 936.5s exceeds 600s
+  const r = spawnSync("node", ["--experimental-strip-types", CHECKER, "--root", dir, "--no-block"], { encoding: "utf8" });
+  assert.equal(r.status, 0, `--no-block must exit 0 even when exceeded: ${r.stdout} ${r.stderr}`);
+  assert.match(r.stdout, /SUITE-DURATION-EXCEEDED/);
+  assert.match(r.stdout, /round227/);
+});

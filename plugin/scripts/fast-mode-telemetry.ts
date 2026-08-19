@@ -113,6 +113,7 @@ import {
   SCHEMA_VERSION,
   VALID_STAGES,
   VALID_OUTCOMES,
+  IMPL_COMPLETE_EVENT_KIND,
   validateEvent,
   emitEvent,
   parseEventStream,
@@ -716,6 +717,47 @@ export function buildEndEvent({ taskId, runId, outcome, executionCwd, baseCommit
   };
 }
 
+/**
+ * Build the schema-valid `Fast` impl-complete event (eventKind 'impl-complete') — the THIRD
+ * task-lifecycle event (gap-inflight-states-missing-impl-complete-event). fan-in writes it after
+ * impl completes (suite green) and BEFORE land, splitting the start→end span into start→impl-complete
+ * (implementing) and impl-complete→end (awaiting-land). timing is all-null (a boundary marker, not a
+ * start/end), so aggregate() classifies it as neither start-like nor end-like; the boundary instant
+ * is recordedAtMs.
+ * @param {object} opts
+ * @param {string} opts.taskId
+ * @param {string} opts.runId
+ * @param {string} [opts.executionCwd]
+ * @param {string|null} [opts.baseCommit]
+ * @param {number} [opts.recordedAtMs]
+ * @returns {object} — a plain object that A1a validateEvent accepts
+ */
+export function buildImplCompleteEvent({ taskId, runId, executionCwd, baseCommit = null, recordedAtMs = Date.now() }) {
+  return {
+    schemaVersion: SCHEMA_VERSION,
+    runId,
+    candidateId: String(taskId),
+    taskId: String(taskId),
+    stage: FAST_MODE_STAGE,
+    attempt: 0,
+    timing: { queuedAtMs: null, startedAtMs: null, endedAtMs: null },
+    agentLabel: FAST_MODE_AGENT_LABEL,
+    commandIdentity: "fast-mode-telemetry:impl-complete",
+    executionCwd: executionCwd ?? process.cwd(),
+    worktreePath: null,
+    baseCommit,
+    candidateCommit: null,
+    outcome: null,
+    waitReason: null,
+    resourceClaim: null,
+    observedWrites: [],
+    isolationMode: null,
+    dispatchMode: "serial",
+    recordedAtMs,
+    eventKind: IMPL_COMPLETE_EVENT_KIND,
+  };
+}
+
 // ── Write / read ──────────────────────────────────────────────────────────────────────────────────────
 
 /** runId is used verbatim as a `.workflow-events/<runId>.jsonl` path component — must be filename-safe. */
@@ -774,6 +816,30 @@ export function hasEndEvent(root, runId) {
     let e;
     try { e = JSON.parse(line); } catch { continue; }
     if (e && (e.eventKind === "end" || (e.timing && e.timing.endedAtMs != null))) return true;
+  }
+  return false;
+}
+
+/**
+ * Whether the runId's event file already carries an impl-complete event (eventKind "impl-complete").
+ * The write-time idempotency guard for `--impl-complete`: an ff-retry re-runs phase 2 (which writes
+ * impl-complete again); the guard skips the second write so a runId carries exactly one impl-complete
+ * boundary. PURE READ — never writes. Missing file / malformed line ⇒ false (a bracket with no
+ * readable impl-complete proceeds to write; a false negative here at worst reproduces a harmless
+ * duplicate boundary that aggregate() dedups by first-wins).
+ * @param {string} root
+ * @param {string} runId
+ * @returns {boolean}
+ */
+export function hasImplCompleteEvent(root, runId) {
+  if (!runId || !RUN_ID_SAFE_RE.test(runId)) return false;
+  const logPath = path.join(root, ".workflow-events", `${runId}.jsonl`);
+  if (!fs.existsSync(logPath)) return false;
+  for (const line of fs.readFileSync(logPath, "utf8").split("\n")) {
+    if (line.trim() === "") continue;
+    let e;
+    try { e = JSON.parse(line); } catch { continue; }
+    if (e && e.eventKind === IMPL_COMPLETE_EVENT_KIND) return true;
   }
   return false;
 }
@@ -960,6 +1026,13 @@ function isEndLike(e) {
   if (e.eventKind === "end") return true;
   return e.timing.endedAtMs != null;
 }
+/** Impl-complete boundary event (gap-inflight-states-missing-impl-complete-event): the third
+ *  task-lifecycle kind. Its timing is all-null so it is NEVER start-like nor end-like — it is a
+ *  mid-span marker that splits start→end into start→impl-complete and impl-complete→end. */
+function isImplComplete(e) {
+  if (!e || !e.timing) return false;
+  return e.eventKind === IMPL_COMPLETE_EVENT_KIND;
+}
 
 /**
  * Compute the halt time to subtract from a throughput window (AC2/AC4).
@@ -1051,10 +1124,14 @@ export function aggregate(events, { sinceMs = null, nowMs = null, haltEvents = n
   const byRun = new Map();
   for (const e of taskEvents) {
     if (!byRun.has(e.runId)) {
-      byRun.set(e.runId, { runId: e.runId, taskId: e.taskId, start: null, ends: [] });
+      byRun.set(e.runId, { runId: e.runId, taskId: e.taskId, start: null, implComplete: null, ends: [] });
     }
     const rec = byRun.get(e.runId);
-    if (isStartLike(e)) {
+    // impl-complete is checked FIRST: its timing is all-null so it is never start-like/end-like, but
+    // the explicit branch keeps the boundary classification unambiguous.
+    if (isImplComplete(e)) {
+      if (!rec.implComplete) rec.implComplete = e; // first impl-complete wins (idempotent re-write safe)
+    } else if (isStartLike(e)) {
       if (!rec.start) rec.start = e;
     } else if (isEndLike(e)) {
       rec.ends.push(e);
@@ -1069,6 +1146,10 @@ export function aggregate(events, { sinceMs = null, nowMs = null, haltEvents = n
   const orphaned = [];
   /** @type {Array<{taskId:string,runId:string,startedAtMs:number,startedAtMsUnreliable:boolean}>} */
   const inProgress = [];
+  /** @type {Array<{taskId:string,runId:string,startedAtMs:number}>} */
+  const implementing = [];
+  /** @type {Array<{taskId:string,runId:string,startedAtMs:number,implCompletedAtMs:number|null}>} */
+  const awaitingLand = [];
   /** @type {Array<{taskId:string,runId:string,minutes:number,outcome:string,startedAtMs:number}>} */
   const deferred = [];
   /** @type {Array<{taskId:string,runId:string,minutes:number,outcome:string|null,reconcileReason:string,startedAtMsUnreliable:boolean}>} */
@@ -1136,12 +1217,23 @@ export function aggregate(events, { sinceMs = null, nowMs = null, haltEvents = n
     } else if (rec.start && !end) {
       if (sinceMs != null && rec.start.recordedAtMs < sinceMs) continue;
       inProgress.push({ taskId: rec.taskId, runId: rec.runId, startedAtMs, startedAtMsUnreliable });
+      // gap-inflight-states-missing-impl-complete-event: the impl-complete boundary splits the open
+      // span into two INDEPENDENT counts — implementing (start, no impl-complete: 真正在实现) and
+      // awaiting-land (impl-complete, no end: 排队待落地). Build dispatch reads the former; the land
+      // single-flight gate reads the latter. Both are start-without-end (still in `inProgress`).
+      if (rec.implComplete) {
+        awaitingLand.push({ taskId: rec.taskId, runId: rec.runId, startedAtMs, implCompletedAtMs: rec.implComplete.recordedAtMs ?? null });
+      } else {
+        implementing.push({ taskId: rec.taskId, runId: rec.runId, startedAtMs });
+      }
     }
   }
 
   tasks.sort((a, b) => a.taskId.localeCompare(b.taskId));
   orphaned.sort((a, b) => a.taskId.localeCompare(b.taskId) || a.runId.localeCompare(b.runId));
   inProgress.sort((a, b) => a.taskId.localeCompare(b.taskId) || a.runId.localeCompare(b.runId));
+  implementing.sort((a, b) => a.taskId.localeCompare(b.taskId) || a.runId.localeCompare(b.runId));
+  awaitingLand.sort((a, b) => a.taskId.localeCompare(b.taskId) || a.runId.localeCompare(b.runId));
   deferred.sort((a, b) => a.taskId.localeCompare(b.taskId) || a.runId.localeCompare(b.runId));
   reconciled.sort((a, b) => a.taskId.localeCompare(b.taskId) || a.runId.localeCompare(b.runId));
   unreliable.sort((a, b) => a.taskId.localeCompare(b.taskId) || a.runId.localeCompare(b.runId));
@@ -1213,7 +1305,7 @@ export function aggregate(events, { sinceMs = null, nowMs = null, haltEvents = n
   const longestBlockedMs = blocked.length ? Math.max(...blocked.map((b) => b.durationMs)) : 0;
 
   return {
-    tasks, orphaned, inProgress, deferred, meanMinutes, medianMinutes,
+    tasks, orphaned, inProgress, implementing, awaitingLand, deferred, meanMinutes, medianMinutes,
     tasksPerHour, serialEquivalentPerHour,
     windowStart: windowStartMs != null ? new Date(windowStartMs).toISOString() : null,
     windowEnd: windowEndMs != null ? new Date(windowEndMs).toISOString() : null,
@@ -1286,14 +1378,13 @@ export function reconcileInFlight(inProgress, { executorGone, firstKnownCommitMs
  *   1. process alive          → KEEP (a live process carrying the runId needle)
  *   2. subagent transcript    → KEEP (brief-phase impl subagent — dispatched, no worktree yet; its
  *                               process cmdline carries no runId, so only the transcript proves it)
- *   3. worktree open          → KEEP (mid-flight dispatch environment still present — uncertain, and
- *                               the branch may legitimately point at an ancestor of HEAD with no
- *                               commits yet)
- *   4. branch merged          → CLOSE (work landed; the executor that was building it is done)
- *   5. none of the above      → CLOSE (no process, no transcript, no worktree, branch not merged ⇒
- *                               dispatch gone)
- * Presence (process / transcript / open worktree) ALWAYS trumps absence — never close a record whose
- * dispatch environment is still observable. Never consults wall-clock age — see the file-header note.
+ *   3. branch merged          → CLOSE (work landed; the executor that was building it is done)
+ *   4. none of the above      → CLOSE (no process, no transcript, branch not merged ⇒ dispatch gone)
+ * Presence (process / transcript) ALWAYS trumps absence — never close a record whose dispatch is
+ * still observably running. The `worktreeExists`/worktree-present probe is RETIRED
+ * (gap-inflight-states-missing-impl-complete-event): a worktree is pure implementation detail, never
+ * a concurrency-accounting signal — the impl-complete event is the state record. Never consults
+ * wall-clock age — see the file-header note.
  * @param {string} root
  * @returns {(rec: {taskId:string, runId:string}) => {gone:boolean, reason:string}}
  */
@@ -1301,9 +1392,12 @@ export function makeDefaultExecutorGone(root) {
   return (rec) => {
     if (processAlive(rec.runId)) return { gone: false, reason: "process-alive" };
     if (subagentTranscriptAlive(root, rec.taskId)) return { gone: false, reason: "subagent-transcript-alive" };
-    if (worktreeExists(root, rec.taskId)) return { gone: false, reason: "worktree-present" };
+    // gap-inflight-states-missing-impl-complete-event: the `worktreeExists` probe is RETIRED — a
+    // worktree is pure implementation detail (where code lives), never a concurrency-accounting
+    // signal. The impl-complete event is the state record, not the worktree's presence. So an open
+    // worktree no longer KEEPs a record alive in --reconcile.
     if (isBranchMerged(root, rec.taskId)) return { gone: true, reason: "branch-merged" };
-    return { gone: true, reason: "worktree-gone-and-no-process" };
+    return { gone: true, reason: "no-observable-executor" };
   };
 }
 
@@ -1746,6 +1840,7 @@ const usage = `fast-mode-telemetry.ts — fast-mode (direct) execution metering 
 Usage:
   node --experimental-strip-types fast-mode-telemetry.ts --task-start --taskId <id> [--root <dir>]
   node --experimental-strip-types fast-mode-telemetry.ts --task-end --taskId <id> --runId <r> --outcome <done|needs-human|abandoned|deferred> [--fanInCommit <sha>] [--root <dir>]  (--fanInCommit overrides the auto-looked-up fan-in commit sha)
+  node --experimental-strip-types fast-mode-telemetry.ts --impl-complete --taskId <id> --runId <r> [--root <dir>]  (the third lifecycle event: impl done, awaiting land)
   node --experimental-strip-types fast-mode-telemetry.ts --run-id-for --taskId <id> [--root <dir>]     (PURE READ — the open bracket's runId for the A6 fan-in merge message)
   node --experimental-strip-types fast-mode-telemetry.ts --halt-start [--atMs <iso>] [--reason <str>] [--root <dir>]   (record a .halt placement)
   node --experimental-strip-types fast-mode-telemetry.ts --halt-end   [--atMs <iso>] [--root <dir>]                    (record a .halt removal)
@@ -1966,6 +2061,39 @@ export async function main(argv) {
       return 1;
     }
     console.log(`fast-mode-telemetry: end event written for ${taskId} (runId ${runId}, outcome ${outcome}${fanInCommit ? `, fanInCommit ${fanInCommit}` : ""})`);
+    return 0;
+  }
+
+  // --impl-complete (gap-inflight-states-missing-impl-complete-event): write the THIRD task-lifecycle
+  // event — the boundary between "implementing" and "awaiting-land". fan-in writes it after impl
+  // completes (suite green) and BEFORE land, so the start→end span splits into two independently
+  // countable segments. Idempotent: a second write for the same runId (an ff-retry re-running phase 2)
+  // is skipped.
+  if (args.includes("--impl-complete")) {
+    const taskId = getArgValue(args, "--taskId");
+    const runId = getArgValue(args, "--runId");
+    if (!taskId || !runId) {
+      console.error("fast-mode-telemetry: --impl-complete requires --taskId <id> --runId <r>");
+      return 1;
+    }
+    if (hasImplCompleteEvent(root, runId)) {
+      console.log(`fast-mode-telemetry: --impl-complete idempotent — runId ${runId} already marked impl-complete; no second event written`);
+      return 0;
+    }
+    const event = buildImplCompleteEvent({
+      taskId,
+      runId,
+      executionCwd: process.cwd(),
+      baseCommit: getBaseCommit(root),
+      recordedAtMs: Date.now(),
+    });
+    try {
+      writeEvent(event, root);
+    } catch (e) {
+      console.error(`fast-mode-telemetry: ${e.message}`);
+      return 1;
+    }
+    console.log(`fast-mode-telemetry: impl-complete event written for ${taskId} (runId ${runId})`);
     return 0;
   }
 

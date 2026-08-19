@@ -245,6 +245,43 @@ export function panePidsOf(dir) {
   return pids;
 }
 
+/** serverPidsOfByCmdline(dir) — PIDs of LIVE tmux SERVER processes whose cmdline still references
+ * the probe's socket path under `dir`. This is the LAST-RESORT discovery that closes the
+ * socket-closed-but-alive leak (gap-session-liveness-teardown-unified-kill-servers): a tmux server
+ * that closed its listening socket, whose pane children are already SIGHUP'd dead, and whose pid was
+ * never cached is INVISIBLE to dirHasLiveOwner/serverPidOf (both proven false/null while the server
+ * is STILL ALIVE — after the socket dir is removed, /proc/net/unix no longer lists it). Its CMDLINE
+ * retains the socket path it was started with (`tmux -S <dir>/sock/tmux-<uid>/default new-session …`),
+ * so a /proc cmdline scan finds it and lets the teardown hard-kill SIGKILL it. fs-only (reads
+ * /proc/<pid>/cmdline, returns PIDs); the KILL is the CALLER's PID-targeted SIGKILL, never a
+ * name-based batch kill (invariant no_pkill_by_name_on_live = 1). Matches only processes whose
+ * argv[0] is a tmux binary AND whose cmdline contains `<dir>/` — so a non-tmux process whose args
+ * merely mention the path, or a sibling probe's server, is never matched. */
+export function serverPidsOfByCmdline(dir) {
+  // The dir may ALREADY BE GONE in the ghost case (the socket dir was removed while the server
+  // still runs) — do NOT bail on realpath failure. The literal path is what the server was started
+  // with (TMUX_TMPDIR=<dir>/sock) and what its cmdline retains, so it is the correct match string.
+  let abs = dir;
+  try { abs = fs.realpathSync(dir); } catch { /* dir already gone — keep the literal path */ }
+  const marker = abs + "/"; // the socket path starts under the probe dir
+  const pids = [];
+  try {
+    for (const p of fs.readdirSync("/proc").filter((n) => /^\d+$/.test(n))) {
+      const pid = Number(p);
+      if (pid === process.pid) continue;
+      let argv0 = "", cmdline = "";
+      try {
+        const raw = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8");
+        argv0 = raw.split("\0")[0] ?? "";
+        cmdline = raw.split("\0").join(" ");
+      } catch { continue; } // pid exited mid-scan
+      if (!/tmux/.test(argv0)) continue;          // only tmux servers/clients
+      if (cmdline.includes(marker)) pids.push(pid);
+    }
+  } catch { /* /proc unreadable */ }
+  return pids;
+}
+
 /** Pre-suite orphan sweeper over ALL /tmp/quay-run-* dirs. A namespace dir whose tmux server is
  * STILL alive (a leaked, still-running probe) is SKIPPED — it is in-use, not residue. fs-only,
  * never a process-name batch kill. Returns { cleaned, dirs }. */

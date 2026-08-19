@@ -40,9 +40,9 @@ import { tmux as isolatedTmux } from "../scripts/tmux-session.ts";
 // session-liveness test family keeps resolving the same names (single source of truth).
 import {
   runIdOf, runNamespaceRoot, dirHasLiveOwner, serverPidOf, panePidsOf,
-  sweepRunNamespaces, sweepRunNamespace,
+  sweepRunNamespaces, sweepRunNamespace, serverPidsOfByCmdline,
 } from "../scripts/session-liveness-sweep.mjs";
-export { runIdOf, runNamespaceRoot, dirHasLiveOwner, serverPidOf, panePidsOf, sweepRunNamespaces, sweepRunNamespace };
+export { runIdOf, runNamespaceRoot, dirHasLiveOwner, serverPidOf, panePidsOf, sweepRunNamespaces, sweepRunNamespace, serverPidsOfByCmdline };
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const SCRIPT = path.resolve(__dirname, "..", "scripts", "session-liveness.sh");
@@ -158,6 +158,27 @@ const __liveProbeTmpDirs = new Set();
 export function __registerProbeTmp(tmp) { __liveProbeTmpDirs.add(tmp); }
 export function __unregisterProbeTmp(tmp) { __liveProbeTmpDirs.delete(tmp); }
 
+// ── leaked CHILD-process reaper (gap-session-liveness-teardown-unified-kill-servers) ──────────
+// A cancelled hermetic-probe test skips its `finally`, so its spawned CHILD processes — the monitor
+// (session-liveness.sh, spawnMonitor) and the transcript touch-loop (startTouchLoop) — survive too.
+// They are NOT tmux servers (sweepTmp/reapLiveOwners do not cover them) and nothing else kills them
+// → they accumulate across runs. Each constructor REGISTERS its child here (process-local Set of
+// ChildProcess objects); `reapSpawnedChildren()` — called from the unified after() teardown BEFORE
+// sweepTmp — SIGKILLs any STILL-RUNNING registered child (child.exitCode === null ⇒ not yet exited,
+// so a pid REUSED after a normal exit is never killed). Never a name-based batch kill (invariant
+// no_pkill_by_name_on_live = 1): the kill is per-child-handle, scoped to THIS process's own spawns.
+const __liveChildProcs = new Set();
+export function __registerChildProc(child) { __liveChildProcs.add(child); }
+export function __unregisterChildProc(child) { __liveChildProcs.delete(child); }
+export function reapSpawnedChildren() {
+  for (const child of [...__liveChildProcs]) {
+    try {
+      if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+    } catch { /* already dead */ }
+  }
+  __liveChildProcs.clear();
+}
+
 // killProbeServer(abs) — kill ONE registered probe's tmux SERVER (kill-server) on its private
 // socket. The definitive cleanup: the server exits regardless of its session/window state, so a
 // fixture can never leave a live server behind (a live server pins the dir as owner-live, and
@@ -218,11 +239,39 @@ export function teardownProbe(abs) {
       }
     }
   }
-  // Only unregister + remove once the owner is ACTUALLY dead. If it survived even the hard kill
-  // (uninterruptible sleep / unreadable /proc), LEAVE it registered so after()'s reapLiveOwners()
-  // can retry — the "probe stays registered until the server is dead" contract, never orphan an
-  // unreachable live server.
+  // GHOST-SERVER DISCOVERY (gap-session-liveness-teardown-unified-kill-servers): a server that
+  // closed its listening socket, lost its pane children (SIGHUP), and missed the pid cache is
+  // INVISIBLE to dirHasLiveOwner/serverPidOf — PROVEN: after the socket dir is removed,
+  // dirHasLiveOwner=false + serverPidOf=null while the server is STILL ALIVE (its cmdline retains
+  // the socket path). Without this scan the teardown would hit the `!dirHasLiveOwner(abs)` branch
+  // below, UNREGISTER the dir, and leave the live server orphaned forever — the leak that red'ed
+  // the suite-tail tmux-leak-scan (ol-gap4/ol-scd-a/ol-subagent/tgt + a touch-loop, 62min). The
+  // cmdline scan finds the server via its own argv (PID-targeted SIGKILL, never a name-based batch
+  // kill — invariant no_pkill_by_name_on_live = 1). Run ONLY when the owner is invisible to the
+  // socket/cache/pane-env checks — a visible owner is handled by the kill-loop + hard-kill above,
+  // so a normal teardown never pays the /proc cmdline scan.
+  let ghosts = [];
   if (!dirHasLiveOwner(abs)) {
+    ghosts = serverPidsOfByCmdline(abs);
+    for (const pid of ghosts) {
+      if (pid === process.pid) continue;
+      try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ }
+    }
+    if (ghosts.length > 0) {
+      // Bounded wait for the SIGKILL to land before re-evaluating the unregister decision.
+      const ghostWait = Date.now() + 2000;
+      while (Date.now() < ghostWait && serverPidsOfByCmdline(abs).length > 0) {
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+      }
+      ghosts = serverPidsOfByCmdline(abs); // re-read after the wait
+    }
+  }
+  // Only unregister + remove once the owner is ACTUALLY dead — judged by BOTH the visibility
+  // criterion (dirHasLiveOwner) AND the cmdline discovery (no tmux process still references the
+  // socket path). If it survived even the hard kill (uninterruptible sleep / unreadable /proc),
+  // LEAVE it registered so after()'s reapLiveOwners() can retry — the "probe stays registered
+  // until the server is dead" contract, never orphan an unreachable live server.
+  if (!dirHasLiveOwner(abs) && ghosts.length === 0) {
     // Kill the pane CHILDREN (the `exec -a claude-probe sleep 10000` fixtures) that survived the
     // server's death carrying TMUX/TMUX_TMPDIR in their inherited environ. PID-targeted SIGKILL,
     // never a name-based batch kill (invariant no_pkill_by_name_on_live = 1). Without this the
@@ -241,6 +290,26 @@ export function reapLiveOwners() {
   for (const abs of [...__liveProbeTmpDirs]) {
     teardownProbe(abs);
   }
+}
+
+// ── UNIFIED after() teardown (gap-session-liveness-teardown-unified-kill-servers) ──────────────
+// Every session-liveness test file's after() hook calls THIS one shared cleanup, so the teardown
+// surface is a SINGLE code path (not 12 divergent per-file hooks that drift — the 5b shape: the
+// ol-scd-d point fix covered one path and ol-gap4/ol-scd-a/ol-subagent/tgt still leaked). It
+// systematically clears the SET of everything a test process self-built:
+//   1. killProbeServers()  — kill-server on every registered live probe's private socket.
+//   2. reapLiveOwners()    — retry + hard-kill + ghost-cmdline-discovery, then remove dead dirs.
+//   3. reapSpawnedChildren() — SIGKILL leaked monitors + touch-loops (cancelled-test finally skip).
+//   4. sweepTmp(...)       — remove owner-dead residue dirs under the file's OWN prefixes.
+// Files pass their OWN /tmp prefixes so the sweep never touches a sibling file's active probe
+// (SPLIT CONCURRENCY SAFETY: each split file owns a distinct prefix).
+export function sessionLivenessAfter(...prefixes) {
+  // 判据1 (gap-session-liveness-fixture-tmux-not-killed): kill-server 本进程创建的 tmux server —
+  // sweepTmp 的 owner-liveness 保护（AC3）只跳过活 owner 目录，夹具不 kill ⇒ 泄漏无出口。
+  killProbeServers();
+  reapLiveOwners();
+  reapSpawnedChildren();
+  sweepTmp(...prefixes);
 }
 
 // ── availability guards ───────────────────────────────────────────────────────────
@@ -272,6 +341,14 @@ export function tmux(args, env) {
     // helpers' 0o700 socket-base dirs.
     fs.mkdirSync(path.dirname(sock), { recursive: true, mode: 0o700 });
     const r = isolatedTmux(args, { socket: sock, env: e });
+    // AUTO-REGISTER a self-built tmux SERVER created OUTSIDE makeHermeticProbe (e.g. a test that
+    // calls `tmux(["new-session", …], env)` directly — the events test's ol-cold/ol-env). The probe
+    // dir is TMUX_TMPDIR's parent (<dir>/sock → <dir>), the same layout makeHermeticProbe uses, so
+    // the unified after()'s reapLiveOwners() can kill this server too. Registration is idempotent
+    // (Set) and only on SUCCESS — a failed new-session never starts a server.
+    if (args[0] === "new-session" && r.status === 0) {
+      __registerProbeTmp(path.dirname(e.TMUX_TMPDIR));
+    }
     return { status: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
   }
   // Real-probe path (env === process.env, targeting the manager box's REAL probe session): preserve
@@ -324,16 +401,33 @@ export function paneHasClaudeChild(env, session) {
   return false;
 }
 
-// ── load-robustness budget (gap-session-liveness-wall-clock-budget-false-positives, 2026-08-12) ──
+// ── load-robustness budget (gap-session-liveness-wall-clock-budget-false-positives, 2026-08-12;
+//    gap-session-liveness-hangguard-ms-timeout, 2026-08-18) ─────────────────────────────────────
 // A wait budget here is a HANG-GUARD, never a correctness criterion. Under suite load the real
 // polling loop (session-liveness.sh sleep $INTERVAL) + real tmux + process spawn slow down — events
 // arrive after a tight wall-clock budget → false red. The product isn't broken; the measurement
 // window is too narrow. Every wait helper below polls a REAL signal (a marker line in the monitor's
 // stdout, the round counter, a /proc liveness probe) and uses the budget only as an upper cap so a
-// genuinely hung monitor still fails. 60s is deliberately loose — slow-but-correct passes,
-// hung-but-wrong still fails. A caller's explicit budget is CLAMPED UP to this floor (Math.max), so
-// a tight literal can never reintroduce a false red (hard-rule-4-corollary-2: widen generously).
-export const HANG_GUARD_MS = 60_000;
+// genuinely hung monitor still fails — slow-but-correct passes, hung-but-wrong still fails. A
+// caller's explicit budget is CLAMPED UP to this floor (Math.max), so a tight literal can never
+// reintroduce a false red (hard-rule-4-corollary-2: widen generously).
+//
+// 2026-08-18 (gap-session-liveness-hangguard-ms-timeout): the fixed 60_000 floor was "deliberately
+// loose" in isolation but broke under the overlap phase — 16 concurrent test files saturate the
+// 16-core host, and session-liveness.sh (≥2 node --experimental-strip-types subprocesses per round
+// + tmux/git/proc scans) is CPU-starved to ≈20s/round, so 4 rounds exceeded 60s and the AC3 负控制
+// false-hung (commit 43153e58). A fixed 180_000 literal would repeat the same mistake on the NEXT
+// bigger host — its adequacy depends on host parallelism (hard-rule-4-corollary-2: a timeout whose
+// reasonableness depends on machine spec must READ the host, not hardcode a literal). So the floor
+// scales with os.availableParallelism(): the measured ≈20s/round at 16 cores is ≈1.25s/core/round,
+// the deepest wait in this family is 4 rounds, and a ≈2.4× margin yields ~12s/core — 16 cores ⇒ 192s
+// (≥ the 180s the suite-fix measured sufficient, ≥ the ~80s measured need), while a small host keeps
+// the original 60s floor so a genuinely hung monitor still fails promptly.
+const HOST_PARALLELISM = (() => {
+  try { return os.availableParallelism(); } catch { /* node < 18.14 */ }
+  return os.cpus().length || 1;
+})();
+export const HANG_GUARD_MS = Math.max(60_000, HOST_PARALLELISM * 12_000);
 function hangGuard(ms) { return Math.max(ms ?? HANG_GUARD_MS, HANG_GUARD_MS); }
 
 export async function waitForAlive(env, session, timeoutMs = HANG_GUARD_MS) {
@@ -512,6 +606,7 @@ export function spawnMonitor(env, targets, { script = SCRIPT, tickLogs, transcri
   // register:true AND SESSION_ROOT:<tmp> to exercise the registration path hermetically.
   if (!register) monEnv.SL_NO_REGISTER = "1";
   const child = spawn("bash", [script], { env: monEnv });
+  __registerChildProc(child); // reap in the unified after() if the test's finally is skipped
   let out = "";
   child.stdout.on("data", (d) => { out += d; });
   child.stderr.on("data", (d) => { out += d; });
@@ -540,7 +635,7 @@ export async function waitForRounds(mon, n, timeoutMs = HANG_GUARD_MS) {
 // waitForRounds is ABSOLUTE (count >= n); once a monitor has already run many rounds it returns
 // immediately, so the "hold the shape for ≥N more rounds" checks (edge-trigger, negative-control
 // spans) need this DELTA form. Same hermetic principle as waitForRounds: the `# ROUND` marker is the
-// deterministic time source (time injection), never a fixed wall-clock sleep — the 60s hang-guard is
+// deterministic time source (time injection), never a fixed wall-clock sleep — the hang-guard is
 // only an upper cap so a genuinely hung monitor still fails (slow-but-correct passes under load).
 export async function waitForMoreRounds(mon, n, timeoutMs = HANG_GUARD_MS) {
   const target = countRounds(mon) + n;
@@ -667,9 +762,14 @@ export function makePanePermissionPrompt(env, session) {
 }
 
 // startTouchLoop — simulate a live session writing to its transcript: touch <file> every 0.5s.
+// The spawned child is REGISTERED so the unified after()'s reapSpawnedChildren() SIGKILLs it if a
+// cancelled test skips the caller's `toucher.kill("SIGKILL")` (gap-session-liveness-teardown-
+// unified-kill-servers: one leaked touch-loop survived 62min alongside the leaked servers).
 export function startTouchLoop(file) {
-  return spawn("bash", ["-c", 'while true; do touch "$1"; sleep 0.5; done', "touch-loop", file],
+  const child = spawn("bash", ["-c", 'while true; do touch "$1"; sleep 0.5; done', "touch-loop", file],
     { stdio: "ignore" });
+  __registerChildProc(child);
+  return child;
 }
 
 // ── synthetic transcript records (stage-2/3/4 controllable JSONL content) ────────────────────────

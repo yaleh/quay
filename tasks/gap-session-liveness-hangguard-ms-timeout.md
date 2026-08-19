@@ -1,7 +1,7 @@
 ---
 id: gap-session-liveness-hangguard-ms-timeout
 title: "session-liveness HANG_GUARD_MS 时限调整（60s→180s）——重叠相位 16 并发 CPU 饿死导致 4 轮 >60s 误判 hang"
-status: ready
+status: done
 labels:
   - gap
   - performance
@@ -19,17 +19,16 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: `session-liveness.sh` 的 HANG_GUARD_MS 时限调整（60s→180s 或读宿主负载自适应），高并发下不误判 hang。
-- [ ] AC2: 负控制——16 并发 CPU 饱和时 session-liveness 不因 CPU 饿死误判 hang（真实输出）。
-- [ ] AC3: 该文件不再触发 suite-fix 越界修（KNOWN-LOAD-SENSITIVE 走 release）。
+- [x] AC1: `session-liveness.sh` 的 HANG_GUARD_MS 时限调整（60s→180s 或读宿主负载自适应），高并发下不误判 hang。
+- [x] AC2: 负控制——16 并发 CPU 饱和时 session-liveness 不因 CPU 饿死误判 hang（真实输出）。
+- [x] AC3: 该文件不再触发 suite-fix 越界修（KNOWN-LOAD-SENSITIVE 走 release）。
 
 ## Definition of Done
 
-- [ ] 16 并发 CPU 饱和时 session-liveness 不误判 hang（时限自适应），scoped 绿（真实输出）。
+- [x] 16 并发 CPU 饱和时 session-liveness 不误判 hang（时限自适应），scoped 绿（真实输出）。
 
 ## Touches
 
 - tasks/gap-session-liveness-hangguard-ms-timeout.md（自身）
-- plugin/scripts/session-liveness.sh（HANG_GUARD_MS 时限）
-- plugin/scripts/session-liveness-helpers.mjs（若时限逻辑在此）
-- plugin/test/session-liveness.test.mjs（高并发负控制）
+- plugin/test/session-liveness-helpers.mjs（HANG_GUARD_MS 时限——实际位置；原立案 Touches 误写 plugin/scripts/）
+- plugin/test/session-liveness.test.mjs（高并发负控制 + KNOWN-LOAD-SENSITIVE 标注）

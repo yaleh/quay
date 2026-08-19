@@ -21,16 +21,18 @@
 // record under the limit ⇒ ok=true. The output names WHICH axis exceeded (latest / latestMainScope),
 // with round / durationMs / scope / state / commit of each.
 //
-// NOT wired into run_static_checks (it is a trend observation, not a code-class invariant — a stale
-// ledger or an over-long round must not red the whole suite). It is the "tick 里的一行判据": run it
-// from a tick / cron / suite-state-trigger consumer on a cadence, or on demand during a diagnosis.
+// Wired into run_static_checks (scripts/test.sh) REPORT-ONLY via --no-block (gap-suite-duration-
+// exceed-check-not-wired): it is a trend observation, not a code-class invariant — a stale ledger or
+// an over-long round must not red the whole suite, so the wired path prints the observation but never
+// exits non-zero. The DEFAULT mode (no --no-block) stays fail-closed (exit 1 on exceed) so a diagnosis
+// run — or the AC2 negative control against the real ledger — still gets the RED it is owed.
 //
 // Run:
 //   node --experimental-strip-types plugin/scripts/suite-duration-exceed-check.ts
-//       [--limit-ms <n>] [--since-epoch <epoch-ms>] [--root <dir>] [--json]
+//       [--limit-ms <n>] [--since-epoch <epoch-ms>] [--root <dir>] [--json] [--no-block]
 // Exit codes:
-//   0  ok (no round over the limit, or NOT-EVALUATED)
-//   1  SUITE-DURATION-EXCEEDED (a qualifying round's durationMs > limitMs)
+//   0  ok (no round over the limit, or NOT-EVALUATED, or --no-block on an exceed)
+//   1  SUITE-DURATION-EXCEEDED (a qualifying round's durationMs > limitMs, without --no-block)
 
 import fs from "node:fs";
 import path from "node:path";
@@ -189,6 +191,10 @@ export function main(argv: string[]): number {
   const sinceRaw = getArgValue(argv, "--since-epoch");
   const sinceEpoch = sinceRaw !== undefined ? Number(sinceRaw) : null;
   const asJson = argv.includes("--json");
+  // --no-block (gap-suite-duration-exceed-check-not-wired): the REPORT-ONLY wired path. The verdict
+  // is printed verbatim (SUITE-DURATION-EXCEEDED stays visible in the suite log) but the exit is 0 so
+  // a trend observation never reds the whole suite. Usage errors (exit 2) still fire.
+  const noBlock = argv.includes("--no-block");
   if (!Number.isFinite(limitMs) || limitMs < 0) {
     const msg = `--limit-ms must be a non-negative number (got ${JSON.stringify(limitMs)})`;
     if (asJson) console.log(JSON.stringify({ ok: false, error: msg }));
@@ -217,7 +223,7 @@ export function main(argv: string[]): number {
     console.log(`suite-duration-exceed-check: latestMainScope=${fmt(verdict.latestMainScope)}`);
     console.log(`suite-duration-exceed-check: ${verdict.reason}`);
   }
-  return verdict.ok ? 0 : 1;
+  return noBlock || verdict.ok ? 0 : 1;
 }
 
 if (isDirectEntry(import.meta, undefined, "suite-duration-exceed-check")) {

@@ -36,7 +36,7 @@ import { fileURLToPath } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
 import {
   SCRIPT, tmuxAvailable,
-  setProbeTmpPrefix, sweepTmp, reapLiveOwners, tmux, isolateTmuxEnv, isClaudePid,
+  setProbeTmpPrefix, sessionLivenessAfter, tmux, isolateTmuxEnv, isClaudePid,
   paneHasClaudeChild, waitForAlive, makeHermeticProbe,
   spawnMonitor, waitForOutput, waitForRounds, countRounds,
   makePaneBusy, makePaneIdle, makePanePermissionPrompt, startTouchLoop, cleanup,
@@ -55,8 +55,7 @@ setProbeTmpPrefix("session-liveness-sig-o-");
 // suite-tail tmux-leak-scan. reapLiveOwners() FIRST kills this process's OWN still-alive probe
 // servers, then sweepTmp removes owner-dead residue. Sweep ONLY this file's own prefixes.
 after(() => {
-  reapLiveOwners();
-  sweepTmp("session-liveness-sig-o-");
+  sessionLivenessAfter("session-liveness-sig-o-");
 });
 
 test("AC1 — a pane whose ONLY change is the /clear to save token counter stays idle (zero events); masked chrome must not read as work", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
