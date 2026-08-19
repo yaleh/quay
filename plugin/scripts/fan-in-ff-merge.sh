@@ -11,7 +11,8 @@
 #                                        判不出 ⇒ fail-closed 重跑（硬规则 3b: 判不出≠不需要）
 #     3. run the full suite           ← continue only when green (按第 2 步判定)
 #     4. run the doc check            ← the ff-only gap: ff triggers no pre-merge hook (AC63)
-#   持锁段 (THIS script — the ONLY action allowed while holding the lock):
+#   持锁段 (THIS script — the lock covers the ff; on an inert develop increment it also covers the
+#            in-lock develop re-merge + immediate re-ff, gap-fan-in-ff-retry-reruns-suite-on-inert-increment):
 #     5. acquire merge lock → git merge --ff-only task/<id> → release (success or failure)
 #
 # The lock is a SEPARATE flock from the suite lock (full-suite.lock.0/.1): different file, different
@@ -22,7 +23,15 @@
 # (ff-only moves a ref; it cannot conflict), so stale-lock recovery is a branch that is almost never
 # reached — a short lock that needs no elaborate recovery logic is the point (§2).
 #
-# On ff failure — the ONLY reason ff fails after step 1 is "develop advanced concurrently" — this
+# On ff failure — the ONLY reason ff fails after step 1 is "develop advanced concurrently". Before
+# writing a retry record, this script classifies the develop increment (gap-fan-in-ff-retry-reruns-
+# suite-on-inert-increment, AC1/AC2): the increment = `git diff --name-only suite_head...develop_tip`
+# (the commits develop gained since suite_head), judged INERT by the computed classifier
+# (`--classify-delta`, reads scripts/test.sh @static-object; no hand-written path table, AC4). An
+# INERT increment (tasks/*.md / doc / telemetry) does NOT invalidate the already-green suite ⇒ the
+# script, while STILL HOLDING the lock, merges develop into the task branch (in the worktree) and
+# immediately re-runs the ff — milliseconds, no phase-1 full-suite re-run, no retry record. A
+# NON-inert increment (touches code) or an unjudgeable one (fail-closed) keeps the status quo: this
 # script appends a RETRY RECORD (task id / attempt # / develop head / timestamp / runId) and exits 1:
 # the caller returns to 无锁段 step 1 and re-runs. No needs-human path exists for ff failure (§4:
 # ff 失败原因唯一、处置唯一). Anti-livelock (SPEC §7, gap-ff-livelock-trigger-no-action): the retry
@@ -140,6 +149,17 @@ if [ -z "${lock_events}" ]; then lock_events="${root}/.quay/fan-in-merge-lock-ev
 if [ -z "${retry_record}" ]; then retry_record="${root}/.quay/fan-in-retries.jsonl"; fi
 if [ -z "${escalations}" ]; then escalations="${root}/.quay/fan-in-ff-escalations.jsonl"; fi
 
+# ── inert-delta classifier (gap-fan-in-ff-retry-reruns-suite-on-inert-increment) ────────────────────
+# The "惰性" (doc-only) judgment — used by BOTH the suite-certificate gate (AC3) and the in-lock
+# ff-retry (AC1) — reuses the ONE computed classifier: select-static-checks-for-touches.ts
+# --classify-delta (parses scripts/test.sh's `@static-object` annotations; no hand-written path table,
+# AC4). Self-bootstrapping: fan-in-ff-merge.sh is dispatched as `${worktree}/plugin/scripts/
+# fan-in-ff-merge.sh`, so the classifier NEXT TO this script is the worktree's own version and the
+# registry root (scripts/test.sh) is the worktree — a task that modifies
+# select-static-checks-for-touches.ts / scripts/test.sh annotations exercises its own fix.
+classify_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/select-static-checks-for-touches.ts"
+classify_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+
 # ── AC78 判据2(c): --agent-id 自校验 (manager 2026-08-14 裁定并入实现侧, gap-ac78) ────────────────
 # --agent-id is free text — anything passes. Fail-closed: if it resolves to a TOP-LEVEL session id
 # (a `<project>/<id>.jsonl` file or `<project>/<id>/` dir exists, prefix-matched), the ff is being
@@ -217,17 +237,25 @@ if [ -f "${suite_capture}" ]; then
   # Certificate semantics (fixed 2026-08-18, gap-suite-concurrency-ff-gate-and-slot-ssot self-test):
   # the suite runs on the branch tip at suite time (suite_head); the fan-in's 持锁段 flip step THEN
   # commits the task-file status flip (ready→done) on top, pushing the tip past suite_head. So the
-  # gate must accept suite_head as an ANCESTOR of the tip, with the suite_head..tip diff restricted
-  # to the task file (doc-only flip). Any code change between the certified suite and the ff target
-  # still fails closed — the certificate pins the code, not the branch tip.
+  # gate must accept suite_head as an ANCESTOR of the tip. AC3 (gap-fan-in-ff-retry-reruns-suite-on-
+  # inert-increment) 精确弱化 the "tip diff" restriction: `suite_head == tip` OR (`suite_head` is a
+  # `tip` ancestor AND delta(suite_head, tip) is classified inert) — the suite_head..tip diff is
+  # normally just the flip (tasks/<id>.md, inert); an in-lock develop merge adds further INERT commits.
+  # A `@static-object`-covered path in the diff ⇒ code ⇒ refuse (falsifiable, fail-closed). The diff
+  # restriction is the COMPUTED classifier (--classify-delta), never a hand-written path grep.
   if [ "${suite_exit:-}" = "0" ] && [ -n "${suite_head:-}" ] && [ -n "${suite_tip}" ] \
-     && git -C "${root}" merge-base --is-ancestor "${suite_head}" "${suite_tip}" 2>/dev/null \
-     && [ -z "$(git -C "${root}" diff --name-only "${suite_head}" "${suite_tip}" 2>/dev/null | grep -v "^tasks/${task_id}\.md$")" ]; then
-    suite_cert_ok=1
+     && git -C "${root}" merge-base --is-ancestor "${suite_head}" "${suite_tip}" 2>/dev/null; then
+    gate_delta="$(git -C "${root}" diff --name-only "${suite_head}" "${suite_tip}" 2>/dev/null || true)"
+    gate_code="$(node --experimental-strip-types "${classify_script}" --classify-delta --root "${classify_root}" ${gate_delta} 2>/dev/null)" || gate_code="__CLASSIFY_FAILED__"
+    if [ "${gate_code}" = "__CLASSIFY_FAILED__" ]; then
+      suite_cert_ok=0
+    elif [ -z "${gate_code}" ]; then
+      suite_cert_ok=1
+    fi
   fi
 fi
 if [ "${suite_cert_ok}" != "1" ]; then
-  echo "fan-in-ff-merge: 本任务 ${task_id} 的 suite 证书未满足 — capture=${suite_capture} exists=$([ -f "${suite_capture}" ] && echo yes || echo no) suite_exit=${suite_exit:-<unset>} suite_head=${suite_head:-<unset>} 待 ff tip=${suite_tip:-<unresolvable>}; 证书要求 suite_head 是待 ff tip 的祖先、且 suite_head..tip 仅含任务文件（flip）改动，否则任何真实 fan-in（code 与 doc-only 皆然）都会撞闸（AC1 收窄: 读本任务 capture, 不读全局 suite 锁）。NOT acquiring the merge lock" >&2
+  echo "fan-in-ff-merge: 本任务 ${task_id} 的 suite 证书未满足 — capture=${suite_capture} exists=$([ -f "${suite_capture}" ] && echo yes || echo no) suite_exit=${suite_exit:-<unset>} suite_head=${suite_head:-<unset>} 待 ff tip=${suite_tip:-<unresolvable>}; 证书要求 suite_head 是待 ff tip 的祖先、且 suite_head..tip 的 delta 经 --classify-delta 判惰性（无 change/full 检查器 @static-object 覆盖 + 落 doc 面）；塞入 @static-object 覆盖路径 ⇒ 拒（可取假）。NOT acquiring the merge lock" >&2
   exit 2
 fi
 
@@ -265,11 +293,36 @@ printf '%s\n' "{\"event\":\"acquire\",\"ts\":\"${now_iso}\",\"epoch\":${now_epoc
 merge_rc=0
 merge_err=""
 develop_head_before="$(git -C "${root}" rev-parse "${merge_target}" 2>/dev/null || echo "unresolvable")"
-# The ONLY action allowed inside the lock. `--ff-only` can never create a merge commit or a conflict:
-# it either fast-forwards the ref or refuses (develop advanced since step 1's merge develop).
+# The ff inside the lock. `--ff-only` can never create a merge commit or a conflict: it either
+# fast-forwards the ref or refuses (develop advanced since step 1's merge develop).
 if ! merge_out="$(git -C "${root}" merge --ff-only "task/${task_id}" 2>&1)"; then
   merge_rc=1
   merge_err="$(printf '%s\n' "${merge_out}" | head -n1)"
+  # gap-fan-in-ff-retry-reruns-suite-on-inert-increment: ff 失败唯一原因 = develop 前进。当场判 develop
+  # 新 tip 相对 suite_head 的【增量】是否惰性（复用 --classify-delta，三点 diff = develop 自 suite 以来
+  # 新获得的提交）。惰性（tasks/*.md / doc / telemetry）⇒ 锁内 merge develop 进任务分支（worktree）+
+  # 立即重试 ff——毫秒级、零竞争窗口，不回阶段 1 重跑全量。非惰性（含代码）或判不出（fail-closed）⇒
+  # 保留 merge_rc=1，照旧写 retry record 并 exit 1 回阶段 1（AC2 负控制）。
+  develop_tip="$(git -C "${root}" rev-parse "${merge_target}" 2>/dev/null || true)"
+  wt_branch="$( [ -n "${worktree}" ] && git -C "${worktree}" branch --show-current 2>/dev/null || true )"
+  if [ -n "${worktree}" ] && [ "${wt_branch}" = "task/${task_id}" ] && [ -n "${suite_head:-}" ] && [ -n "${develop_tip}" ]; then
+    inc_files="$(git -C "${root}" diff --name-only "${suite_head}...${develop_tip}" 2>/dev/null || true)"
+    if [ -n "${inc_files}" ]; then
+      code_delta="$(node --experimental-strip-types "${classify_script}" --classify-delta --root "${classify_root}" ${inc_files} 2>/dev/null)" || code_delta="__CLASSIFY_FAILED__"
+      if [ "${code_delta}" != "__CLASSIFY_FAILED__" ] && [ -z "${code_delta}" ]; then
+        # inert increment ⇒ merge develop into the task branch (in the worktree), then retry the ff.
+        if git -C "${worktree}" merge --no-edit "${merge_target}" >/dev/null 2>&1; then
+          if merge_out2="$(git -C "${root}" merge --ff-only "task/${task_id}" 2>&1)"; then
+            merge_rc=0
+            merge_err=""
+          else
+            merge_rc=1
+            merge_err="$(printf '%s\n' "${merge_out2}" | head -n1)"
+          fi
+        fi
+      fi
+    fi
+  fi
 fi
 
 now_iso="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
