@@ -1,7 +1,7 @@
 ---
 id: gap-workflow-scriptpath-materialize-falls-back-main
 title: "workflow scriptPath materialize 回退主检出版——bootstrap-HIT 的 worktree 版 scriptPath 被忽略，自举修改未被自身验证"
-status: todo
+status: ready
 labels:
   - gap
   - mechanism

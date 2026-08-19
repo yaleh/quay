@@ -1,7 +1,7 @@
 ---
 id: gap-session-liveness-teardown-unified-kill-servers
 title: "session-liveness 测试 teardown 系统性漏杀自建 tmux server（ol-gap4/ol-subagent/tgt）——第 20 条点修 ol-scd-d 漏同类路径，需统一 after() hook 清理"
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
