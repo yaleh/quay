@@ -29,8 +29,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
-import { makeTmp, cleanup, runInit, pluginDir, laydownWorkspace } from "./quay-init-loop-helpers.mjs";
+import { spawn, spawnSync } from "node:child_process";
+import { makeTmp, cleanup, runInit, pluginDir, laydownWorkspace, diskWorktreeRoot } from "./quay-init-loop-helpers.mjs";
 
 const INIT_ARGS = (ws) => [
   "--loop", "--root", ws, "--project", "proj",
@@ -172,4 +172,206 @@ test("AC5 — --loop --manager lays all three cores (cold-start readable); quay-
     assert.ok(fs.existsSync(path.join(ws, "plugin", "scripts", "quay-session.ts")),
       "the manager core's referenced dep plugin/scripts/quay-session.ts must be laid down");
   } finally { cleanup(ws); }
+});
+
+// ── torn-read simulation seam (gap-quay-init-torn-read-derive-loop-scripts) ────────────────────────
+// derive_loop_scripts() derives the --loop laydown set by grep over the shipped corpus
+// (skills/*/SKILL.md + loop/*.md + workflows/*.js). Under heavy concurrent load a grep/sort in a
+// command substitution can be killed mid-stream (the pipeline's `|| true` masks the death), returning
+// a PARTIAL (torn) set — the laydown then lays FEWER scripts than the docs reference, and
+// verify_referenced_landed (which re-derives the reference set independently) false-positives every
+// missing script as referenced-not-landed (observed at cc8: 104 scripts ≈ the ENTIRE reference set).
+// The fix (derive_loop_scripts stability check) runs TWO independent passes and requires them to be
+// IDENTICAL, so a torn pass (which truncates at a nondeterministic point) retries; only two agreeing
+// non-empty passes are accepted. A stable corpus derives deterministically, so real drift is never
+// masked (a genuinely-absent script is absent from EVERY pass and the downstream gate fail-closes).
+//
+// These tests exercise the REAL quay-init.sh --loop install path with a fake `grep` injected first on
+// PATH. The fake passes through every invocation to the real grep EXCEPT the (a) corpus scan — the
+// grep whose pattern starts with `plugin/scripts/` (the ONLY such grep in the derivation;
+// verify_referenced_landed's reference-scan pattern starts with `(` and is unaffected). On a torn
+// policy it truncates that one grep's output to the first KEEP lines, simulating a grep killed
+// mid-stream. The drop schedule tears only the FIRST corpus read (tornUntil=1) and lets reads 2+
+// return the full set — the first derive_loop_scripts pass is torn, the second is full, so the
+// stability check's two passes disagree and it retries to two agreeing full passes. A pre-fix
+// (unwrapped) derive_loop_scripts would lay down the torn set and fail referenced-not-landed.
+const FAKE_GREP_SOURCE = String.raw`#!/usr/bin/env bash
+# Torn-read simulation grep (quay-init derive_loop_scripts torn-read regression test only).
+# Passes through to the real grep EXCEPT the (a) corpus scan (pattern starting with plugin/scripts/).
+set -u
+real_grep="$REAL_GREP"
+policy="$FAKE_GREP_POLICY"
+
+corpus_scan=no
+for a in "$@"; do
+  case "$a" in
+    plugin/scripts/*) corpus_scan=yes ;;
+  esac
+done
+
+if [ "$corpus_scan" = "yes" ] && [ "$policy" = "torn" ]; then
+  full="$("$real_grep" "$@" 2>/dev/null || true)"
+  rseq=0
+  if [ -f "$FAKE_GREP_COUNTER" ]; then
+    rseq="$(cat "$FAKE_GREP_COUNTER" 2>/dev/null || echo 0)"
+  fi
+  rseq=$((rseq + 1))
+  printf '%s' "$rseq" > "$FAKE_GREP_COUNTER"
+
+  torn=no
+  if [ "$rseq" -le "$FAKE_GREP_TORN_UNTIL" ]; then
+    torn=yes
+  fi
+
+  if [ "$torn" = "yes" ]; then
+    keep="$FAKE_GREP_KEEP"
+    n=0
+    printed=0
+    while IFS= read -r line; do
+      [ -z "$line" ] && continue
+      n=$((n + 1))
+      if [ "$n" -le "$keep" ]; then
+        printf '%s\n' "$line"
+        printed=$((printed + 1))
+      fi
+    done <<< "$full"
+    printf 'corpus %s %s %s\n' "$rseq" "yes" "$printed" >> "$FAKE_GREP_LOG"
+  else
+    printf '%s\n' "$full"
+    printf 'corpus %s %s %s\n' "$rseq" "no" "full" >> "$FAKE_GREP_LOG"
+  fi
+  exit 0
+fi
+
+exec "$real_grep" "$@"
+`;
+
+function realGrepPath() {
+  for (const d of (process.env.PATH || "").split(":")) {
+    const p = path.join(d, "grep");
+    if (fs.existsSync(p)) return p;
+  }
+  return "/usr/bin/grep";
+}
+
+// Like the helpers' runInit, but with an extra env layer (the fake-grep PATH + policy) so a real
+// --loop install runs with the torn-read seam in place.
+function runInitEnv(workspace, args, extraEnv, pluginRoot = pluginDir) {
+  const loop = args.includes("--loop");
+  const argv = ["bash", path.join(pluginRoot, "scripts", "quay-init.sh")];
+  if (loop && !args.some((a) => a === "--worktree-root")) {
+    argv.push("--worktree-root", diskWorktreeRoot());
+  }
+  argv.push(...args);
+  return spawnSync(argv[0], argv.slice(1), {
+    cwd: workspace,
+    encoding: "utf8",
+    env: { ...process.env, CLAUDE_PLUGIN_ROOT: pluginRoot, ...extraEnv },
+  });
+}
+
+// Async spawn variant (the concurrency test must run N installs in PARALLEL, not serially).
+function runInitAsync(workspace, args, pluginRoot = pluginDir) {
+  return new Promise((resolve) => {
+    const argv = ["bash", path.join(pluginRoot, "scripts", "quay-init.sh")];
+    if (args.includes("--loop") && !args.some((a) => a === "--worktree-root")) {
+      argv.push("--worktree-root", diskWorktreeRoot());
+    }
+    argv.push(...args);
+    const child = spawn(argv[0], argv.slice(1), {
+      cwd: workspace,
+      env: { ...process.env, CLAUDE_PLUGIN_ROOT: pluginRoot },
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (d) => { stdout += d; });
+    child.stderr.on("data", (d) => { stderr += d; });
+    child.on("error", (e) => resolve({ status: null, stdout, stderr: `${stderr}${e}` }));
+    child.on("close", (code) => resolve({ status: code, stdout, stderr }));
+  });
+}
+
+// Writes the fake grep into binDir and returns the env the install must run with.
+function tornEnv(binDir, opts) {
+  const fakeGrep = path.join(binDir, "grep");
+  fs.writeFileSync(fakeGrep, FAKE_GREP_SOURCE);
+  fs.chmodSync(fakeGrep, 0o755);
+  return {
+    PATH: `${binDir}:${process.env.PATH || ""}`,
+    REAL_GREP: realGrepPath(),
+    FAKE_GREP_POLICY: opts.policy,
+    FAKE_GREP_COUNTER: path.join(binDir, "counter"),
+    FAKE_GREP_LOG: path.join(binDir, "corpus-reads.log"),
+    FAKE_GREP_TORN_UNTIL: String(opts.tornUntil ?? 0),
+    FAKE_GREP_KEEP: String(opts.keep ?? 5),
+  };
+}
+
+function readCorpusLog(logPath) {
+  if (!fs.existsSync(logPath)) return [];
+  return fs.readFileSync(logPath, "utf8").trim().split("\n").filter(Boolean).map((line) => {
+    const [kind, rseq, torn, printed] = line.split(" ");
+    return { kind, rseq: Number(rseq), torn, printed };
+  });
+}
+
+// ── torn-read regression (gap-quay-init-torn-read-derive-loop-scripts) ─────────────────────────────
+// The stability check: two independent derivation passes must agree before a laydown set is accepted.
+// This test tears ONLY the first corpus read (truncating it to 5 lines) and lets every later read
+// return the full set — the first pass is torn, the second is full, so the two passes disagree and
+// the check retries to two agreeing full passes. A pre-fix (unwrapped) derivation would lay the torn
+// set and fail referenced-not-landed on ~100 missing scripts.
+test("torn-read stability — a torn corpus derivation (grep truncated) is retried; a real --loop install still passes", () => {
+  const binDir = makeTmp("torn-grep-");
+  const env = tornEnv(binDir, { policy: "torn", tornUntil: 1, keep: 5 });
+  const ws = makeTmp("torn-ws-");
+  try {
+    const r = runInitEnv(ws, INIT_ARGS(ws), env);
+    assert.equal(r.status, 0,
+      `a torn corpus read must NOT fail the install (the stability check retries to a clean pass):\n${r.stdout}${r.stderr}`);
+    assert.match(r.stdout, /verify-referenced-landed: OK/,
+      "the referenced ⊆ landed gate must pass once the derivation stabilizes");
+
+    // The fake-grep log proves the tear really fired and that the check read PAST it (a full read
+    // followed the torn one). A torn read that never happened would make this test vacuous; a full
+    // read never following would mean the tear was never absorbed.
+    const log = readCorpusLog(env.FAKE_GREP_LOG);
+    assert.ok(log.length >= 1, "the fake-grep seam must have intercepted at least one corpus scan");
+    assert.equal(log[0].torn, "yes", "the FIRST corpus read must be torn (the tear actually fired)");
+    assert.ok(Number(log[0].printed) >= 1 && Number(log[0].printed) <= 5,
+      `the torn read must be truncated (printed ${log[0].printed} lines, expected ≤ 5)`);
+    assert.ok(log.length >= 3,
+      `the stability check must read past the torn pass (≥3 corpus reads; 2-pass agreement requires a retry), got ${log.length}`);
+    assert.ok(log.some((e) => e.torn === "no"),
+      "a complete (non-torn) corpus read must follow the torn one — the retry moved past it");
+  } finally { cleanup(ws); cleanup(binDir); }
+});
+
+test("torn-read control — the pass-through seam preserves the happy path: consistent reads exit 0", () => {
+  const binDir = makeTmp("torn-grep-");
+  const env = tornEnv(binDir, { policy: "pass" });
+  const ws = makeTmp("torn-ws-");
+  try {
+    const r = runInitEnv(ws, INIT_ARGS(ws), env);
+    assert.equal(r.status, 0, `the pass-through seam must not change a clean install verdict:\n${r.stdout}${r.stderr}`);
+    assert.match(r.stdout, /verify-referenced-landed: OK/,
+      "the referenced ⊆ landed gate must pass on consistent reads");
+  } finally { cleanup(ws); cleanup(binDir); }
+});
+
+// ── concurrency negative control (gap-quay-init-torn-read-derive-loop-scripts AC2) ──────────────────
+// Real concurrent --loop installs must each derive a COMPLETE (non-torn) laydown set: every install
+// exits 0 and passes verify-referenced-landed (the false-positive detector). A torn read in any one
+// install would surface as referenced-not-landed false positives and a non-zero exit.
+test("concurrent --loop installs derive a stable loop set — no torn-read false positive (negative control)", async () => {
+  const N = 4;
+  const wss = Array.from({ length: N }, () => makeTmp("conc-init-"));
+  try {
+    const results = await Promise.all(wss.map((ws) => runInitAsync(ws, INIT_ARGS(ws))));
+    for (const r of results) {
+      assert.equal(r.status, 0, `concurrent install must exit 0:\n${r.stdout}${r.stderr}`);
+      assert.match(r.stdout, /verify-referenced-landed: OK/,
+        "referenced ⊆ landed must pass under concurrency (no torn-read false positive)");
+    }
+  } finally { wss.forEach(cleanup); }
 });

@@ -19,13 +19,13 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: `derive_loop_scripts` 的 torn-read 消除（读写竞争下 `verify_referenced_landed` 不假阳性）。
-- [ ] AC2: 负控制——并发 quay-init 时 derive_loop_scripts 稳定（真实输出，无假阳性）。
-- [ ] AC3: scoped 绿 + 相关测试不红。
+- [x] AC1: `derive_loop_scripts` 的 torn-read 消除（读写竞争下 `verify_referenced_landed` 不假阳性）。
+- [x] AC2: 负控制——并发 quay-init 时 derive_loop_scripts 稳定（真实输出，无假阳性）。
+- [x] AC3: scoped 绿 + 相关测试不红。
 
 ## Definition of Done
 
-- [ ] 并发下 derive_loop_scripts 无 torn-read 假阳性（真实输出），scoped 绿。
+- [x] 并发下 derive_loop_scripts 无 torn-read 假阳性（真实输出），scoped 绿。
 
 ## Touches
 

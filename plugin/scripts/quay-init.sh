@@ -874,9 +874,9 @@ consolidated_member_files() {
     | sed -E 's/.*file: "([^"]+)"/\1/' | sort -u
 }
 
-# derive_loop_scripts — prints the COMPLETE --loop script laydown set (one basename per line),
-# derived as (a)+(b)+(c)+(d) above.
-derive_loop_scripts() {
+# _derive_loop_scripts_once — one derivation pass of the COMPLETE --loop script laydown set
+# (one basename per line), derived as (a)+(b)+(c)+(d) above.
+_derive_loop_scripts_once() {
   local out changed round s dep f
   local -a mech_files=()
   out="$(mktemp)"
@@ -1001,6 +1001,36 @@ derive_loop_scripts() {
   done
   sort -u "$out"
   rm -f "$out"
+}
+
+# derive_loop_scripts — stability-checked wrapper over _derive_loop_scripts_once
+# (gap-quay-init-torn-read-derive-loop-scripts). The laydown set is derived by grep over the shipped
+# corpus (skills/*/SKILL.md + loop/*.md + workflows/*.js); under heavy concurrent load a grep/sort in
+# a command substitution can be killed mid-stream (the `|| true` masks it), returning a PARTIAL (torn)
+# set — which then lays down FEWER scripts than the docs reference, and verify_referenced_landed
+# (which re-derives the reference set independently) false-positives every missing script as
+# referenced-not-landed (observed at cc8: 104 scripts ≈ the ENTIRE reference set in one run). Same
+# torn-read class as _read_declarations (a4f1e41d) — same fix: two independent passes must produce
+# IDENTICAL output (a torn pass truncates at a nondeterministic point, so it differs from a full pass
+# ⇒ retry); only two agreeing non-empty passes are accepted. A stable corpus derives deterministically,
+# so real drift is never masked: a genuinely-absent script is absent from EVERY pass, and the
+# downstream verify_referenced_landed still fail-closes on it.
+derive_loop_scripts() {
+  local a b attempt
+  for attempt in 1 2 3; do
+    a="$(_derive_loop_scripts_once)"
+    b="$(_derive_loop_scripts_once)"
+    if [ -n "$a" ] && [ "$a" = "$b" ]; then
+      printf '%s\n' "$a"
+      return 0
+    fi
+    [ "$attempt" -lt 3 ] && sleep 0.2
+  done
+  # All passes torn or mutually inconsistent — output the LAST snapshot. A torn laydown lays fewer
+  # scripts, so the downstream verify_referenced_landed fail-closes on a genuinely-missing file (the
+  # install fails, never a false pass). The normal case (stable corpus) never reaches this branch.
+  printf '%s\n' "$a"
+  return 0
 }
 
 # ── exec-core pointer resolution (gap-quay-init-real-install-regression-fix ②) ─────────────────────
