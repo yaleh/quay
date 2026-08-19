@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-execute-poll-bounded-blocking-wait
 title: "fan-in-execute 轮询 agent 内有界阻塞等待（timeout 540）——收益最大，需设计边界判定 + 取假测试"
-status: done
+status: ready
 labels:
   - gap
   - performance
