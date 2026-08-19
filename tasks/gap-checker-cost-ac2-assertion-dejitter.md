@@ -1,7 +1,7 @@
 ---
 id: gap-checker-cost-ac2-assertion-dejitter
 title: "checker-cost AC2 断言去抖动——「跨 3 子进程 ms 严格单调」是抖动依赖，改「ms>=delayMs」确定性下界"
-status: ready
+status: done
 labels:
   - gap
   - performance
