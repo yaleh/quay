@@ -1,7 +1,7 @@
 ---
 id: gap-session-liveness-hangguard-ms-timeout
 title: "session-liveness HANG_GUARD_MS 时限调整（60s→180s）——重叠相位 16 并发 CPU 饿死导致 4 轮 >60s 误判 hang"
-status: ready
+status: done
 labels:
   - gap
   - performance
