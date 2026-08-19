@@ -69,6 +69,15 @@ export interface ActivitySignals {
   tickLogAgeMinutes: number | null;
 }
 
+/**
+ * Process-level liveness of an open fast-mode run (gap-in-flight-liveness-worktree-proxy-not-process):
+ * whether an executor process is observably present right now. DISTINCT from worktree existence —
+ * a worktree can exist while no agent is running (a ready-pool wait), and worktree existence is
+ * the proxy this reading replaces on the display surface. `readLive` annotates every start-without-end
+ * run; the board reclassifies `orphan` runs OUT of the in-flight display (AC1).
+ */
+export type RunLiveness = "alive" | "orphan" | "unknown";
+
 export interface InFlightTask {
   taskId: string;
   runId: string;
@@ -82,6 +91,16 @@ export interface InFlightTask {
   implCompletedAtMs: number | null;
   /** Elapsed minutes from startedAtMs to the observation instant, rounded to 1 decimal. */
   minutes: number;
+  /**
+   * Process-level liveness at the observation instant:
+   *   "alive"   — a process cmdline carries the runId's distinctive tail (executor present);
+   *   "orphan"  — /proc was readable and no process matched (executor observably gone — the run is
+   *               NOT in-flight, it is abandoned);
+   *   "unknown" — /proc unavailable/unreadable (fail-closed toward in-flight, never flagged orphan).
+   * `pairInFlight` itself stays PURE (event pairing only); `readLive` annotates this field from the
+   * sync probe so the pairing remains `--report inProgress`-compatible (serve.test.mjs AC2 pin).
+   */
+  liveness: RunLiveness;
 }
 
 export interface LiveResult {
@@ -196,6 +215,10 @@ export function pairInFlight(events: RawEvent[], nowMs: number): InFlightTask[] 
             ? rec.implComplete.recordedAtMs
             : null,
         minutes: Math.max(0, (nowMs - rec.start.timing.startedAtMs) / 60_000),
+        // pairInFlight is a PURE event-pairing function and cannot probe /proc — the fail-closed
+        // "unknown" default keeps the field total. readLive overwrites it with the real process
+        // liveness (classifyRunLiveness(runProcessAliveSync(runId))).
+        liveness: "unknown",
       });
     }
   }
@@ -312,7 +335,14 @@ export function readLive(root: string, { nowMs = Date.now() }: { nowMs?: number 
         status = "empty";
         reason = `未找到遥测记录（${FAST_MODE_EVENTS_DIR}/ 存在但为空，0 条 .jsonl）`;
       } else {
-        inFlight = pairInFlight(readEventsFromDir(eventsDir, files), nowMs);
+        // gap-in-flight-liveness-worktree-proxy-not-process: annotate every start-without-end run
+        // with process-level liveness. The pairing itself (ids/starts) is UNCHANGED — the AC2 pin
+        // in serve.test.mjs requires readLive().inFlight to equal --report inProgress; liveness is
+        // additive. The board reclassifies "orphan" runs out of the in-flight display.
+        inFlight = pairInFlight(readEventsFromDir(eventsDir, files), nowMs).map((t) => ({
+          ...t,
+          liveness: classifyRunLiveness(runProcessAliveSync(t.runId)),
+        }));
       }
     }
   } catch (err) {
@@ -563,10 +593,12 @@ export async function readBoardLanding(root: string): Promise<BoardLanding> {
  *   true  — a live process cmdline contains the runId tail (executor alive → NOT orphan)
  *   false — /proc was readable and no process matched (executor observably gone → orphan)
  *   null  — /proc unavailable or unreadable (unknown → fail-closed: NOT flagged orphan)
- * This is a small NEW probe (not a reimplementation of the drift judgment), documented to mirror
- * the telemetry module so the board's orphan signal agrees with --reconcile's process probe.
+ * SYNC core: readLive is synchronous, so the in-flight annotation cannot await. The async
+ * `isRunProcessAlive` wrapper is kept for API compatibility and delegates here. This is the SAME
+ * /proc scan fast-mode-telemetry.ts's processAlive runs — the board's orphan signal agrees with
+ * --reconcile's process probe (the needle = the runId's last two dash-segments, `<ts>-<rand>`).
  */
-export async function isRunProcessAlive(runId: string): Promise<boolean | null> {
+export function runProcessAliveSync(runId: string): boolean | null {
   if (!runId || runId.length < 4) return null;
   const parts = runId.split("-");
   const needle = parts.length >= 2 ? parts.slice(-2).join("-") : runId;
@@ -590,11 +622,33 @@ export async function isRunProcessAlive(runId: string): Promise<boolean | null> 
 }
 
 /**
+ * Map a boolean|null probe verdict to the RunLiveness vocabulary:
+ *   true  → "alive", false → "orphan", null → "unknown" (fail-closed toward in-flight).
+ */
+export function classifyRunLiveness(alive: boolean | null): RunLiveness {
+  if (alive === true) return "alive";
+  if (alive === false) return "orphan";
+  return "unknown";
+}
+
+/** Async wrapper over runProcessAliveSync (kept for API compatibility). */
+export async function isRunProcessAlive(runId: string): Promise<boolean | null> {
+  return runProcessAliveSync(runId);
+}
+
+/**
  * Execution column (遥测 start/end). Reuses readLive's in-flight pairing (start without end) and
  * adds the two execution-only flags:
- *   in-flight-timeout — started > IN_FLIGHT_TIMEOUT_MINUTES ago with no end (在飞超时)
+ *   in-flight-timeout — an ACTIVE run (process alive/unknown) started > IN_FLIGHT_TIMEOUT_MINUTES
+ *                       ago with no end (在飞超时)
  *   orphan            — started with no end AND the runId's process is observably gone (孤儿)
- * Degrades like readLive: telemetry absent → 「无数据」; unreadable → 「读失败」. Never throws.
+ * gap-in-flight-liveness-worktree-proxy-not-process (AC1): a start-without-end run whose process is
+ * observably gone is NOT in-flight — it is abandoned. `inFlight` therefore EXCLUDES orphan runs
+ * (the board's 实现中/待落地 counts and per-row 在飞 display read this array); orphan runs are
+ * surfaced ONLY through the `orphan` flag, so the board renders them as 孤儿, distinct from worktree
+ * existence (a worktree can exist with no live agent — a ready-pool wait). Reconcile's retention
+ * criteria are untouched (AC3). Degrades like readLive: telemetry absent → 「无数据」; unreadable →
+ * 「读失败」. Never throws.
  */
 export async function readBoardExecution(root: string, { nowMs = Date.now() } = {}): Promise<BoardExecution> {
   const live = readLive(root, { nowMs });
@@ -604,12 +658,21 @@ export async function readBoardExecution(root: string, { nowMs = Date.now() } = 
   const flags = new Map<string, Set<string>>();
   for (const t of live.inFlight) {
     const set = new Set<string>();
-    if (t.minutes > IN_FLIGHT_TIMEOUT_MINUTES) set.add("in-flight-timeout");
-    const alive = await isRunProcessAlive(t.runId);
-    if (alive === false) set.add("orphan");
+    if (t.liveness === "orphan") {
+      // Process observably gone → the run is abandoned, not in-flight. The timeout flag applies
+      // only to ACTIVE runs; an orphan carries just "orphan".
+      set.add("orphan");
+    } else {
+      if (t.minutes > IN_FLIGHT_TIMEOUT_MINUTES) set.add("in-flight-timeout");
+    }
     if (set.size) flags.set(t.taskId, set);
   }
-  return { status: live.status, reason: live.reason, flags, inFlight: live.inFlight };
+  return {
+    status: live.status,
+    reason: live.reason,
+    flags,
+    inFlight: live.inFlight.filter((t) => t.liveness !== "orphan"),
+  };
 }
 
 // ── Git history (gap-git-history-svg-server-rendered) ──────────────────────────────────────────────
