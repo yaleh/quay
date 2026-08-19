@@ -2234,8 +2234,19 @@ export async function main(argv) {
       lastReconcileAtMs: lastReconcileAtMs(root),
       nowMs: Date.now(),
     });
+    // gap-in-flight-liveness-worktree-proxy-not-process: expose the reconcile process probe per open
+    // bracket so the panel/reader can read process-level liveness from the REAL --slot-status output
+    // (the DoD-named surface). The scanning process's own cmdline carries no runIds (they come from
+    // the telemetry store), so processAlive here is free of the self-match trap a runId-in-argv CLI
+    // would hit. Reconcile's retention criteria are untouched (AC3); this is additive read-only.
+    const bracketLiveness = (reportWithMeta.inProgress ?? []).map((r) => ({
+      taskId: r.taskId,
+      runId: r.runId,
+      process_alive: r.runId ? processAlive(r.runId) : null,
+    }));
+    const slotOut = { ...slot, bracket_liveness: bracketLiveness };
     if (args.includes("--json")) {
-      console.log(JSON.stringify(slot, null, 2));
+      console.log(JSON.stringify(slotOut, null, 2));
     } else {
       printHumanSlotStatus(slot);
     }
