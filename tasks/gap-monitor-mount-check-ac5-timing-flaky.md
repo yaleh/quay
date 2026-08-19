@@ -1,7 +1,8 @@
 ---
 id: gap-monitor-mount-check-ac5-timing-flaky
-title: "monitor-mount-check.test.mjs AC5 时序 flaky——~5s 等 fake monitor pid 落盘，8 路并发下稳定超时（阻塞 lane-formula + observability-holes）"
-status: todo
+title: monitor-mount-check.test.mjs AC5 时序 flaky——~5s 等 fake monitor pid 落盘，8
+  路并发下稳定超时（阻塞 lane-formula + observability-holes）
+status: ready
 labels:
   - gap
   - test-flaky
