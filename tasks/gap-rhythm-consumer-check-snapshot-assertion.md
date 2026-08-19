@@ -1,7 +1,7 @@
 ---
 id: gap-rhythm-consumer-check-snapshot-assertion
 title: "rhythm-consumer-check.test.mjs:134 快照常量断言——assert nbs.length===2 把「当前恰好 2 个 --no-block checker」瞬态当不变式"
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
