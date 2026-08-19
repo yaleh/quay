@@ -41,7 +41,7 @@ import os from "node:os";
 import path from "node:path";
 import vm from "node:vm";
 import { fileURLToPath } from "node:url";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { buildTaskManifest, checkTaskAntiDrift } from "../scripts/anti-drift-touches-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -1659,6 +1659,55 @@ test("⑧ AC3 记录面真实化 REAL — the poll reads lane_count from the sui
   const after = fs.readFileSync(capture, "utf8");
   const lane = (after.match(/^lane_count=(\d+)$/m) || [])[1];
   assert.equal(lane, "8", `lane_count must be the MAIN phase's real concurrency (the last __GROUP__ line), got: ${after.match(/^lane_count=.*$/m)?.[0]}`);
+});
+
+// ── ⑩ 轮询 agent 有界阻塞等待（gap-fan-in-execute-poll-bounded-blocking-wait）──────────────────────
+// THE DEFECT: 轮询 agent 每次「看一眼 marker 在不在」就返回 not-done，脚本 setTimeout 60s 再派下一轮——
+// suite 11-19min ⇒ 头 11-15 次结构上必然 not-done 纯空转（~21 次/轮）。修复：把有界阻塞等待
+// （timeout 540 + sleep 15）放进轮询 agent——agent 最多阻塞 540s（硬边界 < Bash 600s 上限），每 15s
+// 看一眼 marker，把 ~21 次空转压到 ~3 次。决策权仍在脚本（timeout 540 是脚本给的硬边界、maxSuitePolls
+// 是脚本循环上限），agent 不自决「等多久」（ab380c5e 是 agent 自决等待，这里是脚本手里的有界等待）。
+
+test("⑩ 有界阻塞等待 wiring — 轮询 agent 带 timeout 540（< Bash 600s 上限）+ sleep 15 循环，决策权仍在脚本（能取假）", async (t) => {
+  const { prompts } = await runWorkflow({
+    args: { task: "gap-test-poll-bounded", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-poll-bounded", mergeTarget: "develop" },
+  });
+  const poll = promptContaining(prompts, "POLL=not-done");
+  // 有界阻塞等待必须存在（能取假：把 timeout 去掉 ⇒ 此断言红）。
+  const m = poll.match(/timeout (\d+) bash -c/);
+  assert.ok(m, "poll must carry `timeout <N> bash -c` (the bounded blocking wait)");
+  const timeoutSecs = Number(m[1]);
+  // 硬边界 < Bash 600s 上限（能取假：放宽 >600s ⇒ 此断言红）。
+  assert.ok(timeoutSecs < 600, `the blocking-wait hard bound must be < Bash 600s limit, got ${timeoutSecs}s`);
+  assert.equal(timeoutSecs, 540, "the hard bound must be exactly 540s (AC1: < 600s with safety margin)");
+  // sleep 15 检查粒度 + 循环等 marker 而非 agent 自决时长。
+  assert.ok(poll.includes('while [ ! -f "$1" ]; do sleep 15; done'), "the bounded wait must loop on the marker existence with sleep 15, not an agent-decided duration");
+  // 决策权仍在脚本（不是 agent 自决等待）。
+  assert.ok(poll.includes("不要做任何等待决策"), "poll must refuse to make any waiting decision (script-owned, ab380c5e 反面)");
+});
+
+test("⑩ REAL 有界阻塞等待 — marker 中途出现时，轮询在【一次】阻塞内等到它（阻塞等待生效，非 N 次空转）", async (t) => {
+  const task = "gap-test-poll-bounded-real";
+  const capture = `/tmp/fan-in-suite-${task}.env`;
+  const marker = `/tmp/fan-in-suite-${task}.exit`;
+  fs.rmSync(marker, { force: true });
+  fs.writeFileSync(capture, ["full_suite_ran=true", "skip_reason=", `start_ms=${Date.now()}`, "suite_head=abc", `suite_log_file=/tmp/fan-in-suite-${task}.log`].join("\n") + "\n");
+  t.after(() => { for (const f of [capture, marker, `/tmp/fan-in-suite-${task}.time`, `/tmp/fan-in-suite-${task}.log`]) { try { fs.rmSync(f, { force: true }); } catch (_) { /* best-effort */ } } });
+  // marker 在 ~1s 后由【后台进程】写入（spawnSync 阻塞 Node 事件循环，Node setTimeout 不会在期间触发）。
+  // 测试用 pollBlockSleep=0.2 覆盖生产 sleep 15，证明阻塞等待本身会等——不是 fixture，是真实 bash 执行。
+  spawn("bash", ["-c", `sleep 1; echo exit=0 > "${marker}"; echo "end_ms=$(date +%s%3N)" >> "${marker}"; echo end_iso=2026-08-18T00:00:01.000Z >> "${marker}"`], { detached: true, stdio: "ignore" }).unref();
+
+  const { prompts } = await runWorkflow({
+    args: { task, worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-poll-bounded-real", mergeTarget: "develop", pollBlockSeconds: 10, pollBlockSleep: 0.2 },
+  });
+  const pollPrompt = promptContaining(prompts, "POLL=not-done");
+  const pollBlock = pollPrompt.slice(pollPrompt.indexOf("suite_capture="), pollPrompt.indexOf("返回 { done: bool"));
+  const t0 = Date.now();
+  const r = runBash(pollBlock, { cwd: "/tmp", timeout: 15_000 });
+  const elapsed = Date.now() - t0;
+  assert.equal(r.status, 0, `poll block failed: ${r.stderr}`);
+  assert.match(r.stdout, /POLL=done SUITE_EXIT=0/, `poll must find the marker mid-block (bounded wait), got: ${r.stdout}`);
+  assert.ok(elapsed >= 800, `the poll must have BLOCKED waiting (elapsed ${elapsed}ms); an instant not-done return is the N-empty-poll shape this fixes`);
 });
 
 // ── fix-scope gate（gap-fix-scope-gate-wired-to-wrong-path）───────────────────────────────────────
