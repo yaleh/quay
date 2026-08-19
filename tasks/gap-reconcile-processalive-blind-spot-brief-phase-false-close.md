@@ -1,7 +1,7 @@
 ---
 id: gap-reconcile-processalive-blind-spot-brief-phase-false-close
 title: "reconcile processAlive(runId) 盲区——impl subagent 未 fork worktree 的 brief 相被判「worktree-gone-and-no-process」误关 bracket"
-status: ready
+status: done
 labels:
   - gap
   - mechanism
