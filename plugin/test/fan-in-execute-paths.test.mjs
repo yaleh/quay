@@ -1857,24 +1857,9 @@ test("⑩b firstDelayMs override — firstDelayMs is args-overridable AND pollIn
   assert.deepEqual(delays, [1234, 0], `firstDelayMs overridable (1234) + pollIntervalMs=0 seam (0); got ${JSON.stringify(delays)}`);
 });
 
-// ── ⑩c suite-poller agentType（gap-fan-in-execute-poll-cost-firstdelay-agenttype AC2）────────────
-// THE DEFECT: 轮询 agent 每次「文件在不在」都重付全套工具 schema（~64k）+ CLAUDE.md（19.5k）⇒ 83.6k
-// cache_read/次基线。FIX: 定义只带 Bash 工具的 suite-poller agentType，轮询 agent 改用该 agentType，
-// 砍掉工具 schema 那 ~64k 的大部分。
-
-test("⑩c agentType wiring — the poll agent is dispatched with agentType='suite-poller' (Bash-only subagent)", async (t) => {
-  const { prompts, schemas } = await runWorkflow({
-    args: { task: "gap-test-poll-agenttype", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-poll-agenttype", mergeTarget: "develop" },
-  });
-  const pollIdx = prompts.findIndex((p) => p.includes("POLL=not-done"));
-  assert.ok(pollIdx >= 0, "a poll prompt must be emitted");
-  assert.equal(schemas[pollIdx].agentType, "suite-poller", "the poll agent must use the suite-poller agentType (取假: 去掉 agentType ⇒ undefined ⇒ 此断言红)");
-  // The poll agent still carries the structured schema (done/suiteExit) alongside the agentType.
-  assert.equal(schemas[pollIdx].schema.type, "object", "the poll agent must still declare its structured schema");
-  // NOTE: schema.required is a cross-realm (vm context) array — deepStrictEqual would fail on the
-  // prototype, so assert membership instead of deep equality.
-  assert.ok(Array.isArray(schemas[pollIdx].schema.required) && schemas[pollIdx].schema.required.includes("done"), "the poll agent schema must still require done");
-});
+// ── ⑩c suite-poller agentType（gap-fan-in-execute-poll-cost-firstdelay-agenttype AC2，暂缓）───────
+// NOTE: agentType='suite-poller' 的 wiring 已 revert（.claude/agents 新目录 watcher 不加载、需 session 重启），
+// 只保留 definition test（定义文件仍在、inert）；wiring 留 session 重启后单独落地。
 
 test("⑩c suite-poller definition — .claude/agents/suite-poller.md declares only the Bash tool (AC2)", () => {
   const agentDef = fs.readFileSync(path.join(REPO_ROOT, ".claude", "agents", "suite-poller.md"), "utf8");

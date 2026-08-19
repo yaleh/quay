@@ -252,7 +252,6 @@ printf 'cpu_s=%s\\ncpu_source=%s\\nend_iso=%s\\nend_ms=%s\\nwall_ms=%s\\nload=%s
 echo "POLL=done SUITE_EXIT=$suite_exit"
 返回 { done: bool（POLL=done ⇒ true）, suiteExit: int|null }。marker 存在但读不出 suite_exit ⇒ done=true, suiteExit=null（fail-closed，脚本按非绿处理）。`,
     {
-      agentType: 'suite-poller',
       schema: {
         type: 'object',
         properties: {

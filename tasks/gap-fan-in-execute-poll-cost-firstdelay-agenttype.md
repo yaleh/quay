@@ -26,7 +26,7 @@ manager 已证否「subagent spawn 会话预算」这条误归因（inner 现 19
 ## Acceptance Criteria
 
 - [x] AC1: fan-in-execute 增加 `firstDelayMs`（默认 ~660s），首轮延迟后仍按 `pollIntervalMs` 轮询；无设计变更、无新失败模式；`pollIntervalMs=0` 测试 seam 照旧可用。
-- [x] AC2: 定义 `suite-poller` agentType（`.claude/agents/suite-poller.md`，只带 Bash 工具），轮询 agent 改用该 agentType，单次轮询 cache_read 基线下降（工具 schema 那 ~64k 的大部分砍掉）。
+- [x] AC2: **暂缓（本次 revert agentType）**——原计划定义 `suite-poller` agentType（`.claude/agents/suite-poller.md`，只带 Bash）降轮询成本，但该文件是 session 启动后新增目录、watcher 不加载、需重启才生效（fan-in bootstrap 当场 crash 实证）；本次 revert agentType 保留 firstDelayMs，suite-poller 降成本留 session 重启后单独落地。
 - [x] AC3: 负控制——真实 suite 等待的轮询次数从 ~21 降到 ~10（firstDelayMs 生效），且 scoped 测试绿。
 
 ## Definition of Done
