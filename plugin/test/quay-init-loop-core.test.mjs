@@ -203,9 +203,14 @@ test('AC4 — laid-down tick docs are byte-identical to the product and carry NO
 });
 
 test('AC3 — no detection source: --loop fails closed, naming every location it searched, without guessing a default', () => {
+  // gap-quay-init-loop-dedupe-real-install AC1: this detection-path test runs as `--dry-run`.
+  // The fail-closed detection block (test-command detection → exit 2 naming the searched sources)
+  // executes identically under dry-run — the dry-run listing happens first, then the same
+  // detection fail-closed fires with the same stderr. What dry-run skips is the ~40-file laydown
+  // + verifies, which this test never asserts. Coverage preserved at ~1/4 the cost.
   const ws = makeTmp(); // empty — no scripts/test.sh, package.json, go.mod, or Cargo.toml
   try {
-    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj']);
+    const r = runInit(ws, ['--loop', '--dry-run', '--root', ws, '--project', 'proj']);
     assert.equal(r.status, 2, '--loop with no detectable test command must fail closed (exit 2)');
     assert.match(r.stderr, /--test-command/, 'failure must tell the human to pass --test-command explicitly');
     // AC3: the failure must say WHICH locations it searched (not just "no command found").
@@ -225,11 +230,15 @@ test('AC3 — no detection source: --loop fails closed, naming every location it
 // already-installed tree). They keep their real installs by design (the detection + config-write
 // path is the mechanism under test).
 test('AC2 — detection ladder: scripts/test.sh is detected as bash scripts/test.sh (quay convention)', () => {
+  // gap-quay-init-loop-dedupe-real-install AC1: the detection-ladder tests assert ONLY the
+  // detected-command message + exit 0, which `--dry-run` prints identically (the detection block
+  // runs before the dry-run skips the laydown). Keeping them on dry-run drops a full real install
+  // each (the laydown+verify are never asserted) with zero coverage loss.
   const ws = makeTmp();
   try {
     fs.mkdirSync(path.join(ws, 'scripts'), { recursive: true });
     fs.writeFileSync(path.join(ws, 'scripts', 'test.sh'), '#!/bin/bash\necho test\n');
-    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--tmux-session', 'proj-0:0.0']);
+    const r = runInit(ws, ['--loop', '--dry-run', '--root', ws, '--project', 'proj', '--tmux-session', 'proj-0:0.0']);
     assert.equal(r.status, 0, `init with a detected test command must exit 0:\n${r.stderr}`);
     assert.match(r.stdout, /detected test command: bash scripts\/test\.sh/,
       'must print the detected command for the human to confirm (AC2: 显示给人确认)');
@@ -260,7 +269,8 @@ test('AC2 — detection ladder: go.mod is detected as go test ./... (meta-cc con
   const ws = makeTmp();
   try {
     fs.writeFileSync(path.join(ws, 'go.mod'), 'module example.com/proj\n\ngo 1.22\n');
-    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--tmux-session', 'proj-0:0.0']);
+    // dry-run (gap-quay-init-loop-dedupe-real-install AC1): detection message + exit 0 asserted, laydown not.
+    const r = runInit(ws, ['--loop', '--dry-run', '--root', ws, '--project', 'proj', '--tmux-session', 'proj-0:0.0']);
     assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
     assert.match(r.stdout, /detected test command: go test \.\/\.\.\./,
       'must detect go test ./... from a go.mod file');
@@ -271,7 +281,8 @@ test('AC2 — detection ladder: Cargo.toml is detected as cargo test', () => {
   const ws = makeTmp();
   try {
     fs.writeFileSync(path.join(ws, 'Cargo.toml'), '[package]\nname = "proj"\nversion = "0.1.0"\n');
-    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--tmux-session', 'proj-0:0.0']);
+    // dry-run (gap-quay-init-loop-dedupe-real-install AC1): detection message + exit 0 asserted, laydown not.
+    const r = runInit(ws, ['--loop', '--dry-run', '--root', ws, '--project', 'proj', '--tmux-session', 'proj-0:0.0']);
     assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
     assert.match(r.stdout, /detected test command: cargo test/,
       'must detect cargo test from a Cargo.toml file');
