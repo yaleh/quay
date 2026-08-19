@@ -28,6 +28,7 @@ extra:
 - [ ] AC2: 新增独立、可单独调的 `pending_fanin_backlog`（worktree 总数，不管活性），留作落地积压监控/告警，不参与 Build-dispatch 的 cap 比较。
 - [ ] AC3: 不碰 `--reconcile` 的保留判据（worktree 在就该保留记录，这条本身对，同 gap-in-flight-liveness AC3 边界）。
 - [ ] AC4: 负控制落在生产载体——load 空闲时 `occupied_slots` 不因「只等落地的 worktree」而 >= cap 派不出（读真实 slot-refill 输出，非 fixture）。
+- [ ] AC5: 回退负控制——「无活进程 ⇒ 不计 occupied」不得退化成「读不到 telemetry ⇒ 计 0」；telemetry 可读且有真活进程时 `occupied_slots` 仍 ≥1（守住 `gap-slot-refill-inflight-disconnected-from-worktrees` 已 done 的 AC1 不被新判活逻辑架空）。
 
 ## Definition of Done
 
