@@ -21,13 +21,13 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: slot-refill 输出把 assembleBatch 的 `deferred`（拒绝原因）并入可见面（并入 `deferred` 或新增独立字段），使 shared-state/learning-type/non-capability-growth 三类拒绝各带可见 reason。
-- [ ] AC2: `no_refill_reason` 在「candidate 过 step-4 但被 assembleBatch 拒」时不再报「no dispatchable candidate passes step-4」——改为报真实拒绝面（或区分「step-4 空」与「assembleBatch 空」两种空 recommended）。
-- [ ] AC3: 负控制——一个 `## Touches` 命中 SHARED_STATE_PATHS 的 ready task，slot-refill 输出可读到「touches shared exp5 state」reason（非 `deferred=[]` + 误导 no_refill_reason）。
+- [x] AC1: slot-refill 输出把 assembleBatch 的 `deferred`（拒绝原因）并入可见面（并入 `deferred` 或新增独立字段），使 shared-state/learning-type/non-capability-growth 三类拒绝各带可见 reason。
+- [x] AC2: `no_refill_reason` 在「candidate 过 step-4 但被 assembleBatch 拒」时不再报「no dispatchable candidate passes step-4」——改为报真实拒绝面（或区分「step-4 空」与「assembleBatch 空」两种空 recommended）。
+- [x] AC3: 负控制——一个 `## Touches` 命中 SHARED_STATE_PATHS 的 ready task，slot-refill 输出可读到「touches shared exp5 state」reason（非 `deferred=[]` + 误导 no_refill_reason）。
 
 ## Definition of Done
 
-- [ ] 构造一个 shared-state-touch ready task 跑 slot-refill，输出直接可读其 assembleBatch 拒绝原因（真实输出，非 fixture），且不再报误导性「no dispatchable candidate passes step-4」。
+- [x] 构造一个 shared-state-touch ready task 跑 slot-refill，输出直接可读其 assembleBatch 拒绝原因（真实输出，非 fixture），且不再报误导性「no dispatchable candidate passes step-4」。
 
 ## Touches
 
