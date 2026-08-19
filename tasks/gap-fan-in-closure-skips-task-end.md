@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-closure-skips-task-end
 title: "fan-in closure 跳过 --task-end——landed 任务 telemetry 括号未闭合（SSOT+phase-overlap 两例 start=1 end=0）+ 6 例双 end 过度写"
-status: done
+status: ready
 labels:
   - gap
   - defect
