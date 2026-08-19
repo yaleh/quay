@@ -1,7 +1,7 @@
 ---
 id: gap-slot-refill-worktree-proxy-blocks-dispatch
 title: "slot-refill.ts 的 occupied_slots 用「worktree 存在」当活性代理——只等落地的 worktree 占槽，load 空闲也派不出 Build"
-status: todo
+status: superseded
 labels:
   - gap
   - mechanism
@@ -10,6 +10,9 @@ parent: null
 children: []
 extra:
   schema: execution
+  superseded: true
+  superseded_at: 2026-08-19
+  superseded_reason: "人裁定「方向是解耦+简化，不是加检查」——worktree 数量和 inner 并发本不该有关系，根因是状态机缺「impl-complete」态而非判活读法不准。本条是「第 6 个补丁」（加 pgrep 判活），方向错，由 gap-inflight-states-missing-impl-complete-event（补第三个事件+两个独立计数）取代"
 ---
 
 **type:** finding
