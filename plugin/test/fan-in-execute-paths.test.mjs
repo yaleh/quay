@@ -1788,3 +1788,78 @@ test("fix-scope REAL leak-residual — a tmux-leak-scan: FAIL with no per-file f
   assert.deepEqual(verdict.inScope, [], "no per-file failure ⇒ no inScope fix");
   assert.ok(verdict.outOfScope.some((f) => f.reason === "leak-residual"), "tmux-leak residual must be outOfScope (env residual, not a Touches regression)");
 });
+
+// ── fix-scope gate release persistence（gap-fix-scope-gate-release-not-persistent）───────────────────
+// THE DEFECT: 上一版 gate 的 load-sensitive release 是一次性 relaunch——relaunch 后仍红，第二轮
+// suite-fix 不再走 release、直接越界修（a76959c8 session-liveness teardown 第 9+ 例）。release 无跨
+// 轮持久状态 ⇒ 第二轮 agent 无记忆、把「隔离重跑确认」读成「重跑后仍红就该修」。FIX：gate 把每个
+// load-sensitive 红的连续 release 轮数 releasedRounds 持久化到 fix_scope_release ledger，第二轮读到
+// 递增；内联 prompt 显式写「releasedRounds ≥ 1 的 load-sensitive 红一律继续 release，⛔ 不得转 fix」。
+// 负控制（AC2/AC3）：同一 load-sensitive 红 run 两轮 gate（relaunch-fail 路径）⇒ 两轮都 release、
+// 零越界 fix。取假：把「第二轮仍 release」改成「第二轮转 fix」（删 ledger 读 / 把 load-sensitive
+// 挪进 inScope / releasedRounds 不递增）⇒ 测试红。
+
+test("fix-scope release persistence wiring — relaunch-fail 2nd suite-fix prompt still carries the idempotent-release instruction", async (t) => {
+  const { prompts } = await runWorkflow({
+    args: { task: "gap-test-fixscope-persist-wire", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-fixscope-persist-wire", mergeTarget: "develop", pollIntervalMs: 0, maxSuitePolls: 5, maxFixRounds: 3 },
+    agentResults: [
+      { outcome: "suite-started", suitePid: 111, codeDelta: "code", worktreeHead: "h1", note: "" },                 // phase 1
+      { done: true, suiteExit: 1 },                                                                                   // poll: RED
+      { relaunched: true, worktreeHead: "h2", failuresFixed: [], note: "load-sensitive 释放（第1轮）" },              // fix round 1: release
+      { done: true, suiteExit: 1 },                                                                                   // poll: STILL RED (relaunch-fail)
+      { relaunched: true, worktreeHead: "h2", failuresFixed: [], note: "load-sensitive 释放（第2轮，幂等持久）" },      // fix round 2: STILL release
+      { done: true, suiteExit: 0 },                                                                                   // poll: green
+      { outcome: "green", ffOk: true, developHead: "d2", worktreeHead: "h2", agentIdUsed: "a2", codeDelta: "code", note: "bracketClose=OK", bracketClosed: true },
+    ],
+  });
+  const fixPrompts = prompts.filter((p) => p.includes("suite-fix 阶段"));
+  assert.equal(fixPrompts.length, 2, "relaunch-fail must emit TWO suite-fix prompts (round 1 + round 2)");
+  const round2 = fixPrompts[1];
+  assert.ok(round2.includes("# fix-scope-gate-block-start"), "round-2 fix prompt must still carry the gate");
+  assert.ok(round2.includes("幂等持久"), "round-2 fix prompt must carry the idempotent-persistent instruction");
+  assert.ok(round2.includes("不得转 fix"), "round-2 fix prompt must forbid converting release → fix");
+  assert.ok(round2.includes("releasedRounds"), "round-2 fix prompt must carry the releasedRounds counter");
+});
+
+test("fix-scope release persistence — relaunch-fail path: same load-sensitive red releases on BOTH rounds (releasedRounds increments, zero越界 fix)", async (t) => {
+  const task = "gap-test-fixscope-persist";
+  const dir = makeFixScopeDir("fan-in-fixscope-persist-", task, [
+    "---",
+    `id: ${task}`,
+    "status: ready",
+    "---",
+    "## Touches",
+    `- tasks/${task}.md`,
+    "- pkg/a/**",
+  ].join("\n") + "\n");
+  t.after(() => cleanup(dir));
+  const log = `/tmp/fan-in-suite-${task}.log`;
+  const release = `/tmp/fan-in-scope-release-${task}.json`;
+  // 同一 load-sensitive 红 + 一个本任务 Touches 内回归（inScope 修，证 gate 不是一律 release）：
+  fs.writeFileSync(log, [
+    `__PERFILE__ duration_ms=1.2 ${dir}/pkg/a/x.test.mjs passed=false`,
+    `__PERFILE__ duration_ms=3.4 ${dir}/plugin/test/cold-start-skill.test.mjs passed=false`,
+  ].join("\n") + "\n", "utf8");
+  t.after(() => { try { fs.rmSync(log, { force: true }); } catch (_) { /* best-effort */ } });
+  t.after(() => { try { fs.rmSync(release, { force: true }); } catch (_) { /* best-effort */ } });
+
+  const block = await fixScopeGateBlockFor(task, dir);
+  const script = block + '\necho "GATE_OUT=[$fix_scope_out]"';
+  const r1 = runBash(script, { cwd: dir }); // round 1: release（relaunch, 无 fix）
+  const r2 = runBash(script, { cwd: dir }); // round 2: relaunch-fail → 仍 release、零越界 fix
+  assert.equal(r1.status, 0, `round-1 gate failed: ${r1.stderr}`);
+  assert.equal(r2.status, 0, `round-2 gate failed: ${r2.stderr}`);
+  const v1 = JSON.parse(r1.stdout.match(/GATE_OUT=\[(.*)\]/s)[1]);
+  const v2 = JSON.parse(r2.stdout.match(/GATE_OUT=\[(.*)\]/s)[1]);
+
+  const ls1 = v1.outOfScope.find((f) => f.reason === "load-sensitive" && f.file === "plugin/test/cold-start-skill.test.mjs");
+  const ls2 = v2.outOfScope.find((f) => f.reason === "load-sensitive" && f.file === "plugin/test/cold-start-skill.test.mjs");
+  assert.ok(ls1, "round 1: the load-sensitive red must be outOfScope release");
+  assert.equal(ls1.releasedRounds, 1, "round 1: first release ⇒ releasedRounds=1");
+  assert.ok(ls2, "round 2 (relaunch-fail): the SAME load-sensitive red must STILL be outOfScope release");
+  assert.equal(ls2.releasedRounds, 2, "round 2: ledger persisted ⇒ releasedRounds increments to 2 (NOT reset to 1)");
+  // 零越界 fix：两轮的 inScope 都不得含 load-sensitive 文件；inScope 只含本任务 Touches 内回归。
+  assert.ok(!v1.inScope.includes("plugin/test/cold-start-skill.test.mjs"), "round 1: load-sensitive red never inScope (零越界 fix)");
+  assert.ok(!v2.inScope.includes("plugin/test/cold-start-skill.test.mjs"), "round 2: load-sensitive red never inScope (零越界 fix)");
+  assert.deepEqual(v2.inScope, ["pkg/a/x.test.mjs"], "in-Touches regression still inScope (gate is not release-everything)");
+});

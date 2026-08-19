@@ -39,10 +39,10 @@ import { tmux as isolatedTmux } from "../scripts/tmux-session.ts";
 // build-plugin-dist (round 123/124 real regression). This helper RE-EXPORTS them so the
 // session-liveness test family keeps resolving the same names (single source of truth).
 import {
-  runIdOf, runNamespaceRoot, dirHasLiveOwner,
+  runIdOf, runNamespaceRoot, dirHasLiveOwner, serverPidOf, panePidsOf,
   sweepRunNamespaces, sweepRunNamespace,
 } from "../scripts/session-liveness-sweep.mjs";
-export { runIdOf, runNamespaceRoot, dirHasLiveOwner, sweepRunNamespaces, sweepRunNamespace };
+export { runIdOf, runNamespaceRoot, dirHasLiveOwner, serverPidOf, panePidsOf, sweepRunNamespaces, sweepRunNamespace };
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const SCRIPT = path.resolve(__dirname, "..", "scripts", "session-liveness.sh");
@@ -179,22 +179,67 @@ export function killProbeServers() {
   }
 }
 
-export function reapLiveOwners() {
-  for (const abs of [...__liveProbeTmpDirs]) {
-    if (!dirHasLiveOwner(abs)) { // owner already gone (e.g. a sibling sweep reaped the socket) — nothing to kill
-      __liveProbeTmpDirs.delete(abs);
-      try { fs.rmSync(abs, { recursive: true, force: true }); } catch { /* best-effort */ }
-      continue;
-    }
+// teardownProbe(abs) — the deterministic probe teardown shared by every hermetic-probe
+// constructor's cleanup() AND reapLiveOwners(). kill-server FIRST (kill-session alone races server
+// teardown under load), then RETRY until the owner actually dies (bounded) BEFORE unregistering:
+// a still-alive server stays registered so after()'s reapLiveOwners() can retry it. This honors
+// the "probe stays registered until the server is dead" contract that the cleanup() comment always
+// stated but the code violated — cleanup() unregistered IMMEDIATELY after a single fire-and-forget
+// kill-server, so a server whose kill raced/failed under suite load survived UNREACHABLE by the
+// reaper (leak-with-no-exit; 2026-08-18 full-suite red: the ol-scd-c probe's server outlived the
+// whole main phase and red'ed the suite-tail tmux-leak-scan). Retrying until the owner dies does
+// NOT weaken the leak gate — a server nobody can kill never clears within the bound. Idempotent on
+// an already-reaped probe (reapLiveOwners may have removed it first).
+const PROBE_TEARDOWN_KILL_WAIT_MS = 10000;
+export function teardownProbe(abs) {
+  const deadline = Date.now() + PROBE_TEARDOWN_KILL_WAIT_MS;
+  while (dirHasLiveOwner(abs) && Date.now() < deadline) {
     killProbeServer(abs);
-    // The server exits once killed; wait briefly so the socket is released before the dir is
-    // removed (a sync wait via Atomics — no process spawn in the cleanup path).
-    const deadline = Date.now() + 2000;
-    while (Date.now() < deadline && dirHasLiveOwner(abs)) {
+    // Wait for the server to actually exit before re-killing (a sync wait via Atomics — no extra
+    // process spawn in the cleanup path); re-kill only if it is STILL alive after the sub-wait.
+    const sub = Date.now() + 500;
+    while (Date.now() < sub && dirHasLiveOwner(abs)) {
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
     }
+  }
+  // HARD-KILL FALLBACK (gap-session-liveness-fixture-tmux-not-killed): a graceful `kill-server`
+  // can race/fail under suite load, and the tmux server is a DETACHED daemon (PPID=1) — nobody
+  // reaps it if the client-side kill never lands, so it survives the whole run and reds the
+  // suite-tail tmux-leak-scan. Escalate to a DIRECT SIGKILL of the server's own PID (resolved via
+  // its socket inode, serverPidOf) — a PID-targeted kill, NOT a name-based batch kill (invariant
+  // no_pkill_by_name_on_live = 1). SIGKILL cannot be ignored, so this closes the orphan window.
+  if (dirHasLiveOwner(abs)) {
+    const pid = serverPidOf(abs);
+    if (pid !== null && pid !== process.pid) {
+      try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ }
+      const hard = Date.now() + PROBE_TEARDOWN_KILL_WAIT_MS;
+      while (dirHasLiveOwner(abs) && Date.now() < hard) {
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+      }
+    }
+  }
+  // Only unregister + remove once the owner is ACTUALLY dead. If it survived even the hard kill
+  // (uninterruptible sleep / unreadable /proc), LEAVE it registered so after()'s reapLiveOwners()
+  // can retry — the "probe stays registered until the server is dead" contract, never orphan an
+  // unreachable live server.
+  if (!dirHasLiveOwner(abs)) {
+    // Kill the pane CHILDREN (the `exec -a claude-probe sleep 10000` fixtures) that survived the
+    // server's death carrying TMUX/TMUX_TMPDIR in their inherited environ. PID-targeted SIGKILL,
+    // never a name-based batch kill (invariant no_pkill_by_name_on_live = 1). Without this the
+    // orphaned children accumulate (200+ observed → suite-wide load red'ing the load-sensitive
+    // family) even though the dir itself is now swept (dirHasLiveOwner is socket-primary).
+    for (const pid of panePidsOf(abs)) {
+      if (pid === process.pid) continue;
+      try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ }
+    }
+    __unregisterProbeTmp(abs);
     try { fs.rmSync(abs, { recursive: true, force: true }); } catch { /* best-effort */ }
-    __liveProbeTmpDirs.delete(abs);
+  }
+}
+
+export function reapLiveOwners() {
+  for (const abs of [...__liveProbeTmpDirs]) {
+    teardownProbe(abs);
   }
 }
 
@@ -331,10 +376,9 @@ export function makeHermeticProbe(session) {
       // 判据1/AC1: kill the SERVER (kill-server, private socket) FIRST — kill-session alone races
       // server teardown under load and can leave a live server that is already-unregistered ⇒
       // unreachable by after()'s reapLiveOwners (leak-with-no-exit, 2026-08-14 full-suite red).
-      // The probe stays registered until the server is dead, so after() retries if interrupted.
-      killProbeServer(tmp);
-      __unregisterProbeTmp(tmp);
-      try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* best-effort */ }
+      // teardownProbe RETRIES kill-server until the owner dies BEFORE unregistering, so the probe
+      // stays registered until the server is dead and after() can retry if interrupted.
+      teardownProbe(tmp);
     },
   };
 }
@@ -358,10 +402,9 @@ export function makePlainPane(session) {
       // 判据1/AC1: kill the SERVER (kill-server, private socket) FIRST — kill-session alone races
       // server teardown under load and can leave a live server that is already-unregistered ⇒
       // unreachable by after()'s reapLiveOwners (leak-with-no-exit, 2026-08-14 full-suite red).
-      // The probe stays registered until the server is dead, so after() retries if interrupted.
-      killProbeServer(tmp);
-      __unregisterProbeTmp(tmp);
-      try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* best-effort */ }
+      // teardownProbe RETRIES kill-server until the owner dies BEFORE unregistering, so the probe
+      // stays registered until the server is dead and after() can retry if interrupted.
+      teardownProbe(tmp);
     },
   };
 }
@@ -389,10 +432,9 @@ export function makeClaudePaneProcess(session) {
       // 判据1/AC1: kill the SERVER (kill-server, private socket) FIRST — kill-session alone races
       // server teardown under load and can leave a live server that is already-unregistered ⇒
       // unreachable by after()'s reapLiveOwners (leak-with-no-exit, 2026-08-14 full-suite red).
-      // The probe stays registered until the server is dead, so after() retries if interrupted.
-      killProbeServer(tmp);
-      __unregisterProbeTmp(tmp);
-      try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* best-effort */ }
+      // teardownProbe RETRIES kill-server until the owner dies BEFORE unregistering, so the probe
+      // stays registered until the server is dead and after() can retry if interrupted.
+      teardownProbe(tmp);
     },
   };
 }
@@ -419,10 +461,9 @@ export function makeTwoWindowSession(session) {
       // 判据1/AC1: kill the SERVER (kill-server, private socket) FIRST — kill-session alone races
       // server teardown under load and can leave a live server that is already-unregistered ⇒
       // unreachable by after()'s reapLiveOwners (leak-with-no-exit, 2026-08-14 full-suite red).
-      // The probe stays registered until the server is dead, so after() retries if interrupted.
-      killProbeServer(tmp);
-      __unregisterProbeTmp(tmp);
-      try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* best-effort */ }
+      // teardownProbe RETRIES kill-server until the owner dies BEFORE unregistering, so the probe
+      // stays registered until the server is dead and after() can retry if interrupted.
+      teardownProbe(tmp);
     },
   };
 }

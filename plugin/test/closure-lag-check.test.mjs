@@ -343,6 +343,75 @@ test("AC2 negative control — --close-task with no open bracket exits 0 and wri
   } finally { cleanup(w); }
 });
 
+// ── Double-end idempotency (gap-fan-in-closure-skips-task-end, AC3): a runId is dispatched once
+//    and closed once. Two closure writers racing (fan-in --close-task vs outer --close-terminal /
+//    step-② --task-end) can both observe the bracket open and both write — the WRITE-time guard in
+//    --task-end skips a second end for an already-closed runId. ───────────────────────────────────
+
+test("double-end — --task-end is write-idempotent: a second end for the same runId is skipped (start=1 end=1)", () => {
+  const w = makeWorkspace("ct-dbl");
+  try {
+    const runId = startBracket(w, "GAP-DBL");
+
+    const first = spawnSync(
+      "node",
+      ["--no-warnings", "--experimental-strip-types", TELEMETRY, "--task-end", "--taskId", "GAP-DBL", "--runId", runId, "--outcome", "done", "--root", w],
+      { encoding: "utf8" },
+    );
+    assert.equal(first.status, 0, `first --task-end must succeed:\n${first.stdout}${first.stderr}`);
+    assert.match(first.stdout, /end event written/);
+
+    const second = spawnSync(
+      "node",
+      ["--no-warnings", "--experimental-strip-types", TELEMETRY, "--task-end", "--taskId", "GAP-DBL", "--runId", runId, "--outcome", "done", "--root", w],
+      { encoding: "utf8" },
+    );
+    assert.equal(second.status, 0, `second --task-end must exit 0 (idempotent):\n${second.stdout}${second.stderr}`);
+    assert.match(second.stdout, /idempotent/, "second end is skipped with a DISTINCT message (守/不守可区分)");
+    assert.doesNotMatch(second.stdout, /end event written/, "second end must NOT write");
+
+    // The event file has exactly ONE start and ONE end — no double-end (start=1 end=2 defect).
+    const evFile = join(w, ".workflow-events", `${runId}.jsonl`);
+    const lines = readFileSync(evFile, "utf8").split("\n").filter((l) => l.trim() !== "");
+    const starts = lines.filter((l) => { const e = JSON.parse(l); return e.eventKind === "start" || (e.timing && e.timing.startedAtMs != null && e.timing.endedAtMs == null); });
+    const ends = lines.filter((l) => { const e = JSON.parse(l); return e.eventKind === "end" || (e.timing && e.timing.endedAtMs != null); });
+    assert.equal(starts.length, 1, "exactly one start event");
+    assert.equal(ends.length, 1, "exactly one end event (the double-end defect is prevented)");
+  } finally { cleanup(w); }
+});
+
+// ── Under-write runId lookup (gap-fan-in-closure-skips-task-end, AC1): --close-task now looks up
+//    the runId via --run-id-for (ONE short line), not a `--report --json | node -e` SHELL PIPE that
+//    truncates at the 64KB pipe buffer once the report exceeds 64KB (a real workspace has ~68KB).
+//    --run-id-for returns the exact runId for an open bracket, "" when closed/absent. ───────────
+
+test("under-write — --run-id-for returns the open bracket's runId (short single line, no report pipe)", () => {
+  const w = makeWorkspace("ct-rid");
+  try {
+    const runId = startBracket(w, "GAP-RID");
+
+    const open = spawnSync(
+      "node",
+      ["--no-warnings", "--experimental-strip-types", TELEMETRY, "--run-id-for", "--taskId", "GAP-RID", "--root", w],
+      { encoding: "utf8" },
+    );
+    assert.equal(open.status, 0, `--run-id-for must succeed:\n${open.stdout}${open.stderr}`);
+    assert.equal(open.stdout.trim(), runId, "--run-id-for returns the exact open-bracket runId");
+    assert.ok(open.stdout.length < 1000, "single short line — structurally cannot truncate at the 64KB pipe buffer");
+
+    // Close the bracket, then --run-id-for returns "" (no open bracket).
+    writeTask(w, "GAP-RID", "done");
+    const closed = run(["--root", w, "--close-task", "--taskId", "GAP-RID", "--outcome", "done"]);
+    assert.equal(closed.status, 0, `--close-task via --run-id-for must close:\n${closed.stdout}${closed.stderr}`);
+    const after = spawnSync(
+      "node",
+      ["--no-warnings", "--experimental-strip-types", TELEMETRY, "--run-id-for", "--taskId", "GAP-RID", "--root", w],
+      { encoding: "utf8" },
+    );
+    assert.equal(after.stdout.trim(), "", "--run-id-for returns empty after the bracket is closed");
+  } finally { cleanup(w); }
+});
+
 // ── AC2 negative control: invalid --close-task usage exits 2 ─────────────────────────────────────
 
 test("AC2 negative control — --close-task usage errors exit 2 (missing --taskId / bad --outcome)", () => {
