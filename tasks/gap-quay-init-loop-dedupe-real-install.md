@@ -1,7 +1,7 @@
 ---
 id: gap-quay-init-loop-dedupe-real-install
 title: "quay-init 族去重复真装——文件级 before 钩子 1 次真装 + 文件拷贝副本（不含 check-drift，已另案退休）"
-status: ready
+status: done
 labels:
   - gap
   - performance
