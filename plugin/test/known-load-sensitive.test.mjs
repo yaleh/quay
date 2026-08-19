@@ -381,10 +381,12 @@ test("AC4 (分级闸) — checkSerialKinds does NOT gate a lowconc family member
   }
 });
 
-test("AC3 — the real repo: 6 of the 8 heavy lowconc→serial downgrade files returned to lowconc (serial phase shrank)", () => {
+test("AC3 — the real repo: 5 of the 8 heavy lowconc→serial downgrade files returned to lowconc (serial phase shrank)", () => {
   // The downgrade set (lowconc→serial on 2026-08-09) was 8 heavy + 1 child-spawn. After the mechanism
-  // re-split: the 6 fixture-amortized real-install files return to lowconc; npm-pack-e2e +
+  // re-split: the 5 fixture-amortized real-install files return to lowconc; npm-pack-e2e +
   // install-config-driven-e2e (full real installs) and checker-cost (broke at lowconc c3) stay serial.
+  // quay-init-check-drift.test.mjs is RETIRED (gap-quay-init-check-drift-merge-into-drift-report —
+  // its assertions were merged into quay-init-drift-report.test.mjs, so it is no longer a test file).
   const serialFiles = [];
   const lowconcFiles = [];
   for (const rel of listTestFiles(REPO_ROOT)) {
@@ -393,7 +395,6 @@ test("AC3 — the real repo: 6 of the 8 heavy lowconc→serial downgrade files r
     if (/^\s*\/\/\s*@test-group\s+lowconc\b/m.test(text)) lowconcFiles.push(rel);
   }
   const movedToLowconc = [
-    "plugin/test/quay-init-check-drift.test.mjs",
     "plugin/test/quay-init-loop-driver.test.mjs",
     "plugin/test/quay-init-loop-runtime.test.mjs",
     "plugin/test/quay-init-loop-vendor.test.mjs",

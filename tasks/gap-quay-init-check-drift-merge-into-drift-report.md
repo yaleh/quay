@@ -21,16 +21,17 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: check-drift.test.mjs 并入 drift-report.test.mjs——保留双方各自独有断言细节（check-drift 的独立 before/after 对照、drift-report 的 fresh-target 只读+幂等），退休 check-drift.test.mjs。
-- [ ] AC2: 负控制落在生产载体——并入后一轮真实 suite 里，原 check-drift 覆盖的 gap（delivery-surface 冻结不更新）仍有测试断言（读真实 suite 日志，非 fixture），覆盖率不丢。
-- [ ] AC3: scoped 绿 + 单轮该族耗时显著下降（check-drift 372079ms 的独有开销消除）。
+- [x] AC1: check-drift.test.mjs 并入 drift-report.test.mjs——保留双方各自独有断言细节（check-drift 的独立 before/after 对照、drift-report 的 fresh-target 只读+幂等），退休 check-drift.test.mjs。
+- [x] AC2: 负控制落在生产载体——并入后一轮真实 suite 里，原 check-drift 覆盖的 gap（delivery-surface 冻结不更新）仍有测试断言（读真实 suite 日志，非 fixture），覆盖率不丢。
+- [x] AC3: scoped 绿 + 单轮该族耗时显著下降（check-drift 372079ms 的独有开销消除）。
 
 ## Definition of Done
 
-- [ ] check-drift.test.mjs 退休、其覆盖并入 drift-report.test.mjs，单轮省 ~370s、覆盖率不丢（真实输出，非 mock）。
+- [x] check-drift.test.mjs 退休、其覆盖并入 drift-report.test.mjs，单轮省 ~370s、覆盖率不丢（真实输出，非 mock）。
 
 ## Touches
 
 - tasks/gap-quay-init-check-drift-merge-into-drift-report.md（自身）
 - plugin/test/quay-init-drift-report.test.mjs（并入 check-drift 独有断言）
 - plugin/test/quay-init-check-drift.test.mjs（退休/删除）
+- plugin/test/known-load-sensitive.test.mjs（AC3 的 lowconc 名单移除已退休的 check-drift.test.mjs——否则该测试断言「check-drift 仍在 lowconc lane」必然红）
