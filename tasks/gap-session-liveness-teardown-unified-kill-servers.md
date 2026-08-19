@@ -33,5 +33,5 @@ session-liveness 测试的 `after()` hook 没有**统一**杀掉测试自建的 
 ## Touches
 
 - tasks/gap-session-liveness-teardown-unified-kill-servers.md（自身）
-- plugin/test/session-liveness-*.test.mjs（after() hook 统一清理自建 server）
+- plugin/test/session-liveness*.mjs（after() hook 统一清理自建 server，覆盖基础测试 session-liveness.test.mjs + helper session-liveness-helpers.mjs + 所有带后缀 test 文件）
 - plugin/scripts/session-liveness-sweep.mjs（统一清理逻辑，若需）
