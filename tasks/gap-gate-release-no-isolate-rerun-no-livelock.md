@@ -26,11 +26,11 @@ extra:
 
 - [x] AC1: load-sensitive release 接 C11 隔离重跑（只重跑失败测试、低并发），非全量 relaunch。
 - [x] AC2: release 侧加 anti-livelock 兜底（attempt≥3 时 escalate/quiet-window，不再无限 relaunch）。
-- [ ] AC3: 负控制落在生产载体——真实 fan-in 撞 load-sensitive 红，隔离重跑收敛（不再全量 relaunch 循环），或 attempt≥3 兜底打断（读生产 journal，非 fixture）。【待外部：落地后下一轮真实全量 load-sensitive 红中确认】
+- [ ] AC3: 负控制落在生产载体——真实 fan-in 撞 load-sensitive 红，隔离重跑收敛（不再全量 relaunch 循环），或 attempt≥3 兜底打断（读生产 journal，非 fixture）。（待外部）
 
 ## Definition of Done
 
-- [ ] load-sensitive 红经隔离重跑收敛（或 anti-livelock 兜底打断），不再无界全量 relaunch（真实输出）。【待外部：落地后真实输出确认——机制已落地并负控制测通】
+- [ ] load-sensitive 红经隔离重跑收敛（或 anti-livelock 兜底打断），不再无界全量 relaunch（真实输出）。（待外部）
 
 ## Touches
 
