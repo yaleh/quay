@@ -2069,3 +2069,40 @@ test("fix-scope release persistence — relaunch-fail path: same load-sensitive 
   assert.ok(!v2.inScope.includes("plugin/test/cold-start-skill.test.mjs"), "round 2: load-sensitive red never inScope (零越界 fix)");
   assert.deepEqual(v2.inScope, ["pkg/a/x.test.mjs"], "in-Touches regression still inScope (gate is not release-everything)");
 });
+
+// ── ⑨ impl-complete event (gap-inflight-states-missing-impl-complete-event) ─────────────────────────
+// fan-in writes the THIRD lifecycle event (`--impl-complete`) after impl completes (suite green) and
+// BEFORE land (step 4.4, between step 4's suite and step 5's flip+ff). The block is runId-guarded
+// (no --task-start bracket ⇒ no event). AC5 负控制: the write lives in phase 2, fires only when
+// runId is set, and idempotency is handled by fast-mode-telemetry's hasImplCompleteEvent guard.
+
+test("⑨ impl-complete — phase-2 prompt writes the event after suite green, before land; runId-guarded", async () => {
+  const { prompts } = await runWorkflow({
+    args: { task: "gap-test-implc", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-implc-1", mergeTarget: "develop" },
+  });
+  const p2 = promptContaining(prompts, "# impl-complete-block-start");
+  // The block lives in phase 2 (the prompt that also carries the suite-record + flip blocks), i.e.
+  // AFTER the suite is green and BEFORE land (step 5 flip+ff).
+  assert.ok(p2.includes("# suite-record-block-start"), "impl-complete sits with the phase-2 mechanical steps");
+  assert.ok(p2.includes("# flip-block-start"), "impl-complete precedes the flip block (land) in phase 2");
+  // The write is the real telemetry CLI, worktree-rooted, carrying task + runId + root.
+  assert.ok(p2.includes("fast-mode-telemetry.ts --impl-complete"), "phase-2 must write the impl-complete event");
+  assert.ok(p2.includes("--taskId gap-test-implc") && p2.includes("--runId fm-implc-1"), "the event carries taskId + runId");
+  assert.ok(p2.includes(`--root ${REPO_ROOT}`), "the event writes to the main checkout's event store");
+  assert.ok(p2.includes(`/tmp/wt/plugin/scripts/`), "the CLI resolves from the worktree (orchestration-bootstrap)");
+  // The block is runId-guarded: no bracket ⇒ no event (AC5 负控制 for a runId-less fan-in). The
+  // `${runId}` is INTERPOLATED by the workflow's template literal at build time.
+  assert.ok(p2.includes('if [ -n "fm-implc-1" ]; then'), `the impl-complete write is guarded by the runId presence, got guard: ${p2.split("\n").find((l) => l.includes("if [ -n"))}`);
+});
+
+test("⑨ impl-complete — runId-less fan-in skips the write (AC5 负控制)", async () => {
+  const { prompts } = await runWorkflow({
+    args: { task: "gap-test-implc-norid", worktree: "/tmp/wt", root: REPO_ROOT, runId: null, mergeTarget: "develop" },
+  });
+  const p2 = promptContaining(prompts, "# impl-complete-block-start");
+  // With runId null the block still emits (the CLI call is inside the guard), but the guard branch
+  // is falsy (the interpolated runId is the empty string) — the event write must NOT fire.
+  assert.ok(p2.includes('if [ -n "" ]; then'), `the runId guard is present even when runId is empty, got guard: ${p2.split("\n").find((l) => l.includes("if [ -n"))}`);
+  // The step-4.4 block's own comment names the skip condition for a runId-less write.
+  assert.ok(p2.includes("runId 为空") || p2.includes("未走 --task-start 留痕"), "the block documents the runId-less skip");
+});

@@ -34,7 +34,7 @@ import { fileURLToPath } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
 import {
   SCRIPT, tmuxAvailable,
-  setProbeTmpPrefix, sweepTmp, reapLiveOwners, tmux, isolateTmuxEnv, isClaudePid,
+  setProbeTmpPrefix, sessionLivenessAfter, tmux, isolateTmuxEnv, isClaudePid,
   paneHasClaudeChild, waitForAlive, makeHermeticProbe,
   spawnMonitor, waitForOutput, waitForRounds, countRounds,
   makePaneBusy, makePaneIdle, makePanePermissionPrompt, startTouchLoop, cleanup,
@@ -53,8 +53,7 @@ setProbeTmpPrefix("session-liveness-sig-e-");
 // suite-tail tmux-leak-scan. reapLiveOwners() FIRST kills this process's OWN still-alive probe
 // servers, then sweepTmp removes owner-dead residue. Sweep ONLY this file's own prefixes.
 after(() => {
-  reapLiveOwners();
-  sweepTmp("session-liveness-sig-e-");
+  sessionLivenessAfter("session-liveness-sig-e-");
 });
 
 test("AC6/D5 — a session stalled FROM MOUNT (never observed busy, stale pure-text transcript) reports SESSION-IDLE after the debounce; the SEEN_BUSY gate must not permanently destroy the stall's report right", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {

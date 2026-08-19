@@ -1525,6 +1525,8 @@ function renderBoardPage(board: {
     landingFlag: string | null;
     execFlags: string[];
     inFlightMinutes: number | null;
+    /** True when the run has an impl-complete event (awaiting-land segment — 排队待落地). */
+    awaitingLand: boolean;
   }>;
 }): string {
   const landingNote = board.landing.status === "ok"
@@ -1532,8 +1534,13 @@ function renderBoardPage(board: {
     : board.landing.status === "empty"
       ? html`<span>落地: <code>task-status-drift-check.ts</code> · <strong>无数据</strong> — ${escapeHtml(board.landing.reason || "")}</span>`
       : html`<span>落地: <code>task-status-drift-check.ts</code> · <strong>读失败</strong> — ${escapeHtml(board.landing.reason || "")}</span>`;
+  // gap-inflight-states-missing-impl-complete-event: the in-flight view splits into TWO independent
+  // counts — implementing (start, no impl-complete: 真正在实现) vs awaiting-land (impl-complete, no
+  // end: 排队待落地). Build dispatch reads the former; the land single-flight gate reads the latter.
+  const implementingCount = board.execution.inFlight.filter((t) => t.implCompletedAtMs == null).length;
+  const awaitingLandCount = board.execution.inFlight.length - implementingCount;
   const execNote = board.execution.status === "ok"
-    ? html`<span>执行: <code>.workflow-events/</code> · ${board.execution.inFlight.length} 在飞</span>`
+    ? html`<span>执行: <code>.workflow-events/</code> · ${implementingCount} 实现中 · ${awaitingLandCount} 待落地</span>`
     : board.execution.status === "empty"
       ? html`<span>执行: <code>.workflow-events/</code> · <strong>无数据</strong> — ${escapeHtml(board.execution.reason || "")}</span>`
       : html`<span>执行: <code>.workflow-events/</code> · <strong>读失败</strong> — ${escapeHtml(board.execution.reason || "")}</span>`;
@@ -1545,7 +1552,7 @@ function renderBoardPage(board: {
     const flagAttr = r.landingFlag ? ` data-flag="${escapeHtml(r.landingFlag)}"` : "";
     const execAttr = r.execFlags.length > 0 ? ` data-exec-flag="${escapeHtml(r.execFlags.join(","))}"` : "";
     const execCell = r.inFlightMinutes != null
-      ? html`在飞 ${escapeHtml(r.inFlightMinutes.toFixed(1))} 分钟${r.execFlags.map((f) => html` · <strong>${f === "in-flight-timeout" ? "在飞超时" : "孤儿"}</strong>`).join("")}`
+      ? html`在飞 ${escapeHtml(r.inFlightMinutes.toFixed(1))} 分钟${r.awaitingLand ? html` · <strong>待落地</strong>` : ""}${r.execFlags.map((f) => html` · <strong>${f === "in-flight-timeout" ? "在飞超时" : "孤儿"}</strong>`).join("")}`
       : (r.execFlags.length > 0 ? r.execFlags.map((f) => html`<strong>${f === "in-flight-timeout" ? "在飞超时" : "孤儿"}</strong>`).join(" · ") : "—");
     const landingCell = r.landingFlag === "done-unlanded"
       ? html`<strong>done 但未落地</strong>`
@@ -1632,6 +1639,7 @@ export async function handleBoard(
       landingFlag,
       execFlags,
       inFlightMinutes: inFlight ? inFlight.minutes : null,
+      awaitingLand: inFlight ? inFlight.implCompletedAtMs != null : false,
     };
   });
 

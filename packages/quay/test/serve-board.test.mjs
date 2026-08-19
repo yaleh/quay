@@ -245,3 +245,51 @@ test("AC7/execution column: /board renders the execution (telemetry) column with
     fs.rmSync(ws, { recursive: true, force: true });
   }
 });
+
+// gap-inflight-states-missing-impl-complete-event AC5 负控制 — /board's execution column splits
+// the in-flight view into TWO independent counts: implementing (start, no impl-complete — 真正在
+// 实现) vs awaiting-land (impl-complete, no end — 排队待落地). Build dispatch reads the former;
+// the land single-flight gate reads the latter. A start+impl-complete+no-end task must NOT render
+// as implementing — it renders as awaiting-land ("待落地"), and the two counts stay independent.
+test("AC8/execution column: /board renders implementing vs awaiting-land as two independent counts (impl-complete boundary)", async () => {
+  const { ws, tasksDir } = makeWorkspace("board-impl-");
+  const cwd0 = process.cwd();
+  let server;
+  try {
+    seed(tasksDir, "IM-1", { title: "Implementing", status: "todo", body: BD_BODY("imSymbol", "packages/quay/src/board-symbol-a.ts") });
+    seed(tasksDir, "AL-1", { title: "Awaiting-land", status: "todo", body: BD_BODY("alSymbol", "packages/quay/src/board-symbol-b.ts") });
+    fs.mkdirSync(path.join(ws, "packages/quay/src"), { recursive: true });
+    fs.writeFileSync(path.join(ws, "packages/quay/src/board-symbol-a.ts"), "export const imSymbol = 1;\n");
+    fs.writeFileSync(path.join(ws, "packages/quay/src/board-symbol-b.ts"), "export const alSymbol = 1;\n");
+
+    const eventsDir = path.join(ws, ".workflow-events");
+    fs.mkdirSync(eventsDir, { recursive: true });
+    const now = Date.now();
+    // IM-1: start only ⇒ implementing.
+    fs.writeFileSync(path.join(eventsDir, "fm-IM-1.jsonl"),
+      JSON.stringify({ schemaVersion: "1", runId: "fm-IM-1-1", candidateId: "IM-1", taskId: "IM-1", stage: "Fast", attempt: 0, eventKind: "start", timing: { queuedAtMs: null, startedAtMs: now - 10 * 60_000, endedAtMs: null }, agentLabel: "fast-mode", commandIdentity: "fast-mode-telemetry:task-start", executionCwd: ws, worktreePath: null, baseCommit: null, candidateCommit: null, outcome: null, waitReason: null, resourceClaim: null, observedWrites: [], isolationMode: null, dispatchMode: "serial", recordedAtMs: now - 10 * 60_000 }) + "\n");
+    // AL-1: start + impl-complete (no end) ⇒ awaiting-land.
+    fs.writeFileSync(path.join(eventsDir, "fm-AL-1.jsonl"),
+      JSON.stringify({ schemaVersion: "1", runId: "fm-AL-1-1", candidateId: "AL-1", taskId: "AL-1", stage: "Fast", attempt: 0, eventKind: "start", timing: { queuedAtMs: null, startedAtMs: now - 20 * 60_000, endedAtMs: null }, agentLabel: "fast-mode", commandIdentity: "fast-mode-telemetry:task-start", executionCwd: ws, worktreePath: null, baseCommit: null, candidateCommit: null, outcome: null, waitReason: null, resourceClaim: null, observedWrites: [], isolationMode: null, dispatchMode: "serial", recordedAtMs: now - 20 * 60_000 }) + "\n" +
+      JSON.stringify({ schemaVersion: "1", runId: "fm-AL-1-1", candidateId: "AL-1", taskId: "AL-1", stage: "Fast", attempt: 0, eventKind: "impl-complete", timing: { queuedAtMs: null, startedAtMs: null, endedAtMs: null }, agentLabel: "fast-mode", commandIdentity: "fast-mode-telemetry:impl-complete", executionCwd: ws, worktreePath: null, baseCommit: null, candidateCommit: null, outcome: null, waitReason: null, resourceClaim: null, observedWrites: [], isolationMode: null, dispatchMode: "serial", recordedAtMs: now - 5 * 60_000 }) + "\n");
+
+    const port = await freePort();
+    process.chdir(ws);
+    server = await startServer({ port });
+    const board = await get(port, "/board");
+    assert.equal(board.status, 200, "AC8: /board 200 with the two-segment telemetry present");
+    // The two INDEPENDENT counts render (1 implementing + 1 awaiting-land), not a single "2 在飞".
+    assert.ok(board.body.includes("1 实现中"), "AC8: the implementing count renders");
+    assert.ok(board.body.includes("1 待落地"), "AC8: the awaiting-land count renders");
+    // AL-1's row carries the 待落地 marker (impl-complete, no end); IM-1's row does NOT.
+    const alRow = board.body.split("</tr>").find((r) => r.includes(">AL-1<"));
+    const imRow = board.body.split("</tr>").find((r) => r.includes(">IM-1<"));
+    assert.ok(alRow && alRow.includes("待落地"), "AC8: the awaiting-land task row shows 待落地");
+    assert.ok(imRow && !imRow.includes("待落地"), "AC8: the implementing task row does NOT show 待落地");
+    assert.ok(imRow && imRow.includes("在飞"), "AC8: the implementing task still shows the in-flight marker");
+  } finally {
+    process.chdir(cwd0);
+    if (server) { server.close(); if (server.client) await server.client.close(); }
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});

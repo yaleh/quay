@@ -34,7 +34,7 @@ import { fileURLToPath } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
 import {
   SCRIPT, PROBE_TARGET, tmuxAvailable, realProbeAvailable,
-  setProbeTmpPrefix, sweepTmp, reapLiveOwners, md5, tmux, isolateTmuxEnv, isClaudePid,
+  setProbeTmpPrefix, sessionLivenessAfter, md5, tmux, isolateTmuxEnv, isClaudePid,
   paneHasClaudeChild, waitForAlive, makeHermeticProbe, makePlainPane,
   makeClaudePaneProcess, makeTwoWindowSession, paneSelfIsClaude, waitForSelfClaude,
   spawnMonitor, waitForOutput, waitForRounds, makeBackdatedGitRepo,
@@ -54,8 +54,7 @@ setProbeTmpPrefix("session-liveness-ev-");
 // sweepTmp removes owner-dead residue. Sweep ONLY this file's own prefixes (see SPLIT CONCURRENCY
 // SAFETY above — never a sibling's).
 after(() => {
-  reapLiveOwners();
-  sweepTmp("session-liveness-ev-", "ol-prod-");
+  sessionLivenessAfter("session-liveness-ev-", "ol-prod-");
 });
 
 test("SESSION-RESUMED then SESSION-IDLE fire when the real probe session goes busy then idle", {

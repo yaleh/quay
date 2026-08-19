@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-suite-log-cross-relaunch-reuse
 title: "suite 日志 `/tmp/fan-in-suite-<task>.log` 跨 relaunch 复用不轮转——历史/当前内容混杂，读者误读旧轮数据"
-status: todo
+status: ready
 labels:
   - gap
   - observability

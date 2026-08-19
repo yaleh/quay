@@ -1,7 +1,7 @@
 ---
 id: gap-suite-duration-exceed-check-not-wired
 title: "suite-duration-exceed-check.ts 未接线 scripts/test.sh/ci.yml——suite 超时不报"
-status: ready
+status: done
 labels:
   - gap
   - finding
@@ -19,15 +19,20 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: `suite-duration-exceed-check.ts` 接线进静态检查相（`run_static_checks` 或等价每轮执行路径）。
-- [ ] AC2: 负控制——一个超时场景使检查 exit 非 0（真实触发，非 fixture）。
-- [ ] AC3: grep 命中 ≥1 个生产调用点（非注释/declaration）。
+- [x] AC1: `suite-duration-exceed-check.ts` 接线进静态检查相（`run_static_checks` 或等价每轮执行路径）。
+- [x] AC2: 负控制——一个超时场景使检查 exit 非 0（真实触发，非 fixture）。
+- [x] AC3: grep 命中 ≥1 个生产调用点（非注释/declaration）。
 
 ## Definition of Done
 
-- [ ] suite 超时被机械报出（真实输出）。
-- [ ] `grep -rn suite-duration-exceed-check` 显示 ≥1 个执行调用点。
+- [x] suite 超时被机械报出（真实输出）。
+- [x] `grep -rn suite-duration-exceed-check` 显示 ≥1 个执行调用点。
 
 ## Touches
 
 - tasks/gap-suite-duration-exceed-check-not-wired.md（自身）
+- plugin/scripts/suite-duration-exceed-check.ts
+- scripts/test.sh
+- plugin/scripts/checker-mutation-cases/suite-duration-exceed-check.sh
+- plugin/scripts/capability-catalog.sh
+- plugin/test/suite-duration-exceed-check.test.mjs

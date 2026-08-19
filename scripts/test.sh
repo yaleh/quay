@@ -762,6 +762,23 @@ run_static_checks() {
   # @static-tier change
   # @static-object plugin/scripts/capability-catalog.sh plugin/scripts/rhythm-consumer-check.ts plugin/test/rhythm-consumer-check.test.mjs scripts/test.sh orchestration/*-tick-core.md plugin/loop/*-tick-core.md
   run_checker "rhythm-consumer-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/rhythm-consumer-check.ts" --check --root "${repo_root}"
+  echo "== suite-duration-exceed check (gap-suite-duration-exceed-check-not-wired, AC4 independent signal) =="
+  # AC101's 600s target had two de-facto sentinels (the 10min foreground cap + the duration ledger)
+  # that the pre-verified-suite path bypassed — round227 ran 936.5s with NO alert. This checker reads
+  # the ledger and goes RED (exit 1, SUITE-DURATION-EXCEEDED) when the latest round exceeds the limit.
+  # It was BUILT (2026-08-17) but had ZERO callers (grep 零命中 — 能取假却无调用者, the zero-wiring
+  # family rhythm-consumer-check cures). Wired here REPORT-ONLY via --no-block: it is a TREND
+  # observation (a stale/over-long PAST round must not red the CURRENT suite — the ledger's latest
+  # round is 600s+ so a blocking wire would halt every round), so the verdict is printed
+  # (SUITE-DURATION-EXCEEDED stays visible in the suite log) but never exits non-zero. The DEFAULT
+  # (no --no-block) stays fail-closed for the AC2 negative control / on-demand diagnosis. CI inherits
+  # it for free (its only test step is `bash scripts/test.sh`).
+  # @static-tier full  (whole-store observability — deferred to the full-suite gate in scoped mode)
+  # --root main_root (gap-gitignored-carriers-absent-in-verify-worktree): the verification-round.jsonl
+  # ledger is MAIN-checkout gitignored runtime state, absent from the one-shot verify worktree.
+  # Pointing --root at the main checkout makes the worktree round read the SAME ledger as a main run
+  # (verdicts identical); on a main run main_root == repo_root ⇒ unchanged.
+  run_checker "suite-duration-exceed-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/suite-duration-exceed-check.ts" --root "${main_root}" --no-block
   # Wait for all parallelized checkers and fail closed if any failed (see the RUN_CHECKER_PARALLEL
   # note at the top of this function — AC3 failure visibility, AC4 cost-ledger completeness).
   run_checker_parallel_wait

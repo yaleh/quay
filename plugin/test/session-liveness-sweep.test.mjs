@@ -37,8 +37,9 @@ import { fileURLToPath } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
 import {
   tmuxAvailable,
-  setProbeTmpPrefix, sweepTmp, reapLiveOwners, dirHasLiveOwner, probeRoot, serverPidOf,
-  makeHermeticProbe, spawnMonitor, waitForRounds,
+  setProbeTmpPrefix, sessionLivenessAfter, sweepTmp, reapLiveOwners, dirHasLiveOwner, probeRoot, serverPidOf,
+  makeHermeticProbe, spawnMonitor, waitForRounds, startTouchLoop, reapSpawnedChildren, serverPidsOfByCmdline,
+  teardownProbe,
 } from "./session-liveness-helpers.mjs";
 // serverPidViaPaneEnv is the socket-close-surviving fallback added by
 // gap-session-liveness-teardown-ol-scd-d-residual; session-liveness-helpers.mjs does not re-export
@@ -48,7 +49,7 @@ import { serverPidViaPaneEnv } from "../scripts/session-liveness-sweep.mjs";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 setProbeTmpPrefix("session-liveness-swp-");
-after(() => { reapLiveOwners(); sweepTmp("session-liveness-swp-"); });
+after(() => { sessionLivenessAfter("session-liveness-swp-"); });
 
 const noTmux = tmuxAvailable ? false : "tmux not installed";
 
@@ -151,6 +152,57 @@ test("AC1 (ol-scd-d residual) — teardown kills the self-built SESSION's SERVER
   }
 });
 
+test("AC1 (unified teardown) — a GHOST server (socket dir removed, socket-criteria blind) is found by cmdline discovery and SIGKILL'd, NOT orphaned by an unregister+rm", { skip: noTmux }, async () => {
+  // gap-session-liveness-teardown-unified-kill-servers: the leak that red'ed the suite-tail
+  // tmux-leak-scan. A server that closed/lost its listening socket is INVISIBLE to the socket-based
+  // criteria — PROVEN here: after rmSync of the socket dir, serverPidOf=null + dirHasLiveOwner=false
+  // while the server is STILL ALIVE. Without the cmdline discovery the teardown would treat it as
+  // owner-dead, UNREGISTER the dir, and orphan the live server forever. serverPidsOfByCmdline finds
+  // it via its own argv (which retains the socket path), and teardownProbe SIGKILLs it.
+  const p = makeHermeticProbe("swp-ghost");
+  try {
+    const serverPid = serverPidOf(p.tmp);
+    assert.ok(Number.isInteger(serverPid) && serverPid > 1,
+      `must resolve the server pid before the socket is removed, got ${serverPid}`);
+    // Remove the socket dir — the server stays alive but becomes invisible to socket-based lookup.
+    fs.rmSync(p.tmp, { recursive: true, force: true });
+    assert.equal(serverPidOf(p.tmp), null, "serverPidOf must be null once the socket is gone");
+    assert.equal(dirHasLiveOwner(p.tmp), false, "dirHasLiveOwner must be false once the socket is gone");
+    const ghosts = serverPidsOfByCmdline(p.tmp);
+    assert.ok(ghosts.includes(serverPid),
+      `cmdline discovery must find the still-alive ghost server ${serverPid}, got [${ghosts}]`);
+    // teardownProbe (the enhanced teardown) must kill the ghost, not orphan it.
+    teardownProbe(p.tmp);
+    let alive = true;
+    try { process.kill(serverPid, 0); } catch { alive = false; }
+    assert.equal(alive, false,
+      `the ghost server ${serverPid} must be DEAD after teardownProbe (cmdline discovery + SIGKILL)`);
+    assert.equal(serverPidsOfByCmdline(p.tmp).length, 0,
+      "no tmux process may still reference the ghost socket path after teardown");
+  } finally {
+    try { p.cleanup(); } catch { /* already reaped */ }
+  }
+});
+
+test("reapSpawnedChildren — SIGKILLs a leaked touch-loop child (cancelled-test finally skip)", { skip: noTmux }, async () => {
+  // gap-session-liveness-teardown-unified-kill-servers: alongside the leaked servers, ONE leaked
+  // touch-loop (startTouchLoop) survived 62min — a cancelled test skips the caller's
+  // `toucher.kill("SIGKILL")`. startTouchLoop now REGISTERS its child; reapSpawnedChildren (part of
+  // the unified sessionLivenessAfter) reaps it by child handle (never a name-based batch kill).
+  const touchFile = path.join(probeRoot(), "session-liveness-swp-touch.jsonl");
+  const t = startTouchLoop(touchFile);
+  try {
+    assert.ok(t.exitCode === null && t.signalCode === null, "the touch-loop must be running before the reaper");
+    reapSpawnedChildren();
+    const deadline = Date.now() + 2000;
+    while (Date.now() < deadline && (t.exitCode === null && t.signalCode === null)) { await sleep(50); }
+    assert.ok(t.signalCode === "SIGKILL" || t.exitCode !== null,
+      `the touch-loop must be reaped by reapSpawnedChildren, exitCode=${t.exitCode} signalCode=${t.signalCode}`);
+  } finally {
+    try { t.kill("SIGKILL"); } catch { /* already reaped */ }
+  }
+});
+
 test("AC2/AC3 — sweepTmp does NOT kill a live session-liveness monitor process", { skip: noTmux }, async () => {
   const p = makeHermeticProbe("swp-mon");
   const mon = spawnMonitor(p.env, `inner ${p.tmp} ${p.session}`);
@@ -194,7 +246,7 @@ test("AC2 — the cleanup surface has no name-based batch kill of session-livene
   const helper = fs.readFileSync(path.join(__dirname, "..", "test", "session-liveness-helpers.mjs"), "utf8");
   const sweepModule = fs.readFileSync(path.join(__dirname, "..", "scripts", "session-liveness-sweep.mjs"), "utf8");
   const helperBodies = fnBodies(helper, ["sweepTmp"]);
-  const sweepBodies = fnBodies(sweepModule, ["dirHasLiveOwner", "sweepRunNamespaces", "sweepRunNamespace"]);
+  const sweepBodies = fnBodies(sweepModule, ["dirHasLiveOwner", "sweepRunNamespaces", "sweepRunNamespace", "serverPidsOfByCmdline"]);
   for (const body of [...Object.values(helperBodies), ...Object.values(sweepBodies)]) {
     assert.ok(!/(?:pkill|killall|spawnSync|spawn)\s*\(/.test(body),
       `cleanup executable body must not contain a name-based kill or process spawn (fs-only cleanup): ${body}`);
