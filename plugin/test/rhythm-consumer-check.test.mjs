@@ -119,7 +119,7 @@ test("判据3 — --no-block with a CONSUMER row is ok", () => {
   assert.equal(v.ok, true);
 });
 
-test("判据3 — extractNoBlockCheckers finds the 2 --no-block run_checker invocations in the live test.sh", () => {
+test("判据3 — extractNoBlockCheckers finds the --no-block run_checker invocations in the live test.sh", () => {
   const src = fs.readFileSync(path.join(REPO_ROOT, "scripts", "test.sh"), "utf8");
   const nbs = extractNoBlockCheckers(src);
   const byName = new Map(nbs.map((n) => [n.name, n.script]));
@@ -129,7 +129,20 @@ test("判据3 — extractNoBlockCheckers finds the 2 --no-block run_checker invo
   // without --no-block) — the pre-reconcile --no-block window is closed, so it is NOT in the
   // --no-block set anymore (a one-sided edit 改正本而副本不落地 blocks the commit).
   assert.equal(byName.has("tick-core-drift-check"), false, "tick-core-drift-check must be a hard gate now");
-  assert.equal(nbs.length, 2, `expected exactly 2 --no-block checkers, got ${JSON.stringify(nbs)}`);
+  // 硬规则 4 推论二/C12: 「当前恰好 N 个」是瞬态字面量,不是不变式——--no-block 集合是开放的
+  // (gap-suite-duration-exceed-check-not-wired 已把集合 2→3,任何新增 --no-block checker 都会破坏
+  // 恰好=2 的断言)。这里只断言下界:已知成员按名在上方逐一核对、tick-core-drift-check 不在集合的
+  // 硬闸断言独立成立;新增 checker 只会让 nbs 变长,下界断言不破。判据3 读的是生产载体
+  // scripts/test.sh (fs.readFileSync),非 fixture。
+  assert.ok(nbs.length >= 2, `expected >= 2 --no-block checkers, got ${JSON.stringify(nbs)}`);
+  // AC2 负控制: 模拟第 3 个 --no-block checker (suite-duration-exceed-check) 加入真实 test.sh 源码后,
+  // 下界断言仍成立——证明断言对「新增 --no-block checker」免疫,不再把当前瞬态当不变式。
+  const withExtra = extractNoBlockCheckers(
+    src +
+      '\nrun_checker "suite-duration-exceed-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/suite-duration-exceed-check.ts" --root "${repo_root}" --no-block',
+  );
+  assert.ok(withExtra.length >= 2, "adding a 3rd --no-block checker must not break the >= 2 assertion");
+  assert.ok(withExtra.some((n) => n.name === "suite-duration-exceed-check"), "synthetic checker is parsed");
 });
 
 // ── 判据4: execution-core Touches must declare BOTH copies ──────────────────────────────────────────

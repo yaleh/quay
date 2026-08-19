@@ -21,13 +21,13 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: `rhythm-consumer-check.test.mjs:134` 改动态断言（`nbs.length >= 2` 或明确列举期望的 checker 集合），不再硬编码「恰好 2 个」。
-- [ ] AC2: 负控制落在生产载体——新增一个 `--no-block` checker 后该断言不破（读真实 suite 输出，非 fixture）。
-- [ ] AC3: scoped 绿 + rhythm-consumer-check 相关测试不红。
+- [x] AC1: `rhythm-consumer-check.test.mjs:134` 改动态断言（`nbs.length >= 2` 或明确列举期望的 checker 集合），不再硬编码「恰好 2 个」。
+- [x] AC2: 负控制落在生产载体——新增一个 `--no-block` checker 后该断言不破（读真实 suite 输出，非 fixture）。
+- [x] AC3: scoped 绿 + rhythm-consumer-check 相关测试不红。
 
 ## Definition of Done
 
-- [ ] 新增 `--no-block` checker 不再破坏 rhythm-consumer-check 断言（真实输出），scoped 绿。
+- [x] 新增 `--no-block` checker 不再破坏 rhythm-consumer-check 断言（真实输出），scoped 绿。
 
 ## Touches
 
