@@ -1,7 +1,7 @@
 ---
 id: gap-runner-grouping-dedupe-metadata-query
 title: "runner-grouping 族元数据查询去重——先文件内去重 3 处（~97s 零风险），跨文件缓存独立后续"
-status: done
+status: ready
 labels:
   - gap
   - performance
