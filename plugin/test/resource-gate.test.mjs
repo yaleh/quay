@@ -37,10 +37,11 @@ import { spawnSync, execSync } from "node:child_process";
 import { WAIT_THRESHOLD } from "../scripts/cap-from-gate.ts";
 // gap-suite-budget-oversubscribe 判据4 — the RUNNER-side derivations the direct path
 // must match: defaultLaneCount() (main lane = max(1, floor(nproc × oversub / S))) +
-// hostParallelism()/concurrentSuiteSlots() (the serial/lowconc H÷S phase budget). Imported as
-// FUNCTIONS (not the module-level DEFAULT_* consts) so the env seams below are read at call time,
-// not import time.
-import { defaultLaneCount, hostParallelism, concurrentSuiteSlots } from "../scripts/full-suite-runner.ts";
+// hostParallelism()/concurrentSuiteSlots()/concurrentPhaseCount() (the serial/lowconc phase budget
+// = hostParallelism ÷ (S × P), P = 2 overlap-ON / 1 overlap-OFF — gap-lane-formula-ignores-phase-
+// overlap-concurrency). Imported as FUNCTIONS (not the module-level DEFAULT_* consts) so the env
+// seams below are read at call time, not import time.
+import { defaultLaneCount, hostParallelism, concurrentSuiteSlots, concurrentPhaseCount } from "../scripts/full-suite-runner.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -125,12 +126,13 @@ function currentDefaultConcurrency() {
 /** Extract the REAL serial_lowconc_host_default (the shared serial/lowconc fallback) from
  *  scripts/test.sh and run it with deterministic seams. This is the DIRECT-path value of the two
  *  phase knobs (no QUAY_SERIAL_CONCURRENCY / QUAY_LOWCONC_CONCURRENCY env) — the AC74 fix makes it
- *  host-derived (H÷S) instead of the old 2/3 literals. */
-function phaseConcurrencyDefault(nproc, slots) {
+ *  host-derived (H÷(S×P)) instead of the old 2/3 literals; `overlap` (default "1" = the
+ *  QUAY_PHASE_OVERLAP default) selects the concurrent-phase count P = 2 (on) / 1 (off). */
+function phaseConcurrencyDefault(nproc, slots, overlap = "1") {
   const src = fs.readFileSync(TEST_SH, "utf8");
   const fnMatch = src.match(/serial_lowconc_host_default\(\) \{[^]*?\n\}/);
   assert.ok(fnMatch, "scripts/test.sh must define serial_lowconc_host_default()");
-  const script = `${fnMatch[0]}\nRESOURCE_GATE_NPROC=${nproc}\nRESOURCE_GATE_CONCURRENT_SUITES=${slots}\nprintf '%s' "$(serial_lowconc_host_default)"\n`;
+  const script = `${fnMatch[0]}\nRESOURCE_GATE_NPROC=${nproc}\nRESOURCE_GATE_CONCURRENT_SUITES=${slots}\nQUAY_PHASE_OVERLAP=${overlap}\nprintf '%s' "$(serial_lowconc_host_default)"\n`;
   const res = spawnSync("bash", ["-c", script], { encoding: "utf8" });
   assert.equal(res.status, 0, `phaseConcurrencyDefault subshell failed: ${res.stderr}`);
   return Number(res.stdout.trim());
@@ -487,12 +489,19 @@ test("AC4 (判据4) — single suite gets nproc/S (pure computation known cost, 
   assert.doesNotMatch(codeLines, /in_use|RESOURCE_GATE_TEST_NODE_PROCS|process-budget\.sh|concurrentSuitesRunning/, "the main formula must NOT read runtime running-suite/in_use counts");
 });
 
-test("AC74/判据2 — serial/lowconc defaults are HOST-derived (H÷S), the 2/3 literals are gone", () => {
-  // The DIRECT-path phase fallback (serial_lowconc_host_default) derives max(1, floor(nproc/S)).
-  assert.equal(phaseConcurrencyDefault(16, 2), 8, "16 cores, 2 slots → serial/lowconc default = 8 (H÷S)");
-  assert.equal(phaseConcurrencyDefault(4, 2), 2, "4 cores, 2 slots → 2");
-  assert.equal(phaseConcurrencyDefault(4, 1), 4, "1 slot → nproc");
-  assert.equal(phaseConcurrencyDefault(1, 2), 1, "floor(1/2) clamps at 1");
+test("AC74/判据2 — serial/lowconc defaults are HOST-derived (H÷(S×P)), the 2/3 literals are gone", () => {
+  // The DIRECT-path phase fallback (serial_lowconc_host_default) derives max(1, floor(nproc/(S×P)))
+  // where P = concurrent-phase count (2 = overlap ON, the QUAY_PHASE_OVERLAP default; 1 = overlap OFF,
+  // the pre-overlap H÷S budget — gap-lane-formula-ignores-phase-overlap-concurrency AC1/AC3).
+  assert.equal(phaseConcurrencyDefault(16, 2, "1"), 4, "16 cores, 2 slots, overlap ON → floor(16/(2×2)) = 4");
+  assert.equal(phaseConcurrencyDefault(4, 2, "1"), 1, "4 cores, 2 slots, overlap ON → 1");
+  assert.equal(phaseConcurrencyDefault(4, 1, "1"), 2, "1 slot, overlap ON → floor(4/(1×2)) = 2");
+  assert.equal(phaseConcurrencyDefault(1, 2, "1"), 1, "floor(1/(2×2)) clamps at 1");
+  // AC3 negative control — overlap OFF keeps the pre-overlap H÷S budget (single-phase peak unchanged).
+  assert.equal(phaseConcurrencyDefault(16, 2, "0"), 8, "16 cores, 2 slots, overlap OFF → floor(16/2) = 8 (unchanged)");
+  assert.equal(phaseConcurrencyDefault(4, 2, "0"), 2, "4 cores, 2 slots, overlap OFF → 2");
+  assert.equal(phaseConcurrencyDefault(4, 1, "0"), 4, "1 slot, overlap OFF → nproc");
+  assert.equal(phaseConcurrencyDefault(1, 2, "0"), 1, "floor(1/2) clamps at 1");
   // The env-fallback LITERALS are gone — the knob reads the host-derived helper, not 2/3.
   const src = fs.readFileSync(TEST_SH, "utf8");
   assert.match(src, /SERIAL_CONCURRENCY="\$\{QUAY_SERIAL_CONCURRENCY:-\$\(serial_lowconc_host_default\)\}"/, "serial default must be host-derived (no 2 literal)");
@@ -501,39 +510,48 @@ test("AC74/判据2 — serial/lowconc defaults are HOST-derived (H÷S), the 2/3 
   assert.doesNotMatch(src, /LOWCONC_CONCURRENCY="\$\{QUAY_LOWCONC_CONCURRENCY:-3\}"/, "the 3 literal must be gone");
 });
 
-test("判据4 — direct path and runner path read the SAME three values, equal to the host derivation (main=H×oversub÷S, serial=lowconc=H÷S)", () => {
+test("判据4 — direct path and runner path read the SAME three values, equal to the host derivation (main=H×oversub÷S, serial=lowconc=H÷(S×P))", () => {
   // Deterministic seams on BOTH sides so the comparison is host-independent.
   const prevNproc = process.env.RESOURCE_GATE_NPROC;
   const prevSlots = process.env.QUAY_MAX_CONCURRENT_SUITES;
   const prevOversub = process.env.QUAY_MAX_OVERSUBSCRIPTION;
+  const prevOverlap = process.env.QUAY_PHASE_OVERLAP;
   process.env.RESOURCE_GATE_NPROC = "16";
   process.env.QUAY_MAX_CONCURRENT_SUITES = "2";
   process.env.QUAY_MAX_OVERSUBSCRIPTION = "1";
   try {
-    // RUNNER path (full-suite-runner.ts): defaultLaneCount() for main; H÷S for the phase knobs.
-    const runnerMain = defaultLaneCount();
-    const runnerSerial = Math.max(1, Math.floor(hostParallelism() / concurrentSuiteSlots()));
-    const runnerLowconc = Math.max(1, Math.floor(hostParallelism() / concurrentSuiteSlots()));
-    // DIRECT path (scripts/test.sh): default_concurrency_formula for main; serial_lowconc_host_default
-    // for both phases (no env → the fallback fires).
-    const directMain = derivedConcurrency(16, 2, 1);
-    const directSerial = phaseConcurrencyDefault(16, 2);
-    const directLowconc = phaseConcurrencyDefault(16, 2);
-
     const host = 16;
     const slots = 2;
     const oversub = 1;
     const targetMain = Math.max(1, Math.floor((host * oversub) / slots));
-    const targetPhase = host / slots;
-    // Each value equals the host derivation (判据4 target table: main=H×oversub÷S, serial=lowconc=H÷S).
+    // overlap ON (the default) ⇒ P = 2 concurrent phases ⇒ each phase budget = H÷(S×2).
+    const targetPhaseOn = Math.max(1, Math.floor(host / (slots * 2)));
+    // RUNNER path (full-suite-runner.ts): defaultLaneCount() for main; H÷(S×concurrentPhaseCount()) for phases.
+    const runnerMain = defaultLaneCount();
+    const runnerSerial = Math.max(1, Math.floor(hostParallelism() / (concurrentSuiteSlots() * concurrentPhaseCount())));
+    const runnerLowconc = Math.max(1, Math.floor(hostParallelism() / (concurrentSuiteSlots() * concurrentPhaseCount())));
+    // DIRECT path (scripts/test.sh): default_concurrency_formula for main; serial_lowconc_host_default
+    // for both phases (overlap ON default → P=2).
+    const directMain = derivedConcurrency(16, 2, 1);
+    const directSerial = phaseConcurrencyDefault(16, 2, "1");
+    const directLowconc = phaseConcurrencyDefault(16, 2, "1");
+    // Each value equals the host derivation (判据4 target table: main=H×oversub÷S, serial=lowconc=H÷(S×P)).
     assert.equal(directMain, targetMain, `direct main must be nproc×oversub÷S (${targetMain})`);
-    assert.equal(directSerial, targetPhase, `direct serial must be H÷S (${targetPhase}) — AC44 derivation`);
-    assert.equal(directLowconc, targetPhase, `direct lowconc must be H÷S`);
+    assert.equal(directSerial, targetPhaseOn, `direct serial must be H÷(S×2) (${targetPhaseOn}) — overlap ON`);
+    assert.equal(directLowconc, targetPhaseOn, `direct lowconc must be H÷(S×2)`);
     // Direct == runner (the "与经 runner 起相同" half — a runner that still derived nproc (no /S) would
     // read main=16 ≠ direct main=8 → red).
     assert.equal(runnerMain, directMain, `runner main (${runnerMain}) must equal direct main (${directMain}) — 判据4`);
     assert.equal(runnerSerial, directSerial, `runner serial (${runnerSerial}) must equal direct serial (${directSerial}) — 判据4`);
     assert.equal(runnerLowconc, directLowconc, `runner lowconc (${runnerLowconc}) must equal direct lowconc (${directLowconc}) — 判据4`);
+    // AC3 negative control — overlap OFF keeps H÷S on BOTH paths (single-phase peak unchanged).
+    process.env.QUAY_PHASE_OVERLAP = "0";
+    const targetPhaseOff = Math.max(1, Math.floor(host / slots));
+    const runnerSerialOff = Math.max(1, Math.floor(hostParallelism() / (concurrentSuiteSlots() * concurrentPhaseCount())));
+    const directSerialOff = phaseConcurrencyDefault(16, 2, "0");
+    assert.equal(runnerSerialOff, targetPhaseOff, `overlap OFF runner serial must be H÷S (${targetPhaseOff})`);
+    assert.equal(directSerialOff, targetPhaseOff, `overlap OFF direct serial must be H÷S (${targetPhaseOff})`);
+    assert.equal(runnerSerialOff, directSerialOff, `overlap OFF runner (${runnerSerialOff}) == direct (${directSerialOff}) — 判据4 negative control`);
   } finally {
     if (prevNproc === undefined) delete process.env.RESOURCE_GATE_NPROC;
     else process.env.RESOURCE_GATE_NPROC = prevNproc;
@@ -541,6 +559,8 @@ test("判据4 — direct path and runner path read the SAME three values, equal 
     else process.env.QUAY_MAX_CONCURRENT_SUITES = prevSlots;
     if (prevOversub === undefined) delete process.env.QUAY_MAX_OVERSUBSCRIPTION;
     else process.env.QUAY_MAX_OVERSUBSCRIPTION = prevOversub;
+    if (prevOverlap === undefined) delete process.env.QUAY_PHASE_OVERLAP;
+    else process.env.QUAY_PHASE_OVERLAP = prevOverlap;
   }
 });
 
