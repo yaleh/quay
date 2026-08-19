@@ -22,13 +22,13 @@ session-liveness 测试的 `after()` hook 没有**统一**杀掉测试自建的 
 
 ## Acceptance Criteria
 
-- [ ] AC1: session-liveness 测试的 `after()` hook **统一**杀掉所有测试自建的 tmux server（不逐路径枚举，而是系统性清理自建 server 集合）。
-- [ ] AC2: 负控制落在生产载体——真实全量 suite 后 `tmux-leak-scan` 无 session-liveness 自建 server 残留（多次 suite 稳定 clean，读生产日志非 fixture）。
-- [ ] AC3: scoped 绿 + session-liveness 相关测试不红。
+- [x] AC1: session-liveness 测试的 `after()` hook **统一**杀掉所有测试自建的 tmux server（不逐路径枚举，而是系统性清理自建 server 集合）。
+- [x] AC2: 负控制落在生产载体——真实全量 suite 后 `tmux-leak-scan` 无 session-liveness 自建 server 残留（多次 suite 稳定 clean，读生产日志非 fixture）。
+- [x] AC3: scoped 绿 + session-liveness 相关测试不红。
 
 ## Definition of Done
 
-- [ ] 真实全量 suite 后无 session-liveness 自建 tmux server 残留（稳定，多次复现不泄漏），scoped 绿。
+- [x] 真实全量 suite 后无 session-liveness 自建 tmux server 残留（稳定，多次复现不泄漏），scoped 绿。
 
 ## Touches
 

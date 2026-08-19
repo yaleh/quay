@@ -41,7 +41,7 @@ import { fileURLToPath } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
 import {
   SCRIPT, tmuxAvailable,
-  setProbeTmpPrefix, sweepTmp, reapLiveOwners, tmux, isolateTmuxEnv, isClaudePid,
+  setProbeTmpPrefix, sessionLivenessAfter, tmux, isolateTmuxEnv, isClaudePid,
   paneHasClaudeChild, waitForAlive, makeHermeticProbe,
   spawnMonitor, waitForOutput, waitForRounds, countRounds,
   makePaneBusy, makePaneIdle, makePanePermissionPrompt, startTouchLoop, cleanup,
@@ -62,8 +62,7 @@ setProbeTmpPrefix("session-liveness-sig-t-");
 // sweepTmp removes owner-dead residue. Sweep ONLY this file's own prefixes (see SPLIT CONCURRENCY
 // SAFETY above — never a sibling's).
 after(() => {
-  reapLiveOwners();
-  sweepTmp("session-liveness-sig-t-");
+  sessionLivenessAfter("session-liveness-sig-t-");
 });
 
 test("AC3 — a pure-text round with no new tool calls (stale transcript) reports SESSION-IDLE after the 2-round debounce (true idle detected, not a gap misjudged)", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
