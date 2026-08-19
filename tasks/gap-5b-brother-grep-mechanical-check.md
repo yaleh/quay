@@ -1,7 +1,7 @@
 ---
 id: gap-5b-brother-grep-mechanical-check
 title: "5b 产物机械检查——fan-in AC 完成闸要求「同载体兄弟实例 grep 命中数」行（零命中写零），让守/不守可区分"
-status: todo
+status: superseded
 labels:
   - gap
   - mechanism
@@ -9,6 +9,9 @@ parent: null
 children: []
 extra:
   schema: execution
+  superseded: true
+  superseded_at: 2026-08-19
+  superseded_reason: "人裁定「解耦+简化非加检查」+ a8 重估「纯增量、能被走过场满足、用一个机制治两类病」。4 个 5b 实例实为两类病：①真代码重复（第18条 leak 正则）该「单一定义两处引用」非「两份同步」；②独立兄弟产物（第13条 measure-history）该「结果不变式检查」非「流程走没走」。由「解耦式修 5b」取代：第18条改单一定义、重复类用 archguard L_D、兄弟产物类个案结果不变式"
 ---
 
 **type:** finding
