@@ -1,7 +1,7 @@
 ---
 id: gap-retreated-state-not-mechanized
 title: "retreated 状态未机制化——slot-refill 推荐刚 retreat 的任务，靠手动跳过（AC53 心跳 REFUSED 根因）"
-status: ready
+status: done
 labels:
   - gap
   - mechanism
