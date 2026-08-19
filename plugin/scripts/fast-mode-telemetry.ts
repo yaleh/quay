@@ -630,6 +630,36 @@ export function writeEvent(event, root) {
   return logPath;
 }
 
+/**
+ * Whether the runId's event file already carries an end-like event (eventKind "end" OR a
+ * non-null `timing.endedAtMs` — the same marker `aggregate`'s isEndLike uses). A runId is
+ * dispatched once (one `--task-start`) and must be closed once; a SECOND `--task-end` for the
+ * same runId is the double-end defect (gap-fan-in-closure-skips-task-end: 6 tasks observed with
+ * start=1 end=2 — two closure writers both observed the bracket open and both wrote). This is the
+ * WRITE-time idempotency guard: the read-then-write pattern in --close-task / --close-terminal is
+ * racy (each writer looks up the open bracket, then writes — two writers in the same window both
+ * see "open"), so the guard lives at the single write choke point instead.
+ *
+ * PURE READ — never writes. Missing file / malformed line ⇒ false (a bracket with no readable
+ * events cannot be known-closed; the writer proceeds — fail-open on the read side is safe because
+ * a false negative here at worst reproduces the pre-fix single end, never a fabricated skip).
+ * @param {string} root
+ * @param {string} runId
+ * @returns {boolean}
+ */
+export function hasEndEvent(root, runId) {
+  if (!runId || !RUN_ID_SAFE_RE.test(runId)) return false;
+  const logPath = path.join(root, ".workflow-events", `${runId}.jsonl`);
+  if (!fs.existsSync(logPath)) return false;
+  for (const line of fs.readFileSync(logPath, "utf8").split("\n")) {
+    if (line.trim() === "") continue;
+    let e;
+    try { e = JSON.parse(line); } catch { continue; }
+    if (e && (e.eventKind === "end" || (e.timing && e.timing.endedAtMs != null))) return true;
+  }
+  return false;
+}
+
 // ── Halt event log (gap-tasksperhour-counts-halted-time-as-slow-work, AC1) ─────────────────────────
 // The append-only halt log is the authoritative source of halt intervals. It is a SEPARATE file from
 // the runId event stream: its lines are {type:"halt", event:"start"|"end", atMs, reason?}, NOT A1a
@@ -1778,6 +1808,17 @@ export async function main(argv) {
     if (!VALID_OUTCOMES.includes(outcome)) {
       console.error(`fast-mode-telemetry: invalid outcome "${outcome}"; must be one of: ${VALID_OUTCOMES.join(", ")}`);
       return 1;
+    }
+    // WRITE-time idempotency guard (gap-fan-in-closure-skips-task-end, double-end): a runId is
+    // dispatched once and closed once. Two closure writers (fan-in --close-task vs the outer's
+    // --close-terminal / step-② --task-end) can each look up the open bracket and then both write —
+    // the read-then-write window is racy, so the guard lives here at the single write choke point.
+    // A second end for an already-closed runId is skipped (exit 0, idempotent success — the caller
+    // treats it exactly like "bracket already closed"). Distinct message so 守/不守 are record-
+    // distinguishable (硬规则 ⑨), never a silent double write.
+    if (hasEndEvent(root, runId)) {
+      console.log(`fast-mode-telemetry: --task-end idempotent — runId ${runId} already closed; no second end written (outcome ${outcome} ignored)`);
+      return 0;
     }
     // Fan-in commit sha (gap-task-telemetry-6-percent-join AC3): `--fanInCommit <sha>` overrides;
     // otherwise auto-lookup the task's fan-in merge commit (best-effort — null when never fan-in'd

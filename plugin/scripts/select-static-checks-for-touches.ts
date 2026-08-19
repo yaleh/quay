@@ -327,6 +327,7 @@ export const FAN_IN_ORCHESTRATION_FILES = [
   "plugin/scripts/per-task-suite-record.ts",
   "plugin/scripts/pre-verified-round-record.ts", // the shared verification-round writer (both fan-in branches)
   "plugin/scripts/full-suite-runner.ts",
+  "plugin/scripts/mirror-full-suite-state.ts", // the full-suite-state mirror writer (gap-full-suite-state-stale-no-writer AC1)
 ];
 
 /** PURE: given a branch's repo-relative delta paths (from `git diff --name-only <merge-base> HEAD`),

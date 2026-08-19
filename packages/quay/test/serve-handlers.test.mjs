@@ -178,14 +178,17 @@ test("AC2/AC4: GET /git-history returns a server-rendered SVG page with zero <sc
     execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "add", "-A"], { cwd: ws });
     execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "init"], { cwd: ws });
 
-    // main line commits, then a feature branch, then a merge (2-parent commit)
-    gitCommit(ws, "main one", { t: 1_700_000_000 });
-    gitCommit(ws, "main two", { t: 1_700_000_200 });
+    // main line commits, then a feature branch, then a merge (2-parent commit).
+    // Timestamps are recent (within readGitHistory's active-branch window) so the fixture's branches
+    // count as active lanes — gap-git-history-counts-stale-branches filters stale branches out.
+    const nowSec = Math.floor(Date.now() / 1000);
+    gitCommit(ws, "main one", { t: nowSec - 500 });
+    gitCommit(ws, "main two", { t: nowSec - 400 });
     execFileSync("git", ["checkout", "-q", "-b", "feature/alpha"], { cwd: ws });
-    gitCommit(ws, "feature alpha one", { t: 1_700_000_300, file: "feature.txt" });
-    gitCommit(ws, "feature alpha two", { t: 1_700_000_400, file: "feature.txt" });
+    gitCommit(ws, "feature alpha one", { t: nowSec - 300, file: "feature.txt" });
+    gitCommit(ws, "feature alpha two", { t: nowSec - 200, file: "feature.txt" });
     execFileSync("git", ["checkout", "-q", "master"], { cwd: ws });
-    gitCommit(ws, "main three", { t: 1_700_000_500 });
+    gitCommit(ws, "main three", { t: nowSec - 100 });
     execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "merge", "-q", "--no-ff", "feature/alpha", "-m", "merge feature/alpha"], { cwd: ws });
 
     // seed a task so startServer (which talks to the provider) has a store to read
