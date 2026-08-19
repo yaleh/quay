@@ -2,7 +2,7 @@
 id: gap-audit-findings-not-backpropagated-to-earlier-detectors
 title: Independently confirmed Execute findings are not classified, calibrated,
   and promoted into earlier Prepare or Verify detectors
-status: needs-human
+status: superseded
 labels:
   - gap
   - milestone-candidate
@@ -11,6 +11,9 @@ parent: null
 children: []
 extra:
   schema: v1
+  superseded: true
+  superseded_at: 2026-08-19
+  superseded_reason: "完成判据写在已退役经典循环术语上（## Human verification when exp5 marks this task done，exp5=经典循环 Audit/Verify 阶段术语），ADR-022（2026-08-03）退役后无法被当前派发链路认领。已落地机制保留于代码库（finding-backpropagate.ts + execution-policy.ts，两 mirrors byte-identical），不随任务状态转换删除"
 ---
 
 **type:** execution
