@@ -1,7 +1,7 @@
 ---
 id: gap-gitignore-fan-in-ff-escalations
 title: ".gitignore 补 `**/.quay/fan-in-ff-escalations.jsonl`——escalation 文件 untracked 杀 fan-in clean-tree"
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -19,13 +19,13 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: `.gitignore` 补 `**/.quay/fan-in-ff-escalations.jsonl`（与 gate-events.jsonl 同族 runtime-state，never committed）。
-- [ ] AC2: 负控制——写一次 escalation 记录后 `git status --porcelain` 为空（该文件被忽略，不脏树）。
-- [ ] AC3: scoped 绿 + 相关 gitignore 检查不红。
+- [x] AC1: `.gitignore` 补 `**/.quay/fan-in-ff-escalations.jsonl`（与 gate-events.jsonl 同族 runtime-state，never committed）。
+- [x] AC2: 负控制——写一次 escalation 记录后 `git status --porcelain` 为空（该文件被忽略，不脏树）。
+- [x] AC3: scoped 绿 + 相关 gitignore 检查不红。
 
 ## Definition of Done
 
-- [ ] escalation 记录写入后不脏树、不杀 clean-tree，scoped 绿（真实输出）。
+- [x] escalation 记录写入后不脏树、不杀 clean-tree，scoped 绿（真实输出）。
 
 ## Touches
 
