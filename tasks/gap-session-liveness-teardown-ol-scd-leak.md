@@ -1,7 +1,8 @@
 ---
 id: gap-session-liveness-teardown-ol-scd-leak
-title: "session-liveness 探针 teardown 泄漏——kill-server 无出口 + 漏杀 pane 子进程孤儿 claude-probe 误判活 owner（ol-scd 家族）"
-status: todo
+title: session-liveness 探针 teardown 泄漏——kill-server 无出口 + 漏杀 pane 子进程孤儿
+  claude-probe 误判活 owner（ol-scd 家族）
+status: ready
 labels:
   - gap
   - mechanism
