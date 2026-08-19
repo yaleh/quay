@@ -68,7 +68,8 @@ import {
   detectAssertionSurfaceEdits,
   concurrentSuiteSlots,
   hostParallelism,
-  countHeldSuiteLocks,
+  countRunnerProcesses,
+  effectiveParallelism,
 } from "../scripts/full-suite-runner.ts";
 import { runOnce, classifyFailure, routeRed, shouldStopDispatch, shouldDispatchOnRed } from "../scripts/suite-state-trigger.ts";
 
@@ -151,6 +152,16 @@ function runRunner({ root, command, laneCount, stateDir, env = {}, serialConcurr
   // 200% the runner uses when the override is absent. Unless a test explicitly provides its own
   // limits, drop the inherited override so the child uses the runner's DEFAULT_SYSTEMD_RUN_LIMITS.
   if (!("QUAY_TEST_SYSTEMD_RUN_LIMITS" in env)) delete mergedEnv.QUAY_TEST_SYSTEMD_RUN_LIMITS;
+  // gap-verification-round-observability-holes AC3 — hermetic tests pin the independent
+  // concurrentSuitesRunning read to a lone round (QUAY_TEST_RUNNER_PROCS=1) by default. Two reasons:
+  // (a) the unseamed pgrep path would count the PRODUCTION full-suite-runner.ts that launches this
+  // test file (and any other concurrent runner), making a round-record assertion non-deterministic;
+  // (b) the pgrep is a SYNCHRONOUS subprocess at round start — under full-suite load it can delay the
+  // suite spawn past a QUAY_TEST_CRASH_AFTER_RUNNING=500ms timer and break the crash test's
+  // "phase records already accumulated" timing. Tests that assert a specific count override the seam
+  // (the AC1/AC2/AC3 concurrent-suite tests); the unseamed production path is exercised separately by
+  // the dedicated "production read counts a real marker process" unit test.
+  if (!("QUAY_TEST_RUNNER_PROCS" in mergedEnv)) mergedEnv.QUAY_TEST_RUNNER_PROCS = "1";
   const child = spawn(process.execPath, args, { stdio: ["ignore", "pipe", "pipe"], env: mergedEnv });
   // Drain pipes so a chatty fake suite cannot block the child.
   child.stdout.on("data", () => {});
@@ -666,6 +677,171 @@ test("AC3 negative control — a deliberately ABORTED round (child signal-killed
     assert.ok(phases.every((p) => typeof p.cpu_usec === "number"), "cpu differentials not lost on abort");
     assert.equal(phases[phases.length - 1].phase, "lowconc", "the in-flight phase is closed at round end");
     assert.equal(typeof phases[phases.length - 1].cpu_usec, "number", "the in-flight phase still gets a cpu reading");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── gap-verification-round-observability-holes: AC1 (lock_wait_ms) + AC2 (phase start/end 绝对时刻
+//    + lowconc_phase_ms 不再恒 0) + AC4 (effective_parallelism) ─────────────────────────────────────────
+// The four verification-round observability holes the task closes: (1) a gap>30% round could not be
+// attributed to flock-wait (lock_wait_ms); (2) the phase duration collapsed under PHASE_OVERLAP (absolute
+// start/end 时刻 don't collapse) and lowconc_phase_ms was恒 0; (3) concurrentSuitesRunning read the broken
+// lock-slot mechanism (see the AC3 tests above); (4) cpu/wall — the single "did the optimization help"
+// KPI — was computable but never recorded (effective_parallelism).
+
+test("AC2 — every phase record carries ABSOLUTE start_ms/end_ms (contiguous, monotonic — duration does not collapse)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-obs-phase-"));
+  const { f, dir } = fakeSuite(PHASE_SUITE);
+  try {
+    const child = runRunner({ root, command: `bash ${f}`, laneCount: 8, env: { QUAY_TEST_CGROUP_SCRIPT: PHASE_SCRIPT } });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, `runner exits 0 on green, got ${code}`);
+    const rec = lastRoundRecord(root);
+    const phases = rec.phases || [];
+    assert.ok(phases.length >= 5, "records present");
+    for (const p of phases) {
+      assert.equal(typeof p.start_ms, "number", `${p.phase} carries absolute start_ms`);
+      assert.equal(typeof p.end_ms, "number", `${p.phase} carries absolute end_ms`);
+      assert.ok(p.end_ms >= p.start_ms, `${p.phase} end_ms >= start_ms`);
+      assert.ok(p.wall_ms === p.end_ms - p.start_ms, `${p.phase} wall_ms == end_ms - start_ms (the duration is derivable from the edges)`);
+    }
+    // Contiguity — a phase's end_ms IS the next phase's start_ms (no gaps, no overlaps in the record
+    // edges), so a reader can reconstruct the full wall from the first start_ms to the last end_ms.
+    for (let i = 0; i + 1 < phases.length; i++) {
+      assert.equal(phases[i].end_ms, phases[i + 1].start_ms, `phase[${i}] end_ms == phase[${i + 1}] start_ms (contiguous)`);
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC1 — lock_wait_ms records the flock wait from test.sh's lock-acquire markers (gap attributable, not a black hole)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-obs-lock-"));
+  // The fake suite emits test.sh's REAL lock-acquire markers with a 1s wait between them — the
+  // `== single-flight lock` START and the `acquired full-suite single-flight slot` END. The runner
+  // times the diff (the flock wait). The 1s sleep is large enough to dominate the runner's stream-
+  // processing jitter (a 200ms sleep read ~63ms under full-suite load — the marker-read latency is
+  // subtracted from the diff, so the test uses a wait >> that latency).
+  const suite = [
+    'echo "== single-flight lock (2 slots — gap-single-flight-lock-2-slot-concurrent-suites + SSoT) =="',
+    "sleep 1",
+    'echo "scripts/test.sh: acquired full-suite single-flight slot 0 (.git/full-suite.lock.0) — held for the entire run"',
+    'echo "# tests 5"',
+    'echo "# pass 5"',
+    'echo "# fail 0"',
+    'echo "# cancelled 0"',
+    "exit 0",
+  ].join("\n");
+  const { f, dir } = fakeSuite(suite);
+  try {
+    const child = runRunner({ root, command: `bash ${f}`, laneCount: 8 });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, `runner exits 0 on green, got ${code}`);
+    const rec = lastRoundRecord(root);
+    assert.ok(rec, "round record written");
+    assert.equal(typeof rec.lock_wait_ms, "number", "lock_wait_ms is a number (present)");
+    assert.ok(rec.lock_wait_ms >= 200, `lock_wait_ms ≈ the 1s flock wait (got ${rec.lock_wait_ms}) — not 0, not absent`);
+    assert.ok(rec.lock_wait_ms < 5000, `lock_wait_ms is the marker diff, not the whole wall (got ${rec.lock_wait_ms})`);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC1 negative — a scoped/no-lock run OMITS lock_wait_ms (no lock was taken — 缺键, not a fabricated 0)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-obs-lock-none-"));
+  const { f, dir } = fakeSuite(GREEN_SUITE); // no lock markers — like a scoped run that never takes the lock
+  try {
+    const child = runRunner({ root, command: `bash ${f}`, laneCount: 8 });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, `runner exits 0 on green, got ${code}`);
+    const rec = lastRoundRecord(root);
+    assert.equal(rec.lock_wait_ms, undefined, "no lock_wait_ms when no lock was taken (a scoped run)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC2 — lowconc_phase_ms 不再恒 0: on an OVERLAP round it carries the real lowconc sub-time (overlap_lowconc_ms)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-obs-ovl-"));
+  // The overlap stream test.sh emits: `overlap: running`, the two parallel phases' sub-times +
+  // done-markers, then the fixed-overhead decomposition where lowconc_phase_ms=0 (subsumed). The
+  // runner must replace that 0 with the real overlap_lowconc_ms sub-time.
+  const suite = [
+    'echo "overlap: running 5 serial + 8 lowconc files in parallel (serial conc=2, lowconc conc=3)"',
+    'echo "__GROUP__ concurrency=2 files=5 sum_ms=1000 floor_ms=700 capped=0"',
+    'echo "__OVERHEAD__ overlap_serial_ms=2000"',
+    'echo "__OVERHEAD__ overlap_serial_done=1"',
+    'echo "__GROUP__ concurrency=3 files=8 sum_ms=1600 floor_ms=800 capped=0"',
+    'echo "__OVERHEAD__ overlap_lowconc_ms=1500"',
+    'echo "__OVERHEAD__ overlap_lowconc_done=1"',
+    'echo "__GROUP__ concurrency=8 files=17 sum_ms=3000 floor_ms=1200 capped=0"',
+    'echo "__OVERHEAD__ serial_phase_ms=2500"',
+    'echo "__OVERHEAD__ lowconc_phase_ms=0"',
+    'echo "__OVERHEAD__ main_phase_ms=3000"',
+    'echo "# tests 5"',
+    'echo "# pass 5"',
+    'echo "# fail 0"',
+    'echo "# cancelled 0"',
+    "exit 0",
+  ].join("\n");
+  const { f, dir } = fakeSuite(suite);
+  try {
+    const child = runRunner({
+      root,
+      command: `bash ${f}`,
+      laneCount: 8,
+      serialConcurrency: 2,
+      lowconcConcurrency: 3,
+      env: { QUAY_TEST_CGROUP_SCRIPT: PHASE_SCRIPT },
+    });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, `runner exits 0 on green, got ${code}`);
+    const rec = lastRoundRecord(root);
+    assert.equal(rec.serial_phase_ms, 2500, "serial_phase_ms stays the combined window");
+    assert.equal(rec.lowconc_phase_ms, 1500, `lowconc_phase_ms = overlap_lowconc_ms (1500), NOT the 0 test.sh emitted, got ${rec.lowconc_phase_ms}`);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC4 unit — effectiveParallelism(cpuTimeS, durationMs) = cpu_time_s ÷ (durationMs/1000), null on a missing/zero input", () => {
+  assert.equal(effectiveParallelism(7162, 823000), 8.702, "7162s / 823s = 8.702 cores (the Finding's solo cpu/wall)");
+  assert.equal(effectiveParallelism(6900, 1421000), 4.856, "6900s / 1421s = 4.856 cores (the Finding's overlapped per-suite cpu/wall)");
+  assert.equal(effectiveParallelism(null, 823000), null, "null cpu_time_s ⇒ null (never a fabricated 0)");
+  assert.equal(effectiveParallelism(0, 823000), null, "0 cpu_time_s ⇒ null (a 0 quotient would read 'infinite cores')");
+  assert.equal(effectiveParallelism(100, 0), null, "0 wall ⇒ null");
+});
+
+test("AC4 — the round record carries effective_parallelism = cpu_time_s ÷ wall (present only when cpu_time_s is finite)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-obs-eff-"));
+  const { f, dir } = fakeSuite(GREEN_SUITE);
+  try {
+    const child = runRunner({
+      root,
+      command: `bash ${f}`,
+      laneCount: 2,
+      env: {
+        QUAY_TEST_SCOPE_UNIT: "run-seam-eff.scope",
+        QUAY_TEST_JOURNALCTL_OUTPUT:
+          "Aug 12 18:42:48 h systemd[2938]: run-seam-eff.scope: Consumed 2957.234s CPU time, 1.5G memory peak, 0B memory swap peak.",
+      },
+    });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, "green hermetic round with the load seam");
+    const rec = lastRoundRecord(root);
+    assert.equal(typeof rec.cpu_time_s, "number", "cpu_time_s landed (the denominator)");
+    assert.equal(
+      rec.effective_parallelism,
+      Number((rec.cpu_time_s / (rec.durationMs / 1000)).toFixed(3)),
+      `effective_parallelism = cpu_time_s/(durationMs/1000), rounded to 3 decimals (got ${rec.effective_parallelism})`,
+    );
+    assert.ok(rec.effective_parallelism > 0, "effective_parallelism is a positive finite number");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(dir, { recursive: true, force: true });
@@ -1627,22 +1803,28 @@ test("AC2 — concurrentSuiteSlots() reads QUAY_MAX_CONCURRENT_SUITES (the singl
   }
 });
 
-// ── gap-lanes-nproc-concurrent-suites-accounting: AC1/AC2/AC3 (nproc + concurrent-suite count) ──────
+// ── gap-lanes-nproc-concurrent-suites-accounting + gap-verification-round-observability-holes AC3 ──
 // After the 2-slot lock, the concurrent-suite count is a NEW variable: two full suites can now run at
 // once, so the same wall-clock reading has a different meaning under 1-suite vs 2-suite concurrency.
 // Every verification-round record must carry nproc (read-host) + the configured slot count +
 // the ACTUAL concurrently-running count so a cross-round comparison can attribute "this round is
 // slower" to machine concurrency rather than to the change being measured.
+// gap-verification-round-observability-holes AC3 — concurrentSuitesRunning is now an INDEPENDENT read
+// (countRunnerProcesses — counting alive runner processes by cmdline), NOT the lock-slot probe. The
+// slot probe WAS the broken mechanism (one pid double-holding two slots ⇒ the count read ≤S forever,
+// `{None:140, 1:34, 2:18}`, never >2 even when 4 suites genuinely overlapped). The seam
+// QUAY_TEST_RUNNER_PROCS pins the count for hermetic determinism (the pgrep path would count the
+// production full-suite-runner.ts that launches this very test file, making a lone-round assertion
+// non-deterministic).
 
 test("AC1 — a round records nproc (read-host) + concurrentSuiteSlots + concurrentSuitesRunning in verification-round.jsonl", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-lanes-"));
-  const lockDir = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-lanes-lock-"));
   const { f, dir } = fakeSuite(GREEN_SUITE);
   try {
     // RESOURCE_GATE_NPROC is the deterministic host-read seam (os.availableParallelism() is not
-    // controllable in a test); FULL_SUITE_LOCK_FILE pins the lock probe to a temp dir with NO held
-    // slots (a lone round — no other suite running); QUAY_MAX_CONCURRENT_SUITES pinned so the parent
-    // suite's env cannot leak a different knob value into the round record.
+    // controllable in a test); QUAY_TEST_RUNNER_PROCS pins the independent read to a lone round (this
+    // runner only); QUAY_MAX_CONCURRENT_SUITES pinned so the parent suite's env cannot leak a
+    // different knob value into the round record.
     const child = runRunner({
       root,
       command: `bash ${f}`,
@@ -1650,7 +1832,7 @@ test("AC1 — a round records nproc (read-host) + concurrentSuiteSlots + concurr
       env: {
         RESOURCE_GATE_NPROC: "8",
         QUAY_MAX_CONCURRENT_SUITES: "2",
-        FULL_SUITE_LOCK_FILE: path.join(lockDir, "full-suite.lock"),
+        QUAY_TEST_RUNNER_PROCS: "1",
       },
     });
     const { code } = await waitExit(child);
@@ -1659,39 +1841,18 @@ test("AC1 — a round records nproc (read-host) + concurrentSuiteSlots + concurr
     assert.ok(rec, "verification-round.jsonl written");
     assert.equal(rec.nproc, 8, `nproc = host parallelism (read-host seam), got ${rec.nproc}`);
     assert.equal(rec.concurrentSuiteSlots, 2, `concurrentSuiteSlots = QUAY_MAX_CONCURRENT_SUITES (the 2-slot knob), got ${rec.concurrentSuiteSlots}`);
-    assert.equal(rec.concurrentSuitesRunning, 1, `a lone round (no other suite holds a slot) runs at concurrency 1, got ${rec.concurrentSuitesRunning}`);
+    assert.equal(rec.concurrentSuitesRunning, 1, `a lone round (no other runner alive) runs at concurrency 1, got ${rec.concurrentSuitesRunning}`);
     assert.equal(hostParallelism(), Number.isFinite(Number(process.env.RESOURCE_GATE_NPROC)) ? Number(process.env.RESOURCE_GATE_NPROC) : hostParallelism(), "hostParallelism() is a number (read-host, never a literal)");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(dir, { recursive: true, force: true });
-    fs.rmSync(lockDir, { recursive: true, force: true });
   }
 });
 
 test("AC2 — 2-suite round records concurrentSuitesRunning=2, mechanically distinct from a 1-suite round (=1) [negative control]", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-lanes2-"));
-  const lockDir = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-lanes2-lock-"));
-  const lockFile = path.join(lockDir, "full-suite.lock");
   const { f, dir } = fakeSuite(GREEN_SUITE);
-  let holder = null;
   try {
-    // Hold slot .0 as if ANOTHER full suite is mid-run (the 2-slot lock's other slot). The holder is
-    // a detached flock whose whole process group is killed at teardown (flock holds the slot for the
-    // lifetime of its `sleep 30` command; killing the group releases it — verified in sandbox).
-    holder = spawn("flock", [lockFile + ".0", "-c", "sleep 30"], { stdio: "ignore", detached: true });
-    await new Promise((r) => setTimeout(r, 200)); // let flock actually take the slot
-    // Confirm the probe reads the held slot (the seam itself is sound before asserting the record).
-    // The probe reads FULL_SUITE_LOCK_FILE from ITS OWN process env — the parent test process must
-    // set it for the self-check (the child runner gets it via runRunner's env).
-    const prevLockEnv = process.env.FULL_SUITE_LOCK_FILE;
-    process.env.FULL_SUITE_LOCK_FILE = lockFile;
-    try {
-      assert.equal(countHeldSuiteLocks(root), 1, "countHeldSuiteLocks() sees the held other-suite slot (seam self-check)");
-    } finally {
-      if (prevLockEnv === undefined) delete process.env.FULL_SUITE_LOCK_FILE;
-      else process.env.FULL_SUITE_LOCK_FILE = prevLockEnv;
-    }
-
     const child = runRunner({
       root,
       command: `bash ${f}`,
@@ -1699,7 +1860,7 @@ test("AC2 — 2-suite round records concurrentSuitesRunning=2, mechanically dist
       env: {
         RESOURCE_GATE_NPROC: "8",
         QUAY_MAX_CONCURRENT_SUITES: "2",
-        FULL_SUITE_LOCK_FILE: lockFile,
+        QUAY_TEST_RUNNER_PROCS: "2",
       },
     });
     const { code } = await waitExit(child);
@@ -1707,45 +1868,25 @@ test("AC2 — 2-suite round records concurrentSuitesRunning=2, mechanically dist
     const rec = lastRoundRecord(root);
     assert.ok(rec, "verification-round.jsonl written");
     assert.equal(rec.concurrentSuiteSlots, 2, `slot count = 2, got ${rec.concurrentSuiteSlots}`);
-    assert.equal(rec.concurrentSuitesRunning, 2, `a 2-suite round (one other slot held) records concurrentSuitesRunning=2, got ${rec.concurrentSuitesRunning}`);
+    assert.equal(rec.concurrentSuitesRunning, 2, `a 2-suite round records concurrentSuitesRunning=2, got ${rec.concurrentSuitesRunning}`);
     assert.equal(rec.nproc, 8, `nproc recorded, got ${rec.nproc}`);
     // AC2 negative control — the LONE-round AC1 test above records concurrentSuitesRunning=1; this
     // round records 2. The two records are mechanically distinguishable on the concurrency axis, so a
     // cross-round comparison can tell "this round ran alongside another suite" from "it ran alone".
     assert.notEqual(rec.concurrentSuitesRunning, 1, "2-suite round MUST differ from the lone-round record");
   } finally {
-    if (holder) {
-      try { process.kill(-holder.pid, "SIGKILL"); } catch { /* already gone */ }
-      try { holder.kill("SIGKILL"); } catch { /* already gone */ }
-    }
     fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(dir, { recursive: true, force: true });
-    fs.rmSync(lockDir, { recursive: true, force: true });
   }
 });
 
-test("AC3 — concurrentSuitesRunning never exceeds the slot count (a queued third suite is not a 3rd running suite)", async () => {
+test("AC3 — the independent read records >2 (NOT capped at the slot count) [gap-verification-round-observability-holes]", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-lanes3-"));
-  const lockDir = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-lanes3-lock-"));
-  const lockFile = path.join(lockDir, "full-suite.lock");
   const { f, dir } = fakeSuite(GREEN_SUITE);
-  let h0 = null;
-  let h1 = null;
   try {
-    // BOTH slots held (a hypothetical world where this round would be queued): the record must STILL
-    // cap concurrentSuitesRunning at the slot count (2) — never report a 3rd running suite.
-    h0 = spawn("flock", [lockFile + ".0", "-c", "sleep 30"], { stdio: "ignore", detached: true });
-    h1 = spawn("flock", [lockFile + ".1", "-c", "sleep 30"], { stdio: "ignore", detached: true });
-    await new Promise((r) => setTimeout(r, 200));
-    const prevLockEnv = process.env.FULL_SUITE_LOCK_FILE;
-    process.env.FULL_SUITE_LOCK_FILE = lockFile;
-    try {
-      assert.equal(countHeldSuiteLocks(root), 2, "both slots held (seam self-check)");
-    } finally {
-      if (prevLockEnv === undefined) delete process.env.FULL_SUITE_LOCK_FILE;
-      else process.env.FULL_SUITE_LOCK_FILE = prevLockEnv;
-    }
-
+    // 4 runner processes alive while the slot count is 2 — the pre-fix slot-probe derivation would cap
+    // this at 2 (and actually read ≤S forever because the probe WAS the broken mechanism); the
+    // independent count records the real 4 (this is the 4-suite-overlap the field could never see).
     const child = runRunner({
       root,
       command: `bash ${f}`,
@@ -1753,7 +1894,7 @@ test("AC3 — concurrentSuitesRunning never exceeds the slot count (a queued thi
       env: {
         RESOURCE_GATE_NPROC: "8",
         QUAY_MAX_CONCURRENT_SUITES: "2",
-        FULL_SUITE_LOCK_FILE: lockFile,
+        QUAY_TEST_RUNNER_PROCS: "4",
       },
     });
     const { code } = await waitExit(child);
@@ -1761,17 +1902,58 @@ test("AC3 — concurrentSuitesRunning never exceeds the slot count (a queued thi
     const rec = lastRoundRecord(root);
     assert.ok(rec, "verification-round.jsonl written");
     assert.equal(rec.concurrentSuiteSlots, 2, `slot count = 2, got ${rec.concurrentSuiteSlots}`);
-    assert.equal(rec.concurrentSuitesRunning, 2, `both slots held ⇒ concurrency capped at the slot count 2, got ${rec.concurrentSuitesRunning}`);
+    assert.equal(rec.concurrentSuitesRunning, 4, `a 4-runner round records concurrentSuitesRunning=4 (>2, NOT capped at the slot count), got ${rec.concurrentSuitesRunning}`);
   } finally {
-    for (const h of [h0, h1]) {
-      if (h) {
-        try { process.kill(-h.pid, "SIGKILL"); } catch { /* already gone */ }
-        try { h.kill("SIGKILL"); } catch { /* already gone */ }
-      }
-    }
     fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(dir, { recursive: true, force: true });
-    fs.rmSync(lockDir, { recursive: true, force: true });
+  }
+});
+
+test("AC3 unit — countRunnerProcesses() seam fails open to 1 on an invalid/absent value (never a fabricated 0)", () => {
+  for (const bad of ["0", "abc", "-3"]) {
+    process.env.QUAY_TEST_RUNNER_PROCS = bad;
+    assert.equal(countRunnerProcesses(), 1, `seam '${bad}' fails open to 1 (this runner), never 0`);
+  }
+  delete process.env.QUAY_TEST_RUNNER_PROCS;
+  // The unseamed read is the real pgrep path — a positive integer (this host may have other runners;
+  // it must never be <1 because this process's own cmdline matches the pattern).
+  assert.ok(countRunnerProcesses() >= 1, "unseamed countRunnerProcesses() is a real positive count");
+});
+
+test("AC3 unit — the production read (pgrep, no seam) counts real marker processes (positive control: the independent read is a measurement, not a seam echo)", async () => {
+  // Spawn TWO processes whose cmdline matches the runner pattern (`full-suite-runner.ts` as a node argv
+  // entry — `node -e <sleep> full-suite-runner.ts`) and confirm the pgrep-based count sees BOTH. This
+  // is the honesty guard (CLAUDE.md 硬规则 4/4b): the seam above is self-fulfilling, so prove the real
+  // read path measures a real process. TWO markers are used because the read fails open to 1 on ZERO
+  // matches (the fail-open sentinel is indistinguishable from a real count of 1 — the caller here is
+  // the TEST process, whose cmdline `full-suite-runner.test.mjs` does NOT match `full-suite-runner\.ts`,
+  // so with no live runner the read legitimately sees 0 ⇒ fails open to 1). With two markers the count
+  // is ≥2 regardless of how many production runners are alive, so the assertion cannot be satisfied by
+  // the fail-open 1 (the `bash -c … full-suite-runner.ts` trick also does NOT work — bash execs away
+  // its $0, so the pattern never lands in /proc/pid/cmdline).
+  const markers = [
+    spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)", "full-suite-runner.ts"], { stdio: "ignore", detached: true }),
+    spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)", "full-suite-runner.ts"], { stdio: "ignore", detached: true }),
+  ];
+  let spawnFailed = false;
+  for (const m of markers) m.once("error", () => { spawnFailed = true; });
+  try {
+    const prev = process.env.QUAY_TEST_RUNNER_PROCS;
+    delete process.env.QUAY_TEST_RUNNER_PROCS;
+    // ONE settle wait (1.5s) then ONE after-read: two pgrep calls total. The earlier 50×50ms poll was
+    // load-sensitive (each pgrep spawns a process; under full-suite load the loop ran ~17s and still
+    // raced the marker's own load-delayed startup).
+    await new Promise((r) => setTimeout(r, 1500));
+    const after = countRunnerProcesses();
+    if (!spawnFailed) {
+      assert.ok(after >= 2, `production read counts the marker processes (after=${after} — must be ≥2 for the two markers, never the fail-open 1)`);
+    }
+    if (prev !== undefined) process.env.QUAY_TEST_RUNNER_PROCS = prev;
+  } finally {
+    for (const m of markers) {
+      try { process.kill(-m.pid, "SIGKILL"); } catch { /* already gone */ }
+      try { m.kill("SIGKILL"); } catch { /* already gone */ }
+    }
   }
 });
 
