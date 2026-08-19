@@ -263,6 +263,16 @@ export const PARKED_MARKER_RE = /\*\*PARKED\b/i;
  *  task superseded — the 2026-08-13 self-flagging of this task's own Evidence text). */
 export const SUPERSEDED_MARKER_RE = /^\s*(?:>\s*)?\*\*SUPERSEDED\b/im;
 
+/** Task-level RETREATED / 搁置 marker (tasks/gap-retreated-state-not-mechanized): a LINE-START bold
+ *  `**RETREATED`, optionally inside a blockquote — the mechanical "retreated / shelved" state a task
+ *  carries after a load-induced retreat (done→ready rollback that must NOT be re-dispatched until the
+ *  fix-scope gate lands). Position-based (hard-rule ②), mirroring SUPERSEDED_MARKER_RE: the
+ *  line-start + optional-blockquote anchor distinguishes the actual marker from any inline mention (a
+ *  prose sentence naming "retreated" — e.g. this task's own Finding — is NOT a marker; only the bold
+ *  line-start form marks the task shelved). Un-shelving (解除搁置) = removing the marker line, which
+ *  restores dispatchability. */
+export const RETREATED_MARKER_RE = /^\s*(?:>\s*)?\*\*RETREATED\b/im;
+
 // ── LANDING-BLOCKED signal (tasks/gap-landing-blocked-invisible-to-dispatch-criteria) ───────────────
 // The dispatch criterion (`dispatchable_disjoint >= cap`) answers ONLY "are there ≥cap mutually-
 // disjoint candidates" (the touches-conflict graph, grep-verified: it reads NO merge/landing state).
@@ -880,6 +890,15 @@ export function isFixture(task) {
 
 export function isParked(task) {
   return PARKED_MARKER_RE.test(task.body);
+}
+
+/** True when the task carries the RETREATED / 搁置 marker (tasks/gap-retreated-state-not-mechanized) —
+ *  a task the outer retreated (load-induced red rollback) but which must stay out of the dispatch
+ *  recommendation until the fix-scope gate lands and the marker is removed (解除搁置). The RECOGNITION
+ *  half only; the EXCLUSION half lives in slot-refill's step-4 (defer "retreated"), mirroring the
+ *  SUPERSEDED recognition/exclusion split. */
+export function isRetreated(task) {
+  return RETREATED_MARKER_RE.test(task.body);
 }
 
 // AC-record exclusion (SPEC-three-layer-unified-architecture §5 AC-tracking, manager AC20-AC35
