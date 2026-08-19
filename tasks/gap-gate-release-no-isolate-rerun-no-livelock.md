@@ -1,7 +1,7 @@
 ---
 id: gap-gate-release-no-isolate-rerun-no-livelock
 title: "gate load-sensitive release 无 C11 隔离重跑 + 无 anti-livelock 兜底——全量 relaunch 循环无界（收敛失败）"
-status: ready
+status: done
 labels:
   - gap
   - mechanism
