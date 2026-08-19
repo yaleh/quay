@@ -103,6 +103,7 @@ const runId = A.runId ?? ''
 const mergeTarget = A.mergeTarget ?? 'develop'
 // 回合预算承载的脚本控制流可调参数（生产用默认；测试经 args 覆盖，如 pollIntervalMs=0）。
 const pollIntervalMs = A.pollIntervalMs ?? 60_000   // 脚本 setTimeout 的轮询间隔
+const firstDelayMs = A.firstDelayMs ?? 660_000      // 首轮轮询延迟（suite 已测下界 11min ⇒ 从 t=660s 起轮，~21 次空转→~10 次；gap-fan-in-execute-poll-cost-firstdelay-agenttype）
 const maxSuitePolls = A.maxSuitePolls ?? 60         // 单次 suite 等待的有界轮询数（60×60s=60min 上限）
 const maxFixRounds = A.maxFixRounds ?? 4            // 红 suite 的最大修复迭代
 const maxFfRetries = A.maxFfRetries ?? 3            // ff 失败（develop 前进）的最大重试（同 SPEC §7 阈值）
@@ -197,6 +198,10 @@ echo "FIX_SCOPE_VERDICT=$fix_scope_out"
 // 循环，最多 540s 硬边界（< Bash 600s 上限），把 ~21 次空转轮询压到 ~3 次；决策权仍在脚本——
 // timeout 540 是脚本给的硬边界、maxSuitePolls 是脚本循环上限，agent 不自决「等多久」。命中 marker
 // 则补全 capture 的 post 字段。脚本 setTimeout 仍是外层轮询间隔。
+// 首轮起轮延迟（gap-fan-in-execute-poll-cost-firstdelay-agenttype）：suite 已测下界 11min，却从
+// t=60s 起轮 ⇒ 头 11-15 次结构上必然 not-done 纯空转。firstDelayMs（默认 660s）让首轮 setTimeout
+// 从 660s 起，后续回到 pollIntervalMs——与上面的有界阻塞等待叠加，把 ~21 次空转压到 ~10 次（
+// pollIntervalMs=0 测试 seam 照旧可用：firstDelayMs 也可经 args 覆盖）。
 async function pollSuite() {
   return agent(
     `你是 fan-in suite 等待轮询（workflow 脚本控制流调用，有界阻塞等待，一回合内返回）。任务 ${task} 的 suite 以 detached 方式运行。用 Bash 工具运行下面命令并返回结果——不要做任何等待决策（等待由 workflow 脚本控制）。命令里的 timeout ${pollBlockSeconds} 是脚本给的硬边界；Bash 工具的执行时限须设大于 ${pollBlockSeconds}s（上限 600s）。
@@ -247,6 +252,7 @@ printf 'cpu_s=%s\\ncpu_source=%s\\nend_iso=%s\\nend_ms=%s\\nwall_ms=%s\\nload=%s
 echo "POLL=done SUITE_EXIT=$suite_exit"
 返回 { done: bool（POLL=done ⇒ true）, suiteExit: int|null }。marker 存在但读不出 suite_exit ⇒ done=true, suiteExit=null（fail-closed，脚本按非绿处理）。`,
     {
+      agentType: 'suite-poller',
       schema: {
         type: 'object',
         properties: {
@@ -263,8 +269,10 @@ async function waitForSuite() {
   let done = false
   let exit = null
   let polls = 0
+  let delayMs = firstDelayMs
   while (!done) {
-    await new Promise((r) => setTimeout(r, pollIntervalMs))
+    await new Promise((r) => setTimeout(r, delayMs))
+    delayMs = pollIntervalMs // 首轮用 firstDelayMs（suite 下界 11min 已测），之后回到 pollIntervalMs
     const p = await pollSuite()
     done = !!p.done
     exit = p.suiteExit ?? null
