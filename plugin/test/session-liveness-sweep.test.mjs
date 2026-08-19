@@ -40,6 +40,10 @@ import {
   setProbeTmpPrefix, sweepTmp, reapLiveOwners, dirHasLiveOwner, probeRoot, serverPidOf,
   makeHermeticProbe, spawnMonitor, waitForRounds,
 } from "./session-liveness-helpers.mjs";
+// serverPidViaPaneEnv is the socket-close-surviving fallback added by
+// gap-session-liveness-teardown-ol-scd-d-residual; session-liveness-helpers.mjs does not re-export
+// it (this task's Touches is scoped to the production module + this test), so import it directly.
+import { serverPidViaPaneEnv } from "../scripts/session-liveness-sweep.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -113,6 +117,35 @@ test("serverPidOf — resolves the tmux SERVER daemon's PID via its socket inode
     p.cleanup();
     assert.equal(serverPidOf(p.tmp), null,
       "serverPidOf must be null once the server is killed (socket no longer held live)");
+  } finally {
+    try { p.cleanup(); } catch { /* already reaped */ }
+  }
+});
+
+test("AC1 (ol-scd-d residual) — teardown kills the self-built SESSION's SERVER process, not just its socket/panes", { skip: noTmux }, async () => {
+  // gap-session-liveness-teardown-ol-scd-d-residual: 7c755610 fixed the kill-server exit + orphaned
+  // pane-child paths, but the ol-scd-d test STILL leaked its self-started tmux server. The residual
+  // shape: a server that closes its LISTENING socket but is STILL ALIVE (hanging in its graceful-exit
+  // path under suite load) is invisible to the socket-based serverPidOf/dirHasLiveOwner, so the
+  // teardown killed the pane children but NOT the server (session). The fix resolves the server pid
+  // from the pane children's inherited TMUX environ — which SURVIVES the socket close — so the
+  // hard-kill can still reach it. This proves both halves: the fallback resolves the SAME server pid,
+  // and after teardown the server PROCESS is dead (the leak-scan's pgrep predicate), not merely the
+  // socket gone.
+  const p = makeHermeticProbe("swp-srvsession");
+  try {
+    const serverPid = serverPidOf(p.tmp);
+    assert.ok(Number.isInteger(serverPid) && serverPid > 1,
+      `must resolve the tmux server pid before teardown, got ${serverPid}`);
+    assert.equal(serverPidViaPaneEnv(p.tmp), serverPid,
+      "serverPidViaPaneEnv must resolve the SAME server pid via the pane children's TMUX env (the socket-close-surviving fallback)");
+    p.cleanup();
+    let procAlive = true;
+    try { process.kill(serverPid, 0); } catch { procAlive = false; }
+    assert.equal(procAlive, false,
+      `the tmux server process ${serverPid} must be DEAD after teardown (not just socket-closed — a hanging server is the leak)`);
+    assert.equal(serverPidViaPaneEnv(p.tmp), null,
+      "serverPidViaPaneEnv must be null once the server is dead (a dead server's cmdline is empty)");
   } finally {
     try { p.cleanup(); } catch { /* already reaped */ }
   }
