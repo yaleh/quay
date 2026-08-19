@@ -21,16 +21,17 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: 给 5b 产物加机械检查——凡 Touches 含「修某处 X 类缺陷」的任务，fan-in 的 AC 完成闸要求任务体里有一条「同载体兄弟实例 grep 命中数」的行，**零命中也要写零**（对应硬规则② 的零计数复核半边）。
-- [ ] AC2: 负控制落在生产载体——一个缺 grep 产物的 5b 类任务，fan-in 被 AC 完成闸拦（读真实闸输出，非 fixture）；补上「命中数=0」后放行。
-- [ ] AC3: scoped 绿 + 既有无 5b 任务的 fan-in 不受影响（只拦「Touches 含修 X 类」的任务）。
+- [ ] AC1: fan-in 的 AC 完成闸要求【所有】任务体里有一条「同载体兄弟实例 grep 命中数」的行，**零命中也要写零**（对应硬规则② 的零计数复核半边）。**取消触发谓词**——「Touches 含修某处 X 类缺陷」是语义判断、不可机械评估，加谓词会「求值不出 ⇒ 分支跳过 ⇒ 闸恒绿」（硬规则 3b③ 的 outer-tick-log-check 形态）。对所有 fan-in 任务一律要求这一行（5b 本就不限于「5b 类任务」，任何「在一处修好 X」都适用）。
+- [ ] AC2: 负控制落在生产载体——一个缺 grep 产物的任务 fan-in 被闸拦，补「命中数=0」后放行（读真实闸输出，非 fixture）。
+- [ ] AC3: 闸上线后【首个真实拦截输出】贴进任务体——不是「测试证明能拦」，是「生产链路真的拦下过一次」（硬规则 4 推论三：只能被 fixture 满足的判据不是测量）。
+- [ ] AC4: scoped 绿。
 
 ## Definition of Done
 
-- [ ] 一个 5b 类任务缺 grep 产物被 fan-in 闸拦、补产物后放行（真实输出），守/不守从此可区分。
+- [ ] 一个任务缺 grep 产物被 fan-in 闸拦（真实生产拦截，输出贴进任务体）、补产物后放行，守/不守从此可区分。
 
 ## Touches
 
 - tasks/gap-5b-brother-grep-mechanical-check.md（自身）
-- plugin/scripts/fan-in-ac-completion-gate.js（AC 完成闸加 5b grep 产物检查）
+- plugin/scripts/fan-in-ac-completion-gate.ts（AC 完成闸加「兄弟 grep 命中数」行检查，所有任务一律）
 - plugin/test/fan-in-ac-completion-gate.test.mjs（缺产物拦 + 零命中放行负控制）
