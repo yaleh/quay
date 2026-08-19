@@ -104,6 +104,7 @@
 // per-task-duration history, so it stays git-tracked (gap-telemetry-report-writes-and-deadlocks-readiness).
 
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -198,6 +199,123 @@ export function processAlive(runId) {
     }
   } catch (_) { /* /proc unavailable (non-Linux, sandbox) → no positive signal */ }
   return false;
+}
+
+// ── Subagent-transcript liveness (gap-reconcile-processalive-blind-spot-brief-phase-false-close) ──────
+// `processAlive(runId)` has a structural blind spot: an impl subagent is dispatched by the Agent tool,
+// and its process cmdline does NOT carry the runId (the runId is a telemetry identifier, not a process
+// identifier). In the BRIEF phase — subagent dispatched, its worktree not yet forked — neither
+// `processAlive` nor `worktreeExists` sees it, so the old four-level probe fell through to
+// `worktree-gone-and-no-process` and false-closed a LIVE bracket (2026-08-18 13:1xZ: closure-skips-
+// task-end + git-history-counts-stale, both impl agents still active). The subagent IS observably
+// alive via its transcript file (`<session>/subagents/agent-*.jsonl` — the same source
+// cap-counts-subagents-check.ts 判据2 reads): the spawn record's prompt names `tasks/<taskId>.md` and
+// `quay-worktrees/<taskId>`. A transcript written within the recency window whose content names the
+// task ⇒ a live impl subagent ⇒ KEEP.
+
+/** Subagent transcript filename pattern (`agent-<id>.jsonl`; same as cap-counts-subagents-check.ts). */
+export const SUBAGENT_TRANSCRIPT_RE = /^agent-.+\.jsonl$/;
+
+/** Recency window for a live subagent transcript. Mirrors the reconcile-compliance proximity window
+ *  (RECONCILE_COMPLIANCE_WINDOW_MS — one inner tick) and stays well under OVER90 (90 min), so a
+ *  crashed subagent's bracket lingers at most this long before --reconcile closes it. */
+export const TRANSCRIPT_LIVENESS_WINDOW_MS = 30 * 60 * 1000;
+
+/**
+ * Claude Code's project-dir slug for a repo root: every `/` → `-` (e.g. `/home/yale/work/quay` →
+ * `-home-yale-work-quay`). The on-disk convention fan-in-ff-merge.sh:170 uses for
+ * `$HOME/.claude/projects/<slug>/`.
+ * @param {string} root
+ * @returns {string}
+ */
+export function claudeProjectsSlug(root) {
+  return String(root).replace(/\//g, "-");
+}
+
+/**
+ * Whether a live impl subagent transcript names this taskId. Scans each session's
+ * `subagents/agent-*.jsonl` under the project dir (slug) for a transcript written within `windowMs`
+ * whose content references the task's file path (`tasks/<taskId>.md`) or worktree path
+ * (`quay-worktrees/<taskId>`). A brief-phase subagent (dispatched, no worktree yet) is observably
+ * alive ONLY through this transcript — its process cmdline carries no runId and its cwd is the main
+ * checkout. Fail-closed toward FALSE (never a positive "alive" from an unavailable source): any fs
+ * error / missing dir / stale transcript ⇒ false.
+ * @param {string} root — the repo root (derives the project-dir slug)
+ * @param {string} taskId
+ * @param {object} [opts]
+ * @param {string|null} [opts.projectsDir] — Claude Code projects dir. Default `$HOME/.claude/projects`
+ *   (tests inject a temp HOME/projectsDir so the scan never touches the real corpus).
+ * @param {number} [opts.nowMs] — default Date.now()
+ * @param {number} [opts.windowMs] — default TRANSCRIPT_LIVENESS_WINDOW_MS
+ * @returns {boolean}
+ */
+export function subagentTranscriptAlive(root, taskId, { projectsDir = null, nowMs = Date.now(), windowMs = TRANSCRIPT_LIVENESS_WINDOW_MS } = {}) {
+  if (!root || !taskId) return false;
+  let projDir;
+  try {
+    const base = projectsDir ?? path.join(os.homedir(), ".claude", "projects");
+    projDir = path.join(base, claudeProjectsSlug(root));
+  } catch (_) {
+    return false;
+  }
+  let sessions;
+  try {
+    sessions = fs.readdirSync(projDir, { withFileTypes: true });
+  } catch (_) {
+    return false; // no project dir — no positive signal
+  }
+  const needleFile = `tasks/${taskId}.md`;
+  const needleWorktree = `quay-worktrees/${taskId}`;
+  const cutoff = nowMs - windowMs;
+  for (const sess of sessions) {
+    if (!sess || !sess.isDirectory()) continue;
+    const subDir = path.join(projDir, sess.name, "subagents");
+    let files;
+    try {
+      files = fs.readdirSync(subDir);
+    } catch (_) {
+      continue; // no subagents dir for this session
+    }
+    for (const f of files) {
+      if (!SUBAGENT_TRANSCRIPT_RE.test(f)) continue;
+      const fp = path.join(subDir, f);
+      let mtimeMs;
+      try {
+        mtimeMs = fs.statSync(fp).mtimeMs;
+      } catch (_) {
+        continue;
+      }
+      if (!Number.isFinite(mtimeMs) || mtimeMs < cutoff) continue;
+      if (transcriptReferencesTask(fp, needleFile, needleWorktree)) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Whether a transcript file's leading bytes reference the task (its task-file path or worktree path).
+ * Reads only a bounded prefix — the spawn record's prompt (which names both paths) is the first line,
+ * so 64 KiB is ample. Any read error ⇒ false.
+ * @param {string} fp
+ * @param {string} needleFile — `tasks/<taskId>.md`
+ * @param {string} needleWorktree — `quay-worktrees/<taskId>`
+ * @returns {boolean}
+ */
+function transcriptReferencesTask(fp, needleFile, needleWorktree) {
+  let text;
+  try {
+    const fd = fs.openSync(fp, "r");
+    try {
+      const buf = Buffer.alloc(64 * 1024);
+      const n = fs.readSync(fd, buf, 0, buf.length, 0);
+      text = buf.subarray(0, n).toString("utf8");
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch (_) {
+    return false;
+  }
+  return text.includes(needleFile) || text.includes(needleWorktree);
 }
 
 /**
@@ -1165,19 +1283,24 @@ export function reconcileInFlight(inProgress, { executorGone, firstKnownCommitMs
 
 /**
  * The production observable-executor probe wired by `--reconcile`. Checks in priority order:
- *   1. process alive   → KEEP (strongest presence signal; never close a live executor)
- *   2. worktree open   → KEEP (mid-flight dispatch environment still present — uncertain, and the
- *                        branch may legitimately point at an ancestor of HEAD with no commits yet)
- *   3. branch merged   → CLOSE (work landed; the executor that was building it is done)
- *   4. none of the above → CLOSE (no process, no worktree, branch not merged ⇒ dispatch gone)
- * Presence (process / open worktree) ALWAYS trumps absence — never close a record whose dispatch
- * environment is still observable. Never consults wall-clock age — see the file-header note.
+ *   1. process alive          → KEEP (a live process carrying the runId needle)
+ *   2. subagent transcript    → KEEP (brief-phase impl subagent — dispatched, no worktree yet; its
+ *                               process cmdline carries no runId, so only the transcript proves it)
+ *   3. worktree open          → KEEP (mid-flight dispatch environment still present — uncertain, and
+ *                               the branch may legitimately point at an ancestor of HEAD with no
+ *                               commits yet)
+ *   4. branch merged          → CLOSE (work landed; the executor that was building it is done)
+ *   5. none of the above      → CLOSE (no process, no transcript, no worktree, branch not merged ⇒
+ *                               dispatch gone)
+ * Presence (process / transcript / open worktree) ALWAYS trumps absence — never close a record whose
+ * dispatch environment is still observable. Never consults wall-clock age — see the file-header note.
  * @param {string} root
  * @returns {(rec: {taskId:string, runId:string}) => {gone:boolean, reason:string}}
  */
 export function makeDefaultExecutorGone(root) {
   return (rec) => {
     if (processAlive(rec.runId)) return { gone: false, reason: "process-alive" };
+    if (subagentTranscriptAlive(root, rec.taskId)) return { gone: false, reason: "subagent-transcript-alive" };
     if (worktreeExists(root, rec.taskId)) return { gone: false, reason: "worktree-present" };
     if (isBranchMerged(root, rec.taskId)) return { gone: true, reason: "branch-merged" };
     return { gone: true, reason: "worktree-gone-and-no-process" };

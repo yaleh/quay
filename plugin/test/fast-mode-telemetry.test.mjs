@@ -1067,6 +1067,109 @@ test("RECONCILE — processAlive detects a live process by runId (AC3 real-proce
   }
 });
 
+// ── Subagent-transcript liveness (gap-reconcile-processalive-blind-spot-brief-phase-false-close) ────
+// `processAlive(runId)` is blind to a brief-phase impl subagent: the Agent-tool dispatch's process
+// cmdline carries no runId, and the worktree is not forked yet. The old four-level probe fell through
+// to `worktree-gone-and-no-process` and false-closed a LIVE bracket. The fix adds a subagent-transcript
+// liveness signal: a transcript at `<session>/subagents/agent-*.jsonl` written within the recency
+// window whose content names the task ⇒ KEEP, not false-close.
+
+test("SUBAGENT-LIVENESS — subagentTranscriptAlive finds a recent transcript naming the task (PURE, injected projectsDir)", async () => {
+  const cli = await importCli();
+  const tmp = makeTmpWorkspace();
+  try {
+    const root = "/home/yale/work/quay";
+    const proj = path.join(tmp, "projects");
+    const sess = path.join(proj, cli.claudeProjectsSlug(root), "sess-1", "subagents");
+    fs.mkdirSync(sess, { recursive: true });
+    fs.writeFileSync(
+      path.join(sess, "agent-abc123.jsonl"),
+      '{"type":"user","message":{"content":"执行任务 gap-x（任务文件 /home/yale/work/quay/tasks/gap-x.md）。git worktree add /home/yale/work/quay-worktrees/gap-x"}}',
+      "utf8",
+    );
+    assert.equal(cli.subagentTranscriptAlive(root, "gap-x", { projectsDir: proj }), true, "a recent transcript naming the task ⇒ alive");
+    assert.equal(cli.subagentTranscriptAlive(root, "gap-other", { projectsDir: proj }), false, "a different taskId is not matched");
+    // Aged out: the same transcript read from beyond the recency window ⇒ false (no permanent keep).
+    assert.equal(
+      cli.subagentTranscriptAlive(root, "gap-x", { projectsDir: proj, nowMs: Date.now() + cli.TRANSCRIPT_LIVENESS_WINDOW_MS + 60_000 }),
+      false,
+      "a stale transcript outside the window ⇒ not alive",
+    );
+    // Missing projects dir ⇒ false (fail-closed, never a positive signal from an unavailable source).
+    assert.equal(cli.subagentTranscriptAlive(root, "gap-x", { projectsDir: path.join(tmp, "nope") }), false);
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test("SUBAGENT-LIVENESS — claudeProjectsSlug maps a root path to Claude Code's project-dir slug", async () => {
+  const cli = await importCli();
+  assert.equal(cli.claudeProjectsSlug("/home/yale/work/quay"), "-home-yale-work-quay");
+});
+
+test("SUBAGENT-LIVENESS CLI — brief-phase bracket (live transcript, no worktree) is KEPT by --reconcile; closed_brackets_reflect_processes stays true (AC1/AC2/AC3)", async () => {
+  const cli = await importCli();
+  const tmp = makeTmpWorkspace();
+  const tmpHome = makeTmpWorkspace();
+  try {
+    fs.writeFileSync(path.join(tmp, ".gitignore"), ".workflow-events/\n", "utf8");
+    fs.mkdirSync(path.join(tmp, "tasks"), { recursive: true });
+    fs.writeFileSync(path.join(tmp, "tasks", "brief-task.md"), "---\nid: brief-task\n---\n", "utf8");
+    gitCmd(tmp, "init", "-q");
+    gitCmd(tmp, "config", "user.email", "test@example.com");
+    gitCmd(tmp, "config", "user.name", "test");
+    assert.equal(gitCmd(tmp, "add", "-A").status, 0);
+    assert.equal(gitCmd(tmp, "commit", "-m", "seed").status, 0);
+
+    // Open a brief-phase bracket: --task-start, NO worktree, NO task branch (the defect shape).
+    const start = runCli(tmp, "--task-start", "--taskId", "brief-task");
+    assert.equal(start.status, 0, start.stderr);
+
+    // A live impl subagent transcript naming brief-task, written just now, under a temp HOME so the
+    // probe (os.homedir → $HOME) scans only this corpus.
+    const sess = path.join(tmpHome, ".claude", "projects", cli.claudeProjectsSlug(tmp), "sess-brief", "subagents");
+    fs.mkdirSync(sess, { recursive: true });
+    fs.writeFileSync(
+      path.join(sess, "agent-brief123.jsonl"),
+      '{"type":"user","message":{"content":"执行任务 brief-task（任务文件 ' + path.join(tmp, "tasks", "brief-task.md") +
+        '）。git -C ' + tmp + ' worktree add ' + path.join(path.dirname(tmp), "quay-worktrees", "brief-task") + ' -b task/brief-task develop"}}',
+      "utf8",
+    );
+
+    const env = { HOME: tmpHome, QUAY_TELEMETRY_SUBAGENTS: "0" };
+
+    // AC1/AC2 negative control: --reconcile KEEPS the brief-phase bracket (no false-close).
+    const rec = runCliEnv(tmp, env, "--reconcile", "--json");
+    assert.equal(rec.status, 0, rec.stderr);
+    const out = JSON.parse(rec.stdout);
+    const keptB = (out.kept ?? []).find((k) => k.taskId === "brief-task");
+    assert.ok(keptB, `brief-phase bracket must be KEPT: ${JSON.stringify(out)}`);
+    assert.equal(keptB.keepReason, "subagent-transcript-alive");
+    assert.equal((out.closed ?? []).length, 0, "nothing closed — the live subagent keeps the bracket open");
+
+    // AC3: the slot view reports the bracket as real in-flight, no closed-but-live residual.
+    const slot = runCliEnv(tmp, env, "--slot-status", "--cap", "5", "--json");
+    assert.equal(slot.status, 0, slot.stderr);
+    const s = JSON.parse(slot.stdout);
+    assert.equal(s.real_in_flight, 1, "the brief-phase bracket is real in-flight (kept), not stale");
+    assert.equal(s.stale_brackets, 0);
+    assert.equal(s.closed_but_live_agents.length, 0, "no closed-but-live residual");
+    assert.equal(s.closed_brackets_reflect_processes, true, "invariant restored (no false-close ⇒ no closed-but-live)");
+
+    // Negative control: remove the transcript (executor now observably gone) ⇒ --reconcile closes.
+    fs.rmSync(path.join(sess, "agent-brief123.jsonl"));
+    const rec2 = runCliEnv(tmp, env, "--reconcile", "--json");
+    assert.equal(rec2.status, 0, rec2.stderr);
+    const out2 = JSON.parse(rec2.stdout);
+    const closedB = (out2.closed ?? []).find((c) => c.taskId === "brief-task");
+    assert.ok(closedB, `with the transcript gone the bracket closes: ${JSON.stringify(out2)}`);
+    assert.equal(closedB.reconcileReason, "worktree-gone-and-no-process");
+  } finally {
+    cleanup(tmp);
+    cleanup(tmpHome);
+  }
+});
+
 // ── Slot status (gap-telemetry-brackets-vs-subagents-no-slot-visibility) ────────────────────────────
 
 test("SLOT-STATUS — 5 stale brackets + 1 real agent ⇒ real_in_flight 1, slots_free 2 (AC5 regression shape)", async () => {
