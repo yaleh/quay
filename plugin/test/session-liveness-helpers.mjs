@@ -324,16 +324,33 @@ export function paneHasClaudeChild(env, session) {
   return false;
 }
 
-// ── load-robustness budget (gap-session-liveness-wall-clock-budget-false-positives, 2026-08-12) ──
+// ── load-robustness budget (gap-session-liveness-wall-clock-budget-false-positives, 2026-08-12;
+//    gap-session-liveness-hangguard-ms-timeout, 2026-08-18) ─────────────────────────────────────
 // A wait budget here is a HANG-GUARD, never a correctness criterion. Under suite load the real
 // polling loop (session-liveness.sh sleep $INTERVAL) + real tmux + process spawn slow down — events
 // arrive after a tight wall-clock budget → false red. The product isn't broken; the measurement
 // window is too narrow. Every wait helper below polls a REAL signal (a marker line in the monitor's
 // stdout, the round counter, a /proc liveness probe) and uses the budget only as an upper cap so a
-// genuinely hung monitor still fails. 60s is deliberately loose — slow-but-correct passes,
-// hung-but-wrong still fails. A caller's explicit budget is CLAMPED UP to this floor (Math.max), so
-// a tight literal can never reintroduce a false red (hard-rule-4-corollary-2: widen generously).
-export const HANG_GUARD_MS = 60_000;
+// genuinely hung monitor still fails — slow-but-correct passes, hung-but-wrong still fails. A
+// caller's explicit budget is CLAMPED UP to this floor (Math.max), so a tight literal can never
+// reintroduce a false red (hard-rule-4-corollary-2: widen generously).
+//
+// 2026-08-18 (gap-session-liveness-hangguard-ms-timeout): the fixed 60_000 floor was "deliberately
+// loose" in isolation but broke under the overlap phase — 16 concurrent test files saturate the
+// 16-core host, and session-liveness.sh (≥2 node --experimental-strip-types subprocesses per round
+// + tmux/git/proc scans) is CPU-starved to ≈20s/round, so 4 rounds exceeded 60s and the AC3 负控制
+// false-hung (commit 43153e58). A fixed 180_000 literal would repeat the same mistake on the NEXT
+// bigger host — its adequacy depends on host parallelism (hard-rule-4-corollary-2: a timeout whose
+// reasonableness depends on machine spec must READ the host, not hardcode a literal). So the floor
+// scales with os.availableParallelism(): the measured ≈20s/round at 16 cores is ≈1.25s/core/round,
+// the deepest wait in this family is 4 rounds, and a ≈2.4× margin yields ~12s/core — 16 cores ⇒ 192s
+// (≥ the 180s the suite-fix measured sufficient, ≥ the ~80s measured need), while a small host keeps
+// the original 60s floor so a genuinely hung monitor still fails promptly.
+const HOST_PARALLELISM = (() => {
+  try { return os.availableParallelism(); } catch { /* node < 18.14 */ }
+  return os.cpus().length || 1;
+})();
+export const HANG_GUARD_MS = Math.max(60_000, HOST_PARALLELISM * 12_000);
 function hangGuard(ms) { return Math.max(ms ?? HANG_GUARD_MS, HANG_GUARD_MS); }
 
 export async function waitForAlive(env, session, timeoutMs = HANG_GUARD_MS) {
@@ -540,7 +557,7 @@ export async function waitForRounds(mon, n, timeoutMs = HANG_GUARD_MS) {
 // waitForRounds is ABSOLUTE (count >= n); once a monitor has already run many rounds it returns
 // immediately, so the "hold the shape for ≥N more rounds" checks (edge-trigger, negative-control
 // spans) need this DELTA form. Same hermetic principle as waitForRounds: the `# ROUND` marker is the
-// deterministic time source (time injection), never a fixed wall-clock sleep — the 60s hang-guard is
+// deterministic time source (time injection), never a fixed wall-clock sleep — the hang-guard is
 // only an upper cap so a genuinely hung monitor still fails (slow-but-correct passes under load).
 export async function waitForMoreRounds(mon, n, timeoutMs = HANG_GUARD_MS) {
   const target = countRounds(mon) + n;
