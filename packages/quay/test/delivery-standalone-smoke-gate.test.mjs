@@ -41,6 +41,19 @@ after(() => {
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
 const SMOKE_SCRIPT = path.join(REPO_ROOT, "packages", "quay", "test", "delivery-standalone-smoke.sh");
 
+// ── Amortized deliver baseline (gap-npm-file-copy-amortize AC1) ──────────────────────────────────
+// A2/C1/D1 (and the A1 zero-arg factory) each invoke the smoke gate through a DIFFERENT access
+// surface (direct gate() resolve, CLI `quay gate`, real-workspace wiring) but all run the SAME
+// smoke.sh — which historically did a full `npm pack → npm install --omit=dev` per invocation
+// (4× the expensive npm ops for one product state). Mirror quay-init-loop-helpers.mjs's
+// "one real install → shared baseline → each test deltas" technique: point every smoke.sh
+// invocation at ONE fresh baseline dir. The FIRST invocation builds the delivered product there
+// (real npm pack + install), the other three reuse it. Mechanism unchanged — still a real npm run
+// and real bash, just not repeated 4× (AC3). A fresh mkdtemp per run means no stale-baseline reuse.
+const SMOKE_BASE = fs.mkdtempSync(path.join(os.tmpdir(), "quay-m52-base-"));
+_tmpDirs.push(SMOKE_BASE);
+process.env.QUAY_DELIVERY_SMOKE_BASE = SMOKE_BASE;
+
 const gate = (name) => resolveGate(name, REPO_ROOT);
 
 // delivery-standalone-smoke.sh simulates a real npm delivery (pack + fresh-workspace install),

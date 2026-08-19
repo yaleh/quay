@@ -24,13 +24,13 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: smoke-gate 三个 test 摊销一次 npm pack+install（产物状态相同，只验证不同接入面）。
-- [ ] AC2: capability-catalog 摊销成 1 份共享只读基线 + 每 test 单文件 patch（不再 5×261 次全量复制）。
-- [ ] AC3: 机制不变（真跑 npm / 真跑 bash，不 mock），scoped 绿 + 负控制可信度不降（真实输出）。
+- [x] AC1: smoke-gate 三个 test 摊销一次 npm pack+install（产物状态相同，只验证不同接入面）。
+- [x] AC2: capability-catalog 摊销成 1 份共享只读基线 + 每 test 单文件 patch（不再 5×261 次全量复制）。
+- [x] AC3: 机制不变（真跑 npm / 真跑 bash，不 mock），scoped 绿 + 负控制可信度不降（真实输出）。
 
 ## Definition of Done
 
-- [ ] 两处摊销落地，npm/复制耗时显著下降、机制不变，scoped 绿（真实输出）。
+- [x] 两处摊销落地，npm/复制耗时显著下降、机制不变，scoped 绿（真实输出）。
 
 ## Touches
 

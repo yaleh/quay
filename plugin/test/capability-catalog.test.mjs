@@ -46,6 +46,54 @@ function derivedScripts() {
   return [...out].sort();
 }
 
+// ── Amortized shared read-only baseline (gap-npm-file-copy-amortize AC2) ─────────────────────────
+// 5 tests each historically copied ALL plugin/scripts (261 files) into a fresh tmp — 5×261 data
+// copies (~1300+) of the same read-only content. Instead: ONE shared read-only baseline (real
+// copies, built lazily ONCE) + each test materializes a WRITABLE hard-link farm from it (zero data
+// copy) and patches ONLY the file(s) it needs. capability-catalog.sh is the ONE existing script a
+// test writes to, so materializeScripts breaks its hard link with a real copy — a writeFileSync
+// through a hard link would corrupt the shared baseline for every other test (same inode). The
+// baseline is disposable (removed by after()); the real plugin/scripts is never the write source,
+// so a test bug can never corrupt the repo.
+const _baseline = { dir: null, files: null };
+const _baselineDirs = [];
+function sharedBaseline() {
+  if (_baseline.dir) return _baseline;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cap-cat-base-"));
+  _baselineDirs.push(dir);
+  fs.mkdirSync(path.join(dir, "plugin", "scripts"), { recursive: true });
+  const files = derivedScripts();
+  for (const f of files) {
+    fs.copyFileSync(path.join(SCRIPTS_DIR, f), path.join(dir, "plugin", "scripts", f));
+  }
+  _baseline.dir = dir;
+  _baseline.files = files;
+  return _baseline;
+}
+
+// materializeScripts(tag): a fresh WRITABLE plugin/scripts tree for one test. Every script is a
+// hard link to the shared baseline (no data copy), except capability-catalog.sh which is a real
+// copy so a test's writeFileSync patches only its own copy. Returns the tmp root (plugin/ lives
+// under it); the caller creates any non-scripts sibling dirs it needs.
+function materializeScripts(tag) {
+  const base = sharedBaseline();
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), `cap-cat-${tag}-`));
+  fs.mkdirSync(path.join(tmp, "plugin", "scripts"), { recursive: true });
+  for (const f of base.files) {
+    const src = path.join(base.dir, "plugin", "scripts", f);
+    const dst = path.join(tmp, "plugin", "scripts", f);
+    if (f === "capability-catalog.sh") fs.copyFileSync(src, dst);
+    else fs.linkSync(src, dst);
+  }
+  return tmp;
+}
+after(() => {
+  for (const d of _baselineDirs) {
+    try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* best-effort */ }
+  }
+  _baselineDirs.length = 0;
+});
+
 function runCatalog(args = [], opts = {}) {
   return spawnSync("bash", [CATALOG, ...args], { encoding: "utf8", ...opts });
 }
@@ -121,12 +169,8 @@ test("AC5/band — unclassified == 0 (every shipped check declares its question)
 
 // ── AC1c: entry-point gate — a field-less script entering the artifact is rejected ──
 test("AC1c — a new script without a declared question is unclassified and the catalog exits non-zero (negative control + restore)", () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cap-cat-"));
+  const tmp = materializeScripts("ac1c");
   try {
-    fs.mkdirSync(path.join(tmp, "plugin", "scripts"), { recursive: true });
-    for (const f of derivedScripts()) {
-      fs.copyFileSync(path.join(SCRIPTS_DIR, f), path.join(tmp, "plugin", "scripts", f));
-    }
     // fail direction: a new script enters the artifact with NO declaration line.
     fs.writeFileSync(path.join(tmp, "plugin", "scripts", "ghost-check.sh"),
       "#!/usr/bin/env bash\n# a brand-new checker with no declared question\necho hi\n");
@@ -154,12 +198,8 @@ test("AC1c — a new script without a declared question is unclassified and the 
 // catalog load and broke the tab-separated ROWS → --json IndexError). The catalog's own AC5 gate
 // must fail loud on both injection forms and pass on the fixed baseline.
 test("AC5 no-command-substitution — a data value containing a backtick or $( makes the catalog exit non-zero (negative control + restore)", () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cap-cat-cs-"));
+  const tmp = materializeScripts("ac5cs");
   try {
-    fs.mkdirSync(path.join(tmp, "plugin", "scripts"), { recursive: true });
-    for (const f of derivedScripts()) {
-      fs.copyFileSync(path.join(SCRIPTS_DIR, f), path.join(tmp, "plugin", "scripts", f));
-    }
     const catTmp = path.join(tmp, "plugin", "scripts", "capability-catalog.sh");
     const src = fs.readFileSync(CATALOG, "utf8");
     // Anchor: the capability-catalog.sh QUESTION line (first `[capability-catalog.sh]="..."` in the file).
@@ -226,14 +266,10 @@ test("AC1/AC3 — --json rows carry the surface field: .sh classified public/int
 });
 
 test("AC3 — negative control: an internal .sh referenced by a consumer-facing doc makes the gate exit non-zero", () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cap-entry-surface-"));
+  const tmp = materializeScripts("entry");
   try {
-    fs.mkdirSync(path.join(tmp, "plugin", "scripts"), { recursive: true });
     fs.mkdirSync(path.join(tmp, "plugin", "loop"), { recursive: true });
     fs.mkdirSync(path.join(tmp, "plugin", "skills", "demo"), { recursive: true });
-    for (const f of derivedScripts()) {
-      fs.copyFileSync(path.join(SCRIPTS_DIR, f), path.join(tmp, "plugin", "scripts", f));
-    }
     // Fail direction: a consumer-facing doc references an INTERNAL script (one not in PUBLIC_ENTRYPOINTS).
     fs.writeFileSync(path.join(tmp, "plugin", "loop", "tick.md"),
       "run: bash plugin/scripts/checker-cost-lib.sh --record\n");
@@ -284,13 +320,9 @@ test("①/②/③/④ — every declared row carries cadence, 失效前提, last
 });
 
 test("① entry gate — a declared check missing cadence/失效前提 is rejected (exit non-zero), and restoring it passes", () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cap-cat-fields-"));
+  const tmp = materializeScripts("fields");
   try {
     // A temp copy of the whole plugin/scripts so the catalog sees every real script.
-    fs.mkdirSync(path.join(tmp, "plugin", "scripts"), { recursive: true });
-    for (const f of derivedScripts()) {
-      fs.copyFileSync(path.join(SCRIPTS_DIR, f), path.join(tmp, "plugin", "scripts", f));
-    }
     const catTmp = path.join(tmp, "plugin", "scripts", "capability-catalog.sh");
     const src = fs.readFileSync(CATALOG, "utf8");
 
@@ -313,12 +345,8 @@ test("① entry gate — a declared check missing cadence/失效前提 is reject
 });
 
 test("① entry gate — a declared check missing 失效前提 (invalidation) is rejected", () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cap-cat-inval-"));
+  const tmp = materializeScripts("inval");
   try {
-    fs.mkdirSync(path.join(tmp, "plugin", "scripts"), { recursive: true });
-    for (const f of derivedScripts()) {
-      fs.copyFileSync(path.join(SCRIPTS_DIR, f), path.join(tmp, "plugin", "scripts", f));
-    }
     const catTmp = path.join(tmp, "plugin", "scripts", "capability-catalog.sh");
     const src = fs.readFileSync(CATALOG, "utf8");
     // Remove the capability-catalog.sh INVALIDATION row.
