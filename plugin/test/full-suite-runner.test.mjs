@@ -70,6 +70,8 @@ import {
   hostParallelism,
   countRunnerProcesses,
   effectiveParallelism,
+  concurrentPhaseCount,
+  countHeldSuiteLocks,
 } from "../scripts/full-suite-runner.ts";
 import { runOnce, classifyFailure, routeRed, shouldStopDispatch, shouldDispatchOnRed } from "../scripts/suite-state-trigger.ts";
 
@@ -4399,27 +4401,50 @@ function fakeTestShRecordingPhaseEnv(root) {
   return { envLog };
 }
 
-test("AC1/AC3 — the default run passes HOST-READ phase concurrency (os.availableParallelism ÷ slots) to the child test.sh", async () => {
+test("AC1/AC3 — the default run passes HOST-READ phase concurrency (os.availableParallelism ÷ slots ÷ concurrent-phase-count) to the child test.sh", async () => {
   // gap-ac44-concurrent-phases-read-host-parallelism AC1/AC3 + gap-single-flight-lock-2-slot-concurrent-
-  // suites AC2: the phase-concurrency defaults are host-read (os.availableParallelism()) DIVIDED by the
-  // concurrent-suite slot count, NOT the machine-spec-dependent literal 6 (hard-rule-4 推论二 — same
-  // defect class as cpuQuota:"400%"). RESOURCE_GATE_NPROC is the deterministic test seam (the SAME
-  // source expression as defaultLaneCount's derivation) and QUAY_MAX_CONCURRENT_SUITES the slot seam:
-  // nproc=7 → serial=7 lowconc=7 with slots=1 (the old 1-suite behavior), serial=3 lowconc=3 with
-  // slots=2 (floor(7/2)) regardless of the host this suite actually runs on.
-  for (const [slots, serial, lowconc] of [["1", "7", "7"], ["2", "3", "3"]]) {
+  // suites AC2 + gap-lane-formula-ignores-phase-overlap-concurrency AC1/AC3: the phase-concurrency
+  // defaults are host-read (os.availableParallelism()) DIVIDED by the concurrent-suite slot count S AND
+  // by the concurrent-PHASE count P (2 when QUAY_PHASE_OVERLAP is on — serial+lowconc run in parallel —
+  // 1 when off = sequential, the pre-overlap budget). RESOURCE_GATE_NPROC / QUAY_MAX_CONCURRENT_SUITES /
+  // QUAY_PHASE_OVERLAP are the deterministic seams: nproc=7 ⇒ overlap ON floor(7/(S×2)), OFF floor(7/S).
+  // AC3 negative control: overlap OFF keeps the old floor(7/S) values (7/3), only the ON path halves.
+  for (const [overlap, slots, serial, lowconc] of [
+    ["1", "1", "3", "3"], // overlap ON ⇒ P=2: floor(7/(1×2))=3
+    ["1", "2", "1", "1"], // floor(7/(2×2))=1
+    ["0", "1", "7", "7"], // overlap OFF ⇒ P=1: floor(7/1)=7 (unchanged)
+    ["0", "2", "3", "3"], // floor(7/2)=3 (unchanged)
+  ]) {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-phaseenv-default-"));
     const { envLog } = fakeTestShRecordingPhaseEnv(root);
     try {
-      const child = runRunner({ root, laneCount: 4, env: { RESOURCE_GATE_NPROC: "7", QUAY_MAX_CONCURRENT_SUITES: slots } });
+      const child = runRunner({ root, laneCount: 4, env: { RESOURCE_GATE_NPROC: "7", QUAY_MAX_CONCURRENT_SUITES: slots, QUAY_PHASE_OVERLAP: overlap } });
       const { code } = await waitExit(child);
-      assert.equal(code, 0, `runner exits 0 on green (slots=${slots}), got ${code}`);
+      assert.equal(code, 0, `runner exits 0 on green (slots=${slots}, overlap=${overlap}), got ${code}`);
       await poll(() => fs.existsSync(envLog));
       const line = fs.readFileSync(envLog, "utf8").trim();
-      assert.equal(line, `SERIAL=${serial} LOWCONC=${lowconc}`, `host-read defaults ÷ slots (nproc=7, slots=${slots} → ${serial}/${lowconc}), got: ${line}`);
+      assert.equal(line, `SERIAL=${serial} LOWCONC=${lowconc}`, `host-read defaults ÷ slots ÷ phases (nproc=7, slots=${slots}, overlap=${overlap} → ${serial}/${lowconc}), got: ${line}`);
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
+  }
+});
+
+test("gap-lane-formula-ignores-phase-overlap-concurrency — concurrentPhaseCount() reads QUAY_PHASE_OVERLAP: default (unset) = 2 phases, \"0\" = 1 phase", () => {
+  // The knob defaults to overlap ON (P=2) exactly like test.sh's `PHASE_OVERLAP="${QUAY_PHASE_OVERLAP:-1}"`;
+  // only an explicit "0" selects the sequential single-phase budget. A stray "1"/garbage reads as ON —
+  // the same default-on semantics test.sh uses (QUAY_PHASE_OVERLAP=0 is the documented ONE-KEY ROLLBACK).
+  const prev = process.env.QUAY_PHASE_OVERLAP;
+  try {
+    delete process.env.QUAY_PHASE_OVERLAP;
+    assert.equal(concurrentPhaseCount(), 2, "unset QUAY_PHASE_OVERLAP ⇒ 2 concurrent phases (overlap ON default)");
+    process.env.QUAY_PHASE_OVERLAP = "0";
+    assert.equal(concurrentPhaseCount(), 1, "QUAY_PHASE_OVERLAP=0 ⇒ 1 phase (sequential, AC3 negative control)");
+    process.env.QUAY_PHASE_OVERLAP = "1";
+    assert.equal(concurrentPhaseCount(), 2, "QUAY_PHASE_OVERLAP=1 ⇒ 2 phases (overlap ON)");
+  } finally {
+    if (prev === undefined) delete process.env.QUAY_PHASE_OVERLAP;
+    else process.env.QUAY_PHASE_OVERLAP = prev;
   }
 });
 

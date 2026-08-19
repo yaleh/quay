@@ -89,6 +89,29 @@ function spawnOrphanedFake(livenessPath, pidFile, env = {}) {
   return { wrapperPid };
 }
 
+// Poll for the orphaned fake monitor's pid file to be written AND carry a readable integer pid.
+// The double-fork wrapper writes `echo $! > pidFile` non-atomically: under the lowconc phase's
+// host-derived concurrency (nproc/2 = 8 on this 16-core box) the wrapper can be starved past the
+// old fixed ~5s sleep, and the file can momentarily exist-but-empty (created by the `>` redirect
+// before `$!` is flushed). Poll for a VALID pid — not mere existence — with a generous timeout
+// upper bound, and fail with the observed raw content so a timeout is diagnosable (not a bare
+// "pid must be readable" assertion).
+async function waitForPidFile(pidFile, { timeoutMs = 15000, intervalMs = 25 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    let raw = "";
+    try { raw = fs.readFileSync(pidFile, "utf8").trim(); } catch { /* not created yet */ }
+    const pid = parseInt(raw, 10);
+    if (raw !== "" && Number.isInteger(pid) && pid > 0) return pid;
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `orphaned fake monitor pid file ${pidFile} not readable after ${timeoutMs}ms (last raw content: ${JSON.stringify(raw)})`,
+      );
+    }
+    await sleep(intervalMs);
+  }
+}
+
 // /proc/<pid>/stat field 4 = ppid. The comm field (2) can contain spaces/parens — parse from the
 // last `)` so the field offsets stay correct.
 function readPpid(pid) {
@@ -257,9 +280,7 @@ test("AC5 — a monitor orphaned to a PREVIOUS session is still detected as moun
   const { wrapperPid } = spawnOrphanedFake(livenessPath, pidFile, { SESSION_ROOT: tmp });
   let fakePid = null;
   try {
-    for (let i = 0; i < 200 && !fs.existsSync(pidFile); i++) await sleep(25);
-    fakePid = parseInt(fs.readFileSync(pidFile, "utf8").trim(), 10);
-    assert.ok(Number.isInteger(fakePid), "orphaned fake monitor pid must be readable");
+    fakePid = await waitForPidFile(pidFile);
     // Wait until the short-lived wrapper has exited and the fake has been reparented out of the
     // test's process tree (ppid is no longer the wrapper / the test's own node process).
     for (let i = 0; i < 200; i++) {

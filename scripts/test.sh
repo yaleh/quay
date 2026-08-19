@@ -969,6 +969,9 @@ default_concurrency_formula() {
   # 两并发 suite 合计 16+8=24 > 16（load 29.23，2026-08-14 14:39Z）。纯计算下 S 个 suite 各拿
   # nproc×oversub/S ⇒ Σ lane ≤ nproc×oversub 结构上不可能超。单 suite 只拿 nproc/S（本机 8）是
   # 纯计算方案的已知代价（判据4），非缺陷；要单 suite 拿满由旋钮③ oversub 表达（⛔ 不动态放大）。
+  # 阶段间并发（gap-lane-formula-ignores-phase-overlap-concurrency）：QUAY_PHASE_OVERLAP=1 时
+  # serial+lowconc 并行（重叠窗口 Σ lane = serial+lowconc），serial_lowconc_host_default 的分母因此
+  # 再乘并发阶段数 P ⇒ S×P ⇒ 重叠窗口 Σ lane ≤ nproc×oversub 同样结构上不可能超（不变式恢复可守）。
   total_budget="${RESOURCE_GATE_NPROC:-}"
   oversub="${RESOURCE_GATE_OVERSUBSCRIPTION:-${QUAY_MAX_OVERSUBSCRIPTION:-1}}"
   slots="${RESOURCE_GATE_CONCURRENT_SUITES:-${QUAY_MAX_CONCURRENT_SUITES:-2}}"
@@ -1004,17 +1007,28 @@ default_test_concurrency() {
 #   cc=1 WALL_MS=455613 (0 cancelled) vs cc=2 WALL_MS=289579 (0 cancelled) — c2 快 36% 且 0-cancelled;
 #   real-install e2e 双文件 c2 实测 0-cancelled (147s)。⇒ 默认上调至 2 (后经 AC44/AC74 改读宿主)。
 # serial_lowconc_host_default — the host-derived fallback shared by BOTH phase knobs: reads
-# RESOURCE_GATE_NPROC (test seam) → nproc, and RESOURCE_GATE_CONCURRENT_SUITES (test seam) →
-# QUAY_MAX_CONCURRENT_SUITES (旋钮②) → 2, clamped at 1. max(1, floor(nproc ÷ S)). This keeps the
-# direct-path default byte-identical to the runner's DEFAULT_SERIAL_CONCURRENCY / DEFAULT_LOWCONC_CONCURRENCY.
+# RESOURCE_GATE_NPROC (test seam) → nproc, RESOURCE_GATE_CONCURRENT_SUITES (test seam) →
+# QUAY_MAX_CONCURRENT_SUITES (旋钮②) → 2, clamped at 1, and QUAY_PHASE_OVERLAP (default 1) → the
+# concurrent-PHASE count P (2 = serial+lowconc parallel, 1 = sequential). max(1, floor(nproc ÷ (S×P))).
+# gap-lane-formula-ignores-phase-overlap-concurrency: QUAY_PHASE_OVERLAP=1 runs serial + lowconc in
+# PARALLEL, so the overlap window carries 2 concurrent phases each at its own budget — the denominator
+# must count the concurrent PHASES too (S×P), else each suite's overlap window runs serial+lowconc at
+# 2×nproc/S and S suites reach S×2×nproc/S = 2×nproc > nproc×oversub (16+16=32 > 16 on this host).
+# QUAY_PHASE_OVERLAP=0 = sequential ⇒ P = 1 (the pre-overlap H÷S budget, unchanged — AC3 negative
+# control). This keeps the direct-path default byte-identical to the runner's
+# DEFAULT_SERIAL_CONCURRENCY / DEFAULT_LOWCONC_CONCURRENCY.
 serial_lowconc_host_default() {
-  local ncpu slots
+  local ncpu slots phases
   ncpu="${RESOURCE_GATE_NPROC:-$(nproc 2>/dev/null || echo 1)}"
   slots="${RESOURCE_GATE_CONCURRENT_SUITES:-${QUAY_MAX_CONCURRENT_SUITES:-2}}"
   if ! [[ "${slots}" =~ ^[0-9]+$ ]] || [ "${slots}" -lt 1 ]; then
     slots=2
   fi
-  awk -v n="${ncpu}" -v s="${slots}" 'BEGIN { c = int(n / s); if (c < 1) c = 1; print c }'
+  phases=1
+  if [ "${QUAY_PHASE_OVERLAP:-1}" != "0" ]; then
+    phases=2
+  fi
+  awk -v n="${ncpu}" -v s="${slots}" -v p="${phases}" 'BEGIN { c = int(n / (s * p)); if (c < 1) c = 1; print c }'
 }
 # The full-suite-runner sets these env vars when --serial-concurrency / --lowconc-concurrency are passed.
 SERIAL_CONCURRENCY="${QUAY_SERIAL_CONCURRENCY:-$(serial_lowconc_host_default)}"

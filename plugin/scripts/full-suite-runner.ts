@@ -1739,8 +1739,46 @@ export function countRunnerProcesses(): number {
  * gap-suite-budget-oversubscribe, human 14:4xZ 修正方向), so the sum over S suites cannot exceed
  * nproc × oversub.
  */
-export const DEFAULT_SERIAL_CONCURRENCY = Math.max(1, Math.floor(hostParallelism() / concurrentSuiteSlots()));
-export const DEFAULT_LOWCONC_CONCURRENCY = Math.max(1, Math.floor(hostParallelism() / concurrentSuiteSlots()));
+/**
+ * gap-lane-formula-ignores-phase-overlap-concurrency — the number of load-sensitive phases that run
+ * CONCURRENTLY in the overlap window. QUAY_PHASE_OVERLAP=1 (the default, matching test.sh's
+ * `PHASE_OVERLAP="${QUAY_PHASE_OVERLAP:-1}"`) runs serial + lowconc in PARALLEL ⇒ 2 concurrent
+ * phases, each at its own concurrency — the overlap window's Σ lane = SERIAL + LOWCONC, so the
+ * per-phase budget must divide the host by S × P (P = the concurrent-phase count) to keep
+ * Σ lane ≤ nproc × oversub structurally. QUAY_PHASE_OVERLAP=0 runs them sequentially ⇒ P = 1 (the
+ * pre-overlap budget, unchanged — AC3 negative control). Reads the SAME knob default as test.sh so
+ * the direct path and runner path cannot drift (判据4).
+ */
+export function concurrentPhaseCount(): number {
+  return process.env.QUAY_PHASE_OVERLAP === "0" ? 1 : 2;
+}
+
+/**
+ * gap-load-sensitive-serial-phase-unbounded-growth-measure-first AC2/AC3 (measure-first) —
+ * the load-sensitive phase concurrency defaults. The serial phase (KNOWN-LOAD-SENSITIVE A/B-class +
+ * real-install family) and the lowconc phase (hermetic-but-load-sensitive session-observation
+ * family) default to the HOST parallelism (os.availableParallelism()), not a machine-spec-dependent
+ * literal 6 — on nproc=16 the old 6/6 left 10 cores idle across 59.5% of wall-clock
+ * (gap-ac44-concurrent-phases-read-host-parallelism). The measured experiment evidence for WHY these
+ * phases benefit from concurrency > 1 still stands: serial cc=1 WALL_MS=455613 vs cc=2 WALL_MS=289579,
+ * both 0-cancelled (2026-08-10, c2 快 36%; real-install e2e 双文件 c2 实测 0-cancelled). Both remain
+ * overridable via --serial-concurrency / --lowconc-concurrency, which the runner passes to test.sh as
+ * QUAY_SERIAL_CONCURRENCY / QUAY_LOWCONC_CONCURRENCY so a FUTURE controlled experiment can re-measure
+ * before any further bump.
+ * gap-ac74-serial-lowconc-literal-direct-path (human 06:4xZ AC68 /slots 回退) — the serial/lowconc
+ * PHASE budgets divide by the concurrent-suite slot count (hostParallelism ÷ QUAY_MAX_CONCURRENT_SUITES;
+ * 1 suite ⇒ 16, 2 suites ⇒ each 8 on a 16-core host) — the SAME expression test.sh's
+ * serial_lowconc_host_default reads so the direct path matches (判据4). This is the AC44 rule; the
+ * MAIN lane budget (defaultLaneCount) ALSO divides by S (max(1, floor(nproc × oversub / S)) —
+ * gap-suite-budget-oversubscribe, human 14:4xZ 修正方向), so the sum over S suites cannot exceed
+ * nproc × oversub.
+ * gap-lane-formula-ignores-phase-overlap-concurrency — the phase budgets now ALSO divide by the
+ * concurrent-phase count P (S × P = slots × concurrentPhaseCount()): with overlap ON the overlap
+ * window runs serial+lowconc in parallel (Σ lane = SERIAL + LOWCONC), so each phase gets
+ * hostParallelism ÷ (S × 2) — the same S×P denominator test.sh's serial_lowconc_host_default reads.
+ */
+export const DEFAULT_SERIAL_CONCURRENCY = Math.max(1, Math.floor(hostParallelism() / (concurrentSuiteSlots() * concurrentPhaseCount())));
+export const DEFAULT_LOWCONC_CONCURRENCY = Math.max(1, Math.floor(hostParallelism() / (concurrentSuiteSlots() * concurrentPhaseCount())));
 
 /** Parse a positive-integer arg (e.g. --serial-concurrency 2); NaN/<1 → null (caller errors). */
 function parsePositiveIntArg(argv: string[], name: string): number | null {
@@ -2239,8 +2277,9 @@ export async function run(argv: string[]): Promise<number> {
   // concurrency is passed to test.sh as QUAY_SERIAL_CONCURRENCY / QUAY_LOWCONC_CONCURRENCY so the
   // controlled experiment can run the serial phase at a higher concurrency and measure wall-clock +
   // cancelled BEFORE the default is bumped. Defaults are host-read (DEFAULT_SERIAL_CONCURRENCY /
-  // DEFAULT_LOWCONC_CONCURRENCY = os.availableParallelism(), gap-ac44-concurrent-phases-read-host-
-  // parallelism) — an explicit flag always wins over the host default (AC2).
+  // DEFAULT_LOWCONC_CONCURRENCY = os.availableParallelism() ÷ (slots × concurrentPhaseCount()),
+  // gap-ac44-concurrent-phases-read-host-parallelism + gap-lane-formula-ignores-phase-overlap-
+  // concurrency) — an explicit flag always wins over the host default (AC2).
   const serialConcurrencyArg = parsePositiveIntArg(argv, "--serial-concurrency");
   const lowconcConcurrencyArg = parsePositiveIntArg(argv, "--lowconc-concurrency");
   if (serialConcurrencyArg === null && parseArg(argv, "--serial-concurrency") !== undefined) {

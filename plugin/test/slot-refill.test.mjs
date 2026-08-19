@@ -72,7 +72,7 @@ import {
 // AC47 (gap-ac47-completion-predicate-consumer-fail-closed): the shape-aware completion counter (the
 // single source both slot-refill's landed gate and ready-pool-check's notYetFlipped consume) — needed
 // directly for the AC2 all-5-consumers negative control on the DIR-014 suffixed-heading shape.
-import { applyPromotions, countCompletionCheckboxes } from "../scripts/ready-pool-check.ts";
+import { applyPromotions, countCompletionCheckboxes, RETREATED_MARKER_RE, isRetreated } from "../scripts/ready-pool-check.ts";
 import { countAcCheckboxes } from "../scripts/task-status-drift-check.ts";
 // DIRECTORY-GLOB SELF-FILE EXEMPTION (tasks/gap-directory-level-tasks-touch-global-lock AC1): the
 // pure-function unit test needs parseTouches (candidate/in-flight Touches parsing) + expandGlobs (the
@@ -683,6 +683,66 @@ test("SUPERSEDED FILTER — marker-form only: a ready task CARRYING **SUPERSEDED
   assert.ok(r.recommended.includes("gap-discusses"), "discussion-only task is recommended");
   assert.ok(r.recommended.includes("gap-clean"), "clean task is recommended");
   assert.ok(!r.recommended.includes("gap-marker"), "marker-carrying task never recommended");
+});
+
+// ── RETREATED / 搁置 FILTER (tasks/gap-retreated-state-not-mechanized) ──────────────────────────────
+// A ready task the outer retreated (load-induced red rollback, left `ready` so it stays in the pool)
+// carries a line-start bold `**RETREATED` marker and must NOT be recommended for dispatch — "等
+// fix-scope gate land 前不重派" is a MECHANICAL signal, not a manual skip (the AC53 heartbeat REFUSED
+// root cause: should_refill=true with retreated tasks recommended, then skipped by hand). 解除搁置 =
+// removing the marker ⇒ dispatchable again.
+
+test("RETREATED FILTER — a ready task carrying **RETREATED** is deferred and NOT recommended; removing the marker (解除搁置) restores dispatch (AC1/AC2/DoD)", (t) => {
+  const root = makeWorkspace("retreated");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // Marker-form: the outer retreat leaves `> **RETREATED / 搁置** …` as a body line.
+  writeTask(root, "gap-ret", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/ret.ts (new)"], "\n> **RETREATED / 搁置** load-induced red — wait for fix-scope gate.\n") });
+  writeTask(root, "gap-clean", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/clean.ts (new)"]) });
+  const tasksDir = path.join(root, "tasks");
+
+  const r = analyzeSlotRefill({ tasksDir, root, cap: 5 });
+  assert.ok(!r.recommended.includes("gap-ret"), "retreated task is NOT recommended (no manual skip)");
+  assert.ok(r.recommended.includes("gap-clean"), "a clean disjoint candidate is still recommended");
+  const ret = (r.deferred || []).find((d) => d.id === "gap-ret");
+  assert.ok(ret && /retreated/.test(ret.reason), `retreated task deferred with reason "retreated", got: ${JSON.stringify(ret)}`);
+
+  // Un-shelve (解除搁置): rewrite the task WITHOUT the marker ⇒ dispatchable again.
+  writeTask(root, "gap-ret", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/ret.ts (new)"]) });
+  const r2 = analyzeSlotRefill({ tasksDir, root, cap: 5 });
+  assert.ok(r2.recommended.includes("gap-ret"), "after 解除搁置 (marker removed) the task is recommended again");
+});
+
+test("RETREATED FILTER — a retreated-only pool ⇒ should_refill=false with a named reason (AC53 end-invariant no longer trips, AC3)", (t) => {
+  const root = makeWorkspace("retreated-only");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // The ONLY ready candidate is retreated — before the fix slot-refill recommended it (should_refill
+  // true + no_refill_reason null) and the heartbeat refused on manual skip. Now it is deferred, so the
+  // end-invariant (should_refill ∧ slots_free>0 ∧ dispatchable_disjoint>0 ∧ no reason) is NOT violated.
+  writeTask(root, "gap-ret", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/ret.ts (new)"], "\n> **RETREATED / 搁置** load-induced red — wait for fix-scope gate.\n") });
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 5 });
+  assert.deepEqual(r.recommended, [], "no dispatchable recommendation (the retreated task is deferred, not skipped)");
+  assert.equal(r.should_refill, false, "should_refill=false — the AC53 end-invariant gate no longer trips");
+  assert.ok(r.no_refill_reason, "no_refill_reason is non-null (never the should_refill=true + null shape that REFUSED)");
+});
+
+test("RETREATED FILTER — position-based (hard-rule ②): a prose mention of 'retreat' is NOT the marker; only the bold line-start form defers (AC1 negative control)", (t) => {
+  const root = makeWorkspace("retreated-prose");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // Prose mentions "retreat"/"retreated" without the bold line-start marker — must stay dispatchable.
+  writeTask(root, "gap-prose", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/prose.ts (new)"], "\nThis task discusses the retreated-state defect but is not itself retreated.\n") });
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 5 });
+  assert.ok(r.recommended.includes("gap-prose"), "a prose mention of retreated is NOT excluded (marker-form only)");
+  const d = (r.deferred || []).find((x) => x.id === "gap-prose");
+  assert.ok(!d || !/retreated/.test(d.reason), `prose-mention task must not defer as retreated, got: ${JSON.stringify(d)}`);
+});
+
+test("RETREATED MARKER — pure: bold line-start form matches; inline/prose forms do not (recognition pin, AC1)", () => {
+  assert.equal(RETREATED_MARKER_RE.test("> **RETREATED / 搁置** load-induced red"), true, "blockquote line-start marker matches");
+  assert.equal(RETREATED_MARKER_RE.test("**RETREATED**"), true, "bare line-start marker matches");
+  assert.equal(RETREATED_MARKER_RE.test("a task that was retreated stays ready"), false, "prose 'retreated' is not the marker");
+  assert.equal(RETREATED_MARKER_RE.test("note the **RETREATED** inline mention"), false, "inline bold mention is not the marker (line-start only)");
+  assert.equal(isRetreated({ body: "> **RETREATED / 搁置**\n" }), true, "isRetreated recognizes the marker");
+  assert.equal(isRetreated({ body: "not a marker" }), false, "isRetreated fails on a non-marker body");
 });
 
 // ── AC7: idempotence — pure, no writes, same inputs ⇒ identical output ─────────────────────────────

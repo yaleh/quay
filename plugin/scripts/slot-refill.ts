@@ -92,6 +92,12 @@ import {
   // category (e.g. naming the `superseded-capability` checker) is NOT a superseded task and must stay
   // dispatchable. Reused from ready-pool-check's marker regex (single source, no parallel copy).
   SUPERSEDED_MARKER_RE,
+  // RETREATED / 搁置 MARKER (tasks/gap-retreated-state-not-mechanized): a task the outer retreated
+  // (load-induced red rollback) carries a line-start bold `**RETREATED` marker and must NOT be
+  // re-recommended until the fix-scope gate lands and the marker is removed (解除搁置). Reused from
+  // ready-pool-check's marker regex (single source, no parallel copy) — the SAME recognition/exclusion
+  // split as SUPERSEDED_MARKER_RE.
+  RETREATED_MARKER_RE,
   // MERGE-WORKTREE SURFACE (tasks/gap-dispatch-gate-blind-to-inflight-merge-worktree): the
   // merge-in-flight detector + its touches-overlap judge. The dispatch gate's touches-overlap
   // judgment must include in-flight MERGE worktrees' conflict surfaces (the vhs-merge accident:
@@ -807,6 +813,15 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
       // gap-slot-refill-clique-ignores-landed-touches, whose body names `superseded-capability`) stays
       // dispatchable.
       if (SUPERSEDED_MARKER_RE.test(text)) { defer(id, "superseded"); continue; }
+      // RETREATED / 搁置 FILTER (tasks/gap-retreated-state-not-mechanized): a ready task the outer
+      // retreated (load-induced red rollback, left `ready` so it stays in the pool) carries the
+      // line-start bold `**RETREATED` marker and must never be recommended for dispatch — "等 fix-scope
+      // gate land 前不重派" is now a MECHANICAL signal, not a manual skip (the AC53 heartbeat REFUSED
+      // root cause: should_refill=true with the retreated tasks recommended, then skipped by hand).
+      // Removing the marker (解除搁置) restores dispatchability. Same principle as superseded: the
+      // marker is the mechanism's signal, position-based (hard-rule ② — only the bold line-start
+      // MARKER matches, a prose mention of "retreated" stays dispatchable).
+      if (RETREATED_MARKER_RE.test(text)) { defer(id, "retreated"); continue; }
       // INJECTED DISPATCH GATE (optional): any additional per-candidate check the caller wants to
       // enforce (default none). A rejected candidate (ok:false) is skipped and the loop continues →
       // BACKFILL from later-in-sort candidates, exactly like the built-in step-4 gates — a rejected
