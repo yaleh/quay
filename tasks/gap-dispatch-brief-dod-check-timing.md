@@ -1,7 +1,7 @@
 ---
 id: gap-dispatch-brief-dod-check-timing
 title: "派发 brief「不勾 DoD」与 fan-in gate「DoD 必勾」时序张力——impl 应勾 impl-time 项、fan-in 勾 fan-in-time 项，非「全不勾」"
-status: ready
+status: done
 labels:
   - gap
   - process
