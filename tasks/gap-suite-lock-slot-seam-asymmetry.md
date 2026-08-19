@@ -19,17 +19,23 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: `suiteLockSlotCount()` 与 bash 侧同源读 seam（`RESOURCE_GATE_CONCURRENT_SUITES` 优先，回退 `QUAY_MAX_CONCURRENT_SUITES`），两侧对称。
-- [ ] AC2: 负控制——`QUAY_MAX_CONCURRENT_SUITES=1` 时 5 个 fixture 不再因硬编码 S=2 假设红（读 seam 后断言自适应）。
-- [ ] AC3: TS==bash 槽数不变量保持（suite-slot-ssot-check I4）。
+- [x] AC1: `suiteLockSlotCount()` 与 bash 侧同源读 seam（`RESOURCE_GATE_CONCURRENT_SUITES` 优先，回退 `QUAY_MAX_CONCURRENT_SUITES`），两侧对称。
+- [x] AC2: 负控制——`QUAY_MAX_CONCURRENT_SUITES=1` 时 5 个 fixture 不再因硬编码 S=2 假设红（读 seam 后断言自适应）。
+- [x] AC3: TS==bash 槽数不变量保持（suite-slot-ssot-check I4）。
 
 ## Definition of Done
 
-- [ ] `QUAY_MAX_CONCURRENT_SUITES=1` 时 5 fixture 绿（seam 对称、断言不硬编码 S=2），scoped 绿（真实输出）。
+- [x] `QUAY_MAX_CONCURRENT_SUITES=1` 时 5 fixture 绿（seam 对称、断言不硬编码 S=2），scoped 绿（真实输出）。
 
 ## Touches
 
 - tasks/gap-suite-lock-slot-seam-asymmetry.md（自身）
 - plugin/scripts/suite-lock-slots.ts（suiteLockSlotCount 读 seam）
 - plugin/scripts/suite-slot-lib.sh（bash 侧 seam 语义对齐）
-- plugin/test/suite-slot-ssot-check.test.mjs（seam 对称负控制）
+- plugin/scripts/pre-verified-round-record.ts（第三个槽数读点改委托 canonical，消除同族 seam 不对称）
+- plugin/scripts/suite-slot-ssot-check.ts（I4 注释随 seam 对称更新）
+- plugin/test/suite-slot-ssot-check.test.mjs（seam 对称负控制 + I4 能取假改注入漂移）
+- plugin/test/full-suite-runner.test.mjs（AC2 默认断言清 seam）
+- plugin/test/resource-gate.test.mjs（AC5 断言自适应 S + 判据4 清 seam）
+- plugin/test/worktree-process-reaper.test.mjs（fullSuiteLockFiles 断言自适应 S）
+- plugin/test/pre-verified-round-record.test.mjs（concurrentSuiteSlots / concurrentSuitesRunning 断言自适应 S）

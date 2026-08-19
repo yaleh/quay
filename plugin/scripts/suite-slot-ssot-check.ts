@@ -227,10 +227,11 @@ export function checkBashTsCountAgree(root: string): SsotVerdict {
     return { id: "I4", ok: false, evaluated: false, detail: "suite-slot-lib.sh not found (cannot judge)" };
   }
   const ts = suiteLockSlotCount();
-  // NOTE: the bash canonical reads RESOURCE_GATE_CONCURRENT_SUITES (test seam) → QUAY_MAX_CONCURRENT_SUITES.
-  // The TS canonical reads QUAY_MAX_CONCURRENT_SUITES. They agree when the seam is unset (production);
-  // under a test seam the checker pins QUAY_MAX_CONCURRENT_SUITES (the production knob) so the comparison
-  // is apples-to-apples.
+  // NOTE: since gap-suite-lock-slot-seam-asymmetry, BOTH canons read the same precedence —
+  // RESOURCE_GATE_CONCURRENT_SUITES (test seam) → QUAY_MAX_CONCURRENT_SUITES (旋钮②) → 2, with
+  // empty-string-as-unset (`:-`) on both. They therefore agree under ANY env (production or a test
+  // seam); a drift here means one side's semantics changed independently, which is exactly what I4
+  // detects.
   const res = spawnSync("bash", ["-c", `source "${lib}"; suite_slot_count`], { encoding: "utf8", env: process.env });
   if (res.status !== 0) {
     return { id: "I4", ok: false, evaluated: false, detail: `suite_slot_count failed: ${res.stderr}` };

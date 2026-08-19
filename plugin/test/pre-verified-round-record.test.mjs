@@ -349,7 +349,7 @@ test("AC1 — a REAL-suite record (preverified:0) with a suite log carries seria
     assert.equal(record.lowconc_phase_ms, 0, "lowconc_phase_ms ← lowconc_phase_ms");
     assert.equal(record.main_phase_ms, 512000, "main_phase_ms ← main_phase_ms");
     assert.equal(typeof record.nproc, "number", "nproc is a number (read-host)");
-    assert.equal(record.concurrentSuiteSlots, 2, "concurrentSuiteSlots = QUAY_MAX_CONCURRENT_SUITES default 2");
+    assert.equal(record.concurrentSuiteSlots, concurrentSuiteSlots(), "concurrentSuiteSlots = the configured slot count (default 2; adaptive under QUAY_MAX_CONCURRENT_SUITES=1, gap-suite-lock-slot-seam-asymmetry AC2)");
     assert.equal(record.concurrentSuitesRunning, 1, "a lone round (no held other-suite slot) records concurrentSuitesRunning=1");
   } finally {
     if (prevLock === undefined) delete process.env.FULL_SUITE_LOCK_FILE;
@@ -387,7 +387,11 @@ test("AC1 — a real-suite record with an UNREADABLE suite log records phase-les
 test("AC1 — the concurrency helpers read the host + QUAY_MAX_CONCURRENT_SUITES the SAME way full-suite-runner does (seams respected)", () => {
   const prevNproc = process.env.RESOURCE_GATE_NPROC;
   const prevSlots = process.env.QUAY_MAX_CONCURRENT_SUITES;
+  const prevSeam = process.env.RESOURCE_GATE_CONCURRENT_SUITES;
   try {
+    // This test drives the KNOB — clear the seam (read FIRST since gap-suite-lock-slot-seam-asymmetry)
+    // so it cannot shadow the knob from an ambient test env.
+    delete process.env.RESOURCE_GATE_CONCURRENT_SUITES;
     process.env.RESOURCE_GATE_NPROC = "8";
     process.env.QUAY_MAX_CONCURRENT_SUITES = "1";
     assert.equal(hostParallelism(), 8, "RESOURCE_GATE_NPROC is the deterministic nproc seam");
@@ -399,6 +403,8 @@ test("AC1 — the concurrency helpers read the host + QUAY_MAX_CONCURRENT_SUITES
     else process.env.RESOURCE_GATE_NPROC = prevNproc;
     if (prevSlots === undefined) delete process.env.QUAY_MAX_CONCURRENT_SUITES;
     else process.env.QUAY_MAX_CONCURRENT_SUITES = prevSlots;
+    if (prevSeam === undefined) delete process.env.RESOURCE_GATE_CONCURRENT_SUITES;
+    else process.env.RESOURCE_GATE_CONCURRENT_SUITES = prevSeam;
   }
 });
 
@@ -414,7 +420,7 @@ test("AC1 — concurrentSuitesRunning=2 when another suite holds a slot [negativ
     try {
       assert.equal(countHeldSuiteLocks(REPO_ROOT), 1, "the held other-suite slot is probed (seam self-check)");
       const { record } = buildPreVerifiedRoundRecord({ ...BASE, preverified: "0", root: REPO_ROOT });
-      assert.equal(record.concurrentSuitesRunning, 2, "concurrentSuitesRunning=2 when another suite holds a slot");
+      assert.equal(record.concurrentSuitesRunning, Math.min(2, concurrentSuiteSlots()), "concurrentSuitesRunning = min(1 + held-other-suite, slots) — 2 when S>=2, 1 when S=1 (adaptive, gap-suite-lock-slot-seam-asymmetry AC2)");
     } finally {
       if (prevLock === undefined) delete process.env.FULL_SUITE_LOCK_FILE;
       else process.env.FULL_SUITE_LOCK_FILE = prevLock;

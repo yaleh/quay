@@ -31,6 +31,7 @@ import {
   selfAndAncestors,
   enumerateProcsFromSeam,
 } from "../scripts/worktree-process-reaper.ts";
+import { suiteLockSlotCount } from "../scripts/suite-lock-slots.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(__dirname, "..", "..");
@@ -133,7 +134,7 @@ test("classifyOrphans — orphan probes (cwd deleted + claude-probe) + stale loc
   assert.deepEqual(cls.staleLockHolders.map((p) => p.pid), [2]);
 });
 
-test("fullSuiteLockFiles — derives <git-common-dir>/full-suite.lock.0/.1 from a real git repo", () => {
+test("fullSuiteLockFiles — derives <git-common-dir>/full-suite.lock.0..S-1 from a real git repo (S = configured slot count)", () => {
   const dir = tmp("git");
   try {
     const git = (args) => spawnSync("git", args, { cwd: dir, encoding: "utf8" });
@@ -144,8 +145,12 @@ test("fullSuiteLockFiles — derives <git-common-dir>/full-suite.lock.0/.1 from 
     git(["add", "-A"]);
     git(["commit", "-qm", "x"]);
     const lockFiles = fullSuiteLockFiles(dir);
-    assert.ok(lockFiles[0].endsWith("/full-suite.lock.0"), lockFiles[0]);
-    assert.ok(lockFiles[1].endsWith("/full-suite.lock.1"), lockFiles[1]);
+    // Adaptive to the configured slot count (gap-suite-lock-slot-seam-asymmetry AC2): S=1 ⇒ [.0] only,
+    // S=2 ⇒ [.0,.1], S=3 ⇒ [.0,.1,.2] — no hardcoded 2-file assumption.
+    assert.equal(lockFiles.length, suiteLockSlotCount(), `fullSuiteLockFiles derives S slot paths (S=${suiteLockSlotCount()}), got ${JSON.stringify(lockFiles)}`);
+    lockFiles.forEach((f, i) => {
+      assert.ok(f.endsWith(`/full-suite.lock.${i}`), `slot ${i} ends with /full-suite.lock.${i}, got ${f}`);
+    });
   } finally {
     cleanup(dir);
   }
