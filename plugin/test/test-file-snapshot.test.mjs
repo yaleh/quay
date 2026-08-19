@@ -19,7 +19,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -118,6 +118,62 @@ test("AC1: exact worktree check — current == baseline ∪ --expect-added; an u
     const bad = runHelper(["check", baseline, "--expect-added", expect, ...leakSet]);
     assert.notEqual(bad.status, 0, "an unexpected addition must be red under --expect-added");
     assert.match(bad.stderr, /leak\.test\.mjs/, "the unexpected file must be named");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── AC1 (gap-test-file-snapshot-no-production-caller): the WIRED production mode ─────────────────────
+// The run_static_checks wiring invokes `test-file-snapshot.sh --repo-relative check
+// <committed-baseline>`. --repo-relative normalizes the canonical --list-files output (absolute
+// realpaths, machine-/worktree-specific) to repo-root-relative so ONE committed baseline is portable
+// across worktrees / the main checkout / CI. These tests pin that normalization on a hermetic fake
+// repo whose scripts/test.sh --list-files prints absolute paths under ITS root.
+
+function makeFakeRepo(root, fileNames) {
+  // fileNames are repo-relative; the fake test.sh prints them as absolute paths under `root`.
+  mkdirSync(join(root, "scripts"), { recursive: true });
+  writeFileSync(
+    join(root, "scripts", "test.sh"),
+    `#!/usr/bin/env bash\nif [ "\${1:-}" = "--list-files" ]; then\n  printf '%s\\n' \\\n${fileNames
+      .map((f) => `    "${join(root, f)}"`)
+      .join(" \\\n")}\nfi\n`,
+  );
+}
+
+test("AC1 wired mode: --repo-relative snapshot records repo-relative paths (portable baseline)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "tfs-rel-"));
+  try {
+    const fakeRoot = join(dir, "repo");
+    const relFiles = ["plugin/test/a.test.mjs", "plugin/test/b.test.mjs", "plugin/test/c.test.mjs"];
+    makeFakeRepo(fakeRoot, relFiles);
+    const baseline = join(dir, "baseline.txt");
+    const r = runHelper(["--repo-relative", "--root", fakeRoot, "snapshot", baseline]);
+    assert.equal(r.status, 0, `snapshot exited ${r.status}: ${r.stderr}`);
+    const recorded = readFileSync(baseline, "utf8").trim().split("\n").filter(Boolean).sort();
+    assert.deepEqual(recorded, [...relFiles].sort(), "baseline must be repo-relative, not absolute");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC1 wired mode: --repo-relative check is green on an intact set and RED on a removal", () => {
+  const dir = mkdtempSync(join(tmpdir(), "tfs-relcheck-"));
+  try {
+    const fakeRoot = join(dir, "repo");
+    const full = ["plugin/test/a.test.mjs", "plugin/test/b.test.mjs", "plugin/test/c.test.mjs"];
+    makeFakeRepo(fakeRoot, full);
+    const baseline = join(dir, "baseline.txt");
+    assert.equal(runHelper(["--repo-relative", "--root", fakeRoot, "snapshot", baseline]).status, 0);
+    // Self-check against the same tree → green, 0 additions.
+    const self = runHelper(["--repo-relative", "--root", fakeRoot, "check", baseline]);
+    assert.equal(self.status, 0, `self-check must be green: ${self.stdout}${self.stderr}`);
+    // Negative control (AC2): delete b.test.mjs from the tree → the check MUST exit non-zero and
+    // name the removed file (this is the exact wired shape: 删测试文件必红).
+    makeFakeRepo(fakeRoot, [full[0], full[2]]);
+    const neg = runHelper(["--repo-relative", "--root", fakeRoot, "check", baseline]);
+    assert.notEqual(neg.status, 0, "a removal must be red under the wired --repo-relative check");
+    assert.match(neg.stderr, /b\.test\.mjs/, "the removed file must be named");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

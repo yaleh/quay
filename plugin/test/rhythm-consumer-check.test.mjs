@@ -75,11 +75,15 @@ test("判据1 — KNOWN_UNWIRED baseline is reported as known-gap, not red", () 
   assert.ok(KNOWN_UNWIRED["mechanism-vitality-check.ts"], "the baseline carries a reason");
 });
 
-test("判据1 — the KNOWN_UNWIRED baseline names the 21 pre-existing zero-call gaps", () => {
+test("判据1 — the KNOWN_UNWIRED baseline names the 20 pre-existing zero-call gaps", () => {
   // The baseline is the enumerated list of pre-existing non-按需 zero-call mechanisms (measured
   // 2026-08-14). It must not silently grow — a NEW mechanism that is neither wired nor baselined
-  // is RED. Sanity: the two fan-in checkers are NOT baselined (they must be caught).
-  assert.equal(Object.keys(KNOWN_UNWIRED).length, 21);
+  // is RED. SHRINK-ONLY: 21 → 20 on 2026-08-19 when gap-test-file-snapshot-no-production-caller
+  // wired test-file-snapshot.sh into run_static_checks (a wired mechanism is no longer a
+  // known-gap — it has a strict call site). Sanity: the two fan-in checkers are NOT baselined
+  // (they must be caught).
+  assert.equal(Object.keys(KNOWN_UNWIRED).length, 20);
+  assert.equal("test-file-snapshot.sh" in KNOWN_UNWIRED, false, "wired — no longer a known gap");
   assert.equal("fan-in-ff-protocol-check.ts" in KNOWN_UNWIRED, false);
   assert.equal("fan-in-ff-executor-check.ts" in KNOWN_UNWIRED, false);
 });

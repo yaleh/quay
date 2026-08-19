@@ -104,7 +104,6 @@ export const KNOWN_UNWIRED: Record<string, string> = {
   "supervisor-health.sh": "supervisor health observer — invoked by the supervisor path, not every round",
   "supervisor-observe.sh": "supervisor observe loop — invoked by the supervisor path, not every round",
   "test-file-baseline.ts": "test-file baseline snapshot — maintenance utility, cadence aspirational",
-  "test-file-snapshot.sh": "test-file snapshot capture — maintenance utility, cadence aspirational",
   "unverified-integration-task-ids.ts": "unverified integration task-id census — ad hoc, cadence aspirational",
   "workflow-baseline-metrics.ts": "workflow baseline metrics collector — invoked by workflow infra, not a suite gate",
   "workflow-journal.ts": "workflow stage journal store — library used by workflow infra, cadence aspirational",
