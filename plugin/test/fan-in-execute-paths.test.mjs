@@ -41,7 +41,7 @@ import os from "node:os";
 import path from "node:path";
 import vm from "node:vm";
 import { fileURLToPath } from "node:url";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { buildTaskManifest, checkTaskAntiDrift } from "../scripts/anti-drift-touches-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -1103,6 +1103,114 @@ test("⑦ REAL skip — a doc-only capture (full_suite_ran=false) writes NO veri
   assert.equal(fs.existsSync(path.join(dir, ".quay", "verification-round.jsonl")), false, "no verification-round record for a doc-only skip (no suite ran)");
 });
 
+// ── ⑦b full-suite-state.json mirror-write (gap-full-suite-state-stale-no-writer AC1/AC3) ─────────────
+// The detached suite (setsid bash scripts/test.sh) never goes through full-suite-runner.ts (the ONLY
+// full-suite-state.json writer) ⇒ the state file went stale (the /tests page read a stale currentState;
+// collectFailureFiles carried a latent unbounded-union of a stale state's failures[]). The fix: step 4.5
+// mirror-writes the terminal GREEN state (reusing full-suite-runner's mirrorStateFile pattern) via
+// plugin/scripts/mirror-full-suite-state.ts, guarded by full_suite_ran=true (a doc-only skip never
+// fabricates a green). These tests run the REAL block against a real temp repo + a real capture.
+
+async function mirrorBlockFor(task, worktree, root) {
+  const { prompts } = await runWorkflow({
+    args: { task, worktree, root, runId: "fm-mirror-1", mergeTarget: "develop" },
+  });
+  return extractBlockFromPrompts(prompts, "# mirror-state-block-start", "# mirror-state-block-end");
+}
+
+test("⑦b wiring — the fan-in prompt carries a full-suite-state.json mirror-write block (mirror-full-suite-state.ts, guarded by full_suite_ran=true, inside the preverified-round-block)", async (t) => {
+  const { prompts } = await runWorkflow({
+    args: { task: "gap-test-mirror", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-mirror", mergeTarget: "develop" },
+  });
+  const block = extractBlockFromPrompts(prompts, "# mirror-state-block-start", "# mirror-state-block-end");
+  assert.ok(block.includes("mirror-full-suite-state.ts"), "block must invoke the mirror writer");
+  assert.ok(block.includes("--state green"), "the mirror writes the terminal GREEN state (phase 2 only runs green)");
+  assert.ok(block.includes('--finished-at "$end_iso"'), "block must pass the capture's real end time (end_iso)");
+  assert.ok(block.includes('--commit "$suite_head"'), "block must pin the verified suite_head as commit");
+  assert.ok(block.includes('--duration-ms "$wall_ms"'), "block must reuse the capture's wall-clock");
+  assert.ok(block.includes('--lane-count "$lane_count"'), "block must reuse the capture's lane count");
+  assert.ok(block.includes('--load "$load"'), "block must reuse the capture's load");
+  assert.ok(block.includes("--task-id gap-test-mirror"), "block must carry the fan-in task id (traceability)");
+  assert.ok(block.includes("--run-id fm-mirror"), "block must carry the fan-in runId (traceability)");
+  // The mirror write lives INSIDE the full_suite_ran=true guard (the same shared guard as the
+  // verification-round write) — a doc-only skip must not fabricate a green state.
+  const p2 = promptContaining(prompts, "# mirror-state-block-start");
+  const guardIdx = p2.indexOf('[ "$full_suite_ran" = "true" ]');
+  const blockIdx = p2.indexOf("# mirror-state-block-start");
+  const guardEndIdx = p2.indexOf("# preverified-round-block-end");
+  assert.ok(guardIdx >= 0, "the full_suite_ran=true guard must be present in the phase-2 prompt");
+  assert.ok(blockIdx > guardIdx && blockIdx < guardEndIdx, "the mirror write runs INSIDE the full_suite_ran=true guard");
+});
+
+test("⑦b REAL mirror — a green fan-in capture writes a FRESH full-suite-state.json to the shared checkout (gap-full-suite-state-stale-no-writer AC1/AC3)", async (t) => {
+  const dir = makePreVerifiedWorktree();
+  t.after(() => cleanup(dir));
+  const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: dir, encoding: "utf8" }).stdout.trim();
+  const task = "gap-test-mirror-real";
+  const capture = `/tmp/fan-in-suite-${task}.env`;
+  fs.writeFileSync(capture, [
+    "full_suite_ran=true",
+    "skip_reason=",
+    "cpu_s=42.5",
+    "cpu_source=gnu-time",
+    "start_iso=2026-08-18T04:30:00.000Z",
+    "end_iso=2026-08-18T04:45:36.519Z",
+    "wall_ms=936519",
+    "load=8.03",
+    "lane_count=8",
+    "suite_exit=0",
+    `suite_head=${head}`,
+  ].join("\n") + "\n", "utf8");
+  t.after(() => { try { fs.rmSync(capture, { force: true }); } catch (_) { /* best-effort */ } });
+
+  const block = await mirrorBlockFor(task, dir, REPO_ROOT);
+  const r = runBash(`suite_capture="${capture}"; . "$suite_capture"; ${block}`, { cwd: dir });
+  assert.equal(r.status, 0, `mirror write must exit 0: ${r.stderr}`);
+  const stateFile = path.join(dir, ".quay", "full-suite-state.json");
+  assert.ok(fs.existsSync(stateFile), "full-suite-state.json was written");
+  const st = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  assert.equal(st.state, "green");
+  assert.equal(st.startedAt, "2026-08-18T04:30:00.000Z");
+  assert.equal(st.finishedAt, Math.floor(Date.parse("2026-08-18T04:45:36.519Z") / 1000), "finishedAt is EPOCH SECONDS (full-suite-runner convention)");
+  assert.equal(st.durationMs, 936519);
+  assert.equal(st.laneCount, 8);
+  assert.equal(st.load, 8.03);
+  assert.equal(st.commit, head, "commit = the pinned suite_head");
+  assert.equal(st.runner, "inner", "the fan-in suite is an inner-layer run");
+  assert.equal(st.scope, "worktree");
+  assert.equal(st.taskId, task);
+  assert.equal(st.runId, "fm-mirror-1");
+});
+
+test("⑦b REAL skip — a doc-only capture (full_suite_ran=false) writes NO full-suite-state.json (no suite ran ⇒ no fabricated green)", async (t) => {
+  const dir = makePreVerifiedWorktree();
+  t.after(() => cleanup(dir));
+  const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: dir, encoding: "utf8" }).stdout.trim();
+  const task = "gap-test-mirror-skip";
+  const capture = `/tmp/fan-in-suite-${task}.env`;
+  fs.writeFileSync(capture, [
+    "full_suite_ran=false",
+    "skip_reason=doc-only-delta",
+    "cpu_s=null",
+    "cpu_source=not-wired",
+    "start_iso=2026-08-18T05:00:00.000Z",
+    "end_iso=2026-08-18T05:00:00.000Z",
+    "wall_ms=0",
+    "load=4.5",
+    "lane_count=1",
+    "suite_exit=0",
+    `suite_head=${head}`,
+  ].join("\n") + "\n", "utf8");
+  t.after(() => { try { fs.rmSync(capture, { force: true }); } catch (_) { /* best-effort */ } });
+
+  // Run the FULL preverified-round-block (which wraps the mirror block in the full_suite_ran=true
+  // guard) so the guard is what excludes the write — not a manually-skipped block.
+  const block = await preVerifiedBlockFor(task, dir, REPO_ROOT);
+  const r = runBash(`suite_capture="${capture}"; . "$suite_capture"; ${block}`, { cwd: dir });
+  assert.equal(r.status, 0, `doc-only skip must exit 0 (no write): ${r.stderr}`);
+  assert.equal(fs.existsSync(path.join(dir, ".quay", "full-suite-state.json")), false, "no full-suite-state.json for a doc-only skip (the full_suite_ran=true guard excludes it)");
+});
+
 test("⑦ REAL real-suite WITH a suite log — the fan-in landing row carries the phase fields + concurrency variables (gap-fan-in-verification-round-thin-schema-phase-gap AC1/AC4)", async (t) => {
   // THE DEFECT THIS TASK FIXES: fan-in landing rows were thin — no serial/main/static phase ms, no
   // nproc/concurrentSuiteSlots/concurrentSuitesRunning — so AC101's lane-concurrency control round
@@ -1226,6 +1334,7 @@ test("⑦ worktree-resolution — every fan-in orchestration script call is ${wo
     "select-static-checks-for-touches.ts --classify-delta", // step 2 (phase 1)
     "per-task-suite-record.ts",                             // step 4.5 (phase 2)
     "pre-verified-round-record.ts",                         // step 4.5 (phase 2, both fan-in branches)
+    "mirror-full-suite-state.ts",                           // step 4.5 (phase 2, gap-full-suite-state-stale-no-writer)
     "fan-in-ac-completion-gate.ts",                         // step 5 (phase 2)
     "fan-in-ff-merge.sh",                                   // step 5 (phase 2)
     "closure-lag-check.sh",                                 // step 5.5 (phase 2)
@@ -1659,4 +1768,256 @@ test("⑧ AC3 记录面真实化 REAL — the poll reads lane_count from the sui
   const after = fs.readFileSync(capture, "utf8");
   const lane = (after.match(/^lane_count=(\d+)$/m) || [])[1];
   assert.equal(lane, "8", `lane_count must be the MAIN phase's real concurrency (the last __GROUP__ line), got: ${after.match(/^lane_count=.*$/m)?.[0]}`);
+});
+
+// ── ⑩ 轮询 agent 有界阻塞等待（gap-fan-in-execute-poll-bounded-blocking-wait）──────────────────────
+// THE DEFECT: 轮询 agent 每次「看一眼 marker 在不在」就返回 not-done，脚本 setTimeout 60s 再派下一轮——
+// suite 11-19min ⇒ 头 11-15 次结构上必然 not-done 纯空转（~21 次/轮）。修复：把有界阻塞等待
+// （timeout 540 + sleep 15）放进轮询 agent——agent 最多阻塞 540s（硬边界 < Bash 600s 上限），每 15s
+// 看一眼 marker，把 ~21 次空转压到 ~3 次。决策权仍在脚本（timeout 540 是脚本给的硬边界、maxSuitePolls
+// 是脚本循环上限），agent 不自决「等多久」（ab380c5e 是 agent 自决等待，这里是脚本手里的有界等待）。
+
+test("⑩ 有界阻塞等待 wiring — 轮询 agent 带 timeout 540（< Bash 600s 上限）+ sleep 15 循环，决策权仍在脚本（能取假）", async (t) => {
+  const { prompts } = await runWorkflow({
+    args: { task: "gap-test-poll-bounded", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-poll-bounded", mergeTarget: "develop" },
+  });
+  const poll = promptContaining(prompts, "POLL=not-done");
+  // 有界阻塞等待必须存在（能取假：把 timeout 去掉 ⇒ 此断言红）。
+  const m = poll.match(/timeout (\d+) bash -c/);
+  assert.ok(m, "poll must carry `timeout <N> bash -c` (the bounded blocking wait)");
+  const timeoutSecs = Number(m[1]);
+  // 硬边界 < Bash 600s 上限（能取假：放宽 >600s ⇒ 此断言红）。
+  assert.ok(timeoutSecs < 600, `the blocking-wait hard bound must be < Bash 600s limit, got ${timeoutSecs}s`);
+  assert.equal(timeoutSecs, 540, "the hard bound must be exactly 540s (AC1: < 600s with safety margin)");
+  // sleep 15 检查粒度 + 循环等 marker 而非 agent 自决时长。
+  assert.ok(poll.includes('while [ ! -f "$1" ]; do sleep 15; done'), "the bounded wait must loop on the marker existence with sleep 15, not an agent-decided duration");
+  // 决策权仍在脚本（不是 agent 自决等待）。
+  assert.ok(poll.includes("不要做任何等待决策"), "poll must refuse to make any waiting decision (script-owned, ab380c5e 反面)");
+});
+
+test("⑩ REAL 有界阻塞等待 — marker 中途出现时，轮询在【一次】阻塞内等到它（阻塞等待生效，非 N 次空转）", async (t) => {
+  const task = "gap-test-poll-bounded-real";
+  const capture = `/tmp/fan-in-suite-${task}.env`;
+  const marker = `/tmp/fan-in-suite-${task}.exit`;
+  fs.rmSync(marker, { force: true });
+  fs.writeFileSync(capture, ["full_suite_ran=true", "skip_reason=", `start_ms=${Date.now()}`, "suite_head=abc", `suite_log_file=/tmp/fan-in-suite-${task}.log`].join("\n") + "\n");
+  t.after(() => { for (const f of [capture, marker, `/tmp/fan-in-suite-${task}.time`, `/tmp/fan-in-suite-${task}.log`]) { try { fs.rmSync(f, { force: true }); } catch (_) { /* best-effort */ } } });
+  // marker 在 ~1s 后由【后台进程】写入（spawnSync 阻塞 Node 事件循环，Node setTimeout 不会在期间触发）。
+  // 测试用 pollBlockSleep=0.2 覆盖生产 sleep 15，证明阻塞等待本身会等——不是 fixture，是真实 bash 执行。
+  spawn("bash", ["-c", `sleep 1; echo exit=0 > "${marker}"; echo "end_ms=$(date +%s%3N)" >> "${marker}"; echo end_iso=2026-08-18T00:00:01.000Z >> "${marker}"`], { detached: true, stdio: "ignore" }).unref();
+
+  const { prompts } = await runWorkflow({
+    args: { task, worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-poll-bounded-real", mergeTarget: "develop", pollBlockSeconds: 10, pollBlockSleep: 0.2 },
+  });
+  const pollPrompt = promptContaining(prompts, "POLL=not-done");
+  const pollBlock = pollPrompt.slice(pollPrompt.indexOf("suite_capture="), pollPrompt.indexOf("返回 { done: bool"));
+  const t0 = Date.now();
+  const r = runBash(pollBlock, { cwd: "/tmp", timeout: 15_000 });
+  const elapsed = Date.now() - t0;
+  assert.equal(r.status, 0, `poll block failed: ${r.stderr}`);
+  assert.match(r.stdout, /POLL=done SUITE_EXIT=0/, `poll must find the marker mid-block (bounded wait), got: ${r.stdout}`);
+  assert.ok(elapsed >= 800, `the poll must have BLOCKED waiting (elapsed ${elapsed}ms); an instant not-done return is the N-empty-poll shape this fixes`);
+});
+
+// ── fix-scope gate（gap-fix-scope-gate-wired-to-wrong-path）───────────────────────────────────────
+// THE DEFECT: 上一版 fix-scope gate（gap-suite-fix-workflow-no-load-sensitive-branch）落在
+// execute-suite-fix.js（standalone 死工作流）零效果——生产 suite-fix 是 fan-in-execute.js 的内联
+// subagent（suite-fix 阶段 prompt），直接修根因、不经 execute-suite-fix.js。越界修已复发第 8+ 例
+// （b0aa31c2 修 quay-init.sh / eb77b17e 修 supervisor-observe.test.mjs / 43153e58 修
+// session-liveness-helpers.mjs——全不在各自任务 Touches）。FIX：gate 接线到内联 suite-fix prompt，
+// fix 前判红是否本任务 Touches 内回归——inScope 修 / load-sensitive 释放 / 别任务 bug defer。
+// 负控制（AC2）用【真实 bash】跑 gate 块（vm 实执行 workflow 发出的 prompt 分类），判越界红被
+// defer/release、零越界 fix。判定复用 touches-orthogonality-check.ts（parseTouches/matchGlob）+
+// known-load-sensitive.ts（scanFamily/kindForFile），与 execute-suite-fix.js 同源。
+
+/** Drive the RED path so the workflow emits the suite-fix (Fix-agent) prompt, then extract the
+ *  fix-scope gate block from that prompt. */
+async function fixScopeGateBlockFor(task, worktree) {
+  const { prompts } = await runWorkflow({
+    args: { task, worktree, root: REPO_ROOT, runId: "fm-fixscope", mergeTarget: "develop", pollIntervalMs: 0, maxSuitePolls: 5, maxFixRounds: 2 },
+    agentResults: [
+      { outcome: "suite-started", suitePid: 111, codeDelta: "code", worktreeHead: "h1", note: "" }, // phase 1
+      { done: true, suiteExit: 1 },                                                                 // poll: suite RED
+      { relaunched: true, worktreeHead: "h2", failuresFixed: ["x"], note: "" },                     // Fix agent
+      { done: true, suiteExit: 0 },                                                                 // poll: green after fix
+      { outcome: "green", ffOk: true, developHead: "d2", worktreeHead: "h2", agentIdUsed: "a2", codeDelta: "code", note: "bracketClose=OK", bracketClosed: true },
+    ],
+  });
+  return extractBlockFromPrompts(prompts, "# fix-scope-gate-block-start", "# fix-scope-gate-block-end");
+}
+
+/** A fake worktree: real plugin/ symlinked (the gate imports touches-orthogonality-check.ts /
+ *  known-load-sensitive.ts and scanFamily against the real manifest) + a real tasks/<id>.md. */
+function makeFixScopeDir(prefix, task, body) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  fs.symlinkSync(path.join(REPO_ROOT, "plugin"), path.join(dir, "plugin"), "dir");
+  fs.mkdirSync(path.join(dir, "tasks"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "tasks", `${task}.md`), body, "utf8");
+  return dir;
+}
+
+test("fix-scope wiring — the inline suite-fix prompt carries the gate (判红 Touches 内/越界), NOT execute-suite-fix.js", async (t) => {
+  const { prompts } = await runWorkflow({
+    args: { task: "gap-test-fixscope-wire", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-fixscope-wire", mergeTarget: "develop", pollIntervalMs: 0, maxSuitePolls: 5, maxFixRounds: 1 },
+    agentResults: [
+      { outcome: "suite-started", suitePid: 111, codeDelta: "code", worktreeHead: "h1", note: "" },
+      { done: true, suiteExit: 1 },
+      { relaunched: true, worktreeHead: "h2", failuresFixed: ["x"], note: "" },
+      { done: true, suiteExit: 0 },
+      { outcome: "green", ffOk: true, developHead: "d2", worktreeHead: "h2", agentIdUsed: "a2", codeDelta: "code", note: "bracketClose=OK", bracketClosed: true },
+    ],
+  });
+  const fixPrompt = promptContaining(prompts, "suite-fix 阶段");
+  assert.ok(fixPrompt.includes("# fix-scope-gate-block-start"), "the fix prompt must carry the fix-scope gate block");
+  assert.ok(fixPrompt.includes("FIX_SCOPE_VERDICT"), "the gate must emit a FIX_SCOPE_VERDICT");
+  assert.ok(fixPrompt.includes("known-load-sensitive.ts"), "the gate must partition by the load-sensitive manifest");
+  assert.ok(fixPrompt.includes("touches-orthogonality-check.ts"), "the gate must reuse parseTouches/matchGlob");
+  assert.ok(fixPrompt.includes("只修 inScope"), "the fix instruction must scope to inScope (Touches 内回归)");
+  assert.ok(fixPrompt.includes("越界"), "the fix instruction must forbid out-of-scope fixes");
+});
+
+test("fix-scope REAL negative control — in-Touches red → inScope(fix); out-of-Touches red → other-task defer; load-sensitive red → release", async (t) => {
+  const task = "gap-test-fixscope-real";
+  const dir = makeFixScopeDir("fan-in-fixscope-", task, [
+    "---",
+    `id: ${task}`,
+    "status: ready",
+    "---",
+    "## Touches",
+    `- tasks/${task}.md`,
+    "- pkg/a/**",
+  ].join("\n") + "\n");
+  t.after(() => cleanup(dir));
+  const log = `/tmp/fan-in-suite-${task}.log`;
+  fs.writeFileSync(log, [
+    `__PERFILE__ duration_ms=1.2 ${dir}/pkg/a/x.test.mjs passed=false`,
+    `__PERFILE__ duration_ms=2.3 ${dir}/pkg/OTHER/stray.test.mjs passed=false`,
+    `__PERFILE__ duration_ms=3.4 ${dir}/plugin/test/cold-start-skill.test.mjs passed=false`,
+  ].join("\n") + "\n", "utf8");
+  t.after(() => { try { fs.rmSync(log, { force: true }); } catch (_) { /* best-effort */ } });
+
+  const block = await fixScopeGateBlockFor(task, dir);
+  const r = runBash(block + '\necho "GATE_OUT=[$fix_scope_out]"', { cwd: dir });
+  assert.equal(r.status, 0, `gate block failed: ${r.stderr}`);
+  const m = r.stdout.match(/GATE_OUT=\[(.*)\]/s);
+  assert.ok(m, `gate JSON echo missing:\n${r.stdout}`);
+  const verdict = JSON.parse(m[1]);
+  assert.equal(verdict.scoped, true, "a task with a ## Touches section is scoped");
+  assert.deepEqual(verdict.inScope, ["pkg/a/x.test.mjs"], "an in-Touches red must be inScope (fix)");
+  const reasons = Object.fromEntries(verdict.outOfScope.map((f) => [f.file, f.reason]));
+  assert.equal(reasons["pkg/OTHER/stray.test.mjs"], "other-task", "an out-of-Touches red must defer as other-task");
+  assert.equal(reasons["plugin/test/cold-start-skill.test.mjs"], "load-sensitive", "a load-sensitive family red must release (not fix)");
+});
+
+test("fix-scope REAL machine-partition — a task WITHOUT a ## Touches section ⇒ scoped=false, load-sensitive still released, rest inScope", async (t) => {
+  const task = "gap-test-fixscope-noscope";
+  const dir = makeFixScopeDir("fan-in-fixscope-ns-", task, "---\nid: gap-test-fixscope-noscope\nstatus: ready\n---\n## Plan\nno touches section\n");
+  t.after(() => cleanup(dir));
+  const log = `/tmp/fan-in-suite-${task}.log`;
+  fs.writeFileSync(log, [
+    `__PERFILE__ duration_ms=1.2 ${dir}/plugin/test/cold-start-skill.test.mjs passed=false`,
+    `__PERFILE__ duration_ms=2.3 ${dir}/pkg/a/x.test.mjs passed=false`,
+  ].join("\n") + "\n", "utf8");
+  t.after(() => { try { fs.rmSync(log, { force: true }); } catch (_) { /* best-effort */ } });
+  const block = await fixScopeGateBlockFor(task, dir);
+  const r = runBash(block + '\necho "GATE_OUT=[$fix_scope_out]"', { cwd: dir });
+  assert.equal(r.status, 0, r.stderr);
+  const m = r.stdout.match(/GATE_OUT=\[(.*)\]/s);
+  assert.ok(m, `gate JSON echo missing:\n${r.stdout}`);
+  const verdict = JSON.parse(m[1]);
+  assert.equal(verdict.scoped, false, "no ## Touches section ⇒ scoped=false (machine-partition only)");
+  const loadSensitive = verdict.outOfScope.find((f) => f.reason === "load-sensitive");
+  assert.equal(loadSensitive.file, "plugin/test/cold-start-skill.test.mjs", "load-sensitive family is released even unscoped");
+  assert.ok(verdict.inScope.includes("pkg/a/x.test.mjs"), "unscoped: non-family failures stay inScope (machine-partition only)");
+});
+
+test("fix-scope REAL leak-residual — a tmux-leak-scan: FAIL with no per-file failure ⇒ outOfScope leak-residual (never fixed as a Touches regression)", async (t) => {
+  const task = "gap-test-fixscope-leak";
+  const dir = makeFixScopeDir("fan-in-fixscope-leak-", task, "---\nid: gap-test-fixscope-leak\nstatus: ready\n---\n## Touches\n- tasks/gap-test-fixscope-leak.md\n- pkg/a/**\n");
+  t.after(() => cleanup(dir));
+  const log = `/tmp/fan-in-suite-${task}.log`;
+  fs.writeFileSync(log, "tmux-leak-scan: FAIL\nresidual tmux server skv-1234\n", "utf8");
+  t.after(() => { try { fs.rmSync(log, { force: true }); } catch (_) { /* best-effort */ } });
+  const block = await fixScopeGateBlockFor(task, dir);
+  const r = runBash(block + '\necho "GATE_OUT=[$fix_scope_out]"', { cwd: dir });
+  assert.equal(r.status, 0, r.stderr);
+  const m = r.stdout.match(/GATE_OUT=\[(.*)\]/s);
+  const verdict = JSON.parse(m[1]);
+  assert.deepEqual(verdict.inScope, [], "no per-file failure ⇒ no inScope fix");
+  assert.ok(verdict.outOfScope.some((f) => f.reason === "leak-residual"), "tmux-leak residual must be outOfScope (env residual, not a Touches regression)");
+});
+
+// ── fix-scope gate release persistence（gap-fix-scope-gate-release-not-persistent）───────────────────
+// THE DEFECT: 上一版 gate 的 load-sensitive release 是一次性 relaunch——relaunch 后仍红，第二轮
+// suite-fix 不再走 release、直接越界修（a76959c8 session-liveness teardown 第 9+ 例）。release 无跨
+// 轮持久状态 ⇒ 第二轮 agent 无记忆、把「隔离重跑确认」读成「重跑后仍红就该修」。FIX：gate 把每个
+// load-sensitive 红的连续 release 轮数 releasedRounds 持久化到 fix_scope_release ledger，第二轮读到
+// 递增；内联 prompt 显式写「releasedRounds ≥ 1 的 load-sensitive 红一律继续 release，⛔ 不得转 fix」。
+// 负控制（AC2/AC3）：同一 load-sensitive 红 run 两轮 gate（relaunch-fail 路径）⇒ 两轮都 release、
+// 零越界 fix。取假：把「第二轮仍 release」改成「第二轮转 fix」（删 ledger 读 / 把 load-sensitive
+// 挪进 inScope / releasedRounds 不递增）⇒ 测试红。
+
+test("fix-scope release persistence wiring — relaunch-fail 2nd suite-fix prompt still carries the idempotent-release instruction", async (t) => {
+  const { prompts } = await runWorkflow({
+    args: { task: "gap-test-fixscope-persist-wire", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-fixscope-persist-wire", mergeTarget: "develop", pollIntervalMs: 0, maxSuitePolls: 5, maxFixRounds: 3 },
+    agentResults: [
+      { outcome: "suite-started", suitePid: 111, codeDelta: "code", worktreeHead: "h1", note: "" },                 // phase 1
+      { done: true, suiteExit: 1 },                                                                                   // poll: RED
+      { relaunched: true, worktreeHead: "h2", failuresFixed: [], note: "load-sensitive 释放（第1轮）" },              // fix round 1: release
+      { done: true, suiteExit: 1 },                                                                                   // poll: STILL RED (relaunch-fail)
+      { relaunched: true, worktreeHead: "h2", failuresFixed: [], note: "load-sensitive 释放（第2轮，幂等持久）" },      // fix round 2: STILL release
+      { done: true, suiteExit: 0 },                                                                                   // poll: green
+      { outcome: "green", ffOk: true, developHead: "d2", worktreeHead: "h2", agentIdUsed: "a2", codeDelta: "code", note: "bracketClose=OK", bracketClosed: true },
+    ],
+  });
+  const fixPrompts = prompts.filter((p) => p.includes("suite-fix 阶段"));
+  assert.equal(fixPrompts.length, 2, "relaunch-fail must emit TWO suite-fix prompts (round 1 + round 2)");
+  const round2 = fixPrompts[1];
+  assert.ok(round2.includes("# fix-scope-gate-block-start"), "round-2 fix prompt must still carry the gate");
+  assert.ok(round2.includes("幂等持久"), "round-2 fix prompt must carry the idempotent-persistent instruction");
+  assert.ok(round2.includes("不得转 fix"), "round-2 fix prompt must forbid converting release → fix");
+  assert.ok(round2.includes("releasedRounds"), "round-2 fix prompt must carry the releasedRounds counter");
+});
+
+test("fix-scope release persistence — relaunch-fail path: same load-sensitive red releases on BOTH rounds (releasedRounds increments, zero越界 fix)", async (t) => {
+  const task = "gap-test-fixscope-persist";
+  const dir = makeFixScopeDir("fan-in-fixscope-persist-", task, [
+    "---",
+    `id: ${task}`,
+    "status: ready",
+    "---",
+    "## Touches",
+    `- tasks/${task}.md`,
+    "- pkg/a/**",
+  ].join("\n") + "\n");
+  t.after(() => cleanup(dir));
+  const log = `/tmp/fan-in-suite-${task}.log`;
+  const release = `/tmp/fan-in-scope-release-${task}.json`;
+  // 同一 load-sensitive 红 + 一个本任务 Touches 内回归（inScope 修，证 gate 不是一律 release）：
+  fs.writeFileSync(log, [
+    `__PERFILE__ duration_ms=1.2 ${dir}/pkg/a/x.test.mjs passed=false`,
+    `__PERFILE__ duration_ms=3.4 ${dir}/plugin/test/cold-start-skill.test.mjs passed=false`,
+  ].join("\n") + "\n", "utf8");
+  t.after(() => { try { fs.rmSync(log, { force: true }); } catch (_) { /* best-effort */ } });
+  t.after(() => { try { fs.rmSync(release, { force: true }); } catch (_) { /* best-effort */ } });
+
+  const block = await fixScopeGateBlockFor(task, dir);
+  const script = block + '\necho "GATE_OUT=[$fix_scope_out]"';
+  const r1 = runBash(script, { cwd: dir }); // round 1: release（relaunch, 无 fix）
+  const r2 = runBash(script, { cwd: dir }); // round 2: relaunch-fail → 仍 release、零越界 fix
+  assert.equal(r1.status, 0, `round-1 gate failed: ${r1.stderr}`);
+  assert.equal(r2.status, 0, `round-2 gate failed: ${r2.stderr}`);
+  const v1 = JSON.parse(r1.stdout.match(/GATE_OUT=\[(.*)\]/s)[1]);
+  const v2 = JSON.parse(r2.stdout.match(/GATE_OUT=\[(.*)\]/s)[1]);
+
+  const ls1 = v1.outOfScope.find((f) => f.reason === "load-sensitive" && f.file === "plugin/test/cold-start-skill.test.mjs");
+  const ls2 = v2.outOfScope.find((f) => f.reason === "load-sensitive" && f.file === "plugin/test/cold-start-skill.test.mjs");
+  assert.ok(ls1, "round 1: the load-sensitive red must be outOfScope release");
+  assert.equal(ls1.releasedRounds, 1, "round 1: first release ⇒ releasedRounds=1");
+  assert.ok(ls2, "round 2 (relaunch-fail): the SAME load-sensitive red must STILL be outOfScope release");
+  assert.equal(ls2.releasedRounds, 2, "round 2: ledger persisted ⇒ releasedRounds increments to 2 (NOT reset to 1)");
+  // 零越界 fix：两轮的 inScope 都不得含 load-sensitive 文件；inScope 只含本任务 Touches 内回归。
+  assert.ok(!v1.inScope.includes("plugin/test/cold-start-skill.test.mjs"), "round 1: load-sensitive red never inScope (零越界 fix)");
+  assert.ok(!v2.inScope.includes("plugin/test/cold-start-skill.test.mjs"), "round 2: load-sensitive red never inScope (零越界 fix)");
+  assert.deepEqual(v2.inScope, ["pkg/a/x.test.mjs"], "in-Touches regression still inScope (gate is not release-everything)");
 });

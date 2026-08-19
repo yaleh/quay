@@ -1,3 +1,11 @@
+// ════════════════════════════════════════════════════════════════════════════════
+// ⛔ DEAD / 历史遗留工作流（gap-fix-scope-gate-wired-to-wrong-path AC3, 2026-08-18）。
+// 生产 suite-fix 在 fan-in-execute.js 的内联 subagent prompt（suite-fix 阶段，读 /tmp/fan-in-suite
+// -<task>.log 修根因），不调本文件——grep 只命中注释「前例/实证」，无一处真调用；本文件仅被
+// plugin/sync.sh dual-copy 铺出。fix-scope gate 已接线到 fan-in-execute.js 内联 prompt，本文件里
+// 的 fixScopeGate 不再代表生产路径。保留原实现与测试不动（未移除，避免 plugin/sync.sh dual-copy
+// 引用清理），仅标注 dead——不要再把它当成生产 suite-fix 路径接线任何新 gate。
+// ════════════════════════════════════════════════════════════════════════════════
 export const meta = {
   name: 'execute-suite-fix',
   description: 'A15 ④ suite-fix chain as a workflow: Fix(agent) → Verify(script-owned setTimeout poll of full-suite-state.json) → Merge(agent fan-in + batch-merge). Waiting is decided by script control flow, never by an agent (ab380c5e structural fix). Full suite only — no partial execution, no premature abort.',

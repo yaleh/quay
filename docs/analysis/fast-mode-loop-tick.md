@@ -688,7 +688,7 @@ node --experimental-strip-types plugin/scripts/touches-orthogonality-check.ts --
 任务代理提交前编辑 `tasks/<id>.md`（它自己的任务文件，Touches 已授权）：**勾 AC 复选框**（它实现了、
 自己跑过 scoped 测试，有全部事实）+ **贴 invoke 实跑证据**（自己 scoped 测试的输出）。**仍 SCOPED ONLY**
 （不跑全量 suite——全量判据归外层 verification-round）；**不翻 status**（翻 done 是外层收尾的活）；
-**不勾 DoD 行**（DoD 全量绿在 SCOPED ONLY 下任务内不可知，是唯一真时序依赖）。收尾（外层异步）因此
+**DoD 勾选按时机分离**（gap-dispatch-brief-dod-check-timing）：**impl 勾 impl-time 可判的 DoD 项**（如 scoped 绿）；**fan-in-time 项**（全量绿 / 行为性后果）**不勾、留 fan-in**，且行尾标注「（待外部）」（fan-in-ac-completion-gate 只认该标注放行）。**不是「全不勾」**——「全不勾」会让 fan-in 的 AC 完成闸把每个任务都拒翻。收尾（外层异步）因此
 每任务只剩「核对 DoD 行 + 翻 done + 关遥测括号」——量小到不是同步点（(c) 块落地后，closure-async
 机制根的收尾对已自勾 AC/证据的任务是 no-op）。
 

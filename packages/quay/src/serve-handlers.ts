@@ -2482,6 +2482,8 @@ export async function handleAllRoutes(
     return;
   }
 
+  // gap-git-history-svg-server-rendered: server-rendered git history SVG. Reads git via the same
+  // workspace-observation path as /live + /journal (observation.ts shells out to git too).
   if (url.pathname === "/git-history") {
     await handleGitHistory(req, res, cfg);
     return;
@@ -2492,13 +2494,6 @@ export async function handleAllRoutes(
   // checker (observation.ts's readBoardLanding) so per-task agreement holds by construction.
   if (url.pathname === "/board") {
     await handleBoard(req, res, url, client, manifest, cfg);
-    return;
-  }
-
-  // gap-git-history-svg-server-rendered: server-rendered git history SVG. Reads git via the same
-  // workspace-observation path as /live + /journal (observation.ts shells out to git too).
-  if (url.pathname === "/git-history") {
-    await handleGitHistory(req, res, cfg);
     return;
   }
 
