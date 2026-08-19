@@ -528,6 +528,17 @@ ${FIX_SCOPE_GATE}
 
 步骤（严格按序；每步都先 cd ${worktree} 或显式用 -C）：
 
+【无锁段 step 4.4 — 写 impl-complete 事件（gap-inflight-states-missing-impl-complete-event）】
+# impl-complete-block-start
+# suite 已绿（或 suite-skipped / suite-preverified）⇒ impl 完成，任务进入「待落地」段。在 land
+# （step 5 flip+ff）之前写第三个生命周期事件，把 start→end 拆成 start→impl-complete（实现）与
+# impl-complete→end（待落地）两段——Build 派发读前者、落地单飞读后者（不再读 worktree）。幂等：
+# ff-retry 重跑 phase 2 时 hasImplCompleteEvent 跳过重写。runId 为空（未走 --task-start 留痕）⇒ 跳过。
+if [ -n "${runId}" ]; then
+  node --experimental-strip-types ${worktree}/plugin/scripts/fast-mode-telemetry.ts --impl-complete --taskId ${task} --runId ${runId} --root ${root} || true
+fi
+# impl-complete-block-end
+
 【无锁段 step 4.5 — per-task-suite 入账（全绿后；跳过也写）】
 # suite-record-block-start
 # per-task-suite 入账（gap-fan-in-suite-data-not-accounted）：每次 fan-in 写一条——含跳过全量。

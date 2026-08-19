@@ -97,6 +97,18 @@ export const VALID_ISOLATION_MODES = Object.freeze(["worktree"]);
 /** Valid dispatch-mode values. */
 export const VALID_DISPATCH_MODES = Object.freeze(["serial", "concurrent"]);
 
+/** Fast-mode task-lifecycle `eventKind` values (the A1b extra field distinguishes start/end, and
+ *  now the impl-complete boundary). `impl-complete` is the THIRD task-lifecycle event
+ *  (gap-inflight-states-missing-impl-complete-event): fan-in writes it after impl completes (suite
+ *  green) and BEFORE land, splitting the start→end span into start→impl-complete (implementing) and
+ *  impl-complete→end (awaiting-land). `blocked` is the separate blocked-wait marker written by
+ *  inner-blocked-signal.ts — NOT a task-lifecycle kind. Purely additive — SCHEMA_VERSION is NOT
+ *  bumped (M207 additive-growth precedent; eventKind is an extra field, never validated). */
+export const VALID_EVENT_KINDS = Object.freeze(["start", "end", "impl-complete", "blocked"]);
+
+/** The single `eventKind` value marking the impl-complete boundary — see VALID_EVENT_KINDS. */
+export const IMPL_COMPLETE_EVENT_KIND = "impl-complete";
+
 /** Required field names for a v1 StageEvent. */
 export const REQUIRED_FIELDS = Object.freeze([
   "schemaVersion",
@@ -546,6 +558,15 @@ export function selftest() {
     const r = validateEvent(de);
     check(`dispatchMode-${dm}`, r.ok, `ok=${r.ok}`);
   }
+
+  // ── impl-complete eventKind (gap-inflight-states-missing-impl-complete-event): the third
+  // task-lifecycle kind passes through as a forward-compat extra field and is declared in the
+  // single-source kind list ──
+  check("impl-complete-kind-declared", IMPL_COMPLETE_EVENT_KIND === "impl-complete" && VALID_EVENT_KINDS.includes(IMPL_COMPLETE_EVENT_KIND),
+    `VALID_EVENT_KINDS carries "${IMPL_COMPLETE_EVENT_KIND}"`);
+  const implCompleteEvent = { ...validEvent, eventKind: IMPL_COMPLETE_EVENT_KIND, timing: { queuedAtMs: null, startedAtMs: null, endedAtMs: null } };
+  const icr = validateEvent(implCompleteEvent);
+  check("impl-complete-event-validates", icr.ok, `ok=${icr.ok} (extra eventKind field, timing null)`);
 
   // ── null commandIdentity accepted ──
   const nullCmdResult = validateEvent({ ...validEvent, commandIdentity: null });

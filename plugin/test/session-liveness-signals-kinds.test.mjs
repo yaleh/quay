@@ -32,7 +32,7 @@ import { fileURLToPath } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
 import {
   SCRIPT, tmuxAvailable,
-  setProbeTmpPrefix, sweepTmp, reapLiveOwners, killProbeServers, tmux, isolateTmuxEnv, isClaudePid,
+  setProbeTmpPrefix, sessionLivenessAfter, tmux, isolateTmuxEnv, isClaudePid,
   paneHasClaudeChild, waitForAlive, makeHermeticProbe,
   spawnMonitor, waitForOutput, waitForRounds, countRounds,
   makePaneBusy, makePaneIdle, makePanePermissionPrompt, startTouchLoop, cleanup,
@@ -53,11 +53,7 @@ setProbeTmpPrefix("session-liveness-sig-k-");
 // sweepTmp removes owner-dead residue. Sweep ONLY this file's own prefixes (see SPLIT CONCURRENCY
 // SAFETY above — never a sibling's).
 after(() => {
-  // 判据1 (gap-session-liveness-fixture-tmux-not-killed): kill-server 本进程创建的 tmux server —
-  // sweepTmp 的 owner-liveness 保护（AC3）只跳过活 owner 目录，夹具不 kill ⇒ 泄漏无出口。
-  killProbeServers();
-  reapLiveOwners(); // 移除 owner 已死的残留（kill-server 后 dirHasLiveOwner 恒假）
-  sweepTmp("session-liveness-sig-k-");
+  sessionLivenessAfter("session-liveness-sig-k-");
 });
 
 test("AC1/AC3/AC6/AC7 — esc to interrupt PRESENCE drives busy/idle; RESUMED carries cause + last-input; IDLE fires when the flag disappears", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {

@@ -48,7 +48,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import {
-  SCRIPT, tmuxAvailable, setProbeTmpPrefix, sweepTmp, reapLiveOwners,
+  SCRIPT, tmuxAvailable, setProbeTmpPrefix, sessionLivenessAfter,
   makeHermeticProbe, waitForAlive, spawnMonitor, waitForOutput, waitForRounds,
   writeTranscript, assistantUsageRecord, userInputRecord, isoAgo, HANG_GUARD_MS,
 } from "./session-liveness-helpers.mjs";
@@ -56,8 +56,7 @@ import {
 setProbeTmpPrefix("session-liveness-scd-");
 
 after(() => {
-  reapLiveOwners();
-  sweepTmp("session-liveness-scd-", "ol-prod-");
+  sessionLivenessAfter("session-liveness-scd-", "ol-prod-");
 });
 
 // ── fixtures ─────────────────────────────────────────────────────────────────────────────────────

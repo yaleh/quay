@@ -1,7 +1,7 @@
 ---
 id: gap-measure-history-detached-suite-mirror-write
 title: "measure-history.jsonl detached-suite 停摆——fan-in setsid 路径绕过 full-suite-runner.ts 唯一写入者，照抄 full-suite-state.json 的 mirror-write 模式补 mirror-write"
-status: todo
+status: ready
 labels:
   - gap
   - observability
