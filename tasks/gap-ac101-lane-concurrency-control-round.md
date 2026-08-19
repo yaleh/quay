@@ -1,7 +1,7 @@
 ---
 id: gap-ac101-lane-concurrency-control-round
 title: AC101 600s 根因对照轮——QUAY_MAX_CONCURRENT_SUITES=1 的 lane 对照实验（serial+main 556s=93% 预算，S=2 默认砍半并发与裁定方向相反）
-status: ready
+status: done
 labels:
   - gap
   - experiment
