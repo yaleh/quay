@@ -1,7 +1,7 @@
 ---
 id: gap-gitignore-fan-in-ff-escalations
 title: ".gitignore 补 `**/.quay/fan-in-ff-escalations.jsonl`——escalation 文件 untracked 杀 fan-in clean-tree"
-status: ready
+status: done
 labels:
   - gap
   - mechanism
