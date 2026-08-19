@@ -50,7 +50,7 @@ import {
   SCRIPT, tmuxAvailable,
   setProbeTmpPrefix, sweepTmp, reapLiveOwners, tmux, isolateTmuxEnv, isClaudePid,
   waitForAlive, spawnMonitor, waitForOutput, waitForRounds, countRounds,
-  __registerProbeTmp, __unregisterProbeTmp, killProbeServer,
+  __registerProbeTmp, teardownProbe,
 } from "./session-liveness-helpers.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -89,8 +89,13 @@ function makeEnvProbe(session, claudeProjectDir, sid) {
       // 判据1/AC1: kill the SERVER (kill-server, private socket) FIRST — kill-session alone races
       // server teardown under load and can leave a live server that is already-unregistered ⇒
       // unreachable by after()'s reapLiveOwners (leak-with-no-exit, 2026-08-14 full-suite red).
-      killProbeServer(tmp);
-      __unregisterProbeTmp(tmp);
+      // teardownProbe RETRIES kill-server until the owner dies BEFORE unregistering, so the probe
+      // stays registered until the server is dead and after() can retry if interrupted.
+      teardownProbe(tmp);
+      // teardownProbe already rmSync's `tmp` inside the shared helper; the explicit best-effort
+      // rmSync below keeps the mkdtemp STATICALLY paired with a cleanup in THIS file — tmp-leak-
+      // pairing-check / test-isolation R6 are file-scoped and cannot follow teardownProbe into
+      // session-liveness-helpers.mjs. Idempotent (the dir is already gone after teardownProbe).
       try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* best-effort */ }
     },
   };
@@ -117,8 +122,13 @@ function makeNoEnvProbe(session) {
       // 判据1/AC1: kill the SERVER (kill-server, private socket) FIRST — kill-session alone races
       // server teardown under load and can leave a live server that is already-unregistered ⇒
       // unreachable by after()'s reapLiveOwners (leak-with-no-exit, 2026-08-14 full-suite red).
-      killProbeServer(tmp);
-      __unregisterProbeTmp(tmp);
+      // teardownProbe RETRIES kill-server until the owner dies BEFORE unregistering, so the probe
+      // stays registered until the server is dead and after() can retry if interrupted.
+      teardownProbe(tmp);
+      // teardownProbe already rmSync's `tmp` inside the shared helper; the explicit best-effort
+      // rmSync below keeps the mkdtemp STATICALLY paired with a cleanup in THIS file — tmp-leak-
+      // pairing-check / test-isolation R6 are file-scoped and cannot follow teardownProbe into
+      // session-liveness-helpers.mjs. Idempotent (the dir is already gone after teardownProbe).
       try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* best-effort */ }
     },
   };

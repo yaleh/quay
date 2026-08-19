@@ -37,7 +37,7 @@ import { fileURLToPath } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
 import {
   tmuxAvailable,
-  setProbeTmpPrefix, sweepTmp, reapLiveOwners, dirHasLiveOwner, probeRoot,
+  setProbeTmpPrefix, sweepTmp, reapLiveOwners, dirHasLiveOwner, probeRoot, serverPidOf,
   makeHermeticProbe, spawnMonitor, waitForRounds,
 } from "./session-liveness-helpers.mjs";
 
@@ -91,6 +91,28 @@ test("reapLiveOwners — kills THIS process's still-alive hermetic probe server 
     // reaped probe (a cancelled test's finally may still run if the node:test abort allows it).
     p.cleanup();
     assert.ok(true, "cleanup on a reaped probe must not throw");
+  } finally {
+    try { p.cleanup(); } catch { /* already reaped */ }
+  }
+});
+
+test("serverPidOf — resolves the tmux SERVER daemon's PID via its socket inode, null once killed", { skip: noTmux }, async () => {
+  // The hard-kill fallback in teardownProbe (gap-session-liveness-fixture-tmux-not-killed) relies on
+  // serverPidOf to find the DETACHED server daemon's PID (PPID=1, no parent to reap it). Prove the
+  // primitive: a live probe's socket resolves to a REAL tmux server pid (cmdline "tmux"), and after
+  // a graceful kill-server it resolves to null (socket no longer held by a live process).
+  const p = makeHermeticProbe("swp-pid");
+  try {
+    const pid = serverPidOf(p.tmp);
+    assert.ok(Number.isInteger(pid) && pid > 1,
+      `serverPidOf must resolve a live server to a pid > 1, got ${pid}`);
+    let cmdline = "";
+    try { cmdline = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0")[0]; } catch { /* /proc race */ }
+    assert.match(cmdline, /tmux/,
+      `serverPidOf must resolve to the tmux SERVER process, got pid ${pid} cmdline "${cmdline}"`);
+    p.cleanup();
+    assert.equal(serverPidOf(p.tmp), null,
+      "serverPidOf must be null once the server is killed (socket no longer held live)");
   } finally {
     try { p.cleanup(); } catch { /* already reaped */ }
   }
