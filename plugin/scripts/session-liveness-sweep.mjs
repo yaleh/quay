@@ -64,6 +64,13 @@ export function dirHasLiveOwner(dir) {
         if (sock.startsWith(abs + "/")) return true;
       }
     }
+    // Socket table READ and NO live socket under the dir → owner-dead. The environ fallback below
+    // runs ONLY when this read FAILED (unreadable /proc/net/unix). It must NOT run here: a leaked
+    // pane CHILD (the `exec -a claude-probe sleep 10000` fixture) survives the server's death
+    // carrying the inherited TMUX_TMPDIR environ, and treating that orphan as a live owner left
+    // dead-server dirs unswept (2026-08-18 full-suite red: 21 residual session-liveness-* dirs,
+    // every one owner-dead but environ-marked by an orphaned `claude-probe 10000`).
+    return false;
   } catch { /* /proc/net/unix unreadable — fall through to the environ check */ }
   try {
     const procs = fs.readdirSync("/proc").filter((n) => /^\d+$/.test(n));
@@ -77,6 +84,75 @@ export function dirHasLiveOwner(dir) {
     }
   } catch { /* /proc unreadable */ }
   return false;
+}
+
+/** serverPidOf(dir) — the PID of the LIVE process holding a listening socket under `dir`
+ * (the tmux SERVER daemon a hermetic probe started), or null when no such socket is live.
+ * The server daemon is detached (PPID=1 after its `tmux new-session` client exits), so a graceful
+ * `kill-server` that races/fails under suite load leaves it ORPHANED and unreachable by any parent
+ * reap — the teardown hard-kill fallback (gap-session-liveness-fixture-tmux-not-killed) needs its
+ * PID. Resolved by mapping the socket INODE from /proc/net/unix to the process holding it via
+ * /proc/<pid>/fd/* (a PID-targeted lookup, fs-only — NOT a name-based batch kill; invariant
+ * no_pkill_by_name_on_live = 1 is preserved). Only the LISTENING socket matches (<dir>/sock/...),
+ * so a transient monitor CLIENT connection is never mistaken for the server. */
+export function serverPidOf(dir) {
+  let abs;
+  try { abs = fs.realpathSync(dir); } catch { return null; }
+  try {
+    const netUnix = fs.readFileSync("/proc/net/unix", "utf8");
+    const inodes = [];
+    for (const line of netUnix.split("\n")) {
+      const parts = line.trim().split(/\s+/);
+      if (parts.length >= 8) { // num: ref protocol flags type st inode path
+        const sock = parts.slice(7).join(" ");
+        if (sock.startsWith(abs + "/")) inodes.push(parts[6]);
+      }
+    }
+    if (inodes.length === 0) return null;
+    for (const p of fs.readdirSync("/proc").filter((n) => /^\d+$/.test(n))) {
+      try {
+        const fdDir = `/proc/${p}/fd`;
+        for (const fd of fs.readdirSync(fdDir)) {
+          try {
+            const link = fs.readlinkSync(`${fdDir}/${fd}`);
+            for (const ino of inodes) {
+              if (link === `socket:[${ino}]`) return Number(p);
+            }
+          } catch { /* fd vanished mid-scan */ }
+        }
+      } catch { /* pid exited mid-scan */ }
+    }
+  } catch { /* /proc unreadable */ }
+  return null;
+}
+
+/** panePidsOf(dir) — PIDs of the pane CHILDREN a hermetic probe spawned (the
+ * `exec -a claude-probe sleep 10000` fixtures) whose `TMUX=` env still points at this probe's
+ * socket (<dir>/sock/tmux-<uid>/default). When the tmux SERVER dies (graceful kill-server OR the
+ * teardownProbe SIGKILL hard-kill), these detached children are ORPHANED (PPID=1) but KEEP the
+ * inherited TMUX/TMUX_TMPDIR environ — the old dirHasLiveOwner environ fallback mistook that orphan
+ * for a live owner (so the dead-server dir was never swept), and the orphaned `sleep 10000`
+ * processes accumulated across runs (200+ observed → suite-wide load that red'd the load-sensitive
+ * family). fs-only (reads /proc/<pid>/environ, returns PIDs); the KILL is the CALLER's
+ * PID-targeted SIGKILL, never a name-based batch kill (invariant no_pkill_by_name_on_live = 1). */
+export function panePidsOf(dir) {
+  let abs;
+  try { abs = fs.realpathSync(dir); } catch { return []; }
+  const pids = [];
+  try {
+    for (const p of fs.readdirSync("/proc").filter((n) => /^\d+$/.test(n))) {
+      try {
+        const environ = fs.readFileSync(`/proc/${p}/environ`, "utf8");
+        for (const kv of environ.split("\0")) {
+          if (kv.startsWith("TMUX=") && kv.slice("TMUX=".length).startsWith(abs + "/")) {
+            pids.push(Number(p));
+            break;
+          }
+        }
+      } catch { /* pid exited mid-scan */ }
+    }
+  } catch { /* /proc unreadable */ }
+  return pids;
 }
 
 /** Pre-suite orphan sweeper over ALL /tmp/quay-run-* dirs. A namespace dir whose tmux server is
