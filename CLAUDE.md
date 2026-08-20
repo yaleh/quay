@@ -12,7 +12,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 | 要做什么 | 正本（**不要在本文件复制其内容**） |
 |---|---|
-| 有哪些机件、各自回答什么问题 | `bash plugin/scripts/capability-catalog.sh`（182 条声明，**唯一清单**） |
+| 有哪些机件、各自回答什么问题 | `bash plugin/scripts/capability-catalog.sh`（**唯一清单**；声明数看它自报——`summary: N scripts`，不要硬记数字，会随脚本增删漂移） |
 | 驱动/投递到别的 Claude 会话 | **默认：`ListAgents` → `SendMessage`**（人 2026-08-12 裁定「实际应用 SendMessage」；需 Claude Code 2.1.224 或更新,本机 2.1.228）。**实测**：目标 busy 直投即达（无 can-receive 闸门）；到达形态 `<cross-session-message from=… from-name=… from-mode=…>`,**身份由平台标注而非发送方自称**；平台强制 peer 不能代替人许可/改配置/**执行斜杠命令**。**旧机件保留可用但非默认路径**（人 2026-08-12 裁定「还保留原实现和测试,但尽量减少对其使用」）：`supervisor-deliver.sh` / `send-keys-reliable.sh` / `drive-target-check.sh` / `transcript-delivery-check.ts`。（`message-bus.ts` / `inbox-reader.sh` 随 inbox 机制删除——人 2026-08-20 裁定范围A。）**保留的两个不可替代用途**：①**控制面**——`/clear` 等斜杠命令原生通道办不到（文档明确 "Commands don't run"）,只能走 tmux 输入；②**下游交付面**——Claude Code 低于 2.1.224 者 / Bedrock·AWS·GCP·Foundry / native Windows。**手工拼 tmux send-keys 仍禁止。** |
 | 三层每轮该做什么 | `orchestration/{manager,orchestrator,fast-mode}-tick-core.md`（执行路径；**强制判据是 `tick-core-static-check.ts` 的 (src:N) 覆盖率=100%，不是行数**；「各 ≤80 行」判据退役说明 → `orchestration/archive/AC58-retired-clauses.md#R17`） |
 | 判准 / 收尾 / 发消息形态 | `orchestration/manager-tick-{criteria,closing,sending}.md`（466 行；**停调 workflow 19 小时 ⇒ 这些全部缺席 ⇒ 8 条违规**） |
