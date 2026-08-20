@@ -36,7 +36,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { isDirectEntry } from "./gate-script-base.ts";
-import { suiteLockSlotCount } from "./suite-lock-slots.ts";
+import { suiteLockSlotCount, suiteLockBase } from "./suite-lock-slots.ts";
 
 /** I2 — the slot-path literal shapes in CODE positions (直接对着表现形式 — the 槽文件名模式). The
  *  canonical generation loops emit `${base}.${i}` (a variable digit) and the variable is never named
@@ -227,11 +227,18 @@ export function checkBashTsCountAgree(root: string): SsotVerdict {
     return { id: "I4", ok: false, evaluated: false, detail: "suite-slot-lib.sh not found (cannot judge)" };
   }
   const ts = suiteLockSlotCount();
-  // NOTE: since gap-suite-lock-slot-seam-asymmetry, BOTH canons read the same precedence —
-  // RESOURCE_GATE_CONCURRENT_SUITES (test seam) → QUAY_MAX_CONCURRENT_SUITES (旋钮②) → 2, with
-  // empty-string-as-unset (`:-`) on both. They therefore agree under ANY env (production or a test
-  // seam); a drift here means one side's semantics changed independently, which is exactly what I4
-  // detects.
+  // NOTE: since gap-suite-lock-slot-seam-asymmetry + gap-suite-concurrency-env-to-file-fresh-read,
+  // BOTH canons read the same precedence — RESOURCE_GATE_CONCURRENT_SUITES (test seam) →
+  // `<suiteLockBase>.concurrency` (scalar file, fresh-read) → QUAY_MAX_CONCURRENT_SUITES (旋钮②) → 2,
+  // with empty-string-as-unset (`:-`) on both. They therefore agree under ANY env AND any
+  // `.concurrency` file (production or a test seam); a drift here means one side's semantics changed
+  // independently, which is exactly what I4 detects. The file read is RAW on both sides (`[ -f ] &&
+  // cat` / `fs.existsSync && readFileSync().trim()`) — no YAML, no bash→node delegation — so I4
+  // stays an honest dual-implementation cross-check (硬规则④: never a self-referential single read).
+  const file = `${suiteLockBase(process.cwd())}.concurrency`;
+  const fileState = fs.existsSync(file)
+    ? `file ${path.basename(file)}=${fs.readFileSync(file, "utf8").trim() || "<empty>"}`
+    : "file <absent>";
   const res = spawnSync("bash", ["-c", `source "${lib}"; suite_slot_count`], { encoding: "utf8", env: process.env });
   if (res.status !== 0) {
     return { id: "I4", ok: false, evaluated: false, detail: `suite_slot_count failed: ${res.stderr}` };
@@ -241,9 +248,9 @@ export function checkBashTsCountAgree(root: string): SsotVerdict {
     return { id: "I4", ok: false, evaluated: false, detail: `suite_slot_count returned non-positive '${res.stdout.trim()}'` };
   }
   if (bashCount === ts) {
-    return { id: "I4", ok: true, evaluated: true, detail: `bash canonical suite_slot_count=${bashCount} == TS canonical suiteLockSlotCount=${ts} (env QUAY_MAX_CONCURRENT_SUITES=${process.env.QUAY_MAX_CONCURRENT_SUITES ?? "<unset>"})` };
+    return { id: "I4", ok: true, evaluated: true, detail: `bash canonical suite_slot_count=${bashCount} == TS canonical suiteLockSlotCount=${ts} (${fileState}; env QUAY_MAX_CONCURRENT_SUITES=${process.env.QUAY_MAX_CONCURRENT_SUITES ?? "<unset>"})` };
   }
-  return { id: "I4", ok: false, evaluated: true, detail: `bash canonical suite_slot_count=${bashCount} != TS canonical suiteLockSlotCount=${ts} — the two canons drifted` };
+  return { id: "I4", ok: false, evaluated: true, detail: `bash canonical suite_slot_count=${bashCount} != TS canonical suiteLockSlotCount=${ts} (${fileState}) — the two canons drifted` };
 }
 
 /** I5 — the runtime concurrency cap (behavioral, not asserted): spawn N = S+2 concurrent slot

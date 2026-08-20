@@ -13,13 +13,21 @@
 #
 # SEAM SYMMETRY (gap-suite-lock-slot-seam-asymmetry): the TS canonical suiteLockSlotCount() reads the
 # SAME precedence as this file — RESOURCE_GATE_CONCURRENT_SUITES (the deterministic test seam) FIRST,
+# then `<base>.concurrency` (the scalar file — gap-suite-concurrency-env-to-file-fresh-read: env is
+# forked once per process, a file is re-read by the next detached suite process without a restart),
 # then 旋钮② QUAY_MAX_CONCURRENT_SUITES, then the 2 default, with empty-string-as-unset (`:-`) on both.
-# The two canons therefore agree under ANY env, including a test seam (they could only drift if one
-# side's semantics changed independently — exactly what suite-slot-ssot-check I4 detects).
+# The two canons therefore agree under ANY env AND any `.concurrency` file, including a test seam (they
+# could only drift if one side's semantics changed independently — exactly what suite-slot-ssot-check
+# I4 detects). Both read the file RAW (bash `[ -f "$f" ] && cat "$f"`, TS `fs.existsSync &&
+# fs.readFileSync(...).trim()`), so I4 stays an honest dual-implementation cross-check (故意双实现算同
+# 一个数 — 不引入 YAML 依赖, 不让 bash 转调 node).
 #
 # Functions:
-#   suite_slot_count     — echo S = RESOURCE_GATE_CONCURRENT_SUITES (test seam, same convention as
-#                          test.sh's derivation functions) → QUAY_MAX_CONCURRENT_SUITES (旋钮②) → 2.
+#   suite_slot_count     — echo S = RESOURCE_GATE_CONCURRENT_SUITES (test seam) → `<base>.concurrency`
+#                          (scalar file next to the lock base, fresh-read) → QUAY_MAX_CONCURRENT_SUITES
+#                          (旋钮②) → 2. Optional first arg = the lock base (used for the file read);
+#                          when omitted the base is resolved like test.sh's full_suite_lock
+#                          (FULL_SUITE_LOCK_FILE env → git-common-dir → .git/full-suite.lock).
 #   suite_slot_paths     — echo the S slot paths for a base (`${base}.0`..`${base}.S-1`), one per line.
 #
 # Both generate the digit via a loop variable — a `full-suite.lock.<digit>` literal never appears here
@@ -27,23 +35,65 @@
 
 # shellcheck disable=SC2317  # sourced functions are not "unused"
 suite_slot_count() {
-  local s="${RESOURCE_GATE_CONCURRENT_SUITES:-${QUAY_MAX_CONCURRENT_SUITES:-2}}"
-  case "$s" in
-    ''|*[!0-9]*) echo 2 ;;  # non-numeric / empty fails open to the single default (never 0 slots)
-    *)
-      if [ "$s" -lt 1 ]; then
-        echo 2  # 0/negative fails open to the single default (the old 1-slot behavior)
-      else
-        echo "$s"
-      fi
-      ;;
-  esac
+  local base="$1" file="" s fv
+  if [ -n "$base" ]; then
+    file="${base}.concurrency"
+  else
+    # Resolve the base the same way test.sh's full_suite_lock does (FULL_SUITE_LOCK_FILE env override →
+    # git-common-dir → .git/full-suite.lock) so a no-arg call (the I4 checker) reads the SAME file the
+    # TS canonical resolves from process.cwd().
+    local d="${FULL_SUITE_LOCK_FILE:-}"
+    if [ -z "$d" ]; then
+      d="$(git rev-parse --git-common-dir 2>/dev/null || true)"
+      [ -z "$d" ] && d=".git"
+      d="${d}/full-suite.lock"
+    fi
+    file="${d}.concurrency"
+  fi
+
+  # ① test seam env (deterministic tests; empty-string-as-unset, invalid falls through)
+  s="${RESOURCE_GATE_CONCURRENT_SUITES:-}"
+  if [ -n "$s" ]; then
+    case "$s" in
+      ''|*[!0-9]*) : ;;  # non-numeric / empty → fall through
+      *)
+        if [ "$s" -ge 1 ]; then echo "$s"; return; fi
+        ;;
+    esac
+  fi
+
+  # ② `.concurrency` scalar file next to the lock base — RAW read, fresh every call (no restart for the
+  # next detached suite process to pick up a new S). Non-numeric / empty falls through.
+  [ -f "$file" ] && fv="$(cat "$file")"
+  if [ -n "${fv:-}" ]; then
+    fv="${fv#"${fv%%[![:space:]]*}"}"   # strip leading whitespace (matches TS .trim())
+    fv="${fv%"${fv##*[![:space:]]}"}"   # strip trailing whitespace
+    case "$fv" in
+      ''|*[!0-9]*) : ;;
+      *)
+        if [ "$fv" -ge 1 ]; then echo "$fv"; return; fi
+        ;;
+    esac
+  fi
+
+  # ③ env 旋钮② (transition period — the file now has priority over it)
+  s="${QUAY_MAX_CONCURRENT_SUITES:-}"
+  if [ -n "$s" ]; then
+    case "$s" in
+      ''|*[!0-9]*) : ;;
+      *)
+        if [ "$s" -ge 1 ]; then echo "$s"; return; fi
+        ;;
+    esac
+  fi
+
+  echo 2  # default: single-suite baseline (0/negative/non-numeric above all fail open here)
 }
 
 # shellcheck disable=SC2317
 suite_slot_paths() {
   local base="$1" count i
-  count="$(suite_slot_count)"
+  count="$(suite_slot_count "$base")"   # pass the base so the `.concurrency` file read uses it
   i=0
   while [ "$i" -lt "$count" ]; do
     printf '%s\n' "${base}.${i}"
