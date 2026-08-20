@@ -32,13 +32,13 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1: fan-in-ff-merge.sh 持锁段恢复调 reaper（stale-lock reclaim），不再被 9645a4ff 的窄检查替换。
-- [ ] AC2: 生产载体验证——真实 stale-lock 场景 reaper 被调用（非 fixture）。
+- [x] AC1: fan-in-ff-merge.sh 持锁段恢复调 reaper（stale-lock reclaim），不再被 9645a4ff 的窄检查替换。
+- [x] AC2: 生产载体验证——真实 stale-lock 场景 reaper 被调用（非 fixture）。
 - [ ] AC3: 全量 suite 绿。
 
 ## Definition of Done
 
-- [ ] fan-in-ff-merge.sh 持锁段恢复调 reaper（stale-lock reclaim，不再被 9645a4ff 窄检查替换）；生产载体验证（真实 stale-lock 场景 reaper 被调用）；全量 suite 绿（scripts/test.sh exit 0）；修复提交可 git log 追溯。
+- [ ] fan-in-ff-merge.sh 持锁段恢复调 reaper（stale-lock reclaim，不再被 9645a4ff 窄检查替换）；生产载体验证（真实 stale-lock 场景 reaper 被调用）；全量 suite 绿（scripts/test.sh exit 0）；修复提交可 git log 追溯（修复提交 43572346c86780b85804caf125baba30cfcf8982）。AC3（全量 suite）与 DoD 的「全量 suite 绿」未勾——按 inner 约束不跑全量 suite，留待 fan-in 全量门覆盖。
 
 ## Touches
 
