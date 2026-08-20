@@ -1,7 +1,7 @@
 ---
 id: gap-ac118-third-party-project-verification
 title: "AC118 第三方项目验证：用当前版本真实驱动 archguard/meta-cc，补回 AC16②/AC88 收窄掉的要求"
-status: ready
+status: done
 labels:
   - gap
   - mechanism
