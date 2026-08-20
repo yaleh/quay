@@ -86,6 +86,7 @@ depends_on: []
 - packages/quay/plugin/scripts/capability-catalog.sh（打包副本，同步）
 - plugin/test/supervisor-bus-identity.test.mjs（改：收缩）
 - orchestration/fast-mode-tick-core.md（inner 独占执行核，A5 行迁出归档）
+- orchestration/archive/AC58-retired-clauses.md（A5 迁出落点，追加 R36）
 - docs/analysis/fast-mode-loop-tick.md（inner 独占，移除收件箱段）
 - plugin/loop/fast-mode-loop-tick.md（inner 独占，移除收件箱段）
 - orchestration/SPEC-inbox-service-2026-08-08.md（删，设计记录）
