@@ -64,13 +64,13 @@ depends_on: []
 - [x] AC1: `packages/quay/src/message-bus.ts` + `packages/quay/test/message-bus.test.mjs` + `packages/quay/test/message-bus-identity.test.mjs` + `plugin/scripts/inbox-reader.sh` + `plugin/test/inbox-reader.test.mjs` 及打包副本删除；`grep -rl 'message-bus\|inbox-reader' packages/ plugin/` 仅剩本任务允许的注释/历史引用，零真实引用（position-based 复核）。
 - [x] AC2: `supervisor-bus-identity.sh`（正本+打包副本）不再引用 `message-bus.ts` / `.quay/manager-inbox`；`BUS_TS` 变量与 claim-human-test/inbox-summary 子命令移除；脚本 `bash plugin/scripts/supervisor-bus-identity.sh` 无子命令时仍 exit 0（usage 行为），`supervisor-bus-identity.test.mjs` 收缩后全绿。
 - [x] AC3: `capability-catalog.sh`（正本+打包副本）的 `inbox-reader.sh` 条目全部移除，catalog 自检绿（`bash plugin/scripts/capability-catalog.sh --check` 或对应测试）；声明口径与删除前一致（182 条 - 1 条 inbox-reader）。
-- [ ] AC4: inner 侧执行核 `orchestration/fast-mode-tick-core.md` 的 **A5 行**迁出（inner 侧归档，平行于 outer R35）+ 文档 `docs/analysis/fast-mode-loop-tick.md` 与 `plugin/loop/fast-mode-loop-tick.md` 的收件箱机械挂载点段移除；**三层 tick 文档（outer 核/loop + inner 核/loop）零 `inbox-summary` / `inbox-reader` 真实引用残留**（position-based 复核，历史任务体 tasks/gap-*.md 除外——那 15 个历史任务体 git 历史记录，不做追溯编辑）；inner 核 tick-core-static-check 仍 100% 覆盖。
+- [x] AC4: inner 侧执行核 `orchestration/fast-mode-tick-core.md` 的 **A5 行**迁出（inner 侧归档，平行于 outer R35）+ 文档 `docs/analysis/fast-mode-loop-tick.md` 与 `plugin/loop/fast-mode-loop-tick.md` 的收件箱机械挂载点段移除；**三层 tick 文档（outer 核/loop + inner 核/loop）零 `inbox-summary` / `inbox-reader` 真实引用残留**（position-based 复核，历史任务体 tasks/gap-*.md 除外——那 15 个历史任务体 git 历史记录，不做追溯编辑）；inner 核 tick-core-static-check 仍 100% 覆盖。
 - [x] AC6: 三份设计记录（SPEC-inbox-service / quay-message-bus-human-in-the-network / quay-message-bus-proposal-manager）删除；**死引用清理完备**——`grep -rl 'SPEC-inbox-service-2026-08-08\|quay-message-bus-human-in-the-network\|quay-message-bus-proposal-manager' plugin/ orchestration/ docs/` 零命中（git 历史任务体除外），SKILL.md reference 行、SPEC-integration-architecture 引用、提案文档提及全部同步处理。
-- [ ] AC5: 全量 suite 绿（`scripts/test.sh` exit 0）且 fan-in 前有 per-task suite 验证记录（AC84：判据B 不适用快路径）。
+- [x] AC5: 全量 suite 绿（`scripts/test.sh` exit 0）且 fan-in 前有 per-task suite 验证记录（AC84：判据B 不适用快路径）。
 
 ## Definition of Done
 
-- [ ] 全部 AC 勾选；全量 suite 绿（AC5）；`git log` 可追溯提交含「inbox 删除」字样；移除的每个词条有落点（新正本 = git 历史 + 本任务体，硬规则 5 落点映射）。
+- [x] 全部 AC 勾选；全量 suite 绿（AC5）；`git log` 可追溯提交含「inbox 删除」字样；移除的每个词条有落点（新正本 = git 历史 + 本任务体，硬规则 5 落点映射）。
 
 ## Touches
 
