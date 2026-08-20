@@ -46,8 +46,8 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1: fan-in-execute.js stage-2 prompt 含「suite 绿后回勾依赖 suite 结果的框」指令（双拷贝同步）。
-- [ ] AC2: 只勾真满足的条件，未满足保持未勾（不伪造，fail-closed 语义不变）。
+- [x] AC1: fan-in-execute.js stage-2 prompt 含「suite 绿后回勾依赖 suite 结果的框」指令（双拷贝同步）。
+- [x] AC2: 只勾真满足的条件，未满足保持未勾（不伪造，fail-closed 语义不变）。
 - [ ] AC3: 真实 fan-in 一次：suite 绿后 AC/DoD 框自动勾上，AC 闸直接放行，无 needs-human 往返。
 
 ## Definition of Done
