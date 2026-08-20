@@ -286,8 +286,8 @@ Key cross-cutting facts (require reading several files to see):
    **「还保留原实现和测试,但尽量减少对其使用」——② 被推翻,archive 已叫停,实现与测试原地保留。**
    **⇒ 现状：SendMessage 是默认；旧机件保留可用,仅用于【控制面】（斜杠命令）与【下游不支持原生的环境】。**
    **手工拼 tmux send-keys 依旧禁止**；`send-keys-verified.sh` 早已 superseded（md5 整屏哈希判据被 ADR-016 修正案禁止）。
-2. ~~收件箱~~：**彻底删除（人 2026-08-20 裁定范围A，不留 archive/说明）——`message-bus.ts` / `inbox-reader.sh` / `.quay/manager-inbox/` 全部移除，见 `tasks/gap-inbox-message-bus-teardown`。** 曾经的教训已推广为通则——
-   **同一个容器里若装着两类 population,只用覆盖其中一类的工具去判空,会把非空读成空**（当时：`inbox-reader.sh` 只认 JSON 记录、看不见手写 `.md`；64 封信被读成零）。
+2. ~~收件箱~~：**已删除（人 2026-08-20 裁定范围A，不留 archive/说明）——`message-bus.ts` / `inbox-reader.sh` / `.quay/manager-inbox/` 全部移除，见 `tasks/gap-inbox-message-bus-teardown`。** 曾经的教训已推广为通则——
+   **同一个容器里若装着两类 population,只用覆盖其中一类的工具去判空,会把非空读成空**（当时：收件箱读工具只认 JSON 记录、看不见手写 `.md`；64 封信被读成零）。
    **这个教训的一般形态见硬规则 5「来源完备性」,不再需要专门的收件箱条目。**
 3. pane 状态：`pane-state-classify.ts`，不是整屏哈希（ADR-016 禁）。
 4. outer→inner 驱动文本契约：`drive-contract-check.ts`。

@@ -95,4 +95,6 @@ depends_on: []
 - plugin/skills/init/SKILL.md（改：移除 reference-doc 行）
 - orchestration/SPEC-integration-architecture-2026-08-05.md（改：移除已删文档引用）
 - docs/proposals/quay-product-outline.md（核：移除已删文档提及）
+- docs/proposals/quay-saas-remote-access-to-an-onprem-loop.md（核：移除对已删 quay-message-bus 文档的死引用）
+- docs/proposals/quay-web-human-is-not-an-operator.md（核：移除对已删 quay-message-bus 文档的死引用）
 - tasks/gap-inbox-message-bus-teardown.md（自身）
