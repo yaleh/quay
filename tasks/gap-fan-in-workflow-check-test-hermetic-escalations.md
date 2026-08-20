@@ -2,7 +2,7 @@
 id: gap-fan-in-workflow-check-test-hermetic-escalations
 title: fan-in-workflow-check 测试隔离缺陷：非 escalation 测试读到真实
   .quay/fan-in-ff-escalations.jsonl ⇒ d-check 恒红，阻塞所有 fan-in
-status: done
+status: ready
 labels:
   - gap
   - mechanism
