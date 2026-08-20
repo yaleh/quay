@@ -33,6 +33,7 @@ import {
   parseObserverRegistry,
   parseVerificationRound,
   buildManagerSessionTargets,
+  classifySessionLayer,
   readManager,
   readTranscriptTail,
   readTests,
@@ -153,6 +154,19 @@ test("AC2: parseSessionLivenessJson extracts the --once --json sessions array", 
   assert.equal(rows[0].halted, false);
   assert.equal(rows[1].alive, false);
   assert.equal(rows[1].pid, null);
+});
+
+test("AC2: classifySessionLayer maps session names to the three layers (never drops to nothing)", () => {
+  // Manager view's explicit target names + topology-style window-suffixed names + the manager's own.
+  assert.equal(classifySessionLayer("outer"), "Outer");
+  assert.equal(classifySessionLayer("inner"), "Inner");
+  assert.equal(classifySessionLayer("quay-0:outer"), "Outer");
+  assert.equal(classifySessionLayer("quay-0:inner"), "Inner");
+  assert.equal(classifySessionLayer("quay-0:manager"), "Manager");
+  assert.equal(classifySessionLayer("manager"), "Manager");
+  assert.equal(classifySessionLayer("INNER"), "Inner"); // case-insensitive
+  // A name carrying no layer marker must land in Other, never be dropped from the page.
+  assert.equal(classifySessionLayer("quay"), "Other");
 });
 
 test("AC2: parseSessionLivenessOutput keeps dead layers (no pid field) as GONE rows", () => {

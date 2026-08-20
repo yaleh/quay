@@ -39,7 +39,8 @@ export const TICK_LOG_FILE = "tick-log.md";
 export const GIT_LOG_LIMIT = 20;
 /** Recent-entry bounds for the /journal page. */
 export const JOURNAL_ESCALATION_SECTIONS = 10;
-export const JOURNAL_TICK_ROWS = 15;
+/** tick-log.md entries are `## 时间戳`-headed (or `` `HH:MMZ` ``-bulleted) prose — read as SECTIONS, not table rows. */
+export const JOURNAL_TICK_SECTIONS = 15;
 /**
  * gap-live-cannot-tell-a-dead-loop-from-an-unwired-one: the activity window used to tell
  * 「循环在跑但没接遥测」 apart from 「循环根本没跑」. A signal is "active" if it falls inside the
@@ -394,6 +395,12 @@ function readRecentSections(root: string, relFile: string, max: number): Journal
     };
   }
   const lines = text.split(/\r?\n/);
+  // Fail-closed (gap-webui-journal-reads-stale-data AC3): a present-but-empty/whitespace-only
+  // file is NOT data — report 「无数据」 (status empty), never "ok with no content" which the
+  // renderer would show as 「暂无内容」 and could be mistaken for a genuinely empty-but-wired store.
+  if (!lines.some((ln) => ln.trim().length > 0)) {
+    return { status: "empty", reason: `${relFile} 为空`, markdown: null };
+  }
   const boundaries: number[] = [];
   lines.forEach((ln, i) => {
     if (/^##\s+/.test(ln)) boundaries.push(i);
@@ -409,35 +416,6 @@ function readRecentSections(root: string, relFile: string, max: number): Journal
     recent.unshift(lines.slice(boundaries[i], boundaries[i + 1]).join("\n"));
   }
   return { status: "ok", reason: null, markdown: recent.join("\n\n") };
-}
-
-/**
- * Read a markdown table file and keep the header + separator + the most recent `max` data rows.
- * Newest-first tables (tick-log.md) put recent rows right after the header, so the first `max`
- * `|`-rows after the separator are the recent ones; a trailing summary/tally table is excluded
- * because it sits at the END of the `|`-row sequence.
- */
-function readRecentTableRows(root: string, relFile: string, max: number): JournalSection {
-  const abs = path.join(root, relFile);
-  let text: string;
-  try {
-    if (!fs.existsSync(abs)) {
-      return { status: "empty", reason: `missing ${relFile}`, markdown: null };
-    }
-    text = fs.readFileSync(abs, "utf8");
-  } catch (err) {
-    return {
-      status: "error",
-      reason: `cannot read ${relFile}: ${err instanceof Error ? err.message : String(err)}`,
-      markdown: null,
-    };
-  }
-  const tableLines = text.split(/\r?\n/).filter((ln) => ln.trim().startsWith("|"));
-  if (tableLines.length < 2) {
-    return { status: "ok", reason: null, markdown: tableLines.join("\n") };
-  }
-  const markdown = [tableLines[0], tableLines[1], ...tableLines.slice(2, 2 + max)].join("\n");
-  return { status: "ok", reason: null, markdown };
 }
 
 /** Recent commits via `git -C <root> log --oneline -N`. A non-git workspace degrades to empty. */
@@ -467,7 +445,7 @@ function readRecentCommits(root: string, limit: number): JournalSection {
 export function readJournal(root: string): JournalResult {
   return {
     escalations: readRecentSections(path.join(root, ORCHESTRATION_DIR), ESCALATIONS_FILE, JOURNAL_ESCALATION_SECTIONS),
-    tickLog: readRecentTableRows(path.join(root, ORCHESTRATION_DIR), TICK_LOG_FILE, JOURNAL_TICK_ROWS),
+    tickLog: readRecentSections(path.join(root, ORCHESTRATION_DIR), TICK_LOG_FILE, JOURNAL_TICK_SECTIONS),
     commits: readRecentCommits(root, GIT_LOG_LIMIT),
   };
 }
@@ -1479,8 +1457,11 @@ export interface SessionMessage {
   text: string;
 }
 
+export type SessionLayer = "Manager" | "Outer" | "Inner" | "Other";
+
 export interface SessionDetail {
   name: string;
+  layer: SessionLayer;
   alive: boolean;
   pid: number | null;
   halted: boolean;
@@ -1488,6 +1469,30 @@ export interface SessionDetail {
   transcriptReason: string | null;
   messages: SessionMessage[] | null;
 }
+
+/**
+ * Classify a session's layer from its target name (the name chosen in SESSION_TARGETS).
+ * Naming conventions: the manager view registers targets literally named `outer` / `inner`;
+ * topology-style names carry the window suffix (`quay-0:outer` / `quay-0:inner`); the manager
+ * session itself is named with a `manager` marker. Case-insensitive substring match, ordered
+ * manager → outer → inner so a name containing several markers resolves deterministically.
+ * Names that match none are "Other" — a session must never be silently dropped from the page.
+ */
+export function classifySessionLayer(name: string): SessionLayer {
+  const n = name.toLowerCase();
+  if (n.includes("manager")) return "Manager";
+  if (n.includes("outer")) return "Outer";
+  if (n.includes("inner")) return "Inner";
+  return "Other";
+}
+
+/** Render order + fixed headings for the /sessions page's three layers (plus the Other fallback). */
+export const SESSION_LAYERS: ReadonlyArray<{ layer: SessionLayer; heading: string }> = [
+  { layer: "Manager", heading: "Manager" },
+  { layer: "Outer", heading: "Outer" },
+  { layer: "Inner", heading: "Inner" },
+  { layer: "Other", heading: "Other / 未分类" },
+];
 
 export interface SessionsResult {
   status: ObservationStatus;
@@ -1553,7 +1558,13 @@ export async function readSessions(root: string): Promise<SessionsResult> {
   if (!p) {
     return { status: "empty", reason: `${SESSION_LIVENESS_REL} 缺失（未接入）`, sessions: [] };
   }
-  const r = await runPluginScript(root, SESSION_LIVENESS_REL, ["--once", "--json"], 20_000);
+  // Register explicit outer+inner targets (same override the Manager view uses) so the sessions
+  // resolve to layer-named rows (`outer` / `inner`) instead of whatever single default target the
+  // workspace env happens to name — the /sessions page is a three-layer view by design. Fail-closed:
+  // when no session name is derivable, buildManagerSessionTargets returns null and we run with the
+  // env's own targets (preserving pre-existing display).
+  const targets = buildManagerSessionTargets(root);
+  const r = await runPluginScript(root, SESSION_LIVENESS_REL, ["--once", "--json"], 20_000, targets ? { SESSION_TARGETS: targets } : undefined);
   if (r.stdout == null) {
     return { status: "empty", reason: r.reason, sessions: [] };
   }
@@ -1574,6 +1585,7 @@ export async function readSessions(root: string): Promise<SessionsResult> {
     }
     sessions.push({
       name: row.name,
+      layer: classifySessionLayer(row.name),
       alive: row.alive,
       pid: row.pid,
       halted: row.halted,

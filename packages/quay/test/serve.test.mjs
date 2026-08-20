@@ -1699,7 +1699,7 @@ async function main() {
     );
     fs.writeFileSync(
       path.join(orchDir, "tick-log.md"),
-      "# 外层 tick 记录\n\n| 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |\n|---|---|---|---|---|\n| 2026-08-03 05:45Z | `correct` | 测试 tick 行 | 在飞 OBS-A | 核实 X |\n| 2026-08-03 05:33Z | `no-action` | 更早 tick | - | - |\n"
+      "# 外层 tick 记录\n\n## 2026-08-03 05:45Z\n\n`correct` — 测试 tick 条目（散文）。\n\n## 2026-08-03 05:33Z\n\n`no-action` — 更早 tick 条目。\n"
     );
 
     const obsOrigCwd = process.cwd();
@@ -1752,7 +1752,7 @@ async function main() {
       assert(journal.body.includes("升级项") && journal.body.includes("测试升级项"),
         "AC3: /journal renders the recent escalations.md entry");
       assert(journal.body.includes("tick-log.md") && journal.body.includes("2026-08-03 05:45Z"),
-        "AC3: /journal renders the recent tick-log.md row");
+        "AC1: /journal renders the recent tick-log.md entry (## timestamp + prose, not a table row)");
       assert(journal.body.includes("fixture commit") && journal.body.includes(obsCommitHash),
         "AC3: /journal renders the recent git commits (fixture commit)");
       const jData = readJournal(obsWorkspaceRoot);
@@ -1764,6 +1764,47 @@ async function main() {
       // the untracked-file listing: they rename the store and turn it into a file).
       const gitAfter = execFileSync("git", ["status", "--porcelain"], { cwd: obsWorkspaceRoot, encoding: "utf8" });
       assert(gitBefore === gitAfter, "AC6: git status --porcelain is unchanged by /live + /journal renders (zero side effects)");
+
+      // gap-webui-journal-reads-stale-data — AC2 negative control: a tick-log.md carrying a STALE
+      // legacy table block (08-14, the manager's observed freeze date) at the TOP plus a CURRENT
+      // prose entry (today) at the BOTTOM must render TODAY, not the stale table. The section
+      // reader keeps the most recent `## ` sections and discards the pre-first-heading table.
+      const tickLogPath = path.join(orchDir, "tick-log.md");
+      const todayStamp = new Date().toISOString().slice(0, 10) + " 09:44Z";
+      fs.writeFileSync(
+        tickLogPath,
+        "# 外层 tick 记录\n\n| 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |\n|---|---|---|---|---|\n| 2026-08-14 05:45Z | `correct` | 陈旧表格行 | - | - |\n\n## " + todayStamp + "\n\n`correct` — 今日散文条目。\n"
+      );
+      const journalToday = await get(obsPort, "/journal");
+      assert(journalToday.status === 200, "AC2: GET /journal returns 200 with a stale-table + today-prose tick-log");
+      assert(journalToday.body.includes(todayStamp),
+        `AC2: /journal shows TODAY's prose entry (${todayStamp}), not the stale 08-14 table`);
+      assert(!journalToday.body.includes("2026-08-14"),
+        "AC2: /journal does NOT render the stale 08-14 legacy table block");
+
+      // AC3 reverse control — fail-closed: MISSING tick-log.md reports 「无数据」, never stale data.
+      fs.rmSync(tickLogPath, { force: true });
+      const journalMissing = await get(obsPort, "/journal");
+      assert(journalMissing.status === 200, "AC3: GET /journal returns 200 when tick-log.md is missing");
+      assert(journalMissing.body.includes("无数据"),
+        "AC3: /journal reports 「无数据」 when tick-log.md is missing");
+      assert(!journalMissing.body.includes(todayStamp),
+        "AC3: /journal does NOT show tick data when tick-log.md is missing");
+
+      // AC3 reverse control — EMPTY tick-log.md is also fail-closed: 「无数据」, not "ok with no content".
+      fs.writeFileSync(tickLogPath, "   \n\n  \n");
+      const journalEmpty = await get(obsPort, "/journal");
+      assert(journalEmpty.status === 200, "AC3: GET /journal returns 200 when tick-log.md is empty");
+      assert(journalEmpty.body.includes("无数据"),
+        "AC3: /journal reports 「无数据」 (status empty) when tick-log.md is empty/whitespace");
+      assert(!journalEmpty.body.includes(todayStamp),
+        "AC3: /journal does NOT show tick data when tick-log.md is empty");
+
+      // Restore a non-empty tick-log so the later live-state activity-signal checks still see a fresh log.
+      fs.writeFileSync(tickLogPath, "# 外层 tick 记录\n\n## " + todayStamp + "\n\n`correct` — 恢复后的散文条目。\n");
+      const journalRestored = await get(obsPort, "/journal");
+      assert(journalRestored.status === 200 && journalRestored.body.includes(todayStamp),
+        "AC2/AC3: /journal recovers (shows today's entry) after tick-log.md is restored");
 
       // gap-live-cannot-tell-a-dead-loop-from-an-unwired-one: telemetry absent no longer shows
       // the generic 「无数据」. This workspace HAS activity signals (the fixture commit above +

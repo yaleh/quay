@@ -1,7 +1,7 @@
 ---
 id: gap-webui-sessions-no-layer-labels
 title: "/sessions 页缺分层标签——全篇无 Manager/Outer/Inner 分节标题，内容是扁平文本"
-status: ready
+status: done
 labels:
   - gap
   - webui
@@ -19,13 +19,16 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: `/sessions` 页按 Manager/Outer/Inner 分节渲染（分节标题）。
-- [ ] AC2: 每节下内容按层归属（不混排）。
+- [x] AC1: `/sessions` 页按 Manager/Outer/Inner 分节渲染（分节标题）。
+- [x] AC2: 每节下内容按层归属（不混排）。
 
 ## Definition of Done
 
-- [ ] `/sessions` 页可见 Manager/Outer/Inner 三层分节标题，各节内容按层归属不混排（真实渲染）。
+- [x] `/sessions` 页可见 Manager/Outer/Inner 三层分节标题，各节内容按层归属不混排（真实渲染）。
 
 ## Touches
 
+- packages/quay/src/observation.ts
+- packages/quay/src/serve-handlers.ts
+- packages/quay/test/serve-ac95-views.test.mjs
 - tasks/gap-webui-sessions-no-layer-labels.md（自身）
