@@ -1,7 +1,7 @@
 ---
 id: gap-ac105-build-tgz-v060
 title: AC105 build 当前版本可用产物：package.sh 产出 0.6.0 tgz（锚 commit sha + 产物 sha256，非路径）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -32,14 +32,15 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: `bash packages/quay/scripts/package.sh` 成功产出 `.tgz`（exit 0）。
-- [ ] AC2: `tar tzf <产物>` 显示 `plugin/` 条目非空（08-06 曾错把 npm pack 当入口得 0 条，此判据防复发）。
-- [ ] AC3: 产物内 `package/plugin/.claude-plugin/plugin.json` 版本 = `0.6.0`。
-- [ ] AC4: 达成证据 = build 时 `git rev-parse HEAD`（commit sha）+ 产物 `sha256sum`，⛔ 不记 .tgz 文件路径（判据不得引用生命周期短于判据本身的对象）。
+- [x] AC1: `bash packages/quay/scripts/package.sh` 成功产出 `.tgz`（exit 0）。
+- [x] AC2: `tar tzf <产物>` 显示 `plugin/` 条目非空（08-06 曾错把 npm pack 当入口得 0 条，此判据防复发）。
+- [x] AC3: 产物内 `package/plugin/.claude-plugin/plugin.json` 版本 = `0.6.0`。
+- [x] AC4: 达成证据 = build 时 `git rev-parse HEAD`（commit sha）+ 产物 `sha256sum`，⛔ 不记 .tgz 文件路径（判据不得引用生命周期短于判据本身的对象）。
+  证据：commit sha=`64ca97df852c5a055c7dea33e9b841c2e7fe6443`，产物 sha256=`bbaf905d07842990f8b02357f4143fd10491c88afe0e808da8a321cf258fbfcb`。
 
 ## Definition of Done
 
-- [ ] 当前版本 0.6.0 tgz 已产出；commit sha + 产物 sha256 已记录（可复核）；三条取假判据（AC1-3）全满足。
+- [x] 当前版本 0.6.0 tgz 已产出；commit sha + 产物 sha256 已记录（可复核）；三条取假判据（AC1-3）全满足。
 
 ## Touches
 
