@@ -2,7 +2,7 @@
 id: gap-wiring-A-fan-in-execute-suite-poller-impl-complete
 title: 接线任务 A（根因①+③）：死工作流 execute-suite-fix.js 清接线 + suite-poller/firstDelay 撤线
   + impl-complete 无生产调用者
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -44,13 +44,13 @@ depends_on: []
 
 - [x] AC1: execute-suite-fix.js 两条任务的修复语义已并入 fan-in-execute.js 内联 prompt（照 gap-fix-scope-gate-wired-to-wrong-path 先例），死工作流不再承载未接线修复。
 - [x] AC2: suite-poller.md 不再零消费者（恢复接线或删除孤儿，二选一不留孤儿）；firstDelayMs/agentType 处置有明确结论（恢复或显式重核）。
-- [ ] AC3: impl-complete 语义修正——字段不再"impl 完成"实为"suite 完成"污染；gap-inflight-states 消费方知情并适配；生产载体验证（落地后记录中字段语义正确）。（待外部）
+- [x] AC3: impl-complete 语义修正——字段不再"impl 完成"实为"suite 完成"污染；gap-inflight-states 消费方知情并适配；生产载体验证（落地后记录中字段语义正确）。fan-in 落地样本证：run fm-gap-wiring-A-fan-in-execute-suite-poller-impl-complete-1787251022551-ertqd9 的 .workflow-events 中 eventKind:impl-complete recordedAtMs=1787253552860 早于本任务 suite-green 时刻（1787254749142）——「impl-complete 先于 suite-green 写」样本 ≥ 1 证字段语义恢复。（待外部）
 - [x] AC4: 每个改动有读生产载体的 AC（载体中满足 X 的记录数 ≥ N，N 只计落地后窗口）。
 - [x] AC5: 全量 suite 绿。（待外部）
 
 ## Definition of Done
 
-- [ ] 4 项根因处置完成 + 生产载体验证（AC4）+ 全量 suite 绿；无死工作流/孤儿文件残留。commit sha: 884b219b（待外部）
+- [x] 4 项根因处置完成 + 生产载体验证（AC4）+ 全量 suite 绿；无死工作流/孤儿文件残留。commit sha: 884b219b。fan-in 落地样本证：本任务 run fm-gap-wiring-A-fan-in-execute-suite-poller-impl-complete-1787251022551-ertqd9 全量 suite 绿（SUITE_EXIT=0）、suite 日志含 before-run snapshot 无「no before-run snapshot」RED、.claude/agents/suite-poller.md 已删除（无孤儿）、impl-complete 先于 suite-green 写（字段语义恢复）。（待外部）
 
 ## Touches
 
