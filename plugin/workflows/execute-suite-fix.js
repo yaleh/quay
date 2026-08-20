@@ -1,10 +1,16 @@
 // ════════════════════════════════════════════════════════════════════════════════
-// ⛔ DEAD / 历史遗留工作流（gap-fix-scope-gate-wired-to-wrong-path AC3, 2026-08-18）。
-// 生产 suite-fix 在 fan-in-execute.js 的内联 subagent prompt（suite-fix 阶段，读 /tmp/fan-in-suite
-// -<task>.log 修根因），不调本文件——grep 只命中注释「前例/实证」，无一处真调用；本文件仅被
-// plugin/sync.sh dual-copy 铺出。fix-scope gate 已接线到 fan-in-execute.js 内联 prompt，本文件里
-// 的 fixScopeGate 不再代表生产路径。保留原实现与测试不动（未移除，避免 plugin/sync.sh dual-copy
-// 引用清理），仅标注 dead——不要再把它当成生产 suite-fix 路径接线任何新 gate。
+// ⛔ SUPERSEDED / 已退役工作流（gap-wiring-A-fan-in-execute-suite-poller-impl-complete, 2026-08-20）。
+// 本文件零生产调用者（全库仅测试/同步引用）——生产 suite-fix 在 fan-in-execute.js 的内联 subagent
+// prompt（suite-fix 阶段，读 /tmp/fan-in-suite-<task>.log 修根因）。本文件曾承载的两条修复语义已
+// 全部并入 fan-in-execute.js 内联 prompt（照 gap-fix-scope-gate-wired-to-wrong-path 先例）：
+//   ① gap-suite-fix-workflow-no-load-sensitive-branch → fan-in-execute.js 的 FIX_SCOPE_GATE 常量
+//     （fix 前机械分诊 inScope/outOfScope：load-sensitive 释放、checker 误报与别任务 bug defer）；
+//   ② gap-suite-fix-relaunch-stale-tmux-snapshot → fan-in-execute.js 的 SUITE_LAUNCH 块显式
+//     `tmux-leak-scan.sh --snapshot ${worktree}`（launch/relaunch 前落新鲜 before-run 快照）。
+// 保留本文件（未删除，避免 plugin/sync.sh dual-copy / workflows-dual-copy-drift-check / quay-init.sh
+// 引用清理）——但【不再是任何修复的承载路径】：不要把它当成生产 suite-fix 路径接线任何新 gate。
+// 原实现与测试不动（历史可查）。history：前身为 DEAD 标注（gap-fix-scope-gate-wired-to-wrong-path
+// AC3, 2026-08-18），wiring 审计 A 任务升级为 SUPERSEDED。
 // ════════════════════════════════════════════════════════════════════════════════
 export const meta = {
   name: 'execute-suite-fix',

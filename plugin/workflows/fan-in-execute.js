@@ -152,6 +152,13 @@ if [ -f "$suite_log_file" ]; then mv -f "$suite_log_file" "\${suite_log_file}.pr
 printf '__FANIN_SUITE_START__ iso=%s ms=%s head=%s round=full\\n' "$suite_start_iso" "$suite_start_ms" "$suite_head_now" > "$suite_log_file"
 printf 'full_suite_ran=true\\nskip_reason=\\nstart_iso=%s\\nstart_ms=%s\\nsuite_head=%s\\nsuite_log_file=%s\\n' \\
   "$suite_start_iso" "$suite_start_ms" "$suite_head_now" "$suite_log_file" > "$suite_capture"
+# gap-suite-fix-relaunch-stale-tmux-snapshot：launch/relaunch 前【显式】落新鲜 tmux-leak before-run 快照。
+# 生产 suite-fix（本 workflow 内联 Fix agent 的 relaunch）复用本 SUITE_LAUNCH ⇒ 此处即「relaunch 前生成
+# 新鲜快照」的 workflow 层保证——不依赖 scripts/test.sh FULL_SUITE_DEFAULT 深层分支；覆盖
+# refresh-worktree-quay.sh 从 main checkout 拷入的陈旧/缺失 .quay/tmux-leak-scan.snapshot（陈旧/缺失快照
+# ⇒ suite 收尾 --check fail-closed「no before-run snapshot」RED 的成因）。fail-open（--check 本身
+# fail-closed 兜底）。
+bash ${worktree}/plugin/scripts/tmux-leak-scan.sh --snapshot ${worktree} >/dev/null 2>&1 || true
 # single-flight 锁等待上调（gap-single-flight-lock-wait-shorter-than-suite）：test.sh 的
 # FULL_SUITE_LOCK_TIMEOUT 默认 600 < suite 实测上界 807931ms ≈ 808s ⇒ 5 fan-in 撞 2 slot 时第 3+ suite
 # 在 slot 释放前 fail-closed「not starting」白等 600s 后 relaunch。启动时把该 env 提到 ≥ suite 时长
@@ -589,7 +596,17 @@ ${SUITE_WAIT_BASH}
 # hasImplCompleteEvent 跳过重写（ff-retry 重跑 phase 2 同幂等）；Build 路径漏写（异常）⇒ 本步补写。
 # runId 为空（未走 --task-start 留痕）⇒ 跳过。|| true：回退是 best-effort，不因漏写拦 fan-in。
 if [ -n "${runId}" ]; then
-  node --experimental-strip-types ${worktree}/plugin/scripts/fast-mode-telemetry.ts --impl-complete --taskId ${task} --runId ${runId} --root ${root} || true
+  # gap-wiring-A-fan-in-execute-suite-poller-impl-complete：诚实报告写入路径——Build 已写 ⇒ 幂等跳过
+  # （IMPL-COMPLETE=build-wrote，正常主路径）；本步实际写入 ⇒ Build 漏写（IMPL-COMPLETE=backstop-wrote，
+  # ⚠️ 异常路径——事件在 suite-green 时刻写入，字段语义退化为「suite 完成」；派发 brief 已要求 Build
+  # 完成时调用 --impl-complete，此路径应只出现在 Build 未遵循派发词约定的异常）。|| true：回退是
+  # best-effort，不因漏写拦 fan-in。
+  ic_out=$(node --experimental-strip-types ${worktree}/plugin/scripts/fast-mode-telemetry.ts --impl-complete --taskId ${task} --runId ${runId} --root ${root} 2>&1) || ic_out="\${ic_out:-IMPL-COMPLETE-BACKSTOP-FAILED}"
+  case "$ic_out" in
+    *"already marked impl-complete"*) echo "IMPL-COMPLETE=build-wrote（幂等跳过——Build 完成时已写）";;
+    *"impl-complete event written"*) echo "IMPL-COMPLETE=backstop-wrote（⚠️ Build 未写，异常路径：事件在 suite-green 时刻写入）";;
+    *) echo "IMPL-COMPLETE=unknown ($ic_out)";;
+  esac
 fi
 # impl-complete-block-end
 

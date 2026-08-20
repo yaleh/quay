@@ -678,6 +678,7 @@ node --experimental-strip-types plugin/scripts/touches-orthogonality-check.ts --
 任务代理提交前编辑 `tasks/<id>.md`（它自己的任务文件，Touches 已授权）：**勾 AC 复选框**（它实现了、
 自己跑过 scoped 测试，有全部事实）+ **贴 invoke 实跑证据**（自己 scoped 测试的输出）。**仍 SCOPED ONLY**
 （不跑全量 suite——全量判据归外层 verification-round）；**不翻 status**（翻 done 是外层收尾的活）；
+**完成时写 impl-complete 生命周期边界（gap-impl-complete-event-written-by-fan-in-not-build / gap-inflight-states-missing-impl-complete-event）**：Build 完成（提交后）调用 `node --experimental-strip-types <root>/plugin/scripts/fast-mode-telemetry.ts --impl-complete --taskId <id> --root <root>`——`--runId` 省略（自动从 `--task-start` 开括号解析，Build 不持有 runId）；Build 完成即写 ⇒ 排队待 fan-in 的任务带 impl-complete、不占 Build 槽（slot-refill 的 `implementing` 段只含真正在 Build 的）。幂等：fan-in step 4.4 的 `hasImplCompleteEvent` 守卫已写则跳过；缺 `--task-start` 括号则 fail-closed（不写）。
 **DoD 勾选按时机分离**（gap-dispatch-brief-dod-check-timing）：**impl 勾 impl-time 可判的 DoD 项**（如 scoped 绿）；**fan-in-time 项**（全量绿 / 行为性后果）**不勾、留 fan-in**，且行尾标注「（待外部）」（fan-in-ac-completion-gate 只认该标注放行）。**不是「全不勾」**——「全不勾」会让 fan-in 的 AC 完成闸把每个任务都拒翻。收尾（外层异步）因此
 每任务只剩「核对 DoD 行 + 翻 done + 关遥测括号」——量小到不是同步点（(c) 块落地后，closure-async
 机制根的收尾对已自勾 AC/证据的任务是 no-op）。
