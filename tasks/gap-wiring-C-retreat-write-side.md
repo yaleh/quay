@@ -42,6 +42,8 @@ depends_on: []
 ## Touches
 
 - packages/quay/src/gate/lifecycle.ts（retreat 写标记）
+- packages/quay/test/lifecycle.test.mjs（写侧测试——RETREATED-WRITE Phase-A + Phase-C E2E）
+- plugin/test/retreat-ac-uncheck.test.mjs（retreat edge 契约断言更新）
 - plugin/scripts/slot-refill.ts（检测侧，若需对齐——本任务未改，检测侧原样正确）
 - plugin/scripts/ready-pool-check.ts（检测侧，若需对齐——本任务未改，检测侧原样正确）
 - tasks/gap-wiring-C-retreat-write-side.md（自身）
