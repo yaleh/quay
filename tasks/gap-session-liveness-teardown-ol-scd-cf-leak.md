@@ -1,7 +1,7 @@
 ---
 id: gap-session-liveness-teardown-ol-scd-cf-leak
 title: "第26条复发——session-liveness 又泄漏 ol-scd-c/f（统一 after() 仍漏同类路径，5b 第二次同形）"
-status: ready
+status: done
 labels:
   - gap
   - mechanism
