@@ -23,12 +23,12 @@ extra:
 ## Acceptance Criteria
 
 - [x] AC1: `measure-history.jsonl` 在 detached-suite 路径也被写入——照抄 `mirror-full-suite-state.ts` 的 mirror-write 模式，新增薄写入器并接线到 `fan-in-execute.js` step 4.5（双拷贝同步 `.claude/workflows/fan-in-execute.js`）。
-- [ ] AC2: 负控制落在生产载体——一次真实 detached-suite fan-in 后，`measure-history.jsonl` 有本轮每文件耗时记录（读生产载体，非 fixture/standalone 注入）。（待外部——本 impl 只交付 writer+wiring+scoped 绿；真实 detached-suite fan-in 由 AC78 fan-in 步骤自身执行并在 step 4.5 经 mirror-history-block 落账后确认）
+- [ ] AC2: 负控制落在生产载体——一次真实 detached-suite fan-in 后，`measure-history.jsonl` 有本轮每文件耗时记录（读生产载体，非 fixture/standalone 注入）。本 impl 只交付 writer+wiring+scoped 绿；真实 detached-suite fan-in 由 AC78 fan-in 步骤自身执行并在 step 4.5 经 mirror-history-block 落账后确认（待外部）
 - [x] AC3: `measure-trend-check.ts` 消费者不红（mirror-write 后数据格式与 full-suite-runner.ts 直写一致）。
 
 ## Definition of Done
 
-- [ ] 真实 detached-suite fan-in 后 `measure-history.jsonl` 更新（不再停摆），scoped 绿 + 消费者不红（真实输出）。（待外部——scoped 绿 + 消费者不红已由本 impl 验证；真实 detached-suite fan-in 落账由 AC78 fan-in 步骤执行后确认）
+- [ ] 真实 detached-suite fan-in 后 `measure-history.jsonl` 更新（不再停摆），scoped 绿 + 消费者不红（真实输出）。scoped 绿 + 消费者不红已由本 impl 验证；真实 detached-suite fan-in 落账由 AC78 fan-in 步骤执行后确认（待外部）
 
 ## Touches
 
