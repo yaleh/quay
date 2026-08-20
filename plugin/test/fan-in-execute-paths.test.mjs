@@ -1218,6 +1218,120 @@ test("⑦b REAL skip — a doc-only capture (full_suite_ran=false) writes NO ful
   assert.equal(fs.existsSync(path.join(dir, ".quay", "full-suite-state.json")), false, "no full-suite-state.json for a doc-only skip (the full_suite_ran=true guard excludes it)");
 });
 
+// ── ⑦c measure-history.jsonl mirror-write (gap-measure-history-detached-suite-mirror-write AC1/AC3) ──
+// The detached suite (setsid bash scripts/test.sh) never goes through full-suite-runner.ts (the ONLY
+// measure-history.jsonl writer) ⇒ the per-file duration ledger went stale (last record 2026-08-17T04:29:08Z;
+// two days of detached-suite rounds with no records). The fix: step 4.5 mirror-appends a round parsed from
+// THIS round's REAL suite log (the __PERFILE__ lines measure-suite-reporter.mjs already emitted) via
+// plugin/scripts/mirror-measure-history.ts (reusing landMeasureHistory — the SAME function the runner
+// calls, so the data format is identical), guarded by full_suite_ran=true (a doc-only skip never fabricates
+// a round). These tests run the REAL block against a real temp repo + a real capture + a real suite log.
+
+async function mirrorHistoryBlockFor(task, worktree, root) {
+  const { prompts } = await runWorkflow({
+    args: { task, worktree, root, runId: "fm-mhist-1", mergeTarget: "develop" },
+  });
+  return extractBlockFromPrompts(prompts, "# mirror-history-block-start", "# mirror-history-block-end");
+}
+
+test("⑦c wiring — the fan-in prompt carries a measure-history.jsonl mirror-write block (mirror-measure-history.ts, guarded by full_suite_ran=true, inside the preverified-round-block)", async (t) => {
+  const { prompts } = await runWorkflow({
+    args: { task: "gap-test-mhist", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-mhist", mergeTarget: "develop" },
+  });
+  const block = extractBlockFromPrompts(prompts, "# mirror-history-block-start", "# mirror-history-block-end");
+  assert.ok(block.includes("mirror-measure-history.ts"), "block must invoke the mirror writer");
+  assert.ok(block.includes('--log "$suite_log_file"'), "block must pass the capture's REAL suite log path (the __PERFILE__ source)");
+  assert.ok(block.includes('--lane-count "$lane_count"'), "block must reuse the capture's lane count");
+  assert.ok(block.includes('--run-at "$end_iso"'), "block must pass the capture's real end time as runAt");
+  assert.ok(block.includes("--task-id gap-test-mhist"), "block must carry the fan-in task id (traceability)");
+  assert.ok(block.includes("--run-id fm-mhist"), "block must carry the fan-in runId (traceability)");
+  // The mirror write lives INSIDE the full_suite_ran=true guard (the same shared guard as the
+  // verification-round write) — a doc-only skip must not fabricate a round.
+  const p2 = promptContaining(prompts, "# mirror-history-block-start");
+  const guardIdx = p2.indexOf('[ "$full_suite_ran" = "true" ]');
+  const blockIdx = p2.indexOf("# mirror-history-block-start");
+  const guardEndIdx = p2.indexOf("# preverified-round-block-end");
+  assert.ok(guardIdx >= 0, "the full_suite_ran=true guard must be present in the phase-2 prompt");
+  assert.ok(blockIdx > guardIdx && blockIdx < guardEndIdx, "the mirror write runs INSIDE the full_suite_ran=true guard");
+});
+
+test("⑦c REAL mirror — a green fan-in capture with a REAL suite log appends a measure-history.jsonl round to the shared checkout (gap-measure-history-detached-suite-mirror-write AC1/AC3)", async (t) => {
+  const dir = makePreVerifiedWorktree();
+  t.after(() => cleanup(dir));
+  const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: dir, encoding: "utf8" }).stdout.trim();
+  const task = "gap-test-mhist-real";
+  const capture = `/tmp/fan-in-suite-${task}.env`;
+  const suiteLog = `/tmp/fan-in-suite-${task}.log`;
+  fs.writeFileSync(suiteLog, [
+    "__PERFILE__ duration_ms=1204.5 /home/yale/work/quay-worktrees/gap-demo/plugin/test/a.test.mjs passed=true",
+    "__PERFILE__ duration_ms=842.25 /home/yale/work/quay-worktrees/gap-demo/plugin/test/b.test.mjs passed=true",
+    "__PERFILE__ duration_ms=999999.5 /home/yale/work/quay-worktrees/gap-demo/plugin/test/c.test.mjs passed=false",
+  ].join("\n") + "\n", "utf8");
+  t.after(() => { for (const f of [capture, suiteLog]) { try { fs.rmSync(f, { force: true }); } catch (_) { /* best-effort */ } } });
+  fs.writeFileSync(capture, [
+    "full_suite_ran=true",
+    "skip_reason=",
+    "cpu_s=42.5",
+    "cpu_source=gnu-time",
+    "start_iso=2026-08-18T04:30:00.000Z",
+    "end_iso=2026-08-18T04:45:36.519Z",
+    "wall_ms=936519",
+    "load=8.03",
+    "lane_count=8",
+    "suite_exit=0",
+    `suite_head=${head}`,
+    `suite_log_file=${suiteLog}`,
+  ].join("\n") + "\n", "utf8");
+
+  const block = await mirrorHistoryBlockFor(task, dir, REPO_ROOT);
+  const r = runBash(`suite_capture="${capture}"; . "$suite_capture"; ${block}`, { cwd: dir });
+  assert.equal(r.status, 0, `mirror write must exit 0: ${r.stderr}`);
+  const historyFile = path.join(dir, ".quay", "measure-history.jsonl");
+  assert.ok(fs.existsSync(historyFile), "measure-history.jsonl was written to the shared checkout");
+  const lines = fs.readFileSync(historyFile, "utf8").trim().split("\n");
+  assert.equal(lines.length, 3, "one record per test file in the round");
+  const rec = JSON.parse(lines[0]);
+  // The record shape is IDENTICAL to full-suite-runner's direct writes (AC3 — the measure-trend-check.ts
+  // consumer reads this exact shape; no worktree-root prefix on the key).
+  assert.equal(typeof rec.round, "number");
+  assert.equal(rec.runAt, "2026-08-18T04:45:36.519Z", "runAt = the capture's end_iso");
+  assert.equal(rec.file, "plugin/test/a.test.mjs", "file key is normalized repo-root-relative");
+  assert.equal(rec.durationMs, 1204.5);
+  assert.equal(rec.passed, true);
+  assert.equal(rec.laneCount, 8);
+  assert.equal(typeof rec.logDigest, "string");
+});
+
+test("⑦c REAL no-op — a green fan-in capture whose suite log has NO __PERFILE__ lines writes NO round (exit 0, never a fabricated measure-history round)", async (t) => {
+  const dir = makePreVerifiedWorktree();
+  t.after(() => cleanup(dir));
+  const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: dir, encoding: "utf8" }).stdout.trim();
+  const task = "gap-test-mhist-nop";
+  const capture = `/tmp/fan-in-suite-${task}.env`;
+  const suiteLog = `/tmp/fan-in-suite-${task}.log`;
+  fs.writeFileSync(suiteLog, "__OVERHEAD__ run_static_checks_ms=100\nno perfile lines here\n", "utf8");
+  t.after(() => { for (const f of [capture, suiteLog]) { try { fs.rmSync(f, { force: true }); } catch (_) { /* best-effort */ } } });
+  fs.writeFileSync(capture, [
+    "full_suite_ran=true",
+    "skip_reason=",
+    "cpu_s=42.5",
+    "cpu_source=gnu-time",
+    "start_iso=2026-08-18T05:00:00.000Z",
+    "end_iso=2026-08-18T05:15:00.000Z",
+    "wall_ms=900000",
+    "load=4.5",
+    "lane_count=8",
+    "suite_exit=0",
+    `suite_head=${head}`,
+    `suite_log_file=${suiteLog}`,
+  ].join("\n") + "\n", "utf8");
+
+  const block = await mirrorHistoryBlockFor(task, dir, REPO_ROOT);
+  const r = runBash(`suite_capture="${capture}"; . "$suite_capture"; ${block}`, { cwd: dir });
+  assert.equal(r.status, 0, `no-perfile-lines must exit 0 (benign no-op, never blocks the fan-in): ${r.stderr}`);
+  assert.equal(fs.existsSync(path.join(dir, ".quay", "measure-history.jsonl")), false, "no measure-history.jsonl for a suite with no __PERFILE__ lines (no fabricated round)");
+});
+
 test("⑦ REAL real-suite WITH a suite log — the fan-in landing row carries the phase fields + concurrency variables (gap-fan-in-verification-round-thin-schema-phase-gap AC1/AC4)", async (t) => {
   // THE DEFECT THIS TASK FIXES: fan-in landing rows were thin — no serial/main/static phase ms, no
   // nproc/concurrentSuiteSlots/concurrentSuitesRunning — so AC101's lane-concurrency control round
@@ -1644,6 +1758,7 @@ test("⑧ turn-budget REAL — a real detached suite (setsid) + the real poll bl
   }
 });
 
+
 test("⑧ split — the poll block parses a gnu-time '%U %S' line into cpu_user_s/cpu_sys_s (real values, not estimates)", async (t) => {
   // gap-verification-round-cpu-split-not-recorded AC1/AC3 — the poll block splits the SAME gnu-time line
   // whose sum becomes cpu_time_s. Seeded with the finding's real values (user=4414.230 sys=6899.653):
@@ -1683,6 +1798,156 @@ test("⑧ split — the poll block parses a gnu-time '%U %S' line into cpu_user_
   assert.match(out, /^cpu_sys_s=6899\.653$/m, "capture carries cpu_sys_s from the gnu-time %S column");
   assert.match(out, /^cpu_s=11313\.883$/m, "cpu_s stays the sum (user+sys) — AC1 keeps the existing field");
   assert.match(out, /^cpu_source=gnu-time$/m, "cpu_source=gnu-time for a real measurement");
+});
+
+
+// ── ⑧⑩ 锁等待负控制（gap-single-flight-lock-wait-shorter-than-suite AC2/AC3）─────────────────────────
+// THE DEFECT: test.sh 的 single-flight 锁默认 FULL_SUITE_LOCK_TIMEOUT=600 < suite 实测上界 ~840s ⇒
+// 5 fan-in 撞 2 slot 时第 3+ suite 在 slot 释放前 fail-closed「not starting」白等 600s 后 relaunch。
+// FIX: SUITE_LAUNCH/ISOLATE_LAUNCH 启动 detached suite 时经 env 把 FULL_SUITE_LOCK_TIMEOUT 提到 ≥ suite
+// 时长（默认 suiteLockTimeoutSecs=900，args 可覆盖；调用方可经 env FULL_SUITE_LOCK_TIMEOUT 覆盖）。
+// ① 结构负控制（本缺陷的负控制）：launch 块必须携带 FULL_SUITE_LOCK_TIMEOUT ≥ 840 —— revert 本修复
+//    （丢掉 env / 回到 600）⇒ 此断言红。
+// ② REAL 机制（wait-and-acquire）：fake test.sh 忠实复现 test.sh 的锁等待语义（S=2 槽、非阻塞 try +
+//    有界等待 + FULL_SUITE_LOCK_TIMEOUT fail-closed）。两槽全忙时套件【等待】释放而【非】fail-closed；
+//    反向（正对照）：等待短于释放时刻 ⇒ 确实 fail-closed「not starting」——证明机制真实可取假。
+test("⑧⑩ 锁等待负控制 — suite-launch 携带 FULL_SUITE_LOCK_TIMEOUT ≥ suite 时长; REAL 槽忙→释放后获取而非 fail-closed", async (t) => {
+  // RED 序列驱动 vm 实执行：fix agent prompt 携带 ISOLATE_LAUNCH 块（SUITE_LAUNCH 在 phase-1 prompt）。
+  const { prompts } = await runWorkflow({
+    args: { task: "gap-test-lockwait", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-lockwait", mergeTarget: "develop" },
+    agentResults: [
+      { outcome: "suite-started", suitePid: 111, codeDelta: "code", worktreeHead: "h1", note: "" }, // phase 1
+      { done: true, suiteExit: 1 },                                                                 // poll: RED
+      { relaunched: true, worktreeHead: "h2", failuresFixed: [], note: "" },                       // Fix agent (carries ISOLATE_LAUNCH)
+      { done: true, suiteExit: 0 },                                                                 // poll: green after fix
+      { outcome: "green", ffOk: true, developHead: "d2", worktreeHead: "h2", agentIdUsed: "a2", codeDelta: "code", note: "bracketClose=OK", bracketClosed: true }, // phase 2
+    ],
+  });
+
+  // ── ① 结构负控制 ──
+  const launch = extractBlockFromPrompts(prompts, "# suite-launch-block-start", "# suite-launch-block-end");
+  const m = launch.match(/suite_lock_timeout="\$\{FULL_SUITE_LOCK_TIMEOUT:-(\d+)\}"/);
+  assert.ok(m, "suite-launch must define suite_lock_timeout from FULL_SUITE_LOCK_TIMEOUT (default ≥ suite duration)");
+  assert.ok(Number(m[1]) >= 840, `default suite-lock wait must be ≥ the measured suite duration (~840s, 807931ms), got ${m[1]}`);
+  assert.ok(launch.includes('setsid env FULL_SUITE_LOCK_TIMEOUT="$suite_lock_timeout"'), "the launched suite must receive FULL_SUITE_LOCK_TIMEOUT via env");
+  const isolate = extractBlockFromPrompts(prompts, "# isolate-launch-block-start", "# isolate-launch-block-end");
+  assert.ok(isolate.includes('FULL_SUITE_LOCK_TIMEOUT="$suite_lock_timeout"'), "isolate-rerun launch must also pass FULL_SUITE_LOCK_TIMEOUT");
+
+  // ── ② REAL wait-and-acquire ──
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fan-in-lockwait-"));
+  t.after(() => cleanup(dir));
+  const task = "gap-test-lockwait-real";
+  const git = (args) => {
+    const r = spawnSync("git", args, { cwd: dir, encoding: "utf8" });
+    if (r.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${r.stderr}`);
+  };
+  git(["init", "-q", "-b", "main"]);
+  git(["config", "user.email", "test@test"]);
+  git(["config", "user.name", "test"]);
+  fs.writeFileSync(path.join(dir, "README.md"), "base\n");
+  git(["add", "-A"]); git(["commit", "-qm", "base"]);
+
+  // Fake test.sh: faithful single-flight lock semantics (S=2 slots, non-blocking try, bounded wait,
+  // fail-closed after FULL_SUITE_LOCK_TIMEOUT). The REAL scripts/test.sh is far too heavy for a unit test.
+  const fakeTest = [
+    "#!/usr/bin/env bash",
+    "set -u",
+    'lock_base="$(git rev-parse --git-common-dir 2>/dev/null || echo .git)/full-suite.lock"',
+    "fds=()",
+    'for i in 0 1; do exec {fd}>"${lock_base}.${i}"; fds+=("$fd"); done',
+    'held=""',
+    "idx=0",
+    'for fd in "${fds[@]}"; do if flock -n "$fd"; then held="$idx"; break; fi; idx=$((idx+1)); done',
+    'if [ -z "$held" ]; then',
+    "  start=$SECONDS; waited=0",
+    '  while [ "$waited" -lt "${FULL_SUITE_LOCK_TIMEOUT:-600}" ]; do',
+    "    idx=0",
+    '    for fd in "${fds[@]}"; do if flock -w 1 "$fd"; then held="$idx"; break; fi; idx=$((idx+1)); done',
+    '    [ -n "$held" ] && break',
+    "    waited=$((SECONDS - start))",
+    "  done",
+    '  if [ -z "$held" ]; then',
+    '    echo "scripts/test.sh: another full suite holds all slots — not starting (single-flight lock; waited ${FULL_SUITE_LOCK_TIMEOUT:-600}s)" >&2',
+    "    exit 1",
+    "  fi",
+    "fi",
+    'echo "acquired full-suite single-flight slot $held"',
+    "sleep 1",
+    "exit 0",
+    "",
+  ].join("\n");
+  fs.mkdirSync(path.join(dir, "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "scripts", "test.sh"), fakeTest);
+  fs.chmodSync(path.join(dir, "scripts", "test.sh"), 0o755);
+  git(["add", "-A"]); git(["commit", "-qm", "add fake test.sh"]);
+
+  const codeDeltaFile = `/tmp/fan-in-code-delta-${task}.txt`;
+  fs.writeFileSync(codeDeltaFile, "plugin/workflows/fan-in-execute.js\n");
+  const tmpFiles = [`/tmp/fan-in-suite-${task}.env`, `/tmp/fan-in-suite-${task}.exit`, `/tmp/fan-in-suite-${task}.time`, `/tmp/fan-in-suite-${task}.log`, codeDeltaFile];
+  t.after(() => { for (const f of tmpFiles) { try { fs.rmSync(f, { force: true }); } catch (_) {} } });
+
+  const { prompts: prompts2 } = await runWorkflow({
+    args: { task, worktree: dir, root: REPO_ROOT, runId: "fm-lockwait-real", mergeTarget: "develop" },
+  });
+  const launchBlock = extractBlockFromPrompts(prompts2, "# suite-launch-block-start", "# suite-launch-block-end");
+
+  // Hold BOTH slots in a detached holder; killing it releases the flock (fd close auto-releases).
+  const holder = spawn("bash", ["-c",
+    `cd ${dir}; exec 8>"${dir}/.git/full-suite.lock.0"; flock -n 8 || exit 8; ` +
+    `exec 9>"${dir}/.git/full-suite.lock.1"; flock -n 9 || exit 9; ` +
+    `touch ${dir}/slots-held; sleep 30`], { stdio: "ignore" });
+  t.after(() => { try { holder.kill("SIGKILL"); } catch (_) {} });
+  for (let i = 0; i < 50 && !fs.existsSync(path.join(dir, "slots-held")); i++) await new Promise((r) => setTimeout(r, 50));
+  assert.ok(fs.existsSync(path.join(dir, "slots-held")), "holder must hold both slots before the suite launch");
+
+  // Launch the REAL SUITE_LAUNCH block with a SHORT lock wait (6s test seam — the suite finds both slots
+  // busy and must WAIT, not fail-closed). Spawn asynchronously (spawnSync would block until the detached
+  // suite's inherited stdout pipe closes — the suite is still waiting), free a slot while it waits, then
+  // await the block's ~3s confirm. The suite must acquire the freed slot (waited < 6s) and run to exit 0.
+  const launchProc = spawn("bash", ["-c", `export FULL_SUITE_LOCK_TIMEOUT=6; ${launchBlock}`], { cwd: dir, stdio: ["ignore", "pipe", "pipe"] });
+  let launchOut = "";
+  launchProc.stdout.on("data", (d) => { launchOut += d; });
+  launchProc.stderr.on("data", (d) => { launchOut += d; });
+  await new Promise((r) => setTimeout(r, 1500)); // let the suite start waiting
+  holder.kill("SIGKILL");                       // free a slot WHILE the suite is waiting
+  const launchExit = await new Promise((resolve) => { launchProc.on("exit", (code, sig) => resolve({ code, sig })); });
+  assert.equal(launchExit.code, 0, `launch block failed: ${launchOut}`);
+
+  const marker = `/tmp/fan-in-suite-${task}.exit`;
+  let seen = false;
+  for (let i = 0; i < 50 && !seen; i++) { if (fs.existsSync(marker)) seen = true; else await new Promise((r) => setTimeout(r, 100)); }
+  assert.ok(seen, "the waiting suite must acquire the freed slot and write its exit marker");
+  const markerText = fs.readFileSync(marker, "utf8");
+  const log = fs.readFileSync(`/tmp/fan-in-suite-${task}.log`, "utf8");
+  assert.match(markerText, /exit=0/, `the suite must run to exit 0 after acquiring the freed slot, got: ${markerText.trim()}`);
+  assert.match(log, /acquired full-suite single-flight slot/, "the suite must log its slot acquisition");
+  assert.ok(!log.includes("not starting"), "the suite must NOT fail-closed (no 'not starting' lock refusal)");
+
+  // ── ②b 正对照（机制可取假）：等待短于释放时刻 ⇒ 确实 fail-closed「not starting」。
+  const taskFc = "gap-test-lockwait-fc";
+  const codeDeltaFc = `/tmp/fan-in-code-delta-${taskFc}.txt`;
+  fs.writeFileSync(codeDeltaFc, "plugin/workflows/fan-in-execute.js\n");
+  t.after(() => { for (const f of [`/tmp/fan-in-suite-${taskFc}.env`, `/tmp/fan-in-suite-${taskFc}.exit`, `/tmp/fan-in-suite-${taskFc}.time`, `/tmp/fan-in-suite-${taskFc}.log`, codeDeltaFc]) { try { fs.rmSync(f, { force: true }); } catch (_) {} } });
+  const { prompts: prompts3 } = await runWorkflow({
+    args: { task: taskFc, worktree: dir, root: REPO_ROOT, runId: "fm-lockwait-fc", mergeTarget: "develop" },
+  });
+  const launchBlockFc = extractBlockFromPrompts(prompts3, "# suite-launch-block-start", "# suite-launch-block-end");
+  const holder2 = spawn("bash", ["-c",
+    `cd ${dir}; exec 8>"${dir}/.git/full-suite.lock.0"; flock -n 8 || exit 8; ` +
+    `exec 9>"${dir}/.git/full-suite.lock.1"; flock -n 9 || exit 9; ` +
+    `touch ${dir}/slots-held-2; sleep 30`], { stdio: "ignore" });
+  t.after(() => { try { holder2.kill("SIGKILL"); } catch (_) {} });
+  for (let i = 0; i < 50 && !fs.existsSync(path.join(dir, "slots-held-2")); i++) await new Promise((r) => setTimeout(r, 50));
+  assert.ok(fs.existsSync(path.join(dir, "slots-held-2")), "holder2 must hold both slots");
+  // FULL_SUITE_LOCK_TIMEOUT=1: slots stay held well past 1s ⇒ the suite fail-closes BEFORE any release.
+  runBash(`export FULL_SUITE_LOCK_TIMEOUT=1; ${launchBlockFc}`, { cwd: dir, timeout: 30_000 });
+  holder2.kill("SIGKILL");
+  const markerFc = `/tmp/fan-in-suite-${taskFc}.exit`;
+  let seenFc = false;
+  for (let i = 0; i < 50 && !seenFc; i++) { if (fs.existsSync(markerFc)) seenFc = true; else await new Promise((r) => setTimeout(r, 100)); }
+  assert.ok(seenFc, "the short-wait suite must fail-closed (marker written)");
+  const logFc = fs.readFileSync(`/tmp/fan-in-suite-${taskFc}.log`, "utf8");
+  assert.match(logFc, /not starting/, "the short-wait suite must log the lock refusal (fail-closed — the defect the fix prevents)");
 });
 
 // ── ⑧ durationMs 真墙钟一致性（gap-fan-in-suite-duration-poll-granularity-inflation）─────────────────

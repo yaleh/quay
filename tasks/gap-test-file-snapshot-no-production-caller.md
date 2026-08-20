@@ -1,7 +1,7 @@
 ---
 id: gap-test-file-snapshot-no-production-caller
 title: "test-file-snapshot.sh「删测试文件必红」判据无生产调用者——删测试文件不触发任何红"
-status: ready
+status: done
 labels:
   - gap
   - finding
@@ -21,15 +21,23 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: `test-file-snapshot.sh` 接线进 `run_static_checks`（或等价每轮执行路径），含持久化 baseline 文件。
-- [ ] AC2: 负控制——删除一个测试文件（且不在 baseline 的 --expect-added）⇒ 检查 exit 非 0。
-- [ ] AC3: 检查有真实生产调用者（grep 命中一个执行调用点，不是注释/声明）。
+- [x] AC1: `test-file-snapshot.sh` 接线进 `run_static_checks`（或等价每轮执行路径），含持久化 baseline 文件。
+- [x] AC2: 负控制——删除一个测试文件（且不在 baseline 的 --expect-added）⇒ 检查 exit 非 0。
+- [x] AC3: 检查有真实生产调用者（grep 命中一个执行调用点，不是注释/声明）。
 
 ## Definition of Done
 
-- [ ] 删测试文件被机械挡下（真实输出，非 fixture）。
-- [ ] `grep -rn test-file-snapshot.sh` 显示 ≥1 个执行调用点（非注释/declaration）。
+- [x] 删测试文件被机械挡下（真实输出，非 fixture）。
+- [x] `grep -rn test-file-snapshot.sh` 显示 ≥1 个执行调用点（非注释/declaration）。
 
 ## Touches
 
+- plugin/scripts/test-file-snapshot.sh
+- scripts/test.sh
+- docs/analysis/test-file-baseline.txt
+- plugin/scripts/checker-mutation-cases/test-file-snapshot.sh
+- plugin/scripts/capability-catalog.sh
+- plugin/scripts/rhythm-consumer-check.ts
+- plugin/test/test-file-snapshot.test.mjs
+- plugin/test/rhythm-consumer-check.test.mjs
 - tasks/gap-test-file-snapshot-no-production-caller.md（自身）
