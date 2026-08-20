@@ -1791,6 +1791,11 @@ exit 0
   const roundFile = `/tmp/fan-in-suite-${task}.round`;
   const suiteLog = `/tmp/fan-in-suite-${task}.log`;
   const marker = `/tmp/fan-in-suite-${task}.exit`;
+  // 防呆（gap-fan-in-suite-log-cross-relaunch-reuse 测试自包含）：round 计数器是固定 /tmp 路径，
+  // 上一次运行被中断（scoped 门 SIGTERM / 崩掉的 relaunch）留下的陈旧计数会把本轮 round 序号顺移
+  // （round-1 变成 duration_ms=1.2 而非 1.1）⇒ 断言假红。生产 launch block 只清 marker/time，
+  // 计数器是测试自己的簿记 ⇒ 启动前在此显式清掉，不依赖调用方环境干净。
+  fs.rmSync(roundFile, { force: true });
   t.after(() => { for (const f of [`/tmp/fan-in-suite-${task}.env`, marker, `/tmp/fan-in-suite-${task}.time`, suiteLog, `${suiteLog}.prev`, roundFile]) { try { fs.rmSync(f, { force: true }); } catch (_) { /* best-effort */ } } });
 
   const codeDeltaFile = `/tmp/fan-in-code-delta-${task}.txt`;
