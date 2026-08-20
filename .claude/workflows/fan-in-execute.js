@@ -28,8 +28,12 @@ export const meta = {
 //     per-task-suite-record.ts / full-suite-runner.ts），其 fan-in 必须用自己的修复被验证（取假一/取假二
 //     钉在 plugin/test/fan-in-execute-paths.test.mjs）。step 0 命中时 echo FAN-IN-BOOTSTRAP=hit，且若
 //     root 与 worktree 的 fan-in-execute.js 不一致（本次派发没用 worktree 版 scriptPath）echo WARN——
-//     结构性缺口仍在。改本文件必须同步 plugin/workflows/fan-in-execute.js（双拷贝，workflows-dual-copy-
-//     drift-check）与 A6 派发规则（fast-mode-tick-core.md：命中 ⇒ scriptPath 用 worktree 版）。
+//     结构性缺口仍在。⑥b 自举同步（gap-bootstrap-worktree-stale-fan-in-execute）：worktree fork 可能早于
+//     编排修复 land ⇒ 其 fan-in-execute.js/编排脚本陈旧。step 0 命中时【merge develop 前】先跑
+//     select-static-checks-for-touches.ts --bootstrap-sync（A6 派发侧也先跑同一同步），把最新 develop
+//     编排修复合入 worktree（保留本分支修改）——陈旧 worktree 的派发-time scriptPath 也被修到最新。
+//     改本文件必须同步 plugin/workflows/fan-in-execute.js（双拷贝，workflows-dual-copy-
+//     drift-check）与 A6 派发规则（fast-mode-tick-core.md：命中 ⇒ 先同步再以 worktree 版 scriptPath 派发）。
 //  ⑦ suite 等待（gap-fan-in-turn-budget-suite-timeout 的 2026-08-20 证伪 → gap-subagent-turn-budget-
 //     13min-falsified）：旧设计假设「subagent 有 ~10-13min 回合预算硬超时」⇒ 全量 suite ~14-25min 等
 //     不完 ⇒ 把等待搬到脚本控制流（setTimeout + 每轮起一个新短命轮询 agent）。该前提已被证伪：①inner
@@ -397,11 +401,22 @@ if [ -n "$bootstrap_hit" ]; then
   echo "FAN-IN-BOOTSTRAP=hit（本分支修改 fan-in 编排文件：）"
   echo "$bootstrap_hit"
   echo "⇒ 编排脚本一律从 worktree 解析"
-  # 自举警示（取假一能取假）：命中而 root 与 worktree 的 fan-in-execute.js 不一致 ⇒ 本次派发没用
-  # worktree 版 scriptPath ⇒ 本任务运行的 workflow 是主检出版（未含本分支修改）⇒ 修复未被自己验证。
+  # 自举同步（gap-bootstrap-worktree-stale-fan-in-execute，AC1）：worktree fork 可能早于某些 fan-in
+  # 编排修复 land（实证 full-suite-state-stale 的 worktree fork e29e5de9 < poll-bounded 23a75eba ⇒ 其
+  # fan-in-execute.js 缺 timeout 540 阻塞等待）。在 merge develop（step 1）前【先同步】：git merge
+  # ${mergeTarget} 把最新 develop 编排修复合入 worktree（保留本分支自己的修改——自举 self-validation 语义）。
+  # 冲突 ⇒ 脚本 abort 并留干净工作树（step 1 的 merge 会再撞并慢慢解）；脏树/ref 缺失 ⇒ skip（step 1
+  # 处理）。幂等：派发侧已合 ⇒ "Already up to date"。脚本从 worktree 解析（本分支自带此模式，先于 land），
+  # root 兜底（fork 早于本模式 land 的 worktree 自身跑不了它）。
+  sync_helper="${worktree}/plugin/scripts/select-static-checks-for-touches.ts"
+  [ -f "$sync_helper" ] || sync_helper="${root}/plugin/scripts/select-static-checks-for-touches.ts"
+  node --experimental-strip-types "$sync_helper" --bootstrap-sync --worktree ${worktree} --merge-target ${mergeTarget} --root ${root} 2>&1 || echo "FAN-IN-BOOTSTRAP-SYNC-FAILED rc=$?"
+  # 自举警示（取假一能取假）：同步后若 worktree 与主检出的 fan-in-execute.js 仍不一致 ⇒ 本分支修改了它
+  # ⇒ 自举要求派发用 worktree 版 scriptPath（若本次派发误用了主检出版，本任务对 fan-in-execute.js 的
+  # 修复未被自己验证）。同步已让未修改的 fan-in-execute.js 与主检出一致 ⇒ 此警示只在本分支确实改了它时触发。
   if [ -f "${worktree}/.claude/workflows/fan-in-execute.js" ]; then
     if ! cmp -s "${worktree}/.claude/workflows/fan-in-execute.js" "${root}/.claude/workflows/fan-in-execute.js" 2>/dev/null; then
-      echo "FAN-IN-BOOTSTRAP-WARN: 本分支修改了 fan-in-execute.js 但本次 fan-in 运行的 workflow 是主检出版（A6 自举规则要求以 worktree 版 scriptPath 派发）——本任务的修复未被自己验证" >&2
+      echo "FAN-IN-BOOTSTRAP-WARN: worktree 与主检出的 fan-in-execute.js 不一致（本分支修改了它 ⇒ 须用 worktree 版 scriptPath；若派发误用主检出版，本任务修复未被自己验证）" >&2
     fi
   fi
 else
