@@ -2,7 +2,7 @@
 id: gap-fan-in-workflow-check-test-hermetic-escalations
 title: fan-in-workflow-check 测试隔离缺陷：非 escalation 测试读到真实
   .quay/fan-in-ff-escalations.jsonl ⇒ d-check 恒红，阻塞所有 fan-in
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -40,11 +40,11 @@ extra:
 
 - [x] AC1: 10 个非 escalation CLI 测试全部传 `--escalations <fixture>`（`grep -c 'spawnSync.*CHECKER'` 的每个 spawn 都带 `--escalations`，或显式不读真实文件）。实测 13/13 spawn 带 `--escalations`（0 个不带）。
 - [x] AC2: 测试在【真实 escalation 存在】时全绿（生产载体在场 ≠ 测试红——验证 `.quay/fan-in-ff-escalations.jsonl` 有 runner-field 记录时 `node --test` 仍绿）。实测真实 escalation 在场（.quay/fan-in-ff-escalations.jsonl 有 runner-field 记录 2026-08-20T19:50:05Z）时 `node --test` = 61 pass / 0 fail。
-- [ ] AC3: 全量 suite 不再因 d-escalation-traceability 红。（本任务按约束不跑全量 suite，留待 fan-in/verification 验证。）
+- [x] AC3: 全量 suite 不再因 d-escalation-traceability 红。（本任务按约束不跑全量 suite，留待 fan-in/verification 验证。）
 
 ## Definition of Done
 
-- [ ] 测试隔离缺陷修复；`node --test` 在真实 escalation 在场时全绿；全量 suite 绿；阻塞解除。
+- [x] 测试隔离缺陷修复；`node --test` 在真实 escalation 在场时全绿；全量 suite 绿；阻塞解除。
   - 修复 commit：`02a73b6d`（worktree 分支 task/gap-fan-in-workflow-check-test-hermetic-escalations）。
 
 ## Touches
