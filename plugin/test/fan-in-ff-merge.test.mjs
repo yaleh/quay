@@ -486,6 +486,59 @@ test("AC1 gate — capture suite_head != 待 ff HEAD ⇒ exit 2 (证书必须钉
   }
 });
 
+test("stale suite-lock reclaim restored — blocked path (missing certificate) runs the reaper and REAPS a REAL stale holder (gap-wiring-D-worktree-remove-orphans-reclaim-restore)", () => {
+  // gap-wiring-D-worktree-remove-orphans-reclaim-restore (硬规则 5b): 9645a4ff silently replaced the
+  // reaper's stale-lock reclaim (989ec472's gap-worktree-remove-orphans-probes wiring) with the narrow
+  // per-task certificate gate and dropped the reaper call entirely. The certificate gate is CORRECT
+  // (it fixed the 2026-08-18 mutual-refuse livelock) — the reaper is a SEPARATE concern and must be
+  // restored. This test is the PRODUCTION-CARRIER (AC2): a REAL stale holder (a process whose cwd
+  // points at a DELETED dir, holding a suite single-flight lock slot open — the detached-hung-suite
+  // orphan shape) is constructed for real (not a fixture/mock), the certificate is missing (the
+  // BLOCKED path), and the ff must (a) refuse exit 2 AND (b) have run the reaper — proven by the
+  // stale holder's flock being auto-released (the reaper killed it). The normal fast path (green
+  // certificate) is untouched — the reaper only runs on the blocked path.
+  const dir = makeTmp("reclaimrestore");
+  const st = stateDir("reclaimrestore");
+  try {
+    initRepo(dir);
+    makeTaskBranch(dir, "ac62-reclaim");
+    const events = path.join(st, "events.jsonl");
+    const retries = path.join(st, "retries.jsonl");
+    const slot0 = path.join(dir, ".git", SUITE_LOCK_0);
+    fs.mkdirSync(path.dirname(slot0), { recursive: true });
+    fs.writeFileSync(slot0, "", "utf8");
+    // A REAL stale holder: a background subshell whose cwd is a dir we then DELETE, holding slot .0
+    // open via flock (the detached hung suite shape). After `rm -rf`, its cwd becomes
+    // "<holderDir> (deleted)" — the ORPHAN signature the reaper's --orphans --stale-lock-holders-only
+    // matches (cwdDeleted + holds the lock file open). flock auto-releases when the process dies.
+    const holderDir = path.join(dir, "holder-wt");
+    fs.mkdirSync(holderDir, { recursive: true });
+    const lockMark = path.join(st, "lock-state.txt");
+    // NO --suite-capture: the certificate gate FAILS ⇒ the blocked path runs the reaper before the
+    // exit-2 refusal. Assert exit 2 AND that the stale holder's lock was released (the reaper ran on a
+    // REAL stale lock — the production-carrier).
+    const mergeArgs = ["--task", "ac62-reclaim", "--root", dir, "--lock-events", events, "--retry-record", retries];
+    const inner =
+      `(cd "${holderDir}" && exec 9>"${slot0}" && flock -n 9 && sleep 30) & holder=$!; ` +
+      `sleep 0.3; rm -rf "${holderDir}"; ` +
+      `bash ${MERGE_SCRIPT} ${mergeArgs.map((a) => JSON.stringify(a)).join(" ")}; rc=$?; ` +
+      `if (flock -n 9 2>/dev/null) 9>"${slot0}"; then echo REAPED > "${lockMark}"; else echo STILL_HELD > "${lockMark}"; fi; ` +
+      `kill "$holder" 2>/dev/null; wait "$holder" 2>/dev/null; exit $rc`;
+    const r = spawnSync("bash", ["-c", inner], { encoding: "utf8" });
+    assert.equal(r.status, 2, `missing certificate must refuse (exit 2):\nstdout=${r.stdout}\nstderr=${r.stderr}`);
+    assert.match(r.stderr, /suite 证书未满足/, "the refusal names the missing suite certificate");
+    assert.ok(!fs.existsSync(events), "no lock events — the lock was never acquired");
+    assert.ok(!fs.existsSync(retries), "no retry record — environment guard, not an ff failure");
+    // PRODUCTION-CARRIER (AC2): the stale holder must have been reaped on the blocked path — its flock
+    // is auto-released only when the holding process dies (the reaper's kill). A free lock proves the
+    // reaper ran in a REAL stale-lock scenario (not a fixture/mock).
+    assert.equal(fs.readFileSync(lockMark, "utf8").trim(), "REAPED", "the stale suite-lock holder must be reaped by the reaper on the blocked path (real stale-lock scenario)");
+  } finally {
+    cleanup(dir);
+    cleanup(st);
+  }
+});
+
 test("AC5 — contradiction B FIXED: BOTH global suite-lock slots held (S=2, two suites coexisting) do NOT refuse ANOTHER task's ff", () => {
   // The 2026-08-18 livelock: two fan-ins running suites in PARALLEL each saw the other's global
   // full-suite.lock slot ⇒ mutual REFUSE. Under S=2, two coexisting suites hold BOTH slots (.0 + .1).
