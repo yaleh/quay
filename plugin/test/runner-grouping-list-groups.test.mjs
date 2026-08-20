@@ -44,6 +44,27 @@ function runTestSh(...args) {
   return r.stdout;
 }
 
+// 文件内去重 (gap-runner-grouping-dedupe-metadata-query): each --list-files/--list-groups re-spawns
+// scripts/test.sh (a ~20-35s metadata query on this machine) and this file previously issued the
+// parameter-identical pair twice (--list-files in AC3+AC6, --list-groups in AC10+AC3). node --test
+// runs each test FILE in its own process, so this module-level memo is strictly per-file — zero
+// cross-process state risk. Only PARAMETER-IDENTICAL calls share a result.
+const metaCache = new Map();
+function runTestShCached(...args) {
+  const key = JSON.stringify(args);
+  if (!metaCache.has(key)) metaCache.set(key, runTestSh(...args));
+  return metaCache.get(key);
+}
+// Fresh re-read for readStable retries — re-queries the live tree and refreshes the cache entry.
+// The anti-flake retry must see the current glob, not a stale snapshot (a transient zz-* fixture
+// between two reads is the exact case round-310 hit); the cache serves only the happy path.
+function runTestShRefresh(...args) {
+  const key = JSON.stringify(args);
+  const out = runTestSh(...args);
+  metaCache.set(key, out);
+  return out;
+}
+
 // Ground truth is COMPUTED at runtime, never snapshotted. A hardcoded `EXPECTED_ENGINE = 58`
 // goes stale the moment anyone adds a test file — B3-2 red on fan-in for exactly this reason
 // (B3-1 merged a new engine test 13 min after B3-2's worktree snapshot). Per the fast-mode tick
@@ -64,7 +85,7 @@ function parseGroups(out) {
 }
 
 test("AC10/AC2/AC3: --list-groups reports per-group counts of the deduped glob", () => {
-  const out = runTestSh("--list-groups");
+  const out = runTestShCached("--list-groups");
   const g = parseGroups(out);
   // Relationship, not snapshot: the FIVE groups partition the deduped realpath total (serial is
   // the load-sensitive family's group — gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests;
@@ -88,7 +109,10 @@ test("AC10/AC2/AC3: --list-groups reports per-group counts of the deduped glob",
 function readStable(read, relationship) {
   let values = null;
   for (let attempt = 0; attempt < 4; attempt++) {
-    values = read();
+    // attempt 0 may serve the metadata cache (文件内去重 happy path); retries pass refresh=true so
+    // the read re-queries the LIVE tree (runTestShRefresh) — preserving the transient-fixture
+    // recovery the bounded re-read exists for.
+    values = read(attempt > 0);
     if (relationship(values)) break;
   }
   return values;
@@ -96,9 +120,12 @@ function readStable(read, relationship) {
 
 test("AC3: realpath dedup — --list-files count + serial equals --list-groups total (12 symlinks not double-run)", () => {
   const { files, g } = readStable(
-    () => {
-      const files = runTestSh("--list-files").trim().split("\n").filter(Boolean);
-      const g = parseGroups(runTestSh("--list-groups"));
+    (refresh) => {
+      // --list-groups reuses AC10's cached result (文件内去重); --list-files is the cache source
+      // for AC6. On refresh (a transient-fixture retry) both re-query the live tree.
+      const query = refresh ? runTestShRefresh : runTestShCached;
+      const files = query("--list-files").trim().split("\n").filter(Boolean);
+      const g = parseGroups(query("--list-groups"));
       // The default --list-files EXCLUDES the serial group (routed to the concurrency-1 phase) and
       // INCLUDES the lowconc phase files (routed to the concurrency-3 phase), so the dedup
       // relationship is files + serial == total.
@@ -121,8 +148,11 @@ test("AC6: --group product,engine ∪ --group lowconc selects the same files as 
   // byte-exact concatenation equality — serial-anti-stomp landing in ANY window makes it unequal.
   // Bounded re-read until the concatenation holds stably, same as AC3 (readStable above).
   const { noArgs, body, low } = readStable(
-    () => {
-      const noArgs = runTestSh("--list-files");
+    (refresh) => {
+      // noArgs reuses AC3's cached --list-files (文件内去重); on refresh it re-queries live.
+      // body/low are unique to this test (no redundant twin), so they always query fresh.
+      const query = refresh ? runTestShRefresh : runTestShCached;
+      const noArgs = query("--list-files");
       const body = runTestSh("--group", "product,engine", "--list-files");
       const low = runTestSh("--group", "lowconc", "--list-files");
       // body ends with a trailing newline after its last file; splice body's trailing newline and

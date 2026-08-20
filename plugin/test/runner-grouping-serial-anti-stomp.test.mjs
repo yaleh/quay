@@ -47,6 +47,19 @@ function runTestSh(...args) {
   return r.stdout;
 }
 
+// 文件内去重 (gap-runner-grouping-dedupe-metadata-query): the successful `--list-groups` metadata
+// query is issued twice in this file (serial mechanism test + AC0c); each re-spawn of
+// scripts/test.sh costs ~20-35s. node --test runs each test FILE in its own process, so this
+// module-level memo is strictly per-file — zero cross-process state risk. Only
+// PARAMETER-IDENTICAL calls share a result (the AC0c FAIL-CLOSED `--list-groups` at line ~155
+// expects a non-zero exit and stays a raw spawnSync, never cached).
+const metaCache = new Map();
+function runTestShCached(...args) {
+  const key = JSON.stringify(args);
+  if (!metaCache.has(key)) metaCache.set(key, runTestSh(...args));
+  return metaCache.get(key);
+}
+
 // Ground truth is COMPUTED at runtime, never snapshotted (same invariant as the sibling
 // runner-grouping-list-groups.test.mjs — see its header for the relationship rationale).
 function parseGroups(out) {
@@ -120,7 +133,7 @@ test("serial group mechanism (gap-suite-concurrency-8-green-serial-group-for-non
   // Behavioral: --group serial --list-files returns exactly the serial members and nothing else;
   // the default --list-files EXCLUDES them (the concurrency-8 main body no longer pays their load).
   const serialList = runTestSh("--group", "serial", "--list-files").trim().split("\n").filter(Boolean);
-  const g = parseGroups(runTestSh("--list-groups"));
+  const g = parseGroups(runTestShCached("--list-groups"));
   assert.equal(serialList.length, g.serial, "--group serial must list exactly the serial group");
   for (const f of serialList) {
     const grp = groupOfFile(f);
@@ -145,7 +158,7 @@ test("AC0c (anti-stomp): group_of recognizes ALL FIVE groups in one case arm —
     "group_of must recognize ALL FIVE groups (product|engine|governance|serial|lowconc) in one case arm");
   // Behavioral double-check: all five counts are non-zero, and an unknown-group declaration is
   // FAIL-CLOSED (not silently degraded to engine — AC0b).
-  const g = parseGroups(runTestSh("--list-groups"));
+  const g = parseGroups(runTestShCached("--list-groups"));
   assert.ok(g.product > 0 && g.engine > 0 && g.governance > 0 && g.serial > 0 && g.lowconc > 0,
     "all five groups must have non-zero membership in --list-groups");
   const unknown = join(repoRoot, "plugin", "test", "zz-unknown-group-anti-stomp.test.mjs");

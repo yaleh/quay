@@ -667,6 +667,13 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
   // in the result so the tick can close deferred candidates' open brackets (--close-task --outcome
   // deferred). slot-refill stays PURE; it only reports.
   let deferred = [];
+  // ASSEMBLEBATCH-DEFERRED (gap-slot-refill-discards-assemblebatch-deferred AC1): the batch
+  // scheduler's serialize reasons (shared-state / learning-type / non-capability-growth /
+  // not-disjoint-from-peer / ill-declared-touches) — captured from assembleBatch's `deferred`
+  // so the output's `deferred` exposes the REAL rejection reason instead of dropping it, and
+  // `no_refill_reason` can distinguish "no candidate passed step-4" from "candidates passed
+  // step-4 but assembleBatch serialized them all".
+  let assembleBatchDeferred = [];
   // PHANTOM-KILLER FALSE-NEGATIVE OBSERVATION POINT (gap-phantom-killer-false-negative-id-not-in-
   // commits AC1): count of ready tasks caught by the BODY-side landed signal (isBodyLanded) that the
   // git-grep hasLandedImplementation MISSED (bodyLanded && !gitLanded). Each is a phantom-killer false
@@ -871,7 +878,16 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
     const cliqueCandidates = landedCandidateIds.size === 0
       ? candidates
       : candidates.filter((c) => !landedCandidateIds.has(c.id));
-    const { batch } = assembleBatch(cliqueCandidates, { expand });
+    const { batch, deferred: batchDeferred } = assembleBatch(cliqueCandidates, { expand });
+    // ASSEMBLEBATCH-DEFERRED MERGE (gap-slot-refill-discards-assemblebatch-deferred AC1): the
+    // step-4 skips (deferred via defer()) and the batch scheduler's serialize reasons are BOTH
+    // deferrals — merge them so the output's `deferred` carries the REAL rejection reason
+    // (shared-state / learning-type / non-capability-growth / not-disjoint-from-peer /
+    // ill-declared-touches). Pre-fix the assembleBatch deferred was DESTRUCTURED AWAY, so a
+    // candidate that passed all step-4 checks yet was serialized by assembleBatch produced
+    // `deferred=[]` + the misleading "no dispatchable candidate passes step-4" no_refill_reason.
+    assembleBatchDeferred = batchDeferred;
+    for (const d of batchDeferred) deferred.push(d);
     const landedRecommended = landedCandidateIds.size === 0
       ? []
       : candidates.filter((c) => landedCandidateIds.has(c.id)).map((c) => c.id);
@@ -944,7 +960,19 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
     // when the caller passed --running, else the wide in-flight fallback.
     noRefillReason = `no free slots (${runningSubagentCount !== null ? `running subagents ${runningSubagentCount}` : `in-flight ${inFlight.length} + closed-but-live ${closedButLive.length}`}${subagentsInFlight > 0 ? ` + subagents ${subagentsInFlight}` : ""} >= cap ${effectiveCap})`;
   } else if (recommended.length === 0) {
-    noRefillReason = "no dispatchable candidate passes step-4 checks (touches-resolve / deps-ready / disjoint-from-in-flight / self-touch C8)";
+    // ASSEMBLEBATCH-DEFERRED (gap-slot-refill-discards-assemblebatch-deferred AC2): when at least
+    // one candidate PASSED the step-4 checks but assembleBatch serialized them all, the old
+    // "no dispatchable candidate passes step-4" is a MISREPORT — the candidate DID pass step-4,
+    // it was deferred by the batch scheduler (shared-state / learning-type / non-capability-growth
+    // / not-disjoint-from-peer). Report the REAL rejection face instead, so a reader can see in one
+    // line why nothing was recommended. The genuine "step-4 empty" case (no candidate passed) keeps
+    // the original message.
+    if (assembleBatchDeferred.length > 0) {
+      const reasons = [...new Set(assembleBatchDeferred.map((d) => d.reason))];
+      noRefillReason = `${assembleBatchDeferred.length} candidate(s) passed step-4 but assembleBatch deferred all of them (serialization): ${reasons.join("; ")}`;
+    } else {
+      noRefillReason = "no dispatchable candidate passes step-4 checks (touches-resolve / deps-ready / disjoint-from-in-flight / self-touch C8)";
+    }
   }
 
   return {
