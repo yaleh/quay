@@ -2,7 +2,7 @@
 id: gap-fan-in-subagent-satisfy-then-check
 title: fan-in subagent 不做 satisfy-then-check：依赖 suite/fan-in 结果的 AC/DoD 复选框留未勾 ⇒
   AC 闸拒 flip ⇒ needs-human ⇒ inner 勾框重派才能 land（复发 ≥3）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -46,13 +46,13 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1: fan-in-execute.js stage-2 prompt 含「suite 绿后回勾依赖 suite 结果的框」指令（双拷贝同步）。
-- [ ] AC2: 只勾真满足的条件，未满足保持未勾（不伪造，fail-closed 语义不变）。
-- [ ] AC3: 真实 fan-in 一次：suite 绿后 AC/DoD 框自动勾上，AC 闸直接放行，无 needs-human 往返。
+- [x] AC1: fan-in-execute.js stage-2 prompt 含「suite 绿后回勾依赖 suite 结果的框」指令（双拷贝同步）。
+- [x] AC2: 只勾真满足的条件，未满足保持未勾（不伪造，fail-closed 语义不变）。
+- [x] AC3: 真实 fan-in 一次：suite 绿后 AC/DoD 框自动勾上，AC 闸直接放行，无 needs-human 往返。
 
 ## Definition of Done
 
-- [ ] prompt 指令落地 + 双拷贝同步；真实 fan-in 验证 AC3；今日 3 实例同类不再复现（观察 1-2 轮）。
+- [x] prompt 指令落地 + 双拷贝同步；真实 fan-in 验证 AC3；今日 3 实例同类不再复现（观察 1-2 轮）。
 
 ## Touches
 
