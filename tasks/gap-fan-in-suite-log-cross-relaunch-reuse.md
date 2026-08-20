@@ -21,16 +21,22 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: 每轮 relaunch 时真正轮转/清空日志（或打当前轮起始标记：时间戳/round id），读者和判定代码按标记切片，不再整份文件线性 grep。
-- [ ] AC2: 负控制落在生产载体——一次多轮 relaunch 后，按标记切片能区分「当前轮 vs 历史轮」（读真实日志，非 fixture）。
-- [ ] AC3: scoped 绿 + 读日志的判定代码（full-suite-runner / measure-suite-reporter / fan-in gate）不红。
+- [x] AC1: 每轮 relaunch 时真正轮转/清空日志（或打当前轮起始标记：时间戳/round id），读者和判定代码按标记切片，不再整份文件线性 grep。
+- [x] AC2: 负控制落在生产载体——一次多轮 relaunch 后，按标记切片能区分「当前轮 vs 历史轮」（读真实日志，非 fixture）。
+- [x] AC3: scoped 绿 + 读日志的判定代码（full-suite-runner / measure-suite-reporter / fan-in gate）不红。
 
 ## Definition of Done
 
-- [ ] 多轮 relaunch 后日志可区分当前轮/历史轮，误读旧轮数据的现象消除（真实输出）。
+- [x] 多轮 relaunch 后日志可区分当前轮/历史轮，误读旧轮数据的现象消除（真实输出）。
 
 ## Touches
 
 - tasks/gap-fan-in-suite-log-cross-relaunch-reuse.md（自身）
-- plugin/workflows/fan-in-execute.js（relaunch 时轮转日志或打起始标记；双拷贝同步 .claude/workflows/fan-in-execute.js）
-- plugin/scripts/measure-suite-reporter.mjs（或相关读日志判定代码，按标记切片）
+- plugin/workflows/fan-in-execute.js（SUITE_LAUNCH / ISOLATE_LAUNCH / doc-only 轮：轮转日志 → .prev + 打 __FANIN_SUITE_START__ 起始标记；fix-scope gate 按标记切片）
+- .claude/workflows/fan-in-execute.js（fan-in-execute.js 双拷贝，byte-identical）
+- plugin/scripts/measure-trend-check.ts（parsePerFileLines 按起始标记切片，只读当前轮）
+- plugin/scripts/pre-verified-round-record.ts（parseSuitePhases / detectPhaseOverlap 按起始标记切片）
+- plugin/scripts/measure-suite-reporter.mjs（产出行日志的 reporter——读者切片的契约对照方，本任务未改其逻辑）
+- plugin/test/fan-in-execute-paths.test.mjs（REAL 多轮 relaunch 轮转 + 按标记切片测试）
+- plugin/test/measure-trend-check.test.mjs（parsePerFileLines 切片单测）
+- plugin/test/pre-verified-round-record.test.mjs（parseSuitePhases 切片单测）

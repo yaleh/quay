@@ -145,7 +145,9 @@ const PHASE_OVERHEAD_RE = /^__OVERHEAD__\s+([A-Za-z0-9_]+)_ms=(\d+)(?:\s+partial
 
 /** Parse test.sh's `__OVERHEAD__ <phase>_ms=N` lines from a suite log. Returns {} when the log is
  *  absent/unreadable (never fabricates a phase — the absent-field contract). Keyed by the raw label
- *  (`serial_phase`, `lowconc_phase`, `main_phase`, `run_static_checks`). */
+ *  (`serial_phase`, `lowconc_phase`, `main_phase`, `run_static_checks`).
+ *  gap-fan-in-suite-log-cross-relaunch-reuse: 按最后一个 `__FANIN_SUITE_START__` 起始标记切片（只读
+ *  当前轮），无标记 ⇒ 整份（向后兼容）。 */
 export function parseSuitePhases(suiteLog) {
   const phaseMs = {};
   if (!suiteLog) return phaseMs;
@@ -155,7 +157,9 @@ export function parseSuitePhases(suiteLog) {
   } catch {
     return phaseMs;
   }
-  for (const line of text.split("\n")) {
+  const mk = text.lastIndexOf("__FANIN_SUITE_START__");
+  const body = mk === -1 ? text : text.slice(mk);
+  for (const line of body.split("\n")) {
     const m = line.match(PHASE_OVERHEAD_RE);
     if (m) phaseMs[m[1]] = Number(m[2]);
   }
@@ -181,7 +185,10 @@ export function detectPhaseOverlap(suiteLog) {
   } catch {
     return null;
   }
-  for (const line of text.split("\n")) {
+  // gap-fan-in-suite-log-cross-relaunch-reuse: 按最后一个起始标记切片（只读当前轮；无标记 ⇒ 整份）。
+  const mk = text.lastIndexOf("__FANIN_SUITE_START__");
+  const body = mk === -1 ? text : text.slice(mk);
+  for (const line of body.split("\n")) {
     if (OVERLAP_RUNNING_RE.test(line)) return true;
   }
   return false;

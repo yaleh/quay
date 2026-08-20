@@ -294,6 +294,23 @@ test("AC1 — parseSuitePhases extracts serial/main/static/lowconc phase ms from
   assert.equal(phases.build_dist, 479, "other __OVERHEAD__ labels are accumulated too (full-suite-runner parity)");
 });
 
+test("gap-fan-in-suite-log-cross-relaunch-reuse — parseSuitePhases slices by the last __FANIN_SUITE_START__ marker (current round only; stale old-round phases excluded)", () => {
+  const log = writeSuiteLog(null, [
+    "__FANIN_SUITE_START__ iso=2026-08-19T00:00:00.000Z ms=100 head=old round=full",
+    "__OVERHEAD__ run_static_checks_ms=1111",
+    "__OVERHEAD__ serial_phase_ms=2222",
+    "__FANIN_SUITE_START__ iso=2026-08-19T00:10:00.000Z ms=600 head=new round=full",
+    "__OVERHEAD__ run_static_checks_ms=3333",
+    "__OVERHEAD__ main_phase_ms=4444",
+  ]);
+  const phases = parseSuitePhases(log);
+  assert.deepEqual(
+    phases,
+    { run_static_checks: 3333, main_phase: 4444 },
+    "only the last-marker round's __OVERHEAD__ lines are parsed; the old round's 1111/2222 are excluded",
+  );
+});
+
 test("AC1 — parseSuitePhases returns {} for a missing or unreadable log (never fabricates a phase)", () => {
   assert.deepEqual(parseSuitePhases(undefined), {}, "no log path → no phases");
   assert.deepEqual(parseSuitePhases(""), {}, "empty log path → no phases");

@@ -103,10 +103,15 @@ export function normalizePerFileKey(file: string): string {
   return m ? m[1] : file;
 }
 
-/** Parse `__PERFILE__ duration_ms=<dur> <full-path> passed=<bool>` lines (measure-suite-reporter). */
+/** Parse `__PERFILE__ duration_ms=<dur> <full-path> passed=<bool>` lines (measure-suite-reporter).
+ *  gap-fan-in-suite-log-cross-relaunch-reuse: fan-in relaunch 轮转日志并打 `__FANIN_SUITE_START__`
+ * 起始标记——按最后一个标记切片，只解析当前轮（最后一个 `__FANIN_SUITE_START__` 之后）的内容，不整份
+ * 线性读旧轮。无标记（full-suite-runner 直写 / 测试手写日志 / 旧版 fan-in）⇒ 整份读取（向后兼容）。 */
 export function parsePerFileLines(text: string): PerFileRecord[] {
   const out: PerFileRecord[] = [];
-  for (const line of text.split("\n")) {
+  const mk = text.lastIndexOf("__FANIN_SUITE_START__");
+  const body = mk === -1 ? text : text.slice(mk);
+  for (const line of body.split("\n")) {
     const m = line.match(/^__PERFILE__ duration_ms=([0-9.]+) (\S+) passed=(true|false)$/);
     if (m) {
       const dur = parseFloat(m[1]);
