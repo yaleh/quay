@@ -44,6 +44,15 @@
 //                  log's `overlap: running` marker (gap-phase-overlap-field-always-false-negative).
 //                  ALWAYS present: true = overlap ran; false = log readable + marker absent
 //                  (sequential); null = log absent/unreadable (n/a, never fabricated).
+//   lock_wait_ms / effective_parallelism / lowconc_phase_ms = gap-wiring-B-verification-round-
+//                  write-path AC1: the three observability-holes / phases-overlap-merged fields ride
+//                  the REAL landing path (previously only full-suite-runner.ts — dead on fan-in —
+//                  wrote them). lock_wait_ms ← test.sh's `__OVERHEAD__ lock_wait_ms=N` (the flock
+//                  START→acquired wall, EPOCHREALTIME), falling back to `lock_overhead` (the whole
+//                  lock-acquire wall) on pre-marker logs; absent on scoped/nested — 缺键, never 0;
+//                  effective_parallelism ← cpu_time_s ÷ wall-seconds (absent when cpu_time_s is
+//                  null/≤0 — a fabricated 0 would read "infinite cores"); lowconc_phase_ms carries
+//                  the `overlap_lowconc_ms` sub-time on an overlap round instead of the subsumed 0.
 //
 // pass/fail/cancelled/tests are OMITTED — the fan-in capture carries no test counts (the suite ran
 // outside full-suite-runner). A green round has fail=0/cancelled=0, but the pass count is genuinely
@@ -155,6 +164,22 @@ const COMMIT_RE = /^[0-9a-f]{40}$/i;
 
 const PHASE_OVERHEAD_RE = /^__OVERHEAD__\s+([A-Za-z0-9_]+)_ms=(\d+)(?:\s+partial=1)?$/;
 
+/** Byte offset of the LAST `__FANIN_SUITE_START__` LINE (anchored at line start), or -1.
+ *  gap-wiring-B-verification-round-write-path: the previous `lastIndexOf(substring)` was fooled by the
+ *  suite's OWN test output — a node:test assertion description (`✔ … — parseSuitePhases slices by the
+ *  last __FANIN_SUITE_START__ marker …`) CONTAINS the marker string MID-LINE, so lastIndexOf sliced
+ *  from INSIDE the test run and excluded the EARLY `overlap: running` / `overlap_<phase>_ms` markers
+ *  (real round 347 recorded phase_overlap=false + lowconc_phase_ms=0 despite a genuine overlap log).
+ *  Anchoring on the line START (the emitted marker is always `__FANIN_SUITE_START__ iso=…`) excludes
+ *  test-output mentions. */
+function lastSuiteStartOffset(text) {
+  const re = /^__FANIN_SUITE_START__\s/gm;
+  let last = -1;
+  let m;
+  while ((m = re.exec(text)) !== null) last = m.index;
+  return last;
+}
+
 /** Parse test.sh's `__OVERHEAD__ <phase>_ms=N` lines from a suite log. Returns {} when the log is
  *  absent/unreadable (never fabricates a phase — the absent-field contract). Keyed by the raw label
  *  (`serial_phase`, `lowconc_phase`, `main_phase`, `run_static_checks`).
@@ -169,7 +194,7 @@ export function parseSuitePhases(suiteLog) {
   } catch {
     return phaseMs;
   }
-  const mk = text.lastIndexOf("__FANIN_SUITE_START__");
+  const mk = lastSuiteStartOffset(text);
   const body = mk === -1 ? text : text.slice(mk);
   for (const line of body.split("\n")) {
     const m = line.match(PHASE_OVERHEAD_RE);
@@ -198,7 +223,10 @@ export function detectPhaseOverlap(suiteLog) {
     return null;
   }
   // gap-fan-in-suite-log-cross-relaunch-reuse: 按最后一个起始标记切片（只读当前轮；无标记 ⇒ 整份）。
-  const mk = text.lastIndexOf("__FANIN_SUITE_START__");
+  // gap-wiring-B-verification-round-write-path: 用行首锚定的标记（见 lastSuiteStartOffset）——真实日志
+  // 的 suite 自身测试输出会包含 `__FANIN_SUITE_START__` 字符串，lastIndexOf 会从测试输出中间切片而漏掉
+  // 早段的 `overlap: running` 标记（round 347 实证：overlap 日志被记成 phase_overlap=false）。
+  const mk = lastSuiteStartOffset(text);
   const body = mk === -1 ? text : text.slice(mk);
   for (const line of body.split("\n")) {
     if (OVERLAP_RUNNING_RE.test(line)) return true;
@@ -214,6 +242,19 @@ export function hostParallelism() {
   );
   const ncpu = Number(ncpuRaw);
   return Number.isFinite(ncpu) && ncpu >= 1 ? ncpu : 1;
+}
+
+/** Effective parallelism = cpu_time_s ÷ wall-seconds — the observability-holes AC4 "did the suite
+ *  optimization help" KPI, same 口径 as full-suite-runner.effectiveParallelism (:1300). Returns null
+ *  when cpu_time_s is null/≤0 or wall ≤0 — the field is then ABSENT (a fabricated 0 would read
+ *  "infinite cores", 硬规则⑥ 缺值=未查≠为假). gap-wiring-B-verification-round-write-path AC1: wired
+ *  into THIS real landing writer (the fan-in path) so real verification-round rows carry it, not just
+ *  full-suite-runner's dead-on-fan-in path. */
+export function effectiveParallelism(cpuTimeS, durationMs) {
+  if (cpuTimeS == null || !Number.isFinite(cpuTimeS) || cpuTimeS <= 0) return null;
+  const wallS = durationMs / 1000;
+  if (!Number.isFinite(wallS) || wallS <= 0) return null;
+  return Number((cpuTimeS / wallS).toFixed(3));
 }
 
 /** The configured concurrent-suite slot count — delegated to the TS canonical suiteLockSlotCount()
@@ -400,6 +441,13 @@ export function buildPreVerifiedRoundRecord(o) {
     if (cpuUserS != null) record.cpu_user_s = cpuUserS;
     if (cpuSysS != null) record.cpu_sys_s = cpuSysS;
   }
+  // gap-wiring-B-verification-round-write-path AC1 — effective_parallelism (observability-holes AC4)
+  // rides the REAL landing path: cpu_time_s ÷ wall. Present ONLY when cpu_time_s is a finite number
+  // > 0 (null cpu_time_s → the field is ABSENT — a fabricated 0 would read "infinite cores"). This
+  // is the single "did the suite optimization help" KPI, comparable per round — previously 0 real
+  // records carried it because only the dead-on-fan-in full-suite-runner path wrote it.
+  const effPar = effectiveParallelism(cpuTimeS, durationMs);
+  if (effPar !== null) record.effective_parallelism = effPar;
   // gap-fan-in-verification-round-thin-schema-phase-gap AC1/AC2 — phase fields + concurrency
   // variables (same 口径 as full-suite-runner's appendVerificationRound). Phase source: the suite
   // log (--suite-log). preverified 分支单独定案 (AC2): the writer parses phases from --suite-log
@@ -409,17 +457,43 @@ export function buildPreVerifiedRoundRecord(o) {
   // preverified=1 capture WITHOUT a log path records no phase data, honestly.
   const suiteLog = o.suiteLog ? String(o.suiteLog).trim() : "";
   const phaseMs = parseSuitePhases(suiteLog);
+  const phaseOverlap = detectPhaseOverlap(suiteLog);
   if (phaseMs.run_static_checks !== undefined) record.static_phase_ms = phaseMs.run_static_checks;
   if (phaseMs.serial_phase !== undefined) record.serial_phase_ms = phaseMs.serial_phase;
-  if (phaseMs.lowconc_phase !== undefined) record.lowconc_phase_ms = phaseMs.lowconc_phase;
+  if (phaseMs.lowconc_phase !== undefined) {
+    // gap-wiring-B-verification-round-write-path AC1 — lowconc_phase_ms 不再恒 0 on an overlap round
+    // (the phases-overlap-merged defect: 78/78 real fan-in overlap rounds had lowconc_phase_ms=0).
+    // On overlap test.sh subsumes lowconc into the serial window and emits lowconc_phase_ms=0, but
+    // ALSO emits the per-process `__OVERHEAD__ overlap_lowconc_ms=N` sub-time — carry THAT real
+    // duration instead of the 0 (mirrors full-suite-runner:3917-3924). Falls back to the raw value
+    // only when the sub-time marker was missed (a truncated round — honest, nothing recoverable).
+    record.lowconc_phase_ms =
+      phaseOverlap === true && typeof phaseMs.overlap_lowconc === "number"
+        ? phaseMs.overlap_lowconc
+        : phaseMs.lowconc_phase;
+  }
   if (phaseMs.main_phase !== undefined) record.main_phase_ms = phaseMs.main_phase;
+  // gap-wiring-B-verification-round-write-path AC1 — lock_wait_ms (observability-holes AC1) rides the
+  // REAL landing path. full-suite-runner derives it from its live stream markers (Date.now()); the
+  // fan-in log is a post-hoc file with no wall timestamps, so test.sh now emits `__OVERHEAD__
+  // lock_wait_ms=N` on the FULL-SUITE path (the flock START→acquired wall, EPOCHREALTIME) — parse it
+  // into phaseMs.lock_wait. FALLBACK for logs produced BEFORE the precise marker landed (and reused
+  // captures): `lock_overhead` (oh_t1 - oh_t0, the whole lock-acquire block incl. the flock wait +
+  // ~ms of setup — the SAME wall full-suite-runner calls lock_wait) — a real measurement, not a
+  // fabricated 0. Absent when the suite skipped the lock (scoped/nested runs — 缺键, never 0; a
+  // reader must tolerate absence, same contract as full-suite-runner).
+  if (phaseMs.lock_wait !== undefined) {
+    record.lock_wait_ms = phaseMs.lock_wait;
+  } else if (phaseMs.lock_overhead !== undefined) {
+    record.lock_wait_ms = phaseMs.lock_overhead;
+  }
   // gap-phase-overlap-field-always-false-negative — the fan-in landing path (this writer) must ALSO
   // carry phase_overlap (the DoD's "真实 fan-in 轮正确写入"): derive from the suite log's
   // `overlap: running` marker, mirroring full-suite-runner's phaseOverlapRan latch. Unlike
   // full-suite-runner (absent-field on a sequential round), this writer makes the field ALWAYS
   // present so a reader can distinguish the three cases — true = overlap ran; false = log readable +
   // marker absent (sequential); null = log absent/unreadable (n/a, never a fabricated boolean).
-  record.phase_overlap = detectPhaseOverlap(suiteLog);
+  record.phase_overlap = phaseOverlap;
   // Concurrency variables (AC1): nproc + slots are deterministic reads; concurrentSuitesRunning =
   // 1 (this round's own slot) + currently-held OTHER-suite slots at WRITE time, capped at the slot
   // count — the same formula + clamp as full-suite-runner's round-start capture (:2591-2596). The
@@ -482,9 +556,12 @@ Usage:
   --cpu-sys-s       the suite's gnu-time SYSTEM cpu seconds — the "%S" column (same contract).
                     user+sys ≈ cpu_time_s by construction (same source line). Optional
   --suite-log       the fan-in suite log path — parse its __OVERHEAD__ <phase>_ms=N lines into
-                    static/serial/lowconc/main phase fields + record nproc/concurrentSuiteSlots/
-                    concurrentSuitesRunning (same 口径 as full-suite-runner). When absent or
-                    unreadable the row is EXPLICITLY phase-less (no fabricated fields).
+                    static/serial/lowconc/main phase fields + lock_wait_ms (test.sh's flock marker)
+                    + record nproc/concurrentSuiteSlots/concurrentSuitesRunning (same 口径 as
+                    full-suite-runner). On an overlap round lowconc_phase_ms carries the
+                    overlap_lowconc_ms sub-time instead of the subsumed 0. effective_parallelism is
+                    derived from --cpu-time-s ÷ --duration-ms. When the log is absent or unreadable
+                    the row is EXPLICITLY phase-less (no fabricated fields).
   --runner          nominal runner identity (default 'outer', matching the existing ledger)
   --root            repo root (default: cwd) — resolves the shared checkout via git common-dir
   --record-file     override the ledger path (hermetic tests)

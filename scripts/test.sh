@@ -1198,7 +1198,7 @@ full_suite_lock_acquire() {
     return 0
   fi
   mkdir -p "$(dirname "${FULL_SUITE_LOCK_FILE}")"
-  local _s_fd _s_slot _s_idx _s_held="" _s_waited=0 _s_wall_start=0
+  local _s_fd _s_slot _s_idx _s_held="" _s_waited=0 _s_wall_start=0 _s_lock_start_ms="" _s_lock_end_ms=""
   FULL_SUITE_LOCK_FDS=()
   # Open EVERY slot file on its own dynamically-allocated FD (append mode: the file exists + is
   # writable even if empty). FD-based flock auto-releases on process exit — a crash/abort cannot leak.
@@ -1206,6 +1206,13 @@ full_suite_lock_acquire() {
     exec {_s_fd}>"${_s_slot}"
     FULL_SUITE_LOCK_FDS+=("${_s_fd}")
   done
+  # gap-verification-round-observability-holes AC1 (fan-in path) — measure the flock wait from the
+  # lock START marker to the acquired marker (EPOCHREALTIME, µs→ms) so the real landing writer
+  # pre-verified-round-record.ts can record lock_wait_ms. full-suite-runner derives the SAME value
+  # from its live stream markers; the fan-in log is a post-hoc file with no wall timestamps, so
+  # test.sh must emit it. Only on a REAL acquire (the skip branches returned above) — scoped/nested
+  # runs stay marker-less (缺键, not a fabricated 0).
+  _s_lock_start_ms="${EPOCHREALTIME:-}"
   echo "== single-flight lock (${#FULL_SUITE_LOCK_SLOTS[@]} slots — gap-single-flight-lock-2-slot-concurrent-suites + SSoT) =="
   # Non-blocking try over every slot: a free slot is taken immediately (AC1: the 2nd suite starts
   # instead of being serialized).
@@ -1239,6 +1246,13 @@ full_suite_lock_acquire() {
   fi
   FULL_SUITE_LOCK_HELD="${_s_held}"
   echo "scripts/test.sh: acquired full-suite single-flight slot ${_s_held} (${FULL_SUITE_LOCK_FILE}.${_s_held}) — held for the entire run"
+  if [ -n "${_s_lock_start_ms:-}" ]; then
+    _s_lock_end_ms="${EPOCHREALTIME:-}"
+    if [ -n "${_s_lock_end_ms:-}" ]; then
+      _s_lock_wait_ms="$(awk -v a="${_s_lock_start_ms}" -v b="${_s_lock_end_ms}" 'BEGIN { d = (b - a) * 1000; printf "%d", d < 0 ? 0 : d }')"
+      echo "__OVERHEAD__ lock_wait_ms=${_s_lock_wait_ms}" >&2
+    fi
+  fi
 }
 
 # full_suite_lock_release — release the HELD slot and close all FDs (idempotent; flock also
