@@ -2,7 +2,7 @@
 id: gap-wiring-A-fan-in-execute-suite-poller-impl-complete
 title: 接线任务 A（根因①+③）：死工作流 execute-suite-fix.js 清接线 + suite-poller/firstDelay 撤线
   + impl-complete 无生产调用者
-status: done
+status: ready
 labels:
   - gap
   - mechanism
