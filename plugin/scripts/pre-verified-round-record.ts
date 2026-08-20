@@ -29,7 +29,9 @@
 //   laneCount    = the suite's lane_count
 //   load         = the suite's load (the /proc/loadavg 1min at the suite's end)
 //   state        = "green" (both fan-in branches only write after suite_exit=0)
-//   runner       = nominal identity (default "outer", matching every existing verification-round row)
+//   runner       = layer identity (default "inner" — the fan-in suite is an inner-layer run; the SAME
+//                  default mirror-full-suite-state.ts writes, so the state + verification-round carriers
+//                  agree. Explicit --runner overrides.)
 //   scope        = "worktree" (the fan-in suite ran against the task worktree's HEAD)
 //   commit       = the pinned suite_head (the exact HEAD that was verified)
 //   cpu_time_s / cpu_source = the capture's GNU-time CPU seconds / provenance (AC6: explicit null +
@@ -62,7 +64,9 @@
 //   laneCount    = the capture's lane_count
 //   load         = the capture's load (the /proc/loadavg 1min at the pre-verification suite's end)
 //   state        = "green" (the pre-verified path only reuses a capture with suite_exit=0)
-//   runner       = nominal identity (default "outer", matching every existing verification-round row)
+//   runner       = layer identity (default "inner" — the fan-in suite is an inner-layer run; the SAME
+//                  default mirror-full-suite-state.ts writes, so the state + verification-round carriers
+//                  agree. Explicit --runner overrides.)
 //   scope        = "worktree" (the pre-verified suite ran against the task worktree's HEAD)
 //   commit       = the pinned suite_head (the exact HEAD that was verified)
 //   cpu_time_s / cpu_source = the capture's GNU-time CPU seconds / provenance (AC6: explicit null +
@@ -109,7 +113,9 @@
 //                     static/serial/lowconc/main phase fields + record nproc/concurrentSuiteSlots/
 //                     concurrentSuitesRunning (same 口径 as full-suite-runner). When absent or
 //                     unreadable the row is EXPLICITLY phase-less (no fabricated fields).
-//   --runner          nominal runner identity (default 'outer', matching the existing ledger)
+//   --runner          layer identity (default 'inner' — the fan-in suite is an inner-layer run; the
+//                     SAME default mirror-full-suite-state.ts writes, so the state + verification-round
+//                     carriers agree for the same round. Explicit --runner overrides.)
 //   --root            repo root (default: cwd) — resolves the shared checkout via git common-dir
 //   --record-file     override the ledger path (hermetic tests)
 //   --json            machine-readable output {ok, record, file}
@@ -356,7 +362,11 @@ export function buildPreVerifiedRoundRecord(o) {
       setter(v);
     }
   }
-  const runner = o.runner ? String(o.runner).trim() : "outer";
+  // gap-runner-field-hardcoded-outer-not-measurement — default 'inner' (the fan-in suite is an
+  // inner-layer run), the SAME default mirror-full-suite-state.ts writes — so the verification-round
+  // and the full-suite-state.json carriers agree on the runner for the same round (修前两者各说各话：
+  // state=inner / verification-round=outer). Explicit --runner still overrides.
+  const runner = o.runner ? String(o.runner).trim() : "inner";
   if (!runner) return { error: "--runner must be a non-empty string" };
   // preverified — the shared writer's branch marker (AC3): 1/true = reused capture (pre-verified
   // branch), 0/false = the suite RAN inside this fan-in (real-suite branch). Default true for

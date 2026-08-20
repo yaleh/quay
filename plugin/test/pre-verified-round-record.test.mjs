@@ -78,11 +78,21 @@ test("AC1/AC2 — buildPreVerifiedRoundRecord emits a SuiteRoundRecord-compatibl
   assert.equal(record.load, 8.03);
   assert.equal(record.scope, "worktree", "the pre-verified suite ran against the task worktree's HEAD");
   assert.equal(record.commit, BASE.commit, "commit = the pinned suite_head (the exact HEAD verified)");
-  assert.equal(record.runner, "outer");
+  assert.equal(record.runner, "inner", "default = inner — the fan-in suite is an inner-layer run (same default as mirror-full-suite-state.ts; gap-runner-field-hardcoded-outer-not-measurement)");
   assert.equal(record.taskId, "gap-test-preverified");
   assert.equal(record.runId, "fm-pre-1");
   assert.equal(record.cpu_time_s, 123.456);
   assert.equal(record.cpu_source, "gnu-time");
+});
+
+test("AC1 — an explicit --runner override wins over the default (gap-runner-field-hardcoded-outer-not-measurement)", () => {
+  // The default flipped to "inner" (the fan-in suite is an inner-layer run); an explicit --runner
+  // must still be honored (e.g. a caller that knows the nominal identity differs).
+  const { record, error } = buildPreVerifiedRoundRecord({ ...BASE, runner: "outer" });
+  assert.equal(error, undefined, `build must succeed: ${error}`);
+  assert.equal(record.runner, "outer", "explicit --runner outer overrides the default");
+  assert.equal(buildPreVerifiedRoundRecord({ ...BASE, runner: "inner" }).record.runner, "inner");
+  assert.match(buildPreVerifiedRoundRecord({ ...BASE, runner: "   " }).error ?? "", /--runner/);
 });
 
 test("AC1/AC3 — the SHARED writer emits preverified:false for a REAL-suite round (--preverified 0, gap-fan-in-realsuite-bypasses-verification-round-ledger)", () => {
