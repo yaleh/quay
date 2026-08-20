@@ -187,11 +187,66 @@ function fakeTestShRecordingArgs(root) {
   return { argsLog };
 }
 
-function waitExit(child) {
-  return new Promise((resolve) => {
-    child.once("exit", (code, signal) => resolve({ code, signal }));
+/**
+ * Resolve with `{ code, signal }` when `child` exits. Defensive against two hang modes:
+ *
+ * 1. LATE LISTENER (the load race, gap-full-suite-runner-test-waitExit-load-race): if the child
+ *    exits BEFORE this listener is mounted (e.g. it finished during an earlier `await` gap — under
+ *    load 15-25 the child can exit between spawn and the `waitExit` call), Node child_process does
+ *    NOT replay the 'exit' event to a listener attached after the fact — the promise would hang
+ *    forever. Guard: `child.exitCode`/`child.signalCode` are populated at exit regardless of
+ *    listeners (verified empirically), so if either is already set we resolve immediately from the
+ *    cached values instead of waiting for an event that will never fire.
+ *
+ * 2. CHILD NEVER EXITS: a `timeoutMs` fallback rejects with a diagnostic (pid / exit code / signal
+ *    / killed) so a genuinely-stuck child fails the test (fail-fast) instead of hanging the suite.
+ *
+ * The default parameter covers all 114 existing `await waitExit(child)` call sites unchanged.
+ */
+function waitExit(child, { timeoutMs = 60_000 } = {}) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (v) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(v);
+    };
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      const state = {
+        pid: child.pid,
+        exitCode: child.exitCode,
+        signalCode: child.signalCode,
+        killed: child.killed,
+      };
+      console.error(`[waitExit] TIMEOUT after ${timeoutMs}ms — child never exited. state=${JSON.stringify(state)}`);
+      reject(new Error(`waitExit: child ${child.pid} did not exit within ${timeoutMs}ms (exitCode=${child.exitCode}, signal=${child.signalCode})`));
+    }, timeoutMs);
+    // Mount the listener FIRST, then check the cached exit properties — no gap between the two.
+    child.once("exit", (code, signal) => finish({ code, signal }));
+    if (child.exitCode !== null || child.signalCode !== null) {
+      finish({ code: child.exitCode, signal: child.signalCode });
+    }
   });
 }
+
+test("negative control — waitExit resolves bounded when the child ALREADY exited before the listener is mounted (exit event is NOT replayed)", async () => {
+  // The load race (gap-full-suite-runner-test-waitExit-load-race): under load 15-25 a spawned child
+  // can exit during an `await` gap BEFORE waitExit mounts its 'exit' listener. Node child_process
+  // does not replay the 'exit' event to a late listener ⇒ the promise would hang forever. This
+  // negative control reproduces exactly that ordering: the child exits AND its exit event fires
+  // (exitCode is populated) before waitExit is called; waitExit must return bounded, not hang.
+  const child = spawn(process.execPath, ["-e", "process.exit(0)"], { stdio: "ignore" });
+  await poll(() => child.exitCode !== null || child.signalCode !== null, { timeoutMs: 5000 });
+  const start = Date.now();
+  const { code, signal } = await waitExit(child);
+  const elapsed = Date.now() - start;
+  assert.equal(code, 0, "resolves with the cached exit code even though the event already fired");
+  assert.equal(signal, null);
+  assert.ok(elapsed < 5000, `bounded return, not a hang (took ${elapsed}ms)`);
+});
 
 function poll(fn, { timeoutMs = 5000, intervalMs = 30 } = {}) {
   const start = Date.now();
