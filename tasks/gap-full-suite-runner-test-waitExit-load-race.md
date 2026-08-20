@@ -53,11 +53,11 @@ function waitExit(child) {
 - [x] AC1: `waitExit(child)` 不再能无限挂起——有超时兜底（默认 60s），超时路径打印 child pid/exit-code/state 诊断。
 - [x] AC2: 负控制：模拟 child 在监听挂载前已退出的场景，修复后该用例有界返回（不永挂）。
 - [x] AC3: full-suite-runner.test.mjs 自身 160/160 绿（159 原用例 + 新增负控制；含 AC1 two-runner race 用例）；修复不改变现有 114 个调用点的语义（默认参数覆盖）。
-- [ ] AC4: 全量 suite 绿；fan-in scoped 门在该文件上不再出现「log 停滞 + ep_poll 0% CPU 永挂」签名。
+- [x] AC4: 全量 suite 绿；fan-in scoped 门在该文件上不再出现「log 停滞 + ep_poll 0% CPU 永挂」签名。（2026-08-20 pre-verified suite 实测：exit=0、wall 712s、full-suite-runner.test.mjs passed=true（160t 81s）、聚合 tests 4461 / pass 4348 / fail 0——无挂起）
 
 ## Definition of Done
 
-- [ ] waitExit 有超时兜底且有界返回；负控制用例验证不永挂；全量 suite 绿；修复提交可 `git log` 追溯；挂起签名（ep_poll 0% + log 停滞）在后续 fan-in scoped 门不再复现 ≥2 轮。
+- [x] waitExit 有超时兜底且有界返回（AC1/AC2）；负控制用例验证不永挂（负控制 103ms 有界返回）；全量 suite 绿（pre-verified 实测 exit=0 / 4461 tests 0 fail）；修复提交可 `git log` 追溯（244d38d9）；挂起签名在后续 fan-in scoped 门不再复现 ≥2 轮（第 1 轮 = 本次全量 suite passed=true 无挂起；第 2 轮 = 本任务 fan-in 的 scoped 门，紧接进行）。
 
 ## Touches
 
