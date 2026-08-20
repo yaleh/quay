@@ -2264,6 +2264,54 @@ test("⑩b firstDelayMs override — firstDelayMs is args-overridable AND pollIn
   assert.deepEqual(delays, [1234, 0], `firstDelayMs overridable (1234) + pollIntervalMs=0 seam (0); got ${JSON.stringify(delays)}`);
 });
 
+// ── ⑩d poll 硬边界 ≥ suite 时长（gap-agent-no-timeout-option AC1/AC3，2026-08-20 外层裁定）────────
+// THE DEFECT (b187d84a 回退教训): 把 pollBlockSeconds 收到 100（< Bash 工具默认 120s）曾被当成
+// 「让等待落在默认时限内 ⇒ 等待即代码保证」——但 poll 的硬边界必须 ≥ suite 时长（实测 19+ min ≈
+// 1140s）。100s < suite 时长 ⇒ poll 每次在 suite 结束前超时返回 not-done ⇒ fan-in 误判「suite 异常」
+// → release → relaunch 无限循环（外层实测裁定，7d973c40 回退）。⇒ 判据是「firstDelayMs +
+// pollBlockSeconds ≥ suite 时长」，不是「< Bash 120s」。agent() 无 timeout 旋钮（opts 仅
+// {label,phase,schema,model,effort,isolation,agentType}）——「加旋钮」是 Claude Code 特性请求、
+// 仓库改不了。兜底 = suite detached 运行（setsid+&+disown）：poll agent 的 Bash 即使被默认 120s
+// kill、提前返回 not-done，suite 继续跑，脚本 setTimeout 循环再轮询——detached 让「agent 内长阻塞」
+// 成为纯优化而非正确性要求（文档化见 fan-in-execute.js pollSuite 注释）。
+
+const SUITE_FLOOR_SECS = 1140; // 实测 19+ min ≈ 1140s（2026-08-20 外层裁定）
+
+test("⑩d poll 硬边界 ≥ suite 时长 — 默认 poll 配置覆盖单次 suite（AC1 机械判据，读真实 poll 配置）", async (t) => {
+  const { prompts, delays } = await runWorkflow({
+    args: { task: "gap-test-poll-boundary", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-poll-boundary", mergeTarget: "develop" },
+  });
+  const poll = promptContaining(prompts, "POLL=not-done");
+  const m = poll.match(/timeout (\d+) bash -c/);
+  assert.ok(m, "poll must carry `timeout <N> bash -c` (the bounded blocking wait)");
+  const pollBlockSeconds = Number(m[1]);
+  const firstDelayMs = delays[0] ?? 0;
+  const totalCoverageSecs = firstDelayMs / 1000 + pollBlockSeconds;
+  assert.ok(
+    totalCoverageSecs >= SUITE_FLOOR_SECS,
+    `poll 硬边界（firstDelayMs ${firstDelayMs / 1000}s + pollBlockSeconds ${pollBlockSeconds}s = ${totalCoverageSecs}s）必须 ≥ suite 时长 ${SUITE_FLOOR_SECS}s；取假：把 pollBlockSeconds 收到 100 ⇒ 660+100=760 < 1140 ⇒ 本断言红（b187d84a 回退教训）`
+  );
+});
+
+test("⑩d falsification — poll 硬边界 < suite 时长时判据红（pollBlockSeconds=100 override，AC3 取假）", async (t) => {
+  // 取假：同一个「覆盖度 ≥ 地板」谓词喂给一个【已知为坏的】配置（100s，b187d84a 回退值）⇒ 谓词必须
+  // 判它为不及格（断言通过 = 谓词能红，证明「≥ 地板」不是恒真——硬规则 4：结构上不可能取假的量不是测量）。
+  const { prompts, delays } = await runWorkflow({
+    args: { task: "gap-test-poll-boundary-bad", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-poll-boundary-bad", mergeTarget: "develop", pollBlockSeconds: 100 },
+  });
+  const poll = promptContaining(prompts, "POLL=not-done");
+  const m = poll.match(/timeout (\d+) bash -c/);
+  assert.ok(m, "poll must carry `timeout <N> bash -c`");
+  const pollBlockSeconds = Number(m[1]);
+  assert.equal(pollBlockSeconds, 100, "sanity: the pollBlockSeconds=100 override must be applied");
+  const firstDelayMs = delays[0] ?? 0;
+  const totalCoverageSecs = firstDelayMs / 1000 + pollBlockSeconds;
+  assert.ok(
+    totalCoverageSecs < SUITE_FLOOR_SECS,
+    `取假谓词：${totalCoverageSecs}s < ${SUITE_FLOOR_SECS}s 必须成立（pollBlockSeconds=100 ⇒ 660+100=760 < 1140，覆盖不到 suite 时长）；若此断言红则「≥ 地板」判据是恒真/错测`
+  );
+});
+
 // ── ⑩c suite-poller agentType（gap-fan-in-execute-poll-cost-firstdelay-agenttype AC2，暂缓）───────
 // NOTE: agentType='suite-poller' 的 wiring 已 revert（.claude/agents 新目录 watcher 不加载、需 session 重启），
 // 只保留 definition test（定义文件仍在、inert）；wiring 留 session 重启后单独落地。
