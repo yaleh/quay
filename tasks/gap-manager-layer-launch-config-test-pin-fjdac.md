@@ -40,12 +40,12 @@ extra:
 
 - [x] AC1: `plugin/test/manager-layer-skill.test.mjs` 与 `plugin/test/manager-layer-shipping.test.mjs` 中所有 `claude-deepseek` launcher pin 已改为 `claude-fjdac`（`grep -n 'claude-deepseek'` 两文件 0 命中）。
 - [x] AC2: 两测试文件单独跑绿（`node --test plugin/test/manager-layer-skill.test.mjs plugin/test/manager-layer-shipping.test.mjs`）。
-- [ ] AC3: 全量 suite 不再因这两条 pin 红（fan-in 阶段全量绿）。
+- [x] AC3: 全量 suite 不再因这两条 pin 红（fan-in 阶段全量绿）。fan-in 全量 suite exit=0（SUITE_EXIT=0，lane 16，17:51:46Z，pre-verified capture）
 - [x] AC4: 记录 commit sha（本任务自身）。commit sha=`29ba65c0`
 
 ## Definition of Done
 
-- [ ] launcher pin 同步完成且验证绿；fan-in 全量 suite 绿；land 到 develop。
+- [x] launcher pin 同步完成且验证绿；fan-in 全量 suite 绿；land 到 develop。
 
 ## Touches
 
