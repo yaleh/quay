@@ -1466,6 +1466,16 @@ export interface SuiteRoundRecord {
    */
   scope_unit?: string;
   cpu_time_s?: number | null;
+  /**
+   * gap-verification-round-cpu-split-not-recorded AC1/AC3 — the gnu-time USER/SYSTEM CPU split, present
+   * ONLY when the round's cpu_time_s came from GNU time (the fan-in detached-suite path writes these
+   * via pre-verified-round-record.ts). THIS runner's cpu_time_s comes from the systemd `Consumed`
+   * journal line, which reports ONLY aggregate CPU time — no user/sys split — so a full-suite-runner
+   * row NEVER carries these fields (缺键, same absent-field contract as cpu_time_s itself). A reader
+   * must tolerate their absence (and must not infer "user/sys unknown ⇒ 0").
+   */
+  cpu_user_s?: number;
+  cpu_sys_s?: number;
   mem_peak_mb?: number | null;
   swap_peak_mb?: number | null;
   load_read_error?: string | null;

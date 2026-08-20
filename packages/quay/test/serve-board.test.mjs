@@ -20,7 +20,15 @@ import os from "node:os";
 import net from "node:net";
 import http from "node:http";
 import { startServer } from "../src/serve.ts";
-import { readBoardExecution, runProcessAliveSync } from "../src/observation.ts";
+import {
+  readBoardLanding,
+  readBoardExecution,
+  runProcessAliveSync,
+  clearLandingCache,
+  getLandingColdRunCount,
+  LANDING_CACHE_TTL_MS,
+} from "../src/observation.ts";
+import { renderBoardPage } from "../src/serve-handlers.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 import { createStore } from "../../quay-native/src/store.ts";
 
@@ -192,6 +200,9 @@ test("AC3 negative control: done task with Touches→nonexistent code is flagged
     // exists → no longer reverse-drift. BOTH sides must stop flagging.
     fs.mkdirSync(path.join(ws, "packages/quay/src"), { recursive: true });
     fs.writeFileSync(path.join(ws, "packages/quay/src/never-created.ts"), "// now the touch exists\n");
+    // gap-webui-board-load-120s: readBoardLanding is short-TTL-cached — the fixture changed between
+    // the two requests, so drop the cache to force a fresh read (the display is a 30s snapshot).
+    clearLandingCache();
 
     const board2 = await get(port, "/board");
     const checker2 = runChecker(ws);
@@ -439,4 +450,204 @@ test("AC2/AC3 negative control: worktree exists + status=ready + no live process
     fs.rmSync(ws, { recursive: true, force: true });
     try { if (wtPath) fs.rmSync(wtPath, { recursive: true, force: true }); } catch { /* already gone */ }
   }
+});
+
+test("gap-webui-board-no-pagination: /board supports server-side ?page=N pagination, ?status= and ?label= filtering, zero client JS", async () => {
+  const { ws, tasksDir } = makeWorkspace("board-pg-");
+  const cwd0 = process.cwd();
+  let server;
+  try {
+    // 25 tasks (default page size is 20 → 2 pages): PGT-01..10 status=done label=gap,
+    // PGT-11..20 status=ready label=webui, PGT-21..25 status=todo no label.
+    for (let i = 1; i <= 25; i++) {
+      const id = `PGT-${String(i).padStart(2, "0")}`;
+      const status = i <= 10 ? "done" : i <= 20 ? "ready" : "todo";
+      const labels = i <= 10 ? ["gap"] : i <= 20 ? ["webui"] : [];
+      seed(tasksDir, id, { title: `Pagination fixture ${id}`, status, labels, body: BD_BODY(`pg${id}Sym`, "packages/quay/src/pg-never-exists.ts") });
+    }
+
+    const port = await freePort();
+    process.chdir(ws);
+    server = await startServer({ port });
+
+    const countRows = (body) => body.split("</tr>").filter((r) => r.includes(">PGT-")).length;
+
+    // AC3: zero client JS — the board page carries no <script> element.
+    const board = await get(port, "/board");
+    assert.equal(board.status, 200, "AC1: GET /board returns 200");
+    assert.ok(!/<script/i.test(board.body), "AC3: board output contains no client JS <script> tag");
+
+    // AC1: default page 1 shows PGT-01..20, not PGT-21; page nav reports 2 pages / 25 rows.
+    assert.ok(board.body.includes("Page 1 of 2 (25 rows)"), "AC1: board reports Page 1 of 2 (25 rows)");
+    assert.ok(board.body.includes(">PGT-01<") && board.body.includes(">PGT-20<"), "AC1: page 1 shows PGT-01..PGT-20");
+    assert.ok(!board.body.includes(">PGT-21<"), "AC1: page 1 does NOT show PGT-21");
+    assert.equal(countRows(board.body), 20, "AC1: page 1 renders exactly 20 rows");
+
+    // AC1: ?page=2 returns the remaining 5 rows.
+    const page2 = await get(port, "/board?page=2");
+    assert.equal(page2.status, 200, "AC1: GET /board?page=2 returns 200");
+    assert.ok(page2.body.includes("Page 2 of 2 (25 rows)"), "AC1: board reports Page 2 of 2");
+    assert.ok(page2.body.includes(">PGT-21<") && page2.body.includes(">PGT-25<"), "AC1: page 2 shows PGT-21..PGT-25");
+    assert.ok(!page2.body.includes(">PGT-20<"), "AC1: page 2 does NOT show PGT-20");
+    assert.equal(countRows(page2.body), 5, "AC1: page 2 renders exactly 5 rows");
+
+    // AC1: an out-of-range page clamps to the last page — 200, never a 500.
+    const overflow = await get(port, "/board?page=999");
+    assert.equal(overflow.status, 200, "AC1: out-of-range page clamps (200, not 500)");
+    assert.ok(overflow.body.includes("Page 2 of 2 (25 rows)"), "AC1: out-of-range page clamps to page 2");
+
+    // AC2: ?status=done filters to the 10 done rows only.
+    const statusFiltered = await get(port, "/board?status=done");
+    assert.equal(statusFiltered.status, 200, "AC2: GET /board?status=done returns 200");
+    assert.ok(statusFiltered.body.includes(">PGT-01<") && statusFiltered.body.includes(">PGT-10<"), "AC2: status=done shows done rows");
+    assert.ok(!statusFiltered.body.includes(">PGT-11<"), "AC2: status=done excludes ready rows");
+    assert.ok(!statusFiltered.body.includes(">PGT-21<"), "AC2: status=done excludes todo rows");
+    assert.equal(countRows(statusFiltered.body), 10, "AC2: status=done renders exactly 10 rows");
+
+    // AC2: ?label=gap filters to tasks carrying the gap label.
+    const labelFiltered = await get(port, "/board?label=gap");
+    assert.equal(labelFiltered.status, 200, "AC2: GET /board?label=gap returns 200");
+    assert.ok(labelFiltered.body.includes(">PGT-01<") && labelFiltered.body.includes(">PGT-10<"), "AC2: label=gap shows labeled rows");
+    assert.ok(!labelFiltered.body.includes(">PGT-11<"), "AC2: label=gap excludes webui-labeled rows");
+    assert.equal(countRows(labelFiltered.body), 10, "AC2: label=gap renders exactly 10 rows");
+
+    // AC2: AND-logic — status+label both present → 10; mismatch → 0 (200, not an error).
+    const both = await get(port, "/board?status=done&label=gap");
+    assert.equal(both.status, 200, "AC2: combined status+label filter returns 200");
+    assert.equal(countRows(both.body), 10, "AC2: status=done&label=gap → 10 rows");
+    const mismatch = await get(port, "/board?status=ready&label=gap");
+    assert.equal(mismatch.status, 200, "AC2: empty-filter result is 200, not an error");
+    assert.equal(countRows(mismatch.body), 0, "AC2: status=ready&label=gap → 0 rows (AND)");
+
+    // AC1/AC2: pagination respects filters — the filtered set (10 ready rows) fits one page.
+    const readyFiltered = await get(port, "/board?status=ready");
+    assert.ok(readyFiltered.body.includes("Page 1 of 1 (10 rows)"), "AC2/AC1: filter result paginates correctly");
+  } finally {
+    process.chdir(cwd0);
+    if (server) { server.close(); if (server.client) await server.client.close(); }
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+// ── gap-webui-board-load-120s: /board cold-load ~120s → single-digit seconds ──────────────────────
+// The landing judgment (readBoardLanding) cold-runs plugin/scripts/task-status-drift-check.ts, which
+// on a large repo does a FULL git-log pass over the landing ref (>150s — the checker's own comment
+// documents it). The fix: a short-TTL cache (LANDING_CACHE_TTL_MS, 30s — the same window as the
+// slot-refill probe) so a cache hit never spawns the subprocess (AC2); a second-level subprocess
+// timeout (LANDING_TIMEOUT_MS) so a slow/hung checker fails open (AC3); and a distinct 「读取超时」
+// render. These three tests prove AC1 (cold load single-digit seconds), AC2 (negative control:
+// cache hit ⇒ no cold subprocess, second request fast), and AC3 (timeout ⇒ 读取超时, fail-open).
+
+test("AC1: /board cold load completes in single-digit seconds (TTL + 秒级 timeout + fail-open)", async () => {
+  const { ws, tasksDir } = makeWorkspace("board-ac1-");
+  const cwd0 = process.cwd();
+  let server;
+  try {
+    seed(tasksDir, "CL-1", { title: "Cold load", status: "todo", body: BD_BODY("clSymbol", "packages/quay/src/board-symbol.ts") });
+    fs.mkdirSync(path.join(ws, "packages/quay/src"), { recursive: true });
+    fs.writeFileSync(path.join(ws, "packages/quay/src/board-symbol.ts"), "export const clSymbol = 1;\n");
+    assert.ok(LANDING_CACHE_TTL_MS > 0 && LANDING_CACHE_TTL_MS <= 60_000,
+      `AC1: the landing TTL (${LANDING_CACHE_TTL_MS}ms) is a short bounded window`);
+    const port = await freePort();
+    process.chdir(ws);
+    server = await startServer({ port });
+    clearLandingCache();
+    const t0 = Date.now();
+    const board = await get(port, "/board");
+    const elapsed = Date.now() - t0;
+    assert.equal(board.status, 200, "AC1: cold /board returns 200");
+    assert.ok(board.body.includes("CL-1"), "AC1: the cold request still renders the task");
+    // Single-digit seconds — vs the ~120s cold load the defect measured. The deterministic bound is
+    // LANDING_TIMEOUT_MS (8s, pinned by the AC3 timeout test); this wall-clock assertion is the
+    // real-output smoke bound against the fixture's fast checker.
+    assert.ok(elapsed < 10_000, `AC1: cold /board load ${elapsed}ms is single-digit seconds`);
+  } finally {
+    process.chdir(cwd0);
+    if (server) { server.close(); if (server.client) await server.client.close(); }
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("AC2 negative control: a cache-hit /board request does NOT cold-run the checker (second request fast)", async () => {
+  const { ws, tasksDir } = makeWorkspace("board-cache-");
+  const cwd0 = process.cwd();
+  let server;
+  try {
+    seed(tasksDir, "CC-1", { title: "Cache control", status: "todo", body: BD_BODY("ccSymbol", "packages/quay/src/board-symbol.ts") });
+    fs.mkdirSync(path.join(ws, "packages/quay/src"), { recursive: true });
+    fs.writeFileSync(path.join(ws, "packages/quay/src/board-symbol.ts"), "export const ccSymbol = 1;\n");
+    const port = await freePort();
+    process.chdir(ws);
+    server = await startServer({ port });
+    clearLandingCache();
+    const before = getLandingColdRunCount();
+
+    const t0 = Date.now();
+    const board1 = await get(port, "/board");
+    const coldElapsed = Date.now() - t0;
+    const afterCold = getLandingColdRunCount();
+    assert.equal(board1.status, 200, "AC2: cold request 200");
+    assert.ok(afterCold > before, "AC2: the cold request spawns the checker subprocess");
+
+    const t1 = Date.now();
+    const board2 = await get(port, "/board");
+    const warmElapsed = Date.now() - t1;
+    assert.equal(board2.status, 200, "AC2: cache-hit request 200");
+    assert.equal(getLandingColdRunCount(), afterCold,
+      "AC2: the cache-hit request does NOT spawn the checker subprocess (counter flat)");
+    assert.ok(warmElapsed < coldElapsed,
+      `AC2: the cache-hit request (${warmElapsed}ms) is faster than the cold request (${coldElapsed}ms)`);
+    assert.ok(board2.body.includes("CC-1"), "AC2: the cache-hit response still renders the task");
+    assert.ok(board2.body.includes("task-status-drift-check.ts"), "AC2: the landing column still renders");
+  } finally {
+    process.chdir(cwd0);
+    if (server) { server.close(); if (server.client) await server.client.close(); }
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("AC3 fail-open: a landing subprocess exceeding the second-level timeout renders 「读取超时」, not an empty wait", async () => {
+  const { ws } = makeWorkspace("board-timeout-");
+  const slowChecker = path.join(ws, "slow-checker.mjs");
+  fs.writeFileSync(slowChecker,
+    "// fake drift checker that hangs — the second-level timeout must kill it and fail open\n" +
+    "await new Promise((r) => setTimeout(r, 60_000));\n" +
+    "console.log(JSON.stringify({ suspects: [], reverse: [], scanned: 0 }));\n");
+
+  // (a) The observation layer returns a timedOut reading promptly (well under the old 120s cap),
+  //     and caches it — a second call within the TTL hits the cache (no re-spawn).
+  const before = getLandingColdRunCount();
+  const t0 = Date.now();
+  const landing = await readBoardLanding(ws, { checkerPath: slowChecker, timeoutMs: 300 });
+  const elapsed = Date.now() - t0;
+  const afterTimeout = getLandingColdRunCount();
+  assert.equal(landing.status, "error", "AC3: a timed-out landing is status error (fail-open, never throws)");
+  assert.equal(landing.timedOut, true, "AC3: the timed-out landing carries timedOut:true");
+  assert.ok(landing.reason.includes("fail-open"), `AC3: the reason describes the fail-open (got ${landing.reason})`);
+  assert.ok(elapsed < 5_000, `AC3: the timeout returns in ~${elapsed}ms, not the old 120s cap`);
+  assert.ok(afterTimeout > before, "AC3: the first call cold-runs the (hanging) checker");
+
+  const landing2 = await readBoardLanding(ws, { checkerPath: slowChecker, timeoutMs: 300 });
+  assert.equal(getLandingColdRunCount(), afterTimeout,
+    "AC2/AC3: the cached timeout is served without re-spawning the checker");
+  assert.equal(landing2.timedOut, true, "AC2/AC3: the cached reading is still the timeout");
+
+  // (b) The render emits 「读取超时」 distinctly from a generic 读失败.
+  const page = renderBoardPage({
+    landing: { status: "error", timedOut: true, reason: landing.reason, flags: new Map(), scanned: 0 },
+    execution: { status: "empty", reason: null, flags: new Map(), inFlight: [] },
+    intentStatus: "ok",
+    intentReason: null,
+    rows: [],
+  });
+  assert.ok(page.includes("读取超时"), "AC3: the rendered page shows 读取超时");
+  const okPage = renderBoardPage({
+    landing: { status: "error", reason: "landing 判断源读失败：boom", flags: new Map(), scanned: 0 },
+    execution: { status: "empty", reason: null, flags: new Map(), inFlight: [] },
+    intentStatus: "ok",
+    intentReason: null,
+    rows: [],
+  });
+  assert.ok(okPage.includes("读失败") && !okPage.includes("读取超时"),
+    "AC3: a non-timeout failure renders 读失败, not 读取超时 (the two are distinguishable)");
 });

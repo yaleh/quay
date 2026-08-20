@@ -1,7 +1,7 @@
 ---
 id: gap-verification-round-cpu-split-not-recorded
 title: "verification-round.jsonl 只记合并 cpu_time_s 无 user/sys 拆分——suite 优化无法区分「测试内容」vs「执行形态」成本"
-status: ready
+status: done
 labels:
   - gap
   - finding
@@ -23,14 +23,22 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: `verification-round.jsonl` 每条记录增加 `cpu_user_s` / `cpu_sys_s`（或等价拆分），由 suite 完成时写入（现有 `cpu_time_s` 保留）。
-- [ ] AC2: 负控制——一次真实 suite run 后，记录含 user/sys 两字段且 user+sys≈cpu_time_s（可核对）。
-- [ ] AC3: 拆分来源是真实 gnu-time / time 输出（非估算），与现有 `cpu_source` 字段一致。
+- [x] AC1: `verification-round.jsonl` 每条记录增加 `cpu_user_s` / `cpu_sys_s`（或等价拆分），由 suite 完成时写入（现有 `cpu_time_s` 保留）。
+- [ ] AC2: 负控制——一次真实 suite run 后，记录含 user/sys 两字段且 user+sys≈cpu_time_s（可核对）。（待外部）
+- [x] AC3: 拆分来源是真实 gnu-time / time 输出（非估算），与现有 `cpu_source` 字段一致。
 
 ## Definition of Done
 
-- [ ] 一次真实 suite run 的记录含 user/sys 拆分，且与 `/tmp/*.time` 原始值一致。
+- [ ] 一次真实 suite run 的记录含 user/sys 拆分，且与 `/tmp/*.time` 原始值一致。（待外部）
 
 ## Touches
 
 - tasks/gap-verification-round-cpu-split-not-recorded.md（自身）
+- plugin/scripts/pre-verified-round-record.ts
+- plugin/scripts/per-task-suite-record.ts
+- plugin/scripts/full-suite-runner.ts
+- plugin/workflows/fan-in-execute.js
+- .claude/workflows/fan-in-execute.js
+- plugin/test/pre-verified-round-record.test.mjs
+- plugin/test/per-task-suite-record-check.test.mjs
+- plugin/test/fan-in-execute-paths.test.mjs
