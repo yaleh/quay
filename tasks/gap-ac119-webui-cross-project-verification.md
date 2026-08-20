@@ -1,7 +1,7 @@
 ---
 id: gap-ac119-webui-cross-project-verification
 title: "AC119 Web UI 跨项目验证：近期 5 项 webui 改进在第三方项目真实数据上逐条核对"
-status: ready
+status: done
 labels:
   - gap
   - mechanism
