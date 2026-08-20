@@ -50,9 +50,9 @@ function waitExit(child) {
 
 ## Acceptance Criteria
 
-- [ ] AC1: `waitExit(child)` 不再能无限挂起——有超时兜底（默认合理值），超时路径打印 child pid/exit-code/state 诊断。
-- [ ] AC2: 负控制：模拟 child 在监听挂载前已退出的场景，修复后该用例有界返回（不永挂）。
-- [ ] AC3: full-suite-runner.test.mjs 自身 15/15 绿（含 AC1 two-runner race 用例）；修复不改变现有 114 个调用点的语义（默认参数覆盖）。
+- [x] AC1: `waitExit(child)` 不再能无限挂起——有超时兜底（默认 60s），超时路径打印 child pid/exit-code/state 诊断。
+- [x] AC2: 负控制：模拟 child 在监听挂载前已退出的场景，修复后该用例有界返回（不永挂）。
+- [x] AC3: full-suite-runner.test.mjs 自身 160/160 绿（159 原用例 + 新增负控制；含 AC1 two-runner race 用例）；修复不改变现有 114 个调用点的语义（默认参数覆盖）。
 - [ ] AC4: 全量 suite 绿；fan-in scoped 门在该文件上不再出现「log 停滞 + ep_poll 0% CPU 永挂」签名。
 
 ## Definition of Done
