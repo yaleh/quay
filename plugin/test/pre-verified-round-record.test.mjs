@@ -145,6 +145,57 @@ test("AC6 — negative / non-numeric cpu_time_s fail-closed", () => {
   assert.match(buildPreVerifiedRoundRecord({ ...BASE, cpuTimeS: "abc" }).error ?? "", /cpu-time-s/);
 });
 
+// ── gap-verification-round-cpu-split-not-recorded: cpu_user_s / cpu_sys_s ───────────────────────────
+
+test("AC1/AC3 — cpu_user_s/cpu_sys_s ride the record when the capture split the SAME gnu-time line (user+sys ≈ cpu_time_s)", () => {
+  // The finding's real values: user=4414.230 sys=6899.653 (sys=61%); cpu_time_s = their sum.
+  const { record, error } = buildPreVerifiedRoundRecord({
+    ...BASE,
+    cpuTimeS: "11313.883",
+    cpuSource: "gnu-time",
+    cpuUserS: "4414.230",
+    cpuSysS: "6899.653",
+  });
+  assert.equal(error, undefined, `build must succeed: ${error}`);
+  assert.equal(record.cpu_time_s, 11313.883, "cpu_time_s stays the gnu-time sum (existing field preserved)");
+  assert.equal(record.cpu_user_s, 4414.230, "cpu_user_s = the gnu-time %U column");
+  assert.equal(record.cpu_sys_s, 6899.653, "cpu_sys_s = the gnu-time %S column");
+  assert.ok(Math.abs((record.cpu_user_s + record.cpu_sys_s) - record.cpu_time_s) < 0.01, "user+sys ≈ cpu_time_s (AC2)");
+});
+
+test("AC6 — an absent split (no args / empty / null / 0) is omitted, never a fabricated 0, never a fail-closed", () => {
+  // No split args → no split fields (the existing cpu_time_s-only shape is unchanged).
+  const plain = buildPreVerifiedRoundRecord({ ...BASE, cpuTimeS: "42.5", cpuSource: "gnu-time" });
+  assert.equal(plain.record.cpu_user_s, undefined, "no split args → cpu_user_s absent");
+  assert.equal(plain.record.cpu_sys_s, undefined, "no split args → cpu_sys_s absent");
+  // Empty strings (an unset bash capture var on a doc-only skip / not-wired round) → omitted, NOT an error.
+  const empty = buildPreVerifiedRoundRecord({ ...BASE, cpuTimeS: "42.5", cpuSource: "gnu-time", cpuUserS: "", cpuSysS: "" });
+  assert.equal(empty.error, undefined, "empty split args are 'considered + unavailable', not fail-closed");
+  assert.equal(empty.record.cpu_user_s, undefined);
+  assert.equal(empty.record.cpu_sys_s, undefined);
+  // Literal null / 0 → omitted.
+  const nullRec = buildPreVerifiedRoundRecord({ ...BASE, cpuTimeS: "42.5", cpuSource: "gnu-time", cpuUserS: "null", cpuSysS: "0" });
+  assert.equal(nullRec.error, undefined);
+  assert.equal(nullRec.record.cpu_user_s, undefined);
+  assert.equal(nullRec.record.cpu_sys_s, undefined);
+});
+
+test("AC1 fail-closed — a REAL split value with a null cpu_time_s is ambiguous ⇒ error (a split without its sum)", () => {
+  const r = buildPreVerifiedRoundRecord({
+    ...BASE,
+    cpuTimeS: "null",
+    cpuSource: "not-wired",
+    cpuUserS: "4414.230",
+    cpuSysS: "6899.653",
+  });
+  assert.match(r.error ?? "", /cpu-time-s/, "a real split without its sum must fail closed (硬规则 3b)");
+});
+
+test("AC6 — negative / non-numeric split values fail-closed", () => {
+  assert.match(buildPreVerifiedRoundRecord({ ...BASE, cpuTimeS: "42.5", cpuUserS: "-1" }).error ?? "", /cpu-user-s/);
+  assert.match(buildPreVerifiedRoundRecord({ ...BASE, cpuTimeS: "42.5", cpuSysS: "abc" }).error ?? "", /cpu-sys-s/);
+});
+
 // ── 硬规则 3b: fail-closed (nothing written on a missing/invalid field) ─────────────────────────────
 
 test("fail-closed — missing --task-id / --run-id / --commit / --started-at yields an error, never a partial record", () => {
@@ -215,6 +266,60 @@ test("CLI — --preverified 0 writes a REAL-suite record (preverified:false, gap
   const lines = fs.readFileSync(file, "utf8").trim().split("\n").filter(Boolean);
   assert.equal(lines.length, 1);
   assert.equal(JSON.parse(lines[0]).preverified, false);
+});
+
+test("CLI — --cpu-user-s/--cpu-sys-s flow through to the appended record (user+sys ≈ cpu_time_s)", () => {
+  const file = tmpFile("pvr-split-");
+  const args = [
+    "--task-id", BASE.taskId,
+    "--run-id", BASE.runId,
+    "--started-at", BASE.startedAt,
+    "--duration-ms", BASE.durationMs,
+    "--lane-count", BASE.laneCount,
+    "--load", BASE.load,
+    "--commit", BASE.commit,
+    "--cpu-time-s", "11313.883",
+    "--cpu-source", "gnu-time",
+    "--cpu-user-s", "4414.230",
+    "--cpu-sys-s", "6899.653",
+    "--record-file", file,
+    "--json",
+  ];
+  const r = spawnSync("node", ["--experimental-strip-types", WRITER, ...args], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.record.cpu_time_s, 11313.883);
+  assert.equal(out.record.cpu_user_s, 4414.230);
+  assert.equal(out.record.cpu_sys_s, 6899.653);
+  const lines = fs.readFileSync(file, "utf8").trim().split("\n").filter(Boolean);
+  assert.equal(lines.length, 1);
+  const rec = JSON.parse(lines[0]);
+  assert.ok(Math.abs((rec.cpu_user_s + rec.cpu_sys_s) - rec.cpu_time_s) < 0.01, "appended record: user+sys ≈ cpu_time_s (AC2)");
+});
+
+test("CLI — an empty --cpu-user-s '' (unset capture var) is not fail-closed on a real cpu_time_s", () => {
+  const file = tmpFile("pvr-empty-split-");
+  const args = [
+    "--task-id", BASE.taskId,
+    "--run-id", BASE.runId,
+    "--started-at", BASE.startedAt,
+    "--duration-ms", BASE.durationMs,
+    "--lane-count", BASE.laneCount,
+    "--load", BASE.load,
+    "--commit", BASE.commit,
+    "--cpu-time-s", "42.5",
+    "--cpu-source", "gnu-time",
+    "--cpu-user-s", "",
+    "--cpu-sys-s", "",
+    "--record-file", file,
+    "--json",
+  ];
+  const r = spawnSync("node", ["--experimental-strip-types", WRITER, ...args], { encoding: "utf8" });
+  assert.equal(r.status, 0, `empty split args must not fail: ${r.stderr}`);
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.record.cpu_time_s, 42.5);
+  assert.equal(out.record.cpu_user_s, undefined, "empty split arg → field absent");
+  assert.equal(out.record.cpu_sys_s, undefined);
 });
 
 test("CLI — fail-closed on a missing required field (exit 2, nothing written)", () => {

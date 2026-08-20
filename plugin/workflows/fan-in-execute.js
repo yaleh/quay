@@ -285,12 +285,24 @@ if [ "$full_suite_ran" = "true" ]; then
 fi
 cpu_s=null
 cpu_source=not-wired
+cpu_user_s=null
+cpu_sys_s=null
 if [ -f "$suite_time_file" ]; then
+  cpu_user=$(tail -1 "$suite_time_file" 2>/dev/null | awk '{printf "%.3f", $1}' || true)
+  cpu_sys=$(tail -1 "$suite_time_file" 2>/dev/null | awk '{printf "%.3f", $2}' || true)
   cpu=$(tail -1 "$suite_time_file" 2>/dev/null | awk '{printf "%.3f", $1+$2}' || true)
-  if [ -n "$cpu" ] && [ "$cpu" != "0.000" ]; then cpu_s=$cpu; cpu_source=gnu-time; fi
+  if [ -n "$cpu" ] && [ "$cpu" != "0.000" ]; then
+    cpu_s=$cpu
+    cpu_source=gnu-time
+    # gap-verification-round-cpu-split-not-recorded AC1/AC3 — the SAME gnu-time "%U %S" line split into
+    # its user/sys columns (cpu_time_s = their sum). 0.000 components stay 0.000 (the writer normalizes
+    # 0 → omitted, AC6); a missing column reads as 0.000 by awk. Real gnu-time output, never estimated.
+    cpu_user_s=$cpu_user
+    cpu_sys_s=$cpu_sys
+  fi
 fi
-printf 'cpu_s=%s\\ncpu_source=%s\\nend_iso=%s\\nend_ms=%s\\nwall_ms=%s\\nload=%s\\nlane_count=%s\\nsuite_exit=%s\\n' \\
-  "$cpu_s" "$cpu_source" "$end_iso" "$end_ms" "$wall_ms" "$load" "$lane_count" "$suite_exit" >> "$suite_capture"
+printf 'cpu_s=%s\\ncpu_source=%s\\ncpu_user_s=%s\\ncpu_sys_s=%s\\nend_iso=%s\\nend_ms=%s\\nwall_ms=%s\\nload=%s\\nlane_count=%s\\nsuite_exit=%s\\n' \\
+  "$cpu_s" "$cpu_source" "$cpu_user_s" "$cpu_sys_s" "$end_iso" "$end_ms" "$wall_ms" "$load" "$lane_count" "$suite_exit" >> "$suite_capture"
 echo "POLL=done SUITE_EXIT=$suite_exit"
 返回 { done: bool（POLL=done ⇒ true）, suiteExit: int|null }。marker 存在但读不出 suite_exit ⇒ done=true, suiteExit=null（fail-closed，脚本按非绿处理）。`,
     {
@@ -603,7 +615,8 @@ if [ -n "$skip_reason" ]; then
     --duration-ms "$wall_ms" --started-at "$start_iso" --finished-at "$end_iso" \
     --doc-checked true --doc-check-exit 0 \
     --full-suite-ran "$full_suite_ran" --skip-reason "$skip_reason" \
-    --cpu-time-s "$cpu_s" --cpu-source "$cpu_source" --load "$load"; then
+    --cpu-time-s "$cpu_s" --cpu-source "$cpu_source" \
+    --cpu-user-s "$cpu_user_s" --cpu-sys-s "$cpu_sys_s" --load "$load"; then
     echo "FATAL: per-task-suite-record 入账失败（AC1 判据1 义务）⇒ 不翻 done、不 ff" >&2
     exit 2
   fi
@@ -613,7 +626,8 @@ else
     --duration-ms "$wall_ms" --started-at "$start_iso" --finished-at "$end_iso" \
     --doc-checked true --doc-check-exit 0 \
     --full-suite-ran "$full_suite_ran" \
-    --cpu-time-s "$cpu_s" --cpu-source "$cpu_source" --load "$load"; then
+    --cpu-time-s "$cpu_s" --cpu-source "$cpu_source" \
+    --cpu-user-s "$cpu_user_s" --cpu-sys-s "$cpu_sys_s" --load "$load"; then
     echo "FATAL: per-task-suite-record 入账失败（AC1 判据1 义务）⇒ 不翻 done、不 ff" >&2
     exit 2
   fi
@@ -632,7 +646,8 @@ if [ "$full_suite_ran" = "true" ]; then
   if ! node --experimental-strip-types ${worktree}/plugin/scripts/pre-verified-round-record.ts \
     --task-id ${task} --run-id ${runId} --started-at "$start_iso" --duration-ms "$wall_ms" \
     --lane-count "$lane_count" --load "$load" --commit "$suite_head" --preverified "$preverified_flag" \
-    --cpu-time-s "$cpu_s" --cpu-source "$cpu_source" --suite-log "\${suite_log_file:-}"; then
+    --cpu-time-s "$cpu_s" --cpu-source "$cpu_source" \
+    --cpu-user-s "$cpu_user_s" --cpu-sys-s "$cpu_sys_s" --suite-log "\${suite_log_file:-}"; then
     echo "FATAL: verification-round 入账失败（AC1 判据1 义务）⇒ 不翻 done、不 ff" >&2
     exit 2
   fi

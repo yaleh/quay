@@ -977,6 +977,11 @@ test("⑦ wiring — the fan-in prompt carries a verification-round write block 
   // suite_log_file so the writer can parse the phase fields (real-run capture always carries it; a
   // pre-verified capture only when the caller recorded its log path — the "单独定案" seam).
   assert.ok(block.includes('--suite-log "${suite_log_file:-}"'), "block must pass the suite log path to the shared writer");
+  // gap-verification-round-cpu-split-not-recorded AC1 — the block passes the gnu-time user/sys split
+  // (parsed by the poll block into the capture) so the verification-round record carries cpu_user_s /
+  // cpu_sys_s (the finding's sys=61% lever is then measurable round-over-round).
+  assert.ok(block.includes('--cpu-user-s "$cpu_user_s"'), "block must pass the gnu-time USER cpu seconds to the writer");
+  assert.ok(block.includes('--cpu-sys-s "$cpu_sys_s"'), "block must pass the gnu-time SYSTEM cpu seconds to the writer");
   // Placement: the write runs in step 4.5 (suite-record-block), BEFORE the capture is removed — all in the phase-2 prompt.
   const p2 = promptContaining(prompts, "# preverified-round-block-start");
   const blockIdx = p2.indexOf("# preverified-round-block-start");
@@ -1468,6 +1473,8 @@ test("⑧ turn-budget — the poll agent completes the capture post-fields (cpu/
   assert.ok(poll.includes("suite_exit_marker"), "poll must read the exit marker");
   assert.ok(poll.includes("POLL=done SUITE_EXIT"), "poll must emit the done + exit result");
   assert.ok(poll.includes("cpu_source"), "poll must compute cpu_source (gnu-time or not-wired)");
+  assert.ok(poll.includes("cpu_user_s"), "poll must compute cpu_user_s (the gnu-time %U column — gap-verification-round-cpu-split-not-recorded)");
+  assert.ok(poll.includes("cpu_sys_s"), "poll must compute cpu_sys_s (the gnu-time %S column)");
   assert.ok(poll.includes("wall_ms"), "poll must compute wall_ms from the pre-suite start_ms");
   assert.ok(poll.includes("lane_count"), "poll must compute lane_count");
   assert.ok(poll.includes("suite_exit"), "poll must record suite_exit into the capture");
@@ -1627,12 +1634,55 @@ test("⑧ turn-budget REAL — a real detached suite (setsid) + the real poll bl
     [/^wall_ms=\d+$/m, "wall_ms"],
     [/^cpu_s=/m, "cpu_s"],
     [/^cpu_source=/m, "cpu_source"],
+    [/^cpu_user_s=/m, "cpu_user_s"],
+    [/^cpu_sys_s=/m, "cpu_sys_s"],
     [/^load=/m, "load"],
     [/^lane_count=\d+$/m, "lane_count"],
     [/^suite_head=/m, "suite_head"],
   ]) {
     assert.match(capture, re, `capture must carry ${name} (phase-2 入账输入)`);
   }
+});
+
+test("⑧ split — the poll block parses a gnu-time '%U %S' line into cpu_user_s/cpu_sys_s (real values, not estimates)", async (t) => {
+  // gap-verification-round-cpu-split-not-recorded AC1/AC3 — the poll block splits the SAME gnu-time line
+  // whose sum becomes cpu_time_s. Seeded with the finding's real values (user=4414.230 sys=6899.653):
+  // the capture must carry both columns and the writer's record must satisfy user+sys ≈ cpu_time_s.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fan-in-split-"));
+  t.after(() => cleanup(dir));
+  const task = "gap-test-tb-split";
+  const capture = `/tmp/fan-in-suite-${task}.env`;
+  const marker = `/tmp/fan-in-suite-${task}.exit`;
+  const timeFile = `/tmp/fan-in-suite-${task}.time`;
+  const logFile = `/tmp/fan-in-suite-${task}.log`;
+  t.after(() => { for (const f of [capture, marker, timeFile, logFile]) { try { fs.rmSync(f, { force: true }); } catch (_) { /* best-effort */ } } });
+  // Seed the pre-suite capture fields, a green exit marker, a readable suite log, and a REAL gnu-time line.
+  fs.writeFileSync(capture, [
+    "full_suite_ran=true",
+    "skip_reason=",
+    "start_iso=2026-08-20T00:00:00.000Z",
+    "start_ms=1755652800000",
+    "suite_head=" + "0".repeat(40),
+    `suite_log_file=${logFile}`,
+  ].join("\n") + "\n", "utf8");
+  fs.writeFileSync(marker, "exit=0\nend_ms=1755652801000\nend_iso=2026-08-20T00:00:01.000Z\n", "utf8");
+  fs.writeFileSync(timeFile, "4414.230 6899.653\n", "utf8");
+  fs.writeFileSync(logFile, "ok\n", "utf8");
+
+  const { prompts } = await runWorkflow({
+    args: { task, worktree: dir, root: REPO_ROOT, runId: "fm-tb-split", mergeTarget: "develop" },
+  });
+  const pollPrompt = promptContaining(prompts, "POLL=not-done");
+  const pollBlock = pollPrompt.slice(pollPrompt.indexOf("suite_capture="), pollPrompt.indexOf("返回 { done: bool"));
+  const r = runBash(pollBlock, { cwd: dir });
+  assert.equal(r.status, 0, `poll block failed: ${r.stderr}`);
+  assert.match(r.stdout, /POLL=done SUITE_EXIT=0/, `poll must report done exit 0, got: ${r.stdout}`);
+
+  const out = fs.readFileSync(capture, "utf8");
+  assert.match(out, /^cpu_user_s=4414\.230$/m, "capture carries cpu_user_s from the gnu-time %U column");
+  assert.match(out, /^cpu_sys_s=6899\.653$/m, "capture carries cpu_sys_s from the gnu-time %S column");
+  assert.match(out, /^cpu_s=11313\.883$/m, "cpu_s stays the sum (user+sys) — AC1 keeps the existing field");
+  assert.match(out, /^cpu_source=gnu-time$/m, "cpu_source=gnu-time for a real measurement");
 });
 
 // ── ⑧ durationMs 真墙钟一致性（gap-fan-in-suite-duration-poll-granularity-inflation）─────────────────
