@@ -37,6 +37,7 @@ import {
   hostParallelism,
   concurrentSuiteSlots,
   countHeldSuiteLocks,
+  effectiveParallelism,
 } from "../scripts/pre-verified-round-record.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -426,6 +427,29 @@ test("gap-fan-in-suite-log-cross-relaunch-reuse — parseSuitePhases slices by t
   );
 });
 
+test("gap-wiring-B — the suite's OWN test output mentioning `__FANIN_SUITE_START__` mid-line does NOT break the slice (anchored line-start marker), so the overlap marker stays in view", () => {
+  // Real round-347 shape: the emitted marker is line 1; the suite's node:test run prints an assertion
+  // description CONTAINING the marker string mid-line; the overlap markers are EARLY (before that
+  // test-output line). lastIndexOf(substring) sliced from the test-output line and dropped the overlap
+  // markers → phase_overlap=false + lowconc=0 on a genuine overlap log. The anchored slice must keep them.
+  const log = writeSuiteLog(null, [
+    "__FANIN_SUITE_START__ iso=2026-08-20T19:25:28.290Z ms=1787253928310 head=209cfce7 round=full",
+    "overlap: running 33 serial + 26 lowconc files in parallel (serial conc=8, lowconc conc=8)",
+    "__OVERHEAD__ overlap_lowconc_ms=282751",
+    "__OVERHEAD__ lowconc_phase_ms=0",
+    "__OVERHEAD__ serial_phase_ms=282766",
+    "✔ gap-fan-in-suite-log-cross-relaunch-reuse — parseSuitePhases slices by the last __FANIN_SUITE_START__ marker (current round only)",
+    "__OVERHEAD__ main_phase_ms=235253",
+    "__OVERHEAD__ lock_overhead_ms=221306",
+  ]);
+  assert.equal(detectPhaseOverlap(log), true, "the overlap marker (before the spurious mid-line mention) is still detected");
+  const { record } = buildPreVerifiedRoundRecord({ ...BASE, preverified: "0", suiteLog: log, root: REPO_ROOT });
+  assert.equal(record.phase_overlap, true, "phase_overlap:true — the anchored slice keeps the early marker");
+  assert.equal(record.lowconc_phase_ms, 282751, "lowconc_phase_ms = the overlap sub-time (the 78/78 defect is fixed even with test-output marker mentions)");
+  assert.equal(record.serial_phase_ms, 282766, "the end-burst phases (after the mention) are still parsed");
+  assert.equal(record.lock_wait_ms, 221306, "lock_wait_ms falls back to lock_overhead on a pre-marker log");
+});
+
 test("AC1 — parseSuitePhases returns {} for a missing or unreadable log (never fabricates a phase)", () => {
   assert.deepEqual(parseSuitePhases(undefined), {}, "no log path → no phases");
   assert.deepEqual(parseSuitePhases(""), {}, "empty log path → no phases");
@@ -514,6 +538,88 @@ test("AC1 — a real-suite record with an UNREADABLE suite log records phase-les
   });
   assert.equal(record.serial_phase_ms, undefined, "unreadable log → no serial phase");
   assert.equal(record.main_phase_ms, undefined, "unreadable log → no main phase");
+});
+
+// ── gap-wiring-B-verification-round-write-path AC1: lock_wait_ms / effective_parallelism /
+//    lowconc_phase_ms ride the REAL landing path (previously only the dead-on-fan-in
+//    full-suite-runner.ts wrote them) ─────────────────────────────────────────────────────────────
+
+test("gap-wiring-B AC1 — effective_parallelism rides the record (cpu_time_s ÷ wall, same 口径 as full-suite-runner; absent on null/≤0 cpu_time_s)", () => {
+  // The observability-holes finding's real ratio: 7162s cpu / 823s wall = 8.702.
+  const { record, error } = buildPreVerifiedRoundRecord({ ...BASE, cpuTimeS: "7162", cpuSource: "gnu-time", durationMs: "823000" });
+  assert.equal(error, undefined, `build must succeed: ${error}`);
+  assert.equal(record.effective_parallelism, 8.702, "effective_parallelism = cpu_time_s / (durationMs/1000), 3 decimals");
+  // The second real sample: 6900s / 1421s = 4.856.
+  const { record: r2 } = buildPreVerifiedRoundRecord({ ...BASE, cpuTimeS: "6900", cpuSource: "gnu-time", durationMs: "1421000" });
+  assert.equal(r2.effective_parallelism, 4.856, "second real sample 6900/1421");
+  // Unit: the exported helper mirrors full-suite-runner.effectiveParallelism (null contract).
+  assert.equal(effectiveParallelism(7162, 823000), 8.702);
+  assert.equal(effectiveParallelism(null, 823000), null, "null cpu_time_s → null (field absent, not a fabricated 0)");
+  assert.equal(effectiveParallelism(0, 823000), null, "0 cpu_time_s → null (a 0 would read 'infinite cores')");
+  assert.equal(effectiveParallelism(100, 0), null, "non-positive wall → null");
+  // A caller that passes no cpu-time-s at all → the field is ABSENT (硬规则⑥ 缺值=未查≠为假).
+  const noCpu = buildPreVerifiedRoundRecord({ ...BASE, root: REPO_ROOT }).record;
+  assert.equal(noCpu.effective_parallelism, undefined, "no cpu_time_s → effective_parallelism absent");
+});
+
+test("gap-wiring-B AC1 — lock_wait_ms rides the record from test.sh's `__OVERHEAD__ lock_wait_ms=N` marker (absent on a marker-less log)", () => {
+  const log = writeSuiteLog(null, [
+    "== single-flight lock (2 slots — gap-single-flight-lock-2-slot-concurrent-suites + SSoT) ==",
+    "__OVERHEAD__ lock_wait_ms=12345",
+    "scripts/test.sh: acquired full-suite single-flight slot 0 (.git/full-suite.lock.0) — held for the entire run",
+    "__OVERHEAD__ serial_phase_ms=301000",
+  ]);
+  const { record, error } = buildPreVerifiedRoundRecord({ ...BASE, preverified: "0", suiteLog: log, root: REPO_ROOT });
+  assert.equal(error, undefined, `build must succeed: ${error}`);
+  assert.equal(record.lock_wait_ms, 12345, "lock_wait_ms ← the __OVERHEAD__ lock_wait_ms marker (the flock START→acquired wall)");
+
+  // Fallback for PRE-MARKER logs: `lock_overhead` (the whole lock-acquire wall incl. the flock wait)
+  // is carried as lock_wait_ms — a REAL measurement, not a fabricated 0. This makes the field appear
+  // on real full-suite fan-in rounds even when the log predates test.sh's precise marker.
+  const preMarkerLog = writeSuiteLog(null, ["__OVERHEAD__ lock_overhead_ms=221306", "__OVERHEAD__ serial_phase_ms=301000"]);
+  const preMarker = buildPreVerifiedRoundRecord({ ...BASE, preverified: "0", suiteLog: preMarkerLog, root: REPO_ROOT }).record;
+  assert.equal(preMarker.lock_wait_ms, 221306, "pre-marker log → lock_wait_ms = lock_overhead (the acquire wall, real)");
+
+  // A log WITHOUT any lock marker (e.g. a scoped/no-lock run that skipped full_suite_lock_acquire) → 缺键.
+  const noLockLog = writeSuiteLog(null, ["__OVERHEAD__ serial_phase_ms=301000"]);
+  const noLock = buildPreVerifiedRoundRecord({ ...BASE, preverified: "0", suiteLog: noLockLog, root: REPO_ROOT }).record;
+  assert.equal(noLock.lock_wait_ms, undefined, "no lock marker → lock_wait_ms absent (缺键, never a fabricated 0)");
+
+  // No log at all → absent (the phase-less contract).
+  const noLog = buildPreVerifiedRoundRecord({ ...BASE, preverified: "0", root: REPO_ROOT }).record;
+  assert.equal(noLog.lock_wait_ms, undefined, "no log → lock_wait_ms absent");
+});
+
+test("gap-wiring-B AC1 — lowconc_phase_ms carries the overlap_lowconc_ms sub-time on an overlap round (no longer the subsumed 0)", () => {
+  // On overlap test.sh emits lowconc_phase_ms=0 (subsumed into the serial window) AND the real
+  // per-process `__OVERHEAD__ overlap_lowconc_ms=N` sub-time — the record must carry the real value.
+  const overlapLog = writeSuiteLog(null, [
+    "overlap: running 5 serial + 8 lowconc files in parallel",
+    "__OVERHEAD__ lowconc_phase_ms=0",
+    "__OVERHEAD__ overlap_lowconc_ms=183000",
+    "__OVERHEAD__ serial_phase_ms=301000",
+    "__OVERHEAD__ main_phase_ms=512000",
+  ]);
+  const { record, error } = buildPreVerifiedRoundRecord({ ...BASE, preverified: "0", suiteLog: overlapLog, root: REPO_ROOT });
+  assert.equal(error, undefined, `build must succeed: ${error}`);
+  assert.equal(record.phase_overlap, true, "overlap marker → phase_overlap:true");
+  assert.equal(record.lowconc_phase_ms, 183000, "overlap round → lowconc_phase_ms = the overlap_lowconc sub-time (not the subsumed 0)");
+
+  // A sequential round still records the raw lowconc_phase_ms (no overlap sub-time involved).
+  const seqLog = writeSuiteLog(null, ["__OVERHEAD__ lowconc_phase_ms=183000", "__OVERHEAD__ serial_phase_ms=301000"]);
+  const seqRec = buildPreVerifiedRoundRecord({ ...BASE, preverified: "0", suiteLog: seqLog, root: REPO_ROOT }).record;
+  assert.equal(seqRec.phase_overlap, false, "sequential log → phase_overlap:false");
+  assert.equal(seqRec.lowconc_phase_ms, 183000, "sequential round → raw lowconc_phase_ms");
+
+  // An overlap round whose sub-time marker was missed (truncated) falls back to the raw value — honest.
+  const missedLog = writeSuiteLog(null, [
+    "overlap: running 5 serial + 8 lowconc files in parallel",
+    "__OVERHEAD__ lowconc_phase_ms=0",
+    "__OVERHEAD__ serial_phase_ms=301000",
+  ]);
+  const missedRec = buildPreVerifiedRoundRecord({ ...BASE, preverified: "0", suiteLog: missedLog, root: REPO_ROOT }).record;
+  assert.equal(missedRec.phase_overlap, true, "overlap marker present");
+  assert.equal(missedRec.lowconc_phase_ms, 0, "sub-time marker missed → falls back to the raw lowconc_phase_ms (0) — honest");
 });
 
 test("AC1 — the concurrency helpers read the host + QUAY_MAX_CONCURRENT_SUITES the SAME way full-suite-runner does (seams respected)", () => {
