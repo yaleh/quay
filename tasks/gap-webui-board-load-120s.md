@@ -1,7 +1,7 @@
 ---
 id: gap-webui-board-load-120s
 title: "/board 加载 120s——readBoardLanding 无缓存 + 硬超时 120s（超时后渲染错误态），每次请求冷跑子进程"
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -23,14 +23,17 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: `/board` 冷加载从 ~120s 降到个位数秒（TTL 缓存 + 秒级 timeout + fail-open）。
-- [ ] AC2: 负控制——缓存命中时不再冷跑子进程（可观测：第二次请求快）。
-- [ ] AC3: 超时渲染「读取超时」而非空等到硬顶（fail-open）。
+- [x] AC1: `/board` 冷加载从 ~120s 降到个位数秒（TTL 缓存 + 秒级 timeout + fail-open）。
+- [x] AC2: 负控制——缓存命中时不再冷跑子进程（可观测：第二次请求快）。
+- [x] AC3: 超时渲染「读取超时」而非空等到硬顶（fail-open）。
 
 ## Definition of Done
 
-- [ ] `/board` 冷加载实测耗时从 ~120s 降到个位数秒（真实输出，非估算；缓存命中 + 秒级 timeout + fail-open 三者都落地）。
+- [x] `/board` 冷加载实测耗时从 ~120s 降到个位数秒（真实输出，非估算；缓存命中 + 秒级 timeout + fail-open 三者都落地）。
 
 ## Touches
 
+- packages/quay/src/observation.ts（readBoardLanding：TTL 缓存 + 秒级 timeout + fail-open + timedOut 标志 + 测试 seam/counter）
+- packages/quay/src/serve-handlers.ts（renderBoardPage 读取超时分支 + 导出 + handleBoard catch 补 timedOut）
+- packages/quay/test/serve-board.test.mjs（新增 AC1/AC2/AC3 三条；既有 AC3 负控制在两次请求间 clearLandingCache）
 - tasks/gap-webui-board-load-120s.md（自身）

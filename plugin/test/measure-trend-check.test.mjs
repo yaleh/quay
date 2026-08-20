@@ -72,6 +72,30 @@ test("AC3 — parsePerFileLines matches measure-suite-reporter's __PERFILE__ lin
   assert.equal(parsePerFileLines("__PERFILE__ duration_ms=0 /repo/x.test.mjs passed=false\n").length, 0);
 });
 
+test("gap-fan-in-suite-log-cross-relaunch-reuse — parsePerFileLines slices by the last __FANIN_SUITE_START__ marker (current round only, no stale-old-round read)", () => {
+  // A fan-in relaunch rotates the log: old round (marker round=full) then current round (marker round=full).
+  // The parser must read ONLY the current (last-marker) round's __PERFILE__ lines — the old round's
+  // `passed=false` must NOT leak into the current-round records.
+  const log =
+    "__FANIN_SUITE_START__ iso=2026-08-19T00:00:00.000Z ms=100 head=old round=full\n" +
+    "__PERFILE__ duration_ms=275.1 /repo/old.test.mjs passed=false\n" +
+    "__FANIN_SUITE_START__ iso=2026-08-19T00:10:00.000Z ms=600 head=new round=full\n" +
+    "__PERFILE__ duration_ms=120.5 /repo/cur.test.mjs passed=true\n" +
+    "__PERFILE__ duration_ms=42.2 /repo/cur2.test.mjs passed=false\n";
+  const recs = parsePerFileLines(log);
+  assert.deepEqual(
+    recs.map((r) => [r.file, r.passed]),
+    [
+      ["/repo/cur.test.mjs", true],
+      ["/repo/cur2.test.mjs", false],
+    ],
+    "only the last-marker round's records are parsed; the stale old-round passed=false is excluded",
+  );
+  // No marker ⇒ whole file (backward compat with full-suite-runner direct writes / test-authored logs).
+  const noMarker = parsePerFileLines("__PERFILE__ duration_ms=9 /repo/plain.test.mjs passed=true\n");
+  assert.equal(noMarker.length, 1, "no marker ⇒ whole file read (backward compat)");
+});
+
 test("constraint 6 — normalizePerFileKey strips the verify-round worktree root (same file across rounds keys once)", () => {
   // The same physical test file under two different per-task worktree roots MUST map to ONE key
   // (basename 归一 — gap-phase-overlap-two-phase-parallel-exploration constraint 6; 1179 full-path

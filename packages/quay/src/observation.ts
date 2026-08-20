@@ -514,6 +514,9 @@ export interface BoardLanding {
   flags: Map<string, string>;
   /** Number of tasks the checker scanned (0 when degraded). */
   scanned: number;
+  /** True when status === "error" AND the subprocess exceeded LANDING_TIMEOUT_MS (fail-open: the
+   *  page renders 「读取超时」 instead of an empty wait to the old 120s cap — AC3). */
+  timedOut?: boolean;
 }
 
 export interface BoardExecution {
@@ -525,30 +528,82 @@ export interface BoardExecution {
   inFlight: InFlightTask[];
 }
 
+// ── Board landing cache — short-TTL, mirroring the slot-refill probe (readPoolMetrics) ─────────────
+// readBoardLanding cold-runs plugin/scripts/task-status-drift-check.ts, which on a large repo does a
+// FULL git-log pass over the landing ref — >150s measured, documented by the checker's own comment
+// (task-status-drift-check.ts:462). Per-request cold-running is exactly the 120s /board defect
+// (gap-webui-board-load-120s), so a reading is short-TTL-cached (30s, the same window as
+// SLOT_REFILL_CACHE_TTL_MS). A TIMEOUT is cached too: on a large repo the checker's steady state IS
+// a timeout, and not caching it would make EVERY request pay the full second-level cap — the AC2
+// "second request fast" negative control would fail where it matters. The cache lives ONLY in the
+// serve-side observation layer (display surface); A22 / slot-refill's own reads never import
+// observation.ts, so caching here cannot pollute the dispatch truth (the same isolation readPoolMetrics
+// documents for its AC3). Keyed by workspace root so two served workspaces never share a reading.
+export const LANDING_CACHE_TTL_MS = 30_000;
+/** Second-level hard cap for the landing subprocess — on exceed the child is SIGTERMed and the page
+ *  renders 「读取超时」 (fail-open, AC3) instead of the old 120s empty wait. 8s is single-digit
+ *  seconds (AC1) with headroom for a normal small-repo run. */
+export const LANDING_TIMEOUT_MS = 8_000;
+const landingCache = new Map<string, { at: number; landing: BoardLanding }>();
+
+/** Test-hygiene handle: drop all cached landing readings. */
+export function clearLandingCache(): void {
+  landingCache.clear();
+}
+
+/** Test observability: number of times the drift-checker subprocess was actually spawned since
+ *  process start. The AC2 negative control asserts this stays flat on a cache-hit request. */
+let landingColdRunCount = 0;
+export function getLandingColdRunCount(): number {
+  return landingColdRunCount;
+}
+
+/** Test seams for readBoardLanding — checkerPath overrides the resolved checker script (e.g. a fake
+ *  that hangs, to exercise the timeout path); timeoutMs overrides the subprocess deadline. */
+export interface ReadBoardLandingOpts {
+  checkerPath?: string;
+  timeoutMs?: number;
+}
+
 /**
  * Reuse the drift checker as the single authoritative landing judgment. Runs
  * `plugin/scripts/task-status-drift-check.ts --json` (resolved relative to THIS module, with
  * cwd = the served workspace root so findRepoRoot finds the served store) and maps its output:
  *   suspects  → "landed-not-closed"  (已落地但未收尾: code in tree, status not closed)
  *   reverse   → "done-unlanded"      (done 但未落地: done, code never landed)
- * Fail-closed: script absent → 「无数据」; run/parse failure → 「读失败」. Never throws (AC6).
+ * The result is short-TTL-cached (LANDING_CACHE_TTL_MS) — a cache hit returns WITHOUT spawning the
+ * subprocess (AC2). Fail-open: script absent → 「无数据」; run/parse failure → 「读失败」; a subprocess
+ * exceeding LANDING_TIMEOUT_MS is killed and returns timedOut:true → 「读取超时」 (AC3 — never an empty
+ * wait to the old 120s cap). Never throws (AC6).
  */
-export async function readBoardLanding(root: string): Promise<BoardLanding> {
+export async function readBoardLanding(root: string, opts: ReadBoardLandingOpts = {}): Promise<BoardLanding> {
+  const hit = landingCache.get(root);
+  if (hit && Date.now() - hit.at < LANDING_CACHE_TTL_MS) return hit.landing;
+  const timeoutMs = opts.timeoutMs ?? LANDING_TIMEOUT_MS;
+
   let scriptPath: string;
-  let stripTypes = true;
+  let stripTypes: boolean;
   try {
-    scriptPath = fileURLToPath(new URL(DRIFT_CHECKER_REL, import.meta.url));
-    // gap-shipped-ts-files-are-not-bundled-80-raw-typescript-in-the-artifact: the shipped
-    // artifact carries the plugin .ts as bundled dist/*.js executables (no raw .ts), so the
-    // drift checker resolves to plugin/scripts/dist/task-status-drift-check.js there — run
-    // without --experimental-strip-types (a plain ESM .js).
-    if (!fs.existsSync(scriptPath)) {
-      const bundled = fileURLToPath(
-        new URL("../../../plugin/scripts/dist/task-status-drift-check.js", import.meta.url)
-      );
-      if (fs.existsSync(bundled)) {
-        scriptPath = bundled;
-        stripTypes = false;
+    if (opts.checkerPath) {
+      // Test seam: a caller-provided checker path (e.g. a fake that hangs) skips the dev/dist
+      // fallback and derives strip-types from its extension.
+      scriptPath = opts.checkerPath;
+      stripTypes = scriptPath.endsWith(".ts");
+    } else {
+      scriptPath = fileURLToPath(new URL(DRIFT_CHECKER_REL, import.meta.url));
+      stripTypes = true;
+      // gap-shipped-ts-files-are-not-bundled-80-raw-typescript-in-the-artifact: the shipped
+      // artifact carries the plugin .ts as bundled dist/*.js executables (no raw .ts), so the
+      // drift checker resolves to plugin/scripts/dist/task-status-drift-check.js there — run
+      // without --experimental-strip-types (a plain ESM .js).
+      if (!fs.existsSync(scriptPath)) {
+        const bundled = fileURLToPath(
+          new URL("../../../plugin/scripts/dist/task-status-drift-check.js", import.meta.url)
+        );
+        if (fs.existsSync(bundled)) {
+          scriptPath = bundled;
+          stripTypes = false;
+        }
       }
     }
   } catch {
@@ -566,9 +621,10 @@ export async function readBoardLanding(root: string): Promise<BoardLanding> {
     const argv = stripTypes
       ? ["--experimental-strip-types", scriptPath, "--json"]
       : [scriptPath, "--json"];
+    landingColdRunCount += 1;
     const { stdout } = await execFileP("node", argv, {
       cwd: root,
-      timeout: 120_000,
+      timeout: timeoutMs,
       maxBuffer: 32 * 1024 * 1024,
       encoding: "utf8",
     });
@@ -576,14 +632,29 @@ export async function readBoardLanding(root: string): Promise<BoardLanding> {
     const flags = new Map<string, string>();
     for (const s of parsed.suspects ?? []) flags.set(s.taskId, "landed-not-closed");
     for (const r of parsed.reverse ?? []) flags.set(r.taskId, "done-unlanded");
-    return { status: "ok", reason: null, flags, scanned: parsed.scanned ?? 0 };
+    const landing: BoardLanding = { status: "ok", reason: null, flags, scanned: parsed.scanned ?? 0 };
+    landingCache.set(root, { at: Date.now(), landing });
+    return landing;
   } catch (err) {
-    return {
-      status: "error",
-      reason: `landing 判断源读失败：${err instanceof Error ? err.message : String(err)}`,
-      flags: new Map(),
-      scanned: 0,
-    };
+    const timedOut = (err as { killed?: boolean; signal?: string }).killed === true;
+    const landing: BoardLanding = timedOut
+      ? {
+          status: "error",
+          timedOut: true,
+          reason: `landing 判断源执行超过 ${timeoutMs}ms 未完成（fail-open）`,
+          flags: new Map(),
+          scanned: 0,
+        }
+      : {
+          status: "error",
+          reason: `landing 判断源读失败：${err instanceof Error ? err.message : String(err)}`,
+          flags: new Map(),
+          scanned: 0,
+        };
+    // Cache a timeout too — on a large repo the checker's steady state IS a timeout, so this keeps
+    // repeat page loads instant (AC2) instead of paying the second-level cap on every request.
+    if (timedOut) landingCache.set(root, { at: Date.now(), landing });
+    return landing;
   }
 }
 
