@@ -69,6 +69,7 @@ depends_on: []
 ## Touches
 
 - plugin/scripts/pre-verified-round-record.ts（真实写入路径）
+- plugin/test/pre-verified-round-record.test.mjs（三字段接入的测试——effective_parallelism/lock_wait_ms/lowconc 修正/切片锚定）
 - plugin/scripts/full-suite-runner.ts（死路径处置）
 - scripts/test.sh（若影响测试）
 - tasks/gap-wiring-B-verification-round-write-path.md（自身）
