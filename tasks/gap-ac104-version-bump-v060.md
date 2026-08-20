@@ -37,12 +37,12 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1: `scripts/version-consistency-check.ts` 输出 `All 8 files carry version 0.6.0`（不是手动逐个改而不跑检查器）。
-- [ ] AC2: 8 处版本字段全为 0.6.0，无残留 0.5.0（脚本零退出）。
+- [x] AC1: `scripts/version-consistency-check.ts` 输出 `All 8 files carry version 0.6.0`（不是手动逐个改而不跑检查器）。
+- [x] AC2: 8 处版本字段全为 0.6.0，无残留 0.5.0（脚本零退出）。
 
 ## Definition of Done
 
-- [ ] version-consistency-check 绿（输出 All 8 files carry version 0.6.0）；提交可 `git log` 追溯。
+- [x] version-consistency-check 绿（输出 All 8 files carry version 0.6.0）；提交可 `git log` 追溯。
 
 ## Touches
 
