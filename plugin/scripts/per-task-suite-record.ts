@@ -207,6 +207,46 @@ export function buildRecord(o) {
       }
     }
   }
+  // gap-verification-round-cpu-split-not-recorded AC1/AC3 (sibling-instance 5b — same gnu-time source
+  // the verification-round writer splits): the suite's gnu-time USER/SYSTEM cpu seconds — the "%U"/"%S"
+  // columns of the SAME line whose sum is cpu_time_s. Written ONLY alongside a real cpu_time_s
+  // (cpu_source='gnu-time'); a split without its sum is ambiguous, so a caller that passes a REAL split
+  // value with a null/absent cpu_time_s fails closed (硬规则 3b). Each component is a non-negative number
+  // or explicit null (AC6, never a misleading 0); absent components are omitted (absent-field contract).
+  // NOTE: the entry gate ignores empty/0 split args entirely — a bash caller whose capture has no
+  // gnu-time (e.g. a doc-only skip) passes `--cpu-user-s ""` and must NOT trip the fail-closed.
+  let cpuUserS;
+  let cpuSysS;
+  const splitArgs = [
+    ["cpu-user-s", o.cpuUserS, (v) => { cpuUserS = v; }],
+    ["cpu-sys-s", o.cpuSysS, (v) => { cpuSysS = v; }],
+  ];
+  const hasRealSplit = splitArgs.some(([, raw]) => {
+    if (raw == null) return false;
+    const s = String(raw).trim();
+    if (s === "" || s === "null") return false;
+    const v = Number(s);
+    // A "present" split value = anything the caller passed that is NOT the literal 0 (which normalizes
+    // to omitted, AC6). Negative / non-numeric values are still a REAL attempt at a split → they must
+    // enter validation (and fail closed) below — an invalid split must never be silently swallowed.
+    return !(Number.isFinite(v) && v === 0);
+  });
+  if (hasRealSplit) {
+    if (cpuTimeS == null) {
+      return { error: "--cpu-user-s/--cpu-sys-s require a real --cpu-time-s (the gnu-time sum); a split without its sum is ambiguous" };
+    }
+    for (const [name, raw, setter] of splitArgs) {
+      if (raw == null) continue;
+      const s = String(raw).trim();
+      if (s === "" || s === "null") continue; // considered + unavailable → omitted
+      const v = Number(s);
+      if (!Number.isFinite(v) || v < 0) {
+        return { error: `--${name} must be a non-negative number, 0, or null (got ${JSON.stringify(raw)})` };
+      }
+      if (v === 0) continue; // 0 → omitted (AC6)
+      setter(v);
+    }
+  }
   // A SKIPPED full suite has no CPU measurement at all — a non-zero cpu_time_s with fullSuiteRan
   // false is a semantic contradiction (nothing ran), so it is fail-closed (硬规则 3b: 读不懂 ≠ 合格).
   if (fullSuiteRan === false && cpuTimeS != null) {
@@ -279,6 +319,10 @@ export function buildRecord(o) {
   if (o.cpuTimeS != null || cpuSource != null) {
     record.cpu_time_s = cpuTimeS;
     record.cpu_source = cpuSource ?? "not-wired";
+    // gap-verification-round-cpu-split-not-recorded — the gnu-time user/sys split rides alongside
+    // cpu_time_s/cpu_source when the capture parsed it; omitted when unavailable.
+    if (cpuUserS != null) record.cpu_user_s = cpuUserS;
+    if (cpuSysS != null) record.cpu_sys_s = cpuSysS;
   }
   if (load != null) record.load = load;
   if (phases != null) record.phases = phases;
@@ -328,6 +372,11 @@ Usage:
   --cpu-source      WHERE the cpu_time_s value came from: 'gnu-time' for a real measurement, or
                     'not-wired' for an unavailable source (defaults: gnu-time for a real number,
                     not-wired for null/0/skip). Optional; rides the record when cpu_time_s is present
+  --cpu-user-s      the suite's gnu-time USER cpu seconds — the "%U" column of the same "%U %S" line
+                    whose sum is cpu_time_s. Real number or null (0 → omitted, AC6). Requires a real
+                    --cpu-time-s (a split without its sum is ambiguous — fail-closed). Optional
+  --cpu-sys-s       the suite's gnu-time SYSTEM cpu seconds — the "%S" column (same contract).
+                    user+sys ≈ cpu_time_s by construction (same source line). Optional
   --load            the /proc/loadavg 1min load at suite end (non-negative). Optional
   --phases          the per-phase DIFFERENTIAL breakdown as a JSON array of
                     {phase, wall_ms, cpu_usec?, psi_cpu_total?, psi_io_total?, lanes?}
@@ -385,6 +434,8 @@ export function main(argv) {
     skipReason: getArgValue(args, "--skip-reason"),
     cpuTimeS: getArgValue(args, "--cpu-time-s"),
     cpuSource: getArgValue(args, "--cpu-source"),
+    cpuUserS: getArgValue(args, "--cpu-user-s"),
+    cpuSysS: getArgValue(args, "--cpu-sys-s"),
     load: getArgValue(args, "--load"),
     phases: getArgValue(args, "--phases"),
     stateFile: stateFileValues,

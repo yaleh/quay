@@ -1,7 +1,7 @@
 ---
 id: gap-test-group-downgrade-no-guard
 title: "@test-group 降级路径无守卫——合法改标 serial/lowconc/governance 使测试被静默移出默认集/跳过，闸不自知"
-status: ready
+status: done
 labels:
   - gap
   - finding
@@ -23,15 +23,20 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: `check_group_declarations` 增加「降级检测」——一个文件（按 path+前次 @test-group 记录）从 product/engine 改标为 serial/lowconc/governance 时，必须带额外证据（commit message 显式标注理由），否则 exit 非 0。
-- [ ] AC2: 降级检测有负控制（一个真实的 engine→governance 改标被挡下，一个带理由的合法降级被放行）。
-- [ ] AC3: 检测接进 `run_static_checks`（或等价每轮执行路径），不是仅存在于测试。
+- [x] AC1: `check_group_declarations` 增加「降级检测」——一个文件（按 path+前次 @test-group 记录）从 product/engine 改标为 serial/lowconc/governance 时，必须带额外证据（commit message 显式标注理由），否则 exit 非 0。
+- [x] AC2: 降级检测有负控制（一个真实的 engine→governance 改标被挡下，一个带理由的合法降级被放行）。
+- [x] AC3: 检测接进 `run_static_checks`（或等价每轮执行路径），不是仅存在于测试。
 
 ## Definition of Done
 
-- [ ] 一条「engine→governance 无理由改标」被机械挡下（真实输出，非 fixture）。
-- [ ] 一条「带 commit message 理由的合法降级」被放行（对照）。
+- [x] 一条「engine→governance 无理由改标」被机械挡下（真实输出，非 fixture）。
+- [x] 一条「带 commit message 理由的合法降级」被放行（对照）。
 
 ## Touches
 
 - tasks/gap-test-group-downgrade-no-guard.md（自身）
+- scripts/test.sh
+- plugin/scripts/test-group-downgrade-check.ts
+- plugin/scripts/checker-mutation-cases/test-group-downgrade-check.sh
+- plugin/scripts/capability-catalog.sh
+- docs/proposals/quay-product-outline.md

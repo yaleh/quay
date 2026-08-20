@@ -271,6 +271,12 @@ attempt=$(( prior_failures + 1 ))
 # flock on an open fd: the lock is released automatically when the fd closes (process exit), so a
 # crash mid-ff cannot leak it — no stale-lock recovery design needed (§2). --lock-wait bounds the
 # wait (default 30s; the hold is milliseconds so a waiter never actually waits this long).
+# ⚠️ lock wait 语义（gap-single-flight-lock-wait-shorter-than-suite）：本锁是【正确性锁】——只包
+# git merge --ff-only（毫秒级 hold），wait 30s 绰绰有余。它【不是】suite 的 single-flight【资源锁】
+# （<git-common-dir>/full-suite.lock.0/.1，hold 是整套 suite ~840s）。后者 600s 默认 < suite 时长 ⇒
+# 第 3+ suite 白等 fail-closed「not starting」；fan-in-execute.js 启动 detached suite 时经 env 把它
+# 提到 ≥ suite 时长（FULL_SUITE_LOCK_TIMEOUT，默认 900s）。fan-in 流程显式传 --lock-wait
+# （mergeLockWaitSecs，默认 30s，fan-in-execute.js args）——两个锁的 wait 语义互不混淆。
 mkdir -p "$(dirname "${lock_events}")" "$(dirname "${retry_record}")" "$(dirname "${escalations}")" 2>/dev/null || true
 lock_fd=9
 exec {lock_fd}>"${lock_file}"

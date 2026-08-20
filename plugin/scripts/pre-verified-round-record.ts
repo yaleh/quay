@@ -83,6 +83,7 @@
 //       --task-id <taskId> --run-id <runId> --started-at <iso> --duration-ms <ms>
 //       --lane-count <n> --load <n> --commit <sha>
 //       [--preverified <0|1|true|false>] [--cpu-time-s <n|null>] [--cpu-source <name>]
+//       [--cpu-user-s <n|null>] [--cpu-sys-s <n|null>]
 //       [--suite-log <path>] [--runner <name>] [--root <dir>] [--record-file <file>]
 //       [--json] [--help]
 //
@@ -99,6 +100,11 @@
 //   --cpu-time-s      the suite's CPU seconds — a real number, or the literal null when the source
 //                     was considered and UNAVAILABLE (AC6; 0 normalizes to null)
 //   --cpu-source      WHERE the cpu_time_s came from ('gnu-time' / 'not-wired'; optional)
+//   --cpu-user-s      the suite's gnu-time USER cpu seconds — the "%U" column of the same line whose
+//                     "%U %S" sum is cpu_time_s. A real number or the literal null (0 → omitted, AC6).
+//                     Written only alongside a real cpu_time_s (cpu_source='gnu-time'). Optional
+//   --cpu-sys-s       the suite's gnu-time SYSTEM cpu seconds — the "%S" column (same contract as
+//                     --cpu-user-s). user+sys ≈ cpu_time_s by construction (same source line). Optional
 //   --suite-log       the fan-in suite log path — parse its `__OVERHEAD__ <phase>_ms=N` lines into
 //                     static/serial/lowconc/main phase fields + record nproc/concurrentSuiteSlots/
 //                     concurrentSuitesRunning (same 口径 as full-suite-runner). When absent or
@@ -301,6 +307,48 @@ export function buildPreVerifiedRoundRecord(o) {
       }
     }
   }
+  // gap-verification-round-cpu-split-not-recorded AC1/AC3 — the gnu-time user/sys CPU split. The fan-in
+  // capture parses the SAME gnu-time "%U %S" line into cpu_user_s (column 1) and cpu_sys_s (column 2);
+  // cpu_time_s is their sum (column 1 + 2). Written ONLY alongside a real cpu_time_s (cpu_source =
+  // 'gnu-time') — a split without its sum is ambiguous, so a caller that passes a REAL split value with
+  // a null/absent cpu_time_s fails closed (硬规则 3b). Each component is a non-negative number or
+  // explicit null (AC6, never a misleading 0 — the same 0→null normalization cpu_time_s follows).
+  // Absent components (the arg not passed / empty / the literal null / 0) are omitted from the record;
+  // a reader must tolerate their absence. NOTE: the entry gate ignores empty/0 split args entirely —
+  // a bash caller whose capture has no gnu-time (e.g. a doc-only skip) passes `--cpu-user-s ""` and
+  // must NOT trip the fail-closed (an unset capture var is "considered + unavailable", not a real split).
+  let cpuUserS;
+  let cpuSysS;
+  const splitArgs = [
+    ["cpu-user-s", o.cpuUserS, (v) => { cpuUserS = v; }],
+    ["cpu-sys-s", o.cpuSysS, (v) => { cpuSysS = v; }],
+  ];
+  const hasRealSplit = splitArgs.some(([, raw]) => {
+    if (raw == null) return false;
+    const s = String(raw).trim();
+    if (s === "" || s === "null") return false;
+    const v = Number(s);
+    // A "present" split value = anything the caller passed that is NOT the literal 0 (which normalizes
+    // to omitted, AC6). Negative / non-numeric values are still a REAL attempt at a split → they must
+    // enter validation (and fail closed) below — an invalid split must never be silently swallowed.
+    return !(Number.isFinite(v) && v === 0);
+  });
+  if (hasRealSplit) {
+    if (cpuTimeS == null) {
+      return { error: "--cpu-user-s/--cpu-sys-s require a real --cpu-time-s (the gnu-time sum); a split without its sum is ambiguous" };
+    }
+    for (const [name, raw, setter] of splitArgs) {
+      if (raw == null) continue;
+      const s = String(raw).trim();
+      if (s === "" || s === "null") continue; // considered + unavailable → omitted (absent-field contract)
+      const v = Number(s);
+      if (!Number.isFinite(v) || v < 0) {
+        return { error: `--${name} must be a non-negative number, 0, or null (got ${JSON.stringify(raw)})` };
+      }
+      if (v === 0) continue; // 0 → omitted (AC6 — 0 conflates "not measured" with "truly ~0")
+      setter(v);
+    }
+  }
   const runner = o.runner ? String(o.runner).trim() : "outer";
   if (!runner) return { error: "--runner must be a non-empty string" };
   // preverified — the shared writer's branch marker (AC3): 1/true = reused capture (pre-verified
@@ -330,6 +378,10 @@ export function buildPreVerifiedRoundRecord(o) {
   if (o.cpuTimeS != null || cpuSource != null) {
     record.cpu_time_s = cpuTimeS;
     record.cpu_source = cpuSource ?? "not-wired";
+    // gap-verification-round-cpu-split-not-recorded AC1 — the gnu-time user/sys split rides alongside
+    // cpu_time_s/cpu_source when the capture parsed it (a real measurement); omitted when unavailable.
+    if (cpuUserS != null) record.cpu_user_s = cpuUserS;
+    if (cpuSysS != null) record.cpu_sys_s = cpuSysS;
   }
   // gap-fan-in-verification-round-thin-schema-phase-gap AC1/AC2 — phase fields + concurrency
   // variables (same 口径 as full-suite-runner's appendVerificationRound). Phase source: the suite
@@ -391,6 +443,7 @@ Usage:
       --task-id <taskId> --run-id <runId> --started-at <iso> --duration-ms <ms>
       --lane-count <n> --load <n> --commit <sha>
       [--preverified <0|1|true|false>] [--cpu-time-s <n|null>] [--cpu-source <name>]
+      [--cpu-user-s <n|null>] [--cpu-sys-s <n|null>]
       [--suite-log <path>] [--runner <name>] [--root <dir>] [--record-file <file>]
       [--json] [--help]
 
@@ -406,6 +459,11 @@ Usage:
   --cpu-time-s      the suite's CPU seconds — a real number, or the literal null when the source was
                     considered and UNAVAILABLE (AC6; 0 normalizes to null)
   --cpu-source      WHERE the cpu_time_s came from ('gnu-time' / 'not-wired'; optional)
+  --cpu-user-s      the suite's gnu-time USER cpu seconds — the "%U" column of the same "%U %S" line
+                    whose sum is cpu_time_s. Real number or null (0 → omitted, AC6). Requires a real
+                    --cpu-time-s (a split without its sum is ambiguous — fail-closed). Optional
+  --cpu-sys-s       the suite's gnu-time SYSTEM cpu seconds — the "%S" column (same contract).
+                    user+sys ≈ cpu_time_s by construction (same source line). Optional
   --suite-log       the fan-in suite log path — parse its __OVERHEAD__ <phase>_ms=N lines into
                     static/serial/lowconc/main phase fields + record nproc/concurrentSuiteSlots/
                     concurrentSuitesRunning (same 口径 as full-suite-runner). When absent or
@@ -447,6 +505,8 @@ export function main(argv) {
     preverified: getArgValue(args, "--preverified"),
     cpuTimeS: getArgValue(args, "--cpu-time-s"),
     cpuSource: getArgValue(args, "--cpu-source"),
+    cpuUserS: getArgValue(args, "--cpu-user-s"),
+    cpuSysS: getArgValue(args, "--cpu-sys-s"),
     runner: getArgValue(args, "--runner"),
     suiteLog: getArgValue(args, "--suite-log"),
     root,

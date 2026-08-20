@@ -159,6 +159,13 @@ export function readHistoryRounds(historyFile: string): Array<{ round: number; r
  * the SAME log digest, the land is a no-op (so re-running the trend-check / the runner's
  * post-suite hook over the same log never duplicates a round). Best-effort at the call site:
  * a land failure must never fail the suite verdict.
+ *
+ * SHARED writer (gap-measure-history-detached-suite-mirror-write AC1/AC3): this function is ALSO
+ * called by plugin/scripts/mirror-measure-history.ts — the fan-in detached-suite path
+ * (`setsid bash scripts/test.sh`, which never goes through full-suite-runner.ts) parses its REAL
+ * suite log through landMeasureHistory so the appended round's {round,runAt,file,durationMs,passed,
+ * laneCount,logDigest} shape is IDENTICAL to the runner's direct writes — this consumer (and
+ * compareLastTwoRounds) reads the mirror-write round without any format difference.
  */
 export function landMeasureHistory(opts: {
   historyFile?: string;
