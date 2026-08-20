@@ -29,7 +29,7 @@ bootstrap 机制（任务 touches fan-in 编排文件 ⇒ fan-in 用 worktree sc
 
 ## Definition of Done
 
-- [ ] bootstrap-HIT 任务的 fan-in 用最新编排文件，poll-bounded 的「~3 次」生效（真实输出）。
+- [ ] bootstrap-HIT 任务的 fan-in 用最新编排文件，poll-bounded 的「~3 次」生效（真实输出）。（待外部）
 
 ## Touches
 
