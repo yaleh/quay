@@ -770,7 +770,13 @@ function makeFixture() {
   const wfEvents = path.join(dir, ".workflow-events");
   fs.mkdirSync(wfEvents, { recursive: true });
   const dispatchRecord = path.join(dir, "dispatch-record.jsonl");
-  return { dir, wfEvents, dispatchRecord };
+  // Hermeticity (gap-fan-in-workflow-check-test-hermetic-escalations): the CLI reads the REAL
+  // <root>/.quay/fan-in-ff-escalations.jsonl by default (spawns pass --root REPO_ROOT). Every fixture
+  // spawn must pass --escalations to an EMPTY file so the real runner-field escalation never trips
+  // d-escalation-traceability. The escalation-specific tests overwrite this with their own records.
+  const escFile = path.join(dir, "escalations.jsonl");
+  fs.writeFileSync(escFile, "");
+  return { dir, wfEvents, dispatchRecord, escFile };
 }
 
 test("CLI — NOT-EVALUATED when the workflow has not landed (no boundary resolves, no lock events after)", (t) => {
@@ -778,7 +784,7 @@ test("CLI — NOT-EVALUATED when the workflow has not landed (no boundary resolv
   t.after(() => cleanup(fx.dir));
   const lockFile = path.join(fx.dir, "lock.jsonl");
   fs.writeFileSync(lockFile, JSON.stringify({ event: "acquire", taskId: "gap-old", epoch: 1, agentId: "x" }) + "\n");
-  const res = spawnSync("node", ["--experimental-strip-types", CHECKER, "--root", REPO_ROOT, "--lock-events", lockFile, "--project-dir", fx.dir, "--workflow-events-dir", fx.wfEvents, "--dispatch-record", fx.dispatchRecord, "--workflow-landed-ts", "2099-01-01T00:00:00Z", "--json"], { encoding: "utf8" });
+  const res = spawnSync("node", ["--experimental-strip-types", CHECKER, "--root", REPO_ROOT, "--lock-events", lockFile, "--project-dir", fx.dir, "--workflow-events-dir", fx.wfEvents, "--dispatch-record", fx.dispatchRecord, "--escalations", fx.escFile, "--workflow-landed-ts", "2099-01-01T00:00:00Z", "--json"], { encoding: "utf8" });
   assert.equal(res.status, 0);
   const out = JSON.parse(res.stdout);
   assert.equal(out.evaluated, false);
@@ -792,7 +798,7 @@ test("CLI — RED when a fan-in after the boundary has no Workflow call and a to
   const lockFile = path.join(fx.dir, "lock.jsonl");
   const ev = { event: "acquire", taskId: "gap-ac72-cert-mechanism-retire", epoch: 2000000000, agentId: "902b4528-bc95-4ec6-9e10-5c2a0c47c4bb" };
   fs.writeFileSync(lockFile, JSON.stringify(ev) + "\n");
-  const res = spawnSync("node", ["--experimental-strip-types", CHECKER, "--root", REPO_ROOT, "--lock-events", lockFile, "--project-dir", fx.dir, "--workflow-events-dir", fx.wfEvents, "--dispatch-record", fx.dispatchRecord, "--workflow-landed-ts", "2026-08-14T00:00:00Z", "--json"], { encoding: "utf8" });
+  const res = spawnSync("node", ["--experimental-strip-types", CHECKER, "--root", REPO_ROOT, "--lock-events", lockFile, "--project-dir", fx.dir, "--workflow-events-dir", fx.wfEvents, "--dispatch-record", fx.dispatchRecord, "--escalations", fx.escFile, "--workflow-landed-ts", "2026-08-14T00:00:00Z", "--json"], { encoding: "utf8" });
   assert.equal(res.status, 1);
   const out = JSON.parse(res.stdout);
   assert.equal(out.ok, false);
@@ -811,7 +817,7 @@ test("CLI — GREEN when the fan-in has a Workflow call AND a real subagent agen
   fs.writeFileSync(lockFile, JSON.stringify(ev) + "\n");
   const wfFile = path.join(fx.dir, "65dc5943-107a-4ef5-94d2-4ba5d0d3816c.jsonl");
   fs.writeFileSync(wfFile, JSON.stringify({ message: { content: [{ type: "tool_use", name: "Workflow", input: { scriptPath: "/q/.claude/workflows/fan-in-execute.js", args: '{"task":"gap-ac67-fan-in-executor-to-task-subagent"}' } }] } }) + "\n");
-  const res = spawnSync("node", ["--experimental-strip-types", CHECKER, "--root", REPO_ROOT, "--lock-events", lockFile, "--project-dir", fx.dir, "--workflow-events-dir", fx.wfEvents, "--dispatch-record", fx.dispatchRecord, "--workflow-landed-ts", "2026-08-14T00:00:00Z", "--json"], { encoding: "utf8" });
+  const res = spawnSync("node", ["--experimental-strip-types", CHECKER, "--root", REPO_ROOT, "--lock-events", lockFile, "--project-dir", fx.dir, "--workflow-events-dir", fx.wfEvents, "--dispatch-record", fx.dispatchRecord, "--escalations", fx.escFile, "--workflow-landed-ts", "2026-08-14T00:00:00Z", "--json"], { encoding: "utf8" });
   assert.equal(res.status, 0);
   const out = JSON.parse(res.stdout);
   assert.equal(out.ok, true);
@@ -830,7 +836,7 @@ test("CLI — GREEN when fan-in tasks were dispatched before the boundary (AC76 
   fs.mkdirSync(path.join(fx.dir, "subagents"), { recursive: true });
   fs.writeFileSync(path.join(fx.dir, "subagents", "agent-" + REAL_AC78_LOCK.agentId + ".jsonl"), "{}");
   fs.writeFileSync(path.join(fx.dir, "subagents", "agent-" + REAL_AC76_LOCK.agentId + ".jsonl"), "{}");
-  const res = spawnSync("node", ["--experimental-strip-types", CHECKER, "--root", REPO_ROOT, "--lock-events", lockFile, "--project-dir", fx.dir, "--workflow-events-dir", fx.wfEvents, "--dispatch-record", fx.dispatchRecord, "--workflow-landed-ts", "2026-08-14T09:20:07Z", "--json"], { encoding: "utf8" });
+  const res = spawnSync("node", ["--experimental-strip-types", CHECKER, "--root", REPO_ROOT, "--lock-events", lockFile, "--project-dir", fx.dir, "--workflow-events-dir", fx.wfEvents, "--dispatch-record", fx.dispatchRecord, "--escalations", fx.escFile, "--workflow-landed-ts", "2026-08-14T09:20:07Z", "--json"], { encoding: "utf8" });
   assert.equal(res.status, 0);
   const out = JSON.parse(res.stdout);
   assert.equal(out.ok, true);
@@ -849,7 +855,7 @@ test("CLI — RED when a fan-in task was dispatched AFTER the boundary with no W
   fs.writeFileSync(lockFile, JSON.stringify(ev) + "\n");
   // Dispatch AFTER the boundary (workflow exists ⇒ it COULD have dispatched it) — no Workflow call.
   fs.writeFileSync(path.join(fx.wfEvents, "fm-gap-post-boundary-2000000000-r1.jsonl"), JSON.stringify({ eventKind: "start", recordedAtMs: 1999999999000 }) + "\n");
-  const res = spawnSync("node", ["--experimental-strip-types", CHECKER, "--root", REPO_ROOT, "--lock-events", lockFile, "--project-dir", fx.dir, "--workflow-events-dir", fx.wfEvents, "--dispatch-record", fx.dispatchRecord, "--workflow-landed-ts", "2026-08-14T09:20:07Z", "--json"], { encoding: "utf8" });
+  const res = spawnSync("node", ["--experimental-strip-types", CHECKER, "--root", REPO_ROOT, "--lock-events", lockFile, "--project-dir", fx.dir, "--workflow-events-dir", fx.wfEvents, "--dispatch-record", fx.dispatchRecord, "--escalations", fx.escFile, "--workflow-landed-ts", "2026-08-14T09:20:07Z", "--json"], { encoding: "utf8" });
   assert.equal(res.status, 1);
   const out = JSON.parse(res.stdout);
   assert.equal(out.ok, false);
@@ -873,7 +879,7 @@ test("CLI — idle-watch replay: dispatch before the enforcement baseline with n
   fs.writeFileSync(path.join(fx.wfEvents, ev.runId + ".jsonl"), JSON.stringify({ eventKind: "start", recordedAtMs: 1786700361087, timing: { startedAtMs: 1786700361087 } }) + "\n");
   fs.mkdirSync(path.join(fx.dir, "subagents"), { recursive: true });
   fs.writeFileSync(path.join(fx.dir, "subagents", "agent-" + ev.agentId + ".jsonl"), "{}");
-  const res = spawnSync("node", ["--experimental-strip-types", CHECKER, "--root", REPO_ROOT, "--lock-events", lockFile, "--project-dir", fx.dir, "--workflow-events-dir", fx.wfEvents, "--dispatch-record", fx.dispatchRecord, "--workflow-landed-ts", "2026-08-14T09:20:07Z", "--enforcement-baseline-ts", "2026-08-14T09:55:00Z", "--json"], { encoding: "utf8" });
+  const res = spawnSync("node", ["--experimental-strip-types", CHECKER, "--root", REPO_ROOT, "--lock-events", lockFile, "--project-dir", fx.dir, "--workflow-events-dir", fx.wfEvents, "--dispatch-record", fx.dispatchRecord, "--escalations", fx.escFile, "--workflow-landed-ts", "2026-08-14T09:20:07Z", "--enforcement-baseline-ts", "2026-08-14T09:55:00Z", "--json"], { encoding: "utf8" });
   assert.equal(res.status, 0);
   const out = JSON.parse(res.stdout);
   assert.equal(out.ok, true);
@@ -893,7 +899,7 @@ test("CLI — 负控制: a fan-in dispatched AFTER the enforcement baseline with
   // Dispatch AFTER the enforcement baseline (09:55:00Z) — enforcement is live, the workflow EXISTS,
   // it could have been dispatched ⇒ no Workflow call is a fresh violation (RED), NOT debt.
   fs.writeFileSync(path.join(fx.wfEvents, ev.runId + ".jsonl"), JSON.stringify({ eventKind: "start", recordedAtMs: 2000000000000 }) + "\n");
-  const res = spawnSync("node", ["--experimental-strip-types", CHECKER, "--root", REPO_ROOT, "--lock-events", lockFile, "--project-dir", fx.dir, "--workflow-events-dir", fx.wfEvents, "--dispatch-record", fx.dispatchRecord, "--workflow-landed-ts", "2026-08-14T09:20:07Z", "--enforcement-baseline-ts", "2026-08-14T09:55:00Z", "--json"], { encoding: "utf8" });
+  const res = spawnSync("node", ["--experimental-strip-types", CHECKER, "--root", REPO_ROOT, "--lock-events", lockFile, "--project-dir", fx.dir, "--workflow-events-dir", fx.wfEvents, "--dispatch-record", fx.dispatchRecord, "--escalations", fx.escFile, "--workflow-landed-ts", "2026-08-14T09:20:07Z", "--enforcement-baseline-ts", "2026-08-14T09:55:00Z", "--json"], { encoding: "utf8" });
   assert.equal(res.status, 1);
   const out = JSON.parse(res.stdout);
   assert.equal(out.ok, false);
@@ -933,10 +939,17 @@ test("AC3 (gap-gitignored-carriers-absent-in-verify-worktree) — feeding the ro
   fs.writeFileSync(path.join(wfEvents, ev.runId + ".jsonl"), JSON.stringify({ eventKind: "start", recordedAtMs: 2000000000000 }) + "\n");
   fs.mkdirSync(path.join(mainRoot, "subagents"), { recursive: true });
   fs.writeFileSync(path.join(mainRoot, "subagents", "agent-" + ev.agentId + ".jsonl"), "{}");
+  // Hermetic d-check (gap-fan-in-workflow-check-test-hermetic-escalations): the temp-root spawns
+  // below must never read the REAL .quay/fan-in-ff-escalations.jsonl — pass an explicit EMPTY
+  // escalation file to each root (the default <root>/.quay/fan-in-ff-escalations.jsonl is bypassed).
+  const mainEsc = path.join(mainQuay, "escalations.jsonl");
+  fs.writeFileSync(mainEsc, "");
+  const worktreeEsc = path.join(worktreeRoot, "escalations.jsonl");
+  fs.writeFileSync(worktreeEsc, "");
 
   // (1) Worktree round: --root <worktree> (carrier absent ⇒ default path <worktree>/.quay/… missing)
   //     ⇒ constant-green nothing-to-judge — the exact disease AC3 rules out.
-  const beforeRes = spawnSync("node", ["--experimental-strip-types", CHECKER, "--root", worktreeRoot, "--project-dir", mainRoot, "--workflow-events-dir", wfEvents, "--workflow-landed-ts", "2026-08-14T09:20:07Z", "--enforcement-baseline-ts", "2026-08-14T09:55:00Z", "--json"], { encoding: "utf8" });
+  const beforeRes = spawnSync("node", ["--experimental-strip-types", CHECKER, "--root", worktreeRoot, "--project-dir", mainRoot, "--workflow-events-dir", wfEvents, "--escalations", worktreeEsc, "--workflow-landed-ts", "2026-08-14T09:20:07Z", "--enforcement-baseline-ts", "2026-08-14T09:55:00Z", "--json"], { encoding: "utf8" });
   assert.equal(beforeRes.status, 0);
   const before = JSON.parse(beforeRes.stdout);
   assert.equal(before.ok, true);
@@ -946,7 +959,7 @@ test("AC3 (gap-gitignored-carriers-absent-in-verify-worktree) — feeding the ro
   // (2) POST-FIX worktree round: the round feeds --root main_root (the MAIN checkout) ⇒ the DEFAULT
   //     carrier path <main>/.quay/fan-in-merge-lock-events.jsonl resolves ⇒ evaluated, and gap-ac81 is
   //     EXEMPTED by the checked-in table ⇒ ok=true with it reported in ruledHistoricalGaps (NOT missing).
-  const afterRes = spawnSync("node", ["--experimental-strip-types", CHECKER, "--root", mainRoot, "--project-dir", mainRoot, "--workflow-events-dir", wfEvents, "--workflow-landed-ts", "2026-08-14T09:20:07Z", "--enforcement-baseline-ts", "2026-08-14T09:55:00Z", "--json"], { encoding: "utf8" });
+  const afterRes = spawnSync("node", ["--experimental-strip-types", CHECKER, "--root", mainRoot, "--project-dir", mainRoot, "--workflow-events-dir", wfEvents, "--escalations", mainEsc, "--workflow-landed-ts", "2026-08-14T09:20:07Z", "--enforcement-baseline-ts", "2026-08-14T09:55:00Z", "--json"], { encoding: "utf8" });
   assert.equal(afterRes.status, 0);
   const after = JSON.parse(afterRes.stdout);
   assert.equal(after.ok, true);
@@ -971,7 +984,7 @@ test("AC3 (gap-gitignored-carriers-absent-in-verify-worktree) — feeding the ro
   const nonExempt = { event: "acquire", taskId: "gap-post-baseline", epoch: 2000000000, runId: "fm-gap-post-baseline-2000000000-r1", agentId: "aab2d14d10a762ff4" };
   fs.writeFileSync(path.join(mainQuay, "fan-in-merge-lock-events.jsonl"), JSON.stringify(ev) + "\n" + JSON.stringify(nonExempt) + "\n");
   fs.writeFileSync(path.join(wfEvents, nonExempt.runId + ".jsonl"), JSON.stringify({ eventKind: "start", recordedAtMs: 2000000000000 }) + "\n");
-  const redRes = spawnSync("node", ["--experimental-strip-types", CHECKER, "--root", mainRoot, "--project-dir", mainRoot, "--workflow-events-dir", wfEvents, "--workflow-landed-ts", "2026-08-14T09:20:07Z", "--enforcement-baseline-ts", "2026-08-14T09:55:00Z", "--json"], { encoding: "utf8" });
+  const redRes = spawnSync("node", ["--experimental-strip-types", CHECKER, "--root", mainRoot, "--project-dir", mainRoot, "--workflow-events-dir", wfEvents, "--escalations", mainEsc, "--workflow-landed-ts", "2026-08-14T09:20:07Z", "--enforcement-baseline-ts", "2026-08-14T09:55:00Z", "--json"], { encoding: "utf8" });
   assert.equal(redRes.status, 1);
   const red = JSON.parse(redRes.stdout);
   assert.equal(red.ok, false);
@@ -1041,7 +1054,7 @@ test("CLI — no escalation records ⇒ the escalation check is NOT-EVALUATED, n
   fs.writeFileSync(wfFile, JSON.stringify({ message: { content: [{ type: "tool_use", name: "Workflow", input: { scriptPath: "/q/.claude/workflows/fan-in-execute.js", args: '{"task":"gap-ac67-fan-in-executor-to-task-subagent"}' } }] } }) + "\n");
   fs.mkdirSync(path.join(fx.dir, "subagents"), { recursive: true });
   fs.writeFileSync(path.join(fx.dir, "subagents", "agent-aab2d14d10a762ff4.jsonl"), "{}");
-  const escFile = path.join(fx.dir, "escalations.jsonl"); // does not exist / empty
+  const escFile = path.join(fx.dir, "escalations.jsonl"); // empty (created by makeFixture) ⇒ no escalations
   const res = spawnSync("node", ["--experimental-strip-types", CHECKER, "--root", REPO_ROOT, "--lock-events", lockFile, "--project-dir", fx.dir, "--workflow-events-dir", fx.wfEvents, "--dispatch-record", fx.dispatchRecord, "--escalations", escFile, "--workflow-landed-ts", "2026-08-14T09:20:07Z", "--json"], { encoding: "utf8" });
   assert.equal(res.status, 0);
   const out = JSON.parse(res.stdout);

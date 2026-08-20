@@ -133,11 +133,12 @@ function fakeSuite(scriptBody) {
 }
 
 /** Spawn the runner against a temp root with a fake command. */
-function runRunner({ root, command, laneCount, stateDir, env = {}, serialConcurrency, lowconcConcurrency }) {
+function runRunner({ root, command, laneCount, stateDir, runner, env = {}, serialConcurrency, lowconcConcurrency }) {
   const args = ["--no-warnings", "--experimental-strip-types", RUNNER, "--root", root];
   if (stateDir) args.push("--state-dir", stateDir);
   if (command) args.push("--command", command);
   if (laneCount !== undefined && laneCount !== null) args.push("--lane-count", String(laneCount));
+  if (runner !== undefined && runner !== null) args.push("--runner", String(runner));
   if (serialConcurrency !== undefined) args.push("--serial-concurrency", String(serialConcurrency));
   if (lowconcConcurrency !== undefined) args.push("--lowconc-concurrency", String(lowconcConcurrency));
   const mergedEnv = { ...process.env, ...env };
@@ -305,6 +306,46 @@ test("AC1 — a green run writes the exact suite-state shape to .quay/full-suite
     assert.ok(s.finishedAt > 0, "finishedAt epoch seconds is positive");
     assert.equal(typeof s.durationMs, "number", "durationMs is the AC5 measurement hook");
     assert.ok(s.durationMs >= 0);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC1 — an explicit --runner inner is recorded in BOTH the state and the verification-round (gap-runner-field-hardcoded-outer-not-measurement)", async () => {
+  // The pre-fix code had NO --runner flag ⇒ `runner` was structurally pinned to "outer" (硬规则 4:
+  // a field that can only ever take one value is not a measurement). Now an explicit --runner is
+  // honored everywhere `base.runner` flows (state write + verification-round write share the value).
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-runner-"));
+  const { f, dir } = fakeSuite(GREEN_SUITE);
+  try {
+    const child = runRunner({ root, command: `bash ${f}`, laneCount: 8, runner: "inner" });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, `runner exits 0 on green, got ${code}`);
+
+    const s = readState(root);
+    assert.ok(s, "state file written");
+    assert.equal(s.runner, "inner", "the state write records the explicit --runner inner");
+    // The verification-round row carries the SAME runner (both reads of base.runner).
+    const vr = lastRoundRecord(root);
+    assert.ok(vr, "a verification-round row was appended");
+    assert.equal(vr.runner, "inner", "the verification-round row records the same runner");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC1 — an invalid --runner value fails closed (nothing written), not a silent fallback (gap-runner-field-hardcoded-outer-not-measurement)", async () => {
+  // 硬规则 3b: an unreadable/unparseable input must NOT return a value identical to a valid one —
+  // a garbage --runner must exit non-zero before any state write, never silently record "outer".
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-runner-bad-"));
+  const { f, dir } = fakeSuite(GREEN_SUITE);
+  try {
+    const child = runRunner({ root, command: `bash ${f}`, runner: "not-a-layer" });
+    const { code } = await waitExit(child);
+    assert.equal(code, 1, "invalid --runner exits 1 (usage error)");
+    assert.equal(readState(root), null, "no state file is written on a --runner usage error");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(dir, { recursive: true, force: true });

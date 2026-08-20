@@ -100,6 +100,12 @@
 //     [--lowconc-concurrency <n>]    # lowconc-phase internal concurrency, passed as
 //                                    #   QUAY_LOWCONC_CONCURRENCY (default: host parallelism — same
 //                                    #   host-read source; explicit flag always wins)
+//     [--runner <outer|inner>]       # gap-runner-field-hardcoded-outer-not-measurement: the layer
+//                                    #   identity this round records (outer/inner). Default: derived
+//                                    #   from the SAME source the state path uses (scope —
+//                                    #   isGitWorktree(root)): a worktree-scoped run ⇒ "inner", a
+//                                    #   main-scoped run ⇒ "outer". Explicit flag always wins
+//                                    #   (aligned with pre-verified-round-record.ts --runner).
 //     [--sync]                       # wait for the suite to finish before exiting
 //
 // Concurrency knob FORK (gap-full-suite-runner-red-pattern-matches-bare-x-vitest-false-red AC3):
@@ -273,12 +279,12 @@ export interface SuiteState {
    */
   runId?: string;
   /**
-   * ⚠️ 非执行面取证（A19 降级标注，tasks/gap-a19-evidence-field-does-not-match-measured-object，
-   * manager 2026-08-13）：`runner` 只记录本进程被调用时的【名义层身份】（outer/inner），
-   * 不知道调用者是主会话回合 / workflow / subagent——本 runner 恒写 "outer"（无 --runner 旗标），
-   * 140/140 零反例 ⇒ 它结构上不可能取假（硬规则 4），不是测量，**绝不驱动**执行形态计数器的 signal。
+   * gap-runner-field-hardcoded-outer-not-measurement — `runner` 记录本进程被调用时的【层身份】
+   * （outer/inner）。修前恒写 "outer"（无 --runner 旗标）⇒ 结构上不可能取假（硬规则 4），不是测量；
+   * 修后：显式 --runner 旗标优先，否则从 scope 的同一来源派生（isGitWorktree(root)——worktree 内
+   * 跑 ⇒ inner，主检出跑 ⇒ outer），字段可取假。⚠️ 它仍是【层身份】标注，不是【执行形态】——
    * 执行形态取证面是 launch tool_use 的 transcript 文件类别（主会话/agent/workflow 三类），
-   * 见 plugin/scripts/suite-execution-form-counter.ts。本字段保留仅作展示/历史对照。
+   * 见 plugin/scripts/suite-execution-form-counter.ts，绝不驱动其 signal。
    */
   runner: "outer" | "inner";
   /**
@@ -2379,6 +2385,24 @@ export async function run(argv: string[]): Promise<number> {
   // producing checkout's scope so waiters can distinguish a worktree-origin suite (deferrable — its
   // completion updates nothing anyone waits on) from the main-repo suite (the signal being waited for).
   const scope = isGitWorktree(root) ? ("worktree" as const) : ("main" as const);
+  // gap-runner-field-hardcoded-outer-not-measurement — `runner` 真实反映层身份（不再恒写 "outer"，
+  // 硬规则 4：恒取假的量不是测量）。显式 --runner 旗标优先（对齐 pre-verified-round-record.ts）；
+  // 否则从 scope 的同一来源派生（不新造判定逻辑）：worktree 内跑 ⇒ inner（fan-in/内层），
+  // 主检出跑 ⇒ outer（外层/人要求的一次性轮）。两个载体（state + verification-round）共用 base.runner，
+  // 从此不再各说各话。
+  const runnerArg = parseArg(argv, "--runner");
+  let runner: "outer" | "inner";
+  if (runnerArg !== undefined) {
+    if (runnerArg !== "outer" && runnerArg !== "inner") {
+      process.stderr.write(
+        `full-suite-runner: invalid --runner '${runnerArg}' (must be 'outer' or 'inner')\n`,
+      );
+      return 1;
+    }
+    runner = runnerArg;
+  } else {
+    runner = scope === "worktree" ? "inner" : "outer";
+  }
   // gap-merge-green-snapshot-verified-commit-livelock AC2 — record the TESTED COMMIT ONCE at run
   // start (the integration tip the green is about to verify). The batch-merge helper merges THIS
   // commit rather than the moving integration HEAD, so the green's COVERAGE is satisfied by
@@ -2486,7 +2510,7 @@ export async function run(argv: string[]): Promise<number> {
       writeState(stateFile, {
         state: "red",
         reason: "aborted",
-        runner: "outer",
+        runner,
         startedAt: at,
         laneCount,
         scope: "main",
@@ -2554,9 +2578,10 @@ export async function run(argv: string[]): Promise<number> {
     );
   }
   const base = {
-    // 非执行面取证（A19 降级）：runner 恒 "outer" 是名义层身份标注，不代表执行形态；
+    // gap-runner-field-hardcoded-outer-not-measurement — runner 现在取真值（--runner 旗标或 scope
+    // 派生），state 与 verification-round 共用此值。⚠️ 它仍是层身份标注，不代表执行形态；
     // 执行形态取证面是 launch tool_use 的 transcript 文件类别（见 suite-execution-form-counter.ts）。
-    runner: "outer" as const,
+    runner,
     startedAt,
     laneCount,
     scope,
