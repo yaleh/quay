@@ -342,6 +342,89 @@ export function fanInOrchestrationBootstrapHit(deltaPaths) {
     .filter((p) => FAN_IN_ORCHESTRATION_FILES.some((o) => matchesObject(o, p)));
 }
 
+// ── Bootstrap worktree sync (gap-bootstrap-worktree-stale-fan-in-execute, AC1/AC2) ────────────────────
+//
+// THE DEFECT (from the task title): a bootstrap-HIT task's fan-in is dispatched with the WORKTREE's
+// fan-in-execute.js as scriptPath so the branch's own fix is self-validated. But the worktree forked
+// from develop at SOME earlier commit; if a fan-in orchestration fix landed on develop AFTER the fork
+// (e.g. the poll-bounded blocking wait — `timeout 540` — 23a75eba), the worktree's fan-in-execute.js
+// is the OLD version — that fix does NOT take effect for bootstrap-HIT tasks (empirical: the
+// full-suite-state-stale worktree forked at e29e5de9, before poll-bounded landed ⇒ its fan-in used the
+// non-blocking poll, ~21 round trips instead of ~3).
+//
+// THE FIX: before the fan-in dispatches with the worktree scriptPath (A6 dispatch rule), and again at
+// the workflow's step 0 (before step-1's `git merge develop`), MERGE develop into the worktree. After a
+// clean merge, EVERY orchestration file = the branch's own modifications (self-validation) MERGED WITH
+// develop's latest (the poll fix is present even in unmodified regions of a branch-modified file). On
+// conflict, abort and leave the worktree clean (the workflow's step-1 merge will surface and resolve
+// it — status quo). On a dirty worktree / unresolvable merge-target ref, skip (step-1 handles it). The
+// merge is idempotent: if the dispatch already merged, step-0's merge reports "Already up to date".
+//
+// Callers resolve the SCRIPT from the worktree first (the branch's own copy — it carries this mode on
+// the branch even before it lands on develop), falling back to ${root} (a worktree forked before this
+// mode landed on develop cannot run it from itself).
+
+export interface BootstrapSyncResult {
+  worktree: string;
+  mergeTarget: string;
+  merged: boolean;
+  conflict: boolean;
+  skipped: boolean;
+  skipReason: string;
+  head: string | null;
+  error: string | null;
+}
+
+/** Run `git merge <mergeTarget>` inside a task worktree so the worktree's fan-in orchestration files
+ *  (fan-in-execute.js + scripts) are the LATEST develop version while preserving the branch's own
+ *  modifications (bootstrap self-validation). Never fail-closed: a conflict / dirty tree / unresolvable
+ *  ref returns a distinguishable skipped/conflict result and leaves the worktree clean — the fan-in's
+ *  step-1 merge is the authoritative conflict-resolution point. */
+export function syncWorktreeOrchestration(
+  worktree: string,
+  mergeTarget: string,
+  opts: { timeoutMs?: number } = {},
+): BootstrapSyncResult {
+  const timeoutMs = opts.timeoutMs ?? 60_000;
+  const base: BootstrapSyncResult = {
+    worktree, mergeTarget, merged: false, conflict: false,
+    skipped: false, skipReason: "", head: null, error: null,
+  };
+  const run = (args: string[], cwd: string): { status: number; stdout: string; stderr: string } => {
+    try {
+      const out = execFileSync("git", args, { cwd, encoding: "utf8", timeout: timeoutMs, stdio: ["ignore", "pipe", "pipe"] });
+      return { status: 0, stdout: out, stderr: "" };
+    } catch (e) {
+      const err = e as { status?: number; stdout?: string | Buffer; stderr?: string | Buffer };
+      return { status: err.status ?? 1, stdout: String(err.stdout ?? ""), stderr: String(err.stderr ?? "") };
+    }
+  };
+  const tail = (s: string) => s.trim().split("\n").filter(Boolean).slice(-3).join(" ");
+
+  const probe = run(["rev-parse", "--is-inside-work-tree"], worktree);
+  if (probe.status !== 0) return { ...base, skipped: true, skipReason: "not-a-git-worktree" };
+
+  const refProbe = run(["rev-parse", "--verify", "--quiet", `${mergeTarget}^{commit}`], worktree);
+  if (refProbe.status !== 0) return { ...base, skipped: true, skipReason: `merge-target-unavailable:${mergeTarget}` };
+
+  // Dirty-check ignores UNTRACKED files (--untracked-files=no): a merge is blocked by MODIFIED tracked
+  // files, not by untracked additions (test fixtures symlink plugin/ as untracked; production worktrees
+  // at fan-in time carry no tracked modifications).
+  const status = run(["status", "--porcelain", "--untracked-files=no"], worktree);
+  if (status.status === 0 && status.stdout.trim() !== "") return { ...base, skipped: true, skipReason: "dirty-worktree" };
+
+  const m = run(["merge", "--no-edit", "--no-progress", mergeTarget], worktree);
+  if (m.status === 0) {
+    const head = run(["rev-parse", "HEAD"], worktree);
+    return { ...base, merged: true, head: head.status === 0 ? head.stdout.trim() : null };
+  }
+  if (/CONFLICT/i.test(m.stderr) || /CONFLICT/i.test(m.stdout)) {
+    try { execFileSync("git", ["merge", "--abort"], { cwd: worktree, stdio: "ignore", timeout: timeoutMs }); } catch { /* best-effort */ }
+    return { ...base, conflict: true, error: tail(`${m.stderr}\n${m.stdout}`) };
+  }
+  return { ...base, error: tail(`${m.stderr}\n${m.stdout}`) || "git merge failed" };
+}
+
 /**
  * True iff `relPath` is a NEW file at selection time: it exists on disk under `root` AND git does
  * not track it (the task created it but has not yet committed it — the AC4 "not-yet-tracked"
@@ -571,6 +654,13 @@ Output modes:
       fan-in-ff-merge.sh / per-task-suite-record.ts / full-suite-runner.ts + mirrors), one per line.
       Empty = miss (the branch does not modify the pipeline ⇒ main-checkout scriptPath is fine);
       non-empty = HIT ⇒ the fan-in must run the WORKTREE's own version of the pipeline.
+  --bootstrap-sync --worktree <dir> [--merge-target <branch>] [--root <dir>] — bootstrap worktree
+      sync (gap-bootstrap-worktree-stale-fan-in-execute): merge the merge-target into the task worktree
+      so its fan-in orchestration files (fan-in-execute.js + scripts) are the LATEST develop version
+      while preserving the branch's own modifications (self-validation). Run BEFORE the fan-in
+      dispatches with the worktree scriptPath (A6 rule) and again at the workflow's step 0 (before
+      step-1 merge develop). Prints FAN-IN-BOOTSTRAP-SYNC merged/conflict/skipped (or --json); exit 0
+      always (informational — a conflict/skip leaves the worktree clean for step-1 to resolve).
 
 Exit codes: 0 ok; 2 usage/task-not-found.`;
 
@@ -679,6 +769,7 @@ export function main(argv) {
   const listMode = args.includes("--list");
   const classifyDelta = args.includes("--classify-delta");
   const bootstrapOrchestration = args.includes("--bootstrap-orchestration");
+  const bootstrapSync = args.includes("--bootstrap-sync");
   const commandsMode = args.includes("--commands");
   const checkRegOnly = args.includes("--check-registration");
 
@@ -689,6 +780,43 @@ export function main(argv) {
     process.stderr.write(`select-static-checks-for-touches: --check-registration requires --task <id> (a file-list --touches has no ## Touches to validate)\n`);
     return 2;
   }
+
+  // --bootstrap-sync --worktree <dir> [--merge-target <branch>] [--root <dir>] — bootstrap worktree
+  // sync (gap-bootstrap-worktree-stale-fan-in-execute, AC1). A bootstrap-HIT task's fan-in is
+  // dispatched with the WORKTREE's fan-in-execute.js as scriptPath; if the worktree forked BEFORE a
+  // fan-in orchestration fix landed on develop, that file is stale and the fix never takes effect.
+  // Merge develop into the worktree so every orchestration file = branch modifications MERGED WITH
+  // develop's latest. Informational (exit 0 even on conflict/skip — the fan-in's step-1 merge is the
+  // authoritative conflict-resolution point; the sync result distinguishes merged/conflict/skipped).
+  // Referenced by BOTH the A6 dispatch rule (fast-mode-tick-core.md, run before Workflow() so the
+  // dispatch-time scriptPath is the merged file) and the workflow's step-0 bootstrap block (the
+  // "merge develop 前先同步" safety net — fixes the orchestration SCRIPTS even when the dispatcher
+  // misses the sync). Runs BEFORE the scripts/test.sh registry check (a pure git op — no registry).
+  if (bootstrapSync) {
+    const worktreeArg = getArgValue(args, "--worktree");
+    const mergeTarget = getArgValue(args, "--merge-target") ?? "develop";
+    if (!worktreeArg) {
+      process.stderr.write(`select-static-checks-for-touches: --bootstrap-sync requires --worktree <dir> (the task worktree to sync)\n`);
+      return 2;
+    }
+    const result = syncWorktreeOrchestration(path.resolve(worktreeArg), mergeTarget);
+    if (asJson) {
+      process.stdout.write(JSON.stringify(result, null, 2) + "\n");
+    } else {
+      const parts = [
+        `FAN-IN-BOOTSTRAP-SYNC worktree=${result.worktree}`,
+        `merged=${result.merged ? 1 : 0}`,
+        `conflict=${result.conflict ? 1 : 0}`,
+        `skipped=${result.skipped ? 1 : 0}`,
+        result.head ? `head=${result.head}` : null,
+        result.skipReason ? `skip_reason=${result.skipReason}` : null,
+        result.error ? `error=${result.error}` : null,
+      ].filter(Boolean).join(" ");
+      process.stdout.write(parts + "\n");
+    }
+    return 0;
+  }
+
   const testSh = path.join(root, TEST_SH_REL);
   if (!fs.existsSync(testSh)) {
     process.stderr.write(`select-static-checks-for-touches: scripts/test.sh not found at ${testSh}\n`);

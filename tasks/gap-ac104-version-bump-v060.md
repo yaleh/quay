@@ -1,7 +1,7 @@
 ---
 id: gap-ac104-version-bump-v060
 title: AC104 版本号推进到 v0.6.0（8 处一致）——当前阶段管线第一步
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -25,6 +25,8 @@ depends_on: []
 - plugin/.claude-plugin/plugin.json、plugin/.claude-plugin/marketplace.json（quay entry）
 - .claude-plugin/marketplace.json（quay entry）、plugin/vendor/quay/package.json
 
+**⚠️ 另有第 9 处 `plugin/VERSION`（2026-08-20 inner 发现）**：sync.sh 文档明定「plugin/VERSION marks the plugin version and MUST be bumped whenever the plugin version bumps」，且 `touches-parser.ts`/`sync.sh` 都读它。**`version-consistency-check.ts` 的 VERSION_ENTRIES 只查 8 处、漏 plugin/VERSION —— 检查器覆盖缺口**，故任务 AC 判据维持「All 8 files」；但实现必须同步 bump plugin/VERSION（本次已 bump，见 Touches）。**检查器缺口单独立条补齐（须在 AC104 land 后，否则 develop 上 plugin/VERSION 仍 0.5.0 会自造红）**。
+
 **为什么 inner 执行**：版本字段属产品代码（package.json 等），D 段边界 outer 不改产品代码 → inner 域。
 
 **为什么现在**：新批（waitExit-race + turn-budget）已全 land（46b76046），0 在飞，load 低。AC104 是 AC105（build tgz）→ AC107（跨主机）→ AC118/119（已 ready 等管线）的前置。human 裁定「AC104 等 outer 自然轮到」——现在到了。
@@ -37,12 +39,12 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1: `scripts/version-consistency-check.ts` 输出 `All 8 files carry version 0.6.0`（不是手动逐个改而不跑检查器）。
-- [ ] AC2: 8 处版本字段全为 0.6.0，无残留 0.5.0（脚本零退出）。
+- [x] AC1: `scripts/version-consistency-check.ts` 输出 `All 8 files carry version 0.6.0`（不是手动逐个改而不跑检查器）。
+- [x] AC2: 8 处版本字段全为 0.6.0，无残留 0.5.0（脚本零退出）。
 
 ## Definition of Done
 
-- [ ] version-consistency-check 绿（输出 All 8 files carry version 0.6.0）；提交可 `git log` 追溯。
+- [x] version-consistency-check 绿（输出 All 8 files carry version 0.6.0）；提交可 `git log` 追溯。
 
 ## Touches
 
@@ -54,4 +56,5 @@ depends_on: []
 - plugin/.claude-plugin/marketplace.json（版本）
 - .claude-plugin/marketplace.json（版本）
 - plugin/vendor/quay/package.json（版本）
+- plugin/VERSION（版本——sync.sh 明定须随版本 bump，2026-08-20 inner 发现 Touches 漏列）
 - tasks/gap-ac104-version-bump-v060.md（自身）
