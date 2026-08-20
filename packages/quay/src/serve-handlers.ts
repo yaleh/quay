@@ -1512,7 +1512,7 @@ export async function handleJournal(
 // (board_flags == suspects + reverse, per-task) holds BY CONSTRUCTION (AC2/AC3). Execution flags
 // (在飞超时/孤儿) use a separate `data-exec-flag` attribute so they never pollute the data-flag count.
 
-function renderBoardPage(board: {
+export function renderBoardPage(board: {
   landing: BoardLanding;
   execution: BoardExecution;
   intentStatus: "ok" | "error";
@@ -1533,7 +1533,12 @@ function renderBoardPage(board: {
     ? html`<span>落地: <code>task-status-drift-check.ts</code> · 扫描 ${board.landing.scanned} 任务</span>`
     : board.landing.status === "empty"
       ? html`<span>落地: <code>task-status-drift-check.ts</code> · <strong>无数据</strong> — ${escapeHtml(board.landing.reason || "")}</span>`
-      : html`<span>落地: <code>task-status-drift-check.ts</code> · <strong>读失败</strong> — ${escapeHtml(board.landing.reason || "")}</span>`;
+      : board.landing.timedOut
+        // gap-webui-board-load-120s AC3 — fail-open: a subprocess that exceeded LANDING_TIMEOUT_MS
+        // renders 「读取超时」 (distinct from a generic 读失败) instead of empty-waiting to the old
+        // 120s hard cap.
+        ? html`<span>落地: <code>task-status-drift-check.ts</code> · <strong>读取超时</strong> — ${escapeHtml(board.landing.reason || "")}</span>`
+        : html`<span>落地: <code>task-status-drift-check.ts</code> · <strong>读失败</strong> — ${escapeHtml(board.landing.reason || "")}</span>`;
   // gap-inflight-states-missing-impl-complete-event: the in-flight view splits into TWO independent
   // counts — implementing (start, no impl-complete: 真正在实现) vs awaiting-land (impl-complete, no
   // end: 排队待落地). Build dispatch reads the former; the land single-flight gate reads the latter.
@@ -1591,7 +1596,7 @@ export async function handleBoard(
   try {
     landing = await readBoardLanding(cfg.workspaceRoot);
   } catch (err) {
-    landing = { status: "error", reason: `internal: ${err instanceof Error ? err.message : String(err)}`, flags: new Map(), scanned: 0 };
+    landing = { status: "error", timedOut: false, reason: `internal: ${err instanceof Error ? err.message : String(err)}`, flags: new Map(), scanned: 0 };
   }
   let execution: BoardExecution;
   try {
