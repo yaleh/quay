@@ -776,6 +776,24 @@ run_static_checks() {
   # @static-tier change
   # @static-object plugin/scripts/capability-catalog.sh plugin/scripts/rhythm-consumer-check.ts plugin/test/rhythm-consumer-check.test.mjs scripts/test.sh orchestration/*-tick-core.md plugin/loop/*-tick-core.md
   run_checker "rhythm-consumer-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/rhythm-consumer-check.ts" --check --root "${repo_root}"
+  echo "== test-file-snapshot relative-baseline check (gap-test-file-snapshot-no-production-caller, AC1) =="
+  # The 「删测试文件必红」 relative-baseline criterion — a COMMITTED repo-relative baseline
+  # (docs/analysis/test-file-baseline.txt) records the canonical test-file set
+  # (scripts/test.sh --list-files — the single source of truth); this check asserts current ⊇
+  # baseline — ADDITIONS since the baseline are ALLOWED (a concurrent merge adding a test file is
+  # the B3-2 scenario gap-global-count-assertions-fragile-relative-baseline cures), a REMOVAL is a
+  # REAL regression and red-lights the commit (set -euo pipefail abort). --repo-relative normalizes
+  # to repo-root-relative so the SAME committed baseline is portable across worktrees / the main
+  # checkout / CI (the canonical --list-files output is absolute realpaths — machine-/worktree-
+  # specific, and would read every baseline file as "REMOVED" in any other tree). Baseline refresh
+  # on a LEGITIMATE test-file removal:
+  #   bash plugin/scripts/test-file-snapshot.sh --repo-relative snapshot docs/analysis/test-file-baseline.txt
+  # then commit the updated baseline. Wired here as a code-class 每轮 gate (the zero-wiring disease
+  # this task cures: the script existed + was unit-tested but had NO production caller — hard rule
+  # 3b's "看起来覆盖了、实际未接线的检查").
+  # @static-tier change
+  # @static-object plugin/test/ packages/*/test/ experiments/*/test/ scripts/test.sh plugin/scripts/test-file-snapshot.sh
+  run_checker "test-file-snapshot-check" bash "${repo_root}/plugin/scripts/test-file-snapshot.sh" --repo-relative check "${repo_root}/docs/analysis/test-file-baseline.txt"
   echo "== suite-duration-exceed check (gap-suite-duration-exceed-check-not-wired, AC4 independent signal) =="
   # AC101's 600s target had two de-facto sentinels (the 10min foreground cap + the duration ledger)
   # that the pre-verified-suite path bypassed — round227 ran 936.5s with NO alert. This checker reads

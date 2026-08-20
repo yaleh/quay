@@ -118,6 +118,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { isDirectEntry } from "./gate-script-base.ts";
+import { suiteLockSlotCount } from "./suite-lock-slots.ts";
 import { resolveSharedCheckout, toIsoTimestamp } from "./per-task-suite-record.ts";
 
 const COMMIT_RE = /^[0-9a-f]{40}$/i;
@@ -196,11 +197,14 @@ export function hostParallelism() {
   return Number.isFinite(ncpu) && ncpu >= 1 ? ncpu : 1;
 }
 
-/** The configured concurrent-suite slot count (QUAY_MAX_CONCURRENT_SUITES, default 2) — the same
- *  definition-point read as full-suite-runner.concurrentSuiteSlots (clamped >= 1, fail-open to 2). */
+/** The configured concurrent-suite slot count — delegated to the TS canonical suiteLockSlotCount()
+ *  (gap-suite-lock-slot-seam-asymmetry: it reads the SAME seam precedence as the bash canonical —
+ *  RESOURCE_GATE_CONCURRENT_SUITES → QUAY_MAX_CONCURRENT_SUITES → 2). This writer keeps the slot read
+ *  OUT of the heavy full-suite-runner module by importing the lightweight suite-lock-slots.ts
+ *  (node-builtins only), not by duplicating the env expression — the previous local copy read only the
+ *  knob and drifted from the bash side under a test seam. */
 export function concurrentSuiteSlots() {
-  const raw = Number(process.env.QUAY_MAX_CONCURRENT_SUITES ?? "2");
-  return Number.isFinite(raw) && raw >= 1 ? Math.floor(raw) : 2;
+  return suiteLockSlotCount();
 }
 
 /** Resolve the single-flight 2-slot lock files the SAME way full-suite-runner.suiteLockPaths does:
