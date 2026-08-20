@@ -2070,6 +2070,141 @@ test("fix-scope release persistence — relaunch-fail path: same load-sensitive 
   assert.deepEqual(v2.inScope, ["pkg/a/x.test.mjs"], "in-Touches regression still inScope (gate is not release-everything)");
 });
 
+// ── release 隔离重跑 + anti-livelock（gap-gate-release-no-isolate-rerun-no-livelock）────────────────
+// THE DEFECT: load-sensitive release 此前是【全量 relaunch】——高 load 常驻下全量 relaunch 不减 load，
+// load-sensitive 族反复红 ⇒ 收敛失败（2026-08-19 ac101 实证 3 RED + 3 全量 relaunch，靠低 load 单飞
+// 侥幸收敛）；release 侧无 anti-livelock 兜底（attempt≥3）⇒ out-of-scope → release → 全量 relaunch
+// 循环无界（ac101 曾 ~2h）。FIX（AC1/AC2）：release 接 C11 隔离重跑（只重跑失败家族文件、低并发，
+// 非全量 relaunch）+ anti-livelock 兜底（同一 load-sensitive 红 releasedRounds ≥ 3 ⇒ escalate、不再
+// relaunch）。负控制（真实 bash，非 fixture）：① 纯 load-sensitive 释放的 gate verdict 携带
+// isolateRerun + livelock=false，且隔离文件列表被 gate 机械写入 /tmp/fan-in-scope-isolate-<task>.files；
+// ② 同一 load-sensitive 红连跑 3 轮 gate ⇒ 第 3 轮 livelock=true（attempt≥3 escalate）；③ 内联 fix
+// prompt 携带 ISOLATE_LAUNCH 块与三态 release 决策（有 inScope ⇒ 全量 relaunch / 纯释放 ⇒ 隔离重跑 /
+// livelock ⇒ escalate 不 relaunch）；④ workflow 层：fix agent 返回 relaunched:false（livelock escalate）
+// ⇒ 工作流立即 red 停止，不再进入第 2 个 fix round（无界循环被打破）。
+
+test("release isolation wiring — the fix prompt carries ISOLATE_LAUNCH + the three-state release decision (isolate-rerun ≠ full relaunch; livelock ⇒ escalate)", async (t) => {
+  const { prompts } = await runWorkflow({
+    args: { task: "gap-test-release-iso-wire", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-release-iso-wire", mergeTarget: "develop", pollIntervalMs: 0, maxSuitePolls: 5, maxFixRounds: 2 },
+    agentResults: [
+      { outcome: "suite-started", suitePid: 111, codeDelta: "code", worktreeHead: "h1", note: "" },
+      { done: true, suiteExit: 1 },
+      { relaunched: true, worktreeHead: "h2", failuresFixed: [], note: "load-sensitive 释放（第1轮）" },
+      { done: true, suiteExit: 0 },
+      { outcome: "green", ffOk: true, developHead: "d2", worktreeHead: "h2", agentIdUsed: "a2", codeDelta: "code", note: "bracketClose=OK", bracketClosed: true },
+    ],
+  });
+  const fixPrompt = promptContaining(prompts, "suite-fix 阶段");
+  assert.ok(fixPrompt.includes("# isolate-launch-block-start"), "the fix prompt must carry the ISOLATE_LAUNCH block (C11 隔离重跑)");
+  assert.ok(fixPrompt.includes("隔离重跑"), "the fix prompt must instruct the C11 isolated-rerun path");
+  assert.ok(fixPrompt.includes("非全量 relaunch"), "the release must be isolation rerun, NOT full relaunch (AC1)");
+  assert.ok(fixPrompt.includes("livelock"), "the fix prompt must carry the anti-livelock flag");
+  assert.ok(fixPrompt.includes("anti-livelock") || fixPrompt.includes("不再 relaunch"), "the fix prompt must instruct the anti-livelock escalation (AC2)");
+  assert.ok(fixPrompt.includes("relaunched: false"), "the anti-livelock escalation must return relaunched:false (no relaunch)");
+  assert.ok(fixPrompt.includes("rerunMode"), "the fix prompt must return rerunMode (full|isolated|null) for production evidence");
+  assert.ok(fixPrompt.includes("bash scripts/test.sh"), "the full relaunch block is still carried (inScope-fix case)");
+});
+
+test("release isolation REAL — pure load-sensitive red ⇒ verdict carries isolateRerun (family files, low-conc) + livelock=false; gate writes the isolate files list", async (t) => {
+  const task = "gap-test-release-iso-real";
+  const dir = makeFixScopeDir("fan-in-release-iso-", task, [
+    "---",
+    `id: ${task}`,
+    "status: ready",
+    "---",
+    "## Touches",
+    `- tasks/${task}.md`,
+    "- pkg/a/**",
+  ].join("\n") + "\n");
+  t.after(() => cleanup(dir));
+  const log = `/tmp/fan-in-suite-${task}.log`;
+  const release = `/tmp/fan-in-scope-release-${task}.json`;
+  const isolate = `/tmp/fan-in-scope-isolate-${task}.files`;
+  // 纯 load-sensitive 红（无 inScope 回归）：两个家族成员同时红。
+  fs.writeFileSync(log, [
+    `__PERFILE__ duration_ms=3.4 ${dir}/plugin/test/cold-start-skill.test.mjs passed=false`,
+    `__PERFILE__ duration_ms=4.5 ${dir}/plugin/test/runner-grouping-flags-only.test.mjs passed=false`,
+  ].join("\n") + "\n", "utf8");
+  t.after(() => { try { fs.rmSync(log, { force: true }); } catch (_) { /* best-effort */ } });
+  t.after(() => { try { fs.rmSync(release, { force: true }); } catch (_) { /* best-effort */ } });
+  t.after(() => { try { fs.rmSync(isolate, { force: true }); } catch (_) { /* best-effort */ } });
+
+  const block = await fixScopeGateBlockFor(task, dir);
+  const r = runBash(block + '\necho "GATE_OUT=[$fix_scope_out]"', { cwd: dir });
+  assert.equal(r.status, 0, `gate block failed: ${r.stderr}`);
+  const m = r.stdout.match(/GATE_OUT=\[(.*)\]/s);
+  assert.ok(m, `gate JSON echo missing:\n${r.stdout}`);
+  const verdict = JSON.parse(m[1]);
+  assert.equal(verdict.livelock, false, "round 1: releasedRounds=1 < 3 ⇒ no livelock");
+  assert.ok(verdict.isolateRerun, "pure load-sensitive release must carry the isolateRerun command (AC1)");
+  assert.ok(verdict.isolateRerun.includes("bash scripts/test.sh"), "isolateRerun is a low-concurrency test.sh command (only family files)");
+  assert.ok(verdict.isolateRerun.includes("plugin/test/cold-start-skill.test.mjs"), "isolateRerun includes the family failing file");
+  // 隔离文件列表被 gate 机械写入（每行一个 worktree 相对路径）——机制，不是靠 agent 记性：
+  const files = fs.existsSync(isolate) ? fs.readFileSync(isolate, "utf8").trim().split("\n").filter(Boolean) : [];
+  assert.ok(files.includes("plugin/test/cold-start-skill.test.mjs"), "gate wrote the isolate files list (mechanism)");
+  assert.ok(files.includes("plugin/test/runner-grouping-flags-only.test.mjs"), "gate wrote BOTH family files to the isolate list");
+  // 零越界 fix：load-sensitive 文件不在 inScope：
+  assert.ok(!verdict.inScope.includes("plugin/test/cold-start-skill.test.mjs"), "load-sensitive red never inScope (零越界 fix)");
+});
+
+test("release anti-livelock REAL — same load-sensitive red 3 rounds ⇒ round-3 verdict livelock=true (attempt≥3 escalate)", async (t) => {
+  const task = "gap-test-release-ll-real";
+  const dir = makeFixScopeDir("fan-in-release-ll-", task, [
+    "---",
+    `id: ${task}`,
+    "status: ready",
+    "---",
+    "## Touches",
+    `- tasks/${task}.md`,
+    "- pkg/a/**",
+  ].join("\n") + "\n");
+  t.after(() => cleanup(dir));
+  const log = `/tmp/fan-in-suite-${task}.log`;
+  const release = `/tmp/fan-in-scope-release-${task}.json`;
+  const isolate = `/tmp/fan-in-scope-isolate-${task}.files`;
+  fs.writeFileSync(log, [
+    `__PERFILE__ duration_ms=3.4 ${dir}/plugin/test/cold-start-skill.test.mjs passed=false`,
+  ].join("\n") + "\n", "utf8");
+  t.after(() => { try { fs.rmSync(log, { force: true }); } catch (_) { /* best-effort */ } });
+  t.after(() => { try { fs.rmSync(release, { force: true }); } catch (_) { /* best-effort */ } });
+  t.after(() => { try { fs.rmSync(isolate, { force: true }); } catch (_) { /* best-effort */ } });
+
+  const block = await fixScopeGateBlockFor(task, dir);
+  const gate = (round) => {
+    const r = runBash(block + '\necho "GATE_OUT=[$fix_scope_out]"', { cwd: dir });
+    assert.equal(r.status, 0, `round ${round} gate failed: ${r.stderr}`);
+    const m = r.stdout.match(/GATE_OUT=\[(.*)\]/s);
+    assert.ok(m, `round ${round} gate JSON echo missing:\n${r.stdout}`);
+    return JSON.parse(m[1]);
+  };
+  const v1 = gate(1);
+  const v2 = gate(2);
+  const v3 = gate(3);
+  assert.equal(v1.livelock, false, "round 1: releasedRounds=1 < 3 ⇒ no livelock");
+  assert.equal(v2.livelock, false, "round 2: releasedRounds=2 < 3 ⇒ no livelock");
+  assert.equal(v3.livelock, true, "round 3: releasedRounds=3 ≥ 3 ⇒ livelock=true (attempt≥3 escalate, AC2)");
+  const ls3 = v3.outOfScope.find((f) => f.reason === "load-sensitive" && f.file === "plugin/test/cold-start-skill.test.mjs");
+  assert.ok(ls3, "round 3 still releases (幂等持久, never转 fix)");
+  assert.equal(ls3.releasedRounds, 3, "round 3 releasedRounds=3");
+  assert.equal(ls3.livelock, true, "round 3 item carries the per-item livelock flag");
+});
+
+test("release anti-livelock — fix agent escalation (relaunched:false) ⇒ workflow stops red with the anti-livelock message (no infinite relaunch)", async (t) => {
+  const { prompts, result } = await runWorkflow({
+    args: { task: "gap-test-release-ll-wf", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-release-ll-wf", mergeTarget: "develop", pollIntervalMs: 0, maxSuitePolls: 5, maxFixRounds: 4 },
+    agentResults: [
+      { outcome: "suite-started", suitePid: 111, codeDelta: "code", worktreeHead: "h1", note: "" },
+      { done: true, suiteExit: 1 },                                                                                                        // poll: RED
+      { relaunched: false, rerunMode: null, worktreeHead: "h2", failuresFixed: [], note: "load-sensitive anti-livelock（releasedRounds≥3）：停止无界 relaunch，escalate → quiet-window / needs-human" },  // Fix agent: livelock escalate
+    ],
+  });
+  const fixPrompts = prompts.filter((p) => p.includes("suite-fix 阶段"));
+  assert.equal(fixPrompts.length, 1, "livelock escalation emits ONE fix prompt, then stops (no round-2 relaunch)");
+  assert.equal(result.outcome, "red", "escalation must be terminal (red), not another relaunch round");
+  assert.ok(result.message.includes("anti-livelock"), `the workflow message names the anti-livelock escalation, got: ${result.message}`);
+  assert.equal(result.ffOk, false, "no ff on livelock escalation");
+});
+
 // ── ⑨ impl-complete event (gap-inflight-states-missing-impl-complete-event) ─────────────────────────
 // fan-in writes the THIRD lifecycle event (`--impl-complete`) after impl completes (suite green) and
 // BEFORE land (step 4.4, between step 4's suite and step 5's flip+ff). The block is runId-guarded

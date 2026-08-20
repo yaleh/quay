@@ -109,6 +109,7 @@ const maxFixRounds = A.maxFixRounds ?? 4            // 红 suite 的最大修复
 const maxFfRetries = A.maxFfRetries ?? 3            // ff 失败（develop 前进）的最大重试（同 SPEC §7 阈值）
 const pollBlockSeconds = A.pollBlockSeconds ?? 540  // 轮询 agent 内有界阻塞等待的硬边界（< Bash 600s 上限，gap-fan-in-execute-poll-bounded-blocking-wait）
 const pollBlockSleep = A.pollBlockSleep ?? 15        // 阻塞等待的检查粒度（每 N 秒看一眼 exit marker）
+const releaseLivelockRounds = A.releaseLivelockRounds ?? 3  // release 侧 anti-livelock（gap-gate-release-no-isolate-rerun-no-livelock）：同一 load-sensitive 红连续 release ≥3 轮 ⇒ escalate（SPEC §7「同一任务失败 ≥3 次 才谈防活锁」同阈值）
 
 if (!task || !worktree || !root) {
   return { outcome: 'bad-args', message: 'task / worktree / root are required', args }
@@ -133,6 +134,34 @@ setsid bash -c 'cd "$1" && { if command -v /usr/bin/time >/dev/null 2>&1; then /
 suite_pid=$!
 printf 'suite_pid=%s\\n' "$suite_pid" >> "$suite_capture"`
 
+// ── C11 隔离重跑启动（gap-gate-release-no-isolate-rerun-no-livelock AC1）────────────────────────────
+// load-sensitive release 的【隔离重跑】launch——只重跑 fix-scope gate 分诊出的 load-sensitive 家族
+// 失败文件（低并发：scripts/test.sh 在低核机推导串行），【非全量 relaunch】。高 load 常驻下全量
+// relaunch 不减 load，load-sensitive 族反复红 ⇒ 收敛失败（2026-08-19 ac101 fan-in 实证：3 RED + 3
+// 全量 relaunch，靠低 load 单飞侥幸收敛）。文件列表由 gate 机械写入
+// /tmp/fan-in-scope-isolate-${task}.files（每行一个 worktree 相对路径；文件缺失/为空 ⇒ 本块不应被
+// 使用，调用方应退回全量 relaunch）。与 SUITE_LAUNCH 共享同一 exit marker / capture，脚本控制流
+// waitForSuite 无需感知区别；capture 标 full_suite_ran=false + skip_reason=isolate-rerun-load-sensitive
+// （诚实的记录面：本 fan-in 最终验证是隔离重跑而非全量 suite）。不捕获 CPU（full_suite_ran=false 时
+// per-task-suite-record 拒绝非空 cpu_time_s —— AC6「skip 不消耗 CPU」），GNU time 不可用问题不存在。
+const ISOLATE_LAUNCH = `
+# isolate-launch-block-start
+suite_capture="/tmp/fan-in-suite-${task}.env"
+suite_exit_marker="/tmp/fan-in-suite-${task}.exit"
+suite_time_file="/tmp/fan-in-suite-${task}.time"
+suite_log_file="/tmp/fan-in-suite-${task}.log"
+rm -f "$suite_exit_marker"
+suite_start_iso=$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)
+suite_start_ms=$(date +%s%3N)
+suite_head_now=$(git rev-parse HEAD 2>/dev/null || echo unknown)
+printf 'full_suite_ran=false\\nskip_reason=isolate-rerun-load-sensitive\\nstart_iso=%s\\nstart_ms=%s\\nsuite_head=%s\\nsuite_log_file=%s\\n' \\
+  "$suite_start_iso" "$suite_start_ms" "$suite_head_now" "$suite_log_file" > "$suite_capture"
+isolate_files=$(tr '\\n' ' ' < "/tmp/fan-in-scope-isolate-${task}.files" 2>/dev/null || true)
+setsid env SUITE_ISOLATE_FILES="$isolate_files" bash -c 'cd "$1" && { bash scripts/test.sh $SUITE_ISOLATE_FILES; } > "$2" 2>&1; rc=$?; printf "exit=%s\\nend_ms=%s\\nend_iso=%s\\n" "$rc" "$(date +%s%3N)" "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)" > "$3"' _ "${worktree}" "$suite_log_file" "$suite_exit_marker" & disown
+suite_pid=$!
+printf 'suite_pid=%s\\n' "$suite_pid" >> "$suite_capture"
+# isolate-launch-block-end`
+
 // ── fix-scope gate（fix 前判定红是否本任务 Touches 内回归，gap-fix-scope-gate-wired-to-wrong-path）──
 // 上一版 fix-scope gate（gap-suite-fix-workflow-no-load-sensitive-branch）落在 execute-suite-fix.js
 // （standalone 死工作流）零效果——生产 suite-fix 是本文件内联 subagent（:391 prompt），它直接修根因、
@@ -150,21 +179,32 @@ printf 'suite_pid=%s\\n' "$suite_pid" >> "$suite_capture"`
 // load-sensitive 红的连续 release 轮数 releasedRounds 持久化到 fix_scope_release ledger（/tmp 文件，
 // 跨 fix-round agent 调用存活），下一轮读到递增；内联 prompt 显式写「releasedRounds ≥ 1 的 load-
 // sensitive 红一律继续 release，⛔ 不得转 fix」。幂等持久 = 机制（ledger）+ 指令（prompt）双保险。
+// release 动作三态（gap-gate-release-no-isolate-rerun-no-livelock，delivery-critical）：release 侧
+// 此前是【全量 relaunch】——高 load 常驻下全量 relaunch 不减 load，load-sensitive 族反复红 ⇒ 收敛
+// 失败（2026-08-19 ac101 实证 3 RED + 3 全量 relaunch）且无 anti-livelock 兜底（无界）。修法：gate
+// 额外产出 isolateRerun 命令 + 把 load-sensitive 文件列表机械写入 /tmp/fan-in-scope-isolate-${task}.files；
+// 纯 load-sensitive 释放（无 inScope 修复）⇒ 【C11 隔离重跑】用 ISOLATE_LAUNCH（只重跑失败家族文件、
+// 低并发，非全量 relaunch）；同一 load-sensitive 红 releasedRounds ≥ ${releaseLivelockRounds}（SPEC §7
+// attempt≥3 同阈值）⇒ FIX_SCOPE_VERDICT.livelock=true ⇒ 【anti-livelock 兜底】escalate（relaunched:false、
+// quiet-window/needs-human），不再无界 relaunch。
 const FIX_SCOPE_GATE = `【fix-scope gate —— 修任何失败前必须先跑，得到 FIX_SCOPE_VERDICT 再动手修】
 # fix-scope-gate-block-start
 fix_scope_log="/tmp/fan-in-suite-${task}.log"
 fix_scope_touches="${worktree}/tasks/${task}.md"
 fix_scope_release="/tmp/fan-in-scope-release-${task}.json"
+fix_scope_isolate="/tmp/fan-in-scope-isolate-${task}.files"
+rm -f "$fix_scope_isolate"
 fix_scope_out=$(node --no-warnings --experimental-strip-types --input-type=module -e 'import fs from "node:fs";
 import { parseTouches, matchGlob, normalizePath } from "${worktree}/plugin/scripts/touches-orthogonality-check.ts";
 import { scanFamily, kindForFile } from "${worktree}/plugin/scripts/known-load-sensitive.ts";
-const taskFile = process.argv[1]; const wt = process.argv[2]; const logFile = process.argv[3]; const releaseLedger = process.argv[4];
+const taskFile = process.argv[1]; const wt = process.argv[2]; const logFile = process.argv[3]; const releaseLedger = process.argv[4]; const isolateFile = process.argv[5];
+const livelockRounds = Number(process.argv[6] || 3);
 let globs = null;
 try { const tb = fs.readFileSync(taskFile, "utf8"); const p = parseTouches(tb); if (p.hasSection) globs = p.globs; } catch (e) { globs = null; }
 const family = scanFamily(wt);
 let logText = ""; try { logText = fs.readFileSync(logFile, "utf8"); } catch (e) { logText = ""; }
 let prior = {}; try { if (releaseLedger) prior = JSON.parse(fs.readFileSync(releaseLedger, "utf8")); } catch (e) { prior = {}; }
-const inScope = []; const outOfScope = []; const seen = new Set();
+const inScope = []; const outOfScope = []; const loadSensitiveFiles = []; let livelock = false; const seen = new Set();
 const re = /^__PERFILE__ duration_ms=[0-9.]+ (.+) passed=false$/gm;
 let m;
 while ((m = re.exec(logText)) !== null) {
@@ -174,24 +214,26 @@ while ((m = re.exec(logText)) !== null) {
   if (seen.has(rel)) continue;
   seen.add(rel);
   const kind = kindForFile(family, rel);
-  if (kind !== undefined) { const rounds = (typeof prior[rel] === "number" ? prior[rel] : 0) + 1; prior[rel] = rounds; outOfScope.push({ file: rel, reason: "load-sensitive", kind, releasedRounds: rounds }); continue; }
+  if (kind !== undefined) { const rounds = (typeof prior[rel] === "number" ? prior[rel] : 0) + 1; prior[rel] = rounds; loadSensitiveFiles.push(rel); if (rounds >= livelockRounds) livelock = true; outOfScope.push({ file: rel, reason: "load-sensitive", kind, releasedRounds: rounds, livelock: rounds >= livelockRounds }); continue; }
   if (globs === null) { inScope.push(rel); continue; }
   if (globs.some((g) => matchGlob(normalizePath(g), rel))) inScope.push(rel); else outOfScope.push({ file: rel, reason: "other-task" });
 }
 if (/tmux-leak-scan: FAIL/.test(logText)) outOfScope.push({ file: null, reason: "leak-residual" });
 if (inScope.length === 0 && outOfScope.length === 0 && /run_static_checks|static-check/i.test(logText)) outOfScope.push({ file: null, reason: "checker-misreport" });
 try { if (releaseLedger) fs.writeFileSync(releaseLedger, JSON.stringify(prior)); } catch (e) {}
-process.stdout.write(JSON.stringify({ scoped: globs !== null, inScope, outOfScope }));' "$fix_scope_touches" "${worktree}" "$fix_scope_log" "$fix_scope_release" 2>&1) || { echo "FIX_SCOPE_NOT_EVALUATED=1"; fix_scope_out=""; }
+if (loadSensitiveFiles.length > 0) { try { fs.writeFileSync(isolateFile, loadSensitiveFiles.join("\\n") + "\\n"); } catch (e) {} }
+const isolateRerun = loadSensitiveFiles.length > 0 ? "bash scripts/test.sh " + loadSensitiveFiles.join(" ") : null;
+process.stdout.write(JSON.stringify({ scoped: globs !== null, inScope, outOfScope, isolateRerun, livelock }));' "$fix_scope_touches" "${worktree}" "$fix_scope_log" "$fix_scope_release" "$fix_scope_isolate" "${releaseLivelockRounds}" 2>&1) || { echo "FIX_SCOPE_NOT_EVALUATED=1"; fix_scope_out=""; }
 echo "FIX_SCOPE_VERDICT=$fix_scope_out"
 # fix-scope-gate-block-end
 判定（读上面的 FIX_SCOPE_VERDICT JSON）：
 - inScope 里的失败 = 本任务 Touches 内的回归 ⇒ 只修这些文件；禁止触碰 outOfScope 里列出的任何文件。
 - outOfScope 里的失败 = 越界红，一律不修：
-    * reason=load-sensitive（in_family，kind 已标注，携带 releasedRounds = 已连续 release 的轮数含本轮）⇒ 释放：不修。⛔ 幂等持久：同一 load-sensitive 红无论 relaunch 几轮都【继续 release】，任何一轮都不得转 fix——relaunch 后仍红 ⇒ 仍 release（不是「重跑确认后改修」）。releasedRounds ≥ 1 的项本轮仍 release，note 里写「load-sensitive 释放（第 N 轮，幂等持久），⛔ 不得转 fix」，N = releasedRounds 的值。release 落账由 gate 自动持久化到 fix_scope_release ledger（跨 relaunch 轮次递增），下一轮 gate 会读到 releasedRounds 递增——这是机制保证，不是靠记性。
+    * reason=load-sensitive（in_family，kind 已标注，携带 releasedRounds = 已连续 release 的轮数含本轮）⇒ 释放：不修。⛔ 幂等持久：同一 load-sensitive 红无论重跑几轮都【继续 release】，任何一轮都不得转 fix——重跑后仍红 ⇒ 仍 release（不是「重跑确认后改修」）。releasedRounds ≥ 1 的项本轮仍 release，note 里写「load-sensitive 释放（第 N 轮，幂等持久），⛔ 不得转 fix」，N = releasedRounds 的值。release 落账由 gate 自动持久化到 fix_scope_release ledger（跨重跑轮次递增），下一轮 gate 会读到 releasedRounds 递增——这是机制保证，不是靠记性。⛔ release 动作三态（见下方「重新启动 suite」步骤）：有 inScope 修复 ⇒ 全量 relaunch；纯 load-sensitive 释放且 FIX_SCOPE_VERDICT.livelock=false ⇒ 【C11 隔离重跑】（只重跑失败家族文件、低并发，非全量 relaunch）；FIX_SCOPE_VERDICT.livelock=true（任一 load-sensitive 项 releasedRounds ≥ ${releaseLivelockRounds}）⇒ 【anti-livelock 兜底】：不再 relaunch、escalate（relaunched:false）。
     * reason=checker-misreport ⇒ defer：不修，note 里要求 defer 独立任务。
     * reason=other-task / leak-residual ⇒ 别任务 bug / 环境残留：不修，note 里要求 defer 独立任务。
 - FIX_SCOPE_NOT_EVALUATED=1 ⇒ fail-closed：本任务不修任何失败，全部 defer（无法评估 ≠ 合格）。
-修完 inScope 后照常重新启动全量 suite。返回的 failuresFixed 只列 inScope 修复；越界 defer/release 写进 note。relaunch 后 suite 仍红的 load-sensitive 红 ⇒ 仍按本 gate release，⛔ 绝不转 fix。`
+修完 inScope 后照常重新启动全量 suite。返回的 failuresFixed 只列 inScope 修复；越界 defer/release 写进 note。重跑后 suite 仍红的 load-sensitive 红 ⇒ 仍按本 gate release，⛔ 绝不转 fix。`
 
 // ── 脚本控制流的 suite 等待：不把等待决策交给任何 agent（ab380c5e / execute-suite-fix.js）──────
 // 轮询 agent 内有界阻塞等待（gap-fan-in-execute-poll-bounded-blocking-wait）：timeout 540 + sleep 15
@@ -481,16 +523,20 @@ ${FIX_SCOPE_GATE}
 任务：
 1. 读 /tmp/fan-in-suite-${task}.log 的【全部】失败行（__PERFILE__ passed=false 行 + spec 失败摘要），先跑上面的 fix-scope gate 得到 FIX_SCOPE_VERDICT。
 2. 按 fix-scope gate verdict：只修 inScope 里的失败（本任务 Touches 内回归），在 ${worktree} 里 git add + git commit（真实修复，不是删测试/改判据绕过）；outOfScope 的越界红一律不修（load-sensitive 释放 / checker 误报与别任务 bug defer 独立任务）。
-3. 重新启动全量 suite（detached）：${SUITE_LAUNCH}
-   ⛔ 禁止 Bash(run_in_background:true)（subagent 退出被连带杀）；⛔ 禁止前台 bash scripts/test.sh。
-   启动后短促确认（~3s）exit marker 未立刻出现，然后返回。
-4. 返回 { relaunched: bool, worktreeHead, failuresFixed: string[], note }。failuresFixed 只列 inScope 修复；越界 defer/release 写进 note。
+3. 重新启动 suite（detached）。⛔ 禁止 Bash(run_in_background:true)（subagent 退出被连带杀）；⛔ 禁止前台 bash scripts/test.sh。启动后短促确认（~3s）exit marker 未立刻出现，然后返回。按 fix-scope gate verdict 选启动方式（release 侧三态，gap-gate-release-no-isolate-rerun-no-livelock）：
+   a. inScope 非空（本任务有要修的回归）⇒ 修完 inScope 后【全量 relaunch】：用上面的 ${SUITE_LAUNCH} 块（重跑整个套件验证代码改动）。
+   b. inScope 为空 且 FIX_SCOPE_VERDICT.livelock = true（同一 load-sensitive 红已连续 release ≥ ${releaseLivelockRounds} 轮）⇒ 【anti-livelock 兜底】：⛔ 不再 relaunch（不跑全量也不跑隔离）。escalate：返回 { relaunched: false, ... }，note 写「load-sensitive anti-livelock（releasedRounds≥${releaseLivelockRounds}）：停止无界 relaunch，escalate → quiet-window / needs-human」。
+   c. inScope 为空 且只有 load-sensitive 释放、FIX_SCOPE_VERDICT.livelock = false ⇒ 【C11 隔离重跑】：用下面的 ${ISOLATE_LAUNCH} 块（只重跑 gate 分诊出的 load-sensitive 家族失败文件、低并发，非全量 relaunch）——高 load 常驻下全量 relaunch 不减 load、load-sensitive 反复红（ac101 实证 3 RED + 3 全量 relaunch）。
+   其余情形（inScope 为空、outOfScope 只有 other-task/leak/checker defer）⇒ 照旧全量 relaunch（上面的 ${SUITE_LAUNCH}）。
+   ${ISOLATE_LAUNCH}
+4. 返回 { relaunched: bool, rerunMode: 'full' | 'isolated' | null, worktreeHead, failuresFixed: string[], note }。failuresFixed 只列 inScope 修复；越界 defer/release 写进 note。relaunched=false 仅当 anti-livelock 兜底 (b) 或启动失败；rerunMode=isolated 仅当走了 (c) 隔离重跑；rerunMode=full 仅当走了 (a) 全量 relaunch。
 不要做任何等待决策——等待由 workflow 脚本控制。`,
       {
         schema: {
           type: 'object',
           properties: {
             relaunched: { type: 'boolean' },
+            rerunMode: { type: 'string' },
             worktreeHead: { type: 'string' },
             failuresFixed: { type: 'array', items: { type: 'string' } },
             note: { type: 'string' },
@@ -499,9 +545,9 @@ ${FIX_SCOPE_GATE}
         },
       }
     )
-    log(`FanIn fix round ${fixRounds}/${maxFixRounds}: relaunched=${fix.relaunched} fixed=${(fix.failuresFixed ?? []).length} note=${fix.note ?? ''}`)
+    log(`FanIn fix round ${fixRounds}/${maxFixRounds}: relaunched=${fix.relaunched} rerunMode=${fix.rerunMode ?? '?'} fixed=${(fix.failuresFixed ?? []).length} note=${fix.note ?? ''}`)
     if (!fix.relaunched) {
-      return { outcome: 'red', ffOk: false, task, message: `fan-in fix agent did not relaunch: ${fix.note ?? 'unknown'}` }
+      return { outcome: 'red', ffOk: false, task, message: `fan-in fix agent did not relaunch (${fix.note?.includes('anti-livelock') ? 'release anti-livelock' : 'abort'}): ${fix.note ?? 'unknown'}` }
     }
     const waited = await waitForSuite()
     suiteDone = waited.done

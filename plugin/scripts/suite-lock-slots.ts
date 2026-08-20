@@ -27,13 +27,35 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { isDirectEntry } from "./gate-script-base.ts";
 
+/** Read an env var the way bash's `${VAR:-…}` reads it: an EMPTY string is treated as UNSET and falls
+ *  through to the next source. The bash canonical (suite-slot-lib.sh) uses `:-` on both seams, so the
+ *  TS side must too — else `RESOURCE_GATE_CONCURRENT_SUITES=""` + knob=1 would read 2 here and 1 there
+ *  (the seam asymmetry this task closes). */
+function envValOrUndefined(name: string): string | undefined {
+  const v = process.env[name];
+  return v === undefined || v === "" ? undefined : v;
+}
+
+/** Match the bash canonical's value VALIDATION exactly: only a string of digits `[0-9]+` passes
+ *  (suite-slot-lib.sh's `*[!0-9]*` case), anything else (fractional "1.5", "1.0", whitespace, "-1")
+ *  is rejected exactly the way bash rejects it — falling through to the next source / the 2 default.
+ *  A bare `Number()` + integer check would accept "1.0" as 1 where bash says 2. */
+function slotVal(name: string): string | undefined {
+  const v = envValOrUndefined(name);
+  return v !== undefined && /^[0-9]+$/.test(v) ? v : undefined;
+}
+
 /** The slot count S — the SINGLE definition point for "how many suites may run at once".
- *  Reads 旋钮② QUAY_MAX_CONCURRENT_SUITES (default 2). Clamped to >= 1 — an invalid/zero setting
- *  fails open to the single-suite default (the old 1-slot behavior), never to 0 slots.
- *  This is the SAME expression full-suite-runner.ts's concurrentSuiteSlots() delegates to. */
+ *  Reads the bash-side seam RESOURCE_GATE_CONCURRENT_SUITES FIRST (the deterministic test seam, same
+ *  convention as scripts/test.sh's derivation functions), then 旋钮② QUAY_MAX_CONCURRENT_SUITES,
+ *  defaulting to 2 — the SAME precedence + validation as the bash canonical suite-slot-lib.sh
+ *  suite_slot_count (`${SEAM:-${KNOB:-2}}`, `[0-9]+` and `-lt 1` ⇒ the 2 default), so the two canons
+ *  agree under ANY env (including a test seam) and even on malformed values. Clamped to >= 1 — an
+ *  invalid/zero setting fails open to the single-suite default (the old 1-slot behavior), never to 0
+ *  slots. This is the SAME expression full-suite-runner.ts's concurrentSuiteSlots() delegates to. */
 export function suiteLockSlotCount(): number {
-  const raw = Number(process.env.QUAY_MAX_CONCURRENT_SUITES ?? "2");
-  return Number.isFinite(raw) && raw >= 1 ? Math.floor(raw) : 2;
+  const raw = Number(slotVal("RESOURCE_GATE_CONCURRENT_SUITES") ?? slotVal("QUAY_MAX_CONCURRENT_SUITES") ?? "2");
+  return raw >= 1 ? raw : 2;
 }
 
 /** The S slot paths for a base — `${base}.0 .. ${base}.S-1`. S-generated via a loop variable, so a

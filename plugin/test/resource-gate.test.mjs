@@ -394,10 +394,14 @@ test("AC5 — formula derives max(1, floor(nproc × oversub / S)); the DEFAULT e
   // constant-return regression goes RED here (the Contract's control clause). Idle host ⇒
   // max(1, floor(nproc × 1 / 2)) = nproc/2 (pure computation known cost).
   const realNproc = Number(execSync("nproc").toString().trim());
+  // Adaptive to the configured slot count (gap-suite-lock-slot-seam-asymmetry AC2): under
+  // QUAY_MAX_CONCURRENT_SUITES=1 the effective default is nproc (single slot = whole host), not nproc/2 —
+  // the assertion must not hardcode S=2.
+  const realSlots = concurrentSuiteSlots();
   assert.equal(
     currentDefaultConcurrency(),
-    derivedConcurrency(realNproc, 2, 1),
-    `default_test_concurrency must return max(1, floor(${realNproc}×1/2)) = ${Math.max(1, Math.floor(realNproc / 2))} on the real host (gap-suite-budget-oversubscribe pure computation)`
+    derivedConcurrency(realNproc, realSlots, 1),
+    `default_test_concurrency must return max(1, floor(${realNproc}×1/${realSlots})) = ${Math.max(1, Math.floor(realNproc / realSlots))} on the real host (gap-suite-budget-oversubscribe pure computation)`
   );
 });
 
@@ -516,6 +520,10 @@ test("判据4 — direct path and runner path read the SAME three values, equal 
   const prevSlots = process.env.QUAY_MAX_CONCURRENT_SUITES;
   const prevOversub = process.env.QUAY_MAX_OVERSUBSCRIPTION;
   const prevOverlap = process.env.QUAY_PHASE_OVERLAP;
+  const prevSeam = process.env.RESOURCE_GATE_CONCURRENT_SUITES;
+  // This test drives the KNOB — clear the seam (read FIRST by suiteLockSlotCount since
+  // gap-suite-lock-slot-seam-asymmetry) so it cannot shadow the knob from an ambient test env.
+  delete process.env.RESOURCE_GATE_CONCURRENT_SUITES;
   process.env.RESOURCE_GATE_NPROC = "16";
   process.env.QUAY_MAX_CONCURRENT_SUITES = "2";
   process.env.QUAY_MAX_OVERSUBSCRIPTION = "1";
@@ -561,6 +569,8 @@ test("判据4 — direct path and runner path read the SAME three values, equal 
     else process.env.QUAY_MAX_OVERSUBSCRIPTION = prevOversub;
     if (prevOverlap === undefined) delete process.env.QUAY_PHASE_OVERLAP;
     else process.env.QUAY_PHASE_OVERLAP = prevOverlap;
+    if (prevSeam === undefined) delete process.env.RESOURCE_GATE_CONCURRENT_SUITES;
+    else process.env.RESOURCE_GATE_CONCURRENT_SUITES = prevSeam;
   }
 });
 

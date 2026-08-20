@@ -39,10 +39,16 @@ import {
 
 function withSlots(value, fn) {
   const prev = process.env.QUAY_MAX_CONCURRENT_SUITES;
+  const prevSeam = process.env.RESOURCE_GATE_CONCURRENT_SUITES;
+  // withSlots drives the KNOB — the seam must be cleared so suiteLockSlotCount() (which now reads the
+  // RESOURCE_GATE_CONCURRENT_SUITES seam FIRST) cannot shadow the knob from a leaked ambient test seam.
+  delete process.env.RESOURCE_GATE_CONCURRENT_SUITES;
   process.env.QUAY_MAX_CONCURRENT_SUITES = String(value);
   try { return fn(); } finally {
     if (prev === undefined) delete process.env.QUAY_MAX_CONCURRENT_SUITES;
     else process.env.QUAY_MAX_CONCURRENT_SUITES = prev;
+    if (prevSeam === undefined) delete process.env.RESOURCE_GATE_CONCURRENT_SUITES;
+    else process.env.RESOURCE_GATE_CONCURRENT_SUITES = prevSeam;
   }
 }
 
@@ -112,6 +118,33 @@ test("bash canonical — suite_slot_count matches TS suiteLockSlotCount under th
   }
 });
 
+test("seam symmetry (gap-suite-lock-slot-seam-asymmetry AC1) — TS suiteLockSlotCount reads the RESOURCE_GATE_CONCURRENT_SUITES test seam FIRST, same as the bash canonical; empty seam falls through to the knob (`:-` semantics)", () => {
+  const prevSeam = process.env.RESOURCE_GATE_CONCURRENT_SUITES;
+  const prevKnob = process.env.QUAY_MAX_CONCURRENT_SUITES;
+  try {
+    // seam ONLY (knob unset): both sides read the seam — the pre-fix TS read the knob (default 2) and
+    // drifted from bash (1) ⇒ the asymmetry this task closes.
+    delete process.env.QUAY_MAX_CONCURRENT_SUITES;
+    process.env.RESOURCE_GATE_CONCURRENT_SUITES = "1";
+    assert.equal(suiteLockSlotCount(), 1, "TS reads the seam (RESOURCE_GATE_CONCURRENT_SUITES=1) with the knob unset");
+    assert.equal(bashSlotCount(), 1, "bash reads the seam too");
+    assert.equal(suiteLockSlotCount(), bashSlotCount(), "TS == bash under a seam-only env");
+    // seam wins over a DIFFERENT knob (precedence: seam FIRST, then knob).
+    process.env.QUAY_MAX_CONCURRENT_SUITES = "3";
+    assert.equal(suiteLockSlotCount(), 1, "seam shadows the knob (seam-first precedence)");
+    assert.equal(bashSlotCount(), 1, "bash agrees: seam shadows the knob");
+    // empty seam (`:-` semantics) falls through to the knob — NOT read as a value.
+    process.env.RESOURCE_GATE_CONCURRENT_SUITES = "";
+    assert.equal(suiteLockSlotCount(), 3, "empty seam falls through to the knob (same as bash :-)");
+    assert.equal(bashSlotCount(), 3, "bash agrees on the empty-seam fall-through");
+  } finally {
+    if (prevSeam === undefined) delete process.env.RESOURCE_GATE_CONCURRENT_SUITES;
+    else process.env.RESOURCE_GATE_CONCURRENT_SUITES = prevSeam;
+    if (prevKnob === undefined) delete process.env.QUAY_MAX_CONCURRENT_SUITES;
+    else process.env.QUAY_MAX_CONCURRENT_SUITES = prevKnob;
+  }
+});
+
 // ── concurrentSuitesRunning 随 S (countHeldSuiteLocks probes S slots) ───────────────────────────────
 
 test("AC3 — countHeldSuiteLocks probes S slots: S=3 with `.2` held ⇒ 1 held (the fixed two-slot destructure could never see `.2`)", async () => {
@@ -149,7 +182,11 @@ test("AC3 — countHeldSuiteLocks probes S slots: S=3 with `.2` held ⇒ 1 held 
 test("AC4 — lane × S ≤ nproc × oversub (the pure-computation budget never oversubscribes)", () => {
   const prevNproc = process.env.RESOURCE_GATE_NPROC;
   const prevOversub = process.env.QUAY_MAX_OVERSUBSCRIPTION;
+  const prevSeam = process.env.RESOURCE_GATE_CONCURRENT_SUITES;
   try {
+    // This test drives the KNOB — the seam (read FIRST by suiteLockSlotCount since
+    // gap-suite-lock-slot-seam-asymmetry) must be cleared or it shadows the knob.
+    delete process.env.RESOURCE_GATE_CONCURRENT_SUITES;
     process.env.RESOURCE_GATE_NPROC = "16";
     for (const S of [1, 2, 3]) {
       process.env.QUAY_MAX_CONCURRENT_SUITES = String(S);
@@ -171,6 +208,8 @@ test("AC4 — lane × S ≤ nproc × oversub (the pure-computation budget never 
     if (prevOversub === undefined) delete process.env.QUAY_MAX_OVERSUBSCRIPTION;
     else process.env.QUAY_MAX_OVERSUBSCRIPTION = prevOversub;
     delete process.env.QUAY_MAX_CONCURRENT_SUITES;
+    if (prevSeam === undefined) delete process.env.RESOURCE_GATE_CONCURRENT_SUITES;
+    else process.env.RESOURCE_GATE_CONCURRENT_SUITES = prevSeam;
   }
 });
 
@@ -267,21 +306,15 @@ test("checker I3 — 能取假: a consumer NOT reading the canonical ⇒ RED", (
   } finally { cleanup(root); }
 });
 
-test("checker I4 — 能取假: bash canonical != TS canonical under a mismatched env ⇒ RED", () => {
-  // Drive the bash canonical via its RESOURCE_GATE_CONCURRENT_SUITES seam while the TS canonical reads
-  // QUAY_MAX_CONCURRENT_SUITES — they disagree ⇒ I4 must be RED (the two canons drifted).
-  const root = REPO_ROOT;
-  const prevSeam = process.env.RESOURCE_GATE_CONCURRENT_SUITES;
-  const prevSlots = process.env.QUAY_MAX_CONCURRENT_SUITES;
+test("checker I4 — 能取假: a bash canonical that disagrees with TS ⇒ RED (injected drift)", () => {
+  // The TS canonical now reads the SAME seam precedence as bash, so a mismatched env can no longer make
+  // them differ — that WAS the seam asymmetry (bash read the seam, TS read the knob). I4 stays
+  // falsifiable: inject a bash canonical that returns a different count and the checker must go RED.
+  const root = makeFakeRoot({
+    "plugin/scripts/suite-slot-lib.sh": 'suite_slot_count() { echo 5; }\n',
+  });
   try {
-    process.env.RESOURCE_GATE_CONCURRENT_SUITES = "3";
-    process.env.QUAY_MAX_CONCURRENT_SUITES = "2";
     const v = checkBashTsCountAgree(root);
-    assert.equal(v.ok, false, `bash=3 != TS=2 must be RED, got: ${v.detail}`);
-  } finally {
-    if (prevSeam === undefined) delete process.env.RESOURCE_GATE_CONCURRENT_SUITES;
-    else process.env.RESOURCE_GATE_CONCURRENT_SUITES = prevSeam;
-    if (prevSlots === undefined) delete process.env.QUAY_MAX_CONCURRENT_SUITES;
-    else process.env.QUAY_MAX_CONCURRENT_SUITES = prevSlots;
-  }
+    assert.equal(v.ok, false, `bash=5 != TS (real env) must be RED, got: ${v.detail}`);
+  } finally { cleanup(root); }
 });
