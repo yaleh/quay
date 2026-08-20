@@ -1,7 +1,7 @@
 ---
 id: gap-webui-board-no-pagination
 title: "/board 1257 行零分页零筛选——需服务端分页（query param）+ status/label 筛选"
-status: ready
+status: done
 labels:
   - gap
   - webui
