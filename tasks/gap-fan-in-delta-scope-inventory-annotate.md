@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-delta-scope-inventory-annotate
 title: "delta-scope 存量处置：AC1 枚举出的已 done 但未验证任务逐个标注「落地未经全量轮验证」（从 gap-fan-in-delta-scope-doc-only-skip AC4 拆出）"
-status: todo
+status: ready
 labels:
   - gap
   - mechanism

@@ -1,7 +1,7 @@
 ---
 id: gap-sea-verify-node-free-fails-050
 title: "SEA 二进制 node-free serve 验证失败（v0.5.0 release 实测）——sea-verify-node-free 无 Node serve+curl 不过"
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
