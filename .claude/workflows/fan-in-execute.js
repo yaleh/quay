@@ -136,6 +136,10 @@ rm -f "$suite_exit_marker" "$suite_time_file"
 suite_start_iso=$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)
 suite_start_ms=$(date +%s%3N)
 suite_head_now=$(git rev-parse HEAD 2>/dev/null || echo unknown)
+# gap-fan-in-suite-log-cross-relaunch-reuse: 每轮 relaunch 轮转日志 + 打起始标记。旧轮内容移到
+# .prev（诊断可查），当前轮从【空文件 + 起始标记】开始，读者按标记切片（不再整份线性 grep 读旧轮）。
+if [ -f "$suite_log_file" ]; then mv -f "$suite_log_file" "\${suite_log_file}.prev" 2>/dev/null || true; fi
+printf '__FANIN_SUITE_START__ iso=%s ms=%s head=%s round=full\\n' "$suite_start_iso" "$suite_start_ms" "$suite_head_now" > "$suite_log_file"
 printf 'full_suite_ran=true\\nskip_reason=\\nstart_iso=%s\\nstart_ms=%s\\nsuite_head=%s\\nsuite_log_file=%s\\n' \\
   "$suite_start_iso" "$suite_start_ms" "$suite_head_now" "$suite_log_file" > "$suite_capture"
 # single-flight 锁等待上调（gap-single-flight-lock-wait-shorter-than-suite）：test.sh 的
@@ -145,7 +149,7 @@ printf 'full_suite_ran=true\\nskip_reason=\\nstart_iso=%s\\nstart_ms=%s\\nsuite_
 # 让第 3+ suite 等够 slot 释放而不是 fail-closed。
 suite_lock_timeout="\${FULL_SUITE_LOCK_TIMEOUT:-${suiteLockTimeoutSecs}}"
 # GNU time 捕获 CPU（判据3 的 cpu_time_s）；GNU time 不可用 ⇒ 保持 null + not-wired（AC6，绝不写 0）。
-setsid env FULL_SUITE_LOCK_TIMEOUT="$suite_lock_timeout" bash -c 'cd "$1" && { if command -v /usr/bin/time >/dev/null 2>&1; then /usr/bin/time -o "$2" -f "%U %S" bash scripts/test.sh; else bash scripts/test.sh; fi; } > "$3" 2>&1; rc=$?; printf "exit=%s\\nend_ms=%s\\nend_iso=%s\\n" "$rc" "$(date +%s%3N)" "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)" > "$4"' _ "${worktree}" "$suite_time_file" "$suite_log_file" "$suite_exit_marker" & disown
+setsid env FULL_SUITE_LOCK_TIMEOUT="$suite_lock_timeout" bash -c 'cd "$1" && { if command -v /usr/bin/time >/dev/null 2>&1; then /usr/bin/time -o "$2" -f "%U %S" bash scripts/test.sh; else bash scripts/test.sh; fi; } >> "$3" 2>&1; rc=$?; printf "exit=%s\\nend_ms=%s\\nend_iso=%s\\n" "$rc" "$(date +%s%3N)" "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)" > "$4"' _ "${worktree}" "$suite_time_file" "$suite_log_file" "$suite_exit_marker" & disown
 suite_pid=$!
 printf 'suite_pid=%s\\n' "$suite_pid" >> "$suite_capture"`
 
@@ -169,13 +173,16 @@ rm -f "$suite_exit_marker"
 suite_start_iso=$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)
 suite_start_ms=$(date +%s%3N)
 suite_head_now=$(git rev-parse HEAD 2>/dev/null || echo unknown)
+# gap-fan-in-suite-log-cross-relaunch-reuse: 同 SUITE_LAUNCH——轮转旧轮 + 起始标记（round=isolated）。
+if [ -f "$suite_log_file" ]; then mv -f "$suite_log_file" "\${suite_log_file}.prev" 2>/dev/null || true; fi
+printf '__FANIN_SUITE_START__ iso=%s ms=%s head=%s round=isolated\\n' "$suite_start_iso" "$suite_start_ms" "$suite_head_now" > "$suite_log_file"
 printf 'full_suite_ran=false\\nskip_reason=isolate-rerun-load-sensitive\\nstart_iso=%s\\nstart_ms=%s\\nsuite_head=%s\\nsuite_log_file=%s\\n' \\
   "$suite_start_iso" "$suite_start_ms" "$suite_head_now" "$suite_log_file" > "$suite_capture"
 isolate_files=$(tr '\\n' ' ' < "/tmp/fan-in-scope-isolate-${task}.files" 2>/dev/null || true)
 # single-flight 锁等待上调（gap-single-flight-lock-wait-shorter-than-suite）：与 SUITE_LAUNCH 同一语义，
 # 隔离重跑也走 scripts/test.sh（受 single-flight 锁约束），同样把 FULL_SUITE_LOCK_TIMEOUT 提到 ≥ suite 时长。
 suite_lock_timeout="\${FULL_SUITE_LOCK_TIMEOUT:-${suiteLockTimeoutSecs}}"
-setsid env SUITE_ISOLATE_FILES="$isolate_files" FULL_SUITE_LOCK_TIMEOUT="$suite_lock_timeout" bash -c 'cd "$1" && { bash scripts/test.sh $SUITE_ISOLATE_FILES; } > "$2" 2>&1; rc=$?; printf "exit=%s\\nend_ms=%s\\nend_iso=%s\\n" "$rc" "$(date +%s%3N)" "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)" > "$3"' _ "${worktree}" "$suite_log_file" "$suite_exit_marker" & disown
+setsid env SUITE_ISOLATE_FILES="$isolate_files" FULL_SUITE_LOCK_TIMEOUT="$suite_lock_timeout" bash -c 'cd "$1" && { bash scripts/test.sh $SUITE_ISOLATE_FILES; } >> "$2" 2>&1; rc=$?; printf "exit=%s\\nend_ms=%s\\nend_iso=%s\\n" "$rc" "$(date +%s%3N)" "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)" > "$3"' _ "${worktree}" "$suite_log_file" "$suite_exit_marker" & disown
 suite_pid=$!
 printf 'suite_pid=%s\\n' "$suite_pid" >> "$suite_capture"
 # isolate-launch-block-end`
@@ -221,6 +228,10 @@ let globs = null;
 try { const tb = fs.readFileSync(taskFile, "utf8"); const p = parseTouches(tb); if (p.hasSection) globs = p.globs; } catch (e) { globs = null; }
 const family = scanFamily(wt);
 let logText = ""; try { logText = fs.readFileSync(logFile, "utf8"); } catch (e) { logText = ""; }
+// gap-fan-in-suite-log-cross-relaunch-reuse: 按当前轮起始标记切片——只读最后一个 __FANIN_SUITE_START__
+// 之后的内容（当前轮），不整份线性 grep 旧轮；无标记（full-suite-runner/测试手写日志）⇒ 整份（向后兼容）。
+const _roundMk = logText.lastIndexOf("__FANIN_SUITE_START__");
+if (_roundMk !== -1) logText = logText.slice(_roundMk);
 let prior = {}; try { if (releaseLedger) prior = JSON.parse(fs.readFileSync(releaseLedger, "utf8")); } catch (e) { prior = {}; }
 const inScope = []; const outOfScope = []; const loadSensitiveFiles = []; let livelock = false; const seen = new Set();
 const re = /^__PERFILE__ duration_ms=[0-9.]+ (.+) passed=false$/gm;
@@ -490,6 +501,10 @@ ${SUITE_LAUNCH}
 else
   suite_start_iso=$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)
   suite_load=$(cut -d' ' -f1 /proc/loadavg 2>/dev/null || echo 0)
+  # gap-fan-in-suite-log-cross-relaunch-reuse: doc-only 轮也轮转旧日志 + 打 skipped 标记——本轮的
+  # /tmp/fan-in-suite-<task>.log 不得残留上一轮全量 suite 的内容（读者按标记切片会读到 round=skipped）。
+  if [ -f "$suite_log_file" ]; then mv -f "$suite_log_file" "\${suite_log_file}.prev" 2>/dev/null || true; fi
+  printf '__FANIN_SUITE_START__ iso=%s ms=%s head=%s round=skipped\\n' "$suite_start_iso" "$suite_start_ms" "$suite_head_now" > "$suite_log_file"
   printf 'full_suite_ran=false\\nskip_reason=doc-only-delta\\ncpu_s=null\\ncpu_source=not-wired\\nstart_iso=%s\\nend_iso=%s\\nwall_ms=0\\nload=%s\\nlane_count=1\\nsuite_exit=0\\nsuite_head=%s\\n' \\
     "$suite_start_iso" "$suite_start_iso" "$suite_load" "$suite_head_now" > "$suite_capture"
   echo "SUITE_OUTCOME=skipped"
@@ -551,7 +566,7 @@ codeDelta = step 2 记下的 code_delta。worktreeHead = 当前 worktree HEAD（
 - 上一轮 exit：${suiteExit}
 ${FIX_SCOPE_GATE}
 任务：
-1. 读 /tmp/fan-in-suite-${task}.log 的【全部】失败行（__PERFILE__ passed=false 行 + spec 失败摘要），先跑上面的 fix-scope gate 得到 FIX_SCOPE_VERDICT。
+1. 读 /tmp/fan-in-suite-${task}.log 的【全部】失败行（__PERFILE__ passed=false 行 + spec 失败摘要），先跑上面的 fix-scope gate 得到 FIX_SCOPE_VERDICT。日志已按轮轮转：当前文件 = 上一轮（本次失败的这轮）的内容，第一行是 __FANIN_SUITE_START__ 起始标记；上一轮更早的内容在 /tmp/fan-in-suite-${task}.log.prev（诊断用，勿当当前轮）。读当前轮请从最后一个 __FANIN_SUITE_START__ 之后切片。
 2. 按 fix-scope gate verdict：只修 inScope 里的失败（本任务 Touches 内回归），在 ${worktree} 里 git add + git commit（真实修复，不是删测试/改判据绕过）；outOfScope 的越界红一律不修（load-sensitive 释放 / checker 误报与别任务 bug defer 独立任务）。
 3. 重新启动 suite（detached）。⛔ 禁止 Bash(run_in_background:true)（subagent 退出被连带杀）；⛔ 禁止前台 bash scripts/test.sh。启动后短促确认（~3s）exit marker 未立刻出现，然后返回。按 fix-scope gate verdict 选启动方式（release 侧三态，gap-gate-release-no-isolate-rerun-no-livelock）：
    a. inScope 非空（本任务有要修的回归）⇒ 修完 inScope 后【全量 relaunch】：用上面的 ${SUITE_LAUNCH} 块（重跑整个套件验证代码改动）。

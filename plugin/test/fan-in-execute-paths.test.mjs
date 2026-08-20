@@ -1758,6 +1758,97 @@ test("⑧ turn-budget REAL — a real detached suite (setsid) + the real poll bl
   }
 });
 
+test("⑧ log-rotation REAL — relaunching the detached suite ROTATES /tmp/fan-in-suite-<task>.log to .prev and marks the current round (gap-fan-in-suite-log-cross-relaunch-reuse AC1/AC2)", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fan-in-logrot-"));
+  t.after(() => cleanup(dir));
+  const task = "gap-test-logrot";
+  const git = (args) => {
+    const r = spawnSync("git", args, { cwd: dir, encoding: "utf8" });
+    if (r.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${r.stderr}`);
+  };
+  git(["init", "-q", "-b", "main"]);
+  git(["config", "user.email", "test@test"]);
+  git(["config", "user.name", "test"]);
+  fs.writeFileSync(path.join(dir, "README.md"), "base\n");
+  git(["add", "-A"]); git(["commit", "-qm", "base"]);
+  fs.mkdirSync(path.join(dir, "scripts"), { recursive: true });
+  // A fake suite that emits a ROUND-TAGGED __PERFILE__ line (round-1 vs round-2 output distinguishable),
+  // sleeps 1s (so the detached launch + exit marker both have time to work), and exits 0. The round tag
+  // is a /tmp counter the test reads back to know which round the CURRENT log represents.
+  fs.writeFileSync(path.join(dir, "scripts", "test.sh"),
+    `#!/usr/bin/env bash
+count=$(cat /tmp/fan-in-suite-${task}.round 2>/dev/null || echo 0)
+count=$((count+1))
+echo "$count" > /tmp/fan-in-suite-${task}.round
+echo "__PERFILE__ duration_ms=1.\${count} \${PWD}/round\${count}.test.mjs passed=true"
+echo "__GROUP__ concurrency=2 files=1 sum_ms=10 floor_ms=10 capped=0"
+sleep 1
+exit 0
+`);
+  fs.chmodSync(path.join(dir, "scripts", "test.sh"), 0o755);
+  git(["add", "-A"]); git(["commit", "-qm", "add test.sh"]);
+
+  const roundFile = `/tmp/fan-in-suite-${task}.round`;
+  const suiteLog = `/tmp/fan-in-suite-${task}.log`;
+  const marker = `/tmp/fan-in-suite-${task}.exit`;
+  t.after(() => { for (const f of [`/tmp/fan-in-suite-${task}.env`, marker, `/tmp/fan-in-suite-${task}.time`, suiteLog, `${suiteLog}.prev`, roundFile]) { try { fs.rmSync(f, { force: true }); } catch (_) { /* best-effort */ } } });
+
+  const codeDeltaFile = `/tmp/fan-in-code-delta-${task}.txt`;
+  fs.writeFileSync(codeDeltaFile, "plugin/workflows/fan-in-execute.js\n");
+  t.after(() => { try { fs.rmSync(codeDeltaFile, { force: true }); } catch (_) { /* best-effort */ } });
+
+  const { prompts } = await runWorkflow({
+    args: { task, worktree: dir, root: REPO_ROOT, runId: "fm-logrot", mergeTarget: "develop" },
+  });
+  const launchBlock = extractBlockFromPrompts(prompts, "# suite-launch-block-start", "# suite-launch-block-end");
+
+  const waitRound = async (round) => {
+    for (let i = 0; i < 150; i++) {
+      const c = fs.existsSync(roundFile) ? Number(fs.readFileSync(roundFile, "utf8").trim()) : 0;
+      if (c >= round && fs.existsSync(marker)) return;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    throw new Error(`timeout waiting for round ${round} marker`);
+  };
+
+  // Round 1 (initial launch).
+  const r1 = runBash(launchBlock, { cwd: dir, timeout: 30_000 });
+  assert.equal(r1.status, 0, `round-1 launch failed: ${r1.stderr}`);
+  assert.match(r1.stdout, /SUITE_OUTCOME=started/, "code_delta non-empty must start the full suite");
+  await waitRound(1);
+  const log1 = fs.readFileSync(suiteLog, "utf8");
+  assert.ok(log1.startsWith("__FANIN_SUITE_START__"), "round-1 log must start with the __FANIN_SUITE_START__ marker");
+  assert.match(log1, /round=full/, "round-1 marker is round=full");
+  assert.ok(log1.includes("__PERFILE__ duration_ms=1.1 "), "round-1 suite output follows the marker");
+  assert.ok(log1.includes("__GROUP__ concurrency=2"), "round-1 __GROUP__ lane line present");
+
+  // Round 2 (relaunch — the contaminated path this task fixes: same path reused without rotation).
+  const r2 = runBash(launchBlock, { cwd: dir, timeout: 30_000 });
+  assert.equal(r2.status, 0, `round-2 launch failed: ${r2.stderr}`);
+  assert.match(r2.stdout, /SUITE_OUTCOME=started/, "relaunch must start the suite again");
+  await waitRound(2);
+
+  const log2 = fs.readFileSync(suiteLog, "utf8");
+  assert.ok(log2.startsWith("__FANIN_SUITE_START__"), "round-2 log must start fresh with a new marker");
+  assert.ok(log2.includes("__PERFILE__ duration_ms=1.2 "), "round-2 suite output is in the CURRENT log");
+  assert.ok(!log2.includes("__PERFILE__ duration_ms=1.1 "), "round-1 output must NOT be in the current log (rotated away — 误读旧轮 eliminated)");
+
+  // The .prev file preserves the PREVIOUS round (diagnostics + the marker-slicing contrast).
+  const prev = fs.readFileSync(`${suiteLog}.prev`, "utf8");
+  assert.ok(prev.includes("__PERFILE__ duration_ms=1.1 "), ".prev preserves round-1 content");
+  assert.ok(!prev.includes("__PERFILE__ duration_ms=1.2 "), ".prev must NOT contain the current round");
+
+  // AC2 negative control ON THE PRODUCTION CARRIER: reader slicing by marker distinguishes current vs
+  // historical round from the REAL rotated log (parsePerFileLines reads only the last-marker round).
+  const { parsePerFileLines } = await import("../scripts/measure-trend-check.ts");
+  const recs = parsePerFileLines(log2);
+  assert.deepEqual(
+    recs.map((r) => [r.file.split("/").pop(), r.passed]),
+    [["round2.test.mjs", true]],
+    "the reader slices to the current (round-2) round from the real relaunched log",
+  );
+});
+
 
 test("⑧ split — the poll block parses a gnu-time '%U %S' line into cpu_user_s/cpu_sys_s (real values, not estimates)", async (t) => {
   // gap-verification-round-cpu-split-not-recorded AC1/AC3 — the poll block splits the SAME gnu-time line
@@ -1799,6 +1890,7 @@ test("⑧ split — the poll block parses a gnu-time '%U %S' line into cpu_user_
   assert.match(out, /^cpu_s=11313\.883$/m, "cpu_s stays the sum (user+sys) — AC1 keeps the existing field");
   assert.match(out, /^cpu_source=gnu-time$/m, "cpu_source=gnu-time for a real measurement");
 });
+
 
 
 // ── ⑧⑩ 锁等待负控制（gap-single-flight-lock-wait-shorter-than-suite AC2/AC3）─────────────────────────
