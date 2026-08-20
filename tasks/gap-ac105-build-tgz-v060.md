@@ -1,7 +1,7 @@
 ---
 id: gap-ac105-build-tgz-v060
 title: AC105 build 当前版本可用产物：package.sh 产出 0.6.0 tgz（锚 commit sha + 产物 sha256，非路径）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
