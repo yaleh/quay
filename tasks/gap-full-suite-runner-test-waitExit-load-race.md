@@ -2,7 +2,7 @@
 id: gap-full-suite-runner-test-waitExit-load-race
 title: full-suite-runner.test.mjs waitExit 负载 race：child.once('exit') 在 child
   已退后挂监听 ⇒ exit 事件丢失 ⇒ promise 永挂（复发，负载诱发）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
