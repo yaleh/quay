@@ -20,7 +20,15 @@ import os from "node:os";
 import net from "node:net";
 import http from "node:http";
 import { startServer } from "../src/serve.ts";
-import { readBoardExecution, runProcessAliveSync } from "../src/observation.ts";
+import {
+  readBoardLanding,
+  readBoardExecution,
+  runProcessAliveSync,
+  clearLandingCache,
+  getLandingColdRunCount,
+  LANDING_CACHE_TTL_MS,
+} from "../src/observation.ts";
+import { renderBoardPage } from "../src/serve-handlers.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 import { createStore } from "../../quay-native/src/store.ts";
 
@@ -192,6 +200,9 @@ test("AC3 negative control: done task with Touches→nonexistent code is flagged
     // exists → no longer reverse-drift. BOTH sides must stop flagging.
     fs.mkdirSync(path.join(ws, "packages/quay/src"), { recursive: true });
     fs.writeFileSync(path.join(ws, "packages/quay/src/never-created.ts"), "// now the touch exists\n");
+    // gap-webui-board-load-120s: readBoardLanding is short-TTL-cached — the fixture changed between
+    // the two requests, so drop the cache to force a fresh read (the display is a 30s snapshot).
+    clearLandingCache();
 
     const board2 = await get(port, "/board");
     const checker2 = runChecker(ws);
@@ -439,4 +450,127 @@ test("AC2/AC3 negative control: worktree exists + status=ready + no live process
     fs.rmSync(ws, { recursive: true, force: true });
     try { if (wtPath) fs.rmSync(wtPath, { recursive: true, force: true }); } catch { /* already gone */ }
   }
+});
+
+// ── gap-webui-board-load-120s: /board cold-load ~120s → single-digit seconds ──────────────────────
+// The landing judgment (readBoardLanding) cold-runs plugin/scripts/task-status-drift-check.ts, which
+// on a large repo does a FULL git-log pass over the landing ref (>150s — the checker's own comment
+// documents it). The fix: a short-TTL cache (LANDING_CACHE_TTL_MS, 30s — the same window as the
+// slot-refill probe) so a cache hit never spawns the subprocess (AC2); a second-level subprocess
+// timeout (LANDING_TIMEOUT_MS) so a slow/hung checker fails open (AC3); and a distinct 「读取超时」
+// render. These three tests prove AC1 (cold load single-digit seconds), AC2 (negative control:
+// cache hit ⇒ no cold subprocess, second request fast), and AC3 (timeout ⇒ 读取超时, fail-open).
+
+test("AC1: /board cold load completes in single-digit seconds (TTL + 秒级 timeout + fail-open)", async () => {
+  const { ws, tasksDir } = makeWorkspace("board-ac1-");
+  const cwd0 = process.cwd();
+  let server;
+  try {
+    seed(tasksDir, "CL-1", { title: "Cold load", status: "todo", body: BD_BODY("clSymbol", "packages/quay/src/board-symbol.ts") });
+    fs.mkdirSync(path.join(ws, "packages/quay/src"), { recursive: true });
+    fs.writeFileSync(path.join(ws, "packages/quay/src/board-symbol.ts"), "export const clSymbol = 1;\n");
+    assert.ok(LANDING_CACHE_TTL_MS > 0 && LANDING_CACHE_TTL_MS <= 60_000,
+      `AC1: the landing TTL (${LANDING_CACHE_TTL_MS}ms) is a short bounded window`);
+    const port = await freePort();
+    process.chdir(ws);
+    server = await startServer({ port });
+    clearLandingCache();
+    const t0 = Date.now();
+    const board = await get(port, "/board");
+    const elapsed = Date.now() - t0;
+    assert.equal(board.status, 200, "AC1: cold /board returns 200");
+    assert.ok(board.body.includes("CL-1"), "AC1: the cold request still renders the task");
+    // Single-digit seconds — vs the ~120s cold load the defect measured. The deterministic bound is
+    // LANDING_TIMEOUT_MS (8s, pinned by the AC3 timeout test); this wall-clock assertion is the
+    // real-output smoke bound against the fixture's fast checker.
+    assert.ok(elapsed < 10_000, `AC1: cold /board load ${elapsed}ms is single-digit seconds`);
+  } finally {
+    process.chdir(cwd0);
+    if (server) { server.close(); if (server.client) await server.client.close(); }
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("AC2 negative control: a cache-hit /board request does NOT cold-run the checker (second request fast)", async () => {
+  const { ws, tasksDir } = makeWorkspace("board-cache-");
+  const cwd0 = process.cwd();
+  let server;
+  try {
+    seed(tasksDir, "CC-1", { title: "Cache control", status: "todo", body: BD_BODY("ccSymbol", "packages/quay/src/board-symbol.ts") });
+    fs.mkdirSync(path.join(ws, "packages/quay/src"), { recursive: true });
+    fs.writeFileSync(path.join(ws, "packages/quay/src/board-symbol.ts"), "export const ccSymbol = 1;\n");
+    const port = await freePort();
+    process.chdir(ws);
+    server = await startServer({ port });
+    clearLandingCache();
+    const before = getLandingColdRunCount();
+
+    const t0 = Date.now();
+    const board1 = await get(port, "/board");
+    const coldElapsed = Date.now() - t0;
+    const afterCold = getLandingColdRunCount();
+    assert.equal(board1.status, 200, "AC2: cold request 200");
+    assert.ok(afterCold > before, "AC2: the cold request spawns the checker subprocess");
+
+    const t1 = Date.now();
+    const board2 = await get(port, "/board");
+    const warmElapsed = Date.now() - t1;
+    assert.equal(board2.status, 200, "AC2: cache-hit request 200");
+    assert.equal(getLandingColdRunCount(), afterCold,
+      "AC2: the cache-hit request does NOT spawn the checker subprocess (counter flat)");
+    assert.ok(warmElapsed < coldElapsed,
+      `AC2: the cache-hit request (${warmElapsed}ms) is faster than the cold request (${coldElapsed}ms)`);
+    assert.ok(board2.body.includes("CC-1"), "AC2: the cache-hit response still renders the task");
+    assert.ok(board2.body.includes("task-status-drift-check.ts"), "AC2: the landing column still renders");
+  } finally {
+    process.chdir(cwd0);
+    if (server) { server.close(); if (server.client) await server.client.close(); }
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("AC3 fail-open: a landing subprocess exceeding the second-level timeout renders 「读取超时」, not an empty wait", async () => {
+  const { ws } = makeWorkspace("board-timeout-");
+  const slowChecker = path.join(ws, "slow-checker.mjs");
+  fs.writeFileSync(slowChecker,
+    "// fake drift checker that hangs — the second-level timeout must kill it and fail open\n" +
+    "await new Promise((r) => setTimeout(r, 60_000));\n" +
+    "console.log(JSON.stringify({ suspects: [], reverse: [], scanned: 0 }));\n");
+
+  // (a) The observation layer returns a timedOut reading promptly (well under the old 120s cap),
+  //     and caches it — a second call within the TTL hits the cache (no re-spawn).
+  const before = getLandingColdRunCount();
+  const t0 = Date.now();
+  const landing = await readBoardLanding(ws, { checkerPath: slowChecker, timeoutMs: 300 });
+  const elapsed = Date.now() - t0;
+  const afterTimeout = getLandingColdRunCount();
+  assert.equal(landing.status, "error", "AC3: a timed-out landing is status error (fail-open, never throws)");
+  assert.equal(landing.timedOut, true, "AC3: the timed-out landing carries timedOut:true");
+  assert.ok(landing.reason.includes("fail-open"), `AC3: the reason describes the fail-open (got ${landing.reason})`);
+  assert.ok(elapsed < 5_000, `AC3: the timeout returns in ~${elapsed}ms, not the old 120s cap`);
+  assert.ok(afterTimeout > before, "AC3: the first call cold-runs the (hanging) checker");
+
+  const landing2 = await readBoardLanding(ws, { checkerPath: slowChecker, timeoutMs: 300 });
+  assert.equal(getLandingColdRunCount(), afterTimeout,
+    "AC2/AC3: the cached timeout is served without re-spawning the checker");
+  assert.equal(landing2.timedOut, true, "AC2/AC3: the cached reading is still the timeout");
+
+  // (b) The render emits 「读取超时」 distinctly from a generic 读失败.
+  const page = renderBoardPage({
+    landing: { status: "error", timedOut: true, reason: landing.reason, flags: new Map(), scanned: 0 },
+    execution: { status: "empty", reason: null, flags: new Map(), inFlight: [] },
+    intentStatus: "ok",
+    intentReason: null,
+    rows: [],
+  });
+  assert.ok(page.includes("读取超时"), "AC3: the rendered page shows 读取超时");
+  const okPage = renderBoardPage({
+    landing: { status: "error", reason: "landing 判断源读失败：boom", flags: new Map(), scanned: 0 },
+    execution: { status: "empty", reason: null, flags: new Map(), inFlight: [] },
+    intentStatus: "ok",
+    intentReason: null,
+    rows: [],
+  });
+  assert.ok(okPage.includes("读失败") && !okPage.includes("读取超时"),
+    "AC3: a non-timeout failure renders 读失败, not 读取超时 (the two are distinguishable)");
 });

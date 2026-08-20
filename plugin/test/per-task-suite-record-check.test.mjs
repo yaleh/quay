@@ -362,6 +362,50 @@ test("判据2/3 — a RUN is recorded: buildRecord emits fullSuiteRan:true + cpu
   assert.equal(validateRecord(built.record).ok, true);
 });
 
+// ── gap-verification-round-cpu-split-not-recorded: cpu_user_s / cpu_sys_s (sibling 5b) ──────────────
+
+test("AC1/AC3 (sibling) — a RUN with --cpu-user-s/--cpu-sys-s records the split from the SAME gnu-time line (user+sys ≈ cpu_time_s)", () => {
+  const built = buildRecord({
+    ...SUITE_RECORD_BASE,
+    fullSuiteRan: "true",
+    cpuTimeS: "11313.883",
+    cpuSource: "gnu-time",
+    cpuUserS: "4414.230",
+    cpuSysS: "6899.653",
+    load: "4.5",
+  });
+  assert.equal(built.error, undefined, `run build must succeed: ${built.error}`);
+  assert.equal(built.record.cpu_time_s, 11313.883);
+  assert.equal(built.record.cpu_source, "gnu-time");
+  assert.equal(built.record.cpu_user_s, 4414.230, "cpu_user_s = the gnu-time %U column");
+  assert.equal(built.record.cpu_sys_s, 6899.653, "cpu_sys_s = the gnu-time %S column");
+  assert.ok(Math.abs((built.record.cpu_user_s + built.record.cpu_sys_s) - built.record.cpu_time_s) < 0.01, "user+sys ≈ cpu_time_s (AC2)");
+  assert.equal(validateRecord(built.record).ok, true, "the split fields are OPTIONAL — the checker stays GREEN");
+});
+
+test("AC6 (sibling) — empty/null/0 split args are omitted, never fail-closed, never a fabricated 0", () => {
+  // Empty strings (an unset bash capture var on a doc-only skip) with a real cpu_time_s → omitted.
+  const empty = buildRecord({ ...SUITE_RECORD_BASE, fullSuiteRan: "true", cpuTimeS: "42.5", cpuSource: "gnu-time", cpuUserS: "", cpuSysS: "" });
+  assert.equal(empty.error, undefined, "empty split args are 'considered + unavailable', not fail-closed");
+  assert.equal(empty.record.cpu_user_s, undefined);
+  assert.equal(empty.record.cpu_sys_s, undefined);
+  // null / 0 → omitted.
+  const nullRec = buildRecord({ ...SUITE_RECORD_BASE, fullSuiteRan: "true", cpuTimeS: "42.5", cpuSource: "gnu-time", cpuUserS: "null", cpuSysS: "0" });
+  assert.equal(nullRec.error, undefined);
+  assert.equal(nullRec.record.cpu_user_s, undefined);
+  assert.equal(nullRec.record.cpu_sys_s, undefined);
+});
+
+test("AC1 fail-closed (sibling) — a REAL split value with a null cpu_time_s is ambiguous ⇒ error", () => {
+  const r = buildRecord({ ...SUITE_RECORD_BASE, fullSuiteRan: "true", cpuTimeS: "null", cpuSource: "not-wired", cpuUserS: "4414.230" });
+  assert.match(r.error ?? "", /cpu-time-s/, "a real split without its sum must fail closed (硬规则 3b)");
+});
+
+test("AC6 (sibling) — negative / non-numeric split values fail-closed", () => {
+  assert.match(buildRecord({ ...SUITE_RECORD_BASE, fullSuiteRan: "true", cpuTimeS: "42.5", cpuUserS: "-1" }).error ?? "", /cpu-user-s/);
+  assert.match(buildRecord({ ...SUITE_RECORD_BASE, fullSuiteRan: "true", cpuTimeS: "42.5", cpuSysS: "abc" }).error ?? "", /cpu-sys-s/);
+});
+
 test("判据2 — the writer CLI records a SKIP (--full-suite-ran false --skip-reason doc-only-delta --cpu-time-s null --cpu-source not-wired)", () => {
   const file = tmpFile("ptsr-skip-");
   const r = spawnSync("node", ["--experimental-strip-types", WRITER,

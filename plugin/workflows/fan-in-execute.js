@@ -49,6 +49,13 @@ export const meta = {
 //     取假（plugin/test/fan-in-execute-paths.test.mjs）：构造 step2 code_delta 非空 ⇒ 阶段 1 启动
 //     detached suite（setsid+&+disown）且立即返回；脚本轮询到 suite 绿 ⇒ 阶段 2 机械步骤（flip/ff/
 //     bracket）全执行。等待由脚本控制流决定，不占任何 subagent 回合。
+//  ⑩ 启动 suite 的 single-flight 锁等待（gap-single-flight-lock-wait-shorter-than-suite）：test.sh 的
+//     FULL_SUITE_LOCK_TIMEOUT 默认 600 < suite 实测上界 ~840s ⇒ 5 fan-in 撞 2 slot 时第 3+ suite 白等
+//     600s 后 fail-closed「not starting」relaunch。SUITE_LAUNCH/ISOLATE_LAUNCH 启动 detached suite 时经
+//     env 把 FULL_SUITE_LOCK_TIMEOUT 提到 ≥ suite 时长（默认 ${suiteLockTimeoutSecs}s，args 可覆盖）。
+//     改本块必须同步 plugin/test/fan-in-execute-paths.test.mjs 的锁等待负控制组（suite-launch 携带
+//     FULL_SUITE_LOCK_TIMEOUT ≥ 840 + REAL 槽忙→释放后获取而非 fail-closed）。ff 的 merge 锁（--lock-wait
+//     ${mergeLockWaitSecs}s）是独立正确性锁（毫秒级 hold），与 suite 资源锁无关。
 //
 //  脚本层能力边界（同 manager-tick-core.js 实测）：globalThis 仅 log/phase/budget/setTimeout/
 //  clearTimeout/agent/parallel/pipeline/workflow/args；无 require/process/fetch；import() 语法
@@ -110,6 +117,8 @@ const maxFfRetries = A.maxFfRetries ?? 3            // ff 失败（develop 前�
 const pollBlockSeconds = A.pollBlockSeconds ?? 540  // 轮询 agent 内有界阻塞等待的硬边界（< Bash 600s 上限，gap-fan-in-execute-poll-bounded-blocking-wait）
 const pollBlockSleep = A.pollBlockSleep ?? 15        // 阻塞等待的检查粒度（每 N 秒看一眼 exit marker）
 const releaseLivelockRounds = A.releaseLivelockRounds ?? 3  // release 侧 anti-livelock（gap-gate-release-no-isolate-rerun-no-livelock）：同一 load-sensitive 红连续 release ≥3 轮 ⇒ escalate（SPEC §7「同一任务失败 ≥3 次 才谈防活锁」同阈值）
+const suiteLockTimeoutSecs = A.suiteLockTimeoutSecs ?? 900  // fan-in 启动的 suite 的 single-flight 锁等待（FULL_SUITE_LOCK_TIMEOUT，秒）——test.sh 默认 600 < suite 实测上界 807931ms ≈ 808s ⇒ 5 fan-in 撞 2 slot 时第 3+ suite 在 slot 释放前 fail-closed「not starting」白等 600s 后 relaunch（gap-single-flight-lock-wait-shorter-than-suite）。900 ≥ 808 + 余量；由 SUITE_LAUNCH/ISOLATE_LAUNCH 经 env 传入启动的 detached suite；调用方可经 env FULL_SUITE_LOCK_TIMEOUT 覆盖（测试 seam）。
+const mergeLockWaitSecs = A.mergeLockWaitSecs ?? 30  // fan-in-ff-merge.sh 的 merge 锁等待（--lock-wait，秒）——正确性锁，覆盖毫秒级 ff（hold 是 git merge --ff-only），与 suite 的 single-flight 资源锁无关（后者由 suiteLockTimeoutSecs 上调）。显式传递让 fan-in 流程拥有该语义（task Touches: fan-in-ff-merge.sh lock wait 语义）。
 
 if (!task || !worktree || !root) {
   return { outcome: 'bad-args', message: 'task / worktree / root are required', args }
@@ -133,8 +142,14 @@ if [ -f "$suite_log_file" ]; then mv -f "$suite_log_file" "\${suite_log_file}.pr
 printf '__FANIN_SUITE_START__ iso=%s ms=%s head=%s round=full\\n' "$suite_start_iso" "$suite_start_ms" "$suite_head_now" > "$suite_log_file"
 printf 'full_suite_ran=true\\nskip_reason=\\nstart_iso=%s\\nstart_ms=%s\\nsuite_head=%s\\nsuite_log_file=%s\\n' \\
   "$suite_start_iso" "$suite_start_ms" "$suite_head_now" "$suite_log_file" > "$suite_capture"
+# single-flight 锁等待上调（gap-single-flight-lock-wait-shorter-than-suite）：test.sh 的
+# FULL_SUITE_LOCK_TIMEOUT 默认 600 < suite 实测上界 807931ms ≈ 808s ⇒ 5 fan-in 撞 2 slot 时第 3+ suite
+# 在 slot 释放前 fail-closed「not starting」白等 600s 后 relaunch。启动时把该 env 提到 ≥ suite 时长
+# （默认 ${suiteLockTimeoutSecs}s；调用方可经 env FULL_SUITE_LOCK_TIMEOUT 覆盖——测试 seam），
+# 让第 3+ suite 等够 slot 释放而不是 fail-closed。
+suite_lock_timeout="\${FULL_SUITE_LOCK_TIMEOUT:-${suiteLockTimeoutSecs}}"
 # GNU time 捕获 CPU（判据3 的 cpu_time_s）；GNU time 不可用 ⇒ 保持 null + not-wired（AC6，绝不写 0）。
-setsid bash -c 'cd "$1" && { if command -v /usr/bin/time >/dev/null 2>&1; then /usr/bin/time -o "$2" -f "%U %S" bash scripts/test.sh; else bash scripts/test.sh; fi; } >> "$3" 2>&1; rc=$?; printf "exit=%s\\nend_ms=%s\\nend_iso=%s\\n" "$rc" "$(date +%s%3N)" "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)" > "$4"' _ "${worktree}" "$suite_time_file" "$suite_log_file" "$suite_exit_marker" & disown
+setsid env FULL_SUITE_LOCK_TIMEOUT="$suite_lock_timeout" bash -c 'cd "$1" && { if command -v /usr/bin/time >/dev/null 2>&1; then /usr/bin/time -o "$2" -f "%U %S" bash scripts/test.sh; else bash scripts/test.sh; fi; } >> "$3" 2>&1; rc=$?; printf "exit=%s\\nend_ms=%s\\nend_iso=%s\\n" "$rc" "$(date +%s%3N)" "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)" > "$4"' _ "${worktree}" "$suite_time_file" "$suite_log_file" "$suite_exit_marker" & disown
 suite_pid=$!
 printf 'suite_pid=%s\\n' "$suite_pid" >> "$suite_capture"`
 
@@ -164,7 +179,10 @@ printf '__FANIN_SUITE_START__ iso=%s ms=%s head=%s round=isolated\\n' "$suite_st
 printf 'full_suite_ran=false\\nskip_reason=isolate-rerun-load-sensitive\\nstart_iso=%s\\nstart_ms=%s\\nsuite_head=%s\\nsuite_log_file=%s\\n' \\
   "$suite_start_iso" "$suite_start_ms" "$suite_head_now" "$suite_log_file" > "$suite_capture"
 isolate_files=$(tr '\\n' ' ' < "/tmp/fan-in-scope-isolate-${task}.files" 2>/dev/null || true)
-setsid env SUITE_ISOLATE_FILES="$isolate_files" bash -c 'cd "$1" && { bash scripts/test.sh $SUITE_ISOLATE_FILES; } >> "$2" 2>&1; rc=$?; printf "exit=%s\\nend_ms=%s\\nend_iso=%s\\n" "$rc" "$(date +%s%3N)" "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)" > "$3"' _ "${worktree}" "$suite_log_file" "$suite_exit_marker" & disown
+# single-flight 锁等待上调（gap-single-flight-lock-wait-shorter-than-suite）：与 SUITE_LAUNCH 同一语义，
+# 隔离重跑也走 scripts/test.sh（受 single-flight 锁约束），同样把 FULL_SUITE_LOCK_TIMEOUT 提到 ≥ suite 时长。
+suite_lock_timeout="\${FULL_SUITE_LOCK_TIMEOUT:-${suiteLockTimeoutSecs}}"
+setsid env SUITE_ISOLATE_FILES="$isolate_files" FULL_SUITE_LOCK_TIMEOUT="$suite_lock_timeout" bash -c 'cd "$1" && { bash scripts/test.sh $SUITE_ISOLATE_FILES; } >> "$2" 2>&1; rc=$?; printf "exit=%s\\nend_ms=%s\\nend_iso=%s\\n" "$rc" "$(date +%s%3N)" "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)" > "$3"' _ "${worktree}" "$suite_log_file" "$suite_exit_marker" & disown
 suite_pid=$!
 printf 'suite_pid=%s\\n' "$suite_pid" >> "$suite_capture"
 # isolate-launch-block-end`
@@ -296,12 +314,24 @@ if [ "$full_suite_ran" = "true" ]; then
 fi
 cpu_s=null
 cpu_source=not-wired
+cpu_user_s=null
+cpu_sys_s=null
 if [ -f "$suite_time_file" ]; then
+  cpu_user=$(tail -1 "$suite_time_file" 2>/dev/null | awk '{printf "%.3f", $1}' || true)
+  cpu_sys=$(tail -1 "$suite_time_file" 2>/dev/null | awk '{printf "%.3f", $2}' || true)
   cpu=$(tail -1 "$suite_time_file" 2>/dev/null | awk '{printf "%.3f", $1+$2}' || true)
-  if [ -n "$cpu" ] && [ "$cpu" != "0.000" ]; then cpu_s=$cpu; cpu_source=gnu-time; fi
+  if [ -n "$cpu" ] && [ "$cpu" != "0.000" ]; then
+    cpu_s=$cpu
+    cpu_source=gnu-time
+    # gap-verification-round-cpu-split-not-recorded AC1/AC3 — the SAME gnu-time "%U %S" line split into
+    # its user/sys columns (cpu_time_s = their sum). 0.000 components stay 0.000 (the writer normalizes
+    # 0 → omitted, AC6); a missing column reads as 0.000 by awk. Real gnu-time output, never estimated.
+    cpu_user_s=$cpu_user
+    cpu_sys_s=$cpu_sys
+  fi
 fi
-printf 'cpu_s=%s\\ncpu_source=%s\\nend_iso=%s\\nend_ms=%s\\nwall_ms=%s\\nload=%s\\nlane_count=%s\\nsuite_exit=%s\\n' \\
-  "$cpu_s" "$cpu_source" "$end_iso" "$end_ms" "$wall_ms" "$load" "$lane_count" "$suite_exit" >> "$suite_capture"
+printf 'cpu_s=%s\\ncpu_source=%s\\ncpu_user_s=%s\\ncpu_sys_s=%s\\nend_iso=%s\\nend_ms=%s\\nwall_ms=%s\\nload=%s\\nlane_count=%s\\nsuite_exit=%s\\n' \\
+  "$cpu_s" "$cpu_source" "$cpu_user_s" "$cpu_sys_s" "$end_iso" "$end_ms" "$wall_ms" "$load" "$lane_count" "$suite_exit" >> "$suite_capture"
 echo "POLL=done SUITE_EXIT=$suite_exit"
 返回 { done: bool（POLL=done ⇒ true）, suiteExit: int|null }。marker 存在但读不出 suite_exit ⇒ done=true, suiteExit=null（fail-closed，脚本按非绿处理）。`,
     {
@@ -618,7 +648,8 @@ if [ -n "$skip_reason" ]; then
     --duration-ms "$wall_ms" --started-at "$start_iso" --finished-at "$end_iso" \
     --doc-checked true --doc-check-exit 0 \
     --full-suite-ran "$full_suite_ran" --skip-reason "$skip_reason" \
-    --cpu-time-s "$cpu_s" --cpu-source "$cpu_source" --load "$load"; then
+    --cpu-time-s "$cpu_s" --cpu-source "$cpu_source" \
+    --cpu-user-s "$cpu_user_s" --cpu-sys-s "$cpu_sys_s" --load "$load"; then
     echo "FATAL: per-task-suite-record 入账失败（AC1 判据1 义务）⇒ 不翻 done、不 ff" >&2
     exit 2
   fi
@@ -628,7 +659,8 @@ else
     --duration-ms "$wall_ms" --started-at "$start_iso" --finished-at "$end_iso" \
     --doc-checked true --doc-check-exit 0 \
     --full-suite-ran "$full_suite_ran" \
-    --cpu-time-s "$cpu_s" --cpu-source "$cpu_source" --load "$load"; then
+    --cpu-time-s "$cpu_s" --cpu-source "$cpu_source" \
+    --cpu-user-s "$cpu_user_s" --cpu-sys-s "$cpu_sys_s" --load "$load"; then
     echo "FATAL: per-task-suite-record 入账失败（AC1 判据1 义务）⇒ 不翻 done、不 ff" >&2
     exit 2
   fi
@@ -647,7 +679,8 @@ if [ "$full_suite_ran" = "true" ]; then
   if ! node --experimental-strip-types ${worktree}/plugin/scripts/pre-verified-round-record.ts \
     --task-id ${task} --run-id ${runId} --started-at "$start_iso" --duration-ms "$wall_ms" \
     --lane-count "$lane_count" --load "$load" --commit "$suite_head" --preverified "$preverified_flag" \
-    --cpu-time-s "$cpu_s" --cpu-source "$cpu_source" --suite-log "\${suite_log_file:-}"; then
+    --cpu-time-s "$cpu_s" --cpu-source "$cpu_source" \
+    --cpu-user-s "$cpu_user_s" --cpu-sys-s "$cpu_sys_s" --suite-log "\${suite_log_file:-}"; then
     echo "FATAL: verification-round 入账失败（AC1 判据1 义务）⇒ 不翻 done、不 ff" >&2
     exit 2
   fi
@@ -763,7 +796,7 @@ fi
 agent_id=$(basename "$self" .jsonl 2>/dev/null | sed 's/^agent-//')
 if [ -z "$agent_id" ]; then echo "FATAL: 未能从 $self 提取 agent id（--agent-id 不能由调用方填）" >&2; exit 2; fi
 # selfloc-block-end
-bash ${worktree}/plugin/scripts/fan-in-ff-merge.sh --task ${task} --run-id ${runId} --agent-id "$agent_id" --root ${root} --merge-target ${mergeTarget} --worktree ${worktree}
+bash ${worktree}/plugin/scripts/fan-in-ff-merge.sh --task ${task} --run-id ${runId} --agent-id "$agent_id" --root ${root} --merge-target ${mergeTarget} --worktree ${worktree} --lock-wait ${mergeLockWaitSecs}
 ff_rc=$?
 # 本任务 suite capture 的使命已尽（ff 闸已在 fan-in-ff-merge.sh 内读过它）——清理掉；若 ff 失败重试，
 # step 4 会重写新 capture（gap-suite-concurrency-ff-gate-and-slot-ssot）。不在此 exit：step 5.5（仅 ff
