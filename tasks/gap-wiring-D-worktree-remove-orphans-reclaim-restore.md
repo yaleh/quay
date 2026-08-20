@@ -43,4 +43,5 @@ depends_on: []
 ## Touches
 
 - plugin/scripts/fan-in-ff-merge.sh（恢复 reaper 接线）
+- plugin/test/fan-in-ff-merge.test.mjs（stale-lock reaper 接线测试——真实 stale-lock E2E）
 - tasks/gap-wiring-D-worktree-remove-orphans-reclaim-restore.md（自身）
