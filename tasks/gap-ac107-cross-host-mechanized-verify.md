@@ -1,7 +1,7 @@
 ---
 id: gap-ac107-cross-host-mechanized-verify
 title: AC107 跨主机机制化验证：verify-deliver-coldstart.sh 对 B/C 各跑完整三步（直接量活性判据，非手工一次性）
-status: done
+status: ready
 labels:
   - gap
   - mechanism
