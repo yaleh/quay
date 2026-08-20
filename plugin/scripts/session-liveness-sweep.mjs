@@ -282,6 +282,141 @@ export function serverPidsOfByCmdline(dir) {
   return pids;
 }
 
+// ── TRUE CATCH-ALL SERVER REGISTRY (gap-session-liveness-teardown-ol-scd-cf-leak) ────────────────
+// The session-liveness test family's teardown is registry-driven: every self-built tmux SERVER is
+// registered DURABLY (a disk-backed JSONL registry) the moment it is created, and every cleanup
+// pass — the test process's after() hook, the suite-tail scan-kill in test.sh, the runner's
+// pre/post-suite sweeps — kills by iterating that registry. No path/prefix enumeration, no
+// name-based batch kill (invariant no_pkill_by_name_on_live = 1): each kill is a PID/socket-targeted
+// SIGKILL of a server the tests verifiably self-built. This is the TRUE catch-all that closes the 5b
+// recurrence (ol-scd-d point fix → unified after() → still ol-scd-c/f): a NEW teardown path leaks
+// only if it creates a server OUTSIDE the registration seam (the session-liveness tmux() helper /
+// probe constructors — every hermetic server goes through them). And because the registry is DURABLE
+// (not process-local), a test process that CRASHES before its after() hook cannot orphan its
+// servers: the suite-tail scan-kill and the next run's pre-suite sweep still find and kill them.
+//
+// The registry is a SINGLE append-only JSONL file. Entries are keyed by the mkdtemp-unique probe
+// dir; a dir is never reused, so a stale entry is a no-op once its server is dead. Concurrent test
+// processes (cc=3) append atomically (O_APPEND, small lines); readers skip malformed lines. The
+// file lives OUTSIDE the per-run namespace (/tmp/quay-test-servers.jsonl) so the namespaced
+// tmux-leak-scan (which scans /tmp/quay-run-<id>/*) never flags the registry itself.
+export function serverRegistryPath() {
+  return path.join(os.tmpdir(), "quay-test-servers.jsonl");
+}
+
+/** The tmux server's private socket path for a hermetic probe dir (the path the server was started
+ * with: TMUX_TMPDIR=<dir>/sock → socket <dir>/sock/tmux-<uid>/default). Derived, matching the
+ * tmux() helper's resolution exactly (process.getuid()). */
+export function sockOfDir(dir) {
+  const uid = typeof process.getuid === "function" ? process.getuid() : 1000;
+  return path.join(dir, "sock", `tmux-${uid}`, "default");
+}
+
+/** True when `pid` is a LIVE tmux process (argv[0] of /proc/<pid>/cmdline matches /tmux/). A
+ * dead/zombie server has an empty cmdline; a reused pid for a non-tmux process fails the match. */
+export function isLiveTmuxPid(pid) {
+  if (!Number.isInteger(pid) || pid <= 1) return false;
+  try {
+    const argv0 = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0")[0] ?? "";
+    return /tmux/.test(argv0);
+  } catch { return false; }
+}
+
+/** True when the owning TEST process (entry.proc) is still alive — used to protect a concurrent
+ * scoped run's ACTIVE servers from a cross-run kill (deadProcOnly). */
+export function isProcAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 1) return false;
+  try { process.kill(pid, 0); return true; } catch { return false; }
+}
+
+/** registerServer(dir) — append a durable record for a self-built tmux server. Called from the
+ * registration seam (the session-liveness tmux() helper) the moment `new-session` succeeds, when
+ * the socket is bound and serverPidOf resolves the daemon pid (captured so a later socket close can
+ * never lose it). Best-effort: a failed registry write must never break a test. */
+export function registerServer(dir) {
+  try {
+    const entry = {
+      dir,
+      sock: sockOfDir(dir),
+      pid: serverPidOf(dir), // best-effort; null if the socket is not yet visible
+      proc: process.pid,
+      runId: runIdOf(),
+      ts: Date.now(),
+    };
+    fs.appendFileSync(serverRegistryPath(), JSON.stringify(entry) + "\n", "utf8");
+  } catch { /* best-effort */ }
+}
+
+/** readServerRegistry() — parse the durable registry (skip malformed/partial lines). */
+export function readServerRegistry() {
+  const out = [];
+  let raw = "";
+  try { raw = fs.readFileSync(serverRegistryPath(), "utf8"); } catch { return out; }
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) continue;
+    try { out.push(JSON.parse(line)); } catch { /* partial concurrent append — skip */ }
+  }
+  return out;
+}
+
+/** resolveRegisteredServerPid(entry) — the PID of the STILL-ALIVE tmux server this registry entry
+ * describes, or null when the server is dead/gone. Tries, in order: the socket-inode mapping
+ * (authoritative while the socket is open; also caches the pid), the cmdline ghost discovery
+ * (socket closed but argv retains <dir>/ — the leak evidence shows the server's argv keeps the
+ * full `-S <socket>` invocation), and finally the RECORDED pid (captured at creation — the one
+ * discovery that survives even the cmdline-truncation case, verified live tmux). */
+export function resolveRegisteredServerPid(entry) {
+  try {
+    const pid = serverPidOf(entry.dir);
+    if (pid !== null) return pid;
+  } catch { /* /proc unreadable */ }
+  const ghosts = serverPidsOfByCmdline(entry.dir);
+  if (ghosts.length > 0) return ghosts[0];
+  if (entry.pid && isLiveTmuxPid(entry.pid)) return entry.pid;
+  return null;
+}
+
+/** Cheap deadProcOnly pre-filter: does this entry's server have ANY cheap live signal — the socket
+ * file still on disk (a live tmux server holds it open), or a verified-live recorded tmux pid?
+ * Absent both, the expensive /proc discovery (socket-inode map walk + full-cmdline scan) would only
+ * confirm a gone server — skip it. The recorded pid is captured at registration and a still-alive
+ * server's pid is stable, so a live server whose socket later closed is still caught via
+ * isLiveTmuxPid(entry.pid). Prevents the O(/proc × registry) walk on every pre-suite sweep (the
+ * registry is append-only and grows: 344 dead entries ≈ 3s measured on this machine). */
+function serverPlausiblyAlive(entry) {
+  try { if (fs.existsSync(sockOfDir(entry.dir))) return true; } catch { /* dir gone */ }
+  if (entry.pid && isLiveTmuxPid(entry.pid)) return true;
+  return false;
+}
+
+/** killRegisteredServers(filter) — kill every STILL-ALIVE server the durable registry describes,
+ * per the caller's filter:
+ *   { proc }          — only THIS process's entries (the test after() hook).
+ *   { runId }         — only ONE run's entries (the runner post-suite + namespaced suite-tail kill).
+ *   { deadProcOnly }  — only entries whose OWNING TEST PROCESS is dead (crashed-process residue;
+ *                       the pre-suite sweep + legacy suite-tail kill). A concurrent scoped run's
+ *                       ACTIVE servers (proc alive) are never touched.
+ * Each kill is a PID-targeted SIGKILL (verified live tmux), NEVER a name-based batch kill (invariant
+ * no_pkill_by_name_on_live = 1). Returns the killed records for the runner's round record. */
+export function killRegisteredServers(filter = {}) {
+  const killed = [];
+  for (const entry of readServerRegistry()) {
+    if (filter.proc !== undefined && entry.proc !== filter.proc) continue;
+    if (filter.runId !== undefined && entry.runId !== filter.runId) continue;
+    if (filter.deadProcOnly && isProcAlive(entry.proc)) continue;
+    // deadProcOnly fast-path: skip the O(/proc) discovery when no cheap live signal exists — the
+    // sweep runs on EVERY suite (registry-driven TRUE catch-all), so a gone server must not cost a
+    // full process-table scan per entry. Verified live servers (socket on disk / live recorded pid)
+    // still reach resolveRegisteredServerPid and get their PID-targeted SIGKILL unchanged.
+    if (filter.deadProcOnly && !serverPlausiblyAlive(entry)) continue;
+    const pid = resolveRegisteredServerPid(entry);
+    if (pid === null || pid === process.pid) continue;
+    try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ }
+    killed.push({ dir: entry.dir, pid, sock: entry.sock });
+  }
+  return killed;
+}
+
 /** Pre-suite orphan sweeper over ALL /tmp/quay-run-* dirs. A namespace dir whose tmux server is
  * STILL alive (a leaked, still-running probe) is SKIPPED — it is in-use, not residue. fs-only,
  * never a process-name batch kill. Returns { cleaned, dirs }. */

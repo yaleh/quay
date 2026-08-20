@@ -194,9 +194,6 @@ transcript 引用 **85 次** vs `capture-pane` **2 次**；今晚实测可信度
 ⇒ **信道正规化的第一优先级不是投递，是消费者的机械挂载点**（tick 的某一步显式读收件箱）。
 否则又是「写了但不在决策时被调用」——本仓 AC9/AC10 反复踩的同一个坑。
 
-**展开见** `docs/proposals/quay-message-bus-human-in-the-network.md`
-（含 AC12b 因此第一次可机械测量的论据，以及它自身的 fail-safe 缺陷）。
-
 ---
 
 ## 5. 与「克制层数增长」的关系

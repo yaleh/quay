@@ -5,7 +5,6 @@
 - **性质**：**减法**。不新增能力，删掉一个已经没有消费者的能力面。
 - **Relates:** [`quay-web-observation-surface.md`](./quay-web-observation-surface.md)（web 作为观察面的增量设计——
   本文是它的**前提澄清**：既然是观察面，操纵面就不该并存），
-  [`quay-message-bus-human-in-the-network.md`](./quay-message-bus-human-in-the-network.md)（人真正需要的那条通道），
   [`quay-as-a-living-system.md`](./quay-as-a-living-system.md) §3（退化器官）
 
 **AC/DoD 与立案由外层判断。**
@@ -71,7 +70,6 @@ $ grep -o '"actor":"[^"]*"' .quay/gate-events.jsonl | sort | uniq -c
 3. **在办公室外看到自己的项目**（→ SaaS 那份文档）。
 
 ⇒ **删按钮不是削减人的能力，是把投入从一个没人用的面挪到三个真缺的面。**
-前两条见 [`quay-message-bus-human-in-the-network.md`](./quay-message-bus-human-in-the-network.md)。
 
 ---
 

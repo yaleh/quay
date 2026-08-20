@@ -373,8 +373,7 @@ node --no-warnings --experimental-strip-types plugin/scripts/manager-observation
   停止后续动作，按「授权边界」升级给人（step 5）。**违反即停**——运行时约束不是建议。
 - **负控制（AC3，不误报）**：指向 inner 的 capture-pane（`-t "$TMUX_SESSION:inner"`，窗口名由
   `loop.tmux_session` + `:inner` 约定代入——本网络实例见 orchestration 副本的「本层状态」节）
-  不计数；**manager→outer 的发布不计数**（`supervisor-bus-identity.sh inbox-summary`、读 manager 的
-  inbox/bus——那是 manager 向本层交付，不属于 C3 的 outer→manager 方向）；基于转述的指控（本层
+  不计数；**manager→outer 的发布不计数**（收件箱机制已退役——inbox 彻底删除，人 2026-08-20 裁定范围A）；基于转述的指控（本层
   transcript 里散文提到 manager）不被当作证据——**只数真实 tool 调用**。
 - **独立审计（方向合法）**：manager 对本层跑同一检查器（manager→outer 观测是合法方向，不受 C3
   约束）——`node --no-warnings --experimental-strip-types <repo>/plugin/scripts/manager-observation-runtime-check.ts --root <repo> --session <本层会话id> --json`。
@@ -585,7 +584,7 @@ node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --report -
 node --experimental-strip-types plugin/scripts/task-status-drift-check.ts
 node --experimental-strip-types plugin/scripts/task-status-drift-check.ts --stranded   # stranded worktree branches
 cat docs/analysis/batch2-queue-state.md             # 内层自报的队列状态（文件名历史引用——batch2 是旧批次名）
-bash plugin/scripts/supervisor-bus-identity.sh inbox-summary   # 收件箱机械挂载点：unread 逐条进决策，delivered≠consumed
+# 收件箱机械挂载点已退役（inbox 机制彻底删除，人 2026-08-20 裁定范围A；见 tasks/gap-inbox-message-bus-teardown）
 ```
 
 **`ruling-required` 屏幕观察者（外层是主轮询方）**：主判据是**屏幕形状分类**。外层按分钟（60s）轮询

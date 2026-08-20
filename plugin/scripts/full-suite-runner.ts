@@ -135,7 +135,7 @@ import { scanFamily, kindForFile } from "./known-load-sensitive.ts";
 // These are RUNTIME fs-only sweepers — they live in plugin/scripts/session-liveness-sweep.mjs
 // (a PRODUCTION module, shipped in the npm-pack bundle), NOT the test helper: package.sh excludes
 // plugin/test/ from the bundle, so importing from there breaks build-plugin-dist (round 123/124).
-import { sweepRunNamespaces, sweepRunNamespace } from "./session-liveness-sweep.mjs";
+import { sweepRunNamespaces, sweepRunNamespace, killRegisteredServers } from "./session-liveness-sweep.mjs";
 // gap-single-file-test-duration-trend-unwatched AC1/AC2 (fan-in 9edf2cb9, hand-merged into the
 // develop→integration convergence 2026-08-09): land the suite's per-file __PERFILE__ duration
 // history + compare against the last round (the trend dimension — per-file durations WATCHED round
@@ -2417,6 +2417,23 @@ export async function run(argv: string[]): Promise<number> {
   } catch (e) {
     process.stderr.write(`full-suite-runner: pre-suite cleanup failed (continuing): ${e instanceof Error ? e.message : String(e)}\n`);
   }
+  // TRUE-CATCH-ALL (gap-session-liveness-teardown-ol-scd-cf-leak): kill still-alive registered
+  // servers whose OWNING TEST PROCESS is dead (a prior run's crashed-process residue — the durable
+  // registry survives the crash, the in-memory Set did not). sweepRunNamespaces above skips live-owner
+  // dirs by design, so THIS registry-driven kill (PID-targeted SIGKILL of servers the tests
+  // self-built — invariant no_pkill_by_name_on_live = 1) is the step that actually reclaims them.
+  // deadProcOnly protects a concurrent scoped run's ACTIVE servers (proc alive); the full-suite lock
+  // serializes full suites, so no concurrent full suite is at risk. Best-effort.
+  try {
+    const killedResidue = killRegisteredServers({ deadProcOnly: true });
+    if (killedResidue.length > 0) {
+      process.stderr.write(
+        `full-suite-runner: pre-suite registry kill removed ${killedResidue.length} crashed-process server residue(s)\n`,
+      );
+    }
+  } catch (e) {
+    process.stderr.write(`full-suite-runner: pre-suite registry kill failed (continuing): ${e instanceof Error ? e.message : String(e)}\n`);
+  }
   // gap-worktree-remove-orphans-probes (option ② reaper): reap ALREADY-orphaned process residue —
   // claude-probe test fixtures whose cwd points at a DELETED worktree (a previous `git worktree
   // remove` ran before the test's own cleanup), and stale full-suite.lock holders (a detached suite
@@ -3739,6 +3756,21 @@ export async function run(argv: string[]): Promise<number> {
     }
   } catch (e) {
     process.stderr.write(`full-suite-runner: post-suite cleanup failed (continuing): ${e instanceof Error ? e.message : String(e)}\n`);
+  }
+  // TRUE-CATCH-ALL (gap-session-liveness-teardown-ol-scd-cf-leak): kill THIS run's still-alive
+  // registered servers (safety net after the suite-tail scan-kill — e.g. a process whose server
+  // leaked after the scan, or a run where QUAY_RUN_ID never reached test.sh). Registry-driven
+  // (PID-targeted SIGKILL of servers the tests self-built — invariant no_pkill_by_name_on_live = 1),
+  // scoped to this runId so a concurrent scoped run's servers are never touched. Best-effort.
+  try {
+    const killedRun = killRegisteredServers({ runId: shortRunId });
+    if (killedRun.length > 0) {
+      process.stderr.write(
+        `full-suite-runner: post-suite registry kill removed ${killedRun.length} still-alive registered server(s) from run ${shortRunId}\n`,
+      );
+    }
+  } catch (e) {
+    process.stderr.write(`full-suite-runner: post-suite registry kill failed (continuing): ${e instanceof Error ? e.message : String(e)}\n`);
   }
   // The combined cleanup count + WHICH dirs (pre-suite stale namespaces + post-suite own residue),
   // for the round record. Capped so a pathological round cannot grow the record unboundedly.
