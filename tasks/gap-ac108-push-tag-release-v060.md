@@ -1,7 +1,7 @@
 ---
 id: gap-ac108-push-tag-release-v060
 title: AC108 推送+打标+发布 v0.6.0：三者指向同一提交（release note 真实反映 674+ 变更）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
