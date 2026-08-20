@@ -1,7 +1,7 @@
 ---
 id: gap-impl-complete-event-written-by-fan-in-not-build
 title: "impl-complete 事件由 fan-in step 4.4 写而非 Build 写——第23条解耦结构性失效，Build 完成但排队中的任务被误计「在实现」占 Build 槽"
-status: ready
+status: done
 labels:
   - gap
   - mechanism
