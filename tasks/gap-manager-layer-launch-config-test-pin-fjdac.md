@@ -1,7 +1,7 @@
 ---
 id: gap-manager-layer-launch-config-test-pin-fjdac
 title: manager-layer 测试 launcher pin 同步到 claude-fjdac（b4572bb8 5b 欠账）——当前阻塞所有 fan-in
-status: ready
+status: done
 labels:
   - gap
   - mechanism
