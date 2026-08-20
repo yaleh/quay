@@ -31,8 +31,10 @@ import {
   runAdjudicate,
   runPromote,
   runRetreat,
+  RETREATED_MARKER_RE,
 } from "../src/gate/lifecycle.ts";
 import { queryGateEvents } from "../src/gate/gate-event-store.ts";
+import { isRetreated } from "../../../plugin/scripts/ready-pool-check.ts";
 import { makeTmpDir, makeTmpWorkspace } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 import { QUAY_CLI, QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
@@ -55,9 +57,12 @@ function stubClient(task) {
     async taskCheck() {
       return { ok: state.status === "ready" ? false : true, reason: "stub" };
     },
-    async taskWrite({ status, expectedStatus }) {
+    async taskWrite({ status, expectedStatus, body }) {
       if (expectedStatus && state.status !== expectedStatus) throw new Error("ConflictError");
       state.status = status;
+      // Preserve body writes so tests can assert the marker/uncheck landed on the stored task
+      // (existing tests pass no body — a bodyless stub stays bodyless).
+      if (body !== undefined) state.body = body;
       return { ...state };
     },
     _state: state,
@@ -466,6 +471,87 @@ test("A4 [AC6]: runRetreat ready→todo still works (no regression on existing r
   resetExit();
 });
 
+// ===========================================================================
+// RETREATED WRITE SIDE (tasks/gap-wiring-C-retreat-write-side) — every retreat
+// writes the `**RETREATED` / 搁置 marker (gap-retreated-state-not-mechanized)
+// that the detection side reads (ready-pool-check isRetreated / slot-refill
+// step-4 defer "retreated"). Before this wiring the write side was missing:
+// 0 task files carried the marker and the detection side never saw a real
+// retreat. The writer's output must satisfy RETREATED_MARKER_RE (line-start
+// bold, optional blockquote) — the exact anchor the plugin's reader tests.
+// ===========================================================================
+
+test("RETREATED-WRITE [AC1]: runRetreat done→ready writes the **RETREATED marker to a string body", async () => {
+  resetExit();
+  const logPath = tmpLog("retreat-write-marker");
+  const body = "## Proposal\nreal proposal text\n## AC\n- [x] done\n## DoD\n- [x] done\n";
+  const client = stubClient({ id: "T-RW1", status: "done", extra: {}, body });
+  const r = await runRetreat({ client, id: "T-RW1", reason: "load-induced red — wait for fix-scope gate", logPath });
+  assert.equal(r.ok, true);
+  assert.equal(r.to, "ready");
+  assert.equal(client._state.status, "ready");
+  assert.ok(RETREATED_MARKER_RE.test(client._state.body), `body must carry the **RETREATED marker; got: ${client._state.body}`);
+  assert.match(client._state.body, /^> \*\*RETREATED \/ 搁置（load-induced red — wait for fix-scope gate）\*\*$/m, "marker is the line-start blockquote bold form carrying the reason");
+  // The DETECTION side (ready-pool-check isRetreated — the same predicate slot-refill reuses)
+  // must read what the write side produced.
+  assert.equal(isRetreated({ body: client._state.body }), true, "ready-pool-check isRetreated reads the written marker");
+  resetExit();
+});
+
+test("RETREATED-WRITE [AC1+AC83]: runRetreat done→ready unchecks AC boxes AND writes the marker (they compose)", async () => {
+  resetExit();
+  const logPath = tmpLog("retreat-write-ac83");
+  const body = "## Proposal\nreal proposal text\n## AC\n- [x] a-c-1\n- [X] a-c-2\n## DoD\n- [x] dod-1\n";
+  const client = stubClient({ id: "T-RW2", status: "done", extra: {}, body });
+  const r = await runRetreat({ client, id: "T-RW2", reason: "rework", logPath });
+  assert.equal(r.ok, true);
+  assert.equal(r.to, "ready");
+  assert.match(client._state.body, /## AC\n- \[ \] a-c-1\n- \[ \] a-c-2/, "AC boxes unchecked (AC83)");
+  assert.ok(RETREATED_MARKER_RE.test(client._state.body), "marker present alongside the uncheck");
+  resetExit();
+});
+
+test("RETREATED-WRITE: edge-scoped — ready→todo / needs-human→todo write NO marker (no body patch)", async () => {
+  resetExit();
+  const logPath = tmpLog("retreat-write-edges");
+  const body = "## Proposal\nreal proposal text\n";
+  const client1 = stubClient({ id: "T-RW3", status: "ready", extra: {}, body });
+  const r1 = await runRetreat({ client: client1, id: "T-RW3", reason: "re-triage", logPath });
+  assert.equal(r1.to, "todo");
+  assert.ok(!RETREATED_MARKER_RE.test(client1._state.body), "ready→todo writes NO marker (not a shelve — rolls back to todo)");
+
+  const client2 = stubClient({ id: "T-RW4", status: "needs-human", extra: {}, body });
+  const r2 = await runRetreat({ client: client2, id: "T-RW4", reason: "dependency installed", logPath });
+  assert.equal(r2.to, "todo");
+  assert.ok(!RETREATED_MARKER_RE.test(client2._state.body), "needs-human→todo writes NO marker");
+  resetExit();
+});
+
+test("RETREATED-WRITE: idempotent — a done task whose body already carries the marker is not stacked on re-retreat", async () => {
+  resetExit();
+  const logPath = tmpLog("retreat-write-idem");
+  const body = "> **RETREATED / 搁置（first）**\n\n## Proposal\nreal proposal text\n";
+  const client = stubClient({ id: "T-RW5", status: "done", extra: {}, body });
+  const r = await runRetreat({ client, id: "T-RW5", reason: "second retreat", logPath });
+  assert.equal(r.ok, true);
+  assert.equal(r.to, "ready");
+  const matches = client._state.body.match(/\*\*RETREATED/g) ?? [];
+  assert.equal(matches.length, 1, "exactly one marker line — no duplicate");
+  resetExit();
+});
+
+test("RETREATED-WRITE: fail-open — a task with no body still retreats (status flips, no body write)", async () => {
+  resetExit();
+  const logPath = tmpLog("retreat-write-nobody");
+  const client = stubClient({ id: "T-RW6", status: "done", extra: {} });
+  const r = await runRetreat({ client, id: "T-RW6", reason: "no body case", logPath });
+  assert.equal(r.ok, true);
+  assert.equal(r.to, "ready");
+  assert.equal(client._state.status, "ready");
+  assert.equal(client._state.body, undefined, "no body field on a bodyless stub task");
+  resetExit();
+});
+
 test("A5 [AC2]: superseded is a hard terminal — runPromote throws illegal transition, no write", async () => {
   resetExit();
   const logPath = tmpLog("superseded-promote");
@@ -753,4 +839,67 @@ test("C [DIR-102 AC6]: `quay retreat <done> --reason x` still works (no regressi
 
   const after = JSON.parse(runQuay(["task", "view", "DONE-RET", "--json"], workspaceRoot).stdout);
   assert.equal(after.status, "ready", "done→ready still works");
+});
+
+// --- RETREATED WRITE SIDE E2E (tasks/gap-wiring-C-retreat-write-side AC2) ---
+// Production-carrier end-to-end: a REAL `quay retreat` against a REAL native
+// provider writes the `**RETREATED` marker to the REAL task file on disk, and
+// the REAL detection side (slot-refill CLI's step-4 defer) reads it back. This
+// is not a fixture — it exercises lifecycle.runRetreat, the native store's
+// taskWrite, and slot-refill's RETREATED filter against each other.
+
+const SLOT_REFILL_CLI = path.join(__dirname, "..", "..", "..", "plugin", "scripts", "slot-refill.ts");
+
+/** A native-provider workspace whose tasks dir IS `<root>/tasks` — so the same root
+ *  can be handed to slot-refill (`--root`) for the detection half of the E2E. */
+function makeSlotNativeWorkspace(tag) {
+  const root = makeTmpDir(`quay-qeng3-${tag}-`);
+  const tasksDir = path.join(root, "tasks");
+  fs.mkdirSync(tasksDir, { recursive: true });
+  fs.mkdirSync(path.join(root, "code"), { recursive: true });
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, ".quay", "config.yml"),
+    [
+      "providers:",
+      "  native:",
+      "    enabled: true",
+      `    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"`,
+      `    tasks_dir: "${tasksDir.replaceAll("\\", "\\\\")}"`,
+      `    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]`,
+      "    env:",
+      `      QUAY_NATIVE_TASKS_DIR: "${tasksDir.replaceAll("\\", "\\\\")}"`,
+      "",
+    ].join("\n")
+  );
+  return { root, tasksDir };
+}
+
+test("C [RETREATED-E2E AC2]: real `quay retreat` writes **RETREATED to the task file AND slot-refill defers the retreated ready task", () => {
+  const { root, tasksDir } = makeSlotNativeWorkspace("retreated-e2e");
+  // A dispatchable done task (self-touch + (new) touch resolve cleanly) — only the marker the
+  // retreat writes may remove it from the dispatch recommendation.
+  const dispatchable = validSections + acDodChecked +
+    "## Touches\n- code/ret-e2e.ts (new)\n- tasks/E2E-RET.md\n";
+  runNative(["task", "create", "E2E-RET", "--title", "e2e retreat", "--status", "done",
+    "--body", dispatchable], tasksDir);
+
+  const r = runQuay(["retreat", "E2E-RET", "--reason", "load-induced red — wait for fix-scope gate"], root);
+  assert.equal(r.status, 0, `retreat exit 0; stdout=${r.stdout}, stderr=${r.stderr}`);
+  assert.match(r.stdout, /RETREAT done → ready/);
+
+  // Write side: the REAL task file on disk carries the marker.
+  const fileBody = fs.readFileSync(path.join(tasksDir, "E2E-RET.md"), "utf8");
+  assert.match(fileBody, /^\s*>\s*\*\*RETREATED\b/im, `task file must carry the marker; got:\n${fileBody}`);
+  const after = JSON.parse(runQuay(["task", "view", "E2E-RET", "--json"], root).stdout);
+  assert.equal(after.status, "ready", "done→ready flips status");
+
+  // Detection side: the REAL slot-refill CLI reads the written marker and defers the task
+  // (reason "retreated") — the task is NOT recommended for dispatch.
+  const slot = JSON.parse(execFileSync(process.execPath, [
+    "--no-warnings", "--experimental-strip-types", SLOT_REFILL_CLI, "--root", root, "--cap", "5",
+  ], { encoding: "utf8", env: { ...process.env, QUAY_TELEMETRY_SUBAGENTS: "0" } }));
+  assert.ok(!(slot.recommended ?? []).includes("E2E-RET"), "retreated task is NOT recommended for dispatch");
+  const ret = (slot.deferred ?? []).find((d) => d.id === "E2E-RET");
+  assert.ok(ret && /retreated/.test(ret.reason), `E2E-RET deferred as retreated; got deferred=${JSON.stringify(slot.deferred)}`);
 });

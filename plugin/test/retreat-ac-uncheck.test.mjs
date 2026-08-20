@@ -19,7 +19,7 @@ import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
-import { runRetreat } from "../../packages/quay/src/gate/lifecycle.ts";
+import { runRetreat, RETREATED_MARKER_RE } from "../../packages/quay/src/gate/lifecycle.ts";
 import { queryGateEvents } from "../../packages/quay/src/gate/gate-event-store.ts";
 import { makeTmpDir } from "./helpers/tmp-workspace.mjs";
 
@@ -200,7 +200,10 @@ test("shape family: `## AC（draft）` / `## AC (draft)` AC boxes are also unche
   const r2 = await runRetreat({ client: client2, id: "T-ODD", reason: "rework", logPath: logPath2 });
   assert.equal(r2.ok, true);
   assert.equal(r2.to, "ready");
-  assert.equal(client2._writes.filter((w) => w.body !== undefined).length, 0, "unrecognized AC heading → no body patch (fails open)");
-  assert.match(client2._state.body, /- \[x\] ac-one/, "the checkbox under an unrecognized heading is left checked (body unchanged)");
+  // The unrecognized AC heading fails OPEN for the AC-uncheck (the checkbox stays checked), but the
+  // done→ready `**RETREATED` marker IS still written (gap-wiring-C-retreat-write-side — a separate
+  // write-side concern from AC unchecking; the marker is what shelves a retreated ready task).
+  assert.match(client2._state.body, /- \[x\] ac-one/, "the checkbox under an unrecognized heading is left checked (AC-uncheck fails open)");
+  assert.ok(RETREATED_MARKER_RE.test(client2._state.body), "the **RETREATED marker is written regardless of AC-heading recognition");
   resetExit();
 });
