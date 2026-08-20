@@ -1781,6 +1781,13 @@ run_selected() {
     # them to clear before declaring a leak, so test-spawned tmux servers still exiting at run end
     # (round 95 false-red: tests=4150 all pass) are not swept as residue. A genuine leak persists
     # past the bound and still fails. A clean run adds zero latency (first scan wins immediately).
+    # TRUE-CATCH-ALL registry kill (gap-session-liveness-teardown-ol-scd-cf-leak): BEFORE the suite-tail
+    # leak scan, kill any STILL-ALIVE server the session-liveness family registered durably. Closes the
+    # process-crash / cancelled-test hole — a test process that died before its after() hook can never
+    # clean its server, but the durable registry (written at server-creation) survives. Registry-driven
+    # (PID-targeted SIGKILL of servers the tests self-built), NEVER a name-based batch kill (invariant
+    # no_pkill_by_name_on_live = 1). Best-effort (exit 0 always) — the leak-scan is the assertion.
+    node --experimental-strip-types "${repo_root}/plugin/scripts/session-liveness-sweep-kill.mjs" || true
     if ! bash "${repo_root}/plugin/scripts/tmux-leak-scan.sh" --check "${repo_root}"; then
       code=1
     fi

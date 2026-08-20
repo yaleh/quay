@@ -41,8 +41,9 @@ import { tmux as isolatedTmux } from "../scripts/tmux-session.ts";
 import {
   runIdOf, runNamespaceRoot, dirHasLiveOwner, serverPidOf, panePidsOf,
   sweepRunNamespaces, sweepRunNamespace, serverPidsOfByCmdline,
+  registerServer, killRegisteredServers, readServerRegistry,
 } from "../scripts/session-liveness-sweep.mjs";
-export { runIdOf, runNamespaceRoot, dirHasLiveOwner, serverPidOf, panePidsOf, sweepRunNamespaces, sweepRunNamespace, serverPidsOfByCmdline };
+export { runIdOf, runNamespaceRoot, dirHasLiveOwner, serverPidOf, panePidsOf, sweepRunNamespaces, sweepRunNamespace, serverPidsOfByCmdline, registerServer, killRegisteredServers, readServerRegistry };
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const SCRIPT = path.resolve(__dirname, "..", "scripts", "session-liveness.sh");
@@ -304,6 +305,13 @@ export function reapLiveOwners() {
 // Files pass their OWN /tmp prefixes so the sweep never touches a sibling file's active probe
 // (SPLIT CONCURRENCY SAFETY: each split file owns a distinct prefix).
 export function sessionLivenessAfter(...prefixes) {
+  // TRUE CATCH-ALL (gap-session-liveness-teardown-ol-scd-cf-leak): the durable-registry kill FIRST.
+  // The in-memory Set below can lose an entry (teardownProbe unregisters a dir it misjudges
+  // owner-dead while the server is still alive — the 5b recurrence that leaked ol-scd-c/f), but the
+  // durable record — written at server-creation — survives, so this pass kills by the registry
+  // regardless of the in-memory state. Scoped to THIS process (proc filter) so a sibling file's
+  // active server is never touched (SPLIT CONCURRENCY SAFETY: each split file is a separate process).
+  killRegisteredServers({ proc: process.pid });
   // 判据1 (gap-session-liveness-fixture-tmux-not-killed): kill-server 本进程创建的 tmux server —
   // sweepTmp 的 owner-liveness 保护（AC3）只跳过活 owner 目录，夹具不 kill ⇒ 泄漏无出口。
   killProbeServers();
@@ -347,7 +355,14 @@ export function tmux(args, env) {
     // the unified after()'s reapLiveOwners() can kill this server too. Registration is idempotent
     // (Set) and only on SUCCESS — a failed new-session never starts a server.
     if (args[0] === "new-session" && r.status === 0) {
-      __registerProbeTmp(path.dirname(e.TMUX_TMPDIR));
+      const dir = path.dirname(e.TMUX_TMPDIR);
+      __registerProbeTmp(dir);
+      // TRUE CATCH-ALL (gap-session-liveness-teardown-ol-scd-cf-leak): durably register EVERY
+      // self-built server at the moment of creation. The in-memory Set alone can lose an entry
+      // (teardownProbe unregisters a dir it misjudges owner-dead while the server still lives — the
+      // 5b recurrence that leaked ol-scd-c/f), and a crashed process loses the whole Set. The durable
+      // record survives both, so after() and the suite-tail scan-kill can always find the server.
+      registerServer(dir);
     }
     return { status: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
   }
