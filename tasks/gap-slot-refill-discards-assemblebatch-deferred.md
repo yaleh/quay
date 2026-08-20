@@ -1,7 +1,7 @@
 ---
 id: gap-slot-refill-discards-assemblebatch-deferred
 title: "slot-refill 丢弃 assembleBatch deferred——「no dispatchable candidate passes step-4」误报（shared-state/learning/non-capability-growth 拒绝原因不可见）"
-status: ready
+status: done
 labels:
   - gap
   - mechanism
