@@ -698,6 +698,15 @@ if ! node --experimental-strip-types ${worktree}/plugin/scripts/anti-drift-touch
 fi
 # anti-drift-land-block-end
 
+【suite 绿后回勾依赖 suite/fan-in 结果的 AC/DoD 复选框（gap-fan-in-subagent-satisfy-then-check）】
+本 fan-in 的 suite 已绿（或 preverified 复用绿）、anti-drift 已过 ⇒ 在运行下方 AC 完成闸（fan-in-ac-
+completion-gate.ts，step 5 flip 块内）【之前】做「满足后勾框」收尾：编辑 tasks/${task}.md，把
+【依赖 suite/fan-in 结果、且已被本次绿 suite / 完成的 fan-in 真实满足】的复选框从 '- [ ]' 勾为 '- [x]'
+——典型如「全量 suite 绿」「真实 fan-in 走新路径绿」「tmux-leak-scan clean」「AC3: 真实 fan-in 一次」等，
+条件已达，仅缺勾选动作。
+⛔ 只勾【真满足】的框：任何条件【未满足】的复选框必须保持 '- [ ]' 未勾（fail-closed 语义不变）。
+⛔ 绝不伪造勾选——本步是补齐「满足后勾框」的收尾动作，不是放宽 AC 完成闸（该闸仍要求全勾才翻 done）。
+
 # flip-block-start
 # flip done（承重点③，gap-fan-in-execute-three-unverified-paths）：行形不匹配 ⇒ 报错而非静默绿——
 # sed 对不匹配行静默改 0 行且 exit 0；锚定 $ 只翻 frontmatter 的精确 'status: ready'，
