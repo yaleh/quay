@@ -1,7 +1,7 @@
 ---
 id: gap-suite-concurrency-env-to-file-fresh-read
 title: "suite 并发数 S 从 env 改配置文件（suite 脚本每次新鲜读取）——env fork 继承病根，文件读下一次调用即生效"
-status: done
+status: ready
 labels:
   - gap
   - mechanism
