@@ -114,7 +114,7 @@ const firstDelayMs = A.firstDelayMs ?? 660_000      // 首轮轮询延迟（suit
 const maxSuitePolls = A.maxSuitePolls ?? 60         // 单次 suite 等待的有界轮询数（60×60s=60min 上限）
 const maxFixRounds = A.maxFixRounds ?? 4            // 红 suite 的最大修复迭代
 const maxFfRetries = A.maxFfRetries ?? 3            // ff 失败（develop 前进）的最大重试（同 SPEC §7 阈值）
-const pollBlockSeconds = A.pollBlockSeconds ?? 540  // 轮询 agent 内有界阻塞等待的硬边界（< Bash 600s 上限，gap-fan-in-execute-poll-bounded-blocking-wait）
+const pollBlockSeconds = A.pollBlockSeconds ?? 100  // 轮询 agent 内有界阻塞等待的硬边界（gap-agent-no-timeout-option：< Bash 工具默认时限 120s，命令落在默认时限内，不依赖模型把 Bash 时限设长；起源 gap-fan-in-execute-poll-bounded-blocking-wait）
 const pollBlockSleep = A.pollBlockSleep ?? 15        // 阻塞等待的检查粒度（每 N 秒看一眼 exit marker）
 const releaseLivelockRounds = A.releaseLivelockRounds ?? 3  // release 侧 anti-livelock（gap-gate-release-no-isolate-rerun-no-livelock）：同一 load-sensitive 红连续 release ≥3 轮 ⇒ escalate（SPEC §7「同一任务失败 ≥3 次 才谈防活锁」同阈值）
 const suiteLockTimeoutSecs = A.suiteLockTimeoutSecs ?? 900  // fan-in 启动的 suite 的 single-flight 锁等待（FULL_SUITE_LOCK_TIMEOUT，秒）——test.sh 默认 600 < suite 实测上界 807931ms ≈ 808s ⇒ 5 fan-in 撞 2 slot 时第 3+ suite 在 slot 释放前 fail-closed「not starting」白等 600s 后 relaunch（gap-single-flight-lock-wait-shorter-than-suite）。900 ≥ 808 + 余量；由 SUITE_LAUNCH/ISOLATE_LAUNCH 经 env 传入启动的 detached suite；调用方可经 env FULL_SUITE_LOCK_TIMEOUT 覆盖（测试 seam）。
@@ -265,26 +265,30 @@ echo "FIX_SCOPE_VERDICT=$fix_scope_out"
 修完 inScope 后照常重新启动全量 suite。返回的 failuresFixed 只列 inScope 修复；越界 defer/release 写进 note。重跑后 suite 仍红的 load-sensitive 红 ⇒ 仍按本 gate release，⛔ 绝不转 fix。`
 
 // ── 脚本控制流的 suite 等待：不把等待决策交给任何 agent（ab380c5e / execute-suite-fix.js）──────
-// 轮询 agent 内有界阻塞等待（gap-fan-in-execute-poll-bounded-blocking-wait）：timeout 540 + sleep 15
-// 循环，最多 540s 硬边界（< Bash 600s 上限），把 ~21 次空转轮询压到 ~3 次；决策权仍在脚本——
-// timeout 540 是脚本给的硬边界、maxSuitePolls 是脚本循环上限，agent 不自决「等多久」。命中 marker
+// 轮询 agent 内有界阻塞等待（gap-fan-in-execute-poll-bounded-blocking-wait）：timeout ${pollBlockSeconds}
+// + sleep 15 循环，最多 ${pollBlockSeconds}s 硬边界，把 ~21 次空转轮询压到 ~3 次；决策权仍在脚本——
+// timeout 是脚本给的硬边界、maxSuitePolls 是脚本循环上限，agent 不自决「等多久」。命中 marker
 // 则补全 capture 的 post 字段。脚本 setTimeout 仍是外层轮询间隔。
+// ⚠️ gap-agent-no-timeout-option：agent() 无 timeout/bashTimeout 旋钮，旧默认 540s 依赖「模型把 Bash
+// 工具时限设 >540s」——纯语言请求非代码保证（生产 journal 实证：108 次 poll 中 46 次跑满 540s，但 1 次
+// 被 Bash 工具默认 120s kill）。修法：硬边界收到 ${pollBlockSeconds}s（< Bash 工具默认时限 120s，留余量）——
+// 命令落在工具默认时限内，模型无需做任何事，等待即代码保证（非 prompt 请求）。
 // 首轮起轮延迟（gap-fan-in-execute-poll-cost-firstdelay-agenttype）：suite 已测下界 11min，却从
 // t=60s 起轮 ⇒ 头 11-15 次结构上必然 not-done 纯空转。firstDelayMs（默认 660s）让首轮 setTimeout
 // 从 660s 起，后续回到 pollIntervalMs——与上面的有界阻塞等待叠加，把 ~21 次空转压到 ~10 次（
 // pollIntervalMs=0 测试 seam 照旧可用：firstDelayMs 也可经 args 覆盖）。
 async function pollSuite() {
   return agent(
-    `你是 fan-in suite 等待轮询（workflow 脚本控制流调用，有界阻塞等待，一回合内返回）。任务 ${task} 的 suite 以 detached 方式运行。用 Bash 工具运行下面命令并返回结果——不要做任何等待决策（等待由 workflow 脚本控制）。命令里的 timeout ${pollBlockSeconds} 是脚本给的硬边界；Bash 工具的执行时限须设大于 ${pollBlockSeconds}s（上限 600s）。
+    `你是 fan-in suite 等待轮询（workflow 脚本控制流调用，有界阻塞等待，一回合内返回）。任务 ${task} 的 suite 以 detached 方式运行。用 Bash 工具运行下面命令并返回结果——不要做任何等待决策（等待由 workflow 脚本控制）。命令里的 timeout ${pollBlockSeconds} 是脚本给的硬边界；本命令有界 ≤${pollBlockSeconds}s，落在 Bash 工具默认时限（120s）内——不要为此调整 Bash 工具时限（gap-agent-no-timeout-option：等待由脚本控制流保证，不依赖模型设长 timeout）。
 suite_capture="/tmp/fan-in-suite-${task}.env"
 suite_exit_marker="/tmp/fan-in-suite-${task}.exit"
 suite_time_file="/tmp/fan-in-suite-${task}.time"
 suite_log_file="/tmp/fan-in-suite-${task}.log"
 if [ ! -f "$suite_exit_marker" ]; then
   # 有界阻塞等待（gap-fan-in-execute-poll-bounded-blocking-wait）：最多 ${pollBlockSeconds}s 硬边界
-  # （< Bash 600s 上限），每 ${pollBlockSleep}s 看一眼 marker。决策权仍在脚本——这个 timeout 是脚本给的
-  # 硬边界、maxSuitePolls 是脚本循环上限，agent 不自决「等多久」（ab380c5e 是 agent 自决等待，这里是
-  # 脚本手里的有界等待）。
+  # （< Bash 工具默认时限 120s，gap-agent-no-timeout-option），每 ${pollBlockSleep}s 看一眼 marker。
+  # 决策权仍在脚本——这个 timeout 是脚本给的硬边界、maxSuitePolls 是脚本循环上限，agent 不自决「等多久」
+  # （ab380c5e 是 agent 自决等待，这里是脚本手里的有界等待）。
   timeout ${pollBlockSeconds} bash -c 'while [ ! -f "$1" ]; do sleep ${pollBlockSleep}; done' _ "$suite_exit_marker" || true
 fi
 if [ ! -f "$suite_exit_marker" ]; then

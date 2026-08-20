@@ -2179,14 +2179,18 @@ test("⑧ AC3 记录面真实化 REAL — the poll reads lane_count from the sui
   assert.equal(lane, "8", `lane_count must be the MAIN phase's real concurrency (the last __GROUP__ line), got: ${after.match(/^lane_count=.*$/m)?.[0]}`);
 });
 
-// ── ⑩ 轮询 agent 有界阻塞等待（gap-fan-in-execute-poll-bounded-blocking-wait）──────────────────────
+// ── ⑩ 轮询 agent 有界阻塞等待（gap-fan-in-execute-poll-bounded-blocking-wait + gap-agent-no-timeout-option）
 // THE DEFECT: 轮询 agent 每次「看一眼 marker 在不在」就返回 not-done，脚本 setTimeout 60s 再派下一轮——
 // suite 11-19min ⇒ 头 11-15 次结构上必然 not-done 纯空转（~21 次/轮）。修复：把有界阻塞等待
-// （timeout 540 + sleep 15）放进轮询 agent——agent 最多阻塞 540s（硬边界 < Bash 600s 上限），每 15s
-// 看一眼 marker，把 ~21 次空转压到 ~3 次。决策权仍在脚本（timeout 540 是脚本给的硬边界、maxSuitePolls
+// （timeout + sleep 15）放进轮询 agent——agent 最多阻塞 pollBlockSeconds（硬边界），每 15s
+// 看一眼 marker，把 ~21 次空转压到 ~3 次。决策权仍在脚本（timeout 是脚本给的硬边界、maxSuitePolls
 // 是脚本循环上限），agent 不自决「等多久」（ab380c5e 是 agent 自决等待，这里是脚本手里的有界等待）。
+// ⚠️ gap-agent-no-timeout-option: agent() 无 timeout/bashTimeout 旋钮，旧默认 540s 依赖「模型把 Bash
+// 时限设 >540s」——纯语言请求非代码保证（生产 journal 实证：108 次 poll 中 1 次被 Bash 工具默认 120s
+// kill）。FIX：硬边界收到 pollBlockSeconds=100（< Bash 工具默认时限 120s，留 20s 余量）——命令落在
+// 工具默认时限内，模型无需调整 Bash 时限，等待即代码保证。能取假：去掉 timeout ⇒ 红；放宽 ≥120s ⇒ 红。
 
-test("⑩ 有界阻塞等待 wiring — 轮询 agent 带 timeout 540（< Bash 600s 上限）+ sleep 15 循环，决策权仍在脚本（能取假）", async (t) => {
+test("⑩ 有界阻塞等待 wiring — 轮询 agent 带 timeout 100（< Bash 工具默认时限 120s）+ sleep 15 循环，决策权仍在脚本（能取假）", async (t) => {
   const { prompts } = await runWorkflow({
     args: { task: "gap-test-poll-bounded", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-poll-bounded", mergeTarget: "develop" },
   });
@@ -2195,9 +2199,10 @@ test("⑩ 有界阻塞等待 wiring — 轮询 agent 带 timeout 540（< Bash 60
   const m = poll.match(/timeout (\d+) bash -c/);
   assert.ok(m, "poll must carry `timeout <N> bash -c` (the bounded blocking wait)");
   const timeoutSecs = Number(m[1]);
-  // 硬边界 < Bash 600s 上限（能取假：放宽 >600s ⇒ 此断言红）。
-  assert.ok(timeoutSecs < 600, `the blocking-wait hard bound must be < Bash 600s limit, got ${timeoutSecs}s`);
-  assert.equal(timeoutSecs, 540, "the hard bound must be exactly 540s (AC1: < 600s with safety margin)");
+  // 硬边界 < Bash 工具默认时限 120s（gap-agent-no-timeout-option：命令落在默认时限内，不依赖模型设长
+  // timeout；能取假：放宽 ≥120s ⇒ 此断言红）。
+  assert.ok(timeoutSecs < 120, `the blocking-wait hard bound must be < Bash tool default 120s limit, got ${timeoutSecs}s`);
+  assert.equal(timeoutSecs, 100, "the hard bound must be exactly 100s (gap-agent-no-timeout-option: < 120s default with safety margin)");
   // sleep 15 检查粒度 + 循环等 marker 而非 agent 自决时长。
   assert.ok(poll.includes('while [ ! -f "$1" ]; do sleep 15; done'), "the bounded wait must loop on the marker existence with sleep 15, not an agent-decided duration");
   // 决策权仍在脚本（不是 agent 自决等待）。
