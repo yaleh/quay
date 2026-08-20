@@ -9,7 +9,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import type { ProviderClient } from "./provider-client.ts";
-import { readLive, readJournal, readBoardLanding, readBoardExecution, readGitHistory, readSystem, readManager, readTests, readSessions, readArchitecture, type LiveResult, type JournalResult, type JournalSection, type BoardLanding, type BoardExecution, type GitHistoryCommit, type GitHistoryResult, type SystemResult, type ManagerResult, type TestsResult, type SessionsResult, type ArchitectureResult, type TestRunRecord } from "./observation.ts";
+import { readLive, readJournal, readBoardLanding, readBoardExecution, readGitHistory, readSystem, readManager, readTests, readSessions, readArchitecture, SESSION_LAYERS, type LiveResult, type JournalResult, type JournalSection, type BoardLanding, type BoardExecution, type GitHistoryCommit, type GitHistoryResult, type SystemResult, type ManagerResult, type TestsResult, type SessionsResult, type SessionDetail, type ArchitectureResult, type TestRunRecord } from "./observation.ts";
 import { createGoalStore } from "./goal-store.ts";
 import { createDocumentStore } from "./document-store.ts";
 // live-state discriminator texts (gap-live-cannot-tell-a-dead-loop-from-an-unwired-one) — the
@@ -2149,7 +2149,7 @@ export async function handleTests(
 // ── /sessions ──────────────────────────────────────────────────────────────────────────────────────
 
 function renderSessionsPage(sessions: SessionsResult): string {
-  const cards = sessions.sessions.map((s) => {
+  const cardFor = (s: SessionDetail): string => {
     const msgHtml = s.messages && s.messages.length > 0
       ? s.messages.map((m) => html`<div style="border-left:2px solid var(--color-divider);padding-left:0.6rem;margin-bottom:0.5rem">
           <div style="font-size:0.7rem;color:var(--color-neutral-700)">${escapeHtml(m.time)} · ${escapeHtml(m.role)}</div>
@@ -2164,6 +2164,25 @@ function renderSessionsPage(sessions: SessionsResult): string {
       <div style="font-size:0.75rem;color:var(--color-neutral-700)">${s.halted ? "halted" : s.pid != null ? `pid ${s.pid}` : "—"}</div>
       ${msgHtml}
     </div>`;
+  };
+
+  // Group by layer (Manager / Outer / Inner, plus Other for names that carry no layer marker) so
+  // each section renders only its own layer's sessions — never mixed. SESSION_LAYERS covers every
+  // possible layer value, so no session is dropped.
+  const byLayer = new Map<SessionDetail["layer"], SessionDetail[]>();
+  for (const s of sessions.sessions) {
+    const list = byLayer.get(s.layer) ?? [];
+    list.push(s);
+    byLayer.set(s.layer, list);
+  }
+  const sections = SESSION_LAYERS.map(({ layer, heading }) => {
+    const items = byLayer.get(layer) ?? [];
+    return html`<section style="margin-bottom:1.5rem">
+      <h2>${escapeHtml(heading)}</h2>
+      ${items.length > 0
+        ? html`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:1rem">${items.map(cardFor).join("")}</div>`
+        : html`<p class="meta">无该层会话目标</p>`}
+    </section>`;
   }).join("");
   return html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay sessions — Manager/Outer/Inner 最近会话">${modernistStyles()}${pageStyles()}<title>Sessions — 三层最近会话</title></head>
@@ -2171,7 +2190,7 @@ function renderSessionsPage(sessions: SessionsResult): string {
       <h1>Sessions — Manager / Outer / Inner 最近会话</h1>
       <p class="meta">数据源：<code>session-liveness.sh --once</code> + 会话 transcript 尾部</p>
       ${obsNote(sessions.status, sessions.reason)}
-      ${sessions.sessions.length > 0 ? html`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:1rem">${cards}</div>` : ""}
+      ${sessions.sessions.length > 0 ? sections : ""}
     </main></body></html>`;
 }
 

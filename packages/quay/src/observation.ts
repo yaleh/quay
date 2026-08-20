@@ -1408,8 +1408,11 @@ export interface SessionMessage {
   text: string;
 }
 
+export type SessionLayer = "Manager" | "Outer" | "Inner" | "Other";
+
 export interface SessionDetail {
   name: string;
+  layer: SessionLayer;
   alive: boolean;
   pid: number | null;
   halted: boolean;
@@ -1417,6 +1420,30 @@ export interface SessionDetail {
   transcriptReason: string | null;
   messages: SessionMessage[] | null;
 }
+
+/**
+ * Classify a session's layer from its target name (the name chosen in SESSION_TARGETS).
+ * Naming conventions: the manager view registers targets literally named `outer` / `inner`;
+ * topology-style names carry the window suffix (`quay-0:outer` / `quay-0:inner`); the manager
+ * session itself is named with a `manager` marker. Case-insensitive substring match, ordered
+ * manager → outer → inner so a name containing several markers resolves deterministically.
+ * Names that match none are "Other" — a session must never be silently dropped from the page.
+ */
+export function classifySessionLayer(name: string): SessionLayer {
+  const n = name.toLowerCase();
+  if (n.includes("manager")) return "Manager";
+  if (n.includes("outer")) return "Outer";
+  if (n.includes("inner")) return "Inner";
+  return "Other";
+}
+
+/** Render order + fixed headings for the /sessions page's three layers (plus the Other fallback). */
+export const SESSION_LAYERS: ReadonlyArray<{ layer: SessionLayer; heading: string }> = [
+  { layer: "Manager", heading: "Manager" },
+  { layer: "Outer", heading: "Outer" },
+  { layer: "Inner", heading: "Inner" },
+  { layer: "Other", heading: "Other / 未分类" },
+];
 
 export interface SessionsResult {
   status: ObservationStatus;
@@ -1482,7 +1509,13 @@ export async function readSessions(root: string): Promise<SessionsResult> {
   if (!p) {
     return { status: "empty", reason: `${SESSION_LIVENESS_REL} 缺失（未接入）`, sessions: [] };
   }
-  const r = await runPluginScript(root, SESSION_LIVENESS_REL, ["--once", "--json"], 20_000);
+  // Register explicit outer+inner targets (same override the Manager view uses) so the sessions
+  // resolve to layer-named rows (`outer` / `inner`) instead of whatever single default target the
+  // workspace env happens to name — the /sessions page is a three-layer view by design. Fail-closed:
+  // when no session name is derivable, buildManagerSessionTargets returns null and we run with the
+  // env's own targets (preserving pre-existing display).
+  const targets = buildManagerSessionTargets(root);
+  const r = await runPluginScript(root, SESSION_LIVENESS_REL, ["--once", "--json"], 20_000, targets ? { SESSION_TARGETS: targets } : undefined);
   if (r.stdout == null) {
     return { status: "empty", reason: r.reason, sessions: [] };
   }
@@ -1503,6 +1536,7 @@ export async function readSessions(root: string): Promise<SessionsResult> {
     }
     sessions.push({
       name: row.name,
+      layer: classifySessionLayer(row.name),
       alive: row.alive,
       pid: row.pid,
       halted: row.halted,
