@@ -13,10 +13,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | 要做什么 | 正本（**不要在本文件复制其内容**） |
 |---|---|
 | 有哪些机件、各自回答什么问题 | `bash plugin/scripts/capability-catalog.sh`（182 条声明，**唯一清单**） |
-| 驱动/投递到别的 Claude 会话 | **默认：`ListAgents` → `SendMessage`**（人 2026-08-12 裁定「实际应用 SendMessage」；需 Claude Code 2.1.224 或更新,本机 2.1.228）。**实测**：目标 busy 直投即达（无 can-receive 闸门）；到达形态 `<cross-session-message from=… from-name=… from-mode=…>`,**身份由平台标注而非发送方自称**；平台强制 peer 不能代替人许可/改配置/**执行斜杠命令**。**旧机件保留可用但非默认路径**（人 2026-08-12 裁定「还保留原实现和测试,但尽量减少对其使用」）：`supervisor-deliver.sh` / `send-keys-reliable.sh` / `drive-target-check.sh` / `transcript-delivery-check.ts` / `message-bus.ts` / `inbox-reader.sh`。**保留的两个不可替代用途**：①**控制面**——`/clear` 等斜杠命令原生通道办不到（文档明确 "Commands don't run"）,只能走 tmux 输入；②**下游交付面**——Claude Code 低于 2.1.224 者 / Bedrock·AWS·GCP·Foundry / native Windows。**手工拼 tmux send-keys 仍禁止。** |
+| 驱动/投递到别的 Claude 会话 | **默认：`ListAgents` → `SendMessage`**（人 2026-08-12 裁定「实际应用 SendMessage」；需 Claude Code 2.1.224 或更新,本机 2.1.228）。**实测**：目标 busy 直投即达（无 can-receive 闸门）；到达形态 `<cross-session-message from=… from-name=… from-mode=…>`,**身份由平台标注而非发送方自称**；平台强制 peer 不能代替人许可/改配置/**执行斜杠命令**。**旧机件保留可用但非默认路径**（人 2026-08-12 裁定「还保留原实现和测试,但尽量减少对其使用」）：`supervisor-deliver.sh` / `send-keys-reliable.sh` / `drive-target-check.sh` / `transcript-delivery-check.ts`。（`message-bus.ts` / `inbox-reader.sh` 随 inbox 机制删除——人 2026-08-20 裁定范围A。）**保留的两个不可替代用途**：①**控制面**——`/clear` 等斜杠命令原生通道办不到（文档明确 "Commands don't run"）,只能走 tmux 输入；②**下游交付面**——Claude Code 低于 2.1.224 者 / Bedrock·AWS·GCP·Foundry / native Windows。**手工拼 tmux send-keys 仍禁止。** |
 | 三层每轮该做什么 | `orchestration/{manager,orchestrator,fast-mode}-tick-core.md`（执行路径；**强制判据是 `tick-core-static-check.ts` 的 (src:N) 覆盖率=100%，不是行数**；「各 ≤80 行」判据退役说明 → `orchestration/archive/AC58-retired-clauses.md#R17`） |
 | 判准 / 收尾 / 发消息形态 | `orchestration/manager-tick-{criteria,closing,sending}.md`（466 行；**停调 workflow 19 小时 ⇒ 这些全部缺席 ⇒ 8 条违规**） |
-| 收件箱（**保留但非默认**，人 2026-08-12「还保留原实现和测试，但尽量减少对其使用」） | **默认改用 `SendMessage`；文件收件箱保留可用。** 若使用它，**判「有没有人给我留话」必须 `ls .quay/manager-inbox/` 列目录本身**——`inbox-reader.sh` 只消费 message-bus 写的 JSON 记录，**手写的 `.md` 它不认**（实测 2026-08-12：目录 64 封 `.md`，它报零 `read` 行）。**一般形态见硬规则 5：同一容器装两类 population，只用覆盖其一的工具去判空，会把非空读成空。** |
 | pane 状态 | `plugin/scripts/pane-state-classify.ts`（底部区域 + 枚举态，**不是整屏哈希**）。**⚠️ 它是【被 import 的判定库】，不是每轮直接调的命令**——真实消费者是 `session-liveness.sh`（`classifyPaneVerdict` 等）与 `inner-blocked-signal.ts:151`（outer A7 / inner A7-A8 经它间接用）。**manager 直接调用那一条（旧 A4）已于 2026-08-14 退役**（人令清理；实测从未执行）→ `orchestration/archive/AC58-retired-clauses.md#R28`。**pane 忙闲是代理量**：pane 进程存在 ≠ 会话在处理（实证：inner 的 pane 一直在而 tick 停 21 分钟）；**判层活性的正本是直接量**（`git log` 提交时刻 / worktree 内活进程）。 |
 | **诊断「空槽 + 池里有货 + 就是不派」** | **先查 subagent 预算,不要先怀疑机制** —— harness 有**会话级累计** spawn 上限，触顶后**静默降级为主线程串行**，三层执行核都不写它。识别：目标会话 transcript 里搜 `Subagent spawn limit reached`；实测燃烧率 ~60 次/天 ⇒ 默认额度约 **3 天**寿命，**任何长于 3 天的自主运行必然撞它**。数值、环境变量名、`/clear` 是否重置、两个易混旋钮（会话累计 vs 并发）——**正本在 `tasks/gap-inner-subagent-budget-invisible.md`，不在此处复制**（数值随 Claude Code 版本变）。**代价实证 2026-08-10：三层 + 人共花数小时反复误诊为「outer 不派发」「inner 自锁」「唤醒链断」，全错。** **第二种成因（2026-08-13 实测补）**：inner 长时间占用回合做【主线程编辑】（红窗快修等），期间既不产生完成事件、也不触发心跳重评估 ⇒ 同样表现为空槽+有货+不派，但 subagent 预算完全正常（实测 21/200）。**识别：查 slot-refill 调用间隔**（实测一夜有 4 段 54–149 分钟空档、合计占窗口 52%），不是查预算。 |
 
@@ -287,7 +286,7 @@ Key cross-cutting facts (require reading several files to see):
    **「还保留原实现和测试,但尽量减少对其使用」——② 被推翻,archive 已叫停,实现与测试原地保留。**
    **⇒ 现状：SendMessage 是默认；旧机件保留可用,仅用于【控制面】（斜杠命令）与【下游不支持原生的环境】。**
    **手工拼 tmux send-keys 依旧禁止**；`send-keys-verified.sh` 早已 superseded（md5 整屏哈希判据被 ADR-016 修正案禁止）。
-2. ~~收件箱~~：**已废除（人 2026-08-12 裁定）。** 曾经的教训仍成立且已推广为通则——
+2. ~~收件箱~~：**彻底删除（人 2026-08-20 裁定范围A，不留 archive/说明）——`message-bus.ts` / `inbox-reader.sh` / `.quay/manager-inbox/` 全部移除，见 `tasks/gap-inbox-message-bus-teardown`。** 曾经的教训已推广为通则——
    **同一个容器里若装着两类 population,只用覆盖其中一类的工具去判空,会把非空读成空**（当时：`inbox-reader.sh` 只认 JSON 记录、看不见手写 `.md`；64 封信被读成零）。
    **这个教训的一般形态见硬规则 5「来源完备性」,不再需要专门的收件箱条目。**
 3. pane 状态：`pane-state-classify.ts`，不是整屏哈希（ADR-016 禁）。

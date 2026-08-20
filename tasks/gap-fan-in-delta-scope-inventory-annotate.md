@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-delta-scope-inventory-annotate
 title: "delta-scope 存量处置：AC1 枚举出的已 done 但未验证任务逐个标注「落地未经全量轮验证」（从 gap-fan-in-delta-scope-doc-only-skip AC4 拆出）"
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
@@ -35,7 +35,8 @@ depends_on:
 
 ## Definition of Done
 
-- [ ] 父任务清单的全部存量任务已标注 + 补跑判定完成。
+- [ ] 父任务 AC1 清单的全部存量任务已逐个标注「落地未经全量轮验证」，标注数 = 清单数可机械核对（AC1）。
+- [ ] 每个标注同时完成补跑判定：需补跑的列出计划、不需补跑的理由写清（AC2），标注提交可 `git log` 追溯（AC3）。
 
 ## Touches
 
