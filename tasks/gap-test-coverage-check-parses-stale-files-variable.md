@@ -6,17 +6,6 @@ parent: null
 children: []
 extra: {}
 ---
----
-id: gap-test-coverage-check-parses-stale-files-variable
-title: "test-coverage-check.ts parses files=(...) but test.sh renamed it to glob=(...) — CI check silently broken"
-status: todo
-labels:
-  - gap
-  - defect
-  - milestone-candidate
-extra:
-  schema: v1
----
 
 **type:** execution
 

@@ -8,19 +8,6 @@ parent: null
 children: []
 extra: {}
 ---
----
-id: gap-direct-bypass-check-quoted-path-false-positive
-title: "direct-to-develop-bypass-check 对非 ASCII 文件名误判——git quotes 使 ^docs/ 排除失效（2fdb6e32 Web UI 设计正本 false positive）"
-status: todo
-labels:
-  - gap
-  - mechanism
-parent: null
-children: []
-extra:
-  schema: execution
-depends_on: []
----
 
 **type:** execution
 

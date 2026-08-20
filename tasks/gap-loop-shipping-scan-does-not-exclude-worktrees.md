@@ -9,16 +9,6 @@ parent: null
 children: []
 extra: {}
 ---
----
-id: gap-loop-shipping-scan-does-not-exclude-worktrees
-status: todo
-labels:
-  - gap
-  - defect
-parent: null
-children: []
-extra: {}
----
 **type:** execution
 
 ## Proposal

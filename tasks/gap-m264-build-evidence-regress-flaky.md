@@ -6,17 +6,6 @@ parent: null
 children: []
 extra: {}
 ---
----
-id: gap-m264-build-evidence-regress-flaky
-title: "M264 regress test is flaky — green in one full-suite run, red in the next, same commit"
-status: todo
-labels:
-  - gap
-  - defect
-  - milestone-candidate
-extra:
-  schema: v1
----
 
 **type:** execution
 
