@@ -549,6 +549,8 @@ budget-13min-falsified：无 subagent 回合预算超时）。运行后看输出
 ⛔ 单次 Bash 调用不得超过 600s——上面的 timeout ${pollBlockSeconds} 已是硬边界，绝不自行加大等待。
 ⛔ 不要做任何等待决策——每次等待的时长由上面的 timeout ${pollBlockSeconds} 硬边界决定、循环次数由最多
 ${maxSuitePolls} 次决定；你只是重跑同一个固定命令，绝不自行选择等待更久/更短。
+⛔ 若某次 Bash 调用被中断/超时 kill（工具报错而非 POLL 输出），suite 仍在 detached 跑——照常再运行一次
+同一等待块，直到 POLL=done 或达到最多 ${maxSuitePolls} 次。
 ${SUITE_WAIT_BASH}
 返回 { done: bool（POLL=done ⇒ true）, suiteExit: int|null }（等待块的内部输出语义，不是你的最终返回——
 你的最终返回见文末 schema）。若 ${maxSuitePolls} 次后仍 POLL=not-done ⇒ 返回 { outcome:'suite-not-done', suiteExit:null }（不执行机械步骤）。`
