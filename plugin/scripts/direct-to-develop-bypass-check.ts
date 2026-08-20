@@ -234,6 +234,11 @@ export const RULED_HISTORICAL_COMMITS: { sha: string; reason: string }[] = [
       "四条在飞任务被同一个 closure 缺陷挡住，修复本身很小（一行标记），走完整 fan-in 要再等一轮全量 suite（500-700s）才能解锁，止损优先于流程完整性。" +
       "教训：manager 直提 develop 同样是不对的行为模式，应当走 fan-in——这次是应急例外，不该成为常态。",
   },
+  {
+    sha: "8e024f88",
+    reason:
+      "outer 直修 plugin/test/outer-cron-registry.test.mjs 的时间炸弹 fixture 日期（2026-08-14 硬编码越过 24h 线 ⇒ 4 条恒红 ⇒ 全量 suite exit 1 ⇒ 卡住所有 fan-in，含 AC104 1h fix 循环）——AC65 类直修（plugin/test 单命令可验：`node --test plugin/test/outer-cron-registry.test.mjs` 32/33，唯一 fail=canonicalRepoRoot 是 worktree 上下文断言非真红），但提交信息用了散文 'AC65 direct-fix（plugin/test 单命令可验）' 而非两谓词要求的确切 `AC65:`+`AC65-Verified:` 两行 ⇒ 非 ac65Authorized 分类。裁定 ruled one-off：修复本身已验证（单命令）、紧急（阻断全管线）、非偷懒绕过 fan-in；amend 会重写 develop 上 19ddd0b2/dc320a35 两个在飞任务引用 sha（AC104 worktree 已 merge dc320a35）。⛔ 教训：outer AC65 直修必须用确切两行形式（declaration + verification artifact），散文声明不豁免。outer 2026-08-20 裁定 ruled one-off（先例 cddc55e2/f9577da1）。",
+  },
 ];
 
 /** 一条 commit sha 是否命中 ruled 豁免表（前缀匹配——git 可能给全量或缩写 sha）。PURE。 */

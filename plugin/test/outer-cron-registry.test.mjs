@@ -110,23 +110,28 @@ function realRegistry() {
   return loadRegistry(REPO_ROOT);
 }
 
-/** 确定性 fixture 收据（不依赖真实注册表——负控制可机器无关地取假）。sha256 与真实正本一致。 */
+/** 确定性 fixture 收据（不依赖真实注册表——负控制可机器无关地取假）。sha256 与真实正本一致。
+ *  createdAt/verifiedAt 取「相对 now 的固定偏移」而非硬编码日期：硬编码日期会随时间老化——
+ *  08-14 固死于 2026-08-20 ~15:17Z 越过 24h 线（剩余 23h < 判据5 的 24h ⇒ CRITICAL ⇒ exit 1），
+ *  全量 suite 恒红 4 条、AC104 fan-in 卡 fix 循环 ~1h。偏移式：created = now−2d（剩余恒 ≈5 天 >
+ *  24h）、verifiedAt = now−1d（判据③ 恒新鲜，now−verifiedAt ≈1 天 < 7 天窗口）。 */
+const FIXTURE_NOW_MS = Date.now();
 const DEFAULT_FIXTURE = {
   inner: {
     cronId: "09fabf33",
     cronExpr: "7,27,47 * * * *",
     promptSha256: sha256Hex(INNER_PROMPT),
     promptBytes: Buffer.byteLength(INNER_PROMPT, "utf8"),
-    createdAt: "2026-08-14T15:17:16Z",
-    verifiedAt: "2026-08-14T16:00:00Z",
+    createdAt: new Date(FIXTURE_NOW_MS - 2 * 24 * 60 * 60 * 1000).toISOString(),
+    verifiedAt: new Date(FIXTURE_NOW_MS - 1 * 24 * 60 * 60 * 1000).toISOString(),
   },
   outer: {
     cronId: "a2360e1d",
     cronExpr: "*/20 * * * *",
     promptSha256: sha256Hex(OUTER_PROMPT),
     promptBytes: Buffer.byteLength(OUTER_PROMPT, "utf8"),
-    createdAt: "2026-08-14T15:21:19Z",
-    verifiedAt: "2026-08-14T16:00:00Z",
+    createdAt: new Date(FIXTURE_NOW_MS - 2 * 24 * 60 * 60 * 1000).toISOString(),
+    verifiedAt: new Date(FIXTURE_NOW_MS - 1 * 24 * 60 * 60 * 1000).toISOString(),
   },
 };
 
