@@ -28,14 +28,12 @@
 > （`repo_root` / `test_command` / `tmux_session` / `fork_baseline` / `merge_target`）。
 > 执行含这些名字的命令前，先读该文件把值代入——不要凭记忆。
 >
-> **工作分支模型（branch cutover，2026-08-06）**：本副本是 quay 自身消费的外层 tick
-> （`orchestration/orchestrator-loop-tick.md`），工作分支按外层裁定直接改为**字面量两线**：
-> `FORK_BASELINE` = develop（已验证基线）、`MERGE_TARGET` = integration（待验证汇入点）——见
-> `.quay/config.yml` `loop:` 节的 `fork_baseline` / `merge_target`。所有含分支操作的命令代入这两个值，
-> 不要字面写死。共享模板 `plugin/loop/orchestrator-loop-tick.md` 的工作分支名**可配置**（默认单线，
-> 供未做 cutover 的下游经升级通道消费），本副本是 quay 自己的两线落地——两者角色分工见任务体 AC5。
-> **切分声明（AC38，2026-08-12 执行切分）**：本文件是 quay 自身消费的**本层实例状态**（工作分支两线、
-> integration 作 checkout、项目列表、tmux 布局、以及每一条判据在本仓的实测与代价）；**产品行为正本**在
+> **工作分支模型（单线，integration 退役说明 → `orchestration/archive/AC58-retired-clauses.md#R04`）**：
+> `FORK_BASELINE` = `MERGE_TARGET` = develop（`.quay/config.yml` `loop:` 节），任务从 develop fork、
+> worktree 内验证、merge 回 develop——见下方 `## 本层状态` 节。共享模板 `plugin/loop/orchestrator-loop-tick.md`
+> 的工作分支名**可配置**，两者角色分工见任务体 AC5。
+> **切分声明（AC38，2026-08-12 执行切分）**：本文件是 quay 自身消费的**本层实例状态**（工作分支、
+> 项目列表、tmux 布局、以及每一条判据在本仓的实测与代价）；**产品行为正本**在
 > `plugin/loop/orchestrator-loop-tick.md`（随 `quay-init --loop` 原样铺到目标项目即本路径）。
 > **切分边界**：**产品行为进 plugin / 本层实例状态留 orchestration**——与 manager 层已按同判据切分
 > （产品模板 vs quay 状态）同形。**本文件的独有内容 = 本层实例状态**（quay 网络取值 / 历史实测 /
@@ -43,14 +41,7 @@
 > tick 核引用同一批行为文件（AC3）。**机械判据（AC38 Contract）**：
 > `comm -3 <(sort plugin/loop/orchestrator-loop-tick.md) <(sort orchestration/orchestrator-loop-tick.md) | wc -l`
 > 即两份独有行数——切分后各自主题单一。**本层状态汇总见下方 `## 本层状态` 节。**
-> **⚠️ 2026-08-09 结构性修正（外层的 WORKING CHECKOUT 切到 integration）**：此前的故障链是「立项/记账
-> 提交落 develop ⇒ 不变式被破（develop-only 累积）⇒ ff 前需并回 integration ⇒ 验证期 tip 被记账推走 ⇒
-> 绿过期」——冻结窗口只是手段不是机制。长效解法：**外层工作 checkout = integration**，develop 只经 ff
-> （batch-merge）前进。`git checkout integration`（如需临时 worktree 已占用 integration，先 `git worktree
-> remove` 它）。此后外层的一切提交（立项/记账/红窗修复）都落 integration；develop 保持 ff-only、无
-> develop-only 提交、不变式（`is-ancestor develop integration`）持久成立；验证跑在 integration（= ff
-> 目标），绿与 ff 树天然对齐。含分支操作的命令仍代入 `fork_baseline`/`merge_target` 两个值（develop /
-> integration），只是「当前 checkout 是哪个」变了。
+> **外层工作 checkout = develop**（integration 双线机制退役说明 → `orchestration/archive/AC58-retired-clauses.md#R04`）。
 
 **启动方式**（在编排会话，即本会话或 `/clear` 后的新会话）：按下方「冷启动」步骤操作——**循环驱动
 只有一个**：步骤 4 的 `CronCreate`（20 分钟 cron）。Monitor 是事件监测，不是驱动。两个都做完再进
@@ -726,7 +717,7 @@ node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --report -
 node --experimental-strip-types plugin/scripts/task-status-drift-check.ts
 node --experimental-strip-types plugin/scripts/task-status-drift-check.ts --stranded   # stranded worktree branches (gap-stranded-...: silent fail-closed alarm)
 cat docs/analysis/batch2-queue-state.md             # 内层自报的队列状态
-bash plugin/scripts/supervisor-bus-identity.sh inbox-summary   # 收件箱机械挂载点（gap-supervisor-message-bus-with-identity AC4）：unread 逐条进决策，delivered≠consumed
+# 收件箱机械挂载点已退役（inbox 机制彻底删除，人 2026-08-20 裁定范围A；见 tasks/gap-inbox-message-bus-teardown）
 bash plugin/scripts/manager-tick-log-check.sh --json   # AC5b 行判据(新旧两格式)+缩水棘轮(基线sidecar <log>.baseline，pass 时自动上调)——自动调用者；fail(exit 非 0) 按既有升级通道处置（写 tick-log + 攒给人），不静默
 ```
 

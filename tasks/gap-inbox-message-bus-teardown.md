@@ -34,6 +34,7 @@ depends_on: []
 | `plugin/scripts/capability-catalog.sh` | 验证机件（**SINGLE SOURCE OF TRUTH**，1909 行），6 处 `inbox-reader.sh` 引用（:222/:476/:746/:1016/:1286 等） | **改**：移除条目 |
 | `packages/quay/plugin/scripts/capability-catalog.sh` | 打包副本（1859 行，与正本 diff） | 同步 |
 | `plugin/test/supervisor-bus-identity.test.mjs` | 测 claim-human-test + inbox-summary 两子命令 | **改**：收缩到保留子命令 |
+| `orchestration/fast-mode-tick-core.md:26` | **inner 执行核 A5 行**（`bash plugin/scripts/supervisor-bus-identity.sh inbox-summary`）——与 outer A5（已迁 R35）平行的 inner 侧同一条 | **改**：迁出到 inner 侧归档（同 outer R35 处置），inner 独占文件 inner 落盘 |
 | `docs/analysis/fast-mode-loop-tick.md` | inner tick 文档，:320-328 收件箱机械挂载点 | **改**：移除（inner 独占文档，inner 落盘） |
 | `plugin/loop/fast-mode-loop-tick.md` | inner 产品模板，:432-445 | **改**：移除（inner 独占） |
 | `orchestration/SPEC-inbox-service-2026-08-08.md` | 设计记录（inbox 机制的设计正本） | **删**（git 历史 = 落点；外层裁定：设计推理已随机制退役，git 可复现） |
@@ -54,7 +55,7 @@ depends_on: []
 2. **改 supervisor-bus-identity.sh**（正本 + 打包副本）：移除 `claim-human-test`、`inbox-summary` 两子命令与其 `BUS_TS` 变量/`inbox` 变量；确认脚本无其他依赖 message-bus.ts 的核心投递路径（外层已核实：脚本只有这两个子命令，无 delegate-to-supervisor-deliver 独立路径）；保留 usage 骨架与脚本身份注释。
 3. **改 capability-catalog.sh**（正本 1909 行 + 打包副本 1859 行）：移除全部 `inbox-reader.sh` 条目（含 head/每轮/失效前提/日期/判定词条）；保持 182 条声明口径与 catalog 自检绿。
 4. **改 supervisor-bus-identity.test.mjs**：删除 claim-human-test + inbox-summary 的测试用例，保留脚本存在的断言（如 usage/exit 行为），suite 绿。
-5. **inner 侧文档**（inner 独占，inner 落盘）：`docs/analysis/fast-mode-loop-tick.md:320-328` 收件箱机械挂载点 + `plugin/loop/fast-mode-loop-tick.md:432-445` 移除；外层已在 orchestration/ 侧同步删。
+5. **inner 侧文档**（inner 独占，inner 落盘）：`orchestration/fast-mode-tick-core.md:26` 的 **A5 行**迁出（inner 侧归档，平行于 outer R35）+ `docs/analysis/fast-mode-loop-tick.md:320-328` + `plugin/loop/fast-mode-loop-tick.md:432-445` 收件箱机械挂载点移除；外层已在 orchestration/ 侧同步删。
 6. **设计记录删除**（外层已裁定，落点 = git 历史）：SPEC-inbox-service + quay-message-bus-human-in-the-network + quay-message-bus-proposal-manager 三份删除；**同步清理死引用**——plugin/skills/{manager,init}/SKILL.md 的 reference 行、SPEC-integration-architecture 的引用、quay-product-outline 等提案文档的提及（position-based 复核，仅删指向已删文档的真实引用，保留历史叙述本身）。
 7. **验证**：全量 suite 绿（`scripts/test.sh`）。**本任务触碰 capability-catalog.sh（验证机件）+ 产品代码，判据B 明确不适用快路径**——fan-in 前必须有 per-task suite 验证（AC84 语义）。
 
@@ -63,7 +64,7 @@ depends_on: []
 - [x] AC1: `packages/quay/src/message-bus.ts` + `packages/quay/test/message-bus.test.mjs` + `packages/quay/test/message-bus-identity.test.mjs` + `plugin/scripts/inbox-reader.sh` + `plugin/test/inbox-reader.test.mjs` 及打包副本删除；`grep -rl 'message-bus\|inbox-reader' packages/ plugin/` 仅剩本任务允许的注释/历史引用，零真实引用（position-based 复核）。
 - [x] AC2: `supervisor-bus-identity.sh`（正本+打包副本）不再引用 `message-bus.ts` / `.quay/manager-inbox`；`BUS_TS` 变量与 claim-human-test/inbox-summary 子命令移除；脚本 `bash plugin/scripts/supervisor-bus-identity.sh` 无子命令时仍 exit 0（usage 行为），`supervisor-bus-identity.test.mjs` 收缩后全绿。
 - [x] AC3: `capability-catalog.sh`（正本+打包副本）的 `inbox-reader.sh` 条目全部移除，catalog 自检绿（`bash plugin/scripts/capability-catalog.sh --check` 或对应测试）；声明口径与删除前一致（182 条 - 1 条 inbox-reader）。
-- [x] AC4: inner 侧文档 `docs/analysis/fast-mode-loop-tick.md` 与 `plugin/loop/fast-mode-loop-tick.md` 的收件箱机械挂载点段移除；无 `inbox-summary` / `inbox-reader` 引用残留（position-based 复核，历史任务体 tasks/gap-*.md 除外——那 15 个历史任务体 git 历史记录，不做追溯编辑）。
+- [ ] AC4: inner 侧执行核 `orchestration/fast-mode-tick-core.md` 的 **A5 行**迁出（inner 侧归档，平行于 outer R35）+ 文档 `docs/analysis/fast-mode-loop-tick.md` 与 `plugin/loop/fast-mode-loop-tick.md` 的收件箱机械挂载点段移除；**三层 tick 文档（outer 核/loop + inner 核/loop）零 `inbox-summary` / `inbox-reader` 真实引用残留**（position-based 复核，历史任务体 tasks/gap-*.md 除外——那 15 个历史任务体 git 历史记录，不做追溯编辑）；inner 核 tick-core-static-check 仍 100% 覆盖。
 - [x] AC6: 三份设计记录（SPEC-inbox-service / quay-message-bus-human-in-the-network / quay-message-bus-proposal-manager）删除；**死引用清理完备**——`grep -rl 'SPEC-inbox-service-2026-08-08\|quay-message-bus-human-in-the-network\|quay-message-bus-proposal-manager' plugin/ orchestration/ docs/` 零命中（git 历史任务体除外），SKILL.md reference 行、SPEC-integration-architecture 引用、提案文档提及全部同步处理。
 - [ ] AC5: 全量 suite 绿（`scripts/test.sh` exit 0）且 fan-in 前有 per-task suite 验证记录（AC84：判据B 不适用快路径）。
 
@@ -84,6 +85,8 @@ depends_on: []
 - plugin/scripts/capability-catalog.sh（改：移除条目）
 - packages/quay/plugin/scripts/capability-catalog.sh（打包副本，同步）
 - plugin/test/supervisor-bus-identity.test.mjs（改：收缩）
+- orchestration/fast-mode-tick-core.md（inner 独占执行核，A5 行迁出归档）
+- orchestration/archive/AC58-retired-clauses.md（A5 迁出落点，追加 R36）
 - docs/analysis/fast-mode-loop-tick.md（inner 独占，移除收件箱段）
 - plugin/loop/fast-mode-loop-tick.md（inner 独占，移除收件箱段）
 - orchestration/SPEC-inbox-service-2026-08-08.md（删，设计记录）
@@ -94,6 +97,8 @@ depends_on: []
 - orchestration/SPEC-integration-architecture-2026-08-05.md（改：移除已删文档引用）
 - docs/proposals/quay-product-outline.md（核：移除已删文档提及 + DELIVERY-INVENTORY 快照再生成 scripts=266→265）
 - docs/analysis/test-file-baseline.txt（删 3 个测试文件后的必要同步：test-file-snapshot relative-baseline 机械要求；另吸收 develop 已存在的陈旧遗漏 plugin/test/mirror-measure-history.test.mjs）
+- docs/proposals/quay-saas-remote-access-to-an-onprem-loop.md（核：移除对已删 quay-message-bus 文档的死引用）
+- docs/proposals/quay-web-human-is-not-an-operator.md（核：移除对已删 quay-message-bus 文档的死引用）
 - tasks/gap-inbox-message-bus-teardown.md（自身）
 
 ## Evidence（inner 落盘 2026-08-20，impl 完成）
