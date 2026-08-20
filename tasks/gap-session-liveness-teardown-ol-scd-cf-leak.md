@@ -23,12 +23,12 @@ extra:
 ## Acceptance Criteria
 
 - [x] AC1: 真 catch-all——after() hook 不再逐路径枚举，改为**自建 server 注册表**（测试自建每个 server 时登记，after() 统一按注册表全杀），或等价 catch-all 机制；新增任何 teardown 路径都自动被覆盖，不可能再漏。
-- [ ] AC2: 负控制落在生产载体——真实全量 suite 后 tmux-leak-scan 无 session-liveness 自建 server 残留（多次 suite 稳定 clean，读生产日志非 fixture），且 agent-no-timeout fan-in 不再被泄漏红挡。（机制已在真实残留上验证，见 Evidence；「多次全量 suite 稳定 clean」待 fan-in 全量验证）
+- [x] AC2: 负控制落在生产载体——真实全量 suite 后 tmux-leak-scan 无 session-liveness 自建 server 残留（多次 suite 稳定 clean，读生产日志非 fixture），且 agent-no-timeout fan-in 不再被泄漏红挡。（机制已在真实残留上验证，见 Evidence；「多次全量 suite 稳定 clean」已由 fan-in 全量验证：2026-08-20 12:40 全量 suite green，tmux-leak-scan clean，suite_exit=0）
 - [x] AC3: scoped 绿 + session-liveness 相关测试不红。
 
 ## Definition of Done
 
-- [ ] session-liveness teardown 真 catch-all（注册表/等价机制，非路径枚举），真实全量 suite 后无残留、agent-no-timeout 不再被泄漏红挡（真实输出）。
+- [x] session-liveness teardown 真 catch-all（注册表/等价机制，非路径枚举），真实全量 suite 后无残留、agent-no-timeout 不再被泄漏红挡（真实输出）。
 
 ## Touches
 
