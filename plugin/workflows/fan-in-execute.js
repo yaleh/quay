@@ -672,6 +672,31 @@ if [ "$full_suite_ran" = "true" ]; then
     exit 2
   fi
   # mirror-state-block-end
+  # mirror-history-block-start
+  # measure-history.jsonl mirror-write (gap-measure-history-detached-suite-mirror-write AC1/AC3):
+  # the detached suite (setsid bash scripts/test.sh) never goes through full-suite-runner.ts (the ONLY
+  # measure-history.jsonl writer) ⇒ <shared-checkout>/.quay/measure-history.jsonl went stale (last record
+  # 2026-08-17T04:29:08Z; every detached-suite round after that carried no per-file durations — the sibling
+  # victim of gap-full-suite-state-stale-no-writer's root cause). Append a round parsed from THIS round's
+  # REAL suite log (the __PERFILE__ lines measure-suite-reporter.mjs already emitted into the suite's
+  # stdout, redirected to /tmp/fan-in-suite-<task>.log), reusing landMeasureHistory — the SAME function
+  # full-suite-runner.ts calls — so the data format is identical to the runner's direct writes (AC3: the
+  # measure-trend-check.ts consumer reads the same shape). Guarded by full_suite_ran=true (a doc-only skip
+  # never fabricates a round). writer 经 git common-dir 从 worktree 解析主检出（同 pre-verified-round-record /
+  # mirror-full-suite-state）。写失败 ⇒ HARD FAIL（AC1 义务）；benign no-op（无 __PERFILE__ 行 / 重复日志）
+  # 由 writer 以 exit 0 返回（不挡 fan-in）。capture 无 suite_log_file（pre-verified 复用时 caller 未记录其
+  # 日志路径）⇒ SKIP + WARN（响亮不静默——本 finding 正是「停摆两天无人知」；无法解析的轮不假装已入账）。
+  if [ -n "$suite_log_file" ]; then
+    if ! node --experimental-strip-types ${worktree}/plugin/scripts/mirror-measure-history.ts \
+      --log "$suite_log_file" --lane-count "$lane_count" --run-at "$end_iso" \
+      --task-id ${task} --run-id ${runId}; then
+      echo "FATAL: measure-history.jsonl mirror-write 失败（AC1 义务）⇒ 不翻 done、不 ff" >&2
+      exit 2
+    fi
+  else
+    echo "WARN: measure-history mirror-write skip — capture 无 suite_log_file（caller 未记录 suite 日志路径）⇒ 无法解析 __PERFILE__ 行入账" >&2
+  fi
+  # mirror-history-block-end
 fi
 # preverified-round-block-end
 # ⚠️ 本步【不】rm "$suite_capture"——ff 闸 (fan-in-ff-merge.sh AC1 收窄) 要读本任务 capture 的

@@ -11,6 +11,12 @@
 # full-suite-runner.ts / worktree-process-reaper.ts); the behavioral invariant
 # (plugin/scripts/suite-slot-ssot-check.ts + plugin/test) verifies the two agree.
 #
+# SEAM SYMMETRY (gap-suite-lock-slot-seam-asymmetry): the TS canonical suiteLockSlotCount() reads the
+# SAME precedence as this file — RESOURCE_GATE_CONCURRENT_SUITES (the deterministic test seam) FIRST,
+# then 旋钮② QUAY_MAX_CONCURRENT_SUITES, then the 2 default, with empty-string-as-unset (`:-`) on both.
+# The two canons therefore agree under ANY env, including a test seam (they could only drift if one
+# side's semantics changed independently — exactly what suite-slot-ssot-check I4 detects).
+#
 # Functions:
 #   suite_slot_count     — echo S = RESOURCE_GATE_CONCURRENT_SUITES (test seam, same convention as
 #                          test.sh's derivation functions) → QUAY_MAX_CONCURRENT_SUITES (旋钮②) → 2.

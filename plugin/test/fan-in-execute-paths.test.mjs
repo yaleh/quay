@@ -1213,6 +1213,120 @@ test("⑦b REAL skip — a doc-only capture (full_suite_ran=false) writes NO ful
   assert.equal(fs.existsSync(path.join(dir, ".quay", "full-suite-state.json")), false, "no full-suite-state.json for a doc-only skip (the full_suite_ran=true guard excludes it)");
 });
 
+// ── ⑦c measure-history.jsonl mirror-write (gap-measure-history-detached-suite-mirror-write AC1/AC3) ──
+// The detached suite (setsid bash scripts/test.sh) never goes through full-suite-runner.ts (the ONLY
+// measure-history.jsonl writer) ⇒ the per-file duration ledger went stale (last record 2026-08-17T04:29:08Z;
+// two days of detached-suite rounds with no records). The fix: step 4.5 mirror-appends a round parsed from
+// THIS round's REAL suite log (the __PERFILE__ lines measure-suite-reporter.mjs already emitted) via
+// plugin/scripts/mirror-measure-history.ts (reusing landMeasureHistory — the SAME function the runner
+// calls, so the data format is identical), guarded by full_suite_ran=true (a doc-only skip never fabricates
+// a round). These tests run the REAL block against a real temp repo + a real capture + a real suite log.
+
+async function mirrorHistoryBlockFor(task, worktree, root) {
+  const { prompts } = await runWorkflow({
+    args: { task, worktree, root, runId: "fm-mhist-1", mergeTarget: "develop" },
+  });
+  return extractBlockFromPrompts(prompts, "# mirror-history-block-start", "# mirror-history-block-end");
+}
+
+test("⑦c wiring — the fan-in prompt carries a measure-history.jsonl mirror-write block (mirror-measure-history.ts, guarded by full_suite_ran=true, inside the preverified-round-block)", async (t) => {
+  const { prompts } = await runWorkflow({
+    args: { task: "gap-test-mhist", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-mhist", mergeTarget: "develop" },
+  });
+  const block = extractBlockFromPrompts(prompts, "# mirror-history-block-start", "# mirror-history-block-end");
+  assert.ok(block.includes("mirror-measure-history.ts"), "block must invoke the mirror writer");
+  assert.ok(block.includes('--log "$suite_log_file"'), "block must pass the capture's REAL suite log path (the __PERFILE__ source)");
+  assert.ok(block.includes('--lane-count "$lane_count"'), "block must reuse the capture's lane count");
+  assert.ok(block.includes('--run-at "$end_iso"'), "block must pass the capture's real end time as runAt");
+  assert.ok(block.includes("--task-id gap-test-mhist"), "block must carry the fan-in task id (traceability)");
+  assert.ok(block.includes("--run-id fm-mhist"), "block must carry the fan-in runId (traceability)");
+  // The mirror write lives INSIDE the full_suite_ran=true guard (the same shared guard as the
+  // verification-round write) — a doc-only skip must not fabricate a round.
+  const p2 = promptContaining(prompts, "# mirror-history-block-start");
+  const guardIdx = p2.indexOf('[ "$full_suite_ran" = "true" ]');
+  const blockIdx = p2.indexOf("# mirror-history-block-start");
+  const guardEndIdx = p2.indexOf("# preverified-round-block-end");
+  assert.ok(guardIdx >= 0, "the full_suite_ran=true guard must be present in the phase-2 prompt");
+  assert.ok(blockIdx > guardIdx && blockIdx < guardEndIdx, "the mirror write runs INSIDE the full_suite_ran=true guard");
+});
+
+test("⑦c REAL mirror — a green fan-in capture with a REAL suite log appends a measure-history.jsonl round to the shared checkout (gap-measure-history-detached-suite-mirror-write AC1/AC3)", async (t) => {
+  const dir = makePreVerifiedWorktree();
+  t.after(() => cleanup(dir));
+  const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: dir, encoding: "utf8" }).stdout.trim();
+  const task = "gap-test-mhist-real";
+  const capture = `/tmp/fan-in-suite-${task}.env`;
+  const suiteLog = `/tmp/fan-in-suite-${task}.log`;
+  fs.writeFileSync(suiteLog, [
+    "__PERFILE__ duration_ms=1204.5 /home/yale/work/quay-worktrees/gap-demo/plugin/test/a.test.mjs passed=true",
+    "__PERFILE__ duration_ms=842.25 /home/yale/work/quay-worktrees/gap-demo/plugin/test/b.test.mjs passed=true",
+    "__PERFILE__ duration_ms=999999.5 /home/yale/work/quay-worktrees/gap-demo/plugin/test/c.test.mjs passed=false",
+  ].join("\n") + "\n", "utf8");
+  t.after(() => { for (const f of [capture, suiteLog]) { try { fs.rmSync(f, { force: true }); } catch (_) { /* best-effort */ } } });
+  fs.writeFileSync(capture, [
+    "full_suite_ran=true",
+    "skip_reason=",
+    "cpu_s=42.5",
+    "cpu_source=gnu-time",
+    "start_iso=2026-08-18T04:30:00.000Z",
+    "end_iso=2026-08-18T04:45:36.519Z",
+    "wall_ms=936519",
+    "load=8.03",
+    "lane_count=8",
+    "suite_exit=0",
+    `suite_head=${head}`,
+    `suite_log_file=${suiteLog}`,
+  ].join("\n") + "\n", "utf8");
+
+  const block = await mirrorHistoryBlockFor(task, dir, REPO_ROOT);
+  const r = runBash(`suite_capture="${capture}"; . "$suite_capture"; ${block}`, { cwd: dir });
+  assert.equal(r.status, 0, `mirror write must exit 0: ${r.stderr}`);
+  const historyFile = path.join(dir, ".quay", "measure-history.jsonl");
+  assert.ok(fs.existsSync(historyFile), "measure-history.jsonl was written to the shared checkout");
+  const lines = fs.readFileSync(historyFile, "utf8").trim().split("\n");
+  assert.equal(lines.length, 3, "one record per test file in the round");
+  const rec = JSON.parse(lines[0]);
+  // The record shape is IDENTICAL to full-suite-runner's direct writes (AC3 — the measure-trend-check.ts
+  // consumer reads this exact shape; no worktree-root prefix on the key).
+  assert.equal(typeof rec.round, "number");
+  assert.equal(rec.runAt, "2026-08-18T04:45:36.519Z", "runAt = the capture's end_iso");
+  assert.equal(rec.file, "plugin/test/a.test.mjs", "file key is normalized repo-root-relative");
+  assert.equal(rec.durationMs, 1204.5);
+  assert.equal(rec.passed, true);
+  assert.equal(rec.laneCount, 8);
+  assert.equal(typeof rec.logDigest, "string");
+});
+
+test("⑦c REAL no-op — a green fan-in capture whose suite log has NO __PERFILE__ lines writes NO round (exit 0, never a fabricated measure-history round)", async (t) => {
+  const dir = makePreVerifiedWorktree();
+  t.after(() => cleanup(dir));
+  const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: dir, encoding: "utf8" }).stdout.trim();
+  const task = "gap-test-mhist-nop";
+  const capture = `/tmp/fan-in-suite-${task}.env`;
+  const suiteLog = `/tmp/fan-in-suite-${task}.log`;
+  fs.writeFileSync(suiteLog, "__OVERHEAD__ run_static_checks_ms=100\nno perfile lines here\n", "utf8");
+  t.after(() => { for (const f of [capture, suiteLog]) { try { fs.rmSync(f, { force: true }); } catch (_) { /* best-effort */ } } });
+  fs.writeFileSync(capture, [
+    "full_suite_ran=true",
+    "skip_reason=",
+    "cpu_s=42.5",
+    "cpu_source=gnu-time",
+    "start_iso=2026-08-18T05:00:00.000Z",
+    "end_iso=2026-08-18T05:15:00.000Z",
+    "wall_ms=900000",
+    "load=4.5",
+    "lane_count=8",
+    "suite_exit=0",
+    `suite_head=${head}`,
+    `suite_log_file=${suiteLog}`,
+  ].join("\n") + "\n", "utf8");
+
+  const block = await mirrorHistoryBlockFor(task, dir, REPO_ROOT);
+  const r = runBash(`suite_capture="${capture}"; . "$suite_capture"; ${block}`, { cwd: dir });
+  assert.equal(r.status, 0, `no-perfile-lines must exit 0 (benign no-op, never blocks the fan-in): ${r.stderr}`);
+  assert.equal(fs.existsSync(path.join(dir, ".quay", "measure-history.jsonl")), false, "no measure-history.jsonl for a suite with no __PERFILE__ lines (no fabricated round)");
+});
+
 test("⑦ REAL real-suite WITH a suite log — the fan-in landing row carries the phase fields + concurrency variables (gap-fan-in-verification-round-thin-schema-phase-gap AC1/AC4)", async (t) => {
   // THE DEFECT THIS TASK FIXES: fan-in landing rows were thin — no serial/main/static phase ms, no
   // nproc/concurrentSuiteSlots/concurrentSuitesRunning — so AC101's lane-concurrency control round

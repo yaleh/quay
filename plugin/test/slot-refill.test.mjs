@@ -669,6 +669,105 @@ test("DEFER — slot-refill exposes deferred candidates with reasons (touches-ov
   for (const d of r.deferred) assert.ok(!r.recommended.includes(d.id), `deferred ${d.id} must not be recommended`);
 });
 
+// ── ASSEMBLEBATCH-DEFERRED (gap-slot-refill-discards-assemblebatch-deferred): slot-refill only
+// destructured assembleBatch's `batch`, DISCARDING its `deferred` — so a candidate that passed all
+// step-4 checks yet was serialized by assembleBatch (shared-state / learning-type /
+// non-capability-growth) reported `deferred=[]` + the misleading "no dispatchable candidate passes
+// step-4" no_refill_reason. AC1: the assembleBatch deferred reasons must be merged into the output's
+// `deferred`. AC2: no_refill_reason must report the REAL rejection face (assembleBatch serialization)
+// instead of "no dispatchable candidate passes step-4" when candidates DID pass step-4. ───────────────
+
+// AC1 + AC3 negative control: a ready task whose `## Touches` hits SHARED_STATE_PATHS is deferred by
+// assembleBatch with a readable "touches shared exp5 state" reason (NOT deferred=[] + misleading
+// no_refill_reason). Real CLI output (DoD: 真实输出，非 fixture).
+test("ASSEMBLEBATCH-DEFERRED (AC1/AC3) — a shared-state-touch ready task surfaces the assembleBatch rejection reason in `deferred` and a non-misleading no_refill_reason", (t) => {
+  const root = makeWorkspace("batch-defer");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // The candidate passes EVERY step-4 check (touches-resolve / deps-ready / disjoint / self-touch C8)
+  // but its `## Touches` declares a SHARED_STATE_PATHS path — assembleBatch serializes it.
+  writeTask(root, "gap-shared", {
+    status: "ready",
+    labels: ["gap"],
+    body: dispatchableBody(["- experiments/quay-perpetual-stream/dashboard.md (new)"]),
+  });
+  const script = path.resolve(__dirname, "..", "scripts", "slot-refill.ts");
+  const r = JSON.parse(execFileSync(
+    process.execPath,
+    ["--no-warnings", "--experimental-strip-types", script, "--root", root, "--cap", "5", "--json"],
+    { encoding: "utf8", env: { ...process.env, QUAY_TELEMETRY_SUBAGENTS: "0" } },
+  ));
+  // AC1: the assembleBatch rejection reason is visible in the output's `deferred`.
+  const d = (r.deferred || []).find((x) => x.id === "gap-shared");
+  assert.ok(d, `gap-shared deferred by assembleBatch, got deferred=${JSON.stringify(r.deferred)}`);
+  assert.ok(/touches shared exp5 state/.test(d.reason),
+    `reason names the shared-state serialization, got: ${d.reason}`);
+  // AC2: no_refill_reason reports the REAL rejection face, NOT the misleading step-4 message.
+  assert.ok(!/no dispatchable candidate passes step-4/.test(r.no_refill_reason || ""),
+    `no_refill_reason must not misreport step-4 emptiness, got: ${r.no_refill_reason}`);
+  assert.ok(/assembleBatch/.test(r.no_refill_reason || "") && /touches shared exp5 state/.test(r.no_refill_reason || ""),
+    `no_refill_reason names the assembleBatch rejection face, got: ${r.no_refill_reason}`);
+  assert.deepEqual(r.recommended, [], "the shared-state candidate is not recommended");
+});
+
+// AC1: a `learning`-typed candidate is serialized by assembleBatch — the reason must be visible.
+test("ASSEMBLEBATCH-DEFERRED (AC1) — a learning-type candidate surfaces the 'learning-type' rejection reason", (t) => {
+  const root = makeWorkspace("batch-learn");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-learn", {
+    status: "ready",
+    labels: ["gap"],
+    body: dispatchableBody(["- code/learn.ts (new)"]).replace("**type:** execution", "**type:** learning"),
+  });
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 5 });
+  const d = (r.deferred || []).find((x) => x.id === "gap-learn");
+  assert.ok(d, `gap-learn deferred by assembleBatch, got deferred=${JSON.stringify(r.deferred)}`);
+  assert.ok(/learning-type/.test(d.reason), `reason names learning-type, got: ${d.reason}`);
+  assert.deepEqual(r.recommended, [], "the learning candidate is not recommended");
+});
+
+// AC1: a non-capability-growth value-type candidate is serialized by assembleBatch — the reason must
+// be visible.
+test("ASSEMBLEBATCH-DEFERRED (AC1) — a non-capability-growth candidate surfaces the 'non-capability-growth' rejection reason", (t) => {
+  const root = makeWorkspace("batch-value");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-disc", {
+    status: "ready",
+    labels: ["gap"],
+    body: dispatchableBody(["- code/disc.ts (new)"]).replace("**type:** execution", "**type:** execution\n**Value type:** discovery"),
+  });
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 5 });
+  const d = (r.deferred || []).find((x) => x.id === "gap-disc");
+  assert.ok(d, `gap-disc deferred by assembleBatch, got deferred=${JSON.stringify(r.deferred)}`);
+  assert.ok(/non-capability-growth/.test(d.reason), `reason names non-capability-growth, got: ${d.reason}`);
+  assert.deepEqual(r.recommended, [], "the non-capability-growth candidate is not recommended");
+});
+
+// AC2: distinguish the two "empty recommended" shapes. (a) NO candidate passed step-4 ⇒ the original
+// "no dispatchable candidate passes step-4" message is kept. (b) candidates PASSED step-4 but
+// assembleBatch serialized them ⇒ the real rejection face is reported.
+test("ASSEMBLEBATCH-DEFERRED (AC2) — no_refill_reason distinguishes 'step-4 empty' from 'assembleBatch serialized'", (t) => {
+  const root = makeWorkspace("batch-emptyshape");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // (a) step-4 empty: a candidate deferred by deps-not-ready (never reaches assembleBatch).
+  writeTask(root, "gap-dep", { status: "ready", labels: ["gap"], parent: "gap-never-done", body: dispatchableBody(["- code/dep.ts (new)"]) });
+  const rStep4Empty = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 5 });
+  assert.deepEqual(rStep4Empty.recommended, []);
+  assert.match(rStep4Empty.no_refill_reason || "", /no dispatchable candidate passes step-4/,
+    "step-4-empty keeps the original no_refill_reason");
+  // (b) assembleBatch-serialized: a candidate that PASSES step-4 but touches shared state.
+  writeTask(root, "gap-shared", {
+    status: "ready",
+    labels: ["gap"],
+    body: dispatchableBody(["- experiments/quay-perpetual-stream/dashboard.md (new)"]),
+  });
+  const rBatchEmpty = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 5 });
+  assert.deepEqual(rBatchEmpty.recommended, []);
+  assert.ok(!/no dispatchable candidate passes step-4/.test(rBatchEmpty.no_refill_reason || ""),
+    "assembleBatch-empty must NOT use the step-4 message");
+  assert.match(rBatchEmpty.no_refill_reason || "", /passed step-4 but assembleBatch deferred/,
+    "assembleBatch-empty names the serialization face");
+});
+
 test("SUPERSEDED FILTER — marker-form only: a ready task CARRYING **SUPERSEDED** is deferred; one DISCUSSING the word is recommended (AC46 marker fix)", (t) => {
   const root = makeWorkspace("superseded-filter");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));

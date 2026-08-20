@@ -1786,7 +1786,12 @@ test("AC2 — concurrentSuiteSlots() reads QUAY_MAX_CONCURRENT_SUITES (the singl
   // setting fails OPEN to the single-suite default (2 is the current knob value; a misconfigured host
   // degrades to the old 1-slot behavior, never to 0 lanes). The value is clamped to an integer >= 1.
   const prev = process.env.QUAY_MAX_CONCURRENT_SUITES;
+  const prevSeam = process.env.RESOURCE_GATE_CONCURRENT_SUITES;
   try {
+    // Clear the seam too — suiteLockSlotCount() reads RESOURCE_GATE_CONCURRENT_SUITES FIRST (since
+    // gap-suite-lock-slot-seam-asymmetry), so a "default with the knob deleted" assertion must not be
+    // shadowed by an ambient seam.
+    delete process.env.RESOURCE_GATE_CONCURRENT_SUITES;
     delete process.env.QUAY_MAX_CONCURRENT_SUITES;
     assert.equal(concurrentSuiteSlots(), 2, "default slot count = 2 (旋钮② current value)");
     process.env.QUAY_MAX_CONCURRENT_SUITES = "1";
@@ -1802,6 +1807,8 @@ test("AC2 — concurrentSuiteSlots() reads QUAY_MAX_CONCURRENT_SUITES (the singl
   } finally {
     if (prev === undefined) delete process.env.QUAY_MAX_CONCURRENT_SUITES;
     else process.env.QUAY_MAX_CONCURRENT_SUITES = prev;
+    if (prevSeam === undefined) delete process.env.RESOURCE_GATE_CONCURRENT_SUITES;
+    else process.env.RESOURCE_GATE_CONCURRENT_SUITES = prevSeam;
   }
 });
 
