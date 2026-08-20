@@ -1,7 +1,8 @@
 ---
 id: gap-inbox-message-bus-teardown
-title: "inbox 机制彻底删除（范围A，人 2026-08-20 09:2xZ 裁定）——message-bus.ts/inbox-reader.sh 代码+测试删除，supervisor-bus-identity.sh 失效子命令退役，capability-catalog 条目清理"
-status: todo
+title: inbox 机制彻底删除（范围A，人 2026-08-20 09:2xZ 裁定）——message-bus.ts/inbox-reader.sh
+  代码+测试删除，supervisor-bus-identity.sh 失效子命令退役，capability-catalog 条目清理
+status: ready
 labels:
   - gap
   - mechanism
