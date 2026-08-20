@@ -29,14 +29,14 @@
       },
       "outer": {
         "name": "quay-outer",
-        "launcher": "claude-fjdac",
-        "model": "glm-5.3",
+        "launcher": "claude-deepseek",
+        "model": "deepseek-v4-flash",
         "env": {}
       },
       "inner": {
         "name": "quay-inner",
-        "launcher": "claude-fjdac",
-        "model": "glm-5.3",
+        "launcher": "claude-deepseek",
+        "model": "deepseek-v4-flash",
         "env": {}
       }
     },
