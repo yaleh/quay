@@ -376,6 +376,19 @@ export function resolveRegisteredServerPid(entry) {
   return null;
 }
 
+/** Cheap deadProcOnly pre-filter: does this entry's server have ANY cheap live signal — the socket
+ * file still on disk (a live tmux server holds it open), or a verified-live recorded tmux pid?
+ * Absent both, the expensive /proc discovery (socket-inode map walk + full-cmdline scan) would only
+ * confirm a gone server — skip it. The recorded pid is captured at registration and a still-alive
+ * server's pid is stable, so a live server whose socket later closed is still caught via
+ * isLiveTmuxPid(entry.pid). Prevents the O(/proc × registry) walk on every pre-suite sweep (the
+ * registry is append-only and grows: 344 dead entries ≈ 3s measured on this machine). */
+function serverPlausiblyAlive(entry) {
+  try { if (fs.existsSync(sockOfDir(entry.dir))) return true; } catch { /* dir gone */ }
+  if (entry.pid && isLiveTmuxPid(entry.pid)) return true;
+  return false;
+}
+
 /** killRegisteredServers(filter) — kill every STILL-ALIVE server the durable registry describes,
  * per the caller's filter:
  *   { proc }          — only THIS process's entries (the test after() hook).
@@ -391,6 +404,11 @@ export function killRegisteredServers(filter = {}) {
     if (filter.proc !== undefined && entry.proc !== filter.proc) continue;
     if (filter.runId !== undefined && entry.runId !== filter.runId) continue;
     if (filter.deadProcOnly && isProcAlive(entry.proc)) continue;
+    // deadProcOnly fast-path: skip the O(/proc) discovery when no cheap live signal exists — the
+    // sweep runs on EVERY suite (registry-driven TRUE catch-all), so a gone server must not cost a
+    // full process-table scan per entry. Verified live servers (socket on disk / live recorded pid)
+    // still reach resolveRegisteredServerPid and get their PID-targeted SIGKILL unchanged.
+    if (filter.deadProcOnly && !serverPlausiblyAlive(entry)) continue;
     const pid = resolveRegisteredServerPid(entry);
     if (pid === null || pid === process.pid) continue;
     try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ }
