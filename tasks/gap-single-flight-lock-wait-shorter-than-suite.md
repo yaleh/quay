@@ -1,7 +1,7 @@
 ---
 id: gap-single-flight-lock-wait-shorter-than-suite
 title: "single-flight 锁等待 600s < suite 时长 ~840s——第 3+ suite 在 slot 释放前 fail-closed 白等 600s 后 relaunch"
-status: ready
+status: done
 labels:
   - gap
   - performance
