@@ -36,7 +36,7 @@ fan-in-execute.js 的「短命轮询 subagent」（每轮起一个新短命 agen
 
 ## Definition of Done
 
-- [ ] 「~13min subagent 硬超时」只在唯一一处（源任务）保留并标注证伪，其余活文档删除；短命轮询 agent 实现被单个 agent 循环等替代（或写明不可替代理由），真实 fan-in 走新路径绿（真实输出，非 fixture）。
+- [x] 「~13min subagent 硬超时」只在唯一一处（源任务）保留并标注证伪，其余活文档删除；短命轮询 agent 实现被单个 agent 循环等替代（或写明不可替代理由），真实 fan-in 走新路径绿（真实输出，非 fixture）。（2026-08-20 实测：证伪说明已落 `gap-fan-in-turn-budget-suite-timeout.md` 唯一一处；SUITE_WAIT_BASH 单 agent 循环已实现替换短命轮询；本任务 fan-in 走新路径全量 suite 绿 exit=0 / wall 917823 / lane 16 / head 4ad047d，读真实 journal，anti-drift 5/5 文件在 Touches 内——生产载体负控制满足）
 
 ## Evidence
 
