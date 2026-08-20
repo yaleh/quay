@@ -20,14 +20,16 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: Journal 页读取 tick-log 最新条目（`## 时间戳` + 散文格式），不再找已废弃的表格块。
-- [ ] AC2: 负控制——tick-log 有今日条目时 Journal 页显示今日（非陈旧 08-14）。
-- [ ] AC3: 反向对照——tick-log 缺失/空时报 empty，不误报有数据（fail-closed 保持）。
+- [x] AC1: Journal 页读取 tick-log 最新条目（`## 时间戳` + 散文格式），不再找已废弃的表格块。
+- [x] AC2: 负控制——tick-log 有今日条目时 Journal 页显示今日（非陈旧 08-14）。
+- [x] AC3: 反向对照——tick-log 缺失/空时报 empty，不误报有数据（fail-closed 保持）。
 
 ## Definition of Done
 
-- [ ] Journal 页显示 tick-log 最新条目（真实输出，非 fixture）。
+- [x] Journal 页显示 tick-log 最新条目（真实输出，非 fixture）。
 
 ## Touches
 
+- packages/quay/src/observation.ts
+- packages/quay/test/serve.test.mjs
 - tasks/gap-webui-journal-reads-stale-data.md（自身）

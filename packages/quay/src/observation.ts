@@ -39,7 +39,8 @@ export const TICK_LOG_FILE = "tick-log.md";
 export const GIT_LOG_LIMIT = 20;
 /** Recent-entry bounds for the /journal page. */
 export const JOURNAL_ESCALATION_SECTIONS = 10;
-export const JOURNAL_TICK_ROWS = 15;
+/** tick-log.md entries are `## 时间戳`-headed (or `` `HH:MMZ` ``-bulleted) prose — read as SECTIONS, not table rows. */
+export const JOURNAL_TICK_SECTIONS = 15;
 /**
  * gap-live-cannot-tell-a-dead-loop-from-an-unwired-one: the activity window used to tell
  * 「循环在跑但没接遥测」 apart from 「循环根本没跑」. A signal is "active" if it falls inside the
@@ -394,6 +395,12 @@ function readRecentSections(root: string, relFile: string, max: number): Journal
     };
   }
   const lines = text.split(/\r?\n/);
+  // Fail-closed (gap-webui-journal-reads-stale-data AC3): a present-but-empty/whitespace-only
+  // file is NOT data — report 「无数据」 (status empty), never "ok with no content" which the
+  // renderer would show as 「暂无内容」 and could be mistaken for a genuinely empty-but-wired store.
+  if (!lines.some((ln) => ln.trim().length > 0)) {
+    return { status: "empty", reason: `${relFile} 为空`, markdown: null };
+  }
   const boundaries: number[] = [];
   lines.forEach((ln, i) => {
     if (/^##\s+/.test(ln)) boundaries.push(i);
@@ -409,35 +416,6 @@ function readRecentSections(root: string, relFile: string, max: number): Journal
     recent.unshift(lines.slice(boundaries[i], boundaries[i + 1]).join("\n"));
   }
   return { status: "ok", reason: null, markdown: recent.join("\n\n") };
-}
-
-/**
- * Read a markdown table file and keep the header + separator + the most recent `max` data rows.
- * Newest-first tables (tick-log.md) put recent rows right after the header, so the first `max`
- * `|`-rows after the separator are the recent ones; a trailing summary/tally table is excluded
- * because it sits at the END of the `|`-row sequence.
- */
-function readRecentTableRows(root: string, relFile: string, max: number): JournalSection {
-  const abs = path.join(root, relFile);
-  let text: string;
-  try {
-    if (!fs.existsSync(abs)) {
-      return { status: "empty", reason: `missing ${relFile}`, markdown: null };
-    }
-    text = fs.readFileSync(abs, "utf8");
-  } catch (err) {
-    return {
-      status: "error",
-      reason: `cannot read ${relFile}: ${err instanceof Error ? err.message : String(err)}`,
-      markdown: null,
-    };
-  }
-  const tableLines = text.split(/\r?\n/).filter((ln) => ln.trim().startsWith("|"));
-  if (tableLines.length < 2) {
-    return { status: "ok", reason: null, markdown: tableLines.join("\n") };
-  }
-  const markdown = [tableLines[0], tableLines[1], ...tableLines.slice(2, 2 + max)].join("\n");
-  return { status: "ok", reason: null, markdown };
 }
 
 /** Recent commits via `git -C <root> log --oneline -N`. A non-git workspace degrades to empty. */
@@ -467,7 +445,7 @@ function readRecentCommits(root: string, limit: number): JournalSection {
 export function readJournal(root: string): JournalResult {
   return {
     escalations: readRecentSections(path.join(root, ORCHESTRATION_DIR), ESCALATIONS_FILE, JOURNAL_ESCALATION_SECTIONS),
-    tickLog: readRecentTableRows(path.join(root, ORCHESTRATION_DIR), TICK_LOG_FILE, JOURNAL_TICK_ROWS),
+    tickLog: readRecentSections(path.join(root, ORCHESTRATION_DIR), TICK_LOG_FILE, JOURNAL_TICK_SECTIONS),
     commits: readRecentCommits(root, GIT_LOG_LIMIT),
   };
 }
