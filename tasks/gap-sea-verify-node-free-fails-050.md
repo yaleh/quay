@@ -41,7 +41,8 @@ depends_on: []
 
 ## Definition of Done
 
-- [ ] SEA 无 Node 通道验证通过（AC2），缺陷根因（A 或 B）落记录。
+- [ ] SEA 无 Node 通道验证通过（AC2）：`sea-verify-node-free` 与 `sea-verify-node-free-cross-platform` 在无 Node 环境 serve+curl 全绿。
+- [ ] 缺陷根因判定（假说 A 真依赖运行时 Node / 假说 B 验证步骤 env 假设错）以实测落记录，修复提交可 `git log` 追溯（AC3），不接受跳过验证。
 
 ## Touches
 
