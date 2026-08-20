@@ -1553,13 +1553,15 @@ export function renderBoardPage(board: {
     awaitingLand: boolean;
   }>;
   // gap-webui-board-no-pagination: server-side pagination + status/label filter metadata.
-  page: number;
-  totalPages: number;
-  totalRows: number;
-  statusFilter: string | null;
-  labelFilters: string[];
-  pageSize: number;
-  pageSizeInvalid: boolean;
+  // Optional — a board built without it (e.g. direct renderBoardPage unit-test callers) renders
+  // as a single unfiltered page (defaults applied inside the render, never a crash).
+  page?: number;
+  totalPages?: number;
+  totalRows?: number;
+  statusFilter?: string | null;
+  labelFilters?: string[];
+  pageSize?: number;
+  pageSizeInvalid?: boolean;
 }): string {
   const landingNote = board.landing.status === "ok"
     ? html`<span>落地: <code>task-status-drift-check.ts</code> · 扫描 ${board.landing.scanned} 任务</span>`
@@ -1606,41 +1608,51 @@ export function renderBoardPage(board: {
 
   // ── gap-webui-board-no-pagination: filter summary + page-size selector + page nav ──
   // All server-rendered: plain <a href> links and one GET form — no <script> anywhere (AC3).
+  // The metadata is optional on the input board: a board object built without pagination/filter
+  // fields (direct renderBoardPage callers, e.g. the load-120s AC3 fail-open unit test) renders
+  // as a single unfiltered page at the default page size — never a crash.
+  const page = board.page ?? 1;
+  const totalPages = board.totalPages ?? 1;
+  const totalRows = board.totalRows ?? board.rows.length;
+  const statusFilter = board.statusFilter ?? null;
+  const labelFilters = board.labelFilters ?? [];
+  const pageSize = board.pageSize ?? DEFAULT_PAGE_SIZE;
+  const pageSizeInvalid = board.pageSizeInvalid ?? false;
   const filterParts: string[] = [];
-  if (board.statusFilter) {
-    filterParts.push(html`status=${escapeHtml(board.statusFilter)} (<a href="${buildBoardHref(null, board.labelFilters, null, board.pageSize)}">clear</a>)`);
+  if (statusFilter) {
+    filterParts.push(html`status=${escapeHtml(statusFilter)} (<a href="${buildBoardHref(null, labelFilters, null, pageSize)}">clear</a>)`);
   }
-  for (const l of board.labelFilters) {
-    filterParts.push(html`label=${escapeHtml(l)} (<a href="${buildBoardHref(board.statusFilter, board.labelFilters.filter((x) => x !== l), null, board.pageSize)}">clear</a>)`);
+  for (const l of labelFilters) {
+    filterParts.push(html`label=${escapeHtml(l)} (<a href="${buildBoardHref(statusFilter, labelFilters.filter((x) => x !== l), null, pageSize)}">clear</a>)`);
   }
   const filterNav = filterParts.length > 0
     ? html`<p class="meta list-nav">Filter: ${filterParts.join(" · ")}</p>`
     : "";
   const filterForm = html`<form method="GET" style="margin:0.5rem 0 0.75rem;display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap">
-    <input name="status" type="text" placeholder="status (e.g. done)" value="${escapeHtml(board.statusFilter || "")}" style="padding:0.4rem 0.6rem;border:1px solid var(--color-divider);border-radius:4px;font-size:0.9rem;min-width:120px">
-    <input name="label" type="text" placeholder="label (e.g. gap)" value="${escapeHtml(board.labelFilters[0] || "")}" style="padding:0.4rem 0.6rem;border:1px solid var(--color-divider);border-radius:4px;font-size:0.9rem;min-width:120px">
+    <input name="status" type="text" placeholder="status (e.g. done)" value="${escapeHtml(statusFilter || "")}" style="padding:0.4rem 0.6rem;border:1px solid var(--color-divider);border-radius:4px;font-size:0.9rem;min-width:120px">
+    <input name="label" type="text" placeholder="label (e.g. gap)" value="${escapeHtml(labelFilters[0] || "")}" style="padding:0.4rem 0.6rem;border:1px solid var(--color-divider);border-radius:4px;font-size:0.9rem;min-width:120px">
     <button type="submit" style="padding:0.4rem 0.8rem">Filter</button>
     ${filterParts.length > 0 ? html`<a href="/board" style="margin-left:0.25rem">clear all</a>` : ""}
   </form>`;
   const pageSizeOptions = [20, 50, 100, 250];
   const pageSizeNav = html`<p class="meta">Page size:
     ${pageSizeOptions.map((sz) =>
-      sz === board.pageSize
+      sz === pageSize
         ? html`<strong>${sz}</strong>`
-        : html`<a href="${buildBoardHref(board.statusFilter, board.labelFilters, null, sz)}">${sz}</a>`
+        : html`<a href="${buildBoardHref(statusFilter, labelFilters, null, sz)}">${sz}</a>`
     ).join(" ")}
-    ${board.pageSizeInvalid ? html`<span class="error-banner" role="alert" style="display:inline;margin-left:0.5rem">Invalid pageSize value ignored; showing default (${DEFAULT_PAGE_SIZE}).</span>` : ""}
+    ${pageSizeInvalid ? html`<span class="error-banner" role="alert" style="display:inline;margin-left:0.5rem">Invalid pageSize value ignored; showing default (${DEFAULT_PAGE_SIZE}).</span>` : ""}
   </p>`;
-  const pageNav = board.totalPages > 1 ? html`
+  const pageNav = totalPages > 1 ? html`
     <p class="meta">
-      ${board.page > 1
-        ? html`<a href="${buildBoardHref(board.statusFilter, board.labelFilters, board.page - 1, board.pageSize)}">&laquo; Previous</a>`
+      ${page > 1
+        ? html`<a href="${buildBoardHref(statusFilter, labelFilters, page - 1, pageSize)}">&laquo; Previous</a>`
         : html`<span class="page-nav-disabled">&laquo; Previous</span>`}
-      &nbsp; Page ${board.page} of ${board.totalPages} (${board.totalRows} rows) &nbsp;
-      ${board.page < board.totalPages
-        ? html`<a href="${buildBoardHref(board.statusFilter, board.labelFilters, board.page + 1, board.pageSize)}">Next &raquo;</a>`
+      &nbsp; Page ${page} of ${totalPages} (${totalRows} rows) &nbsp;
+      ${page < totalPages
+        ? html`<a href="${buildBoardHref(statusFilter, labelFilters, page + 1, pageSize)}">Next &raquo;</a>`
         : html`<span class="page-nav-disabled">Next &raquo;</span>`}
-    </p>` : html`<p class="meta">Page 1 of ${board.totalPages} (${board.totalRows} rows)</p>`;
+    </p>` : html`<p class="meta">Page 1 of ${totalPages} (${totalRows} rows)</p>`;
 
   return html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay board — 三源 join 看板">${modernistStyles()}${pageStyles()}<title>Board — 三源 join 看板</title></head>
