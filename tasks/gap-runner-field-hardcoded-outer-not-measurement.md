@@ -1,7 +1,7 @@
 ---
 id: gap-runner-field-hardcoded-outer-not-measurement
 title: "full-suite-runner 的 runner 字段恒写 \"outer\"（无 --runner 旗标）——结构上不可能取假的量 + AC84 判据1 把它当恒真合取项"
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
