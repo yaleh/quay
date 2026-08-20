@@ -1,8 +1,8 @@
 export const meta = {
   name: 'fan-in-execute',
-  description: 'AC78 fan-in 执行 workflow — 无锁段（merge develop → delta 断言面判定 → ts-typecheck → scoped 门+全量+doc）与持锁段（flip done → fan-in-ff-merge.sh）由本脚本生成的 subagent prompt 全权执行；全量 suite 的【等待】由脚本控制流承担（setTimeout + 轮询 agent，gap-fan-in-turn-budget-suite-timeout），不占任何 subagent 回合预算；subagent 在 ff 成功后才返回。A6 只检查「是否走了本 workflow」（判据2 (a)(b)(c)）。',
+  description: 'AC78 fan-in 执行 workflow — 无锁段（merge develop → delta 断言面判定 → ts-typecheck → scoped 门+全量+doc）与持锁段（flip done → fan-in-ff-merge.sh）由本脚本生成的 subagent prompt 全权执行；全量 suite 的【等待】由阶段 2 agent 在本回合内多次 <600s Bash 循环承担（gap-subagent-turn-budget-13min-falsified：已证伪「subagent 回合预算硬超时」，真实限制仅 Bash 单次 600s 硬顶 + suite 实测 19+ min）；subagent 在 ff 成功后才返回。A6 只检查「是否走了本 workflow」（判据2 (a)(b)(c)）。',
   whenToUse: 'inner 对某任务执行 fan-in 时（A6）：以 scriptPath 调用本 workflow，args={task, worktree, root, runId, mergeTarget}。禁止 name:（M176 陷阱：同会话第二次 name: 派发可能取旧脚本体）。',
-  phases: [{ title: 'FanIn', detail: '阶段1（预备+启动 detached suite，立即返回）→ 脚本控制流等 suite（回合预算承载）→ 阶段2（入账+flip+ff+bracket），ff 成功后才返回' }],
+  phases: [{ title: 'FanIn', detail: '阶段1（预备+启动 detached suite，立即返回）→ 阶段2 agent 回合内循环 <600s Bash 等 suite →（红则 Fix agent 重启动）→ 入账+flip+ff+bracket，ff 成功后才返回' }],
 }
 
 // ══ 本文件的设计（AC78 判据1/判据5/判据6，tasks/gap-ac78-fan-in-workflow-a6-check）══════════
@@ -30,25 +30,33 @@ export const meta = {
 //     root 与 worktree 的 fan-in-execute.js 不一致（本次派发没用 worktree 版 scriptPath）echo WARN——
 //     结构性缺口仍在。改本文件必须同步 plugin/workflows/fan-in-execute.js（双拷贝，workflows-dual-copy-
 //     drift-check）与 A6 派发规则（fast-mode-tick-core.md：命中 ⇒ scriptPath 用 worktree 版）。
-//  ⑦ 回合预算承载（gap-fan-in-turn-budget-suite-timeout）：step4 全量 suite ~14-25min > subagent
-//     回合预算 ⇒ 旧设计中 subagent 等 suite 时回合耗尽被强制收尾（capture 未写/flip/ff/bracket 全缺，
-//     release-timeout 实证 + AC95 第 2 次复发；AC101 达成不缓解——fan-in 的 suite 因 CPU 争用仍超预算）。
-//     修复 = 把 suite 交给【长生命周期载体】（detached setsid 进程，subagent 退出不影响它），把
-//     【等待】从 subagent 回合搬到【脚本控制流】——setTimeout + 轮询 agent 读 exit marker
-//     （ab380c5e 同源：等待由脚本控制流决定，不存在需要做等待决策的 agent；execute-suite-fix.js 前例）。
+//  ⑦ suite 等待（gap-fan-in-turn-budget-suite-timeout 的 2026-08-20 证伪 → gap-subagent-turn-budget-
+//     13min-falsified）：旧设计假设「subagent 有 ~10-13min 回合预算硬超时」⇒ 全量 suite ~14-25min 等
+//     不完 ⇒ 把等待搬到脚本控制流（setTimeout + 每轮起一个新短命轮询 agent）。该前提已被证伪：①inner
+//     (2b140e8a) 29 个直属 subagent 15 个 >10min、14 个 >13min、最长 38.7min，正常完成非截断；②官方
+//     无 subagent 整体超时，真实硬顶只有 Bash 单次 600s（GitHub #61405）；③本仓库两份「~13min 实证」
+//     打开后都不是超时（wf_c6f4d0ef-c6a 13.6min 正常完成 / wf_1072dc43-893 user interrupted）。
+//     ⇒ 真实约束 = 全量 suite 实测 19+ min > Bash 单次 600s 硬顶 ⇒ 需要【跨多次 <600s Bash 调用】等待，
+//     【不需要】每轮起一个新 agent。修复 = 【单个阶段 2 agent】在本回合内循环多次 <600s Bash 等 suite
+//     （有界阻塞等待 timeout ${pollBlockSeconds} + sleep ${pollBlockSleep}，最多 ${maxSuitePolls} 次），
+//     suite 绿后执行机械步骤；suite 红 ⇒ 返回 suite-red，脚本派 Fix agent 重启动 detached suite 后重派
+//     阶段 2。detached（setsid+&+disown）仍成立（suite 生命周期不依赖 subagent）。证伪说明唯一保留处 =
+//     tasks/gap-fan-in-turn-budget-suite-timeout.md「2026-08-20 证伪」。
 //     阶段划分：
 //       阶段 1（agent #1）：step 0-4 预备（merge/delta/typecheck/scoped/doc）+ 启动 detached suite +
 //           写 pre-suite capture → 立即返回（outcome=suite-started / skipped / preverified）。
-//       脚本控制流：setTimeout + 轮询 agent（短促只读 exit marker；命中则补全 capture post 字段）。
-//       红 suite ⇒ Fix agent（读日志 → 修 → 重新启动 detached）→ 脚本再等（有界 maxFixRounds）。
+//       阶段 2（agent #2）：本回合内循环 <600s Bash 等 suite（最多 ${maxSuitePolls} 次，有界阻塞等待
+//           timeout ${pollBlockSeconds} + sleep ${pollBlockSleep}）→ 补全 capture post 字段 → suite 绿则
+//           机械步骤（step 4.5 入账 + step 5 flip+ff + step 5.5 bracket）；suite 红 ⇒ 返回
+//           { outcome:'suite-red', suiteExit }（不执行机械步骤，脚本派 Fix agent）。
+//       红 suite ⇒ Fix agent（读日志 → 修 → 重新启动 detached）→ 脚本再派阶段 2（有界 maxFixRounds）。
 //       ff 失败（develop 前进，窗口 = merge 到 ff 之间的整个 suite 时长）⇒ 回阶段 1 重跑
 //       （有界 maxFfRetries，同 SPEC §7 防活锁阈值；阶段 1 首步 revert 上次 ff 失败遗留的 done 翻转）。
-//       阶段 2（agent #2）：step 4.5 入账 + step 5 flip+ff + step 5.5 bracket → 返回。
 //     ⛔ 禁止 Bash(run_in_background:true)（subagent 退出被 harness 连带杀，execute-suite-fix.js
-//        实证 runId f6b824b5）；⛔ 禁止前台 bash scripts/test.sh（>10min 前台 Bash 上限 + 回合窗）。
+//        实证 runId f6b824b5）；⛔ 禁止前台 bash scripts/test.sh（suite 19+ min > Bash 单次 600s 硬顶）。
 //     取假（plugin/test/fan-in-execute-paths.test.mjs）：构造 step2 code_delta 非空 ⇒ 阶段 1 启动
-//     detached suite（setsid+&+disown）且立即返回；脚本轮询到 suite 绿 ⇒ 阶段 2 机械步骤（flip/ff/
-//     bracket）全执行。等待由脚本控制流决定，不占任何 subagent 回合。
+//     detached suite（setsid+&+disown）且立即返回；阶段 2 agent 的等待块循环 <600s Bash 到 suite 绿 ⇒
+//     机械步骤（flip/ff/bracket）全执行。等待由阶段 2 agent 承担，脚本不派短命轮询 agent。
 //  ⑩ 启动 suite 的 single-flight 锁等待（gap-single-flight-lock-wait-shorter-than-suite）：test.sh 的
 //     FULL_SUITE_LOCK_TIMEOUT 默认 600 < suite 实测上界 ~840s ⇒ 5 fan-in 撞 2 slot 时第 3+ suite 白等
 //     600s 后 fail-closed「not starting」relaunch。SUITE_LAUNCH/ISOLATE_LAUNCH 启动 detached suite 时经
@@ -108,13 +116,11 @@ const worktree = A.worktree
 const root = A.root
 const runId = A.runId ?? ''
 const mergeTarget = A.mergeTarget ?? 'develop'
-// 回合预算承载的脚本控制流可调参数（生产用默认；测试经 args 覆盖，如 pollIntervalMs=0）。
-const pollIntervalMs = A.pollIntervalMs ?? 60_000   // 脚本 setTimeout 的轮询间隔
-const firstDelayMs = A.firstDelayMs ?? 660_000      // 首轮轮询延迟（suite 已测下界 11min ⇒ 从 t=660s 起轮，~21 次空转→~10 次；gap-fan-in-execute-poll-cost-firstdelay-agenttype）
-const maxSuitePolls = A.maxSuitePolls ?? 60         // 单次 suite 等待的有界轮询数（60×60s=60min 上限）
+// 阶段 2 agent 的 suite 等待可调参数（生产用默认；测试经 args 覆盖，如 pollBlockSeconds=10、pollBlockSleep=0.2）。
+const maxSuitePolls = A.maxSuitePolls ?? 60         // 阶段 2 agent 内循环等待的有界轮询数（60×(540s/次)=9h 上限；suite 实测 19min ⇒ ~3 次）
 const maxFixRounds = A.maxFixRounds ?? 4            // 红 suite 的最大修复迭代
 const maxFfRetries = A.maxFfRetries ?? 3            // ff 失败（develop 前进）的最大重试（同 SPEC §7 阈值）
-const pollBlockSeconds = A.pollBlockSeconds ?? 540  // 轮询 agent 内有界阻塞等待的硬边界（< Bash 600s 上限，gap-fan-in-execute-poll-bounded-blocking-wait）
+const pollBlockSeconds = A.pollBlockSeconds ?? 540  // 阶段 2 agent 内单次 <600s Bash 有界阻塞等待的硬边界（gap-fan-in-execute-poll-bounded-blocking-wait）
 const pollBlockSleep = A.pollBlockSleep ?? 15        // 阻塞等待的检查粒度（每 N 秒看一眼 exit marker）
 const releaseLivelockRounds = A.releaseLivelockRounds ?? 3  // release 侧 anti-livelock（gap-gate-release-no-isolate-rerun-no-livelock）：同一 load-sensitive 红连续 release ≥3 轮 ⇒ escalate（SPEC §7「同一任务失败 ≥3 次 才谈防活锁」同阈值）
 const suiteLockTimeoutSecs = A.suiteLockTimeoutSecs ?? 900  // fan-in 启动的 suite 的 single-flight 锁等待（FULL_SUITE_LOCK_TIMEOUT，秒）——test.sh 默认 600 < suite 实测上界 807931ms ≈ 808s ⇒ 5 fan-in 撞 2 slot 时第 3+ suite 在 slot 释放前 fail-closed「not starting」白等 600s 后 relaunch（gap-single-flight-lock-wait-shorter-than-suite）。900 ≥ 808 + 余量；由 SUITE_LAUNCH/ISOLATE_LAUNCH 经 env 传入启动的 detached suite；调用方可经 env FULL_SUITE_LOCK_TIMEOUT 覆盖（测试 seam）。
@@ -264,41 +270,34 @@ echo "FIX_SCOPE_VERDICT=$fix_scope_out"
 - FIX_SCOPE_NOT_EVALUATED=1 ⇒ fail-closed：本任务不修任何失败，全部 defer（无法评估 ≠ 合格）。
 修完 inScope 后照常重新启动全量 suite。返回的 failuresFixed 只列 inScope 修复；越界 defer/release 写进 note。重跑后 suite 仍红的 load-sensitive 红 ⇒ 仍按本 gate release，⛔ 绝不转 fix。`
 
-// ── 脚本控制流的 suite 等待：不把等待决策交给任何 agent（ab380c5e / execute-suite-fix.js）──────
-// 轮询 agent 内有界阻塞等待（gap-fan-in-execute-poll-bounded-blocking-wait）：timeout 540 + sleep 15
-// 循环，最多 540s 硬边界（< Bash 600s 上限），把 ~21 次空转轮询压到 ~3 次；决策权仍在脚本——
-// timeout 540 是脚本给的硬边界、maxSuitePolls 是脚本循环上限，agent 不自决「等多久」。命中 marker
-// 则补全 capture 的 post 字段。脚本 setTimeout 仍是外层轮询间隔。
-// 首轮起轮延迟（gap-fan-in-execute-poll-cost-firstdelay-agenttype）：suite 已测下界 11min，却从
-// t=60s 起轮 ⇒ 头 11-15 次结构上必然 not-done 纯空转。firstDelayMs（默认 660s）让首轮 setTimeout
-// 从 660s 起，后续回到 pollIntervalMs——与上面的有界阻塞等待叠加，把 ~21 次空转压到 ~10 次（
-// pollIntervalMs=0 测试 seam 照旧可用：firstDelayMs 也可经 args 覆盖）。
+// ── 阶段 2 agent 的 suite 等待：单 agent 循环多次 <600s Bash，不每轮起新 agent ────────────────────────
+// （gap-subagent-turn-budget-13min-falsified：2026-08-20 证伪「subagent ~13min 回合预算硬超时」——
+// 旧设计「每轮起一个新短命轮询 agent + 脚本 setTimeout」唯一依据就是这个假数字。真实限制只有 Bash
+// 单次 600s 硬顶 + suite 实测 19+ min ⇒ 阶段 2 agent 在本回合内多次运行下面的自足等待块（单次有界
+// 阻塞等待 timeout ${pollBlockSeconds} + sleep ${pollBlockSleep}，< 600s 硬边界），POLL=not-done 就再跑
+// 一次（最多 ${maxSuitePolls} 次）。detached suite 不受影响（setsid+&+disown，SUITE_LAUNCH）。）
 // ── agent() 无 timeout 旋钮的局限（gap-agent-no-timeout-option 2026-08-20 外层裁定）─────────────
 // Workflow 工具 agent() 的 opts 仅 {label, phase, schema, model, effort, isolation, agentType}——
 // 没有 timeout/bashTimeout 旋钮。「加旋钮」是 Claude Code 特性请求，本仓库改不了。
-// ⇒ 有界阻塞等待（timeout 540，见 pollBlockSeconds 默认）落在【Bash 工具】的时限上，而「Bash
-// 执行时限须设大于 540s」是纯语言请求、非代码保证——poll agent 可能被 Bash 默认 120s kill、
-// 提前返回 not-done。
-// ⇒ 兜底 = suite 以 detached 方式运行（setsid + & + disown，见 SUITE_LAUNCH）：poll agent 的
-// timeout 只界它【自己看 marker】的时长、不界 suite 生命周期；即使 poll 提前超时返回 not-done，
-// suite 继续跑，脚本 setTimeout 循环再轮询。detached 让「agent 内长阻塞」成为纯优化（空转轮询从
-// ~21 次压到 ~3 次），而非正确性要求。
-// ⇒ 硬边界判据（AC1）：firstDelayMs + pollBlockSeconds ≥ suite 时长（实测 19+ min ≈ 1140s）。
-//   不得收窄到 < Bash 默认 120s 去「让等待落在默认时限内」——100s < suite 时长 ⇒ poll 每次在
-//   suite 结束前超时返回 not-done ⇒ fan-in 误判「suite 异常」→ release → relaunch 无限循环
-//   （b187d84a 已回退，7d973c40）。
-async function pollSuite() {
-  return agent(
-    `你是 fan-in suite 等待轮询（workflow 脚本控制流调用，有界阻塞等待，一回合内返回）。任务 ${task} 的 suite 以 detached 方式运行。用 Bash 工具运行下面命令并返回结果——不要做任何等待决策（等待由 workflow 脚本控制）。命令里的 timeout ${pollBlockSeconds} 是脚本给的硬边界；Bash 工具的执行时限须设大于 ${pollBlockSeconds}s（上限 600s）。
+// ⇒ 有界阻塞等待（timeout ${pollBlockSeconds}，见 pollBlockSeconds 默认）落在【Bash 工具】的时限上，
+// 而「Bash 执行时限须设大于 ${pollBlockSeconds}s」是纯语言请求、非代码保证——阶段 2 agent 的 Bash 可能
+// 被默认 120s kill、提前返回 not-done。
+// ⇒ 兜底 = suite 以 detached 方式运行（setsid + & + disown，见 SUITE_LAUNCH）：等待块的超时只界它
+// 【自己看 marker】的时长、不界 suite 生命周期；即使 Bash 提前超时返回 not-done，suite 继续跑，阶段 2
+// agent 重跑等待块即可。detached 让「agent 内长阻塞」成为纯优化（空转轮询压到 ~3 次），而非正确性要求。
+// ⇒ 覆盖判据（AC1，取代旧 firstDelayMs+pollBlockSeconds）：maxSuitePolls × pollBlockSeconds ≥ suite
+//   时长（实测 19+ min ≈ 1140s）。默认 60×540=32400s ≫ 1140s；不得把单次收窄到 < Bash 默认 120s 去
+//   「让等待落在默认时限内」还指望一次覆盖 suite（b187d84a 已回退，7d973c40）。
+const SUITE_WAIT_BASH = `
 suite_capture="/tmp/fan-in-suite-${task}.env"
 suite_exit_marker="/tmp/fan-in-suite-${task}.exit"
 suite_time_file="/tmp/fan-in-suite-${task}.time"
 suite_log_file="/tmp/fan-in-suite-${task}.log"
 if [ ! -f "$suite_exit_marker" ]; then
   # 有界阻塞等待（gap-fan-in-execute-poll-bounded-blocking-wait）：最多 ${pollBlockSeconds}s 硬边界
-  # （< Bash 600s 上限），每 ${pollBlockSleep}s 看一眼 marker。决策权仍在脚本——这个 timeout 是脚本给的
-  # 硬边界、maxSuitePolls 是脚本循环上限，agent 不自决「等多久」（ab380c5e 是 agent 自决等待，这里是
-  # 脚本手里的有界等待）。
+  # （< Bash 600s 上限），每 ${pollBlockSleep}s 看一眼 marker。决策权在固定命令——这个 timeout 是脚本给的
+  # 硬边界、maxSuitePolls 是循环上限，agent 不自决「等多久」，只是重跑同一个固定命令（ab380c5e 是
+  # agent 自决等待，这里是固定命令的有界等待）。
   timeout ${pollBlockSeconds} bash -c 'while [ ! -f "$1" ]; do sleep ${pollBlockSleep}; done' _ "$suite_exit_marker" || true
 fi
 if [ ! -f "$suite_exit_marker" ]; then
@@ -309,7 +308,7 @@ fi
 suite_exit=$(sed -n 's/^exit=//p' "$suite_exit_marker" | tail -1)
 [ -n "$suite_exit" ] || suite_exit=1
 # 真实结束时刻由 detached suite 在退出时刻写入 marker（gap-fan-in-suite-duration-poll-
-# granularity-inflation）：poll 只读不重算 ⇒ wall_ms 不再含轮询发现延迟（round232 +65.1s 虚高）。
+# granularity-inflation）：等待块只读不重算 ⇒ wall_ms 不再含轮询发现延迟（round232 +65.1s 虚高）。
 # 旧格式 marker 无 end_ms/end_iso ⇒ fallback 到 poll-discovery 时刻（backward compat，不报错）。
 marker_end_ms=$(sed -n 's/^end_ms=//p' "$suite_exit_marker" | tail -1)
 marker_end_iso=$(sed -n 's/^end_iso=//p' "$suite_exit_marker" | tail -1)
@@ -346,42 +345,15 @@ if [ -f "$suite_time_file" ]; then
 fi
 printf 'cpu_s=%s\\ncpu_source=%s\\ncpu_user_s=%s\\ncpu_sys_s=%s\\nend_iso=%s\\nend_ms=%s\\nwall_ms=%s\\nload=%s\\nlane_count=%s\\nsuite_exit=%s\\n' \\
   "$cpu_s" "$cpu_source" "$cpu_user_s" "$cpu_sys_s" "$end_iso" "$end_ms" "$wall_ms" "$load" "$lane_count" "$suite_exit" >> "$suite_capture"
-echo "POLL=done SUITE_EXIT=$suite_exit"
-返回 { done: bool（POLL=done ⇒ true）, suiteExit: int|null }。marker 存在但读不出 suite_exit ⇒ done=true, suiteExit=null（fail-closed，脚本按非绿处理）。`,
-    {
-      schema: {
-        type: 'object',
-        properties: {
-          done: { type: 'boolean' },
-          suiteExit: { type: 'number' },
-        },
-        required: ['done'],
-      },
-    }
-  )
-}
+echo "POLL=done SUITE_EXIT=$suite_exit"`
 
-async function waitForSuite() {
-  let done = false
-  let exit = null
-  let polls = 0
-  let delayMs = firstDelayMs
-  while (!done) {
-    await new Promise((r) => setTimeout(r, delayMs))
-    delayMs = pollIntervalMs // 首轮用 firstDelayMs（suite 下界 11min 已测），之后回到 pollIntervalMs
-    const p = await pollSuite()
-    done = !!p.done
-    exit = p.suiteExit ?? null
-    if (++polls > maxSuitePolls) {
-      log(`WARN: suite poll cap reached (${maxSuitePolls} polls) — advancing on last poll state (done=${done}, exit=${exit})`)
-      break
-    }
-  }
-  return { done, exit }
-}
+// 等待块的内部输出语义（阶段 2 prompt 里跟随在 ${SUITE_WAIT_BASH} 之后说明；不是 agent 的最终返回）：
+//   返回 { done: bool（POLL=done ⇒ true）, suiteExit: int|null }。marker 存在但读不出 suite_exit ⇒
+//   done=true, suiteExit=null（fail-closed，阶段 2 按非绿处理）。
 
-// ── 重试循环：阶段 1（预备+启动 suite）→ 脚本等 suite（红则 Fix）→ 阶段 2（入账+flip+ff+bracket）──
-// ff 失败（develop 前进）⇒ 回阶段 1 重跑（有界 maxFfRetries）。整个循环由脚本控制流驱动。
+// ── 重试循环：阶段 1（预备+启动 suite）→ 阶段 2（单 agent 回合内循环 <600s Bash 等 suite + 机械步骤）──
+// suite 红 ⇒ Fix agent 重启动 detached suite 后重派阶段 2（有界 maxFixRounds）。ff 失败（develop 前进）⇒
+// 回阶段 1 重跑（有界 maxFfRetries）。等待由阶段 2 agent 承担（gap-subagent-turn-budget-13min-falsified）。
 phase('FanIn')
 let finalResult = null
 let ffAttempts = 0
@@ -390,7 +362,7 @@ while (finalResult == null) {
     `你是 fan-in 执行 subagent（阶段 1/2：无锁段预备 + 启动 suite）。任务 ${task} 的 fan-in 分两阶段完成：
 - 阶段 1（你，本轮）：无锁段 step 0-4 —— merge develop → delta 断言面判定 → ts-typecheck → scoped 门 + doc 检查 → 启动全量 suite（detached，立即返回，【不等它】）。
 - 阶段 2（后续 agent，suite 绿后）：step 4.5 per-task-suite 入账 + 持锁段（flip done → fan-in-ff-merge.sh → bracket close）。
-⛔ 你在本回合【不等待 suite】——全量 suite ~14-25min 超过 subagent 回合预算（release-timeout 实证 + AC95 复发）；等待由 workflow 脚本控制流承担（setTimeout 轮询 exit marker，ab380c5e 同源）。suite 以 detached 方式启动（setsid + & + disown = 长生命周期载体），你启动 + 短促确认后立即返回。
+⛔ 你在本回合【不等待 suite】——suite 以 detached 方式启动（setsid + & + disown = 长生命周期载体），你启动 + 短促确认后立即返回；等待由阶段 2 agent 在本回合内多次 <600s Bash 循环承担（Bash 单次 600s 硬顶 + suite 实测 19+ min，需跨多次调用等待；gap-subagent-turn-budget-13min-falsified 证伪「subagent 回合预算超时」）。
 
 执行上下文（你直接使用，无需探查）：
 - 任务 worktree（你的工作目录，所有代码操作都在这里）：${worktree}
@@ -467,8 +439,8 @@ delta=$(git -C ${worktree} diff --name-only "$fork" HEAD 2>/dev/null || true)
 # 解析（非 cwd、非 ${root}）——本任务若修改了 select-static-checks-for-touches.ts / scripts/test.sh 的
 # @static-object 注解，其 fan-in 必须用自己的版本判定（取假二：旧正则判 doc、worktree 版判 code）。
 code_delta=$(node --experimental-strip-types ${worktree}/plugin/scripts/select-static-checks-for-touches.ts --classify-delta --root ${worktree} $delta) || code_delta="__CLASSIFY_FAILED__"
-# 回合预算承载（gap-fan-in-turn-budget-suite-timeout）：把 code_delta 落盘，step 4 的 suite 启动块
-# 据此判定（bash 变量不跨 Bash 调用持久）。
+# suite 等待（gap-fan-in-turn-budget-suite-timeout / gap-subagent-turn-budget-13min-falsified）：把
+# code_delta 落盘，step 4 的 suite 启动块据此判定（bash 变量不跨 Bash 调用持久）。
 printf '%s' "$code_delta" > /tmp/fan-in-code-delta-${task}.txt
 判定：
   - code_delta 非空 ⇒ 分支整体变更触及代码/脚本/测试断言面（或被检查器读取的路径）⇒ 本回合【要】重跑全量 suite。
@@ -490,9 +462,10 @@ cd ${worktree} && bash scripts/test.sh --static-checks-doc
 # 全量 suite 启动（gap-fan-in-turn-budget-suite-timeout）：把 suite 交给长生命周期载体（detached
 # setsid 进程，subagent 退出不影响它），不在本回合等待。⛔ 禁止 Bash(run_in_background:true)
 # （subagent 退出时被 harness 连带杀掉，execute-suite-fix.js 实证 runId f6b824b5）；⛔ 禁止前台
-# bash scripts/test.sh（~14-25min 超过单次前台 Bash 10min 上限 + 回合窗）。等待由 workflow 脚本
-# 控制流决定（setTimeout 轮询 exit marker）。本块判定依据 /tmp/fan-in-code-delta-${task}.txt
-# （step 2 落盘）：非空 ⇒ 启动全量 suite；空 ⇒ 跳过（doc-only）；已有 pre-verified capture ⇒ 复用。
+# bash scripts/test.sh（suite 19+ min > Bash 单次 600s 硬顶）。等待由阶段 2 agent 在本回合内多次
+# <600s Bash 循环承担（gap-subagent-turn-budget-13min-falsified）。本块判定依据
+# /tmp/fan-in-code-delta-${task}.txt（step 2 落盘）：非空 ⇒ 启动全量 suite；空 ⇒ 跳过（doc-only）；
+# 已有 pre-verified capture ⇒ 复用。
 suite_capture="/tmp/fan-in-suite-${task}.env"
 suite_exit_marker="/tmp/fan-in-suite-${task}.exit"
 suite_time_file="/tmp/fan-in-suite-${task}.time"
@@ -556,73 +529,30 @@ codeDelta = step 2 记下的 code_delta。worktreeHead = 当前 worktree HEAD（
     return { outcome: 'red', ffOk: false, task, message: `fan-in prep returned unexpected outcome: ${prep.outcome}` }
   }
 
-  // ── 脚本控制流的 suite 等待（回合预算承载的核心）────────────────────────────────────────────
-  let suiteDone = prep.outcome !== 'suite-started'
-  let suiteExit = null
-  if (prep.outcome === 'suite-started') {
-    const waited = await waitForSuite()
-    suiteDone = waited.done
-    suiteExit = waited.exit
-  }
-
-  // ── 红 suite：Fix agent（读日志 → 修 → 重新启动 detached）→ 脚本再等（有界 maxFixRounds）────
+  // ── 阶段 2：单 agent 循环等 suite + 机械步骤（suite 红 ⇒ suite-red，脚本派 Fix agent 重派阶段 2）──
+  // gap-subagent-turn-budget-13min-falsified：旧「脚本 setTimeout + 每轮起一个新短命轮询 agent」已删——
+  // 阶段 2 agent 在本回合内循环 <600s Bash 等 suite（等待块在下方 prompt 顶部）。
+  const suiteNeedsWait = prep.outcome === 'suite-started'
+  let stage = null
   let fixRounds = 0
-  while (suiteDone && suiteExit !== 0) {
-    if (fixRounds >= maxFixRounds) {
-      return { outcome: 'red', ffOk: false, task, message: `fan-in suite red after ${fixRounds} fix rounds (last exit ${suiteExit}) — not landing` }
-    }
-    fixRounds++
-    const fix = await agent(
-      `你是 fan-in 执行 subagent（suite-fix 阶段）。任务 ${task} 的全量 suite 上一轮退出码 ${suiteExit}（RED）——你读失败日志、按 fix-scope gate 判红是否本任务 Touches 内回归，修根因、以 detached 方式重新启动 suite，然后【立即返回】（等待由 workflow 脚本控制流承担，不在你本回合内等）。
-执行上下文：
-- 任务 worktree（你的工作目录）：${worktree}
-- suite 日志：/tmp/fan-in-suite-${task}.log
-- 上一轮 exit：${suiteExit}
-${FIX_SCOPE_GATE}
-任务：
-1. 读 /tmp/fan-in-suite-${task}.log 的【全部】失败行（__PERFILE__ passed=false 行 + spec 失败摘要），先跑上面的 fix-scope gate 得到 FIX_SCOPE_VERDICT。日志已按轮轮转：当前文件 = 上一轮（本次失败的这轮）的内容，第一行是 __FANIN_SUITE_START__ 起始标记；上一轮更早的内容在 /tmp/fan-in-suite-${task}.log.prev（诊断用，勿当当前轮）。读当前轮请从最后一个 __FANIN_SUITE_START__ 之后切片。
-2. 按 fix-scope gate verdict：只修 inScope 里的失败（本任务 Touches 内回归），在 ${worktree} 里 git add + git commit（真实修复，不是删测试/改判据绕过）；outOfScope 的越界红一律不修（load-sensitive 释放 / checker 误报与别任务 bug defer 独立任务）。
-3. 重新启动 suite（detached）。⛔ 禁止 Bash(run_in_background:true)（subagent 退出被连带杀）；⛔ 禁止前台 bash scripts/test.sh。启动后短促确认（~3s）exit marker 未立刻出现，然后返回。按 fix-scope gate verdict 选启动方式（release 侧三态，gap-gate-release-no-isolate-rerun-no-livelock）：
-   a. inScope 非空（本任务有要修的回归）⇒ 修完 inScope 后【全量 relaunch】：用上面的 ${SUITE_LAUNCH} 块（重跑整个套件验证代码改动）。
-   b. inScope 为空 且 FIX_SCOPE_VERDICT.livelock = true（同一 load-sensitive 红已连续 release ≥ ${releaseLivelockRounds} 轮）⇒ 【anti-livelock 兜底】：⛔ 不再 relaunch（不跑全量也不跑隔离）。escalate：返回 { relaunched: false, ... }，note 写「load-sensitive anti-livelock（releasedRounds≥${releaseLivelockRounds}）：停止无界 relaunch，escalate → quiet-window / needs-human」。
-   c. inScope 为空 且只有 load-sensitive 释放、FIX_SCOPE_VERDICT.livelock = false ⇒ 【C11 隔离重跑】：用下面的 ${ISOLATE_LAUNCH} 块（只重跑 gate 分诊出的 load-sensitive 家族失败文件、低并发，非全量 relaunch）——高 load 常驻下全量 relaunch 不减 load、load-sensitive 反复红（ac101 实证 3 RED + 3 全量 relaunch）。
-   其余情形（inScope 为空、outOfScope 只有 other-task/leak/checker defer）⇒ 照旧全量 relaunch（上面的 ${SUITE_LAUNCH}）。
-   ${ISOLATE_LAUNCH}
-4. 返回 { relaunched: bool, rerunMode: 'full' | 'isolated' | null, worktreeHead, failuresFixed: string[], note }。failuresFixed 只列 inScope 修复；越界 defer/release 写进 note。relaunched=false 仅当 anti-livelock 兜底 (b) 或启动失败；rerunMode=isolated 仅当走了 (c) 隔离重跑；rerunMode=full 仅当走了 (a) 全量 relaunch。
-不要做任何等待决策——等待由 workflow 脚本控制。`,
-      {
-        schema: {
-          type: 'object',
-          properties: {
-            relaunched: { type: 'boolean' },
-            rerunMode: { type: 'string' },
-            worktreeHead: { type: 'string' },
-            failuresFixed: { type: 'array', items: { type: 'string' } },
-            note: { type: 'string' },
-          },
-          required: ['relaunched'],
-        },
-      }
-    )
-    log(`FanIn fix round ${fixRounds}/${maxFixRounds}: relaunched=${fix.relaunched} rerunMode=${fix.rerunMode ?? '?'} fixed=${(fix.failuresFixed ?? []).length} note=${fix.note ?? ''}`)
-    if (!fix.relaunched) {
-      return { outcome: 'red', ffOk: false, task, message: `fan-in fix agent did not relaunch (${fix.note?.includes('anti-livelock') ? 'release anti-livelock' : 'abort'}): ${fix.note ?? 'unknown'}` }
-    }
-    const waited = await waitForSuite()
-    suiteDone = waited.done
-    suiteExit = waited.exit
-  }
+  while (true) {
+    stage = await agent(
+    `你是 fan-in 执行 subagent（阶段 2：等 suite + 入账 + 持锁段）。任务 ${task} 的 suite 已以 detached 方式启动（或 suite-skipped / suite-preverified）；你在【本回合内】等 suite（多次 <600s Bash 循环），suite 绿后执行机械步骤。以下所有上下文已逐字内联，不需要询问任何人，也不要引用「上一条消息」。
 
-  if (!suiteDone) {
-    return { outcome: 'red', ffOk: false, task, message: `fan-in suite did not finish within poll cap for ${task}` }
-  }
-  if (suiteExit !== 0) {
-    return { outcome: 'red', ffOk: false, task, message: `fan-in suite red (exit ${suiteExit}) for ${task} — not landing` }
-  }
-
-  // ── 阶段 2（机械步骤）：入账 + flip + ff + bracket（ff 失败 ⇒ ff-retry，脚本回阶段 1）────────
-  const result = await agent(
-    `你是 fan-in 执行 subagent（阶段 2/2：入账 + 持锁段）。任务 ${task} 的 suite 已绿（或 suite-skipped / suite-preverified），由 workflow 脚本控制流等完；现在你执行机械步骤（全部快操作，你的回合内完成）。以下所有上下文已逐字内联，不需要询问任何人，也不要引用「上一条消息」。
+${suiteNeedsWait ? `【等待 suite（单 agent 循环多次 <600s Bash，不每轮起新 agent）】
+任务 ${task} 的 suite 以 detached 方式运行（setsid+&+disown，SUITE_LAUNCH）。你在本回合内等它：运行下面
+的【等待块】（自足 bash，单次有界阻塞等待最多 ${pollBlockSeconds}s < Bash 600s 硬顶；gap-subagent-turn-
+budget-13min-falsified：无 subagent 回合预算超时）。运行后看输出：
+  - POLL=not-done ⇒ 再运行一次同一等待块（最多 ${maxSuitePolls} 次，每次独立 Bash 调用，单次 < 600s）。
+  - POLL=done SUITE_EXIT=N ⇒ 停止等待，按 N 分支：N=0 ⇒ 继续机械步骤；N!=0 ⇒ 直接返回
+    { outcome:'suite-red', suiteExit:N }（不执行机械步骤，等待 Fix agent 修复后重派你）。
+⛔ 单次 Bash 调用不得超过 600s——上面的 timeout ${pollBlockSeconds} 已是硬边界，绝不自行加大等待。
+⛔ 不要做任何等待决策——每次等待的时长由上面的 timeout ${pollBlockSeconds} 硬边界决定、循环次数由最多
+${maxSuitePolls} 次决定；你只是重跑同一个固定命令，绝不自行选择等待更久/更短。
+${SUITE_WAIT_BASH}
+返回 { done: bool（POLL=done ⇒ true）, suiteExit: int|null }（等待块的内部输出语义，不是你的最终返回——
+你的最终返回见文末 schema）。若 ${maxSuitePolls} 次后仍 POLL=not-done ⇒ 返回 { outcome:'suite-not-done', suiteExit:null }（不执行机械步骤）。`
+: `（suite 已 skipped / preverified —— capture 已含 suite_exit，无需等待，直接执行机械步骤。）`}
 
 执行上下文（你直接使用，无需探查）：
 - 任务 worktree（你的工作目录，所有代码操作都在这里）：${worktree}
@@ -850,10 +780,8 @@ reaper="${worktree}/plugin/scripts/worktree-process-reaper.ts"
 node --no-warnings --experimental-strip-types "$reaper" --worktree ${worktree} --root ${root} --json >/dev/null 2>&1 || true
 git worktree remove ${worktree} --force && git branch -d task/${task}
 
-返回 { outcome: 'green' | 'needs-human' | 'red' | 'ff-retry', ffOk, developHead, worktreeHead, agentIdUsed, codeDelta, note, bracketClosed }。
-outcome=green 仅当 ff 成功（develop fast-forward 到 task tip）。outcome=ff-retry 仅当 ff 失败（develop 前进，
-exit 1/3）——脚本将回阶段 1 重跑，你【不得】重试 ff、【不得】执行 step 5.5。outcome=needs-human 仅当
-flip/入账等持锁段前置失败（如 AC 闸拒绝/入账 HARD FAIL）。red = 其它失败。
+返回 { outcome: 'green' | 'needs-human' | 'red' | 'ff-retry' | 'suite-red' | 'suite-not-done', ffOk, suiteExit, developHead, worktreeHead, agentIdUsed, codeDelta, note, bracketClosed }。
+outcome=suite-not-done 仅当等待达到 ${maxSuitePolls} 次上限仍无 exit marker（不执行机械步骤，脚本 fail-closed 红）。outcome=suite-red 仅当 suite 退出码非 0（读等待块补全的 capture 的 suite_exit）——不执行机械步骤，脚本派 Fix agent 修复后重派你。outcome=green 仅当 ff 成功（develop fast-forward 到 task tip）。outcome=ff-retry 仅当 ff 失败（develop 前进，exit 1/3）——脚本将回阶段 1 重跑，你【不得】重试 ff、【不得】执行 step 5.5。outcome=needs-human 仅当 flip/入账等持锁段前置失败（如 AC 闸拒绝/入账 HARD FAIL）。red = 其它失败。
 bracketClosed = step 5.5 的闭合结果（true=已闭合 / false=闭合失败 / null=ff 未成功未执行 5.5）。
 note 必须标注 bracketClose=OK 或 bracketClose=FAILED。`,
     {
@@ -862,6 +790,7 @@ note 必须标注 bracketClose=OK 或 bracketClose=FAILED。`,
         properties: {
           outcome: { type: 'string' },
           ffOk: { type: 'boolean' },
+          suiteExit: { type: ['number', 'null'] },
           developHead: { type: 'string' },
           worktreeHead: { type: 'string' },
           agentIdUsed: { type: 'string' },
@@ -873,14 +802,62 @@ note 必须标注 bracketClose=OK 或 bracketClose=FAILED。`,
       },
     }
   )
-  log(`FanIn final: outcome=${result.outcome} ffOk=${result.ffOk} agent=${result.agentIdUsed ?? '?'} develop=${result.developHead ?? '?'}`)
+  if (stage.outcome === 'suite-not-done') {
+    return { outcome: 'red', ffOk: false, task, message: `fan-in suite did not finish within poll cap for ${task}` }
+  }
+  if (stage.outcome === 'suite-red') {
+    if (fixRounds >= maxFixRounds) {
+      return { outcome: 'red', ffOk: false, task, message: `fan-in suite red after ${fixRounds} fix rounds (last exit ${stage.suiteExit}) — not landing` }
+    }
+    fixRounds++
+    const fix = await agent(
+      `你是 fan-in 执行 subagent（suite-fix 阶段）。任务 ${task} 的全量 suite 上一轮退出码 ${stage.suiteExit}（RED）——你读失败日志、按 fix-scope gate 判红是否本任务 Touches 内回归，修根因、以 detached 方式重新启动 suite，然后【立即返回】（等待由阶段 2 agent 在本回合内多次 <600s Bash 循环承担，不在你本回合内等；gap-subagent-turn-budget-13min-falsified）。
+执行上下文：
+- 任务 worktree（你的工作目录）：${worktree}
+- suite 日志：/tmp/fan-in-suite-${task}.log
+- 上一轮 exit：${stage.suiteExit}
+${FIX_SCOPE_GATE}
+任务：
+1. 读 /tmp/fan-in-suite-${task}.log 的【全部】失败行（__PERFILE__ passed=false 行 + spec 失败摘要），先跑上面的 fix-scope gate 得到 FIX_SCOPE_VERDICT。日志已按轮轮转：当前文件 = 上一轮（本次失败的这轮）的内容，第一行是 __FANIN_SUITE_START__ 起始标记；上一轮更早的内容在 /tmp/fan-in-suite-${task}.log.prev（诊断用，勿当当前轮）。读当前轮请从最后一个 __FANIN_SUITE_START__ 之后切片。
+2. 按 fix-scope gate verdict：只修 inScope 里的失败（本任务 Touches 内回归），在 ${worktree} 里 git add + git commit（真实修复，不是删测试/改判据绕过）；outOfScope 的越界红一律不修（load-sensitive 释放 / checker 误报与别任务 bug defer 独立任务）。
+3. 重新启动 suite（detached）。⛔ 禁止 Bash(run_in_background:true)（subagent 退出被连带杀）；⛔ 禁止前台 bash scripts/test.sh。启动后短促确认（~3s）exit marker 未立刻出现，然后返回。按 fix-scope gate verdict 选启动方式（release 侧三态，gap-gate-release-no-isolate-rerun-no-livelock）：
+   a. inScope 非空（本任务有要修的回归）⇒ 修完 inScope 后【全量 relaunch】：用上面的 ${SUITE_LAUNCH} 块（重跑整个套件验证代码改动）。
+   b. inScope 为空 且 FIX_SCOPE_VERDICT.livelock = true（同一 load-sensitive 红已连续 release ≥ ${releaseLivelockRounds} 轮）⇒ 【anti-livelock 兜底】：⛔ 不再 relaunch（不跑全量也不跑隔离）。escalate：返回 { relaunched: false, ... }，note 写「load-sensitive anti-livelock（releasedRounds≥${releaseLivelockRounds}）：停止无界 relaunch，escalate → quiet-window / needs-human」。
+   c. inScope 为空 且只有 load-sensitive 释放、FIX_SCOPE_VERDICT.livelock = false ⇒ 【C11 隔离重跑】：用下面的 ${ISOLATE_LAUNCH} 块（只重跑 gate 分诊出的 load-sensitive 家族失败文件、低并发，非全量 relaunch）——高 load 常驻下全量 relaunch 不减 load、load-sensitive 反复红（ac101 实证 3 RED + 3 全量 relaunch）。
+   其余情形（inScope 为空、outOfScope 只有 other-task/leak/checker defer）⇒ 照旧全量 relaunch（上面的 ${SUITE_LAUNCH}）。
+   ${ISOLATE_LAUNCH}
+4. 返回 { relaunched: bool, rerunMode: 'full' | 'isolated' | null, worktreeHead, failuresFixed: string[], note }。failuresFixed 只列 inScope 修复；越界 defer/release 写进 note。relaunched=false 仅当 anti-livelock 兜底 (b) 或启动失败；rerunMode=isolated 仅当走了 (c) 隔离重跑；rerunMode=full 仅当走了 (a) 全量 relaunch。
+不要做任何等待决策——每次等待的时长由阶段 2 的等待块 timeout 硬边界决定。`,
+      {
+        schema: {
+          type: 'object',
+          properties: {
+            relaunched: { type: 'boolean' },
+            rerunMode: { type: 'string' },
+            worktreeHead: { type: 'string' },
+            failuresFixed: { type: 'array', items: { type: 'string' } },
+            note: { type: 'string' },
+          },
+          required: ['relaunched'],
+        },
+      }
+    )
+    log(`FanIn fix round ${fixRounds}/${maxFixRounds}: relaunched=${fix.relaunched} rerunMode=${fix.rerunMode ?? '?'} fixed=${(fix.failuresFixed ?? []).length} note=${fix.note ?? ''}`)
+    if (!fix.relaunched) {
+      return { outcome: 'red', ffOk: false, task, message: `fan-in fix agent did not relaunch (${fix.note?.includes('anti-livelock') ? 'release anti-livelock' : 'abort'}): ${fix.note ?? 'unknown'}` }
+    }
+    continue   // 重派阶段 2（等 Fix 重启动的 detached suite 再机械步骤）
+  }
+  break   // stage 是真实 phase-2 结果
+  }
+  log(`FanIn final: outcome=${stage.outcome} ffOk=${stage.ffOk} agent=${stage.agentIdUsed ?? '?'} develop=${stage.developHead ?? '?'}`)
 
-  if (result.ffOk) {
-    finalResult = result
+  if (stage.ffOk) {
+    finalResult = stage
     break
   }
-  if (result.outcome !== 'ff-retry') {
-    finalResult = result
+  if (stage.outcome !== 'ff-retry') {
+    finalResult = stage
     break
   }
   // ff 失败（develop 前进）⇒ 回阶段 1 重跑。有界（maxFfRetries，同 SPEC §7 防活锁阈值）。

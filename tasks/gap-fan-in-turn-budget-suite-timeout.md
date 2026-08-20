@@ -68,3 +68,26 @@ workflow 已承载 suite（detached + 脚本控制流等待），正常情况下
 - plugin/test/fan-in-execute-paths.test.mjs（取假对照 + ⑧ 回合预算承载组）
 - tasks/gap-fan-in-turn-budget-suite-timeout.md（自身）
 （注：plugin/scripts/fan-in-ff-merge.sh 未脚本化——workflow 自身承载 suite，恢复路径为上方 fallback 文档）
+
+## 2026-08-20 证伪（唯一保留处）
+
+**「subagent ~10-13min 回合预算硬超时」已被证伪——它不存在。** 本任务正文的「回合预算耗尽被强制收尾」
+成因叙述基于一个假前提；真实限制只有 **Bash 单次调用 600s 硬顶**（官方文档化），与「subagent 整体运行
+时长」是两回事。**本段是「~13min 硬超时」这个具体说法的唯一保留处**（用户 2026-08-20 逐字裁定：文档中的
+描述仅保留一处并说明已被证明是错的，其余删除以减少噪音，并去除基于这一假设的实现）。实现去除见
+`tasks/gap-subagent-turn-budget-13min-falsified`（fan-in-execute.js 的「短命轮询 agent + 脚本 setTimeout」
+改为「单个阶段 2 agent 本回合内多次 <600s Bash 循环等 suite」）。
+
+**三条证据链（a8 提供，可复算）**：
+① **会话历史直接反证**：inner（2b140e8a）29 个直属 subagent，15 个 >10min、14 个 >13min、最长
+   38.7min，抽查全程连续真实 tool_use、正常完成（非截断）。
+② **官方无此限制**：只有 Bash 单次调用 600s 硬顶是真的（文档化）；subagent 整体无文档化超时
+   （GitHub #61405「Subagent delegation lacks timeout」）。
+③ **本仓库引用的两份「~13min 实证」逐份打开都不是超时**：`wf_c6f4d0ef-c6a` 13.6min 正常完成
+   （bracketClosed:false 是设计内诚实标注，非超时截断）；`wf_1072dc43-893` 末尾是「user rejected /
+   interrupted by user」= 人为中断，与计时器无关。
+
+**⇒ 对上方正文的修正**：suite 实测 19+ min 仍 > Bash 单次 600s 硬顶，所以 detached suite + 跨多次
+<600s Bash 等待仍成立；被证伪的只是「必须把等待整个搬出 subagent 回合、每轮起一个新短命轮询 agent」
+这个激进形状——单 subagent 能连续跑 30+ min 上百次工具调用（证据①），阶段 2 agent 自己循环等即可。
+AC1 的「回合预算承载」实现已相应简化（见 `gap-subagent-turn-budget-13min-falsified`）。

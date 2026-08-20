@@ -58,19 +58,18 @@ async function runWorkflow(opts) {
   const body = src.replace(/^export\s+const\s+meta/m, "const meta");
   const wrapped = "(async () => {\n" + body + "\n})()";
   const captured = { prompts: [], schemas: [], phases: [], logs: [], delays: [] };
-  // Default agent sequence: drive the GREEN path (phase1 suite-started → poll done exit0 → phase2 green),
-  // so tests that only extract blocks from the emitted prompts still exercise the full multi-agent flow.
+  // Default agent sequence: drive the GREEN path (phase1 suite-started → stage2 green), so tests that
+  // only extract blocks from the emitted prompts still exercise the full multi-agent flow. The stage-2
+  // agent (NOT a separate poll agent) loops <600s Bash waits inline, then does the mechanical steps
+  // (gap-subagent-turn-budget-13min-falsified: no per-round short-lived poll agents anymore).
   const defaultResults = [
     { outcome: "suite-started", suitePid: 4242, codeDelta: "mock-code", worktreeHead: "mockhead", note: "mock-prep" },
-    { done: true, suiteExit: 0 },
     { outcome: "green", ffOk: true, developHead: "dhead", worktreeHead: "whead", agentIdUsed: "mockagent", codeDelta: "mock-code", note: "bracketClose=OK", bracketClosed: true },
   ];
   const sandbox = {
     console,
-    // Fast-forward the script-owned suite waits (the workflow's setTimeout IS the poll interval;
-    // the turn-budget fix moves the wait out of subagent turns into script control flow).
-    // Record the DELAY value passed to each setTimeout so firstDelayMs/pollIntervalMs sequencing
-    // is observable (gap-fan-in-execute-poll-cost-firstdelay-agenttype).
+    // The workflow no longer owns setTimeout-based poll scheduling (the stage-2 agent waits inline);
+    // the delay recording is kept for tests that still inspect captured.delays (empty in the new shape).
     setTimeout: (fn, _ms) => { captured.delays.push(_ms); setTimeout(fn, 0); },
     clearTimeout,
     args: JSON.stringify(opts.args),
@@ -381,11 +380,11 @@ test("① AC2 — orchestration/fast-mode-tick-core.md and other checker-read .m
 
 // ── REAL-INVOCATION smoke (判据3 / AC78 实调 protection) ──────────────────────────────────────────
 
-test("REAL-INVOCATION — the workflow file vm-executes and emits the multi-agent prompt set (AC78 + turn-budget split)", async (t) => {
+test("REAL-INVOCATION — the workflow file vm-executes and emits the multi-agent prompt set (AC78 + stage-2 wait shape)", async (t) => {
   const { prompts, phases, result } = await runWorkflow({
     args: { task: "gap-test-smoke", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-test-1", mergeTarget: "develop" },
   });
-  assert.ok(prompts.length >= 3, `split fan-in emits phase1 + poll + phase2 prompts, got ${prompts.length}`);
+  assert.ok(prompts.length >= 2, `fan-in emits phase1 + stage2 prompts, got ${prompts.length}`);
   // Phase 1 (prep): steps 0-4 incl. merge develop.
   assert.ok(prompts[0].includes("【无锁段 step 1"), "phase-1 prompt must carry step 1 (merge develop)");
   assert.ok(prompts[0].includes("【无锁段 step 4"), "phase-1 prompt must carry step 4");
@@ -1537,13 +1536,14 @@ test("⑦ 取假二 — a branch modifying an orchestration script AND carrying 
   assert.match(m[1], /plugin\/scripts\/fan-in-ff-merge\.sh/, `the modified orchestration script must also be code, got: ${m[1]}`);
 });
 
-// ── ⑧ 回合预算承载 (gap-fan-in-turn-budget-suite-timeout) ────────────────────────────────────────
+// ── ⑧ suite 等待 + 阶段 2 承载 (gap-fan-in-turn-budget-suite-timeout → gap-subagent-turn-budget-13min-falsified) ──
 // AC1 取假: 构造 step2 code_delta 非空 ⇒ 全量 suite 必跑且机械步骤必完成（flip/ff/bracket 全执行）。
-// 旧设计: step4 把全量 suite 启动为后台后, subagent 等 suite 时【回合预算耗尽被强制收尾】——
-// suite 未完成/capture 未写/flip/ff/bracket 全缺 (release-timeout 实证 + AC95 复发)。
-// 修复: suite 交给【长生命周期载体】(detached setsid 进程)，【等待】从 subagent 回合搬到脚本控制流
-// (setTimeout + 轮询 agent 读 exit marker, ab380c5e/execute-suite-fix.js 同源)。这些测试用脚本化的
-// agent 序列驱动 vm 实执行的工作流, 断言控制流 (绿/红→修/轮询上限/ff-retry) 与 phase 1/2 的 prompt 结构。
+// 2026-08-20 证伪: 旧设计假设「subagent ~13min 回合预算硬超时」⇒ 每轮起一个新短命轮询 agent + 脚本
+// setTimeout。该数字是假的（真实限制仅 Bash 单次 600s 硬顶 + suite 实测 19+ min）⇒ 修复: suite 交给
+// 【长生命周期载体】(detached setsid 进程)，【等待】由【单个阶段 2 agent】在本回合内多次 <600s Bash
+// 循环承担（有界阻塞等待 timeout 540 + sleep 15，最多 maxSuitePolls 次），suite 绿后执行机械步骤；
+// suite 红 ⇒ 返回 suite-red，脚本派 Fix agent 重启动后重派阶段 2。这些测试用脚本化的 agent 序列驱动
+// vm 实执行的工作流, 断言控制流 (绿/红→修/轮询上限/ff-retry) 与 phase 1/2 的 prompt 结构。
 
 test("⑧ turn-budget 取假 — phase-1 suite-launch DETACHES (setsid + & + disown), NOT foreground, NOT Bash(run_in_background:true)", async (t) => {
   const { prompts } = await runWorkflow({
@@ -1579,54 +1579,57 @@ test("⑧ turn-budget 取假 — suite-launch block decides by code_delta: non-e
   assert.ok(launch.includes("PRE-VERIFIED-SUITE"), "the pre-verified reuse branch must be present (suite_head-pinned)");
 });
 
-test("⑧ turn-budget — the poll agent completes the capture post-fields (cpu/end/wall/load/lane/suite_exit) on exit-marker hit", async (t) => {
+test("⑧ stage-2 wait block — completes the capture post-fields (cpu/end/wall/load/lane/suite_exit) on exit-marker hit", async (t) => {
   const { prompts } = await runWorkflow({
     args: { task: "gap-test-tb-poll", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-tb-poll", mergeTarget: "develop" },
   });
   const poll = promptContaining(prompts, "POLL=not-done");
-  assert.ok(poll.includes("suite_exit_marker"), "poll must read the exit marker");
-  assert.ok(poll.includes("POLL=done SUITE_EXIT"), "poll must emit the done + exit result");
-  assert.ok(poll.includes("cpu_source"), "poll must compute cpu_source (gnu-time or not-wired)");
-  assert.ok(poll.includes("cpu_user_s"), "poll must compute cpu_user_s (the gnu-time %U column — gap-verification-round-cpu-split-not-recorded)");
-  assert.ok(poll.includes("cpu_sys_s"), "poll must compute cpu_sys_s (the gnu-time %S column)");
-  assert.ok(poll.includes("wall_ms"), "poll must compute wall_ms from the pre-suite start_ms");
-  assert.ok(poll.includes("lane_count"), "poll must compute lane_count");
-  assert.ok(poll.includes("suite_exit"), "poll must record suite_exit into the capture");
-  assert.ok(poll.includes("不要做任何等待决策"), "poll must not make any waiting decision (script-owned)");
+  assert.ok(poll.includes("suite_exit_marker"), "wait block must read the exit marker");
+  assert.ok(poll.includes("POLL=done SUITE_EXIT"), "wait block must emit the done + exit result");
+  assert.ok(poll.includes("cpu_source"), "wait block must compute cpu_source (gnu-time or not-wired)");
+  assert.ok(poll.includes("cpu_user_s"), "wait block must compute cpu_user_s (the gnu-time %U column — gap-verification-round-cpu-split-not-recorded)");
+  assert.ok(poll.includes("cpu_sys_s"), "wait block must compute cpu_sys_s (the gnu-time %S column)");
+  assert.ok(poll.includes("wall_ms"), "wait block must compute wall_ms from the pre-suite start_ms");
+  assert.ok(poll.includes("lane_count"), "wait block must compute lane_count");
+  assert.ok(poll.includes("suite_exit"), "wait block must record suite_exit into the capture");
+  assert.ok(poll.includes("不要做任何等待决策"), "wait block must not make any waiting decision (fixed command)");
 });
 
-test("⑧ turn-budget — script-owned wait drives the GREEN path: suite-started → poll(done exit0) → phase-2 mechanical steps (flip/ff/bracket)", async (t) => {
+test("⑧ stage-2 wait — the SINGLE stage-2 agent drives the GREEN path: suite-started → wait-loop → mechanical steps (flip/ff/bracket)", async (t) => {
   const { prompts, result } = await runWorkflow({
-    args: { task: "gap-test-tb-green", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-tb-green", mergeTarget: "develop", pollIntervalMs: 0, maxSuitePolls: 5 },
+    args: { task: "gap-test-tb-green", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-tb-green", mergeTarget: "develop", maxSuitePolls: 5 },
     agentResults: [
       { outcome: "suite-started", suitePid: 111, codeDelta: "code", worktreeHead: "h1", note: "" }, // phase 1
-      { done: false, suiteExit: null },                                                             // poll: still running
-      { done: true, suiteExit: 0 },                                                                 // poll: suite green
-      { outcome: "green", ffOk: true, developHead: "d1", worktreeHead: "h1", agentIdUsed: "a1", codeDelta: "code", note: "bracketClose=OK", bracketClosed: true }, // phase 2
+      { outcome: "green", ffOk: true, developHead: "d1", worktreeHead: "h1", agentIdUsed: "a1", codeDelta: "code", note: "bracketClose=OK", bracketClosed: true }, // stage 2 (wait loop + mechanicals)
     ],
   });
-  assert.equal(result.outcome, "green", "script-owned wait must land a green suite through phase 2");
+  assert.equal(result.outcome, "green", "stage-2 wait must land a green suite through the mechanical steps");
   assert.equal(result.ffOk, true);
-  // Phase-2 prompt must carry ALL mechanical steps (AC1: flip/ff/bracket all execute).
+  // The stage-2 prompt (the ONE agent) must carry BOTH the wait block AND all mechanical steps
+  // (gap-subagent-turn-budget-13min-falsified: the wait lives in the stage-2 agent, not a separate
+  // short-lived poll agent per round).
   const p2 = promptContaining(prompts, "# flip-block-start");
-  assert.ok(p2.includes("per-task-suite-record.ts"), "phase-2 must write the per-task-suite record (step 4.5)");
-  assert.ok(p2.includes("fan-in-ff-merge.sh --task"), "phase-2 must run the ff-merge (step 5)");
-  assert.ok(p2.includes("--worktree /tmp/wt"), "phase-2 must pass --worktree to the ff-merge (stale-lock reclaim scope, gap-worktree-remove-orphans-probes)");
-  assert.ok(p2.includes("# bracket-close-block-start"), "phase-2 must close the telemetry bracket (step 5.5)");
-  assert.ok(p2.includes("worktree-process-reaper.ts"), "phase-2 must reap live processes under the worktree before removal (gap-worktree-remove-orphans-probes)");
-  assert.ok(p2.includes('"$reaper" --worktree /tmp/wt'), "phase-2 must scope the reaper to the worktree being removed");
-  assert.ok(p2.includes("git worktree remove"), "phase-2 must clean up the worktree after ff");
+  assert.ok(p2.includes("POLL=not-done"), "stage-2 prompt must carry the wait block (single agent loops <600s Bash)");
+  assert.ok(p2.includes("per-task-suite-record.ts"), "stage-2 must write the per-task-suite record (step 4.5)");
+  assert.ok(p2.includes("fan-in-ff-merge.sh --task"), "stage-2 must run the ff-merge (step 5)");
+  assert.ok(p2.includes("--worktree /tmp/wt"), "stage-2 must pass --worktree to the ff-merge (stale-lock reclaim scope, gap-worktree-remove-orphans-probes)");
+  assert.ok(p2.includes("# bracket-close-block-start"), "stage-2 must close the telemetry bracket (step 5.5)");
+  assert.ok(p2.includes("worktree-process-reaper.ts"), "stage-2 must reap live processes under the worktree before removal (gap-worktree-remove-orphans-probes)");
+  assert.ok(p2.includes('"$reaper" --worktree /tmp/wt'), "stage-2 must scope the reaper to the worktree being removed");
+  assert.ok(p2.includes("git worktree remove"), "stage-2 must clean up the worktree after ff");
+  // 取假: the old shape spawned a SEPARATE short-lived poll agent per round (prompts.length >= 3 with a
+  // standalone poll prompt); the new shape has the wait block INSIDE the stage-2 prompt (2 prompts total).
+  assert.equal(prompts.length, 2, "green path = phase1 + stage2 (no separate poll agent)");
 });
 
-test("⑧ turn-budget — RED suite ⇒ Fix agent relaunches detached ⇒ script re-waits ⇒ phase-2 lands", async (t) => {
+test("⑧ stage-2 wait — RED suite ⇒ stage-2 returns suite-red ⇒ Fix agent relaunches detached ⇒ re-dispatched stage-2 lands", async (t) => {
   const { prompts, result } = await runWorkflow({
-    args: { task: "gap-test-tb-red", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-tb-red", mergeTarget: "develop", pollIntervalMs: 0, maxSuitePolls: 5, maxFixRounds: 2 },
+    args: { task: "gap-test-tb-red", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-tb-red", mergeTarget: "develop", maxSuitePolls: 5, maxFixRounds: 2 },
     agentResults: [
-      { outcome: "suite-started", suitePid: 111, codeDelta: "code", worktreeHead: "h1", note: "" }, // phase 1
-      { done: true, suiteExit: 1 },                                                                 // poll: suite RED
-      { relaunched: true, worktreeHead: "h2", failuresFixed: ["fix-x"], note: "" },                 // Fix agent
-      { done: true, suiteExit: 0 },                                                                 // poll: suite green after fix
-      { outcome: "green", ffOk: true, developHead: "d2", worktreeHead: "h2", agentIdUsed: "a2", codeDelta: "code", note: "bracketClose=OK", bracketClosed: true }, // phase 2
+      { outcome: "suite-started", suitePid: 111, codeDelta: "code", worktreeHead: "h1", note: "" },                 // phase 1
+      { outcome: "suite-red", suiteExit: 1, ffOk: false },                                                          // stage 2: suite RED (no mechanicals)
+      { relaunched: true, worktreeHead: "h2", failuresFixed: ["fix-x"], note: "" },                                 // Fix agent
+      { outcome: "green", ffOk: true, developHead: "d2", worktreeHead: "h2", agentIdUsed: "a2", codeDelta: "code", note: "bracketClose=OK", bracketClosed: true }, // stage 2 re-dispatched (waits again + mechanicals)
     ],
   });
   assert.equal(result.outcome, "green", "a red suite must be fixed + re-verified before landing");
@@ -1634,14 +1637,12 @@ test("⑧ turn-budget — RED suite ⇒ Fix agent relaunches detached ⇒ script
   assert.ok(prompts.some((p) => p.includes("你读失败日志")), "the Fix prompt must read the suite log failures");
 });
 
-test("⑧ turn-budget — suite never completes within the poll cap ⇒ red (bounded wait, no infinite hang)", async (t) => {
+test("⑧ stage-2 wait — suite never completes within the stage-2 poll cap ⇒ stage-2 returns suite-not-done ⇒ red (bounded wait, no infinite hang)", async (t) => {
   const { result } = await runWorkflow({
-    args: { task: "gap-test-tb-cap", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-tb-cap", mergeTarget: "develop", pollIntervalMs: 0, maxSuitePolls: 2 },
+    args: { task: "gap-test-tb-cap", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-tb-cap", mergeTarget: "develop", maxSuitePolls: 2 },
     agentResults: [
-      { outcome: "suite-started", suitePid: 111, codeDelta: "code", worktreeHead: "h1", note: "" }, // phase 1
-      { done: false, suiteExit: null },                                                             // poll 1
-      { done: false, suiteExit: null },                                                             // poll 2
-      { done: false, suiteExit: null },                                                             // poll 3 (breaks the cap)
+      { outcome: "suite-started", suitePid: 111, codeDelta: "code", worktreeHead: "h1", note: "" },  // phase 1
+      { outcome: "suite-not-done", suiteExit: null, ffOk: false },                                    // stage 2: never completed within its loop cap
     ],
   });
   assert.equal(result.outcome, "red", "a suite that never completes must fail closed");
@@ -1649,38 +1650,34 @@ test("⑧ turn-budget — suite never completes within the poll cap ⇒ red (bou
   assert.ok(result.message.includes("poll cap"), `message must cite the poll cap: ${result.message}`);
 });
 
-test("⑧ turn-budget — ff failure (develop advanced during suite) ⇒ script re-runs phase 1 (bounded) and lands on the retry", async (t) => {
+test("⑧ stage-2 wait — ff failure (develop advanced during suite) ⇒ script re-runs phase 1 (bounded) and lands on the retry", async (t) => {
   const { prompts, result, logs } = await runWorkflow({
-    args: { task: "gap-test-tb-ff", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-tb-ff", mergeTarget: "develop", pollIntervalMs: 0, maxSuitePolls: 5, maxFfRetries: 2 },
+    args: { task: "gap-test-tb-ff", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-tb-ff", mergeTarget: "develop", maxSuitePolls: 5, maxFfRetries: 2 },
     agentResults: [
       // attempt 1
       { outcome: "suite-started", suitePid: 111, codeDelta: "code", worktreeHead: "h1", note: "" }, // phase 1
-      { done: true, suiteExit: 0 },                                                                 // poll
-      { outcome: "ff-retry", ffOk: false, note: "develop advanced" },                               // phase 2 ff FAILED
+      { outcome: "ff-retry", ffOk: false, note: "develop advanced" },                               // stage 2 ff FAILED
       // attempt 2 (script re-runs phase 1)
       { outcome: "suite-started", suitePid: 222, codeDelta: "code", worktreeHead: "h2", note: "" }, // phase 1 (retry)
-      { done: true, suiteExit: 0 },                                                                 // poll
-      { outcome: "green", ffOk: true, developHead: "d2", worktreeHead: "h2", agentIdUsed: "a2", codeDelta: "code", note: "bracketClose=OK", bracketClosed: true }, // phase 2
+      { outcome: "green", ffOk: true, developHead: "d2", worktreeHead: "h2", agentIdUsed: "a2", codeDelta: "code", note: "bracketClose=OK", bracketClosed: true }, // stage 2
     ],
   });
   assert.equal(result.outcome, "green", "a develop-advanced ff failure must retry from phase 1 and land");
-  assert.equal(prompts.length, 6, "2× (phase1 + poll + phase2)");
+  assert.equal(prompts.length, 4, "2× (phase1 + stage2)");
   assert.ok(logs.some((l) => l.includes("ff-retry")), "log must record the ff-retry re-run");
   // The phase-1 prompt (retry) must carry the stale-flip revert preamble.
-  assert.ok(prompts[3].includes("重试遗留翻转处理"), "the retry phase-1 prompt must carry the stale-flip revert");
+  assert.ok(prompts[2].includes("重试遗留翻转处理"), "the retry phase-1 prompt must carry the stale-flip revert");
 });
 
-test("⑧ turn-budget — ff-retry exhausted (maxFfRetries) ⇒ red + anti-livelock message (SPEC §7 bound)", async (t) => {
+test("⑧ stage-2 wait — ff-retry exhausted (maxFfRetries) ⇒ red + anti-livelock message (SPEC §7 bound)", async (t) => {
   const { result } = await runWorkflow({
-    args: { task: "gap-test-tb-ffx", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-tb-ffx", mergeTarget: "develop", pollIntervalMs: 0, maxSuitePolls: 5, maxFfRetries: 2 },
+    args: { task: "gap-test-tb-ffx", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-tb-ffx", mergeTarget: "develop", maxSuitePolls: 5, maxFfRetries: 2 },
     agentResults: [
       // attempt 1
       { outcome: "suite-started", suitePid: 111, codeDelta: "code", worktreeHead: "h1", note: "" },
-      { done: true, suiteExit: 0 },
       { outcome: "ff-retry", ffOk: false, note: "develop advanced" },
       // attempt 2 — ffAttempts becomes 2, 2 >= maxFfRetries(2) ⇒ red
       { outcome: "suite-started", suitePid: 222, codeDelta: "code", worktreeHead: "h2", note: "" },
-      { done: true, suiteExit: 0 },
       { outcome: "ff-retry", ffOk: false, note: "develop advanced again" },
     ],
   });
@@ -1909,10 +1906,9 @@ test("⑧⑩ 锁等待负控制 — suite-launch 携带 FULL_SUITE_LOCK_TIMEOUT 
     args: { task: "gap-test-lockwait", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-lockwait", mergeTarget: "develop" },
     agentResults: [
       { outcome: "suite-started", suitePid: 111, codeDelta: "code", worktreeHead: "h1", note: "" }, // phase 1
-      { done: true, suiteExit: 1 },                                                                 // poll: RED
+      { outcome: "suite-red", suiteExit: 1, ffOk: false },                                          // stage 2: RED
       { relaunched: true, worktreeHead: "h2", failuresFixed: [], note: "" },                       // Fix agent (carries ISOLATE_LAUNCH)
-      { done: true, suiteExit: 0 },                                                                 // poll: green after fix
-      { outcome: "green", ffOk: true, developHead: "d2", worktreeHead: "h2", agentIdUsed: "a2", codeDelta: "code", note: "bracketClose=OK", bracketClosed: true }, // phase 2
+      { outcome: "green", ffOk: true, developHead: "d2", worktreeHead: "h2", agentIdUsed: "a2", codeDelta: "code", note: "bracketClose=OK", bracketClosed: true }, // stage 2 re-dispatched
     ],
   });
 
@@ -2179,14 +2175,15 @@ test("⑧ AC3 记录面真实化 REAL — the poll reads lane_count from the sui
   assert.equal(lane, "8", `lane_count must be the MAIN phase's real concurrency (the last __GROUP__ line), got: ${after.match(/^lane_count=.*$/m)?.[0]}`);
 });
 
-// ── ⑩ 轮询 agent 有界阻塞等待（gap-fan-in-execute-poll-bounded-blocking-wait）──────────────────────
-// THE DEFECT: 轮询 agent 每次「看一眼 marker 在不在」就返回 not-done，脚本 setTimeout 60s 再派下一轮——
-// suite 11-19min ⇒ 头 11-15 次结构上必然 not-done 纯空转（~21 次/轮）。修复：把有界阻塞等待
-// （timeout 540 + sleep 15）放进轮询 agent——agent 最多阻塞 540s（硬边界 < Bash 600s 上限），每 15s
-// 看一眼 marker，把 ~21 次空转压到 ~3 次。决策权仍在脚本（timeout 540 是脚本给的硬边界、maxSuitePolls
-// 是脚本循环上限），agent 不自决「等多久」（ab380c5e 是 agent 自决等待，这里是脚本手里的有界等待）。
+// ── ⑩ 阶段 2 agent 内单次有界阻塞等待（gap-fan-in-execute-poll-bounded-blocking-wait）────────────
+// THE DEFECT: 旧「每轮起一个新短命轮询 agent + 脚本 setTimeout 60s」下每次 agent 只看一眼 marker 就返回
+// not-done ⇒ suite 11-19min ⇒ 头 11-15 次结构上必然 not-done 纯空转。修复（在 stage-2 单 agent 内）：
+// 等待块带【有界阻塞等待】（timeout 540 + sleep 15）——单次 Bash 最多阻塞 540s（硬边界 < Bash 600s
+// 上限），每 15s 看一眼 marker，把 ~21 次空转压到 ~3 次。决策权在固定命令（timeout 540 是脚本给的硬
+// 边界、maxSuitePolls 是循环上限），agent 不自决「等多久」（ab380c5e 是 agent 自决等待，这里是固定命令
+// 的有界等待，agent 只是重跑它；gap-subagent-turn-budget-13min-falsified）。
 
-test("⑩ 有界阻塞等待 wiring — 轮询 agent 带 timeout 540（< Bash 600s 上限）+ sleep 15 循环，决策权仍在脚本（能取假）", async (t) => {
+test("⑩ 有界阻塞等待 wiring — 阶段 2 等待块带 timeout 540（< Bash 600s 上限）+ sleep 15 循环（能取假）", async (t) => {
   const { prompts } = await runWorkflow({
     args: { task: "gap-test-poll-bounded", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-poll-bounded", mergeTarget: "develop" },
   });
@@ -2200,8 +2197,8 @@ test("⑩ 有界阻塞等待 wiring — 轮询 agent 带 timeout 540（< Bash 60
   assert.equal(timeoutSecs, 540, "the hard bound must be exactly 540s (AC1: < 600s with safety margin)");
   // sleep 15 检查粒度 + 循环等 marker 而非 agent 自决时长。
   assert.ok(poll.includes('while [ ! -f "$1" ]; do sleep 15; done'), "the bounded wait must loop on the marker existence with sleep 15, not an agent-decided duration");
-  // 决策权仍在脚本（不是 agent 自决等待）。
-  assert.ok(poll.includes("不要做任何等待决策"), "poll must refuse to make any waiting decision (script-owned, ab380c5e 反面)");
+  // 决策权在固定命令（不是 agent 自决等待）——阶段 2 prompt 明示「不要做任何等待决策」。
+  assert.ok(poll.includes("不要做任何等待决策"), "the wait block must refuse to make any waiting decision (fixed command, ab380c5e 反面)");
 });
 
 test("⑩ REAL 有界阻塞等待 — marker 中途出现时，轮询在【一次】阻塞内等到它（阻塞等待生效，非 N 次空转）", async (t) => {
@@ -2228,87 +2225,90 @@ test("⑩ REAL 有界阻塞等待 — marker 中途出现时，轮询在【一�
   assert.ok(elapsed >= 800, `the poll must have BLOCKED waiting (elapsed ${elapsed}ms); an instant not-done return is the N-empty-poll shape this fixes`);
 });
 
-// ── ⑩b firstDelayMs 起轮延迟（gap-fan-in-execute-poll-cost-firstdelay-agenttype AC1/AC3）──────────
-// THE DEFECT: suite 已测下界 11min（674-1138s），却从 t=60s 起轮 ⇒ 头 11-15 次结构上必然 not-done
-// 纯空转（~21 次/轮）。FIX: firstDelayMs（默认 660s）让首轮 setTimeout 从 660s 起，后续回到
-// pollIntervalMs。pollIntervalMs=0 测试 seam 照旧可用（firstDelayMs 也可经 args 覆盖）。
+// ── ⑩b 阶段 2 agent 循环等待覆盖（gap-subagent-turn-budget-13min-falsified：取代旧 firstDelayMs/pollIntervalMs）──
+// 旧设计的「首轮起轮延迟 firstDelayMs（660s）+ 脚本 setTimeout 循环 + 每轮起一个新短命轮询 agent」已随
+// 证伪（无 subagent 回合预算超时）一起删除——阶段 2 agent 在本回合内循环运行【单个有界阻塞等待块】
+// （timeout 540 + sleep 15，< 600s 硬顶）直到 exit marker 出现（最多 maxSuitePolls 次）。覆盖判据从
+// 「firstDelayMs + pollBlockSeconds ≥ 时长」改为「maxSuitePolls × pollBlockSeconds ≥ 时长」
+// （默认 60×540=32400s ≫ 1140s）。
 
-test("⑩b firstDelayMs — the FIRST suite-wait uses firstDelayMs (default 660s), subsequent use pollIntervalMs (AC1 取假)", async (t) => {
-  const { result, delays } = await runWorkflow({
+test("⑩b stage-2 wait wiring — the stage-2 prompt carries the bounded-wait block (timeout 540 + sleep 15) AND the maxSuitePolls loop bound (能取假)", async (t) => {
+  const { prompts } = await runWorkflow({
     args: { task: "gap-test-firstdelay", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-firstdelay", mergeTarget: "develop" },
-    agentResults: [
-      { outcome: "suite-started", suitePid: 111, codeDelta: "code", worktreeHead: "h1", note: "" }, // phase 1
-      { done: false, suiteExit: null },                                                             // poll 1 (not done)
-      { done: false, suiteExit: null },                                                             // poll 2 (not done)
-      { done: true, suiteExit: 0 },                                                                 // poll 3 (green)
-      { outcome: "green", ffOk: true, developHead: "d1", worktreeHead: "h1", agentIdUsed: "a1", codeDelta: "code", note: "bracketClose=OK", bracketClosed: true },
-    ],
   });
-  assert.equal(result.outcome, "green");
-  // 3 polls ⇒ 3 setTimeout delays: [firstDelayMs(660s), pollIntervalMs(60s), pollIntervalMs(60s)].
-  // 取假: 若首轮仍用 pollIntervalMs(60s)，delays[0] 会是 60000 而非 660000 ⇒ 此断言红。
-  assert.deepEqual(delays, [660_000, 60_000, 60_000], `first delay must be firstDelayMs, then pollIntervalMs; got ${JSON.stringify(delays)}`);
+  const poll = promptContaining(prompts, "POLL=not-done");
+  const m = poll.match(/timeout (\d+) bash -c/);
+  assert.ok(m, "the stage-2 wait block must carry `timeout <N> bash -c` (the bounded blocking wait)");
+  const pollBlockSeconds = Number(m[1]);
+  assert.ok(pollBlockSeconds < 600, `the blocking-wait hard bound must be < Bash 600s limit, got ${pollBlockSeconds}s`);
+  assert.equal(pollBlockSeconds, 540, "the hard bound must be exactly 540s (AC1: < 600s with safety margin)");
+  assert.ok(poll.includes('while [ ! -f "$1" ]; do sleep 15; done'), "the bounded wait must loop on the marker existence with sleep 15");
+  // The agent-loop bound (gap-subagent-turn-budget-13min-falsified): the SAME stage-2 agent re-runs the
+  // block up to maxSuitePolls times — 取假: 删掉「最多 N 次」循环说明 ⇒ 此断言红。
+  const cap = poll.match(/最多 (\d+) 次/);
+  assert.ok(cap, "the stage-2 wait instructions must carry the maxSuitePolls loop bound ('最多 N 次')");
+  const maxSuitePolls = Number(cap[1]);
+  const totalCoverageSecs = maxSuitePolls * pollBlockSeconds;
+  assert.ok(totalCoverageSecs >= SUITE_FLOOR_SECS, `stage-2 loop coverage (${maxSuitePolls}×${pollBlockSeconds}s = ${totalCoverageSecs}s) must ≥ suite 时长 ${SUITE_FLOOR_SECS}s`);
 });
 
-test("⑩b firstDelayMs override — firstDelayMs is args-overridable AND pollIntervalMs=0 still zeroes subsequent waits (AC1 seam)", async (t) => {
-  const { result, delays } = await runWorkflow({
-    args: { task: "gap-test-firstdelay0", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-firstdelay0", mergeTarget: "develop", firstDelayMs: 1234, pollIntervalMs: 0, maxSuitePolls: 5 },
-    agentResults: [
-      { outcome: "suite-started", suitePid: 111, codeDelta: "code", worktreeHead: "h1", note: "" },
-      { done: false, suiteExit: null },
-      { done: true, suiteExit: 0 },
-      { outcome: "green", ffOk: true, developHead: "d1", worktreeHead: "h1", agentIdUsed: "a1", codeDelta: "code", note: "bracketClose=OK", bracketClosed: true },
-    ],
+test("⑩b stage-2 wait args override — pollBlockSeconds / pollBlockSleep / maxSuitePolls are args-overridable and reflected in the prompt (AC1 seam)", async (t) => {
+  const { prompts } = await runWorkflow({
+    args: { task: "gap-test-firstdelay0", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-firstdelay0", mergeTarget: "develop", pollBlockSeconds: 123, pollBlockSleep: 0.5, maxSuitePolls: 7 },
   });
-  assert.equal(result.outcome, "green");
-  assert.deepEqual(delays, [1234, 0], `firstDelayMs overridable (1234) + pollIntervalMs=0 seam (0); got ${JSON.stringify(delays)}`);
+  const poll = promptContaining(prompts, "POLL=not-done");
+  assert.match(poll, /timeout 123 bash -c/, "pollBlockSeconds override must render in the wait block");
+  assert.ok(poll.includes('do sleep 0.5; done'), "pollBlockSleep override must render in the wait block");
+  assert.match(poll, /最多 7 次/, "maxSuitePolls override must render in the loop bound");
 });
 
-// ── ⑩d poll 硬边界 ≥ suite 时长（gap-agent-no-timeout-option AC1/AC3，2026-08-20 外层裁定）────────
+// ── ⑩d 单次硬边界 + 循环覆盖 ≥ suite 时长（gap-agent-no-timeout-option AC1/AC3，2026-08-20 外层裁定）────
 // THE DEFECT (b187d84a 回退教训): 把 pollBlockSeconds 收到 100（< Bash 工具默认 120s）曾被当成
-// 「让等待落在默认时限内 ⇒ 等待即代码保证」——但 poll 的硬边界必须 ≥ suite 时长（实测 19+ min ≈
-// 1140s）。100s < suite 时长 ⇒ poll 每次在 suite 结束前超时返回 not-done ⇒ fan-in 误判「suite 异常」
-// → release → relaunch 无限循环（外层实测裁定，7d973c40 回退）。⇒ 判据是「firstDelayMs +
-// pollBlockSeconds ≥ suite 时长」，不是「< Bash 120s」。agent() 无 timeout 旋钮（opts 仅
-// {label,phase,schema,model,effort,isolation,agentType}）——「加旋钮」是 Claude Code 特性请求、
-// 仓库改不了。兜底 = suite detached 运行（setsid+&+disown）：poll agent 的 Bash 即使被默认 120s
-// kill、提前返回 not-done，suite 继续跑，脚本 setTimeout 循环再轮询——detached 让「agent 内长阻塞」
-// 成为纯优化而非正确性要求（文档化见 fan-in-execute.js pollSuite 注释）。
+// 「让等待落在默认时限内 ⇒ 等待即代码保证」——但单次等待的硬边界 × 循环次数必须覆盖 suite 时长（实测
+// 19+ min ≈ 1140s）。agent() 无 timeout 旋钮（opts 仅 {label,phase,schema,model,effort,isolation,agentType}）
+// ——「加旋钮」是 Claude Code 特性请求、仓库改不了。兜底 = suite detached 运行（setsid+&+disown）：
+// 阶段 2 agent 的 Bash 即使被默认 120s kill、提前返回 not-done，suite 继续跑，agent 重跑等待块即可——
+// detached 让「agent 内长阻塞」成为纯优化而非正确性要求。
 
 const SUITE_FLOOR_SECS = 1140; // 实测 19+ min ≈ 1140s（2026-08-20 外层裁定）
 
-test("⑩d poll 硬边界 ≥ suite 时长 — 默认 poll 配置覆盖单次 suite（AC1 机械判据，读真实 poll 配置）", async (t) => {
-  const { prompts, delays } = await runWorkflow({
+test("⑩d stage-2 loop 覆盖 ≥ suite 时长 — 默认 maxSuitePolls × pollBlockSeconds 覆盖单次 suite（AC1 机械判据，读真实 prompt）", async (t) => {
+  const { prompts } = await runWorkflow({
     args: { task: "gap-test-poll-boundary", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-poll-boundary", mergeTarget: "develop" },
   });
   const poll = promptContaining(prompts, "POLL=not-done");
   const m = poll.match(/timeout (\d+) bash -c/);
-  assert.ok(m, "poll must carry `timeout <N> bash -c` (the bounded blocking wait)");
+  assert.ok(m, "the wait block must carry `timeout <N> bash -c` (the bounded blocking wait)");
   const pollBlockSeconds = Number(m[1]);
-  const firstDelayMs = delays[0] ?? 0;
-  const totalCoverageSecs = firstDelayMs / 1000 + pollBlockSeconds;
+  const cap = poll.match(/最多 (\d+) 次/);
+  assert.ok(cap, "the wait instructions must carry the maxSuitePolls loop bound");
+  const maxSuitePolls = Number(cap[1]);
+  const totalCoverageSecs = maxSuitePolls * pollBlockSeconds;
   assert.ok(
     totalCoverageSecs >= SUITE_FLOOR_SECS,
-    `poll 硬边界（firstDelayMs ${firstDelayMs / 1000}s + pollBlockSeconds ${pollBlockSeconds}s = ${totalCoverageSecs}s）必须 ≥ suite 时长 ${SUITE_FLOOR_SECS}s；取假：把 pollBlockSeconds 收到 100 ⇒ 660+100=760 < 1140 ⇒ 本断言红（b187d84a 回退教训）`
+    `stage-2 loop 覆盖（maxSuitePolls ${maxSuitePolls} × pollBlockSeconds ${pollBlockSeconds}s = ${totalCoverageSecs}s）必须 ≥ suite 时长 ${SUITE_FLOOR_SECS}s；取假：把 pollBlockSeconds 收到 100 且 maxSuitePolls=1 ⇒ 100 < 1140 ⇒ 本断言红（b187d84a 回退教训）`
   );
 });
 
-test("⑩d falsification — poll 硬边界 < suite 时长时判据红（pollBlockSeconds=100 override，AC3 取假）", async (t) => {
-  // 取假：同一个「覆盖度 ≥ 地板」谓词喂给一个【已知为坏的】配置（100s，b187d84a 回退值）⇒ 谓词必须
-  // 判它为不及格（断言通过 = 谓词能红，证明「≥ 地板」不是恒真——硬规则 4：结构上不可能取假的量不是测量）。
-  const { prompts, delays } = await runWorkflow({
-    args: { task: "gap-test-poll-boundary-bad", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-poll-boundary-bad", mergeTarget: "develop", pollBlockSeconds: 100 },
+test("⑩d falsification — 单次覆盖 < suite 时长时判据红（pollBlockSeconds=100 + maxSuitePolls=1 override，AC3 取假）", async (t) => {
+  // 取假：同一个「覆盖度 ≥ 地板」谓词喂给一个【已知为坏的】配置（100s 单次 × 1 次循环，b187d84a 回退值）
+  // ⇒ 谓词必须判它为不及格（断言通过 = 谓词能红，证明「≥ 地板」不是恒真——硬规则 4）。
+  const { prompts } = await runWorkflow({
+    args: { task: "gap-test-poll-boundary-bad", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-poll-boundary-bad", mergeTarget: "develop", pollBlockSeconds: 100, maxSuitePolls: 1 },
   });
   const poll = promptContaining(prompts, "POLL=not-done");
   const m = poll.match(/timeout (\d+) bash -c/);
-  assert.ok(m, "poll must carry `timeout <N> bash -c`");
+  assert.ok(m, "the wait block must carry `timeout <N> bash -c`");
   const pollBlockSeconds = Number(m[1]);
   assert.equal(pollBlockSeconds, 100, "sanity: the pollBlockSeconds=100 override must be applied");
-  const firstDelayMs = delays[0] ?? 0;
-  const totalCoverageSecs = firstDelayMs / 1000 + pollBlockSeconds;
+  const cap = poll.match(/最多 (\d+) 次/);
+  assert.ok(cap, "the wait instructions must carry the maxSuitePolls loop bound");
+  const maxSuitePolls = Number(cap[1]);
+  assert.equal(maxSuitePolls, 1, "sanity: the maxSuitePolls=1 override must be applied");
+  const totalCoverageSecs = maxSuitePolls * pollBlockSeconds;
   assert.ok(
     totalCoverageSecs < SUITE_FLOOR_SECS,
-    `取假谓词：${totalCoverageSecs}s < ${SUITE_FLOOR_SECS}s 必须成立（pollBlockSeconds=100 ⇒ 660+100=760 < 1140，覆盖不到 suite 时长）；若此断言红则「≥ 地板」判据是恒真/错测`
+    `取假谓词：${totalCoverageSecs}s < ${SUITE_FLOOR_SECS}s 必须成立（100s × 1 = 100 < 1140，覆盖不到 suite 时长）；若此断言红则「≥ 地板」判据是恒真/错测`
   );
 });
 
@@ -2337,13 +2337,12 @@ test("⑩c suite-poller definition — .claude/agents/suite-poller.md declares o
  *  fix-scope gate block from that prompt. */
 async function fixScopeGateBlockFor(task, worktree) {
   const { prompts } = await runWorkflow({
-    args: { task, worktree, root: REPO_ROOT, runId: "fm-fixscope", mergeTarget: "develop", pollIntervalMs: 0, maxSuitePolls: 5, maxFixRounds: 2 },
+    args: { task, worktree, root: REPO_ROOT, runId: "fm-fixscope", mergeTarget: "develop", maxSuitePolls: 5, maxFixRounds: 2 },
     agentResults: [
       { outcome: "suite-started", suitePid: 111, codeDelta: "code", worktreeHead: "h1", note: "" }, // phase 1
-      { done: true, suiteExit: 1 },                                                                 // poll: suite RED
+      { outcome: "suite-red", suiteExit: 1, ffOk: false },                                          // stage 2: suite RED
       { relaunched: true, worktreeHead: "h2", failuresFixed: ["x"], note: "" },                     // Fix agent
-      { done: true, suiteExit: 0 },                                                                 // poll: green after fix
-      { outcome: "green", ffOk: true, developHead: "d2", worktreeHead: "h2", agentIdUsed: "a2", codeDelta: "code", note: "bracketClose=OK", bracketClosed: true },
+      { outcome: "green", ffOk: true, developHead: "d2", worktreeHead: "h2", agentIdUsed: "a2", codeDelta: "code", note: "bracketClose=OK", bracketClosed: true }, // stage 2 re-dispatched
     ],
   });
   return extractBlockFromPrompts(prompts, "# fix-scope-gate-block-start", "# fix-scope-gate-block-end");
@@ -2361,12 +2360,11 @@ function makeFixScopeDir(prefix, task, body) {
 
 test("fix-scope wiring — the inline suite-fix prompt carries the gate (判红 Touches 内/越界), NOT execute-suite-fix.js", async (t) => {
   const { prompts } = await runWorkflow({
-    args: { task: "gap-test-fixscope-wire", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-fixscope-wire", mergeTarget: "develop", pollIntervalMs: 0, maxSuitePolls: 5, maxFixRounds: 1 },
+    args: { task: "gap-test-fixscope-wire", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-fixscope-wire", mergeTarget: "develop", maxSuitePolls: 5, maxFixRounds: 1 },
     agentResults: [
       { outcome: "suite-started", suitePid: 111, codeDelta: "code", worktreeHead: "h1", note: "" },
-      { done: true, suiteExit: 1 },
+      { outcome: "suite-red", suiteExit: 1, ffOk: false },
       { relaunched: true, worktreeHead: "h2", failuresFixed: ["x"], note: "" },
-      { done: true, suiteExit: 0 },
       { outcome: "green", ffOk: true, developHead: "d2", worktreeHead: "h2", agentIdUsed: "a2", codeDelta: "code", note: "bracketClose=OK", bracketClosed: true },
     ],
   });
@@ -2462,15 +2460,14 @@ test("fix-scope REAL leak-residual — a tmux-leak-scan: FAIL with no per-file f
 
 test("fix-scope release persistence wiring — relaunch-fail 2nd suite-fix prompt still carries the idempotent-release instruction", async (t) => {
   const { prompts } = await runWorkflow({
-    args: { task: "gap-test-fixscope-persist-wire", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-fixscope-persist-wire", mergeTarget: "develop", pollIntervalMs: 0, maxSuitePolls: 5, maxFixRounds: 3 },
+    args: { task: "gap-test-fixscope-persist-wire", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-fixscope-persist-wire", mergeTarget: "develop", maxSuitePolls: 5, maxFixRounds: 3 },
     agentResults: [
       { outcome: "suite-started", suitePid: 111, codeDelta: "code", worktreeHead: "h1", note: "" },                 // phase 1
-      { done: true, suiteExit: 1 },                                                                                   // poll: RED
+      { outcome: "suite-red", suiteExit: 1, ffOk: false },                                                           // stage 2: RED
       { relaunched: true, worktreeHead: "h2", failuresFixed: [], note: "load-sensitive 释放（第1轮）" },              // fix round 1: release
-      { done: true, suiteExit: 1 },                                                                                   // poll: STILL RED (relaunch-fail)
+      { outcome: "suite-red", suiteExit: 1, ffOk: false },                                                           // stage 2 re-dispatched: STILL RED (relaunch-fail)
       { relaunched: true, worktreeHead: "h2", failuresFixed: [], note: "load-sensitive 释放（第2轮，幂等持久）" },      // fix round 2: STILL release
-      { done: true, suiteExit: 0 },                                                                                   // poll: green
-      { outcome: "green", ffOk: true, developHead: "d2", worktreeHead: "h2", agentIdUsed: "a2", codeDelta: "code", note: "bracketClose=OK", bracketClosed: true },
+      { outcome: "green", ffOk: true, developHead: "d2", worktreeHead: "h2", agentIdUsed: "a2", codeDelta: "code", note: "bracketClose=OK", bracketClosed: true }, // stage 2 re-dispatched: green
     ],
   });
   const fixPrompts = prompts.filter((p) => p.includes("suite-fix 阶段"));
@@ -2540,12 +2537,11 @@ test("fix-scope release persistence — relaunch-fail path: same load-sensitive 
 
 test("release isolation wiring — the fix prompt carries ISOLATE_LAUNCH + the three-state release decision (isolate-rerun ≠ full relaunch; livelock ⇒ escalate)", async (t) => {
   const { prompts } = await runWorkflow({
-    args: { task: "gap-test-release-iso-wire", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-release-iso-wire", mergeTarget: "develop", pollIntervalMs: 0, maxSuitePolls: 5, maxFixRounds: 2 },
+    args: { task: "gap-test-release-iso-wire", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-release-iso-wire", mergeTarget: "develop", maxSuitePolls: 5, maxFixRounds: 2 },
     agentResults: [
       { outcome: "suite-started", suitePid: 111, codeDelta: "code", worktreeHead: "h1", note: "" },
-      { done: true, suiteExit: 1 },
+      { outcome: "suite-red", suiteExit: 1, ffOk: false },
       { relaunched: true, worktreeHead: "h2", failuresFixed: [], note: "load-sensitive 释放（第1轮）" },
-      { done: true, suiteExit: 0 },
       { outcome: "green", ffOk: true, developHead: "d2", worktreeHead: "h2", agentIdUsed: "a2", codeDelta: "code", note: "bracketClose=OK", bracketClosed: true },
     ],
   });
@@ -2646,10 +2642,10 @@ test("release anti-livelock REAL — same load-sensitive red 3 rounds ⇒ round-
 
 test("release anti-livelock — fix agent escalation (relaunched:false) ⇒ workflow stops red with the anti-livelock message (no infinite relaunch)", async (t) => {
   const { prompts, result } = await runWorkflow({
-    args: { task: "gap-test-release-ll-wf", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-release-ll-wf", mergeTarget: "develop", pollIntervalMs: 0, maxSuitePolls: 5, maxFixRounds: 4 },
+    args: { task: "gap-test-release-ll-wf", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-release-ll-wf", mergeTarget: "develop", maxSuitePolls: 5, maxFixRounds: 4 },
     agentResults: [
       { outcome: "suite-started", suitePid: 111, codeDelta: "code", worktreeHead: "h1", note: "" },
-      { done: true, suiteExit: 1 },                                                                                                        // poll: RED
+      { outcome: "suite-red", suiteExit: 1, ffOk: false },                                                                                 // stage 2: RED
       { relaunched: false, rerunMode: null, worktreeHead: "h2", failuresFixed: [], note: "load-sensitive anti-livelock（releasedRounds≥3）：停止无界 relaunch，escalate → quiet-window / needs-human" },  // Fix agent: livelock escalate
     ],
   });
