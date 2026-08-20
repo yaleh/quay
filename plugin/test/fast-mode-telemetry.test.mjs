@@ -2112,3 +2112,84 @@ test("IMPL-COMPLETE — idempotent: a second --impl-complete for the same runId 
     cleanup(tmp);
   }
 });
+
+// ── IMPL-COMPLETE Build-side write (gap-impl-complete-event-written-by-fan-in-not-build) ─────────────
+// The PRIMARY writer moves from fan-in step 4.4 to the Build subagent's completion. The Build subagent
+// does not hold the runId (the inner generated it at --task-start dispatch), so `--impl-complete`
+// auto-resolves it from the task's OPEN bracket when `--runId` is omitted — the same lookup --run-id-for
+// uses. These are REAL-CLI tests (write the real event file, read it back) — the AC2 production-carrier
+// negative control.
+
+test("IMPL-COMPLETE — Build-side write: --impl-complete without --runId auto-resolves the open bracket's runId (gap-impl-complete-event-written-by-fan-in-not-build AC1)", async () => {
+  const tmp = makeTmpWorkspace();
+  try {
+    const start = runCli(tmp, "--task-start", "--taskId", "gap-build-side");
+    assert.equal(start.status, 0, start.stderr);
+    const runId = start.stdout.trim();
+    assert.match(runId, /^fm-/, `--task-start printed a runId, got: ${runId}`);
+
+    // The Build-side write: only --taskId + --root (no --runId — the subagent does not hold it).
+    const ic = runCli(tmp, "--impl-complete", "--taskId", "gap-build-side");
+    assert.equal(ic.status, 0, `auto-resolve must succeed: ${ic.stderr}`);
+    assert.match(ic.stdout, /impl-complete event written/, `reports the write: ${ic.stdout}`);
+    assert.ok(ic.stdout.includes(runId), `the auto-resolved runId is the open bracket's, got: ${ic.stdout}`);
+
+    // Read the REAL event stream back: the runId file (the one --task-start generated) carries the
+    // impl-complete boundary — AC2 production carrier (real file, not a fixture).
+    const evs = readEventsJsonl(tmp, runId);
+    assert.equal(evs.filter((e) => e.eventKind === "impl-complete").length, 1, "exactly one impl-complete in the runId event file");
+    assert.equal(evs[evs.length - 1].runId, runId, "the event landed in the open bracket's runId file");
+
+    // The report classifies it awaiting-land (impl-complete, no end) — NOT implementing.
+    const rep = runCli(tmp, "--report", "--json");
+    assert.equal(rep.status, 0, rep.stderr);
+    const r = JSON.parse(rep.stdout);
+    assert.ok(!(r.implementing ?? []).some((x) => x.taskId === "gap-build-side"), "a Build-completed task is NOT counted as implementing");
+    assert.ok((r.awaitingLand ?? []).some((x) => x.taskId === "gap-build-side"), "a Build-completed task IS awaiting-land");
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test("IMPL-COMPLETE — Build-side negative control: no open bracket ⇒ fail-closed (exit 1), nothing written (AC2)", async () => {
+  const tmp = makeTmpWorkspace();
+  try {
+    // No --task-start was ever run for this task — there is no open bracket to auto-resolve.
+    const ic = runCli(tmp, "--impl-complete", "--taskId", "gap-no-bracket");
+    assert.notEqual(ic.status, 0, "no open bracket must fail-closed, not silently pass");
+    assert.match(ic.stderr, /could not resolve an open runId/, `names the cause: ${ic.stderr}`);
+    // Nothing was written: the events dir has no runId file for this task.
+    const dir = path.join(tmp, ".workflow-events");
+    const files = fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => f.endsWith(".jsonl")) : [];
+    assert.ok(files.every((f) => !f.includes("gap-no-bracket")), `no event file for a bracket-less task, got: ${files.join(", ")}`);
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test("IMPL-COMPLETE — AC2 production carrier: Build-completed-but-queued (start + impl-complete, no end) is NOT implementing; start-only IS", async () => {
+  const tmp = makeTmpWorkspace();
+  try {
+    // gap-queued: Build completed, waiting in the fan-in queue (start + impl-complete, no end).
+    const startQ = runCli(tmp, "--task-start", "--taskId", "gap-queued");
+    assert.equal(startQ.status, 0, startQ.stderr);
+    const icQ = runCli(tmp, "--impl-complete", "--taskId", "gap-queued"); // Build-side write, no runId
+    assert.equal(icQ.status, 0, icQ.stderr);
+
+    // gap-building: still in Build (start only, no impl-complete).
+    const startB = runCli(tmp, "--task-start", "--taskId", "gap-building-2");
+    assert.equal(startB.status, 0, startB.stderr);
+
+    const rep = runCli(tmp, "--report", "--json");
+    assert.equal(rep.status, 0, rep.stderr);
+    const r = JSON.parse(rep.stdout);
+    const implIds = (r.implementing ?? []).map((x) => x.taskId);
+    const awaitIds = (r.awaitingLand ?? []).map((x) => x.taskId);
+    assert.ok(implIds.includes("gap-building-2"), "start-only IS implementing (真正在 Build)");
+    assert.ok(!implIds.includes("gap-queued"), "Build-completed-queued is NOT implementing — frees the Build slot (AC2)");
+    assert.ok(awaitIds.includes("gap-queued"), "Build-completed-queued IS awaiting-land");
+    assert.equal(r.inProgress.length, 2, "both open runs still surface in inProgress (start-without-end)");
+  } finally {
+    cleanup(tmp);
+  }
+});

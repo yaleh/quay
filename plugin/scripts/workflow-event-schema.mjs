@@ -99,11 +99,13 @@ export const VALID_DISPATCH_MODES = Object.freeze(["serial", "concurrent"]);
 
 /** Fast-mode task-lifecycle `eventKind` values (the A1b extra field distinguishes start/end, and
  *  now the impl-complete boundary). `impl-complete` is the THIRD task-lifecycle event
- *  (gap-inflight-states-missing-impl-complete-event): fan-in writes it after impl completes (suite
- *  green) and BEFORE land, splitting the start→end span into start→impl-complete (implementing) and
- *  impl-complete→end (awaiting-land). `blocked` is the separate blocked-wait marker written by
- *  inner-blocked-signal.ts — NOT a task-lifecycle kind. Purely additive — SCHEMA_VERSION is NOT
- *  bumped (M207 additive-growth precedent; eventKind is an extra field, never validated). */
+ *  (gap-inflight-states-missing-impl-complete-event): its PRIMARY writer is the Build subagent's
+ *  completion (gap-impl-complete-event-written-by-fan-in-not-build), with fan-in step 4.4 re-invoking
+ *  it as an idempotent backstop before land. It splits the start→end span into start→impl-complete
+ *  (implementing) and impl-complete→end (awaiting-land). `blocked` is the separate blocked-wait
+ *  marker written by inner-blocked-signal.ts — NOT a task-lifecycle kind. Purely additive —
+ *  SCHEMA_VERSION is NOT bumped (M207 additive-growth precedent; eventKind is an extra field, never
+ *  validated). */
 export const VALID_EVENT_KINDS = Object.freeze(["start", "end", "impl-complete", "blocked"]);
 
 /** The single `eventKind` value marking the impl-complete boundary — see VALID_EVENT_KINDS. */

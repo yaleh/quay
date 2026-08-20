@@ -33,8 +33,12 @@ extra:
 ## Touches
 
 - tasks/gap-impl-complete-event-written-by-fan-in-not-build.md（自身）
-- plugin/scripts/fast-mode-telemetry.ts（impl-complete 事件写入点 + 幂等逻辑）
-- plugin/workflows/fan-in-execute.js（step 4.4 改幂等跳过；双拷贝同步 .claude/workflows/fan-in-execute.js）
+- plugin/scripts/fast-mode-telemetry.ts（impl-complete 事件写入点：--impl-complete 自动解析 runId + 幂等逻辑；Build 完成时写事件）
+- plugin/scripts/workflow-event-schema.mjs（impl-complete 注释：Build 为主写入方；experiments/ 镜像同步）
+- experiments/quay-perpetual-stream/scripts/workflow-event-schema.mjs（workflow-event-schema.mjs 的 experiments/ 镜像）
+- plugin/workflows/fan-in-execute.js（step 4.4 改幂等回退；双拷贝同步 .claude/workflows/fan-in-execute.js）
 - .claude/workflows/fan-in-execute.js（同上）
-- plugin/scripts/slot-refill.ts（Build 派发计数，若读法需调整）
-- plugin/test/（impl-complete 事件写入点负控制）
+- plugin/scripts/slot-refill.ts（Build 派发计数读法——本轮核实无需调整：读 implementing 段，Build 完成即写 impl-complete ⇒ 排队任务自动释放 Build 槽）
+- plugin/test/fast-mode-telemetry.test.mjs（impl-complete 事件写入点负控制 + Build-side 自动解析 runId）
+- plugin/test/fan-in-execute-paths.test.mjs（step 4.4 幂等回退负控制）
+- plugin/test/workflow-event-schema.test.mjs（schema 注释同步后回归）

@@ -719,8 +719,9 @@ export function buildEndEvent({ taskId, runId, outcome, executionCwd, baseCommit
 
 /**
  * Build the schema-valid `Fast` impl-complete event (eventKind 'impl-complete') — the THIRD
- * task-lifecycle event (gap-inflight-states-missing-impl-complete-event). fan-in writes it after
- * impl completes (suite green) and BEFORE land, splitting the start→end span into start→impl-complete
+ * task-lifecycle event (gap-inflight-states-missing-impl-complete-event). The PRIMARY writer is the
+ * Build subagent's completion (gap-impl-complete-event-written-by-fan-in-not-build); fan-in step 4.4
+ * re-invokes it as an idempotent backstop. It splits the start→end span into start→impl-complete
  * (implementing) and impl-complete→end (awaiting-land). timing is all-null (a boundary marker, not a
  * start/end), so aggregate() classifies it as neither start-like nor end-like; the boundary instant
  * is recordedAtMs.
@@ -822,11 +823,12 @@ export function hasEndEvent(root, runId) {
 
 /**
  * Whether the runId's event file already carries an impl-complete event (eventKind "impl-complete").
- * The write-time idempotency guard for `--impl-complete`: an ff-retry re-runs phase 2 (which writes
- * impl-complete again); the guard skips the second write so a runId carries exactly one impl-complete
- * boundary. PURE READ — never writes. Missing file / malformed line ⇒ false (a bracket with no
- * readable impl-complete proceeds to write; a false negative here at worst reproduces a harmless
- * duplicate boundary that aggregate() dedups by first-wins).
+ * The write-time idempotency guard for `--impl-complete`: the Build subagent writes the boundary at
+ * completion AND fan-in step 4.4 re-runs the command as a backstop (an ff-retry re-runs phase 2 which
+ * writes impl-complete again); the guard skips the second write so a runId carries exactly one
+ * impl-complete boundary. PURE READ — never writes. Missing file / malformed line ⇒ false (a bracket
+ * with no readable impl-complete proceeds to write; a false negative here at worst reproduces a
+ * harmless duplicate boundary that aggregate() dedups by first-wins).
  * @param {string} root
  * @param {string} runId
  * @returns {boolean}
@@ -1840,7 +1842,7 @@ const usage = `fast-mode-telemetry.ts — fast-mode (direct) execution metering 
 Usage:
   node --experimental-strip-types fast-mode-telemetry.ts --task-start --taskId <id> [--root <dir>]
   node --experimental-strip-types fast-mode-telemetry.ts --task-end --taskId <id> --runId <r> --outcome <done|needs-human|abandoned|deferred> [--fanInCommit <sha>] [--root <dir>]  (--fanInCommit overrides the auto-looked-up fan-in commit sha)
-  node --experimental-strip-types fast-mode-telemetry.ts --impl-complete --taskId <id> --runId <r> [--root <dir>]  (the third lifecycle event: impl done, awaiting land)
+  node --experimental-strip-types fast-mode-telemetry.ts --impl-complete --taskId <id> [--runId <r>] [--root <dir>]  (the third lifecycle event: impl done, awaiting land; --runId optional — auto-resolved from the open bracket when omitted)
   node --experimental-strip-types fast-mode-telemetry.ts --run-id-for --taskId <id> [--root <dir>]     (PURE READ — the open bracket's runId for the A6 fan-in merge message)
   node --experimental-strip-types fast-mode-telemetry.ts --halt-start [--atMs <iso>] [--reason <str>] [--root <dir>]   (record a .halt placement)
   node --experimental-strip-types fast-mode-telemetry.ts --halt-end   [--atMs <iso>] [--root <dir>]                    (record a .halt removal)
@@ -2065,16 +2067,34 @@ export async function main(argv) {
   }
 
   // --impl-complete (gap-inflight-states-missing-impl-complete-event): write the THIRD task-lifecycle
-  // event — the boundary between "implementing" and "awaiting-land". fan-in writes it after impl
-  // completes (suite green) and BEFORE land, so the start→end span splits into two independently
-  // countable segments. Idempotent: a second write for the same runId (an ff-retry re-running phase 2)
-  // is skipped.
+  // event — the boundary between "implementing" and "awaiting-land". The PRIMARY writer is the BUILD
+  // subagent's completion (gap-impl-complete-event-written-by-fan-in-not-build): Build reports
+  // impl-complete at the moment it finishes implementing, so a task that has completed Build but is
+  // still queued in fan-in already carries the boundary and is NOT counted as implementing by the
+  // Build dispatch gate. fan-in step 4.4 re-invokes this as an IDEMPOTENT BACKSTOP (the
+  // hasImplCompleteEvent guard skips the second write), so a task whose Build path did not write the
+  // event still gets it before land. `--runId` is optional: when omitted it is auto-resolved from the
+  // task's OPEN bracket (the runId --task-start generated at dispatch, the same lookup --run-id-for
+  // uses) — the Build subagent does not hold the runId, only the taskId. No open bracket ⇒ fail-closed
+  // (exit 1, nothing written): a Build completion without a --task-start bracket is an anomaly, and
+  // the caller must not silently drop the boundary.
   if (args.includes("--impl-complete")) {
     const taskId = getArgValue(args, "--taskId");
-    const runId = getArgValue(args, "--runId");
-    if (!taskId || !runId) {
-      console.error("fast-mode-telemetry: --impl-complete requires --taskId <id> --runId <r>");
+    if (!taskId) {
+      console.error("fast-mode-telemetry: --impl-complete requires --taskId <id>");
       return 1;
+    }
+    let runId = getArgValue(args, "--runId");
+    if (!runId) {
+      const events = [];
+      for await (const e of readAllEvents(root)) events.push(e);
+      const report = aggregate(events, {});
+      const open = report.inProgress.find((p) => p.taskId === taskId);
+      runId = open && open.runId ? open.runId : "";
+      if (!runId) {
+        console.error(`fast-mode-telemetry: --impl-complete could not resolve an open runId for task ${taskId} (no --task-start bracket?); nothing written`);
+        return 1;
+      }
     }
     if (hasImplCompleteEvent(root, runId)) {
       console.log(`fast-mode-telemetry: --impl-complete idempotent — runId ${runId} already marked impl-complete; no second event written`);

@@ -619,12 +619,14 @@ ${FIX_SCOPE_GATE}
 
 步骤（严格按序；每步都先 cd ${worktree} 或显式用 -C）：
 
-【无锁段 step 4.4 — 写 impl-complete 事件（gap-inflight-states-missing-impl-complete-event）】
+【无锁段 step 4.4 — 写 impl-complete 事件（幂等回退；gap-inflight-states-missing-impl-complete-event / gap-impl-complete-event-written-by-fan-in-not-build）】
 # impl-complete-block-start
-# suite 已绿（或 suite-skipped / suite-preverified）⇒ impl 完成，任务进入「待落地」段。在 land
-# （step 5 flip+ff）之前写第三个生命周期事件，把 start→end 拆成 start→impl-complete（实现）与
-# impl-complete→end（待落地）两段——Build 派发读前者、落地单飞读后者（不再读 worktree）。幂等：
-# ff-retry 重跑 phase 2 时 hasImplCompleteEvent 跳过重写。runId 为空（未走 --task-start 留痕）⇒ 跳过。
+# 第三个生命周期事件把 start→end 拆成 start→impl-complete（实现）与 impl-complete→end（待落地）
+# 两段——Build 派发读前者、落地单飞读后者（不再读 worktree）。**PRIMARY 写入方是 Build subagent
+# 完成时**（gap-impl-complete-event-written-by-fan-in-not-build：Build 完成即写，排队待 fan-in 的
+# 任务不占 Build 槽）；本步是**幂等回退**——Build 路径已写 ⇒ fast-mode-telemetry 的
+# hasImplCompleteEvent 跳过重写（ff-retry 重跑 phase 2 同幂等）；Build 路径漏写（异常）⇒ 本步补写。
+# runId 为空（未走 --task-start 留痕）⇒ 跳过。|| true：回退是 best-effort，不因漏写拦 fan-in。
 if [ -n "${runId}" ]; then
   node --experimental-strip-types ${worktree}/plugin/scripts/fast-mode-telemetry.ts --impl-complete --taskId ${task} --runId ${runId} --root ${root} || true
 fi
