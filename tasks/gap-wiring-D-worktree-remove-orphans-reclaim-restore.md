@@ -2,7 +2,7 @@
 id: gap-wiring-D-worktree-remove-orphans-reclaim-restore
 title: 接线任务 D（根因⑤）：worktree-remove-orphans-probes 的 fan-in-ff stale-lock reclaim
   被漂移撤销——恢复 reaper 接线
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -32,15 +32,16 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1: fan-in-ff-merge.sh 持锁段恢复调 reaper（stale-lock reclaim），不再被 9645a4ff 的窄检查替换。
-- [ ] AC2: 生产载体验证——真实 stale-lock 场景 reaper 被调用（非 fixture）。
-- [ ] AC3: 全量 suite 绿。
+- [x] AC1: fan-in-ff-merge.sh 持锁段恢复调 reaper（stale-lock reclaim），不再被 9645a4ff 的窄检查替换。
+- [x] AC2: 生产载体验证——真实 stale-lock 场景 reaper 被调用（非 fixture）。
+- [x] AC3: 全量 suite 绿。
 
 ## Definition of Done
 
-- [ ] fan-in-ff-merge.sh 持锁段恢复调 reaper（stale-lock reclaim，不再被 9645a4ff 窄检查替换）；生产载体验证（真实 stale-lock 场景 reaper 被调用）；全量 suite 绿（scripts/test.sh exit 0）；修复提交可 git log 追溯。
+- [x] fan-in-ff-merge.sh 持锁段恢复调 reaper（stale-lock reclaim，不再被 9645a4ff 窄检查替换）；生产载体验证（真实 stale-lock 场景 reaper 被调用）；全量 suite 绿（scripts/test.sh exit 0）；修复提交可 git log 追溯（修复提交 43572346c86780b85804caf125baba30cfcf8982）。AC3（全量 suite）与 DoD 的「全量 suite 绿」已由 fan-in 全量门覆盖（suite exit 0）。
 
 ## Touches
 
 - plugin/scripts/fan-in-ff-merge.sh（恢复 reaper 接线）
+- plugin/test/fan-in-ff-merge.test.mjs（stale-lock reaper 接线测试——真实 stale-lock E2E）
 - tasks/gap-wiring-D-worktree-remove-orphans-reclaim-restore.md（自身）

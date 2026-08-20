@@ -255,6 +255,29 @@ if [ -f "${suite_capture}" ]; then
   fi
 fi
 if [ "${suite_cert_ok}" != "1" ]; then
+  # gap-wiring-D-worktree-remove-orphans-reclaim-restore (硬规则 5b): restore the stale-lock reclaim
+  # seam that 9645a4ff dropped when it replaced the global suite-lock probe with this per-task
+  # certificate. The certificate narrow-gate is the CORRECT architecture (the per-task capture fixed
+  # the 2026-08-18 mutual-refuse livelock) — but the reaper was a SEPARATE concern (gap-worktree-
+  # remove-orphans-probes: reclaim stale suite-lock HOLDERS so a hung holder never blocks a suite from
+  # starting) that must not silently disappear with it. On the BLOCKED path (certificate unsatisfied —
+  # the analog of "a slot is held" under the old gate), run the reaper best-effort BEFORE refusing:
+  #   (a) --worktree <path> reclaims THIS task worktree's own leftovers (a hung suite/runner from a
+  #       prior fan-in attempt whose worktree still exists — excludes the caller's own process tree);
+  #   (b) --orphans --stale-lock-holders-only reclaims stale suite-lock holders whose cwd points at a
+  #       DELETED worktree (the orphan family: a suite whose worktree was removed without first
+  #       stopping it — the flock auto-releases when the process dies, so reclaiming unblocks the
+  #       caller's next suite start).
+  # NEVER a name-based batch kill of live processes (the 2026-08-08 two-layer-blind invariant);
+  # --stale-lock-holders-only skips the global claude-probe orphan sweep (cross-test race, 2026-08-17).
+  # The normal fast path (certificate green) is untouched — the reaper only runs on the blocked path.
+  _reaper="${BASH_SOURCE[0]%/*}/worktree-process-reaper.ts"
+  if [ -f "${_reaper}" ]; then
+    if [ -n "${worktree}" ]; then
+      node --no-warnings --experimental-strip-types "${_reaper}" --worktree "${worktree}" --root "${root}" --json >/dev/null 2>&1 || true
+    fi
+    node --no-warnings --experimental-strip-types "${_reaper}" --orphans --stale-lock-holders-only --root "${root}" --json >/dev/null 2>&1 || true
+  fi
   echo "fan-in-ff-merge: 本任务 ${task_id} 的 suite 证书未满足 — capture=${suite_capture} exists=$([ -f "${suite_capture}" ] && echo yes || echo no) suite_exit=${suite_exit:-<unset>} suite_head=${suite_head:-<unset>} 待 ff tip=${suite_tip:-<unresolvable>}; 证书要求 suite_head 是待 ff tip 的祖先、且 suite_head..tip 的 delta 经 --classify-delta 判惰性（无 change/full 检查器 @static-object 覆盖 + 落 doc 面）；塞入 @static-object 覆盖路径 ⇒ 拒（可取假）。NOT acquiring the merge lock" >&2
   exit 2
 fi
