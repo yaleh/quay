@@ -1,7 +1,7 @@
 ---
 id: gap-ac104-version-bump-v060
 title: AC104 版本号推进到 v0.6.0（8 处一致）——当前阶段管线第一步
-status: ready
+status: done
 labels:
   - gap
   - mechanism
