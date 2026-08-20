@@ -33,12 +33,13 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: `gh run list --workflow=ci.yml --branch=develop` 核实 dist-verify-node-floor job conclusion=success 且时刻新于 2026-08-20（能取假：不存在或旧于切换 ⇒ 未达成）。
-- [ ] AC2: 达成证据写入 `.quay/productization-verification.jsonl`（`ac="AC106"`，含 run id + 时刻 + commit）。
+- [x] AC1: `gh run list --workflow=ci.yml --branch=develop` 核实 dist-verify-node-floor job conclusion=success 且时刻新于 2026-08-20（能取假：不存在或旧于切换 ⇒ 未达成）。
+- [x] AC2: 达成证据写入 `.quay/productization-verification.jsonl`（`ac="AC106"`，含 run id + 时刻 + commit）。
+  - Evidence: run_id=32375298855 job=dist-verify-node-floor conclusion=success created=2026-08-20T13:37:11Z sha=bab28666 branch=develop
 
 ## Definition of Done
 
-- [ ] dist-verify-node-floor job success 已核实（真实 run，非配置）；记录已写入 productization-verification.jsonl；若发现未真跑则按缺陷立案。
+- [x] dist-verify-node-floor job success 已核实（真实 run，非配置）；记录已写入 productization-verification.jsonl；若发现未真跑则按缺陷立案。
 
 ## Touches
 
