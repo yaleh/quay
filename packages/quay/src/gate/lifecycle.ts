@@ -285,6 +285,36 @@ export async function runPromote({ client, id, logPath, actor = "quay-cli", work
 }
 
 /**
+ * The `**RETREATED` / 搁置 marker (tasks/gap-retreated-state-not-mechanized) — the mechanical
+ * "retreated / shelved" state a task carries after a retreat (load-induced red rollback that must
+ * NOT be re-dispatched until the fix-scope gate lands and the marker is removed — 解除搁置).
+ *
+ * The DETECTION side lives in the plugin: plugin/scripts/ready-pool-check.ts defines the canonical
+ * `RETREATED_MARKER_RE` (which slot-refill.ts reuses — single source, no parallel copy within the
+ * plugin). THIS module is the WRITE side. Core stays dependency-free (engine.ts:23 — the Core
+ * package must not import the plugin), so the detection anchor is reproduced here, NOT imported —
+ * the writer's output must satisfy exactly the same line-start bold `**RETREATED` (optional
+ * blockquote) anchor the reader tests. Position-based (hard-rule ②): only the bold line-start
+ * MARKER matches — a prose mention of "retreated" is not a marker.
+ */
+export const RETREATED_MARKER_RE = /^\s*(?:>\s*)?\*\*RETREATED\b/im;
+
+/** Prepend the `**RETREATED` / 搁置 marker to a task body (every retreat is a shelve — the reason
+ *  is the retreat's deliverable, carried inline for traceability). Fail-open on non-string: a
+ *  retreat still flips status; marking is best-effort over a present body, exactly like
+ *  uncheckAcBoxes. Idempotent: a body already carrying the marker is returned unchanged (a
+ *  re-retreat must not stack duplicate marker lines). */
+function addRetreatedMarker(body: string, reason: string): string {
+  if (typeof body !== "string") return body;
+  if (RETREATED_MARKER_RE.test(body)) return body;
+  // Collapse the reason to a single line — a retreat reason is user prose; newlines would break the
+  // line-start marker anchor (the reader's `^` is per-line).
+  const oneLine = reason.replace(/\s+/g, " ").trim();
+  const marker = `> **RETREATED / 搁置（${oneLine}）**`;
+  return `${marker}\n\n${body.replace(/^\s+/, "")}`;
+}
+
+/**
  * Uncheck every checked box in the task's `## Acceptance Criteria` section
  * (`- [x]` / `- [X]` → `- [ ]`) — the retreat done→ready semantic
  * (gap-not-yet-flipped-blocks-retreated-ac83-class). A retreat rolls a task
@@ -348,7 +378,18 @@ export async function runRetreat({ client, id, reason, logPath, actor = "quay-cl
   assertTransition(task.status, "back");
   const prev = legalBack(task.status);
 
-  const body = task.status === "done" ? uncheckAcBoxes(task.body) : task.body;
+  const baseBody = task.status === "done" ? uncheckAcBoxes(task.body) : task.body;
+  // RETREATED WRITE SIDE (tasks/gap-wiring-C-retreat-write-side): the done→ready retreat writes the
+  // `**RETREATED` / 搁置 marker (gap-retreated-state-not-mechanized) — the mechanical signal the
+  // detection side (ready-pool-check `isRetreated` / slot-refill step-4 defer "retreated") reads.
+  // A done→ready retreat leaves the task READY (a dispatch candidate) but SHELVED; the marker is
+  // what keeps it out of dispatch until 解除搁置 (removing the marker line). Before this wiring the
+  // write side was missing: 0 task files carried the marker and the detection side never saw a real
+  // retreat. done→ready ALSO unchecks AC boxes (AC83). ready→todo / needs-human→todo roll back to
+  // todo (NOT a dispatch candidate) so they write NO marker and NO body patch — retreat body
+  // mutations stay edge-scoped (retreat-ac-uncheck.test.mjs pins ready→todo as a no-body-patch
+  // edge; a non-shelved re-triage must be dispatchable again once re-promoted to ready).
+  const body = task.status === "done" ? addRetreatedMarker(baseBody, reason) : baseBody;
   await client.taskWrite({
     id,
     status: prev!,
