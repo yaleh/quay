@@ -1,7 +1,7 @@
 ---
 id: gap-test-file-snapshot-no-production-caller
 title: "test-file-snapshot.sh「删测试文件必红」判据无生产调用者——删测试文件不触发任何红"
-status: ready
+status: done
 labels:
   - gap
   - finding
