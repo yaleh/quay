@@ -328,6 +328,20 @@ run_static_checks() {
   # @static-tier change
   # @static-object plugin/test/ packages/*/test/ experiments/*/test/
   run_checker "test-framework-policy-check" bash "${repo_root}/plugin/scripts/test-framework-policy-check.sh" "${repo_root}"
+  echo "== @test-group downgrade check (gap-test-group-downgrade-no-guard, AC1/AC2/AC3) =="
+  # A LEGAL-but-degrading @test-group re-tag (product/engine → governance/serial/lowconc) silently
+  # removes a test from the default {product,engine} set (governance self-skips, serial/lowconc drop
+  # out of the default concurrency body) — previously NO check reported it. This checker requires a
+  # commit-message reason marker ("@test-group-downgrade") for any default-set escape after the
+  # enforcement baseline (8ea050c7 — develop HEAD when the guard landed); uncommitted escapes always
+  # fail (commit with the marker first). Wired here (AC3) so EVERY test-running invocation and CI —
+  # whose only test step is `bash scripts/test.sh` — inherits it. Also invoked from
+  # check_group_declarations (AC1, the declarations guard's pre-flight + metadata-mode call sites).
+  # Negative/positive controls: plugin/scripts/checker-mutation-cases/test-group-downgrade-check.sh
+  # (temp-git-repo fixture, real git output) + the checker's own --selftest.
+  # @static-tier change
+  # @static-object plugin/test/ packages/*/test/ experiments/*/test/
+  run_checker "test-group-downgrade-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/test-group-downgrade-check.ts" --root "${repo_root}"
   echo "== test-isolation contract check (gap-test-isolation-contract-is-unwritten, AC1-AC6) =="
   # @static-tier change
   # @static-object plugin/test/ packages/*/test/ experiments/*/test/
@@ -1274,6 +1288,15 @@ check_group_declarations() {
         ;;
     esac
   done < <(build_deduped_files)
+  # gap-test-group-downgrade-no-guard (AC1): a LEGAL-but-degrading re-tag
+  # (product/engine → governance/serial/lowconc) silently removes a test from the default set —
+  # check_group_declarations now ALSO runs the downgrade detector
+  # (plugin/scripts/test-group-downgrade-check.ts), which requires a commit-message reason marker
+  # ("@test-group-downgrade") for any default-set escape after the enforcement baseline.
+  # stdout is redirected to stderr: this function also runs in the metadata modes
+  # (--list-groups/--list-files) whose stdout IS the data (file list / group counts) — a checker
+  # line leaking into it would be miscounted as a test file (test-coverage-check AC5 423 vs 421).
+  node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/test-group-downgrade-check.ts" --root "${repo_root}" >&2 || exit $?
 }
 
 # build_deduped_files — echo the union glob, deduped by realpath (AC3). One file per line.
