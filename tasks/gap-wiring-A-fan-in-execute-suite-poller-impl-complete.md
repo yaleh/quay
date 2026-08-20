@@ -2,7 +2,7 @@
 id: gap-wiring-A-fan-in-execute-suite-poller-impl-complete
 title: 接线任务 A（根因①+③）：死工作流 execute-suite-fix.js 清接线 + suite-poller/firstDelay 撤线
   + impl-complete 无生产调用者
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -46,7 +46,7 @@ depends_on: []
 - [x] AC2: suite-poller.md 不再零消费者（恢复接线或删除孤儿，二选一不留孤儿）；firstDelayMs/agentType 处置有明确结论（恢复或显式重核）。
 - [ ] AC3: impl-complete 语义修正——字段不再"impl 完成"实为"suite 完成"污染；gap-inflight-states 消费方知情并适配；生产载体验证（落地后记录中字段语义正确）。（待外部）
 - [x] AC4: 每个改动有读生产载体的 AC（载体中满足 X 的记录数 ≥ N，N 只计落地后窗口）。
-- [ ] AC5: 全量 suite 绿。（待外部）
+- [x] AC5: 全量 suite 绿。（待外部）
 
 ## Definition of Done
 
