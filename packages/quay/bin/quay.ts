@@ -224,10 +224,31 @@ export async function run(argv, ctx = {}) {
 // test's run(ctx.capture) installed mid-dispatch (the module-load run stays
 // pending until the test's first await, then its finally reverts the write
 // patch, so command output leaks to the real process streams instead of the
-// capture buffer). The import.meta.url === process.argv[1] check is the
-// standard ESM main-module test and is byte-identical under the esbuild dist
-// bundle (import.meta.url is rewritten to the bundle's own file:// URL).
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// capture buffer). The check must fire in BOTH module systems the CLI ships as:
+//   - ESM (source via --experimental-strip-types, and the ESM dist/quay.js
+//     npm-pack bundle): import.meta.url is the real module URL, so the
+//     import.meta.url === pathToFileURL(process.argv[1]).href test applies.
+//   - CJS (the SEA build's dist-sea/quay-bundle.cjs, format:cjs): esbuild
+//     rewrites `import.meta` to an EMPTY OBJECT (import.meta.url === undefined),
+//     so the import.meta.url test is ALWAYS FALSE there and the standard CJS
+//     main-module test (require.main === module) must fire instead.
+//     gap-sea-verify-node-free-fails-050: without the require.main branch, the
+//     SEA binary's CLI shell never ran and every command (--help/--version/
+//     serve) exited 0 silently — sea-verify-node-free's serve+curl step failed
+//     not from a missing embedded runtime but because the bundled CLI never
+//     executed. `typeof require !== "undefined"` guards the ESM case where
+//     referencing require.main would throw ReferenceError, and
+//     `typeof module !== "undefined"` guards the ESM bundle (dist/quay.js,
+//     where esbuild aliases require to a createRequire-injected __require but
+//     `module` does not exist at ESM scope).
+const isMain =
+  process.argv[1] &&
+  ((typeof require !== "undefined" &&
+    typeof module !== "undefined" &&
+    require.main === module) ||
+    (typeof import.meta !== "undefined" &&
+      import.meta.url === pathToFileURL(process.argv[1]).href));
+if (isMain) {
   run(process.argv.slice(2)).then((res) => {
     if (typeof res.code === "number") process.exitCode = res.code;
   }).catch((err) => {
