@@ -17,17 +17,28 @@
 # without touching the real checkout.
 #
 # Usage:
-#   test-file-snapshot.sh snapshot <baseline-file> [files...]
+#   test-file-snapshot.sh [--repo-relative] [--root <dir>] snapshot <baseline-file> [files...]
 #       Record the current test-file set into <baseline-file> (one path per line, sorted, deduped).
 #       With no [files...], the canonical set is read from `scripts/test.sh --list-files`.
 #
-#   test-file-snapshot.sh check <baseline-file> [--expect-added <additions-file>] [files...]
+#   test-file-snapshot.sh [--repo-relative] [--root <dir>] check <baseline-file> [--expect-added <additions-file>] [files...]
 #       Compare the current set against the baseline.
 #         default (relative / fan-in): every baseline file must still be present; additions since
 #           the baseline are reported and ALLOWED. Exit 0 on pass; exit 1 on any removal.
 #         with --expect-added <additions-file> (a file, one path per line): the exact worktree
 #           check — current must equal baseline ∪ expected additions; an UNEXPECTED addition is red
 #           too (catches a stray file leaked into the worktree before rebase).
+#
+# Global flags (BEFORE the subcommand):
+#   --repo-relative — normalize every path to repo-root-relative. A COMMITTED baseline
+#       (docs/analysis/test-file-baseline.txt, wired into run_static_checks) MUST use this: the
+#       canonical `--list-files` output is absolute realpaths, which are machine-/worktree-specific
+#       and would read every baseline file as "REMOVED" in any other tree. --repo-relative strips
+#       the current repo-root prefix so the SAME committed baseline is portable across worktrees /
+#       the main checkout / CI.
+#   --root <dir>    — override the self-derived repo root (hermetic fixture repos in tests /
+#       mutation cases whose scripts/test.sh --list-files is a fake set). Defaults to the script's
+#       own repo root.
 #
 # Exit codes: 0 = relative-baseline satisfied; 1 = regression (removal, or unexpected addition
 # under --expect-added); 2 = usage error.
@@ -47,6 +58,37 @@ usage() {
   exit 2
 }
 
+# --root <dir> / --repo-relative — global flags parsed BEFORE the subcommand (see the header).
+repo_relative=0
+while [ "$#" -gt 0 ]; do
+  case "${1:-}" in
+    --root)
+      [ "$#" -ge 2 ] || usage
+      repo_root="$2"
+      shift 2
+      ;;
+    --repo-relative)
+      repo_relative=1
+      shift
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+test_sh="${repo_root}/scripts/test.sh"
+
+# strip_repo_root — prefix-strip the repo-root (only when the path is under it) so --repo-relative
+# baselines are portable. Pure: a path already repo-relative passes through unchanged.
+strip_repo_root() {
+  while IFS= read -r _f; do
+    case "${_f}" in
+      "${repo_root}/"*) printf '%s\n' "${_f#"${repo_root}/"}" ;;
+      *) printf '%s\n' "${_f}" ;;
+    esac
+  done
+}
+
 # current_files — the live set as sorted, deduped lines. Non-empty "$@" → explicit paths (fixture
 # mode); empty → the canonical `scripts/test.sh --list-files` output (single source of truth).
 #
@@ -60,9 +102,17 @@ usage() {
 # caller's business and pass through verbatim.
 current_files() {
   if [ "$#" -gt 0 ]; then
-    printf '%s\n' "$@"
+    if [ "${repo_relative}" = "1" ]; then
+      printf '%s\n' "$@" | strip_repo_root
+    else
+      printf '%s\n' "$@"
+    fi
   else
-    bash "${test_sh}" --list-files | grep -vE '/zz-[^/]*$' || true
+    if [ "${repo_relative}" = "1" ]; then
+      bash "${test_sh}" --list-files | grep -vE '/zz-[^/]*$' | strip_repo_root || true
+    else
+      bash "${test_sh}" --list-files | grep -vE '/zz-[^/]*$' || true
+    fi
   fi
 }
 
@@ -114,7 +164,11 @@ case "${cmd}" in
       # Exact worktree check: current == baseline ∪ expected additions.
       expected_sorted="$(mktemp)"
       trap 'rm -f "${baseline_sorted}" "${current_sorted}" "${expected_sorted}"' EXIT
-      sort -u "${expect_added}" > "${expected_sorted}"
+      if [ "${repo_relative}" = "1" ]; then
+        cat "${expect_added}" | strip_repo_root | sort -u > "${expected_sorted}"
+      else
+        sort -u "${expect_added}" > "${expected_sorted}"
+      fi
       # expected_union = baseline ∪ expected (sorted, deduped)
       expected_union="$(mktemp)"
       trap 'rm -f "${baseline_sorted}" "${current_sorted}" "${expected_sorted}" "${expected_union}"' EXIT
