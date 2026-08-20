@@ -2445,14 +2445,18 @@ test("⑩d falsification — 单次覆盖 < suite 时长时判据红（pollBlock
   );
 });
 
-// ── ⑩c suite-poller agentType（gap-fan-in-execute-poll-cost-firstdelay-agenttype AC2，暂缓）───────
-// NOTE: agentType='suite-poller' 的 wiring 已 revert（.claude/agents 新目录 watcher 不加载、需 session 重启），
-// 只保留 definition test（定义文件仍在、inert）；wiring 留 session 重启后单独落地。
+// ── ⑩c suite-poller agentType（gap-fan-in-execute-poll-cost-firstdelay-agenttype AC2 + wiring 审计 A）──
+// agentType='suite-poller' 的 wiring 已 revert（7b917cd1：.claude/agents 新目录 watcher 不加载、fan-in
+// bootstrap 当场 crash）；d1338f95 重写后【没有短命轮询 agent 可挂它】——阶段 2 agent 承担机械步骤
+// （per-task-suite 入账 / flip / ff / bracket），套 Bash-only 会砍掉其必需工具 ⇒ 恢复接线架构上不成立。
+// 处置：删除零消费者孤儿（gap-wiring-A-fan-in-execute-suite-poller-impl-complete），不留孤儿。
 
-test("⑩c suite-poller definition — .claude/agents/suite-poller.md declares only the Bash tool (AC2)", () => {
-  const agentDef = fs.readFileSync(path.join(REPO_ROOT, ".claude", "agents", "suite-poller.md"), "utf8");
-  assert.match(agentDef, /^name:\s*suite-poller\s*$/m, "frontmatter name must be suite-poller");
-  assert.match(agentDef, /^tools:\s*Bash\s*$/m, "tools must be restricted to Bash only (the ~64k tool-schema cut)");
+test("⑩c suite-poller orphan removed — .claude/agents/suite-poller.md no longer exists (wiring revoked, no restorable consumer)", () => {
+  const agentFile = path.join(REPO_ROOT, ".claude", "agents", "suite-poller.md");
+  assert.ok(!fs.existsSync(agentFile), "the suite-poller orphan must be REMOVED (no zero-consumer orphan left)");
+  // 没有 live wiring 引用 agentType suite-poller（阶段 2 不是 poll-only agent，套它会砍掉机械步骤工具）。
+  const wf = fs.readFileSync(path.join(REPO_ROOT, "plugin", "workflows", "fan-in-execute.js"), "utf8");
+  assert.ok(!wf.includes("agentType: 'suite-poller'"), "fan-in-execute must NOT wire agentType suite-poller");
 });
 
 // ── fix-scope gate（gap-fix-scope-gate-wired-to-wrong-path）───────────────────────────────────────
