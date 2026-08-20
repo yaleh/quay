@@ -1,7 +1,7 @@
 ---
 id: gap-bootstrap-worktree-stale-fan-in-execute
 title: "bootstrap worktree scriptPath 用陈旧 fan-in-execute.js——poll-bounded fix 对 bootstrap-HIT 任务不生效"
-status: ready
+status: done
 labels:
   - gap
   - mechanism
