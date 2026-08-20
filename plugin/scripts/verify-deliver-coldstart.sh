@@ -217,27 +217,41 @@ sha256_file() {
 # build_from_develop_tip(): 在 <repo> 的 develop-tip 建 detached worktree，现 build quay+quay-native tgz。
 # 复用 develop-deliver-tgz.sh 的 build 手法（detached worktree at develop tip + node_modules symlink
 # + package.sh + quay-native build-dist + npm pack）。产出 tgz 路径写入 QUAY_TGZ/QN_TGZ，
-# build_sha/build_date 从 <repo> 的 develop 分支取。build 产物落 <repo>/.quay/（gitignored，非 /tmp tmpfs）。
+# build_sha/build_date 从 <repo> 的 develop 分支取。
+# ⛔ 产物必须【拷出】detached worktree 到持久 staging（<repo>/.quay/，gitignored，非 /tmp tmpfs）——
+#    worktree 在 build 后即被 remove（连同其内文件），若 tgz 只留在 worktree 路径里，
+#    主流程 `[ -f "$QUAY_TGZ" ]` 必然命中「missing .tgz file」（AC107 实证 2026-08-20：
+#    修复前 --build-root 模式 build OK 后即报 missing .tgz file）。
 build_from_develop_tip() {
-  local repo="$1" tip sha date wt
+  local repo="$1" tip sha date wt stage
   tip="$(git -C "$repo" rev-parse refs/heads/develop 2>/dev/null || echo "")"
   [ -n "$tip" ] || { echo "  FAIL: cannot resolve refs/heads/develop in $repo" >&2; return 1; }
   sha="$tip"
   date="$(git -C "$repo" log -1 --format=%cI refs/heads/develop 2>/dev/null || echo "")"
   [ -n "$date" ] || date="$(git -C "$repo" log -1 --format=%cI "$sha" 2>/dev/null || echo "")"
   wt="$repo/.quay/ac88-build-${sha:0:12}"
+  stage="$repo/.quay/ac88-artifacts-${sha:0:12}"
+  rm -rf "$stage"; mkdir -p "$stage"
   if [ -e "$wt" ]; then git -C "$repo" worktree remove --force "$wt" 2>/dev/null || rm -rf "$wt"; fi
   echo "  build: detached worktree at develop tip ${sha:0:12}"
   git -C "$repo" worktree add --detach "$wt" "$sha" >/dev/null 2>&1 || { echo "  FAIL: git worktree add" >&2; return 1; }
   ln -s "$repo/node_modules" "$wt/node_modules" 2>/dev/null || true
   local build_ok=0
   if (cd "$wt" && bash packages/quay/scripts/package.sh) >/dev/null 2>&1; then
-    local qt qnt
+    local qt qnt staged_q staged_qn
     qt="$(ls -1t "$wt/packages/quay/"quay-*.tgz 2>/dev/null | head -1 || true)"
     if [ -n "$qt" ] && [ -f "$qt" ]; then
       if (cd "$wt/packages/quay-native" && bash scripts/build-dist.sh && npm pack --pack-destination "$wt/packages/quay-native/") >/dev/null 2>&1; then
         qnt="$(ls -1t "$wt/packages/quay-native/"quay-native-*.tgz 2>/dev/null | head -1 || true)"
-        [ -n "$qnt" ] && [ -f "$qnt" ] && { QUAY_TGZ="$qt"; QN_TGZ="$qnt"; build_ok=1; }
+        if [ -n "$qnt" ] && [ -f "$qnt" ]; then
+          staged_q="$stage/$(basename "$qt")"
+          staged_qn="$stage/$(basename "$qnt")"
+          if cp -f "$qt" "$staged_q" && cp -f "$qnt" "$staged_qn" && [ -f "$staged_q" ] && [ -f "$staged_qn" ]; then
+            QUAY_TGZ="$staged_q"; QN_TGZ="$staged_qn"; build_ok=1
+          else
+            echo "  FAIL: cannot persist tgz out of worktree to $stage" >&2
+          fi
+        fi
       fi
     fi
   fi
