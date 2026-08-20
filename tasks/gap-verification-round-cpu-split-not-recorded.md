@@ -1,7 +1,7 @@
 ---
 id: gap-verification-round-cpu-split-not-recorded
 title: "verification-round.jsonl 只记合并 cpu_time_s 无 user/sys 拆分——suite 优化无法区分「测试内容」vs「执行形态」成本"
-status: ready
+status: done
 labels:
   - gap
   - finding
