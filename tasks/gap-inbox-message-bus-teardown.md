@@ -36,6 +36,13 @@ depends_on: []
 | `plugin/test/supervisor-bus-identity.test.mjs` | 测 claim-human-test + inbox-summary 两子命令 | **改**：收缩到保留子命令 |
 | `docs/analysis/fast-mode-loop-tick.md` | inner tick 文档，:320-328 收件箱机械挂载点 | **改**：移除（inner 独占文档，inner 落盘） |
 | `plugin/loop/fast-mode-loop-tick.md` | inner 产品模板，:432-445 | **改**：移除（inner 独占） |
+| `orchestration/SPEC-inbox-service-2026-08-08.md` | 设计记录（inbox 机制的设计正本） | **删**（git 历史 = 落点；外层裁定：设计推理已随机制退役，git 可复现） |
+| `docs/proposals/quay-message-bus-human-in-the-network.md` | 设计记录 | **删**（git 历史 = 落点） |
+| `docs/proposals/quay-message-bus-proposal-manager-2026-08-06.md` | 设计记录 | **删**（git 历史 = 落点） |
+| `plugin/skills/manager/SKILL.md:175` | 引用 SPEC-inbox-service | **改**：移除该 reference 行（否则死引用，硬规则 5） |
+| `plugin/skills/init/SKILL.md:183` | 引用 SPEC-inbox-service | **改**：移除该 reference-doc 行 |
+| `orchestration/SPEC-integration-architecture-2026-08-05.md` | 引用 quay-message-bus-human-in-the-network | **改**：移除该引用（死引用清理） |
+| `docs/proposals/quay-product-outline.md` / `quay-web-human-is-not-an-operator.md` / `quay-saas-remote-access-to-an-onprem-loop.md` | 引用 quay-message-bus-human-in-the-network | **核**：若仅提及历史设计，改指针或移除 |
 
 **明确排除（人裁定保留，不得删除/改动）**：`supervisor-deliver.sh` / `send-keys-reliable.sh` / `drive-target-check.sh` / `transcript-delivery-check.ts`（控制面）。`supervisor-bus.sh`（外层核实仅注释提及 message-bus，零真实引用，无需动）。
 
@@ -48,7 +55,8 @@ depends_on: []
 3. **改 capability-catalog.sh**（正本 1909 行 + 打包副本 1859 行）：移除全部 `inbox-reader.sh` 条目（含 head/每轮/失效前提/日期/判定词条）；保持 182 条声明口径与 catalog 自检绿。
 4. **改 supervisor-bus-identity.test.mjs**：删除 claim-human-test + inbox-summary 的测试用例，保留脚本存在的断言（如 usage/exit 行为），suite 绿。
 5. **inner 侧文档**（inner 独占，inner 落盘）：`docs/analysis/fast-mode-loop-tick.md:320-328` 收件箱机械挂载点 + `plugin/loop/fast-mode-loop-tick.md:432-445` 移除；外层已在 orchestration/ 侧同步删。
-6. **验证**：全量 suite 绿（`scripts/test.sh`）。**本任务触碰 capability-catalog.sh（验证机件）+ 产品代码，判据B 明确不适用快路径**——fan-in 前必须有 per-task suite 验证（AC84 语义）。
+6. **设计记录删除**（外层已裁定，落点 = git 历史）：SPEC-inbox-service + quay-message-bus-human-in-the-network + quay-message-bus-proposal-manager 三份删除；**同步清理死引用**——plugin/skills/{manager,init}/SKILL.md 的 reference 行、SPEC-integration-architecture 的引用、quay-product-outline 等提案文档的提及（position-based 复核，仅删指向已删文档的真实引用，保留历史叙述本身）。
+7. **验证**：全量 suite 绿（`scripts/test.sh`）。**本任务触碰 capability-catalog.sh（验证机件）+ 产品代码，判据B 明确不适用快路径**——fan-in 前必须有 per-task suite 验证（AC84 语义）。
 
 ## Acceptance Criteria
 
@@ -56,6 +64,7 @@ depends_on: []
 - [ ] AC2: `supervisor-bus-identity.sh`（正本+打包副本）不再引用 `message-bus.ts` / `.quay/manager-inbox`；`BUS_TS` 变量与 claim-human-test/inbox-summary 子命令移除；脚本 `bash plugin/scripts/supervisor-bus-identity.sh` 无子命令时仍 exit 0（usage 行为），`supervisor-bus-identity.test.mjs` 收缩后全绿。
 - [ ] AC3: `capability-catalog.sh`（正本+打包副本）的 `inbox-reader.sh` 条目全部移除，catalog 自检绿（`bash plugin/scripts/capability-catalog.sh --check` 或对应测试）；声明口径与删除前一致（182 条 - 1 条 inbox-reader）。
 - [ ] AC4: inner 侧文档 `docs/analysis/fast-mode-loop-tick.md` 与 `plugin/loop/fast-mode-loop-tick.md` 的收件箱机械挂载点段移除；无 `inbox-summary` / `inbox-reader` 引用残留（position-based 复核，历史任务体 tasks/gap-*.md 除外——那 15 个历史任务体 git 历史记录，不做追溯编辑）。
+- [ ] AC6: 三份设计记录（SPEC-inbox-service / quay-message-bus-human-in-the-network / quay-message-bus-proposal-manager）删除；**死引用清理完备**——`grep -rl 'SPEC-inbox-service-2026-08-08\|quay-message-bus-human-in-the-network\|quay-message-bus-proposal-manager' plugin/ orchestration/ docs/` 零命中（git 历史任务体除外），SKILL.md reference 行、SPEC-integration-architecture 引用、提案文档提及全部同步处理。
 - [ ] AC5: 全量 suite 绿（`scripts/test.sh` exit 0）且 fan-in 前有 per-task suite 验证记录（AC84：判据B 不适用快路径）。
 
 ## Definition of Done
@@ -77,4 +86,11 @@ depends_on: []
 - plugin/test/supervisor-bus-identity.test.mjs（改：收缩）
 - docs/analysis/fast-mode-loop-tick.md（inner 独占，移除收件箱段）
 - plugin/loop/fast-mode-loop-tick.md（inner 独占，移除收件箱段）
+- orchestration/SPEC-inbox-service-2026-08-08.md（删，设计记录）
+- docs/proposals/quay-message-bus-human-in-the-network.md（删，设计记录）
+- docs/proposals/quay-message-bus-proposal-manager-2026-08-06.md（删，设计记录）
+- plugin/skills/manager/SKILL.md（改：移除 SPEC-inbox 引用行）
+- plugin/skills/init/SKILL.md（改：移除 reference-doc 行）
+- orchestration/SPEC-integration-architecture-2026-08-05.md（改：移除已删文档引用）
+- docs/proposals/quay-product-outline.md（核：移除已删文档提及）
 - tasks/gap-inbox-message-bus-teardown.md（自身）
