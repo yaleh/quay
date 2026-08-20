@@ -3,9 +3,7 @@
 - **Status:** Proposal（管理者，人给出方向）—— **明确未启动，启动条件见 §6**
 - **Date:** 2026-08-06
 - **性质**：架构与**时机**判断。核心主张：**它不是第二个产品，是第三种传输。**
-- **Relates:** [`quay-message-bus-human-in-the-network.md`](./quay-message-bus-human-in-the-network.md)
-  （前置：总线的传输层无关性），
-  [`orchestration/SPEC-integration-architecture-2026-08-05.md`](../../orchestration/SPEC-integration-architecture-2026-08-05.md)（两个窄接口），
+- **Relates:** [`orchestration/SPEC-integration-architecture-2026-08-05.md`](../../orchestration/SPEC-integration-architecture-2026-08-05.md)（两个窄接口），
   [`orchestration/SPEC-state-crystallization-2026-08-05.md`](../../orchestration/SPEC-state-crystallization-2026-08-05.md)（每实体一个写入者），
   [`quay-as-a-living-system.md`](./quay-as-a-living-system.md) §2（生态位分化是发现机制）
 

@@ -9,7 +9,7 @@
 //         gate's laydown-set rehearsal).
 //   AC3 — the cold-start AC8c dead keys are gone: `grep 'inner-state.sh\|send-keys-verified'`
 //         on plugin/skills/cold-start/SKILL.md is 0 hits (Contract invoke/control).
-//   AC4 — the launch config 三件套 (claude-fjdac --model deepseek-v4-flash +
+//   AC4 — the launch config 三件套 (claude-deepseek --model deepseek-v4-flash +
 //         CLAUDE_CODE_MAX_CONTEXT_TOKENS=917000) is in the checked-in deliverable
 //         (.claude/launch.settings.json), referenced by the manager skill's launch section.
 //   AC5 — the manager skill's planning function carries a live roadmap/strategic counterpart
@@ -84,7 +84,7 @@ test('AC4 — the launch config 三件套 (deepseek-v4-flash + CLAUDE_CODE_MAX_C
   const s = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
   assert.equal(s.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS, '917000', 'env must carry the 917000 context (三件套 #1)');
   const outer = s._launchSpec?.roles?.outer;
-  assert.equal(outer?.launcher, 'claude-fjdac', 'outer role must use claude-fjdac launcher (三件套 #2)');
+  assert.equal(outer?.launcher, 'claude-deepseek', 'outer role must use claude-deepseek launcher (三件套 #2)');
   assert.equal(outer?.model, 'deepseek-v4-flash', 'outer role must pin deepseek-v4-flash (三件套 #3)');
   // The manager skill references the launch config for the manager's own start (tribal → installable),
   // WITHOUT exposing the bare launcher script — a skill is the user-facing interface, the launcher is

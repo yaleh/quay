@@ -525,3 +525,26 @@ export function semanticTriggerHeuristic(heartbeat) {
 ```
 **红窗分诊外层独占**,不把红树丢给 inner:bisect 定位肇事 merge → 回退该 merge → 回退对应的翻 done 由【inner】执行（翻 done 已移交 inner，(a2)；外层只做归因与回退决策）→ 修好才重启套件 → green 即撤信号;**绝不 blind `--ours/--theirs`** (src:1052 "全量 suite 红")
 ```
+
+## R35 — outer A5 收件箱读数退役（inbox 机制彻底删除，人 2026-08-20 09:2xZ 裁定范围A）
+
+**来源**：`orchestration/orchestrator-tick-core.md` A5 + `orchestration/orchestrator-loop-tick.md` + `plugin/loop/orchestrator-tick-core.md` + `plugin/loop/orchestrator-loop-tick.md`
+**退役**：人 2026-08-20 09:2xZ 裁定 inbox 机制彻底删除（范围A，不留 archive/说明）。manager 已完成其侧（`.quay/manager-inbox/` 134 文件删除 + manager-tick-core A15/A0④/C10 清理，f40ef8f2+2ebef21c）；剩余面由任务 `gap-inbox-message-bus-teardown` 承接（message-bus.ts/inbox-reader.sh 代码+测试删除、supervisor-bus-identity.sh 失效子命令退役、capability-catalog 条目清理、inner 侧 fast-mode-loop-tick 收件箱段移除）。
+**正文**（原文迁出保留）：
+
+```
+| A5 | `ls .quay/manager-inbox/`（**列目录本身，不依赖任何 unread 计数器**——gap-inbox-counter-disconnected-from-files：counter 曾报 delivered=0 但目录实有 6 封，沉默失败） | 判据：**目录非空 ⇒ 逐条进决策**，不看 counter；`delivered`（写进目录）≠ `consumed`（读过+回执），无回执机制则 delivered>0 即报（不吞） (src:728 "inbox-summary") |
+```
+**落点映射**：A5 的「判非空要列目录本身」「delivered≠consumed」教训已一般化为硬规则 5（来源完备性）——不再需要收件箱专属条目；收件箱路径随机制删除，历史由 git + 本任务体承载。
+
+
+## R36 — inner A5 收件箱读数退役（inbox 机制彻底删除，人 2026-08-20 09:2xZ 裁定范围A）
+
+**来源**：`orchestration/fast-mode-tick-core.md` A5 + `plugin/loop/fast-mode-loop-tick.md`（inner 侧收件箱挂载点段）
+**退役**：人 2026-08-20 09:2xZ 裁定 inbox 机制彻底删除（范围A，不留 archive/说明）。与 outer A5（R35）平行——inner 执行核同一条收件箱读数指令退役。剩余面由任务 `gap-inbox-message-bus-teardown` 承接（message-bus.ts/inbox-reader.sh 代码+测试删除、supervisor-bus-identity.sh 失效子命令退役、capability-catalog 条目清理、inner 侧 fast-mode-loop-tick 收件箱段移除）。
+**正文**（原文迁出保留）：
+
+```
+| A5 | `bash plugin/scripts/supervisor-bus-identity.sh inbox-summary` | 有 `unread:` ⇒ 逐条进本轮决策;本步**只读不写回执** (src:385,389) |
+```
+**落点映射**：inner A5 的「有 unread 逐条进决策、只读不写回执」教训随 inbox 机制整体退役（人裁定范围A）；不再需要收件箱专属条目。收件箱路径随机制删除，历史由 git + 本任务体承载。

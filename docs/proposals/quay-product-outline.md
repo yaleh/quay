@@ -159,15 +159,14 @@ post-friction**（被硌了才发现）。而探针**本来就是设计来做 pr
 **根因不是「人懒得点」，是人在这套机制里的位置变了**：人给方向、提问、裁定优先级；
 **改任务的只有 agent**。按钮是为一个已经不存在的角色建的 ⇒ 标准的退化器官。
 
-⇒ 人面的三份新提案（**方向已定、AC/立案归外层**）：
+⇒ 人面的两份新提案（**方向已定、AC/立案归外层**）：
 
 | 文档 | 主张 |
 |---|---|
 | [`quay-web-human-is-not-an-operator.md`](./quay-web-human-is-not-an-operator.md) | **减法**：删 action 按钮；负控制＝删后 `actor` 分布不应变化 |
-| [`quay-message-bus-human-in-the-network.md`](./quay-message-bus-human-in-the-network.md) | 人是 `deliver()`/`observe()` 的**第三个 target**；`.quay/manager-inbox/` 是已自发出现的粗糙版；**它让 AC12b 第一次可机械测量** |
 | [`quay-saas-remote-access-to-an-onprem-loop.md`](./quay-saas-remote-access-to-an-onprem-loop.md) | SaaS ＝**第三种传输**而非第二个产品；启动条件是**外部信号**，不是内部判断 |
 
-**次序**：先删（零风险、消一个安全面）→ 再做总线（但按传输层无关设计）→ SaaS 保留选项、暂不动工。
+**次序**：先删（零风险、消一个安全面）→ SaaS 保留选项、暂不动工。
 
 ---
 

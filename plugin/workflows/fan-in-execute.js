@@ -273,6 +273,20 @@ echo "FIX_SCOPE_VERDICT=$fix_scope_out"
 // t=60s 起轮 ⇒ 头 11-15 次结构上必然 not-done 纯空转。firstDelayMs（默认 660s）让首轮 setTimeout
 // 从 660s 起，后续回到 pollIntervalMs——与上面的有界阻塞等待叠加，把 ~21 次空转压到 ~10 次（
 // pollIntervalMs=0 测试 seam 照旧可用：firstDelayMs 也可经 args 覆盖）。
+// ── agent() 无 timeout 旋钮的局限（gap-agent-no-timeout-option 2026-08-20 外层裁定）─────────────
+// Workflow 工具 agent() 的 opts 仅 {label, phase, schema, model, effort, isolation, agentType}——
+// 没有 timeout/bashTimeout 旋钮。「加旋钮」是 Claude Code 特性请求，本仓库改不了。
+// ⇒ 有界阻塞等待（timeout 540，见 pollBlockSeconds 默认）落在【Bash 工具】的时限上，而「Bash
+// 执行时限须设大于 540s」是纯语言请求、非代码保证——poll agent 可能被 Bash 默认 120s kill、
+// 提前返回 not-done。
+// ⇒ 兜底 = suite 以 detached 方式运行（setsid + & + disown，见 SUITE_LAUNCH）：poll agent 的
+// timeout 只界它【自己看 marker】的时长、不界 suite 生命周期；即使 poll 提前超时返回 not-done，
+// suite 继续跑，脚本 setTimeout 循环再轮询。detached 让「agent 内长阻塞」成为纯优化（空转轮询从
+// ~21 次压到 ~3 次），而非正确性要求。
+// ⇒ 硬边界判据（AC1）：firstDelayMs + pollBlockSeconds ≥ suite 时长（实测 19+ min ≈ 1140s）。
+//   不得收窄到 < Bash 默认 120s 去「让等待落在默认时限内」——100s < suite 时长 ⇒ poll 每次在
+//   suite 结束前超时返回 not-done ⇒ fan-in 误判「suite 异常」→ release → relaunch 无限循环
+//   （b187d84a 已回退，7d973c40）。
 async function pollSuite() {
   return agent(
     `你是 fan-in suite 等待轮询（workflow 脚本控制流调用，有界阻塞等待，一回合内返回）。任务 ${task} 的 suite 以 detached 方式运行。用 Bash 工具运行下面命令并返回结果——不要做任何等待决策（等待由 workflow 脚本控制）。命令里的 timeout ${pollBlockSeconds} 是脚本给的硬边界；Bash 工具的执行时限须设大于 ${pollBlockSeconds}s（上限 600s）。

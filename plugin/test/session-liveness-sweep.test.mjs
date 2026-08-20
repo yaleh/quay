@@ -32,19 +32,23 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
 import {
   tmuxAvailable,
   setProbeTmpPrefix, sessionLivenessAfter, sweepTmp, reapLiveOwners, dirHasLiveOwner, probeRoot, serverPidOf,
   makeHermeticProbe, spawnMonitor, waitForRounds, startTouchLoop, reapSpawnedChildren, serverPidsOfByCmdline,
-  teardownProbe,
+  teardownProbe, killRegisteredServers, readServerRegistry,
 } from "./session-liveness-helpers.mjs";
 // serverPidViaPaneEnv is the socket-close-surviving fallback added by
 // gap-session-liveness-teardown-ol-scd-d-residual; session-liveness-helpers.mjs does not re-export
 // it (this task's Touches is scoped to the production module + this test), so import it directly.
-import { serverPidViaPaneEnv } from "../scripts/session-liveness-sweep.mjs";
+// sockOfDir/serverRegistryPath are the durable-registry primitives (gap-session-liveness-teardown-
+// ol-scd-cf-leak) the catch-all tests write synthetic dead-owner entries with. isLiveTmuxPid is the
+// cmdline-based liveness check (a SIGKILL'd server may linger as a ZOMBIE until init reaps it, and
+// process.kill(pid,0) returns true for a zombie — so the dead-assertion must read /proc/cmdline).
+import { serverPidViaPaneEnv, sockOfDir, serverRegistryPath, isLiveTmuxPid } from "../scripts/session-liveness-sweep.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -184,6 +188,82 @@ test("AC1 (unified teardown) — a GHOST server (socket dir removed, socket-crit
   }
 });
 
+test("AC1 (TRUE catch-all) — a self-built server is DURABLY registered, and killRegisteredServers kills it even when the in-memory registration is lost (the ol-scd-c/f 5b shape)", { skip: noTmux }, async () => {
+  // gap-session-liveness-teardown-ol-scd-cf-leak: the 5b recurrence — teardownProbe can misjudge a
+  // still-alive server owner-dead and UNREGISTER the in-memory Set entry, orphaning it forever (the
+  // socket-invisible + cmdline-miss path that left ol-scd-c/f leaking past the whole suite). The
+  // TRUE catch-all is a DURABLE registry written at server-creation: the record survives the
+  // in-memory loss, so a registry-driven kill can always find the server. This test proves both
+  // halves: the probe is durably recorded, and killRegisteredServers (which does NOT depend on the
+  // in-memory Set) resolves and SIGKILLs the still-alive server.
+  const p = makeHermeticProbe("swp-regkill");
+  try {
+    const serverPid = serverPidOf(p.tmp);
+    assert.ok(Number.isInteger(serverPid) && serverPid > 1,
+      `must resolve the server pid before the kill, got ${serverPid}`);
+    // The durable registry must contain THIS process's entry for this probe dir (written at
+    // creation by the tmux() seam). Do NOT call p.cleanup() — the point is to prove the durable
+    // record + registry kill find the server regardless of in-memory state.
+    const durable = readServerRegistry().filter((e) => e.dir === p.tmp && e.proc === process.pid);
+    assert.ok(durable.length >= 1,
+      `the probe dir must be durably registered, got ${JSON.stringify(durable)}`);
+    const killed = killRegisteredServers({ proc: process.pid });
+    const hit = killed.find((k) => k.dir === p.tmp);
+    assert.ok(hit,
+      `killRegisteredServers must find + kill this process's registered server via the durable registry, got ${JSON.stringify(killed)}`);
+    // isLiveTmuxPid reads /proc/<pid>/cmdline — a SIGKILL'd server may linger as a ZOMBIE until init
+    // reaps it (process.kill(pid,0) returns true for a zombie), but a dead/zombie server's cmdline
+    // is empty, so isLiveTmuxPid is the correct dead-assertion.
+    const deadline = Date.now() + 2000;
+    while (Date.now() < deadline && isLiveTmuxPid(serverPid)) { await sleep(50); }
+    assert.equal(isLiveTmuxPid(serverPid), false,
+      `the registered server ${serverPid} must be DEAD after killRegisteredServers`);
+  } finally {
+    try { p.cleanup(); } catch { /* already killed */ }
+  }
+});
+
+test("AC1 (TRUE catch-all) — killRegisteredServers({ deadProcOnly: true }) kills a CRASHED-process server but NEVER an alive process's server (cross-run safety)", { skip: noTmux }, async () => {
+  // gap-session-liveness-teardown-ol-scd-cf-leak: the process-crash hole — a test process that dies
+  // before its after() hook loses its in-memory registry, so its server survives. The durable
+  // registry survives; the pre-suite/legacy suite-tail kill uses deadProcOnly (kill only entries
+  // whose OWNING TEST PROCESS is dead) so a CONCURRENT scoped run's ACTIVE server is never touched.
+  // Two probes: A (real owner, alive) must SURVIVE deadProcOnly; B (synthetic dead-owner entry) must
+  // be KILLED.
+  const a = makeHermeticProbe("swp-dp-a");
+  const b = makeHermeticProbe("swp-dp-b");
+  try {
+    const aPid = serverPidOf(a.tmp);
+    const bPid = serverPidOf(b.tmp);
+    assert.ok(Number.isInteger(aPid) && aPid > 1, "probe A server pid must resolve");
+    assert.ok(Number.isInteger(bPid) && bPid > 1, "probe B server pid must resolve");
+    // A dead owning-process pid (spawn + await exit — node reaps it, so process.kill(pid,0) → ESRCH).
+    const dead = spawn("true");
+    await new Promise((res) => dead.on("exit", res));
+    const deadProcPid = dead.pid;
+    // Synthetic crashed-owner entry for B's server (its real entry has proc=THIS process, alive).
+    fs.appendFileSync(serverRegistryPath(),
+      JSON.stringify({ dir: b.tmp, sock: sockOfDir(b.tmp), pid: bPid, proc: deadProcPid, runId: "", ts: Date.now() }) + "\n",
+      "utf8");
+    const killed = killRegisteredServers({ deadProcOnly: true });
+    const killedB = killed.find((k) => k.dir === b.tmp);
+    assert.ok(killedB, `deadProcOnly must kill the crashed-owner server, got ${JSON.stringify(killed)}`);
+    assert.ok(!killed.some((k) => k.dir === a.tmp),
+      `deadProcOnly must NOT kill the alive-owner server (cross-run safety), got ${JSON.stringify(killed)}`);
+    // B's server must be dead (cmdline-based — a SIGKILL'd server may be a zombie until init reaps
+    // it); A's server must still be a LIVE tmux server (isLiveTmuxPid true = not killed).
+    const deadline = Date.now() + 2000;
+    while (Date.now() < deadline && isLiveTmuxPid(bPid)) { await sleep(50); }
+    assert.equal(isLiveTmuxPid(bPid), false,
+      `the crashed-owner server ${bPid} must be DEAD after deadProcOnly`);
+    assert.equal(isLiveTmuxPid(aPid), true,
+      `the alive-owner server ${aPid} must SURVIVE deadProcOnly`);
+  } finally {
+    try { a.cleanup(); } catch { /* already reaped */ }
+    try { b.cleanup(); } catch { /* already reaped */ }
+  }
+});
+
 test("reapSpawnedChildren — SIGKILLs a leaked touch-loop child (cancelled-test finally skip)", { skip: noTmux }, async () => {
   // gap-session-liveness-teardown-unified-kill-servers: alongside the leaked servers, ONE leaked
   // touch-loop (startTouchLoop) survived 62min — a cancelled test skips the caller's
@@ -227,7 +307,11 @@ test("AC2 — the cleanup surface has no name-based batch kill of session-livene
   // dirHasLiveOwner + the two runner sweepers moved to the PRODUCTION sweep module (plugin/scripts/
   // session-liveness-sweep.mjs, gap-leak-residue-per-run-namespace-isolation — a runtime import from
   // the test helper broke build-plugin-dist), so scan BOTH: the helper for sweepTmp, the production
-  // module for dirHasLiveOwner/sweepRunNamespaces/sweepRunNamespace.
+  // module for dirHasLiveOwner/sweepRunNamespaces/sweepRunNamespace. The TRUE-CATCH-ALL registry
+  // (gap-session-liveness-teardown-ol-scd-cf-leak) is now the CLEANUP SURFACE too — the whole point
+  // of killRegisteredServers is to kill leaked servers — so its registry/read/resolve/kill functions
+  // are scanned for the same no-name-based-kill / no-spawn invariant (each kill is a PID-targeted
+  // process.kill SIGKILL, resolved via /proc — never pkill/killall/spawn).
   const fnBodies = (src, names) => {
     const bodies = {};
     for (const name of names) {
@@ -246,7 +330,7 @@ test("AC2 — the cleanup surface has no name-based batch kill of session-livene
   const helper = fs.readFileSync(path.join(__dirname, "..", "test", "session-liveness-helpers.mjs"), "utf8");
   const sweepModule = fs.readFileSync(path.join(__dirname, "..", "scripts", "session-liveness-sweep.mjs"), "utf8");
   const helperBodies = fnBodies(helper, ["sweepTmp"]);
-  const sweepBodies = fnBodies(sweepModule, ["dirHasLiveOwner", "sweepRunNamespaces", "sweepRunNamespace", "serverPidsOfByCmdline"]);
+  const sweepBodies = fnBodies(sweepModule, ["dirHasLiveOwner", "sweepRunNamespaces", "sweepRunNamespace", "serverPidsOfByCmdline", "registerServer", "readServerRegistry", "resolveRegisteredServerPid", "killRegisteredServers", "isLiveTmuxPid", "isProcAlive", "sockOfDir", "serverRegistryPath"]);
   for (const body of [...Object.values(helperBodies), ...Object.values(sweepBodies)]) {
     assert.ok(!/(?:pkill|killall|spawnSync|spawn)\s*\(/.test(body),
       `cleanup executable body must not contain a name-based kill or process spawn (fs-only cleanup): ${body}`);
