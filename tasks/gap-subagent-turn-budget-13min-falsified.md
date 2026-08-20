@@ -1,7 +1,7 @@
 ---
 id: gap-subagent-turn-budget-13min-falsified
 title: "subagent ~13min 回合预算硬超时是假的——fan-in-execute.js 的短命轮询 agent 架构建立在证伪数字上，去重到一处 + 去该实现"
-status: ready
+status: done
 labels:
   - gap
   - mechanism
