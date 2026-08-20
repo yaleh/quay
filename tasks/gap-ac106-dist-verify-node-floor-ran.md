@@ -1,7 +1,7 @@
 ---
 id: gap-ac106-dist-verify-node-floor-ran
 title: AC106 dist-verify-node-floor 在当前流程上真实运行过（job success 新于 2026-08-20，非配置看起来对）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
