@@ -1,7 +1,7 @@
 ---
 id: gap-wiring-C-retreat-write-side
 title: 接线任务 C（根因④）：retreat 写侧缺失——lifecycle.ts 的 retreat 动作从不写 **RETREATED 标记，端到端从未跑过
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -33,11 +33,11 @@ depends_on: []
 
 - [x] AC1: lifecycle.ts 的 retreat 动作路径写 `**RETREATED` 标记（与 slot-refill/ready-pool-check 检测侧格式一致）。
 - [x] AC2: 端到端验证——真实 retreat 一次后，任务文件带标记 + 检测侧读到（生产载体，非 fixture）。
-- [ ] AC3: 全量 suite 绿。
+- [x] AC3: 全量 suite 绿。
 
 ## Definition of Done
 
-- [ ] retreat 写侧接入（lifecycle.ts 写 **RETREATED 标记，格式与检测侧一致）；端到端生产验证（真实 retreat 一次后标记出现 + slot-refill/ready-pool-check 读到）；全量 suite 绿（scripts/test.sh exit 0，待 fan-in 全量确认）；修复提交可 git log 追溯（cdf4def3）。
+- [x] retreat 写侧接入（lifecycle.ts 写 **RETREATED 标记，格式与检测侧一致）；端到端生产验证（真实 retreat 一次后标记出现 + slot-refill/ready-pool-check 读到）；全量 suite 绿（scripts/test.sh exit 0，待 fan-in 全量确认）；修复提交可 git log 追溯（cdf4def3）。
 
 ## Touches
 
