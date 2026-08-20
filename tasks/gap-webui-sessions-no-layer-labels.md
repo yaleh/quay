@@ -1,7 +1,7 @@
 ---
 id: gap-webui-sessions-no-layer-labels
 title: "/sessions 页缺分层标签——全篇无 Manager/Outer/Inner 分节标题，内容是扁平文本"
-status: ready
+status: done
 labels:
   - gap
   - webui
