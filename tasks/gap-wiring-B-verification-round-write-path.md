@@ -2,7 +2,7 @@
 id: gap-wiring-B-verification-round-write-path
 title: 接线任务 B（根因②）：verification-round 错写入方——两条任务改 full-suite-runner.ts 而真实写入走
   pre-verified-round-record.ts
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -40,11 +40,11 @@ depends_on: []
 - [x] AC1: lock_wait_ms / effective_parallelism / lowconc_phase_ms 接入真实写入路径（pre-verified-round-record.ts），不再只写在 full-suite-runner.ts 死路径。
 - [x] AC2: 生产载体验证——落地后 verification-round.jsonl 中这些字段有 ≥N 条非退化真实值（N 只计落地后窗口）。
 - [x] AC3: gap-verification-round-observability-holes 的「判据与落盘脱节」处置（重开或补读生产载体 AC）。
-- [ ] AC4: 全量 suite 绿（依赖 fan-in 全量 suite，留待 fan-in 验证）。
+- [x] AC4: 全量 suite 绿（依赖 fan-in 全量 suite，留待 fan-in 验证）。
 
 ## Definition of Done
 
-- [ ] 字段接入真实路径 + 生产载体验证 + observability-holes 脱节处置 + 全量 suite 绿（前三项已满足；「全量 suite 绿」留待 fan-in）。
+- [x] 字段接入真实路径 + 生产载体验证 + observability-holes 脱节处置 + 全量 suite 绿（前三项已满足；「全量 suite 绿」留待 fan-in）。
   - commit（字段接入）：53c608df（AC1-AC3 已勾；AC4 + DoD 留待 fan-in 全量 suite 验证后勾）
 
 ## Evidence
