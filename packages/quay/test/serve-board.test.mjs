@@ -440,3 +440,80 @@ test("AC2/AC3 negative control: worktree exists + status=ready + no live process
     try { if (wtPath) fs.rmSync(wtPath, { recursive: true, force: true }); } catch { /* already gone */ }
   }
 });
+
+test("gap-webui-board-no-pagination: /board supports server-side ?page=N pagination, ?status= and ?label= filtering, zero client JS", async () => {
+  const { ws, tasksDir } = makeWorkspace("board-pg-");
+  const cwd0 = process.cwd();
+  let server;
+  try {
+    // 25 tasks (default page size is 20 → 2 pages): PGT-01..10 status=done label=gap,
+    // PGT-11..20 status=ready label=webui, PGT-21..25 status=todo no label.
+    for (let i = 1; i <= 25; i++) {
+      const id = `PGT-${String(i).padStart(2, "0")}`;
+      const status = i <= 10 ? "done" : i <= 20 ? "ready" : "todo";
+      const labels = i <= 10 ? ["gap"] : i <= 20 ? ["webui"] : [];
+      seed(tasksDir, id, { title: `Pagination fixture ${id}`, status, labels, body: BD_BODY(`pg${id}Sym`, "packages/quay/src/pg-never-exists.ts") });
+    }
+
+    const port = await freePort();
+    process.chdir(ws);
+    server = await startServer({ port });
+
+    const countRows = (body) => body.split("</tr>").filter((r) => r.includes(">PGT-")).length;
+
+    // AC3: zero client JS — the board page carries no <script> element.
+    const board = await get(port, "/board");
+    assert.equal(board.status, 200, "AC1: GET /board returns 200");
+    assert.ok(!/<script/i.test(board.body), "AC3: board output contains no client JS <script> tag");
+
+    // AC1: default page 1 shows PGT-01..20, not PGT-21; page nav reports 2 pages / 25 rows.
+    assert.ok(board.body.includes("Page 1 of 2 (25 rows)"), "AC1: board reports Page 1 of 2 (25 rows)");
+    assert.ok(board.body.includes(">PGT-01<") && board.body.includes(">PGT-20<"), "AC1: page 1 shows PGT-01..PGT-20");
+    assert.ok(!board.body.includes(">PGT-21<"), "AC1: page 1 does NOT show PGT-21");
+    assert.equal(countRows(board.body), 20, "AC1: page 1 renders exactly 20 rows");
+
+    // AC1: ?page=2 returns the remaining 5 rows.
+    const page2 = await get(port, "/board?page=2");
+    assert.equal(page2.status, 200, "AC1: GET /board?page=2 returns 200");
+    assert.ok(page2.body.includes("Page 2 of 2 (25 rows)"), "AC1: board reports Page 2 of 2");
+    assert.ok(page2.body.includes(">PGT-21<") && page2.body.includes(">PGT-25<"), "AC1: page 2 shows PGT-21..PGT-25");
+    assert.ok(!page2.body.includes(">PGT-20<"), "AC1: page 2 does NOT show PGT-20");
+    assert.equal(countRows(page2.body), 5, "AC1: page 2 renders exactly 5 rows");
+
+    // AC1: an out-of-range page clamps to the last page — 200, never a 500.
+    const overflow = await get(port, "/board?page=999");
+    assert.equal(overflow.status, 200, "AC1: out-of-range page clamps (200, not 500)");
+    assert.ok(overflow.body.includes("Page 2 of 2 (25 rows)"), "AC1: out-of-range page clamps to page 2");
+
+    // AC2: ?status=done filters to the 10 done rows only.
+    const statusFiltered = await get(port, "/board?status=done");
+    assert.equal(statusFiltered.status, 200, "AC2: GET /board?status=done returns 200");
+    assert.ok(statusFiltered.body.includes(">PGT-01<") && statusFiltered.body.includes(">PGT-10<"), "AC2: status=done shows done rows");
+    assert.ok(!statusFiltered.body.includes(">PGT-11<"), "AC2: status=done excludes ready rows");
+    assert.ok(!statusFiltered.body.includes(">PGT-21<"), "AC2: status=done excludes todo rows");
+    assert.equal(countRows(statusFiltered.body), 10, "AC2: status=done renders exactly 10 rows");
+
+    // AC2: ?label=gap filters to tasks carrying the gap label.
+    const labelFiltered = await get(port, "/board?label=gap");
+    assert.equal(labelFiltered.status, 200, "AC2: GET /board?label=gap returns 200");
+    assert.ok(labelFiltered.body.includes(">PGT-01<") && labelFiltered.body.includes(">PGT-10<"), "AC2: label=gap shows labeled rows");
+    assert.ok(!labelFiltered.body.includes(">PGT-11<"), "AC2: label=gap excludes webui-labeled rows");
+    assert.equal(countRows(labelFiltered.body), 10, "AC2: label=gap renders exactly 10 rows");
+
+    // AC2: AND-logic — status+label both present → 10; mismatch → 0 (200, not an error).
+    const both = await get(port, "/board?status=done&label=gap");
+    assert.equal(both.status, 200, "AC2: combined status+label filter returns 200");
+    assert.equal(countRows(both.body), 10, "AC2: status=done&label=gap → 10 rows");
+    const mismatch = await get(port, "/board?status=ready&label=gap");
+    assert.equal(mismatch.status, 200, "AC2: empty-filter result is 200, not an error");
+    assert.equal(countRows(mismatch.body), 0, "AC2: status=ready&label=gap → 0 rows (AND)");
+
+    // AC1/AC2: pagination respects filters — the filtered set (10 ready rows) fits one page.
+    const readyFiltered = await get(port, "/board?status=ready");
+    assert.ok(readyFiltered.body.includes("Page 1 of 1 (10 rows)"), "AC2/AC1: filter result paginates correctly");
+  } finally {
+    process.chdir(cwd0);
+    if (server) { server.close(); if (server.client) await server.client.close(); }
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});

@@ -19,14 +19,16 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: `/board` 支持服务端分页（query param，如 `?page=N`）。
-- [ ] AC2: 支持按 status/label 筛选。
-- [ ] AC3: 不引入客户端 JS（保持「零客户端 JS」取向）。
+- [x] AC1: `/board` 支持服务端分页（query param，如 `?page=N`）。
+- [x] AC2: 支持按 status/label 筛选。
+- [x] AC3: 不引入客户端 JS（保持「零客户端 JS」取向）。
 
 ## Definition of Done
 
-- [ ] `/board?page=2` 返回第二页、`?status=<s>` 筛选生效（真实输出，全程不引入客户端 JS）。
+- [x] `/board?page=2` 返回第二页、`?status=<s>` 筛选生效（真实输出，全程不引入客户端 JS）。
 
 ## Touches
 
 - tasks/gap-webui-board-no-pagination.md（自身）
+- packages/quay/src/serve-handlers.ts（/board 服务端分页 + status/label 筛选 + 零客户端 JS 渲染）
+- packages/quay/test/serve-board.test.mjs（分页/筛选/零 JS 的 scoped 测试）
