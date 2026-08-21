@@ -8,6 +8,10 @@ parent: null
 children: []
 extra:
   schema: execution
+depends_on:
+  - gap-ac120-suite-bucket-attribution-mechanism
+  - gap-ac122-suite-bucket-hub-list-full-suite
+  - gap-ac123-suite-bucket-cross-bucket-both-sides
 ---
 
 **type:** execution
