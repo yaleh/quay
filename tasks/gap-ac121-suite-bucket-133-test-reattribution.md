@@ -44,5 +44,5 @@ depends_on:
 
 ## Touches
 
-- .quay/suite-bucket-reattribution.jsonl（判定记录，载体名可 inner 定）
+- .quay/suite-bucket-reattribution.jsonl (new)
 - tasks/gap-ac121-suite-bucket-133-test-reattribution.md（自身）

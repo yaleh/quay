@@ -43,5 +43,5 @@ depends_on:
 
 ## Touches
 
-- plugin/scripts/suite-bucket-hub-list（枢纽清单，载体名可 inner 定）
+- plugin/scripts/suite-bucket-hub-list (new)
 - tasks/gap-ac122-suite-bucket-hub-list-full-suite.md（自身）
