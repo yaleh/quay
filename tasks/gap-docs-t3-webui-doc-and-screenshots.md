@@ -29,8 +29,8 @@ extra:
 
 1. 对 15 条精确路由 + 4 条详情路由，各截一图（google-chrome --headless=new，开发树 serve，复用 AC100 流程）。
 2. 每张截图对应路由：真实 HTTP 请求断言页面内容 + 关键元素（AC119 手法——非 curl 探活）。
-3. 写 Web UI 用户文档页 `docs/<新页>.md`（15 路由 + 4 详情全列出，含截图）。
-4. 截图存 `docs/images/*.png`，文档引用。
+3. 写 Web UI 用户文档页 `docs/webui-guide.md`（15 路由 + 4 详情全列出，含截图）。
+4. 截图存 `docs/images/webui-*.png`，文档引用。
 
 ## Acceptance Criteria
 
@@ -46,7 +46,7 @@ extra:
 
 ## Touches
 
-- docs/<Web UI 文档新页>.md（新增）
-- docs/images/*.png（截图）
+- docs/webui-guide.md（新增——Web UI 用户文档页）
+- docs/images/webui-*.png（截图，具体文件按路由定）
 - 截图生成脚本（复用 AC100 流程）
 - tasks/gap-docs-t3-webui-doc-and-screenshots.md（自身）
