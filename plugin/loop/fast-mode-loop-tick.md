@@ -1377,6 +1377,15 @@ engine 组 + governance 组 == 去重后 realpath 总数」这类**关系**，�
 建的任务必须有：`## Proposal`（问题 + 证据 + 选定机制）、`## Acceptance Criteria`（可机械验证）、
 `## Touches`。缺任一项的不算建成。
 
+**立案后当场提交主检出任务体（`gap-inner-filing-commit-main-checkout-task-body`）**：写任务体
+（task_write）落盘到主检出 `tasks/<id>.md` 后，**同一 tick 步骤当场 `git add tasks/<id>.md && git commit`**
+（与派发记录 dispatch-record 同拍）。worktree 内提交**不包含**主检出的 untracked 任务体
+（git 语义：worktree 提交在 `task/<id>` 分支，主检出 untracked 不动）；主检出 untracked 任务体 =
+硬规则 11b 违反（盘上任务体即生产输入）——`fan-in-ff-merge.sh` 的 `git status --porcelain`
+（含 untracked）非空即 exit 2，**硬阻所有 fan-in 的 ff**（两次实证：
+gap-manager-layer-launch-config-test-pin-fjdac / gap-fan-in-workflow-check-test-hermetic-escalations，
+外层代提交 49526867 / 0743c444）。
+
 **核心/loop 文档 outer 独占写（`gap-write-ownership-extend-beyond-tasks-to-outer-core-and-hot-files` AC2）**：
 inner 建任务时**不得**把 `orchestration/orchestrator-loop-tick.md` 与 `orchestration/orchestrator-tick-core.md`
 （及未来新增的 `orchestration/` 下 `orchestrator-*.md` 一族）列入 `## Touches`——它们归 outer 独占写
