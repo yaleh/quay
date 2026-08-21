@@ -305,14 +305,36 @@ suite_capture="/tmp/fan-in-suite-${task}.env"
 suite_exit_marker="/tmp/fan-in-suite-${task}.exit"
 suite_time_file="/tmp/fan-in-suite-${task}.time"
 suite_log_file="/tmp/fan-in-suite-${task}.log"
+# 存活核验的 pid（gap-suite-wait-bash-stale-pid-poll）：从 capture 读 suite_pid（SUITE_LAUNCH 启动时写）。
+# marker 出现前用 kill -0 核验进程存活——detached suite 若在写 .exit 前静默死亡（信号/OOM/异常），poller
+# 立即发现并写可区分失败态，不再以「.exit 不存在 ⇒ 进程还在跑」的假假设空转满 ${pollBlockSeconds}s。
+suite_pid=""
+if [ -f "$suite_capture" ]; then
+  suite_pid=$(sed -n 's/^suite_pid=//p' "$suite_capture" | tail -1)
+fi
 if [ ! -f "$suite_exit_marker" ]; then
   # 有界阻塞等待（gap-fan-in-execute-poll-bounded-blocking-wait）：最多 ${pollBlockSeconds}s 硬边界
   # （< Bash 600s 上限），每 ${pollBlockSleep}s 看一眼 marker。决策权在固定命令——这个 timeout 是脚本给的
   # 硬边界、maxSuitePolls 是循环上限，agent 不自决「等多久」，只是重跑同一个固定命令（ab380c5e 是
   # agent 自决等待，这里是固定命令的有界等待）。
-  timeout ${pollBlockSeconds} bash -c 'while [ ! -f "$1" ]; do sleep ${pollBlockSleep}; done' _ "$suite_exit_marker" || true
+  # 内层循环每次醒来先 kill -0 核验 suite_pid 存活（gap-suite-wait-bash-stale-pid-poll AC1）；进程已死
+  # 且 marker 未写 ⇒ exit 42（sentinel）提前返回，不等满 ${pollBlockSeconds}s 空转（AC2：写可区分失败态）。
+  poll_rc=0
+  timeout ${pollBlockSeconds} bash -c '
+    while [ ! -f "$1" ]; do
+      if [ -n "$2" ] && ! kill -0 "$2" 2>/dev/null; then
+        exit 42
+      fi
+      sleep ${pollBlockSleep}
+    done
+  ' _ "$suite_exit_marker" "$suite_pid" || poll_rc=$?
 fi
 if [ ! -f "$suite_exit_marker" ]; then
+  if [ "$poll_rc" = "42" ]; then
+    printf 'suite_pid_dead=1\\nsuite_pid_dead_ts=%s\\n' "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)" >> "$suite_capture"
+    echo "POLL=suite-pid-dead pid=$suite_pid"
+    exit 0
+  fi
   echo 'POLL=not-done'
   exit 0
 fi
@@ -569,6 +591,8 @@ budget-13min-falsified：无 subagent 回合预算超时）。运行后看输出
   - POLL=not-done ⇒ 再运行一次同一等待块（最多 ${maxSuitePolls} 次，每次独立 Bash 调用，单次 < 600s）。
   - POLL=done SUITE_EXIT=N ⇒ 停止等待，按 N 分支：N=0 ⇒ 继续机械步骤；N!=0 ⇒ 直接返回
     { outcome:'suite-red', suiteExit:N }（不执行机械步骤，等待 Fix agent 修复后重派你）。
+  - POLL=suite-pid-dead ⇒ suite 进程在写 .exit 前静默死亡（kill -0 核验失败，非正常退出）⇒ 立即返回
+    { outcome:'suite-pid-dead', suiteExit:null }（不执行机械步骤、不再空转——等待主循环派 Fix agent 重新启动 suite）。
 ⛔ 单次 Bash 调用不得超过 600s——上面的 timeout ${pollBlockSeconds} 已是硬边界，绝不自行加大等待。
 ⛔ 不要做任何等待决策——每次等待的时长由上面的 timeout ${pollBlockSeconds} 硬边界决定、循环次数由最多
 ${maxSuitePolls} 次决定；你只是重跑同一个固定命令，绝不自行选择等待更久/更短。
@@ -576,7 +600,7 @@ ${maxSuitePolls} 次决定；你只是重跑同一个固定命令，绝不自行
 同一等待块，直到 POLL=done 或达到最多 ${maxSuitePolls} 次。
 ${SUITE_WAIT_BASH}
 返回 { done: bool（POLL=done ⇒ true）, suiteExit: int|null }（等待块的内部输出语义，不是你的最终返回——
-你的最终返回见文末 schema）。若 ${maxSuitePolls} 次后仍 POLL=not-done ⇒ 返回 { outcome:'suite-not-done', suiteExit:null }（不执行机械步骤）。`
+你的最终返回见文末 schema）。若 ${maxSuitePolls} 次后仍 POLL=not-done ⇒ 返回 { outcome:'suite-not-done', suiteExit:null }（不执行机械步骤）。收到 POLL=suite-pid-dead ⇒ 立即返回 { outcome:'suite-pid-dead', suiteExit:null }（不执行机械步骤、不再空转——等待主循环派 Fix agent 重新启动 suite）。`
 : `（suite 已 skipped / preverified —— capture 已含 suite_exit，无需等待，直接执行机械步骤。）`}
 
 执行上下文（你直接使用，无需探查）：
@@ -824,8 +848,8 @@ reaper="${worktree}/plugin/scripts/worktree-process-reaper.ts"
 node --no-warnings --experimental-strip-types "$reaper" --worktree ${worktree} --root ${root} --json >/dev/null 2>&1 || true
 git worktree remove ${worktree} --force && git branch -d task/${task}
 
-返回 { outcome: 'green' | 'needs-human' | 'red' | 'ff-retry' | 'suite-red' | 'suite-not-done', ffOk, suiteExit, developHead, worktreeHead, agentIdUsed, codeDelta, note, bracketClosed }。
-outcome=suite-not-done 仅当等待达到 ${maxSuitePolls} 次上限仍无 exit marker（不执行机械步骤，脚本 fail-closed 红）。outcome=suite-red 仅当 suite 退出码非 0（读等待块补全的 capture 的 suite_exit）——不执行机械步骤，脚本派 Fix agent 修复后重派你。outcome=green 仅当 ff 成功（develop fast-forward 到 task tip）。outcome=ff-retry 仅当 ff 失败（develop 前进，exit 1/3）——脚本将回阶段 1 重跑，你【不得】重试 ff、【不得】执行 step 5.5。outcome=needs-human 仅当 flip/入账等持锁段前置失败（如 AC 闸拒绝/入账 HARD FAIL）。red = 其它失败。
+返回 { outcome: 'green' | 'needs-human' | 'red' | 'ff-retry' | 'suite-red' | 'suite-pid-dead' | 'suite-not-done', ffOk, suiteExit, developHead, worktreeHead, agentIdUsed, codeDelta, note, bracketClosed }。
+outcome=suite-not-done 仅当等待达到 ${maxSuitePolls} 次上限仍无 exit marker（不执行机械步骤，脚本 fail-closed 红）。outcome=suite-red 仅当 suite 退出码非 0（读等待块补全的 capture 的 suite_exit）——不执行机械步骤，脚本派 Fix agent 修复后重派你。outcome=suite-pid-dead 仅当 suite 进程在写 .exit 前静默死亡（等待块 kill -0 核验失败，无 exit marker）——不执行机械步骤，脚本派 Fix agent 重新启动 suite 后重派你。outcome=green 仅当 ff 成功（develop fast-forward 到 task tip）。outcome=ff-retry 仅当 ff 失败（develop 前进，exit 1/3）——脚本将回阶段 1 重跑，你【不得】重试 ff、【不得】执行 step 5.5。outcome=needs-human 仅当 flip/入账等持锁段前置失败（如 AC 闸拒绝/入账 HARD FAIL）。red = 其它失败。
 bracketClosed = step 5.5 的闭合结果（true=已闭合 / false=闭合失败 / null=ff 未成功未执行 5.5）。
 note 必须标注 bracketClose=OK 或 bracketClose=FAILED。`,
     {
@@ -849,17 +873,22 @@ note 必须标注 bracketClose=OK 或 bracketClose=FAILED。`,
   if (stage.outcome === 'suite-not-done') {
     return { outcome: 'red', ffOk: false, task, message: `fan-in suite did not finish within poll cap for ${task}` }
   }
-  if (stage.outcome === 'suite-red') {
+  if (stage.outcome === 'suite-red' || stage.outcome === 'suite-pid-dead') {
+    const pidDead = stage.outcome === 'suite-pid-dead'
     if (fixRounds >= maxFixRounds) {
-      return { outcome: 'red', ffOk: false, task, message: `fan-in suite red after ${fixRounds} fix rounds (last exit ${stage.suiteExit}) — not landing` }
+      return { outcome: 'red', ffOk: false, task, message: pidDead
+        ? `fan-in suite process died before exit marker after ${fixRounds} fix rounds — not landing`
+        : `fan-in suite red after ${fixRounds} fix rounds (last exit ${stage.suiteExit}) — not landing` }
     }
     fixRounds++
     const fix = await agent(
-      `你是 fan-in 执行 subagent（suite-fix 阶段）。任务 ${task} 的全量 suite 上一轮退出码 ${stage.suiteExit}（RED）——你读失败日志、按 fix-scope gate 判红是否本任务 Touches 内回归，修根因、以 detached 方式重新启动 suite，然后【立即返回】（等待由阶段 2 agent 在本回合内多次 <600s Bash 循环承担，不在你本回合内等；gap-subagent-turn-budget-13min-falsified）。
+      `${pidDead
+        ? `你是 fan-in 执行 subagent（suite-relaunch 阶段）。任务 ${task} 的全量 suite 进程在写 .exit 前【静默死亡】（等待块 kill -0 核验失败，退出码未知——信号/OOM/异常，非正常退出；无 exit marker 可读）——`
+        : `你是 fan-in 执行 subagent（suite-fix 阶段）。任务 ${task} 的全量 suite 上一轮退出码 ${stage.suiteExit}（RED）——`}你读失败日志、按 fix-scope gate 判红是否本任务 Touches 内回归，修根因、以 detached 方式重新启动 suite，然后【立即返回】（等待由阶段 2 agent 在本回合内多次 <600s Bash 循环承担，不在你本回合内等；gap-subagent-turn-budget-13min-falsified）。
 执行上下文：
 - 任务 worktree（你的工作目录）：${worktree}
 - suite 日志：/tmp/fan-in-suite-${task}.log
-- 上一轮 exit：${stage.suiteExit}
+- 上一轮 exit：${pidDead ? 'unknown（进程死亡，无 exit marker——读日志末段判因）' : stage.suiteExit}
 ${FIX_SCOPE_GATE}
 任务：
 1. 读 /tmp/fan-in-suite-${task}.log 的【全部】失败行（__PERFILE__ passed=false 行 + spec 失败摘要），先跑上面的 fix-scope gate 得到 FIX_SCOPE_VERDICT。日志已按轮轮转：当前文件 = 上一轮（本次失败的这轮）的内容，第一行是 __FANIN_SUITE_START__ 起始标记；上一轮更早的内容在 /tmp/fan-in-suite-${task}.log.prev（诊断用，勿当当前轮）。读当前轮请从最后一个 __FANIN_SUITE_START__ 之后切片。

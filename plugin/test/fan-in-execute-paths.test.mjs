@@ -1770,6 +1770,22 @@ test("⑧ stage-2 wait — RED suite ⇒ stage-2 returns suite-red ⇒ Fix agent
   assert.ok(prompts.some((p) => p.includes("你读失败日志")), "the Fix prompt must read the suite log failures");
 });
 
+test("⑧ stage-2 wait — suite process dies before writing .exit ⇒ stage-2 returns suite-pid-dead ⇒ relaunch agent re-starts detached ⇒ re-dispatched stage-2 lands (gap-suite-wait-bash-stale-pid-poll AC2)", async (t) => {
+  const { prompts, result } = await runWorkflow({
+    args: { task: "gap-test-tb-piddead", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-tb-piddead", mergeTarget: "develop", maxSuitePolls: 5, maxFixRounds: 2 },
+    agentResults: [
+      { outcome: "suite-started", suitePid: 111, codeDelta: "code", worktreeHead: "h1", note: "" },                 // phase 1
+      { outcome: "suite-pid-dead", suiteExit: null, ffOk: false },                                                   // stage 2: pid dead, no exit marker
+      { relaunched: true, worktreeHead: "h2", failuresFixed: [], note: "relaunch after silent death" },             // relaunch agent
+      { outcome: "green", ffOk: true, developHead: "d2", worktreeHead: "h2", agentIdUsed: "a2", codeDelta: "code", note: "bracketClose=OK", bracketClosed: true }, // stage 2 re-dispatched
+    ],
+  });
+  assert.equal(result.outcome, "green", "a silently-dead suite must be relaunched + re-verified before landing");
+  assert.ok(prompts.some((p) => p.includes("suite-relaunch 阶段")), "a relaunch-agent prompt must be emitted for a dead-pid suite");
+  assert.ok(prompts.some((p) => p.includes("静默死亡")), "the relaunch prompt must name the silent-death reason");
+  assert.ok(prompts.some((p) => p.includes("FIX_SCOPE_VERDICT")), "the relaunch prompt must still carry the fix-scope gate");
+});
+
 test("⑧ stage-2 wait — suite never completes within the stage-2 poll cap ⇒ stage-2 returns suite-not-done ⇒ red (bounded wait, no infinite hang)", async (t) => {
   const { result } = await runWorkflow({
     args: { task: "gap-test-tb-cap", worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-tb-cap", mergeTarget: "develop", maxSuitePolls: 2 },
@@ -2329,7 +2345,10 @@ test("⑩ 有界阻塞等待 wiring — 阶段 2 等待块带 timeout 540（< Ba
   assert.ok(timeoutSecs < 600, `the blocking-wait hard bound must be < Bash 600s limit, got ${timeoutSecs}s`);
   assert.equal(timeoutSecs, 540, "the hard bound must be exactly 540s (AC1: < 600s with safety margin)");
   // sleep 15 检查粒度 + 循环等 marker 而非 agent 自决时长。
-  assert.ok(poll.includes('while [ ! -f "$1" ]; do sleep 15; done'), "the bounded wait must loop on the marker existence with sleep 15, not an agent-decided duration");
+  assert.ok(poll.includes('while [ ! -f "$1" ]; do'), "the bounded wait must loop on the marker existence with sleep, not an agent-decided duration");
+  assert.ok(poll.includes('sleep 15'), "the bounded wait must carry the sleep 15 poll granularity");
+  // 存活核验（gap-suite-wait-bash-stale-pid-poll AC1）：内层循环必须 kill -0 核验 suite_pid，不纯靠 .exit 存在性。
+  assert.ok(poll.includes('kill -0 "$2"'), "the bounded wait must liveness-check suite_pid with kill -0");
   // 决策权在固定命令（不是 agent 自决等待）——阶段 2 prompt 明示「不要做任何等待决策」。
   assert.ok(poll.includes("不要做任何等待决策"), "the wait block must refuse to make any waiting decision (fixed command, ab380c5e 反面)");
 });
@@ -2358,6 +2377,38 @@ test("⑩ REAL 有界阻塞等待 — marker 中途出现时，轮询在【一�
   assert.ok(elapsed >= 800, `the poll must have BLOCKED waiting (elapsed ${elapsed}ms); an instant not-done return is the N-empty-poll shape this fixes`);
 });
 
+test("⑩ REAL 死进程负控制 — suite 进程在写 .exit 前静默死亡 ⇒ poller 快速 emit POLL=suite-pid-dead + 写可区分失败态（gap-suite-wait-bash-stale-pid-poll AC1/AC2）", async (t) => {
+  const task = "gap-test-piddead";
+  const capture = `/tmp/fan-in-suite-${task}.env`;
+  const marker = `/tmp/fan-in-suite-${task}.exit`;
+  fs.rmSync(marker, { force: true });
+  // 真实死亡 pid（非 fixture 数字）：spawn 一个短命进程、等它被 reap，然后断言 kill -0 失败。
+  const deadPid = Number(spawnSync("bash", ["-c", "echo $$; sleep 0.1"], { encoding: "utf8" }).stdout.trim());
+  assert.ok(Number.isInteger(deadPid) && deadPid > 0, `dead pid precondition: got ${deadPid}`);
+  const alive = spawnSync("bash", ["-c", `kill -0 ${deadPid} 2>/dev/null; echo $?`], { encoding: "utf8" }).stdout.trim();
+  assert.equal(alive, "1", `test precondition: pid ${deadPid} must be provably dead (kill -0 exit 1), got ${alive}`);
+  // capture 模拟已启动 suite（含 suite_pid）但 .exit 从未被写（进程静默死亡）。
+  fs.writeFileSync(capture, ["full_suite_ran=true", "skip_reason=", `start_ms=${Date.now()}`, "suite_head=abc", `suite_log_file=/tmp/fan-in-suite-${task}.log`, `suite_pid=${deadPid}`].join("\n") + "\n");
+  t.after(() => { for (const f of [capture, marker, `/tmp/fan-in-suite-${task}.time`, `/tmp/fan-in-suite-${task}.log`]) { try { fs.rmSync(f, { force: true }); } catch (_) { /* best-effort */ } } });
+
+  // 测试用 pollBlockSleep=0.2 + pollBlockSeconds=30：若 poller 仍只查 .exit 存在性，会在 30s 硬边界内
+  // 空转（旧谓词）；新谓词在第一次 sleep 间隔就 kill -0 发现 pid 死亡 ⇒ 立即返回。
+  const { prompts } = await runWorkflow({
+    args: { task, worktree: "/tmp/wt", root: REPO_ROOT, runId: "fm-piddead", mergeTarget: "develop", pollBlockSeconds: 30, pollBlockSleep: 0.2 },
+  });
+  const pollPrompt = promptContaining(prompts, "POLL=not-done");
+  const pollBlock = pollPrompt.slice(pollPrompt.indexOf("suite_capture="), pollPrompt.indexOf("返回 { done: bool"));
+  const t0 = Date.now();
+  const r = runBash(pollBlock, { cwd: "/tmp", timeout: 15_000 });
+  const elapsed = Date.now() - t0;
+  assert.equal(r.status, 0, `poll block failed: ${r.stderr}`);
+  assert.match(r.stdout, /POLL=suite-pid-dead/, `must emit the distinguishable suite-pid-dead state, got: ${r.stdout}`);
+  assert.ok(elapsed < 10_000, `must fail fast (kill -0 on first sleep interval), NOT spin the ${30}s bound: elapsed ${elapsed}ms`);
+  // AC2: 可区分失败态落在生产载体（capture），不是只有 agent stdout 一句。
+  const cap = fs.readFileSync(capture, "utf8");
+  assert.match(cap, /^suite_pid_dead=1$/m, "capture must carry suite_pid_dead=1 (AC2 distinguishable failure state)");
+});
+
 // ── ⑩b 阶段 2 agent 循环等待覆盖（gap-subagent-turn-budget-13min-falsified：取代旧 firstDelayMs/pollIntervalMs）──
 // 旧设计的「首轮起轮延迟 firstDelayMs（660s）+ 脚本 setTimeout 循环 + 每轮起一个新短命轮询 agent」已随
 // 证伪（无 subagent 回合预算超时）一起删除——阶段 2 agent 在本回合内循环运行【单个有界阻塞等待块】
@@ -2375,7 +2426,8 @@ test("⑩b stage-2 wait wiring — the stage-2 prompt carries the bounded-wait b
   const pollBlockSeconds = Number(m[1]);
   assert.ok(pollBlockSeconds < 600, `the blocking-wait hard bound must be < Bash 600s limit, got ${pollBlockSeconds}s`);
   assert.equal(pollBlockSeconds, 540, "the hard bound must be exactly 540s (AC1: < 600s with safety margin)");
-  assert.ok(poll.includes('while [ ! -f "$1" ]; do sleep 15; done'), "the bounded wait must loop on the marker existence with sleep 15");
+  assert.ok(poll.includes('while [ ! -f "$1" ]; do'), "the bounded wait must loop on the marker existence with sleep");
+  assert.ok(poll.includes('kill -0 "$2"'), "the bounded wait must liveness-check suite_pid with kill -0 (gap-suite-wait-bash-stale-pid-poll AC1)");
   // The agent-loop bound (gap-subagent-turn-budget-13min-falsified): the SAME stage-2 agent re-runs the
   // block up to maxSuitePolls times — 取假: 删掉「最多 N 次」循环说明 ⇒ 此断言红。
   const cap = poll.match(/最多 (\d+) 次/);
@@ -2391,7 +2443,8 @@ test("⑩b stage-2 wait args override — pollBlockSeconds / pollBlockSleep / ma
   });
   const poll = promptContaining(prompts, "POLL=not-done");
   assert.match(poll, /timeout 123 bash -c/, "pollBlockSeconds override must render in the wait block");
-  assert.ok(poll.includes('do sleep 0.5; done'), "pollBlockSleep override must render in the wait block");
+  assert.ok(poll.includes('sleep 0.5'), "pollBlockSleep override must render in the wait block");
+  assert.ok(poll.includes('kill -0 "$2"'), "the liveness check must render in the wait block");
   assert.match(poll, /最多 7 次/, "maxSuitePolls override must render in the loop bound");
 });
 
