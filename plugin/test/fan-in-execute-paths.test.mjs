@@ -2585,6 +2585,25 @@ test("fix-scope REAL leak-residual — a tmux-leak-scan: FAIL with no per-file f
   assert.ok(verdict.outOfScope.some((f) => f.reason === "leak-residual"), "tmux-leak residual must be outOfScope (env residual, not a Touches regression)");
 });
 
+test("fix-scope NEGATIVE control — a PASSING '✔'-prefixed test whose NAME quotes `tmux-leak-scan: FAIL` must NOT be classified leak-residual (^ anchor; gap-fan-in-execute-tmux-leak-scan-unanchored AC2)", async (t) => {
+  const task = "gap-test-fixscope-leak-neg";
+  const dir = makeFixScopeDir("fan-in-fixscope-leakneg-", task, "---\nid: gap-test-fixscope-leak-neg\nstatus: ready\n---\n## Touches\n- tasks/gap-test-fixscope-leak-neg.md\n- pkg/a/**\n");
+  t.after(() => cleanup(dir));
+  const log = `/tmp/fan-in-suite-${task}.log`;
+  // The runner's own AC5 e2e NAME quotes the `tmux-leak-scan: FAIL` shape; as a PASSING line it is
+  // `✔`-prefixed, so the unanchored `/tmux-leak-scan: FAIL/` used to match it and trigger a phantom
+  // leak-residual on every suite-fix relaunch. Only a column-0 REAL residual is leak-residual.
+  fs.writeFileSync(log, "✔ AC5 e2e — a 'tmux-leak-scan: FAIL' residual line flips red\n", "utf8");
+  t.after(() => { try { fs.rmSync(log, { force: true }); } catch (_) { /* best-effort */ } });
+  const block = await fixScopeGateBlockFor(task, dir);
+  const r = runBash(block + '\necho "GATE_OUT=[$fix_scope_out]"', { cwd: dir });
+  assert.equal(r.status, 0, r.stderr);
+  const m = r.stdout.match(/GATE_OUT=\[(.*)\]/s);
+  assert.ok(m, `gate JSON echo missing:\n${r.stdout}`);
+  const verdict = JSON.parse(m[1]);
+  assert.ok(!verdict.outOfScope.some((f) => f.reason === "leak-residual"), "a PASSING '✔'-prefixed test whose NAME quotes `tmux-leak-scan: FAIL` must NOT be leak-residual (only a column-0 REAL residual is)");
+});
+
 // ── fix-scope gate release persistence（gap-fix-scope-gate-release-not-persistent）───────────────────
 // THE DEFECT: 上一版 gate 的 load-sensitive release 是一次性 relaunch——relaunch 后仍红，第二轮
 // suite-fix 不再走 release、直接越界修（a76959c8 session-liveness teardown 第 9+ 例）。release 无跨

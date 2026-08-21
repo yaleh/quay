@@ -133,6 +133,7 @@ import { runOnce, isRunnerInFlight, type SuiteState as TriggerSuiteState } from 
 import { resolveAssertionSurface } from "./precommit-guard.ts";
 import { getLoad1 } from "./checker-cost.ts";
 import { scanFamily, kindForFile } from "./known-load-sensitive.ts";
+import { TMUX_LEAK_FAIL_RE } from "./tmux-leak-fail-re.ts";
 // gap-leak-residue-per-run-namespace-isolation — the runner-level unified cleanup REUSES the
 // owner-liveness criterion (dirHasLiveOwner) already implemented in the session-liveness helpers
 // (the 2026-08-08 two-layer-blind invariant: cleanup is PATH-OWNERSHIP + OWNER-LIVENESS based,
@@ -474,7 +475,7 @@ const FAILURE_PATTERNS: RegExp[] = [
   /^✖\s+\S.*\(\d+(?:\.\d+)?ms\)/, // node:test spec-reporter per-test failure: ✖ <testname> (Nms) — ^ anchored: a REAL reporter failure starts the line; a PASSING test whose NAME quotes the `✖ <name> (Nms)` shape (runner-failure-patterns' own e2e names) is `✔`-prefixed and must not match
   /^✖\s+failing tests?/, // node:test spec-reporter failure-block header: `✖ failing tests:` (only emitted when tests failed) — ^ anchored, same reasoning
   /^__PERFILE__\s+duration_ms=.*\s+passed=false\b/, // measure-suite-reporter per-file failure: __PERFILE__ duration_ms=<d> <path> passed=false — ^ anchored + FULL reporter shape (candidate B, gap-runner-perfile-pattern-unnchored-self-match-phantom-red): a REAL reporter line starts column-0 with `__PERFILE__ duration_ms=...`; a PASSING test whose NAME quotes the shape (the runner's own e2e test names) is `✔`-prefixed and must not match — same family as the ^✖ fix (c83ce4be)
-  /^tmux-leak-scan: FAIL/, // suite-tail leak scan's residual report (candidate C) — ^ anchored: a REAL leak-scan residual starts column-0 with `tmux-leak-scan: FAIL`; a PASSING test whose NAME quotes the shape (the runner's own AC5 e2e name, gap-tmux-leak-scan-pattern-unnchored-self-match-phantom-red) is `✔`-prefixed and must not match — same self-match family as the ^✖ fix (c83ce4be) and ^__PERFILE__ (a1b78104)
+  TMUX_LEAK_FAIL_RE, // suite-tail leak scan's residual report (candidate C) — single definition, ^-anchored (rationale in tmux-leak-fail-re.ts)
 ];
 
 // gap-verification-round-reason-self-contradiction — GATE/SCAN failure lines that flip red while the
@@ -486,7 +487,7 @@ const FAILURE_PATTERNS: RegExp[] = [
 // round with fail=0 (all tests passed) is never mislabelled reason='failed'.
 const GATE_SCAN_FAILURE_LINES: { gate: string; re: RegExp }[] = [
   { gate: "perfile-timeout", re: /^__PERFILE__\s+duration_ms=.*\s+passed=false\b/ },
-  { gate: "tmux-leak-scan", re: /^tmux-leak-scan: FAIL/ },
+  { gate: "tmux-leak-scan", re: TMUX_LEAK_FAIL_RE },
 ];
 
 /** The gate/scan identity of a failure line, or null when the line is not a gate/scan failure. */
