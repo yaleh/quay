@@ -1,7 +1,7 @@
 ---
 id: gap-webui-modernist-css-missing-in-tgz
 title: webui-modernist.css 打包缺失：serve 页面 200 但 <style> 为空（AC119 跨项目验证发现）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
