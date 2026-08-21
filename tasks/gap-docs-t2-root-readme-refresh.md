@@ -1,7 +1,7 @@
 ---
 id: gap-docs-t2-root-readme-refresh
 title: T2 根 README 刷新：版本字面量/usage 13 命令/配置两节/环境变量 10/端到端流程/断链
-status: ready
+status: done
 labels:
   - gap
   - docs
@@ -38,17 +38,17 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: `grep -c '0\.3\.5' README.md` = 0（版本字面量全清）。
-- [ ] AC2: `:347` usage 行含全部命令（对齐 quay.ts:206 dispatch 表，diff 差 = 0）。
-- [ ] AC3: `gates:` 6 类 + `loop:` 12+ 字段在 README 有文档（`grep 'gates:\|loop:' README.md` 命中 + 逐类核对）。
-- [ ] AC4: 10 个未覆盖环境变量已补文档（`grep 'QUAY_NATIVE_ADR_DIR\|QUAY_GITHUB_MAX_ISSUES' README.md` 命中）。
-- [ ] AC5: README 含 todo→ready→done 端到端流程（`grep -c 'promote\|retreat\|complete' README.md` 非零 + 流程示例存在）。
-- [ ] AC6: 断链 :583 修复（链接目标存在）；:513 测试命令与 ADR-019 对齐（指向 scripts/test.sh）。
-- [ ] AC7: 全量 suite 绿。
+- [x] AC1: `grep -c '0\.3\.5' README.md` = 0（版本字面量全清）。
+- [x] AC2: `:347` usage 行含全部命令（对齐 quay.ts:206 dispatch 表，diff 差 = 0）。
+- [x] AC3: `gates:` 6 类 + `loop:` 12+ 字段在 README 有文档（`grep 'gates:\|loop:' README.md` 命中 + 逐类核对）。
+- [x] AC4: 10 个未覆盖环境变量已补文档（`grep 'QUAY_NATIVE_ADR_DIR\|QUAY_GITHUB_MAX_ISSUES' README.md` 命中）。
+- [x] AC5: README 含 todo→ready→done 端到端流程（`grep -c 'promote\|retreat\|complete' README.md` 非零 + 流程示例存在）。
+- [x] AC6: 断链 :583 修复（链接目标存在）；:513 测试命令与 ADR-019 对齐（指向 scripts/test.sh）。
+- [x] AC7: 全量 suite 绿。
 
 ## Definition of Done
 
-- [ ] 六子缺口全清（AC1-6 逐条可机械取假验证）；全量 suite 绿（AC7）。
+- [x] 六子缺口全清（AC1-6 逐条可机械取假验证）；全量 suite 绿（AC7）。
 
 ## Touches
 

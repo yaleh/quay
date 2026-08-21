@@ -397,12 +397,38 @@ test("AC5 — formula derives max(1, floor(nproc × oversub / S)); the DEFAULT e
   // Adaptive to the configured slot count (gap-suite-lock-slot-seam-asymmetry AC2): under
   // QUAY_MAX_CONCURRENT_SUITES=1 the effective default is nproc (single slot = whole host), not nproc/2 —
   // the assertion must not hardcode S=2.
-  const realSlots = concurrentSuiteSlots();
-  assert.equal(
-    currentDefaultConcurrency(),
-    derivedConcurrency(realNproc, realSlots, 1),
-    `default_test_concurrency must return max(1, floor(${realNproc}×1/${realSlots})) = ${Math.max(1, Math.floor(realNproc / realSlots))} on the real host (gap-suite-budget-oversubscribe pure computation)`
-  );
+  //
+  // Hermetic against the PRODUCTION `.concurrency` scalar (gap-suite-slot-ssot-i5-false-positive): the
+  // TS canonical (concurrentSuiteSlots) and the bash canonical (default_test_concurrency) must read the
+  // SAME S. The TS side reads <suiteLockBase>.concurrency FIRST — a live-suite S=1 file would shadow the
+  // knob and drift from bash (which reads seam→knob→2) ⇒ the real-host assertion goes red. Pin the base
+  // to an isolated temp dir carrying 2 and drive the knob to 2 so BOTH canons deterministically read S=2.
+  const prevLock = process.env.FULL_SUITE_LOCK_FILE;
+  const prevSeam = process.env.RESOURCE_GATE_CONCURRENT_SUITES;
+  const prevKnob = process.env.QUAY_MAX_CONCURRENT_SUITES;
+  const pinTmp = fs.mkdtempSync(path.join(os.tmpdir(), "rg-pin5-"));
+  const pinBase = path.join(pinTmp, "full-suite.lock");
+  fs.writeFileSync(`${pinBase}.concurrency`, "2", "utf8");
+  process.env.FULL_SUITE_LOCK_FILE = pinBase;
+  delete process.env.RESOURCE_GATE_CONCURRENT_SUITES;
+  process.env.QUAY_MAX_CONCURRENT_SUITES = "2";
+  let realSlots;
+  try {
+    realSlots = concurrentSuiteSlots();
+    assert.equal(
+      currentDefaultConcurrency(),
+      derivedConcurrency(realNproc, realSlots, 1),
+      `default_test_concurrency must return max(1, floor(${realNproc}×1/${realSlots})) = ${Math.max(1, Math.floor(realNproc / realSlots))} on the real host (gap-suite-budget-oversubscribe pure computation)`
+    );
+  } finally {
+    if (prevLock === undefined) delete process.env.FULL_SUITE_LOCK_FILE;
+    else process.env.FULL_SUITE_LOCK_FILE = prevLock;
+    if (prevSeam === undefined) delete process.env.RESOURCE_GATE_CONCURRENT_SUITES;
+    else process.env.RESOURCE_GATE_CONCURRENT_SUITES = prevSeam;
+    if (prevKnob === undefined) delete process.env.QUAY_MAX_CONCURRENT_SUITES;
+    else process.env.QUAY_MAX_CONCURRENT_SUITES = prevKnob;
+    fs.rmSync(pinTmp, { recursive: true, force: true });
+  }
 });
 
 test("AC5b — the MAIN derivation is PURE computation: runtime in_use is NOT subtracted (the pre-fix racy subtraction was the oversubscription source); process-budget.sh still reports the cross-layer budget", () => {
@@ -521,12 +547,21 @@ test("判据4 — direct path and runner path read the SAME three values, equal 
   const prevOversub = process.env.QUAY_MAX_OVERSUBSCRIPTION;
   const prevOverlap = process.env.QUAY_PHASE_OVERLAP;
   const prevSeam = process.env.RESOURCE_GATE_CONCURRENT_SUITES;
+  const prevLock = process.env.FULL_SUITE_LOCK_FILE;
   // This test drives the KNOB — clear the seam (read FIRST by suiteLockSlotCount since
   // gap-suite-lock-slot-seam-asymmetry) so it cannot shadow the knob from an ambient test env.
   delete process.env.RESOURCE_GATE_CONCURRENT_SUITES;
   process.env.RESOURCE_GATE_NPROC = "16";
   process.env.QUAY_MAX_CONCURRENT_SUITES = "2";
   process.env.QUAY_MAX_OVERSUBSCRIPTION = "1";
+  // Hermetic against the PRODUCTION `.concurrency` scalar (gap-suite-slot-ssot-i5-false-positive): a
+  // live-suite S=1 file at <suiteLockBase>.concurrency would otherwise SHADOW the knob=2 this test
+  // drives (the file has priority over QUAY_MAX_CONCURRENT_SUITES) ⇒ concurrentSuiteSlots() reads S=1
+  // ⇒ runner main=16 ≠ direct main=8 (判据4 red). Pin the base to an isolated temp dir carrying 2.
+  const pinTmp = fs.mkdtempSync(path.join(os.tmpdir(), "rg-pin4-"));
+  const pinBase = path.join(pinTmp, "full-suite.lock");
+  fs.writeFileSync(`${pinBase}.concurrency`, "2", "utf8");
+  process.env.FULL_SUITE_LOCK_FILE = pinBase;
   try {
     const host = 16;
     const slots = 2;
@@ -571,6 +606,9 @@ test("判据4 — direct path and runner path read the SAME three values, equal 
     else process.env.QUAY_PHASE_OVERLAP = prevOverlap;
     if (prevSeam === undefined) delete process.env.RESOURCE_GATE_CONCURRENT_SUITES;
     else process.env.RESOURCE_GATE_CONCURRENT_SUITES = prevSeam;
+    if (prevLock === undefined) delete process.env.FULL_SUITE_LOCK_FILE;
+    else process.env.FULL_SUITE_LOCK_FILE = prevLock;
+    fs.rmSync(pinTmp, { recursive: true, force: true });
   }
 });
 
