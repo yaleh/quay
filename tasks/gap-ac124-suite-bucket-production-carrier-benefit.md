@@ -1,7 +1,7 @@
 ---
 id: gap-ac124-suite-bucket-production-carrier-benefit
 title: AC124 分桶收益落生产载体（≥10 轮带桶字段 + P/M 各 ≥3 轮中位数 ≤40% 全量）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
