@@ -1,7 +1,7 @@
 ---
 id: gap-ac109-productization-verification-writeback
 title: AC109 产品化状态写回 productization-verification.jsonl（AC104-108 结果，复用载体）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
