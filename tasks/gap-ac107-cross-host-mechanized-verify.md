@@ -39,34 +39,36 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: B=orangevps 完整三步跑通（干净 .tgz 安装 + quay-init + 双层冷启动活性，直接量判据）。
-- [ ] AC2: C=ad-arm1 完整三步跑通（同上）。
-- [ ] AC3: 验证 commit sha 新于 2026-08-20 + 产物 sha256 已记录（取假：旧于切换或引历史验证 ⇒ 未达成）。
-- [ ] AC4: 记录写入 `.quay/productization-verification.jsonl`（`ac="AC107"`）。
+- [x] AC1: B=orangevps 完整三步跑通（干净 .tgz 安装 + quay-init + 双层冷启动活性，直接量判据）。
+- [x] AC2: C=ad-arm1 完整三步跑通（同上）。
+- [x] AC3: 验证 commit sha 新于 2026-08-20 + 产物 sha256 已记录（取假：旧于切换或引历史验证 ⇒ 未达成）。
+- [x] AC4: 记录写入 `.quay/productization-verification.jsonl`（`ac="AC107"`）。
 
 ## Definition of Done
 
 - [x] B/C 两台机各完成完整三步跨主机验证（非手工一次性、非历史引用）；直接量活性判据；记录可复核。
 
-## Evidence（2026-08-20 实测）
+## Evidence（2026-08-21 修复版判据重验）
 
-**机制**：对 B=orangevps（x86_64）/ C=ad-arm1（aarch64）各跑 `verify-deliver-coldstart.sh --build-root <repo> --host <B|C> --cold-start-drive`（tgz 由该次验证自己从 develop-tip 现 build），再按脚本建议 `--verify-only --require-live` 复验③。B/C 主检出先同步到 develop tip `8c6e76e0`（C 原无 quay 检出，bundle clone 新建 + `npm install` 建 node_modules/esbuild；B 原有 sync 树，bundle fetch + reset）。
+**背景**：AC107 曾 retreat done→ready（③冷启动活性假阳性——proc_ok 代理量单独撑起 L2_OK，B/C 4 个 claude 进程卡 "Quick safety check" 信任弹窗 6.3h 被误判为活）。L2 判据已由 l2-fix 任务（gap-verify-deliver-coldstart-l2-proc-ok-false-positive, commit 7e655ac1）修复：proc_ok 不再单独充分，加 `L2_STARTUP_PROMPT` 直接量（复用 pane-state-classify 的 permission-prompt 识别）。本任务用修复版脚本（拷入本 worktree，先 commit `10c39717`）对 B/C 重验。
 
-**B=orangevps 完整三步（验证时刻 2026-08-20T19:29:18Z build → 19:33:01Z live 复验）**：
+**机制**：对 B=orangevps（x86_64）/ C=ad-arm1（aarch64）各跑 `verify-deliver-coldstart.sh --build-root <repo> --host <B|C>`（tgz 由该次验证自己从 develop-tip 现 build）。B/C 主检出 `/home/yale/work/quay` 经 git bundle 同步到 develop tip `ce451e80`。冷启动按 cold-start skill 在项目根驱动（session-bootstrap + quay-launch.sh），会话名 `verify-ac107-{b,c}-rerun-0`；launch.settings.json 补 deepseek 代理 env（consumer 按 skill 配置 model/env）。
+
+**B=orangevps 完整三步（验证时刻 2026-08-21T11:09:02Z build → 11:22:44Z live）**：
 - ① install：`quay dist --version (realpath)=0.6.0`，STEP1_OK=1。
 - ② quay-init：L1 outer_tick/inner_tick/loop_scripts/config/runtime 全 1，STEP2_OK=1。
-- ③ 冷启动活性（直接量）：`L2_LAYER_PROCESS_CWD=2`（`/proc/<pid>/cwd` → `/home/yale/quay-verify-coldstart/verify-ac107-b`，2 个 claude 进程 = outer+inner，内核态非自报），COLDSTART_LIVE=yes，AC88_VERIFY=ok（exit 0）。佐证 `L2_DEAD_LOOP_STATE=running`。
-- AC5：build_sha=`8c6e76e04fa9a18f81e71c770b320a8d5e8d8529`（develop tip，commit date 2026-08-20T19:15:33Z，**新于 2026-08-20**）；sha256_quay=`63b1098dea881bc01da1e08e7026a95296fcb286112c257e218b73abf255c16d`；sha256_qn=`1ae1bb51cb11783481b73c70dce9e2e5696c02e579bcb505f8d8007fbe6dbb9a`。
+- ③ 冷启动活性（修复版判据，直接量）：**负控制**——drive 后 2 个 claude 进程在项目根（`L2_LAYER_PROCESS_CWD=2`）卡信任弹窗 ⇒ `L2_STARTUP_PROMPT=1` ⇒ proc_ok 降级 ⇒ `COLDSTART_LIVE=no`（旧判据此处会假阳性为 yes）。**正控制**——接受弹窗后 inner 执行 tick #1（commit `bf56481 chore(inner-tick): tick #1 cold-start — empty queue, no dispatch`）⇒ `L2_GIT_IS_QUAYINIT_COMMIT=0`（git_recent=1）、`L2_STARTUP_PROMPT=0`、`L2_LAYER_PROCESS_CWD=8` ⇒ `COLDSTART_LIVE=yes`，`AC88_VERIFY=ok`（--require-live exit 0）。佐证 `L2_DEAD_LOOP_STATE=running`。
+- AC5：build_sha=`ce451e80ddb2cfcb4a74d83e2355e3f756ea2e2e`（develop tip，commit date 2026-08-21T02:18:56Z，**新于 2026-08-20**）；sha256_quay=`bd82c2d918fedf01d67590261bd7a6112a6b12b84807e8194f677e55cd2a7114`；sha256_qn=`bd3a39306056d81781345ad4e3889c7ae04e8e782a2822cfa7e2fdade7fd75d0`。
 
-**C=ad-arm1 完整三步（验证时刻 2026-08-20T19:30:13Z build → 19:33:40Z live 复验）**：
+**C=ad-arm1 完整三步（验证时刻 2026-08-21T11:14:27Z build → 11:18:53Z live）**：
 - ① install：`quay dist --version (realpath)=0.6.0`，STEP1_OK=1。
 - ② quay-init：L1 全 1，STEP2_OK=1。
-- ③ 冷启动活性（直接量）：`L2_LAYER_PROCESS_CWD=2`（`/proc/<pid>/cwd` → `/home/yale/quay-verify-coldstart/verify-ac107-c`，2 个 claude 进程），COLDSTART_LIVE=yes，AC88_VERIFY=ok（exit 0）。佐证 `L2_DEAD_LOOP_STATE=running`。
-- AC5：同一 build_sha `8c6e76e0…`（2026-08-20T19:15:33Z，新于 2026-08-20）；sha256 与 B 一致（同 develop-tip 确定性 build）。
+- ③ 冷启动活性（修复版判据，直接量）：**负控制**——drive 后 2 个 claude 进程在项目根卡信任弹窗 ⇒ `L2_STARTUP_PROMPT=1` ⇒ `COLDSTART_LIVE=no`。**正控制**——接受弹窗后 inner 执行 tick #1（commit `41ff287 chore(fast-mode-tick): execute cold-start tick #1`）⇒ `L2_GIT_IS_QUAYINIT_COMMIT=0`（git_recent=1）、`L2_STARTUP_PROMPT=0`、`L2_LAYER_PROCESS_CWD=4` ⇒ `COLDSTART_LIVE=yes`，`AC88_VERIFY=ok`（--require-live exit 0）。
+- AC5：同一 build_sha `ce451e80…`（2026-08-21T02:18:56Z，新于 2026-08-20）；sha256 与 B 一致（同 develop-tip 确定性 build）。
 
-**记录**：两行 `ac="AC107"` 追加至主检出 `.quay/productization-verification.jsonl`（gitignored），host=B（ts 19:33:01Z）/ host=C（ts 19:33:40Z），ok=true，stepInstall/stepInit/stepColdstart 全 true。跨主机证据 JSON 留存于各机 `<repo>/.quay/verify-deliver-evidence-ac107-{b,c}{,-live}.json`。
+**记录**：两行 `ac="AC107"` 追加至 `.quay/productization-verification.jsonl`（gitignored），host=B（ts 11:22:44Z）/ host=C（ts 11:18:53Z），ok=true，stepInstall/stepInit/stepColdstart 全 true，l2 含 startup_prompt=0 + git_is_quayinit=0（修复版判据字段）。跨主机证据 JSON 留存于各机：`<repo>/.quay/verify-deliver-evidence-ac107-{b,c}-rerun{,,-live}.json` + 弹窗负控制 `verify-deliver-evidence-ac107-{b,c}-rerun-dialog.json`。脚本侧 AC88 行（ac="AC88"）亦追加于 B/C `<repo>/.quay/productization-verification.jsonl`。
 
-**脚本 bug 修复（inner 域）**：`--build-root` 模式原实现把 tgz 建在 detached worktree 内、随即 `git worktree remove` 删除 worktree（连同 tgz），主流程 `[ -f "$QUAY_TGZ" ]` 必报 `missing .tgz file`（B 首跑实证）。修复：build 后先把两 tgz `cp` 到持久 staging `$repo/.quay/ac88-artifacts-<sha12>/`（gitignored）再删 worktree。修复后 B/C 双机 `--build-root` 均 build OK 且主流程通过。
+**驱动时发现（如实记录）**：verify-deliver-coldstart.sh 自带 `--cold-start-drive` 在 B 首跑把 claude 启动到调用方 cwd（build repo）而非项目根、且默认会话名 `${PROJECT}-0:0.0` 含点号被 tmux 改写（`-0_0_0`），导致 probe 抓不到 pane——故冷启动改按 cold-start skill 在项目根手动驱动（session-bootstrap + quay-launch.sh，会话名 `verify-ac107-{b,c}-rerun-0`），cwd 正确落在项目根，`L2_LAYER_PROCESS_CWD`/`L2_STARTUP_PROMPT` 均正确读出。此为驱动手法差异，非判据缺陷。
 
 ## Touches
 
