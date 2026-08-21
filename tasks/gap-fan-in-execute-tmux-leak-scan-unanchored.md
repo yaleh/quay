@@ -40,3 +40,4 @@ extra:
 - plugin/workflows/fan-in-execute.js（:181 改 import 常量）
 - .claude/workflows/fan-in-execute.js（双拷贝同步 import）
 - plugin/test/fan-in-execute-paths.test.mjs（leak-residual 假阳性负控制）
+- docs/proposals/quay-product-outline.md（新增 plugin/scripts/tmux-leak-fail-re.ts ⇒ DELIVERY-INVENTORY 快照同一变更内再生成，delivery-inventory-drift-gate 强制）
