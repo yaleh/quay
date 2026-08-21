@@ -1,7 +1,7 @@
 ---
 id: gap-docs-t4-package-readmes
 title: T4 补 quay-native/quay-github 两包 README（npm 页面空白）+ 修 quay README serve 节
-status: ready
+status: done
 labels:
   - gap
   - docs
@@ -33,7 +33,7 @@ extra:
 - [x] AC1: `ls packages/quay-native/README.md packages/quay-github/README.md` 均存在（npm 页面不再空白）。
 - [x] AC2: 两包 README 描述各自 provider 的角色与数据形态（quay-native = tasks/*.md 存储；quay-github = Issues 映射）。
 - [x] AC3: `packages/quay/README.md:327` serve 节已补 `--host` + 全视图描述。
-- [ ] AC4: 全量 suite 绿。
+- [x] AC4: 全量 suite 绿。
 
 ## Definition of Done
 
