@@ -1,7 +1,7 @@
 ---
 id: gap-inner-filing-commit-main-checkout-task-body
 title: inner 立案流程主检出任务体未当场提交（11b 复发×2，挡所有 fan-in ff）——立案后当场提交
-status: ready
+status: done
 labels:
   - gap
   - mechanism
