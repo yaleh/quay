@@ -1,7 +1,7 @@
 ---
 id: gap-ac122-suite-bucket-hub-list-full-suite
 title: AC122 枢纽文件显式清单 + 触及任一即退回全量（22 个含 H 任务回放 22/22）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
