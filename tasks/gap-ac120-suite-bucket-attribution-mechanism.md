@@ -47,4 +47,6 @@ depends_on: []
 
 - plugin/scripts/suite-bucket-attribution.ts (new)
 - plugin/test/suite-bucket-attribution.test.mjs (new)
+- plugin/scripts/capability-catalog.sh（新 script 注册：catalog 声明行）
+- docs/proposals/quay-product-outline.md（新 script 注册：§6 delivery-inventory 快照）
 - tasks/gap-ac120-suite-bucket-attribution-mechanism.md（自身）
