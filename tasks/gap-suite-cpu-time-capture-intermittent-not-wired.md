@@ -35,10 +35,15 @@ depends_on: []
 4. 用同一谓词重扫 `.quay/per-task-suite-records.jsonl`，确认「fullSuiteRan=true 且 cpu_time_s 缺失/null/≤0」== 0。
 5. fan-in（AC78 workflow）land。
 
+**实现（2026-08-21，追因+修，落 `plugin/scripts/per-task-suite-record.ts`）**：
+- **`not-wired` 断点**：SUITE_LAUNCH 的 GNU time `-o "$time_file"` 在 suite【开始】时把 time 文件 truncate 成 0 字节、只在 suite【结束】时（wait4 之后）写 `%U %S` 报告。任何中断——kill-on-red 把整个 session/进程组 SIGKILL（`gap-ac76` 等 RED 记录的 0 字节 `.time` 实测）、或 relaunch 的 `rm -f "$suite_time_file"` 落在 end-write 之前——都留下 0 字节/缺失的 time 文件；parse 块把它静默降级成 `cpu_s=null + cpu_source=not-wired`，writer 原样落盘。⇒「跑了全量却记 null」与「仪器未接线」同形（硬规则 3b/4），判据「==0」被违反。
+- **`None` 断点**：3 条 `cpu_source` 字段整体缺失的记录是 **08-14 18:39（`57825d11`）之前 / 旧 writer 路径**——fan-in 调用 writer 时未传 `--cpu-time-s`/`--cpu-source`，writer 按「pre-wiring legacy shape」合法省略该字段。
+- **修**：writer `buildRecord` 新增镜像 fail-closed——`fullSuiteRan===true` 必须带真数 `cpu_time_s`（GNU time User+System）；null/缺失/≤0 ⇒ exit 2 拒写（错误信息记录原因，绝不静默 null）。**一条规则同时拒掉 `not-wired`（null）与 `None`（字段缺失）两形状**。skip 路径（`fullSuiteRan===false`）的 `0→null + not-wired` 正确形态不受影响。
+
 ## Acceptance Criteria
 
-- [ ] AC1: 追因并修 `not-wired` 断点（fan-in 捕获块间歇未接 GNU time），今日 11:08Z 这类记录不再出现。
-- [ ] AC2: 追因并修 `None` 断点（cpu_source 字段缺失的写路径）。
+- [x] AC1: 追因并修 `not-wired` 断点（fan-in 捕获块间歇未接 GNU time），今日 11:08Z 这类记录不再出现。
+- [x] AC2: 追因并修 `None` 断点（cpu_source 字段缺失的写路径）。
 - [ ] AC3: 用同一谓词重扫，「fullSuiteRan=true 且 cpu_time_s 缺失/null/≤0」条数 == 0（含两类形状）。
 
 ## Definition of Done
@@ -47,5 +52,6 @@ depends_on: []
 
 ## Touches
 
-- plugin/scripts/per-task-suite-record.ts（writer，若涉修复）
+- plugin/scripts/per-task-suite-record.ts（writer——fullSuiteRan=true 必带真数 cpu_time_s 的 fail-closed 规则）
+- plugin/test/per-task-suite-record-check.test.mjs（writer buildRecord 的 fail-closed 测试——not-wired/None 两形状拒写）
 - tasks/gap-suite-cpu-time-capture-intermittent-not-wired.md（自身）
