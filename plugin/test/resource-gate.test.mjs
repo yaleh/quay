@@ -783,12 +783,13 @@ test("AC5 — process-budget.sh header documents the counting scope (test procs 
 
 test("AC5 — scripts/test.sh uses the derived default in its exec lines (no hardcoded 8)", () => {
   const src = fs.readFileSync(TEST_SH, "utf8");
-  // All FIVE invocation sites must use the derived default: 4 `exec node --test ...` lines
-  // (run_selected, --group-explicit, explicit-file, --scoped <file...>) + 1 `node --test ...`
-  // line (--for-task, no exec). The --scoped <file...> site was added by
-  // gap-scoped-runs-pay-full-static-check-overhead and correctly uses the derived default.
+  // All SIX invocation sites must use the derived default: 4 `exec node --test ...` lines
+  // (run_selected, --group-explicit, explicit-file, --scoped <file...>) + 2 `node --test ...`
+  // lines (--for-task and --buckets, no exec). The --scoped <file...> site was added by
+  // gap-scoped-runs-pay-full-static-check-overhead; the --buckets site was added by
+  // gap-ac124-suite-bucket-production-carrier-benefit. Both correctly use the derived default.
   const allSites = src.match(/node --test --test-concurrency="\$\(default_test_concurrency\)"/g);
-  assert.equal(allSites.length, 5, `expected 5 derived-concurrency invocation sites, got ${allSites.length}`);
+  assert.equal(allSites.length, 6, `expected 6 derived-concurrency invocation sites, got ${allSites.length}`);
   assert.doesNotMatch(src, /--test-concurrency=8/, "no hardcoded 8 may remain in test.sh");
 });
 
