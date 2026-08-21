@@ -93,3 +93,15 @@ SPEC §7 触发（≥3 ff 失败）⇒ 请求一个 quiet 窗口
 - `--for-task` scoped 门：**exit 0**，72 tests / 0 fail（含新增 4+7=11 条）。ts-typecheck 门：**ADMITTED (exit 0)**（无新增/移动 .ts，Touches 收窄为具体文件）。
 
 **既有测试全绿**：`fan-in-ff-merge.test.mjs` 16/16、`fan-in-workflow-check.test.mjs` 56/56 全绿，无回归（现有 exit 1/2 语义、lock-events 配对被保留）。
+
+## 标注（gap-fan-in-delta-scope-inventory-annotate）
+
+> **⚠️ 落地未经全量轮验证**（runId `fm-gap-fan-in-delta-scope-inventory-annotate-1787312000000-inv`，2026-08-21）
+> 父任务 gap-fan-in-delta-scope-doc-only-skip AC1 枚举：本任务 fan-in 记录 `fullSuiteRan=false` ∧ `skipReason=doc-only-delta`，但实际 diff 含非 doc 文件，落地当时未被全量轮覆盖：
+> ```
+>     plugin/scripts/fan-in-ff-merge.sh
+>     plugin/scripts/fan-in-workflow-check.ts
+>     plugin/test/fan-in-ff-merge.test.mjs
+>     plugin/test/fan-in-workflow-check.test.mjs
+> ```
+> **补跑判定（AC2）：不需补跑全量轮** —— 落地（merge `87f872ce4a1551c7095e909edd7ea3d00d702433` @ `2026-08-14T18:53:06+00:00`）后 develop 已有 **200** 轮 `fullSuiteRan=true` 全量轮运行（green **196** 轮，最后 gap-docs-t3-webui-doc-and-screenshots @ 2026-08-21T13:12:56.151Z）覆盖其改动。

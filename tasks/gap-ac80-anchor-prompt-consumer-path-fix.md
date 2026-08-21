@@ -76,3 +76,18 @@ depends_on: []
 ## Evidence
 
 （落地后回填——round172：AC1c 红（prompt 自引用）+ outer-cron-registry NOT-EVALUATED（worktree 路径解析失败），均 2eedf16c 引入）
+
+## 标注（gap-fan-in-delta-scope-inventory-annotate）
+
+> **⚠️ 落地未经全量轮验证**（runId `fm-gap-fan-in-delta-scope-inventory-annotate-1787312000000-inv`，2026-08-21）
+> 父任务 gap-fan-in-delta-scope-doc-only-skip AC1 枚举：本任务 fan-in 记录 `fullSuiteRan=false` ∧ `skipReason=doc-only-delta`，但实际 diff 含非 doc 文件，落地当时未被全量轮覆盖：
+> ```
+>     plugin/loop/fast-mode-loop-tick.md
+>     plugin/scripts/loop-shipping-exclusion-data.mjs
+>     plugin/scripts/outer-anchor-check.ts
+>     plugin/scripts/outer-cron-registry.json
+>     plugin/scripts/outer-cron-registry.ts
+>     plugin/test/outer-anchor-check.test.mjs
+>     plugin/test/outer-cron-registry.test.mjs
+> ```
+> **补跑判定（AC2）：不需补跑全量轮** —— 落地（merge `01767263ca6a56fc95119366faad7b086f7f6b39` @ `2026-08-15T00:58:30+00:00`）后 develop 已有 **198** 轮 `fullSuiteRan=true` 全量轮运行（green **194** 轮，最后 gap-docs-t3-webui-doc-and-screenshots @ 2026-08-21T13:12:56.151Z）覆盖其改动。

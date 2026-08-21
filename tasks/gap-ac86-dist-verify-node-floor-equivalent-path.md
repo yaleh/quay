@@ -96,3 +96,13 @@ fixture/配置正确 ≠ 已产出）。
 - plugin/scripts/*（若选路径②，本机 floor 验证步；含 capability-catalog.sh——0a4e5c1f 转义 $TMUX 修 CI 下 package.sh 构建失败）
 - plugin/test/*（对应测试）
 - tasks/gap-ac86-dist-verify-node-floor-equivalent-path.md（自身）
+
+## 标注（gap-fan-in-delta-scope-inventory-annotate）
+
+> **⚠️ 落地未经全量轮验证**（runId `fm-gap-fan-in-delta-scope-inventory-annotate-1787312000000-inv`，2026-08-21）
+> 父任务 gap-fan-in-delta-scope-doc-only-skip AC1 枚举：本任务 fan-in 记录 `fullSuiteRan=false` ∧ `skipReason=doc-only-delta`，但实际 diff 含非 doc 文件，落地当时未被全量轮覆盖：
+> ```
+>     .github/workflows/ci.yml
+>     plugin/scripts/capability-catalog.sh
+> ```
+> **补跑判定（AC2）：不需补跑全量轮** —— 落地（merge `5dab2bc83aa515e5fe8c043ac6f5e5daa0afc408` @ `2026-08-16T10:31:59+00:00`）后 develop 已有 **187** 轮 `fullSuiteRan=true` 全量轮运行（green **184** 轮，最后 gap-docs-t3-webui-doc-and-screenshots @ 2026-08-21T13:12:56.151Z）覆盖其改动。

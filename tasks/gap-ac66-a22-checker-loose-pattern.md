@@ -47,3 +47,12 @@ A22_READING_RE = /心跳|读数|晋|无晋|心跳已跑|POOL|deficit|promotions|
 - plugin/scripts/ac66-a22-agent-id-check.ts（extractA22ReadingLines 收紧）
 - plugin/test/ac66-a22-agent-id-check.test.mjs（负控制：状态注记不匹配）
 - tasks/gap-ac66-a22-checker-loose-pattern.md（自身）
+
+## 标注（gap-fan-in-delta-scope-inventory-annotate）
+
+> **⚠️ 落地未经全量轮验证**（runId `fm-gap-fan-in-delta-scope-inventory-annotate-1787312000000-inv`，2026-08-21）
+> 父任务 gap-fan-in-delta-scope-doc-only-skip AC1 枚举：本任务 fan-in 记录 `fullSuiteRan=false` ∧ `skipReason=doc-only-delta`，但实际 diff 含非 doc 文件，落地当时未被全量轮覆盖：
+> ```
+>     plugin/scripts/ac66-a22-agent-id-check.ts
+> ```
+> **补跑判定（AC2）：不需补跑全量轮** —— 落地（merge `fe9d6f5910731bf03b791d1c6157e0912789e7f8` @ `2026-08-16T20:41:41+00:00`）后 develop 已有 **182** 轮 `fullSuiteRan=true` 全量轮运行（green **181** 轮，最后 gap-docs-t3-webui-doc-and-screenshots @ 2026-08-21T13:12:56.151Z）覆盖其改动。

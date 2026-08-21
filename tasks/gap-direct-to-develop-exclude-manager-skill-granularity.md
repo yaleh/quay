@@ -76,3 +76,13 @@ depends_on:
 ## 止损
 
 **需要 —— 当下动作 = 本任务立案**：接线真差集=1（635ec831），manager/SKILL.md 结构上走不了 fan-in 路——不排除则每轮恒红、训练「已知跳过」；排除到 manager/** 粒度保住 init/SKILL.md 真红（7e64a86b）。
+
+## 标注（gap-fan-in-delta-scope-inventory-annotate）
+
+> **⚠️ 落地未经全量轮验证**（runId `fm-gap-fan-in-delta-scope-inventory-annotate-1787312000000-inv`，2026-08-21）
+> 父任务 gap-fan-in-delta-scope-doc-only-skip AC1 枚举：本任务 fan-in 记录 `fullSuiteRan=false` ∧ `skipReason=doc-only-delta`，但实际 diff 含非 doc 文件，落地当时未被全量轮覆盖：
+> ```
+>     plugin/scripts/direct-to-develop-bypass-check.ts
+>     plugin/test/direct-to-develop-bypass-check.test.mjs
+> ```
+> **补跑判定（AC2）：不需补跑全量轮** —— 落地（merge `50e07bc15746ab2979c880ce2333ea6bdd0ffac3` @ `2026-08-15T05:03:33+00:00`）后 develop 已有 **197** 轮 `fullSuiteRan=true` 全量轮运行（green **193** 轮，最后 gap-docs-t3-webui-doc-and-screenshots @ 2026-08-21T13:12:56.151Z）覆盖其改动。

@@ -133,3 +133,18 @@ shared-checkout 解析）全绿。
 - .gitignore（补 `.quay/productization-verification.jsonl` 运行时状态忽略）
 - .quay/productization-verification.jsonl（记录文件，SHARED checkout 运行时状态——`.quay/**` 过度宽泛，收窄到具体文件）
 - tasks/gap-ac89-productization-verification-record.md（自身）
+
+## 标注（gap-fan-in-delta-scope-inventory-annotate）
+
+> **⚠️ 落地未经全量轮验证**（runId `fm-gap-fan-in-delta-scope-inventory-annotate-1787312000000-inv`，2026-08-21）
+> 父任务 gap-fan-in-delta-scope-doc-only-skip AC1 枚举：本任务 fan-in 记录 `fullSuiteRan=false` ∧ `skipReason=doc-only-delta`，但实际 diff 含非 doc 文件，落地当时未被全量轮覆盖：
+> ```
+>     .gitignore
+>     docs/proposals/quay-product-outline.md
+>     plugin/scripts/capability-catalog.sh
+>     plugin/scripts/productization-verification-record-check.ts
+>     plugin/scripts/productization-verification-record.ts
+>     plugin/scripts/verify-deliver-coldstart.sh
+>     plugin/test/productization-verification-record-check.test.mjs
+> ```
+> **补跑判定（AC2）：不需补跑全量轮** —— 落地（merge `75ffbb9e21b5d4837b8c371e2e73ea79ca94ce0a` @ `2026-08-16T15:34:40+00:00`）后 develop 已有 **185** 轮 `fullSuiteRan=true` 全量轮运行（green **182** 轮，最后 gap-docs-t3-webui-doc-and-screenshots @ 2026-08-21T13:12:56.151Z）覆盖其改动。

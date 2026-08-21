@@ -99,3 +99,13 @@ touches-one-entry-one-path-check.ts → touches-one-entry-one-path-check.test.mj
 - 单路径 Touches ⇒ 放行（AC1 negative）。
 - 非 tasks/*.md 的 staged 文件 ⇒ 放行（scope=staged tasks/*.md，Touches 检查只盯任务体）。
 - 祖父基线列名任务的多路径 bullet ⇒ 放行（shrink-only 基线尊重，不为历史 debt 制造新 blocker）。
+
+## 标注（gap-fan-in-delta-scope-inventory-annotate）
+
+> **⚠️ 落地未经全量轮验证**（runId `fm-gap-fan-in-delta-scope-inventory-annotate-1787312000000-inv`，2026-08-21）
+> 父任务 gap-fan-in-delta-scope-doc-only-skip AC1 枚举：本任务 fan-in 记录 `fullSuiteRan=false` ∧ `skipReason=doc-only-delta`，但实际 diff 含非 doc 文件，落地当时未被全量轮覆盖：
+> ```
+>     plugin/scripts/precommit-guard.ts
+>     plugin/test/precommit-guard.test.mjs
+> ```
+> **补跑判定（AC2）：不需补跑全量轮** —— 落地（merge `c15b793cec75722c5f6c81873b765de9a010421d` @ `2026-08-16T22:07:51+00:00`）后 develop 已有 **181** 轮 `fullSuiteRan=true` 全量轮运行（green **180** 轮，最后 gap-docs-t3-webui-doc-and-screenshots @ 2026-08-21T13:12:56.151Z）覆盖其改动。

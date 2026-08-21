@@ -97,3 +97,21 @@ fail-fast（挂起会超时判 FAIL），建议另立 gap 任务系统性修复�
 - plugin/scripts/precommit-guard.ts（同上）
 - docs/proposals/quay-product-outline.md（§6 DELIVERY-INVENTORY 快照重生成——新增 deliver-verify-usage.sh 使 scripts 计数 254→255）
 - tasks/gap-ac92-delivery-verify-usage-intersection.md（自身）
+
+## 标注（gap-fan-in-delta-scope-inventory-annotate）
+
+> **⚠️ 落地未经全量轮验证**（runId `fm-gap-fan-in-delta-scope-inventory-annotate-1787312000000-inv`，2026-08-21）
+> 父任务 gap-fan-in-delta-scope-doc-only-skip AC1 枚举：本任务 fan-in 记录 `fullSuiteRan=false` ∧ `skipReason=doc-only-delta`，但实际 diff 含非 doc 文件，落地当时未被全量轮覆盖：
+> ```
+>     docs/proposals/quay-product-outline.md
+>     plugin/scripts/capability-catalog.sh
+>     plugin/scripts/concurrent-batch-scheduler.ts
+>     plugin/scripts/deliver-verify-usage.sh
+>     plugin/scripts/develop-deliver-tgz.sh
+>     plugin/scripts/full-suite-runner.ts
+>     plugin/scripts/known-load-sensitive.ts
+>     plugin/scripts/measure-trend-check.ts
+>     plugin/scripts/precommit-guard.ts
+>     plugin/scripts/suite-state-trigger.ts
+> ```
+> **补跑判定（AC2）：不需补跑全量轮** —— 落地（merge `468a3b6e579196c8d1e2c1f4aeb9e768edc79626` @ `2026-08-16T11:00:17+00:00`）后 develop 已有 **186** 轮 `fullSuiteRan=true` 全量轮运行（green **183** 轮，最后 gap-docs-t3-webui-doc-and-screenshots @ 2026-08-21T13:12:56.151Z）覆盖其改动。

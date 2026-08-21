@@ -84,3 +84,17 @@ depends_on: []
 - AC3（B=orangevps 干净目录全新安装）：`step1_install` 用 `npm install -g --prefix <隔离前缀>`，`step2_init` 用全新空项目目录，绝不复用 sync.sh git 开发树；驱动时以 `--build-root` 自 build + `--prefix`/`--root` 指干净路径。
 - AC4（C=ad-arm1 从零全新安装）：脚本对空宿主无前提——①从 .tgz 全新装（或 --build-root 现 build）→②空项目 init →③冷启动；不依赖任何既有 checkout/worktree。
 - AC5（证据可机械核对，锚定 commit sha + sha256）：`ac5_evaluate` 计算两 tgz 的 sha256 + 记录 build_sha/build_date（--build-root 时本脚本自取 develop-tip 的 `git rev-parse HEAD` 与其提交时间）；达成 = build_sha 为 40-hex 且 build_date ≥ 2026-08-16T00:00:00Z（阶段切换日）。⛔ 判据只锚定 commit sha / 内容 sha256 / ISO 提交时间——不引用 AC85 产物路径（生命周期短于判据，随 worktree 已消失）。复算：`--selfcheck` AC5 三态控制——recent-build ⇒ ok=1、old-build ⇒ ok=0、no-sha ⇒ evaluated=0（可区分「未评估」≠「不合格」，硬规则 3b）。
+
+## 标注（gap-fan-in-delta-scope-inventory-annotate）
+
+> **⚠️ 落地未经全量轮验证**（runId `fm-gap-fan-in-delta-scope-inventory-annotate-1787312000000-inv`，2026-08-21）
+> 父任务 gap-fan-in-delta-scope-doc-only-skip AC1 枚举：本任务 fan-in 记录 `fullSuiteRan=false` ∧ `skipReason=doc-only-delta`，但实际 diff 含非 doc 文件，落地当时未被全量轮覆盖：
+> ```
+>     docs/proposals/quay-product-outline.md
+>     plugin/scripts/capability-catalog.sh
+>     plugin/scripts/loop-shipping-exclusion-data.mjs
+>     plugin/scripts/verify-deliver-coldstart.sh
+>     plugin/test/outer-cron-registry.test.mjs
+>     plugin/test/verify-deliver-coldstart.test.mjs
+> ```
+> **补跑判定（AC2）：不需补跑全量轮** —— 落地（merge `5e51bb35a6359bc5dbef1bf166ce70c6ddadf16b` @ `2026-08-16T09:30:59+00:00`）后 develop 已有 **187** 轮 `fullSuiteRan=true` 全量轮运行（green **184** 轮，最后 gap-docs-t3-webui-doc-and-screenshots @ 2026-08-21T13:12:56.151Z）覆盖其改动。

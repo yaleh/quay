@@ -98,3 +98,18 @@ loop-doc 漂移机件是 tick-core-static-check）。本任务修的是「闸存
 - plugin/loop/fast-mode-tick-core.md（落地副本语义对齐正本——AC90 配平前置，非达成本身）
 - scripts/test.sh（tick-core-drift-check 由 --no-block 转硬闸）
 - tasks/gap-ac90-delivery-copy-drift-gate.md（自身）
+
+## 标注（gap-fan-in-delta-scope-inventory-annotate）
+
+> **⚠️ 落地未经全量轮验证**（runId `fm-gap-fan-in-delta-scope-inventory-annotate-1787312000000-inv`，2026-08-21）
+> 父任务 gap-fan-in-delta-scope-doc-only-skip AC1 枚举：本任务 fan-in 记录 `fullSuiteRan=false` ∧ `skipReason=doc-only-delta`，但实际 diff 含非 doc 文件，落地当时未被全量轮覆盖：
+> ```
+>     plugin/loop/fast-mode-tick-core.md
+>     plugin/scripts/capability-catalog.sh
+>     plugin/scripts/checker-mutation-cases/tick-core-static-check.sh
+>     plugin/scripts/tick-core-static-check.ts
+>     plugin/test/rhythm-consumer-check.test.mjs
+>     plugin/test/tick-core-static-check.test.mjs
+>     scripts/test.sh
+> ```
+> **补跑判定（AC2）：不需补跑全量轮** —— 落地（merge `30cc31329846c12057c01c6f8801189ba292b07e` @ `2026-08-16T08:38:17+00:00`）后 develop 已有 **187** 轮 `fullSuiteRan=true` 全量轮运行（green **184** 轮，最后 gap-docs-t3-webui-doc-and-screenshots @ 2026-08-21T13:12:56.151Z）覆盖其改动。
