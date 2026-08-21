@@ -7,12 +7,18 @@
 //   从未以数字 2 出现 — concurrency-literal-check 的字面量扫描器按构造看不见 (硬规则⑤)。
 //
 // THIS FILE is the single definition point for "the suite lock slots":
-//   suiteLockSlotCount()  — 槽数 S = QUAY_MAX_CONCURRENT_SUITES (旋钮②), clamped at >= 1
-//                          (invalid/zero fails open to the single-suite default, never 0 slots).
+//   suiteLockSlotCount()  — 槽数 S, clamped at >= 1 (invalid/zero fails open to the single-suite
+//                          default, never 0 slots). S precedence (same on the bash canonical):
+//                          RESOURCE_GATE_CONCURRENT_SUITES (test seam env) →
+//                          `<suiteLockBase>.concurrency` (scalar file, fresh read every call —
+//                          gap-suite-concurrency-env-to-file-fresh-read: env is forked once per
+//                          process, a file is re-read by the next detached suite process without a
+//                          restart) → QUAY_MAX_CONCURRENT_SUITES (env 旋钮②, transition period) → 2.
 //   suiteLockSlotPaths()  — `${base}.0 .. ${base}.S-1` (S-generated, never a hardcoded .0/.1 literal).
 //   suiteLockBase()       — the base path resolution (FULL_SUITE_LOCK_FILE env override →
 //                          git-common-dir → <root>/.git), SHARED by every consumer so all worktrees
-//                          contend on the SAME lock files.
+//                          contend on the SAME lock files. The `.concurrency` file lives NEXT TO this
+//                          base (`${base}.concurrency`) so it uses the SAME path resolution.
 //
 // Every consumer reads THIS module (by import) instead of re-deriving the slots:
 //   plugin/scripts/full-suite-runner.ts     (suiteLockPaths / countHeldSuiteLocks)
@@ -45,24 +51,60 @@ function slotVal(name: string): string | undefined {
   return v !== undefined && /^[0-9]+$/.test(v) ? v : undefined;
 }
 
-/** The slot count S — the SINGLE definition point for "how many suites may run at once".
- *  Reads the bash-side seam RESOURCE_GATE_CONCURRENT_SUITES FIRST (the deterministic test seam, same
- *  convention as scripts/test.sh's derivation functions), then 旋钮② QUAY_MAX_CONCURRENT_SUITES,
- *  defaulting to 2 — the SAME precedence + validation as the bash canonical suite-slot-lib.sh
- *  suite_slot_count (`${SEAM:-${KNOB:-2}}`, `[0-9]+` and `-lt 1` ⇒ the 2 default), so the two canons
- *  agree under ANY env (including a test seam) and even on malformed values. Clamped to >= 1 — an
- *  invalid/zero setting fails open to the single-suite default (the old 1-slot behavior), never to 0
- *  slots. This is the SAME expression full-suite-runner.ts's concurrentSuiteSlots() delegates to. */
-export function suiteLockSlotCount(): number {
-  const raw = Number(slotVal("RESOURCE_GATE_CONCURRENT_SUITES") ?? slotVal("QUAY_MAX_CONCURRENT_SUITES") ?? "2");
+/** Clamp a validated numeric string to >= 1 — an invalid/zero setting fails open to the single-suite
+ *  default (the old 1-slot behavior), never to 0 slots. Callers pass only `[0-9]+`-validated values
+ *  (from slotVal / fileSlotVal), so `Number()` never sees a fractional or NaN form. */
+function clampCount(v: string): number {
+  const raw = Number(v);
   return raw >= 1 ? raw : 2;
+}
+
+/** Read the `.concurrency` scalar file NEXT TO the suite-lock base: `${base}.concurrency` (e.g. a
+ *  `full-suite.lock.concurrency` next to `full-suite.lock.0/.1`). The file holds a PURE digit like
+ *  `"1"` — read RAW (`fs.existsSync && fs.readFileSync(...).trim()`, NO YAML, NO parser), the same
+ *  raw-read shape the bash canonical uses (`[ -f "$f" ] && cat "$f"`), so the I4 dual-implementation
+ *  cross-check stays honest (故意双实现算同一个数 — 不引入 YAML 依赖, 不让 bash 转调 node).
+ *  Returns undefined when the file is absent OR its content is not a pure digit (falls through to the
+ *  next source / the 2 default — a malformed file never fabricates a slot count). `base` is optional:
+ *  when omitted it is resolved from `suiteLockBase(process.cwd())`, so a bare `suiteLockSlotCount()`
+ *  (e.g. the I4 checker) and the bash `suite_slot_count` with no arg resolve the SAME file. */
+function fileSlotVal(base?: string): string | undefined {
+  const b = base ?? suiteLockBase(process.cwd());
+  const file = `${b}.concurrency`;
+  if (!fs.existsSync(file)) return undefined;
+  const v = fs.readFileSync(file, "utf8").trim();
+  return v !== "" && /^[0-9]+$/.test(v) ? v : undefined;
+}
+
+/** The slot count S — the SINGLE definition point for "how many suites may run at once".
+ *  Precedence (identical on the bash canonical suite-slot-lib.sh `suite_slot_count`):
+ *    1. RESOURCE_GATE_CONCURRENT_SUITES — the deterministic test seam env (same convention as
+ *       scripts/test.sh's derivation functions). Empty-string-as-unset (`:-`), invalid falls through.
+ *    2. `<base>.concurrency` — the scalar file, fresh-read every call (no restart needed for the next
+ *       detached suite process to pick up a new S). Reads the file at the SAME base the slot paths use.
+ *    3. QUAY_MAX_CONCURRENT_SUITES — env 旋钮② (transition period; the file now has priority over it).
+ *    4. Default 2.
+ *  Clamped to >= 1 — an invalid/zero setting fails open to the single-suite default (the old 1-slot
+ *  behavior), never to 0 slots. This is the SAME expression full-suite-runner.ts's
+ *  concurrentSuiteSlots() delegates to. `base` is optional — pass it when the caller already resolved
+ *  it (suiteLockSlotPaths), so the file is read from THAT base and never re-resolves git-common-dir
+ *  (a cwd-resolution would be a different base than the slot paths' own base). */
+export function suiteLockSlotCount(base?: string): number {
+  const seam = slotVal("RESOURCE_GATE_CONCURRENT_SUITES");
+  if (seam !== undefined) return clampCount(seam);
+  const file = fileSlotVal(base);
+  if (file !== undefined) return clampCount(file);
+  const knob = slotVal("QUAY_MAX_CONCURRENT_SUITES");
+  if (knob !== undefined) return clampCount(knob);
+  return 2;
 }
 
 /** The S slot paths for a base — `${base}.0 .. ${base}.S-1`. S-generated via a loop variable, so a
  *  `full-suite.lock.<digit>` literal never appears in code (the SSoT checker greps for that shape
- *  and must find ZERO hits outside the generation loop). */
+ *  and must find ZERO hits outside the generation loop). The count is read AT `base` (not re-resolved
+ *  from cwd), so the `.concurrency` file read and the slot paths always share the same base. */
 export function suiteLockSlotPaths(base: string): string[] {
-  const count = suiteLockSlotCount();
+  const count = suiteLockSlotCount(base);
   const out: string[] = [];
   for (let i = 0; i < count; i++) out.push(`${base}.${i}`);
   return out;
@@ -92,9 +134,10 @@ const usage = [
   "",
   "Usage:",
   "  node --experimental-strip-types suite-lock-slots.ts --base <lock-file-base>",
-  "      print the S slot paths (`base.0`..`base.S-1`) one per line (S = QUAY_MAX_CONCURRENT_SUITES).",
+  "      print the S slot paths (`base.0`..`base.S-1`) one per line (S = seam → `<base>.concurrency` → knob → 2).",
   "  node --experimental-strip-types suite-lock-slots.ts --root <repo> [--count]",
-  "      resolve the repo's suite-lock base and print its S slot paths; --count prints only S.",
+  "      resolve the repo's suite-lock base and print its S slot paths; --count prints only S (the",
+  "      `.concurrency` file next to the resolved base is honored — the AC3 negative-control surface).",
   "  node --experimental-strip-types suite-lock-slots.ts --help",
   "",
   "Exit codes: 0 always (import-only module; the CLI is a convenience).",
@@ -119,7 +162,7 @@ function main(argv: string[]): number {
   if (rootArg) {
     const base = suiteLockBase(path.resolve(rootArg));
     if (args.includes("--count")) {
-      console.log(suiteLockSlotCount());
+      console.log(suiteLockSlotCount(base)); // read the `.concurrency` file at this base (AC3 negative control)
       return 0;
     }
     for (const p of suiteLockSlotPaths(base)) console.log(p);

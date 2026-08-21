@@ -145,6 +145,86 @@ test("seam symmetry (gap-suite-lock-slot-seam-asymmetry AC1) — TS suiteLockSlo
   }
 });
 
+// ── `.concurrency` scalar file (gap-suite-concurrency-env-to-file-fresh-read) ──────────────────────
+// AC1/AC2 — the two canons BOTH read `<suiteLockBase>.concurrency` raw (bash `[ -f ] && cat`, TS
+// `fs.existsSync && readFileSync().trim()`), in the precedence seam → file → knob → default. These
+// tests are hermetic: `FULL_SUITE_LOCK_FILE` pins the base to a temp dir so no ambient production
+// `.concurrency` file (nor the real git-common-dir) can interfere, and the file is cleaned up.
+
+test("AC1 — both canonicals independently read the same `.concurrency` scalar file; I4 stays GREEN under the file scheme (evaluated:true, bash==TS)", () => {
+  const tmp = makeTmp("concurrency");
+  const base = path.join(tmp, "full-suite.lock");
+  const prevLock = process.env.FULL_SUITE_LOCK_FILE;
+  process.env.FULL_SUITE_LOCK_FILE = base;
+  try {
+    // no file yet → falls through to the env knob / default (probe the current ambient knob).
+    const noFileTs = suiteLockSlotCount();
+    const noFileBash = bashSlotCount();
+    assert.equal(noFileTs, noFileBash, "no file: bash == TS");
+
+    // write the scalar file (trailing newline, like `echo 1 >` would leave) → both read it raw.
+    fs.writeFileSync(`${base}.concurrency`, "3\n", "utf8");
+    assert.equal(suiteLockSlotCount(), 3, "TS reads the .concurrency file (readFileSync + trim)");
+    assert.equal(bashSlotCount(), 3, "bash reads the same .concurrency file ([ -f ] && cat, trimmed)");
+    assert.equal(bashSlotCount(), suiteLockSlotCount(), "bash == TS under the file scheme");
+
+    // I4 — the static checker must still evaluate (NOT-EVALUATED would be the 硬规则③b shape) and pass.
+    const v = checkBashTsCountAgree(REPO_ROOT);
+    assert.equal(v.evaluated, true, `I4 must be evaluated under the file scheme, got: ${v.detail}`);
+    assert.equal(v.ok, true, `I4 must be GREEN under the file scheme (bash==TS), got: ${v.detail}`);
+  } finally {
+    if (prevLock === undefined) delete process.env.FULL_SUITE_LOCK_FILE;
+    else process.env.FULL_SUITE_LOCK_FILE = prevLock;
+    cleanup(tmp);
+  }
+});
+
+test("AC2 — precedence: seam > `.concurrency` file > knob > default (both canonicals agree)", () => {
+  const tmp = makeTmp("prec");
+  const base = path.join(tmp, "full-suite.lock");
+  const prevLock = process.env.FULL_SUITE_LOCK_FILE;
+  const prevSeam = process.env.RESOURCE_GATE_CONCURRENT_SUITES;
+  const prevKnob = process.env.QUAY_MAX_CONCURRENT_SUITES;
+  process.env.FULL_SUITE_LOCK_FILE = base;
+  try {
+    // file=3, knob unset → file wins over the default.
+    delete process.env.RESOURCE_GATE_CONCURRENT_SUITES;
+    delete process.env.QUAY_MAX_CONCURRENT_SUITES;
+    fs.writeFileSync(`${base}.concurrency`, "3", "utf8");
+    assert.equal(suiteLockSlotCount(), 3, "file wins over the default (no env)");
+    assert.equal(bashSlotCount(), 3, "bash agrees");
+
+    // file=3, knob=1 → file wins over the env knob (文件优先).
+    process.env.QUAY_MAX_CONCURRENT_SUITES = "1";
+    assert.equal(suiteLockSlotCount(), 3, "file wins over the knob (file > QUAY_MAX_CONCURRENT_SUITES)");
+    assert.equal(bashSlotCount(), 3, "bash agrees");
+
+    // seam=2, file=3, knob=1 → test seam wins.
+    process.env.RESOURCE_GATE_CONCURRENT_SUITES = "2";
+    assert.equal(suiteLockSlotCount(), 2, "test seam wins over the file");
+    assert.equal(bashSlotCount(), 2, "bash agrees");
+
+    // invalid file 'abc' → falls through to the knob.
+    fs.writeFileSync(`${base}.concurrency`, "abc", "utf8");
+    delete process.env.RESOURCE_GATE_CONCURRENT_SUITES;
+    assert.equal(suiteLockSlotCount(), 1, "non-numeric file falls through to the knob");
+    assert.equal(bashSlotCount(), 1, "bash agrees");
+
+    // invalid file 'abc' + knob unset → falls through to the default.
+    delete process.env.QUAY_MAX_CONCURRENT_SUITES;
+    assert.equal(suiteLockSlotCount(), 2, "non-numeric file + no knob → default 2");
+    assert.equal(bashSlotCount(), 2, "bash agrees");
+  } finally {
+    if (prevLock === undefined) delete process.env.FULL_SUITE_LOCK_FILE;
+    else process.env.FULL_SUITE_LOCK_FILE = prevLock;
+    if (prevSeam === undefined) delete process.env.RESOURCE_GATE_CONCURRENT_SUITES;
+    else process.env.RESOURCE_GATE_CONCURRENT_SUITES = prevSeam;
+    if (prevKnob === undefined) delete process.env.QUAY_MAX_CONCURRENT_SUITES;
+    else process.env.QUAY_MAX_CONCURRENT_SUITES = prevKnob;
+    cleanup(tmp);
+  }
+});
+
 // ── concurrentSuitesRunning 随 S (countHeldSuiteLocks probes S slots) ───────────────────────────────
 
 test("AC3 — countHeldSuiteLocks probes S slots: S=3 with `.2` held ⇒ 1 held (the fixed two-slot destructure could never see `.2`)", async () => {
