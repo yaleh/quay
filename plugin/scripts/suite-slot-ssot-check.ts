@@ -258,7 +258,13 @@ export function checkBashTsCountAgree(root: string): SsotVerdict {
  *  contend with a live suite) and count how many hold a slot simultaneously. With an EXCLUSIVE flock
  *  exactly S acquire (the rest block on `flock -n`); if the flock is made non-exclusive (the
  *  `flock -s` shared injection, or the slot logic broken) all N acquire ⇒ acquired > S ⇒ RED. The
- *  exclusivity is EXERCISED, not read off a comment — it can take false (AC3). */
+ *  exclusivity is EXERCISED, not read off a comment — it can take false (AC3).
+ *
+ *  The probe's slot COUNT is pinned to the checker's S via a `.concurrency` file at the hermetic base
+ *  (plus a sanitized probe env) — without that pin the holders resolve their own count from the
+ *  ambient env (default 2), which drifts from a production `.concurrency` file (e.g. S=1) ⇒ the probe
+ *  contends on 2 slots while the checker compares against 1 ⇒ FALSE RED while real suites queue
+ *  (gap-suite-slot-ssot-i5-false-positive: the reported "2/3 held (> S=1)" with a healthy host). */
 export interface ConcurrencyProbeResult {
   acquired: number;
   status: number;
@@ -286,13 +292,15 @@ sleep 0.4
 
 /** Run N concurrent acquirers (each `bash <holderScript> <base> <outFile>`) and count `acquired`.
  *  Pure orchestration — the holder's lock mode is the caller's choice, so the falsifiability test
- *  can inject a shared-mode holder and observe acquired == N (the RED half of AC3). */
-export function runConcurrencyProbe(script: string, base: string, N: number): ConcurrencyProbeResult {
+ *  can inject a shared-mode holder and observe acquired == N (the RED half of AC3). `env` lets the
+ *  caller pin the holder subprocess's environment (the I5 checker sanitizes it so the hermetic base's
+ *  `.concurrency` file is authoritative — ambient seam/knob cannot shadow it). */
+export function runConcurrencyProbe(script: string, base: string, N: number, env: NodeJS.ProcessEnv = process.env): ConcurrencyProbeResult {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "suite-slot-i5-"));
   const hs = path.join(tmp, "holder.sh");
   fs.writeFileSync(hs, script);
   const driver = `set -u\nfor i in $(seq 1 ${N}); do bash "${hs}" "${base}" "${tmp}/r\${i}.txt" & done\nwait\n`;
-  const res = spawnSync("bash", ["-c", driver], { encoding: "utf8", timeout: 15000 });
+  const res = spawnSync("bash", ["-c", driver], { encoding: "utf8", timeout: 15000, env });
   let acquired = 0;
   for (let i = 1; i <= N; i++) {
     const f = path.join(tmp, `r${i}.txt`);
@@ -306,7 +314,15 @@ export function runConcurrencyProbe(script: string, base: string, N: number): Co
   return { acquired, status: res.status ?? 0, stderr: res.stderr ?? "" };
 }
 
-/** I5 — S+2 concurrent acquirers, at most S may hold (exclusive flock). RED iff acquired > S. */
+/** I5 — S+2 concurrent acquirers, at most S may hold (exclusive flock). RED iff acquired > S.
+ *  The probe is HERMETIC: it contends only with its own acquirers on a temp base, so external
+ *  production holders (live suites) physically cannot be mixed into the count. `S` is the canonical
+ *  slot count (seam → `.concurrency` file → knob → 2), and the probe's holders are pinned to exactly
+ *  that S via a `.concurrency` file at the temp base + a sanitized probe env (seam cleared, knob=S) —
+ *  the two sources agree, so ambient drift cannot make the probe contend on a different slot count
+ *  than the checker compares against (gap-suite-slot-ssot-i5-false-positive). The flock mode is
+ *  exclusive by default; `QUAY_TEST_SSOT_I5_FLOCK=shared` injects a shared flock so the checker
+ *  itself can go RED end-to-end (硬规则 3b — a verdict that can never go RED is a false guarantee). */
 export function checkRuntimeConcurrencyCapped(root: string): SsotVerdict {
   const lib = path.join(root, "plugin", "scripts", "suite-slot-lib.sh");
   if (!fs.existsSync(lib)) {
@@ -316,17 +332,25 @@ export function checkRuntimeConcurrencyCapped(root: string): SsotVerdict {
   const N = S + 2;
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "suite-slot-i5-base-"));
   const base = path.join(tmp, "full-suite.lock");
-  const { acquired, status, stderr } = runConcurrencyProbe(holderScript(lib, "-n"), base, N);
+  // Pin the probe's holders to EXACTLY S slots: a `.concurrency` file at the hermetic base makes the
+  // holder's suite_slot_count read S (the canonical reads seam → file → knob; the file now carries S).
+  fs.writeFileSync(`${base}.concurrency`, String(S), "utf8");
+  const probeEnv = { ...process.env };
+  delete probeEnv.RESOURCE_GATE_CONCURRENT_SUITES; // the test seam must not shadow the hermetic file
+  probeEnv.QUAY_MAX_CONCURRENT_SUITES = String(S); // belt-and-suspenders: the knob agrees with the file
+  const flock = process.env.QUAY_TEST_SSOT_I5_FLOCK === "shared" ? "-s -n" : "-n";
+  const { acquired, status, stderr } = runConcurrencyProbe(holderScript(lib, flock), base, N, probeEnv);
   fs.rmSync(tmp, { recursive: true, force: true });
   if (status !== 0) {
     return { id: "I5", ok: false, evaluated: false, detail: `concurrency probe failed (status=${status}, stderr=${stderr.trim() || "<empty>"}) — NOT-EVALUATED` };
   }
   const ok = acquired <= S;
+  const hermetic = "hermetic temp base (the probe's own S+2 acquirers only — external production holders are isolated and cannot be counted)";
   return {
     id: "I5", ok, evaluated: true,
     detail: ok
-      ? `${acquired}/${N} concurrent acquirers held a slot (≤ S=${S}) — slot exclusivity holds`
-      : `${acquired}/${N} concurrent acquirers held a slot (> S=${S}) — slot exclusivity VIOLATED (the 4-concurrent-suite manifestation)`,
+      ? `${acquired}/${N} concurrent acquirers held a slot on the ${hermetic} — ≤ S=${S} — slot exclusivity holds`
+      : `${acquired}/${N} concurrent acquirers held a slot on the ${hermetic} — > S=${S} — slot exclusivity VIOLATED among the probe's own acquirers (the 4-concurrent-suite manifestation)`,
   };
 }
 
