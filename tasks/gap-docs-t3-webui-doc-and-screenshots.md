@@ -1,7 +1,7 @@
 ---
 id: gap-docs-t3-webui-doc-and-screenshots
 title: T3 Web UI 用户文档 + 截图：15 路由+4 详情全覆盖（人裁定截图+页面验证，开发树取图）
-status: done
+status: ready
 labels:
   - gap
   - docs
