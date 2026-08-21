@@ -21,7 +21,11 @@
 #               .quay/config.yml + 项目本地 runtime (.quay/runtime/bin/quay.js)。
 #   ③ 冷启动 — 双层 (outer+inner) 活性验证，判据是【直接量】(AC2 / CLAUDE.md 硬规则 4b)：
 #               · git 提交时间戳     —— loop 产出过提交（外部可核：git 对象）
-#               · /proc/<pid>/cwd   —— 会话进程落在项目内（内核态）
+#               · /proc/<pid>/cwd   —— 会话进程落在项目内（内核态），【且已通过启动信任弹窗】
+#                                      （复用 pane-state-classify 的 permission-prompt 识别——
+#                                      gap-verify-deliver-coldstart-l2-proc-ok-false-positive：
+#                                      进程刚 spawn 卡在 "Quick safety check" 弹窗 6.2h 时
+#                                      proc_ok 不得单独撑起，硬规则 4b）
 #               · git worktree       —— inner 派发过在飞任务（git 态）
 #               【不用】层自己的心跳自报（硬规则 4b：自报在停摆时恰好也停更，与「一切正常」同形）；
 #               【不是】仅 quay serve 端口 HTTP 探活（AC2）。另接 shipped L2 判据
@@ -90,6 +94,7 @@ ROOT=""
 WORKTREE_ROOT=""
 TEST_CMD=""
 TMUX_SESSION=""
+TMUX_SESSION_EXPLICIT=0       # --tmux-session 显式传入（区分默认 `${PROJECT}-0:0.0` 猜测 vs 用户指定）
 WAIT=30
 LIVENESS_WINDOW=30          # 分钟；与 dead-loop-check.sh 默认窗口同量级（周期锚点 20 分钟）
 COLD_START_DRIVE=0          # 默认不驱动（冷启动是 agent 驱动的 skill；本脚本默认只验证）
@@ -100,6 +105,8 @@ EVIDENCE=""
 AC89=""
 HOST=""                      # AC89 记录的主机字段（B|C，跨主机验证时由驱动方传入）
 CWD="$(pwd)"
+VC_NODE="${VC_NODE:-node}"                    # 启动弹窗探针的 node 接缝（测试可覆盖）
+VC_TMUX_SOCKET="${VC_TMUX_SOCKET:-}"          # 启动弹窗探针的 tmux 套接字覆盖（测试可覆盖）
 
 # ── AC5 锚（人 2026-08-16 裁定：达成 = 该 build 的 commit sha 新于本次阶段切换 2026-08-16）──
 # 判据只锚定事后仍可核的对象：commit sha / 内容 sha256 / ISO 提交时间 —— 不引用 worktree 产物路径。
@@ -124,7 +131,7 @@ while [ $# -gt 0 ]; do
     --root) ROOT="$2"; shift 2 ;;
     --worktree-root) WORKTREE_ROOT="$2"; shift 2 ;;
     --test-command) TEST_CMD="$2"; shift 2 ;;
-    --tmux-session) TMUX_SESSION="$2"; shift 2 ;;
+    --tmux-session) TMUX_SESSION="$2"; TMUX_SESSION_EXPLICIT=1; shift 2 ;;
     --wait) WAIT="$2"; shift 2 ;;
     --liveness-window) LIVENESS_WINDOW="$2"; shift 2 ;;
     --skip-cold-start-drive) COLD_START_DRIVE=0; shift ;;
@@ -145,12 +152,64 @@ done
 #   L2_GIT_IS_QUAYINIT_COMMIT 该提交是否 `chore(quay-init):` 前缀（硬规则 4b：排除安装自己的 auto-commit）
 #   L2_INNER_WORKTREE_COUNT  项目 worktree 里在飞 task worktree 数 —— inner 派发过任务
 #   L2_LAYER_PROCESS_CWD     /proc/<pid>/cwd 解析到项目根的 claude/node 进程数 —— 双层会话进程活着在项目里
+#   L2_STARTUP_PROMPT        双层窗口 pane 是否卡在启动信任弹窗（permission-prompt；复用
+#                             pane-state-classify.ts 的 permission-prompt 识别，经 --pane-verdict
+#                             接缝——AC1「不新造」；1 = 有 pane 卡弹窗 ⇒ proc_ok 不得单独撑起，
+#                             硬规则 4b，gap-verify-deliver-coldstart-l2-proc-ok-false-positive）
 #   L2_DEAD_LOOP_STATE       shipped L2 判据 cold_start_state（佐证；复用不新造）
 L2_GIT_COMMIT_AGE_MIN="-"
 L2_GIT_IS_QUAYINIT_COMMIT=0
 L2_INNER_WORKTREE_COUNT=0
 L2_LAYER_PROCESS_CWD=0
+L2_STARTUP_PROMPT=0
 L2_DEAD_LOOP_STATE="unknown"
+
+# L2_STARTUP_PROMPT —— 「已通过启动弹窗」直接量（gap-verify-deliver-coldstart-l2-proc-ok-false-positive）。
+# /proc/<pid>/cwd 只证明「进程活着在项目里」，不证明「进程过了启动信任弹窗进入 tick 循环」——
+# B/C 实测 4 个 claude 进程从 spawn 起卡在 "Quick safety check" 弹窗 6.2h，coldstart_live=yes 完全由
+# proc_ok 撑起，git_recent/wt_recent 均为 0（AC107 任务体取假条件 (c)「⛔不得用『进程存在』代理量」被
+# 自己的实现违反）。本探针复用 pane-state-classify.ts 的 permission-prompt 分类器
+# （pane-state-classify.ts:101 PERMISSION_PROMPT_RE，特征串 Quick safety check / trust this folder /
+# Enter to confirm …；session-liveness.sh 已把该弹窗归类为 SESSION-INTERVENTION-REQUIRED，
+# busy=0 intervention=1），经 --pane-verdict 接缝（与 session-liveness.sh 的 _sl_pane_verdict 同一
+# 判定源）分类双层窗口 pane：
+#   任一 outer/inner 窗口 pane 分类为 permission-prompt ⇒ L2_STARTUP_PROMPT=1（进程卡在启动弹窗）。
+# 捕获不到 pane（无 tmux / 会话未建 / 窗口缺失）⇒ L2_STARTUP_PROMPT=0 —— 无法观测弹窗，不据此推翻
+# proc_ok；这不是恒真项（能观测到弹窗时仍会置 1），git/wt 直接量仍独立判活。
+probe_startup_prompt() {
+  local root="$1" sess cap verdict socket role
+  L2_STARTUP_PROMPT=0
+  # 会话名解析（与 session-bootstrap.sh / quay-topology.sh 同源——绝不猜会话名）：
+  #   显式 --tmux-session > SESSION_TMUX_SESSION env > session-liveness.env（quay-init 写入的每项目
+  #   权威配置）> 默认 `${PROJECT}-0:0.0` 的会话部分（猜测，仅 full 模式兜底）。
+  #   ⚠️ 默认 `${PROJECT}-0:0.0` 是猜测：quay-init --loop 写进 session-liveness.env 的才是真实会话名，
+  #   B/C 验证时若默认猜测与真实会话不符，探针会盯错 pane（miss 掉弹窗）——所以非显式时优先读 env 文件。
+  sess=""
+  if [ "$TMUX_SESSION_EXPLICIT" = 1 ]; then sess="${TMUX_SESSION%%:*}"; fi
+  if [ -z "$sess" ]; then sess="${SESSION_TMUX_SESSION:-}"; fi
+  if [ -z "$sess" ] && [ -f "$root/orchestration/session-liveness.env" ]; then
+    sess="$(sed -n 's/^SESSION_TMUX_SESSION=//p' "$root/orchestration/session-liveness.env" 2>/dev/null | head -1)"
+  fi
+  if [ -z "$sess" ]; then sess="${TMUX_SESSION%%:*}"; fi
+  [ -n "$sess" ] || return 0   # 无会话名（冷启动未建拓扑）⇒ 无法观测弹窗，不推翻 proc_ok
+  # tmux 控制套接字解析（同 session-liveness.sh 的 SL_TMUX_SOCKET；VC_TMUX_SOCKET 为测试接缝）。
+  socket="${VC_TMUX_SOCKET:-}"
+  if [ -z "$socket" ] && [ -n "${TMUX_TMPDIR:-}" ]; then socket="${TMUX_TMPDIR}/tmux-$(id -u)/default"; fi
+  if [ -z "$socket" ]; then socket="${TMPDIR:-/tmp}/tmux-$(id -u)/default"; fi
+  # 双层拓扑窗口 = outer + inner（quay-topology.sh 的 <project>-N:outer / :inner）。
+  for role in outer inner; do
+    cap="$(env -u TMUX tmux -S "$socket" capture-pane -p -t "$sess:$role" 2>/dev/null || true)"
+    [ -n "$cap" ] || continue
+    verdict="$(printf '%s\n' "$cap" | "$VC_NODE" --no-warnings --experimental-strip-types \
+      "$SCRIPT_DIR/pane-state-classify.ts" --pane-verdict 2>/dev/null \
+      || echo 'state=unknown busy=1 intervention=0 work_in_flight=0 region_empty=0')"
+    if printf '%s' "$verdict" | grep -Eq '^intervention=1$' 2>/dev/null; then
+      L2_STARTUP_PROMPT=1
+      break
+    fi
+  done
+}
+
 probe_direct_measures() {
   local root="$1" now ct subject
   now="$(date +%s)"
@@ -182,6 +241,8 @@ probe_direct_measures() {
         ;;
     esac
   done
+  # 已通过启动弹窗？(proc_ok 非充分条件化 —— 复用 pane-state-classify 的 permission-prompt 识别)
+  probe_startup_prompt "$root"
   if [ -f "$root/plugin/scripts/dead-loop-check.sh" ]; then
     L2_DEAD_LOOP_STATE="$(bash "$root/plugin/scripts/dead-loop-check.sh" --check-running --root "$root" 2>/dev/null \
       | sed -n 's/^cold_start_state=//p' | head -1 || true)"
@@ -194,6 +255,9 @@ L1_OUTER_TICK=0; L1_INNER_TICK=0; L1_LOOP_SCRIPTS=0; L1_CONFIG=0; L1_RUNTIME=0
 L1_OK=0; L2_OK=0; COLDSTART_LIVE=no
 coldstart_verdict() {
   L1_OK=$(( L1_OUTER_TICK && L1_INNER_TICK && L1_LOOP_SCRIPTS && L1_CONFIG && L1_RUNTIME ))
+  # 自包含判定：函数必须重算而非继承上次调用的旧值（selfcheck 多次调用，旧值泄漏会把
+  # L2_OK=0 的判负伪装成 COLDSTART_LIVE=yes——同一函数即判定器，输出不得依赖调用历史）。
+  COLDSTART_LIVE=no
   local git_recent=0 wt_recent=0 proc_ok=0
   # git 活性：近期提交 且 非 quay-init auto-commit（硬规则 4b —— 排除「没在转也成立」的量）
   if [ "$L2_GIT_COMMIT_AGE_MIN" != "-" ] && [ "$L2_GIT_COMMIT_AGE_MIN" -le "$LIVENESS_WINDOW" ] \
@@ -201,7 +265,13 @@ coldstart_verdict() {
     git_recent=1
   fi
   [ "$L2_INNER_WORKTREE_COUNT" -ge 1 ] 2>/dev/null && wt_recent=1
-  [ "$L2_LAYER_PROCESS_CWD" -ge 2 ] 2>/dev/null && proc_ok=1
+  # proc_ok 不再单独充分（gap-verify-deliver-coldstart-l2-proc-ok-false-positive，硬规则 4b）：
+  # 进程存在(>=2)【且】已通过启动弹窗（L2_STARTUP_PROMPT=0）才算活性信号。进程刚 spawn 卡在
+  # "Quick safety check" 信任弹窗时 L2_STARTUP_PROMPT=1 ⇒ proc_ok=0 —— B/C 实测 4 个 claude 进程
+  # 卡弹窗 6.2h，coldstart_live 曾由 proc_ok 单独撑起（git_recent/wt_recent 均 0）。
+  if [ "$L2_LAYER_PROCESS_CWD" -ge 2 ] 2>/dev/null && [ "$L2_STARTUP_PROMPT" = 0 ]; then
+    proc_ok=1
+  fi
   L2_OK=$(( git_recent || wt_recent || proc_ok ))
   if [ "$L1_OK" = 1 ] && [ "$L2_OK" = 1 ]; then COLDSTART_LIVE=yes; fi
 }
@@ -434,6 +504,7 @@ step3_coldstart() {
   echo "    L2_GIT_IS_QUAYINIT_COMMIT=${L2_GIT_IS_QUAYINIT_COMMIT} (1 = the recent commit is quay-init's own auto-commit — excluded)"
   echo "    L2_INNER_WORKTREE_COUNT=${L2_INNER_WORKTREE_COUNT} (>=1 = inner dispatched)"
   echo "    L2_LAYER_PROCESS_CWD=${L2_LAYER_PROCESS_CWD} (>=2 = outer+inner processes in project)"
+  echo "    L2_STARTUP_PROMPT=${L2_STARTUP_PROMPT} (1 = a two-layer pane is stuck at the startup permission-prompt — proc_ok demoted, hard rule 4b)"
   echo "    L2_DEAD_LOOP_STATE=${L2_DEAD_LOOP_STATE} (shipped L2 criterion, corroboration)"
   if [ "$COLDSTART_LIVE" = "yes" ]; then
     echo "  COLDSTART_LIVE=yes — two-layer loop verified live by direct measures"
@@ -501,6 +572,47 @@ selfcheck() {
   echo "selfcheck: dead(no-real-loop,recent-chore-commit) L1_OK=$d1 COLDSTART_LIVE=$d2 (expect 1/no)"
   echo "selfcheck: alive(recent-non-chore-commit) L1_OK=$a1 COLDSTART_LIVE=$a2 (expect 1/yes)"
 
+  # control 6 (AC2 负向 —— proc_ok 假阳性回归, gap-verify-deliver-coldstart-l2-proc-ok-false-positive):
+  # 进程存在(>=2)但双层 pane 卡启动信任弹窗（L2_STARTUP_PROMPT=1）⇒ proc_ok 不得单独撑起 ⇒
+  # COLDSTART_LIVE=no。B/C 实测形态：git_recent/wt_recent 均 0，4 个 claude 进程卡 "Quick safety
+  # check" 弹窗 6.2h，coldstart_live 曾由 proc_ok 单独撑起（判据被实现违反）。
+  L2_LAYER_PROCESS_CWD=2
+  L2_STARTUP_PROMPT=1
+  L2_GIT_COMMIT_AGE_MIN="-"
+  L2_GIT_IS_QUAYINIT_COMMIT=0
+  L2_INNER_WORKTREE_COUNT=0
+  coldstart_verdict
+  local p1 p2
+  p1="$L2_OK"; p2="$COLDSTART_LIVE"
+
+  # control 7 (AC2 正向 —— proc_ok 直接量): 进程存在(>=2) 且 已通过启动弹窗（L2_STARTUP_PROMPT=0）
+  # ⇒ proc_ok 作活性信号 ⇒ COLDSTART_LIVE=yes（git/wt 均无近期信号，活性完全由 proc_ok+已过弹窗撑起）。
+  L2_LAYER_PROCESS_CWD=2
+  L2_STARTUP_PROMPT=0
+  L2_GIT_COMMIT_AGE_MIN="-"
+  L2_GIT_IS_QUAYINIT_COMMIT=0
+  L2_INNER_WORKTREE_COUNT=0
+  coldstart_verdict
+  local p3 p4
+  p3="$L2_OK"; p4="$COLDSTART_LIVE"
+
+  # control 8 (复用 wiring —— AC1「复用 pane-state-classify 的 permission-prompt 识别，不新造」):
+  # 真实信任弹窗 fixture 经 probe_startup_prompt 同一条 --pane-verdict 接缝必须判 intervention=1
+  # （同一判定源：session-liveness.sh 的 _sl_pane_verdict / classifyPaneVerdict）。
+  local pv_fix pv_out p5
+  pv_fix="Quick safety check: Is this a project you created or one you trust?
+❯ 1. Yes, I trust this folder ✔
+  2. No, exit
+Enter to confirm · Esc to cancel"
+  pv_out="$(printf '%s\n' "$pv_fix" | "$VC_NODE" --no-warnings --experimental-strip-types \
+    "$SCRIPT_DIR/pane-state-classify.ts" --pane-verdict 2>/dev/null \
+    || echo 'state=unknown busy=1 intervention=0 work_in_flight=0 region_empty=0')"
+  if printf '%s' "$pv_out" | grep -Eq '^intervention=1$' 2>/dev/null; then p5=1; else p5=0; fi
+
+  echo "selfcheck: prompt-blocked(procs=2,prompt=1) L2_OK=$p1 COLDSTART_LIVE=$p2 (expect 0/no)"
+  echo "selfcheck: prompt-passed(procs=2,prompt=0) L2_OK=$p3 COLDSTART_LIVE=$p4 (expect 1/yes)"
+  echo "selfcheck: pane-verdict-permission-intervention=$p5 (expect 1 — 复用 pane-state-classify 的 permission-prompt 识别)"
+
   # control 3 (AC5 正向/positive)：build_sha 40-hex + build_date >= 阶段切换 + 双 sha256 ⇒ AC5_OK=1
   # control 4 (AC5 负向/negative)：build_date 早于阶段切换 ⇒ AC5_OK=0（判据能取假）
   # control 5 (AC5 未评估)：缺 build_sha ⇒ AC5_EVALUATED=0（可区分「未评估」≠「不合格」，硬规则 3b）
@@ -524,11 +636,14 @@ selfcheck() {
   if [ "$d1" = "1" ] && [ "$d2" = "no" ] && [ "$a1" = "1" ] && [ "$a2" = "yes" ] \
      && [ "$c3_e" = "1" ] && [ "$c3_ok" = "1" ] \
      && [ "$c4_e" = "1" ] && [ "$c4_ok" = "0" ] \
-     && [ "$c5_e" = "0" ] && [ "$c5_ok" = "0" ]; then
-    echo "selfcheck: PASS — AC2 direct measures can take false (chore auto-commit excluded) and true (loop work); AC5 can take false (old build), true (recent build), and be distinct when not evaluated"
+     && [ "$c5_e" = "0" ] && [ "$c5_ok" = "0" ] \
+     && [ "$p1" = "0" ] && [ "$p2" = "no" ] \
+     && [ "$p3" = "1" ] && [ "$p4" = "yes" ] \
+     && [ "$p5" = "1" ]; then
+    echo "selfcheck: PASS — AC2 direct measures can take false (chore auto-commit excluded; proc_ok demoted by startup-prompt) and true (loop work; proc_ok + passed-prompt); AC5 can take false (old build), true (recent build), and be distinct when not evaluated"
     rc=0
   else
-    echo "selfcheck: FAIL — d1=$d1 d2=$d2 a1=$a1 a2=$a2 c3_e=$c3_e c3_ok=$c3_ok c4_e=$c4_e c4_ok=$c4_ok c5_e=$c5_e c5_ok=$c5_ok" >&2
+    echo "selfcheck: FAIL — d1=$d1 d2=$d2 a1=$a1 a2=$a2 p1=$p1 p2=$p2 p3=$p3 p4=$p4 p5=$p5 c3_e=$c3_e c3_ok=$c3_ok c4_e=$c4_e c4_ok=$c4_ok c5_e=$c5_e c5_ok=$c5_ok" >&2
     rc=1
   fi
   rm -rf "$tmp"
@@ -620,6 +735,7 @@ echo "L2_GIT_COMMIT_AGE_MIN=$L2_GIT_COMMIT_AGE_MIN"
 echo "L2_GIT_IS_QUAYINIT_COMMIT=$L2_GIT_IS_QUAYINIT_COMMIT"
 echo "L2_INNER_WORKTREE_COUNT=$L2_INNER_WORKTREE_COUNT"
 echo "L2_LAYER_PROCESS_CWD=$L2_LAYER_PROCESS_CWD"
+echo "L2_STARTUP_PROMPT=$L2_STARTUP_PROMPT"
 echo "L2_DEAD_LOOP_STATE=$L2_DEAD_LOOP_STATE"
 echo "L2_OK=$L2_OK"
 echo "COLDSTART_LIVE=$COLDSTART_LIVE"
@@ -658,6 +774,7 @@ cat > "$EVIDENCE" <<EOF
   "l2_git_is_quayinit_commit": $L2_GIT_IS_QUAYINIT_COMMIT,
   "l2_inner_worktree_count": $L2_INNER_WORKTREE_COUNT,
   "l2_layer_process_cwd": $L2_LAYER_PROCESS_CWD,
+  "l2_startup_prompt": $L2_STARTUP_PROMPT,
   "l2_dead_loop_state": "$L2_DEAD_LOOP_STATE",
   "coldstart_live": "$COLDSTART_LIVE",
   "ac88_verify": "$AC88_VERIFY",
@@ -668,7 +785,7 @@ echo "evidence written → $EVIDENCE"
 
 # ── AC89 记录（同 per-task-suite-records 形态，JSON 行；AC89 AC4: B/C 两机 + 安装/初始化/冷启动三项）──
 mkdir -p "$(dirname "$AC89")"
-detail="steps: install(1)=$STEP1_OK init(2)=$STEP2_OK coldstart(3) live=$COLDSTART_LIVE git_age=${L2_GIT_COMMIT_AGE_MIN}min quayinit_commit=$L2_GIT_IS_QUAYINIT_COMMIT worktree=$L2_INNER_WORKTREE_COUNT proc_cwd=$L2_LAYER_PROCESS_CWD dead_loop=$L2_DEAD_LOOP_STATE build_sha=${BUILD_SHA:-} build_date=${BUILD_DATE:-} sha256_quay=${SHA256_QUAY:-0} sha256_qn=${SHA256_QN:-0} ac5_ok=$AC5_OK"
+detail="steps: install(1)=$STEP1_OK init(2)=$STEP2_OK coldstart(3) live=$COLDSTART_LIVE git_age=${L2_GIT_COMMIT_AGE_MIN}min quayinit_commit=$L2_GIT_IS_QUAYINIT_COMMIT worktree=$L2_INNER_WORKTREE_COUNT proc_cwd=$L2_LAYER_PROCESS_CWD startup_prompt=$L2_STARTUP_PROMPT dead_loop=$L2_DEAD_LOOP_STATE build_sha=${BUILD_SHA:-} build_date=${BUILD_DATE:-} sha256_quay=${SHA256_QUAY:-0} sha256_qn=${SHA256_QN:-0} ac5_ok=$AC5_OK"
 okflag=false; [ "$AC88_VERIFY" = "ok" ] && okflag=true
 step3=0; [ "$COLDSTART_LIVE" = "yes" ] && step3=1
 bool() { [ "$1" = "1" ] && printf true || printf false; }
