@@ -1524,6 +1524,19 @@ export interface SuiteRoundRecord {
    */
   phases?: PhaseDiffRecord[];
   phase_counter_error?: string | null;
+  /**
+   * gap-ac124-suite-bucket-production-carrier-benefit — the bucket-execution fields, present ONLY on
+   * a bucket-mode round (test.sh emitted a __BUCKETS__ marker; the default full suite never does).
+   *   buckets             — which buckets ran: "P" | "M" | "P+M" | "full" (full = hub fallback or a
+   *                         no-bucket-triggerable change, still a bucket-mode decision).
+   *   bucket_files        — the selected test-file count (the FULL count on a "full" round).
+   *   bucket_duration_ms  — the bucket run's wall duration (= durationMs: the round IS the bucket run).
+   * Absent on every non-bucket round — a reader must tolerate their absence (same contract as the
+   * *_phase_ms / cpu_time_s fields).
+   */
+  buckets?: string;
+  bucket_files?: number;
+  bucket_duration_ms?: number;
 }
 
 /**
@@ -2316,7 +2329,15 @@ export async function run(argv: string[]): Promise<number> {
     QUAY_LOWCONC_CONCURRENCY: String(lowconcConcurrency),
   };
 
-  const baseCommand = explicitCommand ?? "bash scripts/test.sh";
+  // gap-ac124-suite-bucket-production-carrier-benefit — bucket-level selection. `--buckets <task-id>`
+  // runs the task's bucket subset (P-only ⇒ P, M-only ⇒ M, hub ⇒ full) via test.sh's own --buckets
+  // flag, instead of the canonical full suite. The runner's ONLY job here is to hand the bucket task
+  // to test.sh (which is the selection authority) and to carry the __BUCKETS__ marker into the round
+  // record. An explicit --command wins over --buckets (the caller took over the command entirely).
+  const bucketTaskId = parseArg(argv, "--buckets");
+  const baseCommand =
+    explicitCommand ??
+    (bucketTaskId !== undefined ? `bash scripts/test.sh --buckets ${bucketTaskId}` : "bash scripts/test.sh");
   // AC2 — REPLACE splice: strip any existing --test-concurrency (both spellings) and splice the
   // effective laneCount as the ONLY concurrency flag. Arbitrary non-concurrency commands (a fake
   // suite, --fail-fast-check) are left untouched — their concurrency is their own business.
@@ -3027,6 +3048,13 @@ export async function run(argv: string[]): Promise<number> {
   const floorMsSeen: number[] = [];
   const ceilingFiles: string[] = [];
 
+  // gap-ac124-suite-bucket-production-carrier-benefit — the __BUCKETS__ marker test.sh emits on a
+  // bucket-selected run (buckets=<P|M|P+M|full> files=<n> full=<0|1>). Only a bucket-mode run emits it
+  // (the default full suite does not), so a round without the marker omits the bucket fields — the
+  // same absent-field contract as the *_phase_ms fields (a reader must tolerate their absence).
+  let bucketLabel: string | null = null;
+  let bucketFiles: number | null = null;
+
   // gap-phase-boundary-differential-accounting — REAL-TIME phase-boundary detection (the runner
   // reads the monotonic cumulative counters at each boundary and records the phase that JUST
   // completed — one record per phase). The boundaries are detected from the stream markers test.sh
@@ -3256,6 +3284,16 @@ export async function run(argv: string[]): Promise<number> {
       ceilingFiles.push(ceilingM[1]);
       const floor = Number(ceilingM[3]); // group 2 is duration_ms; group 3 is floor_ms
       if (!floorMsSeen.includes(floor)) floorMsSeen.push(floor);
+    }
+    // gap-ac124-suite-bucket-production-carrier-benefit — parse test.sh's __BUCKETS__ marker
+    // (bucket-selected runs only). buckets is the canonical label (P|M|P+M|full); files is the
+    // selected file count. First marker wins (test.sh emits exactly one).
+    if (bucketLabel === null) {
+      const bucketM = line.match(/^__BUCKETS__\s+buckets=(\S+)\s+files=(\d+)\s+full=([01])/);
+      if (bucketM) {
+        bucketLabel = bucketM[1];
+        bucketFiles = Number(bucketM[2]);
+      }
     }
     // gap-full-suite-state-red-no-failure-detail-static-check-invisible AC2/AC4 — accumulate
     // static-check detail lines on EVERY line (the `VIOLATION:` / summary / ratchet lines appear
@@ -3982,6 +4020,13 @@ export async function run(argv: string[]): Promise<number> {
     ...(phaseAccount ? { phases: phaseAccount.records } : {}),
     ...(phaseAccount?.read_error ? { phase_counter_error: phaseAccount.read_error } : {}),
     ...(phaseAccount?.finalReadError ? { phase_final_read_error: phaseAccount.finalReadError } : {}),
+    // gap-ac124-suite-bucket-production-carrier-benefit — the bucket-execution fields. Present only on
+    // a bucket-mode round (test.sh emitted __BUCKETS__); the default full suite omits them (a reader
+    // must tolerate their absence). bucket_duration_ms is the round's own durationMs (the round IS the
+    // bucket run — no separate clock), so the 40%-of-full comparison reads durationMs directly.
+    ...(bucketLabel !== null ? { buckets: bucketLabel } : {}),
+    ...(bucketFiles !== null ? { bucket_files: bucketFiles } : {}),
+    ...(bucketLabel !== null ? { bucket_duration_ms: durationMs } : {}),
   });
   // NOTE: appendVerificationRound above is the ONE suite-duration append per run (the
   // checker-cost.test.mjs AC6 contract: two runs ⇒ exactly two verification-round.jsonl lines).

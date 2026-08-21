@@ -2065,6 +2065,53 @@ elif [ "${1:-}" = "--for-task" ] || [ "${1:-}" = "--scoped" ]; then
     exit "${sel_code}"
   fi
   exit "${test_code}"
+elif [ "${1:-}" = "--buckets" ]; then
+  # gap-ac124-suite-bucket-production-carrier-benefit: bucket-level test selection (the phase's
+  # coarser granularity than --for-task). `scripts/test.sh --buckets <task-id>` delegates to
+  # suite-bucket-select.ts, which resolves the task's ## Touches to a bucket set via AC120 attribution
+  # + AC121 reattribution + AC122 hub fallback + AC123 both-sides, and runs the bucket subset:
+  #   hub touch  ⇒ FULL suite (unconditional, no fan-out)
+  #   P-only     ⇒ P bucket; M-only ⇒ M bucket; P+M ⇒ both; UNRESOLVED always selected (safe side)
+  #   no bucket  ⇒ FULL suite (fail-closed — an unclassifiable code change must not look like "nothing")
+  # FULL static checks ALWAYS run (the bucket is about TEST FILES, never a static-check frequency cut —
+  # phase-goal "按变更选桶,不是降频"). Emits a __BUCKETS__ marker line (bucket + file count + full flag)
+  # that full-suite-runner.ts carries into the verification-round record.
+  bucket_id="${2:-}"
+  if [ -z "${bucket_id}" ]; then
+    echo "scripts/test.sh: --buckets requires a task id" >&2
+    exit 2
+  fi
+  shift 2
+  rest_args=()
+  for a in "$@"; do rest_args+=("${a}"); done
+  bucket_summary="$(node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/suite-bucket-select.ts" --root "${repo_root}" --task "${bucket_id}" --summary)" || {
+    echo "scripts/test.sh: --buckets ${bucket_id} — bucket selector failed (exit $?)" >&2
+    exit 2
+  }
+  bucket_full="$(printf '%s' "${bucket_summary}" | sed -n 's/.*full=\([01]\).*/\1/p')"
+  bucket_buckets="$(printf '%s' "${bucket_summary}" | sed -n 's/.*buckets=\([^ ]*\).*/\1/p')"
+  bucket_files="$(printf '%s' "${bucket_summary}" | sed -n 's/.*files=\([0-9][0-9]*\).*/\1/p')"
+  echo "__BUCKETS__ buckets=${bucket_buckets} files=${bucket_files} full=${bucket_full}"
+  if [ "${bucket_full}" = "1" ]; then
+    # Hub touch / no-bucket-triggerable ⇒ the full default suite (run_selected exits).
+    run_selected "$(effective_groups)"
+  fi
+  bucket_sel_out="$(node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/suite-bucket-select.ts" --root "${repo_root}" --task "${bucket_id}" --paths-only)"
+  if [ -z "${bucket_sel_out}" ]; then
+    echo "scripts/test.sh: --buckets ${bucket_id} — selector selected 0 test files (bucket=${bucket_buckets}); falling back to full suite" >&2
+    run_selected "$(effective_groups)"
+  fi
+  mapfile -t files <<< "${bucket_sel_out}"
+  # FULL static checks (verification-grade — no 降频), then the bucket test subset.
+  run_static_checks
+  build_dist_once
+  mark_nested
+  if has_explicit_concurrency "${rest_args[@]}"; then
+    node --test "${rest_args[@]}" "${files[@]}"
+  else
+    node --test --test-concurrency="$(default_test_concurrency)" "${rest_args[@]}" "${files[@]}"
+  fi
+  exit $?
 elif all_flags "$@"; then
   # gap-test-sh-flags-only-...: bare node --test flags + the DEFAULT glob (the documented
   # `--test-concurrency=4` and `--experimental-test-coverage` forms). Previously these fell to the

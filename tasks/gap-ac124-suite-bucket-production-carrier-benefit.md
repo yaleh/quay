@@ -42,12 +42,44 @@ depends_on:
 - [ ] AC1: `.quay/verification-round.jsonl` 中新于阶段切换的轮次 ≥10 轮带「本轮跑哪几桶 + 桶文件数 + 桶耗时」字段。
 - [ ] AC2: 仅 P 变更 ≥3 轮、仅 M 变更 ≥3 轮，各自 `durationMs` 中位数 ≤ 全量中位数 40%。
 
+## 执行证据（inner 2026-08-21）
+
+**判定：启用接线已落地 + 桶字段写入已实测；AC1/AC2 的「≥10 轮 / ≥3+3 轮」生产载体累计未达成——需 land 后由循环实际跑轮次（本 session 不制造假轮）。**
+
+### 接线（本实现，机械可复核）
+
+- **`plugin/scripts/suite-bucket-select.ts`（new）**——桶级选择器，AC120+AC121+AC122+AC123 的消费端：
+  `selectBucketsForTouches(touched)` → `{fullSuite, buckets, selectedFiles, fileCount, hubMatches, triggered}`。
+  规则 = 枢纽触碰⇒无条件全量（AC122）；否则触发桶∩测试桶集合（AC123 both-sides 固有）；**UNRESOLVED 恒入选**（AC123 安全侧不做减法）；无桶可触发⇒全量（fail-closed，硬规则 3b）。
+  触发桶判定复用 AC120 `classifyPath`（P=`packages/*/(src|bin|dist)`、M=`plugin/scripts`、S=`scripts/test.sh`）+ experiments mirror fold。
+  测试桶归属 = AC121 reattribution judgment（单点覆盖）优先，否则 AC120 `bucketSetOf`；**新增 mirror fold**（`experiments/…/test/` 里 `../scripts/X.ts` 的镜像 import → M，AC120 静态闭包解析到 experiments 路径而 `classifyPath` 不认，故补 fold）。
+- **`scripts/test.sh` `--buckets <task-id>`**——跑选择器 → `__BUCKETS__ buckets=<P|M|P+M|full> files=<n> full=<0|1>` 标记 → hub/无桶⇒全量默认路径；否则**全套 static checks（不降频）+ node --test 桶子集**。
+- **`full-suite-runner.ts` `--buckets <task-id>`**——command 换成 `bash scripts/test.sh --buckets <id>`；`onLine` 解析 `__BUCKETS__` 标记 → 轮记录写三字段。
+- **字段 schema**（仅桶模式轮写，默认全量轮缺键——同 `*_phase_ms` 缺键契约）：`buckets`（哪几桶，"full"=枢纽退回）、`bucket_files`（桶文件数）、`bucket_duration_ms`（= durationMs，轮本身即桶运行）。
+
+### 实测（生产载体 + 演示轮）
+
+- **生产载体 `verification-round.jsonl` 桶字段轮 = 0**（389 轮全无 `buckets` 字段——分桶执行尚未在循环落地，本任务只做接线）。阶段切换后无桶字段轮。
+- **演示轮（本 session 实跑，落 temp state-dir，不污染生产载体）**：M-only（DIR-043，`--lane-count 16`）→ `buckets=M bucket_files=219 bucket_duration_ms=300010`；P-only（DIR-075，`--lane-count 8`）→ `buckets=P bucket_files=163 bucket_duration_ms=317053`。两轮均 `state=red`（环境性：`chart2-s2/s3` versions drifted——主检出 v0.6.1..develop ahead 10，非桶机制缺陷）。
+- **选择器实测（424 测试文件）**：P 桶 137 文件、M 桶 219 文件、全量 424；P/M 各含 12 个跨桶 `packages/quay/test/*`（AC123 both-sides 回放 0 缺）。
+- **40% 阈值对照（诚实读数）**：全量绿轮中位数 **720822ms** ⇒ 40% 阈值 288329ms。M 桶演示 300010ms = **41.6%**（lane 16），略高于 40%；开销主因 = 9 个真 UNRESOLVED 恒入选（`integration-batch-merge`/`measure-suite`/`quay-init-loop-vendor`/`plugin-vendor-standalone`/`user-scope-reinstall`/`session-liveness-restart`/`sync-lag-check`/`manager-arm-loop`/`outer-tick-log-check`，均 spawn-by-name、静态闭包不可定位，安全侧不减法）。P 桶 mirror fold 后 137 文件（lane 8 演示 317s；lane 16 应在 40% 内）。
+
+### 测试
+
+`bash scripts/test.sh --for-task gap-ac124-suite-bucket-production-carrier-benefit` → **187 pass / 0 fail / 0 cancelled**（含 full-suite-runner.test.mjs 回归 + capability-catalog.test.mjs + 新 suite-bucket-select.test.mjs 10 断言）。`for d in packages/*/; do npx tsc --noEmit -p "$d"; done` → exit 0。
+
 ## Definition of Done
 
 - [ ] 分桶执行启用后生产载体 ≥10 轮带桶字段，P/M 各 ≥3 轮中位数 ≤40%；land 到 develop；AC1-2 全勾。
 
+**遗留（land 后由循环推进，非本 session）**：① fan-in land 到 develop（本 session 按指令不 fan-in）；② 循环实际跑 ≥10 轮桶字段轮 + P/M 各 ≥3 轮；③ M 桶 41.6% 略超 40%——9 个真 UNRESOLVED 恒入选是主因，可后续按 AC121 同法补重归属（另案，非本任务）。
+
 ## Touches
 
-- scripts/test.sh（启用分桶执行的接线点）
-- plugin/scripts/full-suite-runner.ts（启用分桶执行的接线点）
+- scripts/test.sh（启用分桶执行的接线点：`--buckets <task-id>` 分支）
+- plugin/scripts/full-suite-runner.ts（启用分桶执行的接线点：`--buckets` 透传 + 桶字段写入）
+- plugin/scripts/suite-bucket-select.ts（new —— 桶级选择器，AC120+AC121+AC122+AC123 的消费端）
+- plugin/test/suite-bucket-select.test.mjs（new —— 选择器单测）
+- plugin/scripts/capability-catalog.sh（new script 注册：catalog 声明行）
+- docs/proposals/quay-product-outline.md（new script 注册：§6 delivery-inventory 快照）
 - tasks/gap-ac124-suite-bucket-production-carrier-benefit.md（自身）
