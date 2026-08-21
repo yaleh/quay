@@ -43,7 +43,7 @@ depends_on:
 
 ## Touches
 
-- plugin/scripts/suite-bucket-hub-list (new)
+- plugin/scripts/suite-bucket-hub-list.ts (new)
 - plugin/test/suite-bucket-hub-list.test.mjs (new)
 - plugin/scripts/capability-catalog.sh（新 script 注册：catalog 声明行）
 - docs/proposals/quay-product-outline.md（新 script 注册：§6 delivery-inventory 快照）
