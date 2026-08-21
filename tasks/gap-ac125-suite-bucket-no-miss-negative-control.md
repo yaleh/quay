@@ -1,7 +1,7 @@
 ---
 id: gap-ac125-suite-bucket-no-miss-negative-control
 title: AC125 漏测负控制（3 次真实跨层回归回放 3/3 仍选中会红的测试——唯一的"没漏"判据）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -66,7 +66,7 @@ depends_on:
 
 ## Definition of Done
 
-- [ ] ≥3 次真实跨层回归回放 3/3 仍选中会红测试；land 到 develop；AC1-2 全勾。
+- [x] ≥3 次真实跨层回归回放 3/3 仍选中会红测试；land 到 develop；AC1-2 全勾。
 
 ## Touches
 
