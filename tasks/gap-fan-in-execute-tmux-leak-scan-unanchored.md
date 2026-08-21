@@ -37,5 +37,6 @@ extra:
 
 - tasks/gap-fan-in-execute-tmux-leak-scan-unanchored.md（自身）
 - plugin/scripts/（导出 tmux-leak-scan 锚定正则常量，具体模块按实现面定）
-- plugin/workflows/fan-in-execute.js（:181 改 import 常量；.claude/workflows/fan-in-execute.js 同步 import）
+- plugin/workflows/fan-in-execute.js（:181 改 import 常量）
+- .claude/workflows/fan-in-execute.js（双拷贝同步 import）
 - plugin/test/fan-in-execute-paths.test.mjs（leak-residual 假阳性负控制）
