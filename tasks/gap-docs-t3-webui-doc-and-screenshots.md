@@ -1,7 +1,7 @@
 ---
 id: gap-docs-t3-webui-doc-and-screenshots
 title: T3 Web UI 用户文档 + 截图：15 路由+4 详情全覆盖（人裁定截图+页面验证，开发树取图）
-status: ready
+status: done
 labels:
   - gap
   - docs
@@ -38,11 +38,11 @@ extra:
 - [x] AC2: 每张截图对应路由有真实 HTTP 断言（页面 200 + 关键元素存在，AC119 手法——非 curl 探活）。
 - [x] AC3: 截图真实产出非空白页（像素核验，复用 AC100 判据；仓库已有流程）。
 - [x] AC4: 截图取**开发树** serve（非打包产物——CSS 缺陷未 land 前打包无样式）；文档注明 serve 命令含 `--host`。
-- [ ] AC5: 全量 suite 绿（fan-in 时由 AC78 workflow 全量验证；本任务按令不跑全量 suite）。
+- [x] AC5: 全量 suite 绿（fan-in 时由 AC78 workflow 全量验证；本任务按令不跑全量 suite）。
 
 ## Definition of Done
 
-- [ ] 15+4 路由全部有截图 + 真实 HTTP 页面验证（非只存图）；Web UI 文档页完整；取图来源开发树已定死（真实输出）。
+- [x] 15+4 路由全部有截图 + 真实 HTTP 页面验证（非只存图）；Web UI 文档页完整；取图来源开发树已定死（真实输出）。
 
 ## Evidence
 
