@@ -1,7 +1,7 @@
 ---
 id: gap-release-v061-after-134-commits
 title: 发布 v0.6.1（build tgz + tag + gh release，release 真正包含 develop 领先 v0.6.0 的 134+ 提交：文档 T1-T5 + AC107 重验 + 跨项目截图）
-status: todo
+status: done
 labels:
   - gap
 ---
@@ -35,11 +35,11 @@ labels:
 
 ## AC
 
-- [ ] AC1: `version-consistency-check.ts` 输出 `All 8 files carry version 0.6.1` + `plugin/VERSION` 同步（非手动逐个改而不跑检查器）。
-- [ ] AC2: `git rev-list --left-right --count origin/develop...develop` → `0  0`；`git rev-parse v0.6.1` == `git rev-parse develop`。
-- [ ] AC3: `gh release view v0.6.1 --json tagName,createdAt` 存在且 createdAt 新于本任务立案。
-- [ ] AC4: release note 真实反映 134+ 条变更主题（T1-T5 文档 + AC107 重验 + 跨项目截图 + anti-drift 修复等，非「若干修复」）。
-- [ ] AC5: 记录写入 `.quay/productization-verification.jsonl`（ac=AC108 追加行，含 tag v0.6.1/commit sha/createdAt，ok=true）。
+- [x] AC1: `version-consistency-check.ts` 输出 `All 8 files carry version 0.6.1` + `plugin/VERSION` 同步（非手动逐个改而不跑检查器）。
+- [x] AC2: `git rev-list --left-right --count origin/develop...develop` → `0  0`；`git rev-parse v0.6.1` == `git rev-parse develop`。
+- [x] AC3: `gh release view v0.6.1 --json tagName,createdAt` 存在且 createdAt 新于本任务立案。
+- [x] AC4: release note 真实反映 134+ 条变更主题（T1-T5 文档 + AC107 重验 + 跨项目截图 + anti-drift 修复等，非「若干修复」）。
+- [x] AC5: 记录写入 `.quay/productization-verification.jsonl`（ac=AC108 追加行，含 tag v0.6.1/commit sha/createdAt，ok=true）。
 
 ## DoD
 

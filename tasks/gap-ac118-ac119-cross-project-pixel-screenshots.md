@@ -1,7 +1,7 @@
 ---
 id: gap-ac118-ac119-cross-project-pixel-screenshots
 title: AC118/119 跨项目像素截图补验证（B 机 meta-cc quay serve + headless chrome 截图，同次满足跨项目+截图）
-status: todo
+status: done
 labels:
   - gap
 ---
@@ -33,9 +33,9 @@ labels:
 
 ## AC
 
-- [ ] AC1: 同一次行动中，B/C 上 `quay serve` 指向 meta-cc 项目数据面 + 真实 HTTP 内容断言（非 curl 探活）。
-- [ ] AC2: ≥3 张真实像素 PNG 截图（headless chrome），截图显示 meta-cc 项目自己的数据（非 quay 演示/空白），`file` + 像素核验可查。
-- [ ] AC3: 记录写入主检出 `.quay/productization-verification.jsonl`（ac=AC118 追加行，含 host/project/serve_port/截图清单/sha256，ok=true），时刻新于本任务立案。
+- [x] AC1: 同一次行动中，B/C 上 `quay serve` 指向 meta-cc 项目数据面 + 真实 HTTP 内容断言（非 curl 探活）。
+- [x] AC2: ≥3 张真实像素 PNG 截图（headless chrome），截图显示 meta-cc 项目自己的数据（非 quay 演示/空白），`file` + 像素核验可查。
+- [x] AC3: 记录写入主检出 `.quay/productization-verification.jsonl`（ac=AC118 追加行，含 host/project/serve_port/截图清单/sha256，ok=true），时刻新于本任务立案。
 
 ## DoD
 
