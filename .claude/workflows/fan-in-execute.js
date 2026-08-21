@@ -166,8 +166,19 @@ bash ${worktree}/plugin/scripts/tmux-leak-scan.sh --snapshot ${worktree} >/dev/n
 # 让第 3+ suite 等够 slot 释放而不是 fail-closed。
 suite_lock_timeout="\${FULL_SUITE_LOCK_TIMEOUT:-${suiteLockTimeoutSecs}}"
 # GNU time 捕获 CPU（判据3 的 cpu_time_s）；GNU time 不可用 ⇒ 保持 null + not-wired（AC6，绝不写 0）。
-setsid env FULL_SUITE_LOCK_TIMEOUT="$suite_lock_timeout" bash -c 'cd "$1" && { if command -v /usr/bin/time >/dev/null 2>&1; then /usr/bin/time -o "$2" -f "%U %S" bash scripts/test.sh; else bash scripts/test.sh; fi; } >> "$3" 2>&1; rc=$?; printf "exit=%s\\nend_ms=%s\\nend_iso=%s\\n" "$rc" "$(date +%s%3N)" "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)" > "$4"' _ "${worktree}" "$suite_time_file" "$suite_log_file" "$suite_exit_marker" & disown
-suite_pid=$!
+# gap-suite-wait-bash-stale-pid-poll 修正（生产实测 2026-08-21，负控制 3 行确认）：$! 是 setsid 父进程 PID——
+# setsid 检测到调用方是进程组组长即 fork，父进程立即退出（负控制实测 $! 恒 DEAD、wrapper $$ 恒 ALIVE）
+# ⇒ kill -0 $! 恒失败，误报 suite-pid-dead（真实 suite 存活而 poller 判死，阻塞全部 fan-in）。
+# 改由 wrapper 首行自写 $$（session leader，生命周期=整个 suite）到 pidfile 作为 suite_pid——poller 核验
+# 它才是真实存活信号；pidfile 读不到 ⇒ suite_pid 空，poller 退回纯 .exit 轮询（安全兜底）。
+suite_pid_file="/tmp/fan-in-suite-${task}.pid"
+rm -f "$suite_pid_file"
+setsid env FULL_SUITE_LOCK_TIMEOUT="$suite_lock_timeout" bash -c 'echo $$ > "$5"; cd "$1" && { if command -v /usr/bin/time >/dev/null 2>&1; then /usr/bin/time -o "$2" -f "%U %S" bash scripts/test.sh; else bash scripts/test.sh; fi; } >> "$3" 2>&1; rc=$?; printf "exit=%s\\nend_ms=%s\\nend_iso=%s\\n" "$rc" "$(date +%s%3N)" "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)" > "$4"' _ "${worktree}" "$suite_time_file" "$suite_log_file" "$suite_exit_marker" "$suite_pid_file" & disown
+suite_pid=""
+for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+  if [ -s "$suite_pid_file" ]; then suite_pid=$(cat "$suite_pid_file"); break; fi
+  sleep 0.1
+done
 printf 'suite_pid=%s\\n' "$suite_pid" >> "$suite_capture"`
 
 // ── C11 隔离重跑启动（gap-gate-release-no-isolate-rerun-no-livelock AC1）────────────────────────────
@@ -199,8 +210,16 @@ isolate_files=$(tr '\\n' ' ' < "/tmp/fan-in-scope-isolate-${task}.files" 2>/dev/
 # single-flight 锁等待上调（gap-single-flight-lock-wait-shorter-than-suite）：与 SUITE_LAUNCH 同一语义，
 # 隔离重跑也走 scripts/test.sh（受 single-flight 锁约束），同样把 FULL_SUITE_LOCK_TIMEOUT 提到 ≥ suite 时长。
 suite_lock_timeout="\${FULL_SUITE_LOCK_TIMEOUT:-${suiteLockTimeoutSecs}}"
-setsid env SUITE_ISOLATE_FILES="$isolate_files" FULL_SUITE_LOCK_TIMEOUT="$suite_lock_timeout" bash -c 'cd "$1" && { bash scripts/test.sh $SUITE_ISOLATE_FILES; } >> "$2" 2>&1; rc=$?; printf "exit=%s\\nend_ms=%s\\nend_iso=%s\\n" "$rc" "$(date +%s%3N)" "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)" > "$3"' _ "${worktree}" "$suite_log_file" "$suite_exit_marker" & disown
-suite_pid=$!
+# gap-suite-wait-bash-stale-pid-poll 修正同 SUITE_LAUNCH：$! 是 setsid 父进程 PID（fork 即退），kill -0 恒
+# 失败误报死进程 ⇒ 改由 wrapper 首行自写 $$ 到 pidfile（session leader）作为 suite_pid（硬规则 5b 全实例）。
+suite_pid_file="/tmp/fan-in-suite-${task}.pid"
+rm -f "$suite_pid_file"
+setsid env SUITE_ISOLATE_FILES="$isolate_files" FULL_SUITE_LOCK_TIMEOUT="$suite_lock_timeout" bash -c 'echo $$ > "$4"; cd "$1" && { bash scripts/test.sh $SUITE_ISOLATE_FILES; } >> "$2" 2>&1; rc=$?; printf "exit=%s\\nend_ms=%s\\nend_iso=%s\\n" "$rc" "$(date +%s%3N)" "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)" > "$3"' _ "${worktree}" "$suite_log_file" "$suite_exit_marker" "$suite_pid_file" & disown
+suite_pid=""
+for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+  if [ -s "$suite_pid_file" ]; then suite_pid=$(cat "$suite_pid_file"); break; fi
+  sleep 0.1
+done
 printf 'suite_pid=%s\\n' "$suite_pid" >> "$suite_capture"
 # isolate-launch-block-end`
 

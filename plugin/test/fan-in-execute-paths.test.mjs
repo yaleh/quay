@@ -1688,6 +1688,11 @@ test("⑧ turn-budget 取假 — phase-1 suite-launch DETACHES (setsid + & + dis
   assert.ok(launch.includes("suite_exit_marker"), "suite-launch must define the exit marker (the script-owned wait signal)");
   assert.ok(launch.includes('rc=$?'), "the detached wrapper must capture the suite exit code");
   assert.ok(launch.includes('printf "exit=%s'), "the detached wrapper must write the exit code to the marker");
+  // gap-suite-wait-bash-stale-pid-poll：suite_pid 必须是 wrapper 自写的真实 PID（pidfile），NOT 瞬态
+  // setsid 父进程（$! fork 即退——kill -0 恒失败误报死进程，生产实测 2026-08-21，负控制 3 行确认）。
+  assert.ok(launch.includes("suite_pid_file="), "suite-launch must write the wrapper PID to a pidfile (kill -0 polls a live process — gap-suite-wait-bash-stale-pid-poll)");
+  assert.ok(launch.includes('echo $$ >'), "the detached wrapper must self-record its PID ($$ = session leader) into the pidfile");
+  assert.ok(!launch.includes("suite_pid=$!"), "suite-launch must NOT record the transient setsid parent PID ($! is dead — fork-and-exit)");
   // ⛔ NOT the two forbidden forms (f6b824b5 实证: Bash(run_in_background:true) 死于 subagent 退出; 前台 bash 超 10min 上限).
   // Only the EXECUTABLE lines matter — the comments legitimately name the forbidden form to forbid it.
   const execLines = launch.split("\n").filter((l) => !l.trim().startsWith("#"));
@@ -1859,7 +1864,7 @@ test("⑧ turn-budget REAL — a real detached suite (setsid) + the real poll bl
 
   const codeDeltaFile = `/tmp/fan-in-code-delta-${task}.txt`;
   fs.writeFileSync(codeDeltaFile, "plugin/workflows/fan-in-execute.js\n");
-  t.after(() => { for (const f of [`/tmp/fan-in-suite-${task}.env`, `/tmp/fan-in-suite-${task}.exit`, `/tmp/fan-in-suite-${task}.time`, `/tmp/fan-in-suite-${task}.log`, codeDeltaFile]) { try { fs.rmSync(f, { force: true }); } catch (_) { /* best-effort */ } } });
+  t.after(() => { for (const f of [`/tmp/fan-in-suite-${task}.env`, `/tmp/fan-in-suite-${task}.exit`, `/tmp/fan-in-suite-${task}.time`, `/tmp/fan-in-suite-${task}.log`, `/tmp/fan-in-suite-${task}.pid`, codeDeltaFile]) { try { fs.rmSync(f, { force: true }); } catch (_) { /* best-effort */ } } });
 
   const { prompts } = await runWorkflow({
     args: { task, worktree: dir, root: REPO_ROOT, runId: "fm-tb-real", mergeTarget: "develop" },
@@ -2236,7 +2241,7 @@ test("⑧ duration REAL — wall_ms equals the suite TRUE wall clock (marker end
 
   const codeDeltaFile = `/tmp/fan-in-code-delta-${task}.txt`;
   fs.writeFileSync(codeDeltaFile, "plugin/workflows/fan-in-execute.js\n");
-  t.after(() => { for (const f of [`/tmp/fan-in-suite-${task}.env`, `/tmp/fan-in-suite-${task}.exit`, `/tmp/fan-in-suite-${task}.time`, `/tmp/fan-in-suite-${task}.log`, codeDeltaFile]) { try { fs.rmSync(f, { force: true }); } catch (_) { /* best-effort */ } } });
+  t.after(() => { for (const f of [`/tmp/fan-in-suite-${task}.env`, `/tmp/fan-in-suite-${task}.exit`, `/tmp/fan-in-suite-${task}.time`, `/tmp/fan-in-suite-${task}.log`, `/tmp/fan-in-suite-${task}.pid`, codeDeltaFile]) { try { fs.rmSync(f, { force: true }); } catch (_) { /* best-effort */ } } });
 
   const { prompts } = await runWorkflow({
     args: { task, worktree: dir, root: REPO_ROOT, runId: "fm-tb-duration", mergeTarget: "develop" },
