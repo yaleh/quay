@@ -82,4 +82,5 @@ depends_on:
 - plugin/test/suite-bucket-select.test.mjs（new —— 选择器单测）
 - plugin/scripts/capability-catalog.sh（new script 注册：catalog 声明行）
 - docs/proposals/quay-product-outline.md（new script 注册：§6 delivery-inventory 快照）
+- plugin/test/resource-gate.test.mjs（--buckets 接线使 derived-concurrency 计数 5→6，合法连带）
 - tasks/gap-ac124-suite-bucket-production-carrier-benefit.md（自身）
