@@ -1,7 +1,7 @@
 ---
 id: gap-ac107-cross-host-mechanized-verify
 title: AC107 跨主机机制化验证：verify-deliver-coldstart.sh 对 B/C 各跑完整三步（直接量活性判据，非手工一次性）
-status: done
+status: ready
 labels:
   - gap
   - mechanism
@@ -39,10 +39,10 @@ extra:
 
 ## Acceptance Criteria
 
-- [x] AC1: B=orangevps 完整三步跑通（干净 .tgz 安装 + quay-init + 双层冷启动活性，直接量判据）。
-- [x] AC2: C=ad-arm1 完整三步跑通（同上）。
-- [x] AC3: 验证 commit sha 新于 2026-08-20 + 产物 sha256 已记录（取假：旧于切换或引历史验证 ⇒ 未达成）。
-- [x] AC4: 记录写入 `.quay/productization-verification.jsonl`（`ac="AC107"`）。
+- [ ] AC1: B=orangevps 完整三步跑通（干净 .tgz 安装 + quay-init + 双层冷启动活性，直接量判据）。
+- [ ] AC2: C=ad-arm1 完整三步跑通（同上）。
+- [ ] AC3: 验证 commit sha 新于 2026-08-20 + 产物 sha256 已记录（取假：旧于切换或引历史验证 ⇒ 未达成）。
+- [ ] AC4: 记录写入 `.quay/productization-verification.jsonl`（`ac="AC107"`）。
 
 ## Definition of Done
 

@@ -324,13 +324,44 @@ FAIL — acceptance failed (exit 1)
 DEMO-2: FAIL — acceptance failed (exit 1) (left ready)
 ```
 
-### `quay serve [--port <port>]`
+### `quay serve [--host <host>] [--port <port>]`
 
-Starts the web UI (task list + detail pages). The list page supports the
-same filter/sort/search affordances as the CLI, plus a `?pageSize=` query
-param (10/20/50/100 selector rendered on the page) mirroring `--page-size`.
-An invalid `?pageSize=` value falls back to the default (20) with a visible
-warning banner, rather than silently showing everything.
+Starts the web UI. Defaults to binding `0.0.0.0` on port `4173`; pass
+`--host` to bind a specific interface (e.g. `127.0.0.1` for a localhost-only
+binding) and `--port` for a different port:
+
+```sh
+node --experimental-strip-types packages/quay/bin/quay.ts serve --host 0.0.0.0 --port 4173
+```
+
+The UI renders the full 15-view site nav — four groups — plus per-item
+detail pages:
+
+- **核心 (Core)** — `Dashboard` (the landing page; `/` redirects here),
+  `Tasks`.
+- **观测 (Observation)** — `Live`, `Board`, `System`, `Manager`.
+- **记录 (Records)** — `Journal`, `Git History`, `Tests`, `Sessions`.
+- **知识 (Knowledge)** — `ADRs`, `Goals`, `Docs`, `Architecture`.
+
+View highlights:
+
+- **Dashboard** — the landing page, with a task-ledger card and workspace
+  status.
+- **Tasks** — the task board. The list page supports the same
+  filter/sort/search affordances as the CLI, plus a `?pageSize=` query
+  param (10/20/50/100 selector rendered on the page) mirroring
+  `--page-size`. An invalid `?pageSize=` value falls back to the default
+  (20) with a visible warning banner, rather than silently showing
+  everything. Each task links to a `/task/<id>` detail page.
+- **Live** / **Board** / **System** / **Manager** — workspace observation:
+  live loop state, the intent/execution/landing inconsistency verdict,
+  resource-gate + process-budget system status, and the manager view.
+- **Journal** / **Git History** / **Tests** / **Sessions** — records: the
+  loop journal (escalations, tick log, recent commits), a server-rendered
+  commit-landing timeline SVG, the test-suite view, and session history.
+- **ADRs** / **Goals** / **Docs** / **Architecture** — knowledge: list +
+  detail pages for each kind (`/adr` + `/adr/<id>`, `/goal` + `/goal/<id>`,
+  `/doc` + `/doc/<id>`), plus the architecture view.
 
 ### `quay mcp`
 
