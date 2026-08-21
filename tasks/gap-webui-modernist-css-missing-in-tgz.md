@@ -31,13 +31,15 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: 修复后 `quay serve` 的产物包含 webui-modernist.css（bundle 或 tgz 内含），读取路径正确。
-- [ ] AC2: 负控制落在生产载体——真实 serve 下页面 `<style>` 非空（读真实 HTTP 响应，非 fixture）。
+- [x] AC1: 修复后 `quay serve` 的产物包含 webui-modernist.css（bundle 或 tgz 内含），读取路径正确。
+- [x] AC2: 负控制落在生产载体——真实 serve 下页面 `<style>` 非空（读真实 HTTP 响应，非 fixture）。
 - [ ] AC3: 全量 suite 绿。
 
 ## Definition of Done
 
-- [ ] webui-modernist.css 随打包产物正确分发；真实 serve 下 `<style>` 非空（真实输出）。
+- [x] webui-modernist.css 随打包产物正确分发；真实 serve 下 `<style>` 非空（真实输出）。
+
+commit: d10be403
 
 ## Touches
 
