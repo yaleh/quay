@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-execute-tmux-leak-scan-unanchored
 title: "fan-in-execute.js:180 的 `/tmux-leak-scan: FAIL/` 正则未 ^ 锚定——同缺陷第二份（5b 实例），匹配测试描述文本假阳性"
-status: done
+status: ready
 labels:
   - gap
   - mechanism
