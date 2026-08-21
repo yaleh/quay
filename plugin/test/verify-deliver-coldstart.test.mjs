@@ -52,6 +52,16 @@ test("AC2+AC5 — --selfcheck exits 0, reports PASS, and exercises both direct-m
     "negative control: only a chore(quay-init) auto-commit must NOT be live (hard rule 4b)");
   assert.match(r.stdout, /alive\(recent-non-chore-commit\) L1_OK=1 COLDSTART_LIVE=yes/,
     "positive control: a real loop commit must be live");
+  // AC1 regression (gap-verify-deliver-coldstart-l2-proc-ok-false-positive): proc_ok must NOT be
+  // a standalone sufficient liveness signal when a two-layer pane is stuck at the startup
+  // permission-prompt — even with >=2 claude/node processes in the project (B/C 实测 4 进程卡
+  // "Quick safety check" 弹窗 6.2h, coldstart_live 曾由 proc_ok 单独撑起).
+  assert.match(r.stdout, /prompt-blocked\(procs=2,prompt=1\) L2_OK=0 COLDSTART_LIVE=no/,
+    "negative control: procs present BUT startup-prompt ⇒ proc_ok demoted, NOT live (hard rule 4b)");
+  assert.match(r.stdout, /prompt-passed\(procs=2,prompt=0\) L2_OK=1 COLDSTART_LIVE=yes/,
+    "positive control: procs present AND startup-prompt passed ⇒ proc_ok is a live signal");
+  assert.match(r.stdout, /pane-verdict-permission-intervention=1/,
+    "reuse wiring: pane-state-classify --pane-verdict classifies the real trust-prompt as intervention (AC1 复用不新造)");
   // AC5 controls (criterion takes false/true and has a distinct not-evaluated state)
   assert.match(r.stdout, /ac5-positive\(recent-build\) eval=1 ok=1/,
     "AC5 positive: build after the 2026-08-16 phase switch must be ok");
