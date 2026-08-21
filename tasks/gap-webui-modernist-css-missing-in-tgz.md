@@ -1,7 +1,7 @@
 ---
 id: gap-webui-modernist-css-missing-in-tgz
 title: webui-modernist.css 打包缺失：serve 页面 200 但 <style> 为空（AC119 跨项目验证发现）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -31,17 +31,20 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: 修复后 `quay serve` 的产物包含 webui-modernist.css（bundle 或 tgz 内含），读取路径正确。
-- [ ] AC2: 负控制落在生产载体——真实 serve 下页面 `<style>` 非空（读真实 HTTP 响应，非 fixture）。
-- [ ] AC3: 全量 suite 绿。
+- [x] AC1: 修复后 `quay serve` 的产物包含 webui-modernist.css（bundle 或 tgz 内含），读取路径正确。
+- [x] AC2: 负控制落在生产载体——真实 serve 下页面 `<style>` 非空（读真实 HTTP 响应，非 fixture）。
+- [x] AC3: 全量 suite 绿。
 
 ## Definition of Done
 
-- [ ] webui-modernist.css 随打包产物正确分发；真实 serve 下 `<style>` 非空（真实输出）。
+- [x] webui-modernist.css 随打包产物正确分发；真实 serve 下 `<style>` 非空（真实输出）。
+
+commit: d10be403
 
 ## Touches
 
 - packages/quay/src/serve-handlers.ts（CSS 读取路径——若需改）
-- packages/quay/scripts/package.sh 或打包配置（tgz 内含 CSS——若需改）
+- packages/quay/scripts/build-dist.mjs（dist 打包入口——CSS inline 进 bundle）
+- packages/quay/test/build-dist.test.mjs（打包测试——inline CSS + 真实 serve <style> 非空）
 - packages/quay/src/webui-modernist.css（CSS 文件本身，若需复制到分发位）
 - tasks/gap-webui-modernist-css-missing-in-tgz.md（自身）

@@ -39,6 +39,24 @@ const DEFAULT_OUTFILE = path.resolve(pkgDir, "dist/quay.js");
 export const REQUIRE_BANNER =
   'import { createRequire } from "node:module"; const require = createRequire(import.meta.url);';
 
+// gap-webui-modernist-css-missing-in-tgz: the dist bundle must be SELF-CONTAINED
+// for the Web UI stylesheet. serve-handlers.ts reads the Modernist token sheet
+// (webui-modernist.css) relative to its own location — from src/ the file sits
+// beside it, but from the bundled dist/quay.js it does NOT (npm pack ships the
+// file under src/, never dist/), so every bundled `quay serve` logged
+// `webui-modernist.css missing: ENOENT` and served an empty <style>. Rather than
+// making every downstream copy (npm-pack tarball, plugin/vendor/quay/dist,
+// quay-init's .quay/runtime laydown) drag a sibling .css file around, INLINE the
+// stylesheet into the bundle at build time: the banner sets
+// globalThis.__WEBUI_MODERNIST_CSS__ before any module executes, and
+// serve-handlers.ts prefers that inlined value over its readFileSync fallback
+// (which still covers source-tree runs under node --experimental-strip-types).
+export function buildBanner() {
+  const cssPath = path.resolve(pkgDir, "src", "webui-modernist.css");
+  const css = fs.readFileSync(cssPath, "utf8");
+  return `${REQUIRE_BANNER}\nglobalThis.__WEBUI_MODERNIST_CSS__ = ${JSON.stringify(css)};`;
+}
+
 /**
  * Build the ESM dist bundle. Resolves the entrypoint from (in order) the
  * `entry` option, the QUAY_BUILD_DIST_ENTRY env var (a testability hook for the
@@ -68,7 +86,7 @@ export async function buildDist(opts = {}) {
       // runtime never readFileSyncs a sibling package.json — the vendored plugin/vendor/quay/
       // dist/quay.js is truly self-contained (runs standalone with no package.json beside it).
       loader: { ".json": "json" },
-      banner: { js: REQUIRE_BANNER },
+      banner: { js: buildBanner() },
       logLevel: "info",
     });
   } catch (err) {

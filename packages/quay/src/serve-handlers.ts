@@ -349,7 +349,18 @@ hr { border: none; border-top: 1px solid var(--color-divider); margin: 1rem 0; }
 // detail-page code segments must be 0 — the hex lives only in the .css asset).
 // webui-modernist-sync.test.mjs asserts the product copy is byte-identical to
 // the design source, which is what makes "same style source" mechanically true.
+//
+// gap-webui-modernist-css-missing-in-tgz: the canonical product copy lives
+// beside this file in src/ (so source-tree runs read it fine), but the bundled
+// dist/quay.js has no sibling .css — npm pack ships the file under src/, never
+// dist/ — so every bundled serve logged ENOENT and served an empty <style>.
+// build-dist.mjs now INLINES the stylesheet into the bundle (its banner sets
+// globalThis.__WEBUI_MODERNIST_CSS__ before any module executes), making the
+// dist self-contained. Prefer that inlined value when present; fall back to the
+// sibling-file read for source runs (node --experimental-strip-types).
+const __webuiCssGlobal = globalThis as unknown as { __WEBUI_MODERNIST_CSS__?: string };
 const WEBUI_MODERNIST_CSS = (() => {
+  if (__webuiCssGlobal.__WEBUI_MODERNIST_CSS__ !== undefined) return __webuiCssGlobal.__WEBUI_MODERNIST_CSS__;
   try {
     return readFileSync(new URL("./webui-modernist.css", import.meta.url), "utf8");
   } catch (err) {
