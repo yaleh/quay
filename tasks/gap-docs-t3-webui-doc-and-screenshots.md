@@ -30,7 +30,7 @@ extra:
 1. 对 15 条精确路由 + 4 条详情路由，各截一图（google-chrome --headless=new，开发树 serve，复用 AC100 流程）。
 2. 每张截图对应路由：真实 HTTP 请求断言页面内容 + 关键元素（AC119 手法——非 curl 探活）。
 3. 写 Web UI 用户文档页 `docs/webui-guide.md`（15 路由 + 4 详情全列出，含截图）。
-4. 截图存 `docs/images/webui-*.png`，文档引用。
+4. 截图存 `docs/images/webui-*`，文档引用。
 
 ## Acceptance Criteria
 
@@ -55,7 +55,7 @@ extra:
   （`/`、`/dashboard`、`/tasks`、`/system`、`/manager`、`/tests`、`/sessions`、`/architecture`、
   `/live`、`/journal`、`/git-history`、`/board`、`/adr`、`/goal`、`/doc` +
   `/adr/:id`、`/goal/:id`、`/doc/:id`、`/task/:id`）= 文档全覆盖，差 0。
-- 19 张截图全部在 `docs/images/webui-*.png` 且全部被文档引用（grep 核对 19/19 无遗漏引用、无悬空引用）。
+- 19 张截图全部在 `docs/images/webui-*` 且全部被文档引用（grep 核对 19/19 无遗漏引用、无悬空引用）。
 
 **AC2 — 每张截图对应路由真实 HTTP 断言（AC119 手法，非 curl 探活）**
 - `docs/capture-webui-screenshots.sh` 对每条路由：curl 取回页面内容（`/` 断言 302 + `Location: /dashboard`，
@@ -82,7 +82,7 @@ extra:
 ## Touches
 
 - docs/webui-guide.md（新增——Web UI 用户文档页，19 路由全列表 + 截图引用 + 启动命令含 --host）
-- docs/images/webui-*.png（新增——19 张截图：15 精确路由 + 4 详情；含 webui-screenshots.tsv 清单）
+- docs/images/webui-*（新增——19 张截图：15 精确路由 + 4 详情；含 webui-screenshots.tsv 清单）
 - docs/capture-webui-screenshots.sh（新增——截图+真实 HTTP 断言+像素核验脚本，复用 AC100/AC119 流程）
 - docs/verify-webui-screenshot.mjs（新增——PNG 像素核验：Modernist 浅底/深色正文/accent，判非空白页）
 - goals/AC-100-webui-detail-pages-modernist-tokens.md（**本地 demo 数据，不提交**——/goal/:id 详情页渲染用，AC100 同款 demo workspace 做法）
