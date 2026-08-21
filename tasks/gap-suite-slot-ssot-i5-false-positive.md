@@ -35,8 +35,8 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: I5 探针在隔离环境跑（独立临时锁目录 / mock base），不与真实持锁者混计（能取假：有并发 suite 时 I5 仍误判红 ⇒ 未修好）。
-- [ ] AC2: 探针区分「自己 acquirer 持锁」vs「外部第三方持锁者」（诊断输出，非笼统「N/M held」）。
+- [x] AC1: I5 探针在隔离环境跑（独立临时锁目录 / mock base），不与真实持锁者混计（能取假：有并发 suite 时 I5 仍误判红 ⇒ 未修好）。
+- [x] AC2: 探针区分「自己 acquirer 持锁」vs「外部第三方持锁者」（诊断输出，非笼统「N/M held」）。
 - [ ] AC3: 负控制落在生产载体——真实 fan-in suite 在有并发 suite 的宿主上跑，I5 不再误判红（读真实 suite 结果，非 fixture）。
 - [ ] AC4: 全量 suite 绿。
 
