@@ -1,7 +1,7 @@
 ---
 id: gap-manager-layer-launch-config-test-pin-deepseek-v4-pro
 title: manager-layer 测试 model pin 同步到 deepseek-v4-pro（e21e843d 欠账）——当前阻塞所有 fan-in
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
