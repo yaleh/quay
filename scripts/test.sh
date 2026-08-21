@@ -737,6 +737,24 @@ run_static_checks() {
   # as a main run ⇒ verdicts identical (AC3: gap-ac81 caught red in the round, never masked); on a main
   # run main_root == repo_root ⇒ unchanged (AC2: real drift stays red).
   run_checker "fan-in-workflow-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/fan-in-workflow-check.ts" --root "${main_root}" --json
+  echo "== fan-in-materialize-check (gap-workflow-scriptpath-materialize-falls-back-main — workflow scriptPath 静默回退主检出版) =="
+  # Detects the M176-family materialization fallback: a bootstrap-HIT fan-in dispatched with
+  # scriptPath=<worktree>/.claude/workflows/fan-in-execute.js must run the WORKTREE version (so the
+  # task's own fix to the pipeline is verified by its own fan-in), but the SDK sometimes silently
+  # materializes the MAIN checkout version. This checker reads the PRODUCTION CARRIER — the SDK-written
+  # ~/.claude/projects/<slug>/<session>/workflows/wf_*.json records (which carry BOTH the passed
+  # scriptPath AND the materialized script content) — and verifies the materialized script matches the
+  # worktree version. DECISIVE when the worktree file is on disk (in-flight / just-fan-in'd); for GONE
+  # worktrees it reconstructs the worktree states from .workflow-events + git and is conservative
+  # (intermediate/partial ⇒ NOT-EVALUATED, never RED — 硬规则 3b). RED on a proven fallback (the
+  # materialized script equals the pre-task base while the task's own commits touched the workflow).
+  # @static-tier change
+  # @static-object plugin/scripts/fan-in-materialize-check.ts plugin/scripts/select-static-checks-for-touches.ts .claude/workflows/fan-in-execute.js plugin/test/fan-in-materialize-check.test.mjs
+  # --root main_root (gap-gitignored-carriers-absent-in-verify-worktree): the wf_*.json records +
+  # .workflow-events + task Touches this checker audits are MAIN-checkout state, absent from the
+  # one-shot verify worktree. Pointing --root at the main checkout makes the worktree round read the
+  # SAME data as a main run ⇒ verdicts identical; on a main run main_root == repo_root ⇒ unchanged.
+  run_checker "fan-in-materialize-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/fan-in-materialize-check.ts" --root "${main_root}" --json
   echo "== direct-to-develop-bypass-check (gap-direct-to-develop-bypasses-fan-in-gates — 直接提交 develop 绕过 fan-in 机件) =="
   # 直接提交 develop（reflog action = commit，区别于 fan-in 的 merge … Fast-forward）∧ 触及代码/断言面
   # ∧ 不在 ff-lock 时间窗内 ⇒ RED（11b/C17 写所有权/越权直改面）。排除集（denominator 谓词）与
