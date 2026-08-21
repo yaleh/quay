@@ -1,7 +1,7 @@
 ---
 id: gap-docs-t1-changelog-backfill
 title: T1 CHANGELOG 补 v0.4/v0.5/v0.6 三节（现有 git tag 而文档零命中，指针文件过时）
-status: ready
+status: done
 labels:
   - gap
   - docs
@@ -31,7 +31,7 @@ extra:
 
 - [x] AC1: `CHANGELOG.md` 顶层含 v0.4.0 / v0.5.0 / v0.6.0 三节（`grep '^## v0\.[456]' CHANGELOG.md` 命中 ≥3）。
 - [x] AC2: `packages/quay/CHANGELOG.md` 指针更新（不再说 "starting with v0.3.x"；可 `grep -v 'starting with v0.3'` 验证）。
-- [ ] AC3: 全量 suite 绿。
+- [x] AC3: 全量 suite 绿。
 
 ## Definition of Done
 
