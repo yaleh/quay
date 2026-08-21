@@ -50,4 +50,5 @@ depends_on:
 
 - scripts/test.sh（启用分桶执行的接线点）
 - plugin/scripts/full-suite-runner.ts（启用分桶执行的接线点）
+- plugin/test/resource-gate.test.mjs（--buckets 接线使 derived-concurrency 计数 5→6，合法连带）
 - tasks/gap-ac124-suite-bucket-production-carrier-benefit.md（自身）
