@@ -1,7 +1,7 @@
 ---
 id: gap-suite-wait-bash-stale-pid-poll
 title: SUITE_WAIT_BASH poller 死进程空转：纯 .exit 文件检查不核验 suite_pid（阻塞全部 fan-in，硬规则 4）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -41,7 +41,7 @@ extra:
 - [x] AC1: poller 每次 sleep 间隔核验 `kill -0 $suite_pid`（从 .env 读 pid），不纯靠 .exit 文件存在性。
 - [x] AC2: suite 进程死亡且 .exit 未写 ⇒ 写可区分失败态（`SUITE_PID_DEAD`）交回主循环，不耗尽 540s 空转。
 - [x] AC3: 负控制落在生产载体——真实 suite 进程静默死亡场景，poller 快速识别并重派（读真实 fan-in 结果，非 fixture）。
-- [ ] AC4: 全量 suite 绿。
+- [x] AC4: 全量 suite 绿。
 
 ## Definition of Done
 
