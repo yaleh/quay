@@ -50,5 +50,25 @@ DIR-103-B、gap-ac65-direct-fix-vs-bypass-detector-conflict、gap-ac66-a22-check
 
 ## Touches
 
-- tasks/*.md（父任务 AC1 清单里的存量任务，逐个加标注）
+- tasks/DIR-103-B.md
+- tasks/gap-ac65-direct-fix-vs-bypass-detector-conflict.md
+- tasks/gap-ac66-a22-checker-loose-pattern.md
+- tasks/gap-ac80-anchor-prompt-consumer-path-fix.md
+- tasks/gap-ac81-anchor-check-canonical-live-byte-mismatch.md
+- tasks/gap-ac86-dist-verify-node-floor-equivalent-path.md
+- tasks/gap-ac88-verification-mechanism-extend-deliver.md
+- tasks/gap-ac89-productization-verification-record.md
+- tasks/gap-ac90-delivery-copy-drift-gate.md
+- tasks/gap-ac92-delivery-verify-usage-intersection.md
+- tasks/gap-ac93-dist-chains-version-consistency.md
+- tasks/gap-ac97-webui-zero-cost-gaps.md
+- tasks/gap-direct-to-develop-exclude-manager-skill-granularity.md
+- tasks/gap-ff-livelock-trigger-no-action.md
+- tasks/gap-gitignored-carriers-absent-in-verify-worktree.md
+- tasks/gap-quay-init-laydown-missing-touches-checker.md
+- tasks/gap-refresh-worktree-quay-main-derive.md
+- tasks/gap-spec-reference-doc-declare-init-skill.md
+- tasks/gap-static-check-red-failures0-misattributed.md
+- tasks/gap-tick-core-drift-fast-mode-mode-conflict.md
+- tasks/gap-touches-one-entry-detector-not-enforcer.md（存量标注——父任务 AC1 清单 21 个假跳过任务逐个加标注）
 - tasks/gap-fan-in-delta-scope-inventory-annotate.md（自身）
