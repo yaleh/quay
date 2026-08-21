@@ -1,7 +1,7 @@
 ---
 id: gap-quay-entry-guard-symlink-broken
 title: quay 入口守卫符号链接拓扑恒假：npm install -g 后 quay 命令静默空输出（同族第 3 次，牵连 AC108）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -43,11 +43,11 @@ node <安装路径>/dist/quay.js --version   # 正常输出 0.6.0
 - [x] AC1: `quay --version` 经 npm 全局安装（符号链接拓扑）非空输出 0.6.0（能取假：空输出 ⇒ 未修好）。
 - [x] AC2: 负控制矩阵——source ESM / npm-installed symlinked ESM / SEA CJS 三种调用拓扑各至少一条测试，入口守卫均成立（可机械验证）。
 - [x] AC3: 真实 repro 已复现为负控制（`npm install -g` 隔离 prefix → 符号链接调用 → 非空输出，读真实输出非 fixture）。
-- [ ] AC4: 全量 suite 绿。
+- [x] AC4: 全量 suite 绿。
 
 ## Definition of Done
 
-- [ ] 入口守卫符号链接拓扑修复；负控制矩阵覆盖三种拓扑（source ESM / symlinked ESM / SEA CJS）；真实 repro 验证通过（读真实输出）。
+- [x] 入口守卫符号链接拓扑修复；负控制矩阵覆盖三种拓扑（source ESM / symlinked ESM / SEA CJS）；真实 repro 验证通过（读真实输出）。
 
 ## Touches
 
