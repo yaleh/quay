@@ -30,14 +30,14 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: `ls packages/quay-native/README.md packages/quay-github/README.md` 均存在（npm 页面不再空白）。
-- [ ] AC2: 两包 README 描述各自 provider 的角色与数据形态（quay-native = tasks/*.md 存储；quay-github = Issues 映射）。
-- [ ] AC3: `packages/quay/README.md:327` serve 节已补 `--host` + 全视图描述。
+- [x] AC1: `ls packages/quay-native/README.md packages/quay-github/README.md` 均存在（npm 页面不再空白）。
+- [x] AC2: 两包 README 描述各自 provider 的角色与数据形态（quay-native = tasks/*.md 存储；quay-github = Issues 映射）。
+- [x] AC3: `packages/quay/README.md:327` serve 节已补 `--host` + 全视图描述。
 - [ ] AC4: 全量 suite 绿。
 
 ## Definition of Done
 
-- [ ] 三个包各有 README（真实文件存在）；quay-native/quay-github 描述各自 provider；serve 节已修。
+- [x] 三个包各有 README（真实文件存在）；quay-native/quay-github 描述各自 provider；serve 节已修。
 
 ## Touches
 
