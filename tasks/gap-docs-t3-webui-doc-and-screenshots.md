@@ -34,19 +34,56 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: Web UI 文档页覆盖全部 15 条精确路由 + 4 条详情路由（`serve-handlers.ts:2584-2698` 的精确路由集合 vs 文档 = 差 0）。
-- [ ] AC2: 每张截图对应路由有真实 HTTP 断言（页面 200 + 关键元素存在，AC119 手法——非 curl 探活）。
-- [ ] AC3: 截图真实产出非空白页（像素核验，复用 AC100 判据；仓库已有流程）。
-- [ ] AC4: 截图取**开发树** serve（非打包产物——CSS 缺陷未 land 前打包无样式）；文档注明 serve 命令含 `--host`。
-- [ ] AC5: 全量 suite 绿。
+- [x] AC1: Web UI 文档页覆盖全部 15 条精确路由 + 4 条详情路由（`serve-handlers.ts:2584-2698` 的精确路由集合 vs 文档 = 差 0）。
+- [x] AC2: 每张截图对应路由有真实 HTTP 断言（页面 200 + 关键元素存在，AC119 手法——非 curl 探活）。
+- [x] AC3: 截图真实产出非空白页（像素核验，复用 AC100 判据；仓库已有流程）。
+- [x] AC4: 截图取**开发树** serve（非打包产物——CSS 缺陷未 land 前打包无样式）；文档注明 serve 命令含 `--host`。
+- [ ] AC5: 全量 suite 绿（fan-in 时由 AC78 workflow 全量验证；本任务按令不跑全量 suite）。
 
 ## Definition of Done
 
 - [ ] 15+4 路由全部有截图 + 真实 HTTP 页面验证（非只存图）；Web UI 文档页完整；取图来源开发树已定死（真实输出）。
 
+## Evidence
+
+执行时刻：2026-08-21。worktree `gap-docs-t3-webui-doc-and-screenshots`，开发树
+`node --experimental-strip-types packages/quay/bin/quay.ts serve --host 127.0.0.1 --port 8123`
+（`.quay/config.yml` 为 worktree 本地 gitignored 配置，native provider → 本 worktree 的 tasks/adr）。
+
+**AC1 — 文档覆盖 15 精确 + 4 详情（差 0）**
+- `docs/webui-guide.md` 路由总览表 19 行（15 精确 + 4 详情），逐条核对 `serve-handlers.ts` 门面分发器
+  （`/`、`/dashboard`、`/tasks`、`/system`、`/manager`、`/tests`、`/sessions`、`/architecture`、
+  `/live`、`/journal`、`/git-history`、`/board`、`/adr`、`/goal`、`/doc` +
+  `/adr/:id`、`/goal/:id`、`/doc/:id`、`/task/:id`）= 文档全覆盖，差 0。
+- 19 张截图全部在 `docs/images/webui-*.png` 且全部被文档引用（grep 核对 19/19 无遗漏引用、无悬空引用）。
+
+**AC2 — 每张截图对应路由真实 HTTP 断言（AC119 手法，非 curl 探活）**
+- `docs/capture-webui-screenshots.sh` 对每条路由：curl 取回页面内容（`/` 断言 302 + `Location: /dashboard`，
+  其余断言 HTTP 200 + 页面 `<h1>` 关键元素存在），19/19 全 PASS。
+- 服务端 CSS 已确认渲染：`/dashboard` 页面 `<style>` 含 `--color-bg: #f3f2f2`，chrome-devtools
+  实测 `getComputedStyle(document.body).backgroundColor === "rgb(243, 242, 242)"`（Modernist token 生效）。
+
+**AC3 — 截图非空白（像素核验，AC100 判据）**
+- `docs/verify-webui-screenshot.mjs` 解码 PNG：19/19 均 `verdict: non-blank`
+  （Modernist 浅底 90.9–98.6%、深色正文 0.5–4.5%、accent `#ec3013` 命中 325–4130 px）。
+- 19 张 PNG md5 全不相同（非同一张复制）。
+
+**AC4 — 取图来源开发树 + 文档注明 --host**
+- 截图全部取自行 `node --experimental-strip-types packages/quay/bin/quay.ts serve --host ... --port ...`
+  的开发树服务；`docs/webui-guide.md`「启动」节注明 `--host <ip>` 与 `--port <port>` 及打包产物
+  样式缺失警示（`gap-webui-modernist-css-missing-in-tgz` 未 land 前）。
+
+**数据**：详情路由示例 `/adr/ADR-016`、`/goal/AC-100`、`/doc/DOC-001`、`/task/gap-docs-t3-webui-doc-and-screenshots`
+均 200 渲染真实内容。`goals/AC-100-*.md` 为本地 demo goal-store 记录（AC100 同款 demo workspace 做法，**不提交**），
+用于让 `/goal/:id` 详情页渲染非空页面。
+
+**AC5**：按执行令不跑全量 suite——留待 fan-in（AC78 workflow）全量验证。
+
 ## Touches
 
-- docs/webui-guide.md（新增——Web UI 用户文档页）
-- docs/images/webui-*.png（截图，具体文件按路由定）
-- 截图生成脚本（复用 AC100 流程）
+- docs/webui-guide.md（新增——Web UI 用户文档页，19 路由全列表 + 截图引用 + 启动命令含 --host）
+- docs/images/webui-*.png（新增——19 张截图：15 精确路由 + 4 详情；含 webui-screenshots.tsv 清单）
+- docs/capture-webui-screenshots.sh（新增——截图+真实 HTTP 断言+像素核验脚本，复用 AC100/AC119 流程）
+- docs/verify-webui-screenshot.mjs（新增——PNG 像素核验：Modernist 浅底/深色正文/accent，判非空白页）
+- goals/AC-100-webui-detail-pages-modernist-tokens.md（**本地 demo 数据，不提交**——/goal/:id 详情页渲染用，AC100 同款 demo workspace 做法）
 - tasks/gap-docs-t3-webui-doc-and-screenshots.md（自身）
