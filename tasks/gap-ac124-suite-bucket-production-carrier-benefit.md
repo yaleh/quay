@@ -48,4 +48,6 @@ depends_on:
 
 ## Touches
 
+- scripts/test.sh（启用分桶执行的接线点）
+- plugin/scripts/full-suite-runner.ts（启用分桶执行的接线点）
 - tasks/gap-ac124-suite-bucket-production-carrier-benefit.md（自身）
