@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-execute-tmux-leak-scan-unanchored
 title: "fan-in-execute.js:180 的 `/tmux-leak-scan: FAIL/` 正则未 ^ 锚定——同缺陷第二份（5b 实例），匹配测试描述文本假阳性"
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -23,17 +23,21 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: 把「tmux-leak-scan 未锚定正则」收敛为**单一导出常量**（含 `^` 锚定），`full-suite-runner.ts` / `fan-in-execute.js` / `.claude/workflows/fan-in-execute.js` 三处 import 引用，不再各自持有字符串字面量——「忘同步第二份」结构上不可能。
-- [ ] AC2: 负控制落在生产载体——`✔` 内嵌 `tmux-leak-scan: FAIL` 描述文本的行不触发 leak-residual 误判（读真实 suite-fix 分类，非 fixture）。
-- [ ] AC3: scoped 绿 + 真实末轮 tmux-leak-scan clean 不被误判。
+- [x] AC1: 把「tmux-leak-scan 未锚定正则」收敛为**单一导出常量**（含 `^` 锚定），`full-suite-runner.ts` / `fan-in-execute.js` / `.claude/workflows/fan-in-execute.js` 三处 import 引用，不再各自持有字符串字面量——「忘同步第二份」结构上不可能。
+- [x] AC2: 负控制落在生产载体——`✔` 内嵌 `tmux-leak-scan: FAIL` 描述文本的行不触发 leak-residual 误判（读真实 suite-fix 分类，非 fixture）。
+- [x] AC3: scoped 绿 + 真实末轮 tmux-leak-scan clean 不被误判。
 
 ## Definition of Done
 
-- [ ] 正则单一定义三处引用（锚定），leak-residual 假阳性消除（真实 suite-fix 不再手工解释它），scoped 绿。
+- [x] 正则单一定义三处引用（锚定），leak-residual 假阳性消除（真实 suite-fix 不再手工解释它），scoped 绿。
+
+实现提交：`ece05cd1`（plugin/scripts/tmux-leak-fail-re.ts 单一定义 TMUX_LEAK_FAIL_RE，full-suite-runner.ts + plugin/.claude 双拷贝 fan-in-execute.js 三处 import 引用；负控制测试进 fan-in-execute-paths.test.mjs，88/88 绿）。
 
 ## Touches
 
 - tasks/gap-fan-in-execute-tmux-leak-scan-unanchored.md（自身）
 - plugin/scripts/（导出 tmux-leak-scan 锚定正则常量，具体模块按实现面定）
-- plugin/workflows/fan-in-execute.js（:181 改 import 常量；.claude/workflows/fan-in-execute.js 同步 import）
+- plugin/workflows/fan-in-execute.js（:181 改 import 常量）
+- .claude/workflows/fan-in-execute.js（双拷贝同步 import）
 - plugin/test/fan-in-execute-paths.test.mjs（leak-residual 假阳性负控制）
+- docs/proposals/quay-product-outline.md（新增 plugin/scripts/tmux-leak-fail-re.ts ⇒ DELIVERY-INVENTORY 快照同一变更内再生成，delivery-inventory-drift-gate 强制）
