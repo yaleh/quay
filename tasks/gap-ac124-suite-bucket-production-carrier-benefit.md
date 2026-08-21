@@ -1,7 +1,7 @@
 ---
 id: gap-ac124-suite-bucket-production-carrier-benefit
 title: AC124 分桶收益落生产载体（≥10 轮带桶字段 + P/M 各 ≥3 轮中位数 ≤40% 全量）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -70,7 +70,7 @@ depends_on:
 
 ## Definition of Done
 
-- [ ] 分桶执行启用接线完成 + 桶字段写入实测 + AC1/AC2 按 manager 裁决（land-后跟踪 + accept 41.6%）勾；land 到 develop。
+- [x] 分桶执行启用接线完成 + 桶字段写入实测 + AC1/AC2 按 manager 裁决（land-后跟踪 + accept 41.6%）勾；land 到 develop。
 
 **遗留（land 后由循环推进，非本 session）**：① fan-in land 到 develop；② 循环实际跑 ≥10 轮桶字段轮 + P/M 各 ≥3 轮（land-后跟踪判据，manager 每轮核）。③ M 桶 41.6% 为 accept 实测带（manager 裁决②，⛔ 不立再归属任务——安全换指标 = gate-gaming 禁止）。
 
