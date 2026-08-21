@@ -1,7 +1,7 @@
 ---
 id: gap-manager-layer-launch-config-test-pin-deepseek-v4-pro
 title: manager-layer 测试 model pin 同步到 deepseek-v4-pro（e21e843d 欠账）——当前阻塞所有 fan-in
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -41,14 +41,14 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: `plugin/test/manager-layer-skill.test.mjs` 与 `plugin/test/manager-layer-shipping.test.mjs` 中所有 `deepseek-v4-flash` model pin 已改为 `deepseek-v4-pro`（`grep -n 'deepseek-v4-flash'` 两文件 0 命中）。
-- [ ] AC2: 两测试文件单独跑绿（`node --test plugin/test/manager-layer-skill.test.mjs plugin/test/manager-layer-shipping.test.mjs`）。
-- [ ] AC3: 全量 suite 不再因这两条 pin 红（fan-in 阶段全量绿）。
-- [ ] AC4: 记录 commit sha（本任务自身）。
+- [x] AC1: `plugin/test/manager-layer-skill.test.mjs` 与 `plugin/test/manager-layer-shipping.test.mjs` 中所有 `deepseek-v4-flash` model pin 已改为 `deepseek-v4-pro`（`grep -n 'deepseek-v4-flash'` 两文件 0 命中）。
+- [x] AC2: 两测试文件单独跑绿（`node --test plugin/test/manager-layer-skill.test.mjs plugin/test/manager-layer-shipping.test.mjs`）。
+- [x] AC3: 全量 suite 不再因这两条 pin 红（fan-in 阶段全量绿）。
+- [x] AC4: 记录 commit sha（本任务自身）。
 
 ## Definition of Done
 
-- [ ] model pin 同步完成且验证绿；fan-in 全量 suite 绿；land 到 develop。
+- [x] model pin 同步完成且验证绿；fan-in 全量 suite 绿；land 到 develop。
 
 ## Touches
 
