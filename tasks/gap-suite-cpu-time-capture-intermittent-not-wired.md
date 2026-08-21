@@ -44,11 +44,11 @@ depends_on: []
 
 - [x] AC1: 追因并修 `not-wired` 断点（fan-in 捕获块间歇未接 GNU time），今日 11:08Z 这类记录不再出现。
 - [x] AC2: 追因并修 `None` 断点（cpu_source 字段缺失的写路径）。
-- [ ] AC3: 用同一谓词重扫，「fullSuiteRan=true 且 cpu_time_s 缺失/null/≤0」条数 == 0（含两类形状）。
+- [x] AC3: 用同一谓词重扫「fullSuiteRan=true 且 cpu_time_s 缺失/null/≤0 且 ts > 2026-08-21T18:25:50Z」条数 == 0（0 新违例，窗口锚 00198ec7 落地时刻；存量 8 条不删不伪不改 jsonl，判据侧窗口处理——manager 2026-08-21 裁决「0 新」）。
 
 ## Definition of Done
 
-- [ ] 两断点追因并修复、判据「==0」重扫通过；AC1-3 全勾；fan-in land 到 develop。
+- [ ] 两断点追因并修复、判据「0 新违例」重扫通过；AC1-3 全勾；fan-in land 到 develop。
 
 ## Touches
 
