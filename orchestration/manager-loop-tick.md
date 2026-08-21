@@ -36,6 +36,19 @@
 （`heavy-op-token.sh` 已于 2026-08-06 退休：人裁定「彻底删掉」，见
 gap-session-liveness-remove-shared-events-and-lock。）
 
+**第二例外（2026-08-21 人裁定，追认 2026-08-20T09:35–10:11Z 执行，见
+`orchestration/manager-tick-log.md:28327` 的升级记录）**：条款2「不跑验证」与条款4
+「不直接改任何项目的代码」中的"代码"，**明确收窄为产品代码**（`packages/*`、
+`plugin/scripts/*` 等实际功能实现——改动会影响某项目功能/测试/CI 结果的东西）。
+**orchestration/methodology 层文档**（跨层共享的执行核/流程/方法论文本，例如
+outer 自己的执行核 `orchestrator-*.md`、`CLAUDE.md`、`plugin/loop/` 镜像这类）
+**不算"任何项目的代码"**——manager 可以直接编辑这类文档，也可以跑对应的验证
+（如 `tick-core-static-check.ts`）核实改动正确，不算越界，不需要每次单独请示。
+**判据**：改动是否影响某项目的功能实现/测试/CI 结果 ⇒ 产品代码，仍归条款3/4管，
+manager 不碰；改动是否只影响跨层协作规则/执行核指令/方法论文本本身 ⇒ 方法论文档，
+manager 可直接改 + 可跑对应验证。**边界没有取消，只是把"活文档"从"产品代码"这个
+范畴里挪了出去**——这次误判的根因正是把两者混为一谈（见该条 tick-log 记录的自审）。
+
 **交叉标注（`gap-inner-serial-main-thread-not-dispatch`，2026-08-09）：OB-SLOT 槽位账测错对象作废重立。**
 管理者此前按「空槽 = 没有在飞的 subagent」读内层槽位——但 inner 的 85 分钟实测（Bash 162 / Edit 41 /
 Agent 2）显示工作根本不在 subagent 里（41 次 Edit 全在主线程改产品脚本），「空槽」义务测的是**不承载
