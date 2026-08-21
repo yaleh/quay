@@ -36,8 +36,8 @@ extra:
 - [x] AC1: `verify-deliver-coldstart.sh` 的 L2 活性判定不再单独由 proc_ok 撑起——加「已通过启动弹窗」直接量（复用 pane-state-classify 的 permission-prompt 识别），或 proc_ok 改为非充分条件。
       **验证**：`--selfcheck` 新增三条控制带全绿——`prompt-blocked(procs=2,prompt=1) L2_OK=0 COLDSTART_LIVE=no`（负向：进程在但卡弹窗 ⇒ proc_ok 不得撑起）、`prompt-passed(procs=2,prompt=0) L2_OK=1 COLDSTART_LIVE=yes`（正向）、`pane-verdict-permission-intervention=1`（复用 wiring：pane-state-classify --pane-verdict 把真实信任弹窗 fixture 判为 intervention）。实现：`probe_startup_prompt()` 复用 pane-state-classify.ts:101 的 permission-prompt 分类器（经 `--pane-verdict` 接缝，与 session-liveness.sh 同一判定源）扫 outer/inner 窗口 pane；`coldstart_verdict` 的 proc_ok 要求 `L2_LAYER_PROCESS_CWD>=2 && L2_STARTUP_PROMPT=0`。测试文件新增三条断言。详见提交。
 - [ ] AC2: 负控制落在生产载体——重新对 B/C 跑完整三步，`coldstart_live=yes` 只在进程真正通过信任弹窗进入 tick 循环时成立（读真实证据 json，非 fixture）。
-- [ ] AC3: B/C 卡死进程已处置（回应弹窗或 kill 重来，inner 判断）。
-- [ ] AC4: 全量 suite 绿。
+- [x] AC3: B/C 卡死进程已处置（inner 2026-08-21 06:3xZ 核实 B 1440237/1440254 + C 1890775/1890791 卡信任弹窗 6.3h ⇒ kill 全部，两机 remaining=0）。
+- [x] AC4: 全量 suite 绿。
 
 ## Definition of Done
 
