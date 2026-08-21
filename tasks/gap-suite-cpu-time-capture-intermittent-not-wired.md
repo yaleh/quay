@@ -1,7 +1,7 @@
 ---
 id: gap-suite-cpu-time-capture-intermittent-not-wired
 title: suite 入账 cpu_time_s 捕获间歇有洞——fullSuiteRan=true 8 条缺 cpu_time_s（not-wired×5+None×3，今日 1 条），判据「==0」被违反
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -48,7 +48,7 @@ depends_on: []
 
 ## Definition of Done
 
-- [ ] 两断点追因并修复、判据「0 新违例」重扫通过；AC1-3 全勾；fan-in land 到 develop。
+- [x] 两断点追因并修复、判据「0 新违例」重扫通过；AC1-3 全勾；fan-in land 到 develop。
 
 ## Touches
 
