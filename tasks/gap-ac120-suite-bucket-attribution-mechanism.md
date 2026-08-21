@@ -1,7 +1,7 @@
 ---
 id: gap-ac120-suite-bucket-attribution-mechanism
 title: AC120 suite 桶归属判据机械化（静态引用闭包 → P|S|M|UNRESOLVED，三组样本回放能取假）
-status: done
+status: ready
 labels:
   - gap
 parent: null
