@@ -48,7 +48,12 @@ export const meta = {
 //    **模板串里的每个反引号都要写成 \`；`${` 也要转义**（早先踩过一次 String.raw 不挡 ${}）。
 //    通则同本文件判准 ②b：一个"通过"的检查，只有在它检查的正是你需要的保证时才算数。
 
-const MODEL = 'sonnet'
+// ⚠️ 2026-08-21 09:4xZ：固定别名 'sonnet' 在人切换会话模型（kimi-k2.7-code）后的进程重启里
+//    变成后端不可解析——audit agent 连 3 次 API 400 "Model not exist"（确定性，重试无效），
+//    整份审计缺席（evaluated:false）。钉死别名 = 依赖宿主路由的常量（硬规则 4 推论二同族：
+//    合理性依赖当前环境的字面量，换个环境静默失效）。
+//    ⇒ 修法同源：不钉别名，改继承会话模型（undefined = 不传 model 字段）。
+const MODEL = undefined
 const ROOT = '/home/yale/work/quay'
 // args 到达时是【字符串】不是对象（实测 wf_6f8cc053-f52）：直接 args.x 会静默 undefined。
 // 提到 MGR_SESSION_LOOKUP 之前先定义——后者要读 A.managerSessionId（2026-08-18 08:3x 修复引入）。
@@ -327,7 +332,9 @@ ${READ_CMD}
 
 所以：**不要列举主循环做了什么**。只在证据里发现【主循环没声明、但确实发生过】的动作时，
 把它放进 \`undeclaredActions\`（这是漏报检测）。看不到就返回空数组，**不要凑数**。`,
-    { label: 'self-audit', phase: 'Audit', schema: AUDIT_SCHEMA, model: MODEL }
+    // MODEL 为 undefined 时不携带 model 字段（继承会话模型）——⛔ 不传 `model: undefined` 字面，
+    // 避免运行时有无把显式 undefined 当"已指定"的实现差异
+    (() => { const o = { label: 'self-audit', phase: 'Audit', schema: AUDIT_SCHEMA }; if (MODEL) o.model = MODEL; return o })()
   ),
 ])
 
