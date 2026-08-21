@@ -31,8 +31,8 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: `quay --help` 输出含 `adr`、`config validate`、`manager`（Usage 块补齐）。
-- [ ] AC2: help 输出与 `quay.ts` dispatch 表命令集合差 = 0（可机械取假：diff 命令集合）。
+- [x] AC1: `quay --help` 输出含 `adr`、`config validate`、`manager`（Usage 块补齐）。
+- [x] AC2: help 输出与 `quay.ts` dispatch 表命令集合差 = 0（可机械取假：diff 命令集合）。
 - [ ] AC3: 全量 suite 绿（含 help 相关测试）。
 
 ## Definition of Done
