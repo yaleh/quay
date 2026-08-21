@@ -182,7 +182,13 @@ function runRunner({ root, command, laneCount, stateDir, runner, env = {}, seria
   // carrying the configured slot count (default 2) in its `.concurrency` file — every runRunner-based
   // test is then hermetic against production lock state (the runner probes/locks the pinned base,
   // never the real git-common-dir).
-  if (!("FULL_SUITE_LOCK_FILE" in mergedEnv)) {
+  // ⚠️ Guard on the per-call `env` (NOT mergedEnv): the REAL suite launch (scripts/test.sh:1181) sets
+  // FULL_SUITE_LOCK_FILE in the parent env, so `in mergedEnv` is TRUE there and the pinning would be
+  // SKIPPED — the child then reads the PRODUCTION `.concurrency` file (a live-suite S=1 scalar) which
+  // shadows the test-driven knob (gap-suite-slot-ssot-i5-false-positive full-suite RED: 6 assertions
+  // read S=1). Only a test EXPLICITLY passing its own FULL_SUITE_LOCK_FILE via the per-call `env`
+  // opts out of the hermetic pin; ambient suite-launch env never does.
+  if (!("FULL_SUITE_LOCK_FILE" in env)) {
     const lockDir = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-lock-"));
     _runnerLockDirs.push(lockDir);
     const lockBase = path.join(lockDir, "full-suite.lock");
