@@ -52,7 +52,8 @@ extra:
 ## Touches
 
 - tasks/gap-workflow-scriptpath-materialize-falls-back-main.md（自身）
-- plugin/scripts/fan-in-materialize-check.ts（新：scriptPath materialize 回退检测器）
+- plugin/scripts/fan-in-materialize-check.ts
+- plugin/scripts/checker-mutation-cases/fan-in-materialize-check.sh（checker-mutation 用例——AC78 mutation-check fail-closed）（新：scriptPath materialize 回退检测器）
 - plugin/test/fan-in-materialize-check.test.mjs（新：scriptPath materialize 负控制）
 - scripts/test.sh（接线：run_static_checks 新增 fan-in-materialize-check，@static-tier change）
 - plugin/scripts/capability-catalog.sh（登记：fan-in-materialize-check 的 QUESTION/CADENCE/INVALIDATION/LAST_REAFFIRMED/MATCHING 声明）
