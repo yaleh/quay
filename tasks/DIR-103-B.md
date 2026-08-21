@@ -178,3 +178,14 @@ Standard inherited-core DoD clauses apply.
    test lives in the new `mcp-gate-dryrun.test.mjs`; the `(or sibling MCP-surface test)`
    parenthetical was removed. Keep acceptance.test.mjs out of Touches (it is not edited by
    this child).
+
+## 标注（gap-fan-in-delta-scope-inventory-annotate）
+
+> **⚠️ 落地未经全量轮验证**（runId `fm-gap-fan-in-delta-scope-inventory-annotate-1787312000000-inv`，2026-08-21）
+> 父任务 gap-fan-in-delta-scope-doc-only-skip AC1 枚举：本任务 fan-in 记录 `fullSuiteRan=false` ∧ `skipReason=doc-only-delta`，但实际 diff 含非 doc 文件，落地当时未被全量轮覆盖：
+> ```
+>     packages/quay/src/gate/engine.ts
+>     packages/quay/src/mcp-handlers.ts
+>     packages/quay/test/mcp-gate-dryrun.test.mjs
+> ```
+> **补跑判定（AC2）：不需补跑全量轮** —— 落地（merge `04cdc1d23adddf1485f5a00131e401d7d20d7659` @ `2026-08-15T12:16:50+00:00`）后 develop 已有 **191** 轮 `fullSuiteRan=true` 全量轮运行（green **187** 轮，最后 gap-docs-t3-webui-doc-and-screenshots @ 2026-08-21T13:12:56.151Z）覆盖其改动。

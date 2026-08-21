@@ -99,3 +99,17 @@ manager 原报 3824 已更新为实测值）
 - tasks/gap-ac93-dist-chains-version-consistency.md（自身）
 
 > 版本统一注解：version-consistency-check.ts 覆盖上述 8 个版本文件（含三个 provider 包）——每路径一个 bullet 是 parseTouches 可解析的格式。
+
+## 标注（gap-fan-in-delta-scope-inventory-annotate）
+
+> **⚠️ 落地未经全量轮验证**（runId `fm-gap-fan-in-delta-scope-inventory-annotate-1787312000000-inv`，2026-08-21）
+> 父任务 gap-fan-in-delta-scope-doc-only-skip AC1 枚举：本任务 fan-in 记录 `fullSuiteRan=false` ∧ `skipReason=doc-only-delta`，但实际 diff 含非 doc 文件，落地当时未被全量轮覆盖：
+> ```
+>     .claude-plugin/marketplace.json
+>     .github/workflows/publish-plugin-dist.yml
+>     package-lock.json
+>     packages/quay-backlog/package.json
+>     packages/quay-github/package.json
+>     packages/quay-native/package.json
+> ```
+> **补跑判定（AC2）：不需补跑全量轮** —— 落地（merge `7c86e858547608ed4e4c97c4c698e59023c02cf9` @ `2026-08-16T09:11:57+00:00`）后 develop 已有 **187** 轮 `fullSuiteRan=true` 全量轮运行（green **184** 轮，最后 gap-docs-t3-webui-doc-and-screenshots @ 2026-08-21T13:12:56.151Z）覆盖其改动。

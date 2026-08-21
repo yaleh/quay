@@ -123,3 +123,24 @@ AC65-Verified: <验证命令> => <实际输出摘要>          ← 验证产物�
 原 PARKED 历史见 git（sha 表 stopgap 阶段，10:3xZ—11:4xZ）。人裁定方向（主体不同）已实现：
 outer 落 AC65 措辞（b11ce720）+ 声明/验证两谓词形态；inner 现重写 detector（见 Implementation）。
 parser fan-in 已解除 hold 在飞（wltmuze1w）。
+
+## 标注（gap-fan-in-delta-scope-inventory-annotate）
+
+> **⚠️ 落地未经全量轮验证**（runId `fm-gap-fan-in-delta-scope-inventory-annotate-1787312000000-inv`，2026-08-21）
+> 父任务 gap-fan-in-delta-scope-doc-only-skip AC1 枚举：本任务 fan-in 记录 `fullSuiteRan=false` ∧ `skipReason=doc-only-delta`，但实际 diff 含非 doc 文件，落地当时未被全量轮覆盖：
+> ```
+>     .claude/workflows/manager-tick-core.js
+>     orchestration/archive/AC58-retired-clauses.md
+>     orchestration/manager-phase-goal.md
+>     orchestration/orchestrator-loop-tick.md
+>     orchestration/orchestrator-tick-core.md
+>     plugin/loop/orchestrator-loop-tick.md
+>     plugin/loop/orchestrator-tick-core.md
+>     plugin/scripts/direct-to-develop-bypass-check.ts
+>     plugin/scripts/retired-clause-check.ts
+>     plugin/scripts/trend-check.ts
+>     plugin/test/direct-to-develop-bypass-check.test.mjs
+>     plugin/test/trend-check.test.mjs
+>     scripts/test.sh
+> ```
+> **补跑判定（AC2）：不需补跑全量轮** —— 落地（merge `ca0b39dd74d22e339995c71a6ed0430b0e83356f` @ `2026-08-15T10:07:47+00:00`）后 develop 已有 **193** 轮 `fullSuiteRan=true` 全量轮运行（green **189** 轮，最后 gap-docs-t3-webui-doc-and-screenshots @ 2026-08-21T13:12:56.151Z）覆盖其改动。

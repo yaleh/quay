@@ -85,3 +85,15 @@ bare 引用会为一个非机制成员造假引用。而 dependency-closure 步�
   `packages/quay/test/sea-artifact-consumer-e2e.test.mjs`（release artifact → consumer clone 的完整 release/init 路径）
   **2/2 PASS**（AC4 consumer 新增 `touches-one-entry-one-path-check` 落盘断言）。全量 suite 聚合绿由 fan-in 全量轮确认。
 - **AC4**：`precommit-guard.ts` 未改（`git diff` 无该文件）；`touches-one-entry-one-path-check.ts` 未改（仅入 laydown 集）。
+
+## 标注（gap-fan-in-delta-scope-inventory-annotate）
+
+> **⚠️ 落地未经全量轮验证**（runId `fm-gap-fan-in-delta-scope-inventory-annotate-1787312000000-inv`，2026-08-21）
+> 父任务 gap-fan-in-delta-scope-doc-only-skip AC1 枚举：本任务 fan-in 记录 `fullSuiteRan=false` ∧ `skipReason=doc-only-delta`，但实际 diff 含非 doc 文件，落地当时未被全量轮覆盖：
+> ```
+>     packages/quay/test/sea-artifact-consumer-e2e.test.mjs
+>     plugin/scripts/quay-init.sh
+>     plugin/test/quay-init-loop-core.test.mjs
+>     plugin/test/quay-init-loop.test.mjs
+> ```
+> **补跑判定（AC2）：不需补跑全量轮** —— 落地（merge `60173b40415399e813e94bd324c8c86c3426fc52` @ `2026-08-16T23:01:05+00:00`）后 develop 已有 **181** 轮 `fullSuiteRan=true` 全量轮运行（green **180** 轮，最后 gap-docs-t3-webui-doc-and-screenshots @ 2026-08-21T13:12:56.151Z）覆盖其改动。

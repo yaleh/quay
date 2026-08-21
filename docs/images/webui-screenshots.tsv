@@ -1,0 +1,19 @@
+/	webui-root	webui-root.png	redirect	/dashboard
+/dashboard	webui-dashboard	webui-dashboard.png	body	<h1>Dashboard</h1>
+/tasks	webui-tasks	webui-tasks.png	body	<h1>Quay — task list
+/system	webui-system	webui-system.png	body	<h1>System — 系统状态</h1>
+/manager	webui-manager	webui-manager.png	body	<h1>Manager / Outer / Inner — 三层状态</h1>
+/tests	webui-tests	webui-tests.png	body	<h1>Tests — 验证轮记录</h1>
+/sessions	webui-sessions	webui-sessions.png	body	<h1>Sessions — Manager / Outer / Inner 最近会话</h1>
+/architecture	webui-architecture	webui-architecture.png	body	<h1>Architecture — 系统组件图</h1>
+/live	webui-live	webui-live.png	body	<h1>Live — 循环此刻在做什么</h1>
+/journal	webui-journal	webui-journal.png	body	<h1>Journal — 循环最近记录</h1>
+/git-history	webui-git-history	webui-git-history.png	body	<h1>Git History — 提交落地时间轴</h1>
+/board	webui-board	webui-board.png	body	<h1>Board — 意图 / 执行 / 落地</h1>
+/adr	webui-adr	webui-adr.png	body	<h1>ADRs
+/adr/ADR-016	webui-adr-detail	webui-adr-detail.png	body	<h1>ADR-016
+/goal	webui-goal	webui-goal.png	body	<h1>Goals — 阶段目标与 AC
+/goal/AC-100	webui-goal-detail	webui-goal-detail.png	body	<h1>AC-100
+/doc	webui-doc	webui-doc.png	body	<h1>Managed documents
+/doc/DOC-001	webui-doc-detail	webui-doc-detail.png	body	<h1>DOC-001
+/task/gap-docs-t3-webui-doc-and-screenshots	webui-task-detail	webui-task-detail.png	body	<h1>gap-docs-t3-webui-doc-and-screenshots

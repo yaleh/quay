@@ -68,3 +68,13 @@ root="$(git -C "${worktree}" worktree list --porcelain 2>/dev/null | awk '/^work
 2. 测试 AC4 清除子进程 `QUAY_MAIN_CHECKOUT`（使 derive 真正被测），AC4b 用 git shim 反转 `worktree list` 顺序构造「首项非 main」样本（git 2.43 真实 repo 构造不出，shim 是诚实等价物），AC4c 验证 detached verify worktree 上下文 derive 仍得 main。
 
 **测试结果（直接 `node --test plugin/test/refresh-worktree-quay.test.mjs`）**：7/7 pass（AC1-AC5 + AC4b + AC4c），duration ~1379ms。能取假验证：旧首项 derive 在 shim 反转下得 wt==root ⇒ no-op ⇒ config 未复制 ⇒ AC4b 断言失败；新 derive 不受 list 顺序影响 ⇒ 复制成功。derive 实测（task worktree，无 env）→ `/home/yale/work/quay`；main checkout 运行 → no-op。
+
+## 标注（gap-fan-in-delta-scope-inventory-annotate）
+
+> **⚠️ 落地未经全量轮验证**（runId `fm-gap-fan-in-delta-scope-inventory-annotate-1787312000000-inv`，2026-08-21）
+> 父任务 gap-fan-in-delta-scope-doc-only-skip AC1 枚举：本任务 fan-in 记录 `fullSuiteRan=false` ∧ `skipReason=doc-only-delta`，但实际 diff 含非 doc 文件，落地当时未被全量轮覆盖：
+> ```
+>     plugin/scripts/refresh-worktree-quay.sh
+>     plugin/test/refresh-worktree-quay.test.mjs
+> ```
+> **补跑判定（AC2）：不需补跑全量轮** —— 落地（merge `aafaf685ec33e66338fc44a612fa8a0eaa3d2935` @ `2026-08-15T09:10:54+00:00`）后 develop 已有 **194** 轮 `fullSuiteRan=true` 全量轮运行（green **190** 轮，最后 gap-docs-t3-webui-doc-and-screenshots @ 2026-08-21T13:12:56.151Z）覆盖其改动。

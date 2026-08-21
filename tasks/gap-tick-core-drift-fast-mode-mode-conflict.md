@@ -76,3 +76,27 @@ quay-init --loop 铺出布局（`plugin/skills/init/SKILL.md:68-71` 逐条）：
 - plugin/loop/fast-mode-tick-core.md（如需，副本引用与正本一致化）
 - plugin/scripts/checker-mutation-cases/tick-core-static-check.sh（fan-in 全量 suite checker-mutation-check 发现：semantic mode 下 mutation-case fixture 的 fast-mode 副本仍是 byte-identical、无 docs/analysis 角色引用 ⇒ 基线恒红 always-red；补角色引用头注，fixture 与 checker 新语义一致）
 - tasks/gap-tick-core-drift-fast-mode-mode-conflict.md（自身）
+
+## 标注（gap-fan-in-delta-scope-inventory-annotate）
+
+> **⚠️ 落地未经全量轮验证**（runId `fm-gap-fan-in-delta-scope-inventory-annotate-1787312000000-inv`，2026-08-21）
+> 父任务 gap-fan-in-delta-scope-doc-only-skip AC1 枚举：本任务 fan-in 记录 `fullSuiteRan=false` ∧ `skipReason=doc-only-delta`，但实际 diff 含非 doc 文件，落地当时未被全量轮覆盖：
+> ```
+>     .claude/workflows/execute-suite-fix.js
+>     orchestration/SPEC-worker-driven-inner-2026-08-16.md
+>     orchestration/manager-phase-goal.md
+>     orchestration/orchestrator-tick-core.md
+>     plugin/loop/fast-mode-tick-core.md
+>     plugin/loop/orchestrator-tick-core.md
+>     plugin/scripts/capability-catalog.sh
+>     plugin/scripts/checker-mutation-cases/tick-core-static-check.sh
+>     plugin/scripts/direct-to-develop-bypass-check.ts
+>     plugin/scripts/outer-cron-registry.json
+>     plugin/scripts/tick-core-static-check.ts
+>     plugin/skills/init/SKILL.md
+>     plugin/skills/manager/SKILL.md
+>     plugin/test/rhythm-consumer-check.test.mjs
+>     plugin/test/tick-core-static-check.test.mjs
+>     scripts/test.sh
+> ```
+> **补跑判定（AC2）：不需补跑全量轮** —— 落地（merge `6e7f24f817f22de22f997d6ab7421329e2f5408f` @ `2026-08-16T03:03:20+00:00`）后 develop 已有 **187** 轮 `fullSuiteRan=true` 全量轮运行（green **184** 轮，最后 gap-docs-t3-webui-doc-and-screenshots @ 2026-08-21T13:12:56.151Z）覆盖其改动。

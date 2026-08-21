@@ -70,3 +70,13 @@ round182 红 failures[0]=gap-ac37 dispatch-review（eb7b04f5 消 contract-line �
 ## 止损
 
 **需要 —— 当下动作 = 本任务立案**：round181/182 两轮红都因 failures[0] 指向非阻断检查器而误导分诊（gap-ac37 白花一轮）。manager ③ 对照定案后判据现成（failures[0] 须来自真 exit≠0 checker），立案即止损线。
+
+## 标注（gap-fan-in-delta-scope-inventory-annotate）
+
+> **⚠️ 落地未经全量轮验证**（runId `fm-gap-fan-in-delta-scope-inventory-annotate-1787312000000-inv`，2026-08-21）
+> 父任务 gap-fan-in-delta-scope-doc-only-skip AC1 枚举：本任务 fan-in 记录 `fullSuiteRan=false` ∧ `skipReason=doc-only-delta`，但实际 diff 含非 doc 文件，落地当时未被全量轮覆盖：
+> ```
+>     plugin/scripts/full-suite-runner.ts
+>     plugin/test/full-suite-runner.test.mjs
+> ```
+> **补跑判定（AC2）：不需补跑全量轮** —— 落地（merge `be789f9916e9a67150cdc3fec03f6e1d8e08a55f` @ `2026-08-15T05:28:51+00:00`）后 develop 已有 **197** 轮 `fullSuiteRan=true` 全量轮运行（green **193** 轮，最后 gap-docs-t3-webui-doc-and-screenshots @ 2026-08-21T13:12:56.151Z）覆盖其改动。

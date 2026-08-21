@@ -69,3 +69,12 @@ depends_on: []
 - 判据2（能取假，AC6 不回归）：`node --test plugin/test/manager-layer-shipping.test.mjs` → 7/7 绿，AC6「indexes every on-disk orchestration/SPEC-*.md」仍绿（引用保留只补声明）。
 - 判据3（既有测试 + scoped 门）：`quay-init.test.mjs` + `quay-init-loop-consumer-doc-refs.test.mjs` → 9/9 绿；`quay-init-loop-driver.test.mjs` → 15/15 绿（AC7「every orchestration/* ref is landed or declared」验证新声明正确分类）；`scripts/test.sh --for-task gap-spec-reference-doc-declare-init-skill --allow-thin` → exit 0（task-contract-check / malformed-task-check / superseded-capability-check / landing-target-check 全 PASS；selector 0/2 薄选择为既有态——init/SKILL.md 无 touch→test 映射，非本次改动引入）。
 - 未跑全量（Build 阶段 scoped/direct only）；排除集 + carriers 的 scoped 门不再被此红阻断。
+
+## 标注（gap-fan-in-delta-scope-inventory-annotate）
+
+> **⚠️ 落地未经全量轮验证**（runId `fm-gap-fan-in-delta-scope-inventory-annotate-1787312000000-inv`，2026-08-21）
+> 父任务 gap-fan-in-delta-scope-doc-only-skip AC1 枚举：本任务 fan-in 记录 `fullSuiteRan=false` ∧ `skipReason=doc-only-delta`，但实际 diff 含非 doc 文件，落地当时未被全量轮覆盖：
+> ```
+>     plugin/skills/init/SKILL.md
+> ```
+> **补跑判定（AC2）：不需补跑全量轮** —— 落地（merge `c6fbe2c3a453ce06c962a64cce257ae5b845c644` @ `2026-08-15T05:01:11+00:00`）后 develop 已有 **197** 轮 `fullSuiteRan=true` 全量轮运行（green **193** 轮，最后 gap-docs-t3-webui-doc-and-screenshots @ 2026-08-21T13:12:56.151Z）覆盖其改动。
