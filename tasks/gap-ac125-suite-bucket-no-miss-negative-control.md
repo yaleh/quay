@@ -1,7 +1,7 @@
 ---
 id: gap-ac125-suite-bucket-no-miss-negative-control
 title: AC125 漏测负控制（3 次真实跨层回归回放 3/3 仍选中会红的测试——唯一的"没漏"判据）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
