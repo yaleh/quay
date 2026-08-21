@@ -41,10 +41,10 @@ depends_on: []
 
 ## Definition of Done
 
-- [ ] 机件实现 + 三组样本回放测试绿；AC1-2 全勾；land 到 develop。
+- [ ] 分桶归属机件实现完成、三组已知样本回放测试全绿、AC1-2 全勾；fan-in land 到 develop。
 
 ## Touches
 
-- plugin/scripts/suite-bucket-attribution.ts（实现，名可 inner 定）
-- plugin/test/suite-bucket-attribution.test.mjs（测试）
+- plugin/scripts/suite-bucket-attribution.ts (new)
+- plugin/test/suite-bucket-attribution.test.mjs (new)
 - tasks/gap-ac120-suite-bucket-attribution-mechanism.md（自身）
