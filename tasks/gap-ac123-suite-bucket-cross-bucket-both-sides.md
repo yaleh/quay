@@ -1,7 +1,7 @@
 ---
 id: gap-ac123-suite-bucket-cross-bucket-both-sides
 title: AC123 跨桶测试计入两边（P-only 与 M-only 两个方向都要选中那 12 个）
-status: ready
+status: done
 labels:
   - gap
 parent: null
