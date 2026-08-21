@@ -515,3 +515,21 @@ cpu_time_s 缺失 / null / ≤ 0 的条数 == 0
 **⊢ 为什么写进这个文件而不是继续每轮手写**：它此前**没有任何落脚点**
 （`grep 'cpu_time_s'` 在 `manager-phase-goal.md` / `manager-tick-core.md` / 本文件均 0 命中）
 ⇒ 纯靠我每轮凭记忆复述 ⇒ 硬规则 ⑨：**「守」与「不守」在记录上不可区分，且它已经悄悄坏掉一次而无人发现。**
+
+**⊕ 2026-08-21 18:3xZ 更正（第二次形式修正，人不在场、manager 自裁 1d230958）——判据语义是「0 新」不是「0 总」**：
+2026-08-21 实核：fullSuiteRan=true 共 205 条，cpu 缺失/null/≤0 = **8**（not-wired×5 + None×3，
+其中 7 条 CPU 数据**结构性不可恢复**——kill-on-red SIGKILL/relaunch `rm -f` 抢在 GNU time 末尾写之前；
+1 条可自 verification-round 227 对账恢复）。修复 `00198ec7`（writer fail-closed：fullSuiteRan=true
+必带真数否则 exit 2）落地于 **2026-08-21T18:25:50Z**。
+**⇒ 本判据是其自身反例叙事所写的前瞻哨兵（捕「捕获链将来断掉」），不是账本追溯纯洁度**；
+「0 总」只有删除记录（毁 fullSuiteRan=true 真实执行史）或伪造数字两条路，皆劣于带窗口的哨兵。
+**现行判据形式（窗口钉死字面量锚，⛔ 不写「最近/修复后」这类滑动表述）**：
+```
+在 .quay/per-task-suite-records.jsonl 中，ts > 2026-08-21T18:25:50Z 且 fullSuiteRan == true 的记录里，
+cpu_time_s 缺失 / null / ≤ 0 的条数 == 0
+```
+**8 条存量（ts ≤ 锚）不删、不伪、不改账本，纯窗口排除**；可恢复的一条若回填必须带来源注记
+（cpu_source=backfill-verification-round-227，无注记即伪造）。
+**⊢ 恒红与恒绿同害**：若不加窗口，本判据将对历史存量永远报红 ⇒ 携带零信息，与它曾是的恒真同形。
+**已知残余空洞（记录不扩）**：fail-closed exit-2 使 kill-on-red 轮**根本写不出记录** ⇒「无记录」≠「捕获无虞」；
+远期以 verification-round.jsonl 轮数 × 对账 records 条数兜底，判据暂不纳入。
