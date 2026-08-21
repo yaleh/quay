@@ -39,8 +39,8 @@ depends_on:
 
 ## Acceptance Criteria
 
-- [ ] AC1: `.quay/verification-round.jsonl` 中新于阶段切换的轮次 ≥10 轮带「本轮跑哪几桶 + 桶文件数 + 桶耗时」字段。
-- [ ] AC2: 仅 P 变更 ≥3 轮、仅 M 变更 ≥3 轮，各自 `durationMs` 中位数 ≤ 全量中位数 40%。
+- [x] AC1: 分桶执行启用接线已落地 + 桶字段写入已实测（`buckets`/`bucket_files`/`bucket_duration_ms`）；「≥10 轮带桶字段」为 land-后跟踪判据（窗口锚=本任务 fan-in land 时刻，manager 每轮核，⛔ 本任务不伪造轮次）——manager 2026-08-21 裁决①。
+- [x] AC2: M-only 实测 300010ms=41.6%（accept）、P-only mirror-fold 后 137 文件；40% 阈值系估值错误（漏算 9 个 UNRESOLVED 恒选安全侧 + 固定开销）——manager 2026-08-21 裁决② accept 41.6%、⛔ 不立 9 测试再归属（gate-gaming）；持续信号围绕 41.6% 带按套件噪声 σ 判显著偏离。
 
 ## 执行证据（inner 2026-08-21）
 
@@ -70,9 +70,9 @@ depends_on:
 
 ## Definition of Done
 
-- [ ] 分桶执行启用后生产载体 ≥10 轮带桶字段，P/M 各 ≥3 轮中位数 ≤40%；land 到 develop；AC1-2 全勾。
+- [ ] 分桶执行启用接线完成 + 桶字段写入实测 + AC1/AC2 按 manager 裁决（land-后跟踪 + accept 41.6%）勾；land 到 develop。
 
-**遗留（land 后由循环推进，非本 session）**：① fan-in land 到 develop（本 session 按指令不 fan-in）；② 循环实际跑 ≥10 轮桶字段轮 + P/M 各 ≥3 轮；③ M 桶 41.6% 略超 40%——9 个真 UNRESOLVED 恒入选是主因，可后续按 AC121 同法补重归属（另案，非本任务）。
+**遗留（land 后由循环推进，非本 session）**：① fan-in land 到 develop；② 循环实际跑 ≥10 轮桶字段轮 + P/M 各 ≥3 轮（land-后跟踪判据，manager 每轮核）。③ M 桶 41.6% 为 accept 实测带（manager 裁决②，⛔ 不立再归属任务——安全换指标 = gate-gaming 禁止）。
 
 ## Touches
 
