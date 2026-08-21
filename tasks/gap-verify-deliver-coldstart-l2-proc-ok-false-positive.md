@@ -1,7 +1,7 @@
 ---
 id: gap-verify-deliver-coldstart-l2-proc-ok-false-positive
 title: verify-deliver-coldstart.sh L2 活性判据假阳性：proc_ok 单独撑起通过，未判信任弹窗（硬规则 4b）
-status: done
+status: ready
 labels:
   - gap
   - mechanism
