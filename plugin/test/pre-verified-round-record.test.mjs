@@ -626,6 +626,12 @@ test("AC1 — the concurrency helpers read the host + QUAY_MAX_CONCURRENT_SUITES
   const prevNproc = process.env.RESOURCE_GATE_NPROC;
   const prevSlots = process.env.QUAY_MAX_CONCURRENT_SUITES;
   const prevSeam = process.env.RESOURCE_GATE_CONCURRENT_SUITES;
+  const prevLock = process.env.FULL_SUITE_LOCK_FILE;
+  // Pin the base to an isolated temp dir with NO `.concurrency` file, so the knob this test drives is
+  // authoritative — the PRODUCTION scalar (a live-suite S=1 file) would otherwise shadow the knob and
+  // break the "0 fails open to default 2" step (gap-suite-slot-ssot-i5-false-positive class).
+  const pinTmp = fs.mkdtempSync(path.join(os.tmpdir(), "pvr-pin-"));
+  process.env.FULL_SUITE_LOCK_FILE = path.join(pinTmp, "full-suite.lock");
   try {
     // This test drives the KNOB — clear the seam (read FIRST since gap-suite-lock-slot-seam-asymmetry)
     // so it cannot shadow the knob from an ambient test env.
@@ -643,6 +649,9 @@ test("AC1 — the concurrency helpers read the host + QUAY_MAX_CONCURRENT_SUITES
     else process.env.QUAY_MAX_CONCURRENT_SUITES = prevSlots;
     if (prevSeam === undefined) delete process.env.RESOURCE_GATE_CONCURRENT_SUITES;
     else process.env.RESOURCE_GATE_CONCURRENT_SUITES = prevSeam;
+    if (prevLock === undefined) delete process.env.FULL_SUITE_LOCK_FILE;
+    else process.env.FULL_SUITE_LOCK_FILE = prevLock;
+    fs.rmSync(pinTmp, { recursive: true, force: true });
   }
 });
 

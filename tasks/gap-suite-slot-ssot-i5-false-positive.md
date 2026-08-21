@@ -48,4 +48,8 @@ extra:
 
 - plugin/test/suite-slot-ssot-check.test.mjs（I5 探针隔离）
 - plugin/scripts/suite-slot-ssot-check.ts（若扫描逻辑需配合）
+- plugin/test/resource-gate.test.mjs（判据4/AC5 读 concurrency helpers 加 FULL_SUITE_LOCK_FILE hermetic 钉定——生产 .concurrency 标量 shadow knob 同源）
+- plugin/test/pre-verified-round-record.test.mjs（AC1 concurrency helpers 同源隔离）
+- plugin/test/full-suite-runner.test.mjs（AC2 + runRunner 子进程 hermetic 锁 base 钉定）
+- plugin/test/worktree-process-reaper.test.mjs（fullSuiteLockFiles 断言同源隔离）
 - tasks/gap-suite-slot-ssot-i5-false-positive.md（自身）
