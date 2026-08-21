@@ -1,7 +1,7 @@
 ---
 id: gap-release-v061-after-134-commits
 title: 发布 v0.6.1（build tgz + tag + gh release，release 真正包含 develop 领先 v0.6.0 的 134+ 提交：文档 T1-T5 + AC107 重验 + 跨项目截图）
-status: todo
+status: ready
 labels:
   - gap
 ---

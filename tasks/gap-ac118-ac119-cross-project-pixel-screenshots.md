@@ -1,7 +1,7 @@
 ---
 id: gap-ac118-ac119-cross-project-pixel-screenshots
 title: AC118/119 跨项目像素截图补验证（B 机 meta-cc quay serve + headless chrome 截图，同次满足跨项目+截图）
-status: todo
+status: ready
 labels:
   - gap
 ---
