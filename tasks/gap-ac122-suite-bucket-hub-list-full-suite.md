@@ -1,7 +1,7 @@
 ---
 id: gap-ac122-suite-bucket-hub-list-full-suite
 title: AC122 枢纽文件显式清单 + 触及任一即退回全量（22 个含 H 任务回放 22/22）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -39,7 +39,7 @@ depends_on:
 
 ## Definition of Done
 
-- [ ] 枢纽清单 + 全量退回接线完成，0 漏判 invariant 绿；land 到 develop；AC1-3 全勾。
+- [x] 枢纽清单 + 全量退回接线完成，0 漏判 invariant 绿；land 到 develop；AC1-3 全勾。
 
 ## Touches
 
