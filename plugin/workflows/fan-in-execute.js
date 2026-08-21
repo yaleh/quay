@@ -145,7 +145,7 @@ suite_log_file="/tmp/fan-in-suite-${task}.log"
 rm -f "$suite_exit_marker" "$suite_time_file"
 suite_start_iso=$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)
 suite_start_ms=$(date +%s%3N)
-suite_head_now=$(git rev-parse HEAD 2>/dev/null || echo unknown)
+suite_head_now=$(git -C ${worktree} rev-parse HEAD 2>/dev/null || echo unknown)
 # gap-fan-in-suite-log-cross-relaunch-reuse: 每轮 relaunch 轮转日志 + 打起始标记。旧轮内容移到
 # .prev（诊断可查），当前轮从【空文件 + 起始标记】开始，读者按标记切片（不再整份线性 grep 读旧轮）。
 if [ -f "$suite_log_file" ]; then mv -f "$suite_log_file" "\${suite_log_file}.prev" 2>/dev/null || true; fi
@@ -189,7 +189,7 @@ suite_log_file="/tmp/fan-in-suite-${task}.log"
 rm -f "$suite_exit_marker"
 suite_start_iso=$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)
 suite_start_ms=$(date +%s%3N)
-suite_head_now=$(git rev-parse HEAD 2>/dev/null || echo unknown)
+suite_head_now=$(git -C ${worktree} rev-parse HEAD 2>/dev/null || echo unknown)
 # gap-fan-in-suite-log-cross-relaunch-reuse: 同 SUITE_LAUNCH——轮转旧轮 + 起始标记（round=isolated）。
 if [ -f "$suite_log_file" ]; then mv -f "$suite_log_file" "\${suite_log_file}.prev" 2>/dev/null || true; fi
 printf '__FANIN_SUITE_START__ iso=%s ms=%s head=%s round=isolated\\n' "$suite_start_iso" "$suite_start_ms" "$suite_head_now" > "$suite_log_file"
@@ -491,7 +491,7 @@ cd ${worktree} && bash scripts/test.sh --static-checks-doc
 suite_capture="/tmp/fan-in-suite-${task}.env"
 suite_exit_marker="/tmp/fan-in-suite-${task}.exit"
 suite_time_file="/tmp/fan-in-suite-${task}.time"
-suite_head_now=$(git rev-parse HEAD 2>/dev/null || echo unknown)
+suite_head_now=$(git -C ${worktree} rev-parse HEAD 2>/dev/null || echo unknown)
 code_delta=$(cat /tmp/fan-in-code-delta-${task}.txt 2>/dev/null || true)
 suite_preverified=0
 if [ -f "$suite_capture" ] && grep -q '^full_suite_ran=true$' "$suite_capture" && grep -q '^suite_exit=0$' "$suite_capture" && grep -q "^suite_head=$suite_head_now$" "$suite_capture"; then
