@@ -17,6 +17,7 @@
 //     from ../bin/quay.ts (parseFlags/parseVerbless/resolveJsonFlag/
 //     resolvePageSize/relativeTimeCli/stripHeadings)
 
+import fs from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { QUAY_VERSION } from "../src/version.ts";
 // gap-reduce-sync-spawn-floor-suite-slowdown: parseFlags/resolveJsonFlag come
@@ -241,13 +242,31 @@ export async function run(argv, ctx = {}) {
 //     `typeof module !== "undefined"` guards the ESM bundle (dist/quay.js,
 //     where esbuild aliases require to a createRequire-injected __require but
 //     `module` does not exist at ESM scope).
+// gap-quay-entry-guard-symlink-broken: the ESM main-module check must survive
+// the npm-installed symlink topology. Under `npm install -g`, bin/quay is a
+// symlink (node_modules/.bin/quay -> ../quay/dist/quay.js): import.meta.url
+// resolves to the REAL file the symlink points at, while process.argv[1] keeps
+// the symlink path itself, so a plain string compare is ALWAYS false and run()
+// never fired (empty `quay --version`, EXIT=0 — v0.6.0 was fully broken for
+// npm global installs). Canonicalize argv[1] with fs.realpathSync so both sides
+// are the same real path (realpath of a non-symlink is the path itself, so this
+// also covers the plain source/bundle case). import.meta.main would be cleaner
+// but needs Node >=24.2 — the npm-pack dist must run on the Node-20 floor, so no.
 const isMain =
   process.argv[1] &&
   ((typeof require !== "undefined" &&
     typeof module !== "undefined" &&
     require.main === module) ||
     (typeof import.meta !== "undefined" &&
-      import.meta.url === pathToFileURL(process.argv[1]).href));
+      import.meta.url !== undefined &&
+      (import.meta.url === pathToFileURL(process.argv[1]).href ||
+        (() => {
+          try {
+            return import.meta.url === pathToFileURL(fs.realpathSync(process.argv[1])).href;
+          } catch {
+            return false; // argv[1] not resolvable — fall back to the literal-path compare above
+          }
+        })())));
 if (isMain) {
   run(process.argv.slice(2)).then((res) => {
     if (typeof res.code === "number") process.exitCode = res.code;

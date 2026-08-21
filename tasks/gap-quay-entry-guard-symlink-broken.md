@@ -40,9 +40,9 @@ node <安装路径>/dist/quay.js --version   # 正常输出 0.6.0
 
 ## Acceptance Criteria
 
-- [ ] AC1: `quay --version` 经 npm 全局安装（符号链接拓扑）非空输出 0.6.0（能取假：空输出 ⇒ 未修好）。
-- [ ] AC2: 负控制矩阵——source ESM / npm-installed symlinked ESM / SEA CJS 三种调用拓扑各至少一条测试，入口守卫均成立（可机械验证）。
-- [ ] AC3: 真实 repro 已复现为负控制（`npm install -g` 隔离 prefix → 符号链接调用 → 非空输出，读真实输出非 fixture）。
+- [x] AC1: `quay --version` 经 npm 全局安装（符号链接拓扑）非空输出 0.6.0（能取假：空输出 ⇒ 未修好）。
+- [x] AC2: 负控制矩阵——source ESM / npm-installed symlinked ESM / SEA CJS 三种调用拓扑各至少一条测试，入口守卫均成立（可机械验证）。
+- [x] AC3: 真实 repro 已复现为负控制（`npm install -g` 隔离 prefix → 符号链接调用 → 非空输出，读真实输出非 fixture）。
 - [ ] AC4: 全量 suite 绿。
 
 ## Definition of Done
