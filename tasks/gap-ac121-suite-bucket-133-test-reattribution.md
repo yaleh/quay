@@ -1,7 +1,7 @@
 ---
 id: gap-ac121-suite-bucket-133-test-reattribution
 title: AC121 230 个调 test.sh 测试逐条重归属（133 个误归 S 是真漏测风险——分桶执行的前提）
-status: ready
+status: done
 labels:
   - gap
 parent: null
