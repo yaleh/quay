@@ -1,7 +1,7 @@
 ---
 id: gap-docs-t5-help-missing-commands
 title: T5 quay --help 漏 adr/config validate/manager 三命令（代码缺陷，用户无法发现）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -31,13 +31,13 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: `quay --help` 输出含 `adr`、`config validate`、`manager`（Usage 块补齐）。
-- [ ] AC2: help 输出与 `quay.ts` dispatch 表命令集合差 = 0（可机械取假：diff 命令集合）。
-- [ ] AC3: 全量 suite 绿（含 help 相关测试）。
+- [x] AC1: `quay --help` 输出含 `adr`、`config validate`、`manager`（Usage 块补齐）。
+- [x] AC2: help 输出与 `quay.ts` dispatch 表命令集合差 = 0（可机械取假：diff 命令集合）。
+- [x] AC3: 全量 suite 绿（含 help 相关测试）。
 
 ## Definition of Done
 
-- [ ] help Usage 块含全部 dispatch 命令（含 adr/config validate/manager）；命令集合差 = 0（真实输出）。
+- [x] help Usage 块含全部 dispatch 命令（含 adr/config validate/manager）；命令集合差 = 0（真实输出）。
 
 ## Touches
 

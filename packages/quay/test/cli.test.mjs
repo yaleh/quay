@@ -1223,6 +1223,37 @@ async function block14(workspaceRoot) {
       "quay --help documents the --gate <name> flag in a dedicated gate/gate-log options section"
     );
     assert(r.stdout.includes("--list"), "quay --help documents the --list flag for 'gate'");
+    // gap-docs-t5-help-missing-commands: the Usage synopsis must list EVERY dispatchable verb
+    // (adr / config validate / manager were missing — users could not discover them). AC1: the
+    // three previously-missing commands appear in the synopsis block. AC2: the synopsis verb set
+    // equals the quay.ts dispatch table's `cmd === "…"` set (mechanical, fails-closed).
+    const synopsisVerbs = synopsisBlock
+      .split("\n")
+      .map((l) => l.match(/^\s*quay ([a-z][a-z-]*)(?:\s|$)/))
+      .filter(Boolean)
+      .map((m) => m[1])
+      .filter((v) => v !== "--version" && v !== "--help" && v !== "-h");
+    for (const verb of ["adr", "config", "manager"]) {
+      assert(
+        synopsisVerbs.includes(verb),
+        `quay --help Usage synopsis includes the dispatchable verb '${verb}' (gap-docs-t5-help-missing-commands)`
+      );
+    }
+    assert(
+      r.stdout.includes("quay config validate"),
+      "quay --help Usage synopsis includes the 'quay config validate' line"
+    );
+    // The dispatch command set from packages/quay/bin/quay.ts (every `if (cmd === "…")` route).
+    const dispatchVerbs = [
+      "adr", "task", "action", "serve", "mcp", "init", "config", "gate", "gate-log",
+      "complete", "adjudicate", "promote", "retreat", "run", "migrate", "manager",
+    ];
+    const missing = dispatchVerbs.filter((v) => !synopsisVerbs.includes(v));
+    const extra = synopsisVerbs.filter((v) => !dispatchVerbs.includes(v));
+    assert(
+      missing.length === 0 && extra.length === 0,
+      `quay --help Usage synopsis verb set == dispatch table set (diff=0; missing: ${missing.join(",")}, extra: ${extra.join(",")})`
+    );
   }
 
   // quay -h: alias, also exits 0

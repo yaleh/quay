@@ -22,6 +22,11 @@ Usage:
   quay task create <task-id> --title <title> [--body <text>|--body-file <path>] [--status <status>] [--labels <a,b>] [--parent <id>] [--children <a,b>] [--extra <json>] [--json]
   quay task edit <task-id> [--title <title>] [--status <status>] [--body <text>|--body-file <path>] [--labels <a,b>] [--extra <json>] [--parent <id>] [--children <a,b>] [--expect-status <status>] [--acceptance <cmd>] [--append-notes <text>] [--enforce-gate] [--json]
   quay task check <task-id> [--json]
+  quay adr list [--status <status>] [--tag <tag>] [--json] [--root <path>]
+  quay adr view <id> [--json] [--root <path>]
+  quay adr new <id> --title <title> [--status <status>] [--body <text>|--body-file <path>] [--json] [--root <path>]
+  quay adr accept|deprecate|reject <id> [--json] [--root <path>]
+  quay adr supersede <id> --by <newId> [--json] [--root <path>]
   quay action list <task-id> [--json]
   quay action run <task-id> <action-id> [--json]
   quay gate <task-id> [--gate <name>] [--cwd <dir>] [--timeout <ms>] [--dry-run]
@@ -33,8 +38,12 @@ Usage:
   quay retreat <task-id> --reason <reason> [--file <log-path>]
   quay run [--once] [--file <log-path>] [--cwd <dir>] [--timeout <ms>]
   quay migrate --from <providerId> --to <providerId> [--json]
+  quay config validate [--json|--format json] [--check-files] [--root <path>]
   quay serve [--port <port>] [--host <host>]
   quay mcp
+  quay manager start [--dry-run] [--json]
+  quay manager adopt <root> [--dry-run] [--json]
+  quay manager arm [--dry-run] [--json] [--verify]
 
 Options for task list:
   --status <status>   Filter by status (todo, ready, done, needs-human, superseded)

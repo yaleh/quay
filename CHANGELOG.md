@@ -1,5 +1,72 @@
 # Changelog
 
+## v0.6.0 (2026-08-20) — productization pipeline close-out (AC104-119) + Web UI gap fixes
+
+Closes the productization/verification pipeline (AC104-119): the version-bump step, current-tgz
+build, cross-host and cross-project verification, and release/status-writeback all became wired
+steps. Also lands a batch of Web UI fixes found by that verification.
+
+#### Added
+
+- **Version-bump automation (AC104)**: one `version: bump 0.5.0 -> 0.6.0` commit updates all 8
+  version-bearing files (4 `package.json` + `plugin.json` + 2 `marketplace.json` + vendored copy,
+  plus `plugin/VERSION`) — the first step of the productization pipeline.
+- **Build/verify steps wired (AC105-107)**: build the current-version tgz, run a real
+  `dist-verify` on it, and a cross-host mechanized verification (`verify-deliver-coldstart.sh`
+  gains `--build-root` tgz persistence and a complete B/C dual-machine three-step cold-start run).
+- **Third-party / cross-project verification (AC118/AC119)**: the delivery mechanism verified
+  against a real third-party project (meta-cc on machine B) and the Web UI across projects.
+- **verification-round write-path wiring**: `verification-round.jsonl`'s three fields now written
+  by the real round-record path.
+- **Web UI fixes**: `/board` server-side pagination + status/label filtering, `/sessions`
+  rendered by layer (Manager/Outer/Inner) without mixing, and the Journal page reading fresh
+  tick-log sections.
+
+#### Identified (fix filed)
+
+- **CSS asset missing from the release tarball**: AC119 cross-project Web UI verification found
+  `serve` returning 200 but an empty `<style>` — `webui-modernist.css` was placed under `src/` in
+  the tgz while the bundle read it from a same-directory path. A fix task was filed
+  (AC108/109 pipeline close-out) for the following release.
+
+## v0.5.0 (2026-08-16) — AC85-93 productization chain (cross-host verify, version consistency, plugin dist)
+
+The largest autonomous-development release to date (3286 non-merge commits): lands the AC85-93
+productization chain, a large gap backlog of mechanism fixes, and the Web UI redesign groundwork.
+
+#### Added
+
+- **Productization build/verification chain (AC85-89)**: Node-floor dist verification
+  (`dist-verify-node-floor`), `verify-deliver-coldstart.sh` three-step cold-start verification
+  (isolated `.tgz` install → in-project `quay-init --loop` → two-layer outer+inner cold-start
+  liveness), and a `productization-verification.jsonl` record carrier.
+- **Version consistency across all four distribution chains (AC93)**: unified to 0.5.0 across the
+  root marketplace, `quay-native`/`quay-github`/`backlog` packages, and the plugin vendored copy;
+  the plugin-install chain is now triggerable on the develop push path.
+- **Delivery-surface guards (AC90-92)**: fast-mode copy drift gate (`normalized-byte`), the
+  delivery execution core no longer points at undelivered files, and `deliver-verify-usage.sh`
+  asserts the verified surface intersects the actually-used surface.
+- **Web UI redesign groundwork**: the improved Web UI design spec written up, with the next-stage
+  AC94-99 tasks filed.
+- **Autonomous-loop hardening**: `execute-suite-fix` dropped the `CPUQuota=400%` literal
+  (host-dependent limit → genuinely unconstrained), and fan-in-execute auto-closes telemetry
+  brackets.
+
+## v0.4.0 (2026-08-06) — plugin bundle in the release + two-line branch model (develop/integration) + ADR crystallization
+
+#### Added
+
+- **Plugin bundle now ships in the release (AC16)**: the Claude Code plugin bundle (`plugin/`) —
+  the third install path alongside npm and SEA — is included in released artifacts.
+- **Two-line branch model (develop/integration)**: dispatch forks from `develop` by default
+  (`fork_baseline:develop`), merges target the two-line model, and `develop` becomes the
+  authoritative line holding all task work plus record commits.
+- **ADR crystallization (ADR-020..032)**: adaptive methodology budget (ADR-021), retirement of the
+  classic milestone loop in favor of the two-layer fast mode (ADR-022), axes as first-class ADR
+  records (ADR-025), and rulings traceability (ADR-024), among others.
+- **Mechanism hardening**: supervisor base layer, a pure-append checker-cost ledger, and
+  cross-machine regression fixes (ready-pool arity, heavy-op token lease units).
+
 ## v0.3.x — M08-merge-recover (dated per-item below; see git log for exact commit dates)
 
 ### v0.3.12 (2026-07-24) — distribution discipline: version-consistency gate + delivery-manifest assertion + plugin concurrent-batch scripts
