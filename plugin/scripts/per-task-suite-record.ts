@@ -252,6 +252,19 @@ export function buildRecord(o) {
   if (fullSuiteRan === false && cpuTimeS != null) {
     return { error: "--cpu-time-s must be null (or omitted) when --full-suite-ran false — a skipped suite consumed no CPU (AC6, never 0)" };
   }
+  // gap-suite-cpu-time-capture-intermittent-not-wired (AC1/AC2) — the MIRROR of the skip rule above.
+  // fullSuiteRan === true REQUIRES a real cpu_time_s (GNU-time User+System): a full suite that RAN
+  // must have consumed CPU, so a null/missing/≤0 cpu_time_s with fullSuiteRan true is the
+  // capture-not-wired failure shape — indistinguishable from a wiring bug (硬规则 3b). FAIL-CLOSED:
+  // never write a fullSuiteRan=true record that cannot carry a real CPU; record the REASON in the
+  // error rather than a silent null. This rejects BOTH break shapes the manager-tick-criteria "==0"
+  // predicate flags — the `not-wired` shape (explicit null + cpu_source=not-wired, from an
+  // intermittently-empty GNU-time file) and the field-absent `None` shape (a caller that never
+  // passed --cpu-time-s leaves cpuTimeS undefined here). `cpuTimeS <= 0` also covers a caller that
+  // passed 0 (which AC6 normalizes to null) or a negative that somehow slipped validation.
+  if (fullSuiteRan === true && (cpuTimeS == null || cpuTimeS <= 0)) {
+    return { error: "--full-suite-ran true requires a real --cpu-time-s (GNU-time User+System); a full suite that ran must have consumed CPU — capture not wired, fail-closed (never a silent null)" };
+  }
   let load;
   if (o.load != null) {
     const v = Number(o.load);

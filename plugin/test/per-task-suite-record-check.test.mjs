@@ -434,11 +434,28 @@ test("判据2 — the writer CLI records a SKIP (--full-suite-ran false --skip-r
   assert.equal(validateRecord(rec).ok, true, "the skip record is judged GREEN by the checker's 判据2");
 });
 
-test("AC6 — a legacy `--cpu-time-s 0` is normalized to explicit null + not-wired (never a silent 0)", () => {
-  const built = buildRecord({ ...SUITE_RECORD_BASE, fullSuiteRan: "true", cpuTimeS: "0" });
-  assert.equal(built.error, undefined, `0 cpu build must succeed: ${built.error}`);
+test("AC6 — a legacy `--cpu-time-s 0` is normalized to explicit null + not-wired on a SKIP (fullSuiteRan:false), never a silent 0", () => {
+  // AC6 (gap-phase-boundary-differential-accounting) 0→null normalization lives on the SKIP path —
+  // a skipped suite consumes no CPU, so 0 is EXPLICIT null + not-wired (never a misleading 0).
+  const built = buildRecord({ ...SUITE_RECORD_BASE, fullSuiteRan: "false", skipReason: "doc-only-delta", cpuTimeS: "0" });
+  assert.equal(built.error, undefined, `skip 0-cpu build must succeed: ${built.error}`);
   assert.equal(built.record.cpu_time_s, null, "0 is normalized to EXPLICIT null (0 conflates not-wired with ~0 consumption)");
   assert.equal(built.record.cpu_source, "not-wired");
+});
+
+test("gap-suite-cpu-time-capture-intermittent-not-wired — a RUN (fullSuiteRan:true) with `--cpu-time-s 0` ⇒ fail-closed (0 normalizes to null, and a real run must carry a real CPU)", () => {
+  const built = buildRecord({ ...SUITE_RECORD_BASE, fullSuiteRan: "true", cpuTimeS: "0" });
+  assert.match(built.error ?? "", /cpu-time-s/, "a full run with 0 CPU is the capture-not-wired shape ⇒ fail-closed (never a silent null)");
+});
+
+test("gap-suite-cpu-time-capture-intermittent-not-wired — a RUN (fullSuiteRan:true) with `--cpu-time-s null` ⇒ fail-closed (not-wired shape)", () => {
+  const built = buildRecord({ ...SUITE_RECORD_BASE, fullSuiteRan: "true", cpuTimeS: "null", cpuSource: "not-wired" });
+  assert.match(built.error ?? "", /cpu-time-s/, "a full run whose GNU-time capture is unavailable must fail closed, never write null + not-wired");
+});
+
+test("gap-suite-cpu-time-capture-intermittent-not-wired — a RUN (fullSuiteRan:true) with NO --cpu-time-s at all ⇒ fail-closed (field-absent None shape)", () => {
+  const built = buildRecord({ ...SUITE_RECORD_BASE, fullSuiteRan: "true" });
+  assert.match(built.error ?? "", /cpu-time-s/, "a full run recorded without any CPU consideration is ambiguous ⇒ fail-closed (the old pre-wiring path must not emit a cpu-less fullSuiteRan record)");
 });
 
 test("AC6 — buildRecord fail-closed: a non-zero cpu_time_s with --full-suite-ran false is a semantic contradiction (nothing ran)", () => {
