@@ -1,7 +1,7 @@
 ---
 id: gap-webui-modernist-css-missing-in-tgz
 title: webui-modernist.css 打包缺失：serve 页面 200 但 <style> 为空（AC119 跨项目验证发现）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -33,7 +33,7 @@ extra:
 
 - [x] AC1: 修复后 `quay serve` 的产物包含 webui-modernist.css（bundle 或 tgz 内含），读取路径正确。
 - [x] AC2: 负控制落在生产载体——真实 serve 下页面 `<style>` 非空（读真实 HTTP 响应，非 fixture）。
-- [ ] AC3: 全量 suite 绿。
+- [x] AC3: 全量 suite 绿。
 
 ## Definition of Done
 
