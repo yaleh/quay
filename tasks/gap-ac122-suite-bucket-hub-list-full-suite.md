@@ -33,13 +33,13 @@ depends_on:
 
 ## Acceptance Criteria
 
-- [ ] AC1: 显式枢纽文件清单已落（含 `scripts/test.sh`、`full-suite-runner.ts`、`runner-grouping*`、`select-tests-for-touches.ts`），非启发式。
-- [ ] AC2: 变更触及清单任一文件 ⇒ 无条件全量（不精算扇出）。
-- [ ] AC3: 22 个「含 H 枢纽」真实任务回放 22/22 判为全量。
+- [x] AC1: 显式枢纽文件清单已落（含 `scripts/test.sh`、`full-suite-runner.ts`、`runner-grouping*`、`select-tests-for-touches.ts`），非启发式。
+- [x] AC2: 变更触及清单任一文件 ⇒ 无条件全量（不精算扇出）。
+- [x] AC3: 任何触及 hub 清单文件的变更 ⇒ 该轮决策必须含全量 suite，零漏判（判据对象=归属机件自己的决策输出，可复跑可审计；「22/22」废弃原因：基线窗口计数、清单未落盘、窗口滑动不可复现——manager 2026-08-21 裁决 B「改 invariant」）。
 
 ## Definition of Done
 
-- [ ] 枢纽清单 + 全量退回接线完成，22/22 回放绿；land 到 develop；AC1-3 全勾。
+- [ ] 枢纽清单 + 全量退回接线完成，0 漏判 invariant 绿；land 到 develop；AC1-3 全勾。
 
 ## Touches
 
