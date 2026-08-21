@@ -249,6 +249,13 @@ export const RULED_HISTORICAL_COMMITS: { sha: string; reason: string }[] = [
     reason:
       "ruling-add 提交自身豁免（同 8dfd2967 形）——fd1de6a0 把 42ae0d27 加入 ruled 表（outer 代为提交 inner 的登记编辑），本身是直接提交（改 checker 源码）⇒ bypass 自指死锁（给 fd1de6a0 加 ruled = 又一个直接提交）。解：本条目（次一提交，带 AC65 两谓词）把 fd1de6a0 入表，fd1de6a0 自身内容已验证（42ae0d27 已按 ruledHistorical 分类）。outer 2026-08-21 02:5xZ approve 42ae0d27 登记；inner 2026-08-21 03:0xZ 补 fd1de6a0 自豁免条目（先例 8dfd2967）。",
   },
+  {
+    sha: "a388ca38",
+    reason:
+      "release 0.6.1 版本 bump——人 2026-08-21 14:1xZ 原话「①落地后 build+tag+发布一个新版本」（manager 转达「不要解释，实际做」），outer 按人令直接执行发布操作（版本 bump→push→tag→gh release），非 outer 自发起代码直改；" +
+      "8 处 + plugin/VERSION 均 0.6.1（version-consistency-check 'All 8 files carry version 0.6.1' 已验证），release v0.6.1 已 gh 发布（createdAt 2026-08-21T14:49:30Z）指向本提交。" +
+      "先例 08e8ec55（release 0.5.0 版本 bump 同形）。outer 2026-08-21 14:5xZ 裁定 ruled one-off（先例 08e8ec55/cddc55e2）。",
+  },
 ];
 
 /** 一条 commit sha 是否命中 ruled 豁免表（前缀匹配——git 可能给全量或缩写 sha）。PURE。 */
