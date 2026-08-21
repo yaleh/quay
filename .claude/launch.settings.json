@@ -30,13 +30,13 @@
       "outer": {
         "name": "quay-outer",
         "launcher": "claude-fjdac",
-        "model": "deepseek-v4-flash",
+        "model": "deepseek-v4-pro",
         "env": {}
       },
       "inner": {
         "name": "quay-inner",
         "launcher": "claude-fjdac",
-        "model": "deepseek-v4-flash",
+        "model": "deepseek-v4-pro",
         "env": {}
       }
     },
