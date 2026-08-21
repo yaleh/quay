@@ -1,7 +1,7 @@
 ---
 id: gap-suite-cpu-time-capture-intermittent-not-wired
 title: suite 入账 cpu_time_s 捕获间歇有洞——fullSuiteRan=true 8 条缺 cpu_time_s（not-wired×5+None×3，今日 1 条），判据「==0」被违反
-status: todo
+status: ready
 labels:
   - gap
 parent: null
