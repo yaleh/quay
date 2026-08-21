@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-execute-suite-head-cwd-independent
 title: fan-in-execute.js suite_head 依赖 phase-1 cwd：误记 develop HEAD ⇒ 证书 fail-closed 拒 ff（CSS 实证）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
