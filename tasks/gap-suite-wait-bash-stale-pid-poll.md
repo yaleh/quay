@@ -1,7 +1,7 @@
 ---
 id: gap-suite-wait-bash-stale-pid-poll
 title: SUITE_WAIT_BASH poller 死进程空转：纯 .exit 文件检查不核验 suite_pid（阻塞全部 fan-in，硬规则 4）
-status: done
+status: ready
 labels:
   - gap
   - mechanism
