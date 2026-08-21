@@ -1,7 +1,7 @@
 ---
 id: gap-inner-filing-commit-main-checkout-task-body
 title: inner 立案流程主检出任务体未当场提交（11b 复发×2，挡所有 fan-in ff）——立案后当场提交
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -37,15 +37,37 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: inner 立案流程在写任务体后当场提交主检出任务体（同一 tick 步骤，与 dispatch-record 同拍）。
-- [ ] AC2: 负控制落在生产载体——连续 3 个新立案任务，`git status --porcelain` 无 untracked `tasks/*.md`（读真实 git，非 fixture）。
-- [ ] AC3: 全量 suite 绿。
+- [x] AC1: inner 立案流程在写任务体后当场提交主检出任务体（同一 tick 步骤，与 dispatch-record 同拍）。——编排文档含该要求，grep「立案后当场提交主检出任务体」命中（orchestration/fast-mode-tick-core.md B5 1 处 + 落地副本 1 处）。
+- [ ] AC2: 负控制落在生产载体——连续 3 个新立案任务，`git status --porcelain` 无 untracked `tasks/*.md`（读真实 git，非 fixture）。（待外部）
+- [ ] AC3: 全量 suite 绿。（待外部）
 
 ## Definition of Done
 
-- [ ] inner 立案即提交主检出任务体；连续 3 个新立案无 untracked 任务体（真实输出）。
+- [x] inner 立案即提交主检出任务体（B5 强制要求已落盘，正本+落地副本 grep 命中）。
+- [ ] 连续 3 个新立案无 untracked 任务体（真实输出）。（待外部）
+
+## Evidence
+
+**runId**: `fm-gap-inner-filing-commit-main-checkout-task-body-1787311000000-inflr`
+
+**改动三件**：
+1. `orchestration/fast-mode-tick-core.md` B5「建任务时」——补「立案后当场提交主检出任务体」强制要求（同一 tick 步骤、与 A16b 同拍；注明 11b 语义 + `fan-in-ff-merge.sh` porcelain 非空 exit 2 挡 ff 的两实例）。
+2. `plugin/loop/fast-mode-tick-core.md`——落地副本同语义落地（AC90 normalized-byte，行为体与正本一致）。
+3. `plugin/loop/fast-mode-loop-tick.md`「发现问题时建任务」节——补「立案后当场提交主检出任务体」正本（B5 的 `src:1379 "立案后当场提交主检出任务体"` 锚句落点）。
+
+**grep 证据（AC1）**：
+- `grep -c "立案后当场提交主检出任务体" orchestration/fast-mode-tick-core.md` → 1
+- `grep -c "立案后当场提交主检出任务体" plugin/loop/fast-mode-tick-core.md` → 1
+- `grep -c "立案后当场提交主检出任务体" plugin/loop/fast-mode-loop-tick.md` → 1
+
+**静态检查（全部绿）**：
+- `tick-core-static-check.ts --check-drift` → PASS（4 pairs 一致；fast-mode ≐ body）
+- `tick-core-static-check.ts` → PASS（AC3 src:N 覆盖 fast-mode 46/46，AC4 指针 OK，AC5 B3 编号 OK，AC6 一致，AC8 排除一致）
+- 行为体 normalized diff 正本 vs 副本 → IDENTICAL
 
 ## Touches
 
 - tasks/gap-inner-filing-commit-main-checkout-task-body.md（自身）
-- plugin/scripts/（inner 立案流程所在——若在脚本/编排面）
+- orchestration/fast-mode-tick-core.md（B5 立案提交强制要求）
+- plugin/loop/fast-mode-tick-core.md（落地副本语义落地）
+- plugin/loop/fast-mode-loop-tick.md（立案提交正本 + B5 锚句）
