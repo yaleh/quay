@@ -239,6 +239,7 @@ rm -f "$fix_scope_isolate"
 fix_scope_out=$(node --no-warnings --experimental-strip-types --input-type=module -e 'import fs from "node:fs";
 import { parseTouches, matchGlob, normalizePath } from "${worktree}/plugin/scripts/touches-orthogonality-check.ts";
 import { scanFamily, kindForFile } from "${worktree}/plugin/scripts/known-load-sensitive.ts";
+import { TMUX_LEAK_FAIL_RE } from "${worktree}/plugin/scripts/tmux-leak-fail-re.ts";
 const taskFile = process.argv[1]; const wt = process.argv[2]; const logFile = process.argv[3]; const releaseLedger = process.argv[4]; const isolateFile = process.argv[5];
 const livelockRounds = Number(process.argv[6] || 3);
 let globs = null;
@@ -264,7 +265,7 @@ while ((m = re.exec(logText)) !== null) {
   if (globs === null) { inScope.push(rel); continue; }
   if (globs.some((g) => matchGlob(normalizePath(g), rel))) inScope.push(rel); else outOfScope.push({ file: rel, reason: "other-task" });
 }
-if (/tmux-leak-scan: FAIL/.test(logText)) outOfScope.push({ file: null, reason: "leak-residual" });
+if (TMUX_LEAK_FAIL_RE.test(logText)) outOfScope.push({ file: null, reason: "leak-residual" });
 if (inScope.length === 0 && outOfScope.length === 0 && /run_static_checks|static-check/i.test(logText)) outOfScope.push({ file: null, reason: "checker-misreport" });
 try { if (releaseLedger) fs.writeFileSync(releaseLedger, JSON.stringify(prior)); } catch (e) {}
 if (loadSensitiveFiles.length > 0) { try { fs.writeFileSync(isolateFile, loadSensitiveFiles.join("\\n") + "\\n"); } catch (e) {} }

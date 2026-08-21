@@ -136,6 +136,9 @@ test("classifyOrphans — orphan probes (cwd deleted + claude-probe) + stale loc
 
 test("fullSuiteLockFiles — derives <git-common-dir>/full-suite.lock.0..S-1 from a real git repo (S = configured slot count)", () => {
   const dir = tmp("git");
+  const prevLock = process.env.FULL_SUITE_LOCK_FILE;
+  const prevSeam = process.env.RESOURCE_GATE_CONCURRENT_SUITES;
+  const prevKnob = process.env.QUAY_MAX_CONCURRENT_SUITES;
   try {
     const git = (args) => spawnSync("git", args, { cwd: dir, encoding: "utf8" });
     git(["init", "-q", "-b", "master"]);
@@ -144,6 +147,15 @@ test("fullSuiteLockFiles — derives <git-common-dir>/full-suite.lock.0..S-1 fro
     writeFileSync(join(dir, "a.txt"), "x\n");
     git(["add", "-A"]);
     git(["commit", "-qm", "x"]);
+    // Hermetic against the PRODUCTION `.concurrency` scalar (gap-suite-slot-ssot-i5-false-positive):
+    // suiteLockSlotCount() in the assertion resolves from the TEST process cwd (the worktree) and would
+    // read the production <suiteLockBase>.concurrency (a live-suite S=1 file), shadowing the knob and
+    // drifting from fullSuiteLockFiles(dir) (which resolves from the temp git repo). Pin the base to
+    // THIS repo's common-dir and carry S=2 there so both sides deterministically read S=2.
+    process.env.FULL_SUITE_LOCK_FILE = join(dir, ".git", "full-suite.lock");
+    writeFileSync(join(dir, ".git", "full-suite.lock.concurrency"), "2", "utf8");
+    delete process.env.RESOURCE_GATE_CONCURRENT_SUITES;
+    process.env.QUAY_MAX_CONCURRENT_SUITES = "2";
     const lockFiles = fullSuiteLockFiles(dir);
     // Adaptive to the configured slot count (gap-suite-lock-slot-seam-asymmetry AC2): S=1 ⇒ [.0] only,
     // S=2 ⇒ [.0,.1], S=3 ⇒ [.0,.1,.2] — no hardcoded 2-file assumption.
@@ -152,6 +164,12 @@ test("fullSuiteLockFiles — derives <git-common-dir>/full-suite.lock.0..S-1 fro
       assert.ok(f.endsWith(`/full-suite.lock.${i}`), `slot ${i} ends with /full-suite.lock.${i}, got ${f}`);
     });
   } finally {
+    if (prevLock === undefined) delete process.env.FULL_SUITE_LOCK_FILE;
+    else process.env.FULL_SUITE_LOCK_FILE = prevLock;
+    if (prevSeam === undefined) delete process.env.RESOURCE_GATE_CONCURRENT_SUITES;
+    else process.env.RESOURCE_GATE_CONCURRENT_SUITES = prevSeam;
+    if (prevKnob === undefined) delete process.env.QUAY_MAX_CONCURRENT_SUITES;
+    else process.env.QUAY_MAX_CONCURRENT_SUITES = prevKnob;
     cleanup(dir);
   }
 });

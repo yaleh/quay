@@ -40,15 +40,31 @@ import {
 function withSlots(value, fn) {
   const prev = process.env.QUAY_MAX_CONCURRENT_SUITES;
   const prevSeam = process.env.RESOURCE_GATE_CONCURRENT_SUITES;
-  // withSlots drives the KNOB — the seam must be cleared so suiteLockSlotCount() (which now reads the
-  // RESOURCE_GATE_CONCURRENT_SUITES seam FIRST) cannot shadow the knob from a leaked ambient test seam.
+  const prevLock = process.env.FULL_SUITE_LOCK_FILE;
+  let tmp;
+  // Hermetic against the PRODUCTION lock state (gap-suite-slot-ssot-i5-false-positive): the production
+  // `<suiteLockBase>.concurrency` scalar (a live-suite S=1 file) would otherwise SHADOW the knob this
+  // helper drives — the `.concurrency` file has priority over QUAY_MAX_CONCURRENT_SUITES. When the
+  // caller has NOT already pinned FULL_SUITE_LOCK_FILE, pin the base to an isolated temp dir carrying
+  // `value` in THAT base's `.concurrency` file; a caller that set FULL_SUITE_LOCK_FILE itself (e.g.
+  // the countHeldSuiteLocks test, which controls WHERE the probe looks) keeps its base — its own
+  // override already neutralizes the production scalar.
   delete process.env.RESOURCE_GATE_CONCURRENT_SUITES;
   process.env.QUAY_MAX_CONCURRENT_SUITES = String(value);
+  if (prevLock === undefined) {
+    tmp = makeTmp("slots");
+    const base = path.join(tmp, "full-suite.lock");
+    fs.writeFileSync(`${base}.concurrency`, String(value), "utf8");
+    process.env.FULL_SUITE_LOCK_FILE = base;
+  }
   try { return fn(); } finally {
     if (prev === undefined) delete process.env.QUAY_MAX_CONCURRENT_SUITES;
     else process.env.QUAY_MAX_CONCURRENT_SUITES = prev;
     if (prevSeam === undefined) delete process.env.RESOURCE_GATE_CONCURRENT_SUITES;
     else process.env.RESOURCE_GATE_CONCURRENT_SUITES = prevSeam;
+    if (prevLock === undefined) delete process.env.FULL_SUITE_LOCK_FILE;
+    else process.env.FULL_SUITE_LOCK_FILE = prevLock;
+    if (tmp) cleanup(tmp);
   }
 }
 
@@ -121,6 +137,13 @@ test("bash canonical — suite_slot_count matches TS suiteLockSlotCount under th
 test("seam symmetry (gap-suite-lock-slot-seam-asymmetry AC1) — TS suiteLockSlotCount reads the RESOURCE_GATE_CONCURRENT_SUITES test seam FIRST, same as the bash canonical; empty seam falls through to the knob (`:-` semantics)", () => {
   const prevSeam = process.env.RESOURCE_GATE_CONCURRENT_SUITES;
   const prevKnob = process.env.QUAY_MAX_CONCURRENT_SUITES;
+  const prevLock = process.env.FULL_SUITE_LOCK_FILE;
+  // Pin the base to an isolated temp dir (NO `.concurrency` file there) so the empty-seam fall-through
+  // really reaches the knob — the production `<suiteLockBase>.concurrency` scalar (a live-suite S=1
+  // file) would otherwise shadow the knob and break the "empty seam → knob" step (the same
+  // production-lock interference class as gap-suite-slot-ssot-i5-false-positive).
+  const tmp = makeTmp("seamsym");
+  process.env.FULL_SUITE_LOCK_FILE = path.join(tmp, "full-suite.lock");
   try {
     // seam ONLY (knob unset): both sides read the seam — the pre-fix TS read the knob (default 2) and
     // drifted from bash (1) ⇒ the asymmetry this task closes.
@@ -142,6 +165,9 @@ test("seam symmetry (gap-suite-lock-slot-seam-asymmetry AC1) — TS suiteLockSlo
     else process.env.RESOURCE_GATE_CONCURRENT_SUITES = prevSeam;
     if (prevKnob === undefined) delete process.env.QUAY_MAX_CONCURRENT_SUITES;
     else process.env.QUAY_MAX_CONCURRENT_SUITES = prevKnob;
+    if (prevLock === undefined) delete process.env.FULL_SUITE_LOCK_FILE;
+    else process.env.FULL_SUITE_LOCK_FILE = prevLock;
+    cleanup(tmp);
   }
 });
 
@@ -263,6 +289,13 @@ test("AC4 — lane × S ≤ nproc × oversub (the pure-computation budget never 
   const prevNproc = process.env.RESOURCE_GATE_NPROC;
   const prevOversub = process.env.QUAY_MAX_OVERSUBSCRIPTION;
   const prevSeam = process.env.RESOURCE_GATE_CONCURRENT_SUITES;
+  const prevLock = process.env.FULL_SUITE_LOCK_FILE;
+  // Isolate the base (no `.concurrency` file there): the production scalar (a live-suite S=1 file)
+  // would otherwise shadow this test's knob and make concurrentSuiteSlots() read 1 for every S —
+  // defaultLaneCount() then derives 16×2/1=32 instead of 16 (gap-suite-slot-ssot-i5-false-positive
+  // class: production lock state must not perturb the test's derived slot count).
+  const tmp = makeTmp("lane");
+  process.env.FULL_SUITE_LOCK_FILE = path.join(tmp, "full-suite.lock");
   try {
     // This test drives the KNOB — the seam (read FIRST by suiteLockSlotCount since
     // gap-suite-lock-slot-seam-asymmetry) must be cleared or it shadows the knob.
@@ -290,6 +323,9 @@ test("AC4 — lane × S ≤ nproc × oversub (the pure-computation budget never 
     delete process.env.QUAY_MAX_CONCURRENT_SUITES;
     if (prevSeam === undefined) delete process.env.RESOURCE_GATE_CONCURRENT_SUITES;
     else process.env.RESOURCE_GATE_CONCURRENT_SUITES = prevSeam;
+    if (prevLock === undefined) delete process.env.FULL_SUITE_LOCK_FILE;
+    else process.env.FULL_SUITE_LOCK_FILE = prevLock;
+    cleanup(tmp);
   }
 });
 
@@ -334,6 +370,57 @@ test("I5 — checker verdict: GREEN on the real repo (exclusive flock, acquired 
   const v = checkRuntimeConcurrencyCapped(REPO_ROOT);
   assert.equal(v.evaluated, true, "I5 must be evaluated on the real repo");
   assert.equal(v.ok, true, `I5 must be GREEN, got: ${v.detail}`);
+});
+
+test("I5 — checker stays GREEN when the production `.concurrency` file says S=1 AND a real suite holds a slot at the production base (the false-positive reproduction: the probe's slot count is pinned to the checker's S, not the ambient default 2, and the probe is hermetic — the real holder is invisible)", async () => {
+  const tmp = makeTmp("i5prod");
+  const prodBase = path.join(tmp, "prod-full-suite.lock");
+  fs.writeFileSync(`${prodBase}.concurrency`, "1\n", "utf8"); // the production scalar (S=1, the reported symptom)
+  const prevLock = process.env.FULL_SUITE_LOCK_FILE;
+  const prevSeam = process.env.RESOURCE_GATE_CONCURRENT_SUITES;
+  const prevKnob = process.env.QUAY_MAX_CONCURRENT_SUITES;
+  process.env.FULL_SUITE_LOCK_FILE = prodBase;
+  delete process.env.RESOURCE_GATE_CONCURRENT_SUITES;
+  delete process.env.QUAY_MAX_CONCURRENT_SUITES;
+  // A REAL live-suite holder on the production base's only slot (`.0`): a genuine concurrent suite
+  // mid-run. The probe must neither see it (hermetic base) nor be perturbed by it.
+  const { spawn } = await import("node:child_process");
+  const holder = spawn("flock", [`${prodBase}.0`, "-c", "sleep 30"], { stdio: "ignore", detached: true });
+  try {
+    await new Promise((r) => setTimeout(r, 250));
+    const v = checkRuntimeConcurrencyCapped(REPO_ROOT);
+    assert.equal(v.evaluated, true, `I5 must be evaluated under a production S=1 .concurrency file, got: ${v.detail}`);
+    // The false positive was "2/3 held (> S=1)" — with the probe pinned to S=1, exactly 1 of 3 holds.
+    assert.equal(v.ok, true, `I5 must be GREEN while a real suite holds the production slot, got: ${v.detail}`);
+    // Hermetic isolation: the probe must NOT create/contend on slot files at the production base —
+    // the live suite holding `.0` here must be invisible to (and unperturbed by) the probe. (The
+    // `.concurrency` scalar WE wrote is expected; the probe must not add any OTHER `.<digit>` slot file.)
+    const prodSlots = fs.readdirSync(tmp).filter((f) => /^prod-full-suite\.lock\.\d+$/.test(f));
+    assert.deepEqual(prodSlots, ["prod-full-suite.lock.0"], "the probe must be hermetic — the only slot file at the production base is the live holder's own `.0`");
+  } finally {
+    try { process.kill(-holder.pid, "SIGKILL"); } catch { /* already gone */ }
+    try { holder.kill("SIGKILL"); } catch { /* already gone */ }
+    if (prevLock === undefined) delete process.env.FULL_SUITE_LOCK_FILE;
+    else process.env.FULL_SUITE_LOCK_FILE = prevLock;
+    if (prevSeam === undefined) delete process.env.RESOURCE_GATE_CONCURRENT_SUITES;
+    else process.env.RESOURCE_GATE_CONCURRENT_SUITES = prevSeam;
+    if (prevKnob === undefined) delete process.env.QUAY_MAX_CONCURRENT_SUITES;
+    else process.env.QUAY_MAX_CONCURRENT_SUITES = prevKnob;
+    cleanup(tmp);
+  }
+});
+
+test("I5 — checker itself can go RED end-to-end (硬规则 3b): QUAY_TEST_SSOT_I5_FLOCK=shared injection ⇒ all S+2 acquire ⇒ the checker verdict goes RED, not just the raw probe", () => {
+  const prev = process.env.QUAY_TEST_SSOT_I5_FLOCK;
+  process.env.QUAY_TEST_SSOT_I5_FLOCK = "shared";
+  try {
+    const v = checkRuntimeConcurrencyCapped(REPO_ROOT);
+    assert.equal(v.evaluated, true, `I5 must be evaluated under the shared-flock injection, got: ${v.detail}`);
+    assert.equal(v.ok, false, `I5 must go RED when the probe's flock is shared (exclusivity broken), got: ${v.detail}`);
+  } finally {
+    if (prev === undefined) delete process.env.QUAY_TEST_SSOT_I5_FLOCK;
+    else process.env.QUAY_TEST_SSOT_I5_FLOCK = prev;
+  }
 });
 
 // ── the static checker: falsifiability (每条都能取假) ───────────────────────────────────────────────

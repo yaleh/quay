@@ -31,13 +31,21 @@
 // Run:
 //   scripts/test.sh plugin/test/full-suite-runner.test.mjs
 
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, execSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+/** Hermetic lock dirs created by runRunner (gap-suite-slot-ssot-i5-false-positive) — cleaned after the
+ *  whole file so they never leak into /tmp NOR into a git-repo `root` (an untracked file in `root`
+ *  would flip the treeDirty round-START annotation, breaking the CLEAN-tree test). */
+const _runnerLockDirs = [];
+after(() => {
+  for (const d of _runnerLockDirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* best-effort */ } }
+});
 
 import {
   isFailureLine,
@@ -165,6 +173,28 @@ function runRunner({ root, command, laneCount, stateDir, runner, env = {}, seria
   // (the AC1/AC2/AC3 concurrent-suite tests); the unseamed production path is exercised separately by
   // the dedicated "production read counts a real marker process" unit test.
   if (!("QUAY_TEST_RUNNER_PROCS" in mergedEnv)) mergedEnv.QUAY_TEST_RUNNER_PROCS = "1";
+  // HERMETIC lock base (gap-suite-slot-ssot-i5-false-positive): the runner's suiteLockSlotCount() /
+  // suiteLockPaths() resolve from process.cwd() (this test file's worktree, since runRunner does not
+  // set a child cwd) and would read the PRODUCTION <suiteLockBase>.concurrency scalar (a live-suite
+  // S=1 file), which SHADOWS the env knob a test drives ⇒ round records read S=1 instead of the
+  // configured S. Pin the runner's lock base to a temp dir OUTSIDE `root` (an untracked file inside a
+  // git-repo `root` would flip the round-START treeDirty annotation, breaking the CLEAN-tree test)
+  // carrying the configured slot count (default 2) in its `.concurrency` file — every runRunner-based
+  // test is then hermetic against production lock state (the runner probes/locks the pinned base,
+  // never the real git-common-dir).
+  // ⚠️ Guard on the per-call `env` (NOT mergedEnv): the REAL suite launch (scripts/test.sh:1181) sets
+  // FULL_SUITE_LOCK_FILE in the parent env, so `in mergedEnv` is TRUE there and the pinning would be
+  // SKIPPED — the child then reads the PRODUCTION `.concurrency` file (a live-suite S=1 scalar) which
+  // shadows the test-driven knob (gap-suite-slot-ssot-i5-false-positive full-suite RED: 6 assertions
+  // read S=1). Only a test EXPLICITLY passing its own FULL_SUITE_LOCK_FILE via the per-call `env`
+  // opts out of the hermetic pin; ambient suite-launch env never does.
+  if (!("FULL_SUITE_LOCK_FILE" in env)) {
+    const lockDir = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-lock-"));
+    _runnerLockDirs.push(lockDir);
+    const lockBase = path.join(lockDir, "full-suite.lock");
+    fs.writeFileSync(`${lockBase}.concurrency`, mergedEnv.QUAY_MAX_CONCURRENT_SUITES ?? "2", "utf8");
+    mergedEnv.FULL_SUITE_LOCK_FILE = lockBase;
+  }
   const child = spawn(process.execPath, args, { stdio: ["ignore", "pipe", "pipe"], env: mergedEnv });
   // Drain pipes so a chatty fake suite cannot block the child.
   child.stdout.on("data", () => {});
@@ -1883,6 +1913,13 @@ test("AC2 — concurrentSuiteSlots() reads QUAY_MAX_CONCURRENT_SUITES (the singl
   // degrades to the old 1-slot behavior, never to 0 lanes). The value is clamped to an integer >= 1.
   const prev = process.env.QUAY_MAX_CONCURRENT_SUITES;
   const prevSeam = process.env.RESOURCE_GATE_CONCURRENT_SUITES;
+  const prevLock = process.env.FULL_SUITE_LOCK_FILE;
+  // Pin the base to an isolated temp dir with NO `.concurrency` file so the knob this test drives is
+  // authoritative — the PRODUCTION scalar (a live-suite S=1 file at <suiteLockBase>.concurrency) has
+  // priority over QUAY_MAX_CONCURRENT_SUITES and would shadow every knob value asserted here
+  // (gap-suite-slot-ssot-i5-false-positive class: production lock state must not perturb the tests).
+  const pinTmp = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-pin-"));
+  process.env.FULL_SUITE_LOCK_FILE = path.join(pinTmp, "full-suite.lock");
   try {
     // Clear the seam too — suiteLockSlotCount() reads RESOURCE_GATE_CONCURRENT_SUITES FIRST (since
     // gap-suite-lock-slot-seam-asymmetry), so a "default with the knob deleted" assertion must not be
@@ -1905,6 +1942,9 @@ test("AC2 — concurrentSuiteSlots() reads QUAY_MAX_CONCURRENT_SUITES (the singl
     else process.env.QUAY_MAX_CONCURRENT_SUITES = prev;
     if (prevSeam === undefined) delete process.env.RESOURCE_GATE_CONCURRENT_SUITES;
     else process.env.RESOURCE_GATE_CONCURRENT_SUITES = prevSeam;
+    if (prevLock === undefined) delete process.env.FULL_SUITE_LOCK_FILE;
+    else process.env.FULL_SUITE_LOCK_FILE = prevLock;
+    fs.rmSync(pinTmp, { recursive: true, force: true });
   }
 });
 
