@@ -239,6 +239,11 @@ export const RULED_HISTORICAL_COMMITS: { sha: string; reason: string }[] = [
     reason:
       "outer 直修 plugin/test/outer-cron-registry.test.mjs 的时间炸弹 fixture 日期（2026-08-14 硬编码越过 24h 线 ⇒ 4 条恒红 ⇒ 全量 suite exit 1 ⇒ 卡住所有 fan-in，含 AC104 1h fix 循环）——AC65 类直修（plugin/test 单命令可验：`node --test plugin/test/outer-cron-registry.test.mjs` 32/33，唯一 fail=canonicalRepoRoot 是 worktree 上下文断言非真红），但提交信息用了散文 'AC65 direct-fix（plugin/test 单命令可验）' 而非两谓词要求的确切 `AC65:`+`AC65-Verified:` 两行 ⇒ 非 ac65Authorized 分类。裁定 ruled one-off：修复本身已验证（单命令）、紧急（阻断全管线）、非偷懒绕过 fan-in；amend 会重写 develop 上 19ddd0b2/dc320a35 两个在飞任务引用 sha（AC104 worktree 已 merge dc320a35）。⛔ 教训：outer AC65 直修必须用确切两行形式（declaration + verification artifact），散文声明不豁免。outer 2026-08-20 裁定 ruled one-off（先例 cddc55e2/f9577da1）。",
   },
+  {
+    sha: "42ae0d27",
+    reason:
+      "inner 紧急修复 fan-in-execute.js suite_head 计算 cwd 依赖——SUITE_LAUNCH/ISOLATE_LAUNCH/pre-verified 三处 `git rev-parse HEAD` 在 phase-1 agent 当前 cwd 运行，agent cwd 落主检出 ⇒ suite_head 误记 develop HEAD ⇒ step-5 证书（suite_head 须为 ff tip 祖先）fail-closed 拒 ff。实证：CSS fan-in（wf_b89bfab1）suite 绿跑 820s 但 suite_head=53602d48（develop）非 tip cea404e4 祖先 ⇒ ff 拒绝；tmux-leak capture 同缺陷（07b07f5f vs worktree b15fe7da）。修法：三处改 `git -C ${worktree} rev-parse HEAD`（cwd 无关），双副本同步，node --check 语法过。⛔ 教训：inner 直提 develop 是错的（应走 fan-in），但此修正在 4 fan-in 在飞时被发现、不修则 ff 全拒，且修复本身由 CSS 重派真实验证（AC2 gap-fan-in-execute-suite-head-cwd-independent）——紧急止损。inner 2026-08-21 02:5xZ 裁定 ruled one-off（先例 8e024f88/cbbbb766/cddc55e2；待 outer/manager 复核）。",
+  },
 ];
 
 /** 一条 commit sha 是否命中 ruled 豁免表（前缀匹配——git 可能给全量或缩写 sha）。PURE。 */
