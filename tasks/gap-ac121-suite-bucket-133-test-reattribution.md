@@ -1,7 +1,7 @@
 ---
 id: gap-ac121-suite-bucket-133-test-reattribution
 title: AC121 230 个调 test.sh 测试逐条重归属（133 个误归 S 是真漏测风险——分桶执行的前提）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -40,7 +40,7 @@ depends_on:
 
 ## Definition of Done
 
-- [ ] 230 个测试逐条重归属落记录且判定数=230、漏判=0；land 到 develop；AC1-2 全勾。
+- [x] 230 个测试逐条重归属落记录且判定数=230、漏判=0；land 到 develop；AC1-2 全勾。
 
 ## 判定方法（本实现，机械可复核）
 
