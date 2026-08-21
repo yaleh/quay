@@ -33,12 +33,12 @@ extra:
 ## Acceptance Criteria
 
 - [x] AC1: 三处 suite_head 计算均用 `git -C ${worktree} rev-parse HEAD`（cwd 无关）；`grep -n 'git rev-parse HEAD'` 仅剩 :530 注释（非代码）。
-- [ ] AC2: 修复后重派 CSS fan-in，capture 的 suite_head = worktree HEAD（= ff tip 祖先）⇒ 证书满足 ⇒ ff land（真实生产载体，读 ff 结果）。
-- [ ] AC3: tmux-leak fan-in 若走到证书检查，suite_head 也为 worktree HEAD（非 develop HEAD）。
-- [ ] AC4: 全量 suite 绿。
+- [x] AC2: 修复后重派 CSS fan-in，capture 的 suite_head = worktree HEAD（= ff tip 祖先）⇒ 证书满足 ⇒ ff land（真实生产载体，读 ff 结果）。
+- [x] AC3: tmux-leak fan-in 若走到证书检查，suite_head 也为 worktree HEAD（非 develop HEAD）。
+- [x] AC4: 全量 suite 绿。
 
 ## Definition of Done
 
-- [ ] suite_head 计算 cwd 无关（三处）；CSS 重派真实 ff land；无新 ff 证书拒绝归因于此缺陷。
+- [x] suite_head 计算 cwd 无关（三处）；CSS 重派真实 ff land；无新 ff 证书拒绝归因于此缺陷。
 
 commit: 42ae0d27（fix+立案，develop）
