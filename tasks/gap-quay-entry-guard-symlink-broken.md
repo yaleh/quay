@@ -1,7 +1,7 @@
 ---
 id: gap-quay-entry-guard-symlink-broken
 title: quay 入口守卫符号链接拓扑恒假：npm install -g 后 quay 命令静默空输出（同族第 3 次，牵连 AC108）
-status: done
+status: ready
 labels:
   - gap
   - mechanism
