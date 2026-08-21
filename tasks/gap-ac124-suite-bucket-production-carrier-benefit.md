@@ -8,6 +8,12 @@ parent: null
 children: []
 extra:
   schema: execution
+depends_on:
+  - gap-ac120-suite-bucket-attribution-mechanism
+  - gap-ac121-suite-bucket-133-test-reattribution
+  - gap-ac122-suite-bucket-hub-list-full-suite
+  - gap-ac123-suite-bucket-cross-bucket-both-sides
+  - gap-ac125-suite-bucket-no-miss-negative-control
 ---
 
 **type:** execution
@@ -20,13 +26,13 @@ extra:
 
 **⛔ 不接受估算值**（同 `gap-phase-boundary-differential-accounting` 推论三：fixture/估算正确 ≠ 已产出）。**阈值来源**：基线实测 P=21.9%、M=18.1%，40% 是含跨桶与兜底后的宽松上界，不是凭空设的数。
 
-**⛔ 前提**：AC121（133 个逐条重归属）已 land——否则启用分桶执行等于给出会漏测的绿。
+**⛔ 前提**：AC120/AC121/AC122/AC123/**AC125** 已 land——否则启用分桶执行等于给出会漏测的绿（AC125 是唯一「没漏」判据，缺它本阶段达成等于恒绿判据；见 frontmatter `depends_on`）。
 
 **为什么 inner 执行**：启用分桶执行 + 跑轮次 + 读生产载体 → inner 域。
 
 ## Plan
 
-1. 分桶执行启用（前置 AC120/AC121/AC122/AC123 已 land）。
+1. 分桶执行启用（前置 AC120/AC121/AC122/AC123/AC125 已 land，见 frontmatter `depends_on`）。
 2. 确保 `.quay/verification-round.jsonl` 新轮次带桶字段（桶 + 文件数 + 耗时）。
 3. 累计 ≥10 轮带桶字段；P-only 与 M-only 各 ≥3 轮，`durationMs` 中位数 ≤ 全量中位数 40%。
 4. fan-in land。
