@@ -46,5 +46,6 @@ extra:
 ## Touches
 
 - plugin/scripts/verify-deliver-coldstart.sh（L2 判定修复）
+- plugin/test/verify-deliver-coldstart.test.mjs（L2_STARTUP_PROMPT 回归断言 + AC1 三控制带）
 - .quay/productization-verification.jsonl（AC107 记录更新/标注）
 - tasks/gap-verify-deliver-coldstart-l2-proc-ok-false-positive.md（自身）
