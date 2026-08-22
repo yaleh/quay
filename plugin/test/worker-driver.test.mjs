@@ -1,11 +1,14 @@
 // @test-group governance
-// worker-driver.test.mjs — SPEC-worker-driven-inner-2026-08-16 §5 阶段 2（AC116）: the mechanical
-// worker driver spawns claude -p workers with N-concurrency (in-flight = the driver's OWN spawned
+// worker-driver.test.mjs — SPEC-worker-driven-inner-2026-08-16 §5 阶段 2（AC116）+ 阶段 3（AC117）: the
+// mechanical worker driver spawns claude -p workers with N-concurrency (in-flight = the driver's OWN spawned
 // child-process count, 硬规则 4b), a wall-clock timeout that SIGTERMs the worker (preserving the
 // worktree), and a stash-before-checkout that never discards. 阶段 1（AC115）AC1/AC2/AC3 保留：
 // 在飞 = 驱动子进程数（直接量）、worker 退出码 + outcome 字段齐全（SPEC §4③）、杀 worker ⇒ 察觉并记录。
+// 阶段 3（AC117）MCP 控制面：halt 语义（停止新派发、不杀在飞，AC1）、调用方身份显式传且可核（AC2，
+// header Mcp-Caller-Id 或 tool 参数 caller，非 Mcp-Session-Id）、无身份调用 ⇒ 拒（AC3 能取假）。
 // The worker command is injectable (--worker-cmd) so the tests never spawn a real claude — they drive
-// `node -e process.exit(…)` and `sleep`, exactly the kill/timeout seams.
+// `node -e process.exit(…)` and `sleep`, exactly the kill/timeout seams. The control plane is tested
+// over a real Streamable HTTP MCP connection (serveControlPlane on port 0 + SDK client).
 //
 // Run: scripts/test.sh plugin/test/worker-driver.test.mjs
 
@@ -30,6 +33,21 @@ import {
   WORKER_OUTCOME_REL,
   FINAL_STATES,
   DEFAULT_STASH_MESSAGE,
+  defaultControlState,
+  readControlState,
+  writeControlState,
+  isHalted,
+  applyHalt,
+  applyPreference,
+  applyForceDispatch,
+  resolveCaller,
+  knownCallers,
+  headerValue,
+  computeHaltedOutcome,
+  CONTROL_STATE_REL,
+  CONTROL_CALLERS_ENV,
+  CONTROL_HEADER,
+  serveControlPlane,
 } from "../scripts/worker-driver.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -368,4 +386,200 @@ test("AC3 — stuck worker + --timeout ⇒ wall-clock SIGTERM, final_state=timed
   // worktree 仍在（驱动超时杀 worker 会话，但保留 worktree；从不 remove/prune）。
   assert.ok(fs.existsSync(wtPath), "worktree still exists after timeout (preserved)");
   assert.match(runGit(root, ["worktree", "list"]), /w1/, "git worktree list still shows the worktree");
+});
+
+// ── 阶段 3（AC117）MCP 控制面：控制态 + 身份（AC2/AC3 纯函数）──────────────────────────────────────
+
+test("AC2/AC3 — resolveCaller: explicit + verifiable; no identity ⇒ reject; unknown ⇒ reject; no default identity", () => {
+  // AC3（能取假）：不带身份 ⇒ 拒，⛔ 不得按默认身份放行。
+  const none = resolveCaller({});
+  assert.equal(none.ok, false);
+  assert.equal(none.code, "no-caller");
+  assert.match(none.reason, /no caller identity/);
+
+  // 空字符串 / 纯空白 同样视为「无身份」。
+  assert.equal(resolveCaller({ toolArg: "  " }).ok, false);
+  assert.equal(resolveCaller({ header: "" }).ok, false);
+
+  // AC2 可核：未知身份（不在 knownCallers）⇒ 拒（不是「默认放行」，也不是「无身份」）。
+  const unknown = resolveCaller({ toolArg: "evil" });
+  assert.equal(unknown.ok, false);
+  assert.equal(unknown.code, "unknown-caller");
+  assert.match(unknown.reason, /unknown caller "evil"/);
+
+  // 已知身份（tool 参数 / header 两种形态）⇒ ok。
+  assert.deepEqual(resolveCaller({ toolArg: "outer" }), { ok: true, caller: "outer" });
+  assert.deepEqual(resolveCaller({ header: "manager" }), { ok: true, caller: "manager" });
+
+  // tool 参数优先于 header。
+  assert.deepEqual(resolveCaller({ toolArg: "outer", header: "manager" }), { ok: true, caller: "outer" });
+
+  // 可核集合可配置（QUAY_CONTROL_CALLERS），缺省 outer,manager。
+  assert.deepEqual([...knownCallers({})].sort(), ["manager", "outer"]);
+  assert.deepEqual([...knownCallers({ [CONTROL_CALLERS_ENV]: "alice,bob" })].sort(), ["alice", "bob"]);
+  assert.equal(resolveCaller({ toolArg: "alice", env: { [CONTROL_CALLERS_ENV]: "alice,bob" } }).ok, true);
+
+  // headerValue 兼容 string / string[] / Headers.get 三种形态（AC2 的 header 通道取到值）。
+  assert.equal(headerValue({ [CONTROL_HEADER]: "outer" }, CONTROL_HEADER), "outer");
+  assert.equal(headerValue({ [CONTROL_HEADER]: ["manager", "x"] }, CONTROL_HEADER), "manager");
+  assert.equal(headerValue({ get: (n) => (n === CONTROL_HEADER ? "outer" : null) }, CONTROL_HEADER), "outer");
+  assert.equal(headerValue(undefined, CONTROL_HEADER), null);
+});
+
+test("control state — default / merge / halt / preference / forceDispatch / fail-closed read", () => {
+  const d = defaultControlState();
+  assert.equal(d.halted, false);
+  assert.equal(d.schemaVersion, 1);
+  assert.deepEqual(d.preference, {});
+  assert.deepEqual(d.forced, []);
+
+  const h = applyHalt(d, "outer", true, "2026-01-01T00:00:00.000Z");
+  assert.equal(h.halted, true);
+  assert.equal(h.halted_by, "outer");
+  assert.equal(h.halted_at, "2026-01-01T00:00:00.000Z");
+  // resume（halted=false）清 halted_by / halted_at。
+  const resumed = applyHalt(h, "outer", false);
+  assert.equal(resumed.halted, false);
+  assert.equal(resumed.halted_by, null);
+  assert.equal(resumed.halted_at, null);
+
+  const p = applyPreference(d, "cost", "low");
+  assert.deepEqual(p.preference, { cost: "low" });
+
+  const f = applyForceDispatch(d, "gap-x", "hot", "manager", "2026-01-01T00:00:00.000Z");
+  assert.equal(f.forced.length, 1);
+  assert.equal(f.forced[0].task, "gap-x");
+  assert.equal(f.forced[0].caller, "manager");
+
+  // fail-closed：解析失败 ⇒ halted=true（硬规则 3b：读不懂 ≠ 合格）。
+  const root = makeRoot("ctrl-state");
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  writeControlState(root, h);
+  assert.equal(readControlState(root).state.halted, true, "roundtrip: written halted state read back");
+  assert.equal(readControlState(root).parseError, null);
+
+  fs.writeFileSync(path.join(root, CONTROL_STATE_REL), "{ not json");
+  const bad = readControlState(root);
+  assert.equal(bad.state.halted, true, "unparseable control state ⇒ fail-closed halted=true");
+  assert.ok(bad.parseError, "parse error reported, not silently swallowed");
+  assert.equal(isHalted(root), true);
+
+  // 缺失 ⇒ 缺省（未 halt）。
+  const empty = makeRoot("ctrl-missing");
+  assert.equal(readControlState(empty).state.halted, false);
+  assert.equal(readControlState(empty).parseError, null);
+});
+
+test("computeHaltedOutcome — final_state=not-dispatched + FINAL_STATES contains it", () => {
+  assert.ok(FINAL_STATES.includes("not-dispatched"), "not-dispatched is a terminal state");
+  const o = computeHaltedOutcome({ task: "gap-y", selectorReason: "r", runId: "run", nowMs: 1234, inFlightCount: 2 });
+  assert.equal(o.final_state, "not-dispatched");
+  assert.equal(o.exit_code, null);
+  assert.equal(o.worker_pid, null);
+  assert.equal(o.in_flight_count, 2);
+  assert.match(o.failure_reason, /halted/);
+  assert.equal(o.task, "gap-y");
+});
+
+// ── AC1（阶段 3）: halt = 停止新派发、不杀在飞 ───────────────────────────────────────────────────────
+
+test("AC1 — pre-halted control state ⇒ driver dispatches ZERO workers and records not-dispatched", (t) => {
+  const root = makeRoot("halt-pre");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeControlState(root, applyHalt(defaultControlState(), "outer", true));
+
+  const out = runDriver(root, ["--task", "gap-h", "--reason", "r", "--worker-cmd", "node -e process.exit(0)", "--json"]);
+  const events = out.trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  assert.equal(events.some((e) => e.event === "worker-spawned"), false, "no worker spawned while halted");
+  assert.equal(events.some((e) => e.event === "worker-skipped"), true, "the skip is recorded, not silent");
+
+  const records = readOutcomeLines(root);
+  assert.equal(records.length, 1, "exactly one outcome record (the halted skip — no silent loss)");
+  assert.equal(records[0].final_state, "not-dispatched");
+  assert.equal(records[0].worker_pid, null);
+});
+
+test("AC1 — halt mid-run stops NEW dispatch only; the in-flight worker completes (never killed)", async (t) => {
+  const root = makeRoot("halt-mid");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeControlState(root, defaultControlState());
+
+  const pidFile = path.join(root, "w.pid");
+  const driver = spawn(process.execPath, [
+    "--no-warnings", "--experimental-strip-types", DRIVER, "--root", root,
+    "--task", "gap-slow", "--task", "gap-fast", "--reason", "r", "--concurrency", "1",
+    "--worker-cmd", "sleep 2", "--pid-file", pidFile, "--json",
+  ], { stdio: ["ignore", "pipe", "ignore"] });
+
+  let buf = "";
+  driver.stdout.on("data", (d) => { buf += d; });
+  let firstPid = null;
+  for (let i = 0; i < 200 && firstPid === null; i++) {
+    if (fs.existsSync(pidFile)) firstPid = Number(fs.readFileSync(pidFile, "utf8").trim().split("\n")[0]);
+    else await new Promise((r) => setTimeout(r, 20));
+  }
+  assert.ok(firstPid, "the first (in-flight) worker spawned and wrote its pid");
+
+  // flip halt while gap-slow is in-flight
+  writeControlState(root, applyHalt(defaultControlState(), "outer", true));
+
+  const exitCode = await new Promise((resolve) => { driver.on("close", (c) => resolve(c)); });
+  assert.equal(exitCode, 0, "halted-skip is a clean stop, not a driver failure");
+
+  const records = readOutcomeLines(root);
+  assert.equal(records.length, 2, "two outcome records: one in-flight completed + one skipped");
+  const slow = records.find((r) => r.task === "gap-slow");
+  const fast = records.find((r) => r.task === "gap-fast");
+  assert.equal(slow.final_state, "completed", "AC1: the in-flight worker was NOT killed — it completed");
+  assert.equal(fast.final_state, "not-dispatched", "AC1: the NEW dispatch was stopped after halt");
+});
+
+// ── AC2/AC3（阶段 3, HTTP 层能取假）: 不带身份 ⇒ 拒；header/tool 参数 ⇒ 可核放行 ───────────────────
+
+test("AC3 (HTTP) — control-plane call without identity ⇒ rejected; with caller (arg or header) ⇒ ok", async (t) => {
+  const root = makeRoot("ctrl-http");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+
+  const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
+  const { StreamableHTTPClientTransport } = await import("@modelcontextprotocol/sdk/client/streamableHttp.js");
+
+  const handle = await serveControlPlane({ root, port: 0, env: {} });
+  t.after(() => handle.close());
+
+  const callHalt = async (headers, args) => {
+    const transport = new StreamableHTTPClientTransport(new URL(handle.url), {
+      requestInit: headers ? { headers } : undefined,
+    });
+    const client = new Client({ name: "worker-driver-test", version: "0.0.1" });
+    await client.connect(transport);
+    const res = await client.callTool({ name: "halt", arguments: args });
+    await client.close();
+    return res;
+  };
+
+  // AC3（能取假）：不带身份调用 ⇒ 拒（isError:true），⛔ 不得按默认身份放行。
+  const noIdentity = await callHalt(undefined, { halted: true });
+  assert.equal(noIdentity.isError, true, "no-identity call is rejected");
+  assert.match(noIdentity.content[0].text, /no caller identity/);
+
+  // 未知身份 ⇒ 拒（可核的另一半）。
+  const unknown = await callHalt(undefined, { halted: true, caller: "evil" });
+  assert.equal(unknown.isError, true, "unknown caller is rejected");
+  assert.match(unknown.content[0].text, /unknown caller "evil"/);
+
+  // AC2（tool 参数通道）：caller=outer ⇒ 放行，控制态落盘 halted_by=outer。
+  const byArg = await callHalt(undefined, { halted: true, caller: "outer" });
+  assert.equal(byArg.isError, undefined, "caller via tool arg is accepted");
+  assert.match(byArg.content[0].text, /"halted_by": "outer"/);
+
+  // AC2（header 通道）：Mcp-Caller-Id: manager ⇒ 放行（证明 header 显式传且可核，非 Mcp-Session-Id）。
+  const byHeader = await callHalt({ "Mcp-Caller-Id": "manager" }, { halted: true });
+  assert.equal(byHeader.isError, undefined, "caller via Mcp-Caller-Id header is accepted");
+  assert.match(byHeader.content[0].text, /"halted_by": "manager"/);
+
+  // 控制态文件（单一真相源）落盘了最后那次 halt。
+  const state = readControlState(root).state;
+  assert.equal(state.halted, true);
+  assert.equal(state.halted_by, "manager");
 });

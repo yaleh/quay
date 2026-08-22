@@ -45,4 +45,5 @@ depends_on:
 ## Touches
 
 - plugin/scripts/worker-driver.ts（MCP 控制面，落点 inner 定）
+- plugin/test/worker-driver.test.mjs（AC1/AC2/AC3 取假测试——扩 Touches：测试文件是新增代码的必要落点）
 - tasks/gap-ac117-spec-phase3-mcp-control-plane.md（自身）
