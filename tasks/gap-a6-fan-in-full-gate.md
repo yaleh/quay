@@ -1,7 +1,7 @@
 ---
 id: gap-a6-fan-in-full-gate
 title: A6 fan-in 门 scoped→full——①b 合并后正确性（跨任务交互）在合并那一刻被抓，停全局轮的前提
-status: todo
+status: superseded
 labels:
   - gap
   - mechanism
@@ -9,6 +9,10 @@ parent: null
 children: []
 extra:
   schema: execution
+  superseded: true
+  superseded_at: 2026-08-22
+  superseded_reason: "核心提案「fan-in 门 scoped→全量」已 moot——fan-in 现在已是全量（fan-in-execute.js SUITE_LAUNCH 跑全量 test.sh），AC126 正改成 --buckets 分桶方向相反。①b 跨任务交互已被分桶阶段更优解接管：AC122（触枢纽⇒全量兜底）+ AC123（跨桶两边）+ AC125（不漏测负控制 3/3）；land 锁子项由 fan-in-ff-merge.sh 现有 merge 锁覆盖"
+  superseded_by: "AC122/AC123/AC125"
 ---
 
 **type:** execution
