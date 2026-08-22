@@ -1,7 +1,7 @@
 ---
 id: gap-webui-cross-task-blocking-visibility
 title: web 展示跨任务阻塞关系（Touches 交集 + depends_on 链 → blocks/blockedBy，谁挡谁可查）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -29,12 +29,12 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1：`InFlightTask` 有 `blocks`/`blockedBy` 字段，由 Touches 交集 + depends_on 链算出（机械可核）。
-- [ ] AC2：`/live`（或独立视图）展示「任务 X 阻塞 [Y, Z]」的跨任务阻塞关系（当前只在 tick-log 散文里，web 可查）。
+- [x] AC1：`InFlightTask` 有 `blocks`/`blockedBy` 字段，由 Touches 交集 + depends_on 链算出（机械可核）。
+- [x] AC2：`/live`（或独立视图）展示「任务 X 阻塞 [Y, Z]」的跨任务阻塞关系（当前只在 tick-log 散文里，web 可查）。
 
 ## Definition of Done
 
-- [ ] 跨任务阻塞关系计算（blocks/blockedBy 字段）与 /live 渲染展示落地；AC1-2 全勾；land 到 develop。
+- [x] 跨任务阻塞关系计算（blocks/blockedBy 字段）与 /live 渲染展示落地；AC1-2 全勾；land 到 develop。
 
 ## Touches
 
