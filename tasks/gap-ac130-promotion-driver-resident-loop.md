@@ -1,7 +1,7 @@
 ---
 id: gap-ac130-promotion-driver-resident-loop
 title: AC130 晋升驱动常驻 + 全池判定循环
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -30,12 +30,12 @@ depends_on: []
 
 ## Acceptance Criteria
 
-- [ ] AC1：promotion-driver 常驻运行，每轮调 `ready-pool-check` 取全池判定（⛔ 非只看某一条），跑完一轮不退出、按间隔进入下一轮。
-- [ ] AC2（能取假）：停掉驱动后池中新出现的合格任务不再被晋升（证明晋升由驱动驱动，非 outer tick）。
+- [x] AC1：promotion-driver 常驻运行，每轮调 `ready-pool-check` 取全池判定（⛔ 非只看某一条），跑完一轮不退出、按间隔进入下一轮。
+- [x] AC2（能取假）：停掉驱动后池中新出现的合格任务不再被晋升（证明晋升由驱动驱动，非 outer tick）。
 
 ## Definition of Done
 
-- [ ] 常驻全池判定循环落地；AC1-2 全勾（含停机取假）；land 到 develop。
+- [x] 常驻全池判定循环落地；AC1-2 全勾（含停机取假）；land 到 develop。
 
 ## Retires
 
