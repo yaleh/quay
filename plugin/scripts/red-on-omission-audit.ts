@@ -50,6 +50,16 @@ function has(text: string, needle: string): boolean {
   return text.includes(needle);
 }
 
+/** True iff `needle` is wired into the suite's static-gate surface — scripts/test.sh OR the
+ *  runner-static-gate.ts it sources (gap-ac128-hub-split-harness-concerns moved run_static_checks out
+ *  of test.sh into that file; run_doc_checks stays in test.sh). */
+function wiredInSuite(root: string, needle: string): boolean {
+  return (
+    has(readUnder(root, "scripts/test.sh"), needle) ||
+    has(readUnder(root, "plugin/scripts/runner-static-gate.ts"), needle)
+  );
+}
+
 /** True iff `text` matches the regex anywhere. */
 function hasRe(text: string, re: RegExp): boolean {
   return re.test(text);
@@ -321,13 +331,12 @@ export const REGISTRY: RedReadingEntry[] = [
     redReading: "`adr016-screen-use-check` 静态门 exit 1（整屏哈希命中即红，@static-tier change 每 scoped 跑）",
     verify: (root) => {
       const checker = fileExists(root, "plugin/scripts/adr016-screen-use-check.ts");
-      const sh = readUnder(root, "scripts/test.sh");
-      const wired = has(sh, "adr016-screen-use-check");
+      const wired = wiredInSuite(root, "adr016-screen-use-check");
       return {
         ok: checker && wired,
         detail: checker && wired
-          ? "adr016-screen-use-check 存在 + 接入 test.sh run_static_checks"
-          : `adr016 检查器存在=${checker}；test.sh 接入=${wired}`,
+          ? "adr016-screen-use-check 存在 + 接入 suite static-gate (run_static_checks)"
+          : `adr016 检查器存在=${checker}；suite 接入=${wired}`,
       };
     },
   },
@@ -364,13 +373,12 @@ export const REGISTRY: RedReadingEntry[] = [
     redReading: "`drive-contract-check` exit 1（顺序断言无 pair 输出 ⇒ 门拒，@static-tier change）",
     verify: (root) => {
       const checker = fileExists(root, "plugin/scripts/drive-contract-check.ts");
-      const sh = readUnder(root, "scripts/test.sh");
-      const wired = has(sh, "drive-contract-check");
+      const wired = wiredInSuite(root, "drive-contract-check");
       return {
         ok: checker && wired,
         detail: checker && wired
-          ? "drive-contract-check 存在 + 接入 test.sh run_static_checks"
-          : `drive-contract-check 存在=${checker}；test.sh 接入=${wired}`,
+          ? "drive-contract-check 存在 + 接入 suite static-gate"
+          : `drive-contract-check 存在=${checker}；suite 接入=${wired}`,
       };
     },
   },
@@ -381,15 +389,14 @@ export const REGISTRY: RedReadingEntry[] = [
     redReading: "`task-contract-check` exit 1（@static-tier always，scoped 也跑 ⇒ 契约 ratchet 增长即红）",
     verify: (root) => {
       const checker = fileExists(root, "plugin/scripts/task-contract-check.ts");
-      const sh = readUnder(root, "scripts/test.sh");
-      const wired = has(sh, "task-contract-check");
+      const wired = wiredInSuite(root, "task-contract-check");
       const t = tickCore(root);
       const doc = has(t, "task-contract-check");
       return {
         ok: checker && wired && doc,
         detail: checker && wired && doc
-          ? "task-contract-check 存在 + test.sh 接入 + 执行核 C14 声明"
-          : `task-contract-check 存在=${checker}；test.sh 接入=${wired}；执行核声明=${doc}`,
+          ? "task-contract-check 存在 + suite 接入 + 执行核 C14 声明"
+          : `task-contract-check 存在=${checker}；suite 接入=${wired}；执行核声明=${doc}`,
       };
     },
   },

@@ -220,11 +220,11 @@ export function enumerateGates(root) {
   return gates;
 }
 
-/** Static checkers from scripts/test.sh's run_static_checks + CI workflows (same mechanical source as checker-mutation-check.sh). */
+/** Static checkers from runner-static-gate.ts's run_static_checks + CI workflows (same mechanical source as checker-mutation-check.sh — run_static_checks moved OUT of scripts/test.sh, gap-ac128-hub-split-harness-concerns). */
 export function enumerateStaticCheckers(root) {
-  const testSh = readFile(path.join(root, "scripts", "test.sh"));
+  const staticGate = readFile(path.join(root, "plugin", "scripts", "runner-static-gate.ts"));
   const names = new Set();
-  for (const m of extractFunctionBody(testSh, "run_static_checks").matchAll(/\$\{repo_root\}\/plugin\/scripts\/([A-Za-z0-9_.-]+)\.(?:sh|ts)/g)) {
+  for (const m of extractFunctionBody(staticGate, "run_static_checks").matchAll(/\$\{repo_root\}\/plugin\/scripts\/([A-Za-z0-9_.-]+)\.(?:sh|ts)/g)) {
     names.add(m[1]);
   }
   const wfDir = path.join(root, ".github", "workflows");

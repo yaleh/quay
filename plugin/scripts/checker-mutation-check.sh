@@ -55,6 +55,7 @@ _script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${_script_dir}/../.." && pwd)"
 CASES_DIR="${repo_root}/plugin/scripts/checker-mutation-cases"
 TEST_SH="${repo_root}/scripts/test.sh"
+STATIC_GATE="${repo_root}/plugin/scripts/runner-static-gate.ts"
 WORKFLOWS_GLOB="${repo_root}/.github/workflows/*.yml"
 
 # ── arg defaults ───────────────────────────────────────────────────────────────────────────────────
@@ -62,15 +63,23 @@ meta_inject=""
 
 # ── manifest parsing (AC1: from run_static_checks + run_doc_checks + CI, never hand-written) ──────
 
-# Parse scripts/test.sh's run_static_checks() AND run_doc_checks() function bodies for
-# plugin/scripts/<name>.(sh|ts). The doc-class checkers MOVED to run_doc_checks under AC51
-# (gap-ac51-assertion-surface-split — they now run at pre-commit, not in the full suite), but their
-# mutation cases MUST stay in this manifest — the L_S instrument is not weakened by the split.
+# Parse the run_static_checks() body (now in runner-static-gate.ts, gap-ac128-hub-split-harness-concerns)
+# AND run_doc_checks() (still in scripts/test.sh) for plugin/scripts/<name>.(sh|ts). The doc-class
+# checkers MOVED to run_doc_checks under AC51 (gap-ac51-assertion-surface-split — they now run at
+# pre-commit, not in the full suite), but their mutation cases MUST stay in this manifest — the L_S
+# instrument is not weakened by the split. run_static_checks itself moved OUT of test.sh into
+# runner-static-gate.ts; the awk is unchanged per file (from the `run_static_checks() {` /
+# `run_doc_checks() {` line to the next `}`).
 list_run_static_checks_checkers() {
-  if [ ! -f "$TEST_SH" ]; then
-    return 0
+  local body=""
+  if [ -f "$STATIC_GATE" ]; then
+    body="$(awk '/^run_static_checks\(\)/{f=1;next} f && /^}/{f=0} f' "$STATIC_GATE")"
   fi
-  awk '/^run_static_checks\(\)|^run_doc_checks\(\)/{f=1;next} f && /^}/{f=0} f' "$TEST_SH" \
+  if [ -f "$TEST_SH" ]; then
+    body="${body}
+$(awk '/^run_doc_checks\(\)/{f=1;next} f && /^}/{f=0} f' "$TEST_SH")"
+  fi
+  printf '%s\n' "$body" \
     | grep -oE '\$\{repo_root\}/plugin/scripts/[A-Za-z0-9_.-]+\.(sh|ts)' \
     | sed -E 's#.*/plugin/scripts/##; s/\.(sh|ts)$//' \
     | sort -u
@@ -368,7 +377,7 @@ while [ "$#" -gt 0 ]; do
     --check) cmd="check" ;;
     --selftest) cmd="selftest" ;;
     --json) json=1 ;;
-    --repo-root) shift; repo_root="$1"; CASES_DIR="${repo_root}/plugin/scripts/checker-mutation-cases"; TEST_SH="${repo_root}/scripts/test.sh"; WORKFLOWS_GLOB="${repo_root}/.github/workflows/*.yml" ;;
+    --repo-root) shift; repo_root="$1"; CASES_DIR="${repo_root}/plugin/scripts/checker-mutation-cases"; TEST_SH="${repo_root}/scripts/test.sh"; STATIC_GATE="${repo_root}/plugin/scripts/runner-static-gate.ts"; WORKFLOWS_GLOB="${repo_root}/.github/workflows/*.yml" ;;
     --meta-inject) shift; meta_inject="$1" ;;
     -*) die_usage ;;
     *) die_usage ;;

@@ -172,7 +172,7 @@ function symlinkRuntimeTrees(dir, files) {
     }
   } else {
     fs.mkdirSync(path.join(dir, "plugin", "scripts"), { recursive: true });
-    for (const f of ["select-static-checks-for-touches.ts", "task-schema.ts", "touches-parser.ts",
+    for (const f of ["select-static-checks-for-touches.ts", "runner-static-gate.ts", "task-schema.ts", "touches-parser.ts",
                      "gate-script-base.ts", "wiring-coverage-check.ts", "touches-orthogonality-check.ts"]) {
       const dest = path.join(dir, "plugin", "scripts", f);
       if (!fs.existsSync(dest) && !delta.has(`plugin/scripts/${f}`)) {

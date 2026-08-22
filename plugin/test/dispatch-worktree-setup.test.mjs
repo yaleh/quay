@@ -320,10 +320,10 @@ t("AC4 — checker: clean repo (all task worktrees present) exits 0 and --fail s
   }
 });
 
-// ── AC4 wiring: the checker must be wired into scripts/test.sh's run_static_checks ─────────────
+// ── AC4 wiring: the checker must be wired into run_static_checks (runner-static-gate.ts) ────────
 
-t("AC4 wiring — worktree-node-modules-check is invoked by run_static_checks (scripts/test.sh)", () => {
-  const testSh = fs.readFileSync(path.join(REPO_ROOT, "scripts/test.sh"), "utf8");
+t("AC4 wiring — worktree-node-modules-check is invoked by run_static_checks (runner-static-gate.ts)", () => {
+  const testSh = fs.readFileSync(path.join(REPO_ROOT, "plugin/scripts/runner-static-gate.ts"), "utf8");
   const checkName = "worktree-node-modules-check";
   assert.match(testSh, /run_checker\s+"worktree-node-modules-check"/, `run_static_checks must run ${checkName}`);
   assert.match(testSh, /@static-tier full/, "the checker must be a full-tier whole-store check (deferred in scoped runs)");
