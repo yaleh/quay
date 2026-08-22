@@ -1,7 +1,7 @@
 ---
 id: gap-ac135-outer-promotion-retirement
 title: AC135 实际切换 + outer A22/A24 退役（单一真相源）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
