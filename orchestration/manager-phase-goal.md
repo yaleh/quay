@@ -409,9 +409,32 @@ AC117 = SPEC §5 阶段 3（MCP 控制面）            退役目标：.halt 文
 SPEC 是目前唯一一份把"检查机制净减少"写成必答项的文档，本阶段把它推广成全阶段纪律。
 **⊢ SPEC §4④ 的约束原样有效**：单任务墙钟超时值 **⛔ 不得拍脑袋**，先无阈值跑一段记录分布再定。
 
+### AC128（hub 单体按关切拆文件——爆炸半径收窄，⛔ 不冒充吞吐）
+
+**判据（能取假，grep 函数名）**：`scripts/test.sh` + `plugin/scripts/full-suite-runner.ts` 里 harness-critical 关切
+各自抽出到聚焦文件，两单体不再承载其函数定义。取假样本：
+红解析（`gateScanCause`/`isFailureLine`/`buildStaticCheckFailures`）、并发-lanes（`hostParallelism`/`concurrentSuiteSlots`/`spliceConcurrency`）、
+闸门-static（`resource_gate_check`/`run_static_checks`）、树态（`snapshotAssertionSurface`/`readTreeState`/`readVerifiedCommit`）、
+状态写（`writeStateGuarded`/`appendVerificationRound`）——在原两单体命中 **0**、在各自新聚焦文件命中；
+且全量 suite 绿 + 分桶选择行为不变（行为保真）。
+
+**⊢ 诚实定位（⛔ 不写成吞吐优化）**：30 天 hub 两单体 252 次提交、~7 个关切挤 2 文件 ⇒ 任何 suite 关切迭代都动同一个大单体。
+**拆文件不省 full-suite**（新文件仍是 hub，触碰仍全量——harness-critical 改动必须全量验证，这是对的）；
+省的是【爆炸半径 + review 面 + 合并冲突 + 未来演进速度】。吞吐率这笔账已由 AC124/126（分桶）结掉，
+本判据里 ⛔ 不得出现任何耗时/吞吐数字（否则是拿结构卫生冒充吞吐，硬规则 4）。
+
+**⊢ 与 AC112 的张力（显式记，不回避）**：拆分使 `plugin/scripts/` 文件数 +N（1 单体 → ~5 聚焦），
+与 AC112「总量掉头向下」方向相反——**一次性重构成本，非机制净增**；
+本判据按【函数有家】不按文件数，故不与 AC112 冲突；落笔提交信息须标「拆分重构，非新增机制」，
+且 AC112 的切换时基线（现测）把这次 +N 计入分母、不判为违规净增。
+
+**⊢ 依赖（记不改）**：accounting/overhead 剥离已立案（`gap-suite-hub-file-responsibility-strip`，当前阶段后续）；
+本条覆盖其余 harness-critical 关切。前者 land 出的 `suite-accounting.ts`（非 hub）是本条【行为保真 + hub 清单边界】的参照——
+拆分后 `suite-bucket-hub-list.ts` 的 HUB_FILES 须逐文件核：harness-critical 新文件在列、非 harness 不在列。
+
 ### 本阶段的达成条件与已知风险
 
-**达成 = AC110 ∧ AC111 ∧ AC112 ∧ AC113 ∧ AC114 ∧ AC115 ∧ AC116 ∧ AC117。**
+**达成 = AC110 ∧ AC111 ∧ AC112 ∧ AC113 ∧ AC114 ∧ AC115 ∧ AC116 ∧ AC117 ∧ AC128。**
 
 **⊕ 激活前修正（2026-08-22 桶分析后，manager 补，四处须在切换时修/重测，否则判据失真）**：
 ① **AC113/AC114 判据面 scope=main→worktree**——AC84 后全量轮全写 `scope=worktree`、main-scope 轮=0，原判据结构性不可达（已在上文两处 AC 内联改）。
