@@ -1,0 +1,132 @@
+# runner-grouping.ts — the --group / __GROUP__ grouping mechanism, extracted from scripts/test.sh
+# (gap-suite-hub-file-responsibility-strip).
+#
+# WHY A SEPARATE FILE: these functions decide WHICH test files run for a given --group — harness-critical,
+# so this file IS a hub (suite-bucket-hub-list.ts HUB_FILES glob `plugin/scripts/runner-grouping*` matches
+# it; a change here still forces the full suite). Extracting them out of scripts/test.sh shrinks that
+# monolith WITHOUT weakening the hub rule. NOTE: this file is SOURCED by scripts/test.sh — bash does not
+# care about the extension, and the `.ts` name is what makes the previously-dead `runner-grouping*` glob
+# in HUB_FILES finally match a real file.
+#
+# Moved verbatim from scripts/test.sh lines 1292-1416: group_of / check_group_declarations /
+# effective_groups / in_group / is_default_set / select_files / list_groups. build_deduped_files
+# deliberately STAYS in scripts/test.sh (its `local glob=(...)` line is the ADR-004 single-source
+# canonical test glob parsed by four checkers). check_group_declarations still invokes
+# plugin/scripts/test-group-downgrade-check.ts.
+
+# ── group resolution helpers (gap-test-suite-has-no-layer-grouping) ──────────────────────────────
+
+# group_of <file> — echo the declared `// @test-group <name>` (default: engine, AC7).
+# Valid groups: product|engine|governance (the default-run body) + serial (the load-sensitive
+# concurrency-1 phase — nested-suite-spawn + real-wall-clock-wait + the real-install
+# install/quay-init family, gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests +
+# gap-install-family-tests-rotate-flakes-under-full-suite) + lowconc (the hermetic-but-load-sensitive
+# concurrency-3 phase, gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive). A MISSING
+# declaration defaults to
+# engine (AC7). An UNRECOGNIZED group name is FAIL-CLOSED, never silently degraded to engine:
+# the r10 regression (four commits b209f4fd→174badc0→e92c54d8→c7176a37 each dropping one group
+# from this case, so serial/lowconc silently folded into the concurrency-N body and the isolation
+# guarantee was cancelled WITHOUT going red) must be a hard failure, not a silent pass.
+group_of() {
+  local f="$1" g
+  g="$(grep -m1 -oE '@test-group[[:space:]]+[a-z]+' "$f" 2>/dev/null | awk '{print $2}' || true)"
+  case "${g:-}" in
+    product|engine|governance|serial|lowconc) echo "$g" ;;
+    "")
+      # No declaration at all — intentional default to engine (AC7). The undeclared → engine path
+      # is a real rule, distinct from an unknown-group typo.
+      echo "engine" ;;
+    *)
+      echo "scripts/test.sh: group_of: FAIL-CLOSED: '$f' declares unknown @test-group '$g' — a group was dropped or mis-typed (recognized: product|engine|governance|serial|lowconc); refusing to silently degrade it to engine" >&2
+      exit 3
+      ;;
+  esac
+}
+
+# check_group_declarations — pre-flight fail-closed guard (gap-verify-round-9-failures-from-recent-
+# changes-fix-batch, AC0b): every test file's declared `// @test-group` must be one of the five
+# recognized groups. A file declaring an UNKNOWN group is a dropped/mis-typed group — the r10
+# regression (b209f4fd→174badc0→e92c54d8→c7176a37 each dropping one group from group_of's case)
+# silently folded serial/lowconc into the concurrency-N engine body and cancelled the isolation
+# guarantee WITHOUT going red. That must be a HARD failure, not a silent pass. group_of's own
+# `*)` branch is defense-in-depth (it runs inside a command substitution, so its exit cannot abort
+# the parent); this check runs directly in the dispatch path and exits the script.
+check_group_declarations() {
+  local f g
+  while IFS= read -r f; do
+    g="$(grep -m1 -oE '@test-group[[:space:]]+[a-z]+' "$f" 2>/dev/null | awk '{print $2}' || true)"
+    case "${g:-}" in
+      ""|product|engine|governance|serial|lowconc) ;;
+      *)
+        echo "scripts/test.sh: FAIL-CLOSED: '$f' declares unknown @test-group '$g' — a group was dropped or mis-typed (recognized: product|engine|governance|serial|lowconc); refusing to silently degrade it to engine" >&2
+        exit 3
+        ;;
+    esac
+  done < <(build_deduped_files)
+  # gap-test-group-downgrade-no-guard (AC1): a LEGAL-but-degrading re-tag
+  # (product/engine → governance/serial/lowconc) silently removes a test from the default set —
+  # check_group_declarations now ALSO runs the downgrade detector
+  # (plugin/scripts/test-group-downgrade-check.ts), which requires a commit-message reason marker
+  # ("@test-group-downgrade") for any default-set escape after the enforcement baseline.
+  # stdout is redirected to stderr: this function also runs in the metadata modes
+  # (--list-groups/--list-files) whose stdout IS the data (file list / group counts) — a checker
+  # line leaking into it would be miscounted as a test file (test-coverage-check AC5 423 vs 421).
+  node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/test-group-downgrade-check.ts" --root "${repo_root}" >&2 || exit
+}
+
+# build_deduped_files — deliberately STAYS in scripts/test.sh (NOT moved here): its `local glob=(...)`
+# line is the SINGLE-SOURCE (ADR-004) canonical test glob that FOUR checkers mechanically parse from
+# scripts/test.sh (test-framework-policy-check.ts / test-coverage-check.ts / test-impl-census-check.ts /
+# test-group-downgrade-check.ts). Moving it here would break those checkers' glob derivation (0 files).
+# The functions below (check_group_declarations / select_files / list_groups) call build_deduped_files
+# by NAME — bash resolves it at CALL time, so it is available even though it is defined in test.sh.
+
+# effective_groups — echo the groups a given run should include (default product,engine, AC4).
+effective_groups() {
+  echo "product,engine"
+}
+
+# in_group <group> <csv> — return 0 iff group is in the comma-separated list.
+in_group() {
+  local g="$1" csv="$2"
+  [[ ",${csv}," == *",${g},"* ]]
+}
+
+# is_default_set <csv> — return 0 iff csv is exactly the default set {product,engine} (AC6).
+is_default_set() {
+  [ "${1:-}" = "product,engine" ]
+}
+
+# select_files <groups-csv> — echo the files to run for the given groups (respecting the
+# default-set self-skip passthrough so governance reports `skipped` rather than absent, AC4/AC6).
+select_files() {
+  local groups="$1" f g
+  while IFS= read -r f; do
+    g="$(group_of "$f")"
+    if in_group "$g" "$groups"; then
+      printf '%s\n' "$f"
+    elif [ "$g" = "governance" ] && is_default_set "$groups"; then
+      # governance self-skips via its in-file block; keep it in the run so it is VISIBLE.
+      printf '%s\n' "$f"
+    fi
+  done < <(build_deduped_files)
+}
+
+# list_groups — per-group counts over the full deduped glob (AC10). `serial` and `lowconc` are real
+# groups (the load-sensitive families routed to their own phases), so the default-set partition
+# product+engine+governance no longer equals total — serial and lowconc are the 4th and 5th parts.
+list_groups() {
+  declare -A counts=([product]=0 [engine]=0 [governance]=0 [serial]=0 [lowconc]=0)
+  local f g
+  while IFS= read -r f; do
+    g="$(group_of "$f")"
+    counts[$g]=$(( ${counts[$g]:-0} + 1 ))
+  done < <(build_deduped_files)
+  printf 'product:    %d\n' "${counts[product]:-0}"
+  printf 'engine:     %d\n' "${counts[engine]:-0}"
+  printf 'governance: %d\n' "${counts[governance]:-0}"
+  printf 'serial:     %d\n' "${counts[serial]:-0}"
+  printf 'lowconc:    %d\n' "${counts[lowconc]:-0}"
+  local total=$(( ${counts[product]:-0} + ${counts[engine]:-0} + ${counts[governance]:-0} + ${counts[serial]:-0} + ${counts[lowconc]:-0} ))
+  printf 'total:      %d (deduped by realpath)\n' "$total"
+}

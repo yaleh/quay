@@ -36,6 +36,10 @@ const REPO_ROOT = path.resolve(__dirname, "..", "..");
 const CLI = path.join(REPO_ROOT, "plugin", "scripts", "select-tests-for-touches.ts");
 const CLI_MIRROR = path.join(REPO_ROOT, "experiments", "quay-perpetual-stream", "scripts", "select-tests-for-touches.ts");
 const TEST_SH = path.join(REPO_ROOT, "scripts", "test.sh");
+// gap-suite-hub-file-responsibility-strip: the grouping functions (group_of/effective_groups/
+// build_deduped_files/...) moved from scripts/test.sh into this sourced library — the AC11 structural
+// pins that assert those BODIES now read the new file; the CALL-SITE pins stay on scripts/test.sh.
+const RUNNER_GROUPING = path.join(REPO_ROOT, "plugin", "scripts", "runner-grouping.ts");
 
 // ── Helpers ───────────────────────────────────────────────────────────────────────────────────────────
 
@@ -556,13 +560,17 @@ test("REGRESSION (round-1 NIT) — testBasenameFor collapses a .test. marker (fo
 
 test("AC11 — scripts/test.sh no-args branch is the grouped default (structural)", () => {
   const src = fs.readFileSync(TEST_SH, "utf8");
+  const grouping = fs.readFileSync(RUNNER_GROUPING, "utf8");
   // The glob now spans ALL three test dirs (AC2); no-args routes through the grouped default
   // (product,engine, AC4); the exec line derives the default concurrency (gap-no-resource-awareness-
   // heavy-ops-run-blind AC5) and (gap-test-sh-flags-only-...) PREPENDS extra flags-only args before
-  // the file list so a user --test-concurrency=N wins (node last-flag-wins).
+  // the file list so a user --test-concurrency=N wins (node last-flag-wins). effective_groups' BODY
+  // lives in the extracted runner-grouping.ts (gap-suite-hub-file-responsibility-strip), while the
+  // build_deduped_files glob STAYS in test.sh (its `glob=(...)` line is the ADR-004 single-source
+  // canonical test glob parsed by four checkers); the CALL-SITE pins stay on test.sh.
   assert.match(src, /local glob=\(packages\/\*\/test\/\*\.test\.mjs plugin\/test\/\*\.test\.mjs experiments\/quay-perpetual-stream\/test\/\*\.test\.mjs\)/);
   assert.match(src, /run_selected "\$\(effective_groups\)"/);
-  assert.match(src, /effective_groups\(\) \{\n  echo "product,engine"/);
+  assert.match(grouping, /effective_groups\(\) \{\n  echo "product,engine"/);
   assert.match(src, /exec node --test --test-concurrency="\$\(default_test_concurrency\)" "\$@" "\$\{files\[@\]\}"/);
   // The explicit-file branch still runs through the same exec line.
   assert.match(src, /exec node --test --test-concurrency="\$\(default_test_concurrency\)" "\$@"/);
