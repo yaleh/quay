@@ -1,7 +1,7 @@
 ---
 id: gap-measure-trend-check-slice-line-anchor
 title: measure-trend-check.ts:112 lastIndexOf 裸 substring → 行首锚定（5b sibling，同 fan-in-execute.js:276 缺陷）
-status: todo
+status: ready
 labels:
   - gap
 parent: null

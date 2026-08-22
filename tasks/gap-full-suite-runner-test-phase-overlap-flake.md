@@ -1,7 +1,7 @@
 ---
 id: gap-full-suite-runner-test-phase-overlap-flake
 title: full-suite-runner.test.mjs AC2 PHASE_OVERLAP 墙钟断言未标 @load-sensitive（16 并发确定性 flake，阻塞 fan-in）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
