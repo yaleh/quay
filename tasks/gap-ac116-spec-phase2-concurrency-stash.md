@@ -1,7 +1,7 @@
 ---
 id: gap-ac116-spec-phase2-concurrency-stash
 title: AC116 SPEC §5 阶段 2——驱动控并发 + 超时杀 worker 保留 worktree + checkout 前 stash
-status: todo
+status: ready
 labels:
   - gap
 parent: null
