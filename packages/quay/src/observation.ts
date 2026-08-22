@@ -1471,6 +1471,45 @@ async function readDevelopLead(root: string): Promise<number | null> {
   }
 }
 
+/**
+ * Manager view — LIGHT path for the dashboard display surface (gap-webui-dashboard-load-time-
+ * optimization AC1): loop-driver + session-liveness ONLY, WITHOUT the slot-refill pool probe.
+ *
+ * The dashboard's mgrCard (serve-handlers.ts renderDashboardPage) shows only loopDriver.verdict +
+ * the alive-session count — it never renders pool/floor/deficit/cap. Cold-calling slot-refill is the
+ * single most expensive probe in the manager view (~9s on the live box: `node
+ * --experimental-strip-types` re-strips the whole import graph each run), so paying it for data the
+ * card does NOT show is wasted latency. The `/manager` detail page — which DOES render pool — keeps
+ * calling the full `readManager` below.
+ *
+ * The un-probed fields are returned as `status: "empty"` (never "ok") so any surface that
+ * accidentally renders them reads 未接入 rather than a fabricated zero (hard rule ③b — a value the
+ * probe never produced must not be indistinguishable from a real reading). `version` is the
+ * build-time QUAY_VERSION constant (free, no runtime read); `developLead` is left null (the card
+ * does not show it, and a git rev-list is a subprocess we skip on the light path).
+ */
+export async function readManagerLight(root: string): Promise<ManagerResult> {
+  const targets = buildManagerSessionTargets(root);
+  const [loopDriver, liveness] = await Promise.all([
+    runLoopDriverProbe(root),
+    runLivenessProbe(root, targets),
+  ]);
+
+  const version: string | null = QUAY_VERSION || null;
+
+  const degraded = loopDriver.status === "empty" && liveness.status === "empty";
+  return {
+    status: degraded ? "empty" : "ok",
+    reason: degraded ? "manager 观测机制脚本缺失" : null,
+    loopDriver,
+    liveness,
+    observers: { status: "empty", reason: "dashboard 轻量探针不含 observers（/manager 详情页才含）", rows: [] },
+    pool: { status: "empty", reason: "dashboard 轻量探针不含 pool（/manager 详情页才含）", pool: null, floor: null, deficit: null, cap: null },
+    version,
+    developLead: null,
+  };
+}
+
 /** Manager view: loop-driver + session-liveness + observer registry + slot-refill pool metrics. */
 export async function readManager(root: string): Promise<ManagerResult> {
   // AC1 (gap-webui-dashboard-manager-slow-parallelize): the four async probes are independent — run
